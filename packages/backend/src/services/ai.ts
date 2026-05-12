@@ -2614,7 +2614,7 @@ function validateAndNormalizeRefinedCandidates(
   const out: RefineCandidate[] = [];
   void rejectNumber; // 미사용 — stripRejectNumberPatterns는 일반 패턴으로 검출. 향후 회사별 reject_number 정확 매칭 시 활용.
   // ★ D152+ Harold님 PM2 진단: dropout 단계별 카운트 — 어느 필터에서 제외되는지 정확히 파악
-  const dropCounts = { tooShort: 0, tooLong: 0, infoLoss: 0, similar: 0 };
+  const dropCounts = { tooShort: 0, tooLong: 0, infoLoss: 0, similar: 0, notEnriched: 0 };
   for (const c of candidates) {
     if (!c?.text || typeof c.text !== 'string') continue;
     let text = c.text.trim();
@@ -2664,12 +2664,23 @@ function validateAndNormalizeRefinedCandidates(
       continue;
     }
 
+    // (e) ★ D152-5 정정 (2026-05-12 Harold님 명시): "있는 문안을 더 읽고 싶고 궁금하고 풍성하게" — 표현 풍성화 부족 검출.
+    //   원본 300자+ 긴 메시지에서 결과 길이가 원본 105% 미만 = "정리 수준" 다듬기 자동 제외.
+    //   본문 항목 보존 + 도입/마무리 자연 풍성화 시 결과는 자연스럽게 105~130% 도달.
+    //   덴프스 브랜드위크 케이스(원본 ~500자, 결과 ~510자 = ratio 102%) 같은 정리 수준 자동 차단.
+    //   임계 110% → 105%로 완화 (사실 추가 강요 X, 표현 풍성화만으로 자연 도달 가능한 수준).
+    if (originalMessage.length >= 300 && text.length < originalMessage.length * 1.05) {
+      dropCounts.notEnriched += 1;
+      continue;
+    }
+
     out.push({ text, bytes, type: classifyType(bytes) });
   }
   if (candidates.length > 0 && out.length === 0) {
     console.warn(
       `[ai][refineDirectMessage] validateAndNormalize dropout — raw=${candidates.length} out=0 ` +
-      `(tooShort=${dropCounts.tooShort}, tooLong=${dropCounts.tooLong}, infoLoss=${dropCounts.infoLoss}, similar=${dropCounts.similar})`,
+      `(tooShort=${dropCounts.tooShort}, tooLong=${dropCounts.tooLong}, infoLoss=${dropCounts.infoLoss}, ` +
+      `similar=${dropCounts.similar}, notEnriched=${dropCounts.notEnriched})`,
     );
   }
   return out;
@@ -2777,13 +2788,36 @@ ${lengthTarget}. **원본보다 짧으면 정보 손실 — 원본 길이 이상
 원본에 시즌 정보 없어도 자연스러운 시즌 묘사 1~2개 자유 추가 가능.
 ⚠️ 시즌 묘사는 일반적 사실만 (${monthLabel} 계절감 OK). 구체적 매출/통계 지어내기 X.
 
-## 🎯 긴 LMS(3단락+) 다듬기 가이드 (Harold님 핵심 지시 — "와~ 진짜 대박" 느낌)
-**원본이 3단락+ 또는 200자+이면 적극 풍성화 필수.**
-1. **도입부**: 시선 정지 한 줄로 풍성화 — 질문훅("혹시 아세요?") / 시즌감("봄의 끝자락에") / 숫자 임팩트("★ 15%")
-2. **본문 리스트 항목**: 각 항목에 짧은 매력 묘사 1줄씩 자유 추가 (사실 보존하면서 — 예: "마린 그래픽 반팔티" → "마린 그래픽 반팔티 — 산뜻한 바다 무드")
-3. **마무리 CTA**: 단순 "확인하세요" 금지, 구체 행동 유도 + 시즌감/임팩트 한 줄
-4. **단락 구조 그대로**: 원본 단락 수만큼 결과도 동일하게. 단락 합치기/쪼개기 X
-5. **🚨 결과가 도입부 한 줄만 손대고 본문 그대로 = 다듬기 실패** — 본문에도 변화 반드시 박음
+## 긴 LMS(3단락+) 다듬기 가이드 — "읽고 싶고 행사가 궁금해지는" 느낌
+**Harold님 핵심 지시 (2026-05-12):**
+"없는 걸 지어내지 X, 있는 문안을 좀 더 읽고 싶고 궁금하고 풍성하게."
+
+편안하고 자연스럽게 풍성화하세요. 강박적으로 의무 채우려 하지 X — 사용자가 결과를 읽고
+"읽어보고 싶다", "행사가 궁금하다", "이전보다 매력적이다" 느낌이 들면 충분합니다.
+
+### 풍성화 방향 (편안하게)
+1. **도입부 매력 강화** — 호기심 유발 / 시즌감 / 강조 표현 자연스럽게
+   - 호기심 예: "혹시 알고 계셨나요?" / "오늘이 무슨 날인지 아세요?"
+   - 시즌감 예: "봄의 끝자락에," / "감사의 5월에,"
+   - 강조 예: "★ 오늘 단 하루" / "▶ 지금 라이브 중!"
+   - 원본 활기 톤은 더 활기차게, 차분 톤은 더 격조있게 (톤 역행 X)
+
+2. **마무리 CTA 풍성화** — 호기심 갭 / 시급성 / 행동 유도 한 줄
+   - 예: "지금 바로 참여해 보세요." → "지금 라이브 중! 90분 안에 챙기세요 ▶"
+
+3. **본문 리스트 항목은 그대로 보존, 표현만 자연스럽게**
+   - 항목 자체(상품명/혜택/숫자/날짜/링크)는 그대로
+   - 연결사/조사/어순/강조만 더 매력적으로
+   - 항목에 없는 사실(무드/감각/소재/통계) 임의 추가 X
+
+4. **단락 구조 그대로** (합치기/쪼개기 X)
+
+### 절대 지키기
+- 원본에 없는 사실(매장/장소/약속/혜택/특가/숫자/날짜/통계/무드/감각/소재) 창작 X
+- 본문 항목 자체(상품명/숫자/혜택) 수정 X
+- 활기 톤 → 차분 톤 역행 X
+- 도입부 1줄 미세 변경 + 본문 그대로 = 다듬기 가치 부족 (자동 제외됨)
+- 결과 길이 원본 105% 미만 = 표현 풍성화 부족 자동 제외 (도입/마무리 자연 풍성화 시 105~130% 자연 도달)
 
 ### 항목 감각 표현 vs 사실 창작 구분 (중요)
 - ✓ OK: "마린 그래픽 반팔티" → "마린 그래픽 반팔티 — 산뜻한 바다 무드" (감각 표현 추가)
@@ -2858,7 +2892,9 @@ export async function refineDirectMessage(
         max_tokens: AI_MAX_TOKENS.refineMessage,
         system: systemPrompt,
         messages: [
-          { role: 'user', content: `원본 메시지:\n\n${message}\n\n위 메시지를 다듬어 가장 자연스럽고 효과적인 안 1개를 JSON 배열로만 제시해주세요.` },
+          // ★ D152-5 정정2 (2026-05-12 Harold님 명시): "편안하게 풍성하게, 읽고 싶고 행사가 궁금하게."
+          //   강제/의무 표현 약화, 편안한 톤 가이드.
+          { role: 'user', content: `원본 메시지:\n\n${message}\n\n위 메시지를 다듬어 JSON 배열 1개로 제시하세요.\n\nHarold님 핵심 지시:\n"없는 걸 지어내지 X, 있는 문안을 좀 더 읽고 싶고 궁금하고 풍성하게."\n\n가이드 (편안하고 자연스럽게):\n- 도입부 매력 강화 (호기심 유발 / 시즌감 / 강조)\n- 마무리 CTA 풍성화 (호기심 갭 / 시급성 / 행동 유도 한 줄)\n- 본문 리스트 항목(상품명/혜택/숫자/날짜/링크) 그대로 보존, 항목에 없는 사실 추가 X\n- 표현(연결사/조사/어순/강조)만 자연스럽게\n- 활기 톤은 더 활기차게, 차분 톤은 더 격조있게 (톤 역행 X)\n- 결과를 읽고 "읽고 싶고 행사가 궁금해진다" 느낌이 들도록\n- 결과 길이 원본 105~130% (단순 띄어쓰기/문장부호만 변경하면 자동 제외)` },
         ],
       });
       const textBlock = response.content.find((b: any) => b.type === 'text') as any;
@@ -2896,7 +2932,8 @@ export async function refineDirectMessage(
         model: AI_MODELS.gpt,
         messages: [
           { role: 'system', content: systemPrompt },
-          { role: 'user', content: `원본 메시지:\n${message}\n\n다듬은 안 1개를 JSON 형식 {"candidates":[{"text":"..."}]}로 반환` },
+          // ★ D152-5 정정2 (2026-05-12): OpenAI fallback도 편안한 톤 가이드.
+          { role: 'user', content: `원본 메시지:\n${message}\n\n다듬은 안 1개를 JSON {"candidates":[{"text":"..."}]} 형식으로 반환.\n\n"없는 걸 지어내지 X, 있는 문안을 좀 더 읽고 싶고 궁금하고 풍성하게" — 편안하고 자연스럽게: 도입부 매력 강화 + 마무리 CTA 풍성화 + 본문 항목(상품/혜택/숫자/링크) 그대로 보존(사실 추가 X) + 표현만 자연스럽게 + 결과를 읽고 "읽고 싶고 궁금하다" 느낌 + 길이 원본 105~130%.` },
         ],
         max_completion_tokens: AI_MAX_TOKENS.refineMessage,
         response_format: { type: 'json_object' },
