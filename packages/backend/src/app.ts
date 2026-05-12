@@ -41,6 +41,8 @@ import { startAlimtalkScheduler } from './utils/alimtalk-jobs';
 import { startTrialDowngradeWorker } from './utils/trial-downgrade-worker';
 // ★ D151 (2026-05-11): 캠페인 결과 자동 sync 워커 (5분 주기, 환불 누락 영구 차단)
 import { startCampaignSyncWorker } from './utils/campaign-sync-worker';
+// ★ D153 (2026-05-13): MySQL 진실 원천 환불 sweep 워커 (5분 주기, PG fail_count 의존 X 뿌리뽑기)
+import { startMysqlRefundSweeper } from './utils/mysql-refund-sweeper';
 
 // 공용 관리 라우트 (슈퍼관리자 + 고객사관리자)
 import manageUsersRoutes from './routes/manage-users';
@@ -210,6 +212,11 @@ app.listen(PORT, () => {
 
   // ★ D151 (2026-05-11): 캠페인 결과 자동 sync (5분 주기) — fire-and-forget 사용자 진입 의존 → 백그라운드 자동
   startCampaignSyncWorker();
+
+  // ★ D153 (2026-05-13): MySQL 진실 원천 환불 sweep (5분 주기) — PG fail_count 의존 X
+  //   balance_transactions 회계 진실 + MySQL status_code 직접 카운트로 차액 환불 보정
+  //   기존 syncCampaignResults가 `target > success+fail` 조건으로 SELECT 누락된 캠페인까지 sweep
+  startMysqlRefundSweeper();
 });
 
 export default app;
