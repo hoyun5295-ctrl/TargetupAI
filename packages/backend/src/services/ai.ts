@@ -2580,10 +2580,10 @@ function validateAndNormalizeRefinedCandidates(
     // (d) 길이 필터
     if (text.length < 10) { dropCounts.tooShort += 1; continue; }
     if (bytes > 2000) { dropCounts.tooLong += 1; continue; }
-    // (d-2) ★ D152+ Harold님 지적: 다듬기 결과가 원본보다 너무 짧으면 정보 손실(예: "증정" 단어 삭제로 의미 모호화).
-    //   원본 50자+ 인데 결과가 원본 60% 미만이면 핵심 정보 누락 의심 = 제외.
-    //   긴 LMS는 다듬어도 길이 유지되는 게 정상 — 60% 임계값으로 완화(80% → 70% → 60%).
-    if (originalMessage.length >= 50 && text.length < originalMessage.length * 0.6) {
+    // (d-2) ★ D152+ Harold님 PM2 진단: infoLoss=1 사고 — Claude가 보수적 해석으로 짧게 답함 → 원본 60% 미만 → 자동 제외.
+    //   임계값 추가 완화 60% → 50% (긴 LMS 700자+ 다듬을 때 350자+ 정도면 핵심 정보 포함 가정).
+    //   임계값 80% → 70% → 60% → 50% 순차 완화. 운영 dropout 로그 보고 추가 조정 가능.
+    if (originalMessage.length >= 50 && text.length < originalMessage.length * 0.5) {
       dropCounts.infoLoss += 1;
       continue;
     }
@@ -2618,7 +2618,7 @@ export async function refineDirectMessage(
   const brandLine = companyName ? `브랜드명: ${companyName}` : '';
   const lengthTarget = maxBytes && maxBytes > 90
     ? `${maxBytes}바이트 이내로 다양하게 (짧은 안 ~ 긴 안 분산)`
-    : '원본 길이의 80~150% 사이 (너무 짧으면 정보 손실, 너무 길면 부담). 일반적으로 90바이트(SMS) 또는 2000바이트(LMS) 이내';
+    : '원본 길이의 100~150% 권장 (원본보다 짧으면 핵심 정보 누락 사고). 일반적으로 90바이트(SMS) 또는 2000바이트(LMS) 이내. 원본의 모든 정보 항목을 빠짐없이 포함.';
   const { monthLabel, seasonHint } = getSeasonContext();
 
   // D120 패턴 미러 — 회사별 최근 발송 문안 few-shot (각 회사 톤/스타일 자동 학습)
@@ -2640,10 +2640,11 @@ export async function refineDirectMessage(
 
 원칙 (절대 준수):
 1. **다듬기 정의 — 단순 정리가 아니라 "더 매력적이고 풍성한 카피"로 변환**:
-   - 보존 영역(절대 변경 X): 상품명/할인율/일시/숫자/매장명/연락처/이벤트명/주소/URL — 원본 그대로.
+   - 보존 영역(절대 변경 X): 상품명/할인율/일시/숫자/매장명/연락처/이벤트명/주소/URL/모든 안내 항목 — 원본 그대로.
    - 자유 영역(적극 활용): 수식어/감성 표현/계절 묘사/감사 인사/CTA 표현/문장 구조/어순 — 원본보다 더 매력적으로 풍성하게.
+   - 🚨 **원본의 모든 정보를 빠짐없이 포함** — "증정"/"한정"/"무료" 같은 핵심 단어 누락 금지. 원본 항목 수만큼 결과에도 모두 포함.
    - 목표: "기존보다 문안이 풍성해지고 AI 가치를 체감하게" — 단어 몇 개 빼고 정리하는 수준 X.
-   - 길이: ${lengthTarget}.
+   - 길이: ${lengthTarget}. **결과 길이가 원본보다 짧으면 정보 손실 가능성 — 원본 길이 이상 권장**.
 
 2. **🚨 절대 지어내기 금지 (사고 차단)**:
    - 원본에 없는 **매장/장소/약속/혜택/특가/숫자/날짜/통계/사실** 임의 추가 X.
@@ -2730,7 +2731,22 @@ ${fewShotBlock}
       });
       const textBlock = response.content.find((b: any) => b.type === 'text') as any;
       const rawText = textBlock?.text || '';
+      // ★ D152+ Harold님 PM2 진단 강화: Claude 메인 사고(infoLoss=1) 원인 추적용 stop_reason + 토큰 사용량 + 응답 길이 로그.
+      //   stop_reason='max_tokens' = 응답 잘림 (토큰 증가 필요), 'end_turn' = 정상 완료 (다른 원인).
+      console.log(
+        `[ai][refineDirectMessage] Claude raw — stop_reason=${(response as any).stop_reason || 'unknown'}, ` +
+        `text_length=${rawText.length}, ` +
+        `input_tokens=${(response as any).usage?.input_tokens || 0}, ` +
+        `output_tokens=${(response as any).usage?.output_tokens || 0}, ` +
+        `original_length=${message.length}`,
+      );
       const candidates = parseRefineCandidates(rawText);
+      if (candidates.length > 0) {
+        console.log(
+          `[ai][refineDirectMessage] Claude parsed — first_text_length=${candidates[0]?.text?.length || 0}, ` +
+          `vs original=${message.length} (ratio=${(((candidates[0]?.text?.length || 0) / Math.max(message.length, 1)) * 100).toFixed(0)}%)`,
+        );
+      }
       const validated = validateAndNormalizeRefinedCandidates(candidates, message, rejectNumber);
       if (validated.length > 0) return { candidates: validated };
       console.warn(`[ai][refineDirectMessage] Claude 응답 파싱/검증 후 0건 (raw=${candidates.length}, validated=${validated.length}), OpenAI fallback`);

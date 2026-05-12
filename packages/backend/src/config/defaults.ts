@@ -19,10 +19,12 @@ redis.on('error', (err) => console.error('[Redis] 연결 에러:', err.message))
 // AI 모델명 (환경변수로 모델 업그레이드 시 .env만 수정)
 // ============================================================
 export const AI_MODELS = {
-  // ★ D152+ (2026-05-12) 모델 업그레이드: Sonnet 4.5 → 4.6 (다듬기 품질↑) / GPT 5.1 → 5.3 (fallback 강화).
+  // ★ D152+ (2026-05-12) 모델 (OpenAI/Anthropic 2026.5 API 사용 가능 모델 조사 후 확정):
+  //   - Claude: claude-sonnet-4-6 (2/17 release, $3/$15 per 1M tokens, 다듬기 품질↑ 균형)
+  //   - GPT: gpt-5.4-mini (fallback 용도, 비용 최소화). gpt-5.3 미존재 사고 fix.
   //   .env CLAUDE_MODEL / GPT_MODEL로 런타임 오버라이드 가능.
   claude: process.env.CLAUDE_MODEL || 'claude-sonnet-4-6',
-  gpt: process.env.GPT_MODEL || 'gpt-5.3',
+  gpt: process.env.GPT_MODEL || 'gpt-5.4-mini',
 };
 
 // ============================================================
@@ -135,8 +137,8 @@ export const AI_MAX_TOKENS = {
   customMessage: 2048,
   /** 분석 인사이트 */
   analysis: 4096,
-  /** AI 인라인 다듬기 (D152+) */
-  refineMessage: 2048,
+  /** AI 인라인 다듬기 (D152+) — 긴 LMS(2000B) 다듬기 시 출력 잘림 차단. D152 운영 진단으로 2048 → 4096 증가. */
+  refineMessage: 4096,
 };
 
 // ============================================================
