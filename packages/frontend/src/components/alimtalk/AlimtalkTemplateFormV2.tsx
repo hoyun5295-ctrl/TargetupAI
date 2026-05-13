@@ -148,6 +148,9 @@ export default function AlimtalkTemplateFormV2({
   }, [toast]);
 
   // ── 채널추가형(AD/MI) 선택 시 "채널 추가" 버튼 자동 고정
+  // ★ D153 (2026-05-13): BA/EX 변경 시 AC 버튼 자동 제거 (잔존 차단 — PDF 신고 #2)
+  //   AD/MI → BA/EX 전환 시 AC 버튼이 form.buttons에 잔존하여 미리보기/등록에 노출되던 사고.
+  //   D152-1 ButtonEditor type 전환 잔존 패턴과 동일 카테고리 — messageType 단위 분기 추가.
   useEffect(() => {
     if (form.messageType === 'AD' || form.messageType === 'MI') {
       const has = form.buttons.some((b) => b.type === 'AC');
@@ -155,6 +158,15 @@ export default function AlimtalkTemplateFormV2({
         setForm((f) => ({
           ...f,
           buttons: [...f.buttons, { type: 'AC', name: '채널 추가' }],
+        }));
+      }
+    } else {
+      // BA/EX: AC 버튼 자동 제거 (잔존 차단)
+      const hasAc = form.buttons.some((b) => b.type === 'AC');
+      if (hasAc) {
+        setForm((f) => ({
+          ...f,
+          buttons: f.buttons.filter((b) => b.type !== 'AC'),
         }));
       }
     }
@@ -408,7 +420,7 @@ export default function AlimtalkTemplateFormV2({
               fieldset disabled가 자식 form 컨트롤 일괄 비활성 (HTML5 표준). min-w-0 + border-0 reset. */}
         <fieldset
           disabled={readOnly}
-          className="grid grid-cols-1 md:grid-cols-[1fr_360px] flex-1 overflow-hidden border-0 p-0 m-0 min-w-0"
+          className="grid grid-cols-1 md:grid-cols-[1fr_360px] flex-1 overflow-hidden border-0 p-0 m-0 min-w-0 min-h-0"
         >
           {/* Left: Form */}
           <div className="px-6 py-4 overflow-y-auto space-y-4 border-r border-gray-100">
