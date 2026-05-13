@@ -387,7 +387,7 @@ export default function AlimtalkTemplateFormV2({
   return (
     <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-50">
       <div
-        className="bg-white rounded-2xl shadow-2xl w-full max-w-5xl max-h-[92vh] overflow-hidden flex flex-col"
+        className="bg-white rounded-2xl shadow-2xl w-full max-w-5xl h-[92vh] overflow-hidden flex flex-col"
         style={{ animation: 'zoomIn 0.2s ease-out' }}
       >
         {/* Header */}
@@ -416,12 +416,10 @@ export default function AlimtalkTemplateFormV2({
         </div>
 
         {/* Body: 2-col (폼 / 미리보기).
-            ★ D151+ (PDF 0511 #3): readOnly 시 모든 input/select/checkbox/button 자동 disabled.
-              fieldset disabled가 자식 form 컨트롤 일괄 비활성 (HTML5 표준). min-w-0 + border-0 reset. */}
-        {/* ★ D153 (5/13): fieldset + display:grid 브라우저 호환성 사고 (Chrome/Safari fieldset에 grid 적용 시 height collapse 무효).
-            fieldset은 contents로만 두고(자식 form controls의 disabled 효과만 유지) 내부 div가 grid container 담당. */}
-        <fieldset disabled={readOnly} className="contents">
-        <div className="grid grid-cols-1 md:grid-cols-[1fr_360px] flex-1 overflow-hidden border-0 p-0 m-0 min-w-0 min-h-0">
+            ★ D153 (5/13): fieldset 완전 제거 — Chrome/Safari fieldset+grid+contents 호환성 모두 사고.
+              D151+ fieldset disabled 의도(readOnly 시 입력 차단)는 wrapper div의 pointer-events-none + opacity로 대체.
+              Footer 버튼은 fieldset 외부였어서 readOnly 영향 X 정합. */}
+        <div className={`grid grid-cols-1 md:grid-cols-[1fr_360px] flex-1 overflow-hidden border-0 p-0 m-0 min-w-0 min-h-0 ${readOnly ? 'pointer-events-none opacity-60' : ''}`}>
           {/* Left: Form */}
           <div className="px-6 py-4 overflow-y-auto space-y-4 border-r border-gray-100 min-h-0">
             {/* 발신 프로필 */}
@@ -878,7 +876,6 @@ export default function AlimtalkTemplateFormV2({
             />
           </div>
         </div>
-        </fieldset>
 
         {/* Footer */}
         <div className="px-6 py-3 border-t border-gray-200 bg-gray-50 flex justify-end gap-3">
