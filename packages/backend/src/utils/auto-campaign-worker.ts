@@ -139,17 +139,22 @@ async function runMessageGeneration(): Promise<void> {
   const logPrefix = '[auto-worker][gen]';
 
   try {
-    // ★ D142 (2026-04-28): D-1 범위로 당김 (12~36시간 이내, 기존 24~48h).
-    //   → "하루 전날 문안생성"(Harold님 정책) — 발송시각 기준 12h~36h 윈도우면 충분.
-    //   → 그동안 등록 시 발송시각이 "지금 + 24h 미만"이면 풀백 무한리턴되던 사고 차단.
+    // ★ D153 (2026-05-13): 윈도우 12~36h → 23~25h로 좁힘 (D-1 정확 정합).
+    //   → 기존 12~36h + cron 1분 tick은 first match가 next-36h 시점에 잡혀
+    //     발송 36h 전(D-1 새벽 4시 등 부적절 시각)에 generate되던 사고 (PDF 0512 신고 2).
+    //   → 5/13 16:00 발송 → 5/12 04:00에 generate되어 직원 새벽 알림 사고.
+    // ★ D142 (2026-04-28) 12h 하한은 24h 미만 등록 풀백 무한리턴 차단 의도 — 여전히 유지
+    //   (24h 미만은 L1131-1137 D-day 2h 전 fallback 분기에서 generate).
+    //   → "하루 전날 문안생성"(Harold님 정책) — 23~25h 윈도우 = next-25h~next-24h first match.
+    //   → 5/13 16:00 → 5/12 15:00~16:00 KST generate (직원 자연 D-1 인식 ✓).
     // ★ D114 P6: generating_at 잠금 — 워커 폴링 중복 픽업 방지 (AI 생성+스팸테스트 1분+ 소요)
     const result = await query(
       `SELECT * FROM auto_campaigns
        WHERE status = 'active'
          AND ai_generate_enabled = true
-         AND next_run_at > NOW() + INTERVAL '12 hours'
-         AND next_run_at <= NOW() + INTERVAL '36 hours'
-         AND (generated_at IS NULL OR generated_at < NOW() - INTERVAL '36 hours')
+         AND next_run_at > NOW() + INTERVAL '23 hours'
+         AND next_run_at <= NOW() + INTERVAL '25 hours'
+         AND (generated_at IS NULL OR generated_at < NOW() - INTERVAL '25 hours')
          AND (generating_at IS NULL OR generating_at < NOW() - INTERVAL '30 minutes')
        ORDER BY next_run_at ASC`
     );
