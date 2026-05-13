@@ -423,7 +423,7 @@ export default function AlimtalkTemplateFormV2({
           className="grid grid-cols-1 md:grid-cols-[1fr_360px] flex-1 overflow-hidden border-0 p-0 m-0 min-w-0 min-h-0"
         >
           {/* Left: Form */}
-          <div className="px-6 py-4 overflow-y-auto space-y-4 border-r border-gray-100">
+          <div className="px-6 py-4 overflow-y-auto space-y-4 border-r border-gray-100 min-h-0">
             {/* 발신 프로필 */}
             <div>
               <label className="block text-xs font-medium text-gray-600 mb-1">
@@ -859,7 +859,7 @@ export default function AlimtalkTemplateFormV2({
           </div>
 
           {/* Right: Preview */}
-          <div className="p-4 bg-gray-50 overflow-y-auto">
+          <div className="p-4 bg-gray-50 overflow-y-auto min-h-0">
             <p className="text-xs font-semibold text-gray-500 mb-2">실시간 미리보기</p>
             <AlimtalkPreview
               messageType={form.messageType}
