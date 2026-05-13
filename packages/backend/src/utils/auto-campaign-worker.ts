@@ -414,10 +414,38 @@ async function generateMessageForAutoCampaign(ac: any): Promise<void> {
 
         // ★ D111 P5: (광고)+무료거부 부착 — isAd/opt080Number 전달 (buildAdMessage 내장)
         const genOpt080 = ac.is_ad ? await getOpt080Number(ac.user_id, ac.company_id) : '';
+
+        // ★ D153 (2026-05-13): D-1 사전알림 통합 — 발송 대상 인원 수 계산 후 알림 SMS에 포함
+        //   Harold님 정책 "D-1에 어떤 문안으로 몇 명에게 나가는지 안내" 정합.
+        //   customer-filter (CT-01) + store_code + unsubscribes 필터 = 실제 발송 라우트(L694-714) 동일 패턴.
+        //   COUNT만 조회 (실제 발송 시 재조회) — D-1 시점 추정치, 직원 사전 확인용.
+        let d1TargetCount = 0;
+        try {
+          const filterRes = buildFilterQueryCompat(ac.target_filter, ac.company_id);
+          let countStoreFilter = '';
+          const countStoreParams: any[] = [];
+          if (ac.store_code) {
+            countStoreFilter = ` AND c.store_code = $${filterRes.nextIndex}`;
+            countStoreParams.push(ac.store_code);
+          }
+          const countUnsubIdx = filterRes.nextIndex + countStoreParams.length;
+          const countUnsubFilter = ` AND NOT EXISTS (SELECT 1 FROM unsubscribes u WHERE u.user_id = $${countUnsubIdx} AND u.phone = c.phone)`;
+          const countRes = await query(
+            `SELECT COUNT(*)::int AS cnt FROM customers c
+             WHERE c.company_id = $1 AND c.is_active = true AND c.sms_opt_in = true
+             ${filterRes.where}${countStoreFilter}${countUnsubFilter}`,
+            [ac.company_id, ...filterRes.params, ...countStoreParams, ac.user_id]
+          );
+          d1TargetCount = countRes.rows[0]?.cnt || 0;
+        } catch (countErr) {
+          console.error(`${logPrefix} D-1 발송 대상 카운트 실패 (알림은 발송, 인원 표시만 0):`, countErr);
+        }
+
         const genNotifyMsg = buildAiGeneratedNotifyMessage({
           campaignName: ac.campaign_name,
           scheduledDateStr,
           scheduledTimeStr,
+          targetCount: d1TargetCount,
           messageType: ac.message_type,
           messageContent: generatedContent,
           isAd: ac.is_ad ?? false,

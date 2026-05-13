@@ -161,13 +161,19 @@ export function sanitizeSmsText(text: string): string {
 }
 
 /**
- * D-2 AI 문안 생성 완료 알림 메시지 빌더.
+ * D-1 AI 문안 생성 + 사전알림 통합 메시지 빌더.
+ *
+ * ★ D153 (2026-05-13): D-1 사전알림 단계(buildPreNotifyMessage) 폐지(D142) 보강 —
+ *   Harold님 정책 "D-1에 어떤 문안으로 몇 명에게 나가는지 안내" 명시 정합.
+ *   기존 [AI 문안 생성 완료] SMS에 발송 대상/메시지 타입 라인 추가 통합.
  *
  * 출력 예시:
  *   [AI 문안 생성 완료]
  *
  *   캠페인: 신상품 4월 프로모션
  *   발송 예정: 4월 15일 11:00
+ *   발송 대상: 1,234명
+ *   메시지 타입: LMS
  *
  *   === AI 생성 문안 ===
  *   [브랜드명] 안녕하세요 김철수님...
@@ -181,6 +187,13 @@ export function buildAiGeneratedNotifyMessage(ctx: AutoCampaignNotifyContext): s
   lines.push(`캠페인: ${sanitizeSmsText(ctx.campaignName)}`);
   if (ctx.scheduledDateStr || ctx.scheduledTimeStr) {
     lines.push(`발송 예정: ${ctx.scheduledDateStr || ''} ${ctx.scheduledTimeStr || ''}`.trim());
+  }
+  // ★ D153: 발송 대상 인원 수 + 메시지 타입 (D-1 사전알림 통합)
+  if (typeof ctx.targetCount === 'number') {
+    lines.push(`발송 대상: ${ctx.targetCount.toLocaleString()}명`);
+  }
+  if (ctx.messageType) {
+    lines.push(`메시지 타입: ${ctx.messageType}`);
   }
   lines.push('');
   lines.push('=== AI 생성 문안 ===');
