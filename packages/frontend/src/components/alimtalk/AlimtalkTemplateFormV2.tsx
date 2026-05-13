@@ -418,10 +418,10 @@ export default function AlimtalkTemplateFormV2({
         {/* Body: 2-col (폼 / 미리보기).
             ★ D151+ (PDF 0511 #3): readOnly 시 모든 input/select/checkbox/button 자동 disabled.
               fieldset disabled가 자식 form 컨트롤 일괄 비활성 (HTML5 표준). min-w-0 + border-0 reset. */}
-        <fieldset
-          disabled={readOnly}
-          className="grid grid-cols-1 md:grid-cols-[1fr_360px] flex-1 overflow-hidden border-0 p-0 m-0 min-w-0 min-h-0"
-        >
+        {/* ★ D153 (5/13): fieldset + display:grid 브라우저 호환성 사고 (Chrome/Safari fieldset에 grid 적용 시 height collapse 무효).
+            fieldset은 contents로만 두고(자식 form controls의 disabled 효과만 유지) 내부 div가 grid container 담당. */}
+        <fieldset disabled={readOnly} className="contents">
+        <div className="grid grid-cols-1 md:grid-cols-[1fr_360px] flex-1 overflow-hidden border-0 p-0 m-0 min-w-0 min-h-0">
           {/* Left: Form */}
           <div className="px-6 py-4 overflow-y-auto space-y-4 border-r border-gray-100 min-h-0">
             {/* 발신 프로필 */}
@@ -877,6 +877,7 @@ export default function AlimtalkTemplateFormV2({
               profileName={profileName}
             />
           </div>
+        </div>
         </fieldset>
 
         {/* Footer */}
