@@ -27,7 +27,7 @@ import { getCompanySmsTablesWithLogs, smsBatchAggByGroup, kakaoBatchAggByGroup }
 import { SUCCESS_CODES, PENDING_CODES } from './sms-result-map';
 import { prepaidRefund } from './prepaid';
 
-const INTERVAL_MS = 60 * 1000;     // 1분 — Harold님 명시 (D153 5/13): 5분은 짜치고 부하 미미(336 candidates / 17 user_groups / 1.5초/사이클 / 2.5% 점유)
+const INTERVAL_MS = 30 * 1000;     // 30초 — Harold님 명시 (D153 5/13): 레거시 실시간 환불 패턴 정합 + 후불 8.5/선불 1.5 부하 보수 마진 (1.5초/사이클 / 5% 점유 / 후불 업체는 billing_type filter로 쿼리 자체 X)
 const BOOT_DELAY_MS = 90 * 1000;   // campaign-sync-worker(60초)와 시작 시점 차이 둠
 
 let _timer: NodeJS.Timeout | null = null;
