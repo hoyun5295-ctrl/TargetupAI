@@ -3,6 +3,7 @@ import { query } from '../config/database';
 import { authenticate } from '../middlewares/auth';
 import { process080Callback, getUserUnsubscribes, registerUnsubscribe } from '../utils/unsubscribe-helper';
 import { deduplicateByPhone } from '../utils/deduplicate';
+import { normalizePhone } from '../utils/normalize';
 
 const router = Router();
 
@@ -158,9 +159,13 @@ router.post('/', async (req: Request, res: Response) => {
     
     const { phone } = req.body;
     const userType = req.user?.userType;
-    const cleanPhone = phone.replace(/\D/g, '');
+    // ★ D162 (2026-05-15) 0 자동 보정: 기존 `replace(/\D/g, '')`만으로는 카카오 받은 CSV 등
+    //   앞 0 누락된 10자리 휴대폰(예: 1066133762)이 그대로 INSERT → customers.phone 11자리와
+    //   매칭 X → 수신거부 등록됐다 표시되지만 발송 시 스팸 발송 사고 영구 위험.
+    //   normalize.ts CT의 normalizePhone(0 자동 보정 + 한국 휴대폰 유효성 검사) 적용.
+    const cleanPhone = normalizePhone(phone);
 
-    if (cleanPhone.length < 10) {
+    if (!cleanPhone) {
       return res.status(400).json({ error: '올바른 전화번호를 입력하세요.' });
     }
 
@@ -201,8 +206,11 @@ router.post('/upload', async (req: Request, res: Response) => {
     const insertedPhones: string[] = [];
 
     for (const phone of phones) {
-      const cleanPhone = String(phone).replace(/\D/g, '');
-      if (cleanPhone.length >= 10) {
+      // ★ D162 (2026-05-15) 0 자동 보정: 카카오 받은 CSV 등 앞 0 누락 10자리 휴대폰(예: 1066133762)
+      //   → normalizePhone(0 자동 보정 + 한국 휴대폰 유효성 검사)로 11자리 정합 + 매칭 보장.
+      //   유효 휴대폰 아니면 skip (잘못된 번호로 unsubscribes INSERT 차단).
+      const cleanPhone = normalizePhone(phone);
+      if (cleanPhone) {
         // CT-03: admin이면 고객 store_code 기준 브랜드 사용자에게 자동 배정
         const cnt = await registerUnsubscribe(companyId, userId, userType || 'company_user', cleanPhone, 'upload');
         if (cnt > 0) {
@@ -211,6 +219,8 @@ router.post('/upload', async (req: Request, res: Response) => {
         } else {
           skipCount++;
         }
+      } else {
+        skipCount++;
       }
     }
 

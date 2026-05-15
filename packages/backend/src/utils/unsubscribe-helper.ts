@@ -157,14 +157,20 @@ export async function registerUnsubscribe(
     //   - no_filter-2: store_codes 배정됐으나 customer_stores 실존 매칭 0 → 유령, 전체 등록
     //   - filtered   : 실존 매칭 + c.store_code 매칭 → 해당 user만
     //   - blocked    : store_codes 미배정 → 스킵
+    // ★ D162 (2026-05-15) 42P08 root cause fix:
+    //   기존 SQL이 $1/$3/$4만 사용 + $2(userId) 미사용 → PostgreSQL prepared statement cache가
+    //   미사용 placeholder의 type을 unknown으로 추론 → 운 나쁜 connection에서 캐시 type 불일치
+    //   → 'inconsistent types deduced for parameter $3 (text versus character varying)' 42P08.
+    //   정정: 미사용 $2 placeholder 제거 ($3→$2, $4→$3 재번호) + `::uuid`/`::varchar` 명시 cast
+    //   추가 → type inference 영구 고정 + 캐시 type 일관성 보장.
     const result = await query(
       `INSERT INTO unsubscribes (company_id, user_id, phone, source)
-       SELECT $1, u.id, $3, $4
+       SELECT $1::uuid, u.id, $2::varchar, $3::varchar
        FROM customers c
        JOIN users u ON u.company_id = c.company_id
          AND u.user_type = 'user'
          AND COALESCE(u.is_active, true) = true
-       WHERE c.company_id = $1 AND c.phone = $3
+       WHERE c.company_id = $1 AND c.phone = $2
          AND (
            NOT EXISTS (SELECT 1 FROM customer_stores cs WHERE cs.company_id = $1)
            OR
@@ -180,14 +186,16 @@ export async function registerUnsubscribe(
                            AND cs.store_code = ANY(u.store_codes)))
          )
        ON CONFLICT (user_id, phone) DO NOTHING`,
-      [companyId, userId, phone, source]
+      [companyId, phone, source]
     );
     insertCount = result.rowCount || 0;
   } else {
     // 브랜드 사용자 → 본인 user_id로 등록
+    // ★ D162 (2026-05-15) 회귀 차단 보험 cast: 같은 prepared statement cache 영역에서
+    //   type inference 흔들림 가능성 영구 차단.
     const result = await query(
       `INSERT INTO unsubscribes (company_id, user_id, phone, source)
-       VALUES ($1, $2, $3, $4)
+       VALUES ($1::uuid, $2::uuid, $3::varchar, $4::varchar)
        ON CONFLICT (user_id, phone) DO NOTHING`,
       [companyId, userId, phone, source]
     );
