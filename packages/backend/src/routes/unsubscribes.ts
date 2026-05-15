@@ -1,9 +1,22 @@
 import { Request, Response, Router } from 'express';
 import { query } from '../config/database';
 import { authenticate } from '../middlewares/auth';
-import { process080Callback, getUserUnsubscribes, registerUnsubscribe } from '../utils/unsubscribe-helper';
+import { process080Callback, getUserUnsubscribes, registerUnsubscribe, IsolationBlockedError } from '../utils/unsubscribe-helper';
 import { deduplicateByPhone } from '../utils/deduplicate';
 import { normalizePhone } from '../utils/normalize';
+
+// ★ D162-3 (2026-05-15) 격리 ON 회사 + company_admin = 등록/삭제 차단 가드
+//   안내 메시지: "수신거부 사용자격리기능이 적용되어있습니다. 한줄로 운영실에 문의하세요"
+const ISOLATION_BLOCK_MESSAGE = '수신거부 사용자격리기능이 적용되어있습니다. 한줄로 운영실에 문의하세요';
+
+async function checkIsolationBlock(companyId: string, userType: string | undefined): Promise<boolean> {
+  if (userType !== 'company_admin') return false;
+  const result = await query(
+    `SELECT COALESCE(user_isolation_enabled, false) AS iso FROM companies WHERE id = $1::uuid`,
+    [companyId]
+  );
+  return result.rows[0]?.iso === true;
+}
 
 const router = Router();
 
@@ -127,6 +140,15 @@ router.get('/', async (req: Request, res: Response) => {
       optOutAutoSync = companyInfo.rows[0]?.opt_out_auto_sync || false;
     }
     
+    // ★ D162-3 (2026-05-15) 격리 ON/OFF 응답 — frontend에서 admin 등록/삭제 UI 가드용
+    const isoResult = await query(
+      `SELECT COALESCE(user_isolation_enabled, false) AS iso FROM companies WHERE id = $1::uuid`,
+      [companyId]
+    );
+    const userIsolationEnabled = isoResult.rows[0]?.iso === true;
+    // 격리 ON + company_admin = 등록/삭제 차단. 그 외 = 관리 허용.
+    const canManageUnsubscribes = !(userType === 'company_admin' && userIsolationEnabled);
+
     return res.json({
       success: true,
       unsubscribes: paged,
@@ -138,6 +160,8 @@ router.get('/', async (req: Request, res: Response) => {
       },
       opt080Number,
       optOutAutoSync,
+      userIsolationEnabled,
+      canManageUnsubscribes,
     });
   } catch (error) {
     console.error('수신거부 목록 조회 에러:', error);
@@ -159,6 +183,12 @@ router.post('/', async (req: Request, res: Response) => {
     
     const { phone } = req.body;
     const userType = req.user?.userType;
+
+    // ★ D162-3 격리 ON + company_admin 가드 (등록 차단)
+    if (await checkIsolationBlock(companyId, userType)) {
+      return res.status(403).json({ error: ISOLATION_BLOCK_MESSAGE });
+    }
+
     // ★ D162 (2026-05-15) 0 자동 보정: 기존 `replace(/\D/g, '')`만으로는 카카오 받은 CSV 등
     //   앞 0 누락된 10자리 휴대폰(예: 1066133762)이 그대로 INSERT → customers.phone 11자리와
     //   매칭 X → 수신거부 등록됐다 표시되지만 발송 시 스팸 발송 사고 영구 위험.
@@ -169,8 +199,16 @@ router.post('/', async (req: Request, res: Response) => {
       return res.status(400).json({ error: '올바른 전화번호를 입력하세요.' });
     }
 
-    // CT-03 (D162-3): 회사 전체 active user broadcast 등록 (격리 OFF 기본)
-    const insertedCount = await registerUnsubscribe(companyId, userId, userType || 'company_user', cleanPhone, 'manual');
+    // CT-03 (D162-3): 격리 OFF=회사 전체 broadcast / 격리 ON=사용자 본인+admin sync
+    let insertedCount: number;
+    try {
+      insertedCount = await registerUnsubscribe(companyId, userId, userType || 'company_user', cleanPhone, 'manual');
+    } catch (e) {
+      if (e instanceof IsolationBlockedError) {
+        return res.status(403).json({ error: ISOLATION_BLOCK_MESSAGE });
+      }
+      throw e;
+    }
 
     // D43-4: 유료 플랜 업체면 customers.sms_opt_in = false 동시 업데이트
     await syncCustomerOptIn(companyId, cleanPhone, false);
@@ -199,12 +237,18 @@ router.post('/upload', async (req: Request, res: Response) => {
     }
     
     const { phones } = req.body;
-    
+
     if (!phones || !Array.isArray(phones) || phones.length === 0) {
       return res.status(400).json({ error: '전화번호 목록이 필요합니다.' });
     }
-    
+
     const userType = req.user?.userType;
+
+    // ★ D162-3 격리 ON + company_admin 가드 (업로드 차단)
+    if (await checkIsolationBlock(companyId, userType)) {
+      return res.status(403).json({ error: ISOLATION_BLOCK_MESSAGE });
+    }
+
     let insertCount = 0;
     let skipCount = 0;
     const insertedPhones: string[] = [];
@@ -215,8 +259,16 @@ router.post('/upload', async (req: Request, res: Response) => {
       //   유효 휴대폰 아니면 skip (잘못된 번호로 unsubscribes INSERT 차단).
       const cleanPhone = normalizePhone(phone);
       if (cleanPhone) {
-        // CT-03: admin이면 고객 store_code 기준 브랜드 사용자에게 자동 배정
-        const cnt = await registerUnsubscribe(companyId, userId, userType || 'company_user', cleanPhone, 'upload');
+        // CT-03 (D162-3): 격리 OFF=회사 전체 broadcast / 격리 ON=사용자 본인+admin sync
+        let cnt: number;
+        try {
+          cnt = await registerUnsubscribe(companyId, userId, userType || 'company_user', cleanPhone, 'upload');
+        } catch (e) {
+          if (e instanceof IsolationBlockedError) {
+            return res.status(403).json({ error: ISOLATION_BLOCK_MESSAGE });
+          }
+          throw e;
+        }
         if (cnt > 0) {
           insertCount += cnt;
           insertedPhones.push(cleanPhone);
@@ -257,9 +309,15 @@ router.delete('/:id', async (req: Request, res: Response) => {
   try {
     const companyId = req.user?.companyId;
     const userId = req.user?.userId;
+    const userType = req.user?.userType;
     const loginId = req.user?.loginId;
     if (!companyId || !userId) {
       return res.status(403).json({ error: '권한이 필요합니다.' });
+    }
+
+    // ★ D162-3 격리 ON + company_admin 가드 (삭제 차단)
+    if (await checkIsolationBlock(companyId, userType)) {
+      return res.status(403).json({ error: ISOLATION_BLOCK_MESSAGE });
     }
 
     const { id } = req.params;

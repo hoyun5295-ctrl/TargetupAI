@@ -18,6 +18,9 @@ export default function Unsubscribes() {
   const [optOutAutoSync, setOptOutAutoSync] = useState(false);
   const [syncTesting, setSyncTesting] = useState(false);
   const [syncTestModal, setSyncTestModal] = useState(false);
+  // ★ D162-3 격리 ON + 고객사관리자 = 등록/삭제 UI 비활성화 + 안내 메시지
+  const [canManageUnsubscribes, setCanManageUnsubscribes] = useState(true);
+  const [userIsolationEnabled, setUserIsolationEnabled] = useState(false);
 
   useEffect(() => {
     loadUnsubscribes();
@@ -44,6 +47,9 @@ export default function Unsubscribes() {
         // D43-4: 080 설정 정보 수신
         setOpt080Number(data.opt080Number || '');
         setOptOutAutoSync(data.optOutAutoSync || false);
+        // ★ D162-3 격리 ON + 고객사관리자 = 등록/삭제 UI 차단
+        setCanManageUnsubscribes(data.canManageUnsubscribes !== false);
+        setUserIsolationEnabled(data.userIsolationEnabled === true);
         return items;
       }
     } catch (error) {
@@ -325,7 +331,7 @@ export default function Unsubscribes() {
               </div>
             </div>
 
-            {/* 직접 추가 */}
+            {/* 직접 추가 — 격리 ON + 고객사관리자 차단 */}
             <div className="min-w-[200px]">
               <label className="block text-sm font-medium text-gray-700 mb-1">직접 추가</label>
               <div className="flex gap-2">
@@ -333,30 +339,32 @@ export default function Unsubscribes() {
                   type="text"
                   value={newPhone}
                   onChange={(e) => setNewPhone(e.target.value)}
-                  onKeyDown={(e) => e.key === 'Enter' && handleAdd()}
+                  onKeyDown={(e) => e.key === 'Enter' && canManageUnsubscribes && handleAdd()}
                   placeholder="01012345678"
-                  className="w-36 px-3 py-2 border rounded-lg"
+                  disabled={!canManageUnsubscribes}
+                  className={`w-36 px-3 py-2 border rounded-lg ${!canManageUnsubscribes ? 'bg-gray-100 cursor-not-allowed' : ''}`}
                 />
                 <button
                   onClick={handleAdd}
-                  className="px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700"
+                  disabled={!canManageUnsubscribes}
+                  className={`px-4 py-2 text-white rounded-lg ${canManageUnsubscribes ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-gray-400 cursor-not-allowed'}`}
                 >
                   추가
                 </button>
               </div>
             </div>
 
-            {/* 파일 업로드 */}
+            {/* 파일 업로드 — 격리 ON + 고객사관리자 차단 */}
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">파일 업로드</label>
-              <label className={`inline-flex items-center gap-2 px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 cursor-pointer ${uploading ? 'opacity-50' : ''}`}>
+              <label className={`inline-flex items-center gap-2 px-4 py-2 text-white rounded-lg ${canManageUnsubscribes ? 'bg-purple-600 hover:bg-purple-700 cursor-pointer' : 'bg-gray-400 cursor-not-allowed'} ${uploading ? 'opacity-50' : ''}`}>
                 <span>📁</span>
                 <span>{uploading ? '처리중...' : 'CSV/TXT'}</span>
                 <input
                   type="file"
                   accept=".csv,.txt"
                   onChange={handleFileUpload}
-                  disabled={uploading}
+                  disabled={uploading || !canManageUnsubscribes}
                   className="hidden"
                 />
               </label>
@@ -386,6 +394,14 @@ export default function Unsubscribes() {
               : '※ 파일 업로드는 한 줄에 하나의 전화번호 형식입니다.'
             }
           </p>
+
+          {/* ★ D162-3 격리 ON + 고객사관리자 안내 */}
+          {!canManageUnsubscribes && userIsolationEnabled && (
+            <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+              <strong>수신거부 사용자격리기능이 적용되어있습니다.</strong> 한줄로 운영실에 문의하세요.
+              <div className="text-xs text-amber-700 mt-1">고객사관리자는 조회만 가능합니다. 각 사용자가 등록한 수신거부 결과가 본 화면에 자동 동기화됩니다.</div>
+            </div>
+          )}
         </div>
 
         {/* 목록 */}
@@ -425,8 +441,9 @@ export default function Unsubscribes() {
                       </td>
                       <td className="px-4 py-3 text-center">
                         <button
-                          onClick={() => setDeleteModal({ show: true, id: item.id, phone: item.phone })}
-                          className="text-red-500 hover:text-red-700 text-sm"
+                          onClick={() => canManageUnsubscribes && setDeleteModal({ show: true, id: item.id, phone: item.phone })}
+                          disabled={!canManageUnsubscribes}
+                          className={`text-sm ${canManageUnsubscribes ? 'text-red-500 hover:text-red-700' : 'text-gray-300 cursor-not-allowed'}`}
                         >
                           삭제
                         </button>

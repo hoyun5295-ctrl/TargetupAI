@@ -141,6 +141,13 @@ export async function registerBulkCompanyUserUnsubscribes(
   return result.rowCount || 0;
 }
 
+export class IsolationBlockedError extends Error {
+  constructor() {
+    super('ISOLATION_BLOCKED');
+    this.name = 'IsolationBlockedError';
+  }
+}
+
 export async function registerUnsubscribe(
   companyId: string,
   userId: string,
@@ -150,12 +157,42 @@ export async function registerUnsubscribe(
 ): Promise<number> {
   let insertCount = 0;
 
-  // ★ D162-3 (2026-05-15) Harold 명시 의도 — 격리 OFF(기본) 회사 = 누가 업로드하든 회사 전체 broadcast
-  //   admin / user 분기 통합. 옛 D136 customers JOIN 디자인 + 본인 user_id 한정 INSERT 모두 폐기.
-  //   회사의 모든 active 사용자(admin + user) user_id에 동일 phone row INSERT.
-  //   ON CONFLICT으로 중복 차단. ::uuid/::varchar cast로 42P08 type inference 영구 고정.
-  //   격리 ON 회사 분기는 별 단계 (companies.user_isolation_enabled 신설 + 슈퍼관리자 토글).
-  void userId; void userType; // 격리 ON 분기 도입 시까지 미사용 (companies.user_isolation_enabled)
+  // ★ D162-3 (2026-05-15) Harold 명시 4 분기 매트릭스:
+  //   - 격리 OFF + 누구든     → 회사 전체 active user broadcast
+  //   - 격리 ON  + company_admin → 차단 (IsolationBlockedError, 라우트에서 403 + 안내)
+  //   - 격리 ON  + company_user → 본인 user_id + 회사의 admin user_id 양쪽 INSERT
+  //   - 격리 ON  + 그 외       → 차단 (방어)
+  //   회사별 user_isolation_enabled = false(기본) → broadcast / true → 사용자별 격리.
+  //   옛 D136 customers JOIN + store_code 격리 디자인 폐기 (Harold 새 설계로 대체).
+  const companyResult = await query(
+    `SELECT COALESCE(user_isolation_enabled, false) AS iso FROM companies WHERE id = $1::uuid`,
+    [companyId]
+  );
+  const isolationEnabled = companyResult.rows[0]?.iso === true;
+
+  if (isolationEnabled) {
+    if (userType === 'company_admin') {
+      throw new IsolationBlockedError();
+    }
+    if (userType !== 'company_user') {
+      throw new IsolationBlockedError();
+    }
+    // 격리 ON + 사용자 → 본인 + 회사 admin 양쪽 INSERT
+    const result = await query(
+      `INSERT INTO unsubscribes (company_id, user_id, phone, source)
+       SELECT $1::uuid, u.id, $3::varchar, $4::varchar
+       FROM users u
+       WHERE u.company_id = $1::uuid
+         AND COALESCE(u.is_active, true) = true
+         AND (u.id = $2::uuid OR u.user_type = 'admin')
+       ON CONFLICT (user_id, phone) DO NOTHING`,
+      [companyId, userId, phone, source]
+    );
+    return result.rowCount || 0;
+  }
+
+  // 격리 OFF (기본) — 회사 전체 active user broadcast (admin + user 모두)
+  void userId; void userType;
   const result = await query(
     `INSERT INTO unsubscribes (company_id, user_id, phone, source)
      SELECT $1::uuid, u.id, $2::varchar, $3::varchar
