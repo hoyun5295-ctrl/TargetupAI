@@ -151,51 +151,35 @@ export async function registerUnsubscribe(
   let insertCount = 0;
 
   if (userType === 'company_admin') {
-    // ★ D136 (2026-04-22) 개선: admin 수동/개별 수신거부 등록 시 company_user 자동 배정을
-    //   getStoreScope(CT-02) 4단계 판정으로 재작성 (기존 `ANY(u.store_codes)` 단일 조건의 유령 배정 버그 해결).
-    //   - no_filter-1: customer_stores 체계 없음 → 모든 company_user에게 등록
-    //   - no_filter-2: store_codes 배정됐으나 customer_stores 실존 매칭 0 → 유령, 전체 등록
-    //   - filtered   : 실존 매칭 + c.store_code 매칭 → 해당 user만
-    //   - blocked    : store_codes 미배정 → 스킵
-    // ★ D162 (2026-05-15) 42P08 root cause fix:
-    //   기존 SQL이 $1/$3/$4만 사용 + $2(userId) 미사용 → PostgreSQL prepared statement cache가
-    //   미사용 placeholder의 type을 unknown으로 추론 → 운 나쁜 connection에서 캐시 type 불일치
-    //   → 'inconsistent types deduced for parameter $3 (text versus character varying)' 42P08.
-    //   정정: 미사용 $2 placeholder 제거 ($3→$2, $4→$3 재번호) + `::uuid`/`::varchar` 명시 cast
-    //   추가 → type inference 영구 고정 + 캐시 type 일관성 보장.
+    // ★ D162-2 (2026-05-15) Harold 명시 의도 100% 정합 — 고객사관리자 등록 = 회사 전체 active user broadcast
+    //   옛 D136 customers JOIN 디자인 완전 폐기: customers에 phone이 박혀있어야 INSERT 성공하던
+    //   사고 → 카카오 받은 CSV 같은 신규 phone(customers 미존재)이 "중복 제외" 표시되며 등록 0건
+    //   → 발송 시 매칭 X → 스팸 발송 영구 위험.
+    //   신 의도: admin 등록 = 회사의 admin + user 모든 active 사용자에게 broadcast INSERT.
+    //   ON CONFLICT으로 중복 차단. ::uuid/::varchar cast로 42P08 type inference 영구 고정.
     const result = await query(
       `INSERT INTO unsubscribes (company_id, user_id, phone, source)
        SELECT $1::uuid, u.id, $2::varchar, $3::varchar
-       FROM customers c
-       JOIN users u ON u.company_id = c.company_id
-         AND u.user_type = 'user'
+       FROM users u
+       WHERE u.company_id = $1::uuid
+         AND u.user_type IN ('admin', 'user')
          AND COALESCE(u.is_active, true) = true
-       WHERE c.company_id = $1 AND c.phone = $2
-         AND (
-           NOT EXISTS (SELECT 1 FROM customer_stores cs WHERE cs.company_id = $1)
-           OR
-           (u.store_codes IS NOT NULL AND array_length(u.store_codes, 1) > 0
-            AND NOT EXISTS (SELECT 1 FROM customer_stores cs
-                             WHERE cs.company_id = $1
-                               AND cs.store_code = ANY(u.store_codes)))
-           OR
-           (u.store_codes IS NOT NULL AND array_length(u.store_codes, 1) > 0
-            AND c.store_code = ANY(u.store_codes)
-            AND EXISTS (SELECT 1 FROM customer_stores cs
-                         WHERE cs.company_id = $1
-                           AND cs.store_code = ANY(u.store_codes)))
-         )
        ON CONFLICT (user_id, phone) DO NOTHING`,
       [companyId, phone, source]
     );
     insertCount = result.rowCount || 0;
   } else {
-    // 브랜드 사용자 → 본인 user_id로 등록
-    // ★ D162 (2026-05-15) 회귀 차단 보험 cast: 같은 prepared statement cache 영역에서
-    //   type inference 흔들림 가능성 영구 차단.
+    // ★ D162-2 (2026-05-15) Harold 명시 의도 100% 정합 — 일반 사용자 등록 = 본인 + 회사 admin 둘 다 INSERT
+    //   옛 디자인: 본인 user_id 단일 INSERT → admin이 회사 전체 발송 시 수신거부 매칭 X → 사고
+    //   신 의도: 본인 user_id INSERT + 회사의 admin user_id에게도 INSERT (broadcast 1건 확장)
+    //   process080Callback L337-356 admin sync 패턴과 동일.
     const result = await query(
       `INSERT INTO unsubscribes (company_id, user_id, phone, source)
-       VALUES ($1::uuid, $2::uuid, $3::varchar, $4::varchar)
+       SELECT $1::uuid, u.id, $3::varchar, $4::varchar
+       FROM users u
+       WHERE u.company_id = $1::uuid
+         AND COALESCE(u.is_active, true) = true
+         AND (u.id = $2::uuid OR u.user_type = 'admin')
        ON CONFLICT (user_id, phone) DO NOTHING`,
       [companyId, userId, phone, source]
     );
