@@ -114,6 +114,7 @@ export default function AdminDashboard() {
     newExcludedSegment: '',
     lineGroupId: '',
     kakaoEnabled: false,
+    userIsolationEnabled: false,  // ★ D162-3 (2026-05-15) 수신거부 사용자격리 ON/OFF
     subscriptionStatus: 'trial',
     // ★ CT-17: 30일 PRO 체험 관리 (표시용)
     trialExpiresAt: '' as string | null | '',
@@ -1857,6 +1858,7 @@ const handleApproveRequest = async (id: string) => {
           newExcludedSegment: '',
           lineGroupId: c.line_group_id || '',
           kakaoEnabled: c.kakao_enabled ?? false,
+          userIsolationEnabled: c.user_isolation_enabled ?? false,  // ★ D162-3 수신거부 사용자격리
           subscriptionStatus: c.subscription_status || 'trial',
           // ★ CT-17
           trialExpiresAt: c.trial_expires_at || '',
@@ -5107,6 +5109,29 @@ const handleApproveRequest = async (id: string) => {
                         className="sr-only peer"
                       />
                       <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-yellow-500"></div>
+                    </label>
+                  </div>
+
+                  {/* ★ D162-3 (2026-05-15) 수신거부 사용자격리 ON/OFF */}
+                  <div className="flex items-center justify-between p-4 bg-gradient-to-r from-amber-50 to-orange-50 border border-amber-200 rounded-xl mt-3">
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-lg">🔒</span>
+                        <span className="font-semibold text-gray-800">수신거부 사용자격리</span>
+                      </div>
+                      <p className="text-xs text-gray-500 mt-1">
+                        ON = 멀티 브랜드 회사 영역. 고객사관리자는 등록/삭제 차단(조회만 가능), 사용자가 등록한 수신거부는 관리자에게 자동 동기화.<br/>
+                        OFF = 누구든 등록/삭제 가능 + 회사 전체 사용자 동일 수신거부 적용 (기본).
+                      </p>
+                    </div>
+                    <label className="relative inline-flex items-center cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={editCompany.userIsolationEnabled}
+                        onChange={(e) => setEditCompany({ ...editCompany, userIsolationEnabled: e.target.checked })}
+                        className="sr-only peer"
+                      />
+                      <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-amber-500"></div>
                     </label>
                   </div>
                 </div>

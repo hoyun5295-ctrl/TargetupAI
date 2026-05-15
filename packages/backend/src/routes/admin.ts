@@ -381,7 +381,8 @@ router.put('/companies/:id', authenticate, requireSuperAdmin, async (req: Reques
     businessNumber, ceoName, businessType, businessItem, address,
     allowCallbackSelfRegister, maxUsers, sessionTimeoutMinutes,
     approvalRequired, targetStrategy, lineGroupId, kakaoEnabled,
-    subscriptionStatus
+    subscriptionStatus,
+    userIsolationEnabled  // ★ D162-3 (2026-05-15) 수신거부 사용자격리 ON/OFF
   } = req.body;
   
   try {
@@ -428,11 +429,12 @@ router.put('/companies/:id', authenticate, requireSuperAdmin, async (req: Reques
           target_strategy = COALESCE($28, target_strategy),
           line_group_id = COALESCE($29, line_group_id),
           kakao_enabled = COALESCE($30, kakao_enabled),
+          user_isolation_enabled = COALESCE($33, user_isolation_enabled),
           -- subscription_status는 위 plan_id CASE문에서 처리
           updated_at = NOW()
       WHERE id = $32
       RETURNING *
-    `, [companyName, contactName, contactEmail, contactPhone, status, planId, rejectNumber, brandName, sendHourStart, sendHourEnd, dailyLimit, holidaySend, duplicateDays, costPerSms, costPerLms, costPerMms, costPerKakao, storeCodeList ? JSON.stringify(storeCodeList) : null, businessNumber, ceoName, businessType, businessItem, address, allowCallbackSelfRegister !== undefined ? allowCallbackSelfRegister : null, maxUsers || null, sessionTimeoutMinutes || null, approvalRequired !== undefined ? approvalRequired : null, targetStrategy || null, lineGroupId || null, kakaoEnabled !== undefined ? kakaoEnabled : null, finalSubscriptionStatus, id]);
+    `, [companyName, contactName, contactEmail, contactPhone, status, planId, rejectNumber, brandName, sendHourStart, sendHourEnd, dailyLimit, holidaySend, duplicateDays, costPerSms, costPerLms, costPerMms, costPerKakao, storeCodeList ? JSON.stringify(storeCodeList) : null, businessNumber, ceoName, businessType, businessItem, address, allowCallbackSelfRegister !== undefined ? allowCallbackSelfRegister : null, maxUsers || null, sessionTimeoutMinutes || null, approvalRequired !== undefined ? approvalRequired : null, targetStrategy || null, lineGroupId || null, kakaoEnabled !== undefined ? kakaoEnabled : null, finalSubscriptionStatus, id, userIsolationEnabled !== undefined ? userIsolationEnabled : null]);
     
     if (result.rows.length === 0) {
       return res.status(404).json({ error: '회사를 찾을 수 없습니다.' });
