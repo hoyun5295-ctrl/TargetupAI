@@ -169,12 +169,16 @@ router.post('/', async (req: Request, res: Response) => {
       return res.status(400).json({ error: '올바른 전화번호를 입력하세요.' });
     }
 
-    // CT-03: admin이면 고객 store_code 기준 브랜드 사용자에게 자동 배정
-    await registerUnsubscribe(companyId, userId, userType || 'company_user', cleanPhone, 'manual');
+    // CT-03 (D162-3): 회사 전체 active user broadcast 등록 (격리 OFF 기본)
+    const insertedCount = await registerUnsubscribe(companyId, userId, userType || 'company_user', cleanPhone, 'manual');
 
     // D43-4: 유료 플랜 업체면 customers.sms_opt_in = false 동시 업데이트
     await syncCustomerOptIn(companyId, cleanPhone, false);
-    
+
+    // ★ Audit 로그 (시간 + IP + 등록 주체 + 영향 row 수)
+    const ip = req.headers['x-forwarded-for'] || req.ip || 'unknown';
+    console.log(`[unsubscribe-audit][add] ${new Date().toISOString()} ip=${ip} actor=${req.user?.loginId || userId} company=${companyId} phone=${cleanPhone} inserted_rows=${insertedCount}`);
+
     return res.json({ success: true, message: '등록되었습니다.' });
   } catch (error) {
     console.error('수신거부 추가 에러:', error);
@@ -228,7 +232,11 @@ router.post('/upload', async (req: Request, res: Response) => {
     if (insertedPhones.length > 0) {
       await syncCustomerOptInBulk(companyId, insertedPhones, false);
     }
-    
+
+    // ★ Audit 로그 (시간 + IP + 등록 주체 + 업로드 결과)
+    const ip = req.headers['x-forwarded-for'] || req.ip || 'unknown';
+    console.log(`[unsubscribe-audit][upload] ${new Date().toISOString()} ip=${ip} actor=${req.user?.loginId || userId} company=${companyId} total=${phones.length} inserted=${insertCount} skipped=${skipCount}`);
+
     return res.json({
       success: true,
       message: `${insertCount}건 등록, ${skipCount}건 중복 제외`,
@@ -249,13 +257,15 @@ router.delete('/:id', async (req: Request, res: Response) => {
   try {
     const companyId = req.user?.companyId;
     const userId = req.user?.userId;
+    const loginId = req.user?.loginId;
     if (!companyId || !userId) {
       return res.status(403).json({ error: '권한이 필요합니다.' });
     }
 
     const { id } = req.params;
 
-    // ★ B17-01: user_id 기준으로 삭제 (본인 수신거부만 관리)
+    // ★ D162-3 (2026-05-15) Harold 명시 의도 — 격리 OFF(기본) 회사 = 회사 전체 row DELETE
+    //   등록 broadcast 패턴과 정합 (한 user 삭제 시 다른 user에 row 잔존 → 발송 매칭 X 사고 차단)
     const target = await query(
       `SELECT phone FROM unsubscribes WHERE id = $1 AND user_id = $2`,
       [id, userId]
@@ -264,16 +274,20 @@ router.delete('/:id', async (req: Request, res: Response) => {
     if (target.rows.length > 0) {
       const targetPhone = target.rows[0].phone;
 
-      // unsubscribes에서 해당 사용자의 해당 번호 삭제
-      await query(
-        `DELETE FROM unsubscribes WHERE user_id = $1 AND phone = $2`,
-        [userId, targetPhone]
+      // 회사 전체 active user의 해당 phone row 모두 삭제 + 삭제 row 수 반환
+      const delResult = await query(
+        `DELETE FROM unsubscribes WHERE company_id = $1::uuid AND phone = $2::varchar RETURNING user_id`,
+        [companyId, targetPhone]
       );
+
+      // ★ Audit 로그 (시간 + IP + 삭제 주체 + 영향 row 수) — PM2 로그 검색 가능
+      const ip = req.headers['x-forwarded-for'] || req.ip || 'unknown';
+      console.log(`[unsubscribe-audit][delete] ${new Date().toISOString()} ip=${ip} actor=${loginId || userId} company=${companyId} phone=${targetPhone} affected_rows=${delResult.rowCount || 0}`);
 
       // D43-4: customers.sms_opt_in = true 복원
       await syncCustomerOptIn(companyId, targetPhone, true);
     }
-    
+
     return res.json({ success: true, message: '삭제되었습니다.' });
   } catch (error) {
     console.error('수신거부 삭제 에러:', error);

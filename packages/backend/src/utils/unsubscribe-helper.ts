@@ -150,41 +150,23 @@ export async function registerUnsubscribe(
 ): Promise<number> {
   let insertCount = 0;
 
-  if (userType === 'company_admin') {
-    // ★ D162-2 (2026-05-15) Harold 명시 의도 100% 정합 — 고객사관리자 등록 = 회사 전체 active user broadcast
-    //   옛 D136 customers JOIN 디자인 완전 폐기: customers에 phone이 박혀있어야 INSERT 성공하던
-    //   사고 → 카카오 받은 CSV 같은 신규 phone(customers 미존재)이 "중복 제외" 표시되며 등록 0건
-    //   → 발송 시 매칭 X → 스팸 발송 영구 위험.
-    //   신 의도: admin 등록 = 회사의 admin + user 모든 active 사용자에게 broadcast INSERT.
-    //   ON CONFLICT으로 중복 차단. ::uuid/::varchar cast로 42P08 type inference 영구 고정.
-    const result = await query(
-      `INSERT INTO unsubscribes (company_id, user_id, phone, source)
-       SELECT $1::uuid, u.id, $2::varchar, $3::varchar
-       FROM users u
-       WHERE u.company_id = $1::uuid
-         AND u.user_type IN ('admin', 'user')
-         AND COALESCE(u.is_active, true) = true
-       ON CONFLICT (user_id, phone) DO NOTHING`,
-      [companyId, phone, source]
-    );
-    insertCount = result.rowCount || 0;
-  } else {
-    // ★ D162-2 (2026-05-15) Harold 명시 의도 100% 정합 — 일반 사용자 등록 = 본인 + 회사 admin 둘 다 INSERT
-    //   옛 디자인: 본인 user_id 단일 INSERT → admin이 회사 전체 발송 시 수신거부 매칭 X → 사고
-    //   신 의도: 본인 user_id INSERT + 회사의 admin user_id에게도 INSERT (broadcast 1건 확장)
-    //   process080Callback L337-356 admin sync 패턴과 동일.
-    const result = await query(
-      `INSERT INTO unsubscribes (company_id, user_id, phone, source)
-       SELECT $1::uuid, u.id, $3::varchar, $4::varchar
-       FROM users u
-       WHERE u.company_id = $1::uuid
-         AND COALESCE(u.is_active, true) = true
-         AND (u.id = $2::uuid OR u.user_type = 'admin')
-       ON CONFLICT (user_id, phone) DO NOTHING`,
-      [companyId, userId, phone, source]
-    );
-    insertCount = result.rowCount || 0;
-  }
+  // ★ D162-3 (2026-05-15) Harold 명시 의도 — 격리 OFF(기본) 회사 = 누가 업로드하든 회사 전체 broadcast
+  //   admin / user 분기 통합. 옛 D136 customers JOIN 디자인 + 본인 user_id 한정 INSERT 모두 폐기.
+  //   회사의 모든 active 사용자(admin + user) user_id에 동일 phone row INSERT.
+  //   ON CONFLICT으로 중복 차단. ::uuid/::varchar cast로 42P08 type inference 영구 고정.
+  //   격리 ON 회사 분기는 별 단계 (companies.user_isolation_enabled 신설 + 슈퍼관리자 토글).
+  void userId; void userType; // 격리 ON 분기 도입 시까지 미사용 (companies.user_isolation_enabled)
+  const result = await query(
+    `INSERT INTO unsubscribes (company_id, user_id, phone, source)
+     SELECT $1::uuid, u.id, $2::varchar, $3::varchar
+     FROM users u
+     WHERE u.company_id = $1::uuid
+       AND u.user_type IN ('admin', 'user')
+       AND COALESCE(u.is_active, true) = true
+     ON CONFLICT (user_id, phone) DO NOTHING`,
+    [companyId, phone, source]
+  );
+  insertCount = result.rowCount || 0;
 
   return insertCount;
 }
@@ -421,27 +403,31 @@ export async function getUserUnsubscribes(userId: string, options: {
  * @returns 삭제된 건수
  */
 export async function deleteUserUnsubscribes(userId: string, phones?: string[]): Promise<number> {
-  // 먼저 company_id 조회 (sms_opt_in 동기화용)
+  // 먼저 company_id 조회 (sms_opt_in 동기화 + 회사 전체 row DELETE 영역)
   const userResult = await query('SELECT company_id FROM users WHERE id = $1', [userId]);
   if (userResult.rows.length === 0) return 0;
   const companyId = userResult.rows[0].company_id;
 
+  // ★ D162-3 (2026-05-15) Harold 명시 의도 — 격리 OFF(기본) 회사 = 사용자/admin/슈퍼관리자
+  //   누가 삭제하든 회사 전체 user_id의 해당 phone row 모두 DELETE (등록 broadcast 패턴 정합).
+  //   옛 user_id 단일 DELETE는 회사 전체 broadcast 등록과 불일치 → 한 user 삭제 시 다른 user에
+  //   row 잔존 → 발송 시 매칭 X → 수신거부 풀림 사고. 회사 전체 row 일괄 DELETE로 정합.
   let deletedPhones: string[];
 
   if (phones && phones.length > 0) {
-    // 선택 삭제
+    // 선택 삭제 — 회사 전체 row DELETE
     const result = await query(
-      `DELETE FROM unsubscribes WHERE user_id = $1 AND phone = ANY($2) RETURNING phone`,
-      [userId, phones]
+      `DELETE FROM unsubscribes WHERE company_id = $1::uuid AND phone = ANY($2::varchar[]) RETURNING phone`,
+      [companyId, phones]
     );
-    deletedPhones = result.rows.map((r: any) => r.phone);
+    deletedPhones = Array.from(new Set(result.rows.map((r: any) => r.phone)));
   } else {
-    // 전체 삭제
+    // 전체 삭제 — 회사 전체 row DELETE
     const result = await query(
-      `DELETE FROM unsubscribes WHERE user_id = $1 RETURNING phone`,
-      [userId]
+      `DELETE FROM unsubscribes WHERE company_id = $1::uuid RETURNING phone`,
+      [companyId]
     );
-    deletedPhones = result.rows.map((r: any) => r.phone);
+    deletedPhones = Array.from(new Set(result.rows.map((r: any) => r.phone)));
   }
 
   // 삭제된 번호들 sms_opt_in 복구
