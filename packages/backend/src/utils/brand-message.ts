@@ -7,7 +7,7 @@
  * 자유형(IMC_BM_FREE_BIZ_MSG) — 직접 작성 8종
  * 기본형(IMC_BM_BASIC_BIZ_MSG) — 템플릿 기반 변수 치환
  *
- * 참조: [휴머스온]브랜드메시지 Agent 사용 메뉴얼_20260209.pdf
+ * 참조: [IMC]브랜드메시지 Agent 사용 메뉴얼_20260209.pdf
  */
 
 import { insertKakaoQueue, insertKakaoBasicQueue } from './sms-queue';

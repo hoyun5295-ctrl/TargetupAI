@@ -31,7 +31,7 @@ import spamFilterRoutes from './routes/spam-filter';
 import analysisRoutes from './routes/analysis';
 import autoCampaignsRoutes from './routes/auto-campaigns';
 import savedSegmentsRoutes from './routes/saved-segments';
-// ★ D130: 휴머스온 IMC 알림톡/브랜드메시지 관리
+// ★ D130: IMC 알림톡/브랜드메시지 관리
 import alimtalkRoutes from './routes/alimtalk';
 import { startAutoCampaignScheduler } from './utils/auto-campaign-worker';
 import { ensureMonthlyLogTables } from './utils/sms-queue';
@@ -98,7 +98,7 @@ app.use(cors({
 }));
 
 app.use(morgan('dev'));
-// ★ D130: 휴머스온 IMC 웹훅은 HMAC 검증을 위해 raw body 필요
+// ★ D130: IMC 웹훅은 HMAC 검증을 위해 raw body 필요
 //    express.json()이 먼저 파싱하면 rawBody 손실되므로 이 경로만 선처리
 app.use('/api/alimtalk/webhook', express.raw({ type: '*/*', limit: '10mb' }));
 app.use(express.json({ limit: LIMITS.requestBodySize }));

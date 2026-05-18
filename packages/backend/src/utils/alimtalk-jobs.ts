@@ -220,7 +220,7 @@ export async function syncPendingTemplatesJob(): Promise<void> {
 
   try {
     // ★ D152-4 Harold님 핵심 지시 (2026-05-12): IMC 6단계 정합 — KREQ 누락이 D135부터 4주 반복 사고의 진짜 root cause.
-    //   IMC 흐름: REG(등록) → REQ(검수요청, 한줄로→휴머스온) → HREJ(휴머스온 반려) | KREQ(카카오 검수요청, 휴머스온 통과)
+    //   IMC 흐름: REG(등록) → REQ(검수요청, 한줄로→IMC) → HREJ(내부 반려) | KREQ(카카오 검수요청, 내부 검수 통과)
     //                                                          → KREJ(카카오 반려) | APR(승인완료)
     //   기존: REQUESTED/REVIEWING/REQ/REV 4종만 폴링 → KREQ 단계가 폴링 대상에서 빠져 영원히 동기화 X
     //   수정: IMC 진행 중 상태 5종(REG/REQ/REV/KREQ + 한줄로 풀네임 REQUESTED/REVIEWING) 전부 포함.
@@ -329,7 +329,7 @@ export async function syncPendingTemplatesJob(): Promise<void> {
  * ★ D152-4 Harold님 지시 (2026-05-12): IMC 6단계 정합 (kakao_alimtalk.md 매뉴얼).
  *   - APR / APPROVED → 'APPROVED' (승인완료, 발송 가능 = 종결)
  *   - REJ / REJECTED / KREJ → 'REJECTED' (카카오 반려 = 종결, 재검수 가능하지만 알림 발송 시점)
- *   - HREJ → null (휴머스온 내부 반려 = 비종결 — 재검수 가능, 알림 발송 X)
+ *   - HREJ → null (내부 반려 = 비종결 — 재검수 가능, 알림 발송 X)
  *   - REG / REQ / REV / KREQ / REQUESTED / REVIEWING → null (진행 중)
  */
 function toTerminalStatus(status: string): 'APPROVED' | 'REJECTED' | null {
@@ -345,9 +345,9 @@ function toTerminalStatus(status: string): 'APPROVED' | 'REJECTED' | null {
  *
  *  IMC 정의 6단계 (kakao_alimtalk.md 매뉴얼):
  *    REG  → 요청등록 (검수 전)
- *    REQ  → 검수요청 (한줄로 → 휴머스온)
- *    HREJ → 휴머스온 반려 (내부, 재검수 가능)
- *    KREQ → 카카오 검수요청 (휴머스온 통과)
+ *    REQ  → 검수요청 (한줄로 → IMC)
+ *    HREJ → 내부 반려 (재검수 가능)
+ *    KREQ → 카카오 검수요청 (내부 검수 통과 후)
  *    KREJ → 카카오 반려 (재검수 가능)
  *    APR  → 승인완료
  *

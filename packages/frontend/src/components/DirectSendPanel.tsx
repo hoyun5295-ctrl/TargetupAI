@@ -526,20 +526,16 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
           </div>
 
           <div className="flex items-center gap-2">
-            {/* ★ D162-4 (2026-05-15) 2차: Harold님 명시 정합 — 헤더 창닫기 옆에 알림톡 발송 진입 버튼.
-                카카오 노란색(#FEE500)으로 임팩트. 클릭 시 직접발송 모달 유지 + AlimtalkSendModal 풀 화면 진입. */}
+            {/* ★ D162-4 (2026-05-15) 4차: Harold님 명시 정합 — 알림톡 버튼 톤 다운.
+                기존 카카오 노란색(#FEE500)이 너무 튐 → 옅은 amber 톤으로 창닫기와 괴리 없게 정리. */}
             {onAlimtalkOpen && (
               <button
                 type="button"
                 onClick={onAlimtalkOpen}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-bold transition shadow-sm hover:shadow"
-                style={{
-                  backgroundColor: '#FEE500',
-                  color: '#3C1E1E',
-                }}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition border border-amber-200 bg-amber-50 hover:bg-amber-100 text-amber-700"
                 title="알림톡 발송 화면으로 전환"
               >
-                <Bell size={14} strokeWidth={2} />
+                <Bell size={14} strokeWidth={1.75} />
                 <span>알림톡 발송</span>
               </button>
             )}

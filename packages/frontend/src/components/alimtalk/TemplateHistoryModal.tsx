@@ -6,7 +6,7 @@
  * - 알림톡 + 브랜드 동일 모달 재사용 (type prop 분기)
  * - 좌측 목록(최신순) → 행 클릭 → 우측 상세 (그 시점 변경 필드 diff)
  *
- * 휴머스온/IMC 키워드 노출 0:
+ * 상위 사업자/IMC 키워드 노출 0:
  *   - backend `sendImcManagedResponse`가 raw 메시지 sanitize
  *   - 본 컴포넌트의 `INSPECTION_LABELS.HREJ`는 '내부 반려'로 표기
  */
@@ -61,7 +61,7 @@ const CHANGE_TYPE_LABELS: Record<string, { label: string; cls: string }> = {
   DELETE:     { label: '삭제',      cls: 'bg-rose-50 text-rose-700' },
 };
 
-// 검수 상태 (알림톡만). HREJ는 사용자 노출 시 휴머스온 키워드 차폐(→ '내부 반려').
+// 검수 상태 (알림톡만). HREJ는 사용자 노출 시 상위 사업자 키워드 차폐(→ '내부 반려').
 const INSPECTION_LABELS: Record<string, string> = {
   REG:  '등록',
   REQ:  '검수요청',

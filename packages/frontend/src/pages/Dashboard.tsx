@@ -271,6 +271,8 @@ export default function Dashboard() {
   // ★ D162-4 (2026-05-15) PDF 0515 알림톡 #1+#3 후속: 알림톡 발송 전용 풀 화면 모달 진입 state.
   //   Harold님 명시 의도 — 직접발송 모달에 알림톡 squeeze 사고 영구 종결. AlimtalkSendModal 별도 풀 화면.
   const [showAlimtalkSend, setShowAlimtalkSend] = useState(false);
+  // ★ D162-4 (2026-05-15) 4차: 직접타겟발송 → 알림톡 진입 시 추출된 수신자 그대로 인계 (Harold님 명시).
+  const [alimtalkInitialRecipients, setAlimtalkInitialRecipients] = useState<any[]>([]);
   const [showTargetSend, setShowTargetSend] = useState(false);
   // ★ D152+ (PDF 0511 funnel fix): 직접발송 진입 시 24h 1회 AI 다듬기 안내 팝업.
   //   67사 무료체험 funnel(고객DB 업로드 3%) 절대 병목 해소 — AI 가치 DB 없이 즉시 체감 동선.
@@ -3215,9 +3217,11 @@ const campaignData = {
         targetSending={targetSending}
         onResetTarget={() => { setShowTargetSend(false); setShowDirectTargeting(true); }}
         onAlimtalkOpen={() => {
-          // ★ D162-4 (2026-05-15) 2차: 직접타겟발송 → 알림톡 발송 풀 화면 진입. 타겟 추출된 수신자를 directRecipients에 미러링하지 X.
-          //   AlimtalkSendModal은 자체 수신자 입력 영역(직접입력/파일등록/주소록)을 사용. 타겟 결과는 별도 추출 필요 시 주소록 저장 후 진입.
+          // ★ D162-4 (2026-05-15) 4차: 직접타겟발송 → 알림톡 발송 진입 시 추출된 수신자 그대로 인계 (Harold님 명시 정합).
+          //   AlimtalkSendModal의 initialRecipients prop으로 targetRecipients 전달 → 자체 수신자 입력 동선 skip.
+          setAlimtalkInitialRecipients(targetRecipients);
           setShowAlimtalkSend(true);
+          setShowTargetSend(false);
         }}
         handleTargetTestSend={handleTargetTestSend}
         testSending={testSending}
@@ -3412,8 +3416,9 @@ const campaignData = {
           formatRejectNumber={formatRejectNumber}
           onClose={() => { setShowDirectSend(false); setKakaoMessage(''); setDirectSendChannel('sms'); }}
           onAlimtalkOpen={() => {
-            // ★ D162-4 (2026-05-15) 2차: 직접발송 모달 헤더의 카카오 노란색 버튼 → 알림톡 발송 풀 화면 진입.
-            //   직접발송 모달은 그대로 유지하되 알림톡 모달이 위에 z-index 50으로 노출.
+            // ★ D162-4 (2026-05-15) 2차: 직접발송 모달 헤더의 알림톡 버튼 → 알림톡 발송 풀 화면 진입.
+            //   직접발송 자체 입력한 수신자(directRecipients)가 있으면 그대로 인계.
+            setAlimtalkInitialRecipients(directRecipients);
             setShowAlimtalkSend(true);
           }}
         />
@@ -3423,7 +3428,11 @@ const campaignData = {
           Harold님 명시 — 직접발송 모달에 squeeze 사고 영구 종결. 좌측 채널 패널 + 우측 수신자/매칭/발송. */}
       <AlimtalkSendModal
         show={showAlimtalkSend}
-        onClose={() => setShowAlimtalkSend(false)}
+        onClose={() => {
+          setShowAlimtalkSend(false);
+          setAlimtalkInitialRecipients([]);
+        }}
+        initialRecipients={alimtalkInitialRecipients}
         alimtalkSenders={alimtalkSenders}
         alimtalkTemplates={kakaoTemplates as any}
         customerFieldOptions={[]}

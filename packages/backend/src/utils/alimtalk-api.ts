@@ -1,5 +1,5 @@
 /**
- * CT-16: 휴머스온 IMC 관리 API 호출 컨트롤타워 (유일 진입점)
+ * CT-16: IMC 관리 API 호출 컨트롤타워 (유일 진입점)
  *
  * ALIMTALK-DESIGN.md §5-2 기준.
  *
@@ -697,7 +697,7 @@ function guessMimeFromFilename(filename: string): string {
 
 // ★ D151+ (PDF 0511 #4): IMC 전송 시 한글/특수문자 파일명 → ASCII-safe 강제.
 //   form-data v4.0.5 `_getContentDisposition`은 filename을 헤더에 그대로 박음 (RFC 5987 자동 처리 X).
-//   IMC humuson Java/Spring 서버가 ASCII 외 byte를 latin1로 해석 → 확장자 추출 실패
+//   IMC Java/Spring 서버가 ASCII 외 byte를 latin1로 해석 → 확장자 추출 실패
 //   → octet-stream 인식 → 미리보기 깨짐 (PG byte는 정상 저장됨).
 //   원본 파일명은 PG `inspection_evidence_filename`에 보존되며, IMC 전송 시점만 ASCII-safe 변환.
 //   ASCII 영문/숫자/`.-_`만 포함 시 원본 유지 (D149-#B 영문 파일명 호환).

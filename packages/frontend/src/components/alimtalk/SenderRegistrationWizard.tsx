@@ -54,7 +54,7 @@ export default function SenderRegistrationWizard({
 
   // Step 3
   const [token, setToken] = useState('');
-  // D131: customSenderKey 필드 제거. 휴머스온 IMC가 senderKey를 API로 자동 발급하므로
+  // D131: customSenderKey 필드 제거. IMC가 senderKey를 API로 자동 발급하므로
   //       고객사 직접 입력 항목 불필요 (기존 고객사는 인비토가 일괄 등록).
 
   // 카테고리 (3단 트리)

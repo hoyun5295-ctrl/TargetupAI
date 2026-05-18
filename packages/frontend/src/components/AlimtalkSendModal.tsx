@@ -13,7 +13,7 @@
  * 발송 흐름은 기존 DirectSendPanel의 handleAlimtalkSend와 동일 — onSendConfirm callback으로 위임.
  */
 
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { Bell, X, Contact } from 'lucide-react';
 import AlimtalkChannelPanel, {
   type AlimtalkChannelState,
@@ -63,6 +63,10 @@ export interface AlimtalkSendModalProps {
   }) => void;
 
   setToast: (t: { show: boolean; type: 'success' | 'error' | 'warning'; message: string }) => void;
+
+  /** ★ D162-4 (2026-05-15) 4차: 직접타겟발송에서 추출된 수신자 그대로 인계받기 (Harold님 명시 정합).
+   *   show=true 진입 + initialRecipients 길이 > 0이면 자동 setRecipients. 사용자 별도 입력 X. */
+  initialRecipients?: any[];
 }
 
 export default function AlimtalkSendModal({
@@ -83,6 +87,7 @@ export default function AlimtalkSendModal({
   setAlimtalkNextContents,
   onSendConfirm,
   setToast,
+  initialRecipients,
 }: AlimtalkSendModalProps) {
   // 수신자 영역 — 알림톡 전용 state (직접발송 directRecipients와 격리)
   const [inputMode, setInputMode] = useState<'direct' | 'file' | 'address'>('direct');
@@ -94,6 +99,21 @@ export default function AlimtalkSendModal({
   const [sending, setSending] = useState(false);
   // ★ D162-4 (2026-05-15) 2차: 주소록 진입 — Harold님 명시 정합. AddressBookModal 재사용 (recipients/setRecipients 위임).
   const [showAddressBook, setShowAddressBook] = useState(false);
+
+  // ★ D162-4 (2026-05-15) 4차: 직접타겟발송에서 추출된 수신자 그대로 인계 — Harold님 명시 정합.
+  //   show=true 진입 시 initialRecipients가 있으면 recipients 박음. 모달 닫으면 reset(직접발송에서 자체 입력 가능하도록).
+  useEffect(() => {
+    if (show && initialRecipients && initialRecipients.length > 0) {
+      setRecipients(initialRecipients);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [show, initialRecipients]);
+  // ★ D162-4 (2026-05-15) 3차: 파일 컬럼 매핑 모달 — Harold님 명시 정합 "직접발송과 똑같이 필드선택 가능".
+  //   파일 업로드 직후 매핑 모달 진입 → 핸드폰 컬럼 + 템플릿 변수별 컬럼 매핑 → 적용 시 recipients + variableMap 자동 박힘.
+  const [showMapping, setShowMapping] = useState(false);
+  const [fileHeaders, setFileHeaders] = useState<string[]>([]);
+  const [fileAllData, setFileAllData] = useState<any[]>([]);
+  const [phoneColumn, setPhoneColumn] = useState('');
 
   // AlimtalkChannelPanel 통합 state
   const channelState: AlimtalkChannelState = useMemo(
@@ -151,7 +171,8 @@ export default function AlimtalkSendModal({
     });
   };
 
-  // 파일 업로드 — 단순화 (phone 컬럼 자동 인식)
+  // ★ D162-4 (2026-05-15) 3차: 파일 업로드 — Harold님 명시 정합 "직접발송과 똑같이 필드선택 가능".
+  //   파싱 후 자동 인식만 하지 X. 컬럼 매핑 모달 진입 → 핸드폰 + 템플릿 변수별 컬럼 사용자 선택 → 적용.
   const handleFileUpload = async (file: File) => {
     setFileLoading(true);
     const formData = new FormData();
@@ -170,33 +191,68 @@ export default function AlimtalkSendModal({
       }
       const allData: any[] = data.allData || data.preview || [];
       const headers: string[] = data.headers || [];
-      const phoneCol =
-        headers.find((h) => /휴대폰|전화|핸드폰|연락처|phone|mobile|hp/i.test(h)) || headers[0];
-      if (!phoneCol) {
-        setToast({ show: true, type: 'error', message: '수신번호 컬럼을 찾을 수 없습니다.' });
+      if (headers.length === 0 || allData.length === 0) {
+        setToast({ show: true, type: 'error', message: '파일에서 데이터를 읽을 수 없습니다.' });
         return;
       }
-      const parsed = allData
-        .map((row) => {
-          const phone = normalizePhoneKr(row[phoneCol]);
-          if (!phone) return null;
-          return { ...row, phone };
-        })
-        .filter(Boolean) as any[];
-      const dedup = dedupEnabled
-        ? Array.from(new Map(parsed.map((r) => [r.phone, r])).values())
-        : parsed;
-      setRecipients(dedup);
-      setToast({
-        show: true,
-        type: 'success',
-        message: `${dedup.length}건 업로드 완료${dedupEnabled && dedup.length !== parsed.length ? ` (중복 ${parsed.length - dedup.length}건 제거)` : ''}`,
-      });
+      setFileHeaders(headers);
+      setFileAllData(allData);
+      // 핸드폰 컬럼 자동 인식 (사용자 변경 가능)
+      const autoPhone =
+        headers.find((h) => /휴대폰|전화|핸드폰|연락처|phone|mobile|hp/i.test(h)) || headers[0] || '';
+      setPhoneColumn(autoPhone);
+      // 템플릿 변수 자동 매칭 — 변수명이 컬럼명과 일치하면 `@@컬럼@@` placeholder 박음
+      if (kakaoSelectedTemplate?.content) {
+        const vars = (kakaoSelectedTemplate.content.match(/#\{[^}]+\}/g) || []) as string[];
+        const uniqueVars = Array.from(new Set(vars));
+        const autoMap: Record<string, string> = {};
+        uniqueVars.forEach((v) => {
+          const inner = v.replace(/^#\{|\}$/g, '').trim();
+          const matchedHeader = headers.find((h) => h.trim() === inner);
+          if (matchedHeader && matchedHeader !== autoPhone) {
+            autoMap[v] = `@@${matchedHeader}@@`;
+          }
+        });
+        if (Object.keys(autoMap).length > 0) {
+          setKakaoTemplateVars((prev) => ({ ...prev, ...autoMap }));
+        }
+      }
+      setShowMapping(true);
     } catch {
       setToast({ show: true, type: 'error', message: '파일 업로드 중 오류가 발생했습니다.' });
     } finally {
       setFileLoading(false);
     }
+  };
+
+  // ★ D162-4 (2026-05-15) 3차: 매핑 적용 — 핸드폰 컬럼 + (변수 매칭은 variableMap에 박힘) → recipients 박음.
+  //   각 row는 파일 헤더 그대로 보존하여 발송 시 row[헤더명]으로 자동 치환 (AlimtalkVariableMappingPanel의 sampleRecipient 자동 치환과 정합).
+  const applyMapping = () => {
+    if (!phoneColumn) {
+      setToast({ show: true, type: 'error', message: '핸드폰 번호 컬럼을 선택해주세요.' });
+      return;
+    }
+    const parsed = fileAllData
+      .map((row) => {
+        const phone = normalizePhoneKr(row[phoneColumn]);
+        if (!phone) return null;
+        return { ...row, phone };
+      })
+      .filter(Boolean) as any[];
+    if (parsed.length === 0) {
+      setToast({ show: true, type: 'error', message: '유효한 수신번호가 없습니다.' });
+      return;
+    }
+    const dedup = dedupEnabled
+      ? Array.from(new Map(parsed.map((r) => [r.phone, r])).values())
+      : parsed;
+    setRecipients(dedup);
+    setShowMapping(false);
+    setToast({
+      show: true,
+      type: 'success',
+      message: `${dedup.length}건 적용 완료${dedupEnabled && dedup.length !== parsed.length ? ` (중복 ${parsed.length - dedup.length}건 제거)` : ''}`,
+    });
   };
 
   // 발송 — 직접발송과 동일 검증 + onSendConfirm 위임
@@ -507,6 +563,200 @@ export default function AlimtalkSendModal({
         setDirectRecipients={setRecipients}
         setToast={setToast}
       />
+
+      {/* ★ D162-4 (2026-05-15) 3차: 파일 컬럼 매핑 모달 — Harold님 명시 정합 "직접발송과 똑같이 필드선택 가능".
+          핸드폰 컬럼 + 템플릿 변수별 컬럼 매핑 + 미리보기. 적용 시 recipients 박음 + 변수 placeholder 자동 박힘. */}
+      {showMapping && (
+        <div
+          className="fixed inset-0 bg-black/50 backdrop-blur-sm z-[60] flex items-center justify-center p-4"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setShowMapping(false);
+          }}
+        >
+          <div
+            className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[85vh] flex flex-col overflow-hidden"
+            style={{ animation: 'zoomIn 0.2s ease-out' }}
+          >
+            {/* 헤더 */}
+            <div className="px-6 py-4 border-b border-gray-200 bg-gradient-to-r from-blue-50 to-white flex justify-between items-center shrink-0">
+              <div>
+                <h3 className="text-lg font-bold text-gray-900">컬럼 매핑</h3>
+                <p className="text-xs text-gray-500 mt-0.5">
+                  핸드폰 컬럼 + 템플릿 변수별 컬럼을 선택하면 발송 대상자별로 자동 치환됩니다.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowMapping(false)}
+                className="text-gray-400 hover:text-gray-600 text-2xl shrink-0 ml-2"
+                aria-label="닫기"
+              >
+                &times;
+              </button>
+            </div>
+
+            {/* 본문 — 스크롤 */}
+            <div className="px-6 py-5 overflow-y-auto flex-1 space-y-4">
+              {/* 핸드폰 컬럼 */}
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">
+                  핸드폰 번호 컬럼 <span className="text-red-500">*</span>
+                </label>
+                <select
+                  value={phoneColumn}
+                  onChange={(e) => setPhoneColumn(e.target.value)}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-200 outline-none"
+                >
+                  <option value="">선택</option>
+                  {fileHeaders.map((h) => (
+                    <option key={h} value={h}>
+                      {h}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* 템플릿 변수 매칭 */}
+              {kakaoSelectedTemplate?.content && (() => {
+                const vars = Array.from(
+                  new Set((kakaoSelectedTemplate.content.match(/#\{[^}]+\}/g) || []) as string[]),
+                );
+                if (vars.length === 0) {
+                  return (
+                    <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-3 text-xs text-emerald-700">
+                      선택한 템플릿에 치환 변수가 없습니다. 핸드폰 컬럼만 매핑하면 됩니다.
+                    </div>
+                  );
+                }
+                return (
+                  <div>
+                    <p className="text-xs font-medium text-gray-600 mb-1">
+                      템플릿 변수 매핑 <span className="text-gray-400">({vars.length}개)</span>
+                    </p>
+                    <p className="text-[11px] text-gray-400 mb-2 leading-relaxed">
+                      파일 컬럼 선택 시 발송 대상자별 자동 치환. 직접 입력 시 모든 수신자에게 같은 값으로 발송.
+                    </p>
+                    <div className="space-y-2">
+                      {vars.map((v) => {
+                        const current = kakaoTemplateVars[v] || '';
+                        const isFieldRef = current.startsWith('@@') && current.endsWith('@@');
+                        const fieldKey = isFieldRef ? current.slice(2, -2) : '';
+                        return (
+                          <div key={v} className="grid grid-cols-[120px_1fr] gap-2 items-center">
+                            <span className="text-[11px] font-mono text-amber-700 bg-amber-50 rounded px-2 py-1 truncate">
+                              {v}
+                            </span>
+                            <div className="flex items-center gap-2">
+                              <select
+                                value={isFieldRef ? fieldKey : '__manual__'}
+                                onChange={(e) => {
+                                  const val = e.target.value;
+                                  if (val === '__manual__') {
+                                    setKakaoTemplateVars((prev) => ({ ...prev, [v]: '' }));
+                                  } else {
+                                    setKakaoTemplateVars((prev) => ({ ...prev, [v]: `@@${val}@@` }));
+                                  }
+                                }}
+                                className="border border-gray-200 rounded px-2 py-1 text-xs max-w-[170px]"
+                              >
+                                <option value="__manual__">직접 입력 (모든 수신자 동일)</option>
+                                {fileHeaders
+                                  .filter((h) => h !== phoneColumn)
+                                  .map((h) => (
+                                    <option key={h} value={h}>
+                                      {h}
+                                    </option>
+                                  ))}
+                              </select>
+                              {!isFieldRef && (
+                                <input
+                                  type="text"
+                                  value={current}
+                                  onChange={(e) =>
+                                    setKakaoTemplateVars((prev) => ({ ...prev, [v]: e.target.value }))
+                                  }
+                                  placeholder="값 입력"
+                                  className="flex-1 border border-gray-200 rounded px-2 py-1 text-xs"
+                                />
+                              )}
+                              {isFieldRef && (
+                                <span className="flex-1 text-[11px] text-emerald-700 bg-emerald-50 rounded px-2 py-1 truncate">
+                                  컬럼: {fieldKey}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              })()}
+
+              {/* 파일 미리보기 */}
+              {fileAllData.length > 0 && (
+                <div>
+                  <p className="text-xs font-medium text-gray-600 mb-1">
+                    파일 미리보기 <span className="text-gray-400">(최대 5건 / 총 {fileAllData.length.toLocaleString()}건)</span>
+                  </p>
+                  <div className="border border-gray-200 rounded-lg overflow-x-auto">
+                    <table className="w-full text-[11px]">
+                      <thead className="bg-gray-50">
+                        <tr>
+                          {fileHeaders.map((h) => (
+                            <th
+                              key={h}
+                              className={`px-2 py-1 text-left font-medium whitespace-nowrap ${
+                                h === phoneColumn ? 'text-blue-700 bg-blue-50' : 'text-gray-500'
+                              }`}
+                            >
+                              {h}
+                              {h === phoneColumn && <span className="ml-1 text-[10px]">📱</span>}
+                            </th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {fileAllData.slice(0, 5).map((row, i) => (
+                          <tr key={i} className="border-t border-gray-100">
+                            {fileHeaders.map((h) => (
+                              <td
+                                key={h}
+                                className="px-2 py-1 text-gray-700 truncate max-w-[140px] whitespace-nowrap"
+                              >
+                                {row[h] != null ? String(row[h]) : ''}
+                              </td>
+                            ))}
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* 푸터 */}
+            <div className="px-6 py-3 border-t border-gray-200 bg-gray-50 flex justify-end gap-2 shrink-0">
+              <button
+                type="button"
+                onClick={() => setShowMapping(false)}
+                className="px-5 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg text-sm"
+              >
+                취소
+              </button>
+              <button
+                type="button"
+                onClick={applyMapping}
+                disabled={!phoneColumn}
+                className="px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                매핑 적용
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

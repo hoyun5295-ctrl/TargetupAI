@@ -57,7 +57,7 @@ export interface TemplateInspectionNotifyContext {
  * 알림톡 템플릿 검수 결과 알림 메시지 빌더.
  *
  * 배경 (D135+):
- *   이전에는 휴머스온 IMC `createAlarmUser` API로 검수 알림 수신자를 등록하면
+ *   이전에는 IMC `createAlarmUser` API로 검수 알림 수신자를 등록하면
  *   IMC가 승인/반려 시점에 자동으로 카톡 알림을 보내는 구조로 설계되어 있었으나,
  *   해당 API가 인비토 API 키에 활성화되어 있지 않아 4032 에러로 전면 거부됨.
  *

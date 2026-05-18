@@ -1,5 +1,5 @@
 /**
- * CT-18: 휴머스온 IMC 웹훅 수신 처리 컨트롤타워
+ * CT-18: IMC 웹훅 수신 처리 컨트롤타워
  *
  * ALIMTALK-DESIGN.md §5-4, §8 준수.
  *
@@ -29,7 +29,7 @@ export interface WebhookEventPayload {
   reportType: string; // SM/LM/MM/AT/FT/RCS
   reportCode: string;
   resend: boolean;
-  receivedAt: string; // 예: "2026-03-05 19:49:43" (휴머스온 표기)
+  receivedAt: string; // 예: "2026-03-05 19:49:43" (IMC 표기)
   netInfo?: string;
 }
 
@@ -56,7 +56,7 @@ export interface WebhookProcessResult {
 
 /**
  * HMAC-SHA256 서명 검증.
- * 휴머스온이 헤더로 전달한 signature(hex)와 rawBody + secret을 비교.
+ * IMC가 헤더로 전달한 signature(hex)와 rawBody + secret을 비교.
  * 타이밍 공격 방어를 위해 `crypto.timingSafeEqual` 사용.
  *
  * env `IMC_WEBHOOK_HMAC_SECRET` 미설정 시 `false` 반환 (Phase 0 대응).
@@ -148,8 +148,8 @@ export function parseMessageKey(messageKey: string): {
 
 /**
  * receivedAt 문자열을 timestamptz로 안전 변환.
- * 휴머스온이 `"YYYY-MM-DD HH:mm:ss"` 형식(타임존 미포함)으로 보내면 **KST로 해석**
- * (휴머스온 서버 시간대 기준).
+ * IMC가 `"YYYY-MM-DD HH:mm:ss"` 형식(타임존 미포함)으로 보내면 **KST로 해석**
+ * (IMC 서버 시간대 기준).
  */
 function parseReceivedAt(s: string | undefined): string | null {
   if (!s) return null;

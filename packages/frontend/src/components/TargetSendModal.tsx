@@ -794,20 +794,16 @@ export default function TargetSendModal({
                 </span>
               </div>
               <div className="flex items-center gap-2">
-                {/* ★ D162-4 (2026-05-15) 2차: Harold님 명시 — 수신번호 검색 옆 알림톡 발송 진입 버튼.
-                    카카오 노란색(#FEE500) 임팩트. 타겟 추출된 수신자 그대로 알림톡 모달로 전달. */}
+                {/* ★ D162-4 (2026-05-15) 4차: 알림톡 버튼 톤 다운 (창닫기와 괴리 없게).
+                    추출된 수신자(targetRecipients) 그대로 알림톡 모달로 인계. */}
                 {onAlimtalkOpen && (
                   <button
                     type="button"
                     onClick={onAlimtalkOpen}
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-bold transition shadow-sm hover:shadow"
-                    style={{
-                      backgroundColor: '#FEE500',
-                      color: '#3C1E1E',
-                    }}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition border border-amber-200 bg-amber-50 hover:bg-amber-100 text-amber-700"
                     title="추출된 수신자에게 알림톡 발송"
                   >
-                    <Sparkles size={14} strokeWidth={2} />
+                    <Sparkles size={14} strokeWidth={1.75} />
                     <span>알림톡 발송</span>
                   </button>
                 )}

@@ -1,5 +1,5 @@
 /**
- * /api/alimtalk/* — 휴머스온 IMC 연동 라우트
+ * /api/alimtalk/* — IMC 연동 라우트
  *
  * ALIMTALK-DESIGN.md §5-5 기준. 총 33개 엔드포인트.
  *
@@ -93,7 +93,7 @@ function requireCompany(req: Request, res: Response): string | null {
 }
 
 // ════════════════════════════════════════════════════════════
-// 1) 공개: POST /webhook — 휴머스온 리포트 수신
+// 1) 공개: POST /webhook — IMC 리포트 수신
 // ════════════════════════════════════════════════════════════
 // raw body parser가 HMAC 검증용으로 필요.
 
@@ -186,7 +186,7 @@ router.post(
         companyId: targetCompanyIdInBody,
         profileName,
       } = req.body || {};
-      // D131: customSenderKey 파라미터 폐지. 휴머스온 IMC가 senderKey를 API로 자동 발급.
+      // D131: customSenderKey 파라미터 폐지. IMC가 senderKey를 API로 자동 발급.
 
       if (!token || !yellowId || !phoneNumber || !categoryCode) {
         return res.status(400).json({
@@ -663,7 +663,7 @@ router.post(
         });
       }
       const senderKey = prof.rows[0].profile_key;
-      // D131: IMC 실제 제한은 templateKey **최대 20자** (공식 문서 오표기 128자 → 휴머스온 확인됨 2026-04-21).
+      // D131: IMC 실제 제한은 templateKey **최대 20자** (공식 문서 오표기 128자 → IMC 측 확인됨 2026-04-21).
       //       과거 생성 규칙(`TPL_${companyId12}_${timestamp}` = 29자)이 IMC 6005 유발.
       //       `T{base36 timestamp(~9)}{base36 random(10)}` = 20자 고정, 충돌 가능성 사실상 0.
       const rawKey = typeof body.templateKey === 'string' ? body.templateKey.trim() : '';
@@ -817,7 +817,7 @@ router.post(
 
       // ─────────────────────────────────────────
       // ★ D139 #4 (0425): 등록과 검수요청 분리 — 자동 검수요청 제거.
-      //    이전(D135 B9)엔 등록 성공 직후 자동 검수요청 호출 → 휴머스온 스펙·직원 요청과 부합 안 함.
+      //    이전(D135 B9)엔 등록 성공 직후 자동 검수요청 호출 → IMC 스펙·직원 요청과 부합 안 함.
       //    이제 status='DRAFT' 유지. 검수요청은 별도 엔드포인트 POST /templates/:code/inspect (기존 존재) 호출.
       //    프론트는 목록에서 '검수요청' 액션 버튼으로 명시 호출 (D139 #4-1).
       // ─────────────────────────────────────────

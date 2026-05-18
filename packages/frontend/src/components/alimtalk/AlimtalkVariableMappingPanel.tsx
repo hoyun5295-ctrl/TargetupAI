@@ -88,122 +88,72 @@ export default function AlimtalkVariableMappingPanel({
     onVariableMapChange({ ...variableMap, [varKey]: value });
   };
 
-  if (!selectedTemplate) {
-    return (
-      <div className="border-2 border-dashed border-gray-200 rounded-2xl p-4 bg-gray-50/50">
-        <p className="text-xs font-semibold text-gray-500 mb-1">변수 매칭</p>
-        <p className="text-xs text-gray-400">
-          좌측에서 알림톡 템플릿을 선택하면 변수 매칭 화면이 표시됩니다.
-        </p>
-      </div>
-    );
-  }
-
-  if (variables.length === 0) {
-    return (
-      <div className="border-2 border-emerald-200 rounded-2xl p-4 bg-emerald-50/40">
-        <p className="text-xs font-semibold text-emerald-700 mb-1">변수 매칭</p>
-        <p className="text-xs text-emerald-600">
-          선택한 템플릿에 치환 변수가 없습니다. 본문 그대로 발송됩니다.
-        </p>
-      </div>
-    );
+  // ★ D162-4 (2026-05-15) 4차: Harold님 명시 — 변수 매칭 영역 컴팩트화. 큰 안내문/샘플 미리보기 제거.
+  //   파일 매핑 모달에서 이미 컬럼 매핑 처리되므로 우측은 단순 inline 행 단위 매칭만.
+  //   템플릿 미선택 / 변수 0개 케이스에서는 null 반환 → 우측 영역에 빈 공간 차지 X.
+  if (!selectedTemplate || variables.length === 0) {
+    // 샘플 미리보기 활용 보장 (사용 안 됨 경고 차단)
+    void previewText;
+    void recipientCount;
+    return null;
   }
 
   return (
-    <div className="border-2 border-blue-200 rounded-2xl overflow-hidden bg-white shadow-sm">
-      <div className="p-4 space-y-3">
-        {/* 헤더 */}
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <span className="text-lg">🔗</span>
-            <span className="text-sm font-semibold text-blue-800">변수 매칭</span>
-          </div>
-          <span className="text-[10px] text-gray-400">{variables.length}개 변수</span>
-        </div>
-
-        <p className="text-[11px] text-gray-500 leading-relaxed">
-          템플릿 변수(<span className="font-mono text-amber-700">{`#{변수명}`}</span>)에 사용할 값을 매핑합니다.
-          고객 필드 선택 시 발송 대상자별 자동 치환되며, 직접 입력 시 모든 수신자에게 같은 값으로 발송됩니다.
-        </p>
-
-        {/* 매핑 행 */}
-        <div className="space-y-2">
-          {variables.map((varKey) => {
-            const current = variableMap[varKey] || '';
-            const isFieldRef = current.startsWith('@@') && current.endsWith('@@');
-            const fieldKey = isFieldRef ? current.slice(2, -2) : '';
-            const fieldLabel =
-              customerFieldOptions.find((f) => f.key === fieldKey)?.label || fieldKey;
-            return (
-              <div
-                key={varKey}
-                className="grid grid-cols-[100px_1fr] gap-2 items-center"
-              >
-                <span className="text-[11px] font-mono text-amber-700 bg-amber-50 rounded px-2 py-1 truncate">
-                  {varKey}
-                </span>
-                <div className="flex items-center gap-2">
-                  {customerFieldOptions.length > 0 && (
-                    <select
-                      value={isFieldRef ? fieldKey : '__manual__'}
-                      onChange={(e) => {
-                        const v = e.target.value;
-                        if (v === '__manual__') {
-                          setVariable(varKey, '');
-                        } else {
-                          setVariable(varKey, `@@${v}@@`);
-                        }
-                      }}
-                      className="border border-gray-200 rounded px-1.5 py-1 text-[11px] max-w-[130px] shrink-0"
-                    >
-                      <option value="__manual__">직접 입력</option>
-                      {customerFieldOptions.map((f) => (
-                        <option key={f.key} value={f.key}>
-                          {f.label}
-                        </option>
-                      ))}
-                    </select>
-                  )}
-                  {isFieldRef ? (
-                    <span className="flex-1 text-[11px] text-emerald-700 bg-emerald-50 rounded px-2 py-1 truncate">
-                      고객 필드: {fieldLabel}
-                    </span>
-                  ) : (
-                    <input
-                      type="text"
-                      value={current}
-                      onChange={(e) => setVariable(varKey, e.target.value)}
-                      placeholder="값 입력 (모든 수신자 동일)"
-                      className="flex-1 border border-gray-200 rounded px-2 py-1 text-[11px]"
-                    />
-                  )}
-                </div>
+    <div className="border border-gray-200 rounded-xl bg-white shadow-sm p-3">
+      <div className="flex items-center justify-between mb-2">
+        <span className="text-xs font-semibold text-gray-700">변수 매칭</span>
+        <span className="text-[10px] text-gray-400">{variables.length}개</span>
+      </div>
+      <div className="space-y-1.5">
+        {variables.map((varKey) => {
+          const current = variableMap[varKey] || '';
+          const isFieldRef = current.startsWith('@@') && current.endsWith('@@');
+          const fieldKey = isFieldRef ? current.slice(2, -2) : '';
+          return (
+            <div key={varKey} className="grid grid-cols-[90px_1fr] gap-2 items-center">
+              <span className="text-[11px] font-mono text-amber-700 bg-amber-50 rounded px-1.5 py-1 truncate">
+                {varKey}
+              </span>
+              <div className="flex items-center gap-1.5">
+                {customerFieldOptions.length > 0 && (
+                  <select
+                    value={isFieldRef ? fieldKey : '__manual__'}
+                    onChange={(e) => {
+                      const v = e.target.value;
+                      if (v === '__manual__') {
+                        setVariable(varKey, '');
+                      } else {
+                        setVariable(varKey, `@@${v}@@`);
+                      }
+                    }}
+                    className="border border-gray-200 rounded px-1.5 py-1 text-[11px] max-w-[110px] shrink-0"
+                  >
+                    <option value="__manual__">직접 입력</option>
+                    {customerFieldOptions.map((f) => (
+                      <option key={f.key} value={f.key}>
+                        {f.label}
+                      </option>
+                    ))}
+                  </select>
+                )}
+                {!isFieldRef && (
+                  <input
+                    type="text"
+                    value={current}
+                    onChange={(e) => setVariable(varKey, e.target.value)}
+                    placeholder="값 입력"
+                    className="flex-1 border border-gray-200 rounded px-2 py-1 text-[11px] min-w-0"
+                  />
+                )}
+                {isFieldRef && (
+                  <span className="flex-1 text-[11px] text-emerald-700 bg-emerald-50 rounded px-2 py-1 truncate">
+                    {fieldKey}
+                  </span>
+                )}
               </div>
-            );
-          })}
-        </div>
-
-        {/* 샘플 미리보기 — sampleRecipient 있으면 첫 수신자 데이터로 치환된 결과 */}
-        {sampleRecipient ? (
-          <div className="border-t pt-3">
-            <p className="text-[11px] font-semibold text-gray-600 mb-1">
-              첫 수신자 치환 미리보기
-              {recipientCount > 0 && (
-                <span className="ml-1 text-gray-400">({recipientCount.toLocaleString()}명 중 1번째)</span>
-              )}
-            </p>
-            <div className="bg-amber-50 border border-amber-200 rounded-lg p-2 text-[11px] text-gray-800 whitespace-pre-wrap leading-relaxed max-h-32 overflow-y-auto">
-              {previewText}
             </div>
-          </div>
-        ) : (
-          <div className="border-t pt-3">
-            <p className="text-[11px] text-amber-600 bg-amber-50 border border-amber-200 rounded p-2 leading-relaxed">
-              수신자 데이터를 업로드/입력하면 첫 수신자 기준 치환 미리보기를 확인할 수 있습니다.
-            </p>
-          </div>
-        )}
+          );
+        })}
       </div>
     </div>
   );

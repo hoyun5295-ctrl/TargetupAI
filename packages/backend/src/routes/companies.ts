@@ -1612,7 +1612,7 @@ router.post('/inquiry', async (req: Request, res: Response) => {
 
 // ===== 카카오 발신 프로필 관리 =====
 /**
- * @deprecated D130+ 휴머스온 IMC 연동은 `/api/alimtalk/*` 라우트로 이관되었습니다.
+ * @deprecated D130+ IMC 연동은 `/api/alimtalk/*` 라우트로 이관되었습니다.
  *             (utils/alimtalk-api.ts CT-16 + routes/alimtalk.ts)
  *             본 `/api/companies/kakao-profiles`, `/api/companies/kakao-templates`는
  *             레거시 로컬 DB CRUD 호환을 위해 유지되며, 신규 화면은 `/api/alimtalk/*`를 사용해야 합니다.

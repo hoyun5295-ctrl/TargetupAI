@@ -96,7 +96,7 @@ function getToken() {
 }
 
 // ★ D152-4 Harold님 지시 (2026-05-12): IMC 6단계 정합 (kakao_alimtalk.md 매뉴얼 기반).
-//   IMC 정의: REG → REQ → HREJ(휴머스온 반려) | KREQ(카카오 검수요청) → KREJ(카카오 반려) | APR
+//   IMC 정의: REG → REQ → HREJ(내부 반려) | KREQ(카카오 검수요청) → KREJ(카카오 반려) | APR
 //   기존 5단계(DRAFT/REQUESTED/REVIEWING/APPROVED/REJECTED) → 6단계 완전 정합.
 //   - REVIEWING/REV 폐기 (IMC 정의에 없음 — REQ 다음은 바로 KREQ)
 //   - HREJ(내부 반려) / KREQ(카카오 검수요청) / KREJ(카카오 반려) 신규 추가
@@ -232,10 +232,10 @@ export default function AlimtalkManagementSection() {
   //   레거시 REJECTED/REJ는 "카카오 반려"(KREJ) 탭에 흡수 — 운영 데이터 손실 없이 6단계 UI 정합.
   const FILTER_MATCH: Record<string, string[]> = {
     DRAFT:     ['DRAFT', 'REG'],
-    REQUESTED: ['REQUESTED', 'REQ', 'REVIEWING', 'REV'],  // 한줄로 → 휴머스온 검수 중
-    KREQ:      ['KREQ'],                                   // 카카오 검수 중 (휴머스온 통과)
+    REQUESTED: ['REQUESTED', 'REQ', 'REVIEWING', 'REV'],  // 내부 검수 중
+    KREQ:      ['KREQ'],                                   // 카카오 검수 중 (내부 검수 통과 후)
     APPROVED:  ['APPROVED', 'APR'],
-    HREJ:      ['HREJ'],                                   // 휴머스온 내부 반려
+    HREJ:      ['HREJ'],                                   // 내부 반려
     KREJ:      ['KREJ', 'REJECTED', 'REJ'],                // 카카오 반려 (레거시 REJ 흡수)
   };
 
@@ -248,7 +248,7 @@ export default function AlimtalkManagementSection() {
   // ★ D142+ F (2026-04-29) PDF 0428 알림톡 #3: 검수요청 시 코멘트 + 증빙자료 입력 모달.
   //   "코멘트 입력칸 + 코멘트 증빙자료 추가" — 직원 요구. backend는 이미 /inspect-with-file 보유.
   // ★ D152-4 (2026-05-12): IMC 매뉴얼 정합 — 검수요청 가능 = REG/HREJ/KREJ + 레거시 DRAFT/REJECTED/REJ.
-  //   "검수요청은 검수상태가 등록(REG), 휴머스온 반려(HREJ), 카카오 반려(KREJ) 상태에서만 가능합니다."
+  //   "검수요청은 검수상태가 등록(REG), 내부 반려(HREJ), 카카오 반려(KREJ) 상태에서만 가능합니다."
   const inspect = (t: Template) => {
     if (!['DRAFT', 'REG', 'REJECTED', 'REJ', 'HREJ', 'KREJ'].includes(t.status)) {
       setToast('등록/반려 상태에서만 검수요청 가능');
@@ -420,7 +420,7 @@ export default function AlimtalkManagementSection() {
               </thead>
               <tbody>
                 {profiles.map((p) => {
-                  // ★ D135+: "IMC 상태" 컬럼 삭제. 상위 사업자(휴머스온) 승인 여부를 고객사가 볼 필요 없음.
+                  // ★ D135+: "IMC 상태" 컬럼 삭제. 상위 사업자 승인 여부를 고객사가 볼 필요 없음.
                   //   발신프로필 상태는 내부 polling(syncSenderStatusJob)으로만 추적하고 UI 미노출.
                   const ap = APPROVAL_LABELS[p.approval_status || 'PENDING_APPROVAL'] || {
                     label: p.approval_status || '-',
@@ -573,7 +573,7 @@ export default function AlimtalkManagementSection() {
                 // ★ D139 #4-1 (0425) + D152-4 (2026-05-12): 상태별 액션 버튼 노출 분기.
                 //   IMC 6단계 정합 (kakao_alimtalk.md 매뉴얼):
                 //     DRAFT/REG(등록): 수정 / 검수요청 / 삭제 / 상세보기
-                //     REQUESTED/REQ/REVIEWING/REV(휴머스온 검수 중): 검수요청 취소 / 상세보기
+                //     REQUESTED/REQ/REVIEWING/REV(내부 검수 중): 검수요청 취소 / 상세보기
                 //     KREQ(카카오 검수 중): 상세보기만 (카카오 측 검수 진행 — 취소/수정 불가)
                 //     HREJ(내부 반려) / KREJ(카카오 반려) / REJECTED/REJ: 재검수 / 상세보기
                 //     APPROVED/APR(승인): 상세보기만
@@ -823,7 +823,7 @@ export default function AlimtalkManagementSection() {
                 {rejectReasonTarget.rejectReason}
               </div>
               <p className="mt-3 text-[11px] text-gray-500 leading-relaxed">
-                ℹ 본 사유는 카카오/휴머스온 검수팀이 전달한 내용입니다. 본문 수정 후 '재검수' 버튼으로 다시 검수 요청할 수 있습니다.
+                ℹ 본 사유는 카카오 검수팀이 전달한 내용입니다. 본문 수정 후 '재검수' 버튼으로 다시 검수 요청할 수 있습니다.
               </p>
             </div>
 
