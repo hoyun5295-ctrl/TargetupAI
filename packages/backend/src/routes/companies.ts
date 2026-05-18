@@ -251,7 +251,9 @@ router.get('/plan-request/status', async (req: Request, res: Response) => {
 });
 
 // PUT /api/companies/plan-request/:id/confirm - 사용자 결과 확인 처리
-router.put('/plan-request/:id/confirm', async (req: Request, res: Response) => {
+// ★ D162-4 (2026-05-15) PDF 0515 알림톡 #3 root cause fix: `/:id` 패턴 UUID regex 제약.
+//   같은 파일 뒤에 정의된 명시 path 라우트(/kakao-templates 등)가 `/:id`에 잡혀 매칭 우선이 슈퍼관리자 차단으로 가는 사고 방지.
+router.put('/plan-request/:id([0-9a-f-]{36})/confirm', async (req: Request, res: Response) => {
   try {
     const companyId = (req as any).user?.companyId;
     const { id } = req.params;
@@ -1208,7 +1210,12 @@ router.get('/', requireSuperAdmin, async (req: Request, res: Response) => {
 });
 
 // GET /api/companies/:id - 고객사 상세
-router.get('/:id', requireSuperAdmin, async (req: Request, res: Response) => {
+// ★ D162-4 (2026-05-15) PDF 0515 알림톡 #3 root cause fix: `/:id` UUID regex 제약.
+//   기존 `/:id`가 1-segment 명시 path(`/kakao-profiles`, `/kakao-templates`, `/rcs-templates` 등)를 잡아채
+//   requireSuperAdmin이 일반 사용자 403 차단 → Dashboard.tsx loadKakaoTemplates fetch 결과 빈 배열 →
+//   알림톡 발송 화면 "승인된 템플릿이 없습니다" 사고 1년+ 영구 발생.
+//   UUID regex `[0-9a-f-]{36}` 제약으로 명시 path 라우트 정확 매칭 보장.
+router.get('/:id([0-9a-f-]{36})', requireSuperAdmin, async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
 
@@ -1316,7 +1323,8 @@ router.post('/', requireSuperAdmin, async (req: Request, res: Response) => {
  * POST /api/companies/:id/grant-trial
  * body: { days?: number = 30 }
  */
-router.post('/:id/grant-trial', requireSuperAdmin, async (req: Request, res: Response) => {
+// ★ D162-4 (2026-05-15): `/:id` UUID regex 제약 (일관성)
+router.post('/:id([0-9a-f-]{36})/grant-trial', requireSuperAdmin, async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     const days = Math.max(1, Math.min(Number((req.body as any)?.days) || 30, 365));
@@ -1373,7 +1381,8 @@ router.post('/:id/grant-trial', requireSuperAdmin, async (req: Request, res: Res
  *   - 조건: plan_code='TRIAL' 인 경우만 (subscription_status 값에 무관 — 'active'/'trial' 둘 다 허용)
  *     ※ 과거 subscription_status='trial' 조건만으로는 admin.ts가 'active'로 덮어쓴 케이스에서 취소 불가했음.
  */
-router.post('/:id/revoke-trial', requireSuperAdmin, async (req: Request, res: Response) => {
+// ★ D162-4 (2026-05-15): `/:id` UUID regex 제약 (일관성)
+router.post('/:id([0-9a-f-]{36})/revoke-trial', requireSuperAdmin, async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
 
@@ -1415,7 +1424,8 @@ router.post('/:id/revoke-trial', requireSuperAdmin, async (req: Request, res: Re
 });
 
 // PUT /api/companies/:id - 고객사 수정 (전체 설정 포함)
-router.put('/:id', requireSuperAdmin, async (req: Request, res: Response) => {
+// ★ D162-4 (2026-05-15): `/:id` UUID regex 제약 — 미래에 1-segment 명시 PUT 라우트 추가 시 충돌 방지
+router.put('/:id([0-9a-f-]{36})', requireSuperAdmin, async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     const {

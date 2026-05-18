@@ -81,6 +81,10 @@ interface Props {
   onSuccess: () => void;
   /** ★ D139 #4-1 (0425): 상세보기 모달용 — 모든 필드 disabled + 저장 버튼 숨김 */
   readOnly?: boolean;
+  /** ★ D162-4 (2026-05-15) PDF 0515 알림톡 #1: 반려 상태 재검수 진입 시 헤더 아래 빨간 박스로 반려사유 노출 */
+  rejectReason?: string | null;
+  /** ★ D162-4 (2026-05-15) PDF 0515 알림톡 #1: 저장(PUT) 완료 후 자동 POST /inspect 호출 (반려 → 본문 수정 → 재검수 요청 단일 플로우) */
+  autoInspectAfterSave?: boolean;
 }
 
 function getToken() {
@@ -130,6 +134,8 @@ export default function AlimtalkTemplateFormV2({
   onClose,
   onSuccess,
   readOnly = false,
+  rejectReason = null,
+  autoInspectAfterSave = false,
 }: Props) {
   const isEdit = !!template?.id;
   const [form, setForm] = useState<TemplateFormData>(() => initialForm(template));
@@ -371,6 +377,43 @@ export default function AlimtalkTemplateFormV2({
         }
       }
 
+      // ★ D162-4 (2026-05-15) PDF 0515 알림톡 #1: 반려 상태 재검수 진입 시 저장 후 자동 검수요청.
+      //   AlimtalkManagementSection에서 HREJ/KREJ 등 반려 상태 "재검수" 버튼 클릭 시 풀 폼 진입 + 본문 수정 +
+      //   저장(PUT) → 여기서 자동으로 POST /inspect 호출 → 재검수 요청 완료. 기존 작은 검수요청 모달(inspectionTarget)에
+      //   본문 수정 동선이 없던 사고 영구 종결.
+      if (autoInspectAfterSave && savedTemplateCode) {
+        try {
+          const inspectRes = await fetch(
+            `/api/alimtalk/templates/${encodeURIComponent(savedTemplateCode)}/inspect`,
+            {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                Authorization: `Bearer ${getToken()}`,
+              },
+              body: JSON.stringify({ comment: form.inspectionComment || '' }),
+            },
+          );
+          const inspectData = await inspectRes.json().catch(() => ({}));
+          if (!inspectRes.ok || !inspectData.success) {
+            setToast({
+              type: 'error',
+              message: `수정은 완료됐지만 재검수 요청에 실패했습니다: ${inspectData?.error || inspectRes.status}`,
+            });
+            setSaving(false);
+            return;
+          }
+        } catch (inspectErr: any) {
+          console.error('[AlimtalkTemplateFormV2] auto inspect 실패', inspectErr);
+          setToast({
+            type: 'error',
+            message: '수정은 완료됐지만 재검수 요청 중 오류가 발생했습니다',
+          });
+          setSaving(false);
+          return;
+        }
+      }
+
       // ★ D139 #4 (0425): 자동 검수요청 분기 제거 (등록과 검수요청 분리).
       //   템플릿은 DRAFT 상태로 저장 → 목록에서 '검수요청' 버튼으로 명시 액션.
       // ★ D142+ A1+A2 (2026-04-29): 성공 시 setSaving(true) 유지 → 모달 unmount까지 등록 버튼 비활성화.
@@ -415,11 +458,29 @@ export default function AlimtalkTemplateFormV2({
           </button>
         </div>
 
+        {/* ★ D162-4 (2026-05-15) PDF 0515 알림톡 #1: 반려 상태 재검수 진입 시 헤더 아래 빨간 박스로 반려사유 노출.
+            본문 수정 + 저장하면 autoInspectAfterSave 분기로 자동 재검수 요청 전송. */}
+        {rejectReason && (
+          <div className="px-6 py-3 bg-red-50 border-b border-red-200">
+            <p className="text-xs font-semibold text-red-700 mb-1">
+              반려 사유 (본문 수정 후 저장하면 자동으로 재검수 요청됩니다)
+            </p>
+            <p className="text-sm text-red-700 whitespace-pre-wrap leading-relaxed">
+              {rejectReason}
+            </p>
+          </div>
+        )}
+
         {/* Body: 2-col (폼 / 미리보기).
             ★ D153 (5/13): fieldset 완전 제거 — Chrome/Safari fieldset+grid+contents 호환성 모두 사고.
               D151+ fieldset disabled 의도(readOnly 시 입력 차단)는 wrapper div의 pointer-events-none + opacity로 대체.
-              Footer 버튼은 fieldset 외부였어서 readOnly 영향 X 정합. */}
-        <div className={`grid grid-cols-1 md:grid-cols-[1fr_360px] flex-1 overflow-hidden border-0 p-0 m-0 min-w-0 min-h-0 ${readOnly ? 'pointer-events-none opacity-60' : ''}`}>
+              Footer 버튼은 fieldset 외부였어서 readOnly 영향 X 정합.
+            ★ D162-4 (2026-05-15) PDF 0515 알림톡 #2 root cause fix:
+              기존 wrapper에 `pointer-events-none` 박혀있어 readOnly 상세보기 모달에서 스크롤 휠/터치도 차단 →
+              본문 영역 아래로 내릴 수 없는 사고. wrapper에서 pointer-events-none 제거 +
+              자식 input/select/textarea/button/label 셀렉터로만 pointer-events-none 적용 →
+              스크롤(overflow-y-auto)은 살아있고 입력만 차단되는 정합. */}
+        <div className={`grid grid-cols-1 md:grid-cols-[1fr_360px] flex-1 overflow-hidden border-0 p-0 m-0 min-w-0 min-h-0 ${readOnly ? 'opacity-60 [&_input]:pointer-events-none [&_select]:pointer-events-none [&_textarea]:pointer-events-none [&_button]:pointer-events-none [&_label]:pointer-events-none' : ''}`}>
           {/* Left: Form */}
           <div className="px-6 py-4 overflow-y-auto space-y-4 border-r border-gray-100 min-h-0">
             {/* 발신 프로필 */}
@@ -894,8 +955,13 @@ export default function AlimtalkTemplateFormV2({
               className="px-5 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-sm font-medium disabled:opacity-50"
             >
               {/* ★ D139 #4 (0425): '등록 + 검수요청' → '등록'으로 분리.
-                  검수요청은 목록의 '검수요청' 액션 버튼(#4-1)으로 명시 호출. */}
-              {saving ? '저장 중...' : isEdit ? '수정 저장' : '등록'}
+                  검수요청은 목록의 '검수요청' 액션 버튼(#4-1)으로 명시 호출.
+                  ★ D162-4 (2026-05-15): autoInspectAfterSave=true (반려 상태 재검수 진입)면 라벨 '수정 + 재검수 요청'으로 명시. */}
+              {saving
+                ? (autoInspectAfterSave ? '재검수 요청 중...' : '저장 중...')
+                : isEdit
+                  ? (autoInspectAfterSave ? '수정 + 재검수 요청' : '수정 저장')
+                  : '등록'}
             </button>
           )}
         </div>

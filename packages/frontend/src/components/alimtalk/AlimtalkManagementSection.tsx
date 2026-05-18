@@ -147,6 +147,12 @@ export default function AlimtalkManagementSection() {
   const [filter, setFilter] = useState<string>('ALL');
 
   const [editing, setEditing] = useState<Partial<TemplateFormData> | null | undefined>(undefined);
+  // ★ D162-4 (2026-05-15) PDF 0515 알림톡 #1: 반려 상태 재검수 진입 시 메타 정보(반려사유 + 자동 검수요청).
+  //   editing state와 분리해 type 영향 최소화. 모달 close/onSuccess 시 editingMeta도 null로 리셋.
+  const [editingMeta, setEditingMeta] = useState<{
+    rejectReason: string | null;
+    autoInspect: boolean;
+  } | null>(null);
   // ★ D139 #4-1 (0425): 상세보기(read-only) 전용 state — 수정 모달과 분리.
   //   동일 폼 컴포넌트 AlimtalkTemplateFormV2를 readOnly prop으로 재사용.
   const [viewing, setViewing] = useState<Partial<TemplateFormData> | null>(null);
@@ -572,7 +578,9 @@ export default function AlimtalkManagementSection() {
                   <tr key={t.id} className="border-t border-gray-100 hover:bg-gray-50">
                     <td className="px-4 py-2">
                       <div className="font-medium text-gray-900">{t.template_name}</div>
-                      {(t.status === 'REJECTED' || t.status === 'REJ') &&
+                      {/* ★ D162-4 (2026-05-15) PDF 0515 알림톡 #1: HREJ(휴머스온 내부 반려) + KREJ(카카오 반려)도 사유 표시.
+                          기존 REJECTED/REJ만 매칭 → IMC 6단계 정합 시 HREJ/KREJ row의 사유가 화면에 노출되지 않던 사고. */}
+                      {(t.status === 'REJECTED' || t.status === 'REJ' || t.status === 'HREJ' || t.status === 'KREJ') &&
                         t.reject_reason && (
                           <div className="text-[11px] text-red-500 mt-0.5">
                             사유: {t.reject_reason}
@@ -655,11 +663,20 @@ export default function AlimtalkManagementSection() {
                           검수요청 취소
                         </button>
                       )}
-                      {/* 재검수: REJECTED 전용 (inspect 함수 그대로 재사용) */}
+                      {/* ★ D162-4 (2026-05-15) PDF 0515 알림톡 #1: 재검수 버튼 = 풀 폼 진입 + 반려사유 노출 + 저장 후 자동 검수요청.
+                          기존엔 inspect(t) → 작은 검수요청 모달(코멘트+증빙자료만)로 본문 수정 동선이 없던 사고.
+                          이제 setEditing + setEditingMeta로 풀 폼(AlimtalkTemplateFormV2 editing mode)에 들어가 본문 수정 후
+                          저장하면 autoInspectAfterSave 분기로 자동 POST /inspect 호출 → 재검수 요청 완료. */}
                       {isRej && (
                         <button
                           type="button"
-                          onClick={() => inspect(t)}
+                          onClick={() => {
+                            setEditing(toFormData(t));
+                            setEditingMeta({
+                              rejectReason: t.reject_reason,
+                              autoInspect: true,
+                            });
+                          }}
                           className="text-[11px] px-2 py-0.5 bg-amber-50 hover:bg-amber-100 text-amber-700 rounded"
                         >
                           재검수
@@ -705,10 +722,17 @@ export default function AlimtalkManagementSection() {
           template={editing}
           profiles={profiles}
           categories={categories}
-          onClose={() => setEditing(undefined)}
-          onSuccess={() => {
+          rejectReason={editingMeta?.rejectReason ?? null}
+          autoInspectAfterSave={editingMeta?.autoInspect ?? false}
+          onClose={() => {
             setEditing(undefined);
-            setToast('저장 완료');
+            setEditingMeta(null);
+          }}
+          onSuccess={() => {
+            const wasAutoInspect = editingMeta?.autoInspect;
+            setEditing(undefined);
+            setEditingMeta(null);
+            setToast(wasAutoInspect ? '수정 + 재검수 요청 완료' : '저장 완료');
             load();
           }}
         />
