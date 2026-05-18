@@ -112,4 +112,14 @@ export const requireCompanyAdmin = (req: Request, res: Response, next: NextFunct
   next();
 };
 
-export default { authenticate, requireSuperAdmin, requireCompanyAdmin, generateToken };
+// ★ D162-4 (2026-05-15) PDF 0515 알림톡 #3 root cause fix:
+//   `/:id` 라우트가 같은 파일 뒤의 명시 path 라우트(`/kakao-templates` 등)를 가로채는 사고 방지.
+//   req.params.id가 UUID 형식이 아니면 next('route')로 다음 라우트 매칭으로 진행 → 명시 path 라우트 정확 매칭 보장.
+//   path-to-regexp regex 패턴 (`/:id([0-9a-f-]{36})`)이 Express 4/5 path-to-regexp 버전 차이로 의도대로 작동 안 할 우려 100% 제거.
+//   Express 버전 무관 작동 보장.
+export const requireUuidId = (req: Request, _res: Response, next: NextFunction) => {
+  if (!/^[0-9a-f-]{36}$/i.test(req.params.id || '')) return next('route');
+  next();
+};
+
+export default { authenticate, requireSuperAdmin, requireCompanyAdmin, requireUuidId, generateToken };
