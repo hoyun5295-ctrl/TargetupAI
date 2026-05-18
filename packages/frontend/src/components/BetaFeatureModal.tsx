@@ -102,26 +102,27 @@ export default function BetaFeatureModal({ show, onClose }: BetaFeatureModalProp
 
           {/* 헤더 영역 */}
           <div className="mb-8">
-            <div className="flex items-center gap-3 mb-3">
+            <div className="flex items-center gap-3 mb-4">
               <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-amber-300 to-fuchsia-400 flex items-center justify-center shadow-lg shadow-fuchsia-500/30">
                 <Sparkles className="w-6 h-6 text-indigo-950" />
               </div>
-              <span className="text-[10px] font-bold tracking-wider px-2.5 py-1 rounded-full bg-gradient-to-r from-amber-400 to-fuchsia-400 text-indigo-950">
-                BETA · COMING SOON
+              <span className="text-[10px] font-bold tracking-[0.18em] px-2.5 py-1 rounded-full bg-gradient-to-r from-amber-400 to-fuchsia-400 text-indigo-950">
+                ENTERPRISE BETA
               </span>
             </div>
+            <p className="text-xs font-semibold tracking-[0.3em] text-white/40 mb-2 uppercase">AI Marketing Operations</p>
             <h2 className="text-3xl md:text-4xl font-bold mb-3 leading-tight bg-gradient-to-r from-amber-200 via-fuchsia-200 to-indigo-200 bg-clip-text text-transparent">
-              곧 만나실 어마어마한 기능들
+              한 줄로 작동하는<br className="hidden md:block" />차세대 마케팅 오퍼레이션
             </h2>
-            <p className="text-white/70 text-sm md:text-base mb-4">
-              한 줄 입력만으로 고객 타겟팅 · 메시지 · 채널 · 여정 · 성과 분석까지 AI가 자동 실행하는 차세대 마케팅 자동화 엔진.
+            <p className="text-white/70 text-sm md:text-base mb-5 leading-relaxed">
+              타겟팅 · 메시지 · 채널 · 시점 · 여정 · 성과 분석까지 AI가 자동 실행하는 엔터프라이즈 마케팅 자동운전 엔진.
             </p>
             <div className="flex items-center gap-3 text-xs text-white/50">
-              <span>현재 베타테스트 진행 중</span>
+              <span>Enterprise Beta Program</span>
               <span className="w-1 h-1 rounded-full bg-white/30" />
-              <span>엔터프라이즈 우선 운영</span>
+              <span>Production 검증 단계</span>
               <span className="w-1 h-1 rounded-full bg-white/30" />
-              <span>출시 예정 2026 Q3</span>
+              <span>GA 2026 Q3</span>
             </div>
             <div className="mt-3 h-1.5 bg-white/10 rounded-full overflow-hidden">
               <div className="h-full w-[35%] bg-gradient-to-r from-amber-400 via-fuchsia-400 to-indigo-400 rounded-full shadow-lg shadow-fuchsia-500/50" />

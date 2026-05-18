@@ -19,6 +19,8 @@ import KakaoRcsPage from './pages/KakaoRcsPage';
 import DmBuilderPage from './pages/DmBuilderPage'; // ★ 모바일 DM 빌더
 // ★ D130: 슈퍼관리자 알림톡 발신프로필 모니터링 페이지
 import AlimtalkSendersPage from './pages/AlimtalkSendersPage';
+// ★ D163 (2026-05-19) Braze급 SaaS Step 0 — AI Operator placeholder (ENT/BUSINESS 대상 베타)
+import AiOperatorPage from './pages/AiOperatorPage';
 
 // ★ 세션 타이머 Context — 헤더 등에서 남은 시간 표시용
 interface SessionTimerContextType {
@@ -232,6 +234,17 @@ function App() {
           element={
             <PrivateRoute allowedTypes={['company_admin', 'company_user']}>
               <KakaoRcsPage />
+            </PrivateRoute>
+          }
+        />
+
+        {/* ★ D163 (2026-05-19) Braze급 SaaS Step 0 — AI Operator placeholder.
+            메뉴 게이팅(isBetaAccessAllowed)은 Dashboard.tsx에서 처리. URL 직접 진입은 placeholder 노출. */}
+        <Route
+          path="/ai-operator"
+          element={
+            <PrivateRoute allowedTypes={['company_admin', 'company_user']}>
+              <AiOperatorPage />
             </PrivateRoute>
           }
         />
