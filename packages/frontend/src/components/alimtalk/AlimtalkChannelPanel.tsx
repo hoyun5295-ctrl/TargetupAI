@@ -22,6 +22,7 @@
  */
 
 import { useEffect, useMemo, useState } from 'react';
+import AlimtalkPreview from './AlimtalkPreview';
 
 export interface AlimtalkSenderProfile {
   id: string;
@@ -187,9 +188,8 @@ export default function AlimtalkChannelPanel({
     });
   };
 
-  const setVariable = (k: string, v: string) => {
-    onChange({ ...value, variableMap: { ...value.variableMap, [k]: v } });
-  };
+  // ★ D162-4 (2026-05-15): setVariable 헬퍼 제거 — 변수 매핑 영역 우측 AlimtalkVariableMappingPanel로 이동.
+  //   외부에서 variableMap state를 직접 setting하는 패턴으로 통일. (호출부 onVariableMapChange 직접 호출)
 
   const setNextType = (t: AlimtalkNextType) => {
     onChange({ ...value, nextType: t });
@@ -320,71 +320,77 @@ export default function AlimtalkChannelPanel({
           )}
         </div>
 
-        {/* 3) 변수 매핑 */}
-        {selectedTemplate && Object.keys(value.variableMap).length > 0 && (
+        {/* ★ D162-4 (2026-05-15) PDF 0515 알림톡 #1 후속: 변수 매핑 영역은 우측 영역(AlimtalkVariableMappingPanel)으로 이동.
+            Harold님 명시 "우측에 고객데이터 올렸을때 매칭되는 화면" 의도 + ALIMTALK-DESIGN.md §6-3-D 매뉴얼 정합.
+            좌측 패널은 발신프로필+템플릿+미리보기+부달에 집중. setVariable 헬퍼는 외부 상태 sync용으로 유지 (handleSelectTemplate에서 호출). */}
+
+        {/* ★ D162-4 (2026-05-15) PDF 0515 알림톡 #1+#3 후속: 미리보기 영역을 부달 발송 위로 이동 + AlimtalkPreview 컴포넌트 재사용.
+            Harold님 명시 "템플릿을 선택하고 나면 그게 카카오알림톡화면으로 전환되고" 의도 + ALIMTALK-DESIGN.md §6-3-D 정합.
+            AlimtalkPreview = 16조합(BA/EX/AD/MI × NONE/TEXT/IMAGE/ITEM_LIST) 카카오 말풍선 디자인 + 변수 하이라이트.
+            등록 모달(AlimtalkTemplateFormV2)에서 이미 사용 중 — 일관된 디자인 보장.
+            previewMode 'template'(원본+변수 하이라이트) vs 'filled'(변수 치환된 결과) 토글 유지. */}
+        {/* 4) 카카오 말풍선 미리보기 */}
+        {selectedTemplate && (
           <div className="border-t pt-3">
             <div className="flex items-center justify-between mb-2">
               <label className="text-xs font-medium text-gray-600">
-                변수 매핑
+                미리보기
               </label>
-              <span className="text-[10px] text-gray-400">
-                고객 필드 자동 치환 또는 직접 입력
-              </span>
+              <div className="flex text-[10px] rounded-md border border-gray-200 overflow-hidden">
+                <button
+                  type="button"
+                  onClick={() => setPreviewMode('template')}
+                  className={`px-2 py-0.5 ${
+                    previewMode === 'template'
+                      ? 'bg-gray-700 text-white'
+                      : 'bg-white text-gray-500'
+                  }`}
+                >
+                  원본
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPreviewMode('filled')}
+                  className={`px-2 py-0.5 ${
+                    previewMode === 'filled'
+                      ? 'bg-gray-700 text-white'
+                      : 'bg-white text-gray-500'
+                  }`}
+                >
+                  치환
+                </button>
+              </div>
             </div>
-            <div className="space-y-1.5">
-              {Object.keys(value.variableMap).map((varKey) => {
-                const current = value.variableMap[varKey] || '';
-                const isFieldRef =
-                  current.startsWith('@@') && current.endsWith('@@');
-                const fieldKey = isFieldRef ? current.slice(2, -2) : '';
-                return (
-                  <div key={varKey} className="flex items-center gap-2">
-                    <span className="text-[11px] font-mono text-blue-700 w-24 shrink-0 truncate">
-                      {varKey}
-                    </span>
-                    {customerFieldOptions.length > 0 && (
-                      <select
-                        value={isFieldRef ? fieldKey : '__manual__'}
-                        onChange={(e) => {
-                          const v = e.target.value;
-                          if (v === '__manual__') {
-                            setVariable(varKey, '');
-                          } else {
-                            setVariable(varKey, `@@${v}@@`);
-                          }
-                        }}
-                        className="border border-gray-200 rounded px-1.5 py-1 text-[11px] max-w-[110px]"
-                      >
-                        <option value="__manual__">직접 입력</option>
-                        {customerFieldOptions.map((f) => (
-                          <option key={f.key} value={f.key}>
-                            {f.label}
-                          </option>
-                        ))}
-                      </select>
-                    )}
-                    {!isFieldRef && (
-                      <input
-                        type="text"
-                        value={current}
-                        onChange={(e) => setVariable(varKey, e.target.value)}
-                        placeholder="값 입력"
-                        className="flex-1 border border-gray-200 rounded px-2 py-1 text-[11px]"
-                      />
-                    )}
-                    {isFieldRef && (
-                      <span className="flex-1 text-[11px] text-emerald-600 bg-emerald-50 rounded px-2 py-1">
-                        고객 필드 자동 치환: {fieldKey}
-                      </span>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
+            <AlimtalkPreview
+              messageType={(selectedTemplate.message_type || 'BA') as any}
+              emphasizeType={(selectedTemplate.emphasize_type || 'NONE') as any}
+              templateTitle={
+                selectedTemplate.emphasize_title
+                  ? previewMode === 'filled'
+                    ? renderPreview(selectedTemplate.emphasize_title)
+                    : selectedTemplate.emphasize_title
+                  : undefined
+              }
+              templateSubtitle={selectedTemplate.emphasize_subtitle || undefined}
+              imageUrl={(selectedTemplate as any).image_url || undefined}
+              content={
+                previewMode === 'filled'
+                  ? renderPreview(selectedTemplate.content)
+                  : selectedTemplate.content
+              }
+              extraContent={(selectedTemplate as any).extra_content || undefined}
+              adContent={(selectedTemplate as any).ad_content || undefined}
+              header={(selectedTemplate as any).template_header || undefined}
+              highlight={(selectedTemplate as any).item_highlight || undefined}
+              itemList={(selectedTemplate as any).item_list || undefined}
+              summary={(selectedTemplate as any).item_summary || undefined}
+              buttons={(selectedTemplate.buttons || []) as any}
+              profileName={selectedTemplate.profile_name || undefined}
+            />
           </div>
         )}
 
-        {/* 4) 부달 발송 */}
+        {/* 5) 부달 발송 */}
         {selectedTemplate && (
           <div className="border-t pt-3">
             <label className="block text-xs font-medium text-gray-600 mb-1.5">
@@ -430,65 +436,6 @@ export default function AlimtalkChannelPanel({
                 </div>
               </div>
             )}
-          </div>
-        )}
-
-        {/* 5) 미리보기 */}
-        {selectedTemplate && (
-          <div className="border-t pt-3">
-            <div className="flex items-center justify-between mb-2">
-              <label className="text-xs font-medium text-gray-600">
-                미리보기
-              </label>
-              <div className="flex text-[10px] rounded-md border border-gray-200 overflow-hidden">
-                <button
-                  type="button"
-                  onClick={() => setPreviewMode('template')}
-                  className={`px-2 py-0.5 ${
-                    previewMode === 'template'
-                      ? 'bg-gray-700 text-white'
-                      : 'bg-white text-gray-500'
-                  }`}
-                >
-                  원본
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setPreviewMode('filled')}
-                  className={`px-2 py-0.5 ${
-                    previewMode === 'filled'
-                      ? 'bg-gray-700 text-white'
-                      : 'bg-white text-gray-500'
-                  }`}
-                >
-                  치환
-                </button>
-              </div>
-            </div>
-            <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-3 text-xs">
-              {selectedTemplate.emphasize_type === 'TEXT' &&
-                selectedTemplate.emphasize_title && (
-                  <div className="font-bold text-sm text-gray-900 mb-2 pb-2 border-b border-yellow-200">
-                    {renderPreview(selectedTemplate.emphasize_title)}
-                  </div>
-                )}
-              <div className="whitespace-pre-wrap text-gray-700 leading-relaxed">
-                {renderPreview(selectedTemplate.content)}
-              </div>
-              {Array.isArray(selectedTemplate.buttons) &&
-                selectedTemplate.buttons.length > 0 && (
-                  <div className="mt-3 pt-2 border-t border-yellow-200 space-y-1.5">
-                    {selectedTemplate.buttons.map((btn: any, i: number) => (
-                      <div
-                        key={i}
-                        className="text-center text-xs bg-white border border-gray-200 rounded-lg py-1.5"
-                      >
-                        {btn.name || btn.buttonName || `버튼 ${i + 1}`}
-                      </div>
-                    ))}
-                  </div>
-                )}
-            </div>
           </div>
         )}
       </div>

@@ -9,6 +9,7 @@ import AlimtalkChannelPanel, {
   type AlimtalkSenderProfile,
   type AlimtalkTemplate,
 } from './alimtalk/AlimtalkChannelPanel';
+import AlimtalkVariableMappingPanel from './alimtalk/AlimtalkVariableMappingPanel';
 
 // ★ D43-3c: 정규식 특수문자 이스케이프
 const escapeRegExp = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -778,6 +779,21 @@ export default function TargetSendModal({
 
           {/* ========== 우측: 수신자 목록 ========== */}
           <div className="flex-1 flex flex-col">
+            {/* ★ D162-4 (2026-05-15) PDF 0515 알림톡 #1: 알림톡 채널일 때만 변수 매칭 박스 노출.
+                직접타겟발송도 직접발송과 동일 UX. SMS/RCS 채널 영향 0. */}
+            {targetSendChannel === 'kakao_alimtalk' && (
+              <div className="mb-3">
+                <AlimtalkVariableMappingPanel
+                  selectedTemplate={kakaoSelectedTemplate}
+                  variableMap={kakaoTemplateVars}
+                  onVariableMapChange={(next) => setKakaoTemplateVars(next)}
+                  customerFieldOptions={customerFieldOptions}
+                  sampleRecipient={targetRecipients[0] || null}
+                  recipientCount={targetRecipients.length}
+                />
+              </div>
+            )}
+
             {/* 헤더 */}
             <div className="flex items-center justify-between mb-3">
               <div className="flex items-center gap-3">

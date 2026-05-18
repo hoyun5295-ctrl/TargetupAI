@@ -22,6 +22,7 @@ import SpamFilterTestModal from './SpamFilterTestModal';
 // ★ D123 P11: 미등록 회신번호 확인 모달 (한줄로 발송과 동일 패턴)
 import CallbackConfirmModal, { CallbackConfirmData } from './CallbackConfirmModal';
 // ★ D130: 알림톡 공용 패널 (설계서 §6-3-D)
+import AlimtalkVariableMappingPanel from './alimtalk/AlimtalkVariableMappingPanel';
 import AlimtalkChannelPanel, {
   type AlimtalkChannelState,
   type AlimtalkSenderProfile,
@@ -1010,18 +1011,37 @@ export default function AutoSendFormModal({ campaign, aiPremiumEnabled, onClose,
                   </button>
                 </div>
 
-                {/* ★ D130: 알림톡 채널 선택 시 공용 Panel */}
+                {/* ★ D130: 알림톡 채널 선택 시 공용 Panel
+                    ★ D162-4 (2026-05-15): AlimtalkVariableMappingPanel 같이 노출 — 자동발송도 직접발송과 동일 화면(Harold님 명시).
+                       자동발송은 수신자가 발송 시점 결정이라 sampleRecipient=null. 매핑 정의만 박혀서 발송 시점 자동 치환. */}
                 {channel === 'alimtalk' && (
-                  <AlimtalkChannelPanel
-                    senders={alimtalkSenders}
-                    templates={alimtalkTemplates}
-                    customerFieldOptions={(availableFields || []).map((f) => ({
-                      key: f.field_key,
-                      label: f.display_name || f.field_label || f.field_key,
-                    }))}
-                    value={alimtalkState}
-                    onChange={setAlimtalkState}
-                  />
+                  <div className="space-y-3">
+                    <AlimtalkChannelPanel
+                      senders={alimtalkSenders}
+                      templates={alimtalkTemplates}
+                      customerFieldOptions={(availableFields || []).map((f) => ({
+                        key: f.field_key,
+                        label: f.display_name || f.field_label || f.field_key,
+                      }))}
+                      value={alimtalkState}
+                      onChange={setAlimtalkState}
+                    />
+                    <AlimtalkVariableMappingPanel
+                      selectedTemplate={
+                        alimtalkTemplates.find((t) => t.template_code === alimtalkState.templateCode) || null
+                      }
+                      variableMap={alimtalkState.variableMap}
+                      onVariableMapChange={(next) =>
+                        setAlimtalkState({ ...alimtalkState, variableMap: next })
+                      }
+                      customerFieldOptions={(availableFields || []).map((f) => ({
+                        key: f.field_key,
+                        label: f.display_name || f.field_label || f.field_key,
+                      }))}
+                      sampleRecipient={null}
+                      recipientCount={0}
+                    />
+                  </div>
                 )}
 
                 {/* ★ D130: SMS/LMS/MMS 채널 전용 UI — 알림톡 선택 시 전체 숨김 */}

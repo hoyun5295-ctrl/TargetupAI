@@ -48,6 +48,7 @@ import AlimtalkChannelPanel, {
   type AlimtalkSenderProfile,
   type AlimtalkTemplate,
 } from './alimtalk/AlimtalkChannelPanel';
+import AlimtalkVariableMappingPanel from './alimtalk/AlimtalkVariableMappingPanel';
 import '../styles/direct-send.css';
 
 // ============================================================
@@ -1054,6 +1055,20 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
 
           {/* ====== 우측: 수신자 관리 ====== */}
           <section className="flex flex-col gap-4 min-w-0">
+
+            {/* ★ D162-4 (2026-05-15) PDF 0515 알림톡 #1: 알림톡 채널일 때만 변수 매칭 박스 노출.
+                Harold님 명시 "우측에 고객데이터 올렸을때 매칭되는 화면" + ALIMTALK-DESIGN.md §6-3-D 정합.
+                SMS/RCS는 영향 0 — 분기 조건으로 알림톡만 표시. */}
+            {directSendChannel === 'kakao_alimtalk' && (
+              <AlimtalkVariableMappingPanel
+                selectedTemplate={kakaoSelectedTemplate}
+                variableMap={kakaoTemplateVars}
+                onVariableMapChange={(next) => setKakaoTemplateVars(next)}
+                customerFieldOptions={customerFieldOptions}
+                sampleRecipient={directRecipients[0] || null}
+                recipientCount={directRecipients.length}
+              />
+            )}
 
             {/* 입력 방식 탭 + 필터 */}
             <div className="flex items-center justify-between gap-4 flex-wrap">
