@@ -161,6 +161,10 @@ export interface DirectSendPanelProps {
 
   // 닫기
   onClose: () => void;
+
+  // ★ D162-4 (2026-05-15) 2차: 직접발송 모달 헤더에서 알림톡 발송 풀 화면 모달 진입 callback.
+  //   Harold님 명시 정합 — DashboardHeader 메뉴 대신 모달 내부에서 진입해 사용자 혼란 차단.
+  onAlimtalkOpen?: () => void;
 }
 
 // ============================================================
@@ -204,6 +208,7 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
     setPendingBytes, setShowLmsConfirm, setShowSmsConvert,
     getMaxByteMessage, formatPhoneNumber, formatRejectNumber,
     onClose,
+    onAlimtalkOpen,
   } = props;
 
   // ★ D120: 커서 위치 기반 변수 삽입용 ref
@@ -520,10 +525,29 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
             </div>
           </div>
 
-          <button className="ds-close-btn ds-t" onClick={onClose}>
-            <X size={14} strokeWidth={1.75} />
-            <span>창닫기</span>
-          </button>
+          <div className="flex items-center gap-2">
+            {/* ★ D162-4 (2026-05-15) 2차: Harold님 명시 정합 — 헤더 창닫기 옆에 알림톡 발송 진입 버튼.
+                카카오 노란색(#FEE500)으로 임팩트. 클릭 시 직접발송 모달 유지 + AlimtalkSendModal 풀 화면 진입. */}
+            {onAlimtalkOpen && (
+              <button
+                type="button"
+                onClick={onAlimtalkOpen}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-bold transition shadow-sm hover:shadow"
+                style={{
+                  backgroundColor: '#FEE500',
+                  color: '#3C1E1E',
+                }}
+                title="알림톡 발송 화면으로 전환"
+              >
+                <Bell size={14} strokeWidth={2} />
+                <span>알림톡 발송</span>
+              </button>
+            )}
+            <button className="ds-close-btn ds-t" onClick={onClose}>
+              <X size={14} strokeWidth={1.75} />
+              <span>창닫기</span>
+            </button>
+          </div>
         </header>
 
         {/* ============ 2컬럼 body ============ */}
@@ -532,29 +556,10 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
           {/* ====== 좌측: 메시지 에디터 ====== */}
           <section className="ds-section">
 
-            {/* 채널 탭
-                ★ D162-4 (2026-05-15): 알림톡 채널 탭 제거 — Harold님 명시 의도 정합.
-                  직접발송 모달 = SMS/RCS만. 알림톡은 Dashboard 메뉴 "알림톡 발송" → AlimtalkSendModal 풀 화면 모달 전용 진입.
-                  하위 알림톡 분기 코드(L1017+/L1062+/L1391+/L1418+/L470+)는 호환성을 위해 유지하되 채널 탭에서 진입 불가 → 무력화. */}
-            <div className="ds-channel-group">
-              {([
-                { key: 'sms' as const, label: '문자', Icon: MessageSquare, on: 'ds-pill--on' },
-                { key: 'rcs' as const, label: 'RCS', Icon: Smartphone, on: 'ds-pill--on-purple' },
-              ]).map(({ key, label, Icon, on }) => (
-                <button
-                  key={key}
-                  type="button"
-                  className={`ds-pill ${directSendChannel === key ? on : ''}`}
-                  onClick={() => {
-                    setDirectSendChannel(key);
-                    if (key === 'sms') setMmsUploadedImages([]);
-                  }}
-                >
-                  <Icon size={15} strokeWidth={1.75} />
-                  <span>{label}</span>
-                </button>
-              ))}
-            </div>
+            {/* ★ D162-4 (2026-05-15) 2차: Harold님 명시 — 문자/RCS 채널 탭 자체 제거.
+                직접발송 = 문자(SMS/LMS/MMS) 단일 모드. RCS는 "곧 오픈 예정" 상태라 진입 동선 별도 운영.
+                알림톡은 헤더의 카카오 노란색 '알림톡 발송' 버튼으로 진입 → AlimtalkSendModal 풀 화면.
+                directSendChannel state는 'sms' 고정 (mount 시 Dashboard.onDirectSend가 강제 reset). 하위 RCS 분기 코드는 dead. */}
 
             {/* === SMS 채널 === */}
             {directSendChannel === 'sms' && (

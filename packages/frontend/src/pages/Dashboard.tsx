@@ -3214,6 +3214,11 @@ const campaignData = {
         setSendConfirm={setSendConfirm}
         targetSending={targetSending}
         onResetTarget={() => { setShowTargetSend(false); setShowDirectTargeting(true); }}
+        onAlimtalkOpen={() => {
+          // ★ D162-4 (2026-05-15) 2차: 직접타겟발송 → 알림톡 발송 풀 화면 진입. 타겟 추출된 수신자를 directRecipients에 미러링하지 X.
+          //   AlimtalkSendModal은 자체 수신자 입력 영역(직접입력/파일등록/주소록)을 사용. 타겟 결과는 별도 추출 필요 시 주소록 저장 후 진입.
+          setShowAlimtalkSend(true);
+        }}
         handleTargetTestSend={handleTargetTestSend}
         testSending={testSending}
         testCooldown={testCooldown}
@@ -3406,6 +3411,11 @@ const campaignData = {
           formatPhoneNumber={formatPhoneNumber}
           formatRejectNumber={formatRejectNumber}
           onClose={() => { setShowDirectSend(false); setKakaoMessage(''); setDirectSendChannel('sms'); }}
+          onAlimtalkOpen={() => {
+            // ★ D162-4 (2026-05-15) 2차: 직접발송 모달 헤더의 카카오 노란색 버튼 → 알림톡 발송 풀 화면 진입.
+            //   직접발송 모달은 그대로 유지하되 알림톡 모달이 위에 z-index 50으로 노출.
+            setShowAlimtalkSend(true);
+          }}
         />
       )}
 

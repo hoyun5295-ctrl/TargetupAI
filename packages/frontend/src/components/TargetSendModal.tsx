@@ -137,6 +137,9 @@ interface TargetSendModalProps {
 
   // 타겟 재설정
   onResetTarget: () => void;
+
+  // ★ D162-4 (2026-05-15) 2차: 직접타겟발송 → 알림톡 발송 풀 화면 진입 callback. 수신번호 검색 옆 카카오 노란색 버튼.
+  onAlimtalkOpen?: () => void;
 }
 
 export default function TargetSendModal({
@@ -185,6 +188,7 @@ export default function TargetSendModal({
   testSentResult: testSentResultProp,
   targetSending,
   onResetTarget,
+  onAlimtalkOpen,
 }: TargetSendModalProps) {
 
   // ====== 내부 state ======
@@ -403,25 +407,10 @@ export default function TargetSendModal({
         <div className="px-6 py-5 flex gap-5">
           {/* ========== 좌측: 메시지 작성 ========== */}
           <div className="w-[400px]">
-            {/* 채널 선택 탭
-                ★ D162-4 (2026-05-15): 알림톡 채널 탭 제거 — Harold님 명시 의도 정합.
-                  직접타겟발송 모달 = SMS/RCS만. 알림톡은 Dashboard 메뉴 "알림톡 발송" → AlimtalkSendModal 풀 화면 전용 진입.
-                  타겟 결과를 알림톡으로 발송 시 → 타겟 추출 후 알림톡 발송 메뉴 진입 (별 단계로 통합). */}
-            <div className="flex mb-2 bg-gray-100 rounded-lg p-1 gap-0.5">
-              {([
-                { key: 'sms' as const, label: '📱 문자', activeColor: 'text-emerald-600' },
-                { key: 'rcs' as const, label: '📱 RCS', activeColor: 'text-purple-600' },
-              ] as const).map(ch => (
-                <button key={ch.key}
-                  onClick={() => { setTargetSendChannel(ch.key); if (ch.key === 'sms') setMmsUploadedImages([]); }}
-                  className={`flex-1 py-2 text-xs font-medium rounded-md transition-all ${
-                    targetSendChannel === ch.key
-                      ? `bg-white shadow ${ch.activeColor}`
-                      : 'text-gray-400 hover:text-gray-600'
-                  }`}
-                >{ch.label}</button>
-              ))}
-            </div>
+            {/* ★ D162-4 (2026-05-15) 2차: Harold님 명시 — 문자/RCS 채널 탭 자체 제거.
+                직접타겟발송 = 문자(SMS/LMS/MMS) 단일 모드. RCS는 "곧 오픈 예정" 상태로 채널 탭 비노출.
+                알림톡은 수신번호 검색 옆 카카오 노란색 '알림톡 발송' 버튼으로 진입 → AlimtalkSendModal 풀 화면.
+                targetSendChannel state는 'sms' 고정. 하위 RCS 분기 코드는 dead. */}
 
             {/* === SMS 채널 === */}
             {targetSendChannel === 'sms' && (<>
@@ -805,6 +794,23 @@ export default function TargetSendModal({
                 </span>
               </div>
               <div className="flex items-center gap-2">
+                {/* ★ D162-4 (2026-05-15) 2차: Harold님 명시 — 수신번호 검색 옆 알림톡 발송 진입 버튼.
+                    카카오 노란색(#FEE500) 임팩트. 타겟 추출된 수신자 그대로 알림톡 모달로 전달. */}
+                {onAlimtalkOpen && (
+                  <button
+                    type="button"
+                    onClick={onAlimtalkOpen}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-bold transition shadow-sm hover:shadow"
+                    style={{
+                      backgroundColor: '#FEE500',
+                      color: '#3C1E1E',
+                    }}
+                    title="추출된 수신자에게 알림톡 발송"
+                  >
+                    <Sparkles size={14} strokeWidth={2} />
+                    <span>알림톡 발송</span>
+                  </button>
+                )}
                 <input
                   type="text"
                   placeholder="🔍 수신번호 검색"

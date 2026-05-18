@@ -8,8 +8,9 @@ interface DashboardHeaderProps {
   department?: string;
   isCompanyAdmin: boolean;
   onDirectSend: () => void;
-  // ★ D162-4 (2026-05-15): 알림톡 발송 전용 진입 — 직접발송과 분리된 풀 화면 모달
-  onAlimtalkSend: () => void;
+  // ★ D162-4 (2026-05-15) 2차: Harold님 명시 — DashboardHeader 메뉴에서 '알림톡 발송' 제거.
+  //   직접발송/직접타겟발송 모달 내부 버튼으로 진입. 본 prop은 호환성 차 optional 유지 (외부 호출 가능).
+  onAlimtalkSend?: () => void;
   onCalendar: () => void;
   onResults: () => void;
   onAnalysis: () => void;
@@ -104,15 +105,9 @@ export default function DashboardHeader({
       path: '/kakao-rcs',
     },
     { label: '직접발송', onClick: onDirectSend, color: 'green', path: '/' },
-    // ★ D162-4 (2026-05-15): 알림톡 발송 별도 진입 — Harold님 명시 "RCS&알림톡 별도 버튼" 의도 + 알림톡 전용 풀 화면 모달
-    {
-      label: '알림톡 발송',
-      onClick: () => enterpriseGuard('알림톡 발송', '알림톡 템플릿 기반 발송 기능입니다.',
-        () => lockGuard(onAlimtalkSend)),
-      color: 'green',
-      locked: isEnterpriseLocked || isSubscriptionLocked,
-      path: '/',
-    },
+    // ★ D162-4 (2026-05-15) 2차: Harold님 명시 정합 — DashboardHeader 메뉴에서 '알림톡 발송' 제거.
+    //   직접발송/직접타겟발송 모달 헤더 안에서 알림톡 모달 진입 (카카오 노란색 버튼). 메뉴 분리 시 사용자 혼란 차단.
+    //   onAlimtalkSend prop은 호환성 위해 유지 (Dashboard에서 직접발송/타겟발송 → 알림톡 모달 진입 callback).
     { label: '발송결과', onClick: onResults, color: 'green', path: '/' },
     { label: '수신거부', onClick: () => navigate('/unsubscribes'), color: 'gold', path: '/unsubscribes' },
     { label: '설정', onClick: () => navigate('/settings'), color: 'green', path: '/settings' },

@@ -14,13 +14,14 @@
  */
 
 import { useState, useMemo } from 'react';
-import { Bell, X } from 'lucide-react';
+import { Bell, X, Contact } from 'lucide-react';
 import AlimtalkChannelPanel, {
   type AlimtalkChannelState,
   type AlimtalkSenderProfile,
   type AlimtalkTemplate,
 } from './alimtalk/AlimtalkChannelPanel';
 import AlimtalkVariableMappingPanel from './alimtalk/AlimtalkVariableMappingPanel';
+import AddressBookModal from './AddressBookModal';
 import { normalizePhoneKr } from '../utils/formatDate';
 
 export interface AlimtalkSendModalProps {
@@ -84,13 +85,15 @@ export default function AlimtalkSendModal({
   setToast,
 }: AlimtalkSendModalProps) {
   // 수신자 영역 — 알림톡 전용 state (직접발송 directRecipients와 격리)
-  const [inputMode, setInputMode] = useState<'direct' | 'file'>('direct');
+  const [inputMode, setInputMode] = useState<'direct' | 'file' | 'address'>('direct');
   const [directInput, setDirectInput] = useState('');
   const [recipients, setRecipients] = useState<any[]>([]);
   const [fileLoading, setFileLoading] = useState(false);
   const [dedupEnabled, setDedupEnabled] = useState(true);
   const [unsubFilterEnabled, setUnsubFilterEnabled] = useState(true);
   const [sending, setSending] = useState(false);
+  // ★ D162-4 (2026-05-15) 2차: 주소록 진입 — Harold님 명시 정합. AddressBookModal 재사용 (recipients/setRecipients 위임).
+  const [showAddressBook, setShowAddressBook] = useState(false);
 
   // AlimtalkChannelPanel 통합 state
   const channelState: AlimtalkChannelState = useMemo(
@@ -341,7 +344,8 @@ export default function AlimtalkSendModal({
                 </div>
               </div>
 
-              {/* 입력 방식 탭 */}
+              {/* ★ D162-4 (2026-05-15) 2차: 입력 방식 탭 — 직접입력 / 파일등록 / 주소록 3개로 확장.
+                  Harold님 명시 "주소록에서 가져와서 보내는것도 추가" 정합. AddressBookModal 재사용으로 동작 일관성. */}
               <div className="flex gap-1 bg-gray-100 rounded-lg p-1">
                 <button
                   type="button"
@@ -376,6 +380,21 @@ export default function AlimtalkSendModal({
                     }}
                   />
                 </label>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setInputMode('address');
+                    setShowAddressBook(true);
+                  }}
+                  className={`flex-1 py-1.5 text-xs font-medium rounded-md transition inline-flex items-center justify-center gap-1 ${
+                    inputMode === 'address'
+                      ? 'bg-white shadow text-blue-600'
+                      : 'text-gray-500 hover:text-gray-700'
+                  }`}
+                >
+                  <Contact size={13} strokeWidth={1.75} />
+                  <span>주소록</span>
+                </button>
               </div>
 
               {/* 직접입력 영역 */}
@@ -479,6 +498,15 @@ export default function AlimtalkSendModal({
           }
         `}</style>
       </div>
+
+      {/* ★ D162-4 (2026-05-15) 2차: 주소록 모달 — Harold님 명시 정합. recipients/setRecipients position에 위임 → 그룹 선택 시 자동 박힘. */}
+      <AddressBookModal
+        show={showAddressBook}
+        onClose={() => setShowAddressBook(false)}
+        directRecipients={recipients}
+        setDirectRecipients={setRecipients}
+        setToast={setToast}
+      />
     </div>
   );
 }

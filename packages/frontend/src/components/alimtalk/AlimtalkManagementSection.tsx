@@ -173,6 +173,14 @@ export default function AlimtalkManagementSection() {
     templateName: string;
   } | null>(null);
 
+  // ★ D162-4 (2026-05-15) 2차: 반려사유 상세 모달 — Harold님 명시 정합.
+  //   row에 반려사유 펼쳐 표시하던 영역 제거 → 관리 컬럼 '반려사유' 버튼 클릭 시 적정 사이즈 모달 노출 (스크롤 가능).
+  const [rejectReasonTarget, setRejectReasonTarget] = useState<{
+    templateName: string;
+    rejectReason: string;
+    status: string;
+  } | null>(null);
+
   // 내 회사 정보 (Wizard에 전달) — authStore에서 직접 참조 (별도 API 호출 불필요)
   const authUser = useAuthStore((s) => s.user);
   const myCompany = useMemo(
@@ -578,14 +586,8 @@ export default function AlimtalkManagementSection() {
                   <tr key={t.id} className="border-t border-gray-100 hover:bg-gray-50">
                     <td className="px-4 py-2">
                       <div className="font-medium text-gray-900">{t.template_name}</div>
-                      {/* ★ D162-4 (2026-05-15) PDF 0515 알림톡 #1: HREJ(휴머스온 내부 반려) + KREJ(카카오 반려)도 사유 표시.
-                          기존 REJECTED/REJ만 매칭 → IMC 6단계 정합 시 HREJ/KREJ row의 사유가 화면에 노출되지 않던 사고. */}
-                      {(t.status === 'REJECTED' || t.status === 'REJ' || t.status === 'HREJ' || t.status === 'KREJ') &&
-                        t.reject_reason && (
-                          <div className="text-[11px] text-red-500 mt-0.5">
-                            사유: {t.reject_reason}
-                          </div>
-                        )}
+                      {/* ★ D162-4 (2026-05-15) 2차: Harold님 명시 정합 — 반려사유 펼침 영역 제거.
+                          row에 길게 펼쳐지던 사유 글씨가 화면 어지러움 유발. 관리 컬럼의 '반려사유' 버튼 클릭 시 모달로 상세 노출. */}
                     </td>
                     <td className="px-4 py-2 text-xs text-gray-600">
                       {t.profile_name || '-'}
@@ -661,6 +663,23 @@ export default function AlimtalkManagementSection() {
                           className="text-[11px] px-2 py-0.5 bg-gray-100 hover:bg-gray-200 text-gray-600 rounded"
                         >
                           검수요청 취소
+                        </button>
+                      )}
+                      {/* ★ D162-4 (2026-05-15) 2차: 반려사유 확인 버튼 — Harold님 명시 정합.
+                          반려 상태 + 사유가 있을 때만 노출. 클릭 시 적정 사이즈 모달(스크롤 가능)로 상세 노출. */}
+                      {isRej && t.reject_reason && (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setRejectReasonTarget({
+                              templateName: t.template_name || t.template_code,
+                              rejectReason: t.reject_reason || '',
+                              status: t.status,
+                            })
+                          }
+                          className="text-[11px] px-2 py-0.5 bg-red-50 hover:bg-red-100 text-red-600 rounded"
+                        >
+                          반려사유
                         </button>
                       )}
                       {/* ★ D162-4 (2026-05-15) PDF 0515 알림톡 #1: 재검수 버튼 = 풀 폼 진입 + 반려사유 노출 + 저장 후 자동 검수요청.
@@ -758,6 +777,74 @@ export default function AlimtalkManagementSection() {
           templateName={historyTarget.templateName}
           onClose={() => setHistoryTarget(null)}
         />
+      )}
+
+      {/* ★ D162-4 (2026-05-15) 2차: 반려사유 상세 모달 — Harold님 명시 정합.
+          row에 펼쳐 표시하던 사유를 별도 모달로 분리. max-w-2xl + max-h 80vh + overflow-y-auto로 긴 사유도 스크롤 안정. */}
+      {rejectReasonTarget && (
+        <div
+          className="fixed inset-0 bg-black/50 backdrop-blur-sm z-[60] flex items-center justify-center p-4"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setRejectReasonTarget(null);
+          }}
+        >
+          <div
+            className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[80vh] flex flex-col overflow-hidden"
+            style={{ animation: 'zoomIn 0.2s ease-out' }}
+          >
+            {/* 헤더 */}
+            <div className="px-6 py-4 border-b border-gray-200 bg-gradient-to-r from-red-50 to-white flex justify-between items-center shrink-0">
+              <div className="flex items-start gap-3 min-w-0">
+                <span className="w-10 h-10 rounded-xl bg-red-100 flex items-center justify-center text-lg shrink-0">
+                  ⚠
+                </span>
+                <div className="min-w-0">
+                  <h3 className="text-lg font-bold text-gray-900 truncate">
+                    {STATUS_LABELS[rejectReasonTarget.status]?.label || '반려'} 사유
+                  </h3>
+                  <p className="text-xs text-gray-500 mt-0.5 truncate">
+                    템플릿: {rejectReasonTarget.templateName}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setRejectReasonTarget(null)}
+                className="text-gray-400 hover:text-gray-600 text-2xl shrink-0 ml-2"
+                aria-label="닫기"
+              >
+                &times;
+              </button>
+            </div>
+
+            {/* 본문 — 스크롤 영역 */}
+            <div className="px-6 py-5 overflow-y-auto flex-1">
+              <div className="bg-red-50 border border-red-200 rounded-xl p-4 text-sm text-red-900 leading-relaxed whitespace-pre-wrap">
+                {rejectReasonTarget.rejectReason}
+              </div>
+              <p className="mt-3 text-[11px] text-gray-500 leading-relaxed">
+                ℹ 본 사유는 카카오/휴머스온 검수팀이 전달한 내용입니다. 본문 수정 후 '재검수' 버튼으로 다시 검수 요청할 수 있습니다.
+              </p>
+            </div>
+
+            {/* 푸터 */}
+            <div className="px-6 py-3 border-t border-gray-200 bg-gray-50 flex justify-end gap-2 shrink-0">
+              <button
+                type="button"
+                onClick={() => setRejectReasonTarget(null)}
+                className="px-5 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg text-sm"
+              >
+                닫기
+              </button>
+            </div>
+          </div>
+          <style>{`
+            @keyframes zoomIn {
+              from { opacity: 0; transform: scale(0.96); }
+              to { opacity: 1; transform: scale(1); }
+            }
+          `}</style>
+        </div>
       )}
 
       {/* ★ D142+ F (2026-04-29): 검수요청 시 코멘트 + 증빙자료 입력 모달 (PDF 0428 알림톡 #3) */}
