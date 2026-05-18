@@ -8,6 +8,8 @@ interface DashboardHeaderProps {
   department?: string;
   isCompanyAdmin: boolean;
   onDirectSend: () => void;
+  // ★ D162-4 (2026-05-15): 알림톡 발송 전용 진입 — 직접발송과 분리된 풀 화면 모달
+  onAlimtalkSend: () => void;
   onCalendar: () => void;
   onResults: () => void;
   onAnalysis: () => void;
@@ -46,6 +48,7 @@ export default function DashboardHeader({
   department,
   isCompanyAdmin,
   onDirectSend,
+  onAlimtalkSend,
   onCalendar,
   onResults,
   onAnalysis,
@@ -101,6 +104,15 @@ export default function DashboardHeader({
       path: '/kakao-rcs',
     },
     { label: '직접발송', onClick: onDirectSend, color: 'green', path: '/' },
+    // ★ D162-4 (2026-05-15): 알림톡 발송 별도 진입 — Harold님 명시 "RCS&알림톡 별도 버튼" 의도 + 알림톡 전용 풀 화면 모달
+    {
+      label: '알림톡 발송',
+      onClick: () => enterpriseGuard('알림톡 발송', '알림톡 템플릿 기반 발송 기능입니다.',
+        () => lockGuard(onAlimtalkSend)),
+      color: 'green',
+      locked: isEnterpriseLocked || isSubscriptionLocked,
+      path: '/',
+    },
     { label: '발송결과', onClick: onResults, color: 'green', path: '/' },
     { label: '수신거부', onClick: () => navigate('/unsubscribes'), color: 'gold', path: '/unsubscribes' },
     { label: '설정', onClick: () => navigate('/settings'), color: 'green', path: '/settings' },

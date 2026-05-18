@@ -403,12 +403,14 @@ export default function TargetSendModal({
         <div className="px-6 py-5 flex gap-5">
           {/* ========== 좌측: 메시지 작성 ========== */}
           <div className="w-[400px]">
-            {/* 채널 선택 탭 */}
+            {/* 채널 선택 탭
+                ★ D162-4 (2026-05-15): 알림톡 채널 탭 제거 — Harold님 명시 의도 정합.
+                  직접타겟발송 모달 = SMS/RCS만. 알림톡은 Dashboard 메뉴 "알림톡 발송" → AlimtalkSendModal 풀 화면 전용 진입.
+                  타겟 결과를 알림톡으로 발송 시 → 타겟 추출 후 알림톡 발송 메뉴 진입 (별 단계로 통합). */}
             <div className="flex mb-2 bg-gray-100 rounded-lg p-1 gap-0.5">
               {([
                 { key: 'sms' as const, label: '📱 문자', activeColor: 'text-emerald-600' },
                 { key: 'rcs' as const, label: '📱 RCS', activeColor: 'text-purple-600' },
-                { key: 'kakao_alimtalk' as const, label: '🔔 알림톡', activeColor: 'text-blue-600' },
               ] as const).map(ch => (
                 <button key={ch.key}
                   onClick={() => { setTargetSendChannel(ch.key); if (ch.key === 'sms') setMmsUploadedImages([]); }}

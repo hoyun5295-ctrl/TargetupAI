@@ -49,6 +49,7 @@ import { formatDate, formatPreviewValue, formatByType, calculateSmsBytes, trunca
 import { insertAtCursorOrAppend } from '../utils/textInsert';
 import { getMmsImagePath, getMmsImageDisplayName, toMmsImagePaths, type MmsImageItem } from '../utils/mmsImage';
 import DirectSendPanel from '../components/DirectSendPanel';
+import AlimtalkSendModal from '../components/AlimtalkSendModal';
 import DirectSendAiRefinePopup from '../components/DirectSendAiRefinePopup';
 
 interface Stats {
@@ -267,6 +268,9 @@ export default function Dashboard() {
   const [showUploadProgressModal, setShowUploadProgressModal] = useState(false);
   const uploadProgressIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const [showDirectSend, setShowDirectSend] = useState(false);
+  // ★ D162-4 (2026-05-15) PDF 0515 알림톡 #1+#3 후속: 알림톡 발송 전용 풀 화면 모달 진입 state.
+  //   Harold님 명시 의도 — 직접발송 모달에 알림톡 squeeze 사고 영구 종결. AlimtalkSendModal 별도 풀 화면.
+  const [showAlimtalkSend, setShowAlimtalkSend] = useState(false);
   const [showTargetSend, setShowTargetSend] = useState(false);
   // ★ D152+ (PDF 0511 funnel fix): 직접발송 진입 시 24h 1회 AI 다듬기 안내 팝업.
   //   67사 무료체험 funnel(고객DB 업로드 3%) 절대 병목 해소 — AI 가치 DB 없이 즉시 체감 동선.
@@ -2239,6 +2243,9 @@ const campaignData = {
         planCode={planInfo?.plan_code}
         onDirectSend={async () => {
           setShowDirectSend(true);
+          // ★ D162-4 (2026-05-15): 직접발송 모달 진입 시 채널 강제 SMS reset.
+          //   AlimtalkSendModal에서 setDirectSendChannel('kakao_alimtalk') 박힌 후 잔존하는 사고 차단.
+          setDirectSendChannel('sms');
           try {
             const token = localStorage.getItem('token');
             const settingsRes = await fetch('/api/companies/settings', {
@@ -2262,6 +2269,10 @@ const campaignData = {
           } catch (err) {
             console.error('회신번호 로드 실패:', err);
           }
+        }}
+        onAlimtalkSend={() => {
+          // ★ D162-4 (2026-05-15): 알림톡 전용 풀 화면 모달 진입. 발신프로필/템플릿은 loadKakaoTemplates에서 이미 로드됨.
+          setShowAlimtalkSend(true);
         }}
         onCalendar={() => setShowCalendar(true)}
         onResults={() => setShowResults(true)}
@@ -3397,6 +3408,47 @@ const campaignData = {
           onClose={() => { setShowDirectSend(false); setKakaoMessage(''); setDirectSendChannel('sms'); }}
         />
       )}
+
+      {/* ★ D162-4 (2026-05-15) PDF 0515 알림톡 #1+#3 후속: 알림톡 발송 전용 풀 화면 모달.
+          Harold님 명시 — 직접발송 모달에 squeeze 사고 영구 종결. 좌측 채널 패널 + 우측 수신자/매칭/발송. */}
+      <AlimtalkSendModal
+        show={showAlimtalkSend}
+        onClose={() => setShowAlimtalkSend(false)}
+        alimtalkSenders={alimtalkSenders}
+        alimtalkTemplates={kakaoTemplates as any}
+        customerFieldOptions={[]}
+        alimtalkProfileId={alimtalkProfileId}
+        setAlimtalkProfileId={setAlimtalkProfileId}
+        kakaoSelectedTemplate={kakaoSelectedTemplate}
+        setKakaoSelectedTemplate={setKakaoSelectedTemplate}
+        kakaoTemplateVars={kakaoTemplateVars}
+        setKakaoTemplateVars={setKakaoTemplateVars}
+        alimtalkFallback={alimtalkFallback}
+        setAlimtalkFallback={setAlimtalkFallback}
+        alimtalkNextContents={alimtalkNextContents}
+        setAlimtalkNextContents={setAlimtalkNextContents}
+        onSendConfirm={(data) => {
+          // ★ 알림톡 모달 → Dashboard 발송 흐름 진입. 기존 executeDirectSend 흐름 그대로 활용 (isAlimtalk 분기).
+          setDirectRecipients(data.recipients);
+          setDirectSendChannel('kakao_alimtalk');
+          setKakaoSelectedTemplate(data.selectedTemplate);
+          setKakaoTemplateVars(data.variableMap);
+          setAlimtalkFallback(data.fallback);
+          setAlimtalkNextContents(data.nextContents);
+          setAlimtalkProfileId(data.profileId);
+          setSendConfirm({
+            show: data.show,
+            type: data.type,
+            count: data.count,
+            unsubscribeCount: data.unsubscribeCount,
+            duplicateCount: data.duplicateCount,
+            from: 'direct',
+            msgType: '알림톡',
+          } as any);
+          setShowAlimtalkSend(false);
+        }}
+        setToast={setToast}
+      />
 
       {/* ★ D152+ (PDF 0511 funnel fix): 직접발송 진입 시 AI 다듬기 안내 팝업 (24h 1회). */}
       <DirectSendAiRefinePopup

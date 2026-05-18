@@ -532,12 +532,14 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
           {/* ====== 좌측: 메시지 에디터 ====== */}
           <section className="ds-section">
 
-            {/* 채널 탭 */}
+            {/* 채널 탭
+                ★ D162-4 (2026-05-15): 알림톡 채널 탭 제거 — Harold님 명시 의도 정합.
+                  직접발송 모달 = SMS/RCS만. 알림톡은 Dashboard 메뉴 "알림톡 발송" → AlimtalkSendModal 풀 화면 모달 전용 진입.
+                  하위 알림톡 분기 코드(L1017+/L1062+/L1391+/L1418+/L470+)는 호환성을 위해 유지하되 채널 탭에서 진입 불가 → 무력화. */}
             <div className="ds-channel-group">
               {([
                 { key: 'sms' as const, label: '문자', Icon: MessageSquare, on: 'ds-pill--on' },
                 { key: 'rcs' as const, label: 'RCS', Icon: Smartphone, on: 'ds-pill--on-purple' },
-                { key: 'kakao_alimtalk' as const, label: '알림톡', Icon: Bell, on: 'ds-pill--on-blue' },
               ]).map(({ key, label, Icon, on }) => (
                 <button
                   key={key}
