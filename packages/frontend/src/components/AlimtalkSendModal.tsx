@@ -119,8 +119,6 @@ export default function AlimtalkSendModal({
       setShowMapping(false);
       setDirectInput('');
       setInputMode('direct');
-      // 수신자 — initialRecipients 있으면 그대로, 없으면 빈 배열
-      setRecipients(initialRecipients && initialRecipients.length > 0 ? initialRecipients : []);
       // ★ D162-4 (2026-05-15) 7차: 직접발송 진입 시 고객 DB 표준 필드 fetch — 변수 매칭 옵션 제공.
       //   Harold님 명시 정합. 직접타겟발송도 recipients[0] keys 우선이지만 fallback으로 활용.
       const token = localStorage.getItem('token');
@@ -137,6 +135,15 @@ export default function AlimtalkSendModal({
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [show]);
+
+  // ★ D162-4 (2026-05-15) 8차: initialRecipients 변경 감지 — Harold님 명시 정합.
+  //   직접타겟발송에서 추출된 수신자가 인계될 때 useEffect deps에 initialRecipients 누락되어 빈 배열로 박히던 사고 영구 차단.
+  //   show=true 시 initialRecipients가 있으면 그대로 박음, 없으면 빈 배열(직접발송 자체 입력).
+  //   매핑/state reset은 show=true 진입 시 1회만(위 useEffect) — 사용자 매핑 변경이 reset되는 사고 방지.
+  useEffect(() => {
+    if (!show) return;
+    setRecipients(initialRecipients && initialRecipients.length > 0 ? initialRecipients : []);
+  }, [show, initialRecipients]);
 
   // ★ D162-4 (2026-05-15) 3차: 파일 컬럼 매핑 모달 — Harold님 명시 정합 "직접발송과 똑같이 필드선택 가능".
   //   파일 업로드 직후 매핑 모달 진입 → 핸드폰 컬럼 + 템플릿 변수별 컬럼 매핑 → 적용 시 recipients + variableMap 자동 박힘.
