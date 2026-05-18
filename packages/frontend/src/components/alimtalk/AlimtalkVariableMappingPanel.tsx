@@ -98,59 +98,60 @@ export default function AlimtalkVariableMappingPanel({
     return null;
   }
 
+  // ★ D162-4 (2026-05-15) 4차: Harold님 명시 정합 — 한 줄에 4개씩 배치(반응형). 변수명 위 + 매핑 셀렉터 아래 카드 단위.
   return (
     <div className="border border-gray-200 rounded-xl bg-white shadow-sm p-3">
       <div className="flex items-center justify-between mb-2">
         <span className="text-xs font-semibold text-gray-700">변수 매칭</span>
         <span className="text-[10px] text-gray-400">{variables.length}개</span>
       </div>
-      <div className="space-y-1.5">
+      <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-2">
         {variables.map((varKey) => {
           const current = variableMap[varKey] || '';
           const isFieldRef = current.startsWith('@@') && current.endsWith('@@');
           const fieldKey = isFieldRef ? current.slice(2, -2) : '';
           return (
-            <div key={varKey} className="grid grid-cols-[90px_1fr] gap-2 items-center">
-              <span className="text-[11px] font-mono text-amber-700 bg-amber-50 rounded px-1.5 py-1 truncate">
+            <div
+              key={varKey}
+              className="flex flex-col gap-1 border border-gray-100 rounded-lg p-1.5 bg-gray-50/40 min-w-0"
+            >
+              <span className="text-[10px] font-mono text-amber-700 bg-amber-50 rounded px-1.5 py-0.5 truncate self-start">
                 {varKey}
               </span>
-              <div className="flex items-center gap-1.5">
-                {customerFieldOptions.length > 0 && (
-                  <select
-                    value={isFieldRef ? fieldKey : '__manual__'}
-                    onChange={(e) => {
-                      const v = e.target.value;
-                      if (v === '__manual__') {
-                        setVariable(varKey, '');
-                      } else {
-                        setVariable(varKey, `@@${v}@@`);
-                      }
-                    }}
-                    className="border border-gray-200 rounded px-1.5 py-1 text-[11px] max-w-[110px] shrink-0"
-                  >
-                    <option value="__manual__">직접 입력</option>
-                    {customerFieldOptions.map((f) => (
-                      <option key={f.key} value={f.key}>
-                        {f.label}
-                      </option>
-                    ))}
-                  </select>
-                )}
-                {!isFieldRef && (
-                  <input
-                    type="text"
-                    value={current}
-                    onChange={(e) => setVariable(varKey, e.target.value)}
-                    placeholder="값 입력"
-                    className="flex-1 border border-gray-200 rounded px-2 py-1 text-[11px] min-w-0"
-                  />
-                )}
-                {isFieldRef && (
-                  <span className="flex-1 text-[11px] text-emerald-700 bg-emerald-50 rounded px-2 py-1 truncate">
-                    {fieldKey}
-                  </span>
-                )}
-              </div>
+              {customerFieldOptions.length > 0 ? (
+                <select
+                  value={isFieldRef ? fieldKey : '__manual__'}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    if (v === '__manual__') {
+                      setVariable(varKey, '');
+                    } else {
+                      setVariable(varKey, `@@${v}@@`);
+                    }
+                  }}
+                  className="border border-gray-200 rounded px-1.5 py-1 text-[11px] w-full bg-white"
+                >
+                  <option value="__manual__">직접 입력</option>
+                  {customerFieldOptions.map((f) => (
+                    <option key={f.key} value={f.key}>
+                      {f.label}
+                    </option>
+                  ))}
+                </select>
+              ) : null}
+              {!isFieldRef ? (
+                <input
+                  type="text"
+                  value={current}
+                  onChange={(e) => setVariable(varKey, e.target.value)}
+                  placeholder="값 입력"
+                  className="border border-gray-200 rounded px-1.5 py-1 text-[11px] w-full min-w-0"
+                />
+              ) : (
+                <span className="text-[10px] text-emerald-700 bg-emerald-50 rounded px-1.5 py-1 truncate">
+                  컬럼: {fieldKey}
+                </span>
+              )}
             </div>
           );
         })}

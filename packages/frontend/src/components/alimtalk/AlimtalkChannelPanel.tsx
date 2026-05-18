@@ -74,6 +74,9 @@ interface Props {
   onChange: (v: AlimtalkChannelState) => void;
   /** 템플릿 목록이 비었을 때 안내용 콜백 (선택) */
   onRequestTemplates?: () => void;
+  /** ★ D162-4 (2026-05-15) 4차: 첫 수신자 row — 미리보기 치환 모드에서 실제 값으로 치환. (Harold님 명시 정합)
+   *   `@@필드키@@` placeholder는 row[필드키] 값으로 치환, 값이 비어 있으면 `{필드키}` 안내. */
+  sampleRecipient?: Record<string, any> | null;
 }
 
 const EMPTY_STATE: AlimtalkChannelState = {
@@ -113,6 +116,7 @@ export default function AlimtalkChannelPanel({
   value,
   onChange,
   onRequestTemplates,
+  sampleRecipient,
 }: Props) {
   const [previewMode, setPreviewMode] = useState<'template' | 'filled'>('filled');
 
@@ -202,17 +206,27 @@ export default function AlimtalkChannelPanel({
   const requiresNextContents = value.nextType === 'A' || value.nextType === 'B';
 
   // 미리보기 렌더: template content에서 변수 치환
+  // ★ D162-4 (2026-05-15) 4차: sampleRecipient가 있으면 실제 row 값으로 치환 (Harold님 명시 정합).
+  //   `@@필드키@@` placeholder → row[필드키] 값, 비어 있으면 `{필드키}` 안내 + 직접 입력값은 그대로.
   const renderPreview = (text: string | null | undefined): string => {
     if (!text) return '';
     let out = text;
     if (previewMode === 'filled') {
       Object.entries(value.variableMap).forEach(([k, v]) => {
         const escaped = k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-        const replacement = v
-          ? v.startsWith('@@') && v.endsWith('@@')
-            ? `{${v.slice(2, -2)}}` // @@name@@ → {name} 시각 표시
-            : v
-          : k;
+        let replacement: string;
+        if (v && v.startsWith('@@') && v.endsWith('@@')) {
+          const fieldKey = v.slice(2, -2);
+          const sampleVal = sampleRecipient?.[fieldKey];
+          replacement =
+            sampleVal != null && String(sampleVal).trim() !== ''
+              ? String(sampleVal)
+              : `{${fieldKey}}`;
+        } else if (v) {
+          replacement = v;
+        } else {
+          replacement = k;
+        }
         out = out.replace(new RegExp(escaped, 'g'), replacement);
       });
     }

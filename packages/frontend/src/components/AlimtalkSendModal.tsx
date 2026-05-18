@@ -115,6 +115,18 @@ export default function AlimtalkSendModal({
   const [fileAllData, setFileAllData] = useState<any[]>([]);
   const [phoneColumn, setPhoneColumn] = useState('');
 
+  // ★ D162-4 (2026-05-15) 4차: 매핑된 변수 컬럼 추출 — Harold님 명시 "리스트에 매핑 내용 표시" 정합.
+  //   kakaoTemplateVars의 값 중 `@@헤더@@` placeholder인 항목들의 헤더명만 unique 추출.
+  const mappedColumns = useMemo(() => {
+    return Array.from(
+      new Set(
+        Object.values(kakaoTemplateVars)
+          .filter((v): v is string => typeof v === 'string' && v.startsWith('@@') && v.endsWith('@@'))
+          .map((v) => v.slice(2, -2)),
+      ),
+    );
+  }, [kakaoTemplateVars]);
+
   // AlimtalkChannelPanel 통합 state
   const channelState: AlimtalkChannelState = useMemo(
     () => ({
@@ -353,6 +365,7 @@ export default function AlimtalkSendModal({
               customerFieldOptions={customerFieldOptions}
               value={channelState}
               onChange={handleChannelChange}
+              sampleRecipient={recipients[0] || null}
             />
           </div>
 
@@ -475,7 +488,7 @@ export default function AlimtalkSendModal({
                 </div>
               )}
 
-              {/* 수신자 목록 */}
+              {/* ★ D162-4 (2026-05-15) 4차: 수신자 목록 — 매핑된 변수 컬럼도 함께 표시. Harold님 명시 정합. */}
               {recipients.length > 0 && (
                 <div className="border border-gray-200 rounded-lg overflow-hidden">
                   <div className="bg-gray-50 px-3 py-1.5 border-b border-gray-200 flex items-center justify-between">
@@ -490,16 +503,42 @@ export default function AlimtalkSendModal({
                       전체삭제
                     </button>
                   </div>
-                  <div className="max-h-48 overflow-y-auto">
+                  <div className="max-h-48 overflow-y-auto overflow-x-auto">
                     <table className="w-full text-xs">
+                      {mappedColumns.length > 0 && (
+                        <thead className="bg-gray-50/70 sticky top-0">
+                          <tr>
+                            <th className="px-3 py-1 text-left text-[10px] font-medium text-gray-500 whitespace-nowrap">
+                              수신번호
+                            </th>
+                            {mappedColumns.map((col) => (
+                              <th
+                                key={col}
+                                className="px-3 py-1 text-left text-[10px] font-medium text-gray-500 whitespace-nowrap"
+                              >
+                                {col}
+                              </th>
+                            ))}
+                            <th className="px-3 py-1 text-right"></th>
+                          </tr>
+                        </thead>
+                      )}
                       <tbody>
                         {recipients.slice(0, 50).map((r, idx) => (
                           <tr
                             key={`${r.phone}-${idx}`}
                             className="border-b border-gray-100 last:border-0"
                           >
-                            <td className="px-3 py-1 font-mono text-gray-700">{r.phone}</td>
-                            <td className="px-3 py-1 text-right">
+                            <td className="px-3 py-1 font-mono text-gray-700 whitespace-nowrap">{r.phone}</td>
+                            {mappedColumns.map((col) => (
+                              <td
+                                key={col}
+                                className="px-3 py-1 text-gray-700 truncate max-w-[140px] whitespace-nowrap"
+                              >
+                                {r[col] != null && String(r[col]).trim() !== '' ? String(r[col]) : '-'}
+                              </td>
+                            ))}
+                            <td className="px-3 py-1 text-right whitespace-nowrap">
                               <button
                                 type="button"
                                 onClick={() =>
