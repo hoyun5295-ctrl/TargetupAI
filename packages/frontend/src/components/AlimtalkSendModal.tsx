@@ -121,25 +121,62 @@ export default function AlimtalkSendModal({
       setInputMode('direct');
       // 수신자 — initialRecipients 있으면 그대로, 없으면 빈 배열
       setRecipients(initialRecipients && initialRecipients.length > 0 ? initialRecipients : []);
+      // ★ D162-4 (2026-05-15) 7차: 직접발송 진입 시 고객 DB 표준 필드 fetch — 변수 매칭 옵션 제공.
+      //   Harold님 명시 정합. 직접타겟발송도 recipients[0] keys 우선이지만 fallback으로 활용.
+      const token = localStorage.getItem('token');
+      fetch('/api/customers/enabled-fields', { headers: { Authorization: `Bearer ${token}` } })
+        .then((r) => r.json())
+        .then((data) => {
+          if (data && Array.isArray(data.fields)) {
+            setEnabledFields(data.fields);
+          }
+        })
+        .catch(() => {
+          /* 권한/네트워크 실패 시 빈 배열 유지 — recipients[0] 또는 props fallback */
+        });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [show]);
 
-  // ★ D162-4 (2026-05-15) 5차: 동적 컬럼 옵션 — Harold님 명시 정합 "직접타겟발송에서는 컬럼을 선택할 수 있게".
-  //   recipients[0]의 keys(phone 외) 기반으로 동적 매핑 옵션 생성. 직접타겟발송도 자동으로 매칭 드롭다운에 컬럼 노출.
+  // ★ D162-4 (2026-05-15) 7차: 동적 컬럼 옵션 — Harold님 명시 정합 (직접발송 vs 직접타겟발송 차이 반영).
+  //   우선순위:
+  //   (1) 직접타겟발송 — recipients[0] keys(phone 외): 추출된 row의 실제 컬럼이 그대로 매칭 옵션
+  //   (2) 직접발송 — enabledFields(/api/customers/enabled-fields): 고객 DB 표준 필드(name/gender/birth_date 등)
+  //                  backend가 발송 시점에 phone으로 customers 조회 + 자동 치환 (기존 SMS 발송 패턴 동일)
+  //   (3) Fallback — props customerFieldOptions
   const dynamicFieldOptions = useMemo(() => {
+    // (1) 추출된 row가 있으면 그 keys 우선
     const sample = recipients[0];
-    if (!sample) return customerFieldOptions;
-    const keys = Object.keys(sample).filter((k) => k !== 'phone');
-    if (keys.length === 0) return customerFieldOptions;
-    return keys.map((k) => ({ key: k, label: k }));
-  }, [recipients, customerFieldOptions]);
+    if (sample) {
+      const keys = Object.keys(sample).filter((k) => k !== 'phone');
+      if (keys.length > 0) {
+        return keys.map((k) => ({ key: k, label: k }));
+      }
+    }
+    // (2) 고객 DB 표준 필드
+    if (enabledFields.length > 0) {
+      return enabledFields.map((f) => ({
+        key: f.field_key,
+        label: f.display_name || f.field_label || f.field_key,
+      }));
+    }
+    // (3) props fallback
+    return customerFieldOptions;
+  }, [recipients, enabledFields, customerFieldOptions]);
   // ★ D162-4 (2026-05-15) 3차: 파일 컬럼 매핑 모달 — Harold님 명시 정합 "직접발송과 똑같이 필드선택 가능".
   //   파일 업로드 직후 매핑 모달 진입 → 핸드폰 컬럼 + 템플릿 변수별 컬럼 매핑 → 적용 시 recipients + variableMap 자동 박힘.
   const [showMapping, setShowMapping] = useState(false);
   const [fileHeaders, setFileHeaders] = useState<string[]>([]);
   const [fileAllData, setFileAllData] = useState<any[]>([]);
   const [phoneColumn, setPhoneColumn] = useState('');
+  // ★ D162-4 (2026-05-15) 7차: 직접발송 진입 시 고객 DB 표준 필드(/api/customers/enabled-fields)를 변수 매칭 옵션으로 활용.
+  //   Harold님 명시 정합 "직접발송은 싱크에이전트나 이미 업로드된 고객DB를 가지고 보내는거잖아".
+  //   발송 시 backend가 phone으로 고객 조회 + 자동 치환(기존 SMS 발송 패턴 동일).
+  const [enabledFields, setEnabledFields] = useState<Array<{
+    field_key: string;
+    display_name?: string;
+    field_label?: string;
+  }>>([]);
 
   // ★ D162-4 (2026-05-15) 4차: 매핑된 변수 컬럼 추출 — Harold님 명시 "리스트에 매핑 내용 표시" 정합.
   //   kakaoTemplateVars의 값 중 `@@헤더@@` placeholder인 항목들의 헤더명만 unique 추출.
