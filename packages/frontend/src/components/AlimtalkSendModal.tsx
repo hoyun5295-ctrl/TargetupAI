@@ -100,14 +100,40 @@ export default function AlimtalkSendModal({
   // ★ D162-4 (2026-05-15) 2차: 주소록 진입 — Harold님 명시 정합. AddressBookModal 재사용 (recipients/setRecipients 위임).
   const [showAddressBook, setShowAddressBook] = useState(false);
 
-  // ★ D162-4 (2026-05-15) 4차: 직접타겟발송에서 추출된 수신자 그대로 인계 — Harold님 명시 정합.
-  //   show=true 진입 시 initialRecipients가 있으면 recipients 박음. 모달 닫으면 reset(직접발송에서 자체 입력 가능하도록).
+  // ★ D162-4 (2026-05-15) 5차: Harold님 명시 정합 — 알림톡 모달 진입 시 매핑/state 전체 reset.
+  //   기존엔 Dashboard 전역 state(kakaoTemplateVars/kakaoSelectedTemplate/등)가 직접발송 ↔ 직접타겟발송 간 유출되어
+  //   옛 매핑값이 새 모달에 그대로 노출되는 치명 사고 발생. show=true 진입 시 모든 알림톡 state 초기화 +
+  //   initialRecipients 있으면 그 값으로 recipients 박음.
   useEffect(() => {
-    if (show && initialRecipients && initialRecipients.length > 0) {
-      setRecipients(initialRecipients);
+    if (show) {
+      // 알림톡 채널/매핑 state 초기화 — 직접발송 ↔ 타겟발송 간 매핑 유출 차단
+      setKakaoSelectedTemplate(null);
+      setKakaoTemplateVars({});
+      setAlimtalkProfileId('');
+      setAlimtalkFallback('L');
+      setAlimtalkNextContents('');
+      // 파일 매핑/입력 state 초기화
+      setFileHeaders([]);
+      setFileAllData([]);
+      setPhoneColumn('');
+      setShowMapping(false);
+      setDirectInput('');
+      setInputMode('direct');
+      // 수신자 — initialRecipients 있으면 그대로, 없으면 빈 배열
+      setRecipients(initialRecipients && initialRecipients.length > 0 ? initialRecipients : []);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [show, initialRecipients]);
+  }, [show]);
+
+  // ★ D162-4 (2026-05-15) 5차: 동적 컬럼 옵션 — Harold님 명시 정합 "직접타겟발송에서는 컬럼을 선택할 수 있게".
+  //   recipients[0]의 keys(phone 외) 기반으로 동적 매핑 옵션 생성. 직접타겟발송도 자동으로 매칭 드롭다운에 컬럼 노출.
+  const dynamicFieldOptions = useMemo(() => {
+    const sample = recipients[0];
+    if (!sample) return customerFieldOptions;
+    const keys = Object.keys(sample).filter((k) => k !== 'phone');
+    if (keys.length === 0) return customerFieldOptions;
+    return keys.map((k) => ({ key: k, label: k }));
+  }, [recipients, customerFieldOptions]);
   // ★ D162-4 (2026-05-15) 3차: 파일 컬럼 매핑 모달 — Harold님 명시 정합 "직접발송과 똑같이 필드선택 가능".
   //   파일 업로드 직후 매핑 모달 진입 → 핸드폰 컬럼 + 템플릿 변수별 컬럼 매핑 → 적용 시 recipients + variableMap 자동 박힘.
   const [showMapping, setShowMapping] = useState(false);
@@ -362,7 +388,7 @@ export default function AlimtalkSendModal({
             <AlimtalkChannelPanel
               senders={alimtalkSenders}
               templates={alimtalkTemplates}
-              customerFieldOptions={customerFieldOptions}
+              customerFieldOptions={dynamicFieldOptions}
               value={channelState}
               onChange={handleChannelChange}
               sampleRecipient={recipients[0] || null}
@@ -376,7 +402,7 @@ export default function AlimtalkSendModal({
               selectedTemplate={kakaoSelectedTemplate}
               variableMap={kakaoTemplateVars}
               onVariableMapChange={(next) => setKakaoTemplateVars(next)}
-              customerFieldOptions={customerFieldOptions}
+              customerFieldOptions={dynamicFieldOptions}
               sampleRecipient={recipients[0] || null}
               recipientCount={recipients.length}
             />
