@@ -5,6 +5,7 @@ import {
   Brain,
   Check,
   Clock,
+  Copy,
   DollarSign,
   LineChart,
   Loader2,
@@ -12,11 +13,14 @@ import {
   RefreshCw,
   Send,
   Sparkles,
+  Star,
   Target,
   Wand2,
   Workflow,
   Zap,
 } from 'lucide-react';
+import AiRefineModal from '../components/AiRefineModal';
+import { useAuthStore } from '../stores/authStore';
 
 // ============================================================
 // 타입 정의
@@ -190,13 +194,16 @@ interface ResultCardProps {
   subtitle: string;
   description?: string;
   index: number;
+  extra?: React.ReactNode;       // ★ D165: 카드 본문 하단 풍부 인터랙션 슬롯 (3안 토글 / 차트 / breakdown 등)
+  className?: string;            // ★ D165: 그리드 col-span 등 외부 제어
+  truncateHeadline?: boolean;    // ★ D165: 메시지 카드처럼 긴 텍스트 truncate 끄기
 }
 
-function ResultCard({ accent, icon: Icon, label, headline, subtitle, description, index }: ResultCardProps) {
+function ResultCard({ accent, icon: Icon, label, headline, subtitle, description, index, extra, className, truncateHeadline = true }: ResultCardProps) {
   const tokens = ACCENT_TOKENS[accent];
   return (
     <div
-      className={`group relative p-6 rounded-2xl bg-white/[0.04] backdrop-blur-xl border ${tokens.border} hover:bg-white/[0.07] hover:scale-[1.01] transition-all duration-300 shadow-lg ${tokens.glow} animate-in fade-in slide-in-from-bottom-3 fill-mode-both`}
+      className={`group relative p-6 rounded-2xl bg-white/[0.04] backdrop-blur-xl border ${tokens.border} hover:bg-white/[0.07] hover:scale-[1.01] transition-all duration-300 shadow-lg ${tokens.glow} animate-in fade-in slide-in-from-bottom-3 fill-mode-both ${className || ''}`}
       style={{ animationDelay: `${index * 60}ms`, animationDuration: '500ms' }}
     >
       <div className="flex items-start gap-4 mb-4">
@@ -205,13 +212,14 @@ function ResultCard({ accent, icon: Icon, label, headline, subtitle, description
         </div>
         <div className="flex-1 min-w-0">
           <p className={`text-[10px] font-semibold tracking-[0.22em] uppercase mb-1 ${tokens.text}`}>{label}</p>
-          <p className="text-2xl font-bold text-white truncate" title={headline}>{headline}</p>
+          <p className={`text-2xl font-bold text-white ${truncateHeadline ? 'truncate' : ''}`} title={headline}>{headline}</p>
           <p className="text-xs text-white/50 mt-0.5">{subtitle}</p>
         </div>
       </div>
       {description && (
-        <p className="text-sm text-white/65 leading-relaxed pl-15 line-clamp-3">{description}</p>
+        <p className="text-sm text-white/65 leading-relaxed line-clamp-3 mb-3">{description}</p>
       )}
+      {extra && <div className="mt-1">{extra}</div>}
     </div>
   );
 }
@@ -222,12 +230,19 @@ function ResultCard({ accent, icon: Icon, label, headline, subtitle, description
 
 export default function AiOperatorPage() {
   const navigate = useNavigate();
+  const { user } = useAuthStore();
+  const companyName = (user as any)?.company?.name || '';
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [objective, setObjective] = useState('');
   const [loading, setLoading] = useState(false);
   const [progressStep, setProgressStep] = useState(0);
   const [proposal, setProposal] = useState<ProposalResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // ★ D165: 메시지 3안 토글 + 다듬기 모달 + 다듬기 결과 오버라이드
+  const [selectedVariantIdx, setSelectedVariantIdx] = useState(0);
+  const [showRefineModal, setShowRefineModal] = useState(false);
+  const [refinedOverrides, setRefinedOverrides] = useState<Record<number, string>>({});
+  const [copiedAt, setCopiedAt] = useState<number | null>(null);
 
   // textarea 자동 높이 조절
   useEffect(() => {
@@ -500,64 +515,260 @@ export default function AiOperatorPage() {
               </span>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
-              <ResultCard
-                index={0}
-                accent="rose"
-                icon={Target}
-                label="추천 타겟"
-                headline={`${proposal.target.count.toLocaleString()}명`}
-                subtitle={`전체 ${proposal.target.totalCount.toLocaleString()}명 중 ${proposal.target.totalCount > 0 ? ((proposal.target.count / proposal.target.totalCount) * 100).toFixed(1) : 0}%`}
-                description={proposal.target.criteria}
-              />
-              <ResultCard
-                index={1}
-                accent="amber"
-                icon={MessageSquare}
-                label="추천 메시지"
-                headline={proposal.messages[0]?.variantName || '문안'}
-                subtitle={`${proposal.messages.length}개 안 생성 · ${proposal.recommendation || 'A안 추천'}`}
-                description={proposal.messages[0]?.smsText || proposal.messages[0]?.lmsText || ''}
-              />
-              <ResultCard
-                index={2}
-                accent="emerald"
-                icon={Send}
-                label="추천 채널"
-                headline={proposal.channel.recommended}
-                subtitle={proposal.channel.isAd ? '광고 메시지' : '정보 메시지'}
-                description={proposal.channel.reason}
-              />
-              <ResultCard
-                index={3}
-                accent="cyan"
-                icon={Clock}
-                label="발송 시점"
-                headline={formatScheduleTime(proposal.schedule.recommendedTime)}
-                subtitle="한국 시간 (KST)"
-                description="AI 추천 최적 발송 시간 · 도착률 + 응답률 기반"
-              />
-              <ResultCard
-                index={4}
-                accent="violet"
-                icon={DollarSign}
-                label="예상 비용"
-                headline={`${proposal.cost.estimated.toLocaleString()}원`}
-                subtitle={proposal.cost.breakdown}
-                description={`회사별 단가 자동 적용 · 단가 ${proposal.cost.unitCost.toLocaleString()}원/건`}
-              />
-              <ResultCard
-                index={5}
-                accent="fuchsia"
-                icon={LineChart}
-                label="예상 성과"
-                headline={`+${proposal.performance.expectedRevenue.toLocaleString()}원`}
-                subtitle={`클릭 ${proposal.performance.expectedClicks.toLocaleString()} · 전환 ${proposal.performance.expectedConversions.toLocaleString()}`}
-                description={`예상 클릭률 ${(proposal.performance.clickRate * 100).toFixed(1)}% · 전환률 ${(proposal.performance.conversionRate * 100).toFixed(1)}% · 고객 평균 매출 기반 추정`}
-              />
-            </div>
+            {(() => {
+              // ★ D165: 메시지 3안 토글 — 다듬기 결과가 있으면 오버라이드 사용
+              const variants = proposal.messages;
+              const safeIdx = Math.min(selectedVariantIdx, Math.max(0, variants.length - 1));
+              const activeVariant = variants[safeIdx];
+              const isRecommended = (proposal.recommendation || '').includes(activeVariant?.variantId || '__none__')
+                || (proposal.recommendation || '').includes(activeVariant?.variantName || '__none__');
+              const activeChannel = (proposal.channel.recommended || 'SMS').toUpperCase();
+              const overrideText = refinedOverrides[safeIdx];
+              const baseBody = activeChannel === 'SMS' ? (activeVariant?.smsText || '') : (activeVariant?.lmsText || activeVariant?.smsText || '');
+              const activeBody = overrideText || baseBody;
+              const bytesLen = (s: string) => {
+                let bytes = 0;
+                for (let i = 0; i < s.length; i++) {
+                  const code = s.charCodeAt(i);
+                  bytes += code > 0x7F ? 2 : 1;
+                }
+                return bytes;
+              };
+              const activeBytes = bytesLen(activeBody);
 
-            {/* CTA */}
+              return (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+                  {/* ============= 추천 메시지 (full width — D165 핵심 인터랙션) ============= */}
+                  <ResultCard
+                    index={0}
+                    accent="amber"
+                    icon={MessageSquare}
+                    label="추천 메시지"
+                    headline={activeVariant?.variantName || '문안'}
+                    subtitle={`${variants.length}개 안 생성 · ${activeChannel} · ${activeBytes} bytes${overrideText ? ' · 다듬어진 안' : ''}`}
+                    truncateHeadline={false}
+                    className="md:col-span-2"
+                    extra={
+                      <div className="mt-3">
+                        {/* 3안 토글 탭 */}
+                        <div className="flex items-center gap-2 mb-3 flex-wrap">
+                          {variants.map((v, idx) => {
+                            const isActive = idx === safeIdx;
+                            const isAnswerRecommended = (proposal.recommendation || '').includes(v.variantId)
+                              || (proposal.recommendation || '').includes(v.variantName);
+                            return (
+                              <button
+                                key={v.variantId}
+                                type="button"
+                                onClick={() => setSelectedVariantIdx(idx)}
+                                className={`group/tab relative px-3.5 py-1.5 rounded-lg text-xs font-medium transition-all flex items-center gap-1.5 ${
+                                  isActive
+                                    ? 'bg-gradient-to-r from-amber-400/30 to-fuchsia-400/30 text-white border border-amber-300/40 shadow-md'
+                                    : 'bg-white/[0.04] text-white/55 border border-white/10 hover:bg-white/[0.08] hover:text-white/80'
+                                }`}
+                              >
+                                {isAnswerRecommended && (
+                                  <Star className={`w-3 h-3 ${isActive ? 'text-amber-300 fill-amber-300' : 'text-amber-400/60 fill-amber-400/60'}`} />
+                                )}
+                                <span>{v.variantName || `${String.fromCharCode(65 + idx)}안`}</span>
+                                {v.score > 0 && (
+                                  <span className={`ml-0.5 text-[10px] tabular-nums ${isActive ? 'text-amber-200' : 'text-white/40'}`}>
+                                    {v.score}
+                                  </span>
+                                )}
+                              </button>
+                            );
+                          })}
+                          {isRecommended && (
+                            <span className="ml-auto text-[10px] font-semibold tracking-[0.2em] uppercase text-amber-300/80">
+                              AI Recommended
+                            </span>
+                          )}
+                        </div>
+
+                        {/* 콘셉트 */}
+                        {activeVariant?.concept && (
+                          <p className="text-xs text-white/45 mb-2">
+                            <span className="font-semibold text-white/60">콘셉트:</span> {activeVariant.concept}
+                          </p>
+                        )}
+
+                        {/* 본문 박스 */}
+                        <div className="relative p-4 rounded-xl bg-indigo-950/60 border border-white/10 mb-3">
+                          <pre className="whitespace-pre-wrap break-words text-sm text-white/85 leading-relaxed font-sans">
+                            {activeBody || '메시지 본문이 비어있습니다.'}
+                          </pre>
+                          {overrideText && (
+                            <button
+                              type="button"
+                              onClick={() => setRefinedOverrides((prev) => {
+                                const next = { ...prev };
+                                delete next[safeIdx];
+                                return next;
+                              })}
+                              className="absolute top-2 right-2 px-2 py-0.5 rounded-full text-[10px] font-medium bg-emerald-500/20 text-emerald-200 border border-emerald-400/30 hover:bg-emerald-500/30 transition-all"
+                              title="원본 안으로 되돌리기"
+                            >
+                              다듬어짐 · 되돌리기
+                            </button>
+                          )}
+                        </div>
+
+                        {/* 메시지 액션 */}
+                        <div className="flex gap-2 flex-wrap">
+                          <button
+                            type="button"
+                            onClick={() => setShowRefineModal(true)}
+                            disabled={!activeBody}
+                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-gradient-to-r from-amber-400/20 to-fuchsia-400/20 text-amber-100 border border-amber-300/30 hover:from-amber-400/30 hover:to-fuchsia-400/30 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed transition-all"
+                          >
+                            <Wand2 className="w-3.5 h-3.5" />
+                            AI로 다듬기
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (!activeBody) return;
+                              navigator.clipboard.writeText(activeBody).then(() => {
+                                setCopiedAt(Date.now());
+                                setTimeout(() => setCopiedAt(null), 1500);
+                              });
+                            }}
+                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-white/5 text-white/70 border border-white/10 hover:bg-white/10 hover:text-white transition-all"
+                          >
+                            {copiedAt ? <Check className="w-3.5 h-3.5 text-emerald-300" /> : <Copy className="w-3.5 h-3.5" />}
+                            {copiedAt ? '복사 완료' : '본문 복사'}
+                          </button>
+                        </div>
+                      </div>
+                    }
+                  />
+
+                  {/* ============= 추천 타겟 ============= */}
+                  <ResultCard
+                    index={1}
+                    accent="rose"
+                    icon={Target}
+                    label="추천 타겟"
+                    headline={`${proposal.target.count.toLocaleString()}명`}
+                    subtitle={`전체 ${proposal.target.totalCount.toLocaleString()}명 중 ${proposal.target.totalCount > 0 ? ((proposal.target.count / proposal.target.totalCount) * 100).toFixed(1) : 0}%`}
+                    description={proposal.target.criteria}
+                  />
+
+                  {/* ============= 추천 채널 ============= */}
+                  <ResultCard
+                    index={2}
+                    accent="emerald"
+                    icon={Send}
+                    label="추천 채널"
+                    headline={proposal.channel.recommended}
+                    subtitle={proposal.channel.isAd ? '광고 메시지 (Ad)' : '정보 메시지 (Info)'}
+                    description={proposal.channel.reason}
+                  />
+
+                  {/* ============= 발송 시점 ============= */}
+                  <ResultCard
+                    index={3}
+                    accent="cyan"
+                    icon={Clock}
+                    label="발송 시점"
+                    headline={formatScheduleTime(proposal.schedule.recommendedTime)}
+                    subtitle="한국 시간 (KST)"
+                    description="AI 추천 최적 발송 시간 · 도착률 + 응답률 기반"
+                  />
+
+                  {/* ============= 예상 비용 (breakdown 강화) ============= */}
+                  <ResultCard
+                    index={4}
+                    accent="violet"
+                    icon={DollarSign}
+                    label="예상 비용"
+                    headline={`${proposal.cost.estimated.toLocaleString()}원`}
+                    subtitle={`${activeChannel} ${proposal.target.count.toLocaleString()}건`}
+                    truncateHeadline={false}
+                    extra={
+                      <div className="mt-2 space-y-1.5">
+                        <div className="flex items-center justify-between text-xs text-white/60 px-2 py-1.5 rounded-md bg-white/5 border border-white/10">
+                          <span>건당 단가</span>
+                          <span className="font-mono font-semibold text-white">{proposal.cost.unitCost.toLocaleString()}원</span>
+                        </div>
+                        <div className="flex items-center justify-between text-xs text-white/60 px-2 py-1.5 rounded-md bg-white/5 border border-white/10">
+                          <span>발송 건수</span>
+                          <span className="font-mono font-semibold text-white">{proposal.target.count.toLocaleString()}건</span>
+                        </div>
+                        <div className="flex items-center justify-between text-xs px-2 py-1.5 rounded-md bg-gradient-to-r from-violet-500/15 to-purple-500/15 border border-violet-400/30">
+                          <span className="font-semibold text-violet-200">총 예상 비용</span>
+                          <span className="font-mono font-bold text-white">{proposal.cost.estimated.toLocaleString()}원</span>
+                        </div>
+                      </div>
+                    }
+                  />
+
+                  {/* ============= 예상 성과 (full width — 미니 차트) ============= */}
+                  <ResultCard
+                    index={5}
+                    accent="fuchsia"
+                    icon={LineChart}
+                    label="예상 성과"
+                    headline={`+${proposal.performance.expectedRevenue.toLocaleString()}원`}
+                    subtitle="고객 평균 매출 × 예상 전환 수 기반 추정"
+                    truncateHeadline={false}
+                    className="md:col-span-2"
+                    extra={
+                      <div className="mt-3 grid grid-cols-1 sm:grid-cols-3 gap-3">
+                        {/* 클릭률 */}
+                        <div className="p-3 rounded-xl bg-white/5 border border-white/10">
+                          <div className="flex items-center justify-between mb-1.5">
+                            <span className="text-[10px] font-semibold tracking-wider uppercase text-fuchsia-200">예상 클릭</span>
+                            <span className="text-xs font-mono font-bold text-white">{proposal.performance.expectedClicks.toLocaleString()}</span>
+                          </div>
+                          <div className="h-1.5 bg-white/10 rounded-full overflow-hidden">
+                            <div
+                              className="h-full bg-gradient-to-r from-fuchsia-400 to-pink-400 rounded-full transition-all duration-700"
+                              style={{ width: `${Math.min(100, proposal.performance.clickRate * 100 * 10)}%` }}
+                            />
+                          </div>
+                          <p className="text-[10px] text-white/40 mt-1">CTR {(proposal.performance.clickRate * 100).toFixed(1)}%</p>
+                        </div>
+
+                        {/* 전환률 */}
+                        <div className="p-3 rounded-xl bg-white/5 border border-white/10">
+                          <div className="flex items-center justify-between mb-1.5">
+                            <span className="text-[10px] font-semibold tracking-wider uppercase text-fuchsia-200">예상 전환</span>
+                            <span className="text-xs font-mono font-bold text-white">{proposal.performance.expectedConversions.toLocaleString()}</span>
+                          </div>
+                          <div className="h-1.5 bg-white/10 rounded-full overflow-hidden">
+                            <div
+                              className="h-full bg-gradient-to-r from-amber-400 to-rose-400 rounded-full transition-all duration-700"
+                              style={{ width: `${Math.min(100, proposal.performance.conversionRate * 100 * 30)}%` }}
+                            />
+                          </div>
+                          <p className="text-[10px] text-white/40 mt-1">CVR {(proposal.performance.conversionRate * 100).toFixed(2)}%</p>
+                        </div>
+
+                        {/* ROI */}
+                        <div className="p-3 rounded-xl bg-gradient-to-br from-fuchsia-500/10 to-pink-500/10 border border-fuchsia-400/30">
+                          <div className="flex items-center justify-between mb-1.5">
+                            <span className="text-[10px] font-semibold tracking-wider uppercase text-fuchsia-200">예상 ROI</span>
+                            <span className="text-xs font-mono font-bold text-white">
+                              {proposal.cost.estimated > 0
+                                ? `${Math.round((proposal.performance.expectedRevenue / proposal.cost.estimated) * 100).toLocaleString()}%`
+                                : '—'}
+                            </span>
+                          </div>
+                          <p className="text-[10px] text-white/55 mt-2 leading-relaxed">
+                            매출 {proposal.performance.expectedRevenue.toLocaleString()}원<br />
+                            ÷ 비용 {proposal.cost.estimated.toLocaleString()}원
+                          </p>
+                        </div>
+                      </div>
+                    }
+                  />
+                </div>
+              );
+            })()}
+
+            {/* CTA — D165에서 "메시지 다듬기"는 메시지 카드 내부로 이동, 여기는 발송/리셋만 */}
             <div className="flex flex-col sm:flex-row gap-3">
               <button
                 type="button"
@@ -567,15 +778,6 @@ export default function AiOperatorPage() {
               >
                 <Send className="w-4 h-4" />
                 승인 발송 <span className="text-[10px] font-mono opacity-70">D166</span>
-              </button>
-              <button
-                type="button"
-                disabled
-                className="px-6 py-3.5 rounded-xl bg-white/5 text-white/70 font-medium border border-white/15 opacity-40 cursor-not-allowed flex items-center justify-center gap-2"
-                title="D165에서 박힐 예정"
-              >
-                <Wand2 className="w-4 h-4" />
-                메시지 다듬기 <span className="text-[10px] font-mono opacity-70">D165</span>
               </button>
               <button
                 type="button"
@@ -702,6 +904,25 @@ export default function AiOperatorPage() {
           </>
         )}
       </main>
+
+      {/* ★ D165: 메시지 다듬기 모달 — AiRefineModal 재사용 (D152 emerald 톤). 선택된 안 → AI 풍성화 → onApply로 오버라이드 박힘 */}
+      <AiRefineModal
+        isOpen={showRefineModal}
+        originalMessage={(() => {
+          if (!proposal) return '';
+          const idx = Math.min(selectedVariantIdx, Math.max(0, proposal.messages.length - 1));
+          const v = proposal.messages[idx];
+          if (!v) return '';
+          const ch = (proposal.channel.recommended || 'SMS').toUpperCase();
+          return refinedOverrides[idx] || (ch === 'SMS' ? v.smsText : (v.lmsText || v.smsText));
+        })()}
+        companyName={companyName}
+        onClose={() => setShowRefineModal(false)}
+        onApply={(text) => {
+          setRefinedOverrides((prev) => ({ ...prev, [selectedVariantIdx]: text }));
+          setShowRefineModal(false);
+        }}
+      />
     </div>
   );
 }
