@@ -51,6 +51,7 @@ import { getMmsImagePath, getMmsImageDisplayName, toMmsImagePaths, type MmsImage
 import DirectSendPanel from '../components/DirectSendPanel';
 import AlimtalkSendModal from '../components/AlimtalkSendModal';
 import DirectSendAiRefinePopup from '../components/DirectSendAiRefinePopup';
+import BetaFeatureModal from '../components/BetaFeatureModal';
 
 interface Stats {
   total: string;
@@ -151,6 +152,8 @@ export default function Dashboard() {
   const [showSpamFilterLock, setShowSpamFilterLock] = useState(false);
   const [showPlanApproval, setShowPlanApproval] = useState(false);
   const [planApproval, setPlanApproval] = useState<{requestId: string; planName: string} | null>(null);
+  // ★ D163 (2026-05-19) Braze급 SaaS Step 0 — AI Operator 베타 모달 (전체 등급 노출, ENT+만 실제 진입)
+  const [showBetaModal, setShowBetaModal] = useState(false);
 
   const [stats, setStats] = useState<Stats | null>(null);
   const [planInfo, setPlanInfo] = useState<PlanInfo | null>(null);
@@ -2243,6 +2246,15 @@ const campaignData = {
         department={(user as any)?.department}
         isCompanyAdmin={user?.userType === 'company_admin'}
         planCode={planInfo?.plan_code}
+        onAiOperatorClick={() => {
+          // ★ D163: AI Operator 메뉴 클릭 — ENT/BUSINESS만 실제 진입, 그 외는 BetaFeatureModal
+          const code = planInfo?.plan_code;
+          if (code === 'ENTERPRISE' || code === 'BUSINESS') {
+            navigate('/ai-operator');
+          } else {
+            setShowBetaModal(true);
+          }
+        }}
         onDirectSend={async () => {
           setShowDirectSend(true);
           // ★ D162-4 (2026-05-15): 직접발송 모달 진입 시 채널 강제 SMS reset.
@@ -3781,6 +3793,10 @@ const campaignData = {
 
       {/* AI 활용 안내 팝업 — 로그인 직후 1회 노출 (24h localStorage 차단) */}
       <AiGuidePopup />
+
+      {/* ★ D163 (2026-05-19) Braze급 SaaS Step 0 — AI Operator 베타 안내 모달.
+          ENT/BUSINESS 외 등급 사용자가 헤더 "AI Operator" 메뉴 클릭 시 노출. */}
+      <BetaFeatureModal show={showBetaModal} onClose={() => setShowBetaModal(false)} />
 
       {/* 하단 링크 */}
       <div className="max-w-7xl mx-auto px-4 py-6 mt-8 border-t border-gray-200 text-center text-xs text-gray-400 space-x-3">

@@ -182,6 +182,23 @@ export function isSubscriptionBlocked(ctx: PlanContext): { blocked: boolean; rea
 }
 
 // ═══════════════════════════════════════════════════════════
+// 베타 기능 접근 판정 (D163 신설 — Braze급 SaaS 9 세션 분할)
+// ═══════════════════════════════════════════════════════════
+
+/**
+ * Braze급 베타 기능 접근 허용 여부.
+ *
+ * 정책 (D162-5 Harold님 확정):
+ *   - ENTERPRISE / BUSINESS = 베타 기능 실제 진입 허용
+ *   - 그 외 (TRIAL/FREE/STARTER/BASIC/PRO) = BetaFeatureModal 표시
+ *
+ * 안정성 검증 후 단계적 확장 예정 (PRO → BASIC).
+ */
+export function isBetaAccessAllowed(ctx: PlanContext): boolean {
+  return ctx.planCode === 'ENTERPRISE' || ctx.planCode === 'BUSINESS';
+}
+
+// ═══════════════════════════════════════════════════════════
 // 기능별 체크 — canUseFeature
 // ═══════════════════════════════════════════════════════════
 

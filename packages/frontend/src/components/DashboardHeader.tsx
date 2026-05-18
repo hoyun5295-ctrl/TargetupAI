@@ -23,9 +23,13 @@ interface DashboardHeaderProps {
   onSubscriptionLocked?: () => void;
   // ★ ENTERPRISE 전용 기능 게이팅 (자동발송, 카카오&RCS)
   planCode?: string;
+  // ★ D163 (2026-05-19) Braze급 SaaS Step 0 — AI Operator 베타 메뉴.
+  //   클릭 시 Dashboard.tsx에서 isBetaAccessAllowed 게이팅:
+  //   ENTERPRISE/BUSINESS = /ai-operator 진입 / 그 외 = BetaFeatureModal 표시.
+  onAiOperatorClick?: () => void;
 }
 
-type MenuColor = 'green' | 'gold' | 'gray';
+type MenuColor = 'green' | 'gold' | 'gray' | 'beta';
 
 interface MenuItem {
   label: string;
@@ -33,14 +37,17 @@ interface MenuItem {
   color: MenuColor;
   emphasized?: boolean;
   locked?: boolean;
+  betaBadge?: boolean; // ★ D163: BETA 뱃지 노출 (AI Operator 등 베타 메뉴)
   path?: string; // 현재 페이지 활성 감지용
 }
 
 // ★ D95: 필(pill) 스타일 메뉴 — 밑줄 제거, 호버/강조 시 배경색
+// ★ D163: 'beta' 색상 추가 — AI Operator 등 베타 메뉴 강조 (그라데이션 amber→fuchsia)
 const COLOR_CONFIG: Record<MenuColor, { text: string; hoverText: string; hoverBg: string; activeBg: string; activeText: string }> = {
   green: { text: '#4b5563', hoverText: '#15803d', hoverBg: '#f0fdf4', activeBg: '#ecfdf5', activeText: '#15803d' },
   gold:  { text: '#4b5563', hoverText: '#b45309', hoverBg: '#fffbeb', activeBg: '#fef3c7', activeText: '#b45309' },
   gray:  { text: '#9ca3af', hoverText: '#6b7280', hoverBg: '#f3f4f6', activeBg: '#f3f4f6', activeText: '#6b7280' },
+  beta:  { text: '#4b5563', hoverText: '#a21caf', hoverBg: '#fdf4ff', activeBg: '#fae8ff', activeText: '#a21caf' },
 };
 
 export default function DashboardHeader({
@@ -59,6 +66,7 @@ export default function DashboardHeader({
   isSubscriptionLocked,
   onSubscriptionLocked,
   planCode,
+  onAiOperatorClick,
 }: DashboardHeaderProps) {
   const navigate = useNavigate();
   const location = useLocation();
@@ -87,6 +95,18 @@ export default function DashboardHeader({
   };
 
   const menuItems: MenuItem[] = [
+    // ★ D163 (2026-05-19) Braze급 SaaS Step 0 — AI Operator 베타 메뉴.
+    //   메뉴 자체는 전체 등급 노출 (마케팅 효과 + "곧 어마어마한 기능 옵니다" 인지).
+    //   클릭 시 Dashboard.tsx에서 isBetaAccessAllowed 게이팅 후 진입/BetaFeatureModal 분기.
+    ...(onAiOperatorClick
+      ? [{
+          label: 'AI Operator',
+          onClick: onAiOperatorClick,
+          color: 'beta' as MenuColor,
+          betaBadge: true,
+          path: '/ai-operator',
+        }]
+      : []),
     {
       label: '자동발송',
       onClick: () => enterpriseGuard('자동발송', '반복 발송 스케줄을 설정하면 자동으로 메시지가 발송됩니다.',
@@ -164,7 +184,7 @@ export default function DashboardHeader({
                 onClick={item.onClick}
                 onMouseEnter={() => setHoveredIdx(idx)}
                 onMouseLeave={() => setHoveredIdx(null)}
-                className="px-3.5 py-1.5 text-[13px] rounded-lg transition-all duration-200 flex items-center gap-1 tracking-wide"
+                className="px-3.5 py-1.5 text-[13px] rounded-lg transition-all duration-200 flex items-center gap-1.5 tracking-wide"
                 style={{
                   color: textColor,
                   backgroundColor: bgColor,
@@ -173,6 +193,11 @@ export default function DashboardHeader({
               >
                 {item.locked && <span className="text-xs">🔒</span>}
                 {item.label}
+                {item.betaBadge && (
+                  <span className="text-[9px] font-bold tracking-wider px-1.5 py-0.5 rounded-full bg-gradient-to-r from-amber-400 to-fuchsia-500 text-white shadow-sm">
+                    BETA
+                  </span>
+                )}
               </button>
             );
           })}
