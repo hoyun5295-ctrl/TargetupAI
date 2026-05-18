@@ -892,6 +892,9 @@ export async function generateMessages(
     availableVars?: string[];
     // ★ D120: 고객사 최근 발송 문안 (few-shot 학습용)
     recentMessages?: string[];
+    // ★ D170+ (2026-05-19) Harold 명시 — AI Operator 메시지 = Opus 4.7로 격상:
+    //   기본 호출(/generate-message)은 sonnet, AI Operator는 'opus' 전달.
+    model?: 'sonnet' | 'opus' | 'haiku';
   }
 ): Promise<AIRecommendResult> {
   if (!process.env.ANTHROPIC_API_KEY) {
@@ -1007,8 +1010,9 @@ ${usePersonalization ? `- 사용할 개인화 변수: ${personalizationTags}
       userMessage,
       maxTokens: 2048,
       temperature: 0.7,
+      model: extraContext?.model, // ★ D170+: AI Operator는 'opus' 전달 (1M ctx + 회사 history 활용 본문 품질 최상)
     });
-    
+
     let jsonStr = text;
     if (text.includes('```json')) {
       const start = text.indexOf('```json') + 7;

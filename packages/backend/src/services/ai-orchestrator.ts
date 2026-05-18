@@ -70,6 +70,7 @@ export interface OrchestratorResult {
     recommended: string;
     reason: string;
     isAd: boolean;
+    rejectNumber: string | null;  // ★ D170+ (Harold 명시): 광고 메시지 미리보기에 (광고)+무료거부 자동 합성 정보
   };
   schedule: {
     recommendedTime: string;
@@ -336,6 +337,8 @@ export async function orchestrate(ctx: AgentContext): Promise<OrchestratorResult
       personalizationVars: targetResult.personalization_vars,
       availableVarsCatalog: varCatalog,
       availableVars: availableVars,
+      // ★ D170+ (Harold 명시 2026-05-19): Message Sub-agent = Opus 4.7 (1M ctx + 본문 품질 최상)
+      model: 'opus',
     }
   );
   mark('message', messageStart);
@@ -390,6 +393,7 @@ export async function orchestrate(ctx: AgentContext): Promise<OrchestratorResult
       recommended: targetResult.recommended_channel,
       reason: targetResult.channel_reason,
       isAd: !!targetResult.is_ad,
+      rejectNumber: (ctx.companyInfo.reject_number as string) || null, // ★ Harold 명시: 광고+무료거부 자동 합성용
     },
     schedule: {
       recommendedTime: targetResult.recommended_time,

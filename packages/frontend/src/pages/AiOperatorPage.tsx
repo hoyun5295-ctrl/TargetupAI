@@ -65,6 +65,7 @@ interface ProposalResponse {
     recommended: string;
     reason: string;
     isAd: boolean;
+    rejectNumber?: string | null;  // ★ Harold 명시: 광고 메시지 미리보기에 (광고)+무료거부 자동 합성
   };
   schedule: {
     recommendedTime: string;
@@ -682,7 +683,17 @@ export default function AiOperatorPage() {
               const activeChannel = (proposal.channel.recommended || 'SMS').toUpperCase();
               const overrideText = refinedOverrides[safeIdx];
               const baseBody = activeVariant?.body || '';
-              const activeBody = overrideText || baseBody;
+              const rawActiveBody = overrideText || baseBody;
+              // ★ Harold 명시 (2026-05-19): 광고 메시지면 (광고) prefix + 무료거부 suffix 자동 합성 — 실제 발송 형태 미리보기
+              //   원본(rawActiveBody)은 다듬기/발송 시 그대로 사용. 표시(activeBody)만 합성 — 실 발송은 /direct-send가 adEnabled=true로 자동 박음.
+              const isAd = !!proposal.channel.isAd;
+              const rawReject = proposal.channel.rejectNumber || '';
+              const formattedReject = rawReject
+                ? rawReject.replace(/[^0-9]/g, '').replace(/^(\d{3,4})(\d{3,4})(\d{4})$/, '$1-$2-$3')
+                : '';
+              const activeBody = (isAd && rawReject && rawActiveBody)
+                ? `(광고)\n${rawActiveBody}\n무료거부 ${formattedReject || rawReject}`
+                : rawActiveBody;
               const bytesLen = (s: string) => {
                 let bytes = 0;
                 for (let i = 0; i < s.length; i++) {
