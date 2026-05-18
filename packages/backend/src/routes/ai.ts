@@ -9,7 +9,8 @@ import { getStoreScope } from '../utils/store-scope';
 import { buildFilterWhereClauseCompat } from '../utils/customer-filter';
 import { aggregateCampaignPerformance } from '../utils/stats-aggregation';
 import { formatDateValue, getOpt080Number } from '../utils/messageUtils';
-import { loadPlanContext, canUseFeature, requirePlanFeature } from '../utils/plan-guard';
+import { loadPlanContext, canUseFeature, requirePlanFeature, isBetaAccessAllowed } from '../utils/plan-guard';
+import { getCompanyCosts } from '../config/defaults';
 
 
 // ★ D79: 인라인 래퍼 제거 → CT-01 buildFilterWhereClauseCompat 직접 사용
@@ -851,6 +852,169 @@ router.post('/refine-message', requirePlanFeature('ai_messaging'), async (req: R
   } catch (err: any) {
     console.error('[ai/refine-message] 오류:', err);
     return res.status(500).json({ success: false, error: err?.message || 'AI 다듬기 실패' });
+  }
+});
+
+// ============================================================
+// ★ D164 (2026-05-19) Braze급 SaaS Step 0 — AI Operator 통합 제안서
+// 한 줄 명령 → recommendTarget + generateMessages 통합 응답
+// ENTERPRISE/BUSINESS 베타 게이팅 적용 (isBetaAccessAllowed CT-17 D163)
+// ============================================================
+router.post('/operator/propose', async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    const userId = req.user?.userId;
+
+    if (!companyId) {
+      return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+    }
+
+    // ★ CT-17 D163: 베타 게이팅 — ENTERPRISE/BUSINESS만 진입
+    const ctx = await loadPlanContext(companyId);
+    if (!ctx) return res.status(404).json({ success: false, error: '회사 정보를 찾을 수 없습니다.' });
+    if (!isBetaAccessAllowed(ctx)) {
+      return res.status(403).json({
+        success: false,
+        error: '본 기능은 엔터프라이즈 베타 운영 중입니다.',
+        code: 'BETA_GATE',
+      });
+    }
+
+    const { objective } = req.body;
+    if (!objective || typeof objective !== 'string' || objective.trim().length < 5) {
+      return res.status(400).json({ success: false, error: '마케팅 목표를 한 줄로 입력해주세요 (5자 이상).' });
+    }
+
+    // 회사 정보 + 통계 조회
+    const companyResult = await query(
+      `SELECT company_name, business_type, COALESCE(reject_number, opt_out_080_number) as reject_number,
+              brand_name, brand_slogan, brand_description, brand_tone, customer_schema,
+              cost_per_sms, cost_per_lms, cost_per_mms, cost_per_kakao
+       FROM companies WHERE id = $1::uuid`,
+      [companyId]
+    );
+    const companyInfo: any = companyResult.rows[0] || {};
+    companyInfo.name = companyInfo.company_name;
+
+    // ★ D102: getOpt080Number 컨트롤타워 사용
+    const userOpt080 = await getOpt080Number(userId || null, companyId);
+    if (userOpt080) companyInfo.reject_number = userOpt080;
+
+    // 카카오 프로필 여부 (recommendTarget 채널 추천 hint)
+    const kakaoProfileResult = await query(
+      'SELECT COUNT(*) FROM kakao_sender_profiles WHERE company_id = $1 AND is_active = true',
+      [companyId]
+    );
+    companyInfo.has_kakao_profile = parseInt(kakaoProfileResult.rows[0].count) > 0;
+
+    // 고객 통계
+    const statsResult = await query(
+      `SELECT
+         COUNT(*) as total,
+         COUNT(*) FILTER (WHERE sms_opt_in = true) as sms_opt_in_count,
+         COUNT(*) FILTER (WHERE gender = 'M') as male_count,
+         COUNT(*) FILTER (WHERE gender = 'F') as female_count,
+         AVG((custom_fields->>'purchase_count')::numeric) as avg_purchase_count,
+         AVG((custom_fields->>'total_spent')::numeric) as avg_total_spent
+       FROM customers WHERE company_id = $1 AND is_active = true`,
+      [companyId]
+    );
+    const customerStats = statsResult.rows[0];
+
+    // 1. 타겟 추천
+    const targetResult = await recommendTarget(companyId, objective, customerStats, companyInfo);
+    const estimatedCount = Math.max(0, targetResult.estimated_count || 0);
+
+    // 2. 메시지 생성 (변수 카탈로그는 회사별 customer_schema + 활성 필드 자동 정합)
+    const { fieldMappings: varCatalog, availableVars } = extractVarCatalog(companyInfo.customer_schema);
+    await filterVarCatalogByData(varCatalog, availableVars, companyId);
+
+    const messagesResult = await generateMessages(
+      objective,
+      {
+        total_count: estimatedCount,
+        avg_purchase_count: parseFloat(customerStats.avg_purchase_count) || 0,
+        avg_total_spent: parseFloat(customerStats.avg_total_spent) || 0,
+      },
+      {
+        brandName: companyInfo.brand_name || companyInfo.company_name,
+        brandSlogan: companyInfo.brand_slogan,
+        brandDescription: companyInfo.brand_description,
+        brandTone: companyInfo.brand_tone,
+        channel: targetResult.recommended_channel,
+        isAd: targetResult.is_ad,
+        rejectNumber: companyInfo.reject_number,
+        usePersonalization: targetResult.use_personalization,
+        personalizationVars: targetResult.personalization_vars,
+        availableVarsCatalog: varCatalog,
+        availableVars: availableVars,
+      }
+    );
+
+    // 3. 비용 계산 (회사별 단가 우선, 미설정 시 DEFAULT_COSTS)
+    const costs = getCompanyCosts(companyInfo);
+    const channelKey = (targetResult.recommended_channel || 'SMS').toLowerCase();
+    const unitCost: number = (costs as Record<string, number>)[channelKey] ?? costs.sms;
+    const estimatedCost = Math.round(estimatedCount * unitCost);
+
+    // 4. 성과 예측 (D164 기본 — D169 Extended Thinking에서 reasoning trace로 강화)
+    const expectedClickRate = 0.03;
+    const expectedConversionRate = 0.008;
+    const avgRevenue = parseFloat(customerStats.avg_total_spent) || 50000;
+    const expectedClicks = Math.round(estimatedCount * expectedClickRate);
+    const expectedConversions = Math.round(estimatedCount * expectedConversionRate);
+    const expectedRevenue = Math.round(expectedConversions * avgRevenue);
+
+    return res.json({
+      success: true,
+      target: {
+        count: estimatedCount,
+        totalCount: parseInt(customerStats.total || '0'),
+        criteria: targetResult.reasoning,
+        filters: targetResult.filters,
+        suggestedName: targetResult.suggested_campaign_name,
+      },
+      messages: messagesResult.variants.slice(0, 3).map((v) => ({
+        variantId: v.variant_id,
+        variantName: v.variant_name,
+        concept: v.concept,
+        smsText: v.sms_text,
+        lmsText: v.lms_text,
+        kakaoText: v.kakao_text,
+        score: v.score,
+      })),
+      recommendation: messagesResult.recommendation,
+      recommendationReason: messagesResult.recommendation_reason,
+      channel: {
+        recommended: targetResult.recommended_channel,
+        reason: targetResult.channel_reason,
+        isAd: targetResult.is_ad,
+      },
+      schedule: {
+        recommendedTime: targetResult.recommended_time,
+      },
+      cost: {
+        estimated: estimatedCost,
+        unitCost,
+        breakdown: `${targetResult.recommended_channel} ${estimatedCount.toLocaleString()}건 × ${unitCost.toLocaleString()}원`,
+      },
+      performance: {
+        expectedClicks,
+        expectedConversions,
+        expectedRevenue,
+        clickRate: expectedClickRate,
+        conversionRate: expectedConversionRate,
+      },
+      meta: {
+        usePersonalization: targetResult.use_personalization,
+        personalizationVars: targetResult.personalization_vars,
+        useIndividualCallback: targetResult.use_individual_callback,
+        generatedAt: new Date().toISOString(),
+      },
+    });
+  } catch (err: any) {
+    console.error('[AI Operator] propose 오류:', err);
+    return res.status(500).json({ success: false, error: err?.message || 'AI Operator 제안서 생성 실패' });
   }
 });
 
