@@ -138,6 +138,21 @@ export default function AlimtalkSendModal({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [show]);
 
+  // ★ D162-4 (2026-05-15) 3차: 파일 컬럼 매핑 모달 — Harold님 명시 정합 "직접발송과 똑같이 필드선택 가능".
+  //   파일 업로드 직후 매핑 모달 진입 → 핸드폰 컬럼 + 템플릿 변수별 컬럼 매핑 → 적용 시 recipients + variableMap 자동 박힘.
+  const [showMapping, setShowMapping] = useState(false);
+  const [fileHeaders, setFileHeaders] = useState<string[]>([]);
+  const [fileAllData, setFileAllData] = useState<any[]>([]);
+  const [phoneColumn, setPhoneColumn] = useState('');
+  // ★ D162-4 (2026-05-15) 7차: 직접발송 진입 시 고객 DB 표준 필드(/api/customers/enabled-fields)를 변수 매칭 옵션으로 활용.
+  //   Harold님 명시 정합 "직접발송은 싱크에이전트나 이미 업로드된 고객DB를 가지고 보내는거잖아".
+  //   발송 시 backend가 phone으로 고객 조회 + 자동 치환(기존 SMS 발송 패턴 동일).
+  const [enabledFields, setEnabledFields] = useState<Array<{
+    field_key: string;
+    display_name?: string;
+    field_label?: string;
+  }>>([]);
+
   // ★ D162-4 (2026-05-15) 7차: 동적 컬럼 옵션 — Harold님 명시 정합 (직접발송 vs 직접타겟발송 차이 반영).
   //   우선순위:
   //   (1) 직접타겟발송 — recipients[0] keys(phone 외): 추출된 row의 실제 컬럼이 그대로 매칭 옵션
@@ -163,20 +178,6 @@ export default function AlimtalkSendModal({
     // (3) props fallback
     return customerFieldOptions;
   }, [recipients, enabledFields, customerFieldOptions]);
-  // ★ D162-4 (2026-05-15) 3차: 파일 컬럼 매핑 모달 — Harold님 명시 정합 "직접발송과 똑같이 필드선택 가능".
-  //   파일 업로드 직후 매핑 모달 진입 → 핸드폰 컬럼 + 템플릿 변수별 컬럼 매핑 → 적용 시 recipients + variableMap 자동 박힘.
-  const [showMapping, setShowMapping] = useState(false);
-  const [fileHeaders, setFileHeaders] = useState<string[]>([]);
-  const [fileAllData, setFileAllData] = useState<any[]>([]);
-  const [phoneColumn, setPhoneColumn] = useState('');
-  // ★ D162-4 (2026-05-15) 7차: 직접발송 진입 시 고객 DB 표준 필드(/api/customers/enabled-fields)를 변수 매칭 옵션으로 활용.
-  //   Harold님 명시 정합 "직접발송은 싱크에이전트나 이미 업로드된 고객DB를 가지고 보내는거잖아".
-  //   발송 시 backend가 phone으로 고객 조회 + 자동 치환(기존 SMS 발송 패턴 동일).
-  const [enabledFields, setEnabledFields] = useState<Array<{
-    field_key: string;
-    display_name?: string;
-    field_label?: string;
-  }>>([]);
 
   // ★ D162-4 (2026-05-15) 4차: 매핑된 변수 컬럼 추출 — Harold님 명시 "리스트에 매핑 내용 표시" 정합.
   //   kakaoTemplateVars의 값 중 `@@헤더@@` placeholder인 항목들의 헤더명만 unique 추출.
