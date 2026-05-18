@@ -1,9 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
+  AlertTriangle,
   ArrowLeft,
   Brain,
   Check,
+  CheckCircle2,
   Clock,
   Copy,
   DollarSign,
@@ -12,11 +14,13 @@ import {
   MessageSquare,
   RefreshCw,
   Send,
+  ShieldCheck,
   Sparkles,
   Star,
   Target,
   Wand2,
   Workflow,
+  X,
   Zap,
 } from 'lucide-react';
 import AiRefineModal from '../components/AiRefineModal';
@@ -30,10 +34,19 @@ interface ProposalMessage {
   variantId: string;
   variantName: string;
   concept: string;
-  smsText: string;
-  lmsText: string;
-  kakaoText?: string;
+  body: string;             // ★ D165 fix: backend message_text 단일 필드 (channel은 별도 박음)
+  subject?: string;         // LMS/MMS 제목 (선택)
+  byteCount?: number;       // SMS 경고용
+  byteWarning?: boolean;
   score: number;
+}
+
+// ★ D170: Multi-Agent Orchestrator 응답 — compliance + agentDurations 추가
+interface ComplianceBlock {
+  passed: boolean;
+  riskLevel: 'low' | 'medium' | 'high';
+  warnings: string[];
+  suggestions: string[];
 }
 
 interface ProposalResponse {
@@ -56,6 +69,7 @@ interface ProposalResponse {
   schedule: {
     recommendedTime: string;
   };
+  compliance?: ComplianceBlock;  // ★ D170: Compliance Sub-agent (Haiku 4.5) 응답
   cost: {
     estimated: number;
     unitCost: number;
@@ -72,6 +86,8 @@ interface ProposalResponse {
     usePersonalization: boolean;
     personalizationVars: string[];
     useIndividualCallback: boolean;
+    countVerified?: boolean;                    // ★ D168
+    agentDurations?: Record<string, number>;    // ★ D170
     generatedAt: string;
   };
 }
@@ -243,6 +259,17 @@ export default function AiOperatorPage() {
   const [showRefineModal, setShowRefineModal] = useState(false);
   const [refinedOverrides, setRefinedOverrides] = useState<Record<number, string>>({});
   const [copiedAt, setCopiedAt] = useState<number | null>(null);
+  // ★ D166: 승인 → 발송 흐름 (preview-recipients + /direct-send 2-step)
+  const [sending, setSending] = useState(false);
+  const [sendError, setSendError] = useState<string | null>(null);
+  const [sendResult, setSendResult] = useState<{
+    campaignId: string;
+    sentCount: number;
+    failCount: number;
+    unsubscribeCount?: number;
+    message: string;
+    suggestedName: string;
+  } | null>(null);
 
   // textarea 자동 높이 조절
   useEffect(() => {
@@ -304,7 +331,89 @@ export default function AiOperatorPage() {
     setObjective('');
     setError(null);
     setProgressStep(0);
+    setSendResult(null);
+    setSendError(null);
+    setRefinedOverrides({});
+    setSelectedVariantIdx(0);
     textareaRef.current?.focus();
+  };
+
+  // ★ D166: 승인 발송 — 2-step (preview-recipients → /direct-send)
+  const handleApprove = async () => {
+    if (!proposal || sending) return;
+    setSending(true);
+    setSendError(null);
+    setSendResult(null);
+
+    try {
+      const token = localStorage.getItem('token');
+
+      // 1. recipients 조회
+      const previewRes = await fetch('/api/ai/operator/preview-recipients', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ filters: proposal.target.filters }),
+      });
+      const previewData = await previewRes.json();
+      if (!previewRes.ok || !previewData.success) {
+        throw new Error(previewData.error || '수신자 조회 실패');
+      }
+      const recipients: Array<Record<string, unknown>> = previewData.recipients || [];
+      if (recipients.length === 0) {
+        throw new Error('발송 대상 고객이 없습니다. 타겟 조건을 조정해주세요.');
+      }
+      if (!previewData.defaultCallback) {
+        throw new Error('기본 회신번호가 등록되지 않았습니다. 발신번호 관리에서 등록 후 다시 시도해주세요.');
+      }
+
+      // 2. 선택된 안 추출
+      const idx = Math.min(selectedVariantIdx, Math.max(0, proposal.messages.length - 1));
+      const variant = proposal.messages[idx];
+      if (!variant) throw new Error('선택된 메시지가 없습니다.');
+      const body = refinedOverrides[idx] || variant.body || '';
+      if (!body || body.length < 5) throw new Error('메시지 본문이 비어있습니다. 다시 생성해주세요.');
+
+      const channel = (proposal.channel.recommended || 'SMS').toUpperCase();
+      const isLmsOrMms = channel === 'LMS' || channel === 'MMS';
+      // LMS/MMS subject 필수 — AI가 안 줬으면 suggestedName 또는 회사명으로 fallback (17자 이내)
+      const rawSubject = variant.subject || proposal.target.suggestedName || `${companyName || ''} AI 캠페인`.trim() || 'AI Operator';
+      const subject = isLmsOrMms ? rawSubject.slice(0, 17) : '';
+
+      // 3. 발송 (기존 /direct-send 재사용 — 검증된 흐름 + 라인그룹/중복제거/회신번호 가드 자동)
+      const sendRes = await fetch('/api/campaigns/direct-send', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({
+          msgType: channel,
+          subject,
+          message: body,
+          callback: previewData.defaultCallback,
+          recipients,
+          adEnabled: !!proposal.channel.isAd,
+          scheduled: false,
+          sendChannel: 'sms',
+          dedupEnabled: true,
+          unsubFilterEnabled: true,
+        }),
+      });
+      const sendData = await sendRes.json();
+      if (!sendRes.ok || !sendData.success) {
+        throw new Error(sendData.error || '발송 처리 실패');
+      }
+
+      setSendResult({
+        campaignId: sendData.campaignId,
+        sentCount: sendData.sentCount || 0,
+        failCount: sendData.failCount || 0,
+        unsubscribeCount: sendData.unsubscribeCount || 0,
+        message: sendData.message || '',
+        suggestedName: proposal.target.suggestedName || 'AI Operator 캠페인',
+      });
+    } catch (err) {
+      setSendError(err instanceof Error ? err.message : '발송 오류가 발생했습니다.');
+    } finally {
+      setSending(false);
+    }
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -515,6 +624,54 @@ export default function AiOperatorPage() {
               </span>
             </div>
 
+            {/* ★ D170: Compliance Sub-agent (Haiku 4.5) 경고 표시 — high/medium만 노출, low는 ShieldCheck 작은 표시 */}
+            {proposal.compliance && (
+              <>
+                {(proposal.compliance.riskLevel !== 'low' || !proposal.compliance.passed) && (
+                  <div className={`mb-5 p-4 rounded-xl border backdrop-blur-xl ${
+                    proposal.compliance.riskLevel === 'high'
+                      ? 'bg-rose-500/10 border-rose-400/40'
+                      : 'bg-amber-500/10 border-amber-400/40'
+                  }`}>
+                    <div className="flex items-center gap-2 mb-2.5">
+                      <AlertTriangle className={`w-4 h-4 ${proposal.compliance.riskLevel === 'high' ? 'text-rose-300' : 'text-amber-300'}`} />
+                      <p className={`text-sm font-semibold ${proposal.compliance.riskLevel === 'high' ? 'text-rose-100' : 'text-amber-100'}`}>
+                        Compliance Check · {proposal.compliance.riskLevel === 'high' ? '발송 차단 권장' : '검토 필요'}
+                      </p>
+                      <span className={`ml-auto text-[10px] font-mono uppercase tracking-wider px-2 py-0.5 rounded-full ${
+                        proposal.compliance.riskLevel === 'high'
+                          ? 'bg-rose-500/30 text-rose-100'
+                          : 'bg-amber-500/30 text-amber-100'
+                      }`}>
+                        Haiku 4.5
+                      </span>
+                    </div>
+                    {proposal.compliance.warnings.length > 0 && (
+                      <ul className="text-xs text-white/75 space-y-1 mb-2">
+                        {proposal.compliance.warnings.map((w, i) => (
+                          <li key={i} className="flex gap-1.5"><span className="opacity-60">·</span><span>{w}</span></li>
+                        ))}
+                      </ul>
+                    )}
+                    {proposal.compliance.suggestions.length > 0 && (
+                      <ul className="text-xs text-white/60 space-y-1 mt-2 pt-2 border-t border-white/10">
+                        {proposal.compliance.suggestions.map((s, i) => (
+                          <li key={i} className="flex gap-1.5"><span className="opacity-60">→</span><span>{s}</span></li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                )}
+                {proposal.compliance.riskLevel === 'low' && proposal.compliance.passed && (
+                  <div className="mb-5 flex items-center gap-2 px-3 py-2 rounded-lg bg-emerald-500/10 border border-emerald-400/30 text-xs">
+                    <ShieldCheck className="w-3.5 h-3.5 text-emerald-300" />
+                    <span className="text-emerald-200">Compliance Check 통과</span>
+                    <span className="ml-auto text-[10px] font-mono uppercase tracking-wider text-emerald-300/60">Haiku 4.5</span>
+                  </div>
+                )}
+              </>
+            )}
+
             {(() => {
               // ★ D165: 메시지 3안 토글 — 다듬기 결과가 있으면 오버라이드 사용
               const variants = proposal.messages;
@@ -524,7 +681,7 @@ export default function AiOperatorPage() {
                 || (proposal.recommendation || '').includes(activeVariant?.variantName || '__none__');
               const activeChannel = (proposal.channel.recommended || 'SMS').toUpperCase();
               const overrideText = refinedOverrides[safeIdx];
-              const baseBody = activeChannel === 'SMS' ? (activeVariant?.smsText || '') : (activeVariant?.lmsText || activeVariant?.smsText || '');
+              const baseBody = activeVariant?.body || '';
               const activeBody = overrideText || baseBody;
               const bytesLen = (s: string) => {
                 let bytes = 0;
@@ -768,26 +925,34 @@ export default function AiOperatorPage() {
               );
             })()}
 
-            {/* CTA — D165에서 "메시지 다듬기"는 메시지 카드 내부로 이동, 여기는 발송/리셋만 */}
+            {/* ★ D166: 승인 발송 활성화 — preview-recipients + /direct-send 2-step */}
             <div className="flex flex-col sm:flex-row gap-3">
               <button
                 type="button"
-                disabled
-                className="flex-1 px-6 py-3.5 rounded-xl bg-gradient-to-r from-amber-400 to-fuchsia-400 text-indigo-950 font-semibold opacity-40 cursor-not-allowed flex items-center justify-center gap-2"
-                title="D166에서 박힐 예정"
+                onClick={handleApprove}
+                disabled={sending}
+                className="flex-1 px-6 py-3.5 rounded-xl bg-gradient-to-r from-amber-400 via-fuchsia-400 to-indigo-400 text-indigo-950 font-semibold hover:brightness-110 hover:shadow-xl hover:shadow-fuchsia-500/40 disabled:opacity-50 disabled:cursor-wait transition-all flex items-center justify-center gap-2"
               >
-                <Send className="w-4 h-4" />
-                승인 발송 <span className="text-[10px] font-mono opacity-70">D166</span>
+                {sending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+                {sending ? '발송 처리 중...' : '승인 후 발송 시작'}
               </button>
               <button
                 type="button"
                 onClick={handleReset}
-                className="px-6 py-3.5 rounded-xl bg-white/10 text-white font-medium border border-white/20 hover:bg-white/15 transition-all flex items-center justify-center gap-2"
+                disabled={sending}
+                className="px-6 py-3.5 rounded-xl bg-white/10 text-white font-medium border border-white/20 hover:bg-white/15 disabled:opacity-40 disabled:cursor-not-allowed transition-all flex items-center justify-center gap-2"
               >
                 <RefreshCw className="w-4 h-4" />
                 다시 생성
               </button>
             </div>
+
+            {/* 발송 에러 */}
+            {sendError && (
+              <div className="mt-3 p-3 rounded-lg bg-rose-500/10 border border-rose-400/30 text-rose-200 text-sm">
+                <span className="font-semibold">발송 오류 · </span>{sendError}
+              </div>
+            )}
 
             {/* 메시지 추천 이유 (작게) */}
             {proposal.recommendationReason && (
@@ -905,6 +1070,96 @@ export default function AiOperatorPage() {
         )}
       </main>
 
+      {/* ★ D166: 발송 결과 모달 — 발송 처리 완료 후 큰 체크 + 캠페인 정보 + dashboard 발송결과 진입 */}
+      {sendResult && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-md animate-in fade-in duration-200"
+          onClick={() => setSendResult(null)}
+        >
+          <div
+            className="relative w-full max-w-md rounded-3xl border border-white/10 shadow-2xl bg-gradient-to-br from-emerald-950 via-teal-950 to-indigo-950 animate-in fade-in zoom-in-95 duration-300"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* 배경 글로우 */}
+            <div className="pointer-events-none absolute inset-0 overflow-hidden rounded-3xl">
+              <div className="absolute -top-20 -left-20 w-72 h-72 rounded-full bg-emerald-500/20 blur-3xl" />
+              <div className="absolute -bottom-20 -right-20 w-72 h-72 rounded-full bg-teal-500/20 blur-3xl" />
+            </div>
+
+            <div className="relative p-8">
+              <button
+                type="button"
+                onClick={() => setSendResult(null)}
+                className="absolute top-5 right-5 w-9 h-9 rounded-full flex items-center justify-center text-white/60 hover:text-white hover:bg-white/10 transition-all"
+                aria-label="닫기"
+              >
+                <X className="w-5 h-5" />
+              </button>
+
+              {/* 큰 체크 아이콘 */}
+              <div className="flex justify-center mb-5">
+                <div className="relative w-20 h-20 rounded-full bg-gradient-to-br from-emerald-400 to-teal-500 flex items-center justify-center shadow-2xl shadow-emerald-500/40">
+                  <CheckCircle2 className="w-12 h-12 text-white" strokeWidth={2.5} />
+                  <span className="absolute inset-0 rounded-full bg-emerald-400/30 animate-ping" />
+                </div>
+              </div>
+
+              <div className="text-center mb-6">
+                <p className="text-[10px] font-semibold tracking-[0.3em] uppercase text-emerald-300 mb-2">Campaign Dispatched</p>
+                <h3 className="text-2xl font-bold text-white mb-1.5">발송 처리 완료</h3>
+                <p className="text-sm text-white/70 truncate" title={sendResult.suggestedName}>{sendResult.suggestedName}</p>
+              </div>
+
+              {/* 결과 숫자 */}
+              <div className="grid grid-cols-2 gap-3 mb-6">
+                <div className="p-4 rounded-xl bg-white/5 border border-white/10 text-center">
+                  <p className="text-[10px] font-semibold tracking-wider uppercase text-emerald-300 mb-1.5">발송 성공</p>
+                  <p className="text-2xl font-bold text-white tabular-nums">{sendResult.sentCount.toLocaleString()}</p>
+                  <p className="text-[11px] text-white/40 mt-0.5">건</p>
+                </div>
+                <div className="p-4 rounded-xl bg-white/5 border border-white/10 text-center">
+                  <p className="text-[10px] font-semibold tracking-wider uppercase text-white/40 mb-1.5">발송 실패</p>
+                  <p className={`text-2xl font-bold tabular-nums ${sendResult.failCount > 0 ? 'text-rose-300' : 'text-white/30'}`}>
+                    {sendResult.failCount.toLocaleString()}
+                  </p>
+                  <p className="text-[11px] text-white/40 mt-0.5">건 {sendResult.failCount > 0 ? '· 자동 환불' : ''}</p>
+                </div>
+              </div>
+
+              {sendResult.message && (
+                <div className="mb-5 p-3 rounded-lg bg-white/[0.03] border border-white/10">
+                  <p className="text-xs text-white/65 leading-relaxed">{sendResult.message}</p>
+                </div>
+              )}
+
+              {/* CTA */}
+              <div className="flex flex-col sm:flex-row gap-2.5">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSendResult(null);
+                    navigate('/dashboard');
+                  }}
+                  className="flex-1 px-5 py-3 rounded-xl bg-gradient-to-r from-emerald-400 to-teal-500 text-emerald-950 font-semibold hover:brightness-110 hover:shadow-lg hover:shadow-emerald-500/30 transition-all"
+                >
+                  발송 결과 보기
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSendResult(null);
+                    handleReset();
+                  }}
+                  className="px-5 py-3 rounded-xl bg-white/10 text-white font-medium border border-white/20 hover:bg-white/20 transition-all"
+                >
+                  새 캠페인
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ★ D165: 메시지 다듬기 모달 — AiRefineModal 재사용 (D152 emerald 톤). 선택된 안 → AI 풍성화 → onApply로 오버라이드 박힘 */}
       <AiRefineModal
         isOpen={showRefineModal}
@@ -913,8 +1168,7 @@ export default function AiOperatorPage() {
           const idx = Math.min(selectedVariantIdx, Math.max(0, proposal.messages.length - 1));
           const v = proposal.messages[idx];
           if (!v) return '';
-          const ch = (proposal.channel.recommended || 'SMS').toUpperCase();
-          return refinedOverrides[idx] || (ch === 'SMS' ? v.smsText : (v.lmsText || v.smsText));
+          return refinedOverrides[idx] || v.body || '';
         })()}
         companyName={companyName}
         onClose={() => setShowRefineModal(false)}

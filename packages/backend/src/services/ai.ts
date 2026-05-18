@@ -19,24 +19,71 @@ const openai = new OpenAI({
 
 // ============================================================
 // AI 호출 (Claude → gpt-5.1 자동 fallback)
+// ★ D167 (2026-05-19) Braze급 SaaS Step 0 — Prompt Caching 적용:
+//   system 블록을 cache_control: 'ephemeral'로 박아 회사별 시스템 프롬프트
+//   (브랜드 톤 + 30일 history + 고객 DB 스키마)를 1h TTL 캐싱.
+//   동일 시스템 재호출 시 90% 비용 절감 + latency 1/3.
+//   minimum 1024 tokens 미달 prompt도 무해 (SDK 자동 무시).
 // ============================================================
 export async function callAIWithFallback(params: {
   system: string;
   userMessage: string;
   maxTokens: number;
   temperature: number;
+  // ★ D169 (2026-05-19) Braze급 SaaS Step 0 — Extended Thinking 옵션:
+  //   채널 의사결정·여정 설계 등 high-stakes 추론 시 활성. AI가 reasoning trace 생성 후 최종 응답.
+  //   활성 시 temperature는 1로 강제 (Anthropic API 제약). 호출부에서 reasoning trace 노출 가능.
+  thinking?: boolean;
+  thinkingBudget?: number;  // 기본 5000 tokens
+  // ★ D170 (2026-05-19) Braze급 SaaS Step 0 — Multi-Agent 3 모델 mix:
+  //   - 'sonnet' (기본): 일반 sub-agent
+  //   - 'opus': Orchestrator (1M ctx, 30일 history + sub-agent 통합)
+  //   - 'haiku': Compliance/분류 sub-agent (빠른 검수)
+  model?: 'sonnet' | 'opus' | 'haiku';
 }): Promise<string> {
-  // 1차: Claude Sonnet
+  // 1차: Claude (모델 선택: sonnet/opus/haiku)
   try {
-    const response = await anthropic.messages.create({
-      model: AI_MODELS.claude,
+    const modelName = params.model === 'opus' ? AI_MODELS.opus
+                    : params.model === 'haiku' ? AI_MODELS.haiku
+                    : AI_MODELS.claude;
+    const requestParams: any = {
+      model: modelName,
       max_tokens: params.maxTokens,
-      temperature: params.temperature,
-      system: params.system,
+      // thinking 활성 시 temperature=1 강제 (SDK 요구사항)
+      temperature: params.thinking ? 1 : params.temperature,
+      system: [
+        {
+          type: 'text' as const,
+          text: params.system,
+          cache_control: { type: 'ephemeral' as const },
+        },
+      ],
       messages: [{ role: 'user', content: params.userMessage }],
-    });
-    const text = response.content[0].type === 'text' ? response.content[0].text : '';
-    console.log('[AI] Claude 호출 성공');
+    };
+    if (params.thinking) {
+      requestParams.thinking = {
+        type: 'enabled',
+        budget_tokens: params.thinkingBudget || 5000,
+      };
+    }
+
+    const response = await anthropic.messages.create(requestParams);
+
+    // ★ D169: thinking 활성 시 첫 content block이 thinking block — text block을 별도로 찾기
+    const textBlock = response.content.find((b: any) => b.type === 'text');
+    const text = textBlock && textBlock.type === 'text' ? (textBlock as any).text : '';
+
+    // ★ D167: Prompt Cache 활성 hit/miss 로그 + ★ D169: thinking + ★ D170: model 로그
+    const usage = response.usage as unknown as Record<string, number | undefined>;
+    const cacheRead = usage?.cache_read_input_tokens || 0;
+    const cacheCreated = usage?.cache_creation_input_tokens || 0;
+    const thinkingTag = params.thinking ? ' · Thinking' : '';
+    const modelTag = params.model && params.model !== 'sonnet' ? ` · ${params.model.toUpperCase()}` : '';
+    if (cacheRead > 0 || cacheCreated > 0) {
+      console.log(`[AI] Claude 호출 성공${modelTag} (Cache · read ${cacheRead}, created ${cacheCreated}, in ${usage?.input_tokens || 0}, out ${usage?.output_tokens || 0}${thinkingTag})`);
+    } else {
+      console.log(`[AI] Claude 호출 성공${modelTag}${thinkingTag}`);
+    }
     return text;
   } catch (claudeError: any) {
     console.warn(`[AI] Claude 실패 (${claudeError.status || claudeError.message}) → gpt-5.1 fallback`);

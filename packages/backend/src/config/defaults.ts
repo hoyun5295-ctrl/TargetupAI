@@ -23,7 +23,13 @@ export const AI_MODELS = {
   //   - Claude: claude-sonnet-4-6 (2/17 release, $3/$15 per 1M tokens, 다듬기 품질↑ 균형)
   //   - GPT: gpt-5.4-mini (fallback 용도, 비용 최소화). gpt-5.3 미존재 사고 fix.
   //   .env CLAUDE_MODEL / GPT_MODEL로 런타임 오버라이드 가능.
+  // ★ D170 (2026-05-19) Braze급 SaaS Step 0 — Multi-Agent 3 모델 mix:
+  //   - claude (Sonnet 4.6): 기본 sub-agent (target/message/channel/schedule)
+  //   - opus (Opus 4.7, 1M ctx): Orchestrator — 회사 30일 history + sub-agent 결과 통합
+  //   - haiku (Haiku 4.5): Compliance/분류 sub-agent — latency <300ms + cost 1/10
   claude: process.env.CLAUDE_MODEL || 'claude-sonnet-4-6',
+  opus: process.env.CLAUDE_OPUS_MODEL || 'claude-opus-4-7',
+  haiku: process.env.CLAUDE_HAIKU_MODEL || 'claude-haiku-4-5',
   gpt: process.env.GPT_MODEL || 'gpt-5.4-mini',
 };
 
