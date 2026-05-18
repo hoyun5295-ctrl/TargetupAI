@@ -107,6 +107,97 @@
 
 ---
 
+### 🔥 D162-4 (2026-05-15 ~ 2026-05-19, 진행 중) — 알림톡 발송 모달 전면 재구성 + 잔존 검증
+
+> **Harold님 명시:** "직접타겟발송은 검증이 더 필요한 상황이야 여전히 리스트 부분에서 수정사항이 좀 있어"
+>
+> **상세 메모리:** `memory/project_d162_4_alimtalk_send_modal_overhaul.md` 정독 — 1~8차 누적 + 변경 파일 + 잔존 작업.
+
+#### 진행 완료 (1~8차, 배포 완료)
+
+PDF 0515 알림톡 3건 root cause fix + Harold UX 8차 반복 정합:
+- AlimtalkSendModal.tsx 신규 풀 화면 모달 (좌측 채널 + 우측 수신자/매칭/발송, 직접입력/파일등록/주소록 3 탭, 파일 컬럼 매핑 모달 내장)
+- DirectSendPanel/TargetSendModal 알림톡 채널 탭 제거 + 헤더에 amber 톤 "알림톡 발송" 버튼 + onAlimtalkOpen prop
+- AlimtalkVariableMappingPanel 4열 grid 컴팩트 + AlimtalkChannelPanel sampleRecipient prop으로 실제 row 값 치환
+- routes/companies.ts `/:id` requireUuidId 미들웨어 (`/kakao-templates` 가로채던 1년+ 사고 영구 종결)
+- useEffect 분리 ([show] state reset + [show, initialRecipients] setRecipients) — deps 누락 사고 차단
+- dynamicFieldOptions 3-tier 우선순위 (recipients[0] keys > enabledFields > props customerFieldOptions)
+- 휴머스온 키워드 전수 제거 (frontend 3 + backend 9 파일, "카카오 검수팀"/"내부 반려" 단일화)
+- 반려사유 상세 모달 분리 (max-w-2xl max-h-80vh)
+
+#### 잔존 작업 (다음 세션 진입 시)
+
+- ★ **직접타겟발송 검증** — 8차 useEffect deps fix 후 추출된 수신자가 알림톡 모달에 정상 인계되는지 + 변수 매칭 드롭다운에 추출 컬럼만 노출되는지 검증
+- ★ **AlimtalkSendModal 수신자 리스트 수정사항** — Harold 미명시(다음 세션에서 구체 신고 받음)
+
+#### 메모리 신규 박음 (D162-4 기간)
+
+- `feedback_no_devtools_browser_diagnostic.md` — F12 안내 절대 금지
+- `feedback_push_and_deploy_commands.md` — 푸시/배포 표준 형식
+- `feedback_no_humuson_keyword_exposure.md` — 휴머스온 키워드 노출 금지
+- `feedback_jondaetmal_to_harold.md` — Harold님 대상 존댓말 절대 (D162-5에서 명시 지적)
+
+---
+
+### 🚀 D162-5 (2026-05-19) — Braze급 SaaS 로드맵 kickoff
+
+> **Harold님 명시:** "제대로 만들어보자 우리 제대로된 브레이즈급의 SaaS 를 말야 너와 내가"
+>
+> **상세 메모리:** `memory/project_d162_5_braze_grade_roadmap_kickoff.md` 정독 — 두 docx(Braze_HanjulloAI_Briefing + HanjulloAI_Braze_Grade_Product_Strategy) 정독 결과 + AI 4 결합 전략 + 9 세션 분할 + ENTERPRISE+ 베타 게이팅.
+>
+> **D163 핸드오프:** `status/handoff_D163_beta_modal_system.md` 정독 — 변경 파일 4건 정확한 위치 + BetaFeatureModal 디자인 가이드.
+
+#### 진단 (Harold님 명시)
+
+- 무료체험 67사 AI 활용 0건 — 진짜 root cause = "AI로 뭘 해야 할지 모름" 진입 friction + 가치 인지 실패
+- 두 가정 평가:
+  - 가정 1 (유료 전환 부담) = 정합. 35만원 베이직도 못 쓰면 어차피 타겟 외. 단 "써보지 않음"의 root cause는 가격 아님.
+  - 가정 2 (밥줄 위협) = 부분 사실. 한국 SMB 마케팅 현장은 1인 담당(환영) / 5~10명 팀(저항) / 대표 직접(환영)으로 갈림. 한줄로 타겟 비중 작음.
+- 진짜 답 = Braze 문서 "사용자는 캠페인 세팅 배우고 싶어 하지 않는다 — 한 줄 목표 입력하면 AI가 실행 패키지로 바꿔야 한다"
+
+#### 9 세션 분할 (Step 0)
+
+| D | 범위 | 등급 가시성 |
+|---|------|-----------|
+| **D163** | 베타 안내 시스템 인프라 (헤더 메뉴 + 모달 + 게이팅) | 모달=전체, 기능=ENT+ |
+| **D164** | 무료체험 진입 wizard + 자연어 입력 prominently | ENT+ |
+| **D165** | AI 제안서 통합 카드 (타겟+메시지+채널+시간+비용+성과) | ENT+ |
+| **D166** | 승인→발송→결과 reactive 흐름 | ENT+ |
+| **D167** | Prompt Caching (services/ai.ts callAIWithFallback 강화) | backend 인프라 |
+| **D168** | Tool Use SQL Loop (recommendTarget + relaxFilters 자동) | backend 인프라 |
+| **D169** | Extended Thinking (recommendNextCampaign + 채널 의사결정 reasoning trace) | backend 인프라 |
+| **D170** | 회사별 메모리 + Multi-agent (Orchestrator Opus 4.7 + Sub-agent Sonnet 4.6) | backend 인프라 |
+| **D171** | Step 0 통합 검증 + ENTERPRISE 대상 베타 운영 진입 | 운영 진입 |
+
+#### AI 4 결합 전략 (D162-5 확정)
+
+1. **3 모델 mix:** Opus 4.7 (1M ctx, orchestrator) + Sonnet 4.6 (sub-agent 병렬) + Haiku 4.5 (분류 단순)
+2. **5 API 무기:** Prompt Caching + Tool Use + Extended Thinking + Batch API + Citations
+3. **Multi-agent loop:** Orchestrator + Target/Message/Compliance/Channel/Schedule/Cost-ROI/Journey 6~7 Sub-agent
+4. **회사별 메모리 누적:** Anthropic Memory tool + 30일 캠페인 history 시스템 프롬프트 캐싱
+
+#### 베타 게이팅 정책 (Harold 명시)
+
+- ENTERPRISE/BUSINESS = 실제 베타 기능 진입
+- 그 외 (TRIAL/FREE/STARTER/BASIC/PRO) = BetaFeatureModal (아주 예쁜 디자인) 표시
+- 헤더 메뉴는 전체 노출 = "곧 어마어마한 기능 옵니다" 마케팅 효과
+- 안정성 검증 후 PRO → BASIC 단계적 확장
+
+#### Step 1~3 (D172+ 예고)
+
+- **Step 1** (D172~D180): 성과 리포트 → Next Action 추천 ("1회성 발송툴" 탈출)
+- **Step 2** (D181~D200): Journey Builder Lite (가입/재구매/휴면/장바구니 자동 여정)
+- **Step 3** (D201~D230): Decisioning Engine (고객별 채널/시점/오퍼 AI 결정)
+
+#### 진입 순서
+
+1. **선행** = D162-4 잔존(직접타겟발송 검증 + AlimtalkSendModal 수신자 리스트) 종결
+2. **D163 진입** = `status/handoff_D163_beta_modal_system.md` 정독 + Step A-D 박음
+3. **검증** = tsc 0 errors + 로컬 동작 + 디자인 정합 + atomic safe-build
+4. **배포** = Harold님 직접 진행
+
+---
+
 ### 🟢 D150 (2026-05-08~11) — 알림톡+카카오 전체 마무리 (코드 작업 종결, 월요일 자연 검증만 잔여)
 
 > **Harold님 명시:** "5월 10일 일요일까지 전부 끝내려고 해. 같이 제대로 해보자 원칙에 맞게."
