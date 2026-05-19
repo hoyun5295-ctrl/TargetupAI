@@ -139,10 +139,44 @@ PDF 0515 알림톡 3건 root cause fix + Harold UX 8차 반복 정합:
 
 ---
 
-### 🚀 D162-5 (2026-05-19) — Braze급 SaaS 로드맵 kickoff
+### 🚀 D162-5 → D170+ (2026-05-19) — Braze급 SaaS Step 0 (D163~D170) 완료 + 배포
 
 > **Harold님 명시:** "제대로 만들어보자 우리 제대로된 브레이즈급의 SaaS 를 말야 너와 내가"
 >
+> ★ **누적 작업 상세 추적:** [`status/ai_operator_progress.md`](status/ai_operator_progress.md) — 박힌 파일/잔여 작업/Harold 정합 룰 매트릭스
+> ★ **메모리:** `memory/project_d162_5_braze_grade_roadmap_kickoff.md` + `memory/feedback_ai_operator_model_isolation.md`
+
+#### Step 0 (D163~D170) ✓ 완료 + 배포 매트릭스
+
+| Phase | 핵심 | 상태 |
+|-------|------|:-:|
+| D163 | 베타 안내 시스템 인프라 (헤더 메뉴 + BetaFeatureModal + isBetaAccessAllowed + /ai-operator 라우트) | ✓ |
+| D164 | `POST /api/ai/operator/propose` endpoint + Hero/Pipeline/Result 6 카드 | ✓ |
+| D165 | 결과 카드 정합 (메시지 3안 토글 + 다듬기 + 성과 차트 + 비용 breakdown + (광고) 미리보기) | ✓ |
+| D166 | 승인→발송 (preview-recipients + /direct-send 2-step) + 발송 시점 안전장치(sendMode 3분기 + datetime input + confirm) | ✓ |
+| D167 | Prompt Caching (cache_control ephemeral) | ✓ |
+| D168 | Count 검증 (countFilteredCustomers — AI 추정 → DB 실제) | ✓ |
+| D169 | Extended Thinking 옵션 (Opus 4.7 adaptive 호환) | ✓ |
+| D170 | Multi-Agent Orchestrator (services/ai-orchestrator.ts + 6 Sub-agent + 회사별 메모리) | ✓ |
+| D170+ | Harold 명시 정합 fix 누적 (모델 분리 + Opus 4.7 breaking changes + GPT 5.5 fallback + UI 모델명 제거 + CSS warning fix) | ✓ |
+
+#### Harold 명시 모델 영역 절대 분리
+
+- **AI Operator 신메뉴** = Claude Opus 4.7 + GPT 5.5 (둘 다 temperature 박지 X)
+- **기존 한줄로AI 전체** = Claude Sonnet 4.6 + gpt-5.4-mini (절대 변경 X, 6,000사+ 영향)
+- 결정 위치: `packages/backend/src/config/defaults.ts` AI_MODELS (코드 default가 진실, .env는 override만)
+
+#### 잔여 (D171 + Step 1+ 예정)
+
+- **D171**: Step 0 통합 검증 + ENTERPRISE 베타 운영 진입 + SESSION_MILESTONES 데이터 갱신 + count 0 시 relaxFilters loop
+- **Step 1 (D172~D180)**: 성과 리포트 → Next Action 추천 (recommendNextCampaign 강화 + 매출/ROI/LTV 통합 리포트)
+- **Step 2 (D181~D200)**: Journey Builder Lite (가입/재구매/휴면 자동 여정)
+- **Step 3 (D201~D230)**: Decisioning Engine (고객별 채널/시점/오퍼 AI 결정)
+
+---
+
+### 🚀 D162-5 원본 kickoff (2026-05-19) — 참조용
+
 > **상세 메모리:** `memory/project_d162_5_braze_grade_roadmap_kickoff.md` 정독 — 두 docx(Braze_HanjulloAI_Briefing + HanjulloAI_Braze_Grade_Product_Strategy) 정독 결과 + AI 4 결합 전략 + 9 세션 분할 + ENTERPRISE+ 베타 게이팅.
 >
 > **D163 핸드오프:** `status/handoff_D163_beta_modal_system.md` 정독 — 변경 파일 4건 정확한 위치 + BetaFeatureModal 디자인 가이드.
