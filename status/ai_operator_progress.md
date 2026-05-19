@@ -31,7 +31,12 @@
 | **D175** | **공식 기능 정의서** `docs/AI_OPERATOR_기능정의서.md` (v1.0.4, 살아있는 문서) + CLAUDE.md 필수 참조 매트릭스 박음 + ai_operator_progress.md 정의서 연결 | ✓ 완료 | 문서 |
 | **D175-A** | **Web Push + In-app Message 채널 (SDK 확장)** Harold 명시 + 영업팀장 의견 정합. 4 테이블 + utils CT-26 web-push(VAPID) + CT-27 inapp-message + routes 9 endpoint + SDK v0.2.0(push/inapp/service-worker 3 모듈) + PushCampaignsPage + InAppMessagesPage + 메뉴 2건. 환경변수 3건 VAPID_* + web-push 패키지 | ✓ 완료 | 빌드 + DB SQL 4건 + 환경변수 + npm install 대기 |
 | **D175-B** | **BEYOND BRAZE 비전 문서 신설** Harold 명시 "글로벌 최강 마테크 + 압도적 AI Operator + 누구도 못 따라하는 솔루션". docs/한줄로_BEYOND_BRAZE_비전.md v0.1 (12 섹션 Manifesto + 영구 원칙 + Braze 분석 + 8축 차별화 + Continuous Operator 사용자 동의 흐름 + 음성 AI 정직 분석 + 압축 로드맵 + 5년 시야 + KPI) | ✓ 완료 | 문서 |
-| **D176** | **Continuous Agentic Operator (사용자 동의 흐름)** 비전 압축 로드맵 1순위 박힘. DB 2 테이블 + companies ALTER 3 + utils CT-28(Zero-Count 영구 원칙 정합 + ENT 자동 실행 임계값 + 5분 worker) + routes 7 endpoint + ContinuousOperatorPage(2 탭) + 메뉴 + 라우트. AI 단독 실행 X 영구 원칙 100% 정합 | ✓ 완료 | 빌드 + DB SQL 3건 대기 |
+| **D176** | **Continuous Agentic Operator (사용자 동의 흐름)** 비전 압축 로드맵 1순위 박힘. DB 2 테이블 + companies ALTER 3 + utils CT-28(Zero-Count 영구 원칙 정합 + ENT 자동 실행 임계값 + 5분 worker) + routes 7 endpoint + ContinuousOperatorPage(2 탭) + 메뉴 + 라우트. AI 단독 실행 X 영구 원칙 100% 정합 | ✓ 완료 | DB SQL 박힘 종결 |
+| **D177-fix** | AiOperatorPage SESSION_MILESTONES + 진행률 카드 + 9 세션 로드맵 영구 제거. 영구 원칙 #6 미래 로드맵 노출 X 박음 | ✓ 완료 | 배포 종결 |
+| **D177-ux** | DashboardHeader dropdown UI (1차 박음, ux2에서 영구 제거) | ✓ 완료 → ux2 정정 | — |
+| **D177-ux2** | dropdown 영구 제거 + AiOperatorPage 안 SUB_MODULE_CARDS 5건 박음 (함께 사용하는 AI 영역 섹션) | ✓ 완료 | 배포 종결 |
+| **D177-ux3** | sub-module 페이지 뒤로가기 5건 navigate('/ai-operator') 일괄 정정 + 영구 원칙 #7 박음 (feedback_sub_module_back_navigation) | ✓ 완료 | 빌드 대기 (frontend만 변경) |
+| **운영 DB schema** | D172/D172-B/D175-A/D176 운영 SQL 17건 Harold 직접 박힘 종결 (11 테이블 + 6 companies 컬럼 + 2 plans 컬럼 검증 정합) | ✓ 박힘 종결 | — |
 
 ---
 
@@ -58,6 +63,9 @@
 - `packages/frontend/src/pages/Dashboard.tsx` — **D171-B `lastSendConfig.autoRelax` 필드 + `handleAiCampaignGenerate` autoRelax 파라미터 + AiSendTypeModal/RecommendTemplateModal 콜백 autoRelax 인자 + saved-segments POST body `autoRelax` 영구 제거**
 - `packages/frontend/src/components/RecommendTemplateModal.tsx` — **D171-B `onSelectHanjullo` autoRelax 인자 + `handleSelect` 전달 인자 제거** (SavedSegment.auto_relax DB select 매핑은 보존)
 - `packages/frontend/src/components/AutoSendFormModal.tsx` — **D171-B `auto_relax: false` body 박지 X (서버 측에서 자체 차단)**
+- `packages/frontend/src/pages/CdpSettingsPage.tsx` + `PerformancePage.tsx` + `ContinuousOperatorPage.tsx` + `PushCampaignsPage.tsx` + `InAppMessagesPage.tsx` — **D177-ux3 ArrowLeft onClick navigate('/') → navigate('/ai-operator') 일괄 정정 (영구 원칙 #7 정합)**
+- `packages/frontend/src/pages/AiOperatorPage.tsx` — **D177-ux2 SUB_MODULE_CARDS 5건 + "함께 사용하는 AI 영역" 섹션 박음 (7 엔진 카드 위)**
+- `packages/frontend/src/components/DashboardHeader.tsx` — **D177-ux/ux2 dropdown 박힘 → 영구 제거 (AI Operator 메뉴만 박음, sub-module은 페이지 안에 박힘)**
 
 ### 메모리 (Harold 영구 정합)
 - `memory/project_d162_5_braze_grade_roadmap_kickoff.md` — Step 0 로드맵 + 9 세션 분할
@@ -114,20 +122,42 @@
 
 ---
 
-## ⏸ 잔여 작업 (Step 1+ 예정)
+## ⏸ 잔여 작업 (다음 세션 진입 영역)
 
-> D171 Step 0 코드 작업 (A/B/C/D) 전체 종결. 잔여는 Step 1+ (D172~).
+> Step 0 D163~D177-ux3 전체 종결 + 운영 DB schema 박힘 종결 + 비전 v0.3 박힘. 다음 세션은 운영 환경 사용 검증 + D177~D180 압축 로드맵 진입.
 
-### Step 1 (D172~D180): 성과 리포트 → Next Action 추천
-- 매출/ROI/고객군별 성과 통합 리포트
-- recommendNextCampaign 강화
-- "1회성 발송툴" 탈출
+### 1순위 — 운영 환경 사용 검증 (Harold 명시 "사용하면서 디버그" 정합)
 
-### Step 2 (D181~D200): Journey Builder Lite
-- 가입/재구매/휴면/장바구니/생일/예약 자동 여정
+| 영역 | Harold 검증 위치 |
+|------|----------------|
+| AI Operator + Continuous Operator + 성과리포트 + CDP + Web Push + In-app | `/ai-operator` 진입 → SUB_MODULE_CARDS 5건 차례 진입 |
+| 운영 환경 노출 본 후 디자인 정정 결정 | BETA 뱃지 / 색상 톤다운 / dropdown 호버 시간 |
 
-### Step 3 (D201~D230): Decisioning Engine
-- 고객별 채널/시점/오퍼 AI 자동 결정
+### 2순위 — 압축 로드맵 D177~D180 (BEYOND BRAZE 비전 v0.3 정합)
+
+| D | 영역 | 박을 의존성 |
+|---|------|------------|
+| **D177 Self-Optimizing (Bandit A/B)** | utils/bandit-optimizer.ts CT-29 (Thompson Sampling) + Continuous Operator proposal 변형 박음 + 결과 분석 | D176 운영 데이터 누적 후 (1주+ 권장) |
+| **D178 인바운드 AI 음성 응답** | 한국 음성 인프라 검토(NCloud / Naver Clova / Twilio) + STT + TTS + 자사몰 전화 클릭 → AI 응답 | 외부 인프라 검토 + Harold 결정 필요 |
+| **D179 Multi-Goal Decisioning** | Continuous Operator 확장 — 다중 목표 박음 + AI 충돌 없는 흐름 | D176/D177 안정화 후 |
+| **D180 Email 채널 통합** | SDK Email 모듈 + SendGrid / Postmark 통합 | 외부 의존성 검토 |
+
+### 3순위 — Harold 결정 받음
+
+| 항목 | 결정 영역 |
+|------|----------|
+| **카페24 진입 방안** | 옵션 C (SDK 직접 박음, 이미 박힌 인프라) vs 옵션 B (admin API key 발급 가능 여부 검증) — Harold 카페24 admin 확인 후 |
+| **ENT 베타 진입 회사 1~3사 명단** | Harold 결정 — 카페24/자사몰 종류 + 등급 정합 |
+| **Shopify / 메이크샵 wrapper 구체 구현** | Phase 2 — ENT 후보사 자사몰 종류 우선순위 |
+
+### Step 2 (D181~D200) — 사용 검증 후 진입
+
+- Journey Builder Lite — 가입/재구매/휴면/장바구니/생일/예약 자동 여정
+- 자연어 진입 (AI Operator 통합)
+
+### Step 3 (D201~D230) — Step 2 박힌 후
+
+- Decisioning Engine — 고객별 채널/시점/오퍼 AI 자동 결정
 
 ---
 
@@ -217,10 +247,10 @@
 
 ---
 
-## 진입 명령 (다음 세션)
+## 진입 명령 (다음 세션 첫 메시지)
 
 ```
-status/ai_operator_progress.md 정독 → Harold 신고 우선 종결 → Step 1 (D172~D180) 진입 또는 ENT 베타 대상사 명단 확정
+status/STATUS.md CURRENT_TASK § "다음 세션 진입 가이드" 정독 + status/ai_operator_progress.md 정독 + docs/AI_OPERATOR_기능정의서.md v1.0.7 + docs/한줄로_BEYOND_BRAZE_비전.md v0.3 정독 → Harold 신고 우선 종결 또는 D177 Self-Optimizing 진입 또는 카페24 진입 방안 결정 진입
 ```
 
-> D171 코드 작업 (A/B/C) 종결 — 빌드/배포 후 ENT 베타 진입 대상사 확정 단계만 Harold 결정 대기.
+> Step 0 D163~D177-ux3 + 운영 DB schema + BEYOND BRAZE 비전 v0.3 박힘 종결. 다음 세션은 운영 환경 사용 검증 + 압축 로드맵 D177~D180 진입.

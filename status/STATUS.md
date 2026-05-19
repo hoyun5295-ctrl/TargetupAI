@@ -107,6 +107,49 @@
 
 ---
 
+### 🚀 다음 세션 진입 가이드 (D177-ux3 배포 후 즉시 진입)
+
+> **선행 정독 필수:** `docs/AI_OPERATOR_기능정의서.md` v1.0.7 + `docs/한줄로_BEYOND_BRAZE_비전.md` v0.3 + `status/ai_operator_progress.md`
+>
+> **영구 원칙 (모든 박음 시 정합):** [[feedback_no_target_auto_relax]] + [[feedback_ai_operator_model_isolation]] + [[feedback_no_future_roadmap_user_exposure]] + [[feedback_sub_module_back_navigation]] + [[feedback_jondaetmal_to_harold]] + [[feedback_push_and_deploy_commands]] + [[feedback_no_humuson_keyword_exposure]] + [[feedback_no_devtools_browser_diagnostic]]
+
+#### 1순위 — 운영 환경 사용 검증 (Harold "사용하면서 디버그" 명시 정합)
+
+| 영역 | Harold 검증 |
+|------|------------|
+| AI Operator 메인 진입 | `/ai-operator` 자연어 한 줄 → 통합 제안서 + 발송 흐름 |
+| Continuous Operator | `/continuous-operator` 신규 영구 운영 + 매일 09:00 KST 자동 제안서 + 일괄 승인 |
+| 성과리포트 | `/performance` 30일 성과 + AI Next Action 추천 + AI Operator prefill |
+| 자사몰 연동 (CDP) | `/cdp-settings` API key 발급 + 카페24 OAuth UI (CAFE24_* 환경변수 미박힘 시 카페24 연동만 동작 X) |
+| Web Push (admin only) | `/push-campaigns` 구독자 매트릭스 + 발송 폼 (VAPID 환경변수 박음 필수) |
+| In-app Message (admin only) | `/inapp-messages` CRUD + 미리보기 + CTR 통계 |
+
+#### 2순위 — 다음 세션 박을 영역 (압축 로드맵 D177~D180)
+
+| D | 영역 | 박을 의존성 |
+|---|------|------------|
+| **D177 Self-Optimizing (Bandit A/B)** | utils/bandit-optimizer.ts CT-29 (Thompson Sampling) + Continuous Operator proposal에 변형 A/B 박음 + 결과 분석 | D176 운영 데이터 누적 후 (1주+ 권장) |
+| **D178 인바운드 AI 음성 응답** | 한국 음성 인프라(NCloud / Naver Clova / 또는 Twilio) 검토 → STT + TTS + 자사몰 → 전화 클릭 → AI CDP 데이터 응답 흐름 | 외부 인프라 검토 + Harold 결정 필요 |
+| **D179 Multi-Goal Decisioning** | Continuous Operator 확장 — "매출 + 신규 + 휴면" 동시 박음 + AI 충돌 없는 흐름 자동 박음 | D176/D177 안정화 후 |
+| **D180 Email 채널 통합** | SDK Email 모듈 + SendGrid / Postmark / Mailgun 통합 | 외부 의존성 검토 |
+
+#### 3순위 — 운영 검증 후 결정 (Harold 결정 받음)
+
+| 항목 | 결정 영역 |
+|------|----------|
+| **카페24 진입 방안** | 옵션 C (SDK 직접 박음, 이미 박힌 인프라) vs 옵션 B (admin API key 발급 가능 여부 검증) — Harold 운영 환경 카페24 admin 확인 후 |
+| **AI Operator 메뉴 디자인 톤다운** | 운영 환경 노출 본 후 BETA 뱃지 작게 / 색상 톤다운 / dropdown 호버 시간 조정 필요 시 박음 |
+| **ENT 베타 진입 회사 1~3사 명단** | Harold 결정 — 카페24/자사몰 종류 + 등급 정합 |
+| **Shopify / 메이크샵 wrapper 구체 구현** | Phase 2 — ENT 후보사 자사몰 종류에 따라 우선순위 결정 |
+
+#### 진입 명령 (다음 세션 첫 메시지)
+
+```
+status/STATUS.md CURRENT_TASK § "다음 세션 진입 가이드" 정독 + docs/AI_OPERATOR_기능정의서.md v1.0.7 + docs/한줄로_BEYOND_BRAZE_비전.md v0.3 정독 → Harold 신고 우선 종결 또는 D177 Self-Optimizing 진입 또는 카페24 진입 방안 결정 진입
+```
+
+---
+
 ### 🔥 D162-4 (2026-05-15 ~ 2026-05-19, 진행 중) — 알림톡 발송 모달 전면 재구성 + 잔존 검증
 
 > **Harold님 명시:** "직접타겟발송은 검증이 더 필요한 상황이야 여전히 리스트 부분에서 수정사항이 좀 있어"
@@ -171,6 +214,7 @@ PDF 0515 알림톡 3건 root cause fix + Harold UX 8차 반복 정합:
 | D177-ux | **DashboardHeader 메뉴 간소화 — AI Operator dropdown 통합** Harold 명시 — "메인 메뉴 헤더 복잡 / AI 오퍼레이션 안 하위 메뉴 / 디자인 신경써서 마무리 / 신규 메뉴들 전부 AI Operator 하위". MenuItem interface 확장(subMenu) + AI Operator 메뉴에 subMenu 5건 통합(AI Operator/AI 영구운영/성과리포트/자사몰 연동/Web Push/인앱메시지) + 기존 헤더 별도 박힌 5건 메뉴 제거 + dropdown UI 박음(hover trigger + 그라데이션 상단 강조선 + label+description + BETA 뱃지 + 하단 안내 "AI가 제안 · 사용자가 승인 후 발송" + animate-in fade-in zoom-in-95 + 호버 보라색 hover bg) | ✓ (빌드 대기) |
 | D177-ux2 | **dropdown 영구 제거 + AiOperatorPage 안 sub-module 박음** Harold 명시 정정 — "dropdown X / AI Operator 페이지 안 메뉴 박음". DashboardHeader SubMenuItem interface + AI Operator subMenu + dropdown 렌더링 영구 제거 + AiOperatorPage에 SUB_MODULE_CARDS 5건(AI 영구운영/성과리포트/자사몰 연동/Web Push 회사 admin only/인앱메시지 회사 admin only) + "함께 사용하는 AI 영역" 섹션 박음(7 엔진 카드 위) + 카드별 그라데이션 + BETA 뱃지 + 호버 효과 + → 화살표 transition. 헤더는 AI Operator 메뉴만 박음 | ✓ (빌드 대기) |
 | D177-ux3 | **sub-module 페이지 뒤로가기 일관성 fix** Harold 명시 — "AI 오퍼레이션 메뉴로 돌아가는게 아니라 메인페이지로 돌아간다 / 원칙에 맞도록". 5 페이지(CdpSettings/Performance/ContinuousOperator/PushCampaigns/InAppMessages) ArrowLeft 박을 때 navigate('/') → navigate('/ai-operator') 일괄 정정. 부모-자식 계층 본질 정합. 영구 원칙 박음(memory/feedback_sub_module_back_navigation.md) | ✓ (빌드 대기) |
+| **DB schema** | **D172/D172-B/D175-A/D176 운영 환경 SQL 17건 전체 박힘 종결** (Harold 직접 PostgreSQL 실행, 2026-05-19) — 검증 SQL 결과 11 테이블 + 6 companies 컬럼 + 2 plans 컬럼 모두 정합 | ✓ 박힘 종결 |
 
 #### Harold 명시 모델 영역 절대 분리
 
