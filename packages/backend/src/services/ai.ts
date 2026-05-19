@@ -43,11 +43,15 @@ export async function callAIWithFallback(params: {
   // 1차: Claude (모델 선택: sonnet/opus)
   try {
     const modelName = params.model === 'opus' ? AI_MODELS.opus : AI_MODELS.claude;
+    const isOpus = params.model === 'opus';
+
+    // ★ D170+ (Opus 4.7 Breaking Changes 정합):
+    //   - Opus 4.7은 temperature/top_p/top_k 박으면 400 error (sampling 파라미터 제거)
+    //   - Opus 4.7은 thinking.type='enabled' 박으면 400 error (adaptive만 지원)
+    //   - 따라서 Opus 호출 시 temperature 박지 않음, thinking은 adaptive 형식
     const requestParams: any = {
       model: modelName,
       max_tokens: params.maxTokens,
-      // thinking 활성 시 temperature=1 강제 (SDK 요구사항)
-      temperature: params.thinking ? 1 : params.temperature,
       system: [
         {
           type: 'text' as const,
@@ -57,11 +61,22 @@ export async function callAIWithFallback(params: {
       ],
       messages: [{ role: 'user', content: params.userMessage }],
     };
+
+    // temperature — Opus 4.7은 박으면 400, Sonnet/Haiku는 정합
+    if (!isOpus) {
+      requestParams.temperature = params.thinking ? 1 : params.temperature;
+    }
+
+    // thinking — Opus 4.7은 adaptive only, Sonnet은 enabled+budget_tokens
     if (params.thinking) {
-      requestParams.thinking = {
-        type: 'enabled',
-        budget_tokens: params.thinkingBudget || 5000,
-      };
+      if (isOpus) {
+        requestParams.thinking = { type: 'adaptive' };
+      } else {
+        requestParams.thinking = {
+          type: 'enabled',
+          budget_tokens: params.thinkingBudget || 5000,
+        };
+      }
     }
 
     const response = await anthropic.messages.create(requestParams);

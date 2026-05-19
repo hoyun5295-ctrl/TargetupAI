@@ -35,8 +35,8 @@ export const AI_MODELS = {
   //
   //   callAIWithFallback에서 params.model === 'opus'일 때만 AI Operator 영역.
   //   기본 호출(model 미박힘)은 자동으로 기존 한줄로AI 흐름.
-  claude: process.env.CLAUDE_MODEL || 'claude-sonnet-4-6',               // ★ 기존 한줄로AI — Harold 명시 절대 유지
-  opus: process.env.CLAUDE_OPUS_MODEL || 'claude-opus-4-7',              // ★ AI Operator 신메뉴 전용
+  claude: process.env.CLAUDE_MODEL || 'claude-sonnet-4-6',               // ★ 기존 한줄로AI — Harold 명시 절대 유지 (검증)
+  opus: process.env.CLAUDE_OPUS_MODEL || 'claude-opus-4-7',              // ★ AI Operator 전용 (valid 확정 — 4-7 정합, 400 사고는 temperature 박은 게 원인)
   gpt: process.env.GPT_MODEL || 'gpt-5.4-mini',                          // ★ 기존 한줄로AI fallback — Harold 명시 절대 유지
   gptOperator: process.env.GPT_OPERATOR_MODEL || 'gpt-5.5',              // ★ AI Operator 신메뉴 fallback
 };
