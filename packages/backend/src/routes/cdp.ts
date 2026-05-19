@@ -17,7 +17,7 @@
  *   POST /api/cdp/issue-key      — public/secret key 발급 또는 재발급 (raw 1회 노출)
  */
 
-import { Router, Request, Response } from 'express';
+import { Router, Request, Response, json } from 'express';
 import { authenticate } from '../middlewares/auth';
 import { requireCdpApiKey, recordCdpApiCall, issueCdpKeyPair, isCdpEnabledForPlan } from '../utils/cdp-auth';
 import { identifyCustomer } from '../utils/cdp-identity';
@@ -26,6 +26,16 @@ import { syncOrder, bulkImport } from '../utils/cdp-orders';
 import { listProvidersForUI } from '../utils/provider-registry';
 // ★ D173 (2026-05-19): cafe24Adapter import 부수 효과로 cafe24 provider 등록
 import '../utils/cafe24-client';
+// ★ D178 (2026-05-19): naverSmartStoreAdapter import 부수 효과로 네이버 스마트스토어 provider 등록
+import '../utils/naver-commerce-client';
+// ★ D178 (2026-05-19): 자체 호스팅 자사몰 Adapter (Harold 명시 — 카페24보다 자체 호스팅 위주)
+import {
+  customSelfHostedAdapter,
+  issueCustomWebhookSecret,
+  getCustomWebhookInfo,
+  getCustomIntegrationByCompanyId,
+  revokeCustomWebhookSecret,
+} from '../utils/custom-self-hosted-adapter';
 // ★ D175-A (2026-05-19): Web Push + In-app Message 채널
 import {
   getVapidPublicKey,
@@ -167,6 +177,103 @@ router.post('/order', requireCdpApiKey, async (req: Request, res: Response) => {
     return res.status(status).json({ success: false, error: err?.message || 'order 처리 실패' });
   }
 });
+
+// ════════════════════════════════════════════════════════════════════
+// ★ D178 (2026-05-19) — 자체 호스팅 자사몰 Webhook (HMAC-SHA256 서명 인증)
+//   Harold 명시 — "카페24보다 자체 호스팅 자사몰 위주". 회사 자체 자사몰이 webhook_secret 박고 POST 박음.
+//   인증: X-Hanjullo-Company-Id 헤더 + X-Hanjullo-Signature (HMAC-SHA256 hex/base64)
+// ════════════════════════════════════════════════════════════════════
+
+router.post(
+  '/webhook/custom',
+  json({ limit: '1mb', verify: (req: any, _res, buf) => { req.rawBody = buf; } }),
+  async (req: Request, res: Response) => {
+    try {
+      const companyIdHeader = req.headers['x-hanjullo-company-id'];
+      const eventHeader = req.headers['x-hanjullo-event'];
+      const signatureHeader = req.headers['x-hanjullo-signature'];
+
+      const companyId = Array.isArray(companyIdHeader) ? companyIdHeader[0] : companyIdHeader;
+      const event = Array.isArray(eventHeader) ? eventHeader[0] : (eventHeader || req.body?.event);
+      const signature = Array.isArray(signatureHeader) ? signatureHeader[0] : signatureHeader;
+
+      if (!companyId || !event) {
+        return res.status(400).json({ success: false, error: 'X-Hanjullo-Company-Id와 X-Hanjullo-Event 헤더는 필수입니다.' });
+      }
+      if (!/^[a-f0-9-]{36}$/i.test(String(companyId))) {
+        return res.status(400).json({ success: false, error: 'X-Hanjullo-Company-Id 형식이 올바르지 않습니다.' });
+      }
+
+      // webhook_secret 조회 + 서명 검증
+      const integration = await getCustomIntegrationByCompanyId(String(companyId));
+      if (!integration || !integration.webhookSecret) {
+        return res.status(401).json({
+          success: false,
+          error: 'webhook_secret이 발급되지 않은 회사입니다. CdpSettingsPage에서 발급받아주세요.',
+        });
+      }
+      const rawBody = (req as any).rawBody || JSON.stringify(req.body);
+      const isValid = customSelfHostedAdapter.verifyWebhookSignature(
+        rawBody,
+        String(signature || ''),
+        integration.webhookSecret
+      );
+      if (!isValid) {
+        console.warn('[Custom Webhook] 서명 검증 실패, company=', companyId, 'event=', event);
+        return res.status(401).json({ success: false, error: 'X-Hanjullo-Signature 서명 검증에 실패했습니다.' });
+      }
+
+      // idempotency_key
+      const resource = req.body?.resource || req.body || {};
+      const idempotencyKey = customSelfHostedAdapter.buildIdempotencyKey(String(event), resource, req.body || {});
+
+      // 중복 차단 + 처리 row INSERT
+      const insertRes = await query(
+        `INSERT INTO cdp_webhook_deliveries (
+          id, company_id, source, webhook_event, idempotency_key, payload, status, retry_count, created_at
+        ) VALUES (
+          gen_random_uuid(), $1::uuid, 'custom', $2, $3, $4::jsonb, 'received', 0, NOW()
+        )
+        ON CONFLICT (company_id, source, idempotency_key) DO NOTHING
+        RETURNING id`,
+        [companyId, event, idempotencyKey, JSON.stringify(req.body || {})]
+      );
+
+      if (insertRes.rows.length === 0) {
+        await query(
+          `UPDATE cdp_webhook_deliveries
+           SET status = 'duplicate', processed_at = NOW(), updated_at = NOW()
+           WHERE company_id = $1::uuid AND source = 'custom' AND idempotency_key = $2`,
+          [companyId, idempotencyKey]
+        );
+        return res.json({ success: true, duplicate: true });
+      }
+
+      const deliveryId = insertRes.rows[0].id;
+
+      try {
+        await customSelfHostedAdapter.processWebhookEvent(String(companyId), String(event), resource);
+        await query(
+          `UPDATE cdp_webhook_deliveries SET status = 'processed', processed_at = NOW() WHERE id = $1::uuid`,
+          [deliveryId]
+        );
+        return res.json({ success: true });
+      } catch (processErr: any) {
+        console.error('[Custom Webhook] 이벤트 처리 실패:', processErr);
+        await query(
+          `UPDATE cdp_webhook_deliveries
+           SET status = 'failed', error_message = $2, processed_at = NOW()
+           WHERE id = $1::uuid`,
+          [deliveryId, String(processErr?.message || 'unknown').slice(0, 1000)]
+        );
+        return res.json({ success: false, error: '이벤트 처리 실패' });
+      }
+    } catch (err: any) {
+      console.error('[Custom Webhook] 오류:', err);
+      return res.status(500).json({ success: false, error: err?.message || 'webhook 처리 실패' });
+    }
+  }
+);
 
 // ════════════════════════════════════════════════════════════════════
 // ★ D175-A — Web Push 외부 API (SDK 호출, requireCdpApiKey 인증)
@@ -560,6 +667,72 @@ router.get('/providers', async (_req: Request, res: Response) => {
   } catch (err: any) {
     console.error('[CDP /providers] 오류:', err);
     return res.status(500).json({ success: false, error: err?.message || '조회 실패' });
+  }
+});
+
+// ════════════════════════════════════════════════════════════════════
+// ★ D178 (2026-05-19) — 자체 호스팅 자사몰 webhook_secret 회사 admin endpoint
+// ════════════════════════════════════════════════════════════════════
+
+// GET /api/cdp/custom/info — 현재 회사 webhook_secret 발급 상태 (CdpSettingsPage 표시)
+router.get('/custom/info', async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+    const info = await getCustomWebhookInfo(companyId);
+    return res.json({ success: true, ...info, companyId });
+  } catch (err: any) {
+    console.error('[CDP /custom/info] 오류:', err);
+    return res.status(500).json({ success: false, error: err?.message || '조회 실패' });
+  }
+});
+
+// POST /api/cdp/custom/issue-secret — webhook_secret 발급/재발급 (raw secret 1회만 응답)
+router.post('/custom/issue-secret', async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    const userType = req.user?.userType;
+    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+    if (userType !== 'company_admin') {
+      return res.status(403).json({ success: false, error: 'webhook_secret 발급은 회사 관리자만 가능합니다.' });
+    }
+    const cdpEnabled = await isCdpEnabledForPlan(companyId);
+    if (!cdpEnabled) {
+      return res.status(403).json({
+        success: false,
+        error: '자체 호스팅 자사몰 연동은 비즈니스 요금제부터 이용 가능합니다.',
+        code: 'PLAN_FEATURE_LOCKED',
+      });
+    }
+    const result = await issueCustomWebhookSecret(companyId);
+    return res.json({
+      success: true,
+      webhook_secret: result.secret,  // ★ raw secret — 본 응답에서만 1회 노출, 재발급 시 옛 secret은 폐기
+      webhook_url: result.webhookUrl,
+      company_id: companyId,
+      issued_at: result.issuedAt,
+      message: 'webhook_secret은 본 응답에서만 1회 노출됩니다. 자사몰 자체 서버에 즉시 박아주세요. 재발급 시 기존 secret은 즉시 폐기됩니다.',
+    });
+  } catch (err: any) {
+    console.error('[CDP /custom/issue-secret] 오류:', err);
+    return res.status(500).json({ success: false, error: err?.message || 'webhook_secret 발급 실패' });
+  }
+});
+
+// DELETE /api/cdp/custom/revoke — 자체 호스팅 자사몰 연동 해제
+router.delete('/custom/revoke', async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    const userType = req.user?.userType;
+    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+    if (userType !== 'company_admin') {
+      return res.status(403).json({ success: false, error: '연동 해제는 회사 관리자만 가능합니다.' });
+    }
+    const ok = await revokeCustomWebhookSecret(companyId);
+    return res.json({ success: ok });
+  } catch (err: any) {
+    console.error('[CDP /custom/revoke] 오류:', err);
+    return res.status(500).json({ success: false, error: err?.message || '연동 해제 실패' });
   }
 });
 

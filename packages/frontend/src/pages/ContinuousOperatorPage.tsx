@@ -1,9 +1,34 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { AlertCircle, ArrowLeft, Brain, Check, ChevronDown, ChevronUp, Clock, Edit2, Loader2, Play, Plus, RefreshCw, Sparkles, Trash2, X, Zap } from 'lucide-react';
+import { AlertCircle, ArrowLeft, Brain, Check, ChevronDown, ChevronUp, Clock, Edit2, Loader2, Play, Plus, RefreshCw, Sparkles, Target, Trash2, X, Zap } from 'lucide-react';
 
 // ★ D176 (2026-05-19): Continuous Agentic Operator — AI는 매일 제안서 박음 / 실행은 사용자 동의 후
 //   영구 원칙: AI 단독 실행 X / Zero-Count 차단 / ENT 자동 실행 옵션 default OFF
+// ★ D177 (2026-05-19): Self-Optimizing Bandit (Thompson Sampling) — message variant 누적 학습 + 추천
+
+interface ProposalVariant {
+  id: string;
+  proposalId: string;
+  variantIndex: number;
+  messageBody: string;
+  byteCount: number;
+  armAlpha: number;
+  armBeta: number;
+  sentCount: number;
+  clickCount: number;
+  conversionCount: number;
+  rewardTotal: number;
+}
+
+interface BanditRecommendation {
+  variantId: string;
+  variantIndex: number;
+  messageBody: string;
+  posteriorMean: number;
+  posteriorSample: number;
+  totalTrials: number;
+  reasoning: string;
+}
 
 type Schedule = 'daily' | 'weekly' | 'monthly';
 type OperatorStatus = 'active' | 'paused' | 'archived';
@@ -52,8 +77,38 @@ export default function ContinuousOperatorPage() {
   const [editing, setEditing] = useState<Partial<ContinuousOperator> | null>(null);
   const [saving, setSaving] = useState(false);
   const [expandedProposal, setExpandedProposal] = useState<string | null>(null);
+  // ★ D177 Self-Optimizing Bandit — proposal expand 시점에 variants + recommendation 박음
+  const [variantsMap, setVariantsMap] = useState<Record<string, { variants: ProposalVariant[]; recommendation: BanditRecommendation | null }>>({});
 
   const token = () => localStorage.getItem('token');
+
+  // ★ D177: proposal expand 시점에 variants + Bandit 추천 박음
+  const loadVariants = async (proposalId: string) => {
+    if (variantsMap[proposalId]) return; // 이미 박힘
+    try {
+      const res = await fetch(`/api/ai/operator/proposals/${proposalId}/variants`, {
+        headers: { Authorization: `Bearer ${token()}` },
+      });
+      const data = await res.json();
+      if (data.success) {
+        setVariantsMap((prev) => ({
+          ...prev,
+          [proposalId]: { variants: data.variants || [], recommendation: data.recommendation },
+        }));
+      }
+    } catch (e) {
+      console.error('variants 박음 실패:', e);
+    }
+  };
+
+  const toggleExpand = (proposalId: string) => {
+    if (expandedProposal === proposalId) {
+      setExpandedProposal(null);
+    } else {
+      setExpandedProposal(proposalId);
+      loadVariants(proposalId);
+    }
+  };
 
   const loadAll = async () => {
     setLoading(true);
@@ -328,7 +383,7 @@ export default function ContinuousOperatorPage() {
                             </>
                           )}
                           <button
-                            onClick={() => setExpandedProposal(expanded ? null : p.id)}
+                            onClick={() => toggleExpand(p.id)}
                             className="text-xs text-gray-500 hover:bg-gray-50 px-3 py-1.5 rounded flex items-center gap-1"
                           >
                             {expanded ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
@@ -353,13 +408,41 @@ export default function ContinuousOperatorPage() {
                           <div>
                             <div className="font-bold text-gray-700 mb-1">메시지 ({messages.length}안)</div>
                             <div className="space-y-1.5">
-                              {messages.slice(0, 3).map((m: any, i: number) => (
-                                <div key={i} className="bg-white border rounded p-2">
-                                  <div className="font-medium text-gray-700">{m.variantName || `Variant ${i + 1}`} · {m.byteCount}byte</div>
-                                  <div className="text-gray-600 whitespace-pre-wrap mt-1">{m.body}</div>
-                                </div>
-                              ))}
+                              {messages.slice(0, 3).map((m: any, i: number) => {
+                                const variantData = variantsMap[p.id]?.variants?.[i];
+                                const recommendation = variantsMap[p.id]?.recommendation;
+                                const isBanditRecommended = recommendation?.variantIndex === i;
+                                return (
+                                  <div key={i} className={`border rounded p-2 ${isBanditRecommended ? 'bg-indigo-50 border-indigo-300' : 'bg-white'}`}>
+                                    <div className="flex items-center gap-2 flex-wrap">
+                                      <span className="font-medium text-gray-700">{m.variantName || `Variant ${i + 1}`}</span>
+                                      <span className="text-[10px] text-gray-500">· {m.byteCount}byte</span>
+                                      {isBanditRecommended && (
+                                        <span className="text-[10px] bg-indigo-600 text-white px-1.5 py-0.5 rounded-full font-medium flex items-center gap-1">
+                                          <Target className="w-2.5 h-2.5" /> Bandit 추천
+                                        </span>
+                                      )}
+                                      {variantData && (
+                                        <span className="text-[10px] text-gray-500">
+                                          발송 {variantData.sentCount} · 클릭 {variantData.clickCount} · 전환 {variantData.conversionCount}
+                                        </span>
+                                      )}
+                                    </div>
+                                    <div className="text-gray-600 whitespace-pre-wrap mt-1">{m.body}</div>
+                                  </div>
+                                );
+                              })}
                             </div>
+                            {/* D177 Bandit 추천 사유 박음 */}
+                            {variantsMap[p.id]?.recommendation && (
+                              <div className="mt-2 bg-indigo-50 border border-indigo-200 rounded p-2 text-indigo-900 text-[11px] flex items-start gap-1.5">
+                                <Target className="w-3 h-3 mt-0.5 shrink-0" />
+                                <div>
+                                  <strong>Self-Optimizing 추천:</strong> {variantsMap[p.id].recommendation!.reasoning}
+                                  <div className="text-indigo-700 mt-0.5">★ 영구 원칙 정합 — 본 추천은 참고만, 발송은 사용자가 박은 variant로 진행됩니다.</div>
+                                </div>
+                              </div>
+                            )}
                           </div>
                         )}
                         {performance && (

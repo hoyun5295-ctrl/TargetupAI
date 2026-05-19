@@ -25,6 +25,14 @@ import {
   rejectProposal,
   generateProposalForOperator,
 } from '../utils/continuous-operator';
+// ★ D177 (2026-05-19): Self-Optimizing Bandit (Thompson Sampling)
+import {
+  listVariantsByProposal,
+  recommendVariantForProposal,
+  recordVariantReward,
+} from '../utils/bandit-optimizer';
+// ★ D179 (2026-05-19): Multi-Goal Decisioning (Opus 4.7 충돌 분석)
+import { analyzeGoalConflicts, OperatorGoal } from '../utils/multi-goal-decisioning';
 
 
 // ★ D79: 인라인 래퍼 제거 → CT-01 buildFilterWhereClauseCompat 직접 사용
@@ -1192,6 +1200,125 @@ router.post('/operator/proposals/:id/reject', async (req: Request, res: Response
   } catch (err: any) {
     console.error('[Proposals reject] 오류:', err);
     return res.status(500).json({ success: false, error: err?.message || '거부 실패' });
+  }
+});
+
+// ============================================================
+// ★ D177 (2026-05-19) Self-Optimizing Bandit — variant 추천 + reward 박음
+//   사용자 승인 흐름 정합: Bandit은 추천만 박음, 사용자가 발송 박음.
+// ============================================================
+
+router.get('/operator/proposals/:id/variants', async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+    // 권한 검증 — proposal이 본 회사 소유인지
+    const owner = await query(
+      `SELECT operator_id FROM operator_proposals WHERE id = $1::uuid AND company_id = $2::uuid`,
+      [req.params.id, companyId]
+    );
+    if (owner.rows.length === 0) return res.status(404).json({ success: false, error: '제안서를 찾을 수 없습니다.' });
+
+    const variants = await listVariantsByProposal(req.params.id);
+    const operatorId = owner.rows[0].operator_id;
+    const recommendation = await recommendVariantForProposal(req.params.id, {
+      operatorId,
+      useAccumulated: true,
+    });
+    return res.json({ success: true, variants, recommendation });
+  } catch (err: any) {
+    console.error('[Proposals variants GET] 오류:', err);
+    return res.status(500).json({ success: false, error: err?.message || '조회 실패' });
+  }
+});
+
+// ============================================================
+// ★ D179 (2026-05-19) Multi-Goal Decisioning — 다중 목표 충돌 분석 (Opus 4.7)
+//   영구 원칙 정합: AI 단독 실행 X — 분석 결과는 사용자 검토 후 박음
+// ============================================================
+
+router.post('/operator/multi-goal/analyze', async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+
+    const planCtx = await loadPlanContext(companyId);
+    if (!planCtx) return res.status(404).json({ success: false, error: '회사 정보를 찾을 수 없습니다.' });
+    if (!isBetaAccessAllowed(planCtx)) {
+      return res.status(403).json({ success: false, error: '본 기능은 엔터프라이즈 베타 운영 중입니다.', code: 'BETA_GATE' });
+    }
+
+    const { goals } = req.body;
+    if (!Array.isArray(goals) || goals.length === 0) {
+      return res.status(400).json({ success: false, error: 'goals 배열은 1건 이상 박혀야 합니다.' });
+    }
+    if (goals.length > 5) {
+      return res.status(400).json({ success: false, error: 'goals는 최대 5건까지 박을 수 있습니다.' });
+    }
+
+    // 가중치 합 정규화 (0.0~1.0 박지 X 시 자동 정규화)
+    const totalWeight = goals.reduce((sum: number, g: any) => sum + (Number(g.weight) || 0), 0);
+    const normalizedGoals: OperatorGoal[] = goals.map((g: any) => ({
+      name: String(g.name || '').slice(0, 100),
+      description: g.description ? String(g.description).slice(0, 500) : undefined,
+      weight: totalWeight > 0 ? (Number(g.weight) || 0) / totalWeight : 1.0 / goals.length,
+    }));
+
+    // 회사 정보 + 고객 통계
+    const companyRes = await query(
+      `SELECT company_name, business_type, brand_name, brand_tone FROM companies WHERE id = $1::uuid`,
+      [companyId]
+    );
+    const statsRes = await query(
+      `SELECT COUNT(*) AS total,
+              COUNT(*) FILTER (WHERE sms_opt_in = true) AS sms_opt_in_count,
+              AVG((custom_fields->>'purchase_count')::numeric) AS avg_purchase_count,
+              AVG((custom_fields->>'total_spent')::numeric) AS avg_total_spent
+       FROM customers WHERE company_id = $1::uuid AND is_active = true`,
+      [companyId]
+    );
+
+    const analysis = await analyzeGoalConflicts({
+      goals: normalizedGoals,
+      companyInfo: companyRes.rows[0] || {},
+      customerStats: statsRes.rows[0] || {},
+    });
+
+    return res.json({ success: true, analysis });
+  } catch (err: any) {
+    console.error('[AI Operator multi-goal] 오류:', err);
+    return res.status(500).json({ success: false, error: err?.message || '충돌 분석 실패' });
+  }
+});
+
+router.post('/operator/proposals/:id/variants/:vid/record', async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    const userType = req.user?.userType;
+    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+    if (userType !== 'company_admin') {
+      return res.status(403).json({ success: false, error: 'reward 박음은 회사 관리자만 가능합니다.' });
+    }
+    // 권한 검증
+    const owner = await query(
+      `SELECT v.id FROM operator_proposal_variants v
+       JOIN operator_proposals p ON v.proposal_id = p.id
+       WHERE v.id = $1::uuid AND p.id = $2::uuid AND p.company_id = $3::uuid`,
+      [req.params.vid, req.params.id, companyId]
+    );
+    if (owner.rows.length === 0) return res.status(404).json({ success: false, error: 'variant를 찾을 수 없습니다.' });
+
+    const { sent, clicked, converted } = req.body;
+    await recordVariantReward({
+      variantId: req.params.vid,
+      sent: Number(sent || 0),
+      clicked: Number(clicked || 0),
+      converted: Number(converted || 0),
+    });
+    return res.json({ success: true });
+  } catch (err: any) {
+    console.error('[Proposals variant record] 오류:', err);
+    return res.status(500).json({ success: false, error: err?.message || 'reward 박음 실패' });
   }
 });
 

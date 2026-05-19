@@ -1,7 +1,7 @@
 # 한줄로 — BEYOND BRAZE 비전
 
 **문서 종류:** 살아있는 비전 문서 (체어맨 + CTO 전용, 대외 공개 X)
-**버전:** v0.3 (D177 사용자 노출 영역 정리 — 헤더 dropdown 통합 + 미래 로드맵 영구 제거)
+**버전:** v0.4 (D178~D180 압축 진입 — 자체 호스팅 자사몰 + 네이버 스마트스토어 + Bandit + 음성 AI + Multi-Goal + Email 한번에 박음)
 **최종 갱신:** 2026-05-19
 **체어맨:** Harold
 **CTO:** 비토 (Claude Opus 4.7)
@@ -242,6 +242,7 @@ Braze Canvas Journey = 마케터가 박는 1회성. 한줄로 Continuous Operato
 | **v0.1** | 2026-05-19 (D175-B) | 비전 신설 | Manifesto + 영구 원칙 5건 + Braze 압도 8축 + Continuous Operator(사용자 동의 흐름) + 음성 AI 정직 분석 + 압축 로드맵 D176~D200 + 5년 시야 + KPI |
 | **v0.2** | 2026-05-19 (D176) | Continuous Operator 박힘 | 비전 § 3 박힌 Continuous Agentic Operator 본격 구현 — utils/continuous-operator.ts CT-28 + DB 2 테이블 + routes/ai.ts Operator CRUD + Proposals 승인/거부 + ContinuousOperatorPage + 5분 주기 worker scheduler. **AI 단독 실행 X 영구 원칙 100% 정합** — 모든 제안서는 사용자 승인 후 발송 (ENT 자동 실행 default OFF + 1,000건/5만원/low risk/비광고 임계값) |
 | **v0.3** | 2026-05-19 (D177) | 사용자 노출 영역 정리 + 영구 원칙 #6 + #7 박음 + 운영 DB 종결 | (D177-fix) AiOperatorPage SESSION_MILESTONES + 진행률 카드 + 9-Phase 로드맵 영구 제거. (D177-ux/ux2) DashboardHeader dropdown 박힘 → 영구 제거 + AiOperatorPage 안 SUB_MODULE_CARDS 5건 박음(함께 사용하는 AI 영역 섹션). (D177-ux3) sub-module 페이지 뒤로가기 5건 navigate('/ai-operator') 일괄 정정. **영구 원칙 #6 미래 로드맵 노출 X + #7 sub-module 뒤로가기 정합 박음.** **운영 DB schema 17건 박힘 종결** (11 테이블 + 6 companies + 2 plans 컬럼). |
+| **v0.4** | 2026-05-19 (D178~D180 압축 진입) | Harold "한번에 싹 다 원칙에 맞게" 명시 정합 | **자사몰 영역 정정** — 카페24 후순위, 자체 호스팅 자사몰 + 네이버 스마트스토어 우선 박음 (Harold 명시 — "지들이 보유한 서버에서 자사몰 위주" + "네이버스토어를 자사몰처럼 쓰는 회사들 많음"). **압축 로드맵 D177~D180 한번에 박음** — (Track A-1) 자체 호스팅 자사몰 customSelfHostedAdapter CT-29 + HMAC-SHA256 검증 + webhook_secret 발급 흐름 + Node.js 코드 샘플. (Track A-2) 네이버 스마트스토어 CT-30 + Naver Commerce API OAuth + Webhook + cafe24 미러 패턴. (D177) Self-Optimizing Bandit CT-31 Thompson Sampling + operator_proposal_variants + cold start explore + operator 누적 학습. (D178) 인바운드 음성 AI CT-32 Naver Clova STT/TTS + CT-33 voice-inbound + voice_inbound_calls + companies ALTER voice_inbound_enabled + Opus 4.7 응답 + 트랜스크립트 사후 확인. (D179) Multi-Goal Decisioning CT-34 + Opus 4.7 충돌 분석 + sub_plans + conflict_matrix + 가중치 자동 정규화. (D180) Email CT-35 SendGrid native fetch + CT-36 email-channel + email_campaigns/email_events + 광고성 (광고) prefix + 무료거부 자동 박음 + 1,000건 batch. **AiOperatorPage SUB_MODULE_CARDS 5→7건** (음성 AI + Email 추가). **영구 원칙 7건 정합 100%** — AI 단독 실행 X / Zero-Count / 모델 분리(Opus 4.7 영역, Sonnet 4.6 흐름 영향 0건) / 사용자 신뢰 / 한국 native(Clova + 네이버 + 자체 호스팅) / 미래 로드맵 노출 X / sub-module 뒤로가기 navigate('/ai-operator'). |
 
 ---
 

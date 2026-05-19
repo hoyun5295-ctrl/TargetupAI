@@ -30,6 +30,10 @@ import PushCampaignsPage from './pages/PushCampaignsPage';
 import InAppMessagesPage from './pages/InAppMessagesPage';
 // ★ D176 (2026-05-19): Continuous Agentic Operator (사용자 동의 흐름)
 import ContinuousOperatorPage from './pages/ContinuousOperatorPage';
+// ★ D178 (2026-05-19): 인바운드 AI 음성 응답 (Naver Clova STT/TTS + Opus 4.7)
+import VoiceInboundPage from './pages/VoiceInboundPage';
+// ★ D180 (2026-05-19): Email 채널 (SendGrid)
+import EmailCampaignsPage from './pages/EmailCampaignsPage';
 
 // ★ 세션 타이머 Context — 헤더 등에서 남은 시간 표시용
 interface SessionTimerContextType {
@@ -304,6 +308,26 @@ function App() {
           element={
             <PrivateRoute allowedTypes={['company_admin', 'company_user']}>
               <ContinuousOperatorPage />
+            </PrivateRoute>
+          }
+        />
+
+        {/* ★ D178 (2026-05-19): 인바운드 AI 음성 응답 — BUSINESS+ 베타 (회사 admin) */}
+        <Route
+          path="/voice-inbound"
+          element={
+            <PrivateRoute allowedTypes={['company_admin']}>
+              <VoiceInboundPage />
+            </PrivateRoute>
+          }
+        />
+
+        {/* ★ D180 (2026-05-19): Email 캠페인 (SendGrid) — BUSINESS+ 베타 (회사 admin) */}
+        <Route
+          path="/email-campaigns"
+          element={
+            <PrivateRoute allowedTypes={['company_admin']}>
+              <EmailCampaignsPage />
             </PrivateRoute>
           }
         />

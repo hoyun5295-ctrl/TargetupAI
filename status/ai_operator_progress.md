@@ -36,7 +36,16 @@
 | **D177-ux** | DashboardHeader dropdown UI (1차 박음, ux2에서 영구 제거) | ✓ 완료 → ux2 정정 | — |
 | **D177-ux2** | dropdown 영구 제거 + AiOperatorPage 안 SUB_MODULE_CARDS 5건 박음 (함께 사용하는 AI 영역 섹션) | ✓ 완료 | 배포 종결 |
 | **D177-ux3** | sub-module 페이지 뒤로가기 5건 navigate('/ai-operator') 일괄 정정 + 영구 원칙 #7 박음 (feedback_sub_module_back_navigation) | ✓ 완료 | 빌드 대기 (frontend만 변경) |
+| **D178 Track A-1** | **자체 호스팅 자사몰 (Harold 명시 우선)** utils/custom-self-hosted-adapter.ts CT-29 + HMAC-SHA256 hex/base64 검증 + identifyCustomer/syncOrder/trackEvent 표준 + issueCustomWebhookSecret + routes/cdp.ts /webhook/custom + 회사 admin endpoint 3건 + CdpSettingsPage 카드(secret 1회 노출 + Node.js 코드 샘플) | ✓ 완료 | 빌드 + 운영 검증 대기 |
+| **D178 Track A-2** | **네이버 스마트스토어 (Harold 명시 우선)** utils/naver-commerce-client.ts CT-30 + Naver Commerce API OAuth + Webhook + naverSmartStoreAdapter + routes/naver-commerce.ts(cafe24 미러) + CdpSettingsPage 카드. 환경변수 3건 NAVER_COMMERCE_CLIENT_ID/SECRET/REDIRECT_URI | ✓ 완료 | 빌드 + 환경변수 + 운영 검증 대기 |
+| **D177 Self-Optimizing** | utils/bandit-optimizer.ts CT-31 Thompson Sampling(Beta-Bernoulli + Marsaglia-Tsang Gamma sample + cold start explore + operator 누적 학습) + DB operator_proposal_variants 테이블 + continuous-operator 확장(generateProposal에서 insertProposalVariants) + routes/ai.ts variants endpoint 2건 + ContinuousOperatorPage variant 매트릭스(Bandit 추천 강조 + reasoning) | ✓ 완료 | 빌드 + DB SQL 1건 대기 |
+| **D178 음성 AI** | utils/naver-clova-client.ts CT-32(Clova Speech STT + Voice TTS) + utils/voice-inbound.ts CT-33(handleInboundCall + CDP 매칭 + Opus 4.7 + TTS + DB 저장) + DB voice_inbound_calls + companies ALTER voice_inbound_enabled + routes/voice.ts + VoiceInboundPage(토글 + 영구 원칙 안내 + 통화 이력 + 트랜스크립트 사후 확인) | ✓ 완료 | 빌드 + DB SQL 1건 + ALTER + 환경변수 4건(Clova) + VOICE_WEBHOOK_SECRET 대기 |
+| **D179 Multi-Goal** | utils/multi-goal-decisioning.ts CT-34(analyzeGoalConflicts — Opus 4.7 충돌 분석 + sub_plans + conflict_matrix + recommended_order + 가중치 자동 정규화 + AI 실패 시 fallback) + routes/ai.ts POST /api/ai/operator/multi-goal/analyze | ✓ 완료 | 빌드 대기 |
+| **D180 Email** | utils/sendgrid-client.ts CT-35(native fetch SendGrid Web API v3 + tracking) + utils/email-channel.ts CT-36(campaign CRUD + send + Zero-Count + 광고성 (광고) prefix + 무료거부 자동 + 1,000건 batch) + DB email_campaigns/events 2 테이블 + routes/email.ts(webhook + admin 4건) + EmailCampaignsPage | ✓ 완료 | 빌드 + DB SQL 2건 + 환경변수 3건(SENDGRID_*) 대기 |
+| **AiOperatorPage SUB_MODULE_CARDS** | 5→7건 박음 (음성 AI + Email 카드 추가) + import Mail/Phone | ✓ 완료 | 빌드 대기 |
+| **App.tsx 라우트** | /voice-inbound + /email-campaigns 2건 추가 (BUSINESS+ 회사 admin) | ✓ 완료 | 빌드 대기 |
 | **운영 DB schema** | D172/D172-B/D175-A/D176 운영 SQL 17건 Harold 직접 박힘 종결 (11 테이블 + 6 companies 컬럼 + 2 plans 컬럼 검증 정합) | ✓ 박힘 종결 | — |
+| **D178~D180 신규 DB schema** | operator_proposal_variants 1 + voice_inbound_calls 1 + email_campaigns 1 + email_events 1 = **4 신규 테이블** + companies ALTER voice_inbound_enabled 1 컬럼 = SQL 5건 박음 | ⏸ Harold 직접 박을 영역 | SQL 5건 + 환경변수 박힌 후 진입 |
 
 ---
 

@@ -11,7 +11,9 @@ import {
   DollarSign,
   LineChart,
   Loader2,
+  Mail,
   MessageSquare,
+  Phone,
   RefreshCw,
   Send,
   ShieldCheck,
@@ -154,9 +156,11 @@ interface SubModuleCard {
 const SUB_MODULE_CARDS: SubModuleCard[] = [
   { icon: Brain,        gradient: 'from-indigo-400 to-violet-500', label: 'AI 영구운영',    description: '매일 AI가 새 캠페인 제안 (사용자 승인 후 발송)',     path: '/continuous-operator' },
   { icon: LineChart,    gradient: 'from-fuchsia-400 to-pink-500',  label: '성과리포트',     description: '30일 성과 분석 + AI 다음 캠페인 추천',              path: '/performance' },
-  { icon: Workflow,     gradient: 'from-emerald-400 to-teal-500',  label: '자사몰 연동',    description: '카페24 / Shopify / 메이크샵 회원·주문 자동 sync',  path: '/cdp-settings' },
+  { icon: Workflow,     gradient: 'from-emerald-400 to-teal-500',  label: '자사몰 연동',    description: '자체 호스팅 · 네이버 스마트스토어 · 카페24 자동 sync', path: '/cdp-settings' },
   { icon: Zap,          gradient: 'from-amber-400 to-orange-500',  label: 'Web Push',      description: '브라우저 푸시 알림 발송',                            path: '/push-campaigns',   adminOnly: true },
   { icon: MessageSquare,gradient: 'from-rose-400 to-pink-500',     label: '인앱메시지',     description: '자사몰 안의 배너/모달 자동 표시',                    path: '/inapp-messages',   adminOnly: true },
+  { icon: Phone,        gradient: 'from-violet-400 to-purple-500', label: '인바운드 음성 AI', description: '자사몰 사용자 전화 클릭 시 AI 자동 응답 (Phase 1)', path: '/voice-inbound',    adminOnly: true },
+  { icon: Mail,         gradient: 'from-blue-400 to-cyan-500',     label: 'Email 캠페인',   description: 'SendGrid 기반 transactional · marketing 발송',      path: '/email-campaigns',  adminOnly: true },
 ];
 
 // 결과 카드 액센트

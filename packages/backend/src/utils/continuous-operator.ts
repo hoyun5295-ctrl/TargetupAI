@@ -28,6 +28,8 @@
 import { query } from '../config/database';
 import { orchestrate } from '../services/ai-orchestrator';
 import { getCompanyCosts } from '../config/defaults';
+// ★ D177 (2026-05-19): Self-Optimizing Bandit — message variants 박음 + Thompson Sampling
+import { insertProposalVariants } from './bandit-optimizer';
 
 // ════════════════════════════════════════════════════════════════════
 // 타입
@@ -320,10 +322,27 @@ export async function generateProposalForOperator(operatorId: string): Promise<O
     ]
   );
 
-  // 8. Operator 통계 갱신
+  // 8. D177 Self-Optimizing — message variants 박음 (Bandit 학습 기반)
+  const messages: any[] = (orchestratorResult.messages as any[]) || [];
+  if (messages.length > 0) {
+    try {
+      await insertProposalVariants(
+        messages.slice(0, 3).map((m: any, idx: number) => ({
+          proposalId: proposalRes.rows[0].id,
+          variantIndex: idx,
+          messageBody: String(m.body || m.message || ''),
+          byteCount: Number(m.byteCount || m.byte_count || 0),
+        }))
+      );
+    } catch (err: any) {
+      console.warn(`[ContinuousOperator] variant 박음 실패 (proposal=${proposalRes.rows[0].id}):`, err?.message || err);
+    }
+  }
+
+  // 9. Operator 통계 갱신
   await updateOperatorAfterRun(operator.id, operator.schedule, operator.scheduleTime, 1, autoExecuteEligible);
 
-  console.log(`[ContinuousOperator] ${operator.name} 제안서 박힘 (${recipientCount}명 / ${costEstimate}원 / ${autoExecuteEligible ? '자동 실행' : 'pending'})`);
+  console.log(`[ContinuousOperator] ${operator.name} 제안서 박힘 (${recipientCount}명 / ${costEstimate}원 / ${autoExecuteEligible ? '자동 실행' : 'pending'} / variants ${messages.length}건)`);
 
   return mapRowToProposal(proposalRes.rows[0]);
 }

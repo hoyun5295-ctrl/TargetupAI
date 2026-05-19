@@ -37,6 +37,12 @@ import alimtalkRoutes from './routes/alimtalk';
 import cdpRoutes from './routes/cdp';
 // ★ D172-B (2026-05-19): 카페24 OAuth + Webhook receiver
 import cafe24Routes, { cafe24CallbackRouter } from './routes/cafe24';
+// ★ D178 (2026-05-19): 네이버 스마트스토어 (커머스 API) OAuth + Webhook
+import naverCommerceRoutes, { naverCommerceCallbackRouter } from './routes/naver-commerce';
+// ★ D178 (2026-05-19): 인바운드 AI 음성 응답 (Naver Clova STT/TTS + Opus 4.7)
+import voiceRoutes from './routes/voice';
+// ★ D180 (2026-05-19): Email 채널 (SendGrid Web API v3)
+import emailRoutes from './routes/email';
 import { startAutoCampaignScheduler } from './utils/auto-campaign-worker';
 import { ensureMonthlyLogTables } from './utils/sms-queue';
 import { startSpamTestQueueWorker } from './utils/spam-test-queue';
@@ -160,6 +166,13 @@ app.use('/api/cdp', cdpRoutes); // ★ D172: 한줄로 CDP — 자사몰 → 한
 // ★ D172-B: 카페24 OAuth callback (authenticate 우회 — 카페24가 브라우저 redirect로 호출) → cafe24Routes보다 먼저 등록
 app.use('/api/cafe24', cafe24CallbackRouter);
 app.use('/api/cafe24', cafe24Routes);
+// ★ D178: 네이버 스마트스토어 OAuth callback (authenticate 우회) → naverCommerceRoutes보다 먼저 등록
+app.use('/api/naver-commerce', naverCommerceCallbackRouter);
+app.use('/api/naver-commerce', naverCommerceRoutes);
+// ★ D178: 인바운드 AI 음성 응답 (통신사 webhook + 회사 admin 토글/이력)
+app.use('/api/voice', voiceRoutes);
+// ★ D180: Email 채널 (SendGrid Event Webhook + 회사 admin 캠페인 CRUD/발송)
+app.use('/api/email', emailRoutes);
 // ★ D130: 알림톡/브랜드메시지 IMC 연동 (발신프로필/템플릿/검수/웹훅/이미지/알림수신자)
 app.use('/api/alimtalk', alimtalkRoutes);
 app.use('/api/dm', dmRouter);

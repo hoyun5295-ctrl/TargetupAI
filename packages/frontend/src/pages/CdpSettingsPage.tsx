@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { AlertCircle, ArrowLeft, Check, Copy, Database, ExternalLink, KeyRound, Link2, RefreshCw, Store, Unlink } from 'lucide-react';
+import { AlertCircle, ArrowLeft, Check, Copy, Database, ExternalLink, KeyRound, Link2, RefreshCw, Server, Store, Unlink } from 'lucide-react';
 import { useAuthStore } from '../stores/authStore';
 
 // ★ D172 (2026-05-19) — 한줄로 CDP 설정 페이지
@@ -43,6 +43,14 @@ interface Cafe24Status {
   scope?: string;
 }
 
+interface NaverCommerceStatus {
+  connected: boolean;
+  store_id?: string;
+  status?: string;
+  token_expires_at?: string;
+  scope?: string;
+}
+
 interface ProviderInfo {
   provider: string;
   displayName: string;
@@ -53,6 +61,21 @@ interface ProviderInfo {
     adminApi: boolean;
   };
   status: 'available' | 'coming_soon';
+}
+
+interface CustomWebhookInfo {
+  hasSecret: boolean;
+  webhookUrl: string;
+  issuedAt: string | null;
+  companyId: string;
+}
+
+interface CustomIssuedSecret {
+  webhook_secret: string;
+  webhook_url: string;
+  company_id: string;
+  issued_at: string;
+  message: string;
 }
 
 export default function CdpSettingsPage() {
@@ -69,7 +92,17 @@ export default function CdpSettingsPage() {
   const [cafe24Status, setCafe24Status] = useState<Cafe24Status | null>(null);
   const [cafe24MallId, setCafe24MallId] = useState('');
   const [cafe24Connecting, setCafe24Connecting] = useState(false);
+  // ★ D178 네이버 스마트스토어
+  const [naverStatus, setNaverStatus] = useState<NaverCommerceStatus | null>(null);
+  const [naverStoreId, setNaverStoreId] = useState('');
+  const [naverConnecting, setNaverConnecting] = useState(false);
   const [providers, setProviders] = useState<ProviderInfo[]>([]);
+  // ★ D178 (2026-05-19) 자체 호스팅 자사몰
+  const [customInfo, setCustomInfo] = useState<CustomWebhookInfo | null>(null);
+  const [customIssuedSecret, setCustomIssuedSecret] = useState<CustomIssuedSecret | null>(null);
+  const [customConfirmReissue, setCustomConfirmReissue] = useState(false);
+  const [customIssuing, setCustomIssuing] = useState(false);
+  const [copyStatusCustom, setCopyStatusCustom] = useState<'idle' | 'secret' | 'url' | 'companyId'>('idle');
 
   const token = () => localStorage.getItem('token');
 
@@ -111,6 +144,63 @@ export default function CdpSettingsPage() {
       if (data.success) setCafe24Status(data);
     } catch (e) {
       console.error('카페24 status 조회 실패:', e);
+    }
+  };
+
+  // ★ D178 네이버 스마트스토어
+  const loadNaverStatus = async () => {
+    try {
+      const res = await fetch('/api/naver-commerce/status', {
+        headers: { Authorization: `Bearer ${token()}` },
+      });
+      const data = await res.json();
+      if (data.success) setNaverStatus(data);
+    } catch (e) {
+      console.error('네이버 스마트스토어 status 조회 실패:', e);
+    }
+  };
+
+  const handleNaverConnect = async () => {
+    const trimmed = naverStoreId.trim();
+    if (!trimmed) {
+      alert('네이버 스마트스토어 store_id를 박아주세요.');
+      return;
+    }
+    setNaverConnecting(true);
+    try {
+      const res = await fetch(`/api/naver-commerce/oauth/authorize?store_id=${encodeURIComponent(trimmed)}`, {
+        headers: { Authorization: `Bearer ${token()}` },
+      });
+      const data = await res.json();
+      if (data.success && data.authorize_url) {
+        window.open(data.authorize_url, 'naver_oauth', 'width=720,height=820');
+        alert('새 창에서 네이버 로그인 + 동의를 완료한 후, 본 페이지로 돌아와 새로고침해주세요.');
+      } else {
+        alert(data.error || '네이버 스마트스토어 연동 시작 실패');
+      }
+    } catch (e: any) {
+      alert(e?.message || '네이버 스마트스토어 연동 처리 중 오류가 발생했습니다.');
+    } finally {
+      setNaverConnecting(false);
+    }
+  };
+
+  const handleNaverDisconnect = async () => {
+    if (!confirm('네이버 스마트스토어 연동을 해제하시겠습니까? 자사몰 → 한줄로 sync가 즉시 중단됩니다.')) return;
+    try {
+      const res = await fetch('/api/naver-commerce/disconnect', {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${token()}` },
+      });
+      const data = await res.json();
+      if (data.success) {
+        await loadNaverStatus();
+        alert('네이버 스마트스토어 연동이 해제되었습니다.');
+      } else {
+        alert(data.error || '연동 해제 실패');
+      }
+    } catch (e: any) {
+      alert(e?.message || '연동 해제 처리 중 오류가 발생했습니다.');
     }
   };
 
@@ -170,11 +260,91 @@ export default function CdpSettingsPage() {
     }
   };
 
+  // ★ D178 자체 호스팅 자사몰
+  const loadCustomInfo = async () => {
+    try {
+      const res = await fetch('/api/cdp/custom/info', {
+        headers: { Authorization: `Bearer ${token()}` },
+      });
+      const data = await res.json();
+      if (data.success) {
+        setCustomInfo({
+          hasSecret: data.hasSecret,
+          webhookUrl: data.webhookUrl,
+          issuedAt: data.issuedAt,
+          companyId: data.companyId,
+        });
+      }
+    } catch (e) {
+      console.error('자체 호스팅 info 조회 실패:', e);
+    }
+  };
+
+  const handleCustomIssue = async () => {
+    if (customInfo?.hasSecret && !customConfirmReissue) {
+      setCustomConfirmReissue(true);
+      return;
+    }
+    setCustomIssuing(true);
+    setCustomConfirmReissue(false);
+    try {
+      const res = await fetch('/api/cdp/custom/issue-secret', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token()}`,
+        },
+      });
+      const data = await res.json();
+      if (data.success) {
+        setCustomIssuedSecret(data);
+        await loadCustomInfo();
+      } else {
+        alert(data.error || 'webhook_secret 발급 실패');
+      }
+    } catch (e: any) {
+      alert(e?.message || 'webhook_secret 발급 중 오류');
+    } finally {
+      setCustomIssuing(false);
+    }
+  };
+
+  const handleCustomRevoke = async () => {
+    if (!confirm('자체 호스팅 자사몰 연동을 해제하시겠습니까? 자사몰에서 보낸 webhook이 즉시 차단됩니다.')) return;
+    try {
+      const res = await fetch('/api/cdp/custom/revoke', {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${token()}` },
+      });
+      const data = await res.json();
+      if (data.success) {
+        await loadCustomInfo();
+        alert('자체 호스팅 자사몰 연동이 해제되었습니다.');
+      } else {
+        alert(data.error || '연동 해제 실패');
+      }
+    } catch (e: any) {
+      alert(e?.message || '연동 해제 중 오류');
+    }
+  };
+
+  const copyCustom = async (text: string, target: 'secret' | 'url' | 'companyId') => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopyStatusCustom(target);
+      setTimeout(() => setCopyStatusCustom('idle'), 1500);
+    } catch {
+      alert('복사 실패 — 브라우저 권한을 확인해주세요.');
+    }
+  };
+
   useEffect(() => {
     loadUsage();
     loadEvents();
     loadCafe24Status();
     loadProviders();
+    loadCustomInfo();
+    loadNaverStatus();
   }, []);
 
   const handleIssueKey = async () => {
@@ -472,6 +642,254 @@ export default function CdpSettingsPage() {
                 )}
                 <div className="text-xs text-gray-400">
                   ★ 카페24 admin URL이 <span className="font-mono">https://hanjullo-test.cafe24.com/admin</span>이면 mall_id는 <span className="font-mono">hanjullo-test</span>입니다.
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ★ D178 (2026-05-19) — 자체 호스팅 자사몰 (Webhook + SDK). Harold 명시 — 카페24보다 자체 호스팅 우선. */}
+        {usage?.cdp_enabled && (
+          <div className="bg-white border rounded-xl p-6">
+            <div className="flex items-center gap-2 mb-1">
+              <Server className="w-5 h-5 text-indigo-600" />
+              <h2 className="text-base font-bold text-gray-800">자체 호스팅 자사몰 (Webhook + SDK)</h2>
+              <span className="text-xs bg-indigo-50 text-indigo-700 px-2 py-0.5 rounded-full font-medium">권장</span>
+            </div>
+            <div className="text-xs text-gray-500 mb-4">
+              자체 서버(Next.js / Node / Django / PHP / Rails 등)에서 운영하는 자사몰을 한줄로 CDP에 연결합니다.
+              webhook_secret 발급 → 자사몰 코드에 박음 → 표준 endpoint POST → 한줄로AI 자동 동기화.
+            </div>
+
+            {/* 발급된 직후 raw secret 1회 노출 */}
+            {customIssuedSecret && (
+              <div className="bg-emerald-50 border-2 border-emerald-300 rounded-xl p-5 mb-4">
+                <div className="flex items-center gap-2 mb-3">
+                  <Check className="w-5 h-5 text-emerald-600" />
+                  <h3 className="text-sm font-bold text-emerald-900">webhook_secret이 발급되었습니다</h3>
+                </div>
+                <div className="text-xs text-emerald-800 mb-4 leading-relaxed">
+                  ★ <strong>본 화면을 닫으면 webhook_secret을 다시 볼 수 없습니다.</strong> 자사몰 자체 서버 환경변수에 즉시 박아주세요. 재발급 시 기존 secret은 즉시 폐기됩니다.
+                </div>
+                <div className="space-y-3">
+                  <div>
+                    <label className="text-xs font-medium text-emerald-900 block mb-1">Webhook Secret (X-Hanjullo-Signature 서명 키) — ★ 1회 노출</label>
+                    <div className="flex gap-2">
+                      <input
+                        readOnly
+                        value={customIssuedSecret.webhook_secret}
+                        className="flex-1 px-3 py-2 bg-white border-2 border-rose-300 rounded-lg text-xs font-mono text-gray-700"
+                      />
+                      <button
+                        onClick={() => copyCustom(customIssuedSecret.webhook_secret, 'secret')}
+                        className="px-3 py-2 bg-rose-600 hover:bg-rose-700 text-white rounded-lg text-xs font-medium flex items-center gap-1.5"
+                      >
+                        {copyStatusCustom === 'secret' ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+                        {copyStatusCustom === 'secret' ? '복사됨' : '복사'}
+                      </button>
+                    </div>
+                  </div>
+                  <div>
+                    <label className="text-xs font-medium text-emerald-900 block mb-1">Webhook URL (자사몰이 POST 박는 endpoint)</label>
+                    <div className="flex gap-2">
+                      <input readOnly value={customIssuedSecret.webhook_url} className="flex-1 px-3 py-2 bg-white border border-emerald-200 rounded-lg text-xs font-mono text-gray-700" />
+                      <button onClick={() => copyCustom(customIssuedSecret.webhook_url, 'url')} className="px-3 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-medium flex items-center gap-1.5">
+                        {copyStatusCustom === 'url' ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+                        {copyStatusCustom === 'url' ? '복사됨' : '복사'}
+                      </button>
+                    </div>
+                  </div>
+                  <div>
+                    <label className="text-xs font-medium text-emerald-900 block mb-1">Company ID (X-Hanjullo-Company-Id 헤더 값)</label>
+                    <div className="flex gap-2">
+                      <input readOnly value={customIssuedSecret.company_id} className="flex-1 px-3 py-2 bg-white border border-emerald-200 rounded-lg text-xs font-mono text-gray-700" />
+                      <button onClick={() => copyCustom(customIssuedSecret.company_id, 'companyId')} className="px-3 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-medium flex items-center gap-1.5">
+                        {copyStatusCustom === 'companyId' ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+                        {copyStatusCustom === 'companyId' ? '복사됨' : '복사'}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setCustomIssuedSecret(null)}
+                  className="mt-4 px-4 py-2 bg-white border border-emerald-300 hover:bg-emerald-100 text-emerald-800 text-sm font-medium rounded-lg"
+                >
+                  확인 — 자사몰 자체 서버에 박았습니다
+                </button>
+              </div>
+            )}
+
+            {/* 발급 상태 */}
+            {!customIssuedSecret && customInfo && (
+              <>
+                {customInfo.hasSecret ? (
+                  <div className="space-y-3">
+                    <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-4 flex items-start gap-3">
+                      <Check className="w-5 h-5 text-emerald-600 mt-0.5 shrink-0" />
+                      <div className="flex-1">
+                        <div className="text-sm font-medium text-emerald-900">자체 호스팅 자사몰이 연동되었습니다</div>
+                        <div className="text-xs text-emerald-700 mt-1">
+                          발급 일자: {customInfo.issuedAt ? new Date(customInfo.issuedAt).toLocaleString('ko-KR') : '-'}
+                        </div>
+                      </div>
+                    </div>
+                    <div className="bg-gray-50 rounded-lg p-3 text-xs space-y-1 font-mono text-gray-700">
+                      <div><strong className="text-gray-600">Webhook URL:</strong> {customInfo.webhookUrl}</div>
+                      <div><strong className="text-gray-600">Company ID:</strong> {customInfo.companyId}</div>
+                      <div className="text-gray-500 mt-2 font-sans">★ webhook_secret은 발급 시점 1회만 노출됩니다. 자사몰에 박은 secret을 잃어버린 경우 재발급 박아주세요.</div>
+                    </div>
+                    {customConfirmReissue ? (
+                      <div className="bg-rose-50 border border-rose-200 rounded-lg p-4 space-y-3">
+                        <div className="text-sm text-rose-900 font-medium">
+                          정말로 재발급하시겠습니까? 기존 webhook_secret은 즉시 폐기되며, 자사몰 코드의 secret을 새 값으로 교체해야 합니다.
+                        </div>
+                        <div className="flex gap-2">
+                          <button
+                            onClick={handleCustomIssue}
+                            disabled={customIssuing || !isAdmin}
+                            className="px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white text-sm font-medium rounded-lg disabled:opacity-40"
+                          >
+                            {customIssuing ? '재발급 중...' : '확인 — 재발급 진행'}
+                          </button>
+                          <button onClick={() => setCustomConfirmReissue(false)} className="px-4 py-2 bg-white border border-gray-300 hover:bg-gray-50 text-gray-700 text-sm font-medium rounded-lg">취소</button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="flex gap-2">
+                        <button
+                          onClick={handleCustomIssue}
+                          disabled={!isAdmin}
+                          className="px-4 py-2 bg-white border border-gray-300 hover:bg-gray-50 text-gray-700 text-sm font-medium rounded-lg disabled:opacity-40"
+                        >
+                          재발급
+                        </button>
+                        {isAdmin && (
+                          <button onClick={handleCustomRevoke} className="px-4 py-2 bg-white border border-rose-300 hover:bg-rose-50 text-rose-700 text-sm font-medium rounded-lg flex items-center gap-2">
+                            <Unlink className="w-4 h-4" />
+                            연동 해제
+                          </button>
+                        )}
+                      </div>
+                    )}
+                    {!isAdmin && <div className="text-xs text-gray-500">webhook_secret 발급/재발급/해제는 회사 관리자만 가능합니다.</div>}
+
+                    {/* 코드 샘플 (이미 발급된 회사) */}
+                    <div className="bg-gray-50 rounded-lg p-4 mt-2 space-y-2">
+                      <div className="font-medium text-gray-800 text-sm">자사몰 자체 서버 박는 흐름 (Node.js 샘플)</div>
+                      <pre className="text-xs font-mono bg-white border border-gray-200 rounded p-3 overflow-x-auto">{`import { createHmac } from 'crypto';
+
+const body = JSON.stringify({
+  event: 'order.created',
+  resource: {
+    order_id: 'O-12345',
+    external_id: 'C-9001',
+    status: 'completed',
+    total_amount: 49000,
+    ordered_at: new Date().toISOString(),
+    items: [{ product_id: 'P001', product_name: '셔츠', price: 49000, quantity: 1 }],
+  },
+});
+
+const signature = createHmac('sha256', process.env.HANJULLO_WEBHOOK_SECRET)
+  .update(body).digest('hex');
+
+await fetch('${customInfo.webhookUrl}', {
+  method: 'POST',
+  headers: {
+    'Content-Type': 'application/json',
+    'X-Hanjullo-Company-Id': '${customInfo.companyId}',
+    'X-Hanjullo-Event':      'order.created',
+    'X-Hanjullo-Signature':  signature,
+  },
+  body,
+});`}</pre>
+                      <div className="text-xs text-gray-500">표준 이벤트: customer.created / customer.updated / order.created / order.updated / order.cancelled / order.refunded</div>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    <div className="text-sm text-gray-600">
+                      webhook_secret이 아직 발급되지 않았습니다. 발급 시 64자 hex secret이 박힙니다.
+                      <br />Secret은 발급 시점에 한 번만 노출되니, 자사몰 자체 서버에 즉시 박아주세요.
+                    </div>
+                    <button
+                      onClick={handleCustomIssue}
+                      disabled={customIssuing || !isAdmin}
+                      className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium rounded-lg disabled:opacity-40"
+                    >
+                      {customIssuing ? '발급 중...' : 'webhook_secret 발급'}
+                    </button>
+                    {!isAdmin && <div className="text-xs text-gray-500">webhook_secret 발급은 회사 관리자만 가능합니다.</div>}
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        )}
+
+        {/* ★ D178 (2026-05-19) — 네이버 스마트스토어 (Harold 명시 — 네이버스토어를 자사몰처럼 박는 회사 대응) */}
+        {usage?.cdp_enabled && (
+          <div className="bg-white border rounded-xl p-6">
+            <div className="flex items-center gap-2 mb-4">
+              <Store className="w-5 h-5 text-emerald-600" />
+              <h2 className="text-base font-bold text-gray-800">네이버 스마트스토어 연동</h2>
+              <span className="text-xs bg-emerald-50 text-emerald-700 px-2 py-0.5 rounded-full font-medium">코딩 0건</span>
+            </div>
+
+            {naverStatus?.connected ? (
+              <div className="space-y-3">
+                <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-4 flex items-start gap-3">
+                  <Check className="w-5 h-5 text-emerald-600 mt-0.5 shrink-0" />
+                  <div className="flex-1">
+                    <div className="text-sm font-medium text-emerald-900">
+                      {naverStatus.store_id} 네이버 스마트스토어와 연동되었습니다
+                    </div>
+                    <div className="text-xs text-emerald-700 mt-1">
+                      status: {naverStatus.status} · 토큰 만료: {naverStatus.token_expires_at ? new Date(naverStatus.token_expires_at).toLocaleString('ko-KR') : '-'}
+                      <br />scope: <span className="font-mono">{naverStatus.scope || '-'}</span>
+                    </div>
+                  </div>
+                </div>
+                <div className="text-xs text-gray-500">
+                  네이버 커머스 API가 보내는 webhook(회원 가입/주문 생성/주문 취소)은 자동으로 한줄로 customers + cdp_events에 박힙니다.
+                </div>
+                {isAdmin && (
+                  <button
+                    onClick={handleNaverDisconnect}
+                    className="px-4 py-2 bg-white border border-rose-300 hover:bg-rose-50 text-rose-700 text-sm font-medium rounded-lg flex items-center gap-2"
+                  >
+                    <Unlink className="w-4 h-4" />
+                    연동 해제
+                  </button>
+                )}
+              </div>
+            ) : (
+              <div className="space-y-3">
+                <div className="text-sm text-gray-600">
+                  네이버 스마트스토어 store_id를 입력하시면 OAuth 새 창이 열립니다. 네이버 관리자로 로그인 + 동의 완료 시 자동으로 회원/주문 sync가 박힙니다.
+                </div>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={naverStoreId}
+                    onChange={(e) => setNaverStoreId(e.target.value)}
+                    placeholder="예: 12345678"
+                    className="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
+                  />
+                  <button
+                    onClick={handleNaverConnect}
+                    disabled={naverConnecting || !isAdmin || !naverStoreId.trim()}
+                    className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-medium rounded-lg disabled:opacity-40 flex items-center gap-2"
+                  >
+                    <Link2 className="w-4 h-4" />
+                    {naverConnecting ? '연동 중...' : '네이버 스마트스토어 연동 시작'}
+                  </button>
+                </div>
+                {!isAdmin && (
+                  <div className="text-xs text-gray-500">네이버 스마트스토어 연동은 회사 관리자만 가능합니다.</div>
+                )}
+                <div className="text-xs text-gray-400">
+                  ★ 네이버 스마트스토어 관리자 페이지에서 store_id를 확인하실 수 있습니다 (보통 8자리 숫자).
                 </div>
               </div>
             )}
