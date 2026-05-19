@@ -115,7 +115,7 @@ export default function DashboardHeader({
       locked: isEnterpriseLocked || isSubscriptionLocked,
       path: '/auto-send',
     },
-    { label: '모바일DM', onClick: () => lockGuard(() => navigate('/dm-builder')), color: 'gold', locked: isSubscriptionLocked, path: '/dm-builder' },
+    // ★ D182 (2026-05-19): 모바일DM 헤더 메뉴 영구 제거 — AI Operator 페이지 안 SUB_MODULE_CARDS로 이동 (Harold 명시 — 헤더 간소화)
     {
       label: '카카오&RCS',
       onClick: () => enterpriseGuard('카카오 & RCS', '알림톡 템플릿 · 브랜드메시지 · RCS 통합 관리 기능입니다.',

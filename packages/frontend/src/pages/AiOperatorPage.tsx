@@ -14,6 +14,7 @@ import {
   Mail,
   MessageSquare,
   Phone,
+  Smartphone,
   RefreshCw,
   Send,
   ShieldCheck,
@@ -161,6 +162,7 @@ const SUB_MODULE_CARDS: SubModuleCard[] = [
   { icon: MessageSquare,gradient: 'from-rose-400 to-pink-500',     label: '인앱메시지',     description: '자사몰 안의 배너/모달 자동 표시',                    path: '/inapp-messages',   adminOnly: true },
   { icon: Phone,        gradient: 'from-violet-400 to-purple-500', label: '인바운드 음성 AI', description: '자사몰 사용자 전화 클릭 시 AI 자동 응답 (Phase 1)', path: '/voice-inbound',    adminOnly: true },
   { icon: Mail,         gradient: 'from-blue-400 to-cyan-500',     label: 'Email 캠페인',   description: 'SendGrid 기반 transactional · marketing 발송',      path: '/email-campaigns',  adminOnly: true },
+  { icon: Smartphone,   gradient: 'from-amber-400 to-yellow-500',  label: '모바일 DM',      description: '카드형 모바일 DM 빌더 — 미디어 메시지 디자인',       path: '/dm-builder' },
 ];
 
 // 결과 카드 액센트

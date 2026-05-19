@@ -181,7 +181,7 @@ export default function DmBuilderPage() {
     return (
       <div style={{ minHeight: '100vh', background: 'var(--dm-neutral-100)', fontFamily: 'var(--dm-font-primary)', display: 'flex', flexDirection: 'column' }}>
         <header style={{ background: 'var(--dm-bg)', borderBottom: '1px solid var(--dm-neutral-200)', padding: '16px 32px', display: 'flex', alignItems: 'center', gap: 16 }}>
-          <button onClick={() => navigate('/')} style={{ background: 'transparent', border: 'none', fontSize: 20, cursor: 'pointer', padding: 8, borderRadius: 8 }} title="대시보드로">←</button>
+          <button onClick={() => navigate('/ai-operator')} style={{ background: 'transparent', border: 'none', fontSize: 20, cursor: 'pointer', padding: 8, borderRadius: 8 }} title="AI Operator로">←</button>
           <h1 style={{ fontSize: 20, fontWeight: 800, color: 'var(--dm-neutral-900)', margin: 0 }}>모바일 DM 빌더</h1>
           <span style={{ fontSize: 11, padding: '3px 8px', background: 'var(--dm-primary-light)', color: 'var(--dm-primary)', borderRadius: 12, fontWeight: 700 }}>PRO</span>
         </header>
@@ -201,10 +201,10 @@ export default function DmBuilderPage() {
                 요금제 안내 보기
               </button>
               <button
-                onClick={() => navigate('/')}
+                onClick={() => navigate('/ai-operator')}
                 style={{ height: 44, padding: '0 20px', background: '#fff', color: 'var(--dm-neutral-700)', border: '1px solid var(--dm-neutral-300)', borderRadius: 10, fontSize: 14, fontWeight: 600, cursor: 'pointer' }}
               >
-                대시보드로
+                AI Operator로
               </button>
             </div>
           </div>
@@ -217,7 +217,7 @@ export default function DmBuilderPage() {
   return (
     <div style={{ minHeight: '100vh', background: 'var(--dm-neutral-100)', fontFamily: 'var(--dm-font-primary)' }}>
       <header style={{ background: 'var(--dm-bg)', borderBottom: '1px solid var(--dm-neutral-200)', padding: '16px 32px', display: 'flex', alignItems: 'center', gap: 16 }}>
-        <button onClick={() => navigate('/')} style={{ background: 'transparent', border: 'none', fontSize: 20, cursor: 'pointer', padding: 8, borderRadius: 8 }} title="대시보드로">←</button>
+        <button onClick={() => navigate('/ai-operator')} style={{ background: 'transparent', border: 'none', fontSize: 20, cursor: 'pointer', padding: 8, borderRadius: 8 }} title="AI Operator로">←</button>
         <h1 style={{ fontSize: 20, fontWeight: 800, color: 'var(--dm-neutral-900)', margin: 0 }}>모바일 DM 빌더</h1>
         <span style={{ fontSize: 11, padding: '3px 8px', background: 'var(--dm-primary-light)', color: 'var(--dm-primary)', borderRadius: 12, fontWeight: 700 }}>PRO</span>
         <div style={{ flex: 1 }} />
