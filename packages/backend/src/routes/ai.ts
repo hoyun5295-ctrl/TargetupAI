@@ -33,6 +33,17 @@ import {
 } from '../utils/bandit-optimizer';
 // ★ D179 (2026-05-19): Multi-Goal Decisioning (Opus 4.7 충돌 분석)
 import { analyzeGoalConflicts, OperatorGoal } from '../utils/multi-goal-decisioning';
+// ★ D181 (2026-05-19): 회사별 메모리 누적 (Anthropic Memory 패턴)
+import {
+  addMemory as addCompanyMemory,
+  listMemories as listCompanyMemories,
+  deleteMemory as deleteCompanyMemory,
+  MemoryType,
+} from '../utils/company-memory';
+// ★ D181 (2026-05-19): Anthropic Batch API (50% 비용 절감)
+import { listBatchJobs, pollBatch } from '../utils/batch-ai';
+// ★ D181 (2026-05-19): Anthropic Citations (AI 응답 근거 박음 — 사용자 신뢰)
+import { buildCompanyDocuments, callAIWithCitations } from '../utils/citations';
 
 
 // ★ D79: 인라인 래퍼 제거 → CT-01 buildFilterWhereClauseCompat 직접 사용
@@ -1306,6 +1317,162 @@ router.post('/operator/multi-goal/analyze', async (req: Request, res: Response) 
   } catch (err: any) {
     console.error('[AI Operator multi-goal] 오류:', err);
     return res.status(500).json({ success: false, error: err?.message || '충돌 분석 실패' });
+  }
+});
+
+// ============================================================
+// ★ D181 (2026-05-19) 회사별 메모리 (Anthropic Memory 패턴) — 회사 admin endpoint
+//   영구 원칙 #4 사용자 신뢰 — 회사 admin이 메모리 박은 영역 검토 + 삭제 박을 수 있음
+// ============================================================
+
+router.get('/operator/memory', async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+    const memoryType = req.query.type ? (String(req.query.type) as MemoryType) : undefined;
+    const limit = Math.min(parseInt(String(req.query.limit || '100')) || 100, 500);
+    const memories = await listCompanyMemories(companyId, { memoryType, limit });
+    return res.json({ success: true, memories });
+  } catch (err: any) {
+    console.error('[AI Operator memory GET] 오류:', err);
+    return res.status(500).json({ success: false, error: err?.message || '조회 실패' });
+  }
+});
+
+router.post('/operator/memory', async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    const userType = req.user?.userType;
+    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+    if (userType !== 'company_admin') {
+      return res.status(403).json({ success: false, error: '메모리 박음은 회사 관리자만 가능합니다.' });
+    }
+    const { memory_type, memory_key, memory_value, importance, source, metadata } = req.body;
+    if (!memory_type || !memory_key || !memory_value) {
+      return res.status(400).json({ success: false, error: 'memory_type, memory_key, memory_value는 필수입니다.' });
+    }
+    const validTypes: MemoryType[] = ['success_pattern', 'customer_insight', 'brand_tone_evolution', 'channel_performance', 'compliance_learning'];
+    if (!validTypes.includes(memory_type)) {
+      return res.status(400).json({ success: false, error: `memory_type은 ${validTypes.join('/')} 중 박혀야 합니다.` });
+    }
+    const entry = await addCompanyMemory({
+      companyId,
+      memoryType: memory_type,
+      memoryKey: String(memory_key),
+      memoryValue: String(memory_value),
+      importance: importance ? Number(importance) : undefined,
+      source: source ? String(source) : 'admin_input',
+      metadata: metadata || {},
+    });
+    return res.json({ success: true, memory: entry });
+  } catch (err: any) {
+    console.error('[AI Operator memory POST] 오류:', err);
+    return res.status(500).json({ success: false, error: err?.message || '메모리 박음 실패' });
+  }
+});
+
+router.delete('/operator/memory/:id', async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    const userType = req.user?.userType;
+    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+    if (userType !== 'company_admin') {
+      return res.status(403).json({ success: false, error: '메모리 삭제는 회사 관리자만 가능합니다.' });
+    }
+    const ok = await deleteCompanyMemory(companyId, req.params.id);
+    if (!ok) return res.status(404).json({ success: false, error: '메모리를 찾을 수 없습니다.' });
+    return res.json({ success: true });
+  } catch (err: any) {
+    console.error('[AI Operator memory DELETE] 오류:', err);
+    return res.status(500).json({ success: false, error: err?.message || '삭제 실패' });
+  }
+});
+
+// ============================================================
+// ★ D181 (2026-05-19) Anthropic Batch API — 회사 admin 운영 모니터링 endpoint
+//   대량 발송 박은 영역 50% 비용 절감 — Continuous Operator 박은 영역에서 박음
+// ============================================================
+
+router.get('/operator/batches', async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+    const limit = Math.min(parseInt(String(req.query.limit || '50')) || 50, 200);
+    const batches = await listBatchJobs(companyId, limit);
+    return res.json({ success: true, batches });
+  } catch (err: any) {
+    console.error('[AI Operator batches GET] 오류:', err);
+    return res.status(500).json({ success: false, error: err?.message || '조회 실패' });
+  }
+});
+
+router.post('/operator/batches/:batchId/poll', async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+    // 권한 검증 — 본 회사 소유 batch
+    const owner = await query(
+      `SELECT id FROM ai_batch_jobs WHERE batch_id = $1 AND company_id = $2::uuid`,
+      [req.params.batchId, companyId]
+    );
+    if (owner.rows.length === 0) return res.status(404).json({ success: false, error: 'batch를 찾을 수 없습니다.' });
+    const job = await pollBatch(req.params.batchId);
+    return res.json({ success: true, job });
+  } catch (err: any) {
+    console.error('[AI Operator batches poll] 오류:', err);
+    return res.status(500).json({ success: false, error: err?.message || 'poll 실패' });
+  }
+});
+
+// ============================================================
+// ★ D181 (2026-05-19) Anthropic Citations — AI 응답 근거 박음 (사용자 신뢰)
+//   사용자 박은 질문 → 회사 데이터 documents 박음 → Opus 4.7 응답 + citations 박음
+//   영구 원칙 #4 사용자 신뢰 — "AI가 박은 근거 박음"
+// ============================================================
+
+router.post('/operator/explain', async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+
+    const planCtx = await loadPlanContext(companyId);
+    if (!planCtx) return res.status(404).json({ success: false, error: '회사 정보를 찾을 수 없습니다.' });
+    if (!isAiOperatorAllowed(planCtx, req.user)) {
+      return res.status(403).json({ success: false, error: '본 기능은 엔터프라이즈 베타 운영 중입니다.', code: 'BETA_GATE' });
+    }
+
+    const { question } = req.body;
+    if (!question || typeof question !== 'string' || question.trim().length < 5) {
+      return res.status(400).json({ success: false, error: '질문을 박아주세요 (5자 이상).' });
+    }
+
+    const documents = await buildCompanyDocuments(companyId);
+    if (documents.length === 0) {
+      return res.status(400).json({ success: false, error: '회사 데이터가 부족하여 근거 박을 영역이 없습니다. 일부 캠페인을 박은 후 다시 시도해주세요.' });
+    }
+
+    const systemPrompt = `당신은 한줄로AI Operator의 분석 에이전트입니다 (Opus 4.7).
+박힌 document에 박힌 사실만 박음 + 박은 근거 박음 (citations 박음).
+추측/창작 X — document에 박지 X 영역은 "박은 정보가 없습니다" 박음.
+한국어 존댓말 (~입니다 / ~합니다).`;
+
+    const answer = await callAIWithCitations({
+      model: 'opus',
+      system: systemPrompt,
+      userMessage: question.trim(),
+      documents,
+      maxTokens: 1500,
+    });
+
+    return res.json({
+      success: true,
+      text: answer.text,
+      citations: answer.citations,
+      document_titles: documents.map((d) => d.title),
+    });
+  } catch (err: any) {
+    console.error('[AI Operator explain] 오류:', err);
+    return res.status(500).json({ success: false, error: err?.message || '분석 실패' });
   }
 });
 

@@ -21,6 +21,8 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { query } from '../config/database';
 import { getCompanyCosts, AI_MODELS } from '../config/defaults';
+// ★ D181 (2026-05-19): Anthropic Memory 패턴 박음 — 회사별 누적 학습
+import { buildMemoryPromptContext as buildCompanyMemoryPromptContext } from '../utils/company-memory';
 import {
   callAIWithFallback,
   recommendTarget,
@@ -138,7 +140,13 @@ export async function buildCompanyMemoryContext(companyId: string): Promise<stri
     const company = companyRes.rows[0] || {};
     const recentMessages: string[] = recentRes.rows.map((r: any) => r.message_content);
 
-    return `## Company Memory (D170 회사별 누적 학습)
+    // ★ D181 (2026-05-19) — Anthropic Memory 패턴 박음: ai_company_memory 박은 영역 박음
+    const memoryContext = await buildCompanyMemoryPromptContext(companyId, 30).catch((err) => {
+      console.warn('[Orchestrator] buildMemoryPromptContext 실패:', err);
+      return '';
+    });
+
+    return `## Company Memory (D170 / D181 회사별 누적 학습)
 - 브랜드명: ${company.brand_name || '(미설정)'}
 - 슬로건: ${company.brand_slogan || '(미설정)'}
 - 톤앤매너: ${company.brand_tone || '친근함'}
@@ -149,7 +157,8 @@ ${company.brand_description ? `- 브랜드 소개: ${company.brand_description}`
 ${recentMessages.length > 0
   ? recentMessages.map((m, i) => `${i + 1}. ${m.replace(/\(광고\)/g, '').replace(/무료거부\d+/g, '').replace(/무료수신거부\s?\d{3}-?\d{3,4}-?\d{4}/g, '').trim().slice(0, 250)}`).join('\n')
   : '(최근 30일 발송 이력 없음)'}
-`;
+
+${memoryContext}`;
   } catch (err) {
     console.warn('[Orchestrator] buildCompanyMemoryContext 실패, 빈 컨텍스트 반환:', err);
     return '';

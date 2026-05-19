@@ -46,6 +46,12 @@
 | **App.tsx 라우트** | /voice-inbound + /email-campaigns 2건 추가 (BUSINESS+ 회사 admin) | ✓ 완료 | 빌드 대기 |
 | **운영 DB schema** | D172/D172-B/D175-A/D176 운영 SQL 17건 Harold 직접 박힘 종결 (11 테이블 + 6 companies 컬럼 + 2 plans 컬럼 검증 정합) | ✓ 박힘 종결 | — |
 | **D178~D180 신규 DB schema** | operator_proposal_variants 1 + voice_inbound_calls 1 + email_campaigns 1 + email_events 1 = **4 신규 테이블** + companies ALTER voice_inbound_enabled 1 컬럼 = SQL 5건 박음 | ⏸ Harold 직접 박을 영역 | SQL 5건 + 환경변수 박힌 후 진입 |
+| **D178 hoyun 박음 게이팅** | utils/plan-guard.ts isAiOperatorAllowed 박음 + routes/ai.ts 5건 정정 + GET /operator/access endpoint + Dashboard.tsx onAiOperatorClick 박음. ENV `AI_OPERATOR_ALLOWED_USERS=hoyun` 박힘 시 hoyun만 진입, 그 외 모두 BetaFeatureModal | ✓ 완료 + 배포 + .env 박음 종결 (Harold 직접) | — |
+| **D181 #1 D179 Frontend UI** | ContinuousOperatorPage 다중 목표 modal + analyze + sub_plans + conflict_matrix + recommended_order UI 박음 + 가중치 자동 정규화 + 헤더 버튼 박음 | ✓ 완료 | 빌드 대기 (frontend만 변경) |
+| **D181 #2 Anthropic Memory tool 패턴** | utils/company-memory.ts CT-37(5 메모리 타입 + addMemory/listMemories/buildMemoryPromptContext/recordCampaignLearning) + DB ai_company_memory 테이블 + ai-orchestrator.ts buildCompanyMemoryContext에 박음 + routes/ai.ts 회사 admin endpoint 3건 | ✓ 완료 | 빌드 + DB SQL 1건 박음 대기 |
+| **D181 #3 Anthropic Batch API** | utils/batch-ai.ts CT-38(submitBatch + pollBatch + getBatchResults + listBatchJobs Anthropic native) + DB ai_batch_jobs 테이블 + routes/ai.ts /operator/batches endpoint 2건. **대량 발송 50% 비용 절감** | ✓ 완료 | 빌드 + DB SQL 1건 박음 대기 |
+| **D181 #4 Anthropic Citations** | utils/citations.ts CT-39(buildCompanyDocuments 4 document + callAIWithCitations Opus 4.7 native citations.enabled) + routes/ai.ts /operator/explain endpoint. **사용자 신뢰 #4 본질 박음** | ✓ 완료 | 빌드 대기 (DB 박지 X) |
+| **D181 신규 DB schema** | ai_company_memory 1 + ai_batch_jobs 1 = **2 신규 테이블** | ⏸ Harold 직접 박을 영역 | SQL 2건 박힌 후 진입 |
 
 ---
 

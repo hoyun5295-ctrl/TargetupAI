@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { AlertCircle, ArrowLeft, Brain, Check, ChevronDown, ChevronUp, Clock, Edit2, Loader2, Play, Plus, RefreshCw, Sparkles, Target, Trash2, X, Zap } from 'lucide-react';
+import { AlertCircle, ArrowLeft, Brain, Check, ChevronDown, ChevronUp, Clock, Edit2, GitMerge, Loader2, Play, Plus, RefreshCw, Sparkles, Target, Trash2, X, Zap } from 'lucide-react';
 
 // ★ D176 (2026-05-19): Continuous Agentic Operator — AI는 매일 제안서 박음 / 실행은 사용자 동의 후
 //   영구 원칙: AI 단독 실행 X / Zero-Count 차단 / ENT 자동 실행 옵션 default OFF
@@ -28,6 +28,33 @@ interface BanditRecommendation {
   posteriorSample: number;
   totalTrials: number;
   reasoning: string;
+}
+
+// ★ D179 (2026-05-19): Multi-Goal Decisioning 박음 UI 박음
+interface MultiGoalInput {
+  name: string;
+  description?: string;
+  weight: number;
+}
+
+interface MultiGoalSubPlan {
+  goalName: string;
+  targetCriteria: string;
+  channelRecommended: string;
+  timingRecommended: string;
+  conflicts: string[];
+  priority: number;
+  shouldExecute: boolean;
+  reasoning: string;
+}
+
+interface MultiGoalAnalysis {
+  goals: MultiGoalInput[];
+  subPlans: MultiGoalSubPlan[];
+  overallStrategy: string;
+  conflictMatrix: string;
+  recommendedOrder: string[];
+  analyzedAt: string;
 }
 
 type Schedule = 'daily' | 'weekly' | 'monthly';
@@ -79,6 +106,14 @@ export default function ContinuousOperatorPage() {
   const [expandedProposal, setExpandedProposal] = useState<string | null>(null);
   // ★ D177 Self-Optimizing Bandit — proposal expand 시점에 variants + recommendation 박음
   const [variantsMap, setVariantsMap] = useState<Record<string, { variants: ProposalVariant[]; recommendation: BanditRecommendation | null }>>({});
+  // ★ D179 Multi-Goal Decisioning — 다중 목표 충돌 분석 박음
+  const [showMultiGoal, setShowMultiGoal] = useState(false);
+  const [multiGoals, setMultiGoals] = useState<MultiGoalInput[]>([
+    { name: '', description: '', weight: 0.5 },
+    { name: '', description: '', weight: 0.5 },
+  ]);
+  const [analyzing, setAnalyzing] = useState(false);
+  const [multiGoalAnalysis, setMultiGoalAnalysis] = useState<MultiGoalAnalysis | null>(null);
 
   const token = () => localStorage.getItem('token');
 
@@ -108,6 +143,44 @@ export default function ContinuousOperatorPage() {
       setExpandedProposal(proposalId);
       loadVariants(proposalId);
     }
+  };
+
+  // ★ D179 Multi-Goal 박음
+  const handleMultiGoalAnalyze = async () => {
+    const validGoals = multiGoals.filter((g) => g.name.trim().length > 0);
+    if (validGoals.length < 2) {
+      alert('다중 목표 분석은 2건 이상 박혀야 합니다.');
+      return;
+    }
+    setAnalyzing(true);
+    setMultiGoalAnalysis(null);
+    try {
+      const res = await fetch('/api/ai/operator/multi-goal/analyze', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token()}` },
+        body: JSON.stringify({ goals: validGoals }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setMultiGoalAnalysis(data.analysis);
+      } else {
+        alert(data.error || '충돌 분석 실패');
+      }
+    } catch (e: any) {
+      alert(e?.message || '분석 중 오류');
+    } finally {
+      setAnalyzing(false);
+    }
+  };
+
+  const addMultiGoal = () => {
+    if (multiGoals.length >= 5) return;
+    setMultiGoals([...multiGoals, { name: '', description: '', weight: 0.2 }]);
+  };
+
+  const removeMultiGoal = (idx: number) => {
+    if (multiGoals.length <= 2) return;
+    setMultiGoals(multiGoals.filter((_, i) => i !== idx));
   };
 
   const loadAll = async () => {
@@ -260,6 +333,14 @@ export default function ContinuousOperatorPage() {
             <button onClick={loadAll} className="text-xs text-gray-600 hover:bg-gray-100 px-3 py-1.5 rounded-lg flex items-center gap-1.5">
               <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
               새로고침
+            </button>
+            <button
+              onClick={() => { setShowMultiGoal(true); setMultiGoalAnalysis(null); }}
+              className="text-xs bg-violet-600 hover:bg-violet-700 text-white px-3 py-1.5 rounded-lg flex items-center gap-1.5"
+              title="다중 목표 박을 때 AI가 충돌 영역 분석 박음 (Multi-Goal Decisioning)"
+            >
+              <GitMerge className="w-3.5 h-3.5" />
+              다중 목표 분석
             </button>
             <button
               onClick={() => setEditing({ name: '', objective: '', schedule: 'daily', scheduleTime: '09:00', status: 'active' })}
@@ -512,6 +593,160 @@ export default function ContinuousOperatorPage() {
           </>
         )}
       </div>
+
+      {/* ★ D179 Multi-Goal 분석 모달 */}
+      {showMultiGoal && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50" onClick={() => setShowMultiGoal(false)}>
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[90vh] overflow-y-auto p-6" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center gap-2 mb-4">
+              <GitMerge className="w-5 h-5 text-violet-600" />
+              <h3 className="text-base font-bold text-gray-800">Multi-Goal Decisioning — 다중 목표 충돌 분석</h3>
+              <span className="text-[10px] bg-violet-100 text-violet-700 px-1.5 py-0.5 rounded-full font-medium">Opus 4.7</span>
+            </div>
+            <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 mb-4 text-xs text-amber-900 flex items-start gap-2">
+              <AlertCircle className="w-4 h-4 mt-0.5 shrink-0" />
+              <div>
+                <strong>영구 원칙:</strong> 다중 목표 박을 때 AI가 충돌 영역(동일 고객 동시 발송 / 메시지 중복 / 시점 겹침)을 박음 + 사용자 검토 후 영구 운영 박음.
+                실행은 사용자 승인 후에만 박음.
+              </div>
+            </div>
+
+            {!multiGoalAnalysis && (
+              <>
+                <div className="space-y-3 mb-4">
+                  {multiGoals.map((g, idx) => (
+                    <div key={idx} className="border rounded-lg p-3 bg-gray-50">
+                      <div className="flex items-center gap-2 mb-2">
+                        <span className="text-xs font-bold text-gray-700">목표 {idx + 1}</span>
+                        {multiGoals.length > 2 && (
+                          <button onClick={() => removeMultiGoal(idx)} className="text-rose-500 hover:text-rose-700 text-xs ml-auto">
+                            제거
+                          </button>
+                        )}
+                      </div>
+                      <div className="grid grid-cols-2 gap-2 mb-2">
+                        <input
+                          type="text"
+                          value={g.name}
+                          onChange={(e) => {
+                            const next = [...multiGoals];
+                            next[idx] = { ...next[idx], name: e.target.value };
+                            setMultiGoals(next);
+                          }}
+                          placeholder="예: VIP 재구매"
+                          className="px-3 py-2 border rounded text-sm"
+                          maxLength={100}
+                        />
+                        <div>
+                          <label className="text-[10px] text-gray-500 block">가중치 (0~1, 합 자동 정규화)</label>
+                          <input
+                            type="number"
+                            step="0.1"
+                            min="0"
+                            max="1"
+                            value={g.weight}
+                            onChange={(e) => {
+                              const next = [...multiGoals];
+                              next[idx] = { ...next[idx], weight: parseFloat(e.target.value) || 0 };
+                              setMultiGoals(next);
+                            }}
+                            className="px-3 py-2 border rounded text-sm w-full"
+                          />
+                        </div>
+                      </div>
+                      <textarea
+                        value={g.description || ''}
+                        onChange={(e) => {
+                          const next = [...multiGoals];
+                          next[idx] = { ...next[idx], description: e.target.value };
+                          setMultiGoals(next);
+                        }}
+                        placeholder="자연어 상세 (선택) — 예: VIP 등급 + 최근 30일 미구매 고객"
+                        className="w-full px-3 py-2 border rounded text-xs resize-none h-16"
+                        maxLength={500}
+                      />
+                    </div>
+                  ))}
+                  {multiGoals.length < 5 && (
+                    <button
+                      onClick={addMultiGoal}
+                      className="w-full py-2 border-2 border-dashed border-gray-300 hover:border-violet-400 hover:bg-violet-50 text-xs text-gray-600 rounded-lg flex items-center justify-center gap-1.5"
+                    >
+                      <Plus className="w-3 h-3" /> 목표 추가 (최대 5건)
+                    </button>
+                  )}
+                </div>
+                <div className="flex gap-2 justify-end pt-2 border-t">
+                  <button onClick={() => setShowMultiGoal(false)} className="px-4 py-2 border rounded-lg text-sm text-gray-700 hover:bg-gray-50">취소</button>
+                  <button
+                    onClick={handleMultiGoalAnalyze}
+                    disabled={analyzing}
+                    className="px-4 py-2 bg-violet-600 hover:bg-violet-700 text-white text-sm rounded-lg disabled:opacity-40 flex items-center gap-1.5"
+                  >
+                    {analyzing ? <><Loader2 className="w-3.5 h-3.5 animate-spin" /> AI 분석 중...</> : <><Sparkles className="w-3.5 h-3.5" /> 충돌 분석 박음</>}
+                  </button>
+                </div>
+              </>
+            )}
+
+            {/* 분석 결과 */}
+            {multiGoalAnalysis && (
+              <>
+                <div className="bg-violet-50 border border-violet-200 rounded-lg p-4 mb-4">
+                  <div className="text-xs font-bold text-violet-900 mb-1">통합 전략</div>
+                  <div className="text-sm text-violet-800 whitespace-pre-wrap leading-relaxed">{multiGoalAnalysis.overallStrategy}</div>
+                </div>
+
+                <div className="mb-4">
+                  <div className="text-xs font-bold text-gray-700 mb-2">박을 순서 (Recommended Order)</div>
+                  <div className="flex flex-wrap gap-2">
+                    {multiGoalAnalysis.recommendedOrder.map((name, idx) => (
+                      <div key={idx} className="bg-white border border-violet-300 rounded-full px-3 py-1 text-xs flex items-center gap-1.5">
+                        <span className="bg-violet-600 text-white w-4 h-4 rounded-full flex items-center justify-center text-[10px] font-bold">{idx + 1}</span>
+                        {name}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="mb-4 space-y-2">
+                  <div className="text-xs font-bold text-gray-700">목표별 sub-plan</div>
+                  {multiGoalAnalysis.subPlans.map((sp, idx) => (
+                    <div key={idx} className={`border rounded-lg p-3 ${sp.shouldExecute ? 'bg-white' : 'bg-rose-50 border-rose-200'}`}>
+                      <div className="flex items-center gap-2 mb-1">
+                        <span className="bg-violet-600 text-white w-4 h-4 rounded-full flex items-center justify-center text-[10px] font-bold">{sp.priority}</span>
+                        <span className="text-sm font-bold text-gray-800">{sp.goalName}</span>
+                        <span className="text-[10px] bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded-full">{sp.channelRecommended}</span>
+                        <span className="text-[10px] bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded-full">{sp.timingRecommended}</span>
+                        {!sp.shouldExecute && <span className="text-[10px] bg-rose-200 text-rose-800 px-1.5 py-0.5 rounded-full">실행 제외</span>}
+                      </div>
+                      <div className="text-xs text-gray-600 mb-1">{sp.targetCriteria}</div>
+                      {sp.conflicts.length > 0 && (
+                        <div className="text-[11px] text-amber-700 mt-1.5">
+                          <strong>충돌:</strong> {sp.conflicts.join(' / ')}
+                        </div>
+                      )}
+                      <div className="text-[11px] text-gray-500 mt-1">{sp.reasoning}</div>
+                    </div>
+                  ))}
+                </div>
+
+                {multiGoalAnalysis.conflictMatrix && (
+                  <details className="mb-4">
+                    <summary className="text-xs font-bold text-gray-700 cursor-pointer">충돌 매트릭스 (markdown)</summary>
+                    <pre className="bg-gray-50 border rounded p-3 text-[11px] font-mono whitespace-pre-wrap mt-2">{multiGoalAnalysis.conflictMatrix}</pre>
+                  </details>
+                )}
+
+                <div className="flex gap-2 justify-end pt-3 border-t">
+                  <button onClick={() => { setMultiGoalAnalysis(null); }} className="px-4 py-2 border rounded-lg text-sm text-gray-700 hover:bg-gray-50">다시 분석</button>
+                  <button onClick={() => setShowMultiGoal(false)} className="px-4 py-2 bg-violet-600 hover:bg-violet-700 text-white text-sm rounded-lg">확인</button>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* 편집 모달 */}
       {editing && (
