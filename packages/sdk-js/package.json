@@ -1,0 +1,49 @@
+{
+  "name": "@hanjullo/sdk",
+  "version": "0.2.0",
+  "description": "한줄로 CDP (Customer Data Platform) JavaScript SDK — 자사몰 → 한줄로AI 회원/이벤트/주문 sync 표준 SDK",
+  "type": "module",
+  "main": "./dist/cjs/index.js",
+  "module": "./dist/esm/index.js",
+  "types": "./dist/types/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/types/index.d.ts",
+      "import": "./dist/esm/index.js",
+      "require": "./dist/cjs/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.esm.json && tsc -p tsconfig.cjs.json && tsc -p tsconfig.types.json",
+    "build:clean": "rm -rf dist && npm run build",
+    "test": "echo \"테스트 추후 추가\" && exit 0"
+  },
+  "keywords": [
+    "hanjullo",
+    "cdp",
+    "marketing",
+    "sms",
+    "lms",
+    "kakao",
+    "alimtalk",
+    "customer-data-platform"
+  ],
+  "author": "Hanjullo (TargetUp)",
+  "license": "MIT",
+  "homepage": "https://hanjul.ai",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/hanjul-ai/sdk-js"
+  },
+  "devDependencies": {
+    "typescript": "^5.3.3"
+  },
+  "engines": {
+    "node": ">=14"
+  }
+}

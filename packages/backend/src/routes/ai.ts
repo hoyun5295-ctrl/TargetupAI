@@ -1,7 +1,7 @@
 import { Request, Response, Router } from 'express';
 import { query } from '../config/database';
 import { authenticate } from '../middlewares/auth';
-import { checkAPIStatus, extractVarCatalog, filterVarCatalogByData, generateCustomMessages, generateMessages, parseBriefing, recommendTarget, countFilteredCustomers, relaxFilters, recommendNextCampaign, refineDirectMessage } from '../services/ai';
+import { checkAPIStatus, extractVarCatalog, filterVarCatalogByData, generateCustomMessages, generateMessages, parseBriefing, recommendTarget, countFilteredCustomers, recommendNextCampaign, refineDirectMessage } from '../services/ai';
 import { buildGenderFilter, buildGradeFilter, buildRegionFilter, getGenderVariants, getRegionVariants } from '../utils/normalize';
 import { FIELD_MAP, FIELD_DISPLAY_MAP, reverseDisplayValue } from '../utils/standard-field-map';
 import { isValidCustomFieldKey } from '../utils/safe-field-name';
@@ -11,7 +11,9 @@ import { aggregateCampaignPerformance } from '../utils/stats-aggregation';
 import { formatDateValue, getOpt080Number } from '../utils/messageUtils';
 import { loadPlanContext, canUseFeature, requirePlanFeature, isBetaAccessAllowed } from '../utils/plan-guard';
 import { getCompanyCosts } from '../config/defaults';
-import { orchestrate } from '../services/ai-orchestrator';
+import { orchestrate, orchestrateWithAI } from '../services/ai-orchestrator';
+// ★ D174 (2026-05-19): Step 1 Next Action Advisor — Opus 4.7
+import { buildPerformanceSnapshot, recommendNextAction } from '../utils/next-action-advisor';
 
 
 // ★ D79: 인라인 래퍼 제거 → CT-01 buildFilterWhereClauseCompat 직접 사용
@@ -226,67 +228,14 @@ router.post('/recommend-target', async (req: Request, res: Response) => {
     // ★ 실제 타겟 수 계산 — countFilteredCustomers 공통 함수 사용
     // 빈 필터({})도 정상 카운트 (AI가 전체 대상을 의도한 경우 포함)
     const filterResult = await countFilteredCustomers(companyId, result.filters, userId!, storeFilter, baseParams);
-    let actualCount = filterResult.count;
-    let unsubscribeCount = filterResult.unsubscribeCount;
+    const actualCount = filterResult.count;
+    const unsubscribeCount = filterResult.unsubscribeCount;
     console.log(`[AI] 필터 카운트 결과: ${actualCount}명 (수신거부: ${unsubscribeCount}명)`);
 
-    // ★ 기능 4: 0명일 때 AI 자동 조건완화 (프로 이상 ai_premium_enabled 전용)
-    let autoRelaxed = false;
-    let originalFilters: Record<string, any> | null = null;
-    let relaxedFields: string[] = [];
-
-    // ★ auto_relax 파라미터: 프론트에서 ON/OFF 제어 (기본 true — 프로 이상이면 자동 시도)
-    const autoRelaxRequested = req.body.auto_relax !== false;
-
-    if (actualCount === 0 && Object.keys(result.filters).length > 0 && autoRelaxRequested) {
-      // ★ CT-17: AI 프리미엄 게이팅 (PRO+)
-      const premiumCtx = await loadPlanContext(companyId);
-      const isPremium = premiumCtx ? canUseFeature(premiumCtx, 'ai_premium').allowed : false;
-
-      if (isPremium) {
-        console.log('[AI] 0명 매칭 → 자동 조건완화 시도 (프로 이상)');
-        originalFilters = { ...result.filters };
-
-        // 최대 2회 시도
-        for (let attempt = 1; attempt <= 2; attempt++) {
-          const relaxResult = await relaxFilters(
-            result.filters,
-            result.reasoning,
-            statsResult.rows[0],
-            '' // activeFieldsPrompt는 recommendTarget 내부에서 이미 사용됨
-          );
-
-          if (Object.keys(relaxResult.filters).length === 0) {
-            console.warn(`[AI] 조건완화 ${attempt}회차 — 빈 필터 반환, 중단`);
-            break;
-          }
-
-          let relaxCount: { count: number; unsubscribeCount: number };
-          try {
-            relaxCount = await countFilteredCustomers(companyId, relaxResult.filters, userId!, storeFilter, baseParams);
-          } catch (relaxErr) {
-            console.warn(`[AI] 조건완화 ${attempt}회차 — 카운트 쿼리 실패, 중단:`, relaxErr);
-            break;
-          }
-
-          if (relaxCount.count > 0) {
-            console.log(`[AI] 조건완화 ${attempt}회차 성공 — ${relaxCount.count}명 매칭`);
-            result.filters = relaxResult.filters;
-            result.reasoning = relaxResult.reasoning;
-            actualCount = relaxCount.count;
-            unsubscribeCount = relaxCount.unsubscribeCount;
-            autoRelaxed = true;
-            relaxedFields = relaxResult.relaxed_fields;
-            break;
-          }
-
-          console.log(`[AI] 조건완화 ${attempt}회차 — 여전히 0명`);
-          // 다음 시도를 위해 현재 완화된 필터를 기준으로 재시도
-          result.filters = relaxResult.filters;
-          result.reasoning = relaxResult.reasoning;
-        }
-      }
-    }
+    // ★ D171 (Harold 명시 영구 원칙): 타겟 매칭 0건 시 자동완화 박지 X — 발송 차단이 정합.
+    // AI가 임의로 조건 풀어서 다른 고객에게 발송 = 마케팅 의도 파괴 + 수신자 권리 침해.
+    // 0건 응답을 그대로 frontend에 박아 사용자가 조건을 재입력하도록 안내.
+    // 메모리: feedback_no_target_auto_relax.md
 
     // ★ 풀백 감지 — 로그만 남김 (DB 추출 결과는 정확하므로 임의로 0으로 덮어쓰지 않음)
     const totalCustomers = parseInt(statsResult.rows[0].sms_opt_in_count || statsResult.rows[0].total);
@@ -297,11 +246,6 @@ router.post('/recommend-target', async (req: Request, res: Response) => {
     result.estimated_count = actualCount;
     (result as any).unsubscribe_count = unsubscribeCount;
     (result as any).has_kakao_profile = hasKakaoProfile;
-    (result as any).auto_relaxed = autoRelaxed;
-    if (autoRelaxed && originalFilters) {
-      (result as any).original_filters = originalFilters;
-      (result as any).relaxed_fields = relaxedFields;
-    }
 
     // ★ D85: 샘플 고객 1명 조회
     // - sample_customer: displayName 키 (프론트 미리보기용 — %이름%, %등급% 등)
@@ -923,7 +867,11 @@ router.post('/operator/propose', async (req: Request, res: Response) => {
     const customerStats = statsResult.rows[0];
 
     // ★ D170: Multi-Agent Orchestrator 호출 — 6 Sub-agent (Target/Verify/Message/Compliance/Cost-ROI) 통합
-    const result = await orchestrate({
+    // ★ D171-D (2026-05-19): env flag AI_OPERATOR_USE_AI_DECISION=true 시 진정 Orchestrator AI (Opus 4.7 Tool Use) 진입
+    //   default false (기존 orchestrate 순차 호출). 운영 toggle용. 실패 시 자동 fallback to orchestrate().
+    const useAIDecision = process.env.AI_OPERATOR_USE_AI_DECISION === 'true';
+    const orchestratorFn = useAIDecision ? orchestrateWithAI : orchestrate;
+    const result = await orchestratorFn({
       companyId,
       userId: userId || null,
       objective: objective.trim(),
@@ -1025,6 +973,44 @@ router.post('/operator/preview-recipients', async (req: Request, res: Response) 
   } catch (err: any) {
     console.error('[AI Operator] preview-recipients 오류:', err);
     return res.status(500).json({ success: false, error: err?.message || '수신자 조회 실패' });
+  }
+});
+
+// ============================================================
+// ★ D174 (2026-05-19) Step 1 — Next Action Advisor (Opus 4.7)
+// AI Operator의 "1회성 발송툴 탈출" 진정 가치 박는 영역.
+// BUSINESS+ 베타 게이팅 (AI Operator와 동일 정책).
+// ============================================================
+router.post('/operator/next-action', async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+
+    // 베타 게이팅 (operator/propose와 동일)
+    const planCtx = await loadPlanContext(companyId);
+    if (!planCtx) return res.status(404).json({ success: false, error: '회사 정보를 찾을 수 없습니다.' });
+    if (!isBetaAccessAllowed(planCtx)) {
+      return res.status(403).json({ success: false, error: '본 기능은 엔터프라이즈 베타 운영 중입니다.', code: 'BETA_GATE' });
+    }
+
+    const companyResult = await query(
+      `SELECT company_name, business_type, brand_name, brand_tone FROM companies WHERE id = $1::uuid`,
+      [companyId]
+    );
+    const companyInfo = companyResult.rows[0] || {};
+
+    const snapshot = await buildPerformanceSnapshot(companyId);
+    const advice = await recommendNextAction(companyId, snapshot, companyInfo);
+
+    return res.json({
+      success: true,
+      snapshot,
+      advice,
+      generatedAt: new Date().toISOString(),
+    });
+  } catch (err: any) {
+    console.error('[AI Operator] next-action 오류:', err);
+    return res.status(500).json({ success: false, error: err?.message || '다음 캠페인 추천 생성 실패' });
   }
 });
 

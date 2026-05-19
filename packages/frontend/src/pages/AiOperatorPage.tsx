@@ -148,13 +148,13 @@ interface SessionMilestone {
 const SESSION_MILESTONES: SessionMilestone[] = [
   { d: 'D163', title: '베타 안내 시스템 인프라 (헤더 메뉴 + 모달 + 게이팅)', status: 'done' },
   { d: 'D164', title: '진입 hero + 자연어 입력 + AI 통합 제안서 endpoint', status: 'done' },
-  { d: 'D165', title: 'AI 제안서 카드 정합 디자인 강화', status: 'next' },
-  { d: 'D166', title: '승인 → 발송 → 결과 reactive 흐름', status: 'planned' },
-  { d: 'D167', title: 'Prompt Caching (callAIWithFallback 강화, 90% 비용 절감)', status: 'planned' },
-  { d: 'D168', title: 'Tool Use SQL Loop (recommendTarget + relaxFilters 자동)', status: 'planned' },
-  { d: 'D169', title: 'Extended Thinking (reasoning trace 노출)', status: 'planned' },
-  { d: 'D170', title: '회사별 메모리 + Multi-agent (Orchestrator + Sub-agent)', status: 'planned' },
-  { d: 'D171', title: 'Step 0 통합 검증 + ENTERPRISE 베타 운영 진입', status: 'planned' },
+  { d: 'D165', title: 'AI 제안서 카드 정합 디자인 강화', status: 'done' },
+  { d: 'D166', title: '승인 → 발송 → 결과 reactive 흐름 + 발송 시점 안전장치', status: 'done' },
+  { d: 'D167', title: 'Prompt Caching (callAIWithFallback 강화, 90% 비용 절감)', status: 'done' },
+  { d: 'D168', title: 'Tool Use SQL Loop (countFilteredCustomers — AI 추정 → DB 실제)', status: 'done' },
+  { d: 'D169', title: 'Extended Thinking (Opus 4.7 adaptive 호환)', status: 'done' },
+  { d: 'D170', title: '회사별 메모리 + Multi-Agent Orchestrator (6 Sub-agent)', status: 'done' },
+  { d: 'D171', title: 'Step 0 통합 검증 + ENTERPRISE 베타 운영 진입', status: 'next' },
 ];
 
 const STATUS_CONFIG: Record<MilestoneStatus, { icon: typeof Check; bg: string; ring: string; text: string; label: string }> = {
@@ -250,7 +250,16 @@ export default function AiOperatorPage() {
   const { user } = useAuthStore();
   const companyName = (user as any)?.company?.name || '';
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const [objective, setObjective] = useState('');
+  // ★ D174 (2026-05-19): PerformancePage가 sessionStorage에 박은 prefill objective 자동 박음
+  const [objective, setObjective] = useState(() => {
+    if (typeof window === 'undefined') return '';
+    const prefill = sessionStorage.getItem('ai_operator_prefill_objective');
+    if (prefill) {
+      sessionStorage.removeItem('ai_operator_prefill_objective');
+      return prefill;
+    }
+    return '';
+  });
   const [loading, setLoading] = useState(false);
   const [progressStep, setProgressStep] = useState(0);
   const [proposal, setProposal] = useState<ProposalResponse | null>(null);

@@ -209,7 +209,7 @@ export default function Dashboard() {
   const [showCustomSendModal, setShowCustomSendModal] = useState(false);
   // 저장 세그먼트용
   const [customFlowPreload, setCustomFlowPreload] = useState<{selectedFields: string[]; briefing: string; url: string; channel: string; isAd: boolean} | null>(null);
-  const [lastSendConfig, setLastSendConfig] = useState<{type: 'hanjullo' | 'custom'; prompt?: string; autoRelax?: boolean; selectedFields?: string[]; briefing?: string; url?: string; channel?: string; isAd?: boolean} | null>(null);
+  const [lastSendConfig, setLastSendConfig] = useState<{type: 'hanjullo' | 'custom'; prompt?: string; selectedFields?: string[]; briefing?: string; url?: string; channel?: string; isAd?: boolean} | null>(null);
   const [showSpamFilter, setShowSpamFilter] = useState(false);
   const [spamFilterData, setSpamFilterData] = useState<{sms?: string; lms?: string; callback: string; msgType: 'SMS'|'LMS'|'MMS'; subject?: string; isAd?: boolean; firstRecipient?: Record<string, any>}>({callback:'',msgType:'SMS'});
   const [sampleCustomer, setSampleCustomer] = useState<Record<string, string>>({});
@@ -1421,7 +1421,8 @@ export default function Dashboard() {
     }
   };
 // AI 캠페인 생성 (프롬프트 한 방)
-const handleAiCampaignGenerate = async (promptOverride?: string, autoRelax?: boolean) => {
+// ★ D171 영구 원칙: autoRelax 인자 박지 X — 타겟 자동완화 절대 금지. memory/feedback_no_target_auto_relax.md
+const handleAiCampaignGenerate = async (promptOverride?: string) => {
   const prompt = promptOverride || aiCampaignPrompt;
   if (!prompt.trim()) {
     setShowPromptAlert(true);
@@ -1429,8 +1430,8 @@ const handleAiCampaignGenerate = async (promptOverride?: string, autoRelax?: boo
   }
   setAiLoading(true);
   try {
-    // 1. 타겟 + 채널 추천 받기 (★ D80: auto_relax 파라미터 전달)
-    const response = await aiApi.recommendTarget({ objective: prompt, auto_relax: autoRelax !== false });
+    // 1. 타겟 + 채널 추천 받기 (D171: auto_relax 박지 X — 0건 매칭 시 발송 차단)
+    const response = await aiApi.recommendTarget({ objective: prompt });
     const result = response.data;
     
     // AI 결과 저장
@@ -2090,11 +2091,10 @@ const campaignData = {
         <AiSendTypeModal
           onClose={() => { setShowAiSendType(false); setAiCampaignPrompt(''); }}
           initialPrompt={aiCampaignPrompt}
-          aiPremiumEnabled={!!planInfo?.ai_premium_enabled}
-          onSelectHanjullo={(prompt, autoRelax) => {
+          onSelectHanjullo={(prompt) => {
             setShowAiSendType(false);
             setAiCampaignPrompt(prompt);
-            handleAiCampaignGenerate(prompt, autoRelax);
+            handleAiCampaignGenerate(prompt);
           }}
           onSelectCustom={() => {
             setShowAiSendType(false);
@@ -3049,7 +3049,7 @@ const campaignData = {
                 emoji,
                 segmentType: lastSendConfig.type,
                 prompt: lastSendConfig.prompt,
-                autoRelax: lastSendConfig.autoRelax,
+                // ★ D171 영구 원칙: autoRelax 박지 X. memory/feedback_no_target_auto_relax.md
                 selectedFields: lastSendConfig.selectedFields,
                 briefing: lastSendConfig.briefing,
                 url: lastSendConfig.url,
@@ -3095,10 +3095,10 @@ const campaignData = {
         <RecommendTemplateModal
           show={showTemplates}
           onClose={() => setShowTemplates(false)}
-          onSelectHanjullo={(prompt, autoRelax) => {
+          onSelectHanjullo={(prompt) => {
             setShowTemplates(false);
             setAiCampaignPrompt(prompt);
-            handleAiCampaignGenerate(prompt, autoRelax);
+            handleAiCampaignGenerate(prompt);
           }}
           onSelectCustom={(preloadData) => {
             setShowTemplates(false);

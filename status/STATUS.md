@@ -159,6 +159,12 @@ PDF 0515 알림톡 3건 root cause fix + Harold UX 8차 반복 정합:
 | D169 | Extended Thinking 옵션 (Opus 4.7 adaptive 호환) | ✓ |
 | D170 | Multi-Agent Orchestrator (services/ai-orchestrator.ts + 6 Sub-agent + 회사별 메모리) | ✓ |
 | D170+ | Harold 명시 정합 fix 누적 (모델 분리 + Opus 4.7 breaking changes + GPT 5.5 fallback + UI 모델명 제거 + CSS warning fix) | ✓ |
+| D171 | SESSION_MILESTONES 갱신 (A) + ENT 베타 운영 진입 가이드 (C) + **Zero-Count Auto-Relax 영구 제거 (B, Harold 명시 — 타겟 정합성 100%, 0건 = 발송 차단)** + **진정 Orchestrator AI (D, Opus 4.7 Tool Use 기반 multi-agent loop, env flag toggle)** | ✓ (빌드 대기) |
+| D172 | **한줄로 CDP 박음 — A+B 동일 세션 종결.** Harold 명시 "다음세션 X 여기서 전부 마무리". **A 백엔드 코어**: cdp 컬럼 + 4 테이블 + utils CT 4(cdp-auth/cdp-identity/cdp-events/cdp-orders) + routes/cdp.ts 7 endpoint + plan-guard ai_cdp + app.ts + CdpSettingsPage + 메뉴. **B SDK + 카페24**: packages/sdk-js/ 패키지 `@hanjullo/sdk` 4 메서드 + utils/cafe24-client.ts CT-23 + routes/cafe24.ts OAuth/Webhook + company_integrations 테이블 + 카페24 연동 UI. BUSINESS+ 베타 + bcrypt + idempotency. 단일 push + DB SQL 9+1건 + 환경변수 3건 (CAFE24_*) | ✓ (빌드 + DB schema SQL + 환경변수 대기) |
+| D173 | **Provider Adapter 일반화 (자사몰 종합 세트)** Harold 명시 "카페24만 X 다양한 자사몰 종합 대응" 정합. utils/provider-registry.ts (CT-24 IProviderAdapter base + Registry + SkeletonProviderAdapter Shopify/메이크샵/imweb/식스샵/WooCommerce 등록) + cafe24-client.ts cafe24Adapter 박음(첫 구현체) + routes/cafe24 위임(7-1 단일 진실) + GET /api/cdp/providers + CdpSettingsPage "지원 자사몰 매트릭스" 카드 | ✓ (빌드 대기) |
+| D174 | **Step 1 Next Action Advisor 핵심 ("1회성 발송툴 탈출")** Harold 명시 "Braze 월등하고 범용적인 Operator". utils/next-action-advisor.ts (CT-25 buildPerformanceSnapshot + recommendNextAction Opus 4.7) + POST /api/ai/operator/next-action + PerformancePage(30일 성과 매트릭스 + AI 추천 카드 + AI Operator prefill 흐름) + DashboardHeader 성과리포트 메뉴 + /performance 라우트 + AiOperatorPage prefill objective. Opus 4.7 모델 분리 룰 정합 | ✓ (빌드 대기) |
+| D175 | **공식 기능 정의서 박음** Harold 명시 "이력 관리 + 소개서 .docx 변환 정합" → `docs/AI_OPERATOR_기능정의서.md` 신설 (살아있는 문서, v1.0.3, 14 섹션: 개요/차별화/아키텍처/모델/Sub-agent/기능/영구원칙/CDP/Provider/베타게이팅/API매트릭스/로드맵/환경변수/변경이력) + CLAUDE.md 필수 참조 매트릭스 박음 + ai_operator_progress.md 정의서 연결 | ✓ (문서) |
+| D175-A | **Web Push + In-app Message 채널 (SDK 확장)** Harold 명시 "Web Push까지 가도록" + 영업팀장 의견 정합. DB 4 신규 테이블(cdp_push_subscriptions/cdp_push_campaigns/cdp_inapp_messages/cdp_inapp_impressions) + utils CT-26 web-push(VAPID + 자동 expire) + CT-27 inapp-message(CRUD + frequency 제어 + 트래킹) + routes/cdp.ts push+inapp endpoint 9건 + SDK `@hanjullo/sdk` v0.2.0(push/inapp/service-worker 3 모듈) + PushCampaignsPage + InAppMessagesPage + 메뉴 2건(회사 admin only). 환경변수 3건(VAPID_*) + `web-push` 패키지 의존성. 기능 정의서 v1.0.4 갱신 | ✓ (빌드 + DB SQL 4건 + 환경변수 + npm install 대기) |
 
 #### Harold 명시 모델 영역 절대 분리
 
@@ -166,9 +172,9 @@ PDF 0515 알림톡 3건 root cause fix + Harold UX 8차 반복 정합:
 - **기존 한줄로AI 전체** = Claude Sonnet 4.6 + gpt-5.4-mini (절대 변경 X, 6,000사+ 영향)
 - 결정 위치: `packages/backend/src/config/defaults.ts` AI_MODELS (코드 default가 진실, .env는 override만)
 
-#### 잔여 (D171 + Step 1+ 예정)
+#### 잔여 (Phase 1+ 예정)
 
-- **D171**: Step 0 통합 검증 + ENTERPRISE 베타 운영 진입 + SESSION_MILESTONES 데이터 갱신 + count 0 시 relaxFilters loop
+- **Step 0 종결:** D171 코드 작업 (A/B/C) 종결 — 빌드/배포 후 ENT 베타 진입 대상사 확정 단계만 Harold 결정 대기 (상세 = `status/ai_operator_progress.md` § "ENTERPRISE 베타 운영 진입 가이드")
 - **Step 1 (D172~D180)**: 성과 리포트 → Next Action 추천 (recommendNextCampaign 강화 + 매출/ROI/LTV 통합 리포트)
 - **Step 2 (D181~D200)**: Journey Builder Lite (가입/재구매/휴면 자동 여정)
 - **Step 3 (D201~D230)**: Decisioning Engine (고객별 채널/시점/오퍼 AI 결정)

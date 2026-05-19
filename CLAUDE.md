@@ -154,6 +154,8 @@
 | `status/OPS.md` | 서버/배포/인프라 | 서버 관련 작업 시 |
 | `status/SCHEMA.md` | PostgreSQL/MySQL 전체 DB 스키마 | 쿼리 작성/DB 작업 시 |
 | `status/SYNC-AGENT-TROUBLESHOOTING.md` | 싱크에이전트 진단 | 싱크 이슈 시 |
+| `docs/AI_OPERATOR_기능정의서.md` | AI Operator 기능 정의서 (살아있는 문서, 신규 기능 추가 시 § 13 변경 이력에 박음) | AI Operator / CDP / Provider Adapter 영역 작업 시 |
+| `status/ai_operator_progress.md` | AI Operator Step 0 진행 매트릭스 + Harold 명시 정합 룰 | AI Operator 세션 진입 시 |
 
 ## 작업 시작 체크리스트
 

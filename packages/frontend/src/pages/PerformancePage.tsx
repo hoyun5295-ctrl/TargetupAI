@@ -1,0 +1,271 @@
+import { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { ArrowLeft, BarChart3, Brain, Clock, Loader2, RefreshCw, Sparkles, Target, TrendingUp, Users } from 'lucide-react';
+
+// ★ D174 (2026-05-19) Step 1 — 성과 리포트 + AI Next Action 추천
+//   BUSINESS+ 베타 게이팅 (백엔드 isBetaAccessAllowed).
+
+interface Snapshot {
+  totalCampaigns: number;
+  totalSent: number;
+  totalSuccess: number;
+  successRate: number;
+  byChannel: Array<{ channel: string; sent: number; success: number; successRate: number }>;
+  byHour: Array<{ hour: number; sent: number; successRate: number }>;
+  estimatedRevenue: number;
+  newCustomers30d: number;
+  activeCustomers30d: number;
+}
+
+interface Advice {
+  summary: string;
+  recommendedAudience: string;
+  recommendedChannel: string;
+  recommendedTime: string;
+  insights: string[];
+  suggestedObjective: string;
+  expectedClickRate: number;
+  expectedConversionRate: number;
+  expectedRevenue: number;
+}
+
+export default function PerformancePage() {
+  const navigate = useNavigate();
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
+  const [advice, setAdvice] = useState<Advice | null>(null);
+
+  const token = () => localStorage.getItem('token');
+
+  const load = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await fetch('/api/ai/operator/next-action', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token()}` },
+        body: '{}',
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        if (data.code === 'BETA_GATE') {
+          setError('본 기능은 비즈니스 / 엔터프라이즈 요금제에서 이용 가능합니다.');
+        } else {
+          setError(data.error || '성과 리포트 생성 실패');
+        }
+        return;
+      }
+      setSnapshot(data.snapshot);
+      setAdvice(data.advice);
+    } catch (e: any) {
+      setError(e?.message || '성과 리포트 호출 중 오류가 발생했습니다.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    load();
+  }, []);
+
+  const goAiOperatorWithObjective = () => {
+    if (!advice?.suggestedObjective) return;
+    sessionStorage.setItem('ai_operator_prefill_objective', advice.suggestedObjective);
+    navigate('/ai-operator');
+  };
+
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-indigo-50">
+      <div className="bg-white border-b">
+        <div className="max-w-6xl mx-auto px-6 py-4 flex items-center gap-3">
+          <button onClick={() => navigate('/')} className="text-gray-500 hover:text-gray-700 p-1">
+            <ArrowLeft className="w-5 h-5" />
+          </button>
+          <BarChart3 className="w-5 h-5 text-indigo-600" />
+          <h1 className="text-lg font-bold text-gray-800">성과 리포트 + AI 다음 캠페인 추천</h1>
+          <span className="text-xs bg-indigo-50 text-indigo-700 px-2 py-0.5 rounded-full font-medium">BETA</span>
+          <div className="ml-auto">
+            <button
+              onClick={load}
+              disabled={loading}
+              className="px-3 py-1.5 text-sm text-indigo-600 hover:bg-indigo-50 rounded-lg flex items-center gap-1.5"
+            >
+              <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+              새로고침
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div className="max-w-6xl mx-auto px-6 py-8 space-y-6">
+        {loading && (
+          <div className="bg-white border rounded-xl p-12 flex flex-col items-center gap-3 text-gray-500">
+            <Loader2 className="w-6 h-6 animate-spin text-indigo-500" />
+            <div className="text-sm">최근 30일 캠페인 성과 + AI 추천을 생성하는 중입니다...</div>
+            <div className="text-xs text-gray-400">Opus 4.7이 데이터를 분석합니다 (10~20초 소요)</div>
+          </div>
+        )}
+
+        {error && !loading && (
+          <div className="bg-amber-50 border border-amber-200 rounded-xl p-6 text-amber-900">
+            {error}
+          </div>
+        )}
+
+        {snapshot && !loading && (
+          <>
+            {/* 30일 성과 카드 4종 */}
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+              <StatCard icon={<TrendingUp className="w-5 h-5" />} label="발송 캠페인" value={`${snapshot.totalCampaigns}건`} accent="indigo" />
+              <StatCard icon={<Target className="w-5 h-5" />} label="성공률" value={`${(snapshot.successRate * 100).toFixed(1)}%`} sub={`${snapshot.totalSuccess.toLocaleString()} / ${snapshot.totalSent.toLocaleString()}`} accent="emerald" />
+              <StatCard icon={<Users className="w-5 h-5" />} label="활성 고객" value={`${snapshot.activeCustomers30d.toLocaleString()}명`} sub={`신규 ${snapshot.newCustomers30d.toLocaleString()}명`} accent="rose" />
+              <StatCard icon={<TrendingUp className="w-5 h-5" />} label="추정 매출 (CDP)" value={`${snapshot.estimatedRevenue.toLocaleString()}원`} sub="자사몰 연동 시" accent="amber" />
+            </div>
+
+            {/* 채널별 + 시간대별 매트릭스 */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="bg-white border rounded-xl p-5">
+                <div className="text-sm font-bold text-gray-800 mb-3">채널별 성과</div>
+                {snapshot.byChannel.length === 0 ? (
+                  <div className="text-xs text-gray-400 py-6 text-center">최근 30일 발송 이력이 없습니다.</div>
+                ) : (
+                  <div className="space-y-2">
+                    {snapshot.byChannel.map((c) => (
+                      <div key={c.channel} className="flex items-center justify-between text-sm">
+                        <span className="font-medium text-gray-700">{c.channel}</span>
+                        <div className="flex items-center gap-3 text-xs text-gray-500">
+                          <span>{c.sent.toLocaleString()}건</span>
+                          <span className="font-bold text-emerald-600">{(c.successRate * 100).toFixed(1)}%</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <div className="bg-white border rounded-xl p-5">
+                <div className="text-sm font-bold text-gray-800 mb-3">시간대별 성과 (상위 5)</div>
+                {snapshot.byHour.length === 0 ? (
+                  <div className="text-xs text-gray-400 py-6 text-center">데이터 없음</div>
+                ) : (
+                  <div className="space-y-2">
+                    {[...snapshot.byHour].sort((a, b) => b.sent - a.sent).slice(0, 5).map((h) => (
+                      <div key={h.hour} className="flex items-center justify-between text-sm">
+                        <span className="font-medium text-gray-700">{String(h.hour).padStart(2, '0')}시</span>
+                        <div className="flex items-center gap-3 text-xs text-gray-500">
+                          <span>{h.sent.toLocaleString()}건</span>
+                          <span className="font-bold text-indigo-600">{(h.successRate * 100).toFixed(1)}%</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* AI 추천 카드 */}
+            {advice && (
+              <div className="bg-gradient-to-br from-indigo-50 via-fuchsia-50 to-amber-50 border-2 border-indigo-200 rounded-2xl p-6 space-y-5">
+                <div className="flex items-center gap-2">
+                  <Brain className="w-5 h-5 text-indigo-600" />
+                  <h2 className="text-base font-bold text-gray-800">AI 다음 캠페인 추천</h2>
+                  <span className="text-xs bg-white border border-indigo-200 text-indigo-700 px-2 py-0.5 rounded-full font-medium">Opus 4.7</span>
+                </div>
+
+                {advice.summary && (
+                  <div className="bg-white/80 rounded-xl p-4 text-sm font-medium text-gray-800 leading-relaxed">
+                    {advice.summary}
+                  </div>
+                )}
+
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                  <RecCard icon={<Target className="w-4 h-4" />} label="추천 타겟" value={advice.recommendedAudience || '-'} />
+                  <RecCard icon={<Sparkles className="w-4 h-4" />} label="추천 채널" value={advice.recommendedChannel} />
+                  <RecCard icon={<Clock className="w-4 h-4" />} label="추천 시점" value={advice.recommendedTime ? new Date(advice.recommendedTime).toLocaleString('ko-KR') : '-'} />
+                </div>
+
+                {advice.insights.length > 0 && (
+                  <div className="bg-white/80 rounded-xl p-4">
+                    <div className="text-xs font-medium text-gray-700 mb-2">핵심 인사이트</div>
+                    <ul className="space-y-1.5">
+                      {advice.insights.map((ins, i) => (
+                        <li key={i} className="text-sm text-gray-700 flex gap-2">
+                          <span className="text-indigo-500 shrink-0">·</span>
+                          <span>{ins}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs">
+                  <div className="bg-white/80 rounded-lg px-3 py-2">
+                    <div className="text-gray-500">예상 클릭률</div>
+                    <div className="text-lg font-bold text-gray-800">{(advice.expectedClickRate * 100).toFixed(1)}%</div>
+                  </div>
+                  <div className="bg-white/80 rounded-lg px-3 py-2">
+                    <div className="text-gray-500">예상 전환율</div>
+                    <div className="text-lg font-bold text-gray-800">{(advice.expectedConversionRate * 100).toFixed(2)}%</div>
+                  </div>
+                  <div className="bg-white/80 rounded-lg px-3 py-2">
+                    <div className="text-gray-500">예상 매출</div>
+                    <div className="text-lg font-bold text-gray-800">{advice.expectedRevenue.toLocaleString()}원</div>
+                  </div>
+                </div>
+
+                {advice.suggestedObjective && (
+                  <div className="border-t border-indigo-200 pt-4">
+                    <div className="text-xs text-gray-600 mb-2">
+                      "<span className="font-medium">{advice.suggestedObjective}</span>" — AI Operator에 박을 자연어 한 줄
+                    </div>
+                    <button
+                      onClick={goAiOperatorWithObjective}
+                      className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium rounded-lg flex items-center gap-2"
+                    >
+                      <Sparkles className="w-4 h-4" />
+                      AI Operator에서 이 캠페인 실행하기
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+          </>
+        )}
+
+        <div className="text-xs text-gray-400 text-center pt-4">
+          본 추천은 AI 분석 결과이며 사용자 검토 + 승인 후 발송됩니다 (AI 단독 발송 X). 타겟 매칭 0건 시 발송 차단 정책 정합.
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function StatCard({ icon, label, value, sub, accent }: { icon: React.ReactNode; label: string; value: string; sub?: string; accent: 'indigo' | 'emerald' | 'rose' | 'amber' }) {
+  const accentClass = {
+    indigo: 'text-indigo-600 bg-indigo-50',
+    emerald: 'text-emerald-600 bg-emerald-50',
+    rose: 'text-rose-600 bg-rose-50',
+    amber: 'text-amber-600 bg-amber-50',
+  }[accent];
+  return (
+    <div className="bg-white border rounded-xl p-5">
+      <div className={`inline-flex items-center justify-center w-8 h-8 rounded-lg ${accentClass} mb-3`}>{icon}</div>
+      <div className="text-xs text-gray-500 mb-1">{label}</div>
+      <div className="text-xl font-bold text-gray-900">{value}</div>
+      {sub && <div className="text-xs text-gray-400 mt-1">{sub}</div>}
+    </div>
+  );
+}
+
+function RecCard({ icon, label, value }: { icon: React.ReactNode; label: string; value: string }) {
+  return (
+    <div className="bg-white/80 rounded-xl p-4">
+      <div className="flex items-center gap-1.5 text-xs text-gray-500 mb-1">
+        {icon}
+        {label}
+      </div>
+      <div className="text-sm font-bold text-gray-800">{value}</div>
+    </div>
+  );
+}

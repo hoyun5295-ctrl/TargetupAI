@@ -39,10 +39,11 @@ export type FeatureKey =
   | 'ai_mapping'        // 엑셀 업로드 AI 자동매핑                — STARTER+
   | 'spam_filter'       // 스팸필터 수동 테스트                    — STARTER+
   | 'ai_messaging'      // AI 메시지 생성/AI 타겟 추천            — BASIC+
-  | 'ai_premium'        // auto-relax/추천캠페인/AI 문안생성       — PRO+
+  | 'ai_premium'        // 추천캠페인/AI 문안생성                  — PRO+ (D171: auto-relax 영구 제거)
   | 'auto_campaign'     // 자동발송                                — PRO+
   | 'mobile_dm'         // 모바일 DM 빌더                          — PRO+
-  | 'auto_spam_test';   // 스팸테스트 자동화                       — PRO+
+  | 'auto_spam_test'    // 스팸테스트 자동화                       — PRO+
+  | 'ai_cdp';           // ★ D172: 한줄로 CDP (자사몰 sync API)    — BUSINESS+
 
 /**
  * 구독 상태.
@@ -75,7 +76,9 @@ export interface PlanContext {
     spam_filter_enabled: boolean;
     auto_spam_test_enabled: boolean;
     mobile_dm_enabled: boolean;
+    cdp_enabled: boolean;                // ★ D172
   };
+  cdpEventsPerMonth: number | null;      // ★ D172: NULL = 무제한(ENTERPRISE)
   maxAutoCampaigns: number | null;       // NULL = 무제한(ENTERPRISE)
   autoCampaignOverride: number | null;   // 회사별 오버라이드 (D76)
   directRecipientLimit: number | null;   // 직접발송 주소록 최대 건수 (FREE=99,999, 나머지 NULL=무제한)
@@ -104,6 +107,8 @@ export const PLAN_STATUS_SELECT_EXPR = `
   p.auto_campaign_enabled, p.max_auto_campaigns,
   p.spam_filter_enabled, p.auto_spam_test_enabled,
   COALESCE(p.mobile_dm_enabled, false) AS mobile_dm_enabled,
+  COALESCE(p.cdp_enabled, false) AS cdp_enabled,
+  p.cdp_events_per_month,
   p.direct_recipient_limit,
   c.auto_campaign_override, c.subscription_status, c.trial_expires_at
 `.trim();
@@ -151,7 +156,9 @@ export async function loadPlanContext(companyId: string): Promise<PlanContext | 
       spam_filter_enabled: !!row.spam_filter_enabled,
       auto_spam_test_enabled: !!row.auto_spam_test_enabled,
       mobile_dm_enabled: !!row.mobile_dm_enabled,
+      cdp_enabled: !!row.cdp_enabled,
     },
+    cdpEventsPerMonth: row.cdp_events_per_month != null ? Number(row.cdp_events_per_month) : null,
     maxAutoCampaigns: row.max_auto_campaigns != null ? Number(row.max_auto_campaigns) : null,
     autoCampaignOverride: row.auto_campaign_override != null ? Number(row.auto_campaign_override) : null,
     directRecipientLimit: row.direct_recipient_limit != null ? Number(row.direct_recipient_limit) : null,
@@ -275,6 +282,11 @@ export function canUseFeature(ctx: PlanContext, key: FeatureKey): FeatureCheckRe
       return ctx.features.auto_spam_test_enabled
         ? { allowed: true }
         : { allowed: false, errorMsg: '스팸테스트 자동화는 프로 요금제 이상에서 이용 가능합니다.', errorCode: 'PLAN_FEATURE_LOCKED' };
+
+    case 'ai_cdp':
+      return ctx.features.cdp_enabled
+        ? { allowed: true }
+        : { allowed: false, errorMsg: '한줄로 CDP는 비즈니스 요금제 이상에서 이용 가능합니다.', errorCode: 'PLAN_FEATURE_LOCKED' };
 
     default: {
       const _exhaustive: never = key;

@@ -18,8 +18,9 @@
  *   - callAIWithFallback의 cache_control ephemeral과 결합 (D167) → 90% 비용 절감
  */
 
+import Anthropic from '@anthropic-ai/sdk';
 import { query } from '../config/database';
-import { getCompanyCosts } from '../config/defaults';
+import { getCompanyCosts, AI_MODELS } from '../config/defaults';
 import {
   callAIWithFallback,
   recommendTarget,
@@ -28,6 +29,11 @@ import {
   filterVarCatalogByData,
   countFilteredCustomers,
 } from './ai';
+
+// ★ D171-D (2026-05-19): 진정 Orchestrator AI 전용 Anthropic 인스턴스 (Tool Use 직접 호출)
+const orchestratorAnthropic = new Anthropic({
+  apiKey: process.env.ANTHROPIC_API_KEY || '',
+});
 
 // ============================================================
 // 타입
@@ -97,6 +103,10 @@ export interface OrchestratorResult {
     countVerified: boolean;
     generatedAt: string;
     agentDurations: Record<string, number>;
+    // ★ D171-D (2026-05-19): 진정 Orchestrator AI (Opus 4.7) Tool Use 흐름 진입 여부
+    usedAIDecision?: boolean;
+    // ★ D171-D: AI가 어떤 tool을 어떤 입력으로 호출했는지 추적 (배포 후 운영 분석용)
+    aiDecisionTrace?: Array<{ iteration: number; tool: string; inputSummary: string; durationMs: number }>;
   };
 }
 
@@ -318,6 +328,12 @@ export async function orchestrate(ctx: AgentContext): Promise<OrchestratorResult
   }
   mark('verify', verifyStart);
 
+  // ============ 2-1. Zero-Count 정책 (D171 — Harold 명시 영구 원칙) ============
+  // 타겟 매칭 0건이면 자동완화(relaxFilters) 박지 X — 발송 차단이 정합.
+  // AI가 임의로 조건 풀어서 다른 고객에게 발송 = 마케팅 의도 파괴 + 수신자 권리 침해 + 발신번호 차단 위험.
+  // 0건 응답을 그대로 frontend에 박아 사용자가 조건을 재입력하도록 안내.
+  // 메모리: feedback_no_target_auto_relax.md
+
   // ============ 3. Message Sub-agent ============
   const messageStart = Date.now();
   const { fieldMappings: varCatalog, availableVars } = extractVarCatalog(ctx.companyInfo.customer_schema);
@@ -413,6 +429,418 @@ export async function orchestrate(ctx: AgentContext): Promise<OrchestratorResult
       countVerified,
       generatedAt: new Date().toISOString(),
       agentDurations: durations,
+    },
+  };
+}
+
+// ============================================================
+// ★ D171-D (2026-05-19): 진정 Orchestrator AI (Opus 4.7) — Tool Use 기반 sub-agent 호출 흐름
+//
+// Harold 명시 D171 종결 — orchestrate()가 backend 직접 순차 호출이라면,
+// orchestrateWithAI()는 Opus 4.7 Orchestrator AI가 sub-agent를 tool로 호출하며 분배 결정.
+//
+// 흐름:
+//   1. Opus 4.7에 system 프롬프트(회사 메모리 + Zero-Count 영구 원칙 + 사용 가능 tool) 박음
+//   2. user message에 사용자 objective + 회사 통계 박음
+//   3. Loop iteration (max 8):
+//      a. AI 응답 받음
+//      b. stop_reason='tool_use'면 tool 호출 + tool_result 박아 재호출
+//      c. stop_reason='end_turn'이면 종료
+//   4. 통합 결과로 OrchestratorResult 박음 + cost_roi 계산 (산술, AI tool X)
+//
+// 안전장치:
+//   - max_iterations: 8 (무한 loop 차단)
+//   - per-tool max_calls: 2
+//   - max_tokens: 4096
+//   - 실패 시 orchestrate() 자동 fallback (응답 인터페이스 호환)
+//   - Zero-Count Auto-Relax 절대 금지 (system 프롬프트 명시) — feedback_no_target_auto_relax.md
+//
+// 모델 분리 룰 (feedback_ai_operator_model_isolation.md):
+//   - Orchestrator AI = Opus 4.7 (Sonnet 4.6 영향 0건)
+//   - Tool 내부 sub-agent = 기존 Opus 4.7 model:'opus' 박힘 그대로
+//
+// 라우팅:
+//   - routes/ai.ts /operator/propose가 env flag AI_OPERATOR_USE_AI_DECISION=true 시 본 함수 진입
+//   - default false (기존 orchestrate 순차 호출)
+// ============================================================
+
+interface ToolCallTrace {
+  iteration: number;
+  tool: string;
+  inputSummary: string;
+  durationMs: number;
+}
+
+const ORCHESTRATOR_TOOLS: Anthropic.Tool[] = [
+  {
+    name: 'target_analysis',
+    description: '사용자의 마케팅 목표를 분석하여 고객 타겟 필터 조건을 추출합니다. AI가 customer_schema 기반 필터 + 추천 채널(SMS/LMS/MMS/KAKAO) + 광고 여부 + 개인화 변수를 결정합니다. (호출 1회 권장)',
+    input_schema: {
+      type: 'object',
+      properties: {
+        analysis_note: { type: 'string', description: '왜 이 단계를 호출하는지 한 줄 메모' },
+      },
+      required: ['analysis_note'],
+    },
+  },
+  {
+    name: 'count_verification',
+    description: 'target_analysis 결과 filters로 실제 DB 매칭 고객 수를 검증합니다. AI 추정값이 아닌 DB 실제 count를 반환합니다. (target_analysis 후 필수)',
+    input_schema: {
+      type: 'object',
+      properties: {
+        verification_note: { type: 'string', description: '검증 의도 한 줄 메모' },
+      },
+      required: ['verification_note'],
+    },
+  },
+  {
+    name: 'message_composition',
+    description: 'target_analysis + count_verification 결과를 바탕으로 채널별 A/B/C 메시지 3안을 생성합니다. (count_verification 후 호출, 0건이면 호출 금지)',
+    input_schema: {
+      type: 'object',
+      properties: {
+        composition_note: { type: 'string', description: '문안 의도 한 줄 메모' },
+      },
+      required: ['composition_note'],
+    },
+  },
+  {
+    name: 'compliance_check',
+    description: '생성된 메시지가 한국 정보통신망법 + 카카오 정책 + 통신사 스팸 정책에 부합하는지 검수합니다. (message_composition 후 호출)',
+    input_schema: {
+      type: 'object',
+      properties: {
+        check_note: { type: 'string', description: '검수 의도 한 줄 메모' },
+      },
+      required: ['check_note'],
+    },
+  },
+];
+
+export async function orchestrateWithAI(ctx: AgentContext): Promise<OrchestratorResult> {
+  console.log('[OrchestratorAI] 진입 — Opus 4.7 Tool Use 기반 sub-agent 호출 흐름');
+
+  const durations: Record<string, number> = {};
+  const trace: ToolCallTrace[] = [];
+  const toolCallCounts: Record<string, number> = {};
+  const mark = (key: string, start: number) => { durations[key] = Date.now() - start; };
+
+  // sub-agent 호출 결과 저장 (각 tool이 채우는 closure 변수)
+  let targetResult: any = null;
+  let estimatedCount = 0;
+  let countVerified = false;
+  let normalizedMessages: OrchestratorResult['messages'] = [];
+  let messagesResult: any = null;
+  let compliance: ComplianceResult = { passed: false, riskLevel: 'high', warnings: ['Compliance 미실행'], suggestions: [] };
+
+  // Tool 실제 호출 (tool name → 해당 sub-agent 함수)
+  const callTool = async (toolName: string): Promise<any> => {
+    const start = Date.now();
+    try {
+      if (toolName === 'target_analysis') {
+        targetResult = await recommendTarget(
+          ctx.companyId, ctx.objective, ctx.customerStats, ctx.companyInfo as any,
+          { model: 'opus' }
+        );
+        estimatedCount = Math.max(0, targetResult.estimated_count || 0);
+        mark('target', start);
+        return {
+          estimated_count: estimatedCount,
+          filters: targetResult.filters,
+          reasoning: targetResult.reasoning,
+          recommended_channel: targetResult.recommended_channel,
+          is_ad: !!targetResult.is_ad,
+          suggested_campaign_name: targetResult.suggested_campaign_name,
+        };
+      }
+      if (toolName === 'count_verification') {
+        if (!targetResult) {
+          mark('verify', start);
+          return { error: 'target_analysis가 먼저 호출되어야 합니다.' };
+        }
+        try {
+          const cnt = await countFilteredCustomers(ctx.companyId, targetResult.filters, ctx.userId || '');
+          estimatedCount = cnt.count;
+          countVerified = true;
+          mark('verify', start);
+          return {
+            actual_count: cnt.count,
+            unsubscribe_count: cnt.unsubscribeCount,
+            // ★ Zero-Count 영구 원칙 안내 (Harold 명시 D171)
+            warning: cnt.count === 0
+              ? '★ 매칭 0건 — 발송 차단 정합 (Harold 영구 원칙). 자동완화 절대 금지. message_composition 호출 X. 사용자에게 조건 재입력 안내 박을 것.'
+              : null,
+          };
+        } catch (cntErr: any) {
+          mark('verify', start);
+          return { error: `count_verification 실패: ${cntErr?.message || 'unknown'}` };
+        }
+      }
+      if (toolName === 'message_composition') {
+        if (!targetResult) {
+          mark('message', start);
+          return { error: 'target_analysis가 먼저 호출되어야 합니다.' };
+        }
+        if (estimatedCount === 0) {
+          mark('message', start);
+          return { error: '★ 매칭 0건 — Zero-Count 영구 원칙으로 message_composition 호출 차단. count_verification 결과를 사용자에게 안내 박을 것.' };
+        }
+        const { fieldMappings: varCatalog, availableVars } = extractVarCatalog(ctx.companyInfo.customer_schema);
+        await filterVarCatalogByData(varCatalog, availableVars, ctx.companyId);
+
+        messagesResult = await generateMessages(
+          ctx.objective,
+          {
+            total_count: estimatedCount,
+            avg_purchase_count: parseFloat(ctx.customerStats.avg_purchase_count) || 0,
+            avg_total_spent: parseFloat(ctx.customerStats.avg_total_spent) || 0,
+          },
+          {
+            brandName: ctx.companyInfo.brand_name || ctx.companyInfo.company_name,
+            brandSlogan: ctx.companyInfo.brand_slogan,
+            brandDescription: ctx.companyInfo.brand_description,
+            brandTone: ctx.companyInfo.brand_tone,
+            channel: targetResult.recommended_channel,
+            isAd: targetResult.is_ad,
+            rejectNumber: ctx.companyInfo.reject_number,
+            usePersonalization: targetResult.use_personalization,
+            personalizationVars: targetResult.personalization_vars,
+            availableVarsCatalog: varCatalog,
+            availableVars: availableVars,
+            model: 'opus',
+          }
+        );
+        normalizedMessages = messagesResult.variants.slice(0, 3).map((v: any) => {
+          const anyV = v as Record<string, unknown>;
+          return {
+            variantId: v.variant_id,
+            variantName: v.variant_name,
+            concept: v.concept,
+            body: (anyV.message_text as string) || '',
+            subject: (anyV.subject as string) || '',
+            byteCount: (anyV.byte_count as number) || 0,
+            byteWarning: (anyV.byte_warning as boolean) || false,
+            score: v.score,
+          };
+        });
+        mark('message', start);
+        return {
+          variant_count: normalizedMessages.length,
+          recommendation: messagesResult.recommendation,
+          recommendation_reason: messagesResult.recommendation_reason,
+          primary_body_preview: normalizedMessages[0]?.body?.slice(0, 200) || '',
+        };
+      }
+      if (toolName === 'compliance_check') {
+        if (!targetResult || normalizedMessages.length === 0) {
+          mark('compliance', start);
+          return { error: 'message_composition이 먼저 호출되어야 합니다.' };
+        }
+        const primaryBody = normalizedMessages[0]?.body || '';
+        compliance = await checkCompliance(
+          primaryBody,
+          targetResult.recommended_channel || 'SMS',
+          !!targetResult.is_ad
+        );
+        mark('compliance', start);
+        return {
+          passed: compliance.passed,
+          risk_level: compliance.riskLevel,
+          warnings: compliance.warnings,
+          suggestions: compliance.suggestions,
+        };
+      }
+      return { error: `알 수 없는 tool: ${toolName}` };
+    } catch (err: any) {
+      console.error(`[OrchestratorAI] tool ${toolName} 호출 실패:`, err);
+      return { error: err?.message || 'tool 호출 실패' };
+    }
+  };
+
+  // ============ Opus 4.7 Orchestrator AI 호출 ============
+  const memoryContext = await buildCompanyMemoryContext(ctx.companyId);
+
+  const systemPrompt = `당신은 한국 SMS/LMS 마케팅 자동화의 진정 Orchestrator AI입니다.
+사용자의 마케팅 목표(자연어 한 줄)를 받아, 사용 가능한 sub-agent tool 4종을 적절한 순서로 호출하여 통합 제안서를 만들어주세요.
+
+${memoryContext}
+
+## 사용 가능한 Tool (호출 순서 권장)
+1. target_analysis (필수, 1회): 마케팅 목표 → 고객 타겟 필터 + 채널 + 광고 여부 추출
+2. count_verification (필수, target 후 1회): DB 실제 매칭 고객 수 검증
+3. message_composition (count>0 시 1회): 채널별 A/B/C 메시지 3안 생성. count=0이면 호출 금지
+4. compliance_check (message 후 1회): 정보통신망법 + 카카오 정책 + 스팸 정책 검수
+
+## ★ 절대 영구 원칙 (Harold 명시 D171)
+- 타겟 매칭 0건이 나오면 자동완화(relaxFilters / auto-relax) 절대 금지. 발송 차단이 정합.
+- AI가 임의로 조건 풀어서 다른 고객에게 발송 = 마케팅 의도 파괴 + 수신자 권리 침해 + 발신번호 차단 위험.
+- count_verification 결과 0건이면 message_composition 호출하지 말고, "★ 매칭 0건 — 사용자가 조건을 재입력해야 합니다" 한 줄로 즉시 응답 종료.
+
+## 흐름 가이드
+- 4 tool을 모두 호출한 후 통합 분석 한 단락(200자 이내) 박고 종료 (stop_reason='end_turn')
+- 각 tool은 최대 2회만 호출 가능 (안전장치)
+- 동일 tool 결과 받은 후 입력 변경 없이 재호출 금지
+- tool_use 없이 자유 텍스트만 응답하면 fallback 흐름으로 전환됩니다 — 반드시 tool을 호출하세요`;
+
+  const userMessage = `## 사용자 마케팅 목표
+"${ctx.objective}"
+
+## 회사 컨텍스트
+- 회사명: ${ctx.companyInfo.company_name || '(미설정)'}
+- 업종: ${ctx.companyInfo.business_type || '(미설정)'}
+- 전체 고객: ${ctx.customerStats.total || 0}명
+- SMS 수신동의: ${ctx.customerStats.sms_opt_in_count || 0}명
+
+위 정보 + 회사 메모리를 토대로 sub-agent tool을 순서대로 호출해 통합 제안서를 만들어주세요.
+모든 tool 호출 후 최종 분석을 한 단락(200자 이내) 박고 종료해주세요.`;
+
+  const orchestratorStart = Date.now();
+  const messages: Anthropic.MessageParam[] = [{ role: 'user', content: userMessage }];
+  const maxIterations = 8;
+  let stoppedNormally = false;
+
+  try {
+    for (let iter = 1; iter <= maxIterations; iter++) {
+      const response = await orchestratorAnthropic.messages.create({
+        model: AI_MODELS.opus,
+        max_tokens: 4096,
+        system: [
+          {
+            type: 'text',
+            text: systemPrompt,
+            cache_control: { type: 'ephemeral' },
+          },
+        ],
+        messages,
+        tools: ORCHESTRATOR_TOOLS,
+      });
+
+      // 종료 조건
+      if (response.stop_reason !== 'tool_use') {
+        const textBlock = response.content.find((b: any) => b.type === 'text');
+        const finalText = textBlock && textBlock.type === 'text' ? (textBlock as any).text : '';
+        console.log(`[OrchestratorAI] iter ${iter} 종료 (stop_reason=${response.stop_reason}) — ${finalText.slice(0, 100)}`);
+        stoppedNormally = true;
+        break;
+      }
+
+      // tool_use blocks 처리
+      const toolUseBlocks = response.content.filter((b: any) => b.type === 'tool_use');
+      if (toolUseBlocks.length === 0) {
+        console.warn('[OrchestratorAI] tool_use stop_reason인데 tool_use block 0건 — fallback');
+        break;
+      }
+
+      // assistant message에 박음
+      messages.push({ role: 'assistant', content: response.content as any });
+
+      // 각 tool 호출 + tool_result 박음
+      const toolResults: any[] = [];
+      for (const toolUse of toolUseBlocks) {
+        if (toolUse.type !== 'tool_use') continue;
+        const toolName = (toolUse as any).name;
+        const toolUseId = (toolUse as any).id;
+        const toolInput = (toolUse as any).input;
+
+        // per-tool max_calls 안전장치
+        toolCallCounts[toolName] = (toolCallCounts[toolName] || 0) + 1;
+        if (toolCallCounts[toolName] > 2) {
+          console.warn(`[OrchestratorAI] tool ${toolName} 2회 초과 — 차단`);
+          toolResults.push({
+            type: 'tool_result',
+            tool_use_id: toolUseId,
+            content: JSON.stringify({ error: '동일 tool 2회 초과 호출 차단 (안전장치)' }),
+            is_error: true,
+          });
+          continue;
+        }
+
+        const toolStart = Date.now();
+        const toolResult = await callTool(toolName);
+        trace.push({
+          iteration: iter,
+          tool: toolName,
+          inputSummary: typeof toolInput === 'object' ? JSON.stringify(toolInput).slice(0, 100) : String(toolInput).slice(0, 100),
+          durationMs: Date.now() - toolStart,
+        });
+        toolResults.push({
+          type: 'tool_result',
+          tool_use_id: toolUseId,
+          content: JSON.stringify(toolResult),
+          is_error: !!toolResult.error,
+        });
+      }
+
+      messages.push({ role: 'user', content: toolResults as any });
+    }
+
+    mark('orchestrator', orchestratorStart);
+
+    // 필수 tool 호출 검증
+    if (!targetResult) {
+      throw new Error('OrchestratorAI: target_analysis 미호출 — fallback');
+    }
+    if (!messagesResult || normalizedMessages.length === 0) {
+      // 0건 매칭으로 message_composition 의도적 skip한 경우 정합
+      if (estimatedCount === 0) {
+        console.log('[OrchestratorAI] 0건 매칭으로 message_composition skip — Zero-Count 영구 원칙 정합');
+        normalizedMessages = [];
+        messagesResult = { recommendation: '', recommendation_reason: '매칭 고객 0건 — 사용자가 조건을 재입력해야 합니다.' };
+      } else {
+        throw new Error('OrchestratorAI: message_composition 미호출 (count>0) — fallback');
+      }
+    }
+    if (!stoppedNormally) {
+      console.warn(`[OrchestratorAI] max_iterations(${maxIterations}) 도달 — 부분 결과로 진행`);
+    }
+  } catch (orchErr: any) {
+    console.error('[OrchestratorAI] 흐름 실패 — orchestrate() fallback:', orchErr?.message || orchErr);
+    return orchestrate(ctx);
+  }
+
+  // ============ Cost-ROI 계산 (산술, AI tool X) ============
+  const costStart = Date.now();
+  const costRoi = calculateCostROI({
+    count: estimatedCount,
+    channel: targetResult.recommended_channel || 'SMS',
+    companyInfo: ctx.companyInfo,
+    avgRevenue: parseFloat(ctx.customerStats.avg_total_spent) || 50000,
+  });
+  mark('costRoi', costStart);
+
+  return {
+    target: {
+      count: estimatedCount,
+      totalCount: parseInt(ctx.customerStats.total || '0'),
+      criteria: targetResult.reasoning || '',
+      filters: targetResult.filters || {},
+      suggestedName: targetResult.suggested_campaign_name || '',
+    },
+    messages: normalizedMessages,
+    recommendation: messagesResult.recommendation || '',
+    recommendationReason: messagesResult.recommendation_reason || '',
+    channel: {
+      recommended: targetResult.recommended_channel || 'SMS',
+      reason: targetResult.channel_reason || '',
+      isAd: !!targetResult.is_ad,
+      rejectNumber: (ctx.companyInfo.reject_number as string) || null,
+    },
+    schedule: {
+      recommendedTime: targetResult.recommended_time || '',
+    },
+    compliance,
+    cost: costRoi.cost,
+    performance: costRoi.performance,
+    meta: {
+      usePersonalization: !!targetResult.use_personalization,
+      personalizationVars: targetResult.personalization_vars || [],
+      useIndividualCallback: !!targetResult.use_individual_callback,
+      countVerified,
+      generatedAt: new Date().toISOString(),
+      agentDurations: durations,
+      usedAIDecision: true,
+      aiDecisionTrace: trace,
     },
   };
 }

@@ -124,6 +124,15 @@ export default function DashboardHeader({
       locked: isEnterpriseLocked,
       path: '/kakao-rcs',
     },
+    // ★ D172 (2026-05-19): 자사몰 연동 (CDP) — BUSINESS+ 베타. 메뉴 자체는 전체 노출, 진입 시 백엔드 게이팅.
+    { label: '자사몰 연동', onClick: () => navigate('/cdp-settings'), color: 'beta', betaBadge: true, path: '/cdp-settings' },
+    // ★ D174 (2026-05-19): 성과 리포트 + AI 다음 캠페인 — BUSINESS+ 베타
+    { label: '성과리포트', onClick: () => navigate('/performance'), color: 'beta', betaBadge: true, path: '/performance' },
+    // ★ D175-A (2026-05-19): Web Push + In-app Message — BUSINESS+ 베타, 회사 admin only
+    ...(isCompanyAdmin ? [
+      { label: 'Web Push', onClick: () => navigate('/push-campaigns'), color: 'beta' as MenuColor, betaBadge: true, path: '/push-campaigns' },
+      { label: '인앱메시지', onClick: () => navigate('/inapp-messages'), color: 'beta' as MenuColor, betaBadge: true, path: '/inapp-messages' },
+    ] : []),
     { label: '직접발송', onClick: onDirectSend, color: 'green', path: '/' },
     // ★ D162-4 (2026-05-15) 2차: Harold님 명시 정합 — DashboardHeader 메뉴에서 '알림톡 발송' 제거.
     //   직접발송/직접타겟발송 모달 헤더 안에서 알림톡 모달 진입 (카카오 노란색 버튼). 메뉴 분리 시 사용자 혼란 차단.

@@ -28,7 +28,8 @@ router.post('/', async (req: Request, res: Response) => {
     const userId = req.user?.userId;
     if (!companyId || !userId) return res.status(403).json({ error: '권한이 없습니다.' });
 
-    const { name, emoji, segmentType, prompt, autoRelax, selectedFields, briefing, url, channel, isAd } = req.body;
+    // ★ D171 영구 원칙: autoRelax 무시 (request body에 박혀와도 false 고정). feedback_no_target_auto_relax.md
+    const { name, emoji, segmentType, prompt, selectedFields, briefing, url, channel, isAd } = req.body;
 
     if (!name || !segmentType) {
       return res.status(400).json({ error: '세그먼트명과 유형은 필수입니다.' });
@@ -41,7 +42,7 @@ router.post('/', async (req: Request, res: Response) => {
     }
 
     const segment = await saveSegment(companyId, userId, {
-      name, emoji, segmentType, prompt, autoRelax, selectedFields, briefing, url, channel, isAd,
+      name, emoji, segmentType, prompt, selectedFields, briefing, url, channel, isAd,
     });
     return res.json({ success: true, segment, message: '세그먼트가 저장되었습니다.' });
   } catch (error: any) {
@@ -60,10 +61,11 @@ router.put('/:id', async (req: Request, res: Response) => {
     const userId = req.user?.userId;
     if (!companyId || !userId) return res.status(403).json({ error: '권한이 없습니다.' });
 
-    const { name, emoji, segmentType, prompt, autoRelax, selectedFields, briefing, url, channel, isAd } = req.body;
+    // ★ D171 영구 원칙: autoRelax 무시 (request body에 박혀와도 UPDATE 박지 X). feedback_no_target_auto_relax.md
+    const { name, emoji, segmentType, prompt, selectedFields, briefing, url, channel, isAd } = req.body;
 
     const segment = await updateSegment(req.params.id, companyId, userId, {
-      name, emoji, segmentType, prompt, autoRelax, selectedFields, briefing, url, channel, isAd,
+      name, emoji, segmentType, prompt, selectedFields, briefing, url, channel, isAd,
     });
     if (!segment) {
       return res.status(404).json({ error: '세그먼트를 찾을 수 없습니다.' });

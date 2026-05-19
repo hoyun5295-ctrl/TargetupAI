@@ -225,7 +225,7 @@ QTmsg `status_code`, 통신사 코드, 스팸필터 판정 결과를 한 곳에�
 
 ### 5-7. AI 프리미엄 기능 (D80 — plans.ai_premium_enabled 게이팅)
 
-1. **자동조건완화 (auto-relax):** AI가 매칭 0건 시 조건 완화 (최대 2회 시도)
+1. **~~자동조건완화 (auto-relax)~~ — D171 영구 제거 (Harold 명시 2026-05-19):** 타겟 매칭 0건 시 자동완화 절대 금지. AI가 임의로 조건 풀어서 다른 고객에게 발송 = 마케팅 의도 파괴 + 정보통신망법 위험 + 수신자 권리 침해 + 발신번호 차단 위험. 0건 매칭 = 발송 차단이 정합. 사용자가 조건 재입력. `memory/feedback_no_target_auto_relax.md` 영구 박음.
 2. **캠페인 성과 → AI 다음 캠페인 추천:** `aggregateCampaignPerformance()` + `recommendNextCampaign()`
 3. **자동발송 AI 문안생성:** D-2 생성 + 스팸테스트 → D-1 담당자 알림 → D-day 발송
 

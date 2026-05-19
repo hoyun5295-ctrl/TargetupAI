@@ -33,6 +33,10 @@ import autoCampaignsRoutes from './routes/auto-campaigns';
 import savedSegmentsRoutes from './routes/saved-segments';
 // ★ D130: IMC 알림톡/브랜드메시지 관리
 import alimtalkRoutes from './routes/alimtalk';
+// ★ D172 (2026-05-19): 한줄로 CDP — 자사몰 sync API (identify/event/order/bulk-import)
+import cdpRoutes from './routes/cdp';
+// ★ D172-B (2026-05-19): 카페24 OAuth + Webhook receiver
+import cafe24Routes, { cafe24CallbackRouter } from './routes/cafe24';
 import { startAutoCampaignScheduler } from './utils/auto-campaign-worker';
 import { ensureMonthlyLogTables } from './utils/sms-queue';
 import { startSpamTestQueueWorker } from './utils/spam-test-queue';
@@ -150,6 +154,10 @@ app.use('/api/internal', internalAlertRoutes); // ★ D145: localhost 전용 시
 app.use('/api/mms-images', mmsImagesRoutes);
 app.use('/api/auto-campaigns', autoCampaignsRoutes);
 app.use('/api/saved-segments', savedSegmentsRoutes);
+app.use('/api/cdp', cdpRoutes); // ★ D172: 한줄로 CDP — 자사몰 → 한줄로 sync
+// ★ D172-B: 카페24 OAuth callback (authenticate 우회 — 카페24가 브라우저 redirect로 호출) → cafe24Routes보다 먼저 등록
+app.use('/api/cafe24', cafe24CallbackRouter);
+app.use('/api/cafe24', cafe24Routes);
 // ★ D130: 알림톡/브랜드메시지 IMC 연동 (발신프로필/템플릿/검수/웹훅/이미지/알림수신자)
 app.use('/api/alimtalk', alimtalkRoutes);
 app.use('/api/dm', dmRouter);

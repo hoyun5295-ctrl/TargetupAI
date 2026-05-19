@@ -21,6 +21,13 @@ import DmBuilderPage from './pages/DmBuilderPage'; // ★ 모바일 DM 빌더
 import AlimtalkSendersPage from './pages/AlimtalkSendersPage';
 // ★ D163 (2026-05-19) Braze급 SaaS Step 0 — AI Operator placeholder (ENT/BUSINESS 대상 베타)
 import AiOperatorPage from './pages/AiOperatorPage';
+// ★ D172 (2026-05-19): 한줄로 CDP — 자사몰 → 한줄로 sync 설정 페이지
+import CdpSettingsPage from './pages/CdpSettingsPage';
+// ★ D174 (2026-05-19): Step 1 — 성과 리포트 + AI 다음 캠페인 추천
+import PerformancePage from './pages/PerformancePage';
+// ★ D175-A (2026-05-19): Web Push + In-app Message 채널
+import PushCampaignsPage from './pages/PushCampaignsPage';
+import InAppMessagesPage from './pages/InAppMessagesPage';
 
 // ★ 세션 타이머 Context — 헤더 등에서 남은 시간 표시용
 interface SessionTimerContextType {
@@ -245,6 +252,46 @@ function App() {
           element={
             <PrivateRoute allowedTypes={['company_admin', 'company_user']}>
               <AiOperatorPage />
+            </PrivateRoute>
+          }
+        />
+
+        {/* ★ D172 (2026-05-19): 자사몰 연동 (CDP) 설정 — BUSINESS+ */}
+        <Route
+          path="/cdp-settings"
+          element={
+            <PrivateRoute allowedTypes={['company_admin', 'company_user']}>
+              <CdpSettingsPage />
+            </PrivateRoute>
+          }
+        />
+
+        {/* ★ D174 (2026-05-19): 성과 리포트 + AI 다음 캠페인 추천 — BUSINESS+ 베타 */}
+        <Route
+          path="/performance"
+          element={
+            <PrivateRoute allowedTypes={['company_admin', 'company_user']}>
+              <PerformancePage />
+            </PrivateRoute>
+          }
+        />
+
+        {/* ★ D175-A (2026-05-19): Web Push 캠페인 — BUSINESS+ 베타 */}
+        <Route
+          path="/push-campaigns"
+          element={
+            <PrivateRoute allowedTypes={['company_admin']}>
+              <PushCampaignsPage />
+            </PrivateRoute>
+          }
+        />
+
+        {/* ★ D175-A (2026-05-19): In-app Message 관리 — BUSINESS+ 베타 */}
+        <Route
+          path="/inapp-messages"
+          element={
+            <PrivateRoute allowedTypes={['company_admin']}>
+              <InAppMessagesPage />
             </PrivateRoute>
           }
         />

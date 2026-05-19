@@ -1,0 +1,534 @@
+/**
+ * ★ CT-23: 카페24 REST API 클라이언트 컨트롤타워 — D172-B (2026-05-19)
+ *
+ * 🎯 목적
+ *   카페24 OAuth + REST API 통신 표준 wrapper.
+ *   - OAuth 코드 교환 (authorize code → access_token + refresh_token)
+ *   - access_token 자동 갱신 (token_expires_at + 5분 마진)
+ *   - 표준 카페24 API 호출 (회원/주문/장바구니 fetch)
+ *   - Webhook 서명 검증 (HMAC-SHA256)
+ *
+ * 📋 카페24 OAuth 표준 (mall_id 기반)
+ *   - Authorize URL: https://{mall_id}.cafe24api.com/api/v2/oauth/authorize
+ *   - Token URL: https://{mall_id}.cafe24api.com/api/v2/oauth/token
+ *   - API base: https://{mall_id}.cafe24api.com/api/v2/admin/...
+ *   - Access token TTL: 2시간 / Refresh token TTL: 14일
+ *
+ * 🔐 인증 정보 보관
+ *   - company_integrations 테이블에 access_token/refresh_token 박힘 (company_id + provider='cafe24' + mall_id UNIQUE)
+ *
+ * 📝 환경변수 (Harold .env)
+ *   - CAFE24_CLIENT_ID: 한줄로AI 앱의 카페24 client_id
+ *   - CAFE24_CLIENT_SECRET: client_secret
+ *   - CAFE24_REDIRECT_URI: OAuth callback URL (예: https://app.hanjul.ai/api/cafe24/oauth/callback)
+ */
+
+import { query } from '../config/database';
+import { createHmac } from 'crypto';
+import {
+  IProviderAdapter,
+  ProviderCapabilities,
+  ProviderTokenResponse,
+  ProviderIntegration,
+  registerProvider,
+} from './provider-registry';
+import { identifyCustomer } from './cdp-identity';
+import { syncOrder } from './cdp-orders';
+import { trackEvent } from './cdp-events';
+
+const CAFE24_CLIENT_ID = process.env.CAFE24_CLIENT_ID || '';
+const CAFE24_CLIENT_SECRET = process.env.CAFE24_CLIENT_SECRET || '';
+const CAFE24_REDIRECT_URI = process.env.CAFE24_REDIRECT_URI || '';
+
+const DEFAULT_SCOPE = [
+  'mall.read_customer',
+  'mall.read_order',
+  'mall.read_product',
+  'mall.read_application',
+].join(',');
+
+const TOKEN_REFRESH_MARGIN_MS = 5 * 60 * 1000; // 만료 5분 전 갱신
+
+// ════════════════════════════════════════════════════════════════════
+// 타입
+// ════════════════════════════════════════════════════════════════════
+
+export interface Cafe24TokenResponse {
+  access_token: string;
+  expires_at: string;          // ISO datetime
+  refresh_token: string;
+  refresh_token_expires_at: string;
+  client_id: string;
+  mall_id: string;
+  user_id?: string;
+  scopes: string[];
+  shop_no?: number;
+  issued_at: string;
+}
+
+export interface Cafe24Integration {
+  id: string;
+  companyId: string;
+  mallId: string;
+  accessToken: string;
+  refreshToken: string;
+  tokenExpiresAt: Date;
+  scope: string;
+  webhookSecret: string | null;
+  status: string;
+}
+
+// ════════════════════════════════════════════════════════════════════
+// OAuth — authorize URL + code 교환
+// ════════════════════════════════════════════════════════════════════
+
+/**
+ * 카페24 OAuth authorize URL 생성.
+ * - mall_id는 사용자가 CdpSettingsPage에서 입력
+ * - state는 CSRF 방지 + company_id 식별용 (서버 측 검증)
+ */
+export function buildCafe24AuthorizeUrl(mallId: string, state: string, scope: string = DEFAULT_SCOPE): string {
+  if (!CAFE24_CLIENT_ID || !CAFE24_REDIRECT_URI) {
+    throw new Error('CAFE24_CLIENT_ID / CAFE24_REDIRECT_URI 환경변수가 설정되지 않았습니다.');
+  }
+  if (!/^[a-z0-9_-]+$/i.test(mallId)) {
+    throw new Error('카페24 mall_id 형식이 올바르지 않습니다.');
+  }
+  const params = new URLSearchParams({
+    response_type: 'code',
+    client_id: CAFE24_CLIENT_ID,
+    state,
+    redirect_uri: CAFE24_REDIRECT_URI,
+    scope,
+  });
+  return `https://${mallId}.cafe24api.com/api/v2/oauth/authorize?${params.toString()}`;
+}
+
+/**
+ * authorize code → access_token + refresh_token 교환.
+ */
+export async function exchangeCafe24Code(mallId: string, code: string): Promise<Cafe24TokenResponse> {
+  if (!CAFE24_CLIENT_ID || !CAFE24_CLIENT_SECRET || !CAFE24_REDIRECT_URI) {
+    throw new Error('카페24 OAuth 환경변수가 설정되지 않았습니다.');
+  }
+  const url = `https://${mallId}.cafe24api.com/api/v2/oauth/token`;
+  const basicAuth = Buffer.from(`${CAFE24_CLIENT_ID}:${CAFE24_CLIENT_SECRET}`).toString('base64');
+  const body = new URLSearchParams({
+    grant_type: 'authorization_code',
+    code,
+    redirect_uri: CAFE24_REDIRECT_URI,
+  });
+
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/x-www-form-urlencoded',
+      Authorization: `Basic ${basicAuth}`,
+    },
+    body: body.toString(),
+  });
+
+  if (!res.ok) {
+    const errBody = await safeJsonText(res);
+    throw new Error(`카페24 토큰 교환 실패 (${res.status}): ${errBody}`);
+  }
+
+  return (await res.json()) as Cafe24TokenResponse;
+}
+
+/**
+ * refresh_token으로 access_token 갱신.
+ */
+export async function refreshCafe24Token(mallId: string, refreshToken: string): Promise<Cafe24TokenResponse> {
+  if (!CAFE24_CLIENT_ID || !CAFE24_CLIENT_SECRET) {
+    throw new Error('카페24 OAuth 환경변수가 설정되지 않았습니다.');
+  }
+  const url = `https://${mallId}.cafe24api.com/api/v2/oauth/token`;
+  const basicAuth = Buffer.from(`${CAFE24_CLIENT_ID}:${CAFE24_CLIENT_SECRET}`).toString('base64');
+  const body = new URLSearchParams({
+    grant_type: 'refresh_token',
+    refresh_token: refreshToken,
+  });
+
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/x-www-form-urlencoded',
+      Authorization: `Basic ${basicAuth}`,
+    },
+    body: body.toString(),
+  });
+
+  if (!res.ok) {
+    const errBody = await safeJsonText(res);
+    throw new Error(`카페24 토큰 갱신 실패 (${res.status}): ${errBody}`);
+  }
+
+  return (await res.json()) as Cafe24TokenResponse;
+}
+
+// ════════════════════════════════════════════════════════════════════
+// company_integrations 저장 / 조회 / 갱신
+// ════════════════════════════════════════════════════════════════════
+
+export async function saveCafe24Integration(
+  companyId: string,
+  mallId: string,
+  tokenRes: Cafe24TokenResponse,
+  webhookSecret: string | null = null
+): Promise<void> {
+  await query(
+    `INSERT INTO company_integrations (
+      id, company_id, provider, mall_id, access_token, refresh_token,
+      token_expires_at, scope, meta, webhook_secret, connected_at, status,
+      created_at, updated_at
+    ) VALUES (
+      gen_random_uuid(), $1::uuid, 'cafe24', $2, $3, $4,
+      $5, $6, $7::jsonb, $8, NOW(), 'active',
+      NOW(), NOW()
+    )
+    ON CONFLICT (company_id, provider, mall_id) DO UPDATE SET
+      access_token = EXCLUDED.access_token,
+      refresh_token = EXCLUDED.refresh_token,
+      token_expires_at = EXCLUDED.token_expires_at,
+      scope = EXCLUDED.scope,
+      meta = company_integrations.meta || EXCLUDED.meta,
+      webhook_secret = COALESCE(EXCLUDED.webhook_secret, company_integrations.webhook_secret),
+      status = 'active',
+      updated_at = NOW()`,
+    [
+      companyId,
+      mallId,
+      tokenRes.access_token,
+      tokenRes.refresh_token,
+      new Date(tokenRes.expires_at),
+      Array.isArray(tokenRes.scopes) ? tokenRes.scopes.join(',') : DEFAULT_SCOPE,
+      JSON.stringify({
+        user_id: tokenRes.user_id,
+        shop_no: tokenRes.shop_no,
+        issued_at: tokenRes.issued_at,
+        refresh_token_expires_at: tokenRes.refresh_token_expires_at,
+      }),
+      webhookSecret,
+    ]
+  );
+}
+
+export async function getCafe24Integration(companyId: string, mallId?: string): Promise<Cafe24Integration | null> {
+  const result = mallId
+    ? await query(
+        `SELECT id, company_id, mall_id, access_token, refresh_token, token_expires_at, scope, webhook_secret, status
+         FROM company_integrations
+         WHERE company_id = $1::uuid AND provider = 'cafe24' AND mall_id = $2
+         LIMIT 1`,
+        [companyId, mallId]
+      )
+    : await query(
+        `SELECT id, company_id, mall_id, access_token, refresh_token, token_expires_at, scope, webhook_secret, status
+         FROM company_integrations
+         WHERE company_id = $1::uuid AND provider = 'cafe24'
+         ORDER BY connected_at DESC NULLS LAST
+         LIMIT 1`,
+        [companyId]
+      );
+  if (result.rows.length === 0) return null;
+  const r = result.rows[0];
+  return {
+    id: r.id,
+    companyId: r.company_id,
+    mallId: r.mall_id,
+    accessToken: r.access_token,
+    refreshToken: r.refresh_token,
+    tokenExpiresAt: new Date(r.token_expires_at),
+    scope: r.scope || '',
+    webhookSecret: r.webhook_secret,
+    status: r.status,
+  };
+}
+
+/**
+ * mall_id로 회사 식별 (Webhook receiver용).
+ */
+export async function getCafe24IntegrationByMallId(mallId: string): Promise<Cafe24Integration | null> {
+  const result = await query(
+    `SELECT id, company_id, mall_id, access_token, refresh_token, token_expires_at, scope, webhook_secret, status
+     FROM company_integrations
+     WHERE provider = 'cafe24' AND mall_id = $1 AND status = 'active'
+     LIMIT 1`,
+    [mallId]
+  );
+  if (result.rows.length === 0) return null;
+  const r = result.rows[0];
+  return {
+    id: r.id,
+    companyId: r.company_id,
+    mallId: r.mall_id,
+    accessToken: r.access_token,
+    refreshToken: r.refresh_token,
+    tokenExpiresAt: new Date(r.token_expires_at),
+    scope: r.scope || '',
+    webhookSecret: r.webhook_secret,
+    status: r.status,
+  };
+}
+
+/**
+ * access_token이 만료 임박이면 자동 갱신.
+ * - 만료 5분 전 + 만료 후 모두 갱신
+ */
+export async function ensureFreshCafe24Token(integration: Cafe24Integration): Promise<Cafe24Integration> {
+  const now = Date.now();
+  const expiresAt = integration.tokenExpiresAt.getTime();
+  if (expiresAt > now + TOKEN_REFRESH_MARGIN_MS) {
+    return integration;
+  }
+
+  try {
+    const refreshed = await refreshCafe24Token(integration.mallId, integration.refreshToken);
+    await saveCafe24Integration(integration.companyId, integration.mallId, refreshed);
+    return {
+      ...integration,
+      accessToken: refreshed.access_token,
+      refreshToken: refreshed.refresh_token,
+      tokenExpiresAt: new Date(refreshed.expires_at),
+    };
+  } catch (err) {
+    await query(
+      `UPDATE company_integrations
+       SET status = 'token_expired', updated_at = NOW()
+       WHERE id = $1::uuid`,
+      [integration.id]
+    );
+    throw err;
+  }
+}
+
+// ════════════════════════════════════════════════════════════════════
+// REST API 호출
+// ════════════════════════════════════════════════════════════════════
+
+/**
+ * 카페24 admin API 호출.
+ * - 자동 토큰 갱신 (만료 임박 시)
+ * - 5xx 시 1회 retry
+ */
+export async function cafe24ApiCall<T = unknown>(
+  integration: Cafe24Integration,
+  path: string,
+  options: { method?: string; query?: Record<string, string | number | boolean | undefined>; body?: unknown } = {}
+): Promise<T> {
+  const fresh = await ensureFreshCafe24Token(integration);
+
+  const baseUrl = `https://${fresh.mallId}.cafe24api.com/api/v2/admin`;
+  const qs = options.query
+    ? '?' + new URLSearchParams(
+        Object.fromEntries(
+          Object.entries(options.query)
+            .filter(([_, v]) => v !== undefined && v !== null)
+            .map(([k, v]) => [k, String(v)])
+        )
+      ).toString()
+    : '';
+  const url = `${baseUrl}${path.startsWith('/') ? path : `/${path}`}${qs}`;
+
+  const headers: Record<string, string> = {
+    Authorization: `Bearer ${fresh.accessToken}`,
+    'Content-Type': 'application/json',
+    'X-Cafe24-Api-Version': '2024-09-01',
+  };
+
+  const fetchOpts: RequestInit = {
+    method: options.method || 'GET',
+    headers,
+  };
+  if (options.body !== undefined) {
+    fetchOpts.body = JSON.stringify(options.body);
+  }
+
+  let lastErr: Error | null = null;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const res = await fetch(url, fetchOpts);
+    if (res.ok) {
+      return (await res.json()) as T;
+    }
+    if (res.status >= 500 && attempt === 0) {
+      lastErr = new Error(`카페24 API 5xx (${res.status}) — retry`);
+      await new Promise((r) => setTimeout(r, 500));
+      continue;
+    }
+    const errBody = await safeJsonText(res);
+    throw new Error(`카페24 API 호출 실패 (${res.status}): ${errBody}`);
+  }
+  throw lastErr || new Error('카페24 API 호출 실패');
+}
+
+// ════════════════════════════════════════════════════════════════════
+// Webhook 서명 검증 (HMAC-SHA256)
+// ════════════════════════════════════════════════════════════════════
+
+/**
+ * 카페24 webhook 서명 검증.
+ * - X-Cafe24-Hmac-Sha256 헤더 vs HMAC-SHA256(webhook_secret, raw_body) base64
+ * - webhook_secret이 미박힘이면 검증 skip (Phase 2 강화 영역)
+ */
+export function verifyCafe24WebhookSignature(rawBody: Buffer | string, signature: string, secret: string | null): boolean {
+  if (!secret) return true; // webhook_secret 미박힘 시 검증 skip — Phase 2 보강
+  if (!signature) return false;
+  try {
+    const body = typeof rawBody === 'string' ? rawBody : rawBody.toString('utf8');
+    const computed = createHmac('sha256', secret).update(body).digest('base64');
+    return computed === signature;
+  } catch {
+    return false;
+  }
+}
+
+// ════════════════════════════════════════════════════════════════════
+// 헬퍼
+// ════════════════════════════════════════════════════════════════════
+
+async function safeJsonText(res: Response): Promise<string> {
+  try {
+    return JSON.stringify(await res.json());
+  } catch {
+    try {
+      return await res.text();
+    } catch {
+      return '<응답 본문 파싱 실패>';
+    }
+  }
+}
+
+// ════════════════════════════════════════════════════════════════════
+// IProviderAdapter 구현체 (D173) — Provider Registry에 자동 등록
+// ════════════════════════════════════════════════════════════════════
+
+const cafe24Capabilities: ProviderCapabilities = {
+  oauth: true,
+  webhook: true,
+  webhookSignatureVerification: true,
+  adminApi: true,
+};
+
+function toProviderTokenResponse(tokenRes: Cafe24TokenResponse): ProviderTokenResponse {
+  return {
+    accessToken: tokenRes.access_token,
+    refreshToken: tokenRes.refresh_token,
+    expiresAt: new Date(tokenRes.expires_at),
+    scope: Array.isArray(tokenRes.scopes) ? tokenRes.scopes.join(',') : '',
+    metadata: {
+      user_id: tokenRes.user_id,
+      shop_no: tokenRes.shop_no,
+      issued_at: tokenRes.issued_at,
+      refresh_token_expires_at: tokenRes.refresh_token_expires_at,
+    },
+  };
+}
+
+export const cafe24Adapter: IProviderAdapter = {
+  provider: 'cafe24',
+  displayName: '카페24',
+  capabilities: cafe24Capabilities,
+
+  buildAuthorizeUrl(mallId: string, state: string, scope?: string): string {
+    return buildCafe24AuthorizeUrl(mallId, state, scope);
+  },
+
+  async exchangeCode(mallId: string, code: string): Promise<ProviderTokenResponse> {
+    const tokenRes = await exchangeCafe24Code(mallId, code);
+    return toProviderTokenResponse(tokenRes);
+  },
+
+  async refreshToken(integration: ProviderIntegration): Promise<ProviderTokenResponse> {
+    const tokenRes = await refreshCafe24Token(integration.mallId, integration.refreshToken);
+    return toProviderTokenResponse(tokenRes);
+  },
+
+  verifyWebhookSignature(rawBody: Buffer | string, signature: string, secret: string | null): boolean {
+    return verifyCafe24WebhookSignature(rawBody, signature, secret);
+  },
+
+  async processWebhookEvent(companyId: string, event: string, resource: Record<string, any>): Promise<void> {
+    // routes/cafe24.ts processCafe24Event 박힌 로직과 동일 — 단일 진실 박음 정합점.
+    switch (event) {
+      case 'customer.created':
+      case 'customer.updated':
+        await identifyCustomer(companyId, {
+          source: 'cafe24',
+          externalId: String(resource.member_id || resource.customer_id || ''),
+          email: resource.email,
+          phone: resource.cellphone || resource.phone,
+          name: resource.name,
+          birthDate: resource.birthday,
+          gender: resource.gender,
+          grade: resource.group_no ? `group_${resource.group_no}` : undefined,
+          address: [resource.address1, resource.address2].filter(Boolean).join(' '),
+          customFields: {
+            cafe24_group_no: resource.group_no,
+            cafe24_member_grade: resource.member_grade,
+            cafe24_join_date: resource.created_date,
+          },
+        });
+        break;
+
+      case 'order.created':
+      case 'order.updated':
+        await syncOrder(companyId, {
+          source: 'cafe24',
+          orderId: String(resource.order_id || ''),
+          externalId: String(resource.member_id || resource.customer_id || ''),
+          email: resource.buyer_email,
+          phone: resource.buyer_cellphone || resource.buyer_phone,
+          name: resource.buyer_name,
+          status: resource.order_status === 'completed' ? 'completed' : (resource.order_status || 'pending'),
+          totalAmount: Number(resource.actual_payment_amount || resource.order_price_amount || 0),
+          itemCount: resource.items ? resource.items.length : undefined,
+          items: Array.isArray(resource.items) ? resource.items.map((it: any) => ({
+            productId: it.product_no ? String(it.product_no) : undefined,
+            productName: it.product_name,
+            price: it.product_price ? Number(it.product_price) : undefined,
+            quantity: it.quantity ? Number(it.quantity) : undefined,
+          })) : undefined,
+          orderedAt: resource.order_date || new Date().toISOString(),
+          currency: 'KRW',
+        });
+        break;
+
+      case 'order.cancelled':
+      case 'order.refunded':
+        await trackEvent(companyId, {
+          source: 'cafe24',
+          eventName: 'custom_order_cancelled',
+          externalId: String(resource.member_id || resource.customer_id || ''),
+          properties: {
+            order_id: resource.order_id,
+            status: resource.order_status,
+            cancelled_amount: resource.actual_payment_amount,
+          },
+          occurredAt: resource.cancelled_date || new Date().toISOString(),
+        });
+        break;
+
+      default:
+        console.log(`[Cafe24 Adapter] 처리하지 않는 event: ${event}`);
+    }
+  },
+
+  extractMallIdFromWebhook(headers, body): string | null {
+    const fromHeader = headers['x-cafe24-mall-id'] || headers['X-Cafe24-Mall-Id'];
+    if (fromHeader) return Array.isArray(fromHeader) ? fromHeader[0] : fromHeader;
+    return body?.resource?.mall_id || null;
+  },
+
+  extractEventFromWebhook(headers, _body): string | null {
+    const fromHeader = headers['x-cafe24-event'] || headers['X-Cafe24-Event'];
+    if (!fromHeader) return null;
+    return Array.isArray(fromHeader) ? fromHeader[0] : fromHeader;
+  },
+
+  buildIdempotencyKey(event: string, resource: Record<string, any>, body: Record<string, any>): string {
+    return `${event}:${resource?.order_id || resource?.member_id || body?.event_no || Date.now()}`;
+  },
+};
+
+registerProvider(cafe24Adapter);

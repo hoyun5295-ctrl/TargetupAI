@@ -15,7 +15,7 @@ export interface SaveSegmentData {
   segmentType: 'hanjullo' | 'custom';
   // AI 한줄로용
   prompt?: string;
-  autoRelax?: boolean;
+  // ★ D171 (Harold 명시 영구 원칙): autoRelax 박지 X — 타겟 자동완화 절대 금지. feedback_no_target_auto_relax.md
   // AI 맞춤한줄용
   selectedFields?: string[];
   briefing?: string;
@@ -76,7 +76,7 @@ export async function saveSegment(
       data.emoji || '📋',
       data.segmentType,
       data.prompt || null,
-      data.autoRelax || false,
+      false, // ★ D171 영구 원칙: auto_relax 항상 false 박음 (DB 컬럼 보존, 값 무효화)
       data.selectedFields || null,
       data.briefing || null,
       data.url || null,
@@ -150,7 +150,7 @@ export async function updateSegment(
       data.emoji ?? null,
       data.segmentType ?? null,
       data.prompt ?? null,
-      data.autoRelax ?? null,
+      null, // ★ D171 영구 원칙: auto_relax UPDATE 박지 X (null → COALESCE 기존 값 유지)
       data.selectedFields ?? null,
       data.briefing ?? null,
       data.url ?? null,

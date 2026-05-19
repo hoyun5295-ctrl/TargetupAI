@@ -275,8 +275,11 @@
 | use_product_category_large | boolean | |
 | use_product_category_medium | boolean | |
 | use_product_category_small | boolean | |
-| api_key | varchar(100) | |
-| api_secret | varchar(100) | |
+| api_key | varchar(100) | ★ 싱크에이전트 인증 전용 (CDP 아님) |
+| api_secret | varchar(100) | ★ 싱크에이전트 인증 전용 (CDP 아님) |
+| cdp_api_key | varchar(100) | ★ D172 (CDP 전용 public key — 자사몰 클라이언트 호출 식별) |
+| cdp_api_secret_hash | varchar(255) | ★ D172 (CDP server-side 인증 bcrypt 해시 — raw 1회 노출 후 미저장) |
+| cdp_api_key_issued_at | timestamptz | ★ D172 (CDP key 발급 시각) |
 | auto_campaign_override | integer | 자동발송 회사별 오버라이드 (NULL=플랜따름, 0=비활성, 1+=허용건수) |
 | max_users | integer | 최대 사용자 수 (기본 5) |
 | session_timeout_minutes | integer | 세션 타임아웃 분 (기본 30) |
@@ -681,6 +684,8 @@
 | ai_premium_enabled | boolean DEFAULT false | AI 프리미엄 (auto-relax/추천캠페인/AI문안생성). PRO+ true |
 | **mobile_dm_enabled** | **boolean DEFAULT false** | **CT-17: 모바일 DM 빌더. PRO+ true** |
 | **direct_recipient_limit** | **integer** | **CT-17: 직접발송 주소록 최대 건수. FREE=99,999, 나머지 NULL(무제한)** |
+| **cdp_enabled** | **boolean DEFAULT false** | **★ D172: 한줄로 CDP (자사몰 → 한줄로 customers/이벤트 sync) feature 플래그. BUSINESS+ true** |
+| **cdp_events_per_month** | **integer** | **★ D172: CDP API 월 호출 한도. BASIC=10,000 / PRO=100,000 / BUSINESS=1,000,000 / ENTERPRISE NULL(무제한)** |
 | created_at | timestamp | |
 
 **companies 추가 컬럼 (CT-17 활용):**
@@ -1326,3 +1331,401 @@
 - INDEX: company_id
 - INDEX: status WHERE status = 'pending'
 - INDEX: requested_by
+
+---
+
+## D172 — 한줄로 CDP (Customer Data Platform) 신설 (2026-05-19~)
+
+> ★ 자사몰 → 한줄로AI 고객/주문/이벤트 sync 표준 인프라. Braze/Segment/Klaviyo 패턴 정합.
+> ★ 운영 진입 가이드 + 자사몰 종류별 통합 방식 = `status/ai_operator_progress.md` (Step 1+ 진입 시 추가) + `memory/project_d172_cdp_kickoff.md`
+
+### cdp_identity_links (자사몰 external_id ↔ 한줄로 customers.id 매핑) — D172 신규
+
+| 컬럼 | 타입 | 비고 |
+|------|------|------|
+| id | uuid PK | |
+| company_id | uuid FK → companies | |
+| customer_id | uuid FK → customers | 한줄로 customers row (NULL 가능 — 비회원 이벤트도 link 박음) |
+| source | varchar(30) | 'cafe24' / 'shopify' / 'makeshop' / 'imweb' / 'custom_sdk' / 'webhook' |
+| external_id | varchar(200) | 자사몰 내부 회원 ID (cafe24 member_id 등) |
+| external_email | varchar(150) | 자사몰 이메일 (회원 매칭 보조) |
+| external_phone | varchar(20) | 자사몰 전화 (회원 매칭 보조) |
+| last_seen_at | timestamptz | 마지막 식별/이벤트 발생 시각 |
+| created_at | timestamptz | |
+| updated_at | timestamptz | |
+- UNIQUE: (company_id, source, external_id)
+- INDEX: customer_id
+- INDEX: company_id, external_email
+- INDEX: company_id, external_phone
+
+### cdp_events (CDP 이벤트 ingestion 로그) — D172 신규
+
+| 컬럼 | 타입 | 비고 |
+|------|------|------|
+| id | uuid PK | |
+| company_id | uuid FK → companies | |
+| identity_link_id | uuid FK → cdp_identity_links (NULL 가능) | 비회원 이벤트는 NULL |
+| customer_id | uuid FK → customers (NULL 가능) | 매칭 시 박음 |
+| event_name | varchar(50) | 'page_view' / 'cart_add' / 'cart_remove' / 'checkout_start' / 'purchase' / 'wishlist_add' / custom |
+| properties | jsonb DEFAULT '{}' | 이벤트별 자유 데이터 (상품 ID, 금액, URL 등) |
+| source | varchar(30) | 'cafe24' / 'shopify' / 'custom_sdk' / 'webhook' |
+| occurred_at | timestamptz | 자사몰 발생 시각 (자사몰이 박음, 미박힘 시 created_at) |
+| created_at | timestamptz | |
+- INDEX: company_id, occurred_at DESC
+- INDEX: company_id, event_name, occurred_at DESC
+- INDEX: customer_id, occurred_at DESC WHERE customer_id IS NOT NULL
+- INDEX: company_id, created_at DESC (이벤트 로그 조회용)
+
+### cdp_webhook_deliveries (Webhook 신뢰성 추적) — D172 신규
+
+| 컬럼 | 타입 | 비고 |
+|------|------|------|
+| id | uuid PK | |
+| company_id | uuid FK → companies | |
+| source | varchar(30) | 'cafe24' / 'shopify' / ... |
+| webhook_event | varchar(100) | 'order.created' / 'customer.created' 등 자사몰별 표준 |
+| idempotency_key | varchar(200) | 자사몰이 박은 unique key (재시도 시 중복 차단) |
+| payload | jsonb | 원본 webhook payload (디버깅용, 30일 후 NULL) |
+| status | varchar(20) | 'received' / 'processed' / 'failed' / 'duplicate' |
+| error_message | text | 실패 시 사유 |
+| retry_count | integer DEFAULT 0 | |
+| processed_at | timestamptz | |
+| created_at | timestamptz | |
+- UNIQUE: (company_id, source, idempotency_key) — D145 idempotent 패턴 정합
+- INDEX: company_id, status, created_at DESC
+
+### cdp_api_call_log (API 호출 누적 — 요금제 게이팅) — D172 신규
+
+| 컬럼 | 타입 | 비고 |
+|------|------|------|
+| id | bigserial PK | |
+| company_id | uuid FK → companies | |
+| endpoint | varchar(50) | 'identify' / 'event' / 'order' / 'bulk-import' |
+| call_count | integer | bulk-import의 경우 row 단위 누적 |
+| status_code | integer | 200/400/401/429 등 |
+| occurred_at | timestamptz | |
+- INDEX: company_id, occurred_at DESC (월별 집계용)
+
+### company_integrations (자사몰 OAuth 통합 인증) — D172-B 신규
+
+> ★ 자사몰별 OAuth 인증 + access_token/refresh_token 보관. 카페24/Shopify/메이크샵 등 표준 SaaS 자사몰 진입 layer.
+> ★ access_token / refresh_token은 backend-only — frontend 노출 X. 회사 단위 격리.
+
+| 컬럼 | 타입 | 비고 |
+|------|------|------|
+| id | uuid PK | |
+| company_id | uuid FK → companies | |
+| provider | varchar(20) | 'cafe24' / 'shopify' / 'makeshop' / 'imweb' / 'sixshop' / 'woocommerce' 등 |
+| mall_id | varchar(100) | 자사몰 식별자 (카페24 mall_id 등) |
+| access_token | text | OAuth access token (Phase 2에서 암호화 박을 가치 — 현재 raw, env DATABASE 격리) |
+| refresh_token | text | refresh token |
+| token_expires_at | timestamptz | access_token 만료 시각 (카페24 = 2시간 TTL) |
+| scope | text | OAuth 부여 scope (mall.read_customer, mall.read_order 등) |
+| meta | jsonb DEFAULT '{}' | 자사몰별 추가 데이터 (mall_name, plan, currency 등) |
+| webhook_secret | varchar(100) | webhook 서명 검증용 secret (자사몰이 박음 또는 한줄로 발급) |
+| connected_at | timestamptz | OAuth 최초 연동 시각 |
+| last_synced_at | timestamptz | 마지막 webhook 수신 또는 polling 시각 |
+| status | varchar(20) DEFAULT 'active' | 'active' / 'token_expired' / 'revoked' / 'error' |
+| created_at | timestamptz | |
+| updated_at | timestamptz | |
+- UNIQUE: (company_id, provider, mall_id)
+- INDEX: company_id
+- INDEX: provider, status
+
+### D172-B 운영 환경 추가 실행 SQL (Harold 직접)
+
+```sql
+-- 7. company_integrations
+CREATE TABLE IF NOT EXISTS company_integrations (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  company_id uuid NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+  provider varchar(20) NOT NULL,
+  mall_id varchar(100) NOT NULL,
+  access_token text,
+  refresh_token text,
+  token_expires_at timestamptz,
+  scope text,
+  meta jsonb NOT NULL DEFAULT '{}',
+  webhook_secret varchar(100),
+  connected_at timestamptz,
+  last_synced_at timestamptz,
+  status varchar(20) NOT NULL DEFAULT 'active',
+  created_at timestamptz NOT NULL DEFAULT NOW(),
+  updated_at timestamptz NOT NULL DEFAULT NOW(),
+  UNIQUE(company_id, provider, mall_id)
+);
+CREATE INDEX IF NOT EXISTS idx_company_integrations_company ON company_integrations(company_id);
+CREATE INDEX IF NOT EXISTS idx_company_integrations_provider ON company_integrations(provider, status);
+```
+
+### D172 환경변수 (Harold .env 박을 영역)
+
+```
+# 카페24 App (한줄로 개발자 센터에 등록 후 박음)
+CAFE24_CLIENT_ID=...
+CAFE24_CLIENT_SECRET=...
+CAFE24_REDIRECT_URI=https://app.hanjul.ai/api/cafe24/oauth/callback
+```
+
+---
+
+## D175-A — Web Push + In-app Message 채널 (2026-05-19)
+
+> ★ AI Operator + CDP 인프라 위에 박는 채널 확장. 영업팀장 의견 정합(푸시/팝업 채널 강력) + Harold 비전(범용 + 사용 편리).
+> ★ Web Push = VAPID 표준 / In-app Message = SDK 자동 표시 + frequency 제어 + 트래킹.
+
+### cdp_push_subscriptions (Web Push 구독 정보) — D175-A 신규
+
+| 컬럼 | 타입 | 비고 |
+|------|------|------|
+| id | uuid PK | |
+| company_id | uuid FK → companies | |
+| customer_id | uuid FK → customers (NULL 가능) | 비회원 anonymous 구독 가능 |
+| identity_link_id | uuid FK → cdp_identity_links (NULL 가능) | |
+| endpoint | text | Web Push subscription endpoint URL (UNIQUE per company) |
+| p256dh_key | text | Web Push P256DH 공개키 |
+| auth_key | text | Web Push auth secret |
+| user_agent | text | 구독 시 브라우저 UA (디버깅) |
+| status | varchar(20) DEFAULT 'active' | active / revoked / expired |
+| subscribed_at | timestamptz NOT NULL DEFAULT NOW() | |
+| last_sent_at | timestamptz | 마지막 push 발송 시각 |
+| created_at | timestamptz | |
+| updated_at | timestamptz | |
+- UNIQUE: (company_id, endpoint)
+- INDEX: company_id, status WHERE status='active'
+- INDEX: customer_id WHERE customer_id IS NOT NULL
+
+### cdp_push_campaigns (Web Push 캠페인 발송 이력) — D175-A 신규
+
+| 컬럼 | 타입 | 비고 |
+|------|------|------|
+| id | uuid PK | |
+| company_id | uuid FK | |
+| created_by | uuid FK → users | |
+| title | varchar(100) | 푸시 제목 |
+| body | text | 본문 |
+| url | text | 클릭 시 이동 URL |
+| icon | text | 푸시 아이콘 URL (선택) |
+| badge | text | 뱃지 URL (선택) |
+| recipient_count | integer | 발송 대상 수 |
+| success_count | integer DEFAULT 0 | |
+| fail_count | integer DEFAULT 0 | |
+| status | varchar(20) DEFAULT 'pending' | pending / sending / completed / failed |
+| sent_at | timestamptz | |
+| created_at | timestamptz | |
+- INDEX: company_id, created_at DESC
+
+### cdp_inapp_messages (In-app Message 정의) — D175-A 신규
+
+| 컬럼 | 타입 | 비고 |
+|------|------|------|
+| id | uuid PK | |
+| company_id | uuid FK | |
+| created_by | uuid FK → users | |
+| title | varchar(100) | |
+| body | text | |
+| action_url | text | CTA 클릭 시 이동 |
+| action_label | varchar(50) | CTA 라벨 (기본 "자세히 보기") |
+| position | varchar(20) DEFAULT 'top_banner' | top_banner / bottom_banner / center_modal |
+| background_color | varchar(20) DEFAULT '#4f46e5' | hex 색상 |
+| text_color | varchar(20) DEFAULT '#ffffff' | |
+| trigger_event | varchar(50) DEFAULT 'page_load' | page_load / cart_add / purchase 등 CDP 이벤트 |
+| display_frequency | varchar(30) DEFAULT 'once_per_session' | once_per_session / once_per_day / always |
+| start_at | timestamptz | 노출 시작 시각 (NULL = 즉시) |
+| end_at | timestamptz | 노출 종료 시각 (NULL = 무기한) |
+| status | varchar(20) DEFAULT 'active' | active / paused / archived |
+| created_at | timestamptz | |
+| updated_at | timestamptz | |
+- INDEX: company_id, status, start_at, end_at
+
+### cdp_inapp_impressions (In-app Message 표시/클릭 트래킹) — D175-A 신규
+
+| 컬럼 | 타입 | 비고 |
+|------|------|------|
+| id | bigserial PK | |
+| company_id | uuid FK | |
+| message_id | uuid FK → cdp_inapp_messages | |
+| customer_id | uuid FK → customers (NULL 가능) | |
+| identity_link_id | uuid FK → cdp_identity_links (NULL 가능) | |
+| anonymous_id | varchar(100) | 비회원 브라우저 추적 ID |
+| event_type | varchar(20) | 'impression' / 'click' / 'dismiss' |
+| occurred_at | timestamptz NOT NULL DEFAULT NOW() | |
+- INDEX: company_id, message_id, occurred_at DESC
+- INDEX: message_id, event_type
+
+### D175-A 운영 환경 추가 실행 SQL (Harold 직접)
+
+```sql
+-- 8. cdp_push_subscriptions
+CREATE TABLE IF NOT EXISTS cdp_push_subscriptions (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  company_id uuid NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+  customer_id uuid REFERENCES customers(id) ON DELETE SET NULL,
+  identity_link_id uuid REFERENCES cdp_identity_links(id) ON DELETE SET NULL,
+  endpoint text NOT NULL,
+  p256dh_key text NOT NULL,
+  auth_key text NOT NULL,
+  user_agent text,
+  status varchar(20) NOT NULL DEFAULT 'active',
+  subscribed_at timestamptz NOT NULL DEFAULT NOW(),
+  last_sent_at timestamptz,
+  created_at timestamptz NOT NULL DEFAULT NOW(),
+  updated_at timestamptz NOT NULL DEFAULT NOW(),
+  UNIQUE(company_id, endpoint)
+);
+CREATE INDEX IF NOT EXISTS idx_push_subs_active ON cdp_push_subscriptions(company_id, status) WHERE status = 'active';
+CREATE INDEX IF NOT EXISTS idx_push_subs_customer ON cdp_push_subscriptions(customer_id) WHERE customer_id IS NOT NULL;
+
+-- 9. cdp_push_campaigns
+CREATE TABLE IF NOT EXISTS cdp_push_campaigns (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  company_id uuid NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+  created_by uuid REFERENCES users(id) ON DELETE SET NULL,
+  title varchar(100) NOT NULL,
+  body text NOT NULL,
+  url text,
+  icon text,
+  badge text,
+  recipient_count integer NOT NULL DEFAULT 0,
+  success_count integer NOT NULL DEFAULT 0,
+  fail_count integer NOT NULL DEFAULT 0,
+  status varchar(20) NOT NULL DEFAULT 'pending',
+  sent_at timestamptz,
+  created_at timestamptz NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_push_campaigns ON cdp_push_campaigns(company_id, created_at DESC);
+
+-- 10. cdp_inapp_messages
+CREATE TABLE IF NOT EXISTS cdp_inapp_messages (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  company_id uuid NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+  created_by uuid REFERENCES users(id) ON DELETE SET NULL,
+  title varchar(100) NOT NULL,
+  body text NOT NULL,
+  action_url text,
+  action_label varchar(50) DEFAULT '자세히 보기',
+  position varchar(20) NOT NULL DEFAULT 'top_banner',
+  background_color varchar(20) NOT NULL DEFAULT '#4f46e5',
+  text_color varchar(20) NOT NULL DEFAULT '#ffffff',
+  trigger_event varchar(50) NOT NULL DEFAULT 'page_load',
+  display_frequency varchar(30) NOT NULL DEFAULT 'once_per_session',
+  start_at timestamptz,
+  end_at timestamptz,
+  status varchar(20) NOT NULL DEFAULT 'active',
+  created_at timestamptz NOT NULL DEFAULT NOW(),
+  updated_at timestamptz NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_inapp_active ON cdp_inapp_messages(company_id, status, start_at, end_at);
+
+-- 11. cdp_inapp_impressions
+CREATE TABLE IF NOT EXISTS cdp_inapp_impressions (
+  id bigserial PRIMARY KEY,
+  company_id uuid NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+  message_id uuid NOT NULL REFERENCES cdp_inapp_messages(id) ON DELETE CASCADE,
+  customer_id uuid REFERENCES customers(id) ON DELETE SET NULL,
+  identity_link_id uuid REFERENCES cdp_identity_links(id) ON DELETE SET NULL,
+  anonymous_id varchar(100),
+  event_type varchar(20) NOT NULL,
+  occurred_at timestamptz NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_inapp_imp_msg ON cdp_inapp_impressions(company_id, message_id, occurred_at DESC);
+CREATE INDEX IF NOT EXISTS idx_inapp_imp_event ON cdp_inapp_impressions(message_id, event_type);
+```
+
+### D175-A 환경변수 (Harold .env 박음)
+
+```
+# Web Push VAPID 키 (web-push 라이브러리 generateVAPIDKeys로 생성 후 박음)
+VAPID_PUBLIC_KEY=B...   # base64url 인코딩된 P256 공개키
+VAPID_PRIVATE_KEY=...   # base64url 인코딩된 P256 비밀키
+VAPID_SUBJECT=mailto:admin@hanjul.ai
+```
+
+### D175-A backend 패키지 의존성 (Harold npm install)
+
+```bash
+cd /home/administrator/targetup-app/packages/backend && npm install web-push @types/web-push
+```
+
+### D172 운영 환경 실행 SQL (Harold 직접 진행)
+
+```sql
+-- 1. companies 컬럼 ALTER
+ALTER TABLE companies ADD COLUMN IF NOT EXISTS cdp_api_key varchar(100);
+ALTER TABLE companies ADD COLUMN IF NOT EXISTS cdp_api_secret_hash varchar(255);
+ALTER TABLE companies ADD COLUMN IF NOT EXISTS cdp_api_key_issued_at timestamptz;
+CREATE UNIQUE INDEX IF NOT EXISTS uniq_companies_cdp_api_key ON companies(cdp_api_key) WHERE cdp_api_key IS NOT NULL;
+
+-- 2. plans 컬럼 ALTER
+ALTER TABLE plans ADD COLUMN IF NOT EXISTS cdp_enabled boolean NOT NULL DEFAULT false;
+ALTER TABLE plans ADD COLUMN IF NOT EXISTS cdp_events_per_month integer;
+
+-- BUSINESS+ 베타 진입은 cdp_enabled = true. 한도는 plan별로 박음.
+UPDATE plans SET cdp_enabled = true, cdp_events_per_month = 1000000 WHERE plan_code = 'BUSINESS';
+UPDATE plans SET cdp_enabled = true, cdp_events_per_month = NULL WHERE plan_code = 'ENTERPRISE';
+UPDATE plans SET cdp_events_per_month = 100000 WHERE plan_code = 'PRO';
+UPDATE plans SET cdp_events_per_month = 10000 WHERE plan_code = 'BASIC';
+
+-- 3. cdp_identity_links
+CREATE TABLE IF NOT EXISTS cdp_identity_links (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  company_id uuid NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+  customer_id uuid REFERENCES customers(id) ON DELETE SET NULL,
+  source varchar(30) NOT NULL,
+  external_id varchar(200) NOT NULL,
+  external_email varchar(150),
+  external_phone varchar(20),
+  last_seen_at timestamptz,
+  created_at timestamptz NOT NULL DEFAULT NOW(),
+  updated_at timestamptz NOT NULL DEFAULT NOW(),
+  UNIQUE(company_id, source, external_id)
+);
+CREATE INDEX IF NOT EXISTS idx_cdp_identity_links_customer ON cdp_identity_links(customer_id) WHERE customer_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_cdp_identity_links_email ON cdp_identity_links(company_id, external_email) WHERE external_email IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_cdp_identity_links_phone ON cdp_identity_links(company_id, external_phone) WHERE external_phone IS NOT NULL;
+
+-- 4. cdp_events
+CREATE TABLE IF NOT EXISTS cdp_events (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  company_id uuid NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+  identity_link_id uuid REFERENCES cdp_identity_links(id) ON DELETE SET NULL,
+  customer_id uuid REFERENCES customers(id) ON DELETE SET NULL,
+  event_name varchar(50) NOT NULL,
+  properties jsonb NOT NULL DEFAULT '{}',
+  source varchar(30) NOT NULL,
+  occurred_at timestamptz NOT NULL DEFAULT NOW(),
+  created_at timestamptz NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_cdp_events_company_occurred ON cdp_events(company_id, occurred_at DESC);
+CREATE INDEX IF NOT EXISTS idx_cdp_events_company_event ON cdp_events(company_id, event_name, occurred_at DESC);
+CREATE INDEX IF NOT EXISTS idx_cdp_events_customer ON cdp_events(customer_id, occurred_at DESC) WHERE customer_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_cdp_events_company_created ON cdp_events(company_id, created_at DESC);
+
+-- 5. cdp_webhook_deliveries
+CREATE TABLE IF NOT EXISTS cdp_webhook_deliveries (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  company_id uuid NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+  source varchar(30) NOT NULL,
+  webhook_event varchar(100) NOT NULL,
+  idempotency_key varchar(200) NOT NULL,
+  payload jsonb,
+  status varchar(20) NOT NULL DEFAULT 'received',
+  error_message text,
+  retry_count integer NOT NULL DEFAULT 0,
+  processed_at timestamptz,
+  created_at timestamptz NOT NULL DEFAULT NOW(),
+  UNIQUE(company_id, source, idempotency_key)
+);
+CREATE INDEX IF NOT EXISTS idx_cdp_webhook_status ON cdp_webhook_deliveries(company_id, status, created_at DESC);
+
+-- 6. cdp_api_call_log
+CREATE TABLE IF NOT EXISTS cdp_api_call_log (
+  id bigserial PRIMARY KEY,
+  company_id uuid NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+  endpoint varchar(50) NOT NULL,
+  call_count integer NOT NULL DEFAULT 1,
+  status_code integer NOT NULL,
+  occurred_at timestamptz NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_cdp_api_call_log_company ON cdp_api_call_log(company_id, occurred_at DESC);
+```

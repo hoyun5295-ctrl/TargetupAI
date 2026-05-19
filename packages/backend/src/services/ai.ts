@@ -2111,8 +2111,8 @@ ${channel} 채널에 최적화된 3가지 맞춤 문안(A/B/C)을 생성해주�
 
 // ============================================================
 // ★ 기능 4: 타겟 필터 실시간 건수 조회 (공통 함수 — 중복 제거)
-// recommend-target, recount-target, relaxFilters 3곳에서 사용
-// CT-01 buildFilterWhereClauseCompat 활용
+// recommend-target, recount-target에서 사용 — CT-01 buildFilterWhereClauseCompat 활용
+// (D171 영구 원칙: 0건 매칭 시 자동완화 박지 X — 발송 차단이 정합. feedback_no_target_auto_relax.md)
 // ============================================================
 
 export interface FilterCountResult {
@@ -2165,125 +2165,11 @@ export async function countFilteredCustomers(
 }
 
 // ============================================================
-// ★ 기능 4: AI 타겟 조건 자동완화 (Zero-Count Auto-Relax)
-// 0명 매칭 시 AI에게 조건 완화 요청 → 재추천
-// 프로 요금제 이상 (ai_premium_enabled) 전용
+// ★ D171 (Harold 명시 영구 원칙): AI 타겟 조건 자동완화 함수 제거
+// 0건 매칭 시 자동완화 절대 금지 — 발송 차단이 정합.
+// AI가 임의로 조건 풀어서 다른 고객에게 발송 = 마케팅 의도 파괴 + 수신자 권리 침해 + 발신번호 차단 위험.
+// 메모리: feedback_no_target_auto_relax.md
 // ============================================================
-
-export interface RelaxFiltersResult {
-  filters: Record<string, any>;
-  reasoning: string;
-  relaxed_fields: string[];
-}
-
-/**
- * AI에게 필터 조건 완화를 요청하는 함수
- * - 원래 필터 + 0명 사유를 AI에 전달
- * - AI가 의도를 유지하면서 가장 영향 적은 필드부터 완화
- * - relaxed_fields로 어떤 필드를 완화했는지 명시
- */
-export async function relaxFilters(
-  originalFilters: Record<string, any>,
-  originalReasoning: string,
-  customerStats: any,
-  activeFieldsPrompt: string,
-  companyInfo?: { business_type?: string; brand_name?: string }
-): Promise<RelaxFiltersResult> {
-  const userMessage = `## 상황
-이전에 추천한 타겟 필터 조건으로 매칭된 고객이 0명입니다.
-마케팅 의도를 최대한 유지하면서 조건을 완화하여 적절한 타겟을 찾아주세요.
-
-## 이전 추천 필터
-${JSON.stringify(originalFilters, null, 2)}
-
-## 이전 추천 이유
-${originalReasoning}
-
-## 고객 데이터 현황
-- 전체 고객: ${customerStats.total}명
-- SMS 수신동의: ${customerStats.sms_opt_in_count}명
-
-## 사용 가능한 필터 필드
-${activeFieldsPrompt}
-
-## 완화 우선순위 가이드
-1. 가장 제한적인 조건부터 완화 (예: 연령 범위 확대, 등급 조건 추가)
-2. 핵심 의도(성별, 주요 타겟)는 최대한 유지
-3. 조건을 완전히 제거하기보다 범위를 넓히는 방향 선호
-4. 너무 넓히면 안 됨 — 타겟팅 의미가 없어짐
-
-## ⛔ 절대 금지 규칙
-- filters를 빈 객체 {}로 반환하지 마세요! 빈 필터 = 전체 고객 선택 = 타겟팅 무의미
-- 모든 필터 조건을 제거하지 마세요. 최소 1개 이상의 의미 있는 필터를 반드시 유지하세요
-- 해당 데이터가 DB에 존재하지 않을 수 있습니다. 그 경우에도 완전히 제거하지 말고 범위만 넓히세요
-- 0명 매칭이 반복되면 차라리 "매칭 불가"라고 reasoning에 명시하고, 원래 필터를 그대로 반환하세요
-
-## 출력 형식 (JSON만 응답)
-{
-  "filters": { ... 완화된 필터 조건 ... },
-  "reasoning": "어떻게 완화했고 왜 이렇게 했는지 한글 1~2문장",
-  "relaxed_fields": ["완화한 필드명1", "완화한 필드명2"]
-}`;
-
-  try {
-    const text = await callAIWithFallback({
-      system: '당신은 CRM 마케팅 타겟팅 전문가입니다. 필터 조건이 너무 좁아서 0명이 매칭되었습니다. 마케팅 의도를 유지하면서 조건을 적절히 완화해주세요. JSON 형식으로만 응답하세요.',
-      userMessage,
-      maxTokens: 1024,
-      temperature: 0.3,
-    });
-
-    let jsonStr = text;
-    if (text.includes('```json')) {
-      const start = text.indexOf('```json') + 7;
-      const end = text.indexOf('```', start);
-      jsonStr = text.slice(start, end).trim();
-    } else if (text.includes('```')) {
-      const start = text.indexOf('```') + 3;
-      const end = text.indexOf('```', start);
-      jsonStr = text.slice(start, end).trim();
-    }
-
-    const result = JSON.parse(jsonStr);
-    const relaxedFilters = result.filters || {};
-
-    // ★ 안전장치: AI가 빈 필터를 반환하면 원래 필터 유지 (전체 고객 풀백 방지)
-    if (Object.keys(relaxedFilters).length === 0) {
-      console.warn('[AI] relaxFilters 안전장치 — AI가 빈 필터 반환, 원래 필터 유지');
-      return {
-        filters: originalFilters,
-        reasoning: '조건 완화 시 모든 필터가 제거되어 원래 조건을 유지합니다.',
-        relaxed_fields: [],
-      };
-    }
-
-    // ★ 안전장치: 원래 필터 키가 전부 제거되었으면 차단
-    const originalKeys = Object.keys(originalFilters);
-    const remainingOriginalKeys = originalKeys.filter(k => k in relaxedFilters);
-    if (originalKeys.length > 0 && remainingOriginalKeys.length === 0) {
-      console.warn(`[AI] relaxFilters 안전장치 — 원래 필터 키(${originalKeys.join(',')}) 전부 제거됨, 원래 필터 유지`);
-      return {
-        filters: originalFilters,
-        reasoning: '조건 완화 시 핵심 필터가 모두 제거되어 원래 조건을 유지합니다.',
-        relaxed_fields: [],
-      };
-    }
-
-    return {
-      filters: relaxedFilters,
-      reasoning: result.reasoning || '조건을 완화했습니다.',
-      relaxed_fields: result.relaxed_fields || [],
-    };
-  } catch (err) {
-    console.error('[AI] relaxFilters 실패:', err);
-    // ★ 실패 시에도 원래 필터 유지 (빈 필터 반환 = 전체 고객 풀백 위험)
-    return {
-      filters: originalFilters,
-      reasoning: '조건 완화에 실패하여 원래 조건을 유지합니다.',
-      relaxed_fields: [],
-    };
-  }
-}
 
 // ============================================================
 // ★ 기능 2: AI 다음 캠페인 추천 (발송 결과 기반)
