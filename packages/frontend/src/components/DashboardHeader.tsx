@@ -31,6 +31,14 @@ interface DashboardHeaderProps {
 
 type MenuColor = 'green' | 'gold' | 'gray' | 'beta';
 
+interface SubMenuItem {
+  label: string;
+  description?: string;
+  onClick: () => void;
+  betaBadge?: boolean;
+  path?: string;
+}
+
 interface MenuItem {
   label: string;
   onClick: () => void;
@@ -39,6 +47,8 @@ interface MenuItem {
   locked?: boolean;
   betaBadge?: boolean; // ★ D163: BETA 뱃지 노출 (AI Operator 등 베타 메뉴)
   path?: string; // 현재 페이지 활성 감지용
+  // ★ D177-ux (2026-05-19): AI Operator dropdown sub-menu — 신규 기능 5건 통합 박음
+  subMenu?: SubMenuItem[];
 }
 
 // ★ D95: 필(pill) 스타일 메뉴 — 밑줄 제거, 호버/강조 시 배경색
@@ -96,8 +106,8 @@ export default function DashboardHeader({
 
   const menuItems: MenuItem[] = [
     // ★ D163 (2026-05-19) Braze급 SaaS Step 0 — AI Operator 베타 메뉴.
-    //   메뉴 자체는 전체 등급 노출 (마케팅 효과 + "곧 어마어마한 기능 옵니다" 인지).
-    //   클릭 시 Dashboard.tsx에서 isBetaAccessAllowed 게이팅 후 진입/BetaFeatureModal 분기.
+    // ★ D177-ux (2026-05-19): Harold 명시 — 신규 기능 5건(자사몰 연동/성과리포트/AI 영구운영/Web Push/인앱메시지)을
+    //   AI Operator dropdown sub-menu로 통합. 헤더 간소화 + 진정 본질 (모두 AI Operator 하위 영역) 정합.
     ...(onAiOperatorClick
       ? [{
           label: 'AI Operator',
@@ -105,6 +115,52 @@ export default function DashboardHeader({
           color: 'beta' as MenuColor,
           betaBadge: true,
           path: '/ai-operator',
+          subMenu: [
+            {
+              label: 'AI Operator',
+              description: '자연어 한 줄로 캠페인 자동 설계',
+              onClick: onAiOperatorClick,
+              betaBadge: true,
+              path: '/ai-operator',
+            },
+            {
+              label: 'AI 영구운영',
+              description: '매일 AI가 새 캠페인 제안 (사용자 승인 후 발송)',
+              onClick: () => navigate('/continuous-operator'),
+              betaBadge: true,
+              path: '/continuous-operator',
+            },
+            {
+              label: '성과리포트',
+              description: '30일 성과 분석 + AI 다음 캠페인 추천',
+              onClick: () => navigate('/performance'),
+              betaBadge: true,
+              path: '/performance',
+            },
+            {
+              label: '자사몰 연동',
+              description: '카페24 / Shopify / 메이크샵 회원·주문 sync',
+              onClick: () => navigate('/cdp-settings'),
+              betaBadge: true,
+              path: '/cdp-settings',
+            },
+            ...(isCompanyAdmin ? [
+              {
+                label: 'Web Push',
+                description: '브라우저 푸시 알림 발송',
+                onClick: () => navigate('/push-campaigns'),
+                betaBadge: true,
+                path: '/push-campaigns',
+              },
+              {
+                label: '인앱메시지',
+                description: '자사몰 안의 배너/모달 자동 표시',
+                onClick: () => navigate('/inapp-messages'),
+                betaBadge: true,
+                path: '/inapp-messages',
+              },
+            ] : []),
+          ],
         }]
       : []),
     {
@@ -124,17 +180,6 @@ export default function DashboardHeader({
       locked: isEnterpriseLocked,
       path: '/kakao-rcs',
     },
-    // ★ D172 (2026-05-19): 자사몰 연동 (CDP) — BUSINESS+ 베타. 메뉴 자체는 전체 노출, 진입 시 백엔드 게이팅.
-    { label: '자사몰 연동', onClick: () => navigate('/cdp-settings'), color: 'beta', betaBadge: true, path: '/cdp-settings' },
-    // ★ D174 (2026-05-19): 성과 리포트 + AI 다음 캠페인 — BUSINESS+ 베타
-    { label: '성과리포트', onClick: () => navigate('/performance'), color: 'beta', betaBadge: true, path: '/performance' },
-    // ★ D176 (2026-05-19): AI 영구 운영 (Continuous Operator) — BUSINESS+ 베타
-    { label: 'AI 영구운영', onClick: () => navigate('/continuous-operator'), color: 'beta', betaBadge: true, path: '/continuous-operator' },
-    // ★ D175-A (2026-05-19): Web Push + In-app Message — BUSINESS+ 베타, 회사 admin only
-    ...(isCompanyAdmin ? [
-      { label: 'Web Push', onClick: () => navigate('/push-campaigns'), color: 'beta' as MenuColor, betaBadge: true, path: '/push-campaigns' },
-      { label: '인앱메시지', onClick: () => navigate('/inapp-messages'), color: 'beta' as MenuColor, betaBadge: true, path: '/inapp-messages' },
-    ] : []),
     { label: '직접발송', onClick: onDirectSend, color: 'green', path: '/' },
     // ★ D162-4 (2026-05-15) 2차: Harold님 명시 정합 — DashboardHeader 메뉴에서 '알림톡 발송' 제거.
     //   직접발송/직접타겟발송 모달 헤더 안에서 알림톡 모달 진입 (카카오 노란색 버튼). 메뉴 분리 시 사용자 혼란 차단.
@@ -189,27 +234,115 @@ export default function DashboardHeader({
                   ? cfg.hoverBg
                   : 'transparent';
 
+            // ★ D177-ux: sub-menu 박힌 메뉴는 hover 시 dropdown 펼침
+            const hasSubMenu = !!item.subMenu && item.subMenu.length > 0;
+            const subMenuActive = hasSubMenu && item.subMenu!.some((s) => s.path && location.pathname === s.path);
+
             return (
-              <button
+              <div
                 key={item.label}
-                onClick={item.onClick}
+                className="relative"
                 onMouseEnter={() => setHoveredIdx(idx)}
                 onMouseLeave={() => setHoveredIdx(null)}
-                className="px-3.5 py-1.5 text-[13px] rounded-lg transition-all duration-200 flex items-center gap-1.5 tracking-wide"
-                style={{
-                  color: textColor,
-                  backgroundColor: bgColor,
-                  fontWeight: isActive ? 600 : 500,
-                }}
               >
-                {item.locked && <span className="text-xs">🔒</span>}
-                {item.label}
-                {item.betaBadge && (
-                  <span className="text-[9px] font-bold tracking-wider px-1.5 py-0.5 rounded-full bg-gradient-to-r from-amber-400 to-fuchsia-500 text-white shadow-sm">
-                    BETA
-                  </span>
+                <button
+                  onClick={item.onClick}
+                  className="px-3.5 py-1.5 text-[13px] rounded-lg transition-all duration-200 flex items-center gap-1.5 tracking-wide"
+                  style={{
+                    color: subMenuActive ? cfg.activeText : textColor,
+                    backgroundColor: subMenuActive ? cfg.activeBg : bgColor,
+                    fontWeight: isActive || subMenuActive ? 600 : 500,
+                  }}
+                >
+                  {item.locked && <span className="text-xs">🔒</span>}
+                  {item.label}
+                  {item.betaBadge && (
+                    <span className="text-[9px] font-bold tracking-wider px-1.5 py-0.5 rounded-full bg-gradient-to-r from-amber-400 to-fuchsia-500 text-white shadow-sm">
+                      BETA
+                    </span>
+                  )}
+                  {hasSubMenu && (
+                    <svg
+                      className={`w-3 h-3 transition-transform duration-200 ${isHovered ? 'rotate-180' : ''}`}
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                      style={{ opacity: 0.6 }}
+                    >
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M19 9l-7 7-7-7" />
+                    </svg>
+                  )}
+                </button>
+
+                {/* ★ D177-ux: Sub-menu dropdown — hover 시 펼침 */}
+                {hasSubMenu && isHovered && (
+                  <div
+                    className="absolute right-0 top-full pt-2 z-50"
+                    style={{ minWidth: '320px' }}
+                  >
+                    <div
+                      className="bg-white rounded-2xl shadow-xl border border-gray-100 overflow-hidden animate-in fade-in zoom-in-95 duration-150"
+                      style={{
+                        boxShadow: '0 10px 40px -10px rgba(168, 85, 247, 0.15), 0 4px 20px rgba(0, 0, 0, 0.06)',
+                      }}
+                    >
+                      {/* 그라데이션 상단 강조선 */}
+                      <div className="h-0.5 bg-gradient-to-r from-amber-400 via-fuchsia-500 to-violet-500" />
+
+                      <div className="p-1.5">
+                        {item.subMenu!.map((sub, sIdx) => {
+                          const subActive = sub.path && location.pathname === sub.path;
+                          return (
+                            <button
+                              key={sub.label + sIdx}
+                              onClick={() => {
+                                setHoveredIdx(null);
+                                sub.onClick();
+                              }}
+                              className="w-full text-left px-3 py-2.5 rounded-xl transition-all duration-150 group"
+                              style={{
+                                backgroundColor: subActive ? '#fdf4ff' : 'transparent',
+                              }}
+                              onMouseEnter={(e) => {
+                                if (!subActive) e.currentTarget.style.backgroundColor = '#faf5ff';
+                              }}
+                              onMouseLeave={(e) => {
+                                if (!subActive) e.currentTarget.style.backgroundColor = 'transparent';
+                              }}
+                            >
+                              <div className="flex items-center gap-2 mb-0.5">
+                                <span
+                                  className="text-[13px] font-semibold tracking-tight"
+                                  style={{ color: subActive ? '#a21caf' : '#1f2937' }}
+                                >
+                                  {sub.label}
+                                </span>
+                                {sub.betaBadge && (
+                                  <span className="text-[8px] font-bold tracking-wider px-1.5 py-0.5 rounded-full bg-gradient-to-r from-amber-400 to-fuchsia-500 text-white shadow-sm">
+                                    BETA
+                                  </span>
+                                )}
+                              </div>
+                              {sub.description && (
+                                <p className="text-[11px] text-gray-500 leading-snug ml-0">
+                                  {sub.description}
+                                </p>
+                              )}
+                            </button>
+                          );
+                        })}
+                      </div>
+
+                      {/* 하단 안내 */}
+                      <div className="px-4 py-2.5 bg-gradient-to-r from-amber-50/50 to-fuchsia-50/50 border-t border-gray-100">
+                        <p className="text-[10px] text-gray-500 leading-relaxed">
+                          AI가 제안 · 사용자가 승인 후 발송
+                        </p>
+                      </div>
+                    </div>
+                  </div>
                 )}
-              </button>
+              </div>
             );
           })}
         </nav>

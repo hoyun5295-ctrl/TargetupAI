@@ -1,7 +1,7 @@
 # 한줄로 — BEYOND BRAZE 비전
 
 **문서 종류:** 살아있는 비전 문서 (체어맨 + CTO 전용, 대외 공개 X)
-**버전:** v0.2 (D176 Continuous Operator 박힘)
+**버전:** v0.3 (D177 사용자 노출 영역 정리 — 헤더 dropdown 통합 + 미래 로드맵 영구 제거)
 **최종 갱신:** 2026-05-19
 **체어맨:** Harold
 **CTO:** 비토 (Claude Opus 4.7)
@@ -240,6 +240,7 @@ Braze Canvas Journey = 마케터가 박는 1회성. 한줄로 Continuous Operato
 |------|------|------|------|
 | **v0.1** | 2026-05-19 (D175-B) | 비전 신설 | Manifesto + 영구 원칙 5건 + Braze 압도 8축 + Continuous Operator(사용자 동의 흐름) + 음성 AI 정직 분석 + 압축 로드맵 D176~D200 + 5년 시야 + KPI |
 | **v0.2** | 2026-05-19 (D176) | Continuous Operator 박힘 | 비전 § 3 박힌 Continuous Agentic Operator 본격 구현 — utils/continuous-operator.ts CT-28 + DB 2 테이블 + routes/ai.ts Operator CRUD + Proposals 승인/거부 + ContinuousOperatorPage + 5분 주기 worker scheduler. **AI 단독 실행 X 영구 원칙 100% 정합** — 모든 제안서는 사용자 승인 후 발송 (ENT 자동 실행 default OFF + 1,000건/5만원/low risk/비광고 임계값) |
+| **v0.3** | 2026-05-19 (D177) | 사용자 노출 영역 정리 + 영구 원칙 #6 박음 | (D177-fix) AiOperatorPage SESSION_MILESTONES + 진행률 카드 + 9-Phase 로드맵 영구 제거. (D177-ux) DashboardHeader 메뉴 간소화 — AI Operator dropdown 통합 (subMenu 5건). 헤더 14개 → 9개. **영구 원칙 #6 미래 로드맵 사용자 노출 X 박음.** |
 
 ---
 
