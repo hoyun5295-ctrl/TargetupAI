@@ -79,7 +79,7 @@ export default function PerformancePage() {
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-indigo-50">
       <div className="bg-white border-b">
         <div className="max-w-6xl mx-auto px-6 py-4 flex items-center gap-3">
-          <button onClick={() => navigate('/')} className="text-gray-500 hover:text-gray-700 p-1">
+          <button onClick={() => navigate('/ai-operator')} className="text-gray-500 hover:text-gray-700 p-1">
             <ArrowLeft className="w-5 h-5" />
           </button>
           <BarChart3 className="w-5 h-5 text-indigo-600" />

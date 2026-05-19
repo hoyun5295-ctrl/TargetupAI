@@ -235,7 +235,7 @@ export default function CdpSettingsPage() {
       <div className="bg-white border-b">
         <div className="max-w-5xl mx-auto px-6 py-4 flex items-center gap-3">
           <button
-            onClick={() => navigate('/')}
+            onClick={() => navigate('/ai-operator')}
             className="text-gray-500 hover:text-gray-700 p-1"
           >
             <ArrowLeft className="w-5 h-5" />
