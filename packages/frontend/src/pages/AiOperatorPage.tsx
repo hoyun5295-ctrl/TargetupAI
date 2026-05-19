@@ -271,6 +271,13 @@ export default function AiOperatorPage() {
     message: string;
     suggestedName: string;
   } | null>(null);
+  // ★ D170+ (Harold 명시 2026-05-19): 발송 시점 안전장치 박음
+  //   'aiRecommended' = AI 추천 시점 그대로 예약 발송 (미래 시점이면)
+  //   'immediate' = 지금 즉시 발송 (사용자 명시 선택)
+  //   'custom' = 사용자가 직접 시점 선택 (datetime-local input)
+  type SendMode = 'aiRecommended' | 'immediate' | 'custom';
+  const [sendMode, setSendMode] = useState<SendMode>('aiRecommended');
+  const [customScheduledAt, setCustomScheduledAt] = useState<string>(''); // YYYY-MM-DDTHH:mm 형식
 
   // textarea 자동 높이 조절
   useEffect(() => {
@@ -380,6 +387,59 @@ export default function AiOperatorPage() {
       const rawSubject = variant.subject || proposal.target.suggestedName || `${companyName || ''} AI 캠페인`.trim() || 'AI Operator';
       const subject = isLmsOrMms ? rawSubject.slice(0, 17) : '';
 
+      // ★ D170+ (Harold 명시): 발송 시점 안전장치 박음 — AI 추천/즉시/사용자 직접 분기
+      let scheduled = false;
+      let scheduledAt: string | null = null;
+      const now = Date.now();
+      const MIN_FUTURE_MS = 60 * 1000; // 1분 이상 미래여야 예약 발송으로 박음
+
+      if (sendMode === 'aiRecommended') {
+        // AI 추천 시점이 미래면 예약, 과거/현재면 즉시 발송
+        const recRaw = proposal.schedule.recommendedTime || '';
+        if (recRaw) {
+          const recDate = new Date(recRaw.replace(' ', 'T'));
+          if (!isNaN(recDate.getTime()) && recDate.getTime() > now + MIN_FUTURE_MS) {
+            scheduled = true;
+            scheduledAt = recDate.toISOString();
+          }
+        }
+      } else if (sendMode === 'immediate') {
+        // 즉시 발송 — 사용자 명시 선택
+        scheduled = false;
+      } else if (sendMode === 'custom') {
+        // 사용자가 직접 선택한 시점
+        if (!customScheduledAt) {
+          throw new Error('예약 발송 시점을 선택해주세요.');
+        }
+        const customDate = new Date(customScheduledAt);
+        if (isNaN(customDate.getTime())) {
+          throw new Error('예약 시점 형식이 올바르지 않습니다.');
+        }
+        if (customDate.getTime() <= now + MIN_FUTURE_MS) {
+          throw new Error('예약 시점은 현재로부터 1분 이상 미래여야 합니다.');
+        }
+        // 발송 허용 시간대 (08:00 ~ 21:00 KST) — 한줄로 SEND_HOURS 정합
+        const hour = customDate.getHours();
+        if (hour < 8 || hour >= 21) {
+          throw new Error('예약 시점은 08:00 ~ 21:00 사이여야 합니다.');
+        }
+        scheduled = true;
+        scheduledAt = customDate.toISOString();
+      }
+
+      // ★ D170+ (Harold 명시 안전장치): 즉시 발송 시 사용자 확인 — 회수 불가 안내
+      if (!scheduled) {
+        const isAiPast = sendMode === 'aiRecommended';
+        const confirmMsg = isAiPast
+          ? `AI 추천 시점이 과거이거나 임박해서 ${recipients.length.toLocaleString()}명에게 지금 즉시 발송됩니다.\n발송 후 회수 불가합니다. 진행하시겠습니까?`
+          : `${recipients.length.toLocaleString()}명에게 지금 즉시 발송됩니다.\n발송 후 회수 불가합니다. 진행하시겠습니까?`;
+        if (!window.confirm(confirmMsg)) {
+          setSending(false);
+          setSendError(null);
+          return;
+        }
+      }
+
       // 3. 발송 (기존 /direct-send 재사용 — 검증된 흐름 + 라인그룹/중복제거/회신번호 가드 자동)
       const sendRes = await fetch('/api/campaigns/direct-send', {
         method: 'POST',
@@ -391,7 +451,8 @@ export default function AiOperatorPage() {
           callback: previewData.defaultCallback,
           recipients,
           adEnabled: !!proposal.channel.isAd,
-          scheduled: false,
+          scheduled,
+          scheduledAt,
           sendChannel: 'sms',
           dedupEnabled: true,
           unsubFilterEnabled: true,
@@ -826,15 +887,90 @@ export default function AiOperatorPage() {
                     description={proposal.channel.reason}
                   />
 
-                  {/* ============= 발송 시점 ============= */}
+                  {/* ============= 발송 시점 — D170+ Harold 명시: 사용자 변경 가능 + 안전장치 ============= */}
                   <ResultCard
                     index={3}
                     accent="cyan"
                     icon={Clock}
                     label="발송 시점"
-                    headline={formatScheduleTime(proposal.schedule.recommendedTime)}
-                    subtitle="한국 시간 (KST)"
-                    description="AI 추천 최적 발송 시간 · 도착률 + 응답률 기반"
+                    headline={
+                      sendMode === 'immediate'
+                        ? '지금 즉시 발송'
+                        : sendMode === 'custom' && customScheduledAt
+                          ? formatScheduleTime(customScheduledAt)
+                          : formatScheduleTime(proposal.schedule.recommendedTime)
+                    }
+                    subtitle={
+                      sendMode === 'aiRecommended'
+                        ? 'AI 추천 · KST'
+                        : sendMode === 'immediate'
+                          ? '사용자 선택 · 즉시'
+                          : '사용자 선택 · 예약'
+                    }
+                    truncateHeadline={false}
+                    extra={
+                      <div className="mt-3 space-y-2">
+                        {/* AI 추천 시점 — radio */}
+                        <label className="flex items-start gap-2.5 p-2.5 rounded-lg bg-white/[0.04] border border-white/10 hover:bg-white/[0.07] cursor-pointer transition-all">
+                          <input
+                            type="radio"
+                            name="sendMode"
+                            checked={sendMode === 'aiRecommended'}
+                            onChange={() => setSendMode('aiRecommended')}
+                            className="mt-0.5 accent-cyan-400"
+                          />
+                          <div className="flex-1 min-w-0">
+                            <p className="text-xs font-semibold text-white">AI 추천 시점 사용</p>
+                            <p className="text-[11px] text-white/55 mt-0.5">{formatScheduleTime(proposal.schedule.recommendedTime)} 자동 예약</p>
+                          </div>
+                        </label>
+
+                        {/* 즉시 발송 — radio */}
+                        <label className="flex items-start gap-2.5 p-2.5 rounded-lg bg-white/[0.04] border border-white/10 hover:bg-white/[0.07] cursor-pointer transition-all">
+                          <input
+                            type="radio"
+                            name="sendMode"
+                            checked={sendMode === 'immediate'}
+                            onChange={() => setSendMode('immediate')}
+                            className="mt-0.5 accent-amber-400"
+                          />
+                          <div className="flex-1 min-w-0">
+                            <p className="text-xs font-semibold text-white">지금 즉시 발송</p>
+                            <p className="text-[11px] text-white/55 mt-0.5">승인 클릭 즉시 발송 큐 진입</p>
+                          </div>
+                        </label>
+
+                        {/* 사용자 직접 선택 — radio + datetime input */}
+                        <label className="flex items-start gap-2.5 p-2.5 rounded-lg bg-white/[0.04] border border-white/10 hover:bg-white/[0.07] cursor-pointer transition-all">
+                          <input
+                            type="radio"
+                            name="sendMode"
+                            checked={sendMode === 'custom'}
+                            onChange={() => setSendMode('custom')}
+                            className="mt-0.5 accent-fuchsia-400"
+                          />
+                          <div className="flex-1 min-w-0">
+                            <p className="text-xs font-semibold text-white mb-1.5">직접 시점 선택</p>
+                            <input
+                              type="datetime-local"
+                              value={customScheduledAt}
+                              onChange={(e) => {
+                                setCustomScheduledAt(e.target.value);
+                                if (e.target.value) setSendMode('custom');
+                              }}
+                              min={(() => {
+                                const d = new Date(Date.now() + 5 * 60 * 1000); // 5분 후 최소
+                                const pad = (n: number) => String(n).padStart(2, '0');
+                                return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+                              })()}
+                              disabled={sendMode !== 'custom'}
+                              className="w-full px-2 py-1 rounded-md bg-indigo-950/60 border border-white/15 text-white text-xs disabled:opacity-50 disabled:cursor-not-allowed [color-scheme:dark]"
+                            />
+                            <p className="text-[10px] text-white/40 mt-1">발송 허용 시간 · 08:00 ~ 21:00 KST</p>
+                          </div>
+                        </label>
+                      </div>
+                    }
                   />
 
                   {/* ============= 예상 비용 (breakdown 강화) ============= */}
