@@ -113,16 +113,26 @@ export async function callAIWithFallback(params: {
     ? AI_MODELS.gptOperator  // AI Operator: gpt-5.5
     : AI_MODELS.gpt;         // 기존 한줄로AI: gpt-5.4-mini
 
+  // ★ D170+ (PM2 로그 진단 2026-05-19): GPT-5.5도 temperature 박으면 400 error
+  //   "Unsupported value: 'temperature' does not support 0.3 with this model. Only the default (1) value is supported."
+  //   = GPT-5 series (5.5) sampling 파라미터 제한. gpt-5.4-mini는 그대로 박음(검증된 모델).
+  const isOperatorFallback = fallbackModel === AI_MODELS.gptOperator;
+
   try {
-    const gptResponse = await openai.chat.completions.create({
+    const gptRequest: any = {
       model: fallbackModel,
       max_completion_tokens: params.maxTokens,
-      temperature: params.temperature,
       messages: [
         { role: 'system', content: params.system },
         { role: 'user', content: params.userMessage },
       ],
-    });
+    };
+    // gpt-5.5는 temperature 박지 X (default 1만 지원). gpt-5.4-mini는 그대로 박음.
+    if (!isOperatorFallback) {
+      gptRequest.temperature = params.temperature;
+    }
+
+    const gptResponse = await openai.chat.completions.create(gptRequest);
     const text = gptResponse.choices[0]?.message?.content || '';
     console.log(`[AI] GPT fallback 성공 · model=${fallbackModel}`);
     return text;
