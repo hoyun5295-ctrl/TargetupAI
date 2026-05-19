@@ -19,18 +19,26 @@ redis.on('error', (err) => console.error('[Redis] 연결 에러:', err.message))
 // AI 모델명 (환경변수로 모델 업그레이드 시 .env만 수정)
 // ============================================================
 export const AI_MODELS = {
-  // ★ D152+ (2026-05-12) 모델 (OpenAI/Anthropic 2026.5 API 사용 가능 모델 조사 후 확정):
-  //   - Claude: claude-sonnet-4-6 (2/17 release, $3/$15 per 1M tokens, 다듬기 품질↑ 균형)
-  //   - GPT: gpt-5.4-mini (fallback 용도, 비용 최소화). gpt-5.3 미존재 사고 fix.
-  //   .env CLAUDE_MODEL / GPT_MODEL로 런타임 오버라이드 가능.
-  // ★ D170 (2026-05-19) Braze급 SaaS Step 0 — Multi-Agent 3 모델 mix:
-  //   - claude (Sonnet 4.6): 기본 sub-agent (target/message/channel/schedule)
-  //   - opus (Opus 4.7, 1M ctx): Orchestrator — 회사 30일 history + sub-agent 결과 통합
-  //   - haiku (Haiku 4.5): Compliance/분류 sub-agent — latency <300ms + cost 1/10
-  claude: process.env.CLAUDE_MODEL || 'claude-sonnet-4-6',
-  opus: process.env.CLAUDE_OPUS_MODEL || 'claude-opus-4-7',
-  haiku: process.env.CLAUDE_HAIKU_MODEL || 'claude-haiku-4-5',
-  gpt: process.env.GPT_MODEL || 'gpt-5.4-mini',
+  // ★ D170+ (2026-05-19) Harold 명시 — 모델 영역 절대 분리. 혼용 시 6,000사+ 운영 영향 사고.
+  //
+  //   ┌─────────────────────┬──────────────────┬──────────────────┐
+  //   │ 영역                │ Claude 모델       │ GPT fallback     │
+  //   ├─────────────────────┼──────────────────┼──────────────────┤
+  //   │ 기존 한줄로AI 전체  │ Sonnet 4.6        │ gpt-5.4-mini     │
+  //   │ (refine/generate/   │ (절대 변경 X)     │ (절대 변경 X)    │
+  //   │  recommend-target)  │                  │                  │
+  //   ├─────────────────────┼──────────────────┼──────────────────┤
+  //   │ AI Operator 신메뉴  │ Opus 4.7          │ gpt-5.5          │
+  //   │ (D163+ Multi-Agent) │ (Target/Message/  │                  │
+  //   │                     │  Compliance)      │                  │
+  //   └─────────────────────┴──────────────────┴──────────────────┘
+  //
+  //   callAIWithFallback에서 params.model === 'opus'일 때만 AI Operator 영역.
+  //   기본 호출(model 미박힘)은 자동으로 기존 한줄로AI 흐름.
+  claude: process.env.CLAUDE_MODEL || 'claude-sonnet-4-6',               // ★ 기존 한줄로AI — Harold 명시 절대 유지
+  opus: process.env.CLAUDE_OPUS_MODEL || 'claude-opus-4-7',              // ★ AI Operator 신메뉴 전용
+  gpt: process.env.GPT_MODEL || 'gpt-5.4-mini',                          // ★ 기존 한줄로AI fallback — Harold 명시 절대 유지
+  gptOperator: process.env.GPT_OPERATOR_MODEL || 'gpt-5.5',              // ★ AI Operator 신메뉴 fallback
 };
 
 // ============================================================

@@ -254,9 +254,11 @@ export function formatDateTimeShort(dateStr: string | null | undefined): string 
 }
 
 /**
- * ★ D137: 파일명용 압축 타임스탬프 `YYYYMMDDHHmmss` (14자)
- * 이전 inline 패턴 `toISOString().replace(/[-:T]/g, '')`가 Tailwind JIT에
- * arbitrary value(`-: T;`)로 오스캔되어 CSS 빌드 WARNING 발생 → 컨트롤타워화.
+ * ★ D137: 파일명용 압축 타임스탬프 YYYYMMDDHHmmss (14자)
+ * 이전 inline 정규식 패턴(toISOString에서 대시·콜론·T 문자 제거)이 Tailwind JIT에
+ * arbitrary value 클래스로 오스캔되어 CSS 빌드 WARNING 발생 → 컨트롤타워화.
+ * ★ D170+ (2026-05-19): 주석 안의 정규식 텍스트 자체도 JIT scanner가 재오스캔하는 사고가
+ *   Harold님 명시로 재발견되어 패턴 표기를 자연어로 변경. 정규식 리터럴이나 대괄호 박지 말 것.
  * 사용처: CustomerDBModal 등 파일 다운로드 시 파일명 suffix.
  */
 export function compactTimestamp(date: Date = new Date()): string {

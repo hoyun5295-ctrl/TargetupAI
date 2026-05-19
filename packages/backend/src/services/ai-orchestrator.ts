@@ -1,19 +1,21 @@
 /**
- * AI Operator — Multi-Agent Orchestrator (D170, 2026-05-19)
+ * AI Operator — Multi-Agent Orchestrator (D170+, 2026-05-19)
  *
- * Braze급 SaaS Step 0 — 6 Sub-agent 협업 구조:
- *   1. Target Sub-agent  : 자연어 → 고객군 + filters (recommendTarget 재사용)
- *   2. Message Sub-agent : 채널별 A/B/C 문안 (generateMessages 재사용)
- *   3. Compliance Sub-agent: 스팸/금칙어/정책 검수 (Haiku 4.5, fast)
- *   4. Channel Sub-agent : recommendTarget 응답 채널 활용 (별 AI 호출 X — Sonnet thinking은 D169 callAIWithFallback에 박힘)
- *   5. Schedule Sub-agent: recommendTarget 응답 시점 활용
- *   6. Cost-ROI Sub-agent: 단순 산술 (회사별 단가 × count + 성과 추정)
+ * Harold 명시 모델 정합 (절대 분리):
+ *   - 모든 AI 호출 = Claude Opus 4.7 (model: 'opus' 박음)
+ *   - 백업 fallback = GPT 5.5 (callAIWithFallback이 자동 분기)
+ *   - 기존 한줄로AI 흐름(Sonnet 4.6 + gpt-5.4-mini)은 영향 0건
+ *
+ * Braze급 SaaS Step 0 — Sub-agent 협업 구조:
+ *   1. Target Sub-agent  : 자연어 → 고객군 + filters (recommendTarget + model:'opus')
+ *   2. Verify Sub-agent  : AI 추정 count → DB 실제 count (countFilteredCustomers, AI 호출 X)
+ *   3. Message Sub-agent : 채널별 A/B/C 문안 (generateMessages + model:'opus')
+ *   4. Compliance Sub-agent: 스팸/금칙어/정책 검수 (callAIWithFallback + model:'opus')
+ *   5. Cost-ROI Sub-agent: 단순 산술 (회사별 단가 × count + 성과 추정, AI 호출 X)
  *
  * 회사별 메모리:
  *   - buildCompanyMemoryContext: 브랜드 톤 + 30일 성공 캠페인 history 시스템 프롬프트
  *   - callAIWithFallback의 cache_control ephemeral과 결합 (D167) → 90% 비용 절감
- *
- * 진정 Orchestrator AI(Opus 4.7) 호출은 D170 단순화로 백엔드 직접 통합. 추후 Phase 1에서 Opus orchestrator AI 활성.
  */
 
 import { query } from '../config/database';
@@ -193,7 +195,9 @@ passed=true 이면 warnings/suggestions 빈 배열 가능. 사소한 issue는 me
       userMessage,
       maxTokens: 512,
       temperature: 0.1,
-      model: 'haiku', // ★ D170: Compliance = Haiku 4.5 (빠른 검수 + 저비용)
+      // ★ D170+ (Harold 명시 2026-05-19): Compliance도 Opus 4.7로 격상.
+      //   Haiku 4.5는 빠른 비용 절감 가치이나 한국 정책 검수 품질에서 Opus가 정합. 비용은 ENT 전용이라 한정.
+      model: 'opus',
     });
 
     let jsonStr = text;
@@ -286,13 +290,14 @@ export async function orchestrate(ctx: AgentContext): Promise<OrchestratorResult
   const durations: Record<string, number> = {};
   const mark = (key: string, start: number) => { durations[key] = Date.now() - start; };
 
-  // ============ 1. Target Sub-agent ============
+  // ============ 1. Target Sub-agent (Opus 4.7 — Harold 명시) ============
   const targetStart = Date.now();
   const targetResult = await recommendTarget(
     ctx.companyId,
     ctx.objective,
     ctx.customerStats,
-    ctx.companyInfo as any
+    ctx.companyInfo as any,
+    { model: 'opus' } // ★ D170+ (Harold 명시): AI Operator Target Sub-agent = Opus 4.7
   );
   mark('target', targetStart);
 

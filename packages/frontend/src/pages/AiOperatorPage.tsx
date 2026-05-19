@@ -70,7 +70,7 @@ interface ProposalResponse {
   schedule: {
     recommendedTime: string;
   };
-  compliance?: ComplianceBlock;  // ★ D170: Compliance Sub-agent (Haiku 4.5) 응답
+  compliance?: ComplianceBlock;  // ★ D170: Compliance Sub-agent 응답
   cost: {
     estimated: number;
     unitCost: number;
@@ -625,7 +625,7 @@ export default function AiOperatorPage() {
               </span>
             </div>
 
-            {/* ★ D170: Compliance Sub-agent (Haiku 4.5) 경고 표시 — high/medium만 노출, low는 ShieldCheck 작은 표시 */}
+            {/* ★ D170: Compliance Sub-agent 경고 표시 — high/medium만 노출, low는 ShieldCheck 작은 표시 */}
             {proposal.compliance && (
               <>
                 {(proposal.compliance.riskLevel !== 'low' || !proposal.compliance.passed) && (
@@ -639,13 +639,6 @@ export default function AiOperatorPage() {
                       <p className={`text-sm font-semibold ${proposal.compliance.riskLevel === 'high' ? 'text-rose-100' : 'text-amber-100'}`}>
                         Compliance Check · {proposal.compliance.riskLevel === 'high' ? '발송 차단 권장' : '검토 필요'}
                       </p>
-                      <span className={`ml-auto text-[10px] font-mono uppercase tracking-wider px-2 py-0.5 rounded-full ${
-                        proposal.compliance.riskLevel === 'high'
-                          ? 'bg-rose-500/30 text-rose-100'
-                          : 'bg-amber-500/30 text-amber-100'
-                      }`}>
-                        Haiku 4.5
-                      </span>
                     </div>
                     {proposal.compliance.warnings.length > 0 && (
                       <ul className="text-xs text-white/75 space-y-1 mb-2">
@@ -667,7 +660,6 @@ export default function AiOperatorPage() {
                   <div className="mb-5 flex items-center gap-2 px-3 py-2 rounded-lg bg-emerald-500/10 border border-emerald-400/30 text-xs">
                     <ShieldCheck className="w-3.5 h-3.5 text-emerald-300" />
                     <span className="text-emerald-200">Compliance Check 통과</span>
-                    <span className="ml-auto text-[10px] font-mono uppercase tracking-wider text-emerald-300/60">Haiku 4.5</span>
                   </div>
                 )}
               </>

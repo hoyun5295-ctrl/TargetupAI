@@ -35,17 +35,14 @@ export async function callAIWithFallback(params: {
   //   활성 시 temperature는 1로 강제 (Anthropic API 제약). 호출부에서 reasoning trace 노출 가능.
   thinking?: boolean;
   thinkingBudget?: number;  // 기본 5000 tokens
-  // ★ D170 (2026-05-19) Braze급 SaaS Step 0 — Multi-Agent 3 모델 mix:
-  //   - 'sonnet' (기본): 일반 sub-agent
-  //   - 'opus': Orchestrator (1M ctx, 30일 history + sub-agent 통합)
-  //   - 'haiku': Compliance/분류 sub-agent (빠른 검수)
-  model?: 'sonnet' | 'opus' | 'haiku';
+  // ★ D170+ (2026-05-19) Harold 명시 — 모델 2분리:
+  //   - 'sonnet' (기본, 미박힘 시): 기존 한줄로AI 흐름 (Sonnet 4.6) — 절대 변경 X
+  //   - 'opus': AI Operator 신메뉴 전용 (Opus 4.7)
+  model?: 'sonnet' | 'opus';
 }): Promise<string> {
-  // 1차: Claude (모델 선택: sonnet/opus/haiku)
+  // 1차: Claude (모델 선택: sonnet/opus)
   try {
-    const modelName = params.model === 'opus' ? AI_MODELS.opus
-                    : params.model === 'haiku' ? AI_MODELS.haiku
-                    : AI_MODELS.claude;
+    const modelName = params.model === 'opus' ? AI_MODELS.opus : AI_MODELS.claude;
     const requestParams: any = {
       model: modelName,
       max_tokens: params.maxTokens,
@@ -89,14 +86,21 @@ export async function callAIWithFallback(params: {
     console.warn(`[AI] Claude 실패 (${claudeError.status || claudeError.message}) → gpt-5.1 fallback`);
   }
 
-  // 2차: gpt-5.1 fallback
+  // 2차: GPT fallback
+  // ★ D170+ (Harold 명시 2026-05-19): AI Operator 호출(model: 'opus'/'haiku')과 기존 흐름의 fallback 모델 분리
+  //   - AI Operator: gpt-5.5
+  //   - 기존 한줄로AI 흐름 (sonnet 또는 model 미박힘): gpt-5.4-mini — 절대 건드리지 말 것
   if (!process.env.OPENAI_API_KEY) {
     throw new Error('Claude 실패 + OPENAI_API_KEY 미설정');
   }
 
+  const fallbackModel = params.model === 'opus'
+    ? AI_MODELS.gptOperator  // AI Operator: gpt-5.5
+    : AI_MODELS.gpt;         // 기존 한줄로AI: gpt-5.4-mini
+
   try {
     const gptResponse = await openai.chat.completions.create({
-      model: AI_MODELS.gpt,
+      model: fallbackModel,
       max_completion_tokens: params.maxTokens,
       temperature: params.temperature,
       messages: [
@@ -105,10 +109,10 @@ export async function callAIWithFallback(params: {
       ],
     });
     const text = gptResponse.choices[0]?.message?.content || '';
-    console.log('[AI] gpt-5.1 fallback 성공');
+    console.log(`[AI] GPT fallback 성공 · model=${fallbackModel}`);
     return text;
   } catch (gptError: any) {
-    console.error(`[AI] gpt-5.1도 실패 (${gptError.message})`);
+    console.error(`[AI] GPT도 실패 · model=${fallbackModel} · ${gptError.message}`);
     throw new Error('AI 서비스 일시 장애 (Claude + GPT 모두 실패)');
   }
 }
@@ -893,8 +897,8 @@ export async function generateMessages(
     // ★ D120: 고객사 최근 발송 문안 (few-shot 학습용)
     recentMessages?: string[];
     // ★ D170+ (2026-05-19) Harold 명시 — AI Operator 메시지 = Opus 4.7로 격상:
-    //   기본 호출(/generate-message)은 sonnet, AI Operator는 'opus' 전달.
-    model?: 'sonnet' | 'opus' | 'haiku';
+    //   기본 호출(/generate-message)은 model 미박힘 → default sonnet. AI Operator는 'opus' 전달.
+    model?: 'sonnet' | 'opus';
   }
 ): Promise<AIRecommendResult> {
   if (!process.env.ANTHROPIC_API_KEY) {
@@ -1227,7 +1231,10 @@ export async function recommendTarget(
   companyId: string,
   objective: string,
   customerStats: any,
-  companyInfo?: { business_type?: string; reject_number?: string; brand_name?: string; company_name?: string; customer_schema?: any; has_kakao_profile?: boolean }
+  companyInfo?: { business_type?: string; reject_number?: string; brand_name?: string; company_name?: string; customer_schema?: any; has_kakao_profile?: boolean },
+  // ★ D170+ (2026-05-19) Harold 명시 — AI Operator Target Sub-agent도 Opus 4.7.
+  //   기본 호출(/recommend-target route)은 model 미박힘 → default sonnet 사용 (한줄로 일반 AI 흐름 영향 0).
+  options?: { model?: 'sonnet' | 'opus' }
 ): Promise<{
   filters: any;
   reasoning: string;
@@ -1396,6 +1403,7 @@ ${varCatalogPrompt}
       userMessage,
       maxTokens: 1024,
       temperature: 0.3,
+      model: options?.model, // ★ D170+ (Harold 명시): AI Operator 호출 시 'opus' 전달, 기본 호출(/recommend-target)은 default sonnet
     });
     
     let jsonStr = text;
