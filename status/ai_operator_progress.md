@@ -2,7 +2,8 @@
 
 > 한줄로AI Braze급 SaaS 고도화 — Step 0 (D163~D174) 누적 작업 내역 + 잔여 작업.
 > 매 세션 시작 시 이 문서 정독 → 잔여 작업 진입.
-> ★ **공식 기능 정의서:** [`docs/AI_OPERATOR_기능정의서.md`](../docs/AI_OPERATOR_기능정의서.md) — 살아있는 문서. 신규 기능/변경/영구 원칙은 본 정의서 § 13 변경 이력에 박음. 사외 소개서(.docx)는 본 정의서를 그대로 변환.
+> ★ **공식 기능 정의서:** [`docs/AI_OPERATOR_기능정의서.md`](../docs/AI_OPERATOR_기능정의서.md) — 살아있는 문서 (현재 박힌 기능). 신규 기능/변경/영구 원칙은 본 정의서 § 13 변경 이력에 박음. 사외 소개서(.docx)는 본 정의서를 그대로 변환.
+> ★ **BEYOND BRAZE 비전:** [`docs/한줄로_BEYOND_BRAZE_비전.md`](../docs/한줄로_BEYOND_BRAZE_비전.md) — 체어맨 + CTO 전용 살아있는 비전 문서 (대외 공개 X). Manifesto + 영구 원칙 5건 + 8축 차별화 + Continuous Operator + 음성 AI + 5년 시야 + 압축 로드맵 D176~D200. **압축 로드맵 진입 시 본 문서 정독 필수.**
 > 상세 메모리: `memory/project_d162_5_braze_grade_roadmap_kickoff.md` + `memory/feedback_ai_operator_model_isolation.md` + `memory/project_d172_cdp_kickoff.md` + `memory/project_d173_d174_provider_and_next_action.md`
 
 ---
@@ -29,6 +30,8 @@
 | **D174** | **Step 1 Next Action Advisor 핵심 ("1회성 발송툴 탈출")** utils/next-action-advisor.ts (CT-25 buildPerformanceSnapshot + recommendNextAction Opus 4.7) + POST /api/ai/operator/next-action + PerformancePage(30일 성과 + AI 추천 + AI Operator prefill 흐름) + 성과리포트 메뉴 + /performance 라우트 | ✓ 완료 | 빌드 대기 |
 | **D175** | **공식 기능 정의서** `docs/AI_OPERATOR_기능정의서.md` (v1.0.4, 살아있는 문서) + CLAUDE.md 필수 참조 매트릭스 박음 + ai_operator_progress.md 정의서 연결 | ✓ 완료 | 문서 |
 | **D175-A** | **Web Push + In-app Message 채널 (SDK 확장)** Harold 명시 + 영업팀장 의견 정합. 4 테이블 + utils CT-26 web-push(VAPID) + CT-27 inapp-message + routes 9 endpoint + SDK v0.2.0(push/inapp/service-worker 3 모듈) + PushCampaignsPage + InAppMessagesPage + 메뉴 2건. 환경변수 3건 VAPID_* + web-push 패키지 | ✓ 완료 | 빌드 + DB SQL 4건 + 환경변수 + npm install 대기 |
+| **D175-B** | **BEYOND BRAZE 비전 문서 신설** Harold 명시 "글로벌 최강 마테크 + 압도적 AI Operator + 누구도 못 따라하는 솔루션". docs/한줄로_BEYOND_BRAZE_비전.md v0.1 (12 섹션 Manifesto + 영구 원칙 + Braze 분석 + 8축 차별화 + Continuous Operator 사용자 동의 흐름 + 음성 AI 정직 분석 + 압축 로드맵 + 5년 시야 + KPI) | ✓ 완료 | 문서 |
+| **D176** | **Continuous Agentic Operator (사용자 동의 흐름)** 비전 압축 로드맵 1순위 박힘. DB 2 테이블 + companies ALTER 3 + utils CT-28(Zero-Count 영구 원칙 정합 + ENT 자동 실행 임계값 + 5분 worker) + routes 7 endpoint + ContinuousOperatorPage(2 탭) + 메뉴 + 라우트. AI 단독 실행 X 영구 원칙 100% 정합 | ✓ 완료 | 빌드 + DB SQL 3건 대기 |
 
 ---
 

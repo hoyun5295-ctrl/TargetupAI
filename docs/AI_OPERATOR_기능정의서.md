@@ -1,7 +1,7 @@
 # 한줄로 AI Operator — 기능 정의서
 
 **서비스명:** 한줄로 (TargetUp) AI Operator
-**버전:** v1.0.4 (D170~D175-A 누적)
+**버전:** v1.0.5 (D170~D176 누적)
 **최종 갱신일:** 2026-05-19
 **대상:** ENTERPRISE / BUSINESS 베타 운영
 **도메인:** hanjul.ai (서비스), app.hanjul.ai (고객사 관리자), sys.hanjullo.com (슈퍼관리자)
@@ -204,6 +204,12 @@
 - Compliance Check 카드에 "HAIKU 4.5" / "Opus 4.7" 박지 X (사용자에게 모델명 노출 시 비교 + 불신 + 모델 변경 시 사용자 영향)
 - 통과/경고/위험만 표시
 
+### 6-5. 미래 로드맵/마일스톤 사용자 노출 금지 (D177-fix Harold 명시 영구 원칙)
+
+- AiOperatorPage / DashboardPage 등 사용자 페이지에 D-시리즈 마일스톤 + 9-Phase 로드맵 + 진행률 카드 박지 X
+- 직원/외부 노출 시 영업/보안/사용자 혼란 위험 (예: "곧 출시" 약속 = 미이행 시 신뢰 파괴 / 경쟁사 노출 = 차별화 자산 유출)
+- 이미 박힌 기능만 사용자에게 표시 / 미래 로드맵은 비전 문서(`docs/한줄로_BEYOND_BRAZE_비전.md`, 체어맨+CTO 전용) 박음
+
 ---
 
 ## 7. 데이터 인프라 — 한줄로 CDP (D172)
@@ -385,6 +391,7 @@ interface IProviderAdapter {
 | v1.0.2 | 2026-05-19 (D173) | Backend/Frontend | Provider Adapter 일반화 (CT-24) + cafe24Adapter + skeleton 5종 + Provider 매트릭스 UI |
 | v1.0.3 | 2026-05-19 (D174) | Backend/Frontend | Step 1 Next Action Advisor (CT-25 Opus 4.7) + PerformancePage + 성과리포트 메뉴 + AiOperator prefill |
 | **v1.0.4** | 2026-05-19 (D175-A) | Backend/Frontend/SDK | **Web Push + In-app Message 채널** — DB 4 신규 테이블(cdp_push_subscriptions + cdp_push_campaigns + cdp_inapp_messages + cdp_inapp_impressions) + utils CT-26 web-push(VAPID + sendNotification + 410/404 자동 expire) + CT-27 inapp-message(CRUD + active 매칭 + frequency 제어 + 트래킹) + routes/cdp.ts push+inapp endpoint 9건 + SDK `@hanjullo/sdk` v0.2.0 (push 모듈 + inapp 모듈 + service-worker.ts) + PushCampaignsPage + InAppMessagesPage + DashboardHeader 메뉴 2건 (회사 admin only). VAPID 환경변수 3건 + `web-push` 패키지 의존성 추가 |
+| **v1.0.5** | 2026-05-19 (D176) | Backend/Frontend | **Continuous Agentic Operator — 사용자 동의 흐름** (BEYOND BRAZE 비전 압축 로드맵 1순위) — DB 2 신규 테이블(continuous_operators + operator_proposals) + companies ALTER 3 컬럼 (cdp_auto_execute_enabled/max_recipients/max_cost_krw) + utils CT-28 continuous-operator(createOperator/listOperators/updateOperator/archiveOperator/generateProposalForOperator + Zero-Count 영구 원칙 정합 0건 시 제안서 박지 X + ENT 자동 실행 임계값 체크 + 7일 후 자동 만료 + 5분 주기 worker scheduler) + routes/ai.ts Operator CRUD 4 endpoint + run-now + Proposals 3 endpoint(목록/승인/거부) + ContinuousOperatorPage(2 탭 대기 제안서/영구 운영 목록 + 신규 모달 + 상세 expand + 영구 원칙 안내) + DashboardHeader "AI 영구운영" 메뉴 + /continuous-operator 라우트. **AI 단독 발송 X 영구 원칙 100% 정합** — 모든 제안서는 사용자 승인 후에만 발송 (ENT 자동 실행 옵션은 default OFF + 1,000건/5만원/low risk/비광고 임계값 통과 시만) |
 
 ---
 

@@ -137,31 +137,9 @@ const ENGINE_CARDS: EngineCard[] = [
   { icon: Brain, gradient: 'from-amber-400 to-rose-500', title: 'AI Operator', description: '6 sub-agent 협업 + 회사별 메모리 학습' },
 ];
 
-type MilestoneStatus = 'done' | 'next' | 'planned';
-
-interface SessionMilestone {
-  d: string;
-  title: string;
-  status: MilestoneStatus;
-}
-
-const SESSION_MILESTONES: SessionMilestone[] = [
-  { d: 'D163', title: '베타 안내 시스템 인프라 (헤더 메뉴 + 모달 + 게이팅)', status: 'done' },
-  { d: 'D164', title: '진입 hero + 자연어 입력 + AI 통합 제안서 endpoint', status: 'done' },
-  { d: 'D165', title: 'AI 제안서 카드 정합 디자인 강화', status: 'done' },
-  { d: 'D166', title: '승인 → 발송 → 결과 reactive 흐름 + 발송 시점 안전장치', status: 'done' },
-  { d: 'D167', title: 'Prompt Caching (callAIWithFallback 강화, 90% 비용 절감)', status: 'done' },
-  { d: 'D168', title: 'Tool Use SQL Loop (countFilteredCustomers — AI 추정 → DB 실제)', status: 'done' },
-  { d: 'D169', title: 'Extended Thinking (Opus 4.7 adaptive 호환)', status: 'done' },
-  { d: 'D170', title: '회사별 메모리 + Multi-Agent Orchestrator (6 Sub-agent)', status: 'done' },
-  { d: 'D171', title: 'Step 0 통합 검증 + ENTERPRISE 베타 운영 진입', status: 'next' },
-];
-
-const STATUS_CONFIG: Record<MilestoneStatus, { icon: typeof Check; bg: string; ring: string; text: string; label: string }> = {
-  done:    { icon: Check, bg: 'bg-gradient-to-br from-emerald-400 to-teal-500', ring: 'ring-emerald-400/30', text: 'text-emerald-300', label: '완료' },
-  next:    { icon: Sparkles, bg: 'bg-gradient-to-br from-amber-400 to-fuchsia-500', ring: 'ring-fuchsia-400/40', text: 'text-amber-200', label: '다음 진행' },
-  planned: { icon: Clock, bg: 'bg-white/10', ring: 'ring-white/10', text: 'text-white/40', label: '예정' },
-};
+// ★ D177-fix (2026-05-19): SESSION_MILESTONES + STATUS_CONFIG 영구 제거.
+//   Harold 명시 — "이미 작업완료한건 언제 적용? / 굳이 업그레이드 보여줄 필요 X / 직원들한테 방향성 잡음 명시 X".
+//   직원/외부 노출 시 미래 로드맵 = 영업/보안/사용자 혼란 위험. 진행률 카드 + 9 세션 로드맵 영역 함께 제거.
 
 // 결과 카드 액센트
 interface AccentTokens {
@@ -493,9 +471,6 @@ export default function AiOperatorPage() {
       void handleSubmit();
     }
   };
-
-  const doneCount = SESSION_MILESTONES.filter((m) => m.status === 'done').length;
-  const progress = Math.round((doneCount / SESSION_MILESTONES.length) * 100);
 
   const showAbout = !loading && !proposal;
 
@@ -1113,30 +1088,9 @@ export default function AiOperatorPage() {
         )}
 
         {/* ============= About (입력 전만 표시) ============= */}
+        {/* ★ D177-fix: 진행률 카드 영구 제거 (Harold 명시 — 업그레이드 노출 X / 방향성 이미 잡음) */}
         {showAbout && (
           <>
-            {/* 진행률 카드 */}
-            <div className="max-w-3xl mx-auto mb-12 p-6 rounded-2xl bg-white/5 border border-white/10 backdrop-blur-xl">
-              <div className="flex items-center justify-between mb-3">
-                <div>
-                  <h3 className="text-white font-semibold text-sm">Step 0 · Operations Foundation</h3>
-                  <p className="text-xs text-white/50 mt-0.5">9-Phase 분할 · Enterprise AI Marketing Operations 아키텍처 구축</p>
-                </div>
-                <div className="text-right">
-                  <div className="text-2xl font-bold bg-gradient-to-r from-amber-300 to-fuchsia-400 bg-clip-text text-transparent">
-                    {progress}%
-                  </div>
-                  <div className="text-xs text-white/40">{doneCount} / {SESSION_MILESTONES.length}</div>
-                </div>
-              </div>
-              <div className="h-2 bg-white/10 rounded-full overflow-hidden">
-                <div
-                  className="h-full bg-gradient-to-r from-amber-400 via-fuchsia-400 to-indigo-400 rounded-full shadow-lg shadow-fuchsia-500/50 transition-all duration-700"
-                  style={{ width: `${progress}%` }}
-                />
-              </div>
-            </div>
-
             {/* 7 엔진 카드 */}
             <div className="mb-14">
               <p className="text-[10px] font-semibold tracking-[0.28em] text-white/40 mb-1.5 uppercase">Core AI Engines</p>
@@ -1161,41 +1115,7 @@ export default function AiOperatorPage() {
               </div>
             </div>
 
-            {/* 9 세션 로드맵 */}
-            <div className="mb-14">
-              <p className="text-[10px] font-semibold tracking-[0.28em] text-white/40 mb-1.5 uppercase">Development Roadmap</p>
-              <h2 className="text-xl font-bold mb-1.5 text-white">Step 0 · 9-Phase Delivery</h2>
-              <p className="text-sm text-white/50 mb-6">Phase 단위 분할 출시 · 각 단계 tsc 0 errors + atomic safe-build 검증 통과 후 진입</p>
-              <div className="space-y-2">
-                {SESSION_MILESTONES.map((m) => {
-                  const cfg = STATUS_CONFIG[m.status];
-                  const Icon = cfg.icon;
-                  return (
-                    <div
-                      key={m.d}
-                      className={`flex items-center gap-4 p-4 rounded-xl border ${
-                        m.status === 'done' ? 'bg-white/[0.07] border-emerald-400/20' :
-                        m.status === 'next' ? 'bg-gradient-to-r from-amber-400/10 to-fuchsia-400/10 border-fuchsia-400/30' :
-                        'bg-white/[0.02] border-white/5'
-                      } ${cfg.ring} transition-all`}
-                    >
-                      <div className={`flex-shrink-0 w-9 h-9 rounded-full flex items-center justify-center ring-2 ${cfg.ring} ${cfg.bg}`}>
-                        <Icon className={`w-4 h-4 ${m.status === 'planned' ? 'text-white/40' : 'text-white'}`} />
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2 mb-0.5">
-                          <span className={`text-xs font-mono font-bold ${cfg.text}`}>{m.d}</span>
-                          <span className={`text-[10px] uppercase tracking-wider ${cfg.text}`}>· {cfg.label}</span>
-                        </div>
-                        <p className={`text-sm ${m.status === 'planned' ? 'text-white/40' : 'text-white/85'}`}>
-                          {m.title}
-                        </p>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
+            {/* ★ D177-fix: 9 세션 로드맵 영구 제거 (Harold 명시 — 미래 로드맵 직원/외부 노출 X) */}
 
             {/* 출시 안내 */}
             <div className="max-w-3xl mx-auto p-8 rounded-2xl bg-gradient-to-br from-white/10 to-white/5 border border-white/10 text-center backdrop-blur-xl">

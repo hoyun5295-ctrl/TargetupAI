@@ -14,6 +14,17 @@ import { getCompanyCosts } from '../config/defaults';
 import { orchestrate, orchestrateWithAI } from '../services/ai-orchestrator';
 // ★ D174 (2026-05-19): Step 1 Next Action Advisor — Opus 4.7
 import { buildPerformanceSnapshot, recommendNextAction } from '../utils/next-action-advisor';
+// ★ D176 (2026-05-19): Continuous Agentic Operator (사용자 동의 흐름)
+import {
+  createOperator,
+  listOperators,
+  updateOperator,
+  archiveOperator,
+  listProposals,
+  approveProposal,
+  rejectProposal,
+  generateProposalForOperator,
+} from '../utils/continuous-operator';
 
 
 // ★ D79: 인라인 래퍼 제거 → CT-01 buildFilterWhereClauseCompat 직접 사용
@@ -1011,6 +1022,176 @@ router.post('/operator/next-action', async (req: Request, res: Response) => {
   } catch (err: any) {
     console.error('[AI Operator] next-action 오류:', err);
     return res.status(500).json({ success: false, error: err?.message || '다음 캠페인 추천 생성 실패' });
+  }
+});
+
+// ============================================================
+// ★ D176 (2026-05-19) Continuous Agentic Operator — 사용자 동의 흐름
+//   AI는 매일 회고 + 제안서 박음 / 실행은 항상 사용자 동의 후
+//   ENT 자동 실행 옵션 default OFF + 1,000건/5만원/low risk 임계값
+// ============================================================
+
+// Operator CRUD
+router.post('/operator/continuous', async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    const userId = req.user?.userId;
+    const userType = req.user?.userType;
+    if (!companyId || !userId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+    if (userType !== 'company_admin') {
+      return res.status(403).json({ success: false, error: 'Continuous Operator 신설은 회사 관리자만 가능합니다.' });
+    }
+
+    const planCtx = await loadPlanContext(companyId);
+    if (!planCtx) return res.status(404).json({ success: false, error: '회사 정보를 찾을 수 없습니다.' });
+    if (!isBetaAccessAllowed(planCtx)) {
+      return res.status(403).json({ success: false, error: '본 기능은 엔터프라이즈 베타 운영 중입니다.', code: 'BETA_GATE' });
+    }
+
+    const { name, objective, schedule, schedule_time } = req.body;
+    const operator = await createOperator({
+      companyId,
+      createdBy: userId,
+      name: String(name || '').slice(0, 100),
+      objective: String(objective || ''),
+      schedule,
+      scheduleTime: schedule_time,
+    });
+    return res.json({ success: true, operator });
+  } catch (err: any) {
+    console.error('[Operator continuous POST] 오류:', err);
+    return res.status(500).json({ success: false, error: err?.message || 'Continuous Operator 신설 실패' });
+  }
+});
+
+router.get('/operator/continuous', async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+    const operators = await listOperators(companyId);
+    return res.json({ success: true, operators });
+  } catch (err: any) {
+    console.error('[Operator continuous GET] 오류:', err);
+    return res.status(500).json({ success: false, error: err?.message || '조회 실패' });
+  }
+});
+
+router.put('/operator/continuous/:id', async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    const userType = req.user?.userType;
+    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+    if (userType !== 'company_admin') {
+      return res.status(403).json({ success: false, error: '수정은 회사 관리자만 가능합니다.' });
+    }
+    const { name, objective, schedule, schedule_time, status } = req.body;
+    const operator = await updateOperator(companyId, req.params.id, {
+      name, objective, schedule, scheduleTime: schedule_time, status,
+    });
+    if (!operator) return res.status(404).json({ success: false, error: 'Operator를 찾을 수 없습니다.' });
+    return res.json({ success: true, operator });
+  } catch (err: any) {
+    console.error('[Operator continuous PUT] 오류:', err);
+    return res.status(500).json({ success: false, error: err?.message || '수정 실패' });
+  }
+});
+
+router.delete('/operator/continuous/:id', async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    const userType = req.user?.userType;
+    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+    if (userType !== 'company_admin') {
+      return res.status(403).json({ success: false, error: '삭제는 회사 관리자만 가능합니다.' });
+    }
+    const ok = await archiveOperator(companyId, req.params.id);
+    if (!ok) return res.status(404).json({ success: false, error: 'Operator를 찾을 수 없습니다.' });
+    return res.json({ success: true });
+  } catch (err: any) {
+    console.error('[Operator continuous DELETE] 오류:', err);
+    return res.status(500).json({ success: false, error: err?.message || '삭제 실패' });
+  }
+});
+
+// 수동 제안서 생성 (테스트/즉시 실행)
+router.post('/operator/continuous/:id/run-now', async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    const userType = req.user?.userType;
+    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+    if (userType !== 'company_admin') {
+      return res.status(403).json({ success: false, error: '수동 실행은 회사 관리자만 가능합니다.' });
+    }
+    // 권한 검증 — operator가 본 회사 소유인지
+    const owner = await query(
+      `SELECT id FROM continuous_operators WHERE id = $1::uuid AND company_id = $2::uuid`,
+      [req.params.id, companyId]
+    );
+    if (owner.rows.length === 0) return res.status(404).json({ success: false, error: 'Operator를 찾을 수 없습니다.' });
+    const proposal = await generateProposalForOperator(req.params.id);
+    if (!proposal) {
+      return res.json({ success: true, proposal: null, message: '0건 매칭 또는 생성 실패 — 제안서가 박히지 않았습니다.' });
+    }
+    return res.json({ success: true, proposal });
+  } catch (err: any) {
+    console.error('[Operator run-now] 오류:', err);
+    return res.status(500).json({ success: false, error: err?.message || '제안서 생성 실패' });
+  }
+});
+
+// Proposals — 사용자 검토/승인/거부
+router.get('/operator/proposals', async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+    const status = (req.query.status as string) || 'pending';
+    const validStatuses = ['pending', 'approved', 'rejected', 'auto_executed', 'expired', 'all'];
+    const proposals = await listProposals(
+      companyId,
+      validStatuses.includes(status) ? (status as any) : 'pending',
+      parseInt(String(req.query.limit || '50')) || 50,
+    );
+    return res.json({ success: true, proposals });
+  } catch (err: any) {
+    console.error('[Proposals GET] 오류:', err);
+    return res.status(500).json({ success: false, error: err?.message || '조회 실패' });
+  }
+});
+
+router.post('/operator/proposals/:id/approve', async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    const userId = req.user?.userId;
+    const userType = req.user?.userType;
+    if (!companyId || !userId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+    if (userType !== 'company_admin') {
+      return res.status(403).json({ success: false, error: '승인은 회사 관리자만 가능합니다.' });
+    }
+    const result = await approveProposal(companyId, req.params.id, userId);
+    if (!result.ok) return res.status(400).json({ success: false, error: result.reason });
+    // 실제 발송은 frontend가 proposal.proposalJson을 가지고 /preview-recipients + /direct-send 흐름으로 박음
+    return res.json({ success: true, proposal: result.proposal });
+  } catch (err: any) {
+    console.error('[Proposals approve] 오류:', err);
+    return res.status(500).json({ success: false, error: err?.message || '승인 실패' });
+  }
+});
+
+router.post('/operator/proposals/:id/reject', async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    const userId = req.user?.userId;
+    const userType = req.user?.userType;
+    if (!companyId || !userId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+    if (userType !== 'company_admin') {
+      return res.status(403).json({ success: false, error: '거부는 회사 관리자만 가능합니다.' });
+    }
+    const ok = await rejectProposal(companyId, req.params.id, userId);
+    if (!ok) return res.status(400).json({ success: false, error: 'pending 상태가 아니거나 권한이 없는 제안서입니다.' });
+    return res.json({ success: true });
+  } catch (err: any) {
+    console.error('[Proposals reject] 오류:', err);
+    return res.status(500).json({ success: false, error: err?.message || '거부 실패' });
   }
 });
 

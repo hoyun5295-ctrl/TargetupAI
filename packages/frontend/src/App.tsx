@@ -28,6 +28,8 @@ import PerformancePage from './pages/PerformancePage';
 // ★ D175-A (2026-05-19): Web Push + In-app Message 채널
 import PushCampaignsPage from './pages/PushCampaignsPage';
 import InAppMessagesPage from './pages/InAppMessagesPage';
+// ★ D176 (2026-05-19): Continuous Agentic Operator (사용자 동의 흐름)
+import ContinuousOperatorPage from './pages/ContinuousOperatorPage';
 
 // ★ 세션 타이머 Context — 헤더 등에서 남은 시간 표시용
 interface SessionTimerContextType {
@@ -292,6 +294,16 @@ function App() {
           element={
             <PrivateRoute allowedTypes={['company_admin']}>
               <InAppMessagesPage />
+            </PrivateRoute>
+          }
+        />
+
+        {/* ★ D176 (2026-05-19): Continuous Agentic Operator — BUSINESS+ 베타 */}
+        <Route
+          path="/continuous-operator"
+          element={
+            <PrivateRoute allowedTypes={['company_admin', 'company_user']}>
+              <ContinuousOperatorPage />
             </PrivateRoute>
           }
         />

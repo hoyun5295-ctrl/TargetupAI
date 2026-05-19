@@ -47,6 +47,8 @@ import { startTrialDowngradeWorker } from './utils/trial-downgrade-worker';
 import { startCampaignSyncWorker } from './utils/campaign-sync-worker';
 // ★ D153 (2026-05-13): MySQL 진실 원천 환불 sweep 워커 (5분 주기, PG fail_count 의존 X 뿌리뽑기)
 import { startMysqlRefundSweeper } from './utils/mysql-refund-sweeper';
+// ★ D176 (2026-05-19): Continuous Agentic Operator — 매일 09:00 KST 활성 Operator 제안서 박는 worker (5분 주기 due check)
+import { startContinuousOperatorScheduler } from './utils/continuous-operator';
 
 // 공용 관리 라우트 (슈퍼관리자 + 고객사관리자)
 import manageUsersRoutes from './routes/manage-users';
@@ -225,6 +227,10 @@ app.listen(PORT, () => {
   //   balance_transactions 회계 진실 + MySQL status_code 직접 카운트로 차액 환불 보정
   //   기존 syncCampaignResults가 `target > success+fail` 조건으로 SELECT 누락된 캠페인까지 sweep
   startMysqlRefundSweeper();
+
+  // ★ D176 (2026-05-19): Continuous Operator — 5분 주기 due Operator 체크 + 매일 09:00 KST 제안서 박음
+  //   AI 단독 실행 X 영구 원칙 — 제안서만 박고 사용자 승인 대기. ENT 자동 실행 옵션은 default OFF + 임계값 통과 시만
+  startContinuousOperatorScheduler();
 });
 
 export default app;

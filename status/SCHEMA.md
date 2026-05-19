@@ -1647,6 +1647,111 @@ VAPID_SUBJECT=mailto:admin@hanjul.ai
 cd /home/administrator/targetup-app/packages/backend && npm install web-push @types/web-push
 ```
 
+---
+
+## D176 — Continuous Agentic Operator (사용자 동의 흐름) (2026-05-19)
+
+> ★ 한줄로 BEYOND BRAZE 비전 압축 로드맵 1순위 박힘.
+> ★ AI는 매일 회고 + 제안서 박음 / 실행은 항상 사용자 동의 후 (Harold 영구 원칙 #1 정합).
+> ★ ENT 자동 실행 옵션 (default OFF) — 1,000건/5만원/low risk 임계값만 허용.
+
+### continuous_operators (영구 캠페인 목표) — D176 신규
+
+| 컬럼 | 타입 | 비고 |
+|------|------|------|
+| id | uuid PK | |
+| company_id | uuid FK | |
+| created_by | uuid FK → users | |
+| name | varchar(100) | 사용자가 박은 Operator 이름 ("VIP 재구매 영구 운영" 등) |
+| objective | text | 자연어 한 줄 ("VIP 재구매 유도 + 매출 30% 증대") |
+| schedule | varchar(20) DEFAULT 'daily' | daily / weekly / monthly |
+| schedule_time | varchar(10) DEFAULT '09:00' | KST 박을 시각 |
+| status | varchar(20) DEFAULT 'active' | active / paused / archived |
+| last_run_at | timestamptz | 마지막 제안서 생성 시각 |
+| next_run_at | timestamptz | 다음 제안서 생성 예약 시각 |
+| total_proposals | integer DEFAULT 0 | 누적 제안서 수 |
+| total_approved | integer DEFAULT 0 | 누적 승인 수 |
+| total_rejected | integer DEFAULT 0 | 누적 거부 수 |
+| total_auto_executed | integer DEFAULT 0 | 자동 실행 수 (ENT 옵션) |
+| created_at | timestamptz | |
+| updated_at | timestamptz | |
+- INDEX: company_id, status WHERE status='active'
+- INDEX: status, next_run_at WHERE status='active' (worker 호출용)
+
+### operator_proposals (AI 매일 제안서) — D176 신규
+
+| 컬럼 | 타입 | 비고 |
+|------|------|------|
+| id | uuid PK | |
+| operator_id | uuid FK → continuous_operators | |
+| company_id | uuid FK | |
+| proposal_json | jsonb | OrchestratorResult 통째로 박힘 (target/messages/channel/schedule/compliance/cost/performance/meta) |
+| recipient_count | integer | |
+| cost_estimate | integer | 원화 |
+| status | varchar(20) DEFAULT 'pending' | pending / approved / rejected / auto_executed / expired |
+| auto_executed | boolean DEFAULT false | ENT 자동 실행 임계값 통과 시 true |
+| auto_execute_reason | text | 자동 실행 시 임계값 검증 결과 |
+| reviewed_by | uuid FK → users | 사용자 승인/거부 시 |
+| reviewed_at | timestamptz | |
+| campaign_id | uuid FK → campaigns | 실행 시 박힘 |
+| expires_at | timestamptz | 7일 후 자동 만료 (사용자 미응답 시) |
+| created_at | timestamptz | |
+- INDEX: company_id, status, created_at DESC
+- INDEX: operator_id, created_at DESC
+- INDEX: status, expires_at WHERE status='pending' (만료 처리용)
+
+### D176 운영 환경 실행 SQL (Harold 직접)
+
+```sql
+-- 12. companies ALTER 3 컬럼 (ENT 자동 실행 옵션)
+ALTER TABLE companies ADD COLUMN IF NOT EXISTS cdp_auto_execute_enabled boolean NOT NULL DEFAULT false;
+ALTER TABLE companies ADD COLUMN IF NOT EXISTS cdp_auto_execute_max_recipients integer NOT NULL DEFAULT 1000;
+ALTER TABLE companies ADD COLUMN IF NOT EXISTS cdp_auto_execute_max_cost_krw integer NOT NULL DEFAULT 50000;
+
+-- 13. continuous_operators
+CREATE TABLE IF NOT EXISTS continuous_operators (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  company_id uuid NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+  created_by uuid REFERENCES users(id) ON DELETE SET NULL,
+  name varchar(100) NOT NULL,
+  objective text NOT NULL,
+  schedule varchar(20) NOT NULL DEFAULT 'daily',
+  schedule_time varchar(10) NOT NULL DEFAULT '09:00',
+  status varchar(20) NOT NULL DEFAULT 'active',
+  last_run_at timestamptz,
+  next_run_at timestamptz,
+  total_proposals integer NOT NULL DEFAULT 0,
+  total_approved integer NOT NULL DEFAULT 0,
+  total_rejected integer NOT NULL DEFAULT 0,
+  total_auto_executed integer NOT NULL DEFAULT 0,
+  created_at timestamptz NOT NULL DEFAULT NOW(),
+  updated_at timestamptz NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_continuous_operators_active ON continuous_operators(company_id, status) WHERE status = 'active';
+CREATE INDEX IF NOT EXISTS idx_continuous_operators_next_run ON continuous_operators(status, next_run_at) WHERE status = 'active';
+
+-- 14. operator_proposals
+CREATE TABLE IF NOT EXISTS operator_proposals (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  operator_id uuid NOT NULL REFERENCES continuous_operators(id) ON DELETE CASCADE,
+  company_id uuid NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+  proposal_json jsonb NOT NULL,
+  recipient_count integer NOT NULL DEFAULT 0,
+  cost_estimate integer NOT NULL DEFAULT 0,
+  status varchar(20) NOT NULL DEFAULT 'pending',
+  auto_executed boolean NOT NULL DEFAULT false,
+  auto_execute_reason text,
+  reviewed_by uuid REFERENCES users(id) ON DELETE SET NULL,
+  reviewed_at timestamptz,
+  campaign_id uuid REFERENCES campaigns(id) ON DELETE SET NULL,
+  expires_at timestamptz NOT NULL DEFAULT NOW() + INTERVAL '7 days',
+  created_at timestamptz NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_proposals_company ON operator_proposals(company_id, status, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_proposals_operator ON operator_proposals(operator_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_proposals_expires ON operator_proposals(status, expires_at) WHERE status = 'pending';
+```
+
 ### D172 운영 환경 실행 SQL (Harold 직접 진행)
 
 ```sql

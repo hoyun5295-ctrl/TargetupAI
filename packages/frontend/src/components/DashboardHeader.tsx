@@ -128,6 +128,8 @@ export default function DashboardHeader({
     { label: '자사몰 연동', onClick: () => navigate('/cdp-settings'), color: 'beta', betaBadge: true, path: '/cdp-settings' },
     // ★ D174 (2026-05-19): 성과 리포트 + AI 다음 캠페인 — BUSINESS+ 베타
     { label: '성과리포트', onClick: () => navigate('/performance'), color: 'beta', betaBadge: true, path: '/performance' },
+    // ★ D176 (2026-05-19): AI 영구 운영 (Continuous Operator) — BUSINESS+ 베타
+    { label: 'AI 영구운영', onClick: () => navigate('/continuous-operator'), color: 'beta', betaBadge: true, path: '/continuous-operator' },
     // ★ D175-A (2026-05-19): Web Push + In-app Message — BUSINESS+ 베타, 회사 admin only
     ...(isCompanyAdmin ? [
       { label: 'Web Push', onClick: () => navigate('/push-campaigns'), color: 'beta' as MenuColor, betaBadge: true, path: '/push-campaigns' },
