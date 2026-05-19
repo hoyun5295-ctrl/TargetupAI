@@ -2246,12 +2246,23 @@ const campaignData = {
         department={(user as any)?.department}
         isCompanyAdmin={user?.userType === 'company_admin'}
         planCode={planInfo?.plan_code}
-        onAiOperatorClick={() => {
-          // ★ D163: AI Operator 메뉴 클릭 — ENT/BUSINESS만 실제 진입, 그 외는 BetaFeatureModal
-          const code = planInfo?.plan_code;
-          if (code === 'ENTERPRISE' || code === 'BUSINESS') {
-            navigate('/ai-operator');
-          } else {
+        onAiOperatorClick={async () => {
+          // ★ D178 (2026-05-19) AI Operator 메뉴 클릭 — backend isAiOperatorAllowed 박은 결과 박음
+          //   ENV AI_OPERATOR_ALLOWED_USERS 박힘 시 본 list 박은 사용자만 진입, 그 외 모두 BetaFeatureModal
+          //   ENV 박지 X 시 기존 ENT/BUS 게이팅 (안전 default)
+          try {
+            const t = localStorage.getItem('token');
+            const res = await fetch('/api/ai/operator/access', {
+              headers: { Authorization: `Bearer ${t}` },
+            });
+            const data = await res.json();
+            if (data.success && data.allowed) {
+              navigate('/ai-operator');
+            } else {
+              setShowBetaModal(true);
+            }
+          } catch {
+            // 네트워크 실패 시 안전 default = BetaFeatureModal 박음
             setShowBetaModal(true);
           }
         }}

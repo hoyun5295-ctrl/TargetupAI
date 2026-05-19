@@ -9,7 +9,7 @@ import { getStoreScope } from '../utils/store-scope';
 import { buildFilterWhereClauseCompat } from '../utils/customer-filter';
 import { aggregateCampaignPerformance } from '../utils/stats-aggregation';
 import { formatDateValue, getOpt080Number } from '../utils/messageUtils';
-import { loadPlanContext, canUseFeature, requirePlanFeature, isBetaAccessAllowed } from '../utils/plan-guard';
+import { loadPlanContext, canUseFeature, requirePlanFeature, isBetaAccessAllowed, isAiOperatorAllowed } from '../utils/plan-guard';
 import { getCompanyCosts } from '../config/defaults';
 import { orchestrate, orchestrateWithAI } from '../services/ai-orchestrator';
 // ★ D174 (2026-05-19): Step 1 Next Action Advisor — Opus 4.7
@@ -820,9 +820,27 @@ router.post('/refine-message', requirePlanFeature('ai_messaging'), async (req: R
 });
 
 // ============================================================
+// ★ D178 (2026-05-19) — AI Operator 진입 가능 여부 (Harold 박힘 검증 단계 hoyun 박음)
+//   Frontend가 메뉴 클릭 시 본 endpoint 박음 → allowed=true 면 /ai-operator 진입, false 면 BetaFeatureModal 박음
+// ============================================================
+router.get('/operator/access', async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    if (!companyId) return res.json({ success: true, allowed: false });
+    const planCtx = await loadPlanContext(companyId);
+    if (!planCtx) return res.json({ success: true, allowed: false });
+    const allowed = isAiOperatorAllowed(planCtx, req.user);
+    return res.json({ success: true, allowed });
+  } catch (err: any) {
+    console.error('[AI Operator /access] 오류:', err);
+    return res.json({ success: true, allowed: false });
+  }
+});
+
+// ============================================================
 // ★ D164 (2026-05-19) Braze급 SaaS Step 0 — AI Operator 통합 제안서
 // ★ D170 (2026-05-19) Multi-Agent Orchestrator로 교체 — services/ai-orchestrator.ts에서 6 Sub-agent 협업
-// ENTERPRISE/BUSINESS 베타 게이팅 적용 (isBetaAccessAllowed CT-17 D163)
+// ★ D178 (2026-05-19) — isAiOperatorAllowed 박음 (ENV AI_OPERATOR_ALLOWED_USERS 박힘 시 본 list만, 박지 X 시 ENT/BUS)
 // ============================================================
 router.post('/operator/propose', async (req: Request, res: Response) => {
   try {
@@ -833,10 +851,10 @@ router.post('/operator/propose', async (req: Request, res: Response) => {
       return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
     }
 
-    // ★ CT-17 D163: 베타 게이팅 — ENTERPRISE/BUSINESS만 진입
+    // ★ CT-17 D163 / D178 박힘 검증 단계 — isAiOperatorAllowed (ENV AI_OPERATOR_ALLOWED_USERS 박힘 시 본 list만, 박지 X 시 기존 ENT/BUS 게이팅)
     const planCtx = await loadPlanContext(companyId);
     if (!planCtx) return res.status(404).json({ success: false, error: '회사 정보를 찾을 수 없습니다.' });
-    if (!isBetaAccessAllowed(planCtx)) {
+    if (!isAiOperatorAllowed(planCtx, req.user)) {
       return res.status(403).json({
         success: false,
         error: '본 기능은 엔터프라이즈 베타 운영 중입니다.',
@@ -919,10 +937,10 @@ router.post('/operator/preview-recipients', async (req: Request, res: Response) 
       return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
     }
 
-    // ★ CT-17 D163: 베타 게이팅
+    // ★ CT-17 D163 / D178 박힘 검증 단계 — isAiOperatorAllowed
     const ctx = await loadPlanContext(companyId);
     if (!ctx) return res.status(404).json({ success: false, error: '회사 정보를 찾을 수 없습니다.' });
-    if (!isBetaAccessAllowed(ctx)) {
+    if (!isAiOperatorAllowed(ctx, req.user)) {
       return res.status(403).json({ success: false, error: '본 기능은 엔터프라이즈 베타 운영 중입니다.', code: 'BETA_GATE' });
     }
 
@@ -1008,7 +1026,7 @@ router.post('/operator/next-action', async (req: Request, res: Response) => {
     // 베타 게이팅 (operator/propose와 동일)
     const planCtx = await loadPlanContext(companyId);
     if (!planCtx) return res.status(404).json({ success: false, error: '회사 정보를 찾을 수 없습니다.' });
-    if (!isBetaAccessAllowed(planCtx)) {
+    if (!isAiOperatorAllowed(planCtx, req.user)) {
       return res.status(403).json({ success: false, error: '본 기능은 엔터프라이즈 베타 운영 중입니다.', code: 'BETA_GATE' });
     }
 
@@ -1052,7 +1070,7 @@ router.post('/operator/continuous', async (req: Request, res: Response) => {
 
     const planCtx = await loadPlanContext(companyId);
     if (!planCtx) return res.status(404).json({ success: false, error: '회사 정보를 찾을 수 없습니다.' });
-    if (!isBetaAccessAllowed(planCtx)) {
+    if (!isAiOperatorAllowed(planCtx, req.user)) {
       return res.status(403).json({ success: false, error: '본 기능은 엔터프라이즈 베타 운영 중입니다.', code: 'BETA_GATE' });
     }
 
@@ -1244,7 +1262,7 @@ router.post('/operator/multi-goal/analyze', async (req: Request, res: Response) 
 
     const planCtx = await loadPlanContext(companyId);
     if (!planCtx) return res.status(404).json({ success: false, error: '회사 정보를 찾을 수 없습니다.' });
-    if (!isBetaAccessAllowed(planCtx)) {
+    if (!isAiOperatorAllowed(planCtx, req.user)) {
       return res.status(403).json({ success: false, error: '본 기능은 엔터프라이즈 베타 운영 중입니다.', code: 'BETA_GATE' });
     }
 

@@ -205,6 +205,31 @@ export function isBetaAccessAllowed(ctx: PlanContext): boolean {
   return ctx.planCode === 'ENTERPRISE' || ctx.planCode === 'BUSINESS';
 }
 
+/**
+ * ★ D178 (2026-05-19) — AI Operator 진입 게이팅 (Harold 명시 — 박힘 검증 단계는 본인만 박음).
+ *   ENV `AI_OPERATOR_ALLOWED_USERS` 박힘 시 본 list 박은 loginId/userId만 실제 진입.
+ *   그 외 모든 사용자 (ENT/BUS 포함) = BetaFeatureModal 박음 (기능 소개 한정).
+ *   ENV 박지 X 시 → 기존 ENT/BUS 게이팅 (isBetaAccessAllowed) 그대로 박음 (안전 default).
+ *
+ * @param ctx loadPlanContext 결과
+ * @param user req.user (auth 미들웨어 박은 영역 — JwtPayload는 loginId + userId 박음)
+ */
+export function isAiOperatorAllowed(
+  ctx: PlanContext,
+  user: { loginId?: string; userId?: string } | null | undefined
+): boolean {
+  const raw = process.env.AI_OPERATOR_ALLOWED_USERS || '';
+  const allowedList = raw.split(',').map((s) => s.trim().toLowerCase()).filter(Boolean);
+  if (allowedList.length === 0) {
+    // ENV 박지 X — 기존 베타 게이팅 박음 (안전 default, 다른 회사 영향 0건)
+    return isBetaAccessAllowed(ctx);
+  }
+  // ENV 박힘 — 본 list 박은 사용자만 박음 (등급/회사 무관, 그 외 모두 차단)
+  const loginId = (user?.loginId || '').toLowerCase();
+  const userId = (user?.userId || '').toLowerCase();
+  return allowedList.some((entry) => entry === loginId || entry === userId);
+}
+
 // ═══════════════════════════════════════════════════════════
 // 기능별 체크 — canUseFeature
 // ═══════════════════════════════════════════════════════════
