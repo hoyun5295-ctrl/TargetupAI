@@ -141,6 +141,24 @@ const ENGINE_CARDS: EngineCard[] = [
 //   Harold 명시 — "이미 작업완료한건 언제 적용? / 굳이 업그레이드 보여줄 필요 X / 직원들한테 방향성 잡음 명시 X".
 //   직원/외부 노출 시 미래 로드맵 = 영업/보안/사용자 혼란 위험. 진행률 카드 + 9 세션 로드맵 영역 함께 제거.
 
+// ★ D177-ux2 (2026-05-19): AI Operator 페이지 안 sub-module 박음 (Harold 명시 — 헤더 dropdown X / 페이지 안 메뉴 박음).
+interface SubModuleCard {
+  icon: typeof Target;
+  gradient: string;
+  label: string;
+  description: string;
+  path: string;
+  adminOnly?: boolean;
+}
+
+const SUB_MODULE_CARDS: SubModuleCard[] = [
+  { icon: Brain,        gradient: 'from-indigo-400 to-violet-500', label: 'AI 영구운영',    description: '매일 AI가 새 캠페인 제안 (사용자 승인 후 발송)',     path: '/continuous-operator' },
+  { icon: LineChart,    gradient: 'from-fuchsia-400 to-pink-500',  label: '성과리포트',     description: '30일 성과 분석 + AI 다음 캠페인 추천',              path: '/performance' },
+  { icon: Workflow,     gradient: 'from-emerald-400 to-teal-500',  label: '자사몰 연동',    description: '카페24 / Shopify / 메이크샵 회원·주문 자동 sync',  path: '/cdp-settings' },
+  { icon: Zap,          gradient: 'from-amber-400 to-orange-500',  label: 'Web Push',      description: '브라우저 푸시 알림 발송',                            path: '/push-campaigns',   adminOnly: true },
+  { icon: MessageSquare,gradient: 'from-rose-400 to-pink-500',     label: '인앱메시지',     description: '자사몰 안의 배너/모달 자동 표시',                    path: '/inapp-messages',   adminOnly: true },
+];
+
 // 결과 카드 액센트
 interface AccentTokens {
   iconBg: string;
@@ -1091,6 +1109,39 @@ export default function AiOperatorPage() {
         {/* ★ D177-fix: 진행률 카드 영구 제거 (Harold 명시 — 업그레이드 노출 X / 방향성 이미 잡음) */}
         {showAbout && (
           <>
+            {/* ★ D177-ux2: AI Operator 페이지 안 sub-module 박음 (Harold 명시 — 헤더 dropdown X / 페이지 안 메뉴) */}
+            <div className="mb-14">
+              <p className="text-[10px] font-semibold tracking-[0.28em] text-white/40 mb-1.5 uppercase">AI Operator Modules</p>
+              <h2 className="text-xl font-bold mb-1.5 text-white">함께 사용하는 AI 영역</h2>
+              <p className="text-sm text-white/50 mb-6">자연어 한 줄 진입 외에도 AI Operator 안에 박힌 영역 — 클릭 시 진입</p>
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {SUB_MODULE_CARDS
+                  .filter((card) => !card.adminOnly || (user as any)?.userType === 'company_admin')
+                  .map((card) => {
+                    const Icon = card.icon;
+                    return (
+                      <button
+                        key={card.label}
+                        onClick={() => navigate(card.path)}
+                        className="group relative p-5 rounded-2xl bg-white/[0.07] backdrop-blur-xl border border-white/15 hover:bg-white/[0.13] hover:border-white/30 hover:scale-[1.02] transition-all duration-300 text-left"
+                      >
+                        <div className={`w-11 h-11 rounded-xl bg-gradient-to-br ${card.gradient} flex items-center justify-center mb-3 shadow-lg group-hover:scale-110 transition-transform`}>
+                          <Icon className="w-5 h-5 text-white" />
+                        </div>
+                        <div className="flex items-center gap-2 mb-1">
+                          <h3 className="text-white font-semibold text-sm">{card.label}</h3>
+                          <span className="text-[8px] font-bold tracking-wider px-1.5 py-0.5 rounded-full bg-gradient-to-r from-amber-400 to-fuchsia-500 text-white shadow-sm">BETA</span>
+                        </div>
+                        <p className="text-white/60 text-xs leading-relaxed">{card.description}</p>
+                        <div className="absolute top-5 right-5 text-white/30 group-hover:text-white/70 group-hover:translate-x-0.5 transition-all text-lg">
+                          →
+                        </div>
+                      </button>
+                    );
+                  })}
+              </div>
+            </div>
+
             {/* 7 엔진 카드 */}
             <div className="mb-14">
               <p className="text-[10px] font-semibold tracking-[0.28em] text-white/40 mb-1.5 uppercase">Core AI Engines</p>
