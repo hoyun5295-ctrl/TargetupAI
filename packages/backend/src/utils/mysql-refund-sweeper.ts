@@ -160,15 +160,149 @@ async function runOnce(): Promise<void> {
       }
     }
 
+    // === 5. D182 (2026-05-19) — 타임아웃 환불 reverse 체크 ===
+    //   직원 신고 — 30~34분 시점 통신사 응답 도착하는데 30분 임계값에 환불 처리되어 회사 손해 발생.
+    //   campaign-lifecycle 임계값 30→120분 변경 + 본 reverse 로직으로 영구 안전망 구축.
+    //   타임아웃 환불 처리 후 success 증가 감지 시 자동 차감 (idempotent: reverse 1회만).
+    const reverseRes = await reverseTimeoutRefundIfRecovered();
+    if (reverseRes.reversed > 0) {
+      log(`[reverse-refund] ${reverseRes.reversed}건 reverse 차감 / 총 ${reverseRes.totalAmount}원 (타임아웃 환불 후 발송 성공 확인)`);
+    }
+
     const elapsedMs = Date.now() - startedAt;
-    if (pgUpdateCount > 0 || refundCount > 0) {
-      log(`사이클 완료 — 후보 ${candidates.rows.length} / PG 갱신 ${pgUpdateCount} / 환불 ${refundCount}건 ${totalRefundAmount}원 / ${elapsedMs}ms`);
+    if (pgUpdateCount > 0 || refundCount > 0 || reverseRes.reversed > 0) {
+      log(`사이클 완료 — 후보 ${candidates.rows.length} / PG 갱신 ${pgUpdateCount} / 환불 ${refundCount}건 ${totalRefundAmount}원 / reverse ${reverseRes.reversed}건 ${reverseRes.totalAmount}원 / ${elapsedMs}ms`);
     }
   } catch (err: any) {
     log('전체 오류:', err?.message || err);
   } finally {
     _running = false;
   }
+}
+
+// ===========================================================================
+// D182 (2026-05-19) — 타임아웃 환불 reverse 로직
+// ---------------------------------------------------------------------------
+// 트리거: campaign-lifecycle.ts의 isTimedOut → prepaidRefund(description='타임아웃 실패 환불')
+// 사고: 통신사 응답이 임계값 직후(30~34분 시점)에 도착하면 환불 처리 후 success 카운트 증가 → 회사 손해
+// fix: 본 함수가 30초 주기로 타임아웃 환불 row 추적 → success 증가분만큼 reverse 차감 (idempotent)
+//
+// idempotency 보장:
+//   동일 campaign_id에 description='타임아웃 환불 reverse'인 admin_deduct row가 이미 있으면 skip.
+//   윈도우 24h — 그 이전은 통신사 응답 거의 불가능.
+// ===========================================================================
+
+interface TimeoutRefundRow {
+  refund_id: string;
+  company_id: string;
+  amount: string;
+  description: string;
+  campaign_id: string;
+  message_type: string;
+  current_success: number;
+  current_fail: number;
+  refund_created_at: Date;
+}
+
+async function reverseTimeoutRefundIfRecovered(): Promise<{ reversed: number; totalAmount: number }> {
+  // 1. 최근 24h 내 '타임아웃 실패 환불' row 조회 (reverse 미처리만)
+  const candidates = await query(`
+    SELECT
+      bt.id AS refund_id,
+      bt.company_id,
+      bt.amount,
+      bt.description,
+      bt.reference_id AS campaign_id,
+      bt.message_type,
+      bt.created_at AS refund_created_at,
+      COALESCE(camp.success_count, 0) AS current_success,
+      COALESCE(camp.fail_count, 0) AS current_fail
+    FROM balance_transactions bt
+    JOIN campaigns camp ON bt.reference_id = camp.id
+    WHERE bt.type = 'refund'
+      AND bt.description LIKE '%타임아웃 실패 환불%'
+      AND bt.reference_type = 'campaign'
+      AND bt.created_at > NOW() - INTERVAL '24 hours'
+      AND NOT EXISTS (
+        SELECT 1 FROM balance_transactions bt2
+        WHERE bt2.reference_id = bt.reference_id
+          AND bt2.type = 'admin_deduct'
+          AND bt2.description LIKE '%타임아웃 환불 reverse%'
+      )
+    ORDER BY bt.created_at DESC
+  `);
+
+  let reversed = 0;
+  let totalAmount = 0;
+
+  for (const row of candidates.rows as TimeoutRefundRow[]) {
+    try {
+      // 2. description에서 환불된 fail 건수 + 단가 추출
+      // 예: '타임아웃 실패 환불 (MMS 1건 × 60.5원)' or '타임아웃 실패 환불 (LMS 1건 × 26.4원)'
+      const match = row.description.match(/(\w+)\s*(\d+)\s*건\s*[×x]\s*([\d.]+)\s*원/);
+      if (!match) {
+        log(`[reverse-refund] campaign=${row.campaign_id} description 파싱 실패: "${row.description}"`);
+        continue;
+      }
+      const refundedFailCount = parseInt(match[2], 10);
+      const unitPrice = parseFloat(match[3]);
+
+      // 3. 환불 후 success 증가량 = 실제 발송 성공한 양
+      const currentSuccess = Number(row.current_success);
+      if (currentSuccess <= 0) continue; // 여전히 success 0 = 진짜 실패, reverse 불요
+
+      // 4. reverse 금액 계산: min(success 증가량, 환불된 fail 양) × 단가
+      const recoveredCount = Math.min(currentSuccess, refundedFailCount);
+      const reverseAmount = Math.round(recoveredCount * unitPrice * 100) / 100; // 소수점 2자리
+
+      if (reverseAmount <= 0) continue;
+
+      // 5. companies 잔액 차감 + balance_transactions INSERT (트랜잭션)
+      await query('BEGIN');
+      try {
+        // 잔액 차감
+        const balanceRes = await query(
+          `UPDATE companies SET balance = balance - $1 WHERE id = $2::uuid RETURNING balance`,
+          [reverseAmount, row.company_id]
+        );
+        if (balanceRes.rows.length === 0) {
+          throw new Error(`company_id=${row.company_id} 잔액 갱신 실패`);
+        }
+        const newBalance = Number(balanceRes.rows[0].balance);
+
+        // balance_transactions INSERT (type='admin_deduct', 추적 가능 description)
+        await query(
+          `INSERT INTO balance_transactions (
+            id, company_id, type, amount, balance_after, description,
+            reference_type, reference_id, message_type, created_at
+          ) VALUES (
+            gen_random_uuid(), $1::uuid, 'admin_deduct', $2, $3,
+            $4, 'campaign', $5::uuid, $6, NOW()
+          )`,
+          [
+            row.company_id,
+            -reverseAmount, // 차감이므로 음수
+            newBalance,
+            `타임아웃 환불 reverse (발송 성공 ${recoveredCount}건 확인, ${row.message_type} ${recoveredCount}건 × ${unitPrice}원, D182)`,
+            row.campaign_id,
+            row.message_type,
+          ]
+        );
+
+        await query('COMMIT');
+        reversed++;
+        totalAmount += reverseAmount;
+        log(`✓ reverse campaign=${row.campaign_id} company=${row.company_id} ${row.message_type} success=${recoveredCount}건 → ${reverseAmount}원 차감`);
+      } catch (innerErr: any) {
+        await query('ROLLBACK');
+        log(`✗ reverse campaign=${row.campaign_id} 트랜잭션 롤백:`, innerErr?.message || innerErr);
+      }
+    } catch (rowErr: any) {
+      log(`✗ reverse campaign=${row.campaign_id} 처리 에러:`, rowErr?.message || rowErr);
+    }
+  }
+
+  return { reversed, totalAmount };
 }
 
 export function startMysqlRefundSweeper(): void {

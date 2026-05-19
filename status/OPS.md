@@ -393,6 +393,75 @@ POST /api/sync/purchases   ← 구매내역 벌크 INSERT (배치 최대 1000건
 
 ---
 
+## 9. AI Operator 환경변수 매트릭스 (D170~D181 누적, 2026-05-19)
+
+> 박은 영역 = `/home/administrator/targetup-app/packages/backend/.env`. 박지 X 시 영역별 안전 default 박음.
+
+### 9-1. AI Operator 게이팅 (D178)
+
+| 변수 | 박힘 영역 | 동작 |
+|------|---------|------|
+| `AI_OPERATOR_ALLOWED_USERS` | hoyun (2026-05-19 박힘) | ENV 박힘 시 본 list 박은 loginId/userId만 진입, 그 외 모두 BetaFeatureModal. ENV 박지 X 시 기존 ENT/BUS 게이팅 (안전 default) |
+| `AI_OPERATOR_USE_AI_DECISION` | false (default) | true 시 진정 Orchestrator AI Tool Use 진입 (Opus 4.7 multi-agent loop) |
+
+### 9-2. AI 모델 (D170+)
+
+| 변수 | 박힘 영역 | 비고 |
+|------|---------|------|
+| `ANTHROPIC_API_KEY` | 박힘 | Claude API (Sonnet 4.6 + Opus 4.7) |
+| `OPENAI_API_KEY` | 박힘 | GPT fallback (gpt-5.4-mini + gpt-5.5) |
+
+### 9-3. 자사몰 OAuth (D172/D178)
+
+| 변수 | 박힘 영역 | 비고 |
+|------|---------|------|
+| `CAFE24_CLIENT_ID` | 박지 X | 카페24 App Marketplace 박은 영역 |
+| `CAFE24_CLIENT_SECRET` | 박지 X | |
+| `CAFE24_REDIRECT_URI` | 박지 X | `https://app.hanjul.ai/api/cafe24/oauth/callback` |
+| `NAVER_COMMERCE_CLIENT_ID` | 박지 X | 네이버 커머스 API 콘솔 박은 영역 |
+| `NAVER_COMMERCE_CLIENT_SECRET` | 박지 X | |
+| `NAVER_COMMERCE_REDIRECT_URI` | 박지 X | `https://app.hanjul.ai/api/naver-commerce/oauth/callback` |
+
+### 9-4. Web Push (D175-A)
+
+| 변수 | 박힘 영역 | 비고 |
+|------|---------|------|
+| `VAPID_PUBLIC_KEY` | 박지 X | `web-push generate-vapid-keys` 박음 |
+| `VAPID_PRIVATE_KEY` | 박지 X | |
+| `VAPID_SUBJECT` | 박지 X | `mailto:admin@hanjul.ai` |
+
+### 9-5. 인바운드 음성 AI (D178)
+
+| 변수 | 박힘 영역 | 비고 |
+|------|---------|------|
+| `NAVER_CLOVA_STT_INVOKE_URL` | 박지 X | NCloud Clova Speech 박은 영역 |
+| `NAVER_CLOVA_STT_SECRET` | 박지 X | |
+| `NAVER_CLOVA_TTS_CLIENT_ID` | 박지 X | NCloud Clova Voice 박은 영역 |
+| `NAVER_CLOVA_TTS_CLIENT_SECRET` | 박지 X | |
+| `VOICE_WEBHOOK_SECRET` | 박지 X | 통신사 박은 HMAC-SHA256 박음. 박지 X 시 서명 검증 skip |
+
+### 9-6. Email 채널 (D180)
+
+| 변수 | 박힘 영역 | 비고 |
+|------|---------|------|
+| `SENDGRID_API_KEY` | 박지 X | SendGrid 박은 영역 (Bearer token) |
+| `SENDGRID_FROM_DOMAIN` | 박지 X | SPF/DKIM/DMARC 박힘 도메인 (예: `mail.hanjul.ai`) |
+| `APP_BASE_URL` | 박힘 | `https://app.hanjul.ai` — Custom Webhook URL 박음 정합 |
+
+### 9-7. 박을 영역 확장 명령어 (Harold 직접)
+
+```bash
+# 단순 박음 + restart 한번에 (마지막 줄에 박음)
+echo "변수명=값" >> /home/administrator/targetup-app/packages/backend/.env && pm2 restart all --update-env
+
+# 박힘 검증
+tail -20 /home/administrator/targetup-app/packages/backend/.env
+```
+
+★ `pm2 restart all` 단독 박음 시 옛 env 박힌 영역 캐시 박힘 가능 → `--update-env` 박음 정합.
+
+---
+
 ## 10. DB 백업 체계 (2026-03-05 구축)
 
 ### 10-1. 자동 백업 스케줄

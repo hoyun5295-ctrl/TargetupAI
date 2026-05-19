@@ -1834,3 +1834,137 @@ CREATE TABLE IF NOT EXISTS cdp_api_call_log (
 );
 CREATE INDEX IF NOT EXISTS idx_cdp_api_call_log_company ON cdp_api_call_log(company_id, occurred_at DESC);
 ```
+
+---
+
+### D178~D181 신규 SQL (Harold 직접 PostgreSQL 박을 영역, 7건)
+
+> **현재 박지 X 영역** — Harold 박은 후 본 영역 갱신 박음. 환경변수 박음도 정합 박음.
+
+```sql
+-- ════════════════════════════════════════════════════════════════════
+-- D177 Self-Optimizing Bandit (Thompson Sampling)
+-- ════════════════════════════════════════════════════════════════════
+
+-- 1. operator_proposal_variants — 메시지 변형 + Beta-Bernoulli posterior 박음
+CREATE TABLE IF NOT EXISTS operator_proposal_variants (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  proposal_id uuid NOT NULL REFERENCES operator_proposals(id) ON DELETE CASCADE,
+  variant_index integer NOT NULL,
+  message_body text NOT NULL,
+  byte_count integer NOT NULL DEFAULT 0,
+  arm_alpha numeric NOT NULL DEFAULT 1.0,
+  arm_beta numeric NOT NULL DEFAULT 1.0,
+  sent_count integer NOT NULL DEFAULT 0,
+  click_count integer NOT NULL DEFAULT 0,
+  conversion_count integer NOT NULL DEFAULT 0,
+  reward_total numeric NOT NULL DEFAULT 0,
+  created_at timestamptz NOT NULL DEFAULT NOW(),
+  UNIQUE (proposal_id, variant_index)
+);
+CREATE INDEX IF NOT EXISTS idx_proposal_variants_proposal ON operator_proposal_variants(proposal_id);
+
+-- ════════════════════════════════════════════════════════════════════
+-- D178 인바운드 음성 AI (Naver Clova)
+-- ════════════════════════════════════════════════════════════════════
+
+-- 2. voice_inbound_calls — 인바운드 통화 이력 + 트랜스크립트 사후 확인
+CREATE TABLE IF NOT EXISTS voice_inbound_calls (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  company_id uuid NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+  caller_phone varchar(50) NOT NULL,
+  customer_id uuid REFERENCES customers(id) ON DELETE SET NULL,
+  transcript text NOT NULL,
+  ai_response text NOT NULL,
+  duration_ms integer NOT NULL DEFAULT 0,
+  status varchar(50) NOT NULL DEFAULT 'completed',
+  created_at timestamptz NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_voice_inbound_company_created ON voice_inbound_calls(company_id, created_at DESC);
+
+-- 3. companies ALTER — 회사 admin 음성 AI 활성/비활성 토글
+ALTER TABLE companies ADD COLUMN IF NOT EXISTS voice_inbound_enabled boolean NOT NULL DEFAULT false;
+
+-- ════════════════════════════════════════════════════════════════════
+-- D180 Email 채널 (SendGrid)
+-- ════════════════════════════════════════════════════════════════════
+
+-- 4. email_campaigns — Email 캠페인 메타 + 통계
+CREATE TABLE IF NOT EXISTS email_campaigns (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  company_id uuid NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+  created_by uuid REFERENCES users(id) ON DELETE SET NULL,
+  name varchar(200) NOT NULL,
+  subject varchar(200) NOT NULL,
+  html_body text NOT NULL,
+  text_body text,
+  from_name varchar(100),
+  from_email varchar(200),
+  is_ad boolean NOT NULL DEFAULT false,
+  scheduled_at timestamptz,
+  sent_at timestamptz,
+  status varchar(50) NOT NULL DEFAULT 'draft',
+  sent_count integer NOT NULL DEFAULT 0,
+  open_count integer NOT NULL DEFAULT 0,
+  click_count integer NOT NULL DEFAULT 0,
+  bounce_count integer NOT NULL DEFAULT 0,
+  unsubscribe_count integer NOT NULL DEFAULT 0,
+  created_at timestamptz NOT NULL DEFAULT NOW(),
+  updated_at timestamptz NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_email_campaigns_company_created ON email_campaigns(company_id, created_at DESC);
+
+-- 5. email_events — SendGrid Event Webhook 박은 영역 (open/click/bounce/unsubscribe)
+CREATE TABLE IF NOT EXISTS email_events (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  campaign_id uuid NOT NULL REFERENCES email_campaigns(id) ON DELETE CASCADE,
+  email varchar(200) NOT NULL,
+  event_type varchar(50) NOT NULL,
+  url text,
+  reason text,
+  occurred_at timestamptz NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_email_events_campaign ON email_events(campaign_id, occurred_at DESC);
+
+-- ════════════════════════════════════════════════════════════════════
+-- D181 Phase 1 영구 개선 (Anthropic Memory + Batch API)
+-- ════════════════════════════════════════════════════════════════════
+
+-- 6. ai_company_memory — 회사별 누적 학습 (Anthropic Memory 패턴)
+CREATE TABLE IF NOT EXISTS ai_company_memory (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  company_id uuid NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+  memory_type varchar(50) NOT NULL,  -- 'success_pattern' / 'customer_insight' / 'brand_tone_evolution' / 'channel_performance' / 'compliance_learning'
+  memory_key varchar(200) NOT NULL,
+  memory_value text NOT NULL,
+  importance integer NOT NULL DEFAULT 5,  -- 1~10
+  source varchar(100) NOT NULL DEFAULT 'ai_auto',  -- 'ai_auto' / 'admin_input' / 'campaign_result'
+  metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
+  last_accessed_at timestamptz NOT NULL DEFAULT NOW(),
+  created_at timestamptz NOT NULL DEFAULT NOW(),
+  updated_at timestamptz NOT NULL DEFAULT NOW(),
+  UNIQUE (company_id, memory_type, memory_key)
+);
+CREATE INDEX IF NOT EXISTS idx_ai_company_memory_company_type ON ai_company_memory(company_id, memory_type);
+CREATE INDEX IF NOT EXISTS idx_ai_company_memory_importance ON ai_company_memory(company_id, importance DESC, last_accessed_at DESC);
+
+-- 7. ai_batch_jobs — Anthropic Batch API 박은 영역
+CREATE TABLE IF NOT EXISTS ai_batch_jobs (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  company_id uuid NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+  batch_id varchar(100) NOT NULL UNIQUE,
+  model varchar(100) NOT NULL,
+  total_requests integer NOT NULL,
+  status varchar(50) NOT NULL DEFAULT 'submitted',  -- 'submitted' / 'processing' / 'completed' / 'failed' / 'expired'
+  succeeded_count integer NOT NULL DEFAULT 0,
+  errored_count integer NOT NULL DEFAULT 0,
+  expired_count integer NOT NULL DEFAULT 0,
+  metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
+  submitted_at timestamptz NOT NULL DEFAULT NOW(),
+  completed_at timestamptz,
+  created_at timestamptz NOT NULL DEFAULT NOW(),
+  updated_at timestamptz NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_ai_batch_jobs_company ON ai_batch_jobs(company_id, submitted_at DESC);
+```

@@ -107,45 +107,71 @@
 
 ---
 
-### 🚀 다음 세션 진입 가이드 (D177-ux3 배포 후 즉시 진입)
+### 🚀 다음 세션 진입 가이드 (D178~D181 압축 진입 종결 — 운영 검증 진입)
 
-> **선행 정독 필수:** `docs/AI_OPERATOR_기능정의서.md` v1.0.7 + `docs/한줄로_BEYOND_BRAZE_비전.md` v0.3 + `status/ai_operator_progress.md`
+> **선행 정독 필수:** `docs/AI_OPERATOR_기능정의서.md` v1.0.9 + `docs/한줄로_BEYOND_BRAZE_비전.md` v0.5 + `status/ai_operator_progress.md`
 >
-> **영구 원칙 (모든 박음 시 정합):** [[feedback_no_target_auto_relax]] + [[feedback_ai_operator_model_isolation]] + [[feedback_no_future_roadmap_user_exposure]] + [[feedback_sub_module_back_navigation]] + [[feedback_jondaetmal_to_harold]] + [[feedback_push_and_deploy_commands]] + [[feedback_no_humuson_keyword_exposure]] + [[feedback_no_devtools_browser_diagnostic]]
+> **영구 원칙 (모든 박음 시 정합):** [[feedback_no_target_auto_relax]] + [[feedback_ai_operator_model_isolation]] + [[feedback_no_future_roadmap_user_exposure]] + [[feedback_sub_module_back_navigation]] + [[feedback_jondaetmal_to_harold]] + [[feedback_push_and_deploy_commands]] + [[feedback_no_humuson_keyword_exposure]] + [[feedback_no_devtools_browser_diagnostic]] + [[feedback_ai_operator_user_gating]]
 
-#### 1순위 — 운영 환경 사용 검증 (Harold "사용하면서 디버그" 명시 정합)
+#### 1순위 — 운영 환경 사용 검증 (hoyun 박음 박은 후)
+
+> Harold 박음 종결 (2026-05-19) — `.env`에 `AI_OPERATOR_ALLOWED_USERS=hoyun` 박힘 + pm2 restart 박음. **hoyun만 실제 진입 / 그 외 모두 BetaFeatureModal**.
 
 | 영역 | Harold 검증 |
 |------|------------|
 | AI Operator 메인 진입 | `/ai-operator` 자연어 한 줄 → 통합 제안서 + 발송 흐름 |
-| Continuous Operator | `/continuous-operator` 신규 영구 운영 + 매일 09:00 KST 자동 제안서 + 일괄 승인 |
+| Continuous Operator + **D177 Bandit** | `/continuous-operator` 신규 영구 운영 + 매일 09:00 KST 자동 제안서 + Bandit variant 추천 (proposal expand 시점에 박음) |
+| Continuous Operator + **D179 Multi-Goal** | `/continuous-operator` 헤더 "다중 목표 분석" 버튼 → modal → 2~5건 목표 박음 → analyze → sub_plans + conflict_matrix + recommended_order 박음 |
 | 성과리포트 | `/performance` 30일 성과 + AI Next Action 추천 + AI Operator prefill |
-| 자사몰 연동 (CDP) | `/cdp-settings` API key 발급 + 카페24 OAuth UI (CAFE24_* 환경변수 미박힘 시 카페24 연동만 동작 X) |
-| Web Push (admin only) | `/push-campaigns` 구독자 매트릭스 + 발송 폼 (VAPID 환경변수 박음 필수) |
+| 자사몰 연동 (CDP) | `/cdp-settings` API key 발급 + **자체 호스팅 (Webhook+SDK)** + **네이버 스마트스토어 OAuth** + 카페24 OAuth UI |
+| Web Push (admin only) | `/push-campaigns` 구독자 매트릭스 + 발송 폼 |
 | In-app Message (admin only) | `/inapp-messages` CRUD + 미리보기 + CTR 통계 |
+| **D178 인바운드 음성 AI** (admin only) | `/voice-inbound` 활성/비활성 토글 + Clova 환경변수 박힘 상태 + 통화 이력 + 트랜스크립트 사후 확인 |
+| **D180 Email 캠페인** (admin only) | `/email-campaigns` 캠페인 신설 + 발송 + open/click/bounce/unsubscribe 통계 |
+| **D181 Memory** (회사 admin) | `GET /api/ai/operator/memory` (회사별 누적 학습 박은 영역 박음) + UI 박지 X (다음 세션 박을 영역) |
+| **D181 Batch + Citations** | endpoint 박힘 / UI 박지 X (Phase 2 박을 영역) |
 
-#### 2순위 — 다음 세션 박을 영역 (압축 로드맵 D177~D180)
+#### 2순위 — Harold 박을 외부 영역 (운영 진입 박음 시점)
+
+| 영역 | 환경변수 / DB |
+|------|------------|
+| **DB SQL 7건** (D178~D181 신규) | operator_proposal_variants + voice_inbound_calls + email_campaigns + email_events + companies ALTER voice_inbound_enabled + **ai_company_memory + ai_batch_jobs** (D181 신규 2건) |
+| **네이버 커머스 API** | NAVER_COMMERCE_CLIENT_ID + NAVER_COMMERCE_CLIENT_SECRET + NAVER_COMMERCE_REDIRECT_URI |
+| **Naver Clova STT/TTS** | NAVER_CLOVA_STT_INVOKE_URL + NAVER_CLOVA_STT_SECRET + NAVER_CLOVA_TTS_CLIENT_ID + NAVER_CLOVA_TTS_CLIENT_SECRET |
+| **통신사 음성 Webhook** | VOICE_WEBHOOK_SECRET (통신사 박은 HMAC-SHA256 박음) |
+| **SendGrid** | SENDGRID_API_KEY + SENDGRID_FROM_DOMAIN (SPF/DKIM/DMARC 박힘 도메인) |
+| **hoyun 박음 게이팅** ✓ | AI_OPERATOR_ALLOWED_USERS=hoyun (박힘 종결) |
+
+#### 3순위 — CTO 추천 다음 박을 영역 (운영 데이터 1주+ 박힌 후)
 
 | D | 영역 | 박을 의존성 |
 |---|------|------------|
-| **D177 Self-Optimizing (Bandit A/B)** | utils/bandit-optimizer.ts CT-29 (Thompson Sampling) + Continuous Operator proposal에 변형 A/B 박음 + 결과 분석 | D176 운영 데이터 누적 후 (1주+ 권장) |
-| **D178 인바운드 AI 음성 응답** | 한국 음성 인프라(NCloud / Naver Clova / 또는 Twilio) 검토 → STT + TTS + 자사몰 → 전화 클릭 → AI CDP 데이터 응답 흐름 | 외부 인프라 검토 + Harold 결정 필요 |
-| **D179 Multi-Goal Decisioning** | Continuous Operator 확장 — "매출 + 신규 + 휴면" 동시 박음 + AI 충돌 없는 흐름 자동 박음 | D176/D177 안정화 후 |
-| **D180 Email 채널 통합** | SDK Email 모듈 + SendGrid / Postmark / Mailgun 통합 | 외부 의존성 검토 |
+| **D181~D185 Journey Builder Lite** | 6 표준 여정 (가입/재구매/휴면/장바구니/생일/예약) + AI 자연어 진입 + Continuous Operator + Multi-Goal + Bandit 통합. **Braze Canvas 본질 대응** | D176/D177/D179 운영 데이터 1주+ 박힌 후 |
+| **D186~D190 Provider Adapter 구체** | Shopify (글로벌 1위) / 메이크샵 (한국 2위) wrapper. ENT 후보사 자사몰 종류 박은 후 박음 | Harold 결정 영역 |
+| **D191~D195 글로벌 확장 1차** | 영어 i18n + WhatsApp Business API | 한국 ENT 5사+ 박힌 후 |
+| **D195+ 외향 음성 AI Phase 2** | 정보통신망법 + 한국어 자연도 검토 박힌 후 박음 | 비전 v0.5 § 4-1 정합 |
+| **D196~D200 AI 챗봇 (자사몰 In-app)** | CDP + Opus 4.7 + Tool Use 자율 운영 | 음성 AI 박힌 후 |
 
-#### 3순위 — 운영 검증 후 결정 (Harold 결정 받음)
+#### 4순위 — Harold 결정 영역 (운영 검증 후)
 
 | 항목 | 결정 영역 |
 |------|----------|
-| **카페24 진입 방안** | 옵션 C (SDK 직접 박음, 이미 박힌 인프라) vs 옵션 B (admin API key 발급 가능 여부 검증) — Harold 운영 환경 카페24 admin 확인 후 |
-| **AI Operator 메뉴 디자인 톤다운** | 운영 환경 노출 본 후 BETA 뱃지 작게 / 색상 톤다운 / dropdown 호버 시간 조정 필요 시 박음 |
-| **ENT 베타 진입 회사 1~3사 명단** | Harold 결정 — 카페24/자사몰 종류 + 등급 정합 |
-| **Shopify / 메이크샵 wrapper 구체 구현** | Phase 2 — ENT 후보사 자사몰 종류에 따라 우선순위 결정 |
+| **ENT 베타 진입 회사 1~3사 명단** | 자체 호스팅 / 네이버스토어 / 카페24 종류 + 등급 정합 |
+| **AI Operator 메뉴 디자인 톤다운** | 운영 환경 노출 본 후 BETA 뱃지/색상 박음 |
+| **음성 AI 통신사 인프라 선택** | NCloud SIP / Twilio / 통신사 직접 박음 결정 |
+| **외향 음성 AI 진입** | Phase 2 박을 시점 결정 (정보통신망법 검토 박힌 후) |
+| **AI_OPERATOR_ALLOWED_USERS 박은 영역 확장** | 직원/운영팀 박을 시점 (hoyun 박은 영역에서 영구 검증 박힌 후) |
+
+#### 5순위 — 잔존 영역 (Harold 명시 시 박음)
+
+- D162-4 잔존 (직접타겟발송 검증 + AlimtalkSendModal 수신자 리스트 수정사항)
+- recordCampaignLearning 자동 박음 cron (캠페인 종료 박은 영역 자동 호출, 별 cron 박음)
+- D181 Memory + Batch + Citations Frontend UI 박음 (회사 admin 메모리 검토/삭제 UI + Batch 진행 상태 모니터링 UI + Citations 사용자 질문 박은 영역 박음)
 
 #### 진입 명령 (다음 세션 첫 메시지)
 
 ```
-status/STATUS.md CURRENT_TASK § "다음 세션 진입 가이드" 정독 + docs/AI_OPERATOR_기능정의서.md v1.0.7 + docs/한줄로_BEYOND_BRAZE_비전.md v0.3 정독 → Harold 신고 우선 종결 또는 D177 Self-Optimizing 진입 또는 카페24 진입 방안 결정 진입
+status/STATUS.md CURRENT_TASK § "다음 세션 진입 가이드" 정독 + docs/AI_OPERATOR_기능정의서.md v1.0.9 + docs/한줄로_BEYOND_BRAZE_비전.md v0.5 + status/ai_operator_progress.md 정독 → Harold 신고 우선 종결 또는 D181 Memory/Batch/Citations UI 박음 또는 D181 Journey Builder Lite 박음 진입
 ```
 
 ---
@@ -214,7 +240,19 @@ PDF 0515 알림톡 3건 root cause fix + Harold UX 8차 반복 정합:
 | D177-ux | **DashboardHeader 메뉴 간소화 — AI Operator dropdown 통합** Harold 명시 — "메인 메뉴 헤더 복잡 / AI 오퍼레이션 안 하위 메뉴 / 디자인 신경써서 마무리 / 신규 메뉴들 전부 AI Operator 하위". MenuItem interface 확장(subMenu) + AI Operator 메뉴에 subMenu 5건 통합(AI Operator/AI 영구운영/성과리포트/자사몰 연동/Web Push/인앱메시지) + 기존 헤더 별도 박힌 5건 메뉴 제거 + dropdown UI 박음(hover trigger + 그라데이션 상단 강조선 + label+description + BETA 뱃지 + 하단 안내 "AI가 제안 · 사용자가 승인 후 발송" + animate-in fade-in zoom-in-95 + 호버 보라색 hover bg) | ✓ (빌드 대기) |
 | D177-ux2 | **dropdown 영구 제거 + AiOperatorPage 안 sub-module 박음** Harold 명시 정정 — "dropdown X / AI Operator 페이지 안 메뉴 박음". DashboardHeader SubMenuItem interface + AI Operator subMenu + dropdown 렌더링 영구 제거 + AiOperatorPage에 SUB_MODULE_CARDS 5건(AI 영구운영/성과리포트/자사몰 연동/Web Push 회사 admin only/인앱메시지 회사 admin only) + "함께 사용하는 AI 영역" 섹션 박음(7 엔진 카드 위) + 카드별 그라데이션 + BETA 뱃지 + 호버 효과 + → 화살표 transition. 헤더는 AI Operator 메뉴만 박음 | ✓ (빌드 대기) |
 | D177-ux3 | **sub-module 페이지 뒤로가기 일관성 fix** Harold 명시 — "AI 오퍼레이션 메뉴로 돌아가는게 아니라 메인페이지로 돌아간다 / 원칙에 맞도록". 5 페이지(CdpSettings/Performance/ContinuousOperator/PushCampaigns/InAppMessages) ArrowLeft 박을 때 navigate('/') → navigate('/ai-operator') 일괄 정정. 부모-자식 계층 본질 정합. 영구 원칙 박음(memory/feedback_sub_module_back_navigation.md) | ✓ (빌드 대기) |
+| **D178 Track A-1 자체 호스팅** | Harold 명시 "카페24보다 자체 호스팅 자사몰 위주". utils/custom-self-hosted-adapter.ts CT-29(HMAC-SHA256 hex/base64 + identifyCustomer/syncOrder/trackEvent 표준 + issueCustomWebhookSecret) + routes/cdp.ts /webhook/custom + 회사 admin 3 endpoint + CdpSettingsPage 카드(secret 1회 노출 + Node.js 코드 샘플) | ✓ (빌드 대기) |
+| **D178 Track A-2 네이버 스마트스토어** | Harold 명시 "네이버스토어를 자사몰처럼 쓰는 회사들 많음". utils/naver-commerce-client.ts CT-30 + routes/naver-commerce.ts(authorize/callback/webhook/status/disconnect, cafe24 미러) + naverSmartStoreAdapter + CdpSettingsPage 카드 + 환경변수 3건 | ✓ (빌드 + 환경변수 대기) |
+| **D177 Self-Optimizing Bandit** | utils/bandit-optimizer.ts CT-31 Thompson Sampling(Beta-Bernoulli + Marsaglia-Tsang Gamma + cold start explore + operator 누적 학습) + operator_proposal_variants 테이블 + continuous-operator 확장 + routes/ai variants endpoint 2건 + ContinuousOperatorPage variant 매트릭스 | ✓ (빌드 + DB SQL 1건 대기) |
+| **D178 인바운드 음성 AI** | utils/naver-clova-client.ts CT-32(STT/TTS) + utils/voice-inbound.ts CT-33(Opus 4.7 + CDP 매칭 + TTS) + voice_inbound_calls 테이블 + companies ALTER voice_inbound_enabled + routes/voice.ts + VoiceInboundPage(토글 + 영구 원칙 + 통화 이력 + 트랜스크립트 사후 확인) | ✓ (빌드 + DB SQL 1건 + ALTER + Clova 환경변수 4건 + VOICE_WEBHOOK_SECRET 대기) |
+| **D179 Multi-Goal Decisioning** | utils/multi-goal-decisioning.ts CT-32(Opus 4.7 충돌 분석 + sub_plans + conflict_matrix + recommended_order + 가중치 자동 정규화 + fallback) + routes/ai /operator/multi-goal/analyze | ✓ (빌드 대기) |
+| **D180 SendGrid Email** | utils/sendgrid-client.ts CT-35 native fetch + utils/email-channel.ts CT-36(Zero-Count + 광고성 prefix + 무료거부 + 1,000건 batch) + email_campaigns/events 2 테이블 + routes/email.ts + EmailCampaignsPage | ✓ (빌드 + DB SQL 2건 + 환경변수 3건 대기) |
+| **D178 hoyun 박음 게이팅** | utils/plan-guard.ts isAiOperatorAllowed 박음 + routes/ai.ts 5건 정정 + GET /operator/access endpoint + Dashboard.tsx onAiOperatorClick 박음. ENV `AI_OPERATOR_ALLOWED_USERS=hoyun` 박힘 시 hoyun만 진입, 그 외 모두 BetaFeatureModal | ✓ + ENV 박음 종결 (Harold 직접 2026-05-19) |
+| **D181 #1 D179 Frontend UI** | ContinuousOperatorPage 다중 목표 modal + analyze + sub_plans + conflict_matrix + recommended_order UI + 가중치 자동 정규화 + 헤더 "다중 목표 분석" 버튼 박음 | ✓ (빌드 대기) |
+| **D181 #2 Anthropic Memory tool 패턴** | utils/company-memory.ts CT-37(5 메모리 타입 + addMemory + listMemories + buildMemoryPromptContext + recordCampaignLearning) + DB ai_company_memory + ai-orchestrator buildMemoryPromptContext 박음 + routes/ai.ts 회사 admin 3 endpoint | ✓ (빌드 + DB SQL 1건 대기) |
+| **D181 #3 Anthropic Batch API** | utils/batch-ai.ts CT-38(Anthropic native messages.batches + submitBatch + pollBatch + getBatchResults + listBatchJobs) + DB ai_batch_jobs + routes/ai.ts /operator/batches 2 endpoint. **대량 발송 50% 비용 절감 (24h SLA)** | ✓ (빌드 + DB SQL 1건 대기) |
+| **D181 #4 Anthropic Citations** | utils/citations.ts CT-39(buildCompanyDocuments 4 document + callAIWithCitations Opus 4.7 native citations.enabled) + routes/ai.ts /operator/explain endpoint. **사용자 신뢰 #4 본질** | ✓ (빌드 대기, DB 박지 X) |
 | **DB schema** | **D172/D172-B/D175-A/D176 운영 환경 SQL 17건 전체 박힘 종결** (Harold 직접 PostgreSQL 실행, 2026-05-19) — 검증 SQL 결과 11 테이블 + 6 companies 컬럼 + 2 plans 컬럼 모두 정합 | ✓ 박힘 종결 |
+| **D178~D181 신규 DB schema** | **7 신규 항목 박을 영역** — operator_proposal_variants + voice_inbound_calls + email_campaigns + email_events + companies ALTER voice_inbound_enabled + **ai_company_memory + ai_batch_jobs (D181)** | ⏸ Harold 직접 박을 영역 |
 
 #### Harold 명시 모델 영역 절대 분리
 

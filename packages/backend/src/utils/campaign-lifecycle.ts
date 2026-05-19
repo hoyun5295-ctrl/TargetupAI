@@ -290,11 +290,13 @@ export async function syncCampaignResults(companyId: string): Promise<SyncResult
       const pendingCount = (smsAgg.pending_count || 0) + kakaoResult.pending;
       console.log(`[sync-results] AI run ${run.id} — success:${successCount}, fail:${failCount}, pending:${pendingCount}`);
 
-      // 타임아웃 체크: 발송 후 30분 경과 + pending만 남아있으면 강제 완료
+      // 타임아웃 체크: 발송 후 120분 경과 + pending만 남아있으면 강제 완료
+      // ★ D182 (2026-05-19): 30분 → 120분 변경 (직원 신고 — 30~34분 시점 통신사 응답 도착하는데 환불 처리되어 회사 손해 발생)
+      //   통신사 응답 99%ile 분포 + 안전 마진 = 120분. mysql-refund-sweeper의 reverse refund 로직과 함께 영구 안전망 구축.
       const campTimeInfo = await query('SELECT sent_at, scheduled_at, created_at FROM campaigns WHERE id = $1', [run.campaign_id]);
       const campSentAt = campTimeInfo.rows[0]?.sent_at || campTimeInfo.rows[0]?.scheduled_at || campTimeInfo.rows[0]?.created_at;
       const minutesSinceSend = campSentAt ? (Date.now() - new Date(campSentAt).getTime()) / (1000 * 60) : 0;
-      const isTimedOut = minutesSinceSend > 30 && pendingCount > 0 && successCount === 0 && failCount === 0;
+      const isTimedOut = minutesSinceSend > 120 && pendingCount > 0 && successCount === 0 && failCount === 0;
 
       if (successCount > 0 || failCount > 0 || pendingCount > 0 || isTimedOut) {
         const effectiveFailCount = isTimedOut ? failCount + pendingCount : failCount;
@@ -303,7 +305,7 @@ export async function syncCampaignResults(companyId: string): Promise<SyncResult
         //   pending은 통신사 처리 대기일 뿐 발송 자체는 끝남. 화면 카운트는 MySQL 직접 갱신.
         const newStatus = (successCount + effectiveFailCount + effectivePendingCount) > 0 ? 'completed' : 'failed';
         if (isTimedOut) {
-          console.warn(`[sync-results] campaign_run ${run.id}: 30분 타임아웃 — pending ${pendingCount}건 → fail 처리`);
+          console.warn(`[sync-results] campaign_run ${run.id}: 120분 타임아웃 — pending ${pendingCount}건 → fail 처리`);
         }
 
         // ★ D145 P0+ (2026-05-07): idempotent 환불 패턴 — 호출측은 누적 effectiveFailCount 그대로 보냄
@@ -420,11 +422,13 @@ export async function syncCampaignResults(companyId: string): Promise<SyncResult
       const pendingCount = (smsDirectAgg.pending_count || 0) + kakaoDirectResult.pending;
       console.log(`[sync-results] direct campaign ${campaign.id} — success:${successCount}, fail:${failCount}, pending:${pendingCount}`);
 
-      // 직접발송 타임아웃: 30분 경과 + pending만 남아있으면 강제 완료
+      // 직접발송 타임아웃: 120분 경과 + pending만 남아있으면 강제 완료
+      // ★ D182 (2026-05-19): 30분 → 120분 변경 (직원 신고 — 30~34분 시점 통신사 응답 도착하는데 환불 처리되어 회사 손해 발생)
+      //   AI 캠페인 영역과 동일 임계값. mysql-refund-sweeper의 reverse refund 로직과 함께 영구 안전망 구축.
       // ★ sent_at → scheduled_at → created_at 우선순위 (AI캠페인과 동일 패턴)
       const directSentAt = campaign.sent_at || campaign.scheduled_at || campaign.created_at;
       const directMinutesSince = directSentAt ? (Date.now() - new Date(directSentAt).getTime()) / (1000 * 60) : 0;
-      const directTimedOut = directMinutesSince > 30 && pendingCount > 0 && successCount === 0 && failCount === 0;
+      const directTimedOut = directMinutesSince > 120 && pendingCount > 0 && successCount === 0 && failCount === 0;
 
       if (successCount > 0 || failCount > 0 || pendingCount > 0 || directTimedOut) {
         const dEffectiveFailCount = directTimedOut ? failCount + pendingCount : failCount;
@@ -433,7 +437,7 @@ export async function syncCampaignResults(companyId: string): Promise<SyncResult
         //   pending은 통신사 처리 대기일 뿐 발송 자체는 끝남. 화면 카운트는 MySQL 직접 갱신.
         const newStatus = (successCount + dEffectiveFailCount + dEffectivePendingCount) > 0 ? 'completed' : 'failed';
         if (directTimedOut) {
-          console.warn(`[sync-results] direct campaign ${campaign.id}: 30분 타임아웃 — pending ${pendingCount}건 → fail 처리`);
+          console.warn(`[sync-results] direct campaign ${campaign.id}: 120분 타임아웃 — pending ${pendingCount}건 → fail 처리`);
         }
 
         // ★ D145 P0+ (2026-05-07): idempotent 환불 패턴 — 호출측은 누적 dEffectiveFailCount 그대로 보냄

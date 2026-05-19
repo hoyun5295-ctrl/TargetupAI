@@ -4,7 +4,7 @@ import crypto from 'crypto';
 import { authenticate, requireCompanyAdmin } from '../middlewares/auth';
 import pool, { mysqlQuery } from '../config/database';
 import { getCompanyScope } from '../utils/permission-helper';
-import { getAuthSmsTable } from '../utils/sms-queue';
+import { getAuthSmsTable, getTestSmsTables } from '../utils/sms-queue';
 
 const router = Router();
 
@@ -268,12 +268,15 @@ router.post('/:id/reset-password', async (req: Request, res: Response) => {
         const phone = user.phone.replace(/-/g, '');
         const message = `[Target-UP] 임시 비밀번호: ${tempPassword}\n최초 로그인 시 비밀번호 변경이 필요합니다.`;
 
-        // CT-04: 인증/시스템 SMS는 auth 라인그룹 테이블 사용 (하드코딩 금지)
-        const authTable = await getAuthSmsTable();
+        // ★ D182 (2026-05-19): 내부 발송(비밀번호 초기화)이므로 운영 라인 점유 X → 담당자 테스트 라인 사용
+        //   Harold 명시 — 스팸테스트와 동일한 발송라인(targetai10/SMSQ_SEND_10)으로 분리
+        //   (이전 CT-04 auth 라인 사용에서 변경 — auth(SMSQ_SEND_11)는 인증번호 전용, test(SMSQ_SEND_10)는 담당자 테스트 전용)
+        const testTables = await getTestSmsTables();
+        const targetTable = testTables[0];
         const callback = process.env.SYSTEM_SMS_CALLBACK;
         if (!callback) throw new Error('SYSTEM_SMS_CALLBACK 환경변수가 설정되지 않았습니다');
         await mysqlQuery(
-          `INSERT INTO ${authTable} (dest_no, call_back, msg_contents, msg_type, sendreq_time, status_code, rsv1) VALUES (?, ?, ?, 'S', NOW(), 100, '1')`,
+          `INSERT INTO ${targetTable} (dest_no, call_back, msg_contents, msg_type, sendreq_time, status_code, rsv1) VALUES (?, ?, ?, 'S', NOW(), 100, '1')`,
           [phone, callback, message]
         );
         smsSent = true;

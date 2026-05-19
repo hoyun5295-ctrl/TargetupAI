@@ -910,6 +910,8 @@ export default function Dashboard() {
   const [showSpecialChars, setShowSpecialChars] = useState<'target' | 'direct' | null>(null);
   const [showTemplateBox, setShowTemplateBox] = useState<'target' | 'direct' | null>(null);
   const [templateList, setTemplateList] = useState<any[]>([]);
+  // ★ D182 (2026-05-19) — 보관함 본문 전문 보기 토글 (직원 신고: line-clamp-2로 짤려 전문 확인 불가)
+  const [expandedTemplateIds, setExpandedTemplateIds] = useState<Set<string>>(new Set());
   const [showTemplateSave, setShowTemplateSave] = useState<'target' | 'direct' | null>(null);
   const [templateSaveName, setTemplateSaveName] = useState('');
   // ★ D96: directInputText → DirectSendPanel로 이동
@@ -3551,7 +3553,11 @@ const campaignData = {
                 </div>
               ) : (
                 <div className="space-y-2">
-                  {templateList.map((t: any) => (
+                  {templateList.map((t: any) => {
+                    const isExpanded = expandedTemplateIds.has(t.id);
+                    const contentLines = String(t.content || '').split('\n').length;
+                    const contentLong = (t.content || '').length > 80 || contentLines > 2;
+                    return (
                     <div key={t.id} className="border rounded-xl p-4 hover:border-amber-300 hover:bg-amber-50/30 transition-colors group">
                       <div className="flex justify-between items-start mb-2">
                         <div className="font-medium text-sm text-gray-800">{t.template_name}</div>
@@ -3563,7 +3569,36 @@ const campaignData = {
                           >🗑️</button>
                         </div>
                       </div>
-                      <div className="text-xs text-gray-500 mb-3 line-clamp-2 whitespace-pre-wrap">{t.content}</div>
+                      {/* ★ D182 (2026-05-19): line-clamp-2 → 토글 가능. 직원 신고 — 전문 확인 불가 */}
+                      <div
+                        onClick={() => {
+                          if (!contentLong) return;
+                          setExpandedTemplateIds(prev => {
+                            const next = new Set(prev);
+                            if (next.has(t.id)) next.delete(t.id); else next.add(t.id);
+                            return next;
+                          });
+                        }}
+                        className={`text-xs text-gray-500 mb-2 whitespace-pre-wrap ${isExpanded ? '' : 'line-clamp-2'} ${contentLong ? 'cursor-pointer hover:text-gray-700' : ''}`}
+                        title={contentLong ? (isExpanded ? '클릭하여 접기' : '클릭하여 전문 보기') : ''}
+                      >
+                        {t.content}
+                      </div>
+                      {contentLong && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setExpandedTemplateIds(prev => {
+                              const next = new Set(prev);
+                              if (next.has(t.id)) next.delete(t.id); else next.add(t.id);
+                              return next;
+                            });
+                          }}
+                          className="text-[11px] text-amber-600 hover:text-amber-700 hover:underline mb-2"
+                        >
+                          {isExpanded ? '▲ 접기' : '▼ 전문 보기'}
+                        </button>
+                      )}
                       <button
                         onClick={() => {
                           if (showTemplateBox === 'target') {
@@ -3601,7 +3636,8 @@ const campaignData = {
                         className="w-full py-2 bg-amber-500 hover:bg-amber-600 text-white rounded-lg text-sm font-medium transition-colors"
                       >적용하기</button>
                     </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
             </div>

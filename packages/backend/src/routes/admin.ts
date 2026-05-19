@@ -313,15 +313,21 @@ router.post('/users/:id/reset-password', authenticate, requireSuperAdmin, async 
     `, [passwordHash, id]);
     
     // SMS 발송 (휴대폰 번호가 있는 경우)
+    // ★ D182 (2026-05-19): 내부 발송(비밀번호 초기화)이므로 운영 라인 점유 X → 담당자 테스트 라인 사용
+    //   Harold 명시 — 패스워드 초기화 SMS는 스팸테스트와 동일한 발송라인(targetai10/SMSQ_SEND_10)으로 분리
     let smsSent = false;
     if (user.phone) {
       try {
         const phone = user.phone.replace(/-/g, '');
         const message = `[Target-UP] 임시 비밀번호: ${tempPassword}\n최초 로그인 시 비밀번호 변경이 필요합니다.`;
-        
+
+        const callback = process.env.SYSTEM_SMS_CALLBACK;
+        if (!callback) throw new Error('SYSTEM_SMS_CALLBACK 환경변수가 설정되지 않았습니다');
+        const testTables = await getTestSmsTables();
+        const targetTable = testTables[0]; // SMSQ_SEND_10 (담당자 테스트 라인)
         await mysqlQuery(
-          `INSERT INTO ${ALL_SMS_TABLES[0]} (dest_no, call_back, msg_contents, msg_type, sendreq_time, status_code, rsv1) VALUES (?, ?, ?, 'S', NOW(), 100, '1')`,
-          [phone, process.env.SYSTEM_SMS_CALLBACK || (() => { throw new Error('SYSTEM_SMS_CALLBACK 환경변수가 설정되지 않았습니다'); })(), message]
+          `INSERT INTO ${targetTable} (dest_no, call_back, msg_contents, msg_type, sendreq_time, status_code, rsv1) VALUES (?, ?, ?, 'S', NOW(), 100, '1')`,
+          [phone, callback, message]
         );
         smsSent = true;
       } catch (smsError) {
