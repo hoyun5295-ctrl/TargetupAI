@@ -87,11 +87,12 @@ export async function buildPerformanceSnapshot(companyId: string): Promise<Perfo
   );
 
   // 3. 시간대별 성과
+  // D183 fix: 성공률 영역 = success / sent (대기 영역 포함 분모) — 사용자 관점 정합
   const byHourResult = await query(
     `SELECT
         EXTRACT(HOUR FROM (sent_at AT TIME ZONE 'Asia/Seoul'))::int AS hour,
-        SUM(success_count + fail_count) AS sent,
-        SUM(success_count)::float / NULLIF(SUM(success_count + fail_count), 0) AS success_rate
+        SUM(sent_count) AS sent,
+        SUM(success_count)::float / NULLIF(SUM(sent_count), 0) AS success_rate
      FROM campaigns
      WHERE company_id = $1::uuid
        AND status = 'completed'

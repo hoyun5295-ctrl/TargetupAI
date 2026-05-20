@@ -444,6 +444,8 @@ router.get('/campaigns/:id', async (req: Request, res: Response) => {
         successFail: {
           success: campaign.success_count || 0,
           fail: campaign.fail_count || 0,
+          // D183 fix: 사용자 관점 성공률 영역 = success / sent (대기 영역 포함 분모) — frontend 영역 정합
+          sent: campaign.sent_count || 0,
         },
         carriers: carrierStats,
         errors: errorStats,

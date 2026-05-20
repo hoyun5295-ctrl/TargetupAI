@@ -345,7 +345,8 @@ export default function ResultsModal({ onClose, token, customerDbEnabled, isSubs
               {(summary || campaigns.length > 0) && (() => {
                 const totalSuccess = filteredCampaigns.reduce((sum, c) => sum + (c.success_count || 0), 0);
                 const totalFail = filteredCampaigns.reduce((sum, c) => sum + (c.fail_count || 0), 0);
-                const totalSent = totalSuccess + totalFail;
+                // D183 fix: 전송 영역 = sent_count(통신사 발송 누계) 또는 target_count(목표 수) — 대기 영역 포함 분모 정합
+                const totalSent = filteredCampaigns.reduce((sum, c) => sum + (c.sent_count || c.target_count || 0), 0);
                 const successRate = totalSent > 0 ? Math.round((totalSuccess / totalSent) * 100) : 0;
                 // 메시지 타입별 단가 적용 (SMS/LMS/MMS/카카오 구분)
                 const perSms = summary?.costs?.perSms || 9.9;
@@ -465,7 +466,8 @@ export default function ResultsModal({ onClose, token, customerDbEnabled, isSubs
                           </td>
                           <td className="px-3 py-2.5 text-center">
                             {(() => {
-                              const total = (c.success_count || 0) + (c.fail_count || 0);
+                              // D183 fix: 전송 영역 = sent_count 또는 target_count (대기 영역 포함 분모)
+                              const total = c.sent_count || c.target_count || 0;
                               const rate = total > 0 ? Math.round(((c.success_count || 0) / total) * 100) : 0;
                               return <span className={`px-2 py-0.5 rounded text-xs font-medium ${getStatusBadge(rate)}`}>{rate}%</span>;
                             })()}
@@ -777,14 +779,19 @@ export default function ResultsModal({ onClose, token, customerDbEnabled, isSubs
                     <div className="text-xs text-gray-500 mb-1">성공률</div>
                     <div className={`text-3xl font-bold ${
                       (() => {
+                        // D183 fix: 전송 영역 = s.sent 우선 (대기 영역 포함 분모) + fallback = success+fail
                         const s = campaignDetail?.charts?.successFail;
-                        const rate = s ? Math.round((s.success / (s.success + s.fail || 1)) * 100) : 0;
+                        const denom = s ? (s.sent || (s.success + s.fail) || 1) : 1;
+                        const rate = s ? Math.round((s.success / denom) * 100) : 0;
                         return rate >= 50 ? 'text-green-600' : 'text-red-500';
                       })()
                     }`}>
-                      {campaignDetail?.charts?.successFail
-                        ? Math.round((campaignDetail.charts.successFail.success / (campaignDetail.charts.successFail.success + campaignDetail.charts.successFail.fail || 1)) * 100)
-                        : 0}%
+                      {(() => {
+                        const s = campaignDetail?.charts?.successFail;
+                        if (!s) return 0;
+                        const denom = s.sent || (s.success + s.fail) || 1;
+                        return Math.round((s.success / denom) * 100);
+                      })()}%
                     </div>
                   </div>
                   <div className="border border-gray-200 rounded-lg p-4">
