@@ -107,9 +107,24 @@
 
 ---
 
-### 🚀 다음 세션 진입 가이드 (D182 종결 후 — 운영 데이터 누적 + Journey Builder Lite 진입)
+### 🚀 다음 세션 진입 가이드 (D183 종결 후 — **레거시 이니시스 결제모듈 한줄로 이전 즉시 구현**)
 
-> **선행 정독 필수:** `docs/AI_OPERATOR_기능정의서.md` v1.0.10 + `docs/한줄로_BEYOND_BRAZE_비전.md` v0.6 + `status/ai_operator_progress.md`
+> **★ 최우선 진입 영역 (D184 본질):** **`status/legacy-payment-migration.md`** (SoT) 정독 → 즉시 구현 진입 (1~2일 코드 영역 본질). Harold 명시 "다음 세션 = 헛소리 X = 즉시 완벽 파악 + 옮기기 진행" 정합.
+>
+> **D184 진입 명령어 (다음 세션 첫 메시지)**:
+> ```
+> status/legacy-payment-migration.md 정독 + status/STATUS.md CURRENT_TASK 정독 → 진정 이니시스 결제모듈 한줄로 이전 즉시 구현 진입 (Day 1 Step 1~6 순차 진행). 진정 본질 = SoT 문서 = 본 영역만 정합. 추측 X = SoT 문서 본질만 사용.
+> ```
+>
+> **D183 종결 매트릭스** (이번 세션 완료):
+> - 슈퍼관리자 통계 영역 응답 속도 fix (ecosystem.config.js Heap 2GB + DB Index 5건 + next-action-advisor customer_id 42703 영구 차단 + 성공률 영역 success/sent 정합 5위치 통합 fix)
+> - 클릭 트래킹 인프라 (단축 URL CT-40 + `/c/:hash` redirect + cdp_events 'message_click' + accumulateCampaignLearning 자동 누적 + ResultsModal 클릭률 카드)
+> - 영구 룰 메모리 3건 신규 (cto-mandate-for-vito + sql-command-must-check-schema-first + no-pm2-delete-before-git-push + no-overuse-sago-word)
+> - 레거시 이니시스 결제 영역 완전 파악 (Phase 1) + SoT 문서 작성 (`status/legacy-payment-migration.md`)
+>
+> **D184 본질** = 레거시 invitobiz.com 이니시스 결제모듈 → 한줄로 BalanceModals 카드결제 영역 이전 (가상계좌 영역 영구 제거 + 디자인 깔끔 변경 본질). 운영 MID = `usomsms001`. 분량 = 코드 1~2일 + 이니시스 검수 1~3일 + 운영 검증 2~3일.
+>
+> **선행 정독 (D183~ 잔존 영역, D184 종결 후 진행):** `docs/AI_OPERATOR_기능정의서.md` v1.0.10 + `docs/한줄로_BEYOND_BRAZE_비전.md` v0.6 + `status/ai_operator_progress.md`
 >
 > **영구 원칙 (모든 작업 시 정합):** [[feedback_no_target_auto_relax]] + [[feedback_ai_operator_model_isolation]] + [[feedback_no_future_roadmap_user_exposure]] + [[feedback_sub_module_back_navigation]] + [[feedback_jondaetmal_to_harold]] + [[feedback_push_and_deploy_commands]] + [[feedback_no_humuson_keyword_exposure]] + [[feedback_no_devtools_browser_diagnostic]] + [[feedback_ai_operator_user_gating]] + [[feedback_no_bakkeum_usage]]
 

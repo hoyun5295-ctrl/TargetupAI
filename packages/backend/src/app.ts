@@ -20,6 +20,8 @@ import uploadRoutes from './routes/upload'
 import unsubscribesRoutes from './routes/unsubscribes';
 import addressBooksRoutes from './routes/address-books';
 import balanceRoutes from './routes/balance';
+// ★ D184 (2026-05-20): 이니시스 표준결제 라우트 (레거시 invitobiz.com → 한줄로 이전)
+import paymentsRoutes from './routes/payments';
 import testContactsRoutes from './routes/test-contacts';
 import billingRoutes from './routes/billing';
 import adminSyncRoutes from './routes/admin-sync';
@@ -154,6 +156,8 @@ app.use('/api/v1/results', resultsRoutes);
 app.use('/api/unsubscribes', unsubscribesRoutes);
 app.use('/api/address-books', addressBooksRoutes);
 app.use('/api/balance', balanceRoutes);
+// ★ D184: 이니시스 표준결제 (prepare/return/close/list/detail)
+app.use('/api/payments', paymentsRoutes);
 app.use('/api/admin/billing', billingRoutes);
 app.use('/api/admin/sync', adminSyncRoutes);
 // ★ D145 P0: 더 구체적 경로 먼저 등록 (/api/admin 와일드카드 위에)

@@ -38,6 +38,8 @@ import EmailCampaignsPage from './pages/EmailCampaignsPage';
 import AiMemoryPage from './pages/AiMemoryPage';
 import AiBatchesPage from './pages/AiBatchesPage';
 import AiExplainPage from './pages/AiExplainPage';
+// ★ D184 (2026-05-20): 이니시스 결제 결과 fallback 페이지 (새 창 자동 close 영역에 fallback 본질)
+import PaymentResultPage from './pages/PaymentResultPage';
 
 // ★ 세션 타이머 Context — 헤더 등에서 남은 시간 표시용
 interface SessionTimerContextType {
@@ -391,6 +393,8 @@ function App() {
         <Route path="/pricing" element={<PrivateRoute><PricingPage /></PrivateRoute>} />
         <Route path="/privacy" element={<PrivacyPage />} />
         <Route path="/terms" element={<TermsPage />} />
+        {/* D184: 이니시스 결제 결과 fallback (인증 X — 새 창 자동 close 차단 시 표시) */}
+        <Route path="/payment/result" element={<PaymentResultPage />} />
 
         {/* 404 */}
         <Route path="*" element={<Navigate to="/" replace />} />
