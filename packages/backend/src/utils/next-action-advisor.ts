@@ -112,7 +112,8 @@ export async function buildPerformanceSnapshot(companyId: string): Promise<Perfo
   );
 
   // 5. 신규/활성 고객
-  // D183 fix: campaign_runs / campaigns 영역 customer_id 컬럼 부재 (SCHEMA.md L152-215) — active_via_campaign 제거
+  // D183 fix: campaign_runs / campaigns 영역 customer_id 컬럼 부재 (SCHEMA L152-215 검증) → active_via_campaign 영역 영구 제거.
+  // 진정 활성 고객 본질 = cdp_events 영역 (purchase / page_view / cart_add 등 행동) 정합.
   const customerStats = await query(
     `SELECT
         (SELECT COUNT(*)::int FROM customers WHERE company_id = $1::uuid AND created_at > NOW() - INTERVAL '30 days') AS new_customers,
