@@ -112,16 +112,16 @@ export async function buildPerformanceSnapshot(companyId: string): Promise<Perfo
   );
 
   // 5. 신규/활성 고객
+  // D183 fix: campaign_runs / campaigns 영역 customer_id 컬럼 부재 (SCHEMA.md L152-215) — active_via_campaign 제거
   const customerStats = await query(
     `SELECT
         (SELECT COUNT(*)::int FROM customers WHERE company_id = $1::uuid AND created_at > NOW() - INTERVAL '30 days') AS new_customers,
-        (SELECT COUNT(DISTINCT customer_id)::int FROM cdp_events WHERE company_id = $1::uuid AND occurred_at > NOW() - INTERVAL '30 days' AND customer_id IS NOT NULL) AS active_via_cdp,
-        (SELECT COUNT(DISTINCT customer_id)::int FROM campaign_runs cr JOIN campaigns c ON cr.campaign_id = c.id WHERE c.company_id = $1::uuid AND cr.created_at > NOW() - INTERVAL '30 days') AS active_via_campaign`,
+        (SELECT COUNT(DISTINCT customer_id)::int FROM cdp_events WHERE company_id = $1::uuid AND occurred_at > NOW() - INTERVAL '30 days' AND customer_id IS NOT NULL) AS active_via_cdp`,
     [companyId]
   );
 
   const stats = customerStats.rows[0];
-  const activeCustomers = Math.max(parseInt(stats.active_via_cdp || '0'), parseInt(stats.active_via_campaign || '0'));
+  const activeCustomers = parseInt(stats.active_via_cdp || '0');
 
   const totalCampaigns = (performance as any).total_campaigns || 0;
   const totalSent = (performance as any).total_sent || 0;
