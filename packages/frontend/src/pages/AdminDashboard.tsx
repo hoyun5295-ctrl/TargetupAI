@@ -3883,8 +3883,8 @@ const handleApproveRequest = async (id: string) => {
               const success = Number(sendStats.summary.total_success);
               const fail = Number(sendStats.summary.total_fail);
               const pending = Math.max(0, sent - success - fail);
-              const denom = success + fail;
-              const rate = denom > 0 ? (success / denom * 100).toFixed(1) : '-';
+              // D183 fix: 성공률 = 전송 대비 성공 비율 (대기 영역 포함 분모) — 사용자 관점 정합
+              const rate = sent > 0 ? (success / sent * 100).toFixed(1) : '-';
               return (
                 <div className="bg-white rounded-lg shadow px-6 py-3 flex items-center gap-8 text-sm">
                   <span className="text-gray-500">조회 기간 합계</span>
@@ -3892,7 +3892,7 @@ const handleApproveRequest = async (id: string) => {
                   <span className="font-semibold text-green-600">성공 {success.toLocaleString()}</span>
                   <span className="font-semibold text-red-600">실패 {fail.toLocaleString()}</span>
                   <span className="font-semibold text-amber-600">대기 {pending.toLocaleString()}</span>
-                  <span className="font-semibold text-gray-700">성공률 {denom > 0 ? `${rate}%` : '-'}</span>
+                  <span className="font-semibold text-gray-700">성공률 {sent > 0 ? `${rate}%` : '-'}</span>
                 </div>
               );
             })()}
@@ -3996,8 +3996,8 @@ const handleApproveRequest = async (id: string) => {
                       const success = Number(row.success);
                       const fail = Number(row.fail);
                       const pending = Math.max(0, sent - success - fail);
-                      const denom = success + fail;
-                      const rate = denom > 0 ? (success / denom * 100).toFixed(1) : '-';
+                      // D183 fix: 성공률 = 전송 대비 성공 비율 (대기 영역 포함 분모) — 사용자 관점 정합
+                      const rate = sent > 0 ? (success / sent * 100).toFixed(1) : '-';
                       return (
                         <tr key={idx} className="hover:bg-gray-50">
                           <td className="px-4 py-3 font-medium text-gray-900 font-mono">{row.date || row.month}</td>
@@ -4006,7 +4006,7 @@ const handleApproveRequest = async (id: string) => {
                           <td className="px-4 py-3 text-center text-green-600">{success.toLocaleString()}</td>
                           <td className="px-4 py-3 text-center text-red-600">{fail.toLocaleString()}</td>
                           <td className="px-4 py-3 text-center text-amber-600">{pending.toLocaleString()}</td>
-                          <td className="px-4 py-3 text-center font-medium">{denom > 0 ? `${rate}%` : '-'}</td>
+                          <td className="px-4 py-3 text-center font-medium">{sent > 0 ? `${rate}%` : '-'}</td>
                           <td className="px-4 py-3 text-center">
                             {row.line_group_name ? (
                               <span className="px-2 py-1 bg-blue-50 text-blue-700 text-xs rounded-full font-medium">{row.line_group_name}</span>
