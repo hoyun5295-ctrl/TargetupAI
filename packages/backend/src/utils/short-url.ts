@@ -60,7 +60,8 @@ export async function createShortUrl(input: CreateShortUrlInput): Promise<{ hash
     const hash = generateHash();
     try {
       await query(
-        `INSERT INTO short_urls (hash, full_url, company_id, campaign_id, expires_at)
+        // D183 정정: short_urls 영역 = 한줄전단(hanjulDM) 전단지 미리보기 영역 → 한줄로 캠페인 영역 별 테이블 분리
+        `INSERT INTO message_short_urls (hash, full_url, company_id, campaign_id, expires_at)
          VALUES ($1, $2, $3::uuid, $4, $5)`,
         [hash, input.fullUrl, input.companyId, input.campaignId || null, input.expiresAt || null],
       );
@@ -78,8 +79,9 @@ export async function createShortUrl(input: CreateShortUrlInput): Promise<{ hash
  */
 export async function resolveShortUrl(hash: string): Promise<ShortUrlResolution | null> {
   const result = await query(
+    // D183 정정: 한줄로 캠페인 단축 URL 전용 테이블 (한줄전단 short_urls와 분리)
     `SELECT full_url, company_id, campaign_id, expires_at
-     FROM short_urls
+     FROM message_short_urls
      WHERE hash = $1
      LIMIT 1`,
     [hash],

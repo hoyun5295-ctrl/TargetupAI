@@ -56,12 +56,13 @@ router.get('/c/:hash', async (req: Request, res: Response) => {
       console.warn('[short-url] cdp_events 기록 실패:', err?.message);
     });
 
-    // short_urls.click_count 증가 (fire-and-forget)
-    void query(`UPDATE short_urls SET click_count = click_count + 1 WHERE hash = $1`, [hash]).catch(
-      (err) => {
-        console.warn('[short-url] click_count 증가 실패:', err?.message);
-      },
-    );
+    // message_short_urls.click_count 증가 (fire-and-forget)
+    // D183 정정: 한줄로 캠페인 전용 테이블 (한줄전단 short_urls와 분리)
+    void query(`UPDATE message_short_urls SET click_count = click_count + 1 WHERE hash = $1`, [
+      hash,
+    ]).catch((err) => {
+      console.warn('[short-url] click_count 증가 실패:', err?.message);
+    });
 
     return res.redirect(302, resolved.fullUrl);
   } catch (err: any) {
