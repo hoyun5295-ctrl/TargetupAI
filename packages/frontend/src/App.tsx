@@ -34,6 +34,10 @@ import ContinuousOperatorPage from './pages/ContinuousOperatorPage';
 import VoiceInboundPage from './pages/VoiceInboundPage';
 // ★ D180 (2026-05-19): Email 채널 (SendGrid)
 import EmailCampaignsPage from './pages/EmailCampaignsPage';
+// ★ D181 (2026-05-19): Phase 1 영구 개선 — Memory + Batch + Citations
+import AiMemoryPage from './pages/AiMemoryPage';
+import AiBatchesPage from './pages/AiBatchesPage';
+import AiExplainPage from './pages/AiExplainPage';
 
 // ★ 세션 타이머 Context — 헤더 등에서 남은 시간 표시용
 interface SessionTimerContextType {
@@ -328,6 +332,36 @@ function App() {
           element={
             <PrivateRoute allowedTypes={['company_admin']}>
               <EmailCampaignsPage />
+            </PrivateRoute>
+          }
+        />
+
+        {/* ★ D181 (2026-05-19): AI 학습 메모리 (Anthropic Memory tool 패턴) */}
+        <Route
+          path="/ai-memory"
+          element={
+            <PrivateRoute allowedTypes={['company_admin', 'company_user']}>
+              <AiMemoryPage />
+            </PrivateRoute>
+          }
+        />
+
+        {/* ★ D181 (2026-05-19): AI Batch (50% 비용 절감) */}
+        <Route
+          path="/ai-batches"
+          element={
+            <PrivateRoute allowedTypes={['company_admin', 'company_user']}>
+              <AiBatchesPage />
+            </PrivateRoute>
+          }
+        />
+
+        {/* ★ D181 (2026-05-19): AI에게 질문 (Citations 근거 인용) */}
+        <Route
+          path="/ai-explain"
+          element={
+            <PrivateRoute allowedTypes={['company_admin', 'company_user']}>
+              <AiExplainPage />
             </PrivateRoute>
           }
         />

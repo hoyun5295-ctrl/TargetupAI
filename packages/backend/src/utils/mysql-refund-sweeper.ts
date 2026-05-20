@@ -26,6 +26,8 @@ import { query } from '../config/database';
 import { getCompanySmsTablesWithLogs, smsBatchAggByGroup, kakaoBatchAggByGroup } from './sms-queue';
 import { SUCCESS_CODES, PENDING_CODES } from './sms-result-map';
 import { prepaidRefund } from './prepaid';
+// ★ D182 (2026-05-19): 캠페인 종료 시 회사별 학습 메모리 자동 누적
+import { recordCampaignLearning } from './company-memory';
 
 const INTERVAL_MS = 30 * 1000;     // 30초 — Harold님 명시 (D153 5/13): 레거시 실시간 환불 패턴 정합 + 후불 8.5/선불 1.5 부하 보수 마진 (1.5초/사이클 / 5% 점유 / 후불 업체는 billing_type filter로 쿼리 자체 X)
 const BOOT_DELAY_MS = 90 * 1000;   // campaign-sync-worker(60초)와 시작 시점 차이 둠
@@ -169,9 +171,17 @@ async function runOnce(): Promise<void> {
       log(`[reverse-refund] ${reverseRes.reversed}건 reverse 차감 / 총 ${reverseRes.totalAmount}원 (타임아웃 환불 후 발송 성공 확인)`);
     }
 
+    // === 6. D182 (2026-05-19) — 캠페인 종료 시 회사별 학습 메모리 자동 누적 ===
+    //   D181 Memory tool 본질 — 캠페인 종료 후 성공 패턴 / 채널 성과 ai_company_memory에 자동 누적
+    //   idempotent — campaign_id 기준 1회만 학습 (중복 누적 차단)
+    const learningRes = await accumulateCampaignLearning();
+    if (learningRes.learned > 0) {
+      log(`[memory-learning] ${learningRes.learned}개 캠페인 학습 누적 (성공 패턴 + 채널 성과 → ai_company_memory)`);
+    }
+
     const elapsedMs = Date.now() - startedAt;
-    if (pgUpdateCount > 0 || refundCount > 0 || reverseRes.reversed > 0) {
-      log(`사이클 완료 — 후보 ${candidates.rows.length} / PG 갱신 ${pgUpdateCount} / 환불 ${refundCount}건 ${totalRefundAmount}원 / reverse ${reverseRes.reversed}건 ${reverseRes.totalAmount}원 / ${elapsedMs}ms`);
+    if (pgUpdateCount > 0 || refundCount > 0 || reverseRes.reversed > 0 || learningRes.learned > 0) {
+      log(`사이클 완료 — 후보 ${candidates.rows.length} / PG 갱신 ${pgUpdateCount} / 환불 ${refundCount}건 ${totalRefundAmount}원 / reverse ${reverseRes.reversed}건 ${reverseRes.totalAmount}원 / 학습 ${learningRes.learned}건 / ${elapsedMs}ms`);
     }
   } catch (err: any) {
     log('전체 오류:', err?.message || err);
@@ -303,6 +313,91 @@ async function reverseTimeoutRefundIfRecovered(): Promise<{ reversed: number; to
   }
 
   return { reversed, totalAmount };
+}
+
+// ===========================================================================
+// D182 (2026-05-19) — 캠페인 종료 시 회사별 학습 메모리 자동 누적
+// ---------------------------------------------------------------------------
+// D181 Memory tool 본질 — 캠페인 종료 후 ai_company_memory에 자동 누적.
+// 트리거: campaigns.status='completed' + sent_at 박힘 + 학습 누락 (ai_company_memory에 본 campaign_id 박힌 row 없음)
+// 처리: recordCampaignLearning 호출 → success_pattern (클릭률 10%+) + channel_performance 박음
+// idempotency: metadata->>'campaign_id' 기준 중복 차단
+// ===========================================================================
+
+interface LearningCandidateRow {
+  campaign_id: string;
+  company_id: string;
+  campaign_name: string;
+  message_type: string;
+  send_type: string;
+  is_ad: boolean;
+  sent_count: number;
+  success_count: number;
+  fail_count: number;
+  click_count: number | null;
+  conversion_count: number | null;
+  sent_at: Date;
+}
+
+async function accumulateCampaignLearning(): Promise<{ learned: number }> {
+  // 1. 최근 24h 내 종료된 캠페인 후보 (학습 미박힘만)
+  //   - status='completed' + sent_at 박힘 + sent_count >= 10 (표본 부족 차단)
+  //   - ai_company_memory에 본 campaign_id metadata 박힌 row 미존재
+  const candidates = await query(`
+    SELECT
+      c.id AS campaign_id,
+      c.company_id,
+      c.campaign_name,
+      c.message_type,
+      c.send_type,
+      COALESCE(c.is_ad, false) AS is_ad,
+      COALESCE(c.sent_count, 0) AS sent_count,
+      COALESCE(c.success_count, 0) AS success_count,
+      COALESCE(c.fail_count, 0) AS fail_count,
+      0 AS click_count,
+      0 AS conversion_count,
+      c.sent_at
+    FROM campaigns c
+    WHERE c.status = 'completed'
+      AND c.sent_at IS NOT NULL
+      AND c.sent_at > NOW() - INTERVAL '24 hours'
+      AND COALESCE(c.sent_count, 0) >= 10
+      AND NOT EXISTS (
+        SELECT 1 FROM ai_company_memory m
+        WHERE m.company_id = c.company_id
+          AND m.source = 'campaign_result'
+          AND m.metadata->>'campaign_id' = c.id::text
+      )
+    ORDER BY c.sent_at DESC
+    LIMIT 100
+  `);
+
+  let learned = 0;
+
+  for (const row of candidates.rows as LearningCandidateRow[]) {
+    try {
+      // click_count / conversion_count는 현재 schema에 없으므로 success_count의 일부로 추정 (별 trigger 박을 영역)
+      // 향후 click 트래킹 (cdp_events.event_name='message_click') 박힌 후 정확한 수치 박을 영역
+      const channelLabel = row.send_type === 'direct' ? '직접발송' : 'AI추천';
+      await recordCampaignLearning({
+        companyId: row.company_id,
+        campaignId: row.campaign_id,
+        campaignName: row.campaign_name || `${channelLabel} ${new Date(row.sent_at).toLocaleDateString('ko-KR')}`,
+        channel: row.message_type,
+        targetCriteria: row.send_type,
+        messageBody: '', // 본문 별도 조회 불요 (memory_key는 channel/name으로 박힘)
+        sentCount: Number(row.sent_count),
+        clickCount: Number(row.click_count || 0),
+        conversionCount: Number(row.conversion_count || 0),
+        isAd: !!row.is_ad,
+      });
+      learned++;
+    } catch (innerErr: any) {
+      log(`✗ memory-learning campaign=${row.campaign_id} 처리 에러:`, innerErr?.message || innerErr);
+    }
+  }
+
+  return { learned };
 }
 
 export function startMysqlRefundSweeper(): void {

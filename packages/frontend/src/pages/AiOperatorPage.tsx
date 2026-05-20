@@ -11,6 +11,8 @@ import {
   DollarSign,
   LineChart,
   Loader2,
+  BookOpen,
+  Layers,
   Mail,
   MessageSquare,
   Phone,
@@ -163,6 +165,9 @@ const SUB_MODULE_CARDS: SubModuleCard[] = [
   { icon: Phone,        gradient: 'from-violet-400 to-purple-500', label: '인바운드 음성 AI', description: '자사몰 사용자 전화 클릭 시 AI 자동 응답 (Phase 1)', path: '/voice-inbound',    adminOnly: true },
   { icon: Mail,         gradient: 'from-blue-400 to-cyan-500',     label: 'Email 캠페인',   description: 'SendGrid 기반 transactional · marketing 발송',      path: '/email-campaigns',  adminOnly: true },
   { icon: Smartphone,   gradient: 'from-amber-400 to-yellow-500',  label: '모바일 DM',      description: '카드형 모바일 DM 빌더 — 미디어 메시지 디자인',       path: '/dm-builder' },
+  { icon: Brain,        gradient: 'from-emerald-400 to-teal-500',  label: 'AI 학습 메모리',  description: '회사별 누적 학습 5종 — 시간 지날수록 정확도↑',     path: '/ai-memory' },
+  { icon: BookOpen,     gradient: 'from-indigo-400 to-blue-500',   label: 'AI에게 질문',     description: '회사 데이터 기반 답변 + 근거 인용 (Citations)',     path: '/ai-explain' },
+  { icon: Layers,       gradient: 'from-violet-400 to-indigo-500', label: 'AI Batch',       description: '대량 발송 50% 비용 절감 (24h SLA)',                path: '/ai-batches' },
 ];
 
 // 결과 카드 액센트
