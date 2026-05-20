@@ -107,29 +107,33 @@
 
 ---
 
-### 🚀 다음 세션 진입 가이드 (D178~D181 압축 진입 종결 — 운영 검증 진입)
+### 🚀 다음 세션 진입 가이드 (D182 종결 후 — 운영 데이터 누적 + Journey Builder Lite 진입)
 
-> **선행 정독 필수:** `docs/AI_OPERATOR_기능정의서.md` v1.0.9 + `docs/한줄로_BEYOND_BRAZE_비전.md` v0.5 + `status/ai_operator_progress.md`
+> **선행 정독 필수:** `docs/AI_OPERATOR_기능정의서.md` v1.0.10 + `docs/한줄로_BEYOND_BRAZE_비전.md` v0.6 + `status/ai_operator_progress.md`
 >
-> **영구 원칙 (모든 박음 시 정합):** [[feedback_no_target_auto_relax]] + [[feedback_ai_operator_model_isolation]] + [[feedback_no_future_roadmap_user_exposure]] + [[feedback_sub_module_back_navigation]] + [[feedback_jondaetmal_to_harold]] + [[feedback_push_and_deploy_commands]] + [[feedback_no_humuson_keyword_exposure]] + [[feedback_no_devtools_browser_diagnostic]] + [[feedback_ai_operator_user_gating]]
+> **영구 원칙 (모든 작업 시 정합):** [[feedback_no_target_auto_relax]] + [[feedback_ai_operator_model_isolation]] + [[feedback_no_future_roadmap_user_exposure]] + [[feedback_sub_module_back_navigation]] + [[feedback_jondaetmal_to_harold]] + [[feedback_push_and_deploy_commands]] + [[feedback_no_humuson_keyword_exposure]] + [[feedback_no_devtools_browser_diagnostic]] + [[feedback_ai_operator_user_gating]] + [[feedback_no_bakkeum_usage]]
 
-#### 1순위 — 운영 환경 사용 검증 (hoyun 박음 박은 후)
+#### 1순위 — 운영 환경 사용 검증 (D182 fix 배포 후)
 
-> Harold 박음 종결 (2026-05-19) — `.env`에 `AI_OPERATOR_ALLOWED_USERS=hoyun` 박힘 + pm2 restart 박음. **hoyun만 실제 진입 / 그 외 모두 BetaFeatureModal**.
+> Harold 환경 — `.env` `AI_OPERATOR_ALLOWED_USERS=hoyun` 박힘 종결. **hoyun만 실제 진입 / 그 외 모두 BetaFeatureModal**.
 
-| 영역 | Harold 검증 |
-|------|------------|
-| AI Operator 메인 진입 | `/ai-operator` 자연어 한 줄 → 통합 제안서 + 발송 흐름 |
-| Continuous Operator + **D177 Bandit** | `/continuous-operator` 신규 영구 운영 + 매일 09:00 KST 자동 제안서 + Bandit variant 추천 (proposal expand 시점에 박음) |
-| Continuous Operator + **D179 Multi-Goal** | `/continuous-operator` 헤더 "다중 목표 분석" 버튼 → modal → 2~5건 목표 박음 → analyze → sub_plans + conflict_matrix + recommended_order 박음 |
-| 성과리포트 | `/performance` 30일 성과 + AI Next Action 추천 + AI Operator prefill |
-| 자사몰 연동 (CDP) | `/cdp-settings` API key 발급 + **자체 호스팅 (Webhook+SDK)** + **네이버 스마트스토어 OAuth** + 카페24 OAuth UI |
-| Web Push (admin only) | `/push-campaigns` 구독자 매트릭스 + 발송 폼 |
-| In-app Message (admin only) | `/inapp-messages` CRUD + 미리보기 + CTR 통계 |
-| **D178 인바운드 음성 AI** (admin only) | `/voice-inbound` 활성/비활성 토글 + Clova 환경변수 박힘 상태 + 통화 이력 + 트랜스크립트 사후 확인 |
-| **D180 Email 캠페인** (admin only) | `/email-campaigns` 캠페인 신설 + 발송 + open/click/bounce/unsubscribe 통계 |
-| **D181 Memory** (회사 admin) | `GET /api/ai/operator/memory` (회사별 누적 학습 박은 영역 박음) + UI 박지 X (다음 세션 박을 영역) |
-| **D181 Batch + Citations** | endpoint 박힘 / UI 박지 X (Phase 2 박을 영역) |
+| 영역 | 검증 항목 |
+|------|---------|
+| **D182 신고 1 검증** | 직접발송 패널 보관함 버튼 → 저장 메시지 클릭 시 "전문 보기/접기" 토글 정상 동작 |
+| **D182 신고 2 검증** | mysql-refund-sweeper PM2 로그 grep — `[reverse-refund]` / `[memory-learning]` row 박힌 확인 (30초 주기) |
+| **D182 신고 3 검증** | 슈퍼관리자 + 회사 admin 사용자 비밀번호 초기화 → PM2 로그 `SMSQ_SEND_10` 라인 사용 확인 |
+| **영향받은 회사 보전** | 디에스패션 26.4원 + 태영 60.5원 PG SQL 직접 처리 (이전 답변 안내) |
+| AI Operator 메인 | `/ai-operator` 자연어 한 줄 → 통합 제안서 + 발송 |
+| Continuous Operator + Bandit + Multi-Goal | `/continuous-operator` 영구 운영 + Bandit variant 추천 + "다중 목표 분석" 모달 |
+| 성과리포트 | `/performance` 30일 성과 + AI Next Action |
+| 자사몰 연동 (CDP) | `/cdp-settings` — 자체 호스팅 + 네이버 스마트스토어 + 카페24 |
+| Web Push / In-app (admin) | `/push-campaigns` / `/inapp-messages` |
+| 인바운드 음성 AI (admin) | `/voice-inbound` — Clova 환경변수 박힌 후 통화 이력 확인 |
+| Email 캠페인 (admin) | `/email-campaigns` — SendGrid 환경변수 박힌 후 발송 |
+| **D181/D182 신규 — AI 학습 메모리** | `/ai-memory` — 5 타입 검토/삭제/직접 입력. 자동 학습 cron 30초 주기로 누적 |
+| **D181/D182 신규 — AI에게 질문** | `/ai-explain` — Citations 자연어 질문 + 근거 인용 |
+| **D181/D182 신규 — AI Batch** | `/ai-batches` — Batch 진행 상태 + 50% 비용 절감 통계 |
+| **모바일 DM** (AI Operator 안으로 이동) | `/dm-builder` — 헤더 메뉴 제거됨, SUB_MODULE_CARDS에서 진입 |
 
 #### 2순위 — Harold 박을 외부 영역 (운영 진입 박음 시점)
 
@@ -142,15 +146,33 @@
 | **SendGrid** | SENDGRID_API_KEY + SENDGRID_FROM_DOMAIN (SPF/DKIM/DMARC 박힘 도메인) |
 | **hoyun 박음 게이팅** ✓ | AI_OPERATOR_ALLOWED_USERS=hoyun (박힘 종결) |
 
-#### 3순위 — CTO 추천 다음 박을 영역 (운영 데이터 1주+ 박힌 후)
+#### 3순위 — 다음 세션 CTO 진행 우선순위 (운영 데이터 누적 병행)
 
-| D | 영역 | 박을 의존성 |
-|---|------|------------|
-| **D181~D185 Journey Builder Lite** | 6 표준 여정 (가입/재구매/휴면/장바구니/생일/예약) + AI 자연어 진입 + Continuous Operator + Multi-Goal + Bandit 통합. **Braze Canvas 본질 대응** | D176/D177/D179 운영 데이터 1주+ 박힌 후 |
-| **D186~D190 Provider Adapter 구체** | Shopify (글로벌 1위) / 메이크샵 (한국 2위) wrapper. ENT 후보사 자사몰 종류 박은 후 박음 | Harold 결정 영역 |
-| **D191~D195 글로벌 확장 1차** | 영어 i18n + WhatsApp Business API | 한국 ENT 5사+ 박힌 후 |
-| **D195+ 외향 음성 AI Phase 2** | 정보통신망법 + 한국어 자연도 검토 박힌 후 박음 | 비전 v0.5 § 4-1 정합 |
-| **D196~D200 AI 챗봇 (자사몰 In-app)** | CDP + Opus 4.7 + Tool Use 자율 운영 | 음성 AI 박힌 후 |
+| 순위 | 영역 | 분량 | 진입 조건 |
+|---|------|---|---|
+| **1** | **D183 Journey Builder Lite Step 1** | 큰 (수 일+) | 운영 데이터 1주+ + Bandit/Multi-Goal/Memory 누적 학습 데이터 확인 후 |
+| **2** | **@hanjullo/sdk v0.3.0** (sendEmail + voiceInbound 메서드) | 1~2h | 즉시 가능 |
+| **3** | **D162-4 잔존** (직접타겟발송 검증 + AlimtalkSendModal 수신자 리스트) | 1~2h | Harold 명시 시 |
+| **4** | **클릭 트래킹 인프라** (cdp_events.event_name='message_click') | 3~4h | accumulateCampaignLearning click_count 정확도 향상 필요 시 |
+| **5** | **타임아웃 환불 reverse 슈퍼관리자 알람 SMS** | 1h | 알람 인프라 검토 후 |
+| **6** | **Shopify / 메이크샵 wrapper 구체 구현** | 큰 영역 | ENT 후보사 자사몰 종류 박힌 후 (Harold 결정) |
+| **7** | **D195+ 외향 음성 AI Phase 2** | 큰 영역 | 정보통신망법 + 한국어 자연도 검토 (Harold 결정) |
+| **8** | **D196~D200 AI 챗봇 (자사몰 In-app)** | 큰 영역 | 음성 AI 박힌 후 |
+
+#### Journey Builder Lite (D183~D185) 박을 설계 (다음 세션 진입 시 참조)
+
+**박을 구조**:
+- 6 표준 여정 템플릿: 가입 / 재구매 / 휴면 / 장바구니 포기 / 생일 / 예약
+- 자연어 진입 ("재구매 여정 시작" → Opus 4.7이 6 step 자동 박음)
+- Continuous Operator + Multi-Goal + Bandit 통합 (여정 step별 변형 + 충돌 분석)
+- Memory tool 활용 — 회사별 학습 패턴 기반 step 자동 조정
+
+**박을 영역 예측**:
+- DB: `journeys` + `journey_steps` + `journey_executions` + `journey_step_logs` (4 신규 테이블)
+- utils: `journey-builder.ts` CT-40 + `journey-executor.ts` CT-41
+- routes: `/api/ai/operator/journeys` CRUD + `/start` + `/pause` + `/status`
+- frontend: `/ai-journeys` 페이지 (시각적 step 흐름 + 사용자 진행 추적)
+- Braze Canvas 본질 대응 — 자연어 진입 + AI 자동 step 박음 = 압도 차별화
 
 #### 4순위 — Harold 결정 영역 (운영 검증 후)
 
@@ -171,7 +193,7 @@
 #### 진입 명령 (다음 세션 첫 메시지)
 
 ```
-status/STATUS.md CURRENT_TASK § "다음 세션 진입 가이드" 정독 + docs/AI_OPERATOR_기능정의서.md v1.0.9 + docs/한줄로_BEYOND_BRAZE_비전.md v0.5 + status/ai_operator_progress.md 정독 → Harold 신고 우선 종결 또는 D181 Memory/Batch/Citations UI 박음 또는 D181 Journey Builder Lite 박음 진입
+status/STATUS.md CURRENT_TASK § "다음 세션 진입 가이드" 정독 + docs/AI_OPERATOR_기능정의서.md v1.0.10 + docs/한줄로_BEYOND_BRAZE_비전.md v0.6 + status/ai_operator_progress.md 정독 → Harold 신고 우선 종결 또는 D183 Journey Builder Lite 진입 또는 SDK v0.3.0 진입
 ```
 
 ---

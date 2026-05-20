@@ -52,6 +52,10 @@
 | **D181 #3 Anthropic Batch API** | utils/batch-ai.ts CT-38(submitBatch + pollBatch + getBatchResults + listBatchJobs Anthropic native) + DB ai_batch_jobs 테이블 + routes/ai.ts /operator/batches endpoint 2건. **대량 발송 50% 비용 절감** | ✓ 완료 | 빌드 + DB SQL 1건 박음 대기 |
 | **D181 #4 Anthropic Citations** | utils/citations.ts CT-39(buildCompanyDocuments 4 document + callAIWithCitations Opus 4.7 native citations.enabled) + routes/ai.ts /operator/explain endpoint. **사용자 신뢰 #4 본질 박음** | ✓ 완료 | 빌드 대기 (DB 박지 X) |
 | **D181 신규 DB schema** | ai_company_memory 1 + ai_batch_jobs 1 = **2 신규 테이블** | ⏸ Harold 직접 박을 영역 | SQL 2건 박힌 후 진입 |
+| **D182 직원 신고 fix 3건** | (1) 보관함 메시지 짤림 — Dashboard 모달 expandedTemplateIds + 전문 보기 토글. (2) 선불 타임아웃 환불 사고 — campaign-lifecycle 30→120분 + mysql-refund-sweeper reverseTimeoutRefundIfRecovered idempotent 함수. (3) 패스워드 초기화 SMS 라인 — admin.ts + manage-users.ts getTestSmsTables() 사용 | ✓ 완료 + 배포 종결 | Harold 직접 보전 SQL 86.9원만 남음 |
+| **D182 Phase 1 UI 활성** | AiMemoryPage(/ai-memory 5 타입 + 직접 입력) + AiBatchesPage(/ai-batches 통계 + manual poll) + AiExplainPage(/ai-explain Citations + 예시 질문 4건) + App.tsx 3 라우트 + AiOperatorPage SUB_MODULE_CARDS 7→11건(모바일DM + 메모리 + 질문 + Batch) | ✓ 완료 + 배포 종결 | — |
+| **D182 자동 학습 cron** | mysql-refund-sweeper에 accumulateCampaignLearning() 추가 — 30초 주기 + 24h 윈도우 + sent_count≥10 + metadata.campaign_id idempotent. ai_company_memory 자동 누적 → 영구 원칙 #6 "시간 지날수록 정확도↑" 본질 활성 | ✓ 완료 + 배포 종결 | — |
+| **D182 모바일DM 영역 정리** | DashboardHeader 메뉴 영구 제거 + AiOperatorPage SUB_MODULE_CARDS 카드 추가 + DmBuilderPage 뒤로가기 3곳 navigate('/ai-operator') | ✓ 완료 + 배포 종결 | — |
 
 ---
 
