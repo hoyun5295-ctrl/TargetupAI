@@ -35,6 +35,18 @@ export default function AddressBookModal({
     Array.from({ length: 5 }, () => ({ phone: '', name: '', extra1: '', extra2: '', extra3: '' }))
   );
 
+  // ★ D185 (2026-05-20): 사용자 신고 — 대량 업로드(130,962건+) 시 로딩 안내 영역 누락 사고
+  //   업로드 4 영역(직접입력 등록 / 파일 파싱 / 컬럼 매핑 저장 / 현재 수신자 저장) 영역에 로딩 오버레이 영역 박힘
+  //   업로드 중 영역 = 모달 close 영역 차단 (중간 X 사고 영구 안전망)
+  const [isUploading, setIsUploading] = useState(false);
+  const [uploadingMsg, setUploadingMsg] = useState('주소록을 처리 중입니다...');
+
+  // 업로드 중 영역 close 차단 영역 (사용자가 중간 X 영역 사고 차단)
+  const safeOnClose = () => {
+    if (isUploading) return;
+    onClose();
+  };
+
   const toggleGroupSelection = (groupName: string) => {
     setSelectedGroupNames(prev => {
       const next = new Set(prev);
@@ -107,10 +119,25 @@ export default function AddressBookModal({
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[60]">
-      <div className="bg-white rounded-xl shadow-2xl w-[750px] max-h-[85vh] overflow-hidden">
+      <div className="bg-white rounded-xl shadow-2xl w-[750px] max-h-[85vh] overflow-hidden relative">
+        {/* ★ D185: 업로드 영역 로딩 오버레이 (모달 본체 absolute 영역) */}
+        {isUploading && (
+          <div className="absolute inset-0 bg-white/95 backdrop-blur-sm flex items-center justify-center z-[70] rounded-xl">
+            <div className="text-center px-8">
+              <div className="inline-block w-14 h-14 border-4 border-amber-400 border-t-transparent rounded-full animate-spin mb-5"></div>
+              <div className="text-base font-semibold text-gray-800 mb-2">{uploadingMsg}</div>
+              <div className="text-xs text-gray-500">창을 닫지 마세요. 처리가 완료되면 자동으로 안내됩니다.</div>
+            </div>
+          </div>
+        )}
         <div className="px-6 py-4 border-b bg-amber-50 flex justify-between items-center">
           <h3 className="text-lg font-bold text-amber-700">📒 주소록</h3>
-          <button onClick={onClose} className="text-gray-500 hover:text-gray-700 text-xl">✕</button>
+          <button
+            onClick={safeOnClose}
+            disabled={isUploading}
+            className="text-gray-500 hover:text-gray-700 text-xl disabled:opacity-30 disabled:cursor-not-allowed"
+            title={isUploading ? '업로드 처리 중에는 닫을 수 없습니다' : '닫기'}
+          >✕</button>
         </div>
         
         <div className="p-6 overflow-y-auto max-h-[60vh]">
@@ -206,24 +233,33 @@ export default function AddressBookModal({
                     if (valid.length === 0) { alert('유효한 번호를 1건 이상 입력하세요'); return; }
                     if (!newGroupName.trim()) { alert('그룹명을 입력하세요'); return; }
                     const token = localStorage.getItem('token');
-                    const res = await fetch('/api/address-books', {
-                      method: 'POST',
-                      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-                      body: JSON.stringify({ groupName: newGroupName.trim(), contacts: valid })
-                    });
-                    const data = await res.json();
-                    if (data.success) {
-                      setToast({ show: true, type: 'success', message: data.message });
-                      setTimeout(() => setToast({ show: false, type: 'success', message: '' }), 3000);
-                      setDirectInputMode(false);
-                      setNewGroupName('');
-                      setDirectInputRows(Array.from({ length: 5 }, () => ({ phone: '', name: '', extra1: '', extra2: '', extra3: '' })));
-                      const groupRes = await fetch('/api/address-books/groups', { headers: { Authorization: `Bearer ${token}` } });
-                      const groupData = await groupRes.json();
-                      if (groupData.success) setAddressGroups(groupData.groups || []);
-                    } else { alert(data.error || '저장 실패'); }
+                    setIsUploading(true);
+                    setUploadingMsg(`주소록 등록 중... ${valid.length.toLocaleString()}건 잠시만 기다려주세요`);
+                    try {
+                      const res = await fetch('/api/address-books', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+                        body: JSON.stringify({ groupName: newGroupName.trim(), contacts: valid })
+                      });
+                      const data = await res.json();
+                      if (data.success) {
+                        setToast({ show: true, type: 'success', message: data.message });
+                        setTimeout(() => setToast({ show: false, type: 'success', message: '' }), 3000);
+                        setDirectInputMode(false);
+                        setNewGroupName('');
+                        setDirectInputRows(Array.from({ length: 5 }, () => ({ phone: '', name: '', extra1: '', extra2: '', extra3: '' })));
+                        const groupRes = await fetch('/api/address-books/groups', { headers: { Authorization: `Bearer ${token}` } });
+                        const groupData = await groupRes.json();
+                        if (groupData.success) setAddressGroups(groupData.groups || []);
+                      } else { alert(data.error || '저장 실패'); }
+                    } catch (err: any) {
+                      alert(`네트워크 오류: ${err?.message || err}`);
+                    } finally {
+                      setIsUploading(false);
+                    }
                   }}
-                  className="flex-1 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700"
+                  disabled={isUploading}
+                  className="flex-1 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 disabled:bg-gray-400 disabled:cursor-not-allowed"
                 >💾 주소록 저장</button>
                 <button
                   onClick={() => { setDirectInputMode(false); setNewGroupName(''); setDirectInputRows(Array.from({ length: 5 }, () => ({ phone: '', name: '', extra1: '', extra2: '', extra3: '' }))); }}
@@ -244,11 +280,14 @@ export default function AddressBookModal({
                   type="file"
                   accept=".xlsx,.xls,.csv"
                   className="hidden"
+                  disabled={isUploading}
                   onChange={async (e) => {
                     const file = e.target.files?.[0];
                     if (!file) return;
                     const formData = new FormData();
                     formData.append('file', file);
+                    setIsUploading(true);
+                    setUploadingMsg(`파일을 분석하고 있습니다... (${(file.size / 1024 / 1024).toFixed(1)}MB)`);
                     try {
                       const token = localStorage.getItem('token');
                       const res = await fetch('/api/upload/parse?includeData=true', { method: 'POST', headers: { Authorization: `Bearer ${token}` }, body: formData });
@@ -257,11 +296,15 @@ export default function AddressBookModal({
                         setAddressFileHeaders(data.headers || []);
                         setAddressFileData(data.allData || data.preview || []);
                         setAddressSaveMode(true);
+                      } else {
+                        alert(data.error || '파일 파싱 실패');
                       }
-                    } catch (err) {
-                      alert('파일 파싱 실패');
+                    } catch (err: any) {
+                      alert(`파일 파싱 실패: ${err?.message || err}`);
+                    } finally {
+                      setIsUploading(false);
+                      e.target.value = '';
                     }
-                    e.target.value = '';
                   }}
                 />
               </label>
@@ -337,31 +380,41 @@ export default function AddressBookModal({
                       extra3: cellToString(row[addressColumnMapping.extra3]),
                     }));
                     const token = localStorage.getItem('token');
-                    const res = await fetch('/api/address-books', {
-                      method: 'POST',
-                      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-                      body: JSON.stringify({ groupName: newGroupName, contacts })
-                    });
-                    const data = await res.json();
-                    if (data.success) {
-                      setToast({show: true, type: 'success', message: data.message});
-                      setTimeout(() => setToast({show: false, type: 'success', message: ''}), 3000);
-                      setAddressSaveMode(false);
-                      setNewGroupName('');
-                      setAddressFileData([]);
-                      setAddressColumnMapping({});
-                      const groupRes = await fetch('/api/address-books/groups', { headers: { Authorization: `Bearer ${token}` } });
-                      const groupData = await groupRes.json();
-                      if (groupData.success) setAddressGroups(groupData.groups || []);
-                    } else {
-                      alert(data.error || '저장 실패');
+                    setIsUploading(true);
+                    setUploadingMsg(`주소록 등록 중... ${contacts.length.toLocaleString()}건 처리에 수십초~수분 소요됩니다`);
+                    try {
+                      const res = await fetch('/api/address-books', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+                        body: JSON.stringify({ groupName: newGroupName, contacts })
+                      });
+                      const data = await res.json();
+                      if (data.success) {
+                        setToast({show: true, type: 'success', message: data.message});
+                        setTimeout(() => setToast({show: false, type: 'success', message: ''}), 3000);
+                        setAddressSaveMode(false);
+                        setNewGroupName('');
+                        setAddressFileData([]);
+                        setAddressColumnMapping({});
+                        const groupRes = await fetch('/api/address-books/groups', { headers: { Authorization: `Bearer ${token}` } });
+                        const groupData = await groupRes.json();
+                        if (groupData.success) setAddressGroups(groupData.groups || []);
+                      } else {
+                        alert(data.error || '저장 실패');
+                      }
+                    } catch (err: any) {
+                      alert(`네트워크 오류: ${err?.message || err}`);
+                    } finally {
+                      setIsUploading(false);
                     }
                   }}
-                  className="flex-1 py-2 bg-amber-600 text-white rounded-lg hover:bg-amber-700"
+                  disabled={isUploading}
+                  className="flex-1 py-2 bg-amber-600 text-white rounded-lg hover:bg-amber-700 disabled:bg-gray-400 disabled:cursor-not-allowed"
                 >💾 주소록 저장</button>
                 <button
                   onClick={() => { setAddressSaveMode(false); setAddressFileData([]); setAddressColumnMapping({}); setNewGroupName(''); }}
-                  className="px-4 py-2 bg-gray-300 rounded-lg hover:bg-gray-400"
+                  disabled={isUploading}
+                  className="px-4 py-2 bg-gray-300 rounded-lg hover:bg-gray-400 disabled:opacity-50 disabled:cursor-not-allowed"
                 >취소</button>
               </div>
             </div>
@@ -386,25 +439,34 @@ export default function AddressBookModal({
                       return;
                     }
                     const token = localStorage.getItem('token');
-                    const res = await fetch('/api/address-books', {
-                      method: 'POST',
-                      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-                      body: JSON.stringify({ groupName: newGroupName, contacts: directRecipients })
-                    });
-                    const data = await res.json();
-                    if (data.success) {
-                      setToast({show: true, type: 'success', message: data.message});
-                      setTimeout(() => setToast({show: false, type: 'success', message: ''}), 3000);
-                      setAddressSaveMode(false);
-                      setNewGroupName('');
-                      const groupRes = await fetch('/api/address-books/groups', { headers: { Authorization: `Bearer ${token}` } });
-                      const groupData = await groupRes.json();
-                      if (groupData.success) setAddressGroups(groupData.groups || []);
-                    } else {
-                      alert(data.error || '저장 실패');
+                    setIsUploading(true);
+                    setUploadingMsg(`주소록 저장 중... ${directRecipients.length.toLocaleString()}건 잠시만 기다려주세요`);
+                    try {
+                      const res = await fetch('/api/address-books', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+                        body: JSON.stringify({ groupName: newGroupName, contacts: directRecipients })
+                      });
+                      const data = await res.json();
+                      if (data.success) {
+                        setToast({show: true, type: 'success', message: data.message});
+                        setTimeout(() => setToast({show: false, type: 'success', message: ''}), 3000);
+                        setAddressSaveMode(false);
+                        setNewGroupName('');
+                        const groupRes = await fetch('/api/address-books/groups', { headers: { Authorization: `Bearer ${token}` } });
+                        const groupData = await groupRes.json();
+                        if (groupData.success) setAddressGroups(groupData.groups || []);
+                      } else {
+                        alert(data.error || '저장 실패');
+                      }
+                    } catch (err: any) {
+                      alert(`네트워크 오류: ${err?.message || err}`);
+                    } finally {
+                      setIsUploading(false);
                     }
                   }}
-                  className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700"
+                  disabled={isUploading}
+                  className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:bg-gray-400 disabled:cursor-not-allowed"
                 >저장</button>
                 <button
                   onClick={() => { setAddressSaveMode(false); setNewGroupName(''); }}
