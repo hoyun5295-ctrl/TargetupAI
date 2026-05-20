@@ -43,6 +43,7 @@ import naverCommerceRoutes, { naverCommerceCallbackRouter } from './routes/naver
 import voiceRoutes from './routes/voice';
 // ★ D180 (2026-05-19): Email 채널 (SendGrid Web API v3)
 import emailRoutes from './routes/email';
+import shortUrlRoutes from './routes/short-url';  // D183: 단축 URL redirect (/c/:hash) — 공개 endpoint
 import { startAutoCampaignScheduler } from './utils/auto-campaign-worker';
 import { ensureMonthlyLogTables } from './utils/sms-queue';
 import { startSpamTestQueueWorker } from './utils/spam-test-queue';
@@ -117,6 +118,8 @@ app.use(express.json({ limit: LIMITS.requestBodySize }));
 app.use('/api/upload', uploadRoutes);
 app.use('/api/sync', syncRoutes);
 app.use('/api/spam-filter', spamFilterRoutes);
+// D183 (2026-05-20): 단축 URL redirect — 공개 endpoint (/c/:hash) — SMS/카톡 수신자 클릭 트래킹
+app.use('/', shortUrlRoutes);
 
 // 헬스체크
 app.get('/health', (req, res) => {

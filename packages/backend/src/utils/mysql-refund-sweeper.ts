@@ -354,7 +354,13 @@ async function accumulateCampaignLearning(): Promise<{ learned: number }> {
       COALESCE(c.sent_count, 0) AS sent_count,
       COALESCE(c.success_count, 0) AS success_count,
       COALESCE(c.fail_count, 0) AS fail_count,
-      0 AS click_count,
+      -- D183 (2026-05-20): cdp_events 'message_click' 영역 정확 집계 — 단축 URL 트래킹 통합
+      COALESCE((
+        SELECT COUNT(*)::int FROM cdp_events e
+        WHERE e.company_id = c.company_id
+          AND e.event_name = 'message_click'
+          AND e.properties->>'campaign_id' = c.id::text
+      ), 0) AS click_count,
       0 AS conversion_count,
       c.sent_at
     FROM campaigns c

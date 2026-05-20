@@ -773,8 +773,8 @@ export default function ResultsModal({ onClose, token, customerDbEnabled, isSubs
               </div>
 
               <div className="flex-1 overflow-y-auto p-6 space-y-5">
-                {/* 상단 3카드 */}
-                <div className="grid grid-cols-3 gap-4">
+                {/* 상단 4카드 (D183: 클릭률 카드 추가 — 단축 URL 트래킹 통합) */}
+                <div className="grid grid-cols-4 gap-4">
                   <div className="border border-gray-200 rounded-lg p-4 text-center">
                     <div className="text-xs text-gray-500 mb-1">성공률</div>
                     <div className={`text-3xl font-bold ${
@@ -792,6 +792,20 @@ export default function ResultsModal({ onClose, token, customerDbEnabled, isSubs
                         const denom = s.sent || (s.success + s.fail) || 1;
                         return Math.round((s.success / denom) * 100);
                       })()}%
+                    </div>
+                  </div>
+                  {/* D183 신규: 클릭률 카드 — cdp_events 'message_click' 영역 집계 */}
+                  <div className="border border-gray-200 rounded-lg p-4 text-center">
+                    <div className="text-xs text-gray-500 mb-1">클릭률</div>
+                    <div className="text-3xl font-bold text-blue-600">
+                      {(() => {
+                        const s = campaignDetail?.charts?.successFail;
+                        if (!s || !s.clicks || !s.success) return 0;
+                        return Math.round((s.clicks / s.success) * 100);
+                      })()}%
+                    </div>
+                    <div className="text-xs text-gray-400 mt-1">
+                      {(campaignDetail?.charts?.successFail?.clicks || 0).toLocaleString()} 클릭
                     </div>
                   </div>
                   <div className="border border-gray-200 rounded-lg p-4">

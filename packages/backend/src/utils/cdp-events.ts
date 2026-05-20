@@ -46,6 +46,8 @@ export const STANDARD_EVENT_NAMES = [
   'wishlist_remove',
   'product_view',
   'search',
+  // D183 (2026-05-20): SMS/카톡 단축 URL 클릭 트래킹 — accumulateCampaignLearning 정확도 학습
+  'message_click',
 ] as const;
 
 export type StandardEventName = typeof STANDARD_EVENT_NAMES[number];

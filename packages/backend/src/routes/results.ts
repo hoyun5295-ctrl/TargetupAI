@@ -446,6 +446,19 @@ router.get('/campaigns/:id', async (req: Request, res: Response) => {
           fail: campaign.fail_count || 0,
           // D183 fix: 사용자 관점 성공률 영역 = success / sent (대기 영역 포함 분모) — frontend 영역 정합
           sent: campaign.sent_count || 0,
+          // D183 (2026-05-20): 단축 URL 클릭 트래킹 — cdp_events 'message_click' 영역 집계
+          clicks: Number(
+            (
+              await query(
+                `SELECT COUNT(*)::int AS clicks
+                 FROM cdp_events
+                 WHERE company_id = $1::uuid
+                   AND event_name = 'message_click'
+                   AND properties->>'campaign_id' = $2`,
+                [campaign.company_id, campaign.id],
+              )
+            ).rows[0]?.clicks || 0,
+          ),
         },
         carriers: carrierStats,
         errors: errorStats,
