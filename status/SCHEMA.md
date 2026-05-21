@@ -1148,21 +1148,53 @@
 - 정상 코드 흐름은 모두 `status='scheduled'` 가드라 영향 0 (campaigns.ts:2079, 2088, 926).
 - 검증: `UPDATE campaigns SET target_count = 9999 WHERE id = '14df97e7'` → `ERROR: 완료된 캠페인의 target_count는 변경할 수 없습니다.`
 
-### payments (PG 결제 내역)
+### payments (PG 결제 내역) — D184 (2026-05-20) 이니시스 영역 9 컬럼 ALTER 정합
 | 컬럼 | 타입 | 설명 |
 |------|------|------|
 | id | uuid PK | |
 | company_id | uuid FK | 고객사 |
 | payment_method | varchar(20) | card/virtual_account/transfer |
-| pg_provider | varchar(20) | tosspayments |
-| pg_payment_key | varchar(200) | PG 결제 키 |
-| pg_order_id | varchar(100) | 주문 ID |
+| pg_provider | varchar(20) | tosspayments / **inicis** (D184 신규) |
+| pg_payment_key | varchar(200) | PG 결제 키 (이니시스 = tid, ApplNum) |
+| pg_order_id | varchar(100) | 주문 ID (이니시스 = oid, `HJ-{timestamp}-{rand}` 형식) |
 | amount | numeric(15,2) | 결제 금액 |
 | status | varchar(20) | pending/completed/failed/cancelled |
 | paid_at | timestamptz | |
 | cancelled_at | timestamptz | |
-| pg_response | jsonb | PG 응답 원본 |
+| pg_response | jsonb | PG 응답 원본 (authUrl 인증 결과 jsonb 보관) |
 | created_at | timestamptz | |
+| **user_id** | uuid FK (users.id) | **D184: 결제 실행 사용자 (NULL 가능)** |
+| **card_company** | varchar(50) | **D184: 카드사 (이니시스 응답 cardName)** |
+| **card_quota** | integer | **D184: 할부 개월 (이니시스 응답 cardQuota)** |
+| **result_code** | varchar(10) | **D184: 이니시스 resultCode (0000=성공)** |
+| **result_msg** | text | **D184: 이니시스 resultMsg** |
+| **buyer_name** | varchar(50) | **D184: 구매자명 (이니시스 form buyername)** |
+| **buyer_tel** | varchar(20) | **D184: 구매자 전화 (이니시스 form buyertel)** |
+| **buyer_email** | varchar(100) | **D184: 구매자 이메일 (이니시스 form buyeremail)** |
+| **product_name** | varchar(200) | **D184: 상품명 (이니시스 form goodname)** |
+
+**D184 신규 인덱스 (2026-05-20):**
+- UNIQUE INDEX `uniq_payments_pg_payment_key` ON payments(pg_payment_key) WHERE pg_payment_key IS NOT NULL — 이니시스 tid 중복 INSERT 차단
+- UNIQUE INDEX `uniq_payments_pg_order_id` ON payments(pg_order_id) WHERE pg_order_id IS NOT NULL — 한 결제 = 한 orderId (pending → completed UPDATE 정합)
+- INDEX `idx_payments_company_created` (company_id, created_at DESC) — 회사 admin 결제 이력 조회
+- INDEX `idx_payments_user` (user_id) WHERE user_id IS NOT NULL — 사용자별 결제 조회
+- INDEX `idx_payments_status` (status, created_at DESC) — pending/failed 영역 조회
+- INDEX `idx_payments_pg_provider` (pg_provider, created_at DESC) — provider별 통계
+
+**D184 결제 흐름 (이니시스 표준결제 v2.x):**
+1. `/api/payments/inicis/prepare` (회사 admin 인증) — pending payment INSERT (status='pending', pg_order_id 생성) + 이니시스 form 데이터 + signature 반환
+2. Frontend INIStdPay.pay 호출 → 이니시스 결제창 새 창
+3. 이니시스 → `/api/payments/inicis/return` form POST callback (인증 X, signature 검증)
+4. backend `approveInicisPayment(callback)` — authUrl POST 호출 + SHA256 서명 + verification + 승인 응답
+5. `finalizePaymentSuccess(orderId, approval)` 트랜잭션: payments UPDATE (pending→completed) + companies.balance 증가 + balance_transactions charge INSERT
+6. 사용자에게 HTML response (postMessage + window.close + frontend redirect fallback)
+7. 부모 창 BalanceModals = postMessage 수신 → 잔액 새로고침
+
+**D184 idempotency:**
+- pg_order_id UNIQUE = 같은 결제 중복 INSERT 차단
+- pending → completed UPDATE에 `status = 'pending'` WHERE 가드 = 동시 처리 차단
+- 이미 completed면 alreadyProcessed=true 반환 + balance 추가 증가 X
+- 금액 위변조 검증: approval.totPrice vs db.amount 차이 ≤ 0.5
 
 ### deposit_requests (무통장입금 요청)
 | 컬럼 | 타입 | 설명 |

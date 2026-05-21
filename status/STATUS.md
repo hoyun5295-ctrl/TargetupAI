@@ -107,22 +107,25 @@
 
 ---
 
-### 🚀 다음 세션 진입 가이드 (D183 종결 후 — **레거시 이니시스 결제모듈 한줄로 이전 즉시 구현**)
+### 🚀 다음 세션 진입 가이드 (D186 종결 후 — **D187 Journey Builder Lite Step 1 즉시 진입**)
 
-> **★ 최우선 진입 영역 (D184 본질):** **`status/legacy-payment-migration.md`** (SoT) 정독 → 즉시 구현 진입 (1~2일 코드 영역 본질). Harold 명시 "다음 세션 = 헛소리 X = 즉시 완벽 파악 + 옮기기 진행" 정합.
+> **★ 최우선 진입 영역 (D187):** **`status/D187_journey_builder_lite_plan.md`** (SoT) 정독 → Step 1-A 즉시 진입 (DB 4 테이블 + utils 3건 작성, 예상 4~5h). 작업 완료 후 본 .md 파일 삭제 명시.
 >
-> **D184 진입 명령어 (다음 세션 첫 메시지)**:
+> **D187 진입 명령어 (다음 세션 첫 메시지)**:
 > ```
-> status/legacy-payment-migration.md 정독 + status/STATUS.md CURRENT_TASK 정독 → 진정 이니시스 결제모듈 한줄로 이전 즉시 구현 진입 (Day 1 Step 1~6 순차 진행). 진정 본질 = SoT 문서 = 본 영역만 정합. 추측 X = SoT 문서 본질만 사용.
+> status/D187_journey_builder_lite_plan.md 정독 + status/STATUS.md CURRENT_TASK 정독 → D187 Journey Builder Lite Step 1-A 즉시 진입 (DB schema 4 테이블 + utils/journey-builder.ts CT-43 + utils/journey-executor.ts CT-44 + utils/journey-trigger-watcher.ts 5분 cron). Harold 명시 확정 8건 정합: 7 템플릿 전부 + 회사 자유 임계값 (NULL=무제한 default) + 회사 자유 예산 (NULL=무제한) + 광고/비광고 둘 다 자동 (4 광고 검증 통과 시) + AI_OPERATOR_ALLOWED_USERS=hoyun 유지 + 5분 cron 주기 + 여정별 재진입 default. 작업 완료 후 .md 파일 삭제.
 > ```
 >
-> **D183 종결 매트릭스** (이번 세션 완료):
-> - 슈퍼관리자 통계 영역 응답 속도 fix (ecosystem.config.js Heap 2GB + DB Index 5건 + next-action-advisor customer_id 42703 영구 차단 + 성공률 영역 success/sent 정합 5위치 통합 fix)
-> - 클릭 트래킹 인프라 (단축 URL CT-40 + `/c/:hash` redirect + cdp_events 'message_click' + accumulateCampaignLearning 자동 누적 + ResultsModal 클릭률 카드)
-> - 영구 룰 메모리 3건 신규 (cto-mandate-for-vito + sql-command-must-check-schema-first + no-pm2-delete-before-git-push + no-overuse-sago-word)
-> - 레거시 이니시스 결제 영역 완전 파악 (Phase 1) + SoT 문서 작성 (`status/legacy-payment-migration.md`)
+> **D184~D186 종결 매트릭스** (이번 세션 완료):
+> - **D184 이니시스 표준결제 한줄로 이전 완료** (CT-41 inicis-client.ts + CT-42 payment-processor.ts + routes/payments.ts 5 endpoint + BalanceModals.tsx 카드결제 활성 + 가상계좌 영구 제거 + PaymentResultPage.tsx 신규 + payments ALTER 9 컬럼 + 2 UNIQUE INDEX + 4 INDEX) — Harold signKey `UzZjT0d2V3FyaDgxSmZwWlY4OUdhQT09` + .env INICIS_MODE=test
+> - **D184-fix** company-frontend/package.json `vite-plugin-javascript-obfuscator: ^3.1.0` devDependencies 누락 정정 (1ca6ee8 commit 2달+ 누적 사고)
+> - **D185 사용자 신고** AddressBookModal 대량 업로드 (130,962건+) 로딩 안내 — isUploading state + 4 fetch try/finally + 로딩 오버레이 + close 차단 + 모든 버튼 disabled
+> - **D186 Phase 1 모달 정렬 정정** — 7 파일 / 19 모달 / 4 좌우 분할 영역 stacked (Dashboard 4 + DirectSendPanel 2 + TargetSendModal + AlimtalkSendModal + ResultsModal 5 + ScheduledCampaignModal 5 + DirectPreviewModal)
+> - **D186 Phase 1.5** DashboardHeader 가로 스크롤 + Dashboard 메인 카드 stacked + DB 카드 grid-cols-2 md:grid-cols-3 (숫자 겹침 사고 정정) + 5 기능 카드 grid-cols-2 md:grid-cols-4
+> - **D186 Phase 2-A** direct-send.css 모바일 @media 쿼리 추가 (1509 라인 @media 0건 사고) + 드래그 스크롤 사고 정정 (`overflow: hidden` 3곳 → 모바일 `visible` + backdrop overflow-y:auto + iOS touch scroll)
+> - **D187 Journey Builder Lite Step 1 설계 완료** (status/D187_journey_builder_lite_plan.md 작성) — Harold 8건 명시 확정 + 임계값 재설계 (회사 자유 + 광고 자동) + 다음 세션 즉시 진입
 >
-> **D184 본질** = 레거시 invitobiz.com 이니시스 결제모듈 → 한줄로 BalanceModals 카드결제 영역 이전 (가상계좌 영역 영구 제거 + 디자인 깔끔 변경 본질). 운영 MID = `usomsms001`. 분량 = 코드 1~2일 + 이니시스 검수 1~3일 + 운영 검증 2~3일.
+> **D187 본질** = Braze Canvas Journey 압도 차별화 — 7 표준 여정 (가입/재구매/휴면/장바구니/생일/예약/Custom) + 자연어 진입 (Opus 4.7) + CDP 트리거 기반 자동 step 진행 + 회사 자유 임계값 + 광고 자동 검증 4건. Continuous Operator (D176) 보완 + Memory tool (D181) 활용. 분량 = 9~13h 추정 (Step 1-A/B/C 분할).
 >
 > **선행 정독 (D183~ 잔존 영역, D184 종결 후 진행):** `docs/AI_OPERATOR_기능정의서.md` v1.0.10 + `docs/한줄로_BEYOND_BRAZE_비전.md` v0.6 + `status/ai_operator_progress.md`
 >
