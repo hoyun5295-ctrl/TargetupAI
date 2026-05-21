@@ -76,6 +76,8 @@ interface StepRow {
   message_template: string | null;
   subject: string | null;
   is_ad: boolean;
+  // ★ D188 Phase 2-B-1 (2026-05-21): condition step 평가용 conditionJsonb.
+  condition_jsonb: Record<string, unknown> | null;
 }
 
 interface CustomerRow {
@@ -91,7 +93,8 @@ interface CustomerRow {
   recent_purchase_date: Date | null;
 }
 
-type StepOutcome = 'sent' | 'skipped_hours' | 'skipped_opt_out' | 'skipped_no_customer' | 'paused_balance' | 'paused_budget' | 'paused_threshold' | 'failed' | 'completed';
+// ★ D188 Phase 2-B-1 (2026-05-21): wait/condition step 신규 outcome — 통계 분리 영역.
+type StepOutcome = 'sent' | 'skipped_hours' | 'skipped_opt_out' | 'skipped_no_customer' | 'waited' | 'condition_passed' | 'condition_failed' | 'paused_balance' | 'paused_budget' | 'paused_threshold' | 'failed' | 'completed';
 
 // ════════════════════════════════════════════════════════════════════
 // Worker — 5분 cron
@@ -99,13 +102,14 @@ type StepOutcome = 'sent' | 'skipped_hours' | 'skipped_opt_out' | 'skipped_no_cu
 
 let workerRunning = false;
 
-export async function runJourneyExecutor(): Promise<{ processed: number; sent: number; skipped: number; paused: number; failed: number }> {
+// ★ D188 Phase 2-B-1 (2026-05-21): summary에 waited / condition_passed / condition_failed 카운트 추가.
+export async function runJourneyExecutor(): Promise<{ processed: number; sent: number; skipped: number; waited: number; conditionPassed: number; conditionFailed: number; paused: number; failed: number }> {
   if (workerRunning) {
-    return { processed: 0, sent: 0, skipped: 0, paused: 0, failed: 0 };
+    return { processed: 0, sent: 0, skipped: 0, waited: 0, conditionPassed: 0, conditionFailed: 0, paused: 0, failed: 0 };
   }
   workerRunning = true;
 
-  const summary = { processed: 0, sent: 0, skipped: 0, paused: 0, failed: 0 };
+  const summary = { processed: 0, sent: 0, skipped: 0, waited: 0, conditionPassed: 0, conditionFailed: 0, paused: 0, failed: 0 };
 
   try {
     const dueRes = await query(
@@ -133,6 +137,9 @@ export async function runJourneyExecutor(): Promise<{ processed: number; sent: n
         const outcome = await processExecution(row);
         if (outcome === 'sent') summary.sent++;
         else if (outcome === 'completed') summary.sent++;
+        else if (outcome === 'waited') summary.waited++;
+        else if (outcome === 'condition_passed') summary.conditionPassed++;
+        else if (outcome === 'condition_failed') summary.conditionFailed++;
         else if (outcome.startsWith('paused')) summary.paused++;
         else if (outcome.startsWith('skipped')) summary.skipped++;
         else if (outcome === 'failed') summary.failed++;
@@ -143,7 +150,7 @@ export async function runJourneyExecutor(): Promise<{ processed: number; sent: n
     }
 
     if (dueRes.rows.length > 0) {
-      console.log(`[JourneyExecutor] 처리 완료 — sent=${summary.sent} skipped=${summary.skipped} paused=${summary.paused} failed=${summary.failed}`);
+      console.log(`[JourneyExecutor] 처리 완료 — sent=${summary.sent} waited=${summary.waited} cond_pass=${summary.conditionPassed} cond_fail=${summary.conditionFailed} skipped=${summary.skipped} paused=${summary.paused} failed=${summary.failed}`);
     }
   } finally {
     workerRunning = false;
@@ -171,7 +178,7 @@ async function processExecution(exec: ExecutionRow): Promise<StepOutcome> {
   // 1. 다음 step 조회 (현재 current_step_order + 1)
   const nextStepOrder = exec.current_step_order + 1;
   const stepRes = await query(
-    `SELECT id, journey_id, step_order, step_type, delay_hours, channel, message_template, subject, is_ad
+    `SELECT id, journey_id, step_order, step_type, delay_hours, channel, message_template, subject, is_ad, condition_jsonb
      FROM journey_steps
      WHERE journey_id = $1::uuid AND step_order = $2`,
     [exec.journey_id, nextStepOrder]
@@ -183,6 +190,51 @@ async function processExecution(exec: ExecutionRow): Promise<StepOutcome> {
   }
 
   const step = stepRes.rows[0] as StepRow;
+
+  // ★ D188 Phase 2-B-1 (2026-05-21): step_type 분기 신규 — wait/condition은 메시지 발송 영역 우회.
+  //   wait step = 메시지 발송 0 + 다음 step 진입 (delay_hours는 advanceOrComplete가 다음 step 영역 사용).
+  //   condition step = 고객 조회 후 conditionJsonb 평가 — 만족 시 다음 step 진입 / 미만족 시 execution 종료.
+  //   message step = 기존 흐름 (메시지 발송).
+  if (step.step_type === 'wait') {
+    await logSkippedStep(exec.execution_id, step.id, 'wait_step_passed');
+    await advanceOrComplete(exec, step, 0);
+    return 'waited';
+  }
+
+  if (step.step_type === 'condition') {
+    // condition step도 customer 조회 필요 (조건 평가 영역)
+    const condCustRes = await query(
+      `SELECT id, phone, name, is_active, sms_opt_in, callback, custom_fields, email, birth_date,
+              recent_purchase_date, recent_purchase_amount, total_purchase_amount, purchase_count,
+              grade, points, age, gender, region
+       FROM customers WHERE id = $1::uuid AND company_id = $2::uuid`,
+      [exec.customer_id, exec.company_id]
+    );
+    if (condCustRes.rows.length === 0) {
+      await logSkippedStep(exec.execution_id, step.id, 'condition_customer_not_found');
+      await advanceOrComplete(exec, step, 0);
+      return 'skipped_no_customer';
+    }
+    const condCustomer = condCustRes.rows[0];
+    const passed = evaluateCondition(step.condition_jsonb, condCustomer);
+    if (passed) {
+      await logSkippedStep(exec.execution_id, step.id, 'condition_passed');
+      await advanceOrComplete(exec, step, 0);
+      return 'condition_passed';
+    } else {
+      // 조건 미만족 → execution 종료 (Phase 2-B-1 단순 매트릭스 — 분기 step은 Phase 2-B-2)
+      await query(
+        `UPDATE journey_executions SET status = 'ended', completed_at = NOW(), current_step_order = $2
+         WHERE id = $1::uuid`,
+        [exec.execution_id, step.step_order]
+      );
+      await logSkippedStep(exec.execution_id, step.id, 'condition_failed_ended');
+      console.log(`[JourneyExecutor] execution=${exec.execution_id} step=${step.step_order} condition 미만족 → ended`);
+      return 'condition_failed';
+    }
+  }
+
+  // ──────────── message step (기존 흐름) ────────────
 
   // 2. 발송 시간 검증 (KST 08:00 ~ 21:00)
   if (!isWithinSendHours()) {
@@ -509,4 +561,45 @@ async function logFailedStep(executionId: string, stepId: string, reason: string
     )`,
     [executionId, stepId, reason.slice(0, 500)]
   );
+}
+
+// ════════════════════════════════════════════════════════════════════
+// ★ D188 Phase 2-B-1 (2026-05-21): evaluateCondition — condition step 평가 함수.
+//   conditionJsonb 형식: { "type": "customer_field", "field": "<컬럼명>", "operator": "<연산자>", "value": <값> }
+//   지원 연산자 9종: ==, !=, >=, <=, >, <, in, not_in, is_null, not_null
+//   지원 필드: customers 테이블 컬럼 + custom_fields JSONB 영역.
+//   잘못된 형식 / 미지원 operator = default pass (true) — activateJourney에서 사전 검증 적용됨.
+// ════════════════════════════════════════════════════════════════════
+
+function evaluateCondition(condJsonb: Record<string, unknown> | null, customer: Record<string, any>): boolean {
+  if (!condJsonb || typeof condJsonb !== 'object') return true;
+
+  const type = String(condJsonb.type || '');
+  const field = String(condJsonb.field || '');
+  const operator = String(condJsonb.operator || '');
+  const value = (condJsonb as any).value;
+
+  if (type !== 'customer_field' || !field) return true;
+
+  // customer 영역 → 직접 컬럼 우선, fallback custom_fields JSONB
+  let cv: any = null;
+  if (field in customer) {
+    cv = customer[field];
+  } else if (customer.custom_fields && typeof customer.custom_fields === 'object' && field in customer.custom_fields) {
+    cv = customer.custom_fields[field];
+  }
+
+  switch (operator) {
+    case '==':       return String(cv ?? '') === String(value ?? '');
+    case '!=':       return String(cv ?? '') !== String(value ?? '');
+    case '>=':       return Number(cv) >= Number(value);
+    case '<=':       return Number(cv) <= Number(value);
+    case '>':        return Number(cv) > Number(value);
+    case '<':        return Number(cv) < Number(value);
+    case 'in':       return Array.isArray(value) && value.map((v) => String(v)).includes(String(cv ?? ''));
+    case 'not_in':   return Array.isArray(value) && !value.map((v) => String(v)).includes(String(cv ?? ''));
+    case 'is_null':  return cv == null || cv === '';
+    case 'not_null': return cv != null && cv !== '';
+    default:         return true;
+  }
 }

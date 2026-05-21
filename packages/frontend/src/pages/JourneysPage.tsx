@@ -55,15 +55,27 @@ interface CallbackOption {
   is_default: boolean;
 }
 
+// ★ D188 Phase 2-B-1 (2026-05-21): step_type 3종 확장 — message/wait/condition.
+type StepType = 'message' | 'wait' | 'condition';
+
+interface ConditionJsonb {
+  type: 'customer_field';
+  field: string;
+  operator: '==' | '!=' | '>=' | '<=' | '>' | '<' | 'in' | 'not_in' | 'is_null' | 'not_null';
+  value?: any;
+}
+
 interface AIGeneratedStep {
   stepOrder: number;
-  stepType: 'message';
+  stepType: StepType;
   delayHours: number;
   channel: ChannelType;
   messageTemplate: string;
   subject: string;
   isAd: boolean;
   stepIntent: string;
+  // ★ D188 Phase 2-B-1 (2026-05-21): condition step 평가용 conditionJsonb.
+  conditionJsonb?: ConditionJsonb;
 }
 
 interface AIJourneyPackage {
@@ -283,7 +295,8 @@ export default function JourneysPage() {
 
   const addStep = () => {
     if (!aiPkg) return;
-    if (aiPkg.steps.length >= 5) { alert('최대 5개 step까지 가능합니다.'); return; }
+    // ★ D188 Phase 2-B-1 (2026-05-21): 최대 step 5개 → 7개 확장 (wait/condition 추가 영역 확보).
+    if (aiPkg.steps.length >= 7) { alert('최대 7개 step까지 가능합니다.'); return; }
     const lastDelay = aiPkg.steps[aiPkg.steps.length - 1]?.delayHours || 0;
     const newStep: AIGeneratedStep = {
       stepOrder: aiPkg.steps.length + 1,
@@ -340,10 +353,43 @@ export default function JourneysPage() {
   const handleSaveDraft = async () => {
     if (!aiPkg) return;
     if (!reviewCallback) { alert('회신번호를 선택해주세요.'); return; }
-    const invalid = aiPkg.steps.find((s) => !s.messageTemplate.trim() || s.messageTemplate.trim().length < 10);
-    if (invalid) { alert(`step ${invalid.stepOrder} 본문이 비어있거나 너무 짧습니다.`); return; }
-    const subjectMissing = aiPkg.steps.find((s) => (s.channel === 'lms' || s.channel === 'mms') && (!s.subject || !s.subject.trim()));
-    if (subjectMissing) { alert(`step ${subjectMissing.stepOrder} LMS/MMS 제목이 비어있습니다.`); return; }
+    // ★ D188 Phase 2-B-1 (2026-05-21): step_type별 다른 검증 분기.
+    //   message = 본문 + subject 검증 / wait = delay_hours>0 / condition = conditionJsonb 정합.
+    const validOps = ['==', '!=', '>=', '<=', '>', '<', 'in', 'not_in', 'is_null', 'not_null'];
+    for (const s of aiPkg.steps) {
+      if (s.stepType === 'wait') {
+        if (Number(s.delayHours) <= 0) {
+          alert(`step ${s.stepOrder} (wait) 대기 시간이 0 이하입니다. 1시간 이상 설정해주세요.`);
+          return;
+        }
+        continue;
+      }
+      if (s.stepType === 'condition') {
+        const c = s.conditionJsonb;
+        if (!c || c.type !== 'customer_field' || !c.field || !c.field.trim()) {
+          alert(`step ${s.stepOrder} (condition) 조건 필드를 선택해주세요.`);
+          return;
+        }
+        if (!validOps.includes(c.operator)) {
+          alert(`step ${s.stepOrder} (condition) 연산자를 선택해주세요.`);
+          return;
+        }
+        if (!['is_null', 'not_null'].includes(c.operator) && (c.value === undefined || c.value === null || c.value === '')) {
+          alert(`step ${s.stepOrder} (condition) 비교값을 입력해주세요.`);
+          return;
+        }
+        continue;
+      }
+      // message step = 본문 + subject 검증
+      if (!s.messageTemplate.trim() || s.messageTemplate.trim().length < 10) {
+        alert(`step ${s.stepOrder} 본문이 비어있거나 너무 짧습니다.`);
+        return;
+      }
+      if ((s.channel === 'lms' || s.channel === 'mms') && (!s.subject || !s.subject.trim())) {
+        alert(`step ${s.stepOrder} LMS/MMS 제목이 비어있습니다.`);
+        return;
+      }
+    }
     setSaving(true);
     try {
       const body: any = {
@@ -639,89 +685,225 @@ export default function JourneysPage() {
                 const placeholderWarn = hasPlaceholder(s.messageTemplate);
                 const isEditing = editingStepIdx === idx;
 
+                // ★ D188 Phase 2-B-1 (2026-05-21): step_type별 다른 UI — message/wait/condition.
+                //   헤더는 공통 (step_type select 추가) / 본문은 step_type별 분기.
+                const stepTypeColor =
+                  s.stepType === 'wait' ? 'bg-sky-500/20 text-sky-300' :
+                  s.stepType === 'condition' ? 'bg-emerald-500/20 text-emerald-300' :
+                  'bg-fuchsia-500/20 text-fuchsia-300';
                 return (
                   <div key={idx} className="bg-white/5 border border-white/10 rounded-xl p-4 space-y-2">
                     <div className="flex flex-wrap items-center gap-2">
-                      <div className="shrink-0 w-8 h-8 rounded-full bg-fuchsia-500/20 text-fuchsia-300 flex items-center justify-center font-semibold">{s.stepOrder}</div>
+                      <div className={`shrink-0 w-8 h-8 rounded-full flex items-center justify-center font-semibold ${stepTypeColor}`}>{s.stepOrder}</div>
                       <div className="text-sm font-medium text-white/80 flex-1 min-w-0 truncate">
                         {s.stepIntent || `Step ${s.stepOrder}`}
                       </div>
+                      {/* step_type select — 모든 step에 공통 */}
+                      <select
+                        value={s.stepType}
+                        onChange={(e) => {
+                          const newType = e.target.value as StepType;
+                          const patch: Partial<AIGeneratedStep> = { stepType: newType };
+                          // condition 진입 시 빈 conditionJsonb 자동 생성
+                          if (newType === 'condition' && !s.conditionJsonb) {
+                            patch.conditionJsonb = { type: 'customer_field', field: 'recent_purchase_amount', operator: '>=', value: 100000 };
+                          }
+                          updateStep(idx, patch);
+                        }}
+                        className="px-2 py-1 bg-slate-800 border border-white/10 rounded text-xs"
+                        title="step 유형"
+                      >
+                        <option value="message">메시지</option>
+                        <option value="wait">대기</option>
+                        <option value="condition">조건</option>
+                      </select>
                       <div className="flex items-center gap-1 text-xs">
                         <Clock className="w-3.5 h-3.5 text-white/40" />
                         <input type="number" min={0} max={720} value={s.delayHours} onChange={(e) => updateStep(idx, { delayHours: Number(e.target.value) || 0 })} className="w-16 px-2 py-1 bg-slate-800 border border-white/10 rounded text-xs" />
                         <span className="text-white/50">h</span>
                       </div>
-                      <select value={s.channel} onChange={(e) => updateStep(idx, { channel: e.target.value as ChannelType })} className="px-2 py-1 bg-slate-800 border border-white/10 rounded text-xs">
-                        <option value="sms">SMS</option>
-                        <option value="lms">LMS</option>
-                        <option value="mms">MMS</option>
-                      </select>
-                      <label className="flex items-center gap-1 text-xs cursor-pointer">
-                        <input type="checkbox" checked={s.isAd} onChange={(e) => updateStep(idx, { isAd: e.target.checked })} className="rounded" />
-                        <span className="text-amber-300/80">광고</span>
-                      </label>
-                      <button onClick={() => setEditingStepIdx(isEditing ? null : idx)} className="p-1.5 bg-slate-700 hover:bg-slate-600 rounded" title={isEditing ? '닫기' : '직접 수정'}>
-                        {isEditing ? <Save className="w-3.5 h-3.5" /> : <Edit2 className="w-3.5 h-3.5" />}
-                      </button>
-                      <button onClick={() => handleRefineOpen(idx)} disabled={refineLoading} className="px-2 py-1.5 bg-violet-500/20 hover:bg-violet-500/30 text-violet-300 rounded text-xs flex items-center gap-1 disabled:opacity-50">
-                        {refineLoading ? <Loader2 className="w-3 h-3 animate-spin" /> : <Wand2 className="w-3 h-3" />}AI 다듬기
-                      </button>
+                      {/* channel select + 광고 toggle — message step만 */}
+                      {s.stepType === 'message' && (
+                        <>
+                          <select value={s.channel} onChange={(e) => updateStep(idx, { channel: e.target.value as ChannelType })} className="px-2 py-1 bg-slate-800 border border-white/10 rounded text-xs">
+                            <option value="sms">SMS</option>
+                            <option value="lms">LMS</option>
+                            <option value="mms">MMS</option>
+                          </select>
+                          <label className="flex items-center gap-1 text-xs cursor-pointer">
+                            <input type="checkbox" checked={s.isAd} onChange={(e) => updateStep(idx, { isAd: e.target.checked })} className="rounded" />
+                            <span className="text-amber-300/80">광고</span>
+                          </label>
+                        </>
+                      )}
+                      {/* 직접 수정 + AI 다듬기 — message step만 */}
+                      {s.stepType === 'message' && (
+                        <>
+                          <button onClick={() => setEditingStepIdx(isEditing ? null : idx)} className="p-1.5 bg-slate-700 hover:bg-slate-600 rounded" title={isEditing ? '닫기' : '직접 수정'}>
+                            {isEditing ? <Save className="w-3.5 h-3.5" /> : <Edit2 className="w-3.5 h-3.5" />}
+                          </button>
+                          <button onClick={() => handleRefineOpen(idx)} disabled={refineLoading} className="px-2 py-1.5 bg-violet-500/20 hover:bg-violet-500/30 text-violet-300 rounded text-xs flex items-center gap-1 disabled:opacity-50">
+                            {refineLoading ? <Loader2 className="w-3 h-3 animate-spin" /> : <Wand2 className="w-3 h-3" />}AI 다듬기
+                          </button>
+                        </>
+                      )}
                       <button onClick={() => deleteStep(idx)} className="p-1.5 bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 rounded" title="삭제">
                         <Trash2 className="w-3.5 h-3.5" />
                       </button>
                     </div>
 
-                    {(s.channel === 'lms' || s.channel === 'mms') && (
-                      <div>
-                        <label className="block text-[11px] text-white/50 mb-1">제목 <span className="text-rose-400">*</span> <span className="text-white/30">(LMS/MMS 필수, 최대 40자)</span></label>
-                        <input
-                          value={s.subject}
-                          onChange={(e) => updateStep(idx, { subject: e.target.value })}
-                          placeholder="한 줄 제목 (호기심 유발 / 본문 핵심 요약)"
-                          maxLength={40}
-                          className={`w-full px-3 py-2 bg-slate-900 border rounded text-sm focus:outline-none focus:border-fuchsia-400 ${(!s.subject || !s.subject.trim()) ? 'border-rose-500/50' : 'border-white/10'}`}
-                        />
-                        <div className="text-[10px] text-white/40 mt-0.5">{getByteLength(s.subject)} bytes · 통신사 권장 ~ 40바이트 안</div>
+                    {/* ★ D188 Phase 2-B-1: wait step UI — 시간 대기만 명시 */}
+                    {s.stepType === 'wait' && (
+                      <div className="p-3 bg-sky-500/10 border border-sky-500/30 rounded text-xs text-sky-200 leading-relaxed">
+                        <div className="font-semibold mb-1">시간 대기 step</div>
+                        <div className="text-sky-200/70">
+                          이 step에서는 메시지 발송 없이 {s.delayHours}시간 대기 후 다음 step으로 진입합니다.
+                          후기 요청 전 충분한 사용 시간 확보, 휴면 사용자 점진 접근 등 자연 흐름에 사용해주세요.
+                        </div>
                       </div>
                     )}
 
-                    {isEditing ? (
-                      <textarea value={s.messageTemplate} onChange={(e) => updateStep(idx, { messageTemplate: e.target.value })} rows={6} className="w-full px-3 py-2 bg-slate-900 border border-fuchsia-400/50 rounded text-sm font-mono focus:outline-none resize-y" />
-                    ) : (
-                      <div className="px-3 py-2 bg-slate-900/60 border border-white/10 rounded text-sm whitespace-pre-wrap font-mono text-white/90 cursor-pointer" onClick={() => setEditingStepIdx(idx)}>
-                        {s.messageTemplate}
+                    {/* ★ D188 Phase 2-B-1: condition step UI — GUI 빌더 (field + operator + value) */}
+                    {s.stepType === 'condition' && (
+                      <div className="p-3 bg-emerald-500/10 border border-emerald-500/30 rounded text-xs space-y-2">
+                        <div className="font-semibold text-emerald-200">조건 평가 step</div>
+                        <div className="text-emerald-200/60 leading-relaxed">
+                          고객 정보를 평가해 조건 만족 시 다음 step 진입 / 미만족 시 여정 종료합니다.
+                        </div>
+                        <div className="grid grid-cols-1 md:grid-cols-[1fr_auto_1fr] gap-2 items-center">
+                          <select
+                            value={s.conditionJsonb?.field || ''}
+                            onChange={(e) =>
+                              updateStep(idx, {
+                                conditionJsonb: {
+                                  type: 'customer_field',
+                                  field: e.target.value,
+                                  operator: s.conditionJsonb?.operator || '>=',
+                                  value: s.conditionJsonb?.value,
+                                },
+                              })
+                            }
+                            className="px-2 py-1.5 bg-slate-900 border border-white/10 rounded text-xs"
+                          >
+                            <option value="">필드 선택</option>
+                            <option value="recent_purchase_amount">최근 구매 금액</option>
+                            <option value="total_purchase_amount">누적 구매 금액</option>
+                            <option value="purchase_count">구매 횟수</option>
+                            <option value="grade">등급</option>
+                            <option value="points">포인트</option>
+                            <option value="age">나이</option>
+                            <option value="gender">성별</option>
+                            <option value="region">지역</option>
+                            <option value="sms_opt_in">SMS 수신동의</option>
+                            <option value="recent_purchase_date">최근 구매일</option>
+                            <option value="birth_date">생일</option>
+                          </select>
+                          <select
+                            value={s.conditionJsonb?.operator || '>='}
+                            onChange={(e) =>
+                              updateStep(idx, {
+                                conditionJsonb: {
+                                  type: 'customer_field',
+                                  field: s.conditionJsonb?.field || '',
+                                  operator: e.target.value as ConditionJsonb['operator'],
+                                  value: s.conditionJsonb?.value,
+                                },
+                              })
+                            }
+                            className="px-2 py-1.5 bg-slate-900 border border-white/10 rounded text-xs"
+                          >
+                            <option value="==">같음 (==)</option>
+                            <option value="!=">다름 (!=)</option>
+                            <option value=">=">이상 (≥)</option>
+                            <option value="<=">이하 (≤)</option>
+                            <option value=">">초과 (&gt;)</option>
+                            <option value="<">미만 (&lt;)</option>
+                            <option value="in">포함 (in)</option>
+                            <option value="not_in">미포함 (not_in)</option>
+                            <option value="is_null">비어있음</option>
+                            <option value="not_null">값 있음</option>
+                          </select>
+                          {!['is_null', 'not_null'].includes(s.conditionJsonb?.operator || '') && (
+                            <input
+                              type="text"
+                              value={s.conditionJsonb?.value ?? ''}
+                              onChange={(e) =>
+                                updateStep(idx, {
+                                  conditionJsonb: {
+                                    type: 'customer_field',
+                                    field: s.conditionJsonb?.field || '',
+                                    operator: s.conditionJsonb?.operator || '>=',
+                                    value: e.target.value,
+                                  },
+                                })
+                              }
+                              placeholder="비교값 (in/not_in은 쉼표 구분)"
+                              className="px-2 py-1.5 bg-slate-900 border border-white/10 rounded text-xs"
+                            />
+                          )}
+                        </div>
+                        <div className="text-[10px] text-emerald-200/50">
+                          예: 최근 구매 금액 ≥ 100000 → VIP 등급 고객만 다음 step 진입
+                        </div>
                       </div>
                     )}
 
-                    <div className="flex flex-wrap items-center gap-x-3 text-[11px] text-white/40">
-                      <span className={bytes > maxBytes ? 'text-rose-400' : ''}>본문: {bytes} / {maxBytes} bytes</span>
-                      {placeholderWarn && <span className="text-amber-300">[...] 영역 - 직접 수정 필요</span>}
-                      {(() => {
-                        const unsafe = detectUnsafe(s.messageTemplate + ' ' + s.subject);
-                        if (unsafe.emoji.length === 0 && unsafe.special.length === 0) return null;
-                        return (
-                          <span className="text-rose-400">
-                            통신사 미지원 단어 - 저장 시 자동 정규화 (
-                            {unsafe.emoji.length > 0 && `이모지: ${unsafe.emoji.slice(0, 5).join(' ')}`}
-                            {unsafe.emoji.length > 0 && unsafe.special.length > 0 && ' / '}
-                            {unsafe.special.length > 0 && `특수문자: ${unsafe.special.slice(0, 5).join(' ')}`}
-                            )
-                          </span>
-                        );
-                      })()}
-                    </div>
+                    {/* ★ D188 Phase 2-B-1: message step UI — 기존 매트릭스 유지 */}
+                    {s.stepType === 'message' && (
+                      <>
+                        {(s.channel === 'lms' || s.channel === 'mms') && (
+                          <div>
+                            <label className="block text-[11px] text-white/50 mb-1">제목 <span className="text-rose-400">*</span> <span className="text-white/30">(LMS/MMS 필수, 최대 40자)</span></label>
+                            <input
+                              value={s.subject}
+                              onChange={(e) => updateStep(idx, { subject: e.target.value })}
+                              placeholder="한 줄 제목 (호기심 유발 / 본문 핵심 요약)"
+                              maxLength={40}
+                              className={`w-full px-3 py-2 bg-slate-900 border rounded text-sm focus:outline-none focus:border-fuchsia-400 ${(!s.subject || !s.subject.trim()) ? 'border-rose-500/50' : 'border-white/10'}`}
+                            />
+                            <div className="text-[10px] text-white/40 mt-0.5">{getByteLength(s.subject)} bytes · 통신사 권장 ~ 40바이트 안</div>
+                          </div>
+                        )}
 
-                    {s.isAd && s.messageTemplate.trim().length >= 10 && (
-                      <div className="p-2 bg-slate-950/60 border border-white/5 rounded text-[11px]">
-                        <div className="text-white/40 mb-1">실제 발송 미리보기 ({previewBytes} bytes):</div>
-                        <div className="whitespace-pre-wrap text-white/80 font-mono">{preview}</div>
-                      </div>
+                        {isEditing ? (
+                          <textarea value={s.messageTemplate} onChange={(e) => updateStep(idx, { messageTemplate: e.target.value })} rows={6} className="w-full px-3 py-2 bg-slate-900 border border-fuchsia-400/50 rounded text-sm font-mono focus:outline-none resize-y" />
+                        ) : (
+                          <div className="px-3 py-2 bg-slate-900/60 border border-white/10 rounded text-sm whitespace-pre-wrap font-mono text-white/90 cursor-pointer" onClick={() => setEditingStepIdx(idx)}>
+                            {s.messageTemplate}
+                          </div>
+                        )}
+
+                        <div className="flex flex-wrap items-center gap-x-3 text-[11px] text-white/40">
+                          <span className={bytes > maxBytes ? 'text-rose-400' : ''}>본문: {bytes} / {maxBytes} bytes</span>
+                          {placeholderWarn && <span className="text-amber-300">[...] 영역 - 직접 수정 필요</span>}
+                          {(() => {
+                            const unsafe = detectUnsafe(s.messageTemplate + ' ' + s.subject);
+                            if (unsafe.emoji.length === 0 && unsafe.special.length === 0) return null;
+                            return (
+                              <span className="text-rose-400">
+                                통신사 미지원 단어 - 저장 시 자동 정규화 (
+                                {unsafe.emoji.length > 0 && `이모지: ${unsafe.emoji.slice(0, 5).join(' ')}`}
+                                {unsafe.emoji.length > 0 && unsafe.special.length > 0 && ' / '}
+                                {unsafe.special.length > 0 && `특수문자: ${unsafe.special.slice(0, 5).join(' ')}`}
+                                )
+                              </span>
+                            );
+                          })()}
+                        </div>
+
+                        {s.isAd && s.messageTemplate.trim().length >= 10 && (
+                          <div className="p-2 bg-slate-950/60 border border-white/5 rounded text-[11px]">
+                            <div className="text-white/40 mb-1">실제 발송 미리보기 ({previewBytes} bytes):</div>
+                            <div className="whitespace-pre-wrap text-white/80 font-mono">{preview}</div>
+                          </div>
+                        )}
+                      </>
                     )}
                   </div>
                 );
               })}
 
-              {aiPkg.steps.length < 5 && (
+              {aiPkg.steps.length < 7 && (
                 <button onClick={addStep} className="w-full p-3 border-2 border-dashed border-white/10 hover:border-white/30 rounded-xl text-sm text-white/50 hover:text-white/80 flex items-center justify-center gap-2">
                   <Plus className="w-4 h-4" /> Step 추가
                 </button>

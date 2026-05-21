@@ -332,16 +332,27 @@ async function generateCustomStepsWithAI(
 ): Promise<JourneyStepDefinition[]> {
   const memoryContext = await buildMemoryPromptContext(companyId, 20).catch(() => '');
 
+  // ★ D188 Phase 2-B-1 (2026-05-21): wait + condition step 사용 가이드 + JSON 응답 형식 확장.
   const system = `당신은 한국 마케팅 자동화 여정 설계 전문가입니다.
-회사 admin이 자연어로 입력한 여정 목표를 받아, 2~5개의 step (메시지 발송 시계열)을 JSON으로 응답합니다.
+회사 admin이 자연어로 입력한 여정 목표를 받아, 2~7개의 step (시계열)을 JSON으로 응답합니다.
+
+step_type 3종:
+- "message": 메시지 발송 (SMS/LMS/MMS/알림톡)
+- "wait": 시간 대기만 (delay_hours 후 다음 step 진입) — 메시지 발송 없음
+- "condition": 고객 조건 평가 — 만족 시 다음 step 진입 / 미만족 시 여정 종료
 
 규칙:
-- 각 step은 message 타입만 사용 (wait/condition은 다음 영역에서 다룹니다)
 - delayHours: 0(즉시) ~ 720h(30일) 범위. 24/48/72/168 등 자연 단위 권장
-- channel: 'sms'(90자 내), 'lms'(2000자), 'kakao'(알림톡)
-- messageTemplate: %고객명%, %상품명%, %혜택% 등 변수 활용
+- channel (message step만): 'sms'(90자 내), 'lms'(2000자), 'kakao'(알림톡)
+- messageTemplate (message step만): %고객명%, %상품명%, %혜택% 등 변수 활용
 - 메시지에 (광고) 표기 없음 (시스템 자동 처리)
 - 한국 정보통신망법 + 통신사 스팸 정책 정합
+- conditionJsonb (condition step만): {"type":"customer_field","field":"<컬럼명>","operator":"==|!=|>=|<=|>|<|in|not_in|is_null|not_null","value":<값>}
+  지원 컬럼: name / phone / email / birth_date / recent_purchase_date / recent_purchase_amount / total_purchase_amount / purchase_count / grade / points / sms_opt_in / is_active
+
+언제 wait/condition 사용:
+- wait: 메시지 발송 후 충분한 시간 대기가 의미 있는 영역 (예: 후기 요청 전 충분한 사용 시간)
+- condition: 고객 분기가 필요한 영역 (예: VIP 등급만 받을 step, 구매 금액 임계값 초과 고객만 진입)
 
 회사 컨텍스트:
 - 회사명: ${ctx.companyName}
@@ -354,7 +365,10 @@ ${memoryContext}
 JSON 형식만 응답:
 {
   "steps": [
-    { "stepOrder": 1, "stepType": "message", "delayHours": 0, "channel": "sms", "messageTemplate": "..." }
+    { "stepOrder": 1, "stepType": "message", "delayHours": 0, "channel": "sms", "messageTemplate": "..." },
+    { "stepOrder": 2, "stepType": "wait", "delayHours": 72 },
+    { "stepOrder": 3, "stepType": "condition", "delayHours": 0, "conditionJsonb": {"type":"customer_field","field":"recent_purchase_amount","operator":">=","value":100000} },
+    { "stepOrder": 4, "stepType": "message", "delayHours": 0, "channel": "lms", "messageTemplate": "..." }
   ]
 }`;
 
@@ -382,13 +396,26 @@ JSON 형식만 응답:
   const parsed = JSON.parse(jsonStr);
   const rawSteps: any[] = Array.isArray(parsed.steps) ? parsed.steps : [];
 
-  const steps: JourneyStepDefinition[] = rawSteps.slice(0, 5).map((s: any, idx: number) => ({
-    stepOrder: idx + 1,
-    stepType: 'message',
-    delayHours: Math.max(0, Math.min(720, Number(s.delayHours) || 0)),
-    channel: ['sms', 'lms', 'mms', 'kakao', 'email'].includes(s.channel) ? s.channel : 'sms',
-    messageTemplate: String(s.messageTemplate || '').slice(0, 2000),
-  }));
+  // ★ D188 Phase 2-B-1 (2026-05-21): step_type 3종 정합 — message/wait/condition.
+  //   AI가 잘못된 step_type 반환 시 'message' default. condition_jsonb 정합 검증 X — activateJourney에서 검증.
+  const steps: JourneyStepDefinition[] = rawSteps.slice(0, 7).map((s: any, idx: number) => {
+    const stepType: StepType = ['message', 'wait', 'condition'].includes(s.stepType) ? s.stepType : 'message';
+    const base: JourneyStepDefinition = {
+      stepOrder: idx + 1,
+      stepType,
+      delayHours: Math.max(0, Math.min(720, Number(s.delayHours) || 0)),
+    };
+    if (stepType === 'message') {
+      base.channel = ['sms', 'lms', 'mms', 'kakao', 'email'].includes(s.channel) ? s.channel : 'sms';
+      base.messageTemplate = String(s.messageTemplate || '').slice(0, 2000);
+      base.isAd = s.isAd !== undefined ? !!s.isAd : true;
+    } else if (stepType === 'condition') {
+      if (s.conditionJsonb && typeof s.conditionJsonb === 'object') {
+        base.conditionJsonb = s.conditionJsonb;
+      }
+    }
+    return base;
+  });
 
   if (steps.length === 0) {
     throw new Error('AI가 유효한 step을 생성하지 못했습니다. 목표 문구를 더 명확히 작성해주세요.');
@@ -403,9 +430,16 @@ JSON 형식만 응답:
 
 export async function activateJourney(companyId: string, journeyId: string, userId: string): Promise<{ ok: boolean; reason?: string }> {
   // 활성화 전 검증 — placeholder 미편집 차단 + 회신번호 필수 + 본문 최소 길이
+  // ★ D188 Phase 2-B-1 (2026-05-21): step_type별 다른 검증 분기 — message/wait/condition.
   const detail = await query(
     `SELECT j.callback_number, j.status,
-            (SELECT json_agg(json_build_object('order', step_order, 'message', message_template) ORDER BY step_order) FROM journey_steps WHERE journey_id = j.id) AS steps
+            (SELECT json_agg(json_build_object(
+              'order', step_order,
+              'type', step_type,
+              'message', message_template,
+              'delay', delay_hours,
+              'condition', condition_jsonb
+            ) ORDER BY step_order) FROM journey_steps WHERE journey_id = j.id) AS steps
      FROM journeys j
      WHERE j.id = $1::uuid AND j.company_id = $2::uuid`,
     [journeyId, companyId]
@@ -423,6 +457,45 @@ export async function activateJourney(companyId: string, journeyId: string, user
     return { ok: false, reason: 'step이 없는 여정은 활성화할 수 없습니다.' };
   }
   for (const s of steps) {
+    const stepType = String(s.type || 'message');
+
+    // ★ D188 Phase 2-B-1: step_type별 검증 분기
+    if (stepType === 'wait') {
+      // wait step = delay_hours > 0 필수 (의미 있는 대기 영역)
+      const delay = Number(s.delay || 0);
+      if (delay <= 0) {
+        return { ok: false, reason: `step ${s.order} (wait) 대기 시간이 0 이하입니다. 1시간 이상 설정해주세요.` };
+      }
+      continue; // wait step은 본문 검증 skip
+    }
+
+    if (stepType === 'condition') {
+      // condition step = conditionJsonb 정합 검증 (type + field + operator 필수)
+      const cond = s.condition;
+      if (!cond || typeof cond !== 'object') {
+        return { ok: false, reason: `step ${s.order} (condition) condition_jsonb 미설정. 조건을 작성해주세요.` };
+      }
+      const condType = String((cond as any).type || '');
+      const condField = String((cond as any).field || '');
+      const condOperator = String((cond as any).operator || '');
+      if (condType !== 'customer_field') {
+        return { ok: false, reason: `step ${s.order} (condition) type은 'customer_field'만 지원합니다.` };
+      }
+      if (!condField.trim()) {
+        return { ok: false, reason: `step ${s.order} (condition) 조건 필드명이 비어있습니다.` };
+      }
+      const validOps = ['==', '!=', '>=', '<=', '>', '<', 'in', 'not_in', 'is_null', 'not_null'];
+      if (!validOps.includes(condOperator)) {
+        return { ok: false, reason: `step ${s.order} (condition) operator는 ${validOps.join('/')} 중 하나여야 합니다.` };
+      }
+      // is_null / not_null은 value 불요, 그 외는 value 필수
+      if (!['is_null', 'not_null'].includes(condOperator) && (cond as any).value === undefined) {
+        return { ok: false, reason: `step ${s.order} (condition) value가 비어있습니다.` };
+      }
+      continue; // condition step은 본문 검증 skip
+    }
+
+    // message step = 본문 길이 + placeholder 검증 (기존 매트릭스)
     const msg = String(s.message || '').trim();
     if (!msg || msg.length < 10) {
       return { ok: false, reason: `step ${s.order} 본문이 너무 짧습니다 (최소 10자).` };
@@ -448,11 +521,20 @@ export async function activateJourney(companyId: string, journeyId: string, user
 }
 
 // step 본문 갱신 (활성화 전 회사 admin이 직접 편집)
+// ★ D188 Phase 2-B-1 (2026-05-21): step_type + conditionJsonb patch 추가 — wait/condition step 편집 영역.
 export async function updateJourneyStep(
   companyId: string,
   journeyId: string,
   stepId: string,
-  patch: { messageTemplate?: string; subject?: string; channel?: ChannelType; delayHours?: number; isAd?: boolean }
+  patch: {
+    messageTemplate?: string;
+    subject?: string;
+    channel?: ChannelType;
+    delayHours?: number;
+    isAd?: boolean;
+    stepType?: StepType;
+    conditionJsonb?: Record<string, unknown> | null;
+  }
 ): Promise<boolean> {
   // 회사 격리 + 활성 상태에서는 step 수정 차단
   const j = await query(
@@ -464,13 +546,20 @@ export async function updateJourneyStep(
     throw new Error('활성 상태 여정의 step은 수정할 수 없습니다. 먼저 일시정지해주세요.');
   }
 
+  // ★ D188 Phase 2-B-1: step_type 변경 시 conditionJsonb 정합 검증 (condition은 conditionJsonb 필수).
+  if (patch.stepType === 'condition' && (!patch.conditionJsonb || typeof patch.conditionJsonb !== 'object')) {
+    throw new Error('condition step은 conditionJsonb가 필수입니다.');
+  }
+
   const r = await query(
     `UPDATE journey_steps SET
        message_template = COALESCE($4, message_template),
        channel = COALESCE($5, channel),
        delay_hours = COALESCE($6, delay_hours),
        is_ad = COALESCE($7, is_ad),
-       subject = COALESCE($8, subject)
+       subject = COALESCE($8, subject),
+       step_type = COALESCE($9, step_type),
+       condition_jsonb = COALESCE($10::jsonb, condition_jsonb)
      WHERE id = $1::uuid AND journey_id = $2::uuid
      RETURNING id`,
     [
@@ -482,6 +571,8 @@ export async function updateJourneyStep(
       patch.delayHours != null ? Math.max(0, Math.min(720, Number(patch.delayHours))) : null,
       patch.isAd !== undefined ? !!patch.isAd : null,
       patch.subject !== undefined ? patch.subject.slice(0, 50) : null,
+      patch.stepType ?? null,
+      patch.conditionJsonb !== undefined ? JSON.stringify(patch.conditionJsonb) : null,
     ]
   );
   return r.rows.length > 0;
