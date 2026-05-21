@@ -45,6 +45,15 @@ export interface JourneyStepDefinition {
   subject?: string;
   isAd?: boolean;
   conditionJsonb?: Record<string, unknown>;
+  // ★ D188 Phase 2-B-2 (2026-05-21): 알림톡 (channel='kakao') 영역 — sms-queue insertAlimtalkQueue 정합.
+  alimtalkProfileId?: string;
+  alimtalkTemplateCode?: string;
+  alimtalkVariableMap?: Record<string, string>;       // #{name} → 실제값 또는 @@필드키@@
+  alimtalkNextType?: 'N' | 'S' | 'L' | 'A' | 'B';     // 부달 발송 정책
+  alimtalkNextContents?: string;                      // A/B 시 대체 문구
+  alimtalkNextSubject?: string;                       // L/B 시 LMS 대체 제목
+  // ★ D188 Phase 2-B-2 (2026-05-21): MMS (channel='mms') 영역 — 이미지 서버 경로 배열.
+  mmsImagePaths?: string[];
 }
 
 export interface JourneyTemplate {
@@ -270,12 +279,19 @@ export async function createJourneyFromTemplate(input: CreateJourneyInput): Prom
 
   const journeyId = journeyRes.rows[0].id as string;
 
+  // ★ D188 Phase 2-B-2 (2026-05-21): 알림톡 + MMS 컬럼 7건 추가 (DB ALTER 정합).
   for (const step of steps) {
     await query(
       `INSERT INTO journey_steps (
-        id, journey_id, step_order, step_type, delay_hours, channel, message_template, subject, is_ad, condition_jsonb, created_at
+        id, journey_id, step_order, step_type, delay_hours, channel, message_template, subject, is_ad, condition_jsonb,
+        alimtalk_profile_id, alimtalk_template_code, alimtalk_variable_map,
+        alimtalk_next_type, alimtalk_next_contents, alimtalk_next_subject,
+        mms_image_paths, created_at
       ) VALUES (
-        gen_random_uuid(), $1::uuid, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, NOW()
+        gen_random_uuid(), $1::uuid, $2, $3, $4, $5, $6, $7, $8, $9::jsonb,
+        $10::uuid, $11, $12::jsonb,
+        $13, $14, $15,
+        $16::text[], NOW()
       )`,
       [
         journeyId,
@@ -287,6 +303,13 @@ export async function createJourneyFromTemplate(input: CreateJourneyInput): Prom
         step.subject || null,
         step.isAd !== undefined ? !!step.isAd : true,
         step.conditionJsonb ? JSON.stringify(step.conditionJsonb) : null,
+        step.alimtalkProfileId || null,
+        step.alimtalkTemplateCode || null,
+        step.alimtalkVariableMap ? JSON.stringify(step.alimtalkVariableMap) : null,
+        step.alimtalkNextType || null,
+        step.alimtalkNextContents || null,
+        step.alimtalkNextSubject || null,
+        Array.isArray(step.mmsImagePaths) && step.mmsImagePaths.length > 0 ? step.mmsImagePaths : null,
       ]
     );
   }
@@ -534,6 +557,14 @@ export async function updateJourneyStep(
     isAd?: boolean;
     stepType?: StepType;
     conditionJsonb?: Record<string, unknown> | null;
+    // ★ D188 Phase 2-B-2 (2026-05-21): 알림톡 + MMS 영역 patch.
+    alimtalkProfileId?: string | null;
+    alimtalkTemplateCode?: string | null;
+    alimtalkVariableMap?: Record<string, string> | null;
+    alimtalkNextType?: 'N' | 'S' | 'L' | 'A' | 'B' | null;
+    alimtalkNextContents?: string | null;
+    alimtalkNextSubject?: string | null;
+    mmsImagePaths?: string[] | null;
   }
 ): Promise<boolean> {
   // 회사 격리 + 활성 상태에서는 step 수정 차단
@@ -559,7 +590,14 @@ export async function updateJourneyStep(
        is_ad = COALESCE($7, is_ad),
        subject = COALESCE($8, subject),
        step_type = COALESCE($9, step_type),
-       condition_jsonb = COALESCE($10::jsonb, condition_jsonb)
+       condition_jsonb = COALESCE($10::jsonb, condition_jsonb),
+       alimtalk_profile_id = COALESCE($11::uuid, alimtalk_profile_id),
+       alimtalk_template_code = COALESCE($12, alimtalk_template_code),
+       alimtalk_variable_map = COALESCE($13::jsonb, alimtalk_variable_map),
+       alimtalk_next_type = COALESCE($14, alimtalk_next_type),
+       alimtalk_next_contents = COALESCE($15, alimtalk_next_contents),
+       alimtalk_next_subject = COALESCE($16, alimtalk_next_subject),
+       mms_image_paths = COALESCE($17::text[], mms_image_paths)
      WHERE id = $1::uuid AND journey_id = $2::uuid
      RETURNING id`,
     [
@@ -573,6 +611,13 @@ export async function updateJourneyStep(
       patch.subject !== undefined ? patch.subject.slice(0, 50) : null,
       patch.stepType ?? null,
       patch.conditionJsonb !== undefined ? JSON.stringify(patch.conditionJsonb) : null,
+      patch.alimtalkProfileId ?? null,
+      patch.alimtalkTemplateCode ?? null,
+      patch.alimtalkVariableMap !== undefined ? JSON.stringify(patch.alimtalkVariableMap) : null,
+      patch.alimtalkNextType ?? null,
+      patch.alimtalkNextContents ?? null,
+      patch.alimtalkNextSubject ?? null,
+      Array.isArray(patch.mmsImagePaths) ? patch.mmsImagePaths : null,
     ]
   );
   return r.rows.length > 0;

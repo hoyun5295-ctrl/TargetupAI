@@ -327,3 +327,188 @@ function mapRow(r: any): ProposalVariant {
     createdAt: new Date(r.created_at),
   };
 }
+
+// ════════════════════════════════════════════════════════════════════
+// ★ D188 Phase 2-B-3 (2026-05-21): journey_step_variants — Journey A/B + Bandit 통합
+//   - journey_steps 단일 step에 multiple variants (variant_id varchar 'A'/'B'/'C' 정합)
+//   - thompsonSamplingChoice 재사용 (ProposalVariant interface 변환)
+//   - journey-executor processExecution message step 진입 시 variants 박혀있으면 선택 후 발송
+// ════════════════════════════════════════════════════════════════════
+
+export interface JourneyStepVariant {
+  id: string;
+  stepId: string;
+  variantId: string;              // 'A' / 'B' / 'C'
+  messageTemplate: string | null;
+  subject: string | null;
+  channel: string | null;
+  alimtalkTemplateCode: string | null;
+  alimtalkVariableMap: Record<string, string> | null;
+  trafficWeight: number;
+  banditAlpha: number;
+  banditBeta: number;
+  sentCount: number;
+  clickCount: number;
+  conversionCount: number;
+}
+
+export interface JourneyStepVariantRecommendation {
+  variant: JourneyStepVariant;
+  posteriorMean: number;
+  posteriorSample: number;
+  totalTrials: number;
+  reasoning: string;
+}
+
+/**
+ * journey_step의 variants 매트릭스 조회 (step_order ASC, variant_id ASC).
+ */
+export async function listJourneyStepVariants(stepId: string): Promise<JourneyStepVariant[]> {
+  const r = await query(
+    `SELECT id, step_id, variant_id, message_template, subject, channel,
+            alimtalk_template_code, alimtalk_variable_map,
+            traffic_weight, bandit_alpha, bandit_beta,
+            sent_count, click_count, conversion_count
+     FROM journey_step_variants
+     WHERE step_id = $1::uuid
+     ORDER BY variant_id ASC`,
+    [stepId]
+  );
+  return r.rows.map((row: any) => ({
+    id: row.id,
+    stepId: row.step_id,
+    variantId: row.variant_id,
+    messageTemplate: row.message_template,
+    subject: row.subject,
+    channel: row.channel,
+    alimtalkTemplateCode: row.alimtalk_template_code,
+    alimtalkVariableMap: row.alimtalk_variable_map,
+    trafficWeight: parseFloat(row.traffic_weight) || 0.5,
+    banditAlpha: parseFloat(row.bandit_alpha) || 1.0,
+    banditBeta: parseFloat(row.bandit_beta) || 1.0,
+    sentCount: row.sent_count || 0,
+    clickCount: row.click_count || 0,
+    conversionCount: row.conversion_count || 0,
+  }));
+}
+
+/**
+ * journey_step variants 중 Bandit Thompson Sampling으로 최선 variant 선택.
+ * 누적 발송 3회 미만 = cold start explore (균등 random).
+ */
+export function selectJourneyStepVariant(variants: JourneyStepVariant[]): JourneyStepVariantRecommendation | null {
+  if (variants.length === 0) return null;
+  const totalTrials = variants.reduce((sum, v) => sum + v.sentCount, 0);
+
+  if (totalTrials < 3) {
+    const randomIdx = Math.floor(Math.random() * variants.length);
+    const chosen = variants[randomIdx];
+    return {
+      variant: chosen,
+      posteriorMean: chosen.banditAlpha / (chosen.banditAlpha + chosen.banditBeta),
+      posteriorSample: 0,
+      totalTrials,
+      reasoning: `초기 탐색 단계 (누적 발송 ${totalTrials}회 < 3회) — 모든 variant 동등 기회. 누적 3회 이상부터 Bandit 추천 작동.`,
+    };
+  }
+
+  let bestIdx = 0;
+  let bestSample = -1;
+  for (let i = 0; i < variants.length; i++) {
+    const v = variants[i];
+    const sample = sampleBeta(v.banditAlpha, v.banditBeta);
+    if (sample > bestSample) {
+      bestSample = sample;
+      bestIdx = i;
+    }
+  }
+  const chosen = variants[bestIdx];
+  const posteriorMean = chosen.banditAlpha / (chosen.banditAlpha + chosen.banditBeta);
+  const reasoning = `누적 발송 ${totalTrials}회 — Variant ${chosen.variantId} 평균 클릭률 ${(posteriorMean * 100).toFixed(1)}% / 본 sample ${(bestSample * 100).toFixed(1)}%. Thompson Sampling 추천.`;
+  return {
+    variant: chosen,
+    posteriorMean,
+    posteriorSample: bestSample,
+    totalTrials,
+    reasoning,
+  };
+}
+
+/**
+ * journey_step_variants 발송 reward 누적 — α/β 갱신.
+ */
+export async function recordJourneyStepVariantReward(
+  variantId: string,
+  sent: number,
+  clicked: number,
+  converted: number
+): Promise<void> {
+  if (sent <= 0) return;
+  const notClicked = Math.max(sent - clicked, 0);
+  await query(
+    `UPDATE journey_step_variants SET
+       sent_count = sent_count + $2,
+       click_count = click_count + $3,
+       conversion_count = conversion_count + $4,
+       bandit_alpha = bandit_alpha + $3,
+       bandit_beta = bandit_beta + $5,
+       updated_at = NOW()
+     WHERE id = $1::uuid`,
+    [variantId, sent, clicked, converted, notClicked]
+  );
+}
+
+/**
+ * variant CRUD — step에 신규 variant 추가.
+ */
+export async function createJourneyStepVariant(input: {
+  stepId: string;
+  variantId: string;
+  messageTemplate?: string;
+  subject?: string;
+  channel?: string;
+  alimtalkTemplateCode?: string;
+  alimtalkVariableMap?: Record<string, string>;
+  trafficWeight?: number;
+}): Promise<string> {
+  const r = await query(
+    `INSERT INTO journey_step_variants (
+      id, step_id, variant_id, message_template, subject, channel,
+      alimtalk_template_code, alimtalk_variable_map,
+      traffic_weight, bandit_alpha, bandit_beta,
+      sent_count, click_count, conversion_count, created_at, updated_at
+    ) VALUES (
+      gen_random_uuid(), $1::uuid, $2, $3, $4, $5,
+      $6, $7::jsonb,
+      $8, 1.0, 1.0,
+      0, 0, 0, NOW(), NOW()
+    ) ON CONFLICT (step_id, variant_id) DO UPDATE SET
+      message_template = EXCLUDED.message_template,
+      subject = EXCLUDED.subject,
+      channel = EXCLUDED.channel,
+      alimtalk_template_code = EXCLUDED.alimtalk_template_code,
+      alimtalk_variable_map = EXCLUDED.alimtalk_variable_map,
+      traffic_weight = EXCLUDED.traffic_weight,
+      updated_at = NOW()
+    RETURNING id`,
+    [
+      input.stepId,
+      input.variantId.slice(0, 8),
+      input.messageTemplate?.slice(0, 2000) || null,
+      input.subject?.slice(0, 50) || null,
+      input.channel || null,
+      input.alimtalkTemplateCode || null,
+      input.alimtalkVariableMap ? JSON.stringify(input.alimtalkVariableMap) : null,
+      input.trafficWeight != null ? Math.max(0, Math.min(1, input.trafficWeight)) : 0.5,
+    ]
+  );
+  return r.rows[0].id as string;
+}
+
+export async function deleteJourneyStepVariant(variantId: string): Promise<boolean> {
+  const r = await query(
+    `DELETE FROM journey_step_variants WHERE id = $1::uuid RETURNING id`,
+    [variantId]
+  );
+  return r.rows.length > 0;
+}

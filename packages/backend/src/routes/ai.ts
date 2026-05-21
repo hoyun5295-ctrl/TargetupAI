@@ -26,10 +26,15 @@ import {
   generateProposalForOperator,
 } from '../utils/continuous-operator';
 // ★ D177 (2026-05-19): Self-Optimizing Bandit (Thompson Sampling)
+// ★ D188 Phase 2-B-3 (2026-05-21): journey_step_variants CRUD + reward + 추천 헬퍼 import 추가.
 import {
   listVariantsByProposal,
   recommendVariantForProposal,
   recordVariantReward,
+  listJourneyStepVariants,
+  createJourneyStepVariant,
+  deleteJourneyStepVariant,
+  recordJourneyStepVariantReward,
 } from '../utils/bandit-optimizer';
 // ★ D179 (2026-05-19): Multi-Goal Decisioning (Opus 4.7 충돌 분석)
 import { analyzeGoalConflicts, OperatorGoal } from '../utils/multi-goal-decisioning';
@@ -1670,19 +1675,153 @@ router.patch('/operator/journeys/:id/steps/:stepId', async (req: Request, res: R
     if (!isAiOperatorAllowed(planCtx, req.user)) {
       return res.status(403).json({ success: false, error: 'AI Operator 진입 권한이 없습니다.', code: 'AI_OPERATOR_GATED' });
     }
-    const { messageTemplate, subject, channel, delayHours, isAd } = req.body || {};
+    // ★ D188 Phase 2-B-1+2 (2026-05-21): stepType + conditionJsonb + 알림톡 + MMS 영역 patch 확장.
+    const {
+      messageTemplate, subject, channel, delayHours, isAd,
+      stepType, conditionJsonb,
+      alimtalkProfileId, alimtalkTemplateCode, alimtalkVariableMap,
+      alimtalkNextType, alimtalkNextContents, alimtalkNextSubject,
+      mmsImagePaths,
+    } = req.body || {};
     const ok = await updateJourneyStep(companyId, req.params.id, req.params.stepId, {
       messageTemplate,
       subject,
       channel,
       delayHours: delayHours != null ? Number(delayHours) : undefined,
       isAd,
+      stepType,
+      conditionJsonb,
+      alimtalkProfileId,
+      alimtalkTemplateCode,
+      alimtalkVariableMap,
+      alimtalkNextType,
+      alimtalkNextContents,
+      alimtalkNextSubject,
+      mmsImagePaths,
     });
     if (!ok) return res.status(404).json({ success: false, error: 'step을 찾을 수 없거나 수정 권한이 없습니다.' });
     return res.json({ success: true });
   } catch (err: any) {
     console.error('[Journeys update step] 오류:', err);
     return res.status(500).json({ success: false, error: err?.message || 'step 수정 실패' });
+  }
+});
+
+// ════════════════════════════════════════════════════════════════════
+// ★ D188 Phase 2-B-3 (2026-05-21): journey_step_variants A/B + Bandit endpoint
+// ════════════════════════════════════════════════════════════════════
+
+// GET /api/ai/operator/journeys/:journeyId/steps/:stepId/variants — variants 조회
+router.get('/operator/journeys/:journeyId/steps/:stepId/variants', async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+    const planCtx = await loadPlanContext(companyId);
+    if (!planCtx) return res.status(404).json({ success: false, error: '회사 정보를 찾을 수 없습니다.' });
+    if (!isAiOperatorAllowed(planCtx, req.user)) {
+      return res.status(403).json({ success: false, error: 'AI Operator 진입 권한이 없습니다.', code: 'AI_OPERATOR_GATED' });
+    }
+    // 회사 격리 검증 — journey가 해당 회사 소유인지 확인
+    const j = await query(`SELECT 1 FROM journeys WHERE id = $1::uuid AND company_id = $2::uuid`, [req.params.journeyId, companyId]);
+    if (j.rows.length === 0) return res.status(404).json({ success: false, error: '여정을 찾을 수 없습니다.' });
+    const variants = await listJourneyStepVariants(req.params.stepId);
+    return res.json({ success: true, variants });
+  } catch (err: any) {
+    console.error('[Journeys variants list] 오류:', err);
+    return res.status(500).json({ success: false, error: err?.message || 'variants 조회 실패' });
+  }
+});
+
+// POST /api/ai/operator/journeys/:journeyId/steps/:stepId/variants — variant 신규/UPSERT
+router.post('/operator/journeys/:journeyId/steps/:stepId/variants', async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+    const planCtx = await loadPlanContext(companyId);
+    if (!planCtx) return res.status(404).json({ success: false, error: '회사 정보를 찾을 수 없습니다.' });
+    if (!isAiOperatorAllowed(planCtx, req.user)) {
+      return res.status(403).json({ success: false, error: 'AI Operator 진입 권한이 없습니다.', code: 'AI_OPERATOR_GATED' });
+    }
+    // 회사 격리 + 활성 여정 차단 (active 시 variant 신규 X)
+    const j = await query(`SELECT status FROM journeys WHERE id = $1::uuid AND company_id = $2::uuid`, [req.params.journeyId, companyId]);
+    if (j.rows.length === 0) return res.status(404).json({ success: false, error: '여정을 찾을 수 없습니다.' });
+    if (j.rows[0].status === 'active') {
+      return res.status(409).json({ success: false, error: '활성 여정의 variant는 수정 X. 먼저 일시정지해주세요.' });
+    }
+    const { variantId, messageTemplate, subject, channel, alimtalkTemplateCode, alimtalkVariableMap, trafficWeight } = req.body || {};
+    if (!variantId || typeof variantId !== 'string' || !variantId.trim()) {
+      return res.status(400).json({ success: false, error: 'variantId 필수 (예: A/B/C).' });
+    }
+    const id = await createJourneyStepVariant({
+      stepId: req.params.stepId,
+      variantId: variantId.trim(),
+      messageTemplate,
+      subject,
+      channel,
+      alimtalkTemplateCode,
+      alimtalkVariableMap,
+      trafficWeight: trafficWeight != null ? Number(trafficWeight) : undefined,
+    });
+    return res.json({ success: true, id });
+  } catch (err: any) {
+    console.error('[Journeys variants create] 오류:', err);
+    return res.status(500).json({ success: false, error: err?.message || 'variant 신규 실패' });
+  }
+});
+
+// DELETE /api/ai/operator/journeys/variants/:variantId — variant 삭제
+router.delete('/operator/journeys/variants/:variantId', async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+    const planCtx = await loadPlanContext(companyId);
+    if (!planCtx) return res.status(404).json({ success: false, error: '회사 정보를 찾을 수 없습니다.' });
+    if (!isAiOperatorAllowed(planCtx, req.user)) {
+      return res.status(403).json({ success: false, error: 'AI Operator 진입 권한이 없습니다.', code: 'AI_OPERATOR_GATED' });
+    }
+    // 회사 격리 — variant → step → journey 추적
+    const own = await query(
+      `SELECT 1 FROM journey_step_variants v
+       JOIN journey_steps s ON v.step_id = s.id
+       JOIN journeys j ON s.journey_id = j.id
+       WHERE v.id = $1::uuid AND j.company_id = $2::uuid AND j.status != 'active'`,
+      [req.params.variantId, companyId]
+    );
+    if (own.rows.length === 0) {
+      return res.status(404).json({ success: false, error: 'variant를 찾을 수 없거나 활성 여정 (먼저 일시정지).' });
+    }
+    const ok = await deleteJourneyStepVariant(req.params.variantId);
+    return res.json({ success: ok });
+  } catch (err: any) {
+    console.error('[Journeys variants delete] 오류:', err);
+    return res.status(500).json({ success: false, error: err?.message || 'variant 삭제 실패' });
+  }
+});
+
+// POST /api/ai/operator/journeys/variants/:variantId/track — click/conversion 트래킹 (외부 webhook 또는 SDK 호출)
+router.post('/operator/journeys/variants/:variantId/track', async (req: Request, res: Response) => {
+  try {
+    // ★ 본 endpoint는 외부 트래킹 영역 — 회사 격리만 가볍게 (variant → journey company_id 확인).
+    const companyId = req.user?.companyId;
+    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+    const own = await query(
+      `SELECT 1 FROM journey_step_variants v
+       JOIN journey_steps s ON v.step_id = s.id
+       JOIN journeys j ON s.journey_id = j.id
+       WHERE v.id = $1::uuid AND j.company_id = $2::uuid`,
+      [req.params.variantId, companyId]
+    );
+    if (own.rows.length === 0) {
+      return res.status(404).json({ success: false, error: 'variant를 찾을 수 없습니다.' });
+    }
+    const { clicked, converted } = req.body || {};
+    const clickedN = Math.max(0, Math.min(1, Number(clicked) || 0));
+    const convertedN = Math.max(0, Math.min(1, Number(converted) || 0));
+    await recordJourneyStepVariantReward(req.params.variantId, 0, clickedN, convertedN);
+    return res.json({ success: true });
+  } catch (err: any) {
+    console.error('[Journeys variants track] 오류:', err);
+    return res.status(500).json({ success: false, error: err?.message || 'track 실패' });
   }
 });
 

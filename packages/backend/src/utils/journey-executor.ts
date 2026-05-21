@@ -30,7 +30,13 @@ import {
   getCompanySmsTables,
   hasCompanyLineGroup,
   bulkInsertSmsQueue,
+  insertAlimtalkQueue,
 } from './sms-queue';
+import {
+  listJourneyStepVariants,
+  selectJourneyStepVariant,
+  recordJourneyStepVariantReward,
+} from './bandit-optimizer';
 import {
   prepareSendMessage,
   prepareFieldMappings,
@@ -78,6 +84,14 @@ interface StepRow {
   is_ad: boolean;
   // ★ D188 Phase 2-B-1 (2026-05-21): condition step 평가용 conditionJsonb.
   condition_jsonb: Record<string, unknown> | null;
+  // ★ D188 Phase 2-B-2 (2026-05-21): 알림톡 + MMS 채널 확장 영역.
+  alimtalk_profile_id: string | null;
+  alimtalk_template_code: string | null;
+  alimtalk_variable_map: Record<string, string> | null;
+  alimtalk_next_type: string | null;
+  alimtalk_next_contents: string | null;
+  alimtalk_next_subject: string | null;
+  mms_image_paths: string[] | null;
 }
 
 interface CustomerRow {
@@ -178,7 +192,10 @@ async function processExecution(exec: ExecutionRow): Promise<StepOutcome> {
   // 1. 다음 step 조회 (현재 current_step_order + 1)
   const nextStepOrder = exec.current_step_order + 1;
   const stepRes = await query(
-    `SELECT id, journey_id, step_order, step_type, delay_hours, channel, message_template, subject, is_ad, condition_jsonb
+    `SELECT id, journey_id, step_order, step_type, delay_hours, channel, message_template, subject, is_ad, condition_jsonb,
+            alimtalk_profile_id, alimtalk_template_code, alimtalk_variable_map,
+            alimtalk_next_type, alimtalk_next_contents, alimtalk_next_subject,
+            mms_image_paths
      FROM journey_steps
      WHERE journey_id = $1::uuid AND step_order = $2`,
     [exec.journey_id, nextStepOrder]
@@ -235,6 +252,28 @@ async function processExecution(exec: ExecutionRow): Promise<StepOutcome> {
   }
 
   // ──────────── message step (기존 흐름) ────────────
+
+  // ★ D188 Phase 2-B-3 (2026-05-21): variants 선택 — Bandit Thompson Sampling.
+  //   step에 variants ≥ 1건 있으면 선택 후 step 변수 덮어쓰기. 발송 후 recordJourneyStepVariantReward 호출.
+  let activeVariantId: string | null = null;
+  try {
+    const variants = await listJourneyStepVariants(step.id);
+    if (variants.length > 0) {
+      const rec = selectJourneyStepVariant(variants);
+      if (rec) {
+        activeVariantId = rec.variant.id;
+        step.message_template = rec.variant.messageTemplate || step.message_template;
+        step.subject = rec.variant.subject || step.subject;
+        step.channel = rec.variant.channel || step.channel;
+        step.alimtalk_template_code = rec.variant.alimtalkTemplateCode || step.alimtalk_template_code;
+        step.alimtalk_variable_map = rec.variant.alimtalkVariableMap || step.alimtalk_variable_map;
+        console.log(`[JourneyExecutor] step=${step.step_order} variant ${rec.variant.variantId} 선택 — ${rec.reasoning}`);
+      }
+    }
+  } catch (variantsErr: any) {
+    // variants 조회 실패 시 fallback = step 본 영역 사용 (영역 안전망)
+    console.warn(`[JourneyExecutor] variants 조회 실패 fallback:`, variantsErr?.message || variantsErr);
+  }
 
   // 2. 발송 시간 검증 (KST 08:00 ~ 21:00)
   if (!isWithinSendHours()) {
@@ -293,52 +332,99 @@ async function processExecution(exec: ExecutionRow): Promise<StepOutcome> {
     return 'failed';
   }
 
+  // ★ D188 Phase 2-B-2 (2026-05-21): channel 분기 — SMS/LMS/MMS = 기존 prepareSendMessage 흐름 / KAKAO = kakao_templates 조회 + alimtalk_variable_map 치환 + insertAlimtalkQueue.
   // 6. 메시지 + 비용 계산
+  const channelLower = (step.channel || 'lms').toLowerCase();
+  const isKakao = channelLower === 'kakao';
   const channelType = (step.channel || 'lms').toUpperCase();
-  const msgType = channelType === 'LMS' || channelType === 'MMS' ? channelType : 'SMS';
+  const msgType = isKakao ? 'KAKAO' : (channelType === 'LMS' || channelType === 'MMS' ? channelType : 'SMS');
   const fieldMappings = await prepareFieldMappings(exec.company_id);
   const opt080Number = await getOpt080Number(exec.created_by, exec.company_id);
 
-  // 광고 표기 — step.is_ad (DB default true) → buildAdMessage가 (광고)+080+KISA 제목 자동 합성
+  // 광고 표기 — step.is_ad (DB default true) → buildAdMessage가 (광고)+080+KISA 제목 자동 합성 (알림톡 영역 무관 = 정보성 메시지)
   const isAd = step.is_ad !== false;
 
-  // ★ D187-fix5: 발송 직전 최후 안전망 — sanitize 자동 적용 (이모지/비표준 특수문자 제거)
-  const sanTemplate = sanitizeForSms(step.message_template || '');
-  const sanSubject = sanitizeForSms(step.subject || '');
-  if (sanTemplate.hadChanges) {
-    console.log(`[JourneyExecutor] step ${step.step_order} 본문 sanitize:`, sanTemplate.warnings.join(' / '));
-  }
-  if (sanSubject.hadChanges) {
-    console.log(`[JourneyExecutor] step ${step.step_order} 제목 sanitize:`, sanSubject.warnings.join(' / '));
+  let message: string;
+  let subject: string;
+  let kakaoTemplateRow: { id: string; template_code: string; content: string; buttons: any[]; status: string } | null = null;
+
+  if (isKakao) {
+    // ★ D188 Phase 2-B-2 (2026-05-21): 알림톡 영역 — kakao_templates 조회 + alimtalk_variable_map 치환.
+    if (!step.alimtalk_template_code) {
+      await pauseJourney(exec.journey_id, `step ${step.step_order} 알림톡 템플릿 코드가 비어있어 발송 차단`);
+      await logFailedStep(exec.execution_id, step.id, 'alimtalk_template_code_empty');
+      return 'failed';
+    }
+    const tplRes = await query(
+      `SELECT id, template_code, content, buttons, status
+       FROM kakao_templates WHERE template_code = $1 AND company_id = $2::uuid LIMIT 1`,
+      [step.alimtalk_template_code, exec.company_id]
+    );
+    if (tplRes.rows.length === 0) {
+      await pauseJourney(exec.journey_id, `step ${step.step_order} 알림톡 템플릿(${step.alimtalk_template_code}) 미존재 또는 회사 격리 위반`);
+      await logFailedStep(exec.execution_id, step.id, 'alimtalk_template_not_found');
+      return 'failed';
+    }
+    kakaoTemplateRow = tplRes.rows[0] as any;
+    if (!['APPROVED', 'APR'].includes(String(kakaoTemplateRow!.status || '').toUpperCase())) {
+      await pauseJourney(exec.journey_id, `step ${step.step_order} 알림톡 템플릿 미승인 (status=${kakaoTemplateRow!.status})`);
+      await logFailedStep(exec.execution_id, step.id, 'alimtalk_template_not_approved');
+      return 'failed';
+    }
+    // 알림톡 본문 = template.content + alimtalk_variable_map 치환 (@@필드키@@ → customer[필드키] / 그 외 = 직접 입력값 그대로)
+    message = replaceAlimtalkVars(
+      String(kakaoTemplateRow!.content || ''),
+      customer as Record<string, any>,
+      step.alimtalk_variable_map || {}
+    );
+    // 알림톡 자체는 subject 무관, LMS 대체(L/B) 발송 시점만 alimtalk_next_subject 사용 (insertAlimtalkQueue title_str 영역)
+    subject = step.alimtalk_next_subject || '';
+  } else {
+    // ★ 기존 흐름 — SMS/LMS/MMS는 prepareSendMessage 정합.
+    // ★ D187-fix5: 발송 직전 최후 안전망 — sanitize 자동 적용 (이모지/비표준 특수문자 제거)
+    const sanTemplate = sanitizeForSms(step.message_template || '');
+    const sanSubject = sanitizeForSms(step.subject || '');
+    if (sanTemplate.hadChanges) {
+      console.log(`[JourneyExecutor] step ${step.step_order} 본문 sanitize:`, sanTemplate.warnings.join(' / '));
+    }
+    if (sanSubject.hadChanges) {
+      console.log(`[JourneyExecutor] step ${step.step_order} 제목 sanitize:`, sanSubject.warnings.join(' / '));
+    }
+
+    const prep = prepareSendMessage(
+      sanTemplate.sanitized,
+      customer as Record<string, any>,
+      fieldMappings,
+      { msgType: msgType as 'SMS' | 'LMS' | 'MMS', isAd, opt080Number, subject: sanSubject.sanitized }
+    );
+    message = prep.message;
+    subject = prep.subject;
+
+    // LMS/MMS인데 subject 비어있으면 발송 차단 (통신사 정책 위반 차단)
+    if ((msgType === 'LMS' || msgType === 'MMS') && (!subject || subject.trim().length === 0)) {
+      await pauseJourney(exec.journey_id, `step ${step.step_order} 제목이 비어있어 LMS/MMS 발송 차단`);
+      await logFailedStep(exec.execution_id, step.id, 'subject_empty_for_lms_mms');
+      return 'failed';
+    }
+
+    if (!message || message.trim().length < 2) {
+      await logFailedStep(exec.execution_id, step.id, 'empty_message_after_prepare');
+      await advanceOrComplete(exec, step, 0);
+      return 'failed';
+    }
   }
 
-  const { message, subject } = prepareSendMessage(
-    sanTemplate.sanitized,
-    customer as Record<string, any>,
-    fieldMappings,
-    { msgType, isAd, opt080Number, subject: sanSubject.sanitized }
-  );
-
-  // LMS/MMS인데 subject 비어있으면 발송 차단 (통신사 정책 위반 차단)
-  if ((msgType === 'LMS' || msgType === 'MMS') && (!subject || subject.trim().length === 0)) {
-    await pauseJourney(exec.journey_id, `step ${step.step_order} 제목이 비어있어 LMS/MMS 발송 차단`);
-    await logFailedStep(exec.execution_id, step.id, 'subject_empty_for_lms_mms');
-    return 'failed';
-  }
-
-  if (!message || message.trim().length < 2) {
-    await logFailedStep(exec.execution_id, step.id, 'empty_message_after_prepare');
-    await advanceOrComplete(exec, step, 0);
-    return 'failed';
-  }
-
-  // 비용 산정 (회사별 단가)
+  // 비용 산정 (회사별 단가) — channel별 단가
   const compRes = await query(
     `SELECT cost_per_sms, cost_per_lms, cost_per_mms, cost_per_kakao FROM companies WHERE id = $1::uuid`,
     [exec.company_id]
   );
   const costs = getCompanyCosts(compRes.rows[0] || {});
-  const unitCost = msgType === 'LMS' ? Number(costs.lms) : msgType === 'MMS' ? Number(costs.mms) : Number(costs.sms);
+  const unitCost =
+    msgType === 'KAKAO' ? Number(costs.kakao) :
+    msgType === 'LMS'   ? Number(costs.lms) :
+    msgType === 'MMS'   ? Number(costs.mms) :
+                          Number(costs.sms);
   const sendCost = Math.round(unitCost);
 
   // 7. 임계값 검증 (회사 자유 — NULL = 무제한)
@@ -362,8 +448,9 @@ async function processExecution(exec: ExecutionRow): Promise<StepOutcome> {
     }
   }
 
-  // 8. 잔액 차감 (atomic)
-  const deduct = await prepaidDeduct(exec.company_id, 1, msgType, exec.journey_id, exec.created_by || undefined);
+  // 8. 잔액 차감 (atomic) — KAKAO는 prepaidDeduct가 'KAKAO' msgType 지원 정합 (없으면 fallback 'SMS' 단가)
+  const prepaidMsgType = msgType === 'KAKAO' ? 'KAKAO' : (msgType as 'SMS' | 'LMS' | 'MMS');
+  const deduct = await prepaidDeduct(exec.company_id, 1, prepaidMsgType as any, exec.journey_id, exec.created_by || undefined);
   if (!deduct.ok) {
     await pauseJourney(exec.journey_id, deduct.error || '잔액 부족');
     await logFailedStep(exec.execution_id, step.id, 'insufficient_balance');
@@ -378,13 +465,15 @@ async function processExecution(exec: ExecutionRow): Promise<StepOutcome> {
     return 'failed';
   }
 
+  // ★ D188 Phase 2-B-2 (2026-05-21): campaigns INSERT — send_channel은 알림톡 시 'alimtalk' / 그 외 'sms' 정합.
+  const sendChannelForCampaign = isKakao ? 'alimtalk' : 'sms';
   const campaignRes = await query(
     `INSERT INTO campaigns (
       company_id, campaign_name, message_type, message_content, subject, message_subject, message_template,
       is_ad, target_count, sent_count, created_by, send_channel, callback_number, status, scheduled_at, sent_at
     ) VALUES (
       $1::uuid, $2, $3, $4, $5, $5, $4,
-      $6, 1, 1, $7::uuid, 'sms', $8, 'sending', NOW(), NOW()
+      $6, 1, 1, $7::uuid, $9, $8, 'sending', NOW(), NOW()
     ) RETURNING id`,
     [
       exec.company_id,
@@ -395,11 +484,12 @@ async function processExecution(exec: ExecutionRow): Promise<StepOutcome> {
       isAd,
       exec.created_by,
       callbackNumber,
+      sendChannelForCampaign,
     ]
   );
   const campaignId = campaignRes.rows[0].id as string;
 
-  // 10. bulkInsertSmsQueue (단건)
+  // ★ D188 Phase 2-B-2 (2026-05-21): 10. queue INSERT — channel별 분기 (SMS/LMS/MMS = bulkInsertSmsQueue / KAKAO = insertAlimtalkQueue).
   try {
     const tables = await getCompanySmsTables(exec.company_id, exec.created_by || undefined);
     if (tables.length === 0) {
@@ -408,22 +498,44 @@ async function processExecution(exec: ExecutionRow): Promise<StepOutcome> {
       return 'failed';
     }
 
-    const row = [
-      cleanPhone,
-      callbackNumber,
-      message,
-      msgType,
-      subject || '',
-      new Date(),
-      exec.company_id,
-      `journey:${exec.journey_id}:${step.id}`,
-      '',
-      '',
-      '',
-    ];
-    await bulkInsertSmsQueue(tables, [row], true);
+    if (isKakao && kakaoTemplateRow) {
+      // 알림톡 영역 — insertAlimtalkQueue 사용. buttons → buttonJson 변환.
+      const buttonJson = convertButtonsToQTmsgInline(kakaoTemplateRow.buttons || []);
+      await insertAlimtalkQueue(
+        tables,
+        [{
+          phone: cleanPhone,
+          callback: callbackNumber,
+          message,
+          titleStr: subject || undefined,  // L/B 시 LMS 대체 제목
+          templateCode: step.alimtalk_template_code || '',
+          nextType: (step.alimtalk_next_type as 'N' | 'S' | 'L' | 'A' | 'B' | undefined) || 'L',
+          nextContents: step.alimtalk_next_contents || undefined,
+          buttonJson: buttonJson || undefined,
+          etcJson: undefined,
+          companyId: exec.company_id,
+        }]
+      );
+    } else {
+      // SMS/LMS/MMS 영역 — bulkInsertSmsQueue 정합.
+      const row = [
+        cleanPhone,
+        callbackNumber,
+        message,
+        msgType,
+        subject || '',
+        new Date(),
+        exec.company_id,
+        `journey:${exec.journey_id}:${step.id}`,
+        // MMS 영역 — mms_image_paths[0..2] 사용 (basename 추출, sms-queue file_name1~3 정합)
+        (msgType === 'MMS' && step.mms_image_paths && step.mms_image_paths[0]) ? extractBasename(step.mms_image_paths[0]) : '',
+        (msgType === 'MMS' && step.mms_image_paths && step.mms_image_paths[1]) ? extractBasename(step.mms_image_paths[1]) : '',
+        (msgType === 'MMS' && step.mms_image_paths && step.mms_image_paths[2]) ? extractBasename(step.mms_image_paths[2]) : '',
+      ];
+      await bulkInsertSmsQueue(tables, [row], true);
+    }
   } catch (sendErr: any) {
-    console.error('[JourneyExecutor] bulkInsertSmsQueue 실패:', sendErr?.message || sendErr);
+    console.error('[JourneyExecutor] queue 발송 실패:', sendErr?.message || sendErr);
     await logFailedStep(exec.execution_id, step.id, 'queue_insert_failed');
     await advanceOrComplete(exec, step, sendCost);
     return 'failed';
@@ -438,6 +550,15 @@ async function processExecution(exec: ExecutionRow): Promise<StepOutcome> {
     )`,
     [exec.execution_id, step.id, campaignId, sendCost]
   );
+
+  // ★ D188 Phase 2-B-3 (2026-05-21): variants reward 누적 — sent=1 (click/conversion은 추후 트래킹 endpoint 영역).
+  if (activeVariantId) {
+    try {
+      await recordJourneyStepVariantReward(activeVariantId, 1, 0, 0);
+    } catch (rewardErr: any) {
+      console.warn(`[JourneyExecutor] variant reward 갱신 실패:`, rewardErr?.message || rewardErr);
+    }
+  }
 
   // 12. execution + journey 통계 갱신
   await advanceOrComplete(exec, step, sendCost);
@@ -602,4 +723,80 @@ function evaluateCondition(condJsonb: Record<string, unknown> | null, customer: 
     case 'not_null': return cv != null && cv !== '';
     default:         return true;
   }
+}
+
+// ════════════════════════════════════════════════════════════════════
+// ★ D188 Phase 2-B-2 (2026-05-21): 알림톡 변수 치환 + 버튼 JSON 변환 + MMS 파일명 추출 헬퍼 3종.
+// ════════════════════════════════════════════════════════════════════
+
+/**
+ * 알림톡 본문 #{변수} 치환.
+ * varMap entry 값이 '@@필드키@@' 형식이면 customer[필드키]로 치환, 그 외는 직접 값 사용.
+ * customer.custom_fields JSONB fallback.
+ */
+function replaceAlimtalkVars(
+  content: string,
+  customer: Record<string, any>,
+  varMap: Record<string, string>
+): string {
+  if (!content) return '';
+  let out = content;
+  Object.entries(varMap || {}).forEach(([k, v]) => {
+    const escapedKey = k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    let replacement: string;
+    if (typeof v === 'string' && v.startsWith('@@') && v.endsWith('@@')) {
+      const fieldKey = v.slice(2, -2);
+      let cv: any = null;
+      if (fieldKey in customer) {
+        cv = customer[fieldKey];
+      } else if (customer.custom_fields && typeof customer.custom_fields === 'object' && fieldKey in customer.custom_fields) {
+        cv = customer.custom_fields[fieldKey];
+      }
+      replacement = cv != null && String(cv).trim() !== '' ? String(cv) : '';
+    } else {
+      replacement = v || '';
+    }
+    out = out.replace(new RegExp(escapedKey, 'g'), replacement);
+  });
+  return out;
+}
+
+/**
+ * 알림톡 버튼 JSON 변환 (kakao_templates.buttons → QTmsg k_button_json 형식).
+ * 입력: [{ name, type, url1, url2 }, ...] (또는 buttonName/buttonType/buttonUrlMobile/buttonUrlPc)
+ * 출력: {"name1":"...","type1":"2","url1_1":"...","url1_2":"...","name2":...}  (최대 5개)
+ */
+function convertButtonsToQTmsgInline(buttons: any[]): string | null {
+  if (!Array.isArray(buttons) || buttons.length === 0) return null;
+  const TYPE_MAP: Record<string, string> = {
+    DS: '1',       // 배송조회
+    WL: '2',       // 웹링크
+    AL: '3',       // 앱링크
+    BK: '4',       // 봇키워드
+    MD: '5',       // 메시지전달
+    AC: '6',       // 채널추가
+    BC: '4',       // 봇전환
+    BF: '4',
+    PD: '2',
+  };
+  const out: Record<string, string> = {};
+  buttons.slice(0, 5).forEach((b, i) => {
+    const n = i + 1;
+    out[`name${n}`] = b.name || b.buttonName || b.label || `버튼${n}`;
+    out[`type${n}`] = TYPE_MAP[b.type || b.buttonType] || '2';
+    out[`url${n}_1`] = b.url1 || b.urlMobile || b.buttonUrlMobile || b.url || '';
+    out[`url${n}_2`] = b.url2 || b.urlPc || b.buttonUrlPc || '';
+  });
+  return JSON.stringify(out);
+}
+
+/**
+ * MMS 이미지 서버 경로 → 파일명만 추출 (sms-queue file_name1~3 정합).
+ * 예: "/home/admin/mms/abc123.jpg" → "abc123.jpg"
+ */
+function extractBasename(filePath: string | null | undefined): string {
+  if (!filePath) return '';
+  const s = String(filePath);
+  const idx = Math.max(s.lastIndexOf('/'), s.lastIndexOf('\\'));
+  return idx >= 0 ? s.slice(idx + 1) : s;
 }

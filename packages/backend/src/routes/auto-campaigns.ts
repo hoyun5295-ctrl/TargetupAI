@@ -291,8 +291,20 @@ router.get('/:id', async (req: Request, res: Response) => {
 
 // ============================================================
 // 3. POST / — 자동캠페인 생성
+// ★ D188 Phase 2-B-4 (2026-05-21) 자동발송 영구 폐기 — Harold 명시 "사용 고객사 0 + 여정 빌더 진짜 업그레이드".
+//   신규 생성 영역 410 Gone 영구 차단. 운영 데이터 보존 + worker 유지 (기존 활성 매트릭스 자연 소멸).
+//   사용자는 여정 빌더(/ai-journeys)로 진입 안내.
 // ============================================================
-router.post('/', async (req: Request, res: Response) => {
+router.post('/', async (_req: Request, res: Response) => {
+  return res.status(410).json({
+    error: '자동발송 신규 등록은 영구 폐기되었습니다. 여정 빌더(/ai-journeys)로 이전해주세요.',
+    code: 'AUTO_CAMPAIGN_DEPRECATED',
+    journeyBuilderUrl: '/ai-journeys',
+  });
+});
+
+// ★ D188 Phase 2-B-4: 기존 핸들러 영역 영구 미사용 — 사용자는 여정 빌더 사용. 운영 데이터 매트릭스 안전망 위해 코드는 보존 (worker / GET 조회 / pause/resume 영역과 분리).
+async function _deprecatedCreateAutoCampaign(req: Request, res: Response) {
   try {
     const companyId = req.user?.companyId;
     const userId = req.user?.userId;
@@ -538,7 +550,9 @@ router.post('/', async (req: Request, res: Response) => {
     console.error('[auto-campaigns] 생성 실패:', err);
     res.status(500).json({ error: '자동발송 생성에 실패했습니다.' });
   }
-});
+}
+// ★ D188 Phase 2-B-4: _deprecatedCreateAutoCampaign 함수 영역 영구 미사용 (D69~D182 자동발송 코드 보존 — 운영 데이터 안전망).
+void _deprecatedCreateAutoCampaign;
 
 // ============================================================
 // 4. PUT /:id — 자동캠페인 수정

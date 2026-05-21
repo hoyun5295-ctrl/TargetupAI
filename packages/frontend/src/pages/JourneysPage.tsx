@@ -12,7 +12,8 @@ import {
 
 type TemplateCode = 'onboarding' | 'repeat' | 'dormant' | 'cart' | 'birthday' | 'reservation' | 'custom';
 type JourneyStatus = 'draft' | 'active' | 'paused' | 'ended';
-type ChannelType = 'sms' | 'lms' | 'mms';
+// ★ D188 Phase 2-B-2 (2026-05-21): kakao 채널 추가.
+type ChannelType = 'sms' | 'lms' | 'mms' | 'kakao';
 type RefineTone = '감성적' | '실용적' | '캐주얼';
 
 interface JourneyRow {
@@ -76,6 +77,15 @@ interface AIGeneratedStep {
   stepIntent: string;
   // ★ D188 Phase 2-B-1 (2026-05-21): condition step 평가용 conditionJsonb.
   conditionJsonb?: ConditionJsonb;
+  // ★ D188 Phase 2-B-2 (2026-05-21): 알림톡 (channel='kakao') 영역.
+  alimtalkProfileId?: string;
+  alimtalkTemplateCode?: string;
+  alimtalkVariableMap?: Record<string, string>;
+  alimtalkNextType?: 'N' | 'S' | 'L' | 'A' | 'B';
+  alimtalkNextContents?: string;
+  alimtalkNextSubject?: string;
+  // ★ D188 Phase 2-B-2 (2026-05-21): MMS (channel='mms') 영역.
+  mmsImagePaths?: string[];
 }
 
 interface AIJourneyPackage {
@@ -725,10 +735,12 @@ export default function JourneysPage() {
                       {/* channel select + 광고 toggle — message step만 */}
                       {s.stepType === 'message' && (
                         <>
+                          {/* ★ D188 Phase 2-B-2 (2026-05-21): kakao + mms 채널 옵션 신규. */}
                           <select value={s.channel} onChange={(e) => updateStep(idx, { channel: e.target.value as ChannelType })} className="px-2 py-1 bg-slate-800 border border-white/10 rounded text-xs">
                             <option value="sms">SMS</option>
                             <option value="lms">LMS</option>
                             <option value="mms">MMS</option>
+                            <option value="kakao">알림톡</option>
                           </select>
                           <label className="flex items-center gap-1 text-xs cursor-pointer">
                             <input type="checkbox" checked={s.isAd} onChange={(e) => updateStep(idx, { isAd: e.target.checked })} className="rounded" />
@@ -848,8 +860,61 @@ export default function JourneysPage() {
                       </div>
                     )}
 
-                    {/* ★ D188 Phase 2-B-1: message step UI — 기존 매트릭스 유지 */}
-                    {s.stepType === 'message' && (
+                    {/* ★ D188 Phase 2-B-2 (2026-05-21): 알림톡 step UI — channel='kakao' 시 알림톡 안내 + 핵심 input. */}
+                    {s.stepType === 'message' && s.channel === 'kakao' && (
+                      <div className="p-3 bg-amber-500/10 border border-amber-500/30 rounded text-xs space-y-2">
+                        <div className="font-semibold text-amber-200">알림톡 (KAKAO) step</div>
+                        <div className="text-amber-200/60 leading-relaxed">
+                          승인된 알림톡 템플릿 코드 + 부달 발송 정책을 입력하세요. 본문은 kakao_templates에서 자동 로드됩니다.
+                        </div>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                          <input
+                            type="text"
+                            value={s.alimtalkTemplateCode || ''}
+                            onChange={(e) => updateStep(idx, { alimtalkTemplateCode: e.target.value })}
+                            placeholder="알림톡 템플릿 코드 (kakao_templates.template_code)"
+                            className="px-2 py-1.5 bg-slate-900 border border-white/10 rounded text-xs"
+                          />
+                          <select
+                            value={s.alimtalkNextType || 'L'}
+                            onChange={(e) => updateStep(idx, { alimtalkNextType: e.target.value as 'N' | 'S' | 'L' | 'A' | 'B' })}
+                            className="px-2 py-1.5 bg-slate-900 border border-white/10 rounded text-xs"
+                          >
+                            <option value="N">N (대체 안함)</option>
+                            <option value="S">S (SMS 대체 - 동일 문구)</option>
+                            <option value="L">L (LMS 대체 - 동일 문구)</option>
+                            <option value="A">A (SMS + 별도 문구)</option>
+                            <option value="B">B (LMS + 별도 문구)</option>
+                          </select>
+                        </div>
+                        {(s.alimtalkNextType === 'L' || s.alimtalkNextType === 'B') && (
+                          <input
+                            type="text"
+                            value={s.alimtalkNextSubject || ''}
+                            onChange={(e) => updateStep(idx, { alimtalkNextSubject: e.target.value })}
+                            placeholder="LMS 대체 제목 (L/B 시 필수, 최대 40자)"
+                            maxLength={40}
+                            className="w-full px-2 py-1.5 bg-slate-900 border border-white/10 rounded text-xs"
+                          />
+                        )}
+                        {(s.alimtalkNextType === 'A' || s.alimtalkNextType === 'B') && (
+                          <textarea
+                            value={s.alimtalkNextContents || ''}
+                            onChange={(e) => updateStep(idx, { alimtalkNextContents: e.target.value })}
+                            placeholder="대체 문구 (A/B 시 필수)"
+                            rows={3}
+                            maxLength={s.alimtalkNextType === 'A' ? 90 : 2000}
+                            className="w-full px-2 py-1.5 bg-slate-900 border border-white/10 rounded text-xs resize-y"
+                          />
+                        )}
+                        <div className="text-[10px] text-amber-200/50">
+                          알림톡 변수 매핑 (#{`{변수}`} → 고객 필드) UI는 운영 검증 후 단계적 통합 영역 — 우선 회사 admin이 직접 alimtalk_variable_map JSON 형식 입력 영역.
+                        </div>
+                      </div>
+                    )}
+
+                    {/* ★ D188 Phase 2-B-1: message step UI — 기존 매트릭스 유지 (SMS/LMS/MMS) */}
+                    {s.stepType === 'message' && s.channel !== 'kakao' && (
                       <>
                         {(s.channel === 'lms' || s.channel === 'mms') && (
                           <div>

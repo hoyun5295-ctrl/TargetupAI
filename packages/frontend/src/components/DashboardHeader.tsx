@@ -107,14 +107,8 @@ export default function DashboardHeader({
           path: '/ai-operator',
         }]
       : []),
-    {
-      label: '자동발송',
-      onClick: () => enterpriseGuard('자동발송', '반복 발송 스케줄을 설정하면 자동으로 메시지가 발송됩니다.',
-        () => lockGuard(() => navigate('/auto-send'))),
-      color: 'gold',
-      locked: isEnterpriseLocked || isSubscriptionLocked,
-      path: '/auto-send',
-    },
+    // ★ D188 Phase 2-B-4 (2026-05-21) 자동발송 메뉴 영구 제거 — Harold 명시 "사용 고객사 0 + 여정 빌더가 진짜 업그레이드".
+    //   /auto-send 라우트 진입 시 AutoSendPage.tsx가 여정 빌더 안내 페이지로 노출. auto_campaigns 운영 데이터는 보존 (worker 유지).
     // ★ D182 (2026-05-19): 모바일DM 헤더 메뉴 영구 제거 — AI Operator 페이지 안 SUB_MODULE_CARDS로 이동 (Harold 명시 — 헤더 간소화)
     {
       label: '카카오&RCS',
