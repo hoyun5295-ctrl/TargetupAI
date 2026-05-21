@@ -54,7 +54,8 @@ export default function AlimtalkPreview({
     : null;
 
   return (
-    <div className="bg-gradient-to-b from-amber-50 to-amber-100/70 rounded-2xl p-4 max-w-sm mx-auto select-none">
+    {/* ★ D188 (2026-05-21) 영업팀장 신고 #7-(3): 카카오 말풍선 미리보기 영역 복사 가능 정합 — `select-none` 차단 사고 영구 종결. */}
+    <div className="bg-gradient-to-b from-amber-50 to-amber-100/70 rounded-2xl p-4 max-w-sm mx-auto select-text">
       <p className="text-xs text-gray-500 mb-2">
         {profileName ? `@${profileName}` : '카카오톡 미리보기'}
       </p>

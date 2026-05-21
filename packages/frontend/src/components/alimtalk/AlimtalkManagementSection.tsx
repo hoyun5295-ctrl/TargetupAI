@@ -181,6 +181,12 @@ export default function AlimtalkManagementSection() {
     status: string;
   } | null>(null);
 
+  // ★ D188 (2026-05-21) 영업팀장 신고 #4: 템플릿 검색 UI — 4 영역 선택(templateName/content/templateCode/customTemplateCode) + 검색어 input.
+  //   클라이언트 측 filter (templates useMemo 합성) — 서버 API 추가 호출 X. 운영 환경 템플릿 수 수십~수백 건 = 클라이언트 filter 정합.
+  type SearchType = 'templateName' | 'content' | 'templateCode' | 'customTemplateCode';
+  const [searchType, setSearchType] = useState<SearchType>('templateName');
+  const [searchKeyword, setSearchKeyword] = useState('');
+
   // 내 회사 정보 (Wizard에 전달) — authStore에서 직접 참조 (별도 API 호출 불필요)
   const authUser = useAuthStore((s) => s.user);
   const myCompany = useMemo(
@@ -240,10 +246,23 @@ export default function AlimtalkManagementSection() {
   };
 
   const filtered = useMemo(() => {
-    if (filter === 'ALL') return templates;
-    const allowed = FILTER_MATCH[filter] || [filter];
-    return templates.filter((t) => allowed.includes(t.status));
-  }, [templates, filter]);
+    const byStatus =
+      filter === 'ALL'
+        ? templates
+        : templates.filter((t) => (FILTER_MATCH[filter] || [filter]).includes(t.status));
+    // ★ D188 (2026-05-21) 영업팀장 신고 #4: 검색 keyword 합성 — 4 영역 lowercase 부분 일치.
+    const kw = searchKeyword.trim().toLowerCase();
+    if (!kw) return byStatus;
+    return byStatus.filter((t) => {
+      const fieldValue =
+        searchType === 'templateName'       ? (t.template_name || '') :
+        searchType === 'content'            ? (t.content || '') :
+        searchType === 'templateCode'       ? (t.template_code || '') :
+        searchType === 'customTemplateCode' ? (t.custom_template_code || '') :
+        '';
+      return String(fieldValue).toLowerCase().includes(kw);
+    });
+  }, [templates, filter, searchType, searchKeyword]);
 
   // ★ D142+ F (2026-04-29) PDF 0428 알림톡 #3: 검수요청 시 코멘트 + 증빙자료 입력 모달.
   //   "코멘트 입력칸 + 코멘트 증빙자료 추가" — 직원 요구. backend는 이미 /inspect-with-file 보유.
@@ -490,7 +509,7 @@ export default function AlimtalkManagementSection() {
             #4 "휴면 삭제" — DORMANT 탭 제거 (라벨은 유지)
             #5 "카카오 반려 메뉴 추가" — KREJ 신규 탭 (HREJ '내부 반려'와 분리)
             filter 시 IMC raw + 한줄로 풀네임 양쪽 매칭으로 호환 (filtered useMemo) */}
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between flex-wrap gap-2">
         <div className="flex flex-wrap gap-1 text-xs">
           {(['ALL', 'DRAFT', 'REQUESTED', 'KREQ', 'APPROVED', 'HREJ', 'KREJ'] as const).map((s) => (
             <button
@@ -507,7 +526,38 @@ export default function AlimtalkManagementSection() {
             </button>
           ))}
         </div>
-        <div className="flex gap-2">
+        <div className="flex gap-2 items-center flex-wrap">
+          {/* ★ D188 (2026-05-21) 영업팀장 신고 #4: 검색 UI — 4 영역 select + input. 클라이언트 측 filter. */}
+          <div className="flex items-center gap-1 bg-white border border-gray-300 rounded-lg overflow-hidden text-xs">
+            <select
+              value={searchType}
+              onChange={(e) => setSearchType(e.target.value as SearchType)}
+              className="px-2 py-1.5 text-xs bg-white border-0 focus:outline-none focus:ring-0 text-gray-700"
+            >
+              <option value="templateName">템플릿명</option>
+              <option value="content">템플릿 문구</option>
+              <option value="templateCode">템플릿코드</option>
+              <option value="customTemplateCode">고객사관리코드</option>
+            </select>
+            <div className="w-px h-4 bg-gray-200" />
+            <input
+              type="text"
+              value={searchKeyword}
+              onChange={(e) => setSearchKeyword(e.target.value)}
+              placeholder="검색어"
+              className="px-2 py-1.5 text-xs w-36 border-0 focus:outline-none focus:ring-0 placeholder:text-gray-400"
+            />
+            {searchKeyword && (
+              <button
+                type="button"
+                onClick={() => setSearchKeyword('')}
+                className="px-2 py-1.5 text-xs text-gray-400 hover:text-gray-600"
+                aria-label="검색 초기화"
+              >
+                ×
+              </button>
+            )}
+          </div>
           {/* ★ 검수 알림 수신자 관리 + 템플릿 등록: 고객사관리자만 (백엔드 requireCompanyAdmin) */}
           {canManage && (
             <>
@@ -555,6 +605,8 @@ export default function AlimtalkManagementSection() {
             <thead className="bg-gray-50 text-xs text-gray-500">
               <tr>
                 <th className="text-left px-4 py-2">템플릿</th>
+                {/* ★ D188 (2026-05-21) 영업팀장 신고 #3: 템플릿코드 컬럼 신규 — 사용자가 발송 매칭/디버그용 표시 정합. */}
+                <th className="text-left px-4 py-2">템플릿코드</th>
                 <th className="text-left px-4 py-2">프로필</th>
                 <th className="text-left px-4 py-2">등록자</th>
                 <th className="text-center px-4 py-2">유형</th>
@@ -588,6 +640,15 @@ export default function AlimtalkManagementSection() {
                       <div className="font-medium text-gray-900">{t.template_name}</div>
                       {/* ★ D162-4 (2026-05-15) 2차: Harold님 명시 정합 — 반려사유 펼침 영역 제거.
                           row에 길게 펼쳐지던 사유 글씨가 화면 어지러움 유발. 관리 컬럼의 '반려사유' 버튼 클릭 시 모달로 상세 노출. */}
+                      {t.custom_template_code && (
+                        <div className="text-[10px] text-gray-400 font-mono mt-0.5">
+                          고객사: {t.custom_template_code}
+                        </div>
+                      )}
+                    </td>
+                    {/* ★ D188 (2026-05-21) 영업팀장 신고 #3: 템플릿코드 컬럼 row. font-mono + 작은 텍스트 + select-text. */}
+                    <td className="px-4 py-2 font-mono text-[11px] text-gray-500 select-text cursor-text">
+                      {t.template_code || '-'}
                     </td>
                     <td className="px-4 py-2 text-xs text-gray-600">
                       {t.profile_name || '-'}

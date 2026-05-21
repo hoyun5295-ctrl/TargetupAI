@@ -44,6 +44,9 @@ export interface AlimtalkSendModalProps {
   setAlimtalkFallback: (f: 'N' | 'S' | 'L' | 'A' | 'B') => void;
   alimtalkNextContents: string;
   setAlimtalkNextContents: (v: string) => void;
+  /** ★ D188 (2026-05-21) 영업팀장 신고 #7-(2): LMS 대체 제목 (L/B 시 필수). Dashboard 전역 state 관리. */
+  alimtalkNextSubject?: string;
+  setAlimtalkNextSubject?: (v: string) => void;
 
   // 발송 핸들러 — Dashboard에서 위임받아 SendConfirm 모달 진입
   onSendConfirm: (data: {
@@ -59,6 +62,8 @@ export interface AlimtalkSendModalProps {
     variableMap: Record<string, string>;
     fallback: 'N' | 'S' | 'L' | 'A' | 'B';
     nextContents: string;
+    /** ★ D188 (2026-05-21) 영업팀장 신고 #7-(2): LMS 대체 제목 — L/B 시 필수 (Dashboard 발송 fetch에 전달). */
+    nextSubject?: string;
     profileId: string;
   }) => void;
 
@@ -85,6 +90,8 @@ export default function AlimtalkSendModal({
   setAlimtalkFallback,
   alimtalkNextContents,
   setAlimtalkNextContents,
+  alimtalkNextSubject,
+  setAlimtalkNextSubject,
   onSendConfirm,
   setToast,
   initialRecipients,
@@ -112,6 +119,8 @@ export default function AlimtalkSendModal({
       setAlimtalkProfileId('');
       setAlimtalkFallback('L');
       setAlimtalkNextContents('');
+      // ★ D188 (2026-05-21) 영업팀장 신고 #7-(2): LMS 대체 제목 state reset.
+      if (setAlimtalkNextSubject) setAlimtalkNextSubject('');
       // 파일 매핑/입력 state 초기화
       setFileHeaders([]);
       setFileAllData([]);
@@ -207,6 +216,8 @@ export default function AlimtalkSendModal({
       variableMap: kakaoTemplateVars,
       nextType: alimtalkFallback,
       nextContents: alimtalkNextContents,
+      // ★ D188 (2026-05-21) 영업팀장 신고 #7-(2): LMS 대체 제목 동기화.
+      nextSubject: alimtalkNextSubject || '',
     }),
     [
       alimtalkProfileId,
@@ -214,6 +225,7 @@ export default function AlimtalkSendModal({
       kakaoTemplateVars,
       alimtalkFallback,
       alimtalkNextContents,
+      alimtalkNextSubject,
     ],
   );
 
@@ -224,6 +236,8 @@ export default function AlimtalkSendModal({
     setKakaoTemplateVars(v.variableMap);
     setAlimtalkFallback(v.nextType);
     setAlimtalkNextContents(v.nextContents);
+    // ★ D188 (2026-05-21) 영업팀장 신고 #7-(2): LMS 대체 제목 동기화 setter.
+    if (setAlimtalkNextSubject) setAlimtalkNextSubject(v.nextSubject || '');
   };
 
   // 직접입력 파싱 — 한 줄에 하나씩, 콤마/탭/공백 무시
@@ -360,6 +374,14 @@ export default function AlimtalkSendModal({
       setToast({ show: true, type: 'error', message: '대체 문구를 입력해주세요.' });
       return;
     }
+    // ★ D188 (2026-05-21) 영업팀장 신고 #7-(2): L(LMS 대체) + B(LMS+문구) 시 LMS 제목 필수.
+    if (
+      ['L', 'B'].includes(alimtalkFallback) &&
+      !(alimtalkNextSubject || '').trim()
+    ) {
+      setToast({ show: true, type: 'error', message: 'LMS 대체 발송 시 제목을 입력해주세요.' });
+      return;
+    }
     setSending(true);
     try {
       const token = localStorage.getItem('token');
@@ -389,11 +411,28 @@ export default function AlimtalkSendModal({
         variableMap: kakaoTemplateVars,
         fallback: alimtalkFallback,
         nextContents: alimtalkNextContents,
+        // ★ D188 (2026-05-21) 영업팀장 신고 #7-(2): LMS 대체 제목 payload 전달.
+        nextSubject: alimtalkNextSubject || '',
         profileId: alimtalkProfileId,
       });
     } finally {
       setSending(false);
     }
+  };
+
+  // ★ D188 (2026-05-21) 영업팀장 신고 #6-(2): close 시 sending state + body overflow 명시 reset 안전망.
+  //   모달 close 후 직접 발송 패널 복귀 시 스크롤 차단 잔존 사고 영구 차단.
+  //   document.body.style.overflow 박힌 영역 자체는 본 모달에서 변경 X 확인됨 — 영구 안전망으로 reset 명시.
+  const handleClose = () => {
+    setSending(false);
+    try {
+      if (typeof document !== 'undefined' && document.body) {
+        document.body.style.overflow = '';
+      }
+    } catch {
+      /* ignore */
+    }
+    onClose();
   };
 
   if (!show) return null;
@@ -419,7 +458,7 @@ export default function AlimtalkSendModal({
           </div>
           <button
             type="button"
-            onClick={onClose}
+            onClick={handleClose}
             className="p-2 text-gray-400 hover:text-gray-700 hover:bg-gray-100 rounded-lg transition"
           >
             <X size={20} strokeWidth={1.75} />

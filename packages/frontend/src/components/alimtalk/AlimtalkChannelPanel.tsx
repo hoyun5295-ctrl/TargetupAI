@@ -60,6 +60,9 @@ export interface AlimtalkChannelState {
   variableMap: Record<string, string>;    // #{name} → 실제값 또는 `@@필드키@@`
   nextType: AlimtalkNextType;
   nextContents: string;
+  /** ★ D188 (2026-05-21) 영업팀장 신고 #7-(2): LMS 대체 발송(L/B) 시 LMS 제목.
+   *   L=LMS 대체(동일 문구) / B=LMS+문구(별도 문구) 모두 LMS = 제목 필수. S/A=SMS / N=대체 안함 = 무관. */
+  nextSubject?: string;
 }
 
 interface Props {
@@ -86,6 +89,7 @@ const EMPTY_STATE: AlimtalkChannelState = {
   variableMap: {},
   nextType: 'L',
   nextContents: '',
+  nextSubject: '',
 };
 
 export function createEmptyAlimtalkState(): AlimtalkChannelState {
@@ -153,6 +157,9 @@ export default function AlimtalkChannelPanel({
   );
 
   // 템플릿 변경 시 변수 맵 초기화
+  // ★ D188 (2026-05-21) 영업팀장 신고 #7-(4): 알림톡 본문 변수 → LMS 대체 본문 자동 동기화.
+  //   템플릿 변경 시 selectedTemplate.content의 #{변수}를 nextContents에 자동 복사 (사용자 입력 영역 보존 분기).
+  //   사용자가 LMS 대체 본문을 직접 작성한 영역이 있으면 (value.nextContents 비어있지 X) 보존.
   const handleSelectTemplate = (t: AlimtalkTemplate | null) => {
     if (!t) {
       onChange({
@@ -173,11 +180,17 @@ export default function AlimtalkChannelPanel({
       )?.key;
       next[v] = fieldKey ? `@@${fieldKey}@@` : value.variableMap[v] || '';
     });
+    // ★ D188 신규: nextContents 비어있을 때만 본문 변수 그대로 자동 동기화 (사용자 직접 입력 보존).
+    const autoNextContents =
+      !value.nextContents.trim() && (value.nextType === 'A' || value.nextType === 'B')
+        ? t.content
+        : value.nextContents;
     onChange({
       ...value,
       templateCode: t.template_code,
       templateId: t.id,
       variableMap: next,
+      nextContents: autoNextContents,
     });
   };
 
@@ -203,7 +216,14 @@ export default function AlimtalkChannelPanel({
     onChange({ ...value, nextContents: v });
   };
 
+  // ★ D188 (2026-05-21) 영업팀장 신고 #7-(2): LMS 대체 subject setter 신규.
+  const setNextSubject = (v: string) => {
+    onChange({ ...value, nextSubject: v });
+  };
+
   const requiresNextContents = value.nextType === 'A' || value.nextType === 'B';
+  // ★ D188 (2026-05-21) 영업팀장 신고 #7-(2): L(LMS 대체) + B(LMS+문구) 모두 LMS = 제목 필수.
+  const requiresNextSubject = value.nextType === 'L' || value.nextType === 'B';
 
   // 미리보기 렌더: template content에서 변수 치환
   // ★ D162-4 (2026-05-15) 4차: sampleRecipient가 있으면 실제 row 값으로 치환 (Harold님 명시 정합).
@@ -430,6 +450,27 @@ export default function AlimtalkChannelPanel({
                 </button>
               ))}
             </div>
+            {/* ★ D188 (2026-05-21) 영업팀장 신고 #7-(2): L/B 시 LMS 제목 input 신규. */}
+            {requiresNextSubject && (
+              <div className="mt-2">
+                <label className="block text-[11px] text-gray-500 mb-1">
+                  대체 LMS 제목 <span className="text-red-500">*</span>
+                  <span className="ml-1 text-gray-400">(40자, LMS/MMS는 제목 필수)</span>
+                </label>
+                <input
+                  type="text"
+                  value={value.nextSubject || ''}
+                  onChange={(e) => setNextSubject(e.target.value)}
+                  placeholder="LMS 대체 발송 시 표시될 제목"
+                  maxLength={40}
+                  className="w-full border border-gray-300 rounded px-2 py-1.5 text-xs"
+                />
+                <div className="text-right text-[10px] text-gray-400 mt-0.5">
+                  {(value.nextSubject || '').length} / 40자
+                </div>
+              </div>
+            )}
+            {/* ★ D188 (2026-05-21) 영업팀장 신고 #7-(1): 부달 textarea 영역 확대 rows={3}→{6} + resize-y. */}
             {requiresNextContents && (
               <div className="mt-2">
                 <label className="block text-[11px] text-gray-500 mb-1">
@@ -439,9 +480,9 @@ export default function AlimtalkChannelPanel({
                 <textarea
                   value={value.nextContents}
                   onChange={(e) => setNextContents(e.target.value)}
-                  rows={3}
-                  placeholder="알림톡 실패 시 이 문구로 대체 발송됩니다"
-                  className="w-full border border-gray-300 rounded px-2 py-1.5 text-xs resize-none"
+                  rows={6}
+                  placeholder="알림톡 실패 시 이 문구로 대체 발송됩니다. (알림톡 본문 변수 #{...}가 자동 적용됩니다)"
+                  className="w-full border border-gray-300 rounded px-2 py-1.5 text-xs resize-y"
                   maxLength={value.nextType === 'A' ? 90 : 2000}
                 />
                 <div className="text-right text-[10px] text-gray-400 mt-0.5">

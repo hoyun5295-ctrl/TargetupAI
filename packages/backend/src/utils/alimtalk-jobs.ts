@@ -400,16 +400,47 @@ async function notifyTemplateInspectionResult(params: {
   if (users.length === 0) return 0;
 
   // 2) 해당 발신프로필 관리자 번호 조회 (callback으로 사용)
+  // ★ D188 (2026-05-21) 영업팀장 신고 #1: 인비토 채널 검수 알림 0건 사고 영구 종결.
+  //   기존 admin_phone_number 빈 영역 → return 0 = 영영 알림 X. 인비토 같이 발신프로필 등록 시 admin_phone_number 누락된 회사의
+  //   알림 영구 발화 0 사고. 영구 정합 = sender_registrations 첫 approved.phone fallback 적용.
+  //   회신 사고 위험 최소화 = 회사 본인 검증된 phone 영역만 사용 (외부 phone 사용 X).
   const profRes = await query(
     `SELECT admin_phone_number FROM kakao_sender_profiles WHERE profile_key = $1 LIMIT 1`,
     [params.profileKey],
   );
-  const callback = String(profRes.rows[0]?.admin_phone_number || '').replace(/\D/g, '');
+  let callback = String(profRes.rows[0]?.admin_phone_number || '').replace(/\D/g, '');
+
+  // Fallback 1: 회사의 첫 approved sender_registrations.phone (회사 검증된 발신번호 = 회신 안전)
   if (!callback) {
-    // callback 미등록 시 발송 불가. 로그만 남기고 스킵 (기간계 안정성 우선)
+    try {
+      const srRes = await query(
+        `SELECT phone FROM sender_registrations
+          WHERE company_id = $1 AND status = 'approved'
+          ORDER BY reviewed_at DESC NULLS LAST, id DESC
+          LIMIT 1`,
+        [params.companyId],
+      );
+      callback = String(srRes.rows[0]?.phone || '').replace(/\D/g, '');
+      if (callback) {
+        log(
+          'notifyTemplateInspectionResult',
+          `admin_phone_number 빈 영역 → sender_registrations fallback 사용 (profile_key=${params.profileKey}, callback=${callback})`,
+        );
+      }
+    } catch (fallbackErr) {
+      logErr('notifyTemplateInspectionResult-fallback', fallbackErr);
+    }
+  }
+
+  if (!callback) {
+    // 모든 fallback 실패 시 발송 불가. 로그만 남기고 스킵 (기간계 안정성 우선)
     logErr(
       'notifyTemplateInspectionResult',
-      new Error(`profile.admin_phone_number 없음 — profile_key=${params.profileKey}`),
+      new Error(
+        `admin_phone_number + sender_registrations fallback 모두 빈 영역 — ` +
+          `profile_key=${params.profileKey}, company_id=${params.companyId}. ` +
+          `회사 admin에게 발신프로필 admin_phone_number 등록 또는 발신번호 승인 안내 필요.`,
+      ),
     );
     return 0;
   }

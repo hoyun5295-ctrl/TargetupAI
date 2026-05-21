@@ -459,15 +459,20 @@ export default function AlimtalkTemplateFormV2({
         </div>
 
         {/* ★ D162-4 (2026-05-15) PDF 0515 알림톡 #1: 반려 상태 재검수 진입 시 헤더 아래 빨간 박스로 반려사유 노출.
-            본문 수정 + 저장하면 autoInspectAfterSave 분기로 자동 재검수 요청 전송. */}
+            본문 수정 + 저장하면 autoInspectAfterSave 분기로 자동 재검수 요청 전송.
+            ★ D188 (2026-05-21) 영업팀장 신고 #2: 반려사유 박스 영역 축소 + 텍스트 드래그/복사 가능.
+              max-h-[120px] + overflow-y-auto = 긴 사유 스크롤 / 본문 작성 영역 확대.
+              select-text + cursor-text = 사용자 드래그/복사 명시 정합. */}
         {rejectReason && (
-          <div className="px-6 py-3 bg-red-50 border-b border-red-200">
+          <div className="px-6 py-2 bg-red-50 border-b border-red-200">
             <p className="text-xs font-semibold text-red-700 mb-1">
               반려 사유 (본문 수정 후 저장하면 자동으로 재검수 요청됩니다)
             </p>
-            <p className="text-sm text-red-700 whitespace-pre-wrap leading-relaxed">
-              {rejectReason}
-            </p>
+            <div className="max-h-[120px] overflow-y-auto rounded border border-red-100 bg-white/40 px-2 py-1.5">
+              <p className="text-sm text-red-700 whitespace-pre-wrap leading-relaxed select-text cursor-text">
+                {rejectReason}
+              </p>
+            </div>
           </div>
         )}
 
@@ -480,7 +485,11 @@ export default function AlimtalkTemplateFormV2({
               본문 영역 아래로 내릴 수 없는 사고. wrapper에서 pointer-events-none 제거 +
               자식 input/select/textarea/button/label 셀렉터로만 pointer-events-none 적용 →
               스크롤(overflow-y-auto)은 살아있고 입력만 차단되는 정합. */}
-        <div className={`grid grid-cols-1 md:grid-cols-[1fr_360px] flex-1 overflow-hidden border-0 p-0 m-0 min-w-0 min-h-0 ${readOnly ? 'opacity-60 [&_input]:pointer-events-none [&_select]:pointer-events-none [&_textarea]:pointer-events-none [&_button]:pointer-events-none [&_label]:pointer-events-none' : ''}`}>
+        {/* ★ D188 (2026-05-21) 영업팀장 신고 #5: 상세보기 본문 textarea 스크롤/드래그/복사 차단 사고 영구 종결.
+              D162-4 PDF 0515 #2 fix가 textarea도 pointer-events-none 적용 — 본문 스크롤+드래그+복사 모두 차단 사고.
+              영구 정합 = wrapper readOnly 분기에서 textarea만 pointer-events-none 제거 + content/extra textarea에 native `readOnly={readOnly}` 추가.
+              input/select/button/label은 pointer-events-none 유지 (영역 변경 차단). */}
+        <div className={`grid grid-cols-1 md:grid-cols-[1fr_360px] flex-1 overflow-hidden border-0 p-0 m-0 min-w-0 min-h-0 ${readOnly ? 'opacity-70 [&_input]:pointer-events-none [&_select]:pointer-events-none [&_button]:pointer-events-none [&_label]:pointer-events-none' : ''}`}>
           {/* Left: Form */}
           <div className="px-6 py-4 overflow-y-auto space-y-4 border-r border-gray-100 min-h-0">
             {/* 발신 프로필 */}
@@ -672,11 +681,12 @@ export default function AlimtalkTemplateFormV2({
                 rows={6}
                 maxLength={1000}
                 placeholder="변수는 #{변수명} 형식 (예: #{고객명}님 주문 확인)"
+                readOnly={readOnly}
                 className={`w-full border rounded-lg px-3 py-2 text-sm resize-none ${
                   contentOver
                     ? 'border-red-300 focus:ring-red-200'
                     : 'border-gray-300 focus:ring-amber-200'
-                }`}
+                } ${readOnly ? 'bg-gray-50 cursor-text select-text' : ''}`}
               />
               <VariableChips content={form.content} />
             </div>
@@ -733,7 +743,8 @@ export default function AlimtalkTemplateFormV2({
                   onChange={(e) => setForm({ ...form, extra: e.target.value })}
                   rows={3}
                   maxLength={500}
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm resize-none"
+                  readOnly={readOnly}
+                  className={`w-full border border-gray-300 rounded-lg px-3 py-2 text-sm resize-none ${readOnly ? 'bg-gray-50 cursor-text select-text' : ''}`}
                 />
               </div>
             )}

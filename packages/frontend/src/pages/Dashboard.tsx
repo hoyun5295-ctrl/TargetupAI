@@ -312,6 +312,8 @@ export default function Dashboard() {
   // ★ D130 알림톡 전용 추가 state (SMS/RCS/LMS/MMS와 무관)
   const [alimtalkProfileId, setAlimtalkProfileId] = useState<string>('');
   const [alimtalkNextContents, setAlimtalkNextContents] = useState<string>('');
+  // ★ D188 (2026-05-21) 영업팀장 신고 #7-(2): LMS 대체 발송(L/B) 시 LMS 제목 — 알림톡 자체는 제목 무관, 대체 발송만 사용.
+  const [alimtalkNextSubject, setAlimtalkNextSubject] = useState<string>('');
   const [alimtalkSenders, setAlimtalkSenders] = useState<any[]>([]);
   const kakaoEnabled = !!(user as any)?.company?.kakaoEnabled;
   // 카카오 템플릿 + 발신프로필 로드 (D130)
@@ -492,6 +494,8 @@ export default function Dashboard() {
           alimtalkButtonJson: convertButtonsToQTmsg(kakaoSelectedTemplate.buttons) || null,
           alimtalkNextType: alimtalkFallback,
           alimtalkNextContents: (alimtalkFallback === 'A' || alimtalkFallback === 'B') ? alimtalkNextContents : '',
+          // ★ D188 (2026-05-21) 영업팀장 신고 #7-(2): L/B 시 LMS 제목 backend 전달.
+          alimtalkNextSubject: (alimtalkFallback === 'L' || alimtalkFallback === 'B') ? alimtalkNextSubject : '',
         } : {}),
       };
       const res = await fetch('/api/campaigns/direct-send', {
@@ -654,6 +658,8 @@ export default function Dashboard() {
             alimtalkButtonJson: targetConvertButtons(kakaoSelectedTemplate.buttons) || null,
             alimtalkNextType: alimtalkFallback,
             alimtalkNextContents: (alimtalkFallback === 'A' || alimtalkFallback === 'B') ? alimtalkNextContents : '',
+            // ★ D188 (2026-05-21) 영업팀장 신고 #7-(2): L/B 시 LMS 제목 backend 전달.
+            alimtalkNextSubject: (alimtalkFallback === 'L' || alimtalkFallback === 'B') ? alimtalkNextSubject : '',
           } : {}),
         })
       });
@@ -3193,6 +3199,8 @@ const campaignData = {
         setAlimtalkProfileId={setAlimtalkProfileId}
         alimtalkNextContents={alimtalkNextContents}
         setAlimtalkNextContents={setAlimtalkNextContents}
+        alimtalkNextSubject={alimtalkNextSubject}
+        setAlimtalkNextSubject={setAlimtalkNextSubject}
         selectedCallback={selectedCallback}
         setSelectedCallback={setSelectedCallback}
         useIndividualCallback={useIndividualCallback}
@@ -3420,6 +3428,7 @@ const campaignData = {
           alimtalkSenders={alimtalkSenders}
           alimtalkProfileId={alimtalkProfileId} setAlimtalkProfileId={setAlimtalkProfileId}
           alimtalkNextContents={alimtalkNextContents} setAlimtalkNextContents={setAlimtalkNextContents}
+          alimtalkNextSubject={alimtalkNextSubject} setAlimtalkNextSubject={setAlimtalkNextSubject}
           rcsTemplates={rcsTemplates}
           rcsSelectedTemplate={rcsSelectedTemplate} setRcsSelectedTemplate={setRcsSelectedTemplate}
           setShowDirectPreview={setShowDirectPreview}
@@ -3471,6 +3480,8 @@ const campaignData = {
         setAlimtalkFallback={setAlimtalkFallback}
         alimtalkNextContents={alimtalkNextContents}
         setAlimtalkNextContents={setAlimtalkNextContents}
+        alimtalkNextSubject={alimtalkNextSubject}
+        setAlimtalkNextSubject={setAlimtalkNextSubject}
         onSendConfirm={(data) => {
           // ★ 알림톡 모달 → Dashboard 발송 흐름 진입. 기존 executeDirectSend 흐름 그대로 활용 (isAlimtalk 분기).
           setDirectRecipients(data.recipients);
