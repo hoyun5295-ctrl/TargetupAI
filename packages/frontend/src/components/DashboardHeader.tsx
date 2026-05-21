@@ -139,18 +139,19 @@ export default function DashboardHeader({
 
   return (
     <header className="bg-white border-b border-gray-200">
-      <div className="max-w-7xl mx-auto px-4 py-4 flex justify-between items-center">
-        {/* 좌측: 회사명 + 사용자 */}
-        <div className="cursor-pointer select-none" onClick={() => window.location.reload()}>
-          <h1 className="text-xl font-bold text-gray-800">{companyName}</h1>
-          <p className="text-sm text-gray-500">
+      {/* D186 Phase 1.5: 모바일 stacked + 데스크탑 좌우 분할 */}
+      <div className="max-w-7xl mx-auto px-3 md:px-4 py-2 md:py-4 flex flex-col md:flex-row md:justify-between md:items-center gap-2 md:gap-0">
+        {/* 좌측: 회사명 + 사용자 — 모바일에서는 한 줄 컴팩트 */}
+        <div className="cursor-pointer select-none flex md:block items-center gap-2 shrink-0" onClick={() => window.location.reload()}>
+          <h1 className="text-base md:text-xl font-bold text-gray-800 truncate max-w-[200px] md:max-w-none">{companyName}</h1>
+          <p className="text-xs md:text-sm text-gray-500 truncate">
             {userName}
             {department ? ` · ${department}` : ''}
           </p>
         </div>
 
-        {/* 우측: 세션 타이머 + 탭 스타일 메뉴 */}
-        <nav className="flex items-center gap-1">
+        {/* 우측: 세션 타이머 + 메뉴 — 모바일에서는 가로 스크롤 */}
+        <nav className="flex items-center gap-1 overflow-x-auto w-full md:w-auto -mx-3 px-3 md:mx-0 md:px-0 scrollbar-thin">
           <SessionTimer />
           {menuItems.map((item, idx) => {
             const cfg = COLOR_CONFIG[item.color];
@@ -184,7 +185,7 @@ export default function DashboardHeader({
                 onClick={item.onClick}
                 onMouseEnter={() => setHoveredIdx(idx)}
                 onMouseLeave={() => setHoveredIdx(null)}
-                className="px-3.5 py-1.5 text-[13px] rounded-lg transition-all duration-200 flex items-center gap-1.5 tracking-wide"
+                className="px-2.5 md:px-3.5 py-1.5 text-[12px] md:text-[13px] rounded-lg transition-all duration-200 flex items-center gap-1.5 tracking-wide flex-shrink-0 whitespace-nowrap"
                 style={{
                   color: textColor,
                   backgroundColor: bgColor,

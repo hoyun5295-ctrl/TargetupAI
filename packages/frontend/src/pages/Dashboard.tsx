@@ -2316,17 +2316,17 @@ const campaignData = {
       />
 
       {/* 메인 */}
-      <main className="max-w-7xl mx-auto px-4 py-8">
-        {/* ===== 상단: 좌(60%) + 우(40%) 통합 ===== */}
-        <div className="flex gap-4 mb-4">
+      <main className="max-w-7xl mx-auto px-3 md:px-4 py-4 md:py-8">
+        {/* ===== 상단: 좌(60%) + 우(40%) 통합 — D186: 모바일 stacked + 데스크탑 좌우 ===== */}
+        <div className="flex flex-col lg:flex-row gap-4 mb-4">
           {/* ===== 좌측 60%: 요금제/발송현황 + 동적카드 ===== */}
-          <div className="w-[60%] flex flex-col gap-4">
-            {/* 1행: 요금제 + 발송현황 */}
-            <div className="flex gap-4">
+          <div className="w-full lg:w-[60%] flex flex-col gap-4">
+            {/* 1행: 요금제 + 발송현황 — 모바일 stacked + sm+ 좌우 */}
+            <div className="flex flex-col sm:flex-row gap-4">
               {/* 요금제 현황 */}
               <div
                 onClick={() => navigate('/pricing')}
-                className="w-[40%] bg-white rounded-2xl p-5 cursor-pointer hover:shadow-md transition-all border border-gray-100 shadow-sm"
+                className="w-full sm:w-[40%] bg-white rounded-2xl p-5 cursor-pointer hover:shadow-md transition-all border border-gray-100 shadow-sm"
               >
                 <div className="flex items-center justify-between mb-3">
                   <div className="flex items-center gap-2">
@@ -2387,7 +2387,7 @@ const campaignData = {
               </div>
 
               {/* 발송 현황 */}
-              <div className="w-[60%] bg-white rounded-2xl p-5 border border-gray-100 shadow-sm">
+              <div className="w-full sm:w-[60%] bg-white rounded-2xl p-5 border border-gray-100 shadow-sm">
                 <div className="flex items-center justify-between mb-3">
                   <div className="flex items-center gap-2">
                     <div className="w-1 h-4 bg-green-600 rounded-full" />
@@ -2441,7 +2441,7 @@ const campaignData = {
               {/* 고객 DB 미업로드 — 전체 블러 + CTA */}
               {dashboardCards?.configured && dashboardCards?.hasCustomerData === false && (
                 <div className="relative">
-                  <div className="grid grid-cols-3 gap-3 filter blur-sm pointer-events-none select-none">
+                  <div className="grid grid-cols-2 md:grid-cols-3 gap-3 filter blur-sm pointer-events-none select-none">
                     {dashboardCards.cards.slice(0, 6).map((card) => (
                       <div key={card.cardId} className="p-4 bg-gray-50/50 rounded-xl">
                         <div className="text-lg font-bold text-gray-200">0</div>
@@ -2476,7 +2476,7 @@ const campaignData = {
 
                 return (
                   <div>
-                    <div className="grid grid-cols-3 gap-3">
+                    <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
                       {pageCards.map((card, i) => {
                         const globalIdx = safePage * CARDS_PER_PAGE + i;
                         const color = CARD_COLORS[globalIdx % CARD_COLORS.length];
@@ -2600,7 +2600,7 @@ const campaignData = {
           </div>
 
           {/* ===== 우측 40%: 버튼 3개 세로 스택 ===== */}
-          <div className="w-[40%] flex flex-col gap-4">
+          <div className="w-full lg:w-[40%] flex flex-col gap-4">
             {hideAi ? (
               <>
                 <button 
@@ -2761,8 +2761,8 @@ const campaignData = {
              {/* 타겟 추출 탭 */}
             {activeTab === 'target' && (
               <div>
-{/* 5개 기능 카드 */}
-<div className="grid grid-cols-4 gap-4">
+{/* 5개 기능 카드 — D186: 모바일 2열 + md+ 4열 */}
+<div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                   {/* 최근 캠페인 */}
                   <div onClick={() => { if (isSubscriptionLocked) { setShowSubscriptionLock(true); return; } loadRecentCampaigns(); setShowRecentCampaigns(true); }} className={`bg-white/50 shadow-sm rounded-xl p-6 min-h-[140px] cursor-pointer hover:shadow-lg transition-all text-center border border-green-200 ${isSubscriptionLocked ? 'opacity-60' : ''}`}>
                     <BarChart3 className="w-8 h-8 mx-auto mb-3 text-green-700" />
