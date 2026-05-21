@@ -1344,8 +1344,8 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
 
         {/* ============ 파일 매핑 모달 ============ */}
         {directShowMapping && (
-          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60]">
-            <div className="bg-white rounded-2xl shadow-2xl w-[650px] max-h-[80vh] overflow-y-auto">
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60] p-4">
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-[650px] max-h-[90vh] overflow-y-auto">
               <div className="px-5 py-3 border-b bg-emerald-50 flex justify-between items-center">
                 <div>
                   <h3 className="font-semibold text-[14px] text-emerald-900 flex items-center gap-2">
@@ -1462,8 +1462,8 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
             ? DIRECT_VAR_MAP.filter(v => directMessage.includes(v.variable)).map(v => v.fieldKey)
             : [];
           return (
-            <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60]">
-              <div className="bg-white rounded-2xl shadow-2xl w-[550px] overflow-hidden">
+            <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60] p-4">
+              <div className="bg-white rounded-2xl shadow-2xl w-full max-w-[550px] max-h-[90vh] overflow-hidden">
                 <div className="px-5 py-3 border-b bg-emerald-50 flex justify-between items-center">
                   <div>
                     <h3 className="font-semibold text-[14px] text-emerald-900 flex items-center gap-2">

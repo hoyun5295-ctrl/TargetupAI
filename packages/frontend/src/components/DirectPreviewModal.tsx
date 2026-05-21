@@ -61,16 +61,17 @@ export default function DirectPreviewModal({
     resolveRecipientCallback(r, !!useIndividualCallback, individualCallbackColumn || '', selectedCallback) || '';
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60]">
-      <div className={`bg-white rounded-2xl shadow-2xl overflow-hidden ${(directMessage.includes('%') && (directRecipients.length > 0 || targetRecipients.length > 0)) ? 'w-[860px]' : 'w-[400px]'}`}>
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60] p-2 md:p-4">
+      <div className={`bg-white rounded-2xl shadow-2xl max-h-[95vh] overflow-y-auto ${(directMessage.includes('%') && (directRecipients.length > 0 || targetRecipients.length > 0)) ? 'w-full max-w-[860px]' : 'w-full max-w-[400px]'}`}>
         <div className="p-4 border-b bg-emerald-50 flex justify-between items-center">
-          <h3 className="font-bold text-lg">📄 메시지 미리보기</h3>
+          <h3 className="font-bold text-base md:text-lg">📄 메시지 미리보기</h3>
           <button onClick={onClose} className="text-gray-500 hover:text-gray-700 text-xl">✕</button>
         </div>
-        
-        <div className="p-6 flex gap-6">
+
+        {/* D186: 모바일 stacked + 데스크탑 좌우 분할 */}
+        <div className="p-4 md:p-6 flex flex-col md:flex-row gap-4 md:gap-6">
           {/* 좌측: 폰 프레임 */}
-          <div className="flex flex-col items-center shrink-0">
+          <div className="flex flex-col items-center shrink-0 mx-auto md:mx-0">
             <div className="rounded-[1.8rem] p-[3px] bg-gradient-to-b from-emerald-400 to-emerald-600 shadow-lg shadow-emerald-200">
               <div className="bg-white rounded-[1.6rem] overflow-hidden flex flex-col w-[280px]" style={{ height: '420px' }}>
                 {/* 상단 - 회신번호 (첫 수신자의 실제 적용 번호) */}

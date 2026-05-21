@@ -3256,8 +3256,8 @@ const campaignData = {
 
       {/* 예약전송 달력 모달 (공용) */}
       {showReservePicker && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[60]">
-          <div className="bg-white rounded-xl shadow-2xl w-[360px] overflow-hidden">
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[60] p-4">
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-[360px] max-h-[90vh] overflow-hidden">
             <div className="bg-blue-50 px-5 py-4 border-b">
               <h3 className="text-lg font-bold text-blue-700">📅 예약 시간 설정</h3>
             </div>
@@ -3504,8 +3504,8 @@ const campaignData = {
 
       {/* 특수문자 모달 (직접발송 + 직접타겟발송 공용) */}
       {showSpecialChars && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[70]" onClick={() => setShowSpecialChars(null)}>
-          <div className="bg-white rounded-2xl shadow-2xl w-[400px] overflow-hidden animate-in fade-in zoom-in" onClick={e => e.stopPropagation()}>
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[70] p-4" onClick={() => setShowSpecialChars(null)}>
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-[400px] max-h-[90vh] overflow-hidden animate-in fade-in zoom-in" onClick={e => e.stopPropagation()}>
             <div className="p-4 border-b bg-purple-50 flex justify-between items-center">
               <h3 className="font-bold text-lg">✨ 특수문자</h3>
               <button onClick={() => setShowSpecialChars(null)} className="text-gray-500 hover:text-gray-700 text-xl">✕</button>
@@ -3538,8 +3538,8 @@ const campaignData = {
 
       {/* 보관함 모달 (직접발송 + 직접타겟발송 공용) */}
       {showTemplateBox && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[70]" onClick={() => setShowTemplateBox(null)}>
-          <div className="bg-white rounded-2xl shadow-2xl w-[500px] max-h-[70vh] overflow-hidden animate-in fade-in zoom-in" onClick={e => e.stopPropagation()}>
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[70] p-4" onClick={() => setShowTemplateBox(null)}>
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-[500px] max-h-[85vh] overflow-hidden animate-in fade-in zoom-in" onClick={e => e.stopPropagation()}>
             <div className="p-4 border-b bg-amber-50 flex justify-between items-center">
               <h3 className="font-bold text-lg">📂 보관함</h3>
               <button onClick={() => setShowTemplateBox(null)} className="text-gray-500 hover:text-gray-700 text-xl">✕</button>
@@ -3647,8 +3647,8 @@ const campaignData = {
 
       {/* 문자저장 모달 (직접발송 + 직접타겟발송 공용) */}
       {showTemplateSave && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[70]" onClick={() => setShowTemplateSave(null)}>
-          <div className="bg-white rounded-2xl shadow-2xl w-[400px] overflow-hidden animate-in fade-in zoom-in" onClick={e => e.stopPropagation()}>
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[70] p-4" onClick={() => setShowTemplateSave(null)}>
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-[400px] max-h-[90vh] overflow-hidden animate-in fade-in zoom-in" onClick={e => e.stopPropagation()}>
             <div className="p-4 border-b bg-emerald-50 flex justify-between items-center">
               <h3 className="font-bold text-lg">💾 문자 저장</h3>
               <button onClick={() => setShowTemplateSave(null)} className="text-gray-500 hover:text-gray-700 text-xl">✕</button>

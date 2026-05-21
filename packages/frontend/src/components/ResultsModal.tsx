@@ -245,8 +245,8 @@ export default function ResultsModal({ onClose, token, customerDbEnabled, isSubs
   };
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-      <div className="bg-white rounded-xl shadow-2xl w-[1300px] max-h-[100vh] overflow-hidden flex flex-col">
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-2 md:p-4">
+      <div className="bg-white rounded-xl shadow-2xl w-full max-w-[1300px] max-h-[95vh] overflow-hidden flex flex-col">
         {/* 헤더 */}
         <div className="flex justify-between items-center px-6 py-4 border-b bg-white">
           <h2 className="text-lg font-bold text-gray-800">발송 결과</h2>
@@ -764,8 +764,8 @@ export default function ResultsModal({ onClose, token, customerDbEnabled, isSubs
 
         {/* ==================== 캠페인 상세 모달 ==================== */}
         {selectedCampaign && (
-          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[60]">
-            <div className="bg-white rounded-xl shadow-2xl w-[820px] max-h-[85vh] overflow-hidden flex flex-col">
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[60] p-2 md:p-4">
+            <div className="bg-white rounded-xl shadow-2xl w-full max-w-[820px] max-h-[90vh] overflow-hidden flex flex-col">
               {/* 헤더 */}
               <div className="flex justify-between items-center px-6 py-4 border-b">
                 <h3 className="font-bold text-gray-800">캠페인 상세</h3>
@@ -935,8 +935,8 @@ export default function ResultsModal({ onClose, token, customerDbEnabled, isSubs
         {/* ==================== 발송 내역 팝업 ==================== */}
         {/* ★ D124: 모달 폭 960→1300px 확대 + 각 셀 whitespace-nowrap — 수신번호/날짜/결과코드 줄바꿈 방지 */}
         {showSendDetail && selectedCampaign && (
-          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[70]">
-            <div className="bg-white rounded-xl shadow-2xl w-[1300px] max-w-[95vw] max-h-[85vh] overflow-hidden flex flex-col">
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[70] p-2 md:p-4">
+            <div className="bg-white rounded-xl shadow-2xl w-full max-w-[1300px] max-h-[90vh] overflow-hidden flex flex-col">
               {/* 헤더 */}
               <div className="flex justify-between items-center px-6 py-4 border-b">
                 <div>
@@ -1102,8 +1102,8 @@ export default function ResultsModal({ onClose, token, customerDbEnabled, isSubs
 
         {/* ==================== 예약 취소 확인 모달 ==================== */}
         {cancelTarget && (
-          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[60]">
-            <div className="bg-white rounded-xl shadow-2xl w-[400px] overflow-hidden">
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[60] p-4">
+            <div className="bg-white rounded-xl shadow-2xl w-full max-w-[400px] max-h-[90vh] overflow-hidden">
               <div className="bg-red-50 px-6 py-4 border-b">
                 <h3 className="text-lg font-bold text-red-700">예약 취소</h3>
               </div>
@@ -1191,8 +1191,8 @@ export default function ResultsModal({ onClose, token, customerDbEnabled, isSubs
           const maxBytes = typeLabel === 'SMS' ? 90 : 2000;
           const hasImages = Array.isArray(mmsImages) && mmsImages.length > 0;
           return (
-            <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[80] animate-in fade-in duration-150" onClick={() => setMsgDetailContent(null)}>
-              <div className="bg-white rounded-2xl shadow-2xl w-[400px] overflow-hidden animate-in zoom-in-95 duration-200" onClick={(e) => e.stopPropagation()}>
+            <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[80] animate-in fade-in duration-150 p-4" onClick={() => setMsgDetailContent(null)}>
+              <div className="bg-white rounded-2xl shadow-2xl w-full max-w-[400px] max-h-[90vh] overflow-hidden animate-in zoom-in-95 duration-200" onClick={(e) => e.stopPropagation()}>
                 <div className="p-4 border-b bg-emerald-50 flex justify-between items-center">
                   <h3 className="font-bold text-lg">📱 메시지 내용</h3>
                   <button onClick={() => setMsgDetailContent(null)} className="text-gray-500 hover:text-gray-700 text-xl">✕</button>

@@ -752,7 +752,7 @@ export default function AlimtalkSendModal({
                         const isFieldRef = current.startsWith('@@') && current.endsWith('@@');
                         const fieldKey = isFieldRef ? current.slice(2, -2) : '';
                         return (
-                          <div key={v} className="grid grid-cols-[120px_1fr] gap-2 items-center">
+                          <div key={v} className="grid grid-cols-[100px_1fr] md:grid-cols-[120px_1fr] gap-2 items-center">
                             <span className="text-[11px] font-mono text-amber-700 bg-amber-50 rounded px-2 py-1 truncate">
                               {v}
                             </span>

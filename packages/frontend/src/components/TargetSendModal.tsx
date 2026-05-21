@@ -385,13 +385,13 @@ export default function TargetSendModal({
   if (!show) return null;
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-      <div className="bg-white rounded-2xl shadow-2xl w-[1400px] max-h-[95vh] overflow-y-auto">
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-2 md:p-4">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-[1400px] max-h-[95vh] overflow-y-auto">
         {/* 헤더 */}
-        <div className="px-6 py-4 border-b flex justify-between items-center bg-green-50">
+        <div className="px-4 md:px-6 py-3 md:py-4 border-b flex justify-between items-center bg-green-50">
           <div>
-            <h3 className="text-xl font-bold text-gray-800">직접 타겟 발송</h3>
-            <p className="text-base text-gray-500 mt-1">추출된 <span className="font-bold text-emerald-600">{targetRecipients.length.toLocaleString()}명</span>에게 메시지를 발송합니다</p>
+            <h3 className="text-base md:text-xl font-bold text-gray-800">직접 타겟 발송</h3>
+            <p className="text-xs md:text-base text-gray-500 mt-1">추출된 <span className="font-bold text-emerald-600">{targetRecipients.length.toLocaleString()}명</span>에게 메시지를 발송합니다</p>
           </div>
           <button
             onClick={onClose}
@@ -403,10 +403,10 @@ export default function TargetSendModal({
           </button>
         </div>
 
-        {/* 본문 */}
-        <div className="px-6 py-5 flex gap-5">
+        {/* 본문 — D186: 모바일 stacked (md 이하) + 데스크탑 좌우 분할 */}
+        <div className="px-4 md:px-6 py-4 md:py-5 flex flex-col md:flex-row gap-4 md:gap-5">
           {/* ========== 좌측: 메시지 작성 ========== */}
-          <div className="w-[400px]">
+          <div className="w-full md:w-[400px] md:shrink-0">
             {/* ★ D162-4 (2026-05-15) 2차: Harold님 명시 — 문자/RCS 채널 탭 자체 제거.
                 직접타겟발송 = 문자(SMS/LMS/MMS) 단일 모드. RCS는 "곧 오픈 예정" 상태로 채널 탭 비노출.
                 알림톡은 수신번호 검색 옆 카카오 노란색 '알림톡 발송' 버튼으로 진입 → AlimtalkSendModal 풀 화면.

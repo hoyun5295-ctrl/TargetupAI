@@ -47,10 +47,10 @@ export default function ScheduledCampaignModal({
   if (!show) return null;
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-      <div className="bg-white rounded-xl shadow-2xl w-[900px] max-h-[85vh] overflow-hidden">
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-2 md:p-4">
+      <div className="bg-white rounded-xl shadow-2xl w-full max-w-[900px] max-h-[90vh] overflow-hidden">
         <div className="p-4 border-b bg-red-50 flex justify-between items-center">
-          <h3 className="font-bold text-lg">⏰ 예약 대기 {scheduledCampaigns.length > 0 && `(${scheduledCampaigns.length}건)`}</h3>
+          <h3 className="font-bold text-base md:text-lg">⏰ 예약 대기 {scheduledCampaigns.length > 0 && `(${scheduledCampaigns.length}건)`}</h3>
           <button onClick={() => {
             // ★ D111 P4: 닫기 시 선택/수신자/ref 전부 초기화 (stale 데이터 잔존 방지)
             onClose();
@@ -61,9 +61,10 @@ export default function ScheduledCampaignModal({
             latestSelectedIdRef.current = null;
           }} className="text-gray-500 hover:text-gray-700 text-xl">✕</button>
         </div>
-        <div className="flex h-[70vh]">
+        {/* D186: 모바일 stacked + 데스크탑 좌우 분할 */}
+        <div className="flex flex-col md:flex-row h-[80vh] md:h-[70vh]">
           {/* 좌측: 캠페인 목록 */}
-          <div className="w-[320px] border-r overflow-y-auto p-3 space-y-2">
+          <div className="w-full md:w-[320px] md:shrink-0 border-b md:border-b-0 md:border-r overflow-y-auto p-3 space-y-2 max-h-[40vh] md:max-h-none">
             {scheduledCampaigns.length > 0 ? (
               scheduledCampaigns.map((c: any) => (
                 <div 
@@ -291,8 +292,8 @@ export default function ScheduledCampaignModal({
     </div>
     {/* 삭제 확인 모달 */}
     {deleteConfirm.show && (
-      <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-[60]">
-        <div className="bg-white rounded-2xl shadow-2xl w-[360px] overflow-hidden">
+      <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-[60] p-4">
+        <div className="bg-white rounded-2xl shadow-2xl w-full max-w-[360px] max-h-[90vh] overflow-hidden">
           <div className="p-6 text-center">
             <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4">
               <span className="text-3xl">🗑️</span>
@@ -343,8 +344,8 @@ export default function ScheduledCampaignModal({
     )}
     {/* 예약취소 확인 모달 */}
     {cancelConfirm.show && (
-      <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-[60]">
-        <div className="bg-white rounded-2xl shadow-2xl w-[380px] overflow-hidden animate-in fade-in zoom-in duration-200">
+      <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-[60] p-4">
+        <div className="bg-white rounded-2xl shadow-2xl w-full max-w-[380px] max-h-[90vh] overflow-hidden animate-in fade-in zoom-in duration-200">
           <div className="p-6 text-center">
             <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4">
               <span className="text-3xl">🚫</span>
@@ -394,8 +395,8 @@ export default function ScheduledCampaignModal({
     )}
     {/* 메시지 상세보기 모달 */}
     {messagePreview.show && (
-      <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-[60]">
-        <div className="bg-white rounded-2xl shadow-2xl w-[400px] overflow-hidden">
+      <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-[60] p-4">
+        <div className="bg-white rounded-2xl shadow-2xl w-full max-w-[400px] max-h-[90vh] overflow-hidden">
           <div className="p-4 border-b bg-blue-50 flex justify-between items-center">
             <div>
               <h3 className="text-lg font-bold text-blue-700">💬 메시지 내용</h3>
@@ -423,8 +424,8 @@ export default function ScheduledCampaignModal({
     )}
     {/* 문안 수정 모달 */}
     {messageEditModal && (
-      <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-[60]">
-        <div className="bg-white rounded-2xl shadow-2xl w-[500px] overflow-hidden">
+      <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-[60] p-4">
+        <div className="bg-white rounded-2xl shadow-2xl w-full max-w-[500px] max-h-[90vh] overflow-hidden">
           <div className="p-4 border-b bg-amber-50">
             <h3 className="text-lg font-bold text-amber-700">✏️ 문안 수정</h3>
             <p className="text-sm text-amber-600 mt-1">변수: %이름%, %등급%, %지역%, %회신번호%</p>
