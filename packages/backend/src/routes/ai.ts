@@ -44,6 +44,20 @@ import {
 import { listBatchJobs, pollBatch } from '../utils/batch-ai';
 // ★ D181 (2026-05-19): Anthropic Citations (AI 응답 근거 박음 — 사용자 신뢰)
 import { buildCompanyDocuments, callAIWithCitations } from '../utils/citations';
+// ★ D187 (2026-05-20): Journey Builder Lite — 7 표준 여정 + 자연어 진입 (Opus 4.7)
+import {
+  createJourneyFromTemplate,
+  activateJourney,
+  pauseJourney,
+  endJourney,
+  listJourneys,
+  getJourneyDetail,
+  listExecutions,
+  getJourneyStats,
+  JOURNEY_TEMPLATES,
+  JourneyTemplateCode,
+  JourneyStatus,
+} from '../utils/journey-builder';
 
 
 // ★ D79: 인라인 래퍼 제거 → CT-01 buildFilterWhereClauseCompat 직접 사용
@@ -1504,6 +1518,216 @@ router.post('/operator/proposals/:id/variants/:vid/record', async (req: Request,
   } catch (err: any) {
     console.error('[Proposals variant record] 오류:', err);
     return res.status(500).json({ success: false, error: err?.message || 'reward 박음 실패' });
+  }
+});
+
+// ════════════════════════════════════════════════════════════════════
+// D187 Journey Builder Lite — 7 표준 여정 (가입/재구매/휴면/장바구니/생일/예약/Custom)
+//   영구 룰 정합: AI_OPERATOR_ALLOWED_USERS 게이팅 + BUSINESS+ + 회사 격리
+// ════════════════════════════════════════════════════════════════════
+
+// GET /api/ai/operator/journeys — 회사 활성/대기 여정 목록 + 7 템플릿 카탈로그
+router.get('/operator/journeys', async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+    const planCtx = await loadPlanContext(companyId);
+    if (!planCtx) return res.status(404).json({ success: false, error: '회사 정보를 찾을 수 없습니다.' });
+    if (!isAiOperatorAllowed(planCtx, req.user)) {
+      return res.status(403).json({ success: false, error: 'AI Operator 진입 권한이 없습니다.', code: 'AI_OPERATOR_GATED' });
+    }
+
+    const status = (req.query.status as JourneyStatus | 'all') || 'all';
+    const journeys = await listJourneys(companyId, status);
+
+    const templates = Object.values(JOURNEY_TEMPLATES).map((t) => ({
+      templateCode: t.templateCode,
+      name: t.name,
+      description: t.description,
+      triggerEvent: t.triggerEvent,
+      allowReentry: t.allowReentry,
+      reentryCooldownDays: t.reentryCooldownDays,
+      stepCount: t.steps.length,
+    }));
+
+    return res.json({ success: true, journeys, templates });
+  } catch (err: any) {
+    console.error('[Journeys list] 오류:', err);
+    return res.status(500).json({ success: false, error: err?.message || '여정 조회 실패' });
+  }
+});
+
+// POST /api/ai/operator/journeys — 신규 여정 생성 (템플릿 또는 자연어)
+router.post('/operator/journeys', async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    const userId = req.user?.userId;
+    if (!companyId || !userId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+    const planCtx = await loadPlanContext(companyId);
+    if (!planCtx) return res.status(404).json({ success: false, error: '회사 정보를 찾을 수 없습니다.' });
+    if (!isAiOperatorAllowed(planCtx, req.user)) {
+      return res.status(403).json({ success: false, error: 'AI Operator 진입 권한이 없습니다.', code: 'AI_OPERATOR_GATED' });
+    }
+
+    const {
+      templateCode,
+      name,
+      customObjective,
+      thresholdRecipients,
+      thresholdCost,
+      thresholdRiskLevel,
+      budgetMonthly,
+      allowReentry,
+      reentryCooldownDays,
+    } = req.body || {};
+
+    if (!templateCode || !JOURNEY_TEMPLATES[templateCode as JourneyTemplateCode]) {
+      return res.status(400).json({ success: false, error: '템플릿 코드가 유효하지 않습니다.' });
+    }
+
+    const { journeyId } = await createJourneyFromTemplate({
+      companyId,
+      createdBy: userId,
+      templateCode: templateCode as JourneyTemplateCode,
+      name,
+      customObjective,
+      thresholdRecipients: thresholdRecipients ?? null,
+      thresholdCost: thresholdCost ?? null,
+      thresholdRiskLevel: thresholdRiskLevel || 'low',
+      budgetMonthly: budgetMonthly ?? null,
+      allowReentry,
+      reentryCooldownDays,
+    });
+
+    const detail = await getJourneyDetail(companyId, journeyId);
+    return res.status(201).json({ success: true, journeyId, detail });
+  } catch (err: any) {
+    console.error('[Journeys create] 오류:', err);
+    return res.status(500).json({ success: false, error: err?.message || '여정 생성 실패' });
+  }
+});
+
+// GET /api/ai/operator/journeys/:id — 상세 (steps + 통계)
+router.get('/operator/journeys/:id', async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+    const planCtx = await loadPlanContext(companyId);
+    if (!planCtx) return res.status(404).json({ success: false, error: '회사 정보를 찾을 수 없습니다.' });
+    if (!isAiOperatorAllowed(planCtx, req.user)) {
+      return res.status(403).json({ success: false, error: 'AI Operator 진입 권한이 없습니다.', code: 'AI_OPERATOR_GATED' });
+    }
+
+    const detail = await getJourneyDetail(companyId, req.params.id);
+    if (!detail) return res.status(404).json({ success: false, error: '여정을 찾을 수 없습니다.' });
+    return res.json({ success: true, ...detail });
+  } catch (err: any) {
+    console.error('[Journeys detail] 오류:', err);
+    return res.status(500).json({ success: false, error: err?.message || '여정 상세 조회 실패' });
+  }
+});
+
+// POST /api/ai/operator/journeys/:id/activate — 활성화
+router.post('/operator/journeys/:id/activate', async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    const userId = req.user?.userId;
+    if (!companyId || !userId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+    const planCtx = await loadPlanContext(companyId);
+    if (!planCtx) return res.status(404).json({ success: false, error: '회사 정보를 찾을 수 없습니다.' });
+    if (!isAiOperatorAllowed(planCtx, req.user)) {
+      return res.status(403).json({ success: false, error: 'AI Operator 진입 권한이 없습니다.', code: 'AI_OPERATOR_GATED' });
+    }
+
+    const ok = await activateJourney(companyId, req.params.id, userId);
+    if (!ok) return res.status(404).json({ success: false, error: 'draft / paused 상태 여정만 활성화 가능합니다.' });
+    return res.json({ success: true });
+  } catch (err: any) {
+    console.error('[Journeys activate] 오류:', err);
+    return res.status(500).json({ success: false, error: err?.message || '활성화 실패' });
+  }
+});
+
+// POST /api/ai/operator/journeys/:id/pause — 일시정지
+router.post('/operator/journeys/:id/pause', async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+    const planCtx = await loadPlanContext(companyId);
+    if (!planCtx) return res.status(404).json({ success: false, error: '회사 정보를 찾을 수 없습니다.' });
+    if (!isAiOperatorAllowed(planCtx, req.user)) {
+      return res.status(403).json({ success: false, error: 'AI Operator 진입 권한이 없습니다.', code: 'AI_OPERATOR_GATED' });
+    }
+
+    const reason = String(req.body?.reason || '관리자 일시정지');
+    const ok = await pauseJourney(companyId, req.params.id, reason);
+    if (!ok) return res.status(404).json({ success: false, error: 'active 상태 여정만 일시정지 가능합니다.' });
+    return res.json({ success: true });
+  } catch (err: any) {
+    console.error('[Journeys pause] 오류:', err);
+    return res.status(500).json({ success: false, error: err?.message || '일시정지 실패' });
+  }
+});
+
+// POST /api/ai/operator/journeys/:id/end — 종료
+router.post('/operator/journeys/:id/end', async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+    const planCtx = await loadPlanContext(companyId);
+    if (!planCtx) return res.status(404).json({ success: false, error: '회사 정보를 찾을 수 없습니다.' });
+    if (!isAiOperatorAllowed(planCtx, req.user)) {
+      return res.status(403).json({ success: false, error: 'AI Operator 진입 권한이 없습니다.', code: 'AI_OPERATOR_GATED' });
+    }
+
+    const ok = await endJourney(companyId, req.params.id);
+    if (!ok) return res.status(404).json({ success: false, error: '이미 종료된 여정입니다.' });
+    return res.json({ success: true });
+  } catch (err: any) {
+    console.error('[Journeys end] 오류:', err);
+    return res.status(500).json({ success: false, error: err?.message || '종료 실패' });
+  }
+});
+
+// GET /api/ai/operator/journeys/:id/executions — 고객별 실행 상태 (페이지네이션)
+router.get('/operator/journeys/:id/executions', async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+    const planCtx = await loadPlanContext(companyId);
+    if (!planCtx) return res.status(404).json({ success: false, error: '회사 정보를 찾을 수 없습니다.' });
+    if (!isAiOperatorAllowed(planCtx, req.user)) {
+      return res.status(403).json({ success: false, error: 'AI Operator 진입 권한이 없습니다.', code: 'AI_OPERATOR_GATED' });
+    }
+
+    const limit = Math.min(Number(req.query.limit) || 50, 200);
+    const offset = Math.max(0, Number(req.query.offset) || 0);
+    const status = (req.query.status as string) || undefined;
+    const executions = await listExecutions(companyId, req.params.id, { limit, offset, status });
+    return res.json({ success: true, executions });
+  } catch (err: any) {
+    console.error('[Journeys executions] 오류:', err);
+    return res.status(500).json({ success: false, error: err?.message || 'execution 조회 실패' });
+  }
+});
+
+// GET /api/ai/operator/journeys/:id/stats — 통계 (진입/완료/비용/step별 전환율)
+router.get('/operator/journeys/:id/stats', async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+    const planCtx = await loadPlanContext(companyId);
+    if (!planCtx) return res.status(404).json({ success: false, error: '회사 정보를 찾을 수 없습니다.' });
+    if (!isAiOperatorAllowed(planCtx, req.user)) {
+      return res.status(403).json({ success: false, error: 'AI Operator 진입 권한이 없습니다.', code: 'AI_OPERATOR_GATED' });
+    }
+
+    const stats = await getJourneyStats(companyId, req.params.id);
+    if (!stats) return res.status(404).json({ success: false, error: '여정을 찾을 수 없습니다.' });
+    return res.json({ success: true, stats });
+  } catch (err: any) {
+    console.error('[Journeys stats] 오류:', err);
+    return res.status(500).json({ success: false, error: err?.message || '통계 조회 실패' });
   }
 });
 

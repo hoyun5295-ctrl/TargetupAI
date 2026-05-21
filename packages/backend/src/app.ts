@@ -58,6 +58,9 @@ import { startCampaignSyncWorker } from './utils/campaign-sync-worker';
 import { startMysqlRefundSweeper } from './utils/mysql-refund-sweeper';
 // ★ D176 (2026-05-19): Continuous Agentic Operator — 매일 09:00 KST 활성 Operator 제안서 박는 worker (5분 주기 due check)
 import { startContinuousOperatorScheduler } from './utils/continuous-operator';
+// ★ D187 (2026-05-20): Journey Builder Lite — 5분 주기 due execution 처리 + 5분 주기 trigger 매칭
+import { startJourneyExecutor } from './utils/journey-executor';
+import { startJourneyTriggerWatcher } from './utils/journey-trigger-watcher';
 
 // 공용 관리 라우트 (슈퍼관리자 + 고객사관리자)
 import manageUsersRoutes from './routes/manage-users';
@@ -251,6 +254,12 @@ app.listen(PORT, () => {
   // ★ D176 (2026-05-19): Continuous Operator — 5분 주기 due Operator 체크 + 매일 09:00 KST 제안서 박음
   //   AI 단독 실행 X 영구 원칙 — 제안서만 박고 사용자 승인 대기. ENT 자동 실행 옵션은 default OFF + 임계값 통과 시만
   startContinuousOperatorScheduler();
+
+  // ★ D187 (2026-05-20): Journey Builder Lite — 5분 주기 due execution 발송 + 5분 주기 trigger 매칭
+  //   7 표준 여정 (가입/재구매/휴면/장바구니/생일/예약/Custom) + 회사 자유 임계값 + 광고 자동 검증 4건
+  //   AI_OPERATOR_ALLOWED_USERS=hoyun 게이팅 (routes/ai.ts 영역)
+  startJourneyExecutor();
+  startJourneyTriggerWatcher();
 });
 
 export default app;

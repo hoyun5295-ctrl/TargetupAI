@@ -157,6 +157,7 @@ interface SubModuleCard {
 }
 
 const SUB_MODULE_CARDS: SubModuleCard[] = [
+  { icon: Workflow,     gradient: 'from-fuchsia-400 to-purple-500', label: '여정 자동화',    description: '7 표준 여정 (가입/재구매/휴면 등) + 자연어 진입',   path: '/ai-journeys' },
   { icon: Brain,        gradient: 'from-indigo-400 to-violet-500', label: 'AI 영구운영',    description: '매일 AI가 새 캠페인 제안 (사용자 승인 후 발송)',     path: '/continuous-operator' },
   { icon: LineChart,    gradient: 'from-fuchsia-400 to-pink-500',  label: '성과리포트',     description: '30일 성과 분석 + AI 다음 캠페인 추천',              path: '/performance' },
   { icon: Workflow,     gradient: 'from-emerald-400 to-teal-500',  label: '자사몰 연동',    description: '자체 호스팅 · 네이버 스마트스토어 · 카페24 자동 sync', path: '/cdp-settings' },

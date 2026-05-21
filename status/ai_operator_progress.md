@@ -256,9 +256,14 @@
 - AI가 다음 캠페인 자동 제안 (recommendNextCampaign 강화)
 - "1회성 발송툴" 탈출 → 운영 파트너 진입
 
-### Step 2: Journey Builder Lite (D181~D200)
-- 가입/재구매/휴면/장바구니/생일/예약 자동 여정
-- 7 여정 템플릿 + 트리거 + 흐름 검토 UX
+### Step 2: Journey Builder Lite (D187 Step 1 종결)
+- ✓ 7 표준 여정 템플릿 (가입/재구매/휴면/장바구니/생일/예약/Custom) — utils CT-43 journey-builder + CT-44 journey-executor
+- ✓ Custom 자연어 진입 — Opus 4.7 + ai_company_memory 통합
+- ✓ 트리거 5분 cron polling — customer.created / cdp.purchase / customer.dormant / cdp.cart_abandon / customer.birthday_approaching / cdp.reservation_created
+- ✓ 회사 자유 임계값 (NULL=무제한 default) — recipients/cost/risk 3종
+- ✓ 광고 자동 검증 4건 — (광고) prefix / 080 무료거부 / 발송 시간 KST 08:00~21:00 / KISA 제목
+- ✓ 재진입 cooldown 정책 — 여정별 default 매트릭스
+- ⏳ Step 2-B 잔존 — wait/condition step 타입 / MMS·KAKAO 채널 확장 / 트리거 다양화 / journey 단위 A/B 테스트 / 분석 차트 강화
 
 ### Step 3: Decisioning Engine (D201~D230)
 - 고객별 채널/시점/오퍼 AI 자동 결정
@@ -269,7 +274,7 @@
 ## 진입 명령 (다음 세션 첫 메시지)
 
 ```
-status/STATUS.md CURRENT_TASK § "다음 세션 진입 가이드" 정독 + status/ai_operator_progress.md 정독 + docs/AI_OPERATOR_기능정의서.md v1.0.7 + docs/한줄로_BEYOND_BRAZE_비전.md v0.3 정독 → Harold 신고 우선 종결 또는 D177 Self-Optimizing 진입 또는 카페24 진입 방안 결정 진입
+status/STATUS.md CURRENT_TASK § "다음 세션 진입 가이드" 정독 + status/ai_operator_progress.md 정독 + docs/AI_OPERATOR_기능정의서.md v1.1.0 정독 → Harold 신고 우선 종결 또는 D188 Step 2-B(wait/condition step + MMS/KAKAO 채널 확장 + journey A/B 테스트) 진입 또는 SDK v0.3.0 진입
 ```
 
-> Step 0 D163~D177-ux3 + 운영 DB schema + BEYOND BRAZE 비전 v0.3 박힘 종결. 다음 세션은 운영 환경 사용 검증 + 압축 로드맵 D177~D180 진입.
+> Step 0~Step 2 Step 1 (D187 Journey Builder Lite Step 1) 종결. 다음 세션은 운영 검증 1주+ 후 Step 2-B 또는 Harold 명시 영역 진입.

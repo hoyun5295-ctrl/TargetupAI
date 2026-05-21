@@ -40,6 +40,8 @@ import AiBatchesPage from './pages/AiBatchesPage';
 import AiExplainPage from './pages/AiExplainPage';
 // ★ D184 (2026-05-20): 이니시스 결제 결과 fallback 페이지 (새 창 자동 close 영역에 fallback 본질)
 import PaymentResultPage from './pages/PaymentResultPage';
+// ★ D187 (2026-05-20): Journey Builder Lite — 7 표준 여정 + 자연어 진입
+import JourneysPage from './pages/JourneysPage';
 
 // ★ 세션 타이머 Context — 헤더 등에서 남은 시간 표시용
 interface SessionTimerContextType {
@@ -364,6 +366,16 @@ function App() {
           element={
             <PrivateRoute allowedTypes={['company_admin', 'company_user']}>
               <AiExplainPage />
+            </PrivateRoute>
+          }
+        />
+
+        {/* ★ D187 (2026-05-20): Journey Builder Lite — 7 표준 여정 + 자연어 진입 */}
+        <Route
+          path="/ai-journeys"
+          element={
+            <PrivateRoute allowedTypes={['company_admin', 'company_user']}>
+              <JourneysPage />
             </PrivateRoute>
           }
         />

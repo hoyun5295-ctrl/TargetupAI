@@ -107,27 +107,29 @@
 
 ---
 
-### 🚀 다음 세션 진입 가이드 (D186 종결 후 — **D187 Journey Builder Lite Step 1 즉시 진입**)
+### 🚀 다음 세션 진입 가이드 (D187 종결 후 — **운영 검증 또는 D188 Step 2-B 진입**)
 
-> **★ 최우선 진입 영역 (D187):** **`status/D187_journey_builder_lite_plan.md`** (SoT) 정독 → Step 1-A 즉시 진입 (DB 4 테이블 + utils 3건 작성, 예상 4~5h). 작업 완료 후 본 .md 파일 삭제 명시.
+> **★ D187 Journey Builder Lite Step 1 종결 매트릭스 (2026-05-20)**: DB 4 테이블 (journeys/journey_steps/journey_executions/journey_step_logs) + 6 인덱스 + utils CT-43 journey-builder + CT-44 journey-executor + journey-trigger-watcher 5분 cron + routes/ai.ts 8 endpoint + JourneysPage /ai-journeys + AiOperatorPage SUB_MODULE_CARDS 12건 + App.tsx 라우트 + app.ts worker 2건 등록. backend/frontend tsc 0 errors. 영구 룰 정합 100% (model:'opus' / 박음 박힘 0건 / no_target_auto_relax / hoyun 게이팅).
 >
-> **D187 진입 명령어 (다음 세션 첫 메시지)**:
+> **★ Harold 박을 영역**: DB SQL 4 테이블 + 6 인덱스 실행 (SCHEMA.md D187 Journey Builder Lite 영역) + tp-push.
+>
+> **D188+ 진입 명령어 (다음 세션 첫 메시지)**:
 > ```
-> status/D187_journey_builder_lite_plan.md 정독 + status/STATUS.md CURRENT_TASK 정독 → D187 Journey Builder Lite Step 1-A 즉시 진입 (DB schema 4 테이블 + utils/journey-builder.ts CT-43 + utils/journey-executor.ts CT-44 + utils/journey-trigger-watcher.ts 5분 cron). Harold 명시 확정 8건 정합: 7 템플릿 전부 + 회사 자유 임계값 (NULL=무제한 default) + 회사 자유 예산 (NULL=무제한) + 광고/비광고 둘 다 자동 (4 광고 검증 통과 시) + AI_OPERATOR_ALLOWED_USERS=hoyun 유지 + 5분 cron 주기 + 여정별 재진입 default. 작업 완료 후 .md 파일 삭제.
+> status/STATUS.md CURRENT_TASK 정독 + docs/AI_OPERATOR_기능정의서.md v1.1.0 + status/ai_operator_progress.md 정독 → 운영 검증 후 D188 Step 2-B (wait/condition step + MMS·KAKAO 채널 확장 + journey A/B 테스트 + 트리거 다양화 + 분석 차트 강화) 진입 또는 Harold 신고 우선 종결 또는 SDK v0.3.0 진입
 > ```
 >
-> **D184~D186 종결 매트릭스** (이번 세션 완료):
+> **D184~D187 종결 매트릭스** (D187 세션 종결 시점):
 > - **D184 이니시스 표준결제 한줄로 이전 완료** (CT-41 inicis-client.ts + CT-42 payment-processor.ts + routes/payments.ts 5 endpoint + BalanceModals.tsx 카드결제 활성 + 가상계좌 영구 제거 + PaymentResultPage.tsx 신규 + payments ALTER 9 컬럼 + 2 UNIQUE INDEX + 4 INDEX) — Harold signKey `UzZjT0d2V3FyaDgxSmZwWlY4OUdhQT09` + .env INICIS_MODE=test
 > - **D184-fix** company-frontend/package.json `vite-plugin-javascript-obfuscator: ^3.1.0` devDependencies 누락 정정 (1ca6ee8 commit 2달+ 누적 사고)
 > - **D185 사용자 신고** AddressBookModal 대량 업로드 (130,962건+) 로딩 안내 — isUploading state + 4 fetch try/finally + 로딩 오버레이 + close 차단 + 모든 버튼 disabled
 > - **D186 Phase 1 모달 정렬 정정** — 7 파일 / 19 모달 / 4 좌우 분할 영역 stacked (Dashboard 4 + DirectSendPanel 2 + TargetSendModal + AlimtalkSendModal + ResultsModal 5 + ScheduledCampaignModal 5 + DirectPreviewModal)
 > - **D186 Phase 1.5** DashboardHeader 가로 스크롤 + Dashboard 메인 카드 stacked + DB 카드 grid-cols-2 md:grid-cols-3 (숫자 겹침 사고 정정) + 5 기능 카드 grid-cols-2 md:grid-cols-4
 > - **D186 Phase 2-A** direct-send.css 모바일 @media 쿼리 추가 (1509 라인 @media 0건 사고) + 드래그 스크롤 사고 정정 (`overflow: hidden` 3곳 → 모바일 `visible` + backdrop overflow-y:auto + iOS touch scroll)
-> - **D187 Journey Builder Lite Step 1 설계 완료** (status/D187_journey_builder_lite_plan.md 작성) — Harold 8건 명시 확정 + 임계값 재설계 (회사 자유 + 광고 자동) + 다음 세션 즉시 진입
+> - **D187 Journey Builder Lite Step 1 종결** — DB 4 테이블 + 6 인덱스 + utils CT-43 journey-builder(7 표준 템플릿 + Custom Opus 4.7) + CT-44 journey-executor(5분 cron + 광고 자동 검증 4건 + 임계값 + prepaid + bulkInsertSmsQueue + step_log) + journey-trigger-watcher(5분 cron + 6 트리거 + cooldown) + routes/ai.ts 8 endpoint(목록/생성/상세/activate/pause/end/executions/stats) + JourneysPage /ai-journeys(활성 여정 + 7 템플릿 + 생성 폼 + 모바일 정합) + AiOperatorPage SUB_MODULE_CARDS 12건(여정 자동화 카드 추가) + App.tsx 라우트 + app.ts worker 2건 등록 + status/D187_journey_builder_lite_plan.md 삭제(Harold 명시)
 >
-> **D187 본질** = Braze Canvas Journey 압도 차별화 — 7 표준 여정 (가입/재구매/휴면/장바구니/생일/예약/Custom) + 자연어 진입 (Opus 4.7) + CDP 트리거 기반 자동 step 진행 + 회사 자유 임계값 + 광고 자동 검증 4건. Continuous Operator (D176) 보완 + Memory tool (D181) 활용. 분량 = 9~13h 추정 (Step 1-A/B/C 분할).
+> **D187 본질** = Braze Canvas Journey 압도 차별화 — 7 표준 여정 (가입/재구매/휴면/장바구니/생일/예약/Custom) + 자연어 진입 (Opus 4.7) + CDP 트리거 기반 자동 step 진행 + 회사 자유 임계값 + 광고 자동 검증 4건. Continuous Operator (D176) 보완 + Memory tool (D181) 활용.
 >
-> **선행 정독 (D183~ 잔존 영역, D184 종결 후 진행):** `docs/AI_OPERATOR_기능정의서.md` v1.0.10 + `docs/한줄로_BEYOND_BRAZE_비전.md` v0.6 + `status/ai_operator_progress.md`
+> **선행 정독:** `docs/AI_OPERATOR_기능정의서.md` v1.1.0 + `docs/한줄로_BEYOND_BRAZE_비전.md` v0.6 + `status/ai_operator_progress.md`
 >
 > **영구 원칙 (모든 작업 시 정합):** [[feedback_no_target_auto_relax]] + [[feedback_ai_operator_model_isolation]] + [[feedback_no_future_roadmap_user_exposure]] + [[feedback_sub_module_back_navigation]] + [[feedback_jondaetmal_to_harold]] + [[feedback_push_and_deploy_commands]] + [[feedback_no_humuson_keyword_exposure]] + [[feedback_no_devtools_browser_diagnostic]] + [[feedback_ai_operator_user_gating]] + [[feedback_no_bakkeum_usage]]
 

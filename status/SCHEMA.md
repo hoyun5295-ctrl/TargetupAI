@@ -2000,3 +2000,92 @@ CREATE TABLE IF NOT EXISTS ai_batch_jobs (
 );
 CREATE INDEX IF NOT EXISTS idx_ai_batch_jobs_company ON ai_batch_jobs(company_id, submitted_at DESC);
 ```
+
+---
+
+### D187 Journey Builder Lite (Harold 직접 PostgreSQL 실행 영역, 4 테이블 + 6 인덱스)
+
+> **현재 미적용 영역** — Harold 직접 실행 후 본 영역 갱신. 환경변수 변경 없음.
+
+```sql
+-- ════════════════════════════════════════════════════════════════════
+-- D187 Journey Builder Lite Step 1 (2026-05-20)
+-- 7 표준 여정 (가입/재구매/휴면/장바구니/생일/예약/Custom) + 트리거 기반 자동 step 진행
+-- Continuous Operator (D176) + Memory tool (D181) 통합
+-- ════════════════════════════════════════════════════════════════════
+
+-- 1. journeys — 회사별 활성 여정
+CREATE TABLE IF NOT EXISTS journeys (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  company_id uuid NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+  name varchar(100) NOT NULL,
+  template_code varchar(30) NOT NULL,           -- 'onboarding' | 'repeat' | 'dormant' | 'cart' | 'birthday' | 'reservation' | 'custom'
+  trigger_event varchar(50) NOT NULL,
+  trigger_filters jsonb NOT NULL DEFAULT '{}'::jsonb,
+  status varchar(20) NOT NULL DEFAULT 'draft',  -- 'draft' | 'active' | 'paused' | 'ended'
+  budget_monthly numeric(15,2),                  -- NULL = 무제한 (회사 자유 설정)
+  allow_reentry boolean NOT NULL DEFAULT false,
+  reentry_cooldown_days integer,
+  threshold_recipients_per_step integer,         -- NULL = 무제한 (회사 자유 설정)
+  threshold_cost_per_step numeric(15,2),         -- NULL = 무제한 (회사 자유 설정)
+  threshold_risk_level varchar(10) NOT NULL DEFAULT 'low',  -- 'low' | 'medium' | 'high'
+  approved_by uuid REFERENCES users(id) ON DELETE SET NULL,
+  approved_at timestamptz,
+  paused_at timestamptz,
+  pause_reason text,
+  stats_total_entered integer NOT NULL DEFAULT 0,
+  stats_total_completed integer NOT NULL DEFAULT 0,
+  stats_total_cost numeric(15,2) NOT NULL DEFAULT 0,
+  created_by uuid REFERENCES users(id) ON DELETE SET NULL,
+  created_at timestamptz NOT NULL DEFAULT NOW(),
+  updated_at timestamptz NOT NULL DEFAULT NOW()
+);
+
+-- 2. journey_steps — 여정 step 정의
+CREATE TABLE IF NOT EXISTS journey_steps (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  journey_id uuid NOT NULL REFERENCES journeys(id) ON DELETE CASCADE,
+  step_order integer NOT NULL,
+  step_type varchar(20) NOT NULL,                -- 'message' | 'wait' | 'condition'
+  delay_hours integer NOT NULL DEFAULT 0,
+  channel varchar(20),                            -- 'sms' | 'lms' | 'mms' | 'kakao' | 'email'
+  message_template text,
+  condition_jsonb jsonb,
+  created_at timestamptz NOT NULL DEFAULT NOW(),
+  UNIQUE (journey_id, step_order)
+);
+
+-- 3. journey_executions — 고객별 여정 실행 상태 (UNIQUE 제거, 재진입 정합)
+CREATE TABLE IF NOT EXISTS journey_executions (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  journey_id uuid NOT NULL REFERENCES journeys(id) ON DELETE CASCADE,
+  customer_id uuid NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
+  current_step_order integer NOT NULL DEFAULT 0,
+  status varchar(20) NOT NULL DEFAULT 'active',  -- 'active' | 'completed' | 'paused' | 'failed'
+  entered_at timestamptz NOT NULL DEFAULT NOW(),
+  next_run_at timestamptz,
+  completed_at timestamptz,
+  total_cost numeric(15,2) NOT NULL DEFAULT 0,
+  created_at timestamptz NOT NULL DEFAULT NOW()
+);
+
+-- 4. journey_step_logs — 각 step 실행 이력
+CREATE TABLE IF NOT EXISTS journey_step_logs (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  execution_id uuid NOT NULL REFERENCES journey_executions(id) ON DELETE CASCADE,
+  step_id uuid NOT NULL REFERENCES journey_steps(id) ON DELETE CASCADE,
+  campaign_id uuid REFERENCES campaigns(id) ON DELETE SET NULL,
+  sent_at timestamptz NOT NULL DEFAULT NOW(),
+  status varchar(20) NOT NULL,                    -- 'sent' | 'failed' | 'skipped'
+  cost numeric(15,2) NOT NULL DEFAULT 0,
+  error_reason text
+);
+
+-- 인덱스 6건
+CREATE INDEX IF NOT EXISTS idx_journeys_company_status ON journeys(company_id, status);
+CREATE INDEX IF NOT EXISTS idx_journey_steps_journey_order ON journey_steps(journey_id, step_order);
+CREATE INDEX IF NOT EXISTS idx_journey_executions_due ON journey_executions(next_run_at) WHERE status = 'active';
+CREATE INDEX IF NOT EXISTS idx_journey_executions_customer ON journey_executions(customer_id);
+CREATE INDEX IF NOT EXISTS idx_journey_executions_journey_status ON journey_executions(journey_id, status, entered_at DESC);
+CREATE INDEX IF NOT EXISTS idx_journey_step_logs_execution ON journey_step_logs(execution_id, sent_at DESC);
+```

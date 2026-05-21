@@ -28,6 +28,9 @@
 | CT-16 | `customer-upsert.ts` | customers 테이블 UPSERT 단일 진입점 (region 중복 등 구조적 차단) |
 | CT-17 | `plan-guard.ts` | 요금제/기능 게이팅 (`isTrialActive`는 `plan_code` 기준) |
 | CT-18 | `enabled-fields.ts` | 활성 필드 탐지 단일 진입점 |
+| CT-43 | `journey-builder.ts` | ★ D187 (2026-05-20) Journey Builder Lite — 7 표준 여정 (가입/재구매/휴면/장바구니/생일/예약/Custom) + 자연어 진입 (Opus 4.7) + 회사 자유 임계값 (NULL=무제한 default) + 회사 자유 예산 |
+| CT-44 | `journey-executor.ts` | ★ D187 (2026-05-20) Journey 5분 cron — due execution 처리 + 광고 자동 검증 4건 (prefix/080/시간/제목) + 임계값 검증 + prepaid 잔액 + step별 sms-queue 발송 |
+| - | `journey-trigger-watcher.ts` | ★ D187 (2026-05-20) Journey 5분 cron — 활성 여정의 trigger_event 영역 polling + cooldown 검증 + journey_executions enqueue |
 | - | `messageUtils.ts` | 변수 치환 (5개 발송 경로 통합) + 광고+080 + KISA 제목 |
 | - | `normalize.ts` | 값 정규화 + `cellToString` (셀 값 → 문자열 안전 변환) |
 | - | `format-number.ts` | 숫자/통화 포맷팅 |
