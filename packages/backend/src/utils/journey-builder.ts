@@ -171,7 +171,7 @@ export const JOURNEY_TEMPLATES: Record<JourneyTemplateCode, JourneyTemplate> = {
   custom: {
     templateCode: 'custom',
     name: 'Custom (자연어 진입)',
-    description: '회사 admin이 자연어로 입력 → Opus 4.7가 자동 step 생성',
+    description: '회사 admin이 자연어로 입력 → AI가 자동 step 생성',
     triggerEvent: 'custom',
     triggerFilters: {},
     allowReentry: true,

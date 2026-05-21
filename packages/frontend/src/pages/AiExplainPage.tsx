@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { AlertCircle, ArrowLeft, BookOpen, FileText, Loader2, Search, Sparkles } from 'lucide-react';
 
 // ★ D181 (2026-05-19): Anthropic Citations 페이지
-//   사용자 자연어 질문 → 회사 데이터 documents → Opus 4.7 응답 + 근거 박은 인용
+//   사용자 자연어 질문 → 회사 데이터 documents → AI 응답 + 근거 인용
 //   영구 원칙 #4 사용자 신뢰 본질 — "AI가 박은 근거 박음"
 
 interface CitationSpan {
@@ -96,7 +96,7 @@ export default function AiExplainPage() {
         <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 text-xs text-amber-900 flex items-start gap-2">
           <AlertCircle className="w-4 h-4 mt-0.5 shrink-0" />
           <div>
-            <strong>Anthropic Citations:</strong> Opus 4.7이 본 회사의 데이터(회사 정보 + 30일 캠페인 history + 학습 메모리 + 고객 통계)만 참고하여 답변하고, 응답 옆에 근거 출처를 인용합니다.
+            <strong>근거 인용 답변:</strong> AI가 본 회사의 데이터(회사 정보 + 30일 캠페인 history + 학습 메모리 + 고객 통계)만 참고하여 답변하고, 응답 옆에 근거 출처를 인용합니다.
             추측 / 창작 없음 — 회사 데이터에 없는 영역은 "정보 없음"으로 답변합니다.
           </div>
         </div>
@@ -150,7 +150,7 @@ export default function AiExplainPage() {
         {loading && (
           <div className="bg-white border rounded-xl p-12 flex flex-col items-center text-gray-500 gap-2">
             <Loader2 className="w-6 h-6 animate-spin" />
-            <div className="text-sm">Opus 4.7이 회사 데이터를 분석 중입니다...</div>
+            <div className="text-sm">AI가 회사 데이터를 분석 중입니다...</div>
           </div>
         )}
 

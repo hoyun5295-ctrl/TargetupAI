@@ -459,7 +459,7 @@ export default function JourneysPage() {
                     rows={3}
                     className="w-full px-3 py-2 bg-slate-900 border border-white/10 rounded-lg text-sm focus:outline-none focus:border-fuchsia-400 resize-none"
                   />
-                  <p className="mt-1 text-[11px] text-white/40">Opus 4.7이 회사 메모리 + 톤을 바탕으로 2~5개 step을 자동 생성합니다.</p>
+                  <p className="mt-1 text-[11px] text-white/40">AI가 회사 메모리 + 톤을 바탕으로 2~5개 step을 자동 생성합니다.</p>
                 </div>
               )}
 

@@ -601,7 +601,6 @@ export default function ContinuousOperatorPage() {
             <div className="flex items-center gap-2 mb-4">
               <GitMerge className="w-5 h-5 text-violet-600" />
               <h3 className="text-base font-bold text-gray-800">Multi-Goal Decisioning — 다중 목표 충돌 분석</h3>
-              <span className="text-[10px] bg-violet-100 text-violet-700 px-1.5 py-0.5 rounded-full font-medium">Opus 4.7</span>
             </div>
             <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 mb-4 text-xs text-amber-900 flex items-start gap-2">
               <AlertCircle className="w-4 h-4 mt-0.5 shrink-0" />

@@ -103,7 +103,7 @@ export default function PerformancePage() {
           <div className="bg-white border rounded-xl p-12 flex flex-col items-center gap-3 text-gray-500">
             <Loader2 className="w-6 h-6 animate-spin text-indigo-500" />
             <div className="text-sm">최근 30일 캠페인 성과 + AI 추천을 생성하는 중입니다...</div>
-            <div className="text-xs text-gray-400">Opus 4.7이 데이터를 분석합니다 (10~20초 소요)</div>
+            <div className="text-xs text-gray-400">AI가 데이터를 분석합니다 (10~20초 소요)</div>
           </div>
         )}
 
@@ -170,7 +170,6 @@ export default function PerformancePage() {
                 <div className="flex items-center gap-2">
                   <Brain className="w-5 h-5 text-indigo-600" />
                   <h2 className="text-base font-bold text-gray-800">AI 다음 캠페인 추천</h2>
-                  <span className="text-xs bg-white border border-indigo-200 text-indigo-700 px-2 py-0.5 rounded-full font-medium">Opus 4.7</span>
                 </div>
 
                 {advice.summary && (

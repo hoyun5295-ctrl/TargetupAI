@@ -30,7 +30,7 @@ import PushCampaignsPage from './pages/PushCampaignsPage';
 import InAppMessagesPage from './pages/InAppMessagesPage';
 // ★ D176 (2026-05-19): Continuous Agentic Operator (사용자 동의 흐름)
 import ContinuousOperatorPage from './pages/ContinuousOperatorPage';
-// ★ D178 (2026-05-19): 인바운드 AI 음성 응답 (Naver Clova STT/TTS + Opus 4.7)
+// ★ D178 (2026-05-19): 인바운드 AI 음성 응답 (Naver Clova STT/TTS)
 import VoiceInboundPage from './pages/VoiceInboundPage';
 // ★ D180 (2026-05-19): Email 채널 (SendGrid)
 import EmailCampaignsPage from './pages/EmailCampaignsPage';

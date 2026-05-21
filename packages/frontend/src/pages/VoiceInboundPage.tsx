@@ -180,7 +180,7 @@ export default function VoiceInboundPage() {
                             <div className="bg-white border rounded p-2 text-gray-700 whitespace-pre-wrap">{c.transcript}</div>
                           </div>
                           <div>
-                            <div className="font-bold text-gray-700 mb-1">AI 응답 (Opus 4.7 + CDP 데이터)</div>
+                            <div className="font-bold text-gray-700 mb-1">AI 응답 (CDP 데이터 활용)</div>
                             <div className="bg-violet-50 border border-violet-200 rounded p-2 text-violet-900 whitespace-pre-wrap">{c.aiResponse}</div>
                           </div>
                         </div>
