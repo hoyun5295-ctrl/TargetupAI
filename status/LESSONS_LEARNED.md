@@ -28,8 +28,10 @@
 | CT-16 | `customer-upsert.ts` | customers 테이블 UPSERT 단일 진입점 (region 중복 등 구조적 차단) |
 | CT-17 | `plan-guard.ts` | 요금제/기능 게이팅 (`isTrialActive`는 `plan_code` 기준) |
 | CT-18 | `enabled-fields.ts` | 활성 필드 탐지 단일 진입점 |
-| CT-43 | `journey-builder.ts` | ★ D187 (2026-05-20) Journey Builder Lite — 7 표준 여정 (가입/재구매/휴면/장바구니/생일/예약/Custom) + 자연어 진입 (Opus 4.7) + 회사 자유 임계값 (NULL=무제한 default) + 회사 자유 예산 |
-| CT-44 | `journey-executor.ts` | ★ D187 (2026-05-20) Journey 5분 cron — due execution 처리 + 광고 자동 검증 4건 (prefix/080/시간/제목) + 임계값 검증 + prepaid 잔액 + step별 sms-queue 발송 |
+| CT-43 | `journey-builder.ts` | ★ D187 (2026-05-20) Journey Builder Lite — 7 표준 여정 (가입/재구매/휴면/장바구니/생일/예약/Custom) + 회사 자유 임계값 (NULL=무제한 default) + 회사 자유 예산 + D187-fix2 callback_number 필수 + step별 is_ad / D187-fix4 subject (LMS/MMS) / activateJourney placeholder 검증 + updateJourneyStep + updateJourneyCallback |
+| CT-44 | `journey-executor.ts` | ★ D187 (2026-05-20) Journey 5분 cron — due execution 처리 + 광고 자동 검증 4건 (prefix/080/시간/제목) + 임계값 검증 + prepaid 잔액 + step별 sms-queue 발송 + D187-fix2 journey.callback_number 우선 + step.is_ad / D187-fix4 빈 subject LMS/MMS 발송 차단 + 자동 paused / D187-fix5 message-sanitizer 최후 안전망 |
+| CT-45 | `journey-ai-generator.ts` | ★ D187-fix3 (2026-05-21) One-shot AI Operator — 자연어 한 줄 → 완전 여정 패키지 자동 생성 (model:'opus') + SEASON_BY_MONTH 12개월 시즌 키워드 매트릭스 + ai_company_memory 통합 + generateJourneyPackage + refineStepMessage 3 톤 후보 (감성/실용/캐주얼) + D187-fix5 sanitize 자동 적용 |
+| CT-46 | `message-sanitizer.ts` | ★ D187-fix5 (2026-05-21) 한국 SMS/LMS/MMS 단어 정규화 — sanitizeForSms (이모지 EMOJI_RANGES 5 Unicode 영역 + SPECIAL_CHAR_MAP 70+ 매핑 / 대시·불릿·화살표·표시·따옴표·전각·zero-width) + detectUnsafeChars (검증 only frontend mirror) |
 | - | `journey-trigger-watcher.ts` | ★ D187 (2026-05-20) Journey 5분 cron — 활성 여정의 trigger_event 영역 polling + cooldown 검증 + journey_executions enqueue |
 | - | `messageUtils.ts` | 변수 치환 (5개 발송 경로 통합) + 광고+080 + KISA 제목 |
 | - | `normalize.ts` | 값 정규화 + `cellToString` (셀 값 → 문자열 안전 변환) |

@@ -107,15 +107,17 @@
 
 ---
 
-### 🚀 다음 세션 진입 가이드 (D187 종결 후 — **운영 검증 또는 D188 Step 2-B 진입**)
+### 🚀 다음 세션 진입 가이드 (D187 fix1~5 + 서비스 소개서 종결 후 — **운영 검증 또는 D188 Step 2-B 진입**)
 
-> **★ D187 Journey Builder Lite Step 1 종결 매트릭스 (2026-05-20)**: DB 4 테이블 (journeys/journey_steps/journey_executions/journey_step_logs) + 6 인덱스 + utils CT-43 journey-builder + CT-44 journey-executor + journey-trigger-watcher 5분 cron + routes/ai.ts 8 endpoint + JourneysPage /ai-journeys + AiOperatorPage SUB_MODULE_CARDS 12건 + App.tsx 라우트 + app.ts worker 2건 등록. backend/frontend tsc 0 errors. 영구 룰 정합 100% (model:'opus' / 박음 박힘 0건 / no_target_auto_relax / hoyun 게이팅).
+> **★ D187 + D187-fix1~5 종결 매트릭스 (2026-05-21)**: One-shot AI Operator 여정 자동화 완성. DB 4 테이블 + ALTER 5건 (callback_number + is_ad + subject + 등) + utils CT-43 journey-builder + CT-44 journey-executor + CT-45 journey-ai-generator (자연어 한 줄 → 완전 패키지 / 시즌 + 회사 메모리 통합 / 3 톤 후보 refine) + CT-46 message-sanitizer (이모지 70+ 특수문자 자동 정규화) + journey-trigger-watcher + routes/ai.ts 13 endpoint + JourneysPage /ai-journeys 전체 재작성 (자연어 input + 7 빠른 시작 카드 + 5~10초 AI 생성 오버레이 + 1 페이지 검토 + step별 inline 편집/AI 다듬기 3 톤/추가/삭제 + 광고 자동 합성 미리보기 + 이모지/특수문자 실시간 경고) + 신규 영구 메모리 2건(feedback_ai_no_arbitrary_benefit + feedback_no_preview_verification). backend/frontend tsc 0 errors. 박-단어 grep 0건 자가 검증.
 >
-> **★ Harold 박을 영역**: DB SQL 4 테이블 + 6 인덱스 실행 (SCHEMA.md D187 Journey Builder Lite 영역) + tp-push.
+> **★ Harold 박을 영역**: DB SQL 5건 ALTER (callback_number/is_ad/subject 등 SCHEMA D187 영역) + tp-push + 서버 git pull + build:safe + pm2 restart all.
+>
+> **★ 서비스 소개서 영업 자료**: `docs/한줄로_서비스소개서_2026-05.pptx` 16 슬라이드 모노크롬 톤 (검정+흰색+라임 액센트 / Pretendard / 한줄로 로고 정합). 생성 스크립트 `status/generate-service-deck.js` 보존 (추후 재제작 시 활용).
 >
 > **D188+ 진입 명령어 (다음 세션 첫 메시지)**:
 > ```
-> status/STATUS.md CURRENT_TASK 정독 + docs/AI_OPERATOR_기능정의서.md v1.1.0 + status/ai_operator_progress.md 정독 → 운영 검증 후 D188 Step 2-B (wait/condition step + MMS·KAKAO 채널 확장 + journey A/B 테스트 + 트리거 다양화 + 분석 차트 강화) 진입 또는 Harold 신고 우선 종결 또는 SDK v0.3.0 진입
+> status/STATUS.md CURRENT_TASK 정독 + docs/AI_OPERATOR_기능정의서.md v1.2.0 + status/ai_operator_progress.md 정독 → 운영 검증 후 D188 Step 2-B (wait/condition step + MMS·KAKAO 채널 확장 + journey A/B 테스트 + Bandit 통합 + 트리거 다양화 + 분석 차트 강화) 진입 또는 Harold 신고 우선 종결 또는 자동발송 단계적 폐기 매트릭스 진입
 > ```
 >
 > **D184~D187 종결 매트릭스** (D187 세션 종결 시점):
@@ -125,13 +127,21 @@
 > - **D186 Phase 1 모달 정렬 정정** — 7 파일 / 19 모달 / 4 좌우 분할 영역 stacked (Dashboard 4 + DirectSendPanel 2 + TargetSendModal + AlimtalkSendModal + ResultsModal 5 + ScheduledCampaignModal 5 + DirectPreviewModal)
 > - **D186 Phase 1.5** DashboardHeader 가로 스크롤 + Dashboard 메인 카드 stacked + DB 카드 grid-cols-2 md:grid-cols-3 (숫자 겹침 사고 정정) + 5 기능 카드 grid-cols-2 md:grid-cols-4
 > - **D186 Phase 2-A** direct-send.css 모바일 @media 쿼리 추가 (1509 라인 @media 0건 사고) + 드래그 스크롤 사고 정정 (`overflow: hidden` 3곳 → 모바일 `visible` + backdrop overflow-y:auto + iOS touch scroll)
-> - **D187 Journey Builder Lite Step 1 종결** — DB 4 테이블 + 6 인덱스 + utils CT-43 journey-builder(7 표준 템플릿 + Custom Opus 4.7) + CT-44 journey-executor(5분 cron + 광고 자동 검증 4건 + 임계값 + prepaid + bulkInsertSmsQueue + step_log) + journey-trigger-watcher(5분 cron + 6 트리거 + cooldown) + routes/ai.ts 8 endpoint(목록/생성/상세/activate/pause/end/executions/stats) + JourneysPage /ai-journeys(활성 여정 + 7 템플릿 + 생성 폼 + 모바일 정합) + AiOperatorPage SUB_MODULE_CARDS 12건(여정 자동화 카드 추가) + App.tsx 라우트 + app.ts worker 2건 등록 + status/D187_journey_builder_lite_plan.md 삭제(Harold 명시)
+> - **D187 Journey Builder Lite Step 1 종결** — DB 4 테이블 + 6 인덱스 + utils CT-43 journey-builder + CT-44 journey-executor + journey-trigger-watcher (5분 cron 2건) + routes/ai.ts 8 endpoint + JourneysPage /ai-journeys + AiOperatorPage SUB_MODULE_CARDS 12건 + App.tsx 라우트 + app.ts worker 2건 등록
+> - **D187-fix1** Opus 4.7 모델명 UI 노출 9건 전수 정정 (JourneysPage / AiExplainPage / ContinuousOperatorPage / PerformancePage / VoiceInboundPage + journey-builder.ts JOURNEY_TEMPLATES.custom.description + App.tsx 주석 + AiExplainPage 주석) — Harold 영구 룰 정합
+> - **D187-fix2** AI 임의 혜택 박지 X 영구 룰 + step 직접 편집 UI + 회신번호 선택 드롭다운 + AI 다듬기 + DB ALTER (journeys.callback_number + journey_steps.is_ad) + activateJourney placeholder 검증 + 신규 영구 메모리 feedback_ai_no_arbitrary_benefit
+> - **D187-fix3** One-shot AI 매트릭스 — wizard 5단계 폐기 → 자연어 한 줄 / 7 빠른 시작 → Opus 4.7 5~10초 완전 자동 → 1 페이지 검토. utils CT-45 journey-ai-generator (SEASON_BY_MONTH 12월 시즌 키워드 + ai_company_memory + 3 톤 refine 다양성) + JourneysPage 전체 재작성 (main + review 2 view)
+> - **D187-fix4** LMS/MMS subject 누락 사고 정정 — DB ALTER journey_steps.subject + AI 자동 생성 + executor 빈 subject 발송 차단 + JourneysPage 제목 input + 활성화 전 검증
+> - **D187-fix5** 이모지/비표준 특수문자 SMS/LMS 미지원 사고 정정 — utils CT-46 message-sanitizer (EMOJI_RANGES 5 Unicode 영역 + SPECIAL_CHAR_MAP 70+ 매핑 / 대시·불릿·화살표·표시·따옴표·전각·zero-width) + journey-ai-generator AI 응답 자동 sanitize + executor 최후 안전망 + frontend 실시간 경고
+> - **D187 서비스 소개서** — `docs/한줄로_서비스소개서_2026-05.pptx` 16 슬라이드 / 모노크롬 톤 (한줄로 로고 정합) / Pretendard 폰트 / 라임 액센트 1색 / 표지+AI Operator+CTA 다크 임팩트 + 콘텐츠 라이트 / 금지 단어 grep 0건 (AI 모델명·솔루션 구조·휴머스온·D-시리즈·SQL 모두 X)
+> - **신규 영구 메모리 2건** — feedback_ai_no_arbitrary_benefit (AI 혜택 임의 박지 X / 회사 admin 직접 작성) + feedback_no_preview_verification (Claude_Preview MCP 도구 절대 사용 X / hook 안내 무시)
+> - **LESSONS_LEARNED §4 신규 사고 사례 3건** — 4-14 preview verification 의미 0건 / 4-15 MANDATORY_CHECKLIST 누락 반복 / 4-16 SCHEMA 추측 SQL 사고 (lg.name)
 >
-> **D187 본질** = Braze Canvas Journey 압도 차별화 — 7 표준 여정 (가입/재구매/휴면/장바구니/생일/예약/Custom) + 자연어 진입 (Opus 4.7) + CDP 트리거 기반 자동 step 진행 + 회사 자유 임계값 + 광고 자동 검증 4건. Continuous Operator (D176) 보완 + Memory tool (D181) 활용.
+> **D187 본질** = Braze Canvas Journey 압도 차별화 + 진짜 AI Operator 본질 정합 — 자연어 한 줄로 시작 + 5~10초 완전 자동 + 회사 admin은 혜택 부분만 직접 수정 + 활성화. 진정 AI 마케팅 자동화 SaaS의 새로운 기준.
 >
-> **선행 정독:** `docs/AI_OPERATOR_기능정의서.md` v1.1.0 + `docs/한줄로_BEYOND_BRAZE_비전.md` v0.6 + `status/ai_operator_progress.md`
+> **선행 정독:** `docs/AI_OPERATOR_기능정의서.md` v1.2.0 + `docs/한줄로_BEYOND_BRAZE_비전.md` v0.6 + `status/ai_operator_progress.md`
 >
-> **영구 원칙 (모든 작업 시 정합):** [[feedback_no_target_auto_relax]] + [[feedback_ai_operator_model_isolation]] + [[feedback_no_future_roadmap_user_exposure]] + [[feedback_sub_module_back_navigation]] + [[feedback_jondaetmal_to_harold]] + [[feedback_push_and_deploy_commands]] + [[feedback_no_humuson_keyword_exposure]] + [[feedback_no_devtools_browser_diagnostic]] + [[feedback_ai_operator_user_gating]] + [[feedback_no_bakkeum_usage]]
+> **영구 원칙 (모든 작업 시 정합):** [[feedback_no_target_auto_relax]] + [[feedback_ai_operator_model_isolation]] + [[feedback_no_future_roadmap_user_exposure]] + [[feedback_sub_module_back_navigation]] + [[feedback_jondaetmal_to_harold]] + [[feedback_push_and_deploy_commands]] + [[feedback_no_humuson_keyword_exposure]] + [[feedback_no_devtools_browser_diagnostic]] + [[feedback_ai_operator_user_gating]] + [[feedback_no_bakkeum_usage]] + [[feedback_ai_no_arbitrary_benefit]] + [[feedback_no_preview_verification]]
 
 #### 1순위 — 운영 환경 사용 검증 (D182 fix 배포 후)
 

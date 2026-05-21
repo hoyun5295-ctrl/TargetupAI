@@ -256,14 +256,19 @@
 - AI가 다음 캠페인 자동 제안 (recommendNextCampaign 강화)
 - "1회성 발송툴" 탈출 → 운영 파트너 진입
 
-### Step 2: Journey Builder Lite (D187 Step 1 종결)
+### Step 2: Journey Builder Lite (D187 + D187-fix1~5 종결)
 - ✓ 7 표준 여정 템플릿 (가입/재구매/휴면/장바구니/생일/예약/Custom) — utils CT-43 journey-builder + CT-44 journey-executor
-- ✓ Custom 자연어 진입 — Opus 4.7 + ai_company_memory 통합
 - ✓ 트리거 5분 cron polling — customer.created / cdp.purchase / customer.dormant / cdp.cart_abandon / customer.birthday_approaching / cdp.reservation_created
 - ✓ 회사 자유 임계값 (NULL=무제한 default) — recipients/cost/risk 3종
 - ✓ 광고 자동 검증 4건 — (광고) prefix / 080 무료거부 / 발송 시간 KST 08:00~21:00 / KISA 제목
 - ✓ 재진입 cooldown 정책 — 여정별 default 매트릭스
-- ⏳ Step 2-B 잔존 — wait/condition step 타입 / MMS·KAKAO 채널 확장 / 트리거 다양화 / journey 단위 A/B 테스트 / 분석 차트 강화
+- ✓ (fix1) UI 모델명 노출 9건 전수 정정 — 영구 룰 정합
+- ✓ (fix2) AI 임의 혜택 박지 X 영구 룰 + step 직접 편집 UI + 회신번호 선택 + AI 다듬기 + DB ALTER (callback_number + is_ad) + 신규 메모리 feedback_ai_no_arbitrary_benefit
+- ✓ (fix3) One-shot AI 매트릭스 — utils CT-45 journey-ai-generator (SEASON_BY_MONTH 12 월 + ai_company_memory + 3 톤 refine) + JourneysPage 전체 재작성 (main + review 2 view + AI 생성 오버레이 + 1 페이지 검토)
+- ✓ (fix4) LMS/MMS subject 누락 사고 정정 — DB ALTER + AI 자동 생성 + executor 빈 subject 차단 + UI 제목 input
+- ✓ (fix5) 이모지/비표준 특수문자 sanitize — utils CT-46 message-sanitizer (5 Unicode 영역 + 70+ 매핑) + 자동 적용 + 최후 안전망 + 실시간 경고
+- ✓ 서비스 소개서 16 슬라이드 (docs/한줄로_서비스소개서_2026-05.pptx) — 모노크롬 톤 + Pretendard + 라임 액센트 + 한줄로 로고 정합 + 금지 단어 grep 0건
+- ⏳ Step 2-B 잔존 — wait/condition step 타입 / MMS·KAKAO 채널 확장 / 트리거 다양화 / journey 단위 A/B 테스트 (Bandit 통합) / 분석 차트 강화 / 자동발송 단계적 폐기 매트릭스
 
 ### Step 3: Decisioning Engine (D201~D230)
 - 고객별 채널/시점/오퍼 AI 자동 결정
@@ -274,7 +279,7 @@
 ## 진입 명령 (다음 세션 첫 메시지)
 
 ```
-status/STATUS.md CURRENT_TASK § "다음 세션 진입 가이드" 정독 + status/ai_operator_progress.md 정독 + docs/AI_OPERATOR_기능정의서.md v1.1.0 정독 → Harold 신고 우선 종결 또는 D188 Step 2-B(wait/condition step + MMS/KAKAO 채널 확장 + journey A/B 테스트) 진입 또는 SDK v0.3.0 진입
+status/STATUS.md CURRENT_TASK § "다음 세션 진입 가이드" 정독 + status/ai_operator_progress.md 정독 + docs/AI_OPERATOR_기능정의서.md v1.2.0 정독 → Harold 신고 우선 종결 또는 D188 Step 2-B (wait/condition step + MMS/KAKAO 채널 확장 + journey A/B 테스트 + Bandit 통합 + 자동발송 단계적 폐기) 진입
 ```
 
-> Step 0~Step 2 Step 1 (D187 Journey Builder Lite Step 1) 종결. 다음 세션은 운영 검증 1주+ 후 Step 2-B 또는 Harold 명시 영역 진입.
+> Step 2 (D187 + D187-fix1~5 + 서비스 소개서) 종결. 다음 세션은 운영 검증 + Harold 명시 영역 진입.
