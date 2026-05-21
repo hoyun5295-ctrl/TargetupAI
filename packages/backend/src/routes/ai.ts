@@ -1670,9 +1670,10 @@ router.patch('/operator/journeys/:id/steps/:stepId', async (req: Request, res: R
     if (!isAiOperatorAllowed(planCtx, req.user)) {
       return res.status(403).json({ success: false, error: 'AI Operator 진입 권한이 없습니다.', code: 'AI_OPERATOR_GATED' });
     }
-    const { messageTemplate, channel, delayHours, isAd } = req.body || {};
+    const { messageTemplate, subject, channel, delayHours, isAd } = req.body || {};
     const ok = await updateJourneyStep(companyId, req.params.id, req.params.stepId, {
       messageTemplate,
+      subject,
       channel,
       delayHours: delayHours != null ? Number(delayHours) : undefined,
       isAd,

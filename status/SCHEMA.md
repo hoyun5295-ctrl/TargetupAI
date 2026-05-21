@@ -2050,6 +2050,8 @@ CREATE TABLE IF NOT EXISTS journey_steps (
   delay_hours integer NOT NULL DEFAULT 0,
   channel varchar(20),                            -- 'sms' | 'lms' | 'mms' | 'kakao' | 'email'
   message_template text,
+  subject varchar(50),                            -- D187-fix4: LMS/MMS 제목 (KISA 2026-05 + 통신사 정책 — LMS/MMS 발송 시 필수)
+  is_ad boolean NOT NULL DEFAULT true,            -- D187-fix2: 광고 표기 자동 합성 (buildAdMessage + buildAdSubject)
   condition_jsonb jsonb,
   created_at timestamptz NOT NULL DEFAULT NOW(),
   UNIQUE (journey_id, step_order)

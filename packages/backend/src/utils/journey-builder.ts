@@ -42,6 +42,7 @@ export interface JourneyStepDefinition {
   delayHours: number;
   channel?: ChannelType;
   messageTemplate?: string;
+  subject?: string;
   isAd?: boolean;
   conditionJsonb?: Record<string, unknown>;
 }
@@ -210,15 +211,19 @@ export async function createJourneyFromTemplate(input: CreateJourneyInput): Prom
 
   let steps: JourneyStepDefinition[];
   if (input.steps && input.steps.length > 0) {
-    steps = input.steps.map((s, idx) => ({
-      stepOrder: s.stepOrder || idx + 1,
-      stepType: s.stepType || 'message',
-      delayHours: Math.max(0, Math.min(720, Number(s.delayHours) || 0)),
-      channel: s.channel || 'lms',
-      messageTemplate: (s.messageTemplate || '').slice(0, 2000),
-      isAd: s.isAd !== undefined ? !!s.isAd : true,
-      conditionJsonb: s.conditionJsonb,
-    }));
+    steps = input.steps.map((s, idx) => {
+      const channel = s.channel || 'lms';
+      return {
+        stepOrder: s.stepOrder || idx + 1,
+        stepType: s.stepType || 'message',
+        delayHours: Math.max(0, Math.min(720, Number(s.delayHours) || 0)),
+        channel,
+        messageTemplate: (s.messageTemplate || '').slice(0, 2000),
+        subject: channel === 'sms' ? '' : (s.subject || '').slice(0, 50),
+        isAd: s.isAd !== undefined ? !!s.isAd : true,
+        conditionJsonb: s.conditionJsonb,
+      };
+    });
   } else if (input.templateCode === 'custom' && input.customObjective) {
     steps = await generateCustomStepsWithAI(input.companyId, input.customObjective, ctx);
   } else {
@@ -268,9 +273,9 @@ export async function createJourneyFromTemplate(input: CreateJourneyInput): Prom
   for (const step of steps) {
     await query(
       `INSERT INTO journey_steps (
-        id, journey_id, step_order, step_type, delay_hours, channel, message_template, is_ad, condition_jsonb, created_at
+        id, journey_id, step_order, step_type, delay_hours, channel, message_template, subject, is_ad, condition_jsonb, created_at
       ) VALUES (
-        gen_random_uuid(), $1::uuid, $2, $3, $4, $5, $6, $7, $8::jsonb, NOW()
+        gen_random_uuid(), $1::uuid, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, NOW()
       )`,
       [
         journeyId,
@@ -279,6 +284,7 @@ export async function createJourneyFromTemplate(input: CreateJourneyInput): Prom
         step.delayHours,
         step.channel || null,
         step.messageTemplate || null,
+        step.subject || null,
         step.isAd !== undefined ? !!step.isAd : true,
         step.conditionJsonb ? JSON.stringify(step.conditionJsonb) : null,
       ]
@@ -446,7 +452,7 @@ export async function updateJourneyStep(
   companyId: string,
   journeyId: string,
   stepId: string,
-  patch: { messageTemplate?: string; channel?: ChannelType; delayHours?: number; isAd?: boolean }
+  patch: { messageTemplate?: string; subject?: string; channel?: ChannelType; delayHours?: number; isAd?: boolean }
 ): Promise<boolean> {
   // 회사 격리 + 활성 상태에서는 step 수정 차단
   const j = await query(
@@ -463,7 +469,8 @@ export async function updateJourneyStep(
        message_template = COALESCE($4, message_template),
        channel = COALESCE($5, channel),
        delay_hours = COALESCE($6, delay_hours),
-       is_ad = COALESCE($7, is_ad)
+       is_ad = COALESCE($7, is_ad),
+       subject = COALESCE($8, subject)
      WHERE id = $1::uuid AND journey_id = $2::uuid
      RETURNING id`,
     [
@@ -474,6 +481,7 @@ export async function updateJourneyStep(
       patch.channel ?? null,
       patch.delayHours != null ? Math.max(0, Math.min(720, Number(patch.delayHours))) : null,
       patch.isAd !== undefined ? !!patch.isAd : null,
+      patch.subject !== undefined ? patch.subject.slice(0, 50) : null,
     ]
   );
   return r.rows.length > 0;

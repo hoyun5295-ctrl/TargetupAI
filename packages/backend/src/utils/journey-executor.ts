@@ -39,6 +39,7 @@ import {
 import { prepaidDeduct } from './prepaid';
 import { normalizePhone } from './normalize-phone';
 import { getCompanyCosts } from '../config/defaults';
+import { sanitizeForSms } from './message-sanitizer';
 
 // ════════════════════════════════════════════════════════════════════
 // 타입
@@ -73,6 +74,7 @@ interface StepRow {
   delay_hours: number;
   channel: string | null;
   message_template: string | null;
+  subject: string | null;
   is_ad: boolean;
 }
 
@@ -169,7 +171,7 @@ async function processExecution(exec: ExecutionRow): Promise<StepOutcome> {
   // 1. 다음 step 조회 (현재 current_step_order + 1)
   const nextStepOrder = exec.current_step_order + 1;
   const stepRes = await query(
-    `SELECT id, journey_id, step_order, step_type, delay_hours, channel, message_template, is_ad
+    `SELECT id, journey_id, step_order, step_type, delay_hours, channel, message_template, subject, is_ad
      FROM journey_steps
      WHERE journey_id = $1::uuid AND step_order = $2`,
     [exec.journey_id, nextStepOrder]
@@ -248,12 +250,29 @@ async function processExecution(exec: ExecutionRow): Promise<StepOutcome> {
   // 광고 표기 — step.is_ad (DB default true) → buildAdMessage가 (광고)+080+KISA 제목 자동 합성
   const isAd = step.is_ad !== false;
 
+  // ★ D187-fix5: 발송 직전 최후 안전망 — sanitize 자동 적용 (이모지/비표준 특수문자 제거)
+  const sanTemplate = sanitizeForSms(step.message_template || '');
+  const sanSubject = sanitizeForSms(step.subject || '');
+  if (sanTemplate.hadChanges) {
+    console.log(`[JourneyExecutor] step ${step.step_order} 본문 sanitize:`, sanTemplate.warnings.join(' / '));
+  }
+  if (sanSubject.hadChanges) {
+    console.log(`[JourneyExecutor] step ${step.step_order} 제목 sanitize:`, sanSubject.warnings.join(' / '));
+  }
+
   const { message, subject } = prepareSendMessage(
-    step.message_template || '',
+    sanTemplate.sanitized,
     customer as Record<string, any>,
     fieldMappings,
-    { msgType, isAd, opt080Number, subject: '' }
+    { msgType, isAd, opt080Number, subject: sanSubject.sanitized }
   );
+
+  // LMS/MMS인데 subject 비어있으면 발송 차단 (통신사 정책 위반 차단)
+  if ((msgType === 'LMS' || msgType === 'MMS') && (!subject || subject.trim().length === 0)) {
+    await pauseJourney(exec.journey_id, `step ${step.step_order} 제목이 비어있어 LMS/MMS 발송 차단`);
+    await logFailedStep(exec.execution_id, step.id, 'subject_empty_for_lms_mms');
+    return 'failed';
+  }
 
   if (!message || message.trim().length < 2) {
     await logFailedStep(exec.execution_id, step.id, 'empty_message_after_prepare');

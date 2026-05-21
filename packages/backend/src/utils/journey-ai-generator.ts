@@ -17,6 +17,7 @@
 import { callAIWithFallback } from '../services/ai';
 import { buildMemoryPromptContext } from './company-memory';
 import { query } from '../config/database';
+import { sanitizeForSms } from './message-sanitizer';
 
 // ════════════════════════════════════════════════════════════════════
 // 타입
@@ -35,6 +36,7 @@ export interface GeneratedStep {
   delayHours: number;
   channel: 'sms' | 'lms' | 'mms';
   messageTemplate: string;
+  subject: string;
   isAd: boolean;
   stepIntent: string;
 }
@@ -186,7 +188,8 @@ ${memoryContext}
 3. delay_hours: 0(즉시) / 24(1일) / 72(3일) / 168(7일) / 336(14일) / 720(30일) 자연 단위
 4. channel: 'lms' default (광고 표기 + 무료거부 자동 합성 시 90바이트 SMS 한계 초과)
 5. isAd: 마케팅성은 true default (정보 안내성만 false)
-6. allow_reentry / reentry_cooldown_days: 시리즈에 맞춰 자동 결정
+6. subject (제목): LMS/MMS 채널 시 필수 — 한 줄 20자 안 / 본문 핵심 요약 / 호기심 유발 / 시즌감 (예: "%고객명%님, 곧 생일이에요" / "VIP만 받는 봄 안내"). SMS 채널은 빈 문자열 "" 박힙니다 (제목 없음).
+7. allow_reentry / reentry_cooldown_days: 시리즈에 맞춰 자동 결정
    - 가입 온보딩: false / null
    - 재구매: true / 0
    - 휴면: true / 90
@@ -198,12 +201,23 @@ ${memoryContext}
 [메시지 작성 원칙 — 매우 중요]
 ✓ 안내문 / 인사 / 감성 텍스트 / 시즌 단어 / 회사 톤 = 풍성하게 직접 작성 (마케팅 가치)
 ✗ 구체 혜택 (% / 원 / 무료 / 쿠폰 / 사은품 / 적립 / 할인 / 무료배송) = 절대 임의 작성 금지
-  대신 \`[혜택 안내 — 직접 수정해주세요]\` placeholder만 정확히 박힙니다
+  대신 \`[혜택 안내 — 직접 수정해주세요]\` placeholder만 정확히 사용
 ✗ URL = \`[URL 입력]\` placeholder
 ✗ (광고) 표기 직접 작성 X (시스템 자동 합성)
 ✗ 무료수신거부 080 직접 작성 X (시스템 자동 합성)
 ✓ %고객명% 변수 사용 권장
 ✓ LMS 250~500바이트 (광고 합성 후 320~570바이트)
+
+[★ 문자 사용 절대 룰 — 한국 통신사 SMS/LMS 표준]
+✗ 이모지 절대 사용 금지 — 🎂 🎉 💝 🌸 🎁 ✨ 💌 🌷 🍀 ❤ 등 모든 이모지 통신사 미지원 (발송 실패 / 깨짐 위험)
+✗ 비표준 특수문자 사용 금지:
+  - 대시: — – ‐ (대신 - 사용)
+  - 화살표: ▶ ▷ ➤ ➜ (대신 > 사용 or "자세히 →" 단어 형태)
+  - 표시: ★ ☆ ✓ ✗ ◆ ※ ‣ • (대신 * V X · 사용 or 단어로 풀어쓰기)
+  - 따옴표: " " ' ' 『 』 (대신 표준 " ' 사용)
+  - 전각 기호: ＆ ％ ＋ ？ ！ (대신 표준 & % + ? ! 사용)
+✓ 허용 단어: 한글 / 영문 / 숫자 / 표준 기호 ( . , ! ? : ; ( ) [ ] " ' + - * / = @ # $ % & | < > → ) / 줄바꿈
+✓ "→" 단어는 자세히 안내 화살표로 허용
 
 [좋은 메시지 예시 — 5월 생일 D-7 사전 안내]
 %고객명%님,
@@ -231,6 +245,7 @@ ${memoryContext}
       "stepType": "message",
       "delayHours": 0,
       "channel": "lms",
+      "subject": "한 줄 20자 안 제목 (LMS/MMS만)",
       "messageTemplate": "...풍성 본문... [혜택 안내 — 직접 수정해주세요] ... → [URL 입력]",
       "isAd": true,
       "stepIntent": "환영 인사 + 첫 구매 안내"
@@ -267,15 +282,30 @@ ${memoryContext}
   }
 
   const rawSteps: any[] = Array.isArray(parsed.steps) ? parsed.steps : [];
-  const steps: GeneratedStep[] = rawSteps.slice(0, 5).map((s: any, idx: number) => ({
-    stepOrder: Number(s.stepOrder) || idx + 1,
-    stepType: 'message' as const,
-    delayHours: Math.max(0, Math.min(720, Number(s.delayHours) || 0)),
-    channel: ['sms', 'lms', 'mms'].includes(s.channel) ? s.channel : 'lms',
-    messageTemplate: String(s.messageTemplate || '').slice(0, 2000),
-    isAd: s.isAd !== false,
-    stepIntent: String(s.stepIntent || '').slice(0, 100),
-  }));
+  const steps: GeneratedStep[] = rawSteps.slice(0, 5).map((s: any, idx: number) => {
+    const channel = ['sms', 'lms', 'mms'].includes(s.channel) ? s.channel : 'lms';
+    // ★ D187-fix5: AI 응답에 이모지/비표준 특수문자 포함 가능성 — sanitize 자동 적용
+    const rawMessage = String(s.messageTemplate || '').slice(0, 2000);
+    const rawSubject = channel === 'sms' ? '' : String(s.subject || '').slice(0, 50);
+    const messageSan = sanitizeForSms(rawMessage);
+    const subjectSan = sanitizeForSms(rawSubject);
+    if (messageSan.hadChanges) {
+      console.log(`[journey-ai-generator] step ${idx + 1} message sanitize:`, messageSan.warnings.join(' / '));
+    }
+    if (subjectSan.hadChanges) {
+      console.log(`[journey-ai-generator] step ${idx + 1} subject sanitize:`, subjectSan.warnings.join(' / '));
+    }
+    return {
+      stepOrder: Number(s.stepOrder) || idx + 1,
+      stepType: 'message' as const,
+      delayHours: Math.max(0, Math.min(720, Number(s.delayHours) || 0)),
+      channel,
+      messageTemplate: messageSan.sanitized,
+      subject: subjectSan.sanitized,
+      isAd: s.isAd !== false,
+      stepIntent: String(s.stepIntent || '').slice(0, 100),
+    };
+  });
 
   if (steps.length === 0) {
     throw new Error('AI가 유효한 step을 생성하지 못했습니다. 목표 문구를 더 명확히 작성해주세요.');
@@ -380,11 +410,13 @@ ${memoryContext}
   const raw: any[] = Array.isArray(parsed.candidates) ? parsed.candidates : [];
   const validTones: Array<'감성적' | '실용적' | '캐주얼'> = ['감성적', '실용적', '캐주얼'];
   const candidates: StepRefineCandidate[] = raw.slice(0, 3).map((c: any) => {
-    const msg = String(c.message || '').slice(0, maxBytes * 2);
+    const rawMsg = String(c.message || '').slice(0, maxBytes * 2);
+    // ★ D187-fix5: refine 응답도 sanitize 자동 적용
+    const san = sanitizeForSms(rawMsg);
     return {
-      message: msg,
+      message: san.sanitized,
       tone: validTones.includes(c.tone) ? c.tone : '감성적',
-      bytes: getBytes(msg),
+      bytes: getBytes(san.sanitized),
       reasoning: String(c.reasoning || '').slice(0, 200),
     };
   });

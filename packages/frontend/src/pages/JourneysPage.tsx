@@ -61,6 +61,7 @@ interface AIGeneratedStep {
   delayHours: number;
   channel: ChannelType;
   messageTemplate: string;
+  subject: string;
   isAd: boolean;
   stepIntent: string;
 }
@@ -121,6 +122,33 @@ function getByteLength(s: string): number {
 
 function hasPlaceholder(message: string): boolean {
   return /\[.*?\]/.test(message);
+}
+
+// D187-fix5: 이모지 + 비표준 특수문자 검출 (SMS/LMS 통신사 미지원 매트릭스)
+function isInRange(code: number, ranges: Array<[number, number]>): boolean {
+  for (const [s, e] of ranges) if (code >= s && code <= e) return true;
+  return false;
+}
+const EMOJI_RANGES_FE: Array<[number, number]> = [
+  [0x1F000, 0x1FFFF], [0x2600, 0x27BF], [0x2300, 0x23FF], [0x2B00, 0x2BFF], [0xFE00, 0xFE0F],
+];
+const UNSAFE_SPECIAL_FE = new Set<string>([
+  '—', '–', '‐', '−',
+  '・', '•', '⦁', '‣', '◦', '▪', '▫',
+  '▶', '▷', '◀', '◁', '►', '◄', '➤', '➔', '➜', '➡',
+  '※', '★', '☆', '✓', '✔', '✗', '✘', '◆', '◇', '■', '□', '●', '○',
+  '«', '»', '〈', '〉', '《', '》', '「', '」', '『', '』', '“', '”', '‘', '’',
+  '＆', '％', '＋', '＝', '？', '！', '：', '；', '，', '．', '＠', '＃', '＊',
+]);
+function detectUnsafe(text: string): { emoji: string[]; special: string[] } {
+  const emoji: string[] = [];
+  const special: string[] = [];
+  for (const c of Array.from(text || '')) {
+    const code = c.codePointAt(0) || 0;
+    if (isInRange(code, EMOJI_RANGES_FE)) emoji.push(c);
+    else if (UNSAFE_SPECIAL_FE.has(c)) special.push(c);
+  }
+  return { emoji: Array.from(new Set(emoji)), special: Array.from(new Set(special)) };
 }
 
 export default function JourneysPage() {
@@ -263,6 +291,7 @@ export default function JourneysPage() {
       delayHours: lastDelay + 24,
       channel: 'lms',
       messageTemplate: '%고객명%님,\n\n[안내 본문을 직접 작성해주세요]\n\n자세히 → [URL 입력]',
+      subject: '[제목을 입력해주세요]',
       isAd: true,
       stepIntent: '추가 step',
     };
@@ -313,6 +342,8 @@ export default function JourneysPage() {
     if (!reviewCallback) { alert('회신번호를 선택해주세요.'); return; }
     const invalid = aiPkg.steps.find((s) => !s.messageTemplate.trim() || s.messageTemplate.trim().length < 10);
     if (invalid) { alert(`step ${invalid.stepOrder} 본문이 비어있거나 너무 짧습니다.`); return; }
+    const subjectMissing = aiPkg.steps.find((s) => (s.channel === 'lms' || s.channel === 'mms') && (!s.subject || !s.subject.trim()));
+    if (subjectMissing) { alert(`step ${subjectMissing.stepOrder} LMS/MMS 제목이 비어있습니다.`); return; }
     setSaving(true);
     try {
       const body: any = {
@@ -640,6 +671,20 @@ export default function JourneysPage() {
                       </button>
                     </div>
 
+                    {(s.channel === 'lms' || s.channel === 'mms') && (
+                      <div>
+                        <label className="block text-[11px] text-white/50 mb-1">제목 <span className="text-rose-400">*</span> <span className="text-white/30">(LMS/MMS 필수, 최대 40자)</span></label>
+                        <input
+                          value={s.subject}
+                          onChange={(e) => updateStep(idx, { subject: e.target.value })}
+                          placeholder="한 줄 제목 (호기심 유발 / 본문 핵심 요약)"
+                          maxLength={40}
+                          className={`w-full px-3 py-2 bg-slate-900 border rounded text-sm focus:outline-none focus:border-fuchsia-400 ${(!s.subject || !s.subject.trim()) ? 'border-rose-500/50' : 'border-white/10'}`}
+                        />
+                        <div className="text-[10px] text-white/40 mt-0.5">{getByteLength(s.subject)} bytes · 통신사 권장 ~ 40바이트 안</div>
+                      </div>
+                    )}
+
                     {isEditing ? (
                       <textarea value={s.messageTemplate} onChange={(e) => updateStep(idx, { messageTemplate: e.target.value })} rows={6} className="w-full px-3 py-2 bg-slate-900 border border-fuchsia-400/50 rounded text-sm font-mono focus:outline-none resize-y" />
                     ) : (
@@ -650,7 +695,20 @@ export default function JourneysPage() {
 
                     <div className="flex flex-wrap items-center gap-x-3 text-[11px] text-white/40">
                       <span className={bytes > maxBytes ? 'text-rose-400' : ''}>본문: {bytes} / {maxBytes} bytes</span>
-                      {placeholderWarn && <span className="text-amber-300">⚠ [...] 영역 — 직접 수정 필요</span>}
+                      {placeholderWarn && <span className="text-amber-300">[...] 영역 - 직접 수정 필요</span>}
+                      {(() => {
+                        const unsafe = detectUnsafe(s.messageTemplate + ' ' + s.subject);
+                        if (unsafe.emoji.length === 0 && unsafe.special.length === 0) return null;
+                        return (
+                          <span className="text-rose-400">
+                            통신사 미지원 단어 - 저장 시 자동 정규화 (
+                            {unsafe.emoji.length > 0 && `이모지: ${unsafe.emoji.slice(0, 5).join(' ')}`}
+                            {unsafe.emoji.length > 0 && unsafe.special.length > 0 && ' / '}
+                            {unsafe.special.length > 0 && `특수문자: ${unsafe.special.slice(0, 5).join(' ')}`}
+                            )
+                          </span>
+                        );
+                      })()}
                     </div>
 
                     {s.isAd && s.messageTemplate.trim().length >= 10 && (
