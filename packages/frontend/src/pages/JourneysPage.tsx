@@ -3,36 +3,17 @@ import { useNavigate } from 'react-router-dom';
 import {
   ArrowLeft, ChevronDown, ChevronUp, Loader2, Pause, Play, Plus, Power, RefreshCw, Sparkles,
   ShoppingCart, Cake, Calendar as CalendarIcon, UserPlus, Repeat, Moon, MessageSquare,
-  Clock, DollarSign, Users, Phone, Wand2, X, AlertCircle,
+  Clock, DollarSign, Users, Phone, Wand2, X, AlertCircle, Send, Trash2, Edit2, Save,
 } from 'lucide-react';
 
-// D187 (2026-05-20): Journey Builder Lite — 7 표준 여정 + Custom 자연어
-// D187-fix2: 회사 admin이 step 메시지 + 회신번호 직접 입력 + AI 다듬기
-//   영구 룰: AI는 임의 혜택(%/원/무료/쿠폰) 절대 만들지 않음. 회사 admin이 직접 작성.
+// D187-fix3 (2026-05-21): One-shot AI Operator — 자연어 한 줄 → AI가 완전 패키지 자동 생성 → 1 페이지 검토 → 활성화
+//   영구 룰: AI는 흐름/안내문/감성 텍스트만 풍성하게 / 구체 혜택(% / 원 / 무료 / 쿠폰)은 회사 admin 직접 작성
+//   기존 wizard 5단계 폐기 → One-shot 흐름 정합
 
 type TemplateCode = 'onboarding' | 'repeat' | 'dormant' | 'cart' | 'birthday' | 'reservation' | 'custom';
 type JourneyStatus = 'draft' | 'active' | 'paused' | 'ended';
-type ChannelType = 'sms' | 'lms' | 'mms' | 'kakao' | 'email';
-
-interface TemplateStep {
-  stepOrder: number;
-  stepType: string;
-  delayHours: number;
-  channel?: ChannelType;
-  messageTemplate?: string;
-  isAd?: boolean;
-}
-
-interface JourneyTemplate {
-  templateCode: TemplateCode;
-  name: string;
-  description: string;
-  triggerEvent: string;
-  allowReentry: boolean;
-  reentryCooldownDays: number | null;
-  stepCount: number;
-  steps: TemplateStep[];
-}
+type ChannelType = 'sms' | 'lms' | 'mms';
+type RefineTone = '감성적' | '실용적' | '캐주얼';
 
 interface JourneyRow {
   id: string;
@@ -74,41 +55,45 @@ interface CallbackOption {
   is_default: boolean;
 }
 
-interface RefineCandidate {
-  message: string;
-  bytes?: number;
-  reason?: string;
-}
-
-interface StepInput {
+interface AIGeneratedStep {
   stepOrder: number;
-  stepType: string;
+  stepType: 'message';
   delayHours: number;
   channel: ChannelType;
   messageTemplate: string;
   isAd: boolean;
+  stepIntent: string;
 }
 
-interface CreateForm {
-  templateCode: TemplateCode;
+interface AIJourneyPackage {
   name: string;
-  customObjective: string;
-  callbackNumber: string;
-  steps: StepInput[];
-  budgetMonthly: string;
-  thresholdCost: string;
-  allowReentry: boolean | null;
-  reentryCooldownDays: string;
+  templateCode: TemplateCode;
+  triggerEvent: string;
+  triggerFilters: Record<string, any>;
+  steps: AIGeneratedStep[];
+  allowReentry: boolean;
+  reentryCooldownDays: number | null;
+  callbackNumberHint: string | null;
+  budgetMonthlyHint: number | null;
+  thresholdCostHint: number | null;
+  reasoning: string;
 }
 
-const TEMPLATE_VISUAL: Record<TemplateCode, { icon: typeof UserPlus; gradient: string }> = {
-  onboarding:  { icon: UserPlus,     gradient: 'from-emerald-400 to-teal-500' },
-  repeat:      { icon: Repeat,       gradient: 'from-cyan-400 to-blue-500' },
-  dormant:     { icon: Moon,         gradient: 'from-violet-400 to-indigo-500' },
-  cart:        { icon: ShoppingCart, gradient: 'from-amber-400 to-orange-500' },
-  birthday:    { icon: Cake,         gradient: 'from-pink-400 to-rose-500' },
-  reservation: { icon: CalendarIcon, gradient: 'from-blue-400 to-indigo-500' },
-  custom:      { icon: Sparkles,     gradient: 'from-fuchsia-400 to-purple-500' },
+interface RefineCandidate {
+  message: string;
+  tone: RefineTone;
+  bytes: number;
+  reasoning: string;
+}
+
+const TEMPLATE_VISUAL: Record<TemplateCode, { icon: typeof UserPlus; gradient: string; label: string; hint: string }> = {
+  onboarding:  { icon: UserPlus,     gradient: 'from-emerald-400 to-teal-500',   label: '신규 가입 환영',  hint: '24시간 안 가입자' },
+  repeat:      { icon: Repeat,       gradient: 'from-cyan-400 to-blue-500',      label: '재구매 유도',     hint: '구매 직후 follow-up' },
+  dormant:     { icon: Moon,         gradient: 'from-violet-400 to-indigo-500',  label: '휴면 회수',       hint: '30일+ 휴면 고객' },
+  cart:        { icon: ShoppingCart, gradient: 'from-amber-400 to-orange-500',   label: '장바구니 회복',   hint: '24시간 결제 X' },
+  birthday:    { icon: Cake,         gradient: 'from-pink-400 to-rose-500',      label: '생일 축하',       hint: 'D-7 사전 + D-Day' },
+  reservation: { icon: CalendarIcon, gradient: 'from-blue-400 to-indigo-500',    label: '예약 알림',       hint: 'D-3 + D-Day + D+1' },
+  custom:      { icon: Sparkles,     gradient: 'from-fuchsia-400 to-purple-500', label: '자유 여정',       hint: 'AI가 자동 설계' },
 };
 
 const STATUS_BADGE: Record<JourneyStatus, { label: string; cls: string }> = {
@@ -129,33 +114,40 @@ function buildPreview(message: string, isAd: boolean, channel: ChannelType, opt0
 }
 
 function getByteLength(s: string): number {
-  // 한글 2바이트 + ASCII 1바이트 근사
   let bytes = 0;
-  for (let i = 0; i < s.length; i++) {
-    bytes += s.charCodeAt(i) > 127 ? 2 : 1;
-  }
+  for (let i = 0; i < s.length; i++) bytes += s.charCodeAt(i) > 127 ? 2 : 1;
   return bytes;
 }
 
 function hasPlaceholder(message: string): boolean {
-  return message.includes('[') && message.includes(']');
+  return /\[.*?\]/.test(message);
 }
 
 export default function JourneysPage() {
   const navigate = useNavigate();
-  const [tab, setTab] = useState<'list' | 'create'>('list');
+  const [view, setView] = useState<'main' | 'review'>('main');
   const [journeys, setJourneys] = useState<JourneyRow[]>([]);
-  const [templates, setTemplates] = useState<JourneyTemplate[]>([]);
   const [callbackOptions, setCallbackOptions] = useState<CallbackOption[]>([]);
   const [opt080Number, setOpt080Number] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [detailsMap, setDetailsMap] = useState<Record<string, JourneyDetail>>({});
-  const [creating, setCreating] = useState<CreateForm | null>(null);
-  const [saving, setSaving] = useState(false);
+
+  // One-shot AI 생성 흐름
+  const [objective, setObjective] = useState('');
+  const [generating, setGenerating] = useState(false);
+  const [aiPkg, setAiPkg] = useState<AIJourneyPackage | null>(null);
+  const [reviewName, setReviewName] = useState('');
+  const [reviewCallback, setReviewCallback] = useState('');
+  const [reviewBudget, setReviewBudget] = useState('');
+  const [reviewThreshold, setReviewThreshold] = useState('');
+
+  // step 수정
+  const [editingStepIdx, setEditingStepIdx] = useState<number | null>(null);
   const [refining, setRefining] = useState<{ stepIdx: number; candidates: RefineCandidate[] } | null>(null);
   const [refineLoading, setRefineLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
 
   const token = () => localStorage.getItem('token');
 
@@ -169,14 +161,9 @@ export default function JourneysPage() {
       ]);
       const jd = await jr.json();
       const cd = await cr.json();
-      if (jd.success) {
-        setJourneys(jd.journeys || []);
-        setTemplates(jd.templates || []);
-      } else if (jd.code === 'AI_OPERATOR_GATED') {
-        setError('AI Operator 진입 권한이 없습니다. 관리자에게 문의해주세요.');
-      } else {
-        setError(jd.error || '여정 조회 실패');
-      }
+      if (jd.success) setJourneys(jd.journeys || []);
+      else if (jd.code === 'AI_OPERATOR_GATED') setError('AI Operator 진입 권한이 없습니다. 관리자에게 문의해주세요.');
+      else setError(jd.error || '여정 조회 실패');
       if (cd.success) {
         setCallbackOptions(cd.numbers || []);
         setOpt080Number(cd.opt080Number || '');
@@ -208,46 +195,85 @@ export default function JourneysPage() {
     else { setExpandedId(journeyId); loadDetail(journeyId); }
   };
 
-  const handleStartCreate = (templateCode: TemplateCode) => {
-    const tmpl = templates.find((t) => t.templateCode === templateCode);
-    const defaultCallback = callbackOptions.find((c) => c.is_default)?.phone || (callbackOptions[0]?.phone || '');
-    const initialSteps: StepInput[] = (tmpl?.steps || []).map((s, idx) => ({
-      stepOrder: s.stepOrder || idx + 1,
-      stepType: s.stepType || 'message',
-      delayHours: s.delayHours || 0,
-      channel: (s.channel || 'lms') as ChannelType,
-      messageTemplate: s.messageTemplate || '',
-      isAd: s.isAd !== false,
-    }));
-    setCreating({
-      templateCode,
-      name: '',
-      customObjective: '',
-      callbackNumber: defaultCallback,
-      steps: initialSteps,
-      budgetMonthly: '',
-      thresholdCost: '',
-      allowReentry: null,
-      reentryCooldownDays: '',
-    });
+  // ════════ One-shot AI 생성 ════════
+  const handleAIGenerate = async (templateHint?: TemplateCode) => {
+    if (!templateHint && objective.trim().length < 3) {
+      alert('여정 목표를 자연어로 입력하거나 빠른 시작 카드를 선택해주세요.');
+      return;
+    }
+    setGenerating(true);
+    setError(null);
+    try {
+      const res = await fetch('/api/ai/operator/journeys-ai-generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token()}` },
+        body: JSON.stringify({
+          objective: templateHint ? undefined : objective.trim(),
+          templateHint,
+        }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        const pkg: AIJourneyPackage = data.package;
+        setAiPkg(pkg);
+        setReviewName(pkg.name);
+        setReviewCallback(pkg.callbackNumberHint || callbackOptions.find((c) => c.is_default)?.phone || (callbackOptions[0]?.phone || ''));
+        setReviewBudget(pkg.budgetMonthlyHint != null ? String(pkg.budgetMonthlyHint) : '');
+        setReviewThreshold(pkg.thresholdCostHint != null ? String(pkg.thresholdCostHint) : '');
+        setView('review');
+      } else {
+        alert(data.error || 'AI 생성 실패. 다시 시도해주세요.');
+      }
+    } catch (e: any) {
+      alert(e?.message || '생성 중 오류');
+    } finally {
+      setGenerating(false);
+    }
   };
 
-  const updateStep = (idx: number, patch: Partial<StepInput>) => {
-    if (!creating) return;
-    const newSteps = [...creating.steps];
+  const handleRegenerate = async () => {
+    if (!aiPkg) return;
+    if (!confirm('현재 생성된 여정을 폐기하고 다시 생성하시겠습니까? 수정한 내용은 사라집니다.')) return;
+    await handleAIGenerate(aiPkg.templateCode === 'custom' && objective ? undefined : aiPkg.templateCode);
+  };
+
+  // ════════ step 수정 ════════
+  const updateStep = (idx: number, patch: Partial<AIGeneratedStep>) => {
+    if (!aiPkg) return;
+    const newSteps = [...aiPkg.steps];
     newSteps[idx] = { ...newSteps[idx], ...patch };
-    setCreating({ ...creating, steps: newSteps });
+    setAiPkg({ ...aiPkg, steps: newSteps });
+  };
+
+  const deleteStep = (idx: number) => {
+    if (!aiPkg) return;
+    if (aiPkg.steps.length <= 1) { alert('최소 1개 step은 필요합니다.'); return; }
+    if (!confirm(`step ${idx + 1}을(를) 삭제하시겠습니까?`)) return;
+    const newSteps = aiPkg.steps.filter((_, i) => i !== idx).map((s, i) => ({ ...s, stepOrder: i + 1 }));
+    setAiPkg({ ...aiPkg, steps: newSteps });
+  };
+
+  const addStep = () => {
+    if (!aiPkg) return;
+    if (aiPkg.steps.length >= 5) { alert('최대 5개 step까지 가능합니다.'); return; }
+    const lastDelay = aiPkg.steps[aiPkg.steps.length - 1]?.delayHours || 0;
+    const newStep: AIGeneratedStep = {
+      stepOrder: aiPkg.steps.length + 1,
+      stepType: 'message',
+      delayHours: lastDelay + 24,
+      channel: 'lms',
+      messageTemplate: '%고객명%님,\n\n[안내 본문을 직접 작성해주세요]\n\n자세히 → [URL 입력]',
+      isAd: true,
+      stepIntent: '추가 step',
+    };
+    setAiPkg({ ...aiPkg, steps: [...aiPkg.steps, newStep] });
   };
 
   const handleRefineOpen = async (idx: number) => {
-    if (!creating) return;
-    const msg = creating.steps[idx].messageTemplate.trim();
-    if (msg.length < 10) {
+    if (!aiPkg) return;
+    const step = aiPkg.steps[idx];
+    if (step.messageTemplate.trim().length < 10) {
       alert('메시지를 10자 이상 작성한 후 다듬기를 사용해주세요.');
-      return;
-    }
-    if (hasPlaceholder(msg)) {
-      alert('미편집 [...] 영역이 남아있습니다. 회사 admin이 직접 작성한 본문에만 다듬기를 적용하세요.');
       return;
     }
     setRefineLoading(true);
@@ -256,9 +282,10 @@ export default function JourneysPage() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token()}` },
         body: JSON.stringify({
-          message: msg,
-          channel: creating.steps[idx].channel,
-          tone: 'seasonal',
+          message: step.messageTemplate,
+          channel: step.channel,
+          isAd: step.isAd,
+          stepIntent: step.stepIntent,
         }),
       });
       const data = await res.json();
@@ -275,46 +302,30 @@ export default function JourneysPage() {
   };
 
   const handleAcceptRefine = (candidate: RefineCandidate) => {
-    if (!creating || !refining) return;
+    if (!aiPkg || !refining) return;
     updateStep(refining.stepIdx, { messageTemplate: candidate.message });
     setRefining(null);
   };
 
-  const handleCreate = async () => {
-    if (!creating) return;
-    if (!creating.callbackNumber) {
-      alert('회신번호를 선택해주세요.');
-      return;
-    }
-    if (creating.templateCode === 'custom' && !creating.customObjective.trim() && creating.steps.length === 0) {
-      alert('Custom 여정은 목표(자연어) 또는 step 목록이 필요합니다.');
-      return;
-    }
-    const invalid = creating.steps.find((s) => !s.messageTemplate.trim() || s.messageTemplate.trim().length < 10);
-    if (invalid) {
-      alert(`step ${invalid.stepOrder} 본문이 비어있거나 너무 짧습니다 (최소 10자).`);
-      return;
-    }
-    const stillPlaceholder = creating.steps.find((s) => hasPlaceholder(s.messageTemplate));
-    if (stillPlaceholder) {
-      const ok = confirm(`step ${stillPlaceholder.stepOrder} 본문에 미편집 [...] 영역이 있습니다.\n초안으로 저장은 가능하지만 활성화 시 차단됩니다.\n계속 저장하시겠습니까?`);
-      if (!ok) return;
-    }
+  // ════════ 저장 + 활성화 ════════
+  const handleSaveDraft = async () => {
+    if (!aiPkg) return;
+    if (!reviewCallback) { alert('회신번호를 선택해주세요.'); return; }
+    const invalid = aiPkg.steps.find((s) => !s.messageTemplate.trim() || s.messageTemplate.trim().length < 10);
+    if (invalid) { alert(`step ${invalid.stepOrder} 본문이 비어있거나 너무 짧습니다.`); return; }
     setSaving(true);
     try {
       const body: any = {
-        templateCode: creating.templateCode,
-        name: creating.name.trim() || undefined,
-        customObjective: creating.customObjective.trim() || undefined,
-        callbackNumber: creating.callbackNumber,
-        steps: creating.steps,
-        budgetMonthly: creating.budgetMonthly ? Number(creating.budgetMonthly) : null,
-        thresholdCost: creating.thresholdCost ? Number(creating.thresholdCost) : null,
+        templateCode: aiPkg.templateCode,
+        name: reviewName.trim() || undefined,
+        customObjective: aiPkg.templateCode === 'custom' ? objective.trim() || undefined : undefined,
+        callbackNumber: reviewCallback,
+        steps: aiPkg.steps,
+        budgetMonthly: reviewBudget ? Number(reviewBudget) : null,
+        thresholdCost: reviewThreshold ? Number(reviewThreshold) : null,
+        allowReentry: aiPkg.allowReentry,
+        reentryCooldownDays: aiPkg.reentryCooldownDays,
       };
-      if (creating.allowReentry !== null) {
-        body.allowReentry = creating.allowReentry;
-        body.reentryCooldownDays = creating.reentryCooldownDays ? Number(creating.reentryCooldownDays) : 0;
-      }
       const res = await fetch('/api/ai/operator/journeys', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token()}` },
@@ -322,14 +333,16 @@ export default function JourneysPage() {
       });
       const data = await res.json();
       if (data.success) {
-        setCreating(null);
-        setTab('list');
+        setAiPkg(null);
+        setObjective('');
+        setView('main');
         await loadAll();
+        alert('초안 여정이 저장되었습니다. 활성 여정 목록에서 활성화 가능합니다.');
       } else {
-        alert(data.error || '여정 생성 실패');
+        alert(data.error || '저장 실패');
       }
     } catch (e: any) {
-      alert(e?.message || '생성 중 오류');
+      alert(e?.message || '저장 중 오류');
     } finally {
       setSaving(false);
     }
@@ -337,8 +350,8 @@ export default function JourneysPage() {
 
   const handleAction = async (journeyId: string, action: 'activate' | 'pause' | 'end') => {
     const confirmMsg =
-      action === 'activate' ? '여정을 활성화하시겠습니까? 트리거 조건에 맞는 고객이 진입하고 step별 메시지가 자동 발송됩니다.\n\n광고 자동 검증 4건이 모두 자동 부착됩니다 ((광고)+무료거부 080+발송시간 08~21시+KISA 제목).' :
-      action === 'pause' ? '여정을 일시정지하시겠습니까? 진행 중인 고객의 다음 step 발송이 멈춥니다.' :
+      action === 'activate' ? '여정을 활성화하시겠습니까? 트리거 조건에 맞는 고객이 진입하고 step별 메시지가 자동 발송됩니다.\n\n광고 자동 검증 4건이 모두 자동 부착됩니다.' :
+      action === 'pause' ? '여정을 일시정지하시겠습니까?' :
       '여정을 종료하시겠습니까? 종료 후 재시작 불가합니다.';
     if (!confirm(confirmMsg)) return;
     try {
@@ -359,301 +372,324 @@ export default function JourneysPage() {
       {/* 헤더 */}
       <div className="border-b border-white/10 bg-slate-950/80 backdrop-blur-sm sticky top-0 z-30">
         <div className="max-w-7xl mx-auto px-3 md:px-6 py-3 md:py-4 flex items-center gap-2 md:gap-4">
-          <button onClick={() => navigate('/ai-operator')} className="p-2 rounded-lg hover:bg-white/10 transition-colors" aria-label="AI Operator로 돌아가기">
+          <button
+            onClick={() => view === 'review' ? (confirm('생성한 여정이 사라집니다. 메인으로 돌아가시겠습니까?') && (setView('main'), setAiPkg(null))) : navigate('/ai-operator')}
+            className="p-2 rounded-lg hover:bg-white/10 transition-colors"
+          >
             <ArrowLeft className="w-5 h-5" />
           </button>
           <div className="flex-1 min-w-0">
-            <h1 className="text-lg md:text-2xl font-bold truncate">여정 자동화 (Journey Builder Lite)</h1>
-            <p className="text-xs md:text-sm text-white/50 mt-0.5">7 표준 여정 + 자연어 진입 — 회사 admin이 메시지/회신번호 직접 설정</p>
+            <h1 className="text-lg md:text-2xl font-bold truncate">
+              {view === 'review' ? 'AI 생성 여정 검토' : '여정 자동화 — AI Operator'}
+            </h1>
+            <p className="text-xs md:text-sm text-white/50 mt-0.5">
+              {view === 'review' ? 'AI가 설계한 흐름을 검토 + 혜택 부분 수정 후 활성화' : '자연어 한 줄 또는 빠른 시작 — AI가 시즌·회사 톤 반영해 완전 자동 생성'}
+            </p>
           </div>
-          <button onClick={loadAll} disabled={loading} className="p-2 rounded-lg hover:bg-white/10 transition-colors disabled:opacity-50" aria-label="새로고침">
-            <RefreshCw className={`w-5 h-5 ${loading ? 'animate-spin' : ''}`} />
-          </button>
-        </div>
-
-        <div className="max-w-7xl mx-auto px-3 md:px-6 flex gap-1">
-          <button onClick={() => setTab('list')} className={`px-4 py-2.5 text-sm font-medium border-b-2 transition-colors ${tab === 'list' ? 'border-fuchsia-400 text-white' : 'border-transparent text-white/50 hover:text-white/80'}`}>
-            활성 여정 ({journeys.length})
-          </button>
-          <button onClick={() => setTab('create')} className={`px-4 py-2.5 text-sm font-medium border-b-2 transition-colors flex items-center gap-1.5 ${tab === 'create' ? 'border-fuchsia-400 text-white' : 'border-transparent text-white/50 hover:text-white/80'}`}>
-            <Plus className="w-4 h-4" /> 신규 여정 생성
-          </button>
+          {view === 'main' && (
+            <button onClick={loadAll} disabled={loading} className="p-2 rounded-lg hover:bg-white/10 transition-colors disabled:opacity-50">
+              <RefreshCw className={`w-5 h-5 ${loading ? 'animate-spin' : ''}`} />
+            </button>
+          )}
         </div>
       </div>
 
-      <div className="max-w-7xl mx-auto px-3 md:px-6 py-4 md:py-8">
+      <div className="max-w-5xl mx-auto px-3 md:px-6 py-4 md:py-8">
         {error && (
           <div className="mb-4 p-3 bg-red-500/10 border border-red-500/30 rounded-lg text-red-200 text-sm">{error}</div>
         )}
 
-        {callbackOptions.length === 0 && !loading && (
+        {callbackOptions.length === 0 && !loading && view === 'main' && (
           <div className="mb-4 p-3 bg-amber-500/10 border border-amber-500/30 rounded-lg text-amber-200 text-sm flex items-start gap-2">
             <AlertCircle className="w-4 h-4 mt-0.5 shrink-0" />
-            <div>회사에 등록된 발신번호가 없습니다. 여정 발송 전 발신번호를 먼저 등록해주세요.</div>
+            <div>회사에 등록된 발신번호가 없습니다. 여정 활성화 전 발신번호를 먼저 등록해주세요.</div>
           </div>
         )}
 
-        {loading && (
-          <div className="flex items-center justify-center py-12">
-            <Loader2 className="w-6 h-6 animate-spin text-white/40" />
-          </div>
-        )}
-
-        {/* 활성 여정 탭 */}
-        {!loading && tab === 'list' && (
-          <div className="space-y-3">
-            {journeys.length === 0 && (
-              <div className="p-8 md:p-12 text-center bg-white/5 border border-white/10 rounded-xl">
-                <Sparkles className="w-10 h-10 mx-auto text-white/30 mb-3" />
-                <p className="text-white/60 text-sm">아직 생성한 여정이 없습니다.</p>
-                <button onClick={() => setTab('create')} className="mt-4 px-4 py-2 bg-gradient-to-r from-fuchsia-500 to-purple-500 rounded-lg text-sm font-medium hover:opacity-90">
-                  첫 여정 만들기
+        {/* ════════════════════════════════════════
+            MAIN VIEW — 자연어 입력 + 빠른 시작 + 활성 목록
+            ════════════════════════════════════════ */}
+        {view === 'main' && (
+          <>
+            {/* 자연어 입력 */}
+            <div className="bg-gradient-to-br from-fuchsia-500/10 via-purple-500/10 to-indigo-500/10 border border-fuchsia-500/30 rounded-xl p-4 md:p-6 mb-4 md:mb-6">
+              <div className="flex items-center gap-2 mb-3">
+                <Sparkles className="w-5 h-5 text-fuchsia-300" />
+                <h2 className="text-base md:text-lg font-semibold">자연어 한 줄로 여정 만들기</h2>
+              </div>
+              <p className="text-xs md:text-sm text-white/60 mb-3">
+                AI가 시즌 + 회사 톤 + 학습 메모리를 종합해 완전한 여정을 자동 설계합니다. 검토 후 혜택 부분만 수정하시면 됩니다.
+              </p>
+              <div className="flex flex-col md:flex-row gap-2">
+                <input
+                  value={objective}
+                  onChange={(e) => setObjective(e.target.value)}
+                  placeholder="예: 신규 가입자 환영 7일 시리즈 / VIP 고객 분기 감사 / 휴면 30일 회수 / 신상품 출시 3단계 안내"
+                  className="flex-1 px-4 py-3 bg-slate-900 border border-white/10 rounded-lg text-sm focus:outline-none focus:border-fuchsia-400"
+                  onKeyDown={(e) => { if (e.key === 'Enter' && !generating) handleAIGenerate(); }}
+                  disabled={generating}
+                />
+                <button
+                  onClick={() => handleAIGenerate()}
+                  disabled={generating || objective.trim().length < 3}
+                  className="px-5 py-3 bg-gradient-to-r from-fuchsia-500 to-purple-500 rounded-lg text-sm font-medium hover:opacity-90 disabled:opacity-50 flex items-center justify-center gap-2"
+                >
+                  {generating ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+                  AI 생성
                 </button>
               </div>
-            )}
+            </div>
 
-            {journeys.map((j) => {
-              const visual = TEMPLATE_VISUAL[j.template_code] || TEMPLATE_VISUAL.custom;
-              const Icon = visual.icon;
-              const badge = STATUS_BADGE[j.status];
-              const isExpanded = expandedId === j.id;
-              const detail = detailsMap[j.id];
+            {/* 빠른 시작 카드 */}
+            <div className="mb-4 md:mb-6">
+              <h3 className="text-sm font-semibold text-white/80 mb-2">또는 빠른 시작</h3>
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-7 gap-2">
+                {(Object.keys(TEMPLATE_VISUAL) as TemplateCode[]).map((code) => {
+                  const v = TEMPLATE_VISUAL[code];
+                  const Icon = v.icon;
+                  return (
+                    <button
+                      key={code}
+                      onClick={() => handleAIGenerate(code)}
+                      disabled={generating}
+                      className="p-3 bg-white/5 border border-white/10 rounded-lg hover:bg-white/10 hover:border-white/20 transition-colors disabled:opacity-50 text-left"
+                    >
+                      <div className={`w-7 h-7 rounded-md bg-gradient-to-br ${v.gradient} flex items-center justify-center mb-2`}>
+                        <Icon className="w-4 h-4 text-white" />
+                      </div>
+                      <div className="text-xs font-medium">{v.label}</div>
+                      <div className="text-[10px] text-white/40 mt-0.5">{v.hint}</div>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
 
-              return (
-                <div key={j.id} className="bg-white/5 border border-white/10 rounded-xl overflow-hidden">
-                  <div className="p-3 md:p-4 cursor-pointer hover:bg-white/[0.07] transition-colors" onClick={() => toggleExpand(j.id)}>
-                    <div className="flex items-start gap-3 md:gap-4">
-                      <div className={`shrink-0 w-10 h-10 md:w-12 md:h-12 rounded-lg bg-gradient-to-br ${visual.gradient} flex items-center justify-center`}>
-                        <Icon className="w-5 h-5 md:w-6 md:h-6 text-white" />
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <div className="flex flex-wrap items-center gap-2 mb-1">
-                          <h3 className="text-sm md:text-base font-semibold truncate">{j.name}</h3>
-                          <span className={`px-2 py-0.5 rounded text-[11px] font-medium ${badge.cls}`}>{badge.label}</span>
-                        </div>
-                        <div className="text-xs text-white/50 flex flex-wrap gap-x-3 gap-y-0.5">
-                          <span className="flex items-center gap-1"><Users className="w-3 h-3" /> 진입 {j.stats_total_entered}건</span>
-                          <span className="flex items-center gap-1"><Sparkles className="w-3 h-3" /> 완료 {j.stats_total_completed}건</span>
-                          <span className="flex items-center gap-1"><DollarSign className="w-3 h-3" /> {Number(j.stats_total_cost).toLocaleString()}원</span>
-                          {j.callback_number && <span className="flex items-center gap-1 text-cyan-300/80"><Phone className="w-3 h-3" /> {j.callback_number}</span>}
-                        </div>
-                        {j.pause_reason && j.status === 'paused' && (
-                          <div className="mt-1.5 text-xs text-amber-200/90 bg-amber-500/10 px-2 py-1 rounded">일시정지 사유: {j.pause_reason}</div>
-                        )}
-                      </div>
-                      <div className="shrink-0 flex items-center gap-1">
-                        {(j.status === 'draft' || j.status === 'paused') && (
-                          <button onClick={(e) => { e.stopPropagation(); handleAction(j.id, 'activate'); }} className="p-2 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300" title="활성화">
-                            <Play className="w-4 h-4" />
-                          </button>
-                        )}
-                        {j.status === 'active' && (
-                          <button onClick={(e) => { e.stopPropagation(); handleAction(j.id, 'pause'); }} className="p-2 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-amber-300" title="일시정지">
-                            <Pause className="w-4 h-4" />
-                          </button>
-                        )}
-                        {j.status !== 'ended' && (
-                          <button onClick={(e) => { e.stopPropagation(); handleAction(j.id, 'end'); }} className="p-2 rounded-lg bg-slate-700 hover:bg-slate-600 text-slate-300" title="종료">
-                            <Power className="w-4 h-4" />
-                          </button>
-                        )}
-                        {isExpanded ? <ChevronUp className="w-4 h-4 text-white/40" /> : <ChevronDown className="w-4 h-4 text-white/40" />}
-                      </div>
-                    </div>
-                  </div>
-
-                  {isExpanded && detail && (
-                    <div className="border-t border-white/10 p-3 md:p-4 bg-slate-950/40">
-                      <div className="text-xs text-white/60 mb-3">
-                        <span>트리거: <span className="text-white/80">{detail.journey.trigger_event}</span></span>
-                        {detail.journey.callback_number && <span className="ml-4">회신번호: <span className="text-white/80">{detail.journey.callback_number}</span></span>}
-                      </div>
-                      <div className="space-y-2">
-                        {detail.steps.map((s) => (
-                          <div key={s.id} className="flex items-start gap-3 p-2.5 bg-white/5 rounded-lg">
-                            <div className="shrink-0 w-8 h-8 rounded-full bg-fuchsia-500/20 text-fuchsia-300 flex items-center justify-center text-sm font-semibold">{s.step_order}</div>
-                            <div className="flex-1 min-w-0">
-                              <div className="text-xs text-white/50 mb-1 flex flex-wrap gap-x-3 gap-y-0.5">
-                                <span className="flex items-center gap-1"><Clock className="w-3 h-3" /> 진입 후 {s.delay_hours}시간</span>
-                                {s.channel && <span className="flex items-center gap-1"><MessageSquare className="w-3 h-3" /> {s.channel.toUpperCase()}</span>}
-                                {s.is_ad && <span className="text-amber-300/80">광고 표기</span>}
-                              </div>
-                              {s.message_template && <div className="text-sm text-white/90 whitespace-pre-wrap break-words">{s.message_template}</div>}
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
+            {/* 활성 여정 목록 */}
+            <div>
+              <h3 className="text-sm font-semibold text-white/80 mb-2">활성 여정 ({journeys.length})</h3>
+              {loading && (
+                <div className="flex items-center justify-center py-12">
+                  <Loader2 className="w-6 h-6 animate-spin text-white/40" />
                 </div>
-              );
-            })}
-          </div>
+              )}
+              {!loading && journeys.length === 0 && (
+                <div className="p-8 text-center bg-white/5 border border-white/10 rounded-xl text-white/50 text-sm">
+                  아직 생성한 여정이 없습니다. 위에서 첫 여정을 만들어보세요.
+                </div>
+              )}
+              <div className="space-y-2">
+                {journeys.map((j) => {
+                  const visual = TEMPLATE_VISUAL[j.template_code] || TEMPLATE_VISUAL.custom;
+                  const Icon = visual.icon;
+                  const badge = STATUS_BADGE[j.status];
+                  const isExpanded = expandedId === j.id;
+                  const detail = detailsMap[j.id];
+                  return (
+                    <div key={j.id} className="bg-white/5 border border-white/10 rounded-xl overflow-hidden">
+                      <div className="p-3 cursor-pointer hover:bg-white/[0.07]" onClick={() => toggleExpand(j.id)}>
+                        <div className="flex items-start gap-3">
+                          <div className={`shrink-0 w-10 h-10 rounded-lg bg-gradient-to-br ${visual.gradient} flex items-center justify-center`}>
+                            <Icon className="w-5 h-5 text-white" />
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <div className="flex flex-wrap items-center gap-2 mb-1">
+                              <h3 className="text-sm font-semibold truncate">{j.name}</h3>
+                              <span className={`px-2 py-0.5 rounded text-[10px] font-medium ${badge.cls}`}>{badge.label}</span>
+                            </div>
+                            <div className="text-xs text-white/50 flex flex-wrap gap-x-3 gap-y-0.5">
+                              <span className="flex items-center gap-1"><Users className="w-3 h-3" />{j.stats_total_entered}</span>
+                              <span className="flex items-center gap-1"><Sparkles className="w-3 h-3" />{j.stats_total_completed}</span>
+                              <span className="flex items-center gap-1"><DollarSign className="w-3 h-3" />{Number(j.stats_total_cost).toLocaleString()}원</span>
+                              {j.callback_number && <span className="flex items-center gap-1 text-cyan-300/80"><Phone className="w-3 h-3" />{j.callback_number}</span>}
+                            </div>
+                            {j.pause_reason && j.status === 'paused' && (
+                              <div className="mt-1.5 text-xs text-amber-200/90 bg-amber-500/10 px-2 py-1 rounded">{j.pause_reason}</div>
+                            )}
+                          </div>
+                          <div className="shrink-0 flex items-center gap-1">
+                            {(j.status === 'draft' || j.status === 'paused') && (
+                              <button onClick={(e) => { e.stopPropagation(); handleAction(j.id, 'activate'); }} className="p-2 rounded bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300" title="활성화">
+                                <Play className="w-4 h-4" />
+                              </button>
+                            )}
+                            {j.status === 'active' && (
+                              <button onClick={(e) => { e.stopPropagation(); handleAction(j.id, 'pause'); }} className="p-2 rounded bg-amber-500/20 hover:bg-amber-500/30 text-amber-300" title="일시정지">
+                                <Pause className="w-4 h-4" />
+                              </button>
+                            )}
+                            {j.status !== 'ended' && (
+                              <button onClick={(e) => { e.stopPropagation(); handleAction(j.id, 'end'); }} className="p-2 rounded bg-slate-700 hover:bg-slate-600 text-slate-300" title="종료">
+                                <Power className="w-4 h-4" />
+                              </button>
+                            )}
+                            {isExpanded ? <ChevronUp className="w-4 h-4 text-white/40" /> : <ChevronDown className="w-4 h-4 text-white/40" />}
+                          </div>
+                        </div>
+                      </div>
+                      {isExpanded && detail && (
+                        <div className="border-t border-white/10 p-3 bg-slate-950/40 space-y-2">
+                          {detail.steps.map((s) => (
+                            <div key={s.id} className="flex items-start gap-3 p-2.5 bg-white/5 rounded">
+                              <div className="shrink-0 w-7 h-7 rounded-full bg-fuchsia-500/20 text-fuchsia-300 flex items-center justify-center text-xs font-semibold">{s.step_order}</div>
+                              <div className="flex-1 min-w-0">
+                                <div className="text-[10px] text-white/50 mb-1">
+                                  <Clock className="w-3 h-3 inline" /> {s.delay_hours}h · {s.channel?.toUpperCase()} {s.is_ad && '· 광고'}
+                                </div>
+                                {s.message_template && <div className="text-xs text-white/85 whitespace-pre-wrap">{s.message_template}</div>}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </>
         )}
 
-        {/* 신규 여정 생성 탭 — 템플릿 카드 선택 */}
-        {!loading && tab === 'create' && !creating && (
-          <div>
-            <p className="text-sm text-white/60 mb-4">템플릿을 선택하면 step별 메시지 + 회신번호를 직접 편집할 수 있습니다. Custom은 자연어 또는 직접 작성 가능합니다.</p>
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 md:gap-4">
-              {templates.map((t) => {
-                const visual = TEMPLATE_VISUAL[t.templateCode] || TEMPLATE_VISUAL.custom;
-                const Icon = visual.icon;
+        {/* ════════════════════════════════════════
+            REVIEW VIEW — AI 생성 여정 검토 + 수정
+            ════════════════════════════════════════ */}
+        {view === 'review' && aiPkg && (
+          <div className="space-y-4">
+            {/* AI reasoning */}
+            <div className="bg-fuchsia-500/10 border border-fuchsia-500/30 rounded-lg p-3 flex items-start gap-2">
+              <Sparkles className="w-4 h-4 mt-0.5 shrink-0 text-fuchsia-300" />
+              <div className="text-xs text-white/80">
+                <span className="font-medium text-fuchsia-300">AI 설계 근거: </span>
+                {aiPkg.reasoning || '시즌 + 회사 톤 + 메모리 기반 자동 설계'}
+              </div>
+            </div>
+
+            {/* 기본 설정 */}
+            <div className="bg-white/5 border border-white/10 rounded-xl p-4 space-y-3">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs text-white/60 mb-1">여정 이름</label>
+                  <input value={reviewName} onChange={(e) => setReviewName(e.target.value)} className="w-full px-3 py-2 bg-slate-900 border border-white/10 rounded-lg text-sm focus:outline-none focus:border-fuchsia-400" />
+                </div>
+                <div>
+                  <label className="block text-xs text-white/60 mb-1">회신번호 <span className="text-rose-400">*</span></label>
+                  <select value={reviewCallback} onChange={(e) => setReviewCallback(e.target.value)} className="w-full px-3 py-2 bg-slate-900 border border-white/10 rounded-lg text-sm focus:outline-none focus:border-fuchsia-400">
+                    <option value="">선택해주세요</option>
+                    {callbackOptions.map((c) => (
+                      <option key={`${c.source}-${c.phone}`} value={c.phone}>
+                        {c.phone}{c.description ? ` (${c.description})` : ''}{c.is_default ? ' • 기본' : ''}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs text-white/60 mb-1">월간 예산 (원, 선택)</label>
+                  <input type="number" value={reviewBudget} onChange={(e) => setReviewBudget(e.target.value)} placeholder="비워두면 무제한" className="w-full px-3 py-2 bg-slate-900 border border-white/10 rounded-lg text-sm focus:outline-none focus:border-fuchsia-400" />
+                </div>
+                <div>
+                  <label className="block text-xs text-white/60 mb-1">step당 비용 한도 (원, 선택)</label>
+                  <input type="number" value={reviewThreshold} onChange={(e) => setReviewThreshold(e.target.value)} placeholder="비워두면 무제한" className="w-full px-3 py-2 bg-slate-900 border border-white/10 rounded-lg text-sm focus:outline-none focus:border-fuchsia-400" />
+                </div>
+              </div>
+              <div className="text-[11px] text-white/50 flex flex-wrap gap-x-3 gap-y-0.5">
+                <span>트리거: {aiPkg.triggerEvent}</span>
+                <span>재진입: {aiPkg.allowReentry ? (aiPkg.reentryCooldownDays ? `${aiPkg.reentryCooldownDays}일 후` : '즉시') : '불가'}</span>
+                <span className="text-amber-300/80">(광고)+무료거부+발송시간+KISA 제목 자동 합성</span>
+              </div>
+            </div>
+
+            {/* Step 시계열 */}
+            <div className="space-y-3">
+              {aiPkg.steps.map((s, idx) => {
+                const bytes = getByteLength(s.messageTemplate);
+                const maxBytes = s.channel === 'sms' ? 90 : 2000;
+                const preview = buildPreview(s.messageTemplate, s.isAd, s.channel, opt080Number);
+                const previewBytes = getByteLength(preview);
+                const placeholderWarn = hasPlaceholder(s.messageTemplate);
+                const isEditing = editingStepIdx === idx;
+
                 return (
-                  <button key={t.templateCode} onClick={() => handleStartCreate(t.templateCode)} className="text-left p-4 bg-white/5 border border-white/10 rounded-xl hover:bg-white/10 hover:border-white/20 transition-colors">
-                    <div className={`w-10 h-10 rounded-lg bg-gradient-to-br ${visual.gradient} flex items-center justify-center mb-3`}>
-                      <Icon className="w-5 h-5 text-white" />
+                  <div key={idx} className="bg-white/5 border border-white/10 rounded-xl p-4 space-y-2">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <div className="shrink-0 w-8 h-8 rounded-full bg-fuchsia-500/20 text-fuchsia-300 flex items-center justify-center font-semibold">{s.stepOrder}</div>
+                      <div className="text-sm font-medium text-white/80 flex-1 min-w-0 truncate">
+                        {s.stepIntent || `Step ${s.stepOrder}`}
+                      </div>
+                      <div className="flex items-center gap-1 text-xs">
+                        <Clock className="w-3.5 h-3.5 text-white/40" />
+                        <input type="number" min={0} max={720} value={s.delayHours} onChange={(e) => updateStep(idx, { delayHours: Number(e.target.value) || 0 })} className="w-16 px-2 py-1 bg-slate-800 border border-white/10 rounded text-xs" />
+                        <span className="text-white/50">h</span>
+                      </div>
+                      <select value={s.channel} onChange={(e) => updateStep(idx, { channel: e.target.value as ChannelType })} className="px-2 py-1 bg-slate-800 border border-white/10 rounded text-xs">
+                        <option value="sms">SMS</option>
+                        <option value="lms">LMS</option>
+                        <option value="mms">MMS</option>
+                      </select>
+                      <label className="flex items-center gap-1 text-xs cursor-pointer">
+                        <input type="checkbox" checked={s.isAd} onChange={(e) => updateStep(idx, { isAd: e.target.checked })} className="rounded" />
+                        <span className="text-amber-300/80">광고</span>
+                      </label>
+                      <button onClick={() => setEditingStepIdx(isEditing ? null : idx)} className="p-1.5 bg-slate-700 hover:bg-slate-600 rounded" title={isEditing ? '닫기' : '직접 수정'}>
+                        {isEditing ? <Save className="w-3.5 h-3.5" /> : <Edit2 className="w-3.5 h-3.5" />}
+                      </button>
+                      <button onClick={() => handleRefineOpen(idx)} disabled={refineLoading} className="px-2 py-1.5 bg-violet-500/20 hover:bg-violet-500/30 text-violet-300 rounded text-xs flex items-center gap-1 disabled:opacity-50">
+                        {refineLoading ? <Loader2 className="w-3 h-3 animate-spin" /> : <Wand2 className="w-3 h-3" />}AI 다듬기
+                      </button>
+                      <button onClick={() => deleteStep(idx)} className="p-1.5 bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 rounded" title="삭제">
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
                     </div>
-                    <div className="font-semibold text-sm md:text-base mb-1">{t.name}</div>
-                    <div className="text-xs text-white/50 mb-3 leading-relaxed">{t.description}</div>
-                    <div className="text-[11px] text-white/40 flex flex-wrap gap-x-3 gap-y-0.5">
-                      <span>step {t.stepCount}개</span>
-                      <span>재진입 {t.allowReentry ? (t.reentryCooldownDays ? `${t.reentryCooldownDays}일 후` : '즉시') : '불가'}</span>
+
+                    {isEditing ? (
+                      <textarea value={s.messageTemplate} onChange={(e) => updateStep(idx, { messageTemplate: e.target.value })} rows={6} className="w-full px-3 py-2 bg-slate-900 border border-fuchsia-400/50 rounded text-sm font-mono focus:outline-none resize-y" />
+                    ) : (
+                      <div className="px-3 py-2 bg-slate-900/60 border border-white/10 rounded text-sm whitespace-pre-wrap font-mono text-white/90 cursor-pointer" onClick={() => setEditingStepIdx(idx)}>
+                        {s.messageTemplate}
+                      </div>
+                    )}
+
+                    <div className="flex flex-wrap items-center gap-x-3 text-[11px] text-white/40">
+                      <span className={bytes > maxBytes ? 'text-rose-400' : ''}>본문: {bytes} / {maxBytes} bytes</span>
+                      {placeholderWarn && <span className="text-amber-300">⚠ [...] 영역 — 직접 수정 필요</span>}
                     </div>
-                  </button>
+
+                    {s.isAd && s.messageTemplate.trim().length >= 10 && (
+                      <div className="p-2 bg-slate-950/60 border border-white/5 rounded text-[11px]">
+                        <div className="text-white/40 mb-1">실제 발송 미리보기 ({previewBytes} bytes):</div>
+                        <div className="whitespace-pre-wrap text-white/80 font-mono">{preview}</div>
+                      </div>
+                    )}
+                  </div>
                 );
               })}
-            </div>
-          </div>
-        )}
 
-        {/* 생성 폼 */}
-        {creating && (
-          <div className="bg-white/5 border border-white/10 rounded-xl p-4 md:p-6 space-y-5">
-            <div className="flex items-center justify-between">
-              <h3 className="text-base md:text-lg font-semibold">
-                {templates.find((t) => t.templateCode === creating.templateCode)?.name} 여정 생성
-              </h3>
-              <button onClick={() => setCreating(null)} className="text-white/40 hover:text-white/80 text-sm">취소</button>
+              {aiPkg.steps.length < 5 && (
+                <button onClick={addStep} className="w-full p-3 border-2 border-dashed border-white/10 hover:border-white/30 rounded-xl text-sm text-white/50 hover:text-white/80 flex items-center justify-center gap-2">
+                  <Plus className="w-4 h-4" /> Step 추가
+                </button>
+              )}
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              <div>
-                <label className="block text-xs text-white/60 mb-1">여정 이름 (선택)</label>
-                <input value={creating.name} onChange={(e) => setCreating({ ...creating, name: e.target.value })} placeholder="비워두면 템플릿 기본 이름이 사용됩니다." className="w-full px-3 py-2 bg-slate-900 border border-white/10 rounded-lg text-sm focus:outline-none focus:border-fuchsia-400" />
-              </div>
-              <div>
-                <label className="block text-xs text-white/60 mb-1">회신번호 <span className="text-rose-400">*</span></label>
-                <select value={creating.callbackNumber} onChange={(e) => setCreating({ ...creating, callbackNumber: e.target.value })} className="w-full px-3 py-2 bg-slate-900 border border-white/10 rounded-lg text-sm focus:outline-none focus:border-fuchsia-400">
-                  <option value="">선택해주세요</option>
-                  {callbackOptions.map((c) => (
-                    <option key={`${c.source}-${c.phone}`} value={c.phone}>
-                      {c.phone}{c.description ? ` (${c.description})` : ''}{c.is_default ? ' • 기본' : ''}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            </div>
-
-            {creating.templateCode === 'custom' && (
-              <div>
-                <label className="block text-xs text-white/60 mb-1">여정 목표 (자연어, 선택)</label>
-                <textarea value={creating.customObjective} onChange={(e) => setCreating({ ...creating, customObjective: e.target.value })} placeholder="예: 첫 구매 후 30일 동안 재구매 유도하기" rows={2} className="w-full px-3 py-2 bg-slate-900 border border-white/10 rounded-lg text-sm focus:outline-none focus:border-fuchsia-400 resize-none" />
-                <p className="mt-1 text-[11px] text-white/40">목표 입력 시 AI가 골격 step을 생성합니다. 회사 admin이 활성화 전 본문을 직접 편집해야 합니다.</p>
-              </div>
-            )}
-
-            {/* Step 편집 영역 */}
-            {creating.steps.length > 0 && (
-              <div>
-                <div className="flex items-center justify-between mb-2">
-                  <label className="text-sm font-medium text-white/80">Step별 메시지 — 회사 admin이 직접 작성</label>
-                  <span className="text-[11px] text-amber-300/80">[...] 영역에 구체 혜택/URL을 직접 입력해주세요</span>
-                </div>
-                <div className="space-y-3">
-                  {creating.steps.map((s, idx) => {
-                    const bytes = getByteLength(s.messageTemplate);
-                    const maxBytes = s.channel === 'sms' ? 90 : 2000;
-                    const preview = buildPreview(s.messageTemplate, s.isAd, s.channel, opt080Number);
-                    const previewBytes = getByteLength(preview);
-                    const placeholderWarn = hasPlaceholder(s.messageTemplate);
-
-                    return (
-                      <div key={idx} className="p-3 bg-slate-900/60 border border-white/10 rounded-lg space-y-2">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <div className="shrink-0 w-7 h-7 rounded-full bg-fuchsia-500/20 text-fuchsia-300 flex items-center justify-center text-sm font-semibold">
-                            {s.stepOrder}
-                          </div>
-                          <div className="flex items-center gap-1">
-                            <Clock className="w-3.5 h-3.5 text-white/40" />
-                            <input type="number" min={0} max={720} value={s.delayHours} onChange={(e) => updateStep(idx, { delayHours: Number(e.target.value) || 0 })} className="w-16 px-2 py-1 bg-slate-800 border border-white/10 rounded text-xs" />
-                            <span className="text-xs text-white/50">시간 후</span>
-                          </div>
-                          <div className="flex items-center gap-1">
-                            <MessageSquare className="w-3.5 h-3.5 text-white/40" />
-                            <select value={s.channel} onChange={(e) => updateStep(idx, { channel: e.target.value as ChannelType })} className="px-2 py-1 bg-slate-800 border border-white/10 rounded text-xs">
-                              <option value="sms">SMS</option>
-                              <option value="lms">LMS</option>
-                              <option value="mms">MMS</option>
-                            </select>
-                          </div>
-                          <label className="flex items-center gap-1.5 text-xs cursor-pointer">
-                            <input type="checkbox" checked={s.isAd} onChange={(e) => updateStep(idx, { isAd: e.target.checked })} className="rounded" />
-                            <span className="text-amber-300/80">광고 표기</span>
-                          </label>
-                          <button type="button" onClick={() => handleRefineOpen(idx)} disabled={refineLoading} className="ml-auto px-2.5 py-1 bg-violet-500/20 hover:bg-violet-500/30 text-violet-300 rounded text-xs flex items-center gap-1 disabled:opacity-50">
-                            {refineLoading ? <Loader2 className="w-3 h-3 animate-spin" /> : <Wand2 className="w-3 h-3" />} AI 다듬기
-                          </button>
-                        </div>
-
-                        <textarea value={s.messageTemplate} onChange={(e) => updateStep(idx, { messageTemplate: e.target.value })} rows={4} placeholder="회사가 제공할 혜택/안내를 직접 작성해주세요." className="w-full px-3 py-2 bg-slate-900 border border-white/10 rounded text-sm focus:outline-none focus:border-fuchsia-400 resize-y font-mono" />
-
-                        <div className="flex flex-wrap items-center gap-x-3 text-[11px] text-white/40">
-                          <span className={bytes > maxBytes ? 'text-rose-400' : ''}>본문: {bytes} / {maxBytes} bytes</span>
-                          {placeholderWarn && <span className="text-amber-300/80">⚠ [...] 영역이 남아있습니다</span>}
-                        </div>
-
-                        {s.isAd && s.messageTemplate.trim().length >= 10 && (
-                          <div className="p-2 bg-slate-950/60 border border-white/5 rounded text-[11px] text-white/60">
-                            <div className="text-white/40 mb-1">실제 발송 미리보기 (자동 합성, {previewBytes} bytes):</div>
-                            <div className="whitespace-pre-wrap text-white/80 font-mono">{preview}</div>
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              <div>
-                <label className="block text-xs text-white/60 mb-1">월간 예산 (원, 선택)</label>
-                <input type="number" value={creating.budgetMonthly} onChange={(e) => setCreating({ ...creating, budgetMonthly: e.target.value })} placeholder="비워두면 무제한" className="w-full px-3 py-2 bg-slate-900 border border-white/10 rounded-lg text-sm focus:outline-none focus:border-fuchsia-400" />
-              </div>
-              <div>
-                <label className="block text-xs text-white/60 mb-1">step당 비용 한도 (원, 선택)</label>
-                <input type="number" value={creating.thresholdCost} onChange={(e) => setCreating({ ...creating, thresholdCost: e.target.value })} placeholder="비워두면 무제한" className="w-full px-3 py-2 bg-slate-900 border border-white/10 rounded-lg text-sm focus:outline-none focus:border-fuchsia-400" />
-              </div>
-            </div>
-
-            <div className="text-xs text-white/40 bg-white/5 rounded-lg p-3 leading-relaxed">
-              <div className="font-medium text-white/60 mb-1">광고 자동 검증 4건 (활성화 시 모두 자동 적용)</div>
-              <ul className="space-y-0.5">
-                <li>· (광고) 표기 자동 부착 (광고 표기 체크된 step)</li>
-                <li>· 무료거부 080 자동 부착</li>
-                <li>· 발송 시간 KST 08:00 ~ 21:00 자동 준수</li>
-                <li>· KISA 제목 자동 적용 (LMS/MMS)</li>
-              </ul>
-              <div className="mt-2 text-amber-200/70">생성 직후 상태는 초안입니다. 활성화 버튼을 누르면 트리거 매칭이 시작됩니다.</div>
-            </div>
-
-            <div className="flex gap-2 pt-2">
-              <button onClick={() => setCreating(null)} disabled={saving} className="px-4 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-sm">취소</button>
-              <button onClick={handleCreate} disabled={saving} className="flex-1 px-4 py-2 rounded-lg bg-gradient-to-r from-fuchsia-500 to-purple-500 text-sm font-medium hover:opacity-90 disabled:opacity-50 flex items-center justify-center gap-2">
-                {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />} 초안 여정 생성
+            {/* 액션 버튼 */}
+            <div className="flex flex-wrap gap-2 pt-2 sticky bottom-0 bg-slate-950/95 backdrop-blur-sm border-t border-white/10 -mx-3 md:-mx-6 px-3 md:px-6 py-3">
+              <button onClick={handleRegenerate} disabled={generating || saving} className="px-4 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-sm flex items-center gap-2 disabled:opacity-50">
+                <RefreshCw className="w-4 h-4" /> AI 다시 생성
+              </button>
+              <button onClick={() => { if (confirm('변경사항이 사라집니다. 메인으로 돌아가시겠습니까?')) { setView('main'); setAiPkg(null); } }} disabled={saving} className="px-4 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-sm">취소</button>
+              <button onClick={handleSaveDraft} disabled={saving || !reviewCallback} className="flex-1 px-4 py-2 rounded-lg bg-gradient-to-r from-fuchsia-500 to-purple-500 text-sm font-medium hover:opacity-90 disabled:opacity-50 flex items-center justify-center gap-2">
+                {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}초안 저장
               </button>
             </div>
           </div>
         )}
       </div>
 
-      {/* AI 다듬기 모달 */}
+      {/* AI 다듬기 modal */}
       {refining && (
         <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4" onClick={() => setRefining(null)}>
-          <div className="bg-slate-900 border border-white/10 rounded-xl max-w-2xl w-full max-h-[80vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
-            <div className="p-4 border-b border-white/10 flex items-center justify-between">
-              <h3 className="text-base font-semibold flex items-center gap-2"><Wand2 className="w-4 h-4 text-violet-400" /> AI 다듬기 후보</h3>
+          <div className="bg-slate-900 border border-white/10 rounded-xl max-w-3xl w-full max-h-[85vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+            <div className="p-4 border-b border-white/10 flex items-center justify-between sticky top-0 bg-slate-900">
+              <h3 className="text-base font-semibold flex items-center gap-2"><Wand2 className="w-4 h-4 text-violet-400" />AI 다듬기 — 3 톤 후보</h3>
               <button onClick={() => setRefining(null)} className="text-white/40 hover:text-white"><X className="w-5 h-5" /></button>
             </div>
             <div className="p-4 space-y-3">
@@ -662,13 +698,32 @@ export default function JourneysPage() {
               ) : (
                 refining.candidates.map((c, i) => (
                   <div key={i} className="p-3 bg-white/5 border border-white/10 rounded-lg">
+                    <div className="flex items-center gap-2 mb-2">
+                      <span className={`px-2 py-0.5 rounded text-[10px] font-medium ${
+                        c.tone === '감성적' ? 'bg-pink-500/20 text-pink-300' :
+                        c.tone === '실용적' ? 'bg-cyan-500/20 text-cyan-300' :
+                        'bg-emerald-500/20 text-emerald-300'
+                      }`}>{c.tone}</span>
+                      <span className="text-[10px] text-white/40">{c.bytes} bytes</span>
+                    </div>
                     <div className="text-sm text-white/90 whitespace-pre-wrap mb-2 font-mono">{c.message}</div>
-                    {c.reason && <div className="text-[11px] text-white/40 mb-2">{c.reason}</div>}
+                    {c.reasoning && <div className="text-[11px] text-white/40 mb-2">{c.reasoning}</div>}
                     <button onClick={() => handleAcceptRefine(c)} className="px-3 py-1.5 bg-violet-500/20 hover:bg-violet-500/30 text-violet-200 rounded text-xs">이 후보 적용</button>
                   </div>
                 ))
               )}
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* AI 생성 중 오버레이 */}
+      {generating && (
+        <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-40">
+          <div className="text-center">
+            <Loader2 className="w-10 h-10 animate-spin text-fuchsia-400 mx-auto mb-3" />
+            <div className="text-sm font-medium">AI Operator가 여정을 설계 중입니다</div>
+            <div className="text-xs text-white/50 mt-1">시즌 + 회사 톤 + 학습 메모리 종합 (5~10초)</div>
           </div>
         </div>
       )}

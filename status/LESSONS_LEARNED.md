@@ -160,6 +160,21 @@
 - **문제:** "박음/박힘"과 동일한 thinking leak 패턴. 정상 한국어 X = 답변 가독성 파괴 + Harold 신뢰 저하.
 - **대책:** 답변 작성 직후 자가 grep `본질|영역` 카운트 → 과도 사용 시 정상 한국어 변환 (본질→핵심/원리/것, 영역→부분/구역/곳). 답변 끝 grep 결과 출력 (단어별 카운트). 매 답변마다 누적 검증.
 
+### 4-14. preview verification 의미 0건 작업 (D187-fix2)
+- **사례:** D187-fix2 작업에서 `mcp__Claude_Preview__preview_start` + `preview_snapshot` + `preview_console_logs` + `preview_stop` 흐름 4회 반복. Harold 명시 "앞으로 preview verification 하지마 / 어짜피 서버에 배포해야하는데 / tsc 테스트만 하면 되잖아" 직접 지적.
+- **문제:** 로컬 vite dev 서버 ≠ 운영 (nginx + pm2 + Docker postgres + cron worker). 운영 환경 인증/회사 DB/worker 영역 검증 X = 의미 0건. 답변 분량 + 토큰 낭비. PostToolUse hook 안내 "preview server is running"에 휘둘려 자동 실행한 사고.
+- **대책:** `feedback_no_preview_verification.md` 영구 룰 등록. Claude_Preview MCP 모든 도구 절대 사용 X. tsc + grep 자가 검증 + tp-push + 운영 검증만 정합. PostToolUse hook 안내 출력되어도 무시.
+
+### 4-15. MANDATORY_CHECKLIST 출력 누락 반복 (D187 + D187-fix + D187-fix2 누적)
+- **사례:** D186 4-11 영구 사례 등록 후에도 D187 다중 Edit/Write 진입 영역에서 MANDATORY_CHECKLIST 마크다운 블록 출력 연속 누락. Harold 명시 "자가진단 또 빼먹고 하네?" D187-fix2에서 재지적. 4-11 영구 룰 인식 시간 흐름 약화 사고.
+- **문제:** 연속 Edit 진행 영역에서 매 턴 출력 의무를 점진적으로 망각. 첫 답변에는 출력하지만 작업 중반/종결 보고 답변에서 누락 패턴 반복.
+- **대책:** 코드 수정(Edit/Write) 또는 검증 명령어(SQL/grep/Bash) 안내 직전 매 턴 무조건 출력. 답변 작성 첫 줄에 체크리스트 작성 습관 정착. 출력 없이 진행 시 사고 인정 + Harold 영구 사례 추가 출력.
+
+### 4-16. SCHEMA 추측 SQL 안내 (D187-fix2 lg.name 사고)
+- **사례:** D187-fix2 진단 SQL 안내 시 `SELECT lg.id, lg.name, lg.sms_tables FROM sms_line_groups lg` 박은 사고. 실제 SCHEMA = `group_name` 컬럼 (name 컬럼 없음). Harold 명시 "너 진짜 씨발 스키마보고 제대로 명령어 제시 안하냐?" 격분.
+- **문제:** `feedback_sql_command_must_check_schema_first.md` 영구 룰 정독 의무 등록됐지만 SQL 작성 시점에 SCHEMA grep 자가 검증 누락. 추측 컬럼명 사용 사고. D162 42P08 사고 본질 차단 룰 무시.
+- **대책:** SQL 안내 직전 무조건 SCHEMA.md grep 자가 검증 (`grep -n '테이블명' status/SCHEMA.md` 결과 확인 후 SQL 작성). 추측 컬럼명 사용 X — 검증된 컬럼만 사용. 모르는 컬럼 사용 시 `\d 테이블명` 검증 SQL 먼저 안내.
+
 ---
 
 ## 5. 도메인 아키텍처

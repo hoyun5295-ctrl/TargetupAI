@@ -60,6 +60,8 @@ import {
   JourneyTemplateCode,
   JourneyStatus,
 } from '../utils/journey-builder';
+// ★ D187-fix3 (2026-05-21): Journey AI Generator — One-shot 자연어 + 시즌 + 회사 메모리
+import { generateJourneyPackage, refineStepMessage } from '../utils/journey-ai-generator';
 
 
 // ★ D79: 인라인 래퍼 제거 → CT-01 buildFilterWhereClauseCompat 직접 사용
@@ -1739,7 +1741,8 @@ router.get('/operator/journeys-callback-numbers', async (req: Request, res: Resp
   }
 });
 
-// POST /api/ai/operator/journeys-refine-step — AI 문안 다듬기 (회사 admin이 작성한 step 본문 정련)
+// POST /api/ai/operator/journeys-refine-step — AI 문안 다듬기 (3 톤 후보 — 감성/실용/캐주얼)
+//   D187-fix3: refineDirectMessage → refineStepMessage (시즌 + 회사 메모리 + 3 톤 다양성)
 router.post('/operator/journeys-refine-step', async (req: Request, res: Response) => {
   try {
     const companyId = req.user?.companyId;
@@ -1749,30 +1752,51 @@ router.post('/operator/journeys-refine-step', async (req: Request, res: Response
     if (!isAiOperatorAllowed(planCtx, req.user)) {
       return res.status(403).json({ success: false, error: 'AI Operator 진입 권한이 없습니다.', code: 'AI_OPERATOR_GATED' });
     }
-    const { message, tone, channel } = req.body || {};
+    const { message, channel, isAd, stepIntent } = req.body || {};
     if (!message || !String(message).trim()) {
       return res.status(400).json({ success: false, error: '메시지 본문이 비어있습니다.' });
     }
-    const compRes = await query(
-      `SELECT company_name, COALESCE(brand_name, company_name) AS brand_name,
-              COALESCE(reject_number, opt_out_080_number) AS reject_number
-       FROM companies WHERE id = $1::uuid`,
-      [companyId]
-    );
-    const c = compRes.rows[0] || {};
-    const maxBytes = channel === 'sms' ? 90 : 2000;
-
-    const { candidates } = await refineDirectMessage({
-      message: String(message),
-      tone: tone || 'seasonal',
-      companyName: c.brand_name || c.company_name || '',
-      maxBytes,
-      rejectNumber: c.reject_number || '',
+    const ch = ['sms', 'lms', 'mms'].includes(channel) ? channel : 'lms';
+    const { candidates } = await refineStepMessage({
+      companyId,
+      currentMessage: String(message),
+      channel: ch,
+      isAd: isAd !== false,
+      stepIntent: stepIntent ? String(stepIntent) : undefined,
     });
     return res.json({ success: true, candidates });
   } catch (err: any) {
     console.error('[Journeys refine step] 오류:', err);
     return res.status(500).json({ success: false, error: err?.message || 'AI 다듬기 실패' });
+  }
+});
+
+// POST /api/ai/operator/journeys-ai-generate — One-shot 자연어 → 완전 여정 패키지
+//   D187-fix3 핵심: Opus 4.7 + 시즌 + 회사 메모리 + Multi-context → 완전 패키지
+router.post('/operator/journeys-ai-generate', async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    const userId = req.user?.userId;
+    if (!companyId || !userId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+    const planCtx = await loadPlanContext(companyId);
+    if (!planCtx) return res.status(404).json({ success: false, error: '회사 정보를 찾을 수 없습니다.' });
+    if (!isAiOperatorAllowed(planCtx, req.user)) {
+      return res.status(403).json({ success: false, error: 'AI Operator 진입 권한이 없습니다.', code: 'AI_OPERATOR_GATED' });
+    }
+    const { objective, templateHint } = req.body || {};
+    if ((!objective || !String(objective).trim()) && !templateHint) {
+      return res.status(400).json({ success: false, error: '자연어 목표 또는 템플릿 단축 진입 중 하나는 필수입니다.' });
+    }
+    const pkg = await generateJourneyPackage({
+      companyId,
+      createdBy: userId,
+      objective: objective ? String(objective) : undefined,
+      templateHint: templateHint || undefined,
+    });
+    return res.json({ success: true, package: pkg });
+  } catch (err: any) {
+    console.error('[Journeys AI generate] 오류:', err);
+    return res.status(500).json({ success: false, error: err?.message || 'AI 생성 실패' });
   }
 });
 
