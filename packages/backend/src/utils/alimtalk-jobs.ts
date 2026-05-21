@@ -299,15 +299,27 @@ export async function syncPendingTemplatesJob(): Promise<void> {
             status: terminal,
             rejectReason,
           });
-          await query(
-            `UPDATE kakao_templates SET alarm_notified_status = $1 WHERE id = $2`,
-            [terminal, row.id],
-          );
-          if (count > 0) notified += count;
-          log(
-            'pendingTemplateSync',
-            `alarmNotify ${terminal} ${row.template_name} → ${count}명`,
-          );
+          // ★ D188 (2026-05-21) 영업팀장 신고 #1 추가 fix: count > 0 시에만 alarm_notified_status UPDATE.
+          //   기존 = callback 빈 영역(admin_phone_number 미등록 + sender_registrations 0건)에서 return 0 됐는데
+          //   UPDATE는 강제 실행 → alarm_notified_status='APPROVED' 영구 잔존 + 다음 cron 재시도 0 사고.
+          //   영구 정합 = count > 0 시에만 UPDATE 실행 → callback 미등록 회사가 admin_phone_number 등록한 직후
+          //   5분 cron에서 재시도 가능 + SMS 발화 정합.
+          if (count > 0) {
+            await query(
+              `UPDATE kakao_templates SET alarm_notified_status = $1 WHERE id = $2`,
+              [terminal, row.id],
+            );
+            notified += count;
+            log(
+              'pendingTemplateSync',
+              `alarmNotify ${terminal} ${row.template_name} → ${count}명`,
+            );
+          } else {
+            log(
+              'pendingTemplateSync',
+              `alarmNotify skip ${terminal} ${row.template_name} — count=0 (callback 미등록 가능성, alarm_notified_status 유지 = 다음 cron 재시도)`,
+            );
+          }
         } catch (notifyErr) {
           logErr(`pendingTemplateSync-alarmNotify-${row.template_code}`, notifyErr);
         }

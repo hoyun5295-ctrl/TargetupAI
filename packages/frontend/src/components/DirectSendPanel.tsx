@@ -123,6 +123,9 @@ export interface DirectSendPanelProps {
   setAlimtalkProfileId?: (id: string) => void;
   alimtalkNextContents?: string;
   setAlimtalkNextContents?: (v: string) => void;
+  // ★ D188 (2026-05-21) 영업팀장 신고 #7-(2): LMS 대체 제목 (L/B 시 필수).
+  alimtalkNextSubject?: string;
+  setAlimtalkNextSubject?: (v: string) => void;
   customerFieldOptions?: { key: string; label: string }[];
 
   // RCS
@@ -198,6 +201,8 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
     setAlimtalkProfileId,
     alimtalkNextContents = '',
     setAlimtalkNextContents,
+    alimtalkNextSubject = '',
+    setAlimtalkNextSubject,
     customerFieldOptions = [],
     rcsTemplates, rcsSelectedTemplate, setRcsSelectedTemplate,
     setShowDirectPreview, setShowSpecialChars, setShowTemplateBox,
