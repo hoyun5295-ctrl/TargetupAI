@@ -177,7 +177,7 @@ function ButtonRow({
   onPatch: (p: Partial<AlimtalkButton>) => void;
   onRemove: () => void;
 }) {
-  // ★ D152-4: 기존 AC 버튼이 박혀있는데 messageType=BA/EX로 변경된 경우
+  // ★ D152-4: 기존 AC 버튼이 저장되어 있는데 messageType=BA/EX로 변경된 경우
   //   availableTypes에 AC가 없어도 select에는 현재 type 값이 보여야 함 (사용자 인지 가능)
   const typesForSelect = useMemo(() => {
     if (availableTypes.find((t) => t.value === btn.type)) return availableTypes;

@@ -163,7 +163,7 @@ export default function CdpSettingsPage() {
   const handleNaverConnect = async () => {
     const trimmed = naverStoreId.trim();
     if (!trimmed) {
-      alert('네이버 스마트스토어 store_id를 박아주세요.');
+      alert('네이버 스마트스토어 store_id를 입력해주세요.');
       return;
     }
     setNaverConnecting(true);
@@ -440,7 +440,7 @@ export default function CdpSettingsPage() {
               <h2 className="text-base font-bold text-emerald-900">CDP 키가 발급되었습니다</h2>
             </div>
             <div className="text-sm text-emerald-800 mb-5 leading-relaxed">
-              ★ <strong>비밀 키(secret)는 본 화면을 닫으면 다시 볼 수 없습니다.</strong> 자사몰에 즉시 박아주세요. 재발급 시 기존 키는 즉시 폐기됩니다.
+              ★ <strong>비밀 키(secret)는 본 화면을 닫으면 다시 볼 수 없습니다.</strong> 자사몰에 즉시 저장해주세요. 재발급 시 기존 키는 즉시 폐기됩니다.
             </div>
             <div className="space-y-3">
               <div>
@@ -501,7 +501,7 @@ export default function CdpSettingsPage() {
                   발급 일시: <span className="font-medium">{usage.issued_at ? new Date(usage.issued_at).toLocaleString('ko-KR') : '-'}</span>
                 </div>
                 <div className="text-sm text-gray-600">
-                  ★ Public Key + Secret은 발급 시점에 자사몰 측에 박혀있어야 합니다. 재발급 시 기존 키는 즉시 폐기되며, 자사몰 코드의 키를 새 값으로 교체해야 합니다.
+                  ★ Public Key + Secret은 발급 시점에 자사몰 측에 저장되어 있어야 합니다. 재발급 시 기존 키는 즉시 폐기되며, 자사몰 코드의 키를 새 값으로 교체해야 합니다.
                 </div>
                 {confirmReissue ? (
                   <div className="bg-rose-50 border border-rose-200 rounded-lg p-4 space-y-3">
@@ -540,8 +540,8 @@ export default function CdpSettingsPage() {
             ) : (
               <div className="space-y-3">
                 <div className="text-sm text-gray-600">
-                  CDP 키가 아직 발급되지 않았습니다. 발급 시 Public Key + Secret 한 쌍이 박힙니다.
-                  <br />Secret은 발급 시점에 한 번만 노출되니, 자사몰 측에 즉시 박아주세요.
+                  CDP 키가 아직 발급되지 않았습니다. 발급 시 Public Key + Secret 한 쌍이 생성됩니다.
+                  <br />Secret은 발급 시점에 한 번만 노출되니, 자사몰 측에 즉시 저장해주세요.
                 </div>
                 <button
                   onClick={handleIssueKey}
@@ -603,7 +603,7 @@ export default function CdpSettingsPage() {
                   </div>
                 </div>
                 <div className="text-xs text-gray-500">
-                  카페24가 보내는 webhook(회원 가입/주문 생성/주문 취소)은 자동으로 한줄로 customers + cdp_events에 박힙니다. 추가 코딩이 필요하지 않습니다.
+                  카페24가 보내는 webhook(회원 가입/주문 생성/주문 취소)은 자동으로 한줄로 customers + cdp_events에 저장됩니다. 추가 코딩이 필요하지 않습니다.
                 </div>
                 {isAdmin && (
                   <button
@@ -618,7 +618,7 @@ export default function CdpSettingsPage() {
             ) : (
               <div className="space-y-3">
                 <div className="text-sm text-gray-600">
-                  카페24 mall_id를 입력하시면 OAuth 새 창이 열립니다. 카페24 관리자로 로그인 + 동의 완료 시 자동으로 회원/주문 sync가 박힙니다.
+                  카페24 mall_id를 입력하시면 OAuth 새 창이 열립니다. 카페24 관리자로 로그인 + 동의 완료 시 자동으로 회원/주문 sync가 진행됩니다.
                 </div>
                 <div className="flex gap-2">
                   <input
@@ -658,7 +658,7 @@ export default function CdpSettingsPage() {
             </div>
             <div className="text-xs text-gray-500 mb-4">
               자체 서버(Next.js / Node / Django / PHP / Rails 등)에서 운영하는 자사몰을 한줄로 CDP에 연결합니다.
-              webhook_secret 발급 → 자사몰 코드에 박음 → 표준 endpoint POST → 한줄로AI 자동 동기화.
+              webhook_secret 발급 → 자사몰 코드에 저장 → 표준 endpoint POST → 한줄로AI 자동 동기화.
             </div>
 
             {/* 발급된 직후 raw secret 1회 노출 */}
@@ -669,7 +669,7 @@ export default function CdpSettingsPage() {
                   <h3 className="text-sm font-bold text-emerald-900">webhook_secret이 발급되었습니다</h3>
                 </div>
                 <div className="text-xs text-emerald-800 mb-4 leading-relaxed">
-                  ★ <strong>본 화면을 닫으면 webhook_secret을 다시 볼 수 없습니다.</strong> 자사몰 자체 서버 환경변수에 즉시 박아주세요. 재발급 시 기존 secret은 즉시 폐기됩니다.
+                  ★ <strong>본 화면을 닫으면 webhook_secret을 다시 볼 수 없습니다.</strong> 자사몰 자체 서버 환경변수에 즉시 저장해주세요. 재발급 시 기존 secret은 즉시 폐기됩니다.
                 </div>
                 <div className="space-y-3">
                   <div>
@@ -690,7 +690,7 @@ export default function CdpSettingsPage() {
                     </div>
                   </div>
                   <div>
-                    <label className="text-xs font-medium text-emerald-900 block mb-1">Webhook URL (자사몰이 POST 박는 endpoint)</label>
+                    <label className="text-xs font-medium text-emerald-900 block mb-1">Webhook URL (자사몰이 POST 호출하는 endpoint)</label>
                     <div className="flex gap-2">
                       <input readOnly value={customIssuedSecret.webhook_url} className="flex-1 px-3 py-2 bg-white border border-emerald-200 rounded-lg text-xs font-mono text-gray-700" />
                       <button onClick={() => copyCustom(customIssuedSecret.webhook_url, 'url')} className="px-3 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-medium flex items-center gap-1.5">
@@ -736,7 +736,7 @@ export default function CdpSettingsPage() {
                     <div className="bg-gray-50 rounded-lg p-3 text-xs space-y-1 font-mono text-gray-700">
                       <div><strong className="text-gray-600">Webhook URL:</strong> {customInfo.webhookUrl}</div>
                       <div><strong className="text-gray-600">Company ID:</strong> {customInfo.companyId}</div>
-                      <div className="text-gray-500 mt-2 font-sans">★ webhook_secret은 발급 시점 1회만 노출됩니다. 자사몰에 박은 secret을 잃어버린 경우 재발급 박아주세요.</div>
+                      <div className="text-gray-500 mt-2 font-sans">★ webhook_secret은 발급 시점 1회만 노출됩니다. 자사몰에 저장한 secret을 잃어버린 경우 재발급 진행해주세요.</div>
                     </div>
                     {customConfirmReissue ? (
                       <div className="bg-rose-50 border border-rose-200 rounded-lg p-4 space-y-3">
@@ -775,7 +775,7 @@ export default function CdpSettingsPage() {
 
                     {/* 코드 샘플 (이미 발급된 회사) */}
                     <div className="bg-gray-50 rounded-lg p-4 mt-2 space-y-2">
-                      <div className="font-medium text-gray-800 text-sm">자사몰 자체 서버 박는 흐름 (Node.js 샘플)</div>
+                      <div className="font-medium text-gray-800 text-sm">자사몰 자체 서버 구현 흐름 (Node.js 샘플)</div>
                       <pre className="text-xs font-mono bg-white border border-gray-200 rounded p-3 overflow-x-auto">{`import { createHmac } from 'crypto';
 
 const body = JSON.stringify({
@@ -809,8 +809,8 @@ await fetch('${customInfo.webhookUrl}', {
                 ) : (
                   <div className="space-y-3">
                     <div className="text-sm text-gray-600">
-                      webhook_secret이 아직 발급되지 않았습니다. 발급 시 64자 hex secret이 박힙니다.
-                      <br />Secret은 발급 시점에 한 번만 노출되니, 자사몰 자체 서버에 즉시 박아주세요.
+                      webhook_secret이 아직 발급되지 않았습니다. 발급 시 64자 hex secret이 생성됩니다.
+                      <br />Secret은 발급 시점에 한 번만 노출되니, 자사몰 자체 서버에 즉시 저장해주세요.
                     </div>
                     <button
                       onClick={handleCustomIssue}
@@ -827,7 +827,7 @@ await fetch('${customInfo.webhookUrl}', {
           </div>
         )}
 
-        {/* ★ D178 (2026-05-19) — 네이버 스마트스토어 (Harold 명시 — 네이버스토어를 자사몰처럼 박는 회사 대응) */}
+        {/* ★ D178 (2026-05-19) — 네이버 스마트스토어 (Harold 명시 — 네이버스토어를 자사몰처럼 운영하는 회사 대응) */}
         {usage?.cdp_enabled && (
           <div className="bg-white border rounded-xl p-6">
             <div className="flex items-center gap-2 mb-4">
@@ -851,7 +851,7 @@ await fetch('${customInfo.webhookUrl}', {
                   </div>
                 </div>
                 <div className="text-xs text-gray-500">
-                  네이버 커머스 API가 보내는 webhook(회원 가입/주문 생성/주문 취소)은 자동으로 한줄로 customers + cdp_events에 박힙니다.
+                  네이버 커머스 API가 보내는 webhook(회원 가입/주문 생성/주문 취소)은 자동으로 한줄로 customers + cdp_events에 저장됩니다.
                 </div>
                 {isAdmin && (
                   <button
@@ -866,7 +866,7 @@ await fetch('${customInfo.webhookUrl}', {
             ) : (
               <div className="space-y-3">
                 <div className="text-sm text-gray-600">
-                  네이버 스마트스토어 store_id를 입력하시면 OAuth 새 창이 열립니다. 네이버 관리자로 로그인 + 동의 완료 시 자동으로 회원/주문 sync가 박힙니다.
+                  네이버 스마트스토어 store_id를 입력하시면 OAuth 새 창이 열립니다. 네이버 관리자로 로그인 + 동의 완료 시 자동으로 회원/주문 sync가 진행됩니다.
                 </div>
                 <div className="flex gap-2">
                   <input

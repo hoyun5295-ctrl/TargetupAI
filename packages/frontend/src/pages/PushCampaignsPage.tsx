@@ -188,7 +188,7 @@ export default function PushCampaignsPage() {
               </button>
               {stats && stats.active === 0 && (
                 <div className="text-xs text-gray-500">
-                  활성 구독자가 0건입니다 — 자사몰에 @hanjullo/sdk push 모듈을 박은 후 사용자 동의를 확보해주세요.
+                  활성 구독자가 0건입니다 — 자사몰에 @hanjullo/sdk push 모듈을 통합한 후 사용자 동의를 확보해주세요.
                 </div>
               )}
             </div>

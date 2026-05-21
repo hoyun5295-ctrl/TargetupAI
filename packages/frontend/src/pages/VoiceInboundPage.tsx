@@ -95,8 +95,8 @@ export default function VoiceInboundPage() {
         <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 text-xs text-amber-900 flex items-start gap-2">
           <AlertCircle className="w-4 h-4 mt-0.5 shrink-0" />
           <div>
-            <strong>영구 원칙:</strong> 사용자가 자사몰에서 "전화 문의" 능동 클릭 시점에만 AI 응답이 박힙니다 (Phase 1 인바운드 한정).
-            외향 발신은 박지 X (Phase 2 후순위). AI는 회사 CDP 데이터에 박힌 사실만 응답합니다 (추측/창작 X).
+            <strong>영구 원칙:</strong> 사용자가 자사몰에서 "전화 문의" 능동 클릭 시점에만 AI 응답이 작동합니다 (Phase 1 인바운드 한정).
+            외향 발신은 미지원 (Phase 2 후순위). AI는 회사 CDP 데이터에 저장된 사실만 응답합니다 (추측/창작 X).
             모든 통화 트랜스크립트는 본 페이지에서 사후 확인 가능합니다.
           </div>
         </div>
@@ -117,9 +117,9 @@ export default function VoiceInboundPage() {
                   <h2 className="text-base font-bold text-gray-800">인바운드 음성 AI {status.enabled ? '활성' : '비활성'}</h2>
                 </div>
                 <div className="text-xs text-gray-600 leading-relaxed">
-                  현재 상태: <strong>{status.enabled ? '인바운드 음성 응답 박힘' : '비활성 (default)'}</strong><br />
-                  Clova STT: {status.clovaConfigured.stt ? '✓ 환경변수 박힘' : '✗ NAVER_CLOVA_STT_* 환경변수 미박힘'}<br />
-                  Clova TTS: {status.clovaConfigured.tts ? '✓ 환경변수 박힘' : '✗ NAVER_CLOVA_TTS_* 환경변수 미박힘'}
+                  현재 상태: <strong>{status.enabled ? '인바운드 음성 응답 활성' : '비활성 (default)'}</strong><br />
+                  Clova STT: {status.clovaConfigured.stt ? '✓ 환경변수 설정됨' : '✗ NAVER_CLOVA_STT_* 환경변수 미설정'}<br />
+                  Clova TTS: {status.clovaConfigured.tts ? '✓ 환경변수 설정됨' : '✗ NAVER_CLOVA_TTS_* 환경변수 미설정'}
                 </div>
               </div>
               <button
@@ -131,12 +131,12 @@ export default function VoiceInboundPage() {
                     : 'bg-violet-600 hover:bg-violet-700 text-white'
                 }`}
               >
-                {toggling ? '처리 중...' : status.enabled ? '비활성으로 박음' : '활성으로 박음'}
+                {toggling ? '처리 중...' : status.enabled ? '비활성으로 전환' : '활성으로 전환'}
               </button>
             </div>
             {(!status.clovaConfigured.stt || !status.clovaConfigured.tts) && (
               <div className="mt-3 bg-rose-50 border border-rose-200 rounded p-3 text-xs text-rose-800">
-                ★ Naver Clova 환경변수가 미박힘 상태입니다. 관리자에게 NAVER_CLOVA_STT_INVOKE_URL / NAVER_CLOVA_STT_SECRET / NAVER_CLOVA_TTS_CLIENT_ID / NAVER_CLOVA_TTS_CLIENT_SECRET 박음을 요청해주세요.
+                ★ Naver Clova 환경변수가 미설정 상태입니다. 관리자에게 NAVER_CLOVA_STT_INVOKE_URL / NAVER_CLOVA_STT_SECRET / NAVER_CLOVA_TTS_CLIENT_ID / NAVER_CLOVA_TTS_CLIENT_SECRET 등록을 요청해주세요.
               </div>
             )}
           </div>
@@ -149,7 +149,7 @@ export default function VoiceInboundPage() {
             {calls.length === 0 ? (
               <div className="text-sm text-gray-500 py-12 text-center">
                 아직 인바운드 통화 이력이 없습니다.<br />
-                <span className="text-xs text-gray-400 mt-2 block">활성 후 자사몰 사용자가 한줄로 inbound 번호로 통화하면 본 영역에 박힙니다.</span>
+                <span className="text-xs text-gray-400 mt-2 block">활성 후 자사몰 사용자가 한줄로 inbound 번호로 통화하면 본 영역에 표시됩니다.</span>
               </div>
             ) : (
               <div className="space-y-2">

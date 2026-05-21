@@ -96,8 +96,8 @@ export default function DashboardHeader({
 
   const menuItems: MenuItem[] = [
     // ★ D163 (2026-05-19) Braze급 SaaS Step 0 — AI Operator 베타 메뉴.
-    // ★ D177-ux2 (2026-05-19) Harold 명시 정정 — dropdown 박지 X, AI Operator 페이지 안에 sub-menu 박음.
-    //   메뉴 깊이 박힌 영역에 신규 기능 노출 = 영업/노출 정합. 헤더에는 AI Operator 메뉴만 박음.
+    // ★ D177-ux2 (2026-05-19) Harold 명시 정정 — dropdown 미사용, AI Operator 페이지 안에 sub-menu 배치.
+    //   메뉴 깊이 적용된 영역에 신규 기능 노출 = 영업/노출 정합. 헤더에는 AI Operator 메뉴만 배치.
     ...(onAiOperatorClick
       ? [{
           label: 'AI Operator',

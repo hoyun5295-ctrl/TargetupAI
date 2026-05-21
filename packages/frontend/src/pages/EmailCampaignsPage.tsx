@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { AlertCircle, ArrowLeft, Loader2, Mail, Plus, RefreshCw, Send } from 'lucide-react';
 
 // ★ D180 (2026-05-19): Email 채널 (SendGrid Web API v3)
-//   영구 원칙 — 발송 시점 안전장치 + Zero-Count + 광고성 (광고) prefix + 무료거부 박음
+//   영구 원칙 — 발송 시점 안전장치 + Zero-Count + 광고성 (광고) prefix + 무료거부 자동 부착
 
 type CampaignStatus = 'draft' | 'scheduled' | 'sending' | 'completed' | 'failed';
 
@@ -97,14 +97,14 @@ export default function EmailCampaignsPage() {
   };
 
   const handleSend = async (campaign: EmailCampaign) => {
-    const recipientsRaw = prompt('수신자 이메일을 박아주세요 (콤마 구분, 예: a@x.com, b@y.com)');
+    const recipientsRaw = prompt('수신자 이메일을 입력해주세요 (콤마 구분, 예: a@x.com, b@y.com)');
     if (!recipientsRaw) return;
     const recipients = recipientsRaw.split(',').map((e) => ({ email: e.trim() })).filter((r) => r.email.includes('@'));
     if (recipients.length === 0) {
-      alert('유효한 이메일을 박지 X — 발송 차단.');
+      alert('유효한 이메일이 없습니다 — 발송 차단.');
       return;
     }
-    if (!confirm(`${recipients.length}명에게 즉시 발송하시겠습니까? ${campaign.isAd ? '(광고성 이메일 — "(광고)" prefix + 무료거부 링크 자동 박힘)' : ''}`)) return;
+    if (!confirm(`${recipients.length}명에게 즉시 발송하시겠습니까? ${campaign.isAd ? '(광고성 이메일 — "(광고)" prefix + 무료거부 링크 자동 부착)' : ''}`)) return;
 
     setSendingId(campaign.id);
     try {
@@ -115,7 +115,7 @@ export default function EmailCampaignsPage() {
       });
       const data = await res.json();
       if (data.success) {
-        alert(`발송 완료 — ${data.sentCount}건 박힘.`);
+        alert(`발송 완료 — ${data.sentCount}건 처리됨.`);
         await loadAll();
       } else {
         alert(data.error || '발송 실패');
@@ -157,14 +157,14 @@ export default function EmailCampaignsPage() {
         <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 text-xs text-amber-900 flex items-start gap-2">
           <AlertCircle className="w-4 h-4 mt-0.5 shrink-0" />
           <div>
-            <strong>영구 원칙:</strong> 광고성 캠페인은 "(광고)" prefix + 수신거부 링크가 자동 박힙니다 (정보통신망법).
-            수신자 0건이면 발송이 차단됩니다 (Zero-Count 영구 원칙). 발송 시점 안전장치 박음 — 즉시/예약 confirm.
+            <strong>영구 원칙:</strong> 광고성 캠페인은 "(광고)" prefix + 수신거부 링크가 자동 부착됩니다 (정보통신망법).
+            수신자 0건이면 발송이 차단됩니다 (Zero-Count 영구 원칙). 발송 시점 안전장치 작동 — 즉시/예약 confirm.
           </div>
         </div>
 
         {status && (
           <div className="bg-white border rounded-xl p-4 text-xs text-gray-600">
-            SendGrid: {status.sendgrid_configured ? '✓ 환경변수 박힘' : '✗ SENDGRID_API_KEY / SENDGRID_FROM_DOMAIN 미박힘'}
+            SendGrid: {status.sendgrid_configured ? '✓ 환경변수 설정됨' : '✗ SENDGRID_API_KEY / SENDGRID_FROM_DOMAIN 미설정'}
             {status.from_domain && <span className="ml-3">발신 도메인: <span className="font-mono">{status.from_domain}</span></span>}
           </div>
         )}
@@ -248,11 +248,11 @@ export default function EmailCampaignsPage() {
               <div>
                 <label className="text-xs text-gray-600 block mb-1">HTML 본문</label>
                 <textarea value={editing.htmlBody || ''} onChange={(e) => setEditing({ ...editing, htmlBody: e.target.value })} className="w-full px-3 py-2 border rounded-lg text-xs font-mono resize-none h-40" placeholder="<p>안녕하세요, {{name}}님</p>" />
-                <div className="text-[10px] text-gray-400 mt-1">{`{{name}}`} 등 substitution은 발송 시 recipients에 박은 값으로 자동 치환됩니다.</div>
+                <div className="text-[10px] text-gray-400 mt-1">{`{{name}}`} 등 substitution은 발송 시 recipients에 입력한 값으로 자동 치환됩니다.</div>
               </div>
               <div className="flex items-center gap-2">
                 <input type="checkbox" id="is_ad" checked={!!editing.isAd} onChange={(e) => setEditing({ ...editing, isAd: e.target.checked })} className="rounded" />
-                <label htmlFor="is_ad" className="text-xs text-gray-700">광고성 이메일 (체크 시 "(광고)" prefix + 수신거부 링크 자동 박힘 — 정보통신망법 정합)</label>
+                <label htmlFor="is_ad" className="text-xs text-gray-700">광고성 이메일 (체크 시 "(광고)" prefix + 수신거부 링크 자동 부착 — 정보통신망법 정합)</label>
               </div>
               {error && <div className="bg-rose-50 border border-rose-200 rounded-lg p-3 text-sm text-rose-700">{error}</div>}
               <div className="flex gap-2 justify-end pt-2">

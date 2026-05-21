@@ -39,7 +39,7 @@ interface ProposalMessage {
   variantId: string;
   variantName: string;
   concept: string;
-  body: string;             // ★ D165 fix: backend message_text 단일 필드 (channel은 별도 박음)
+  body: string;             // ★ D165 fix: backend message_text 단일 필드 (channel은 별도 필드)
   subject?: string;         // LMS/MMS 제목 (선택)
   byteCount?: number;       // SMS 경고용
   byteWarning?: boolean;
@@ -146,7 +146,7 @@ const ENGINE_CARDS: EngineCard[] = [
 //   Harold 명시 — "이미 작업완료한건 언제 적용? / 굳이 업그레이드 보여줄 필요 X / 직원들한테 방향성 잡음 명시 X".
 //   직원/외부 노출 시 미래 로드맵 = 영업/보안/사용자 혼란 위험. 진행률 카드 + 9 세션 로드맵 영역 함께 제거.
 
-// ★ D177-ux2 (2026-05-19): AI Operator 페이지 안 sub-module 박음 (Harold 명시 — 헤더 dropdown X / 페이지 안 메뉴 박음).
+// ★ D177-ux2 (2026-05-19): AI Operator 페이지 안 sub-module 배치 (Harold 명시 — 헤더 dropdown X / 페이지 안 메뉴 배치).
 interface SubModuleCard {
   icon: typeof Target;
   gradient: string;
@@ -258,7 +258,7 @@ export default function AiOperatorPage() {
   const { user } = useAuthStore();
   const companyName = (user as any)?.company?.name || '';
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  // ★ D174 (2026-05-19): PerformancePage가 sessionStorage에 박은 prefill objective 자동 박음
+  // ★ D174 (2026-05-19): PerformancePage가 sessionStorage에 저장한 prefill objective 자동 로드
   const [objective, setObjective] = useState(() => {
     if (typeof window === 'undefined') return '';
     const prefill = sessionStorage.getItem('ai_operator_prefill_objective');
@@ -288,7 +288,7 @@ export default function AiOperatorPage() {
     message: string;
     suggestedName: string;
   } | null>(null);
-  // ★ D170+ (Harold 명시 2026-05-19): 발송 시점 안전장치 박음
+  // ★ D170+ (Harold 명시 2026-05-19): 발송 시점 안전장치 구현
   //   'aiRecommended' = AI 추천 시점 그대로 예약 발송 (미래 시점이면)
   //   'immediate' = 지금 즉시 발송 (사용자 명시 선택)
   //   'custom' = 사용자가 직접 시점 선택 (datetime-local input)
@@ -404,11 +404,11 @@ export default function AiOperatorPage() {
       const rawSubject = variant.subject || proposal.target.suggestedName || `${companyName || ''} AI 캠페인`.trim() || 'AI Operator';
       const subject = isLmsOrMms ? rawSubject.slice(0, 17) : '';
 
-      // ★ D170+ (Harold 명시): 발송 시점 안전장치 박음 — AI 추천/즉시/사용자 직접 분기
+      // ★ D170+ (Harold 명시): 발송 시점 안전장치 구현 — AI 추천/즉시/사용자 직접 분기
       let scheduled = false;
       let scheduledAt: string | null = null;
       const now = Date.now();
-      const MIN_FUTURE_MS = 60 * 1000; // 1분 이상 미래여야 예약 발송으로 박음
+      const MIN_FUTURE_MS = 60 * 1000; // 1분 이상 미래여야 예약 발송으로 처리
 
       if (sendMode === 'aiRecommended') {
         // AI 추천 시점이 미래면 예약, 과거/현재면 즉시 발송
@@ -752,7 +752,7 @@ export default function AiOperatorPage() {
               const baseBody = activeVariant?.body || '';
               const rawActiveBody = overrideText || baseBody;
               // ★ Harold 명시 (2026-05-19): 광고 메시지면 (광고) prefix + 무료거부 suffix 자동 합성 — 실제 발송 형태 미리보기
-              //   원본(rawActiveBody)은 다듬기/발송 시 그대로 사용. 표시(activeBody)만 합성 — 실 발송은 /direct-send가 adEnabled=true로 자동 박음.
+              //   원본(rawActiveBody)은 다듬기/발송 시 그대로 사용. 표시(activeBody)만 합성 — 실 발송은 /direct-send가 adEnabled=true로 자동 처리.
               const isAd = !!proposal.channel.isAd;
               const rawReject = proposal.channel.rejectNumber || '';
               const formattedReject = rawReject
@@ -1121,11 +1121,11 @@ export default function AiOperatorPage() {
         {/* ★ D177-fix: 진행률 카드 영구 제거 (Harold 명시 — 업그레이드 노출 X / 방향성 이미 잡음) */}
         {showAbout && (
           <>
-            {/* ★ D177-ux2: AI Operator 페이지 안 sub-module 박음 (Harold 명시 — 헤더 dropdown X / 페이지 안 메뉴) */}
+            {/* ★ D177-ux2: AI Operator 페이지 안 sub-module 배치 (Harold 명시 — 헤더 dropdown X / 페이지 안 메뉴) */}
             <div className="mb-14">
               <p className="text-[10px] font-semibold tracking-[0.28em] text-white/40 mb-1.5 uppercase">AI Operator Modules</p>
               <h2 className="text-xl font-bold mb-1.5 text-white">함께 사용하는 AI 영역</h2>
-              <p className="text-sm text-white/50 mb-6">자연어 한 줄 진입 외에도 AI Operator 안에 박힌 영역 — 클릭 시 진입</p>
+              <p className="text-sm text-white/50 mb-6">자연어 한 줄 진입 외에도 AI Operator 안에 내장된 영역 — 클릭 시 진입</p>
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                 {SUB_MODULE_CARDS
                   .filter((card) => !card.adminOnly || (user as any)?.userType === 'company_admin')
@@ -1291,7 +1291,7 @@ export default function AiOperatorPage() {
         </div>
       )}
 
-      {/* ★ D165: 메시지 다듬기 모달 — AiRefineModal 재사용 (D152 emerald 톤). 선택된 안 → AI 풍성화 → onApply로 오버라이드 박힘 */}
+      {/* ★ D165: 메시지 다듬기 모달 — AiRefineModal 재사용 (D152 emerald 톤). 선택된 안 → AI 풍성화 → onApply로 오버라이드 적용 */}
       <AiRefineModal
         isOpen={showRefineModal}
         originalMessage={(() => {

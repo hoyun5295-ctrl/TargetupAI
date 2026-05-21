@@ -36,7 +36,7 @@ export default function AddressBookModal({
   );
 
   // ★ D185 (2026-05-20): 사용자 신고 — 대량 업로드(130,962건+) 시 로딩 안내 영역 누락 사고
-  //   업로드 4 영역(직접입력 등록 / 파일 파싱 / 컬럼 매핑 저장 / 현재 수신자 저장) 영역에 로딩 오버레이 영역 박힘
+  //   업로드 4 영역(직접입력 등록 / 파일 파싱 / 컬럼 매핑 저장 / 현재 수신자 저장) 영역에 로딩 오버레이 적용
   //   업로드 중 영역 = 모달 close 영역 차단 (중간 X 사고 영구 안전망)
   const [isUploading, setIsUploading] = useState(false);
   const [uploadingMsg, setUploadingMsg] = useState('주소록을 처리 중입니다...');

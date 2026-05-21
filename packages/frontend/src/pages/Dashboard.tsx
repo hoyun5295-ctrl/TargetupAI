@@ -1429,7 +1429,7 @@ export default function Dashboard() {
     }
   };
 // AI 캠페인 생성 (프롬프트 한 방)
-// ★ D171 영구 원칙: autoRelax 인자 박지 X — 타겟 자동완화 절대 금지. memory/feedback_no_target_auto_relax.md
+// ★ D171 영구 원칙: autoRelax 인자 사용 X — 타겟 자동완화 절대 금지. memory/feedback_no_target_auto_relax.md
 const handleAiCampaignGenerate = async (promptOverride?: string) => {
   const prompt = promptOverride || aiCampaignPrompt;
   if (!prompt.trim()) {
@@ -1438,7 +1438,7 @@ const handleAiCampaignGenerate = async (promptOverride?: string) => {
   }
   setAiLoading(true);
   try {
-    // 1. 타겟 + 채널 추천 받기 (D171: auto_relax 박지 X — 0건 매칭 시 발송 차단)
+    // 1. 타겟 + 채널 추천 받기 (D171: auto_relax 사용 X — 0건 매칭 시 발송 차단)
     const response = await aiApi.recommendTarget({ objective: prompt });
     const result = response.data;
     
@@ -2255,9 +2255,9 @@ const campaignData = {
         isCompanyAdmin={user?.userType === 'company_admin'}
         planCode={planInfo?.plan_code}
         onAiOperatorClick={async () => {
-          // ★ D178 (2026-05-19) AI Operator 메뉴 클릭 — backend isAiOperatorAllowed 박은 결과 박음
-          //   ENV AI_OPERATOR_ALLOWED_USERS 박힘 시 본 list 박은 사용자만 진입, 그 외 모두 BetaFeatureModal
-          //   ENV 박지 X 시 기존 ENT/BUS 게이팅 (안전 default)
+          // ★ D178 (2026-05-19) AI Operator 메뉴 클릭 — backend isAiOperatorAllowed 호출 결과 처리
+          //   ENV AI_OPERATOR_ALLOWED_USERS 설정 시 본 list 등록 사용자만 진입, 그 외 모두 BetaFeatureModal
+          //   ENV 미설정 시 기존 ENT/BUS 게이팅 (안전 default)
           try {
             const t = localStorage.getItem('token');
             const res = await fetch('/api/ai/operator/access', {
@@ -2270,14 +2270,14 @@ const campaignData = {
               setShowBetaModal(true);
             }
           } catch {
-            // 네트워크 실패 시 안전 default = BetaFeatureModal 박음
+            // 네트워크 실패 시 안전 default = BetaFeatureModal 표시
             setShowBetaModal(true);
           }
         }}
         onDirectSend={async () => {
           setShowDirectSend(true);
           // ★ D162-4 (2026-05-15): 직접발송 모달 진입 시 채널 강제 SMS reset.
-          //   AlimtalkSendModal에서 setDirectSendChannel('kakao_alimtalk') 박힌 후 잔존하는 사고 차단.
+          //   AlimtalkSendModal에서 setDirectSendChannel('kakao_alimtalk') 설정 후 잔존하는 사고 차단.
           setDirectSendChannel('sms');
           try {
             const token = localStorage.getItem('token');
@@ -3068,7 +3068,7 @@ const campaignData = {
                 emoji,
                 segmentType: lastSendConfig.type,
                 prompt: lastSendConfig.prompt,
-                // ★ D171 영구 원칙: autoRelax 박지 X. memory/feedback_no_target_auto_relax.md
+                // ★ D171 영구 원칙: autoRelax 사용 X. memory/feedback_no_target_auto_relax.md
                 selectedFields: lastSendConfig.selectedFields,
                 briefing: lastSendConfig.briefing,
                 url: lastSendConfig.url,

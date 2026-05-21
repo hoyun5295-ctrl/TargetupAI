@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { AlertCircle, ArrowLeft, Brain, Check, ChevronDown, ChevronUp, Clock, Edit2, GitMerge, Loader2, Play, Plus, RefreshCw, Sparkles, Target, Trash2, X, Zap } from 'lucide-react';
 
-// ★ D176 (2026-05-19): Continuous Agentic Operator — AI는 매일 제안서 박음 / 실행은 사용자 동의 후
+// ★ D176 (2026-05-19): Continuous Agentic Operator — AI는 매일 제안서 생성 / 실행은 사용자 동의 후
 //   영구 원칙: AI 단독 실행 X / Zero-Count 차단 / ENT 자동 실행 옵션 default OFF
 // ★ D177 (2026-05-19): Self-Optimizing Bandit (Thompson Sampling) — message variant 누적 학습 + 추천
 
@@ -30,7 +30,7 @@ interface BanditRecommendation {
   reasoning: string;
 }
 
-// ★ D179 (2026-05-19): Multi-Goal Decisioning 박음 UI 박음
+// ★ D179 (2026-05-19): Multi-Goal Decisioning UI 추가
 interface MultiGoalInput {
   name: string;
   description?: string;
@@ -104,9 +104,9 @@ export default function ContinuousOperatorPage() {
   const [editing, setEditing] = useState<Partial<ContinuousOperator> | null>(null);
   const [saving, setSaving] = useState(false);
   const [expandedProposal, setExpandedProposal] = useState<string | null>(null);
-  // ★ D177 Self-Optimizing Bandit — proposal expand 시점에 variants + recommendation 박음
+  // ★ D177 Self-Optimizing Bandit — proposal expand 시점에 variants + recommendation 로드
   const [variantsMap, setVariantsMap] = useState<Record<string, { variants: ProposalVariant[]; recommendation: BanditRecommendation | null }>>({});
-  // ★ D179 Multi-Goal Decisioning — 다중 목표 충돌 분석 박음
+  // ★ D179 Multi-Goal Decisioning — 다중 목표 충돌 분석 진입
   const [showMultiGoal, setShowMultiGoal] = useState(false);
   const [multiGoals, setMultiGoals] = useState<MultiGoalInput[]>([
     { name: '', description: '', weight: 0.5 },
@@ -117,9 +117,9 @@ export default function ContinuousOperatorPage() {
 
   const token = () => localStorage.getItem('token');
 
-  // ★ D177: proposal expand 시점에 variants + Bandit 추천 박음
+  // ★ D177: proposal expand 시점에 variants + Bandit 추천 로드
   const loadVariants = async (proposalId: string) => {
-    if (variantsMap[proposalId]) return; // 이미 박힘
+    if (variantsMap[proposalId]) return; // 이미 로드됨
     try {
       const res = await fetch(`/api/ai/operator/proposals/${proposalId}/variants`, {
         headers: { Authorization: `Bearer ${token()}` },
@@ -132,7 +132,7 @@ export default function ContinuousOperatorPage() {
         }));
       }
     } catch (e) {
-      console.error('variants 박음 실패:', e);
+      console.error('variants 로드 실패:', e);
     }
   };
 
@@ -145,11 +145,11 @@ export default function ContinuousOperatorPage() {
     }
   };
 
-  // ★ D179 Multi-Goal 박음
+  // ★ D179 Multi-Goal 분석 진입
   const handleMultiGoalAnalyze = async () => {
     const validGoals = multiGoals.filter((g) => g.name.trim().length > 0);
     if (validGoals.length < 2) {
-      alert('다중 목표 분석은 2건 이상 박혀야 합니다.');
+      alert('다중 목표 분석은 2건 이상 입력해야 합니다.');
       return;
     }
     setAnalyzing(true);
@@ -337,7 +337,7 @@ export default function ContinuousOperatorPage() {
             <button
               onClick={() => { setShowMultiGoal(true); setMultiGoalAnalysis(null); }}
               className="text-xs bg-violet-600 hover:bg-violet-700 text-white px-3 py-1.5 rounded-lg flex items-center gap-1.5"
-              title="다중 목표 박을 때 AI가 충돌 영역 분석 박음 (Multi-Goal Decisioning)"
+              title="다중 목표 설정 시 AI가 충돌 영역을 분석 (Multi-Goal Decisioning)"
             >
               <GitMerge className="w-3.5 h-3.5" />
               다중 목표 분석
@@ -378,7 +378,7 @@ export default function ContinuousOperatorPage() {
         <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 text-xs text-amber-900 flex items-start gap-2">
           <AlertCircle className="w-4 h-4 mt-0.5 shrink-0" />
           <div>
-            <strong>영구 원칙:</strong> AI는 매일 회고 + 제안서를 박을 뿐, 실행은 항상 사용자 승인 후에만 이루어집니다.
+            <strong>영구 원칙:</strong> AI는 매일 회고 + 제안서를 생성할 뿐, 실행은 항상 사용자 승인 후에만 이루어집니다.
             ENT 자동 실행 옵션은 default OFF — 활성 시에도 1,000건 미만 + 5만원 미만 + low risk + 비광고 임계값을 모두 만족해야만 자동 실행됩니다.
             타겟 0건 매칭 시 제안서가 박히지 않습니다.
           </div>
@@ -480,7 +480,7 @@ export default function ContinuousOperatorPage() {
                           <div>
                             <div className="font-bold text-gray-700 mb-1">타겟 분석</div>
                             <div className="text-gray-600">
-                              {target.criteria || '(기준 미박힘)'}
+                              {target.criteria || '(기준 미설정)'}
                               <span className="text-gray-400 ml-2">— 매칭 {target.count?.toLocaleString()} / 전체 {target.totalCount?.toLocaleString()}</span>
                             </div>
                           </div>
@@ -514,13 +514,13 @@ export default function ContinuousOperatorPage() {
                                 );
                               })}
                             </div>
-                            {/* D177 Bandit 추천 사유 박음 */}
+                            {/* D177 Bandit 추천 사유 표시 */}
                             {variantsMap[p.id]?.recommendation && (
                               <div className="mt-2 bg-indigo-50 border border-indigo-200 rounded p-2 text-indigo-900 text-[11px] flex items-start gap-1.5">
                                 <Target className="w-3 h-3 mt-0.5 shrink-0" />
                                 <div>
                                   <strong>Self-Optimizing 추천:</strong> {variantsMap[p.id].recommendation!.reasoning}
-                                  <div className="text-indigo-700 mt-0.5">★ 영구 원칙 정합 — 본 추천은 참고만, 발송은 사용자가 박은 variant로 진행됩니다.</div>
+                                  <div className="text-indigo-700 mt-0.5">★ 영구 원칙 정합 — 본 추천은 참고만, 발송은 사용자가 선택한 variant로 진행됩니다.</div>
                                 </div>
                               </div>
                             )}
@@ -605,8 +605,8 @@ export default function ContinuousOperatorPage() {
             <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 mb-4 text-xs text-amber-900 flex items-start gap-2">
               <AlertCircle className="w-4 h-4 mt-0.5 shrink-0" />
               <div>
-                <strong>영구 원칙:</strong> 다중 목표 박을 때 AI가 충돌 영역(동일 고객 동시 발송 / 메시지 중복 / 시점 겹침)을 박음 + 사용자 검토 후 영구 운영 박음.
-                실행은 사용자 승인 후에만 박음.
+                <strong>영구 원칙:</strong> 다중 목표 설정 시 AI가 충돌 영역(동일 고객 동시 발송 / 메시지 중복 / 시점 겹침)을 분석 + 사용자 검토 후 영구 운영 등록.
+                실행은 사용자 승인 후에만 진행됩니다.
               </div>
             </div>
 
@@ -682,7 +682,7 @@ export default function ContinuousOperatorPage() {
                     disabled={analyzing}
                     className="px-4 py-2 bg-violet-600 hover:bg-violet-700 text-white text-sm rounded-lg disabled:opacity-40 flex items-center gap-1.5"
                   >
-                    {analyzing ? <><Loader2 className="w-3.5 h-3.5 animate-spin" /> AI 분석 중...</> : <><Sparkles className="w-3.5 h-3.5" /> 충돌 분석 박음</>}
+                    {analyzing ? <><Loader2 className="w-3.5 h-3.5 animate-spin" /> AI 분석 중...</> : <><Sparkles className="w-3.5 h-3.5" /> 충돌 분석 시작</>}
                   </button>
                 </div>
               </>
@@ -697,7 +697,7 @@ export default function ContinuousOperatorPage() {
                 </div>
 
                 <div className="mb-4">
-                  <div className="text-xs font-bold text-gray-700 mb-2">박을 순서 (Recommended Order)</div>
+                  <div className="text-xs font-bold text-gray-700 mb-2">추천 순서 (Recommended Order)</div>
                   <div className="flex flex-wrap gap-2">
                     {multiGoalAnalysis.recommendedOrder.map((name, idx) => (
                       <div key={idx} className="bg-white border border-violet-300 rounded-full px-3 py-1 text-xs flex items-center gap-1.5">
@@ -805,7 +805,7 @@ export default function ContinuousOperatorPage() {
                     onChange={(e) => setEditing({ ...editing, status: e.target.value as OperatorStatus })}
                     className="w-full px-3 py-2 border rounded-lg text-sm"
                   >
-                    <option value="active">활성 (매일 제안서 박음)</option>
+                    <option value="active">활성 (매일 제안서 생성)</option>
                     <option value="paused">일시 중지</option>
                   </select>
                 </div>

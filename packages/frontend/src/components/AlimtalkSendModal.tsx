@@ -110,7 +110,7 @@ export default function AlimtalkSendModal({
   // ★ D162-4 (2026-05-15) 5차: Harold님 명시 정합 — 알림톡 모달 진입 시 매핑/state 전체 reset.
   //   기존엔 Dashboard 전역 state(kakaoTemplateVars/kakaoSelectedTemplate/등)가 직접발송 ↔ 직접타겟발송 간 유출되어
   //   옛 매핑값이 새 모달에 그대로 노출되는 치명 사고 발생. show=true 진입 시 모든 알림톡 state 초기화 +
-  //   initialRecipients 있으면 그 값으로 recipients 박음.
+  //   initialRecipients 있으면 그 값으로 recipients 적용.
   useEffect(() => {
     if (show) {
       // 알림톡 채널/매핑 state 초기화 — 직접발송 ↔ 타겟발송 간 매핑 유출 차단
@@ -147,7 +147,7 @@ export default function AlimtalkSendModal({
 
   // ★ D162-4 (2026-05-15) 8차: initialRecipients 변경 감지 — Harold님 명시 정합.
   //   직접타겟발송에서 추출된 수신자가 인계될 때 useEffect deps에 initialRecipients 누락되어 빈 배열로 박히던 사고 영구 차단.
-  //   show=true 시 initialRecipients가 있으면 그대로 박음, 없으면 빈 배열(직접발송 자체 입력).
+  //   show=true 시 initialRecipients가 있으면 그대로 적용, 없으면 빈 배열(직접발송 자체 입력).
   //   매핑/state reset은 show=true 진입 시 1회만(위 useEffect) — 사용자 매핑 변경이 reset되는 사고 방지.
   useEffect(() => {
     if (!show) return;
@@ -155,7 +155,7 @@ export default function AlimtalkSendModal({
   }, [show, initialRecipients]);
 
   // ★ D162-4 (2026-05-15) 3차: 파일 컬럼 매핑 모달 — Harold님 명시 정합 "직접발송과 똑같이 필드선택 가능".
-  //   파일 업로드 직후 매핑 모달 진입 → 핸드폰 컬럼 + 템플릿 변수별 컬럼 매핑 → 적용 시 recipients + variableMap 자동 박힘.
+  //   파일 업로드 직후 매핑 모달 진입 → 핸드폰 컬럼 + 템플릿 변수별 컬럼 매핑 → 적용 시 recipients + variableMap 자동 적용.
   const [showMapping, setShowMapping] = useState(false);
   const [fileHeaders, setFileHeaders] = useState<string[]>([]);
   const [fileAllData, setFileAllData] = useState<any[]>([]);
@@ -298,7 +298,7 @@ export default function AlimtalkSendModal({
       const autoPhone =
         headers.find((h) => /휴대폰|전화|핸드폰|연락처|phone|mobile|hp/i.test(h)) || headers[0] || '';
       setPhoneColumn(autoPhone);
-      // 템플릿 변수 자동 매칭 — 변수명이 컬럼명과 일치하면 `@@컬럼@@` placeholder 박음
+      // 템플릿 변수 자동 매칭 — 변수명이 컬럼명과 일치하면 `@@컬럼@@` placeholder 적용
       if (kakaoSelectedTemplate?.content) {
         const vars = (kakaoSelectedTemplate.content.match(/#\{[^}]+\}/g) || []) as string[];
         const uniqueVars = Array.from(new Set(vars));
@@ -322,7 +322,7 @@ export default function AlimtalkSendModal({
     }
   };
 
-  // ★ D162-4 (2026-05-15) 3차: 매핑 적용 — 핸드폰 컬럼 + (변수 매칭은 variableMap에 박힘) → recipients 박음.
+  // ★ D162-4 (2026-05-15) 3차: 매핑 적용 — 핸드폰 컬럼 + (변수 매칭은 variableMap에 적용) → recipients 적용.
   //   각 row는 파일 헤더 그대로 보존하여 발송 시 row[헤더명]으로 자동 치환 (AlimtalkVariableMappingPanel의 sampleRecipient 자동 치환과 정합).
   const applyMapping = () => {
     if (!phoneColumn) {
@@ -422,7 +422,7 @@ export default function AlimtalkSendModal({
 
   // ★ D188 (2026-05-21) 영업팀장 신고 #6-(2): close 시 sending state + body overflow 명시 reset 안전망.
   //   모달 close 후 직접 발송 패널 복귀 시 스크롤 차단 잔존 사고 영구 차단.
-  //   document.body.style.overflow 박힌 영역 자체는 본 모달에서 변경 X 확인됨 — 영구 안전망으로 reset 명시.
+  //   document.body.style.overflow 적용된 영역 자체는 본 모달에서 변경 X 확인됨 — 영구 안전망으로 reset 명시.
   const handleClose = () => {
     setSending(false);
     try {
@@ -704,7 +704,7 @@ export default function AlimtalkSendModal({
         `}</style>
       </div>
 
-      {/* ★ D162-4 (2026-05-15) 2차: 주소록 모달 — Harold님 명시 정합. recipients/setRecipients position에 위임 → 그룹 선택 시 자동 박힘. */}
+      {/* ★ D162-4 (2026-05-15) 2차: 주소록 모달 — Harold님 명시 정합. recipients/setRecipients position에 위임 → 그룹 선택 시 자동 적용. */}
       <AddressBookModal
         show={showAddressBook}
         onClose={() => setShowAddressBook(false)}
@@ -714,7 +714,7 @@ export default function AlimtalkSendModal({
       />
 
       {/* ★ D162-4 (2026-05-15) 3차: 파일 컬럼 매핑 모달 — Harold님 명시 정합 "직접발송과 똑같이 필드선택 가능".
-          핸드폰 컬럼 + 템플릿 변수별 컬럼 매핑 + 미리보기. 적용 시 recipients 박음 + 변수 placeholder 자동 박힘. */}
+          핸드폰 컬럼 + 템플릿 변수별 컬럼 매핑 + 미리보기. 적용 시 recipients 적용 + 변수 placeholder 자동 적용. */}
       {showMapping && (
         <div
           className="fixed inset-0 bg-black/50 backdrop-blur-sm z-[60] flex items-center justify-center p-4"

@@ -14,7 +14,7 @@
  *  - 자동 매칭: 변수명이 customerFieldOptions의 key 또는 label과 일치하면 `@@필드키@@` placeholder
  *  - 수동 매칭: 사용자가 드롭다운으로 고객 필드 선택 또는 직접 입력
  *  - 첫 수신자 row(sampleRecipient)가 있으면 실시간 치환 미리보기
- *  - 자동발송 케이스(수신자 0건)는 매핑 정의만 박음 + 안내문 노출
+ *  - 자동발송 케이스(수신자 0건)는 매핑 정의만 저장 + 안내문 노출
  */
 
 import { useMemo } from 'react';

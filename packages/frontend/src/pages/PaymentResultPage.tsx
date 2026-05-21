@@ -1,6 +1,6 @@
 // PaymentResultPage — 이니시스 결제 결과 fallback 페이지
-// 진정 본질: 결제 완료 후 새 창에서 backend HTML이 자동 close 박음.
-// 브라우저 영역에서 close 영역 차단 시 본 페이지 영역 표시 (fallback).
+// 진정 본질: 결제 완료 후 새 창에서 backend HTML이 자동 close 처리.
+// 브라우저 영역에서 close 차단 시 본 페이지 영역 표시 (fallback).
 // SoT: status/legacy-payment-migration.md (D184)
 
 import { useEffect, useState } from 'react';

@@ -1013,7 +1013,7 @@ export default function AutoSendFormModal({ campaign, aiPremiumEnabled, onClose,
 
                 {/* ★ D130: 알림톡 채널 선택 시 공용 Panel
                     ★ D162-4 (2026-05-15): AlimtalkVariableMappingPanel 같이 노출 — 자동발송도 직접발송과 동일 화면(Harold님 명시).
-                       자동발송은 수신자가 발송 시점 결정이라 sampleRecipient=null. 매핑 정의만 박혀서 발송 시점 자동 치환. */}
+                       자동발송은 수신자가 발송 시점 결정이라 sampleRecipient=null. 매핑 정의만 저장되어 발송 시점 자동 치환. */}
                 {channel === 'alimtalk' && (
                   <div className="space-y-3">
                     <AlimtalkChannelPanel

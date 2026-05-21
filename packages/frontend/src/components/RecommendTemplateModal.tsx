@@ -8,7 +8,7 @@ interface SavedSegment {
   emoji: string;
   segment_type: 'hanjullo' | 'custom';
   prompt: string | null;
-  // ★ D171 영구 원칙: auto_relax DB 컬럼은 보존되지만 항상 false 박혀있고 frontend는 무시. memory/feedback_no_target_auto_relax.md
+  // ★ D171 영구 원칙: auto_relax DB 컬럼은 보존되지만 항상 false 고정이고 frontend는 무시. memory/feedback_no_target_auto_relax.md
   auto_relax: boolean;
   selected_fields: string[] | null;
   briefing: string | null;
@@ -30,7 +30,7 @@ interface CustomPreloadData {
 interface RecommendTemplateModalProps {
   show: boolean;
   onClose: () => void;
-  // ★ D171 영구 원칙: autoRelax 인자 박지 X. memory/feedback_no_target_auto_relax.md
+  // ★ D171 영구 원칙: autoRelax 인자 사용 X. memory/feedback_no_target_auto_relax.md
   onSelectHanjullo: (prompt: string) => void;
   onSelectCustom: (preloadData: CustomPreloadData) => void;
 }

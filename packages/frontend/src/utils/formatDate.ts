@@ -258,7 +258,7 @@ export function formatDateTimeShort(dateStr: string | null | undefined): string 
  * 이전 inline 정규식 패턴(toISOString에서 대시·콜론·T 문자 제거)이 Tailwind JIT에
  * arbitrary value 클래스로 오스캔되어 CSS 빌드 WARNING 발생 → 컨트롤타워화.
  * ★ D170+ (2026-05-19): 주석 안의 정규식 텍스트 자체도 JIT scanner가 재오스캔하는 사고가
- *   Harold님 명시로 재발견되어 패턴 표기를 자연어로 변경. 정규식 리터럴이나 대괄호 박지 말 것.
+ *   Harold님 명시로 재발견되어 패턴 표기를 자연어로 변경. 정규식 리터럴이나 대괄호 사용 금지.
  * 사용처: CustomerDBModal 등 파일 다운로드 시 파일명 suffix.
  */
 export function compactTimestamp(date: Date = new Date()): string {
@@ -958,7 +958,7 @@ export function buildAdSubjectFront(subject: string, msgType: string, isAd: bool
  * 항상 "순수 본문" 상태로 만든 뒤, is_ad 플래그에 따라 다시 정확히 부착한다.
  *
  * 이로써:
- *  - is_ad=false 인데 본문에 (광고)가 박혀있는 D103 위반 데이터 → 표시 시 자동 제거
+ *  - is_ad=false 인데 본문에 (광고)가 포함된 D103 위반 데이터 → 표시 시 자동 제거
  *  - is_ad=true 인 정상 데이터 → strip 후 다시 정확히 부착
  *
  * 정규식은 backend buildAdMessage 가 만드는 정확한 패턴만 매칭 — 본문 내부 텍스트 훼손 방지.

@@ -4,7 +4,7 @@ import { AlertCircle, ArrowLeft, BookOpen, FileText, Loader2, Search, Sparkles }
 
 // ★ D181 (2026-05-19): Anthropic Citations 페이지
 //   사용자 자연어 질문 → 회사 데이터 documents → AI 응답 + 근거 인용
-//   영구 원칙 #4 사용자 신뢰 본질 — "AI가 박은 근거 박음"
+//   영구 원칙 #4 사용자 신뢰 본질 — "AI가 제시한 근거 표시"
 
 interface CitationSpan {
   citedText: string;

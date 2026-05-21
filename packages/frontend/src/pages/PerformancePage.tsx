@@ -216,7 +216,7 @@ export default function PerformancePage() {
                 {advice.suggestedObjective && (
                   <div className="border-t border-indigo-200 pt-4">
                     <div className="text-xs text-gray-600 mb-2">
-                      "<span className="font-medium">{advice.suggestedObjective}</span>" — AI Operator에 박을 자연어 한 줄
+                      "<span className="font-medium">{advice.suggestedObjective}</span>" — AI Operator에 사용할 자연어 한 줄
                     </div>
                     <button
                       onClick={goAiOperatorWithObjective}

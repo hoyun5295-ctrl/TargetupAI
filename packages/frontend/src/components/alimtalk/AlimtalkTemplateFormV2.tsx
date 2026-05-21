@@ -481,7 +481,7 @@ export default function AlimtalkTemplateFormV2({
               D151+ fieldset disabled 의도(readOnly 시 입력 차단)는 wrapper div의 pointer-events-none + opacity로 대체.
               Footer 버튼은 fieldset 외부였어서 readOnly 영향 X 정합.
             ★ D162-4 (2026-05-15) PDF 0515 알림톡 #2 root cause fix:
-              기존 wrapper에 `pointer-events-none` 박혀있어 readOnly 상세보기 모달에서 스크롤 휠/터치도 차단 →
+              기존 wrapper에 `pointer-events-none` 적용되어 readOnly 상세보기 모달에서 스크롤 휠/터치도 차단 →
               본문 영역 아래로 내릴 수 없는 사고. wrapper에서 pointer-events-none 제거 +
               자식 input/select/textarea/button/label 셀렉터로만 pointer-events-none 적용 →
               스크롤(overflow-y-auto)은 살아있고 입력만 차단되는 정합. */}

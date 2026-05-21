@@ -3,7 +3,7 @@ import { useState } from 'react';
 
 interface AiSendTypeModalProps {
   onClose: () => void;
-  // ★ D171 영구 원칙: autoRelax 인자 박지 X — 타겟 자동완화 절대 금지. memory/feedback_no_target_auto_relax.md
+  // ★ D171 영구 원칙: autoRelax 인자 사용 X — 타겟 자동완화 절대 금지. memory/feedback_no_target_auto_relax.md
   onSelectHanjullo: (prompt: string) => void;
   onSelectCustom: () => void;
   initialPrompt?: string;
