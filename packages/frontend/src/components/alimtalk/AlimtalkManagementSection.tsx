@@ -600,20 +600,22 @@ export default function AlimtalkManagementSection() {
           )}
         </div>
       ) : (
-        <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-          <table className="w-full text-sm">
-            <thead className="bg-gray-50 text-xs text-gray-500">
+        // ★ D188-fix2 (2026-05-21) 영업팀장 추가 신고: 템플릿코드 컬럼 추가로 가로 폭 초과 → 헤더/등록일시/관리 줄바꿈 사고.
+        //   영구 fix = overflow-x-auto 가로 스크롤 안전망 + 모든 td/th에 whitespace-nowrap + 작은 폰트 (text-xs 통일).
+        <div className="bg-white rounded-xl border border-gray-200 overflow-x-auto">
+          <table className="w-full text-xs">
+            <thead className="bg-gray-50 text-[11px] text-gray-500">
               <tr>
-                <th className="text-left px-4 py-2">템플릿</th>
+                <th className="text-left px-3 py-2 whitespace-nowrap">템플릿</th>
                 {/* ★ D188 (2026-05-21) 영업팀장 신고 #3: 템플릿코드 컬럼 신규 — 사용자가 발송 매칭/디버그용 표시 정합. */}
-                <th className="text-left px-4 py-2">템플릿코드</th>
-                <th className="text-left px-4 py-2">프로필</th>
-                <th className="text-left px-4 py-2">등록자</th>
-                <th className="text-center px-4 py-2">유형</th>
-                <th className="text-center px-4 py-2">상태</th>
-                <th className="text-left px-4 py-2">등록일시</th>
-                <th className="text-left px-4 py-2">업데이트</th>
-                <th className="text-right px-4 py-2">관리</th>
+                <th className="text-left px-3 py-2 whitespace-nowrap">템플릿코드</th>
+                <th className="text-left px-3 py-2 whitespace-nowrap">프로필</th>
+                <th className="text-left px-3 py-2 whitespace-nowrap">등록자</th>
+                <th className="text-center px-3 py-2 whitespace-nowrap">유형</th>
+                <th className="text-center px-3 py-2 whitespace-nowrap">상태</th>
+                <th className="text-left px-3 py-2 whitespace-nowrap">등록일시</th>
+                <th className="text-left px-3 py-2 whitespace-nowrap">업데이트</th>
+                <th className="text-right px-3 py-2 whitespace-nowrap">관리</th>
               </tr>
             </thead>
             <tbody>
@@ -636,8 +638,8 @@ export default function AlimtalkManagementSection() {
                 void isKreq; // KREQ는 액션 버튼 미노출(상세보기만) — 상태 라벨로만 표시
                 return (
                   <tr key={t.id} className="border-t border-gray-100 hover:bg-gray-50">
-                    <td className="px-4 py-2">
-                      <div className="font-medium text-gray-900">{t.template_name}</div>
+                    <td className="px-3 py-2 whitespace-nowrap">
+                      <div className="font-medium text-gray-900 text-xs">{t.template_name}</div>
                       {/* ★ D162-4 (2026-05-15) 2차: Harold님 명시 정합 — 반려사유 펼침 영역 제거.
                           row에 길게 펼쳐지던 사유 글씨가 화면 어지러움 유발. 관리 컬럼의 '반려사유' 버튼 클릭 시 모달로 상세 노출. */}
                       {t.custom_template_code && (
@@ -647,13 +649,13 @@ export default function AlimtalkManagementSection() {
                       )}
                     </td>
                     {/* ★ D188 (2026-05-21) 영업팀장 신고 #3: 템플릿코드 컬럼 row. font-mono + 작은 텍스트 + select-text. */}
-                    <td className="px-4 py-2 font-mono text-[11px] text-gray-500 select-text cursor-text">
+                    <td className="px-3 py-2 font-mono text-[10px] text-gray-500 select-text cursor-text whitespace-nowrap">
                       {t.template_code || '-'}
                     </td>
-                    <td className="px-4 py-2 text-xs text-gray-600">
+                    <td className="px-3 py-2 text-[11px] text-gray-600 whitespace-nowrap">
                       {t.profile_name || '-'}
                     </td>
-                    <td className="px-4 py-2 text-xs text-gray-600">
+                    <td className="px-3 py-2 text-[11px] text-gray-600 whitespace-nowrap">
                       {t.created_by_name ? (
                         <>
                           <div>{t.created_by_name}</div>
@@ -667,27 +669,28 @@ export default function AlimtalkManagementSection() {
                         <span className="text-gray-300">-</span>
                       )}
                     </td>
-                    <td className="text-center px-4 py-2 text-xs text-gray-600">
+                    <td className="text-center px-3 py-2 text-[11px] text-gray-600 whitespace-nowrap">
                       {formatTemplateType(t.message_type, t.emphasize_type)}
                     </td>
-                    <td className="text-center px-4 py-2">
+                    <td className="text-center px-3 py-2 whitespace-nowrap">
                       <span
-                        className={`inline-block text-[11px] px-2 py-0.5 rounded ${st.cls}`}
+                        className={`inline-block text-[10px] px-2 py-0.5 rounded ${st.cls}`}
                       >
                         {st.label}
                       </span>
                     </td>
-                    <td className="px-4 py-2 text-xs text-gray-500">
+                    <td className="px-3 py-2 text-[11px] text-gray-500 whitespace-nowrap">
                       {t.created_at
                         ? new Date(t.created_at).toLocaleString('ko-KR')
                         : '-'}
                     </td>
-                    <td className="px-4 py-2 text-xs text-gray-500">
+                    <td className="px-3 py-2 text-[11px] text-gray-500 whitespace-nowrap">
                       {t.updated_at
                         ? new Date(t.updated_at).toLocaleString('ko-KR')
                         : '-'}
                     </td>
-                    <td className="text-right px-4 py-2 space-x-1">
+                    <td className="text-right px-3 py-2 whitespace-nowrap">
+                      <div className="inline-flex flex-nowrap gap-1 items-center">
                       {/* 상세보기: 모든 상태에서 노출 (read-only 모달) */}
                       <button
                         type="button"
@@ -787,6 +790,7 @@ export default function AlimtalkManagementSection() {
                           이력
                         </button>
                       )}
+                      </div>
                     </td>
                   </tr>
                 );
