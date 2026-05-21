@@ -1517,15 +1517,21 @@
    - footer 좌우 분할 → 모바일 stacked
    ============================================================ */
 @media (max-width: 767px) {
+  /* backdrop = 스크롤 컨테이너 (모달이 자유 높이 → backdrop이 스크롤 위임) */
   .ds-backdrop {
     padding: 0;
-    align-items: stretch;
+    align-items: flex-start;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
   }
 
+  /* 모달 = 자유 높이 + backdrop 스크롤 위임 */
   .ds-modal {
     width: 100vw;
-    height: 100vh;
-    max-height: 100vh;
+    height: auto;
+    min-height: 100vh;
+    max-height: none;
+    overflow: visible;
     border-radius: 0;
   }
 
@@ -1566,13 +1572,15 @@
     font-size: 11.5px;
   }
 
-  /* 2컬럼 body → 1컬럼 stacked + 세로 스크롤 */
+  /* 2컬럼 body → 1컬럼 stacked + overflow visible (부모 backdrop이 스크롤) */
   .ds-modal__body {
     grid-template-columns: 1fr;
-    overflow-y: auto;
+    overflow: visible;
   }
   .ds-modal__body > section {
     padding: 12px 14px;
+    overflow: visible;
+    min-height: auto;
   }
   /* 좌우 구분선 영역 숨김 */
   .ds-modal__vdiv {
