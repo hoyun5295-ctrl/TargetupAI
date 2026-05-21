@@ -62,6 +62,7 @@ interface ExecutionRow {
   stats_total_completed: number;
   stats_total_cost: number;
   created_by: string | null;
+  journey_callback_number: string | null;
 }
 
 interface StepRow {
@@ -72,6 +73,7 @@ interface StepRow {
   delay_hours: number;
   channel: string | null;
   message_template: string | null;
+  is_ad: boolean;
 }
 
 interface CustomerRow {
@@ -111,7 +113,8 @@ export async function runJourneyExecutor(): Promise<{ processed: number; sent: n
          e.current_step_order, e.status, e.next_run_at, e.entered_at, e.total_cost,
          j.company_id, j.status AS journey_status,
          j.budget_monthly, j.threshold_cost_per_step, j.threshold_recipients_per_step,
-         j.stats_total_completed, j.stats_total_cost, j.created_by
+         j.stats_total_completed, j.stats_total_cost, j.created_by,
+         j.callback_number AS journey_callback_number
        FROM journey_executions e
        JOIN journeys j ON e.journey_id = j.id
        WHERE e.status = 'active'
@@ -166,7 +169,7 @@ async function processExecution(exec: ExecutionRow): Promise<StepOutcome> {
   // 1. 다음 step 조회 (현재 current_step_order + 1)
   const nextStepOrder = exec.current_step_order + 1;
   const stepRes = await query(
-    `SELECT id, journey_id, step_order, step_type, delay_hours, channel, message_template
+    `SELECT id, journey_id, step_order, step_type, delay_hours, channel, message_template, is_ad
      FROM journey_steps
      WHERE journey_id = $1::uuid AND step_order = $2`,
     [exec.journey_id, nextStepOrder]
@@ -228,14 +231,22 @@ async function processExecution(exec: ExecutionRow): Promise<StepOutcome> {
     return 'failed';
   }
 
+  // 5-2. 회신번호 정합 — 회사 admin 선택(journey.callback_number) 우선, fallback customer.callback
+  const callbackNumber = String(exec.journey_callback_number || customer.callback || '').trim();
+  if (!callbackNumber) {
+    await pauseJourney(exec.journey_id, '회신번호가 비어있어 발송 차단됨');
+    await logFailedStep(exec.execution_id, step.id, 'callback_number_empty');
+    return 'failed';
+  }
+
   // 6. 메시지 + 비용 계산
-  const channelType = (step.channel || 'sms').toUpperCase();
+  const channelType = (step.channel || 'lms').toUpperCase();
   const msgType = channelType === 'LMS' || channelType === 'MMS' ? channelType : 'SMS';
   const fieldMappings = await prepareFieldMappings(exec.company_id);
   const opt080Number = await getOpt080Number(exec.created_by, exec.company_id);
 
-  // 광고 여부: step의 광고성은 기본 false (Custom 영역은 회사 admin이 isAd 설정 — Step 1-A 미적용, 추후 확장)
-  const isAd = false;
+  // 광고 표기 — step.is_ad (DB default true) → buildAdMessage가 (광고)+080+KISA 제목 자동 합성
+  const isAd = step.is_ad !== false;
 
   const { message, subject } = prepareSendMessage(
     step.message_template || '',
@@ -296,7 +307,6 @@ async function processExecution(exec: ExecutionRow): Promise<StepOutcome> {
     return 'failed';
   }
 
-  const callbackNumber = customer.callback || '';
   const campaignRes = await query(
     `INSERT INTO campaigns (
       company_id, campaign_name, message_type, message_content, subject, message_subject, message_template,

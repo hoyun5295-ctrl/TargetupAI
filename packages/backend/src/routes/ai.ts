@@ -54,6 +54,8 @@ import {
   getJourneyDetail,
   listExecutions,
   getJourneyStats,
+  updateJourneyStep,
+  updateJourneyCallback,
   JOURNEY_TEMPLATES,
   JourneyTemplateCode,
   JourneyStatus,
@@ -1548,6 +1550,7 @@ router.get('/operator/journeys', async (req: Request, res: Response) => {
       allowReentry: t.allowReentry,
       reentryCooldownDays: t.reentryCooldownDays,
       stepCount: t.steps.length,
+      steps: t.steps,
     }));
 
     return res.json({ success: true, journeys, templates });
@@ -1573,6 +1576,8 @@ router.post('/operator/journeys', async (req: Request, res: Response) => {
       templateCode,
       name,
       customObjective,
+      callbackNumber,
+      steps,
       thresholdRecipients,
       thresholdCost,
       thresholdRiskLevel,
@@ -1584,6 +1589,9 @@ router.post('/operator/journeys', async (req: Request, res: Response) => {
     if (!templateCode || !JOURNEY_TEMPLATES[templateCode as JourneyTemplateCode]) {
       return res.status(400).json({ success: false, error: '템플릿 코드가 유효하지 않습니다.' });
     }
+    if (!callbackNumber || !String(callbackNumber).trim()) {
+      return res.status(400).json({ success: false, error: '회신번호 선택은 필수입니다.' });
+    }
 
     const { journeyId } = await createJourneyFromTemplate({
       companyId,
@@ -1591,6 +1599,8 @@ router.post('/operator/journeys', async (req: Request, res: Response) => {
       templateCode: templateCode as JourneyTemplateCode,
       name,
       customObjective,
+      callbackNumber: String(callbackNumber),
+      steps: Array.isArray(steps) ? steps : undefined,
       thresholdRecipients: thresholdRecipients ?? null,
       thresholdCost: thresholdCost ?? null,
       thresholdRiskLevel: thresholdRiskLevel || 'low',
@@ -1639,12 +1649,130 @@ router.post('/operator/journeys/:id/activate', async (req: Request, res: Respons
       return res.status(403).json({ success: false, error: 'AI Operator 진입 권한이 없습니다.', code: 'AI_OPERATOR_GATED' });
     }
 
-    const ok = await activateJourney(companyId, req.params.id, userId);
-    if (!ok) return res.status(404).json({ success: false, error: 'draft / paused 상태 여정만 활성화 가능합니다.' });
+    const result = await activateJourney(companyId, req.params.id, userId);
+    if (!result.ok) return res.status(400).json({ success: false, error: result.reason || '활성화 실패' });
     return res.json({ success: true });
   } catch (err: any) {
     console.error('[Journeys activate] 오류:', err);
     return res.status(500).json({ success: false, error: err?.message || '활성화 실패' });
+  }
+});
+
+// PATCH /api/ai/operator/journeys/:id/steps/:stepId — step 본문 갱신 (활성화 전 회사 admin 편집)
+router.patch('/operator/journeys/:id/steps/:stepId', async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+    const planCtx = await loadPlanContext(companyId);
+    if (!planCtx) return res.status(404).json({ success: false, error: '회사 정보를 찾을 수 없습니다.' });
+    if (!isAiOperatorAllowed(planCtx, req.user)) {
+      return res.status(403).json({ success: false, error: 'AI Operator 진입 권한이 없습니다.', code: 'AI_OPERATOR_GATED' });
+    }
+    const { messageTemplate, channel, delayHours, isAd } = req.body || {};
+    const ok = await updateJourneyStep(companyId, req.params.id, req.params.stepId, {
+      messageTemplate,
+      channel,
+      delayHours: delayHours != null ? Number(delayHours) : undefined,
+      isAd,
+    });
+    if (!ok) return res.status(404).json({ success: false, error: 'step을 찾을 수 없거나 수정 권한이 없습니다.' });
+    return res.json({ success: true });
+  } catch (err: any) {
+    console.error('[Journeys update step] 오류:', err);
+    return res.status(500).json({ success: false, error: err?.message || 'step 수정 실패' });
+  }
+});
+
+// PATCH /api/ai/operator/journeys/:id/callback — 회신번호 갱신
+router.patch('/operator/journeys/:id/callback', async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+    const planCtx = await loadPlanContext(companyId);
+    if (!planCtx) return res.status(404).json({ success: false, error: '회사 정보를 찾을 수 없습니다.' });
+    if (!isAiOperatorAllowed(planCtx, req.user)) {
+      return res.status(403).json({ success: false, error: 'AI Operator 진입 권한이 없습니다.', code: 'AI_OPERATOR_GATED' });
+    }
+    const { callbackNumber } = req.body || {};
+    if (!callbackNumber || !String(callbackNumber).trim()) {
+      return res.status(400).json({ success: false, error: '회신번호는 필수입니다.' });
+    }
+    const ok = await updateJourneyCallback(companyId, req.params.id, String(callbackNumber));
+    if (!ok) return res.status(404).json({ success: false, error: '여정을 찾을 수 없거나 활성 상태입니다 (먼저 일시정지).' });
+    return res.json({ success: true });
+  } catch (err: any) {
+    console.error('[Journeys update callback] 오류:', err);
+    return res.status(500).json({ success: false, error: err?.message || '회신번호 수정 실패' });
+  }
+});
+
+// GET /api/ai/operator/journeys-callback-numbers — 회사 발신번호 합집합 (드롭다운)
+router.get('/operator/journeys-callback-numbers', async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    const userId = req.user?.userId;
+    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+    const planCtx = await loadPlanContext(companyId);
+    if (!planCtx) return res.status(404).json({ success: false, error: '회사 정보를 찾을 수 없습니다.' });
+    if (!isAiOperatorAllowed(planCtx, req.user)) {
+      return res.status(403).json({ success: false, error: 'AI Operator 진입 권한이 없습니다.', code: 'AI_OPERATOR_GATED' });
+    }
+    const r = await query(
+      `SELECT DISTINCT phone, source, description, is_default FROM (
+         SELECT REPLACE(phone_number, '-', '') AS phone, 'sender' AS source, description, false AS is_default
+         FROM sender_numbers
+         WHERE company_id = $1::uuid AND is_active = true AND is_verified = true
+         UNION
+         SELECT REPLACE(phone, '-', '') AS phone, 'callback' AS source, label AS description, is_default
+         FROM callback_numbers
+         WHERE company_id = $1::uuid
+       ) src
+       WHERE phone IS NOT NULL AND LENGTH(phone) >= 8
+       ORDER BY is_default DESC NULLS LAST, phone ASC`,
+      [companyId]
+    );
+    const opt080 = await getOpt080Number(userId || null, companyId).catch(() => '');
+    return res.json({ success: true, numbers: r.rows, opt080Number: opt080 });
+  } catch (err: any) {
+    console.error('[Journeys callback-numbers] 오류:', err);
+    return res.status(500).json({ success: false, error: err?.message || '회신번호 조회 실패' });
+  }
+});
+
+// POST /api/ai/operator/journeys-refine-step — AI 문안 다듬기 (회사 admin이 작성한 step 본문 정련)
+router.post('/operator/journeys-refine-step', async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+    const planCtx = await loadPlanContext(companyId);
+    if (!planCtx) return res.status(404).json({ success: false, error: '회사 정보를 찾을 수 없습니다.' });
+    if (!isAiOperatorAllowed(planCtx, req.user)) {
+      return res.status(403).json({ success: false, error: 'AI Operator 진입 권한이 없습니다.', code: 'AI_OPERATOR_GATED' });
+    }
+    const { message, tone, channel } = req.body || {};
+    if (!message || !String(message).trim()) {
+      return res.status(400).json({ success: false, error: '메시지 본문이 비어있습니다.' });
+    }
+    const compRes = await query(
+      `SELECT company_name, COALESCE(brand_name, company_name) AS brand_name,
+              COALESCE(reject_number, opt_out_080_number) AS reject_number
+       FROM companies WHERE id = $1::uuid`,
+      [companyId]
+    );
+    const c = compRes.rows[0] || {};
+    const maxBytes = channel === 'sms' ? 90 : 2000;
+
+    const { candidates } = await refineDirectMessage({
+      message: String(message),
+      tone: tone || 'seasonal',
+      companyName: c.brand_name || c.company_name || '',
+      maxBytes,
+      rejectNumber: c.reject_number || '',
+    });
+    return res.json({ success: true, candidates });
+  } catch (err: any) {
+    console.error('[Journeys refine step] 오류:', err);
+    return res.status(500).json({ success: false, error: err?.message || 'AI 다듬기 실패' });
   }
 });
 
