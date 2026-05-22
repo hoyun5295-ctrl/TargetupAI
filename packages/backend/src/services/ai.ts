@@ -5,6 +5,9 @@ import { query } from '../config/database';
 import { AI_MODELS, AI_MAX_TOKENS, TIMEOUTS } from '../config/defaults';
 import { buildFilterWhereClauseCompat } from '../utils/customer-filter';
 import { cleanLeftoverVars } from '../utils/messageUtils';
+// ★ D210+ Phase 2 (Harold 명시 2026-05-23): CT-58 — 회사별 customer DB 실측 데이터 프로필.
+//   AI 시스템 프롬프트 안 동적 주입 → 어설픈 개인화 사고 차단.
+import { CompanyDataProfile, formatProfileForAiPrompt } from '../utils/company-data-profile';
 
 if (!process.env.ANTHROPIC_API_KEY) console.warn('[AI] ANTHROPIC_API_KEY not configured — Claude AI 기능 비활성 상태');
 if (!process.env.OPENAI_API_KEY) console.warn('[AI] OPENAI_API_KEY not configured — OpenAI 기능 비활성 상태');
@@ -980,6 +983,10 @@ export async function generateMessages(
     // ★ 신규: 변수 카탈로그 (customer_schema에서 전달)
     availableVarsCatalog?: Record<string, VarCatalogEntry>;
     availableVars?: string[];
+    // ★ D210+ Phase 2 (Harold 명시 2026-05-23): 회사 customer DB 실측 프로필 (CT-58 company-data-profile).
+    //   AI userMessage 안 동적 주입 → 안전(70%+) / 분기(30~70%) / 차단(30%-) 3단계 안내.
+    //   본질 = 어설픈 개인화 사고 차단 ("개인화 어설프게 실수로 들어가는게 더 안좋다" — Harold 명시).
+    companyDataProfile?: CompanyDataProfile;
     // ★ D120: 고객사 최근 발송 문안 (few-shot 학습용)
     recentMessages?: string[];
     // ★ D170+ (2026-05-19) Harold 명시 — AI Operator 메시지 = Opus 4.7로 격상:
@@ -1022,6 +1029,12 @@ export async function generateMessages(
     ? personalizationVars
     : availableVars;
   const varCatalogPrompt = buildVarCatalogPrompt(varCatalog, effectiveVars);
+
+  // ★ D210+ Phase 2 (Harold 명시 2026-05-23): 회사 실측 데이터 프로필 동적 주입 (CT-58).
+  //   안전/분기/차단 3단계 분류 + 채워짐 비율 명시 → AI가 어설픈 변수 임의 작성 차단.
+  const companyProfilePrompt = extraContext?.companyDataProfile
+    ? formatProfileForAiPrompt(extraContext.companyDataProfile)
+    : '';
 
   // ★ SMS 바이트 제한 안내 (광고/비광고 구분)
   const smsByteInstruction = channel === 'SMS'
@@ -1071,6 +1084,8 @@ ${extraContext.recentMessages.map((m: string, i: number) => `${i + 1}. ${m.repla
 ⚠️ 위 레퍼런스를 그대로 복사하지 말고, 같은 느낌의 새로운 문안을 창작하세요!` : ''}
 
 ${varCatalogPrompt}
+
+${companyProfilePrompt}
 
 ## 요청사항
 ${channel} 채널에 최적화된 3가지 문안(A/B/C)을 생성해주세요.

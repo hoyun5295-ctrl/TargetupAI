@@ -18,6 +18,9 @@ import { callAIWithFallback } from '../services/ai';
 import { buildMemoryPromptContext } from './company-memory';
 import { query } from '../config/database';
 import { sanitizeForSms } from './message-sanitizer';
+// ★ D210+ Phase 2 (Harold 명시 2026-05-23): CT-58 — 회사 customer DB 실측 프로필 동적 주입.
+//   본질 = AI가 어설픈 변수 임의 작성 차단 (Harold 명시: "개인화 어설프게 실수로 들어가는게 더 안좋다").
+import { getCompanyDataProfile, formatProfileForAiPrompt } from './company-data-profile';
 
 // ════════════════════════════════════════════════════════════════════
 // 타입
@@ -157,6 +160,10 @@ export async function generateJourneyPackage(input: JourneyAIGenerateInput): Pro
   const ctx = await loadCompanyContext(input.companyId);
   const memoryContext = await buildMemoryPromptContext(input.companyId, 30).catch(() => '');
   const season = getSeasonContext();
+  // ★ D210+ Phase 2 (Harold 명시 2026-05-23): 회사 customer DB 실측 프로필 (CT-58).
+  //   AI 시스템 프롬프트 안 안전/분기/차단 3단계 분류 동적 주입.
+  const dataProfile = await getCompanyDataProfile(input.companyId).catch(() => null);
+  const dataProfilePrompt = dataProfile ? formatProfileForAiPrompt(dataProfile) : '';
 
   const system = `당신은 한국 마케팅 자동화 여정 설계 전문가입니다.
 회사 admin이 입력한 자연어 목표 또는 표준 템플릿 진입을 받아 완전한 여정 패키지를 JSON으로 응답합니다.
@@ -260,7 +267,9 @@ ${memoryContext}
 - 회사 admin이 "등급별 분기 / 지역별 / 직전 구매 회상" 영역 명시 시 Liquid 적극 활용
 - Liquid 분기 안의 구체 혜택 텍스트도 동일 룰: % / 원 / 무료 등 임의 작성 X → \`[혜택 안내 — 직접 수정해주세요]\` placeholder
 - 단순 일률 발송 영역은 Liquid 미사용 (기존 %고객명% 변수만 사용 권장)
-- 모르는 필드(customer.X)는 사용 X — 기본 컬럼만 사용: name / phone / grade / age / gender / region / points / purchase_count / recent_purchase_store / recent_purchase_amount / recent_purchase_date
+- ★ D210+ Phase 2 — 모르는 필드(customer.X) 사용 절대 금지. 아래 [회사 실측 데이터 활용 매트릭스]의 안전/분기 변수만 사용 의무.
+
+${dataProfilePrompt}
 
 [★ ★ ★ 날씨 Liquid 변수 — D209+ 신규 (Connected Content 통합) ★ ★ ★]
 ✗ 날씨 단순 단어 직접 작성 절대 금지 ("맑음" / "비" / "눈" / "흐림" / "쌀쌀해요" / "더워요" / "화창" / "쌀쌀") — 발송 시점 실시간 날씨와 불일치 사고 위험 (예: "오늘 날씨 화창해요" 박은 메시지가 폭우 영역에 발송 = 신뢰 파괴)

@@ -23,6 +23,9 @@ import { query } from '../config/database';
 import { getCompanyCosts, AI_MODELS } from '../config/defaults';
 // ★ D181 (2026-05-19): Anthropic Memory 패턴 박음 — 회사별 누적 학습
 import { buildMemoryPromptContext as buildCompanyMemoryPromptContext } from '../utils/company-memory';
+// ★ D210+ Phase 2 (Harold 명시 2026-05-23): CT-58 — 회사 customer DB 실측 프로필.
+//   generateMessages 호출 직전 자동 조회 → AI userMessage 안 동적 주입 → 어설픈 개인화 차단.
+import { getCompanyDataProfile } from '../utils/company-data-profile';
 import {
   callAIWithFallback,
   recommendTarget,
@@ -347,6 +350,9 @@ export async function orchestrate(ctx: AgentContext): Promise<OrchestratorResult
   const messageStart = Date.now();
   const { fieldMappings: varCatalog, availableVars } = extractVarCatalog(ctx.companyInfo.customer_schema);
   await filterVarCatalogByData(varCatalog, availableVars, ctx.companyId);
+  // ★ D210+ Phase 2 (Harold 명시 2026-05-23): 회사 customer DB 실측 프로필 자동 조회 (CT-58).
+  //   AI userMessage 안 안전/분기/차단 3단계 분류 동적 주입 → 어설픈 개인화 사고 차단.
+  const companyDataProfile = await getCompanyDataProfile(ctx.companyId);
 
   const messagesResult = await generateMessages(
     ctx.objective,
@@ -367,6 +373,8 @@ export async function orchestrate(ctx: AgentContext): Promise<OrchestratorResult
       personalizationVars: targetResult.personalization_vars,
       availableVarsCatalog: varCatalog,
       availableVars: availableVars,
+      // ★ D210+ Phase 2 (Harold 명시 2026-05-23): 회사 실측 데이터 프로필 (CT-58) 전달 — 어설픈 변수 차단.
+      companyDataProfile,
       // ★ D209+ (Harold 명시 2026-05-22): Message Sub-agent = Sonnet 4.6 전환.
       //   기존 ai.ts generateMessages 시스템 프롬프트 매트릭스(D152 + D80 정합) 정합 본질
       //   + 비용 80% 절감 (6,000사 운영 정합).
@@ -599,6 +607,8 @@ export async function orchestrateWithAI(ctx: AgentContext): Promise<Orchestrator
         }
         const { fieldMappings: varCatalog, availableVars } = extractVarCatalog(ctx.companyInfo.customer_schema);
         await filterVarCatalogByData(varCatalog, availableVars, ctx.companyId);
+        // ★ D210+ Phase 2 (Harold 명시 2026-05-23): 회사 customer DB 실측 프로필 자동 조회 (CT-58).
+        const companyDataProfile = await getCompanyDataProfile(ctx.companyId);
 
         messagesResult = await generateMessages(
           ctx.objective,
@@ -619,6 +629,8 @@ export async function orchestrateWithAI(ctx: AgentContext): Promise<Orchestrator
             personalizationVars: targetResult.personalization_vars,
             availableVarsCatalog: varCatalog,
             availableVars: availableVars,
+            // ★ D210+ Phase 2 (Harold 명시 2026-05-23): 회사 실측 데이터 프로필 (CT-58) 전달 — 어설픈 변수 차단.
+            companyDataProfile,
             // ★ D209+ (Harold 명시 2026-05-22): orchestrateWithAI 내부 generateMessages도 Sonnet 4.6 전환.
             //   메시지 품질 ai.ts 정합 본질 + 비용 80% 절감.
             model: 'sonnet',

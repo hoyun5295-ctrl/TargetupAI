@@ -246,3 +246,41 @@ export function detectUnsafeChars(text: string): UnsafeDetectResult {
     specialCharList: uniqueSpecial,
   };
 }
+
+// ════════════════════════════════════════════════════════════════════
+// ★ D210+ Phase 2 (Harold 명시 2026-05-23): 미처리 변수 검출.
+//   발송 직전 sanitize 단계에서 `{{ var }}` / `%변수%` 잔존 영역 검출 → 발송 차단 의무.
+//   본질 = "%고객명%님" 그대로 발송 사고 차단 (Harold 명시: 어설픈 개인화 = 신뢰 파괴).
+//
+//   영구 룰 정합 = feedback_ai_no_arbitrary_benefit.
+// ════════════════════════════════════════════════════════════════════
+
+/**
+ * 텍스트 안 미처리 변수 검출.
+ *   - Liquid 변수 출력: {{ customer.name }} / {{ var | default: '...' }}
+ *   - Liquid 태그: {% if %} / {% else %} / {% endif %}
+ *   - 한글/영문 변수: %고객명% / %name% (10% 같은 숫자% 영역 제외)
+ *
+ * 반환 = 검출된 패턴 배열 (빈 배열 = 안전).
+ */
+export function detectUnresolvedVariables(text: string): string[] {
+  if (!text) return [];
+
+  // Liquid 변수 출력
+  const liquidVars = text.match(/\{\{[^}]*\}\}/g) || [];
+  // Liquid 태그 (if/else/endif/for 등)
+  const liquidTags = text.match(/\{%[^%]*%\}/g) || [];
+  // %변수% 영역 — 한글/영문/_ 시작 (10% 같은 숫자% 제외)
+  const percentVars = text.match(/%[가-힣A-Za-z_][\w가-힣]*%/g) || [];
+
+  return [...liquidVars, ...liquidTags, ...percentVars];
+}
+
+/**
+ * 미처리 변수 잔존 영역 검증 — 발송 직전 호출 의무.
+ *   true = 잔존 = 차단 의무.
+ *   false = 안전 = 발송 가능.
+ */
+export function hasUnresolvedVariables(text: string): boolean {
+  return detectUnresolvedVariables(text).length > 0;
+}
