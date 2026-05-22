@@ -42,6 +42,9 @@ import AiExplainPage from './pages/AiExplainPage';
 import PaymentResultPage from './pages/PaymentResultPage';
 // ★ D187 (2026-05-20): Journey Builder Lite — 7 표준 여정 + 자연어 진입
 import JourneysPage from './pages/JourneysPage';
+// ★ D192 (2026-05-22): Journey monitoring + 통계 페이지 신규
+import JourneyDetailPage from './pages/JourneyDetailPage';
+import JourneyStatsPage from './pages/JourneyStatsPage';
 
 // ★ 세션 타이머 Context — 헤더 등에서 남은 시간 표시용
 interface SessionTimerContextType {
@@ -376,6 +379,24 @@ function App() {
           element={
             <PrivateRoute allowedTypes={['company_admin', 'company_user']}>
               <JourneysPage />
+            </PrivateRoute>
+          }
+        />
+        {/* ★ D192 (2026-05-22): Journey 상세 — 진입 사용자 리스트 + step별 진행 매트릭스 */}
+        <Route
+          path="/ai-journeys/:id"
+          element={
+            <PrivateRoute allowedTypes={['company_admin', 'company_user']}>
+              <JourneyDetailPage />
+            </PrivateRoute>
+          }
+        />
+        {/* ★ D192 (2026-05-22): Journey 통계 — 전체 통계 + 등급별 + 시간대 + 요일 + Variant Bandit */}
+        <Route
+          path="/ai-journeys/:id/stats"
+          element={
+            <PrivateRoute allowedTypes={['company_admin', 'company_user']}>
+              <JourneyStatsPage />
             </PrivateRoute>
           }
         />

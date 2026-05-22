@@ -341,6 +341,15 @@ async function processExecution(exec: ExecutionRow): Promise<StepOutcome> {
   const msgType = isKakao ? 'KAKAO' : (channelType === 'LMS' || channelType === 'MMS' ? channelType : 'SMS');
   const fieldMappings = await prepareFieldMappings(exec.company_id);
   const opt080Number = await getOpt080Number(exec.created_by, exec.company_id);
+  // ★ D194 (2026-05-22): Liquid context — company 정보 사전 조회 ({{ company.name }} / {{ company.brand_name }} 지원)
+  const companyRes = await query(
+    `SELECT company_name, brand_name FROM companies WHERE id = $1::uuid`,
+    [exec.company_id]
+  );
+  const companyContext = {
+    name: companyRes.rows[0]?.company_name || '',
+    brand_name: companyRes.rows[0]?.brand_name || '',
+  };
 
   // 광고 표기 — step.is_ad (DB default true) → buildAdMessage가 (광고)+080+KISA 제목 자동 합성 (알림톡 영역 무관 = 정보성 메시지)
   const isAd = step.is_ad !== false;
@@ -396,7 +405,14 @@ async function processExecution(exec: ExecutionRow): Promise<StepOutcome> {
       sanTemplate.sanitized,
       customer as Record<string, any>,
       fieldMappings,
-      { msgType: msgType as 'SMS' | 'LMS' | 'MMS', isAd, opt080Number, subject: sanSubject.sanitized }
+      {
+        msgType: msgType as 'SMS' | 'LMS' | 'MMS',
+        isAd,
+        opt080Number,
+        subject: sanSubject.sanitized,
+        // ★ D194 (2026-05-22): Liquid context — {{ company.name }} 지원
+        company: companyContext,
+      }
     );
     message = prep.message;
     subject = prep.subject;

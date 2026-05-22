@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { Brain, LineChart, MessageSquare, Send, Sparkles, Target, Workflow, X, Zap } from 'lucide-react';
+import { Brain, Code, LineChart, MessageSquare, MousePointerClick, Send, Sparkles, Target, Workflow, X, Zap } from 'lucide-react';
 
 interface BetaFeatureModalProps {
   show: boolean;
@@ -36,25 +36,37 @@ const ENGINE_CARDS: EngineCard[] = [
     icon: Workflow,
     gradient: 'from-cyan-400 to-blue-500',
     title: '여정 자동화 (Journey Builder)',
-    description: '7 표준 여정 (가입/재구매/휴면/장바구니/생일/예약/Custom) + 메시지·대기·조건 step + 다채널(SMS/LMS/MMS/알림톡) + A/B Bandit 자동 최적화',
+    description: '자연어 한 줄 → 7 표준 여정 자동 설계 + 메시지·대기·조건 step + 다채널(SMS/LMS/MMS/알림톡) + A/B Bandit 자동 최적화 + 진입 사용자/통계 실시간 모니터링',
+  },
+  {
+    icon: Code,
+    gradient: 'from-violet-400 to-fuchsia-500',
+    title: 'Liquid 1:1 동적 콘텐츠',
+    description: '사용자별 등급/지역/구매 분기 자동 처리 — 1개 메시지 작성 + 무한 분기 자동 렌더링. {{ customer.name }} + {% if VIP %} 같은 Shopify Liquid 표준 호환',
   },
   {
     icon: Zap,
-    gradient: 'from-violet-400 to-purple-500',
+    gradient: 'from-amber-400 to-orange-500',
     title: '실시간 트리거',
     description: '장바구니/예약/구매 이벤트 자동 감지 → 여정 즉시 진입 → 1:1 맞춤 다채널 발송',
+  },
+  {
+    icon: MousePointerClick,
+    gradient: 'from-emerald-400 to-cyan-500',
+    title: 'Click 트래킹 + 자동 매칭',
+    description: '단축 URL 자동 변환 + 클릭 추적 + Bandit reward 자동 누적 + 알림톡 템플릿 AI 자동 매칭 (변수 자동 매핑)',
   },
   {
     icon: LineChart,
     gradient: 'from-fuchsia-400 to-pink-500',
     title: '성과 + Next Action',
-    description: '매출/ROI/LTV + 다음 캠페인 AI 자동 제안',
+    description: '매출/ROI/LTV + 등급별/시간대/요일별 효과 + 다음 캠페인 AI 자동 제안',
   },
   {
     icon: Brain,
     gradient: 'from-amber-400 to-rose-500',
     title: 'AI Operator',
-    description: '6 sub-agent 협업 + 회사별 메모리 학습',
+    description: '회사별 메모리 학습 + 시즌 컨텍스트 + 동적 흐름 결정 모드 + 회사 톤 자동 정합',
   },
 ];
 
@@ -115,7 +127,7 @@ export default function BetaFeatureModal({ show, onClose }: BetaFeatureModalProp
               한 줄로 작동하는<br className="hidden md:block" />차세대 마케팅 오퍼레이션
             </h2>
             <p className="text-white/70 text-sm md:text-base mb-5 leading-relaxed">
-              자연어 한 줄 → 7 표준 여정 자동 설계 → 다채널(SMS/LMS/MMS/알림톡) 발송 → A/B Bandit 자동 최적화 → 성과 분석.
+              자연어 한 줄 → 7 표준 여정 자동 설계 → 1:1 동적 콘텐츠(Liquid) → 다채널(SMS/LMS/MMS/알림톡) → A/B Bandit 자동 최적화 → Click 트래킹 → 성과 분석.
               엔터프라이즈 마케팅 자동운전 엔진.
             </p>
             <div className="flex items-center gap-3 text-xs text-white/50">

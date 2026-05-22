@@ -4,6 +4,7 @@ import {
   ArrowLeft, ChevronDown, ChevronUp, Loader2, Pause, Play, Plus, Power, RefreshCw, Sparkles,
   ShoppingCart, Cake, Calendar as CalendarIcon, UserPlus, Repeat, Moon, MessageSquare,
   Clock, DollarSign, Users, Phone, Wand2, X, AlertCircle, Send, Trash2, Edit2, Save, Beaker, Code,
+  BarChart3,
 } from 'lucide-react';
 import JourneyVariantsEditor from '../components/journey/JourneyVariantsEditor';
 import JourneyMmsUploader from '../components/journey/JourneyMmsUploader';
@@ -676,8 +677,42 @@ export default function JourneysPage() {
                 </div>
               )}
               {!loading && journeys.length === 0 && (
-                <div className="p-8 text-center bg-white/5 border border-white/10 rounded-xl text-white/50 text-sm">
-                  아직 생성한 여정이 없습니다. 위에서 첫 여정을 만들어보세요.
+                <div className="p-8 bg-gradient-to-br from-violet-500/10 via-fuchsia-500/5 to-indigo-500/10 border border-violet-400/20 rounded-xl">
+                  <div className="text-center mb-6">
+                    <div className="w-14 h-14 mx-auto mb-3 rounded-2xl bg-gradient-to-br from-violet-400 to-fuchsia-500 flex items-center justify-center shadow-lg">
+                      <Sparkles className="w-7 h-7 text-white" />
+                    </div>
+                    <h4 className="text-base font-semibold text-white mb-1">첫 여정을 만들어보세요</h4>
+                    <p className="text-xs text-white/60">자연어 한 줄이면 AI가 완전한 여정을 자동 설계합니다 (5~10초)</p>
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-xs">
+                    {[
+                      { icon: UserPlus, label: '신규 가입자 환영 시리즈 3통', objective: '신규 가입자에게 환영 인사 + 첫 구매 안내 3통 시리즈' },
+                      { icon: Repeat, label: '재구매 후기 + 추천 캠페인', objective: '구매 직후 후기 요청 + 추천 상품 안내' },
+                      { icon: Moon, label: '휴면 회원 복귀 캠페인', objective: '90일 휴면 고객 복귀 유도 + 등급별 분기' },
+                      { icon: ShoppingCart, label: '장바구니 회복 메시지', objective: '장바구니 결제 미진행 24h 후 회복 메시지' },
+                      { icon: Cake, label: '생일 D-7 사전 축하', objective: '생일 7일 전 사전 축하 + 등급별 인사' },
+                    ].map((ex, idx) => {
+                      const ExIcon = ex.icon;
+                      return (
+                        <button
+                          key={idx}
+                          onClick={() => {
+                            setObjective(ex.objective);
+                            // 자연어 입력 영역으로 스크롤
+                            setTimeout(() => window.scrollTo({ top: 0, behavior: 'smooth' }), 50);
+                          }}
+                          className="p-2.5 bg-white/5 hover:bg-white/10 border border-white/10 hover:border-violet-400/30 rounded-lg text-left flex items-center gap-2 transition-all"
+                        >
+                          <ExIcon className="w-4 h-4 text-violet-300 flex-shrink-0" />
+                          <span className="text-white/80 truncate">{ex.label}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <p className="text-[11px] text-white/40 text-center mt-4">
+                    또는 위 자연어 입력란에 직접 작성 — 회사 admin이 원하는 모든 시나리오 가능
+                  </p>
                 </div>
               )}
               <div className="space-y-2">
@@ -710,6 +745,13 @@ export default function JourneysPage() {
                             )}
                           </div>
                           <div className="shrink-0 flex items-center gap-1">
+                            {/* ★ D192 (2026-05-22): Journey 상세 + 통계 진입 — 모든 상태 진입 가능 */}
+                            <button onClick={(e) => { e.stopPropagation(); navigate(`/ai-journeys/${j.id}`); }} className="p-2 rounded bg-blue-500/20 hover:bg-blue-500/30 text-blue-300" title="진입 사용자 매트릭스">
+                              <Users className="w-4 h-4" />
+                            </button>
+                            <button onClick={(e) => { e.stopPropagation(); navigate(`/ai-journeys/${j.id}/stats`); }} className="p-2 rounded bg-violet-500/20 hover:bg-violet-500/30 text-violet-300" title="통계 분석">
+                              <BarChart3 className="w-4 h-4" />
+                            </button>
                             {(j.status === 'draft' || j.status === 'paused') && (
                               <button onClick={(e) => { e.stopPropagation(); handleAction(j.id, 'activate'); }} className="p-2 rounded bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300" title="활성화">
                                 <Play className="w-4 h-4" />
@@ -1019,18 +1061,27 @@ export default function JourneysPage() {
                       <div className="p-3 bg-amber-500/10 border border-amber-500/30 rounded text-xs">
                         <div className="flex items-center justify-between mb-2">
                           <div className="font-semibold text-amber-200">알림톡 (KAKAO) step</div>
-                          {/* ★ D190 #3 (2026-05-22): AI 자동 매칭 추천 버튼 — Opus 4.7 템플릿 매칭 + 변수 자동 매핑 */}
+                          {/* ★ D190 #3 (2026-05-22): AI 자동 매칭 추천 버튼 + ★ D196 (2026-05-22) 사용법 안내 강화 */}
                           {alimtalkTemplates.length > 0 && (
                             <button
                               onClick={() => handleAlimtalkAutoMatch(idx)}
                               className="px-2 py-1 bg-violet-500/30 hover:bg-violet-500/50 text-violet-200 rounded text-[11px] flex items-center gap-1"
-                              title="AI가 회사 보유 템플릿 중 정합 매트릭스 자동 추천 + 변수 자동 매핑"
+                              title="AI가 회사 보유 승인 알림톡 템플릿 중 캠페인 의도에 가장 정합하는 1건 자동 추천 + 변수(#{이름}/#{등급} 등) 자동 매핑. 결과 검토 후 회사 admin 정정 가능."
                             >
                               <Wand2 className="w-3 h-3" />
                               AI 자동 매칭
                             </button>
                           )}
                         </div>
+                        {/* ★ D196 (2026-05-22) 사용법 안내 — 알림톡 step 첫 진입 시 가이드 */}
+                        {!s.alimtalkTemplateCode && alimtalkTemplates.length > 0 && (
+                          <div className="mb-2 p-2 bg-violet-500/10 border border-violet-400/20 rounded text-[11px] text-violet-200/90 flex items-start gap-1.5">
+                            <Wand2 className="w-3 h-3 mt-0.5 flex-shrink-0" />
+                            <span>
+                              <strong className="text-violet-200">AI 자동 매칭</strong> 버튼을 누르면 회사 보유 승인 템플릿 중 캠페인 의도에 정합하는 1건 자동 추천 + 변수 자동 매핑. 또는 아래에서 직접 선택 가능.
+                            </span>
+                          </div>
+                        )}
                         {alimtalkSenders.length === 0 ? (
                           <div className="p-3 bg-rose-500/10 border border-rose-500/30 rounded text-rose-200">
                             승인된 발신프로필이 없습니다. 알림톡 발송 모달에서 발신프로필을 먼저 등록해주세요.

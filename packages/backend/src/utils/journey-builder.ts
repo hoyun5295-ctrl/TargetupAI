@@ -454,12 +454,15 @@ JSON 형식만 응답:
 export async function activateJourney(companyId: string, journeyId: string, userId: string): Promise<{ ok: boolean; reason?: string }> {
   // 활성화 전 검증 — placeholder 미편집 차단 + 회신번호 필수 + 본문 최소 길이
   // ★ D188 Phase 2-B-1 (2026-05-21): step_type별 다른 검증 분기 — message/wait/condition.
+  // ★ D194 (2026-05-22): Liquid 문법 사전 검증 + subject 빈 영역 검증 추가 (직원 테스트 발송 사고 0건 영구 안전망)
   const detail = await query(
     `SELECT j.callback_number, j.status,
             (SELECT json_agg(json_build_object(
               'order', step_order,
               'type', step_type,
               'message', message_template,
+              'subject', subject,
+              'channel', channel,
               'delay', delay_hours,
               'condition', condition_jsonb
             ) ORDER BY step_order) FROM journey_steps WHERE journey_id = j.id) AS steps
@@ -525,6 +528,29 @@ export async function activateJourney(companyId: string, journeyId: string, user
     }
     if (hasUneditedPlaceholder(msg)) {
       return { ok: false, reason: `step ${s.order} 본문에 미편집 [...] 영역이 남아있습니다. 회사 admin이 직접 작성해주세요.` };
+    }
+
+    // ★ D194 (2026-05-22) 강화: subject 빈 영역 차단 — LMS/MMS 채널은 제목 필수
+    const channel = String(s.channel || 'lms');
+    if (channel === 'lms' || channel === 'mms') {
+      const subj = String(s.subject || '').trim();
+      if (!subj) {
+        return { ok: false, reason: `step ${s.order} (${channel.toUpperCase()}) 제목이 비어있습니다. 본문 요약 단순 텍스트 한 줄로 작성해주세요.` };
+      }
+    }
+
+    // ★ D194 (2026-05-22) 강화: Liquid 문법 사전 검증 — 잘못된 문법 발견 시 차단 (발송 시점 매번 실패 영구 방지)
+    try {
+      const { detectLiquidSyntax, validateLiquidTemplate } = await import('./liquid-templating');
+      if (detectLiquidSyntax(msg)) {
+        const valid = validateLiquidTemplate(msg);
+        if (!valid.valid) {
+          const errMsg = valid.errors.map((e) => e.message).join(' / ');
+          return { ok: false, reason: `step ${s.order} Liquid 문법 오류 — ${errMsg}. 미리보기 모달에서 문법 확인 후 재시도해주세요.` };
+        }
+      }
+    } catch (err: any) {
+      console.warn('[activateJourney] Liquid 문법 검증 오류 (skip):', err?.message);
     }
   }
 

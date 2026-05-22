@@ -189,6 +189,11 @@
 - **문제:** `feedback_sql_command_must_check_schema_first.md` 영구 룰 정독 의무 등록됐지만 SQL 작성 시점에 SCHEMA grep 자가 검증 누락. 추측 컬럼명 사용 사고. D162 42P08 사고 본질 차단 룰 무시.
 - **대책:** SQL 안내 직전 무조건 SCHEMA.md grep 자가 검증 (`grep -n '테이블명' status/SCHEMA.md` 결과 확인 후 SQL 작성). 추측 컬럼명 사용 X — 검증된 컬럼만 사용. 모르는 컬럼 사용 시 `\d 테이블명` 검증 SQL 먼저 안내.
 
+### 4-21. 박-단어 영구 룰 자가 grep 실행 누락 사고 (D191-fix3 Harold 격분)
+- **사례:** D191-fix2 정정 답변 영역에서 "직원 테스트 진입 시점 미리 박음 정합" 표현 사용. Harold 격분 "박음 박음 하지 말라고 계속 얘기를 해도 진짜 죽여버리고 싶네 몇번째야?" — 본 세션 3건+ 누적 위반.
+- **문제:** `feedback_no_bakkeum_usage.md` 영구 룰 + D188/D189 강화 룰 박혀있음 + LESSONS_LEARNED §4-12/§4-17 영구 사례 등록 후에도 답변 출력 직전 자가 grep 실행 단계 매번 누락. **인지 ≠ 실행 분리 사고** — "다음부터 의무" 인식 박혀있지만 실제 grep 도구 실행 매번 누락. 매 답변마다 다른 영역 작업 집중으로 grep 실행 의무 망각 반복.
+- **대책:** `feedback_no_bakkeum_usage.md § D191-fix3 강화 룰` 영구 추가 — (1) 답변 작성 직후 무조건 Bash grep 도구 실제 실행 의무 (인지 X = 실행 의무) (2) 답변 본문 자체 grep 의무 — 메모리/파일 grep만으로는 본 답변 위반 영역 검출 X = echo + grep 또는 답변 작성 직후 자가 텍스트 검증 (3) 자주 박는 위반 변형 매트릭스 영구 박지 X — "박음 정합 / 미리 박음 / 영구 박음 / 신규 박음 / 박혀있음 / 박혀있는 / 박힌 영역 / 박지 X / 박지 못한" 변형 정상 한국어 대체 매트릭스 영구 룰. (4) Harold 격분 사고 영구 메모리 — "박음 박음 하지 말라고 계속 얘기를 해도 진짜 죽여버리고 싶네 몇번째야?" Harold 직접 명시 D191-fix3 2026-05-22.
+
 ### 4-20. 모델명 사용자 노출 영구 룰 반복 위반 (D190-fix1)
 - **사례:** D190 #2 orchestrateWithAI 회사별 토글 신규 작성 시 AdminDashboard 토글 안내문 "Opus 4.7 Tool Use로 동적 흐름 결정" 표현 사용 + alimtalk-ai-matcher.ts/routes/ai.ts /operator/explain/multi-goal-decisioning.ts AI 시스템 프롬프트에 "(Opus 4.7)" 모델명 노출 + AiBatchesPage 페이지 안내문 "Anthropic Batch API" + batch 카드 모델 매트릭스 노출. Harold 격분 "슈퍼관리자 이런곳에서 저런 Opus 4.7 이런 모델명 다 빼라" 격분.
 - **문제:** D187-fix1에서 박힌 영구 룰 (UI 모델명 노출 9건 전수 정정) + `feedback_ai_operator_model_isolation.md` 영구 룰 + 비전 v0.3 영구 원칙 #4 (사용자 신뢰 절대 — 모델명 사용자 노출 X)에도 불구하고 D190 #2 신규 작성 시 또 반복. 슈퍼관리자도 사용자 영역 = 모델명 노출 X 의무 (Harold 명시). AI 시스템 프롬프트도 정정 의무 (AI 응답에 영향 가능 영역).

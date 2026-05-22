@@ -59,8 +59,6 @@ import {
   endJourney,
   listJourneys,
   getJourneyDetail,
-  listExecutions,
-  getJourneyStats,
   updateJourneyStep,
   updateJourneyCallback,
   JOURNEY_TEMPLATES,
@@ -69,6 +67,8 @@ import {
 } from '../utils/journey-builder';
 // ★ D187-fix3 (2026-05-21): Journey AI Generator — One-shot 자연어 + 시즌 + 회사 메모리
 import { generateJourneyPackage, refineStepMessage } from '../utils/journey-ai-generator';
+// ★ D192 (2026-05-22): CT-51 Journey 통계 통합 진입점 — 옛 단순 통계(getJourneyStats/listExecutions)를 완전 진화 — buildJourneyStats (overview + steps + segments + hourly + weekday + variants) + listJourneyEnteredCustomers (회사 격리 + 페이지네이션)
+import { buildJourneyStats, listJourneyEnteredCustomers } from '../utils/journey-stats';
 
 
 // ★ D79: 인라인 래퍼 제거 → CT-01 buildFilterWhereClauseCompat 직접 사용
@@ -1991,7 +1991,8 @@ router.post('/operator/journeys/:id/end', async (req: Request, res: Response) =>
   }
 });
 
-// GET /api/ai/operator/journeys/:id/executions — 고객별 실행 상태 (페이지네이션)
+// GET /api/ai/operator/journeys/:id/executions — 진입 사용자 리스트 (페이지네이션 + 상태 필터)
+// ★ D192 (2026-05-22): CT-51 listJourneyEnteredCustomers 통합 — 회사 격리 + 등급/지역 컬럼 추가
 router.get('/operator/journeys/:id/executions', async (req: Request, res: Response) => {
   try {
     const companyId = req.user?.companyId;
@@ -2005,15 +2006,16 @@ router.get('/operator/journeys/:id/executions', async (req: Request, res: Respon
     const limit = Math.min(Number(req.query.limit) || 50, 200);
     const offset = Math.max(0, Number(req.query.offset) || 0);
     const status = (req.query.status as string) || undefined;
-    const executions = await listExecutions(companyId, req.params.id, { limit, offset, status });
-    return res.json({ success: true, executions });
+    const result = await listJourneyEnteredCustomers(req.params.id, companyId, { limit, offset, status });
+    return res.json({ success: true, executions: result.rows, total: result.total });
   } catch (err: any) {
     console.error('[Journeys executions] 오류:', err);
     return res.status(500).json({ success: false, error: err?.message || 'execution 조회 실패' });
   }
 });
 
-// GET /api/ai/operator/journeys/:id/stats — 통계 (진입/완료/비용/step별 전환율)
+// GET /api/ai/operator/journeys/:id/stats — 완전 통계 (overview + steps + segments + hourly + weekday + variants)
+// ★ D192 (2026-05-22): CT-51 buildJourneyStats 통합 — 옛 단순 통계 진화
 router.get('/operator/journeys/:id/stats', async (req: Request, res: Response) => {
   try {
     const companyId = req.user?.companyId;
@@ -2024,12 +2026,12 @@ router.get('/operator/journeys/:id/stats', async (req: Request, res: Response) =
       return res.status(403).json({ success: false, error: 'AI Operator 진입 권한이 없습니다.', code: 'AI_OPERATOR_GATED' });
     }
 
-    const stats = await getJourneyStats(companyId, req.params.id);
-    if (!stats) return res.status(404).json({ success: false, error: '여정을 찾을 수 없습니다.' });
+    const stats = await buildJourneyStats(req.params.id, companyId);
     return res.json({ success: true, stats });
   } catch (err: any) {
     console.error('[Journeys stats] 오류:', err);
-    return res.status(500).json({ success: false, error: err?.message || '통계 조회 실패' });
+    const isAuthErr = err?.message?.includes('회사 격리');
+    return res.status(isAuthErr ? 403 : 500).json({ success: false, error: err?.message || '통계 조회 실패' });
   }
 });
 
