@@ -382,8 +382,8 @@ async function accumulateCampaignLearning(): Promise<{ learned: number }> {
 
   for (const row of candidates.rows as LearningCandidateRow[]) {
     try {
-      // click_count / conversion_count는 현재 schema에 없으므로 success_count의 일부로 추정 (별 trigger 박을 영역)
-      // 향후 click 트래킹 (cdp_events.event_name='message_click') 박힌 후 정확한 수치 박을 영역
+      // ★ D190 #1 (2026-05-22): click_count = cdp_events 'message_click' 정확 집계 (D183 단축 URL + D190 variant_id/journey_id 추적 통합)
+      // conversion_count는 향후 cdp_events 'purchase' / 'conversion' 이벤트 매트릭스 통합 시 정확 집계 (현재 0 default)
       const channelLabel = row.send_type === 'direct' ? '직접발송' : 'AI추천';
       await recordCampaignLearning({
         companyId: row.company_id,

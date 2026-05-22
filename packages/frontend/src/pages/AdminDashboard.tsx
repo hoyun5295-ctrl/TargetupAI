@@ -115,6 +115,7 @@ export default function AdminDashboard() {
     lineGroupId: '',
     kakaoEnabled: false,
     userIsolationEnabled: false,  // ★ D162-3 (2026-05-15) 수신거부 사용자격리 ON/OFF
+    useAiOrchestrator: false,  // ★ D190 #2 (2026-05-22) AI Orchestrator Tool Use 회사별 토글
     subscriptionStatus: 'trial',
     // ★ CT-17: 30일 PRO 체험 관리 (표시용)
     trialExpiresAt: '' as string | null | '',
@@ -1859,6 +1860,7 @@ const handleApproveRequest = async (id: string) => {
           lineGroupId: c.line_group_id || '',
           kakaoEnabled: c.kakao_enabled ?? false,
           userIsolationEnabled: c.user_isolation_enabled ?? false,  // ★ D162-3 수신거부 사용자격리
+          useAiOrchestrator: c.use_ai_orchestrator ?? false,  // ★ D190 #2 AI Orchestrator
           subscriptionStatus: c.subscription_status || 'trial',
           // ★ CT-17
           trialExpiresAt: c.trial_expires_at || '',
@@ -5132,6 +5134,52 @@ const handleApproveRequest = async (id: string) => {
                         className="sr-only peer"
                       />
                       <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-amber-500"></div>
+                    </label>
+                  </div>
+
+                  {/* ★ D190 #2 (2026-05-22): AI Orchestrator (Tool Use) 회사별 토글 — 토글 변경 시 즉시 PATCH 호출 */}
+                  <div className="flex items-start justify-between p-4 bg-violet-50 border border-violet-200 rounded-lg mt-3">
+                    <div className="flex-1">
+                      <div className="flex items-center gap-2">
+                        <span className="text-lg">🤖</span>
+                        <span className="font-semibold text-gray-800">AI Orchestrator (Tool Use)</span>
+                        <span className="text-xs bg-violet-500 text-white px-1.5 py-0.5 rounded">BETA</span>
+                      </div>
+                      <p className="text-xs text-gray-500 mt-1">
+                        ON = AI Operator가 Opus 4.7 Tool Use로 동적 흐름 결정 (target → count → message → compliance 순서 자율 판단).<br/>
+                        OFF = 기존 orchestrate 고정 순서 (안정 영역, default). ENT 1사 한정 활성 → PM2 로그 모니터링 후 단계적 확장 권장.
+                      </p>
+                    </div>
+                    <label className="relative inline-flex items-center cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={editCompany.useAiOrchestrator}
+                        onChange={async (e) => {
+                          const next = e.target.checked;
+                          const prev = editCompany.useAiOrchestrator;
+                          setEditCompany({ ...editCompany, useAiOrchestrator: next });
+                          try {
+                            const token = localStorage.getItem('token');
+                            const res = await fetch(`/api/admin/companies/${editCompany.id}/ai-orchestrator`, {
+                              method: 'PATCH',
+                              headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+                              body: JSON.stringify({ enabled: next }),
+                            });
+                            const data = await res.json();
+                            if (!res.ok) {
+                              alert(data?.error || 'AI Orchestrator 토글 실패');
+                              setEditCompany({ ...editCompany, useAiOrchestrator: prev });
+                            } else {
+                              alert(data?.message || 'AI Orchestrator 토글 완료');
+                            }
+                          } catch (err: any) {
+                            alert(err?.message || '네트워크 오류');
+                            setEditCompany({ ...editCompany, useAiOrchestrator: prev });
+                          }
+                        }}
+                        className="sr-only peer"
+                      />
+                      <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-violet-500"></div>
                     </label>
                   </div>
                 </div>

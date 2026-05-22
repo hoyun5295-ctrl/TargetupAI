@@ -46,6 +46,7 @@ import { prepaidDeduct } from './prepaid';
 import { normalizePhone } from './normalize-phone';
 import { getCompanyCosts } from '../config/defaults';
 import { sanitizeForSms } from './message-sanitizer';
+import { shortenUrlsInText } from './short-url';
 
 // ════════════════════════════════════════════════════════════════════
 // 타입
@@ -411,6 +412,22 @@ async function processExecution(exec: ExecutionRow): Promise<StepOutcome> {
       await logFailedStep(exec.execution_id, step.id, 'empty_message_after_prepare');
       await advanceOrComplete(exec, step, 0);
       return 'failed';
+    }
+
+    // ★ D190 #1 (2026-05-22): 단축 URL 자동 변환 — Bandit reward + CDP 매칭 추적 컨텍스트 통합
+    //   SMS/LMS/MMS 영역만 진입 (알림톡은 검수 완료 본문 변경 차단 — 통신사 정책)
+    //   variantId 존재 시 message_short_urls.variant_id 저장 → 클릭 시 recordJourneyStepVariantReward 자동 호출
+    //   customerId 저장 → 클릭 시 CDP 매칭 (한국 자사몰 도메인 인지 시 external_id 자동 추출)
+    try {
+      message = await shortenUrlsInText(message, {
+        companyId: exec.company_id,
+        journeyId: exec.journey_id,
+        stepId: step.id,
+        variantId: activeVariantId || undefined,
+        customerId: customer.id,
+      });
+    } catch (shortenErr: any) {
+      console.warn(`[JourneyExecutor] step ${step.step_order} 단축 URL 변환 실패 (원본 보존):`, shortenErr?.message);
     }
   }
 

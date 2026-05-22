@@ -37,12 +37,24 @@ export interface CreateShortUrlInput {
   fullUrl: string;
   campaignId?: string;
   expiresAt?: Date;
+  // ★ D190 #1 (2026-05-22): Journey/Variant/Customer 추적 컨텍스트 — Bandit reward 자동 누적 + CDP 매칭
+  journeyId?: string;
+  stepId?: string;
+  variantId?: string;
+  customerId?: string;
+  externalId?: string;
 }
 
 export interface ShortUrlResolution {
   fullUrl: string;
   companyId: string;
   campaignId: string | null;
+  // ★ D190 #1: 추적 컨텍스트 (handleTrackedClick에서 Bandit reward + CDP 매칭에 사용)
+  journeyId: string | null;
+  stepId: string | null;
+  variantId: string | null;
+  customerId: string | null;
+  externalId: string | null;
 }
 
 /**
@@ -61,9 +73,23 @@ export async function createShortUrl(input: CreateShortUrlInput): Promise<{ hash
     try {
       await query(
         // D183 정정: short_urls 영역 = 한줄전단(hanjulDM) 전단지 미리보기 영역 → 한줄로 캠페인 영역 별 테이블 분리
-        `INSERT INTO message_short_urls (hash, full_url, company_id, campaign_id, expires_at)
-         VALUES ($1, $2, $3::uuid, $4, $5)`,
-        [hash, input.fullUrl, input.companyId, input.campaignId || null, input.expiresAt || null],
+        // ★ D190 #1 (2026-05-22): journey_id/step_id/variant_id/customer_id/external_id 추적 컨텍스트 추가
+        `INSERT INTO message_short_urls (
+          hash, full_url, company_id, campaign_id, expires_at,
+          journey_id, step_id, variant_id, customer_id, external_id
+        ) VALUES ($1, $2, $3::uuid, $4, $5, $6, $7, $8, $9, $10)`,
+        [
+          hash,
+          input.fullUrl,
+          input.companyId,
+          input.campaignId || null,
+          input.expiresAt || null,
+          input.journeyId || null,
+          input.stepId || null,
+          input.variantId || null,
+          input.customerId || null,
+          input.externalId || null,
+        ],
       );
       return { hash, shortUrl: `${SHORT_URL_BASE}/${hash}` };
     } catch (err: any) {
@@ -80,7 +106,9 @@ export async function createShortUrl(input: CreateShortUrlInput): Promise<{ hash
 export async function resolveShortUrl(hash: string): Promise<ShortUrlResolution | null> {
   const result = await query(
     // D183 정정: 한줄로 캠페인 단축 URL 전용 테이블 (한줄전단 short_urls와 분리)
-    `SELECT full_url, company_id, campaign_id, expires_at
+    // ★ D190 #1 (2026-05-22): 추적 컨텍스트 SELECT 확장
+    `SELECT full_url, company_id, campaign_id, expires_at,
+            journey_id, step_id, variant_id, customer_id, external_id
      FROM message_short_urls
      WHERE hash = $1
      LIMIT 1`,
@@ -95,24 +123,50 @@ export async function resolveShortUrl(hash: string): Promise<ShortUrlResolution 
     fullUrl: row.full_url,
     companyId: row.company_id,
     campaignId: row.campaign_id || null,
+    journeyId: row.journey_id || null,
+    stepId: row.step_id || null,
+    variantId: row.variant_id || null,
+    customerId: row.customer_id || null,
+    externalId: row.external_id || null,
   };
 }
 
 const URL_REGEX = /https?:\/\/[^\s<>"]+/g;
 
 /**
+ * ★ D190 #1 (2026-05-22): 단축 URL 변환 컨텍스트 — Journey/Variant/Customer 추적 정합
+ *   journey_id/step_id/variant_id → Bandit reward 자동 누적 + Journey 단계별 통계
+ *   customer_id/external_id → CDP 자동 매칭 + customer 단위 클릭 이력
+ */
+export interface ShortenUrlsContext {
+  companyId: string;
+  campaignId?: string;
+  journeyId?: string;
+  stepId?: string;
+  variantId?: string;
+  customerId?: string;
+  externalId?: string;
+}
+
+/**
  * 텍스트 안의 모든 URL을 단축 URL로 치환
  * - 이미 SHORT_URL_BASE로 시작하는 URL은 skip
  * - 단축 실패 시 원본 URL 그대로 보존 (안전 영역)
+ * - ★ D190 #1: 컨텍스트(journey/step/variant/customer) 전달 → message_short_urls에 저장 → 클릭 시 Bandit reward + CDP 매칭 자동
  */
 export async function shortenUrlsInText(
   text: string,
-  companyId: string,
-  campaignId?: string,
+  ctxOrCompanyId: ShortenUrlsContext | string,
+  legacyCampaignId?: string,
 ): Promise<string> {
   if (!text) return text;
   const urls = text.match(URL_REGEX);
   if (!urls || urls.length === 0) return text;
+
+  // 하위 호환 — D183 시그니처 (companyId: string, campaignId?: string) 보존
+  const ctx: ShortenUrlsContext = typeof ctxOrCompanyId === 'string'
+    ? { companyId: ctxOrCompanyId, campaignId: legacyCampaignId }
+    : ctxOrCompanyId;
 
   let result = text;
   // 중복 URL 제거 (동일 URL 다중 등장 시 한 번만 단축)
@@ -121,7 +175,16 @@ export async function shortenUrlsInText(
   for (const url of uniqueUrls) {
     if (url.startsWith(`${SHORT_URL_BASE}/`)) continue;
     try {
-      const { shortUrl } = await createShortUrl({ companyId, fullUrl: url, campaignId });
+      const { shortUrl } = await createShortUrl({
+        companyId: ctx.companyId,
+        fullUrl: url,
+        campaignId: ctx.campaignId,
+        journeyId: ctx.journeyId,
+        stepId: ctx.stepId,
+        variantId: ctx.variantId,
+        customerId: ctx.customerId,
+        externalId: ctx.externalId,
+      });
       // 정규식 대신 split/join으로 안전 치환 (특수문자 escape 불요)
       result = result.split(url).join(shortUrl);
     } catch (err) {

@@ -47,6 +47,8 @@ import {
 } from '../utils/company-memory';
 // ★ D181 (2026-05-19): Anthropic Batch API (50% 비용 절감)
 import { listBatchJobs, pollBatch } from '../utils/batch-ai';
+// ★ D190 #3 (2026-05-22): 알림톡 자동 템플릿 매칭 + 변수 자동 매핑 (Opus 4.7)
+import { matchAlimtalkTemplate } from '../utils/alimtalk-ai-matcher';
 // ★ D181 (2026-05-19): Anthropic Citations (AI 응답 근거 박음 — 사용자 신뢰)
 import { buildCompanyDocuments, callAIWithCitations } from '../utils/citations';
 // ★ D187 (2026-05-20): Journey Builder Lite — 7 표준 여정 + 자연어 진입 (Opus 4.7)
@@ -939,8 +941,16 @@ router.post('/operator/propose', async (req: Request, res: Response) => {
 
     // ★ D170: Multi-Agent Orchestrator 호출 — 6 Sub-agent (Target/Verify/Message/Compliance/Cost-ROI) 통합
     // ★ D171-D (2026-05-19): env flag AI_OPERATOR_USE_AI_DECISION=true 시 진정 Orchestrator AI (Opus 4.7 Tool Use) 진입
-    //   default false (기존 orchestrate 순차 호출). 운영 toggle용. 실패 시 자동 fallback to orchestrate().
-    const useAIDecision = process.env.AI_OPERATOR_USE_AI_DECISION === 'true';
+    //   default false (기존 orchestrate 순차 호출). 실패 시 자동 fallback to orchestrate().
+    // ★ D190 #2 (2026-05-22): 회사별 토글 우선 (companies.use_ai_orchestrator) + env flag fallback.
+    //   ENT 1사 한정 활성 → 단계적 확장 (1사 → 5사 → ENT 전체 → default true).
+    const companyOrchestratorRes = await query(
+      `SELECT use_ai_orchestrator FROM companies WHERE id = $1::uuid`,
+      [companyId]
+    );
+    const companyUseAI = companyOrchestratorRes.rows[0]?.use_ai_orchestrator === true;
+    const envUseAI = process.env.AI_OPERATOR_USE_AI_DECISION === 'true';
+    const useAIDecision = companyUseAI || envUseAI;
     const orchestratorFn = useAIDecision ? orchestrateWithAI : orchestrate;
     const result = await orchestratorFn({
       companyId,
@@ -2020,6 +2030,41 @@ router.get('/operator/journeys/:id/stats', async (req: Request, res: Response) =
   } catch (err: any) {
     console.error('[Journeys stats] 오류:', err);
     return res.status(500).json({ success: false, error: err?.message || '통계 조회 실패' });
+  }
+});
+
+// ════════════════════════════════════════════════════════════════════
+// ★ D190 #3 (2026-05-22): 알림톡 자동 템플릿 매칭 + 변수 자동 매핑 endpoint
+//   - 캠페인 의도(자연어) → Opus 4.7 매칭 → 정합 1건 추천 + 차선 2~3건 + 변수 자동 매핑
+//   - AI 추천만 — 회사 admin 검토 + 승인 후 발송 (영구 원칙 #1)
+//   - 정합 0건 시 회사 admin 안내 (자동완화 절대 금지)
+// ════════════════════════════════════════════════════════════════════
+router.post('/operator/alimtalk/match', authenticate, async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+
+    const planCtx = await loadPlanContext(companyId);
+    if (!planCtx) return res.status(404).json({ success: false, error: '회사 정보를 찾을 수 없습니다.' });
+    if (!isAiOperatorAllowed(planCtx, req.user)) {
+      return res.status(403).json({ success: false, error: 'AI Operator 진입 권한이 없습니다.', code: 'AI_OPERATOR_GATED' });
+    }
+
+    const { campaignObjective, campaignType } = req.body || {};
+    if (!campaignObjective || typeof campaignObjective !== 'string' || campaignObjective.trim().length < 3) {
+      return res.status(400).json({ success: false, error: '캠페인 의도(자연어)를 입력해주세요 (3자 이상).' });
+    }
+
+    const result = await matchAlimtalkTemplate({
+      companyId,
+      campaignObjective: campaignObjective.trim(),
+      campaignType: typeof campaignType === 'string' ? campaignType : undefined,
+    });
+
+    return res.json({ success: true, ...result });
+  } catch (err: any) {
+    console.error('[AI Operator alimtalk match] 오류:', err);
+    return res.status(500).json({ success: false, error: err?.message || '알림톡 매칭 실패' });
   }
 });
 

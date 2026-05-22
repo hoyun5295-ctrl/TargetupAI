@@ -453,6 +453,43 @@ router.put('/companies/:id', authenticate, requireSuperAdmin, async (req: Reques
   }
 });
 
+// ★ D190 #2 (2026-05-22): orchestrateWithAI 회사별 토글 — 슈퍼관리자 전용
+// PATCH /api/admin/companies/:id/ai-orchestrator { enabled: boolean }
+//   ENT 1사 한정 활성 → PM2 로그 비교 분석 (Compliance 통과율 + 비용 + latency) → 단계적 확장
+router.patch('/companies/:id/ai-orchestrator', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
+  const { id } = req.params;
+  const { enabled } = req.body;
+
+  if (typeof enabled !== 'boolean') {
+    return res.status(400).json({ error: 'enabled는 boolean 필수' });
+  }
+
+  try {
+    const result = await query(
+      `UPDATE companies
+       SET use_ai_orchestrator = $1, updated_at = NOW()
+       WHERE id = $2::uuid
+       RETURNING id, company_name, use_ai_orchestrator`,
+      [enabled, id]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: '회사를 찾을 수 없습니다.' });
+    }
+
+    console.log(`[Admin] AI Orchestrator 토글: company=${result.rows[0].company_name} → ${enabled}`);
+    res.json({
+      company: result.rows[0],
+      message: enabled
+        ? 'AI Orchestrator (Tool Use) 활성됨 — PM2 로그 모니터링 권장'
+        : 'AI Orchestrator 비활성됨 — 기존 orchestrate 흐름으로 복원',
+    });
+  } catch (error) {
+    console.error('AI Orchestrator 토글 실패:', error);
+    res.status(500).json({ error: 'AI Orchestrator 토글 실패' });
+  }
+});
+
 // 회사 비활성화 (soft delete)
 router.delete('/companies/:id', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
   const { id } = req.params;

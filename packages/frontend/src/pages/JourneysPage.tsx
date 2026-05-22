@@ -264,6 +264,57 @@ export default function JourneysPage() {
     });
   }, []);
 
+  // ★ D190 #3 (2026-05-22): 알림톡 AI 자동 매칭 — Opus 4.7 매칭 + 변수 자동 매핑
+  const handleAlimtalkAutoMatch = async (stepIdx: number) => {
+    if (!aiPkg) return;
+    const matchObjective = aiPkg.name || aiPkg.reasoning || objective || '캠페인 발송';
+    if (!matchObjective || matchObjective.trim().length < 3) {
+      alert('캠페인 의도가 비어있습니다. 여정 이름 또는 목표를 입력해주세요.');
+      return;
+    }
+    try {
+      const res = await fetch('/api/ai/operator/alimtalk/match', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token()}` },
+        body: JSON.stringify({
+          campaignObjective: matchObjective,
+          campaignType: aiPkg.templateCode,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        alert(data.error || 'AI 매칭 실패');
+        return;
+      }
+      if (!data.matched || !data.template) {
+        alert(data.suggestion || '정합되는 알림톡 템플릿이 없습니다. 캠페인 의도에 맞는 템플릿을 추가 등록해주세요.');
+        return;
+      }
+      // 매칭 결과 자동 적용 — 회사 admin 검토 후 추가 정정 가능
+      const variableMap: Record<string, string> = {};
+      for (const m of (data.variableMappings || [])) {
+        if (m.customerFieldKey) {
+          variableMap[m.templateVariable] = `@@${m.customerFieldKey}@@`;
+        }
+      }
+      updateStep(stepIdx, {
+        alimtalkProfileId: data.template.profile_id,
+        alimtalkTemplateCode: data.template.template_code,
+        alimtalkVariableMap: variableMap,
+      });
+      const unmappedCount = (data.variableMappings || []).filter((m: any) => !m.customerFieldKey).length;
+      alert(
+        `AI 자동 매칭 완료 (정합 점수 ${data.matchScore})\n\n` +
+        `템플릿: ${data.template.template_name}\n` +
+        `근거: ${data.matchReason}\n\n` +
+        `변수 자동 매핑: ${(data.variableMappings || []).length}건 (미매핑 ${unmappedCount}건 — 회사 admin 직접 입력 필요)\n\n` +
+        `회사 admin 검토 + 정정 후 활성화해주세요.`
+      );
+    } catch (err: any) {
+      alert(err?.message || 'AI 매칭 중 오류');
+    }
+  };
+
   // ★ D189 #2 (2026-05-22): step.alimtalk* ↔ AlimtalkChannelState 매핑 헬퍼
   const stepToAlimtalkState = (step: AIGeneratedStep): AlimtalkChannelState => {
     const tpl = alimtalkTemplates.find((t) => t.template_code === step.alimtalkTemplateCode);
@@ -962,7 +1013,20 @@ export default function JourneysPage() {
                     {/* ★ D189 #2 (2026-05-22): 알림톡 step UI — AlimtalkChannelPanel 통합 (발신프로필 + 템플릿 + 변수 매핑 + 부달 + 미리보기) */}
                     {s.stepType === 'message' && s.channel === 'kakao' && (
                       <div className="p-3 bg-amber-500/10 border border-amber-500/30 rounded text-xs">
-                        <div className="font-semibold text-amber-200 mb-2">알림톡 (KAKAO) step</div>
+                        <div className="flex items-center justify-between mb-2">
+                          <div className="font-semibold text-amber-200">알림톡 (KAKAO) step</div>
+                          {/* ★ D190 #3 (2026-05-22): AI 자동 매칭 추천 버튼 — Opus 4.7 템플릿 매칭 + 변수 자동 매핑 */}
+                          {alimtalkTemplates.length > 0 && (
+                            <button
+                              onClick={() => handleAlimtalkAutoMatch(idx)}
+                              className="px-2 py-1 bg-violet-500/30 hover:bg-violet-500/50 text-violet-200 rounded text-[11px] flex items-center gap-1"
+                              title="AI가 회사 보유 템플릿 중 정합 매트릭스 자동 추천 + 변수 자동 매핑"
+                            >
+                              <Wand2 className="w-3 h-3" />
+                              AI 자동 매칭
+                            </button>
+                          )}
+                        </div>
                         {alimtalkSenders.length === 0 ? (
                           <div className="p-3 bg-rose-500/10 border border-rose-500/30 rounded text-rose-200">
                             승인된 발신프로필이 없습니다. 알림톡 발송 모달에서 발신프로필을 먼저 등록해주세요.
