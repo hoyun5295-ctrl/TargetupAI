@@ -7,7 +7,9 @@
  */
 
 import { useEffect, useState } from 'react';
-import { ArrowRight, BarChart3, Edit2, MessageSquareText, Play, Sparkles, X } from 'lucide-react';
+import { ArrowRight, BarChart3, Edit2, LayoutGrid, MessageSquareText, Play, Sparkles, X } from 'lucide-react';
+// ★ D210+ (Harold 명시 2026-05-23): STEP 6 메뉴 매트릭스 = AiOperatorPage와 단일 source 공통 사용.
+import { SUB_MODULE_CARDS } from '../constants/ai-operator-modules';
 
 interface WalkthroughStep {
   icon: typeof Sparkles;
@@ -54,13 +56,15 @@ const STEPS: WalkthroughStep[] = [
     description: '진입 사용자 + step별 효과 + 등급 / 시간대 / 요일 + Bandit. 누적 데이터로 정확도 자동 향상.',
     highlight: 'AI가 효과 데이터 학습 — 시간 지날수록 정확도 ↑',
   },
-  // ★ D209+ (Harold 명시 2026-05-23): STEP 6 — 곧 업데이트 + 기존 고객사 PRO 특별혜택 안내.
+  // ★ D210+ (Harold 명시 2026-05-23): STEP 6 = AI Operator 전체 메뉴 매트릭스 + 기존 고객사 특별 혜택 안내 통합.
+  //   본문 영역 = SUB_MODULE_CARDS 10건 4열 그리드 (lg:grid-cols-4 × 3행) + 하단 안내 박스.
+  //   사용자 본질 = 옛 영역 진입 시 어떤 메뉴 있는지 한 눈에 확인.
   {
-    icon: Sparkles,
+    icon: LayoutGrid,
     gradient: 'from-amber-400 to-fuchsia-500',
-    title: '6. 곧 업데이트됩니다',
-    description: '현재 개발 진행 중. 기존 고객사는 PRO 요금제 사용 시 특별 혜택 진입 가능 (운영팀 안내).',
-    highlight: '★ 기존 고객사 PRO — AI Operator 특별 진입 정합',
+    title: '6. AI Operator 전체 메뉴',
+    description: '자연어 한 줄 외에도 사용 가능한 AI 메뉴 — 클릭하여 각 페이지 진입',
+    highlight: 'PRO 요금제 사용 중인 기존 고객사는 AI Operator 특별 진입 가능 (운영팀 안내).',
   },
 ];
 
@@ -103,7 +107,7 @@ export default function AiOperatorWalkthroughModal({ forceShow, onClose }: AiOpe
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-md animate-in fade-in duration-200" onClick={() => handleClose(false)}>
       <div
-        className="relative w-full max-w-2xl rounded-3xl border border-white/10 shadow-2xl bg-gradient-to-br from-indigo-950 via-purple-950 to-fuchsia-950 overflow-hidden animate-in fade-in zoom-in-95 duration-300"
+        className={`relative w-full ${isLast ? 'max-w-5xl' : 'max-w-2xl'} rounded-3xl border border-white/10 shadow-2xl bg-gradient-to-br from-indigo-950 via-purple-950 to-fuchsia-950 overflow-hidden animate-in fade-in zoom-in-95 duration-300 transition-[max-width]`}
         onClick={(e) => e.stopPropagation()}
       >
         {/* 배경 글로우 */}
@@ -141,10 +145,48 @@ export default function AiOperatorWalkthroughModal({ forceShow, onClose }: AiOpe
               <Icon className="w-8 h-8 text-white" />
             </div>
             <h2 className="text-xl md:text-2xl font-semibold text-white mb-3">{step.title}</h2>
-            <p className="text-sm md:text-base text-white/70 leading-relaxed mb-4">{step.description}</p>
-            <div className="inline-block px-4 py-2 bg-white/5 border border-white/10 rounded-lg text-xs md:text-sm text-violet-200">
-              {step.highlight}
-            </div>
+            {isLast ? (
+              <>
+                {/* ★ D210+ (Harold 명시 2026-05-23): STEP 6 = 메뉴 매트릭스 + 하단 안내 박스 통합 — 사용자 한 눈에 메뉴 확인. */}
+                <p className="text-sm text-white/60 leading-relaxed mb-5">{step.description}</p>
+                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 mb-5 text-left">
+                  {SUB_MODULE_CARDS.map((card) => {
+                    const CardIcon = card.icon;
+                    return (
+                      <div
+                        key={card.label}
+                        className="group relative p-4 rounded-2xl bg-white/[0.06] border border-white/10 hover:bg-white/[0.12] hover:border-violet-400/40 hover:scale-[1.02] transition-all duration-300"
+                      >
+                        <div className={`w-10 h-10 rounded-xl bg-gradient-to-br ${card.gradient} flex items-center justify-center mb-2.5 shadow-lg`}>
+                          <CardIcon className="w-5 h-5 text-white" />
+                        </div>
+                        <div className="flex items-center gap-1.5 mb-1 flex-wrap">
+                          <h3 className="text-white font-semibold text-sm">{card.label}</h3>
+                          {card.adminOnly && (
+                            <span className="text-[8px] font-bold tracking-wider px-1.5 py-0.5 rounded-full bg-amber-500/30 text-amber-200 border border-amber-400/30">관리자</span>
+                          )}
+                        </div>
+                        <p className="text-white/55 text-[11px] leading-relaxed">{card.description}</p>
+                      </div>
+                    );
+                  })}
+                </div>
+                <div className="rounded-xl p-4 bg-gradient-to-r from-amber-500/15 to-fuchsia-500/15 border border-amber-400/30 text-left">
+                  <p className="text-xs font-semibold text-amber-200 mb-1.5 flex items-center gap-1.5">
+                    <Sparkles className="w-3.5 h-3.5" />
+                    기존 고객사 특별 혜택
+                  </p>
+                  <p className="text-[11px] text-white/70 leading-relaxed">{step.highlight}</p>
+                </div>
+              </>
+            ) : (
+              <>
+                <p className="text-sm md:text-base text-white/70 leading-relaxed mb-4">{step.description}</p>
+                <div className="inline-block px-4 py-2 bg-white/5 border border-white/10 rounded-lg text-xs md:text-sm text-violet-200">
+                  {step.highlight}
+                </div>
+              </>
+            )}
           </div>
 
           {/* 액션 버튼 */}
