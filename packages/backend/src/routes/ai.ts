@@ -69,6 +69,10 @@ import {
 import { generateJourneyPackage, refineStepMessage } from '../utils/journey-ai-generator';
 // ★ D192 (2026-05-22): CT-51 Journey 통계 통합 진입점 — 옛 단순 통계(getJourneyStats/listExecutions)를 완전 진화 — buildJourneyStats (overview + steps + segments + hourly + weekday + variants) + listJourneyEnteredCustomers (회사 격리 + 페이지네이션)
 import { buildJourneyStats, listJourneyEnteredCustomers } from '../utils/journey-stats';
+// ★ D197 (2026-05-22) Phase B-2: Predictive Suite — 회사 예측 점수 분포 + Top 위험/구매 가능성 + 모델 정확도
+import { getCompanyPredictionDistribution, getCompanyPredictionSummary } from '../utils/predictive-suite';
+// ★ D205 (2026-05-22) AI 자율 진단 + 자동 추천 — 옛 ContinuousOperator + next-action-advisor 진화
+import { diagnoseCompanyHealth } from '../utils/ai-self-diagnosis';
 
 
 // ★ D79: 인라인 래퍼 제거 → CT-01 buildFilterWhereClauseCompat 직접 사용
@@ -2011,6 +2015,64 @@ router.get('/operator/journeys/:id/executions', async (req: Request, res: Respon
   } catch (err: any) {
     console.error('[Journeys executions] 오류:', err);
     return res.status(500).json({ success: false, error: err?.message || 'execution 조회 실패' });
+  }
+});
+
+// ════════════════════════════════════════════════════════════════════
+// ★ D197 (2026-05-22) Phase B-2 Predictive Suite endpoint 2건
+// ════════════════════════════════════════════════════════════════════
+
+// GET /api/ai/operator/predictive/distribution — 회사 예측 점수 분포 + Top 위험 50명 + Top 구매 가능성 50명 + 모델 정확도
+router.get('/operator/predictive/distribution', async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+    const planCtx = await loadPlanContext(companyId);
+    if (!planCtx) return res.status(404).json({ success: false, error: '회사 정보를 찾을 수 없습니다.' });
+    if (!isAiOperatorAllowed(planCtx, req.user)) {
+      return res.status(403).json({ success: false, error: 'AI Operator 진입 권한이 없습니다.', code: 'AI_OPERATOR_GATED' });
+    }
+    const distribution = await getCompanyPredictionDistribution(companyId);
+    return res.json({ success: true, distribution });
+  } catch (err: any) {
+    console.error('[Predictive distribution] 오류:', err);
+    return res.status(500).json({ success: false, error: err?.message || '예측 분포 조회 실패' });
+  }
+});
+
+// GET /api/ai/operator/self-diagnosis — AI 자율 진단 + 자동 추천 3건 (회사 admin dashboard 진입 시 호출)
+router.get('/operator/self-diagnosis', async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+    const planCtx = await loadPlanContext(companyId);
+    if (!planCtx) return res.status(404).json({ success: false, error: '회사 정보를 찾을 수 없습니다.' });
+    if (!isAiOperatorAllowed(planCtx, req.user)) {
+      return res.status(403).json({ success: false, error: 'AI Operator 진입 권한이 없습니다.', code: 'AI_OPERATOR_GATED' });
+    }
+    const diagnosis = await diagnoseCompanyHealth(companyId);
+    return res.json({ success: true, diagnosis });
+  } catch (err: any) {
+    console.error('[SelfDiagnosis] 오류:', err);
+    return res.status(500).json({ success: false, error: err?.message || '자율 진단 조회 실패' });
+  }
+});
+
+// GET /api/ai/operator/predictive/summary — 회사 예측 요약 (AI 자율 추천 통합용)
+router.get('/operator/predictive/summary', async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+    const planCtx = await loadPlanContext(companyId);
+    if (!planCtx) return res.status(404).json({ success: false, error: '회사 정보를 찾을 수 없습니다.' });
+    if (!isAiOperatorAllowed(planCtx, req.user)) {
+      return res.status(403).json({ success: false, error: 'AI Operator 진입 권한이 없습니다.', code: 'AI_OPERATOR_GATED' });
+    }
+    const summary = await getCompanyPredictionSummary(companyId);
+    return res.json({ success: true, summary });
+  } catch (err: any) {
+    console.error('[Predictive summary] 오류:', err);
+    return res.status(500).json({ success: false, error: err?.message || '예측 요약 조회 실패' });
   }
 });
 

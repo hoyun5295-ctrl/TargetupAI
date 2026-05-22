@@ -159,6 +159,7 @@ interface SubModuleCard {
 
 const SUB_MODULE_CARDS: SubModuleCard[] = [
   { icon: Workflow,     gradient: 'from-fuchsia-400 to-purple-500', label: '여정 자동화',    description: '자연어 한 줄 → 7 표준 여정 + Liquid 1:1 분기 + A/B Bandit + 실시간 통계',   path: '/ai-journeys' },
+  { icon: Brain,        gradient: 'from-violet-400 to-fuchsia-500', label: 'AI 자율 예측',  description: '사용자별 클릭률·이탈 위험·구매 가능성 AI 자동 예측 + Liquid 분기 통합',  path: '/predictive' },
   { icon: Brain,        gradient: 'from-indigo-400 to-violet-500', label: 'AI 영구운영',    description: '매일 AI가 새 캠페인 제안 (사용자 승인 후 발송)',     path: '/continuous-operator' },
   { icon: LineChart,    gradient: 'from-fuchsia-400 to-pink-500',  label: '성과리포트',     description: '30일 성과 분석 + AI 다음 캠페인 추천',              path: '/performance' },
   { icon: Workflow,     gradient: 'from-emerald-400 to-teal-500',  label: '자사몰 연동',    description: '자체 호스팅 · 네이버 스마트스토어 · 카페24 자동 sync', path: '/cdp-settings' },
@@ -1122,6 +1123,9 @@ export default function AiOperatorPage() {
         {/* ★ D177-fix: 진행률 카드 영구 제거 (Harold 명시 — 업그레이드 노출 X / 방향성 이미 잡음) */}
         {showAbout && (
           <>
+            {/* ★ D205 (2026-05-22): AI 자율 진단 자동 추천 카드 — 회사 admin 첫 진입 시 자동 제안 */}
+            <AiSelfDiagnosisCards />
+
             {/* ★ D177-ux2: AI Operator 페이지 안 sub-module 배치 (Harold 명시 — 헤더 dropdown X / 페이지 안 메뉴) */}
             <div className="mb-14">
               <p className="text-[10px] font-semibold tracking-[0.28em] text-white/40 mb-1.5 uppercase">AI Operator Modules</p>
@@ -1312,6 +1316,136 @@ export default function AiOperatorPage() {
 
       {/* ★ D193 (2026-05-22) Phase D-1 사용자 안내: 첫 진입 walkthrough 5단계 안내 (localStorage 1회 표시) */}
       <AiOperatorWalkthroughModal />
+    </div>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════════
+// ★ D205 (2026-05-22): AI 자율 진단 자동 추천 카드 컴포넌트
+//   회사 admin 진입 시 자동 호출 — 우선순위 1~3 추천 카드 표시
+//   원클릭 진행 시 자연어 한 줄 prefill + AI Operator 진입
+// ════════════════════════════════════════════════════════════════════
+
+interface AutoRecommendation {
+  id: string;
+  priority: 1 | 2 | 3;
+  type: string;
+  title: string;
+  reason: string;
+  targetCount: number;
+  expectedImpact: string;
+  oneClickObjective: string;
+}
+
+interface CompanyHealthDiagnosis {
+  overallScore: number;
+  topConcerns: string[];
+  recommendations: AutoRecommendation[];
+}
+
+function AiSelfDiagnosisCards() {
+  const [diagnosis, setDiagnosis] = useState<CompanyHealthDiagnosis | null>(null);
+  const [loading, setLoading] = useState(true);
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    const load = async () => {
+      try {
+        const token = localStorage.getItem('token');
+        const r = await fetch('/api/ai/operator/self-diagnosis', {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        const d = await r.json();
+        if (d.success) setDiagnosis(d.diagnosis);
+      } catch {
+        // skip - 추천 없으면 빈 영역
+      } finally {
+        setLoading(false);
+      }
+    };
+    load();
+  }, []);
+
+  if (loading || !diagnosis || diagnosis.recommendations.length === 0) return null;
+
+  const handleOneClick = (objective: string) => {
+    // AI Operator 자연어 입력 영역에 prefill + 자동 진입 (sessionStorage 정합)
+    sessionStorage.setItem('ai-operator-prefill-objective', objective);
+    sessionStorage.setItem('ai-operator-prefill-source', 'self-diagnosis');
+    // 페이지 새로 진입 (자연어 입력 영역으로 스크롤)
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+    setTimeout(() => {
+      const textarea = document.querySelector('textarea');
+      if (textarea) {
+        (textarea as HTMLTextAreaElement).value = objective;
+        textarea.dispatchEvent(new Event('input', { bubbles: true }));
+        textarea.focus();
+      }
+    }, 300);
+  };
+
+  const priorityColor: Record<number, string> = {
+    1: 'from-rose-500/20 to-pink-500/15 border-rose-400/30',
+    2: 'from-emerald-500/20 to-teal-500/15 border-emerald-400/30',
+    3: 'from-violet-500/20 to-fuchsia-500/15 border-violet-400/30',
+  };
+
+  return (
+    <div className="mb-10 p-5 bg-gradient-to-br from-indigo-950/60 via-purple-950/40 to-fuchsia-950/40 border border-white/10 rounded-2xl">
+      <div className="flex items-center justify-between mb-4">
+        <div>
+          <p className="text-[10px] font-semibold tracking-[0.28em] text-violet-300/70 mb-1 uppercase">AI Self-Diagnosis</p>
+          <h3 className="text-lg font-bold text-white flex items-center gap-2">
+            <Brain className="w-5 h-5 text-violet-400" />
+            AI가 분석한 오늘 추천 캠페인
+          </h3>
+        </div>
+        <div className="text-right">
+          <div className="text-[10px] text-white/40">회사 건강 점수</div>
+          <div className={`text-2xl font-bold font-mono ${diagnosis.overallScore >= 70 ? 'text-emerald-300' : diagnosis.overallScore >= 40 ? 'text-amber-300' : 'text-rose-300'}`}>
+            {diagnosis.overallScore}
+          </div>
+        </div>
+      </div>
+
+      {diagnosis.topConcerns.length > 0 && (
+        <div className="mb-4 p-3 bg-white/5 border border-white/10 rounded-lg">
+          <div className="text-[10px] text-white/40 mb-1.5">AI 진단 우선 영역</div>
+          <ul className="text-xs text-white/80 space-y-1">
+            {diagnosis.topConcerns.map((c, i) => (
+              <li key={i} className="flex items-start gap-1.5">
+                <span className="text-amber-300 mt-0.5">•</span>
+                <span>{c}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+        {diagnosis.recommendations.map((rec) => (
+          <div
+            key={rec.id}
+            className={`p-4 bg-gradient-to-br ${priorityColor[rec.priority]} border rounded-xl`}
+          >
+            <div className="flex items-center gap-1.5 mb-2">
+              <span className="px-1.5 py-0.5 bg-white/10 rounded text-[9px] font-medium text-white/70">우선순위 {rec.priority}</span>
+              {rec.targetCount > 0 && (
+                <span className="text-[10px] text-white/50">{rec.targetCount.toLocaleString()}명</span>
+              )}
+            </div>
+            <h4 className="text-sm font-semibold text-white mb-1.5">{rec.title}</h4>
+            <p className="text-[11px] text-white/70 leading-relaxed mb-2">{rec.reason}</p>
+            <p className="text-[10px] text-white/40 mb-3">{rec.expectedImpact}</p>
+            <button
+              onClick={() => handleOneClick(rec.oneClickObjective)}
+              className="w-full px-3 py-1.5 bg-white/10 hover:bg-white/20 text-white text-xs font-medium rounded transition-colors flex items-center justify-center gap-1"
+            >
+              원클릭 진행 →
+            </button>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }

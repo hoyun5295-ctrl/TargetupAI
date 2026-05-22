@@ -61,6 +61,8 @@ import { startContinuousOperatorScheduler } from './utils/continuous-operator';
 // ★ D187 (2026-05-20): Journey Builder Lite — 5분 주기 due execution 처리 + 5분 주기 trigger 매칭
 import { startJourneyExecutor } from './utils/journey-executor';
 import { startJourneyTriggerWatcher } from './utils/journey-trigger-watcher';
+// ★ D197 (2026-05-22) Phase B-2: Predictive Suite — 1시간 주기 cron + 회사 customer 예측 점수 자동 갱신
+import { startPredictiveWorker } from './utils/predictive-worker';
 
 // 공용 관리 라우트 (슈퍼관리자 + 고객사관리자)
 import manageUsersRoutes from './routes/manage-users';
@@ -260,6 +262,11 @@ app.listen(PORT, () => {
   //   AI_OPERATOR_ALLOWED_USERS=hoyun 게이팅 (routes/ai.ts 영역)
   startJourneyExecutor();
   startJourneyTriggerWatcher();
+
+  // ★ D197 (2026-05-22) Phase B-2: Predictive Suite worker — 1시간 주기 customer 예측 점수 자동 갱신
+  //   클릭률 + 이탈 위험 + 구매 가능성 (Logistic Regression + cold start fallback)
+  //   24h TTL — 발송 시점 cache 우선 + 없으면 즉시 계산
+  startPredictiveWorker();
 });
 
 export default app;

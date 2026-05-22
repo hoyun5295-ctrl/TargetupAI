@@ -513,65 +513,77 @@ export interface SampleCustomer {
   data: Record<string, any>;
 }
 
+// ★ D197 (2026-05-22) Phase B-2: SAMPLE_CUSTOMERS에 Predictive 점수 통합 — Liquid 분기 미리보기 정합
+//   click_score / churn_risk / purchase_likelihood 모두 0~1 매트릭스
 export const SAMPLE_CUSTOMERS: SampleCustomer[] = [
   {
-    label: 'VIP 단골 (서울)',
+    label: 'VIP 오래 함께한 (서울)',
     data: { name: '박홍윤', grade: 'VIP', age: 45, gender: 'M', region: '서울',
             points: 25600, purchase_count: 38, recent_purchase_store: '강남점',
-            recent_purchase_amount: 152000 },
+            recent_purchase_amount: 152000,
+            click_score: 0.45, churn_risk: 0.10, purchase_likelihood: 0.75 },
   },
   {
     label: 'Gold (부산)',
     data: { name: '김민수', grade: 'Gold', age: 32, gender: 'M', region: '부산',
             points: 8200, purchase_count: 14, recent_purchase_store: '서면점',
-            recent_purchase_amount: 78000 },
+            recent_purchase_amount: 78000,
+            click_score: 0.30, churn_risk: 0.20, purchase_likelihood: 0.50 },
   },
   {
     label: 'Silver (대구)',
     data: { name: '이지영', grade: 'Silver', age: 28, gender: 'F', region: '대구',
             points: 3100, purchase_count: 5, recent_purchase_store: '동성로점',
-            recent_purchase_amount: 42000 },
+            recent_purchase_amount: 42000,
+            click_score: 0.20, churn_risk: 0.40, purchase_likelihood: 0.30 },
   },
   {
     label: '일반 (광주)',
     data: { name: '최서연', grade: '일반', age: 35, gender: 'F', region: '광주',
             points: 1200, purchase_count: 2, recent_purchase_store: '충장로점',
-            recent_purchase_amount: 28000 },
+            recent_purchase_amount: 28000,
+            click_score: 0.12, churn_risk: 0.55, purchase_likelihood: 0.20 },
   },
   {
     label: '신규 (인천)',
     data: { name: '정민호', grade: '신규', age: 24, gender: 'M', region: '인천',
             points: 100, purchase_count: 0, recent_purchase_store: null,
-            recent_purchase_amount: 0 },
+            recent_purchase_amount: 0,
+            click_score: 0.18, churn_risk: 0.30, purchase_likelihood: 0.25 },
   },
   {
     label: '휴면 6개월+ (서울)',
     data: { name: '한지수', grade: 'Silver', age: 41, gender: 'F', region: '서울',
             points: 4500, purchase_count: 8, recent_purchase_store: '홍대점',
-            recent_purchase_amount: 0 },
+            recent_purchase_amount: 0,
+            click_score: 0.05, churn_risk: 0.92, purchase_likelihood: 0.08 },
   },
   {
     label: 'VIP 여성 (부산)',
     data: { name: '윤소희', grade: 'VIP', age: 38, gender: 'F', region: '부산',
             points: 31200, purchase_count: 52, recent_purchase_store: '센텀점',
-            recent_purchase_amount: 198000 },
+            recent_purchase_amount: 198000,
+            click_score: 0.50, churn_risk: 0.05, purchase_likelihood: 0.85 },
   },
   {
     label: 'Gold 청년 (대전)',
     data: { name: '강현우', grade: 'Gold', age: 26, gender: 'M', region: '대전',
             points: 6800, purchase_count: 11, recent_purchase_store: '둔산점',
-            recent_purchase_amount: 65000 },
+            recent_purchase_amount: 65000,
+            click_score: 0.35, churn_risk: 0.15, purchase_likelihood: 0.55 },
   },
   {
     label: '익명 (값 누락)',
     data: { name: null, grade: null, age: null, gender: null, region: null,
             points: null, purchase_count: 0, recent_purchase_store: null,
-            recent_purchase_amount: null },
+            recent_purchase_amount: null,
+            click_score: 0.15, churn_risk: 0.50, purchase_likelihood: 0.10 },
   },
   {
     label: '풀 데이터 (테스트용)',
     data: { name: '테스트', grade: 'VIP', age: 30, gender: 'M', region: '서울',
             points: 99999, purchase_count: 100, recent_purchase_store: '본점',
-            recent_purchase_amount: 999999 },
+            recent_purchase_amount: 999999,
+            click_score: 0.40, churn_risk: 0.20, purchase_likelihood: 0.80 },
   },
 ];

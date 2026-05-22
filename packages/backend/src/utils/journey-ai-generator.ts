@@ -240,6 +240,41 @@ ${memoryContext}
 - 단순 일률 발송 영역은 Liquid 미사용 (기존 %고객명% 변수만 사용 권장)
 - 모르는 필드(customer.X)는 사용 X — 기본 컬럼만 사용: name / phone / grade / age / gender / region / points / purchase_count / recent_purchase_store / recent_purchase_amount / recent_purchase_date
 
+[★ ★ ★ AI 자율 예측 점수 활용 가이드 — D197 신규 (Predictive Suite 통합) ★ ★ ★]
+발송 시점에 customer 객체에 자동 첨부되는 3 예측 점수 (0~1 매트릭스):
+✓ {{ customer.click_score }} — 다음 메시지 클릭 가능성
+✓ {{ customer.churn_risk }} — 이탈 위험 (높을수록 회복 캠페인 의무)
+✓ {{ customer.purchase_likelihood }} — 구매 가능성 (높을수록 구매 유도)
+
+[AI 자율 분기 작성 가이드 — 회사 admin이 "이탈 고객 회복" / "구매 유도" / "AI가 알아서 분기" 영역 명시 시 적극 활용]
+
+예시 1 — 이탈 위험 분기:
+{{ customer.name }}님,
+{% if customer.churn_risk > 0.7 %}
+오랜만에 인사드려요. 곧 봄을 맞아 [회복 안내 — 직접 작성해주세요] 준비했어요.
+{% elsif customer.purchase_likelihood > 0.6 %}
+{{ customer.name }}님께 어울리는 새 상품 [추천 안내 — 직접 작성해주세요]
+{% else %}
+이번 봄 새로운 소식 전해드려요.
+{% endif %}
+
+예시 2 — 클릭 가능성 + 등급 통합:
+{{ customer.name }}님,
+{% if customer.click_score > 0.4 and customer.grade == 'VIP' %}
+VIP 회원님께 먼저 안내드리는 봄 소식.
+{% elsif customer.churn_risk > 0.6 %}
+오랜만에 안부 전해드려요.
+{% else %}
+봄 새 소식 안내.
+{% endif %}
+
+[Predictive 점수 분기 본질 룰]
+✓ 점수는 발송 시점 자동 계산 (cache 24h TTL)
+✓ 신규 회사 영역도 cold start fallback 정합 — 등급별 평균 점수 사용
+✓ 데이터 누적 시 모델 자동 정확도 향상 — 시간 지날수록 정확도↑
+✗ 점수 자체를 메시지에 직접 노출 금지 (예: "당신의 이탈 위험은 87%입니다" X)
+✗ Liquid 분기 안 구체 혜택 임의 작성 X — placeholder 유지 의무
+
 [★ 문자 사용 절대 룰 — 한국 통신사 SMS/LMS 표준]
 ✗ 이모지 절대 사용 금지 — 🎂 🎉 💝 🌸 🎁 ✨ 💌 🌷 🍀 ❤ 등 모든 이모지 통신사 미지원 (발송 실패 / 깨짐 위험)
 ✗ 비표준 특수문자 사용 금지:

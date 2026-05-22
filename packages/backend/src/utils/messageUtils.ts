@@ -203,6 +203,8 @@ export function replaceVariables(
     company?: { name?: string; brand_name?: string };
     // ★ D191: 테스트 분리용 (Liquid 미적용 강제) — backward compat 검증 영역
     skipLiquid?: boolean;
+    // ★ D201 (2026-05-22) Phase B-3 Connected Content: 외부 데이터 (날씨/재고/가격/신상품) Liquid context 통합
+    externalContext?: Record<string, any>;
   }
 ): string {
   if (!template) return '';
@@ -250,11 +252,13 @@ export function replaceVariables(
   // - detectLiquidSyntax = false 시 자동 skip (backward compat 100% 정합 — 기존 %변수% 캠페인 영향 0)
   // - 오류 시 원본 텍스트 반환 (발송 차단 X)
   // - 주소록 fallback 후 + fieldMappings 치환 전 위치 — 영문 column 표준 우선
+  // - ★ D201 Phase B-3: externalContext (weather/inventory/price/product) 통합
   if (!options?.skipLiquid && detectLiquidSyntax(result)) {
     const liquidResult = renderLiquid(result, {
       customer: flattenCustomerForLiquid(customer),
       company: options?.company,
       now: new Date(),
+      ...(options?.externalContext || {}),
     });
     result = liquidResult.rendered;
     if (liquidResult.errors.length > 0) {
@@ -493,6 +497,8 @@ export function prepareSendMessage(
     // ★ D191 (2026-05-22) Phase B-1 Liquid Templating: Liquid 컨텍스트 (회사 정보)
     company?: { name?: string; brand_name?: string };
     skipLiquid?: boolean;
+    // ★ D201 (2026-05-22) Phase B-3: Connected Content 외부 데이터
+    externalContext?: Record<string, any>;
   }
 ): { message: string; subject: string } {
   // 1. 변수 치환 (Liquid 렌더링 + %변수% 치환 통합)
@@ -500,6 +506,7 @@ export function prepareSendMessage(
     skipNumberFormatting: options.skipNumberFormatting,
     company: options.company,
     skipLiquid: options.skipLiquid,
+    externalContext: options.externalContext,
   });
   // 2. (광고)+080 본문 (중복 방지 안전장치 내장)
   msg = buildAdMessage(msg, options.msgType, options.isAd, options.opt080Number);

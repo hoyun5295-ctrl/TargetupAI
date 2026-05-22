@@ -351,6 +351,28 @@ async function processExecution(exec: ExecutionRow): Promise<StepOutcome> {
     brand_name: companyRes.rows[0]?.brand_name || '',
   };
 
+  // ★ D197 (2026-05-22) Phase B-2: Predictive Suite 통합 — customer 객체에 click_score / churn_risk / purchase_likelihood 자동 첨부
+  //   Liquid 사용 가능: {% if customer.churn_risk > 0.7 %} 회복 안내 {% endif %}
+  //   cache 우선 조회 (24h TTL) — 없으면 즉시 계산 + 저장 (cdp_customer_predictions)
+  //   안전 fallback — 오류 시 원본 customer 반환 (발송 차단 X)
+  const { enrichCustomerWithPredictions } = await import('./predictive-suite');
+  const enrichedCustomer = await enrichCustomerWithPredictions(customer as Record<string, any>, exec.company_id);
+
+  // ★ D201 (2026-05-22) Phase B-3: Connected Content 통합 — 외부 실시간 데이터 (날씨/재고/가격/신상품) 통합
+  //   Liquid 변수 매칭된 경우만 fetch (불요 API 호출 0건)
+  //   timeout 5초 + 실패 시 빈 값 fallback (발송 차단 X)
+  let externalContext: Record<string, any> = {};
+  try {
+    const { enrichLiquidContextWithExternal } = await import('./connected-content');
+    externalContext = await enrichLiquidContextWithExternal(
+      step.message_template || '',
+      exec.company_id,
+      (enrichedCustomer as any).region || null,
+    );
+  } catch (err: any) {
+    console.warn('[JourneyExecutor] Connected Content skip:', err?.message);
+  }
+
   // 광고 표기 — step.is_ad (DB default true) → buildAdMessage가 (광고)+080+KISA 제목 자동 합성 (알림톡 영역 무관 = 정보성 메시지)
   const isAd = step.is_ad !== false;
 
@@ -403,7 +425,7 @@ async function processExecution(exec: ExecutionRow): Promise<StepOutcome> {
 
     const prep = prepareSendMessage(
       sanTemplate.sanitized,
-      customer as Record<string, any>,
+      enrichedCustomer,
       fieldMappings,
       {
         msgType: msgType as 'SMS' | 'LMS' | 'MMS',
@@ -411,7 +433,10 @@ async function processExecution(exec: ExecutionRow): Promise<StepOutcome> {
         opt080Number,
         subject: sanSubject.sanitized,
         // ★ D194 (2026-05-22): Liquid context — {{ company.name }} 지원
+        // ★ D197 (2026-05-22) Phase B-2: enrichedCustomer = customer + Predictive 점수 통합
+        // ★ D201 (2026-05-22) Phase B-3: externalContext = 날씨/재고/가격/신상품 통합
         company: companyContext,
+        externalContext,
       }
     );
     message = prep.message;
