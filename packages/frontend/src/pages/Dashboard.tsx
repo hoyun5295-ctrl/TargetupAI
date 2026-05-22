@@ -51,7 +51,8 @@ import { getMmsImagePath, getMmsImageDisplayName, toMmsImagePaths, type MmsImage
 import DirectSendPanel from '../components/DirectSendPanel';
 import AlimtalkSendModal from '../components/AlimtalkSendModal';
 import DirectSendAiRefinePopup from '../components/DirectSendAiRefinePopup';
-import BetaFeatureModal from '../components/BetaFeatureModal';
+// ★ D209+ (Harold 명시 2026-05-23): BetaFeatureModal → AiOperatorWalkthroughModal 정합 (AI Operator 메뉴 클릭 시 walkthrough + 특별혜택 안내 본질).
+import AiOperatorWalkthroughModal from '../components/AiOperatorWalkthroughModal';
 
 interface Stats {
   total: string;
@@ -153,7 +154,7 @@ export default function Dashboard() {
   const [showPlanApproval, setShowPlanApproval] = useState(false);
   const [planApproval, setPlanApproval] = useState<{requestId: string; planName: string} | null>(null);
   // ★ D163 (2026-05-19) Braze급 SaaS Step 0 — AI Operator 베타 모달 (전체 등급 노출, ENT+만 실제 진입)
-  const [showBetaModal, setShowBetaModal] = useState(false);
+  const [showWalkthroughModal, setShowWalkthroughModal] = useState(false);
 
   const [stats, setStats] = useState<Stats | null>(null);
   const [planInfo, setPlanInfo] = useState<PlanInfo | null>(null);
@@ -2255,9 +2256,9 @@ const campaignData = {
         isCompanyAdmin={user?.userType === 'company_admin'}
         planCode={planInfo?.plan_code}
         onAiOperatorClick={async () => {
-          // ★ D178 (2026-05-19) AI Operator 메뉴 클릭 — backend isAiOperatorAllowed 호출 결과 처리
-          //   ENV AI_OPERATOR_ALLOWED_USERS 설정 시 본 list 등록 사용자만 진입, 그 외 모두 BetaFeatureModal
-          //   ENV 미설정 시 기존 ENT/BUS 게이팅 (안전 default)
+          // ★ D178 (2026-05-19) + D209+ (Harold 명시 2026-05-23) AI Operator 메뉴 클릭 — backend isAiOperatorAllowed 호출 결과 처리.
+          //   ENV AI_OPERATOR_ALLOWED_USERS 설정 시 본 list 등록 사용자만 진입, 그 외 모두 AiOperatorWalkthroughModal 표시.
+          //   ENV 미설정 시 모두 차단 (개발 진행 영역 — 클릭 시 walkthrough + 특별혜택 안내 표시).
           try {
             const t = localStorage.getItem('token');
             const res = await fetch('/api/ai/operator/access', {
@@ -2267,11 +2268,11 @@ const campaignData = {
             if (data.success && data.allowed) {
               navigate('/ai-operator');
             } else {
-              setShowBetaModal(true);
+              setShowWalkthroughModal(true);
             }
           } catch {
-            // 네트워크 실패 시 안전 default = BetaFeatureModal 표시
-            setShowBetaModal(true);
+            // 네트워크 실패 시 안전 default = walkthrough 표시
+            setShowWalkthroughModal(true);
           }
         }}
         onDirectSend={async () => {
@@ -3854,7 +3855,7 @@ const campaignData = {
 
       {/* ★ D163 (2026-05-19) Braze급 SaaS Step 0 — AI Operator 베타 안내 모달.
           ENT/BUSINESS 외 등급 사용자가 헤더 "AI Operator" 메뉴 클릭 시 노출. */}
-      <BetaFeatureModal show={showBetaModal} onClose={() => setShowBetaModal(false)} />
+      <AiOperatorWalkthroughModal forceShow={showWalkthroughModal} onClose={() => setShowWalkthroughModal(false)} />
 
       {/* 하단 링크 */}
       <div className="max-w-7xl mx-auto px-4 py-6 mt-8 border-t border-gray-200 text-center text-xs text-gray-400 space-x-3">

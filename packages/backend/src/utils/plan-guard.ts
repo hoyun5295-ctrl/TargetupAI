@@ -82,6 +82,7 @@ export interface PlanContext {
   maxAutoCampaigns: number | null;       // NULL = 무제한(ENTERPRISE)
   autoCampaignOverride: number | null;   // 회사별 오버라이드 (D76)
   directRecipientLimit: number | null;   // 직접발송 주소록 최대 건수 (FREE=99,999, 나머지 NULL=무제한)
+  legacyGrandfathered: boolean;          // ★ D209+ (Harold 명시 2026-05-23): 기존 고객사 영역 (PRO + AI Operator 진입 허용 — 레퍼런스 확보 본질)
 }
 
 export interface FeatureCheckResult {
@@ -110,7 +111,8 @@ export const PLAN_STATUS_SELECT_EXPR = `
   COALESCE(p.cdp_enabled, false) AS cdp_enabled,
   p.cdp_events_per_month,
   p.direct_recipient_limit,
-  c.auto_campaign_override, c.subscription_status, c.trial_expires_at
+  c.auto_campaign_override, c.subscription_status, c.trial_expires_at,
+  COALESCE(c.legacy_grandfathered, false) AS legacy_grandfathered
 `.trim();
 
 // ═══════════════════════════════════════════════════════════
@@ -162,6 +164,7 @@ export async function loadPlanContext(companyId: string): Promise<PlanContext | 
     maxAutoCampaigns: row.max_auto_campaigns != null ? Number(row.max_auto_campaigns) : null,
     autoCampaignOverride: row.auto_campaign_override != null ? Number(row.auto_campaign_override) : null,
     directRecipientLimit: row.direct_recipient_limit != null ? Number(row.direct_recipient_limit) : null,
+    legacyGrandfathered: !!row.legacy_grandfathered,
   };
 }
 
@@ -206,25 +209,39 @@ export function isBetaAccessAllowed(ctx: PlanContext): boolean {
 }
 
 /**
- * ★ D178 (2026-05-19) — AI Operator 진입 게이팅 (Harold 명시 — 박힘 검증 단계는 본인만 박음).
- *   ENV `AI_OPERATOR_ALLOWED_USERS` 박힘 시 본 list 박은 loginId/userId만 실제 진입.
- *   그 외 모든 사용자 (ENT/BUS 포함) = BetaFeatureModal 박음 (기능 소개 한정).
- *   ENV 박지 X 시 → 기존 ENT/BUS 게이팅 (isBetaAccessAllowed) 그대로 박음 (안전 default).
+ * ★ D178 (2026-05-19) + D209+ (2026-05-23 Harold 명시) — AI Operator 진입 게이팅:
+ *
+ *   [현재 매트릭스 — 개발 진행 영역]
+ *   - ENV `AI_OPERATOR_ALLOWED_USERS` 설정 시 본 list에 포함된 loginId/userId만 진입 (Harold = hoyun 본질).
+ *   - ENV 미설정 시 → 모두 차단 (개발 진행 영역 안전 default).
+ *   - legacy_grandfathered / BUSINESS / ENTERPRISE 영역도 현재 진입 X (개발 진행 영역).
+ *
+ *   [개발 종결 후 직원 + 회사 admin 공개 시점 매트릭스 — 향후 활성 본질]
+ *   1. BUSINESS / ENTERPRISE = 진입 허용 (신규/legacy 무관)
+ *   2. legacy_grandfathered + PRO = 기존 73개 회사 진입 허용 (레퍼런스 확보 본질 — Harold 명시)
+ *   3. 그 외 (BASIC/STARTER/FREE/TRIAL + 신규 PRO) = BetaFeatureModal 표시 (기능 소개 한정)
+ *
+ *   DB schema (companies.legacy_grandfathered + first_signup_discount_until) = 영역 유지 (향후 활성 정합).
  *
  * @param ctx loadPlanContext 결과
- * @param user req.user (auth 미들웨어 박은 영역 — JwtPayload는 loginId + userId 박음)
+ * @param user req.user (auth 미들웨어 처리 영역 — JwtPayload = loginId + userId 포함)
  */
 export function isAiOperatorAllowed(
-  ctx: PlanContext,
+  _ctx: PlanContext,
   user: { loginId?: string; userId?: string } | null | undefined
 ): boolean {
+  // ★ D209+ (Harold 명시 2026-05-23) — 개발 진행 영역 본질:
+  //   현재 = ENV whitelist만 진입 허용 (Harold = hoyun 본질). ENV 미설정 시 모두 차단.
+  //   개발 종결 후 직원 + 회사 admin 공개 시점 → JSDoc 영역 매트릭스 활성 본질 (legacy + BUSINESS+ 매트릭스).
   const raw = process.env.AI_OPERATOR_ALLOWED_USERS || '';
   const allowedList = raw.split(',').map((s) => s.trim().toLowerCase()).filter(Boolean);
+
   if (allowedList.length === 0) {
-    // ENV 박지 X — 기존 베타 게이팅 박음 (안전 default, 다른 회사 영향 0건)
-    return isBetaAccessAllowed(ctx);
+    // ENV 미설정 → 모두 차단 (개발 진행 영역 안전 default)
+    return false;
   }
-  // ENV 박힘 — 본 list 박은 사용자만 박음 (등급/회사 무관, 그 외 모두 차단)
+
+  // ENV 설정 → 본 list에 포함된 사용자만 진입 (등급/회사 무관)
   const loginId = (user?.loginId || '').toLowerCase();
   const userId = (user?.userId || '').toLowerCase();
   return allowedList.some((entry) => entry === loginId || entry === userId);

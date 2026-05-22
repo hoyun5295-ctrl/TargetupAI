@@ -873,7 +873,13 @@ router.get('/operator/access', async (req: Request, res: Response) => {
     const planCtx = await loadPlanContext(companyId);
     if (!planCtx) return res.json({ success: true, allowed: false });
     const allowed = isAiOperatorAllowed(planCtx, req.user);
-    return res.json({ success: true, allowed });
+    // ★ D209+ (Harold 명시 2026-05-23): 응답 확장 — frontend BetaFeatureModal 정확 안내 정합
+    return res.json({
+      success: true,
+      allowed,
+      planCode: planCtx.planCode,
+      legacyGrandfathered: planCtx.legacyGrandfathered,
+    });
   } catch (err: any) {
     console.error('[AI Operator /access] 오류:', err);
     return res.json({ success: true, allowed: false });

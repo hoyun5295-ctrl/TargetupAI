@@ -54,6 +54,14 @@ const STEPS: WalkthroughStep[] = [
     description: '진입 사용자 + step별 효과 + 등급 / 시간대 / 요일 + Bandit. 누적 데이터로 정확도 자동 향상.',
     highlight: 'AI가 효과 데이터 학습 — 시간 지날수록 정확도 ↑',
   },
+  // ★ D209+ (Harold 명시 2026-05-23): STEP 6 — 곧 업데이트 + 기존 고객사 PRO 특별혜택 안내.
+  {
+    icon: Sparkles,
+    gradient: 'from-amber-400 to-fuchsia-500',
+    title: '6. 곧 업데이트됩니다',
+    description: '현재 개발 진행 중. 기존 고객사는 PRO 요금제 사용 시 특별 혜택 진입 가능 (운영팀 안내).',
+    highlight: '★ 기존 고객사 PRO — AI Operator 특별 진입 정합',
+  },
 ];
 
 const WALKTHROUGH_STORAGE_KEY = 'ai-operator-walkthrough-seen-v1';
@@ -76,8 +84,10 @@ export default function AiOperatorWalkthroughModal({ forceShow, onClose }: AiOpe
     if (!seen) setShow(true);
   }, [forceShow]);
 
-  const handleClose = (dontShowAgain = true) => {
-    if (dontShowAgain) {
+  const handleClose = (dontShowAgain = false) => {
+    // ★ D209+ (Harold 명시 2026-05-23): forceShow 영역 = 매번 표시 본질 — localStorage 영역 처리 X.
+    //   AI Operator 첫 진입 안내 영역 (forceShow=undefined) 만 localStorage 저장 정합.
+    if (dontShowAgain && !forceShow) {
       localStorage.setItem(WALKTHROUGH_STORAGE_KEY, '1');
     }
     setShow(false);
@@ -163,15 +173,17 @@ export default function AiOperatorWalkthroughModal({ forceShow, onClose }: AiOpe
             )}
           </div>
 
-          {/* 다시 보지 않기 */}
-          <div className="mt-4 text-center">
-            <button
-              onClick={() => handleClose(true)}
-              className="text-[11px] text-white/40 hover:text-white/60 underline-offset-2 hover:underline"
-            >
-              다시 보지 않기
-            </button>
-          </div>
+          {/* ★ D209+ (Harold 명시 2026-05-23): 다시 보지 않기 영역 = forceShow 영역 일 때 표시 X (매번 표시 본질). */}
+          {!forceShow && (
+            <div className="mt-4 text-center">
+              <button
+                onClick={() => handleClose(true)}
+                className="text-[11px] text-white/40 hover:text-white/60 underline-offset-2 hover:underline"
+              >
+                다시 보지 않기
+              </button>
+            </div>
+          )}
         </div>
       </div>
     </div>
