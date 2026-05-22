@@ -593,7 +593,7 @@ export async function orchestrateWithAI(ctx: AgentContext): Promise<Orchestrator
         }
         if (estimatedCount === 0) {
           mark('message', start);
-          return { error: '★ 매칭 0건 — Zero-Count 영구 원칙으로 message_composition 호출 차단. count_verification 결과를 사용자에게 안내 박을 것.' };
+          return { error: '★ 매칭 0건 — Zero-Count 영구 원칙으로 message_composition 호출 차단. count_verification 결과를 사용자에게 안내해야 함.' };
         }
         const { fieldMappings: varCatalog, availableVars } = extractVarCatalog(ctx.companyInfo.customer_schema);
         await filterVarCatalogByData(varCatalog, availableVars, ctx.companyId);

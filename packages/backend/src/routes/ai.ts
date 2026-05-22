@@ -1190,7 +1190,7 @@ router.post('/operator/continuous/:id/run-now', async (req: Request, res: Respon
     if (owner.rows.length === 0) return res.status(404).json({ success: false, error: 'Operator를 찾을 수 없습니다.' });
     const proposal = await generateProposalForOperator(req.params.id);
     if (!proposal) {
-      return res.json({ success: true, proposal: null, message: '0건 매칭 또는 생성 실패 — 제안서가 박히지 않았습니다.' });
+      return res.json({ success: true, proposal: null, message: '0건 매칭 또는 생성 실패 — 제안서가 생성되지 않았습니다.' });
     }
     return res.json({ success: true, proposal });
   } catch (err: any) {
@@ -1302,10 +1302,10 @@ router.post('/operator/multi-goal/analyze', async (req: Request, res: Response) 
 
     const { goals } = req.body;
     if (!Array.isArray(goals) || goals.length === 0) {
-      return res.status(400).json({ success: false, error: 'goals 배열은 1건 이상 박혀야 합니다.' });
+      return res.status(400).json({ success: false, error: 'goals 배열은 1건 이상 필요합니다.' });
     }
     if (goals.length > 5) {
-      return res.status(400).json({ success: false, error: 'goals는 최대 5건까지 박을 수 있습니다.' });
+      return res.status(400).json({ success: false, error: 'goals는 최대 5건까지 지원합니다.' });
     }
 
     // 가중치 합 정규화 (0.0~1.0 박지 X 시 자동 정규화)
@@ -1368,7 +1368,7 @@ router.post('/operator/memory', async (req: Request, res: Response) => {
     const userType = req.user?.userType;
     if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
     if (userType !== 'company_admin') {
-      return res.status(403).json({ success: false, error: '메모리 박음은 회사 관리자만 가능합니다.' });
+      return res.status(403).json({ success: false, error: '메모리 추가는 회사 관리자만 가능합니다.' });
     }
     const { memory_type, memory_key, memory_value, importance, source, metadata } = req.body;
     if (!memory_type || !memory_key || !memory_value) {
@@ -1376,7 +1376,7 @@ router.post('/operator/memory', async (req: Request, res: Response) => {
     }
     const validTypes: MemoryType[] = ['success_pattern', 'customer_insight', 'brand_tone_evolution', 'channel_performance', 'compliance_learning'];
     if (!validTypes.includes(memory_type)) {
-      return res.status(400).json({ success: false, error: `memory_type은 ${validTypes.join('/')} 중 박혀야 합니다.` });
+      return res.status(400).json({ success: false, error: `memory_type은 ${validTypes.join('/')} 중 하나여야 합니다.` });
     }
     const entry = await addCompanyMemory({
       companyId,
@@ -1466,12 +1466,12 @@ router.post('/operator/explain', async (req: Request, res: Response) => {
 
     const { question } = req.body;
     if (!question || typeof question !== 'string' || question.trim().length < 5) {
-      return res.status(400).json({ success: false, error: '질문을 박아주세요 (5자 이상).' });
+      return res.status(400).json({ success: false, error: '질문을 입력해주세요 (5자 이상).' });
     }
 
     const documents = await buildCompanyDocuments(companyId);
     if (documents.length === 0) {
-      return res.status(400).json({ success: false, error: '회사 데이터가 부족하여 근거 박을 영역이 없습니다. 일부 캠페인을 박은 후 다시 시도해주세요.' });
+      return res.status(400).json({ success: false, error: '회사 데이터가 부족하여 근거를 제시할 영역이 없습니다. 일부 캠페인을 진행한 후 다시 시도해주세요.' });
     }
 
     const systemPrompt = `당신은 한줄로AI Operator의 분석 에이전트입니다 (Opus 4.7).
@@ -1505,7 +1505,7 @@ router.post('/operator/proposals/:id/variants/:vid/record', async (req: Request,
     const userType = req.user?.userType;
     if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
     if (userType !== 'company_admin') {
-      return res.status(403).json({ success: false, error: 'reward 박음은 회사 관리자만 가능합니다.' });
+      return res.status(403).json({ success: false, error: 'reward 기록은 회사 관리자만 가능합니다.' });
     }
     // 권한 검증
     const owner = await query(

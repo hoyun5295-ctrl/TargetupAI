@@ -94,7 +94,7 @@ export async function createOperator(input: CreateOperatorInput): Promise<Contin
     throw new Error('name과 objective는 필수입니다.');
   }
   if (input.objective.trim().length < 5) {
-    throw new Error('objective는 5자 이상 박아주세요.');
+    throw new Error('objective는 5자 이상 입력해주세요.');
   }
   const schedule: OperatorSchedule = ['daily', 'weekly', 'monthly'].includes(input.schedule || '') ? input.schedule! : 'daily';
   const scheduleTime = input.scheduleTime || '09:00';

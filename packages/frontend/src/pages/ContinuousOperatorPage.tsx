@@ -380,7 +380,7 @@ export default function ContinuousOperatorPage() {
           <div>
             <strong>영구 원칙:</strong> AI는 매일 회고 + 제안서를 생성할 뿐, 실행은 항상 사용자 승인 후에만 이루어집니다.
             ENT 자동 실행 옵션은 default OFF — 활성 시에도 1,000건 미만 + 5만원 미만 + low risk + 비광고 임계값을 모두 만족해야만 자동 실행됩니다.
-            타겟 0건 매칭 시 제안서가 박히지 않습니다.
+            타겟 0건 매칭 시 제안서가 생성되지 않습니다.
           </div>
         </div>
 

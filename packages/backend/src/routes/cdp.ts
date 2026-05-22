@@ -711,7 +711,7 @@ router.post('/custom/issue-secret', async (req: Request, res: Response) => {
       webhook_url: result.webhookUrl,
       company_id: companyId,
       issued_at: result.issuedAt,
-      message: 'webhook_secret은 본 응답에서만 1회 노출됩니다. 자사몰 자체 서버에 즉시 박아주세요. 재발급 시 기존 secret은 즉시 폐기됩니다.',
+      message: 'webhook_secret은 본 응답에서만 1회 노출됩니다. 자사몰 자체 서버에 즉시 저장해주세요. 재발급 시 기존 secret은 즉시 폐기됩니다.',
     });
   } catch (err: any) {
     console.error('[CDP /custom/issue-secret] 오류:', err);
@@ -761,7 +761,7 @@ router.post('/issue-key', async (req: Request, res: Response) => {
       cdp_api_key: pair.cdpApiKey,
       cdp_api_secret: pair.cdpApiSecret,  // ★ raw secret — 본 응답에서만 1회 노출, 재발급 시 옛 secret은 폐기
       issued_at: pair.issuedAt,
-      message: '비밀 키(secret)는 본 응답에서만 1회 노출됩니다. 자사몰에 즉시 박아주세요. 재발급 시 기존 키는 즉시 폐기됩니다.',
+      message: '비밀 키(secret)는 본 응답에서만 1회 노출됩니다. 자사몰에 즉시 저장해주세요. 재발급 시 기존 키는 즉시 폐기됩니다.',
     });
   } catch (err: any) {
     console.error('[CDP /issue-key] 오류:', err);

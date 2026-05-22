@@ -64,7 +64,7 @@ export async function analyzeGoalConflicts(input: {
   const { goals, companyInfo, customerStats } = input;
 
   if (goals.length === 0) {
-    throw new Error('goals 배열은 1건 이상 박혀야 합니다.');
+    throw new Error('goals 배열은 1건 이상 필요합니다.');
   }
 
   // 단일 목표면 충돌 분석 박지 X — 단순 박음
@@ -80,11 +80,11 @@ export async function analyzeGoalConflicts(input: {
           conflicts: [],
           priority: 1,
           shouldExecute: true,
-          reasoning: '단일 목표 — 충돌 분석 박지 X.',
+          reasoning: '단일 목표 — 충돌 분석 불필요.',
         },
       ],
-      overallStrategy: `단일 목표 "${goals[0].name}" 박음 — 표준 흐름 진행.`,
-      conflictMatrix: '단일 목표라 충돌 매트릭스 박지 X.',
+      overallStrategy: `단일 목표 "${goals[0].name}" 분석 완료 — 표준 흐름 진행.`,
+      conflictMatrix: '단일 목표라 충돌 매트릭스 불필요.',
       recommendedOrder: [goals[0].name],
       analyzedAt: new Date(),
     };
@@ -116,7 +116,7 @@ ${goals.map((g, i) => `${i + 1}. "${g.name}" (가중치 ${g.weight}${g.descripti
   // JSON 파싱
   try {
     const jsonMatch = aiResponse.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) throw new Error('AI 응답에서 JSON 박지 X');
+    if (!jsonMatch) throw new Error('AI 응답에서 JSON 찾을 수 없음');
     const parsed = JSON.parse(jsonMatch[0]);
     return {
       goals,

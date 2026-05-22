@@ -167,19 +167,19 @@ export class SkeletonProviderAdapter implements IProviderAdapter {
   };
 
   buildAuthorizeUrl(): string {
-    throw new Error(`${this.displayName} 연동은 Phase 2에서 박힐 예정입니다. 현재는 CDP API + SDK로 직접 호출 가능합니다.`);
+    throw new Error(`${this.displayName} 연동은 Phase 2에서 지원 예정입니다. 현재는 CDP API + SDK로 직접 호출 가능합니다.`);
   }
   async exchangeCode(): Promise<ProviderTokenResponse> {
-    throw new Error(`${this.displayName} 연동은 Phase 2에서 박힐 예정입니다.`);
+    throw new Error(`${this.displayName} 연동은 Phase 2에서 지원 예정입니다.`);
   }
   async refreshToken(): Promise<ProviderTokenResponse> {
-    throw new Error(`${this.displayName} 연동은 Phase 2에서 박힐 예정입니다.`);
+    throw new Error(`${this.displayName} 연동은 Phase 2에서 지원 예정입니다.`);
   }
   verifyWebhookSignature(): boolean {
     return false;
   }
   async processWebhookEvent(): Promise<void> {
-    throw new Error(`${this.displayName} 연동은 Phase 2에서 박힐 예정입니다.`);
+    throw new Error(`${this.displayName} 연동은 Phase 2에서 지원 예정입니다.`);
   }
   extractMallIdFromWebhook(): string | null {
     return null;

@@ -171,7 +171,7 @@ export async function callAIWithCitations(input: {
     throw new Error('ANTHROPIC_API_KEY 환경변수가 설정되지 않았습니다.');
   }
   if (input.documents.length === 0) {
-    throw new Error('Citations 박을 영역 documents 1건 이상 박혀야 합니다.');
+    throw new Error('Citations 사용할 documents 1건 이상 필요합니다.');
   }
 
   const modelKey = input.model || 'opus';

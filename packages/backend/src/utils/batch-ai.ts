@@ -86,10 +86,10 @@ export async function submitBatch(input: {
     throw new Error('ANTHROPIC_API_KEY 환경변수가 설정되지 않았습니다.');
   }
   if (input.requests.length === 0) {
-    throw new Error('requests 배열은 1건 이상 박혀야 합니다.');
+    throw new Error('requests 배열은 1건 이상 필요합니다.');
   }
   if (input.requests.length > 100000) {
-    throw new Error('Anthropic Batch API 1회 한도(100,000건) 초과 — 분할 박아주세요.');
+    throw new Error('Anthropic Batch API 1회 한도(100,000건) 초과 — 분할 진행해주세요.');
   }
 
   const modelKey = input.model || 'opus';

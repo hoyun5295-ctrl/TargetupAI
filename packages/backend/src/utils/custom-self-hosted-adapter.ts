@@ -52,7 +52,7 @@ export const customSelfHostedAdapter: IProviderAdapter = {
   capabilities: customCapabilities,
 
   buildAuthorizeUrl(): string {
-    throw new Error('자체 호스팅 자사몰은 OAuth 흐름이 없습니다. CdpSettingsPage에서 webhook_secret을 발급받아 박아주세요.');
+    throw new Error('자체 호스팅 자사몰은 OAuth 흐름이 없습니다. CdpSettingsPage에서 webhook_secret을 발급받아 저장해주세요.');
   },
 
   async exchangeCode(): Promise<ProviderTokenResponse> {

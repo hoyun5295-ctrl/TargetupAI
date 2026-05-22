@@ -482,7 +482,7 @@ export default function CdpSettingsPage() {
               onClick={() => setIssuedSecret(null)}
               className="mt-5 px-4 py-2 bg-white border border-emerald-300 hover:bg-emerald-100 text-emerald-800 text-sm font-medium rounded-lg"
             >
-              확인 — 키를 안전한 곳에 박았습니다
+              확인 — 키를 안전한 곳에 저장했습니다
             </button>
           </div>
         )}
@@ -714,7 +714,7 @@ export default function CdpSettingsPage() {
                   onClick={() => setCustomIssuedSecret(null)}
                   className="mt-4 px-4 py-2 bg-white border border-emerald-300 hover:bg-emerald-100 text-emerald-800 text-sm font-medium rounded-lg"
                 >
-                  확인 — 자사몰 자체 서버에 박았습니다
+                  확인 — 자사몰 자체 서버에 저장했습니다
                 </button>
               </div>
             )}

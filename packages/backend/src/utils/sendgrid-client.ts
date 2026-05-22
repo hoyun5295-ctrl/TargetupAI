@@ -61,10 +61,10 @@ export async function sendEmailViaSendGrid(input: SendEmailInput): Promise<SendE
     throw new Error('SENDGRID_API_KEY 환경변수가 설정되지 않았습니다.');
   }
   if (input.to.length === 0) {
-    throw new Error('to 배열은 1건 이상 박혀야 합니다.');
+    throw new Error('to 배열은 1건 이상 필요합니다.');
   }
   if (input.to.length > 1000) {
-    throw new Error('SendGrid 1회 발송 한도(1,000명) 초과 — 분할 박아주세요.');
+    throw new Error('SendGrid 1회 발송 한도(1,000명) 초과 — 분할 진행해주세요.');
   }
 
   // SendGrid Personalizations 박음 (사용자별 substitution + bcc)
