@@ -25,6 +25,8 @@ import AiRefineModal from '../components/AiRefineModal';
 import AiOperatorWalkthroughModal from '../components/AiOperatorWalkthroughModal';
 // ★ D210+ Phase 2-fix1 (Harold 명시 2026-05-23): 회사 데이터 활용 매트릭스 안내 카드 (3축 100% 보완).
 import CompanyDataProfileCard from '../components/CompanyDataProfileCard';
+// ★ D210+ Phase 2-fix4 (Harold 명시 2026-05-23): 변수 하이라이트 + 머지 결과 미리보기 컨트롤타워.
+import { highlightVars, mergeAndHighlightVars } from '../utils/highlightVars';
 import { useAuthStore } from '../stores/authStore';
 // ★ D210+ (Harold 명시 2026-05-23): SUB_MODULE_CARDS constants/ 모듈 추출 — Walkthrough STEP 6 공통 사용 정합.
 import { SUB_MODULE_CARDS } from '../constants/ai-operator-modules';
@@ -259,6 +261,11 @@ export default function AiOperatorPage() {
   type SendMode = 'aiRecommended' | 'immediate' | 'custom';
   const [sendMode, setSendMode] = useState<SendMode>('aiRecommended');
   const [customScheduledAt, setCustomScheduledAt] = useState<string>(''); // YYYY-MM-DDTHH:mm 형식
+  // ★ D210+ Phase 2-fix4 (Harold 명시 2026-05-23): 원본/적용 토글 + 상위 고객 샘플 데이터
+  //   - sampleCustomer = displayName 키 매트릭스 ({ "고객명": "...", "등급": "...", ... })
+  //   - showMergedPreview = false (변수 강조 원본 표시) / true (상위 고객 데이터 치환 적용 표시)
+  const [sampleCustomer, setSampleCustomer] = useState<Record<string, string | number | null> | null>(null);
+  const [showMergedPreview, setShowMergedPreview] = useState(false);
 
   // textarea 자동 높이 조절
   useEffect(() => {
@@ -277,6 +284,10 @@ export default function AiOperatorPage() {
     }, 1500);
     return () => clearTimeout(timer);
   }, [loading, progressStep]);
+
+  // ★ D210+ Phase 2-fix5 (Harold 명시 2026-05-23): 옛 mount 시 fetch 제거.
+  //   사고 = 회사 전체 고객 안 1건 fetch (filter X). 정정 = handleSubmit 안 proposal.target.filters 매칭 영역 안 1건 fetch.
+  //   본 영역 = 옛 useEffect 폐기 정합 (handleSubmit 안 fetch 정합).
 
   const handleSubmit = async () => {
     if (objective.trim().length < 5) {
@@ -307,6 +318,27 @@ export default function AiOperatorPage() {
       setTimeout(() => {
         setProposal(data as ProposalResponse);
         setLoading(false);
+
+        // ★ D210+ Phase 2-fix5 (Harold 명시 2026-05-23): 추출 타겟 안 상위 1건 고객 fetch (filters body 영역).
+        //   본질 = proposal.target.filters 매칭 안 LTV/누적구매 상위 1건 → 원본/적용 토글 머지 정확.
+        const filters = (data as ProposalResponse).target?.filters || {};
+        fetch('/api/ai/operator/sample-customer', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({ filters }),
+        })
+          .then((sr) => sr.json())
+          .then((sd) => {
+            if (sd?.success && sd.sampleCustomer) {
+              setSampleCustomer(sd.sampleCustomer);
+            } else {
+              setSampleCustomer(null);
+            }
+          })
+          .catch(() => setSampleCustomer(null));
       }, 600);
     } catch (err) {
       setError(err instanceof Error ? err.message : '오류가 발생했습니다.');
@@ -324,6 +356,9 @@ export default function AiOperatorPage() {
     setSendError(null);
     setRefinedOverrides({});
     setSelectedVariantIdx(0);
+    // ★ D210+ Phase 2-fix5 (Harold 명시 2026-05-23): 새 입력 진입 시 옛 sample-customer 영역 초기화
+    setSampleCustomer(null);
+    setShowMergedPreview(false);
     textareaRef.current?.focus();
   };
 
@@ -795,10 +830,44 @@ export default function AiOperatorPage() {
                           </p>
                         )}
 
+                        {/* ★ D210+ Phase 2-fix4 (Harold 명시 2026-05-23): 원본/적용 토글 — sampleCustomer 영역 있을 때만 표시 */}
+                        {sampleCustomer && (
+                          <div className="flex items-center gap-1 mb-2">
+                            <button
+                              type="button"
+                              onClick={() => setShowMergedPreview(false)}
+                              className={`flex-1 text-[11px] py-1.5 rounded-lg transition-all ${
+                                !showMergedPreview
+                                  ? 'bg-amber-400/25 text-amber-100 font-semibold ring-1 ring-amber-300/40'
+                                  : 'bg-white/5 text-white/40 hover:text-white/60'
+                              }`}
+                              title="개인화 변수 위치 강조 — %고객명% 형태 그대로 표시"
+                            >
+                              원본 (변수 강조)
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setShowMergedPreview(true)}
+                              className={`flex-1 text-[11px] py-1.5 rounded-lg transition-all ${
+                                showMergedPreview
+                                  ? 'bg-emerald-400/25 text-emerald-100 font-semibold ring-1 ring-emerald-400/40'
+                                  : 'bg-white/5 text-white/40 hover:text-white/60'
+                              }`}
+                              title="상위 고객 데이터로 치환된 결과 미리보기"
+                            >
+                              적용 (상위 고객 머지)
+                            </button>
+                          </div>
+                        )}
+
                         {/* 본문 박스 */}
                         <div className="relative p-4 rounded-xl bg-indigo-950/60 border border-white/10 mb-3">
                           <pre className="whitespace-pre-wrap break-words text-sm text-white/85 leading-relaxed font-sans">
-                            {activeBody || '메시지 본문이 비어있습니다.'}
+                            {activeBody
+                              ? (showMergedPreview && sampleCustomer
+                                  ? mergeAndHighlightVars(activeBody, sampleCustomer, 'dark')
+                                  : highlightVars(activeBody, 'dark'))
+                              : '메시지 본문이 비어있습니다.'}
                           </pre>
                           {overrideText && (
                             <button

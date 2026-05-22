@@ -931,6 +931,95 @@ router.get('/operator/data-profile', async (req: Request, res: Response) => {
 });
 
 // ============================================================
+// ★ D210+ Phase 2-fix5 (Harold 명시 2026-05-23) — 추출된 타겟 영역 안 상위 1건 고객 조회
+//   본질 = 추천 메시지 본문 안 %변수% → 추출 타겟 안 상위 고객 데이터 치환 미리보기 (원본/적용 토글 머지 영역).
+//   옛 fix4 사고 = 전체 customer 안 상위 1건 (filters X) → 정정 = proposal.target.filters 매칭 영역 안 상위.
+//   응답 = displayName 키 매트릭스 ({ "고객명": "김민수", "등급": "VIP", ... }) — mergeAndHighlightVars 영역 정합.
+// ============================================================
+router.post('/operator/sample-customer', async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    const userId = req.user?.userId;
+    const userType = req.user?.userType;
+    if (!companyId) {
+      return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+    }
+
+    const { filters } = req.body || {};
+
+    // ★ B16-01: 브랜드 격리 — store-scope 컨트롤타워 (preview-recipients 정합)
+    let storeFilter = '';
+    const baseParams: any[] = [companyId];
+    if (userType === 'company_user' && userId) {
+      const scope = await getStoreScope(companyId, userId);
+      if (scope.type === 'filtered') {
+        storeFilter = ' AND id IN (SELECT customer_id FROM customer_stores WHERE company_id = $1 AND store_code = ANY($2::text[]))';
+        baseParams.push(scope.storeCodes);
+      } else if (scope.type === 'blocked') {
+        return res.json({ success: true, sampleCustomer: null });
+      }
+    }
+
+    // ★ CT-01: 필터 → SQL (preview-recipients 정합 미러). filters X 영역 시 = 전체 매칭 fallback.
+    let filterWhere = '';
+    let filterParams: any[] = [];
+    if (filters && typeof filters === 'object' && Object.keys(filters).length > 0) {
+      const built = buildFilterWhereClauseCompat(filters, baseParams.length + 1);
+      filterWhere = built.sql;
+      filterParams = built.params;
+    }
+    const allParams = [...baseParams, ...filterParams];
+
+    const sql = `
+      SELECT name, grade, gender, age, birth_date, email, region, address,
+             store_name, registered_store, points, recent_purchase_date, recent_purchase_amount,
+             recent_purchase_store, total_purchase_amount, purchase_count, avg_order_value,
+             ltv_score, wedding_anniversary
+      FROM customers
+      WHERE company_id = $1
+        AND is_active = true
+        AND sms_opt_in = true
+        ${storeFilter}
+        ${filterWhere}
+      ORDER BY ltv_score DESC NULLS LAST, total_purchase_amount DESC NULLS LAST, created_at ASC
+      LIMIT 1
+    `;
+
+    const r = await query(sql, allParams);
+    const row = r.rows[0] || null;
+    if (!row) {
+      return res.json({ success: true, sampleCustomer: null });
+    }
+    // ANALYZED_FIELDS (CT-58) percentVar 매트릭스 정합 — mergeAndHighlightVars 영역 key 정합.
+    const sampleCustomer: Record<string, string | number | null> = {
+      '고객명':       row.name || null,
+      '등급':         row.grade || null,
+      '성별':         row.gender || null,
+      '나이':         row.age || null,
+      '생일':         row.birth_date ? new Date(row.birth_date).toLocaleDateString('ko-KR') : null,
+      '이메일':       row.email || null,
+      '지역':         row.region || null,
+      '주소':         row.address || null,
+      '등록매장':     row.store_name || null,
+      '가입매장':     row.registered_store || null,
+      '포인트':       row.points != null ? Number(row.points).toLocaleString() : null,
+      '최근구매일':   row.recent_purchase_date ? new Date(row.recent_purchase_date).toLocaleDateString('ko-KR') : null,
+      '최근구매액':   row.recent_purchase_amount != null ? Number(row.recent_purchase_amount).toLocaleString() : null,
+      '최근구매매장': row.recent_purchase_store || null,
+      '누적구매액':   row.total_purchase_amount != null ? Number(row.total_purchase_amount).toLocaleString() : null,
+      '구매횟수':     row.purchase_count != null ? Number(row.purchase_count).toLocaleString() : null,
+      '평균주문액':   row.avg_order_value != null ? Number(row.avg_order_value).toLocaleString() : null,
+      'LTV점수':      row.ltv_score != null ? Number(row.ltv_score).toLocaleString() : null,
+      '결혼기념일':   row.wedding_anniversary ? new Date(row.wedding_anniversary).toLocaleDateString('ko-KR') : null,
+    };
+    return res.json({ success: true, sampleCustomer });
+  } catch (err: any) {
+    console.error('[AI Operator /sample-customer] 오류:', err);
+    return res.status(500).json({ success: false, error: '샘플 고객 조회 실패' });
+  }
+});
+
+// ============================================================
 // ★ D164 (2026-05-19) Braze급 SaaS Step 0 — AI Operator 통합 제안서
 // ★ D170 (2026-05-19) Multi-Agent Orchestrator로 교체 — services/ai-orchestrator.ts에서 6 Sub-agent 협업
 // ★ D178 (2026-05-19) — isAiOperatorAllowed 박음 (ENV AI_OPERATOR_ALLOWED_USERS 박힘 시 본 list만, 박지 X 시 ENT/BUS)

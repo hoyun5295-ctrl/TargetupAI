@@ -3,12 +3,15 @@ import React from 'react';
 /**
  * ★ D93: 메시지 내 %변수% 부분을 하이라이트 span으로 감싸서 React 요소 배열로 반환
  *
- * 사용처: AiCampaignResultPopup(한줄로), AiCustomSendFlow(맞춤한줄), AiCampaignSendModal(발송확인)
+ * 사용처: AiCampaignResultPopup(한줄로), AiCustomSendFlow(맞춤한줄), AiCampaignSendModal(발송확인), AiOperatorPage(D210+ fix4)
+ *
+ * ★ D210+ Phase 2-fix4 (Harold 명시 2026-05-23): theme prop 신규 — dark 영역 = AiOperatorPage 보라색 배경 정합.
  *
  * @param text 원본 메시지 (예: "안녕하세요 %고객명%님!")
+ * @param theme 'light' (default, 기존 영역) 또는 'dark' (AiOperatorPage 보라색 배경)
  * @returns React.ReactNode[] — 일반 텍스트 + 하이라이트 span 배열
  */
-export function highlightVars(text: string): React.ReactNode[] {
+export function highlightVars(text: string, theme: 'light' | 'dark' = 'light'): React.ReactNode[] {
   if (!text) return [text];
 
   const parts: React.ReactNode[] = [];
@@ -18,6 +21,11 @@ export function highlightVars(text: string): React.ReactNode[] {
   let match;
   let key = 0;
 
+  // dark 영역 = AiOperatorPage 보라색 배경 정합 (amber 톤 dark)
+  const className = theme === 'dark'
+    ? 'bg-amber-300/25 text-amber-100 px-1 py-0.5 rounded font-semibold ring-1 ring-amber-300/40'
+    : 'bg-amber-100 text-amber-800 px-0.5 rounded font-medium';
+
   while ((match = regex.exec(text)) !== null) {
     // 변수 앞의 일반 텍스트
     if (match.index > lastIndex) {
@@ -25,7 +33,7 @@ export function highlightVars(text: string): React.ReactNode[] {
     }
     // %변수% 하이라이트
     parts.push(
-      <span key={key++} className="bg-amber-100 text-amber-800 px-0.5 rounded font-medium">
+      <span key={key++} className={className}>
         {match[0]}
       </span>
     );
@@ -47,15 +55,19 @@ export function highlightVars(text: string): React.ReactNode[] {
  * 첫 번째 고객(또는 추천 샘플)의 실제 값으로 치환된 결과를 표시.
  * 직원 의견: "리스트 적용이 아니라 머지 입력 구간이 직관적으로 보이게"
  *
- * 사용처: AiCampaignSendModal, AiCustomSendFlow의 메시지 미리보기 영역
+ * 사용처: AiCampaignSendModal, AiCustomSendFlow, AiOperatorPage(D210+ fix4) 메시지 미리보기 영역
+ *
+ * ★ D210+ Phase 2-fix4 (Harold 명시 2026-05-23): theme prop 신규 — dark 영역 매트릭스 추가.
  *
  * @param text 원본 메시지 (예: "안녕하세요 %고객명%님!")
  * @param sampleCustomer displayName 키 객체 (예: { "고객명": "김철수", "등급": "VIP" })
+ * @param theme 'light' (default) 또는 'dark'
  * @returns React.ReactNode[] — 치환된 텍스트 + 치환 부분 강조 span
  */
 export function mergeAndHighlightVars(
   text: string,
-  sampleCustomer?: Record<string, string | number | null | undefined>
+  sampleCustomer?: Record<string, string | number | null | undefined>,
+  theme: 'light' | 'dark' = 'light'
 ): React.ReactNode[] {
   if (!text) return [text];
 
@@ -64,6 +76,14 @@ export function mergeAndHighlightVars(
   let lastIndex = 0;
   let match;
   let key = 0;
+
+  // theme 별 className 매트릭스
+  const mergedClass = theme === 'dark'
+    ? 'bg-emerald-400/25 text-emerald-100 px-1 py-0.5 rounded font-semibold ring-1 ring-emerald-400/40'
+    : 'bg-emerald-100 text-emerald-800 px-0.5 rounded font-medium';
+  const missingClass = theme === 'dark'
+    ? 'bg-white/10 text-white/40 px-1 py-0.5 rounded font-medium line-through'
+    : 'bg-gray-200 text-gray-500 px-0.5 rounded font-medium line-through';
 
   while ((match = regex.exec(text)) !== null) {
     if (match.index > lastIndex) {
@@ -74,14 +94,14 @@ export function mergeAndHighlightVars(
     if (value !== null && value !== undefined && value !== '') {
       // 치환된 값 — 초록 배경(머지 완료 시각화)
       parts.push(
-        <span key={key++} className="bg-emerald-100 text-emerald-800 px-0.5 rounded font-medium" title={`%${varName}% → 첫 고객 데이터로 치환됨`}>
+        <span key={key++} className={mergedClass} title={`%${varName}% → 첫 고객 데이터로 치환됨`}>
           {String(value)}
         </span>
       );
     } else {
       // 데이터 없음 — 회색 배경 + 변수 그대로
       parts.push(
-        <span key={key++} className="bg-gray-200 text-gray-500 px-0.5 rounded font-medium line-through" title={`%${varName}% — 샘플 고객에 데이터 없음`}>
+        <span key={key++} className={missingClass} title={`%${varName}% — 샘플 고객에 데이터 없음`}>
           {match[0]}
         </span>
       );
