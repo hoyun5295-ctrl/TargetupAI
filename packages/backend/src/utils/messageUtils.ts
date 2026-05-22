@@ -503,17 +503,9 @@ export function prepareSendMessage(
   });
   // 2. (광고)+080 본문 (중복 방지 안전장치 내장)
   msg = buildAdMessage(msg, options.msgType, options.isAd, options.opt080Number);
-  // 3. ★ KISA 2026-05: 제목 (광고) 부착 (isAd + LMS/MMS만) + ★ D191 Liquid: 제목도 Liquid 렌더링
-  let subj = options.subject || '';
-  if (subj && !options.skipLiquid && detectLiquidSyntax(subj)) {
-    const subjLiquid = renderLiquid(subj, {
-      customer: flattenCustomerForLiquid(customer),
-      company: options.company,
-      now: new Date(),
-    });
-    subj = subjLiquid.rendered;
-  }
-  subj = buildAdSubject(subj, options.msgType, options.isAd);
+  // 3. ★ KISA 2026-05: 제목 (광고) 부착 (isAd + LMS/MMS만)
+  //    ★ D191-fix1 (2026-05-22) Harold 명시: 제목은 변수/Liquid 사용 X — 단순 본문 요약 텍스트만 정합 (가독성 + 통신사 표시 영역 좁음)
+  const subj = buildAdSubject(options.subject || '', options.msgType, options.isAd);
   return { message: msg, subject: subj };
 }
 
