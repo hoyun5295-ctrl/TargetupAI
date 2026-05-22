@@ -146,7 +146,7 @@ ${goals.map((g, i) => `${i + 1}. "${g.name}" (가중치 ${g.weight}${g.descripti
 }
 
 function buildSystemPrompt(companyInfo: any, customerStats: any): string {
-  return `당신은 한줄로AI Multi-Goal Decisioning 분석 에이전트(Opus 4.7)입니다.
+  return `당신은 한줄로AI Multi-Goal Decisioning 분석 에이전트입니다.
 
 회사 정보:
 - 회사: ${companyInfo.company_name || '미설정'}

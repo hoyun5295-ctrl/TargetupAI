@@ -1484,7 +1484,7 @@ router.post('/operator/explain', async (req: Request, res: Response) => {
       return res.status(400).json({ success: false, error: '회사 데이터가 부족하여 근거를 제시할 영역이 없습니다. 일부 캠페인을 진행한 후 다시 시도해주세요.' });
     }
 
-    const systemPrompt = `당신은 한줄로AI Operator의 분석 에이전트입니다 (Opus 4.7).
+    const systemPrompt = `당신은 한줄로AI Operator의 분석 에이전트입니다.
 제공된 document에 명시된 사실만 응답 + 출처 근거 명시 (citations 활용).
 추측/창작 X — document에 없는 영역은 "정보가 없습니다"로 응답.
 한국어 존댓말 (~입니다 / ~합니다).`;

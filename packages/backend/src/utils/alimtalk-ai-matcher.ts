@@ -216,7 +216,7 @@ export async function matchAlimtalkTemplate(input: MatchInput): Promise<Alimtalk
   const memoryContext = await buildMemoryPromptContext(input.companyId, 10).catch(() => '');
 
   // 4. AI 시스템 프롬프트 매트릭스
-  const systemPrompt = `당신은 한국 카카오 알림톡 템플릿 매칭 전문가입니다 (Opus 4.7).
+  const systemPrompt = `당신은 한국 카카오 알림톡 템플릿 매칭 전문가입니다.
 
 목표: 캠페인 의도와 가장 정합되는 알림톡 템플릿 1건 추천 + 차선 2~3건 추천.
 

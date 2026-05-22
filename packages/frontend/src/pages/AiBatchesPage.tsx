@@ -104,7 +104,7 @@ export default function AiBatchesPage() {
         <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 text-xs text-amber-900 flex items-start gap-2">
           <AlertCircle className="w-4 h-4 mt-0.5 shrink-0" />
           <div>
-            <strong>Anthropic Batch API:</strong> 대량 AI 호출(100~10만 요청)을 batch로 처리하면 표준 대비 <strong>50% 비용 절감</strong>됩니다.
+            <strong>Batch 처리 모드:</strong> 대량 AI 호출(100~10만 요청)을 batch로 처리하면 표준 대비 <strong>50% 비용 절감</strong>됩니다.
             24시간 SLA (대부분 1시간 이내 완료). Continuous Operator 영구 운영 시 자동 사용됩니다.
           </div>
         </div>
@@ -161,8 +161,6 @@ export default function AiBatchesPage() {
                   </div>
                   <div className="flex flex-wrap gap-3 text-xs text-gray-600">
                     <span>요청 <strong>{b.totalRequests.toLocaleString()}건</strong></span>
-                    <span>·</span>
-                    <span>모델 <strong>{b.model.replace('claude-', '')}</strong></span>
                     <span>·</span>
                     <span>제출 {new Date(b.submittedAt).toLocaleString('ko-KR')}</span>
                     {b.completedAt && (

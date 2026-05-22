@@ -5146,8 +5146,8 @@ const handleApproveRequest = async (id: string) => {
                         <span className="text-xs bg-violet-500 text-white px-1.5 py-0.5 rounded">BETA</span>
                       </div>
                       <p className="text-xs text-gray-500 mt-1">
-                        ON = AI Operator가 Opus 4.7 Tool Use로 동적 흐름 결정 (target → count → message → compliance 순서 자율 판단).<br/>
-                        OFF = 기존 orchestrate 고정 순서 (안정 영역, default). ENT 1사 한정 활성 → PM2 로그 모니터링 후 단계적 확장 권장.
+                        ON = AI Operator 동적 흐름 결정 모드 활성 (target → count → message → compliance 순서 자율 판단).<br/>
+                        OFF = 기존 고정 순서 (안정 영역, default). ENT 1사 한정 활성 → PM2 로그 모니터링 후 단계적 확장 권장.
                       </p>
                     </div>
                     <label className="relative inline-flex items-center cursor-pointer">
