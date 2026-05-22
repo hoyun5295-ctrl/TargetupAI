@@ -23,6 +23,8 @@ import {
 } from 'lucide-react';
 import AiRefineModal from '../components/AiRefineModal';
 import AiOperatorWalkthroughModal from '../components/AiOperatorWalkthroughModal';
+// ★ D210+ Phase 2-fix1 (Harold 명시 2026-05-23): 회사 데이터 활용 매트릭스 안내 카드 (3축 100% 보완).
+import CompanyDataProfileCard from '../components/CompanyDataProfileCard';
 import { useAuthStore } from '../stores/authStore';
 // ★ D210+ (Harold 명시 2026-05-23): SUB_MODULE_CARDS constants/ 모듈 추출 — Walkthrough STEP 6 공통 사용 정합.
 import { SUB_MODULE_CARDS } from '../constants/ai-operator-modules';
@@ -840,6 +842,10 @@ export default function AiOperatorPage() {
                       </div>
                     }
                   />
+
+                  {/* ============= ★ D210+ Phase 2-fix1 (Harold 명시 2026-05-23): 회사 데이터 활용 매트릭스 안내 ============= */}
+                  {/* 본질 = "AI가 우리 회사 데이터 이만큼 정확히 활용했네" 시각 확인 + 마케팅 담당자 신뢰감 */}
+                  <CompanyDataProfileCard className="md:col-span-2" />
 
                   {/* ============= 추천 타겟 ============= */}
                   <ResultCard

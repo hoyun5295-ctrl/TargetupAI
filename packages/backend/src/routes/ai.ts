@@ -70,6 +70,9 @@ import {
 } from '../utils/journey-builder';
 // ★ D187-fix3 (2026-05-21): Journey AI Generator — One-shot 자연어 + 시즌 + 회사 메모리
 import { generateJourneyPackage, refineStepMessage } from '../utils/journey-ai-generator';
+// ★ D210+ Phase 2-fix1 (Harold 명시 2026-05-23): CT-58 — 회사 customer DB 실측 프로필 조회.
+//   /operator/data-profile endpoint = 마케팅 담당자 검토 UI 안내 카드 data source.
+import { getCompanyDataProfile } from '../utils/company-data-profile';
 // ★ D192 (2026-05-22): CT-51 Journey 통계 통합 진입점 — 옛 단순 통계(getJourneyStats/listExecutions)를 완전 진화 — buildJourneyStats (overview + steps + segments + hourly + weekday + variants) + listJourneyEnteredCustomers (회사 격리 + 페이지네이션)
 import { buildJourneyStats, listJourneyEnteredCustomers } from '../utils/journey-stats';
 // ★ D197 (2026-05-22) Phase B-2: Predictive Suite — 회사 예측 점수 분포 + Top 위험/구매 가능성 + 모델 정확도
@@ -883,6 +886,47 @@ router.get('/operator/access', async (req: Request, res: Response) => {
   } catch (err: any) {
     console.error('[AI Operator /access] 오류:', err);
     return res.json({ success: true, allowed: false });
+  }
+});
+
+// ============================================================
+// ★ D210+ Phase 2-fix1 (Harold 명시 2026-05-23) — 회사 customer DB 실측 프로필 조회
+//   본질 = 마케팅 담당자 검토 UI 안내 카드 (CompanyDataProfileCard) data source.
+//   "AI가 우리 회사 데이터 이만큼 정확히 활용했네" 시각 확인 + 신뢰감.
+//   CT-58 company-data-profile 활용 (1시간 캐시 자동).
+// ============================================================
+router.get('/operator/data-profile', async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    if (!companyId) {
+      return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+    }
+    const profile = await getCompanyDataProfile(companyId);
+    return res.json({
+      success: true,
+      totalCustomers: profile.totalCustomers,
+      safeFields: profile.safeFields.map((f) => ({
+        field: f.field,
+        label: f.label,
+        percentVar: f.percentVar,
+        fillRate: f.fillRate,
+      })),
+      conditionalFields: profile.conditionalFields.map((f) => ({
+        field: f.field,
+        label: f.label,
+        percentVar: f.percentVar,
+        fillRate: f.fillRate,
+      })),
+      blockedFields: profile.blockedFields.map((f) => ({
+        field: f.field,
+        label: f.label,
+        fillRate: f.fillRate,
+      })),
+      analyzedAt: profile.analyzedAt,
+    });
+  } catch (err: any) {
+    console.error('[AI Operator /data-profile] 오류:', err);
+    return res.status(500).json({ success: false, error: '회사 데이터 프로필 조회 실패' });
   }
 });
 
