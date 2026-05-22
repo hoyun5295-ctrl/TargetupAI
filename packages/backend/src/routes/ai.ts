@@ -11,6 +11,9 @@ import { aggregateCampaignPerformance } from '../utils/stats-aggregation';
 import { formatDateValue, getOpt080Number } from '../utils/messageUtils';
 import { loadPlanContext, canUseFeature, requirePlanFeature, isBetaAccessAllowed, isAiOperatorAllowed } from '../utils/plan-guard';
 import { getCompanyCosts } from '../config/defaults';
+// ★ D209+ (Harold 명시 2026-05-22) Phase D 비용 안전 매트릭스 — 회사별 월 한도 + cache 통계
+import { getMonthlyUsage, getDailyUsage } from '../utils/ai-rate-limit';
+import { getCacheStats } from '../utils/ai-cache';
 import { orchestrate, orchestrateWithAI } from '../services/ai-orchestrator';
 // ★ D174 (2026-05-19): Step 1 Next Action Advisor — Opus 4.7
 import { buildPerformanceSnapshot, recommendNextAction } from '../utils/next-action-advisor';
@@ -2129,6 +2132,31 @@ router.post('/operator/alimtalk/match', authenticate, async (req: Request, res: 
   } catch (err: any) {
     console.error('[AI Operator alimtalk match] 오류:', err);
     return res.status(500).json({ success: false, error: err?.message || '알림톡 매칭 실패' });
+  }
+});
+
+// ★ D209+ Phase D 비용 안전 매트릭스 — 회사별 AI 사용량 진단 endpoint
+//   회사 admin 진입 시 월 사용량 + 한도 + 30일 일별 통계 + cache 통계 반환
+router.get('/usage', authenticate, async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    if (!companyId) return res.status(401).json({ success: false, error: '회사 권한이 필요합니다.' });
+
+    const [monthly, daily] = await Promise.all([
+      getMonthlyUsage(companyId),
+      getDailyUsage(companyId, 30),
+    ]);
+    const cache = getCacheStats();
+
+    return res.json({
+      success: true,
+      monthly,
+      daily,
+      cache,
+    });
+  } catch (err: any) {
+    console.error('[AI Usage] 오류:', err);
+    return res.status(500).json({ success: false, error: err?.message || '사용량 조회 실패' });
   }
 });
 

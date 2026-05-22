@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
+  Activity,
   AlertTriangle,
   ArrowLeft,
   Brain,
@@ -171,6 +172,7 @@ const SUB_MODULE_CARDS: SubModuleCard[] = [
   { icon: Brain,        gradient: 'from-emerald-400 to-teal-500',  label: 'AI 학습 메모리',  description: '회사별 누적 학습 5종 — 시간 지날수록 정확도↑',     path: '/ai-memory' },
   { icon: BookOpen,     gradient: 'from-indigo-400 to-blue-500',   label: 'AI에게 질문',     description: '회사 데이터 기반 답변 + 근거 인용 (Citations)',     path: '/ai-explain' },
   { icon: Layers,       gradient: 'from-violet-400 to-indigo-500', label: 'AI Batch',       description: '대량 발송 50% 비용 절감 (24h SLA)',                path: '/ai-batches' },
+  { icon: Activity,     gradient: 'from-blue-400 to-sky-500',      label: 'AI 사용량',      description: '월 한도 + 30일 일별 통계 + cache 효율 진단',          path: '/ai-usage' },
 ];
 
 // 결과 카드 액센트

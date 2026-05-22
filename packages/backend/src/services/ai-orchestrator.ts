@@ -367,8 +367,10 @@ export async function orchestrate(ctx: AgentContext): Promise<OrchestratorResult
       personalizationVars: targetResult.personalization_vars,
       availableVarsCatalog: varCatalog,
       availableVars: availableVars,
-      // ★ D170+ (Harold 명시 2026-05-19): Message Sub-agent = Opus 4.7 (1M ctx + 본문 품질 최상)
-      model: 'opus',
+      // ★ D209+ (Harold 명시 2026-05-22): Message Sub-agent = Sonnet 4.6 전환.
+      //   기존 ai.ts generateMessages 시스템 프롬프트 매트릭스(D152 + D80 정합) 정합 본질
+      //   + 비용 80% 절감 (6,000사 운영 정합).
+      model: 'sonnet',
     }
   );
   mark('message', messageStart);
@@ -617,7 +619,9 @@ export async function orchestrateWithAI(ctx: AgentContext): Promise<Orchestrator
             personalizationVars: targetResult.personalization_vars,
             availableVarsCatalog: varCatalog,
             availableVars: availableVars,
-            model: 'opus',
+            // ★ D209+ (Harold 명시 2026-05-22): orchestrateWithAI 내부 generateMessages도 Sonnet 4.6 전환.
+            //   메시지 품질 ai.ts 정합 본질 + 비용 80% 절감.
+            model: 'sonnet',
           }
         );
         normalizedMessages = messagesResult.variants.slice(0, 3).map((v: any) => {

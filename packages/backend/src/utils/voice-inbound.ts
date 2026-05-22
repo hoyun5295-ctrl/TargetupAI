@@ -107,36 +107,39 @@ export async function handleInboundCall(input: InboundCallInput): Promise<Inboun
     recentOrders = orderRes.rows;
   }
 
-  // 4. Opus 4.7 system 프롬프트 박음 (영구 원칙 #3 모델 분리 + #4 사용자 신뢰 정합)
+  // 4. system 프롬프트 구성 (영구 원칙 #3 모델 분리 + #4 사용자 신뢰 정합)
   const systemPrompt = buildSystemPrompt(company, customerContext, recentOrders);
   const userMessage = transcript || '(음성 인식 결과 없음)';
 
-  console.log(`[VoiceInbound] ${company.company_name} 인바운드 응답 박는 중 (phone=${callerPhone.slice(-4)}, customer=${customerId ? 'matched' : 'unknown'})`);
+  console.log(`[VoiceInbound] ${company.company_name} 인바운드 응답 생성 중 (phone=${callerPhone.slice(-4)}, customer=${customerId ? 'matched' : 'unknown'})`);
 
-  // 5. AI 호출 (Opus 4.7 — 영구 원칙 #3 정합)
+  // ★ D209+ (Harold 명시 2026-05-22): Sonnet 4.6 전환 — 인바운드 단순 응답 영역. 비용 80% 절감.
+  //   Phase D 통합: companyId + source 전달 → 회사별 월 한도 + cache + 통계 자동 활성.
   let responseText = '';
   try {
     const aiResult = await callAIWithFallback({
-      model: 'opus',
+      model: 'sonnet',
       system: systemPrompt,
       userMessage,
       maxTokens: 500,
       temperature: 0,
+      companyId: company.id,
+      source: 'voice-inbound',
     });
     responseText = aiResult || '죄송합니다, 답변을 생성하지 못했습니다. 잠시 후 다시 시도해주세요.';
   } catch (err: any) {
     console.error('[VoiceInbound] AI 호출 실패:', err?.message || err);
-    responseText = '죄송합니다, 잠시 후 다시 문의해주시면 빠른 답변을 박겠습니다.';
+    responseText = '죄송합니다, 잠시 후 다시 문의해주시면 빠른 답변을 드리겠습니다.';
   }
 
-  // 6. TTS 박음 (Clova Voice 박힌 영역)
+  // 6. TTS 생성 (Clova Voice 통합 영역)
   let responseAudio: Buffer | undefined = undefined;
   const clovaCfg = isClovaConfigured();
   if (clovaCfg.tts) {
     try {
       responseAudio = await synthesizeSpeech(responseText, { speaker: 'nara', speed: 0, format: 'mp3' });
     } catch (err: any) {
-      console.warn('[VoiceInbound] TTS 실패 (텍스트만 박음):', err?.message || err);
+      console.warn('[VoiceInbound] TTS 실패 (텍스트만 응답):', err?.message || err);
     }
   }
 

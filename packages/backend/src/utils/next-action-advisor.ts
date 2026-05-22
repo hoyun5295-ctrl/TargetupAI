@@ -221,7 +221,11 @@ ${snapshot.byHour.sort((a, b) => b.sent - a.sent).slice(0, 5).map((h) => `  · $
       userMessage,
       maxTokens: 2048,
       temperature: 0.3,
-      model: 'opus',  // ★ AI Operator 영역 — Opus 4.7 박음 (Harold 모델 분리 룰)
+      // ★ D209+ (Harold 명시 2026-05-22): Sonnet 4.6 전환 — 다음 캠페인 단순 추천 영역. 비용 80% 절감.
+      //   Phase D 통합: companyId + source 전달 → 회사별 월 한도 + cache + 통계 자동 활성.
+      model: 'sonnet',
+      companyId,
+      source: 'next-action-advisor',
     });
 
     let jsonStr = text;

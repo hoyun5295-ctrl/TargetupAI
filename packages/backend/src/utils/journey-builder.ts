@@ -345,7 +345,7 @@ function customizeMessage(template: string, ctx: CompanyContext): string {
 }
 
 // ════════════════════════════════════════════════════════════════════
-// Custom 여정 — Opus 4.7 자연어 진입
+// Custom 여정 — 자연어 진입 (D209+ Sonnet 4.6 전환 — 메시지 흐름 추론 ai.ts 정합)
 // ════════════════════════════════════════════════════════════════════
 
 async function generateCustomStepsWithAI(
@@ -397,12 +397,16 @@ JSON 형식만 응답:
 
   const userMessage = `여정 목표: ${objective}\n\n위 회사 컨텍스트와 메모리를 활용해 2~5개의 step JSON을 응답하세요.`;
 
+  // ★ D209+ (Harold 명시 2026-05-22): Sonnet 4.6 전환 — 메시지 흐름 추론 ai.ts 정합 본질 + 비용 80% 절감.
+  //   Phase D 통합: companyId + source 전달 → 회사별 월 한도 + cache + 통계 자동 활성.
   const text = await callAIWithFallback({
     system,
     userMessage,
     maxTokens: 1024,
     temperature: 0.2,
-    model: 'opus',
+    model: 'sonnet',
+    companyId,
+    source: 'journey-builder-custom',
   });
 
   let jsonStr = text;

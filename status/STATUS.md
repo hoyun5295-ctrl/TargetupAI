@@ -107,7 +107,42 @@
 
 ---
 
-### 🚀 다음 세션 진입 가이드 (D190 Phase A 통합 종결 후 — **운영 검증 + Phase B 진입**)
+### 🚀 다음 세션 진입 가이드 (D197~D208 통합 종결 후 — **D209+ 통합 강화 진입**)
+
+> **★ D197~D208 통합 종결 매트릭스 (2026-05-22)**: Phase B-2 Predictive Suite + Phase B-3 Connected Content + AI 자율 진단 통합 + Harold 직접 배포 완료. cdp_customer_predictions 21,501명 자동 분석 + 90.7% 이탈 위험 진단 (cold start fallback 영역).
+>
+> **D209+ 다음 세션 진입 매트릭스 (Harold 명시 통합 강화 작업 5~7h)**:
+> 1. **Sonnet 4.6 전환** (6 영역 — 비용 80% 절감 + 옛 ai.ts 정합 매트릭스 활용) — generateMessages/generateJourneyPackage/refineStepMessage/matchAlimtalkTemplate/recommendNextAction/voice-inbound
+> 2. **Opus 4.7 유지** (5 영역 — 진정 추론 깊이 의무) — recommendTarget/checkCompliance/orchestrateWithAI/operator-explain/multi-goal-decisioning
+> 3. **시스템 프롬프트 강화** — 옛 ai.ts generateMessages 시스템 프롬프트 매트릭스 정독 + journey-ai-generator에 통합 (시즌 12 / In-Context 4 예시 / 보존-자유 영역 분리 / EUC-KR 안전 / Liquid 분기 본문 풍성)
+> 4. **매장 region 강화** — CT-53에 fetchStoreWeather + customer.recent_purchase_store 자동 매핑 + Liquid {{ weather.store.summary }} 사용 가능
+> 5. **비용 안전 매트릭스 4 영역** — plans.ai_calls_per_month + utils/ai-rate-limit CT-55 + utils/ai-cache CT-56 + ai_call_log 테이블 + /ai-usage 대시보드
+>
+> **D209+ 진입 명령어 (다음 세션 첫 메시지)**:
+> ```
+> status/STATUS.md CURRENT_TASK § D209+ 진입 가이드 정독 + memory/project_d209_plus_handoff.md 정독 + memory/project_d197_d208_completed.md 정독 + memory/feedback_ai_operator_model_isolation.md § D190 강화 룰 정독 + status/LESSONS_LEARNED.md §4-12/4-17/4-19/4-20/4-21 정독 → D209+ 통합 강화 작업 진입 (Sonnet 4.6 전환 + 시스템 프롬프트 강화 + 매장 region + 비용 안전 매트릭스 4 영역 5~7h)
+> ```
+>
+> **D197~D208 옛 완료 매트릭스 (참조)**:
+> - **D197 Phase B-2 Predictive Suite**: CT-52 predictive-suite.ts + predictive-worker.ts (1시간 cron) + journey-executor 통합 + /predictive 대시보드 + AI 시스템 프롬프트 강화 + LiquidPreviewModal 예측 점수 통합
+> - **D201 Phase B-3 Connected Content**: CT-53 connected-content.ts + 한국 region 17 매핑 + OpenWeatherMap fallback + caching + journey-executor + messageUtils 통합
+> - **D205 AI 자율 진단**: CT-54 ai-self-diagnosis.ts + diagnoseCompanyHealth + autoRecommendNextCampaigns 시즌 12 + /operator/self-diagnosis endpoint + AiOperatorPage AiSelfDiagnosisCards 자동 추천 카드 + 원클릭 진행
+> - **Harold 직접 배포 완료**: tp-push + git pull + backend/frontend build:safe + pm2 restart all + OPENWEATHER_API_KEY ENV + DB schema CREATE (cdp_customer_predictions IF NOT EXISTS 정합)
+> - **운영 검증**: 21,501명 자동 분석 + 평균 click_score 0.143 / churn_risk 0.917 / purchase_likelihood 0.035 + 이탈 위험 70%+ 19,494명 진단
+>
+> **신규 영구 룰 (D196~D208)**:
+> - feedback_no_sudo_use_echo.md — sudo 명령어 안내 X 영구 룰 (Harold 명시 "쥐약")
+> - feedback_sql_command_must_check_schema_first.md § D196 강화 — Docker container명 + nginx 경로 + 컬럼명 OPS.md/SCHEMA.md 정독 의무
+> - LESSONS_LEARNED §4-21 — 박-단어 자가 grep 실행 누락 사고 (인지 ≠ 실행 분리 사고)
+>
+> **D209+ 영구 원칙 정합 의무**:
+> - ai_operator_model_isolation 정합 (config/defaults.ts AI_MODELS 매트릭스 정독 후 진입)
+> - 6,000사+ 운영 영향 0 (옛 기존 ai.ts 흐름 영향 0 의무 — model: 'sonnet' = 옛 default 정합)
+> - 박-단어 + sudo + 모델명 자가 grep 의무 (매 답변 출력 직전 Bash grep)
+
+---
+
+### 🚀 옛 진입 가이드 (D190 Phase A 통합 종결 후 — 참조용)
 
 > **★ D190 Phase A 통합 종결 매트릭스 (2026-05-22)**: D190 #1 Click 트래킹 인프라 + D190 #2 orchestrateWithAI 회사별 토글 + D190 #3 알림톡 자동 템플릿 매칭 + D189-fix3 자체 호스팅 자사몰 UI 정정 + D190-fix1 모델명 사용자 노출 영구 룰 위반 6건 정정.
 >

@@ -39,7 +39,29 @@ export async function callAIWithFallback(params: {
   //   - 'sonnet' (기본, 미박힘 시): 기존 한줄로AI 흐름 (Sonnet 4.6) — 절대 변경 X
   //   - 'opus': AI Operator 신메뉴 전용 (Opus 4.7)
   model?: 'sonnet' | 'opus';
+  // ★ D209+ (Harold 명시 2026-05-22): Phase D 비용 안전 매트릭스 통합 — 회사별 한도 + cache + 통계
+  //   companyId 박힘 영역만 자동 통합 (옛 호출부 영향 0 = 점진 통합 정합).
+  //   - checkAiRateLimit: plans.ai_calls_per_month 초과 시 throw AiRateLimitExceeded
+  //   - getCachedResponse: 동일 system + userMessage 5분 cache hit 시 AI 호출 X
+  //   - recordAiCall: 정상 응답 시 ai_call_log INSERT (월 통계)
+  companyId?: string;
+  source?: string;
 }): Promise<string> {
+  // ★ D209+ Phase D: Rate limit 검증 + cache 조회 (companyId 박힘 영역만)
+  let cacheKey: string | null = null;
+  if (params.companyId) {
+    const { checkAiRateLimit } = await import('../utils/ai-rate-limit');
+    await checkAiRateLimit(params.companyId);  // 초과 시 throw AiRateLimitExceeded
+
+    const { generateCacheKey, getCachedResponse } = await import('../utils/ai-cache');
+    cacheKey = generateCacheKey(params.companyId, params.system, params.userMessage);
+    const cached = getCachedResponse(cacheKey);
+    if (cached) {
+      console.log(`[AI] cache hit (company ${params.companyId.slice(0, 8)}, source ${params.source || 'unknown'})`);
+      return cached;
+    }
+  }
+
   // 1차: Claude (모델 선택: sonnet/opus)
   try {
     const modelName = params.model === 'opus' ? AI_MODELS.opus : AI_MODELS.claude;
@@ -96,6 +118,25 @@ export async function callAIWithFallback(params: {
     } else {
       console.log(`[AI] Claude 호출 성공${modelTag}${thinkingTag}`);
     }
+
+    // ★ D209+ Phase D: 정상 응답 시점 cache 저장 + 통계 INSERT (companyId 박힘 영역만)
+    if (params.companyId && cacheKey && text) {
+      try {
+        const { setCachedResponse } = await import('../utils/ai-cache');
+        setCachedResponse(cacheKey, text);
+        const { recordAiCall } = await import('../utils/ai-rate-limit');
+        await recordAiCall({
+          companyId: params.companyId,
+          source: params.source || 'unknown',
+          modelType: params.model === 'opus' ? 'opus' : 'sonnet',
+          inputTokens: usage?.input_tokens || 0,
+          outputTokens: usage?.output_tokens || 0,
+          success: true,
+        });
+      } catch (trackErr: any) {
+        console.warn('[AI] Phase D 통계 기록 오류 (silent skip):', trackErr?.message);
+      }
+    }
     return text;
   } catch (claudeError: any) {
     console.warn(`[AI] Claude 실패 (${claudeError.status || claudeError.message}) → gpt-5.1 fallback`);
@@ -135,6 +176,26 @@ export async function callAIWithFallback(params: {
     const gptResponse = await openai.chat.completions.create(gptRequest);
     const text = gptResponse.choices[0]?.message?.content || '';
     console.log(`[AI] GPT fallback 성공 · model=${fallbackModel}`);
+
+    // ★ D209+ Phase D: GPT fallback 정상 응답 시점 cache 저장 + 통계 INSERT (companyId 박힘 영역만)
+    if (params.companyId && cacheKey && text) {
+      try {
+        const { setCachedResponse } = await import('../utils/ai-cache');
+        setCachedResponse(cacheKey, text);
+        const { recordAiCall } = await import('../utils/ai-rate-limit');
+        const gptUsage = gptResponse.usage as unknown as Record<string, number | undefined> | undefined;
+        await recordAiCall({
+          companyId: params.companyId,
+          source: params.source || 'unknown',
+          modelType: 'gpt-fallback',
+          inputTokens: gptUsage?.prompt_tokens || 0,
+          outputTokens: gptUsage?.completion_tokens || 0,
+          success: true,
+        });
+      } catch (trackErr: any) {
+        console.warn('[AI] Phase D 통계 기록 오류 (silent skip):', trackErr?.message);
+      }
+    }
     return text;
   } catch (gptError: any) {
     console.error(`[AI] GPT도 실패 · model=${fallbackModel} · ${gptError.message}`);

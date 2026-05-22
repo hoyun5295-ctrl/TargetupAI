@@ -3,10 +3,10 @@
  *
  * 목적
  *   자연어 한 줄 → 완전 여정 패키지 자동 생성. 진정 AI Operator 본질 정합.
- *   Opus 4.7 + ai_company_memory + 시즌 컨텍스트 + 회사 톤 + 메모리 통합.
+ *   Sonnet 4.6 + ai_company_memory + 시즌 컨텍스트 + 회사 톤 + 메모리 통합 (D209+ 전환 — 기존 ai.ts 흐름 정합).
  *
  * 영구 룰 정합
- *   - ai_operator_model_isolation: model:'opus' (Sonnet 4.6 흐름 영향 0)
+ *   - ai_operator_model_isolation: model:'sonnet' (D209+ Harold 명시 전환 — 기존 ai.ts 정합 모델)
  *   - ai_no_arbitrary_benefit: 구체 혜택(% / 원 / 무료 / 쿠폰) 임의 작성 X
  *       안내문/인사/감성 텍스트는 풍성, 혜택 영역만 [혜택 안내 — 직접 수정해주세요] placeholder
  *   - no_humuson_keyword_exposure: 검수 단어 X
@@ -214,7 +214,7 @@ ${memoryContext}
    - "단골 고객님" → "오래 함께해주신 고객님" / "소중한 고객님" / "꾸준히 사랑해주시는 고객님"
 ✓ 브랜드 톤 본질: 격조 / 정중함 / 진심 어린 감사 / 절제된 감성 — 친근한 대화체 X, 정중한 안부 O
 ✓ 안내문 / 인사 / 감성 텍스트 / 시즌 단어 / 회사 톤 = 매우 풍성하게 직접 작성 (마케팅 가치 본질)
-   - 단순 "안녕하세요 고객님" 수준 X = 시즌 묘사 + 감성 어휘 + 안부 + 회사 소식 + CTA 안내까지 자연스럽게 박는 영역
+   - 단순 "안녕하세요 고객님" 수준 X = 시즌 묘사 + 감성 어휘 + 안부 + 회사 소식 + CTA 안내까지 자연스럽게 전개
    - 한국 마케팅 정합 분량 = LMS 300~500바이트 (광고 합성 후 380~580바이트) — 단순 단답 X 풍성 본문 의무
    - 줄바꿈 / 단락 활용으로 가독성 정합 (3~5 단락 권장)
 ✗ 구체 혜택 (% / 원 / 무료 / 쿠폰 / 사은품 / 적립 / 할인 / 무료배송) = 절대 임의 작성 금지
@@ -224,6 +224,28 @@ ${memoryContext}
 ✗ 무료수신거부 080 직접 작성 X (시스템 자동 합성)
 ✓ %고객명% 변수 사용 권장 (본문 영역만 — 제목 영역은 변수 X)
 ✓ LMS 300~500바이트 권장 (광고 합성 후 380~580바이트)
+
+[★ ★ ★ 보존 영역 vs 자유 영역 분리 (D209+ Harold 명시 강화 — 옛 ai.ts 정합 통합) ★ ★ ★]
+✓ 보존 영역 (절대 변경 X — 회사 admin이 직접 작성할 영역):
+   - 구체 혜택 (% / 원 / 무료 / 쿠폰 / 사은품 / 적립 / 무료배송) → [혜택 안내 — 직접 수정해주세요] placeholder
+   - 상품명 / 매장명 / 일시 / 숫자 / 연락처 / 주소 / URL → [URL 입력] placeholder 또는 실제 URL 작성
+   - 변수 {{ customer.X }} / %고객명% → 자리 그대로 보존
+✓ 자유 영역 (적극 활용 — 카피라이터 감각으로):
+   - 수식어 / 감성 표현 ("기다리시던" / "소중한" / "정성스럽게" / "오랜 시간 함께해주신")
+   - 시즌 묘사 (현재 시즌 키워드 + 자연스러운 1~2 줄 묘사)
+   - 1:1 대화감 (단체 안내 X, 브랜드가 나한테 직접 보낸 느낌)
+   - 문장 리듬 (짧은 문장 + 긴 문장 교차)
+   - 호기심 갭 (정보 일부 열고 나머지 궁금증 유발 — 사용자가 URL 클릭하고 싶은 느낌)
+
+[★ ★ ★ 뻔한 표현 금지 (D209+ Harold 명시 강화 — 옛 ai.ts 정합 통합) ★ ★ ★]
+✗ "안녕하세요 고객님" — 금지 (시즌감 / 질문 / 숫자로 시작)
+✗ "특별한 혜택 / 소식 / 선물" — 금지 (구체 혜택 placeholder 사용)
+✗ "준비했어요 / 준비했습니다" — 금지 ("지금 ~할 수 있어요" 또는 시즌 도입부로)
+✗ "소중한 고객님" — 금지 (%고객명% 또는 {{ customer.name }} 직접 활용)
+✗ "다양한 혜택" — 금지 (핵심 1가지 구체 placeholder)
+✗ "많은 관심 부탁드립니다" — 금지 (구체 CTA로)
+✗ 느낌표 폭탄 (!!!) — 전체에서 최대 2~3개
+✗ 과장 형용사 ("초특가" / "역대급" / "미친" / "대박") — 금지
 
 [★ Liquid 동적 콘텐츠 — D191 강화 (사용자별 1:1 개인화)]
 회사 admin이 고급 1:1 동적 콘텐츠를 원할 때 Liquid 문법 활용 권장. 발송 시점 사용자별 자동 분기 + 변수 계산:
@@ -239,6 +261,22 @@ ${memoryContext}
 - Liquid 분기 안의 구체 혜택 텍스트도 동일 룰: % / 원 / 무료 등 임의 작성 X → \`[혜택 안내 — 직접 수정해주세요]\` placeholder
 - 단순 일률 발송 영역은 Liquid 미사용 (기존 %고객명% 변수만 사용 권장)
 - 모르는 필드(customer.X)는 사용 X — 기본 컬럼만 사용: name / phone / grade / age / gender / region / points / purchase_count / recent_purchase_store / recent_purchase_amount / recent_purchase_date
+
+[★ ★ ★ 날씨 Liquid 변수 — D209+ 신규 (Connected Content 통합) ★ ★ ★]
+✗ 날씨 단순 단어 직접 작성 절대 금지 ("맑음" / "비" / "눈" / "흐림" / "쌀쌀해요" / "더워요" / "화창" / "쌀쌀") — 발송 시점 실시간 날씨와 불일치 사고 위험 (예: "오늘 날씨 화창해요" 박은 메시지가 폭우 영역에 발송 = 신뢰 파괴)
+✓ 발송 시점 실시간 자동 분기는 Liquid 변수 의무:
+   - {{ weather.summary }} — 고객 region 기준 현재 날씨 한 줄 ("맑음 18°C" 등)
+   - {{ weather.store.summary }} — 매장 region 기준 (매장 단독 행사 영역 의무 — 예: "강남점 봄 행사")
+   - {{ weather.temp }} / {{ weather.condition }} — 온도 / 상태 (분기 조건용)
+✓ 분기 예시 — 폭우 / 폭염 / 눈 영역 안내:
+   {% if weather.condition == 'Rain' %}
+   비 오는 오늘, 매장 방문이 어려우신 분들을 위해
+   {% elsif weather.temp > 30 %}
+   더위 속에도 발걸음 해주시는 분들께
+   {% else %}
+   오늘 날씨와 함께
+   {% endif %}
+✓ 매장 단독 행사 영역 (회사 admin이 "강남점 봄 행사" / "부산점 가을 세일" 명시 시) = {{ weather.store.summary }} 의무
 
 [★ ★ ★ AI 자율 예측 점수 활용 가이드 — D197 신규 (Predictive Suite 통합) ★ ★ ★]
 발송 시점에 customer 객체에 자동 첨부되는 3 예측 점수 (0~1 매트릭스):
@@ -284,6 +322,7 @@ VIP 회원님께 먼저 안내드리는 봄 소식.
   - 따옴표: " " ' ' 『 』 (대신 표준 " ' 사용)
   - 전각 기호: ＆ ％ ＋ ？ ！ (대신 표준 & % + ? ! 사용)
 ✓ 허용 단어: 한글 / 영문 / 숫자 / 표준 기호 ( . , ! ? : ; ( ) [ ] " ' + - * / = @ # $ % & | < > → ) / 줄바꿈
+✓ SMS 호환 특수문자 화이트리스트 (D209+ 강화 — EUC-KR 통신사 검증 정합): ★ ☆ ♥ ♡ ◆ ◇ ■ □ ▲ △ ▶ ◀ ● ○ ◎ ♨ ※ ☞ ☎ ① ② ③ ④ ⑤ ↑ ↓ ← → ㈜ ㎝ ㎏ ㎡
 ✓ "→" 단어는 자세히 안내 화살표로 허용
 
 [좋은 메시지 예시 — 5월 생일 D-7 사전 안내 (풍성 본문 + 단순 제목)]
@@ -345,6 +384,50 @@ VIP 회원님만을 위해 준비한 이번 봄 특별 안내,
 
 자세히 → [URL 입력]
 
+[좋은 메시지 예시 — 신규 가입 환영 (D209+ 신규 Onboarding LMS — 풍성 본문 + 단순 제목)]
+제목: "함께하게 되어 진심으로 반가워요"
+
+본문:
+{{ customer.name | default: '고객' }}님, 안녕하세요.
+
+오늘 저희 매장의 새 가족이 되어주셔서
+진심으로 감사한 마음을 먼저 전해요.
+
+봄꽃이 한창인 이 계절, 첫 인연을 맺게 된 {{ customer.name | default: '고객' }}님께
+저희가 가장 정성껏 준비한 첫 인사를 드리고 싶었어요.
+
+처음 만나는 분께만 드리는 작은 선물 한 가지,
+오래 함께해주실 분들을 위해 정성껏 준비했답니다.
+
+[혜택 안내 — 직접 수정해주세요]
+
+자세히 → [URL 입력]
+
+[좋은 메시지 예시 — 휴면 고객 회복 (D209+ 신규 Dormant LMS — Predictive churn_risk 활용)]
+제목: "오랜만에 안부 전해드려요"
+
+본문:
+{{ customer.name | default: '고객' }}님, 안녕하세요.
+
+{% if customer.churn_risk > 0.7 %}
+오랜 시간 발걸음이 뜸하셨네요.
+혹시 그동안 불편하셨던 영역이 있었다면 부족함을 먼저 사과드리고 싶어요.
+
+다시 한 번 좋은 인연으로 이어가고 싶은 마음으로
+오랜 시간 함께해주신 분들께만 전해드리는 회복 안내 준비했답니다.
+
+[혜택 안내 — 직접 수정해주세요]
+{% else %}
+계절이 바뀌어가는 요즘, 잘 지내고 계신지 안부 전해드려요.
+
+새로운 봄 소식과 함께 {{ customer.name | default: '고객' }}님께
+어울리는 작은 안내 드리고 싶었어요.
+
+[혜택 안내 — 직접 수정해주세요]
+{% endif %}
+
+자세히 → [URL 입력]
+
 [budget / threshold]
 - budgetMonthlyHint: NULL = 무제한 default (회사 자유)
 - thresholdCostHint: NULL = 무제한 default (회사 자유)
@@ -381,12 +464,17 @@ VIP 회원님만을 위해 준비한 이번 봄 특별 안내,
     userMessage = `7 표준 시리즈 단축 진입: ${input.templateHint}\n\n위 회사 컨텍스트 + 시즌 + 메모리에 맞춰 ${input.templateHint} 시리즈의 표준 흐름을 풍성하게 작성한 JSON 응답하세요.`;
   }
 
+  // ★ D209+ (Harold 명시 2026-05-22): Sonnet 4.6 전환 — 기존 ai.ts generateMessages 시스템 프롬프트
+  //   매트릭스(D152 + D80 정합) 정합 본질 + 비용 80% 절감.
+  //   Phase D 통합: companyId + source 전달 → 회사별 월 한도 + cache + 통계 자동 활성.
   const text = await callAIWithFallback({
     system,
     userMessage,
     maxTokens: 4096,
     temperature: 0.4,
-    model: 'opus',
+    model: 'sonnet',
+    companyId: input.companyId,
+    source: 'journey-ai-generate',
   });
 
   let parsed: any;
@@ -490,8 +578,13 @@ ${memoryContext}
 ✓ 안내문 / 인사 / 감성 텍스트는 시즌과 회사 톤에 맞춰 풍성하게 정련
 ✗ 구체 혜택 (% / 원 / 무료 / 쿠폰) 임의 생성 금지 — placeholder 유지
 ✗ (광고) / 무료수신거부 080 직접 작성 X
+✗ 날씨 단순 단어 직접 작성 X — {{ weather.summary }} / {{ weather.store.summary }} Liquid 변수 의무 (D209+ Connected Content 정합)
 ✓ 최대 ${maxBytes}바이트 안
 ✓ ★ D191 강화: Liquid 문법({{ }}, {% if %}, {% endif %}, {% elsif %}, {% else %}, | filter)이 원본에 있으면 정확히 보존. Liquid 분기 안 텍스트만 톤 정련. Liquid 미사용 영역은 기존대로 평문 처리.
+✓ ★ D209+ 강화 (옛 ai.ts 정합 통합):
+  - 뻔한 표현 금지: "안녕하세요 고객님" / "특별한 혜택" / "준비했어요" / "소중한 고객님" / "다양한 혜택" / "많은 관심 부탁드립니다" / 느낌표 폭탄 / 과장 형용사 ("초특가" / "역대급" / "미친" / "대박")
+  - SMS 호환 특수문자 화이트리스트 (EUC-KR 통신사 검증 정합): ★ ☆ ♥ ♡ ◆ ◇ ■ □ ▲ △ ▶ ◀ ● ○ ◎ ♨ ※ ☞ ☎ ① ② ③ ④ ⑤ ↑ ↓ ← → ㈜ ㎝ ㎏ ㎡
+  - 자유 영역 (수식어 / 감성 / 시즌감 / 1:1 대화감 / 호기심 갭) 적극 활용, 사실 영역 (숫자 / 장소 / 약속 / 혜택) 절대 보존
 
 [3 후보 톤 매트릭스]
 1. 감성적: 따뜻함 / 시즌감 강조 / 호기심 유발 / 정서적 공감
@@ -509,12 +602,17 @@ ${memoryContext}
 
   const userMessage = `원본 메시지:\n${input.currentMessage}\n\n위 메시지를 3가지 톤 후보로 다듬어 JSON으로 응답하세요. 혜택 placeholder + 변수는 그대로 유지하고 안내문/감성 텍스트만 정련하세요.`;
 
+  // ★ D209+ (Harold 명시 2026-05-22): Sonnet 4.6 전환 — D152 AI 다듬기 정합 본질
+  //   (기존 ai.ts 흐름과 동일 모델) + 비용 80% 절감.
+  //   Phase D 통합: companyId + source 전달 → 회사별 월 한도 + cache + 통계 자동 활성.
   const text = await callAIWithFallback({
     system,
     userMessage,
     maxTokens: 3000,
     temperature: 0.5,
-    model: 'opus',
+    model: 'sonnet',
+    companyId: input.companyId,
+    source: 'journey-ai-refine',
   });
 
   let parsed: any;

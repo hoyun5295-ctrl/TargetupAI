@@ -368,6 +368,8 @@ async function processExecution(exec: ExecutionRow): Promise<StepOutcome> {
       step.message_template || '',
       exec.company_id,
       (enrichedCustomer as any).region || null,
+      // ★ D209+ (Harold 명시 2026-05-22): 매장 region 강화 — recent_purchase_store 우선, registered_store fallback
+      (enrichedCustomer as any).recent_purchase_store || (enrichedCustomer as any).registered_store || null,
     );
   } catch (err: any) {
     console.warn('[JourneyExecutor] Connected Content skip:', err?.message);

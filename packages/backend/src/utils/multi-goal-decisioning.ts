@@ -106,6 +106,9 @@ ${goals.map((g, i) => `${i + 1}. "${g.name}" (가중치 ${g.weight}${g.descripti
       userMessage,
       maxTokens: 2000,
       temperature: 0,
+      // ★ D209+ Phase D 통합: companyId + source 전달 → 회사별 월 한도 + cache + 통계 자동 활성.
+      companyId: companyInfo?.id,
+      source: 'multi-goal-decisioning',
     });
     aiResponse = aiResult || '';
   } catch (err: any) {

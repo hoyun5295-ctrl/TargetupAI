@@ -47,6 +47,8 @@ import JourneyDetailPage from './pages/JourneyDetailPage';
 import JourneyStatsPage from './pages/JourneyStatsPage';
 // ★ D197 (2026-05-22) Phase B-2: Predictive Suite 대시보드 — AI 자율 예측 분석
 import PredictiveDashboardPage from './pages/PredictiveDashboardPage';
+// ★ D209+ (2026-05-22) Phase D 비용 안전 매트릭스 — AI 호출 월 한도 + cache 통계 대시보드
+import AiUsagePage from './pages/AiUsagePage';
 
 // ★ 세션 타이머 Context — 헤더 등에서 남은 시간 표시용
 interface SessionTimerContextType {
@@ -408,6 +410,16 @@ function App() {
           element={
             <PrivateRoute allowedTypes={['company_admin', 'company_user']}>
               <PredictiveDashboardPage />
+            </PrivateRoute>
+          }
+        />
+
+        {/* ★ D209+ (2026-05-22) Phase D 비용 안전 매트릭스 — AI 호출 월 한도 + cache 통계 */}
+        <Route
+          path="/ai-usage"
+          element={
+            <PrivateRoute allowedTypes={['company_admin', 'company_user']}>
+              <AiUsagePage />
             </PrivateRoute>
           }
         />

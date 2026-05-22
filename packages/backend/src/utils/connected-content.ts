@@ -60,7 +60,8 @@ export interface ProductNewInfo {
 }
 
 export interface ExternalContext {
-  weather?: { today?: WeatherInfo };
+  // ★ D209+ (Harold 명시 2026-05-22): weather.store 신규 — 매장 region 매핑 (매장 단독 행사 영역 정합)
+  weather?: { today?: WeatherInfo; store?: WeatherInfo };
   inventory?: Record<string, InventoryInfo>;
   price?: Record<string, PriceInfo>;
   product?: { new?: ProductNewInfo[]; last_viewed?: ProductNewInfo };
@@ -197,6 +198,61 @@ function defaultWeather(region: string): WeatherInfo {
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// 1-A. fetchStoreWeather — 매장 region 매핑 (callback_numbers JOIN) (D209+ Harold 명시 매장 단독 행사 영역 정합)
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+const storeRegionCache = new Map<string, { region: string | null; expiresAt: number }>();
+const STORE_REGION_CACHE_TTL_MS = 60 * 60 * 1000;  // 1시간 (매장 region은 거의 변경 X)
+
+/**
+ * fetchStoreWeather — 매장 region 매핑 + 날씨 조회
+ *
+ * 매트릭스:
+ *   1. callback_numbers WHERE (store_name = $1 OR store_code = $1) AND company_id = $2 → region 조회
+ *   2. region 매칭 시 fetchWeather(region) 호출
+ *   3. 매칭 X 시 null 반환 (customer.region fallback 정합)
+ *
+ * 의도: 회사 admin이 "강남점 봄 행사" 영역 작성 시, customer.region 무관 매장 영역 날씨 정합.
+ *
+ * SCHEMA 의존: callback_numbers.region varchar(20) NULL 컬럼 (D209+ ALTER 신규)
+ */
+export async function fetchStoreWeather(storeName: string, companyId: string): Promise<WeatherInfo | null> {
+  if (!storeName || !companyId) return null;
+  const cacheKey = `storeRegion:${companyId}:${storeName}`;
+  const cached = storeRegionCache.get(cacheKey);
+
+  let region: string | null;
+  if (cached && cached.expiresAt > Date.now()) {
+    region = cached.region;
+  } else {
+    try {
+      const { query } = await import('../config/database');
+      const res = await query(
+        `SELECT region FROM callback_numbers
+         WHERE company_id = $1::uuid
+           AND (store_name = $2 OR store_code = $2)
+           AND region IS NOT NULL
+         LIMIT 1`,
+        [companyId, storeName]
+      );
+      region = res.rows[0]?.region || null;
+      storeRegionCache.set(cacheKey, { region, expiresAt: Date.now() + STORE_REGION_CACHE_TTL_MS });
+    } catch (err: any) {
+      console.warn('[ConnectedContent] fetchStoreWeather region 조회 오류, fallback:', err?.message);
+      region = null;
+    }
+  }
+
+  if (!region) return null;
+  try {
+    return await fetchWeather(region);
+  } catch (err: any) {
+    console.warn('[ConnectedContent] fetchStoreWeather weather 조회 오류, fallback:', err?.message);
+    return null;
+  }
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // 2. fetchInventory / fetchPrice — ProviderAdapter 정합 (자사몰별 실 구현)
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
@@ -277,17 +333,20 @@ export async function fetchProductNew(companyId: string, limit = 5): Promise<Pro
 
 export function detectExternalVars(template: string): {
   needsWeather: boolean;
+  needsStoreWeather: boolean;  // ★ D209+ (매장 region 강화) — weather.store.* 매칭
   needsInventory: string[];
   needsPrice: string[];
   needsProductNew: boolean;
   needsLastViewed: boolean;
 } {
   if (!template) {
-    return { needsWeather: false, needsInventory: [], needsPrice: [], needsProductNew: false, needsLastViewed: false };
+    return { needsWeather: false, needsStoreWeather: false, needsInventory: [], needsPrice: [], needsProductNew: false, needsLastViewed: false };
   }
 
-  // weather.* 매칭
+  // weather.* 매칭 (today + store 양쪽 trigger)
   const needsWeather = /\{\{\s*weather\.|\{%[^%]*\bweather\./i.test(template);
+  // ★ D209+ weather.store.* 매칭 (매장 region 강화)
+  const needsStoreWeather = /\{\{\s*weather\.store\.|\{%[^%]*\bweather\.store\./i.test(template);
 
   // inventory.X 매칭 (X = product_id 추출)
   const inventoryMatches = template.match(/\{\{\s*inventory\.([a-zA-Z0-9_\-]+)/g) || [];
@@ -305,13 +364,15 @@ export function detectExternalVars(template: string): {
   const needsProductNew = /\{\{\s*product\.new/.test(template);
   const needsLastViewed = /\{\{\s*product\.last_viewed/.test(template);
 
-  return { needsWeather, needsInventory, needsPrice, needsProductNew, needsLastViewed };
+  return { needsWeather, needsStoreWeather, needsInventory, needsPrice, needsProductNew, needsLastViewed };
 }
 
 export async function enrichLiquidContextWithExternal(
   template: string,
   companyId: string,
   customerRegion: string | null,
+  // ★ D209+ (Harold 명시 2026-05-22): 매장 region 강화 — customer.recent_purchase_store 또는 registered_store 전달
+  customerStore?: string | null,
 ): Promise<ExternalContext> {
   const needs = detectExternalVars(template);
   const context: ExternalContext = {};
@@ -320,9 +381,21 @@ export async function enrichLiquidContextWithExternal(
   if (needs.needsWeather && customerRegion) {
     try {
       const weather = await fetchWeather(customerRegion);
-      context.weather = { today: weather };
+      context.weather = { ...(context.weather || {}), today: weather };
     } catch (err: any) {
       console.warn('[ConnectedContent] weather fetch skip:', err?.message);
+    }
+  }
+
+  // ★ D209+ 매장 region 강화 — weather.store.* 매칭 + customer.recent_purchase_store 매핑
+  if (needs.needsStoreWeather && customerStore) {
+    try {
+      const storeWeather = await fetchStoreWeather(customerStore, companyId);
+      if (storeWeather) {
+        context.weather = { ...(context.weather || {}), store: storeWeather };
+      }
+    } catch (err: any) {
+      console.warn('[ConnectedContent] storeWeather fetch skip:', err?.message);
     }
   }
 

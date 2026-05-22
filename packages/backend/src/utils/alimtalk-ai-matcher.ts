@@ -256,15 +256,19 @@ ${i + 1}. ID: ${t.id}
 
 위 매트릭스 정독 후 가장 정합되는 1건 + 차선 2~3건 추천 (JSON only).`;
 
-  // 5. Opus 4.7 호출 (모델 분리 룰 정합)
+  // ★ D209+ (Harold 명시 2026-05-22): Sonnet 4.6 전환 — 단순 템플릿 매칭 + 변수 매핑 영역.
+  //   AI 추론 깊이 의무 X = 비용 80% 절감 + 품질 정합.
+  //   Phase D 통합: companyId + source 전달 → 회사별 월 한도 검증 + cache + 통계 자동 활성.
   let aiResponse = '';
   try {
     const result = await callAIWithFallback({
-      model: 'opus',
+      model: 'sonnet',
       system: systemPrompt,
       userMessage,
       maxTokens: 2000,
       temperature: 0,
+      companyId: input.companyId,
+      source: 'alimtalk-matcher',
     });
     aiResponse = result || '';
   } catch (err: any) {
