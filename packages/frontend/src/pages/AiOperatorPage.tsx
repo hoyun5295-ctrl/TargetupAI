@@ -1106,39 +1106,46 @@ export default function AiOperatorPage() {
         {/* ★ D177-fix: 진행률 카드 영구 제거 (Harold 명시 — 업그레이드 노출 X / 방향성 이미 잡음) */}
         {showAbout && (
           <>
-            {/* ★ D205 (2026-05-22): AI 자율 진단 자동 추천 카드 — 회사 admin 첫 진입 시 자동 제안 */}
-            <AiSelfDiagnosisCards />
+            {/* ★ D209+ (Harold 명시 2026-05-22): 좌우 분할 매트릭스 — 좌측 AI 자율 진단 세로 길게 / 우측 SUB_MODULE_CARDS 2열 세로. */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-14">
+              {/* 좌측 — AI 자율 진단 (세로 길게) */}
+              <div>
+                {/* ★ D205 (2026-05-22): AI 자율 진단 자동 추천 카드 — 회사 admin 첫 진입 시 자동 제안 */}
+                <AiSelfDiagnosisCards />
+              </div>
 
-            {/* ★ D177-ux2: AI Operator 페이지 안 sub-module 배치 (Harold 명시 — 헤더 dropdown X / 페이지 안 메뉴) */}
-            <div className="mb-14">
-              <p className="text-[10px] font-semibold tracking-[0.28em] text-white/40 mb-1.5 uppercase">AI Operator Modules</p>
-              <h2 className="text-xl font-bold mb-1.5 text-white">함께 사용하는 AI 영역</h2>
-              <p className="text-sm text-white/50 mb-6">자연어 한 줄 진입 외에도 AI Operator 안에 내장된 영역 — 클릭 시 진입</p>
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                {SUB_MODULE_CARDS
-                  .filter((card) => !card.adminOnly || (user as any)?.userType === 'company_admin')
-                  .map((card) => {
-                    const Icon = card.icon;
-                    return (
-                      <button
-                        key={card.label}
-                        onClick={() => navigate(card.path)}
-                        className="group relative p-5 rounded-2xl bg-white/[0.07] backdrop-blur-xl border border-white/15 hover:bg-white/[0.13] hover:border-white/30 hover:scale-[1.02] transition-all duration-300 text-left"
-                      >
-                        <div className={`w-11 h-11 rounded-xl bg-gradient-to-br ${card.gradient} flex items-center justify-center mb-3 shadow-lg group-hover:scale-110 transition-transform`}>
-                          <Icon className="w-5 h-5 text-white" />
-                        </div>
-                        <div className="flex items-center gap-2 mb-1">
-                          <h3 className="text-white font-semibold text-sm">{card.label}</h3>
-                          <span className="text-[8px] font-bold tracking-wider px-1.5 py-0.5 rounded-full bg-gradient-to-r from-amber-400 to-fuchsia-500 text-white shadow-sm">BETA</span>
-                        </div>
-                        <p className="text-white/60 text-xs leading-relaxed">{card.description}</p>
-                        <div className="absolute top-5 right-5 text-white/30 group-hover:text-white/70 group-hover:translate-x-0.5 transition-all text-lg">
-                          →
-                        </div>
-                      </button>
-                    );
-                  })}
+              {/* 우측 — SUB_MODULE_CARDS 2열 세로 나열 */}
+              {/* ★ D177-ux2: AI Operator 페이지 안 sub-module 배치 (Harold 명시 — 헤더 dropdown X / 페이지 안 메뉴) */}
+              <div>
+                <p className="text-[10px] font-semibold tracking-[0.28em] text-white/40 mb-1.5 uppercase">AI Operator Modules</p>
+                <h2 className="text-xl font-bold mb-1.5 text-white">함께 사용하는 AI 영역</h2>
+                <p className="text-sm text-white/50 mb-6">자연어 한 줄 진입 외에도 AI Operator 안에 내장된 영역 — 클릭 시 진입</p>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  {SUB_MODULE_CARDS
+                    .filter((card) => !card.adminOnly || (user as any)?.userType === 'company_admin')
+                    .map((card) => {
+                      const Icon = card.icon;
+                      return (
+                        <button
+                          key={card.label}
+                          onClick={() => navigate(card.path)}
+                          className="group relative p-4 rounded-2xl bg-white/[0.07] backdrop-blur-xl border border-white/15 hover:bg-white/[0.13] hover:border-white/30 hover:scale-[1.02] transition-all duration-300 text-left"
+                        >
+                          <div className={`w-10 h-10 rounded-xl bg-gradient-to-br ${card.gradient} flex items-center justify-center mb-3 shadow-lg group-hover:scale-110 transition-transform`}>
+                            <Icon className="w-5 h-5 text-white" />
+                          </div>
+                          <div className="flex items-center gap-1.5 mb-1">
+                            <h3 className="text-white font-semibold text-sm">{card.label}</h3>
+                            <span className="text-[8px] font-bold tracking-wider px-1.5 py-0.5 rounded-full bg-gradient-to-r from-amber-400 to-fuchsia-500 text-white shadow-sm">BETA</span>
+                          </div>
+                          <p className="text-white/60 text-[11px] leading-relaxed">{card.description}</p>
+                          <div className="absolute top-4 right-4 text-white/30 group-hover:text-white/70 group-hover:translate-x-0.5 transition-all text-base">
+                            →
+                          </div>
+                        </button>
+                      );
+                    })}
+                </div>
               </div>
             </div>
 
@@ -1333,7 +1340,7 @@ function AiSelfDiagnosisCards() {
   };
 
   return (
-    <div className="mb-10 p-5 bg-gradient-to-br from-indigo-950/60 via-purple-950/40 to-fuchsia-950/40 border border-white/10 rounded-2xl">
+    <div className="p-5 bg-gradient-to-br from-indigo-950/60 via-purple-950/40 to-fuchsia-950/40 border border-white/10 rounded-2xl h-full">
       <div className="flex items-center justify-between mb-4">
         <div>
           <p className="text-[10px] font-semibold tracking-[0.28em] text-violet-300/70 mb-1 uppercase">AI Self-Diagnosis</p>
@@ -1364,7 +1371,8 @@ function AiSelfDiagnosisCards() {
         </div>
       )}
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+      {/* ★ D209+ (Harold 명시 2026-05-22): 좌우 분할 좌측 영역 = 세로 1열 매트릭스 정합 (옛 md:grid-cols-3 영역 정정). */}
+      <div className="grid grid-cols-1 gap-3">
         {diagnosis.recommendations.map((rec) => (
           <div
             key={rec.id}
