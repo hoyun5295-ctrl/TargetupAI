@@ -142,24 +142,27 @@ export default function AiOperatorWalkthroughModal({ forceShow, onClose }: AiOpe
           </div>
 
           {/* 콘텐츠 */}
+          {/* ★ D210+ (Harold 명시 2026-05-23): STEP 6 영역 = 메뉴 매트릭스 콘텐츠 많음 → 노트북 화면 잘림 차단 의무.
+              isLast 분기 = icon + title 크기 + margin 축소 (1~5 STEPS 형태 영향 0 — Harold 만족 영역 보존). */}
           <div className="text-center">
-            <div className={`w-16 h-16 mx-auto rounded-2xl bg-gradient-to-br ${step.gradient} flex items-center justify-center shadow-lg mb-5`}>
-              <Icon className="w-8 h-8 text-white" />
+            <div className={`${isLast ? 'w-12 h-12 mb-3' : 'w-16 h-16 mb-5'} mx-auto rounded-2xl bg-gradient-to-br ${step.gradient} flex items-center justify-center shadow-lg`}>
+              <Icon className={isLast ? 'w-6 h-6 text-white' : 'w-8 h-8 text-white'} />
             </div>
-            <h2 className="text-xl md:text-2xl font-semibold text-white mb-3">{step.title}</h2>
+            <h2 className={`${isLast ? 'text-lg md:text-xl mb-2' : 'text-xl md:text-2xl mb-3'} font-semibold text-white`}>{step.title}</h2>
             {isLast ? (
               <>
-                {/* ★ D210+ (Harold 명시 2026-05-23): STEP 6 = 메뉴 매트릭스 + 하단 안내 박스 통합 — 사용자 한 눈에 메뉴 확인. */}
-                <p className="text-sm text-white/60 leading-relaxed mb-5 whitespace-pre-line">{step.description}</p>
-                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 mb-5 text-left">
+                {/* ★ D210+ (Harold 명시 2026-05-23): STEP 6 = 메뉴 매트릭스 + 하단 안내 박스 통합 — 사용자 한 눈에 메뉴 확인.
+                    ★ Harold 명시 2026-05-23 추가: 노트북 화면 잘림 차단 = 본문 여백 + 카드 padding + 안내 박스 padding 축소. */}
+                <p className="text-sm text-white/60 leading-relaxed mb-3 whitespace-pre-line">{step.description}</p>
+                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 mb-3 text-left">
                   {SUB_MODULE_CARDS.map((card) => {
                     const CardIcon = card.icon;
                     return (
                       <div
                         key={card.label}
-                        className="group relative p-4 rounded-2xl bg-white/[0.06] border border-white/10 hover:bg-white/[0.12] hover:border-violet-400/40 hover:scale-[1.02] transition-all duration-300"
+                        className="group relative p-3 rounded-2xl bg-white/[0.06] border border-white/10 hover:bg-white/[0.12] hover:border-violet-400/40 hover:scale-[1.02] transition-all duration-300"
                       >
-                        <div className={`w-10 h-10 rounded-xl bg-gradient-to-br ${card.gradient} flex items-center justify-center mb-2.5 shadow-lg`}>
+                        <div className={`w-9 h-9 rounded-xl bg-gradient-to-br ${card.gradient} flex items-center justify-center mb-2 shadow-lg`}>
                           <CardIcon className="w-5 h-5 text-white" />
                         </div>
                         <div className="flex items-center gap-1.5 mb-1 flex-wrap">
@@ -173,8 +176,8 @@ export default function AiOperatorWalkthroughModal({ forceShow, onClose }: AiOpe
                     );
                   })}
                 </div>
-                <div className="rounded-xl p-4 bg-gradient-to-r from-amber-500/15 to-fuchsia-500/15 border border-amber-400/30 text-left">
-                  <p className="text-xs font-semibold text-amber-200 mb-1.5 flex items-center gap-1.5">
+                <div className="rounded-xl p-3 bg-gradient-to-r from-amber-500/15 to-fuchsia-500/15 border border-amber-400/30 text-left">
+                  <p className="text-xs font-semibold text-amber-200 mb-1 flex items-center gap-1.5">
                     <Sparkles className="w-3.5 h-3.5" />
                     기존 고객사 특별 혜택
                   </p>
