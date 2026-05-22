@@ -410,9 +410,14 @@ export default function CdpSettingsPage() {
           >
             <ArrowLeft className="w-5 h-5" />
           </button>
-          <Database className="w-5 h-5 text-indigo-600" />
-          <h1 className="text-lg font-bold text-gray-800">자사몰 연동 (CDP)</h1>
-          <span className="text-xs bg-indigo-50 text-indigo-700 px-2 py-0.5 rounded-full font-medium">BETA</span>
+          <Database className="w-5 h-5 text-indigo-600 flex-shrink-0" />
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-2">
+              <h1 className="text-lg font-bold text-gray-800">자사몰 연동 (CDP)</h1>
+              <span className="text-xs bg-indigo-50 text-indigo-700 px-2 py-0.5 rounded-full font-medium">BETA</span>
+            </div>
+            <p className="text-xs text-gray-500 mt-0.5">자체 호스팅 · 네이버 스마트스토어 · 카페24 자동 sync — 고객 + 주문 + 이벤트 통합</p>
+          </div>
         </div>
       </div>
 

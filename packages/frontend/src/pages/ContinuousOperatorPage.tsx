@@ -326,9 +326,14 @@ export default function ContinuousOperatorPage() {
           <button onClick={() => navigate('/ai-operator')} className="text-gray-500 hover:text-gray-700 p-1">
             <ArrowLeft className="w-5 h-5" />
           </button>
-          <Brain className="w-5 h-5 text-indigo-600" />
-          <h1 className="text-lg font-bold text-gray-800">AI 영구 운영 (Continuous Operator)</h1>
-          <span className="text-xs bg-indigo-50 text-indigo-700 px-2 py-0.5 rounded-full font-medium">BETA</span>
+          <Brain className="w-5 h-5 text-indigo-600 flex-shrink-0" />
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-2">
+              <h1 className="text-lg font-bold text-gray-800">AI 영구 운영 (Continuous Operator)</h1>
+              <span className="text-xs bg-indigo-50 text-indigo-700 px-2 py-0.5 rounded-full font-medium">BETA</span>
+            </div>
+            <p className="text-xs text-gray-500 mt-0.5">매일 AI가 새 캠페인 자동 제안 — 사용자 승인 후 발송 (영구 운영 매트릭스)</p>
+          </div>
           <div className="ml-auto flex items-center gap-2">
             <button onClick={loadAll} className="text-xs text-gray-600 hover:bg-gray-100 px-3 py-1.5 rounded-lg flex items-center gap-1.5">
               <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />

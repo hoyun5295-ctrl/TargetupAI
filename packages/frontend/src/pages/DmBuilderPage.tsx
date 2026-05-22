@@ -218,9 +218,13 @@ export default function DmBuilderPage() {
     <div style={{ minHeight: '100vh', background: 'var(--dm-neutral-100)', fontFamily: 'var(--dm-font-primary)' }}>
       <header style={{ background: 'var(--dm-bg)', borderBottom: '1px solid var(--dm-neutral-200)', padding: '16px 32px', display: 'flex', alignItems: 'center', gap: 16 }}>
         <button onClick={() => navigate('/ai-operator')} style={{ background: 'transparent', border: 'none', fontSize: 20, cursor: 'pointer', padding: 8, borderRadius: 8 }} title="AI Operator로">←</button>
-        <h1 style={{ fontSize: 20, fontWeight: 800, color: 'var(--dm-neutral-900)', margin: 0 }}>모바일 DM 빌더</h1>
-        <span style={{ fontSize: 11, padding: '3px 8px', background: 'var(--dm-primary-light)', color: 'var(--dm-primary)', borderRadius: 12, fontWeight: 700 }}>PRO</span>
-        <div style={{ flex: 1 }} />
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <h1 style={{ fontSize: 20, fontWeight: 800, color: 'var(--dm-neutral-900)', margin: 0 }}>모바일 DM 빌더</h1>
+            <span style={{ fontSize: 11, padding: '3px 8px', background: 'var(--dm-primary-light)', color: 'var(--dm-primary)', borderRadius: 12, fontWeight: 700 }}>PRO</span>
+          </div>
+          <p style={{ fontSize: 12, color: 'var(--dm-neutral-500)', margin: '2px 0 0 0' }}>카드형 모바일 DM 빌더 — 미디어 메세지 디자인 + 카드 단위 편집</p>
+        </div>
         <button
           onClick={handleCreateNew}
           style={{ height: 36, padding: '0 16px', background: 'var(--dm-primary)', color: '#fff', border: 'none', borderRadius: 8, fontSize: 13, fontWeight: 700, cursor: 'pointer' }}

@@ -142,18 +142,18 @@ interface SubModuleCard {
 }
 
 const SUB_MODULE_CARDS: SubModuleCard[] = [
-  { icon: Workflow,     gradient: 'from-fuchsia-400 to-purple-500', label: '여정 자동화',    description: '자연어 한 줄 → 7 표준 여정 + Liquid 1:1 분기 + A/B Bandit + 실시간 통계',   path: '/ai-journeys' },
-  { icon: Brain,        gradient: 'from-violet-400 to-fuchsia-500', label: 'AI 자율 예측',  description: '사용자별 클릭률·이탈 위험·구매 가능성\nAI 자동 예측 + Liquid 분기 통합',  path: '/predictive' },
-  { icon: Brain,        gradient: 'from-indigo-400 to-violet-500', label: 'AI 영구운영',    description: '매일 AI가 새 캠페인 제안\n(사용자 승인 후 발송)',     path: '/continuous-operator' },
-  { icon: LineChart,    gradient: 'from-fuchsia-400 to-pink-500',  label: '성과리포트',     description: '30일 성과 분석 + AI 다음 캠페인 추천',              path: '/performance' },
-  { icon: Workflow,     gradient: 'from-emerald-400 to-teal-500',  label: '자사몰 연동',    description: '자체 호스팅 · 네이버 스마트스토어\n카페24 등 자동 Sync', path: '/cdp-settings' },
+  { icon: Workflow,     gradient: 'from-fuchsia-400 to-purple-500', label: '여정 자동화',    description: '자연어 → 7 표준 여정 + A/B Bandit',   path: '/ai-journeys' },
+  { icon: Brain,        gradient: 'from-violet-400 to-fuchsia-500', label: 'AI 자율 예측',  description: '이탈·구매 가능성 AI 자동 예측',       path: '/predictive' },
+  { icon: Brain,        gradient: 'from-indigo-400 to-violet-500', label: 'AI 영구운영',    description: '매일 AI 캠페인 자동 제안',            path: '/continuous-operator' },
+  { icon: LineChart,    gradient: 'from-fuchsia-400 to-pink-500',  label: '성과리포트',     description: '30일 성과 + 다음 캠페인 추천',        path: '/performance' },
+  { icon: Workflow,     gradient: 'from-emerald-400 to-teal-500',  label: '자사몰 연동',    description: '카페24·네이버 자동 sync',             path: '/cdp-settings' },
   // ★ D209+ (Harold 명시 2026-05-22): Web Push / 인바운드 음성 AI / AI에게 질문 / AI Batch 4 카드 영구 제거.
   //   메뉴 UI만 제거 + 백엔드 기능/라우트/페이지 모두 보존 (직접 URL 진입 정합).
-  { icon: MessageSquare,gradient: 'from-rose-400 to-pink-500',     label: '인앱메시지',     description: '자사몰 안의 배너/모달 자동 표시',                    path: '/inapp-messages',   adminOnly: true },
-  { icon: Mail,         gradient: 'from-blue-400 to-cyan-500',     label: 'Email 캠페인',   description: 'SendGrid 기반 transactional · marketing 발송',      path: '/email-campaigns',  adminOnly: true },
-  { icon: Smartphone,   gradient: 'from-amber-400 to-yellow-500',  label: '모바일 DM',      description: '카드형 모바일 DM 빌더\nㅡ 미디어 메세지 디자인',       path: '/dm-builder' },
-  { icon: Brain,        gradient: 'from-emerald-400 to-teal-500',  label: 'AI 학습 메모리',  description: '회사별 누적 학습 5종\nㅡ 시간 지날수록 정확도↑',     path: '/ai-memory' },
-  { icon: Activity,     gradient: 'from-blue-400 to-sky-500',      label: 'AI 사용량',      description: '월 한도 + 30일 일별 통계 + cache 효율 진단',          path: '/ai-usage' },
+  { icon: MessageSquare,gradient: 'from-rose-400 to-pink-500',     label: '인앱메시지',     description: '자사몰 배너·모달 자동 표시',     path: '/inapp-messages',   adminOnly: true },
+  { icon: Mail,         gradient: 'from-blue-400 to-cyan-500',     label: 'Email 캠페인',   description: '이메일 자동 발송',              path: '/email-campaigns',  adminOnly: true },
+  { icon: Smartphone,   gradient: 'from-amber-400 to-yellow-500',  label: '모바일 DM',      description: '카드형 미디어 메시지 빌더',     path: '/dm-builder' },
+  { icon: Brain,        gradient: 'from-emerald-400 to-teal-500',  label: 'AI 메모리',     description: '회사별 누적 학습 — 정확도↑',    path: '/ai-memory' },
+  { icon: Activity,     gradient: 'from-blue-400 to-sky-500',      label: 'AI 사용량',      description: '월 한도 + 일별 통계',           path: '/ai-usage' },
 ];
 
 // 결과 카드 액센트
@@ -1139,7 +1139,7 @@ export default function AiOperatorPage() {
                             <h3 className="text-white font-semibold text-sm">{card.label}</h3>
                             <span className="text-[8px] font-bold tracking-wider px-1.5 py-0.5 rounded-full bg-gradient-to-r from-amber-400 to-fuchsia-500 text-white shadow-sm">BETA</span>
                           </div>
-                          <p className="text-white/60 text-[11px] leading-relaxed whitespace-pre-line">{card.description}</p>
+                          <p className="text-white/60 text-[11px] leading-relaxed">{card.description}</p>
                           <div className="absolute top-4 right-4 text-white/30 group-hover:text-white/70 group-hover:translate-x-0.5 transition-all text-base">
                             →
                           </div>

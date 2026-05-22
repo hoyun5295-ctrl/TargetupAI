@@ -117,9 +117,14 @@ export default function InAppMessagesPage() {
           <button onClick={() => navigate('/ai-operator')} className="text-gray-500 hover:text-gray-700 p-1">
             <ArrowLeft className="w-5 h-5" />
           </button>
-          <Layers className="w-5 h-5 text-indigo-600" />
-          <h1 className="text-lg font-bold text-gray-800">In-app Message 관리</h1>
-          <span className="text-xs bg-indigo-50 text-indigo-700 px-2 py-0.5 rounded-full font-medium">BETA</span>
+          <Layers className="w-5 h-5 text-indigo-600 flex-shrink-0" />
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-2">
+              <h1 className="text-lg font-bold text-gray-800">In-app Message 관리</h1>
+              <span className="text-xs bg-indigo-50 text-indigo-700 px-2 py-0.5 rounded-full font-medium">BETA</span>
+            </div>
+            <p className="text-xs text-gray-500 mt-0.5">자사몰 안 배너 / 모달 자동 표시 — SDK 통합 + 빈도 제어 + impression / click 트래킹</p>
+          </div>
           <div className="ml-auto flex items-center gap-2">
             <button onClick={load} className="text-xs text-gray-600 hover:bg-gray-100 px-3 py-1.5 rounded-lg flex items-center gap-1.5">
               <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />

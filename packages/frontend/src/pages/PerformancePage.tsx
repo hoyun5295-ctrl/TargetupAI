@@ -82,9 +82,14 @@ export default function PerformancePage() {
           <button onClick={() => navigate('/ai-operator')} className="text-gray-500 hover:text-gray-700 p-1">
             <ArrowLeft className="w-5 h-5" />
           </button>
-          <BarChart3 className="w-5 h-5 text-indigo-600" />
-          <h1 className="text-lg font-bold text-gray-800">성과 리포트 + AI 다음 캠페인 추천</h1>
-          <span className="text-xs bg-indigo-50 text-indigo-700 px-2 py-0.5 rounded-full font-medium">BETA</span>
+          <BarChart3 className="w-5 h-5 text-indigo-600 flex-shrink-0" />
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-2">
+              <h1 className="text-lg font-bold text-gray-800">성과 리포트 + AI 다음 캠페인 추천</h1>
+              <span className="text-xs bg-indigo-50 text-indigo-700 px-2 py-0.5 rounded-full font-medium">BETA</span>
+            </div>
+            <p className="text-xs text-gray-500 mt-0.5">최근 30일 매출 / ROI / 클릭률 분석 + AI가 다음 캠페인 자동 추천</p>
+          </div>
           <div className="ml-auto">
             <button
               onClick={load}

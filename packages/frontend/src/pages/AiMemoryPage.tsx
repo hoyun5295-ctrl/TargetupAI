@@ -161,9 +161,14 @@ export default function AiMemoryPage() {
           <button onClick={() => navigate('/ai-operator')} className="text-gray-500 hover:text-gray-700 p-1">
             <ArrowLeft className="w-5 h-5" />
           </button>
-          <Brain className="w-5 h-5 text-emerald-600" />
-          <h1 className="text-lg font-bold text-gray-800">AI 학습 메모리</h1>
-          <span className="text-xs bg-emerald-50 text-emerald-700 px-2 py-0.5 rounded-full font-medium">BETA</span>
+          <Brain className="w-5 h-5 text-emerald-600 flex-shrink-0" />
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-2">
+              <h1 className="text-lg font-bold text-gray-800">AI 학습 메모리</h1>
+              <span className="text-xs bg-emerald-50 text-emerald-700 px-2 py-0.5 rounded-full font-medium">BETA</span>
+            </div>
+            <p className="text-xs text-gray-500 mt-0.5">회사별 누적 학습 5종 (성공 패턴 / 고객 인사이트 / 톤 / 채널 / 규제) — 시간 지날수록 정확도↑</p>
+          </div>
           <div className="ml-auto flex items-center gap-2">
             <button onClick={load} className="text-xs text-gray-600 hover:bg-gray-100 px-3 py-1.5 rounded-lg flex items-center gap-1.5">
               <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
