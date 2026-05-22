@@ -1130,7 +1130,8 @@ export default function AiOperatorPage() {
                         <button
                           key={card.label}
                           onClick={() => navigate(card.path)}
-                          className="group relative p-4 rounded-2xl bg-white/[0.07] backdrop-blur-xl border border-white/15 hover:bg-white/[0.13] hover:border-white/30 hover:scale-[1.02] transition-all duration-300 text-left"
+                          // ★ D209+ (Harold 명시 2026-05-22): 호버 효과 강화 — shadow + glow + scale + 색감 강화.
+                          className="group relative p-4 rounded-2xl bg-white/[0.07] backdrop-blur-xl border border-white/15 hover:bg-white/[0.18] hover:border-violet-400/50 hover:scale-[1.04] hover:shadow-2xl hover:shadow-violet-500/30 hover:-translate-y-0.5 transition-all duration-300 text-left"
                         >
                           <div className={`w-10 h-10 rounded-xl bg-gradient-to-br ${card.gradient} flex items-center justify-center mb-3 shadow-lg group-hover:scale-110 transition-transform`}>
                             <Icon className="w-5 h-5 text-white" />
@@ -1334,14 +1335,17 @@ function AiSelfDiagnosisCards() {
     }, 300);
   };
 
+  // ★ D209+ (Harold 명시 2026-05-22): 우선순위 카드 색감 명확 구분 + border-2 + shadow 강화.
+  //   우선순위 3 violet 영역 → blue 영역 정정 (wrapper violet 톤과 시각 충돌 차단).
   const priorityColor: Record<number, string> = {
-    1: 'from-rose-500/20 to-pink-500/15 border-rose-400/30',
-    2: 'from-emerald-500/20 to-teal-500/15 border-emerald-400/30',
-    3: 'from-violet-500/20 to-fuchsia-500/15 border-violet-400/30',
+    1: 'from-rose-500/30 to-pink-500/20 border-rose-400/60 shadow-lg shadow-rose-500/20',
+    2: 'from-emerald-500/30 to-teal-500/20 border-emerald-400/60 shadow-lg shadow-emerald-500/20',
+    3: 'from-blue-500/30 to-cyan-500/20 border-blue-400/60 shadow-lg shadow-blue-500/20',
   };
 
   return (
-    <div className="p-5 bg-gradient-to-br from-indigo-950/60 via-purple-950/40 to-fuchsia-950/40 border border-white/10 rounded-2xl h-full">
+    // ★ D209+ (Harold 명시 2026-05-22): 좌측 wrapper 색감 강화 + border-2 + shadow 명확 visual 구분.
+    <div className="p-5 bg-gradient-to-br from-violet-900/50 via-purple-900/40 to-fuchsia-900/30 border-2 border-violet-400/40 rounded-2xl h-full shadow-2xl shadow-violet-500/20">
       <div className="flex items-center justify-between mb-4">
         <div>
           <p className="text-[10px] font-semibold tracking-[0.28em] text-violet-300/70 mb-1 uppercase">AI Self-Diagnosis</p>
@@ -1372,12 +1376,12 @@ function AiSelfDiagnosisCards() {
         </div>
       )}
 
-      {/* ★ D209+ (Harold 명시 2026-05-22): 좌우 분할 좌측 영역 = 세로 1열 매트릭스 정합 (옛 md:grid-cols-3 영역 정정). */}
+      {/* ★ D209+ (Harold 명시 2026-05-22): 좌우 분할 좌측 영역 = 세로 1열 매트릭스 정합 + border-2 + rounded-2xl visual 강화. */}
       <div className="grid grid-cols-1 gap-3">
         {diagnosis.recommendations.map((rec) => (
           <div
             key={rec.id}
-            className={`p-4 bg-gradient-to-br ${priorityColor[rec.priority]} border rounded-xl`}
+            className={`p-4 bg-gradient-to-br ${priorityColor[rec.priority]} border-2 rounded-2xl`}
           >
             <div className="flex items-center gap-1.5 mb-2">
               <span className="px-1.5 py-0.5 bg-white/10 rounded text-[9px] font-medium text-white/70">우선순위 {rec.priority}</span>
