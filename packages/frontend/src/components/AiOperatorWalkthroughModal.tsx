@@ -3,7 +3,7 @@
  *
  * 회사 admin 첫 진입 시 1회 표시 (localStorage 기반).
  * 5단계 walkthrough: 자연어 → 여정 생성 → 검토 → 활성화 → 통계.
- * "다시 보지 않기" 버튼 박힘.
+ * "다시 보지 않기" 버튼 포함.
  */
 
 import { useEffect, useState } from 'react';
@@ -17,40 +17,41 @@ interface WalkthroughStep {
   highlight: string;
 }
 
+// ★ D209+ (Harold 명시 2026-05-23): 모든 description 2줄 한도 (~42~45자) 안 정합 — 카드 높이 정합성 + 신뢰 본질.
 const STEPS: WalkthroughStep[] = [
   {
     icon: MessageSquareText,
     gradient: 'from-fuchsia-400 to-purple-500',
     title: '1. 자연어 한 줄 입력',
-    description: '원하는 캠페인을 일상 한국어로 작성. AI가 회사 컨텍스트 + 시즌 + 학습 메모리 종합하여 자동 설계.',
+    description: '원하는 캠페인을 일상 한국어로 작성하면 AI가 회사 톤 + 시즌 + 메모리 통합 자동 설계.',
     highlight: '예: "VIP 고객 봄 인사 + 등급별 분기 메시지"',
   },
   {
     icon: Sparkles,
     gradient: 'from-violet-400 to-fuchsia-500',
     title: '2. AI 자동 여정 생성 (5~10초)',
-    description: '회사 톤 + 시즌 단어 + 학습 메모리 통합 — 트리거 / step / 채널 / 메시지 / 회신번호 자동 결정. Liquid 동적 콘텐츠도 자동 생성.',
+    description: '회사 톤 + 시즌 + 메모리 통합 — 트리거 / 채널 / 메시지 / 회신번호 + Liquid 자동 결정.',
     highlight: '7 표준 시리즈 + Custom 자유 시나리오 지원',
   },
   {
     icon: Edit2,
     gradient: 'from-amber-400 to-orange-500',
     title: '3. 회사 admin 검토 + 편집',
-    description: '안내문 / 인사 / 감성 텍스트는 AI가 풍성하게 작성. 구체 혜택은 회사 admin 직접 수정 (placeholder 정합). step별 톤 다듬기 3 후보 추천.',
+    description: 'AI가 안내문 / 인사 / 감성 풍성 작성. 구체 혜택은 admin 직접 수정 + step별 톤 3 후보 추천.',
     highlight: '광고 / 무료거부 / 제목 자동 합성 — 발송 직전 정합',
   },
   {
     icon: Play,
     gradient: 'from-emerald-400 to-teal-500',
     title: '4. 활성화 + 자동 발송',
-    description: 'placeholder 잔존 시 활성화 차단 (안전망). 활성화 후 5분 주기 cron이 트리거 자동 감지 + 사용자 진입 + 단계별 발송.',
+    description: 'placeholder 잔존 시 활성화 차단. 활성 후 5분 주기로 트리거 감지 + 단계별 자동 발송.',
     highlight: 'A/B Variant 자동 분배 + Bandit 효과 자동 최적화',
   },
   {
     icon: BarChart3,
     gradient: 'from-cyan-400 to-blue-500',
     title: '5. 실시간 통계 + 효과 분석',
-    description: '진입 사용자 리스트 + step별 효과 + 등급별 / 시간대 / 요일 + Variant Bandit posterior. 데이터 누적 = 다음 여정 정확도 자동 향상.',
+    description: '진입 사용자 + step별 효과 + 등급 / 시간대 / 요일 + Bandit. 누적 데이터로 정확도 자동 향상.',
     highlight: 'AI가 효과 데이터 학습 — 시간 지날수록 정확도 ↑',
   },
 ];
