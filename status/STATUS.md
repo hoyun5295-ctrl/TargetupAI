@@ -107,7 +107,52 @@
 
 ---
 
-### 🚀 다음 세션 진입 가이드 (D197~D208 통합 종결 후 — **D209+ 통합 강화 진입**)
+### 🚀 다음 세션 진입 가이드 (D209+ 통합 종결 후 — **D210+ Phase 1~3 진입**)
+
+> **★ D209+ 통합 종결 매트릭스 (2026-05-22~23)**: Step 1~6 통합 강화 (Sonnet 4.6 전환 8건 + 시스템 프롬프트 5 Section + 매장 region CT-53 + Phase D 비용 안전 CT-55/CT-56 + AI Operator legacy + plan 매트릭스) + UX 정정 누적 (좌우 분할 + 호버 + description 1줄 + 7 sub-module 헤더) + Walkthrough 통합 (STEP 6 + 매번 표시 매트릭스 + Dashboard 통합) + Harold 직접 배포 완료. 옛 [[memory/project_d209_plus_completed]] 정독 본질.
+>
+> **실제 한줄로 요금제 매트릭스 확정**:
+> | plan_code | 월 가격 | max_customers | ai_calls_per_month |
+> |---|---|---|---|
+> | FREE | 0원 | 99,999 | 0 |
+> | TRIAL | 0원 | 100만 | 5,000 |
+> | STARTER | 15만원 | 10만 | 0 |
+> | BASIC | 35만원 | 30만 | 1,000 |
+> | PRO | 100만원 | 100만 | 5,000 |
+> | BUSINESS | 300만원 | 300만 | 20,000 |
+> | ENTERPRISE | 550만원 | 무제한 | 무제한 |
+>
+> **isAiOperatorAllowed 현재 매트릭스** = ENV `AI_OPERATOR_ALLOWED_USERS` 만 진입 (Harold = hoyun 본질) + ENV 미설정 시 모두 차단 (개발 진행 영역). DB schema (legacy_grandfathered + first_signup_discount_until) 유지 (향후 개발 종결 후 직원 + 회사 admin 공개 시점 활성 본질).
+>
+> **D210+ 다음 세션 진입 매트릭스 (Harold 명시 본질 — Harold + CTO 함께 진행)**:
+> 1. **AiOperatorWalkthroughModal STEP 6 메뉴 매트릭스 추가** — 10 SUB_MODULE_CARDS 3열 + 한 줄 description + 특별혜택 안내 본질 (Phase 1 ~1~2h)
+> 2. **한줄 프롬프트 문안 3 안 생성 강화** — 입력 이해 + 개인화 자동 (회사 톤 + 시즌 + 메모리 + Predictive + Liquid) + 풍성 + 다양성 본질 (Phase 2 ~2~3h)
+> 3. **메뉴 하나하나 본질 강화** — Braze/Salesforce 압도 본질 + 회사 admin "와~" 본질 (Phase 3 메뉴별 ~1~2h, Harold + CTO 함께 진행 본질)
+>
+> **D210+ 진입 명령어 (다음 세션 첫 메시지)**:
+> ```
+> status/STATUS.md CURRENT_TASK § D210+ 진입 가이드 정독 + memory/project_d210_handoff.md 정독 + memory/project_d209_plus_completed.md 정독 + memory/feedback_no_operation_verification_by_ai.md 정독 → D210+ 진입 영역 (Harold + CTO 함께 진행 본질): Phase 1 (Walkthrough STEP 6 메뉴 매트릭스) → Phase 2 (한줄 프롬프트 문안 생성 강화) → Phase 3 (메뉴 하나하나 본질 강화 — Braze/Salesforce 압도)
+> ```
+>
+> **신규 영구 룰 (D209+)**:
+> - feedback_no_operation_verification_by_ai.md — ★운영 검증 = Harold + 직원 직접 진행 영역 (AI 작업 영역 X)★ Harold 격분 "몇번을 이야기해도 같은소리를 반복하네?" 영구 사례. 향후 작업 추천 매트릭스에 "운영 검증" 등 유사 표현 영구 차단
+>
+> **옛 추측 사고 4건 영구 사례 (D209+)**:
+> - "35만원 = PRO" 추측 사고 (실제 = BASIC) — monthly_price 정확 정독 본질
+> - legacy 식별 user_type 'company_admin' 추측 사고 (실제 = 'admin') — SCHEMA + DB SELECT 정확 본질
+> - isAiOperatorAllowed legacy + PRO + BUSINESS+ 자동 진입 박은 사고 — Harold 명시 본질 정확 정독 본질 (현재 개발 진행 영역 = hoyun 본인만)
+> - SQL 묶음 + SCHEMA 추측 사고 반복 — SCHEMA.md 정독 + 검증 SQL 1건씩 본질
+>
+> **D210+ 영구 원칙 정합 의무**:
+> - feedback_no_operation_verification_by_ai 정합 (운영 검증 추천 X)
+> - feedback_ai_operator_model_isolation 정합 (모델 분리 본질)
+> - 박-단어 + sudo + 모델명 자가 grep 의무 (매 답변)
+> - SQL 안내 시 SCHEMA.md 정확 정독 본질 (추측 X)
+> - feedback_cto_mandate_for_vito 정합 (Harold + 비토 함께 본질)
+
+---
+
+### 🚀 옛 진입 가이드 (D197~D208 통합 종결 후 — 참조용)
 
 > **★ D197~D208 통합 종결 매트릭스 (2026-05-22)**: Phase B-2 Predictive Suite + Phase B-3 Connected Content + AI 자율 진단 통합 + Harold 직접 배포 완료. cdp_customer_predictions 21,501명 자동 분석 + 90.7% 이탈 위험 진단 (cold start fallback 영역).
 >
