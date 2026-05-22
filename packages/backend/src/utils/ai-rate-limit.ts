@@ -49,7 +49,7 @@ export async function getMonthlyUsage(companyId: string): Promise<{ used: number
     const planRes = await query(
       `SELECT p.ai_calls_per_month
        FROM companies c
-       LEFT JOIN plans p ON c.plan_code = p.code
+       LEFT JOIN plans p ON c.plan_code = p.plan_code
        WHERE c.id = $1::uuid
        LIMIT 1`,
       [companyId]

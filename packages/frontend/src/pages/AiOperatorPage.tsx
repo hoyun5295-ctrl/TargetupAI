@@ -12,11 +12,8 @@ import {
   DollarSign,
   LineChart,
   Loader2,
-  BookOpen,
-  Layers,
   Mail,
   MessageSquare,
-  Phone,
   Smartphone,
   RefreshCw,
   Send,
@@ -27,7 +24,6 @@ import {
   Wand2,
   Workflow,
   X,
-  Zap,
 } from 'lucide-react';
 import AiRefineModal from '../components/AiRefineModal';
 import AiOperatorWalkthroughModal from '../components/AiOperatorWalkthroughModal';
@@ -127,22 +123,9 @@ const SUB_AGENT_STEPS: SubAgentStep[] = [
   { icon: LineChart, label: 'Performance Forecast', gradient: 'from-fuchsia-400 to-pink-500', hint: '클릭 · 전환 · 매출 추정' },
 ];
 
-interface EngineCard {
-  icon: typeof Target;
-  gradient: string;
-  title: string;
-  description: string;
-}
-
-const ENGINE_CARDS: EngineCard[] = [
-  { icon: Target, gradient: 'from-rose-400 to-pink-500', title: 'AI 타겟 엔진', description: '자연어 한 줄로 고객군 자동 추출 + SQL 검증 loop' },
-  { icon: MessageSquare, gradient: 'from-amber-400 to-orange-500', title: 'AI 메시지 엔진', description: '채널별 A/B 문구 + 스팸 검수 + 톤 자동 조절' },
-  { icon: Send, gradient: 'from-emerald-400 to-teal-500', title: '채널 의사결정', description: '고객별 최적 채널·시점·빈도 AI 자동 판단' },
-  { icon: Workflow, gradient: 'from-cyan-400 to-blue-500', title: '여정 자동화', description: '가입/재구매/휴면/생일 여정 AI 자동 설계' },
-  { icon: Zap, gradient: 'from-violet-400 to-purple-500', title: '실시간 트리거', description: '장바구니/예약/구매 이벤트 즉시 자동 발송' },
-  { icon: LineChart, gradient: 'from-fuchsia-400 to-pink-500', title: '성과 + Next Action', description: '매출/ROI/LTV + 다음 캠페인 AI 자동 제안' },
-  { icon: Brain, gradient: 'from-amber-400 to-rose-500', title: 'AI Operator', description: '6 sub-agent 협업 + 회사별 메모리 학습' },
-];
+// ★ D209+ (Harold 명시 2026-05-22): EngineCard + ENGINE_CARDS 영역 영구 제거.
+//   Harold 명시 — "7 코어 엔진 아키텍처 + Enterprise Beta Program 영역 필요 없음".
+//   기능/라우트/페이지 모두 보존 + 사용자 진입 UI 영역만 제거 정합.
 
 // ★ D177-fix (2026-05-19): SESSION_MILESTONES + STATUS_CONFIG 영구 제거.
 //   Harold 명시 — "이미 작업완료한건 언제 적용? / 굳이 업그레이드 보여줄 필요 X / 직원들한테 방향성 잡음 명시 X".
@@ -164,14 +147,12 @@ const SUB_MODULE_CARDS: SubModuleCard[] = [
   { icon: Brain,        gradient: 'from-indigo-400 to-violet-500', label: 'AI 영구운영',    description: '매일 AI가 새 캠페인 제안 (사용자 승인 후 발송)',     path: '/continuous-operator' },
   { icon: LineChart,    gradient: 'from-fuchsia-400 to-pink-500',  label: '성과리포트',     description: '30일 성과 분석 + AI 다음 캠페인 추천',              path: '/performance' },
   { icon: Workflow,     gradient: 'from-emerald-400 to-teal-500',  label: '자사몰 연동',    description: '자체 호스팅 · 네이버 스마트스토어 · 카페24 자동 sync', path: '/cdp-settings' },
-  { icon: Zap,          gradient: 'from-amber-400 to-orange-500',  label: 'Web Push',      description: '브라우저 푸시 알림 발송',                            path: '/push-campaigns',   adminOnly: true },
+  // ★ D209+ (Harold 명시 2026-05-22): Web Push / 인바운드 음성 AI / AI에게 질문 / AI Batch 4 카드 영구 제거.
+  //   메뉴 UI만 제거 + 백엔드 기능/라우트/페이지 모두 보존 (직접 URL 진입 정합).
   { icon: MessageSquare,gradient: 'from-rose-400 to-pink-500',     label: '인앱메시지',     description: '자사몰 안의 배너/모달 자동 표시',                    path: '/inapp-messages',   adminOnly: true },
-  { icon: Phone,        gradient: 'from-violet-400 to-purple-500', label: '인바운드 음성 AI', description: '자사몰 사용자 전화 클릭 시 AI 자동 응답 (Phase 1)', path: '/voice-inbound',    adminOnly: true },
   { icon: Mail,         gradient: 'from-blue-400 to-cyan-500',     label: 'Email 캠페인',   description: 'SendGrid 기반 transactional · marketing 발송',      path: '/email-campaigns',  adminOnly: true },
   { icon: Smartphone,   gradient: 'from-amber-400 to-yellow-500',  label: '모바일 DM',      description: '카드형 모바일 DM 빌더 — 미디어 메시지 디자인',       path: '/dm-builder' },
   { icon: Brain,        gradient: 'from-emerald-400 to-teal-500',  label: 'AI 학습 메모리',  description: '회사별 누적 학습 5종 — 시간 지날수록 정확도↑',     path: '/ai-memory' },
-  { icon: BookOpen,     gradient: 'from-indigo-400 to-blue-500',   label: 'AI에게 질문',     description: '회사 데이터 기반 답변 + 근거 인용 (Citations)',     path: '/ai-explain' },
-  { icon: Layers,       gradient: 'from-violet-400 to-indigo-500', label: 'AI Batch',       description: '대량 발송 50% 비용 절감 (24h SLA)',                path: '/ai-batches' },
   { icon: Activity,     gradient: 'from-blue-400 to-sky-500',      label: 'AI 사용량',      description: '월 한도 + 30일 일별 통계 + cache 효율 진단',          path: '/ai-usage' },
 ];
 
@@ -1161,49 +1142,8 @@ export default function AiOperatorPage() {
               </div>
             </div>
 
-            {/* 7 엔진 카드 */}
-            <div className="mb-14">
-              <p className="text-[10px] font-semibold tracking-[0.28em] text-white/40 mb-1.5 uppercase">Core AI Engines</p>
-              <h2 className="text-xl font-bold mb-1.5 text-white">7 코어 엔진 아키텍처</h2>
-              <p className="text-sm text-white/50 mb-6">Simple outside, Enterprise-grade inside — 단순한 인터페이스 뒤에서 7개 코어 엔진이 협업합니다</p>
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                {ENGINE_CARDS.map((card) => {
-                  const Icon = card.icon;
-                  return (
-                    <div
-                      key={card.title}
-                      className="group relative p-5 rounded-2xl bg-white/5 backdrop-blur-xl border border-white/10 hover:bg-white/10 hover:border-white/20 hover:scale-[1.02] transition-all duration-300"
-                    >
-                      <div className={`w-12 h-12 rounded-xl bg-gradient-to-br ${card.gradient} flex items-center justify-center mb-4 shadow-lg group-hover:scale-110 transition-transform`}>
-                        <Icon className="w-6 h-6 text-white" />
-                      </div>
-                      <h3 className="text-white font-semibold text-base mb-1.5">{card.title}</h3>
-                      <p className="text-white/60 text-xs leading-relaxed">{card.description}</p>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-
+            {/* ★ D209+ (Harold 명시 2026-05-22): "7 코어 엔진 아키텍처" + "Enterprise Beta Program" section 영구 제거. */}
             {/* ★ D177-fix: 9 세션 로드맵 영구 제거 (Harold 명시 — 미래 로드맵 직원/외부 노출 X) */}
-
-            {/* 출시 안내 */}
-            <div className="max-w-3xl mx-auto p-8 rounded-2xl bg-gradient-to-br from-white/10 to-white/5 border border-white/10 text-center backdrop-blur-xl">
-              <div className="inline-flex w-14 h-14 rounded-2xl bg-gradient-to-br from-amber-300 to-fuchsia-400 items-center justify-center mb-4 shadow-lg shadow-fuchsia-500/30">
-                <Sparkles className="w-6 h-6 text-indigo-950" />
-              </div>
-              <p className="text-[10px] font-semibold tracking-[0.3em] text-white/40 mb-2 uppercase">Enterprise Beta Program</p>
-              <h3 className="text-xl font-bold mb-3">Production 검증 단계 운영 중</h3>
-              <p className="text-sm text-white/60 mb-5 leading-relaxed">
-                Production 안정성 검증 완료 후 PRO · BASIC 등급으로 순차 확장됩니다.<br />
-                검증 단계의 개선 피드백은 즉시 반영됩니다.
-              </p>
-              <div className="flex items-center justify-center gap-3 text-xs text-white/50">
-                <span>GA 2026 Q3</span>
-                <span className="w-1 h-1 rounded-full bg-white/30" />
-                <span>Enterprise Inquiry · mobile@invitocorp.com</span>
-              </div>
-            </div>
           </>
         )}
       </main>
