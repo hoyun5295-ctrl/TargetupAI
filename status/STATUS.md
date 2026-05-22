@@ -107,7 +107,42 @@
 
 ---
 
-### 🚀 다음 세션 진입 가이드 (D188 통합 종결 후 — **운영 검증 + D189 잔존 영역 진입**)
+### 🚀 다음 세션 진입 가이드 (D189 통합 종결 후 — **운영 검증 + D190+ 진입**)
+
+> **★ D189 통합 종결 매트릭스 (2026-05-22)**: D189 #1~4 모든 잔존 영역 종결 + D189-fix1 위반 단어 23건 정정 + D189-fix2 sdk-js 잔존 박-단어 18건 정정 + push.ts Buffer 사고 fix + LESSONS_LEARNED §4-19 영구 사례 추가 + memory feedback_no_bakkeum_usage § D189 강화 룰 추가.
+>
+> **D189 작업 매트릭스 (한 세션 통합 종결):**
+> - **D189 #1 JourneyVariantsEditor** 신규 — packages/frontend/src/components/journey/JourneyVariantsEditor.tsx (A/B/C 탭 + traffic_weight 슬라이더 + Bandit 통계 시각화 sent/click/conversion/posteriorMean + 활성 여정 readOnly + AI 임의 혜택 작성 금지 안내) + JourneysPage main view step expand 영역 통합 (variantsExpandedStepIds state + 토글 + Beaker 아이콘)
+> - **D189 #2 AlimtalkChannelPanel Journey kakao step 임베드** — JourneysPage 라인 905~956 단순 input 4건 → AlimtalkChannelPanel 통합 (발신프로필 + 템플릿 매트릭스 + 변수 매핑 + 부달 + 미리보기) + 헬퍼 2건 (stepToAlimtalkState + alimtalkStateToStepPatch) + 회사 발신프로필/템플릿/필드 fetch useEffect
+> - **D189 #3 JourneyMmsUploader** 신규 — packages/frontend/src/components/journey/JourneyMmsUploader.tsx (최대 3장 JPG 300KB + 미리보기 + 삭제 + 클라이언트 사전 검증 + 한글 파일명 ASCII 변환 안내) + JourneysPage subject input 직후 통합
+> - **D189 #4 @hanjullo/sdk v0.3.0 + 백엔드 CDP endpoint** — packages/sdk-js/src/journey-variants.ts 신규 (HanjulloJourneyVariantsModule + trackClick/trackConversion) + types.ts VariantTrackParams + VariantTrackResponse + index.ts HanjulloSDK class journeyVariants 모듈 + package.json 0.3.0 + backend routes/cdp.ts POST /api/cdp/journey-variants/:variantId/track (cdpAuth 인증 + 회사 격리)
+> - **D189-fix1 위반 단어 23건 전수 정정** (Harold 격분 사고) — frontend 2 (EmailCampaignsPage + InAppMessagesPage) + backend 21 (company-memory + email-channel + multi-goal-decisioning + voice-inbound + journey-ai-generator + ai-orchestrator + bandit-optimizer + citations + routes/ai + routes/email). AI 시스템 프롬프트 + AI 응답 reasoning + Citations document context + 이메일 본문 + error response + 자동 학습 메모리 영역 영구 정정
+> - **D189-fix2 sdk-js 잔존 박-단어 18건 정정** — push.ts 6 (Buffer 사고 fix 포함) + index.ts 8 + inapp.ts 2 + types.ts 6 + service-worker.ts 2. 자사몰 개발자 IDE 노출 영역 (JSDoc + 인라인 주석) 영구 정정. push.ts Buffer fallback 제거 (브라우저 only 매트릭스 정합 — @types/node 미설치 환경 tsc 사고 차단)
+> - **신규 영구 메모리 1건** + **LESSONS_LEARNED §4-19 신규 사례 1건** — feedback_no_bakkeum_usage § D189 강화 룰 (광범위 grep 패턴 `['"`+백틱]+[^'"`+백틱]{1,200}박[...]` + 사용자 노출 영역 10분류 매트릭스 + SDK 빌드 영구 룰) + LESSONS_LEARNED §4-19 사용자 노출 영역 광범위 grep 패턴 누락 사고 영구 사례
+>
+> **★ Harold 진행 완료 영역**: tp-push + ssh + git pull + backend build:safe + frontend build:safe + sdk-js npm install --include=dev + npm run build (esm + cjs + types 빌드 정합) + pm2 restart all
+>
+> **D189 본질** = Journey Builder Phase 2-C 완성 (A/B Bandit 시각화 + 알림톡 통합 패널 + MMS 업로드 + SDK 트래킹) + 위반 단어 영구 룰 강화 100% (frontend + backend 사용자 노출 영역 + SDK 모든 영역) + sdk-js v0.3.0 안정화 (Buffer 사고 fix + 빌드 정합)
+>
+> **D190+ 진입 명령어 (다음 세션 첫 메시지)**:
+> ```
+> status/STATUS.md CURRENT_TASK § D190+ 진입 가이드 정독 + status/LESSONS_LEARNED.md §3 D188-Phase2B + §4-19 D189-fix1+fix2 사례 정독 + memory/feedback_no_bakkeum_usage.md § D189 강화 룰 정독 → 운영 검증 (영업팀장 알림톡 14건 + Journey Builder + sdk-js + Variants 트래킹) 결과 받은 후 D190+ 진입 (Shopify/메이크샵 구체 구현 / 음성 AI Phase 2 / 클릭 트래킹 인프라 / 단축 URL redirect endpoint / 또는 Harold 신규 신고 우선 종결)
+> ```
+>
+> **D190+ 영역 (다음 세션 진입 시 참조)**:
+>
+> | 우선순위 | 영역 | 분량 | 진입 조건 |
+> |---|---|---|---|
+> | 1 | 박성용 인비토 admin + Journey Variants 운영 검증 결과 정정 | 명시 시 | Harold 신고 시 |
+> | 2 | 단축 URL redirect endpoint (Journey 메시지 본문 → variantId 자동 트래킹) | 3~4h | 클릭 트래킹 인프라 의무 |
+> | 3 | 클릭 트래킹 인프라 (cdp_events.event_name='message_click' 매트릭스) | 3~4h | accumulateCampaignLearning click_count 정확도 향상 |
+> | 4 | Shopify / 메이크샵 wrapper 구체 구현 | 큰 영역 | ENT 후보사 자사몰 종류 박힌 후 |
+> | 5 | 음성 AI Phase 2 (외향 발신) | 큰 영역 | 정보통신망법 + 한국어 자연도 검토 |
+> | 6 | npm publish @hanjullo/sdk v0.3.0 (자사몰 적용 영역) | 1h | Harold 결정 영역 |
+>
+> ---
+>
+> ### 🚀 옛 진입 가이드 (D188 통합 종결 후 — 참조용)
 
 > **★ D188 통합 종결 매트릭스 (2026-05-21)**: 영업팀장 알림톡 14건 fix + Journey Builder Phase 2-B 통합 (wait/condition + MMS/KAKAO + A/B Bandit + 자동발송 폐기) + 위반 단어 영구 룰 전수 정정 117건.
 >

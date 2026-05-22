@@ -144,7 +144,12 @@ export function listProvidersForUI(): Array<{
     provider: p.provider,
     displayName: p.displayName,
     capabilities: p.capabilities,
-    status: p.capabilities.oauth ? 'available' : 'coming_soon',
+    // ★ D189-fix3 (2026-05-22): 자체 호스팅 자사몰 (OAuth X + Webhook + 서명 검증) 정합 영역 추가.
+    //   기존 oauth 매트릭스만 = 자체 호스팅 (webhook secret 기반) 'coming_soon' 잘못 표시 사고.
+    //   정정: OAuth 또는 (Webhook + 서명 검증) 매트릭스 정합 시 'available'.
+    status: (p.capabilities.oauth || (p.capabilities.webhook && p.capabilities.webhookSignatureVerification))
+      ? 'available'
+      : 'coming_soon',
   }));
 }
 

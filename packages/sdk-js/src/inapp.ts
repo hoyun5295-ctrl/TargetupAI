@@ -14,7 +14,7 @@ export interface InAppInitInput {
   externalId?: string;
   anonymousId?: string;
   trigger?: string;  // 'page_load' (default) / 'cart_add' 등
-  containerSelector?: string;  // 메시지 박힐 DOM 선택자 (기본 body)
+  containerSelector?: string;  // 메시지를 표시할 DOM 선택자 (기본 body)
 }
 
 interface InAppMessage {
@@ -112,7 +112,7 @@ export class HanjulloInAppModule {
 
     // impression 트래킹
     this.track(msg.id, 'impression', input);
-    // 표시 이력 박음
+    // 표시 이력 저장
     this.markSeen(msg);
   }
 

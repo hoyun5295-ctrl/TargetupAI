@@ -12,7 +12,7 @@ export interface HanjulloSDKConfig {
   secret: string;
   /** 호출 base URL (default: https://app.hanjul.ai/api/cdp) */
   endpoint?: string;
-  /** 자사몰 식별 source — 기본 'custom_sdk', 카페24/Shopify wrapper는 자체 박음 */
+  /** 자사몰 식별 source — 기본 'custom_sdk', 카페24/Shopify wrapper는 자체 설정 */
   source?: string;
   /** 네트워크 실패 시 재시도 횟수 (default 2) */
   retries?: number;
@@ -34,7 +34,7 @@ export interface IdentifyParams {
   gender?: 'M' | 'F' | string;
   grade?: string;
   address?: string;
-  /** 자사몰별 추가 필드 (custom_fields JSONB에 박힘) */
+  /** 자사몰별 추가 필드 (custom_fields JSONB에 저장됨) */
   customFields?: Record<string, unknown>;
 }
 
@@ -73,7 +73,7 @@ export interface TrackParams {
   anonymousId?: string;
   /** 이벤트 데이터 (10KB 한도) */
   properties?: Record<string, unknown>;
-  /** ISO datetime (미박힘 시 서버 NOW) */
+  /** ISO datetime (미입력 시 서버 NOW) */
   occurredAt?: string;
 }
 
@@ -90,7 +90,7 @@ export interface TrackResponse {
 // ────────────────────────────────────────────────────────────
 
 export interface OrderParams {
-  /** 자사몰 주문 번호 (idempotency key — 같은 order_id 두 번 박혀도 중복 갱신 X) */
+  /** 자사몰 주문 번호 (idempotency key — 같은 order_id 두 번 호출돼도 중복 갱신 X) */
   orderId: string;
   externalId: string;
   email?: string;
@@ -126,9 +126,9 @@ export interface OrderResponse {
 // ────────────────────────────────────────────────────────────
 
 export interface BulkImportParams {
-  /** 회원 마스터 일괄 박음 (최대 1,000건/요청) */
+  /** 회원 마스터 일괄 전송 (최대 1,000건/요청) */
   customers?: IdentifyParams[];
-  /** 주문 이력 일괄 박음 (최대 1,000건/요청) */
+  /** 주문 이력 일괄 전송 (최대 1,000건/요청) */
   orders?: OrderParams[];
 }
 

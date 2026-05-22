@@ -108,9 +108,9 @@ export class HanjulloSDK {
   }
 
   /**
-   * 행동 이벤트 박음.
-   * - 회원 이벤트: externalId 박음
-   * - 비회원 이벤트: anonymousId 박음 (브라우저 cookie 등)
+   * 행동 이벤트 전송.
+   * - 회원 이벤트: externalId 전송
+   * - 비회원 이벤트: anonymousId 전송 (브라우저 cookie 등)
    * - 표준 이벤트(page_view/cart_add/...) 또는 'custom_*' 접두사
    */
   async track(params: TrackParams): Promise<TrackResponse> {
@@ -133,7 +133,7 @@ export class HanjulloSDK {
    * 주문 sync + RFM 자동 갱신.
    * - status가 'completed' / 'paid'일 때만 customers.total_purchase_amount/purchase_count 갱신
    * - 같은 orderId 두 번 호출되어도 RFM 한 번만 갱신 (idempotency)
-   * - cdp_events 'purchase' 이벤트 자동 박음 (Journey/Decisioning trigger용)
+   * - cdp_events 'purchase' 이벤트 자동 생성 (Journey/Decisioning trigger용)
    */
   async order(params: OrderParams): Promise<OrderResponse> {
     if (!params.orderId || !params.externalId) {
@@ -158,7 +158,7 @@ export class HanjulloSDK {
   }
 
   /**
-   * 초기 마이그레이션 (customers + orders 일괄 박음).
+   * 초기 마이그레이션 (customers + orders 일괄 전송).
    * - 최대 1,000건/요청. 더 큰 import는 페이지네이션 호출.
    */
   async bulkImport(params: BulkImportParams): Promise<BulkImportResponse> {
@@ -199,8 +199,8 @@ export class HanjulloSDK {
 
   private async post<T>(path: string, body: Record<string, unknown>): Promise<T> {
     const url = `${this.endpoint}${path}`;
-    // X-Source 헤더는 한줄로 백엔드의 cdpAuth.source 박는 용도이나 현재 미사용 — backend에서 자체 박음
-    // (Phase 2에서 source per-call override 박을 수 있음)
+    // X-Source 헤더는 한줄로 백엔드의 cdpAuth.source 설정 용도이나 현재 미사용 — backend에서 자체 설정
+    // (Phase 2에서 source per-call override 가능)
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
       'X-Hanjullo-Key': this.apiKey,
@@ -209,7 +209,7 @@ export class HanjulloSDK {
       'X-Hanjullo-Source': this.source,
     };
 
-    // null/undefined 값 제거 (자사몰이 미박힌 옵셔널 필드 깔끔하게 박음)
+    // null/undefined 값 제거 (자사몰이 미입력 옵셔널 필드 깔끔하게 처리)
     const cleanBody: Record<string, unknown> = {};
     for (const [k, v] of Object.entries(body)) {
       if (v !== null && v !== undefined) cleanBody[k] = v;
