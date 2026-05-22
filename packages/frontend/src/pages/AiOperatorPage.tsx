@@ -736,8 +736,11 @@ export default function AiOperatorPage() {
               const activeBytes = bytesLen(activeBody);
 
               return (
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
-                  {/* ============= 추천 메시지 (full width — D165 핵심 인터랙션) ============= */}
+                // ★ D210+ Phase 2-fix3 (Harold 명시 2026-05-23): lg:grid-cols-5 매트릭스
+                //   메시지 = lg:col-span-2 (40% 좌측) / 4개 카드 wrapper = lg:col-span-3 (60% 우측 2×2)
+                //   CompanyDataProfileCard + 예상 성과 = lg:col-span-5 (전체 폭)
+                <div className="grid grid-cols-1 lg:grid-cols-5 gap-4 mb-6">
+                  {/* ============= 추천 메시지 (좌측 40% — lg:col-span-2) ============= */}
                   <ResultCard
                     index={0}
                     accent="amber"
@@ -746,7 +749,7 @@ export default function AiOperatorPage() {
                     headline={activeVariant?.variantName || '문안'}
                     subtitle={`${variants.length}개 안 생성 · ${activeChannel} · ${activeBytes} bytes${overrideText ? ' · 다듬어진 안' : ''}`}
                     truncateHeadline={false}
-                    className="md:col-span-2"
+                    className="lg:col-span-2"
                     extra={
                       <div className="mt-3">
                         {/* 3안 토글 탭 */}
@@ -843,9 +846,8 @@ export default function AiOperatorPage() {
                     }
                   />
 
-                  {/* ============= ★ D210+ Phase 2-fix1 (Harold 명시 2026-05-23): 회사 데이터 활용 매트릭스 안내 ============= */}
-                  {/* 본질 = "AI가 우리 회사 데이터 이만큼 정확히 활용했네" 시각 확인 + 마케팅 담당자 신뢰감 */}
-                  <CompanyDataProfileCard className="md:col-span-2" />
+                  {/* ============= ★ D210+ Phase 2-fix3 (Harold 명시 2026-05-23): 우측 60% wrapper — 4개 카드 (타겟/채널/시점/비용) 2×2 grid ============= */}
+                  <div className="lg:col-span-3 grid grid-cols-1 sm:grid-cols-2 gap-3 content-start">
 
                   {/* ============= 추천 타겟 ============= */}
                   <ResultCard
@@ -869,11 +871,12 @@ export default function AiOperatorPage() {
                     description={proposal.channel.reason}
                   />
 
-                  {/* ============= 발송 시점 — D170+ Harold 명시: 사용자 변경 가능 + 안전장치 ============= */}
+                  {/* ============= 발송 시점 — D170+ Harold 명시: 사용자 변경 가능 + 안전장치 (우측 wrapper 안 전체 폭) ============= */}
                   <ResultCard
                     index={3}
                     accent="cyan"
                     icon={Clock}
+                    className="sm:col-span-2"
                     label="발송 시점"
                     headline={
                       sendMode === 'immediate'
@@ -955,11 +958,12 @@ export default function AiOperatorPage() {
                     }
                   />
 
-                  {/* ============= 예상 비용 (breakdown 강화) ============= */}
+                  {/* ============= 예상 비용 (breakdown 강화 — 우측 wrapper 안 전체 폭) ============= */}
                   <ResultCard
                     index={4}
                     accent="violet"
                     icon={DollarSign}
+                    className="sm:col-span-2"
                     label="예상 비용"
                     headline={`${proposal.cost.estimated.toLocaleString()}원`}
                     subtitle={`${activeChannel} ${proposal.target.count.toLocaleString()}건`}
@@ -982,7 +986,11 @@ export default function AiOperatorPage() {
                     }
                   />
 
-                  {/* ============= 예상 성과 (full width — 미니 차트) ============= */}
+                  </div>
+                  {/* ============= ★ D210+ Phase 2-fix1 (Harold 명시 2026-05-23): 회사 데이터 활용 매트릭스 안내 (전체 폭 — lg:col-span-5) ============= */}
+                  <CompanyDataProfileCard className="lg:col-span-5" />
+
+                  {/* ============= 예상 성과 (전체 폭 — 미니 차트) ============= */}
                   <ResultCard
                     index={5}
                     accent="fuchsia"
@@ -991,7 +999,7 @@ export default function AiOperatorPage() {
                     headline={`+${proposal.performance.expectedRevenue.toLocaleString()}원`}
                     subtitle="고객 평균 매출 × 예상 전환 수 기반 추정"
                     truncateHeadline={false}
-                    className="md:col-span-2"
+                    className="lg:col-span-5"
                     extra={
                       <div className="mt-3 grid grid-cols-1 sm:grid-cols-3 gap-3">
                         {/* 클릭률 */}

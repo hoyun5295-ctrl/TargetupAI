@@ -1007,8 +1007,15 @@ export async function generateMessages(
   const rejectNumber = extraContext?.rejectNumber || '';
   
   // ★ 개인화 설정 - 변수 카탈로그 기반 (FIELD_MAP 동적 생성)
-  const usePersonalization = extraContext?.usePersonalization || false;
-  const personalizationVars = extraContext?.personalizationVars || [];
+  // ★ D210+ Phase 2-fix2 (Harold 명시 2026-05-23): companyDataProfile.safeFields 1+ 영역 시 자동 personalization 활성.
+  //   사고 영역 = 옛 매트릭스 = usePersonalization=false 영역 시 userMessage 안 "%변수% 사용 금지" 강제 → CT-58 안전 변수 100% 채워짐도 본문 안 변수 사용 X 사고 영역.
+  //   본 fix = profile 안 안전 변수 percentVar 매트릭스 자동 활용 (옛 호출처 영향 X — extraContext 명시 영역 우선 정합).
+  const safeFieldsFromProfile = extraContext?.companyDataProfile?.safeFields?.map(f => f.percentVar) || [];
+  const usePersonalization = extraContext?.usePersonalization
+    || safeFieldsFromProfile.length > 0;
+  const personalizationVars = (extraContext?.personalizationVars && extraContext.personalizationVars.length > 0)
+    ? extraContext.personalizationVars
+    : safeFieldsFromProfile;
   const defaultCatalog = buildVarCatalogFromFieldMap();
   const varCatalog = extraContext?.availableVarsCatalog || defaultCatalog.fieldMappings;
   const availableVars = extraContext?.availableVars || defaultCatalog.availableVars;
