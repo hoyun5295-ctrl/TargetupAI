@@ -5,7 +5,7 @@
  * 사용:
  *   await hanjullo.push.subscribe({
  *     externalId: 'user_123',
- *     serviceWorkerPath: '/hanjullo-sw.js'  // 자사몰 루트에 박은 SW 파일
+ *     serviceWorkerPath: '/hanjullo-sw.js'  // 자사몰 루트에 배치된 SW 파일
  *   });
  */
 
@@ -16,7 +16,7 @@ export interface PushSubscribeInput {
   externalId?: string;
   /** 비회원 추적 ID (선택) */
   anonymousId?: string;
-  /** 자사몰에 박힌 service worker 경로 (기본 /hanjullo-sw.js) */
+  /** 자사몰에 배치된 service worker 경로 (기본 /hanjullo-sw.js) */
   serviceWorkerPath?: string;
 }
 
@@ -36,9 +36,9 @@ export class HanjulloPushModule {
   ) {}
 
   /**
-   * 사용자에게 Web Push 권한 요청 + 구독 박음.
+   * 사용자에게 Web Push 권한 요청 + 구독 등록.
    * - permission='denied' 시 즉시 실패 반환
-   * - Service Worker 미박힘 시 자사몰의 SW 파일 경로 필요
+   * - Service Worker 미등록 시 자사몰의 SW 파일 경로 필요
    */
   async subscribe(input: PushSubscribeInput = {}): Promise<PushSubscribeResult> {
     if (typeof window === 'undefined' || typeof navigator === 'undefined') {
@@ -77,7 +77,7 @@ export class HanjulloPushModule {
         applicationServerKey: applicationServerKey as BufferSource,
       });
 
-      // 5. 한줄로 백엔드에 구독 박음
+      // 5. 한줄로 백엔드에 구독 등록
       const subJson = subscription.toJSON();
       const res = await fetch(`${this.endpoint}/push/subscribe`, {
         method: 'POST',
@@ -152,7 +152,9 @@ export class HanjulloPushModule {
 function urlBase64ToUint8Array(base64String: string): Uint8Array {
   const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
   const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
-  const rawData = (typeof window !== 'undefined' ? window.atob(base64) : Buffer.from(base64, 'base64').toString('binary'));
+  // ★ D189 #4 fix (2026-05-22): push.ts는 브라우저 환경 전용 (subscribe() 호출 시점 = window/navigator 검증 통과 후만 실행).
+  //   Buffer fallback 제거 — @types/node 미설치 환경에서 tsc 오류 차단.
+  const rawData = window.atob(base64);
   const outputArray = new Uint8Array(rawData.length);
   for (let i = 0; i < rawData.length; ++i) {
     outputArray[i] = rawData.charCodeAt(i);
