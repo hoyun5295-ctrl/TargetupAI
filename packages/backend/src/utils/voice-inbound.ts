@@ -123,7 +123,7 @@ export async function handleInboundCall(input: InboundCallInput): Promise<Inboun
       maxTokens: 500,
       temperature: 0,
     });
-    responseText = aiResult || '죄송합니다, 답변을 박지 못했습니다. 잠시 후 다시 시도해주세요.';
+    responseText = aiResult || '죄송합니다, 답변을 생성하지 못했습니다. 잠시 후 다시 시도해주세요.';
   } catch (err: any) {
     console.error('[VoiceInbound] AI 호출 실패:', err?.message || err);
     responseText = '죄송합니다, 잠시 후 다시 문의해주시면 빠른 답변을 박겠습니다.';
@@ -164,11 +164,11 @@ export async function handleInboundCall(input: InboundCallInput): Promise<Inboun
 function buildSystemPrompt(company: any, customer: any, recentOrders: any[]): string {
   const customerLine = customer
     ? `현재 통화 중인 고객 정보:
-- 이름: ${customer.name || '미박힘'}
+- 이름: ${customer.name || '미설정'}
 - 등급: ${customer.grade || '일반'}
 - 최근 90일 활동: ${customer.recent_events || 0}건
 - 마지막 구매: ${customer.last_purchase ? new Date(customer.last_purchase).toLocaleDateString('ko-KR') : '없음'}`
-    : '현재 통화 중인 고객은 CDP에 박힌 회원이 아닙니다 (비회원 또는 미식별).';
+    : '현재 통화 중인 고객은 CDP에 등록된 회원이 아닙니다 (비회원 또는 미식별).';
 
   const ordersLine = recentOrders.length > 0
     ? recentOrders.map((o, i) => `${i + 1}. ${new Date(o.occurred_at).toLocaleDateString('ko-KR')} — ${JSON.stringify(o.properties).slice(0, 100)}`).join('\n')
@@ -178,8 +178,8 @@ function buildSystemPrompt(company: any, customer: any, recentOrders: any[]): st
 
 회사 정보:
 - 브랜드: ${company.brand_name || company.company_name}
-- 슬로건: ${company.brand_slogan || '미박힘'}
-- 사업 영역: ${company.business_type || '미박힘'}
+- 슬로건: ${company.brand_slogan || '미설정'}
+- 사업 영역: ${company.business_type || '미설정'}
 - 톤: ${company.brand_tone || '친절하고 전문적'}
 
 ${customerLine}
@@ -188,12 +188,12 @@ ${customerLine}
 ${ordersLine}
 
 응답 가이드 (영구 원칙):
-1. 위 박힌 CDP 데이터에 근거한 사실만 박음 (추측/창작 X)
-2. 발송/예약/결제 등 외부 action은 박지 X — "담당자가 박을 영역" 안내만
-3. 본 통화는 인바운드 음성 응답이므로 60초 이내 박음 (3~5 문장)
-4. 한국어 존댓말로 자연스럽게 박음 (~입니다 / ~해드리겠습니다)
-5. 모르는 정보는 "정확한 답변은 담당자가 박을 영역입니다" 안내
-6. 광고/할인 정보는 박지 X (영구 원칙 — 음성 응답은 안내 한정)`;
+1. 위 정합된 CDP 데이터에 근거한 사실만 응답 (추측/창작 X)
+2. 발송/예약/결제 등 외부 action은 처리 안 함 — "담당자가 처리할 영역" 안내만
+3. 본 통화는 인바운드 음성 응답이므로 60초 이내 응답 (3~5 문장)
+4. 한국어 존댓말로 자연스럽게 응답 (~입니다 / ~해드리겠습니다)
+5. 모르는 정보는 "정확한 답변은 담당자가 안내드릴 영역입니다" 안내
+6. 광고/할인 정보는 제공 X (영구 원칙 — 음성 응답은 안내 한정)`;
 }
 
 // ════════════════════════════════════════════════════════════════════

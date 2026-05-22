@@ -87,7 +87,7 @@ export async function buildCompanyDocuments(companyId: string): Promise<CompanyD
     docs.push({
       title: '회사 정보',
       data: companyText,
-      context: '한줄로AI 박힌 회사 메타 데이터',
+      context: '한줄로AI 등록된 회사 메타 데이터',
     });
   }
 
@@ -108,7 +108,7 @@ export async function buildCompanyDocuments(companyId: string): Promise<CompanyD
     docs.push({
       title: '최근 30일 캠페인 history',
       data: lines.join('\n\n'),
-      context: '한줄로AI 박힌 본 회사 발송 이력',
+      context: '한줄로AI 등록된 본 회사 발송 이력',
     });
   }
 
@@ -121,7 +121,7 @@ export async function buildCompanyDocuments(companyId: string): Promise<CompanyD
     docs.push({
       title: '회사별 학습 메모리',
       data: lines.join('\n'),
-      context: 'AI가 박은 본 회사 박은 영역 박은 학습 결과 박음',
+      context: 'AI가 누적한 본 회사 학습 결과',
     });
   }
 
@@ -144,7 +144,7 @@ export async function buildCompanyDocuments(companyId: string): Promise<CompanyD
         `평균 구매 횟수: ${s.avg_purchase ? Number(s.avg_purchase).toFixed(1) : '(데이터 부족)'}`,
         `평균 구매 금액: ${s.avg_spent ? Number(s.avg_spent).toLocaleString() + '원' : '(데이터 부족)'}`,
       ].join('\n'),
-      context: '한줄로AI 박힌 customers 테이블 박은 영역',
+      context: '한줄로AI 등록된 customers 테이블 영역',
     });
   }
 

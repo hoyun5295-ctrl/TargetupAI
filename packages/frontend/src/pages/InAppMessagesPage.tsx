@@ -152,7 +152,7 @@ export default function InAppMessagesPage() {
 
         {!loading && messages.length === 0 && (
           <div className="bg-white border rounded-xl p-12 text-center text-gray-500 text-sm">
-            등록된 In-app 메시지가 없습니다. 신규 버튼을 박아 첫 메시지를 만들어보세요.
+            등록된 In-app 메시지가 없습니다. 신규 버튼을 눌러 첫 메시지를 만들어보세요.
           </div>
         )}
 

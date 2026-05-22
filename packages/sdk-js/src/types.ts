@@ -151,3 +151,19 @@ export interface SDKError extends Error {
   code?: string;
   responseBody?: unknown;
 }
+
+// ────────────────────────────────────────────────────────────
+// ★ D189 #4 (2026-05-22): Journey Step A/B/Bandit 트래킹
+// ────────────────────────────────────────────────────────────
+
+export interface VariantTrackParams {
+  /** 회원 식별 (선택) */
+  externalId?: string;
+  /** 비회원 추적 ID (선택) */
+  anonymousId?: string;
+}
+
+export interface VariantTrackResponse {
+  success: boolean;
+  error?: string;
+}

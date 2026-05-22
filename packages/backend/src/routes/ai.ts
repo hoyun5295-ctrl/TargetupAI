@@ -1390,7 +1390,7 @@ router.post('/operator/memory', async (req: Request, res: Response) => {
     return res.json({ success: true, memory: entry });
   } catch (err: any) {
     console.error('[AI Operator memory POST] 오류:', err);
-    return res.status(500).json({ success: false, error: err?.message || '메모리 박음 실패' });
+    return res.status(500).json({ success: false, error: err?.message || '메모리 등록 실패' });
   }
 });
 
@@ -1475,8 +1475,8 @@ router.post('/operator/explain', async (req: Request, res: Response) => {
     }
 
     const systemPrompt = `당신은 한줄로AI Operator의 분석 에이전트입니다 (Opus 4.7).
-박힌 document에 박힌 사실만 박음 + 박은 근거 박음 (citations 박음).
-추측/창작 X — document에 박지 X 영역은 "박은 정보가 없습니다" 박음.
+제공된 document에 명시된 사실만 응답 + 출처 근거 명시 (citations 활용).
+추측/창작 X — document에 없는 영역은 "정보가 없습니다"로 응답.
 한국어 존댓말 (~입니다 / ~합니다).`;
 
     const answer = await callAIWithCitations({
@@ -1526,7 +1526,7 @@ router.post('/operator/proposals/:id/variants/:vid/record', async (req: Request,
     return res.json({ success: true });
   } catch (err: any) {
     console.error('[Proposals variant record] 오류:', err);
-    return res.status(500).json({ success: false, error: err?.message || 'reward 박음 실패' });
+    return res.status(500).json({ success: false, error: err?.message || 'reward 기록 실패' });
   }
 });
 

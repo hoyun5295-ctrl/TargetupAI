@@ -153,7 +153,7 @@ export async function sendEmailCampaign(input: SendCampaignInput): Promise<{ mes
   if (campaign.isAd) {
     if (!finalSubject.startsWith('(광고)')) finalSubject = `(광고) ${finalSubject}`;
     if (!finalHtml.includes('수신거부') && !finalHtml.includes('unsubscribe')) {
-      finalHtml += `\n\n<hr><p style="font-size:11px;color:#999;text-align:center">본 메일은 ${campaign.fromName}의 광고 정보입니다. 수신을 원하지 않으시면 <a href="https://app.hanjul.ai/unsubscribe">수신거부</a>를 박아주세요.</p>`;
+      finalHtml += `\n\n<hr><p style="font-size:11px;color:#999;text-align:center">본 메일은 ${campaign.fromName}의 광고 정보입니다. 수신을 원하지 않으시면 <a href="https://app.hanjul.ai/unsubscribe">수신거부</a>를 눌러주세요.</p>`;
     }
   }
 

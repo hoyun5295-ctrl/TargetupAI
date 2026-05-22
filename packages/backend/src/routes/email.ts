@@ -164,7 +164,7 @@ router.post('/campaigns/:id/send', async (req: Request, res: Response) => {
 
     const { recipients, immediate } = req.body;
     if (!Array.isArray(recipients) || recipients.length === 0) {
-      return res.status(400).json({ success: false, error: 'recipients 배열은 1건 이상 박혀야 합니다.' });
+      return res.status(400).json({ success: false, error: 'recipients 배열은 1건 이상이어야 합니다.' });
     }
 
     const result = await sendEmailCampaign({

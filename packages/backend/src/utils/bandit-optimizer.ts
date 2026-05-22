@@ -128,7 +128,7 @@ export function thompsonSamplingChoice(variants: ProposalVariant[]): BanditRecom
       posteriorMean: chosen.armAlpha / (chosen.armAlpha + chosen.armBeta),
       posteriorSample: 0,
       totalTrials,
-      reasoning: `초기 탐색 단계 (누적 발송 ${totalTrials}회 < 3회) — 모든 variant 동등 기회 박음. 누적 3회 이상부터 Bandit 추천 박힙니다.`,
+      reasoning: `초기 탐색 단계 (누적 발송 ${totalTrials}회 < 3회) — 모든 variant 동등 기회 제공. 누적 3회 이상부터 Bandit 추천이 작동합니다.`,
     };
   }
 
@@ -155,7 +155,7 @@ export function thompsonSamplingChoice(variants: ProposalVariant[]): BanditRecom
   if (bestIdx === bestMeanIdx) {
     reasoning = `누적 발송 ${totalTrials}회 — Variant ${chosen.variantIndex + 1} 평균 클릭률 ${(posteriorMean * 100).toFixed(1)}% (최우수). Thompson Sampling 추천.`;
   } else {
-    reasoning = `누적 발송 ${totalTrials}회 — Variant ${chosen.variantIndex + 1} 평균 클릭률 ${(posteriorMean * 100).toFixed(1)}% / 본 sample ${(bestSample * 100).toFixed(1)}%. Thompson Sampling이 탐색 균형을 위해 박음 (최고 평균과 다를 수 있음 — 학습 진행 정합).`;
+    reasoning = `누적 발송 ${totalTrials}회 — Variant ${chosen.variantIndex + 1} 평균 클릭률 ${(posteriorMean * 100).toFixed(1)}% / 본 sample ${(bestSample * 100).toFixed(1)}%. Thompson Sampling이 탐색 균형을 위해 추천 (최고 평균과 다를 수 있음 — 학습 진행 정합).`;
   }
 
   return {

@@ -188,7 +188,7 @@ ${memoryContext}
 3. delay_hours: 0(즉시) / 24(1일) / 72(3일) / 168(7일) / 336(14일) / 720(30일) 자연 단위
 4. channel: 'lms' default (광고 표기 + 무료거부 자동 합성 시 90바이트 SMS 한계 초과)
 5. isAd: 마케팅성은 true default (정보 안내성만 false)
-6. subject (제목): LMS/MMS 채널 시 필수 — 한 줄 20자 안 / 본문 핵심 요약 / 호기심 유발 / 시즌감 (예: "%고객명%님, 곧 생일이에요" / "VIP만 받는 봄 안내"). SMS 채널은 빈 문자열 "" 박힙니다 (제목 없음).
+6. subject (제목): LMS/MMS 채널 시 필수 — 한 줄 20자 안 / 본문 핵심 요약 / 호기심 유발 / 시즌감 (예: "%고객명%님, 곧 생일이에요" / "VIP만 받는 봄 안내"). SMS 채널은 빈 문자열 ""로 응답 (제목 없음).
 7. allow_reentry / reentry_cooldown_days: 시리즈에 맞춰 자동 결정
    - 가입 온보딩: false / null
    - 재구매: true / 0

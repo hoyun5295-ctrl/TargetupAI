@@ -23,6 +23,8 @@ import { requireCdpApiKey, recordCdpApiCall, issueCdpKeyPair, isCdpEnabledForPla
 import { identifyCustomer } from '../utils/cdp-identity';
 import { trackEvent, getRecentEvents } from '../utils/cdp-events';
 import { syncOrder, bulkImport } from '../utils/cdp-orders';
+// ★ D189 #4 (2026-05-22): Journey Step A/B/Bandit 트래킹 — SDK 호출용 endpoint
+import { recordJourneyStepVariantReward } from '../utils/bandit-optimizer';
 import { listProvidersForUI } from '../utils/provider-registry';
 // ★ D173 (2026-05-19): cafe24Adapter import 부수 효과로 cafe24 provider 등록
 import '../utils/cafe24-client';
@@ -175,6 +177,54 @@ router.post('/order', requireCdpApiKey, async (req: Request, res: Response) => {
     const status = err?.message?.includes('필수') || err?.message?.includes('올바르지') ? 400 : 500;
     await recordCdpApiCall(cdpAuth.companyId, 'order', status);
     return res.status(status).json({ success: false, error: err?.message || 'order 처리 실패' });
+  }
+});
+
+// ════════════════════════════════════════════════════════════════════
+// ★ D189 #4 (2026-05-22): Journey Step A/B/Bandit 트래킹 endpoint (SDK 호출용)
+//   - cdpAuth (X-Hanjullo-Key + X-Hanjullo-Secret) 인증
+//   - body: { clicked: 0|1, converted: 0|1 }
+//   - 회사 격리: variant → step → journey → company_id 검증
+//   - 기존 회사 admin 인증 endpoint(/api/ai/operator/journeys/variants/:variantId/track)와 별도
+// ════════════════════════════════════════════════════════════════════
+
+router.post('/journey-variants/:variantId/track', requireCdpApiKey, async (req: Request, res: Response) => {
+  const cdpAuth = req.cdpAuth!;
+  try {
+    const { variantId } = req.params;
+    if (!variantId || !/^[a-f0-9-]{36}$/i.test(variantId)) {
+      await recordCdpApiCall(cdpAuth.companyId, 'event', 400);
+      return res.status(400).json({ success: false, error: 'variantId 형식이 올바르지 않습니다.' });
+    }
+
+    // 회사 격리 검증 — variant → step → journey → company_id
+    const own = await query(
+      `SELECT 1 FROM journey_step_variants v
+       JOIN journey_steps s ON v.step_id = s.id
+       JOIN journeys j ON s.journey_id = j.id
+       WHERE v.id = $1::uuid AND j.company_id = $2::uuid`,
+      [variantId, cdpAuth.companyId]
+    );
+    if (own.rows.length === 0) {
+      await recordCdpApiCall(cdpAuth.companyId, 'event', 404);
+      return res.status(404).json({ success: false, error: 'variant를 찾을 수 없습니다.' });
+    }
+
+    const { clicked, converted } = req.body || {};
+    const clickedN = Math.max(0, Math.min(1, Number(clicked) || 0));
+    const convertedN = Math.max(0, Math.min(1, Number(converted) || 0));
+    if (clickedN === 0 && convertedN === 0) {
+      await recordCdpApiCall(cdpAuth.companyId, 'event', 400);
+      return res.status(400).json({ success: false, error: 'clicked 또는 converted 중 최소 1건은 필수입니다.' });
+    }
+
+    await recordJourneyStepVariantReward(variantId, 0, clickedN, convertedN);
+    await recordCdpApiCall(cdpAuth.companyId, 'event', 200);
+    return res.json({ success: true });
+  } catch (err: any) {
+    console.error('[CDP /journey-variants/track] 오류:', err);
+    await recordCdpApiCall(cdpAuth.companyId, 'event', 500);
+    return res.status(500).json({ success: false, error: err?.message || 'track 처리 실패' });
   }
 });
 

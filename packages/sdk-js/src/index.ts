@@ -28,10 +28,12 @@ import type {
 } from './types';
 import { HanjulloPushModule } from './push';
 import { HanjulloInAppModule } from './inapp';
+import { HanjulloJourneyVariantsModule } from './journey-variants';
 
 export * from './types';
 export { HanjulloPushModule } from './push';
 export { HanjulloInAppModule } from './inapp';
+export { HanjulloJourneyVariantsModule } from './journey-variants';
 
 const DEFAULT_ENDPOINT = 'https://app.hanjul.ai/api/cdp';
 const DEFAULT_SOURCE = 'custom_sdk';
@@ -49,6 +51,8 @@ export class HanjulloSDK {
   public readonly push: HanjulloPushModule;
   /** ★ D175-A: In-app Message 채널 (브라우저 환경) */
   public readonly inapp: HanjulloInAppModule;
+  /** ★ D189 #4: Journey Step A/B/Bandit 트래킹 (click + conversion) */
+  public readonly journeyVariants: HanjulloJourneyVariantsModule;
 
   constructor(config: HanjulloSDKConfig) {
     if (!config.apiKey || !config.apiKey.startsWith('hjl_')) {
@@ -73,6 +77,8 @@ export class HanjulloSDK {
     // ★ D175-A: 브라우저 채널 모듈 (push/inapp)
     this.push = new HanjulloPushModule(this.apiKey, this.secret, this.endpoint);
     this.inapp = new HanjulloInAppModule(this.apiKey, this.secret, this.endpoint);
+    // ★ D189 #4: Journey Step A/B/Bandit 트래킹
+    this.journeyVariants = new HanjulloJourneyVariantsModule(this.apiKey, this.secret, this.endpoint);
   }
 
   // ════════════════════════════════════════════════════════════════

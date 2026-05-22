@@ -179,7 +179,7 @@ export async function buildMemoryPromptContext(companyId: string, maxEntries: nu
 
 ${sections.join('\n\n')}
 
-위 메모리는 본 회사의 운영 박힌 영역 박은 학습 결과입니다. 본 메모리에 박힌 패턴을 우선 박음 + 모순 영역 X 박는 영역 박음.
+위 메모리는 본 회사의 운영 누적 학습 결과입니다. 본 메모리에 정합된 패턴을 우선 적용 + 모순 영역은 제외하고 분석해주세요.
 `;
 }
 
@@ -217,7 +217,7 @@ export async function recordCampaignLearning(input: CampaignLearningInput): Prom
       companyId: input.companyId,
       memoryType: 'success_pattern',
       memoryKey: `${input.channel}/${input.campaignName}`,
-      memoryValue: `${input.channel} 채널 + "${input.campaignName}" 캠페인 박음 → 클릭률 ${(clickRate * 100).toFixed(1)}% / 전환율 ${(conversionRate * 100).toFixed(2)}% (${input.sentCount}명 박음)`,
+      memoryValue: `${input.channel} 채널 + "${input.campaignName}" 캠페인 발송 결과 → 클릭률 ${(clickRate * 100).toFixed(1)}% / 전환율 ${(conversionRate * 100).toFixed(2)}% (${input.sentCount}명 발송)`,
       importance: Math.min(10, Math.floor(clickRate * 50)),
       source: 'campaign_result',
       metadata: {
@@ -236,7 +236,7 @@ export async function recordCampaignLearning(input: CampaignLearningInput): Prom
     companyId: input.companyId,
     memoryType: 'channel_performance',
     memoryKey: channelKey,
-    memoryValue: `${input.channel} 채널 최근 캠페인 박음 — 클릭률 ${(clickRate * 100).toFixed(1)}% / 전환율 ${(conversionRate * 100).toFixed(2)}%`,
+    memoryValue: `${input.channel} 채널 최근 캠페인 성과 — 클릭률 ${(clickRate * 100).toFixed(1)}% / 전환율 ${(conversionRate * 100).toFixed(2)}%`,
     importance: 6,
     source: 'campaign_result',
     metadata: {

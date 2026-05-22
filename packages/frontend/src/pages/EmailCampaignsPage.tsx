@@ -181,7 +181,7 @@ export default function EmailCampaignsPage() {
 
         {!loading && campaigns.length === 0 && (
           <div className="bg-white border rounded-xl p-12 text-center text-sm text-gray-500">
-            아직 등록된 캠페인이 없습니다. "신규 캠페인" 박아 시작해주세요.
+            아직 등록된 캠페인이 없습니다. "신규 캠페인" 버튼을 눌러 시작해주세요.
           </div>
         )}
 

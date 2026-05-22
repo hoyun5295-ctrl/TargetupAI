@@ -107,18 +107,41 @@
 
 ---
 
-### 🚀 다음 세션 진입 가이드 (D187 fix1~5 + 서비스 소개서 종결 후 — **운영 검증 또는 D188 Step 2-B 진입**)
+### 🚀 다음 세션 진입 가이드 (D188 통합 종결 후 — **운영 검증 + D189 잔존 영역 진입**)
 
-> **★ D187 + D187-fix1~5 종결 매트릭스 (2026-05-21)**: One-shot AI Operator 여정 자동화 완성. DB 4 테이블 + ALTER 5건 (callback_number + is_ad + subject + 등) + utils CT-43 journey-builder + CT-44 journey-executor + CT-45 journey-ai-generator (자연어 한 줄 → 완전 패키지 / 시즌 + 회사 메모리 통합 / 3 톤 후보 refine) + CT-46 message-sanitizer (이모지 70+ 특수문자 자동 정규화) + journey-trigger-watcher + routes/ai.ts 13 endpoint + JourneysPage /ai-journeys 전체 재작성 (자연어 input + 7 빠른 시작 카드 + 5~10초 AI 생성 오버레이 + 1 페이지 검토 + step별 inline 편집/AI 다듬기 3 톤/추가/삭제 + 광고 자동 합성 미리보기 + 이모지/특수문자 실시간 경고) + 신규 영구 메모리 2건(feedback_ai_no_arbitrary_benefit + feedback_no_preview_verification). backend/frontend tsc 0 errors. 박-단어 grep 0건 자가 검증.
+> **★ D188 통합 종결 매트릭스 (2026-05-21)**: 영업팀장 알림톡 14건 fix + Journey Builder Phase 2-B 통합 (wait/condition + MMS/KAKAO + A/B Bandit + 자동발송 폐기) + 위반 단어 영구 룰 전수 정정 117건.
 >
-> **★ Harold 박을 영역**: DB SQL 5건 ALTER (callback_number/is_ad/subject 등 SCHEMA D187 영역) + tp-push + 서버 git pull + build:safe + pm2 restart all.
+> **D188 작업 매트릭스 (한 세션 통합 종결):**
+> - **D188 영업팀장 알림톡 14건 통합 fix** (9 파일) — AlimtalkPreview select-text + AlimtalkTemplateFormV2 wrapper readOnly attribute + 반려사유 박스 max-h+scroll + AlimtalkManagementSection 템플릿코드 컬럼 + 검색 UI(4 옵션) + AlimtalkChannelPanel rows={6} + LMS 대체 subject input + 본문 변수 자동 동기화 + AlimtalkSendModal handleClose 안전망 + nextSubject 검증 + Dashboard alimtalkNextSubject state + 3 모달 props + alimtalk-jobs callback fallback (admin_phone_number 빈 영역 → sender_registrations approved.phone + count > 0 시 alarm_notified_status UPDATE 안전망)
+> - **D188-fix1** AlimtalkPreview JSX 주석 위치 사고 정정 + TargetSendModal/DirectSendPanel props interface 정합
+> - **D188-fix2** AlimtalkManagementSection 매트릭스 줄바꿈 정정 (overflow-x-auto + whitespace-nowrap + text-xs + 관리 컬럼 inline-flex)
+> - **D188 Phase 2-B-4 자동발송 영구 폐기** (Harold 명시 "사용 고객사 0 + 여정이 진짜 업그레이드") — DashboardHeader 메뉴 영구 제거 + AutoSendPage 안내 페이지 (여정 빌더 진입) + routes/auto-campaigns POST 410 Gone (운영 데이터 보존 — auto_campaigns + plans 컬럼 + worker 유지)
+> - **D188 Phase 2-B-1 Journey wait + condition step 신규** — journey-builder JourneyStepDefinition stepType+conditionJsonb + activateJourney step_type별 검증 (wait delay>0 / condition conditionJsonb 정합) + AI 시스템 프롬프트 강화 (step_type 3종 가이드 + 11 필드 + 10 operator) + journey-executor step_type 분기 (waited/condition_passed/condition_failed 3 신규 outcome) + evaluateCondition 함수 신규 (customer_field 9 operator + custom_fields JSONB fallback) + JourneysPage step_type select + condition GUI 빌더 (11 필드 × 10 operator + value input)
+> - **D188 Phase 2-B-2 channel 확장 MMS + KAKAO** — DB ALTER journey_steps 7 컬럼 (alimtalk_profile_id/template_code/variable_map/next_type/next_contents/next_subject + mms_image_paths) + JourneyStepDefinition 알림톡/MMS 필드 + createJourneyFromTemplate INSERT + updateJourneyStep patch + processExecution channel 분기 (kakao_templates 조회 + 변수 치환 + insertAlimtalkQueue) + 헬퍼 3종 (replaceAlimtalkVars + convertButtonsToQTmsgInline + extractBasename) + ChannelType kakao + JourneysPage kakao step UI
+> - **D188 Phase 2-B-3 A/B + Bandit 통합** — DB CREATE journey_step_variants + bandit-optimizer.ts 신규 7 함수 (listJourneyStepVariants/selectJourneyStepVariant/recordJourneyStepVariantReward/createJourneyStepVariant/deleteJourneyStepVariant/JourneyStepVariant interface) + processExecution variants Bandit 선택 + reward 누적 + routes/ai.ts variants 4 endpoint (GET/POST/DELETE/track) + PATCH step patch 확장 (stepType/conditionJsonb/alimtalk/mms 영역)
+> - **D188 BetaFeatureModal 여정 강조 통합** — 여정 자동화 카드 description 강화 (7 표준 여정 + Wait/Condition + 다채널 + A/B Bandit) + 실시간 트리거 강화 (여정 즉시 진입) + 헤더 부제 강화
+> - **D188 위반 단어 영구 룰 전수 정정 사고** (Harold 격분 — PDF 캡처 ContinuousOperatorPage + CdpSettingsPage). Phase 1 (PDF 캡처 영역 31건) + Phase 2 (frontend 21 파일 57건) + Phase 3 (backend 응답 메시지 21건) + 활용형 변형 8건 (박히지/박혔/박힐/박았 등) — 총 117건 정정. 사용자 노출 영역만 정정 (backend 코드 주석 skip — Harold 명시 정합)
+> - **신규 영구 메모리 2건** — feedback_no_bakkeum_usage.md § D188 강화 룰 (활용형 grep 패턴 매트릭스 + 정상 한국어 대체 매핑) + feedback_push_and_deploy_commands.md § 4-1 표준 출력 형식 영구 룰 (Harold 명시 — 매 수정 완료 시 무조건 형식)
 >
-> **★ 서비스 소개서 영업 자료**: `docs/한줄로_서비스소개서_2026-05.pptx` 16 슬라이드 모노크롬 톤 (검정+흰색+라임 액센트 / Pretendard / 한줄로 로고 정합). 생성 스크립트 `status/generate-service-deck.js` 보존 (추후 재제작 시 활용).
+> **★ Harold 진행 영역**: DB SQL 2건 (ALTER journey_steps 7 컬럼 + CREATE journey_step_variants) + 인비토 admin_phone_number UPDATE SQL + alarm_notified_status RESET SQL + tp-push + 서버 git pull + build:safe + pm2 restart all
 >
-> **D188+ 진입 명령어 (다음 세션 첫 메시지)**:
+> **D188 본질** = Braze Canvas Journey 압도 완성 + 자동발송 영구 폐기 (여정이 진짜 업그레이드) + Bandit Thompson Sampling 자동 최적화 + 다채널(SMS/LMS/MMS/알림톡) 통합 + 위반 단어 영구 룰 정합 100% + 표준 출력 형식 영구 룰
+>
+> **D189+ 진입 명령어 (다음 세션 첫 메시지)**:
 > ```
-> status/STATUS.md CURRENT_TASK 정독 + docs/AI_OPERATOR_기능정의서.md v1.2.0 + status/ai_operator_progress.md 정독 → 운영 검증 후 D188 Step 2-B (wait/condition step + MMS·KAKAO 채널 확장 + journey A/B 테스트 + Bandit 통합 + 트리거 다양화 + 분석 차트 강화) 진입 또는 Harold 신고 우선 종결 또는 자동발송 단계적 폐기 매트릭스 진입
+> status/STATUS.md CURRENT_TASK § D189 진입 가이드 정독 + status/LESSONS_LEARNED.md §3 D188 + §4 메타 위반 정독 + memory/feedback_no_bakkeum_usage.md § D188 강화 룰 정독 + memory/feedback_push_and_deploy_commands.md § 4-1 표준 출력 형식 정독 + memory/project_d188_full_session_consolidated.md 정독 → 운영 검증 (박성용 인비토 admin 검증 결과) 받은 후 D189 잔존 영역 진입 또는 Harold 신규 신고 우선 종결
 > ```
+>
+> **D189 잔존 영역 (다음 세션 진입 시 참조)**:
+>
+> | 우선순위 | 영역 | 분량 |
+> |---|---|---|
+> | 1 | JourneyVariantsEditor (A/B/C 탭 + traffic_weight 슬라이더 + Bandit 통계 시각화) | 3~4h |
+> | 2 | AlimtalkChannelPanel 임베드 (Journey kakao step — 발신프로필+템플릿+변수 매핑 UI 통합) | 2~3h |
+> | 3 | JourneyMmsUploader (MMS 이미지 업로드 UI — 최대 3개 + 미리보기) | 1~2h |
+> | 4 | variants click/conversion 트래킹 SDK 통합 | 2~3h |
+> | 5 | 박성용 인비토 admin 검증 결과 정정 (잔존 신고 시) | 명시 시 |
+> | 6 | 음성 AI Phase 2 (외향 발신) / 자사몰 Shopify/메이크샵 구체 구현 / 클릭 트래킹 인프라 | 큰 영역 |
 >
 > **D184~D187 종결 매트릭스** (D187 세션 종결 시점):
 > - **D184 이니시스 표준결제 한줄로 이전 완료** (CT-41 inicis-client.ts + CT-42 payment-processor.ts + routes/payments.ts 5 endpoint + BalanceModals.tsx 카드결제 활성 + 가상계좌 영구 제거 + PaymentResultPage.tsx 신규 + payments ALTER 9 컬럼 + 2 UNIQUE INDEX + 4 INDEX) — Harold signKey `UzZjT0d2V3FyaDgxSmZwWlY4OUdhQT09` + .env INICIS_MODE=test

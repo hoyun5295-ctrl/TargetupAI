@@ -3,8 +3,11 @@ import { useNavigate } from 'react-router-dom';
 import {
   ArrowLeft, ChevronDown, ChevronUp, Loader2, Pause, Play, Plus, Power, RefreshCw, Sparkles,
   ShoppingCart, Cake, Calendar as CalendarIcon, UserPlus, Repeat, Moon, MessageSquare,
-  Clock, DollarSign, Users, Phone, Wand2, X, AlertCircle, Send, Trash2, Edit2, Save,
+  Clock, DollarSign, Users, Phone, Wand2, X, AlertCircle, Send, Trash2, Edit2, Save, Beaker,
 } from 'lucide-react';
+import JourneyVariantsEditor from '../components/journey/JourneyVariantsEditor';
+import JourneyMmsUploader from '../components/journey/JourneyMmsUploader';
+import AlimtalkChannelPanel, { type AlimtalkSenderProfile, type AlimtalkTemplate, type AlimtalkChannelState } from '../components/alimtalk/AlimtalkChannelPanel';
 
 // D187-fix3 (2026-05-21): One-shot AI Operator — 자연어 한 줄 → AI가 완전 패키지 자동 생성 → 1 페이지 검토 → 활성화
 //   영구 룰: AI는 흐름/안내문/감성 텍스트만 풍성하게 / 구체 혜택(% / 원 / 무료 / 쿠폰)은 회사 admin 직접 작성
@@ -190,6 +193,12 @@ export default function JourneysPage() {
   const [aiPkg, setAiPkg] = useState<AIJourneyPackage | null>(null);
   const [reviewName, setReviewName] = useState('');
   const [reviewCallback, setReviewCallback] = useState('');
+  // ★ D189 #1 (2026-05-22): JourneyVariantsEditor 토글 — main view step별 A/B 테스트 편집 영역
+  const [variantsExpandedStepIds, setVariantsExpandedStepIds] = useState<Set<string>>(new Set());
+  // ★ D189 #2 (2026-05-22): 알림톡 채널 패널 데이터 — 회사 발신프로필 + 템플릿 + 활성 필드 (review view kakao step UI용)
+  const [alimtalkSenders, setAlimtalkSenders] = useState<AlimtalkSenderProfile[]>([]);
+  const [alimtalkTemplates, setAlimtalkTemplates] = useState<AlimtalkTemplate[]>([]);
+  const [customerFields, setCustomerFields] = useState<Array<{ key: string; label: string }>>([]);
   const [reviewBudget, setReviewBudget] = useState('');
   const [reviewThreshold, setReviewThreshold] = useState('');
 
@@ -226,6 +235,57 @@ export default function JourneysPage() {
   };
 
   useEffect(() => { loadAll(); }, []);
+
+  // ★ D189 #2 (2026-05-22): 알림톡 발신프로필 + 템플릿 + 활성 필드 fetch (review view 알림톡 step UI용)
+  useEffect(() => {
+    const t = token();
+    if (!t) return;
+    Promise.all([
+      fetch('/api/alimtalk/senders', { headers: { Authorization: `Bearer ${t}` } }).catch(() => null),
+      fetch('/api/companies/kakao-templates?status=APPROVED', { headers: { Authorization: `Bearer ${t}` } }).catch(() => null),
+      fetch('/api/customers/enabled-fields', { headers: { Authorization: `Bearer ${t}` } }).catch(() => null),
+    ]).then(async ([sndRes, tplRes, fldRes]) => {
+      if (sndRes?.ok) {
+        const data = await sndRes.json();
+        setAlimtalkSenders(data.profiles || []);
+      }
+      if (tplRes?.ok) {
+        const data = await tplRes.json();
+        setAlimtalkTemplates(data.templates || []);
+      }
+      if (fldRes?.ok) {
+        const data = await fldRes.json();
+        const fields = (data.fields || []).map((f: any) => ({
+          key: f.field_key,
+          label: f.display_name || f.field_label || f.field_key,
+        }));
+        setCustomerFields(fields);
+      }
+    });
+  }, []);
+
+  // ★ D189 #2 (2026-05-22): step.alimtalk* ↔ AlimtalkChannelState 매핑 헬퍼
+  const stepToAlimtalkState = (step: AIGeneratedStep): AlimtalkChannelState => {
+    const tpl = alimtalkTemplates.find((t) => t.template_code === step.alimtalkTemplateCode);
+    return {
+      profileId: step.alimtalkProfileId || '',
+      templateCode: step.alimtalkTemplateCode || '',
+      templateId: tpl?.id || '',
+      variableMap: step.alimtalkVariableMap || {},
+      nextType: (step.alimtalkNextType || 'L') as 'N' | 'S' | 'L' | 'A' | 'B',
+      nextContents: step.alimtalkNextContents || '',
+      nextSubject: step.alimtalkNextSubject || '',
+    };
+  };
+
+  const alimtalkStateToStepPatch = (state: AlimtalkChannelState): Partial<AIGeneratedStep> => ({
+    alimtalkProfileId: state.profileId || undefined,
+    alimtalkTemplateCode: state.templateCode || undefined,
+    alimtalkVariableMap: state.variableMap,
+    alimtalkNextType: state.nextType,
+    alimtalkNextContents: state.nextContents,
+    alimtalkNextSubject: state.nextSubject,
+  });
 
   const loadDetail = async (journeyId: string) => {
     if (detailsMap[journeyId]) return;
@@ -616,17 +676,56 @@ export default function JourneysPage() {
                       </div>
                       {isExpanded && detail && (
                         <div className="border-t border-white/10 p-3 bg-slate-950/40 space-y-2">
-                          {detail.steps.map((s) => (
-                            <div key={s.id} className="flex items-start gap-3 p-2.5 bg-white/5 rounded">
-                              <div className="shrink-0 w-7 h-7 rounded-full bg-fuchsia-500/20 text-fuchsia-300 flex items-center justify-center text-xs font-semibold">{s.step_order}</div>
-                              <div className="flex-1 min-w-0">
-                                <div className="text-[10px] text-white/50 mb-1">
-                                  <Clock className="w-3 h-3 inline" /> {s.delay_hours}h · {s.channel?.toUpperCase()} {s.is_ad && '· 광고'}
+                          {detail.steps.map((s) => {
+                            const variantsExpanded = variantsExpandedStepIds.has(s.id);
+                            const toggleVariants = () => {
+                              setVariantsExpandedStepIds((prev) => {
+                                const next = new Set(prev);
+                                if (next.has(s.id)) next.delete(s.id);
+                                else next.add(s.id);
+                                return next;
+                              });
+                            };
+                            // ★ D189 #1: A/B 테스트는 message step만 (wait/condition step은 메시지 발송 X)
+                            const supportsVariants = s.step_type === 'message';
+                            return (
+                              <div key={s.id} className="space-y-2">
+                                <div className="flex items-start gap-3 p-2.5 bg-white/5 rounded">
+                                  <div className="shrink-0 w-7 h-7 rounded-full bg-fuchsia-500/20 text-fuchsia-300 flex items-center justify-center text-xs font-semibold">{s.step_order}</div>
+                                  <div className="flex-1 min-w-0">
+                                    <div className="text-[10px] text-white/50 mb-1 flex items-center gap-2 flex-wrap">
+                                      <span><Clock className="w-3 h-3 inline" /> {s.delay_hours}h · {s.channel?.toUpperCase()} {s.is_ad && '· 광고'}</span>
+                                      {supportsVariants && (
+                                        <button
+                                          onClick={toggleVariants}
+                                          className={`flex items-center gap-1 px-2 py-0.5 rounded text-[10px] transition-colors ${
+                                            variantsExpanded
+                                              ? 'bg-violet-500/30 text-violet-200'
+                                              : 'bg-violet-500/10 hover:bg-violet-500/20 text-violet-300/80'
+                                          }`}
+                                          title="A/B 테스트 편집"
+                                        >
+                                          <Beaker className="w-3 h-3" />
+                                          A/B 테스트 {variantsExpanded ? '닫기' : '열기'}
+                                        </button>
+                                      )}
+                                    </div>
+                                    {s.message_template && <div className="text-xs text-white/85 whitespace-pre-wrap">{s.message_template}</div>}
+                                  </div>
                                 </div>
-                                {s.message_template && <div className="text-xs text-white/85 whitespace-pre-wrap">{s.message_template}</div>}
+                                {supportsVariants && variantsExpanded && (
+                                  <JourneyVariantsEditor
+                                    stepId={s.id}
+                                    journeyId={j.id}
+                                    journeyStatus={j.status === 'ended' ? 'paused' : (j.status as 'draft' | 'active' | 'paused')}
+                                    defaultChannel={(s.channel || 'sms') as 'sms' | 'lms' | 'mms' | 'kakao'}
+                                    defaultMessageTemplate={s.message_template || ''}
+                                    onClose={toggleVariants}
+                                  />
+                                )}
                               </div>
-                            </div>
-                          ))}
+                            );
+                          })}
                         </div>
                       )}
                     </div>
@@ -860,56 +959,27 @@ export default function JourneysPage() {
                       </div>
                     )}
 
-                    {/* ★ D188 Phase 2-B-2 (2026-05-21): 알림톡 step UI — channel='kakao' 시 알림톡 안내 + 핵심 input. */}
+                    {/* ★ D189 #2 (2026-05-22): 알림톡 step UI — AlimtalkChannelPanel 통합 (발신프로필 + 템플릿 + 변수 매핑 + 부달 + 미리보기) */}
                     {s.stepType === 'message' && s.channel === 'kakao' && (
-                      <div className="p-3 bg-amber-500/10 border border-amber-500/30 rounded text-xs space-y-2">
-                        <div className="font-semibold text-amber-200">알림톡 (KAKAO) step</div>
-                        <div className="text-amber-200/60 leading-relaxed">
-                          승인된 알림톡 템플릿 코드 + 부달 발송 정책을 입력하세요. 본문은 kakao_templates에서 자동 로드됩니다.
-                        </div>
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-                          <input
-                            type="text"
-                            value={s.alimtalkTemplateCode || ''}
-                            onChange={(e) => updateStep(idx, { alimtalkTemplateCode: e.target.value })}
-                            placeholder="알림톡 템플릿 코드 (kakao_templates.template_code)"
-                            className="px-2 py-1.5 bg-slate-900 border border-white/10 rounded text-xs"
-                          />
-                          <select
-                            value={s.alimtalkNextType || 'L'}
-                            onChange={(e) => updateStep(idx, { alimtalkNextType: e.target.value as 'N' | 'S' | 'L' | 'A' | 'B' })}
-                            className="px-2 py-1.5 bg-slate-900 border border-white/10 rounded text-xs"
-                          >
-                            <option value="N">N (대체 안함)</option>
-                            <option value="S">S (SMS 대체 - 동일 문구)</option>
-                            <option value="L">L (LMS 대체 - 동일 문구)</option>
-                            <option value="A">A (SMS + 별도 문구)</option>
-                            <option value="B">B (LMS + 별도 문구)</option>
-                          </select>
-                        </div>
-                        {(s.alimtalkNextType === 'L' || s.alimtalkNextType === 'B') && (
-                          <input
-                            type="text"
-                            value={s.alimtalkNextSubject || ''}
-                            onChange={(e) => updateStep(idx, { alimtalkNextSubject: e.target.value })}
-                            placeholder="LMS 대체 제목 (L/B 시 필수, 최대 40자)"
-                            maxLength={40}
-                            className="w-full px-2 py-1.5 bg-slate-900 border border-white/10 rounded text-xs"
+                      <div className="p-3 bg-amber-500/10 border border-amber-500/30 rounded text-xs">
+                        <div className="font-semibold text-amber-200 mb-2">알림톡 (KAKAO) step</div>
+                        {alimtalkSenders.length === 0 ? (
+                          <div className="p-3 bg-rose-500/10 border border-rose-500/30 rounded text-rose-200">
+                            승인된 발신프로필이 없습니다. 알림톡 발송 모달에서 발신프로필을 먼저 등록해주세요.
+                          </div>
+                        ) : alimtalkTemplates.length === 0 ? (
+                          <div className="p-3 bg-rose-500/10 border border-rose-500/30 rounded text-rose-200">
+                            승인된 알림톡 템플릿이 없습니다. 알림톡 발송 모달에서 템플릿을 먼저 등록 + 검수 통과 후 사용해주세요.
+                          </div>
+                        ) : (
+                          <AlimtalkChannelPanel
+                            senders={alimtalkSenders}
+                            templates={alimtalkTemplates}
+                            customerFieldOptions={customerFields}
+                            value={stepToAlimtalkState(s)}
+                            onChange={(next) => updateStep(idx, alimtalkStateToStepPatch(next))}
                           />
                         )}
-                        {(s.alimtalkNextType === 'A' || s.alimtalkNextType === 'B') && (
-                          <textarea
-                            value={s.alimtalkNextContents || ''}
-                            onChange={(e) => updateStep(idx, { alimtalkNextContents: e.target.value })}
-                            placeholder="대체 문구 (A/B 시 필수)"
-                            rows={3}
-                            maxLength={s.alimtalkNextType === 'A' ? 90 : 2000}
-                            className="w-full px-2 py-1.5 bg-slate-900 border border-white/10 rounded text-xs resize-y"
-                          />
-                        )}
-                        <div className="text-[10px] text-amber-200/50">
-                          알림톡 변수 매핑 (#{`{변수}`} → 고객 필드) UI는 운영 검증 후 단계적 통합 영역 — 우선 회사 admin이 직접 alimtalk_variable_map JSON 형식 입력 영역.
-                        </div>
                       </div>
                     )}
 
@@ -928,6 +998,14 @@ export default function JourneysPage() {
                             />
                             <div className="text-[10px] text-white/40 mt-0.5">{getByteLength(s.subject)} bytes · 통신사 권장 ~ 40바이트 안</div>
                           </div>
+                        )}
+
+                        {/* ★ D189 #3 (2026-05-22): MMS 이미지 업로드 — channel === 'mms' 시 mount (최대 3장, JPG 300KB) */}
+                        {s.channel === 'mms' && (
+                          <JourneyMmsUploader
+                            value={s.mmsImagePaths || []}
+                            onChange={(paths) => updateStep(idx, { mmsImagePaths: paths })}
+                          />
                         )}
 
                         {isEditing ? (

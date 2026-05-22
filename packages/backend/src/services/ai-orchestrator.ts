@@ -578,7 +578,7 @@ export async function orchestrateWithAI(ctx: AgentContext): Promise<Orchestrator
             unsubscribe_count: cnt.unsubscribeCount,
             // ★ Zero-Count 영구 원칙 안내 (Harold 명시 D171)
             warning: cnt.count === 0
-              ? '★ 매칭 0건 — 발송 차단 정합 (Harold 영구 원칙). 자동완화 절대 금지. message_composition 호출 X. 사용자에게 조건 재입력 안내 박을 것.'
+              ? '★ 매칭 0건 — 발송 차단 정합 (Harold 영구 원칙). 자동완화 절대 금지. message_composition 호출 X. 사용자에게 조건 재입력 안내 제공할 것.'
               : null,
           };
         } catch (cntErr: any) {
