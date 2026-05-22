@@ -189,6 +189,11 @@
 - **문제:** `feedback_sql_command_must_check_schema_first.md` 영구 룰 정독 의무 등록됐지만 SQL 작성 시점에 SCHEMA grep 자가 검증 누락. 추측 컬럼명 사용 사고. D162 42P08 사고 본질 차단 룰 무시.
 - **대책:** SQL 안내 직전 무조건 SCHEMA.md grep 자가 검증 (`grep -n '테이블명' status/SCHEMA.md` 결과 확인 후 SQL 작성). 추측 컬럼명 사용 X — 검증된 컬럼만 사용. 모르는 컬럼 사용 시 `\d 테이블명` 검증 SQL 먼저 안내.
 
+### 4-20. 모델명 사용자 노출 영구 룰 반복 위반 (D190-fix1)
+- **사례:** D190 #2 orchestrateWithAI 회사별 토글 신규 작성 시 AdminDashboard 토글 안내문 "Opus 4.7 Tool Use로 동적 흐름 결정" 표현 사용 + alimtalk-ai-matcher.ts/routes/ai.ts /operator/explain/multi-goal-decisioning.ts AI 시스템 프롬프트에 "(Opus 4.7)" 모델명 노출 + AiBatchesPage 페이지 안내문 "Anthropic Batch API" + batch 카드 모델 매트릭스 노출. Harold 격분 "슈퍼관리자 이런곳에서 저런 Opus 4.7 이런 모델명 다 빼라" 격분.
+- **문제:** D187-fix1에서 박힌 영구 룰 (UI 모델명 노출 9건 전수 정정) + `feedback_ai_operator_model_isolation.md` 영구 룰 + 비전 v0.3 영구 원칙 #4 (사용자 신뢰 절대 — 모델명 사용자 노출 X)에도 불구하고 D190 #2 신규 작성 시 또 반복. 슈퍼관리자도 사용자 영역 = 모델명 노출 X 의무 (Harold 명시). AI 시스템 프롬프트도 정정 의무 (AI 응답에 영향 가능 영역).
+- **대책:** `memory/feedback_ai_operator_model_isolation.md § D190 강화 룰` 영구 추가. 매 답변 출력 직전 모델명 grep 자가 검증 의무 — 패턴: `Opus 4\.7|Sonnet 4\.6|Haiku 4\.5|Anthropic Batch|Anthropic Memory|Anthropic Citations|claude-(opus|sonnet|haiku)` 사용자 노출 영역 (UI 안내문 + AI 시스템 프롬프트 + AI 응답 reasoning + 페이지 텍스트). 코드 주석 (`//` + `*`) + PM2 console.log만 skip. 신규 UI/AI 시스템 프롬프트 작성 시 모델명 단어 절대 미사용 — 추상 명칭 (예: "AI 모델" / "고급 추론 모드" / "동적 흐름 결정 모드" / "Batch 처리 모드") 사용 의무.
+
 ### 4-19. 사용자 노출 영역 광범위 grep 패턴 누락 사고 (D189-fix1 + D189-fix2)
 - **사례:** D188 위반 단어 117건 정정 직후 D189 진입 시점 Harold 격분 — EmailCampaignsPage / InAppMessagesPage 박-단어 2건 + AiMemoryPage "최근 캠페인 박음" 자동 학습 메모리 자동 누적 표시 + backend AI 시스템 프롬프트 / AI 응답 reasoning / Citations document context / 이메일 본문 / 음성 AI fallback / 자동 학습 메모리 영역 21건 잔존 (D189-fix1 통합 23건) + sdk-js src JSDoc + 인라인 주석 영역 18건 잔존 (D189-fix2) + sdk-js 빌드 시점 push.ts Buffer 사고 (D175-A부터 잠재 사고 — @types/node 미설치 환경). Harold "쳐 죽여버릴까" 수준 격분.
 - **문제:** D188 강화 grep 패턴이 단순 어간 + 활용형 + frontend sub-module 페이지 매트릭스만 = backend 사용자 노출 영역 (AI 시스템 프롬프트 + AI 응답 reasoning + Citations context + 이메일 본문 + 음성 AI fallback + 자동 학습 메모리) + SDK 매트릭스 누락. "backend 코드 주석 skip" Harold 명시 정합 룰이 모든 backend 박-단어 영역 skip 매트릭스로 잘못 적용. SDK 영역도 자사몰 개발자 IDE 노출 영역 = 정정 의무인데 미정정. SDK 빌드 시점 Buffer 사고 잠재 미발견 (이전 빌드 진입 0건).

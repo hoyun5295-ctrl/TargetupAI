@@ -107,7 +107,47 @@
 
 ---
 
-### 🚀 다음 세션 진입 가이드 (D189 통합 종결 후 — **운영 검증 + D190+ 진입**)
+### 🚀 다음 세션 진입 가이드 (D190 Phase A 통합 종결 후 — **운영 검증 + Phase B 진입**)
+
+> **★ D190 Phase A 통합 종결 매트릭스 (2026-05-22)**: D190 #1 Click 트래킹 인프라 + D190 #2 orchestrateWithAI 회사별 토글 + D190 #3 알림톡 자동 템플릿 매칭 + D189-fix3 자체 호스팅 자사몰 UI 정정 + D190-fix1 모델명 사용자 노출 영구 룰 위반 6건 정정.
+>
+> **D190 작업 완료 영역 (한 세션 통합 종결):**
+> - **D190 #1 Click 트래킹 인프라 + CDP 자동 customer 매칭** — utils/short-url.ts 강화 (CreateShortUrlInput 확장 + journey_id/step_id/variant_id/customer_id/external_id 추적) + utils/korean-ecommerce-domains.ts 신규 (CT-49 한국 자사몰 5종 + Shopify 도메인 인지 + external_id 자동 추출 + 모바일 user-agent 인지) + routes/short-url.ts 강화 (handleTrackedClick — Bandit reward 자동 누적 + CDP 자동 매칭 + last_clicked_at 갱신) + journey-executor.ts processExecution 통합 (sanitize 직후 shortenUrlsInText 호출 — SMS/LMS/MMS 영역만, 알림톡 검수 본문 변경 차단) + mysql-refund-sweeper.ts accumulateCampaignLearning click_count 정확 (D183 이미 정확 — 옛 주석 정정) + journey-ai-generator.ts AI 시스템 프롬프트 강화 (URL 직접 작성 + 자동 단축 안내)
+> - **D190 #2 orchestrateWithAI 회사별 토글** — routes/ai.ts propose endpoint 분기 (companies.use_ai_orchestrator 우선 + env flag fallback) + routes/admin.ts PATCH /api/admin/companies/:id/ai-orchestrator 신규 endpoint (슈퍼관리자 전용) + AdminDashboard.tsx 회사 편집 모달 토글 UI (즉시 PATCH 호출 + 실패 시 자동 rollback)
+> - **D190 #3 알림톡 자동 템플릿 매칭 + 변수 자동 매핑** — utils/alimtalk-ai-matcher.ts 신규 (CT-48 AI 매칭 + 회사 보유 승인 템플릿 + Memory 학습 통합 + 변수 자동 매핑 FIELD_MAP 정확/유사 + AI 실패 fallback 키워드 기반) + routes/ai.ts /operator/alimtalk/match endpoint + JourneysPage handleAlimtalkAutoMatch 함수 + 알림톡 step UI "AI 자동 매칭" 버튼 (Wand2 아이콘)
+> - **D189-fix3** — provider-registry.ts listProvidersForUI status 정정 (OAuth || Webhook+서명검증 = available). 자체 호스팅 자사몰 (D178 구현 완료 영역) UI '곧 출시' → '사용 가능' 정정
+> - **D190-fix1** (Harold 격분 영구 룰 반복 위반 사고) — 모델명 사용자 노출 6건 전수 정정. AdminDashboard 토글 안내문 + alimtalk-ai-matcher AI 시스템 프롬프트 + routes/ai.ts /operator/explain 시스템 프롬프트 + multi-goal-decisioning 시스템 프롬프트 + AiBatchesPage 안내문 ('Anthropic Batch API' → 'Batch 처리 모드') + AiBatchesPage batch 카드 모델 표시 제거
+>
+> **★ Harold 진행 완료 영역**: DB SQL 2건 (message_short_urls 7 컬럼 ALTER + companies use_ai_orchestrator 컬럼 ALTER) + 환경변수 2건 (SHORT_URL_BASE + SHORT_URL_FALLBACK) + tp-push + 서버 git pull + backend build:safe + frontend build:safe + pm2 restart all
+>
+> **D190 Phase A 본질** = 운영 안정화 + AI 학습 정확도 본질 (Click 트래킹 = Bandit reward 정확 누적 + Memory 학습 정확 향상) + 진정 AI Operator 본질 (Tool Use 회사별 토글 + 알림톡 자동 매칭 = 회사 admin 시간 절약 본질)
+>
+> **D191+ 진입 명령어 (다음 세션 첫 메시지)**:
+> ```
+> status/STATUS.md CURRENT_TASK § D191+ 진입 가이드 정독 + status/LESSONS_LEARNED.md §4-20 모델명 노출 반복 위반 사례 정독 + memory/feedback_ai_operator_model_isolation.md § D190 강화 룰 정독 + memory/project_d190_phase_a_completed.md 정독 → Phase A 운영 검증 결과 (orchestrateWithAI ENT 1사 + 알림톡 자동 매칭 + 단축 URL Bandit reward 누적) 받은 후 Phase B 진입 (Liquid Templating / Predictive Suite / Connected Content) 또는 Harold 신규 신고 우선 종결
+> ```
+>
+> **Phase A 운영 검증 영역 (Harold 직접 진입)**:
+> - ENT 후보사 1사 슈퍼관리자 UI → AI Orchestrator 토글 ON → 본인 AI Operator 진입 → 제안서 1회 생성 → PM2 로그 `[OrchestratorAI]` + `aiDecisionTrace` 확인
+> - 회사 admin → /ai-journeys → 자연어 한 줄 여정 생성 → 알림톡 step "AI 자동 매칭" 버튼 클릭 → 정합 결과 + 변수 매핑 검증
+> - 여정 활성화 + 발송 → 단축 URL 받은 사용자 클릭 → cdp_events 'message_click' + Bandit reward 누적 검증 (variant_id 있는 step 영역)
+> - 한국 자사몰 도메인 (카페24/네이버 스마트스토어/메이크샵/imweb/식스샵/Shopify) URL 단축 URL 클릭 → CDP 자동 customer 매칭 검증
+>
+> **Phase B 진입 영역 (D196~D210)**:
+>
+> | 순위 | 영역 | 분량 | 본질 |
+> |---|---|---|---|
+> | 1 | Liquid Templating (사용자별 동적 콘텐츠 + 조건 분기 + 변수 계산) | 16~20h | Braze Real-time Personalization 압도 |
+> | 2 | Predictive Suite (클릭률/이탈 위험/구매 가능성 AI 예측 — Memory + Bandit 데이터 기반) | 12~16h | Braze Sage AI 압도 |
+> | 3 | Connected Content (외부 API 동적 데이터 — 날씨/재고/가격 Journey 통합) | 12~16h | Braze Connected Content 정합 |
+>
+> **D190 잔존 영역**:
+> - npm publish @hanjullo/sdk v0.3.0 (Harold 결정 후 진입 — 자사몰 적용 시점)
+> - nginx reverse proxy `/c/*` → backend `/c/*` 정합 검증 (Harold 직접 진입)
+
+---
+
+### 🚀 옛 진입 가이드 (D189 통합 종결 후 — 참조용)
 
 > **★ D189 통합 종결 매트릭스 (2026-05-22)**: D189 #1~4 모든 잔존 영역 종결 + D189-fix1 위반 단어 23건 정정 + D189-fix2 sdk-js 잔존 박-단어 18건 정정 + push.ts Buffer 사고 fix + LESSONS_LEARNED §4-19 영구 사례 추가 + memory feedback_no_bakkeum_usage § D189 강화 룰 추가.
 >

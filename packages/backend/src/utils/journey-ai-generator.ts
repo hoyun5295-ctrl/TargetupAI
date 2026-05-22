@@ -208,6 +208,21 @@ ${memoryContext}
 ✓ %고객명% 변수 사용 권장
 ✓ LMS 250~500바이트 (광고 합성 후 320~570바이트)
 
+[★ Liquid 동적 콘텐츠 — D191 강화 (사용자별 1:1 개인화)]
+회사 admin이 고급 1:1 동적 콘텐츠를 원할 때 Liquid 문법 활용 권장. 발송 시점 사용자별 자동 분기 + 변수 계산:
+✓ 변수 출력: {{ customer.name }} / {{ customer.grade }} / {{ customer.points }}
+✓ 기본값 fallback: {{ customer.name | default: '고객' }} (값 없으면 '고객'으로 자동 대체)
+✓ 숫자 포맷: {{ customer.points | format_number }} → 2,300 (한국 천 단위 콤마 자동)
+✓ 조건 분기: {% if customer.grade == 'VIP' %} VIP 안내 {% elsif customer.purchase_count > 10 %} 단골 안내 {% else %} 일반 안내 {% endif %}
+✓ 계산: {{ customer.points | minus: 1000 }} (포인트 차감) / {{ customer.amount | times: 0.1 | round: 0 }} (10% 환산)
+✓ 등급별 인사 / 지역별 매장 안내 / 직전 구매 회상 = 1개 메시지로 N가지 분기 자동 처리
+
+[Liquid 활용 가이드 — AI 작성 시 의무]
+- 회사 admin이 "등급별 분기 / 지역별 / 직전 구매 회상" 영역 명시 시 Liquid 적극 활용
+- Liquid 분기 안의 구체 혜택 텍스트도 동일 룰: % / 원 / 무료 등 임의 작성 X → \`[혜택 안내 — 직접 수정해주세요]\` placeholder
+- 단순 일률 발송 영역은 Liquid 미사용 (기존 %고객명% 변수만 사용 권장)
+- 모르는 필드(customer.X)는 사용 X — 기본 컬럼만 사용: name / phone / grade / age / gender / region / points / purchase_count / recent_purchase_store / recent_purchase_amount / recent_purchase_date
+
 [★ 문자 사용 절대 룰 — 한국 통신사 SMS/LMS 표준]
 ✗ 이모지 절대 사용 금지 — 🎂 🎉 💝 🌸 🎁 ✨ 💌 🌷 🍀 ❤ 등 모든 이모지 통신사 미지원 (발송 실패 / 깨짐 위험)
 ✗ 비표준 특수문자 사용 금지:
@@ -219,11 +234,25 @@ ${memoryContext}
 ✓ 허용 단어: 한글 / 영문 / 숫자 / 표준 기호 ( . , ! ? : ; ( ) [ ] " ' + - * / = @ # $ % & | < > → ) / 줄바꿈
 ✓ "→" 단어는 자세히 안내 화살표로 허용
 
-[좋은 메시지 예시 — 5월 생일 D-7 사전 안내]
+[좋은 메시지 예시 — 5월 생일 D-7 사전 안내 (기본)]
 %고객명%님,
 봄의 끝자락, 곧 다가올 %고객명%님의 생일을 미리 축하드려요.
 
 가정의 달 5월에 맞이하는 이번 생일은 더욱 특별할 거예요.
+
+[혜택 안내 — 직접 수정해주세요]
+
+자세히 → [URL 입력]
+
+[좋은 메시지 예시 — 등급별 1:1 분기 (Liquid 활용)]
+{{ customer.name | default: '고객' }}님,
+{% if customer.grade == 'VIP' %}
+VIP 회원님께 먼저 안내드리는 특별한 봄 소식이에요.
+{% elsif customer.purchase_count > 10 %}
+{{ customer.purchase_count }}회 구매해주신 단골 고객님께 감사 인사드려요.
+{% else %}
+봄을 맞아 새로운 소식을 전해드려요.
+{% endif %}
 
 [혜택 안내 — 직접 수정해주세요]
 
@@ -375,6 +404,7 @@ ${memoryContext}
 ✗ 구체 혜택 (% / 원 / 무료 / 쿠폰) 임의 생성 금지 — placeholder 유지
 ✗ (광고) / 무료수신거부 080 직접 작성 X
 ✓ 최대 ${maxBytes}바이트 안
+✓ ★ D191 강화: Liquid 문법({{ }}, {% if %}, {% endif %}, {% elsif %}, {% else %}, | filter)이 원본에 있으면 정확히 보존. Liquid 분기 안 텍스트만 톤 정련. Liquid 미사용 영역은 기존대로 평문 처리.
 
 [3 후보 톤 매트릭스]
 1. 감성적: 따뜻함 / 시즌감 강조 / 호기심 유발 / 정서적 공감

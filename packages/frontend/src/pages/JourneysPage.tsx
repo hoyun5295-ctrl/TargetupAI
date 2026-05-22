@@ -1,13 +1,15 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   ArrowLeft, ChevronDown, ChevronUp, Loader2, Pause, Play, Plus, Power, RefreshCw, Sparkles,
   ShoppingCart, Cake, Calendar as CalendarIcon, UserPlus, Repeat, Moon, MessageSquare,
-  Clock, DollarSign, Users, Phone, Wand2, X, AlertCircle, Send, Trash2, Edit2, Save, Beaker,
+  Clock, DollarSign, Users, Phone, Wand2, X, AlertCircle, Send, Trash2, Edit2, Save, Beaker, Code,
 } from 'lucide-react';
 import JourneyVariantsEditor from '../components/journey/JourneyVariantsEditor';
 import JourneyMmsUploader from '../components/journey/JourneyMmsUploader';
+import LiquidPreviewModal from '../components/journey/LiquidPreviewModal';
 import AlimtalkChannelPanel, { type AlimtalkSenderProfile, type AlimtalkTemplate, type AlimtalkChannelState } from '../components/alimtalk/AlimtalkChannelPanel';
+import { detectLiquidSyntax, renderLiquid, flattenCustomerForLiquid, SAMPLE_CUSTOMERS } from '../utils/liquid-templating';
 
 // D187-fix3 (2026-05-21): One-shot AI Operator — 자연어 한 줄 → AI가 완전 패키지 자동 생성 → 1 페이지 검토 → 활성화
 //   영구 룰: AI는 흐름/안내문/감성 텍스트만 풍성하게 / 구체 혜택(% / 원 / 무료 / 쿠폰)은 회사 admin 직접 작성
@@ -207,6 +209,8 @@ export default function JourneysPage() {
   const [refining, setRefining] = useState<{ stepIdx: number; candidates: RefineCandidate[] } | null>(null);
   const [refineLoading, setRefineLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+  // ★ D191 (2026-05-22) Phase B-1 Liquid Templating: 미리보기 모달 state
+  const [liquidPreview, setLiquidPreview] = useState<{ stepIdx: number; messageTemplate: string; subject: string } | null>(null);
 
   const token = () => localStorage.getItem('token');
 
@@ -1080,6 +1084,22 @@ export default function JourneysPage() {
                           </div>
                         )}
 
+                        {/* ★ D191 (2026-05-22) Phase B-1 Liquid Templating: Liquid 문법 감지 + 미리보기 진입 */}
+                        {detectLiquidSyntax(s.messageTemplate + ' ' + s.subject) && (
+                          <div className="p-2 bg-violet-500/10 border border-violet-400/30 rounded text-[11px] flex items-center justify-between gap-2">
+                            <div className="flex items-center gap-1.5 text-violet-200">
+                              <Code className="w-3.5 h-3.5" />
+                              <span>Liquid 동적 콘텐츠 감지 — 사용자별 1:1 분기 + 변수 계산</span>
+                            </div>
+                            <button
+                              onClick={() => setLiquidPreview({ stepIdx: idx, messageTemplate: s.messageTemplate, subject: s.subject || '' })}
+                              className="px-2 py-1 bg-violet-500/20 hover:bg-violet-500/30 text-violet-200 rounded text-[10px] font-medium flex items-center gap-1"
+                            >
+                              <Sparkles className="w-3 h-3" /> 10명 미리보기
+                            </button>
+                          </div>
+                        )}
+
                         <div className="flex flex-wrap items-center gap-x-3 text-[11px] text-white/40">
                           <span className={bytes > maxBytes ? 'text-rose-400' : ''}>본문: {bytes} / {maxBytes} bytes</span>
                           {placeholderWarn && <span className="text-amber-300">[...] 영역 - 직접 수정 필요</span>}
@@ -1173,6 +1193,15 @@ export default function JourneysPage() {
             <div className="text-xs text-white/50 mt-1">시즌 + 회사 톤 + 학습 메모리 종합 (5~10초)</div>
           </div>
         </div>
+      )}
+
+      {/* ★ D191 (2026-05-22) Phase B-1: Liquid Templating 미리보기 modal */}
+      {liquidPreview && (
+        <LiquidPreviewModal
+          messageTemplate={liquidPreview.messageTemplate}
+          subject={liquidPreview.subject}
+          onClose={() => setLiquidPreview(null)}
+        />
       )}
     </div>
   );

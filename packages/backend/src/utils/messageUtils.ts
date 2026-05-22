@@ -15,6 +15,7 @@ import { formatNumericLike } from './format-number';
 import { reverseDisplayValue, FIELD_DISPLAY_MAP, renderFieldValue } from './standard-field-map';
 import { cellToString } from './normalize';
 import { query } from '../config/database';
+import { renderLiquid, detectLiquidSyntax, flattenCustomerForLiquid } from './liquid-templating';
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // 0-A) 날짜 포맷팅 헬퍼 — 순수 YYYY-MM-DD는 new Date() 없이 직접 파싱
@@ -196,7 +197,13 @@ export function replaceVariables(
   customer: Record<string, any> | null,
   fieldMappings: Record<string, VarCatalogEntry>,
   addressBookFields?: AddressBookFields,
-  options?: { skipNumberFormatting?: boolean }
+  options?: {
+    skipNumberFormatting?: boolean;
+    // ★ D191 (2026-05-22) Phase B-1 Liquid Templating: 회사 컨텍스트 (Liquid {{ company.name }} 영역 지원)
+    company?: { name?: string; brand_name?: string };
+    // ★ D191: 테스트 분리용 (Liquid 미적용 강제) — backward compat 검증 영역
+    skipLiquid?: boolean;
+  }
 ): string {
   if (!template) return '';
 
@@ -238,13 +245,30 @@ export function replaceVariables(
     }
   }
 
+  // ★ D191 (2026-05-22) Phase B-1 Liquid Templating
+  // Step 1: Liquid 렌더링 (Shopify 표준 호환 — {{ customer.X }} / {% if X %} ... {% endif %})
+  // - detectLiquidSyntax = false 시 자동 skip (backward compat 100% 정합 — 기존 %변수% 캠페인 영향 0)
+  // - 오류 시 원본 텍스트 반환 (발송 차단 X)
+  // - 주소록 fallback 후 + fieldMappings 치환 전 위치 — 영문 column 표준 우선
+  if (!options?.skipLiquid && detectLiquidSyntax(result)) {
+    const liquidResult = renderLiquid(result, {
+      customer: flattenCustomerForLiquid(customer),
+      company: options?.company,
+      now: new Date(),
+    });
+    result = liquidResult.rendered;
+    if (liquidResult.errors.length > 0) {
+      console.warn('[Liquid] 렌더링 오류:', JSON.stringify(liquidResult.errors));
+    }
+  }
+
   // customer나 fieldMappings 없으면 주소록 치환만 하고 안전망 적용 후 반환
   if (!customer || !fieldMappings) {
     result = cleanLeftoverVars(result);
     return result;
   }
 
-  // 1단계: fieldMappings 기반 DB 필드 치환
+  // 2단계: fieldMappings 기반 DB 필드 치환
   // ★ D142 (2026-04-28): renderFieldValue 단일 진입점으로 단순화 — Harold님 원칙 그대로 구현.
   //   "고정 22개 = FIELD_DISPLAY_FORMAT_MAP 룰대로 / 커스텀(custom_1~15) = 있는 그대로"
   //
@@ -276,7 +300,7 @@ export function replaceVariables(
     result = result.split(pattern).join(displayValue);
   }
 
-  // 2단계 안전장치: 매핑에 없는 잔여 %...% 패턴 제거 (D144 P2: 시작 문자 한글/영문 강제로 본문 % 보존)
+  // 3단계 안전장치: 매핑에 없는 잔여 %...% 패턴 제거 (D144 P2: 시작 문자 한글/영문 강제로 본문 % 보존)
   result = cleanLeftoverVars(result);
 
   return result;
@@ -466,14 +490,30 @@ export function prepareSendMessage(
     addressBookFields?: AddressBookFields;
     subject?: string;
     skipNumberFormatting?: boolean;  // ★ D123: 직접발송은 고객 원본 데이터 그대로
+    // ★ D191 (2026-05-22) Phase B-1 Liquid Templating: Liquid 컨텍스트 (회사 정보)
+    company?: { name?: string; brand_name?: string };
+    skipLiquid?: boolean;
   }
 ): { message: string; subject: string } {
-  // 1. 변수 치환
-  let msg = replaceVariables(template, customer, fieldMappings, options.addressBookFields, { skipNumberFormatting: options.skipNumberFormatting });
+  // 1. 변수 치환 (Liquid 렌더링 + %변수% 치환 통합)
+  let msg = replaceVariables(template, customer, fieldMappings, options.addressBookFields, {
+    skipNumberFormatting: options.skipNumberFormatting,
+    company: options.company,
+    skipLiquid: options.skipLiquid,
+  });
   // 2. (광고)+080 본문 (중복 방지 안전장치 내장)
   msg = buildAdMessage(msg, options.msgType, options.isAd, options.opt080Number);
-  // 3. ★ KISA 2026-05: 제목 (광고) 부착 (isAd + LMS/MMS만)
-  const subj = buildAdSubject(options.subject || '', options.msgType, options.isAd);
+  // 3. ★ KISA 2026-05: 제목 (광고) 부착 (isAd + LMS/MMS만) + ★ D191 Liquid: 제목도 Liquid 렌더링
+  let subj = options.subject || '';
+  if (subj && !options.skipLiquid && detectLiquidSyntax(subj)) {
+    const subjLiquid = renderLiquid(subj, {
+      customer: flattenCustomerForLiquid(customer),
+      company: options.company,
+      now: new Date(),
+    });
+    subj = subjLiquid.rendered;
+  }
+  subj = buildAdSubject(subj, options.msgType, options.isAd);
   return { message: msg, subject: subj };
 }
 
