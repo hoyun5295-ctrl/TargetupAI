@@ -65,6 +65,7 @@ export interface PredictionCustomerRow {
   churnRisk: number;
   purchaseLikelihood: number;
   lastActivityDays: number | null;
+  modelVersion?: string;  // ★ D210+ Phase 3 (2026-05-23): cold vs trained 표시 매트릭스
 }
 
 export interface ModelAccuracy {
@@ -434,6 +435,7 @@ function rowToCustomer(row: any): PredictionCustomerRow {
     churnRisk: Number(row.churn_risk) || 0,
     purchaseLikelihood: Number(row.purchase_likelihood) || 0,
     lastActivityDays: row.last_activity_days !== null ? Math.floor(Number(row.last_activity_days)) : null,
+    modelVersion: row.model_version || undefined,
   };
 }
 
@@ -442,69 +444,244 @@ function rowToCustomer(row: any): PredictionCustomerRow {
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 export interface CompanyPredictionSummary {
-  totalCustomers: number;
-  highRiskCount: number;          // churn_risk > 0.7
-  highPotentialCount: number;     // purchase_likelihood > 0.6
+  totalCustomersInCompany: number;        // ★ D210+ Phase 3 (2026-05-23): 회사 전체 customers (cdp_customer_predictions 영역 X)
+  totalCustomersInPredictions: number;    // ★ D210+ Phase 3: cdp_customer_predictions 누적 영역
+  predictionCoverage: number;              // ★ D210+ Phase 3: predictions / company (0~1)
+  coldStartCount: number;                  // ★ D210+ Phase 3: model_version = 'v1.0-cold'
+  trainedCount: number;                    // ★ D210+ Phase 3: model_version = 'v1.0-trained'
+  isAllColdStart: boolean;                 // ★ D210+ Phase 3: trainedCount = 0 영역 (UI 안내 카드 조건)
+  lastComputedAt: Date | null;             // ★ D210+ Phase 3
+  highRiskCount: number;                   // churn_risk > 0.7
+  highPotentialCount: number;              // purchase_likelihood > 0.6
   avgClickScore: number;
   avgChurnRisk: number;
   avgPurchaseLikelihood: number;
-  insightText: string;            // AI 시스템 프롬프트 통합용
+  insightText: string;                     // AI 시스템 프롬프트 통합용
+  // ★ 옛 영역 보존 (legacy 호환) — 옛 코드 (orchestrator 등) totalCustomers 사용 영역 정합
+  totalCustomers: number;                  // = totalCustomersInCompany (회사 전체 영역)
 }
 
 export async function getCompanyPredictionSummary(companyId: string): Promise<CompanyPredictionSummary> {
   try {
+    // ★ D210+ Phase 3 (2026-05-23 Harold 명시): 회사 전체 customers + cdp_customer_predictions 영역 양쪽 카운트 정합 의무
+    //   옛 매트릭스 = cdp_customer_predictions 카운트만 = 회사 admin 인지 사고 (29,997명 회사 영역 = 5,000명만 표시 사고)
+    //   신규 매트릭스 = totalCustomersInCompany (customers 영역) + totalCustomersInPredictions (cdp_customer_predictions 영역) + coverage % 표시
+    const companyRes = await query(
+      `SELECT COUNT(*)::int AS total FROM customers WHERE company_id = $1::uuid`,
+      [companyId]
+    );
+    const totalInCompany = Number(companyRes.rows[0]?.total) || 0;
+
     const r = await query(
       `SELECT
          COUNT(*) AS total,
+         COUNT(*) FILTER (WHERE model_version = 'v1.0-cold') AS cold_count,
+         COUNT(*) FILTER (WHERE model_version = 'v1.0-trained') AS trained_count,
          COUNT(*) FILTER (WHERE churn_risk > 0.7) AS high_risk,
          COUNT(*) FILTER (WHERE purchase_likelihood > 0.6) AS high_potential,
          AVG(click_score) AS avg_click,
          AVG(churn_risk) AS avg_churn,
-         AVG(purchase_likelihood) AS avg_purchase
+         AVG(purchase_likelihood) AS avg_purchase,
+         MAX(computed_at) AS last_computed
        FROM cdp_customer_predictions
        WHERE company_id = $1::uuid`,
       [companyId]
     );
     const row = r.rows[0] || {};
-    const total = Number(row.total) || 0;
+    const totalInPredictions = Number(row.total) || 0;
+    const coldCount = Number(row.cold_count) || 0;
+    const trainedCount = Number(row.trained_count) || 0;
     const highRisk = Number(row.high_risk) || 0;
     const highPotential = Number(row.high_potential) || 0;
     const avgClick = Number(row.avg_click) || 0.5;
     const avgChurn = Number(row.avg_churn) || 0.5;
     const avgPurchase = Number(row.avg_purchase) || 0.5;
+    const lastComputedAt = row.last_computed ? new Date(row.last_computed) : null;
+    const predictionCoverage = totalInCompany > 0 ? totalInPredictions / totalInCompany : 0;
+    const isAllColdStart = totalInPredictions > 0 && trainedCount === 0;
 
     let insightText: string;
-    if (total === 0) {
-      insightText = 'AI 예측 점수 데이터가 아직 누적되지 않았습니다. 발송 시작 후 1시간 안에 자동 계산됩니다.';
+    if (totalInPredictions === 0) {
+      insightText = '예측 점수 데이터가 아직 누적되지 않았습니다. 발송 시작 후 1시간 안에 자동 계산됩니다.';
+    } else if (isAllColdStart) {
+      insightText = `전체 ${totalInPredictions.toLocaleString()}명 모두 등급/활동 기반 추정치 (cold start). 실제 발송 누적 후 trained 모델로 자동 진화 — 정확도 시간 흐름과 함께 향상됩니다.`;
     } else {
       const parts: string[] = [];
-      if (highRisk > 0) parts.push(`이탈 위험 70%+ 고객 ${highRisk.toLocaleString()}명 — 회복 캠페인 즉시 추천`);
+      if (highRisk > 0) parts.push(`이탈 위험 70%+ 고객 ${highRisk.toLocaleString()}명 — 회복 캠페인 추천`);
       if (highPotential > 0) parts.push(`구매 가능성 60%+ 고객 ${highPotential.toLocaleString()}명 — 구매 유도 캠페인 추천`);
       if (parts.length === 0) parts.push(`평균 클릭 가능성 ${(avgClick * 100).toFixed(0)}% / 이탈 위험 ${(avgChurn * 100).toFixed(0)}% / 구매 가능성 ${(avgPurchase * 100).toFixed(0)}%`);
       insightText = parts.join(' · ');
     }
 
     return {
-      totalCustomers: total,
+      totalCustomersInCompany: totalInCompany,
+      totalCustomersInPredictions: totalInPredictions,
+      predictionCoverage: round3(predictionCoverage),
+      coldStartCount: coldCount,
+      trainedCount,
+      isAllColdStart,
+      lastComputedAt,
       highRiskCount: highRisk,
       highPotentialCount: highPotential,
       avgClickScore: round3(avgClick),
       avgChurnRisk: round3(avgChurn),
       avgPurchaseLikelihood: round3(avgPurchase),
       insightText,
+      totalCustomers: totalInCompany,  // legacy 호환
     };
   } catch (err: any) {
     console.warn('[Predictive] getCompanyPredictionSummary 오류:', err?.message);
     return {
-      totalCustomers: 0,
+      totalCustomersInCompany: 0,
+      totalCustomersInPredictions: 0,
+      predictionCoverage: 0,
+      coldStartCount: 0,
+      trainedCount: 0,
+      isAllColdStart: false,
+      lastComputedAt: null,
       highRiskCount: 0,
       highPotentialCount: 0,
       avgClickScore: 0.5,
       avgChurnRisk: 0.5,
       avgPurchaseLikelihood: 0.5,
       insightText: '예측 점수 조회 오류 — 추후 자동 재계산됩니다.',
+      totalCustomers: 0,
     };
   }
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// 7. ★ D210+ Phase 3 (2026-05-23 Harold 명시): listCompanyPredictionCustomers
+//    회사 전체 customer 영역 페이지네이션 + 검색 + 필터 + 정렬 매트릭스 (Top 50명 영역 폐기)
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+export type PredictionFilterType = 'all' | 'high_risk' | 'high_potential' | 'high_click' | 'cold_start';
+export type PredictionSortType =
+  | 'churn_risk_desc'
+  | 'purchase_likelihood_desc'
+  | 'click_score_desc'
+  | 'last_activity_asc'
+  | 'last_activity_desc';
+
+export interface ListPredictionCustomersOptions {
+  page?: number;       // 1-based (default 1)
+  limit?: number;      // default 10
+  search?: string;     // name / phone / grade / region ILIKE
+  filter?: PredictionFilterType;
+  sort?: PredictionSortType;
+}
+
+export interface ListPredictionCustomersResult {
+  customers: PredictionCustomerRow[];
+  totalCount: number;       // 회사 전체 cdp_customer_predictions 영역
+  filteredCount: number;    // search + filter 적용 후 영역
+  page: number;
+  totalPages: number;
+  limit: number;
+}
+
+export async function listCompanyPredictionCustomers(
+  companyId: string,
+  options: ListPredictionCustomersOptions = {},
+): Promise<ListPredictionCustomersResult> {
+  const page = Math.max(1, Number(options.page) || 1);
+  const limit = Math.min(100, Math.max(1, Number(options.limit) || 10));
+  const search = (options.search || '').trim();
+  const filter: PredictionFilterType = options.filter || 'all';
+  const sort: PredictionSortType = options.sort || 'churn_risk_desc';
+  const offset = (page - 1) * limit;
+
+  // 필터 WHERE 매트릭스
+  const filterClause = (() => {
+    switch (filter) {
+      case 'high_risk': return 'AND p.churn_risk > 0.7';
+      case 'high_potential': return 'AND p.purchase_likelihood > 0.6';
+      case 'high_click': return 'AND p.click_score > 0.5';
+      case 'cold_start': return `AND p.model_version = 'v1.0-cold'`;
+      case 'all':
+      default: return '';
+    }
+  })();
+
+  // 정렬 ORDER BY 매트릭스
+  const orderClause = (() => {
+    switch (sort) {
+      case 'purchase_likelihood_desc': return 'ORDER BY p.purchase_likelihood DESC, p.churn_risk DESC';
+      case 'click_score_desc': return 'ORDER BY p.click_score DESC, p.churn_risk DESC';
+      case 'last_activity_asc': return 'ORDER BY c.recent_purchase_date ASC NULLS LAST';
+      case 'last_activity_desc': return 'ORDER BY c.recent_purchase_date DESC NULLS LAST';
+      case 'churn_risk_desc':
+      default: return 'ORDER BY p.churn_risk DESC, c.recent_purchase_date ASC NULLS LAST';
+    }
+  })();
+
+  // 검색 ILIKE 매트릭스 (4 영역 OR)
+  const params: any[] = [companyId];
+  let searchClause = '';
+  if (search) {
+    params.push(`%${search}%`);
+    const idx = params.length;
+    searchClause = `AND (
+      c.name ILIKE $${idx}
+      OR c.phone ILIKE $${idx}
+      OR COALESCE(c.grade, '') ILIKE $${idx}
+      OR COALESCE(c.region, '') ILIKE $${idx}
+    )`;
+  }
+
+  // 전체 카운트 (회사 cdp_customer_predictions 영역 총합)
+  const totalRes = await query(
+    `SELECT COUNT(*)::int AS total
+     FROM cdp_customer_predictions p
+     WHERE p.company_id = $1::uuid`,
+    [companyId]
+  );
+  const totalCount = Number(totalRes.rows[0]?.total) || 0;
+
+  // 필터 + 검색 적용 카운트
+  const filteredRes = await query(
+    `SELECT COUNT(*)::int AS total
+     FROM cdp_customer_predictions p
+     INNER JOIN customers c ON c.id = p.customer_id
+     WHERE p.company_id = $1::uuid
+       ${filterClause}
+       ${searchClause}`,
+    params
+  );
+  const filteredCount = Number(filteredRes.rows[0]?.total) || 0;
+
+  // 데이터 조회 (페이지네이션 적용)
+  params.push(limit);
+  params.push(offset);
+  const dataRes = await query(
+    `SELECT
+       p.customer_id, c.name, c.phone, c.grade, c.region,
+       p.click_score, p.churn_risk, p.purchase_likelihood, p.model_version,
+       CASE WHEN c.recent_purchase_date IS NOT NULL THEN
+         EXTRACT(EPOCH FROM (NOW() - c.recent_purchase_date)) / 86400
+       ELSE NULL END AS last_activity_days
+     FROM cdp_customer_predictions p
+     INNER JOIN customers c ON c.id = p.customer_id
+     WHERE p.company_id = $1::uuid
+       ${filterClause}
+       ${searchClause}
+     ${orderClause}
+     LIMIT $${params.length - 1}
+     OFFSET $${params.length}`,
+    params
+  );
+
+  const customers = dataRes.rows.map(rowToCustomer);
+  const totalPages = filteredCount > 0 ? Math.ceil(filteredCount / limit) : 0;
+
+  return {
+    customers,
+    totalCount,
+    filteredCount,
+    page,
+    totalPages,
+    limit,
+  };
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -578,4 +755,174 @@ export async function recomputeCompanyPredictions(
   }
 
   return { updated, skipped };
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// 8. ★ D210+ Phase 3 (2026-05-23 Harold 명시): computeCompanyPredictionsBatch
+//    회사 전체 customer 영역 1 joint SQL UPSERT 매트릭스 — limit 영역 영구 폐기
+//
+//    옛 매트릭스 한계:
+//      - recomputeCompanyPredictions = 5,000 limit + 단일 customer 1 SQL × N (4 sub-SELECT)
+//      - 29,997명 회사 영역 = 1 cron당 5,000명 / 6시간 전수 / 24h TTL cycle
+//      - 큰 회사 영역 stable coverage X / Dashboard 회사 admin 인지 사고
+//
+//    신규 매트릭스:
+//      - 회사 전체 customer 영역 1 SQL UPSERT (CTE + window function)
+//      - 29,997명 영역 ≈ 3~10초 영역 (1 cron 진입 안 전수 갱신 완료)
+//      - 회사 admin Dashboard 영역 회사 전체 영역 영구 표시 정합
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+export interface CompanyBatchResult {
+  updated: number;
+  trainedCount: number;
+  coldCount: number;
+}
+
+export async function computeCompanyPredictionsBatch(
+  companyId: string,
+): Promise<CompanyBatchResult> {
+  try {
+    const r = await query(
+      `WITH base_customers AS (
+        SELECT
+          c.id, c.grade, c.recent_purchase_date, c.purchase_count, c.created_at
+        FROM customers c
+        WHERE c.company_id = $1::uuid
+      ),
+      click_events AS (
+        SELECT
+          customer_id,
+          MAX(occurred_at) AS last_click_at,
+          COUNT(*)::int AS total_clicks
+        FROM cdp_events
+        WHERE company_id = $1::uuid
+          AND event_name = 'message_click'
+          AND customer_id IS NOT NULL
+        GROUP BY customer_id
+      ),
+      sent_logs AS (
+        SELECT
+          e.customer_id,
+          COUNT(*)::int AS total_sent
+        FROM journey_step_logs l
+        JOIN journey_executions e ON e.id = l.execution_id
+        WHERE l.status = 'sent'
+          AND e.customer_id IN (SELECT id FROM base_customers)
+        GROUP BY e.customer_id
+      ),
+      enriched AS (
+        SELECT
+          c.id,
+          COALESCE(c.grade, '일반') AS grade,
+          COALESCE(c.purchase_count, 0) AS purchase_count,
+          cl.last_click_at,
+          COALESCE(cl.total_clicks, 0) AS total_clicks,
+          COALESCE(s.total_sent, 0) AS total_sent,
+          GREATEST(
+            COALESCE(c.recent_purchase_date, '1970-01-01'::timestamptz),
+            COALESCE(cl.last_click_at, '1970-01-01'::timestamptz),
+            c.created_at
+          ) AS last_activity_at
+        FROM base_customers c
+        LEFT JOIN click_events cl ON cl.customer_id = c.id
+        LEFT JOIN sent_logs s ON s.customer_id = c.id
+      ),
+      computed AS (
+        SELECT
+          id,
+          total_sent,
+          -- click_score: trained (Beta-Laplace smoothing) 또는 cold start (grade fallback + recency adjust)
+          CASE
+            WHEN total_sent >= 3 THEN
+              GREATEST(0.0::numeric, LEAST(1.0::numeric,
+                ((total_clicks + 1.0) / (total_sent + 2.0))::numeric
+              ))
+            ELSE
+              GREATEST(0.0::numeric, LEAST(1.0::numeric, (
+                (CASE grade
+                  WHEN 'VIP' THEN 0.32
+                  WHEN 'Gold' THEN 0.24
+                  WHEN 'Silver' THEN 0.18
+                  WHEN '신규' THEN 0.20
+                  ELSE 0.15
+                END)
+                + (CASE
+                    WHEN last_click_at IS NULL THEN 0
+                    WHEN EXTRACT(EPOCH FROM (NOW() - last_click_at)) / 86400 <= 30 THEN 0.10
+                    WHEN EXTRACT(EPOCH FROM (NOW() - last_click_at)) / 86400 >= 60 THEN -0.05
+                    ELSE 0
+                  END)
+              )::numeric))
+          END AS click_score,
+          -- churn_risk = sigmoid((daysSinceActivity - 60) / 20) — 60일 0.5, 90일 0.78, 120일 0.95
+          GREATEST(0.0::numeric, LEAST(1.0::numeric,
+            (1.0 / (1.0 + EXP(-((EXTRACT(EPOCH FROM (NOW() - last_activity_at)) / 86400 - 60) / 20))))::numeric
+          )) AS churn_risk,
+          -- purchase_likelihood: trained (purchase_rate + recency + click + base) 또는 cold start (grade + recency)
+          CASE
+            WHEN total_sent >= 3 AND purchase_count > 0 THEN
+              GREATEST(0.0::numeric, LEAST(1.0::numeric, (
+                (LEAST(purchase_count::numeric / GREATEST(total_sent::numeric, 1.0), 1.0) * 0.6)
+                + (CASE
+                    WHEN EXTRACT(EPOCH FROM (NOW() - last_activity_at)) / 86400 <= 30 THEN 0.15
+                    WHEN EXTRACT(EPOCH FROM (NOW() - last_activity_at)) / 86400 <= 90 THEN 0.05
+                    ELSE -0.10
+                  END)
+                + (CASE WHEN total_clicks > 0 THEN 0.08 ELSE 0 END)
+                + 0.20
+              )::numeric))
+            ELSE
+              GREATEST(0.0::numeric, LEAST(1.0::numeric, (
+                (CASE grade
+                  WHEN 'VIP' THEN 0.28
+                  WHEN 'Gold' THEN 0.18
+                  WHEN 'Silver' THEN 0.12
+                  WHEN '신규' THEN 0.15
+                  ELSE 0.08
+                END)
+                + (CASE
+                    WHEN EXTRACT(EPOCH FROM (NOW() - last_activity_at)) / 86400 <= 30 THEN 0.10
+                    WHEN EXTRACT(EPOCH FROM (NOW() - last_activity_at)) / 86400 <= 90 THEN 0
+                    ELSE -0.08
+                  END)
+              )::numeric))
+          END AS purchase_likelihood
+        FROM enriched
+      )
+      INSERT INTO cdp_customer_predictions
+        (customer_id, company_id, click_score, churn_risk, purchase_likelihood, computed_at, model_version)
+      SELECT
+        id, $1::uuid,
+        ROUND(click_score, 3),
+        ROUND(churn_risk, 3),
+        ROUND(purchase_likelihood, 3),
+        NOW(),
+        CASE WHEN total_sent >= 3 THEN 'v1.0-trained' ELSE 'v1.0-cold' END
+      FROM computed
+      ON CONFLICT (customer_id) DO UPDATE SET
+        click_score = EXCLUDED.click_score,
+        churn_risk = EXCLUDED.churn_risk,
+        purchase_likelihood = EXCLUDED.purchase_likelihood,
+        computed_at = EXCLUDED.computed_at,
+        model_version = EXCLUDED.model_version
+      RETURNING model_version`,
+      [companyId]
+    );
+
+    let trainedCount = 0;
+    let coldCount = 0;
+    for (const row of r.rows) {
+      if (row.model_version === 'v1.0-trained') trainedCount++;
+      else coldCount++;
+    }
+
+    return {
+      updated: r.rows.length,
+      trainedCount,
+      coldCount,
+    };
+  } catch (err: any) {
+    console.error('[Predictive] computeCompanyPredictionsBatch 오류:', err?.message);
+    throw err;
+  }
 }

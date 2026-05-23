@@ -107,9 +107,24 @@
 
 ---
 
-### 🚀 다음 세션 진입 가이드 (D209+ 통합 종결 후 — **D210+ Phase 1~3 진입**)
+### 🚀 다음 세션 진입 가이드 (D210+ Phase 1+2+fix1~10 통합 종결 후 — **D210+ Phase 3 진입**)
 
-> **★ D209+ 통합 종결 매트릭스 (2026-05-22~23)**: Step 1~6 통합 강화 (Sonnet 4.6 전환 8건 + 시스템 프롬프트 5 Section + 매장 region CT-53 + Phase D 비용 안전 CT-55/CT-56 + AI Operator legacy + plan 매트릭스) + UX 정정 누적 (좌우 분할 + 호버 + description 1줄 + 7 sub-module 헤더) + Walkthrough 통합 (STEP 6 + 매번 표시 매트릭스 + Dashboard 통합) + Harold 직접 배포 완료. 옛 [[memory/project_d209_plus_completed]] 정독 본질.
+> **★ D210+ Phase 1+2+fix1~10 통합 종결 매트릭스 (2026-05-23)**:
+> - **Phase 1**: AiOperatorWalkthroughModal STEP 6 메뉴 매트릭스 + constants/ai-operator-modules.ts 신규 + 마케팅팀 친화 5 STEPS 정정 (메신저 비유) + 노트북 잘림 차단 (104px 절약 isLast 분기)
+> - **Phase 2**: CT-58 company-data-profile 신규 (회사 19 컬럼 채워짐 비율 동적 분석 + 안전 70%+/분기 30~70%/차단 30%- 3단계 분류) + ai.ts/ai-orchestrator/journey-ai-generator/message-sanitizer 통합 정정
+> - **Phase 2-fix1**: CompanyDataProfileCard 신규 (3축 100% 보완 시각화) + GET /operator/data-profile
+> - **Phase 2-fix2**: usePersonalization 자동 활성 (safeFields 1+ 시 자동 true + percentVar 자동 활용)
+> - **Phase 2-fix3**: formatProfileForAiPrompt 변수 활용 강제 강화 (1~3개 자연 활용 의무 + 예시) + AiOperatorPage lg:grid-cols-5 (메시지 40%/4 카드 60% 2×2)
+> - **Phase 2-fix4**: 추천 메시지 원본/적용 토글 + highlightVars dark theme + GET /operator/sample-customer
+> - **Phase 2-fix5**: sample-customer GET → POST + filters body (proposal.target.filters 매칭 상위 1건)
+> - **Phase 2-fix6**: JourneysPage 6 sub-agent 진행 카드 (JOURNEY_SUB_AGENT_STEPS) + 토글 + 변수 하이라이트 + journey-ai-generator 5단 매트릭스 풍성 강화 (500~700바이트)
+> - **Phase 2-fix7**: setProgressStep(length) 강제 영역 폐기 → useEffect 1.5초 주기 자연 진행 정합
+> - **Phase 2-fix8**: 2단 시각 효과 (Stage 1 = 6 sub-agent 카드 / Stage 2 = 둥근 스피너 + "마지막 다듬는 중" 안내) + setTimeout 1500+3700ms
+> - **Phase 2-fix9**: mergeAndHighlightVars renderLiquid 통합 ({% if %} Liquid 태그 렌더링 사고 차단) + sampleCustomerFields backend 응답 + highlightVars Liquid 태그/변수 amber 강조 추가
+> - **Phase 2-fix10**: JourneysPage 위/아래 영역 정확 분리 (위 = 원본 highlightVars / 아래 실제 발송 미리보기 = 적용 mergeAndHighlightVars + Liquid 렌더링 + 광고/무료거부)
+> - Harold 직접 배포 완료. 상세 매트릭스 = [[memory/project_d210_phase2_completed]] 정독 의무.
+>
+> **★ D209+ 옛 종결 매트릭스 (2026-05-22~23)**: Step 1~6 통합 강화 + UX 정정 + AI Operator legacy + plan 매트릭스 + Harold 직접 배포 완료. 상세 = [[memory/project_d209_plus_completed]] 정독.
 >
 > **실제 한줄로 요금제 매트릭스 확정**:
 > | plan_code | 월 가격 | max_customers | ai_calls_per_month |
@@ -124,15 +139,39 @@
 >
 > **isAiOperatorAllowed 현재 매트릭스** = ENV `AI_OPERATOR_ALLOWED_USERS` 만 진입 (Harold = hoyun 본질) + ENV 미설정 시 모두 차단 (개발 진행 영역). DB schema (legacy_grandfathered + first_signup_discount_until) 유지 (향후 개발 종결 후 직원 + 회사 admin 공개 시점 활성 본질).
 >
-> **D210+ 다음 세션 진입 매트릭스 (Harold 명시 본질 — Harold + CTO 함께 진행)**:
-> 1. **AiOperatorWalkthroughModal STEP 6 메뉴 매트릭스 추가** — 10 SUB_MODULE_CARDS 3열 + 한 줄 description + 특별혜택 안내 본질 (Phase 1 ~1~2h)
-> 2. **한줄 프롬프트 문안 3 안 생성 강화** — 입력 이해 + 개인화 자동 (회사 톤 + 시즌 + 메모리 + Predictive + Liquid) + 풍성 + 다양성 본질 (Phase 2 ~2~3h)
-> 3. **메뉴 하나하나 본질 강화** — Braze/Salesforce 압도 본질 + 회사 admin "와~" 본질 (Phase 3 메뉴별 ~1~2h, Harold + CTO 함께 진행 본질)
+> **D210+ Phase 3 진입 매트릭스 (Harold + CTO 함께 본질)**:
+> 10개 메뉴 본질 강화 (Braze/Salesforce 압도) — 메뉴별 1~2h, Harold + CTO 함께 검토 + 강화 방향 결정 + 구현 흐름:
 >
-> **D210+ 진입 명령어 (다음 세션 첫 메시지)**:
+> | # | 메뉴 | 경로 | 강화 방향 |
+> |---|---|---|---|
+> | 1 | 여정 자동화 | `/ai-journeys` | Liquid 분기 정확도 + A/B 비교 UX |
+> | 2 | AI 자율 예측 | `/predictive` | cold start → 누적 데이터 v2 정확도 |
+> | 3 | AI 영구운영 | `/continuous-operator` | 의사결정 정확도 + ENT 자동 실행 임계값 |
+> | 4 | 성과리포트 | `/performance` | Next Action Advisor 추천 정확도 |
+> | 5 | 자사몰 연동 | `/cdp-settings` | Shopify/메이크샵 실 구현 |
+> | 6 | 인앱메시지 | `/inapp-messages` | 자사몰 실 배포 + CTR 통계 |
+> | 7 | Email 캠페인 | `/email-campaigns` | 트래킹 정확도 + bounce/spam |
+> | 8 | 모바일 DM | `/dm-builder` | 카드 단위 편집 UX 강화 |
+> | 9 | AI 메모리 | `/ai-memory` | UI 안내 + 학습 정확도 시각화 |
+> | 10 | AI 사용량 | `/ai-usage` | cache hit rate 통계 + 비용 절감 |
+>
+> **D210+ Phase 3 진입 영역 — 1순위 = Phase 3-Predictive** (Harold 명시 2026-05-23):
+> - PredictiveDashboardPage 목업 데이터 제거 + 실제 데이터 source 검증
+> - Top 50명 영역 → 전체 customer 페이징 (10개씩) + 검색 (고객명/연락처/등급/지역) + 필터 + 정렬
+> - 상단 카드 + 차트 영역 = 실제 데이터 source 명시 + cold start 영역 안내
+> - 신규 endpoint = `GET /api/predictive/customers?page=N&limit=10&search=X&filter=Y&sort=Z`
+>
+> **D210+ Phase 3 진입 명령어 (다음 세션 첫 메시지)**:
 > ```
-> status/STATUS.md CURRENT_TASK § D210+ 진입 가이드 정독 + memory/project_d210_handoff.md 정독 + memory/project_d209_plus_completed.md 정독 + memory/feedback_no_operation_verification_by_ai.md 정독 → D210+ 진입 영역 (Harold + CTO 함께 진행 본질): Phase 1 (Walkthrough STEP 6 메뉴 매트릭스) → Phase 2 (한줄 프롬프트 문안 생성 강화) → Phase 3 (메뉴 하나하나 본질 강화 — Braze/Salesforce 압도)
+> status/STATUS.md CURRENT_TASK § D210+ Phase 3 진입 가이드 정독 + memory/project_d210_phase3_handoff.md 정독 + memory/project_d210_phase2_completed.md 정독 + memory/feedback_no_mock_data_in_production.md 정독 (신규 영구 룰) + memory/feedback_no_bakkeum_usage.md § D210+ 강화 정독 + memory/feedback_jondaetmal_to_harold.md § D210+ 강화 정독 → Phase 3-Predictive 진입 (PredictiveDashboardPage 목업 데이터 제거 + 전체 페이징 + 검색 + 실제 데이터 source 검증)
 > ```
+>
+> **신규 영구 룰 (D210+ Phase 3)**:
+> - **feedback_no_mock_data_in_production** (신규 영구 룰) — ★운영 영역 목업/더미/fake 데이터 절대 X★ 모든 지표 = 실제 DB 테이블 source 명시 의무 + cold start 영역 명시. Harold 격분 본질 "껍데기 X = 진정 마케팅 솔루션 본질".
+> - **feedback_jondaetmal_to_harold § D210+ 강화** — 자비스 톤 (Harold = 주인 / 비토 = 수석비서) + 친근 영역 안에서도 존댓말 의무 + 반말 종결어미 grep 의무. Harold 격분 본질 "토니스타크와 자비스 본질".
+>
+> **신규 영구 룰 (D210+ Phase 2-fix10)**:
+> - **feedback_no_bakkeum_usage § D210+ 강화** — 답변 본문 안 박-단어 광범위 grep (`박[가-힣]`) 누락 사고 영구 사례. 매 답변 출력 직전 = 코드 + 답변 본문 양쪽 광범위 grep 의무 강화 (옛 좁은 패턴 영구 폐기).
 >
 > **신규 영구 룰 (D209+)**:
 > - feedback_no_operation_verification_by_ai.md — ★운영 검증 = Harold + 직원 직접 진행 영역 (AI 작업 영역 X)★ Harold 격분 "몇번을 이야기해도 같은소리를 반복하네?" 영구 사례. 향후 작업 추천 매트릭스에 "운영 검증" 등 유사 표현 영구 차단

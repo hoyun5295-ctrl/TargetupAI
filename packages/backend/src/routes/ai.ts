@@ -76,7 +76,14 @@ import { getCompanyDataProfile } from '../utils/company-data-profile';
 // ★ D192 (2026-05-22): CT-51 Journey 통계 통합 진입점 — 옛 단순 통계(getJourneyStats/listExecutions)를 완전 진화 — buildJourneyStats (overview + steps + segments + hourly + weekday + variants) + listJourneyEnteredCustomers (회사 격리 + 페이지네이션)
 import { buildJourneyStats, listJourneyEnteredCustomers } from '../utils/journey-stats';
 // ★ D197 (2026-05-22) Phase B-2: Predictive Suite — 회사 예측 점수 분포 + Top 위험/구매 가능성 + 모델 정확도
-import { getCompanyPredictionDistribution, getCompanyPredictionSummary } from '../utils/predictive-suite';
+// ★ D210+ Phase 3 (2026-05-23 Harold 명시): listCompanyPredictionCustomers — 회사 전체 customer 영역 페이지네이션 + 검색 + 필터 + 정렬
+import {
+  getCompanyPredictionDistribution,
+  getCompanyPredictionSummary,
+  listCompanyPredictionCustomers,
+  type PredictionFilterType,
+  type PredictionSortType,
+} from '../utils/predictive-suite';
 // ★ D205 (2026-05-22) AI 자율 진단 + 자동 추천 — 옛 ContinuousOperator + next-action-advisor 진화
 import { diagnoseCompanyHealth } from '../utils/ai-self-diagnosis';
 
@@ -2244,6 +2251,46 @@ router.get('/operator/predictive/summary', async (req: Request, res: Response) =
   } catch (err: any) {
     console.error('[Predictive summary] 오류:', err);
     return res.status(500).json({ success: false, error: err?.message || '예측 요약 조회 실패' });
+  }
+});
+
+// ★ D210+ Phase 3 (2026-05-23 Harold 명시): 회사 전체 customer 영역 페이지네이션 + 검색 + 필터 + 정렬
+//    옛 Top 50명 영역 폐기 → 회사 admin 자유 탐색 본질 정합
+//    Query: ?page=1&limit=10&search=홍&filter=high_risk&sort=churn_risk_desc
+router.get('/operator/predictive/customers', async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+    const planCtx = await loadPlanContext(companyId);
+    if (!planCtx) return res.status(404).json({ success: false, error: '회사 정보를 찾을 수 없습니다.' });
+    if (!isAiOperatorAllowed(planCtx, req.user)) {
+      return res.status(403).json({ success: false, error: 'AI Operator 진입 권한이 없습니다.', code: 'AI_OPERATOR_GATED' });
+    }
+
+    const page = Math.max(1, parseInt(String(req.query.page || '1'), 10) || 1);
+    const limit = Math.min(100, Math.max(1, parseInt(String(req.query.limit || '10'), 10) || 10));
+    const search = typeof req.query.search === 'string' ? req.query.search.trim() : '';
+
+    const validFilters: PredictionFilterType[] = ['all', 'high_risk', 'high_potential', 'high_click', 'cold_start'];
+    const filterRaw = String(req.query.filter || 'all');
+    const filter: PredictionFilterType = (validFilters as string[]).includes(filterRaw)
+      ? (filterRaw as PredictionFilterType)
+      : 'all';
+
+    const validSorts: PredictionSortType[] = [
+      'churn_risk_desc', 'purchase_likelihood_desc', 'click_score_desc',
+      'last_activity_asc', 'last_activity_desc',
+    ];
+    const sortRaw = String(req.query.sort || 'churn_risk_desc');
+    const sort: PredictionSortType = (validSorts as string[]).includes(sortRaw)
+      ? (sortRaw as PredictionSortType)
+      : 'churn_risk_desc';
+
+    const result = await listCompanyPredictionCustomers(companyId, { page, limit, search, filter, sort });
+    return res.json({ success: true, ...result });
+  } catch (err: any) {
+    console.error('[Predictive customers] 오류:', err);
+    return res.status(500).json({ success: false, error: err?.message || '예측 고객 조회 실패' });
   }
 });
 
