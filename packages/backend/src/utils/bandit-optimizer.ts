@@ -650,3 +650,60 @@ export function declareVariantWinner(variants: JourneyStepVariant[]): VariantWin
     status: 'low_confidence',
   };
 }
+
+// ════════════════════════════════════════════════════════════════════
+// ★ D211+ Phase 1 (2026-05-23 Harold 명시): Beta-Bernoulli 95% 신뢰 구간 계산
+//
+//   본질 (회사 admin 입장 안 winner 자동 선언 신뢰 본질):
+//     - winner 자동 선언 = Monte Carlo 영역 (기존 영역)
+//     - 신뢰 구간 = 평균 클릭률 ± 1.96 × stddev (95% credible interval)
+//     - 회사 admin 인지 = "평균 12.3% (95% 신뢰 구간: 8.5%~16.1%)" 본질
+//
+//   알고리즘 (Beta 분포 통계):
+//     mean = α / (α + β)
+//     variance = αβ / ((α+β)² × (α+β+1))
+//     stddev = sqrt(variance)
+//     95% CI = clamp(mean ± 1.96 × stddev, 0, 1)
+//
+//   사용처:
+//     - routes/ai.ts variants GET 응답 안 variantsCI 통합
+//     - JourneyVariantsEditor.tsx 안 막대 시각화
+// ════════════════════════════════════════════════════════════════════
+
+export interface BetaCredibleInterval {
+  mean: number;          // α / (α + β)
+  stddev: number;        // sqrt(variance)
+  lower95: number;       // clamp(mean - 1.96 × stddev, 0, 1)
+  upper95: number;       // clamp(mean + 1.96 × stddev, 0, 1)
+  intervalWidth: number; // upper95 - lower95 (좁을수록 신뢰도 높음)
+}
+
+export function computeBetaCredibleInterval(alpha: number, beta: number): BetaCredibleInterval {
+  const safeAlpha = Math.max(0.001, alpha);
+  const safeBeta = Math.max(0.001, beta);
+  const sum = safeAlpha + safeBeta;
+  const mean = safeAlpha / sum;
+  const variance = (safeAlpha * safeBeta) / (sum * sum * (sum + 1));
+  const stddev = Math.sqrt(variance);
+  const lower95 = Math.max(0, Math.min(1, mean - 1.96 * stddev));
+  const upper95 = Math.max(0, Math.min(1, mean + 1.96 * stddev));
+  return {
+    mean,
+    stddev,
+    lower95,
+    upper95,
+    intervalWidth: upper95 - lower95,
+  };
+}
+
+export interface VariantCI {
+  variantId: string;
+  ci: BetaCredibleInterval;
+}
+
+export function computeVariantsCI(variants: JourneyStepVariant[]): VariantCI[] {
+  return variants.map((v) => ({
+    variantId: v.variantId,
+    ci: computeBetaCredibleInterval(v.banditAlpha, v.banditBeta),
+  }));
+}

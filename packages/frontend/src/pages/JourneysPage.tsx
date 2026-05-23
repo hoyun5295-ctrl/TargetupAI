@@ -112,6 +112,58 @@ interface PreviewSample {
   modelVersion: string | null;
 }
 
+// ★ D211+ Phase 2 (2026-05-23 Harold 명시): Journey Step Diagnosis 응답 매트릭스
+interface OneClickAction {
+  type: 'adjust_wait_hours' | 'adjust_condition' | 'add_variant' | 'pause_journey' | 'expand_send_hours';
+  label: string;
+  payload: Record<string, any>;
+}
+
+interface StepDiagnosisItem {
+  stepId: string;
+  stepOrder: number;
+  stepType: string;
+  severity: 'good' | 'warning' | 'critical';
+  funnelPercentage: number;
+  dropoutRate: number;
+  topExitReason: string;
+  topExitReasonCount: number;
+  recommendation: string;
+  oneClickAction: OneClickAction | null;
+}
+
+interface JourneyStepDiagnosis {
+  journeyId: string;
+  diagnosedAt: string;
+  overallScore: number;
+  topConcerns: string[];
+  steps: StepDiagnosisItem[];
+  totalEntered: number;
+  totalCompleted: number;
+  completionRate: number;
+}
+
+// ★ D211+ Phase 2 (2026-05-23 Harold 명시): 다음 단계 추천 응답 매트릭스
+interface RecommendedStep {
+  stepType: 'message' | 'wait' | 'condition';
+  delayHours: number;
+  channel: 'sms' | 'lms' | 'mms' | null;
+  messageTemplate: string | null;
+  subject: string | null;
+  conditionType: string | null;
+  reasoning: string;
+  expectedImpact: string;
+}
+
+interface NextStepRecommendation {
+  journeyId: string;
+  recommendedAt: string;
+  currentStepCount: number;
+  recommended: RecommendedStep;
+  alternatives: RecommendedStep[];
+  reasoning: string;
+}
+
 interface CallbackOption {
   phone: string;
   source: string;
@@ -283,6 +335,11 @@ export default function JourneysPage() {
   // ★ D210+ Phase 3 (2026-05-23 Harold 명시): 다중 미리보기 영역 (preview-samples endpoint 활용)
   const [samplesMap, setSamplesMap] = useState<Record<string, PreviewSample[]>>({});
   const [activeSampleLabel, setActiveSampleLabel] = useState<Record<string, string>>({});
+  // ★ D211+ Phase 2 (2026-05-23 Harold 명시): step 진단 + next step 추천 영역
+  const [diagnosisMap, setDiagnosisMap] = useState<Record<string, JourneyStepDiagnosis>>({});
+  const [diagnosisLoading, setDiagnosisLoading] = useState<Record<string, boolean>>({});
+  const [nextStepMap, setNextStepMap] = useState<Record<string, NextStepRecommendation>>({});
+  const [nextStepLoading, setNextStepLoading] = useState<Record<string, boolean>>({});
 
   // One-shot AI 생성 흐름
   const [objective, setObjective] = useState('');
@@ -487,6 +544,42 @@ export default function JourneysPage() {
     } catch {}
   };
 
+  // ★ D211+ Phase 2 (2026-05-23 Harold 명시): step별 진단 fetch (buildJourneyStats + 분류 영역 자동)
+  const loadDiagnosis = async (journeyId: string) => {
+    if (diagnosisMap[journeyId] || diagnosisLoading[journeyId]) return;
+    setDiagnosisLoading((prev) => ({ ...prev, [journeyId]: true }));
+    try {
+      const res = await fetch(`/api/ai/operator/journeys/${journeyId}/step-diagnosis`, {
+        headers: { Authorization: `Bearer ${token()}` },
+      });
+      const data = await res.json();
+      if (data.success && data.diagnosis) {
+        setDiagnosisMap((prev) => ({ ...prev, [journeyId]: data.diagnosis }));
+      }
+    } catch {}
+    finally {
+      setDiagnosisLoading((prev) => ({ ...prev, [journeyId]: false }));
+    }
+  };
+
+  // ★ D211+ Phase 2 (2026-05-23 Harold 명시): 다음 단계 추천 fetch (AI 호출 비용 영역 — 회사 admin 1-click 호출 의무)
+  const loadNextStep = async (journeyId: string) => {
+    if (nextStepLoading[journeyId]) return;
+    setNextStepLoading((prev) => ({ ...prev, [journeyId]: true }));
+    try {
+      const res = await fetch(`/api/ai/operator/journeys/${journeyId}/recommend-next-step`, {
+        headers: { Authorization: `Bearer ${token()}` },
+      });
+      const data = await res.json();
+      if (data.success && data.recommendation) {
+        setNextStepMap((prev) => ({ ...prev, [journeyId]: data.recommendation }));
+      }
+    } catch {}
+    finally {
+      setNextStepLoading((prev) => ({ ...prev, [journeyId]: false }));
+    }
+  };
+
   const toggleExpand = (journeyId: string) => {
     if (expandedId === journeyId) setExpandedId(null);
     else {
@@ -495,6 +588,8 @@ export default function JourneysPage() {
       // ★ D210+ Phase 3 (2026-05-23 Harold 명시): expand 시 stats + samples 영역 함께 fetch
       loadStats(journeyId);
       loadSamples(journeyId);
+      // ★ D211+ Phase 2 (2026-05-23 Harold 명시): expand 시 step별 진단 자동 fetch (AI 호출 X — DB 영역 빠른 영역)
+      loadDiagnosis(journeyId);
     }
   };
 
@@ -1024,6 +1119,70 @@ export default function JourneysPage() {
                             </div>
                           )}
 
+                          {/* ★ D211+ Phase 2 (2026-05-23 Harold 명시): step별 AI 자동 진단 카드 — funnel 영역 직후 통합 */}
+                          {diagnosisMap[j.id] && diagnosisMap[j.id].steps.length > 0 && (
+                            <div className="p-3 bg-amber-500/5 border border-amber-400/30 rounded-lg space-y-2">
+                              <div className="flex items-center gap-2 mb-1">
+                                <AlertTriangle className="w-4 h-4 text-amber-300" />
+                                <span className="text-sm font-semibold text-amber-100">AI 자동 진단</span>
+                                <span className="ml-auto text-[10px] text-white/40 font-mono">
+                                  건강 점수 {diagnosisMap[j.id].overallScore}/100
+                                </span>
+                              </div>
+                              {/* 우선 처리 영역 3건 */}
+                              {diagnosisMap[j.id].topConcerns.length > 0 && (
+                                <div className="space-y-1 mb-2">
+                                  <div className="text-[10px] text-white/40 font-semibold">우선 처리 영역</div>
+                                  {diagnosisMap[j.id].topConcerns.map((concern, idx) => (
+                                    <div key={idx} className="text-[11px] text-amber-200/80 pl-2 border-l-2 border-amber-400/30">
+                                      {concern}
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                              {/* step별 진단 + 1-click 액션 */}
+                              <div className="space-y-1.5">
+                                {diagnosisMap[j.id].steps.filter((s) => s.severity !== 'good').map((step) => (
+                                  <div
+                                    key={step.stepId}
+                                    className={`p-2 rounded border ${
+                                      step.severity === 'critical' ? 'bg-rose-500/10 border-rose-400/30' :
+                                      'bg-amber-500/10 border-amber-400/30'
+                                    }`}
+                                  >
+                                    <div className="flex items-center gap-2 text-[11px]">
+                                      <span className="font-mono text-white/60 w-12">Step {step.stepOrder}</span>
+                                      <span className={`text-[10px] px-1.5 py-0.5 rounded ${
+                                        step.severity === 'critical' ? 'bg-rose-500/30 text-rose-200' :
+                                        'bg-amber-500/30 text-amber-200'
+                                      }`}>
+                                        {step.severity === 'critical' ? '심각' : '주의'}
+                                      </span>
+                                      <span className="text-white/50">{step.topExitReason}</span>
+                                      <span className="ml-auto text-white/60 font-mono">이탈 {(step.dropoutRate * 100).toFixed(0)}%</span>
+                                    </div>
+                                    <div className="text-[11px] text-white/70 mt-1 leading-relaxed">
+                                      {step.recommendation}
+                                    </div>
+                                    {step.oneClickAction && (
+                                      <div className="mt-1.5 text-[10px] text-amber-300/70 italic">
+                                        제안 액션 — {step.oneClickAction.label} (회사 admin 명시 검토 후 적용)
+                                      </div>
+                                    )}
+                                  </div>
+                                ))}
+                                {diagnosisMap[j.id].steps.every((s) => s.severity === 'good') && (
+                                  <div className="text-[11px] text-emerald-300/80 leading-relaxed">
+                                    전체 단계 정상 흐름 — 추가 정정 영역 없음. 다음 단계 신설 검토 가능.
+                                  </div>
+                                )}
+                              </div>
+                              <div className="text-[10px] text-white/40">
+                                완료율 {(diagnosisMap[j.id].completionRate * 100).toFixed(1)}% · 진단 영역 = buildJourneyStats + 자동 분류
+                              </div>
+                            </div>
+                          )}
+
                           {/* ★ D210+ Phase 3 (2026-05-23 Harold 명시): 다중 미리보기 영역 (6 영역 customer 자동 추출 — preview-samples endpoint) */}
                           {samplesMap[j.id] && samplesMap[j.id].length > 0 && (
                             <div className="p-3 bg-cyan-500/5 border border-cyan-400/30 rounded-lg space-y-2">
@@ -1170,6 +1329,90 @@ export default function JourneysPage() {
                               </div>
                             );
                           })}
+
+                          {/* ★ D211+ Phase 2 (2026-05-23 Harold 명시): 다음 단계 자동 추천 카드 — detail.steps 영역 다음 */}
+                          <div className="p-3 bg-cyan-500/5 border border-cyan-400/30 rounded-lg space-y-2">
+                            <div className="flex items-center gap-2">
+                              <Sparkles className="w-4 h-4 text-cyan-300" />
+                              <span className="text-sm font-semibold text-cyan-100">AI 다음 단계 추천</span>
+                              <span className="ml-auto text-[10px] text-white/40">현재 {detail.steps.length}개 단계</span>
+                            </div>
+                            {!nextStepMap[j.id] ? (
+                              <div>
+                                <p className="text-[11px] text-white/60 leading-relaxed mb-2">
+                                  현재 흐름 분석 후 다음 단계 1개 + 대안 2개를 추천합니다 (구체 혜택은 회사 admin 직접 작성).
+                                </p>
+                                <button
+                                  onClick={(e) => { e.stopPropagation(); loadNextStep(j.id); }}
+                                  disabled={nextStepLoading[j.id]}
+                                  className="px-3 py-1.5 bg-cyan-500/20 hover:bg-cyan-500/30 disabled:opacity-50 text-cyan-100 rounded text-xs flex items-center gap-1.5"
+                                >
+                                  {nextStepLoading[j.id] ? (
+                                    <>
+                                      <Loader2 className="w-3 h-3 animate-spin" /> 추천 영역 분석 중
+                                    </>
+                                  ) : (
+                                    <>
+                                      <Sparkles className="w-3 h-3" /> AI 추천 받기
+                                    </>
+                                  )}
+                                </button>
+                              </div>
+                            ) : (
+                              <div className="space-y-2">
+                                {/* 추천 1순위 */}
+                                <div className="p-2.5 bg-cyan-500/10 border border-cyan-400/40 rounded">
+                                  <div className="flex items-center gap-2 mb-1">
+                                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-cyan-500/30 text-cyan-100 font-semibold">추천 1순위</span>
+                                    <span className="text-[11px] text-white/70 font-mono">
+                                      {nextStepMap[j.id].recommended.stepType}
+                                      {nextStepMap[j.id].recommended.delayHours > 0 && ` · ${nextStepMap[j.id].recommended.delayHours}h 후`}
+                                      {nextStepMap[j.id].recommended.channel && ` · ${nextStepMap[j.id].recommended.channel?.toUpperCase()}`}
+                                    </span>
+                                  </div>
+                                  {nextStepMap[j.id].recommended.messageTemplate && (
+                                    <div className="text-[11px] text-white/80 whitespace-pre-wrap mb-1 leading-relaxed">
+                                      {nextStepMap[j.id].recommended.messageTemplate}
+                                    </div>
+                                  )}
+                                  <div className="text-[10px] text-cyan-200/80">{nextStepMap[j.id].recommended.reasoning}</div>
+                                  {nextStepMap[j.id].recommended.expectedImpact && (
+                                    <div className="text-[10px] text-emerald-300/70 mt-0.5">예상 영향 — {nextStepMap[j.id].recommended.expectedImpact}</div>
+                                  )}
+                                </div>
+                                {/* 대안 2건 */}
+                                {nextStepMap[j.id].alternatives.length > 0 && (
+                                  <div className="space-y-1">
+                                    <div className="text-[10px] text-white/40 font-semibold">대안</div>
+                                    {nextStepMap[j.id].alternatives.map((alt, idx) => (
+                                      <div key={idx} className="p-2 bg-white/5 border border-white/10 rounded">
+                                        <div className="flex items-center gap-2 mb-0.5">
+                                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-white/10 text-white/60">대안 {idx + 1}</span>
+                                          <span className="text-[10px] text-white/60 font-mono">
+                                            {alt.stepType}
+                                            {alt.delayHours > 0 && ` · ${alt.delayHours}h`}
+                                            {alt.channel && ` · ${alt.channel.toUpperCase()}`}
+                                          </span>
+                                        </div>
+                                        {alt.messageTemplate && (
+                                          <div className="text-[10px] text-white/70 whitespace-pre-wrap leading-relaxed">{alt.messageTemplate}</div>
+                                        )}
+                                        <div className="text-[10px] text-white/40 mt-0.5">{alt.reasoning}</div>
+                                      </div>
+                                    ))}
+                                  </div>
+                                )}
+                                {nextStepMap[j.id].reasoning && (
+                                  <div className="text-[10px] text-white/50 italic border-t border-white/10 pt-1.5">
+                                    {nextStepMap[j.id].reasoning}
+                                  </div>
+                                )}
+                                <div className="text-[10px] text-white/40">
+                                  회사 admin 명시 검토 + 승인 후 추가 의무 (AI 자동 추가 X).
+                                </div>
+                              </div>
+                            )}
+                          </div>
                         </div>
                       )}
                     </div>

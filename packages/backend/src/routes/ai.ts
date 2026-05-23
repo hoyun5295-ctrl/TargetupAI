@@ -39,6 +39,7 @@ import {
   deleteJourneyStepVariant,
   recordJourneyStepVariantReward,
   declareVariantWinner,
+  computeVariantsCI,
 } from '../utils/bandit-optimizer';
 // ★ D179 (2026-05-19): Multi-Goal Decisioning (Opus 4.7 충돌 분석)
 import { analyzeGoalConflicts, OperatorGoal } from '../utils/multi-goal-decisioning';
@@ -88,6 +89,8 @@ import {
 } from '../utils/predictive-suite';
 // ★ D205 (2026-05-22) AI 자율 진단 + 자동 추천 — 옛 ContinuousOperator + next-action-advisor 진화
 import { diagnoseCompanyHealth } from '../utils/ai-self-diagnosis';
+// ★ D211+ Phase 2 (2026-05-23 Harold 명시): CT-59 Journey Step Diagnosis — 여정 단계별 진단 + 다음 단계 추천
+import { diagnoseJourneySteps, recommendNextJourneyStep } from '../utils/journey-step-diagnosis';
 
 
 // ★ D79: 인라인 래퍼 제거 → CT-01 buildFilterWhereClauseCompat 직접 사용
@@ -1942,7 +1945,9 @@ router.get('/operator/journeys/:journeyId/steps/:stepId/variants', async (req: R
     const variants = await listJourneyStepVariants(req.params.stepId);
     // ★ D210+ Phase 3 (2026-05-23 Harold 명시): winner 자동 선언 매트릭스 응답 통합 (회사 admin 안내 영역만 — 자동 적용 X)
     const winnerDeclaration = declareVariantWinner(variants);
-    return res.json({ success: true, variants, winnerDeclaration });
+    // ★ D211+ Phase 1 (2026-05-23 Harold 명시): Beta-Bernoulli 95% 신뢰 구간 응답 통합 — 회사 admin 입장 winner 자동 선언 신뢰 본질
+    const variantsCI = computeVariantsCI(variants);
+    return res.json({ success: true, variants, winnerDeclaration, variantsCI });
   } catch (err: any) {
     console.error('[Journeys variants list] 오류:', err);
     return res.status(500).json({ success: false, error: err?.message || 'variants 조회 실패' });
@@ -2497,6 +2502,50 @@ router.get('/operator/journeys/:id/stats', async (req: Request, res: Response) =
     console.error('[Journeys stats] 오류:', err);
     const isAuthErr = err?.message?.includes('회사 격리');
     return res.status(isAuthErr ? 403 : 500).json({ success: false, error: err?.message || '통계 조회 실패' });
+  }
+});
+
+// ════════════════════════════════════════════════════════════════════
+// ★ D211+ Phase 2 (2026-05-23 Harold 명시): Journey Step Diagnosis endpoint 2건
+//   - GET /operator/journeys/:id/step-diagnosis — 여정 단계별 진단 (buildJourneyStats + 분류)
+//   - GET /operator/journeys/:id/recommend-next-step — 다음 단계 추천 (Sonnet 4.6)
+// ════════════════════════════════════════════════════════════════════
+
+// GET /api/ai/operator/journeys/:id/step-diagnosis — 여정 단계별 진단
+router.get('/operator/journeys/:id/step-diagnosis', async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+    const planCtx = await loadPlanContext(companyId);
+    if (!planCtx) return res.status(404).json({ success: false, error: '회사 정보를 찾을 수 없습니다.' });
+    if (!isAiOperatorAllowed(planCtx, req.user)) {
+      return res.status(403).json({ success: false, error: 'AI Operator 진입 권한이 없습니다.', code: 'AI_OPERATOR_GATED' });
+    }
+    const diagnosis = await diagnoseJourneySteps(req.params.id, companyId);
+    return res.json({ success: true, diagnosis });
+  } catch (err: any) {
+    console.error('[Journey step-diagnosis] 오류:', err);
+    const isAuthErr = err?.message?.includes('회사 격리');
+    return res.status(isAuthErr ? 403 : 500).json({ success: false, error: err?.message || '진단 영역 오류' });
+  }
+});
+
+// GET /api/ai/operator/journeys/:id/recommend-next-step — 다음 단계 자동 추천
+router.get('/operator/journeys/:id/recommend-next-step', async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+    const planCtx = await loadPlanContext(companyId);
+    if (!planCtx) return res.status(404).json({ success: false, error: '회사 정보를 찾을 수 없습니다.' });
+    if (!isAiOperatorAllowed(planCtx, req.user)) {
+      return res.status(403).json({ success: false, error: 'AI Operator 진입 권한이 없습니다.', code: 'AI_OPERATOR_GATED' });
+    }
+    const recommendation = await recommendNextJourneyStep(req.params.id, companyId);
+    return res.json({ success: true, recommendation });
+  } catch (err: any) {
+    console.error('[Journey recommend-next-step] 오류:', err);
+    const isAuthErr = err?.message?.includes('회사 격리');
+    return res.status(isAuthErr ? 403 : 500).json({ success: false, error: err?.message || '추천 영역 오류' });
   }
 });
 

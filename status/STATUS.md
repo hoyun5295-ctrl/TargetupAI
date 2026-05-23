@@ -107,9 +107,46 @@
 
 ---
 
-### 🚀 다음 세션 진입 가이드 (D210+ Phase 1+2+fix1~10 통합 종결 후 — **D210+ Phase 3 진입**)
+### 🚀 다음 세션 진입 가이드 (D210+ Phase 3 통합 종결 후 — **D211+ 메뉴 점검 영역 진입**)
 
-> **★ D210+ Phase 1+2+fix1~10 통합 종결 매트릭스 (2026-05-23)**:
+> **★ D211+ 진입 매트릭스 (Harold 명시 2026-05-23)**:
+> Harold 본질 명시 = "다음 세션에선 나랑 기능 하나하나 의견 나누면서 점검할거야" — 메뉴 하나하나 의논 + 더 할 영역 X 영역 패스 영역.
+>
+> **D211+ 진입 명령어 (다음 세션 첫 메시지)**:
+> ```
+> status/STATUS.md CURRENT_TASK § D211+ 진입 가이드 정독 + memory/project_d211_next_handoff.md 정독 + memory/project_d210_phase3_completed.md 정독 + 옛 영구 룰 매트릭스 정합 의무 → D211+ 진입 (메뉴 하나하나 Harold + CTO 함께 의논 + 더 할 영역 X 영역 패스 영역)
+> ```
+>
+> **D211+ 점검 영역 매트릭스 (10 메뉴)**:
+>
+> | # | 메뉴 | 경로 | 옛 종결 영역 | 잔존 영역 / 점검 영역 |
+> |---|---|---|---|---|
+> | 1 | 여정 자동화 | `/ai-journeys` | A 5건 (condition step type 3 + wait delay_mode 3 + 자동 재진입 + funnel + 다중 미리보기) | 옛 시각 효과 + variant 영역 추가 강화 |
+> | 2 | AI 자율 예측 | `/predictive` | predictive-worker 영구 진화 + 회사 전체 페이징/검색/필터/정렬 + cold start 안내 | 모범 사례 영역 정합 |
+> | 3 | AI 영구운영 | `/continuous-operator` | B-1 backend (max_risk) + 톤 통일 + 모달 + 박-단어 정정 | UI 임계값 편집 영역 |
+> | 4 | 성과리포트 | `/performance` | B-2 backend (buildFunnelStats) + 톤 통일 + 디자인 강화 | UI funnel 시각화 카드 |
+> | 5 | 자사몰 연동 | `/cdp-settings` | 톤 통일 + 자사몰 카드 + form 영역 | B-3 Shopify 실 구현 (큰 영역) |
+> | 6 | 인앱메시지 | `/inapp-messages` | B-4 backend (getCompanyInAppStats) + 톤 통일 + 모달 | UI 통계 카드 + funnel 시각화 |
+> | 7 | Email 캠페인 | `/email-campaigns` | B-5 backend (bounce 자동 처리) + 톤 통일 + 모달 | UI bounce 통계 영역 |
+> | 8 | 모바일 DM | `/dm-builder` | 메인 wrapper 다크 톤 정합 | B-6 undo/redo + 편집 모드 컴포넌트 영역 (큰 영역) |
+> | 9 | AI 메모리 | `/ai-memory` | B-7 (cleanup + 5 타입 가이드 + 영향도 시각화 + 자동 갱신) + 디자인 강화 | 영역별 추가 강화 의논 |
+> | 10 | AI 사용량 | `/ai-usage` | B-8 (모델별 분포 + 비용 절감) + 디자인 강화 | cache hit rate 추가 시각화 |
+>
+> **★ D210+ Phase 3 통합 종결 매트릭스 (2026-05-23 — 참조용)**:
+>
+> Phase 3-Predictive 영구 진화 + Journey A 5건 + Journey B 6건 backend + 톤 통일 8 페이지 + 디자인 강화 7 페이지 + form/모달/status badge/자사몰 카드 + 박-단어 영구 정정 (전체 codebase) + DB ALTER 6건 + ai_company_memory 16 rows 정정. 상세 매트릭스 = [[memory/project_d210_phase3_completed.md]] 정독 의무.
+>
+> **신규 영구 룰 (D210+ Phase 3)**:
+> - feedback_no_mock_data_in_production — 실제 DB source 명시 의무
+> - LESSONS_LEARNED §4-22 (의무 추가) — 코드 영역 정정 시 + 옛 DB 안 자동 누적 영역 SQL 정정 동시 진입 의무
+>
+> **CTO 책임 영역 본질 (Harold 격분 사고 영구 사례)**:
+> - 옛 단편적 영역 정정 사고 = CTO 책임 영역 위반 영역
+> - 진정 본질 = 한번에 영역별 광범위 grep + 일괄 정정 의무
+>
+> ---
+>
+> **★ D210+ Phase 1+2+fix1~10 옛 종결 매트릭스 (2026-05-23 — 참조용)**:
 > - **Phase 1**: AiOperatorWalkthroughModal STEP 6 메뉴 매트릭스 + constants/ai-operator-modules.ts 신규 + 마케팅팀 친화 5 STEPS 정정 (메신저 비유) + 노트북 잘림 차단 (104px 절약 isLast 분기)
 > - **Phase 2**: CT-58 company-data-profile 신규 (회사 19 컬럼 채워짐 비율 동적 분석 + 안전 70%+/분기 30~70%/차단 30%- 3단계 분류) + ai.ts/ai-orchestrator/journey-ai-generator/message-sanitizer 통합 정정
 > - **Phase 2-fix1**: CompanyDataProfileCard 신규 (3축 100% 보완 시각화) + GET /operator/data-profile

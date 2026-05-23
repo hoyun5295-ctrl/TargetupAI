@@ -51,6 +51,20 @@ interface VariantWinnerDeclaration {
   status: 'cold_start' | 'low_confidence' | 'leading' | 'winner';
 }
 
+// ★ D211+ Phase 1 (2026-05-23 Harold 명시): Beta-Bernoulli 95% 신뢰 구간 (backend computeVariantsCI 응답 정합)
+interface BetaCredibleInterval {
+  mean: number;
+  stddev: number;
+  lower95: number;
+  upper95: number;
+  intervalWidth: number;
+}
+
+interface VariantCI {
+  variantId: string;
+  ci: BetaCredibleInterval;
+}
+
 interface Props {
   stepId: string;
   journeyId: string;
@@ -89,6 +103,8 @@ export default function JourneyVariantsEditor({
 }: Props) {
   const [variants, setVariants] = useState<JourneyStepVariant[]>([]);
   const [winnerDeclaration, setWinnerDeclaration] = useState<VariantWinnerDeclaration | null>(null);
+  // ★ D211+ Phase 1 (2026-05-23 Harold 명시): variantsCI state — Beta 95% 신뢰 구간 시각화 영역
+  const [variantsCI, setVariantsCI] = useState<VariantCI[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -112,6 +128,8 @@ export default function JourneyVariantsEditor({
       setVariants(loaded);
       // ★ D210+ Phase 3 (2026-05-23 Harold 명시): winner 자동 선언 매트릭스 응답 통합
       setWinnerDeclaration(data.winnerDeclaration || null);
+      // ★ D211+ Phase 1 (2026-05-23 Harold 명시): Beta 95% 신뢰 구간 응답 통합
+      setVariantsCI(data.variantsCI || []);
       if (loaded.length > 0) {
         setActiveTab(loaded[0].variantId);
       }
@@ -476,6 +494,71 @@ export default function JourneyVariantsEditor({
                   </div>
                 </div>
               </div>
+
+              {/* ★ D211+ Phase 1 (2026-05-23 Harold 명시): Beta-Bernoulli 95% 신뢰 구간 시각화 — winner 자동 선언 신뢰 본질 */}
+              {(() => {
+                const ciEntry = variantsCI.find((v) => v.variantId === activeVariant.variantId);
+                if (!ciEntry) return null;
+                const { mean, lower95, upper95, intervalWidth } = ciEntry.ci;
+                const meanPct = (mean * 100).toFixed(1);
+                const lowerPct = (lower95 * 100).toFixed(1);
+                const upperPct = (upper95 * 100).toFixed(1);
+                const widthPct = (intervalWidth * 100).toFixed(1);
+                // 신뢰도 안내 — interval 좁을수록 신뢰도 높음 (10%- 좁음 / 10~25% 중간 / 25%+ 넓음)
+                const reliabilityLabel =
+                  intervalWidth < 0.10 ? '신뢰도 높음' :
+                  intervalWidth < 0.25 ? '신뢰도 중간 — 추가 발송 후 좁아짐' :
+                  '신뢰도 부족 — 누적 발송 영역 부족';
+                const reliabilityColor =
+                  intervalWidth < 0.10 ? 'text-emerald-300' :
+                  intervalWidth < 0.25 ? 'text-amber-300' :
+                  'text-rose-300';
+                return (
+                  <div className="p-3 bg-violet-500/5 border border-violet-400/20 rounded-lg">
+                    <div className="flex items-center justify-between mb-2">
+                      <div className="text-[11px] font-semibold text-violet-200 flex items-center gap-1.5">
+                        <BarChart3 className="w-3 h-3" />
+                        95% 신뢰 구간 (Beta-Bernoulli)
+                      </div>
+                      <div className={`text-[10px] font-medium ${reliabilityColor}`}>{reliabilityLabel}</div>
+                    </div>
+                    {/* CI 막대 시각화 — 0~100% 영역 안 lower~upper 범위 표시 + mean 점 */}
+                    <div className="relative h-6 bg-white/5 rounded">
+                      {/* CI 범위 막대 */}
+                      <div
+                        className="absolute top-1 bottom-1 bg-violet-400/40 border-l-2 border-r-2 border-violet-300 rounded-sm"
+                        style={{
+                          left: `${lower95 * 100}%`,
+                          width: `${Math.max(0.5, (upper95 - lower95) * 100)}%`,
+                        }}
+                      />
+                      {/* mean 점 */}
+                      <div
+                        className="absolute top-0 bottom-0 w-0.5 bg-violet-100 shadow-lg"
+                        style={{ left: `calc(${mean * 100}% - 1px)` }}
+                      />
+                      {/* 눈금 0% / 50% / 100% */}
+                      <div className="absolute -bottom-3.5 left-0 text-[9px] text-white/30">0%</div>
+                      <div className="absolute -bottom-3.5 left-1/2 -translate-x-1/2 text-[9px] text-white/30">50%</div>
+                      <div className="absolute -bottom-3.5 right-0 text-[9px] text-white/30">100%</div>
+                    </div>
+                    <div className="mt-5 flex items-center justify-between text-[10px] text-white/60">
+                      <span>
+                        평균 <span className="font-mono text-violet-200 font-semibold">{meanPct}%</span>
+                      </span>
+                      <span>
+                        95% CI <span className="font-mono text-violet-200">{lowerPct}% ~ {upperPct}%</span>
+                        <span className="ml-1 text-white/30">(폭 {widthPct}%p)</span>
+                      </span>
+                    </div>
+                    <div className="mt-1.5 text-[10px] text-white/40 leading-relaxed">
+                      클릭률은 통계적으로 <span className="text-violet-200/70 font-mono">{lowerPct}%~{upperPct}%</span> 사이 95% 확률.
+                      구간이 좁을수록 자동 winner 선언 신뢰도 높음.
+                    </div>
+                  </div>
+                );
+              })()}
+
               <div className="text-[10px] text-white/40 flex items-start gap-1.5 leading-relaxed">
                 <BarChart3 className="w-3 h-3 mt-0.5 flex-shrink-0" />
                 <span>
