@@ -5,12 +5,33 @@ import {
   ShoppingCart, Cake, Calendar as CalendarIcon, UserPlus, Repeat, Moon, MessageSquare,
   Clock, DollarSign, Users, Phone, Wand2, X, AlertCircle, Send, Trash2, Edit2, Save, Beaker, Code,
   BarChart3,
+  // ★ D210+ Phase 2-fix6 (Harold 명시 2026-05-23): 6 sub-agent 진행 카드 + 토글 영역 아이콘
+  Workflow, Brain, LayoutGrid, CheckCircle2,
 } from 'lucide-react';
 import JourneyVariantsEditor from '../components/journey/JourneyVariantsEditor';
 import JourneyMmsUploader from '../components/journey/JourneyMmsUploader';
 import LiquidPreviewModal from '../components/journey/LiquidPreviewModal';
 import AlimtalkChannelPanel, { type AlimtalkSenderProfile, type AlimtalkTemplate, type AlimtalkChannelState } from '../components/alimtalk/AlimtalkChannelPanel';
 import { detectLiquidSyntax, renderLiquid, flattenCustomerForLiquid, SAMPLE_CUSTOMERS } from '../utils/liquid-templating';
+// ★ D210+ Phase 2-fix6 (Harold 명시 2026-05-23): 변수 하이라이트 + 머지 미리보기 컨트롤타워.
+import { highlightVars, mergeAndHighlightVars } from '../utils/highlightVars';
+
+// ★ D210+ Phase 2-fix6 (Harold 명시 2026-05-23): 여정 생성 6 sub-agent 진행 카드 매트릭스.
+//   본질 = 옛 단순 로딩 → 6 sub-agent 시각 효과 → 사용자가 5~10초 기다리기 편함.
+interface JourneySubAgentStep {
+  icon: typeof Workflow;
+  label: string;
+  gradient: string;
+  hint: string;
+}
+const JOURNEY_SUB_AGENT_STEPS: JourneySubAgentStep[] = [
+  { icon: Workflow,      label: 'Trigger Detection',     gradient: 'from-rose-400 to-pink-500',     hint: '트리거 + 타겟 영역 자동 분석' },
+  { icon: Sparkles,      label: 'Season Context',         gradient: 'from-amber-400 to-orange-500',  hint: '시즌 + 회사 톤 종합' },
+  { icon: Brain,         label: 'Memory Learning',        gradient: 'from-emerald-400 to-teal-500',  hint: '회사 누적 학습 메모리 적용' },
+  { icon: LayoutGrid,    label: 'Step Design',            gradient: 'from-cyan-400 to-blue-500',     hint: '단계 + 흐름 자동 설계' },
+  { icon: MessageSquare, label: 'Message Composition',    gradient: 'from-violet-400 to-purple-500', hint: '본문 + 감성 풍성 작성' },
+  { icon: CheckCircle2,  label: 'Review Ready',           gradient: 'from-fuchsia-400 to-pink-500',  hint: '검토 준비 완료' },
+];
 
 // D187-fix3 (2026-05-21): One-shot AI Operator — 자연어 한 줄 → AI가 완전 패키지 자동 생성 → 1 페이지 검토 → 활성화
 //   영구 룰: AI는 흐름/안내문/감성 텍스트만 풍성하게 / 구체 혜택(% / 원 / 무료 / 쿠폰)은 회사 admin 직접 작성
@@ -193,6 +214,10 @@ export default function JourneysPage() {
   // One-shot AI 생성 흐름
   const [objective, setObjective] = useState('');
   const [generating, setGenerating] = useState(false);
+  // ★ D210+ Phase 2-fix6 (Harold 명시 2026-05-23): 6 sub-agent 진행 + 샘플 고객 머지 토글
+  const [progressStep, setProgressStep] = useState(0);
+  const [sampleCustomer, setSampleCustomer] = useState<Record<string, string | number | null> | null>(null);
+  const [showMergedPreview, setShowMergedPreview] = useState(false);
   const [aiPkg, setAiPkg] = useState<AIJourneyPackage | null>(null);
   const [reviewName, setReviewName] = useState('');
   const [reviewCallback, setReviewCallback] = useState('');
@@ -368,6 +393,7 @@ export default function JourneysPage() {
       return;
     }
     setGenerating(true);
+    setProgressStep(0);
     setError(null);
     try {
       const res = await fetch('/api/ai/operator/journeys-ai-generate', {
@@ -386,7 +412,25 @@ export default function JourneysPage() {
         setReviewCallback(pkg.callbackNumberHint || callbackOptions.find((c) => c.is_default)?.phone || (callbackOptions[0]?.phone || ''));
         setReviewBudget(pkg.budgetMonthlyHint != null ? String(pkg.budgetMonthlyHint) : '');
         setReviewThreshold(pkg.thresholdCostHint != null ? String(pkg.thresholdCostHint) : '');
+        setProgressStep(JOURNEY_SUB_AGENT_STEPS.length);
         setView('review');
+
+        // ★ D210+ Phase 2-fix6 (Harold 명시 2026-05-23): 회사 상위 고객 1건 자동 fetch — 원본/치환 토글 머지 영역 정합.
+        //   여정 영역 = 트리거 기반 (filter X) → 전체 customer 안 LTV 상위 1건 fallback.
+        fetch('/api/ai/operator/sample-customer', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token()}` },
+          body: JSON.stringify({ filters: {} }),
+        })
+          .then((sr) => sr.json())
+          .then((sd) => {
+            if (sd?.success && sd.sampleCustomer) {
+              setSampleCustomer(sd.sampleCustomer);
+            } else {
+              setSampleCustomer(null);
+            }
+          })
+          .catch(() => setSampleCustomer(null));
       } else {
         alert(data.error || 'AI 생성 실패. 다시 시도해주세요.');
       }
@@ -396,6 +440,16 @@ export default function JourneysPage() {
       setGenerating(false);
     }
   };
+
+  // ★ D210+ Phase 2-fix6 (Harold 명시 2026-05-23): generating 영역 시 sub-agent 단계 자동 진행 (1.5초 주기)
+  useEffect(() => {
+    if (!generating) return;
+    if (progressStep >= JOURNEY_SUB_AGENT_STEPS.length) return;
+    const timer = setTimeout(() => {
+      setProgressStep((s) => Math.min(s + 1, JOURNEY_SUB_AGENT_STEPS.length));
+    }, 1500);
+    return () => clearTimeout(timer);
+  }, [generating, progressStep]);
 
   const handleRegenerate = async () => {
     if (!aiPkg) return;
@@ -847,6 +901,36 @@ export default function JourneysPage() {
               </div>
             </div>
 
+            {/* ★ D210+ Phase 2-fix6 (Harold 명시 2026-05-23): 원본/적용 토글 — 모든 step 본문 표시 영역 전역 적용 */}
+            {sampleCustomer && (
+              <div className="flex items-center gap-1 bg-white/5 border border-white/10 rounded-lg p-1">
+                <button
+                  type="button"
+                  onClick={() => setShowMergedPreview(false)}
+                  className={`flex-1 text-[11px] py-1.5 rounded-md transition-all ${
+                    !showMergedPreview
+                      ? 'bg-amber-400/25 text-amber-100 font-semibold ring-1 ring-amber-300/40'
+                      : 'text-white/40 hover:text-white/60'
+                  }`}
+                  title="개인화 변수 위치 강조 — %고객명% 형태 그대로 표시"
+                >
+                  원본 (변수 강조)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowMergedPreview(true)}
+                  className={`flex-1 text-[11px] py-1.5 rounded-md transition-all ${
+                    showMergedPreview
+                      ? 'bg-emerald-400/25 text-emerald-100 font-semibold ring-1 ring-emerald-400/40'
+                      : 'text-white/40 hover:text-white/60'
+                  }`}
+                  title="상위 고객 데이터로 치환된 결과 미리보기"
+                >
+                  적용 (상위 고객 머지)
+                </button>
+              </div>
+            )}
+
             {/* 기본 설정 */}
             <div className="bg-white/5 border border-white/10 rounded-xl p-4 space-y-3">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
@@ -1131,7 +1215,10 @@ export default function JourneysPage() {
                           <textarea value={s.messageTemplate} onChange={(e) => updateStep(idx, { messageTemplate: e.target.value })} rows={6} className="w-full px-3 py-2 bg-slate-900 border border-fuchsia-400/50 rounded text-sm font-mono focus:outline-none resize-y" />
                         ) : (
                           <div className="px-3 py-2 bg-slate-900/60 border border-white/10 rounded text-sm whitespace-pre-wrap font-mono text-white/90 cursor-pointer" onClick={() => setEditingStepIdx(idx)}>
-                            {s.messageTemplate}
+                            {/* ★ D210+ Phase 2-fix6 (Harold 명시 2026-05-23): 변수 하이라이트 + 상위 고객 머지 토글 */}
+                            {showMergedPreview && sampleCustomer
+                              ? mergeAndHighlightVars(s.messageTemplate, sampleCustomer, 'dark')
+                              : highlightVars(s.messageTemplate, 'dark')}
                           </div>
                         )}
 
@@ -1236,12 +1323,65 @@ export default function JourneysPage() {
       )}
 
       {/* AI 생성 중 오버레이 */}
+      {/* ★ D210+ Phase 2-fix6 (Harold 명시 2026-05-23): 6 sub-agent 진행 카드 매트릭스 (옛 단순 로딩 → AiOperatorPage 매트릭스 미러) */}
       {generating && (
-        <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-40">
-          <div className="text-center">
-            <Loader2 className="w-10 h-10 animate-spin text-fuchsia-400 mx-auto mb-3" />
-            <div className="text-sm font-medium">AI Operator가 여정을 설계 중입니다</div>
-            <div className="text-xs text-white/50 mt-1">시즌 + 회사 톤 + 학습 메모리 종합 (5~10초)</div>
+        <div className="fixed inset-0 bg-black/85 backdrop-blur-sm flex items-center justify-center z-40 p-4">
+          <div className="max-w-3xl w-full animate-in fade-in duration-300">
+            <div className="text-center mb-6">
+              <p className="text-[11px] font-semibold tracking-[0.28em] text-white/40 uppercase mb-2">AI Operator · Multi-Agent Pipeline</p>
+              <p className="text-white/80 text-sm">6개 sub-agent가 협업하여 여정을 설계하고 있습니다</p>
+            </div>
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+              {JOURNEY_SUB_AGENT_STEPS.map((step, idx) => {
+                const Icon = step.icon;
+                const isDone = idx < progressStep;
+                const isActive = idx === progressStep;
+                const isPending = idx > progressStep;
+                return (
+                  <div
+                    key={step.label}
+                    className={`relative p-4 rounded-xl border backdrop-blur-xl transition-all duration-500 ${
+                      isDone ? 'bg-emerald-500/10 border-emerald-400/30' :
+                      isActive ? 'bg-white/10 border-fuchsia-400/40 scale-[1.02] shadow-lg shadow-fuchsia-500/20' :
+                      'bg-white/[0.02] border-white/5'
+                    }`}
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className={`relative flex-shrink-0 w-10 h-10 rounded-lg flex items-center justify-center transition-all ${
+                        isDone ? 'bg-gradient-to-br from-emerald-400 to-teal-500' :
+                        isActive ? `bg-gradient-to-br ${step.gradient}` :
+                        'bg-white/5'
+                      }`}>
+                        {isDone ? (
+                          <CheckCircle2 className="w-5 h-5 text-white" strokeWidth={3} />
+                        ) : isActive ? (
+                          <>
+                            <Icon className="w-5 h-5 text-white relative z-10" />
+                            <span className="absolute inset-0 rounded-lg bg-white/20 animate-ping" />
+                          </>
+                        ) : (
+                          <Icon className={`w-5 h-5 ${isPending ? 'text-white/25' : 'text-white'}`} />
+                        )}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className={`text-[10px] font-bold tracking-wider uppercase ${
+                          isDone ? 'text-emerald-300' :
+                          isActive ? 'text-white' :
+                          'text-white/30'
+                        }`}>
+                          {step.label}
+                        </p>
+                        <p className={`text-xs mt-0.5 truncate ${
+                          isDone || isActive ? 'text-white/70' : 'text-white/25'
+                        }`}>
+                          {isActive ? '진행 중...' : isDone ? '완료' : step.hint}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
           </div>
         </div>
       )}
