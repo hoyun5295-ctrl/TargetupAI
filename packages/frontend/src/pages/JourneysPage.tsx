@@ -412,7 +412,13 @@ export default function JourneysPage() {
         setReviewCallback(pkg.callbackNumberHint || callbackOptions.find((c) => c.is_default)?.phone || (callbackOptions[0]?.phone || ''));
         setReviewBudget(pkg.budgetMonthlyHint != null ? String(pkg.budgetMonthlyHint) : '');
         setReviewThreshold(pkg.thresholdCostHint != null ? String(pkg.thresholdCostHint) : '');
-        setProgressStep(JOURNEY_SUB_AGENT_STEPS.length);
+        // ★ D210+ Phase 2-fix7 (Harold 명시 2026-05-23): AI 응답 후 진행 시각 확보 영역.
+        //   옛 사고 = 즉시 setView('review') + finally setGenerating(false) → 진행 시각 X.
+        //   정정 = 1.5초 후 마지막 단계 완료 표시 → 2.2초 await 후 화면 전환 (사용자 자연 시각 흐름).
+        setTimeout(() => {
+          setProgressStep(JOURNEY_SUB_AGENT_STEPS.length);
+        }, 1500);
+        await new Promise((resolve) => setTimeout(resolve, 3700));
         setView('review');
 
         // ★ D210+ Phase 2-fix6 (Harold 명시 2026-05-23): 회사 상위 고객 1건 자동 fetch — 원본/치환 토글 머지 영역 정합.
@@ -1331,6 +1337,16 @@ export default function JourneysPage() {
               <p className="text-[11px] font-semibold tracking-[0.28em] text-white/40 uppercase mb-2">AI Operator · Multi-Agent Pipeline</p>
               <p className="text-white/80 text-sm">6개 sub-agent가 협업하여 여정을 설계하고 있습니다</p>
             </div>
+
+            {/* ★ D210+ Phase 2-fix8 (Harold 명시 2026-05-23): Stage 2 — 6단 모두 완료 후 둥근 스피너 + "마지막 다듬는 중" 안내 */}
+            {progressStep >= JOURNEY_SUB_AGENT_STEPS.length && (
+              <div className="mb-6 text-center animate-in fade-in duration-300">
+                <Loader2 className="w-10 h-10 animate-spin text-fuchsia-400 mx-auto mb-3" />
+                <p className="text-white/85 text-sm font-medium">AI Operator가 여정 마지막 다듬는 중입니다</p>
+                <p className="text-white/50 text-xs mt-1">검토 화면 준비 중 — 잠시만 기다려주세요</p>
+              </div>
+            )}
+
             <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
               {JOURNEY_SUB_AGENT_STEPS.map((step, idx) => {
                 const Icon = step.icon;

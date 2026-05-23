@@ -313,8 +313,12 @@ export default function AiOperatorPage() {
       if (!res.ok || !data.success) {
         throw new Error(data.error || '제안서 생성에 실패했습니다.');
       }
-      // 모든 단계 완료 표시 후 결과 노출
-      setProgressStep(SUB_AGENT_STEPS.length);
+      // ★ D210+ Phase 2-fix7 (Harold 명시 2026-05-23): AI 응답 후 진행 시각 확보 영역.
+      //   옛 사고 = setTimeout 600ms 즉시 setLoading(false) → 진행 시각 효과 영역 X (즉시 사라짐).
+      //   정정 = 1500ms 후 마지막 단계 완료 표시 + 2200ms 후 화면 전환 (사용자 자연 시각 흐름).
+      setTimeout(() => {
+        setProgressStep(SUB_AGENT_STEPS.length);
+      }, 1500);
       setTimeout(() => {
         setProposal(data as ProposalResponse);
         setLoading(false);
@@ -339,7 +343,7 @@ export default function AiOperatorPage() {
             }
           })
           .catch(() => setSampleCustomer(null));
-      }, 600);
+      }, 3700);
     } catch (err) {
       setError(err instanceof Error ? err.message : '오류가 발생했습니다.');
       setLoading(false);
@@ -632,6 +636,15 @@ export default function AiOperatorPage() {
               <p className="text-[11px] font-semibold tracking-[0.28em] text-white/40 uppercase mb-2">AI Operator · Multi-Agent Pipeline</p>
               <p className="text-white/70 text-sm">6개 sub-agent가 협업하여 제안서를 설계하고 있습니다</p>
             </div>
+            {/* ★ D210+ Phase 2-fix8 (Harold 명시 2026-05-23): Stage 2 — 6단 모두 완료 후 둥근 스피너 + "마지막 다듬는 중" 안내 영역 */}
+            {progressStep >= SUB_AGENT_STEPS.length && (
+              <div className="mb-6 text-center animate-in fade-in duration-300">
+                <Loader2 className="w-10 h-10 animate-spin text-fuchsia-400 mx-auto mb-3" />
+                <p className="text-white/85 text-sm font-medium">AI Operator가 마지막 다듬는 중입니다</p>
+                <p className="text-white/50 text-xs mt-1">제안서 화면 준비 중 — 잠시만 기다려주세요</p>
+              </div>
+            )}
+
             <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
               {SUB_AGENT_STEPS.map((step, idx) => {
                 const Icon = step.icon;
