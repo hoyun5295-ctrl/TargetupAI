@@ -194,22 +194,24 @@ export default function AiMemoryPage() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-emerald-50">
-      <div className="bg-white border-b">
-        <div className="max-w-6xl mx-auto px-6 py-4 flex items-center gap-3">
-          <button onClick={() => navigate('/ai-operator')} className="text-gray-500 hover:text-gray-700 p-1">
+    <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 text-white">
+      <div className="bg-slate-950/80 backdrop-blur-sm border-b border-white/10 sticky top-0 z-30">
+        <div className="max-w-7xl mx-auto px-4 md:px-6 py-3 md:py-4 flex items-center gap-3">
+          <button onClick={() => navigate('/ai-operator')} className="p-2 rounded-lg hover:bg-white/10 transition-colors">
             <ArrowLeft className="w-5 h-5" />
           </button>
-          <Brain className="w-5 h-5 text-emerald-600 flex-shrink-0" />
+          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-emerald-400 to-teal-500 flex items-center justify-center flex-shrink-0 shadow-lg shadow-emerald-500/20">
+            <Brain className="w-5 h-5 text-white" />
+          </div>
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2">
-              <h1 className="text-lg font-bold text-gray-800">AI 학습 메모리</h1>
-              <span className="text-xs bg-emerald-50 text-emerald-700 px-2 py-0.5 rounded-full font-medium">BETA</span>
+              <h1 className="text-xl md:text-2xl font-semibold text-white">AI 학습 메모리</h1>
+              <span className="text-[10px] bg-gradient-to-r from-amber-400 to-orange-500 text-white px-2 py-0.5 rounded-full font-bold tracking-wide">BETA</span>
             </div>
-            <p className="text-xs text-gray-500 mt-0.5">회사별 누적 학습 5종 (성공 패턴 / 고객 인사이트 / 톤 / 채널 / 규제) — 시간 지날수록 정확도↑</p>
+            <p className="text-xs md:text-sm text-white/50 mt-0.5">회사별 누적 학습 5종 (성공 패턴 / 고객 인사이트 / 톤 / 채널 / 규제) — 시간 지날수록 정확도↑</p>
           </div>
           <div className="ml-auto flex items-center gap-2">
-            <button onClick={load} className="text-xs text-gray-600 hover:bg-gray-100 px-3 py-1.5 rounded-lg flex items-center gap-1.5">
+            <button onClick={load} className="text-xs text-white/70 hover:bg-white/10 px-3 py-2 rounded-lg flex items-center gap-1.5 transition-colors">
               <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
               새로고침
             </button>
@@ -217,7 +219,7 @@ export default function AiMemoryPage() {
             {isAdmin && (
               <button
                 onClick={handleCleanup}
-                className="text-xs bg-amber-100 hover:bg-amber-200 text-amber-800 px-3 py-1.5 rounded-lg flex items-center gap-1.5"
+                className="text-xs bg-amber-500/20 hover:bg-amber-500/30 text-amber-200 px-3 py-2 rounded-lg flex items-center gap-1.5 transition-colors border border-amber-400/30"
                 title="중요도 3 미만 + 90일 이상 미사용 메모리 정리"
               >
                 <Trash2 className="w-3.5 h-3.5" />
@@ -227,7 +229,7 @@ export default function AiMemoryPage() {
             {isAdmin && (
               <button
                 onClick={() => setEditing({ memoryType: 'customer_insight', memoryKey: '', memoryValue: '', importance: 7 })}
-                className="text-xs bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1.5 rounded-lg flex items-center gap-1.5"
+                className="text-xs bg-gradient-to-r from-emerald-500/40 to-teal-500/40 hover:from-emerald-500/60 hover:to-teal-500/60 text-emerald-50 px-3 py-2 rounded-lg flex items-center gap-1.5 font-medium transition-colors border border-emerald-400/30"
               >
                 <Plus className="w-3.5 h-3.5" />
                 직접 입력
@@ -237,48 +239,56 @@ export default function AiMemoryPage() {
         </div>
       </div>
 
-      <div className="max-w-6xl mx-auto px-6 py-6 space-y-4">
+      <div className="max-w-7xl mx-auto px-4 md:px-6 py-6 space-y-5">
+        {/* ★ D210+ 디자인 강화 (2026-05-23): AI 학습 안내 영역 — gradient 영역 */}
+        <div className="p-4 md:p-5 bg-gradient-to-br from-emerald-500/15 via-teal-500/10 to-cyan-500/15 border border-emerald-400/30 rounded-xl">
+          <div className="flex items-start gap-3">
+            <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-emerald-400 to-teal-500 flex items-center justify-center flex-shrink-0">
+              <AlertCircle className="w-5 h-5 text-white" />
+            </div>
+            <div className="flex-1">
+              <div className="text-sm font-semibold text-emerald-100 mb-1">영구 원칙 — 회사별 누적 학습 + 사용자 신뢰</div>
+              <div className="text-xs text-white/80 leading-relaxed">
+                AI는 본 메모리를 시스템 프롬프트에 포함하여 회사별 맞춤 응답을 생성합니다.
+                성공 패턴 / 채널 성과는 캠페인 종료 시 자동 누적되며, 고객 인사이트 / 컴플라이언스 학습은 직접 입력하실 수 있습니다.
+                모든 메모리는 회사 관리자가 검토 + 삭제 가능합니다.
+              </div>
+            </div>
+          </div>
+        </div>
+
         {/* ★ D210+ Phase 3 B-7 (2026-05-23 Harold 명시): 5 타입별 가이드 카드 (예시 + 자동/수동 분류 명시) */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-2">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-3">
           {MEMORY_TYPE_ORDER.map((type) => {
             const meta = MEMORY_TYPE_META[type];
             const count = (byType.get(type) || []).length;
             return (
-              <div key={type} className="p-3 bg-white border border-gray-200 rounded-lg">
-                <div className={`text-xs font-semibold bg-gradient-to-r ${meta.gradient} bg-clip-text text-transparent mb-1`}>
+              <div key={type} className="p-4 bg-white/5 border border-white/10 rounded-xl hover:bg-white/[0.07] transition-colors">
+                <div className={`text-sm font-semibold bg-gradient-to-r ${meta.gradient} bg-clip-text text-transparent mb-1.5`}>
                   {meta.label}
                 </div>
-                <div className="text-[10px] text-gray-500 mb-1.5">{meta.description}</div>
-                <div className="text-[10px] text-gray-600 italic mb-1.5 leading-relaxed">{meta.example}</div>
-                <div className="flex items-center justify-between text-[10px]">
-                  <span className={`px-1.5 py-0.5 rounded ${
-                    meta.addable === 'auto' ? 'bg-emerald-50 text-emerald-700' :
-                    meta.addable === 'admin' ? 'bg-blue-50 text-blue-700' :
-                    'bg-violet-50 text-violet-700'
+                <div className="text-[11px] text-white/50 mb-2">{meta.description}</div>
+                <div className="text-[10px] text-white/60 italic mb-2 leading-relaxed">{meta.example}</div>
+                <div className="flex items-center justify-between text-[10px] pt-2 border-t border-white/5">
+                  <span className={`px-1.5 py-0.5 rounded font-medium ${
+                    meta.addable === 'auto' ? 'bg-emerald-500/20 text-emerald-300' :
+                    meta.addable === 'admin' ? 'bg-blue-500/20 text-blue-300' :
+                    'bg-violet-500/20 text-violet-300'
                   }`}>
                     {meta.addable === 'auto' ? '자동 누적' : meta.addable === 'admin' ? '직접 입력' : '자동 + 직접'}
                   </span>
-                  <span className="font-mono text-gray-500">{count}건</span>
+                  <span className="font-mono text-white/60 text-xs">{count}건</span>
                 </div>
               </div>
             );
           })}
         </div>
 
-        <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 text-xs text-amber-900 flex items-start gap-2">
-          <AlertCircle className="w-4 h-4 mt-0.5 shrink-0" />
-          <div>
-            <strong>영구 원칙:</strong> AI는 본 메모리를 시스템 프롬프트에 포함하여 회사별 맞춤 응답을 생성합니다.
-            성공 패턴 / 채널 성과는 캠페인 종료 시 자동 누적되며, 고객 인사이트 / 컴플라이언스 학습은 직접 입력하실 수 있습니다.
-            모든 메모리는 회사 관리자가 검토 + 삭제 가능합니다 (사용자 신뢰 원칙).
-          </div>
-        </div>
-
         {/* 타입 필터 */}
         <div className="flex flex-wrap gap-2">
           <button
             onClick={() => setFilterType('all')}
-            className={`text-xs px-3 py-1.5 rounded-full font-medium border ${filterType === 'all' ? 'bg-gray-800 text-white border-gray-800' : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'}`}
+            className={`text-xs px-3 py-1.5 rounded-full font-medium border ${filterType === 'all' ? 'bg-violet-500/40 text-violet-100 border-violet-400/50' : 'bg-white/5 text-white/60 border-white/10 hover:bg-white/10'}`}
           >
             전체 ({memories.length})
           </button>
@@ -288,7 +298,7 @@ export default function AiMemoryPage() {
               <button
                 key={type}
                 onClick={() => setFilterType(type)}
-                className={`text-xs px-3 py-1.5 rounded-full font-medium border ${filterType === type ? 'bg-gray-800 text-white border-gray-800' : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'}`}
+                className={`text-xs px-3 py-1.5 rounded-full font-medium border ${filterType === type ? 'bg-violet-500/40 text-violet-100 border-violet-400/50' : 'bg-white/5 text-white/60 border-white/10 hover:bg-white/10'}`}
               >
                 {MEMORY_TYPE_META[type].label} ({count})
               </button>
@@ -296,19 +306,19 @@ export default function AiMemoryPage() {
           })}
         </div>
 
-        {error && <div className="bg-rose-50 border border-rose-200 rounded-lg p-3 text-sm text-rose-700">{error}</div>}
+        {error && <div className="bg-rose-500/10 border border-rose-400/30 rounded-lg p-3 text-sm text-rose-300">{error}</div>}
 
         {loading && (
-          <div className="bg-white border rounded-xl p-12 flex justify-center text-gray-500">
+          <div className="bg-white/5 border border-white/10 rounded-xl p-12 flex justify-center text-white/40">
             <Loader2 className="w-5 h-5 animate-spin" />
           </div>
         )}
 
         {!loading && memories.length === 0 && (
-          <div className="bg-white border rounded-xl p-12 text-center text-sm text-gray-500">
+          <div className="bg-white/5 border border-white/10 rounded-xl p-12 text-center text-sm text-white/50">
             아직 누적된 학습 메모리가 없습니다.
             <br />
-            <span className="text-xs text-gray-400 mt-2 block">캠페인을 발송하시면 성공 패턴 / 채널 성과가 자동으로 누적됩니다.</span>
+            <span className="text-xs text-white/30 mt-2 block">캠페인을 발송하시면 성공 패턴 / 채널 성과가 자동으로 누적됩니다.</span>
           </div>
         )}
 
@@ -318,7 +328,7 @@ export default function AiMemoryPage() {
           if (arr.length === 0) return null;
           const meta = MEMORY_TYPE_META[type];
           return (
-            <div key={type} className="bg-white border rounded-xl overflow-hidden">
+            <div key={type} className="bg-white/5 border border-white/10 rounded-xl overflow-hidden">
               <div className={`p-4 bg-gradient-to-r ${meta.gradient} text-white`}>
                 <div className="flex items-center justify-between">
                   <div>
@@ -328,45 +338,45 @@ export default function AiMemoryPage() {
                   <div className="text-xs bg-white/20 px-2 py-0.5 rounded-full">{arr.length}건</div>
                 </div>
               </div>
-              <div className="divide-y">
+              <div className="divide-y divide-white/5">
                 {arr.map((m) => (
-                  <div key={m.id} className="p-4 flex items-start gap-3 hover:bg-gray-50">
+                  <div key={m.id} className="p-4 flex items-start gap-3 hover:bg-white/5">
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 mb-1 flex-wrap">
-                        <span className="text-sm font-medium text-gray-800">{m.memoryKey}</span>
-                        <span className="text-[10px] bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded-full">중요도 {m.importance}</span>
-                        <span className="text-[10px] bg-blue-50 text-blue-700 px-1.5 py-0.5 rounded-full">{m.source}</span>
+                        <span className="text-sm font-medium text-white">{m.memoryKey}</span>
+                        <span className="text-[10px] bg-white/10 text-white/60 px-1.5 py-0.5 rounded-full">중요도 {m.importance}</span>
+                        <span className="text-[10px] bg-blue-500/20 text-blue-300 px-1.5 py-0.5 rounded-full">{m.source}</span>
                         {/* ★ D210+ Phase 3 B-7 (2026-05-23 Harold 명시): 영향도 시각화 — AI 호출 시 활용 횟수 */}
                         {(m.usageCount ?? 0) > 0 && (
-                          <span className="text-[10px] bg-violet-50 text-violet-700 px-1.5 py-0.5 rounded-full flex items-center gap-0.5">
+                          <span className="text-[10px] bg-violet-500/20 text-violet-300 px-1.5 py-0.5 rounded-full flex items-center gap-0.5">
                             <Activity className="w-2.5 h-2.5" />
                             AI 활용 {m.usageCount}회
                           </span>
                         )}
                       </div>
-                      <div className="text-xs text-gray-600 whitespace-pre-wrap">{m.memoryValue}</div>
+                      <div className="text-xs text-white/70 whitespace-pre-wrap">{m.memoryValue}</div>
                       {/* ★ D210+ Phase 3 B-7 (2026-05-23 Harold 명시): 중요도 시각화 막대 (1~10 영역) */}
                       <div className="mt-1.5 flex items-center gap-2">
-                        <div className="flex-1 max-w-[120px] h-1 bg-gray-100 rounded-full overflow-hidden">
+                        <div className="flex-1 max-w-[120px] h-1 bg-white/10 rounded-full overflow-hidden">
                           <div
                             className={`h-full ${
-                              m.importance >= 8 ? 'bg-emerald-500' :
+                              m.importance >= 8 ? 'bg-emerald-400' :
                               m.importance >= 5 ? 'bg-amber-400' :
-                              'bg-gray-400'
+                              'bg-white/30'
                             }`}
                             style={{ width: `${(m.importance / 10) * 100}%` }}
                           />
                         </div>
-                        <span className="text-[10px] text-gray-400">{m.importance}/10</span>
+                        <span className="text-[10px] text-white/40">{m.importance}/10</span>
                       </div>
-                      <div className="text-[10px] text-gray-400 mt-1">
+                      <div className="text-[10px] text-white/40 mt-1">
                         최근 접근 {new Date(m.lastAccessedAt).toLocaleString('ko-KR')} · 생성 {new Date(m.createdAt).toLocaleDateString('ko-KR')}
                       </div>
                     </div>
                     {isAdmin && (
                       <button
                         onClick={() => handleDelete(m.id)}
-                        className="text-rose-400 hover:text-rose-600 hover:bg-rose-50 p-1.5 rounded"
+                        className="text-rose-300 hover:text-rose-200 hover:bg-rose-500/20 p-1.5 rounded"
                         title="삭제"
                       >
                         <Trash2 className="w-3.5 h-3.5" />
@@ -382,59 +392,59 @@ export default function AiMemoryPage() {
 
       {/* 직접 입력 모달 */}
       {editing && (
-        <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50" onClick={() => setEditing(null)}>
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-xl p-6" onClick={(e) => e.stopPropagation()}>
-            <h3 className="text-base font-bold text-gray-800 mb-4 flex items-center gap-2">
-              <Plus className="w-4 h-4 text-emerald-600" />
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50" onClick={() => setEditing(null)}>
+          <div className="bg-slate-900 border border-white/10 rounded-2xl shadow-2xl w-full max-w-xl p-6" onClick={(e) => e.stopPropagation()}>
+            <h3 className="text-base font-bold text-white mb-4 flex items-center gap-2">
+              <Plus className="w-4 h-4 text-emerald-400" />
               메모리 직접 입력
             </h3>
             <div className="space-y-3">
               <div>
-                <label className="text-xs text-gray-600 block mb-1">타입</label>
+                <label className="text-xs text-white/60 block mb-1">타입</label>
                 <select
                   value={editing.memoryType}
                   onChange={(e) => setEditing({ ...editing, memoryType: e.target.value as MemoryType })}
-                  className="w-full px-3 py-2 border rounded-lg text-sm"
+                  className="w-full px-3 py-2 bg-slate-950/60 border border-white/10 rounded-lg text-sm text-white focus:outline-none focus:border-emerald-400/50"
                 >
                   {MEMORY_TYPE_ORDER.map((t) => (
-                    <option key={t} value={t}>{MEMORY_TYPE_META[t].label} — {MEMORY_TYPE_META[t].description}</option>
+                    <option key={t} value={t} className="bg-slate-900">{MEMORY_TYPE_META[t].label} — {MEMORY_TYPE_META[t].description}</option>
                   ))}
                 </select>
               </div>
               <div>
-                <label className="text-xs text-gray-600 block mb-1">Key (짧은 식별자, 200자 이내)</label>
+                <label className="text-xs text-white/60 block mb-1">Key (짧은 식별자, 200자 이내)</label>
                 <input
                   type="text"
                   value={editing.memoryKey}
                   onChange={(e) => setEditing({ ...editing, memoryKey: e.target.value })}
                   placeholder="예: VIP 고객 재구매 패턴"
                   maxLength={200}
-                  className="w-full px-3 py-2 border rounded-lg text-sm"
+                  className="w-full px-3 py-2 bg-slate-950/60 border border-white/10 rounded-lg text-sm text-white placeholder-white/30 focus:outline-none focus:border-emerald-400/50"
                 />
               </div>
               <div>
-                <label className="text-xs text-gray-600 block mb-1">Value (상세 내용)</label>
+                <label className="text-xs text-white/60 block mb-1">Value (상세 내용)</label>
                 <textarea
                   value={editing.memoryValue}
                   onChange={(e) => setEditing({ ...editing, memoryValue: e.target.value })}
                   placeholder="예: VIP 등급 고객은 화요일 오후 2시 알림톡 발송 시 클릭률 18%로 가장 높음"
-                  className="w-full px-3 py-2 border rounded-lg text-sm resize-none h-24"
+                  className="w-full px-3 py-2 bg-slate-950/60 border border-white/10 rounded-lg text-sm text-white placeholder-white/30 resize-none h-24 focus:outline-none focus:border-emerald-400/50"
                 />
               </div>
               <div>
-                <label className="text-xs text-gray-600 block mb-1">중요도 (1~10, 높을수록 AI가 우선 참고)</label>
+                <label className="text-xs text-white/60 block mb-1">중요도 (1~10, 높을수록 AI가 우선 참고)</label>
                 <input
                   type="number"
                   min="1"
                   max="10"
                   value={editing.importance}
                   onChange={(e) => setEditing({ ...editing, importance: Math.max(1, Math.min(10, parseInt(e.target.value) || 5)) })}
-                  className="w-full px-3 py-2 border rounded-lg text-sm"
+                  className="w-full px-3 py-2 bg-slate-950/60 border border-white/10 rounded-lg text-sm text-white focus:outline-none focus:border-emerald-400/50"
                 />
               </div>
-              <div className="flex gap-2 justify-end pt-2 border-t">
-                <button onClick={() => setEditing(null)} className="px-4 py-2 border rounded-lg text-sm text-gray-700 hover:bg-gray-50">취소</button>
-                <button onClick={handleSave} disabled={saving} className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-sm rounded-lg disabled:opacity-40">
+              <div className="flex gap-2 justify-end pt-2 border-t border-white/10">
+                <button onClick={() => setEditing(null)} className="px-4 py-2 border border-white/10 rounded-lg text-sm text-white/70 hover:bg-white/5">취소</button>
+                <button onClick={handleSave} disabled={saving} className="px-4 py-2 bg-emerald-500/30 hover:bg-emerald-500/50 text-emerald-100 text-sm rounded-lg disabled:opacity-40">
                   {saving ? '저장 중...' : '저장'}
                 </button>
               </div>

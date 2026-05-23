@@ -320,28 +320,30 @@ export default function ContinuousOperatorPage() {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-indigo-50">
-      <div className="bg-white border-b">
-        <div className="max-w-6xl mx-auto px-6 py-4 flex items-center gap-3">
-          <button onClick={() => navigate('/ai-operator')} className="text-gray-500 hover:text-gray-700 p-1">
+    <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 text-white">
+      <div className="bg-slate-950/80 backdrop-blur-sm border-b border-white/10 sticky top-0 z-30">
+        <div className="max-w-7xl mx-auto px-4 md:px-6 py-3 md:py-4 flex items-center gap-3">
+          <button onClick={() => navigate('/ai-operator')} className="p-2 rounded-lg hover:bg-white/10 transition-colors">
             <ArrowLeft className="w-5 h-5" />
           </button>
-          <Brain className="w-5 h-5 text-indigo-600 flex-shrink-0" />
+          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-indigo-400 to-violet-500 flex items-center justify-center flex-shrink-0 shadow-lg shadow-indigo-500/20">
+            <Brain className="w-5 h-5 text-white" />
+          </div>
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2">
-              <h1 className="text-lg font-bold text-gray-800">AI 영구 운영 (Continuous Operator)</h1>
-              <span className="text-xs bg-indigo-50 text-indigo-700 px-2 py-0.5 rounded-full font-medium">BETA</span>
+              <h1 className="text-xl md:text-2xl font-semibold text-white">AI 영구 운영</h1>
+              <span className="text-[10px] bg-gradient-to-r from-amber-400 to-orange-500 text-white px-2 py-0.5 rounded-full font-bold tracking-wide">BETA</span>
             </div>
-            <p className="text-xs text-gray-500 mt-0.5">매일 AI가 새 캠페인 자동 제안 — 사용자 승인 후 발송 (영구 운영 매트릭스)</p>
+            <p className="text-xs md:text-sm text-white/50 mt-0.5">매일 AI가 새 캠페인 자동 제안 — 사용자 승인 후 발송 (영구 운영 매트릭스)</p>
           </div>
           <div className="ml-auto flex items-center gap-2">
-            <button onClick={loadAll} className="text-xs text-gray-600 hover:bg-gray-100 px-3 py-1.5 rounded-lg flex items-center gap-1.5">
+            <button onClick={loadAll} className="text-xs text-white/70 hover:bg-white/10 px-3 py-2 rounded-lg flex items-center gap-1.5 transition-colors">
               <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
               새로고침
             </button>
             <button
               onClick={() => { setShowMultiGoal(true); setMultiGoalAnalysis(null); }}
-              className="text-xs bg-violet-600 hover:bg-violet-700 text-white px-3 py-1.5 rounded-lg flex items-center gap-1.5"
+              className="text-xs bg-gradient-to-r from-violet-500/40 to-fuchsia-500/40 hover:from-violet-500/60 hover:to-fuchsia-500/60 text-violet-50 px-3 py-2 rounded-lg flex items-center gap-1.5 font-medium transition-colors border border-violet-400/30"
               title="다중 목표 설정 시 AI가 충돌 영역을 분석 (Multi-Goal Decisioning)"
             >
               <GitMerge className="w-3.5 h-3.5" />
@@ -349,7 +351,7 @@ export default function ContinuousOperatorPage() {
             </button>
             <button
               onClick={() => setEditing({ name: '', objective: '', schedule: 'daily', scheduleTime: '09:00', status: 'active' })}
-              className="text-xs bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1.5 rounded-lg flex items-center gap-1.5"
+              className="text-xs bg-gradient-to-r from-indigo-500/40 to-violet-500/40 hover:from-indigo-500/60 hover:to-violet-500/60 text-indigo-50 px-3 py-2 rounded-lg flex items-center gap-1.5 font-medium transition-colors border border-indigo-400/30"
             >
               <Plus className="w-3.5 h-3.5" />
               신규 영구 운영
@@ -358,29 +360,29 @@ export default function ContinuousOperatorPage() {
         </div>
 
         {/* 탭 */}
-        <div className="max-w-6xl mx-auto px-6 flex gap-1 border-b">
+        <div className="max-w-7xl mx-auto px-4 md:px-6 flex gap-1">
           <button
             onClick={() => setTab('proposals')}
-            className={`px-4 py-2 text-sm font-medium border-b-2 ${tab === 'proposals' ? 'border-indigo-600 text-indigo-600' : 'border-transparent text-gray-500'}`}
+            className={`px-4 py-2.5 text-sm font-medium border-b-2 transition-colors ${tab === 'proposals' ? 'border-indigo-400 text-indigo-200' : 'border-transparent text-white/50 hover:text-white/80'}`}
           >
             대기 제안서 {proposals.filter((p) => p.status === 'pending').length > 0 && (
-              <span className="ml-1 bg-rose-500 text-white text-[10px] px-1.5 py-0.5 rounded-full">
+              <span className="ml-1.5 bg-rose-500/30 text-rose-200 text-[10px] px-1.5 py-0.5 rounded-full font-bold">
                 {proposals.filter((p) => p.status === 'pending').length}
               </span>
             )}
           </button>
           <button
             onClick={() => setTab('operators')}
-            className={`px-4 py-2 text-sm font-medium border-b-2 ${tab === 'operators' ? 'border-indigo-600 text-indigo-600' : 'border-transparent text-gray-500'}`}
+            className={`px-4 py-2.5 text-sm font-medium border-b-2 transition-colors ${tab === 'operators' ? 'border-indigo-400 text-indigo-200' : 'border-transparent text-white/50 hover:text-white/80'}`}
           >
             영구 운영 목록 ({operators.filter((o) => o.status === 'active').length})
           </button>
         </div>
       </div>
 
-      <div className="max-w-6xl mx-auto px-6 py-6 space-y-4">
+      <div className="max-w-7xl mx-auto px-4 md:px-6 py-6 space-y-5">
         {/* 영구 원칙 안내 */}
-        <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 text-xs text-amber-900 flex items-start gap-2">
+        <div className="bg-amber-500/10 border border-amber-400/30 rounded-lg p-3 text-xs text-amber-100 flex items-start gap-2">
           <AlertCircle className="w-4 h-4 mt-0.5 shrink-0" />
           <div>
             <strong>영구 원칙:</strong> AI는 매일 회고 + 제안서를 생성할 뿐, 실행은 항상 사용자 승인 후에만 이루어집니다.
@@ -390,13 +392,13 @@ export default function ContinuousOperatorPage() {
         </div>
 
         {error && (
-          <div className="bg-rose-50 border border-rose-200 rounded-lg p-3 text-sm text-rose-700">
+          <div className="bg-rose-500/10 border border-rose-400/30 rounded-lg p-3 text-sm text-rose-300">
             {error}
           </div>
         )}
 
         {loading && (
-          <div className="bg-white border rounded-xl p-12 flex justify-center text-gray-500">
+          <div className="bg-white/5 border border-white/10 rounded-xl p-12 flex justify-center text-white/50">
             <Loader2 className="w-5 h-5 animate-spin" />
           </div>
         )}
@@ -405,7 +407,7 @@ export default function ContinuousOperatorPage() {
         {!loading && tab === 'proposals' && (
           <>
             <div className="flex gap-2 items-center">
-              <span className="text-xs text-gray-500">상태:</span>
+              <span className="text-xs text-white/50">상태:</span>
               <select
                 value={proposalStatus}
                 onChange={(e) => setProposalStatus(e.target.value as any)}
@@ -417,10 +419,10 @@ export default function ContinuousOperatorPage() {
             </div>
 
             {proposals.length === 0 ? (
-              <div className="bg-white border rounded-xl p-12 text-center text-sm text-gray-500">
+              <div className="bg-white/5 border border-white/10 rounded-xl p-12 text-center text-sm text-white/50">
                 {proposalStatus === 'pending' ? '대기 중인 제안서가 없습니다.' : '제안서가 없습니다.'}
                 <br />
-                <span className="text-xs text-gray-400 mt-2 block">활성 영구 운영이 있으면 매일 예약 시간에 자동으로 제안서가 생성됩니다.</span>
+                <span className="text-xs text-white/40 mt-2 block">활성 영구 운영이 있으면 매일 예약 시간에 자동으로 제안서가 생성됩니다.</span>
               </div>
             ) : (
               proposals.map((p) => {
@@ -430,23 +432,23 @@ export default function ContinuousOperatorPage() {
                 const messages = p.proposalJson?.messages || [];
                 const performance = p.proposalJson?.performance;
                 return (
-                  <div key={p.id} className="bg-white border rounded-xl overflow-hidden">
+                  <div key={p.id} className="bg-white/5 border border-white/10 rounded-xl overflow-hidden">
                     <div className="p-5">
                       <div className="flex items-start justify-between gap-4">
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center gap-2 mb-1">
-                            <Sparkles className="w-4 h-4 text-indigo-500" />
-                            <div className="text-sm font-bold text-gray-800">{p.operatorName || '(Operator)'}</div>
+                            <Sparkles className="w-4 h-4 text-indigo-300" />
+                            <div className="text-sm font-bold text-white">{p.operatorName || '(Operator)'}</div>
                             <StatusBadge status={p.status} />
                             {p.autoExecuted && (
-                              <span className="text-[10px] bg-violet-100 text-violet-700 px-1.5 py-0.5 rounded-full font-medium flex items-center gap-1">
+                              <span className="text-[10px] bg-violet-500/20 text-violet-300 px-1.5 py-0.5 rounded-full font-medium flex items-center gap-1">
                                 <Zap className="w-2.5 h-2.5" /> 자동 실행
                               </span>
                             )}
                           </div>
-                          <div className="text-xs text-gray-500 mb-2">목표: "{p.operatorObjective}"</div>
-                          <div className="flex flex-wrap gap-3 text-xs text-gray-600">
-                            <span>대상 <strong className="text-indigo-600">{p.recipientCount.toLocaleString()}명</strong></span>
+                          <div className="text-xs text-white/50 mb-2">목표: "{p.operatorObjective}"</div>
+                          <div className="flex flex-wrap gap-3 text-xs text-white/70">
+                            <span>대상 <strong className="text-indigo-300">{p.recipientCount.toLocaleString()}명</strong></span>
                             <span>·</span>
                             <span>비용 <strong>{p.costEstimate.toLocaleString()}원</strong></span>
                             <span>·</span>
@@ -460,17 +462,17 @@ export default function ContinuousOperatorPage() {
                         <div className="flex flex-col gap-1.5 shrink-0">
                           {p.status === 'pending' && (
                             <>
-                              <button onClick={() => handleApprove(p.id)} className="text-xs bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1.5 rounded flex items-center gap-1">
+                              <button onClick={() => handleApprove(p.id)} className="text-xs bg-emerald-500/30 hover:bg-emerald-500/50 text-emerald-100 px-3 py-1.5 rounded flex items-center gap-1">
                                 <Check className="w-3 h-3" /> 승인 + 발송
                               </button>
-                              <button onClick={() => handleReject(p.id)} className="text-xs bg-white border border-rose-300 hover:bg-rose-50 text-rose-700 px-3 py-1.5 rounded flex items-center gap-1">
+                              <button onClick={() => handleReject(p.id)} className="text-xs bg-white/5 border border-rose-400/30 hover:bg-rose-500/20 text-rose-300 px-3 py-1.5 rounded flex items-center gap-1">
                                 <X className="w-3 h-3" /> 거부
                               </button>
                             </>
                           )}
                           <button
                             onClick={() => toggleExpand(p.id)}
-                            className="text-xs text-gray-500 hover:bg-gray-50 px-3 py-1.5 rounded flex items-center gap-1"
+                            className="text-xs text-white/50 hover:bg-white/5 px-3 py-1.5 rounded flex items-center gap-1"
                           >
                             {expanded ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
                             상세
@@ -480,48 +482,48 @@ export default function ContinuousOperatorPage() {
                     </div>
 
                     {expanded && (
-                      <div className="border-t bg-gray-50 px-5 py-4 space-y-3 text-xs">
+                      <div className="border-t bg-white/5 px-5 py-4 space-y-3 text-xs">
                         {target && (
                           <div>
-                            <div className="font-bold text-gray-700 mb-1">타겟 분석</div>
-                            <div className="text-gray-600">
+                            <div className="font-bold text-white/80 mb-1">타겟 분석</div>
+                            <div className="text-white/70">
                               {target.criteria || '(기준 미설정)'}
-                              <span className="text-gray-400 ml-2">— 매칭 {target.count?.toLocaleString()} / 전체 {target.totalCount?.toLocaleString()}</span>
+                              <span className="text-white/40 ml-2">— 매칭 {target.count?.toLocaleString()} / 전체 {target.totalCount?.toLocaleString()}</span>
                             </div>
                           </div>
                         )}
                         {messages.length > 0 && (
                           <div>
-                            <div className="font-bold text-gray-700 mb-1">메시지 ({messages.length}안)</div>
+                            <div className="font-bold text-white/80 mb-1">메시지 ({messages.length}안)</div>
                             <div className="space-y-1.5">
                               {messages.slice(0, 3).map((m: any, i: number) => {
                                 const variantData = variantsMap[p.id]?.variants?.[i];
                                 const recommendation = variantsMap[p.id]?.recommendation;
                                 const isBanditRecommended = recommendation?.variantIndex === i;
                                 return (
-                                  <div key={i} className={`border rounded p-2 ${isBanditRecommended ? 'bg-indigo-50 border-indigo-300' : 'bg-white'}`}>
+                                  <div key={i} className={`border rounded p-2 ${isBanditRecommended ? 'bg-indigo-500/15 border-indigo-400/40' : 'bg-white/5 border-white/10'}`}>
                                     <div className="flex items-center gap-2 flex-wrap">
-                                      <span className="font-medium text-gray-700">{m.variantName || `Variant ${i + 1}`}</span>
-                                      <span className="text-[10px] text-gray-500">· {m.byteCount}byte</span>
+                                      <span className="font-medium text-white/80">{m.variantName || `Variant ${i + 1}`}</span>
+                                      <span className="text-[10px] text-white/50">· {m.byteCount}byte</span>
                                       {isBanditRecommended && (
                                         <span className="text-[10px] bg-indigo-600 text-white px-1.5 py-0.5 rounded-full font-medium flex items-center gap-1">
                                           <Target className="w-2.5 h-2.5" /> Bandit 추천
                                         </span>
                                       )}
                                       {variantData && (
-                                        <span className="text-[10px] text-gray-500">
+                                        <span className="text-[10px] text-white/50">
                                           발송 {variantData.sentCount} · 클릭 {variantData.clickCount} · 전환 {variantData.conversionCount}
                                         </span>
                                       )}
                                     </div>
-                                    <div className="text-gray-600 whitespace-pre-wrap mt-1">{m.body}</div>
+                                    <div className="text-white/70 whitespace-pre-wrap mt-1">{m.body}</div>
                                   </div>
                                 );
                               })}
                             </div>
                             {/* D177 Bandit 추천 사유 표시 */}
                             {variantsMap[p.id]?.recommendation && (
-                              <div className="mt-2 bg-indigo-50 border border-indigo-200 rounded p-2 text-indigo-900 text-[11px] flex items-start gap-1.5">
+                              <div className="mt-2 bg-indigo-500/10 border border-indigo-400/30 rounded p-2 text-indigo-200 text-[11px] flex items-start gap-1.5">
                                 <Target className="w-3 h-3 mt-0.5 shrink-0" />
                                 <div>
                                   <strong>Self-Optimizing 추천:</strong> {variantsMap[p.id].recommendation!.reasoning}
@@ -533,8 +535,8 @@ export default function ContinuousOperatorPage() {
                         )}
                         {performance && (
                           <div>
-                            <div className="font-bold text-gray-700 mb-1">예상 성과</div>
-                            <div className="text-gray-600">
+                            <div className="font-bold text-white/80 mb-1">예상 성과</div>
+                            <div className="text-white/70">
                               클릭률 {(performance.clickRate * 100).toFixed(1)}% · 전환율 {(performance.conversionRate * 100).toFixed(2)}% · 매출 {performance.expectedRevenue?.toLocaleString()}원
                             </div>
                           </div>
@@ -557,22 +559,22 @@ export default function ContinuousOperatorPage() {
         {!loading && tab === 'operators' && (
           <>
             {operators.length === 0 ? (
-              <div className="bg-white border rounded-xl p-12 text-center text-sm text-gray-500">
+              <div className="bg-white/5 border border-white/10 rounded-xl p-12 text-center text-sm text-white/50">
                 등록된 영구 운영이 없습니다.
                 <br />
-                <span className="text-xs text-gray-400 mt-2 block">자연어 한 줄로 마케팅 목표를 박으면 AI가 매일 새 캠페인을 제안합니다.</span>
+                <span className="text-xs text-white/40 mt-2 block">자연어 한 줄로 마케팅 목표를 박으면 AI가 매일 새 캠페인을 제안합니다.</span>
               </div>
             ) : (
               operators.map((op) => (
-                <div key={op.id} className="bg-white border rounded-xl p-5">
+                <div key={op.id} className="bg-white/5 border border-white/10 rounded-xl p-5">
                   <div className="flex items-start justify-between gap-4">
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 mb-1">
-                        <div className="text-base font-bold text-gray-800">{op.name}</div>
+                        <div className="text-base font-bold text-white">{op.name}</div>
                         <StatusBadge status={op.status} />
                       </div>
-                      <div className="text-sm text-gray-600 mb-2">"{op.objective}"</div>
-                      <div className="flex flex-wrap gap-3 text-xs text-gray-500">
+                      <div className="text-sm text-white/70 mb-2">"{op.objective}"</div>
+                      <div className="flex flex-wrap gap-3 text-xs text-white/50">
                         <span><Clock className="w-3 h-3 inline" /> {op.schedule} {op.scheduleTime} (KST)</span>
                         <span>·</span>
                         <span>다음 실행 {op.nextRunAt ? new Date(op.nextRunAt).toLocaleString('ko-KR') : '-'}</span>
@@ -584,7 +586,7 @@ export default function ContinuousOperatorPage() {
                       <button onClick={() => handleRunNow(op.id)} className="text-xs bg-indigo-50 hover:bg-indigo-100 text-indigo-700 px-2 py-1 rounded flex items-center gap-1">
                         <Play className="w-3 h-3" /> 지금 실행
                       </button>
-                      <button onClick={() => setEditing(op)} className="text-xs text-gray-600 hover:bg-gray-50 px-2 py-1 rounded flex items-center gap-1">
+                      <button onClick={() => setEditing(op)} className="text-xs text-white/70 hover:bg-white/5 px-2 py-1 rounded flex items-center gap-1">
                         <Edit2 className="w-3 h-3" /> 수정
                       </button>
                       <button onClick={() => handleDelete(op.id)} className="text-xs text-rose-500 hover:bg-rose-50 px-2 py-1 rounded flex items-center gap-1">
@@ -602,12 +604,12 @@ export default function ContinuousOperatorPage() {
       {/* ★ D179 Multi-Goal 분석 모달 */}
       {showMultiGoal && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50" onClick={() => setShowMultiGoal(false)}>
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[90vh] overflow-y-auto p-6" onClick={(e) => e.stopPropagation()}>
+          <div className="bg-slate-900 border border-white/10 rounded-2xl shadow-2xl w-full max-w-3xl max-h-[90vh] overflow-y-auto p-6" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center gap-2 mb-4">
               <GitMerge className="w-5 h-5 text-violet-600" />
-              <h3 className="text-base font-bold text-gray-800">Multi-Goal Decisioning — 다중 목표 충돌 분석</h3>
+              <h3 className="text-base font-bold text-white">Multi-Goal Decisioning — 다중 목표 충돌 분석</h3>
             </div>
-            <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 mb-4 text-xs text-amber-900 flex items-start gap-2">
+            <div className="bg-amber-500/10 border border-amber-400/30 rounded-lg p-3 mb-4 text-xs text-amber-100 flex items-start gap-2">
               <AlertCircle className="w-4 h-4 mt-0.5 shrink-0" />
               <div>
                 <strong>영구 원칙:</strong> 다중 목표 설정 시 AI가 충돌 영역(동일 고객 동시 발송 / 메시지 중복 / 시점 겹침)을 분석 + 사용자 검토 후 영구 운영 등록.
@@ -619,9 +621,9 @@ export default function ContinuousOperatorPage() {
               <>
                 <div className="space-y-3 mb-4">
                   {multiGoals.map((g, idx) => (
-                    <div key={idx} className="border rounded-lg p-3 bg-gray-50">
+                    <div key={idx} className="border rounded-lg p-3 bg-white/5">
                       <div className="flex items-center gap-2 mb-2">
-                        <span className="text-xs font-bold text-gray-700">목표 {idx + 1}</span>
+                        <span className="text-xs font-bold text-white/80">목표 {idx + 1}</span>
                         {multiGoals.length > 2 && (
                           <button onClick={() => removeMultiGoal(idx)} className="text-rose-500 hover:text-rose-700 text-xs ml-auto">
                             제거
@@ -642,7 +644,7 @@ export default function ContinuousOperatorPage() {
                           maxLength={100}
                         />
                         <div>
-                          <label className="text-[10px] text-gray-500 block">가중치 (0~1, 합 자동 정규화)</label>
+                          <label className="text-[10px] text-white/50 block">가중치 (0~1, 합 자동 정규화)</label>
                           <input
                             type="number"
                             step="0.1"
@@ -674,18 +676,18 @@ export default function ContinuousOperatorPage() {
                   {multiGoals.length < 5 && (
                     <button
                       onClick={addMultiGoal}
-                      className="w-full py-2 border-2 border-dashed border-gray-300 hover:border-violet-400 hover:bg-violet-50 text-xs text-gray-600 rounded-lg flex items-center justify-center gap-1.5"
+                      className="w-full py-2 border-2 border-dashed border-white/20 hover:border-violet-400 hover:bg-violet-500/10 text-xs text-white/70 rounded-lg flex items-center justify-center gap-1.5"
                     >
                       <Plus className="w-3 h-3" /> 목표 추가 (최대 5건)
                     </button>
                   )}
                 </div>
                 <div className="flex gap-2 justify-end pt-2 border-t">
-                  <button onClick={() => setShowMultiGoal(false)} className="px-4 py-2 border rounded-lg text-sm text-gray-700 hover:bg-gray-50">취소</button>
+                  <button onClick={() => setShowMultiGoal(false)} className="px-4 py-2 border rounded-lg text-sm text-white/80 hover:bg-white/5">취소</button>
                   <button
                     onClick={handleMultiGoalAnalyze}
                     disabled={analyzing}
-                    className="px-4 py-2 bg-violet-600 hover:bg-violet-700 text-white text-sm rounded-lg disabled:opacity-40 flex items-center gap-1.5"
+                    className="px-4 py-2 bg-violet-500/30 hover:bg-violet-500/50 text-violet-100 text-sm rounded-lg disabled:opacity-40 flex items-center gap-1.5"
                   >
                     {analyzing ? <><Loader2 className="w-3.5 h-3.5 animate-spin" /> AI 분석 중...</> : <><Sparkles className="w-3.5 h-3.5" /> 충돌 분석 시작</>}
                   </button>
@@ -702,10 +704,10 @@ export default function ContinuousOperatorPage() {
                 </div>
 
                 <div className="mb-4">
-                  <div className="text-xs font-bold text-gray-700 mb-2">추천 순서 (Recommended Order)</div>
+                  <div className="text-xs font-bold text-white/80 mb-2">추천 순서 (Recommended Order)</div>
                   <div className="flex flex-wrap gap-2">
                     {multiGoalAnalysis.recommendedOrder.map((name, idx) => (
-                      <div key={idx} className="bg-white border border-violet-300 rounded-full px-3 py-1 text-xs flex items-center gap-1.5">
+                      <div key={idx} className="bg-white/5 border border-violet-400/40 rounded-full px-3 py-1 text-xs flex items-center gap-1.5">
                         <span className="bg-violet-600 text-white w-4 h-4 rounded-full flex items-center justify-center text-[10px] font-bold">{idx + 1}</span>
                         {name}
                       </div>
@@ -714,37 +716,37 @@ export default function ContinuousOperatorPage() {
                 </div>
 
                 <div className="mb-4 space-y-2">
-                  <div className="text-xs font-bold text-gray-700">목표별 sub-plan</div>
+                  <div className="text-xs font-bold text-white/80">목표별 sub-plan</div>
                   {multiGoalAnalysis.subPlans.map((sp, idx) => (
-                    <div key={idx} className={`border rounded-lg p-3 ${sp.shouldExecute ? 'bg-white' : 'bg-rose-50 border-rose-200'}`}>
+                    <div key={idx} className={`border rounded-lg p-3 ${sp.shouldExecute ? 'bg-white/5 border-white/10' : 'bg-rose-500/10 border-rose-400/30'}`}>
                       <div className="flex items-center gap-2 mb-1">
                         <span className="bg-violet-600 text-white w-4 h-4 rounded-full flex items-center justify-center text-[10px] font-bold">{sp.priority}</span>
-                        <span className="text-sm font-bold text-gray-800">{sp.goalName}</span>
+                        <span className="text-sm font-bold text-white">{sp.goalName}</span>
                         <span className="text-[10px] bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded-full">{sp.channelRecommended}</span>
                         <span className="text-[10px] bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded-full">{sp.timingRecommended}</span>
                         {!sp.shouldExecute && <span className="text-[10px] bg-rose-200 text-rose-800 px-1.5 py-0.5 rounded-full">실행 제외</span>}
                       </div>
-                      <div className="text-xs text-gray-600 mb-1">{sp.targetCriteria}</div>
+                      <div className="text-xs text-white/70 mb-1">{sp.targetCriteria}</div>
                       {sp.conflicts.length > 0 && (
                         <div className="text-[11px] text-amber-700 mt-1.5">
                           <strong>충돌:</strong> {sp.conflicts.join(' / ')}
                         </div>
                       )}
-                      <div className="text-[11px] text-gray-500 mt-1">{sp.reasoning}</div>
+                      <div className="text-[11px] text-white/50 mt-1">{sp.reasoning}</div>
                     </div>
                   ))}
                 </div>
 
                 {multiGoalAnalysis.conflictMatrix && (
                   <details className="mb-4">
-                    <summary className="text-xs font-bold text-gray-700 cursor-pointer">충돌 매트릭스 (markdown)</summary>
-                    <pre className="bg-gray-50 border rounded p-3 text-[11px] font-mono whitespace-pre-wrap mt-2">{multiGoalAnalysis.conflictMatrix}</pre>
+                    <summary className="text-xs font-bold text-white/80 cursor-pointer">충돌 매트릭스 (markdown)</summary>
+                    <pre className="bg-white/5 border rounded p-3 text-[11px] font-mono whitespace-pre-wrap mt-2">{multiGoalAnalysis.conflictMatrix}</pre>
                   </details>
                 )}
 
                 <div className="flex gap-2 justify-end pt-3 border-t">
-                  <button onClick={() => { setMultiGoalAnalysis(null); }} className="px-4 py-2 border rounded-lg text-sm text-gray-700 hover:bg-gray-50">다시 분석</button>
-                  <button onClick={() => setShowMultiGoal(false)} className="px-4 py-2 bg-violet-600 hover:bg-violet-700 text-white text-sm rounded-lg">확인</button>
+                  <button onClick={() => { setMultiGoalAnalysis(null); }} className="px-4 py-2 border rounded-lg text-sm text-white/80 hover:bg-white/5">다시 분석</button>
+                  <button onClick={() => setShowMultiGoal(false)} className="px-4 py-2 bg-violet-500/30 hover:bg-violet-500/50 text-violet-100 text-sm rounded-lg">확인</button>
                 </div>
               </>
             )}
@@ -756,10 +758,10 @@ export default function ContinuousOperatorPage() {
       {editing && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50" onClick={() => setEditing(null)}>
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-xl max-h-[90vh] overflow-y-auto p-6" onClick={(e) => e.stopPropagation()}>
-            <h3 className="text-base font-bold text-gray-800 mb-4">{editing.id ? '영구 운영 수정' : '신규 영구 운영'}</h3>
+            <h3 className="text-base font-bold text-white mb-4">{editing.id ? '영구 운영 수정' : '신규 영구 운영'}</h3>
             <div className="space-y-3">
               <div>
-                <label className="text-xs text-gray-600 block mb-1">이름</label>
+                <label className="text-xs text-white/70 block mb-1">이름</label>
                 <input
                   type="text"
                   value={editing.name || ''}
@@ -770,7 +772,7 @@ export default function ContinuousOperatorPage() {
                 />
               </div>
               <div>
-                <label className="text-xs text-gray-600 block mb-1">자연어 목표</label>
+                <label className="text-xs text-white/70 block mb-1">자연어 목표</label>
                 <textarea
                   value={editing.objective || ''}
                   onChange={(e) => setEditing({ ...editing, objective: e.target.value })}
@@ -781,7 +783,7 @@ export default function ContinuousOperatorPage() {
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="text-xs text-gray-600 block mb-1">주기</label>
+                  <label className="text-xs text-white/70 block mb-1">주기</label>
                   <select
                     value={editing.schedule || 'daily'}
                     onChange={(e) => setEditing({ ...editing, schedule: e.target.value as Schedule })}
@@ -793,7 +795,7 @@ export default function ContinuousOperatorPage() {
                   </select>
                 </div>
                 <div>
-                  <label className="text-xs text-gray-600 block mb-1">실행 시각 (KST)</label>
+                  <label className="text-xs text-white/70 block mb-1">실행 시각 (KST)</label>
                   <input
                     type="time"
                     value={editing.scheduleTime || '09:00'}
@@ -804,7 +806,7 @@ export default function ContinuousOperatorPage() {
               </div>
               {editing.id && (
                 <div>
-                  <label className="text-xs text-gray-600 block mb-1">상태</label>
+                  <label className="text-xs text-white/70 block mb-1">상태</label>
                   <select
                     value={editing.status || 'active'}
                     onChange={(e) => setEditing({ ...editing, status: e.target.value as OperatorStatus })}
@@ -816,19 +818,19 @@ export default function ContinuousOperatorPage() {
                 </div>
               )}
 
-              <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 text-xs text-amber-900">
+              <div className="bg-amber-500/10 border border-amber-400/30 rounded-lg p-3 text-xs text-amber-100">
                 <strong>안내:</strong> AI가 위 시각에 매일/매주/매월 새 제안서를 박습니다. 각 제안서는 사용자 승인 후에만 발송됩니다. 7일 안에 승인하지 않으면 자동 만료됩니다.
               </div>
 
               {error && (
-                <div className="bg-rose-50 border border-rose-200 rounded-lg p-3 text-sm text-rose-700">
+                <div className="bg-rose-500/10 border border-rose-400/30 rounded-lg p-3 text-sm text-rose-300">
                   {error}
                 </div>
               )}
 
               <div className="flex gap-2 justify-end pt-2">
-                <button onClick={() => setEditing(null)} className="px-4 py-2 border rounded-lg text-sm text-gray-700 hover:bg-gray-50">취소</button>
-                <button onClick={handleSave} disabled={saving} className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm rounded-lg disabled:opacity-40">
+                <button onClick={() => setEditing(null)} className="px-4 py-2 border rounded-lg text-sm text-white/80 hover:bg-white/5">취소</button>
+                <button onClick={handleSave} disabled={saving} className="px-4 py-2 bg-indigo-500/30 hover:bg-indigo-500/50 text-indigo-100 text-sm rounded-lg disabled:opacity-40">
                   {saving ? '저장 중...' : '저장'}
                 </button>
               </div>
@@ -844,13 +846,13 @@ function StatusBadge({ status }: { status: string }) {
   const map: Record<string, { label: string; cls: string }> = {
     active: { label: '활성', cls: 'bg-emerald-100 text-emerald-700' },
     paused: { label: '일시중지', cls: 'bg-amber-100 text-amber-700' },
-    archived: { label: '보관', cls: 'bg-gray-100 text-gray-500' },
+    archived: { label: '보관', cls: 'bg-white/10 text-white/50' },
     pending: { label: '승인 대기', cls: 'bg-amber-100 text-amber-700' },
     approved: { label: '승인됨', cls: 'bg-emerald-100 text-emerald-700' },
-    rejected: { label: '거부됨', cls: 'bg-gray-100 text-gray-500' },
-    auto_executed: { label: '자동 실행됨', cls: 'bg-violet-100 text-violet-700' },
+    rejected: { label: '거부됨', cls: 'bg-white/10 text-white/50' },
+    auto_executed: { label: '자동 실행됨', cls: 'bg-violet-500/20 text-violet-300' },
     expired: { label: '만료됨', cls: 'bg-rose-100 text-rose-700' },
   };
-  const e = map[status] || { label: status, cls: 'bg-gray-100 text-gray-600' };
+  const e = map[status] || { label: status, cls: 'bg-white/10 text-white/70' };
   return <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${e.cls}`}>{e.label}</span>;
 }

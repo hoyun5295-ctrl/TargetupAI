@@ -179,30 +179,30 @@ export default function DmBuilderPage() {
   // ── 요금제 게이팅 (CT-17, mobile_dm) ──
   if (planLocked) {
     return (
-      <div style={{ minHeight: '100vh', background: 'var(--dm-neutral-100)', fontFamily: 'var(--dm-font-primary)', display: 'flex', flexDirection: 'column' }}>
-        <header style={{ background: 'var(--dm-bg)', borderBottom: '1px solid var(--dm-neutral-200)', padding: '16px 32px', display: 'flex', alignItems: 'center', gap: 16 }}>
-          <button onClick={() => navigate('/ai-operator')} style={{ background: 'transparent', border: 'none', fontSize: 20, cursor: 'pointer', padding: 8, borderRadius: 8 }} title="AI Operator로">←</button>
-          <h1 style={{ fontSize: 20, fontWeight: 800, color: 'var(--dm-neutral-900)', margin: 0 }}>모바일 DM 빌더</h1>
-          <span style={{ fontSize: 11, padding: '3px 8px', background: 'var(--dm-primary-light)', color: 'var(--dm-primary)', borderRadius: 12, fontWeight: 700 }}>PRO</span>
+      <div style={{ minHeight: '100vh', background: 'linear-gradient(135deg,#020617,#0f172a,#020617)', fontFamily: 'var(--dm-font-primary)', color: '#fff', display: 'flex', flexDirection: 'column' }}>
+        <header style={{ background: 'rgba(2,6,23,0.8)', backdropFilter: 'blur(8px)', borderBottom: '1px solid rgba(255,255,255,0.1)', padding: '16px 32px', display: 'flex', alignItems: 'center', gap: 16 }}>
+          <button onClick={() => navigate('/ai-operator')} style={{ background: 'transparent', border: 'none', fontSize: 20, cursor: 'pointer', padding: 8, borderRadius: 8, color: '#fff' }} title="AI Operator로">←</button>
+          <h1 style={{ fontSize: 20, fontWeight: 800, color: '#fff', margin: 0 }}>모바일 DM 빌더</h1>
+          <span style={{ fontSize: 11, padding: '3px 8px', background: 'rgba(139,92,246,0.2)', color: '#c4b5fd', borderRadius: 12, fontWeight: 700 }}>PRO</span>
         </header>
         <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 32 }}>
-          <div style={{ maxWidth: 480, textAlign: 'center', background: '#fff', border: '1px solid var(--dm-neutral-200)', borderRadius: 16, padding: '40px 32px', boxShadow: '0 10px 30px rgba(15,23,42,0.06)' }}>
+          <div style={{ maxWidth: 480, textAlign: 'center', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 16, padding: '40px 32px', boxShadow: '0 10px 30px rgba(0,0,0,0.4)' }}>
             <div style={{ width: 64, height: 64, borderRadius: 16, margin: '0 auto 20px', background: 'linear-gradient(135deg,#a78bfa,#7c3aed)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 28 }}>📱</div>
-            <h2 style={{ margin: '0 0 8px', fontSize: 20, fontWeight: 800, color: 'var(--dm-neutral-900)' }}>프로 요금제 전용 기능</h2>
-            <p style={{ margin: '0 0 24px', fontSize: 14, color: 'var(--dm-neutral-600)', lineHeight: 1.6 }}>
+            <h2 style={{ margin: '0 0 8px', fontSize: 20, fontWeight: 800, color: '#fff' }}>프로 요금제 전용 기능</h2>
+            <p style={{ margin: '0 0 24px', fontSize: 14, color: 'rgba(255,255,255,0.7)', lineHeight: 1.6 }}>
               {planLocked.msg}<br />
               업그레이드하시면 AI 구조·카피 자동 생성, 검수 10종, A/B 테스트까지 바로 이용하실 수 있어요.
             </p>
             <div style={{ display: 'flex', gap: 10, justifyContent: 'center' }}>
               <button
                 onClick={() => navigate('/pricing')}
-                style={{ height: 44, padding: '0 24px', background: 'var(--dm-primary)', color: '#fff', border: 'none', borderRadius: 10, fontSize: 14, fontWeight: 700, cursor: 'pointer' }}
+                style={{ height: 44, padding: '0 24px', background: 'rgba(139,92,246,0.3)', color: '#ddd6fe', border: '1px solid rgba(139,92,246,0.5)', borderRadius: 10, fontSize: 14, fontWeight: 700, cursor: 'pointer' }}
               >
                 요금제 안내 보기
               </button>
               <button
                 onClick={() => navigate('/ai-operator')}
-                style={{ height: 44, padding: '0 20px', background: '#fff', color: 'var(--dm-neutral-700)', border: '1px solid var(--dm-neutral-300)', borderRadius: 10, fontSize: 14, fontWeight: 600, cursor: 'pointer' }}
+                style={{ height: 44, padding: '0 20px', background: 'rgba(255,255,255,0.05)', color: 'rgba(255,255,255,0.8)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 10, fontSize: 14, fontWeight: 600, cursor: 'pointer' }}
               >
                 AI Operator로
               </button>
@@ -215,38 +215,38 @@ export default function DmBuilderPage() {
 
   // ── 목록 모드 ──
   return (
-    <div style={{ minHeight: '100vh', background: 'var(--dm-neutral-100)', fontFamily: 'var(--dm-font-primary)' }}>
-      <header style={{ background: 'var(--dm-bg)', borderBottom: '1px solid var(--dm-neutral-200)', padding: '16px 32px', display: 'flex', alignItems: 'center', gap: 16 }}>
-        <button onClick={() => navigate('/ai-operator')} style={{ background: 'transparent', border: 'none', fontSize: 20, cursor: 'pointer', padding: 8, borderRadius: 8 }} title="AI Operator로">←</button>
+    <div style={{ minHeight: '100vh', background: 'linear-gradient(135deg,#020617,#0f172a,#020617)', fontFamily: 'var(--dm-font-primary)', color: '#fff' }}>
+      <header style={{ background: 'rgba(2,6,23,0.8)', backdropFilter: 'blur(8px)', borderBottom: '1px solid rgba(255,255,255,0.1)', padding: '16px 32px', display: 'flex', alignItems: 'center', gap: 16 }}>
+        <button onClick={() => navigate('/ai-operator')} style={{ background: 'transparent', border: 'none', fontSize: 20, cursor: 'pointer', padding: 8, borderRadius: 8, color: '#fff' }} title="AI Operator로">←</button>
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <h1 style={{ fontSize: 20, fontWeight: 800, color: 'var(--dm-neutral-900)', margin: 0 }}>모바일 DM 빌더</h1>
-            <span style={{ fontSize: 11, padding: '3px 8px', background: 'var(--dm-primary-light)', color: 'var(--dm-primary)', borderRadius: 12, fontWeight: 700 }}>PRO</span>
+            <h1 style={{ fontSize: 20, fontWeight: 800, color: '#fff', margin: 0 }}>모바일 DM 빌더</h1>
+            <span style={{ fontSize: 11, padding: '3px 8px', background: 'rgba(139,92,246,0.2)', color: '#c4b5fd', borderRadius: 12, fontWeight: 700 }}>PRO</span>
           </div>
-          <p style={{ fontSize: 12, color: 'var(--dm-neutral-500)', margin: '2px 0 0 0' }}>카드형 모바일 DM 빌더 — 미디어 메세지 디자인 + 카드 단위 편집</p>
+          <p style={{ fontSize: 12, color: 'rgba(255,255,255,0.5)', margin: '2px 0 0 0' }}>카드형 모바일 DM 빌더 — 미디어 메세지 디자인 + 카드 단위 편집</p>
         </div>
         <button
           onClick={handleCreateNew}
-          style={{ height: 36, padding: '0 16px', background: 'var(--dm-primary)', color: '#fff', border: 'none', borderRadius: 8, fontSize: 13, fontWeight: 700, cursor: 'pointer' }}
+          style={{ height: 36, padding: '0 16px', background: 'rgba(139,92,246,0.3)', color: '#ddd6fe', border: '1px solid rgba(139,92,246,0.5)', borderRadius: 8, fontSize: 13, fontWeight: 700, cursor: 'pointer' }}
         >
           + 새 DM 만들기
         </button>
       </header>
 
       {legacyDmError && (
-        <div style={{ maxWidth: 1100, margin: '16px auto', padding: '12px 16px', background: '#fff7ed', border: '1px solid #fed7aa', borderRadius: 8, color: '#9a3412', fontSize: 13 }}>
+        <div style={{ maxWidth: 1100, margin: '16px auto', padding: '12px 16px', background: 'rgba(245,158,11,0.1)', border: '1px solid rgba(245,158,11,0.3)', borderRadius: 8, color: '#fde68a', fontSize: 13 }}>
           {legacyDmError}
         </div>
       )}
       {loadError && (
-        <div style={{ maxWidth: 1100, margin: '16px auto', padding: '12px 16px', background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 8, color: '#991b1b', fontSize: 13 }}>
+        <div style={{ maxWidth: 1100, margin: '16px auto', padding: '12px 16px', background: 'rgba(244,63,94,0.1)', border: '1px solid rgba(244,63,94,0.3)', borderRadius: 8, color: '#fca5a5', fontSize: 13 }}>
           {loadError}
         </div>
       )}
 
       <main style={{ maxWidth: 1100, margin: '0 auto', padding: '24px 32px' }}>
         {listLoading ? (
-          <div style={{ textAlign: 'center', padding: 60, color: 'var(--dm-neutral-500)' }}>불러오는 중...</div>
+          <div style={{ textAlign: 'center', padding: 60, color: 'rgba(255,255,255,0.5)' }}>불러오는 중...</div>
         ) : list.length === 0 ? (
           <EmptyList onCreateNew={handleCreateNew} />
         ) : (

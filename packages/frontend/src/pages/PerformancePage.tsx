@@ -76,25 +76,27 @@ export default function PerformancePage() {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-indigo-50">
-      <div className="bg-white border-b">
-        <div className="max-w-6xl mx-auto px-6 py-4 flex items-center gap-3">
-          <button onClick={() => navigate('/ai-operator')} className="text-gray-500 hover:text-gray-700 p-1">
+    <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 text-white">
+      <div className="bg-slate-950/80 backdrop-blur-sm border-b border-white/10 sticky top-0 z-30">
+        <div className="max-w-7xl mx-auto px-4 md:px-6 py-3 md:py-4 flex items-center gap-3">
+          <button onClick={() => navigate('/ai-operator')} className="p-2 rounded-lg hover:bg-white/10 transition-colors">
             <ArrowLeft className="w-5 h-5" />
           </button>
-          <BarChart3 className="w-5 h-5 text-indigo-600 flex-shrink-0" />
+          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-fuchsia-400 to-pink-500 flex items-center justify-center flex-shrink-0 shadow-lg shadow-fuchsia-500/20">
+            <BarChart3 className="w-5 h-5 text-white" />
+          </div>
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2">
-              <h1 className="text-lg font-bold text-gray-800">성과 리포트 + AI 다음 캠페인 추천</h1>
-              <span className="text-xs bg-indigo-50 text-indigo-700 px-2 py-0.5 rounded-full font-medium">BETA</span>
+              <h1 className="text-xl md:text-2xl font-semibold text-white">성과 리포트</h1>
+              <span className="text-[10px] bg-gradient-to-r from-amber-400 to-orange-500 text-white px-2 py-0.5 rounded-full font-bold tracking-wide">BETA</span>
             </div>
-            <p className="text-xs text-gray-500 mt-0.5">최근 30일 매출 / ROI / 클릭률 분석 + AI가 다음 캠페인 자동 추천</p>
+            <p className="text-xs md:text-sm text-white/50 mt-0.5">최근 30일 매출 / ROI / 클릭률 분석 + AI가 다음 캠페인 자동 추천</p>
           </div>
           <div className="ml-auto">
             <button
               onClick={load}
               disabled={loading}
-              className="px-3 py-1.5 text-sm text-indigo-600 hover:bg-indigo-50 rounded-lg flex items-center gap-1.5"
+              className="px-3 py-2 text-sm text-indigo-200 bg-indigo-500/20 hover:bg-indigo-500/30 rounded-lg flex items-center gap-1.5 transition-colors"
             >
               <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
               새로고침
@@ -103,17 +105,17 @@ export default function PerformancePage() {
         </div>
       </div>
 
-      <div className="max-w-6xl mx-auto px-6 py-8 space-y-6">
+      <div className="max-w-7xl mx-auto px-4 md:px-6 py-6 space-y-5">
         {loading && (
-          <div className="bg-white border rounded-xl p-12 flex flex-col items-center gap-3 text-gray-500">
-            <Loader2 className="w-6 h-6 animate-spin text-indigo-500" />
+          <div className="bg-white/5 border border-white/10 rounded-xl p-12 flex flex-col items-center gap-3 text-white/50">
+            <Loader2 className="w-6 h-6 animate-spin text-indigo-300" />
             <div className="text-sm">최근 30일 캠페인 성과 + AI 추천을 생성하는 중입니다...</div>
-            <div className="text-xs text-gray-400">AI가 데이터를 분석합니다 (10~20초 소요)</div>
+            <div className="text-xs text-white/40">AI가 데이터를 분석합니다 (10~20초 소요)</div>
           </div>
         )}
 
         {error && !loading && (
-          <div className="bg-amber-50 border border-amber-200 rounded-xl p-6 text-amber-900">
+          <div className="bg-amber-500/10 border border-amber-400/30 rounded-xl p-6 text-amber-200">
             {error}
           </div>
         )}
@@ -130,18 +132,18 @@ export default function PerformancePage() {
 
             {/* 채널별 + 시간대별 매트릭스 */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="bg-white border rounded-xl p-5">
-                <div className="text-sm font-bold text-gray-800 mb-3">채널별 성과</div>
+              <div className="bg-white/5 border border-white/10 rounded-xl p-5">
+                <div className="text-sm font-bold text-white mb-3">채널별 성과</div>
                 {snapshot.byChannel.length === 0 ? (
-                  <div className="text-xs text-gray-400 py-6 text-center">최근 30일 발송 이력이 없습니다.</div>
+                  <div className="text-xs text-white/40 py-6 text-center">최근 30일 발송 이력이 없습니다.</div>
                 ) : (
                   <div className="space-y-2">
                     {snapshot.byChannel.map((c) => (
                       <div key={c.channel} className="flex items-center justify-between text-sm">
-                        <span className="font-medium text-gray-700">{c.channel}</span>
-                        <div className="flex items-center gap-3 text-xs text-gray-500">
+                        <span className="font-medium text-white/80">{c.channel}</span>
+                        <div className="flex items-center gap-3 text-xs text-white/50">
                           <span>{c.sent.toLocaleString()}건</span>
-                          <span className="font-bold text-emerald-600">{(c.successRate * 100).toFixed(1)}%</span>
+                          <span className="font-bold text-emerald-300">{(c.successRate * 100).toFixed(1)}%</span>
                         </div>
                       </div>
                     ))}
@@ -149,18 +151,18 @@ export default function PerformancePage() {
                 )}
               </div>
 
-              <div className="bg-white border rounded-xl p-5">
-                <div className="text-sm font-bold text-gray-800 mb-3">시간대별 성과 (상위 5)</div>
+              <div className="bg-white/5 border border-white/10 rounded-xl p-5">
+                <div className="text-sm font-bold text-white mb-3">시간대별 성과 (상위 5)</div>
                 {snapshot.byHour.length === 0 ? (
-                  <div className="text-xs text-gray-400 py-6 text-center">데이터 없음</div>
+                  <div className="text-xs text-white/40 py-6 text-center">데이터 없음</div>
                 ) : (
                   <div className="space-y-2">
                     {[...snapshot.byHour].sort((a, b) => b.sent - a.sent).slice(0, 5).map((h) => (
                       <div key={h.hour} className="flex items-center justify-between text-sm">
-                        <span className="font-medium text-gray-700">{String(h.hour).padStart(2, '0')}시</span>
-                        <div className="flex items-center gap-3 text-xs text-gray-500">
+                        <span className="font-medium text-white/80">{String(h.hour).padStart(2, '0')}시</span>
+                        <div className="flex items-center gap-3 text-xs text-white/50">
                           <span>{h.sent.toLocaleString()}건</span>
-                          <span className="font-bold text-indigo-600">{(h.successRate * 100).toFixed(1)}%</span>
+                          <span className="font-bold text-indigo-300">{(h.successRate * 100).toFixed(1)}%</span>
                         </div>
                       </div>
                     ))}
@@ -171,14 +173,14 @@ export default function PerformancePage() {
 
             {/* AI 추천 카드 */}
             {advice && (
-              <div className="bg-gradient-to-br from-indigo-50 via-fuchsia-50 to-amber-50 border-2 border-indigo-200 rounded-2xl p-6 space-y-5">
+              <div className="bg-gradient-to-br from-indigo-500/15 via-fuchsia-500/10 to-amber-500/15 border border-indigo-400/30 rounded-2xl p-6 space-y-5">
                 <div className="flex items-center gap-2">
-                  <Brain className="w-5 h-5 text-indigo-600" />
-                  <h2 className="text-base font-bold text-gray-800">AI 다음 캠페인 추천</h2>
+                  <Brain className="w-5 h-5 text-indigo-300" />
+                  <h2 className="text-base font-bold text-white">AI 다음 캠페인 추천</h2>
                 </div>
 
                 {advice.summary && (
-                  <div className="bg-white/80 rounded-xl p-4 text-sm font-medium text-gray-800 leading-relaxed">
+                  <div className="bg-white/10 border border-white/10 rounded-xl p-4 text-sm font-medium text-white leading-relaxed">
                     {advice.summary}
                   </div>
                 )}
@@ -190,12 +192,12 @@ export default function PerformancePage() {
                 </div>
 
                 {advice.insights.length > 0 && (
-                  <div className="bg-white/80 rounded-xl p-4">
-                    <div className="text-xs font-medium text-gray-700 mb-2">핵심 인사이트</div>
+                  <div className="bg-white/10 border border-white/10 rounded-xl p-4">
+                    <div className="text-xs font-medium text-white/80 mb-2">핵심 인사이트</div>
                     <ul className="space-y-1.5">
                       {advice.insights.map((ins, i) => (
-                        <li key={i} className="text-sm text-gray-700 flex gap-2">
-                          <span className="text-indigo-500 shrink-0">·</span>
+                        <li key={i} className="text-sm text-white/80 flex gap-2">
+                          <span className="text-indigo-300 shrink-0">·</span>
                           <span>{ins}</span>
                         </li>
                       ))}
@@ -204,28 +206,28 @@ export default function PerformancePage() {
                 )}
 
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs">
-                  <div className="bg-white/80 rounded-lg px-3 py-2">
-                    <div className="text-gray-500">예상 클릭률</div>
-                    <div className="text-lg font-bold text-gray-800">{(advice.expectedClickRate * 100).toFixed(1)}%</div>
+                  <div className="bg-white/10 border border-white/10 rounded-lg px-3 py-2">
+                    <div className="text-white/50">예상 클릭률</div>
+                    <div className="text-lg font-bold text-white">{(advice.expectedClickRate * 100).toFixed(1)}%</div>
                   </div>
-                  <div className="bg-white/80 rounded-lg px-3 py-2">
-                    <div className="text-gray-500">예상 전환율</div>
-                    <div className="text-lg font-bold text-gray-800">{(advice.expectedConversionRate * 100).toFixed(2)}%</div>
+                  <div className="bg-white/10 border border-white/10 rounded-lg px-3 py-2">
+                    <div className="text-white/50">예상 전환율</div>
+                    <div className="text-lg font-bold text-white">{(advice.expectedConversionRate * 100).toFixed(2)}%</div>
                   </div>
-                  <div className="bg-white/80 rounded-lg px-3 py-2">
-                    <div className="text-gray-500">예상 매출</div>
-                    <div className="text-lg font-bold text-gray-800">{advice.expectedRevenue.toLocaleString()}원</div>
+                  <div className="bg-white/10 border border-white/10 rounded-lg px-3 py-2">
+                    <div className="text-white/50">예상 매출</div>
+                    <div className="text-lg font-bold text-white">{advice.expectedRevenue.toLocaleString()}원</div>
                   </div>
                 </div>
 
                 {advice.suggestedObjective && (
-                  <div className="border-t border-indigo-200 pt-4">
-                    <div className="text-xs text-gray-600 mb-2">
+                  <div className="border-t border-indigo-400/30 pt-4">
+                    <div className="text-xs text-white/70 mb-2">
                       "<span className="font-medium">{advice.suggestedObjective}</span>" — AI Operator에 사용할 자연어 한 줄
                     </div>
                     <button
                       onClick={goAiOperatorWithObjective}
-                      className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium rounded-lg flex items-center gap-2"
+                      className="px-4 py-2 bg-indigo-500/30 hover:bg-indigo-500/50 text-indigo-100 text-sm font-medium rounded-lg flex items-center gap-2"
                     >
                       <Sparkles className="w-4 h-4" />
                       AI Operator에서 이 캠페인 실행하기
@@ -237,7 +239,7 @@ export default function PerformancePage() {
           </>
         )}
 
-        <div className="text-xs text-gray-400 text-center pt-4">
+        <div className="text-xs text-white/40 text-center pt-4">
           본 추천은 AI 분석 결과이며 사용자 검토 + 승인 후 발송됩니다 (AI 단독 발송 X). 타겟 매칭 0건 시 발송 차단 정책 정합.
         </div>
       </div>
@@ -247,29 +249,29 @@ export default function PerformancePage() {
 
 function StatCard({ icon, label, value, sub, accent }: { icon: React.ReactNode; label: string; value: string; sub?: string; accent: 'indigo' | 'emerald' | 'rose' | 'amber' }) {
   const accentClass = {
-    indigo: 'text-indigo-600 bg-indigo-50',
-    emerald: 'text-emerald-600 bg-emerald-50',
-    rose: 'text-rose-600 bg-rose-50',
-    amber: 'text-amber-600 bg-amber-50',
+    indigo: 'text-indigo-300 bg-indigo-50',
+    emerald: 'text-emerald-300 bg-emerald-500/15',
+    rose: 'text-rose-300 bg-rose-500/15',
+    amber: 'text-amber-300 bg-amber-500/15',
   }[accent];
   return (
-    <div className="bg-white border rounded-xl p-5">
+    <div className="bg-white/5 border border-white/10 rounded-xl p-5">
       <div className={`inline-flex items-center justify-center w-8 h-8 rounded-lg ${accentClass} mb-3`}>{icon}</div>
-      <div className="text-xs text-gray-500 mb-1">{label}</div>
-      <div className="text-xl font-bold text-gray-900">{value}</div>
-      {sub && <div className="text-xs text-gray-400 mt-1">{sub}</div>}
+      <div className="text-xs text-white/50 mb-1">{label}</div>
+      <div className="text-xl font-bold text-white">{value}</div>
+      {sub && <div className="text-xs text-white/40 mt-1">{sub}</div>}
     </div>
   );
 }
 
 function RecCard({ icon, label, value }: { icon: React.ReactNode; label: string; value: string }) {
   return (
-    <div className="bg-white/80 rounded-xl p-4">
-      <div className="flex items-center gap-1.5 text-xs text-gray-500 mb-1">
+    <div className="bg-white/10 border border-white/10 rounded-xl p-4">
+      <div className="flex items-center gap-1.5 text-xs text-white/50 mb-1">
         {icon}
         {label}
       </div>
-      <div className="text-sm font-bold text-gray-800">{value}</div>
+      <div className="text-sm font-bold text-white">{value}</div>
     </div>
   );
 }
