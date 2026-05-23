@@ -219,7 +219,7 @@ export default function JourneysPage() {
   const [sampleCustomer, setSampleCustomer] = useState<Record<string, string | number | null> | null>(null);
   // ★ D210+ Phase 2-fix9 (Harold 명시 2026-05-23): Liquid 렌더링 영역 (field 키 매트릭스).
   const [sampleCustomerFields, setSampleCustomerFields] = useState<Record<string, any> | null>(null);
-  const [showMergedPreview, setShowMergedPreview] = useState(false);
+  // ★ D210+ Phase 2-fix10 (Harold 명시 2026-05-23): 옛 showMergedPreview state 폐기 — 토글 영역 X, 위/아래 영역 명확 분리.
   const [aiPkg, setAiPkg] = useState<AIJourneyPackage | null>(null);
   const [reviewName, setReviewName] = useState('');
   const [reviewCallback, setReviewCallback] = useState('');
@@ -914,33 +914,14 @@ export default function JourneysPage() {
               </div>
             </div>
 
-            {/* ★ D210+ Phase 2-fix6 (Harold 명시 2026-05-23): 원본/적용 토글 — 모든 step 본문 표시 영역 전역 적용 */}
+            {/* ★ D210+ Phase 2-fix10 (Harold 명시 2026-05-23): 옛 토글 영역 폐기 — 위/아래 영역 명확 분리 정합.
+                위 본문 박스 = 원본 (변수 강조) / 아래 "실제 발송 미리보기" = 적용 (변수 치환 + Liquid 렌더링 + 광고/무료거부 영역). */}
             {sampleCustomer && (
-              <div className="flex items-center gap-1 bg-white/5 border border-white/10 rounded-lg p-1">
-                <button
-                  type="button"
-                  onClick={() => setShowMergedPreview(false)}
-                  className={`flex-1 text-[11px] py-1.5 rounded-md transition-all ${
-                    !showMergedPreview
-                      ? 'bg-amber-400/25 text-amber-100 font-semibold ring-1 ring-amber-300/40'
-                      : 'text-white/40 hover:text-white/60'
-                  }`}
-                  title="개인화 변수 위치 강조 — %고객명% 형태 그대로 표시"
-                >
-                  원본 (변수 강조)
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setShowMergedPreview(true)}
-                  className={`flex-1 text-[11px] py-1.5 rounded-md transition-all ${
-                    showMergedPreview
-                      ? 'bg-emerald-400/25 text-emerald-100 font-semibold ring-1 ring-emerald-400/40'
-                      : 'text-white/40 hover:text-white/60'
-                  }`}
-                  title="상위 고객 데이터로 치환된 결과 미리보기"
-                >
-                  적용 (상위 고객 머지)
-                </button>
+              <div className="bg-emerald-500/10 border border-emerald-400/30 rounded-lg p-3 text-xs text-emerald-100 flex items-start gap-2">
+                <Sparkles className="w-3.5 h-3.5 mt-0.5 shrink-0 text-emerald-300" />
+                <div>
+                  <span className="font-semibold">상위 고객 데이터 자동 치환 활성</span> — 각 step 본문은 변수가 강조된 <span className="text-amber-200">원본</span>으로 표시되며, 아래 <span className="text-emerald-200">실제 발송 미리보기</span> 영역에서 실제 발송 형태(변수 치환 + Liquid 렌더링 + 광고/무료거부 합성)를 확인할 수 있어요.
+                </div>
               </div>
             )}
 
@@ -1228,10 +1209,9 @@ export default function JourneysPage() {
                           <textarea value={s.messageTemplate} onChange={(e) => updateStep(idx, { messageTemplate: e.target.value })} rows={6} className="w-full px-3 py-2 bg-slate-900 border border-fuchsia-400/50 rounded text-sm font-mono focus:outline-none resize-y" />
                         ) : (
                           <div className="px-3 py-2 bg-slate-900/60 border border-white/10 rounded text-sm whitespace-pre-wrap font-mono text-white/90 cursor-pointer" onClick={() => setEditingStepIdx(idx)}>
-                            {/* ★ D210+ Phase 2-fix6 + fix9 (Harold 명시 2026-05-23): 변수 + Liquid 하이라이트 + 상위 고객 머지 토글 */}
-                            {showMergedPreview && sampleCustomer
-                              ? mergeAndHighlightVars(s.messageTemplate, sampleCustomer, 'dark', sampleCustomerFields || undefined)
-                              : highlightVars(s.messageTemplate, 'dark')}
+                            {/* ★ D210+ Phase 2-fix10 (Harold 명시 2026-05-23): 위 본문 박스 = 원본 (변수 강조만) — 토글 분기 폐기. */}
+                            {/*    아래 "실제 발송 미리보기" 영역 = 적용본 (mergeAndHighlightVars + Liquid 렌더링 + 광고/무료거부). */}
+                            {highlightVars(s.messageTemplate, 'dark')}
                           </div>
                         )}
 
@@ -1271,8 +1251,18 @@ export default function JourneysPage() {
 
                         {s.isAd && s.messageTemplate.trim().length >= 10 && (
                           <div className="p-2 bg-slate-950/60 border border-white/5 rounded text-[11px]">
-                            <div className="text-white/40 mb-1">실제 발송 미리보기 ({previewBytes} bytes):</div>
-                            <div className="whitespace-pre-wrap text-white/80 font-mono">{preview}</div>
+                            {/* ★ D210+ Phase 2-fix10 (Harold 명시 2026-05-23): 실제 발송 미리보기 = 적용 영역 (변수 치환 + Liquid 렌더링 + 광고/무료거부 합성). */}
+                            <div className="text-white/40 mb-1 flex items-center justify-between flex-wrap gap-1">
+                              <span>실제 발송 미리보기 ({previewBytes} bytes)</span>
+                              {sampleCustomer && (
+                                <span className="text-emerald-300/80 text-[10px]">상위 고객 데이터 치환 + Liquid 렌더링 적용</span>
+                              )}
+                            </div>
+                            <div className="whitespace-pre-wrap text-white/80 font-mono">
+                              {sampleCustomer
+                                ? mergeAndHighlightVars(preview, sampleCustomer, 'dark', sampleCustomerFields || undefined)
+                                : preview}
+                            </div>
                           </div>
                         )}
                       </>
