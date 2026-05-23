@@ -38,6 +38,7 @@ import {
   createJourneyStepVariant,
   deleteJourneyStepVariant,
   recordJourneyStepVariantReward,
+  declareVariantWinner,
 } from '../utils/bandit-optimizer';
 // ★ D179 (2026-05-19): Multi-Goal Decisioning (Opus 4.7 충돌 분석)
 import { analyzeGoalConflicts, OperatorGoal } from '../utils/multi-goal-decisioning';
@@ -1917,7 +1918,9 @@ router.get('/operator/journeys/:journeyId/steps/:stepId/variants', async (req: R
     const j = await query(`SELECT 1 FROM journeys WHERE id = $1::uuid AND company_id = $2::uuid`, [req.params.journeyId, companyId]);
     if (j.rows.length === 0) return res.status(404).json({ success: false, error: '여정을 찾을 수 없습니다.' });
     const variants = await listJourneyStepVariants(req.params.stepId);
-    return res.json({ success: true, variants });
+    // ★ D210+ Phase 3 (2026-05-23 Harold 명시): winner 자동 선언 매트릭스 응답 통합 (회사 admin 안내 영역만 — 자동 적용 X)
+    const winnerDeclaration = declareVariantWinner(variants);
+    return res.json({ success: true, variants, winnerDeclaration });
   } catch (err: any) {
     console.error('[Journeys variants list] 오류:', err);
     return res.status(500).json({ success: false, error: err?.message || 'variants 조회 실패' });
@@ -2037,6 +2040,148 @@ router.patch('/operator/journeys/:id/callback', async (req: Request, res: Respon
   } catch (err: any) {
     console.error('[Journeys update callback] 오류:', err);
     return res.status(500).json({ success: false, error: err?.message || '회신번호 수정 실패' });
+  }
+});
+
+// ★ D210+ Phase 3 (2026-05-23 Harold 명시): 다중 시뮬레이션 endpoint — Liquid 분기 영역 사전 검증
+//    GET /api/ai/operator/journeys/:id/preview-samples
+//    회사 안 customer 영역 6 영역 자동 추출:
+//      - VIP / Gold / Silver / 신규 (등급 영역 4)
+//      - churn_risk > 0.7 (이탈 위험 영역 1)
+//      - purchase_likelihood > 0.6 (구매 가능성 영역 1)
+//    영구 룰 정합 — 회사 격리 + 실제 DB source (cdp_customer_predictions 영역 정합)
+router.get('/operator/journeys/:id/preview-samples', async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+    const planCtx = await loadPlanContext(companyId);
+    if (!planCtx) return res.status(404).json({ success: false, error: '회사 정보를 찾을 수 없습니다.' });
+    if (!isAiOperatorAllowed(planCtx, req.user)) {
+      return res.status(403).json({ success: false, error: 'AI Operator 진입 권한이 없습니다.', code: 'AI_OPERATOR_GATED' });
+    }
+
+    // 회사 격리 검증
+    const j = await query(`SELECT 1 FROM journeys WHERE id = $1::uuid AND company_id = $2::uuid`, [req.params.id, companyId]);
+    if (j.rows.length === 0) return res.status(404).json({ success: false, error: '여정을 찾을 수 없습니다.' });
+
+    // 6 영역 customer 영역 자동 추출 (UNION ALL 단일 SQL)
+    const r = await query(
+      `(SELECT 'VIP' AS label, c.*, p.click_score, p.churn_risk, p.purchase_likelihood, p.model_version
+        FROM customers c
+        LEFT JOIN cdp_customer_predictions p ON p.customer_id = c.id
+        WHERE c.company_id = $1::uuid AND c.grade = 'VIP' AND c.is_active = true
+        ORDER BY c.total_purchase_amount DESC NULLS LAST LIMIT 1)
+       UNION ALL
+       (SELECT 'Gold' AS label, c.*, p.click_score, p.churn_risk, p.purchase_likelihood, p.model_version
+        FROM customers c
+        LEFT JOIN cdp_customer_predictions p ON p.customer_id = c.id
+        WHERE c.company_id = $1::uuid AND c.grade = 'Gold' AND c.is_active = true
+        ORDER BY c.total_purchase_amount DESC NULLS LAST LIMIT 1)
+       UNION ALL
+       (SELECT 'Silver' AS label, c.*, p.click_score, p.churn_risk, p.purchase_likelihood, p.model_version
+        FROM customers c
+        LEFT JOIN cdp_customer_predictions p ON p.customer_id = c.id
+        WHERE c.company_id = $1::uuid AND c.grade = 'Silver' AND c.is_active = true
+        ORDER BY c.total_purchase_amount DESC NULLS LAST LIMIT 1)
+       UNION ALL
+       (SELECT '신규' AS label, c.*, p.click_score, p.churn_risk, p.purchase_likelihood, p.model_version
+        FROM customers c
+        LEFT JOIN cdp_customer_predictions p ON p.customer_id = c.id
+        WHERE c.company_id = $1::uuid AND (c.grade = '신규' OR c.grade IS NULL) AND c.is_active = true
+        ORDER BY c.created_at DESC LIMIT 1)
+       UNION ALL
+       (SELECT '이탈 위험 70%+' AS label, c.*, p.click_score, p.churn_risk, p.purchase_likelihood, p.model_version
+        FROM customers c
+        INNER JOIN cdp_customer_predictions p ON p.customer_id = c.id
+        WHERE c.company_id = $1::uuid AND p.churn_risk > 0.7 AND c.is_active = true
+        ORDER BY p.churn_risk DESC LIMIT 1)
+       UNION ALL
+       (SELECT '구매 가능성 60%+' AS label, c.*, p.click_score, p.churn_risk, p.purchase_likelihood, p.model_version
+        FROM customers c
+        INNER JOIN cdp_customer_predictions p ON p.customer_id = c.id
+        WHERE c.company_id = $1::uuid AND p.purchase_likelihood > 0.6 AND c.is_active = true
+        ORDER BY p.purchase_likelihood DESC LIMIT 1)`,
+      [companyId]
+    );
+
+    // 응답 매트릭스 (sampleCustomer + sampleCustomerFields 영역 양쪽 — JourneysPage 미러)
+    const samples = r.rows.map((row: any) => {
+      const sampleCustomer: Record<string, any> = {
+        고객명: row.name || '',
+        이름: row.name || '',
+        등급: row.grade || '',
+        지역: row.region || '',
+        전화번호: row.phone || '',
+        포인트: row.points != null ? Number(row.points).toLocaleString() : '',
+        최근구매일: row.recent_purchase_date ? new Date(row.recent_purchase_date).toLocaleDateString('ko-KR') : '',
+        총구매액: row.total_purchase_amount != null ? Number(row.total_purchase_amount).toLocaleString() : '',
+        누적구매횟수: row.purchase_count != null ? String(row.purchase_count) : '',
+      };
+      const sampleCustomerFields: Record<string, any> = {
+        name: row.name || null,
+        phone: row.phone || null,
+        grade: row.grade || null,
+        region: row.region || null,
+        age: row.age != null ? Number(row.age) : null,
+        gender: row.gender || null,
+        purchase_count: row.purchase_count != null ? Number(row.purchase_count) : 0,
+        total_purchase_amount: row.total_purchase_amount != null ? Number(row.total_purchase_amount) : 0,
+        recent_purchase_amount: row.recent_purchase_amount != null ? Number(row.recent_purchase_amount) : 0,
+        recent_purchase_date: row.recent_purchase_date || null,
+        birth_date: row.birth_date || null,
+        points: row.points != null ? Number(row.points) : 0,
+        email: row.email || null,
+        click_score: row.click_score != null ? Number(row.click_score) : 0.5,
+        churn_risk: row.churn_risk != null ? Number(row.churn_risk) : 0.5,
+        purchase_likelihood: row.purchase_likelihood != null ? Number(row.purchase_likelihood) : 0.5,
+      };
+      return {
+        label: row.label,
+        customerId: row.id,
+        sampleCustomer,
+        sampleCustomerFields,
+        modelVersion: row.model_version || null,
+      };
+    });
+
+    return res.json({ success: true, samples });
+  } catch (err: any) {
+    console.error('[Journeys preview-samples] 오류:', err);
+    return res.status(500).json({ success: false, error: err?.message || '미리보기 샘플 조회 실패' });
+  }
+});
+
+// ★ D210+ Phase 3 (2026-05-23 Harold 명시): 자동 재진입 토글 endpoint (회사 admin 명시 활성)
+//    PATCH /api/ai/operator/journeys/:id/auto-reentry — auto_reentry_enabled 토글 (default OFF)
+//    영구 룰 정합: feedback_no_target_auto_relax — 사용자 승인하 자동화 본질
+router.patch('/operator/journeys/:id/auto-reentry', async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+    const planCtx = await loadPlanContext(companyId);
+    if (!planCtx) return res.status(404).json({ success: false, error: '회사 정보를 찾을 수 없습니다.' });
+    if (!isAiOperatorAllowed(planCtx, req.user)) {
+      return res.status(403).json({ success: false, error: 'AI Operator 진입 권한이 없습니다.', code: 'AI_OPERATOR_GATED' });
+    }
+    const enabled = !!req.body?.enabled;
+    const r = await query(
+      `UPDATE journeys SET auto_reentry_enabled = $3, updated_at = NOW()
+       WHERE id = $1::uuid AND company_id = $2::uuid
+       RETURNING id, auto_reentry_enabled, allow_reentry, reentry_cooldown_days`,
+      [req.params.id, companyId, enabled]
+    );
+    if (r.rows.length === 0) {
+      return res.status(404).json({ success: false, error: '여정을 찾을 수 없습니다.' });
+    }
+    return res.json({
+      success: true,
+      autoReentryEnabled: r.rows[0].auto_reentry_enabled,
+      allowReentry: r.rows[0].allow_reentry,
+      reentryCooldownDays: r.rows[0].reentry_cooldown_days,
+    });
+  } catch (err: any) {
+    console.error('[Journeys auto-reentry] 오류:', err);
+    return res.status(500).json({ success: false, error: err?.message || '자동 재진입 토글 실패' });
   }
 });
 
@@ -2185,11 +2330,29 @@ router.get('/operator/journeys/:id/executions', async (req: Request, res: Respon
       return res.status(403).json({ success: false, error: 'AI Operator 진입 권한이 없습니다.', code: 'AI_OPERATOR_GATED' });
     }
 
-    const limit = Math.min(Number(req.query.limit) || 50, 200);
-    const offset = Math.max(0, Number(req.query.offset) || 0);
-    const status = (req.query.status as string) || undefined;
-    const result = await listJourneyEnteredCustomers(req.params.id, companyId, { limit, offset, status });
-    return res.json({ success: true, executions: result.rows, total: result.total });
+    // ★ D210+ Phase 3 (2026-05-23 Harold 명시): page + search + filter + sort 영역 강화
+    const page = Math.max(1, parseInt(String(req.query.page || '1'), 10) || 1);
+    const limit = Math.min(200, Math.max(1, parseInt(String(req.query.limit || '10'), 10) || 10));
+    const search = typeof req.query.search === 'string' ? req.query.search.trim() : '';
+
+    const validStatuses = ['all', 'active', 'completed', 'paused', 'ended', 'failed'];
+    const statusRaw = String(req.query.status || 'all');
+    const status = validStatuses.includes(statusRaw) ? (statusRaw as any) : 'all';
+
+    const validSorts = ['entered_at_desc', 'entered_at_asc', 'current_step_desc', 'total_cost_desc', 'completed_at_desc'];
+    const sortRaw = String(req.query.sort || 'entered_at_desc');
+    const sort = validSorts.includes(sortRaw) ? (sortRaw as any) : 'entered_at_desc';
+
+    const result = await listJourneyEnteredCustomers(req.params.id, companyId, { page, limit, search, status, sort });
+    return res.json({
+      success: true,
+      executions: result.rows,
+      total: result.total,
+      filteredCount: result.filteredCount,
+      page: result.page,
+      totalPages: result.totalPages,
+      limit: result.limit,
+    });
   } catch (err: any) {
     console.error('[Journeys executions] 오류:', err);
     return res.status(500).json({ success: false, error: err?.message || 'execution 조회 실패' });

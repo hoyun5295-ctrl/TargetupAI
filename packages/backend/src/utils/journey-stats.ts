@@ -47,6 +47,13 @@ export interface JourneyStepStat {
   conversionCount: number;
   clickRate: number;       // clickCount / sentCount
   conversionRate: number;  // conversionCount / sentCount
+  // ★ D210+ Phase 3 (2026-05-23 Harold 명시): funnel 시각화 영역 + 이탈 사유 영역 분류
+  funnelPercentage: number;        // Step N enteredCount / Step 1 enteredCount * 100 (이탈 영역 funnel)
+  skippedHoursCount: number;       // status='skipped' AND error_reason LIKE '%hours%'
+  skippedOptOutCount: number;      // status='skipped' AND error_reason LIKE '%opt_out%'
+  skippedNoCustomerCount: number;  // status='skipped' AND error_reason LIKE '%customer_not_found%'
+  conditionFailedCount: number;    // status='skipped' AND error_reason LIKE '%condition_failed%'
+  waitedCount: number;             // status='skipped' AND error_reason LIKE '%wait_step_passed%'
 }
 
 export interface JourneySegmentStat {
@@ -177,6 +184,13 @@ async function getJourneyOverview(journeyId: string): Promise<JourneyOverview> {
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 async function getJourneyStepStats(journeyId: string): Promise<JourneyStepStat[]> {
+  // ★ D210+ Phase 3 (2026-05-23 Harold 명시): skipped 영역 분류 4건 + waited 영역 추가 (이탈 사유 영역 funnel 매트릭스)
+  //   journey-executor 영역 logSkippedStep 호출 영역 안 error_reason 영역 매트릭스:
+  //   - 'wait_step_passed' = waited 영역
+  //   - 'condition_failed_ended' / 'condition_failed' = condition_failed 영역
+  //   - 'opt_out_or_inactive' / 'unsubscribed' = opt_out 영역
+  //   - 'customer_not_found' / 'condition_customer_not_found' = no_customer 영역
+  //   - 'skipped_hours' (시간대 영역) = hours 영역
   const r = await query(
     `SELECT
        s.id AS step_id,
@@ -187,6 +201,11 @@ async function getJourneyStepStats(journeyId: string): Promise<JourneyStepStat[]
        COUNT(*) FILTER (WHERE l.status = 'sent') AS sent_count,
        COUNT(*) FILTER (WHERE l.status = 'failed') AS failed_count,
        COUNT(*) FILTER (WHERE l.status = 'skipped') AS skipped_count,
+       COUNT(*) FILTER (WHERE l.status = 'skipped' AND COALESCE(l.error_reason, '') LIKE '%hours%') AS skipped_hours_count,
+       COUNT(*) FILTER (WHERE l.status = 'skipped' AND (COALESCE(l.error_reason, '') LIKE '%opt_out%' OR COALESCE(l.error_reason, '') LIKE '%unsubscribed%' OR COALESCE(l.error_reason, '') LIKE '%inactive%')) AS skipped_opt_out_count,
+       COUNT(*) FILTER (WHERE l.status = 'skipped' AND COALESCE(l.error_reason, '') LIKE '%customer_not_found%') AS skipped_no_customer_count,
+       COUNT(*) FILTER (WHERE l.status = 'skipped' AND COALESCE(l.error_reason, '') LIKE '%condition_failed%') AS condition_failed_count,
+       COUNT(*) FILTER (WHERE l.status = 'skipped' AND COALESCE(l.error_reason, '') = 'wait_step_passed') AS waited_count,
        COALESCE(SUM(l.cost), 0) AS total_cost,
        (
          SELECT COUNT(*)
@@ -217,16 +236,21 @@ async function getJourneyStepStats(journeyId: string): Promise<JourneyStepStat[]
     [journeyId]
   );
 
-  return r.rows.map((row: any) => {
+  // funnel 영역 매트릭스 — Step 1 entered_count 영역 = 100% 기준
+  const rawRows = r.rows;
+  const firstStepEnteredCount = rawRows.length > 0 ? Number(rawRows[0].entered_count) || 0 : 0;
+
+  return rawRows.map((row: any) => {
     const sentCount = Number(row.sent_count) || 0;
     const clickCount = Number(row.click_count) || 0;
     const conversionCount = Number(row.conversion_count) || 0;
+    const enteredCount = Number(row.entered_count) || 0;
     return {
       stepId: row.step_id,
       stepOrder: Number(row.step_order),
       stepType: row.step_type,
       channel: row.channel,
-      enteredCount: Number(row.entered_count) || 0,
+      enteredCount,
       sentCount,
       failedCount: Number(row.failed_count) || 0,
       skippedCount: Number(row.skipped_count) || 0,
@@ -235,6 +259,12 @@ async function getJourneyStepStats(journeyId: string): Promise<JourneyStepStat[]
       conversionCount,
       clickRate: sentCount > 0 ? clickCount / sentCount : 0,
       conversionRate: sentCount > 0 ? conversionCount / sentCount : 0,
+      funnelPercentage: firstStepEnteredCount > 0 ? (enteredCount / firstStepEnteredCount) * 100 : 0,
+      skippedHoursCount: Number(row.skipped_hours_count) || 0,
+      skippedOptOutCount: Number(row.skipped_opt_out_count) || 0,
+      skippedNoCustomerCount: Number(row.skipped_no_customer_count) || 0,
+      conditionFailedCount: Number(row.condition_failed_count) || 0,
+      waitedCount: Number(row.waited_count) || 0,
     };
   });
 }
@@ -419,25 +449,96 @@ async function getJourneyVariantStats(journeyId: string): Promise<JourneyVariant
 // 진입 사용자 리스트
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
+// ★ D210+ Phase 3 (2026-05-23 Harold 명시): listJourneyEnteredCustomers 강화
+//   옛 매트릭스 = status filter + limit + offset 영역만
+//   신규 매트릭스 = search (4 영역 ILIKE) + status filter 5건 + sort 5건 + 페이지네이션
+//   Phase 3-Predictive listCompanyPredictionCustomers 매트릭스 미러 영역 정합
+
+export type JourneyExecutionStatus = 'all' | 'active' | 'completed' | 'paused' | 'ended' | 'failed';
+export type JourneyExecutionSort =
+  | 'entered_at_desc'
+  | 'entered_at_asc'
+  | 'current_step_desc'
+  | 'total_cost_desc'
+  | 'completed_at_desc';
+
 export async function listJourneyEnteredCustomers(
   journeyId: string,
   companyId: string,
-  options: { status?: string; limit?: number; offset?: number } = {}
-): Promise<{ rows: JourneyCustomerRow[]; total: number }> {
+  options: {
+    status?: JourneyExecutionStatus;
+    sort?: JourneyExecutionSort;
+    search?: string;
+    page?: number;
+    limit?: number;
+    offset?: number;  // legacy 호환 (page 영역 우선)
+  } = {}
+): Promise<{ rows: JourneyCustomerRow[]; total: number; filteredCount: number; page: number; totalPages: number; limit: number }> {
   await verifyJourneyOwnership(journeyId, companyId);
 
-  const limit = Math.min(Math.max(options.limit || 50, 1), 200);
-  const offset = Math.max(options.offset || 0, 0);
-  const statusFilter = options.status && options.status !== 'all'
-    ? `AND e.status = '${options.status.replace(/[^a-z_]/g, '')}'`
-    : '';
+  const limit = Math.min(Math.max(options.limit || 10, 1), 200);
+  const page = Math.max(1, Number(options.page) || 1);
+  const offset = options.offset != null ? Math.max(0, options.offset) : (page - 1) * limit;
+  const search = (options.search || '').trim();
 
+  // status 영역 white-list (SQL injection 차단 정합)
+  const validStatuses: JourneyExecutionStatus[] = ['all', 'active', 'completed', 'paused', 'ended', 'failed'];
+  const status: JourneyExecutionStatus = options.status && validStatuses.includes(options.status) ? options.status : 'all';
+  const statusFilter = status === 'all' ? '' : `AND e.status = '${status}'`;
+
+  // sort 영역 white-list
+  const sort: JourneyExecutionSort = options.sort && [
+    'entered_at_desc', 'entered_at_asc', 'current_step_desc', 'total_cost_desc', 'completed_at_desc',
+  ].includes(options.sort) ? options.sort : 'entered_at_desc';
+
+  const orderClause = (() => {
+    switch (sort) {
+      case 'entered_at_asc': return 'ORDER BY e.entered_at ASC';
+      case 'current_step_desc': return 'ORDER BY e.current_step_order DESC, e.entered_at DESC';
+      case 'total_cost_desc': return 'ORDER BY e.total_cost DESC, e.entered_at DESC';
+      case 'completed_at_desc': return 'ORDER BY e.completed_at DESC NULLS LAST, e.entered_at DESC';
+      case 'entered_at_desc':
+      default: return 'ORDER BY e.entered_at DESC';
+    }
+  })();
+
+  // 검색 ILIKE 매트릭스 (4 영역 OR — name / phone / grade / region)
+  const params: any[] = [journeyId];
+  let searchClause = '';
+  if (search) {
+    params.push(`%${search}%`);
+    const idx = params.length;
+    searchClause = `AND (
+      c.name ILIKE $${idx}
+      OR c.phone ILIKE $${idx}
+      OR COALESCE(c.grade, '') ILIKE $${idx}
+      OR COALESCE(c.region, '') ILIKE $${idx}
+    )`;
+  }
+
+  // 전체 카운트 (journey 진입 영역 모든 영역)
   const totalRes = await query(
-    `SELECT COUNT(*) AS total FROM journey_executions e
-     WHERE e.journey_id = $1::uuid ${statusFilter}`,
+    `SELECT COUNT(*)::int AS total FROM journey_executions e
+     WHERE e.journey_id = $1::uuid`,
     [journeyId]
   );
+  const totalCount = Number(totalRes.rows[0]?.total) || 0;
 
+  // 필터 + 검색 적용 카운트
+  const filteredRes = await query(
+    `SELECT COUNT(*)::int AS total
+     FROM journey_executions e
+     INNER JOIN customers c ON c.id = e.customer_id
+     WHERE e.journey_id = $1::uuid
+       ${statusFilter}
+       ${searchClause}`,
+    params
+  );
+  const filteredCount = Number(filteredRes.rows[0]?.total) || 0;
+
+  // 데이터 조회 (페이지네이션 적용)
+  params.push(limit);
+  params.push(offset);
   const r = await query(
     `SELECT
        e.id AS execution_id,
@@ -453,14 +554,22 @@ export async function listJourneyEnteredCustomers(
        e.total_cost
      FROM journey_executions e
      INNER JOIN customers c ON c.id = e.customer_id
-     WHERE e.journey_id = $1::uuid ${statusFilter}
-     ORDER BY e.entered_at DESC
-     LIMIT $2 OFFSET $3`,
-    [journeyId, limit, offset]
+     WHERE e.journey_id = $1::uuid
+       ${statusFilter}
+       ${searchClause}
+     ${orderClause}
+     LIMIT $${params.length - 1} OFFSET $${params.length}`,
+    params
   );
 
+  const totalPages = filteredCount > 0 ? Math.ceil(filteredCount / limit) : 0;
+
   return {
-    total: Number(totalRes.rows[0]?.total) || 0,
+    total: totalCount,
+    filteredCount,
+    page,
+    totalPages,
+    limit,
     rows: r.rows.map((row: any) => ({
       executionId: row.execution_id,
       customerId: row.customer_id,

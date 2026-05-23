@@ -19,7 +19,7 @@
  */
 
 import { useState, useEffect, useCallback } from 'react';
-import { Beaker, Plus, Trash2, Save, Loader2, X, BarChart3, Info } from 'lucide-react';
+import { Beaker, Plus, Trash2, Save, Loader2, X, BarChart3, Info, Trophy, Activity, MousePointerClick, ShoppingCart } from 'lucide-react';
 
 type ChannelType = 'sms' | 'lms' | 'mms' | 'kakao';
 
@@ -38,6 +38,17 @@ export interface JourneyStepVariant {
   sentCount: number;
   clickCount: number;
   conversionCount: number;
+}
+
+// ★ D210+ Phase 3 (2026-05-23 Harold 명시): winner 자동 선언 매트릭스 (backend declareVariantWinner 응답 정합)
+interface VariantWinnerDeclaration {
+  winnerVariantId: string | null;
+  winnerConfidence: number;
+  recommendedTrafficWeights: Record<string, number>;
+  totalTrials: number;
+  variantProbabilities: Record<string, number>;
+  reasoning: string;
+  status: 'cold_start' | 'low_confidence' | 'leading' | 'winner';
 }
 
 interface Props {
@@ -77,6 +88,7 @@ export default function JourneyVariantsEditor({
   onClose,
 }: Props) {
   const [variants, setVariants] = useState<JourneyStepVariant[]>([]);
+  const [winnerDeclaration, setWinnerDeclaration] = useState<VariantWinnerDeclaration | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -98,6 +110,8 @@ export default function JourneyVariantsEditor({
       }
       const loaded: JourneyStepVariant[] = data.variants || [];
       setVariants(loaded);
+      // ★ D210+ Phase 3 (2026-05-23 Harold 명시): winner 자동 선언 매트릭스 응답 통합
+      setWinnerDeclaration(data.winnerDeclaration || null);
       if (loaded.length > 0) {
         setActiveTab(loaded[0].variantId);
       }
@@ -244,6 +258,99 @@ export default function JourneyVariantsEditor({
         </div>
       )}
 
+      {/* ★ D210+ Phase 3 (2026-05-23 Harold 명시): winner 자동 선언 안내 카드 (회사 admin 명시 적용 의무 — 자동 변경 X) */}
+      {winnerDeclaration && variants.length >= 2 && (
+        <div className={`p-3 rounded-lg border ${
+          winnerDeclaration.status === 'winner' ? 'bg-emerald-500/10 border-emerald-400/40' :
+          winnerDeclaration.status === 'leading' ? 'bg-amber-500/10 border-amber-400/40' :
+          'bg-white/5 border-white/10'
+        }`}>
+          <div className="flex items-start gap-2">
+            <Trophy className={`w-4 h-4 mt-0.5 flex-shrink-0 ${
+              winnerDeclaration.status === 'winner' ? 'text-emerald-300' :
+              winnerDeclaration.status === 'leading' ? 'text-amber-300' :
+              'text-white/40'
+            }`} />
+            <div className="flex-1 text-[11px]">
+              <div className={`font-semibold mb-1 ${
+                winnerDeclaration.status === 'winner' ? 'text-emerald-200' :
+                winnerDeclaration.status === 'leading' ? 'text-amber-200' :
+                'text-white/70'
+              }`}>
+                {winnerDeclaration.status === 'winner' && '🏆 Winner 자동 선언'}
+                {winnerDeclaration.status === 'leading' && '선두 영역 진입'}
+                {winnerDeclaration.status === 'low_confidence' && '데이터 누적 영역'}
+                {winnerDeclaration.status === 'cold_start' && '초기 탐색 영역'}
+              </div>
+              <div className="text-white/70 leading-relaxed mb-2">{winnerDeclaration.reasoning}</div>
+              {Object.keys(winnerDeclaration.variantProbabilities).length > 0 && (
+                <div className="space-y-1">
+                  <div className="text-[10px] text-white/40">Variant별 winner 확률 (Monte Carlo 1,000회)</div>
+                  {Object.entries(winnerDeclaration.variantProbabilities).map(([vid, prob]) => (
+                    <div key={vid} className="flex items-center gap-2">
+                      <div className="text-[10px] text-white/60 w-16">Variant {vid}</div>
+                      <div className="flex-1 h-1.5 bg-white/10 rounded-full overflow-hidden">
+                        <div
+                          className={`h-full ${
+                            vid === winnerDeclaration.winnerVariantId
+                              ? winnerDeclaration.status === 'winner' ? 'bg-emerald-400' : 'bg-amber-400'
+                              : 'bg-white/30'
+                          }`}
+                          style={{ width: `${prob * 100}%` }}
+                        />
+                      </div>
+                      <div className="text-[10px] text-white/60 font-mono w-12 text-right">{(prob * 100).toFixed(1)}%</div>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {winnerDeclaration.winnerVariantId && !isReadOnly && (
+                <button
+                  onClick={async () => {
+                    // 권장 traffic 영역 회사 admin 명시 적용 (자동 X)
+                    if (!confirm(`Variant ${winnerDeclaration.winnerVariantId} 영역 권장 traffic 적용하시겠습니까?\n\n${winnerDeclaration.reasoning}`)) return;
+                    setSaving(true);
+                    try {
+                      for (const v of variants) {
+                        const recommended = winnerDeclaration.recommendedTrafficWeights[v.variantId] ?? v.trafficWeight;
+                        await fetch(
+                          `/api/ai/operator/journeys/${journeyId}/steps/${stepId}/variants`,
+                          {
+                            method: 'POST',
+                            headers: fetchHeaders(),
+                            body: JSON.stringify({
+                              variantId: v.variantId,
+                              messageTemplate: v.messageTemplate,
+                              subject: v.subject,
+                              channel: v.channel,
+                              alimtalkTemplateCode: v.alimtalkTemplateCode,
+                              alimtalkVariableMap: v.alimtalkVariableMap,
+                              trafficWeight: recommended,
+                            }),
+                          },
+                        );
+                      }
+                      await loadVariants();
+                    } catch (err: any) {
+                      setError(err?.message || '권장 traffic 적용 실패');
+                    } finally {
+                      setSaving(false);
+                    }
+                  }}
+                  className={`mt-2 px-3 py-1 rounded text-[11px] font-medium ${
+                    winnerDeclaration.status === 'winner'
+                      ? 'bg-emerald-500/30 hover:bg-emerald-500/50 text-emerald-100'
+                      : 'bg-amber-500/30 hover:bg-amber-500/50 text-amber-100'
+                  }`}
+                >
+                  권장 traffic 적용 (회사 admin 명시 확인)
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
       {loading ? (
         <div className="flex justify-center py-6">
           <Loader2 className="w-5 h-5 animate-spin text-violet-300" />
@@ -294,6 +401,60 @@ export default function JourneyVariantsEditor({
           {/* Active variant card */}
           {activeVariant && (
             <div className="space-y-3 pt-2">
+              {/* ★ D210+ Phase 3 (2026-05-23 Harold 명시): funnel 시각화 영역 — 발송 → 클릭 → 전환 매트릭스 */}
+              {activeVariant.sentCount > 0 && (
+                <div className="p-3 bg-slate-950/40 border border-white/10 rounded-lg">
+                  <div className="flex items-center gap-1.5 mb-2">
+                    <Activity className="w-3 h-3 text-violet-300" />
+                    <span className="text-[11px] font-semibold text-white/80">Funnel — Variant {activeVariant.variantId}</span>
+                  </div>
+                  <div className="space-y-2">
+                    {/* 발송 100% */}
+                    <div className="flex items-center gap-2">
+                      <div className="w-16 text-[10px] text-white/60 flex items-center gap-1">
+                        <Activity className="w-2.5 h-2.5" /> 발송
+                      </div>
+                      <div className="flex-1 h-2 bg-white/10 rounded-full overflow-hidden">
+                        <div className="h-full bg-violet-400" style={{ width: '100%' }} />
+                      </div>
+                      <div className="text-[10px] text-white/70 font-mono w-20 text-right">
+                        {activeVariant.sentCount} (100%)
+                      </div>
+                    </div>
+                    {/* 클릭 */}
+                    <div className="flex items-center gap-2">
+                      <div className="w-16 text-[10px] text-white/60 flex items-center gap-1">
+                        <MousePointerClick className="w-2.5 h-2.5" /> 클릭
+                      </div>
+                      <div className="flex-1 h-2 bg-white/10 rounded-full overflow-hidden">
+                        <div
+                          className="h-full bg-cyan-400"
+                          style={{ width: `${(activeVariant.clickCount / activeVariant.sentCount) * 100}%` }}
+                        />
+                      </div>
+                      <div className="text-[10px] text-white/70 font-mono w-20 text-right">
+                        {activeVariant.clickCount} ({((activeVariant.clickCount / activeVariant.sentCount) * 100).toFixed(1)}%)
+                      </div>
+                    </div>
+                    {/* 전환 */}
+                    <div className="flex items-center gap-2">
+                      <div className="w-16 text-[10px] text-white/60 flex items-center gap-1">
+                        <ShoppingCart className="w-2.5 h-2.5" /> 전환
+                      </div>
+                      <div className="flex-1 h-2 bg-white/10 rounded-full overflow-hidden">
+                        <div
+                          className="h-full bg-emerald-400"
+                          style={{ width: `${(activeVariant.conversionCount / activeVariant.sentCount) * 100}%` }}
+                        />
+                      </div>
+                      <div className="text-[10px] text-white/70 font-mono w-20 text-right">
+                        {activeVariant.conversionCount} ({((activeVariant.conversionCount / activeVariant.sentCount) * 100).toFixed(1)}%)
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
               {/* Bandit 통계 */}
               <div className="grid grid-cols-4 gap-2">
                 <div className="p-2 bg-white/5 rounded text-center">

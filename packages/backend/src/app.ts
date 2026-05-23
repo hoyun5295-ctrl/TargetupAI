@@ -63,6 +63,8 @@ import { startJourneyExecutor } from './utils/journey-executor';
 import { startJourneyTriggerWatcher } from './utils/journey-trigger-watcher';
 // ★ D197 (2026-05-22) Phase B-2: Predictive Suite — 1시간 주기 cron + 회사 customer 예측 점수 자동 갱신
 import { startPredictiveWorker } from './utils/predictive-worker';
+// ★ D210+ Phase 3 (2026-05-23 Harold 명시): 자동 재진입 worker — 6시간 주기 + 회사 admin 명시 활성 정합 (default OFF)
+import { startJourneyReentryWorker } from './utils/journey-reentry-worker';
 
 // 공용 관리 라우트 (슈퍼관리자 + 고객사관리자)
 import manageUsersRoutes from './routes/manage-users';
@@ -267,6 +269,11 @@ app.listen(PORT, () => {
   //   클릭률 + 이탈 위험 + 구매 가능성 (Logistic Regression + cold start fallback)
   //   24h TTL — 발송 시점 cache 우선 + 없으면 즉시 계산
   startPredictiveWorker();
+
+  // ★ D210+ Phase 3 (2026-05-23 Harold 명시): 자동 재진입 worker — 6시간 주기 + 회사 admin 명시 활성 정합
+  //   journeys.auto_reentry_enabled = true 영역만 진입 (default OFF — feedback_no_target_auto_relax 정합)
+  //   completed 영역 + cooldown 경과 + customer 활성 영역 → 신규 execution INSERT
+  startJourneyReentryWorker();
 });
 
 export default app;

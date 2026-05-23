@@ -83,6 +83,9 @@ interface StepRow {
   message_template: string | null;
   subject: string | null;
   is_ad: boolean;
+  // ★ D210+ Phase 3 (2026-05-23 Harold 명시): wait step 정확도 — KST 시간대 영역
+  delay_mode: string | null;       // 'relative' | 'specific_hour' | 'next_business_day' (default 'relative')
+  target_hour_kst: number | null;  // 0~23 KST
   // ★ D188 Phase 2-B-1 (2026-05-21): condition step 평가용 conditionJsonb.
   condition_jsonb: Record<string, unknown> | null;
   // ★ D188 Phase 2-B-2 (2026-05-21): 알림톡 + MMS 채널 확장 영역.
@@ -196,7 +199,7 @@ async function processExecution(exec: ExecutionRow): Promise<StepOutcome> {
     `SELECT id, journey_id, step_order, step_type, delay_hours, channel, message_template, subject, is_ad, condition_jsonb,
             alimtalk_profile_id, alimtalk_template_code, alimtalk_variable_map,
             alimtalk_next_type, alimtalk_next_contents, alimtalk_next_subject,
-            mms_image_paths
+            mms_image_paths, delay_mode, target_hour_kst
      FROM journey_steps
      WHERE journey_id = $1::uuid AND step_order = $2`,
     [exec.journey_id, nextStepOrder]
@@ -234,7 +237,8 @@ async function processExecution(exec: ExecutionRow): Promise<StepOutcome> {
       return 'skipped_no_customer';
     }
     const condCustomer = condCustRes.rows[0];
-    const passed = evaluateCondition(step.condition_jsonb, condCustomer);
+    // ★ D210+ Phase 3 (2026-05-23 Harold 명시): evaluateCondition async 변환 — 신규 type 'cdp_event_exists' / 'journey_step_clicked' 영역은 DB SELECT 의무
+    const passed = await evaluateCondition(step.condition_jsonb, condCustomer, exec.execution_id, exec.company_id);
     if (passed) {
       await logSkippedStep(exec.execution_id, step.id, 'condition_passed');
       await advanceOrComplete(exec, step, 0);
@@ -652,8 +656,9 @@ function computeNextSendWindow(now: Date = new Date()): Date {
 
 async function advanceOrComplete(exec: ExecutionRow, currentStep: StepRow, addedCost: number): Promise<void> {
   // 다음 step 조회
+  // ★ D210+ Phase 3 (2026-05-23 Harold 명시): delay_mode + target_hour_kst 컬럼 SELECT 추가
   const nextRes = await query(
-    `SELECT step_order, delay_hours FROM journey_steps
+    `SELECT step_order, delay_hours, delay_mode, target_hour_kst FROM journey_steps
      WHERE journey_id = $1::uuid AND step_order > $2
      ORDER BY step_order ASC LIMIT 1`,
     [exec.journey_id, currentStep.step_order]
@@ -680,8 +685,11 @@ async function advanceOrComplete(exec: ExecutionRow, currentStep: StepRow, added
     return;
   }
 
-  const nextDelayHours = Number(nextRes.rows[0].delay_hours || 0);
-  const nextRunAt = new Date(Date.now() + nextDelayHours * 60 * 60 * 1000);
+  const nextRow = nextRes.rows[0];
+  const nextDelayHours = Number(nextRow.delay_hours || 0);
+  const nextDelayMode = String(nextRow.delay_mode || 'relative');
+  const nextTargetHourKst = nextRow.target_hour_kst != null ? Number(nextRow.target_hour_kst) : null;
+  const nextRunAt = calculateNextRunAt(nextDelayMode, nextDelayHours, nextTargetHourKst);
 
   await query(
     `UPDATE journey_executions SET
@@ -698,6 +706,77 @@ async function advanceOrComplete(exec: ExecutionRow, currentStep: StepRow, added
       [exec.journey_id, addedCost]
     );
   }
+}
+
+/**
+ * ★ D210+ Phase 3 (2026-05-23 Harold 명시): wait step KST 시간대 영역 계산 헬퍼
+ *
+ * delay_mode 3 영역:
+ *   - 'relative'           = NOW() + delay_hours (옛 매트릭스)
+ *   - 'specific_hour'      = 오늘/내일 target_hour_kst 영역 KST (오늘 영역 안 지난 영역 = 오늘 / 지난 영역 = 내일)
+ *   - 'next_business_day'  = 다음 평일 (월~금) 09시 KST (단순 매트릭스 — 한국 공휴일 영역 X)
+ *
+ * KST 계산 매트릭스 (UTC+9):
+ *   - KST 영역 = UTC + 9시간 = JS Date 영역 안 UTC 함수 활용 정합
+ *   - 예: KST 오전 9시 = UTC 0시 (그 전날 09시 영역 UTC)
+ */
+function calculateNextRunAt(
+  delayMode: string,
+  delayHours: number,
+  targetHourKst: number | null,
+): Date {
+  const now = new Date();
+
+  // 'relative' = 옛 매트릭스 (default)
+  if (delayMode === 'relative' || !delayMode) {
+    return new Date(now.getTime() + delayHours * 60 * 60 * 1000);
+  }
+
+  // 'specific_hour' = 오늘/내일 target_hour_kst 영역 KST
+  if (delayMode === 'specific_hour' && targetHourKst !== null) {
+    const targetHour = Math.max(0, Math.min(23, targetHourKst));
+    // KST 현재 영역 = UTC + 9
+    const kstNow = new Date(now.getTime() + 9 * 60 * 60 * 1000);
+    const kstYear = kstNow.getUTCFullYear();
+    const kstMonth = kstNow.getUTCMonth();
+    const kstDate = kstNow.getUTCDate();
+    const kstHour = kstNow.getUTCHours();
+
+    // KST 영역 target 시간 영역 = UTC 영역 (target - 9) (음수 시 그 전날)
+    let daysToAdd = 0;
+    if (kstHour >= targetHour) {
+      // 오늘 target 영역 이미 지난 영역 → 내일
+      daysToAdd = 1;
+    }
+    // KST 영역 (kstYear, kstMonth, kstDate + daysToAdd) 영역 targetHour 시 = UTC 영역 (targetHour - 9) 시
+    // 단순 매트릭스 — UTC 영역 직접 계산
+    const utcTargetMs = Date.UTC(kstYear, kstMonth, kstDate + daysToAdd, targetHour - 9, 0, 0);
+    return new Date(utcTargetMs);
+  }
+
+  // 'next_business_day' = 다음 평일 (월~금) 09시 KST
+  if (delayMode === 'next_business_day') {
+    const kstNow = new Date(now.getTime() + 9 * 60 * 60 * 1000);
+    const kstYear = kstNow.getUTCFullYear();
+    const kstMonth = kstNow.getUTCMonth();
+    const kstDate = kstNow.getUTCDate();
+    const kstHour = kstNow.getUTCHours();
+    const kstDayOfWeek = kstNow.getUTCDay();  // 0=일 ~ 6=토
+
+    let daysToAdd: number;
+    if (kstDayOfWeek === 0) daysToAdd = 1;          // 일 → 월
+    else if (kstDayOfWeek === 6) daysToAdd = 2;     // 토 → 월
+    else if (kstDayOfWeek === 5 && kstHour >= 9) daysToAdd = 3;  // 금 09시 이후 → 월
+    else if (kstHour >= 9) daysToAdd = 1;           // 평일 09시 이후 → 내일
+    else daysToAdd = 0;                              // 평일 09시 이전 → 오늘
+
+    // KST 영역 다음 평일 09시 = UTC 0시 (= 그 전날 00시 UTC + 24h = 다음날 00시 UTC)
+    const utcTargetMs = Date.UTC(kstYear, kstMonth, kstDate + daysToAdd, 9 - 9, 0, 0);  // 9-9=0 (KST 09시 = UTC 00시)
+    return new Date(utcTargetMs);
+  }
+
+  // fallback = relative
+  return new Date(now.getTime() + delayHours * 60 * 60 * 1000);
 }
 
 async function markExecutionCompleted(executionId: string, journeyId: string): Promise<void> {
@@ -745,24 +824,74 @@ async function logFailedStep(executionId: string, stepId: string, reason: string
 }
 
 // ════════════════════════════════════════════════════════════════════
-// ★ D188 Phase 2-B-1 (2026-05-21): evaluateCondition — condition step 평가 함수.
-//   conditionJsonb 형식: { "type": "customer_field", "field": "<컬럼명>", "operator": "<연산자>", "value": <값> }
-//   지원 연산자 9종: ==, !=, >=, <=, >, <, in, not_in, is_null, not_null
-//   지원 필드: customers 테이블 컬럼 + custom_fields JSONB 영역.
-//   잘못된 형식 / 미지원 operator = default pass (true) — activateJourney에서 사전 검증 적용됨.
+// ★ D188 Phase 2-B-1 (2026-05-21) + D210+ Phase 3 (2026-05-23 Harold 명시): evaluateCondition — condition step 평가 함수
+//
+// 지원 type 3건:
+//   1. customer_field — { "type": "customer_field", "field": "<컬럼명>", "operator": "<연산자>", "value": <값> }
+//      · 9 operator: ==, !=, >=, <=, >, <, in, not_in, is_null, not_null
+//      · 지원 필드: customers 테이블 컬럼 + custom_fields JSONB 영역
+//   2. cdp_event_exists — { "type": "cdp_event_exists", "event_name": "<이벤트명>", "within_days": <N>, "presence": "exists"|"not_exists" }
+//      · 본질: 지난 N일 안 특정 이벤트 영역 EXISTS 여부 (예: "지난 7일 안 'purchase' 이벤트 0건 영역" → 리마인드 발송 정합)
+//      · 사용 영역: cdp_events 테이블 + 회사 격리 의무
+//   3. journey_step_clicked — { "type": "journey_step_clicked", "step_order": <N>, "within_days": <N>, "clicked": true|false }
+//      · 본질: 옛 step N 발송 후 within_days 안 클릭 영역 EXISTS 여부 (예: "Step 1 발송 후 5일 안 클릭 X 영역" → 재시도 정합)
+//      · 사용 영역: journey_step_logs + cdp_events (event_name='message_click') 매트릭스
+//
+// 잘못된 형식 / 미지원 type / 미지원 operator = default pass (true) — activateJourney에서 사전 검증 정합.
 // ════════════════════════════════════════════════════════════════════
 
-function evaluateCondition(condJsonb: Record<string, unknown> | null, customer: Record<string, any>): boolean {
+async function evaluateCondition(
+  condJsonb: Record<string, unknown> | null,
+  customer: Record<string, any>,
+  executionId: string,
+  companyId: string,
+): Promise<boolean> {
   if (!condJsonb || typeof condJsonb !== 'object') return true;
 
   const type = String(condJsonb.type || '');
+
+  // 1. customer_field — 옛 매트릭스 (sync 영역 매트릭스)
+  if (type === 'customer_field') {
+    return evaluateCustomerFieldCondition(condJsonb, customer);
+  }
+
+  // 2. cdp_event_exists — 신규 (D210+ Phase 3)
+  if (type === 'cdp_event_exists') {
+    try {
+      return await evaluateCdpEventExistsCondition(condJsonb, customer.id, companyId);
+    } catch (err: any) {
+      console.warn('[Journey condition] cdp_event_exists 평가 오류, default pass:', err?.message);
+      return true;
+    }
+  }
+
+  // 3. journey_step_clicked — 신규 (D210+ Phase 3)
+  if (type === 'journey_step_clicked') {
+    try {
+      return await evaluateJourneyStepClickedCondition(condJsonb, executionId);
+    } catch (err: any) {
+      console.warn('[Journey condition] journey_step_clicked 평가 오류, default pass:', err?.message);
+      return true;
+    }
+  }
+
+  return true;
+}
+
+/**
+ * type='customer_field' 평가 (옛 D188 매트릭스 — sync 영역).
+ * customer 영역 = 직접 컬럼 우선 / fallback custom_fields JSONB.
+ */
+function evaluateCustomerFieldCondition(
+  condJsonb: Record<string, unknown>,
+  customer: Record<string, any>,
+): boolean {
   const field = String(condJsonb.field || '');
   const operator = String(condJsonb.operator || '');
   const value = (condJsonb as any).value;
 
-  if (type !== 'customer_field' || !field) return true;
+  if (!field) return true;
 
-  // customer 영역 → 직접 컬럼 우선, fallback custom_fields JSONB
   let cv: any = null;
   if (field in customer) {
     cv = customer[field];
@@ -783,6 +912,74 @@ function evaluateCondition(condJsonb: Record<string, unknown> | null, customer: 
     case 'not_null': return cv != null && cv !== '';
     default:         return true;
   }
+}
+
+/**
+ * type='cdp_event_exists' 평가 (D210+ Phase 3 신규).
+ * 지난 within_days 안 customer 영역 + event_name 영역 EXISTS 여부.
+ * presence 영역:
+ *   - 'exists'      → 1건+ EXISTS 시 true (조건 만족 — 다음 step 진입)
+ *   - 'not_exists'  → 0건 EXISTS 시 true (조건 만족 — 예: 구매 안 한 영역 리마인드 발송 정합)
+ */
+async function evaluateCdpEventExistsCondition(
+  condJsonb: Record<string, unknown>,
+  customerId: string,
+  companyId: string,
+): Promise<boolean> {
+  const eventName = String(condJsonb.event_name || '').trim();
+  const withinDays = Math.max(1, Math.min(365, Number(condJsonb.within_days) || 7));
+  const presence = String(condJsonb.presence || 'exists');
+
+  if (!eventName) return true;
+
+  const r = await query(
+    `SELECT EXISTS (
+       SELECT 1
+       FROM cdp_events
+       WHERE customer_id = $1::uuid
+         AND company_id = $2::uuid
+         AND event_name = $3
+         AND occurred_at >= NOW() - ($4 * INTERVAL '1 day')
+     ) AS event_exists`,
+    [customerId, companyId, eventName, withinDays]
+  );
+  const exists = Boolean(r.rows[0]?.event_exists);
+  return presence === 'not_exists' ? !exists : exists;
+}
+
+/**
+ * type='journey_step_clicked' 평가 (D210+ Phase 3 신규).
+ * 옛 step_order N 영역 발송 후 within_days 안 클릭 (cdp_events.event_name='message_click') 영역 EXISTS 여부.
+ * clicked 영역:
+ *   - true   → 클릭 EXISTS 시 true
+ *   - false  → 클릭 0건 시 true (예: "Step 1 영역 발송 후 클릭 X 영역" → 다른 채널 영역 재시도 정합)
+ */
+async function evaluateJourneyStepClickedCondition(
+  condJsonb: Record<string, unknown>,
+  executionId: string,
+): Promise<boolean> {
+  const stepOrder = Math.max(1, Number(condJsonb.step_order) || 1);
+  const withinDays = Math.max(1, Math.min(365, Number(condJsonb.within_days) || 7));
+  const clickedTarget = condJsonb.clicked !== false;  // default true
+
+  const r = await query(
+    `SELECT EXISTS (
+       SELECT 1
+       FROM journey_step_logs jsl
+       JOIN journey_steps js ON js.id = jsl.step_id
+       JOIN journey_executions je ON je.id = jsl.execution_id
+       JOIN cdp_events ce ON ce.customer_id = je.customer_id
+         AND ce.event_name = 'message_click'
+         AND ce.occurred_at >= jsl.sent_at
+         AND ce.occurred_at <= jsl.sent_at + ($1 * INTERVAL '1 day')
+       WHERE jsl.execution_id = $2::uuid
+         AND js.step_order = $3
+         AND jsl.status = 'sent'
+     ) AS step_clicked`,
+    [withinDays, executionId, stepOrder]
+  );
+  const clicked = Boolean(r.rows[0]?.step_clicked);
+  return clickedTarget ? clicked : !clicked;
 }
 
 // ════════════════════════════════════════════════════════════════════

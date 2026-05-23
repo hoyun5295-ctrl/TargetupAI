@@ -512,3 +512,141 @@ export async function deleteJourneyStepVariant(variantId: string): Promise<boole
   );
   return r.rows.length > 0;
 }
+
+// ════════════════════════════════════════════════════════════════════
+// ★ D210+ Phase 3 (2026-05-23 Harold 명시): declareVariantWinner — A/B winner 자동 선언 매트릭스
+//
+//   본질 (사용자 승인하 자동화):
+//     - AI 자기 traffic 영역 변경 X — 회사 admin 명시 적용 의무
+//     - 본 함수 = 안내만 (winner 영역 + 신뢰도 + 권장 traffic) — 회사 admin 명시 확인 의무
+//     - feedback_no_target_auto_relax 정합 (자동 변경 X)
+//
+//   알고리즘 (Monte Carlo posterior sampling):
+//     1. Beta(α, β) posterior 1,000회 sampling — 각 회 안 최선 variant 카운트
+//     2. winner 비율 = winCount / 1000
+//     3. 신뢰도 영역 매트릭스:
+//        - 95%+ → "Winner 영역 (95%+ 신뢰도)" + 100% traffic 권장
+//        - 80~95% → "선두 영역 (XX% 신뢰도)" + 80% traffic 권장
+//        - 80% 미만 → "데이터 부족" + 균등 영역
+//     4. Cold start (누적 < 30회) → 균등 영역 정합 (Bandit 흐름 유지)
+// ════════════════════════════════════════════════════════════════════
+
+export interface VariantWinnerDeclaration {
+  winnerVariantId: string | null;                    // null = 신뢰도 부족 영역
+  winnerConfidence: number;                           // 0~1 (winner 비율)
+  recommendedTrafficWeights: Record<string, number>;  // variantId → traffic (0~1)
+  totalTrials: number;
+  variantProbabilities: Record<string, number>;       // variantId → winner 비율 (1,000회 sampling)
+  reasoning: string;                                  // 회사 admin 안내 한국어 사유
+  status: 'cold_start' | 'low_confidence' | 'leading' | 'winner';
+}
+
+export function declareVariantWinner(variants: JourneyStepVariant[]): VariantWinnerDeclaration {
+  if (variants.length === 0) {
+    return {
+      winnerVariantId: null,
+      winnerConfidence: 0,
+      recommendedTrafficWeights: {},
+      totalTrials: 0,
+      variantProbabilities: {},
+      reasoning: 'variant 영역 0건',
+      status: 'cold_start',
+    };
+  }
+
+  const totalTrials = variants.reduce((sum, v) => sum + v.sentCount, 0);
+
+  // Cold start — 누적 30회 미만 영역
+  if (totalTrials < 30) {
+    const equalWeight = 1.0 / variants.length;
+    const weights: Record<string, number> = {};
+    variants.forEach((v) => (weights[v.variantId] = equalWeight));
+    return {
+      winnerVariantId: null,
+      winnerConfidence: 0,
+      recommendedTrafficWeights: weights,
+      totalTrials,
+      variantProbabilities: {},
+      reasoning: `데이터 누적 영역 (누적 ${totalTrials}회 < 30회) — 균등 영역 정합 + Bandit 자동 추천 흐름 유지 영역.`,
+      status: 'cold_start',
+    };
+  }
+
+  // 1,000회 Monte Carlo posterior sampling
+  const ITER = 1000;
+  const winCounts: Record<string, number> = {};
+  variants.forEach((v) => (winCounts[v.variantId] = 0));
+
+  for (let i = 0; i < ITER; i++) {
+    let bestIdx = 0;
+    let bestSample = -Infinity;
+    for (let j = 0; j < variants.length; j++) {
+      const s = sampleBeta(variants[j].banditAlpha, variants[j].banditBeta);
+      if (s > bestSample) {
+        bestSample = s;
+        bestIdx = j;
+      }
+    }
+    winCounts[variants[bestIdx].variantId]++;
+  }
+
+  // 영역별 winner 비율
+  const variantProbabilities: Record<string, number> = {};
+  variants.forEach((v) => (variantProbabilities[v.variantId] = winCounts[v.variantId] / ITER));
+
+  // 최대 winner 영역 식별
+  let topVariantId = variants[0].variantId;
+  let topProbability = variantProbabilities[topVariantId];
+  variants.forEach((v) => {
+    if (variantProbabilities[v.variantId] > topProbability) {
+      topProbability = variantProbabilities[v.variantId];
+      topVariantId = v.variantId;
+    }
+  });
+
+  const topVariant = variants.find((v) => v.variantId === topVariantId)!;
+  const topClickRate = topVariant.banditAlpha / (topVariant.banditAlpha + topVariant.banditBeta);
+  const trafficWeights: Record<string, number> = {};
+
+  if (topProbability >= 0.95) {
+    // 95%+ 신뢰도 영역 — winner 100% traffic 권장
+    variants.forEach((v) => (trafficWeights[v.variantId] = v.variantId === topVariantId ? 1.0 : 0.0));
+    return {
+      winnerVariantId: topVariantId,
+      winnerConfidence: topProbability,
+      recommendedTrafficWeights: trafficWeights,
+      totalTrials,
+      variantProbabilities,
+      reasoning: `Winner = Variant ${topVariantId} (신뢰도 ${(topProbability * 100).toFixed(1)}% / 평균 클릭률 ${(topClickRate * 100).toFixed(1)}%) — 100% traffic 적용 권장. 회사 admin 명시 적용 의무.`,
+      status: 'winner',
+    };
+  }
+
+  if (topProbability >= 0.80) {
+    // 80~95% 신뢰도 영역 — 선두 80% + 그 외 균등
+    const remainingWeight = (1 - 0.80) / Math.max(variants.length - 1, 1);
+    variants.forEach((v) => (trafficWeights[v.variantId] = v.variantId === topVariantId ? 0.80 : remainingWeight));
+    return {
+      winnerVariantId: topVariantId,
+      winnerConfidence: topProbability,
+      recommendedTrafficWeights: trafficWeights,
+      totalTrials,
+      variantProbabilities,
+      reasoning: `선두 = Variant ${topVariantId} (신뢰도 ${(topProbability * 100).toFixed(1)}% / 평균 클릭률 ${(topClickRate * 100).toFixed(1)}%) — 80% traffic 권장 + 추가 발송 후 재평가 의무.`,
+      status: 'leading',
+    };
+  }
+
+  // 80% 미만 — 데이터 부족 영역
+  const equalWeight = 1.0 / variants.length;
+  variants.forEach((v) => (trafficWeights[v.variantId] = equalWeight));
+  return {
+    winnerVariantId: null,
+    winnerConfidence: topProbability,
+    recommendedTrafficWeights: trafficWeights,
+    totalTrials,
+    variantProbabilities,
+    reasoning: `데이터 영역 부족 — 선두 Variant ${topVariantId} 영역 ${(topProbability * 100).toFixed(1)}% 영역 (95% 이상 의무) — 균등 영역 정합 + 추가 발송 후 재평가.`,
+    status: 'low_confidence',
+  };
+}

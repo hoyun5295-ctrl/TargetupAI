@@ -45,6 +45,12 @@ export interface JourneyStepDefinition {
   subject?: string;
   isAd?: boolean;
   conditionJsonb?: Record<string, unknown>;
+  // ★ D210+ Phase 3 (2026-05-23 Harold 명시): wait step 정확도 강화 — KST 시간대 영역
+  //   'relative' (default) = 옛 매트릭스 (delay_hours 영역 NOW() + N시간)
+  //   'specific_hour'      = 오늘/내일 target_hour_kst 영역 (예: "내일 오전 9시 발송 영역")
+  //   'next_business_day'  = 다음 평일 09시 KST (단순 월~금 정합)
+  delayMode?: 'relative' | 'specific_hour' | 'next_business_day';
+  targetHourKst?: number;  // 0~23 (specific_hour 영역 사용)
   // ★ D188 Phase 2-B-2 (2026-05-21): 알림톡 (channel='kakao') 영역 — sms-queue insertAlimtalkQueue 정합.
   alimtalkProfileId?: string;
   alimtalkTemplateCode?: string;
@@ -280,18 +286,19 @@ export async function createJourneyFromTemplate(input: CreateJourneyInput): Prom
   const journeyId = journeyRes.rows[0].id as string;
 
   // ★ D188 Phase 2-B-2 (2026-05-21): 알림톡 + MMS 컬럼 7건 추가 (DB ALTER 정합).
+  // ★ D210+ Phase 3 (2026-05-23 Harold 명시): wait step 정확도 — delay_mode + target_hour_kst 컬럼 2건 추가.
   for (const step of steps) {
     await query(
       `INSERT INTO journey_steps (
         id, journey_id, step_order, step_type, delay_hours, channel, message_template, subject, is_ad, condition_jsonb,
         alimtalk_profile_id, alimtalk_template_code, alimtalk_variable_map,
         alimtalk_next_type, alimtalk_next_contents, alimtalk_next_subject,
-        mms_image_paths, created_at
+        mms_image_paths, delay_mode, target_hour_kst, created_at
       ) VALUES (
         gen_random_uuid(), $1::uuid, $2, $3, $4, $5, $6, $7, $8, $9::jsonb,
         $10::uuid, $11, $12::jsonb,
         $13, $14, $15,
-        $16::text[], NOW()
+        $16::text[], $17, $18, NOW()
       )`,
       [
         journeyId,
@@ -310,6 +317,8 @@ export async function createJourneyFromTemplate(input: CreateJourneyInput): Prom
         step.alimtalkNextContents || null,
         step.alimtalkNextSubject || null,
         Array.isArray(step.mmsImagePaths) && step.mmsImagePaths.length > 0 ? step.mmsImagePaths : null,
+        step.delayMode || 'relative',
+        step.delayMode === 'specific_hour' && typeof step.targetHourKst === 'number' ? step.targetHourKst : null,
       ]
     );
   }
@@ -370,12 +379,19 @@ step_type 3종:
 - messageTemplate (message step만): %고객명%, %상품명%, %혜택% 등 변수 활용
 - 메시지에 (광고) 표기 없음 (시스템 자동 처리)
 - 한국 정보통신망법 + 통신사 스팸 정책 정합
-- conditionJsonb (condition step만): {"type":"customer_field","field":"<컬럼명>","operator":"==|!=|>=|<=|>|<|in|not_in|is_null|not_null","value":<값>}
-  지원 컬럼: name / phone / email / birth_date / recent_purchase_date / recent_purchase_amount / total_purchase_amount / purchase_count / grade / points / sms_opt_in / is_active
+- conditionJsonb (condition step만) — 3 type 지원:
+  1. customer_field — {"type":"customer_field","field":"<컬럼명>","operator":"==|!=|>=|<=|>|<|in|not_in|is_null|not_null","value":<값>}
+     · 지원 컬럼: name / phone / email / birth_date / recent_purchase_date / recent_purchase_amount / total_purchase_amount / purchase_count / grade / points / sms_opt_in / is_active
+  2. cdp_event_exists — {"type":"cdp_event_exists","event_name":"<이벤트명>","within_days":<1~365>,"presence":"exists"|"not_exists"}
+     · 이벤트명 예: purchase / order / cart_add / page_view / message_click
+     · 사용 예: "지난 7일 안 구매 안 한 고객 영역 리마인드 발송" → presence='not_exists'
+  3. journey_step_clicked — {"type":"journey_step_clicked","step_order":<옛 step N>,"within_days":<1~365>,"clicked":true|false}
+     · step_order = 옛 step만 참조 가능 (현재 step보다 작은 영역 의무)
+     · 사용 예: "Step 1 영역 발송 후 5일 안 클릭 X 영역 다른 채널 재시도" → clicked=false
 
 언제 wait/condition 사용:
 - wait: 메시지 발송 후 충분한 시간 대기가 의미 있는 영역 (예: 후기 요청 전 충분한 사용 시간)
-- condition: 고객 분기가 필요한 영역 (예: VIP 등급만 받을 step, 구매 금액 임계값 초과 고객만 진입)
+- condition: 고객 분기가 필요한 영역 (예: VIP 등급만 받을 step / 지난 구매 영역 분기 / 옛 step 클릭 영역 분기)
 
 회사 컨텍스트:
 - 회사명: ${ctx.companyName}
@@ -468,7 +484,9 @@ export async function activateJourney(companyId: string, journeyId: string, user
               'subject', subject,
               'channel', channel,
               'delay', delay_hours,
-              'condition', condition_jsonb
+              'condition', condition_jsonb,
+              'delayMode', delay_mode,
+              'targetHourKst', target_hour_kst
             ) ORDER BY step_order) FROM journey_steps WHERE journey_id = j.id) AS steps
      FROM journeys j
      WHERE j.id = $1::uuid AND j.company_id = $2::uuid`,
@@ -490,38 +508,99 @@ export async function activateJourney(companyId: string, journeyId: string, user
     const stepType = String(s.type || 'message');
 
     // ★ D188 Phase 2-B-1: step_type별 검증 분기
+    // ★ D210+ Phase 3 (2026-05-23 Harold 명시): wait step delay_mode 영역 검증 추가
     if (stepType === 'wait') {
-      // wait step = delay_hours > 0 필수 (의미 있는 대기 영역)
-      const delay = Number(s.delay || 0);
-      if (delay <= 0) {
-        return { ok: false, reason: `step ${s.order} (wait) 대기 시간이 0 이하입니다. 1시간 이상 설정해주세요.` };
+      const delayMode = String(s.delayMode || 'relative');
+      const validDelayModes = ['relative', 'specific_hour', 'next_business_day'];
+      if (!validDelayModes.includes(delayMode)) {
+        return { ok: false, reason: `step ${s.order} (wait) delay_mode = ${validDelayModes.join(' / ')} 중 하나 의무.` };
       }
+
+      if (delayMode === 'relative') {
+        // relative = delay_hours > 0 필수 (의미 있는 대기 영역)
+        const delay = Number(s.delay || 0);
+        if (delay <= 0) {
+          return { ok: false, reason: `step ${s.order} (wait relative) 대기 시간이 0 이하입니다. 1시간 이상 설정해주세요.` };
+        }
+      } else if (delayMode === 'specific_hour') {
+        // specific_hour = target_hour_kst 영역 (0~23) 의무
+        const targetHour = Number(s.targetHourKst);
+        if (!Number.isFinite(targetHour) || targetHour < 0 || targetHour > 23) {
+          return { ok: false, reason: `step ${s.order} (wait specific_hour) target_hour_kst = 0~23 의무.` };
+        }
+      }
+      // next_business_day = 추가 검증 0건 (다음 평일 09시 KST 고정 영역)
+
       continue; // wait step은 본문 검증 skip
     }
 
     if (stepType === 'condition') {
-      // condition step = conditionJsonb 정합 검증 (type + field + operator 필수)
+      // ★ D210+ Phase 3 (2026-05-23 Harold 명시): condition step type 화이트리스트 3종 확장
+      //   1. customer_field — 옛 매트릭스 (9 operator)
+      //   2. cdp_event_exists — 신규 (지난 N일 이벤트 EXISTS 영역)
+      //   3. journey_step_clicked — 신규 (옛 step N 클릭 영역 EXISTS)
       const cond = s.condition;
       if (!cond || typeof cond !== 'object') {
         return { ok: false, reason: `step ${s.order} (condition) condition_jsonb 미설정. 조건을 작성해주세요.` };
       }
       const condType = String((cond as any).type || '');
-      const condField = String((cond as any).field || '');
-      const condOperator = String((cond as any).operator || '');
-      if (condType !== 'customer_field') {
-        return { ok: false, reason: `step ${s.order} (condition) type은 'customer_field'만 지원합니다.` };
+      const validTypes = ['customer_field', 'cdp_event_exists', 'journey_step_clicked'];
+      if (!validTypes.includes(condType)) {
+        return { ok: false, reason: `step ${s.order} (condition) type은 ${validTypes.join(' / ')} 중 하나여야 합니다.` };
       }
-      if (!condField.trim()) {
-        return { ok: false, reason: `step ${s.order} (condition) 조건 필드명이 비어있습니다.` };
+
+      // type 1: customer_field — 옛 매트릭스 (field + operator + value 영역)
+      if (condType === 'customer_field') {
+        const condField = String((cond as any).field || '');
+        const condOperator = String((cond as any).operator || '');
+        if (!condField.trim()) {
+          return { ok: false, reason: `step ${s.order} (condition customer_field) 조건 필드명이 비어있습니다.` };
+        }
+        const validOps = ['==', '!=', '>=', '<=', '>', '<', 'in', 'not_in', 'is_null', 'not_null'];
+        if (!validOps.includes(condOperator)) {
+          return { ok: false, reason: `step ${s.order} (condition customer_field) operator는 ${validOps.join('/')} 중 하나여야 합니다.` };
+        }
+        // is_null / not_null은 value 불요, 그 외는 value 필수
+        if (!['is_null', 'not_null'].includes(condOperator) && (cond as any).value === undefined) {
+          return { ok: false, reason: `step ${s.order} (condition customer_field) value가 비어있습니다.` };
+        }
       }
-      const validOps = ['==', '!=', '>=', '<=', '>', '<', 'in', 'not_in', 'is_null', 'not_null'];
-      if (!validOps.includes(condOperator)) {
-        return { ok: false, reason: `step ${s.order} (condition) operator는 ${validOps.join('/')} 중 하나여야 합니다.` };
+
+      // type 2: cdp_event_exists — event_name + within_days + presence 영역
+      if (condType === 'cdp_event_exists') {
+        const eventName = String((cond as any).event_name || '').trim();
+        const withinDays = Number((cond as any).within_days);
+        const presence = String((cond as any).presence || 'exists');
+        if (!eventName) {
+          return { ok: false, reason: `step ${s.order} (condition cdp_event_exists) event_name 영역 필수입니다.` };
+        }
+        if (!Number.isFinite(withinDays) || withinDays < 1 || withinDays > 365) {
+          return { ok: false, reason: `step ${s.order} (condition cdp_event_exists) within_days = 1~365 범위 의무.` };
+        }
+        if (!['exists', 'not_exists'].includes(presence)) {
+          return { ok: false, reason: `step ${s.order} (condition cdp_event_exists) presence = 'exists' / 'not_exists' 의무.` };
+        }
       }
-      // is_null / not_null은 value 불요, 그 외는 value 필수
-      if (!['is_null', 'not_null'].includes(condOperator) && (cond as any).value === undefined) {
-        return { ok: false, reason: `step ${s.order} (condition) value가 비어있습니다.` };
+
+      // type 3: journey_step_clicked — step_order + within_days + clicked 영역
+      if (condType === 'journey_step_clicked') {
+        const stepOrderTarget = Number((cond as any).step_order);
+        const withinDays = Number((cond as any).within_days);
+        const clicked = (cond as any).clicked;
+        if (!Number.isFinite(stepOrderTarget) || stepOrderTarget < 1) {
+          return { ok: false, reason: `step ${s.order} (condition journey_step_clicked) step_order 영역 필수 (1+).` };
+        }
+        if (stepOrderTarget >= s.order) {
+          return { ok: false, reason: `step ${s.order} (condition journey_step_clicked) step_order = 옛 step만 참조 가능 (현재 ${s.order} > ${stepOrderTarget} 영역 의무).` };
+        }
+        if (!Number.isFinite(withinDays) || withinDays < 1 || withinDays > 365) {
+          return { ok: false, reason: `step ${s.order} (condition journey_step_clicked) within_days = 1~365 범위 의무.` };
+        }
+        if (typeof clicked !== 'boolean') {
+          return { ok: false, reason: `step ${s.order} (condition journey_step_clicked) clicked 영역 = true / false 의무.` };
+        }
       }
+
       continue; // condition step은 본문 검증 skip
     }
 
@@ -595,6 +674,9 @@ export async function updateJourneyStep(
     alimtalkNextContents?: string | null;
     alimtalkNextSubject?: string | null;
     mmsImagePaths?: string[] | null;
+    // ★ D210+ Phase 3 (2026-05-23 Harold 명시): wait step 정확도 영역 patch
+    delayMode?: 'relative' | 'specific_hour' | 'next_business_day' | null;
+    targetHourKst?: number | null;
   }
 ): Promise<boolean> {
   // 회사 격리 + 활성 상태에서는 step 수정 차단
@@ -627,7 +709,9 @@ export async function updateJourneyStep(
        alimtalk_next_type = COALESCE($14, alimtalk_next_type),
        alimtalk_next_contents = COALESCE($15, alimtalk_next_contents),
        alimtalk_next_subject = COALESCE($16, alimtalk_next_subject),
-       mms_image_paths = COALESCE($17::text[], mms_image_paths)
+       mms_image_paths = COALESCE($17::text[], mms_image_paths),
+       delay_mode = COALESCE($18, delay_mode),
+       target_hour_kst = COALESCE($19, target_hour_kst)
      WHERE id = $1::uuid AND journey_id = $2::uuid
      RETURNING id`,
     [
@@ -648,6 +732,8 @@ export async function updateJourneyStep(
       patch.alimtalkNextContents ?? null,
       patch.alimtalkNextSubject ?? null,
       Array.isArray(patch.mmsImagePaths) ? patch.mmsImagePaths : null,
+      patch.delayMode ?? null,
+      patch.targetHourKst != null ? Math.max(0, Math.min(23, Number(patch.targetHourKst))) : null,
     ]
   );
   return r.rows.length > 0;
