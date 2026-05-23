@@ -265,6 +265,8 @@ export default function AiOperatorPage() {
   //   - sampleCustomer = displayName 키 매트릭스 ({ "고객명": "...", "등급": "...", ... })
   //   - showMergedPreview = false (변수 강조 원본 표시) / true (상위 고객 데이터 치환 적용 표시)
   const [sampleCustomer, setSampleCustomer] = useState<Record<string, string | number | null> | null>(null);
+  // ★ D210+ Phase 2-fix9 (Harold 명시 2026-05-23): Liquid 렌더링 영역 (field 키 매트릭스) — renderLiquid 호출 시 customer.X 매칭.
+  const [sampleCustomerFields, setSampleCustomerFields] = useState<Record<string, any> | null>(null);
   const [showMergedPreview, setShowMergedPreview] = useState(false);
 
   // textarea 자동 높이 조절
@@ -338,11 +340,16 @@ export default function AiOperatorPage() {
           .then((sd) => {
             if (sd?.success && sd.sampleCustomer) {
               setSampleCustomer(sd.sampleCustomer);
+              setSampleCustomerFields(sd.sampleCustomerFields || null);
             } else {
               setSampleCustomer(null);
+              setSampleCustomerFields(null);
             }
           })
-          .catch(() => setSampleCustomer(null));
+          .catch(() => {
+            setSampleCustomer(null);
+            setSampleCustomerFields(null);
+          });
       }, 3700);
     } catch (err) {
       setError(err instanceof Error ? err.message : '오류가 발생했습니다.');
@@ -362,6 +369,7 @@ export default function AiOperatorPage() {
     setSelectedVariantIdx(0);
     // ★ D210+ Phase 2-fix5 (Harold 명시 2026-05-23): 새 입력 진입 시 옛 sample-customer 영역 초기화
     setSampleCustomer(null);
+    setSampleCustomerFields(null);
     setShowMergedPreview(false);
     textareaRef.current?.focus();
   };
@@ -878,7 +886,7 @@ export default function AiOperatorPage() {
                           <pre className="whitespace-pre-wrap break-words text-sm text-white/85 leading-relaxed font-sans">
                             {activeBody
                               ? (showMergedPreview && sampleCustomer
-                                  ? mergeAndHighlightVars(activeBody, sampleCustomer, 'dark')
+                                  ? mergeAndHighlightVars(activeBody, sampleCustomer, 'dark', sampleCustomerFields || undefined)
                                   : highlightVars(activeBody, 'dark'))
                               : '메시지 본문이 비어있습니다.'}
                           </pre>

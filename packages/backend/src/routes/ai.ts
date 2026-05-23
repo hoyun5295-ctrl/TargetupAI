@@ -1012,7 +1012,36 @@ router.post('/operator/sample-customer', async (req: Request, res: Response) => 
       'LTV점수':      row.ltv_score != null ? Number(row.ltv_score).toLocaleString() : null,
       '결혼기념일':   row.wedding_anniversary ? new Date(row.wedding_anniversary).toLocaleDateString('ko-KR') : null,
     };
-    return res.json({ success: true, sampleCustomer });
+    // ★ D210+ Phase 2-fix9 (Harold 명시 2026-05-23): Liquid 렌더링 영역 (field 키 매트릭스) — renderLiquid 호출 시 customer.X 매칭.
+    //   본질 = {% if customer.churn_risk > 0.6 %} 등 Liquid 태그 영역 = 미리보기 영역에서도 사용자별 분기 렌더링 의무.
+    //   사고 차단 = mergeAndHighlightVars 영역 안 Liquid 태그 그대로 표시 사고 영역 차단.
+    //   Predictive 영역 = 0.5 중립 fallback (옛 cdp_customer_predictions 영역 미참조 시).
+    const sampleCustomerFields: Record<string, any> = {
+      name: row.name || null,
+      grade: row.grade || null,
+      gender: row.gender || null,
+      age: row.age || null,
+      birth_date: row.birth_date || null,
+      email: row.email || null,
+      region: row.region || null,
+      address: row.address || null,
+      store_name: row.store_name || null,
+      registered_store: row.registered_store || null,
+      points: row.points != null ? Number(row.points) : null,
+      recent_purchase_date: row.recent_purchase_date || null,
+      recent_purchase_amount: row.recent_purchase_amount != null ? Number(row.recent_purchase_amount) : null,
+      recent_purchase_store: row.recent_purchase_store || null,
+      total_purchase_amount: row.total_purchase_amount != null ? Number(row.total_purchase_amount) : null,
+      purchase_count: row.purchase_count != null ? Number(row.purchase_count) : null,
+      avg_order_value: row.avg_order_value != null ? Number(row.avg_order_value) : null,
+      ltv_score: row.ltv_score != null ? Number(row.ltv_score) : null,
+      wedding_anniversary: row.wedding_anniversary || null,
+      // Predictive 점수 = 중립 0.5 fallback (실제 발송 시 cdp_customer_predictions 영역 정합)
+      churn_risk: 0.5,
+      purchase_likelihood: 0.5,
+      click_score: 0.5,
+    };
+    return res.json({ success: true, sampleCustomer, sampleCustomerFields });
   } catch (err: any) {
     console.error('[AI Operator /sample-customer] 오류:', err);
     return res.status(500).json({ success: false, error: '샘플 고객 조회 실패' });

@@ -217,6 +217,8 @@ export default function JourneysPage() {
   // ★ D210+ Phase 2-fix6 (Harold 명시 2026-05-23): 6 sub-agent 진행 + 샘플 고객 머지 토글
   const [progressStep, setProgressStep] = useState(0);
   const [sampleCustomer, setSampleCustomer] = useState<Record<string, string | number | null> | null>(null);
+  // ★ D210+ Phase 2-fix9 (Harold 명시 2026-05-23): Liquid 렌더링 영역 (field 키 매트릭스).
+  const [sampleCustomerFields, setSampleCustomerFields] = useState<Record<string, any> | null>(null);
   const [showMergedPreview, setShowMergedPreview] = useState(false);
   const [aiPkg, setAiPkg] = useState<AIJourneyPackage | null>(null);
   const [reviewName, setReviewName] = useState('');
@@ -432,11 +434,16 @@ export default function JourneysPage() {
           .then((sd) => {
             if (sd?.success && sd.sampleCustomer) {
               setSampleCustomer(sd.sampleCustomer);
+              setSampleCustomerFields(sd.sampleCustomerFields || null);
             } else {
               setSampleCustomer(null);
+              setSampleCustomerFields(null);
             }
           })
-          .catch(() => setSampleCustomer(null));
+          .catch(() => {
+            setSampleCustomer(null);
+            setSampleCustomerFields(null);
+          });
       } else {
         alert(data.error || 'AI 생성 실패. 다시 시도해주세요.');
       }
@@ -1221,9 +1228,9 @@ export default function JourneysPage() {
                           <textarea value={s.messageTemplate} onChange={(e) => updateStep(idx, { messageTemplate: e.target.value })} rows={6} className="w-full px-3 py-2 bg-slate-900 border border-fuchsia-400/50 rounded text-sm font-mono focus:outline-none resize-y" />
                         ) : (
                           <div className="px-3 py-2 bg-slate-900/60 border border-white/10 rounded text-sm whitespace-pre-wrap font-mono text-white/90 cursor-pointer" onClick={() => setEditingStepIdx(idx)}>
-                            {/* ★ D210+ Phase 2-fix6 (Harold 명시 2026-05-23): 변수 하이라이트 + 상위 고객 머지 토글 */}
+                            {/* ★ D210+ Phase 2-fix6 + fix9 (Harold 명시 2026-05-23): 변수 + Liquid 하이라이트 + 상위 고객 머지 토글 */}
                             {showMergedPreview && sampleCustomer
-                              ? mergeAndHighlightVars(s.messageTemplate, sampleCustomer, 'dark')
+                              ? mergeAndHighlightVars(s.messageTemplate, sampleCustomer, 'dark', sampleCustomerFields || undefined)
                               : highlightVars(s.messageTemplate, 'dark')}
                           </div>
                         )}
