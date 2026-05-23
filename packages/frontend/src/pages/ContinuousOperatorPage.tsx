@@ -411,7 +411,7 @@ export default function ContinuousOperatorPage() {
               <select
                 value={proposalStatus}
                 onChange={(e) => setProposalStatus(e.target.value as any)}
-                className="text-xs px-2 py-1 border rounded"
+                className="text-xs px-2 py-1 bg-slate-900 border border-white/10 rounded text-white focus:outline-none focus:border-violet-400/50"
               >
                 <option value="pending">대기</option>
                 <option value="all">전체</option>
@@ -527,7 +527,7 @@ export default function ContinuousOperatorPage() {
                                 <Target className="w-3 h-3 mt-0.5 shrink-0" />
                                 <div>
                                   <strong>Self-Optimizing 추천:</strong> {variantsMap[p.id].recommendation!.reasoning}
-                                  <div className="text-indigo-700 mt-0.5">★ 영구 원칙 정합 — 본 추천은 참고만, 발송은 사용자가 선택한 variant로 진행됩니다.</div>
+                                  <div className="text-indigo-200 mt-0.5">★ 영구 원칙 정합 — 본 추천은 참고만, 발송은 사용자가 선택한 variant로 진행됩니다.</div>
                                 </div>
                               </div>
                             )}
@@ -542,7 +542,7 @@ export default function ContinuousOperatorPage() {
                           </div>
                         )}
                         {p.autoExecuteReason && (
-                          <div className="bg-violet-50 rounded p-2 text-violet-800">
+                          <div className="bg-violet-500/15 border border-violet-400/30 rounded p-2 text-violet-200">
                             <strong>자동 실행 판정:</strong> {p.autoExecuteReason}
                           </div>
                         )}
@@ -583,7 +583,7 @@ export default function ContinuousOperatorPage() {
                       </div>
                     </div>
                     <div className="flex flex-col gap-1.5">
-                      <button onClick={() => handleRunNow(op.id)} className="text-xs bg-indigo-50 hover:bg-indigo-100 text-indigo-700 px-2 py-1 rounded flex items-center gap-1">
+                      <button onClick={() => handleRunNow(op.id)} className="text-xs bg-indigo-50 hover:bg-indigo-100 text-indigo-200 px-2 py-1 rounded flex items-center gap-1">
                         <Play className="w-3 h-3" /> 지금 실행
                       </button>
                       <button onClick={() => setEditing(op)} className="text-xs text-white/70 hover:bg-white/5 px-2 py-1 rounded flex items-center gap-1">
@@ -606,7 +606,7 @@ export default function ContinuousOperatorPage() {
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50" onClick={() => setShowMultiGoal(false)}>
           <div className="bg-slate-900 border border-white/10 rounded-2xl shadow-2xl w-full max-w-3xl max-h-[90vh] overflow-y-auto p-6" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center gap-2 mb-4">
-              <GitMerge className="w-5 h-5 text-violet-600" />
+              <GitMerge className="w-5 h-5 text-violet-300" />
               <h3 className="text-base font-bold text-white">Multi-Goal Decisioning — 다중 목표 충돌 분석</h3>
             </div>
             <div className="bg-amber-500/10 border border-amber-400/30 rounded-lg p-3 mb-4 text-xs text-amber-100 flex items-start gap-2">
@@ -625,7 +625,7 @@ export default function ContinuousOperatorPage() {
                       <div className="flex items-center gap-2 mb-2">
                         <span className="text-xs font-bold text-white/80">목표 {idx + 1}</span>
                         {multiGoals.length > 2 && (
-                          <button onClick={() => removeMultiGoal(idx)} className="text-rose-500 hover:text-rose-700 text-xs ml-auto">
+                          <button onClick={() => removeMultiGoal(idx)} className="text-rose-300 hover:text-rose-200 text-xs ml-auto">
                             제거
                           </button>
                         )}
@@ -640,7 +640,7 @@ export default function ContinuousOperatorPage() {
                             setMultiGoals(next);
                           }}
                           placeholder="예: VIP 재구매"
-                          className="px-3 py-2 border rounded text-sm"
+                          className="px-3 py-2 bg-slate-900 border border-white/10 rounded text-sm text-white placeholder-white/30 focus:outline-none focus:border-violet-400/50"
                           maxLength={100}
                         />
                         <div>
@@ -656,7 +656,7 @@ export default function ContinuousOperatorPage() {
                               next[idx] = { ...next[idx], weight: parseFloat(e.target.value) || 0 };
                               setMultiGoals(next);
                             }}
-                            className="px-3 py-2 border rounded text-sm w-full"
+                            className="px-3 py-2 bg-slate-900 border border-white/10 rounded text-sm text-white placeholder-white/30 w-full focus:outline-none focus:border-violet-400/50"
                           />
                         </div>
                       </div>
@@ -668,7 +668,7 @@ export default function ContinuousOperatorPage() {
                           setMultiGoals(next);
                         }}
                         placeholder="자연어 상세 (선택) — 예: VIP 등급 + 최근 30일 미구매 고객"
-                        className="w-full px-3 py-2 border rounded text-xs resize-none h-16"
+                        className="w-full px-3 py-2 bg-slate-900 border border-white/10 rounded text-xs text-white placeholder-white/30 resize-none h-16 focus:outline-none focus:border-violet-400/50"
                         maxLength={500}
                       />
                     </div>
@@ -683,7 +683,7 @@ export default function ContinuousOperatorPage() {
                   )}
                 </div>
                 <div className="flex gap-2 justify-end pt-2 border-t">
-                  <button onClick={() => setShowMultiGoal(false)} className="px-4 py-2 border rounded-lg text-sm text-white/80 hover:bg-white/5">취소</button>
+                  <button onClick={() => setShowMultiGoal(false)} className="px-4 py-2 bg-white/5 border border-white/10 rounded-lg text-sm text-white/80 hover:bg-white/10 transition-colors">취소</button>
                   <button
                     onClick={handleMultiGoalAnalyze}
                     disabled={analyzing}
@@ -698,9 +698,9 @@ export default function ContinuousOperatorPage() {
             {/* 분석 결과 */}
             {multiGoalAnalysis && (
               <>
-                <div className="bg-violet-50 border border-violet-200 rounded-lg p-4 mb-4">
-                  <div className="text-xs font-bold text-violet-900 mb-1">통합 전략</div>
-                  <div className="text-sm text-violet-800 whitespace-pre-wrap leading-relaxed">{multiGoalAnalysis.overallStrategy}</div>
+                <div className="bg-violet-500/10 border border-violet-400/30 rounded-lg p-4 mb-4">
+                  <div className="text-xs font-bold text-violet-200 mb-1">통합 전략</div>
+                  <div className="text-sm text-violet-100/80 whitespace-pre-wrap leading-relaxed">{multiGoalAnalysis.overallStrategy}</div>
                 </div>
 
                 <div className="mb-4">
@@ -722,13 +722,13 @@ export default function ContinuousOperatorPage() {
                       <div className="flex items-center gap-2 mb-1">
                         <span className="bg-violet-600 text-white w-4 h-4 rounded-full flex items-center justify-center text-[10px] font-bold">{sp.priority}</span>
                         <span className="text-sm font-bold text-white">{sp.goalName}</span>
-                        <span className="text-[10px] bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded-full">{sp.channelRecommended}</span>
-                        <span className="text-[10px] bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded-full">{sp.timingRecommended}</span>
-                        {!sp.shouldExecute && <span className="text-[10px] bg-rose-200 text-rose-800 px-1.5 py-0.5 rounded-full">실행 제외</span>}
+                        <span className="text-[10px] bg-emerald-500/20 text-emerald-300 border border-emerald-400/30 px-1.5 py-0.5 rounded-full">{sp.channelRecommended}</span>
+                        <span className="text-[10px] bg-amber-500/20 text-amber-300 border border-amber-400/30 px-1.5 py-0.5 rounded-full">{sp.timingRecommended}</span>
+                        {!sp.shouldExecute && <span className="text-[10px] bg-rose-500/30 text-rose-200 px-1.5 py-0.5 rounded-full">실행 제외</span>}
                       </div>
                       <div className="text-xs text-white/70 mb-1">{sp.targetCriteria}</div>
                       {sp.conflicts.length > 0 && (
-                        <div className="text-[11px] text-amber-700 mt-1.5">
+                        <div className="text-[11px] text-amber-300 mt-1.5">
                           <strong>충돌:</strong> {sp.conflicts.join(' / ')}
                         </div>
                       )}
@@ -745,7 +745,7 @@ export default function ContinuousOperatorPage() {
                 )}
 
                 <div className="flex gap-2 justify-end pt-3 border-t">
-                  <button onClick={() => { setMultiGoalAnalysis(null); }} className="px-4 py-2 border rounded-lg text-sm text-white/80 hover:bg-white/5">다시 분석</button>
+                  <button onClick={() => { setMultiGoalAnalysis(null); }} className="px-4 py-2 bg-white/5 border border-white/10 rounded-lg text-sm text-white/80 hover:bg-white/10 transition-colors">다시 분석</button>
                   <button onClick={() => setShowMultiGoal(false)} className="px-4 py-2 bg-violet-500/30 hover:bg-violet-500/50 text-violet-100 text-sm rounded-lg">확인</button>
                 </div>
               </>
@@ -757,7 +757,7 @@ export default function ContinuousOperatorPage() {
       {/* 편집 모달 */}
       {editing && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50" onClick={() => setEditing(null)}>
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-xl max-h-[90vh] overflow-y-auto p-6" onClick={(e) => e.stopPropagation()}>
+          <div className="bg-slate-900 border border-white/10 rounded-2xl shadow-2xl w-full max-w-xl max-h-[90vh] overflow-y-auto p-6" onClick={(e) => e.stopPropagation()}>
             <h3 className="text-base font-bold text-white mb-4">{editing.id ? '영구 운영 수정' : '신규 영구 운영'}</h3>
             <div className="space-y-3">
               <div>
@@ -829,7 +829,7 @@ export default function ContinuousOperatorPage() {
               )}
 
               <div className="flex gap-2 justify-end pt-2">
-                <button onClick={() => setEditing(null)} className="px-4 py-2 border rounded-lg text-sm text-white/80 hover:bg-white/5">취소</button>
+                <button onClick={() => setEditing(null)} className="px-4 py-2 bg-white/5 border border-white/10 rounded-lg text-sm text-white/80 hover:bg-white/10 transition-colors">취소</button>
                 <button onClick={handleSave} disabled={saving} className="px-4 py-2 bg-indigo-500/30 hover:bg-indigo-500/50 text-indigo-100 text-sm rounded-lg disabled:opacity-40">
                   {saving ? '저장 중...' : '저장'}
                 </button>
@@ -844,14 +844,14 @@ export default function ContinuousOperatorPage() {
 
 function StatusBadge({ status }: { status: string }) {
   const map: Record<string, { label: string; cls: string }> = {
-    active: { label: '활성', cls: 'bg-emerald-100 text-emerald-700' },
-    paused: { label: '일시중지', cls: 'bg-amber-100 text-amber-700' },
+    active: { label: '활성', cls: 'bg-emerald-500/20 text-emerald-300 border border-emerald-400/30' },
+    paused: { label: '일시중지', cls: 'bg-amber-500/20 text-amber-300 border border-amber-400/30' },
     archived: { label: '보관', cls: 'bg-white/10 text-white/50' },
-    pending: { label: '승인 대기', cls: 'bg-amber-100 text-amber-700' },
-    approved: { label: '승인됨', cls: 'bg-emerald-100 text-emerald-700' },
+    pending: { label: '승인 대기', cls: 'bg-amber-500/20 text-amber-300 border border-amber-400/30' },
+    approved: { label: '승인됨', cls: 'bg-emerald-500/20 text-emerald-300 border border-emerald-400/30' },
     rejected: { label: '거부됨', cls: 'bg-white/10 text-white/50' },
     auto_executed: { label: '자동 실행됨', cls: 'bg-violet-500/20 text-violet-300' },
-    expired: { label: '만료됨', cls: 'bg-rose-100 text-rose-700' },
+    expired: { label: '만료됨', cls: 'bg-rose-500/20 text-rose-300 border border-rose-400/30' },
   };
   const e = map[status] || { label: status, cls: 'bg-white/10 text-white/70' };
   return <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${e.cls}`}>{e.label}</span>;

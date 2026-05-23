@@ -214,33 +214,33 @@ export default function InAppMessagesPage() {
       {/* 편집 모달 */}
       {editing && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50" onClick={() => setEditing(null)}>
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-xl max-h-[90vh] overflow-y-auto p-6" onClick={(e) => e.stopPropagation()}>
+          <div className="bg-slate-900 border border-white/10 rounded-2xl shadow-2xl w-full max-w-xl max-h-[90vh] overflow-y-auto p-6" onClick={(e) => e.stopPropagation()}>
             <h3 className="text-base font-bold text-white mb-4">{editing.id ? '메시지 수정' : '신규 메시지'}</h3>
             <div className="space-y-3">
               <FormField label="제목">
-                <input type="text" value={editing.title || ''} onChange={(e) => setEditing({ ...editing, title: e.target.value })} className="w-full px-3 py-2 border rounded-lg text-sm" maxLength={100} />
+                <input type="text" value={editing.title || ''} onChange={(e) => setEditing({ ...editing, title: e.target.value })} className="w-full px-3 py-2 bg-slate-900 border border-white/10 rounded-lg text-sm text-white placeholder-white/30 focus:outline-none focus:border-violet-400/50" maxLength={100} />
               </FormField>
               <FormField label="본문">
-                <textarea value={editing.body || ''} onChange={(e) => setEditing({ ...editing, body: e.target.value })} className="w-full px-3 py-2 border rounded-lg text-sm resize-none h-20" maxLength={500} />
+                <textarea value={editing.body || ''} onChange={(e) => setEditing({ ...editing, body: e.target.value })} className="w-full px-3 py-2 bg-slate-900 border border-white/10 rounded-lg text-sm text-white placeholder-white/30 resize-none h-20 focus:outline-none focus:border-violet-400/50" maxLength={500} />
               </FormField>
               <div className="grid grid-cols-2 gap-3">
                 <FormField label="CTA 라벨">
-                  <input type="text" value={editing.actionLabel || ''} onChange={(e) => setEditing({ ...editing, actionLabel: e.target.value })} className="w-full px-3 py-2 border rounded-lg text-sm" />
+                  <input type="text" value={editing.actionLabel || ''} onChange={(e) => setEditing({ ...editing, actionLabel: e.target.value })} className="w-full px-3 py-2 bg-slate-900 border border-white/10 rounded-lg text-sm text-white placeholder-white/30 focus:outline-none focus:border-violet-400/50" />
                 </FormField>
                 <FormField label="CTA URL">
-                  <input type="url" value={editing.actionUrl || ''} onChange={(e) => setEditing({ ...editing, actionUrl: e.target.value })} className="w-full px-3 py-2 border rounded-lg text-sm" />
+                  <input type="url" value={editing.actionUrl || ''} onChange={(e) => setEditing({ ...editing, actionUrl: e.target.value })} className="w-full px-3 py-2 bg-slate-900 border border-white/10 rounded-lg text-sm text-white placeholder-white/30 focus:outline-none focus:border-violet-400/50" />
                 </FormField>
               </div>
               <div className="grid grid-cols-3 gap-3">
                 <FormField label="위치">
-                  <select value={editing.position || 'top_banner'} onChange={(e) => setEditing({ ...editing, position: e.target.value as Position })} className="w-full px-3 py-2 border rounded-lg text-sm">
+                  <select value={editing.position || 'top_banner'} onChange={(e) => setEditing({ ...editing, position: e.target.value as Position })} className="w-full px-3 py-2 bg-slate-900 border border-white/10 rounded-lg text-sm text-white placeholder-white/30 focus:outline-none focus:border-violet-400/50">
                     <option value="top_banner">상단 배너</option>
                     <option value="bottom_banner">하단 배너</option>
                     <option value="center_modal">가운데 모달</option>
                   </select>
                 </FormField>
                 <FormField label="트리거">
-                  <select value={editing.triggerEvent || 'page_load'} onChange={(e) => setEditing({ ...editing, triggerEvent: e.target.value })} className="w-full px-3 py-2 border rounded-lg text-sm">
+                  <select value={editing.triggerEvent || 'page_load'} onChange={(e) => setEditing({ ...editing, triggerEvent: e.target.value })} className="w-full px-3 py-2 bg-slate-900 border border-white/10 rounded-lg text-sm text-white placeholder-white/30 focus:outline-none focus:border-violet-400/50">
                     <option value="page_load">페이지 로드</option>
                     <option value="cart_add">장바구니 담음</option>
                     <option value="cart_view">장바구니 페이지</option>
@@ -248,7 +248,7 @@ export default function InAppMessagesPage() {
                   </select>
                 </FormField>
                 <FormField label="빈도">
-                  <select value={editing.displayFrequency || 'once_per_session'} onChange={(e) => setEditing({ ...editing, displayFrequency: e.target.value as Frequency })} className="w-full px-3 py-2 border rounded-lg text-sm">
+                  <select value={editing.displayFrequency || 'once_per_session'} onChange={(e) => setEditing({ ...editing, displayFrequency: e.target.value as Frequency })} className="w-full px-3 py-2 bg-slate-900 border border-white/10 rounded-lg text-sm text-white placeholder-white/30 focus:outline-none focus:border-violet-400/50">
                     <option value="once_per_session">세션당 1회</option>
                     <option value="once_per_day">하루 1회</option>
                     <option value="always">항상</option>
@@ -257,13 +257,13 @@ export default function InAppMessagesPage() {
               </div>
               <div className="grid grid-cols-3 gap-3">
                 <FormField label="배경색">
-                  <input type="color" value={editing.backgroundColor || '#4f46e5'} onChange={(e) => setEditing({ ...editing, backgroundColor: e.target.value })} className="w-full h-10 border rounded-lg" />
+                  <input type="color" value={editing.backgroundColor || '#4f46e5'} onChange={(e) => setEditing({ ...editing, backgroundColor: e.target.value })} className="w-full h-10 bg-slate-900 border border-white/10 rounded-lg cursor-pointer" />
                 </FormField>
                 <FormField label="글자색">
-                  <input type="color" value={editing.textColor || '#ffffff'} onChange={(e) => setEditing({ ...editing, textColor: e.target.value })} className="w-full h-10 border rounded-lg" />
+                  <input type="color" value={editing.textColor || '#ffffff'} onChange={(e) => setEditing({ ...editing, textColor: e.target.value })} className="w-full h-10 bg-slate-900 border border-white/10 rounded-lg cursor-pointer" />
                 </FormField>
                 <FormField label="상태">
-                  <select value={editing.status || 'active'} onChange={(e) => setEditing({ ...editing, status: e.target.value as Status })} className="w-full px-3 py-2 border rounded-lg text-sm">
+                  <select value={editing.status || 'active'} onChange={(e) => setEditing({ ...editing, status: e.target.value as Status })} className="w-full px-3 py-2 bg-slate-900 border border-white/10 rounded-lg text-sm text-white placeholder-white/30 focus:outline-none focus:border-violet-400/50">
                     <option value="active">활성</option>
                     <option value="paused">일시 중지</option>
                   </select>

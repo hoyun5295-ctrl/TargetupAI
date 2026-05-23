@@ -237,24 +237,24 @@ export default function EmailCampaignsPage() {
       {/* 편집 모달 */}
       {editing && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50" onClick={() => setEditing(null)}>
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto p-6" onClick={(e) => e.stopPropagation()}>
+          <div className="bg-slate-900 border border-white/10 rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto p-6" onClick={(e) => e.stopPropagation()}>
             <h3 className="text-base font-bold text-white mb-4">신규 Email 캠페인</h3>
             <div className="space-y-3">
               <div>
                 <label className="text-xs text-white/70 block mb-1">이름</label>
-                <input type="text" value={editing.name || ''} onChange={(e) => setEditing({ ...editing, name: e.target.value })} className="w-full px-3 py-2 border rounded-lg text-sm" placeholder="VIP 5월 재구매 안내" maxLength={200} />
+                <input type="text" value={editing.name || ''} onChange={(e) => setEditing({ ...editing, name: e.target.value })} className="w-full px-3 py-2 bg-slate-900 border border-white/10 rounded-lg text-sm text-white placeholder-white/30 focus:outline-none focus:border-blue-400/50" placeholder="VIP 5월 재구매 안내" maxLength={200} />
               </div>
               <div>
                 <label className="text-xs text-white/70 block mb-1">제목 (subject)</label>
-                <input type="text" value={editing.subject || ''} onChange={(e) => setEditing({ ...editing, subject: e.target.value })} className="w-full px-3 py-2 border rounded-lg text-sm" placeholder="VIP 회원님께 드리는 5월 특별 혜택" maxLength={200} />
+                <input type="text" value={editing.subject || ''} onChange={(e) => setEditing({ ...editing, subject: e.target.value })} className="w-full px-3 py-2 bg-slate-900 border border-white/10 rounded-lg text-sm text-white placeholder-white/30 focus:outline-none focus:border-blue-400/50" placeholder="VIP 회원님께 드리는 5월 특별 혜택" maxLength={200} />
               </div>
               <div>
                 <label className="text-xs text-white/70 block mb-1">발신자 이름 (from name)</label>
-                <input type="text" value={editing.fromName || ''} onChange={(e) => setEditing({ ...editing, fromName: e.target.value })} className="w-full px-3 py-2 border rounded-lg text-sm" placeholder="한줄로AI" maxLength={100} />
+                <input type="text" value={editing.fromName || ''} onChange={(e) => setEditing({ ...editing, fromName: e.target.value })} className="w-full px-3 py-2 bg-slate-900 border border-white/10 rounded-lg text-sm text-white placeholder-white/30 focus:outline-none focus:border-blue-400/50" placeholder="한줄로AI" maxLength={100} />
               </div>
               <div>
                 <label className="text-xs text-white/70 block mb-1">HTML 본문</label>
-                <textarea value={editing.htmlBody || ''} onChange={(e) => setEditing({ ...editing, htmlBody: e.target.value })} className="w-full px-3 py-2 border rounded-lg text-xs font-mono resize-none h-40" placeholder="<p>안녕하세요, {{name}}님</p>" />
+                <textarea value={editing.htmlBody || ''} onChange={(e) => setEditing({ ...editing, htmlBody: e.target.value })} className="w-full px-3 py-2 bg-slate-900 border border-white/10 rounded-lg text-xs font-mono resize-none h-40 text-white placeholder-white/30 focus:outline-none focus:border-blue-400/50" placeholder="<p>안녕하세요, {{name}}님</p>" />
                 <div className="text-[10px] text-white/40 mt-1">{`{{name}}`} 등 substitution은 발송 시 recipients에 입력한 값으로 자동 치환됩니다.</div>
               </div>
               <div className="flex items-center gap-2">
@@ -280,9 +280,9 @@ function StatusBadge({ status }: { status: CampaignStatus }) {
   const map: Record<CampaignStatus, { label: string; cls: string }> = {
     draft: { label: '초안', cls: 'bg-white/10 text-white/70' },
     scheduled: { label: '예약됨', cls: 'bg-amber-500/20 text-amber-300' },
-    sending: { label: '발송 중', cls: 'bg-blue-100 text-blue-700' },
-    completed: { label: '완료', cls: 'bg-emerald-100 text-emerald-700' },
-    failed: { label: '실패', cls: 'bg-rose-100 text-rose-700' },
+    sending: { label: '발송 중', cls: 'bg-blue-500/20 text-blue-300 border border-blue-400/30' },
+    completed: { label: '완료', cls: 'bg-emerald-500/20 text-emerald-300 border border-emerald-400/30' },
+    failed: { label: '실패', cls: 'bg-rose-500/20 text-rose-300 border border-rose-400/30' },
   };
   const e = map[status] || { label: status, cls: 'bg-white/10 text-white/70' };
   return <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${e.cls}`}>{e.label}</span>;

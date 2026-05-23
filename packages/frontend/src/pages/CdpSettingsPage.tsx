@@ -441,7 +441,7 @@ export default function CdpSettingsPage() {
 
         {/* 발급된 key+secret (한 번만 노출) */}
         {issuedSecret && (
-          <div className="bg-emerald-50 border-2 border-emerald-300 rounded-xl p-6">
+          <div className="bg-emerald-500/10 border border-emerald-400/30 rounded-xl p-6">
             <div className="flex items-center gap-2 mb-4">
               <Check className="w-5 h-5 text-emerald-300" />
               <h2 className="text-base font-bold text-emerald-100">CDP 키가 발급되었습니다</h2>
@@ -456,7 +456,7 @@ export default function CdpSettingsPage() {
                   <input
                     readOnly
                     value={issuedSecret.cdp_api_key}
-                    className="flex-1 px-3 py-2 bg-white border border-emerald-200 rounded-lg text-xs font-mono text-white/80"
+                    className="flex-1 px-3 py-2 bg-slate-900 border border-white/10 rounded-lg text-xs font-mono text-white/80"
                   />
                   <button
                     onClick={() => copy(issuedSecret.cdp_api_key, 'key')}
@@ -473,7 +473,7 @@ export default function CdpSettingsPage() {
                   <input
                     readOnly
                     value={issuedSecret.cdp_api_secret}
-                    className="flex-1 px-3 py-2 bg-white border-2 border-rose-300 rounded-lg text-xs font-mono text-white/80"
+                    className="flex-1 px-3 py-2 bg-slate-900 border-2 border-rose-400/40 rounded-lg text-xs font-mono text-white/80"
                   />
                   <button
                     onClick={() => copy(issuedSecret.cdp_api_secret, 'secret')}
@@ -487,7 +487,7 @@ export default function CdpSettingsPage() {
             </div>
             <button
               onClick={() => setIssuedSecret(null)}
-              className="mt-5 px-4 py-2 bg-white border border-emerald-300 hover:bg-emerald-100 text-emerald-200 text-sm font-medium rounded-lg"
+              className="mt-5 px-4 py-2 bg-emerald-500/20 border border-emerald-400/40 hover:bg-emerald-500/30 text-emerald-200 text-sm font-medium rounded-lg"
             >
               확인 — 키를 안전한 곳에 저장했습니다
             </button>
@@ -512,7 +512,7 @@ export default function CdpSettingsPage() {
                 </div>
                 {confirmReissue ? (
                   <div className="bg-rose-500/10 border border-rose-400/30 rounded-lg p-4 space-y-3">
-                    <div className="text-sm text-rose-900 font-medium">
+                    <div className="text-sm text-rose-200 font-medium">
                       정말로 재발급하시겠습니까? 기존 키는 즉시 폐기되며, 교체 전까지 자사몰 → 한줄로 sync가 중단됩니다.
                     </div>
                     <div className="flex gap-2">
@@ -525,7 +525,7 @@ export default function CdpSettingsPage() {
                       </button>
                       <button
                         onClick={() => setConfirmReissue(false)}
-                        className="px-4 py-2 bg-white border border-gray-300 hover:bg-white/5 text-white/80 text-sm font-medium rounded-lg"
+                        className="px-4 py-2 bg-white/5 border border-white/10 hover:bg-white/10 text-white/80 text-sm font-medium rounded-lg"
                       >
                         취소
                       </button>
@@ -535,7 +535,7 @@ export default function CdpSettingsPage() {
                   <button
                     onClick={handleIssueKey}
                     disabled={!isAdmin}
-                    className="px-4 py-2 bg-white border border-gray-300 hover:bg-white/5 text-white/80 text-sm font-medium rounded-lg disabled:opacity-40"
+                    className="px-4 py-2 bg-white/5 border border-white/10 hover:bg-white/10 text-white/80 text-sm font-medium rounded-lg disabled:opacity-40"
                   >
                     재발급
                   </button>
@@ -615,7 +615,7 @@ export default function CdpSettingsPage() {
                 {isAdmin && (
                   <button
                     onClick={handleCafe24Disconnect}
-                    className="px-4 py-2 bg-white border border-rose-300 hover:bg-rose-50 text-rose-300 text-sm font-medium rounded-lg flex items-center gap-2"
+                    className="px-4 py-2 bg-rose-500/15 border border-rose-400/40 hover:bg-rose-500/25 text-rose-200 text-sm font-medium rounded-lg flex items-center gap-2"
                   >
                     <Unlink className="w-4 h-4" />
                     연동 해제
@@ -633,7 +633,7 @@ export default function CdpSettingsPage() {
                     value={cafe24MallId}
                     onChange={(e) => setCafe24MallId(e.target.value)}
                     placeholder="예: hanjullo-test"
-                    className="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-transparent"
+                    className="flex-1 px-3 py-2 bg-slate-900 border border-white/10 rounded-lg text-sm text-white placeholder-white/30 focus:outline-none focus:border-orange-400/50"
                   />
                   <button
                     onClick={handleCafe24Connect}
@@ -670,7 +670,7 @@ export default function CdpSettingsPage() {
 
             {/* 발급된 직후 raw secret 1회 노출 */}
             {customIssuedSecret && (
-              <div className="bg-emerald-50 border-2 border-emerald-300 rounded-xl p-5 mb-4">
+              <div className="bg-emerald-500/10 border border-emerald-400/30 rounded-xl p-5 mb-4">
                 <div className="flex items-center gap-2 mb-3">
                   <Check className="w-5 h-5 text-emerald-300" />
                   <h3 className="text-sm font-bold text-emerald-100">webhook_secret이 발급되었습니다</h3>
@@ -685,7 +685,7 @@ export default function CdpSettingsPage() {
                       <input
                         readOnly
                         value={customIssuedSecret.webhook_secret}
-                        className="flex-1 px-3 py-2 bg-white border-2 border-rose-300 rounded-lg text-xs font-mono text-white/80"
+                        className="flex-1 px-3 py-2 bg-slate-900 border-2 border-rose-400/40 rounded-lg text-xs font-mono text-white/80"
                       />
                       <button
                         onClick={() => copyCustom(customIssuedSecret.webhook_secret, 'secret')}
@@ -699,7 +699,7 @@ export default function CdpSettingsPage() {
                   <div>
                     <label className="text-xs font-medium text-emerald-100 block mb-1">Webhook URL (자사몰이 POST 호출하는 endpoint)</label>
                     <div className="flex gap-2">
-                      <input readOnly value={customIssuedSecret.webhook_url} className="flex-1 px-3 py-2 bg-white border border-emerald-200 rounded-lg text-xs font-mono text-white/80" />
+                      <input readOnly value={customIssuedSecret.webhook_url} className="flex-1 px-3 py-2 bg-slate-900 border border-white/10 rounded-lg text-xs font-mono text-white/80" />
                       <button onClick={() => copyCustom(customIssuedSecret.webhook_url, 'url')} className="px-3 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-medium flex items-center gap-1.5">
                         {copyStatusCustom === 'url' ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
                         {copyStatusCustom === 'url' ? '복사됨' : '복사'}
@@ -709,7 +709,7 @@ export default function CdpSettingsPage() {
                   <div>
                     <label className="text-xs font-medium text-emerald-100 block mb-1">Company ID (X-Hanjullo-Company-Id 헤더 값)</label>
                     <div className="flex gap-2">
-                      <input readOnly value={customIssuedSecret.company_id} className="flex-1 px-3 py-2 bg-white border border-emerald-200 rounded-lg text-xs font-mono text-white/80" />
+                      <input readOnly value={customIssuedSecret.company_id} className="flex-1 px-3 py-2 bg-slate-900 border border-white/10 rounded-lg text-xs font-mono text-white/80" />
                       <button onClick={() => copyCustom(customIssuedSecret.company_id, 'companyId')} className="px-3 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-medium flex items-center gap-1.5">
                         {copyStatusCustom === 'companyId' ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
                         {copyStatusCustom === 'companyId' ? '복사됨' : '복사'}
@@ -719,7 +719,7 @@ export default function CdpSettingsPage() {
                 </div>
                 <button
                   onClick={() => setCustomIssuedSecret(null)}
-                  className="mt-4 px-4 py-2 bg-white border border-emerald-300 hover:bg-emerald-100 text-emerald-200 text-sm font-medium rounded-lg"
+                  className="mt-4 px-4 py-2 bg-emerald-500/20 border border-emerald-400/40 hover:bg-emerald-500/30 text-emerald-200 text-sm font-medium rounded-lg"
                 >
                   확인 — 자사몰 자체 서버에 저장했습니다
                 </button>
@@ -747,7 +747,7 @@ export default function CdpSettingsPage() {
                     </div>
                     {customConfirmReissue ? (
                       <div className="bg-rose-500/10 border border-rose-400/30 rounded-lg p-4 space-y-3">
-                        <div className="text-sm text-rose-900 font-medium">
+                        <div className="text-sm text-rose-200 font-medium">
                           정말로 재발급하시겠습니까? 기존 webhook_secret은 즉시 폐기되며, 자사몰 코드의 secret을 새 값으로 교체해야 합니다.
                         </div>
                         <div className="flex gap-2">
@@ -758,7 +758,7 @@ export default function CdpSettingsPage() {
                           >
                             {customIssuing ? '재발급 중...' : '확인 — 재발급 진행'}
                           </button>
-                          <button onClick={() => setCustomConfirmReissue(false)} className="px-4 py-2 bg-white border border-gray-300 hover:bg-white/5 text-white/80 text-sm font-medium rounded-lg">취소</button>
+                          <button onClick={() => setCustomConfirmReissue(false)} className="px-4 py-2 bg-white/5 border border-white/10 hover:bg-white/10 text-white/80 text-sm font-medium rounded-lg">취소</button>
                         </div>
                       </div>
                     ) : (
@@ -766,12 +766,12 @@ export default function CdpSettingsPage() {
                         <button
                           onClick={handleCustomIssue}
                           disabled={!isAdmin}
-                          className="px-4 py-2 bg-white border border-gray-300 hover:bg-white/5 text-white/80 text-sm font-medium rounded-lg disabled:opacity-40"
+                          className="px-4 py-2 bg-white/5 border border-white/10 hover:bg-white/10 text-white/80 text-sm font-medium rounded-lg disabled:opacity-40"
                         >
                           재발급
                         </button>
                         {isAdmin && (
-                          <button onClick={handleCustomRevoke} className="px-4 py-2 bg-white border border-rose-300 hover:bg-rose-50 text-rose-300 text-sm font-medium rounded-lg flex items-center gap-2">
+                          <button onClick={handleCustomRevoke} className="px-4 py-2 bg-rose-500/15 border border-rose-400/40 hover:bg-rose-500/25 text-rose-200 text-sm font-medium rounded-lg flex items-center gap-2">
                             <Unlink className="w-4 h-4" />
                             연동 해제
                           </button>
@@ -781,9 +781,9 @@ export default function CdpSettingsPage() {
                     {!isAdmin && <div className="text-xs text-white/50">webhook_secret 발급/재발급/해제는 회사 관리자만 가능합니다.</div>}
 
                     {/* 코드 샘플 (이미 발급된 회사) */}
-                    <div className="bg-white/5 rounded-lg p-4 mt-2 space-y-2">
+                    <div className="bg-white/5 border border-white/10 rounded-lg p-4 mt-2 space-y-2">
                       <div className="font-medium text-white text-sm">자사몰 자체 서버 구현 흐름 (Node.js 샘플)</div>
-                      <pre className="text-xs font-mono bg-white border border-white/10 rounded p-3 overflow-x-auto">{`import { createHmac } from 'crypto';
+                      <pre className="text-xs font-mono bg-slate-900 border border-white/10 rounded p-3 overflow-x-auto text-white/80">{`import { createHmac } from 'crypto';
 
 const body = JSON.stringify({
   event: 'order.created',
@@ -840,7 +840,7 @@ await fetch('${customInfo.webhookUrl}', {
             <div className="flex items-center gap-2 mb-4">
               <Store className="w-5 h-5 text-emerald-300" />
               <h2 className="text-base font-bold text-white">네이버 스마트스토어 연동</h2>
-              <span className="text-xs bg-emerald-50 text-emerald-300 px-2 py-0.5 rounded-full font-medium">코딩 0건</span>
+              <span className="text-xs bg-emerald-500/20 text-emerald-300 px-2 py-0.5 rounded-full font-medium">코딩 0건</span>
             </div>
 
             {naverStatus?.connected ? (
@@ -863,7 +863,7 @@ await fetch('${customInfo.webhookUrl}', {
                 {isAdmin && (
                   <button
                     onClick={handleNaverDisconnect}
-                    className="px-4 py-2 bg-white border border-rose-300 hover:bg-rose-50 text-rose-300 text-sm font-medium rounded-lg flex items-center gap-2"
+                    className="px-4 py-2 bg-rose-500/15 border border-rose-400/40 hover:bg-rose-500/25 text-rose-200 text-sm font-medium rounded-lg flex items-center gap-2"
                   >
                     <Unlink className="w-4 h-4" />
                     연동 해제
@@ -881,7 +881,7 @@ await fetch('${customInfo.webhookUrl}', {
                     value={naverStoreId}
                     onChange={(e) => setNaverStoreId(e.target.value)}
                     placeholder="예: 12345678"
-                    className="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
+                    className="flex-1 px-3 py-2 bg-slate-900 border border-white/10 rounded-lg text-sm text-white placeholder-white/30 focus:outline-none focus:border-emerald-400/50"
                   />
                   <button
                     onClick={handleNaverConnect}
@@ -921,8 +921,8 @@ await fetch('${customInfo.webhookUrl}', {
                     key={p.provider}
                     className={`p-4 rounded-xl border ${
                       isAvailable
-                        ? 'bg-emerald-50 border-emerald-200'
-                        : 'bg-white/5 border-gray-200'
+                        ? 'bg-emerald-500/10 border-emerald-400/30'
+                        : 'bg-white/5 border-white/10'
                     }`}
                   >
                     <div className="flex items-center justify-between mb-2">
@@ -930,7 +930,7 @@ await fetch('${customInfo.webhookUrl}', {
                       {isAvailable ? (
                         <span className="text-[10px] bg-emerald-600 text-white px-1.5 py-0.5 rounded-full font-medium">사용 가능</span>
                       ) : (
-                        <span className="text-[10px] bg-gray-400 text-white px-1.5 py-0.5 rounded-full font-medium">곧 출시</span>
+                        <span className="text-[10px] bg-white/10 text-white/60 border border-white/10 px-1.5 py-0.5 rounded-full font-medium">곧 출시</span>
                       )}
                     </div>
                     <div className="text-xs text-white/70 space-y-0.5">
@@ -974,7 +974,7 @@ await fetch('${customInfo.webhookUrl}', {
 
               <div className="bg-white/5 rounded-lg p-4">
                 <div className="font-medium text-white mb-2">샘플 — 회원 가입 시 호출 (JavaScript)</div>
-                <pre className="text-xs font-mono bg-white border border-white/10 rounded p-3 overflow-x-auto">{`fetch('https://app.hanjul.ai/api/cdp/identify', {
+                <pre className="text-xs font-mono bg-slate-900 border border-white/10 rounded p-3 overflow-x-auto text-white/80">{`fetch('https://app.hanjul.ai/api/cdp/identify', {
   method: 'POST',
   headers: {
     'Content-Type': 'application/json',
@@ -1006,7 +1006,7 @@ await fetch('${customInfo.webhookUrl}', {
               <button
                 onClick={loadEvents}
                 disabled={eventsLoading}
-                className="text-xs text-indigo-300 hover:text-indigo-800 flex items-center gap-1"
+                className="text-xs text-indigo-300 hover:text-indigo-200 flex items-center gap-1"
               >
                 <RefreshCw className={`w-3 h-3 ${eventsLoading ? 'animate-spin' : ''}`} />
                 새로고침
@@ -1032,7 +1032,7 @@ await fetch('${customInfo.webhookUrl}', {
                     {events.map((ev) => (
                       <tr key={ev.id} className="border-b last:border-0">
                         <td className="px-3 py-2 text-xs text-white/50">{new Date(ev.occurredAt).toLocaleString('ko-KR')}</td>
-                        <td className="px-3 py-2 text-xs font-mono text-indigo-700">{ev.eventName}</td>
+                        <td className="px-3 py-2 text-xs font-mono text-indigo-300">{ev.eventName}</td>
                         <td className="px-3 py-2 text-xs text-white/70">{ev.source}</td>
                         <td className="px-3 py-2 text-xs text-white/70">
                           {ev.customerId ? '회원' : ev.externalId || '-'}
