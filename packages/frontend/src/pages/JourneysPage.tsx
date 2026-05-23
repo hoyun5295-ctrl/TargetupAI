@@ -15,6 +15,8 @@ import {
 import JourneyVariantsEditor from '../components/journey/JourneyVariantsEditor';
 import JourneyMmsUploader from '../components/journey/JourneyMmsUploader';
 import LiquidPreviewModal from '../components/journey/LiquidPreviewModal';
+// ★ D211+ Phase 3-fix (2026-05-23 Harold 명시): native confirm/prompt 영구 폐기 — 커스텀 다크 톤 모달 정합
+import JourneyActionConfirmModal, { JourneyActionMode } from '../components/journey/JourneyActionConfirmModal';
 import AlimtalkChannelPanel, { type AlimtalkSenderProfile, type AlimtalkTemplate, type AlimtalkChannelState } from '../components/alimtalk/AlimtalkChannelPanel';
 import { detectLiquidSyntax, renderLiquid, flattenCustomerForLiquid, SAMPLE_CUSTOMERS } from '../utils/liquid-templating';
 // ★ D210+ Phase 2-fix6 (Harold 명시 2026-05-23): 변수 하이라이트 + 머지 미리보기 컨트롤타워.
@@ -349,6 +351,8 @@ export default function JourneysPage() {
   const [nextStepLoading, setNextStepLoading] = useState<Record<string, boolean>>({});
   // ★ D211+ Phase 3 (2026-05-23 Harold 명시): status 필터 토글 (보관함 영역 분리)
   const [statusFilter, setStatusFilter] = useState<JourneyStatusFilter>('all');
+  // ★ D211+ Phase 3-fix (2026-05-23 Harold 명시): archive/unarchive/delete 영역 커스텀 다크 톤 모달 (native confirm/prompt 폐기)
+  const [actionModal, setActionModal] = useState<{ mode: JourneyActionMode; journeyId: string; journeyName: string } | null>(null);
 
   // One-shot AI 생성 흐름
   const [objective, setObjective] = useState('');
@@ -835,41 +839,53 @@ export default function JourneysPage() {
     }
   };
 
+  // ★ D211+ Phase 3-fix (2026-05-23 Harold 명시): archive/unarchive/delete 영역 = 커스텀 다크 톤 모달 진입만 (실제 처리 = executeAction)
   const handleAction = async (
     journeyId: string,
     action: 'activate' | 'pause' | 'end' | 'archive' | 'unarchive' | 'delete',
   ) => {
+    // archive/unarchive/delete = 커스텀 모달 진입 (native confirm/prompt 영구 폐기)
+    if (action === 'archive' || action === 'unarchive' || action === 'delete') {
+      const journey = journeys.find((j) => j.id === journeyId);
+      setActionModal({ mode: action, journeyId, journeyName: journey?.name || '여정' });
+      return;
+    }
+
+    // activate/pause/end = 옛 매트릭스 (추후 커스텀 모달 통합 영역 — 본 세션 범위 외)
     const confirmMsg =
       action === 'activate' ? '여정을 활성화하시겠습니까? 트리거 조건에 맞는 고객이 진입하고 step별 메시지가 자동 발송됩니다.\n\n광고 자동 검증 4건이 모두 자동 부착됩니다.' :
       action === 'pause' ? '여정을 일시정지하시겠습니까?' :
-      action === 'end' ? '여정을 종료하시겠습니까? 종료 후 재시작 불가합니다.' :
-      action === 'archive' ? '보관함으로 이동하시겠습니까?\n\n· 통계 영역 영구 보존 (월간/분기 성과 비교 가능)\n· 목록에서만 숨겨짐 — "보관함" 필터에서 영구 접근 가능\n· 복원 가능 (언제든 보관함 영역 안 복원 버튼)' :
-      action === 'unarchive' ? '보관함에서 복원하시겠습니까? 목록 영역 다시 노출됩니다.' :
-      /* delete */ '★ 영구 삭제 의무 ★\n\n본 여정 영구 삭제 시 즉시 손실 영역:\n· 모든 step 정의 영역\n· 진입 customer 실행 영역 (journey_executions)\n· 발송 로그 영역 (journey_step_logs)\n· A/B variant 영역 (journey_step_variants)\n\n복구 X. 신중 검토하시고, 통계 영역 보존 필요 시 "보관함" 영역 정합 의무.\n\n진정 영구 삭제하시겠습니까?';
+      '여정을 종료하시겠습니까? 종료 후 재시작 불가합니다.';
     if (!confirm(confirmMsg)) return;
 
-    // ★ D211+ Phase 3 (2026-05-23 Harold 명시): delete 영역 = 2차 confirm (영구 손실 위험 본질)
-    if (action === 'delete') {
-      const secondConfirm = prompt('영구 삭제 확정 의무 — "삭제" 단어를 직접 입력해주세요.');
-      if (secondConfirm?.trim() !== '삭제') {
-        alert('영구 삭제 영역 취소되었습니다.');
-        return;
-      }
-    }
-
-    // method 영역 분기 매트릭스
-    const method = action === 'delete' ? 'DELETE' :
-                   (action === 'archive' || action === 'unarchive') ? 'PATCH' :
-                   'POST';
     try {
-      const res = await fetch(`/api/ai/operator/journeys/${journeyId}${action === 'delete' ? '' : '/' + action}`, {
+      const res = await fetch(`/api/ai/operator/journeys/${journeyId}/${action}`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token()}` },
+      });
+      const data = await res.json();
+      if (data.success) await loadAll();
+      else alert(data.error || '처리 실패');
+    } catch (e: any) {
+      alert(e?.message || '처리 중 오류');
+    }
+  };
+
+  // ★ D211+ Phase 3-fix (2026-05-23 Harold 명시): 커스텀 모달 확인 후 실제 API 호출
+  const executeArchiveAction = async () => {
+    if (!actionModal) return;
+    const { mode, journeyId } = actionModal;
+    const method = mode === 'delete' ? 'DELETE' : 'PATCH';
+    const path = mode === 'delete' ? '' : '/' + mode;
+    try {
+      const res = await fetch(`/api/ai/operator/journeys/${journeyId}${path}`, {
         method,
         headers: { Authorization: `Bearer ${token()}` },
       });
       const data = await res.json();
       if (data.success) {
-        // delete 영역 = 옛 expand 상태 해제
-        if (action === 'delete' && expandedId === journeyId) setExpandedId(null);
+        if (mode === 'delete' && expandedId === journeyId) setExpandedId(null);
+        setActionModal(null);
         await loadAll();
       } else {
         alert(data.error || '처리 실패');
@@ -2266,6 +2282,16 @@ export default function JourneysPage() {
           messageTemplate={liquidPreview.messageTemplate}
           subject={liquidPreview.subject}
           onClose={() => setLiquidPreview(null)}
+        />
+      )}
+
+      {/* ★ D211+ Phase 3-fix (2026-05-23 Harold 명시): archive/unarchive/delete 영역 커스텀 다크 톤 모달 (native confirm/prompt 영구 폐기) */}
+      {actionModal && (
+        <JourneyActionConfirmModal
+          mode={actionModal.mode}
+          journeyName={actionModal.journeyName}
+          onConfirm={executeArchiveAction}
+          onClose={() => setActionModal(null)}
         />
       )}
     </div>
