@@ -32,6 +32,14 @@ export interface CustomerPredictions {
   clickScore: number;          // 0~1
   churnRisk: number;            // 0~1
   purchaseLikelihood: number;   // 0~1
+  // ★ D211+ Predictive 강화 (2026-05-23 Harold 명시): LTV + 7+ 영역 확장 예측
+  ltv60d: number;              // 60일 예상 매출 (원)
+  ltv90d: number;              // 90일 예상 매출 (원)
+  ltv365d: number;             // 365일 예상 매출 (원)
+  nextPurchaseDays: number | null;        // 다음 구매 예상 일수 (D+N)
+  channelPreference: string | null;       // 'sms' / 'lms' / 'mms' / 'kakao'
+  bestHour: number | null;                // 0~23 (최적 발송 시간대)
+  tonePreference: string | null;          // '감성적' / '실용적' / '캐주얼'
   computedAt: Date;
   modelVersion: string;
 }
@@ -66,6 +74,14 @@ export interface PredictionCustomerRow {
   purchaseLikelihood: number;
   lastActivityDays: number | null;
   modelVersion?: string;  // ★ D210+ Phase 3 (2026-05-23): cold vs trained 표시 매트릭스
+  // ★ D211+ Predictive 강화 (2026-05-23 Harold 명시): LTV + 7+ 영역 확장 표시
+  ltv60d?: number;
+  ltv90d?: number;
+  ltv365d?: number;
+  nextPurchaseDays?: number | null;
+  channelPreference?: string | null;
+  bestHour?: number | null;
+  tonePreference?: string | null;
 }
 
 export interface ModelAccuracy {
@@ -93,6 +109,10 @@ const GRADE_AVG_CLICK: Record<string, number> = {
 const GRADE_AVG_PURCHASE: Record<string, number> = {
   'VIP': 0.28, 'Gold': 0.18, 'Silver': 0.12, '일반': 0.08, '신규': 0.15,
 };
+// ★ D211+ Predictive 강화 (2026-05-23 Harold 명시): 등급별 평균 객단가 (cold start fallback)
+const GRADE_AVG_LTV: Record<string, number> = {
+  'VIP': 150000, 'Gold': 80000, 'Silver': 45000, '일반': 30000, '신규': 25000,
+};
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // 1. computePredictions — 단일 customer 예측 점수 계산
@@ -116,7 +136,20 @@ export async function computePredictions(
           WHERE customer_id = c.id AND event_name IN ('order', 'purchase')) AS total_orders,
          (SELECT COUNT(*) FROM journey_step_logs l
           JOIN journey_executions e ON e.id = l.execution_id
-          WHERE e.customer_id = c.id AND l.status = 'sent') AS total_sent
+          WHERE e.customer_id = c.id AND l.status = 'sent') AS total_sent,
+         -- ★ D211+ Predictive 강화 (2026-05-23 Harold 명시): 채널 / 시간대 선호 영역
+         (SELECT s.channel FROM journey_step_logs l
+          JOIN journey_executions e ON e.id = l.execution_id
+          JOIN journey_steps s ON s.id = l.step_id
+          WHERE e.customer_id = c.id AND l.status = 'sent' AND s.channel IS NOT NULL
+          GROUP BY s.channel
+          ORDER BY COUNT(*) DESC
+          LIMIT 1) AS preferred_channel,
+         (SELECT EXTRACT(HOUR FROM (e.occurred_at AT TIME ZONE 'Asia/Seoul'))::int FROM cdp_events e
+          WHERE e.customer_id = c.id AND e.event_name = 'message_click'
+          GROUP BY EXTRACT(HOUR FROM (e.occurred_at AT TIME ZONE 'Asia/Seoul'))
+          ORDER BY COUNT(*) DESC
+          LIMIT 1) AS best_hour
        FROM customers c
        WHERE c.id = $1::uuid AND c.company_id = $2::uuid`,
       [customerId, companyId]
@@ -186,10 +219,46 @@ export async function computePredictions(
       purchaseLikelihood = clip(base + recencyBoost, 0, 1);
     }
 
+    // ━━━━ ★ D211+ Predictive 강화 (2026-05-23 Harold 명시): LTV + 다음 구매 + 채널/시간/톤 선호 ━━━━
+    const totalPurchaseAmount = Number(row.total_purchase_amount) || 0;
+    const avgPurchaseAmount = purchaseCount > 0 ? totalPurchaseAmount / purchaseCount : GRADE_AVG_LTV[grade] || 30000;
+    // LTV: avg × purchase_likelihood × periods
+    //   60d  = avg × purchase_likelihood × (60/30)
+    //   90d  = avg × purchase_likelihood × (90/30)
+    //   365d = avg × purchase_likelihood × (365/30) × recency_factor
+    const recencyFactor = daysSinceActivity <= 30 ? 1.1 : daysSinceActivity <= 90 ? 1.0 : 0.6;
+    const ltv60d = Math.round(avgPurchaseAmount * purchaseLikelihood * 2 * recencyFactor);
+    const ltv90d = Math.round(avgPurchaseAmount * purchaseLikelihood * 3 * recencyFactor);
+    const ltv365d = Math.round(avgPurchaseAmount * purchaseLikelihood * 12 * recencyFactor);
+
+    // 다음 구매 예상 일수 — 옛 구매 영역 평균 간격 영역
+    let nextPurchaseDays: number | null = null;
+    if (purchaseCount >= 2 && row.created_at) {
+      const accountAgeDays = (Date.now() - new Date(row.created_at).getTime()) / (1000 * 60 * 60 * 24);
+      const avgIntervalDays = accountAgeDays / purchaseCount;
+      const sinceLast = daysSinceActivity;
+      nextPurchaseDays = Math.max(0, Math.round(avgIntervalDays - sinceLast));
+    } else if (hasEnoughData) {
+      // 옛 평균 영역 = 60일 / cold start = null
+      nextPurchaseDays = 60;
+    }
+
+    // 채널 / 시간 / 톤 선호 — 옛 journey_step_logs 영역 학습 (단순 영역 — 향후 진화)
+    const channelPreference = row.preferred_channel || null;
+    const bestHour = row.best_hour !== null && row.best_hour !== undefined ? Number(row.best_hour) : null;
+    const tonePreference = null;  // 향후 진화 영역
+
     return {
       clickScore: round3(clickScore),
       churnRisk: round3(churnRisk),
       purchaseLikelihood: round3(purchaseLikelihood),
+      ltv60d,
+      ltv90d,
+      ltv365d,
+      nextPurchaseDays,
+      channelPreference,
+      bestHour,
+      tonePreference,
       computedAt: new Date(),
       modelVersion,
     };
@@ -210,7 +279,10 @@ export async function getOrComputePredictions(
   try {
     // 1) cache 조회
     const cacheRes = await query(
-      `SELECT click_score, churn_risk, purchase_likelihood, computed_at, model_version
+      `SELECT click_score, churn_risk, purchase_likelihood,
+              ltv_60d, ltv_90d, ltv_365d,
+              next_purchase_days, channel_preference, best_hour, tone_preference,
+              computed_at, model_version
        FROM cdp_customer_predictions
        WHERE customer_id = $1::uuid AND company_id = $2::uuid`,
       [customerId, companyId]
@@ -225,6 +297,14 @@ export async function getOrComputePredictions(
           clickScore: Number(row.click_score),
           churnRisk: Number(row.churn_risk),
           purchaseLikelihood: Number(row.purchase_likelihood),
+          // ★ D211+ Predictive 강화 (2026-05-23 Harold 명시): cache 안 LTV + 7+ 영역 통합
+          ltv60d: Number(row.ltv_60d) || 0,
+          ltv90d: Number(row.ltv_90d) || 0,
+          ltv365d: Number(row.ltv_365d) || 0,
+          nextPurchaseDays: row.next_purchase_days !== null ? Number(row.next_purchase_days) : null,
+          channelPreference: row.channel_preference || null,
+          bestHour: row.best_hour !== null && row.best_hour !== undefined ? Number(row.best_hour) : null,
+          tonePreference: row.tone_preference || null,
           computedAt,
           modelVersion: row.model_version,
         };
@@ -249,17 +329,28 @@ async function upsertPredictions(
   try {
     await query(
       `INSERT INTO cdp_customer_predictions
-         (customer_id, company_id, click_score, churn_risk, purchase_likelihood, computed_at, model_version)
-       VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7)
+         (customer_id, company_id, click_score, churn_risk, purchase_likelihood,
+          ltv_60d, ltv_90d, ltv_365d, next_purchase_days, channel_preference, best_hour, tone_preference,
+          computed_at, model_version)
+       VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
        ON CONFLICT (customer_id) DO UPDATE SET
          click_score = EXCLUDED.click_score,
          churn_risk = EXCLUDED.churn_risk,
          purchase_likelihood = EXCLUDED.purchase_likelihood,
+         ltv_60d = EXCLUDED.ltv_60d,
+         ltv_90d = EXCLUDED.ltv_90d,
+         ltv_365d = EXCLUDED.ltv_365d,
+         next_purchase_days = EXCLUDED.next_purchase_days,
+         channel_preference = EXCLUDED.channel_preference,
+         best_hour = EXCLUDED.best_hour,
+         tone_preference = EXCLUDED.tone_preference,
          computed_at = EXCLUDED.computed_at,
          model_version = EXCLUDED.model_version`,
       [
         customerId, companyId,
         predictions.clickScore, predictions.churnRisk, predictions.purchaseLikelihood,
+        predictions.ltv60d, predictions.ltv90d, predictions.ltv365d,
+        predictions.nextPurchaseDays, predictions.channelPreference, predictions.bestHour, predictions.tonePreference,
         predictions.computedAt, predictions.modelVersion,
       ]
     );
@@ -344,6 +435,8 @@ export async function getCompanyPredictionDistribution(
   const topRiskRes = await query(
     `SELECT p.customer_id, c.name, c.phone, c.grade, c.region,
             p.click_score, p.churn_risk, p.purchase_likelihood,
+            p.ltv_60d, p.ltv_90d, p.ltv_365d,
+            p.next_purchase_days, p.channel_preference, p.best_hour, p.tone_preference,
             CASE WHEN c.recent_purchase_date IS NOT NULL THEN
               EXTRACT(EPOCH FROM (NOW() - c.recent_purchase_date)) / 86400
             ELSE NULL END AS last_activity_days
@@ -359,6 +452,8 @@ export async function getCompanyPredictionDistribution(
   const topPotentialRes = await query(
     `SELECT p.customer_id, c.name, c.phone, c.grade, c.region,
             p.click_score, p.churn_risk, p.purchase_likelihood,
+            p.ltv_60d, p.ltv_90d, p.ltv_365d,
+            p.next_purchase_days, p.channel_preference, p.best_hour, p.tone_preference,
             CASE WHEN c.recent_purchase_date IS NOT NULL THEN
               EXTRACT(EPOCH FROM (NOW() - c.recent_purchase_date)) / 86400
             ELSE NULL END AS last_activity_days
@@ -436,6 +531,14 @@ function rowToCustomer(row: any): PredictionCustomerRow {
     purchaseLikelihood: Number(row.purchase_likelihood) || 0,
     lastActivityDays: row.last_activity_days !== null ? Math.floor(Number(row.last_activity_days)) : null,
     modelVersion: row.model_version || undefined,
+    // ★ D211+ Predictive 강화 (2026-05-23 Harold 명시): LTV + 7+ 영역 표시
+    ltv60d: row.ltv_60d !== null && row.ltv_60d !== undefined ? Number(row.ltv_60d) : undefined,
+    ltv90d: row.ltv_90d !== null && row.ltv_90d !== undefined ? Number(row.ltv_90d) : undefined,
+    ltv365d: row.ltv_365d !== null && row.ltv_365d !== undefined ? Number(row.ltv_365d) : undefined,
+    nextPurchaseDays: row.next_purchase_days !== null && row.next_purchase_days !== undefined ? Number(row.next_purchase_days) : null,
+    channelPreference: row.channel_preference || null,
+    bestHour: row.best_hour !== null && row.best_hour !== undefined ? Number(row.best_hour) : null,
+    tonePreference: row.tone_preference || null,
   };
 }
 
@@ -459,6 +562,16 @@ export interface CompanyPredictionSummary {
   insightText: string;                     // AI 시스템 프롬프트 통합용
   // ★ 옛 영역 보존 (legacy 호환) — 옛 코드 (orchestrator 등) totalCustomers 사용 영역 정합
   totalCustomers: number;                  // = totalCustomersInCompany (회사 전체 영역)
+  // ★ D211+ Predictive 강화 (2026-05-23 Harold 명시): LTV + 다음 구매 + 채널 분포 통합
+  avgLtv60d: number;                       // 회사 평균 60일 LTV
+  avgLtv90d: number;                       // 회사 평균 90일 LTV
+  avgLtv365d: number;                      // 회사 평균 365일 LTV
+  totalProjectedLtv60d: number;            // 회사 전체 합산 60일 LTV
+  totalProjectedLtv90d: number;            // 회사 전체 합산 90일 LTV
+  totalProjectedLtv365d: number;           // 회사 전체 합산 365일 LTV
+  highLtvCount: number;                    // ltv_365d > 평균 × 2 영역 (VIP 후보 영역)
+  channelDistribution: Array<{ channel: string; count: number; pct: number }>;
+  bestHourDistribution: Array<{ hour: number; count: number; pct: number }>;
 }
 
 export async function getCompanyPredictionSummary(companyId: string): Promise<CompanyPredictionSummary> {
@@ -482,6 +595,13 @@ export async function getCompanyPredictionSummary(companyId: string): Promise<Co
          AVG(click_score) AS avg_click,
          AVG(churn_risk) AS avg_churn,
          AVG(purchase_likelihood) AS avg_purchase,
+         -- ★ D211+ Predictive 강화 (2026-05-23 Harold 명시): LTV 평균 + 합산 + 고LTV 영역
+         AVG(ltv_60d) AS avg_ltv_60d,
+         AVG(ltv_90d) AS avg_ltv_90d,
+         AVG(ltv_365d) AS avg_ltv_365d,
+         SUM(ltv_60d) AS total_ltv_60d,
+         SUM(ltv_90d) AS total_ltv_90d,
+         SUM(ltv_365d) AS total_ltv_365d,
          MAX(computed_at) AS last_computed
        FROM cdp_customer_predictions
        WHERE company_id = $1::uuid`,
@@ -496,9 +616,56 @@ export async function getCompanyPredictionSummary(companyId: string): Promise<Co
     const avgClick = Number(row.avg_click) || 0.5;
     const avgChurn = Number(row.avg_churn) || 0.5;
     const avgPurchase = Number(row.avg_purchase) || 0.5;
+    const avgLtv60d = Math.round(Number(row.avg_ltv_60d) || 0);
+    const avgLtv90d = Math.round(Number(row.avg_ltv_90d) || 0);
+    const avgLtv365d = Math.round(Number(row.avg_ltv_365d) || 0);
+    const totalLtv60d = Math.round(Number(row.total_ltv_60d) || 0);
+    const totalLtv90d = Math.round(Number(row.total_ltv_90d) || 0);
+    const totalLtv365d = Math.round(Number(row.total_ltv_365d) || 0);
     const lastComputedAt = row.last_computed ? new Date(row.last_computed) : null;
     const predictionCoverage = totalInCompany > 0 ? totalInPredictions / totalInCompany : 0;
     const isAllColdStart = totalInPredictions > 0 && trainedCount === 0;
+
+    // ★ D211+ Predictive 강화 (2026-05-23 Harold 명시): 고 LTV count (avg × 2 영역)
+    const highLtvThreshold = avgLtv365d * 2;
+    const highLtvRes = await query(
+      `SELECT COUNT(*)::int AS cnt FROM cdp_customer_predictions
+       WHERE company_id = $1::uuid AND ltv_365d > $2`,
+      [companyId, highLtvThreshold]
+    );
+    const highLtvCount = Number(highLtvRes.rows[0]?.cnt) || 0;
+
+    // ★ D211+ Predictive 강화 (2026-05-23 Harold 명시): 채널 분포 + 시간대 분포
+    const channelRes = await query(
+      `SELECT channel_preference AS ch, COUNT(*)::int AS cnt
+       FROM cdp_customer_predictions
+       WHERE company_id = $1::uuid AND channel_preference IS NOT NULL
+       GROUP BY channel_preference
+       ORDER BY cnt DESC`,
+      [companyId]
+    );
+    const channelTotal = channelRes.rows.reduce((sum: number, r: any) => sum + Number(r.cnt), 0);
+    const channelDistribution = channelRes.rows.map((r: any) => ({
+      channel: r.ch,
+      count: Number(r.cnt),
+      pct: channelTotal > 0 ? Number(r.cnt) / channelTotal : 0,
+    }));
+
+    const hourRes = await query(
+      `SELECT best_hour AS hr, COUNT(*)::int AS cnt
+       FROM cdp_customer_predictions
+       WHERE company_id = $1::uuid AND best_hour IS NOT NULL
+       GROUP BY best_hour
+       ORDER BY cnt DESC
+       LIMIT 5`,
+      [companyId]
+    );
+    const hourTotal = hourRes.rows.reduce((sum: number, r: any) => sum + Number(r.cnt), 0);
+    const bestHourDistribution = hourRes.rows.map((r: any) => ({
+      hour: Number(r.hr),
+      count: Number(r.cnt),
+      pct: hourTotal > 0 ? Number(r.cnt) / hourTotal : 0,
+    }));
 
     let insightText: string;
     if (totalInPredictions === 0) {
@@ -528,6 +695,16 @@ export async function getCompanyPredictionSummary(companyId: string): Promise<Co
       avgPurchaseLikelihood: round3(avgPurchase),
       insightText,
       totalCustomers: totalInCompany,  // legacy 호환
+      // ★ D211+ Predictive 강화 (2026-05-23 Harold 명시): LTV + 채널 + 시간대 영역
+      avgLtv60d,
+      avgLtv90d,
+      avgLtv365d,
+      totalProjectedLtv60d: totalLtv60d,
+      totalProjectedLtv90d: totalLtv90d,
+      totalProjectedLtv365d: totalLtv365d,
+      highLtvCount,
+      channelDistribution,
+      bestHourDistribution,
     };
   } catch (err: any) {
     console.warn('[Predictive] getCompanyPredictionSummary 오류:', err?.message);
@@ -546,6 +723,15 @@ export async function getCompanyPredictionSummary(companyId: string): Promise<Co
       avgPurchaseLikelihood: 0.5,
       insightText: '예측 점수 조회 오류 — 추후 자동 재계산됩니다.',
       totalCustomers: 0,
+      avgLtv60d: 0,
+      avgLtv90d: 0,
+      avgLtv365d: 0,
+      totalProjectedLtv60d: 0,
+      totalProjectedLtv90d: 0,
+      totalProjectedLtv365d: 0,
+      highLtvCount: 0,
+      channelDistribution: [],
+      bestHourDistribution: [],
     };
   }
 }
@@ -657,6 +843,8 @@ export async function listCompanyPredictionCustomers(
     `SELECT
        p.customer_id, c.name, c.phone, c.grade, c.region,
        p.click_score, p.churn_risk, p.purchase_likelihood, p.model_version,
+       p.ltv_60d, p.ltv_90d, p.ltv_365d,
+       p.next_purchase_days, p.channel_preference, p.best_hour, p.tone_preference,
        CASE WHEN c.recent_purchase_date IS NOT NULL THEN
          EXTRACT(EPOCH FROM (NOW() - c.recent_purchase_date)) / 86400
        ELSE NULL END AS last_activity_days
@@ -693,6 +881,14 @@ function neutralPredictions(): CustomerPredictions {
     clickScore: NEUTRAL_VALUE,
     churnRisk: NEUTRAL_VALUE,
     purchaseLikelihood: NEUTRAL_VALUE,
+    // ★ D211+ Predictive 강화 (2026-05-23 Harold 명시): 중립값 fallback
+    ltv60d: 0,
+    ltv90d: 0,
+    ltv365d: 0,
+    nextPurchaseDays: null,
+    channelPreference: null,
+    bestHour: null,
+    tonePreference: null,
     computedAt: new Date(),
     modelVersion: COLD_START_VERSION,
   };
@@ -785,7 +981,8 @@ export async function computeCompanyPredictionsBatch(
     const r = await query(
       `WITH base_customers AS (
         SELECT
-          c.id, c.grade, c.recent_purchase_date, c.purchase_count, c.created_at
+          c.id, c.grade, c.recent_purchase_date, c.purchase_count, c.created_at,
+          COALESCE(c.total_purchase_amount, 0) AS total_purchase_amount
         FROM customers c
         WHERE c.company_id = $1::uuid
       ),
@@ -815,6 +1012,8 @@ export async function computeCompanyPredictionsBatch(
           c.id,
           COALESCE(c.grade, '일반') AS grade,
           COALESCE(c.purchase_count, 0) AS purchase_count,
+          c.total_purchase_amount,
+          c.created_at,
           cl.last_click_at,
           COALESCE(cl.total_clicks, 0) AS total_clicks,
           COALESCE(s.total_sent, 0) AS total_sent,
@@ -822,7 +1021,18 @@ export async function computeCompanyPredictionsBatch(
             COALESCE(c.recent_purchase_date, '1970-01-01'::timestamptz),
             COALESCE(cl.last_click_at, '1970-01-01'::timestamptz),
             c.created_at
-          ) AS last_activity_at
+          ) AS last_activity_at,
+          -- ★ D211+ Predictive 강화 (2026-05-23 Harold 명시): 평균 객단가 영역
+          CASE WHEN COALESCE(c.purchase_count, 0) > 0
+            THEN c.total_purchase_amount / c.purchase_count
+            ELSE (CASE COALESCE(c.grade, '일반')
+              WHEN 'VIP' THEN 150000
+              WHEN 'Gold' THEN 80000
+              WHEN 'Silver' THEN 45000
+              WHEN '신규' THEN 25000
+              ELSE 30000
+            END)
+          END AS avg_purchase_amount
         FROM base_customers c
         LEFT JOIN click_events cl ON cl.customer_id = c.id
         LEFT JOIN sent_logs s ON s.customer_id = c.id
@@ -886,16 +1096,40 @@ export async function computeCompanyPredictionsBatch(
                     ELSE -0.08
                   END)
               )::numeric))
-          END AS purchase_likelihood
+          END AS purchase_likelihood,
+          -- ★ D211+ Predictive 강화 (2026-05-23 Harold 명시): recency_factor 영역
+          (CASE
+            WHEN EXTRACT(EPOCH FROM (NOW() - last_activity_at)) / 86400 <= 30 THEN 1.1
+            WHEN EXTRACT(EPOCH FROM (NOW() - last_activity_at)) / 86400 <= 90 THEN 1.0
+            ELSE 0.6
+          END) AS recency_factor,
+          avg_purchase_amount,
+          -- ★ D211+ Predictive 강화 (2026-05-23 Harold 명시): next_purchase_days 영역 (평균 영역 간격 - 마지막 활동 영역)
+          CASE
+            WHEN purchase_count >= 2 THEN
+              GREATEST(0, ROUND(
+                ((EXTRACT(EPOCH FROM (NOW() - created_at)) / 86400) / GREATEST(purchase_count, 1))
+                - (EXTRACT(EPOCH FROM (NOW() - last_activity_at)) / 86400)
+              ))::int
+            WHEN total_sent >= 3 THEN 60
+            ELSE NULL
+          END AS next_purchase_days
         FROM enriched
       )
       INSERT INTO cdp_customer_predictions
-        (customer_id, company_id, click_score, churn_risk, purchase_likelihood, computed_at, model_version)
+        (customer_id, company_id, click_score, churn_risk, purchase_likelihood,
+         ltv_60d, ltv_90d, ltv_365d, next_purchase_days,
+         computed_at, model_version)
       SELECT
         id, $1::uuid,
         ROUND(click_score, 3),
         ROUND(churn_risk, 3),
         ROUND(purchase_likelihood, 3),
+        -- ★ D211+ Predictive 강화 (2026-05-23 Harold 명시): LTV 60/90/365일 영역
+        ROUND(avg_purchase_amount * purchase_likelihood * 2 * recency_factor)::int,
+        ROUND(avg_purchase_amount * purchase_likelihood * 3 * recency_factor)::int,
+        ROUND(avg_purchase_amount * purchase_likelihood * 12 * recency_factor)::int,
+        next_purchase_days,
         NOW(),
         CASE WHEN total_sent >= 3 THEN 'v1.0-trained' ELSE 'v1.0-cold' END
       FROM computed
@@ -903,6 +1137,10 @@ export async function computeCompanyPredictionsBatch(
         click_score = EXCLUDED.click_score,
         churn_risk = EXCLUDED.churn_risk,
         purchase_likelihood = EXCLUDED.purchase_likelihood,
+        ltv_60d = EXCLUDED.ltv_60d,
+        ltv_90d = EXCLUDED.ltv_90d,
+        ltv_365d = EXCLUDED.ltv_365d,
+        next_purchase_days = EXCLUDED.next_purchase_days,
         computed_at = EXCLUDED.computed_at,
         model_version = EXCLUDED.model_version
       RETURNING model_version`,

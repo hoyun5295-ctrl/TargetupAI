@@ -98,6 +98,8 @@ import { diagnoseJourneySteps, recommendNextJourneyStep } from '../utils/journey
 import { simulateJourney } from '../utils/journey-simulator';
 import { generateVariantsFromMessage } from '../utils/variant-generator';
 import { getJourneyLiveSnapshot } from '../utils/journey-stats';
+// ★ D211+ Predictive 강화 (2026-05-23 Harold 명시): CT-63 Explainability
+import { explainCustomerPrediction } from '../utils/predictive-explainer';
 
 
 // ★ D79: 인라인 래퍼 제거 → CT-01 buildFilterWhereClauseCompat 직접 사용
@@ -2552,6 +2554,110 @@ router.get('/operator/predictive/customers', async (req: Request, res: Response)
   } catch (err: any) {
     console.error('[Predictive customers] 오류:', err);
     return res.status(500).json({ success: false, error: err?.message || '예측 고객 조회 실패' });
+  }
+});
+
+// ════════════════════════════════════════════════════════════════════
+// ★ D211+ Predictive 강화 (2026-05-23 Harold 명시): Explainability + 1-click 액션 prefill endpoint 2건
+// ════════════════════════════════════════════════════════════════════
+
+// GET /api/ai/operator/predictive/customers/:id/explain — 단일 customer 영역 예측 안내 (SHAP-like + 자연어)
+router.get('/operator/predictive/customers/:id/explain', async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+    const planCtx = await loadPlanContext(companyId);
+    if (!planCtx) return res.status(404).json({ success: false, error: '회사 정보를 찾을 수 없습니다.' });
+    if (!isAiOperatorAllowed(planCtx, req.user)) {
+      return res.status(403).json({ success: false, error: 'AI Operator 진입 권한이 없습니다.', code: 'AI_OPERATOR_GATED' });
+    }
+    const explanation = await explainCustomerPrediction(req.params.id, companyId);
+    return res.json({ success: true, explanation });
+  } catch (err: any) {
+    console.error('[Predictive explain] 오류:', err);
+    const isAuthErr = err?.message?.includes('회사 격리');
+    return res.status(isAuthErr ? 403 : 500).json({ success: false, error: err?.message || '예측 안내 영역 오류' });
+  }
+});
+
+// POST /api/ai/operator/predictive/quick-action — 1-click 액션 prefill (회사 admin 명시 AI Operator 진입)
+//   payload = { actionType: 'churn_recovery' | 'purchase_push' | 'vip_engagement' }
+//   응답 = { objective: 자연어 한 줄, targetFilters: { ... }, suggestedChannel, suggestedTone }
+router.post('/operator/predictive/quick-action', async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+    const planCtx = await loadPlanContext(companyId);
+    if (!planCtx) return res.status(404).json({ success: false, error: '회사 정보를 찾을 수 없습니다.' });
+    if (!isAiOperatorAllowed(planCtx, req.user)) {
+      return res.status(403).json({ success: false, error: 'AI Operator 진입 권한이 없습니다.', code: 'AI_OPERATOR_GATED' });
+    }
+    const { actionType } = req.body || {};
+    const validTypes = ['churn_recovery', 'purchase_push', 'vip_engagement'];
+    if (!validTypes.includes(actionType)) {
+      return res.status(400).json({ success: false, error: 'actionType 영역 churn_recovery / purchase_push / vip_engagement 의무.' });
+    }
+
+    // 영역별 매칭 customer 카운트 + AI Operator orchestrate 영역 prefill 안내
+    let targetCount = 0;
+    let objective = '';
+    let targetFilters: Record<string, any> = {};
+    let suggestedChannel = 'sms';
+    let suggestedTone = '감성적';
+
+    if (actionType === 'churn_recovery') {
+      const r = await query(
+        `SELECT COUNT(*)::int AS cnt FROM cdp_customer_predictions
+         WHERE company_id = $1::uuid AND churn_risk > 0.7`,
+        [companyId]
+      );
+      targetCount = Number(r.rows[0]?.cnt) || 0;
+      objective = `이탈 위험 70%+ 고객 ${targetCount.toLocaleString()}명 영역 회복 캠페인 — 옛 클릭 채널 + 감성 톤 + 옛 구매 카테고리 영역 추천`;
+      targetFilters = { predictive_churn_risk_min: 0.7 };
+      suggestedChannel = 'lms';
+      suggestedTone = '감성적';
+    } else if (actionType === 'purchase_push') {
+      const r = await query(
+        `SELECT COUNT(*)::int AS cnt FROM cdp_customer_predictions
+         WHERE company_id = $1::uuid AND purchase_likelihood > 0.6`,
+        [companyId]
+      );
+      targetCount = Number(r.rows[0]?.cnt) || 0;
+      objective = `구매 가능성 60%+ 고객 ${targetCount.toLocaleString()}명 영역 추천 상품 캠페인 — 옛 next_purchase_days 영역 D-1 시점 발송 권장`;
+      targetFilters = { predictive_purchase_likelihood_min: 0.6 };
+      suggestedChannel = 'sms';
+      suggestedTone = '실용적';
+    } else if (actionType === 'vip_engagement') {
+      // 평균 365일 LTV 영역 × 2 영역 = 고 LTV 영역
+      const avgRes = await query(
+        `SELECT AVG(ltv_365d) AS avg_ltv FROM cdp_customer_predictions WHERE company_id = $1::uuid`,
+        [companyId]
+      );
+      const avgLtv = Number(avgRes.rows[0]?.avg_ltv) || 0;
+      const r = await query(
+        `SELECT COUNT(*)::int AS cnt FROM cdp_customer_predictions
+         WHERE company_id = $1::uuid AND ltv_365d > $2`,
+        [companyId, avgLtv * 2]
+      );
+      targetCount = Number(r.rows[0]?.cnt) || 0;
+      objective = `LTV 상위 ${targetCount.toLocaleString()}명 영역 (평균 ${avgLtv.toLocaleString()}원 × 2 영역 초과) VIP 전용 혜택 + 감사 인사 캠페인`;
+      targetFilters = { predictive_ltv_365d_min: avgLtv * 2 };
+      suggestedChannel = 'kakao';
+      suggestedTone = '감성적';
+    }
+
+    return res.json({
+      success: true,
+      actionType,
+      targetCount,
+      objective,
+      targetFilters,
+      suggestedChannel,
+      suggestedTone,
+    });
+  } catch (err: any) {
+    console.error('[Predictive quick-action] 오류:', err);
+    return res.status(500).json({ success: false, error: err?.message || '1-click 액션 영역 오류' });
   }
 });
 
