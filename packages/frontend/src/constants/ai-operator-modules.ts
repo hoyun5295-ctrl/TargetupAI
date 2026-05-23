@@ -28,13 +28,14 @@ export interface SubModuleCard {
   adminOnly?: boolean;
 }
 
-// ★ D209+ (Harold 명시 2026-05-22): 모든 description 1줄 일관 매트릭스 — 영구운영 ("매일 AI 캠페인 자동 제안" 12자) 기준.
+// ★ D209+ (Harold 명시 2026-05-22): 모든 description 1줄 일관 매트릭스 — AI 자동 마케팅 ("매일 AI 캠페인 자동 제안" 12자) 기준.
 //   카드 높이 정합성 의무 — AI 영역 신뢰 (정합 X = 사용자 의구심).
 // ★ D210+ (Harold 명시 2026-05-23): constants/ 모듈 추출 — AiOperatorPage + AiOperatorWalkthroughModal STEP 6 공통 사용.
+// ★ D212+ (2026-05-23 Harold 명시): "AI 영구운영" → "AI 자동 마케팅" 메뉴명 정정 — 마케팅팀 친화 본질 (ContinuousOperatorPage 정합)
 export const SUB_MODULE_CARDS: SubModuleCard[] = [
   { icon: Workflow,     gradient: 'from-fuchsia-400 to-purple-500', label: '여정 자동화',    description: 'AI 여정 7종 자동 설계',          path: '/ai-journeys' },
   { icon: Brain,        gradient: 'from-violet-400 to-fuchsia-500', label: 'AI 자율 예측',   description: '이탈·구매 AI 자동 예측',         path: '/predictive' },
-  { icon: Brain,        gradient: 'from-indigo-400 to-violet-500',  label: 'AI 영구운영',    description: '매일 AI 캠페인 자동 제안',       path: '/continuous-operator' },
+  { icon: Brain,        gradient: 'from-indigo-400 to-violet-500',  label: 'AI 자동 마케팅', description: '매일 AI 캠페인 자동 제안',       path: '/continuous-operator' },
   { icon: LineChart,    gradient: 'from-fuchsia-400 to-pink-500',   label: '성과리포트',     description: '30일 성과 + 다음 추천',          path: '/performance' },
   { icon: Workflow,     gradient: 'from-emerald-400 to-teal-500',   label: '자사몰 연동',    description: '카페24·네이버 자동 연동',        path: '/cdp-settings' },
   { icon: MessageSquare,gradient: 'from-rose-400 to-pink-500',      label: '인앱메시지',     description: '자사몰 배너·모달 자동 표시',     path: '/inapp-messages',   adminOnly: true },

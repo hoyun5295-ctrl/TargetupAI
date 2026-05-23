@@ -84,6 +84,16 @@ interface ContinuousOperator {
   budgetAlertThreshold?: number;
   budgetSpentMonth?: number;
   budgetSpentToday?: number;
+  // ★ D212+ 정책 (2026-05-23 Harold 명시): 발송 정책 + 검증 + 담당자 영역
+  deliveryPolicy?: 'daily' | 'weekly' | 'monthly';
+  verificationRequiredDays?: number;
+  verificationPassedDays?: number;
+  adminPhoneNumbers?: string[];
+  backupAdminPhone?: string | null;
+  adminAlertChannel?: 'sms' | 'kakao' | 'email';
+  optOutMinutes?: number;
+  spamScoreThreshold?: number;
+  maxSpamRetries?: number;
 }
 
 // ★ D212+ 1+2+3번 (2026-05-23 Harold 명시): AI 학습 영역 요약 응답
@@ -306,6 +316,15 @@ export default function ContinuousOperatorPage() {
           budget_monthly: editing.budgetMonthly,
           budget_daily: editing.budgetDaily,
           budget_alert_threshold: editing.budgetAlertThreshold,
+          // ★ D212+ 정책 (2026-05-23 Harold 명시): 발송 정책 + 검증 + 담당자 영역 전달
+          delivery_policy: editing.deliveryPolicy || 'daily',
+          verification_required_days: editing.verificationRequiredDays ?? 7,
+          admin_phone_numbers: editing.adminPhoneNumbers || [],
+          backup_admin_phone: editing.backupAdminPhone,
+          admin_alert_channel: editing.adminAlertChannel || 'sms',
+          opt_out_minutes: editing.optOutMinutes ?? 5,
+          spam_score_threshold: editing.spamScoreThreshold ?? 30,
+          max_spam_retries: editing.maxSpamRetries ?? 3,
         }),
       });
       const data = await res.json();
@@ -830,6 +849,43 @@ export default function ContinuousOperatorPage() {
                           <span>·</span>
                           <span>제안 {op.totalProposals}건 (승인 {op.totalApproved} / 거부 {op.totalRejected} / 자동 {op.totalAutoExecuted})</span>
                         </div>
+                        {/* ★ D212+ 정책 (2026-05-23 Harold 명시): 검증 영역 상태 표시 (daily 영역만) */}
+                        {(op.deliveryPolicy === 'daily' || !op.deliveryPolicy) && (op.verificationRequiredDays ?? 7) > 0 && (op.verificationPassedDays ?? 0) < (op.verificationRequiredDays ?? 7) && (
+                          <div className="mt-3 p-2.5 bg-amber-500/10 border border-amber-400/30 rounded-lg">
+                            <div className="flex items-center justify-between text-[11px] mb-1.5">
+                              <span className="text-amber-200 font-semibold flex items-center gap-1">
+                                <AlertCircle className="w-3 h-3" /> 검증 영역 안 (회사 admin 명시 컨펌 의무)
+                              </span>
+                              <span className="text-amber-100 font-mono">
+                                {op.verificationPassedDays ?? 0} / {op.verificationRequiredDays ?? 7}일
+                              </span>
+                            </div>
+                            <div className="h-1.5 bg-white/10 rounded-full overflow-hidden">
+                              <div
+                                className="h-full bg-amber-400"
+                                style={{ width: `${Math.min(100, ((op.verificationPassedDays ?? 0) / (op.verificationRequiredDays ?? 7)) * 100)}%` }}
+                              />
+                            </div>
+                            <div className="mt-1.5 text-[10px] text-amber-100/70">
+                              매일 제안 영역 = "오늘 받은 제안" 탭 영역 안 명시 컨펌 의무. 검증 통과 시 자동 발송 전환 본질.
+                            </div>
+                          </div>
+                        )}
+                        {(op.deliveryPolicy === 'daily' || !op.deliveryPolicy) && (op.verificationPassedDays ?? 0) >= (op.verificationRequiredDays ?? 7) && (op.verificationRequiredDays ?? 7) > 0 && (
+                          <div className="mt-3 p-2 bg-emerald-500/10 border border-emerald-400/30 rounded-lg flex items-center gap-2 text-[11px]">
+                            <Check className="w-3 h-3 text-emerald-300" />
+                            <span className="text-emerald-200">검증 영역 통과 ({op.verificationPassedDays}일+) — 매일 자동 발송 진행</span>
+                          </div>
+                        )}
+                        {op.deliveryPolicy && op.deliveryPolicy !== 'daily' && (
+                          <div className="mt-3 p-2 bg-cyan-500/10 border border-cyan-400/30 rounded-lg flex items-center gap-2 text-[11px]">
+                            <Clock className="w-3 h-3 text-cyan-300" />
+                            <span className="text-cyan-200">
+                              {op.deliveryPolicy === 'weekly' ? '매주' : '매달'} 발송 — 발송 {op.optOutMinutes ?? 5}분 전 담당자 안내 → 정지 X 시 자동 발송
+                            </span>
+                          </div>
+                        )}
+
                         {/* ★ D212+ 5번 (2026-05-23 Harold 명시): 예산 영역 시각화 */}
                         {monthBudget > 0 && (
                           <div className="mt-3 p-2.5 bg-slate-950/50 border border-white/10 rounded-lg">
@@ -1124,6 +1180,93 @@ export default function ContinuousOperatorPage() {
                   </select>
                 </div>
               )}
+
+              {/* ★ D212+ 정책 (2026-05-23 Harold 명시): 발송 정책 카드 — 매일/매주/매달 + 검증 + 담당자 옵트아웃 */}
+              <div className="p-3 bg-indigo-500/5 border border-indigo-400/30 rounded-lg space-y-3">
+                <div className="flex items-center gap-1.5 text-xs font-semibold text-indigo-200">
+                  <Brain className="w-3.5 h-3.5" />
+                  발송 정책 (안전 영역)
+                </div>
+                <div>
+                  <label className="text-[11px] text-white/60 block mb-1">발송 주기</label>
+                  <select
+                    value={editing.deliveryPolicy || 'daily'}
+                    onChange={(e) => setEditing({ ...editing, deliveryPolicy: e.target.value as 'daily' | 'weekly' | 'monthly' })}
+                    className="w-full px-3 py-2 bg-slate-950 border border-white/10 rounded-lg text-sm text-white focus:outline-none focus:border-indigo-400/50 transition-colors"
+                  >
+                    <option value="daily">매일 — 옵트아웃 본질 (최초 N일 검증 후 자동)</option>
+                    <option value="weekly">매주 — 발송 2시간 전 담당자 안내 (5분 옵트아웃)</option>
+                    <option value="monthly">매달 — 발송 2시간 전 담당자 안내 (5분 옵트아웃)</option>
+                  </select>
+                </div>
+                {editing.deliveryPolicy === 'daily' && (
+                  <div>
+                    <label className="text-[11px] text-white/60 block mb-1">검증 기간 (일)</label>
+                    <input
+                      type="number"
+                      min="0"
+                      max="30"
+                      value={editing.verificationRequiredDays ?? 7}
+                      onChange={(e) => setEditing({ ...editing, verificationRequiredDays: Number(e.target.value) })}
+                      className="w-full px-3 py-2 bg-slate-950 border border-white/10 rounded-lg text-sm text-white focus:outline-none focus:border-indigo-400/50 transition-colors"
+                    />
+                    <div className="text-[10px] text-white/40 mt-1">처음 N일 = 회사 admin 매일 명시 컨펌 → N일 통과 후 자동 (기본 7일)</div>
+                  </div>
+                )}
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-[11px] text-white/60 block mb-1">담당자 연락처 (쉼표 구분, 최대 3명)</label>
+                    <input
+                      type="text"
+                      value={(editing.adminPhoneNumbers || []).join(', ')}
+                      onChange={(e) => setEditing({
+                        ...editing,
+                        adminPhoneNumbers: e.target.value.split(',').map((s) => s.trim()).filter(Boolean).slice(0, 3),
+                      })}
+                      placeholder="예: 01012345678, 01098765432"
+                      className="w-full px-3 py-2 bg-slate-950 border border-white/10 rounded-lg text-sm text-white placeholder-white/30 focus:outline-none focus:border-indigo-400/50 transition-colors"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[11px] text-white/60 block mb-1">백업 담당자 (휴가 영역)</label>
+                    <input
+                      type="text"
+                      value={editing.backupAdminPhone ?? ''}
+                      onChange={(e) => setEditing({ ...editing, backupAdminPhone: e.target.value.trim() || null })}
+                      placeholder="예: 01087654321"
+                      className="w-full px-3 py-2 bg-slate-950 border border-white/10 rounded-lg text-sm text-white placeholder-white/30 focus:outline-none focus:border-indigo-400/50 transition-colors"
+                    />
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-[11px] text-white/60 block mb-1">담당자 알림 채널</label>
+                    <select
+                      value={editing.adminAlertChannel || 'sms'}
+                      onChange={(e) => setEditing({ ...editing, adminAlertChannel: e.target.value as 'sms' | 'kakao' | 'email' })}
+                      className="w-full px-3 py-2 bg-slate-950 border border-white/10 rounded-lg text-sm text-white focus:outline-none focus:border-indigo-400/50 transition-colors"
+                    >
+                      <option value="sms">SMS</option>
+                      <option value="kakao">카카오 알림톡</option>
+                      <option value="email">이메일</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="text-[11px] text-white/60 block mb-1">옵트아웃 시간 (분)</label>
+                    <input
+                      type="number"
+                      min="1"
+                      max="60"
+                      value={editing.optOutMinutes ?? 5}
+                      onChange={(e) => setEditing({ ...editing, optOutMinutes: Number(e.target.value) })}
+                      className="w-full px-3 py-2 bg-slate-950 border border-white/10 rounded-lg text-sm text-white focus:outline-none focus:border-indigo-400/50 transition-colors"
+                    />
+                  </div>
+                </div>
+                <div className="text-[10px] text-indigo-200/70 leading-relaxed">
+                  매주/매달 영역 = 발송 N분 전 담당자 안내 → 정지 X = 자동 발송 본질. 모든 발송 = 스팸필터테스트 통과 영역만.
+                </div>
+              </div>
 
               {/* ★ D212+ 5번 (2026-05-23 Harold 명시): 비용 제어 영역 — 월 예산 + 일별 한도 + 알림 임계값 */}
               <div className="p-3 bg-emerald-500/5 border border-emerald-400/30 rounded-lg space-y-3">

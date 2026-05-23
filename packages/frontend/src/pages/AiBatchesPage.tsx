@@ -105,7 +105,7 @@ export default function AiBatchesPage() {
           <AlertCircle className="w-4 h-4 mt-0.5 shrink-0" />
           <div>
             <strong>Batch 처리 모드:</strong> 대량 AI 호출(100~10만 요청)을 batch로 처리하면 표준 대비 <strong>50% 비용 절감</strong>됩니다.
-            24시간 SLA (대부분 1시간 이내 완료). Continuous Operator 영구 운영 시 자동 사용됩니다.
+            24시간 SLA (대부분 1시간 이내 완료). AI 자동 마케팅 실행 시 자동 사용됩니다.
           </div>
         </div>
 
@@ -141,7 +141,7 @@ export default function AiBatchesPage() {
           <div className="bg-white border rounded-xl p-12 text-center text-sm text-gray-500">
             아직 처리된 batch가 없습니다.
             <br />
-            <span className="text-xs text-gray-400 mt-2 block">Continuous Operator 영구 운영 + 대량 캠페인 시 자동으로 batch 처리됩니다.</span>
+            <span className="text-xs text-gray-400 mt-2 block">AI 자동 마케팅 + 대량 캠페인 시 자동으로 batch 처리됩니다.</span>
           </div>
         )}
 

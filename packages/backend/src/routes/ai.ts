@@ -23,6 +23,8 @@ import {
   listOperators,
   updateOperator,
   archiveOperator,
+  adminStopProposal,
+  adminConfirmProposal,
   listProposals,
   approveProposal,
   rejectProposal,
@@ -1350,13 +1352,28 @@ router.put('/operator/continuous/:id', async (req: Request, res: Response) => {
     if (userType !== 'company_admin') {
       return res.status(403).json({ success: false, error: '수정은 회사 관리자만 가능합니다.' });
     }
-    const { name, objective, schedule, schedule_time, status, budget_monthly, budget_daily, budget_alert_threshold } = req.body;
-    // ★ D212+ 5번 (2026-05-23 Harold 명시): 비용 제어 강화 patch
+    const {
+      name, objective, schedule, schedule_time, status,
+      budget_monthly, budget_daily, budget_alert_threshold,
+      // ★ D212+ 정책 (2026-05-23 Harold 명시)
+      delivery_policy, verification_required_days,
+      admin_phone_numbers, backup_admin_phone, admin_alert_channel,
+      opt_out_minutes, spam_score_threshold, max_spam_retries,
+    } = req.body;
     const operator = await updateOperator(companyId, req.params.id, {
       name, objective, schedule, scheduleTime: schedule_time, status,
       budgetMonthly: budget_monthly === undefined ? undefined : (budget_monthly === null ? null : Number(budget_monthly)),
       budgetDaily: budget_daily === undefined ? undefined : (budget_daily === null ? null : Number(budget_daily)),
       budgetAlertThreshold: budget_alert_threshold !== undefined ? Number(budget_alert_threshold) : undefined,
+      // ★ D212+ 정책 (2026-05-23 Harold 명시): 발송 정책 + 검증 + 담당자 영역
+      deliveryPolicy: ['daily', 'weekly', 'monthly'].includes(delivery_policy) ? delivery_policy : undefined,
+      verificationRequiredDays: verification_required_days !== undefined ? Number(verification_required_days) : undefined,
+      adminPhoneNumbers: Array.isArray(admin_phone_numbers) ? admin_phone_numbers.filter((p: any) => typeof p === 'string' && p.trim()) : undefined,
+      backupAdminPhone: backup_admin_phone === undefined ? undefined : (backup_admin_phone === null ? null : String(backup_admin_phone)),
+      adminAlertChannel: ['sms', 'kakao', 'email'].includes(admin_alert_channel) ? admin_alert_channel : undefined,
+      optOutMinutes: opt_out_minutes !== undefined ? Number(opt_out_minutes) : undefined,
+      spamScoreThreshold: spam_score_threshold !== undefined ? Number(spam_score_threshold) : undefined,
+      maxSpamRetries: max_spam_retries !== undefined ? Number(max_spam_retries) : undefined,
     });
     if (!operator) return res.status(404).json({ success: false, error: 'Operator를 찾을 수 없습니다.' });
     return res.json({ success: true, operator });
@@ -1572,6 +1589,44 @@ router.post('/operator/proposals/:id/reject', async (req: Request, res: Response
   } catch (err: any) {
     console.error('[Proposals reject] 오류:', err);
     return res.status(500).json({ success: false, error: err?.message || '거부 실패' });
+  }
+});
+
+// ★ D212+ 정책 (2026-05-23 Harold 명시): 담당자 정지 endpoint — AI 학습 통합
+//   payload = { reason: 'spam_suspicion' | 'content_correction' | 'no_send' | 'other', detail?: string }
+router.post('/operator/proposals/:id/admin-stop', async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+    const { reason, detail } = req.body || {};
+    const validReasons = ['spam_suspicion', 'content_correction', 'no_send', 'other'];
+    if (!validReasons.includes(reason)) {
+      return res.status(400).json({ success: false, error: '정지 사유 영역 의무 (spam_suspicion / content_correction / no_send / other).' });
+    }
+    const ok = await adminStopProposal(companyId, req.params.id, { reason, detail });
+    if (!ok) return res.status(404).json({ success: false, error: '제안 영역 안 찾을 수 없습니다.' });
+    return res.json({ success: true });
+  } catch (err: any) {
+    console.error('[Proposals admin-stop] 오류:', err);
+    return res.status(500).json({ success: false, error: err?.message || '정지 영역 오류' });
+  }
+});
+
+// ★ D212+ 정책 (2026-05-23 Harold 명시): 회사 admin 매일 컨펌 endpoint — 검증 영역 안 누적
+router.post('/operator/proposals/:id/admin-confirm', async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    const userType = req.user?.userType;
+    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+    if (userType !== 'company_admin') {
+      return res.status(403).json({ success: false, error: '회사 관리자만 컨펌 가능합니다.' });
+    }
+    const result = await adminConfirmProposal(companyId, req.params.id);
+    if (!result) return res.status(404).json({ success: false, error: '제안 영역 안 찾을 수 없습니다.' });
+    return res.json({ success: true, verificationDays: result.verificationDays });
+  } catch (err: any) {
+    console.error('[Proposals admin-confirm] 오류:', err);
+    return res.status(500).json({ success: false, error: err?.message || '컨펌 영역 오류' });
   }
 });
 
