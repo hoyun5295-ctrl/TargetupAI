@@ -63,6 +63,9 @@ import {
   activateJourney,
   pauseJourney,
   endJourney,
+  archiveJourney,
+  unarchiveJourney,
+  deleteJourney,
   listJourneys,
   getJourneyDetail,
   updateJourneyStep,
@@ -2342,6 +2345,70 @@ router.post('/operator/journeys/:id/end', async (req: Request, res: Response) =>
   } catch (err: any) {
     console.error('[Journeys end] 오류:', err);
     return res.status(500).json({ success: false, error: err?.message || '종료 실패' });
+  }
+});
+
+// ════════════════════════════════════════════════════════════════════
+// ★ D211+ Phase 3 (2026-05-23 Harold 명시): Archive (soft delete) + Hard Delete endpoint 3건
+//   - PATCH /operator/journeys/:id/archive — 보관함 이동
+//   - PATCH /operator/journeys/:id/unarchive — 보관함 복원
+//   - DELETE /operator/journeys/:id — 영구 삭제 (FK CASCADE)
+// ════════════════════════════════════════════════════════════════════
+
+// PATCH /api/ai/operator/journeys/:id/archive — 보관함 이동 (soft delete)
+router.patch('/operator/journeys/:id/archive', async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+    const planCtx = await loadPlanContext(companyId);
+    if (!planCtx) return res.status(404).json({ success: false, error: '회사 정보를 찾을 수 없습니다.' });
+    if (!isAiOperatorAllowed(planCtx, req.user)) {
+      return res.status(403).json({ success: false, error: 'AI Operator 진입 권한이 없습니다.', code: 'AI_OPERATOR_GATED' });
+    }
+    const ok = await archiveJourney(companyId, req.params.id);
+    if (!ok) return res.status(409).json({ success: false, error: '보관 영역 이동 X — 활성 여정 또는 이미 보관함 영역.' });
+    return res.json({ success: true });
+  } catch (err: any) {
+    console.error('[Journeys archive] 오류:', err);
+    return res.status(500).json({ success: false, error: err?.message || '보관 이동 실패' });
+  }
+});
+
+// PATCH /api/ai/operator/journeys/:id/unarchive — 보관함 복원
+router.patch('/operator/journeys/:id/unarchive', async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+    const planCtx = await loadPlanContext(companyId);
+    if (!planCtx) return res.status(404).json({ success: false, error: '회사 정보를 찾을 수 없습니다.' });
+    if (!isAiOperatorAllowed(planCtx, req.user)) {
+      return res.status(403).json({ success: false, error: 'AI Operator 진입 권한이 없습니다.', code: 'AI_OPERATOR_GATED' });
+    }
+    const ok = await unarchiveJourney(companyId, req.params.id);
+    if (!ok) return res.status(404).json({ success: false, error: '보관함 영역 안 찾을 수 없습니다.' });
+    return res.json({ success: true });
+  } catch (err: any) {
+    console.error('[Journeys unarchive] 오류:', err);
+    return res.status(500).json({ success: false, error: err?.message || '복원 실패' });
+  }
+});
+
+// DELETE /api/ai/operator/journeys/:id — 영구 삭제 (회사 admin 강력 confirm 후)
+router.delete('/operator/journeys/:id', async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+    const planCtx = await loadPlanContext(companyId);
+    if (!planCtx) return res.status(404).json({ success: false, error: '회사 정보를 찾을 수 없습니다.' });
+    if (!isAiOperatorAllowed(planCtx, req.user)) {
+      return res.status(403).json({ success: false, error: 'AI Operator 진입 권한이 없습니다.', code: 'AI_OPERATOR_GATED' });
+    }
+    const result = await deleteJourney(companyId, req.params.id);
+    if (!result.ok) return res.status(409).json({ success: false, error: result.reason || '영구 삭제 실패' });
+    return res.json({ success: true });
+  } catch (err: any) {
+    console.error('[Journeys delete] 오류:', err);
+    return res.status(500).json({ success: false, error: err?.message || '영구 삭제 실패' });
   }
 });
 

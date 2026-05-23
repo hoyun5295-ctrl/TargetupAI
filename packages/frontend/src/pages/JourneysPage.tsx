@@ -9,6 +9,8 @@ import {
   Workflow, Brain, LayoutGrid, CheckCircle2,
   // ★ D210+ Phase 3 (2026-05-23 Harold 명시): 자동 재진입 토글 + funnel 시각화 + 다중 미리보기 아이콘
   RotateCcw, Activity, MousePointerClick, Filter as FilterIcon, TrendingUp, AlertTriangle, Eye,
+  // ★ D211+ Phase 3 (2026-05-23 Harold 명시): 보관함 + 영구 삭제 아이콘
+  Archive, ArchiveRestore,
 } from 'lucide-react';
 import JourneyVariantsEditor from '../components/journey/JourneyVariantsEditor';
 import JourneyMmsUploader from '../components/journey/JourneyMmsUploader';
@@ -63,7 +65,12 @@ interface JourneyRow {
   paused_at: string | null;
   pause_reason: string | null;
   created_at: string;
+  // ★ D211+ Phase 3 (2026-05-23 Harold 명시): 보관함 영역 (soft delete)
+  archived_at?: string | null;
 }
+
+// ★ D211+ Phase 3 (2026-05-23 Harold 명시): status 필터 매트릭스 (전체/활성/일시정지/종료/보관함)
+type JourneyStatusFilter = 'all' | 'active' | 'paused' | 'ended' | 'archived';
 
 interface StepRow {
   id: string;
@@ -340,6 +347,8 @@ export default function JourneysPage() {
   const [diagnosisLoading, setDiagnosisLoading] = useState<Record<string, boolean>>({});
   const [nextStepMap, setNextStepMap] = useState<Record<string, NextStepRecommendation>>({});
   const [nextStepLoading, setNextStepLoading] = useState<Record<string, boolean>>({});
+  // ★ D211+ Phase 3 (2026-05-23 Harold 명시): status 필터 토글 (보관함 영역 분리)
+  const [statusFilter, setStatusFilter] = useState<JourneyStatusFilter>('all');
 
   // One-shot AI 생성 흐름
   const [objective, setObjective] = useState('');
@@ -376,8 +385,10 @@ export default function JourneysPage() {
     setLoading(true);
     setError(null);
     try {
+      // ★ D211+ Phase 3 (2026-05-23 Harold 명시): statusFilter 영역 backend 전달 — archived 영역 분리
+      const statusParam = statusFilter === 'all' ? 'all' : statusFilter;
       const [jr, cr] = await Promise.all([
-        fetch('/api/ai/operator/journeys?status=all', { headers: { Authorization: `Bearer ${token()}` } }),
+        fetch(`/api/ai/operator/journeys?status=${statusParam}`, { headers: { Authorization: `Bearer ${token()}` } }),
         fetch('/api/ai/operator/journeys-callback-numbers', { headers: { Authorization: `Bearer ${token()}` } }),
       ]);
       const jd = await jr.json();
@@ -396,7 +407,8 @@ export default function JourneysPage() {
     }
   };
 
-  useEffect(() => { loadAll(); }, []);
+  // ★ D211+ Phase 3 (2026-05-23 Harold 명시): statusFilter 변경 시 자동 재조회
+  useEffect(() => { loadAll(); }, [statusFilter]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ★ D189 #2 (2026-05-22): 알림톡 발신프로필 + 템플릿 + 활성 필드 fetch (review view 알림톡 step UI용)
   useEffect(() => {
@@ -823,20 +835,45 @@ export default function JourneysPage() {
     }
   };
 
-  const handleAction = async (journeyId: string, action: 'activate' | 'pause' | 'end') => {
+  const handleAction = async (
+    journeyId: string,
+    action: 'activate' | 'pause' | 'end' | 'archive' | 'unarchive' | 'delete',
+  ) => {
     const confirmMsg =
       action === 'activate' ? '여정을 활성화하시겠습니까? 트리거 조건에 맞는 고객이 진입하고 step별 메시지가 자동 발송됩니다.\n\n광고 자동 검증 4건이 모두 자동 부착됩니다.' :
       action === 'pause' ? '여정을 일시정지하시겠습니까?' :
-      '여정을 종료하시겠습니까? 종료 후 재시작 불가합니다.';
+      action === 'end' ? '여정을 종료하시겠습니까? 종료 후 재시작 불가합니다.' :
+      action === 'archive' ? '보관함으로 이동하시겠습니까?\n\n· 통계 영역 영구 보존 (월간/분기 성과 비교 가능)\n· 목록에서만 숨겨짐 — "보관함" 필터에서 영구 접근 가능\n· 복원 가능 (언제든 보관함 영역 안 복원 버튼)' :
+      action === 'unarchive' ? '보관함에서 복원하시겠습니까? 목록 영역 다시 노출됩니다.' :
+      /* delete */ '★ 영구 삭제 의무 ★\n\n본 여정 영구 삭제 시 즉시 손실 영역:\n· 모든 step 정의 영역\n· 진입 customer 실행 영역 (journey_executions)\n· 발송 로그 영역 (journey_step_logs)\n· A/B variant 영역 (journey_step_variants)\n\n복구 X. 신중 검토하시고, 통계 영역 보존 필요 시 "보관함" 영역 정합 의무.\n\n진정 영구 삭제하시겠습니까?';
     if (!confirm(confirmMsg)) return;
+
+    // ★ D211+ Phase 3 (2026-05-23 Harold 명시): delete 영역 = 2차 confirm (영구 손실 위험 본질)
+    if (action === 'delete') {
+      const secondConfirm = prompt('영구 삭제 확정 의무 — "삭제" 단어를 직접 입력해주세요.');
+      if (secondConfirm?.trim() !== '삭제') {
+        alert('영구 삭제 영역 취소되었습니다.');
+        return;
+      }
+    }
+
+    // method 영역 분기 매트릭스
+    const method = action === 'delete' ? 'DELETE' :
+                   (action === 'archive' || action === 'unarchive') ? 'PATCH' :
+                   'POST';
     try {
-      const res = await fetch(`/api/ai/operator/journeys/${journeyId}/${action}`, {
-        method: 'POST',
+      const res = await fetch(`/api/ai/operator/journeys/${journeyId}${action === 'delete' ? '' : '/' + action}`, {
+        method,
         headers: { Authorization: `Bearer ${token()}` },
       });
       const data = await res.json();
-      if (data.success) await loadAll();
-      else alert(data.error || '처리 실패');
+      if (data.success) {
+        // delete 영역 = 옛 expand 상태 해제
+        if (action === 'delete' && expandedId === journeyId) setExpandedId(null);
+        await loadAll();
+      } else {
+        alert(data.error || '처리 실패');
+      }
     } catch (e: any) {
       alert(e?.message || '처리 중 오류');
     }
@@ -972,9 +1009,34 @@ export default function JourneysPage() {
               </div>
             </div>
 
-            {/* 활성 여정 목록 */}
+            {/* ★ D211+ Phase 3 (2026-05-23 Harold 명시): 여정 목록 + status 필터 토글 (보관함 영역 분리) */}
             <div>
-              <h3 className="text-sm font-semibold text-white/80 mb-2">활성 여정 ({journeys.length})</h3>
+              <div className="flex items-center justify-between mb-2 flex-wrap gap-2">
+                <h3 className="text-sm font-semibold text-white/80">
+                  {statusFilter === 'archived' ? '보관함' : '여정 목록'} ({journeys.length})
+                </h3>
+                <div className="flex items-center gap-1 flex-wrap">
+                  {([
+                    { key: 'all', label: '전체' },
+                    { key: 'active', label: '활성' },
+                    { key: 'paused', label: '일시정지' },
+                    { key: 'ended', label: '종료' },
+                    { key: 'archived', label: '보관함' },
+                  ] as Array<{ key: JourneyStatusFilter; label: string }>).map((f) => (
+                    <button
+                      key={f.key}
+                      onClick={() => setStatusFilter(f.key)}
+                      className={`px-2.5 py-1 rounded text-[11px] font-medium transition-colors ${
+                        statusFilter === f.key
+                          ? 'bg-violet-500/30 text-violet-100 border border-violet-400/50'
+                          : 'bg-white/5 hover:bg-white/10 text-white/60 border border-white/10'
+                      }`}
+                    >
+                      {f.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
               {loading && (
                 <div className="flex items-center justify-center py-12">
                   <Loader2 className="w-6 h-6 animate-spin text-white/40" />
@@ -1056,19 +1118,38 @@ export default function JourneysPage() {
                             <button onClick={(e) => { e.stopPropagation(); navigate(`/ai-journeys/${j.id}/stats`); }} className="p-2 rounded bg-violet-500/20 hover:bg-violet-500/30 text-violet-300" title="통계 분석">
                               <BarChart3 className="w-4 h-4" />
                             </button>
-                            {(j.status === 'draft' || j.status === 'paused') && (
+                            {/* ★ D211+ Phase 3 (2026-05-23 Harold 명시): archived 영역 안 unarchive 영역 진입 + 그 외 영역 옛 매트릭스 정합 */}
+                            {!j.archived_at && (j.status === 'draft' || j.status === 'paused') && (
                               <button onClick={(e) => { e.stopPropagation(); handleAction(j.id, 'activate'); }} className="p-2 rounded bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300" title="활성화">
                                 <Play className="w-4 h-4" />
                               </button>
                             )}
-                            {j.status === 'active' && (
+                            {!j.archived_at && j.status === 'active' && (
                               <button onClick={(e) => { e.stopPropagation(); handleAction(j.id, 'pause'); }} className="p-2 rounded bg-amber-500/20 hover:bg-amber-500/30 text-amber-300" title="일시정지">
                                 <Pause className="w-4 h-4" />
                               </button>
                             )}
-                            {j.status !== 'ended' && (
+                            {!j.archived_at && j.status !== 'ended' && (
                               <button onClick={(e) => { e.stopPropagation(); handleAction(j.id, 'end'); }} className="p-2 rounded bg-slate-700 hover:bg-slate-600 text-slate-300" title="종료">
                                 <Power className="w-4 h-4" />
+                              </button>
+                            )}
+                            {/* ★ D211+ Phase 3 (2026-05-23 Harold 명시): 보관함 이동 — active 영역 차단 (먼저 일시정지/종료 의무) */}
+                            {!j.archived_at && j.status !== 'active' && (
+                              <button onClick={(e) => { e.stopPropagation(); handleAction(j.id, 'archive'); }} className="p-2 rounded bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-300" title="보관함으로 이동">
+                                <Archive className="w-4 h-4" />
+                              </button>
+                            )}
+                            {/* ★ D211+ Phase 3 (2026-05-23 Harold 명시): 보관함 복원 — archived 영역만 */}
+                            {j.archived_at && (
+                              <button onClick={(e) => { e.stopPropagation(); handleAction(j.id, 'unarchive'); }} className="p-2 rounded bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-300" title="보관함에서 복원">
+                                <ArchiveRestore className="w-4 h-4" />
+                              </button>
+                            )}
+                            {/* ★ D211+ Phase 3 (2026-05-23 Harold 명시): 영구 삭제 — active 영역 차단 + 2차 confirm "삭제" 단어 입력 의무 */}
+                            {j.status !== 'active' && (
+                              <button onClick={(e) => { e.stopPropagation(); handleAction(j.id, 'delete'); }} className="p-2 rounded bg-rose-500/20 hover:bg-rose-500/30 text-rose-300" title="영구 삭제 (복구 불가)">
+                                <Trash2 className="w-4 h-4" />
                               </button>
                             )}
                             {isExpanded ? <ChevronUp className="w-4 h-4 text-white/40" /> : <ChevronDown className="w-4 h-4 text-white/40" />}

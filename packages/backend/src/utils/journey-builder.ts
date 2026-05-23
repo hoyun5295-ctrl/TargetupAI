@@ -776,11 +776,79 @@ export async function endJourney(companyId: string, journeyId: string): Promise<
 }
 
 // ════════════════════════════════════════════════════════════════════
+// ★ D211+ Phase 3 (2026-05-23 Harold 명시): Archive (soft delete) + Hard Delete 매트릭스
+//
+//   본질:
+//     - archive  = journeys.archived_at = NOW()  → listJourneys default 제외 (통계 보존)
+//     - unarchive = journeys.archived_at = NULL  → 보관함 영역 안 복원
+//     - delete   = DB row 영구 제거 (FK CASCADE — journey_steps / journey_executions / journey_step_logs / journey_step_variants)
+//
+//   안전 매트릭스:
+//     - active 여정 = archive/delete 차단 (먼저 pause/end 의무)
+//     - archive = 모든 status 영역 가능 (active 제외)
+//     - delete = 영구 손실 영역 — 회사 admin 강력 confirm 의무 (frontend 영역)
+//     - cdp_events 안 journey_id 컬럼 X = 통계 영역 손실 X 정합
+// ════════════════════════════════════════════════════════════════════
+
+export async function archiveJourney(companyId: string, journeyId: string): Promise<boolean> {
+  const r = await query(
+    `UPDATE journeys SET archived_at = NOW(), updated_at = NOW()
+     WHERE id = $1::uuid AND company_id = $2::uuid
+       AND status != 'active'
+       AND archived_at IS NULL
+     RETURNING id`,
+    [journeyId, companyId]
+  );
+  return r.rows.length > 0;
+}
+
+export async function unarchiveJourney(companyId: string, journeyId: string): Promise<boolean> {
+  const r = await query(
+    `UPDATE journeys SET archived_at = NULL, updated_at = NOW()
+     WHERE id = $1::uuid AND company_id = $2::uuid
+       AND archived_at IS NOT NULL
+     RETURNING id`,
+    [journeyId, companyId]
+  );
+  return r.rows.length > 0;
+}
+
+export async function deleteJourney(companyId: string, journeyId: string): Promise<{ ok: boolean; reason?: string }> {
+  // active 여정 영역 차단 — 먼저 pause/end 의무
+  const status = await query(
+    `SELECT status FROM journeys WHERE id = $1::uuid AND company_id = $2::uuid`,
+    [journeyId, companyId]
+  );
+  if (status.rows.length === 0) {
+    return { ok: false, reason: '여정을 찾을 수 없습니다.' };
+  }
+  if (status.rows[0].status === 'active') {
+    return { ok: false, reason: '활성 여정은 영구 삭제 X — 먼저 일시정지 또는 종료해주세요.' };
+  }
+  // FK CASCADE = journey_steps / journey_executions / journey_step_logs / journey_step_variants 자동 삭제
+  const r = await query(
+    `DELETE FROM journeys WHERE id = $1::uuid AND company_id = $2::uuid RETURNING id`,
+    [journeyId, companyId]
+  );
+  return { ok: r.rows.length > 0 };
+}
+
+// ════════════════════════════════════════════════════════════════════
 // 조회
 // ════════════════════════════════════════════════════════════════════
 
-export async function listJourneys(companyId: string, status?: JourneyStatus | 'all') {
-  const where = status && status !== 'all' ? `AND status = '${status}'` : '';
+export async function listJourneys(companyId: string, status?: JourneyStatus | 'all' | 'archived') {
+  // ★ D211+ Phase 3 (2026-05-23 Harold 명시): archived 영역 분리 매트릭스
+  //   - status === 'archived' → archived_at IS NOT NULL (보관함 전용)
+  //   - 그 외 → archived_at IS NULL (default — 옛 매트릭스 영역 영구 보존)
+  let where = '';
+  if (status === 'archived') {
+    where = `AND archived_at IS NOT NULL`;
+  } else if (status && status !== 'all') {
+    where = `AND status = '${status}' AND archived_at IS NULL`;
+  } else {
+    where = `AND archived_at IS NULL`;
+  }
   const r = await query(
     `SELECT * FROM journeys
      WHERE company_id = $1::uuid ${where}
