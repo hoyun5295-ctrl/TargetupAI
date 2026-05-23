@@ -1,6 +1,9 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { AlertCircle, ArrowLeft, Brain, Check, ChevronDown, ChevronUp, Clock, Edit2, GitMerge, Loader2, Play, Plus, RefreshCw, Sparkles, Target, Trash2, X, Zap } from 'lucide-react';
+// ★ D212+ (2026-05-23 Harold 명시): native confirm/alert 영구 폐기 — ConfirmModal + Toast 정합
+import ConfirmModal, { ConfirmState } from '../components/ConfirmModal';
+import { useToast } from '../components/ToastProvider';
 
 // ★ D176 (2026-05-19): Continuous Agentic Operator — AI는 매일 제안서 생성 / 실행은 사용자 동의 후
 //   영구 원칙: AI 단독 실행 X / Zero-Count 차단 / ENT 자동 실행 옵션 default OFF
@@ -115,6 +118,10 @@ export default function ContinuousOperatorPage() {
   const [analyzing, setAnalyzing] = useState(false);
   const [multiGoalAnalysis, setMultiGoalAnalysis] = useState<MultiGoalAnalysis | null>(null);
 
+  // ★ D212+ (2026-05-23 Harold 명시): 커스텀 ConfirmModal state + Toast 정합
+  const [confirmState, setConfirmState] = useState<ConfirmState | null>(null);
+  const toast = useToast();
+
   const token = () => localStorage.getItem('token');
 
   // ★ D177: proposal expand 시점에 variants + Bandit 추천 로드
@@ -149,7 +156,7 @@ export default function ContinuousOperatorPage() {
   const handleMultiGoalAnalyze = async () => {
     const validGoals = multiGoals.filter((g) => g.name.trim().length > 0);
     if (validGoals.length < 2) {
-      alert('다중 목표 분석은 2건 이상 입력해야 합니다.');
+      toast.warning('2개 이상의 목표를 입력해주세요.');
       return;
     }
     setAnalyzing(true);
@@ -163,11 +170,12 @@ export default function ContinuousOperatorPage() {
       const data = await res.json();
       if (data.success) {
         setMultiGoalAnalysis(data.analysis);
+        toast.success('충돌 분석이 완료되었습니다.');
       } else {
-        alert(data.error || '충돌 분석 실패');
+        toast.error(data.error || '충돌 분석에 실패했습니다.');
       }
     } catch (e: any) {
-      alert(e?.message || '분석 중 오류');
+      toast.error(e?.message || '분석 중 오류가 발생했습니다.');
     } finally {
       setAnalyzing(false);
     }
@@ -209,7 +217,7 @@ export default function ContinuousOperatorPage() {
 
   const handleSave = async () => {
     if (!editing?.name?.trim() || !editing?.objective?.trim()) {
-      alert('이름과 목표(자연어)는 필수입니다.');
+      toast.warning('이름과 마케팅 목표는 필수입니다.');
       return;
     }
     setSaving(true);
@@ -232,91 +240,130 @@ export default function ContinuousOperatorPage() {
       const data = await res.json();
       if (data.success) {
         setEditing(null);
+        toast.success(editing.id ? '자동 마케팅이 수정되었습니다.' : '자동 마케팅이 시작되었습니다.');
         await loadAll();
       } else {
         setError(data.error || '저장 실패');
+        toast.error(data.error || '저장에 실패했습니다.');
       }
     } catch (e: any) {
       setError(e?.message || '저장 중 오류');
+      toast.error(e?.message || '저장 중 오류가 발생했습니다.');
     } finally {
       setSaving(false);
     }
   };
 
-  const handleDelete = async (id: string) => {
-    if (!confirm('Operator를 archive 처리하시겠습니까? 매일 제안서 생성이 즉시 중단됩니다.')) return;
-    try {
-      const res = await fetch(`/api/ai/operator/continuous/${id}`, {
-        method: 'DELETE',
-        headers: { Authorization: `Bearer ${token()}` },
-      });
-      const data = await res.json();
-      if (data.success) await loadAll();
-      else alert(data.error || '삭제 실패');
-    } catch (e: any) {
-      alert(e?.message || '삭제 중 오류');
-    }
-  };
-
-  const handleRunNow = async (id: string) => {
-    if (!confirm('지금 즉시 제안서를 생성하시겠습니까? (예약 시점과 별개로 1건 추가 생성)')) return;
-    try {
-      const res = await fetch(`/api/ai/operator/continuous/${id}/run-now`, {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${token()}` },
-      });
-      const data = await res.json();
-      if (data.success) {
-        alert(data.message || '제안서가 생성되었습니다. "대기 제안서" 탭에서 확인하세요.');
-        await loadAll();
-      } else {
-        alert(data.error || '실패');
-      }
-    } catch (e: any) {
-      alert(e?.message || '오류');
-    }
-  };
-
-  const handleApprove = async (id: string) => {
-    if (!confirm('제안서를 승인하시겠습니까? 승인 후 발송은 별도 발송 화면에서 진행됩니다.')) return;
-    try {
-      const res = await fetch(`/api/ai/operator/proposals/${id}/approve`, {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${token()}` },
-      });
-      const data = await res.json();
-      if (data.success) {
-        // 승인된 제안서의 objective를 AI Operator로 전달 → 사용자가 검토 후 발송
-        const proposal = proposals.find((p) => p.id === id);
-        if (proposal?.operatorObjective) {
-          sessionStorage.setItem('ai_operator_prefill_objective', proposal.operatorObjective);
-          if (confirm('AI Operator 화면으로 이동하여 발송을 진행하시겠습니까?')) {
-            navigate('/ai-operator');
-            return;
+  // ★ D212+ (2026-05-23 Harold 명시): native confirm/alert 영구 폐기 — 커스텀 모달 + Toast 정합
+  const handleDelete = (id: string) => {
+    setConfirmState({
+      mode: 'danger',
+      title: '자동 마케팅 중지',
+      description: '이 자동 마케팅을 보관함으로 이동하시겠습니까?\n매일 새 캠페인 추천이 즉시 중단됩니다.',
+      confirmLabel: '중지',
+      onConfirm: async () => {
+        try {
+          const res = await fetch(`/api/ai/operator/continuous/${id}`, {
+            method: 'DELETE',
+            headers: { Authorization: `Bearer ${token()}` },
+          });
+          const data = await res.json();
+          if (data.success) {
+            toast.success('자동 마케팅이 중지되었습니다.');
+            await loadAll();
+          } else {
+            toast.error(data.error || '중지에 실패했습니다.');
           }
+        } catch (e: any) {
+          toast.error(e?.message || '중지 중 오류가 발생했습니다.');
         }
-        await loadAll();
-      } else {
-        alert(data.error || '승인 실패');
-      }
-    } catch (e: any) {
-      alert(e?.message || '오류');
-    }
+      },
+    });
   };
 
-  const handleReject = async (id: string) => {
-    if (!confirm('제안서를 거부하시겠습니까?')) return;
-    try {
-      const res = await fetch(`/api/ai/operator/proposals/${id}/reject`, {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${token()}` },
-      });
-      const data = await res.json();
-      if (data.success) await loadAll();
-      else alert(data.error || '거부 실패');
-    } catch (e: any) {
-      alert(e?.message || '오류');
-    }
+  const handleRunNow = (id: string) => {
+    setConfirmState({
+      mode: 'info',
+      title: '지금 즉시 추천 받기',
+      description: '예약 시점과 별개로 지금 새 캠페인 추천 1건을 생성합니다.\n생성 완료 후 "오늘 받은 제안" 탭에서 확인할 수 있습니다.',
+      confirmLabel: '추천 받기',
+      onConfirm: async () => {
+        try {
+          const res = await fetch(`/api/ai/operator/continuous/${id}/run-now`, {
+            method: 'POST',
+            headers: { Authorization: `Bearer ${token()}` },
+          });
+          const data = await res.json();
+          if (data.success) {
+            toast.success(data.message || '제안이 생성되었습니다. "오늘 받은 제안" 탭에서 확인해주세요.');
+            await loadAll();
+          } else {
+            toast.error(data.error || '추천 생성에 실패했습니다.');
+          }
+        } catch (e: any) {
+          toast.error(e?.message || '오류가 발생했습니다.');
+        }
+      },
+    });
+  };
+
+  const handleApprove = (id: string) => {
+    setConfirmState({
+      mode: 'default',
+      title: '제안 승인',
+      description: '이 제안을 승인하시겠습니까?\n승인 후 AI Operator 화면으로 이동하여 발송을 진행할 수 있습니다.',
+      confirmLabel: '승인',
+      onConfirm: async () => {
+        try {
+          const res = await fetch(`/api/ai/operator/proposals/${id}/approve`, {
+            method: 'POST',
+            headers: { Authorization: `Bearer ${token()}` },
+          });
+          const data = await res.json();
+          if (data.success) {
+            const proposal = proposals.find((p) => p.id === id);
+            if (proposal?.operatorObjective) {
+              sessionStorage.setItem('ai_operator_prefill_objective', proposal.operatorObjective);
+              toast.success('승인되었습니다. AI Operator 화면으로 이동합니다.');
+              setTimeout(() => navigate('/ai-operator'), 800);
+              return;
+            }
+            toast.success('제안이 승인되었습니다.');
+            await loadAll();
+          } else {
+            toast.error(data.error || '승인에 실패했습니다.');
+          }
+        } catch (e: any) {
+          toast.error(e?.message || '오류가 발생했습니다.');
+        }
+      },
+    });
+  };
+
+  const handleReject = (id: string) => {
+    setConfirmState({
+      mode: 'warning',
+      title: '제안 거부',
+      description: '이 제안을 거부하시겠습니까?\n거부된 제안은 목록에서 제외됩니다.',
+      confirmLabel: '거부',
+      onConfirm: async () => {
+        try {
+          const res = await fetch(`/api/ai/operator/proposals/${id}/reject`, {
+            method: 'POST',
+            headers: { Authorization: `Bearer ${token()}` },
+          });
+          const data = await res.json();
+          if (data.success) {
+            toast.info('제안이 거부되었습니다.');
+            await loadAll();
+          } else {
+            toast.error(data.error || '거부에 실패했습니다.');
+          }
+        } catch (e: any) {
+          toast.error(e?.message || '오류가 발생했습니다.');
+        }
+      },
+    });
   };
 
   return (
@@ -331,10 +378,10 @@ export default function ContinuousOperatorPage() {
           </div>
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2">
-              <h1 className="text-xl md:text-2xl font-semibold text-white">AI 영구 운영</h1>
+              <h1 className="text-xl md:text-2xl font-semibold text-white">AI 자동 마케팅</h1>
               <span className="text-[10px] bg-gradient-to-r from-amber-400 to-orange-500 text-white px-2 py-0.5 rounded-full font-bold tracking-wide">BETA</span>
             </div>
-            <p className="text-xs md:text-sm text-white/50 mt-0.5">매일 AI가 새 캠페인 자동 제안 — 사용자 승인 후 발송 (영구 운영 매트릭스)</p>
+            <p className="text-xs md:text-sm text-white/50 mt-0.5">매일 아침 AI가 회사 데이터를 분석해 캠페인을 추천합니다. 확인 후 1-click 발송.</p>
           </div>
           <div className="ml-auto flex items-center gap-2">
             <button onClick={loadAll} className="text-xs text-white/70 hover:bg-white/10 px-3 py-2 rounded-lg flex items-center gap-1.5 transition-colors">
@@ -344,17 +391,17 @@ export default function ContinuousOperatorPage() {
             <button
               onClick={() => { setShowMultiGoal(true); setMultiGoalAnalysis(null); }}
               className="text-xs bg-gradient-to-r from-violet-500/40 to-fuchsia-500/40 hover:from-violet-500/60 hover:to-fuchsia-500/60 text-violet-50 px-3 py-2 rounded-lg flex items-center gap-1.5 font-medium transition-colors border border-violet-400/30"
-              title="다중 목표 설정 시 AI가 충돌 영역을 분석 (Multi-Goal Decisioning)"
+              title="여러 목표를 동시에 설정할 때 AI가 충돌 (동일 고객 중복 발송 / 시점 겹침 등)을 분석"
             >
               <GitMerge className="w-3.5 h-3.5" />
-              다중 목표 분석
+              여러 목표 동시 분석
             </button>
             <button
               onClick={() => setEditing({ name: '', objective: '', schedule: 'daily', scheduleTime: '09:00', status: 'active' })}
               className="text-xs bg-gradient-to-r from-indigo-500/40 to-violet-500/40 hover:from-indigo-500/60 hover:to-violet-500/60 text-indigo-50 px-3 py-2 rounded-lg flex items-center gap-1.5 font-medium transition-colors border border-indigo-400/30"
             >
               <Plus className="w-3.5 h-3.5" />
-              신규 영구 운영
+              새 자동 마케팅 만들기
             </button>
           </div>
         </div>
@@ -365,7 +412,7 @@ export default function ContinuousOperatorPage() {
             onClick={() => setTab('proposals')}
             className={`px-4 py-2.5 text-sm font-medium border-b-2 transition-colors ${tab === 'proposals' ? 'border-indigo-400 text-indigo-200' : 'border-transparent text-white/50 hover:text-white/80'}`}
           >
-            대기 제안서 {proposals.filter((p) => p.status === 'pending').length > 0 && (
+            오늘 받은 제안 {proposals.filter((p) => p.status === 'pending').length > 0 && (
               <span className="ml-1.5 bg-rose-500/30 text-rose-200 text-[10px] px-1.5 py-0.5 rounded-full font-bold">
                 {proposals.filter((p) => p.status === 'pending').length}
               </span>
@@ -375,19 +422,19 @@ export default function ContinuousOperatorPage() {
             onClick={() => setTab('operators')}
             className={`px-4 py-2.5 text-sm font-medium border-b-2 transition-colors ${tab === 'operators' ? 'border-indigo-400 text-indigo-200' : 'border-transparent text-white/50 hover:text-white/80'}`}
           >
-            영구 운영 목록 ({operators.filter((o) => o.status === 'active').length})
+            실행 중인 자동 마케팅 ({operators.filter((o) => o.status === 'active').length})
           </button>
         </div>
       </div>
 
       <div className="max-w-7xl mx-auto px-4 md:px-6 py-6 space-y-5">
-        {/* 영구 원칙 안내 */}
+        {/* 안전 정책 안내 */}
         <div className="bg-amber-500/10 border border-amber-400/30 rounded-lg p-3 text-xs text-amber-100 flex items-start gap-2">
           <AlertCircle className="w-4 h-4 mt-0.5 shrink-0" />
           <div>
-            <strong>영구 원칙:</strong> AI는 매일 회고 + 제안서를 생성할 뿐, 실행은 항상 사용자 승인 후에만 이루어집니다.
-            ENT 자동 실행 옵션은 default OFF — 활성 시에도 1,000건 미만 + 5만원 미만 + low risk + 비광고 임계값을 모두 만족해야만 자동 실행됩니다.
-            타겟 0건 매칭 시 제안서가 생성되지 않습니다.
+            <strong>안전 정책:</strong> AI는 매일 회사 데이터를 분석해 캠페인을 추천할 뿐, 발송은 항상 회사 admin 확인 후에만 진행됩니다.
+            Enterprise 플랜의 '자동 발송' 옵션은 기본 OFF — 활성화하더라도 1,000건 미만 + 5만원 미만 + 안전 단계 낮음 + 비광고 캠페인일 때만 자동 발송됩니다.
+            조건에 맞는 고객이 0명이면 제안이 만들어지지 않습니다.
           </div>
         </div>
 
@@ -413,17 +460,74 @@ export default function ContinuousOperatorPage() {
                 onChange={(e) => setProposalStatus(e.target.value as any)}
                 className="text-xs px-2 py-1 bg-slate-900 border border-white/10 rounded text-white focus:outline-none focus:border-violet-400/50"
               >
-                <option value="pending">대기</option>
-                <option value="all">전체</option>
+                <option value="pending">대기 중</option>
+                <option value="all">전체 보기</option>
               </select>
             </div>
 
             {proposals.length === 0 ? (
-              <div className="bg-white/5 border border-white/10 rounded-xl p-12 text-center text-sm text-white/50">
-                {proposalStatus === 'pending' ? '대기 중인 제안서가 없습니다.' : '제안서가 없습니다.'}
-                <br />
-                <span className="text-xs text-white/40 mt-2 block">활성 영구 운영이 있으면 매일 예약 시간에 자동으로 제안서가 생성됩니다.</span>
-              </div>
+              operators.filter((o) => o.status === 'active').length === 0 ? (
+                /* ★ D212+ (2026-05-23 Harold 명시): 첫 진입 가이드 — 마케팅팀 친화 본질 */
+                <div className="bg-gradient-to-br from-indigo-500/10 via-violet-500/5 to-fuchsia-500/10 border border-indigo-400/30 rounded-2xl p-6 md:p-8">
+                  <div className="text-center mb-6">
+                    <div className="w-14 h-14 mx-auto mb-3 rounded-2xl bg-gradient-to-br from-indigo-400 to-violet-500 flex items-center justify-center shadow-lg shadow-indigo-500/20">
+                      <Brain className="w-7 h-7 text-white" />
+                    </div>
+                    <h3 className="text-base md:text-lg font-semibold text-white mb-1">자동 마케팅을 시작해보세요</h3>
+                    <p className="text-xs md:text-sm text-white/60">매일 아침 AI가 회사 데이터를 분석해 새 캠페인을 추천합니다</p>
+                  </div>
+                  {/* 3 step 안내 */}
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-5">
+                    {[
+                      { num: 1, title: '목표 입력', desc: '마케팅 목표를 자연어 한 줄로' },
+                      { num: 2, title: '매일 추천 받기', desc: '아침 9시 AI가 새 캠페인 제안' },
+                      { num: 3, title: '확인 후 발송', desc: '1-click 승인 → 즉시 발송' },
+                    ].map((s) => (
+                      <div key={s.num} className="p-3 bg-white/5 border border-white/10 rounded-lg">
+                        <div className="flex items-center gap-2 mb-1.5">
+                          <div className="w-6 h-6 rounded-lg bg-indigo-500/30 text-indigo-200 text-xs font-bold flex items-center justify-center">{s.num}</div>
+                          <div className="text-sm font-semibold text-white">{s.title}</div>
+                        </div>
+                        <div className="text-[11px] text-white/60 leading-relaxed pl-8">{s.desc}</div>
+                      </div>
+                    ))}
+                  </div>
+                  {/* 예시 영역 */}
+                  <div className="mb-5">
+                    <div className="text-[11px] text-white/40 mb-2 font-medium">예시 목표</div>
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
+                      {[
+                        { label: 'VIP 재구매 유도', desc: 'VIP 등급 고객 90일 안 재구매 캠페인' },
+                        { label: '휴면 회복', desc: '60일 미구매 고객 복귀 유도 캠페인' },
+                        { label: '생일 축하', desc: 'D-7 사전 + 당일 축하 + 혜택 안내' },
+                      ].map((ex) => (
+                        <button
+                          key={ex.label}
+                          onClick={() => setEditing({ name: ex.label, objective: ex.desc, schedule: 'daily', scheduleTime: '09:00', status: 'active' })}
+                          className="p-2.5 bg-white/5 hover:bg-white/10 border border-white/10 hover:border-indigo-400/30 rounded-lg text-left transition-all"
+                        >
+                          <div className="text-xs font-semibold text-white mb-0.5">{ex.label}</div>
+                          <div className="text-[10px] text-white/50">{ex.desc}</div>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  {/* 큰 시작 버튼 */}
+                  <button
+                    onClick={() => setEditing({ name: '', objective: '', schedule: 'daily', scheduleTime: '09:00', status: 'active' })}
+                    className="w-full px-4 py-3 bg-gradient-to-r from-indigo-500/40 to-violet-500/40 hover:from-indigo-500/60 hover:to-violet-500/60 text-white rounded-lg text-sm font-semibold flex items-center justify-center gap-2 border border-indigo-400/30 transition-colors"
+                  >
+                    <Plus className="w-4 h-4" />
+                    새 자동 마케팅 만들기
+                  </button>
+                </div>
+              ) : (
+                <div className="bg-white/5 border border-white/10 rounded-xl p-12 text-center text-sm text-white/50">
+                  {proposalStatus === 'pending' ? '오늘 받은 제안이 없습니다.' : '제안이 없습니다.'}
+                  <br />
+                  <span className="text-xs text-white/40 mt-2 block">자동 마케팅이 활성 상태입니다. 매일 정해진 시간에 AI가 새 캠페인을 추천해드립니다.</span>
+                </div>
+              )
             ) : (
               proposals.map((p) => {
                 const expanded = expandedProposal === p.id;
@@ -527,7 +631,7 @@ export default function ContinuousOperatorPage() {
                                 <Target className="w-3 h-3 mt-0.5 shrink-0" />
                                 <div>
                                   <strong>Self-Optimizing 추천:</strong> {variantsMap[p.id].recommendation!.reasoning}
-                                  <div className="text-indigo-200 mt-0.5">★ 영구 원칙 정합 — 본 추천은 참고만, 발송은 사용자가 선택한 variant로 진행됩니다.</div>
+                                  <div className="text-indigo-200 mt-0.5">★ 안전 정책 — AI 추천은 참고만, 발송은 회사 admin이 선택한 변형으로 진행됩니다.</div>
                                 </div>
                               </div>
                             )}
@@ -555,14 +659,21 @@ export default function ContinuousOperatorPage() {
           </>
         )}
 
-        {/* 탭 2: 영구 운영 목록 */}
+        {/* 탭 2: 자동 마케팅 목록 */}
         {!loading && tab === 'operators' && (
           <>
             {operators.length === 0 ? (
               <div className="bg-white/5 border border-white/10 rounded-xl p-12 text-center text-sm text-white/50">
-                등록된 영구 운영이 없습니다.
+                실행 중인 자동 마케팅이 없습니다.
                 <br />
-                <span className="text-xs text-white/40 mt-2 block">자연어 한 줄로 마케팅 목표를 입력하면 AI가 매일 새 캠페인을 제안합니다.</span>
+                <span className="text-xs text-white/40 mt-2 block">마케팅 목표를 한 줄로 입력하면 AI가 매일 새 캠페인을 추천해드립니다.</span>
+                <button
+                  onClick={() => setEditing({ name: '', objective: '', schedule: 'daily', scheduleTime: '09:00', status: 'active' })}
+                  className="mt-4 px-4 py-2 bg-indigo-500/30 hover:bg-indigo-500/50 text-indigo-50 rounded-lg text-xs font-medium inline-flex items-center gap-1.5 border border-indigo-400/30 transition-colors"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  새 자동 마케팅 만들기
+                </button>
               </div>
             ) : (
               operators.map((op) => (
@@ -603,16 +714,26 @@ export default function ContinuousOperatorPage() {
 
       {/* ★ D179 Multi-Goal 분석 모달 */}
       {showMultiGoal && (
-        <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50" onClick={() => setShowMultiGoal(false)}>
-          <div className="bg-slate-900 border border-white/10 rounded-2xl shadow-2xl w-full max-w-3xl max-h-[90vh] overflow-y-auto p-6" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-center gap-2 mb-4">
-              <GitMerge className="w-5 h-5 text-violet-300" />
-              <h3 className="text-base font-bold text-white">Multi-Goal Decisioning — 다중 목표 충돌 분석</h3>
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 z-50" onClick={() => setShowMultiGoal(false)}>
+          <div className="bg-slate-900 border border-violet-400/30 rounded-2xl shadow-2xl w-full max-w-3xl max-h-[90vh] overflow-hidden flex flex-col" onClick={(e) => e.stopPropagation()}>
+            {/* 헤더 영역 sticky */}
+            <div className="flex items-center gap-3 p-5 border-b border-white/10 flex-shrink-0">
+              <div className="w-10 h-10 rounded-xl bg-violet-500/20 flex items-center justify-center">
+                <GitMerge className="w-5 h-5 text-violet-300" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <h3 className="text-base font-semibold text-white">여러 목표 동시 분석</h3>
+                <p className="text-[11px] text-white/50 mt-0.5">2~5개 목표를 한번에 입력 — AI가 충돌 (중복 발송 / 시점 겹침) 분석</p>
+              </div>
+              <button onClick={() => setShowMultiGoal(false)} className="p-1.5 hover:bg-white/10 rounded-lg transition-colors">
+                <X className="w-4 h-4 text-white/50" />
+              </button>
             </div>
+            <div className="p-5 overflow-y-auto">
             <div className="bg-amber-500/10 border border-amber-400/30 rounded-lg p-3 mb-4 text-xs text-amber-100 flex items-start gap-2">
               <AlertCircle className="w-4 h-4 mt-0.5 shrink-0" />
               <div>
-                <strong>영구 원칙:</strong> 다중 목표 설정 시 AI가 충돌 영역(동일 고객 동시 발송 / 메시지 중복 / 시점 겹침)을 분석 + 사용자 검토 후 영구 운영 등록.
+                <strong>안전 정책:</strong> 여러 목표를 동시에 설정하면 AI가 충돌 영역 (동일 고객 중복 발송 / 메시지 중복 / 시점 겹침) 을 분석 + 회사 admin 검토 후 자동 마케팅 등록.
                 실행은 사용자 승인 후에만 진행됩니다.
               </div>
             </div>
@@ -739,55 +860,73 @@ export default function ContinuousOperatorPage() {
 
                 {multiGoalAnalysis.conflictMatrix && (
                   <details className="mb-4">
-                    <summary className="text-xs font-bold text-white/80 cursor-pointer">충돌 매트릭스 (markdown)</summary>
-                    <pre className="bg-white/5 border rounded p-3 text-[11px] font-mono whitespace-pre-wrap mt-2">{multiGoalAnalysis.conflictMatrix}</pre>
+                    <summary className="text-xs font-bold text-white/80 cursor-pointer">충돌 분석 상세 (markdown)</summary>
+                    <pre className="bg-white/5 border border-white/10 rounded-lg p-3 text-[11px] font-mono whitespace-pre-wrap mt-2 text-white/70">{multiGoalAnalysis.conflictMatrix}</pre>
                   </details>
                 )}
 
-                <div className="flex gap-2 justify-end pt-3 border-t">
+                <div className="flex gap-2 justify-end pt-3 border-t border-white/10">
                   <button onClick={() => { setMultiGoalAnalysis(null); }} className="px-4 py-2 bg-white/5 border border-white/10 rounded-lg text-sm text-white/80 hover:bg-white/10 transition-colors">다시 분석</button>
                   <button onClick={() => setShowMultiGoal(false)} className="px-4 py-2 bg-violet-500/30 hover:bg-violet-500/50 text-violet-100 text-sm rounded-lg">확인</button>
                 </div>
               </>
             )}
+            </div>
           </div>
         </div>
       )}
 
-      {/* 편집 모달 */}
+      {/* 편집 모달 — D212+ 시인성 강화 (다크 톤 + 헤더 sticky + 명확한 input 영역) */}
       {editing && (
-        <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50" onClick={() => setEditing(null)}>
-          <div className="bg-slate-900 border border-white/10 rounded-2xl shadow-2xl w-full max-w-xl max-h-[90vh] overflow-y-auto p-6" onClick={(e) => e.stopPropagation()}>
-            <h3 className="text-base font-bold text-white mb-4">{editing.id ? '영구 운영 수정' : '신규 영구 운영'}</h3>
-            <div className="space-y-3">
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 z-50" onClick={() => setEditing(null)}>
+          <div className="bg-slate-900 border border-indigo-400/30 rounded-2xl shadow-2xl w-full max-w-xl max-h-[90vh] overflow-hidden flex flex-col" onClick={(e) => e.stopPropagation()}>
+            {/* 헤더 영역 */}
+            <div className="flex items-center gap-3 p-5 border-b border-white/10 flex-shrink-0">
+              <div className="w-10 h-10 rounded-xl bg-indigo-500/20 flex items-center justify-center">
+                <Brain className="w-5 h-5 text-indigo-300" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <h3 className="text-base font-semibold text-white">{editing.id ? '자동 마케팅 수정' : '새 자동 마케팅 만들기'}</h3>
+                <p className="text-[11px] text-white/50 mt-0.5">목표 입력 → 매일 정해진 시간에 AI가 새 캠페인을 추천합니다</p>
+              </div>
+              <button onClick={() => setEditing(null)} className="p-1.5 hover:bg-white/10 rounded-lg transition-colors">
+                <X className="w-4 h-4 text-white/50" />
+              </button>
+            </div>
+
+            {/* 본문 영역 */}
+            <div className="p-5 overflow-y-auto space-y-4">
               <div>
-                <label className="text-xs text-white/70 block mb-1">이름</label>
+                <label className="text-xs font-medium text-white/70 block mb-1.5">이름 <span className="text-rose-400">*</span></label>
                 <input
                   type="text"
                   value={editing.name || ''}
                   onChange={(e) => setEditing({ ...editing, name: e.target.value })}
-                  className="w-full px-3 py-2 border rounded-lg text-sm"
-                  placeholder="VIP 재구매 영구 운영"
+                  className="w-full px-3 py-2 bg-slate-950 border border-white/10 rounded-lg text-sm text-white placeholder-white/30 focus:outline-none focus:border-indigo-400/50 transition-colors"
+                  placeholder="예: VIP 재구매 자동 마케팅"
                   maxLength={100}
                 />
               </div>
               <div>
-                <label className="text-xs text-white/70 block mb-1">자연어 목표</label>
+                <label className="text-xs font-medium text-white/70 block mb-1.5">
+                  마케팅 목표 (자연어) <span className="text-rose-400">*</span>
+                </label>
                 <textarea
                   value={editing.objective || ''}
                   onChange={(e) => setEditing({ ...editing, objective: e.target.value })}
-                  className="w-full px-3 py-2 border rounded-lg text-sm resize-none h-20"
-                  placeholder="VIP 등급 고객 중 최근 30일 미구매 고객에게 재구매 유도 메시지를 매일 추천"
+                  className="w-full px-3 py-2 bg-slate-950 border border-white/10 rounded-lg text-sm text-white placeholder-white/30 resize-none h-24 focus:outline-none focus:border-indigo-400/50 transition-colors"
+                  placeholder="예: VIP 등급 고객 중 최근 30일 미구매 고객에게 재구매 유도 메시지를 매일 추천"
                   maxLength={500}
                 />
+                <div className="text-[10px] text-white/40 mt-1">AI가 이해할 수 있도록 구체적으로 작성해주세요 (대상 + 목적 + 시점)</div>
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="text-xs text-white/70 block mb-1">주기</label>
+                  <label className="text-xs font-medium text-white/70 block mb-1.5">추천 주기</label>
                   <select
                     value={editing.schedule || 'daily'}
                     onChange={(e) => setEditing({ ...editing, schedule: e.target.value as Schedule })}
-                    className="w-full px-3 py-2 border rounded-lg text-sm"
+                    className="w-full px-3 py-2 bg-slate-950 border border-white/10 rounded-lg text-sm text-white focus:outline-none focus:border-indigo-400/50 transition-colors"
                   >
                     <option value="daily">매일</option>
                     <option value="weekly">매주</option>
@@ -795,49 +934,69 @@ export default function ContinuousOperatorPage() {
                   </select>
                 </div>
                 <div>
-                  <label className="text-xs text-white/70 block mb-1">실행 시각 (KST)</label>
+                  <label className="text-xs font-medium text-white/70 block mb-1.5">추천 시각 (한국 시간)</label>
                   <input
                     type="time"
                     value={editing.scheduleTime || '09:00'}
                     onChange={(e) => setEditing({ ...editing, scheduleTime: e.target.value })}
-                    className="w-full px-3 py-2 border rounded-lg text-sm"
+                    className="w-full px-3 py-2 bg-slate-950 border border-white/10 rounded-lg text-sm text-white focus:outline-none focus:border-indigo-400/50 transition-colors"
                   />
                 </div>
               </div>
               {editing.id && (
                 <div>
-                  <label className="text-xs text-white/70 block mb-1">상태</label>
+                  <label className="text-xs font-medium text-white/70 block mb-1.5">상태</label>
                   <select
                     value={editing.status || 'active'}
                     onChange={(e) => setEditing({ ...editing, status: e.target.value as OperatorStatus })}
-                    className="w-full px-3 py-2 border rounded-lg text-sm"
+                    className="w-full px-3 py-2 bg-slate-950 border border-white/10 rounded-lg text-sm text-white focus:outline-none focus:border-indigo-400/50 transition-colors"
                   >
-                    <option value="active">활성 (매일 제안서 생성)</option>
-                    <option value="paused">일시 중지</option>
+                    <option value="active">활성 (매일 새 캠페인 추천)</option>
+                    <option value="paused">일시 중지 (추천 멈춤)</option>
                   </select>
                 </div>
               )}
 
-              <div className="bg-amber-500/10 border border-amber-400/30 rounded-lg p-3 text-xs text-amber-100">
-                <strong>안내:</strong> AI가 위 시각에 매일/매주/매월 새 제안서를 생성합니다. 각 제안서는 사용자 승인 후에만 발송됩니다. 7일 안에 승인하지 않으면 자동 만료됩니다.
+              <div className="bg-amber-500/10 border border-amber-400/30 rounded-lg p-3 text-xs text-amber-100 flex items-start gap-2">
+                <AlertCircle className="w-3.5 h-3.5 mt-0.5 shrink-0" />
+                <div className="leading-relaxed">
+                  <strong>안내:</strong> AI가 위 시각에 매일/매주/매월 새 캠페인을 추천합니다. 발송은 회사 admin 확인 후에만 진행됩니다. 7일 안에 확인하지 않으면 자동 만료됩니다.
+                </div>
               </div>
 
               {error && (
-                <div className="bg-rose-500/10 border border-rose-400/30 rounded-lg p-3 text-sm text-rose-300">
-                  {error}
+                <div className="bg-rose-500/10 border border-rose-400/30 rounded-lg p-3 text-sm text-rose-200 flex items-start gap-2">
+                  <AlertCircle className="w-3.5 h-3.5 mt-0.5 shrink-0" />
+                  <div>{error}</div>
                 </div>
               )}
+            </div>
 
-              <div className="flex gap-2 justify-end pt-2">
-                <button onClick={() => setEditing(null)} className="px-4 py-2 bg-white/5 border border-white/10 rounded-lg text-sm text-white/80 hover:bg-white/10 transition-colors">취소</button>
-                <button onClick={handleSave} disabled={saving} className="px-4 py-2 bg-indigo-500/30 hover:bg-indigo-500/50 text-indigo-100 text-sm rounded-lg disabled:opacity-40">
-                  {saving ? '저장 중...' : '저장'}
-                </button>
-              </div>
+            {/* 액션 영역 sticky 하단 */}
+            <div className="flex items-center gap-2 p-5 border-t border-white/10 bg-slate-950/50 flex-shrink-0">
+              <button onClick={() => setEditing(null)} className="flex-1 px-4 py-2 bg-white/5 hover:bg-white/10 text-white/80 rounded-lg text-sm font-medium transition-colors">
+                취소
+              </button>
+              <button
+                onClick={handleSave}
+                disabled={saving || !editing.name?.trim() || !editing.objective?.trim()}
+                className="flex-1 px-4 py-2 bg-indigo-500/40 hover:bg-indigo-500/60 disabled:opacity-30 disabled:cursor-not-allowed text-indigo-50 rounded-lg text-sm font-semibold flex items-center justify-center gap-1.5 transition-colors"
+              >
+                {saving ? (
+                  <><Loader2 className="w-3.5 h-3.5 animate-spin" /> 저장 중</>
+                ) : editing.id ? (
+                  <>수정 저장</>
+                ) : (
+                  <><Plus className="w-3.5 h-3.5" /> 자동 마케팅 시작</>
+                )}
+              </button>
             </div>
           </div>
         </div>
       )}
+
+      {/* ★ D212+ (2026-05-23 Harold 명시): 커스텀 ConfirmModal — native confirm 영구 폐기 정합 */}
+      <ConfirmModal state={confirmState} onClose={() => setConfirmState(null)} />
     </div>
   );
 }

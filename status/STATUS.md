@@ -107,9 +107,45 @@
 
 ---
 
-### 🚀 다음 세션 진입 가이드 (D210+ Phase 3 통합 종결 후 — **D211+ 메뉴 점검 영역 진입**)
+### 🚀 다음 세션 진입 가이드 (D211+ 통합 종결 후 — **D212+ 메뉴 점검 영역 진입**)
 
-> **★ D211+ 진입 매트릭스 (Harold 명시 2026-05-23)**:
+> **★ D212+ 진입 매트릭스 (Harold 명시 2026-05-23)**:
+> Harold 본질 명시 = 본 세션 안 1번 메뉴 (여정 자동화) + 2번 메뉴 (AI 자율 예측) 본질 강화 완료 — 다음 세션 = 3번 메뉴부터 동일 패턴 본질 강화 진입.
+>
+> **D212+ 진입 명령어 (다음 세션 첫 메시지)**:
+> ```
+> status/STATUS.md CURRENT_TASK § D212+ 진입 가이드 정독 + memory/project_d211_completed.md 정독 + memory/feedback_no_native_browser_dialog.md 정독 (D211+ 신규 영구 룰) + 옛 영구 룰 매트릭스 정합 의무 → D212+ 진입 (3번 메뉴 AI 영구운영부터 본질 강화)
+> ```
+>
+> **★ D211+ 세션 통합 종결 매트릭스 (2026-05-23 — 참조용)**:
+> - **여정 자동화 9 영역** — Beta 95% CI + 단계별 AI 진단 + next step 추천 + 보관함/영구 삭제 + 커스텀 다크 톤 모달 + 시뮬레이션 + 실시간 위치 + variant 자동 생성 + 흐름 다이어그램 + 트리거 복합 조건
+> - **Predictive 강화 4 영역** — LTV (60/90/365일) + 7+ 영역 확장 (next_purchase + channel/hour/tone) + Explainability (SHAP-like + Source 명시) + 1-click 액션 (churn_recovery/purchase_push/vip_engagement)
+> - **UX 3층 계층 간소화** — 1층 default (1-click + 요약 한 줄) / 2층 토글 (자세히 분석) / 3층 default (customer 목록)
+> - **신규 CT** — CT-59 (journey-step-diagnosis) / CT-60 (journey-simulator) / CT-61 (variant-generator) / CT-63 (predictive-explainer)
+> - **신규 영구 룰** — feedback_no_native_browser_dialog (native confirm/prompt/alert 절대 사용 X)
+> - **DB ALTER 누적** — journeys.archived_at + cdp_customer_predictions 7 컬럼
+> - **Harold 직접 배포 완료** — tp-push + git pull + build:safe + pm2 restart all
+> - 상세 매트릭스 = [[memory/project_d211_completed.md]] 정독 의무
+>
+> **D212+ 점검 영역 매트릭스 (잔존 8 메뉴)**:
+>
+> | # | 메뉴 | 경로 | 옛 종결 영역 | 본질 강화 방향 |
+> |---|---|---|---|---|
+> | 3 | AI 영구운영 | `/continuous-operator` | B-1 backend (max_risk) + 톤 통일 + 모달 + 박-단어 정정 | UI 임계값 편집 영역 + 영구 운영 상태 시각화 |
+> | 4 | 성과리포트 | `/performance` | B-2 backend (buildFunnelStats) + 톤 통일 + 디자인 강화 | UI funnel 시각화 카드 + Next Action Advisor 추가 강화 |
+> | 5 | 자사몰 연동 | `/cdp-settings` | 톤 통일 + 자사몰 카드 + form 영역 | B-3 Shopify 실 구현 (큰 영역) + 메이크샵 영역 |
+> | 6 | 인앱메시지 | `/inapp-messages` | B-4 backend (getCompanyInAppStats) + 톤 통일 + 모달 | UI 통계 카드 + funnel 시각화 |
+> | 7 | Email 캠페인 | `/email-campaigns` | B-5 backend (bounce 자동 처리) + 톤 통일 + 모달 | UI bounce 통계 영역 + SendGrid webhook 강화 |
+> | 8 | 모바일 DM | `/dm-builder` | 메인 wrapper 다크 톤 정합 | B-6 undo/redo + 편집 모드 컴포넌트 영역 (큰 영역) |
+> | 9 | AI 메모리 | `/ai-memory` | B-7 (cleanup + 5 타입 가이드 + 영향도 시각화 + 자동 갱신) + 디자인 강화 | 영역별 추가 강화 의논 |
+> | 10 | AI 사용량 | `/ai-usage` | B-8 (모델별 분포 + 비용 절감) + 디자인 강화 | cache hit rate 추가 시각화 |
+>
+> **Braze/Salesforce 본질 정직 평가 (D211+ Harold 질문)**:
+> - **한국 시장 = 본질 압도** (알림톡 + KISA + 가격 35~550만원 + AI Operator 자연어 한 줄 + Explainability 투명)
+> - **글로벌 시장 = 본질 X 영역** (Braze 60+ 채널 + 글로벌 컴플라이언스 / 한줄로 한국만 — 향후 영문 진입 영역)
+> - **AI 깊이 = 글로벌 압도** (3 모델 mix + Anthropic 5 무기 + Multi-agent + 회사별 메모리)
+>
+> **★ 이전 D210+ Phase 3 종결 매트릭스 (참조용)**:
 > Harold 본질 명시 = "다음 세션에선 나랑 기능 하나하나 의견 나누면서 점검할거야" — 메뉴 하나하나 의논 + 더 할 영역 X 영역 패스 영역.
 >
 > **D211+ 진입 명령어 (다음 세션 첫 메시지)**:

@@ -4,6 +4,8 @@ import { useAuthStore } from './stores/authStore';
 import { useSessionGuard } from './hooks/useSessionGuard';
 import { useSessionTimeout } from './hooks/useSessionTimeout';
 import SessionTimeoutModal from './components/SessionTimeoutModal';
+// ★ D212+ (2026-05-23 Harold 명시): Toast 알림 영역 — native alert() 영구 폐기 정합
+import { ToastProvider } from './components/ToastProvider';
 import LoginPage from './pages/LoginPage';
 import AdminDashboard from './pages/AdminDashboard';
 import Dashboard from './pages/Dashboard';
@@ -180,6 +182,8 @@ function App() {
 
   return (
     <BrowserRouter>
+      {/* ★ D212+ (2026-05-23 Harold 명시): Toast 알림 영역 — native alert() 영구 폐기 정합 */}
+      <ToastProvider>
       {/* 세션 감시 (로그인 상태일 때만 활성) */}
       <SessionGuard />
       <SessionTimeoutGuard>
@@ -456,6 +460,7 @@ function App() {
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
       </SessionTimeoutGuard>
+      </ToastProvider>
     </BrowserRouter>
   );
 }
