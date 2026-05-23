@@ -1350,9 +1350,13 @@ router.put('/operator/continuous/:id', async (req: Request, res: Response) => {
     if (userType !== 'company_admin') {
       return res.status(403).json({ success: false, error: '수정은 회사 관리자만 가능합니다.' });
     }
-    const { name, objective, schedule, schedule_time, status } = req.body;
+    const { name, objective, schedule, schedule_time, status, budget_monthly, budget_daily, budget_alert_threshold } = req.body;
+    // ★ D212+ 5번 (2026-05-23 Harold 명시): 비용 제어 강화 patch
     const operator = await updateOperator(companyId, req.params.id, {
       name, objective, schedule, scheduleTime: schedule_time, status,
+      budgetMonthly: budget_monthly === undefined ? undefined : (budget_monthly === null ? null : Number(budget_monthly)),
+      budgetDaily: budget_daily === undefined ? undefined : (budget_daily === null ? null : Number(budget_daily)),
+      budgetAlertThreshold: budget_alert_threshold !== undefined ? Number(budget_alert_threshold) : undefined,
     });
     if (!operator) return res.status(404).json({ success: false, error: 'Operator를 찾을 수 없습니다.' });
     return res.json({ success: true, operator });
@@ -1380,6 +1384,116 @@ router.delete('/operator/continuous/:id', async (req: Request, res: Response) =>
 });
 
 // 수동 제안서 생성 (테스트/즉시 실행)
+// ★ D212+ (2026-05-23 Harold 명시): AI 자동 마케팅 학습 영역 요약 endpoint
+//   1번 + 2번 + 3번 통합 — ai_company_memory 누적 영역 + variant 자동 영역 + 어제 성과 영역 요약
+router.get('/operator/continuous/learning-summary', async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+    const planCtx = await loadPlanContext(companyId);
+    if (!planCtx) return res.status(404).json({ success: false, error: '회사 정보를 찾을 수 없습니다.' });
+
+    // 1. ai_company_memory 영역 누적 영역 + 5 타입 분포
+    const memoryRes = await query(
+      `SELECT
+         COUNT(*)::int AS total,
+         COUNT(*) FILTER (WHERE memory_type = 'success_pattern')::int AS success_count,
+         COUNT(*) FILTER (WHERE memory_type = 'customer_insight')::int AS insight_count,
+         COUNT(*) FILTER (WHERE memory_type = 'brand_tone_evolution')::int AS tone_count,
+         COUNT(*) FILTER (WHERE memory_type = 'channel_performance')::int AS channel_count,
+         COUNT(*) FILTER (WHERE memory_type = 'compliance_learning')::int AS compliance_count,
+         MAX(updated_at) AS last_learned_at,
+         AVG(importance) AS avg_importance
+       FROM ai_company_memory
+       WHERE company_id = $1::uuid`,
+      [companyId],
+    );
+    const mem = memoryRes.rows[0] || {};
+
+    // 2. 옛 30일 영역 안 최고 성과 패턴 5건 (importance 높은 순)
+    const topPatternsRes = await query(
+      `SELECT memory_type, summary, importance, usage_count, updated_at
+       FROM ai_company_memory
+       WHERE company_id = $1::uuid AND importance >= 5
+       ORDER BY importance DESC, usage_count DESC NULLS LAST
+       LIMIT 5`,
+      [companyId],
+    );
+
+    // 3. 옛 30일 영역 안 자동 마케팅 영역 성과 영역
+    const performanceRes = await query(
+      `SELECT
+         COUNT(*)::int AS total_proposals,
+         COUNT(*) FILTER (WHERE status = 'approved')::int AS approved_count,
+         COUNT(*) FILTER (WHERE status = 'rejected')::int AS rejected_count,
+         COUNT(*) FILTER (WHERE auto_executed = true)::int AS auto_executed_count,
+         AVG(recipient_count) AS avg_recipients,
+         AVG(cost_estimate) AS avg_cost
+       FROM operator_proposals
+       WHERE company_id = $1::uuid
+         AND created_at >= NOW() - INTERVAL '30 days'`,
+      [companyId],
+    );
+    const perf = performanceRes.rows[0] || {};
+
+    // 4. variant 영역 안 옛 winner 영역 — 옛 14일 영역 안 가장 효과 좋은 variant_index
+    const variantRes = await query(
+      `SELECT
+         v.variant_index,
+         SUM(v.sent_count)::int AS sent,
+         SUM(v.click_count)::int AS clicks,
+         CASE WHEN SUM(v.sent_count) > 0 THEN SUM(v.click_count)::float / SUM(v.sent_count) ELSE 0 END AS ctr
+       FROM operator_proposal_variants v
+       INNER JOIN operator_proposals p ON p.id = v.proposal_id
+       WHERE p.company_id = $1::uuid
+         AND p.created_at >= NOW() - INTERVAL '14 days'
+       GROUP BY v.variant_index
+       ORDER BY ctr DESC`,
+      [companyId],
+    );
+
+    return res.json({
+      success: true,
+      summary: {
+        memory: {
+          total: Number(mem.total) || 0,
+          successPatterns: Number(mem.success_count) || 0,
+          customerInsights: Number(mem.insight_count) || 0,
+          brandToneEvolution: Number(mem.tone_count) || 0,
+          channelPerformance: Number(mem.channel_count) || 0,
+          complianceLearning: Number(mem.compliance_count) || 0,
+          lastLearnedAt: mem.last_learned_at,
+          avgImportance: Number(mem.avg_importance) || 0,
+        },
+        topPatterns: topPatternsRes.rows.map((r: any) => ({
+          memoryType: r.memory_type,
+          summary: r.summary,
+          importance: Number(r.importance) || 0,
+          usageCount: Number(r.usage_count) || 0,
+          updatedAt: r.updated_at,
+        })),
+        performance: {
+          totalProposals30d: Number(perf.total_proposals) || 0,
+          approvedCount: Number(perf.approved_count) || 0,
+          rejectedCount: Number(perf.rejected_count) || 0,
+          autoExecutedCount: Number(perf.auto_executed_count) || 0,
+          avgRecipients: Math.round(Number(perf.avg_recipients) || 0),
+          avgCost: Math.round(Number(perf.avg_cost) || 0),
+        },
+        variantWinner: variantRes.rows.length > 0 ? {
+          variantLabel: ['A', 'B', 'C'][variantRes.rows[0].variant_index] || 'A',
+          ctr: Number(variantRes.rows[0].ctr) || 0,
+          sent: Number(variantRes.rows[0].sent) || 0,
+          clicks: Number(variantRes.rows[0].clicks) || 0,
+        } : null,
+      },
+    });
+  } catch (err: any) {
+    console.error('[Continuous learning-summary] 오류:', err);
+    return res.status(500).json({ success: false, error: err?.message || '학습 영역 요약 조회 실패' });
+  }
+});
+
 router.post('/operator/continuous/:id/run-now', async (req: Request, res: Response) => {
   try {
     const companyId = req.user?.companyId;

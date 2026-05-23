@@ -78,6 +78,47 @@ interface ContinuousOperator {
   totalRejected: number;
   totalAutoExecuted: number;
   createdAt: string;
+  // ★ D212+ 5번 (2026-05-23 Harold 명시): 비용 제어 강화
+  budgetMonthly?: number | null;
+  budgetDaily?: number | null;
+  budgetAlertThreshold?: number;
+  budgetSpentMonth?: number;
+  budgetSpentToday?: number;
+}
+
+// ★ D212+ 1+2+3번 (2026-05-23 Harold 명시): AI 학습 영역 요약 응답
+interface LearningSummary {
+  memory: {
+    total: number;
+    successPatterns: number;
+    customerInsights: number;
+    brandToneEvolution: number;
+    channelPerformance: number;
+    complianceLearning: number;
+    lastLearnedAt: string | null;
+    avgImportance: number;
+  };
+  topPatterns: Array<{
+    memoryType: string;
+    summary: string;
+    importance: number;
+    usageCount: number;
+    updatedAt: string | null;
+  }>;
+  performance: {
+    totalProposals30d: number;
+    approvedCount: number;
+    rejectedCount: number;
+    autoExecutedCount: number;
+    avgRecipients: number;
+    avgCost: number;
+  };
+  variantWinner: {
+    variantLabel: string;
+    ctr: number;
+    sent: number;
+    clicks: number;
+  } | null;
 }
 
 interface OperatorProposal {
@@ -121,6 +162,8 @@ export default function ContinuousOperatorPage() {
   // ★ D212+ (2026-05-23 Harold 명시): 커스텀 ConfirmModal state + Toast 정합
   const [confirmState, setConfirmState] = useState<ConfirmState | null>(null);
   const toast = useToast();
+  // ★ D212+ 1+2+3번 (2026-05-23 Harold 명시): AI 학습 영역 요약
+  const [learningSummary, setLearningSummary] = useState<LearningSummary | null>(null);
 
   const token = () => localStorage.getItem('token');
 
@@ -195,14 +238,18 @@ export default function ContinuousOperatorPage() {
     setLoading(true);
     setError(null);
     try {
-      const [opRes, propRes] = await Promise.all([
+      // ★ D212+ 1+2+3번 (2026-05-23 Harold 명시): learning-summary 영역 fetch 통합
+      const [opRes, propRes, learnRes] = await Promise.all([
         fetch('/api/ai/operator/continuous', { headers: { Authorization: `Bearer ${token()}` } }),
         fetch(`/api/ai/operator/proposals?status=${proposalStatus}`, { headers: { Authorization: `Bearer ${token()}` } }),
+        fetch('/api/ai/operator/continuous/learning-summary', { headers: { Authorization: `Bearer ${token()}` } }),
       ]);
       const opData = await opRes.json();
       const propData = await propRes.json();
+      const learnData = await learnRes.json();
       if (opData.success) setOperators(opData.operators || []);
       if (propData.success) setProposals(propData.proposals || []);
+      if (learnData.success) setLearningSummary(learnData.summary || null);
       if (!opRes.ok && opData.code === 'BETA_GATE') {
         setError('본 기능은 비즈니스 / 엔터프라이즈 요금제 베타에서 이용 가능합니다.');
       }
@@ -214,6 +261,26 @@ export default function ContinuousOperatorPage() {
   };
 
   useEffect(() => { loadAll(); }, [proposalStatus]);
+
+  // ★ D212+ 4번 (2026-05-23 Harold 명시): Predictive 1-click → 자동 마케팅 prefill 자동 처리
+  useEffect(() => {
+    const raw = sessionStorage.getItem('continuousOperatorPrefill');
+    if (!raw) return;
+    try {
+      const prefill = JSON.parse(raw);
+      sessionStorage.removeItem('continuousOperatorPrefill');
+      setEditing({
+        name: prefill.name || '',
+        objective: prefill.objective || '',
+        schedule: 'daily',
+        scheduleTime: '09:00',
+        status: 'active',
+      });
+      toast.info(`Predictive에서 추천된 액션을 자동 마케팅으로 시작합니다 (대상 ${(prefill.targetCount || 0).toLocaleString()}명).`);
+    } catch {
+      sessionStorage.removeItem('continuousOperatorPrefill');
+    }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleSave = async () => {
     if (!editing?.name?.trim() || !editing?.objective?.trim()) {
@@ -235,6 +302,10 @@ export default function ContinuousOperatorPage() {
           schedule: editing.schedule || 'daily',
           schedule_time: editing.scheduleTime || '09:00',
           status: editing.status,
+          // ★ D212+ 5번 (2026-05-23 Harold 명시): 비용 제어 영역 전달
+          budget_monthly: editing.budgetMonthly,
+          budget_daily: editing.budgetDaily,
+          budget_alert_threshold: editing.budgetAlertThreshold,
         }),
       });
       const data = await res.json();
@@ -437,6 +508,65 @@ export default function ContinuousOperatorPage() {
             조건에 맞는 고객이 0명이면 제안이 만들어지지 않습니다.
           </div>
         </div>
+
+        {/* ★ D212+ 1+2+3번 (2026-05-23 Harold 명시): AI 학습 영역 안내 카드 — 회사별 누적 학습 본질 */}
+        {learningSummary && learningSummary.memory.total > 0 && (
+          <div className="bg-gradient-to-br from-indigo-500/10 via-violet-500/5 to-fuchsia-500/10 border border-indigo-400/30 rounded-xl p-4">
+            <div className="flex items-center gap-2 mb-3">
+              <Brain className="w-4 h-4 text-indigo-300" />
+              <span className="text-sm font-semibold text-indigo-100">AI 학습 현황 (시간 갈수록 더 똑똑해집니다)</span>
+              {learningSummary.memory.lastLearnedAt && (
+                <span className="ml-auto text-[10px] text-white/40">
+                  마지막 학습 {new Date(learningSummary.memory.lastLearnedAt).toLocaleDateString('ko-KR')}
+                </span>
+              )}
+            </div>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mb-3">
+              <div className="p-2.5 bg-white/5 rounded-lg">
+                <div className="text-[10px] text-white/40">학습 누적</div>
+                <div className="text-base font-bold font-mono text-indigo-200">{learningSummary.memory.total}건</div>
+              </div>
+              <div className="p-2.5 bg-white/5 rounded-lg">
+                <div className="text-[10px] text-white/40">성공 패턴</div>
+                <div className="text-base font-bold font-mono text-emerald-200">{learningSummary.memory.successPatterns}건</div>
+              </div>
+              <div className="p-2.5 bg-white/5 rounded-lg">
+                <div className="text-[10px] text-white/40">30일 제안</div>
+                <div className="text-base font-bold font-mono text-cyan-200">{learningSummary.performance.totalProposals30d}건</div>
+              </div>
+              <div className="p-2.5 bg-white/5 rounded-lg">
+                <div className="text-[10px] text-white/40">승인률</div>
+                <div className="text-base font-bold font-mono text-amber-200">
+                  {learningSummary.performance.totalProposals30d > 0
+                    ? `${Math.round((learningSummary.performance.approvedCount / learningSummary.performance.totalProposals30d) * 100)}%`
+                    : '-'}
+                </div>
+              </div>
+            </div>
+            {/* 옛 winner variant 영역 */}
+            {learningSummary.variantWinner && learningSummary.variantWinner.sent > 0 && (
+              <div className="flex items-center gap-2 text-[11px] text-white/70 p-2 bg-violet-500/10 border border-violet-400/20 rounded-lg mb-2">
+                <Sparkles className="w-3 h-3 text-violet-300 flex-shrink-0" />
+                <span>
+                  지난 14일 가장 효과 좋은 변형 = <span className="font-semibold text-violet-200">Variant {learningSummary.variantWinner.variantLabel}</span>
+                  <span className="text-white/40"> (클릭률 {(learningSummary.variantWinner.ctr * 100).toFixed(1)}% · 발송 {learningSummary.variantWinner.sent}건)</span>
+                </span>
+              </div>
+            )}
+            {/* 최고 성과 패턴 3건 */}
+            {learningSummary.topPatterns.length > 0 && (
+              <div className="space-y-1">
+                <div className="text-[10px] text-white/40 font-semibold mb-1">최고 성과 학습 패턴 (AI가 매일 활용)</div>
+                {learningSummary.topPatterns.slice(0, 3).map((p, idx) => (
+                  <div key={idx} className="flex items-start gap-2 text-[11px] text-white/70 pl-2 border-l-2 border-indigo-400/30">
+                    <span className="flex-1 leading-relaxed">{p.summary}</span>
+                    <span className="text-[10px] text-amber-300/70 font-mono flex-shrink-0">{p.usageCount}회 활용</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
 
         {error && (
           <div className="bg-rose-500/10 border border-rose-400/30 rounded-lg p-3 text-sm text-rose-300">
@@ -676,37 +806,75 @@ export default function ContinuousOperatorPage() {
                 </button>
               </div>
             ) : (
-              operators.map((op) => (
-                <div key={op.id} className="bg-white/5 border border-white/10 rounded-xl p-5">
-                  <div className="flex items-start justify-between gap-4">
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2 mb-1">
-                        <div className="text-base font-bold text-white">{op.name}</div>
-                        <StatusBadge status={op.status} />
+              operators.map((op) => {
+                // ★ D212+ 5번 (2026-05-23 Harold 명시): 예산 영역 사용률 계산
+                const monthSpent = op.budgetSpentMonth || 0;
+                const monthBudget = op.budgetMonthly || 0;
+                const monthPct = monthBudget > 0 ? (monthSpent / monthBudget) * 100 : 0;
+                const alertThreshold = op.budgetAlertThreshold || 80;
+                const isMonthAlert = monthBudget > 0 && monthPct >= alertThreshold;
+                const isMonthOver = monthBudget > 0 && monthPct >= 100;
+                return (
+                  <div key={op.id} className="bg-white/5 border border-white/10 rounded-xl p-5">
+                    <div className="flex items-start justify-between gap-4">
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 mb-1">
+                          <div className="text-base font-bold text-white">{op.name}</div>
+                          <StatusBadge status={op.status} />
+                        </div>
+                        <div className="text-sm text-white/70 mb-2">"{op.objective}"</div>
+                        <div className="flex flex-wrap gap-3 text-xs text-white/50">
+                          <span><Clock className="w-3 h-3 inline" /> {op.schedule} {op.scheduleTime} (KST)</span>
+                          <span>·</span>
+                          <span>다음 실행 {op.nextRunAt ? new Date(op.nextRunAt).toLocaleString('ko-KR') : '-'}</span>
+                          <span>·</span>
+                          <span>제안 {op.totalProposals}건 (승인 {op.totalApproved} / 거부 {op.totalRejected} / 자동 {op.totalAutoExecuted})</span>
+                        </div>
+                        {/* ★ D212+ 5번 (2026-05-23 Harold 명시): 예산 영역 시각화 */}
+                        {monthBudget > 0 && (
+                          <div className="mt-3 p-2.5 bg-slate-950/50 border border-white/10 rounded-lg">
+                            <div className="flex items-center justify-between text-[11px] mb-1.5">
+                              <span className={isMonthOver ? 'text-rose-300 font-semibold' : isMonthAlert ? 'text-amber-300 font-semibold' : 'text-white/60'}>
+                                이번 달 예산 사용
+                              </span>
+                              <span className="text-white/70 font-mono">
+                                {monthSpent.toLocaleString()}원 / {monthBudget.toLocaleString()}원 ({monthPct.toFixed(0)}%)
+                              </span>
+                            </div>
+                            <div className="h-1.5 bg-white/10 rounded-full overflow-hidden">
+                              <div
+                                className={`h-full ${isMonthOver ? 'bg-rose-400' : isMonthAlert ? 'bg-amber-400' : 'bg-emerald-400'}`}
+                                style={{ width: `${Math.min(100, monthPct)}%` }}
+                              />
+                            </div>
+                            {isMonthOver && (
+                              <div className="mt-1.5 text-[10px] text-rose-300 flex items-center gap-1">
+                                <AlertCircle className="w-2.5 h-2.5" /> 월 예산 초과 — 새 제안 생성 자동 차단
+                              </div>
+                            )}
+                            {!isMonthOver && isMonthAlert && (
+                              <div className="mt-1.5 text-[10px] text-amber-300 flex items-center gap-1">
+                                <AlertCircle className="w-2.5 h-2.5" /> 알림 임계값 {alertThreshold}% 도달
+                              </div>
+                            )}
+                          </div>
+                        )}
                       </div>
-                      <div className="text-sm text-white/70 mb-2">"{op.objective}"</div>
-                      <div className="flex flex-wrap gap-3 text-xs text-white/50">
-                        <span><Clock className="w-3 h-3 inline" /> {op.schedule} {op.scheduleTime} (KST)</span>
-                        <span>·</span>
-                        <span>다음 실행 {op.nextRunAt ? new Date(op.nextRunAt).toLocaleString('ko-KR') : '-'}</span>
-                        <span>·</span>
-                        <span>제안 {op.totalProposals}건 (승인 {op.totalApproved} / 거부 {op.totalRejected} / 자동 {op.totalAutoExecuted})</span>
+                      <div className="flex flex-col gap-1.5">
+                        <button onClick={() => handleRunNow(op.id)} className="text-xs bg-indigo-500/20 hover:bg-indigo-500/30 text-indigo-200 px-2 py-1 rounded flex items-center gap-1 border border-indigo-400/30">
+                          <Play className="w-3 h-3" /> 지금 실행
+                        </button>
+                        <button onClick={() => setEditing(op)} className="text-xs text-white/70 hover:bg-white/10 px-2 py-1 rounded flex items-center gap-1 border border-white/10">
+                          <Edit2 className="w-3 h-3" /> 수정
+                        </button>
+                        <button onClick={() => handleDelete(op.id)} className="text-xs text-rose-300 hover:bg-rose-500/20 px-2 py-1 rounded flex items-center gap-1 border border-rose-400/30">
+                          <Trash2 className="w-3 h-3" /> 중단
+                        </button>
                       </div>
-                    </div>
-                    <div className="flex flex-col gap-1.5">
-                      <button onClick={() => handleRunNow(op.id)} className="text-xs bg-indigo-50 hover:bg-indigo-100 text-indigo-200 px-2 py-1 rounded flex items-center gap-1">
-                        <Play className="w-3 h-3" /> 지금 실행
-                      </button>
-                      <button onClick={() => setEditing(op)} className="text-xs text-white/70 hover:bg-white/5 px-2 py-1 rounded flex items-center gap-1">
-                        <Edit2 className="w-3 h-3" /> 수정
-                      </button>
-                      <button onClick={() => handleDelete(op.id)} className="text-xs text-rose-500 hover:bg-rose-50 px-2 py-1 rounded flex items-center gap-1">
-                        <Trash2 className="w-3 h-3" /> 중단
-                      </button>
                     </div>
                   </div>
-                </div>
-              ))
+                );
+              })
             )}
           </>
         )}
@@ -956,6 +1124,56 @@ export default function ContinuousOperatorPage() {
                   </select>
                 </div>
               )}
+
+              {/* ★ D212+ 5번 (2026-05-23 Harold 명시): 비용 제어 영역 — 월 예산 + 일별 한도 + 알림 임계값 */}
+              <div className="p-3 bg-emerald-500/5 border border-emerald-400/30 rounded-lg space-y-3">
+                <div className="flex items-center gap-1.5 text-xs font-semibold text-emerald-200">
+                  <Zap className="w-3.5 h-3.5" />
+                  비용 제어 (선택 — 비워두면 무제한)
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-[11px] text-white/60 block mb-1">월 예산 (원)</label>
+                    <input
+                      type="number"
+                      min="0"
+                      step="10000"
+                      value={editing.budgetMonthly ?? ''}
+                      onChange={(e) => setEditing({ ...editing, budgetMonthly: e.target.value === '' ? null : Number(e.target.value) })}
+                      placeholder="예: 500000"
+                      className="w-full px-3 py-2 bg-slate-950 border border-white/10 rounded-lg text-sm text-white placeholder-white/30 focus:outline-none focus:border-emerald-400/50 transition-colors"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[11px] text-white/60 block mb-1">일별 한도 (원)</label>
+                    <input
+                      type="number"
+                      min="0"
+                      step="5000"
+                      value={editing.budgetDaily ?? ''}
+                      onChange={(e) => setEditing({ ...editing, budgetDaily: e.target.value === '' ? null : Number(e.target.value) })}
+                      placeholder="예: 50000"
+                      className="w-full px-3 py-2 bg-slate-950 border border-white/10 rounded-lg text-sm text-white placeholder-white/30 focus:outline-none focus:border-emerald-400/50 transition-colors"
+                    />
+                  </div>
+                </div>
+                <div>
+                  <label className="text-[11px] text-white/60 block mb-1">알림 임계값 (%)</label>
+                  <input
+                    type="number"
+                    min="50"
+                    max="100"
+                    step="5"
+                    value={editing.budgetAlertThreshold ?? 80}
+                    onChange={(e) => setEditing({ ...editing, budgetAlertThreshold: Number(e.target.value) })}
+                    className="w-full px-3 py-2 bg-slate-950 border border-white/10 rounded-lg text-sm text-white focus:outline-none focus:border-emerald-400/50 transition-colors"
+                  />
+                  <div className="text-[10px] text-white/40 mt-1">예산 사용률이 임계값에 도달하면 자동 알림 (기본 80%)</div>
+                </div>
+                <div className="text-[10px] text-emerald-200/70 leading-relaxed">
+                  예산 초과 시 새 제안 생성이 자동 차단됩니다. 회사 admin 신뢰 본질입니다.
+                </div>
+              </div>
 
               <div className="bg-amber-500/10 border border-amber-400/30 rounded-lg p-3 text-xs text-amber-100 flex items-start gap-2">
                 <AlertCircle className="w-3.5 h-3.5 mt-0.5 shrink-0" />

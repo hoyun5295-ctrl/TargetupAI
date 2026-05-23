@@ -305,7 +305,8 @@ export default function PredictiveDashboardPage() {
     }
   };
 
-  // ★ D211+ Predictive 강화 (2026-05-23 Harold 명시): 1-click 액션 — AI Operator prefill 진입
+  // ★ D211+ Predictive 강화 (2026-05-23 Harold 명시): 1-click 액션 — AI 자동 마케팅 prefill 진입
+  // ★ D212+ 4번 (2026-05-23 Harold 명시): Predictive 1-click → 매일 자동 마케팅 영역 (1회성 X — 진정 자동 본질)
   const handleQuickAction = async (actionType: 'churn_recovery' | 'purchase_push' | 'vip_engagement') => {
     setQuickActionLoading(actionType);
     try {
@@ -316,13 +317,28 @@ export default function PredictiveDashboardPage() {
       });
       const data: QuickActionResponse & { success: boolean; error?: string } = await res.json();
       if (data.success) {
+        // ★ D212+ 4번 (2026-05-23 Harold 명시): continuousOperatorPrefill 영역 — ContinuousOperator 진입 시 자동 마케팅 모달 자동 열기
+        const actionLabelMap: Record<string, string> = {
+          churn_recovery: '이탈 위험 회복',
+          purchase_push: '구매 유도',
+          vip_engagement: 'VIP LTV 보존',
+        };
+        sessionStorage.setItem('continuousOperatorPrefill', JSON.stringify({
+          name: actionLabelMap[actionType] || '자동 마케팅',
+          objective: data.objective,
+          actionType,
+          targetCount: data.targetCount,
+          suggestedChannel: data.suggestedChannel,
+          suggestedTone: data.suggestedTone,
+        }));
+        // 옛 영역 정합 (1회성 발송 영역 활용 가능 본질)
         sessionStorage.setItem('aiOperatorPrefill', JSON.stringify({
           objective: data.objective,
           targetFilters: data.targetFilters,
           suggestedChannel: data.suggestedChannel,
           suggestedTone: data.suggestedTone,
         }));
-        navigate('/ai-operator');
+        navigate('/continuous-operator');
       }
     } catch {}
     finally {

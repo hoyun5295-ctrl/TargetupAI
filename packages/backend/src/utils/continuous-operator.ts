@@ -64,6 +64,12 @@ export interface ContinuousOperator {
   totalRejected: number;
   totalAutoExecuted: number;
   createdAt: Date;
+  // ★ D212+ 5번 (2026-05-23 Harold 명시): 비용 제어 강화 — 월 예산 + 일별 한도 + 알림 임계값
+  budgetMonthly: number | null;       // 월 예산 (원) — null = 무제한
+  budgetDaily: number | null;          // 일별 한도 (원) — null = 무제한
+  budgetAlertThreshold: number;        // 알림 임계값 % (default 80)
+  budgetSpentMonth: number;            // 이번 달 누적 사용 (원) — auto-computed
+  budgetSpentToday: number;            // 오늘 누적 사용 (원) — auto-computed
 }
 
 export interface OperatorProposal {
@@ -116,10 +122,24 @@ export async function createOperator(input: CreateOperatorInput): Promise<Contin
 }
 
 export async function listOperators(companyId: string): Promise<ContinuousOperator[]> {
+  // ★ D212+ 5번 (2026-05-23 Harold 명시): budget_spent_month + budget_spent_today 영역 sub-query
   const result = await query(
-    `SELECT * FROM continuous_operators
-     WHERE company_id = $1::uuid AND status != 'archived'
-     ORDER BY status DESC, created_at DESC`,
+    `SELECT o.*,
+       COALESCE((
+         SELECT SUM(cost_estimate) FROM operator_proposals
+         WHERE operator_id = o.id
+           AND created_at >= date_trunc('month', NOW())
+           AND status IN ('approved', 'auto_executed')
+       ), 0) AS budget_spent_month,
+       COALESCE((
+         SELECT SUM(cost_estimate) FROM operator_proposals
+         WHERE operator_id = o.id
+           AND created_at >= CURRENT_DATE
+           AND status IN ('approved', 'auto_executed')
+       ), 0) AS budget_spent_today
+     FROM continuous_operators o
+     WHERE o.company_id = $1::uuid AND o.status != 'archived'
+     ORDER BY o.status DESC, o.created_at DESC`,
     [companyId]
   );
   return result.rows.map(mapRowToOperator);
@@ -128,7 +148,17 @@ export async function listOperators(companyId: string): Promise<ContinuousOperat
 export async function updateOperator(
   companyId: string,
   operatorId: string,
-  patch: { name?: string; objective?: string; schedule?: OperatorSchedule; scheduleTime?: string; status?: OperatorStatus }
+  patch: {
+    name?: string;
+    objective?: string;
+    schedule?: OperatorSchedule;
+    scheduleTime?: string;
+    status?: OperatorStatus;
+    // ★ D212+ 5번 (2026-05-23 Harold 명시): 비용 제어 강화 patch
+    budgetMonthly?: number | null;
+    budgetDaily?: number | null;
+    budgetAlertThreshold?: number;
+  }
 ): Promise<ContinuousOperator | null> {
   // schedule/scheduleTime 변경 시 next_run_at 재계산
   let nextRunAt: Date | null = null;
@@ -151,6 +181,9 @@ export async function updateOperator(
       schedule_time = COALESCE($6, schedule_time),
       status = COALESCE($7, status),
       next_run_at = COALESCE($8, next_run_at),
+      budget_monthly = $9,
+      budget_daily = $10,
+      budget_alert_threshold = COALESCE($11, budget_alert_threshold),
       updated_at = NOW()
      WHERE id = $1::uuid AND company_id = $2::uuid
      RETURNING *`,
@@ -162,6 +195,9 @@ export async function updateOperator(
       patch.scheduleTime ?? null,
       patch.status ?? null,
       nextRunAt,
+      patch.budgetMonthly === undefined ? null : patch.budgetMonthly,
+      patch.budgetDaily === undefined ? null : patch.budgetDaily,
+      patch.budgetAlertThreshold ?? null,
     ]
   );
   return result.rows.length > 0 ? mapRowToOperator(result.rows[0]) : null;
@@ -198,15 +234,40 @@ interface CompanyContextRow {
 }
 
 export async function generateProposalForOperator(operatorId: string): Promise<OperatorProposal | null> {
-  // 1. Operator 조회
+  // 1. Operator 조회 — ★ D212+ 5번 (2026-05-23 Harold 명시): budget_spent 영역 sub-query 통합
   const operRes = await query(
-    `SELECT o.*, c.id AS c_id FROM continuous_operators o
+    `SELECT o.*, c.id AS c_id,
+       COALESCE((
+         SELECT SUM(cost_estimate) FROM operator_proposals
+         WHERE operator_id = o.id
+           AND created_at >= date_trunc('month', NOW())
+           AND status IN ('approved', 'auto_executed')
+       ), 0) AS budget_spent_month,
+       COALESCE((
+         SELECT SUM(cost_estimate) FROM operator_proposals
+         WHERE operator_id = o.id
+           AND created_at >= CURRENT_DATE
+           AND status IN ('approved', 'auto_executed')
+       ), 0) AS budget_spent_today
+     FROM continuous_operators o
      JOIN companies c ON o.company_id = c.id
      WHERE o.id = $1::uuid AND o.status = 'active'`,
     [operatorId]
   );
   if (operRes.rows.length === 0) return null;
   const operator = mapRowToOperator(operRes.rows[0]);
+
+  // ★ D212+ 5번 (2026-05-23 Harold 명시): 예산 초과 영역 차단 — 회사 admin 신뢰 본질
+  if (operator.budgetMonthly !== null && operator.budgetSpentMonth >= operator.budgetMonthly) {
+    console.log(`[ContinuousOperator] ${operator.name} 월 예산 초과 (${operator.budgetSpentMonth.toLocaleString()}원 / ${operator.budgetMonthly.toLocaleString()}원) → 제안서 생성 차단`);
+    await updateOperatorAfterRun(operator.id, operator.schedule, operator.scheduleTime, 0);
+    return null;
+  }
+  if (operator.budgetDaily !== null && operator.budgetSpentToday >= operator.budgetDaily) {
+    console.log(`[ContinuousOperator] ${operator.name} 일별 예산 초과 (${operator.budgetSpentToday.toLocaleString()}원 / ${operator.budgetDaily.toLocaleString()}원) → 제안서 생성 차단`);
+    await updateOperatorAfterRun(operator.id, operator.schedule, operator.scheduleTime, 0);
+    return null;
+  }
 
   // 2. 회사 컨텍스트 + 자동 실행 옵션 조회
   const ctxRes = await query(
@@ -569,6 +630,12 @@ function mapRowToOperator(row: any): ContinuousOperator {
     totalRejected: row.total_rejected || 0,
     totalAutoExecuted: row.total_auto_executed || 0,
     createdAt: new Date(row.created_at),
+    // ★ D212+ 5번 (2026-05-23 Harold 명시): 비용 제어 강화 영역 매핑
+    budgetMonthly: row.budget_monthly !== null && row.budget_monthly !== undefined ? Number(row.budget_monthly) : null,
+    budgetDaily: row.budget_daily !== null && row.budget_daily !== undefined ? Number(row.budget_daily) : null,
+    budgetAlertThreshold: Number(row.budget_alert_threshold) || 80,
+    budgetSpentMonth: Number(row.budget_spent_month) || 0,
+    budgetSpentToday: Number(row.budget_spent_today) || 0,
   };
 }
 
