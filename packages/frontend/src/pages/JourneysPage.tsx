@@ -17,6 +17,8 @@ import JourneyMmsUploader from '../components/journey/JourneyMmsUploader';
 import LiquidPreviewModal from '../components/journey/LiquidPreviewModal';
 // ★ D211+ Phase 3-fix (2026-05-23 Harold 명시): native confirm/prompt 영구 폐기 — 커스텀 다크 톤 모달 정합
 import JourneyActionConfirmModal, { JourneyActionMode } from '../components/journey/JourneyActionConfirmModal';
+// ★ D211+ Phase A 4번 (2026-05-23 Harold 명시): 흐름 다이어그램 시각화
+import JourneyFlowDiagram from '../components/journey/JourneyFlowDiagram';
 import AlimtalkChannelPanel, { type AlimtalkSenderProfile, type AlimtalkTemplate, type AlimtalkChannelState } from '../components/alimtalk/AlimtalkChannelPanel';
 import { detectLiquidSyntax, renderLiquid, flattenCustomerForLiquid, SAMPLE_CUSTOMERS } from '../utils/liquid-templating';
 // ★ D210+ Phase 2-fix6 (Harold 명시 2026-05-23): 변수 하이라이트 + 머지 미리보기 컨트롤타워.
@@ -69,6 +71,8 @@ interface JourneyRow {
   created_at: string;
   // ★ D211+ Phase 3 (2026-05-23 Harold 명시): 보관함 영역 (soft delete)
   archived_at?: string | null;
+  // ★ D211+ Phase A 5번 (2026-05-23 Harold 명시): 트리거 복합 조건 영역
+  trigger_filters?: Record<string, any>;
 }
 
 // ★ D211+ Phase 3 (2026-05-23 Harold 명시): status 필터 매트릭스 (전체/활성/일시정지/종료/보관함)
@@ -353,6 +357,10 @@ export default function JourneysPage() {
   const [statusFilter, setStatusFilter] = useState<JourneyStatusFilter>('all');
   // ★ D211+ Phase 3-fix (2026-05-23 Harold 명시): archive/unarchive/delete 영역 커스텀 다크 톤 모달 (native confirm/prompt 폐기)
   const [actionModal, setActionModal] = useState<{ mode: JourneyActionMode; journeyId: string; journeyName: string } | null>(null);
+  // ★ D211+ Phase A (2026-05-23 Harold 명시): 시뮬레이션 + 실시간 위치 영역
+  const [simulationMap, setSimulationMap] = useState<Record<string, any>>({});
+  const [simulationLoading, setSimulationLoading] = useState<Record<string, boolean>>({});
+  const [livePositionsMap, setLivePositionsMap] = useState<Record<string, any>>({});
 
   // One-shot AI 생성 흐름
   const [objective, setObjective] = useState('');
@@ -578,6 +586,38 @@ export default function JourneysPage() {
     }
   };
 
+  // ★ D211+ Phase A 1번 (2026-05-23 Harold 명시): 시뮬레이션 영역 — 회사 admin 1-click 호출 의무 (AI 호출 X / 단순 SQL 영역)
+  const loadSimulation = async (journeyId: string) => {
+    if (simulationLoading[journeyId]) return;
+    setSimulationLoading((prev) => ({ ...prev, [journeyId]: true }));
+    try {
+      const res = await fetch(`/api/ai/operator/journeys/${journeyId}/simulate`, {
+        headers: { Authorization: `Bearer ${token()}` },
+      });
+      const data = await res.json();
+      if (data.success && data.simulation) {
+        setSimulationMap((prev) => ({ ...prev, [journeyId]: data.simulation }));
+      }
+    } catch {}
+    finally {
+      setSimulationLoading((prev) => ({ ...prev, [journeyId]: false }));
+    }
+  };
+
+  // ★ D211+ Phase A 2번 (2026-05-23 Harold 명시): 실시간 위치 영역 — expand 시 자동 fetch (단순 SQL)
+  const loadLivePositions = async (journeyId: string) => {
+    if (livePositionsMap[journeyId]) return;
+    try {
+      const res = await fetch(`/api/ai/operator/journeys/${journeyId}/live-positions`, {
+        headers: { Authorization: `Bearer ${token()}` },
+      });
+      const data = await res.json();
+      if (data.success && data.snapshot) {
+        setLivePositionsMap((prev) => ({ ...prev, [journeyId]: data.snapshot }));
+      }
+    } catch {}
+  };
+
   // ★ D211+ Phase 2 (2026-05-23 Harold 명시): 다음 단계 추천 fetch (AI 호출 비용 영역 — 회사 admin 1-click 호출 의무)
   const loadNextStep = async (journeyId: string) => {
     if (nextStepLoading[journeyId]) return;
@@ -606,6 +646,8 @@ export default function JourneysPage() {
       loadSamples(journeyId);
       // ★ D211+ Phase 2 (2026-05-23 Harold 명시): expand 시 step별 진단 자동 fetch (AI 호출 X — DB 영역 빠른 영역)
       loadDiagnosis(journeyId);
+      // ★ D211+ Phase A 2번 (2026-05-23 Harold 명시): expand 시 실시간 위치 자동 fetch (DB 영역 빠른 영역)
+      loadLivePositions(journeyId);
     }
   };
 
@@ -1174,6 +1216,172 @@ export default function JourneysPage() {
                       </div>
                       {isExpanded && detail && (
                         <div className="border-t border-white/10 p-3 bg-slate-950/40 space-y-2">
+                          {/* ★ D211+ Phase A 4번 (2026-05-23 Harold 명시): 흐름 다이어그램 (step 흐름 + funnel + 실시간 위치 통합 시각화) */}
+                          <JourneyFlowDiagram
+                            steps={detail.steps}
+                            funnelStats={statsMap[j.id]?.map((s) => ({
+                              stepId: s.stepId,
+                              funnelPercentage: s.funnelPercentage,
+                              enteredCount: s.enteredCount,
+                              sentCount: s.sentCount,
+                              clickCount: s.clickCount,
+                            }))}
+                            livePositions={livePositionsMap[j.id]?.positions?.map((p: any) => ({
+                              stepId: p.stepId,
+                              activeCount: p.activeCount,
+                              avgDwellMinutes: p.avgDwellMinutes,
+                            }))}
+                          />
+
+                          {/* ★ D211+ Phase A 1번 (2026-05-23 Harold 명시): 시뮬레이션 카드 (draft/paused 영역 — 활성화 직전 안심 본질) */}
+                          {(j.status === 'draft' || j.status === 'paused') && (
+                            <div className="p-3 bg-emerald-500/5 border border-emerald-400/30 rounded-lg space-y-2">
+                              <div className="flex items-center gap-2">
+                                <TrendingUp className="w-4 h-4 text-emerald-300" />
+                                <span className="text-sm font-semibold text-emerald-100">활성화 직전 시뮬레이션</span>
+                              </div>
+                              {!simulationMap[j.id] ? (
+                                <div>
+                                  <p className="text-[11px] text-white/60 leading-relaxed mb-2">
+                                    트리거 매칭 customer + 예상 발송 건수 + 예상 비용 + 예상 매출 영향 영역 사전 확인 (실제 발송 X).
+                                  </p>
+                                  <button
+                                    onClick={(e) => { e.stopPropagation(); loadSimulation(j.id); }}
+                                    disabled={simulationLoading[j.id]}
+                                    className="px-3 py-1.5 bg-emerald-500/20 hover:bg-emerald-500/30 disabled:opacity-50 text-emerald-100 rounded text-xs flex items-center gap-1.5"
+                                  >
+                                    {simulationLoading[j.id] ? (
+                                      <><Loader2 className="w-3 h-3 animate-spin" /> 분석 중</>
+                                    ) : (
+                                      <><TrendingUp className="w-3 h-3" /> 시뮬레이션 실행</>
+                                    )}
+                                  </button>
+                                </div>
+                              ) : (
+                                <div className="space-y-2">
+                                  {/* 매칭 customer + 등급 분포 */}
+                                  <div className="grid grid-cols-2 gap-2">
+                                    <div className="p-2 bg-white/5 rounded">
+                                      <div className="text-[10px] text-white/40">트리거 매칭</div>
+                                      <div className="text-base font-semibold text-emerald-200 font-mono">{simulationMap[j.id].matchedCustomers.toLocaleString()}명</div>
+                                    </div>
+                                    <div className="p-2 bg-white/5 rounded">
+                                      <div className="text-[10px] text-white/40">총 예상 발송</div>
+                                      <div className="text-base font-semibold text-violet-200 font-mono">{simulationMap[j.id].totalEstimatedSends.toLocaleString()}건</div>
+                                    </div>
+                                    <div className="p-2 bg-white/5 rounded">
+                                      <div className="text-[10px] text-white/40">예상 비용</div>
+                                      <div className="text-base font-semibold text-amber-200 font-mono">{simulationMap[j.id].totalEstimatedCost.toLocaleString()}원</div>
+                                    </div>
+                                    <div className="p-2 bg-white/5 rounded">
+                                      <div className="text-[10px] text-white/40">예상 매출 영향</div>
+                                      <div className="text-base font-semibold text-cyan-200 font-mono">{simulationMap[j.id].estimatedRevenue.toLocaleString()}원</div>
+                                    </div>
+                                  </div>
+                                  {/* 등급 분포 */}
+                                  {simulationMap[j.id].customerSegments?.length > 0 && (
+                                    <div className="space-y-1">
+                                      <div className="text-[10px] text-white/40">등급 분포</div>
+                                      {simulationMap[j.id].customerSegments.slice(0, 5).map((seg: any) => (
+                                        <div key={seg.segment} className="flex items-center gap-2">
+                                          <div className="text-[10px] text-white/60 w-12">{seg.segment}</div>
+                                          <div className="flex-1 h-1.5 bg-white/10 rounded-full overflow-hidden">
+                                            <div className="h-full bg-emerald-400" style={{ width: `${seg.pct * 100}%` }} />
+                                          </div>
+                                          <div className="text-[10px] text-white/60 font-mono w-20 text-right">
+                                            {seg.count.toLocaleString()}명 ({(seg.pct * 100).toFixed(0)}%)
+                                          </div>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  )}
+                                  {/* 예상 클릭률 + 전환율 */}
+                                  <div className="text-[11px] text-white/70 leading-relaxed">
+                                    {simulationMap[j.id].reasoning}
+                                  </div>
+                                  <div className="flex items-center gap-3 text-[10px] text-white/50">
+                                    <span><MousePointerClick className="w-2.5 h-2.5 inline text-cyan-300" /> 예상 클릭률 {(simulationMap[j.id].estimatedClickRate * 100).toFixed(1)}%</span>
+                                    <span><TrendingUp className="w-2.5 h-2.5 inline text-emerald-300" /> 예상 전환율 {(simulationMap[j.id].estimatedConversionRate * 100).toFixed(1)}%</span>
+                                  </div>
+                                  {/* 경고 영역 */}
+                                  {simulationMap[j.id].warnings?.length > 0 && (
+                                    <div className="space-y-1">
+                                      {simulationMap[j.id].warnings.map((w: string, idx: number) => (
+                                        <div key={idx} className="flex items-start gap-1.5 text-[10px] text-amber-200/80">
+                                          <AlertTriangle className="w-2.5 h-2.5 flex-shrink-0 mt-0.5" />
+                                          <span>{w}</span>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  )}
+                                </div>
+                              )}
+                            </div>
+                          )}
+
+                          {/* ★ D211+ Phase A 5번 (2026-05-23 Harold 명시): 트리거 복합 조건 영역 (trigger_event + trigger_filters + customer_conditions) */}
+                          {detail.journey && (
+                            <div className="p-3 bg-violet-500/5 border border-violet-400/20 rounded-lg space-y-1.5">
+                              <div className="flex items-center gap-2">
+                                <FilterIcon className="w-4 h-4 text-violet-300" />
+                                <span className="text-sm font-semibold text-violet-100">트리거 조건</span>
+                                <span className="ml-auto text-[10px] text-white/40 font-mono">{detail.journey.trigger_event || 'custom'}</span>
+                              </div>
+                              {/* 기본 트리거 필터 영역 */}
+                              {detail.journey.trigger_filters && Object.keys(detail.journey.trigger_filters).filter((k) => k !== 'customer_conditions' && k !== 'logic').length > 0 && (
+                                <div className="flex flex-wrap gap-1.5">
+                                  {Object.entries(detail.journey.trigger_filters).filter(([k]) => k !== 'customer_conditions' && k !== 'logic').map(([k, v]) => (
+                                    <span key={k} className="px-2 py-0.5 bg-white/5 border border-white/10 rounded text-[10px] text-white/70 font-mono">
+                                      {k}: {String(v)}
+                                    </span>
+                                  ))}
+                                </div>
+                              )}
+                              {/* customer_conditions 복합 영역 */}
+                              {Array.isArray(detail.journey.trigger_filters?.customer_conditions) && detail.journey.trigger_filters.customer_conditions.length > 0 ? (
+                                <div className="space-y-1 pt-1.5 border-t border-white/10">
+                                  <div className="flex items-center gap-2">
+                                    <span className="text-[10px] text-white/40 font-semibold">고객 복합 조건</span>
+                                    <span className="px-1.5 py-0.5 bg-violet-500/20 text-violet-200 rounded text-[9px] font-mono">
+                                      {detail.journey.trigger_filters?.logic || 'AND'}
+                                    </span>
+                                  </div>
+                                  <div className="space-y-0.5">
+                                    {detail.journey.trigger_filters.customer_conditions.map((cond: any, idx: number) => (
+                                      <div key={idx} className="flex items-center gap-1.5 text-[10px] text-white/70 font-mono">
+                                        <span className="text-violet-300">{cond.field}</span>
+                                        <span className="text-white/40">{cond.op}</span>
+                                        <span className="text-white/80">{Array.isArray(cond.value) ? cond.value.join(', ') : String(cond.value ?? '')}</span>
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                              ) : (
+                                <div className="pt-1.5 border-t border-white/10 text-[10px] text-white/40 leading-relaxed">
+                                  고객 복합 조건 영역 없음 — 트리거 이벤트 만족 시 모든 active customer 영역 진입. 등급/지역/연령 등 추가 조건 영역은 다음 업데이트 안 편집 UI 영역 신설.
+                                </div>
+                              )}
+                            </div>
+                          )}
+
+                          {/* ★ D211+ Phase A 2번 (2026-05-23 Harold 명시): 실시간 진행 위치 요약 (active 여정 영역만) */}
+                          {j.status === 'active' && livePositionsMap[j.id] && livePositionsMap[j.id].totalActive > 0 && (
+                            <div className="p-3 bg-cyan-500/5 border border-cyan-400/30 rounded-lg">
+                              <div className="flex items-center gap-2 mb-1">
+                                <Users className="w-4 h-4 text-cyan-300" />
+                                <span className="text-sm font-semibold text-cyan-100">실시간 진행 위치</span>
+                                <span className="ml-auto text-[10px] text-white/40">
+                                  현재 {livePositionsMap[j.id].totalActive.toLocaleString()}명 / 24h 완료 {livePositionsMap[j.id].totalCompleted24h.toLocaleString()}명
+                                </span>
+                              </div>
+                              {livePositionsMap[j.id].nextRunAt && (
+                                <div className="text-[11px] text-cyan-200/80">
+                                  다음 발송 예정 — {new Date(livePositionsMap[j.id].nextRunAt).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' })}
+                                </div>
+                              )}
+                            </div>
+                          )}
+
                           {/* ★ D210+ Phase 3 (2026-05-23 Harold 명시): funnel 시각화 영역 (JourneyStepStat funnelPercentage + 이탈 사유 5 영역) */}
                           {statsMap[j.id] && statsMap[j.id].length > 0 && statsMap[j.id].some((st) => st.enteredCount > 0) && (
                             <div className="p-3 bg-violet-500/5 border border-violet-400/30 rounded-lg space-y-2">

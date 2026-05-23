@@ -604,3 +604,90 @@ export async function buildJourneyStats(journeyId: string, companyId: string): P
 
   return { overview, steps, segments, hourly, weekday, variants };
 }
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// ★ D211+ Phase A 2번 (2026-05-23 Harold 명시): 실시간 customer 진행 위치 영역
+//
+//   본질 (회사 admin "지금 이 순간 우리 고객 어디 있는지" 인지):
+//     - step별 현재 active execution 수
+//     - 단계별 평균 체류 시간 (옛 entered_at 영역 vs 현재)
+//     - 다음 발송 예정 시간 (가장 가까운 next_run_at)
+//
+//   옛 step 통계 영역 = 누적 영역 / 본 영역 = 실시간 영역
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+export interface JourneyLivePosition {
+  stepId: string;
+  stepOrder: number;
+  stepType: string;
+  channel: string | null;
+  activeCount: number;            // 현재 본 step 안 active execution 수
+  avgDwellMinutes: number;        // 본 step 안 평균 체류 시간 (분)
+  nextRunAt: string | null;       // 본 step 영역 가장 가까운 next_run_at (ISO)
+}
+
+export interface JourneyLiveSnapshot {
+  journeyId: string;
+  snapshotAt: Date;
+  totalActive: number;
+  totalCompleted24h: number;
+  positions: JourneyLivePosition[];
+  nextRunAt: string | null;       // 전체 journey 영역 가장 가까운 next_run_at
+}
+
+export async function getJourneyLiveSnapshot(journeyId: string, companyId: string): Promise<JourneyLiveSnapshot> {
+  await verifyJourneyOwnership(journeyId, companyId);
+
+  // 전체 active + 24h 안 completed
+  const overviewRes = await query(
+    `SELECT
+       COUNT(*) FILTER (WHERE status = 'active')::int AS total_active,
+       COUNT(*) FILTER (WHERE status = 'completed' AND completed_at >= NOW() - INTERVAL '24 hours')::int AS completed_24h,
+       MIN(next_run_at) FILTER (WHERE status = 'active') AS next_run_at
+     FROM journey_executions
+     WHERE journey_id = $1::uuid`,
+    [journeyId],
+  );
+  const overview = overviewRes.rows[0] || {};
+
+  // step별 실시간 위치
+  // current_step_order 매트릭스 = journey_executions.current_step_order
+  // 옛 매트릭스 = current_step_order 영역이 1-based (1, 2, 3...) 정합
+  const stepsRes = await query(
+    `SELECT
+       js.id AS step_id,
+       js.step_order,
+       js.step_type,
+       js.channel,
+       COALESCE(SUM(CASE WHEN je.status = 'active' AND je.current_step_order = js.step_order THEN 1 ELSE 0 END), 0)::int AS active_count,
+       AVG(EXTRACT(EPOCH FROM (NOW() - je.entered_at)) / 60)
+         FILTER (WHERE je.status = 'active' AND je.current_step_order = js.step_order) AS avg_dwell_minutes,
+       MIN(je.next_run_at)
+         FILTER (WHERE je.status = 'active' AND je.current_step_order = js.step_order) AS next_run_at
+     FROM journey_steps js
+     LEFT JOIN journey_executions je ON je.journey_id = js.journey_id
+     WHERE js.journey_id = $1::uuid
+     GROUP BY js.id, js.step_order, js.step_type, js.channel
+     ORDER BY js.step_order ASC`,
+    [journeyId],
+  );
+
+  const positions: JourneyLivePosition[] = stepsRes.rows.map((row: any) => ({
+    stepId: row.step_id,
+    stepOrder: Number(row.step_order),
+    stepType: row.step_type,
+    channel: row.channel,
+    activeCount: Number(row.active_count) || 0,
+    avgDwellMinutes: row.avg_dwell_minutes !== null ? Math.round(Number(row.avg_dwell_minutes)) : 0,
+    nextRunAt: row.next_run_at ? new Date(row.next_run_at).toISOString() : null,
+  }));
+
+  return {
+    journeyId,
+    snapshotAt: new Date(),
+    totalActive: Number(overview.total_active) || 0,
+    totalCompleted24h: Number(overview.completed_24h) || 0,
+    positions,
+    nextRunAt: overview.next_run_at ? new Date(overview.next_run_at).toISOString() : null,
+  };
+}

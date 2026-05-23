@@ -94,6 +94,10 @@ import {
 import { diagnoseCompanyHealth } from '../utils/ai-self-diagnosis';
 // ★ D211+ Phase 2 (2026-05-23 Harold 명시): CT-59 Journey Step Diagnosis — 여정 단계별 진단 + 다음 단계 추천
 import { diagnoseJourneySteps, recommendNextJourneyStep } from '../utils/journey-step-diagnosis';
+// ★ D211+ Phase A (2026-05-23 Harold 명시): CT-60/CT-61 시뮬레이션 + variant 자동 생성 + 실시간 위치
+import { simulateJourney } from '../utils/journey-simulator';
+import { generateVariantsFromMessage } from '../utils/variant-generator';
+import { getJourneyLiveSnapshot } from '../utils/journey-stats';
 
 
 // ★ D79: 인라인 래퍼 제거 → CT-01 buildFilterWhereClauseCompat 직접 사용
@@ -2613,6 +2617,90 @@ router.get('/operator/journeys/:id/recommend-next-step', async (req: Request, re
     console.error('[Journey recommend-next-step] 오류:', err);
     const isAuthErr = err?.message?.includes('회사 격리');
     return res.status(isAuthErr ? 403 : 500).json({ success: false, error: err?.message || '추천 영역 오류' });
+  }
+});
+
+// ════════════════════════════════════════════════════════════════════
+// ★ D211+ Phase A (2026-05-23 Harold 명시): 시뮬레이션 + 실시간 위치 + variant 자동 생성 endpoint 3건
+// ════════════════════════════════════════════════════════════════════
+
+// GET /api/ai/operator/journeys/:id/simulate — 활성화 직전 가상 실행 시뮬레이션
+router.get('/operator/journeys/:id/simulate', async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+    const planCtx = await loadPlanContext(companyId);
+    if (!planCtx) return res.status(404).json({ success: false, error: '회사 정보를 찾을 수 없습니다.' });
+    if (!isAiOperatorAllowed(planCtx, req.user)) {
+      return res.status(403).json({ success: false, error: 'AI Operator 진입 권한이 없습니다.', code: 'AI_OPERATOR_GATED' });
+    }
+    const simulation = await simulateJourney(req.params.id, companyId);
+    return res.json({ success: true, simulation });
+  } catch (err: any) {
+    console.error('[Journey simulate] 오류:', err);
+    const isAuthErr = err?.message?.includes('회사 격리');
+    return res.status(isAuthErr ? 403 : 500).json({ success: false, error: err?.message || '시뮬레이션 영역 오류' });
+  }
+});
+
+// GET /api/ai/operator/journeys/:id/live-positions — 실시간 customer 진행 위치
+router.get('/operator/journeys/:id/live-positions', async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+    const planCtx = await loadPlanContext(companyId);
+    if (!planCtx) return res.status(404).json({ success: false, error: '회사 정보를 찾을 수 없습니다.' });
+    if (!isAiOperatorAllowed(planCtx, req.user)) {
+      return res.status(403).json({ success: false, error: 'AI Operator 진입 권한이 없습니다.', code: 'AI_OPERATOR_GATED' });
+    }
+    const snapshot = await getJourneyLiveSnapshot(req.params.id, companyId);
+    return res.json({ success: true, snapshot });
+  } catch (err: any) {
+    console.error('[Journey live-positions] 오류:', err);
+    const isAuthErr = err?.message?.includes('회사 격리');
+    return res.status(isAuthErr ? 403 : 500).json({ success: false, error: err?.message || '실시간 위치 영역 오류' });
+  }
+});
+
+// POST /api/ai/operator/journeys/steps/:stepId/variants/auto-generate — AI A/B variant 자동 생성
+router.post('/operator/journeys/steps/:stepId/variants/auto-generate', async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+    const planCtx = await loadPlanContext(companyId);
+    if (!planCtx) return res.status(404).json({ success: false, error: '회사 정보를 찾을 수 없습니다.' });
+    if (!isAiOperatorAllowed(planCtx, req.user)) {
+      return res.status(403).json({ success: false, error: 'AI Operator 진입 권한이 없습니다.', code: 'AI_OPERATOR_GATED' });
+    }
+    // 회사 격리 검증 — step → journey → 회사 영역
+    const own = await query(
+      `SELECT 1 FROM journey_steps s
+       INNER JOIN journeys j ON j.id = s.journey_id
+       WHERE s.id = $1::uuid AND j.company_id = $2::uuid`,
+      [req.params.stepId, companyId]
+    );
+    if (own.rows.length === 0) {
+      return res.status(404).json({ success: false, error: 'step 영역 찾을 수 없습니다.' });
+    }
+    const { baseMessage, channel, subject, isAd } = req.body || {};
+    if (typeof baseMessage !== 'string' || baseMessage.trim().length < 10) {
+      return res.status(400).json({ success: false, error: 'base 메시지 영역 10자 이상 의무.' });
+    }
+    if (!['sms', 'lms', 'mms', 'kakao'].includes(channel)) {
+      return res.status(400).json({ success: false, error: 'channel 영역 sms/lms/mms/kakao 의무.' });
+    }
+    const result = await generateVariantsFromMessage({
+      stepId: req.params.stepId,
+      companyId,
+      baseMessage: baseMessage.trim(),
+      channel,
+      subject: typeof subject === 'string' ? subject : null,
+      isAd: !!isAd,
+    });
+    return res.json({ success: true, ...result });
+  } catch (err: any) {
+    console.error('[Journey variants auto-generate] 오류:', err);
+    return res.status(500).json({ success: false, error: err?.message || 'variant 자동 생성 영역 오류' });
   }
 });
 

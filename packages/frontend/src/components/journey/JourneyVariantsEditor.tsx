@@ -19,7 +19,7 @@
  */
 
 import { useState, useEffect, useCallback } from 'react';
-import { Beaker, Plus, Trash2, Save, Loader2, X, BarChart3, Info, Trophy, Activity, MousePointerClick, ShoppingCart } from 'lucide-react';
+import { Beaker, Plus, Trash2, Save, Loader2, X, BarChart3, Info, Trophy, Activity, MousePointerClick, ShoppingCart, Sparkles, AlertTriangle } from 'lucide-react';
 
 type ChannelType = 'sms' | 'lms' | 'mms' | 'kakao';
 
@@ -105,6 +105,13 @@ export default function JourneyVariantsEditor({
   const [winnerDeclaration, setWinnerDeclaration] = useState<VariantWinnerDeclaration | null>(null);
   // ★ D211+ Phase 1 (2026-05-23 Harold 명시): variantsCI state — Beta 95% 신뢰 구간 시각화 영역
   const [variantsCI, setVariantsCI] = useState<VariantCI[]>([]);
+  // ★ D211+ Phase A 3번 (2026-05-23 Harold 명시): AI 자동 생성 영역 (3 톤 — 감성/실용/캐주얼)
+  const [autoGenerating, setAutoGenerating] = useState(false);
+  const [generatedVariants, setGeneratedVariants] = useState<Array<{ tone: string; messageTemplate: string; byteCount: number; reasoning: string }>>([]);
+  const [generationWarnings, setGenerationWarnings] = useState<string[]>([]);
+  // ★ D211+ Phase A-fix (2026-05-23 Harold 명시): native confirm 영구 폐기 — 인라인 confirm card 영역
+  const [pendingDelete, setPendingDelete] = useState<JourneyStepVariant | null>(null);
+  const [pendingTrafficApply, setPendingTrafficApply] = useState<boolean>(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -215,9 +222,86 @@ export default function JourneyVariantsEditor({
     }
   };
 
+  // ★ D211+ Phase A 3번 (2026-05-23 Harold 명시): AI 자동 생성 호출
+  const handleAutoGenerate = async () => {
+    if (isReadOnly) return;
+    if (!defaultMessageTemplate || defaultMessageTemplate.trim().length < 10) {
+      setError('base 메시지 영역 10자 이상 의무 — step 본문 영역 먼저 작성해주세요.');
+      return;
+    }
+    setAutoGenerating(true);
+    setGeneratedVariants([]);
+    setGenerationWarnings([]);
+    setError(null);
+    try {
+      const res = await fetch(
+        `/api/ai/operator/journeys/steps/${stepId}/variants/auto-generate`,
+        {
+          method: 'POST',
+          headers: fetchHeaders(),
+          body: JSON.stringify({
+            baseMessage: defaultMessageTemplate,
+            channel: defaultChannel,
+            subject: defaultSubject,
+          }),
+        },
+      );
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || 'AI 자동 생성 실패');
+      }
+      setGeneratedVariants(data.variants || []);
+      setGenerationWarnings(data.warnings || []);
+    } catch (err: any) {
+      setError(err?.message || 'AI 자동 생성 영역 오류');
+    } finally {
+      setAutoGenerating(false);
+    }
+  };
+
+  // ★ D211+ Phase A 3번 (2026-05-23 Harold 명시): 생성된 variant 영역 명시 적용 (회사 admin 명시 선택)
+  const handleApplyGenerated = async (gen: { tone: string; messageTemplate: string }) => {
+    if (isReadOnly) return;
+    const newId = nextVariantId(variants);
+    setSaving(true);
+    try {
+      const res = await fetch(
+        `/api/ai/operator/journeys/${journeyId}/steps/${stepId}/variants`,
+        {
+          method: 'POST',
+          headers: fetchHeaders(),
+          body: JSON.stringify({
+            variantId: newId,
+            messageTemplate: gen.messageTemplate,
+            subject: defaultSubject,
+            channel: defaultChannel,
+            trafficWeight: 1 / (variants.length + 1),
+          }),
+        },
+      );
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || 'variant 적용 실패');
+      }
+      await loadVariants();
+      setActiveTab(newId);
+      // 적용된 영역 = 생성 리스트 영역 안에서 제거
+      setGeneratedVariants((prev) => prev.filter((g) => g.messageTemplate !== gen.messageTemplate));
+    } catch (err: any) {
+      setError(err?.message || 'variant 적용 실패');
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const handleDeleteVariant = async (variant: JourneyStepVariant) => {
     if (isReadOnly) return;
-    if (!confirm(`Variant ${variant.variantId}을 삭제하시겠습니까?`)) return;
+    // ★ D211+ Phase A-fix (2026-05-23 Harold 명시): native confirm 폐기 — pendingDelete state 영역 인라인 confirm 정합
+    setPendingDelete(variant);
+  };
+
+  const executeDeleteVariant = async (variant: JourneyStepVariant) => {
+    setPendingDelete(null);
     setSaving(true);
     setError(null);
     try {
@@ -262,6 +346,70 @@ export default function JourneyVariantsEditor({
         <br />
         <span className="text-amber-300/70">AI 임의 혜택 작성 금지 — 회사 admin이 직접 작성 (영구 룰).</span>
       </div>
+
+      {/* ★ D211+ Phase A 3번 (2026-05-23 Harold 명시): AI 자동 생성 영역 — 3 톤 (감성/실용/캐주얼) */}
+      {!isReadOnly && variants.length < 3 && (
+        <div className="p-2.5 bg-gradient-to-br from-violet-500/10 to-fuchsia-500/10 border border-violet-400/20 rounded-lg">
+          <div className="flex items-center gap-2 mb-1.5">
+            <Sparkles className="w-3.5 h-3.5 text-violet-300" />
+            <span className="text-[11px] font-semibold text-violet-100">AI 자동 생성 — 3 톤 다양화</span>
+            <button
+              onClick={handleAutoGenerate}
+              disabled={autoGenerating || !defaultMessageTemplate || defaultMessageTemplate.trim().length < 10}
+              className="ml-auto px-2.5 py-1 bg-violet-500/30 hover:bg-violet-500/50 disabled:opacity-30 text-violet-100 rounded text-[10px] flex items-center gap-1 transition-colors"
+            >
+              {autoGenerating ? (
+                <><Loader2 className="w-3 h-3 animate-spin" /> 생성 중</>
+              ) : (
+                <><Sparkles className="w-3 h-3" /> 자동 생성</>
+              )}
+            </button>
+          </div>
+          <div className="text-[10px] text-white/50 leading-relaxed">
+            base 메시지 기준으로 감성적 · 실용적 · 캐주얼 3 톤 자동 생성 (혜택 영역 보존 / 인사·안내·마무리만 톤 다양화).
+          </div>
+
+          {/* 생성된 variant 목록 (회사 admin 명시 적용 의무) */}
+          {generatedVariants.length > 0 && (
+            <div className="mt-2 space-y-1.5">
+              {generatedVariants.map((gen, idx) => (
+                <div key={idx} className="p-2 bg-slate-900 border border-white/10 rounded">
+                  <div className="flex items-center gap-2 mb-1">
+                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-violet-500/30 text-violet-100 font-medium">{gen.tone}</span>
+                    <span className="text-[9px] text-white/40 font-mono">{gen.byteCount}바이트</span>
+                    <button
+                      onClick={() => handleApplyGenerated(gen)}
+                      disabled={saving}
+                      className="ml-auto px-2 py-0.5 bg-emerald-500/30 hover:bg-emerald-500/50 disabled:opacity-30 text-emerald-100 rounded text-[10px] flex items-center gap-1 transition-colors"
+                    >
+                      <Plus className="w-2.5 h-2.5" /> 적용
+                    </button>
+                  </div>
+                  <div className="text-[10px] text-white/80 whitespace-pre-wrap leading-relaxed mb-1">{gen.messageTemplate}</div>
+                  {gen.reasoning && (
+                    <div className="text-[9px] text-white/40 italic">{gen.reasoning}</div>
+                  )}
+                </div>
+              ))}
+              <div className="text-[9px] text-amber-200/60 italic">
+                회사 admin 명시 검토 + "적용" 클릭 의무 — 자동 저장 X.
+              </div>
+            </div>
+          )}
+
+          {/* 경고 영역 */}
+          {generationWarnings.length > 0 && (
+            <div className="mt-1.5 space-y-0.5">
+              {generationWarnings.map((w, idx) => (
+                <div key={idx} className="flex items-start gap-1 text-[9px] text-amber-200/70">
+                  <AlertTriangle className="w-2.5 h-2.5 flex-shrink-0 mt-0.5" />
+                  <span>{w}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       {isReadOnly && (
         <div className="flex items-center gap-2 p-2 bg-amber-500/10 border border-amber-500/30 rounded text-[11px] text-amber-200">
@@ -322,39 +470,9 @@ export default function JourneyVariantsEditor({
                   ))}
                 </div>
               )}
-              {winnerDeclaration.winnerVariantId && !isReadOnly && (
+              {winnerDeclaration.winnerVariantId && !isReadOnly && !pendingTrafficApply && (
                 <button
-                  onClick={async () => {
-                    // 권장 traffic 영역 회사 admin 명시 적용 (자동 X)
-                    if (!confirm(`Variant ${winnerDeclaration.winnerVariantId} 영역 권장 traffic 적용하시겠습니까?\n\n${winnerDeclaration.reasoning}`)) return;
-                    setSaving(true);
-                    try {
-                      for (const v of variants) {
-                        const recommended = winnerDeclaration.recommendedTrafficWeights[v.variantId] ?? v.trafficWeight;
-                        await fetch(
-                          `/api/ai/operator/journeys/${journeyId}/steps/${stepId}/variants`,
-                          {
-                            method: 'POST',
-                            headers: fetchHeaders(),
-                            body: JSON.stringify({
-                              variantId: v.variantId,
-                              messageTemplate: v.messageTemplate,
-                              subject: v.subject,
-                              channel: v.channel,
-                              alimtalkTemplateCode: v.alimtalkTemplateCode,
-                              alimtalkVariableMap: v.alimtalkVariableMap,
-                              trafficWeight: recommended,
-                            }),
-                          },
-                        );
-                      }
-                      await loadVariants();
-                    } catch (err: any) {
-                      setError(err?.message || '권장 traffic 적용 실패');
-                    } finally {
-                      setSaving(false);
-                    }
-                  }}
+                  onClick={() => setPendingTrafficApply(true)}
                   className={`mt-2 px-3 py-1 rounded text-[11px] font-medium ${
                     winnerDeclaration.status === 'winner'
                       ? 'bg-emerald-500/30 hover:bg-emerald-500/50 text-emerald-100'
@@ -363,6 +481,62 @@ export default function JourneyVariantsEditor({
                 >
                   권장 traffic 적용 (회사 admin 명시 확인)
                 </button>
+              )}
+              {/* ★ D211+ Phase A-fix (2026-05-23 Harold 명시): native confirm 폐기 — 인라인 confirm 카드 (권장 traffic 적용) */}
+              {pendingTrafficApply && winnerDeclaration.winnerVariantId && (
+                <div className="mt-2 p-2.5 bg-slate-950 border border-violet-400/40 rounded-lg">
+                  <div className="text-[11px] text-white/80 mb-2 leading-relaxed">
+                    Variant <span className="font-semibold text-violet-200">{winnerDeclaration.winnerVariantId}</span> 영역 권장 traffic 적용하시겠습니까?
+                    <div className="mt-1 text-[10px] text-white/50">{winnerDeclaration.reasoning}</div>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      onClick={() => setPendingTrafficApply(false)}
+                      className="flex-1 px-2 py-1 bg-white/5 hover:bg-white/10 text-white/80 rounded text-[10px]"
+                    >
+                      취소
+                    </button>
+                    <button
+                      onClick={async () => {
+                        setPendingTrafficApply(false);
+                        setSaving(true);
+                        try {
+                          for (const v of variants) {
+                            const recommended = winnerDeclaration.recommendedTrafficWeights[v.variantId] ?? v.trafficWeight;
+                            await fetch(
+                              `/api/ai/operator/journeys/${journeyId}/steps/${stepId}/variants`,
+                              {
+                                method: 'POST',
+                                headers: fetchHeaders(),
+                                body: JSON.stringify({
+                                  variantId: v.variantId,
+                                  messageTemplate: v.messageTemplate,
+                                  subject: v.subject,
+                                  channel: v.channel,
+                                  alimtalkTemplateCode: v.alimtalkTemplateCode,
+                                  alimtalkVariableMap: v.alimtalkVariableMap,
+                                  trafficWeight: recommended,
+                                }),
+                              },
+                            );
+                          }
+                          await loadVariants();
+                        } catch (err: any) {
+                          setError(err?.message || '권장 traffic 적용 실패');
+                        } finally {
+                          setSaving(false);
+                        }
+                      }}
+                      className={`flex-1 px-2 py-1 rounded text-[10px] font-semibold ${
+                        winnerDeclaration.status === 'winner'
+                          ? 'bg-emerald-500/40 hover:bg-emerald-500/60 text-emerald-50'
+                          : 'bg-amber-500/40 hover:bg-amber-500/60 text-amber-50'
+                      }`}
+                    >
+                      적용
+                    </button>
+                  </div>
+                </div>
               )}
             </div>
           </div>
@@ -679,23 +853,53 @@ export default function JourneyVariantsEditor({
 
               {/* 액션 */}
               {!isReadOnly && (
-                <div className="flex items-center gap-2 pt-2 border-t border-white/10">
-                  <button
-                    onClick={() => handleSaveVariant(activeVariant)}
-                    disabled={saving}
-                    className="flex-1 px-3 py-1.5 bg-violet-500/20 hover:bg-violet-500/30 disabled:opacity-50 text-violet-200 rounded text-xs flex items-center justify-center gap-1"
-                  >
-                    {saving ? <Loader2 className="w-3 h-3 animate-spin" /> : <Save className="w-3 h-3" />}
-                    Variant {activeVariant.variantId} 저장
-                  </button>
-                  <button
-                    onClick={() => handleDeleteVariant(activeVariant)}
-                    disabled={saving}
-                    className="px-3 py-1.5 bg-rose-500/20 hover:bg-rose-500/30 disabled:opacity-50 text-rose-200 rounded text-xs flex items-center gap-1"
-                  >
-                    <Trash2 className="w-3 h-3" /> 삭제
-                  </button>
-                </div>
+                <>
+                  {/* ★ D211+ Phase A-fix (2026-05-23 Harold 명시): native confirm 폐기 — 인라인 삭제 confirm 카드 */}
+                  {pendingDelete?.id === activeVariant.id && (
+                    <div className="p-2.5 bg-slate-950 border border-rose-400/40 rounded-lg">
+                      <div className="flex items-start gap-2 mb-2">
+                        <AlertTriangle className="w-3.5 h-3.5 text-rose-300 flex-shrink-0 mt-0.5" />
+                        <span className="text-[11px] text-white/80 leading-relaxed">
+                          Variant <span className="font-semibold text-rose-200">{activeVariant.variantId}</span> 삭제하시겠습니까?
+                          <span className="block text-[10px] text-white/40 mt-0.5">옛 누적 발송/클릭/전환 통계 영역 함께 손실</span>
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          onClick={() => setPendingDelete(null)}
+                          className="flex-1 px-2 py-1 bg-white/5 hover:bg-white/10 text-white/80 rounded text-[10px]"
+                        >
+                          취소
+                        </button>
+                        <button
+                          onClick={() => executeDeleteVariant(activeVariant)}
+                          disabled={saving}
+                          className="flex-1 px-2 py-1 bg-rose-500/40 hover:bg-rose-500/60 disabled:opacity-30 text-rose-50 rounded text-[10px] font-semibold"
+                        >
+                          삭제
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="flex items-center gap-2 pt-2 border-t border-white/10">
+                    <button
+                      onClick={() => handleSaveVariant(activeVariant)}
+                      disabled={saving}
+                      className="flex-1 px-3 py-1.5 bg-violet-500/20 hover:bg-violet-500/30 disabled:opacity-50 text-violet-200 rounded text-xs flex items-center justify-center gap-1"
+                    >
+                      {saving ? <Loader2 className="w-3 h-3 animate-spin" /> : <Save className="w-3 h-3" />}
+                      Variant {activeVariant.variantId} 저장
+                    </button>
+                    <button
+                      onClick={() => handleDeleteVariant(activeVariant)}
+                      disabled={saving || pendingDelete?.id === activeVariant.id}
+                      className="px-3 py-1.5 bg-rose-500/20 hover:bg-rose-500/30 disabled:opacity-50 text-rose-200 rounded text-xs flex items-center gap-1"
+                    >
+                      <Trash2 className="w-3 h-3" /> 삭제
+                    </button>
+                  </div>
+                </>
               )}
             </div>
           )}
