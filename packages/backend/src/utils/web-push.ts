@@ -194,7 +194,7 @@ export async function sendPushCampaign(
        WHERE id = $1::uuid`,
       [campaignId]
     );
-    throw new Error('활성 Web Push 구독자가 0건입니다. 발송이 차단되었습니다 — 자사몰에 push 구독 SDK 박은 후 사용자 동의 확보 부탁드립니다.');
+    throw new Error('활성 Web Push 구독자가 0건입니다. 발송이 차단되었습니다 — 자사몰에 push 구독 SDK 통합 후 사용자 동의 확보가 필요합니다.');
   }
 
   // 4. 발송

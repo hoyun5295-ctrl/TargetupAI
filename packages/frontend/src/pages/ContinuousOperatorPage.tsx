@@ -562,7 +562,7 @@ export default function ContinuousOperatorPage() {
               <div className="bg-white/5 border border-white/10 rounded-xl p-12 text-center text-sm text-white/50">
                 등록된 영구 운영이 없습니다.
                 <br />
-                <span className="text-xs text-white/40 mt-2 block">자연어 한 줄로 마케팅 목표를 박으면 AI가 매일 새 캠페인을 제안합니다.</span>
+                <span className="text-xs text-white/40 mt-2 block">자연어 한 줄로 마케팅 목표를 입력하면 AI가 매일 새 캠페인을 제안합니다.</span>
               </div>
             ) : (
               operators.map((op) => (
@@ -819,7 +819,7 @@ export default function ContinuousOperatorPage() {
               )}
 
               <div className="bg-amber-500/10 border border-amber-400/30 rounded-lg p-3 text-xs text-amber-100">
-                <strong>안내:</strong> AI가 위 시각에 매일/매주/매월 새 제안서를 박습니다. 각 제안서는 사용자 승인 후에만 발송됩니다. 7일 안에 승인하지 않으면 자동 만료됩니다.
+                <strong>안내:</strong> AI가 위 시각에 매일/매주/매월 새 제안서를 생성합니다. 각 제안서는 사용자 승인 후에만 발송됩니다. 7일 안에 승인하지 않으면 자동 만료됩니다.
               </div>
 
               {error && (
