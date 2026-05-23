@@ -7,6 +7,8 @@ import {
   BarChart3,
   // ★ D210+ Phase 2-fix6 (Harold 명시 2026-05-23): 6 sub-agent 진행 카드 + 토글 영역 아이콘
   Workflow, Brain, LayoutGrid, CheckCircle2,
+  // ★ D210+ Phase 3 (2026-05-23 Harold 명시): 자동 재진입 토글 + funnel 시각화 + 다중 미리보기 아이콘
+  RotateCcw, Activity, MousePointerClick, Filter as FilterIcon, TrendingUp, AlertTriangle, Eye,
 } from 'lucide-react';
 import JourneyVariantsEditor from '../components/journey/JourneyVariantsEditor';
 import JourneyMmsUploader from '../components/journey/JourneyMmsUploader';
@@ -53,6 +55,8 @@ interface JourneyRow {
   callback_number: string | null;
   allow_reentry: boolean;
   reentry_cooldown_days: number | null;
+  // ★ D210+ Phase 3 (2026-05-23 Harold 명시): 자동 재진입 명시 활성 영역 (default false)
+  auto_reentry_enabled?: boolean;
   stats_total_entered: number;
   stats_total_completed: number;
   stats_total_cost: number;
@@ -76,6 +80,38 @@ interface JourneyDetail {
   steps: StepRow[];
 }
 
+// ★ D210+ Phase 3 (2026-05-23 Harold 명시): funnel 시각화 영역 — JourneyStepStat 응답 매트릭스
+interface JourneyStepStatFrontend {
+  stepId: string;
+  stepOrder: number;
+  stepType: string;
+  channel: string | null;
+  enteredCount: number;
+  sentCount: number;
+  failedCount: number;
+  skippedCount: number;
+  totalCost: number;
+  clickCount: number;
+  conversionCount: number;
+  clickRate: number;
+  conversionRate: number;
+  funnelPercentage: number;
+  skippedHoursCount: number;
+  skippedOptOutCount: number;
+  skippedNoCustomerCount: number;
+  conditionFailedCount: number;
+  waitedCount: number;
+}
+
+// ★ D210+ Phase 3 (2026-05-23 Harold 명시): 다중 미리보기 영역 — preview-samples endpoint 응답 매트릭스
+interface PreviewSample {
+  label: string;
+  customerId: string;
+  sampleCustomer: Record<string, any>;
+  sampleCustomerFields: Record<string, any>;
+  modelVersion: string | null;
+}
+
 interface CallbackOption {
   phone: string;
   source: string;
@@ -86,12 +122,38 @@ interface CallbackOption {
 // ★ D188 Phase 2-B-1 (2026-05-21): step_type 3종 확장 — message/wait/condition.
 type StepType = 'message' | 'wait' | 'condition';
 
-interface ConditionJsonb {
+// ★ D210+ Phase 3 (2026-05-23 Harold 명시): condition step type 3 union 확장
+//   1. customer_field — 옛 매트릭스 (9 operator)
+//   2. cdp_event_exists — 지난 N일 안 이벤트 EXISTS 영역 (예: "지난 7일 안 구매 X 영역")
+//   3. journey_step_clicked — 옛 step N 클릭 영역 EXISTS (예: "Step 1 영역 클릭 X 영역 재시도")
+
+type ConditionOperator = '==' | '!=' | '>=' | '<=' | '>' | '<' | 'in' | 'not_in' | 'is_null' | 'not_null';
+
+interface ConditionJsonbCustomerField {
   type: 'customer_field';
   field: string;
-  operator: '==' | '!=' | '>=' | '<=' | '>' | '<' | 'in' | 'not_in' | 'is_null' | 'not_null';
+  operator: ConditionOperator;
   value?: any;
 }
+
+interface ConditionJsonbCdpEventExists {
+  type: 'cdp_event_exists';
+  event_name: string;
+  within_days: number;
+  presence: 'exists' | 'not_exists';
+}
+
+interface ConditionJsonbJourneyStepClicked {
+  type: 'journey_step_clicked';
+  step_order: number;
+  within_days: number;
+  clicked: boolean;
+}
+
+type ConditionJsonb =
+  | ConditionJsonbCustomerField
+  | ConditionJsonbCdpEventExists
+  | ConditionJsonbJourneyStepClicked;
 
 interface AIGeneratedStep {
   stepOrder: number;
@@ -104,6 +166,12 @@ interface AIGeneratedStep {
   stepIntent: string;
   // ★ D188 Phase 2-B-1 (2026-05-21): condition step 평가용 conditionJsonb.
   conditionJsonb?: ConditionJsonb;
+  // ★ D210+ Phase 3 (2026-05-23 Harold 명시): wait step 정확도 영역 — KST 시간대
+  //   'relative' (default) = 옛 매트릭스 (delay_hours 영역)
+  //   'specific_hour'      = target_hour_kst 영역 (오늘/내일 KST 정합)
+  //   'next_business_day'  = 다음 평일 09시 KST
+  delayMode?: 'relative' | 'specific_hour' | 'next_business_day';
+  targetHourKst?: number;  // 0~23 (specific_hour 영역만)
   // ★ D188 Phase 2-B-2 (2026-05-21): 알림톡 (channel='kakao') 영역.
   alimtalkProfileId?: string;
   alimtalkTemplateCode?: string;
@@ -210,6 +278,11 @@ export default function JourneysPage() {
   const [error, setError] = useState<string | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [detailsMap, setDetailsMap] = useState<Record<string, JourneyDetail>>({});
+  // ★ D210+ Phase 3 (2026-05-23 Harold 명시): step별 funnel 통계 영역 (JourneyStepStat 활용)
+  const [statsMap, setStatsMap] = useState<Record<string, JourneyStepStatFrontend[]>>({});
+  // ★ D210+ Phase 3 (2026-05-23 Harold 명시): 다중 미리보기 영역 (preview-samples endpoint 활용)
+  const [samplesMap, setSamplesMap] = useState<Record<string, PreviewSample[]>>({});
+  const [activeSampleLabel, setActiveSampleLabel] = useState<Record<string, string>>({});
 
   // One-shot AI 생성 흐름
   const [objective, setObjective] = useState('');
@@ -383,9 +456,46 @@ export default function JourneysPage() {
     } catch {}
   };
 
+  // ★ D210+ Phase 3 (2026-05-23 Harold 명시): step별 funnel 통계 영역 fetch (buildJourneyStats 활용)
+  const loadStats = async (journeyId: string) => {
+    if (statsMap[journeyId]) return;
+    try {
+      const res = await fetch(`/api/ai/operator/journeys/${journeyId}/stats`, {
+        headers: { Authorization: `Bearer ${token()}` },
+      });
+      const data = await res.json();
+      if (data.success && Array.isArray(data.steps)) {
+        setStatsMap((prev) => ({ ...prev, [journeyId]: data.steps }));
+      }
+    } catch {}
+  };
+
+  // ★ D210+ Phase 3 (2026-05-23 Harold 명시): 다중 미리보기 6 영역 fetch (preview-samples endpoint 활용)
+  const loadSamples = async (journeyId: string) => {
+    if (samplesMap[journeyId]) return;
+    try {
+      const res = await fetch(`/api/ai/operator/journeys/${journeyId}/preview-samples`, {
+        headers: { Authorization: `Bearer ${token()}` },
+      });
+      const data = await res.json();
+      if (data.success && Array.isArray(data.samples)) {
+        setSamplesMap((prev) => ({ ...prev, [journeyId]: data.samples }));
+        if (data.samples.length > 0 && !activeSampleLabel[journeyId]) {
+          setActiveSampleLabel((prev) => ({ ...prev, [journeyId]: data.samples[0].label }));
+        }
+      }
+    } catch {}
+  };
+
   const toggleExpand = (journeyId: string) => {
     if (expandedId === journeyId) setExpandedId(null);
-    else { setExpandedId(journeyId); loadDetail(journeyId); }
+    else {
+      setExpandedId(journeyId);
+      loadDetail(journeyId);
+      // ★ D210+ Phase 3 (2026-05-23 Harold 명시): expand 시 stats + samples 영역 함께 fetch
+      loadStats(journeyId);
+      loadSamples(journeyId);
+    }
   };
 
   // ════════ One-shot AI 생성 ════════
@@ -637,6 +747,38 @@ export default function JourneysPage() {
     }
   };
 
+  // ★ D210+ Phase 3 (2026-05-23 Harold 명시): 자동 재진입 토글 (회사 admin 명시 활성 — feedback_no_target_auto_relax 정합)
+  //   activate 시 강력 안내 모달 의무 — 회사 admin 책임 영역 명시 + cooldown 영역 안내
+  const handleToggleAutoReentry = async (journeyId: string, currentEnabled: boolean, cooldownDays: number | null) => {
+    const newEnabled = !currentEnabled;
+    if (newEnabled) {
+      const confirmMsg =
+        `자동 재진입 활성화 확인 의무\n\n` +
+        `여정 완료한 customer 영역이 cooldown 영역 (${cooldownDays ?? 0}일) 경과 후 자동으로 다시 진입합니다.\n` +
+        `6시간 cron worker 영역 자동 진입 정합.\n\n` +
+        `매트릭스 영역:\n` +
+        `· customer 영역 활성 (is_active = true) + sms_opt_in 영역만 진입\n` +
+        `· 중복 active execution 영역 차단 (1 customer 영역 안 1 active execution 정합)\n` +
+        `· 회사 admin 책임 영역 — 비용 영역 + 발송 영역 회사 admin 명시 확인 의무\n\n` +
+        `활성화하시겠습니까?`;
+      if (!confirm(confirmMsg)) return;
+    } else {
+      if (!confirm('자동 재진입 비활성화하시겠습니까? 옛 자동 진입한 active execution 영역 영향 X 정합.')) return;
+    }
+    try {
+      const res = await fetch(`/api/ai/operator/journeys/${journeyId}/auto-reentry`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token()}` },
+        body: JSON.stringify({ enabled: newEnabled }),
+      });
+      const data = await res.json();
+      if (data.success) await loadAll();
+      else alert(data.error || '자동 재진입 토글 실패');
+    } catch (e: any) {
+      alert(e?.message || '자동 재진입 토글 중 오류');
+    }
+  };
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 text-white">
       {/* 헤더 */}
@@ -840,6 +982,144 @@ export default function JourneysPage() {
                       </div>
                       {isExpanded && detail && (
                         <div className="border-t border-white/10 p-3 bg-slate-950/40 space-y-2">
+                          {/* ★ D210+ Phase 3 (2026-05-23 Harold 명시): funnel 시각화 영역 (JourneyStepStat funnelPercentage + 이탈 사유 5 영역) */}
+                          {statsMap[j.id] && statsMap[j.id].length > 0 && statsMap[j.id].some((st) => st.enteredCount > 0) && (
+                            <div className="p-3 bg-violet-500/5 border border-violet-400/30 rounded-lg space-y-2">
+                              <div className="flex items-center gap-2 mb-1">
+                                <Activity className="w-4 h-4 text-violet-300" />
+                                <span className="text-sm font-semibold text-violet-100">Step funnel 시각화</span>
+                                <span className="text-[10px] text-white/40 ml-auto">journey_step_logs 영역 source</span>
+                              </div>
+                              {statsMap[j.id].map((st) => (
+                                <div key={st.stepId} className="space-y-1">
+                                  <div className="flex items-center gap-2 text-[11px]">
+                                    <span className="font-mono text-white/60 w-12">Step {st.stepOrder}</span>
+                                    <span className="text-white/40">{st.stepType}{st.channel ? ` · ${st.channel.toUpperCase()}` : ''}</span>
+                                    <span className="ml-auto text-white/70 font-mono">{st.enteredCount.toLocaleString()}명 ({st.funnelPercentage.toFixed(1)}%)</span>
+                                  </div>
+                                  <div className="h-2 bg-white/10 rounded-full overflow-hidden">
+                                    <div
+                                      className={`h-full ${st.funnelPercentage > 50 ? 'bg-emerald-400' : st.funnelPercentage > 20 ? 'bg-amber-400' : 'bg-rose-400'}`}
+                                      style={{ width: `${Math.min(100, Math.max(2, st.funnelPercentage))}%` }}
+                                    />
+                                  </div>
+                                  {(st.skippedHoursCount > 0 || st.skippedOptOutCount > 0 || st.skippedNoCustomerCount > 0 || st.conditionFailedCount > 0 || st.waitedCount > 0) && (
+                                    <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-[10px] text-white/40 pl-12">
+                                      {st.waitedCount > 0 && <span><Clock className="w-2.5 h-2.5 inline" /> 대기 {st.waitedCount}</span>}
+                                      {st.skippedHoursCount > 0 && <span><Clock className="w-2.5 h-2.5 inline text-amber-300/70" /> 시간대 {st.skippedHoursCount}</span>}
+                                      {st.skippedOptOutCount > 0 && <span><AlertTriangle className="w-2.5 h-2.5 inline text-rose-300/70" /> opt-out {st.skippedOptOutCount}</span>}
+                                      {st.skippedNoCustomerCount > 0 && <span><Users className="w-2.5 h-2.5 inline text-rose-300/70" /> 고객 X {st.skippedNoCustomerCount}</span>}
+                                      {st.conditionFailedCount > 0 && <span><FilterIcon className="w-2.5 h-2.5 inline text-rose-300/70" /> 조건 미충족 {st.conditionFailedCount}</span>}
+                                    </div>
+                                  )}
+                                  {st.sentCount > 0 && (
+                                    <div className="flex items-center gap-3 text-[10px] text-white/50 pl-12">
+                                      <span><Send className="w-2.5 h-2.5 inline text-violet-300" /> 발송 {st.sentCount}</span>
+                                      <span><MousePointerClick className="w-2.5 h-2.5 inline text-cyan-300" /> 클릭 {st.clickCount} ({(st.clickRate * 100).toFixed(1)}%)</span>
+                                      <span><TrendingUp className="w-2.5 h-2.5 inline text-emerald-300" /> 전환 {st.conversionCount} ({(st.conversionRate * 100).toFixed(1)}%)</span>
+                                    </div>
+                                  )}
+                                </div>
+                              ))}
+                            </div>
+                          )}
+
+                          {/* ★ D210+ Phase 3 (2026-05-23 Harold 명시): 다중 미리보기 영역 (6 영역 customer 자동 추출 — preview-samples endpoint) */}
+                          {samplesMap[j.id] && samplesMap[j.id].length > 0 && (
+                            <div className="p-3 bg-cyan-500/5 border border-cyan-400/30 rounded-lg space-y-2">
+                              <div className="flex items-center gap-2 mb-1">
+                                <Eye className="w-4 h-4 text-cyan-300" />
+                                <span className="text-sm font-semibold text-cyan-100">다중 시뮬레이션 — 6 영역 자동 추출</span>
+                                <span className="text-[10px] text-white/40 ml-auto">cdp_customer_predictions + customers 영역 source</span>
+                              </div>
+                              <div className="flex flex-wrap gap-1">
+                                {samplesMap[j.id].map((sample) => (
+                                  <button
+                                    key={sample.label}
+                                    onClick={() =>
+                                      setActiveSampleLabel((prev) => ({ ...prev, [j.id]: sample.label }))
+                                    }
+                                    className={`px-2 py-1 rounded text-[11px] font-medium transition-colors ${
+                                      (activeSampleLabel[j.id] || samplesMap[j.id][0].label) === sample.label
+                                        ? 'bg-cyan-500/30 text-cyan-100'
+                                        : 'bg-white/5 text-white/60 hover:bg-white/10'
+                                    }`}
+                                  >
+                                    {sample.label}
+                                  </button>
+                                ))}
+                              </div>
+                              {(() => {
+                                const activeLabel = activeSampleLabel[j.id] || samplesMap[j.id][0].label;
+                                const active = samplesMap[j.id].find((s) => s.label === activeLabel) || samplesMap[j.id][0];
+                                return (
+                                  <div className="p-2 bg-slate-950/60 border border-white/10 rounded text-[11px] space-y-1">
+                                    <div className="grid grid-cols-2 md:grid-cols-3 gap-x-3 gap-y-0.5">
+                                      <div><span className="text-white/40">이름:</span> <span className="text-white/80 font-mono">{active.sampleCustomer.이름 || '-'}</span></div>
+                                      <div><span className="text-white/40">등급:</span> <span className="text-white/80">{active.sampleCustomer.등급 || '-'}</span></div>
+                                      <div><span className="text-white/40">지역:</span> <span className="text-white/80">{active.sampleCustomer.지역 || '-'}</span></div>
+                                      <div><span className="text-white/40">연락처:</span> <span className="text-white/80 font-mono">{active.sampleCustomer.전화번호 || '-'}</span></div>
+                                      <div><span className="text-white/40">최근 구매:</span> <span className="text-white/80">{active.sampleCustomer.최근구매일 || '-'}</span></div>
+                                      <div><span className="text-white/40">총 구매:</span> <span className="text-white/80 font-mono">{active.sampleCustomer.총구매액 || '-'}</span></div>
+                                    </div>
+                                    <div className="grid grid-cols-3 gap-x-3 mt-1.5 pt-1.5 border-t border-white/5">
+                                      <div><span className="text-cyan-300/60">클릭:</span> <span className="font-mono text-cyan-200">{(Number(active.sampleCustomerFields.click_score) * 100).toFixed(1)}%</span></div>
+                                      <div><span className="text-rose-300/60">이탈:</span> <span className="font-mono text-rose-200">{(Number(active.sampleCustomerFields.churn_risk) * 100).toFixed(1)}%</span></div>
+                                      <div><span className="text-emerald-300/60">구매 가능성:</span> <span className="font-mono text-emerald-200">{(Number(active.sampleCustomerFields.purchase_likelihood) * 100).toFixed(1)}%</span></div>
+                                    </div>
+                                    {active.modelVersion && (
+                                      <div className="text-[10px] text-white/40 mt-1">
+                                        Predictive 모델: {active.modelVersion === 'v1.0-trained' ? (
+                                          <span className="text-emerald-300">trained (실 데이터 기반)</span>
+                                        ) : (
+                                          <span className="text-amber-300">cold start (등급/활동 추정치)</span>
+                                        )}
+                                      </div>
+                                    )}
+                                  </div>
+                                );
+                              })()}
+                            </div>
+                          )}
+
+                          {/* ★ D210+ Phase 3 (2026-05-23 Harold 명시): 자동 재진입 토글 영역 (allow_reentry === true 영역만 표시) */}
+                          {detail.journey.allow_reentry && (
+                            <div className="p-3 bg-fuchsia-500/10 border border-fuchsia-500/30 rounded-lg flex items-start gap-3">
+                              <div className={`w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0 ${
+                                detail.journey.auto_reentry_enabled ? 'bg-fuchsia-500/30' : 'bg-white/5'
+                              }`}>
+                                <RotateCcw className={`w-5 h-5 ${detail.journey.auto_reentry_enabled ? 'text-fuchsia-200' : 'text-white/40'}`} />
+                              </div>
+                              <div className="flex-1">
+                                <div className="flex items-center justify-between mb-1">
+                                  <div className="text-sm font-semibold text-fuchsia-100">
+                                    자동 재진입 {detail.journey.auto_reentry_enabled ? '활성' : '비활성 (default)'}
+                                  </div>
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      handleToggleAutoReentry(
+                                        j.id,
+                                        !!detail.journey.auto_reentry_enabled,
+                                        detail.journey.reentry_cooldown_days,
+                                      );
+                                    }}
+                                    className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                                      detail.journey.auto_reentry_enabled ? 'bg-fuchsia-500' : 'bg-white/20'
+                                    }`}
+                                  >
+                                    <span className={`inline-block h-5 w-5 transform rounded-full bg-white transition-transform ${
+                                      detail.journey.auto_reentry_enabled ? 'translate-x-5' : 'translate-x-0.5'
+                                    }`} />
+                                  </button>
+                                </div>
+                                <div className="text-[11px] text-fuchsia-100/70 leading-relaxed">
+                                  cooldown {detail.journey.reentry_cooldown_days ?? 0}일 경과 후 자동 진입 (6시간 cron). 회사 admin 명시 활성 의무 — AI 자동 진입 X 정합.
+                                </div>
+                              </div>
+                            </div>
+                          )}
+
                           {detail.steps.map((s) => {
                             const variantsExpanded = variantsExpandedStepIds.has(s.id);
                             const toggleVariants = () => {
@@ -1039,98 +1319,355 @@ export default function JourneysPage() {
                     </div>
 
                     {/* ★ D188 Phase 2-B-1: wait step UI — 시간 대기만 명시 */}
+                    {/* ★ D188 Phase 2-B-1 + D210+ Phase 3 (2026-05-23 Harold 명시): wait step UI — delay_mode 3 영역
+                          1. relative — 옛 매트릭스 (delay_hours 단순 영역)
+                          2. specific_hour — target_hour_kst 영역 KST (오늘/내일 정합)
+                          3. next_business_day — 다음 평일 09시 KST (단순 매트릭스) */}
                     {s.stepType === 'wait' && (
-                      <div className="p-3 bg-sky-500/10 border border-sky-500/30 rounded text-xs text-sky-200 leading-relaxed">
-                        <div className="font-semibold mb-1">시간 대기 step</div>
-                        <div className="text-sky-200/70">
-                          이 step에서는 메시지 발송 없이 {s.delayHours}시간 대기 후 다음 step으로 진입합니다.
-                          후기 요청 전 충분한 사용 시간 확보, 휴면 사용자 점진 접근 등 자연 흐름에 사용해주세요.
+                      <div className="p-3 bg-sky-500/10 border border-sky-500/30 rounded text-xs space-y-3">
+                        <div className="font-semibold text-sky-200">시간 대기 step</div>
+                        <div className="text-sky-200/70 leading-relaxed">
+                          메시지 발송 없이 대기 후 다음 step 진입. KST 시간대 정합 매트릭스.
                         </div>
+
+                        {/* delay_mode dropdown */}
+                        <div>
+                          <label className="block text-[10px] text-sky-200/70 mb-1">대기 방식</label>
+                          <select
+                            value={s.delayMode || 'relative'}
+                            onChange={(e) => {
+                              const newMode = e.target.value as NonNullable<AIGeneratedStep['delayMode']>;
+                              if (newMode === 'specific_hour') {
+                                updateStep(idx, { delayMode: newMode, targetHourKst: s.targetHourKst ?? 9 });
+                              } else {
+                                updateStep(idx, { delayMode: newMode, targetHourKst: undefined });
+                              }
+                            }}
+                            className="w-full px-2 py-1.5 bg-slate-900 border border-white/10 rounded text-xs"
+                          >
+                            <option value="relative">상대 시간 (N시간 후)</option>
+                            <option value="specific_hour">특정 시간 (오늘/내일 N시 KST)</option>
+                            <option value="next_business_day">다음 평일 (월~금) 09시 KST</option>
+                          </select>
+                        </div>
+
+                        {/* mode 1: relative — delay_hours input */}
+                        {(!s.delayMode || s.delayMode === 'relative') && (
+                          <div className="space-y-1">
+                            <div className="flex items-center gap-2">
+                              <label className="text-[10px] text-sky-200/70 w-20">대기 시간</label>
+                              <input
+                                type="number"
+                                min={1}
+                                max={720}
+                                value={s.delayHours}
+                                onChange={(e) => updateStep(idx, { delayHours: Math.max(1, Math.min(720, Number(e.target.value) || 1)) })}
+                                className="w-24 px-2 py-1 bg-slate-900 border border-white/10 rounded text-xs"
+                              />
+                              <span className="text-[11px] text-sky-200/70">시간 (1~720h)</span>
+                            </div>
+                            <div className="text-[10px] text-sky-200/50">
+                              예: 72시간 (3일) 대기 후 후기 요청 발송
+                            </div>
+                          </div>
+                        )}
+
+                        {/* mode 2: specific_hour — target_hour_kst input */}
+                        {s.delayMode === 'specific_hour' && (
+                          <div className="space-y-1">
+                            <div className="flex items-center gap-2">
+                              <label className="text-[10px] text-sky-200/70 w-20">발송 시간</label>
+                              <select
+                                value={s.targetHourKst ?? 9}
+                                onChange={(e) => updateStep(idx, { targetHourKst: Math.max(0, Math.min(23, Number(e.target.value) || 9)) })}
+                                className="w-24 px-2 py-1 bg-slate-900 border border-white/10 rounded text-xs"
+                              >
+                                {Array.from({ length: 24 }, (_, i) => i).map((h) => (
+                                  <option key={h} value={h}>{String(h).padStart(2, '0')}시</option>
+                                ))}
+                              </select>
+                              <span className="text-[11px] text-sky-200/70">KST (오늘 영역 안 지난 시점 → 내일 정합)</span>
+                            </div>
+                            <div className="text-[10px] text-sky-200/50">
+                              예: 09시 KST → 옛 발송 직후 오전 진입 시 오늘 09시 / 오후 진입 시 내일 09시 정합
+                            </div>
+                          </div>
+                        )}
+
+                        {/* mode 3: next_business_day */}
+                        {s.delayMode === 'next_business_day' && (
+                          <div className="text-[10px] text-sky-200/50 leading-relaxed">
+                            다음 평일 (월~금) 09시 KST 정합. 토/일 진입 시 다음 월요일 09시 / 금요일 09시 이후 진입 시 다음 월요일 09시 정합.
+                          </div>
+                        )}
                       </div>
                     )}
 
-                    {/* ★ D188 Phase 2-B-1: condition step UI — GUI 빌더 (field + operator + value) */}
+                    {/* ★ D188 Phase 2-B-1 + D210+ Phase 3 (2026-05-23 Harold 명시): condition step UI — type 3 분기 매트릭스
+                          1. customer_field — 옛 매트릭스 (field + operator + value)
+                          2. cdp_event_exists — 지난 N일 안 이벤트 EXISTS 영역
+                          3. journey_step_clicked — 옛 step N 클릭 영역 EXISTS */}
                     {s.stepType === 'condition' && (
-                      <div className="p-3 bg-emerald-500/10 border border-emerald-500/30 rounded text-xs space-y-2">
+                      <div className="p-3 bg-emerald-500/10 border border-emerald-500/30 rounded text-xs space-y-3">
                         <div className="font-semibold text-emerald-200">조건 평가 step</div>
                         <div className="text-emerald-200/60 leading-relaxed">
-                          고객 정보를 평가해 조건 만족 시 다음 step 진입 / 미만족 시 여정 종료합니다.
+                          고객 정보 또는 사건 영역 평가 후 조건 만족 시 다음 step 진입 / 미만족 시 여정 종료합니다.
                         </div>
-                        <div className="grid grid-cols-1 md:grid-cols-[1fr_auto_1fr] gap-2 items-center">
+
+                        {/* type dropdown */}
+                        <div>
+                          <label className="block text-[10px] text-emerald-200/70 mb-1">조건 type</label>
                           <select
-                            value={s.conditionJsonb?.field || ''}
-                            onChange={(e) =>
-                              updateStep(idx, {
-                                conditionJsonb: {
-                                  type: 'customer_field',
-                                  field: e.target.value,
-                                  operator: s.conditionJsonb?.operator || '>=',
-                                  value: s.conditionJsonb?.value,
-                                },
-                              })
-                            }
-                            className="px-2 py-1.5 bg-slate-900 border border-white/10 rounded text-xs"
-                          >
-                            <option value="">필드 선택</option>
-                            <option value="recent_purchase_amount">최근 구매 금액</option>
-                            <option value="total_purchase_amount">누적 구매 금액</option>
-                            <option value="purchase_count">구매 횟수</option>
-                            <option value="grade">등급</option>
-                            <option value="points">포인트</option>
-                            <option value="age">나이</option>
-                            <option value="gender">성별</option>
-                            <option value="region">지역</option>
-                            <option value="sms_opt_in">SMS 수신동의</option>
-                            <option value="recent_purchase_date">최근 구매일</option>
-                            <option value="birth_date">생일</option>
-                          </select>
-                          <select
-                            value={s.conditionJsonb?.operator || '>='}
-                            onChange={(e) =>
-                              updateStep(idx, {
-                                conditionJsonb: {
-                                  type: 'customer_field',
-                                  field: s.conditionJsonb?.field || '',
-                                  operator: e.target.value as ConditionJsonb['operator'],
-                                  value: s.conditionJsonb?.value,
-                                },
-                              })
-                            }
-                            className="px-2 py-1.5 bg-slate-900 border border-white/10 rounded text-xs"
-                          >
-                            <option value="==">같음 (==)</option>
-                            <option value="!=">다름 (!=)</option>
-                            <option value=">=">이상 (≥)</option>
-                            <option value="<=">이하 (≤)</option>
-                            <option value=">">초과 (&gt;)</option>
-                            <option value="<">미만 (&lt;)</option>
-                            <option value="in">포함 (in)</option>
-                            <option value="not_in">미포함 (not_in)</option>
-                            <option value="is_null">비어있음</option>
-                            <option value="not_null">값 있음</option>
-                          </select>
-                          {!['is_null', 'not_null'].includes(s.conditionJsonb?.operator || '') && (
-                            <input
-                              type="text"
-                              value={s.conditionJsonb?.value ?? ''}
-                              onChange={(e) =>
+                            value={s.conditionJsonb?.type || 'customer_field'}
+                            onChange={(e) => {
+                              const newType = e.target.value as ConditionJsonb['type'];
+                              if (newType === 'customer_field') {
                                 updateStep(idx, {
                                   conditionJsonb: {
                                     type: 'customer_field',
-                                    field: s.conditionJsonb?.field || '',
-                                    operator: s.conditionJsonb?.operator || '>=',
-                                    value: e.target.value,
+                                    field: 'recent_purchase_amount',
+                                    operator: '>=',
+                                    value: 100000,
                                   },
-                                })
+                                });
+                              } else if (newType === 'cdp_event_exists') {
+                                updateStep(idx, {
+                                  conditionJsonb: {
+                                    type: 'cdp_event_exists',
+                                    event_name: 'purchase',
+                                    within_days: 7,
+                                    presence: 'not_exists',
+                                  },
+                                });
+                              } else if (newType === 'journey_step_clicked') {
+                                updateStep(idx, {
+                                  conditionJsonb: {
+                                    type: 'journey_step_clicked',
+                                    step_order: Math.max(1, s.stepOrder - 1),
+                                    within_days: 5,
+                                    clicked: false,
+                                  },
+                                });
                               }
-                              placeholder="비교값 (in/not_in은 쉼표 구분)"
-                              className="px-2 py-1.5 bg-slate-900 border border-white/10 rounded text-xs"
-                            />
-                          )}
+                            }}
+                            className="w-full px-2 py-1.5 bg-slate-900 border border-white/10 rounded text-xs"
+                          >
+                            <option value="customer_field">고객 필드 조건 (등급 / 구매 금액 / 지역 영역)</option>
+                            <option value="cdp_event_exists">CDP 이벤트 영역 (지난 N일 안 구매 / 클릭 EXISTS)</option>
+                            <option value="journey_step_clicked">옛 step 클릭 영역 (Step N 클릭 EXISTS)</option>
+                          </select>
                         </div>
-                        <div className="text-[10px] text-emerald-200/50">
-                          예: 최근 구매 금액 ≥ 100000 → VIP 등급 고객만 다음 step 진입
-                        </div>
+
+                        {/* type 1: customer_field 영역 */}
+                        {(!s.conditionJsonb || s.conditionJsonb.type === 'customer_field') && (
+                          <div className="space-y-2">
+                            <div className="grid grid-cols-1 md:grid-cols-[1fr_auto_1fr] gap-2 items-center">
+                              <select
+                                value={(s.conditionJsonb as ConditionJsonbCustomerField | undefined)?.field || ''}
+                                onChange={(e) =>
+                                  updateStep(idx, {
+                                    conditionJsonb: {
+                                      type: 'customer_field',
+                                      field: e.target.value,
+                                      operator: (s.conditionJsonb as ConditionJsonbCustomerField | undefined)?.operator || '>=',
+                                      value: (s.conditionJsonb as ConditionJsonbCustomerField | undefined)?.value,
+                                    },
+                                  })
+                                }
+                                className="px-2 py-1.5 bg-slate-900 border border-white/10 rounded text-xs"
+                              >
+                                <option value="">필드 선택</option>
+                                <option value="recent_purchase_amount">최근 구매 금액</option>
+                                <option value="total_purchase_amount">누적 구매 금액</option>
+                                <option value="purchase_count">구매 횟수</option>
+                                <option value="grade">등급</option>
+                                <option value="points">포인트</option>
+                                <option value="age">나이</option>
+                                <option value="gender">성별</option>
+                                <option value="region">지역</option>
+                                <option value="sms_opt_in">SMS 수신동의</option>
+                                <option value="recent_purchase_date">최근 구매일</option>
+                                <option value="birth_date">생일</option>
+                              </select>
+                              <select
+                                value={(s.conditionJsonb as ConditionJsonbCustomerField | undefined)?.operator || '>='}
+                                onChange={(e) =>
+                                  updateStep(idx, {
+                                    conditionJsonb: {
+                                      type: 'customer_field',
+                                      field: (s.conditionJsonb as ConditionJsonbCustomerField | undefined)?.field || '',
+                                      operator: e.target.value as ConditionOperator,
+                                      value: (s.conditionJsonb as ConditionJsonbCustomerField | undefined)?.value,
+                                    },
+                                  })
+                                }
+                                className="px-2 py-1.5 bg-slate-900 border border-white/10 rounded text-xs"
+                              >
+                                <option value="==">같음 (==)</option>
+                                <option value="!=">다름 (!=)</option>
+                                <option value=">=">이상 (≥)</option>
+                                <option value="<=">이하 (≤)</option>
+                                <option value=">">초과 (&gt;)</option>
+                                <option value="<">미만 (&lt;)</option>
+                                <option value="in">포함 (in)</option>
+                                <option value="not_in">미포함 (not_in)</option>
+                                <option value="is_null">비어있음</option>
+                                <option value="not_null">값 있음</option>
+                              </select>
+                              {!['is_null', 'not_null'].includes((s.conditionJsonb as ConditionJsonbCustomerField | undefined)?.operator || '') && (
+                                <input
+                                  type="text"
+                                  value={(s.conditionJsonb as ConditionJsonbCustomerField | undefined)?.value ?? ''}
+                                  onChange={(e) =>
+                                    updateStep(idx, {
+                                      conditionJsonb: {
+                                        type: 'customer_field',
+                                        field: (s.conditionJsonb as ConditionJsonbCustomerField | undefined)?.field || '',
+                                        operator: (s.conditionJsonb as ConditionJsonbCustomerField | undefined)?.operator || '>=',
+                                        value: e.target.value,
+                                      },
+                                    })
+                                  }
+                                  placeholder="비교값 (in/not_in은 쉼표 구분)"
+                                  className="px-2 py-1.5 bg-slate-900 border border-white/10 rounded text-xs"
+                                />
+                              )}
+                            </div>
+                            <div className="text-[10px] text-emerald-200/50">
+                              예: 최근 구매 금액 ≥ 100000 → VIP 등급 고객만 다음 step 진입
+                            </div>
+                          </div>
+                        )}
+
+                        {/* type 2: cdp_event_exists 영역 */}
+                        {s.conditionJsonb?.type === 'cdp_event_exists' && (
+                          <div className="space-y-2">
+                            <div className="grid grid-cols-1 md:grid-cols-3 gap-2 items-center">
+                              <select
+                                value={s.conditionJsonb.event_name}
+                                onChange={(e) =>
+                                  updateStep(idx, {
+                                    conditionJsonb: {
+                                      type: 'cdp_event_exists',
+                                      event_name: e.target.value,
+                                      within_days: (s.conditionJsonb as ConditionJsonbCdpEventExists).within_days,
+                                      presence: (s.conditionJsonb as ConditionJsonbCdpEventExists).presence,
+                                    },
+                                  })
+                                }
+                                className="px-2 py-1.5 bg-slate-900 border border-white/10 rounded text-xs"
+                              >
+                                <option value="purchase">구매 (purchase)</option>
+                                <option value="order">주문 (order)</option>
+                                <option value="cart_add">장바구니 추가 (cart_add)</option>
+                                <option value="page_view">페이지 조회 (page_view)</option>
+                                <option value="message_click">메시지 클릭 (message_click)</option>
+                              </select>
+                              <input
+                                type="number"
+                                min={1}
+                                max={365}
+                                value={s.conditionJsonb.within_days}
+                                onChange={(e) =>
+                                  updateStep(idx, {
+                                    conditionJsonb: {
+                                      type: 'cdp_event_exists',
+                                      event_name: (s.conditionJsonb as ConditionJsonbCdpEventExists).event_name,
+                                      within_days: Math.max(1, Math.min(365, Number(e.target.value) || 7)),
+                                      presence: (s.conditionJsonb as ConditionJsonbCdpEventExists).presence,
+                                    },
+                                  })
+                                }
+                                placeholder="지난 N일 (1~365)"
+                                className="px-2 py-1.5 bg-slate-900 border border-white/10 rounded text-xs"
+                              />
+                              <select
+                                value={s.conditionJsonb.presence}
+                                onChange={(e) =>
+                                  updateStep(idx, {
+                                    conditionJsonb: {
+                                      type: 'cdp_event_exists',
+                                      event_name: (s.conditionJsonb as ConditionJsonbCdpEventExists).event_name,
+                                      within_days: (s.conditionJsonb as ConditionJsonbCdpEventExists).within_days,
+                                      presence: e.target.value as 'exists' | 'not_exists',
+                                    },
+                                  })
+                                }
+                                className="px-2 py-1.5 bg-slate-900 border border-white/10 rounded text-xs"
+                              >
+                                <option value="exists">이벤트 있음 (exists)</option>
+                                <option value="not_exists">이벤트 없음 (not_exists)</option>
+                              </select>
+                            </div>
+                            <div className="text-[10px] text-emerald-200/50">
+                              예: "지난 7일 안 구매 이벤트 없음" → 마지막날 리마인드 발송 정합
+                            </div>
+                          </div>
+                        )}
+
+                        {/* type 3: journey_step_clicked 영역 */}
+                        {s.conditionJsonb?.type === 'journey_step_clicked' && (
+                          <div className="space-y-2">
+                            <div className="grid grid-cols-1 md:grid-cols-3 gap-2 items-center">
+                              <select
+                                value={s.conditionJsonb.step_order}
+                                onChange={(e) =>
+                                  updateStep(idx, {
+                                    conditionJsonb: {
+                                      type: 'journey_step_clicked',
+                                      step_order: Number(e.target.value) || 1,
+                                      within_days: (s.conditionJsonb as ConditionJsonbJourneyStepClicked).within_days,
+                                      clicked: (s.conditionJsonb as ConditionJsonbJourneyStepClicked).clicked,
+                                    },
+                                  })
+                                }
+                                className="px-2 py-1.5 bg-slate-900 border border-white/10 rounded text-xs"
+                              >
+                                {Array.from({ length: Math.max(0, s.stepOrder - 1) }, (_, i) => i + 1).map((n) => (
+                                  <option key={n} value={n}>Step {n}</option>
+                                ))}
+                              </select>
+                              <input
+                                type="number"
+                                min={1}
+                                max={365}
+                                value={s.conditionJsonb.within_days}
+                                onChange={(e) =>
+                                  updateStep(idx, {
+                                    conditionJsonb: {
+                                      type: 'journey_step_clicked',
+                                      step_order: (s.conditionJsonb as ConditionJsonbJourneyStepClicked).step_order,
+                                      within_days: Math.max(1, Math.min(365, Number(e.target.value) || 5)),
+                                      clicked: (s.conditionJsonb as ConditionJsonbJourneyStepClicked).clicked,
+                                    },
+                                  })
+                                }
+                                placeholder="발송 후 N일 (1~365)"
+                                className="px-2 py-1.5 bg-slate-900 border border-white/10 rounded text-xs"
+                              />
+                              <select
+                                value={String(s.conditionJsonb.clicked)}
+                                onChange={(e) =>
+                                  updateStep(idx, {
+                                    conditionJsonb: {
+                                      type: 'journey_step_clicked',
+                                      step_order: (s.conditionJsonb as ConditionJsonbJourneyStepClicked).step_order,
+                                      within_days: (s.conditionJsonb as ConditionJsonbJourneyStepClicked).within_days,
+                                      clicked: e.target.value === 'true',
+                                    },
+                                  })
+                                }
+                                className="px-2 py-1.5 bg-slate-900 border border-white/10 rounded text-xs"
+                              >
+                                <option value="true">클릭 있음</option>
+                                <option value="false">클릭 없음</option>
+                              </select>
+                            </div>
+                            <div className="text-[10px] text-emerald-200/50">
+                              예: "Step 1 발송 후 5일 안 클릭 없음" → 다른 채널 영역 재시도 정합
+                            </div>
+                          </div>
+                        )}
                       </div>
                     )}
 

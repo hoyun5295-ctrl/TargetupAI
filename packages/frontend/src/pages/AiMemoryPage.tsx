@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { AlertCircle, ArrowLeft, Brain, Loader2, Plus, RefreshCw, Trash2 } from 'lucide-react';
+// ★ D210+ Phase 3 B-7 (2026-05-23 Harold 명시): 영향도 시각화 + 자동 갱신 아이콘
+import { AlertCircle, ArrowLeft, Brain, Loader2, Plus, RefreshCw, Trash2, TrendingUp, Sparkles, Activity, Info } from 'lucide-react';
 import { useAuthStore } from '../stores/authStore';
 
 // ★ D181 (2026-05-19): AI 회사별 메모리 관리 페이지 (Anthropic Memory tool 패턴)
@@ -25,33 +26,46 @@ interface MemoryEntry {
   lastAccessedAt: string;
   createdAt: string;
   updatedAt: string;
+  // ★ D210+ Phase 3 B-7 (2026-05-23 Harold 명시): 영향도 시각화 영역 (사용 횟수)
+  usageCount?: number;
 }
 
-const MEMORY_TYPE_META: Record<MemoryType, { label: string; description: string; gradient: string }> = {
+// ★ D210+ Phase 3 B-7 (2026-05-23 Harold 명시): 5 타입별 가이드 강화 — 예시 + 추가 안내
+const MEMORY_TYPE_META: Record<MemoryType, { label: string; description: string; gradient: string; example: string; addable: 'auto' | 'admin' | 'both' }> = {
   success_pattern: {
     label: '성공 패턴',
     description: '클릭률 높은 캠페인 패턴 (자동 누적)',
     gradient: 'from-emerald-400 to-teal-500',
+    example: '예: "VIP 화요일·목요일 알림톡 → 클릭률 18% (24건 발송)"',
+    addable: 'auto',
   },
   customer_insight: {
     label: '고객 인사이트',
     description: '고객군 행동 분석 (직접 입력 가능)',
     gradient: 'from-blue-400 to-cyan-500',
+    example: '예: "3개월 휴면 고객은 무료 혜택 메시지에 강한 반응"',
+    addable: 'both',
   },
   brand_tone_evolution: {
     label: '브랜드 톤 진화',
     description: '시간별 톤 변화 추적',
     gradient: 'from-violet-400 to-purple-500',
+    example: '예: "이모지 사용 X 정합 — 친근하지만 전문적 톤"',
+    addable: 'admin',
   },
   channel_performance: {
     label: '채널 성과',
     description: '채널별 평균 클릭/전환 (자동 누적)',
     gradient: 'from-amber-400 to-orange-500',
+    example: '예: "LMS > SMS 클릭률 5%p 차이 — 마케팅 영역 LMS 우선"',
+    addable: 'auto',
   },
   compliance_learning: {
     label: '컴플라이언스 학습',
     description: '광고 차단 단어 패턴 (직접 입력 권장)',
     gradient: 'from-rose-400 to-pink-500',
+    example: '예: "\'특가\' 단어 광고 차단 6건 — \'한정 혜택\' 정정 정합"',
+    addable: 'both',
   },
 };
 
@@ -146,6 +160,31 @@ export default function AiMemoryPage() {
     }
   };
 
+  // ★ D210+ Phase 3 B-7 (2026-05-23 Harold 명시): 자동 갱신 cleanup — importance < 3 + 90일+ 미사용 영역 정리
+  const handleCleanup = async () => {
+    if (!isAdmin) {
+      alert('메모리 정리는 회사 관리자만 가능합니다.');
+      return;
+    }
+    if (!confirm('메모리 정리 진입 확인 의무\n\n중요도 3 미만 + 90일 이상 미사용 메모리 영역 자동 삭제 의무.\n\n· 자동 누적된 저영향도 메모리 영역 정리\n· 직접 입력 메모리 영역 = importance 3+ 정합 시 보존\n\n진행하시겠습니까?')) return;
+    try {
+      const res = await fetch('/api/ai/operator/memory/cleanup', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token()}` },
+        body: JSON.stringify({ olderThanDays: 90, minImportance: 3 }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        alert(`정리 완료 — ${data.deletedCount}건 삭제됨 (importance < ${data.minImportance} + ${data.olderThanDays}일 미사용)`);
+        await load();
+      } else {
+        alert(data.error || '정리 실패');
+      }
+    } catch (e: any) {
+      alert(e?.message || '정리 중 오류');
+    }
+  };
+
   // 타입별 그룹화
   const byType = new Map<MemoryType, MemoryEntry[]>();
   for (const m of memories) {
@@ -174,6 +213,17 @@ export default function AiMemoryPage() {
               <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
               새로고침
             </button>
+            {/* ★ D210+ Phase 3 B-7 (2026-05-23 Harold 명시): 자동 갱신 cleanup 버튼 (회사 admin 명시 호출 의무) */}
+            {isAdmin && (
+              <button
+                onClick={handleCleanup}
+                className="text-xs bg-amber-100 hover:bg-amber-200 text-amber-800 px-3 py-1.5 rounded-lg flex items-center gap-1.5"
+                title="중요도 3 미만 + 90일 이상 미사용 메모리 정리"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                자동 정리
+              </button>
+            )}
             {isAdmin && (
               <button
                 onClick={() => setEditing({ memoryType: 'customer_insight', memoryKey: '', memoryValue: '', importance: 7 })}
@@ -188,6 +238,33 @@ export default function AiMemoryPage() {
       </div>
 
       <div className="max-w-6xl mx-auto px-6 py-6 space-y-4">
+        {/* ★ D210+ Phase 3 B-7 (2026-05-23 Harold 명시): 5 타입별 가이드 카드 (예시 + 자동/수동 분류 명시) */}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-2">
+          {MEMORY_TYPE_ORDER.map((type) => {
+            const meta = MEMORY_TYPE_META[type];
+            const count = (byType.get(type) || []).length;
+            return (
+              <div key={type} className="p-3 bg-white border border-gray-200 rounded-lg">
+                <div className={`text-xs font-semibold bg-gradient-to-r ${meta.gradient} bg-clip-text text-transparent mb-1`}>
+                  {meta.label}
+                </div>
+                <div className="text-[10px] text-gray-500 mb-1.5">{meta.description}</div>
+                <div className="text-[10px] text-gray-600 italic mb-1.5 leading-relaxed">{meta.example}</div>
+                <div className="flex items-center justify-between text-[10px]">
+                  <span className={`px-1.5 py-0.5 rounded ${
+                    meta.addable === 'auto' ? 'bg-emerald-50 text-emerald-700' :
+                    meta.addable === 'admin' ? 'bg-blue-50 text-blue-700' :
+                    'bg-violet-50 text-violet-700'
+                  }`}>
+                    {meta.addable === 'auto' ? '자동 누적' : meta.addable === 'admin' ? '직접 입력' : '자동 + 직접'}
+                  </span>
+                  <span className="font-mono text-gray-500">{count}건</span>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
         <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 text-xs text-amber-900 flex items-start gap-2">
           <AlertCircle className="w-4 h-4 mt-0.5 shrink-0" />
           <div>
@@ -259,8 +336,29 @@ export default function AiMemoryPage() {
                         <span className="text-sm font-medium text-gray-800">{m.memoryKey}</span>
                         <span className="text-[10px] bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded-full">중요도 {m.importance}</span>
                         <span className="text-[10px] bg-blue-50 text-blue-700 px-1.5 py-0.5 rounded-full">{m.source}</span>
+                        {/* ★ D210+ Phase 3 B-7 (2026-05-23 Harold 명시): 영향도 시각화 — AI 호출 시 활용 횟수 */}
+                        {(m.usageCount ?? 0) > 0 && (
+                          <span className="text-[10px] bg-violet-50 text-violet-700 px-1.5 py-0.5 rounded-full flex items-center gap-0.5">
+                            <Activity className="w-2.5 h-2.5" />
+                            AI 활용 {m.usageCount}회
+                          </span>
+                        )}
                       </div>
                       <div className="text-xs text-gray-600 whitespace-pre-wrap">{m.memoryValue}</div>
+                      {/* ★ D210+ Phase 3 B-7 (2026-05-23 Harold 명시): 중요도 시각화 막대 (1~10 영역) */}
+                      <div className="mt-1.5 flex items-center gap-2">
+                        <div className="flex-1 max-w-[120px] h-1 bg-gray-100 rounded-full overflow-hidden">
+                          <div
+                            className={`h-full ${
+                              m.importance >= 8 ? 'bg-emerald-500' :
+                              m.importance >= 5 ? 'bg-amber-400' :
+                              'bg-gray-400'
+                            }`}
+                            style={{ width: `${(m.importance / 10) * 100}%` }}
+                          />
+                        </div>
+                        <span className="text-[10px] text-gray-400">{m.importance}/10</span>
+                      </div>
                       <div className="text-[10px] text-gray-400 mt-1">
                         최근 접근 {new Date(m.lastAccessedAt).toLocaleString('ko-KR')} · 생성 {new Date(m.createdAt).toLocaleDateString('ko-KR')}
                       </div>

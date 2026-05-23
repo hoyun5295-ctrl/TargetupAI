@@ -55,6 +55,7 @@ import {
   getActiveMessagesForCustomer,
   trackImpression,
   getMessageStats,
+  getCompanyInAppStats,
 } from '../utils/inapp-message';
 import { query } from '../config/database';
 
@@ -650,6 +651,20 @@ router.get('/inapp', async (req: Request, res: Response) => {
   } catch (err: any) {
     console.error('[CDP /inapp GET] 오류:', err);
     return res.status(500).json({ success: false, error: err?.message || '조회 실패' });
+  }
+});
+
+// ★ D210+ Phase 3 B-4 (2026-05-23 Harold 명시): 회사 전체 인앱 메시지 통계 매트릭스 (CTR + funnel)
+//   GET /api/cdp/inapp/stats — 메시지별 impression / click / dismiss / CTR / dismissRate / 고유 인상
+router.get('/inapp/stats', async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+    const stats = await getCompanyInAppStats(companyId);
+    return res.json({ success: true, stats });
+  } catch (err: any) {
+    console.error('[CDP /inapp/stats] 오류:', err);
+    return res.status(500).json({ success: false, error: err?.message || '통계 조회 실패' });
   }
 });
 

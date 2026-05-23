@@ -41,6 +41,48 @@ export interface PerformanceSnapshot {
   newCustomers30d: number;
   /** 30일 활성 고객 (CDP 이벤트 발생 또는 캠페인 수신) */
   activeCustomers30d: number;
+  // ★ D210+ Phase 3 B-2 (2026-05-23 Harold 명시): cdp_events 4 type funnel 영역
+  funnelStats?: FunnelStats;
+}
+
+// ★ D210+ Phase 3 B-2 (2026-05-23 Harold 명시): cdp_events 4 type funnel 매트릭스
+//   view → cart_add → wishlist_add → purchase 영역 dropout 영역 분석
+export interface FunnelStats {
+  viewCount: number;
+  cartAddCount: number;
+  wishlistAddCount: number;
+  purchaseCount: number;
+  cartConversionRate: number;      // cart_add / view
+  purchaseConversionRate: number;  // purchase / view
+  cartToPurchaseRate: number;      // purchase / cart_add
+}
+
+export async function buildFunnelStats(companyId: string, days = 30): Promise<FunnelStats> {
+  const r = await query(
+    `SELECT
+       COUNT(*) FILTER (WHERE event_name = 'page_view')::int AS view_count,
+       COUNT(*) FILTER (WHERE event_name = 'cart_add')::int AS cart_count,
+       COUNT(*) FILTER (WHERE event_name = 'wishlist_add')::int AS wishlist_count,
+       COUNT(*) FILTER (WHERE event_name IN ('order', 'purchase'))::int AS purchase_count
+     FROM cdp_events
+     WHERE company_id = $1::uuid
+       AND occurred_at > NOW() - ($2 || ' days')::interval`,
+    [companyId, days]
+  );
+  const row = r.rows[0] || {};
+  const viewCount = Number(row.view_count) || 0;
+  const cartAddCount = Number(row.cart_count) || 0;
+  const wishlistAddCount = Number(row.wishlist_count) || 0;
+  const purchaseCount = Number(row.purchase_count) || 0;
+  return {
+    viewCount,
+    cartAddCount,
+    wishlistAddCount,
+    purchaseCount,
+    cartConversionRate: viewCount > 0 ? cartAddCount / viewCount : 0,
+    purchaseConversionRate: viewCount > 0 ? purchaseCount / viewCount : 0,
+    cartToPurchaseRate: cartAddCount > 0 ? purchaseCount / cartAddCount : 0,
+  };
 }
 
 export interface NextActionResult {
@@ -125,6 +167,9 @@ export async function buildPerformanceSnapshot(companyId: string): Promise<Perfo
   const stats = customerStats.rows[0];
   const activeCustomers = parseInt(stats.active_via_cdp || '0');
 
+  // ★ D210+ Phase 3 B-2 (2026-05-23 Harold 명시): cdp_events 4 type funnel 영역 통합
+  const funnelStats = await buildFunnelStats(companyId, 30).catch(() => undefined);
+
   const totalCampaigns = (performance as any).total_campaigns || 0;
   const totalSent = (performance as any).total_sent || 0;
   const totalSuccess = (performance as any).total_success || 0;
@@ -148,6 +193,8 @@ export async function buildPerformanceSnapshot(companyId: string): Promise<Perfo
     estimatedRevenue: parseFloat(revenueResult.rows[0]?.total || '0'),
     newCustomers30d: parseInt(stats.new_customers || '0'),
     activeCustomers30d: activeCustomers,
+    // ★ D210+ Phase 3 B-2 (2026-05-23 Harold 명시): cdp_events 4 type funnel 응답 통합
+    funnelStats,
   };
 }
 

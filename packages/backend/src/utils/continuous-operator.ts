@@ -192,6 +192,8 @@ interface CompanyContextRow {
   cdp_auto_execute_enabled: boolean;
   cdp_auto_execute_max_recipients: number;
   cdp_auto_execute_max_cost_krw: number;
+  // ★ D210+ Phase 3 B-1 (2026-05-23 Harold 명시): 회사별 risk 임계값 영역 (default 'low' — 옛 hardcoded 정합)
+  cdp_auto_execute_max_risk: 'low' | 'medium' | 'high';
   plan_code: string;
 }
 
@@ -214,6 +216,7 @@ export async function generateProposalForOperator(operatorId: string): Promise<O
             COALESCE(c.cdp_auto_execute_enabled, false) AS cdp_auto_execute_enabled,
             COALESCE(c.cdp_auto_execute_max_recipients, 1000) AS cdp_auto_execute_max_recipients,
             COALESCE(c.cdp_auto_execute_max_cost_krw, 50000) AS cdp_auto_execute_max_cost_krw,
+            COALESCE(c.cdp_auto_execute_max_risk, 'low') AS cdp_auto_execute_max_risk,
             COALESCE(p.plan_code, 'FREE') AS plan_code
      FROM companies c
      LEFT JOIN plans p ON c.plan_id = p.id
@@ -280,23 +283,30 @@ export async function generateProposalForOperator(operatorId: string): Promise<O
   const compliance = orchestratorResult.compliance || { passed: true, riskLevel: 'low' };
   const isAd = orchestratorResult.channel?.isAd || false;
 
+  // ★ D210+ Phase 3 B-1 (2026-05-23 Harold 명시): risk 영역 회사별 max_risk 비교 매트릭스
+  //   매트릭스 순위 = low(1) < medium(2) < high(3) — 회사 max_risk 영역 이상 영역 차단
+  const riskRank: Record<string, number> = { low: 1, medium: 2, high: 3 };
+  const proposalRiskRank = riskRank[compliance.riskLevel] || 1;
+  const maxRiskRank = riskRank[ctx.cdp_auto_execute_max_risk] || 1;
+  const riskWithinThreshold = proposalRiskRank <= maxRiskRank;
+
   const autoExecuteEligible =
     ctx.cdp_auto_execute_enabled &&
     (ctx.plan_code === 'ENTERPRISE' || ctx.plan_code === 'BUSINESS') &&
     recipientCount <= ctx.cdp_auto_execute_max_recipients &&
     costEstimate <= ctx.cdp_auto_execute_max_cost_krw &&
-    compliance.riskLevel === 'low' &&
+    riskWithinThreshold &&
     compliance.passed &&
     !isAd;
 
   const autoExecuteReason = autoExecuteEligible
-    ? `자동 실행 임계값 통과: ${recipientCount}명 / ${costEstimate.toLocaleString()}원 / ${compliance.riskLevel} risk / non-ad`
+    ? `자동 실행 임계값 통과: ${recipientCount}명 / ${costEstimate.toLocaleString()}원 / ${compliance.riskLevel} risk (회사 max ${ctx.cdp_auto_execute_max_risk}) / non-ad`
     : `자동 실행 미통과 — ${[
         !ctx.cdp_auto_execute_enabled && '옵션 OFF',
         !['ENTERPRISE', 'BUSINESS'].includes(ctx.plan_code) && '요금제',
         recipientCount > ctx.cdp_auto_execute_max_recipients && `${recipientCount}건 > ${ctx.cdp_auto_execute_max_recipients}`,
         costEstimate > ctx.cdp_auto_execute_max_cost_krw && `${costEstimate}원 > ${ctx.cdp_auto_execute_max_cost_krw}원`,
-        compliance.riskLevel !== 'low' && `compliance ${compliance.riskLevel}`,
+        !riskWithinThreshold && `compliance ${compliance.riskLevel} > 회사 max ${ctx.cdp_auto_execute_max_risk}`,
         !compliance.passed && 'compliance fail',
         isAd && '광고성 메시지',
       ].filter(Boolean).join(', ')}`;

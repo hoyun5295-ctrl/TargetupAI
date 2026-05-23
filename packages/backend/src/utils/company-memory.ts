@@ -49,6 +49,8 @@ export interface MemoryEntry {
   lastAccessedAt: Date;
   createdAt: Date;
   updatedAt: Date;
+  // ★ D210+ Phase 3 B-7 (2026-05-23 Harold 명시): 사용 횟수 영역 (영향도 시각화)
+  usageCount: number;
 }
 
 export interface AddMemoryInput {
@@ -142,10 +144,14 @@ export async function buildMemoryPromptContext(companyId: string, maxEntries: nu
     return '';
   }
 
-  // 박은 영역 박은 후 last_accessed_at 갱신 박음 (best-effort)
+  // last_accessed_at + usage_count 영역 갱신 (best-effort)
+  // ★ D210+ Phase 3 B-7 (2026-05-23 Harold 명시): usage_count 자동 증가 — 영향도 시각화 매트릭스 정합
   const memoryIds = memories.map((m) => m.id);
   query(
-    `UPDATE ai_company_memory SET last_accessed_at = NOW() WHERE id = ANY($1::uuid[])`,
+    `UPDATE ai_company_memory
+     SET last_accessed_at = NOW(),
+         usage_count = COALESCE(usage_count, 0) + 1
+     WHERE id = ANY($1::uuid[])`,
     [memoryIds]
   ).catch(() => {});
 
@@ -263,5 +269,31 @@ function mapRow(row: any): MemoryEntry {
     lastAccessedAt: new Date(row.last_accessed_at),
     createdAt: new Date(row.created_at),
     updatedAt: new Date(row.updated_at),
+    // ★ D210+ Phase 3 B-7 (2026-05-23 Harold 명시): usage_count 영역 매핑
+    usageCount: Number(row.usage_count) || 0,
   };
+}
+
+// ════════════════════════════════════════════════════════════════════
+// ★ D210+ Phase 3 B-7 (2026-05-23 Harold 명시): 자동 갱신 영역 — deprecate
+//   importance < minImportance + olderThanDays 영역 안 미사용 영역 DELETE
+//   본질: 오래된 + 저영향도 메모리 자동 정리 (회사 admin 명시 호출 의무 — cron worker X)
+// ════════════════════════════════════════════════════════════════════
+
+export async function cleanupDeprecatedMemories(
+  companyId: string,
+  options: { olderThanDays?: number; minImportance?: number } = {},
+): Promise<{ deletedCount: number }> {
+  const olderThanDays = Math.max(7, Math.min(365, options.olderThanDays || 90));
+  const minImportance = Math.max(1, Math.min(10, options.minImportance || 3));
+
+  const r = await query(
+    `DELETE FROM ai_company_memory
+     WHERE company_id = $1::uuid
+       AND importance < $2
+       AND last_accessed_at < NOW() - ($3 * INTERVAL '1 day')
+     RETURNING id`,
+    [companyId, minImportance, olderThanDays]
+  );
+  return { deletedCount: r.rows.length };
 }

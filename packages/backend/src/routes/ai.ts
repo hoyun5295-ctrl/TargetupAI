@@ -12,7 +12,7 @@ import { formatDateValue, getOpt080Number } from '../utils/messageUtils';
 import { loadPlanContext, canUseFeature, requirePlanFeature, isBetaAccessAllowed, isAiOperatorAllowed } from '../utils/plan-guard';
 import { getCompanyCosts } from '../config/defaults';
 // ★ D209+ (Harold 명시 2026-05-22) Phase D 비용 안전 매트릭스 — 회사별 월 한도 + cache 통계
-import { getMonthlyUsage, getDailyUsage } from '../utils/ai-rate-limit';
+import { getMonthlyUsage, getDailyUsage, getModelBreakdown } from '../utils/ai-rate-limit';
 import { getCacheStats } from '../utils/ai-cache';
 import { orchestrate, orchestrateWithAI } from '../services/ai-orchestrator';
 // ★ D174 (2026-05-19): Step 1 Next Action Advisor — Opus 4.7
@@ -47,6 +47,7 @@ import {
   addMemory as addCompanyMemory,
   listMemories as listCompanyMemories,
   deleteMemory as deleteCompanyMemory,
+  cleanupDeprecatedMemories,
   MemoryType,
 } from '../utils/company-memory';
 // ★ D181 (2026-05-19): Anthropic Batch API (50% 비용 절감)
@@ -1604,6 +1605,27 @@ router.delete('/operator/memory/:id', async (req: Request, res: Response) => {
   }
 });
 
+// ★ D210+ Phase 3 B-7 (2026-05-23 Harold 명시): 자동 갱신 cleanup endpoint (회사 admin 명시 호출 의무)
+//   POST /api/ai/operator/memory/cleanup?olderThanDays=90&minImportance=3
+//   importance < minImportance + olderThanDays 영역 안 미사용 영역 DELETE
+router.post('/operator/memory/cleanup', async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    const userType = req.user?.userType;
+    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+    if (userType !== 'company_admin') {
+      return res.status(403).json({ success: false, error: '메모리 정리는 회사 관리자만 가능합니다.' });
+    }
+    const olderThanDays = Math.max(7, Math.min(365, Number(req.body?.olderThanDays) || 90));
+    const minImportance = Math.max(1, Math.min(10, Number(req.body?.minImportance) || 3));
+    const result = await cleanupDeprecatedMemories(companyId, { olderThanDays, minImportance });
+    return res.json({ success: true, ...result, olderThanDays, minImportance });
+  } catch (err: any) {
+    console.error('[AI Operator memory cleanup] 오류:', err);
+    return res.status(500).json({ success: false, error: err?.message || '메모리 정리 실패' });
+  }
+});
+
 // ============================================================
 // ★ D181 (2026-05-19) Anthropic Batch API — 회사 admin 운영 모니터링 endpoint
 //   대량 발송 박은 영역 50% 비용 절감 — Continuous Operator 박은 영역에서 박음
@@ -2520,17 +2542,27 @@ router.get('/usage', authenticate, async (req: Request, res: Response) => {
     const companyId = req.user?.companyId;
     if (!companyId) return res.status(401).json({ success: false, error: '회사 권한이 필요합니다.' });
 
-    const [monthly, daily] = await Promise.all([
+    // ★ D210+ Phase 3 B-8 (2026-05-23 Harold 명시): 모델별 분포 영역 매트릭스 추가
+    const [monthly, daily, breakdown] = await Promise.all([
       getMonthlyUsage(companyId),
       getDailyUsage(companyId, 30),
+      getModelBreakdown(companyId, 30),
     ]);
     const cache = getCacheStats();
+
+    // ★ D210+ Phase 3 B-8 (2026-05-23 Harold 명시): cache 비용 절감 영역 계산 (hit rate × 평균 호출 비용)
+    const avgCostWon = daily.length > 0
+      ? daily.reduce((sum, d) => sum + (d.cost || 0), 0) / Math.max(1, daily.reduce((sum, d) => sum + (d.count || 0), 0))
+      : 0;
+    const cacheSavingsWon = cache.hit > 0 ? Math.round(cache.hit * avgCostWon) : 0;
 
     return res.json({
       success: true,
       monthly,
       daily,
       cache,
+      breakdown,
+      cacheSavingsWon,
     });
   } catch (err: any) {
     console.error('[AI Usage] 오류:', err);

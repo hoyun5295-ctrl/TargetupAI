@@ -23,10 +23,20 @@ interface DailyRow {
   cost: number;
 }
 
+interface BreakdownRow {
+  source: string;
+  modelType: string;
+  count: number;
+  cost: number;
+}
+
 interface UsageData {
   monthly: { used: number; limit: number | null };
   daily: DailyRow[];
   cache: { size: number; hit: number; miss: number; hitRate: number };
+  // ★ D210+ Phase 3 B-8 (2026-05-23 Harold 명시): 모델별 분포 + 비용 절감 영역
+  breakdown?: BreakdownRow[];
+  cacheSavingsWon?: number;
 }
 
 export default function AiUsagePage() {
@@ -47,7 +57,13 @@ export default function AiUsagePage() {
         });
         const json = await res.json();
         if (json.success) {
-          setData({ monthly: json.monthly, daily: json.daily || [], cache: json.cache });
+          setData({
+            monthly: json.monthly,
+            daily: json.daily || [],
+            cache: json.cache,
+            breakdown: json.breakdown || [],
+            cacheSavingsWon: json.cacheSavingsWon || 0,
+          });
         } else {
           setError(json.error || 'AI 사용량 조회 실패');
         }
@@ -206,12 +222,55 @@ export default function AiUsagePage() {
                   <TrendingUp className="w-5 h-5 text-violet-500" />
                   <h3 className="font-semibold">비용 절감 효과</h3>
                 </div>
+                {/* ★ D210+ Phase 3 B-8 (2026-05-23 Harold 명시): 실제 cache hit × 평균 호출 비용 영역 (옛 fixed 0.5원 영역 정정) */}
                 <div className="text-2xl font-bold text-gray-800">
-                  ≈ {Math.round(data.cache.hit * 0.5).toLocaleString()}원
+                  ≈ {(data.cacheSavingsWon || 0).toLocaleString()}원
                 </div>
-                <div className="text-xs text-gray-500 mt-1">cache hit × 평균 0.5원</div>
+                <div className="text-xs text-gray-500 mt-1">
+                  cache hit × 실제 평균 호출 비용 (ai_call_log)
+                </div>
               </div>
             </div>
+
+            {/* ★ D210+ Phase 3 B-8 (2026-05-23 Harold 명시): 모델별 분포 영역 (30일 source + modelType 매트릭스) */}
+            {data.breakdown && data.breakdown.length > 0 && (
+              <div className="bg-white rounded-xl shadow-md p-5 mb-6">
+                <div className="flex items-center gap-2 mb-3">
+                  <Activity className="w-5 h-5 text-cyan-500" />
+                  <h3 className="font-semibold">30일 모델별 분포 — source + modelType</h3>
+                  <span className="text-[10px] text-gray-400 ml-auto">ai_call_log 영역 source</span>
+                </div>
+                <div className="space-y-1.5">
+                  {(() => {
+                    const maxCount = Math.max(...data.breakdown.map((b) => b.count), 1);
+                    return data.breakdown.slice(0, 10).map((b, idx) => (
+                      <div key={`${b.source}-${b.modelType}-${idx}`} className="flex items-center gap-2 text-xs">
+                        <div className="w-32 text-gray-700 truncate" title={b.source}>{b.source}</div>
+                        <div className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${
+                          b.modelType === 'opus' ? 'bg-violet-50 text-violet-700' :
+                          b.modelType === 'sonnet' ? 'bg-blue-50 text-blue-700' :
+                          'bg-gray-50 text-gray-600'
+                        }`}>
+                          {b.modelType}
+                        </div>
+                        <div className="flex-1 h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                          <div
+                            className={`h-full ${
+                              b.modelType === 'opus' ? 'bg-violet-400' :
+                              b.modelType === 'sonnet' ? 'bg-blue-400' :
+                              'bg-gray-400'
+                            }`}
+                            style={{ width: `${(b.count / maxCount) * 100}%` }}
+                          />
+                        </div>
+                        <div className="w-20 text-right font-mono text-gray-600">{b.count.toLocaleString()}회</div>
+                        <div className="w-24 text-right font-mono text-gray-500">{b.cost.toLocaleString()}원</div>
+                      </div>
+                    ));
+                  })()}
+                </div>
+              </div>
+            )}
 
             {/* 안내 */}
             <div className="bg-blue-50 border border-blue-200 rounded-xl p-5">

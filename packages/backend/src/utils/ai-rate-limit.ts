@@ -150,3 +150,36 @@ export async function getDailyUsage(companyId: string, days = 30): Promise<Array
     return [];
   }
 }
+
+/**
+ * ★ D210+ Phase 3 B-8 (2026-05-23 Harold 명시): 30일 모델별 분포 매트릭스 (source + modelType + 비용)
+ *   회사 admin 영역 = 모델별 사용 영역 분포 인지 (sub-agent / orchestrator / journey / refine 영역 등)
+ */
+export async function getModelBreakdown(companyId: string, days = 30): Promise<Array<{ source: string; modelType: string; count: number; cost: number }>> {
+  if (!companyId) return [];
+  try {
+    const res = await query(
+      `SELECT
+         source,
+         model_type,
+         COUNT(*)::int AS count,
+         COALESCE(SUM(cost_won), 0)::int AS cost
+       FROM ai_call_log
+       WHERE company_id = $1::uuid
+         AND called_at >= NOW() - ($2 || ' days')::interval
+       GROUP BY source, model_type
+       ORDER BY count DESC
+       LIMIT 30`,
+      [companyId, days]
+    );
+    return res.rows.map((r: any) => ({
+      source: r.source,
+      modelType: r.model_type,
+      count: Number(r.count) || 0,
+      cost: Number(r.cost) || 0,
+    }));
+  } catch (err: any) {
+    console.warn('[AiRateLimit] getModelBreakdown 오류:', err?.message);
+    return [];
+  }
+}

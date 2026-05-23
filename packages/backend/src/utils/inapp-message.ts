@@ -274,6 +274,53 @@ export async function getMessageStats(companyId: string, messageId: string): Pro
   };
 }
 
+// ★ D210+ Phase 3 B-4 (2026-05-23 Harold 명시): 회사 전체 메시지 통계 매트릭스 (CTR funnel 시각화)
+//   회사 admin Dashboard 영역 메시지별 funnel 시각화 + 비교 매트릭스 정합
+export async function getCompanyInAppStats(companyId: string): Promise<Array<{
+  messageId: string;
+  title: string;
+  status: string;
+  impressions: number;
+  clicks: number;
+  dismisses: number;
+  ctr: number;             // click / impression
+  dismissRate: number;     // dismiss / impression
+  uniqueImpressions: number;  // distinct customer_id
+}>> {
+  const r = await query(
+    `SELECT
+       m.id AS message_id,
+       m.title,
+       m.status,
+       COUNT(*) FILTER (WHERE i.event_type = 'impression')::int AS impressions,
+       COUNT(*) FILTER (WHERE i.event_type = 'click')::int AS clicks,
+       COUNT(*) FILTER (WHERE i.event_type = 'dismiss')::int AS dismisses,
+       COUNT(DISTINCT i.customer_id) FILTER (WHERE i.event_type = 'impression' AND i.customer_id IS NOT NULL)::int AS unique_impressions
+     FROM cdp_inapp_messages m
+     LEFT JOIN cdp_inapp_impressions i ON i.message_id = m.id AND i.company_id = m.company_id
+     WHERE m.company_id = $1::uuid
+     GROUP BY m.id, m.title, m.status, m.created_at
+     ORDER BY m.created_at DESC`,
+    [companyId]
+  );
+  return r.rows.map((row: any) => {
+    const impressions = Number(row.impressions) || 0;
+    const clicks = Number(row.clicks) || 0;
+    const dismisses = Number(row.dismisses) || 0;
+    return {
+      messageId: row.message_id,
+      title: row.title,
+      status: row.status,
+      impressions,
+      clicks,
+      dismisses,
+      ctr: impressions > 0 ? clicks / impressions : 0,
+      dismissRate: impressions > 0 ? dismisses / impressions : 0,
+      uniqueImpressions: Number(row.unique_impressions) || 0,
+    };
+  });
+}
+
 // ════════════════════════════════════════════════════════════════════
 // 헬퍼
 // ════════════════════════════════════════════════════════════════════

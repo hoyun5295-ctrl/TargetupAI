@@ -214,9 +214,9 @@ export async function recordEmailEvent(input: EmailEventInput): Promise<void> {
   const { campaignId, email, eventType, url, reason, occurredAt } = input;
   await query(
     `INSERT INTO email_events (
-      id, campaign_id, email, event_type, url, reason, occurred_at, created_at
+      id, campaign_id, email, event_type, url, reason, occurred_at, auto_processed, created_at
     ) VALUES (
-      gen_random_uuid(), $1::uuid, $2, $3, $4, $5, $6, NOW()
+      gen_random_uuid(), $1::uuid, $2, $3, $4, $5, $6, false, NOW()
     )`,
     [campaignId, email, eventType, url || null, reason || null, occurredAt]
   );
@@ -237,6 +237,41 @@ export async function recordEmailEvent(input: EmailEventInput): Promise<void> {
       `UPDATE email_campaigns SET ${column} = ${column} + 1, updated_at = NOW() WHERE id = $1::uuid`,
       [campaignId]
     );
+  }
+
+  // ★ D210+ Phase 3 B-5 (2026-05-23 Harold 명시): bounce / spam / unsubscribe 자동 처리 매트릭스
+  //   bounce / spam_report / unsubscribe 이벤트 수신 시 customers 영역 자동 unsubscribe 정합
+  //   (사용자 인지 영역 = email_opt_in / sms_opt_in 영역 자동 false + email_events.auto_processed = true)
+  if (eventType === 'bounce' || eventType === 'spam_report' || eventType === 'unsubscribe') {
+    try {
+      // 회사 영역 = email_campaigns → company_id 정합 영역
+      const cmp = await query(
+        `SELECT company_id FROM email_campaigns WHERE id = $1::uuid LIMIT 1`,
+        [campaignId]
+      );
+      const companyId = cmp.rows[0]?.company_id;
+      if (companyId) {
+        // customers 영역 자동 처리 — email 정합 영역 + email_opt_in false
+        await query(
+          `UPDATE customers SET
+             email_opt_in = false,
+             updated_at = NOW()
+           WHERE company_id = $1::uuid
+             AND email = $2
+             AND email_opt_in = true`,
+          [companyId, email]
+        );
+        // email_events 영역 auto_processed = true 갱신
+        await query(
+          `UPDATE email_events SET auto_processed = true
+           WHERE campaign_id = $1::uuid AND email = $2 AND event_type = $3
+             AND occurred_at = $4`,
+          [campaignId, email, eventType, occurredAt]
+        );
+      }
+    } catch (err: any) {
+      console.warn('[Email] 자동 unsubscribe 처리 오류 (silent skip):', err?.message);
+    }
   }
 }
 
