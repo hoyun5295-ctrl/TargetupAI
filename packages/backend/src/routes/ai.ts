@@ -16,7 +16,15 @@ import { getMonthlyUsage, getDailyUsage, getModelBreakdown } from '../utils/ai-r
 import { getCacheStats } from '../utils/ai-cache';
 import { orchestrate, orchestrateWithAI } from '../services/ai-orchestrator';
 // ★ D174 (2026-05-19): Step 1 Next Action Advisor — Opus 4.7
-import { buildPerformanceSnapshot, recommendNextAction } from '../utils/next-action-advisor';
+import { buildPerformanceSnapshot, recommendNextAction, buildPerformanceSnapshotV2, type PerformancePeriod } from '../utils/next-action-advisor';
+import { explainPerformance } from '../utils/performance-explainer';
+import { generateQuickAction, type QuickActionType } from '../utils/performance-quick-action';
+import { buildCohortRetention } from '../utils/performance-cohort';
+import { buildBenchmark } from '../utils/performance-benchmark';
+import { buildCampaignAttribution } from '../utils/campaign-response-attribution';
+import { buildDataAvailability } from '../utils/performance-data-availability';
+import { aggregateSmsCountsByCampaign } from '../utils/stats-aggregation';
+import { kakaoBatchAggByGroup } from '../utils/sms-queue';
 // ★ D176 (2026-05-19): Continuous Agentic Operator (사용자 동의 흐름)
 import {
   createOperator,
@@ -1290,6 +1298,292 @@ router.post('/operator/next-action', async (req: Request, res: Response) => {
   } catch (err: any) {
     console.error('[AI Operator] next-action 오류:', err);
     return res.status(500).json({ success: false, error: err?.message || '다음 캠페인 추천 생성 실패' });
+  }
+});
+
+// ============================================================
+// ★ D213+ (2026-05-24) 4번 메뉴 성과리포트 (/performance) 신규 endpoint 8건
+//   - GET  /operator/performance/snapshot-v2 (기간 매트릭스 + D144 정합)
+//   - POST /operator/performance/explain (Opus 4.7 Explainability)
+//   - POST /operator/performance/quick-action (Opus 4.7 1-click 액션)
+//   - GET  /operator/performance/campaigns (드릴다운 페이지네이션)
+//   - GET  /operator/performance/cohort (가입월별 retention)
+//   - GET  /operator/performance/benchmark (요금제별 평균)
+//   - GET  /operator/performance/attribution (캠페인 진행 후 반응)
+//   - GET  /operator/performance/data-availability (데이터 부족 진단)
+// ============================================================
+
+// 1) GET /operator/performance/snapshot-v2?period=7d/14d/30d/90d
+router.get('/operator/performance/snapshot-v2', async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+    const planCtx = await loadPlanContext(companyId);
+    if (!planCtx) return res.status(404).json({ success: false, error: '회사 정보를 찾을 수 없습니다.' });
+    if (!isAiOperatorAllowed(planCtx, req.user)) {
+      return res.status(403).json({ success: false, error: '본 기능은 엔터프라이즈 베타 운영 중입니다.', code: 'BETA_GATE' });
+    }
+
+    const periodParam = String(req.query.period || '30d');
+    const period: PerformancePeriod = (['7d', '14d', '30d', '90d'] as const).includes(periodParam as any)
+      ? (periodParam as PerformancePeriod)
+      : '30d';
+
+    const snapshot = await buildPerformanceSnapshotV2(companyId, period);
+    return res.json({ success: true, snapshot });
+  } catch (err: any) {
+    console.error('[Performance] snapshot-v2 오류:', err);
+    return res.status(500).json({ success: false, error: err?.message || '성과 매트릭스 조회 실패' });
+  }
+});
+
+// 2) POST /operator/performance/explain (Opus 4.7 Explainability)
+router.post('/operator/performance/explain', async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+    const planCtx = await loadPlanContext(companyId);
+    if (!planCtx) return res.status(404).json({ success: false, error: '회사 정보를 찾을 수 없습니다.' });
+    if (!isAiOperatorAllowed(planCtx, req.user)) {
+      return res.status(403).json({ success: false, error: '본 기능은 엔터프라이즈 베타 운영 중입니다.', code: 'BETA_GATE' });
+    }
+
+    const companyResult = await query(
+      `SELECT company_name, business_type, brand_name, brand_tone FROM companies WHERE id = $1::uuid`,
+      [companyId]
+    );
+    const companyInfo = companyResult.rows[0] || {};
+    const snapshot = await buildPerformanceSnapshot(companyId);
+    const explanation = await explainPerformance(companyId, snapshot, companyInfo);
+    return res.json({ success: true, explanation });
+  } catch (err: any) {
+    console.error('[Performance] explain 오류:', err);
+    return res.status(500).json({ success: false, error: err?.message || 'AI 진단 생성 실패' });
+  }
+});
+
+// 3) POST /operator/performance/quick-action (Opus 4.7 1-click 액션)
+router.post('/operator/performance/quick-action', async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+    const planCtx = await loadPlanContext(companyId);
+    if (!planCtx) return res.status(404).json({ success: false, error: '회사 정보를 찾을 수 없습니다.' });
+    if (!isAiOperatorAllowed(planCtx, req.user)) {
+      return res.status(403).json({ success: false, error: '본 기능은 엔터프라이즈 베타 운영 중입니다.', code: 'BETA_GATE' });
+    }
+
+    const actionTypeParam = String(req.body.actionType || '');
+    const validActions: QuickActionType[] = ['channel_recovery', 'time_optimization', 'top_performer_replication'];
+    if (!validActions.includes(actionTypeParam as QuickActionType)) {
+      return res.status(400).json({ success: false, error: '잘못된 actionType' });
+    }
+    const actionType = actionTypeParam as QuickActionType;
+
+    const companyResult = await query(
+      `SELECT company_name, business_type, brand_name, brand_tone FROM companies WHERE id = $1::uuid`,
+      [companyId]
+    );
+    const companyInfo = companyResult.rows[0] || {};
+    const snapshot = await buildPerformanceSnapshot(companyId);
+    const result = await generateQuickAction(companyId, actionType, snapshot, companyInfo);
+    return res.json({ success: true, result });
+  } catch (err: any) {
+    console.error('[Performance] quick-action 오류:', err);
+    return res.status(500).json({ success: false, error: err?.message || '1-click 액션 생성 실패' });
+  }
+});
+
+// 4) GET /operator/performance/campaigns (드릴다운 페이지네이션 + 검색 + 필터 + 정렬)
+router.get('/operator/performance/campaigns', async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+    const planCtx = await loadPlanContext(companyId);
+    if (!planCtx) return res.status(404).json({ success: false, error: '회사 정보를 찾을 수 없습니다.' });
+    if (!isAiOperatorAllowed(planCtx, req.user)) {
+      return res.status(403).json({ success: false, error: '본 기능은 엔터프라이즈 베타 운영 중입니다.', code: 'BETA_GATE' });
+    }
+
+    const periodParam = String(req.query.period || '30d');
+    const periodValid: PerformancePeriod = (['7d', '14d', '30d', '90d'] as const).includes(periodParam as any)
+      ? (periodParam as PerformancePeriod)
+      : '30d';
+    const days = { '7d': 7, '14d': 14, '30d': 30, '90d': 90 }[periodValid];
+    const page = Math.max(1, parseInt(String(req.query.page || '1'), 10) || 1);
+    const limit = Math.max(1, Math.min(50, parseInt(String(req.query.limit || '10'), 10) || 10));
+    const search = String(req.query.search || '').trim();
+    const filterChannel = String(req.query.filterChannel || 'all').toLowerCase();
+    const filterAd = String(req.query.filterAd || 'all').toLowerCase();
+    const sort = String(req.query.sort || 'sent_desc').toLowerCase();
+
+    let where = `c.company_id = $1::uuid AND c.status = 'completed' AND c.sent_at IS NOT NULL AND c.sent_at > NOW() - ($2 || ' days')::interval`;
+    const params: any[] = [companyId, days];
+    let idx = 3;
+    if (search) {
+      where += ` AND c.campaign_name ILIKE $${idx}`;
+      params.push(`%${search}%`);
+      idx++;
+    }
+    if (filterChannel !== 'all') {
+      where += ` AND UPPER(c.message_type) = $${idx}`;
+      params.push(filterChannel.toUpperCase());
+      idx++;
+    }
+    if (filterAd === 'ad') where += ` AND c.is_ad = true`;
+    else if (filterAd === 'info') where += ` AND c.is_ad = false`;
+
+    const countResult = await query(`SELECT COUNT(*)::int AS cnt FROM campaigns c WHERE ${where}`, params);
+    const totalCount = Number(countResult.rows[0]?.cnt) || 0;
+
+    const orderBy =
+      sort === 'success_rate_desc' ? `(CASE WHEN c.sent_count > 0 THEN c.success_count::float / c.sent_count ELSE 0 END) DESC` :
+      sort === 'sent_at_asc' ? `c.sent_at ASC` :
+      sort === 'sent_at_desc' ? `c.sent_at DESC` :
+      `c.sent_count DESC NULLS LAST`;
+    const offset = (page - 1) * limit;
+
+    const metaResult = await query(
+      `SELECT c.id, c.company_id, c.created_by, c.campaign_name, c.message_type, c.is_ad, c.sent_at
+         FROM campaigns c
+        WHERE ${where}
+        ORDER BY ${orderBy}
+        LIMIT ${limit} OFFSET ${offset}`,
+      params
+    );
+
+    const metaRows = metaResult.rows;
+    const smsCountMap = await aggregateSmsCountsByCampaign(metaRows as any);
+    const kakaoCountMap = await kakaoBatchAggByGroup(metaRows.map((c: any) => c.id));
+
+    const costResult = await query(
+      `SELECT cost_per_sms, cost_per_lms, cost_per_mms, cost_per_kakao FROM companies WHERE id = $1::uuid`,
+      [companyId]
+    );
+    const costRow = costResult.rows[0] || {};
+    const costs = {
+      sms: Number(costRow.cost_per_sms) || 9,
+      lms: Number(costRow.cost_per_lms) || 27,
+      mms: Number(costRow.cost_per_mms) || 80,
+      kakao: Number(costRow.cost_per_kakao) || 7,
+    };
+
+    const campaigns = metaRows.map((c: any) => {
+      const sms = smsCountMap.get(c.id) || { total_count: 0, success_count: 0, fail_count: 0 };
+      const kakao = kakaoCountMap.get(c.id) || { total: 0, success: 0, fail: 0, pending: 0 };
+      const sent = Number(sms.total_count || 0) + kakao.total;
+      const success = Number(sms.success_count || 0) + kakao.success;
+      const channelRaw = String(c.message_type || 'SMS').toUpperCase();
+      const channel =
+        channelRaw === 'S' ? 'SMS' :
+        channelRaw === 'L' ? 'LMS' :
+        channelRaw === 'M' ? 'MMS' :
+        channelRaw === 'K' ? 'KAKAO' :
+        channelRaw;
+      let unitCost = costs.sms;
+      if (channel === 'LMS') unitCost = costs.lms;
+      else if (channel === 'MMS') unitCost = costs.mms;
+      else if (channel === 'KAKAO') unitCost = costs.kakao;
+      return {
+        id: c.id,
+        name: c.campaign_name,
+        messageType: channel,
+        isAd: Boolean(c.is_ad),
+        sent,
+        success,
+        successRate: sent > 0 ? success / sent : 0,
+        cost: success * unitCost,
+        sentAt: c.sent_at,
+      };
+    });
+
+    return res.json({
+      success: true,
+      campaigns,
+      totalCount,
+      page,
+      limit,
+      totalPages: Math.ceil(totalCount / limit),
+      source: 'campaigns + MySQL 큐 직접 집계 (D144 정합)',
+    });
+  } catch (err: any) {
+    console.error('[Performance] campaigns 오류:', err);
+    return res.status(500).json({ success: false, error: err?.message || '캠페인 드릴다운 조회 실패' });
+  }
+});
+
+// 5) GET /operator/performance/cohort
+router.get('/operator/performance/cohort', async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+    const planCtx = await loadPlanContext(companyId);
+    if (!planCtx) return res.status(404).json({ success: false, error: '회사 정보를 찾을 수 없습니다.' });
+    if (!isAiOperatorAllowed(planCtx, req.user)) {
+      return res.status(403).json({ success: false, error: '본 기능은 엔터프라이즈 베타 운영 중입니다.', code: 'BETA_GATE' });
+    }
+    const months = Math.max(1, Math.min(24, parseInt(String(req.query.months || '12'), 10) || 12));
+    const result = await buildCohortRetention(companyId, months);
+    return res.json({ success: true, cohort: result });
+  } catch (err: any) {
+    console.error('[Performance] cohort 오류:', err);
+    return res.status(500).json({ success: false, error: err?.message || '코호트 조회 실패' });
+  }
+});
+
+// 6) GET /operator/performance/benchmark
+router.get('/operator/performance/benchmark', async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+    const planCtx = await loadPlanContext(companyId);
+    if (!planCtx) return res.status(404).json({ success: false, error: '회사 정보를 찾을 수 없습니다.' });
+    if (!isAiOperatorAllowed(planCtx, req.user)) {
+      return res.status(403).json({ success: false, error: '본 기능은 엔터프라이즈 베타 운영 중입니다.', code: 'BETA_GATE' });
+    }
+    const days = Math.max(7, Math.min(90, parseInt(String(req.query.days || '30'), 10) || 30));
+    const result = await buildBenchmark(companyId, days);
+    return res.json({ success: true, benchmark: result });
+  } catch (err: any) {
+    console.error('[Performance] benchmark 오류:', err);
+    return res.status(500).json({ success: false, error: err?.message || '벤치마크 조회 실패' });
+  }
+});
+
+// 7) GET /operator/performance/attribution
+router.get('/operator/performance/attribution', async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+    const planCtx = await loadPlanContext(companyId);
+    if (!planCtx) return res.status(404).json({ success: false, error: '회사 정보를 찾을 수 없습니다.' });
+    if (!isAiOperatorAllowed(planCtx, req.user)) {
+      return res.status(403).json({ success: false, error: '본 기능은 엔터프라이즈 베타 운영 중입니다.', code: 'BETA_GATE' });
+    }
+    const days = Math.max(7, Math.min(90, parseInt(String(req.query.days || '30'), 10) || 30));
+    const result = await buildCampaignAttribution(companyId, days);
+    return res.json({ success: true, attribution: result });
+  } catch (err: any) {
+    console.error('[Performance] attribution 오류:', err);
+    return res.status(500).json({ success: false, error: err?.message || 'attribution 조회 실패' });
+  }
+});
+
+// 8) GET /operator/performance/data-availability
+router.get('/operator/performance/data-availability', async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+    const planCtx = await loadPlanContext(companyId);
+    if (!planCtx) return res.status(404).json({ success: false, error: '회사 정보를 찾을 수 없습니다.' });
+    if (!isAiOperatorAllowed(planCtx, req.user)) {
+      return res.status(403).json({ success: false, error: '본 기능은 엔터프라이즈 베타 운영 중입니다.', code: 'BETA_GATE' });
+    }
+    const result = await buildDataAvailability(companyId);
+    return res.json({ success: true, availability: result });
+  } catch (err: any) {
+    console.error('[Performance] data-availability 오류:', err);
+    return res.status(500).json({ success: false, error: err?.message || '데이터 진단 실패' });
   }
 });
 

@@ -16,7 +16,8 @@
 
 import { query } from '../config/database';
 import { callAIWithFallback } from '../services/ai';
-import { aggregateCampaignPerformance } from './stats-aggregation';
+import { aggregateCampaignPerformance, aggregateSmsCountsByCampaign } from './stats-aggregation';
+import { kakaoBatchAggByGroup } from './sms-queue';
 
 // ════════════════════════════════════════════════════════════════════
 // 타입
@@ -313,4 +314,394 @@ ${snapshot.byHour.sort((a, b) => b.sent - a.sent).slice(0, 5).map((h) => `  · $
       expectedRevenue: 0,
     };
   }
+}
+
+// ════════════════════════════════════════════════════════════════════
+// ★ D213+ (2026-05-24) buildPerformanceSnapshotV2 신설
+//   D144 정합 = MySQL 큐 직접 집계 (옛 PG c.success_count 캐시 폐기)
+//   기간 매트릭스 = current + previous 2 윈도우 (격차 자동 계산)
+//   추가 영역 = byChannelROI + byHourWeekday + byDailyTrend + topCampaigns
+//
+//   ⛔ 옛 buildPerformanceSnapshot (line 113~199) 영역 = /operator/next-action endpoint 영역 호환 유지
+//   본 V2 영역 = 4번 메뉴 성과리포트 (/performance) 전용 신규
+// ════════════════════════════════════════════════════════════════════
+
+export type PerformancePeriod = '7d' | '14d' | '30d' | '90d';
+
+const PERIOD_DAYS: Record<PerformancePeriod, number> = {
+  '7d': 7,
+  '14d': 14,
+  '30d': 30,
+  '90d': 90,
+};
+
+export interface PerformanceMetricV2 {
+  current: number;
+  previous: number;
+  diffPct: number;          // (current - previous) / previous × 100 (previous=0 → 100 또는 0)
+  betterThan: boolean;
+}
+
+export interface PerformanceChannelROI {
+  channel: string;
+  sent: number;
+  success: number;
+  successRate: number;
+  estimatedRevenue: number;  // 회사 전체 매출 × (채널 sent / 전체 sent)
+  estimatedCost: number;
+  roas: number;              // revenue / cost
+  previousSent: number;      // 이전 윈도우 비교용
+}
+
+export interface PerformanceTrend {
+  date: string;              // 'YYYY-MM-DD' (KST)
+  sent: number;
+  success: number;
+}
+
+export interface PerformanceTopCampaign {
+  id: string;
+  name: string;
+  messageType: string;
+  sent: number;
+  success: number;
+  successRate: number;
+  estimatedRevenue: number;
+  roas: number;
+  sentAt: string;
+  isAd: boolean;
+}
+
+export interface HourWeekdayCell {
+  hour: number;             // 0~23
+  weekday: number;          // 0~6 (0=일)
+  sent: number;
+  successRate: number;
+}
+
+export interface PerformanceSnapshotV2 {
+  period: PerformancePeriod;
+  periodDays: number;
+  // 요약 6 metric (current + previous 격차)
+  totalCampaigns: PerformanceMetricV2;
+  totalSent: PerformanceMetricV2;
+  successRate: PerformanceMetricV2;
+  newCustomers: PerformanceMetricV2;
+  activeCustomers: PerformanceMetricV2;
+  estimatedRevenue: PerformanceMetricV2;
+  // 자세히 매트릭스
+  byChannelROI: PerformanceChannelROI[];
+  byHourWeekday: HourWeekdayCell[];
+  byDailyTrend: PerformanceTrend[];
+  byDailyTrendPrevious: PerformanceTrend[];
+  funnelStats?: FunnelStats;
+  topCampaigns: PerformanceTopCampaign[];
+  computedAt: string;
+  source: string;
+}
+
+async function getCompanyCosts(companyId: string): Promise<{ sms: number; lms: number; mms: number; kakao: number }> {
+  const r = await query(
+    `SELECT cost_per_sms, cost_per_lms, cost_per_mms, cost_per_kakao FROM companies WHERE id = $1::uuid`,
+    [companyId]
+  );
+  const row = r.rows[0] || {};
+  return {
+    sms: Number(row.cost_per_sms) || 9,
+    lms: Number(row.cost_per_lms) || 27,
+    mms: Number(row.cost_per_mms) || 80,
+    kakao: Number(row.cost_per_kakao) || 7,
+  };
+}
+
+function calcDiffPct(current: number, previous: number): number {
+  if (previous === 0) return current > 0 ? 100 : 0;
+  return ((current - previous) / previous) * 100;
+}
+
+/**
+ * buildPerformanceSnapshotV2 — D144 정합 + 기간 매트릭스 + 추가 영역.
+ *
+ * @param companyId - 회사 ID
+ * @param period - '7d' | '14d' | '30d' | '90d' (default '30d')
+ */
+export async function buildPerformanceSnapshotV2(
+  companyId: string,
+  period: PerformancePeriod = '30d'
+): Promise<PerformanceSnapshotV2> {
+  const days = PERIOD_DAYS[period];
+  const costs = await getCompanyCosts(companyId);
+
+  // 1) 캠페인 메타 조회 (current + previous 2 윈도우)
+  //    current  = NOW() - $days ~ NOW()
+  //    previous = NOW() - $days*2 ~ NOW() - $days
+  const campaignsResult = await query(
+    `SELECT
+        id, company_id, created_by, message_type, sent_at,
+        campaign_name, is_ad,
+        CASE
+          WHEN sent_at > NOW() - ($1 || ' days')::interval THEN 'current'
+          ELSE 'previous'
+        END AS period_bucket
+      FROM campaigns
+      WHERE company_id = $2::uuid
+        AND status = 'completed'
+        AND sent_at IS NOT NULL
+        AND sent_at > NOW() - ($3 || ' days')::interval`,
+    [days, companyId, days * 2]
+  );
+
+  const allCampaigns = campaignsResult.rows;
+
+  // 2) MySQL 큐 직접 집계 (D144 정합) — 전체 캠페인 일괄 처리
+  const smsCountMap = await aggregateSmsCountsByCampaign(allCampaigns as any);
+  const kakaoCountMap = await kakaoBatchAggByGroup(allCampaigns.map((c: any) => c.id));
+
+  type CampaignMetric = {
+    id: string;
+    name: string;
+    messageType: string;
+    sent: number;
+    success: number;
+    fail: number;
+    cost: number;
+    sentAt: Date;
+    isAd: boolean;
+    bucket: 'current' | 'previous';
+  };
+
+  const campaignMetrics: CampaignMetric[] = allCampaigns.map((c: any) => {
+    const sms = smsCountMap.get(c.id) || { total_count: 0, success_count: 0, fail_count: 0 };
+    const kakao = kakaoCountMap.get(c.id) || { total: 0, success: 0, fail: 0, pending: 0 };
+    const sent = Number(sms.total_count || 0) + kakao.total;
+    const success = Number(sms.success_count || 0) + kakao.success;
+    const fail = Number(sms.fail_count || 0) + kakao.fail;
+    const channelRaw = String(c.message_type || 'SMS').toUpperCase();
+    // 'S' → 'SMS', 'L' → 'LMS', 'M' → 'MMS' 변환
+    const channel =
+      channelRaw === 'S' ? 'SMS' :
+      channelRaw === 'L' ? 'LMS' :
+      channelRaw === 'M' ? 'MMS' :
+      channelRaw === 'K' ? 'KAKAO' :
+      channelRaw;
+    let unitCost = costs.sms;
+    if (channel === 'LMS') unitCost = costs.lms;
+    else if (channel === 'MMS') unitCost = costs.mms;
+    else if (channel === 'KAKAO') unitCost = costs.kakao;
+    return {
+      id: c.id,
+      name: c.campaign_name || '',
+      messageType: channel,
+      sent,
+      success,
+      fail,
+      cost: success * unitCost,
+      sentAt: new Date(c.sent_at),
+      isAd: Boolean(c.is_ad),
+      bucket: c.period_bucket as 'current' | 'previous',
+    };
+  });
+
+  const currentMetrics = campaignMetrics.filter((m) => m.bucket === 'current');
+  const previousMetrics = campaignMetrics.filter((m) => m.bucket === 'previous');
+
+  // 3) 요약 metric 합산
+  const sumSent = (arr: CampaignMetric[]) => arr.reduce((s, m) => s + m.sent, 0);
+  const sumSuccess = (arr: CampaignMetric[]) => arr.reduce((s, m) => s + m.success, 0);
+
+  const currentSent = sumSent(currentMetrics);
+  const currentSuccess = sumSuccess(currentMetrics);
+  const previousSent = sumSent(previousMetrics);
+  const previousSuccess = sumSuccess(previousMetrics);
+
+  // 4) 매출 영역 (CDP cdp_events.purchase / order)
+  const revenueResult = await query(
+    `SELECT
+        CASE
+          WHEN occurred_at > NOW() - ($1 || ' days')::interval THEN 'current'
+          ELSE 'previous'
+        END AS bucket,
+        COALESCE(SUM((properties->>'total_amount')::numeric), 0)::float AS revenue
+      FROM cdp_events
+      WHERE company_id = $2::uuid
+        AND event_name IN ('purchase', 'order')
+        AND occurred_at > NOW() - ($3 || ' days')::interval
+      GROUP BY bucket`,
+    [days, companyId, days * 2]
+  );
+  const revenueMap = new Map<string, number>();
+  for (const r of revenueResult.rows) revenueMap.set(String(r.bucket), Number(r.revenue) || 0);
+  const currentRevenue = revenueMap.get('current') || 0;
+  const previousRevenue = revenueMap.get('previous') || 0;
+
+  // 5) 신규 / 활성 고객 영역
+  const newCustomersResult = await query(
+    `SELECT
+        COUNT(*) FILTER (WHERE created_at > NOW() - ($1 || ' days')::interval)::int AS current_new,
+        COUNT(*) FILTER (WHERE created_at > NOW() - ($2 || ' days')::interval AND created_at <= NOW() - ($1 || ' days')::interval)::int AS previous_new
+      FROM customers
+      WHERE company_id = $3::uuid`,
+    [days, days * 2, companyId]
+  );
+  const currentNew = Number(newCustomersResult.rows[0]?.current_new) || 0;
+  const previousNew = Number(newCustomersResult.rows[0]?.previous_new) || 0;
+
+  const activeCustomersResult = await query(
+    `SELECT
+        COUNT(DISTINCT customer_id) FILTER (WHERE occurred_at > NOW() - ($1 || ' days')::interval AND customer_id IS NOT NULL)::int AS current_active,
+        COUNT(DISTINCT customer_id) FILTER (WHERE occurred_at > NOW() - ($2 || ' days')::interval AND occurred_at <= NOW() - ($1 || ' days')::interval AND customer_id IS NOT NULL)::int AS previous_active
+      FROM cdp_events
+      WHERE company_id = $3::uuid`,
+    [days, days * 2, companyId]
+  );
+  const currentActive = Number(activeCustomersResult.rows[0]?.current_active) || 0;
+  const previousActive = Number(activeCustomersResult.rows[0]?.previous_active) || 0;
+
+  // 6) byChannelROI
+  const channelMap = new Map<string, { sent: number; success: number; cost: number; previousSent: number }>();
+  for (const m of currentMetrics) {
+    if (!channelMap.has(m.messageType)) channelMap.set(m.messageType, { sent: 0, success: 0, cost: 0, previousSent: 0 });
+    const v = channelMap.get(m.messageType)!;
+    v.sent += m.sent;
+    v.success += m.success;
+    v.cost += m.cost;
+  }
+  for (const m of previousMetrics) {
+    if (!channelMap.has(m.messageType)) channelMap.set(m.messageType, { sent: 0, success: 0, cost: 0, previousSent: 0 });
+    channelMap.get(m.messageType)!.previousSent += m.sent;
+  }
+  const byChannelROI: PerformanceChannelROI[] = Array.from(channelMap.entries()).map(([channel, v]) => {
+    const channelRevenue = currentRevenue > 0 && currentSent > 0 ? currentRevenue * (v.sent / currentSent) : 0;
+    return {
+      channel,
+      sent: v.sent,
+      success: v.success,
+      successRate: v.sent > 0 ? v.success / v.sent : 0,
+      estimatedRevenue: channelRevenue,
+      estimatedCost: v.cost,
+      roas: v.cost > 0 ? channelRevenue / v.cost : 0,
+      previousSent: v.previousSent,
+    };
+  });
+
+  // 7) byHourWeekday (24 × 7 매트릭스, KST)
+  const hourWeekdayMap = new Map<string, { sent: number; success: number }>();
+  for (const m of currentMetrics) {
+    const kst = new Date(m.sentAt.getTime() + 9 * 3600 * 1000);
+    const hour = kst.getUTCHours();
+    const weekday = kst.getUTCDay();
+    const key = `${hour}-${weekday}`;
+    if (!hourWeekdayMap.has(key)) hourWeekdayMap.set(key, { sent: 0, success: 0 });
+    const v = hourWeekdayMap.get(key)!;
+    v.sent += m.sent;
+    v.success += m.success;
+  }
+  const byHourWeekday: HourWeekdayCell[] = [];
+  for (let h = 0; h < 24; h++) {
+    for (let w = 0; w < 7; w++) {
+      const v = hourWeekdayMap.get(`${h}-${w}`) || { sent: 0, success: 0 };
+      byHourWeekday.push({ hour: h, weekday: w, sent: v.sent, successRate: v.sent > 0 ? v.success / v.sent : 0 });
+    }
+  }
+
+  // 8) byDailyTrend (current + previous overlay 영역)
+  function buildDailyTrend(metrics: CampaignMetric[], offsetDays: number): PerformanceTrend[] {
+    const dailyMap = new Map<string, { sent: number; success: number }>();
+    for (const m of metrics) {
+      const kst = new Date(m.sentAt.getTime() + 9 * 3600 * 1000);
+      const dateStr = kst.toISOString().substring(0, 10);
+      if (!dailyMap.has(dateStr)) dailyMap.set(dateStr, { sent: 0, success: 0 });
+      const v = dailyMap.get(dateStr)!;
+      v.sent += m.sent;
+      v.success += m.success;
+    }
+    const result: PerformanceTrend[] = [];
+    const today = new Date();
+    for (let i = 0; i < days; i++) {
+      const d = new Date(today.getTime() - (i + offsetDays) * 24 * 3600 * 1000);
+      const kst = new Date(d.getTime() + 9 * 3600 * 1000);
+      const dateStr = kst.toISOString().substring(0, 10);
+      const v = dailyMap.get(dateStr) || { sent: 0, success: 0 };
+      result.push({ date: dateStr, sent: v.sent, success: v.success });
+    }
+    return result.reverse();
+  }
+  const byDailyTrend = buildDailyTrend(currentMetrics, 0);
+  const byDailyTrendPrevious = buildDailyTrend(previousMetrics, days);
+
+  // 9) topCampaigns (current 영역 top 10)
+  const topCampaigns: PerformanceTopCampaign[] = [...currentMetrics]
+    .filter((m) => m.sent > 0)
+    .sort((a, b) => b.success - a.success)
+    .slice(0, 10)
+    .map((m) => {
+      const campaignRevenue = currentRevenue > 0 && currentSent > 0 ? currentRevenue * (m.sent / currentSent) : 0;
+      return {
+        id: m.id,
+        name: m.name,
+        messageType: m.messageType,
+        sent: m.sent,
+        success: m.success,
+        successRate: m.sent > 0 ? m.success / m.sent : 0,
+        estimatedRevenue: campaignRevenue,
+        roas: m.cost > 0 ? campaignRevenue / m.cost : 0,
+        sentAt: m.sentAt.toISOString(),
+        isAd: m.isAd,
+      };
+    });
+
+  // 10) funnelStats (CDP)
+  const funnelStats = await buildFunnelStats(companyId, days).catch(() => undefined);
+
+  const currentSuccessRate = currentSent > 0 ? currentSuccess / currentSent : 0;
+  const previousSuccessRate = previousSent > 0 ? previousSuccess / previousSent : 0;
+
+  return {
+    period,
+    periodDays: days,
+    totalCampaigns: {
+      current: currentMetrics.length,
+      previous: previousMetrics.length,
+      diffPct: calcDiffPct(currentMetrics.length, previousMetrics.length),
+      betterThan: currentMetrics.length > previousMetrics.length,
+    },
+    totalSent: {
+      current: currentSent,
+      previous: previousSent,
+      diffPct: calcDiffPct(currentSent, previousSent),
+      betterThan: currentSent > previousSent,
+    },
+    successRate: {
+      current: currentSuccessRate,
+      previous: previousSuccessRate,
+      diffPct: calcDiffPct(currentSuccessRate, previousSuccessRate),
+      betterThan: currentSuccessRate > previousSuccessRate,
+    },
+    newCustomers: {
+      current: currentNew,
+      previous: previousNew,
+      diffPct: calcDiffPct(currentNew, previousNew),
+      betterThan: currentNew > previousNew,
+    },
+    activeCustomers: {
+      current: currentActive,
+      previous: previousActive,
+      diffPct: calcDiffPct(currentActive, previousActive),
+      betterThan: currentActive > previousActive,
+    },
+    estimatedRevenue: {
+      current: currentRevenue,
+      previous: previousRevenue,
+      diffPct: calcDiffPct(currentRevenue, previousRevenue),
+      betterThan: currentRevenue > previousRevenue,
+    },
+    byChannelROI,
+    byHourWeekday,
+    byDailyTrend,
+    byDailyTrendPrevious,
+    funnelStats,
+    topCampaigns,
+    computedAt: new Date().toISOString(),
+    source: 'campaigns + MySQL 큐 직접 집계 (D144 정합 — aggregateSmsCountsByCampaign + kakaoBatchAggByGroup) + cdp_events.purchase + customers',
+  };
 }

@@ -107,9 +107,66 @@
 
 ---
 
-### 🚀 다음 세션 진입 가이드 (D211+ 통합 종결 후 — **D212+ 메뉴 점검 영역 진입**)
+### 🚀 다음 세션 진입 가이드 (D212+ 통합 종결 후 — **D213+ 성과리포트 고도화 진입**)
 
-> **★ D212+ 진입 매트릭스 (Harold 명시 2026-05-23)**:
+> **★ D213+ 진입 매트릭스 (Harold 명시 2026-05-23)**:
+> Harold 본질 명시 = "다음세션에서는 성과리포트 고도화부터 다시들어갈거야" — 4번 메뉴 (성과리포트) 본질 강화 진입 정합.
+>
+> **D213+ 진입 명령어 (다음 세션 첫 메시지)**:
+> ```
+> status/STATUS.md CURRENT_TASK § D213+ 진입 가이드 정독 + memory/project_d212_completed.md 정독 + memory/feedback_no_native_browser_dialog.md 정독 + memory/feedback_push_and_deploy_commands.md 정독 (절대 경로 매트릭스 강화 의무) → D213+ 진입 (4번 메뉴 성과리포트 고도화)
+> ```
+>
+> **★ D212+ 세션 통합 종결 매트릭스 (2026-05-23 — 참조용)**:
+> - **AI 자율 예측 UX 3층 계층 간소화** (1층 1-click + 요약 한 줄 / 2층 자세히 토글 / 3층 customer 목록)
+> - **AI 자동 마케팅 마케팅팀 친화 정제** ("AI 영구운영" → "AI 자동 마케팅" 메뉴명 + 단어 정제 + 첫 진입 가이드 + 모달 시인성)
+> - **ConfirmModal + ToastProvider generic 컴포넌트 신설** (native dialog 12건 영구 폐기)
+> - **AI 학습 안내 카드** (옛 D181/D177/D182 backend 정합 + UI 신설)
+> - **Predictive 1-click → 자동 마케팅 진입** (sessionStorage prefill + useEffect 자동 처리)
+> - **비용 제어 강화** (월 예산 + 일별 한도 + 알림 임계값 + 시각화 막대)
+> - **발송 정책 매트릭스** (매일 옵트아웃 7일 검증 + 매주/매달 5분 옵트아웃)
+> - **스팸필터테스트 자동 통합** (CT-64 spamTestWithRetry + 통과 X 발송 차단)
+> - **담당자 정지 사유 AI 학습** (ai_company_memory 영역 통합)
+> - 신규 CT = CT-64 (continuous-operator-policy)
+> - DB ALTER 누적 = continuous_operators 12건 + operator_proposals 8건
+> - Harold 직접 배포 완료
+> - 상세 매트릭스 = [[memory/project_d212_completed.md]] 정독 의무
+>
+> **D213+ 4번 메뉴 성과리포트 (`/performance`) 본질 강화 매트릭스**:
+> - 옛 종결 영역 = next-action-advisor + buildFunnelStats + 톤 통일 + 디자인 강화
+> - 강화 본질 후보:
+>   - UI funnel 시각화 카드 (cdp_events 4 type — view/cart_add/wishlist_add/purchase)
+>   - Next Action Advisor 추가 강화 (옛 Sonnet 4.6 영역 정합)
+>   - 코호트 분석 (가입월별 retention curve)
+>   - 채널별 ROI (sms/lms/mms/kakao 영역 매트릭스)
+>   - 시간대별 성과 영역 (옛 byHour 영역 정합)
+>   - 회사 vs 업계 평균 영역 (벤치마크 본질)
+>   - 옛 D211+ Predictive 1-click 영역 정합 (Performance 영역 안 통합)
+>
+> **AI 자동 마케팅 (3번 메뉴) 잔존 영역 (다음 세션 본질)**:
+> - worker scheduler 통합 (매주/매달 영역 2시간 전 자동 생성 + 담당자 알림 발송)
+> - 담당자 안내 SMS 실 발송 (옛 sms-queue 영역 정합)
+> - 5분 자동 발송 worker (옵트아웃 시간 도달 시 자동 발송)
+> - 오늘 미리 보기 카드 UI
+> - 즉시 정지 버튼
+>
+> **옛 메뉴 잔존 6건** (D213+ ~ D218+ 본질):
+> - 5번 자사몰 연동 (B-3 Shopify 실 구현)
+> - 6번 인앱메시지 UI 통계 카드
+> - 7번 Email 캠페인 UI bounce 통계
+> - 8번 모바일 DM 편집 모드 컴포넌트
+> - 9번 AI 메모리 추가 강화
+> - 10번 AI 사용량 cache hit rate 시각화
+>
+> **신규 영구 룰 정정 본질 (D212+ Harold 격분 영역)**:
+> - **feedback_push_and_deploy_commands** = **절대 경로 매트릭스 강화 의무** ("git pull 실패" 사고 본질)
+>   - 옛 패턴 = `cd packages/backend && npm run build:safe`
+>   - 신규 매트릭스 = `cd ~/targetup-app/packages/backend && npm run build:safe`
+> - **CTO 책임 영역 = 메뉴명 정정 시 = full_pattern_grep 의무** (constants/ai-operator-modules.ts 영역 누락 사고 본질)
+>
+> ---
+>
+> **★ 옛 D211+ 진입 매트릭스 (참조용 — 2026-05-23)**:
 > Harold 본질 명시 = 본 세션 안 1번 메뉴 (여정 자동화) + 2번 메뉴 (AI 자율 예측) 본질 강화 완료 — 다음 세션 = 3번 메뉴부터 동일 패턴 본질 강화 진입.
 >
 > **D212+ 진입 명령어 (다음 세션 첫 메시지)**:
