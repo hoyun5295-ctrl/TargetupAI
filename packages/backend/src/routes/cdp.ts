@@ -860,8 +860,12 @@ router.get('/diagnostics', async (req: Request, res: Response) => {
     const result = await buildCdpDiagnostics(companyId);
     return res.json({ success: true, diagnostics: result });
   } catch (err: any) {
+    const msg = err?.message || '';
+    if (msg.includes('column') && msg.includes('does not exist')) {
+      return res.status(503).json({ success: false, error: 'DB 마이그레이션 필요 — 운영자에게 customers ALTER 10건 (active_sources / preferred_channel / last_cart_add_at 등) 실행 요청 의무', code: 'DB_MIGRATION_PENDING' });
+    }
     console.error('[CDP /diagnostics] 오류:', err);
-    return res.status(500).json({ success: false, error: err?.message || '진단 조회 실패' });
+    return res.status(500).json({ success: false, error: msg || '진단 조회 실패' });
   }
 });
 
@@ -874,8 +878,12 @@ router.get('/funnel', async (req: Request, res: Response) => {
     const result = await buildCdpFunnel(companyId, days);
     return res.json({ success: true, funnel: result });
   } catch (err: any) {
+    const msg = err?.message || '';
+    if (msg.includes('column') && msg.includes('does not exist')) {
+      return res.status(503).json({ success: false, error: 'DB 마이그레이션 필요 — customers ALTER 10건 실행 요청 의무', code: 'DB_MIGRATION_PENDING' });
+    }
     console.error('[CDP /funnel] 오류:', err);
-    return res.status(500).json({ success: false, error: err?.message || 'funnel 조회 실패' });
+    return res.status(500).json({ success: false, error: msg || 'funnel 조회 실패' });
   }
 });
 
@@ -887,8 +895,12 @@ router.get('/timeline', async (req: Request, res: Response) => {
     const result = await buildCdpTimeline24h(companyId);
     return res.json({ success: true, timeline: result });
   } catch (err: any) {
+    const msg = err?.message || '';
+    if (msg.includes('column') && msg.includes('does not exist')) {
+      return res.status(503).json({ success: false, error: 'DB 마이그레이션 필요 — customers ALTER 10건 실행 요청 의무', code: 'DB_MIGRATION_PENDING' });
+    }
     console.error('[CDP /timeline] 오류:', err);
-    return res.status(500).json({ success: false, error: err?.message || 'timeline 조회 실패' });
+    return res.status(500).json({ success: false, error: msg || 'timeline 조회 실패' });
   }
 });
 
@@ -901,8 +913,12 @@ router.get('/active-customers', async (req: Request, res: Response) => {
     const result = await buildCdpActiveCustomers(companyId, limit);
     return res.json({ success: true, activeCustomers: result });
   } catch (err: any) {
+    const msg = err?.message || '';
+    if (msg.includes('column') && msg.includes('does not exist')) {
+      return res.status(503).json({ success: false, error: 'DB 마이그레이션 필요 — customers ALTER 10건 실행 요청 의무', code: 'DB_MIGRATION_PENDING' });
+    }
     console.error('[CDP /active-customers] 오류:', err);
-    return res.status(500).json({ success: false, error: err?.message || '활성 customer 조회 실패' });
+    return res.status(500).json({ success: false, error: msg || '활성 customer 조회 실패' });
   }
 });
 
@@ -917,8 +933,12 @@ router.get('/channel-distribution', async (req: Request, res: Response) => {
     ]);
     return res.json({ success: true, distribution, capabilities });
   } catch (err: any) {
+    const msg = err?.message || '';
+    if (msg.includes('column') && msg.includes('does not exist')) {
+      return res.status(503).json({ success: false, error: 'DB 마이그레이션 필요 — customers ALTER 10건 실행 요청 의무', code: 'DB_MIGRATION_PENDING' });
+    }
     console.error('[CDP /channel-distribution] 오류:', err);
-    return res.status(500).json({ success: false, error: err?.message || 'channel distribution 조회 실패' });
+    return res.status(500).json({ success: false, error: msg || 'channel distribution 조회 실패' });
   }
 });
 
@@ -940,8 +960,12 @@ router.post('/explain', async (req: Request, res: Response) => {
     const explanation = await explainCdpDiagnostics(companyId, diagnostics, companyInfo);
     return res.json({ success: true, explanation });
   } catch (err: any) {
+    const msg = err?.message || '';
+    if (msg.includes('column') && msg.includes('does not exist')) {
+      return res.status(503).json({ success: false, error: 'DB 마이그레이션 필요 — customers ALTER 10건 실행 요청 의무', code: 'DB_MIGRATION_PENDING' });
+    }
     console.error('[CDP /explain] 오류:', err);
-    return res.status(500).json({ success: false, error: err?.message || 'AI 진단 실패' });
+    return res.status(500).json({ success: false, error: msg || 'AI 진단 실패' });
   }
 });
 
@@ -958,8 +982,12 @@ router.post('/recompute-profile', async (req: Request, res: Response) => {
     const result = await recomputeProfileBatch(companyId, fullRecompute);
     return res.json({ success: true, ...result });
   } catch (err: any) {
+    const msg = err?.message || '';
+    if (msg.includes('column') && msg.includes('does not exist')) {
+      return res.status(503).json({ success: false, error: 'DB 마이그레이션 필요 — customers ALTER 10건 실행 요청 의무', code: 'DB_MIGRATION_PENDING' });
+    }
     console.error('[CDP /recompute-profile] 오류:', err);
-    return res.status(500).json({ success: false, error: err?.message || '재계산 실패' });
+    return res.status(500).json({ success: false, error: msg || '재계산 실패' });
   }
 });
 

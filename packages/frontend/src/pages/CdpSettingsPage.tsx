@@ -7,7 +7,7 @@
  *   1. 상단 + 새로고침
  *   2. 요금제 게이팅 안내
  *   3. 데이터 부족 안내 카드 (CT-73 진단 매트릭스)
- *   4. AI 자율 진단 (Opus 4.7 — 비동기 로드)
+ *   4. AI 자율 진단 (비동기 로드 — 모델 영역 backend 분리 정합)
  *   5. 1-click 액션 3 카드 (자체 호스팅 / 카페24 / 네이버)
  *   6. 요약 5 metric (회사 customer / 매핑 / 매핑률 / 30일 이벤트 / 30일 매출)
  *   7. 자세히 분석 토글 (default 숨김)
@@ -364,7 +364,7 @@ export default function CdpSettingsPage() {
 
   useEffect(() => { loadAll(); }, [loadAll]);
 
-  // AI 진단 (Opus 4.7 — 비동기 로드)
+  // AI 진단 (비동기 로드 — 모델 영역 backend 분리 정합)
   const loadExplanation = async () => {
     if (explanation || explainLoading) return;
     setExplainLoading(true);
@@ -741,7 +741,7 @@ export default function CdpSettingsPage() {
           </div>
         )}
 
-        {/* 4. AI 자율 진단 (Opus 4.7) */}
+        {/* 4. AI 자율 진단 */}
         {usage?.cdp_enabled && (
           <div className="p-4 bg-gradient-to-br from-violet-500/15 via-fuchsia-500/10 to-indigo-500/15 border border-violet-400/30 rounded-xl">
             <div className="flex items-start gap-3">
@@ -749,7 +749,7 @@ export default function CdpSettingsPage() {
                 <Sparkles className="w-5 h-5 text-white" />
               </div>
               <div className="flex-1">
-                <div className="text-sm font-medium text-violet-100 mb-1">AI 자율 진단 (Opus 4.7)</div>
+                <div className="text-sm font-medium text-violet-100 mb-1">AI 자율 진단</div>
                 {explanation ? (
                   <div className="text-xs text-white/80 leading-relaxed">{explanation.topInsight}</div>
                 ) : explainLoading ? (
