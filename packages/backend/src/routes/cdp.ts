@@ -23,6 +23,13 @@ import { requireCdpApiKey, recordCdpApiCall, issueCdpKeyPair, isCdpEnabledForPla
 import { identifyCustomer } from '../utils/cdp-identity';
 import { trackEvent, getRecentEvents } from '../utils/cdp-events';
 import { syncOrder, bulkImport } from '../utils/cdp-orders';
+// ★ D214+ (2026-05-24) CDP 진단 + multi-source 융합 매트릭스 신규 CT 6건
+// (query 영역 = 옛 영역 안 line 67 영역 정합 — duplicate import X)
+import { buildCdpDiagnostics, buildCdpFunnel, buildCdpTimeline24h } from '../utils/cdp-diagnostics';
+import { buildCdpActiveCustomers } from '../utils/cdp-active-customers';
+import { groupCustomersByChannel, getCompanyChannelCapabilities } from '../utils/source-aware-channel-selector';
+import { explainCdpDiagnostics } from '../utils/cdp-fusion-explainer';
+import { recomputeProfileBatch } from '../utils/unified-customer-profile';
 // ★ D189 #4 (2026-05-22): Journey Step A/B/Bandit 트래킹 — SDK 호출용 endpoint
 import { recordJourneyStepVariantReward } from '../utils/bandit-optimizer';
 import { listProvidersForUI } from '../utils/provider-registry';
@@ -831,6 +838,128 @@ router.post('/issue-key', async (req: Request, res: Response) => {
   } catch (err: any) {
     console.error('[CDP /issue-key] 오류:', err);
     return res.status(500).json({ success: false, error: err?.message || '키 발급 실패' });
+  }
+});
+
+// ============================================================
+// ★ D214+ (2026-05-24) 5번 메뉴 자사몰 연동 + 데이터 융합 신규 endpoint 7건
+//   - GET  /diagnostics — 자사몰 진단 (매핑률 + 이벤트 + Webhook + multi-source)
+//   - GET  /funnel — 자사몰 이벤트 funnel (page_view → cart → checkout → purchase)
+//   - GET  /timeline — 24h hourly bucket
+//   - GET  /active-customers — 자사몰 활성 customer top N
+//   - GET  /channel-distribution — channel별 customer 분포 + 회사 channel capabilities
+//   - POST /explain — Opus 4.7 AI 진단
+//   - POST /recompute-profile — unified profile 재계산 (회사 전체 batch)
+// ============================================================
+
+// 1) GET /cdp/diagnostics
+router.get('/diagnostics', async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+    const result = await buildCdpDiagnostics(companyId);
+    return res.json({ success: true, diagnostics: result });
+  } catch (err: any) {
+    console.error('[CDP /diagnostics] 오류:', err);
+    return res.status(500).json({ success: false, error: err?.message || '진단 조회 실패' });
+  }
+});
+
+// 2) GET /cdp/funnel
+router.get('/funnel', async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+    const days = Math.max(7, Math.min(90, parseInt(String(req.query.days || '30'), 10) || 30));
+    const result = await buildCdpFunnel(companyId, days);
+    return res.json({ success: true, funnel: result });
+  } catch (err: any) {
+    console.error('[CDP /funnel] 오류:', err);
+    return res.status(500).json({ success: false, error: err?.message || 'funnel 조회 실패' });
+  }
+});
+
+// 3) GET /cdp/timeline
+router.get('/timeline', async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+    const result = await buildCdpTimeline24h(companyId);
+    return res.json({ success: true, timeline: result });
+  } catch (err: any) {
+    console.error('[CDP /timeline] 오류:', err);
+    return res.status(500).json({ success: false, error: err?.message || 'timeline 조회 실패' });
+  }
+});
+
+// 4) GET /cdp/active-customers
+router.get('/active-customers', async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+    const limit = Math.max(1, Math.min(50, parseInt(String(req.query.limit || '10'), 10) || 10));
+    const result = await buildCdpActiveCustomers(companyId, limit);
+    return res.json({ success: true, activeCustomers: result });
+  } catch (err: any) {
+    console.error('[CDP /active-customers] 오류:', err);
+    return res.status(500).json({ success: false, error: err?.message || '활성 customer 조회 실패' });
+  }
+});
+
+// 5) GET /cdp/channel-distribution
+router.get('/channel-distribution', async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+    const [distribution, capabilities] = await Promise.all([
+      groupCustomersByChannel(companyId),
+      getCompanyChannelCapabilities(companyId),
+    ]);
+    return res.json({ success: true, distribution, capabilities });
+  } catch (err: any) {
+    console.error('[CDP /channel-distribution] 오류:', err);
+    return res.status(500).json({ success: false, error: err?.message || 'channel distribution 조회 실패' });
+  }
+});
+
+// 6) POST /cdp/explain (Opus 4.7 AI 진단)
+router.post('/explain', async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    const userType = req.user?.userType;
+    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+    if (userType !== 'company_admin') {
+      return res.status(403).json({ success: false, error: 'AI 진단은 회사 관리자만 가능합니다.' });
+    }
+    const companyResult = await query(
+      `SELECT company_name, business_type, brand_name FROM companies WHERE id = $1::uuid`,
+      [companyId]
+    );
+    const companyInfo = companyResult.rows[0] || {};
+    const diagnostics = await buildCdpDiagnostics(companyId);
+    const explanation = await explainCdpDiagnostics(companyId, diagnostics, companyInfo);
+    return res.json({ success: true, explanation });
+  } catch (err: any) {
+    console.error('[CDP /explain] 오류:', err);
+    return res.status(500).json({ success: false, error: err?.message || 'AI 진단 실패' });
+  }
+});
+
+// 7) POST /cdp/recompute-profile — unified profile 재계산 (회사 admin only)
+router.post('/recompute-profile', async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    const userType = req.user?.userType;
+    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+    if (userType !== 'company_admin') {
+      return res.status(403).json({ success: false, error: 'profile 재계산은 회사 관리자만 가능합니다.' });
+    }
+    const fullRecompute = req.body.fullRecompute === true;
+    const result = await recomputeProfileBatch(companyId, fullRecompute);
+    return res.json({ success: true, ...result });
+  } catch (err: any) {
+    console.error('[CDP /recompute-profile] 오류:', err);
+    return res.status(500).json({ success: false, error: err?.message || '재계산 실패' });
   }
 });
 

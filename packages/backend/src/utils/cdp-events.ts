@@ -29,6 +29,9 @@
 
 import { query } from '../config/database';
 import { ensureAnonymousLink } from './cdp-identity';
+// ★ D214+ (2026-05-24) Unified Customer Profile 정합
+import { fuseEventToCustomer } from './customer-cdp-fusion';
+import { recomputeProfile } from './unified-customer-profile';
 
 // ═══════════════════════════════════════════════════════════
 // 타입 + 표준 이벤트
@@ -192,6 +195,18 @@ export async function trackEvent(
       occurredAt,
     ]
   );
+
+  // ★ D214+ (2026-05-24) customer-level union 매트릭스 (CT-72 + CT-71)
+  //   cart_add / wishlist_add / page_view 영역 → customers 컬럼 union (fuseEventToCustomer)
+  //   unified profile 재계산 (recomputeProfile — fire-and-forget)
+  if (customerId) {
+    await fuseEventToCustomer(companyId, customerId, input.eventName, occurredAt).catch((err) => {
+      console.warn('[CDP Events] fuseEventToCustomer 실패 (이벤트 INSERT 성공):', err);
+    });
+    void recomputeProfile(companyId, customerId).catch((err) => {
+      console.warn('[CDP Events] recomputeProfile 실패:', err);
+    });
+  }
 
   return {
     eventId: result.rows[0].id,

@@ -62,6 +62,8 @@ export function createCustomerUpsertBuilder(
 
   // INSERT 컬럼 목록 — FIELD_MAP columnNames에 region 등 모든 직접 컬럼이 포함되므로
   // 여기서 개별 컬럼을 추가하면 중복이 되어 PostgreSQL 에러 발생. 절대 추가 금지.
+  // ★ D214+ (2026-05-24) Unified Customer Profile 정합: active_sources / last_activity_at 추가 (리터럴 영역 — paramsPerRow 영향 X)
+  // ★ D214+ 순서 영역 정합 의무: paramList 영역(company_id + columnNames + 3 + uploaded_by옵션) → literal 영역(active_sources + last_activity_at + source + created_at + updated_at)
   const insertCols = [
     'company_id',
     ...columnNames,
@@ -69,12 +71,14 @@ export function createCustomerUpsertBuilder(
     'birth_month_day',
     'custom_fields',
     ...(options.includeUploadedBy ? ['uploaded_by'] : []),
+    'active_sources',           // ★ D214+ literal — INSERT 영역 안 ['sync'|'upload'|'manual'] 박음
+    'last_activity_at',         // ★ D214+ literal — INSERT 영역 안 NOW() 박음
     'source',
     'created_at',
     'updated_at',
   ];
 
-  // row당 파라미터 수 — source/created_at/updated_at은 리터럴(NOW())로 처리
+  // row당 파라미터 수 — source/created_at/updated_at/active_sources/last_activity_at은 리터럴(NOW())로 처리
   const paramsPerRow =
     1 + // company_id
     columnNames.length +
@@ -86,15 +90,34 @@ export function createCustomerUpsertBuilder(
     options.source === 'sync' ? "'sync'" :
     "'manual'";
 
+  // ★ D214+ active_sources 리터럴 (sourceLiteral 활용 — '["sync"]'::jsonb 영역)
+  const activeSourcesLiteral = `('["' || ${sourceLiteral} || '"]')::jsonb`;
+
   // ON CONFLICT UPDATE 절 — phone/store_code는 UNIQUE 키 구성요소이므로 UPDATE에서 제외
-  const updateExclusions = new Set(['phone', 'store_code']);
+  // ★ D214+ (2026-05-24) Unified Customer Profile 정합:
+  //   RFM 컬럼 영역 = GREATEST 강제 의무 (자사몰 영역 cdp-orders.ts 영역 안 최신 영역 덮어쓰기 사고 차단)
+  //   - recent_purchase_date / purchase_count / last_purchase_date = GREATEST (옛 = COALESCE 덮어쓰기 영역 사고)
+  //   - total_purchase_amount = COALESCE 유지 (POS 영역 = 영구 누적 영역 본질)
+  const updateExclusions = new Set([
+    'phone', 'store_code',
+    // ★ D214+ RFM 영역 = 별도 GREATEST 영역 정합 (옛 COALESCE 덮어쓰기 사고 차단)
+    'recent_purchase_date', 'purchase_count', 'last_purchase_date',
+  ]);
   const updateClauses = [
     ...columnNames
       .filter((c) => !updateExclusions.has(c))
       .map((c) => `${c} = COALESCE(EXCLUDED.${c}, customers.${c})`),
+    // ★ D214+ RFM 영역 GREATEST 강제 매트릭스 (자사몰 ↔ POS 충돌 해결)
+    `recent_purchase_date = GREATEST(COALESCE(EXCLUDED.recent_purchase_date, customers.recent_purchase_date), COALESCE(customers.recent_purchase_date, EXCLUDED.recent_purchase_date))`,
+    `purchase_count = GREATEST(COALESCE(EXCLUDED.purchase_count, customers.purchase_count, 0), COALESCE(customers.purchase_count, 0))`,
+    `last_purchase_date = GREATEST(COALESCE(EXCLUDED.last_purchase_date, customers.last_purchase_date), COALESCE(customers.last_purchase_date, EXCLUDED.last_purchase_date))`,
     'birth_year = COALESCE(EXCLUDED.birth_year, customers.birth_year)',
     'birth_month_day = COALESCE(EXCLUDED.birth_month_day, customers.birth_month_day)',
     `custom_fields = CASE WHEN EXCLUDED.custom_fields IS NOT NULL THEN COALESCE(customers.custom_fields, '{}'::jsonb) || EXCLUDED.custom_fields ELSE customers.custom_fields END`,
+    // ★ D214+ active_sources jsonb 영역 안 source push (옛 영역 안 미존재 시 append)
+    `active_sources = CASE WHEN customers.active_sources @> ('"' || ${sourceLiteral} || '"')::jsonb THEN customers.active_sources ELSE COALESCE(customers.active_sources, '[]'::jsonb) || ('["' || ${sourceLiteral} || '"]')::jsonb END`,
+    // ★ D214+ last_activity_at 영역 = NOW() (sync/upload/manual 영역 = 활동 시각 본질)
+    'last_activity_at = GREATEST(COALESCE(customers.last_activity_at, NOW()), NOW())',
     ...(options.includeUploadedBy
       ? ['uploaded_by = COALESCE(EXCLUDED.uploaded_by, customers.uploaded_by)']
       : []),
@@ -142,8 +165,9 @@ export function createCustomerUpsertBuilder(
         { length: paramsPerRow },
         (_, k) => `$${baseIdx + k + 1}`,
       ).join(',');
-      // source/created_at/updated_at은 리터럴로 고정
-      placeholders.push(`(${paramList}, ${sourceLiteral}, NOW(), NOW())`);
+      // ★ D214+ source/created_at/updated_at/active_sources/last_activity_at은 리터럴로 고정
+      // insertCols 영역 순서 정합: ...columnNames, birth_year, birth_month_day, custom_fields, active_sources, last_activity_at, [uploaded_by], source, created_at, updated_at
+      placeholders.push(`(${paramList}, ${activeSourcesLiteral}, NOW(), ${sourceLiteral}, NOW(), NOW())`);
       values.push(...rowValues);
     }
     const returningClause =

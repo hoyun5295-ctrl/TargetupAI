@@ -1,11 +1,46 @@
-import { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { AlertCircle, ArrowLeft, Check, Copy, Database, ExternalLink, KeyRound, Link2, RefreshCw, Server, Store, Unlink } from 'lucide-react';
-import { useAuthStore } from '../stores/authStore';
+/**
+ * CdpSettingsPage.tsx — D214+ (2026-05-24) 5번 메뉴 자사몰 연동 전면 재작성
+ *
+ * 옛 1059줄 → 신규 (Performance/Predictive 매트릭스 정합 12 화면 영역)
+ *
+ * 영역:
+ *   1. 상단 + 새로고침
+ *   2. 요금제 게이팅 안내
+ *   3. 데이터 부족 안내 카드 (CT-73 진단 매트릭스)
+ *   4. AI 자율 진단 (Opus 4.7 — 비동기 로드)
+ *   5. 1-click 액션 3 카드 (자체 호스팅 / 카페24 / 네이버)
+ *   6. 요약 5 metric (회사 customer / 매핑 / 매핑률 / 30일 이벤트 / 30일 매출)
+ *   7. 자세히 분석 토글 (default 숨김)
+ *   8. 자세히 6 차트 (funnel / timeline / Provider별 매핑률 / POS↔CDP / Webhook / 채널)
+ *   9. AI 영향 요인 매트릭스
+ *   10. 자사몰 활성 customer top 10
+ *   11. Provider 매트릭스 (cafe24 + 자체 호스팅 + 네이버 + skeleton)
+ *   12. CDP 키 발급 + 사용량 + 발급 안내
+ *
+ * ⛔ 영구 룰:
+ *   - native dialog 영역 0건 의무 (ConfirmModal + useToast 활용 — feedback_no_native_browser_dialog)
+ *   - 다크 톤 정합 (bg-slate-950 + violet 액센트)
+ *   - Source caption 의무 (feedback_no_mock_data_in_production)
+ */
 
-// ★ D172 (2026-05-19) — 한줄로 CDP 설정 페이지
-//   회사 사용자가 자사몰 → 한줄로 sync API 키 발급 + 통합 가이드 확인 + 운영 모니터링 진입점.
-//   BUSINESS+ 요금제만 진입 (백엔드 cdp_enabled 게이팅 + 사용자 UI 안내).
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import {
+  BarChart, Bar, LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Legend,
+  PieChart, Pie, Cell,
+} from 'recharts';
+import {
+  ArrowLeft, Database, Brain, Loader2, RefreshCw, Sparkles, Users, AlertTriangle,
+  Activity, ChevronRight, ChevronLeft, Info, Link2, Store, Server,
+  KeyRound, Copy, Check, Unlink, MousePointerClick, AlertCircle, ShoppingCart,
+} from 'lucide-react';
+import { useAuthStore } from '../stores/authStore';
+import ConfirmModal, { type ConfirmState } from '../components/ConfirmModal';
+import { useToast } from '../components/ToastProvider';
+
+// ════════════════════════════════════════════════════════════════════
+// 타입 매트릭스
+// ════════════════════════════════════════════════════════════════════
 
 interface CdpUsage {
   cdp_enabled: boolean;
@@ -23,16 +58,6 @@ interface IssueKeyResponse {
   cdp_api_secret: string;
   issued_at: string;
   message: string;
-}
-
-interface RecentEvent {
-  id: string;
-  eventName: string;
-  properties: Record<string, any>;
-  source: string;
-  customerId: string | null;
-  externalId: string | null;
-  occurredAt: string;
 }
 
 interface Cafe24Status {
@@ -78,136 +103,320 @@ interface CustomIssuedSecret {
   message: string;
 }
 
+interface CdpProviderStats {
+  source: string;
+  totalLinks: number;
+  mappedLinks: number;
+  mappingRate: number;
+  events30d: number;
+}
+
+interface WebhookReliability {
+  source: string;
+  totalDeliveries: number;
+  successCount: number;
+  failedCount: number;
+  duplicateCount: number;
+  successRate: number;
+}
+
+interface SourceConflictBucket {
+  activeSourceCount: number;
+  customerCount: number;
+}
+
+interface CdpDiagnostics {
+  totalCustomers: number;
+  totalIdentityLinks: number;
+  mappedLinks: number;
+  overallMappingRate: number;
+  events24h: number;
+  events7d: number;
+  events30d: number;
+  posOnlyCustomers: number;
+  cdpOnlyCustomers: number;
+  fusedCustomers: number;
+  byProvider: CdpProviderStats[];
+  webhookReliability: WebhookReliability[];
+  sourceConflicts: SourceConflictBucket[];
+  computedAt: string;
+  source: string;
+}
+
+interface CdpFunnel {
+  pageViewCount: number;
+  cartAddCount: number;
+  checkoutStartCount: number;
+  purchaseCount: number;
+  cartConversionRate: number;
+  checkoutConversionRate: number;
+  purchaseConversionRate: number;
+  cartToPurchaseRate: number;
+  computedAt: string;
+  source: string;
+}
+
+interface CdpTimelineBucket {
+  hour: number;
+  count: number;
+  byEvent: Record<string, number>;
+}
+
+interface CdpActiveCustomer {
+  customerId: string;
+  customerName: string | null;
+  customerPhone: string | null;
+  customerGrade: string | null;
+  events30d: number;
+  eventsByName: Record<string, number>;
+  revenue30d: number;
+  activeSources: string[];
+  primarySource: string | null;
+  preferredChannel: string | null;
+  lastActivityAt: string | null;
+}
+
+interface CdpActiveCustomers {
+  topCustomers: CdpActiveCustomer[];
+  totalActiveCustomers: number;
+  anonymousEventCount: number;
+  computedAt: string;
+  source: string;
+}
+
+interface ChannelGroup {
+  channel: string;
+  customerIds: string[];
+  count: number;
+}
+
+interface ChannelDistribution {
+  total: number;
+  groups: ChannelGroup[];
+  unreachable: number;
+  computedAt: string;
+}
+
+interface ChannelCapabilities {
+  smsLms: boolean;
+  kakao: boolean;
+  email: boolean;
+  webPush: boolean;
+  inApp: boolean;
+  computedAt: string;
+}
+
+interface CdpExplainFactor {
+  category: string;
+  label: string;
+  impactScore: number;
+  direction: 'positive' | 'negative' | 'neutral';
+  detail: string;
+  sourceField: string;
+}
+
+interface CdpExplanation {
+  overallHealthScore: number;
+  topInsight: string;
+  factors: CdpExplainFactor[];
+  recommendations: string[];
+  explainedAt: string;
+}
+
+const SOURCE_LABEL: Record<string, string> = {
+  custom_sdk: '자체 SDK',
+  cdp_self_hosted: '자체 호스팅',
+  cafe24: '카페24',
+  shopify: 'Shopify',
+  makeshop: '메이크샵',
+  imweb: 'imweb',
+  sixshop: '식스샵',
+  woocommerce: 'WooCommerce',
+  naver: '네이버 스마트스토어',
+  sync: '싱크에이전트',
+  upload: '파일 업로드',
+  manual: '수동 입력',
+};
+
+const CHANNEL_LABEL: Record<string, string> = {
+  KAKAO: '알림톡',
+  LMS: '장문 SMS',
+  SMS: '단문 SMS',
+  EMAIL: '이메일',
+  WEB_PUSH: '웹 푸시',
+  IN_APP: '인앱',
+  NONE: '발송 불가',
+};
+
+const CHANNEL_COLOR: Record<string, string> = {
+  KAKAO: '#fbbf24',
+  LMS: '#a78bfa',
+  SMS: '#60a5fa',
+  EMAIL: '#34d399',
+  WEB_PUSH: '#fb7185',
+  IN_APP: '#22d3ee',
+  NONE: '#64748b',
+};
+
+// ════════════════════════════════════════════════════════════════════
+// 메인 컴포넌트
+// ════════════════════════════════════════════════════════════════════
+
 export default function CdpSettingsPage() {
   const navigate = useNavigate();
   const { user } = useAuthStore();
+  const toast = useToast();
+
+  // 진단 + 차트 영역
+  const [diagnostics, setDiagnostics] = useState<CdpDiagnostics | null>(null);
+  const [funnel, setFunnel] = useState<CdpFunnel | null>(null);
+  const [timeline, setTimeline] = useState<CdpTimelineBucket[]>([]);
+  const [activeCustomers, setActiveCustomers] = useState<CdpActiveCustomers | null>(null);
+  const [channelDist, setChannelDist] = useState<ChannelDistribution | null>(null);
+  const [channelCaps, setChannelCaps] = useState<ChannelCapabilities | null>(null);
+  const [explanation, setExplanation] = useState<CdpExplanation | null>(null);
+  const [explainLoading, setExplainLoading] = useState(false);
+
+  // 옛 영역 (운영 영역 유지)
   const [usage, setUsage] = useState<CdpUsage | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [issuing, setIssuing] = useState(false);
   const [issuedSecret, setIssuedSecret] = useState<IssueKeyResponse | null>(null);
-  const [confirmReissue, setConfirmReissue] = useState(false);
-  const [events, setEvents] = useState<RecentEvent[]>([]);
-  const [eventsLoading, setEventsLoading] = useState(false);
+  const [issuing, setIssuing] = useState(false);
   const [copyStatus, setCopyStatus] = useState<'idle' | 'key' | 'secret'>('idle');
   const [cafe24Status, setCafe24Status] = useState<Cafe24Status | null>(null);
   const [cafe24MallId, setCafe24MallId] = useState('');
   const [cafe24Connecting, setCafe24Connecting] = useState(false);
-  // ★ D178 네이버 스마트스토어
   const [naverStatus, setNaverStatus] = useState<NaverCommerceStatus | null>(null);
   const [naverStoreId, setNaverStoreId] = useState('');
   const [naverConnecting, setNaverConnecting] = useState(false);
   const [providers, setProviders] = useState<ProviderInfo[]>([]);
-  // ★ D178 (2026-05-19) 자체 호스팅 자사몰
   const [customInfo, setCustomInfo] = useState<CustomWebhookInfo | null>(null);
   const [customIssuedSecret, setCustomIssuedSecret] = useState<CustomIssuedSecret | null>(null);
-  const [customConfirmReissue, setCustomConfirmReissue] = useState(false);
   const [customIssuing, setCustomIssuing] = useState(false);
   const [copyStatusCustom, setCopyStatusCustom] = useState<'idle' | 'secret' | 'url' | 'companyId'>('idle');
 
-  const token = () => localStorage.getItem('token');
+  // UI 영역
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [detailsExpanded, setDetailsExpanded] = useState(false);
+  const [confirm, setConfirm] = useState<ConfirmState | null>(null);
 
-  const loadUsage = async () => {
+  const token = () => localStorage.getItem('token');
+  const isAdmin = user?.userType === 'company_admin';
+
+  const loadAll = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    setExplanation(null);
     try {
-      const res = await fetch('/api/cdp/usage', {
-        headers: { Authorization: `Bearer ${token()}` },
-      });
-      const data = await res.json();
-      if (data.success) setUsage(data);
-    } catch (e) {
-      console.error('CDP usage 조회 실패:', e);
+      const headers = { Authorization: `Bearer ${token()}` };
+      const [
+        usageRes, diagRes, funnelRes, timelineRes, activeRes, chDistRes,
+        cafe24Res, naverRes, providersRes, customRes,
+      ] = await Promise.all([
+        fetch('/api/cdp/usage', { headers }),
+        fetch('/api/cdp/diagnostics', { headers }),
+        fetch('/api/cdp/funnel?days=30', { headers }),
+        fetch('/api/cdp/timeline', { headers }),
+        fetch('/api/cdp/active-customers?limit=10', { headers }),
+        fetch('/api/cdp/channel-distribution', { headers }),
+        fetch('/api/cafe24/status', { headers }),
+        fetch('/api/naver-commerce/status', { headers }),
+        fetch('/api/cdp/providers', { headers }),
+        fetch('/api/cdp/custom/info', { headers }),
+      ]);
+      const usageData = await usageRes.json();
+      const diagData = await diagRes.json();
+      const funnelData = await funnelRes.json();
+      const timelineData = await timelineRes.json();
+      const activeData = await activeRes.json();
+      const chDistData = await chDistRes.json();
+      const cafe24Data = await cafe24Res.json();
+      const naverData = await naverRes.json();
+      const providersData = await providersRes.json();
+      const customData = await customRes.json();
+
+      if (usageData.success) setUsage(usageData);
+      if (diagData.success) setDiagnostics(diagData.diagnostics);
+      if (funnelData.success) setFunnel(funnelData.funnel);
+      if (timelineData.success) setTimeline(timelineData.timeline || []);
+      if (activeData.success) setActiveCustomers(activeData.activeCustomers);
+      if (chDistData.success) {
+        setChannelDist(chDistData.distribution);
+        setChannelCaps(chDistData.capabilities);
+      }
+      if (cafe24Data.success) setCafe24Status(cafe24Data);
+      if (naverData.success) setNaverStatus(naverData);
+      if (providersData.success) setProviders(providersData.providers || []);
+      if (customData.success) {
+        setCustomInfo({
+          hasSecret: customData.hasSecret,
+          webhookUrl: customData.webhookUrl,
+          issuedAt: customData.issuedAt,
+          companyId: customData.companyId,
+        });
+      }
+    } catch (e: any) {
+      setError(e?.message || '네트워크 오류');
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
-  const loadEvents = async () => {
-    setEventsLoading(true);
+  useEffect(() => { loadAll(); }, [loadAll]);
+
+  // AI 진단 (Opus 4.7 — 비동기 로드)
+  const loadExplanation = async () => {
+    if (explanation || explainLoading) return;
+    setExplainLoading(true);
     try {
-      const res = await fetch('/api/cdp/recent-events?limit=20', {
-        headers: { Authorization: `Bearer ${token()}` },
+      const res = await fetch('/api/cdp/explain', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token()}` },
+        body: '{}',
       });
       const data = await res.json();
-      if (data.success) setEvents(data.events || []);
-    } catch (e) {
-      console.error('CDP recent-events 조회 실패:', e);
-    } finally {
-      setEventsLoading(false);
-    }
+      if (data.success) setExplanation(data.explanation);
+      else toast.error(data.error || 'AI 진단 실패');
+    } catch { toast.error('AI 진단 네트워크 오류'); }
+    finally { setExplainLoading(false); }
   };
 
-  const loadCafe24Status = async () => {
-    try {
-      const res = await fetch('/api/cafe24/status', {
-        headers: { Authorization: `Bearer ${token()}` },
+  // CDP 키 발급
+  const handleIssueKey = async () => {
+    if (usage?.has_key) {
+      setConfirm({
+        mode: 'danger',
+        title: 'CDP 키 재발급',
+        description: '기존 키는 즉시 폐기되며, 자사몰 코드의 키를 새 값으로 교체할 때까지 sync가 중단됩니다.',
+        confirmLabel: '재발급 진행',
+        onConfirm: async () => { await issueKey(); },
       });
-      const data = await res.json();
-      if (data.success) setCafe24Status(data);
-    } catch (e) {
-      console.error('카페24 status 조회 실패:', e);
+    } else {
+      await issueKey();
     }
   };
-
-  // ★ D178 네이버 스마트스토어
-  const loadNaverStatus = async () => {
+  const issueKey = async () => {
+    setIssuing(true);
     try {
-      const res = await fetch('/api/naver-commerce/status', {
-        headers: { Authorization: `Bearer ${token()}` },
-      });
-      const data = await res.json();
-      if (data.success) setNaverStatus(data);
-    } catch (e) {
-      console.error('네이버 스마트스토어 status 조회 실패:', e);
-    }
-  };
-
-  const handleNaverConnect = async () => {
-    const trimmed = naverStoreId.trim();
-    if (!trimmed) {
-      alert('네이버 스마트스토어 store_id를 입력해주세요.');
-      return;
-    }
-    setNaverConnecting(true);
-    try {
-      const res = await fetch(`/api/naver-commerce/oauth/authorize?store_id=${encodeURIComponent(trimmed)}`, {
-        headers: { Authorization: `Bearer ${token()}` },
-      });
-      const data = await res.json();
-      if (data.success && data.authorize_url) {
-        window.open(data.authorize_url, 'naver_oauth', 'width=720,height=820');
-        alert('새 창에서 네이버 로그인 + 동의를 완료한 후, 본 페이지로 돌아와 새로고침해주세요.');
-      } else {
-        alert(data.error || '네이버 스마트스토어 연동 시작 실패');
-      }
-    } catch (e: any) {
-      alert(e?.message || '네이버 스마트스토어 연동 처리 중 오류가 발생했습니다.');
-    } finally {
-      setNaverConnecting(false);
-    }
-  };
-
-  const handleNaverDisconnect = async () => {
-    if (!confirm('네이버 스마트스토어 연동을 해제하시겠습니까? 자사몰 → 한줄로 sync가 즉시 중단됩니다.')) return;
-    try {
-      const res = await fetch('/api/naver-commerce/disconnect', {
-        method: 'DELETE',
-        headers: { Authorization: `Bearer ${token()}` },
+      const res = await fetch('/api/cdp/issue-key', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token()}` },
       });
       const data = await res.json();
       if (data.success) {
-        await loadNaverStatus();
-        alert('네이버 스마트스토어 연동이 해제되었습니다.');
-      } else {
-        alert(data.error || '연동 해제 실패');
-      }
-    } catch (e: any) {
-      alert(e?.message || '연동 해제 처리 중 오류가 발생했습니다.');
-    }
+        setIssuedSecret(data);
+        toast.success('CDP 키 발급 완료 — Secret을 즉시 저장해주세요.');
+        await loadAll();
+      } else { toast.error(data.error || '키 발급 실패'); }
+    } catch (e: any) { toast.error(e?.message || '키 발급 처리 오류'); }
+    finally { setIssuing(false); }
   };
 
+  // 카페24
   const handleCafe24Connect = async () => {
     const trimmed = cafe24MallId.trim().toLowerCase();
     if (!trimmed || !/^[a-z0-9_-]+$/i.test(trimmed)) {
-      alert('카페24 mall_id 형식이 올바르지 않습니다. (예: hanjullo-test)');
+      toast.error('카페24 mall_id 형식이 올바르지 않습니다 (예: hanjullo-test)');
       return;
     }
     setCafe24Connecting(true);
@@ -218,381 +427,710 @@ export default function CdpSettingsPage() {
       const data = await res.json();
       if (data.success && data.authorize_url) {
         window.open(data.authorize_url, 'cafe24_oauth', 'width=720,height=820');
-        alert('새 창에서 카페24 로그인 + 동의를 완료한 후, 본 페이지로 돌아와 새로고침해주세요.');
-      } else {
-        alert(data.error || '카페24 연동 시작 실패');
-      }
-    } catch (e: any) {
-      alert(e?.message || '카페24 연동 처리 중 오류가 발생했습니다.');
-    } finally {
-      setCafe24Connecting(false);
-    }
+        toast.info('새 창에서 카페24 로그인 + 동의 완료 후 새로고침해주세요.');
+      } else { toast.error(data.error || '카페24 연동 시작 실패'); }
+    } catch (e: any) { toast.error(e?.message || '카페24 연동 처리 오류'); }
+    finally { setCafe24Connecting(false); }
+  };
+  const handleCafe24Disconnect = () => {
+    setConfirm({
+      mode: 'danger',
+      title: '카페24 연동 해제',
+      description: '자사몰 → 한줄로 sync가 즉시 중단됩니다.',
+      onConfirm: async () => {
+        const res = await fetch('/api/cafe24/disconnect', { method: 'DELETE', headers: { Authorization: `Bearer ${token()}` } });
+        const data = await res.json();
+        if (data.success) { await loadAll(); toast.success('카페24 연동 해제 완료'); }
+        else { toast.error(data.error || '연동 해제 실패'); }
+      },
+    });
   };
 
-  const handleCafe24Disconnect = async () => {
-    if (!confirm('카페24 연동을 해제하시겠습니까? 자사몰 → 한줄로 sync가 즉시 중단됩니다.')) return;
+  // 네이버 스마트스토어
+  const handleNaverConnect = async () => {
+    const trimmed = naverStoreId.trim();
+    if (!trimmed) { toast.error('네이버 스마트스토어 store_id를 입력해주세요.'); return; }
+    setNaverConnecting(true);
     try {
-      const res = await fetch('/api/cafe24/disconnect', {
-        method: 'DELETE',
+      const res = await fetch(`/api/naver-commerce/oauth/authorize?store_id=${encodeURIComponent(trimmed)}`, {
         headers: { Authorization: `Bearer ${token()}` },
       });
       const data = await res.json();
-      if (data.success) {
-        await loadCafe24Status();
-        alert('카페24 연동이 해제되었습니다.');
-      } else {
-        alert(data.error || '연동 해제 실패');
-      }
-    } catch (e: any) {
-      alert(e?.message || '연동 해제 처리 중 오류가 발생했습니다.');
-    }
+      if (data.success && data.authorize_url) {
+        window.open(data.authorize_url, 'naver_oauth', 'width=720,height=820');
+        toast.info('새 창에서 네이버 로그인 + 동의 완료 후 새로고침해주세요.');
+      } else { toast.error(data.error || '네이버 스마트스토어 연동 시작 실패'); }
+    } catch (e: any) { toast.error(e?.message || '네이버 스마트스토어 처리 오류'); }
+    finally { setNaverConnecting(false); }
+  };
+  const handleNaverDisconnect = () => {
+    setConfirm({
+      mode: 'danger',
+      title: '네이버 스마트스토어 연동 해제',
+      description: '자사몰 → 한줄로 sync가 즉시 중단됩니다.',
+      onConfirm: async () => {
+        const res = await fetch('/api/naver-commerce/disconnect', { method: 'DELETE', headers: { Authorization: `Bearer ${token()}` } });
+        const data = await res.json();
+        if (data.success) { await loadAll(); toast.success('네이버 스마트스토어 연동 해제 완료'); }
+        else { toast.error(data.error || '연동 해제 실패'); }
+      },
+    });
   };
 
-  const loadProviders = async () => {
-    try {
-      const res = await fetch('/api/cdp/providers', {
-        headers: { Authorization: `Bearer ${token()}` },
-      });
-      const data = await res.json();
-      if (data.success) setProviders(data.providers || []);
-    } catch (e) {
-      console.error('provider 매트릭스 조회 실패:', e);
-    }
-  };
-
-  // ★ D178 자체 호스팅 자사몰
-  const loadCustomInfo = async () => {
-    try {
-      const res = await fetch('/api/cdp/custom/info', {
-        headers: { Authorization: `Bearer ${token()}` },
-      });
-      const data = await res.json();
-      if (data.success) {
-        setCustomInfo({
-          hasSecret: data.hasSecret,
-          webhookUrl: data.webhookUrl,
-          issuedAt: data.issuedAt,
-          companyId: data.companyId,
-        });
-      }
-    } catch (e) {
-      console.error('자체 호스팅 info 조회 실패:', e);
-    }
-  };
-
+  // 자체 호스팅
   const handleCustomIssue = async () => {
-    if (customInfo?.hasSecret && !customConfirmReissue) {
-      setCustomConfirmReissue(true);
-      return;
+    if (customInfo?.hasSecret) {
+      setConfirm({
+        mode: 'danger',
+        title: 'Webhook Secret 재발급',
+        description: '기존 secret이 즉시 폐기되며 자사몰 서버 환경변수 교체까지 webhook이 거부됩니다.',
+        confirmLabel: '재발급 진행',
+        onConfirm: async () => { await issueCustomSecret(); },
+      });
+    } else {
+      await issueCustomSecret();
     }
+  };
+  const issueCustomSecret = async () => {
     setCustomIssuing(true);
-    setCustomConfirmReissue(false);
     try {
       const res = await fetch('/api/cdp/custom/issue-secret', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token()}`,
-        },
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token()}` },
       });
       const data = await res.json();
       if (data.success) {
         setCustomIssuedSecret(data);
-        await loadCustomInfo();
-      } else {
-        alert(data.error || 'webhook_secret 발급 실패');
-      }
-    } catch (e: any) {
-      alert(e?.message || 'webhook_secret 발급 중 오류');
-    } finally {
-      setCustomIssuing(false);
+        toast.success('Webhook Secret 발급 완료 — 즉시 저장해주세요.');
+        await loadAll();
+      } else { toast.error(data.error || 'webhook_secret 발급 실패'); }
+    } catch (e: any) { toast.error(e?.message || 'webhook_secret 발급 오류'); }
+    finally { setCustomIssuing(false); }
+  };
+  const handleCustomRevoke = () => {
+    setConfirm({
+      mode: 'danger',
+      title: '자체 호스팅 연동 해제',
+      description: '자사몰에서 보낸 webhook이 즉시 차단됩니다.',
+      onConfirm: async () => {
+        const res = await fetch('/api/cdp/custom/revoke', { method: 'DELETE', headers: { Authorization: `Bearer ${token()}` } });
+        const data = await res.json();
+        if (data.success) { await loadAll(); toast.success('자체 호스팅 연동 해제 완료'); }
+        else { toast.error(data.error || '연동 해제 실패'); }
+      },
+    });
+  };
+
+  // 1-click 액션 진입
+  const handleQuickAction = (action: 'custom' | 'cafe24' | 'naver') => {
+    if (action === 'custom') {
+      document.getElementById('section-custom')?.scrollIntoView({ behavior: 'smooth' });
+    } else if (action === 'cafe24') {
+      document.getElementById('section-cafe24')?.scrollIntoView({ behavior: 'smooth' });
+    } else {
+      document.getElementById('section-naver')?.scrollIntoView({ behavior: 'smooth' });
     }
   };
 
-  const handleCustomRevoke = async () => {
-    if (!confirm('자체 호스팅 자사몰 연동을 해제하시겠습니까? 자사몰에서 보낸 webhook이 즉시 차단됩니다.')) return;
-    try {
-      const res = await fetch('/api/cdp/custom/revoke', {
-        method: 'DELETE',
-        headers: { Authorization: `Bearer ${token()}` },
-      });
-      const data = await res.json();
-      if (data.success) {
-        await loadCustomInfo();
-        alert('자체 호스팅 자사몰 연동이 해제되었습니다.');
-      } else {
-        alert(data.error || '연동 해제 실패');
-      }
-    } catch (e: any) {
-      alert(e?.message || '연동 해제 중 오류');
-    }
-  };
-
-  const copyCustom = async (text: string, target: 'secret' | 'url' | 'companyId') => {
+  // 복사
+  const copyText = async (text: string, label: string) => {
     try {
       await navigator.clipboard.writeText(text);
-      setCopyStatusCustom(target);
-      setTimeout(() => setCopyStatusCustom('idle'), 1500);
-    } catch {
-      alert('복사 실패 — 브라우저 권한을 확인해주세요.');
-    }
+      toast.success(`${label} 복사 완료`);
+    } catch { toast.error('복사 실패 — 브라우저 권한 확인 필요'); }
   };
-
-  useEffect(() => {
-    loadUsage();
-    loadEvents();
-    loadCafe24Status();
-    loadProviders();
-    loadCustomInfo();
-    loadNaverStatus();
-  }, []);
-
-  const handleIssueKey = async () => {
-    if (usage?.has_key && !confirmReissue) {
-      setConfirmReissue(true);
-      return;
-    }
-    setIssuing(true);
-    setConfirmReissue(false);
-    try {
-      const res = await fetch('/api/cdp/issue-key', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token()}`,
-        },
-      });
-      const data = await res.json();
-      if (data.success) {
-        setIssuedSecret(data);
-        await loadUsage();
-      } else {
-        alert(data.error || '키 발급 실패');
-      }
-    } catch (e: any) {
-      alert(e?.message || '키 발급 처리 중 오류가 발생했습니다.');
-    } finally {
-      setIssuing(false);
-    }
-  };
-
   const copy = async (text: string, target: 'key' | 'secret') => {
-    try {
-      await navigator.clipboard.writeText(text);
-      setCopyStatus(target);
-      setTimeout(() => setCopyStatus('idle'), 1500);
-    } catch {
-      alert('복사 실패 — 브라우저 권한을 확인해주세요.');
-    }
+    try { await navigator.clipboard.writeText(text); setCopyStatus(target); setTimeout(() => setCopyStatus('idle'), 1500); }
+    catch { toast.error('복사 실패'); }
+  };
+  const copyCustom = async (text: string, target: 'secret' | 'url' | 'companyId') => {
+    try { await navigator.clipboard.writeText(text); setCopyStatusCustom(target); setTimeout(() => setCopyStatusCustom('idle'), 1500); }
+    catch { toast.error('복사 실패'); }
   };
 
-  const isAdmin = user?.userType === 'company_admin';
+  const formatPct = (n: number) => `${(n * 100).toFixed(1)}%`;
+  const formatWon = (n: number) => `${Math.round(n).toLocaleString()}원`;
+
+  // 데이터 부족 안내 카드 매트릭스
+  const dataAvailabilityCards = useMemo(() => {
+    if (!diagnostics) return [];
+    const cards: Array<{ level: 'critical' | 'warning' | 'info' | 'good'; icon: typeof Database; title: string; message: string; actionLabel?: string; actionId?: string }> = [];
+
+    const hasAnyProvider = diagnostics.byProvider.length > 0;
+    if (!hasAnyProvider) {
+      cards.push({
+        level: 'warning',
+        icon: Database,
+        title: '자사몰 미연동',
+        message: '자사몰 연동 시 funnel / 매출 / ROAS / 캠페인 반응 매트릭스 자동 활성. 자체 호스팅 / 카페24 / 네이버 영역 중 선택.',
+        actionLabel: '자체 호스팅 연동',
+        actionId: 'section-custom',
+      });
+    } else if (diagnostics.events30d === 0) {
+      cards.push({
+        level: 'warning',
+        icon: Activity,
+        title: '자사몰 이벤트 0건',
+        message: '자사몰 연동되었으나 최근 30일 이벤트 0건 — SDK 설치 또는 webhook 동작 확인 필요.',
+        actionLabel: 'SDK 가이드',
+        actionId: 'section-custom',
+      });
+    } else if (diagnostics.events30d < 100) {
+      cards.push({
+        level: 'info',
+        icon: Activity,
+        title: 'CDP 이벤트 누적 부족',
+        message: `최근 30일 ${diagnostics.events30d}건 — 100건+ 누적 시 funnel + attribution 정확도 향상.`,
+      });
+    }
+
+    if (hasAnyProvider && diagnostics.overallMappingRate < 0.5 && diagnostics.totalIdentityLinks > 0) {
+      cards.push({
+        level: 'warning',
+        icon: Users,
+        title: `매핑률 ${formatPct(diagnostics.overallMappingRate)} — 회원 매칭 영역 약함`,
+        message: '자사몰 회원 영역 안 phone/email 영역 있는지 확인 의무. 익명 이벤트 영역 = trigger 영역만 활용 가능.',
+      });
+    }
+
+    const failedWebhooks = diagnostics.webhookReliability.filter((w) => w.failedCount > 0);
+    if (failedWebhooks.length > 0) {
+      cards.push({
+        level: 'warning',
+        icon: AlertTriangle,
+        title: `Webhook 실패 ${failedWebhooks.reduce((s, w) => s + w.failedCount, 0)}건 (30일)`,
+        message: `${failedWebhooks.map((w) => SOURCE_LABEL[w.source] || w.source).join(', ')} 영역 = 서명 검증 또는 endpoint 확인 의무.`,
+      });
+    }
+
+    if (cards.length === 0 && hasAnyProvider) {
+      cards.push({
+        level: 'good',
+        icon: Check,
+        title: '자사몰 영역 정상 작동',
+        message: `${diagnostics.byProvider.length}개 Provider 연동 / 30일 ${diagnostics.events30d.toLocaleString()}건 이벤트 / 매핑률 ${formatPct(diagnostics.overallMappingRate)} — 모든 매트릭스 활성.`,
+      });
+    }
+    return cards;
+  }, [diagnostics]);
+
+  // POS ↔ CDP 격차 도넛 데이터
+  const fusionPieData = useMemo(() => {
+    if (!diagnostics) return [];
+    return [
+      { name: 'POS only (싱크/업로드/수동)', value: diagnostics.posOnlyCustomers, color: '#64748b' },
+      { name: 'CDP only (자사몰만)', value: diagnostics.cdpOnlyCustomers, color: '#06b6d4' },
+      { name: '융합 (양쪽 source)', value: diagnostics.fusedCustomers, color: '#10b981' },
+    ].filter((d) => d.value > 0);
+  }, [diagnostics]);
+
+  // 24h timeline 차트 데이터
+  const timelineChartData = useMemo(() => {
+    return timeline.map((b) => ({
+      hour: `${b.hour}시`,
+      total: b.count,
+      purchase: b.byEvent['purchase'] || 0,
+      cart: b.byEvent['cart_add'] || 0,
+      view: b.byEvent['page_view'] || 0,
+    }));
+  }, [timeline]);
+
+  // 채널 분포 PieChart
+  const channelPieData = useMemo(() => {
+    if (!channelDist) return [];
+    return channelDist.groups.map((g) => ({
+      name: CHANNEL_LABEL[g.channel] || g.channel,
+      value: g.count,
+      color: CHANNEL_COLOR[g.channel] || '#64748b',
+    }));
+  }, [channelDist]);
+
+  // ════════════════════════════════════════════════════════════════════
+  // JSX
+  // ════════════════════════════════════════════════════════════════════
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 text-white flex items-center justify-center">
+      <div className="min-h-screen bg-slate-950 text-white flex items-center justify-center">
         <div className="text-white/50 flex items-center gap-2">
-          <RefreshCw className="w-4 h-4 animate-spin" />
-          CDP 정보를 불러오는 중입니다...
+          <Loader2 className="w-4 h-4 animate-spin text-violet-400" />
+          자사몰 영역 진단 + 매트릭스 로드 중...
         </div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 text-white">
-      {/* 헤더 sticky */}
+    <div className="min-h-screen bg-slate-950 text-white">
+      <ConfirmModal state={confirm} onClose={() => setConfirm(null)} />
+
+      {/* 1. 상단 헤더 */}
       <div className="bg-slate-950/80 backdrop-blur-sm border-b border-white/10 sticky top-0 z-30">
-        <div className="max-w-7xl mx-auto px-4 md:px-6 py-3 md:py-4 flex items-center gap-3">
-          <button
-            onClick={() => navigate('/ai-operator')}
-            className="p-2 rounded-lg hover:bg-white/10 transition-colors"
-          >
+        <div className="max-w-7xl mx-auto px-4 md:px-6 py-3 md:py-4 flex items-center gap-3 flex-wrap">
+          <button onClick={() => navigate('/ai-operator')} className="p-2 rounded-lg hover:bg-white/10 transition-colors">
             <ArrowLeft className="w-5 h-5" />
           </button>
-          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-green-400 to-emerald-500 flex items-center justify-center flex-shrink-0 shadow-lg shadow-emerald-500/20">
+          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-emerald-400 to-cyan-500 flex items-center justify-center flex-shrink-0 shadow-lg shadow-emerald-500/20">
             <Database className="w-5 h-5 text-white" />
           </div>
           <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
               <h1 className="text-xl md:text-2xl font-semibold text-white">자사몰 연동 (CDP)</h1>
               <span className="text-[10px] bg-gradient-to-r from-amber-400 to-orange-500 text-white px-2 py-0.5 rounded-full font-bold tracking-wide">BETA</span>
             </div>
-            <p className="text-xs md:text-sm text-white/50 mt-0.5">자체 호스팅 · 네이버 스마트스토어 · 카페24 자동 sync — 고객 + 주문 + 이벤트 통합</p>
+            <p className="text-xs md:text-sm text-white/50 mt-0.5">자체 호스팅 · 네이버 · 카페24 · 싱크에이전트 통합 — Unified Customer Profile 매트릭스</p>
           </div>
+          <button onClick={loadAll} disabled={loading} className="p-2 rounded-lg hover:bg-white/10 transition-colors" title="새로고침">
+            <RefreshCw className={`w-4 h-4 text-white/60 ${loading ? 'animate-spin' : ''}`} />
+          </button>
         </div>
       </div>
 
       <div className="max-w-7xl mx-auto px-4 md:px-6 py-6 space-y-5">
-        {/* 요금제 게이팅 안내 */}
+        {error && (
+          <div className="bg-amber-500/10 border border-amber-400/30 rounded-xl p-6 text-amber-200">{error}</div>
+        )}
+
+        {/* 2. 요금제 게이팅 안내 */}
         {!usage?.cdp_enabled && (
           <div className="bg-amber-500/10 border border-amber-400/30 rounded-xl p-5 flex items-start gap-3">
             <AlertCircle className="w-5 h-5 text-amber-300 mt-0.5 shrink-0" />
             <div>
-              <div className="font-bold text-amber-100 mb-1">
-                현재 요금제: {usage?.plan_name || '미가입'} — 자사몰 연동(CDP) 사용 불가
-              </div>
-              <div className="text-sm text-amber-200">
-                자사몰 회원 DB와 한줄로AI를 실시간 동기화하려면 <strong>비즈니스 요금제</strong>가 필요합니다. 가입 또는 업그레이드 후 본 페이지에서 키를 발급받으실 수 있습니다.
-              </div>
+              <div className="font-bold text-amber-100 mb-1">현재 요금제: {usage?.plan_name || '미가입'} — CDP 사용 불가</div>
+              <div className="text-sm text-amber-200">자사몰 회원 DB 영역 ↔ 한줄로AI 실시간 동기화 영역 = <strong>비즈니스 요금제</strong> 의무.</div>
             </div>
           </div>
         )}
 
-        {/* 발급된 key+secret (한 번만 노출) */}
-        {issuedSecret && (
-          <div className="bg-emerald-500/10 border border-emerald-400/30 rounded-xl p-6">
-            <div className="flex items-center gap-2 mb-4">
-              <Check className="w-5 h-5 text-emerald-300" />
-              <h2 className="text-base font-bold text-emerald-100">CDP 키가 발급되었습니다</h2>
-            </div>
-            <div className="text-sm text-emerald-200 mb-5 leading-relaxed">
-              ★ <strong>비밀 키(secret)는 본 화면을 닫으면 다시 볼 수 없습니다.</strong> 자사몰에 즉시 저장해주세요. 재발급 시 기존 키는 즉시 폐기됩니다.
-            </div>
-            <div className="space-y-3">
-              <div>
-                <label className="text-xs font-medium text-emerald-100 block mb-1">Public Key (X-Hanjullo-Key)</label>
-                <div className="flex gap-2">
-                  <input
-                    readOnly
-                    value={issuedSecret.cdp_api_key}
-                    className="flex-1 px-3 py-2 bg-slate-900 border border-white/10 rounded-lg text-xs font-mono text-white/80"
-                  />
-                  <button
-                    onClick={() => copy(issuedSecret.cdp_api_key, 'key')}
-                    className="px-3 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-medium flex items-center gap-1.5"
-                  >
-                    {copyStatus === 'key' ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
-                    {copyStatus === 'key' ? '복사됨' : '복사'}
-                  </button>
-                </div>
-              </div>
-              <div>
-                <label className="text-xs font-medium text-emerald-100 block mb-1">Secret Key (X-Hanjullo-Secret) — ★ 1회 노출</label>
-                <div className="flex gap-2">
-                  <input
-                    readOnly
-                    value={issuedSecret.cdp_api_secret}
-                    className="flex-1 px-3 py-2 bg-slate-900 border-2 border-rose-400/40 rounded-lg text-xs font-mono text-white/80"
-                  />
-                  <button
-                    onClick={() => copy(issuedSecret.cdp_api_secret, 'secret')}
-                    className="px-3 py-2 bg-rose-600 hover:bg-rose-700 text-white rounded-lg text-xs font-medium flex items-center gap-1.5"
-                  >
-                    {copyStatus === 'secret' ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
-                    {copyStatus === 'secret' ? '복사됨' : '복사'}
-                  </button>
-                </div>
-              </div>
-            </div>
-            <button
-              onClick={() => setIssuedSecret(null)}
-              className="mt-5 px-4 py-2 bg-emerald-500/20 border border-emerald-400/40 hover:bg-emerald-500/30 text-emerald-200 text-sm font-medium rounded-lg"
-            >
-              확인 — 키를 안전한 곳에 저장했습니다
-            </button>
-          </div>
-        )}
-
-        {/* 키 발급/재발급 카드 */}
-        {usage?.cdp_enabled && !issuedSecret && (
-          <div className="bg-white/5 border border-white/10 rounded-xl p-6">
-            <div className="flex items-center gap-2 mb-4">
-              <KeyRound className="w-5 h-5 text-indigo-300" />
-              <h2 className="text-base font-bold text-white">CDP API 키</h2>
-            </div>
-
-            {usage.has_key ? (
-              <div className="space-y-3">
-                <div className="text-sm text-white/70">
-                  발급 일시: <span className="font-medium">{usage.issued_at ? new Date(usage.issued_at).toLocaleString('ko-KR') : '-'}</span>
-                </div>
-                <div className="text-sm text-white/70">
-                  ★ Public Key + Secret은 발급 시점에 자사몰 측에 저장되어 있어야 합니다. 재발급 시 기존 키는 즉시 폐기되며, 자사몰 코드의 키를 새 값으로 교체해야 합니다.
-                </div>
-                {confirmReissue ? (
-                  <div className="bg-rose-500/10 border border-rose-400/30 rounded-lg p-4 space-y-3">
-                    <div className="text-sm text-rose-200 font-medium">
-                      정말로 재발급하시겠습니까? 기존 키는 즉시 폐기되며, 교체 전까지 자사몰 → 한줄로 sync가 중단됩니다.
+        {/* 3. 데이터 부족 안내 카드 */}
+        {dataAvailabilityCards.length > 0 && (
+          <div className="space-y-2">
+            {dataAvailabilityCards.map((card, i) => {
+              const styleMap = {
+                critical: 'bg-rose-500/10 border-rose-400/30 text-rose-100',
+                warning: 'bg-amber-500/10 border-amber-400/30 text-amber-100',
+                info: 'bg-cyan-500/10 border-cyan-400/30 text-cyan-100',
+                good: 'bg-emerald-500/10 border-emerald-400/30 text-emerald-100',
+              }[card.level];
+              const iconColor = {
+                critical: 'text-rose-300', warning: 'text-amber-300', info: 'text-cyan-300', good: 'text-emerald-300',
+              }[card.level];
+              const IconComp = card.icon;
+              return (
+                <div key={i} className={`p-4 border rounded-xl ${styleMap}`}>
+                  <div className="flex items-start gap-3">
+                    <div className={`w-9 h-9 rounded-lg bg-white/10 flex items-center justify-center flex-shrink-0 ${iconColor}`}>
+                      <IconComp className="w-5 h-5" />
                     </div>
-                    <div className="flex gap-2">
-                      <button
-                        onClick={handleIssueKey}
-                        disabled={issuing || !isAdmin}
-                        className="px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white text-sm font-medium rounded-lg disabled:opacity-40"
-                      >
-                        {issuing ? '재발급 중...' : '확인 — 재발급 진행'}
-                      </button>
-                      <button
-                        onClick={() => setConfirmReissue(false)}
-                        className="px-4 py-2 bg-white/5 border border-white/10 hover:bg-white/10 text-white/80 text-sm font-medium rounded-lg"
-                      >
-                        취소
-                      </button>
+                    <div className="flex-1 min-w-0">
+                      <div className="text-sm font-semibold mb-0.5">{card.title}</div>
+                      <div className="text-xs leading-relaxed opacity-90">{card.message}</div>
+                      {card.actionLabel && card.actionId && (
+                        <button
+                          onClick={() => document.getElementById(card.actionId!)?.scrollIntoView({ behavior: 'smooth' })}
+                          className="mt-2 px-2.5 py-1 bg-white/15 hover:bg-white/25 rounded text-[11px] font-medium transition-colors"
+                        >
+                          {card.actionLabel} →
+                        </button>
+                      )}
                     </div>
                   </div>
-                ) : (
-                  <button
-                    onClick={handleIssueKey}
-                    disabled={!isAdmin}
-                    className="px-4 py-2 bg-white/5 border border-white/10 hover:bg-white/10 text-white/80 text-sm font-medium rounded-lg disabled:opacity-40"
-                  >
-                    재발급
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {/* 4. AI 자율 진단 (Opus 4.7) */}
+        {usage?.cdp_enabled && (
+          <div className="p-4 bg-gradient-to-br from-violet-500/15 via-fuchsia-500/10 to-indigo-500/15 border border-violet-400/30 rounded-xl">
+            <div className="flex items-start gap-3">
+              <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-violet-400 to-fuchsia-500 flex items-center justify-center flex-shrink-0">
+                <Sparkles className="w-5 h-5 text-white" />
+              </div>
+              <div className="flex-1">
+                <div className="text-sm font-medium text-violet-100 mb-1">AI 자율 진단 (Opus 4.7)</div>
+                {explanation ? (
+                  <div className="text-xs text-white/80 leading-relaxed">{explanation.topInsight}</div>
+                ) : explainLoading ? (
+                  <div className="text-xs text-white/60 flex items-center gap-1.5">
+                    <Loader2 className="w-3 h-3 animate-spin" /> AI 분석 중 (10~20초)
+                  </div>
+                ) : isAdmin ? (
+                  <button onClick={loadExplanation} className="text-xs text-violet-200 hover:text-violet-100 underline-offset-2 hover:underline">
+                    AI 자율 진단 시작 →
                   </button>
-                )}
-                {!isAdmin && (
-                  <div className="text-xs text-white/50">키 발급/재발급은 회사 관리자만 가능합니다.</div>
+                ) : (
+                  <div className="text-xs text-white/50">AI 진단은 회사 관리자만 가능합니다.</div>
                 )}
               </div>
+            </div>
+          </div>
+        )}
+
+        {/* 5. 1-click 액션 3 카드 */}
+        {usage?.cdp_enabled && (
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+            <QuickActionCard
+              icon={<Server className="w-5 h-5" />}
+              title="자체 호스팅 (권장)"
+              desc="자체 서버 자사몰 — webhook_secret 발급 + 표준 endpoint"
+              color="violet"
+              onClick={() => handleQuickAction('custom')}
+            />
+            <QuickActionCard
+              icon={<Store className="w-5 h-5" />}
+              title="카페24"
+              desc="OAuth 자동 연동 — 코딩 0건"
+              color="amber"
+              onClick={() => handleQuickAction('cafe24')}
+            />
+            <QuickActionCard
+              icon={<ShoppingCart className="w-5 h-5" />}
+              title="네이버 스마트스토어"
+              desc="Naver Commerce OAuth — 주문 + 회원 sync"
+              color="emerald"
+              onClick={() => handleQuickAction('naver')}
+            />
+          </div>
+        )}
+
+        {/* 6. 요약 5 metric */}
+        {diagnostics && (
+          <div className="bg-white/5 border border-white/10 rounded-xl p-4">
+            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
+              <MetricBlock label="회사 전체 customer" value={diagnostics.totalCustomers.toLocaleString()} color="text-blue-300" />
+              <MetricBlock label="매핑 customer" value={diagnostics.mappedLinks.toLocaleString()} sub={`매핑률 ${formatPct(diagnostics.overallMappingRate)}`} color="text-cyan-300" />
+              <MetricBlock label="30일 이벤트" value={diagnostics.events30d.toLocaleString()} sub={`24h ${diagnostics.events24h.toLocaleString()}`} color="text-violet-300" />
+              <MetricBlock label="융합 customer" value={diagnostics.fusedCustomers.toLocaleString()} sub={`POS+CDP 양쪽`} color="text-emerald-300" />
+              <MetricBlock label="자사몰만 customer" value={diagnostics.cdpOnlyCustomers.toLocaleString()} sub="(POS 영역 미존재)" color="text-amber-300" />
+            </div>
+            <div className="mt-2 text-[10px] text-white/40">{diagnostics.source}</div>
+          </div>
+        )}
+
+        {/* 7. 자세히 분석 토글 */}
+        {usage?.cdp_enabled && (
+          <button
+            onClick={() => setDetailsExpanded(!detailsExpanded)}
+            className="w-full px-3 py-2 bg-white/5 hover:bg-white/10 rounded-lg text-xs text-white/60 flex items-center justify-center gap-1.5 transition-colors"
+          >
+            {detailsExpanded ? (
+              <><ChevronLeft className="w-3 h-3 rotate-90" /> 간소 보기 — 자세한 차트 숨기기</>
             ) : (
-              <div className="space-y-3">
-                <div className="text-sm text-white/70">
-                  CDP 키가 아직 발급되지 않았습니다. 발급 시 Public Key + Secret 한 쌍이 생성됩니다.
-                  <br />Secret은 발급 시점에 한 번만 노출되니, 자사몰 측에 즉시 저장해주세요.
+              <><ChevronRight className="w-3 h-3 rotate-90" /> 자세한 분석 펼치기 (funnel / timeline / Provider / POS↔CDP / Webhook / 채널 분포)</>
+            )}
+          </button>
+        )}
+
+        {detailsExpanded && (
+          <div className="space-y-4">
+            {/* 자사몰 funnel */}
+            {funnel && funnel.pageViewCount > 0 ? (
+              <ChartCard title="자사몰 이벤트 Funnel (30일)" source={funnel.source} icon={<Activity className="w-4 h-4 text-emerald-300" />}>
+                <div className="space-y-2">
+                  <FunnelBar label="page_view" count={funnel.pageViewCount} max={funnel.pageViewCount} color="#6366f1" />
+                  <FunnelBar label="cart_add" count={funnel.cartAddCount} max={funnel.pageViewCount} color="#06b6d4" />
+                  <FunnelBar label="checkout_start" count={funnel.checkoutStartCount} max={funnel.pageViewCount} color="#a78bfa" />
+                  <FunnelBar label="purchase" count={funnel.purchaseCount} max={funnel.pageViewCount} color="#10b981" />
                 </div>
-                <button
-                  onClick={handleIssueKey}
-                  disabled={issuing || !isAdmin}
-                  className="px-4 py-2 bg-indigo-500/30 hover:bg-indigo-500/50 text-indigo-100 text-sm font-medium rounded-lg disabled:opacity-40"
-                >
-                  {issuing ? '발급 중...' : '키 발급'}
-                </button>
-                {!isAdmin && (
-                  <div className="text-xs text-white/50">키 발급/재발급은 회사 관리자만 가능합니다.</div>
+                <div className="mt-3 grid grid-cols-3 gap-2 text-[10px]">
+                  <StatBox label="cart 전환율" value={formatPct(funnel.cartConversionRate)} color="text-cyan-300" />
+                  <StatBox label="구매 전환율" value={formatPct(funnel.purchaseConversionRate)} color="text-emerald-300" />
+                  <StatBox label="cart → 구매" value={formatPct(funnel.cartToPurchaseRate)} color="text-fuchsia-300" />
+                </div>
+              </ChartCard>
+            ) : (
+              <div className="p-4 bg-white/5 border border-white/10 rounded-xl text-xs text-white/50">
+                자사몰 이벤트 영역 0건 — SDK 설치 또는 webhook 영역 확인 의무.
+              </div>
+            )}
+
+            {/* 24h timeline */}
+            {timeline.length > 0 && timelineChartData.some((d) => d.total > 0) && (
+              <ChartCard title="24시간 이벤트 timeline (KST)" source="cdp_events 24h hourly bucket" icon={<Activity className="w-4 h-4 text-cyan-300" />}>
+                <ResponsiveContainer width="100%" height={200}>
+                  <BarChart data={timelineChartData}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.1)" />
+                    <XAxis dataKey="hour" stroke="rgba(255,255,255,0.5)" fontSize={10} />
+                    <YAxis stroke="rgba(255,255,255,0.5)" fontSize={10} />
+                    <Tooltip contentStyle={{ backgroundColor: '#0f172a', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 8, fontSize: 12 }} />
+                    <Legend wrapperStyle={{ fontSize: 11 }} />
+                    <Bar dataKey="view" stackId="a" fill="#6366f1" name="page_view" />
+                    <Bar dataKey="cart" stackId="a" fill="#06b6d4" name="cart_add" />
+                    <Bar dataKey="purchase" stackId="a" fill="#10b981" name="purchase" />
+                  </BarChart>
+                </ResponsiveContainer>
+              </ChartCard>
+            )}
+
+            {/* Provider별 매핑률 */}
+            {diagnostics && diagnostics.byProvider.length > 0 && (
+              <ChartCard title="Provider별 매핑률 매트릭스" source="cdp_identity_links group by source" icon={<Database className="w-4 h-4 text-violet-300" />}>
+                <div className="space-y-2">
+                  {diagnostics.byProvider.map((p) => (
+                    <div key={p.source} className="space-y-1">
+                      <div className="flex items-center justify-between text-[11px]">
+                        <span className="text-white/80 font-medium">{SOURCE_LABEL[p.source] || p.source}</span>
+                        <span className="text-white/60 font-mono">
+                          {p.mappedLinks.toLocaleString()} / {p.totalLinks.toLocaleString()} ({formatPct(p.mappingRate)}) · 30일 이벤트 {p.events30d.toLocaleString()}
+                        </span>
+                      </div>
+                      <div className="h-2 bg-white/10 rounded-full overflow-hidden">
+                        <div
+                          className={`h-full ${p.mappingRate > 0.7 ? 'bg-emerald-400' : p.mappingRate > 0.4 ? 'bg-amber-400' : 'bg-rose-400'}`}
+                          style={{ width: `${Math.max(2, p.mappingRate * 100)}%` }}
+                        />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </ChartCard>
+            )}
+
+            {/* POS ↔ CDP 격차 도넛 */}
+            {fusionPieData.length > 0 && (
+              <ChartCard title="POS ↔ CDP 융합 격차 (Source overlap)" source="customers.active_sources jsonb 분류" icon={<Users className="w-4 h-4 text-amber-300" />}>
+                <ResponsiveContainer width="100%" height={220}>
+                  <PieChart>
+                    <Pie data={fusionPieData} dataKey="value" nameKey="name" innerRadius={40} outerRadius={80} paddingAngle={2}>
+                      {fusionPieData.map((d, i) => <Cell key={i} fill={d.color} />)}
+                    </Pie>
+                    <Tooltip contentStyle={{ backgroundColor: '#0f172a', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 8, fontSize: 12 }} />
+                    <Legend wrapperStyle={{ fontSize: 11 }} />
+                  </PieChart>
+                </ResponsiveContainer>
+              </ChartCard>
+            )}
+
+            {/* Webhook 신뢰성 */}
+            {diagnostics && diagnostics.webhookReliability.length > 0 && (
+              <ChartCard title="Webhook 신뢰성 매트릭스 (30일)" source="cdp_webhook_deliveries status" icon={<AlertTriangle className="w-4 h-4 text-rose-300" />}>
+                <div className="space-y-1.5">
+                  {diagnostics.webhookReliability.map((w) => (
+                    <div key={w.source} className="grid grid-cols-12 gap-2 items-center text-[11px]">
+                      <div className="col-span-3 text-white/80 font-medium">{SOURCE_LABEL[w.source] || w.source}</div>
+                      <div className="col-span-2 text-white/60 font-mono text-right">{w.totalDeliveries.toLocaleString()}건</div>
+                      <div className="col-span-2 text-emerald-300 font-mono text-right">성공 {w.successCount}</div>
+                      <div className="col-span-2 text-rose-300 font-mono text-right">실패 {w.failedCount}</div>
+                      <div className="col-span-3 text-right font-mono">
+                        <span className={w.successRate > 0.9 ? 'text-emerald-300' : w.successRate > 0.7 ? 'text-amber-300' : 'text-rose-300'}>
+                          {formatPct(w.successRate)}
+                        </span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </ChartCard>
+            )}
+
+            {/* 채널 분포 */}
+            {channelDist && channelPieData.length > 0 && (
+              <ChartCard title="발송 채널 자동 분배 매트릭스" source="customers.preferred_channel (CT-71 unified profile)" icon={<MousePointerClick className="w-4 h-4 text-fuchsia-300" />}>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-center">
+                  <ResponsiveContainer width="100%" height={200}>
+                    <PieChart>
+                      <Pie data={channelPieData} dataKey="value" nameKey="name" innerRadius={30} outerRadius={70} paddingAngle={2}>
+                        {channelPieData.map((d, i) => <Cell key={i} fill={d.color} />)}
+                      </Pie>
+                      <Tooltip contentStyle={{ backgroundColor: '#0f172a', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 8, fontSize: 12 }} />
+                    </PieChart>
+                  </ResponsiveContainer>
+                  <div className="space-y-1.5">
+                    {channelDist.groups.map((g) => (
+                      <div key={g.channel} className="flex items-center justify-between text-[11px]">
+                        <span className="text-white/80 font-medium flex items-center gap-1.5">
+                          <span className="w-2 h-2 rounded-full" style={{ backgroundColor: CHANNEL_COLOR[g.channel] || '#64748b' }} />
+                          {CHANNEL_LABEL[g.channel] || g.channel}
+                        </span>
+                        <span className="text-white/60 font-mono">{g.count.toLocaleString()}명</span>
+                      </div>
+                    ))}
+                    {channelDist.unreachable > 0 && (
+                      <div className="flex items-center justify-between text-[11px] pt-1.5 border-t border-white/10">
+                        <span className="text-rose-300 font-medium">발송 불가</span>
+                        <span className="text-rose-300 font-mono">{channelDist.unreachable.toLocaleString()}명</span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+                {channelCaps && (
+                  <div className="mt-3 pt-3 border-t border-white/10 flex flex-wrap gap-2 text-[10px]">
+                    <CapBadge label="SMS/LMS" active={channelCaps.smsLms} />
+                    <CapBadge label="알림톡" active={channelCaps.kakao} />
+                    <CapBadge label="이메일" active={channelCaps.email} />
+                    <CapBadge label="웹 푸시" active={channelCaps.webPush} />
+                    <CapBadge label="인앱" active={channelCaps.inApp} />
+                  </div>
                 )}
+              </ChartCard>
+            )}
+          </div>
+        )}
+
+        {/* 9. AI 영향 요인 매트릭스 */}
+        {explanation && explanation.factors.length > 0 && (
+          <div className="p-4 bg-white/5 border border-white/10 rounded-xl">
+            <div className="flex items-center gap-2 mb-3">
+              <Brain className="w-4 h-4 text-violet-300" />
+              <h2 className="text-sm font-semibold">AI 자사몰 영향 요인 매트릭스</h2>
+              <span className="ml-auto text-[10px] text-white/40">건강도 스코어 <span className="text-violet-300 font-mono font-bold">{explanation.overallHealthScore}</span>/100</span>
+            </div>
+            <div className="space-y-1.5">
+              {explanation.factors.map((f, i) => {
+                const dirColor = f.direction === 'positive' ? 'bg-emerald-400' : f.direction === 'negative' ? 'bg-rose-400' : 'bg-amber-400';
+                const dirTextColor = f.direction === 'positive' ? 'text-emerald-300' : f.direction === 'negative' ? 'text-rose-300' : 'text-amber-300';
+                return (
+                  <div key={i} className="grid grid-cols-12 gap-2 items-center text-[11px]">
+                    <div className="col-span-3 text-white/70 font-medium">{f.label}</div>
+                    <div className="col-span-5">
+                      <div className="h-2 bg-white/10 rounded-full overflow-hidden">
+                        <div className={`h-full ${dirColor}`} style={{ width: `${f.impactScore * 100}%` }} />
+                      </div>
+                    </div>
+                    <div className={`col-span-1 text-right font-mono ${dirTextColor}`}>{(f.impactScore * 100).toFixed(0)}%</div>
+                    <div className="col-span-3 text-[10px] text-white/50 truncate" title={f.detail}>{f.detail}</div>
+                  </div>
+                );
+              })}
+            </div>
+            {explanation.recommendations.length > 0 && (
+              <div className="mt-3 space-y-1.5">
+                {explanation.recommendations.map((r, i) => (
+                  <div key={i} className="p-2 bg-violet-500/10 border border-violet-400/30 rounded text-[11px] text-violet-100">
+                    <strong>{i + 1}.</strong> {r}
+                  </div>
+                ))}
               </div>
             )}
           </div>
         )}
 
-        {/* 이번 달 사용량 */}
-        {usage?.cdp_enabled && (
-          <div className="bg-white/5 border border-white/10 rounded-xl p-6">
-            <h2 className="text-base font-bold text-white mb-3">이번 달 사용량</h2>
-            <div className="flex items-baseline gap-2 mb-2">
-              <span className="text-3xl font-bold text-indigo-300">{usage.used.toLocaleString()}</span>
-              <span className="text-sm text-white/50">
-                / {usage.monthly_limit === null ? '무제한' : `${usage.monthly_limit.toLocaleString()}건`}
+        {/* 10. 자사몰 활성 customer top 10 */}
+        {activeCustomers && activeCustomers.topCustomers.length > 0 && (
+          <div className="bg-white/5 border border-white/10 rounded-xl overflow-hidden">
+            <div className="px-4 py-3 border-b border-white/10 flex items-center gap-2">
+              <Users className="w-4 h-4 text-cyan-300" />
+              <h2 className="text-sm font-semibold">자사몰 활성 Customer Top {activeCustomers.topCustomers.length}</h2>
+              <span className="ml-auto text-[10px] text-white/40">
+                30일 활성 전체 {activeCustomers.totalActiveCustomers.toLocaleString()}명 · 비회원 이벤트 {activeCustomers.anonymousEventCount.toLocaleString()}건
               </span>
             </div>
-            {usage.monthly_limit !== null && (
-              <div className="w-full bg-white/10 rounded-full h-2 overflow-hidden">
-                <div
-                  className="bg-indigo-500 h-2 transition-all"
-                  style={{ width: `${Math.min((usage.used / usage.monthly_limit) * 100, 100)}%` }}
-                />
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead className="bg-white/5 border-b border-white/10">
+                  <tr className="text-left text-white/60">
+                    <th className="px-3 py-2 font-medium">Customer</th>
+                    <th className="px-3 py-2 font-medium text-center">primary source</th>
+                    <th className="px-3 py-2 font-medium text-center">채널</th>
+                    <th className="px-3 py-2 font-medium text-right">30일 이벤트</th>
+                    <th className="px-3 py-2 font-medium text-right">30일 매출</th>
+                    <th className="px-3 py-2 font-medium text-right">최근 활동</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {activeCustomers.topCustomers.map((c) => (
+                    <tr key={c.customerId} className="border-b border-white/5 hover:bg-white/5">
+                      <td className="px-3 py-2">
+                        <div className="text-white/80">{c.customerName || '-'}</div>
+                        <div className="text-[10px] text-white/40 font-mono">{c.customerPhone || ''} · {c.customerGrade || ''}</div>
+                      </td>
+                      <td className="px-3 py-2 text-center">
+                        {c.primarySource ? (
+                          <span className="text-[10px] px-1.5 py-0.5 bg-violet-500/20 text-violet-300 rounded">
+                            {SOURCE_LABEL[c.primarySource] || c.primarySource}
+                          </span>
+                        ) : '-'}
+                      </td>
+                      <td className="px-3 py-2 text-center">
+                        {c.preferredChannel ? (
+                          <span className="text-[10px] px-1.5 py-0.5 rounded" style={{ backgroundColor: `${CHANNEL_COLOR[c.preferredChannel]}30`, color: CHANNEL_COLOR[c.preferredChannel] }}>
+                            {CHANNEL_LABEL[c.preferredChannel] || c.preferredChannel}
+                          </span>
+                        ) : '-'}
+                      </td>
+                      <td className="px-3 py-2 text-right font-mono text-cyan-300">{c.events30d.toLocaleString()}</td>
+                      <td className="px-3 py-2 text-right font-mono text-amber-300">{c.revenue30d > 0 ? formatWon(c.revenue30d) : '-'}</td>
+                      <td className="px-3 py-2 text-right text-[10px] text-white/50">{c.lastActivityAt ? new Date(c.lastActivityAt).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' }) : '-'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
+        {/* 11. Provider 매트릭스 — 자체 호스팅 */}
+        {usage?.cdp_enabled && (
+          <div id="section-custom" className="bg-white/5 border border-white/10 rounded-xl p-6">
+            <div className="flex items-center gap-2 mb-1">
+              <Server className="w-5 h-5 text-indigo-300" />
+              <h2 className="text-base font-bold text-white">자체 호스팅 자사몰 (Webhook + SDK)</h2>
+              <span className="text-xs bg-indigo-500/20 text-indigo-300 px-2 py-0.5 rounded-full font-medium">권장</span>
+            </div>
+            <div className="text-xs text-white/50 mb-4">
+              자체 서버 자사몰 (Next.js / Node / Django / PHP / Rails 등) → webhook_secret 발급 → 표준 endpoint → 한줄로AI 자동 동기화.
+            </div>
+
+            {customIssuedSecret && (
+              <div className="bg-emerald-500/10 border border-emerald-400/30 rounded-xl p-5 mb-4">
+                <div className="flex items-center gap-2 mb-3">
+                  <Check className="w-5 h-5 text-emerald-300" />
+                  <h3 className="text-sm font-bold text-emerald-100">webhook_secret 발급 완료</h3>
+                </div>
+                <div className="text-xs text-emerald-200 mb-4 leading-relaxed">
+                  ★ <strong>본 화면을 닫으면 webhook_secret을 다시 볼 수 없습니다.</strong> 자체 서버 환경변수에 즉시 저장 의무.
+                </div>
+                <div className="space-y-3">
+                  <SecretRow label="Webhook Secret (X-Hanjullo-Signature) ★ 1회 노출" value={customIssuedSecret.webhook_secret} copied={copyStatusCustom === 'secret'} onCopy={() => copyCustom(customIssuedSecret.webhook_secret, 'secret')} danger />
+                  <SecretRow label="Webhook URL" value={customIssuedSecret.webhook_url} copied={copyStatusCustom === 'url'} onCopy={() => copyCustom(customIssuedSecret.webhook_url, 'url')} />
+                  <SecretRow label="Company ID" value={customIssuedSecret.company_id} copied={copyStatusCustom === 'companyId'} onCopy={() => copyCustom(customIssuedSecret.company_id, 'companyId')} />
+                </div>
+                <button onClick={() => setCustomIssuedSecret(null)} className="mt-4 px-4 py-2 bg-emerald-500/20 border border-emerald-400/40 hover:bg-emerald-500/30 text-emerald-200 text-sm font-medium rounded-lg">
+                  확인 — secret 저장 완료
+                </button>
+              </div>
+            )}
+
+            {customInfo?.hasSecret && !customIssuedSecret ? (
+              <div className="space-y-3">
+                <div className="bg-emerald-500/10 border border-emerald-400/30 rounded-lg p-3 text-sm text-emerald-100">
+                  webhook_secret 발급됨 · 발급일 {customInfo.issuedAt ? new Date(customInfo.issuedAt).toLocaleString('ko-KR') : '-'}
+                </div>
+                <div className="text-xs text-white/50 leading-relaxed">
+                  Webhook URL: <code className="text-white/70 font-mono">{customInfo.webhookUrl}</code>
+                </div>
+                {isAdmin && (
+                  <div className="flex gap-2">
+                    <button onClick={handleCustomIssue} disabled={customIssuing} className="px-4 py-2 bg-white/5 border border-white/10 hover:bg-white/10 text-white/80 text-sm font-medium rounded-lg disabled:opacity-40">
+                      {customIssuing ? '재발급 중...' : 'Secret 재발급'}
+                    </button>
+                    <button onClick={handleCustomRevoke} className="px-4 py-2 bg-rose-500/15 border border-rose-400/40 hover:bg-rose-500/25 text-rose-200 text-sm font-medium rounded-lg flex items-center gap-2">
+                      <Unlink className="w-4 h-4" /> 연동 해제
+                    </button>
+                  </div>
+                )}
+              </div>
+            ) : !customIssuedSecret && (
+              <div className="space-y-3">
+                <div className="text-sm text-white/70">webhook_secret이 아직 발급되지 않았습니다. 발급 시 secret + URL + company_id 한 쌍이 생성됩니다.</div>
+                {isAdmin ? (
+                  <button onClick={handleCustomIssue} disabled={customIssuing} className="px-4 py-2 bg-indigo-500/30 hover:bg-indigo-500/50 text-indigo-100 text-sm font-medium rounded-lg disabled:opacity-40 flex items-center gap-2">
+                    <KeyRound className="w-4 h-4" /> {customIssuing ? '발급 중...' : 'webhook_secret 발급'}
+                  </button>
+                ) : <div className="text-xs text-white/50">발급은 회사 관리자만 가능합니다.</div>}
               </div>
             )}
           </div>
         )}
 
-        {/* 카페24 OAuth 연동 */}
+        {/* 11. Provider 매트릭스 — 카페24 */}
         {usage?.cdp_enabled && (
-          <div className="bg-white/5 border border-white/10 rounded-xl p-6">
+          <div id="section-cafe24" className="bg-white/5 border border-white/10 rounded-xl p-6">
             <div className="flex items-center gap-2 mb-4">
-              <Store className="w-5 h-5 text-orange-500" />
+              <Store className="w-5 h-5 text-amber-300" />
               <h2 className="text-base font-bold text-white">카페24 연동</h2>
-              <span className="text-xs bg-orange-50 text-orange-700 px-2 py-0.5 rounded-full font-medium">코딩 0건</span>
+              <span className="text-xs bg-amber-500/20 text-amber-300 px-2 py-0.5 rounded-full font-medium">OAuth — 코딩 0건</span>
             </div>
 
             {cafe24Status?.connected ? (
@@ -600,247 +1138,46 @@ export default function CdpSettingsPage() {
                 <div className="bg-emerald-500/10 border border-emerald-400/30 rounded-lg p-4 flex items-start gap-3">
                   <Check className="w-5 h-5 text-emerald-300 mt-0.5 shrink-0" />
                   <div className="flex-1">
-                    <div className="text-sm font-medium text-emerald-100">
-                      {cafe24Status.mall_id} 카페24와 연동되었습니다
-                    </div>
+                    <div className="text-sm font-medium text-emerald-100">{cafe24Status.mall_id} 카페24 연동됨</div>
                     <div className="text-xs text-emerald-300 mt-1">
                       status: {cafe24Status.status} · 토큰 만료: {cafe24Status.token_expires_at ? new Date(cafe24Status.token_expires_at).toLocaleString('ko-KR') : '-'}
-                      <br />scope: <span className="font-mono">{cafe24Status.scope || '-'}</span>
                     </div>
                   </div>
                 </div>
-                <div className="text-xs text-white/50">
-                  카페24가 보내는 webhook(회원 가입/주문 생성/주문 취소)은 자동으로 한줄로 customers + cdp_events에 저장됩니다. 추가 코딩이 필요하지 않습니다.
-                </div>
                 {isAdmin && (
-                  <button
-                    onClick={handleCafe24Disconnect}
-                    className="px-4 py-2 bg-rose-500/15 border border-rose-400/40 hover:bg-rose-500/25 text-rose-200 text-sm font-medium rounded-lg flex items-center gap-2"
-                  >
-                    <Unlink className="w-4 h-4" />
-                    연동 해제
+                  <button onClick={handleCafe24Disconnect} className="px-4 py-2 bg-rose-500/15 border border-rose-400/40 hover:bg-rose-500/25 text-rose-200 text-sm font-medium rounded-lg flex items-center gap-2">
+                    <Unlink className="w-4 h-4" /> 연동 해제
                   </button>
                 )}
               </div>
             ) : (
               <div className="space-y-3">
-                <div className="text-sm text-white/70">
-                  카페24 mall_id를 입력하시면 OAuth 새 창이 열립니다. 카페24 관리자로 로그인 + 동의 완료 시 자동으로 회원/주문 sync가 진행됩니다.
-                </div>
+                <div className="text-sm text-white/70">카페24 mall_id 입력 → OAuth 새 창 → 자동 회원/주문 sync.</div>
                 <div className="flex gap-2">
                   <input
                     type="text"
                     value={cafe24MallId}
                     onChange={(e) => setCafe24MallId(e.target.value)}
                     placeholder="예: hanjullo-test"
-                    className="flex-1 px-3 py-2 bg-slate-900 border border-white/10 rounded-lg text-sm text-white placeholder-white/30 focus:outline-none focus:border-orange-400/50"
+                    className="flex-1 px-3 py-2 bg-slate-900 border border-white/10 rounded-lg text-sm text-white placeholder-white/30 focus:outline-none focus:border-amber-400/50"
                   />
-                  <button
-                    onClick={handleCafe24Connect}
-                    disabled={cafe24Connecting || !isAdmin || !cafe24MallId.trim()}
-                    className="px-4 py-2 bg-orange-500 hover:bg-orange-600 text-white text-sm font-medium rounded-lg disabled:opacity-40 flex items-center gap-2"
-                  >
-                    <Link2 className="w-4 h-4" />
-                    {cafe24Connecting ? '연동 중...' : '카페24 연동 시작'}
+                  <button onClick={handleCafe24Connect} disabled={cafe24Connecting || !isAdmin || !cafe24MallId.trim()} className="px-4 py-2 bg-amber-500/30 hover:bg-amber-500/50 text-amber-100 text-sm font-medium rounded-lg disabled:opacity-40 flex items-center gap-2">
+                    <Link2 className="w-4 h-4" /> {cafe24Connecting ? '연동 중...' : '카페24 연동'}
                   </button>
                 </div>
-                {!isAdmin && (
-                  <div className="text-xs text-white/50">카페24 연동은 회사 관리자만 가능합니다.</div>
-                )}
-                <div className="text-xs text-white/40">
-                  ★ 카페24 admin URL이 <span className="font-mono">https://hanjullo-test.cafe24.com/admin</span>이면 mall_id는 <span className="font-mono">hanjullo-test</span>입니다.
-                </div>
+                <div className="text-xs text-white/40">★ admin URL <span className="font-mono">https://hanjullo-test.cafe24.com/admin</span> → mall_id = <span className="font-mono">hanjullo-test</span></div>
               </div>
             )}
           </div>
         )}
 
-        {/* ★ D178 (2026-05-19) — 자체 호스팅 자사몰 (Webhook + SDK). Harold 명시 — 카페24보다 자체 호스팅 우선. */}
+        {/* 11. Provider 매트릭스 — 네이버 스마트스토어 */}
         {usage?.cdp_enabled && (
-          <div className="bg-white/5 border border-white/10 rounded-xl p-6">
-            <div className="flex items-center gap-2 mb-1">
-              <Server className="w-5 h-5 text-indigo-300" />
-              <h2 className="text-base font-bold text-white">자체 호스팅 자사몰 (Webhook + SDK)</h2>
-              <span className="text-xs bg-indigo-500/20 text-indigo-300 px-2 py-0.5 rounded-full font-medium">권장</span>
-            </div>
-            <div className="text-xs text-white/50 mb-4">
-              자체 서버(Next.js / Node / Django / PHP / Rails 등)에서 운영하는 자사몰을 한줄로 CDP에 연결합니다.
-              webhook_secret 발급 → 자사몰 코드에 저장 → 표준 endpoint POST → 한줄로AI 자동 동기화.
-            </div>
-
-            {/* 발급된 직후 raw secret 1회 노출 */}
-            {customIssuedSecret && (
-              <div className="bg-emerald-500/10 border border-emerald-400/30 rounded-xl p-5 mb-4">
-                <div className="flex items-center gap-2 mb-3">
-                  <Check className="w-5 h-5 text-emerald-300" />
-                  <h3 className="text-sm font-bold text-emerald-100">webhook_secret이 발급되었습니다</h3>
-                </div>
-                <div className="text-xs text-emerald-200 mb-4 leading-relaxed">
-                  ★ <strong>본 화면을 닫으면 webhook_secret을 다시 볼 수 없습니다.</strong> 자사몰 자체 서버 환경변수에 즉시 저장해주세요. 재발급 시 기존 secret은 즉시 폐기됩니다.
-                </div>
-                <div className="space-y-3">
-                  <div>
-                    <label className="text-xs font-medium text-emerald-100 block mb-1">Webhook Secret (X-Hanjullo-Signature 서명 키) — ★ 1회 노출</label>
-                    <div className="flex gap-2">
-                      <input
-                        readOnly
-                        value={customIssuedSecret.webhook_secret}
-                        className="flex-1 px-3 py-2 bg-slate-900 border-2 border-rose-400/40 rounded-lg text-xs font-mono text-white/80"
-                      />
-                      <button
-                        onClick={() => copyCustom(customIssuedSecret.webhook_secret, 'secret')}
-                        className="px-3 py-2 bg-rose-600 hover:bg-rose-700 text-white rounded-lg text-xs font-medium flex items-center gap-1.5"
-                      >
-                        {copyStatusCustom === 'secret' ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
-                        {copyStatusCustom === 'secret' ? '복사됨' : '복사'}
-                      </button>
-                    </div>
-                  </div>
-                  <div>
-                    <label className="text-xs font-medium text-emerald-100 block mb-1">Webhook URL (자사몰이 POST 호출하는 endpoint)</label>
-                    <div className="flex gap-2">
-                      <input readOnly value={customIssuedSecret.webhook_url} className="flex-1 px-3 py-2 bg-slate-900 border border-white/10 rounded-lg text-xs font-mono text-white/80" />
-                      <button onClick={() => copyCustom(customIssuedSecret.webhook_url, 'url')} className="px-3 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-medium flex items-center gap-1.5">
-                        {copyStatusCustom === 'url' ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
-                        {copyStatusCustom === 'url' ? '복사됨' : '복사'}
-                      </button>
-                    </div>
-                  </div>
-                  <div>
-                    <label className="text-xs font-medium text-emerald-100 block mb-1">Company ID (X-Hanjullo-Company-Id 헤더 값)</label>
-                    <div className="flex gap-2">
-                      <input readOnly value={customIssuedSecret.company_id} className="flex-1 px-3 py-2 bg-slate-900 border border-white/10 rounded-lg text-xs font-mono text-white/80" />
-                      <button onClick={() => copyCustom(customIssuedSecret.company_id, 'companyId')} className="px-3 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-medium flex items-center gap-1.5">
-                        {copyStatusCustom === 'companyId' ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
-                        {copyStatusCustom === 'companyId' ? '복사됨' : '복사'}
-                      </button>
-                    </div>
-                  </div>
-                </div>
-                <button
-                  onClick={() => setCustomIssuedSecret(null)}
-                  className="mt-4 px-4 py-2 bg-emerald-500/20 border border-emerald-400/40 hover:bg-emerald-500/30 text-emerald-200 text-sm font-medium rounded-lg"
-                >
-                  확인 — 자사몰 자체 서버에 저장했습니다
-                </button>
-              </div>
-            )}
-
-            {/* 발급 상태 */}
-            {!customIssuedSecret && customInfo && (
-              <>
-                {customInfo.hasSecret ? (
-                  <div className="space-y-3">
-                    <div className="bg-emerald-500/10 border border-emerald-400/30 rounded-lg p-4 flex items-start gap-3">
-                      <Check className="w-5 h-5 text-emerald-300 mt-0.5 shrink-0" />
-                      <div className="flex-1">
-                        <div className="text-sm font-medium text-emerald-100">자체 호스팅 자사몰이 연동되었습니다</div>
-                        <div className="text-xs text-emerald-300 mt-1">
-                          발급 일자: {customInfo.issuedAt ? new Date(customInfo.issuedAt).toLocaleString('ko-KR') : '-'}
-                        </div>
-                      </div>
-                    </div>
-                    <div className="bg-white/5 rounded-lg p-3 text-xs space-y-1 font-mono text-white/80">
-                      <div><strong className="text-white/70">Webhook URL:</strong> {customInfo.webhookUrl}</div>
-                      <div><strong className="text-white/70">Company ID:</strong> {customInfo.companyId}</div>
-                      <div className="text-white/50 mt-2 font-sans">★ webhook_secret은 발급 시점 1회만 노출됩니다. 자사몰에 저장한 secret을 잃어버린 경우 재발급 진행해주세요.</div>
-                    </div>
-                    {customConfirmReissue ? (
-                      <div className="bg-rose-500/10 border border-rose-400/30 rounded-lg p-4 space-y-3">
-                        <div className="text-sm text-rose-200 font-medium">
-                          정말로 재발급하시겠습니까? 기존 webhook_secret은 즉시 폐기되며, 자사몰 코드의 secret을 새 값으로 교체해야 합니다.
-                        </div>
-                        <div className="flex gap-2">
-                          <button
-                            onClick={handleCustomIssue}
-                            disabled={customIssuing || !isAdmin}
-                            className="px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white text-sm font-medium rounded-lg disabled:opacity-40"
-                          >
-                            {customIssuing ? '재발급 중...' : '확인 — 재발급 진행'}
-                          </button>
-                          <button onClick={() => setCustomConfirmReissue(false)} className="px-4 py-2 bg-white/5 border border-white/10 hover:bg-white/10 text-white/80 text-sm font-medium rounded-lg">취소</button>
-                        </div>
-                      </div>
-                    ) : (
-                      <div className="flex gap-2">
-                        <button
-                          onClick={handleCustomIssue}
-                          disabled={!isAdmin}
-                          className="px-4 py-2 bg-white/5 border border-white/10 hover:bg-white/10 text-white/80 text-sm font-medium rounded-lg disabled:opacity-40"
-                        >
-                          재발급
-                        </button>
-                        {isAdmin && (
-                          <button onClick={handleCustomRevoke} className="px-4 py-2 bg-rose-500/15 border border-rose-400/40 hover:bg-rose-500/25 text-rose-200 text-sm font-medium rounded-lg flex items-center gap-2">
-                            <Unlink className="w-4 h-4" />
-                            연동 해제
-                          </button>
-                        )}
-                      </div>
-                    )}
-                    {!isAdmin && <div className="text-xs text-white/50">webhook_secret 발급/재발급/해제는 회사 관리자만 가능합니다.</div>}
-
-                    {/* 코드 샘플 (이미 발급된 회사) */}
-                    <div className="bg-white/5 border border-white/10 rounded-lg p-4 mt-2 space-y-2">
-                      <div className="font-medium text-white text-sm">자사몰 자체 서버 구현 흐름 (Node.js 샘플)</div>
-                      <pre className="text-xs font-mono bg-slate-900 border border-white/10 rounded p-3 overflow-x-auto text-white/80">{`import { createHmac } from 'crypto';
-
-const body = JSON.stringify({
-  event: 'order.created',
-  resource: {
-    order_id: 'O-12345',
-    external_id: 'C-9001',
-    status: 'completed',
-    total_amount: 49000,
-    ordered_at: new Date().toISOString(),
-    items: [{ product_id: 'P001', product_name: '셔츠', price: 49000, quantity: 1 }],
-  },
-});
-
-const signature = createHmac('sha256', process.env.HANJULLO_WEBHOOK_SECRET)
-  .update(body).digest('hex');
-
-await fetch('${customInfo.webhookUrl}', {
-  method: 'POST',
-  headers: {
-    'Content-Type': 'application/json',
-    'X-Hanjullo-Company-Id': '${customInfo.companyId}',
-    'X-Hanjullo-Event':      'order.created',
-    'X-Hanjullo-Signature':  signature,
-  },
-  body,
-});`}</pre>
-                      <div className="text-xs text-white/50">표준 이벤트: customer.created / customer.updated / order.created / order.updated / order.cancelled / order.refunded</div>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="space-y-3">
-                    <div className="text-sm text-white/70">
-                      webhook_secret이 아직 발급되지 않았습니다. 발급 시 64자 hex secret이 생성됩니다.
-                      <br />Secret은 발급 시점에 한 번만 노출되니, 자사몰 자체 서버에 즉시 저장해주세요.
-                    </div>
-                    <button
-                      onClick={handleCustomIssue}
-                      disabled={customIssuing || !isAdmin}
-                      className="px-4 py-2 bg-indigo-500/30 hover:bg-indigo-500/50 text-indigo-100 text-sm font-medium rounded-lg disabled:opacity-40"
-                    >
-                      {customIssuing ? '발급 중...' : 'webhook_secret 발급'}
-                    </button>
-                    {!isAdmin && <div className="text-xs text-white/50">webhook_secret 발급은 회사 관리자만 가능합니다.</div>}
-                  </div>
-                )}
-              </>
-            )}
-          </div>
-        )}
-
-        {/* ★ D178 (2026-05-19) — 네이버 스마트스토어 (Harold 명시 — 네이버스토어를 자사몰처럼 운영하는 회사 대응) */}
-        {usage?.cdp_enabled && (
-          <div className="bg-white/5 border border-white/10 rounded-xl p-6">
+          <div id="section-naver" className="bg-white/5 border border-white/10 rounded-xl p-6">
             <div className="flex items-center gap-2 mb-4">
-              <Store className="w-5 h-5 text-emerald-300" />
+              <ShoppingCart className="w-5 h-5 text-emerald-300" />
               <h2 className="text-base font-bold text-white">네이버 스마트스토어 연동</h2>
-              <span className="text-xs bg-emerald-500/20 text-emerald-300 px-2 py-0.5 rounded-full font-medium">코딩 0건</span>
+              <span className="text-xs bg-emerald-500/20 text-emerald-300 px-2 py-0.5 rounded-full font-medium">Naver Commerce OAuth</span>
             </div>
 
             {naverStatus?.connected ? (
@@ -848,211 +1185,221 @@ await fetch('${customInfo.webhookUrl}', {
                 <div className="bg-emerald-500/10 border border-emerald-400/30 rounded-lg p-4 flex items-start gap-3">
                   <Check className="w-5 h-5 text-emerald-300 mt-0.5 shrink-0" />
                   <div className="flex-1">
-                    <div className="text-sm font-medium text-emerald-100">
-                      {naverStatus.store_id} 네이버 스마트스토어와 연동되었습니다
-                    </div>
-                    <div className="text-xs text-emerald-300 mt-1">
-                      status: {naverStatus.status} · 토큰 만료: {naverStatus.token_expires_at ? new Date(naverStatus.token_expires_at).toLocaleString('ko-KR') : '-'}
-                      <br />scope: <span className="font-mono">{naverStatus.scope || '-'}</span>
-                    </div>
+                    <div className="text-sm font-medium text-emerald-100">{naverStatus.store_id} 네이버 스마트스토어 연동됨</div>
+                    <div className="text-xs text-emerald-300 mt-1">status: {naverStatus.status} · 토큰 만료: {naverStatus.token_expires_at ? new Date(naverStatus.token_expires_at).toLocaleString('ko-KR') : '-'}</div>
                   </div>
                 </div>
-                <div className="text-xs text-white/50">
-                  네이버 커머스 API가 보내는 webhook(회원 가입/주문 생성/주문 취소)은 자동으로 한줄로 customers + cdp_events에 저장됩니다.
-                </div>
                 {isAdmin && (
-                  <button
-                    onClick={handleNaverDisconnect}
-                    className="px-4 py-2 bg-rose-500/15 border border-rose-400/40 hover:bg-rose-500/25 text-rose-200 text-sm font-medium rounded-lg flex items-center gap-2"
-                  >
-                    <Unlink className="w-4 h-4" />
-                    연동 해제
+                  <button onClick={handleNaverDisconnect} className="px-4 py-2 bg-rose-500/15 border border-rose-400/40 hover:bg-rose-500/25 text-rose-200 text-sm font-medium rounded-lg flex items-center gap-2">
+                    <Unlink className="w-4 h-4" /> 연동 해제
                   </button>
                 )}
               </div>
             ) : (
               <div className="space-y-3">
-                <div className="text-sm text-white/70">
-                  네이버 스마트스토어 store_id를 입력하시면 OAuth 새 창이 열립니다. 네이버 관리자로 로그인 + 동의 완료 시 자동으로 회원/주문 sync가 진행됩니다.
+                <div className="text-sm text-white/70">네이버 스마트스토어 store_id 입력 → OAuth → 주문 + 회원 sync.</div>
+                <div className="text-xs text-amber-200/80 bg-amber-500/10 border border-amber-400/30 rounded p-2">
+                  ★ 네이버 정책 영역: 개인정보 영역 제한 — phone/email 영역 없을 가능. 매칭률 영역 약함 가능.
                 </div>
                 <div className="flex gap-2">
                   <input
                     type="text"
                     value={naverStoreId}
                     onChange={(e) => setNaverStoreId(e.target.value)}
-                    placeholder="예: 12345678"
+                    placeholder="네이버 스마트스토어 store_id"
                     className="flex-1 px-3 py-2 bg-slate-900 border border-white/10 rounded-lg text-sm text-white placeholder-white/30 focus:outline-none focus:border-emerald-400/50"
                   />
-                  <button
-                    onClick={handleNaverConnect}
-                    disabled={naverConnecting || !isAdmin || !naverStoreId.trim()}
-                    className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-medium rounded-lg disabled:opacity-40 flex items-center gap-2"
-                  >
-                    <Link2 className="w-4 h-4" />
-                    {naverConnecting ? '연동 중...' : '네이버 스마트스토어 연동 시작'}
+                  <button onClick={handleNaverConnect} disabled={naverConnecting || !isAdmin || !naverStoreId.trim()} className="px-4 py-2 bg-emerald-500/30 hover:bg-emerald-500/50 text-emerald-100 text-sm font-medium rounded-lg disabled:opacity-40 flex items-center gap-2">
+                    <Link2 className="w-4 h-4" /> {naverConnecting ? '연동 중...' : '네이버 연동'}
                   </button>
                 </div>
-                {!isAdmin && (
-                  <div className="text-xs text-white/50">네이버 스마트스토어 연동은 회사 관리자만 가능합니다.</div>
-                )}
-                <div className="text-xs text-white/40">
-                  ★ 네이버 스마트스토어 관리자 페이지에서 store_id를 확인하실 수 있습니다 (보통 8자리 숫자).
-                </div>
               </div>
             )}
           </div>
         )}
 
-        {/* Provider 매트릭스 — 자사몰 종합 세트 (D173) */}
-        {usage?.cdp_enabled && providers.length > 0 && (
+        {/* 11. Provider 매트릭스 — skeleton (coming soon) */}
+        {providers.length > 0 && (
           <div className="bg-white/5 border border-white/10 rounded-xl p-6">
-            <div className="flex items-center gap-2 mb-1">
-              <Store className="w-5 h-5 text-indigo-300" />
+            <div className="flex items-center gap-2 mb-4">
+              <Database className="w-5 h-5 text-white/60" />
               <h2 className="text-base font-bold text-white">지원 자사몰 매트릭스</h2>
             </div>
-            <div className="text-xs text-white/50 mb-4">
-              자체구축 자사몰(Next.js/Node/Django/PHP)은 본 wrapper 없이 SDK 또는 CDP API로 즉시 연동 가능합니다.
-            </div>
-            <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-              {providers.map((p) => {
-                const isAvailable = p.status === 'available';
-                return (
-                  <div
-                    key={p.provider}
-                    className={`p-4 rounded-xl border ${
-                      isAvailable
-                        ? 'bg-emerald-500/10 border-emerald-400/30'
-                        : 'bg-white/5 border-white/10'
-                    }`}
-                  >
-                    <div className="flex items-center justify-between mb-2">
-                      <div className="text-sm font-bold text-white">{p.displayName}</div>
-                      {isAvailable ? (
-                        <span className="text-[10px] bg-emerald-600 text-white px-1.5 py-0.5 rounded-full font-medium">사용 가능</span>
-                      ) : (
-                        <span className="text-[10px] bg-white/10 text-white/60 border border-white/10 px-1.5 py-0.5 rounded-full font-medium">곧 출시</span>
-                      )}
-                    </div>
-                    <div className="text-xs text-white/70 space-y-0.5">
-                      <div>OAuth: {p.capabilities.oauth ? '✓' : '—'}</div>
-                      <div>Webhook: {p.capabilities.webhook ? '✓' : '—'}</div>
-                      <div>Admin API: {p.capabilities.adminApi ? '✓' : '—'}</div>
-                    </div>
+            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2">
+              {providers.map((p) => (
+                <div key={p.provider} className={`p-3 rounded-lg border ${p.status === 'available' ? 'bg-emerald-500/10 border-emerald-400/30' : 'bg-white/5 border-white/10'}`}>
+                  <div className="text-sm font-semibold text-white">{p.displayName}</div>
+                  <div className="text-[10px] text-white/40 mt-0.5">
+                    {p.capabilities.oauth && 'OAuth · '}
+                    {p.capabilities.webhook && 'Webhook · '}
+                    {p.capabilities.adminApi && 'Admin API'}
                   </div>
-                );
-              })}
+                  <div className={`mt-1 text-[10px] font-semibold ${p.status === 'available' ? 'text-emerald-300' : 'text-white/40'}`}>
+                    {p.status === 'available' ? '지원' : 'Phase 2 예정'}
+                  </div>
+                </div>
+              ))}
             </div>
           </div>
         )}
 
-        {/* 통합 가이드 */}
-        {usage?.cdp_enabled && (
+        {/* 12. CDP 키 발급 + 사용량 */}
+        {usage?.cdp_enabled && !customInfo?.hasSecret && (
           <div className="bg-white/5 border border-white/10 rounded-xl p-6">
-            <h2 className="text-base font-bold text-white mb-4">자사몰 통합 가이드</h2>
-            <div className="space-y-4 text-sm text-white/80">
-              <div className="bg-white/5 rounded-lg p-4">
-                <div className="font-medium text-white mb-2">자사몰 종류별 진입 방식</div>
-                <ul className="space-y-1.5 ml-4 list-disc text-white/70">
-                  <li><strong>카페24/Shopify/메이크샵/imweb</strong> — App Marketplace에서 "한줄로AI" 설치 (코딩 0건)</li>
-                  <li><strong>자체구축 (Next.js/Node/Django)</strong> — JavaScript SDK 또는 server-side API 직접 호출</li>
-                  <li><strong>WordPress/WooCommerce</strong> — 한줄로AI 플러그인 설치</li>
-                </ul>
-              </div>
-
-              <div className="bg-white/5 rounded-lg p-4">
-                <div className="font-medium text-white mb-2">표준 API 엔드포인트</div>
-                <div className="space-y-1.5 font-mono text-xs text-white/80 ml-4">
-                  <div>POST https://app.hanjul.ai/api/cdp/identify   — 회원 식별/upsert</div>
-                  <div>POST https://app.hanjul.ai/api/cdp/event      — 행동 이벤트 (장바구니/위시리스트 등)</div>
-                  <div>POST https://app.hanjul.ai/api/cdp/order      — 주문 sync + RFM 갱신</div>
-                  <div>POST https://app.hanjul.ai/api/cdp/bulk-import — 초기 마이그레이션 (최대 1,000건/요청)</div>
-                </div>
-                <div className="mt-2 text-xs text-white/50">
-                  헤더: <span className="font-mono">X-Hanjullo-Key</span>: public key / <span className="font-mono">X-Hanjullo-Secret</span>: secret key
-                </div>
-              </div>
-
-              <div className="bg-white/5 rounded-lg p-4">
-                <div className="font-medium text-white mb-2">샘플 — 회원 가입 시 호출 (JavaScript)</div>
-                <pre className="text-xs font-mono bg-slate-900 border border-white/10 rounded p-3 overflow-x-auto text-white/80">{`fetch('https://app.hanjul.ai/api/cdp/identify', {
-  method: 'POST',
-  headers: {
-    'Content-Type': 'application/json',
-    'X-Hanjullo-Key':    'hjl_xxxxxxxxxxxx',
-    'X-Hanjullo-Secret': 'sk_xxxxxxxxxxxx'
-  },
-  body: JSON.stringify({
-    external_id: '\${자사몰_회원ID}',
-    email: 'user@example.com',
-    phone: '01012345678',
-    name: '홍길동',
-    grade: 'VIP'
-  })
-})`}</pre>
-              </div>
-
-              <div className="text-xs text-white/50">
-                상세 가이드 + 전용 SDK + 카페24 App 설치 안내는 D172-B 진입 시 본 페이지에 추가됩니다.
-              </div>
+            <div className="flex items-center gap-2 mb-4">
+              <KeyRound className="w-5 h-5 text-indigo-300" />
+              <h2 className="text-base font-bold text-white">CDP API 키 (legacy 자사몰 직접 호출용)</h2>
             </div>
-          </div>
-        )}
-
-        {/* 최근 이벤트 (디버깅) */}
-        {usage?.cdp_enabled && (
-          <div className="bg-white/5 border border-white/10 rounded-xl p-6">
-            <div className="flex items-center justify-between mb-3">
-              <h2 className="text-base font-bold text-white">최근 이벤트 (디버깅)</h2>
-              <button
-                onClick={loadEvents}
-                disabled={eventsLoading}
-                className="text-xs text-indigo-300 hover:text-indigo-200 flex items-center gap-1"
-              >
-                <RefreshCw className={`w-3 h-3 ${eventsLoading ? 'animate-spin' : ''}`} />
-                새로고침
-              </button>
-            </div>
-            {events.length === 0 ? (
-              <div className="text-sm text-white/50 py-8 text-center">
-                아직 수신된 이벤트가 없습니다. 자사몰에서 API 호출이 진행되면 본 영역에 표시됩니다.
+            {issuedSecret ? (
+              <div className="space-y-3">
+                <div className="text-xs text-amber-200 bg-amber-500/10 border border-amber-400/30 rounded p-2">
+                  ★ Secret은 본 화면에서만 1회 노출됩니다. 자사몰에 즉시 저장 의무.
+                </div>
+                <SecretRow label="Public Key (X-Hanjullo-Key)" value={issuedSecret.cdp_api_key} copied={copyStatus === 'key'} onCopy={() => copy(issuedSecret.cdp_api_key, 'key')} />
+                <SecretRow label="Secret Key (X-Hanjullo-Secret) ★ 1회 노출" value={issuedSecret.cdp_api_secret} copied={copyStatus === 'secret'} onCopy={() => copy(issuedSecret.cdp_api_secret, 'secret')} danger />
+                <button onClick={() => setIssuedSecret(null)} className="px-4 py-2 bg-emerald-500/20 border border-emerald-400/40 hover:bg-emerald-500/30 text-emerald-200 text-sm font-medium rounded-lg">
+                  확인 — 키 저장 완료
+                </button>
               </div>
             ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead className="bg-white/5 border-b text-xs text-white/70">
-                    <tr>
-                      <th className="text-left px-3 py-2 font-medium">시각</th>
-                      <th className="text-left px-3 py-2 font-medium">이벤트</th>
-                      <th className="text-left px-3 py-2 font-medium">출처</th>
-                      <th className="text-left px-3 py-2 font-medium">회원/외부ID</th>
-                      <th className="text-left px-3 py-2 font-medium">속성 (요약)</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {events.map((ev) => (
-                      <tr key={ev.id} className="border-b last:border-0">
-                        <td className="px-3 py-2 text-xs text-white/50">{new Date(ev.occurredAt).toLocaleString('ko-KR')}</td>
-                        <td className="px-3 py-2 text-xs font-mono text-indigo-300">{ev.eventName}</td>
-                        <td className="px-3 py-2 text-xs text-white/70">{ev.source}</td>
-                        <td className="px-3 py-2 text-xs text-white/70">
-                          {ev.customerId ? '회원' : ev.externalId || '-'}
-                        </td>
-                        <td className="px-3 py-2 text-xs text-white/50 truncate max-w-xs">
-                          {JSON.stringify(ev.properties).slice(0, 80)}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+              <div className="space-y-3">
+                <div className="text-sm text-white/70">
+                  {usage.has_key
+                    ? `발급 일시: ${usage.issued_at ? new Date(usage.issued_at).toLocaleString('ko-KR') : '-'}`
+                    : 'CDP 키 미발급. 발급 시 Public Key + Secret 한 쌍 생성.'}
+                </div>
+                {isAdmin && (
+                  <button onClick={handleIssueKey} disabled={issuing} className="px-4 py-2 bg-indigo-500/30 hover:bg-indigo-500/50 text-indigo-100 text-sm font-medium rounded-lg disabled:opacity-40">
+                    {issuing ? '발급 중...' : (usage.has_key ? '재발급' : '키 발급')}
+                  </button>
+                )}
+              </div>
+            )}
+            {usage.cdp_enabled && (
+              <div className="mt-4 pt-4 border-t border-white/10">
+                <div className="text-xs text-white/50 mb-1">이번 달 API 호출</div>
+                <div className="flex items-baseline gap-2">
+                  <span className="text-2xl font-bold text-indigo-300">{usage.used.toLocaleString()}</span>
+                  <span className="text-xs text-white/50">/ {usage.monthly_limit === null ? '무제한' : `${usage.monthly_limit.toLocaleString()}건`}</span>
+                </div>
+                {usage.monthly_limit !== null && (
+                  <div className="w-full bg-white/10 rounded-full h-2 overflow-hidden mt-2">
+                    <div className="bg-indigo-500 h-2 transition-all" style={{ width: `${Math.min((usage.used / usage.monthly_limit) * 100, 100)}%` }} />
+                  </div>
+                )}
               </div>
             )}
           </div>
         )}
 
-        <div className="text-xs text-white/40 text-center pt-4 flex items-center justify-center gap-1">
-          <ExternalLink className="w-3 h-3" />
-          본 기능은 베타 운영 중입니다. 사고 발견 시 즉시 신고 부탁드립니다 — D172-B에서 카페24/Shopify App + JavaScript SDK가 추가됩니다.
+        {/* 13. 컴퓨팅 시점 */}
+        {diagnostics && (
+          <div className="text-center text-[11px] text-white/40 pt-2">
+            마지막 진단: {new Date(diagnostics.computedAt).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' })}
+            <br />
+            Unified Customer Profile 영역 = 5분 cron 자동 재계산 (CT-71) · 이벤트 ingestion 즉시 union (CT-72)
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════════
+// 컴포넌트 매트릭스
+// ════════════════════════════════════════════════════════════════════
+
+function MetricBlock({ label, value, sub, color }: { label: string; value: string; sub?: string; color: string }) {
+  return (
+    <div className="p-3 bg-white/5 rounded-lg">
+      <div className="text-[10px] text-white/40 mb-1">{label}</div>
+      <div className={`text-base md:text-lg font-bold font-mono ${color}`}>{value}</div>
+      {sub && <div className="text-[10px] text-white/40 mt-0.5">{sub}</div>}
+    </div>
+  );
+}
+
+function QuickActionCard({ icon, title, desc, color, onClick }: { icon: React.ReactNode; title: string; desc: string; color: 'violet' | 'amber' | 'emerald'; onClick: () => void }) {
+  const colorMap = {
+    violet: { bg: 'bg-violet-500/10', border: 'border-violet-400/30', text: 'text-violet-100', iconBg: 'bg-violet-500/30', iconText: 'text-violet-200', btn: 'bg-violet-500/30 hover:bg-violet-500/50 text-violet-50' },
+    amber: { bg: 'bg-amber-500/10', border: 'border-amber-400/30', text: 'text-amber-100', iconBg: 'bg-amber-500/30', iconText: 'text-amber-200', btn: 'bg-amber-500/30 hover:bg-amber-500/50 text-amber-50' },
+    emerald: { bg: 'bg-emerald-500/10', border: 'border-emerald-400/30', text: 'text-emerald-100', iconBg: 'bg-emerald-500/30', iconText: 'text-emerald-200', btn: 'bg-emerald-500/30 hover:bg-emerald-500/50 text-emerald-50' },
+  }[color];
+  return (
+    <div className={`p-4 ${colorMap.bg} border ${colorMap.border} rounded-xl`}>
+      <div className="flex items-start gap-2.5 mb-2">
+        <div className={`w-9 h-9 rounded-lg ${colorMap.iconBg} flex items-center justify-center flex-shrink-0`}>
+          <span className={colorMap.iconText}>{icon}</span>
         </div>
+        <div className="flex-1 min-w-0">
+          <div className={`text-sm font-semibold ${colorMap.text}`}>{title}</div>
+        </div>
+      </div>
+      <div className="text-[11px] text-white/60 leading-relaxed mb-2.5">{desc}</div>
+      <button onClick={onClick} className={`w-full px-3 py-1.5 ${colorMap.btn} rounded text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors`}>
+        <Link2 className="w-3 h-3" /> 연동 영역 진입
+      </button>
+    </div>
+  );
+}
+
+function ChartCard({ title, source, icon, children }: { title: string; source?: string; icon: React.ReactNode; children: React.ReactNode }) {
+  return (
+    <div className="bg-white/5 border border-white/10 rounded-xl overflow-hidden">
+      <div className="px-4 py-2.5 border-b border-white/10 flex items-center gap-1.5">
+        {icon}
+        <span className="text-sm font-semibold">{title}</span>
+      </div>
+      <div className="p-4">
+        {children}
+        {source && (<div className="text-[10px] text-white/30 italic mt-2 truncate" title={source}>Data source — {source}</div>)}
+      </div>
+    </div>
+  );
+}
+
+function FunnelBar({ label, count, max, color }: { label: string; count: number; max: number; color: string }) {
+  const pct = max > 0 ? (count / max) * 100 : 0;
+  return (
+    <div>
+      <div className="flex items-center justify-between text-[11px] mb-0.5">
+        <span className="text-white/70 font-medium">{label}</span>
+        <span className="text-white/60 font-mono">{count.toLocaleString()} ({pct.toFixed(1)}%)</span>
+      </div>
+      <div className="h-3 bg-white/10 rounded overflow-hidden">
+        <div className="h-full transition-all" style={{ width: `${Math.max(2, pct)}%`, backgroundColor: color }} />
+      </div>
+    </div>
+  );
+}
+
+function StatBox({ label, value, color }: { label: string; value: string; color: string }) {
+  return (
+    <div className="p-2 bg-white/5 rounded text-center">
+      <div className="text-white/40">{label}</div>
+      <div className={`font-mono font-bold ${color}`}>{value}</div>
+    </div>
+  );
+}
+
+function CapBadge({ label, active }: { label: string; active: boolean }) {
+  return (
+    <span className={`px-2 py-0.5 rounded font-medium ${active ? 'bg-emerald-500/20 text-emerald-300' : 'bg-white/5 text-white/40'}`}>
+      {label} {active ? '✓' : '·'}
+    </span>
+  );
+}
+
+function SecretRow({ label, value, copied, onCopy, danger }: { label: string; value: string; copied: boolean; onCopy: () => void; danger?: boolean }) {
+  return (
+    <div>
+      <label className="text-xs font-medium text-white/80 block mb-1">{label}</label>
+      <div className="flex gap-2">
+        <input readOnly value={value} className={`flex-1 px-3 py-2 bg-slate-900 border rounded-lg text-xs font-mono text-white/80 ${danger ? 'border-rose-400/40 border-2' : 'border-white/10'}`} />
+        <button onClick={onCopy} className={`px-3 py-2 ${danger ? 'bg-rose-500/40 hover:bg-rose-500/60' : 'bg-indigo-500/40 hover:bg-indigo-500/60'} text-white rounded-lg text-xs font-medium flex items-center gap-1.5`}>
+          {copied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+          {copied ? '복사됨' : '복사'}
+        </button>
       </div>
     </div>
   );

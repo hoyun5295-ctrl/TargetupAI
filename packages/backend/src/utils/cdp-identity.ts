@@ -22,6 +22,8 @@
 
 import { query } from '../config/database';
 import { normalizePhone } from './normalize';
+// ★ D214+ (2026-05-24) Unified Customer Profile 정합 — link 변경 시 active_sources 재계산 fire-and-forget
+import { recomputeProfile } from './unified-customer-profile';
 
 // ═══════════════════════════════════════════════════════════
 // 타입
@@ -209,6 +211,11 @@ export async function identifyCustomer(
       normalizedPhone,
     ]
   );
+
+  // ★ D214+ (2026-05-24) unified profile 재계산 (fire-and-forget — active_sources / primary_source / preferred_channel 매트릭스)
+  void recomputeProfile(companyId, customerId!).catch((err) => {
+    console.warn('[CDP Identity] recomputeProfile 실패 (identifyCustomer 영역 정합):', err);
+  });
 
   return {
     customerId: customerId!,
