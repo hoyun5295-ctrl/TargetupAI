@@ -25,11 +25,11 @@ tailwind.config = {
 </script>
 
 <style>
-  /* ★ D217+ fix (2026-05-25 Harold 명시 화면 깨짐 사고 정정):
-     본 HTML 안 각 section = width 1920px / height 1080px 고정 영역 (끌로드 디자인 슬라이드 매트릭스).
-     사용자 화면 폭 < 1920px = 가로 스크롤 + 텍스트 잘림 사고 발생.
-     정정 = CSS zoom 영역 활용 = 화면 폭 맞춤 자동 정정 + 옛 디자인 영역 영구 보존.
-     Firefox = zoom 미지원 → transform: scale() fallback (단 layout 영역 별도 정정 의무). */
+  /* ★ D217+ fix v2 (2026-05-25 Harold 격분 정정 — 옛 zoom calc() 영역 작동 X 사고 정정):
+     본 HTML 안 각 section = width 1920px / height 1080px 고정 영역 (끌로드 디자인 슬라이드).
+     사용자 화면 폭 < 1920px = 가로 스크롤 + 텍스트 잘림 사고.
+     옛 CSS zoom: calc() = 브라우저 표준 X 영역 작동 X — 영구 제거.
+     정정 = JS 영역 동적 transform: scale() + 높이 정정 (모든 브라우저 영구 정합). */
   html, body {
     background:#020617;
     margin: 0;
@@ -38,16 +38,8 @@ tailwind.config = {
   }
   deck-stage { display: block; }
   deck-stage > section {
-    zoom: min(1, calc(100vw / 1920));
-  }
-  /* Firefox + Safari 옛 영역 fallback — transform scale + 높이 영역 정정 */
-  @supports not (zoom: 1) {
-    deck-stage > section {
-      transform: scale(min(1, calc(100vw / 1920)));
-      transform-origin: top left;
-      /* 화면 폭 ≥ 1920 영역 = scale 1 / 높이 1080 유지. 화면 폭 < 1920 영역 = 높이 영역 = 1080 × scale 정정 */
-      /* CSS aspect-ratio 영역 활용 = 본 fallback 영역 별도 wrapper 영역 의무 = 옛 영역 영향 영구 보존 어려움 → JS 영역 권장 */
-    }
+    /* 옛 width 1920px / height 1080px 영구 보존 — JS 영역 동적 transform 정정 */
+    transform-origin: top left;
   }
   /* 모바일 영역 안내 — 768px 이하 영역 = 작은 텍스트 영역 사고 가능 → 안내 영역 */
   @media (max-width: 480px) {
@@ -2266,21 +2258,23 @@ SLIDE 22 — CLOSING / CONTACT
      <deck-stage> 영역 = HTML5 custom element 영역 = JS 정의 X 영역 = CSS display:block 영역 만 정합.
      옛 cloudflare email-decode 영역도 외부 자료 영역 = 본 영역 영구 영향 0 = 제거 의무. -->
 <script>
-  // ★ D217+ fix (2026-05-25): 화면 폭 영역 맞춤 추가 안전망
-  // CSS zoom 미지원 영역 (옛 Firefox) = transform: scale() + 높이 영역 자동 정정.
-  // 사용자 화면 폭 < 1920px 영역 = 옛 1080 영역 = 자동 fluid 정정 영역.
+  // ★ D217+ fix v2 (2026-05-25 Harold 격분 정정):
+  //   옛 CSS zoom: calc() = 브라우저 표준 X = 영구 영향 0 사고 영구 정정.
+  //   JS 영역 = window.innerWidth 영역 = scale 값 동적 정정 = 모든 브라우저 영구 안전 영역.
+  //   본 JS 영역 = supportsZoom 조건 영구 제거 = 모든 영역 영구 적용.
   (function() {
-    var supportsZoom = (function() {
-      try { return CSS.supports('zoom', '1'); } catch (e) { return false; }
-    })();
-    if (supportsZoom) return; // zoom 영역 지원 영역 = CSS 영역 자동 정정 = JS 영역 X
     function adjust() {
       var sections = document.querySelectorAll('deck-stage > section');
       var scale = Math.min(1, window.innerWidth / 1920);
       Array.prototype.forEach.call(sections, function(sec) {
         sec.style.transform = 'scale(' + scale + ')';
         sec.style.transformOrigin = 'top left';
-        sec.style.marginBottom = ((scale - 1) * 1080) + 'px'; // 영역 높이 영역 자동 정정 (음수 영역 = 빈 영역 차단)
+        // 영역 높이 자동 정정 — 1080 × scale (음수 영역 = 빈 영역 차단)
+        if (scale < 1) {
+          sec.style.marginBottom = ((scale - 1) * 1080) + 'px';
+        } else {
+          sec.style.marginBottom = '';
+        }
       });
     }
     if (document.readyState === 'loading') {
@@ -2289,6 +2283,10 @@ SLIDE 22 — CLOSING / CONTACT
       adjust();
     }
     window.addEventListener('resize', adjust);
+    // 영역 폰트 영역 로드 후 영구 재정정 (Pretendard 영역 늦은 로드 영역 안전망)
+    if (document.fonts && document.fonts.ready) {
+      document.fonts.ready.then(adjust);
+    }
   })();
 </script>
 </body>
