@@ -137,6 +137,28 @@
       [상세 룰] `memory/feedback_default_codex_review_workflow.md` 참조
     </RULE>
 
+    <RULE id="design_quality_minimum_journey_level" priority="HIGHEST">
+      ★ D215+ 신규 — 디자인 퀄리티 최소 기준 = AI 여정 동급 영구 룰 (Harold 명시 2026-05-25).
+      신규 메뉴 / 신규 페이지 / UI 신설 / 옛 페이지 전면 재작성 = **최소 AI 여정 자동화 (Journey Builder, `/ai-journeys`) 동급 디자인 퀄리티 의무**.
+      [절대 금지] 옛 단순 form (input + textarea + select + 단순 button) / 옛 단순 table view / 옛 native dialog (alert/confirm/prompt)
+      [의무 요소]
+      - 상단 헤더 sticky + BETA badge + 그라데이션 아이콘 (10x10 rounded-xl)
+      - AI 자율 진단 카드 (violet → fuchsia 그라데이션 + Sparkles + topInsight) — AI 활용 페이지
+      - 자연어 입력 카드 (fuchsia/purple/indigo 그라데이션 + Enter 키) — 자동 생성 페이지
+      - 빠른 시작 카드 7건 (각 시나리오 고유 icon + gradient) — 자동 생성 페이지
+      - 6 sub-agent 진행 카드 (700ms 간격 시각 효과) — AI 자동 생성 진행
+      - 1-click 액션 3 카드 (color-coded — rose/emerald/amber) — 개선 추천
+      - 요약 5 metric + 이전 30일 대비 +/-% (TrendingUp/Down icon) — 통계
+      - 자세히 분석 토글 (ChevronDown/Up + 6 차트) — 통계
+      - 다크 톤 + violet 액센트 (bg-slate-950 + border-white/10) — 모든 페이지
+      - Source caption (`text-[10px] text-white/30 italic Data source — ...`) — 모든 차트/카드
+      - 모바일 반응형 (flex-wrap + md:/lg: 분기 + grid-cols-2 md:grid-cols-4) — 모든 페이지
+      - ConfirmModal + useToast (native dialog 0건) — 모든 페이지
+      - 모달 디자인 (bg-slate-900 + border-white/10 + rounded-2xl + shadow-2xl) — 모든 모달
+      [자가 검증] 매 신규 페이지 / 전면 재작성 직전 = "Journey Builder /ai-journeys 동급 디자인 요소 적용?" 자가 질의 의무.
+      [상세 룰] `memory/feedback_design_quality_minimum_journey_level.md` 참조
+    </RULE>
+
     <RULE id="superpowers_workflow_default">
       ★ D215+ 신규 — Superpowers Plugin 14 skills 작업 흐름 영구 룰 (Harold 명시 2026-05-25).
       Harold settings.json `superpowers@claude-plugins-official` 활성 + 본 세션 자동 로드 14건 (https://github.com/obra/superpowers).
