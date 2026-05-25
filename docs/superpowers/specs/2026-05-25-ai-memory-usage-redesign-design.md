@@ -244,3 +244,4 @@ docs/superpowers/specs/2026-05-25-ai-memory-usage-redesign-design.md 정독 + st
 | 날짜 | 변경 | 담당 |
 |---|---|---|
 | 2026-05-25 | 본 설계서 신설 (D216+ 종결 직후 + Harold 옵션 A 명시) | Harold + 본 AI |
+| 2026-05-25 | **D217+ 본 설계서 구현 종결** — Step 1 (AI 메모리) + Step 2 (AI 사용량) Journey 동급 8 화면 완전 강화 완료. Backend 4 파일 (routes/ai-memory.ts 신설 + routes/ai-usage.ts 신설 + app.ts 등록 + utils/ai-rate-limit.ts `c.plan_code` 사고 정정) + Frontend 6 파일 (AiMemoryPage + AiUsagePage 전면 재작성 + components 6 신설). DB ALTER companies.ai_usage_threshold_config 1건. 영구 룰 8건 100% 정합 + superpowers verification-before-completion D217+ 강화 신설. backend/frontend tsc 0 errors + 박-단어 grep 0건 + 모델명 grep 0건 + native dialog grep 0건 + app.ts 라우트 등록 확인. Harold 직접 배포 완료. 종결 영구 메모리 = [[memory/project_d217_session_full_completed.md]] | Harold + 본 AI |

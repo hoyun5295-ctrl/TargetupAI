@@ -1,7 +1,21 @@
+/**
+ * AiGuidePopup.tsx — 새로운 한줄로 AI Operator 미리보기 팝업 (D217+ 2026-05-25)
+ *
+ * 옛 영역 = 라이트 톤 + "AI 활용 안내" → 정정 = 다크 톤 + violet 액센트 + "곧 출시될 AI Operator 미리보기".
+ * 상세보기 CTA → 새 탭 안 /about-ai-operator.html 전체 화면 진입.
+ * 영업 문의 → HTML 안 CTA → /pricing?openContactModal=true 자동 모달 열기.
+ *
+ * 영구 룰 정합:
+ * - 다크 톤 + violet 액센트 (Journey Builder 동급)
+ * - 모델명 노출 0건 (Opus/Sonnet/GPT/Claude/Anthropic 단어 X)
+ * - native dialog 0건 (alert/confirm/prompt X — 모달 영역만)
+ * - 박-단어 0건
+ * - localStorage dismiss 24h (옛 키 영역 새 영역 = 모든 사용자 1회 노출 정합)
+ */
+
 import { useEffect, useState } from 'react';
 
-const ACCENT = '#10b981'; // emerald — 한줄로 브랜드
-const STORAGE_KEY = 'hanjul_ai_popup_dismiss_until';
+const STORAGE_KEY = 'hanjul_ai_operator_preview_popup_dismiss_until';
 const DISMISS_DURATION_MS = 24 * 60 * 60 * 1000; // 24시간
 
 interface Sample {
@@ -14,22 +28,38 @@ const SAMPLE_PROMPTS: Sample[] = [
   {
     industry: '백화점',
     input: 'VVIP 등급 고객 대상 봄 시즌 프리뷰 초대',
-    output: ['[브랜드] {{이름}}님, VVIP 봄 시즌 프리뷰에 모십니다.', '4/19(토) 14:00 본점 5F.', '회신 부탁드립니다.'],
+    output: [
+      '[브랜드] {{이름}}님, VVIP 봄 시즌 프리뷰에 모십니다.',
+      '4/19(토) 14:00 본점 5F.',
+      '회신 부탁드립니다.',
+    ],
   },
   {
     industry: '뷰티/패션',
     input: '최근 3개월 미방문 회원 신규 컬렉션 안내',
-    output: ['{{이름}}님, 오랜만에 인사드립니다.', '신규 컬렉션을 가장 먼저 보여드릴게요.', '온라인 단독 혜택 포함.'],
+    output: [
+      '{{이름}}님, 오랜만에 인사드립니다.',
+      '신규 컬렉션을 가장 먼저 보여드릴게요.',
+      '온라인 단독 혜택 포함.',
+    ],
   },
   {
     industry: 'F&B',
     input: '광주점 반경 5km 신규 가입 첫 구매 쿠폰',
-    output: ['{{이름}}님, 광주점 첫 방문을 환영합니다.', '첫 구매 5,000원 쿠폰이 도착했어요.', '5월 31일까지.'],
+    output: [
+      '{{이름}}님, 광주점 첫 방문을 환영합니다.',
+      '첫 구매 5,000원 쿠폰이 도착했어요.',
+      '5월 31일까지.',
+    ],
   },
   {
     industry: '리테일',
     input: '주말 한정 신메뉴 출시 안내',
-    output: ['이번 주말, 신메뉴가 도착합니다.', '{{이름}}님께만 먼저 알려드려요.', '토·일 한정.'],
+    output: [
+      '이번 주말, 신메뉴가 도착합니다.',
+      '{{이름}}님께만 먼저 알려드려요.',
+      '토·일 한정.',
+    ],
   },
 ];
 
@@ -74,49 +104,57 @@ function LiveDemo() {
   }, [inputDone, idx]);
 
   return (
-    <div className="rounded-2xl border border-neutral-200/80 bg-neutral-50/60 p-4">
+    <div className="rounded-2xl border border-white/10 bg-slate-950/60 p-4">
       {/* tabs */}
-      <div className="flex items-center gap-1 mb-3">
+      <div className="flex items-center gap-1 mb-3 flex-wrap">
         {SAMPLE_PROMPTS.map((s, i) => (
           <button
             key={s.industry}
             onClick={() => setIdx(i)}
             className={`px-2.5 py-1 text-[11px] rounded-full transition ${
-              i === idx ? 'bg-neutral-900 text-white' : 'text-neutral-500 hover:text-neutral-900'
+              i === idx
+                ? 'bg-gradient-to-r from-violet-500 to-fuchsia-500 text-white font-medium'
+                : 'text-white/50 hover:text-white hover:bg-white/5'
             }`}
-          >{s.industry}</button>
+          >
+            {s.industry}
+          </button>
         ))}
       </div>
 
       {/* input row */}
-      <div className="flex items-start gap-3 px-3.5 py-3 rounded-xl bg-white border border-neutral-200/80">
-        <span className="mt-0.5 text-[11px] font-mono text-neutral-400 select-none">in</span>
-        <div className="flex-1 font-mono text-[13px] leading-relaxed text-neutral-800">
+      <div className="flex items-start gap-3 px-3.5 py-3 rounded-xl bg-white/5 border border-white/10">
+        <span className="mt-0.5 text-[11px] font-mono text-white/40 select-none">in</span>
+        <div className="flex-1 font-mono text-[13px] leading-relaxed text-white/90">
           {typedInput}{!inputDone && <span className="ai-popup-caret" />}
         </div>
       </div>
 
       {/* arrow */}
-      <div className="flex items-center justify-center my-2.5 text-neutral-300">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M12 4v16m0 0l6-6m-6 6l-6-6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
+      <div className="flex items-center justify-center my-2.5 text-white/30">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+          <path d="M12 4v16m0 0l6-6m-6 6l-6-6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
       </div>
 
       {/* output */}
-      <div className="px-3.5 py-3 rounded-xl bg-white border" style={{ borderColor: ACCENT + '40' }}>
+      <div className="px-3.5 py-3 rounded-xl bg-white/5 border border-violet-400/30">
         <div className="flex items-center gap-2 mb-2">
-          <span className="text-[11px] font-mono select-none" style={{ color: ACCENT }}>out</span>
-          <span className="inline-flex items-center gap-1 text-[10px] text-violet-600">
-            <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l1.8 5.6L19 9l-5.2 1.4L12 16l-1.8-5.6L5 9l5.2-1.4L12 2z"/></svg>
+          <span className="text-[11px] font-mono text-violet-300 select-none">out</span>
+          <span className="inline-flex items-center gap-1 text-[10px] text-fuchsia-300">
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M12 2l1.8 5.6L19 9l-5.2 1.4L12 16l-1.8-5.6L5 9l5.2-1.4L12 2z" />
+            </svg>
             AI
           </span>
           {stage === 1 && (
-            <span className="text-[11px] text-neutral-400 ml-1 inline-flex items-center gap-1">
-              <span className="h-1.5 w-1.5 rounded-full bg-neutral-300 animate-pulse"></span>
+            <span className="text-[11px] text-white/40 ml-1 inline-flex items-center gap-1">
+              <span className="h-1.5 w-1.5 rounded-full bg-violet-300 animate-pulse"></span>
               생성 중
             </span>
           )}
         </div>
-        <div className="space-y-1.5 text-[13px] leading-relaxed text-neutral-800 min-h-[72px]">
+        <div className="space-y-1.5 text-[13px] leading-relaxed text-white/90 min-h-[72px]">
           {sample.output.map((line, i) => (
             <div
               key={i}
@@ -124,15 +162,15 @@ function LiveDemo() {
             >
               {line.split(/(\{\{[^}]+\}\})/g).map((seg, j) =>
                 seg.startsWith('{{')
-                  ? <span key={j} className="px-1 py-0.5 rounded font-mono text-[12px]" style={{ background: ACCENT + '15', color: ACCENT }}>{seg}</span>
+                  ? <span key={j} className="px-1 py-0.5 rounded font-mono text-[12px] bg-violet-500/20 text-violet-200">{seg}</span>
                   : <span key={j}>{seg}</span>
               )}
             </div>
           ))}
         </div>
-        <div className="mt-3 flex items-center justify-between text-[11px] text-neutral-400">
+        <div className="mt-3 flex items-center justify-between text-[11px] text-white/40">
           <span>가나다 78자 · LMS</span>
-          <span style={{ color: ACCENT }}>30초 · 발송 준비 완료</span>
+          <span className="text-emerald-300">30초 · 발송 준비 완료</span>
         </div>
       </div>
     </div>
@@ -171,41 +209,73 @@ function Modal({ onClose }: ModalProps) {
         .ai-popup-fade  { animation: aiPopupFadeIn 220ms ease-out both; }
         .ai-popup-in    { animation: aiPopupModalIn 320ms cubic-bezier(.2,.7,.2,1) both; }
         .ai-popup-caret { display: inline-block; width: 2px; height: 1em; background: currentColor; vertical-align: -2px; margin-left: 2px; animation: aiPopupBlink 1s step-end infinite; }
+        @keyframes aiPopupGlowPulse {
+          0%, 100% { box-shadow: 0 0 24px rgba(167, 139, 250, 0.3); }
+          50% { box-shadow: 0 0 40px rgba(217, 70, 239, 0.5); }
+        }
+        .ai-popup-glow { animation: aiPopupGlowPulse 2.4s ease-in-out infinite; }
       `}</style>
 
       <div className="fixed inset-0 z-[9998]">
-        {/* backdrop */}
-        <div className="absolute inset-0 bg-neutral-900/40 ai-popup-fade" onClick={close} />
+        {/* backdrop — 다크 톤 */}
+        <div className="absolute inset-0 bg-black/70 backdrop-blur-sm ai-popup-fade" onClick={close} />
 
         {/* modal */}
-        <div className="absolute inset-0 flex items-center justify-center p-4 sm:p-6">
+        <div className="absolute inset-0 flex items-center justify-center p-4 sm:p-6 overflow-y-auto">
           <div
-            className="ai-popup-in relative w-full max-w-[620px] bg-white rounded-2xl shadow-2xl ring-1 ring-neutral-900/5 overflow-hidden"
-            role="dialog" aria-modal="true" aria-labelledby="ai-popup-title"
+            className="ai-popup-in relative w-full max-w-[680px] bg-gradient-to-br from-slate-900 via-slate-900 to-slate-950 border border-white/10 rounded-2xl shadow-2xl overflow-hidden my-auto"
+            role="dialog" aria-modal="true" aria-labelledby="ai-operator-preview-title"
           >
+            {/* 상단 배경 글로우 영역 */}
+            <div
+              className="absolute -top-32 -right-32 w-64 h-64 rounded-full blur-3xl pointer-events-none"
+              style={{ background: 'radial-gradient(circle, rgba(167,139,250,0.25) 0%, transparent 70%)' }}
+            />
+            <div
+              className="absolute -bottom-32 -left-32 w-64 h-64 rounded-full blur-3xl pointer-events-none"
+              style={{ background: 'radial-gradient(circle, rgba(217,70,239,0.20) 0%, transparent 70%)' }}
+            />
+
             {/* close */}
             <button
               onClick={close}
               aria-label="닫기"
-              className="absolute right-4 top-4 h-8 w-8 grid place-items-center rounded-full text-neutral-400 hover:text-neutral-900 hover:bg-neutral-100 transition"
+              className="absolute right-4 top-4 h-8 w-8 grid place-items-center rounded-full text-white/40 hover:text-white hover:bg-white/10 transition z-10"
             >
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"/></svg>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+                <path d="M6 6l12 12M18 6L6 18" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+              </svg>
             </button>
 
-            <div className="px-7 sm:px-9 pt-9 pb-7">
-              {/* eyebrow */}
-              <div className="flex items-center gap-2 text-[11px] font-mono text-neutral-400 uppercase tracking-wider">
-                <span>§ AI 활용 안내</span>
-                <span className="inline-flex items-center gap-1 text-violet-600">
-                  <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l1.8 5.6L19 9l-5.2 1.4L12 16l-1.8-5.6L5 9l5.2-1.4L12 2z"/></svg>
+            <div className="relative px-7 sm:px-9 pt-9 pb-7">
+              {/* eyebrow — BETA chip */}
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-violet-500/15 border border-violet-400/40 text-[11px] font-bold text-violet-200">
+                  <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M12 2l1.8 5.6L19 9l-5.2 1.4L12 16l-1.8-5.6L5 9l5.2-1.4L12 2z" />
+                  </svg>
+                  AI Operator · BETA
                 </span>
+                <span className="text-[11px] text-white/40">곧 만나실 새로운 한줄로</span>
               </div>
 
-              {/* headline — 단언형 */}
-              <h2 id="ai-popup-title" className="mt-4 text-[28px] sm:text-[32px] leading-[1.18] font-semibold tracking-tight text-neutral-900" style={{ textWrap: 'balance' } as React.CSSProperties}>
-                한 문장으로<br />
-                마케팅 캠페인이 완성됩니다.
+              {/* headline */}
+              <h2
+                id="ai-operator-preview-title"
+                className="mt-5 text-[28px] sm:text-[34px] leading-[1.15] font-bold tracking-tight text-white"
+                style={{ textWrap: 'balance' } as React.CSSProperties}
+              >
+                자연어 한 줄로
+                <br />
+                <span className="bg-gradient-to-r from-violet-300 to-fuchsia-300 bg-clip-text text-transparent">
+                  마케팅 전체를 운영합니다.
+                </span>
               </h2>
+              <p className="mt-3 text-[14px] leading-relaxed text-white/60">
+                지금까지의 한줄로와 완전히 다릅니다.
+                <br />
+                AI Operator가 타겟·메시지·채널·시점·비용·컴플라이언스를 한 번에 설계합니다.
+              </p>
 
               {/* body — Live Demo */}
               <div className="mt-6">
@@ -215,38 +285,51 @@ function Modal({ onClose }: ModalProps) {
               {/* CTAs */}
               <div className="mt-7 flex flex-col gap-2.5">
                 <a
-                  href="/manual/ai-guide.html"
+                  href="/about-ai-operator.html"
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="group inline-flex items-center justify-between px-5 h-12 rounded-xl text-white text-[15px] font-medium transition shadow-[0_1px_0_rgba(255,255,255,0.15)_inset,0_4px_14px_rgba(16,185,129,0.25)] hover:shadow-[0_1px_0_rgba(255,255,255,0.15)_inset,0_8px_22px_rgba(16,185,129,0.32)]"
-                  style={{ background: ACCENT }}
+                  className="group ai-popup-glow inline-flex items-center justify-between px-5 h-12 rounded-xl text-white text-[15px] font-bold transition bg-gradient-to-r from-violet-500 to-fuchsia-500 hover:from-violet-400 hover:to-fuchsia-400"
                 >
-                  <span>AI 활용 가이드 자세히 보기</span>
-                  <span className="inline-block transition-transform group-hover:translate-x-0.5">→</span>
+                  <span className="inline-flex items-center gap-2">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                      <path d="M12 2l1.8 5.6L19 9l-5.2 1.4L12 16l-1.8-5.6L5 9l5.2-1.4L12 2z" />
+                    </svg>
+                    전체 화면으로 상세 보기
+                  </span>
+                  <span className="inline-block transition-transform group-hover:translate-x-1">→</span>
                 </a>
-                <a
-                  href="https://hanjul.ai/manual/manual.html#ch1"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="group inline-flex items-center justify-between px-5 h-12 rounded-xl border border-neutral-200 text-[15px] font-medium text-neutral-700 hover:text-neutral-900 hover:border-neutral-300 transition bg-white"
-                >
-                  <span>사용자 매뉴얼 바로가기</span>
-                  <span className="inline-block transition-transform group-hover:translate-x-0.5">→</span>
-                </a>
+              </div>
+
+              {/* 4 핵심 가치 미니 칩 */}
+              <div className="mt-4 grid grid-cols-2 sm:grid-cols-4 gap-1.5">
+                {[
+                  { label: '자연어 진입', color: 'violet' },
+                  { label: '6 AI 협업', color: 'fuchsia' },
+                  { label: '한국 native', color: 'emerald' },
+                  { label: '사용자 승인 흐름', color: 'amber' },
+                ].map((v) => (
+                  <div
+                    key={v.label}
+                    className="inline-flex items-center justify-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-white/5 border border-white/10 text-[11px] text-white/70"
+                  >
+                    <span className={`h-1.5 w-1.5 rounded-full bg-${v.color}-400`}></span>
+                    {v.label}
+                  </div>
+                ))}
               </div>
 
               {/* footer row */}
               <div className="mt-5 flex items-center justify-between">
-                <label className="inline-flex items-center gap-2 text-[13px] text-neutral-500 cursor-pointer select-none">
+                <label className="inline-flex items-center gap-2 text-[13px] text-white/50 cursor-pointer select-none hover:text-white/70 transition">
                   <input
                     type="checkbox"
-                    className="h-4 w-4 rounded border-neutral-300 text-emerald-500 focus:ring-emerald-500"
+                    className="h-4 w-4 rounded border-white/20 bg-slate-800 text-violet-500 focus:ring-violet-500 focus:ring-offset-slate-900"
                     checked={dontShow}
                     onChange={(e) => setDontShow(e.target.checked)}
                   />
                   오늘 하루 보지 않기
                 </label>
-                <button onClick={close} className="text-[13px] text-neutral-400 hover:text-neutral-700 transition">
+                <button onClick={close} className="text-[13px] text-white/40 hover:text-white/80 transition">
                   나중에 보기
                 </button>
               </div>

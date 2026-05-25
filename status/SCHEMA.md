@@ -281,6 +281,7 @@
 | cdp_api_secret_hash | varchar(255) | ★ D172 (CDP server-side 인증 bcrypt 해시 — raw 1회 노출 후 미저장) |
 | cdp_api_key_issued_at | timestamptz | ★ D172 (CDP key 발급 시각) |
 | auto_campaign_override | integer | 자동발송 회사별 오버라이드 (NULL=플랜따름, 0=비활성, 1+=허용건수) |
+| ai_usage_threshold_config | jsonb | ★ D217+ (2026-05-25) — AI 사용량 한도 알림 설정 `{ enabled, threshold_percent: 50\|80\|95, channels: ['email','sms','inapp'], updated_at }` (기본 `{}`) |
 | max_users | integer | 최대 사용자 수 (기본 5) |
 | session_timeout_minutes | integer | 세션 타임아웃 분 (기본 30) |
 | created_by | uuid | |

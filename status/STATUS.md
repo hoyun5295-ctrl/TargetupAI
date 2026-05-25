@@ -107,23 +107,25 @@
 
 ---
 
-### 🚀 다음 세션 진입 가이드 (D216+ 모바일DM 종결 후 — **D217+ AI 메모리 + AI 사용량 강화 진입**)
+### 🚀 다음 세션 진입 가이드 (D217+ AI Operator 10 메뉴 강화 종결 후 — **D218+ 운영 검증 + 다른 영역 진입**)
 
-> **★ D217+ 진입 매트릭스 (Harold 명시 2026-05-25 — 옵션 A 정합)**:
-> Harold 명시 = "AI Operator 마지막 2 메뉴 = AI 메모리 + AI 사용량 강화 / Journey Builder급 디자인 기본 / 본 세션(D216+) = 설계안 .md 파일화 / 다음 세션부터 실제 작업".
+> **★ D218+ 진입 매트릭스 (Harold 명시 2026-05-25 D217+ 종결 직후)**:
+> D217+ 종결 = AI Operator 10 메뉴 (1번 여정 자동화 / 2번 AI 자율 예측 / 3번 AI 자동 마케팅 / 4번 성과리포트 / 5번 자사몰+데이터 융합 / 6번 인앱메시지 / 7번 Email 캠페인 / 8번 모바일 DM / **9번 AI 메모리 / 10번 AI 사용량**) Journey Builder 동급 강화 완료. D218+ = 운영 검증 (Harold + 직원 직접) + 다른 영역 진입.
 >
-> **D217+ 진입 명령어 (다음 세션 첫 메시지 — 즉시 복사 가능)**:
+> **D218+ 진입 명령어 (다음 세션 첫 메시지 — 즉시 복사 가능)**:
 > ```
-> docs/superpowers/specs/2026-05-25-ai-memory-usage-redesign-design.md 정독 + status/STATUS.md CURRENT_TASK 정독 + memory/feedback_marketing_user_ux_priority.md 정독 + memory/feedback_design_quality_minimum_journey_level.md 정독 + memory/feedback_cto_mandate_for_vito.md 정독 → D217+ 진입 (AI 메모리 + AI 사용량 강화 / Step 1 AI 메모리 먼저 진행 / 옛 ai-rate-limit `c.plan_code` 사고 동시 정정 의무)
+> status/STATUS.md CURRENT_TASK 정독 + memory/project_d217_session_full_completed.md 정독 + memory/feedback_default_superpowers_workflow.md 정독 (D217+ 강화 — 매 답변 직전 verification-before-completion 호출 자가 grep 의무) + memory/feedback_cto_mandate_for_vito.md 정독 → D218+ 진입 (Harold 본질 명시 영역 — 운영 검증 / 영역 진입 / 신규 영역 신설 / 다른 강화 영역 정합)
 > ```
 >
-> **D217+ 강화 핵심 매핑** (`docs/superpowers/specs/2026-05-25-ai-memory-usage-redesign-design.md` 정독 의무):
-> - **AI 메모리** (`/ai-memory`): Journey 동급 8 영역 (자율 진단 + 자연어 검색 + 빠른 시작 7 카드 + 5 타입 도넛 차트 + 영향도 top 10 + 1-click 액션 3 + 자세히 분석 6 차트 + Source caption) — 옛 백엔드 (addMemory / listMemories / cleanupDeprecated / buildMemoryPromptContext) 활용 + 신규 endpoint 3건
-> - **AI 사용량** (`/ai-usage`): Journey 동급 8 영역 (자율 진단 + 자연어 + 빠른 시작 5 + 5 metric + 비용 예측 라인 차트 + 1-click 액션 3 + 자세히 분석 6 차트 + Source caption) — 옛 백엔드 (ai_call_log / ai-rate-limit / ai-cache / batch-ai) 활용 + 신규 endpoint 4건
-> - **옛 사고 동시 정정**: `getMonthlyUsage` 안 `c.plan_code` 컬럼 X 사고 (D215+ PM2 로그 영역) → companies LEFT JOIN plans 정합
-> - **DB ALTER**: companies.ai_usage_threshold_config 1 컬럼
-> - **분량**: 6~8h (각 메뉴 3~4h)
-> - **종결 직전**: `/codex:adversarial-review` 호출 의무 (DB ALTER + AI 호출 영역 = Critical)
+> **★ D217+ 통합 종결 매트릭스 (2026-05-25 — 참조용)**:
+> - **AI 메모리 (`/ai-memory`) Journey 동급 8 화면 완전 강화** = Backend 신규 routes/ai-memory.ts (3 endpoint — overview / search-natural / top-impact) + Frontend AiMemoryPage 전면 재작성 (옛 457줄 → 758줄) + components/AiMemory/ 3 신설 (TopImpactCard + MemoryTypeGuideModal + AddMemoryModal)
+> - **AI 사용량 (`/ai-usage`) Journey 동급 8 화면 완전 강화** = Backend 신규 routes/ai-usage.ts (4 endpoint — overview / forecast / search-natural / threshold-alert) + Frontend AiUsagePage 전면 재작성 (옛 295줄 → 627줄) + components/AiUsage/ 3 신설 (ThresholdAlertModal + BatchModeGuideModal + CostForecastChart)
+> - **옛 사고 동시 정정 완료** = ai-rate-limit getMonthlyUsage `c.plan_code` → `c.plan_id = p.id` JOIN 정정 (D215+ PM2 로그 사고 영구 종결)
+> - **DB ALTER 1건** = `companies.ai_usage_threshold_config jsonb DEFAULT '{}'::jsonb` (한도 알림 설정)
+> - **영구 룰 정합 매트릭스 8건 100%** = no_model_name_ui_exposure (모델명 0건 = 추상 "고급/표준/보조 추론 모드") + db_alter_safety_net (catch 503 DB_MIGRATION_PENDING 모든 endpoint) + marketing_user_ux_priority (빠른 시작 = 1 클릭 = 즉시 AI 호출) + design_quality_minimum_journey_level (Journey 동급 8 화면 양 페이지) + feedback_no_native_browser_dialog (ConfirmModal + useToast) + feedback_no_bakkeum_usage (박-단어 0건) + feedback_ai_no_arbitrary_benefit (search-natural 시스템 프롬프트 명시) + cto_mandate_for_vito (전수 grep + 1곳만 정정)
+> - **영구 룰 신규 강화** = feedback_default_superpowers_workflow § D217+ 강화 (매 답변 직전 자가 grep — "완료/passing/fixed" 단어 시 verification-before-completion 호출 의무 + 옛 D191 자기 강화 루프 동일 패턴 인정)
+> - **자가 검증 evidence** = backend tsc 0 errors + frontend tsc 0 errors + 박-단어 0건 + 모델명 0건 + native dialog 0건 + app.ts 라우트 등록 확인
+> - Harold 직접 배포 완료 + Codex /codex:adversarial-review 권장 영역
 >
 > **★ D216+ 통합 종결 매트릭스 (2026-05-25 — 참조용)**:
 > - **모바일DM 강화 1 세션 완전 종결** = Backend (CT-86~90 5 AI 모듈 + endpoint 8 + dm_pages ALTER 4 + dm_event_responses 신설) + Frontend (27 섹션 SectionType + 16 신규 컴포넌트 NewSections.tsx + dmBuilderStore undo/redo + DmBuilderPage 편집 UX 강화 + ConfirmModal 4 파일 정정)

@@ -119,6 +119,19 @@ export default function PricingPage() {
     setShowContactModal(true);
   };
 
+  // ★ D217+ (2026-05-25): about-ai-operator.html 영업 상담 신청 CTA → /pricing?openContactModal=true 진입 시 자동 모달 열기
+  //   URL 파라미터 처리 후 history.replaceState로 정리 (새로고침 시 중복 진입 차단)
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('openContactModal') === 'true') {
+      openInquiryModal();
+      const newUrl = window.location.pathname;
+      window.history.replaceState({}, '', newUrl);
+    }
+    // companyInfo 변경 시 재진입 차단 = []
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [companyInfo]);
+
   const handleInquirySubmit = async () => {
     if (!inquiryForm.contactName || !inquiryForm.phone || !inquiryForm.email || !inquiryForm.subject || !inquiryForm.message) {
       alert('필수 항목을 모두 입력해주세요.');
