@@ -107,12 +107,51 @@
 
 ---
 
-### 🚀 다음 세션 진입 가이드 (D212+ 통합 종결 후 — **D213+ 성과리포트 고도화 진입**)
+### 🚀 다음 세션 진입 가이드 (D213+ 성과리포트 + D214+ 자사몰 통합 종결 후 — **D215+ 인앱메시지 압도적 강화 진입**)
 
-> **★ D213+ 진입 매트릭스 (Harold 명시 2026-05-23)**:
-> Harold 본질 명시 = "다음세션에서는 성과리포트 고도화부터 다시들어갈거야" — 4번 메뉴 (성과리포트) 본질 강화 진입 정합.
+> **★ D215+ 진입 매트릭스 (Harold 명시 2026-05-24)**:
+> Harold 명시 = "인앱메세지 강화 — Journey Builder급 디자인 의무". 6번 메뉴 (인앱메시지) 압도적 강화 진입 — Braze/Iterable/OneSignal/Pendo 압도.
 >
-> **D213+ 진입 명령어 (다음 세션 첫 메시지)**:
+> **D215+ 진입 명령어 (다음 세션 첫 메시지 — 즉시 복사 가능)**:
+> ```
+> docs/인앱메세지전용.md 정독 + status/STATUS.md CURRENT_TASK 정독 + status/LESSONS_LEARNED.md 인덱스 정독 + status/lessons/LESSONS_META.md 정독 (매 답변 직전 위반 차단) + status/lessons/LESSONS_FRONTEND.md 정독 (모델명 UI 노출 절대 금지) + memory/feedback_ai_operator_model_isolation.md 정독 + memory/feedback_no_bakkeum_usage.md 정독 + memory/feedback_no_native_browser_dialog.md 정독 + memory/feedback_ai_no_arbitrary_benefit.md 정독 + memory/project_d213_d214_completed.md 정독 → D215+ 진입 (6번 메뉴 인앱메시지 압도적 강화 — Journey Builder급 디자인 의무 + CT-77~84 신설 + endpoint 8건 + SDK 8 templates + Frontend 전면 재작성 1800줄+ + DB ALTER 18건)
+> ```
+>
+> **★ D213+ + D214+ 통합 종결 매트릭스 (2026-05-24 — 참조용)**:
+> - **D213+ 4번 메뉴 성과리포트 전면 강화**:
+>   - Backend 신규 CT 6건 (CT-65~70) + buildPerformanceSnapshotV2 정정 (D144 정합 MySQL 큐 직접 집계 + 기간 매트릭스 current/previous 격차)
+>   - endpoint 8건 신설 (snapshot-v2 / explain / quick-action / campaigns / cohort / benchmark / attribution / data-availability)
+>   - Frontend PerformancePage 전면 재작성 (278줄 → 12 화면 영역)
+> - **D214+ 5번 메뉴 자사몰 + 데이터 융합**:
+>   - **Critical 발견**: customer-upsert.ts COALESCE 사고 (RFM GREATEST 강제 의무) — 자사몰 ↔ POS 충돌 차단
+>   - Backend 신규 CT 6건 (CT-71~76 unified-customer-profile / customer-cdp-fusion / cdp-diagnostics / cdp-active-customers / source-aware-channel-selector / cdp-fusion-explainer)
+>   - 옛 정정 3건 (customer-upsert RFM GREATEST + cdp-events fuseEvent + cdp-identity recomputeProfile)
+>   - endpoint 7건 + Frontend CdpSettingsPage 전면 재작성 (1059줄 → 12 화면 영역)
+>   - DB ALTER customers 10건 + 인덱스 3건 (Harold 직접 실행 완료)
+> - **Critical 사고 인정 + 정정**:
+>   - Opus 4.7 UI 노출 4건 (CdpSettingsPage — D190-fix1 영구 룰 반복 위반) → 즉시 정정 + MANDATORY_CHECKLIST 영구 강화
+>   - active_sources 컬럼 X 에러 (DB ALTER 안전망 부재) → 즉시 정정 + endpoint catch 503 DB_MIGRATION_PENDING 분기
+>   - 박-단어 자기 강화 루프 사고 (이전 메모리 인덱스 패턴 누수) → 인정 + 영구 정정 룰
+> - **CLAUDE.md + LESSONS 도메인 분할 (D215+ 진입 직전 메타 정리)**:
+>   - LESSONS_LEARNED.md (342줄) → 인덱스로 축소 + 6 도메인 파일 (`status/lessons/LESSONS_ARCHITECTURE.md` / `LESSONS_DB.md` / `LESSONS_FRONTEND.md` / `LESSONS_BACKEND.md` / `LESSONS_DEPLOY.md` / `LESSONS_META.md`)
+>   - CLAUDE.md MANDATORY_CHECKLIST 강화 (모델명 grep + 박-단어 + 영역/본질 단어 + DB 안전망 + LESSONS 도메인 정독)
+>   - 영구 룰 신규 2건 (`no_model_name_ui_exposure` + `db_alter_safety_net`)
+>   - 상세 매트릭스 = [[memory/project_d213_d214_completed.md]]
+>
+> **D215+ 인앱메시지 강화 매트릭스 (`docs/인앱메세지전용.md` 정독 의무)**:
+> - **디자인 = AI 여정 자동화(`/ai-journeys` 2507줄) 동급 퀄리티 의무**
+> - DB ALTER cdp_inapp_messages 15건 + cdp_inapp_impressions 3건 + 인덱스 4건
+> - Backend CT-77~84 신설 8건 + endpoint 8건
+> - SDK 8 templates 강화 (260줄 → 700~900줄) — full_screen/slide_in/inline_card/toast/floating_button 신규 + 이미지 + 다중 CTA + 애니메이션 + 트리거 다양화 + A/B sticky + retry
+> - Frontend InAppMessagesPage 전면 재작성 (320줄 → 1800~2200줄) — Journey Builder급 12 화면 영역
+> - 총 분량 = 32~41h (3~4 세션)
+
+### 🚀 옛 D213+ 진입 가이드 (참조용 — 종결 완료 2026-05-23)
+
+> **★ D213+ 진입 매트릭스 (옛 — 2026-05-23)**:
+> Harold 명시 = "다음세션에서는 성과리포트 고도화부터 다시들어갈거야" — 4번 메뉴 (성과리포트) 강화 진입 — D215+ 진입 시점 종결 완료.
+>
+> **옛 D213+ 진입 명령어 (참조용 — 종결 완료)**:
 > ```
 > status/STATUS.md CURRENT_TASK § D213+ 진입 가이드 정독 + memory/project_d212_completed.md 정독 + memory/feedback_no_native_browser_dialog.md 정독 + memory/feedback_push_and_deploy_commands.md 정독 (절대 경로 매트릭스 강화 의무) → D213+ 진입 (4번 메뉴 성과리포트 고도화)
 > ```

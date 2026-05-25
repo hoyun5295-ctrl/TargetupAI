@@ -16,7 +16,17 @@
     </RULE>
 
     <RULE id="read_lessons_first" priority="HIGHEST">
-      코드를 수정하기 전, 수정하려는 파일이나 도메인(예: 발송, 수신거부, 동기화 등)과 관련된 과거 사고 사례가 있는지 반드시 `status/LESSONS_LEARNED.md`를 먼저 검색하고 읽어라.
+      코드를 수정하기 전, 수정하려는 파일이나 도메인과 관련된 과거 사고 사례가 있는지 반드시 작업 도메인에 맞는 `status/lessons/LESSONS_*.md` 파일을 먼저 검색하고 읽어라.
+
+      [도메인별 우선 정독 라우팅 — D215+ 신규]
+      - DB / SCHEMA / 돈 / 환불 / 마이그레이션 작업 → `status/lessons/LESSONS_DB.md` 우선 정독
+      - Frontend / UI / 모달 / 모바일 / 모델명 노출 작업 → `status/lessons/LESSONS_FRONTEND.md` 우선 정독
+      - Backend / API / Query / 발송 / AI 호출 작업 → `status/lessons/LESSONS_BACKEND.md` 우선 정독
+      - Deploy / SSH / 빌드 / 의존성 작업 → `status/lessons/LESSONS_DEPLOY.md` 우선 정독
+      - 컨트롤타워 신규/수정 / 도메인 흐름 → `status/lessons/LESSONS_ARCHITECTURE.md` 우선 정독
+      - 매 답변 직전 (답변 패턴 위반 차단) → `status/lessons/LESSONS_META.md` 우선 정독
+
+      옛 `status/LESSONS_LEARNED.md` = 인덱스 영역으로 축소 (도메인 라우팅 참조용).
     </RULE>
 
     <RULE id="no_system_modification">
@@ -27,7 +37,7 @@
 
     <RULE id="no_source_read_without_permission">
       SQL/DB/화면을 통한 1차 검증 전에는 소스 코드 grep/Read를 하지 않는다. 필요 시 반드시 "[승인 요청] Harold님, 소스 코드 grep을 진행해도 될까요?"라고 묻고 명시적인 승인 후 진행한다.
-      예외 (사전 컨펌 없이 read 가능): `status/LESSONS_LEARNED.md`, `status/SCHEMA.md`, `status/STATUS.md`, `status/BUGS.md`, `utils/` 컨트롤타워 파일 (룰/스키마/CT 확인 의무).
+      예외 (사전 컨펌 없이 read 가능): `status/LESSONS_LEARNED.md`, `status/lessons/LESSONS_*.md`, `status/SCHEMA.md`, `status/STATUS.md`, `status/BUGS.md`, `utils/` 컨트롤타워 파일.
     </RULE>
 
     <RULE id="workflow_4_1">
@@ -42,7 +52,7 @@
     </RULE>
 
     <RULE id="no_inline_duplication">
-      코드를 수정하기 전 반드시 `utils/`의 컨트롤타워(CT-01~18) 존재 여부를 확인한다. 라우트(`routes/`) 파일 또는 다른 파일에 컨트롤타워와 동일·유사한 함수를 인라인으로 작성하거나 땜질(Patch)하는 것을 절대 금지한다.
+      코드를 수정하기 전 반드시 `utils/`의 컨트롤타워(CT-01~76) 존재 여부를 확인한다. 라우트(`routes/`) 파일 또는 다른 파일에 컨트롤타워와 동일·유사한 함수를 인라인으로 작성하거나 땜질(Patch)하는 것을 절대 금지한다.
       신규 헬퍼 함수가 필요하면 반드시 적절한 컨트롤타워(`utils/normalize.ts`, `utils/messageUtils.ts` 등)에 정의하고 import해서 사용한다. 라우트 파일 내부에 `const safeStr = ...` 같은 인라인 헬퍼 정의 절대 금지.
     </RULE>
 
@@ -60,7 +70,7 @@
       - ✅, 📋, 🔴, 🟢, 🎯, 🔥, ⛔, ⚠️ 등 이모지/심볼 자랑식 마크
       - "통과", "완료 보고", "✅ 신설", "✅ 확정", "✅ 통일" 등 자랑식 종료 멘트
       - 단순 명령어를 "1단계/2단계/3단계..."로 단계 늘어놓기 (실제 분리 단계가 아닌 경우)
-      - 같은 내용 중복 안내 (직전 답변에 있던 내용 다시 박지 말 것)
+      - 같은 내용 중복 안내 (직전 답변에 있던 내용 다시 출력하지 말 것)
       답변 분량은 새 정보 + 검증 결과만. 마크다운 표는 비교/대조가 명확히 필요할 때만 사용. 헤더(##, ###)는 답변에 1~2개 이내.
     </RULE>
 
@@ -89,6 +99,30 @@
       AI 본인이 본 출력/로그/SQL 결과로 반박하거나 단정하지 않는다. ("내가 보기에는 통과로 보입니다" 등 반박 금지)
       Harold님 보고와 AI 검증 결과가 충돌하면 Harold님 보고를 우선 가설로 두고 추가 검증 명령어부터 제공.
     </RULE>
+
+    <RULE id="no_model_name_ui_exposure" priority="HIGHEST">
+      ★ D214+ 신규 — Opus 4.7 UI 노출 반복 사고 영구 차단 룰.
+      모델명 ("Opus", "Sonnet", "Haiku", "GPT", "Claude", "Anthropic Batch/Memory/Citations", "claude-opus/sonnet/haiku") 사용자 노출 영역 (Frontend UI / AI 시스템 프롬프트 / AI 응답 / 안내문 / button label / option / error response) 절대 출력 금지.
+      [예외] backend `model: 'opus'` (callAIWithFallback 호출 파라미터) + 코드 주석 + PM2 console.log/warn 만 허용.
+      추상 명칭 default — "AI 모델", "AI 자율 진단", "고급 추론 모드", "Batch 처리 모드".
+      매 frontend 파일 작성/수정 직후 grep 자가 검증 의무.
+    </RULE>
+
+    <RULE id="db_alter_safety_net" priority="HIGHEST">
+      ★ D214+ 신규 — active_sources 컬럼 X 에러 사고 영구 차단 룰.
+      DB ALTER 새 컬럼 활용하는 endpoint catch 영역에 반드시 다음 분기 처리 의무:
+      ```
+      const msg = err?.message || '';
+      if (msg.includes('column') && msg.includes('does not exist')) {
+        return res.status(503).json({
+          success: false,
+          error: 'DB 마이그레이션 필요 — 운영자에게 [테이블] ALTER 실행 요청 의무',
+          code: 'DB_MIGRATION_PENDING',
+        });
+      }
+      ```
+      DB 마이그레이션 미실행 시 = 503 + 사용자 친화 안내. 500 에러 노출 X.
+    </RULE>
   </ACTION_FORCING_RULES>
 
   <MANDATORY_CHECKLIST>
@@ -103,10 +137,16 @@
     - [ ] 컨트롤타워 수정인 경우, 7-1 프로세스(grep 전수 리스트업 및 잔존 0건 확인)를 거쳤는가? (Y/N)
     - [ ] 동일 패턴/falsy/조건이 다른 경로에 존재하는지 grep 전수 리스트업했는가? (full_pattern_grep_required) (Y/N)
     - [ ] 제공하는 명령어에 sudo, git 명령어, SSH 접속, tp-deploy-full이 포함되지 않았는가? (Y/N)
-    - [ ] `status/LESSONS_LEARNED.md`에서 관련 과거 사고 사례를 먼저 확인했는가? (Y/N)
+    - [ ] **작업 도메인에 맞는 LESSONS 파일을 우선 정독했는가?** (DB → LESSONS_DB / Frontend → LESSONS_FRONTEND / Backend → LESSONS_BACKEND / Deploy → LESSONS_DEPLOY / 메타 → LESSONS_META) (Y/N) ★ D215+ 신규
     - [ ] 답변에 ✅/이모지/포장 마크업 없이 사실만 짧게 작성했는가? (answer_format_strict) (Y/N)
     - [ ] 답변에 "부탁드립니다/컨펌 부탁/진행 부탁" 등 떠넘기기 표현이 없는가? (no_passing_buck) (Y/N)
     - [ ] Harold님 보고 사실을 단어 그대로 인정했는가? (반박/단정 금지) (user_truth_acceptance) (Y/N)
+    - [ ] **신규 frontend 파일에 모델명(Opus/Sonnet/GPT/Claude) grep = 0건 검증했는가?** (no_model_name_ui_exposure) (Y/N) ★ D214+ 신규
+    - [ ] **신규 코드 안 박-단어(박음/박힘/박는/박지/박을/박혀/박힌/박혔/박힐/박았) 자가 grep = 0건 검증했는가?** (Y/N) ★ D214+ 강화
+    - [ ] **답변에 "영역/본질/정합/매트릭스" 단어 과다 사용 자가 점검했는가?** (자연 한국어 재작성) (Y/N) ★ D214+ 신규
+    - [ ] **DB ALTER 새 컬럼 활용 endpoint catch에 `column does not exist` 분기 처리했는가?** (db_alter_safety_net) (Y/N) ★ D214+ 신규
+    - [ ] **native dialog(alert/confirm/prompt) grep = 0건 확인했는가?** (ConfirmModal + useToast 활용) (Y/N)
+    - [ ] **AI 생성 메시지에 구체 혜택(%/원/쿠폰/무료) 미포함 확인했는가?** (feedback_ai_no_arbitrary_benefit) (Y/N)
   </MANDATORY_CHECKLIST>
 
   <STANDARD_RESPONSES>
@@ -148,23 +188,31 @@
 
 | 문서 | 용도 | 언제 읽나 |
 |------|------|-----------|
-| `status/LESSONS_LEARNED.md` | 핵심 아키텍처(CT) + 과거 치명 사고 + AI 메타 위반 패턴 | 매 작업 시작 시 / 코드 수정 전 |
+| `status/LESSONS_LEARNED.md` | **인덱스** — 도메인별 LESSONS 파일 라우팅 | 매 작업 시작 시 (도메인 식별) |
+| `status/lessons/LESSONS_ARCHITECTURE.md` | 컨트롤타워(CT-01~76) + 도메인 흐름 + 작업 진입 자기 점검 | 컨트롤타워 수정/도메인 흐름 확인 시 |
+| `status/lessons/LESSONS_DB.md` | DB/SCHEMA/돈/환불/마이그레이션 사고 | DB 쿼리/SCHEMA 변경/환불 작업 시 |
+| `status/lessons/LESSONS_FRONTEND.md` | UI/모달/모바일/모델명 노출 사고 | Frontend 페이지/컴포넌트 작업 시 |
+| `status/lessons/LESSONS_BACKEND.md` | API/Query/발송/AI 호출 사고 | Backend route/utils/발송/AI 작업 시 |
+| `status/lessons/LESSONS_DEPLOY.md` | 배포/SSH/빌드/의존성 사고 + 표준 출력 형식 | 배포 명령어 안내 시 |
+| `status/lessons/LESSONS_META.md` | AI 메타 위반 패턴 4-1 ~ 4-25 | **매 답변 직전 정독 의무** |
 | `status/STATUS.md` | 전체 프로젝트 현황 + CURRENT_TASK | 세션 시작 시 |
 | `status/BUGS.md` | 버그 트래커 | 버그 수정 작업 시 |
 | `status/OPS.md` | 서버/배포/인프라 | 서버 관련 작업 시 |
 | `status/SCHEMA.md` | PostgreSQL/MySQL 전체 DB 스키마 | 쿼리 작성/DB 작업 시 |
 | `status/SYNC-AGENT-TROUBLESHOOTING.md` | 싱크에이전트 진단 | 싱크 이슈 시 |
-| `docs/AI_OPERATOR_기능정의서.md` | AI Operator 기능 정의서 v1.0.9 (살아있는 문서, 신규 기능 § 13 변경 이력에 박음). D170~D181 누적 — AI Operator + CDP + Provider + 자체 호스팅 + 네이버 스마트스토어 + Bandit + 음성 AI + Multi-Goal + Email + Memory + Batch + Citations | AI Operator / CDP / Provider / D181 Phase 1 영역 작업 시 |
-| `docs/한줄로_BEYOND_BRAZE_비전.md` | **체어맨 + CTO 전용 살아있는 비전 문서** v0.5 — Manifesto + 영구 원칙 7건 + Braze 압도 8축 + Continuous Operator + 5년 시야 + 압축 로드맵 D176~D200 (대외 공개 X, 추후 공개판 별도 발췌) | 압축 로드맵 진입 / 5년 시야 영역 작업 시 |
-| `status/ai_operator_progress.md` | AI Operator 진행 매트릭스 (D163~D181 누적) + Harold 명시 정합 룰 + 박힘 검증 단계 hoyun 게이팅 박음 종결 | AI Operator 세션 진입 시 |
+| `docs/AI_OPERATOR_기능정의서.md` | AI Operator 기능 정의서 (D170~D214+ 누적) | AI Operator / CDP / Provider 영역 작업 시 |
+| `docs/한줄로_BEYOND_BRAZE_비전.md` | 체어맨 + CTO 전용 살아있는 비전 문서 | 압축 로드맵 진입 / 5년 시야 영역 작업 시 |
+| `docs/인앱메세지전용.md` | D215+ 인앱메시지 강화 진입 설계서 | D215+ 진입 시 |
+| `status/ai_operator_progress.md` | AI Operator 진행 매트릭스 | AI Operator 세션 진입 시 |
 
-## 작업 시작 체크리스트
+## 작업 시작 체크리스트 (D215+ 정합)
 
 1. CLAUDE.md (이 문서) 정독
-2. `status/LESSONS_LEARNED.md` 정독 (특히 §4 AI 메타 위반 패턴)
-3. `status/STATUS.md` CURRENT_TASK 확인
-4. 관련 버그 있으면 `status/BUGS.md` 확인
-5. DB 관련이면 `status/SCHEMA.md` 확인
-6. 수정 대상 파일의 현재 코드를 반드시 먼저 read
-7. Harold님께 수정 방향 보고 → 컨펌 → 구현
-8. `packages/` 메인코드에 직접 수정 (worktree 금지)
+2. **작업 도메인 식별** → 해당 `status/lessons/LESSONS_*.md` 우선 정독 (라우팅 표 참조)
+3. `status/lessons/LESSONS_META.md` 정독 (답변 패턴 위반 차단)
+4. `status/STATUS.md` CURRENT_TASK 확인
+5. 관련 버그 있으면 `status/BUGS.md` 확인
+6. DB 관련이면 `status/SCHEMA.md` 확인
+7. 수정 대상 파일의 현재 코드를 반드시 먼저 read
+8. Harold님께 수정 방향 보고 → 컨펌 → 구현
+9. `packages/` 메인코드에 직접 수정 (worktree 금지)
