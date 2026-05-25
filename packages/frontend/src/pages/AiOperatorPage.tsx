@@ -1192,7 +1192,13 @@ export default function AiOperatorPage() {
               {/* 좌측 — AI 자율 진단 (세로 길게) */}
               <div>
                 {/* ★ D205 (2026-05-22): AI 자율 진단 자동 추천 카드 — 회사 admin 첫 진입 시 자동 제안 */}
-                <AiSelfDiagnosisCards />
+                <AiSelfDiagnosisCards
+                  onApply={(objectiveText) => {
+                    setObjective(objectiveText);
+                    window.scrollTo({ top: 0, behavior: 'smooth' });
+                    setTimeout(() => textareaRef.current?.focus(), 200);
+                  }}
+                />
               </div>
 
               {/* 우측 — SUB_MODULE_CARDS 2열 세로 나열 */}
@@ -1375,10 +1381,9 @@ interface CompanyHealthDiagnosis {
   recommendations: AutoRecommendation[];
 }
 
-function AiSelfDiagnosisCards() {
+function AiSelfDiagnosisCards({ onApply }: { onApply: (objective: string) => void }) {
   const [diagnosis, setDiagnosis] = useState<CompanyHealthDiagnosis | null>(null);
   const [loading, setLoading] = useState(true);
-  const navigate = useNavigate();
 
   useEffect(() => {
     const load = async () => {
@@ -1400,20 +1405,11 @@ function AiSelfDiagnosisCards() {
 
   if (loading || !diagnosis || diagnosis.recommendations.length === 0) return null;
 
+  // ★ D216+ 사고 영구 정정 (Harold 명시 2026-05-25):
+  //   옛 사고 = sessionStorage 키 불일치 (하이픈 vs 언더스코어) + DOM .value 직접 조작 = React state 동기화 X 영역
+  //   정정 = props onApply 영역 직접 호출 매트릭스 정합 (상위 setObjective 영역 직접 호출)
   const handleOneClick = (objective: string) => {
-    // AI Operator 자연어 입력 영역에 prefill + 자동 진입 (sessionStorage 정합)
-    sessionStorage.setItem('ai-operator-prefill-objective', objective);
-    sessionStorage.setItem('ai-operator-prefill-source', 'self-diagnosis');
-    // 페이지 새로 진입 (자연어 입력 영역으로 스크롤)
-    window.scrollTo({ top: 0, behavior: 'smooth' });
-    setTimeout(() => {
-      const textarea = document.querySelector('textarea');
-      if (textarea) {
-        (textarea as HTMLTextAreaElement).value = objective;
-        textarea.dispatchEvent(new Event('input', { bubbles: true }));
-        textarea.focus();
-      }
-    }, 300);
+    onApply(objective);
   };
 
   // ★ D209+ (Harold 명시 2026-05-22): 우선순위 카드 색감 명확 구분 + border-2 + shadow 강화.
