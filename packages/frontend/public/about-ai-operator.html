@@ -25,7 +25,47 @@ tailwind.config = {
 </script>
 
 <style>
-  html, body { background:#020617; }
+  /* ★ D217+ fix (2026-05-25 Harold 명시 화면 깨짐 사고 정정):
+     본 HTML 안 각 section = width 1920px / height 1080px 고정 영역 (끌로드 디자인 슬라이드 매트릭스).
+     사용자 화면 폭 < 1920px = 가로 스크롤 + 텍스트 잘림 사고 발생.
+     정정 = CSS zoom 영역 활용 = 화면 폭 맞춤 자동 정정 + 옛 디자인 영역 영구 보존.
+     Firefox = zoom 미지원 → transform: scale() fallback (단 layout 영역 별도 정정 의무). */
+  html, body {
+    background:#020617;
+    margin: 0;
+    padding: 0;
+    overflow-x: hidden !important;
+  }
+  deck-stage { display: block; }
+  deck-stage > section {
+    zoom: min(1, calc(100vw / 1920));
+  }
+  /* Firefox + Safari 옛 영역 fallback — transform scale + 높이 영역 정정 */
+  @supports not (zoom: 1) {
+    deck-stage > section {
+      transform: scale(min(1, calc(100vw / 1920)));
+      transform-origin: top left;
+      /* 화면 폭 ≥ 1920 영역 = scale 1 / 높이 1080 유지. 화면 폭 < 1920 영역 = 높이 영역 = 1080 × scale 정정 */
+      /* CSS aspect-ratio 영역 활용 = 본 fallback 영역 별도 wrapper 영역 의무 = 옛 영역 영향 영구 보존 어려움 → JS 영역 권장 */
+    }
+  }
+  /* 모바일 영역 안내 — 768px 이하 영역 = 작은 텍스트 영역 사고 가능 → 안내 영역 */
+  @media (max-width: 480px) {
+    body::before {
+      content: '데스크탑 모니터에서 더 좋은 화면으로 보실 수 있습니다.';
+      display: block;
+      padding: 12px 16px;
+      background: rgba(167,139,250,0.15);
+      border-bottom: 1px solid rgba(167,139,250,0.3);
+      color: #c4b5fd;
+      font-size: 11px;
+      text-align: center;
+      font-family: 'Pretendard Variable', Pretendard, sans-serif;
+      position: sticky;
+      top: 0;
+      z-index: 9999;
+    }
+  }
   :root {
     --slate-950:#020617;
     --slate-900:#0f172a;
@@ -2221,6 +2261,35 @@ SLIDE 22 — CLOSING / CONTACT
 
 </deck-stage>
 
-<script data-cfasync="false" src="/cdn-cgi/scripts/5c5dd728/cloudflare-static/email-decode.min.js"></script><script src="deck-stage.js"></script>
+<!-- ★ D217+ fix (2026-05-25 Harold 명시 화면 깨짐 사고 정정):
+     옛 deck-stage.js 외부 자료 영역 = 본 public 영역 X = 404 영역 = 제거 의무.
+     <deck-stage> 영역 = HTML5 custom element 영역 = JS 정의 X 영역 = CSS display:block 영역 만 정합.
+     옛 cloudflare email-decode 영역도 외부 자료 영역 = 본 영역 영구 영향 0 = 제거 의무. -->
+<script>
+  // ★ D217+ fix (2026-05-25): 화면 폭 영역 맞춤 추가 안전망
+  // CSS zoom 미지원 영역 (옛 Firefox) = transform: scale() + 높이 영역 자동 정정.
+  // 사용자 화면 폭 < 1920px 영역 = 옛 1080 영역 = 자동 fluid 정정 영역.
+  (function() {
+    var supportsZoom = (function() {
+      try { return CSS.supports('zoom', '1'); } catch (e) { return false; }
+    })();
+    if (supportsZoom) return; // zoom 영역 지원 영역 = CSS 영역 자동 정정 = JS 영역 X
+    function adjust() {
+      var sections = document.querySelectorAll('deck-stage > section');
+      var scale = Math.min(1, window.innerWidth / 1920);
+      Array.prototype.forEach.call(sections, function(sec) {
+        sec.style.transform = 'scale(' + scale + ')';
+        sec.style.transformOrigin = 'top left';
+        sec.style.marginBottom = ((scale - 1) * 1080) + 'px'; // 영역 높이 영역 자동 정정 (음수 영역 = 빈 영역 차단)
+      });
+    }
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', adjust);
+    } else {
+      adjust();
+    }
+    window.addEventListener('resize', adjust);
+  })();
+</script>
 </body>
 </html>
