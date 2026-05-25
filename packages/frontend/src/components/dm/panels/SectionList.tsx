@@ -2,6 +2,7 @@
  * SectionList — 좌측 패널의 섹션 순서 목록 (DnD 가능)
  * @dnd-kit/sortable 기반 세로 드래그 재정렬.
  */
+import { useState } from 'react';
 import {
   DndContext, closestCenter,
   KeyboardSensor, PointerSensor, useSensor, useSensors,
@@ -13,10 +14,15 @@ import {
 import { CSS } from '@dnd-kit/utilities';
 import { useDmBuilderStore } from '../../../stores/dmBuilderStore';
 import { SECTION_META, type Section } from '../../../utils/dm-section-defaults';
+import ConfirmModal, { type ConfirmState } from '../../ConfirmModal';
 
 export default function SectionList() {
   const sections = useDmBuilderStore((s) => s.sections);
   const reorderSections = useDmBuilderStore((s) => s.reorderSections);
+  const removeSection = useDmBuilderStore((s) => s.removeSection);
+
+  // ★ D216+ ConfirmModal generic (native confirm 영구 폐기)
+  const [confirm, setConfirm] = useState<ConfirmState | null>(null);
 
   const sorted = sections.slice().sort((a, b) => a.order - b.order);
   const ids = sorted.map((s) => s.id);
@@ -35,32 +41,48 @@ export default function SectionList() {
     reorderSections(from, to);
   };
 
+  const requestRemove = (sectionId: string) => {
+    setConfirm({
+      mode: 'danger',
+      title: '섹션 삭제',
+      description: '이 섹션을 삭제할까요? 되돌리려면 Cmd+Z 활용 가능합니다.',
+      confirmLabel: '삭제',
+      cancelLabel: '취소',
+      onConfirm: () => removeSection(sectionId),
+    });
+  };
+
   if (sorted.length === 0) {
     return (
-      <div style={{ padding: '16px 12px', fontSize: 12, color: 'var(--dm-neutral-500)', textAlign: 'center' }}>
-        아직 섹션이 없어요
-      </div>
+      <>
+        <div style={{ padding: '16px 12px', fontSize: 12, color: 'var(--dm-neutral-500)', textAlign: 'center' }}>
+          아직 섹션이 없어요
+        </div>
+        <ConfirmModal state={confirm} onClose={() => setConfirm(null)} />
+      </>
     );
   }
 
   return (
-    <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
-      <SortableContext items={ids} strategy={verticalListSortingStrategy}>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 4, padding: '8px 8px' }}>
-          {sorted.map((s) => (
-            <SortableRow key={s.id} section={s} />
-          ))}
-        </div>
-      </SortableContext>
-    </DndContext>
+    <>
+      <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
+        <SortableContext items={ids} strategy={verticalListSortingStrategy}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 4, padding: '8px 8px' }}>
+            {sorted.map((s) => (
+              <SortableRow key={s.id} section={s} onRequestRemove={() => requestRemove(s.id)} />
+            ))}
+          </div>
+        </SortableContext>
+      </DndContext>
+      <ConfirmModal state={confirm} onClose={() => setConfirm(null)} />
+    </>
   );
 }
 
-function SortableRow({ section }: { section: Section }) {
+function SortableRow({ section, onRequestRemove }: { section: Section; onRequestRemove: () => void }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: section.id });
   const selectedSectionId = useDmBuilderStore((s) => s.selectedSectionId);
   const selectSection = useDmBuilderStore((s) => s.selectSection);
-  const removeSection = useDmBuilderStore((s) => s.removeSection);
   const duplicateSection = useDmBuilderStore((s) => s.duplicateSection);
   const setSectionVisible = useDmBuilderStore((s) => s.setSectionVisible);
 
@@ -137,7 +159,7 @@ function SortableRow({ section }: { section: Section }) {
         </IconBtn>
         <IconBtn onClick={() => duplicateSection(section.id)} title="복제">⎘</IconBtn>
         <IconBtn
-          onClick={() => { if (confirm('이 섹션을 삭제할까요?')) removeSection(section.id); }}
+          onClick={onRequestRemove}
           title="삭제"
           danger
         >✕</IconBtn>

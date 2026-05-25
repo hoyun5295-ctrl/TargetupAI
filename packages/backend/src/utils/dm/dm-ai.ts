@@ -66,8 +66,8 @@ export const TONE_LABELS: Record<ToneKey, string> = {
 
 // ────────────── 유틸: JSON 추출 ──────────────
 
-/** AI 응답에서 첫 번째 JSON 블록을 안전하게 파싱 */
-function extractJson<T = unknown>(raw: string): T {
+/** AI 응답에서 첫 번째 JSON 블록을 안전하게 파싱 (D216+ — CT-86~90 공용 export) */
+export function extractJson<T = unknown>(raw: string): T {
   if (!raw) throw new Error('빈 응답');
   let s = raw.trim();
   // 마크다운 코드블록 제거
@@ -434,6 +434,7 @@ function extractEditableFields(section: Section): Record<string, unknown> {
   const type = section.type;
   const out: Record<string, unknown> = {};
   const keysByType: Record<SectionType, string[]> = {
+    // 옛 11
     header:     ['event_title', 'discount_label'],
     hero:       ['headline', 'sub_copy'],
     coupon:     ['discount_label', 'usage_condition'],
@@ -445,6 +446,23 @@ function extractEditableFields(section: Section): Record<string, unknown> {
     sns:        [],
     promo_code: ['description', 'instructions', 'cta_label'],
     footer:     ['notes'],
+    // D216+ 신규 16 — AI 편집 가능 텍스트 필드
+    product_carousel:  ['title'],
+    gallery:           ['title'],
+    slideshow:         [],
+    tab_cards:         [],
+    poll:              ['question'],
+    survey:            ['title', 'completion_reward_text'],
+    email_capture:     ['headline', 'description', 'reward_description', 'success_text'],
+    click_rewards:     ['reward_description'],
+    lucky_draw:        ['title', 'description'],
+    roulette:          [],
+    instant_coupon:    ['coupon_label', 'discount_description', 'conditions', 'usage_instructions'],
+    limited_quantity:  ['title', 'description'],
+    youtube_embed:     [],
+    instagram_embed:   [],
+    map_store_locator: [],
+    reviews:           ['title'],
   };
   for (const k of keysByType[type] || []) {
     if (p[k] !== undefined && p[k] !== null && p[k] !== '') out[k] = p[k];

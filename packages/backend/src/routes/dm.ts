@@ -44,6 +44,26 @@ import {
 } from '../utils/dm/dm-ab-test';
 // ★ CT-17: 모바일 DM 빌더는 PRO 이상만 사용 가능
 import { requirePlanFeature } from '../utils/plan-guard';
+// ★ D216+ 신규 5 AI 모듈 (CT-86 ~ CT-90)
+import { selfDiagnoseDm } from '../utils/dm/dm-self-diagnosis';
+import { applyQuickAction, type QuickActionType } from '../utils/dm/dm-quick-action';
+import { recommendEventType } from '../utils/dm/dm-event-recommender';
+import { suggestNextSection } from '../utils/dm/dm-section-suggester';
+import { getPersonalizationVariables } from '../utils/dm/dm-personalization-engine';
+
+// ────────────── D216+ 503 안전망 helper (db_alter_safety_net 영구 룰) ──────────────
+function isDbMigrationPendingError(err: any): boolean {
+  const msg = err?.message || '';
+  return msg.includes('column') && msg.includes('does not exist');
+}
+
+function send503Migration(res: any, requiredAlter: string) {
+  return res.status(503).json({
+    success: false,
+    error: `DB 마이그레이션 필요 — 운영자에게 ${requiredAlter} 실행 요청 의무`,
+    code: 'DB_MIGRATION_PENDING',
+  });
+}
 
 const DM_IMAGE_DIR = path.join(process.cwd(), 'uploads', 'dm-images');
 
@@ -955,5 +975,238 @@ dmPublicRouter.post('/ab/:code/track', async (req: Request, res: Response) => {
   } catch (err: any) {
     console.error('[AB추적] 오류:', err.message);
     return res.status(500).json({ error: 'Internal error' });
+  }
+});
+
+// ============================================================
+//  D216+ 신규 endpoint 8건 — 5 AI 모듈 (CT-86 ~ CT-90) + 통계 + 이벤트 응답
+// ============================================================
+
+// POST /api/dm/:id/self-diagnose — CT-86 5 factor 자율 진단
+dmRouter.post('/:id/self-diagnose', async (req: any, res: any) => {
+  try {
+    const companyId = req.user?.companyId;
+    if (!companyId) return res.status(403).json({ error: '회사 권한이 필요합니다.' });
+    const campaignId = req.params.id;
+    const result = await selfDiagnoseDm(companyId, campaignId);
+    return res.json({ success: true, data: result });
+  } catch (err: any) {
+    console.error('[DM self-diagnose] 오류:', err.message);
+    if (isDbMigrationPendingError(err)) {
+      return send503Migration(res, 'dm_pages ALTER 4 + dm_event_responses CREATE');
+    }
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// POST /api/dm/:id/quick-action — CT-87 1-click 3 액션
+dmRouter.post('/:id/quick-action', async (req: any, res: any) => {
+  try {
+    const companyId = req.user?.companyId;
+    if (!companyId) return res.status(403).json({ error: '회사 권한이 필요합니다.' });
+    const campaignId = req.params.id;
+    const action = req.body?.action as QuickActionType;
+    if (!['ai_refine', 'design_align', 'variable_consistency'].includes(action)) {
+      return res.status(400).json({ success: false, error: '알 수 없는 액션' });
+    }
+    const result = await applyQuickAction(companyId, campaignId, action);
+    return res.json({ success: true, data: result });
+  } catch (err: any) {
+    console.error('[DM quick-action] 오류:', err.message);
+    if (isDbMigrationPendingError(err)) {
+      return send503Migration(res, 'dm_pages ALTER 4 + dm_event_responses CREATE');
+    }
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// POST /api/dm/event-recommend — CT-88 이벤트 종류 추천
+dmRouter.post('/event-recommend', async (req: any, res: any) => {
+  try {
+    const companyId = req.user?.companyId;
+    if (!companyId) return res.status(403).json({ error: '회사 권한이 필요합니다.' });
+    const { campaign_goal, target_audience, budget_level } = req.body || {};
+    const result = await recommendEventType(companyId, {
+      campaign_goal,
+      target_audience,
+      budget_level,
+    });
+    return res.json({ success: true, data: result });
+  } catch (err: any) {
+    console.error('[DM event-recommend] 오류:', err.message);
+    if (isDbMigrationPendingError(err)) {
+      return send503Migration(res, 'dm_pages ALTER 4 + dm_event_responses CREATE');
+    }
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// GET /api/dm/:id/section-suggest — CT-89 다음 섹션 추천
+dmRouter.get('/:id/section-suggest', async (req: any, res: any) => {
+  try {
+    const companyId = req.user?.companyId;
+    if (!companyId) return res.status(403).json({ error: '회사 권한이 필요합니다.' });
+    const campaignId = req.params.id;
+    const result = await suggestNextSection(companyId, campaignId);
+    return res.json({ success: true, data: result });
+  } catch (err: any) {
+    console.error('[DM section-suggest] 오류:', err.message);
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// GET /api/dm/personalization-vars — CT-90 Liquid 변수 자동 추천
+dmRouter.get('/personalization-vars', async (req: any, res: any) => {
+  try {
+    const companyId = req.user?.companyId;
+    if (!companyId) return res.status(403).json({ error: '회사 권한이 필요합니다.' });
+    const section_type = req.query.section_type as string | undefined;
+    const current_text = req.query.current_text as string | undefined;
+    const result = await getPersonalizationVariables(companyId, { section_type, current_text });
+    return res.json({ success: true, data: result });
+  } catch (err: any) {
+    console.error('[DM personalization-vars] 오류:', err.message);
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// GET /api/dm/overview — 회사 전체 5 metric 요약
+dmRouter.get('/overview', async (req: any, res: any) => {
+  try {
+    const companyId = req.user?.companyId;
+    if (!companyId) return res.status(403).json({ error: '회사 권한이 필요합니다.' });
+
+    const totals = await query(
+      `SELECT
+        COUNT(*) AS total_dm,
+        COUNT(*) FILTER (WHERE approval_status = 'published') AS published_dm
+      FROM dm_pages
+      WHERE company_id = $1`,
+      [companyId],
+    );
+
+    const views30d = await query(
+      `SELECT
+        COUNT(*) AS total_views,
+        COUNT(DISTINCT phone) FILTER (WHERE phone IS NOT NULL) AS unique_viewers
+      FROM dm_views
+      WHERE company_id = $1 AND viewed_at >= NOW() - INTERVAL '30 days'`,
+      [companyId],
+    );
+
+    const responses30d = await query(
+      `SELECT COUNT(*) AS total_responses
+      FROM dm_event_responses
+      WHERE company_id = $1 AND occurred_at >= NOW() - INTERVAL '30 days'`,
+      [companyId],
+    );
+
+    const totalViews = Number(views30d.rows[0]?.total_views || 0);
+    const totalResponses = Number(responses30d.rows[0]?.total_responses || 0);
+    const avgCtr = totalViews > 0 ? (totalResponses / totalViews) * 100 : 0;
+
+    return res.json({
+      success: true,
+      data: {
+        total_dm: Number(totals.rows[0]?.total_dm || 0),
+        published_dm: Number(totals.rows[0]?.published_dm || 0),
+        total_views_30d: totalViews,
+        unique_viewers_30d: Number(views30d.rows[0]?.unique_viewers || 0),
+        total_responses_30d: totalResponses,
+        avg_ctr_30d: Number(avgCtr.toFixed(2)),
+      },
+    });
+  } catch (err: any) {
+    console.error('[DM overview] 오류:', err.message);
+    if (isDbMigrationPendingError(err)) {
+      return send503Migration(res, 'dm_event_responses CREATE');
+    }
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// GET /api/dm/top-campaigns — Top CTR DM 10
+dmRouter.get('/top-campaigns', async (req: any, res: any) => {
+  try {
+    const companyId = req.user?.companyId;
+    if (!companyId) return res.status(403).json({ error: '회사 권한이 필요합니다.' });
+    const limit = Math.min(Number(req.query.limit) || 10, 50);
+
+    const result = await query(
+      `SELECT
+        dp.id,
+        dp.title,
+        dp.approval_status,
+        COUNT(DISTINCT dv.id) AS view_count,
+        COUNT(DISTINCT der.id) AS interaction_count,
+        CASE WHEN COUNT(DISTINCT dv.id) > 0
+          THEN ROUND((COUNT(DISTINCT der.id)::numeric / COUNT(DISTINCT dv.id)) * 100, 2)
+          ELSE 0
+        END AS ctr
+      FROM dm_pages dp
+      LEFT JOIN dm_views dv ON dv.dm_id = dp.id AND dv.viewed_at >= NOW() - INTERVAL '30 days'
+      LEFT JOIN dm_event_responses der ON der.campaign_id = dp.id AND der.occurred_at >= NOW() - INTERVAL '30 days'
+      WHERE dp.company_id = $1
+      GROUP BY dp.id, dp.title, dp.approval_status
+      HAVING COUNT(DISTINCT dv.id) > 0
+      ORDER BY ctr DESC, view_count DESC
+      LIMIT $2`,
+      [companyId, limit],
+    );
+
+    return res.json({ success: true, data: result.rows });
+  } catch (err: any) {
+    console.error('[DM top-campaigns] 오류:', err.message);
+    if (isDbMigrationPendingError(err)) {
+      return send503Migration(res, 'dm_event_responses CREATE');
+    }
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// POST /api/dm/v/:code/event-response — SDK + 자사몰 호출 (공개)
+dmPublicRouter.post('/:code/event-response', async (req: Request, res: Response) => {
+  try {
+    const { code } = req.params;
+    const { section_id, section_type, response_data, anonymous_id, customer_id } = req.body || {};
+
+    if (!section_id || !section_type) {
+      return res.status(400).json({ success: false, error: 'section_id / section_type 필수' });
+    }
+
+    const dmResult = await query(
+      `SELECT id, company_id FROM dm_pages WHERE short_code = $1`,
+      [code],
+    );
+    if (dmResult.rows.length === 0) {
+      return res.status(404).json({ success: false, error: 'DM 미발견' });
+    }
+
+    const { id: campaignId, company_id: companyId } = dmResult.rows[0];
+
+    await query(
+      `INSERT INTO dm_event_responses
+        (company_id, campaign_id, section_id, section_type, customer_id, anonymous_id, response_data, ip_address, user_agent)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+      [
+        companyId,
+        campaignId,
+        section_id,
+        section_type,
+        customer_id || null,
+        anonymous_id || null,
+        JSON.stringify(response_data || {}),
+        req.ip || null,
+        req.headers['user-agent'] || null,
+      ],
+    );
+
+    return res.json({ success: true });
+  } catch (err: any) {
+    console.error('[DM event-response] 오류:', err.message);
+    if (isDbMigrationPendingError(err)) {
+      return send503Migration(res, 'dm_event_responses CREATE');
+    }
+    return res.status(500).json({ success: false, error: err.message });
   }
 });

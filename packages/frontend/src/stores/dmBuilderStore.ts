@@ -99,6 +99,18 @@ export type DmBuilderState = {
   // ── Toast ──
   toast: { type: 'success' | 'error' | 'info'; message: string } | null;
 
+  // ── History (D216+ undo/redo, 최대 50) ──
+  historyPast: Array<{ pages: DmPage[]; sections: Section[]; ts: number }>;
+  historyFuture: Array<{ pages: DmPage[]; sections: Section[]; ts: number }>;
+
+  // ── Actions: History (D216+) ──
+  pushHistory: () => void;
+  undo: () => void;
+  redo: () => void;
+  canUndo: () => boolean;
+  canRedo: () => boolean;
+  clearHistory: () => void;
+
   // ── Actions: Entity ──
   setTitle: (title: string) => void;
   setStoreName: (name: string) => void;
@@ -170,6 +182,7 @@ const INITIAL_STATE: Pick<
   | 'selectedSectionId' | 'hoveredSectionId' | 'isDirty' | 'lastSavedAt'
   | 'isSaving' | 'loadError' | 'aiGenerating' | 'validationResult'
   | 'validationRunning' | 'openModal' | 'toast'
+  | 'historyPast' | 'historyFuture'
 > = {
   dmId: null,
   title: '',
@@ -193,7 +206,24 @@ const INITIAL_STATE: Pick<
   validationRunning: false,
   openModal: null,
   toast: null,
+  historyPast: [],
+  historyFuture: [],
 };
+
+// ────────────── History 매트릭스 (D216+ undo/redo) ──────────────
+
+const MAX_HISTORY_SIZE = 50;
+
+function cloneSnapshot(pages: DmPage[], sections: Section[]): { pages: DmPage[]; sections: Section[]; ts: number } {
+  return {
+    pages: pages.map((p) => ({
+      ...p,
+      sections: p.sections.map((s) => ({ ...s, props: { ...s.props } })),
+    })),
+    sections: sections.map((s) => ({ ...s, props: { ...s.props } })),
+    ts: Date.now(),
+  };
+}
 
 // ────────────── 유틸 ──────────────
 
@@ -208,6 +238,13 @@ let autosaveTimer: ReturnType<typeof setTimeout> | null = null;
 function scheduleAutosave(save: () => void) {
   if (autosaveTimer) clearTimeout(autosaveTimer);
   autosaveTimer = setTimeout(save, 2000);
+}
+
+// ★ D216+ updateSectionProps 안 debounce pushHistory (500ms — 매 키스트로크 영역 X)
+let historyDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+function scheduleHistoryPush(push: () => void) {
+  if (historyDebounceTimer) clearTimeout(historyDebounceTimer);
+  historyDebounceTimer = setTimeout(push, 500);
 }
 
 function markDirty<T extends Partial<DmBuilderState>>(patch: T): T & { isDirty: true } {
@@ -385,8 +422,56 @@ export const useDmBuilderStore = create<DmBuilderState>((set, get) => ({
     });
   },
 
+  // ── History (D216+ undo/redo) ──
+  pushHistory: () => {
+    const state = get();
+    const snapshot = cloneSnapshot(state.pages, state.sections);
+    set((s) => {
+      const nextPast = [...s.historyPast, snapshot];
+      if (nextPast.length > MAX_HISTORY_SIZE) nextPast.shift();
+      return { historyPast: nextPast, historyFuture: [] };
+    });
+  },
+
+  undo: () => {
+    const state = get();
+    if (state.historyPast.length === 0) return;
+    const previous = state.historyPast[state.historyPast.length - 1];
+    const currentSnapshot = cloneSnapshot(state.pages, state.sections);
+    set({
+      pages: previous.pages,
+      sections: previous.sections,
+      historyPast: state.historyPast.slice(0, -1),
+      historyFuture: [currentSnapshot, ...state.historyFuture],
+      isDirty: true,
+    });
+    scheduleAutosave(() => { if (get().dmId) void get().save({ silent: true }); });
+  },
+
+  redo: () => {
+    const state = get();
+    if (state.historyFuture.length === 0) return;
+    const next = state.historyFuture[0];
+    const currentSnapshot = cloneSnapshot(state.pages, state.sections);
+    const nextPast = [...state.historyPast, currentSnapshot];
+    if (nextPast.length > MAX_HISTORY_SIZE) nextPast.shift();
+    set({
+      pages: next.pages,
+      sections: next.sections,
+      historyPast: nextPast,
+      historyFuture: state.historyFuture.slice(1),
+      isDirty: true,
+    });
+    scheduleAutosave(() => { if (get().dmId) void get().save({ silent: true }); });
+  },
+
+  canUndo: () => get().historyPast.length > 0,
+  canRedo: () => get().historyFuture.length > 0,
+  clearHistory: () => set({ historyPast: [], historyFuture: [] }),
+
   // ── Section CRUD (현재 페이지 대상) ──
   setSections: (sections) => {
+    get().pushHistory();
     set((s) => markDirty(updateCurrentPageSections(s, () => sections)));
     scheduleAutosave(() => { if (get().dmId) void get().save({ silent: true }); });
   },
@@ -398,6 +483,7 @@ export const useDmBuilderStore = create<DmBuilderState>((set, get) => ({
       set({ toast: { type: 'error', message: `${SECTION_META[type].label}은(는) 이 페이지에 최대 ${SECTION_META[type].maxCount}개까지 추가할 수 있어요.` } });
       return;
     }
+    state.pushHistory();
     const afterIdx = afterId ? cur.findIndex((s) => s.id === afterId) : cur.length - 1;
     const insertAt = afterIdx >= 0 ? afterIdx + 1 : cur.length;
     const created = newSection(type, insertAt);
@@ -413,6 +499,7 @@ export const useDmBuilderStore = create<DmBuilderState>((set, get) => ({
   },
 
   removeSection: (id) => {
+    get().pushHistory();
     set((s) => markDirty({
       ...updateCurrentPageSections(s, (list) => list.filter((sec) => sec.id !== id)),
       selectedSectionId: s.selectedSectionId === id ? null : s.selectedSectionId,
@@ -429,6 +516,7 @@ export const useDmBuilderStore = create<DmBuilderState>((set, get) => ({
       set({ toast: { type: 'error', message: `${SECTION_META[src.type].label}은(는) 이 페이지에 최대 ${SECTION_META[src.type].maxCount}개까지 추가할 수 있어요.` } });
       return;
     }
+    state.pushHistory();
     const idx = cur.findIndex((s) => s.id === id);
     const clone: Section = {
       ...src,
@@ -449,17 +537,17 @@ export const useDmBuilderStore = create<DmBuilderState>((set, get) => ({
   },
 
   reorderSections: (fromIdx, toIdx) => {
-    set((s) => {
-      const cur = s.pages[s.currentPageIndex]?.sections || [];
-      if (fromIdx < 0 || fromIdx >= cur.length || toIdx < 0 || toIdx >= cur.length) return s;
-      if (fromIdx === toIdx) return s;
-      return markDirty(updateCurrentPageSections(s, (list) => {
-        const next = list.slice();
-        const [moved] = next.splice(fromIdx, 1);
-        next.splice(toIdx, 0, moved);
-        return next;
-      }));
-    });
+    const state = get();
+    const cur = state.pages[state.currentPageIndex]?.sections || [];
+    if (fromIdx < 0 || fromIdx >= cur.length || toIdx < 0 || toIdx >= cur.length) return;
+    if (fromIdx === toIdx) return;
+    state.pushHistory();
+    set((s) => markDirty(updateCurrentPageSections(s, (list) => {
+      const next = list.slice();
+      const [moved] = next.splice(fromIdx, 1);
+      next.splice(toIdx, 0, moved);
+      return next;
+    })));
     scheduleAutosave(() => { if (get().dmId) void get().save({ silent: true }); });
   },
 
@@ -473,6 +561,8 @@ export const useDmBuilderStore = create<DmBuilderState>((set, get) => ({
   },
 
   updateSectionProps: (id, patch) => {
+    // ★ D216+ debounce pushHistory (500ms — 매 키스트로크 영역 부담 차단)
+    scheduleHistoryPush(() => get().pushHistory());
     set((s) => markDirty(updateCurrentPageSections(s, (list) =>
       list.map((sec) => sec.id === id ? { ...sec, props: { ...sec.props, ...patch } as SectionProps } : sec),
     )));

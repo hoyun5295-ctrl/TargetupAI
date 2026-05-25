@@ -286,6 +286,7 @@ function renderFooter(props: FooterProps, ctx: SectionRenderContext): string {
 // ────────────── 디스패처 ──────────────
 
 const RENDERERS: { [K in SectionType]: (props: any, ctx: SectionRenderContext) => string } = {
+  // 옛 11
   header:     renderHeader,
   hero:       (p) => renderHero(p),
   coupon:     (p) => renderCoupon(p),
@@ -297,7 +298,240 @@ const RENDERERS: { [K in SectionType]: (props: any, ctx: SectionRenderContext) =
   sns:        (p) => renderSns(p),
   promo_code: (p) => renderPromoCode(p),
   footer:     (p, c) => renderFooter(p, c),
+  // ★ D216+ 신규 16 — SSR placeholder (2 세션 영역 = SSR rendering 영역 강화 의무)
+  product_carousel:  (p) => renderProductCarousel(p),
+  gallery:           (p) => renderGallery(p),
+  slideshow:         (p) => renderSlideshow(p),
+  tab_cards:         (p) => renderTabCards(p),
+  poll:              (p) => renderPoll(p),
+  survey:            (p) => renderSurvey(p),
+  email_capture:     (p) => renderEmailCapture(p),
+  click_rewards:     (p) => renderClickRewards(p),
+  lucky_draw:        (p) => renderLuckyDraw(p),
+  roulette:          (p) => renderRoulette(p),
+  instant_coupon:    (p) => renderInstantCoupon(p),
+  limited_quantity:  (p) => renderLimitedQuantity(p),
+  youtube_embed:     (p) => renderYoutubeEmbed(p),
+  instagram_embed:   (p) => renderInstagramEmbed(p),
+  map_store_locator: (p) => renderMapStoreLocator(p),
+  reviews:           (p) => renderReviews(p),
 };
+
+// ────────────── D216+ 신규 16 SSR 렌더링 함수 ──────────────
+
+function renderProductCarousel(p: any): string {
+  const products = Array.isArray(p?.products) ? p.products : [];
+  if (products.length === 0) {
+    return `<div class="dm-section dm-product-carousel" style="padding:var(--dm-sp-4);text-align:center;color:var(--dm-neutral-400);font-style:italic">[상품을 추가해주세요]</div>`;
+  }
+  const items = products.map((it: any) => `
+    <div style="min-width:140px;max-width:160px">
+      ${it.image_url ? `<img src="${escapeHtml(it.image_url)}" alt="${escapeHtml(it.name || '')}" style="width:100%;height:140px;object-fit:cover;border-radius:8px"/>` : `<div style="width:100%;height:140px;background:var(--dm-neutral-100);border-radius:8px"></div>`}
+      <div style="font-size:12px;font-weight:600;margin-top:6px">${escapeHtml(it.name || '')}</div>
+      <div style="font-size:13px;font-weight:700;margin-top:2px">${Number(it.discount_price || it.price || 0).toLocaleString('ko-KR')}원</div>
+    </div>`).join('');
+  return `<div class="dm-section dm-product-carousel" style="padding:var(--dm-sp-4)">
+    ${p.title ? `<div style="font-size:15px;font-weight:700;margin-bottom:8px">${escapeHtml(p.title)}</div>` : ''}
+    <div style="display:flex;gap:12px;overflow-x:auto;padding-bottom:8px">${items}</div>
+  </div>`;
+}
+
+function renderGallery(p: any): string {
+  const images = Array.isArray(p?.images) ? p.images : [];
+  if (images.length === 0) {
+    return `<div class="dm-section dm-gallery" style="padding:var(--dm-sp-4);text-align:center;color:var(--dm-neutral-400);font-style:italic">[이미지를 추가해주세요]</div>`;
+  }
+  const cols = p?.layout === 'grid_3x3' ? 3 : p?.layout === 'list_1xN' ? 1 : 2;
+  const items = images.map((img: any) => `<img src="${escapeHtml(img.url)}" alt="${escapeHtml(img.caption || '')}" style="width:100%;aspect-ratio:1;object-fit:cover;border-radius:6px"/>`).join('');
+  return `<div class="dm-section dm-gallery" style="padding:var(--dm-sp-4)">
+    ${p.title ? `<div style="font-size:15px;font-weight:700;margin-bottom:8px">${escapeHtml(p.title)}</div>` : ''}
+    <div style="display:grid;grid-template-columns:repeat(${cols},1fr);gap:6px">${items}</div>
+  </div>`;
+}
+
+function renderSlideshow(p: any): string {
+  const slides = Array.isArray(p?.slides) ? p.slides : [];
+  if (slides.length === 0) {
+    return `<div class="dm-section dm-slideshow" style="padding:var(--dm-sp-4);text-align:center;color:var(--dm-neutral-400);font-style:italic">[슬라이드를 추가해주세요]</div>`;
+  }
+  const first = slides[0];
+  return `<div class="dm-section dm-slideshow" style="padding:var(--dm-sp-4)">
+    <img src="${escapeHtml(first.image_url || '')}" alt="${escapeHtml(first.caption || '')}" style="width:100%;aspect-ratio:16/9;object-fit:cover;border-radius:8px"/>
+    ${first.caption ? `<div style="font-size:13px;margin-top:8px">${escapeHtml(first.caption)}</div>` : ''}
+  </div>`;
+}
+
+function renderTabCards(p: any): string {
+  const tabs = Array.isArray(p?.tabs) ? p.tabs : [];
+  if (tabs.length === 0) return '';
+  const first = tabs[0];
+  return `<div class="dm-section dm-tab-cards" style="padding:var(--dm-sp-4)">
+    <div style="display:flex;gap:4px;border-bottom:1px solid var(--dm-neutral-200);margin-bottom:12px">
+      ${tabs.map((t: any, i: number) => `<span style="padding:8px 12px;border-bottom:2px solid ${i === 0 ? 'var(--dm-primary)' : 'transparent'};color:${i === 0 ? 'var(--dm-primary)' : 'var(--dm-neutral-600)'};font-size:13px;font-weight:600">${escapeHtml(t.label || '')}</span>`).join('')}
+    </div>
+    <div style="font-size:13px;line-height:1.6">${escapeHtml(first.content || '')}</div>
+  </div>`;
+}
+
+function renderPoll(p: any): string {
+  const options = Array.isArray(p?.options) ? p.options : [];
+  const items = options.map((o: any) => `<div style="padding:10px 14px;background:var(--dm-neutral-50);border:1px solid var(--dm-neutral-200);border-radius:8px;font-size:13px;margin-bottom:8px">${escapeHtml(o.label || '')}</div>`).join('');
+  return `<div class="dm-section dm-poll" style="padding:var(--dm-sp-4)">
+    <div style="font-size:15px;font-weight:700;margin-bottom:8px">${escapeHtml(p.question || '[질문을 작성해주세요]')}</div>
+    ${items}
+    ${p.one_vote_per_user ? `<div style="font-size:11px;color:var(--dm-neutral-500);margin-top:8px">1인 1회 투표</div>` : ''}
+  </div>`;
+}
+
+function renderSurvey(p: any): string {
+  const questions = Array.isArray(p?.questions) ? p.questions : [];
+  if (questions.length === 0) {
+    return `<div class="dm-section dm-survey" style="padding:var(--dm-sp-4);text-align:center;color:var(--dm-neutral-400);font-style:italic">[설문 질문을 추가해주세요]</div>`;
+  }
+  const items = questions.map((q: any) => `<div style="margin-bottom:12px"><div style="font-size:13px;font-weight:600;margin-bottom:6px">${escapeHtml(q.question || '')}${q.required ? ' <span style="color:#dc2626">*</span>' : ''}</div></div>`).join('');
+  return `<div class="dm-section dm-survey" style="padding:var(--dm-sp-4)">
+    ${p.title ? `<div style="font-size:15px;font-weight:700;margin-bottom:8px">${escapeHtml(p.title)}</div>` : ''}
+    ${items}
+    ${p.completion_reward_text ? `<div style="font-size:12px;color:var(--dm-primary);margin-top:12px;font-weight:600">${escapeHtml(p.completion_reward_text)}</div>` : ''}
+  </div>`;
+}
+
+function renderEmailCapture(p: any): string {
+  return `<div class="dm-section dm-email-capture" style="padding:var(--dm-sp-4)">
+    <div style="font-size:15px;font-weight:700;margin-bottom:8px">${escapeHtml(p.headline || '[헤드라인을 작성해주세요]')}</div>
+    ${p.description ? `<div style="font-size:13px;color:var(--dm-neutral-700);margin-bottom:12px;line-height:1.6">${escapeHtml(p.description)}</div>` : ''}
+    <input type="email" placeholder="이메일 주소" style="width:100%;padding:10px;border:1px solid var(--dm-neutral-200);border-radius:6px;font-size:13px;margin-bottom:10px"/>
+    <label style="display:flex;align-items:flex-start;gap:6px;font-size:12px;color:var(--dm-neutral-700);margin-bottom:10px"><input type="checkbox" style="margin-top:2px"/><span>${escapeHtml(p.consent_text || '')}</span></label>
+    <button style="width:100%;height:40px;background:var(--dm-primary);color:#fff;border:none;border-radius:6px;font-size:13px;font-weight:700">${escapeHtml(p.reward_description ? `참여하고 ${p.reward_description}` : '참여하기')}</button>
+    ${p.legal_notice ? `<div style="font-size:10px;color:var(--dm-neutral-500);margin-top:8px;line-height:1.5">${escapeHtml(p.legal_notice)}</div>` : ''}
+  </div>`;
+}
+
+function renderClickRewards(p: any): string {
+  const iconMap: Record<string, string> = { like: '❤️', share: '🔁', scroll: '📜' };
+  return `<div class="dm-section dm-click-rewards" style="padding:var(--dm-sp-4)">
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
+      <div style="font-size:28px">${iconMap[p.reward_type] || '⭐'}</div>
+      <div style="flex:1">
+        <div style="font-size:13px;font-weight:600">${escapeHtml(p.reward_description || '')}</div>
+        ${p.show_progress ? `<div style="font-size:11px;color:var(--dm-neutral-500);margin-top:2px">목표 ${p.target_count || 0}회</div>` : ''}
+      </div>
+    </div>
+  </div>`;
+}
+
+function renderLuckyDraw(p: any): string {
+  const fields = Array.isArray(p?.form_fields) ? p.form_fields : [];
+  const inputs = fields.map((f: any) => `<input placeholder="${f.name === 'name' ? '이름' : f.name === 'phone' ? '전화번호' : '이메일'}" style="padding:10px;border:1px solid #f59e0b;border-radius:6px;font-size:13px;background:#fff;margin-bottom:8px;display:block;width:100%"/>`).join('');
+  return `<div class="dm-section dm-lucky-draw" style="padding:var(--dm-sp-4);background:linear-gradient(135deg,#fef3c7,#fde68a);border:1px solid #f59e0b;border-radius:12px;margin:var(--dm-sp-3) 0">
+    <div style="font-size:28px;margin-bottom:8px">🎁</div>
+    <div style="font-size:15px;font-weight:700;margin-bottom:8px">${escapeHtml(p.title || '[추첨 이벤트 제목]')}</div>
+    ${p.description ? `<div style="font-size:13px;color:var(--dm-neutral-700);margin-bottom:12px;line-height:1.6">${escapeHtml(p.description)}</div>` : ''}
+    ${inputs}
+    <label style="display:flex;align-items:flex-start;gap:6px;font-size:11px;color:var(--dm-neutral-700);margin-bottom:10px"><input type="checkbox" style="margin-top:2px"/><span>${escapeHtml(p.consent_text || '')}</span></label>
+    <button style="width:100%;height:44px;background:#d97706;color:#fff;border:none;border-radius:8px;font-size:14px;font-weight:700">응모하기</button>
+    ${p.draw_at ? `<div style="font-size:11px;color:var(--dm-neutral-600);margin-top:8px;text-align:center">발표: ${escapeHtml(new Date(p.draw_at).toLocaleString('ko-KR'))}</div>` : ''}
+  </div>`;
+}
+
+function renderRoulette(p: any): string {
+  return `<div class="dm-section dm-roulette" style="padding:var(--dm-sp-4);background:linear-gradient(135deg,#ede9fe,#ddd6fe);border:1px solid #7c3aed;border-radius:12px;margin:var(--dm-sp-3) 0;text-align:center">
+    <div style="font-size:28px;margin-bottom:8px">🎡</div>
+    <div style="font-size:15px;font-weight:700;margin-bottom:8px">룰렛 이벤트</div>
+    <div style="width:200px;height:200px;border-radius:50%;background:conic-gradient(#a78bfa 0deg 45deg, #c4b5fd 45deg 90deg, #ddd6fe 90deg 135deg, #ede9fe 135deg 180deg, #a78bfa 180deg 225deg, #c4b5fd 225deg 270deg, #ddd6fe 270deg 315deg, #ede9fe 315deg 360deg);margin:12px auto;border:4px solid #fff"></div>
+    <button style="height:44px;padding:0 32px;background:#7c3aed;color:#fff;border:none;border-radius:8px;font-size:14px;font-weight:700">룰렛 돌리기</button>
+    ${p.one_spin_per_user ? `<div style="font-size:11px;color:var(--dm-neutral-600);margin-top:8px">1인 1회 한정</div>` : ''}
+  </div>`;
+}
+
+function renderInstantCoupon(p: any): string {
+  return `<div class="dm-section dm-instant-coupon" style="padding:var(--dm-sp-4);background:linear-gradient(135deg,#fee2e2,#fecaca);border:2px dashed #ef4444;border-radius:12px;margin:var(--dm-sp-3) 0;text-align:center">
+    <div style="font-size:28px;margin-bottom:8px">🎟️</div>
+    <div style="font-size:15px;font-weight:700;color:#991b1b;margin-bottom:8px">${escapeHtml(p.coupon_label || '')}</div>
+    <div style="font-size:13px;color:#7f1d1d;margin-bottom:12px">${escapeHtml(p.discount_description || '')}</div>
+    ${p.expires_at ? `<div style="font-size:11px;color:#991b1b;margin-bottom:10px;font-weight:600">만료: ${escapeHtml(new Date(p.expires_at).toLocaleString('ko-KR'))}</div>` : ''}
+    <button style="height:44px;padding:0 32px;background:#dc2626;color:#fff;border:none;border-radius:8px;font-size:14px;font-weight:700">쿠폰 받기</button>
+    ${p.conditions ? `<div style="font-size:10px;color:var(--dm-neutral-600);margin-top:8px;font-style:italic">${escapeHtml(p.conditions)}</div>` : ''}
+    ${p.usage_instructions ? `<div style="font-size:10px;color:var(--dm-neutral-500);margin-top:6px">${escapeHtml(p.usage_instructions)}</div>` : ''}
+  </div>`;
+}
+
+function renderLimitedQuantity(p: any): string {
+  const remaining = p.current_remaining ?? p.total_quantity ?? 0;
+  const total = p.total_quantity || 1;
+  const percent = (remaining / total) * 100;
+  return `<div class="dm-section dm-limited-quantity" style="padding:var(--dm-sp-4);background:linear-gradient(135deg,#fef3c7,#fde68a);border:1px solid #d97706;border-radius:12px;margin:var(--dm-sp-3) 0">
+    <div style="font-size:28px;margin-bottom:8px">⏳</div>
+    <div style="font-size:15px;font-weight:700;margin-bottom:8px">${escapeHtml(p.title || '[선착순 이벤트 제목]')}</div>
+    ${p.description ? `<div style="font-size:13px;color:var(--dm-neutral-700);margin-bottom:12px;line-height:1.6">${escapeHtml(p.description)}</div>` : ''}
+    <div style="margin-bottom:12px">
+      <div style="font-size:12px;color:#92400e;margin-bottom:6px;display:flex;justify-content:space-between"><span>남은 수량</span><span style="font-weight:700">${remaining} / ${total}</span></div>
+      <div style="width:100%;height:8px;background:#fff;border-radius:4px;overflow:hidden"><div style="width:${percent}%;height:100%;background:#d97706"></div></div>
+    </div>
+    <button style="width:100%;height:44px;background:#d97706;color:#fff;border:none;border-radius:8px;font-size:14px;font-weight:700">선착순 참여하기</button>
+  </div>`;
+}
+
+function renderYoutubeEmbed(p: any): string {
+  if (!p.video_url) {
+    return `<div class="dm-section dm-youtube-embed" style="padding:var(--dm-sp-4);text-align:center;color:var(--dm-neutral-400);font-style:italic">[YouTube URL을 입력해주세요]</div>`;
+  }
+  const match = String(p.video_url).match(/(?:youtu\.be\/|v=|embed\/)([A-Za-z0-9_-]{11})/);
+  const videoId = match ? match[1] : null;
+  if (!videoId) return `<div class="dm-section dm-youtube-embed" style="padding:var(--dm-sp-4)">잘못된 YouTube URL</div>`;
+  return `<div class="dm-section dm-youtube-embed" style="padding:var(--dm-sp-4)">
+    <div style="position:relative;padding-bottom:56.25%;height:0">
+      <iframe src="https://www.youtube.com/embed/${escapeHtml(videoId)}${p.auto_play ? '?autoplay=1&mute=1' : ''}" style="position:absolute;top:0;left:0;width:100%;height:100%;border:none;border-radius:8px" allow="autoplay; encrypted-media" allowfullscreen></iframe>
+    </div>
+  </div>`;
+}
+
+function renderInstagramEmbed(p: any): string {
+  if (!p.post_url) {
+    return `<div class="dm-section dm-instagram-embed" style="padding:var(--dm-sp-4);text-align:center;color:var(--dm-neutral-400);font-style:italic">[Instagram URL을 입력해주세요]</div>`;
+  }
+  return `<div class="dm-section dm-instagram-embed" style="padding:var(--dm-sp-4)">
+    <a href="${escapeHtml(p.post_url)}" target="_blank" rel="noopener noreferrer" style="display:block;padding:20px;background:linear-gradient(135deg,#fdf2f8,#fce7f3);border:1px solid #ec4899;border-radius:8px;text-align:center;text-decoration:none">
+      <div style="font-size:28px;margin-bottom:6px">📷</div>
+      <div style="font-size:13px;font-weight:600;color:#831843">Instagram 게시물 보기</div>
+    </a>
+  </div>`;
+}
+
+function renderMapStoreLocator(p: any): string {
+  const stores = Array.isArray(p?.stores) ? p.stores : [];
+  const items = stores.map((s: any) => `
+    <div style="padding:10px;background:var(--dm-neutral-50);border-radius:6px;margin-bottom:8px">
+      <div style="font-size:13px;font-weight:600">${escapeHtml(s.name || '')}</div>
+      <div style="font-size:11px;color:var(--dm-neutral-600);margin-top:2px">${escapeHtml(s.address || '')}</div>
+      ${s.phone ? `<div style="font-size:11px;color:var(--dm-primary);margin-top:4px">📞 ${escapeHtml(s.phone)}</div>` : ''}
+      ${s.hours ? `<div style="font-size:11px;color:var(--dm-neutral-500);margin-top:2px">⏰ ${escapeHtml(s.hours)}</div>` : ''}
+    </div>`).join('');
+  return `<div class="dm-section dm-map-store-locator" style="padding:var(--dm-sp-4)">
+    <div style="font-size:15px;font-weight:700;margin-bottom:8px">매장 찾기</div>
+    <div style="width:100%;height:200px;background:var(--dm-neutral-100);border-radius:8px;display:flex;align-items:center;justify-content:center;color:var(--dm-neutral-500);font-size:13px;margin-bottom:12px">🗺️ 지도 영역</div>
+    ${items || `<div style="text-align:center;color:var(--dm-neutral-400);font-style:italic">[매장 정보를 추가해주세요]</div>`}
+  </div>`;
+}
+
+function renderReviews(p: any): string {
+  const reviews = Array.isArray(p?.reviews) ? p.reviews : [];
+  const avg = reviews.length > 0 ? (reviews.reduce((sum: number, r: any) => sum + (r.rating || 0), 0) / reviews.length).toFixed(1) : '0.0';
+  const items = reviews.slice(0, 3).map((r: any) => `
+    <div style="padding:10px;background:var(--dm-neutral-50);border-radius:6px;margin-bottom:10px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
+        <span style="color:#f59e0b;font-size:13px">${'★'.repeat(r.rating || 0)}${'☆'.repeat(5 - (r.rating || 0))}</span>
+        <span style="font-size:11px;color:var(--dm-neutral-500)">${escapeHtml(r.author || '')}</span>
+      </div>
+      <div style="font-size:12px;line-height:1.5">${escapeHtml(r.body || '')}</div>
+      ${r.date ? `<div style="font-size:10px;color:var(--dm-neutral-400);margin-top:4px">${escapeHtml(r.date)}</div>` : ''}
+    </div>`).join('');
+  return `<div class="dm-section dm-reviews" style="padding:var(--dm-sp-4)">
+    ${p.title ? `<div style="font-size:15px;font-weight:700;margin-bottom:8px">${escapeHtml(p.title)}</div>` : ''}
+    ${reviews.length > 0 && p.show_average_rating !== false ? `<div style="display:flex;align-items:baseline;gap:8px;margin-bottom:12px"><span style="font-size:24px;font-weight:700">${avg}</span><span style="color:#f59e0b">★★★★★</span><span style="font-size:11px;color:var(--dm-neutral-500)">(${reviews.length}건)</span></div>` : ''}
+    ${items || `<div style="text-align:center;color:var(--dm-neutral-400);font-style:italic">[리뷰를 추가해주세요]</div>`}
+  </div>`;
+}
 
 /** 단일 섹션 렌더링 */
 export function renderSection(section: Section, ctx: SectionRenderContext): string {

@@ -17,6 +17,13 @@ import StoreInfoSection from './StoreInfoSection';
 import SnsSection from './SnsSection';
 import PromoCodeSection from './PromoCodeSection';
 import FooterSection from './FooterSection';
+// ★ D216+ 신규 16 섹션 컴포넌트 통합
+import {
+  ProductCarouselSection, GallerySection, SlideshowSection, TabCardsSection,
+  PollSection, SurveySection, EmailCaptureSection, ClickRewardsSection,
+  LuckyDrawSection, RouletteSection, InstantCouponSection, LimitedQuantitySection,
+  YoutubeEmbedSection, InstagramEmbedSection, MapStoreLocatorSection, ReviewsSection,
+} from './NewSections';
 
 export type EditHandler = (patch: Partial<SectionProps>) => void;
 
@@ -55,7 +62,27 @@ export default function SectionRenderer({
       case 'sns':        return <SnsSection props={section.props as any} />;
       case 'promo_code': return <PromoCodeSection props={section.props as any} onEdit={onEdit} />;
       case 'footer':     return <FooterSection props={section.props as any} onEdit={onEdit} />;
-      default:           return null;
+      // ★ D216+ 신규 16 섹션 — 카테고리 A. 시각 카드형
+      case 'product_carousel':  return <ProductCarouselSection props={section.props as any} />;
+      case 'gallery':           return <GallerySection props={section.props as any} />;
+      case 'slideshow':         return <SlideshowSection props={section.props as any} />;
+      case 'tab_cards':         return <TabCardsSection props={section.props as any} />;
+      // 카테고리 B. 인터랙션 수집형
+      case 'poll':              return <PollSection props={section.props as any} />;
+      case 'survey':            return <SurveySection props={section.props as any} />;
+      case 'email_capture':     return <EmailCaptureSection props={section.props as any} />;
+      case 'click_rewards':     return <ClickRewardsSection props={section.props as any} />;
+      // 카테고리 C. 참여형 이벤트
+      case 'lucky_draw':        return <LuckyDrawSection props={section.props as any} />;
+      case 'roulette':          return <RouletteSection props={section.props as any} />;
+      case 'instant_coupon':    return <InstantCouponSection props={section.props as any} />;
+      case 'limited_quantity':  return <LimitedQuantitySection props={section.props as any} />;
+      // 카테고리 D. 외부 임베드 + 매장 안내
+      case 'youtube_embed':     return <YoutubeEmbedSection props={section.props as any} />;
+      case 'instagram_embed':   return <InstagramEmbedSection props={section.props as any} />;
+      case 'map_store_locator': return <MapStoreLocatorSection props={section.props as any} />;
+      case 'reviews':           return <ReviewsSection props={section.props as any} />;
+      default:                  return null;
     }
   })();
 

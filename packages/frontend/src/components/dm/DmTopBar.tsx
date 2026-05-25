@@ -32,6 +32,13 @@ export default function DmTopBar({ onBack, onTestSendClick, onPublishClick }: Dm
   const setOpenModal = useDmBuilderStore((s) => s.setOpenModal);
   const layoutMode = useDmBuilderStore((s) => s.layoutMode);
   const setLayoutMode = useDmBuilderStore((s) => s.setLayoutMode);
+  // ★ D216+ undo/redo
+  const undo = useDmBuilderStore((s) => s.undo);
+  const redo = useDmBuilderStore((s) => s.redo);
+  const canUndo = useDmBuilderStore((s) => s.canUndo);
+  const canRedo = useDmBuilderStore((s) => s.canRedo);
+  const undoEnabled = canUndo();
+  const redoEnabled = canRedo();
 
   const canPublish = validationResult?.can_publish !== false;
 
@@ -90,6 +97,44 @@ export default function DmTopBar({ onBack, onTestSendClick, onPublishClick }: Dm
       </span>
 
       <div style={{ flex: 1 }} />
+
+      {/* ★ D216+ Undo / Redo 버튼 */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0 }}>
+        <button
+          onClick={() => undo()}
+          disabled={!undoEnabled}
+          title="실행 취소 (Cmd+Z)"
+          style={{
+            background: 'transparent',
+            border: '1px solid var(--dm-neutral-200)',
+            borderRadius: 6,
+            padding: '6px 8px',
+            fontSize: 13,
+            cursor: undoEnabled ? 'pointer' : 'not-allowed',
+            opacity: undoEnabled ? 1 : 0.3,
+            color: 'var(--dm-neutral-700)',
+          }}
+        >
+          ↶
+        </button>
+        <button
+          onClick={() => redo()}
+          disabled={!redoEnabled}
+          title="다시 실행 (Cmd+Y)"
+          style={{
+            background: 'transparent',
+            border: '1px solid var(--dm-neutral-200)',
+            borderRadius: 6,
+            padding: '6px 8px',
+            fontSize: 13,
+            cursor: redoEnabled ? 'pointer' : 'not-allowed',
+            opacity: redoEnabled ? 1 : 0.3,
+            color: 'var(--dm-neutral-700)',
+          }}
+        >
+          ↷
+        </button>
+      </div>
 
       {/* 레이아웃 모드 세그먼트 토글 */}
       <LayoutModeToggle value={layoutMode} onChange={setLayoutMode} />

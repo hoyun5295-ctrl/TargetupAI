@@ -13,6 +13,7 @@ import { useEffect, useMemo, useState } from 'react';
 import axios from 'axios';
 import { useDmBuilderStore } from '../../../stores/dmBuilderStore';
 import ModalBase, { ModalButton } from './ModalBase';
+import ConfirmModal, { type ConfirmState } from '../../ConfirmModal';
 
 const api = axios.create({ baseURL: '/api' });
 api.interceptors.request.use((cfg) => {
@@ -86,6 +87,8 @@ export default function AbTestModal({ open, onClose }: { open: boolean; onClose:
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [detail, setDetail] = useState<AbResult | null>(null);
   const [loading, setLoading] = useState(false);
+  // ★ D216+ ConfirmModal generic (native confirm 영구 폐기)
+  const [confirm, setConfirm] = useState<ConfirmState | null>(null);
 
   useEffect(() => {
     if (!open) return;
@@ -145,23 +148,39 @@ export default function AbTestModal({ open, onClose }: { open: boolean; onClose:
   const handleAction = async (action: 'start' | 'pause' | 'complete' | 'delete') => {
     if (!selectedId) return;
     const test = tests.find((t) => t.id === selectedId);
-    if (action === 'delete' && test && !window.confirm(`"${test.name}" A/B 테스트를 삭제할까요?`)) return;
-    try {
-      if (action === 'delete') {
-        await api.delete(`/dm/ab-tests/${selectedId}`);
-        setToast({ type: 'success', message: '삭제했어요.' });
-        setSelectedId(null);
-        setView('list');
-      } else {
-        await api.post(`/dm/ab-tests/${selectedId}/${action}`);
-        const actionLabel = action === 'start' ? '시작' : action === 'pause' ? '일시정지' : '완료';
-        setToast({ type: 'success', message: `A/B 테스트를 ${actionLabel}했어요.` });
-        await loadDetail(selectedId);
+
+    const runAction = async () => {
+      try {
+        if (action === 'delete') {
+          await api.delete(`/dm/ab-tests/${selectedId}`);
+          setToast({ type: 'success', message: '삭제했어요.' });
+          setSelectedId(null);
+          setView('list');
+        } else {
+          await api.post(`/dm/ab-tests/${selectedId}/${action}`);
+          const actionLabel = action === 'start' ? '시작' : action === 'pause' ? '일시정지' : '완료';
+          setToast({ type: 'success', message: `A/B 테스트를 ${actionLabel}했어요.` });
+          await loadDetail(selectedId);
+        }
+        await loadAll();
+      } catch (err: any) {
+        setToast({ type: 'error', message: err?.response?.data?.error || '실행 실패' });
       }
-      await loadAll();
-    } catch (err: any) {
-      setToast({ type: 'error', message: err?.response?.data?.error || '실행 실패' });
+    };
+
+    if (action === 'delete' && test) {
+      setConfirm({
+        mode: 'danger',
+        title: 'A/B 테스트 삭제',
+        description: `"${test.name}" A/B 테스트를 삭제할까요?`,
+        confirmLabel: '삭제',
+        cancelLabel: '취소',
+        onConfirm: runAction,
+      });
+      return;
     }
+
+    await runAction();
   };
 
   const footer = (
@@ -169,6 +188,8 @@ export default function AbTestModal({ open, onClose }: { open: boolean; onClose:
   );
 
   return (
+    <>
+    <ConfirmModal state={confirm} onClose={() => setConfirm(null)} />
     <ModalBase
       open={open}
       onClose={onClose}
@@ -261,6 +282,7 @@ export default function AbTestModal({ open, onClose }: { open: boolean; onClose:
         </main>
       </div>
     </ModalBase>
+    </>
   );
 }
 

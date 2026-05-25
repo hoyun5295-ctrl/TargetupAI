@@ -9,6 +9,7 @@
  */
 import { useState } from 'react';
 import { useDmBuilderStore } from '../../../stores/dmBuilderStore';
+import ConfirmModal, { type ConfirmState } from '../../ConfirmModal';
 
 export default function PageList() {
   const pages = useDmBuilderStore((s) => s.pages);
@@ -22,6 +23,8 @@ export default function PageList() {
 
   const [editingIdx, setEditingIdx] = useState<number | null>(null);
   const [editingName, setEditingName] = useState('');
+  // ★ D216+ ConfirmModal generic (native confirm 영구 폐기)
+  const [confirm, setConfirm] = useState<ConfirmState | null>(null);
 
   const startRename = (idx: number) => {
     setEditingIdx(idx);
@@ -133,9 +136,14 @@ export default function PageList() {
                   onDuplicate={() => duplicatePage(idx)}
                   onRename={() => startRename(idx)}
                   onDelete={() => {
-                    if (window.confirm(`"${displayName}" 페이지를 삭제할까요? 안의 섹션이 모두 사라져요.`)) {
-                      removePage(idx);
-                    }
+                    setConfirm({
+                      mode: 'danger',
+                      title: '페이지 삭제',
+                      description: `"${displayName}" 페이지를 삭제할까요? 안의 섹션이 모두 사라져요.`,
+                      confirmLabel: '삭제',
+                      cancelLabel: '취소',
+                      onConfirm: () => removePage(idx),
+                    });
                   }}
                 />
               </>
@@ -164,6 +172,7 @@ export default function PageList() {
       >
         + 새 페이지
       </button>
+      <ConfirmModal state={confirm} onClose={() => setConfirm(null)} />
     </div>
   );
 }

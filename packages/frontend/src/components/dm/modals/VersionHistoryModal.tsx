@@ -12,6 +12,7 @@ import axios from 'axios';
 import { useDmBuilderStore, selectAllSectionsFlat } from '../../../stores/dmBuilderStore';
 import { diffByLine, type DiffChunk } from '../../../utils/dm-text-diff';
 import ModalBase, { ModalButton } from './ModalBase';
+import ConfirmModal, { type ConfirmState } from '../../ConfirmModal';
 
 const api = axios.create({ baseURL: '/api' });
 api.interceptors.request.use((cfg) => {
@@ -44,6 +45,8 @@ export default function VersionHistoryModal({ open, onClose }: { open: boolean; 
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [label, setLabel] = useState('');
   const [note, setNote] = useState('');
+  // ★ D216+ ConfirmModal generic (native confirm 영구 폐기)
+  const [confirm, setConfirm] = useState<ConfirmState | null>(null);
 
   useEffect(() => {
     if (!open || !dmId) return;
@@ -101,15 +104,23 @@ export default function VersionHistoryModal({ open, onClose }: { open: boolean; 
 
   const handleRestore = async () => {
     if (!dmId || !selectedVersion) return;
-    if (!window.confirm(`"${selectedVersion.version_label}" 버전으로 복원할까요? 현재 작업 내용이 덮어써져요.`)) return;
-    try {
-      await api.post(`/dm/${dmId}/versions/${selectedVersion.id}/restore`);
-      await loadDm(dmId);
-      setToast({ type: 'success', message: '복원 완료.' });
-      onClose();
-    } catch (err: any) {
-      setToast({ type: 'error', message: err?.response?.data?.error || '복원 실패' });
-    }
+    setConfirm({
+      mode: 'warning',
+      title: '버전 복원',
+      description: `"${selectedVersion.version_label}" 버전으로 복원할까요? 현재 작업 내용이 덮어써져요.`,
+      confirmLabel: '복원',
+      cancelLabel: '취소',
+      onConfirm: async () => {
+        try {
+          await api.post(`/dm/${dmId}/versions/${selectedVersion.id}/restore`);
+          await loadDm(dmId);
+          setToast({ type: 'success', message: '복원 완료.' });
+          onClose();
+        } catch (err: any) {
+          setToast({ type: 'error', message: err?.response?.data?.error || '복원 실패' });
+        }
+      },
+    });
   };
 
   const footer = (
@@ -124,6 +135,8 @@ export default function VersionHistoryModal({ open, onClose }: { open: boolean; 
   );
 
   return (
+    <>
+    <ConfirmModal state={confirm} onClose={() => setConfirm(null)} />
     <ModalBase
       open={open}
       onClose={onClose}
@@ -236,6 +249,7 @@ export default function VersionHistoryModal({ open, onClose }: { open: boolean; 
         </div>
       </div>
     </ModalBase>
+    </>
   );
 }
 

@@ -107,7 +107,35 @@
 
 ---
 
-### 🚀 다음 세션 진입 가이드 (D213+ 성과리포트 + D214+ 자사몰 통합 종결 후 — **D215+ 인앱메시지 압도적 강화 진입**)
+### 🚀 다음 세션 진입 가이드 (D215+ 인앱메시지 + Email SMTP relay 종결 후 — **D216+ 모바일DM 강화 진입**)
+
+> **★ D216+ 진입 매트릭스 (Harold 명시 2026-05-25)**:
+> Harold 명시 = "모바일DM 강화 — 가장 편리한 UX + 완벽한 디자인 + 다양한 이벤트 요소 / 2 세션 분량 / 본 세션(D215+) = 완벽 설계도 / 다음 세션부터 실제 작업".
+>
+> **D216+ 진입 명령어 (다음 세션 첫 메시지 — 즉시 복사 가능)**:
+> ```
+> docs/superpowers/specs/2026-05-25-mobile-dm-redesign-design.md 정독 + status/STATUS.md CURRENT_TASK 정독 + memory/project_d215_session_full_completed.md 정독 + memory/feedback_design_quality_minimum_journey_level.md 정독 + memory/feedback_default_superpowers_workflow.md 정독 → D216+ 진입 (모바일DM 1 세션 — Backend + 편집 UX 강화) + writing-plans skill 호출 의무
+> ```
+>
+> **D216+ 모바일DM 강화 핵심 매핑 (`docs/superpowers/specs/2026-05-25-mobile-dm-redesign-design.md` 정독 의무)**:
+> - **27 섹션** (옛 11 + 신규 16 — 4 카테고리: 시각 카드형 / 인터랙션 수집형 / 참여형 / 외부 임베드)
+> - **빠른 시작 7 시나리오** (신상품 / 시즌세일 / 추첨 / 매장안내 / 설문보상 / 신규환영 / 룰렛)
+> - **편집 UX 6 영역** (WYSIWYG + 드래그 + 키보드 + AI 마법봉 + 자동 저장 + 실시간 협업)
+> - **신규 5 AI 모듈** (CT-86 self-diagnosis / CT-87 quick-action / CT-88 event-recommender / CT-89 section-suggester / CT-90 personalization-engine)
+> - **Journey Builder 동급 14 화면** 디자인 정합화
+> - **DB ALTER** dm_campaigns 4 컬럼 + dm_event_responses 신규 테이블
+> - **신규 endpoint 8건**
+> - **2 세션 분할** = 1세션 (19~24h Backend + UX) / 2세션 (33~43h 신규 16 섹션 + Journey 동급)
+>
+> **★ D215+ 통합 종결 매트릭스 (2026-05-25 — 참조용)**:
+> - **인앱메시지 압도적 강화** = Phase 1+2+3 (Backend CT-77~84 + endpoint 12 + SDK 850줄 + Frontend 1700줄 + DB ALTER 22)
+> - **Email SMTP relay 전환** = 옛 SendGrid 영구 폐기 + CT-85 company-smtp-client + AES-256-GCM 암호화 + 4 preset + DB ALTER 7 + companies 신규 컬럼
+> - **영구 룰 4건 신설** = codex_review_after_code_change + superpowers_workflow_default + design_quality_minimum_journey_level
+> - **D216+ 모바일DM 완벽 설계도 작성** = `docs/superpowers/specs/2026-05-25-mobile-dm-redesign-design.md`
+> - Harold 직접 배포 완료
+> - 상세 매핑 = [[memory/project_d215_session_full_completed.md]] 정독 의무
+
+### 🚀 옛 D215+ 진입 가이드 (참조용 — 종결 완료 2026-05-25)
 
 > **★ D215+ 진입 매트릭스 (Harold 명시 2026-05-24)**:
 > Harold 명시 = "인앱메세지 강화 — Journey Builder급 디자인 의무". 6번 메뉴 (인앱메시지) 압도적 강화 진입 — Braze/Iterable/OneSignal/Pendo 압도.

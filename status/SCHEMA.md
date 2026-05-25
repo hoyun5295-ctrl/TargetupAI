@@ -629,6 +629,109 @@
 | created_at | timestamp |
 | completed_at | timestamp |
 
+### dm_pages (모바일 DM 빌더 — D119/D125/D216+) ★ D216+ 갱신
+> **D125 마이그레이션 (옛 누락 보강) + D216+ 4 컬럼 추가.**
+> 한줄로 PRO+ 요금제 모바일 DM 빌더 핵심 테이블. 옛 slides 기반 (D119) + 신규 sections 기반 (D125) 동시 지원.
+
+| 컬럼 | 타입 | 비고 |
+|------|------|------|
+| id | uuid PK | |
+| company_id | uuid FK | |
+| created_by | uuid FK | users.id |
+| title | varchar(200) | |
+| store_name | varchar(100) | |
+| header_template | varchar(50) | D119 default/v2 등 |
+| footer_template | varchar(50) | D119 |
+| header_data | jsonb | D119 |
+| footer_data | jsonb | D119 |
+| pages | jsonb | D119 DmSlide[] 또는 D128 DmPageGroup[] |
+| settings | jsonb | |
+| short_code | varchar(20) | 단축URL (UNIQUE) |
+| status | varchar(20) | draft/published |
+| view_count | integer | |
+| **layout_mode** | **varchar(20)** | **D125: scroll/slides/scroll_snap** |
+| **sections** | **jsonb** | **D125 Section[]** |
+| **brand_kit** | **jsonb** | **D125 BrandKit 토큰** |
+| **template_id** | **text** | **D125 템플릿 참조** |
+| **ai_prompt** | **text** | **D125 자연어 프롬프트 원문** |
+| **validation_result** | **jsonb** | **D125 옛 검수 결과 (10 영역 × 3등급)** |
+| **approval_status** | **varchar(20)** | **D125 draft/review/approved/published/rejected** |
+| **event_type** | **varchar(30)** | **★ D216+ — lucky_draw/roulette/instant_coupon 등** |
+| **personalization_strategy** | **jsonb** | **★ D216+ — Liquid 변수 자동 추천 설정** |
+| **quick_start_scenario** | **varchar(30)** | **★ D216+ — 빠른 시작 시나리오** |
+| **last_diagnosed_at** | **timestamptz** | **★ D216+ — CT-86 자율 진단 최근 시각** |
+| created_at | timestamp | |
+| updated_at | timestamp | |
+
+### dm_versions (DM 버전 관리 — D125)
+> **옛 D125 §13 — SCHEMA.md 영구 누락 영역 보강 (D216+ 진입 직전 추가).**
+
+| 컬럼 | 타입 |
+|------|------|
+| id | uuid PK |
+| dm_id | uuid FK | dm_pages.id ON DELETE CASCADE |
+| version_label | text |
+| version_number | integer |
+| sections | jsonb |
+| brand_kit | jsonb |
+| note | text |
+| created_by | uuid FK | users.id |
+| created_at | timestamptz |
+
+### dm_templates (DM 템플릿 갤러리 — D125)
+> **옛 D125 §13 — SCHEMA.md 영구 누락 영역 보강 (D216+ 진입 직전 추가).**
+
+| 컬럼 | 타입 |
+|------|------|
+| id | text PK |
+| category | text |
+| industry | text |
+| name | text |
+| description | text |
+| thumbnail_url | text |
+| sections | jsonb |
+| brand_kit | jsonb |
+| popularity | integer |
+| is_active | boolean |
+| created_at | timestamptz |
+
+### dm_views (DM 열람 추적 — D119/D125)
+| 컬럼 | 타입 |
+|------|------|
+| id | uuid PK |
+| dm_id | uuid FK | dm_pages.id ON DELETE CASCADE |
+| company_id | uuid FK |
+| phone | varchar(20) |
+| page_reached | integer |
+| total_pages | integer |
+| duration_seconds | integer |
+| ip | varchar(45) |
+| user_agent | text |
+| **section_interactions** | **jsonb** | **D125 — 섹션별 체류 시간/클릭 수** |
+| viewed_at | timestamptz |
+| last_active_at | timestamptz |
+
+### dm_event_responses (DM 이벤트 응답 누적) ★ D216+ 신설
+> **신규 16 섹션 (poll / survey / email_capture / lucky_draw / roulette 등) 인터랙션 누적.**
+
+| 컬럼 | 타입 |
+|------|------|
+| id | uuid PK |
+| company_id | uuid FK | companies.id ON DELETE CASCADE |
+| campaign_id | uuid FK | dm_pages.id ON DELETE CASCADE |
+| section_id | uuid |
+| section_type | varchar(30) |
+| customer_id | uuid FK NULL | customers.id ON DELETE SET NULL |
+| anonymous_id | varchar(100) |
+| response_data | jsonb |
+| ip_address | varchar(45) |
+| user_agent | text |
+| occurred_at | timestamptz |
+| created_at | timestamptz |
+- INDEX: (company_id, campaign_id, occurred_at DESC)
+- INDEX: (section_id, section_type)
+- INDEX: (customer_id) WHERE customer_id IS NOT NULL
+
 ### opt_outs (수신거부 — user_id 기준)
 | 컬럼 | 타입 |
 |------|------|

@@ -10,6 +10,8 @@ import { useEffect, useState, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import { useDmBuilderStore } from '../stores/dmBuilderStore';
+import { useDmKeyboardShortcuts } from '../hooks/useDmKeyboardShortcuts';
+import ConfirmModal, { type ConfirmState } from '../components/ConfirmModal';
 import DmTopBar from '../components/dm/DmTopBar';
 import DmLeftPanel from '../components/dm/DmLeftPanel';
 import DmCanvas from '../components/dm/DmCanvas';
@@ -62,6 +64,24 @@ export default function DmBuilderPage() {
   const setToast = useDmBuilderStore((s) => s.setToast);
   const isDirty = useDmBuilderStore((s) => s.isDirty);
   const [confirmBackOpen, setConfirmBackOpen] = useState(false);
+  // ★ D216+ ConfirmModal generic (native confirm 영구 폐기)
+  const [confirm, setConfirm] = useState<ConfirmState | null>(null);
+
+  // ★ D216+ Journey 동급 디자인 — overview 5 metric + 자연어 입력
+  const [overview, setOverview] = useState<{
+    total_dm: number;
+    published_dm: number;
+    total_views_30d: number;
+    unique_viewers_30d: number;
+    total_responses_30d: number;
+    avg_ctr_30d: number;
+  } | null>(null);
+  const [naturalLanguage, setNaturalLanguage] = useState('');
+  const [detailExpanded, setDetailExpanded] = useState(false);
+  const [generating, setGenerating] = useState(false);
+
+  // ★ D216+ 키보드 단축키 활성 (편집 모드 한정)
+  useDmKeyboardShortcuts({ enabled: mode === 'edit' });
 
   const refreshList = useCallback(async () => {
     setListLoading(true);
@@ -86,6 +106,19 @@ export default function DmBuilderPage() {
     if (mode === 'list') refreshList();
   }, [mode, refreshList]);
 
+  // ★ D216+ overview 5 metric 로드 (list 모드 진입 시)
+  useEffect(() => {
+    if (mode !== 'list') return;
+    (async () => {
+      try {
+        const res = await api.get('/dm/overview');
+        if (res.data?.success) setOverview(res.data.data);
+      } catch {
+        // overview 영역 X = silent fallback (옛 영역 영구 정합)
+      }
+    })();
+  }, [mode]);
+
   useEffect(() => {
     if (!toast) return;
     const t = setTimeout(() => setToast(null), 2500);
@@ -102,6 +135,7 @@ export default function DmBuilderPage() {
   const handleLayoutPicked = (layoutMode: LayoutMode) => {
     createNew({ layoutMode });
     setMode('edit');
+    setGenerating(false);
   };
 
   const [convertingId, setConvertingId] = useState<string | null>(null);
@@ -109,18 +143,27 @@ export default function DmBuilderPage() {
   const handleEdit = async (id: string, itemLayoutMode?: string) => {
     setLegacyDmError(null);
     if (itemLayoutMode === 'slides') {
-      if (!confirm('이 DM은 레거시 슬라이드 모드예요.\n새 에디터로 변환하면 섹션 기반 구조로 바뀝니다. 계속할까요?\n(변환 후에는 새 에디터에서 편집 가능하며, 필요 시 백업에서 되돌릴 수 있어요.)')) return;
-      setConvertingId(id);
-      try {
-        const res = await api.post(`/dm/${id}/convert-to-scroll`);
-        setToast({ type: 'success', message: `변환 완료 (${res.data.converted_sections}개 섹션)` });
-        await loadDm(id);
-        setMode('edit');
-      } catch (err: any) {
-        setToast({ type: 'error', message: err?.response?.data?.error || '변환 실패' });
-      } finally {
-        setConvertingId(null);
-      }
+      // ★ D216+ ConfirmModal (옛 native confirm 영구 폐기)
+      setConfirm({
+        mode: 'warning',
+        title: '레거시 슬라이드 모드 DM 변환',
+        description: '이 DM은 옛 슬라이드 모드입니다. 새 에디터로 변환하면 섹션 기반 구조로 바뀝니다.\n변환 후에는 새 에디터에서 편집 가능하며, 필요 시 백업에서 되돌릴 수 있어요.',
+        confirmLabel: '변환하고 진입',
+        cancelLabel: '취소',
+        onConfirm: async () => {
+          setConvertingId(id);
+          try {
+            const res = await api.post(`/dm/${id}/convert-to-scroll`);
+            setToast({ type: 'success', message: `변환 완료 (${res.data.converted_sections}개 섹션)` });
+            await loadDm(id);
+            setMode('edit');
+          } catch (err: any) {
+            setToast({ type: 'error', message: err?.response?.data?.error || '변환 실패' });
+          } finally {
+            setConvertingId(null);
+          }
+        },
+      });
       return;
     }
     await loadDm(id);
@@ -128,14 +171,23 @@ export default function DmBuilderPage() {
   };
 
   const handleDelete = async (id: string) => {
-    if (!confirm('이 DM을 삭제할까요? 되돌릴 수 없어요.')) return;
-    try {
-      await api.delete(`/dm/${id}`);
-      setToast({ type: 'success', message: '삭제했어요.' });
-      refreshList();
-    } catch (err: any) {
-      setToast({ type: 'error', message: err?.response?.data?.error || '삭제 실패' });
-    }
+    // ★ D216+ ConfirmModal (옛 native confirm 영구 폐기)
+    setConfirm({
+      mode: 'danger',
+      title: 'DM 삭제',
+      description: '이 DM을 삭제할까요? 되돌릴 수 없어요.',
+      confirmLabel: '삭제',
+      cancelLabel: '취소',
+      onConfirm: async () => {
+        try {
+          await api.delete(`/dm/${id}`);
+          setToast({ type: 'success', message: '삭제했어요.' });
+          refreshList();
+        } catch (err: any) {
+          setToast({ type: 'error', message: err?.response?.data?.error || '삭제 실패' });
+        }
+      },
+    });
   };
 
   const handleBackToList = () => {
@@ -171,6 +223,7 @@ export default function DmBuilderPage() {
             handleBackToList();
           }}
         />
+        <ConfirmModal state={confirm} onClose={() => setConfirm(null)} />
         {toast && <Toast toast={toast} />}
       </div>
     );
@@ -245,6 +298,155 @@ export default function DmBuilderPage() {
       )}
 
       <main style={{ maxWidth: 1100, margin: '0 auto', padding: '24px 32px' }}>
+        {/* ★ D216+ Journey 동급 디자인 — 자연어 입력 + 빠른 시작 7 카드 */}
+        <div style={{
+          background: 'linear-gradient(135deg, rgba(217,70,239,0.10), rgba(168,85,247,0.08), rgba(99,102,241,0.10))',
+          border: '1px solid rgba(255,255,255,0.1)',
+          borderRadius: 16,
+          padding: 20,
+          marginBottom: 20,
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+            <span style={{ fontSize: 18 }}>✨</span>
+            <span style={{ fontSize: 14, fontWeight: 700, color: '#fff' }}>자연어 한 줄로 DM 자동 생성</span>
+            <span style={{ fontSize: 10, padding: '2px 6px', background: 'rgba(217,70,239,0.3)', color: '#f5d0fe', borderRadius: 10, fontWeight: 700 }}>BETA</span>
+          </div>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <input
+              type="text"
+              value={naturalLanguage}
+              onChange={(e) => setNaturalLanguage(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && naturalLanguage.trim() && !generating) {
+                  setGenerating(true);
+                  setLegacyDmError(null);
+                  setLayoutPickerOpen(true);
+                }
+              }}
+              placeholder='예: "봄 신상 프로모션, 30대 여성, 추첨 이벤트" — Enter로 자동 생성'
+              style={{
+                flex: 1, height: 44, padding: '0 14px',
+                background: 'rgba(255,255,255,0.05)',
+                border: '1px solid rgba(255,255,255,0.15)',
+                borderRadius: 10, fontSize: 13, color: '#fff', outline: 'none',
+              }}
+            />
+            <button
+              onClick={() => { if (naturalLanguage.trim()) { setLayoutPickerOpen(true); } }}
+              disabled={!naturalLanguage.trim() || generating}
+              style={{
+                height: 44, padding: '0 20px',
+                background: naturalLanguage.trim() ? 'linear-gradient(135deg, #a855f7, #d946ef)' : 'rgba(255,255,255,0.05)',
+                color: '#fff', border: 'none', borderRadius: 10,
+                fontSize: 13, fontWeight: 700,
+                cursor: naturalLanguage.trim() ? 'pointer' : 'not-allowed',
+                opacity: naturalLanguage.trim() ? 1 : 0.4,
+              }}
+            >
+              {generating ? '생성 중...' : '자동 생성'}
+            </button>
+          </div>
+
+          {/* 빠른 시작 7 시나리오 */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 8, marginTop: 14 }}>
+            {[
+              { icon: '🛍️', label: '신상품 출시', hint: 'header + hero + product_carousel' },
+              { icon: '🏷️', label: '시즌 세일', hint: 'header + countdown + coupon' },
+              { icon: '🎁', label: '추첨 이벤트', hint: 'header + lucky_draw + cta' },
+              { icon: '🗺️', label: '매장 안내', hint: 'header + map_store_locator' },
+              { icon: '📝', label: '설문 + 보상', hint: 'header + survey + instant_coupon' },
+              { icon: '✉️', label: '신규 환영', hint: 'header + email_capture' },
+              { icon: '🎡', label: '룰렛 이벤트', hint: 'header + roulette + cta' },
+            ].map((s) => (
+              <button
+                key={s.label}
+                onClick={() => { setNaturalLanguage(s.label); setLayoutPickerOpen(true); }}
+                style={{
+                  padding: '10px 8px',
+                  background: 'rgba(255,255,255,0.04)',
+                  border: '1px solid rgba(255,255,255,0.1)',
+                  borderRadius: 10, cursor: 'pointer',
+                  textAlign: 'center', transition: 'all 0.2s',
+                }}
+                onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(217,70,239,0.15)'; }}
+                onMouseLeave={(e) => { e.currentTarget.style.background = 'rgba(255,255,255,0.04)'; }}
+              >
+                <div style={{ fontSize: 20, marginBottom: 4 }}>{s.icon}</div>
+                <div style={{ fontSize: 12, fontWeight: 600, color: '#fff' }}>{s.label}</div>
+                <div style={{ fontSize: 9, color: 'rgba(255,255,255,0.4)', marginTop: 2 }}>{s.hint}</div>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* ★ D216+ 5 metric 요약 (overview endpoint) */}
+        {overview && (
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))',
+            gap: 10,
+            marginBottom: 20,
+          }}>
+            {[
+              { label: '전체 DM', value: overview.total_dm, accent: '#a855f7' },
+              { label: '발행', value: overview.published_dm, accent: '#10b981' },
+              { label: '30일 열람', value: overview.total_views_30d.toLocaleString(), accent: '#06b6d4' },
+              { label: '고유 시청자', value: overview.unique_viewers_30d.toLocaleString(), accent: '#f59e0b' },
+              { label: '평균 CTR', value: `${overview.avg_ctr_30d}%`, accent: '#ec4899' },
+            ].map((m) => (
+              <div key={m.label} style={{
+                background: 'rgba(255,255,255,0.04)',
+                border: '1px solid rgba(255,255,255,0.1)',
+                borderRadius: 12,
+                padding: 14,
+              }}>
+                <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.5)', marginBottom: 4 }}>{m.label}</div>
+                <div style={{ fontSize: 20, fontWeight: 800, color: m.accent }}>{m.value}</div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* ★ D216+ 자세히 분석 토글 (Source caption 영구 룰 정합) */}
+        {overview && (
+          <div style={{ marginBottom: 20 }}>
+            <button
+              onClick={() => setDetailExpanded(!detailExpanded)}
+              style={{
+                background: 'transparent',
+                border: '1px solid rgba(255,255,255,0.1)',
+                color: 'rgba(255,255,255,0.7)',
+                padding: '8px 14px',
+                borderRadius: 8,
+                fontSize: 12,
+                cursor: 'pointer',
+                display: 'flex', alignItems: 'center', gap: 6,
+              }}
+            >
+              {detailExpanded ? '▲' : '▼'} 자세히 분석
+            </button>
+            {detailExpanded && (
+              <div style={{
+                marginTop: 12,
+                padding: 14,
+                background: 'rgba(255,255,255,0.03)',
+                border: '1px solid rgba(255,255,255,0.08)',
+                borderRadius: 10,
+              }}>
+                <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.7)', marginBottom: 8 }}>
+                  총 응답 (30일): <strong style={{ color: '#fff' }}>{overview.total_responses_30d.toLocaleString()}건</strong>
+                </div>
+                <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.4)', marginBottom: 8 }}>
+                  CTR = (이벤트 응답 / 열람) × 100. 응답 영역 = poll / survey / email_capture / lucky_draw 등 인터랙션 누적.
+                </div>
+                <div style={{ fontSize: 10, color: 'rgba(255,255,255,0.3)', fontStyle: 'italic' }}>
+                  Data source — dm_views (최근 30일) + dm_event_responses (CT-86~89 통합 매트릭스)
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
         {listLoading ? (
           <div style={{ textAlign: 'center', padding: 60, color: 'rgba(255,255,255,0.5)' }}>불러오는 중...</div>
         ) : list.length === 0 ? (
@@ -260,9 +462,11 @@ export default function DmBuilderPage() {
 
       <LayoutModePickerModal
         open={layoutPickerOpen}
-        onClose={() => setLayoutPickerOpen(false)}
+        onClose={() => { setLayoutPickerOpen(false); setGenerating(false); }}
         onSelect={handleLayoutPicked}
       />
+
+      <ConfirmModal state={confirm} onClose={() => setConfirm(null)} />
 
       {toast && <Toast toast={toast} />}
     </div>
