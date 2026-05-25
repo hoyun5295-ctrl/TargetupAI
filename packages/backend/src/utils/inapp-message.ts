@@ -2,7 +2,7 @@
  * ★ CT-27: In-app Message 컨트롤타워 — D175-A (2026-05-19)
  *
  * 🎯 목적
- *   자사몰 페이지 안에서 표시되는 banner/modal 메시지 박음.
+ *   자사몰 페이지 안에서 표시되는 banner/modal 메시지 관리.
  *   - 회사 admin이 메시지 정의 (제목/본문/CTA/위치/색상/트리거/빈도/노출 기간)
  *   - SDK가 페이지 로드 시 GET /api/cdp/inapp/active 호출 → 현재 사용자에게 표시할 메시지 반환
  *   - 표시/클릭/dismiss는 POST /api/cdp/inapp/track으로 트래킹
@@ -15,6 +15,10 @@
  */
 
 import { query } from '../config/database';
+// ★ D215+ (2026-05-25) 통합 영역 — CT-78 (segment) + CT-80 (variant) + CT-82 (trigger window)
+import { customerMatchesSegment, isEmptySegment } from './inapp-segment-matcher';
+import { selectVariantForCustomer } from './inapp-variant-optimizer';
+import { isTimeWindowValid } from './inapp-trigger-engine';
 
 // ════════════════════════════════════════════════════════════════════
 // 타입
@@ -159,7 +163,7 @@ export interface ActiveMessagesInput {
   triggerEvent?: string;            // 기본 'page_load'
   externalId?: string;              // 회원 식별
   anonymousId?: string;             // 비회원 식별
-  /** 클라이언트가 박은 표시 이력 (localStorage) — 서버 검증 보조 */
+  /** 클라이언트가 전달한 표시 이력 (localStorage) — 서버 검증 보조 */
   seenMessageIds?: string[];
 }
 
@@ -201,7 +205,7 @@ export async function getActiveMessagesForCustomer(input: ActiveMessagesInput): 
     messages = messages.filter((m) => m.displayFrequency !== 'once_per_day' || !seenIds.has(m.id));
   }
 
-  // 클라이언트가 박은 seenMessageIds도 제외 (once_per_session 메시지)
+  // 클라이언트가 전달한 seenMessageIds 제외 (once_per_session 메시지)
   if (input.seenMessageIds && input.seenMessageIds.length > 0) {
     const seenSet = new Set(input.seenMessageIds);
     messages = messages.filter((m) => m.displayFrequency !== 'once_per_session' || !seenSet.has(m.id));
@@ -221,6 +225,10 @@ export interface TrackImpressionInput {
   customerId?: string | null;
   identityLinkId?: string | null;
   anonymousId?: string | null;
+  // ★ D215+ (2026-05-25) 신규 컬럼
+  buttonId?: string | null;              // 다중 CTA click 분리용
+  dwellSeconds?: number | null;          // 체류 시간 (UI 자세히 분석)
+  attributedPurchaseId?: string | null;  // 24h purchase attribution 직접 매핑
 }
 
 export async function trackImpression(input: TrackImpressionInput): Promise<void> {
@@ -233,15 +241,18 @@ export async function trackImpression(input: TrackImpressionInput): Promise<void
   await query(
     `INSERT INTO cdp_inapp_impressions (
       company_id, message_id, customer_id, identity_link_id, anonymous_id,
-      event_type, occurred_at
+      event_type, button_id, dwell_seconds, attributed_purchase_id, occurred_at
     ) VALUES (
       $1::uuid, $2::uuid, $3::uuid, $4::uuid, $5,
-      $6, NOW()
+      $6, $7, $8, $9::uuid, NOW()
     )`,
     [
       input.companyId, input.messageId,
       input.customerId || null, input.identityLinkId || null, input.anonymousId || null,
       input.eventType,
+      input.buttonId || null,
+      input.dwellSeconds ?? null,
+      input.attributedPurchaseId || null,
     ]
   );
 }
@@ -274,8 +285,8 @@ export async function getMessageStats(companyId: string, messageId: string): Pro
   };
 }
 
-// ★ D210+ Phase 3 B-4 (2026-05-23 Harold 명시): 회사 전체 메시지 통계 매트릭스 (CTR funnel 시각화)
-//   회사 admin Dashboard 영역 메시지별 funnel 시각화 + 비교 매트릭스 정합
+// ★ D210+ Phase 3 B-4 (2026-05-23 Harold 명시): 회사 전체 메시지 통계 (CTR funnel 시각화)
+//   회사 admin Dashboard 메시지별 funnel 시각화 + 비교 표 일치
 export async function getCompanyInAppStats(companyId: string): Promise<Array<{
   messageId: string;
   title: string;
@@ -341,4 +352,201 @@ function mapRowToMessage(row: any): InAppMessage {
     endAt: row.end_at ? new Date(row.end_at) : null,
     status: row.status,
   };
+}
+
+// ════════════════════════════════════════════════════════════════════
+// ★ D215+ (2026-05-25) 통합 — InAppMessageDetail 타입 + V2 함수 + 헬퍼
+//   옛 InAppMessage + getActiveMessagesForCustomer 보존 (backward compat)
+// ════════════════════════════════════════════════════════════════════
+
+export interface InAppMessageDetail extends InAppMessage {
+  template: string;
+  imageUrl: string | null;
+  buttons: any[];
+  segmentConditions: any;
+  triggerConditions: any;
+  personalizationVars: string[];
+  parentMessageId: string | null;
+  variantWeight: number;
+  autoDismissSeconds: number | null;
+  maxDisplaysPerUser: number | null;
+  sendStartHour: number | null;
+  sendEndHour: number | null;
+  allowedWeekdays: number[];
+  localeVariants: any;
+  animation: string;
+}
+
+function mapRowToMessageDetail(row: any): InAppMessageDetail {
+  return {
+    ...mapRowToMessage(row),
+    template: row.template || row.position || 'top_banner',
+    imageUrl: row.image_url || null,
+    buttons: Array.isArray(row.buttons) ? row.buttons : [],
+    segmentConditions: row.segment_conditions || {},
+    triggerConditions: row.trigger_conditions || { event: row.trigger_event || 'page_load' },
+    personalizationVars: Array.isArray(row.personalization_vars) ? row.personalization_vars : [],
+    parentMessageId: row.parent_message_id || null,
+    variantWeight: Number(row.variant_weight ?? 100),
+    autoDismissSeconds: row.auto_dismiss_seconds ?? null,
+    maxDisplaysPerUser: row.max_displays_per_user ?? null,
+    sendStartHour: row.send_start_hour ?? null,
+    sendEndHour: row.send_end_hour ?? null,
+    allowedWeekdays: Array.isArray(row.allowed_weekdays) ? row.allowed_weekdays.map((d: any) => Number(d)) : [0, 1, 2, 3, 4, 5, 6],
+    localeVariants: row.locale_variants || {},
+    animation: row.animation || 'fade',
+  };
+}
+
+const FULL_COLUMNS = `id, title, body, action_url, action_label, position, background_color, text_color,
+                      trigger_event, display_frequency, start_at, end_at, status,
+                      template, image_url, buttons, segment_conditions, trigger_conditions,
+                      personalization_vars, parent_message_id, variant_weight,
+                      auto_dismiss_seconds, max_displays_per_user,
+                      send_start_hour, send_end_hour, allowed_weekdays, locale_variants, animation`;
+
+/**
+ * ★ D215+ V2 — SDK GET /inapp/active 호출 진입.
+ *
+ * 옛 V1 (getActiveMessagesForCustomer) 대비 강화:
+ * - 신규 trigger_conditions 우선 매칭 (옛 trigger_event 컬럼 fallback)
+ * - parent_message_id IS NULL = 부모만 후보 (variant는 CT-80 selectVariantForCustomer로 매핑)
+ * - 시간대 + 요일 윈도우 검증 (CT-82 isTimeWindowValid)
+ * - 세그먼트 조건 검증 (CT-78 customerMatchesSegment)
+ * - max_displays_per_user 검증 (사용자별 누적 impression 한도)
+ * - once_per_day 옛 영역 유지 (DB cdp_inapp_impressions 24h 매칭)
+ */
+export async function getActiveMessagesForCustomerV2(input: ActiveMessagesInput): Promise<InAppMessageDetail[]> {
+  const trigger = input.triggerEvent || 'page_load';
+
+  // Step 1 — 부모 메시지 후보 조회 (trigger_event 또는 trigger_conditions.event 매칭)
+  const candidateResult = await query(
+    `SELECT ${FULL_COLUMNS}
+     FROM cdp_inapp_messages
+     WHERE company_id = $1::uuid
+       AND status = 'active'
+       AND parent_message_id IS NULL
+       AND (trigger_event = $2 OR (trigger_conditions->>'event' = $2))
+       AND (start_at IS NULL OR start_at <= NOW())
+       AND (end_at IS NULL OR end_at >= NOW())
+     ORDER BY created_at DESC
+     LIMIT 20`,
+    [input.companyId, trigger]
+  );
+  let candidates: any[] = candidateResult.rows;
+
+  // Step 2 — customer ID 매핑 (외부 ID → customer_id)
+  let customerId: string | null = null;
+  if (input.externalId) {
+    const linkR = await query(
+      `SELECT customer_id FROM cdp_identity_links
+       WHERE company_id = $1::uuid AND external_id = $2 LIMIT 1`,
+      [input.companyId, input.externalId]
+    );
+    if (linkR.rows.length > 0 && linkR.rows[0].customer_id) {
+      customerId = String(linkR.rows[0].customer_id);
+    }
+  }
+
+  // Step 3 — 시간대 + 요일 윈도우 + 세그먼트 검증 (개별 후보 순회)
+  const passed: any[] = [];
+  for (const cand of candidates) {
+    const timeWindow = isTimeWindowValid({
+      id: String(cand.id),
+      triggerConditions: cand.trigger_conditions || { event: trigger },
+      sendStartHour: cand.send_start_hour,
+      sendEndHour: cand.send_end_hour,
+      allowedWeekdays: Array.isArray(cand.allowed_weekdays) ? cand.allowed_weekdays.map((d: any) => Number(d)) : [0, 1, 2, 3, 4, 5, 6],
+      status: cand.status,
+    });
+    if (!timeWindow.valid) continue;
+
+    const segmentConds = cand.segment_conditions || {};
+    if (!isEmptySegment(segmentConds)) {
+      if (!customerId) continue;  // 세그먼트 조건 있는데 customer 미식별 = 매칭 불가
+      const segMatch = await customerMatchesSegment(input.companyId, customerId, segmentConds).catch(() => false);
+      if (!segMatch) continue;
+    }
+
+    passed.push(cand);
+  }
+
+  // Step 4 — 각 후보별 variant 매핑 (CT-80 selectVariantForCustomer)
+  const selected: any[] = [];
+  for (const cand of passed) {
+    const selection = await selectVariantForCustomer(
+      input.companyId,
+      String(cand.id),
+      customerId,
+      input.anonymousId || null,
+    ).catch(() => null);
+
+    if (selection && !selection.isParent && selection.messageId !== String(cand.id)) {
+      const variantR = await query(
+        `SELECT ${FULL_COLUMNS}
+         FROM cdp_inapp_messages
+         WHERE id = $1::uuid AND company_id = $2::uuid LIMIT 1`,
+        [selection.messageId, input.companyId]
+      );
+      if (variantR.rows.length > 0) {
+        selected.push(variantR.rows[0]);
+        continue;
+      }
+    }
+    selected.push(cand);
+  }
+
+  let messages = selected.map(mapRowToMessageDetail);
+
+  // Step 5 — once_per_day 누적 impression 검증 (24h 윈도우)
+  const onceMessages = messages.filter((m) => m.displayFrequency === 'once_per_day');
+  if (onceMessages.length > 0 && (input.externalId || input.anonymousId)) {
+    const messageIds = onceMessages.map((m) => m.id);
+    const linkFilter = input.externalId
+      ? `AND identity_link_id IN (SELECT id FROM cdp_identity_links WHERE company_id = $1::uuid AND external_id = $3)`
+      : `AND anonymous_id = $3`;
+    const seenResult = await query(
+      `SELECT DISTINCT message_id FROM cdp_inapp_impressions
+       WHERE company_id = $1::uuid
+         AND message_id = ANY($2::uuid[])
+         AND event_type = 'impression'
+         AND occurred_at > NOW() - INTERVAL '24 hours'
+         ${linkFilter}`,
+      [input.companyId, messageIds, input.externalId || input.anonymousId]
+    );
+    const seenIds = new Set<string>(seenResult.rows.map((r: any) => r.message_id));
+    messages = messages.filter((m) => m.displayFrequency !== 'once_per_day' || !seenIds.has(m.id));
+  }
+
+  // Step 6 — max_displays_per_user 검증 (사용자별 누적 impression 한도)
+  const limitedMessages = messages.filter((m) => m.maxDisplaysPerUser !== null && m.maxDisplaysPerUser > 0);
+  if (limitedMessages.length > 0 && (customerId || input.anonymousId)) {
+    const checkUserKey = customerId || input.anonymousId;
+    const userFilterSql = customerId ? `customer_id = $3::uuid` : `anonymous_id = $3`;
+    const limitR = await query(
+      `SELECT message_id, COUNT(*)::int AS cnt
+       FROM cdp_inapp_impressions
+       WHERE company_id = $1::uuid
+         AND message_id = ANY($2::uuid[])
+         AND event_type = 'impression'
+         AND ${userFilterSql}
+       GROUP BY message_id`,
+      [input.companyId, limitedMessages.map((m) => m.id), checkUserKey]
+    );
+    const userCountMap = new Map<string, number>();
+    limitR.rows.forEach((r: any) => userCountMap.set(String(r.message_id), Number(r.cnt || 0)));
+    messages = messages.filter((m) => {
+      if (m.maxDisplaysPerUser === null || m.maxDisplaysPerUser <= 0) return true;
+      const userCount = userCountMap.get(m.id) || 0;
+      return userCount < m.maxDisplaysPerUser;
+    });
+  }
+
+  // Step 7 — once_per_session 클라이언트 hint (옛 영역 유지)
+  if (input.seenMessageIds && input.seenMessageIds.length > 0) {
+    const seenSet = new Set(input.seenMessageIds);
+    messages = messages.filter((m) => m.displayFrequency !== 'once_per_session' || !seenSet.has(m.id));
+  }
+
+  return messages;
 }

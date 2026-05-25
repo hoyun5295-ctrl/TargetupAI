@@ -123,6 +123,38 @@
       ```
       DB 마이그레이션 미실행 시 = 503 + 사용자 친화 안내. 500 에러 노출 X.
     </RULE>
+
+    <RULE id="codex_review_after_code_change" priority="HIGHEST">
+      ★ D215+ 신규 — OpenAI 공식 Codex Plugin 이중 검증 영구 룰 (Harold 명시 2026-05-25).
+      한줄로 작업 종결 직전 = Codex Plugin (`codex-plugin-cc`) 의무 호출. 본 AI + Codex 이중 검증 = 6,000사+ 운영 안전망 + D214+ 자기 강화 루프 사고 차단.
+      [호출 의무 단계]
+      - `/codex:review` — Frontend/Backend 코드 신설/정정 후 (5분+ 작업) 의무
+      - `/codex:adversarial-review` — DB 마이그레이션 / 돈·환불·balance / AI Operator 신규 기능 / 큰 영구 룰 의무
+      - `/codex:rescue` — 본 AI 디버깅 막힘 / root cause 안 보임 / 3회+ fix 실패 / 사이트 다운 호출 의무
+      [흐름] 본 AI 작성 → tsc 0 + 자가 grep 통과 → Codex 호출 → 이슈 발견 시 정정 (최대 5라운드) → 표준 종료 멘트
+      [면제] 단순 typo / 주석 정정 / 메모리 / SCHEMA.md / STATUS.md / Harold 직접 명시 면제 작업
+      [설치] Harold 직접 4단계: `/plugin marketplace add openai/codex-plugin-cc` → `/plugin install codex@openai-codex` → `/reload-plugins` → `/codex:setup`
+      [상세 룰] `memory/feedback_default_codex_review_workflow.md` 참조
+    </RULE>
+
+    <RULE id="superpowers_workflow_default">
+      ★ D215+ 신규 — Superpowers Plugin 14 skills 작업 흐름 영구 룰 (Harold 명시 2026-05-25).
+      Harold settings.json `superpowers@claude-plugins-official` 활성 + 본 세션 자동 로드 14건 (https://github.com/obra/superpowers).
+      [흐름 의무 매핑]
+      - 큰 작업 진입 직전 = `superpowers:brainstorming` (creative work 의도/요구사항/디자인 의논)
+      - 작업 설계 = `superpowers:writing-plans` (multi-step Plan 작성)
+      - Plan 실행 = `superpowers:executing-plans` (separate session) 또는 `superpowers:subagent-driven-development` (본 세션 분할)
+      - 신규 기능 / 버그 fix = `superpowers:test-driven-development` (RED-GREEN-REFACTOR)
+      - 완료 보고 직전 = `superpowers:verification-before-completion` (실제 verify 명령어 실행 후 evidence 출력 의무)
+      - 디버깅 / 오류 = `superpowers:systematic-debugging` (root cause 추적)
+      - 2건+ 독립 task = `superpowers:dispatching-parallel-agents` (병렬 sub-agent)
+      - worktree 격리 = `superpowers:using-git-worktrees`
+      - 작업 종결 + merge/PR = `superpowers:finishing-a-development-branch`
+      - 큰 작업 코드 리뷰 = `superpowers:requesting-code-review` + `receiving-code-review`
+      - 신규 skill 작성 = `superpowers:writing-skills`
+      자가 검증: 매 큰 작업 진입 직전 = "어떤 superpowers skill 호출 의무?" 자가 질의 의무.
+      [상세 룰] `memory/feedback_default_superpowers_workflow.md` 참조
+    </RULE>
   </ACTION_FORCING_RULES>
 
   <MANDATORY_CHECKLIST>

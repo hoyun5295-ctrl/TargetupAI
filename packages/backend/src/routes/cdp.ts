@@ -7,7 +7,7 @@
  *
  * 운영 endpoint:
  *   POST /api/cdp/identify       — 회원 식별/upsert
- *   POST /api/cdp/event          — 행동 이벤트 박음
+ *   POST /api/cdp/event          — 행동 이벤트 기록
  *   POST /api/cdp/order          — 주문 sync + RFM 자동 갱신
  *   POST /api/cdp/bulk-import    — 초기 마이그레이션 (최대 1,000건/요청)
  *
@@ -18,13 +18,17 @@
  */
 
 import { Router, Request, Response, json } from 'express';
+import multer from 'multer';
+import path from 'path';
+import fs from 'fs';
+import { v4 as uuidv4 } from 'uuid';
 import { authenticate } from '../middlewares/auth';
 import { requireCdpApiKey, recordCdpApiCall, issueCdpKeyPair, isCdpEnabledForPlan } from '../utils/cdp-auth';
 import { identifyCustomer } from '../utils/cdp-identity';
 import { trackEvent, getRecentEvents } from '../utils/cdp-events';
 import { syncOrder, bulkImport } from '../utils/cdp-orders';
-// ★ D214+ (2026-05-24) CDP 진단 + multi-source 융합 매트릭스 신규 CT 6건
-// (query 영역 = 옛 영역 안 line 67 영역 정합 — duplicate import X)
+// ★ D214+ (2026-05-24) CDP 진단 + multi-source 융합 신규 CT 6건
+// (query import = line 67 영역에서 단일 등록 — duplicate import X)
 import { buildCdpDiagnostics, buildCdpFunnel, buildCdpTimeline24h } from '../utils/cdp-diagnostics';
 import { buildCdpActiveCustomers } from '../utils/cdp-active-customers';
 import { groupCustomersByChannel, getCompanyChannelCapabilities } from '../utils/source-aware-channel-selector';
@@ -60,10 +64,30 @@ import {
   updateInAppMessage,
   deleteInAppMessage,
   getActiveMessagesForCustomer,
+  getActiveMessagesForCustomerV2,
   trackImpression,
   getMessageStats,
   getCompanyInAppStats,
 } from '../utils/inapp-message';
+// ★ D215+ (2026-05-25) 인앱 메시지 압도적 강화 CT-77~84
+import { generateInAppMessagePackage, listQuickStartCards } from '../utils/inapp-ai-generator';
+import { countSegment, describeSegment } from '../utils/inapp-segment-matcher';
+import { buildPreviewCustomers, renderInAppMessage, listAvailableVariables } from '../utils/inapp-personalization';
+import { createVariant, listVariantsWithStats, declareWinnerIfReady } from '../utils/inapp-variant-optimizer';
+import { explainInAppMessage } from '../utils/inapp-explainer';
+import {
+  buildInAppFunnel,
+  buildHourlyDistribution,
+  buildHeatmap,
+  buildDeviceBreakdown,
+  buildTopMessages,
+  buildInAppOverview,
+} from '../utils/inapp-funnel-stats';
+import {
+  quickActionAIRefine,
+  quickActionTimeOptimize,
+  quickActionSegmentRefine,
+} from '../utils/inapp-quick-action';
 import { query } from '../config/database';
 
 const router = Router();
@@ -238,7 +262,7 @@ router.post('/journey-variants/:variantId/track', requireCdpApiKey, async (req: 
 
 // ════════════════════════════════════════════════════════════════════
 // ★ D178 (2026-05-19) — 자체 호스팅 자사몰 Webhook (HMAC-SHA256 서명 인증)
-//   Harold 명시 — "카페24보다 자체 호스팅 자사몰 위주". 회사 자체 자사몰이 webhook_secret 박고 POST 박음.
+//   Harold 명시 — "카페24보다 자체 호스팅 자사몰 위주". 회사 자체 자사몰이 webhook_secret 발급 후 POST 호출.
 //   인증: X-Hanjullo-Company-Id 헤더 + X-Hanjullo-Signature (HMAC-SHA256 hex/base64)
 // ════════════════════════════════════════════════════════════════════
 
@@ -337,14 +361,14 @@ router.post(
 // ★ D175-A — Web Push 외부 API (SDK 호출, requireCdpApiKey 인증)
 // ════════════════════════════════════════════════════════════════════
 
-// GET /api/cdp/push/vapid-public-key — SDK가 구독 박을 때 활용 (인증 불요, 공개 키)
+// GET /api/cdp/push/vapid-public-key — SDK가 구독 진행 시 활용 (인증 불요, 공개 키)
 router.get('/push/vapid-public-key', (_req: Request, res: Response) => {
   const key = getVapidPublicKey();
   if (!key) return res.status(503).json({ success: false, error: 'VAPID 환경변수가 설정되지 않았습니다.' });
   return res.json({ success: true, vapid_public_key: key });
 });
 
-// POST /api/cdp/push/subscribe — SDK가 사용자 구독 박음
+// POST /api/cdp/push/subscribe — SDK가 사용자 구독 등록
 router.post('/push/subscribe', requireCdpApiKey, async (req: Request, res: Response) => {
   const cdpAuth = req.cdpAuth!;
   try {
@@ -409,6 +433,7 @@ router.post('/push/unsubscribe', requireCdpApiKey, async (req: Request, res: Res
 // ════════════════════════════════════════════════════════════════════
 
 // GET /api/cdp/inapp/active — SDK가 페이지 로드 시 호출, 현재 사용자에게 표시할 메시지 반환
+// ★ D215+ V2 (2026-05-25) — 시간대 + 세그먼트 + variant 통합 검증 (CT-78 + CT-80 + CT-82)
 router.get('/inapp/active', requireCdpApiKey, async (req: Request, res: Response) => {
   const cdpAuth = req.cdpAuth!;
   try {
@@ -418,7 +443,7 @@ router.get('/inapp/active', requireCdpApiKey, async (req: Request, res: Response
     const seenRaw = req.query.seen ? String(req.query.seen) : '';
     const seenMessageIds = seenRaw ? seenRaw.split(',').filter(Boolean) : [];
 
-    const messages = await getActiveMessagesForCustomer({
+    const messages = await getActiveMessagesForCustomerV2({
       companyId: cdpAuth.companyId,
       triggerEvent: trigger,
       externalId,
@@ -429,16 +454,26 @@ router.get('/inapp/active', requireCdpApiKey, async (req: Request, res: Response
     return res.json({ success: true, messages });
   } catch (err: any) {
     console.error('[CDP /inapp/active] 오류:', err);
+    const msg = err?.message || '';
+    if (msg.includes('column') && msg.includes('does not exist')) {
+      await recordCdpApiCall(cdpAuth.companyId, 'event', 503);
+      return res.status(503).json({
+        success: false,
+        error: 'DB 마이그레이션 필요 — 운영자에게 cdp_inapp_messages ALTER 실행 요청 의무',
+        code: 'DB_MIGRATION_PENDING',
+      });
+    }
     await recordCdpApiCall(cdpAuth.companyId, 'event', 500);
     return res.status(500).json({ success: false, error: err?.message || '조회 실패' });
   }
 });
 
-// POST /api/cdp/inapp/track — SDK가 impression/click/dismiss 박음
+// POST /api/cdp/inapp/track — SDK가 impression/click/dismiss 기록
+// ★ D215+ (2026-05-25) — button_id / dwell_seconds 신규 컬럼 처리 + 503 안전망
 router.post('/inapp/track', requireCdpApiKey, async (req: Request, res: Response) => {
   const cdpAuth = req.cdpAuth!;
   try {
-    const { message_id, event_type, external_id, anonymous_id } = req.body;
+    const { message_id, event_type, external_id, anonymous_id, button_id, dwell_seconds } = req.body;
     if (!message_id || !event_type) {
       await recordCdpApiCall(cdpAuth.companyId, 'event', 400);
       return res.status(400).json({ success: false, error: 'message_id와 event_type은 필수입니다.' });
@@ -463,11 +498,22 @@ router.post('/inapp/track', requireCdpApiKey, async (req: Request, res: Response
       customerId,
       identityLinkId,
       anonymousId: anonymous_id || null,
+      buttonId: button_id ? String(button_id).slice(0, 50) : null,
+      dwellSeconds: typeof dwell_seconds === 'number' && dwell_seconds >= 0 ? Math.floor(dwell_seconds) : null,
     });
     await recordCdpApiCall(cdpAuth.companyId, 'event', 200);
     return res.json({ success: true });
   } catch (err: any) {
     console.error('[CDP /inapp/track] 오류:', err);
+    const msg = err?.message || '';
+    if (msg.includes('column') && msg.includes('does not exist')) {
+      await recordCdpApiCall(cdpAuth.companyId, 'event', 503);
+      return res.status(503).json({
+        success: false,
+        error: 'DB 마이그레이션 필요 — 운영자에게 cdp_inapp_impressions ALTER 실행 요청 의무',
+        code: 'DB_MIGRATION_PENDING',
+      });
+    }
     await recordCdpApiCall(cdpAuth.companyId, 'event', 500);
     return res.status(500).json({ success: false, error: err?.message || 'track 처리 실패' });
   }
@@ -661,7 +707,7 @@ router.get('/inapp', async (req: Request, res: Response) => {
   }
 });
 
-// ★ D210+ Phase 3 B-4 (2026-05-23 Harold 명시): 회사 전체 인앱 메시지 통계 매트릭스 (CTR + funnel)
+// ★ D210+ Phase 3 B-4 (2026-05-23 Harold 명시): 회사 전체 인앱 메시지 통계 (CTR + funnel)
 //   GET /api/cdp/inapp/stats — 메시지별 impression / click / dismiss / CTR / dismissRate / 고유 인상
 router.get('/inapp/stats', async (req: Request, res: Response) => {
   try {
@@ -731,7 +777,392 @@ router.delete('/inapp/:id', async (req: Request, res: Response) => {
   }
 });
 
-// GET /api/cdp/providers — 자사몰 wrapper 등록 매트릭스 (CdpSettingsPage 표시용)
+// ════════════════════════════════════════════════════════════════════
+// ★ D215+ (2026-05-25) 인앱 메시지 압도적 강화 — 신규 endpoint 12건
+//   설계서 §5 명시 8건 + Frontend 통합 보조 4건 (overview / top-messages / quick-start-cards / available-variables)
+//   모든 endpoint = 회사 admin 권한 + BUSINESS+ 게이팅 + DB ALTER 503 안전망
+// ════════════════════════════════════════════════════════════════════
+
+// 인앱 이미지 업로드 multer setup
+const INAPP_IMAGE_BASE = process.env.INAPP_IMAGE_PATH || path.resolve('./uploads/inapp');
+const inappImageUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: {
+    fileSize: 2 * 1024 * 1024, // 2MB (인앱 이미지 = MMS 대비 크기 여유)
+    files: 1,
+  },
+  fileFilter: (_req, file, cb) => {
+    const ext = path.extname(file.originalname).toLowerCase();
+    const mime = file.mimetype.toLowerCase();
+    const allowedExts = ['.jpg', '.jpeg', '.png', '.gif', '.webp'];
+    const allowedMimes = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp'];
+    if (allowedExts.includes(ext) && allowedMimes.includes(mime)) {
+      cb(null, true);
+    } else {
+      cb(new Error('이미지 파일 (jpg/png/gif/webp)만 업로드 가능합니다.'));
+    }
+  },
+});
+
+// 회사 admin 권한 + BUSINESS+ 게이팅 공통 헬퍼
+async function ensureInAppAdmin(req: Request, res: Response): Promise<{ companyId: string; userId: string } | null> {
+  const companyId = req.user?.companyId;
+  const userId = req.user?.userId;
+  const userType = req.user?.userType;
+  if (!companyId || !userId) {
+    res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+    return null;
+  }
+  if (userType !== 'company_admin') {
+    res.status(403).json({ success: false, error: '회사 관리자 권한이 필요합니다.' });
+    return null;
+  }
+  const cdpEnabled = await isCdpEnabledForPlan(companyId);
+  if (!cdpEnabled) {
+    res.status(403).json({ success: false, error: '인앱 메시지는 비즈니스 요금제부터 이용 가능합니다.', code: 'PLAN_FEATURE_LOCKED' });
+    return null;
+  }
+  return { companyId, userId };
+}
+
+// DB ALTER 503 분기 공통 헬퍼 (db_alter_safety_net 룰)
+function handleDbMigrationError(err: any, res: Response, tableName: string): boolean {
+  const msg = err?.message || '';
+  if (msg.includes('column') && msg.includes('does not exist')) {
+    res.status(503).json({
+      success: false,
+      error: `DB 마이그레이션 필요 — 운영자에게 ${tableName} ALTER 실행 요청 의무`,
+      code: 'DB_MIGRATION_PENDING',
+    });
+    return true;
+  }
+  return false;
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// 1. POST /api/cdp/inapp/ai-generate — 자연어 → 완전 메시지 자동 생성 (CT-77)
+// ─────────────────────────────────────────────────────────────────────
+router.post('/inapp/ai-generate', async (req: Request, res: Response) => {
+  const auth = await ensureInAppAdmin(req, res);
+  if (!auth) return;
+  try {
+    const { objective, templateHint } = req.body;
+    const pkg = await generateInAppMessagePackage({
+      companyId: auth.companyId,
+      createdBy: auth.userId,
+      objective,
+      templateHint,
+    });
+    return res.json({ success: true, package: pkg });
+  } catch (err: any) {
+    console.error('[CDP /inapp/ai-generate] 오류:', err);
+    if (handleDbMigrationError(err, res, 'cdp_inapp_messages')) return;
+    return res.status(500).json({ success: false, error: err?.message || 'AI 생성 실패' });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────
+// 2. POST /api/cdp/inapp/explain — CTR 영향 요인 + 개선 추천 (CT-81)
+// ─────────────────────────────────────────────────────────────────────
+router.post('/inapp/explain', async (req: Request, res: Response) => {
+  const auth = await ensureInAppAdmin(req, res);
+  if (!auth) return;
+  try {
+    const { message_id } = req.body;
+    if (!message_id) return res.status(400).json({ success: false, error: 'message_id 필수' });
+    const result = await explainInAppMessage(auth.companyId, String(message_id));
+    return res.json({ success: true, result });
+  } catch (err: any) {
+    console.error('[CDP /inapp/explain] 오류:', err);
+    if (handleDbMigrationError(err, res, 'cdp_inapp_messages')) return;
+    return res.status(500).json({ success: false, error: err?.message || 'Explain 실패' });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────
+// 3. POST /api/cdp/inapp/quick-action — 1-click 액션 (CT-84)
+// ─────────────────────────────────────────────────────────────────────
+router.post('/inapp/quick-action', async (req: Request, res: Response) => {
+  const auth = await ensureInAppAdmin(req, res);
+  if (!auth) return;
+  try {
+    const { message_id, action_type } = req.body;
+    if (!message_id || !action_type) {
+      return res.status(400).json({ success: false, error: 'message_id + action_type 필수' });
+    }
+    let result;
+    if (action_type === 'ai_refine') {
+      result = await quickActionAIRefine(auth.companyId, String(message_id), auth.userId);
+    } else if (action_type === 'time_optimize') {
+      result = await quickActionTimeOptimize(auth.companyId, String(message_id));
+    } else if (action_type === 'segment_refine') {
+      result = await quickActionSegmentRefine(auth.companyId, String(message_id));
+    } else {
+      return res.status(400).json({ success: false, error: `허용되지 않는 action_type: ${action_type}` });
+    }
+    return res.json({ success: true, result });
+  } catch (err: any) {
+    console.error('[CDP /inapp/quick-action] 오류:', err);
+    if (handleDbMigrationError(err, res, 'cdp_inapp_messages')) return;
+    return res.status(500).json({ success: false, error: err?.message || 'Quick action 실패' });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────
+// 4. GET /api/cdp/inapp/preview/:id — 실시간 미리보기 (CT-79 + Liquid 치환)
+// ─────────────────────────────────────────────────────────────────────
+router.get('/inapp/preview/:id', async (req: Request, res: Response) => {
+  const auth = await ensureInAppAdmin(req, res);
+  if (!auth) return;
+  try {
+    const messageId = req.params.id;
+    const msgR = await query(
+      `SELECT id, title, body, action_url, action_label, position, background_color, text_color,
+              trigger_event, display_frequency, start_at, end_at, status,
+              template, image_url, buttons, segment_conditions, trigger_conditions,
+              personalization_vars, parent_message_id, variant_weight,
+              auto_dismiss_seconds, max_displays_per_user,
+              send_start_hour, send_end_hour, allowed_weekdays, locale_variants, animation
+       FROM cdp_inapp_messages
+       WHERE id = $1::uuid AND company_id = $2::uuid LIMIT 1`,
+      [messageId, auth.companyId]
+    );
+    if (msgR.rows.length === 0) return res.status(404).json({ success: false, error: '메시지를 찾을 수 없습니다.' });
+    const row = msgR.rows[0];
+
+    const previewCustomers = await buildPreviewCustomers(auth.companyId);
+
+    // 각 customer별 Liquid 변수 치환 렌더링
+    const renderedPreviews = previewCustomers.map((pc) => {
+      const generatedMessage = {
+        title: row.title,
+        body: row.body,
+        template: row.template || row.position || 'top_banner',
+        image_url: row.image_url,
+        buttons: Array.isArray(row.buttons) ? row.buttons : [],
+        background_color: row.background_color,
+        text_color: row.text_color,
+        segment_conditions: row.segment_conditions || {},
+        trigger_conditions: row.trigger_conditions || { event: 'page_load' },
+        personalization_vars: row.personalization_vars || [],
+        display_frequency: row.display_frequency,
+        auto_dismiss_seconds: row.auto_dismiss_seconds,
+        max_displays_per_user: row.max_displays_per_user,
+        send_start_hour: row.send_start_hour,
+        send_end_hour: row.send_end_hour,
+        allowed_weekdays: row.allowed_weekdays || [0, 1, 2, 3, 4, 5, 6],
+        animation: row.animation || 'fade',
+        is_ad: false,
+      };
+      const rendered = renderInAppMessage(generatedMessage as any, pc.customer);
+      return {
+        customerLabel: pc.label,
+        customerSample: pc.customer,
+        rendered,
+      };
+    });
+
+    return res.json({
+      success: true,
+      message: row,
+      previews: renderedPreviews,
+      availableVariables: listAvailableVariables(),
+    });
+  } catch (err: any) {
+    console.error('[CDP /inapp/preview] 오류:', err);
+    if (handleDbMigrationError(err, res, 'cdp_inapp_messages')) return;
+    return res.status(500).json({ success: false, error: err?.message || '미리보기 실패' });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────
+// 5. GET /api/cdp/inapp/funnel-stats/:id — funnel + 시간대 + 히트맵 + 디바이스 (CT-83)
+// ─────────────────────────────────────────────────────────────────────
+router.get('/inapp/funnel-stats/:id', async (req: Request, res: Response) => {
+  const auth = await ensureInAppAdmin(req, res);
+  if (!auth) return;
+  try {
+    const messageId = req.params.id;
+    const [funnel, hourly, heatmap, device] = await Promise.all([
+      buildInAppFunnel(auth.companyId, messageId),
+      buildHourlyDistribution(auth.companyId, messageId),
+      buildHeatmap(auth.companyId, messageId),
+      buildDeviceBreakdown(auth.companyId, messageId),
+    ]);
+    return res.json({
+      success: true,
+      funnel,
+      hourly,
+      heatmap,
+      device,
+    });
+  } catch (err: any) {
+    console.error('[CDP /inapp/funnel-stats] 오류:', err);
+    if (handleDbMigrationError(err, res, 'cdp_inapp_impressions')) return;
+    return res.status(500).json({ success: false, error: err?.message || 'Funnel 통계 실패' });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────
+// 6. POST /api/cdp/inapp/segment-preview — 세그먼트 매칭 customer 수 (CT-78)
+// ─────────────────────────────────────────────────────────────────────
+router.post('/inapp/segment-preview', async (req: Request, res: Response) => {
+  const auth = await ensureInAppAdmin(req, res);
+  if (!auth) return;
+  try {
+    const { segment_conditions } = req.body;
+    if (!segment_conditions || typeof segment_conditions !== 'object') {
+      return res.status(400).json({ success: false, error: 'segment_conditions 필수 (object)' });
+    }
+    const count = await countSegment(auth.companyId, segment_conditions);
+    const description = describeSegment(segment_conditions);
+    return res.json({ success: true, count, description });
+  } catch (err: any) {
+    console.error('[CDP /inapp/segment-preview] 오류:', err);
+    if (handleDbMigrationError(err, res, 'customers')) return;
+    return res.status(500).json({ success: false, error: err?.message || '세그먼트 카운트 실패' });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────
+// 7. POST /api/cdp/inapp/variant — A/B variant 생성 / 목록 / Winner 자동 판정 (CT-80)
+// ─────────────────────────────────────────────────────────────────────
+router.post('/inapp/variant', async (req: Request, res: Response) => {
+  const auth = await ensureInAppAdmin(req, res);
+  if (!auth) return;
+  try {
+    const { action, parent_message_id, ...variantData } = req.body;
+    if (action === 'create') {
+      if (!parent_message_id || !variantData.title || !variantData.body) {
+        return res.status(400).json({ success: false, error: 'parent_message_id + title + body 필수' });
+      }
+      const newId = await createVariant(auth.companyId, auth.userId, {
+        parentMessageId: String(parent_message_id),
+        title: String(variantData.title),
+        body: String(variantData.body),
+        template: variantData.template,
+        image_url: variantData.image_url,
+        buttons: variantData.buttons,
+        background_color: variantData.background_color,
+        text_color: variantData.text_color,
+        animation: variantData.animation,
+        variant_weight: variantData.variant_weight,
+      });
+      return res.json({ success: true, variantId: newId });
+    } else if (action === 'list') {
+      if (!parent_message_id) return res.status(400).json({ success: false, error: 'parent_message_id 필수' });
+      const stats = await listVariantsWithStats(auth.companyId, String(parent_message_id));
+      return res.json({ success: true, variants: stats });
+    } else if (action === 'declare_winner') {
+      if (!parent_message_id) return res.status(400).json({ success: false, error: 'parent_message_id 필수' });
+      const result = await declareWinnerIfReady(auth.companyId, String(parent_message_id));
+      return res.json({ success: true, result });
+    } else {
+      return res.status(400).json({ success: false, error: `허용되지 않는 action: ${action}` });
+    }
+  } catch (err: any) {
+    console.error('[CDP /inapp/variant] 오류:', err);
+    if (handleDbMigrationError(err, res, 'cdp_inapp_messages')) return;
+    return res.status(500).json({ success: false, error: err?.message || 'Variant 처리 실패' });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────
+// 8. POST /api/cdp/inapp/upload-image — 이미지 업로드 (multer)
+// ─────────────────────────────────────────────────────────────────────
+router.post('/inapp/upload-image', (req: any, res: any) => {
+  const uploadHandler = inappImageUpload.single('image');
+  uploadHandler(req, res, async (err: any) => {
+    if (err) {
+      if (err.code === 'LIMIT_FILE_SIZE') {
+        return res.status(400).json({ success: false, error: '이미지 크기는 2MB 이하여야 합니다.' });
+      }
+      return res.status(400).json({ success: false, error: err.message || '이미지 업로드 실패' });
+    }
+    const auth = await ensureInAppAdmin(req, res);
+    if (!auth) return;
+    const file = req.file as Express.Multer.File | undefined;
+    if (!file) return res.status(400).json({ success: false, error: '이미지 파일 필수' });
+    try {
+      const companyDir = path.join(INAPP_IMAGE_BASE, auth.companyId);
+      if (!fs.existsSync(companyDir)) fs.mkdirSync(companyDir, { recursive: true });
+      const ext = path.extname(file.originalname).toLowerCase();
+      const filename = `${uuidv4()}${ext}`;
+      const filepath = path.join(companyDir, filename);
+      fs.writeFileSync(filepath, file.buffer);
+      const publicUrl = `/uploads/inapp/${auth.companyId}/${filename}`;
+      return res.json({ success: true, url: publicUrl, filename, size: file.size });
+    } catch (e: any) {
+      console.error('[CDP /inapp/upload-image] 오류:', e);
+      return res.status(500).json({ success: false, error: e?.message || '이미지 저장 실패' });
+    }
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────
+// 9. GET /api/cdp/inapp/quick-start-cards — 빠른 시작 7 시나리오 (CT-77)
+// ─────────────────────────────────────────────────────────────────────
+router.get('/inapp/quick-start-cards', async (req: Request, res: Response) => {
+  const auth = await ensureInAppAdmin(req, res);
+  if (!auth) return;
+  try {
+    const cards = listQuickStartCards();
+    return res.json({ success: true, cards });
+  } catch (err: any) {
+    console.error('[CDP /inapp/quick-start-cards] 오류:', err);
+    return res.status(500).json({ success: false, error: err?.message || '빠른 시작 카드 조회 실패' });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────
+// 10. GET /api/cdp/inapp/available-variables — Liquid 변수 드롭다운 (CT-79)
+// ─────────────────────────────────────────────────────────────────────
+router.get('/inapp/available-variables', async (req: Request, res: Response) => {
+  const auth = await ensureInAppAdmin(req, res);
+  if (!auth) return;
+  try {
+    const variables = listAvailableVariables();
+    return res.json({ success: true, variables });
+  } catch (err: any) {
+    console.error('[CDP /inapp/available-variables] 오류:', err);
+    return res.status(500).json({ success: false, error: err?.message || '변수 목록 조회 실패' });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────
+// 11. GET /api/cdp/inapp/overview — 회사 전체 요약 5 metric + 격차 (CT-83)
+// ─────────────────────────────────────────────────────────────────────
+router.get('/inapp/overview', async (req: Request, res: Response) => {
+  const auth = await ensureInAppAdmin(req, res);
+  if (!auth) return;
+  try {
+    const overview = await buildInAppOverview(auth.companyId);
+    return res.json({ success: true, overview });
+  } catch (err: any) {
+    console.error('[CDP /inapp/overview] 오류:', err);
+    if (handleDbMigrationError(err, res, 'cdp_inapp_messages')) return;
+    return res.status(500).json({ success: false, error: err?.message || 'Overview 조회 실패' });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────
+// 12. GET /api/cdp/inapp/top-messages — Top CTR 메시지 (CT-83)
+// ─────────────────────────────────────────────────────────────────────
+router.get('/inapp/top-messages', async (req: Request, res: Response) => {
+  const auth = await ensureInAppAdmin(req, res);
+  if (!auth) return;
+  try {
+    const limit = Math.min(Math.max(parseInt(String(req.query.limit || '10'), 10) || 10, 1), 50);
+    const top = await buildTopMessages(auth.companyId, limit);
+    return res.json({ success: true, messages: top });
+  } catch (err: any) {
+    console.error('[CDP /inapp/top-messages] 오류:', err);
+    if (handleDbMigrationError(err, res, 'cdp_inapp_messages')) return;
+    return res.status(500).json({ success: false, error: err?.message || 'Top 메시지 조회 실패' });
+  }
+});
+
+// GET /api/cdp/providers — 자사몰 wrapper 등록 목록 (CdpSettingsPage 표시용)
 router.get('/providers', async (_req: Request, res: Response) => {
   try {
     const providers = listProvidersForUI();

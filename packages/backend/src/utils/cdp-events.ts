@@ -3,9 +3,9 @@
  *
  * 🎯 목적
  *   자사몰 → 한줄로AI 사용자 행동 이벤트 (view/cart/checkout/purchase/wishlist) 수집.
- *   - cdp_events 테이블에 박힘
- *   - identity_link 박힌 이벤트는 customer_id 자동 연결
- *   - 비회원 이벤트도 anonymous link로 박혀서 추후 회원 가입 시 자동 연결
+ *   - cdp_events 테이블에 저장됨
+ *   - identity_link 매핑된 이벤트는 customer_id 자동 연결
+ *   - 비회원 이벤트도 anonymous link로 저장되어 추후 회원 가입 시 자동 연결
  *
  * 📋 표준 event_name (Braze/Segment 정합)
  *   - page_view: 사용자가 페이지 방문
@@ -13,8 +13,8 @@
  *   - cart_remove: 장바구니에서 상품 제거
  *   - cart_view: 장바구니 페이지 진입
  *   - checkout_start: 결제 페이지 진입
- *   - checkout_complete: 결제 완료 (purchase 이벤트와 분리, Cafe24는 둘 다 박음)
- *   - purchase: 구매 완료 (cdp-orders.ts에서도 박음, 이벤트는 trigger용)
+ *   - checkout_complete: 결제 완료 (purchase 이벤트와 분리, Cafe24는 둘 다 기록)
+ *   - purchase: 구매 완료 (cdp-orders.ts에서도 기록, 이벤트는 trigger용)
  *   - wishlist_add: 위시리스트 담음
  *   - wishlist_remove: 위시리스트 제거
  *   - product_view: 상품 페이지 진입
@@ -22,7 +22,7 @@
  *   - custom_*: 자사몰 자체 정의 (custom_ 접두사 필수)
  *
  * ⛔ 영구 원칙
- *   - properties JSONB는 최대 10KB (대용량 박지 X)
+ *   - properties JSONB는 최대 10KB (대용량 저장 X)
  *   - event_name은 표준 또는 'custom_' 접두사만 허용
  *   - source는 cdp_identity_links.source와 일치 필수
  */
@@ -32,6 +32,8 @@ import { ensureAnonymousLink } from './cdp-identity';
 // ★ D214+ (2026-05-24) Unified Customer Profile 정합
 import { fuseEventToCustomer } from './customer-cdp-fusion';
 import { recomputeProfile } from './unified-customer-profile';
+// ★ D215+ (2026-05-25) 인앱 메시지 트리거 매칭 fire-and-forget 로깅 (CT-82)
+import { listInAppTriggerCandidates } from './inapp-trigger-engine';
 
 // ═══════════════════════════════════════════════════════════
 // 타입 + 표준 이벤트
@@ -58,12 +60,12 @@ export type StandardEventName = typeof STANDARD_EVENT_NAMES[number];
 export interface TrackEventInput {
   source: string;                          // 'cafe24' / 'shopify' / 'custom_sdk' 등
   eventName: string;                       // 표준 또는 'custom_*'
-  // 회원 식별 (둘 중 하나 필수, 둘 다 박으면 externalId 우선)
+  // 회원 식별 (둘 중 하나 필수, 둘 다 전달되면 externalId 우선)
   externalId?: string;                     // 자사몰 회원 ID (회원 이벤트)
   anonymousId?: string;                    // 비회원 추적 ID (브라우저 cookie 등)
   // 이벤트 데이터
   properties?: Record<string, any>;        // 최대 10KB
-  occurredAt?: string;                     // ISO datetime (미박힘 시 NOW)
+  occurredAt?: string;                     // ISO datetime (미설정 시 NOW)
 }
 
 export interface TrackEventResult {
@@ -119,9 +121,9 @@ export function validateProperties(properties: any): { ok: boolean; error?: stri
 
 /**
  * CDP 이벤트 1건 INSERT.
- * - externalId 박힘: 기존 link 매칭 → customer_id 박힘
- * - anonymousId 박힘 + externalId 미박힘: anonymous link 박음 (customer_id NULL)
- * - 둘 다 미박힘: 오류
+ * - externalId 전달: 기존 link 매칭 → customer_id 매핑
+ * - anonymousId 전달 + externalId 미전달: anonymous link 생성 (customer_id NULL)
+ * - 둘 다 미전달: 오류
  */
 export async function trackEvent(
   companyId: string,
@@ -159,11 +161,11 @@ export async function trackEvent(
         [identityLinkId]
       );
     } else {
-      // 비식별된 externalId — anonymous link 박음 (회원가입 트래킹 흐름 정합)
+      // 비식별된 externalId — anonymous link 생성 (회원가입 트래킹 흐름 일치)
       identityLinkId = await ensureAnonymousLink(companyId, input.source, input.externalId);
     }
   } else if (input.anonymousId) {
-    // 비회원 추적 — anonymous_<id> 형식으로 link 박음
+    // 비회원 추적 — anonymous_<id> 형식으로 link 생성
     const anonExtId = `anon_${input.anonymousId}`;
     identityLinkId = await ensureAnonymousLink(companyId, input.source, anonExtId);
   } else {
@@ -196,7 +198,7 @@ export async function trackEvent(
     ]
   );
 
-  // ★ D214+ (2026-05-24) customer-level union 매트릭스 (CT-72 + CT-71)
+  // ★ D214+ (2026-05-24) customer-level union 통합 (CT-72 + CT-71)
   //   cart_add / wishlist_add / page_view 영역 → customers 컬럼 union (fuseEventToCustomer)
   //   unified profile 재계산 (recomputeProfile — fire-and-forget)
   if (customerId) {
@@ -205,6 +207,25 @@ export async function trackEvent(
     });
     void recomputeProfile(companyId, customerId).catch((err) => {
       console.warn('[CDP Events] recomputeProfile 실패:', err);
+    });
+  }
+
+  // ★ D215+ (2026-05-25) 인앱 메시지 트리거 매칭 후보 fire-and-forget 로깅 (CT-82)
+  //   실제 인앱 표시는 SDK가 GET /inapp/active 호출 시 수행. 본 영역은 매칭 후보 수 로깅만.
+  //   대상 이벤트: cart_add / cart_view / page_view / checkout_start 4종 (인앱 트리거 표준).
+  const INAPP_TRIGGER_EVENTS = new Set([
+    'cart_add', 'cart.add',
+    'cart_view', 'cart.view',
+    'page_view', 'page.view',
+    'checkout_start', 'checkout.start',
+  ]);
+  if (INAPP_TRIGGER_EVENTS.has(input.eventName)) {
+    void listInAppTriggerCandidates(companyId, input.eventName).then((candidateIds) => {
+      if (candidateIds.length > 0) {
+        console.log(`[CDP Events] 인앱 트리거 매칭 후보 ${candidateIds.length}건 (event=${input.eventName}, companyId=${companyId})`);
+      }
+    }).catch((err) => {
+      console.warn('[CDP Events] listInAppTriggerCandidates 실패:', err);
     });
   }
 
