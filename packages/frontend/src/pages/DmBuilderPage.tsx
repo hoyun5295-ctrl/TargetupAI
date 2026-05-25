@@ -82,6 +82,9 @@ export default function DmBuilderPage() {
   // ★ D216+ 자동 생성 직후 1-click floating bar (편집 모드 안 만족 영역 강화)
   const [showAiFloatingBar, setShowAiFloatingBar] = useState(false);
   const [floatingActionLoading, setFloatingActionLoading] = useState<string | null>(null);
+  // ★ D216+ 목록 페이징 (Harold 명시 2026-05-25 — 가로 3개 × 2열 = 6개 영역)
+  const DM_PAGE_SIZE = 6;
+  const [currentPage, setCurrentPage] = useState(1);
 
   // ★ D216+ 키보드 단축키 활성 (편집 모드 한정)
   useDmKeyboardShortcuts({ enabled: mode === 'edit' });
@@ -92,6 +95,7 @@ export default function DmBuilderPage() {
       const res = await api.get('/dm');
       const items = Array.isArray(res.data) ? res.data : res.data.items || [];
       setList(items);
+      setCurrentPage(1); // ★ D216+ 목록 refresh = 첫 페이지 진입 정합
       setPlanLocked(null);
     } catch (err: any) {
       // ★ CT-17: 403 PLAN_FEATURE_LOCKED → 요금제 가드 화면 표시
@@ -778,13 +782,103 @@ export default function DmBuilderPage() {
           }}>
             아직 만든 DM이 없어요. 위 자연어 입력 / 빠른 시작 카드 / 자유롭게 DM 생성 영역 활용 시작.
           </div>
-        ) : (
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 16 }}>
-            {list.map((dm) => (
-              <DmCard key={dm.id} dm={dm} onEdit={handleEdit} onDelete={handleDelete} />
-            ))}
-          </div>
-        )}
+        ) : (() => {
+          // ★ D216+ 페이징 매트릭스 (Harold 명시 — 가로 3개 × 2열 = 6개)
+          const totalPages = Math.max(1, Math.ceil(list.length / DM_PAGE_SIZE));
+          const safePage = Math.min(currentPage, totalPages);
+          const start = (safePage - 1) * DM_PAGE_SIZE;
+          const paginatedList = list.slice(start, start + DM_PAGE_SIZE);
+          const startIdx = list.length === 0 ? 0 : start + 1;
+          const endIdx = Math.min(start + DM_PAGE_SIZE, list.length);
+
+          return (
+            <>
+              {/* 목록 상단 영역 — 총 개수 + 현재 페이지 표시 */}
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, fontSize: 12, color: 'rgba(255,255,255,0.5)' }}>
+                <span>총 <strong style={{ color: '#fff' }}>{list.length}</strong>개 DM</span>
+                <span>{startIdx}–{endIdx} 표시 중</span>
+              </div>
+
+              {/* 카드 영역 — 데스크탑 3 column 정합 + 모바일 자동 반응형 */}
+              <div style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 280px), 1fr))',
+                gap: 16,
+                maxWidth: 1100,
+                marginBottom: 20,
+              }}>
+                {paginatedList.map((dm) => (
+                  <DmCard key={dm.id} dm={dm} onEdit={handleEdit} onDelete={handleDelete} />
+                ))}
+              </div>
+
+              {/* 페이징 컨트롤 (totalPages > 1 영역만 표시) */}
+              {totalPages > 1 && (
+                <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 6 }}>
+                  <button
+                    onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                    disabled={safePage === 1}
+                    style={{
+                      width: 36, height: 36,
+                      background: safePage === 1 ? 'rgba(255,255,255,0.03)' : 'rgba(255,255,255,0.06)',
+                      border: '1px solid rgba(255,255,255,0.1)',
+                      color: safePage === 1 ? 'rgba(255,255,255,0.3)' : 'rgba(255,255,255,0.8)',
+                      borderRadius: 8,
+                      cursor: safePage === 1 ? 'not-allowed' : 'pointer',
+                      fontSize: 14, fontWeight: 700,
+                      transition: 'all 0.2s',
+                    }}
+                    title="이전 페이지"
+                  >
+                    ‹
+                  </button>
+
+                  {Array.from({ length: totalPages }, (_, i) => i + 1).map((p) => {
+                    const isActive = p === safePage;
+                    return (
+                      <button
+                        key={p}
+                        onClick={() => setCurrentPage(p)}
+                        style={{
+                          minWidth: 36, height: 36, padding: '0 10px',
+                          background: isActive ? 'linear-gradient(135deg, #8b5cf6, #a855f7)' : 'rgba(255,255,255,0.04)',
+                          border: `1px solid ${isActive ? 'rgba(168, 85, 247, 0.6)' : 'rgba(255,255,255,0.1)'}`,
+                          color: isActive ? '#fff' : 'rgba(255,255,255,0.7)',
+                          borderRadius: 8,
+                          cursor: 'pointer',
+                          fontSize: 13,
+                          fontWeight: isActive ? 800 : 600,
+                          transition: 'all 0.2s',
+                          boxShadow: isActive ? '0 2px 8px rgba(168, 85, 247, 0.4)' : 'none',
+                        }}
+                      >
+                        {p}
+                      </button>
+                    );
+                  })}
+
+                  <button
+                    onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                    disabled={safePage === totalPages}
+                    style={{
+                      width: 36, height: 36,
+                      background: safePage === totalPages ? 'rgba(255,255,255,0.03)' : 'rgba(255,255,255,0.06)',
+                      border: '1px solid rgba(255,255,255,0.1)',
+                      color: safePage === totalPages ? 'rgba(255,255,255,0.3)' : 'rgba(255,255,255,0.8)',
+                      borderRadius: 8,
+                      cursor: safePage === totalPages ? 'not-allowed' : 'pointer',
+                      fontSize: 14, fontWeight: 700,
+                      transition: 'all 0.2s',
+                    }}
+                    title="다음 페이지"
+                  >
+                    ›
+                  </button>
+                </div>
+              )}
+            </>
+          );
+        })()}
       </main>
 
       <ConfirmModal state={confirm} onClose={() => setConfirm(null)} />
@@ -886,61 +980,99 @@ function EditorModals() {
 
 function DmCard({ dm, onEdit, onDelete }: { dm: DmListItem; onEdit: (id: string, mode?: string) => void; onDelete: (id: string) => void }) {
   const isLegacy = dm.layout_mode === 'slides';
+  // ★ D216+ 톤앤매너 정합 — 다크 톤 + 색상 매핑 (Harold 명시 2026-05-25)
   const statusLabel = (() => {
     switch (dm.approval_status) {
-      case 'published': return { label: '발행됨', color: '#10b981' };
-      case 'approved':  return { label: '승인됨', color: '#3b82f6' };
-      case 'review':    return { label: '검수중', color: '#f59e0b' };
-      default:          return { label: '임시저장', color: '#737373' };
+      case 'published': return { label: '발행됨',   bg: 'rgba(16, 185, 129, 0.2)',  border: 'rgba(16, 185, 129, 0.4)',  text: '#6ee7b7' };
+      case 'approved':  return { label: '승인됨',   bg: 'rgba(59, 130, 246, 0.2)',  border: 'rgba(59, 130, 246, 0.4)',  text: '#93c5fd' };
+      case 'review':    return { label: '검수중',   bg: 'rgba(245, 158, 11, 0.2)',  border: 'rgba(245, 158, 11, 0.4)',  text: '#fcd34d' };
+      default:          return { label: '임시저장', bg: 'rgba(255,255,255,0.08)',   border: 'rgba(255,255,255,0.15)',   text: 'rgba(255,255,255,0.7)' };
     }
   })();
 
   return (
     <div
       style={{
-        background: 'var(--dm-bg)',
-        borderRadius: 12,
-        border: '1px solid var(--dm-neutral-200)',
+        background: 'rgba(255,255,255,0.04)',
+        borderRadius: 14,
+        border: '1px solid rgba(255,255,255,0.1)',
         padding: 16,
         display: 'flex',
         flexDirection: 'column',
         gap: 8,
-        boxShadow: 'var(--dm-shadow-sm)',
+        boxShadow: '0 1px 3px rgba(0,0,0,0.2)',
         cursor: 'pointer',
-        transition: 'box-shadow 150ms, transform 150ms',
+        transition: 'all 0.25s ease',
       }}
       onClick={() => onEdit(dm.id, dm.layout_mode)}
-      onMouseEnter={(e) => { e.currentTarget.style.boxShadow = 'var(--dm-shadow-md)'; e.currentTarget.style.transform = 'translateY(-2px)'; }}
-      onMouseLeave={(e) => { e.currentTarget.style.boxShadow = 'var(--dm-shadow-sm)'; e.currentTarget.style.transform = 'none'; }}
+      onMouseEnter={(e) => {
+        e.currentTarget.style.background = 'rgba(168, 85, 247, 0.08)';
+        e.currentTarget.style.borderColor = 'rgba(168, 85, 247, 0.3)';
+        e.currentTarget.style.boxShadow = '0 8px 24px rgba(168, 85, 247, 0.15), 0 1px 3px rgba(0,0,0,0.3)';
+        e.currentTarget.style.transform = 'translateY(-2px)';
+      }}
+      onMouseLeave={(e) => {
+        e.currentTarget.style.background = 'rgba(255,255,255,0.04)';
+        e.currentTarget.style.borderColor = 'rgba(255,255,255,0.1)';
+        e.currentTarget.style.boxShadow = '0 1px 3px rgba(0,0,0,0.2)';
+        e.currentTarget.style.transform = 'translateY(0)';
+      }}
     >
       <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 8 }}>
-        <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--dm-neutral-900)', flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+        <div style={{ fontSize: 14, fontWeight: 700, color: '#fff', flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
           {dm.title || '(제목 없음)'}
         </div>
         {isLegacy && (
-          <span style={{ fontSize: 10, padding: '2px 6px', background: 'var(--dm-neutral-100)', color: 'var(--dm-neutral-600)', borderRadius: 4, whiteSpace: 'nowrap' }}>레거시</span>
+          <span style={{ fontSize: 10, padding: '2px 6px', background: 'rgba(245, 158, 11, 0.2)', border: '1px solid rgba(245, 158, 11, 0.4)', color: '#fcd34d', borderRadius: 6, whiteSpace: 'nowrap', fontWeight: 700 }}>레거시</span>
         )}
       </div>
-      {dm.store_name && <div style={{ fontSize: 11, color: 'var(--dm-neutral-600)' }}>{dm.store_name}</div>}
+      {dm.store_name && <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.5)' }}>{dm.store_name}</div>}
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4 }}>
-        <span style={{ fontSize: 10, padding: '3px 8px', background: statusLabel.color + '22', color: statusLabel.color, borderRadius: 4, fontWeight: 700 }}>
+        <span style={{ fontSize: 10, padding: '3px 8px', background: statusLabel.bg, border: `1px solid ${statusLabel.border}`, color: statusLabel.text, borderRadius: 6, fontWeight: 700 }}>
           {statusLabel.label}
         </span>
-        {typeof dm.view_count === 'number' && (
-          <span style={{ fontSize: 11, color: 'var(--dm-neutral-500)' }}>조회 {dm.view_count}</span>
+        {typeof dm.view_count === 'number' && dm.view_count > 0 && (
+          <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.4)' }}>조회 {dm.view_count.toLocaleString()}</span>
         )}
       </div>
       <div style={{ flex: 1 }} />
       <div style={{ display: 'flex', gap: 6, marginTop: 4 }} onClick={(e) => e.stopPropagation()}>
         <button
           onClick={() => onEdit(dm.id, dm.layout_mode)}
-          style={{ flex: 1, height: 28, background: 'var(--dm-primary)', color: '#fff', border: 'none', borderRadius: 6, fontSize: 11, fontWeight: 600, cursor: 'pointer' }}
+          style={{
+            flex: 1,
+            height: 32,
+            background: 'linear-gradient(135deg, #8b5cf6, #a855f7)',
+            color: '#fff',
+            border: 'none',
+            borderRadius: 8,
+            fontSize: 12,
+            fontWeight: 700,
+            cursor: 'pointer',
+            transition: 'all 0.2s',
+            boxShadow: '0 1px 3px rgba(168, 85, 247, 0.3)',
+          }}
+          onMouseEnter={(e) => { e.currentTarget.style.boxShadow = '0 4px 12px rgba(168, 85, 247, 0.5)'; }}
+          onMouseLeave={(e) => { e.currentTarget.style.boxShadow = '0 1px 3px rgba(168, 85, 247, 0.3)'; }}
         >
           편집
         </button>
         <button
           onClick={() => onDelete(dm.id)}
-          style={{ height: 28, padding: '0 10px', background: 'var(--dm-bg)', color: 'var(--dm-error)', border: '1px solid var(--dm-neutral-200)', borderRadius: 6, fontSize: 11, fontWeight: 600, cursor: 'pointer' }}
+          style={{
+            height: 32,
+            padding: '0 12px',
+            background: 'rgba(244, 63, 94, 0.1)',
+            color: '#fda4af',
+            border: '1px solid rgba(244, 63, 94, 0.3)',
+            borderRadius: 8,
+            fontSize: 12,
+            fontWeight: 600,
+            cursor: 'pointer',
+            transition: 'all 0.2s',
+          }}
+          onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(244, 63, 94, 0.2)'; e.currentTarget.style.borderColor = 'rgba(244, 63, 94, 0.5)'; }}
+          onMouseLeave={(e) => { e.currentTarget.style.background = 'rgba(244, 63, 94, 0.1)'; e.currentTarget.style.borderColor = 'rgba(244, 63, 94, 0.3)'; }}
         >
           삭제
         </button>
