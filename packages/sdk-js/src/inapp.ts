@@ -328,17 +328,8 @@ export class HanjulloInAppModule {
   // A/B Sticky Bucketing
   // ════════════════════════════════════════════════════════════════
 
-  private getStickyVariantId(parentMessageId: string, input: InAppInitInput): string | null {
-    if (!parentMessageId) return null;
-    try {
-      const raw = sessionStorage.getItem(SESSION_KEY_STICKY);
-      const sticky = raw ? JSON.parse(raw) : {};
-      return sticky[parentMessageId] || null;
-    } catch {
-      return null;
-    }
-  }
-
+  // ★ D215+ — sticky bucketing 처리 = backend selectVariantForCustomer (CT-80) 단일 진실.
+  //   SDK 안 setStickyVariantId 호출 = 옛 variant 기록 보존 (향후 캐시 hit 안 sticky 활용 강화 시점 진입).
   private setStickyVariantId(parentMessageId: string, variantId: string): void {
     try {
       const raw = sessionStorage.getItem(SESSION_KEY_STICKY);
