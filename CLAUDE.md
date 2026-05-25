@@ -159,6 +159,21 @@
       [상세 룰] `memory/feedback_design_quality_minimum_journey_level.md` 참조
     </RULE>
 
+    <RULE id="marketing_user_ux_priority" priority="HIGHEST">
+      ★ D216+ 신규 — 마케팅 담당자 UX 우선 정합 영구 룰 (Harold 명시 2026-05-25 D216+ 자동 생성 사고 정정 직후).
+      한줄로 사용자 = 마케팅 담당자 영역 = AI 기능 활용 X 영역 본질 = 직관 + 압도적 쉬움 + 동시 퀄리티 우수 정합 의무.
+      [절대 금지]
+      - 사용자 추가 입력 X — 한 클릭 = AI 자동 흐름 + 편집 모드 진입 의무
+      - "다시 입력" / "한 단계 더" / "선택" 단순 trigger 영역 — 옛 D216+ 빠른 시작 카드 → LayoutModePickerModal → 빈 캔버스 (3 단계 영역) = 격분 영역 진정 사고
+      - 옛 단순 form / native dialog / 단순 input + select + button — 사용자 영역 격분
+      [영구 정합 매트릭스]
+      - 자동 생성 버튼 = 자연어 입력 → 즉시 AI 호출 → 완성된 섹션 + 카피 + 편집 모드 진입 (1 단계 의무)
+      - 빠른 시작 카드 = 시나리오 클릭 → 즉시 AI 자동 호출 + 미리 매핑된 섹션 chain + 카피 자동 생성 + 편집 모드 진입 (1 단계 의무)
+      - 자유 입력 영역 = "자유롭게 DM 생성" 큰 버튼 별도 분리 (옛 LayoutModePickerModal 흐름 정합)
+      [자가 검증] 매 신규 frontend 기능 / 흐름 작성 직전 = "사용자 클릭 수 = 1 단계? 사용자 추가 입력 X? AI 자동 흐름 정합?" 자가 질의 의무.
+      [상세 룰] `memory/feedback_marketing_user_ux_priority.md` 참조
+    </RULE>
+
     <RULE id="superpowers_workflow_default">
       ★ D215+ 신규 — Superpowers Plugin 14 skills 작업 흐름 영구 룰 (Harold 명시 2026-05-25).
       Harold settings.json `superpowers@claude-plugins-official` 활성 + 본 세션 자동 로드 14건 (https://github.com/obra/superpowers).
@@ -200,6 +215,7 @@
     - [ ] **답변에 "영역/본질/정합/매트릭스" 단어 과다 사용 자가 점검했는가?** (자연 한국어 재작성) (Y/N) ★ D214+ 신규
     - [ ] **DB ALTER 새 컬럼 활용 endpoint catch에 `column does not exist` 분기 처리했는가?** (db_alter_safety_net) (Y/N) ★ D214+ 신규
     - [ ] **native dialog(alert/confirm/prompt) grep = 0건 확인했는가?** (ConfirmModal + useToast 활용) (Y/N)
+    - [ ] **마케팅 담당자 UX 자가 점검 — 사용자 클릭 수 = 1 단계? 사용자 추가 입력 X? AI 자동 흐름 정합?** (marketing_user_ux_priority) (Y/N) ★ D216+ 신규
     - [ ] **AI 생성 메시지에 구체 혜택(%/원/쿠폰/무료) 미포함 확인했는가?** (feedback_ai_no_arbitrary_benefit) (Y/N)
   </MANDATORY_CHECKLIST>
 

@@ -472,3 +472,169 @@ function extractEditableFields(section: Section): Record<string, unknown> {
 
 // ────────────── Compatibility: 사용되지 않는 SECTION_DEFAULTS import 방지 ──────────────
 void SECTION_DEFAULTS;
+
+// ────────────── D216+ One-Shot AI 생성 (parsePrompt + recommendLayout + generateCopy 통합) ──────────────
+
+import { randomUUID } from 'crypto';
+
+/** 빠른 시작 7 시나리오 → 섹션 chain 매핑 */
+const SCENARIO_MAP: Record<string, { sections: SectionType[]; toneHint: CampaignTone; objective: CampaignObjective }> = {
+  '신상품 출시':   { sections: ['header', 'hero', 'product_carousel', 'cta', 'footer'], toneHint: 'premium',  objective: 'sale' },
+  '시즌 세일':     { sections: ['header', 'countdown', 'coupon', 'cta', 'footer'],      toneHint: 'urgent',   objective: 'sale' },
+  '추첨 이벤트':   { sections: ['header', 'hero', 'lucky_draw', 'cta', 'footer'],       toneHint: 'playful',  objective: 'awareness' },
+  '매장 안내':     { sections: ['header', 'hero', 'map_store_locator', 'store_info', 'footer'], toneHint: 'friendly', objective: 'loyalty' },
+  '설문 + 보상':   { sections: ['header', 'survey', 'instant_coupon', 'footer'],        toneHint: 'friendly', objective: 'retention' },
+  '신규 환영':     { sections: ['header', 'hero', 'email_capture', 'cta', 'footer'],    toneHint: 'friendly', objective: 'awareness' },
+  '룰렛 이벤트':   { sections: ['header', 'roulette', 'cta', 'footer'],                 toneHint: 'playful',  objective: 'awareness' },
+};
+
+export interface OneShotResult {
+  spec: CampaignSpec;
+  sections: Section[];
+  brandKit: Partial<DmBrandKit>;
+  scenario?: string;
+}
+
+/**
+ * 자연어 한 줄 OR 시나리오명 → 완성된 sections[] + brandKit 통합 생성.
+ *
+ * 흐름:
+ *   1. scenario 영역 지정 시 = SCENARIO_MAP 매핑 활용 (섹션 chain 강제 + 톤 hint)
+ *   2. scenario 영역 X = parsePrompt → spec.recommended_sections 영역 활용
+ *   3. recommendLayout → 옛 영역 정합 (다만 scenario 강제 시 = override)
+ *   4. 섹션별 generateCopy → 섹션 props 자동 매핑
+ *   5. 완성된 Section[] + brandKit 반환
+ */
+export async function oneShotGenerate(opts: {
+  prompt: string;
+  scenario?: string;
+  brandName?: string;
+}): Promise<OneShotResult> {
+  const prompt = (opts.prompt || '').trim();
+  if (!prompt && !opts.scenario) {
+    throw new Error('prompt 또는 scenario 영역 필요');
+  }
+
+  // 1. spec 영역 생성 (scenario 영역 지정 시 = 기본 spec 영역 + scenario 매핑 활용)
+  let spec: CampaignSpec;
+  let scenarioMeta = opts.scenario ? SCENARIO_MAP[opts.scenario] : undefined;
+
+  if (prompt) {
+    spec = await parsePrompt(prompt);
+  } else {
+    // scenario 영역만 지정 시 = 옛 CampaignSpec 타입 정합 default spec
+    spec = {
+      brand: { name: opts.brandName || '', tone: scenarioMeta?.toneHint || 'friendly' },
+      objective: scenarioMeta?.objective || 'sale',
+      target: {},
+      personalization: [],
+      tone: scenarioMeta?.toneHint || 'friendly',
+      industry: 'general',
+      recommended_sections: scenarioMeta?.sections || ['header', 'hero', 'cta', 'footer'],
+    };
+  }
+
+  // brandKit 영역 = 옛 spec 영역 정합 (회사 admin 영역 = override 가능)
+  const brandKit: Partial<DmBrandKit> = {
+    tone: spec.tone || scenarioMeta?.toneHint || 'friendly',
+  };
+
+  // 2. sections chain 영역 결정 (scenario 강제 > spec.recommended_sections)
+  const sectionTypes: SectionType[] = scenarioMeta?.sections
+    || (Array.isArray(spec.recommended_sections) ? spec.recommended_sections as SectionType[] : ['header', 'hero', 'cta', 'footer']);
+
+  // 3. 섹션 영역 생성 + 카피 자동 매핑
+  const sections: Section[] = [];
+  for (let i = 0; i < sectionTypes.length; i++) {
+    const type = sectionTypes[i];
+    if (!SECTION_META[type]) continue;
+
+    const section = createSection(type, randomUUID(), i);
+
+    // 4. 섹션별 카피 자동 생성 (AI 영역 = 옛 영역 정합) + 신규 16 영역 = default props 정합
+    if (SECTION_META[type].aiAware) {
+      try {
+        const copy = await generateCopy(spec, section);
+        section.props = mergeCopyIntoProps(section.props as any, type, copy) as any;
+      } catch (err) {
+        console.warn(`[oneShotGenerate] generateCopy 실패 type=${type}:`, (err as any)?.message);
+      }
+    }
+
+    sections.push(section);
+  }
+
+  return { spec, sections, brandKit, scenario: opts.scenario };
+}
+
+/** AI 생성 카피 영역 → 섹션 props 매핑 (옛 11 + 신규 16 정합) */
+function mergeCopyIntoProps(currentProps: Record<string, unknown>, type: SectionType, copy: any): Record<string, unknown> {
+  const next = { ...currentProps };
+  const firstHeadline = Array.isArray(copy?.headlines) && copy.headlines[0]?.text ? copy.headlines[0].text : '';
+  const body = copy?.body || '';
+
+  switch (type) {
+    case 'header':
+      if (firstHeadline) next.event_title = firstHeadline;
+      break;
+    case 'hero':
+      if (firstHeadline) next.headline = firstHeadline;
+      if (body) next.sub_copy = body;
+      break;
+    case 'coupon':
+      if (firstHeadline) next.discount_label = firstHeadline;
+      if (body) next.usage_condition = body;
+      break;
+    case 'countdown':
+      if (firstHeadline) next.urgency_text = firstHeadline;
+      break;
+    case 'text_card':
+      if (firstHeadline) next.headline = firstHeadline;
+      if (body) next.body = body;
+      break;
+    case 'cta':
+      if (firstHeadline && Array.isArray(next.buttons) && next.buttons.length > 0) {
+        (next.buttons as any[])[0] = { ...(next.buttons as any[])[0], label: firstHeadline };
+      }
+      break;
+    case 'promo_code':
+      if (firstHeadline) next.description = firstHeadline;
+      if (body) next.instructions = body;
+      break;
+    case 'footer':
+      if (body) next.notes = body;
+      break;
+    // 신규 16 — AI 생성 영역 (default props 안 placeholder 영역 정합)
+    case 'product_carousel':
+    case 'gallery':
+    case 'reviews':
+      if (firstHeadline) next.title = firstHeadline;
+      break;
+    case 'poll':
+      if (firstHeadline) next.question = firstHeadline;
+      break;
+    case 'survey':
+      if (firstHeadline) next.title = firstHeadline;
+      break;
+    case 'email_capture':
+      if (firstHeadline) next.headline = firstHeadline;
+      if (body) next.description = body;
+      break;
+    case 'click_rewards':
+      if (firstHeadline) next.reward_description = firstHeadline;
+      break;
+    case 'lucky_draw':
+    case 'limited_quantity':
+      if (firstHeadline) next.title = firstHeadline;
+      if (body) next.description = body;
+      break;
+    case 'instant_coupon':
+      if (firstHeadline) next.coupon_label = firstHeadline;
+      if (body) next.discount_description = body;
+      break;
+    default:
+      // roulette / tab_cards / slideshow / youtube_embed / instagram_embed / map_store_locator / video / store_info / sns = 회사 admin 직접 작성
+      break;
+  }
+  return next;
+}

@@ -24,6 +24,7 @@ import {
 import { renderDmViewerHtml, renderDmViewerHtmlWithCustomer, renderDmErrorHtml } from '../utils/dm/dm-viewer';
 import {
   parsePrompt, recommendLayout, generateCopy, transformTone, improveMessage,
+  oneShotGenerate,
   type CampaignSpec, type ToneKey,
 } from '../utils/dm/dm-ai';
 import type { Section } from '../utils/dm/dm-section-registry';
@@ -306,6 +307,36 @@ dmRouter.get('/:id/stats', async (req: any, res: any) => {
 // ============================================================
 //  AI 엔진 5종 (D125 §9)
 // ============================================================
+
+// ★ D216+ POST /api/dm/ai/one-shot-generate — 자연어 OR 시나리오 → 완성된 sections[] 통합 생성
+dmRouter.post('/ai/one-shot-generate', async (req: any, res: any) => {
+  try {
+    const prompt: string = (req.body?.prompt || '').toString().trim();
+    const scenario: string | undefined = req.body?.scenario;
+    const brandName: string | undefined = req.body?.brand_name;
+
+    if (!prompt && !scenario) {
+      return res.status(400).json({ error: 'prompt 또는 scenario 영역 필요' });
+    }
+    if (prompt.length > 2000) {
+      return res.status(400).json({ error: '프롬프트는 2000자 이내로 입력해주세요.' });
+    }
+
+    const result = await oneShotGenerate({ prompt, scenario, brandName });
+    return res.json({
+      success: true,
+      data: {
+        sections: result.sections,
+        brand_kit: result.brandKit,
+        spec: result.spec,
+        scenario: result.scenario,
+      },
+    });
+  } catch (err: any) {
+    console.error('[DM AI one-shot-generate] 오류:', err.message);
+    return res.status(500).json({ success: false, error: err.message || 'AI 통합 생성 실패' });
+  }
+});
 
 // POST /api/dm/ai/parse-prompt — 자연어 → CampaignSpec
 dmRouter.post('/ai/parse-prompt', async (req: any, res: any) => {

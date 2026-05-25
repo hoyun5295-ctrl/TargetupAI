@@ -22,9 +22,7 @@ import ValidationModal from '../components/dm/modals/ValidationModal';
 import VersionHistoryModal from '../components/dm/modals/VersionHistoryModal';
 import BrandKitModal from '../components/dm/modals/BrandKitModal';
 import AbTestModal from '../components/dm/modals/AbTestModal';
-import LayoutModePickerModal from '../components/dm/modals/LayoutModePickerModal';
 import ModalBase, { ModalButton } from '../components/dm/modals/ModalBase';
-import type { LayoutMode } from '../stores/dmBuilderStore';
 import '../styles/dm-builder.css';
 
 const api = axios.create({ baseURL: '/api' });
@@ -79,6 +77,11 @@ export default function DmBuilderPage() {
   const [naturalLanguage, setNaturalLanguage] = useState('');
   const [detailExpanded, setDetailExpanded] = useState(false);
   const [generating, setGenerating] = useState(false);
+  // ★ D216+ 6 sub-agent 진행 시각 효과 (design_quality_minimum_journey_level 영구 룰 정합)
+  const [generationStep, setGenerationStep] = useState<number>(-1); // -1 = 영역 X, 0~5 = 6 단계
+  // ★ D216+ 자동 생성 직후 1-click floating bar (편집 모드 안 만족 영역 강화)
+  const [showAiFloatingBar, setShowAiFloatingBar] = useState(false);
+  const [floatingActionLoading, setFloatingActionLoading] = useState<string | null>(null);
 
   // ★ D216+ 키보드 단축키 활성 (편집 모드 한정)
   useDmKeyboardShortcuts({ enabled: mode === 'edit' });
@@ -125,18 +128,109 @@ export default function DmBuilderPage() {
     return () => clearTimeout(t);
   }, [toast, setToast]);
 
-  const [layoutPickerOpen, setLayoutPickerOpen] = useState(false);
-
+  // ★ D216+ marketing_user_ux_priority 영구 룰 정합 — LayoutModePickerModal 영구 폐기
+  //   "자유롭게 DM 생성" 클릭 = 즉시 scroll default + 편집 모드 진입 (마케팅 담당자 영역 옵션 차이 모름 영역 = 혼란 영역 영구 차단)
+  //   layoutMode 변경 영역 = 편집 모드 안 DmTopBar 토글 영역 활용 정합
   const handleCreateNew = () => {
     setLegacyDmError(null);
-    setLayoutPickerOpen(true);
+    createNew({ layoutMode: 'scroll' });
+    setMode('edit');
   };
 
-  const handleLayoutPicked = (layoutMode: LayoutMode) => {
-    createNew({ layoutMode });
-    setMode('edit');
-    setGenerating(false);
-  };
+  // ★ D216+ 자동 생성 흐름 — 자연어 OR 시나리오 → AI 자동 sections + 카피 → 편집 모드 진입
+  const applyAiGenerated = useDmBuilderStore((s) => s.applyAiGenerated);
+  const save = useDmBuilderStore((s) => s.save);
+
+  const handleAutoGenerate = useCallback(async (opts: { prompt?: string; scenario?: string }) => {
+    if (generating) return;
+    if (!opts.prompt && !opts.scenario) {
+      setToast({ type: 'error', message: '프롬프트 또는 시나리오 영역 필요' });
+      return;
+    }
+    setGenerating(true);
+    setGenerationStep(0);
+    setLegacyDmError(null);
+
+    // ★ D216+ 6 sub-agent 진행 시각 효과 (700ms 간격)
+    const stepTimer = setInterval(() => {
+      setGenerationStep((s) => (s < 4 ? s + 1 : s));
+    }, 700);
+
+    try {
+      const titleHint = opts.scenario || opts.prompt?.slice(0, 30) || '신규 DM';
+      // 1. 신규 DM 영역 생성 (scroll 기본)
+      createNew({ title: titleHint, layoutMode: 'scroll' });
+      // 2. AI 통합 생성 호출 (one-shot)
+      const res = await api.post('/dm/ai/one-shot-generate', {
+        prompt: opts.prompt || '',
+        scenario: opts.scenario,
+      });
+      if (!res.data?.success) {
+        throw new Error(res.data?.error || 'AI 생성 실패');
+      }
+      const { sections, brand_kit } = res.data.data || {};
+      // 3. 섹션 + brandKit 적용
+      applyAiGenerated(sections || [], brand_kit, opts.prompt || opts.scenario || '');
+      // 4. 신규 dmId 저장
+      await save({ silent: true });
+      // 5. 6 단계 종결 표시
+      clearInterval(stepTimer);
+      setGenerationStep(5);
+      await new Promise((r) => setTimeout(r, 400));
+      // 6. 편집 모드 진입 + floating bar 표시 (자동 생성 직후만)
+      setMode('edit');
+      setShowAiFloatingBar(true);
+      setToast({ type: 'success', message: `AI가 ${(sections || []).length}개 섹션 + 카피 자동 생성 종결 — 추가 1-click 액션 활용 가능` });
+    } catch (err: any) {
+      clearInterval(stepTimer);
+      setToast({ type: 'error', message: err?.response?.data?.error || err?.message || 'AI 생성 실패' });
+    } finally {
+      clearInterval(stepTimer);
+      setGenerating(false);
+      setGenerationStep(-1);
+      setNaturalLanguage('');
+    }
+  }, [generating, createNew, applyAiGenerated, save, setToast]);
+
+  // ★ D216+ 편집 모드 안 1-click floating action 영역 (자동 생성 직후 만족 강화)
+  const handleFloatingAction = useCallback(async (action: 'ai_refine' | 'design_align' | 'variable_consistency') => {
+    if (floatingActionLoading) return;
+    setFloatingActionLoading(action);
+    try {
+      const dmId = useDmBuilderStore.getState().dmId;
+      if (!dmId) {
+        setToast({ type: 'error', message: 'DM 저장 후 활용 가능' });
+        return;
+      }
+      const res = await api.post(`/dm/${dmId}/quick-action`, { action });
+      if (!res.data?.success) {
+        throw new Error(res.data?.error || '액션 실패');
+      }
+      // 변경 영역 재로드
+      await useDmBuilderStore.getState().loadDm(dmId);
+      const changes = res.data.data?.changes || [];
+      const labelMap: Record<string, string> = {
+        ai_refine: '카피 다듬기',
+        design_align: '디자인 정합화',
+        variable_consistency: '변수 일관성',
+      };
+      setToast({ type: 'success', message: `${labelMap[action]} 종결 — ${changes.length}개 섹션 정정` });
+    } catch (err: any) {
+      setToast({ type: 'error', message: err?.response?.data?.error || err?.message || '액션 실패' });
+    } finally {
+      setFloatingActionLoading(null);
+    }
+  }, [floatingActionLoading, setToast]);
+
+  // ★ D216+ 6 sub-agent 매트릭스 (Journey Builder 동급 디자인 영역 정합)
+  const SUB_AGENTS = [
+    { label: 'Brand Analysis',   desc: '회사 메모리 + 시즌 분석',      gradient: 'linear-gradient(135deg, #8b5cf6, #a855f7)' },
+    { label: 'Layout Recommend', desc: '섹션 구조 자동 추천',           gradient: 'linear-gradient(135deg, #d946ef, #ec4899)' },
+    { label: 'Copy Generate',    desc: '카피 자동 생성 (감성 + 실용)',  gradient: 'linear-gradient(135deg, #6366f1, #3b82f6)' },
+    { label: 'Variable Bind',    desc: '변수 자동 추천 + fallback',     gradient: 'linear-gradient(135deg, #10b981, #14b8a6)' },
+    { label: 'Validate',         desc: '검수 + 정합 확인',              gradient: 'linear-gradient(135deg, #0ea5e9, #06b6d4)' },
+    { label: 'Ready',            desc: '편집 모드 진입 종결',           gradient: 'linear-gradient(135deg, #f59e0b, #f97316)' },
+  ];
 
   const [convertingId, setConvertingId] = useState<string | null>(null);
 
@@ -224,6 +318,87 @@ export default function DmBuilderPage() {
           }}
         />
         <ConfirmModal state={confirm} onClose={() => setConfirm(null)} />
+
+        {/* ★ D216+ 1-click floating action bar (자동 생성 직후 만족 강화) */}
+        {showAiFloatingBar && (
+          <div style={{
+            position: 'fixed',
+            bottom: 24,
+            left: '50%',
+            transform: 'translateX(-50%)',
+            background: 'linear-gradient(135deg, rgba(15, 23, 42, 0.98), rgba(2, 6, 23, 0.98))',
+            border: '1px solid rgba(168, 85, 247, 0.4)',
+            borderRadius: 16,
+            padding: '14px 18px',
+            boxShadow: '0 10px 40px rgba(0,0,0,0.5), 0 0 0 1px rgba(168, 85, 247, 0.2)',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 12,
+            zIndex: 100,
+            maxWidth: '90vw',
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, paddingRight: 12, borderRight: '1px solid rgba(255,255,255,0.1)' }}>
+              <span style={{ fontSize: 18 }}>✨</span>
+              <div>
+                <div style={{ fontSize: 12, fontWeight: 700, color: '#fff' }}>AI 추천 액션</div>
+                <div style={{ fontSize: 10, color: 'rgba(255,255,255,0.5)' }}>1 클릭 즉시 정정</div>
+              </div>
+            </div>
+
+            {[
+              { action: 'ai_refine' as const,           label: '카피 다듬기',      icon: '✍️', accent: '#f43f5e' },
+              { action: 'design_align' as const,        label: '디자인 정합화',    icon: '🎨', accent: '#10b981' },
+              { action: 'variable_consistency' as const, label: '변수 일관성',     icon: '🔗', accent: '#f59e0b' },
+            ].map((a) => (
+              <button
+                key={a.action}
+                onClick={() => handleFloatingAction(a.action)}
+                disabled={!!floatingActionLoading}
+                style={{
+                  padding: '8px 12px',
+                  background: floatingActionLoading === a.action ? `${a.accent}33` : 'rgba(255,255,255,0.05)',
+                  border: `1px solid ${floatingActionLoading === a.action ? a.accent : 'rgba(255,255,255,0.1)'}`,
+                  borderRadius: 10,
+                  color: '#fff',
+                  fontSize: 12,
+                  fontWeight: 600,
+                  cursor: floatingActionLoading ? 'not-allowed' : 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  transition: 'all 0.2s',
+                  opacity: floatingActionLoading && floatingActionLoading !== a.action ? 0.4 : 1,
+                }}
+                onMouseEnter={(e) => { if (!floatingActionLoading) { e.currentTarget.style.background = `${a.accent}22`; e.currentTarget.style.borderColor = `${a.accent}66`; } }}
+                onMouseLeave={(e) => { if (floatingActionLoading !== a.action) { e.currentTarget.style.background = 'rgba(255,255,255,0.05)'; e.currentTarget.style.borderColor = 'rgba(255,255,255,0.1)'; } }}
+              >
+                <span style={{ fontSize: 14 }}>{a.icon}</span>
+                <span>{floatingActionLoading === a.action ? '처리 중...' : a.label}</span>
+              </button>
+            ))}
+
+            <button
+              onClick={() => setShowAiFloatingBar(false)}
+              style={{
+                marginLeft: 4,
+                width: 28, height: 28,
+                background: 'rgba(255,255,255,0.05)',
+                border: '1px solid rgba(255,255,255,0.1)',
+                borderRadius: 8,
+                color: 'rgba(255,255,255,0.6)',
+                fontSize: 14,
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+              }}
+              title="닫기"
+            >
+              ✕
+            </button>
+          </div>
+        )}
+
         {toast && <Toast toast={toast} />}
       </div>
     );
@@ -318,65 +493,145 @@ export default function DmBuilderPage() {
               onChange={(e) => setNaturalLanguage(e.target.value)}
               onKeyDown={(e) => {
                 if (e.key === 'Enter' && naturalLanguage.trim() && !generating) {
-                  setGenerating(true);
-                  setLegacyDmError(null);
-                  setLayoutPickerOpen(true);
+                  void handleAutoGenerate({ prompt: naturalLanguage.trim() });
                 }
               }}
-              placeholder='예: "봄 신상 프로모션, 30대 여성, 추첨 이벤트" — Enter로 자동 생성'
+              disabled={generating}
+              placeholder='예: "봄 신상 프로모션, 30대 여성, 추첨 이벤트" — Enter로 AI 자동 생성'
               style={{
                 flex: 1, height: 44, padding: '0 14px',
                 background: 'rgba(255,255,255,0.05)',
                 border: '1px solid rgba(255,255,255,0.15)',
                 borderRadius: 10, fontSize: 13, color: '#fff', outline: 'none',
+                opacity: generating ? 0.6 : 1,
               }}
             />
             <button
-              onClick={() => { if (naturalLanguage.trim()) { setLayoutPickerOpen(true); } }}
+              onClick={() => { if (naturalLanguage.trim()) { void handleAutoGenerate({ prompt: naturalLanguage.trim() }); } }}
               disabled={!naturalLanguage.trim() || generating}
               style={{
                 height: 44, padding: '0 20px',
-                background: naturalLanguage.trim() ? 'linear-gradient(135deg, #a855f7, #d946ef)' : 'rgba(255,255,255,0.05)',
+                background: naturalLanguage.trim() && !generating ? 'linear-gradient(135deg, #a855f7, #d946ef)' : 'rgba(255,255,255,0.05)',
                 color: '#fff', border: 'none', borderRadius: 10,
                 fontSize: 13, fontWeight: 700,
-                cursor: naturalLanguage.trim() ? 'pointer' : 'not-allowed',
-                opacity: naturalLanguage.trim() ? 1 : 0.4,
+                cursor: naturalLanguage.trim() && !generating ? 'pointer' : 'not-allowed',
+                opacity: naturalLanguage.trim() && !generating ? 1 : 0.4,
               }}
             >
-              {generating ? '생성 중...' : '자동 생성'}
+              {generating ? 'AI 생성 중...' : '자동 생성'}
             </button>
           </div>
 
-          {/* 빠른 시작 7 시나리오 */}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 8, marginTop: 14 }}>
-            {[
-              { icon: '🛍️', label: '신상품 출시', hint: 'header + hero + product_carousel' },
-              { icon: '🏷️', label: '시즌 세일', hint: 'header + countdown + coupon' },
-              { icon: '🎁', label: '추첨 이벤트', hint: 'header + lucky_draw + cta' },
-              { icon: '🗺️', label: '매장 안내', hint: 'header + map_store_locator' },
-              { icon: '📝', label: '설문 + 보상', hint: 'header + survey + instant_coupon' },
-              { icon: '✉️', label: '신규 환영', hint: 'header + email_capture' },
-              { icon: '🎡', label: '룰렛 이벤트', hint: 'header + roulette + cta' },
-            ].map((s) => (
-              <button
-                key={s.label}
-                onClick={() => { setNaturalLanguage(s.label); setLayoutPickerOpen(true); }}
-                style={{
-                  padding: '10px 8px',
-                  background: 'rgba(255,255,255,0.04)',
-                  border: '1px solid rgba(255,255,255,0.1)',
-                  borderRadius: 10, cursor: 'pointer',
-                  textAlign: 'center', transition: 'all 0.2s',
-                }}
-                onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(217,70,239,0.15)'; }}
-                onMouseLeave={(e) => { e.currentTarget.style.background = 'rgba(255,255,255,0.04)'; }}
-              >
-                <div style={{ fontSize: 20, marginBottom: 4 }}>{s.icon}</div>
-                <div style={{ fontSize: 12, fontWeight: 600, color: '#fff' }}>{s.label}</div>
-                <div style={{ fontSize: 9, color: 'rgba(255,255,255,0.4)', marginTop: 2 }}>{s.hint}</div>
-              </button>
-            ))}
+          {/* ★ D216+ 6 sub-agent 진행 시각 효과 (generating 활성 시점만 표시) */}
+          {generating && generationStep >= 0 && (
+            <div style={{ marginTop: 14, padding: 16, background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 12 }}>
+              <div style={{ fontSize: 12, fontWeight: 700, color: '#fff', marginBottom: 10, display: 'flex', alignItems: 'center', gap: 6 }}>
+                <span style={{ display: 'inline-block', width: 14, height: 14, border: '2px solid #a855f7', borderTopColor: 'transparent', borderRadius: '50%', animation: 'dm-spin 1s linear infinite' }} />
+                AI 자동 생성 진행 중
+              </div>
+              <style>{`@keyframes dm-spin { to { transform: rotate(360deg); } }`}</style>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                {SUB_AGENTS.map((agent, i) => {
+                  const isDone = i < generationStep;
+                  const isActive = i === generationStep;
+                  const isPending = i > generationStep;
+                  return (
+                    <div key={agent.label} style={{
+                      display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px',
+                      background: isActive ? `rgba(168, 85, 247, 0.15)` : isDone ? 'rgba(16, 185, 129, 0.08)' : 'rgba(255,255,255,0.02)',
+                      border: `1px solid ${isActive ? 'rgba(168, 85, 247, 0.5)' : isDone ? 'rgba(16, 185, 129, 0.3)' : 'rgba(255,255,255,0.05)'}`,
+                      borderRadius: 8,
+                      opacity: isPending ? 0.4 : 1,
+                      transition: 'all 0.3s',
+                    }}>
+                      <div style={{ width: 28, height: 28, borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, fontWeight: 700, color: '#fff', background: agent.gradient, flexShrink: 0 }}>
+                        {isDone ? '✓' : isActive ? '◐' : i + 1}
+                      </div>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontSize: 12, fontWeight: 600, color: '#fff' }}>{agent.label}</div>
+                        <div style={{ fontSize: 10, color: 'rgba(255,255,255,0.5)', marginTop: 1 }}>{agent.desc}</div>
+                      </div>
+                      {isActive && (
+                        <span style={{ display: 'inline-block', width: 10, height: 10, border: '2px solid #fff', borderTopColor: 'transparent', borderRadius: '50%', animation: 'dm-spin 0.8s linear infinite', flexShrink: 0 }} />
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* 빠른 시작 7 시나리오 — 카드 클릭 = 즉시 AI 자동 생성 + 편집 모드 진입 */}
+          <div style={{ marginTop: 14 }}>
+            <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.5)', marginBottom: 8, paddingLeft: 4 }}>
+              빠른 시작 — 카드 클릭 시 AI가 자동으로 섹션 + 카피 생성 후 편집 모드 진입
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 10 }}>
+              {[
+                { icon: '🛍️', label: '신상품 출시', hint: '상품 슬라이드 + 구매 유도',  gradient: 'linear-gradient(135deg, rgba(139, 92, 246, 0.25), rgba(168, 85, 247, 0.15))', border: 'rgba(168, 85, 247, 0.4)',  hover: 'rgba(168, 85, 247, 0.30)' },
+                { icon: '🏷️', label: '시즌 세일',  hint: '카운트다운 + 쿠폰 + CTA',     gradient: 'linear-gradient(135deg, rgba(244, 63, 94, 0.25), rgba(239, 68, 68, 0.15))',  border: 'rgba(244, 63, 94, 0.4)',  hover: 'rgba(244, 63, 94, 0.30)' },
+                { icon: '🎁', label: '추첨 이벤트', hint: '응모 form + 자동 추첨',       gradient: 'linear-gradient(135deg, rgba(245, 158, 11, 0.25), rgba(249, 115, 22, 0.15))', border: 'rgba(245, 158, 11, 0.4)', hover: 'rgba(245, 158, 11, 0.30)' },
+                { icon: '🗺️', label: '매장 안내',  hint: '지도 + 매장 위치',            gradient: 'linear-gradient(135deg, rgba(16, 185, 129, 0.25), rgba(20, 184, 166, 0.15))', border: 'rgba(16, 185, 129, 0.4)', hover: 'rgba(16, 185, 129, 0.30)' },
+                { icon: '📝', label: '설문 + 보상', hint: '설문 + 즉시 쿠폰 발급',       gradient: 'linear-gradient(135deg, rgba(14, 165, 233, 0.25), rgba(6, 182, 212, 0.15))',  border: 'rgba(14, 165, 233, 0.4)', hover: 'rgba(14, 165, 233, 0.30)' },
+                { icon: '✉️', label: '신규 환영',  hint: '이메일 수집 + 쿠폰',          gradient: 'linear-gradient(135deg, rgba(217, 70, 239, 0.25), rgba(236, 72, 153, 0.15))', border: 'rgba(217, 70, 239, 0.4)', hover: 'rgba(217, 70, 239, 0.30)' },
+                { icon: '🎡', label: '룰렛 이벤트', hint: '8 영역 회전 + 자동 당첨',     gradient: 'linear-gradient(135deg, rgba(99, 102, 241, 0.25), rgba(139, 92, 246, 0.15))',  border: 'rgba(99, 102, 241, 0.4)', hover: 'rgba(99, 102, 241, 0.30)' },
+              ].map((s) => (
+                <button
+                  key={s.label}
+                  onClick={() => { void handleAutoGenerate({ scenario: s.label }); }}
+                  disabled={generating}
+                  style={{
+                    padding: '14px 10px',
+                    background: s.gradient,
+                    border: `1px solid ${s.border}`,
+                    borderRadius: 12,
+                    cursor: generating ? 'not-allowed' : 'pointer',
+                    textAlign: 'center',
+                    transition: 'all 0.25s ease',
+                    opacity: generating ? 0.5 : 1,
+                    boxShadow: '0 1px 3px rgba(0,0,0,0.2)',
+                  }}
+                  onMouseEnter={(e) => {
+                    if (!generating) {
+                      e.currentTarget.style.transform = 'translateY(-2px)';
+                      e.currentTarget.style.boxShadow = `0 8px 20px ${s.hover}, 0 1px 3px rgba(0,0,0,0.3)`;
+                      e.currentTarget.style.borderColor = s.hover;
+                    }
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.transform = 'translateY(0)';
+                    e.currentTarget.style.boxShadow = '0 1px 3px rgba(0,0,0,0.2)';
+                    e.currentTarget.style.borderColor = s.border;
+                  }}
+                >
+                  <div style={{ fontSize: 26, marginBottom: 6 }}>{s.icon}</div>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: '#fff', marginBottom: 4 }}>{s.label}</div>
+                  <div style={{ fontSize: 10, color: 'rgba(255,255,255,0.6)', lineHeight: 1.4 }}>{s.hint}</div>
+                </button>
+              ))}
+            </div>
           </div>
+
+          {/* ★ D216+ 자유롭게 DM 생성 — 옛 LayoutModePickerModal 흐름 정합 (사용자 직접 작성 영역) */}
+          <button
+            onClick={handleCreateNew}
+            disabled={generating}
+            style={{
+              width: '100%',
+              marginTop: 14,
+              padding: '14px 20px',
+              background: 'rgba(255,255,255,0.04)',
+              border: '1px dashed rgba(255,255,255,0.2)',
+              borderRadius: 10,
+              cursor: generating ? 'not-allowed' : 'pointer',
+              color: '#fff', fontSize: 13, fontWeight: 600,
+              display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+              opacity: generating ? 0.5 : 1,
+            }}
+          >
+            <span style={{ fontSize: 16 }}>📄</span>
+            <span>빈 캔버스에서 자유롭게 DM 생성 (직접 섹션 추가)</span>
+          </button>
         </div>
 
         {/* ★ D216+ 5 metric 요약 (overview endpoint) */}
@@ -403,6 +658,70 @@ export default function DmBuilderPage() {
                 <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.5)', marginBottom: 4 }}>{m.label}</div>
                 <div style={{ fontSize: 20, fontWeight: 800, color: m.accent }}>{m.value}</div>
               </div>
+            ))}
+          </div>
+        )}
+
+        {/* ★ D216+ AI 자율 진단 카드 — design_quality_minimum_journey_level 영구 룰 정합 */}
+        {overview && (
+          <div style={{
+            background: 'linear-gradient(135deg, rgba(139, 92, 246, 0.15), rgba(168, 85, 247, 0.10), rgba(217, 70, 239, 0.15))',
+            border: '1px solid rgba(168, 85, 247, 0.3)',
+            borderRadius: 14,
+            padding: 18,
+            marginBottom: 20,
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+              <span style={{ fontSize: 18 }}>✨</span>
+              <span style={{ fontSize: 13, fontWeight: 700, color: '#fff' }}>AI 자율 진단</span>
+              <span style={{ fontSize: 10, padding: '2px 6px', background: 'rgba(168, 85, 247, 0.3)', color: '#e9d5ff', borderRadius: 10, fontWeight: 700 }}>실시간</span>
+            </div>
+            <div style={{ fontSize: 14, color: '#fff', lineHeight: 1.6, marginBottom: 6 }}>
+              {(() => {
+                if (overview.total_dm === 0) return '첫 DM 자동 생성 권장 — 위 빠른 시작 카드 1 클릭 시 AI 자동 흐름 진입';
+                if (overview.published_dm === 0) return `${overview.total_dm}개 DM 작성 중 — 발행 영역 진입 권장 (검수 + 발행 흐름)`;
+                if (overview.total_views_30d < 50) return `발행 영역 ${overview.published_dm}개 — 발송 데이터 누적 후 정확 진단 가능 영역`;
+                if (overview.avg_ctr_30d >= 5) return `CTR ${overview.avg_ctr_30d}% — 우수 영역 정합 / Top CTR DM 영역 패턴 재활용 권장`;
+                if (overview.avg_ctr_30d >= 2) return `CTR ${overview.avg_ctr_30d}% — 평균 영역 / 1-click 액션 (카피 다듬기) 활용 시 개선 가능`;
+                return `CTR ${overview.avg_ctr_30d}% — 개선 권장 / CTA 위치 + 카피 + 이미지 정합 검토 의무`;
+              })()}
+            </div>
+            <div style={{ fontSize: 10, color: 'rgba(255,255,255,0.4)', fontStyle: 'italic', marginTop: 8 }}>
+              Data source — dm_pages + dm_views (최근 30일) + dm_event_responses 통합 매트릭스
+            </div>
+          </div>
+        )}
+
+        {/* ★ D216+ 1-click 액션 3 카드 — color-coded (rose/emerald/amber) */}
+        {overview && overview.total_dm > 0 && (
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 10, marginBottom: 20 }}>
+            {[
+              { icon: '✍️', label: 'AI 카피 다듬기',   desc: '전체 섹션 카피 톤 정합화', gradient: 'linear-gradient(135deg, rgba(244, 63, 94, 0.2), rgba(239, 68, 68, 0.1))',  border: 'rgba(244, 63, 94, 0.4)',  action: 'ai_refine' },
+              { icon: '🎨', label: '디자인 정합화',    desc: '브랜드 킷 색상 자동 적용', gradient: 'linear-gradient(135deg, rgba(16, 185, 129, 0.2), rgba(20, 184, 166, 0.1))', border: 'rgba(16, 185, 129, 0.4)', action: 'design_align' },
+              { icon: '🔗', label: '변수 일관성 확보', desc: 'Liquid 변수 fallback 자동 추가', gradient: 'linear-gradient(135deg, rgba(245, 158, 11, 0.2), rgba(249, 115, 22, 0.1))', border: 'rgba(245, 158, 11, 0.4)', action: 'variable_consistency' },
+            ].map((a) => (
+              <button
+                key={a.action}
+                onClick={() => setToast({ type: 'info', message: '편집 모드 진입 후 활용 가능 — DM 선택 후 1-click 액션 영역 활용' })}
+                style={{
+                  padding: 14,
+                  background: a.gradient,
+                  border: `1px solid ${a.border}`,
+                  borderRadius: 12,
+                  cursor: 'pointer',
+                  textAlign: 'left',
+                  transition: 'all 0.25s',
+                  boxShadow: '0 1px 3px rgba(0,0,0,0.2)',
+                }}
+                onMouseEnter={(e) => { e.currentTarget.style.transform = 'translateY(-2px)'; e.currentTarget.style.boxShadow = '0 6px 16px rgba(0,0,0,0.25)'; }}
+                onMouseLeave={(e) => { e.currentTarget.style.transform = 'translateY(0)'; e.currentTarget.style.boxShadow = '0 1px 3px rgba(0,0,0,0.2)'; }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6 }}>
+                  <span style={{ fontSize: 22 }}>{a.icon}</span>
+                  <span style={{ fontSize: 13, fontWeight: 700, color: '#fff' }}>{a.label}</span>
+                </div>
+                <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.7)', lineHeight: 1.5 }}>{a.desc}</div>
+              </button>
             ))}
           </div>
         )}
@@ -450,7 +769,15 @@ export default function DmBuilderPage() {
         {listLoading ? (
           <div style={{ textAlign: 'center', padding: 60, color: 'rgba(255,255,255,0.5)' }}>불러오는 중...</div>
         ) : list.length === 0 ? (
-          <EmptyList onCreateNew={handleCreateNew} />
+          <div style={{
+            textAlign: 'center', padding: '40px 20px',
+            color: 'rgba(255,255,255,0.4)', fontSize: 13,
+            background: 'rgba(255,255,255,0.02)',
+            border: '1px dashed rgba(255,255,255,0.08)',
+            borderRadius: 12,
+          }}>
+            아직 만든 DM이 없어요. 위 자연어 입력 / 빠른 시작 카드 / 자유롭게 DM 생성 영역 활용 시작.
+          </div>
         ) : (
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 16 }}>
             {list.map((dm) => (
@@ -459,12 +786,6 @@ export default function DmBuilderPage() {
           </div>
         )}
       </main>
-
-      <LayoutModePickerModal
-        open={layoutPickerOpen}
-        onClose={() => { setLayoutPickerOpen(false); setGenerating(false); }}
-        onSelect={handleLayoutPicked}
-      />
 
       <ConfirmModal state={confirm} onClose={() => setConfirm(null)} />
 
@@ -561,24 +882,7 @@ function EditorModals() {
   );
 }
 
-function EmptyList({ onCreateNew }: { onCreateNew: () => void }) {
-  return (
-    <div style={{ textAlign: 'center', padding: 60, background: 'var(--dm-bg)', borderRadius: 16, border: '1px solid var(--dm-neutral-200)' }}>
-      <div style={{ fontSize: 48, marginBottom: 16 }}>📱</div>
-      <div style={{ fontSize: 16, fontWeight: 700, color: 'var(--dm-neutral-900)', marginBottom: 8 }}>아직 만든 DM이 없어요</div>
-      <div style={{ fontSize: 13, color: 'var(--dm-neutral-600)', marginBottom: 24, lineHeight: 1.6 }}>
-        한 줄 프롬프트로 AI가 구조·카피를 자동 생성해줘요.<br />
-        "봄 신상 프로모션, 30대 여성, 20% 할인, 오늘 자정 마감"처럼 입력해 보세요.
-      </div>
-      <button
-        onClick={onCreateNew}
-        style={{ height: 44, padding: '0 24px', background: 'var(--dm-primary)', color: '#fff', border: 'none', borderRadius: 12, fontSize: 14, fontWeight: 700, cursor: 'pointer' }}
-      >
-        + 첫 DM 만들기
-      </button>
-    </div>
-  );
-}
+// EmptyList 영역 영구 폐기 (D216+ 정합 — 자연어 입력 + 빠른 시작 + 자유롭게 DM 생성 영역 흐름 정합)
 
 function DmCard({ dm, onEdit, onDelete }: { dm: DmListItem; onEdit: (id: string, mode?: string) => void; onDelete: (id: string) => void }) {
   const isLegacy = dm.layout_mode === 'slides';
