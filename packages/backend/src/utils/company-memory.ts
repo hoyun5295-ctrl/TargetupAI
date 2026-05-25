@@ -236,7 +236,11 @@ export async function recordCampaignLearning(input: CampaignLearningInput): Prom
     });
   }
 
-  // 채널 성과 박음 (집계 메모리 박음)
+  // 채널 성과 누적 (집계 메모리)
+  // ★ D216+ 비효율 정정 (Harold 명시 2026-05-25):
+  //   옛 영역 = metadata.campaign_id 영역 누락 = mysql-refund-sweeper NOT EXISTS 영역 안 매칭 X 영역
+  //   = 매 30초 사이클마다 동일 14건 UPSERT 반복 사고 (24h 안 약 2,880회 동일 데이터 덮어쓰기)
+  //   정정 = metadata 안 last_campaign_id 추가 → NOT EXISTS 영역 매칭 → 캠페인 1건당 1회만 학습 정합
   const channelKey = `channel_${input.channel}`;
   await addMemory({
     companyId: input.companyId,
@@ -246,6 +250,7 @@ export async function recordCampaignLearning(input: CampaignLearningInput): Prom
     importance: 6,
     source: 'campaign_result',
     metadata: {
+      last_campaign_id: input.campaignId,
       last_click_rate: clickRate,
       last_conversion_rate: conversionRate,
     },

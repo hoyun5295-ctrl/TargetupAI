@@ -369,10 +369,17 @@ async function accumulateCampaignLearning(): Promise<{ learned: number }> {
       AND c.sent_at > NOW() - INTERVAL '24 hours'
       AND COALESCE(c.sent_count, 0) >= 10
       AND NOT EXISTS (
+        -- ★ D216+ 비효율 정정 (Harold 명시 2026-05-25):
+        --   옛 영역 = campaign_id metadata 영역만 매칭 = success_pattern 영역만 차단 + channel_performance 영역 매칭 X
+        --   = 매 30초 사이클마다 14건 UPSERT 반복 사고 (24h 안 약 2,880회 동일 데이터 덮어쓰기)
+        --   정정 = success_pattern 영역(campaign_id) + channel_performance 영역(last_campaign_id) 양쪽 매핑
         SELECT 1 FROM ai_company_memory m
         WHERE m.company_id = c.company_id
           AND m.source = 'campaign_result'
-          AND m.metadata->>'campaign_id' = c.id::text
+          AND (
+            m.metadata->>'campaign_id' = c.id::text
+            OR m.metadata->>'last_campaign_id' = c.id::text
+          )
       )
     ORDER BY c.sent_at DESC
     LIMIT 100
