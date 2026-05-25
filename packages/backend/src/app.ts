@@ -3,6 +3,8 @@ import dotenv from 'dotenv';
 dotenv.config();
 
 import aiRoutes from './routes/ai';
+import aiMemoryRoutes from './routes/ai-memory';
+import aiUsageRoutes from './routes/ai-usage';
 import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
@@ -158,6 +160,8 @@ app.use('/api/plans', plansRoutes);
 app.use('/api/customers', customersRoutes);
 app.use('/api/campaigns', campaignsRoutes);
 app.use('/api/ai', aiRoutes);
+app.use('/api/ai-memory', aiMemoryRoutes);
+app.use('/api/ai-usage', aiUsageRoutes);
 app.use('/api/analysis', analysisRoutes);
 app.use('/api/v1/results', resultsRoutes);
 app.use('/api/unsubscribes', unsubscribesRoutes);

@@ -46,10 +46,13 @@ export async function getMonthlyUsage(companyId: string): Promise<{ used: number
   }
 
   try {
+    // ★ D217+ 정정 (2026-05-25 Harold 명시): 옛 `c.plan_code` 사고 = companies 안 plan_code 컬럼 X
+    //   = D215+ PM2 로그 영역 "column c.plan_code does not exist" + silent fallback 0 사고
+    //   정정 = c.plan_id = p.id (다른 호출처 30+ 전수 정합)
     const planRes = await query(
       `SELECT p.ai_calls_per_month
        FROM companies c
-       LEFT JOIN plans p ON c.plan_code = p.plan_code
+       LEFT JOIN plans p ON c.plan_id = p.id
        WHERE c.id = $1::uuid
        LIMIT 1`,
       [companyId]

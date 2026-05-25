@@ -107,12 +107,36 @@
 
 ---
 
-### 🚀 다음 세션 진입 가이드 (D215+ 인앱메시지 + Email SMTP relay 종결 후 — **D216+ 모바일DM 강화 진입**)
+### 🚀 다음 세션 진입 가이드 (D216+ 모바일DM 종결 후 — **D217+ AI 메모리 + AI 사용량 강화 진입**)
 
-> **★ D216+ 진입 매트릭스 (Harold 명시 2026-05-25)**:
-> Harold 명시 = "모바일DM 강화 — 가장 편리한 UX + 완벽한 디자인 + 다양한 이벤트 요소 / 2 세션 분량 / 본 세션(D215+) = 완벽 설계도 / 다음 세션부터 실제 작업".
+> **★ D217+ 진입 매트릭스 (Harold 명시 2026-05-25 — 옵션 A 정합)**:
+> Harold 명시 = "AI Operator 마지막 2 메뉴 = AI 메모리 + AI 사용량 강화 / Journey Builder급 디자인 기본 / 본 세션(D216+) = 설계안 .md 파일화 / 다음 세션부터 실제 작업".
 >
-> **D216+ 진입 명령어 (다음 세션 첫 메시지 — 즉시 복사 가능)**:
+> **D217+ 진입 명령어 (다음 세션 첫 메시지 — 즉시 복사 가능)**:
+> ```
+> docs/superpowers/specs/2026-05-25-ai-memory-usage-redesign-design.md 정독 + status/STATUS.md CURRENT_TASK 정독 + memory/feedback_marketing_user_ux_priority.md 정독 + memory/feedback_design_quality_minimum_journey_level.md 정독 + memory/feedback_cto_mandate_for_vito.md 정독 → D217+ 진입 (AI 메모리 + AI 사용량 강화 / Step 1 AI 메모리 먼저 진행 / 옛 ai-rate-limit `c.plan_code` 사고 동시 정정 의무)
+> ```
+>
+> **D217+ 강화 핵심 매핑** (`docs/superpowers/specs/2026-05-25-ai-memory-usage-redesign-design.md` 정독 의무):
+> - **AI 메모리** (`/ai-memory`): Journey 동급 8 영역 (자율 진단 + 자연어 검색 + 빠른 시작 7 카드 + 5 타입 도넛 차트 + 영향도 top 10 + 1-click 액션 3 + 자세히 분석 6 차트 + Source caption) — 옛 백엔드 (addMemory / listMemories / cleanupDeprecated / buildMemoryPromptContext) 활용 + 신규 endpoint 3건
+> - **AI 사용량** (`/ai-usage`): Journey 동급 8 영역 (자율 진단 + 자연어 + 빠른 시작 5 + 5 metric + 비용 예측 라인 차트 + 1-click 액션 3 + 자세히 분석 6 차트 + Source caption) — 옛 백엔드 (ai_call_log / ai-rate-limit / ai-cache / batch-ai) 활용 + 신규 endpoint 4건
+> - **옛 사고 동시 정정**: `getMonthlyUsage` 안 `c.plan_code` 컬럼 X 사고 (D215+ PM2 로그 영역) → companies LEFT JOIN plans 정합
+> - **DB ALTER**: companies.ai_usage_threshold_config 1 컬럼
+> - **분량**: 6~8h (각 메뉴 3~4h)
+> - **종결 직전**: `/codex:adversarial-review` 호출 의무 (DB ALTER + AI 호출 영역 = Critical)
+>
+> **★ D216+ 통합 종결 매트릭스 (2026-05-25 — 참조용)**:
+> - **모바일DM 강화 1 세션 완전 종결** = Backend (CT-86~90 5 AI 모듈 + endpoint 8 + dm_pages ALTER 4 + dm_event_responses 신설) + Frontend (27 섹션 SectionType + 16 신규 컴포넌트 NewSections.tsx + dmBuilderStore undo/redo + DmBuilderPage 편집 UX 강화 + ConfirmModal 4 파일 정정)
+> - **5 미흡 영역 영구 정정** = LayoutModePickerModal 영구 폐기 + 6 sub-agent 진행 시각 효과 + AI 자율 진단 카드 + 1-click 액션 3 + 빠른 시작 7 카드 고유 그라데이션 + 편집 모드 floating bar
+> - **본질 사고 영구 정정** = oneShotGenerate (parsePrompt + recommendLayout + 섹션별 generateCopy 통합) + 자동 생성/빠른 시작 진정 AI 흐름 정합 + AiSelfDiagnosisCards 원클릭 사고 영구 정정 (sessionStorage 키 불일치 + DOM .value 직접 조작 사고)
+> - **DmCard 톤앤매너 영구 정합** = 흰 배경 + 빨간 버튼 영구 폐기 → 다크 톤 + violet 그라데이션 편집 + rose 다크 삭제 + status badge 다크 정합
+> - **DM 목록 페이징** = 3×2 = 6개 + 이전/페이지번호/다음 컨트롤
+> - **mysql-refund-sweeper memory-learning 비효율 영구 정정** = 매 30초 14건 UPSERT → 캠페인 1건당 1회만 학습 (200배 SQL 부담 절감)
+> - **영구 룰 신설** = `marketing_user_ux_priority` (한 클릭 = AI 자동 흐름 의무)
+> - **CampaignSpec 타입 정합 정정** = 옛 타입 정독 X 추측 사고 영구 인정
+> - Harold 직접 배포 완료
+
+> **옛 D216+ 진입 명령어 (참조용 — 종결 완료 2026-05-25)**:
 > ```
 > docs/superpowers/specs/2026-05-25-mobile-dm-redesign-design.md 정독 + status/STATUS.md CURRENT_TASK 정독 + memory/project_d215_session_full_completed.md 정독 + memory/feedback_design_quality_minimum_journey_level.md 정독 + memory/feedback_default_superpowers_workflow.md 정독 → D216+ 진입 (모바일DM 1 세션 — Backend + 편집 UX 강화) + writing-plans skill 호출 의무
 > ```
