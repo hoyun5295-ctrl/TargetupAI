@@ -110,14 +110,17 @@ export async function syncTemplateCodes(
       console.log(`[kakao-template-sync] IMC list page ${page} code=${r.code} ≠ 0000 — break 영역`);
       break;
     }
-    // ★ D217+ fix (2026-05-26 Harold 명시 진단): IMC 응답 영역 구조 영역 영구 디버그 로그
-    //   옛 sync = matched=0 failed=8 사고 = 응답 안 templateKey 영역 영구 X 또는 응답 구조 영역 영구 다른 영역.
-    //   첫 페이지 + 첫 사이클 시점 = raw 영역 영구 출력 + items 영역 영구 분석.
+    // ★ D217+ fix v3 (2026-05-26 Harold 명시 진단 영역 확정): IMC 안 응답 필드명 = `templateList` 영구 정합
+    //   Harold raw 정독 결과 = r.data 최상위 키 = [hasNext, total, templateList] 영역 영구 정합
+    //   옛 sync = `list` / `data.list` / `templates` 영역 영구 X = 빈 배열 영역 = matched=0 사고 진정 root cause.
+    //   IMC 안 total = 4,849건 영구 전체 = templateList 영역 영구 정합 + hasNext 영역 영구 페이지네이션 영역.
     const items: any[] =
+      (r.data as any)?.templateList ||   // ★ 진정 IMC 영역 영구 정합 (우선)
       (r.data as any)?.list ||
       (r.data as any)?.data?.list ||
-      (r.data as any)?.templates ||      // 옛 영역 = 다른 필드명 영역 가능
-      (Array.isArray(r.data) ? (r.data as any) : null) ||  // r.data 자체 = 배열 영역 가능
+      (r.data as any)?.data?.templateList ||
+      (r.data as any)?.templates ||
+      (Array.isArray(r.data) ? (r.data as any) : null) ||
       [];
     if (page === 0) {
       const rawKeys = r.data ? Object.keys(r.data) : [];

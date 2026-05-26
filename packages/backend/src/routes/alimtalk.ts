@@ -706,9 +706,15 @@ router.post(
       if (r.code === '4014' && !templateCode) {
         try {
           const lst = await imc.listAlimtalkTemplates({ page: 0, count: 100 });
+          // ★ D217+ fix v3 (2026-05-26 Harold 명시 진단 영역 확정):
+          //   IMC 안 응답 필드명 = `templateList` 영구 정합 (Harold raw 정독 = total 4,849건 + templateList 영역).
+          //   옛 영역 = `list` / `data.list` 영역 영구 X = 빈 배열 영역 = B3 fallback 영구 영역 영영 사고 잠재.
+          //   본 영역 정정 = 옛 영역 + `templateList` 영역 영구 추가 (옛 호환 영구 영구 유지).
           const items: any[] =
+            (lst.data as any)?.templateList ||
             (lst.data as any)?.list ||
             (lst.data as any)?.data?.list ||
+            (lst.data as any)?.data?.templateList ||
             [];
           const found = items.find((t: any) => t.templateKey === templateKey);
           if (found?.templateCode) {
