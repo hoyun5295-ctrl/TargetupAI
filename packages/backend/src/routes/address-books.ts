@@ -1,4 +1,5 @@
 import { Router, Request, Response } from 'express';
+import * as XLSX from 'xlsx';
 import { query } from '../config/database';
 import { authenticate } from '../middlewares/auth';
 import { cellToString } from '../utils/normalize';
@@ -108,6 +109,162 @@ router.post('/', async (req: Request, res: Response) => {
     return res.json({ success: true, message: `${insertCount}건 저장 완료`, insertCount });
   } catch (error) {
     console.error('주소록 저장 에러:', error);
+    return res.status(500).json({ error: '서버 오류' });
+  }
+});
+
+// ============================================================
+// ★ D219+ Part 2 (2026-05-27) — 박과장님 신고 영역 정정
+//   1. GET /:groupName/export — xlsx 다운로드
+//   2. POST /:groupName/append — 기존 그룹에 contacts 추가 (중복 phone skip)
+// ============================================================
+
+// GET /api/address-books/:groupName/export - 그룹 contacts xlsx 다운로드
+router.get('/:groupName/export', async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    const userId = req.user?.userId;
+    if (!companyId) {
+      return res.status(403).json({ error: '권한이 필요합니다.' });
+    }
+
+    const { groupName } = req.params;
+    const userType = req.user?.userType;
+    const userFilter = userType === 'company_user' && userId ? ' AND user_id = $3' : '';
+    const params = userType === 'company_user' && userId ? [companyId, groupName, userId] : [companyId, groupName];
+
+    const result = await query(
+      `SELECT phone, name, extra1, extra2, extra3
+       FROM address_books
+       WHERE company_id = $1 AND group_name = $2${userFilter}
+       ORDER BY created_at`,
+      params,
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: '주소록을 찾을 수 없거나 내용이 없습니다.' });
+    }
+
+    // xlsx 변환 — 컬럼 라벨 한국어 명시
+    const rows = result.rows.map((r: any) => ({
+      '번호': r.phone || '',
+      '이름': r.name || '',
+      '기타1': r.extra1 || '',
+      '기타2': r.extra2 || '',
+      '기타3': r.extra3 || '',
+    }));
+
+    const workbook = XLSX.utils.book_new();
+    const worksheet = XLSX.utils.json_to_sheet(rows);
+    // 컬럼 너비 정합 (가독성)
+    (worksheet as any)['!cols'] = [
+      { wch: 14 }, // 번호
+      { wch: 12 }, // 이름
+      { wch: 16 }, // 기타1
+      { wch: 16 }, // 기타2
+      { wch: 16 }, // 기타3
+    ];
+    XLSX.utils.book_append_sheet(workbook, worksheet, '주소록');
+
+    const buffer = XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' });
+
+    const filename = `${groupName}_${new Date().toISOString().slice(0, 10)}.xlsx`;
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename*=UTF-8''${encodeURIComponent(filename)}`,
+    );
+    res.setHeader(
+      'Content-Type',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    );
+    return res.send(buffer);
+  } catch (error) {
+    console.error('주소록 다운로드 에러:', error);
+    return res.status(500).json({ error: '서버 오류' });
+  }
+});
+
+// POST /api/address-books/:groupName/append - 기존 그룹에 contacts 추가 (중복 phone skip)
+router.post('/:groupName/append', async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    const userId = req.user?.userId;
+    if (!companyId) {
+      return res.status(403).json({ error: '권한이 필요합니다.' });
+    }
+
+    const { groupName } = req.params;
+    const { contacts } = req.body as { contacts: Array<{ phone: string; name?: string; extra1?: string; extra2?: string; extra3?: string }> };
+
+    if (!Array.isArray(contacts) || contacts.length === 0) {
+      return res.status(400).json({ error: '추가할 연락처가 필요합니다.' });
+    }
+
+    // 기존 그룹 존재 검증 (본인 그룹만 추가 가능 — company_user 격리)
+    const userType = req.user?.userType;
+    const ownerFilter = userType === 'company_user' && userId ? ' AND user_id = $3' : '';
+    const ownerParams = userType === 'company_user' && userId ? [companyId, groupName, userId] : [companyId, groupName];
+
+    const groupCheck = await query(
+      `SELECT COUNT(*)::int AS cnt FROM address_books
+        WHERE company_id = $1 AND group_name = $2${ownerFilter}`,
+      ownerParams,
+    );
+    if (groupCheck.rows[0].cnt === 0) {
+      return res.status(404).json({ error: '존재하지 않는 그룹입니다.' });
+    }
+
+    // 기존 phone 매트릭스 — 중복 차단 (본 그룹 안)
+    const existingRes = await query(
+      `SELECT phone FROM address_books
+        WHERE company_id = $1 AND group_name = $2${ownerFilter}`,
+      ownerParams,
+    );
+    const existingPhones = new Set<string>(
+      existingRes.rows.map((r: any) => String(r.phone || '')),
+    );
+
+    let appendedCount = 0;
+    let duplicateCount = 0;
+    let invalidCount = 0;
+
+    for (const contact of contacts) {
+      const phone = String(contact.phone || '').replace(/\D/g, '');
+      if (phone.length < 10) {
+        invalidCount++;
+        continue;
+      }
+      if (existingPhones.has(phone)) {
+        duplicateCount++;
+        continue;
+      }
+      existingPhones.add(phone); // 본 batch 안 중복 차단
+      await query(
+        `INSERT INTO address_books (company_id, user_id, group_name, phone, name, extra1, extra2, extra3)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+        [
+          companyId,
+          userId,
+          groupName,
+          phone,
+          cellToString(contact.name),
+          cellToString(contact.extra1),
+          cellToString(contact.extra2),
+          cellToString(contact.extra3),
+        ],
+      );
+      appendedCount++;
+    }
+
+    return res.json({
+      success: true,
+      message: `${appendedCount}건 추가 완료 (중복 ${duplicateCount}건 / 무효 ${invalidCount}건 제외)`,
+      appendedCount,
+      duplicateCount,
+      invalidCount,
+    });
+  } catch (error) {
+    console.error('주소록 추가 에러:', error);
     return res.status(500).json({ error: '서버 오류' });
   }
 });

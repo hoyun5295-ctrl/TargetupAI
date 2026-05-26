@@ -41,6 +41,52 @@ export default function AddressBookModal({
   const [isUploading, setIsUploading] = useState(false);
   const [uploadingMsg, setUploadingMsg] = useState('주소록을 처리 중입니다...');
 
+  // ★ D219+ Part 2 (2026-05-27): 박과장님 신고 — 기존 그룹에 번호 추가 모드
+  //   null = 신규 그룹 신설 모드 / string = 기존 그룹명 (append endpoint 호출 분기)
+  const [appendingGroupName, setAppendingGroupName] = useState<string | null>(null);
+
+  // ★ D219+ Part 2 (2026-05-27): 박과장님 신고 — 그룹 단위 xlsx 다운로드
+  const handleDownloadGroup = async (groupName: string) => {
+    try {
+      setIsUploading(true);
+      setUploadingMsg(`${groupName} 다운로드 중...`);
+      const token = localStorage.getItem('token');
+      const res = await fetch(`/api/address-books/${encodeURIComponent(groupName)}/export`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({ error: '다운로드 실패' }));
+        setToast({ show: true, type: 'error', message: errData.error || '다운로드 실패' });
+        setTimeout(() => setToast({ show: false, type: 'error', message: '' }), 3000);
+        return;
+      }
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${groupName}_${new Date().toISOString().slice(0, 10)}.xlsx`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(url);
+      setToast({ show: true, type: 'success', message: `${groupName} 다운로드 완료` });
+      setTimeout(() => setToast({ show: false, type: 'success', message: '' }), 3000);
+    } catch (err: any) {
+      setToast({ show: true, type: 'error', message: `다운로드 오류: ${err?.message || err}` });
+      setTimeout(() => setToast({ show: false, type: 'error', message: '' }), 3000);
+    } finally {
+      setIsUploading(false);
+    }
+  };
+
+  // ★ D219+ Part 2 (2026-05-27): 박과장님 신고 — 기존 그룹 안 번호 추가 모드 진입
+  const handleStartAppend = (groupName: string) => {
+    setAppendingGroupName(groupName);
+    setNewGroupName(groupName); // 표시용 (read-only)
+    setDirectInputMode(true);
+    setDirectInputRows(Array.from({ length: 5 }, () => ({ phone: '', name: '', extra1: '', extra2: '', extra3: '' })));
+  };
+
   // 업로드 중 영역 close 차단 영역 (사용자가 중간 X 영역 사고 차단)
   const safeOnClose = () => {
     if (isUploading) return;
@@ -216,14 +262,21 @@ export default function AddressBookModal({
                   </tbody>
                 </table>
               </div>
+              {/* ★ D219+ Part 2 (2026-05-27) 박과장님 신고: appendingGroupName 시 기존 그룹 안내 + 그룹명 read-only */}
+              {appendingGroupName && (
+                <div className="mt-3 px-3 py-2 bg-violet-50 border border-violet-200 rounded-lg text-xs text-violet-800">
+                  📌 기존 그룹 <b>"{appendingGroupName}"</b> 에 번호를 추가합니다. (중복 번호는 자동 제외)
+                </div>
+              )}
               <div className="flex items-center gap-2 mt-3">
                 <span className="text-sm text-gray-600 w-20">그룹명 *</span>
                 <input
                   type="text"
                   value={newGroupName}
-                  onChange={(e) => setNewGroupName(e.target.value)}
+                  onChange={(e) => !appendingGroupName && setNewGroupName(e.target.value)}
                   placeholder="예: VIP고객"
-                  className="flex-1 px-3 py-2 border rounded-lg text-sm"
+                  readOnly={!!appendingGroupName}
+                  className={`flex-1 px-3 py-2 border rounded-lg text-sm ${appendingGroupName ? 'bg-gray-100 cursor-not-allowed text-gray-600' : ''}`}
                 />
               </div>
               <div className="flex gap-2 mt-3">
@@ -231,21 +284,29 @@ export default function AddressBookModal({
                   onClick={async () => {
                     const valid = directInputRows.filter(r => r.phone.trim().replace(/\D/g, '').length >= 10);
                     if (valid.length === 0) { alert('유효한 번호를 1건 이상 입력하세요'); return; }
-                    if (!newGroupName.trim()) { alert('그룹명을 입력하세요'); return; }
+                    if (!appendingGroupName && !newGroupName.trim()) { alert('그룹명을 입력하세요'); return; }
                     const token = localStorage.getItem('token');
                     setIsUploading(true);
-                    setUploadingMsg(`주소록 등록 중... ${valid.length.toLocaleString()}건 잠시만 기다려주세요`);
+                    setUploadingMsg(`주소록 ${appendingGroupName ? '추가' : '등록'} 중... ${valid.length.toLocaleString()}건 잠시만 기다려주세요`);
                     try {
-                      const res = await fetch('/api/address-books', {
+                      // ★ D219+ Part 2 박과장님 신고: appendingGroupName 분기 — append endpoint 호출
+                      const url = appendingGroupName
+                        ? `/api/address-books/${encodeURIComponent(appendingGroupName)}/append`
+                        : '/api/address-books';
+                      const body = appendingGroupName
+                        ? { contacts: valid }
+                        : { groupName: newGroupName.trim(), contacts: valid };
+                      const res = await fetch(url, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-                        body: JSON.stringify({ groupName: newGroupName.trim(), contacts: valid })
+                        body: JSON.stringify(body)
                       });
                       const data = await res.json();
                       if (data.success) {
                         setToast({ show: true, type: 'success', message: data.message });
                         setTimeout(() => setToast({ show: false, type: 'success', message: '' }), 3000);
                         setDirectInputMode(false);
+                        setAppendingGroupName(null);
                         setNewGroupName('');
                         setDirectInputRows(Array.from({ length: 5 }, () => ({ phone: '', name: '', extra1: '', extra2: '', extra3: '' })));
                         const groupRes = await fetch('/api/address-books/groups', { headers: { Authorization: `Bearer ${token}` } });
@@ -260,9 +321,14 @@ export default function AddressBookModal({
                   }}
                   disabled={isUploading}
                   className="flex-1 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 disabled:bg-gray-400 disabled:cursor-not-allowed"
-                >💾 주소록 저장</button>
+                >💾 {appendingGroupName ? '번호 추가 저장' : '주소록 저장'}</button>
                 <button
-                  onClick={() => { setDirectInputMode(false); setNewGroupName(''); setDirectInputRows(Array.from({ length: 5 }, () => ({ phone: '', name: '', extra1: '', extra2: '', extra3: '' }))); }}
+                  onClick={() => {
+                    setDirectInputMode(false);
+                    setAppendingGroupName(null);
+                    setNewGroupName('');
+                    setDirectInputRows(Array.from({ length: 5 }, () => ({ phone: '', name: '', extra1: '', extra2: '', extra3: '' })));
+                  }}
                   className="px-4 py-2 bg-gray-300 rounded-lg hover:bg-gray-400"
                 >취소</button>
               </div>
@@ -563,6 +629,20 @@ export default function AddressBookModal({
                           }}
                           className="px-3 py-1 bg-emerald-100 text-emerald-700 rounded hover:bg-emerald-200 text-sm"
                         >불러오기</button>
+                        {/* ★ D219+ Part 2 (2026-05-27): 박과장님 신고 — 추가 버튼 */}
+                        <button
+                          onClick={() => handleStartAppend(group.group_name)}
+                          disabled={isUploading}
+                          className="px-3 py-1 bg-violet-100 text-violet-700 rounded hover:bg-violet-200 text-sm disabled:opacity-40"
+                          title="기존 그룹에 번호 추가"
+                        >+ 추가</button>
+                        {/* ★ D219+ Part 2 (2026-05-27): 박과장님 신고 — 다운로드 버튼 (xlsx) */}
+                        <button
+                          onClick={() => handleDownloadGroup(group.group_name)}
+                          disabled={isUploading}
+                          className="px-3 py-1 bg-amber-100 text-amber-700 rounded hover:bg-amber-200 text-sm disabled:opacity-40"
+                          title="Excel 다운로드"
+                        >↓ 다운로드</button>
                         <button
                           onClick={async () => {
                             if (!confirm(`"${group.group_name}" 주소록을 삭제하시겠습니까?`)) return;
