@@ -471,8 +471,8 @@ export default function AiCampaignResultPopup({
                                 </span>
                               </div>
                             )}
-                            {/* 메시지 영역 — 실제 폰 시각 보존 (화이트) */}
-                            <div className="flex-1 overflow-y-auto p-3 bg-white">
+                            {/* 메시지 영역 — 다크 폰 모드 (모달 톤 통일) */}
+                            <div className="flex-1 overflow-y-auto p-3 bg-slate-900">
                               {isEditing ? (
                                 <div className="h-full flex flex-col gap-2">
                                   {(selectedChannel === 'LMS' || selectedChannel === 'MMS') && (
@@ -485,7 +485,7 @@ export default function AiCampaignResultPopup({
                                         setAiResult({ ...aiResult, messages: updated });
                                       }}
                                       placeholder="LMS 제목"
-                                      className="w-full text-[12px] px-2 py-1.5 border border-amber-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-400 text-gray-800"
+                                      className="w-full text-[12px] px-2 py-1.5 bg-white/5 border border-amber-400/30 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-400/60 text-white placeholder-white/30"
                                     />
                                   )}
                                   <textarea
@@ -499,7 +499,7 @@ export default function AiCampaignResultPopup({
                                       };
                                       setAiResult({ ...aiResult, messages: updated });
                                     }}
-                                    className="flex-1 w-full text-[12px] leading-[1.6] p-2 border border-violet-300 rounded-lg resize-none focus:outline-none focus:ring-2 focus:ring-violet-400 text-gray-800"
+                                    className="flex-1 w-full text-[12px] leading-[1.6] p-2 bg-white/5 border border-violet-400/30 rounded-lg resize-none focus:outline-none focus:ring-2 focus:ring-violet-500/20 focus:border-violet-400/60 text-white placeholder-white/30"
                                     autoFocus
                                   />
                                   <button
@@ -511,12 +511,12 @@ export default function AiCampaignResultPopup({
                                 </div>
                               ) : (
                                 <div className="flex gap-2">
-                                  <div className="w-7 h-7 rounded-full bg-violet-100 flex items-center justify-center shrink-0">
-                                    <Smartphone className="w-3.5 h-3.5 text-violet-600" />
+                                  <div className="w-7 h-7 rounded-full bg-violet-500/20 flex items-center justify-center shrink-0">
+                                    <Smartphone className="w-3.5 h-3.5 text-violet-300" />
                                   </div>
-                                  <div className="rounded-2xl rounded-tl-sm p-3 shadow-sm border text-[12px] leading-[1.6] whitespace-pre-wrap break-all overflow-hidden text-gray-700 max-w-[95%] bg-white border-gray-100">
-                                    {/* D93 흐름 유지 — %변수% 하이라이트 */}
-                                    {highlightVars(wrapAdText(msg.message_text || ''))}
+                                  <div className="rounded-2xl rounded-tl-sm p-3 shadow-sm text-[12px] leading-[1.6] whitespace-pre-wrap break-all overflow-hidden text-white/90 max-w-[95%] bg-slate-800 border border-white/10">
+                                    {/* D93 흐름 유지 — %변수% 하이라이트 (dark theme — amber 다크 톤) */}
+                                    {highlightVars(wrapAdText(msg.message_text || ''), 'dark')}
                                   </div>
                                 </div>
                               )}

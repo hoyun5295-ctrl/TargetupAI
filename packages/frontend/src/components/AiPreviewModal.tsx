@@ -108,24 +108,24 @@ export default function AiPreviewModal(props: AiPreviewModalProps) {
                   </div>
                 )}
 
-                {/* 메시지 영역 — 화이트 (실제 폰 시각 보존) */}
-                <div className="flex-1 overflow-y-auto p-3 bg-white">
+                {/* 메시지 영역 — 다크 폰 모드 (모달 톤 통일) */}
+                <div className="flex-1 overflow-y-auto p-3 bg-slate-900">
                   {mmsUploadedImages.length > 0 && (
                     <div className="mb-2">
                       <MmsImagePreview
                         images={mmsUploadedImages}
                         size="full"
                         maxHeight="160px"
-                        borderColor="border border-violet-200"
+                        borderColor="border border-violet-400/30"
                         compact
                       />
                     </div>
                   )}
                   <div className="flex gap-2 mt-1">
-                    <div className="w-7 h-7 rounded-full bg-violet-100 flex items-center justify-center shrink-0">
-                      <Smartphone className="w-3.5 h-3.5 text-violet-600" />
+                    <div className="w-7 h-7 rounded-full bg-violet-500/20 flex items-center justify-center shrink-0">
+                      <Smartphone className="w-3.5 h-3.5 text-violet-300" />
                     </div>
-                    <div className="bg-white rounded-2xl rounded-tl-sm p-3 shadow-sm border border-gray-100 text-[12px] leading-[1.6] whitespace-pre-wrap break-all text-gray-700 max-w-[95%]">
+                    <div className="bg-slate-800 rounded-2xl rounded-tl-sm p-3 shadow-sm border border-white/10 text-[12px] leading-[1.6] whitespace-pre-wrap break-all text-white/90 max-w-[95%]">
                       {displayMsg || '메시지 없음'}
                     </div>
                   </div>
