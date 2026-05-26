@@ -16,6 +16,9 @@ import { registerBulkCompanyUserUnsubscribes } from '../utils/unsubscribe-helper
 
 import { authenticate } from '../middlewares/auth';
 import { blockIfSyncActive } from '../middlewares/sync-active-check';
+// ★ D219+ Part 2 후속 (2026-05-27): CT-96 활용 — AddressBookModal AI 자동 매핑 (STARTER+ 게이팅)
+import { requirePlanFeature } from '../utils/plan-guard';
+import { mapColumnsWithAi, ColumnMappingError } from '../utils/ai-column-mapper';
 
 const router = Router();
 
@@ -990,5 +993,52 @@ function cleanupStaleUploads() {
 // 서버 시작 시 1회 정리 + 1시간 간격 반복
 cleanupStaleUploads();
 setInterval(cleanupStaleUploads, TIMEOUTS.uploadCleanup);
+
+// ============================================================
+// ★ D219+ Part 2 후속 (2026-05-27): Excel/CSV 컬럼 AI 자동 매핑 endpoint
+//   AddressBookModal 파일 업로드 직후 자동 호출 + 향후 customer-upsert 임포트 흐름 재활용 가능.
+//   게이팅 = ai_mapping (STARTER+) — 기존 plan-guard FeatureKey 정합.
+//   본 endpoint = CT-96 mapColumnsWithAi 호출 + 신뢰도 score + 사용자 정정 필요 여부 응답.
+// ============================================================
+
+/**
+ * POST /api/upload/ai-map-columns
+ * body: { columnNames: string[], sampleRows: any[][] }
+ * 응답: { mappings, confidenceScore, needsManualReview }
+ */
+router.post(
+  '/ai-map-columns',
+  authenticate,
+  requirePlanFeature('ai_mapping'),
+  async (req: Request, res: Response) => {
+    try {
+      const companyId = req.user?.companyId;
+      if (!companyId) {
+        return res.status(401).json({ success: false, error: '인증 필요' });
+      }
+      const { columnNames, sampleRows } = req.body as {
+        columnNames: string[];
+        sampleRows: any[][];
+      };
+      if (!Array.isArray(columnNames) || columnNames.length === 0) {
+        return res.status(400).json({ success: false, error: 'columnNames 배열 필수' });
+      }
+
+      const result = await mapColumnsWithAi({
+        companyId,
+        columnNames,
+        sampleRows: Array.isArray(sampleRows) ? sampleRows : [],
+      });
+
+      return res.json({ success: true, ...result });
+    } catch (err: any) {
+      if (err instanceof ColumnMappingError) {
+        return res.status(400).json({ success: false, code: err.code, error: err.message });
+      }
+      console.error('[upload/ai-map-columns] 실패:', err);
+      return res.status(500).json({ success: false, error: 'AI 컬럼 매핑 실패' });
+    }
+  },
+);
 
 export default router;

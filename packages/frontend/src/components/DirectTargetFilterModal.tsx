@@ -1,4 +1,4 @@
-import { Filter, RotateCcw, Search, Users } from 'lucide-react';
+import { Filter, RotateCcw, Search, Users, Sparkles, RefreshCw, AlertCircle, Check, Eye } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { FRONT_FIELD_DISPLAY_MAP, reverseDisplayValueFront } from '../utils/formatDate';
 
@@ -44,6 +44,97 @@ export default function DirectTargetFilterModal({ show, onClose, onExtracted }: 
   const [alertModal, setAlertModal] = useState<{ show: boolean; title: string; message: string; type: 'error' | 'warning' | 'info' }>({ show: false, title: '', message: '', type: 'error' });
   const showAlert = (title: string, message: string, type: 'error' | 'warning' | 'info' = 'error') => {
     setAlertModal({ show: true, title, message, type });
+  };
+
+  // ★ D219+ Part 2 후속 (2026-05-27): AI 자연어 모드 — CT-97 ai-segment-generator 활용
+  //   기존 form 흐름과 병행 — 사용자가 자연어로 입력 시 즉시 AI 변환 + 매칭 수 + 샘플 5건 표시.
+  //   적용 시 = CT-01 호환 filter → /api/customers/extract → onExtracted 직접 호출.
+  //   0건 매칭 = "조건을 정정해주세요" 안내만 (자동 완화 X — D171 영구 룰).
+  const [aiNlMode, setAiNlMode] = useState(false);
+  const [aiNlInput, setAiNlInput] = useState('');
+  const [aiNlGenerating, setAiNlGenerating] = useState(false);
+  const [aiNlResult, setAiNlResult] = useState<{
+    filter: any;
+    explanation: string;
+    matchCount: number;
+    samples: Array<{ id: string; phone: string; name: string | null; gender: string | null; region: string | null; last_purchase_date: string | null; total_purchase_amount: number | null }>;
+  } | null>(null);
+  const [aiNlError, setAiNlError] = useState<string | null>(null);
+  const [aiNlExtracting, setAiNlExtracting] = useState(false);
+
+  const AI_NL_EXAMPLES = [
+    '30일 안 구매하지 않은 30대 여성',
+    'VIP 등급 + 누적 구매 100만원 이상',
+    '서울 거주 + 최근 3개월 안 1회 이상 구매한 고객',
+    '결혼기념일이 이번 달인 고객',
+  ];
+
+  const handleAiNlGenerate = async () => {
+    if (!aiNlInput.trim()) {
+      setAiNlError('조건을 자연어로 입력해주세요.');
+      return;
+    }
+    setAiNlGenerating(true);
+    setAiNlError(null);
+    setAiNlResult(null);
+    try {
+      const token = localStorage.getItem('token');
+      const res = await fetch('/api/customers/generate-from-text', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ naturalLanguage: aiNlInput.trim() }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setAiNlError(data?.error || 'AI 변환 실패');
+        return;
+      }
+      setAiNlResult({
+        filter: data.filter,
+        explanation: data.explanation,
+        matchCount: data.matchCount,
+        samples: data.samples || [],
+      });
+    } catch (e: any) {
+      setAiNlError(e?.message || 'AI 변환 실패');
+    } finally {
+      setAiNlGenerating(false);
+    }
+  };
+
+  const handleAiNlApply = async () => {
+    if (!aiNlResult || aiNlResult.matchCount === 0) return;
+    setAiNlExtracting(true);
+    try {
+      const token = localStorage.getItem('token');
+      const res = await fetch('/api/customers/extract', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ dynamicFilters: aiNlResult.filter, smsOptIn: true, phoneField: 'phone' }),
+      });
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        showAlert('타겟 추출 실패', errData.error || '서버 오류', 'error');
+        return;
+      }
+      const data = await res.json();
+      if (data.success && data.recipients) {
+        // AI 자연어 모드 = fieldsMeta 단순 (phone만 필수 — 향후 확장 가능)
+        onExtracted(data.recipients, data.count, [], undefined, extractedPhoneFields);
+      } else {
+        showAlert('타겟 추출 실패', data.error || '데이터 추출 실패', 'warning');
+      }
+    } catch (err: any) {
+      showAlert('네트워크 오류', err?.message || '서버 연결 실패', 'error');
+    } finally {
+      setAiNlExtracting(false);
+    }
+  };
+
+  const resetAiNlMode = () => {
+    setAiNlInput('');
+    setAiNlResult(null);
+    setAiNlError(null);
   };
 
   // 카테고리 아이콘
@@ -639,6 +730,169 @@ export default function DirectTargetFilterModal({ show, onClose, onExtracted }: 
           </button>
         </div>
 
+        {/* ★ D219+ Part 2 후속 (2026-05-27): AI 자연어 모드 토글 */}
+        <div className="px-5 py-2.5 border-b border-violet-100 bg-gradient-to-r from-violet-50 to-fuchsia-50 flex items-center gap-2">
+          <button
+            onClick={() => setAiNlMode(false)}
+            className={`flex-1 px-3 py-1.5 text-xs rounded-lg font-semibold transition-all ${!aiNlMode ? 'bg-white text-green-700 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+          >
+            <Filter className="w-3.5 h-3.5 inline mr-1" />
+            필터 조건 직접 설정
+          </button>
+          <button
+            onClick={() => setAiNlMode(true)}
+            className={`flex-1 px-3 py-1.5 text-xs rounded-lg font-semibold transition-all ${aiNlMode ? 'bg-gradient-to-r from-violet-500 to-fuchsia-500 text-white shadow-md' : 'text-violet-600 hover:text-violet-800'}`}
+          >
+            <Sparkles className="w-3.5 h-3.5 inline mr-1" />
+            AI 자연어 모드
+            <span className="ml-1 text-[9px] px-1 py-0.5 rounded bg-white/30 text-white font-bold">NEW</span>
+          </button>
+        </div>
+
+        {/* ★ D219+ Part 2 후속: AI 자연어 모드 영역 */}
+        {aiNlMode ? (
+          <div className="p-4 space-y-3 overflow-y-auto max-h-[68vh]">
+            {/* AI 안내 카드 */}
+            <div className="rounded-xl border border-violet-200 bg-gradient-to-br from-violet-50 to-fuchsia-50 p-4">
+              <div className="flex items-start gap-2.5">
+                <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-violet-500 to-fuchsia-500 flex items-center justify-center flex-shrink-0">
+                  <Sparkles className="w-5 h-5 text-white" />
+                </div>
+                <div className="flex-1">
+                  <p className="text-sm font-semibold text-violet-900 mb-0.5">자연어로 고객 추출</p>
+                  <p className="text-[11px] text-violet-700 leading-relaxed">
+                    조건을 자연어로 입력하면 AI가 정확한 필터로 변환합니다. 매칭 수 + 샘플 5건이 즉시 표시되어 신뢰할 수 있어요.
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {/* 예시 prompt */}
+            <div>
+              <p className="text-[10px] text-gray-500 mb-1.5">💡 빠른 시작 예시</p>
+              <div className="flex flex-wrap gap-1.5">
+                {AI_NL_EXAMPLES.map((p) => (
+                  <button
+                    key={p}
+                    onClick={() => setAiNlInput(p)}
+                    className="text-[11px] px-2.5 py-1 rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-700"
+                  >
+                    {p}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* 자연어 입력 */}
+            <div className="rounded-xl border border-gray-200 bg-white p-3">
+              <label className="text-[10px] text-gray-500 mb-1 block">조건 자연어 입력</label>
+              <textarea
+                value={aiNlInput}
+                onChange={(e) => setAiNlInput(e.target.value)}
+                placeholder="예: 30일 안 구매하지 않은 30대 여성"
+                className="w-full bg-gray-50 border border-gray-200 rounded-lg px-2.5 py-2 text-sm text-gray-800 placeholder:text-gray-400 focus:outline-none focus:border-violet-400 focus:ring-1 focus:ring-violet-400"
+                rows={3}
+                disabled={aiNlGenerating || aiNlExtracting}
+              />
+              <div className="mt-2 flex items-center justify-between gap-2">
+                <p className="text-[9px] text-gray-400">검증된 필터만 사용 — 단 1의 오차 없는 추출</p>
+                <button
+                  onClick={handleAiNlGenerate}
+                  disabled={!aiNlInput.trim() || aiNlGenerating || aiNlExtracting}
+                  className="flex items-center gap-1 px-3 py-1.5 bg-gradient-to-r from-violet-500 to-fuchsia-500 hover:from-violet-600 hover:to-fuchsia-600 disabled:opacity-30 disabled:cursor-not-allowed text-white rounded-lg text-xs font-semibold"
+                >
+                  {aiNlGenerating ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
+                  {aiNlGenerating ? 'AI 변환 중...' : 'AI 변환'}
+                </button>
+              </div>
+            </div>
+
+            {/* 오류 */}
+            {aiNlError && (
+              <div className="rounded-xl border border-rose-200 bg-rose-50 p-3">
+                <div className="flex items-start gap-2">
+                  <AlertCircle className="w-4 h-4 text-rose-500 flex-shrink-0 mt-0.5" />
+                  <p className="text-xs text-rose-700">{aiNlError}</p>
+                </div>
+              </div>
+            )}
+
+            {/* 결과 카드 */}
+            {aiNlResult && (
+              <div className="space-y-3">
+                {/* 매칭 수 + AI 해석 */}
+                <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4">
+                  <div className="flex items-start gap-3">
+                    <Users className="w-6 h-6 text-emerald-600 flex-shrink-0" />
+                    <div className="flex-1">
+                      <p className="text-[10px] text-emerald-700/70 mb-0.5">매칭 결과</p>
+                      <p className="text-2xl font-bold text-emerald-700">{aiNlResult.matchCount.toLocaleString()}명</p>
+                      <p className="text-[11px] text-emerald-800/80 mt-1.5 leading-relaxed">
+                        <span className="font-semibold">AI 해석:</span> {aiNlResult.explanation}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                {/* 샘플 5건 */}
+                {aiNlResult.samples.length > 0 && (
+                  <div className="rounded-xl border border-gray-200 bg-white p-3">
+                    <div className="flex items-center gap-1.5 mb-2">
+                      <Eye className="w-3.5 h-3.5 text-gray-500" />
+                      <p className="text-[11px] text-gray-600 font-medium">샘플 5건 미리보기</p>
+                    </div>
+                    <div className="space-y-1">
+                      {aiNlResult.samples.map((s) => (
+                        <div key={s.id} className="flex items-center gap-2 text-[10px] py-1 border-b border-gray-100">
+                          <span className="text-gray-800 font-mono w-28">{s.phone}</span>
+                          <span className="text-gray-600 w-16 truncate">{s.name || '-'}</span>
+                          <span className="text-gray-400 w-10">{s.gender || '-'}</span>
+                          <span className="text-gray-400 w-16 truncate">{s.region || '-'}</span>
+                          <span className="text-gray-400 ml-auto truncate">{s.total_purchase_amount?.toLocaleString() || '-'}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* 0건 안내 (자동 완화 X — D171 영구 룰) */}
+                {aiNlResult.matchCount === 0 && (
+                  <div className="rounded-xl border border-amber-200 bg-amber-50 p-3">
+                    <p className="text-xs text-amber-800">
+                      매칭되는 고객이 0명입니다. 조건을 더 넓혀주세요. (자동 완화는 마케팅 의도 보호를 위해 차단됩니다)
+                    </p>
+                  </div>
+                )}
+
+                {/* 액션 */}
+                <div className="flex gap-2 pt-1">
+                  <button
+                    onClick={resetAiNlMode}
+                    disabled={aiNlExtracting}
+                    className="px-3 py-2 text-xs text-gray-600 hover:text-gray-800 hover:bg-gray-100 rounded-lg disabled:opacity-40"
+                  >
+                    다시 입력
+                  </button>
+                  <button
+                    onClick={handleAiNlApply}
+                    disabled={aiNlResult.matchCount === 0 || aiNlExtracting}
+                    className="flex-1 flex items-center justify-center gap-1.5 px-4 py-2 bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 disabled:opacity-30 disabled:cursor-not-allowed text-white rounded-lg text-sm font-semibold shadow-md"
+                  >
+                    {aiNlExtracting ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
+                    {aiNlExtracting ? '추출 중...' : `이대로 ${aiNlResult.matchCount.toLocaleString()}명 추출`}
+                  </button>
+                </div>
+
+                {/* Source caption */}
+                <p className="text-[9px] text-gray-400 italic text-center mt-2">
+                  Data source — AI 자연어 변환 + 검증된 SQL 필터 빌더 통과 (단 1의 오차 X 본질)
+                </p>
+              </div>
+            )}
+          </div>
+        ) : (
+        <>
+
         {/* 필터 영역 */}
         <div className="p-4 space-y-3 overflow-y-auto max-h-[68vh]">
           {/* 헤더 바 */}
@@ -784,6 +1038,8 @@ export default function DirectTargetFilterModal({ show, onClose, onExtracted }: 
             </div>
           </div>
         </div>
+        </>
+        )}
       </div>
     </div>
 

@@ -14,6 +14,9 @@ import { aggregateSmsCountsByCampaign } from '../utils/stats-aggregation';
 import { blockIfSyncActive } from '../middlewares/sync-active-check';
 import { createCustomerUpsertBuilder } from '../utils/customer-upsert';
 import { detectEnabledFields, buildDynamicSelectExpr } from '../utils/enabled-fields';
+// ★ D219+ Part 2 후속 (2026-05-27): CT-97 활용 — DirectTargetFilterModal 자연어 모드 (BASIC+ 게이팅)
+import { requirePlanFeature } from '../utils/plan-guard';
+import { generateSegmentFromNaturalLanguage, SegmentGenerationError } from '../utils/ai-segment-generator';
 
 const router = Router();
 
@@ -1588,5 +1591,53 @@ router.get('/:id', async (req: Request, res: Response) => {
     res.status(500).json({ error: '조회 실패' });
   }
 });
+
+// ============================================================
+// ★ D219+ Part 2 후속 (2026-05-27): 자연어 → CT-01 호환 filter 변환 + 매칭 미리보기
+//   DirectTargetFilterModal AI 자연어 모드 + 향후 다른 메뉴 (AI 한줄로, Journey 등) 재활용 가능.
+//   게이팅 = ai_messaging (BASIC+) — AI 자연어 변환 기능 한정.
+//   본 endpoint = CT-97 generateSegmentFromNaturalLanguage 호출 + CT-01 호환 검증 + 미리보기.
+//   책임소재 영역 정합 (Harold 명시 2026-05-27): "단 1의 오차도 없는 타겟 추출 의무".
+// ============================================================
+
+/**
+ * POST /api/customers/generate-from-text
+ * body: { naturalLanguage: string, customFieldKeys?: string[] }
+ * 응답: { filter, explanation, matchCount, samples }
+ */
+router.post(
+  '/generate-from-text',
+  requirePlanFeature('ai_messaging'),
+  async (req: Request, res: Response) => {
+    try {
+      const companyId = req.user?.companyId;
+      if (!companyId) {
+        return res.status(401).json({ success: false, error: '인증 필요' });
+      }
+      const { naturalLanguage, customFieldKeys } = req.body as {
+        naturalLanguage: string;
+        customFieldKeys?: string[];
+      };
+      if (!naturalLanguage?.trim()) {
+        return res.status(400).json({ success: false, error: '자연어 입력이 필요합니다.' });
+      }
+
+      const result = await generateSegmentFromNaturalLanguage({
+        companyId,
+        naturalLanguage,
+        customFieldKeys: Array.isArray(customFieldKeys) ? customFieldKeys : undefined,
+      });
+
+      return res.json({ success: true, ...result });
+    } catch (err: any) {
+      if (err instanceof SegmentGenerationError) {
+        // ZERO_MATCH / FILTER_VALIDATION_FAILED 등 사용자 안내 오류 = 400
+        return res.status(400).json({ success: false, code: err.code, error: err.message });
+      }
+      console.error('[customers/generate-from-text] 실패:', err);
+      return res.status(500).json({ success: false, error: 'AI 세그먼트 생성 실패' });
+    }
+  },
+);
 
 export default router;

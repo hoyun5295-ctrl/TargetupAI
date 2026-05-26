@@ -45,6 +45,64 @@ export default function AddressBookModal({
   //   null = 신규 그룹 신설 모드 / string = 기존 그룹명 (append endpoint 호출 분기)
   const [appendingGroupName, setAppendingGroupName] = useState<string | null>(null);
 
+  // ★ D219+ Part 2 후속 (2026-05-27): CT-96 AI 컬럼 자동 매핑 — 파일 업로드 직후 자동 호출
+  //   AI 매핑 결과 = setAddressColumnMapping 자동 채움 + confidence/needsReview 표시
+  //   confidence < 0.8 = "정정 필요" 안내 + dropdown 강조
+  const [aiMappingLoading, setAiMappingLoading] = useState(false);
+  const [aiMappingConfidence, setAiMappingConfidence] = useState<number | null>(null);
+  const [aiMappingNeedsReview, setAiMappingNeedsReview] = useState(false);
+  const [aiMappingDetails, setAiMappingDetails] = useState<Array<{
+    source: string;
+    target: string | null;
+    confidence: number;
+    reason: string;
+  }> | null>(null);
+
+  const runAiColumnMapping = async (headers: string[], allData: any[]) => {
+    if (!Array.isArray(headers) || headers.length === 0) return;
+    setAiMappingLoading(true);
+    setAiMappingConfidence(null);
+    setAiMappingNeedsReview(false);
+    setAiMappingDetails(null);
+    try {
+      const token = localStorage.getItem('token');
+      // 첫 5건 sample rows (header 순서대로 배열 변환)
+      const sampleRows = allData.slice(0, 5).map((row: any) =>
+        headers.map((h) => row[h] ?? null),
+      );
+      const res = await fetch('/api/upload/ai-map-columns', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ columnNames: headers, sampleRows }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        // 403 plan-feature-locked 시 = 단순 안내 (AI 매핑 X = 사용자 수동 진행)
+        if (res.status === 403) {
+          return; // 단순 skip — 사용자 수동 매핑 정합
+        }
+        console.warn('[AddressBookModal] AI 자동 매핑 실패:', data?.error);
+        return;
+      }
+      // 매핑 결과 → setAddressColumnMapping 자동 채움 (target null 영역 제외)
+      const autoMapping: { [key: string]: string } = {};
+      const validTargets = new Set(['phone', 'name', 'extra1', 'extra2', 'extra3']);
+      for (const m of data.mappings || []) {
+        if (m.target && validTargets.has(m.target) && !autoMapping[m.target]) {
+          autoMapping[m.target] = m.source;
+        }
+      }
+      setAddressColumnMapping(autoMapping);
+      setAiMappingConfidence(data.confidenceScore || 0);
+      setAiMappingNeedsReview(!!data.needsManualReview);
+      setAiMappingDetails(data.mappings || null);
+    } catch (e: any) {
+      console.warn('[AddressBookModal] AI 자동 매핑 오류:', e?.message || e);
+    } finally {
+      setAiMappingLoading(false);
+    }
+  };
+
   // ★ D219+ Part 2 (2026-05-27): 박과장님 신고 — 그룹 단위 xlsx 다운로드
   const handleDownloadGroup = async (groupName: string) => {
     try {
@@ -359,9 +417,13 @@ export default function AddressBookModal({
                       const res = await fetch('/api/upload/parse?includeData=true', { method: 'POST', headers: { Authorization: `Bearer ${token}` }, body: formData });
                       const data = await res.json();
                       if (data.success) {
-                        setAddressFileHeaders(data.headers || []);
-                        setAddressFileData(data.allData || data.preview || []);
+                        const headers = data.headers || [];
+                        const allData = data.allData || data.preview || [];
+                        setAddressFileHeaders(headers);
+                        setAddressFileData(allData);
                         setAddressSaveMode(true);
+                        // ★ D219+ Part 2 후속 (2026-05-27): CT-96 AI 자동 매핑 호출 (fire-and-forget — 사용자 수동 매핑 진입 가능 + 결과 들어오면 자동 채움)
+                        runAiColumnMapping(headers, allData);
                       } else {
                         alert(data.error || '파일 파싱 실패');
                       }
@@ -392,6 +454,64 @@ export default function AddressBookModal({
           {addressSaveMode && addressFileData.length > 0 && (
             <div className="mb-4 p-4 bg-amber-50 rounded-lg border border-amber-200">
               <div className="text-sm font-medium text-amber-700 mb-3">📋 컬럼 매핑 ({addressFileData.length}건)</div>
+
+              {/* ★ D219+ Part 2 후속 (2026-05-27): CT-96 AI 자동 매핑 안내 카드 */}
+              {aiMappingLoading && (
+                <div className="mb-3 p-3 rounded-lg border border-violet-200 bg-gradient-to-br from-violet-50 to-fuchsia-50 flex items-center gap-3">
+                  <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-violet-500 to-fuchsia-500 flex items-center justify-center flex-shrink-0">
+                    <div className="w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin" />
+                  </div>
+                  <div>
+                    <p className="text-xs font-semibold text-violet-800">AI가 컬럼을 자동 매핑 중...</p>
+                    <p className="text-[10px] text-violet-600">잠시만 기다려주세요 (필요 시 직접 매핑도 가능)</p>
+                  </div>
+                </div>
+              )}
+
+              {!aiMappingLoading && aiMappingConfidence !== null && (
+                <div className={`mb-3 p-3 rounded-lg border ${aiMappingNeedsReview ? 'border-amber-300 bg-amber-50' : 'border-emerald-300 bg-emerald-50'}`}>
+                  <div className="flex items-start gap-2.5">
+                    <div className={`w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 ${aiMappingNeedsReview ? 'bg-amber-200' : 'bg-emerald-200'}`}>
+                      <span className={`text-base ${aiMappingNeedsReview ? 'text-amber-700' : 'text-emerald-700'}`}>
+                        {aiMappingNeedsReview ? '⚠️' : '✓'}
+                      </span>
+                    </div>
+                    <div className="flex-1">
+                      <div className="flex items-center gap-2 mb-1">
+                        <p className={`text-xs font-semibold ${aiMappingNeedsReview ? 'text-amber-800' : 'text-emerald-800'}`}>
+                          AI 자동 매핑 완료
+                        </p>
+                        <span className={`text-[10px] px-1.5 py-0.5 rounded font-bold ${aiMappingNeedsReview ? 'bg-amber-200 text-amber-800' : 'bg-emerald-200 text-emerald-800'}`}>
+                          전체 신뢰도 {Math.round(aiMappingConfidence * 100)}%
+                        </span>
+                      </div>
+                      <p className={`text-[10px] leading-relaxed ${aiMappingNeedsReview ? 'text-amber-700' : 'text-emerald-700'}`}>
+                        {aiMappingNeedsReview
+                          ? '일부 컬럼 신뢰도가 80% 미만입니다. 아래 매핑을 확인 후 정정해주세요.'
+                          : '모든 컬럼이 안전한 신뢰도로 매핑되었습니다. 그룹명 입력 후 저장하세요.'}
+                      </p>
+                      {/* AI 매핑 상세 (간략) */}
+                      {aiMappingDetails && aiMappingDetails.length > 0 && (
+                        <div className="mt-2 space-y-0.5">
+                          {aiMappingDetails
+                            .filter((m) => m.target !== null)
+                            .map((m) => (
+                              <div key={m.source} className="flex items-center gap-1.5 text-[10px]">
+                                <span className="text-gray-600 font-mono truncate w-24">{m.source}</span>
+                                <span className="text-gray-400">→</span>
+                                <span className="text-gray-700 font-medium truncate flex-1">{m.target}</span>
+                                <span className={`text-[9px] px-1 py-0.5 rounded font-bold ${m.confidence >= 0.8 ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>
+                                  {Math.round(m.confidence * 100)}%
+                                </span>
+                              </div>
+                            ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )}
+
               <div className="space-y-2 mb-4">
                 {[
                   { key: 'phone', label: '수신번호 *', required: true },
@@ -462,6 +582,10 @@ export default function AddressBookModal({
                         setNewGroupName('');
                         setAddressFileData([]);
                         setAddressColumnMapping({});
+                        // ★ D219+ Part 2 후속: AI 매핑 state 초기화
+                        setAiMappingConfidence(null);
+                        setAiMappingNeedsReview(false);
+                        setAiMappingDetails(null);
                         const groupRes = await fetch('/api/address-books/groups', { headers: { Authorization: `Bearer ${token}` } });
                         const groupData = await groupRes.json();
                         if (groupData.success) setAddressGroups(groupData.groups || []);
@@ -478,7 +602,16 @@ export default function AddressBookModal({
                   className="flex-1 py-2 bg-amber-600 text-white rounded-lg hover:bg-amber-700 disabled:bg-gray-400 disabled:cursor-not-allowed"
                 >💾 주소록 저장</button>
                 <button
-                  onClick={() => { setAddressSaveMode(false); setAddressFileData([]); setAddressColumnMapping({}); setNewGroupName(''); }}
+                  onClick={() => {
+                    setAddressSaveMode(false);
+                    setAddressFileData([]);
+                    setAddressColumnMapping({});
+                    setNewGroupName('');
+                    // ★ D219+ Part 2 후속: AI 매핑 state 초기화
+                    setAiMappingConfidence(null);
+                    setAiMappingNeedsReview(false);
+                    setAiMappingDetails(null);
+                  }}
                   disabled={isUploading}
                   className="px-4 py-2 bg-gray-300 rounded-lg hover:bg-gray-400 disabled:opacity-50 disabled:cursor-not-allowed"
                 >취소</button>
