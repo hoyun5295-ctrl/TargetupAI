@@ -217,41 +217,7 @@ export async function completeOnboarding(
 }
 
 // ════════════════════════════════════════════════════════════════════
-// AI 오퍼레이션 무료체험 활성 여부
+// AI 오퍼레이션 무료체험 활성 여부 = plan-guard.ts loadPlanContext 단일 진입점 정합
+// (D219+ Part 2 후속 2026-05-27 Task 7: duplicate 함수 폐기 — onboarding-wizard.ts 안 자체 query X)
+// 호출 영역 = plan-guard.ts loadPlanContext(companyId) 활용 → ctx.isAiOperatorTrialActive 검증
 // ════════════════════════════════════════════════════════════════════
-
-/**
- * 회사의 AI 오퍼레이션 30일 무료체험 활성 여부.
- * Phase 1 plan-guard.ts isAiOperatorTrialActive와 동일 매트릭스.
- */
-export async function isAiOperatorTrialActive(companyId: string): Promise<{
-  active: boolean;
-  startedAt: string | null;
-  until: string | null;
-}> {
-  try {
-    const res = await query(
-      `SELECT ai_operator_trial_started_at, ai_operator_trial_until
-         FROM companies WHERE id = $1`,
-      [companyId],
-    );
-    if (res.rows.length === 0) {
-      return { active: false, startedAt: null, until: null };
-    }
-    const row = res.rows[0];
-    const until = row.ai_operator_trial_until ? new Date(row.ai_operator_trial_until) : null;
-    const active = !!(until && until.getTime() > Date.now());
-    return {
-      active,
-      startedAt: row.ai_operator_trial_started_at,
-      until: row.ai_operator_trial_until,
-    };
-  } catch (err: any) {
-    const msg = err?.message || '';
-    if (msg.includes('column') && msg.includes('does not exist')) {
-      // DB ALTER 미실행 = false 안전 default
-      return { active: false, startedAt: null, until: null };
-    }
-    throw err;
-  }
-}

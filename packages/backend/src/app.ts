@@ -16,6 +16,8 @@ import authRoutes from './routes/auth';
 import companiesRoutes from './routes/companies';
 // ★ D219+ Part 2 (2026-05-27): Onboarding Wizard 7 step endpoints
 import onboardingRoutes from './routes/onboarding';
+// ★ D219+ Part 2 후속 (2026-05-27): 일일 인사이트 API (Performance 카드 + 메일 양쪽 활용)
+import insightRoutes from './routes/insight';
 import plansRoutes from './routes/plans';
 import customersRoutes from './routes/customers';
 import campaignsRoutes from './routes/campaigns';
@@ -172,6 +174,7 @@ app.get('/api', (req, res) => {
 app.use('/api/auth', authRoutes);
 app.use('/api/companies', companiesRoutes);
 app.use('/api/onboarding', onboardingRoutes);
+app.use('/api/insight', insightRoutes);
 app.use('/api/plans', plansRoutes);
 app.use('/api/customers', customersRoutes);
 app.use('/api/campaigns', campaignsRoutes);

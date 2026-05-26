@@ -20,7 +20,6 @@ import {
   saveOnboardingStep,
   completeOnboardingStep,
   completeOnboarding,
-  isAiOperatorTrialActive,
 } from '../utils/onboarding-wizard';
 import {
   generateSegmentFromNaturalLanguage,
@@ -29,12 +28,14 @@ import {
   SegmentGenerationError,
 } from '../utils/ai-segment-generator';
 import { mapColumnsWithAi, ColumnMappingError } from '../utils/ai-column-mapper';
+// ★ D219+ Part 2 후속 (2026-05-27) Task 7: isAiOperatorTrialActive duplicate 폐기 — plan-guard 단일 진입점 통합
+import { loadPlanContext } from '../utils/plan-guard';
 
 const router = Router();
 router.use(authenticate);
 
 // ════════════════════════════════════════════════════════════════════
-// 무료체험 활성 검증 미들웨어
+// 무료체험 활성 검증 미들웨어 (plan-guard 단일 진입점 정합)
 // ════════════════════════════════════════════════════════════════════
 
 async function requireAiOperatorTrialActive(req: Request, res: Response, next: () => void) {
@@ -46,8 +47,8 @@ async function requireAiOperatorTrialActive(req: Request, res: Response, next: (
   if (req.user?.userType === 'super_admin') {
     return next();
   }
-  const trial = await isAiOperatorTrialActive(companyId);
-  if (!trial.active) {
+  const ctx = await loadPlanContext(companyId);
+  if (!ctx?.isAiOperatorTrialActive) {
     return res.status(403).json({
       success: false,
       code: 'AI_OPERATOR_TRIAL_INACTIVE',
@@ -65,7 +66,13 @@ router.get('/state', requireAiOperatorTrialActive, async (req: Request, res: Res
   try {
     const companyId = req.user!.companyId!;
     const userId = req.user!.userId;
-    const trial = await isAiOperatorTrialActive(companyId);
+    // ★ D219+ Part 2 후속 Task 7: plan-guard loadPlanContext 단일 진입점 활용
+    const ctx = await loadPlanContext(companyId);
+    const trial = {
+      active: !!ctx?.isAiOperatorTrialActive,
+      startedAt: ctx?.aiOperatorTrialStartedAt ? ctx.aiOperatorTrialStartedAt.toISOString() : null,
+      until: ctx?.aiOperatorTrialUntil ? ctx.aiOperatorTrialUntil.toISOString() : null,
+    };
     const state = await getOnboardingState(companyId, userId);
     return res.json({
       success: true,

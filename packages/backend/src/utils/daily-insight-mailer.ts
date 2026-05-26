@@ -44,7 +44,7 @@ function logErr(tag: string, err: any) {
 // 인사이트 생성
 // ════════════════════════════════════════════════════════════════════
 
-interface CompanyInsight {
+export interface CompanyInsight {
   companyId: string;
   companyName: string;
   recipientEmail: string;
@@ -55,7 +55,11 @@ interface CompanyInsight {
   trialDaysRemaining: number;
 }
 
-async function collectCompanyInsight(companyId: string): Promise<CompanyInsight | null> {
+/**
+ * 회사별 일일 인사이트 수집 — 매일 9시 메일 + Performance 카드 양쪽 활용.
+ * D219+ Part 2 후속 (2026-05-27): export 정정 (옛 internal 함수 → 단일 진입점).
+ */
+export async function collectCompanyInsight(companyId: string): Promise<CompanyInsight | null> {
   try {
     const company = await query(
       `SELECT c.id, c.company_name, c.contact_email, c.ai_operator_trial_until

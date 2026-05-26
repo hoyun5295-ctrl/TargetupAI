@@ -256,6 +256,19 @@ export default function PerformancePage() {
 
   const [explainLoading, setExplainLoading] = useState(false);
 
+  // ★ D219+ Part 2 후속 (2026-05-27): 일일 인사이트 카드 — CT-98 collectCompanyInsight 활용
+  //   매일 9시 메일 + 화면 안 즉시 확인 양쪽 흐름. 사용자가 화면 진입 시 어제 발송 + 활성 고객 즉시 확인 가능.
+  const [dailyInsight, setDailyInsight] = useState<{
+    companyId: string;
+    companyName: string;
+    recipientEmail: string;
+    yesterdaySent: number;
+    yesterdaySuccess: number;
+    yesterdayFail: number;
+    totalCustomers: number;
+    trialDaysRemaining: number;
+  } | null>(null);
+
   const token = () => localStorage.getItem('token');
 
   const load = useCallback(async () => {
@@ -265,18 +278,31 @@ export default function PerformancePage() {
     try {
       const headers = { Authorization: `Bearer ${token()}` };
       const days = periodToDays(period);
-      const [snapRes, availRes, cohortRes, bmRes, attrRes] = await Promise.all([
+      const [snapRes, availRes, cohortRes, bmRes, attrRes, insightRes] = await Promise.all([
         fetch(`/api/ai/operator/performance/snapshot-v2?period=${period}`, { headers }),
         fetch('/api/ai/operator/performance/data-availability', { headers }),
         fetch('/api/ai/operator/performance/cohort?months=12', { headers }),
         fetch(`/api/ai/operator/performance/benchmark?days=${days}`, { headers }),
         fetch(`/api/ai/operator/performance/attribution?days=${days}`, { headers }),
+        // ★ D219+ Part 2 후속 (2026-05-27): 일일 인사이트 fetch
+        fetch('/api/insight/daily', { headers }),
       ]);
       const snapData = await snapRes.json();
       const availData = await availRes.json();
       const cohortData = await cohortRes.json();
       const bmData = await bmRes.json();
       const attrData = await attrRes.json();
+      // 일일 인사이트 (실패 시 단순 skip — 본 화면 핵심 기능 X)
+      try {
+        const insightData = await insightRes.json();
+        if (insightRes.ok && insightData.success && insightData.insight) {
+          setDailyInsight(insightData.insight);
+        } else {
+          setDailyInsight(null);
+        }
+      } catch {
+        setDailyInsight(null);
+      }
       if (!snapRes.ok) {
         if (snapData.code === 'BETA_GATE') {
           setError('이 기능은 비즈니스 / 엔터프라이즈 요금제에서 이용 가능합니다.');
@@ -462,6 +488,62 @@ export default function PerformancePage() {
       </div>
 
       <div className="max-w-7xl mx-auto px-4 md:px-6 py-6 space-y-5">
+        {/* ★ D219+ Part 2 후속 (2026-05-27): 일일 인사이트 카드 (CT-98 collectCompanyInsight 활용) */}
+        {dailyInsight && (
+          <div className="rounded-2xl border border-violet-400/30 bg-gradient-to-br from-violet-500/10 via-fuchsia-500/10 to-indigo-500/10 p-5">
+            <div className="flex items-start gap-4 flex-wrap">
+              <div className="w-11 h-11 rounded-xl bg-gradient-to-br from-violet-500 to-fuchsia-500 flex items-center justify-center flex-shrink-0">
+                <Sparkles className="w-5 h-5 text-white" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2 flex-wrap mb-1">
+                  <h3 className="text-base font-semibold text-white">{dailyInsight.companyName} 일일 인사이트</h3>
+                  {dailyInsight.trialDaysRemaining > 0 && (
+                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-violet-500/30 text-violet-200 border border-violet-400/30 font-semibold">
+                      체험 D-{dailyInsight.trialDaysRemaining}
+                    </span>
+                  )}
+                </div>
+                <p className="text-[11px] text-white/60">매일 9시 자동 메일과 동일한 인사이트 — 화면 안 즉시 확인 가능</p>
+              </div>
+            </div>
+
+            <div className="mt-4 grid grid-cols-2 md:grid-cols-4 gap-3">
+              <div className="rounded-xl border border-white/10 bg-white/5 p-3">
+                <p className="text-[10px] text-white/50">어제 발송</p>
+                <p className="text-2xl font-bold text-violet-200 mt-1">{dailyInsight.yesterdaySent.toLocaleString()}</p>
+              </div>
+              <div className="rounded-xl border border-white/10 bg-white/5 p-3">
+                <p className="text-[10px] text-white/50">성공</p>
+                <p className="text-2xl font-bold text-emerald-300 mt-1">{dailyInsight.yesterdaySuccess.toLocaleString()}</p>
+              </div>
+              <div className="rounded-xl border border-white/10 bg-white/5 p-3">
+                <p className="text-[10px] text-white/50">실패</p>
+                <p className="text-2xl font-bold text-rose-300 mt-1">{dailyInsight.yesterdayFail.toLocaleString()}</p>
+              </div>
+              <div className="rounded-xl border border-white/10 bg-white/5 p-3">
+                <p className="text-[10px] text-white/50">활성 고객</p>
+                <p className="text-2xl font-bold text-fuchsia-300 mt-1">{dailyInsight.totalCustomers.toLocaleString()}</p>
+              </div>
+            </div>
+
+            <div className="mt-3 p-3 rounded-xl border border-violet-400/20 bg-violet-500/10">
+              <p className="text-[11px] text-violet-100 leading-relaxed">
+                <span className="font-semibold">오늘의 추천 — </span>
+                {dailyInsight.totalCustomers === 0
+                  ? '고객 데이터를 임포트하면 첫 발송이 가능합니다.'
+                  : dailyInsight.yesterdaySent === 0
+                  ? '어제 발송이 없었습니다. AI 자동 마케팅을 활용해보세요.'
+                  : '꾸준한 발송이 이어지고 있습니다. 성과를 분석해 다음 캠페인을 정교화하세요.'}
+              </p>
+            </div>
+
+            <p className="mt-2 text-[10px] text-white/30 italic">
+              Data source — CT-98 daily-insight-mailer collectCompanyInsight (어제 0~24시 sms_send_results + customers is_active)
+            </p>
+          </div>
+        )}
+
         {loading && (
           <div className="bg-white/5 border border-white/10 rounded-xl p-12 flex flex-col items-center gap-3 text-white/50">
             <Loader2 className="w-6 h-6 animate-spin text-indigo-300" />
