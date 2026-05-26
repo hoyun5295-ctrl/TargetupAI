@@ -99,18 +99,44 @@ export async function syncTemplateCodes(
       console.warn(`[kakao-template-sync] IMC list page ${page} code=${r.code} msg=${r.message}`);
       break;
     }
+    // ★ D217+ fix (2026-05-26 Harold 명시 진단): IMC 응답 영역 구조 영역 영구 디버그 로그
+    //   옛 sync = matched=0 failed=8 사고 = 응답 안 templateKey 영역 영구 X 또는 응답 구조 영역 영구 다른 영역.
+    //   첫 페이지 + 첫 사이클 시점 = raw 영역 영구 출력 + items 영역 영구 분석.
     const items: any[] =
       (r.data as any)?.list ||
       (r.data as any)?.data?.list ||
+      (r.data as any)?.templates ||      // 옛 영역 = 다른 필드명 영역 가능
+      (Array.isArray(r.data) ? (r.data as any) : null) ||  // r.data 자체 = 배열 영역 가능
       [];
+    if (page === 0) {
+      const rawKeys = r.data ? Object.keys(r.data) : [];
+      const firstItem = items[0] || null;
+      const firstItemKeys = firstItem ? Object.keys(firstItem) : [];
+      console.log(
+        `[kakao-template-sync][디버그] page=0 r.code=${r.code} r.data 최상위 키=[${rawKeys.join(',')}] items.length=${items.length} 첫 item 키=[${firstItemKeys.join(',')}]`,
+      );
+      if (firstItem) {
+        // 첫 item 영역 = templateKey + templateCode + templateName 영역 영구 확인
+        console.log(
+          `[kakao-template-sync][디버그] 첫 item 영역 = templateKey=${firstItem.templateKey || firstItem.template_key || '(X)'} templateCode=${firstItem.templateCode || firstItem.template_code || '(X)'} templateName=${firstItem.templateName || firstItem.template_name || '(X)'}`,
+        );
+      } else if (items.length === 0) {
+        // items 영역 0건 시 = r.data raw 영역 영구 출력 (영구 진단)
+        const rawSnippet = JSON.stringify(r.data).slice(0, 500);
+        console.log(`[kakao-template-sync][디버그] items 0건 — r.data raw (500자): ${rawSnippet}`);
+      }
+    }
     if (items.length === 0) break;
     for (const item of items) {
-      if (item?.templateKey) {
-        imcByKey.set(String(item.templateKey), item);
+      // 옛 templateKey + 신규 template_key 영역 영구 둘 다 영구 매핑
+      const key = item?.templateKey || item?.template_key;
+      if (key) {
+        imcByKey.set(String(key), item);
       }
     }
     if (items.length < IMC_PAGE_SIZE) break;
   }
+  console.log(`[kakao-template-sync][디버그] IMC 안 영구 매핑 영역 총 ${imcByKey.size}건`);
 
   // 3) 매칭 + UPDATE
   for (const row of pgRows.rows) {
@@ -118,6 +144,13 @@ export async function syncTemplateCodes(
     const imcItem = imcByKey.get(templateKey);
     if (!imcItem) {
       result.failed++;
+      // ★ D217+ fix (2026-05-26 Harold 명시 진단): 매칭 X 첫 3건 = IMC 안 가장 유사 영역 영구 출력
+      if (result.failed <= 3) {
+        const imcKeys = Array.from(imcByKey.keys()).slice(0, 5);
+        console.warn(
+          `[kakao-template-sync][디버그] 매칭 X — 한줄로 templateKey=${templateKey} (${row.template_name}) / IMC 안 영구 처음 5건 = [${imcKeys.join(',')}]`,
+        );
+      }
       result.details.push({
         id: row.id,
         company_id: row.company_id,
@@ -125,7 +158,7 @@ export async function syncTemplateCodes(
         old_code: row.template_code,
         new_code: null,
         status: 'failed',
-        error: `IMC 안 templateKey=${templateKey} 영역 매칭 X`,
+        error: `IMC 안 templateKey=${templateKey} 영역 매칭 X (IMC 안 총 ${imcByKey.size}건)`,
       });
       continue;
     }
