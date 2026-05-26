@@ -1,5 +1,11 @@
-import React, { useState } from 'react';
-import { formatPreviewValue, buildAdMessageFront, buildAdSubjectFront, replaceVarsBySampleCustomer } from '../utils/formatDate';
+import React, { useState, useEffect } from 'react';
+import {
+  Sparkles, X, ArrowLeft, ArrowRight, Eye, Users, Smartphone,
+  Megaphone, MessageSquare, FileText, Image as ImageIcon, AlertTriangle,
+  Loader2, Target, Shield, Calendar, Check, CheckCircle2,
+  ShieldCheck, Send, Camera, Edit3,
+} from 'lucide-react';
+import { buildAdMessageFront, buildAdSubjectFront, replaceVarsBySampleCustomer } from '../utils/formatDate';
 import { highlightVars } from '../utils/highlightVars';
 import MmsImagePreview from './shared/MmsImagePreview';
 
@@ -21,7 +27,6 @@ interface AiCampaignResultPopupProps {
   user: any;
   aiLoading: boolean;
   handleAiGenerateChannelMessage: () => void;
-  // Step 2 buttons
   testSentResult: string | null;
   testSending: boolean;
   testCooldown: boolean;
@@ -31,10 +36,8 @@ interface AiCampaignResultPopupProps {
   setShowSpamFilter: (v: boolean) => void;
   setSpamFilterData: (data: any) => void;
   setShowMmsUploadModal: (v: boolean) => void;
-  // MMS
   mmsUploadedImages: {serverPath: string; url: string; filename: string; originalName?: string; size: number}[];
   setMmsUploadedImages: React.Dispatch<React.SetStateAction<{serverPath: string; url: string; filename: string; originalName?: string; size: number}[]>>;
-  // Utils
   wrapAdText: (text: string) => string;
   calculateBytes: (text: string) => number;
   optOutNumber: string;
@@ -45,402 +48,660 @@ interface AiCampaignResultPopupProps {
   sampleCustomer?: Record<string, string>;
 }
 
+// 6 sub-agent 흐름 — target/count/channel 즉시 완료, message 진행 중, compliance/schedule 700ms 간격
+const SUB_AGENT_STEPS = [
+  { id: 'target', label: '타겟 분석', Icon: Target, doneMs: 0 },
+  { id: 'count', label: '고객 수 집계', Icon: Users, doneMs: 0 },
+  { id: 'channel', label: '채널 선정', Icon: Smartphone, doneMs: 0 },
+  { id: 'message', label: '메시지 생성', Icon: Sparkles, doneMs: -1 },
+  { id: 'compliance', label: '광고법 검수', Icon: Shield, doneMs: 1400 },
+  { id: 'schedule', label: '발송 준비', Icon: Calendar, doneMs: 2800 },
+] as const;
+
+const CHANNEL_OPTIONS = [
+  { key: 'SMS', label: 'SMS', Icon: MessageSquare },
+  { key: 'LMS', label: 'LMS', Icon: FileText },
+  { key: 'MMS', label: 'MMS', Icon: ImageIcon },
+] as const;
+
+const VARIABLE_ALIAS_MAP = {
+  '이름': ['고객명', '성함', '고객이름'],
+  '고객등급': ['등급', '멤버십등급', '회원등급'],
+  '등록매장정보': ['매장명', '매장', '지점', '등록매장'],
+  '최근구매매장': ['구매매장', '최근매장'],
+  '보유포인트': ['포인트', '적립금'],
+  '최근구매금액': ['구매금액', '구매액'],
+  '누적구매금액': ['총구매금액', '총구매액', '누적구매'],
+};
+
 export default function AiCampaignResultPopup({
-  show,
-  onClose,
-  aiStep,
-  setAiStep,
-  aiResult,
-  setAiResult,
-  selectedChannel,
-  setSelectedChannel,
-  selectedAiMsgIdx,
-  setSelectedAiMsgIdx,
-  editingAiMsg,
-  setEditingAiMsg,
-  isAd,
-  setIsAd,
-  user,
-  aiLoading,
-  handleAiGenerateChannelMessage,
-  testSentResult,
-  testSending,
-  testCooldown,
-  handleTestSend,
-  setShowPreview,
-  setShowAiSendModal,
-  setShowSpamFilter,
-  setSpamFilterData,
-  setShowMmsUploadModal,
-  mmsUploadedImages,
-  setMmsUploadedImages,
-  wrapAdText,
-  calculateBytes,
-  optOutNumber,
-  selectedCallback,
-  campaign,
-  formatRejectNumber,
-  targetRecipients,
-  sampleCustomer,
+  show, onClose, aiStep, setAiStep, aiResult, setAiResult,
+  selectedChannel, setSelectedChannel, selectedAiMsgIdx, setSelectedAiMsgIdx,
+  editingAiMsg, setEditingAiMsg, isAd, setIsAd, user, aiLoading,
+  handleAiGenerateChannelMessage, testSentResult, testSending, testCooldown,
+  handleTestSend, setShowPreview, setShowAiSendModal, setShowSpamFilter,
+  setSpamFilterData, setShowMmsUploadModal, mmsUploadedImages, setMmsUploadedImages,
+  wrapAdText, calculateBytes, optOutNumber, selectedCallback, campaign,
+  formatRejectNumber, targetRecipients, sampleCustomer,
 }: AiCampaignResultPopupProps) {
   const [showLmsAlert, setShowLmsAlert] = useState(false);
   const [lmsAlertBytes, setLmsAlertBytes] = useState(0);
+  const [elapsedMs, setElapsedMs] = useState(0);
+
+  // 6 sub-agent 로딩 시각 효과 — aiLoading state 흐름
+  useEffect(() => {
+    if (aiLoading) {
+      setElapsedMs(0);
+      const t = setInterval(() => setElapsedMs(v => v + 100), 100);
+      return () => clearInterval(t);
+    } else {
+      setElapsedMs(0);
+    }
+  }, [aiLoading]);
 
   if (!show) return null;
 
+  const targetCount = aiResult?.target?.count || 0;
+  const targetDescription = aiResult?.target?.description || '추천 타겟';
+  const recommendedChannel = aiResult?.recommendedChannel || 'SMS';
+  const channelReason = aiResult?.channelReason || '추천 채널입니다';
+  const topInsight = aiResult?.topInsight
+    || `${targetDescription} ${targetCount.toLocaleString()}명에게 ${recommendedChannel} 발송이 최적입니다.`;
+
+  // 스팸필터 진입 흐름 (기존 흐름 유지 + 함수 분리)
+  const handleSpamFilterClick = () => {
+    const msg = aiResult?.messages?.[selectedAiMsgIdx]?.message_text || campaign.messageContent || '';
+    const cb = selectedCallback || '';
+    const sc = sampleCustomer || {};
+    const hasSample = sc && Object.keys(sc).length > 0;
+    const replaceVars = (text: string) => hasSample
+      ? replaceVarsBySampleCustomer(text, sc, {
+          removeUnmatched: true,
+          aliasMap: VARIABLE_ALIAS_MAP,
+        })
+      : text;
+    const smsRaw = buildAdMessageFront(msg, 'SMS', isAd, optOutNumber);
+    const lmsRaw = buildAdMessageFront(msg, 'LMS', isAd, optOutNumber);
+    const smsMsg = replaceVars(smsRaw);
+    const lmsMsg = replaceVars(lmsRaw);
+    const subj = aiResult?.messages?.[selectedAiMsgIdx]?.subject || '';
+    setSpamFilterData({
+      sms: smsMsg,
+      lms: lmsMsg,
+      callback: cb,
+      msgType: selectedChannel as 'SMS' | 'LMS' | 'MMS',
+      subject: subj,
+      isAd,
+      firstRecipient: sampleCustomer || undefined,
+    });
+    setShowSpamFilter(true);
+  };
+
+  // 캠페인 확정 진입 흐름 (SMS bytes > 90 시 LMS sub-modal — B-D75-01 흐름 유지)
+  const handleConfirmClick = () => {
+    const selectedMsg = aiResult?.messages?.[selectedAiMsgIdx];
+    if (selectedChannel === 'SMS') {
+      const msg = selectedMsg?.message_text || '';
+      const bytes = calculateBytes(wrapAdText(msg));
+      if (bytes > 90) {
+        setLmsAlertBytes(bytes);
+        setShowLmsAlert(true);
+        return;
+      }
+    }
+    setShowAiSendModal(true);
+  };
+
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-      <div className={`bg-white rounded-xl shadow-2xl max-h-[90vh] overflow-y-auto ${aiStep === 2 ? 'w-[960px]' : 'w-[600px]'}`}>
-        
-        {/* 헤더 */}
-        <div className="p-6 border-b bg-green-50">
-          <div className="flex justify-between items-center">
-            <h3 className="text-lg font-bold flex items-center gap-2">
-              <span>✨</span> AI 추천 결과 {aiStep === 1 ? '- 타겟 & 채널' : '- 캠페인 확정'}
-            </h3>
-            <button onClick={() => { onClose(); setAiStep(1); }} className="text-gray-500 hover:text-gray-700 text-xl">✕</button>
+    <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50">
+      <div className="w-full max-w-5xl bg-slate-900 border border-white/10 rounded-2xl shadow-2xl max-h-[90vh] overflow-y-auto max-md:fixed max-md:inset-0 max-md:max-w-none max-md:max-h-none max-md:rounded-none">
+
+        {/* sticky 헤더 — gradient + Sparkles + BETA 배지 + 보조 액션 + 닫기 */}
+        <div className="sticky top-0 z-30 bg-gradient-to-r from-slate-950 via-violet-950/40 to-slate-950 backdrop-blur-sm border-b border-white/10 px-6 py-4">
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex items-center gap-3 min-w-0">
+              <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-violet-500 to-fuchsia-500 flex items-center justify-center shadow-lg shadow-violet-500/30 shrink-0">
+                <Sparkles className="w-5 h-5 text-white" />
+              </div>
+              <div className="min-w-0">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <h3 className="text-white font-bold text-lg whitespace-nowrap">AI 추천 결과</h3>
+                  <span className="px-2 py-0.5 text-[10px] font-bold bg-violet-500/20 text-violet-300 border border-violet-400/30 rounded">BETA</span>
+                </div>
+                <div className="text-xs text-white/50 mt-0.5">
+                  {aiStep === 1 ? '타겟 & 채널 확인' : '캠페인 메시지 확정'}
+                </div>
+              </div>
+            </div>
+            <div className="flex items-center gap-1 shrink-0">
+              {aiStep === 2 && (
+                <>
+                  <button
+                    onClick={() => setAiStep(1)}
+                    className="text-xs text-white/60 hover:text-white px-2 py-1.5 hover:bg-white/5 rounded transition-colors flex items-center gap-1"
+                  >
+                    <ArrowLeft className="w-3 h-3" /> 채널 변경
+                  </button>
+                  <button
+                    onClick={() => setShowPreview(true)}
+                    className="text-xs text-white/60 hover:text-white px-2 py-1.5 hover:bg-white/5 rounded transition-colors flex items-center gap-1"
+                  >
+                    <Eye className="w-3 h-3" /> 미리보기
+                  </button>
+                </>
+              )}
+              <button
+                onClick={() => { onClose(); setAiStep(1); }}
+                className="text-white/50 hover:text-white p-1.5 hover:bg-white/5 rounded transition-colors"
+                aria-label="닫기"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
           </div>
         </div>
 
-        {/* Step 1: 타겟 + 채널 선택 */}
+        {/* Step 1: AI 자율 진단 + 광고성 + 채널 선택 + 0건 차단 + 다음 버튼 (또는 6 sub-agent 로딩) */}
         {aiStep === 1 && (
-          <div className="p-6 space-y-6">
-            {/* 타겟 요약 */}
-            <div className="bg-blue-50 rounded-lg p-4">
-              <div className="text-sm text-gray-600 mb-1">📌 추출된 타겟</div>
-              <div className="font-semibold text-gray-800">{aiResult?.target?.description || '추천 타겟'}</div>
-<div className="text-blue-600 font-bold text-lg mt-1">{aiResult?.target?.count?.toLocaleString() || 0}명</div>
-            </div>
+          <div className="p-6 space-y-5">
 
-            {/* 채널 추천 */}
-            <div>
-              <div className="text-sm text-gray-600 mb-2">📱 AI 추천 채널</div>
-              <div className="bg-purple-50 border border-purple-200 rounded-lg p-4 mb-4">
-              <div className="font-semibold text-purple-800">{aiResult?.recommendedChannel || 'SMS'} 추천</div>
-              <div className="text-sm text-purple-600 mt-1">"{aiResult?.channelReason || '추천 채널입니다'}"</div>
-              </div>
-{/* 광고성 여부 */}
-<div className="flex items-center justify-between bg-yellow-50 rounded-lg p-4 mb-4">
-              <div>
-                <div className="font-semibold text-gray-800">📢 광고성 메시지</div>
-                <div className="text-sm text-gray-500">
-                  {isAd ? '(광고) 표기 + 무료거부번호 필수 포함' : '알림성 메시지 (표기 불필요)'}
+            {/* AI 자율 진단 카드 — 타겟 + AI 추천 채널 통합 */}
+            <div className="rounded-xl bg-gradient-to-br from-violet-500/10 via-fuchsia-500/5 to-violet-500/10 border border-violet-400/20 p-5">
+              <div className="flex items-start gap-3 mb-4">
+                <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-violet-500 to-fuchsia-500 flex items-center justify-center shrink-0 shadow-md shadow-violet-500/20">
+                  <Sparkles className="w-4 h-4 text-white" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="text-xs text-violet-300 font-medium mb-1">AI 자율 진단</div>
+                  <div className="text-sm text-white/90 leading-relaxed">
+                    {topInsight}
+                  </div>
                 </div>
               </div>
-              <label className="relative inline-flex items-center cursor-pointer">
-                <input 
-                  type="checkbox" 
-                  checked={isAd} 
+
+              <div className="grid grid-cols-2 max-md:grid-cols-1 gap-3">
+                <div className="bg-white/5 border border-white/10 rounded-lg p-3">
+                  <div className="flex items-center gap-1.5 text-[11px] text-white/50 mb-1">
+                    <Users className="w-3 h-3" /> 추출된 타겟
+                  </div>
+                  <div className="text-sm text-white/80 mb-1 line-clamp-1">{targetDescription}</div>
+                  <div className="text-2xl text-violet-300 font-bold">
+                    {targetCount.toLocaleString()}<span className="text-sm text-white/50 ml-1">명</span>
+                  </div>
+                </div>
+                <div className="bg-white/5 border border-white/10 rounded-lg p-3">
+                  <div className="flex items-center gap-1.5 text-[11px] text-white/50 mb-1">
+                    <Smartphone className="w-3 h-3" /> AI 추천 채널
+                  </div>
+                  <div className="text-lg text-fuchsia-300 font-bold mb-1">{recommendedChannel}</div>
+                  <div className="text-xs text-white/60 leading-snug line-clamp-2">{channelReason}</div>
+                </div>
+              </div>
+
+              <div className="text-[10px] text-white/30 italic mt-3">
+                Data source — AI 추천 (자율 진단 + customer-filter)
+              </div>
+            </div>
+
+            {/* 광고성 toggle 라인 — amber 액센트 별도 분리 */}
+            <div className="flex items-center justify-between rounded-xl bg-amber-500/5 border border-amber-400/20 p-4 gap-3">
+              <div className="flex items-start gap-3 min-w-0">
+                <div className="w-8 h-8 rounded-lg bg-amber-500/20 border border-amber-400/30 flex items-center justify-center shrink-0">
+                  <Megaphone className="w-4 h-4 text-amber-300" />
+                </div>
+                <div className="min-w-0">
+                  <div className="text-sm text-white/90 font-medium">광고성 메시지</div>
+                  <div className="text-xs text-white/50 mt-0.5">
+                    {isAd ? '(광고) 표기 + 무료거부번호 필수 포함' : '알림성 메시지 (표기 불필요)'}
+                  </div>
+                </div>
+              </div>
+              <label className="relative inline-flex items-center cursor-pointer shrink-0">
+                <input
+                  type="checkbox"
+                  checked={isAd}
                   onChange={(e) => setIsAd(e.target.checked)}
-                  className="sr-only peer" 
+                  className="sr-only peer"
                 />
-                <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-purple-600"></div>
+                <div className="w-11 h-6 bg-white/10 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-amber-500"></div>
               </label>
             </div>
-              <div className="text-sm text-gray-600 mb-2">채널 선택</div>
+
+            {/* 채널 선택 3 카드 */}
+            <div>
+              <div className="text-xs text-white/60 mb-2">채널 선택</div>
               <div className="grid grid-cols-3 gap-2">
-                {[{key: 'SMS', label: 'SMS', icon: '📱'}, {key: 'LMS', label: 'LMS', icon: '📝'}, {key: 'MMS', label: 'MMS', icon: '🖼️'}].map(({key: ch, label, icon}) => (
+                {CHANNEL_OPTIONS.map(({ key: ch, label, Icon }) => (
                   <button
                     key={ch}
                     onClick={() => { setSelectedChannel(ch); if (ch !== 'MMS') setMmsUploadedImages([]); }}
-                    className={`p-3 rounded-lg border-2 text-center font-medium transition-all ${
+                    className={`flex items-center justify-center gap-2 py-3 rounded-lg border transition-all ${
                       selectedChannel === ch
-                        ? 'border-purple-500 bg-purple-50 text-purple-700'
-                        : 'border-gray-200 hover:border-gray-300 text-gray-600'
+                        ? 'border-violet-400/50 bg-violet-500/10 text-violet-200 shadow-lg shadow-violet-500/20'
+                        : 'border-white/10 bg-white/5 text-white/60 hover:bg-white/10 hover:border-white/20'
                     }`}
                   >
-                    {icon} {label}
+                    <Icon className="w-4 h-4" />
+                    <span className="text-sm font-medium">{label}</span>
                   </button>
                 ))}
               </div>
             </div>
 
-            {/* ★ D77: 추출 고객 0명일 때 경고 + 문안생성 차단 */}
-            {(aiResult?.target?.count || 0) === 0 && (
-              <div className="rounded-lg border border-rose-200 bg-rose-50 p-3 text-center">
-                <div className="text-rose-600 font-medium text-sm">추출된 고객이 0명입니다</div>
-                <div className="text-rose-500 text-xs mt-1">타겟 조건을 수정하거나, 고객 DB에 데이터를 업로드해주세요.</div>
+            {/* 0건 차단 카드 — D77 흐름 유지 (자동 완화 X) */}
+            {targetCount === 0 && (
+              <div className="rounded-xl bg-rose-500/10 border border-rose-400/30 p-4 text-center">
+                <div className="flex items-center justify-center gap-2 text-rose-300 font-medium text-sm mb-1">
+                  <AlertTriangle className="w-4 h-4" />
+                  추출된 고객이 0명입니다
+                </div>
+                <div className="text-rose-300/70 text-xs">
+                  타겟 조건을 정정하거나, 고객 DB에 데이터를 업로드해주세요.
+                </div>
               </div>
             )}
 
-            {/* 다음 버튼 — 0명이면 비활성화 */}
-            <button
-              onClick={handleAiGenerateChannelMessage}
-              disabled={aiLoading || (aiResult?.target?.count || 0) === 0}
-              className="w-full py-4 bg-green-700 text-white rounded-lg font-medium hover:bg-green-800 flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              {aiLoading ? (
-                <>
-                  <span className="animate-spin">⏳</span>
-                  메시지 생성 중...
-                </>
-              ) : (aiResult?.target?.count || 0) === 0 ? (
-                <>추출된 고객이 0명입니다. 다시 추출바랍니다</>
-              ) : (
-                <>다음: 문구 생성 →</>
-              )}
-            </button>
+            {/* 다음 버튼 또는 6 sub-agent 로딩 시각 효과 */}
+            {aiLoading ? (
+              <div className="rounded-xl bg-gradient-to-br from-violet-500/10 via-fuchsia-500/5 to-violet-500/10 border border-violet-400/20 p-5">
+                <div className="flex items-center gap-2 text-violet-300 font-medium text-sm mb-4">
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  AI가 메시지를 생성 중입니다
+                </div>
+                <div className="space-y-2">
+                  {SUB_AGENT_STEPS.map(step => {
+                    const isImmediateDone = step.doneMs === 0;
+                    const isTimedDone = step.doneMs > 0 && elapsedMs >= step.doneMs;
+                    const isMessageStep = step.doneMs === -1;
+                    const isDone = isImmediateDone || isTimedDone;
+                    const isRunning = !isDone && (
+                      isMessageStep ||
+                      (step.doneMs > 0 && elapsedMs >= (step.doneMs - 700))
+                    );
+                    const Icon = step.Icon;
+                    return (
+                      <div
+                        key={step.id}
+                        className={`flex items-center gap-3 px-3 py-2 rounded-lg border transition-all ${
+                          isDone
+                            ? 'bg-emerald-500/10 border-emerald-400/20'
+                            : isRunning
+                              ? 'bg-violet-500/10 border-violet-400/30 shadow-md shadow-violet-500/10'
+                              : 'bg-white/5 border-white/10'
+                        }`}
+                      >
+                        <div
+                          className={`w-7 h-7 rounded-lg flex items-center justify-center shrink-0 ${
+                            isDone
+                              ? 'bg-emerald-500/20 text-emerald-300'
+                              : isRunning
+                                ? 'bg-violet-500/20 text-violet-300'
+                                : 'bg-white/5 text-white/30'
+                          }`}
+                        >
+                          {isDone
+                            ? <Check className="w-4 h-4" />
+                            : isRunning
+                              ? <Loader2 className="w-4 h-4 animate-spin" />
+                              : <Icon className="w-4 h-4" />
+                          }
+                        </div>
+                        <div
+                          className={`text-sm ${
+                            isDone
+                              ? 'text-emerald-200'
+                              : isRunning
+                                ? 'text-violet-200 font-medium'
+                                : 'text-white/40'
+                          }`}
+                        >
+                          {step.label}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            ) : (
+              <button
+                onClick={handleAiGenerateChannelMessage}
+                disabled={targetCount === 0}
+                className="w-full py-4 bg-gradient-to-r from-violet-600 to-fuchsia-600 text-white rounded-xl font-medium hover:from-violet-500 hover:to-fuchsia-500 shadow-lg shadow-violet-500/30 flex items-center justify-center gap-2 disabled:opacity-40 disabled:cursor-not-allowed disabled:shadow-none transition-all"
+              >
+                {targetCount === 0 ? (
+                  <>추출된 고객이 0명입니다. 다시 추출해주세요</>
+                ) : (
+                  <>다음 — AI 메시지 생성 <ArrowRight className="w-4 h-4" /></>
+                )}
+              </button>
+            )}
           </div>
         )}
 
-        {/* Step 2: 메시지 + 캠페인 확정 */}
+        {/* Step 2: 6 sub-agent 결과 + 폰 UI carousel + MMS + 1-click 3 액션 카드 */}
         {aiStep === 2 && (
-          <div className="p-6 space-y-6">
-            {/* 선택된 채널 표시 */}
-            <div className="flex items-center gap-2 text-sm text-gray-600">
-              <span>선택된 채널:</span>
-              <span className="px-2 py-1 bg-purple-100 text-purple-700 rounded font-medium">{selectedChannel}</span>
+          <div className="p-6 space-y-5">
+
+            {/* 6 sub-agent 결과 카드 — 모두 완료 표시 */}
+            <div className="rounded-xl bg-emerald-500/5 border border-emerald-400/20 p-4">
+              <div className="flex items-center gap-2 text-emerald-300 font-medium text-sm mb-3">
+                <Check className="w-4 h-4" />
+                AI 진단 종결 — 6 단계 완료
+              </div>
+              <div className="grid grid-cols-3 max-md:grid-cols-2 gap-2">
+                {SUB_AGENT_STEPS.map(step => (
+                  <div
+                    key={step.id}
+                    className="flex items-center gap-2 bg-white/5 border border-white/10 rounded-lg px-3 py-2"
+                  >
+                    <Check className="w-3 h-3 text-emerald-400 shrink-0" />
+                    <div className="text-xs text-white/70">{step.label}</div>
+                  </div>
+                ))}
+              </div>
+              <div className="text-[10px] text-white/30 italic mt-2">
+                Data source — AI 6 sub-agent (자율 진단)
+              </div>
             </div>
 
-            {/* 메시지 3안 - 모던 폰 UI */}
+            {/* 선택된 채널 + 광고성 칩 */}
+            <div className="flex items-center gap-2 text-xs text-white/60 flex-wrap">
+              <span>선택된 채널:</span>
+              <span className="px-2 py-0.5 bg-violet-500/20 text-violet-200 border border-violet-400/30 rounded font-medium">
+                {selectedChannel}
+              </span>
+              {isAd && (
+                <span className="px-2 py-0.5 bg-amber-500/20 text-amber-200 border border-amber-400/30 rounded font-medium">
+                  광고성
+                </span>
+              )}
+            </div>
+
+            {/* 메시지 3안 폰 UI carousel — 외곽 다크 + 메시지 영역 화이트 */}
             <div>
-              <div className="text-sm text-gray-600 mb-3">💬 {selectedChannel} 메시지 추천 (택1)</div>
-              <div className="grid grid-cols-3 gap-5">
+              <div className="text-sm text-white/80 mb-3 flex items-center gap-2">
+                <MessageSquare className="w-4 h-4 text-violet-300" />
+                {selectedChannel} 메시지 추천 (택1)
+              </div>
+              <div className="grid grid-cols-3 max-md:grid-cols-1 gap-4">
                 {aiResult?.messages?.length > 0 ? (
                   aiResult.messages.map((msg: any, idx: number) => {
+                    const isSelected = selectedAiMsgIdx === idx;
+                    const isEditing = editingAiMsg === idx;
                     return (
-                    <label key={msg.variant_id || idx} className="group cursor-pointer">
-                      <input type="radio" name="message" className="hidden" checked={selectedAiMsgIdx === idx} onChange={() => { setSelectedAiMsgIdx(idx); setEditingAiMsg(null); }} />
-                      {/* 모던 폰 프레임 */}
-                      <div className="rounded-[1.8rem] p-[3px] transition-all bg-gray-300 group-has-[:checked]:bg-gradient-to-b group-has-[:checked]:from-purple-400 group-has-[:checked]:to-purple-600 group-has-[:checked]:shadow-lg group-has-[:checked]:shadow-purple-200 hover:bg-gray-400">
-                        <div className="bg-white rounded-[1.6rem] overflow-hidden flex flex-col" style={{ height: '420px' }}>
-                          {/* 상단 - 타입명 + 수정 버튼 */}
-                          <div className="px-4 py-2.5 bg-gradient-to-r from-gray-50 to-gray-100 flex justify-between items-center shrink-0 border-b">
-                            <span className="text-[11px] text-gray-400 font-medium">문자메시지</span>
-                            <div className="flex items-center gap-1.5">
-                              {selectedAiMsgIdx === idx && editingAiMsg !== idx && (
-                                <button
-                                  onClick={(e) => { e.preventDefault(); e.stopPropagation(); setEditingAiMsg(idx); }}
-                                  className="text-[10px] px-1.5 py-0.5 bg-purple-100 text-purple-600 rounded hover:bg-purple-200 transition-colors"
-                                >
-                                  ✏️ 수정
-                                </button>
-                              )}
-                              <span className="text-[11px] font-bold text-purple-600">{msg.variant_id}. {msg.variant_name}</span>
+                      <label key={msg.variant_id || idx} className="group cursor-pointer">
+                        <input
+                          type="radio"
+                          name="message"
+                          className="hidden"
+                          checked={isSelected}
+                          onChange={() => { setSelectedAiMsgIdx(idx); setEditingAiMsg(null); }}
+                        />
+                        {/* 폰 외곽 — 다크 톤 (선택 시 violet→fuchsia 그라데이션 glow) */}
+                        <div
+                          className={`rounded-[1.8rem] p-[3px] transition-all ${
+                            isSelected
+                              ? 'bg-gradient-to-b from-violet-400 to-fuchsia-500 shadow-lg shadow-violet-500/30'
+                              : 'bg-slate-800 hover:bg-slate-700'
+                          }`}
+                        >
+                          <div className="bg-slate-900 rounded-[1.6rem] overflow-hidden flex flex-col" style={{ height: '420px' }}>
+                            {/* 폰 헤더 — 다크 톤 */}
+                            <div className="px-4 py-2.5 bg-gradient-to-r from-slate-950 to-violet-950/30 flex justify-between items-center shrink-0 border-b border-white/5">
+                              <span className="text-[11px] text-white/40 font-medium">문자메시지</span>
+                              <div className="flex items-center gap-1.5">
+                                {isSelected && !isEditing && (
+                                  <button
+                                    onClick={(e) => { e.preventDefault(); e.stopPropagation(); setEditingAiMsg(idx); }}
+                                    className="text-[10px] px-1.5 py-0.5 bg-violet-500/20 text-violet-300 border border-violet-400/30 rounded hover:bg-violet-500/30 transition-colors flex items-center gap-1"
+                                  >
+                                    <Edit3 className="w-2.5 h-2.5" /> 수정
+                                  </button>
+                                )}
+                                <span className="text-[11px] font-bold text-violet-300">
+                                  {msg.variant_id}. {msg.variant_name}
+                                </span>
+                              </div>
                             </div>
-                          </div>
-                          {/* LMS/MMS 제목 */}
-                          {(selectedChannel === 'LMS' || selectedChannel === 'MMS') && msg.subject && (
-                            <div className="px-4 py-1.5 bg-orange-50 border-b border-orange-200 shrink-0">
-                              <span className="text-[11px] font-bold text-orange-700">{buildAdSubjectFront(msg.subject, selectedChannel, isAd)}</span>
-                            </div>
-                          )}
-                          {/* 메시지 영역 */}
-                          <div className="flex-1 overflow-y-auto p-3 bg-gradient-to-b from-purple-50/30 to-white">
-                            {editingAiMsg === idx ? (
-                              <div className="h-full flex flex-col gap-2">
-                                {(selectedChannel === 'LMS' || selectedChannel === 'MMS') && (
-                                  <input
-                                    type="text"
-                                    value={msg.subject || ''}
+                            {/* LMS/MMS 제목 — amber 액센트 (광고 표기 색상 통일) */}
+                            {(selectedChannel === 'LMS' || selectedChannel === 'MMS') && msg.subject && !isEditing && (
+                              <div className="px-4 py-1.5 bg-amber-500/10 border-b border-amber-400/20 shrink-0">
+                                <span className="text-[11px] font-bold text-amber-300">
+                                  {buildAdSubjectFront(msg.subject, selectedChannel, isAd)}
+                                </span>
+                              </div>
+                            )}
+                            {/* 메시지 영역 — 실제 폰 시각 보존 (화이트) */}
+                            <div className="flex-1 overflow-y-auto p-3 bg-white">
+                              {isEditing ? (
+                                <div className="h-full flex flex-col gap-2">
+                                  {(selectedChannel === 'LMS' || selectedChannel === 'MMS') && (
+                                    <input
+                                      type="text"
+                                      value={msg.subject || ''}
+                                      onChange={(e) => {
+                                        const updated = [...aiResult.messages];
+                                        updated[idx] = { ...updated[idx], subject: e.target.value };
+                                        setAiResult({ ...aiResult, messages: updated });
+                                      }}
+                                      placeholder="LMS 제목"
+                                      className="w-full text-[12px] px-2 py-1.5 border border-amber-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-400 text-gray-800"
+                                    />
+                                  )}
+                                  <textarea
+                                    value={msg.message_text}
                                     onChange={(e) => {
                                       const updated = [...aiResult.messages];
-                                      updated[idx] = { ...updated[idx], subject: e.target.value };
+                                      updated[idx] = {
+                                        ...updated[idx],
+                                        message_text: e.target.value,
+                                        byte_count: calculateBytes(e.target.value),
+                                      };
                                       setAiResult({ ...aiResult, messages: updated });
                                     }}
-                                    placeholder="LMS 제목"
-                                    className="w-full text-[12px] px-2 py-1.5 border border-orange-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-400"
+                                    className="flex-1 w-full text-[12px] leading-[1.6] p-2 border border-violet-300 rounded-lg resize-none focus:outline-none focus:ring-2 focus:ring-violet-400 text-gray-800"
+                                    autoFocus
                                   />
-                                )}
-                                <textarea
-                                  value={msg.message_text}
-                                  onChange={(e) => {
-                                    const updated = [...aiResult.messages];
-                                    updated[idx] = { ...updated[idx], message_text: e.target.value, byte_count: calculateBytes(e.target.value) };
-                                    setAiResult({ ...aiResult, messages: updated });
-                                  }}
-                                  className="flex-1 w-full text-[12px] leading-[1.6] p-2 border border-purple-300 rounded-lg resize-none focus:outline-none focus:ring-2 focus:ring-purple-400"
-                                  autoFocus
-                                />
-                                <button
-                                  onClick={(e) => { e.preventDefault(); e.stopPropagation(); setEditingAiMsg(null); }}
-                                  className="py-1.5 bg-purple-600 text-white text-[11px] font-medium rounded-lg hover:bg-purple-700 transition-colors"
-                                >
-                                  ✅ 수정 완료
-                                </button>
-                              </div>
-                            ) : (
-                            <div className="flex gap-2">
-                              <div className={`w-7 h-7 rounded-full flex items-center justify-center shrink-0 text-xs $bg-purple-100`}>📱</div>
-                              <div className={`rounded-2xl rounded-tl-sm p-3 shadow-sm border text-[12px] leading-[1.6] whitespace-pre-wrap break-all overflow-hidden text-gray-700 max-w-[95%] bg-white border-gray-100`}>
-                              {/* ★ D93: 문안 추천 단계 — %변수% 하이라이트 표시로 개인화 부분 직관적 확인 */}
-                              {highlightVars(wrapAdText(msg.message_text || ''))}
-                              </div>
+                                  <button
+                                    onClick={(e) => { e.preventDefault(); e.stopPropagation(); setEditingAiMsg(null); }}
+                                    className="py-1.5 bg-gradient-to-r from-violet-600 to-fuchsia-600 text-white text-[11px] font-medium rounded-lg hover:from-violet-500 hover:to-fuchsia-500 transition-colors flex items-center justify-center gap-1"
+                                  >
+                                    <Check className="w-3 h-3" /> 수정 완료
+                                  </button>
+                                </div>
+                              ) : (
+                                <div className="flex gap-2">
+                                  <div className="w-7 h-7 rounded-full bg-violet-100 flex items-center justify-center shrink-0">
+                                    <Smartphone className="w-3.5 h-3.5 text-violet-600" />
+                                  </div>
+                                  <div className="rounded-2xl rounded-tl-sm p-3 shadow-sm border text-[12px] leading-[1.6] whitespace-pre-wrap break-all overflow-hidden text-gray-700 max-w-[95%] bg-white border-gray-100">
+                                    {/* D93 흐름 유지 — %변수% 하이라이트 */}
+                                    {highlightVars(wrapAdText(msg.message_text || ''))}
+                                  </div>
+                                </div>
+                              )}
                             </div>
-                            )}
-                          </div>
-                          {/* 하단 바이트 */}
-                          <div className="px-3 py-2 border-t bg-gray-50 text-center shrink-0">
-                          {(() => {
-                            const bytes = calculateBytes(wrapAdText(msg.message_text || ''));
-                            const limit = selectedChannel === 'SMS' ? 90 : 2000;
-                            const isOver = bytes > limit;
-                            return (
-                              <>
-                                <span className={`text-[10px] ${isOver ? 'text-red-600 font-bold' : editingAiMsg === idx ? 'text-purple-600 font-medium' : 'text-gray-400'}`}>
-                                  {bytes} / {limit} bytes
-                                </span>
-                                {isOver && <div className="text-[10px] text-red-600 mt-1">⚠️ {selectedChannel === 'SMS' ? 'SMS 90바이트 초과 — LMS 전환 필요' : 'LMS 2000바이트 초과'}</div>}
-                              </>
-                            );
-                          })()}
+                            {/* 하단 바이트 — 다크 톤 + rose 초과 표시 */}
+                            <div className="px-3 py-2 border-t border-white/5 bg-slate-950 text-center shrink-0">
+                              {(() => {
+                                const bytes = calculateBytes(wrapAdText(msg.message_text || ''));
+                                const limit = selectedChannel === 'SMS' ? 90 : 2000;
+                                const isOver = bytes > limit;
+                                return (
+                                  <>
+                                    <span
+                                      className={`text-[10px] ${
+                                        isOver
+                                          ? 'text-rose-400 font-bold'
+                                          : isEditing
+                                            ? 'text-violet-300 font-medium'
+                                            : 'text-white/40'
+                                      }`}
+                                    >
+                                      {bytes} / {limit} bytes
+                                    </span>
+                                    {isOver && (
+                                      <div className="text-[10px] text-rose-400 mt-1 flex items-center justify-center gap-1">
+                                        <AlertTriangle className="w-2.5 h-2.5" />
+                                        {selectedChannel === 'SMS'
+                                          ? 'SMS 90바이트 초과 — LMS 전환 필요'
+                                          : 'LMS 2000바이트 초과'}
+                                      </div>
+                                    )}
+                                  </>
+                                );
+                              })()}
+                            </div>
                           </div>
                         </div>
-                      </div>
-                    </label>
+                      </label>
                     );
                   })
                 ) : (
-                  <div className="col-span-3 text-center py-8 text-gray-400">
+                  <div className="col-span-3 text-center py-8 text-white/40">
+                    <Loader2 className="w-5 h-5 animate-spin inline mr-2" />
                     메시지를 불러오는 중...
                   </div>
                 )}
               </div>
             </div>
 
-            {/* MMS 이미지 첨부 — ★ B4 (D141): LMS/SMS일 때는 영역 자체 미렌더 (맞춤한줄과 동일 패턴)
-                LMS 선택 → 이미지 첨부 → 자동 MMS 전환 → 첨부 삭제해도 MMS 잠금 → 발송 차단 시나리오 차단 */}
+            {/* MMS 이미지 첨부 — MMS 선택 시만 (B4 D141 흐름 유지) */}
             {selectedChannel === 'MMS' && (
               <div>
-                <div className="text-base font-semibold text-gray-700 mb-3">🖼️ 이미지 첨부 (MMS)</div>
+                <div className="text-sm text-white/80 mb-3 flex items-center gap-2">
+                  <ImageIcon className="w-4 h-4 text-violet-300" />
+                  이미지 첨부 (MMS)
+                </div>
                 <div
                   onClick={() => setShowMmsUploadModal(true)}
-                  className="border-2 border-dashed border-gray-200 rounded-xl p-4 bg-gray-50/50 cursor-pointer hover:border-purple-400 hover:bg-purple-50/50 transition-all"
+                  className="border-2 border-dashed border-white/15 rounded-xl p-4 bg-white/5 cursor-pointer hover:border-violet-400/50 hover:bg-violet-500/10 transition-all"
                 >
                   {mmsUploadedImages.length > 0 ? (
                     <div className="flex items-center gap-3">
                       <MmsImagePreview images={mmsUploadedImages} size="sm" compact />
-                      <div className="text-sm text-purple-600 font-medium">✏️ {mmsUploadedImages.length}장 첨부됨 (클릭하여 수정)</div>
+                      <div className="text-sm text-violet-300 font-medium flex items-center gap-1">
+                        <Edit3 className="w-3.5 h-3.5" />
+                        {mmsUploadedImages.length}장 첨부됨 (클릭하여 정정)
+                      </div>
                     </div>
                   ) : (
                     <div className="flex flex-col items-center gap-2 py-2">
-                      <div className="w-12 h-12 rounded-full bg-gray-100 flex items-center justify-center">
-                        <span className="text-xl">📷</span>
+                      <div className="w-12 h-12 rounded-full bg-white/5 border border-white/10 flex items-center justify-center">
+                        <Camera className="w-5 h-5 text-white/40" />
                       </div>
-                      <div className="text-sm text-gray-500">클릭하여 이미지를 첨부합니다</div>
-                      <div className="text-xs text-gray-400">JPG만 · 300KB 이하 · 최대 3장</div>
+                      <div className="text-sm text-white/60">클릭하여 이미지를 첨부합니다</div>
+                      <div className="text-xs text-white/30">JPG만 · 300KB 이하 · 최대 3장</div>
                     </div>
                   )}
                 </div>
               </div>
             )}
 
-{/* 하단 버튼 */}
-{testSentResult && (
-              <div className={`p-3 rounded-lg text-sm whitespace-pre-wrap mb-3 ${testSentResult.startsWith('✅') ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'}`}>
+            {/* testSentResult 안내 — emerald (성공) / rose (실패) */}
+            {testSentResult && (
+              <div
+                className={`rounded-xl p-3 text-sm whitespace-pre-wrap border ${
+                  testSentResult.startsWith('✅')
+                    ? 'bg-emerald-500/10 border-emerald-400/30 text-emerald-300'
+                    : 'bg-rose-500/10 border-rose-400/30 text-rose-300'
+                }`}
+              >
                 {testSentResult}
               </div>
             )}
-            <div className="flex gap-3 pt-4 border-t">
+
+            {/* 1-click 3 액션 카드 — amber/cyan/emerald color-coded */}
+            <div className="grid grid-cols-3 max-md:grid-cols-1 gap-3 pt-2">
               <button
-                onClick={() => setAiStep(1)}
-                className="flex-1 py-3 border rounded-lg text-gray-600 hover:bg-gray-100 flex items-center justify-center gap-2"
+                onClick={handleSpamFilterClick}
+                className="rounded-xl bg-amber-500/10 border border-amber-400/30 hover:bg-amber-500/20 hover:border-amber-400/50 p-4 text-left transition-all"
               >
-                ← 채널변경
+                <div className="flex items-center gap-2 mb-2">
+                  <div className="w-8 h-8 rounded-lg bg-amber-500/20 flex items-center justify-center">
+                    <ShieldCheck className="w-4 h-4 text-amber-300" />
+                  </div>
+                  <div className="text-xs text-amber-200 font-medium">검증</div>
+                </div>
+                <div className="text-sm text-white font-bold mb-0.5">스팸필터 테스트</div>
+                <div className="text-[11px] text-white/50">금지 단어 + 발신번호 검증</div>
               </button>
+
               <button
-onClick={handleTestSend}
-disabled={testSending || testCooldown}
-className="flex-1 py-3 bg-orange-500 text-white rounded-lg hover:bg-orange-600 disabled:opacity-50 flex items-center justify-center gap-2"
->
-{testSending ? '📱 발송 중...' : testCooldown ? '⏳ 10초 대기' : '📱 담당자 테스트'}
-</button>
-<button 
-onClick={() => setShowPreview(true)}
-className="flex-1 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center justify-center gap-2"
->
-👁️ 미리보기
-</button>
-<button 
-onClick={() => {
-  const msg = aiResult?.messages?.[selectedAiMsgIdx]?.message_text || campaign.messageContent || '';
-                    const cb = selectedCallback || '';
-                    const sc = sampleCustomer || {};
-                    // ★ D121: 미리보기와 동일한 데이터+aliasMap으로 스팸필터에도 치환
-                    const hasSample = sc && Object.keys(sc).length > 0;
-                    const replaceVars = (text: string) => hasSample
-                      ? replaceVarsBySampleCustomer(text, sc, {
-                          removeUnmatched: true,
-                          aliasMap: {
-                            '이름': ['고객명', '성함', '고객이름'],
-                            '고객등급': ['등급', '멤버십등급', '회원등급'],
-                            '등록매장정보': ['매장명', '매장', '지점', '등록매장'],
-                            '최근구매매장': ['구매매장', '최근매장'],
-                            '보유포인트': ['포인트', '적립금'],
-                            '최근구매금액': ['구매금액', '구매액'],
-                            '누적구매금액': ['총구매금액', '총구매액', '누적구매'],
-                          },
-                        })
-                      : text;
-                    const smsRaw = buildAdMessageFront(msg, 'SMS', isAd, optOutNumber);
-                    const lmsRaw = buildAdMessageFront(msg, 'LMS', isAd, optOutNumber);
-                    const smsMsg = replaceVars(smsRaw);
-                    const lmsMsg = replaceVars(lmsRaw);
-                    const subj = aiResult?.messages?.[selectedAiMsgIdx]?.subject || '';
-                    setSpamFilterData({sms: smsMsg, lms: lmsMsg, callback: cb, msgType: selectedChannel as 'SMS'|'LMS'|'MMS', subject: subj, isAd, firstRecipient: sampleCustomer || undefined});
-                    setShowSpamFilter(true);
-}}
-className="flex-1 py-3 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 flex items-center justify-center gap-2"
->
-스팸필터 테스트
-</button>
-<button
-onClick={() => {
-  const selectedMsg = aiResult?.messages?.[selectedAiMsgIdx];
-  // ★ B17-10 → B-D75-01 리팩토링: SMS 바이트 초과 → 커스텀 모달로 LMS 전환 안내
-  if (selectedChannel === 'SMS') {
-    const msg = selectedMsg?.message_text || '';
-    const bytes = calculateBytes(wrapAdText(msg));
-    if (bytes > 90) {
-      setLmsAlertBytes(bytes);
-      setShowLmsAlert(true);
-      return;
-    }
-  }
-  setShowAiSendModal(true);
-}}
-className="flex-1 py-3 bg-green-700 text-white rounded-lg hover:bg-green-800 flex items-center justify-center gap-2"
->
-✅ 캠페인확정
-</button>
+                onClick={handleTestSend}
+                disabled={testSending || testCooldown}
+                className="rounded-xl bg-cyan-500/10 border border-cyan-400/30 hover:bg-cyan-500/20 hover:border-cyan-400/50 p-4 text-left transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                <div className="flex items-center gap-2 mb-2">
+                  <div className="w-8 h-8 rounded-lg bg-cyan-500/20 flex items-center justify-center">
+                    {testSending
+                      ? <Loader2 className="w-4 h-4 text-cyan-300 animate-spin" />
+                      : <Send className="w-4 h-4 text-cyan-300" />}
+                  </div>
+                  <div className="text-xs text-cyan-200 font-medium">테스트</div>
+                </div>
+                <div className="text-sm text-white font-bold mb-0.5">
+                  {testSending ? '발송 중...' : testCooldown ? '10초 대기' : '담당자 테스트'}
+                </div>
+                <div className="text-[11px] text-white/50">내 휴대전화로 1건 발송</div>
+              </button>
+
+              <button
+                onClick={handleConfirmClick}
+                className="rounded-xl bg-gradient-to-br from-emerald-500/20 to-emerald-500/10 border border-emerald-400/40 hover:from-emerald-500/30 hover:to-emerald-500/20 hover:border-emerald-400/60 p-4 text-left transition-all shadow-lg shadow-emerald-500/20"
+              >
+                <div className="flex items-center gap-2 mb-2">
+                  <div className="w-8 h-8 rounded-lg bg-emerald-500/30 flex items-center justify-center">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-300" />
+                  </div>
+                  <div className="text-xs text-emerald-200 font-medium">메인 액션</div>
+                </div>
+                <div className="text-sm text-white font-bold mb-0.5">캠페인 확정</div>
+                <div className="text-[11px] text-white/50">발송 시간 + 회신번호 설정</div>
+              </button>
             </div>
           </div>
         )}
       </div>
 
-      {/* ★ B-D75-01: SMS→LMS 전환 커스텀 모달 (window.confirm 제거) */}
+      {/* LMS 자동 전환 sub-modal — 90byte 초과 시 (B-D75-01 흐름 + 다크 톤 정정) */}
       {showLmsAlert && (
-        <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-[70]">
-          <div className="bg-white rounded-xl shadow-2xl w-[420px] overflow-hidden">
-            <div className="p-6 bg-gradient-to-r from-amber-50 to-orange-50 border-b">
-              <div className="text-center">
-                <div className="text-5xl mb-3">📝</div>
-                <h3 className="text-lg font-bold text-gray-800">메시지 길이 초과</h3>
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-[70]">
+          <div className="bg-slate-900 border border-white/10 rounded-2xl shadow-2xl w-full max-w-md mx-4 overflow-hidden">
+            <div className="p-5 bg-gradient-to-r from-amber-500/20 to-orange-500/10 border-b border-white/10">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-amber-500/20 border border-amber-400/30 flex items-center justify-center">
+                  <FileText className="w-5 h-5 text-amber-300" />
+                </div>
+                <h3 className="text-white font-bold text-base">메시지 길이 초과</h3>
               </div>
             </div>
-            <div className="p-6">
+            <div className="p-5">
               <div className="text-center mb-4">
-                <div className="text-3xl font-bold text-red-500 mb-1">{lmsAlertBytes} <span className="text-lg text-gray-400">/ 90 byte</span></div>
-                <div className="text-gray-600">SMS 제한을 초과했습니다</div>
+                <div className="text-3xl font-bold text-rose-300">
+                  {lmsAlertBytes} <span className="text-base text-white/40">/ 90 byte</span>
+                </div>
+                <div className="text-white/60 text-sm mt-1">SMS 제한을 초과했습니다</div>
               </div>
-              <div className="bg-blue-50 rounded-lg p-4 mb-4">
-                <div className="text-sm text-blue-800">
+              <div className="bg-violet-500/10 border border-violet-400/30 rounded-lg p-3 mb-4">
+                <div className="text-sm text-violet-200">
                   <div className="font-medium mb-1">LMS로 전환하시겠습니까?</div>
-                  <div className="text-blue-600">LMS는 최대 2,000byte까지 발송 가능합니다</div>
+                  <div className="text-violet-300/80 text-xs">LMS는 최대 2,000byte까지 발송 가능합니다</div>
                 </div>
               </div>
-              <div className="flex gap-3">
+              <div className="flex gap-2">
                 <button
                   onClick={() => setShowLmsAlert(false)}
-                  className="flex-1 py-3 border-2 border-gray-300 rounded-lg text-gray-700 font-medium hover:bg-gray-50"
-                >닫기</button>
+                  className="flex-1 py-2.5 border border-white/20 rounded-lg text-white/70 font-medium hover:bg-white/5 transition-colors"
+                >
+                  닫기
+                </button>
                 <button
-                  onClick={() => {
-                    setSelectedChannel('LMS');
-                    setShowLmsAlert(false);
-                  }}
-                  className="flex-1 py-3 bg-green-700 text-white rounded-lg font-medium hover:bg-green-800"
-                >LMS 전환</button>
+                  onClick={() => { setSelectedChannel('LMS'); setShowLmsAlert(false); }}
+                  className="flex-1 py-2.5 bg-gradient-to-r from-violet-600 to-fuchsia-600 text-white rounded-lg font-medium hover:from-violet-500 hover:to-fuchsia-500 shadow-md shadow-violet-500/30 transition-all"
+                >
+                  LMS 전환
+                </button>
               </div>
             </div>
           </div>
