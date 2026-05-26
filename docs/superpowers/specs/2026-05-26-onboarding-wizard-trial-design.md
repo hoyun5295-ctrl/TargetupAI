@@ -350,4 +350,30 @@ CREATE UNIQUE INDEX idx_diel_company_date ON daily_insight_email_log(company_id,
 ## 11. 변경 이력
 
 - 2026-05-26: brainstorming 종결 + 설계 문서 작성 (의문 11건 + 11 섹션 + Phase 매핑 7 Phase + Braze 압도 차별화 5 영역)
-- 2026-05-26 (갱신): Harold 명시 다듬기 팝업 정정 통합 — 의문 13건 + 핵심 분류 5건 + Phase 0 신설 + Braze 차별화 6 영역 + 다듬기 정정 3 frontend 파일 추가 (DirectSendAiRefinePopup + AiRefineModal + AiRefineLockedModal)
+- 2026-05-26 (갱신 1): Harold 명시 다듬기 팝업 정정 통합 — 의문 13건 + 핵심 분류 5건 + Phase 0 신설 + Braze 차별화 6 영역 + 다듬기 정정 3 frontend 파일 추가 (DirectSendAiRefinePopup + AiRefineModal + AiRefineLockedModal)
+- 2026-05-26 (갱신 2, Part 1 종결 직후): Harold 명시 분리 흐름 + "오늘 하루 보지 않기" 옵션 통합. AI 오퍼레이션 30일 무료체험 = 기존 PRO TRIAL과 분리 (companies.ai_operator_trial_started_at + ai_operator_trial_until 별도 컬럼). Wizard 진입 시 "오늘 하루 보지 않기" 24h localStorage cooldown 옵션 추가. AdminDashboard.tsx 안 별도 부여 UI. plan-guard.ts isAiOperatorAllowed 게이팅 정정 (ENT OR ai_operator_trial_until > NOW()). ai-operator-trial-expire-worker.ts 신설 (trial-downgrade-worker.ts 패턴 미러).
+
+## 12. AI 오퍼레이션 30일 무료체험 분리 흐름 (Harold 명시 2026-05-26 갱신)
+
+### 기존 PRO 무료체험과 분리 본질
+
+| 영역 | 기존 PRO 무료체험 (CT-17) | 신규 AI 오퍼레이션 무료체험 |
+|------|---------------------------|-------------------------|
+| 컬럼 | `plan_id` (TRIAL plan) + `trial_expires_at` | `companies.ai_operator_trial_started_at` + `ai_operator_trial_until` |
+| 영향 범위 | 전체 PRO 기능 무료 | AI 오퍼레이션만 무료 (plan_code 유지) |
+| 게이팅 | plan-guard.ts subscription_status + trial_expires_at | plan-guard.ts isAiOperatorAllowed = ENT OR ai_operator_trial_until > NOW() |
+| 자동 종결 cron | trial-downgrade-worker.ts (매일 04:00) | ai-operator-trial-expire-worker.ts 신설 |
+| 부여 endpoint | POST /api/companies/:id/grant-trial | POST /api/companies/:id/grant-ai-operator-trial |
+| 취소 endpoint | POST /api/companies/:id/revoke-trial | POST /api/companies/:id/revoke-ai-operator-trial |
+| 부여 UI | AdminDashboard.tsx 기존 버튼 | AdminDashboard.tsx 별도 버튼 추가 |
+
+### Wizard 진입 흐름 (Harold 명시 — 강압 X)
+
+| 사용자 액션 | localStorage 동작 | 다음 진입 시 노출 여부 |
+|-----------|------------------|---------------------|
+| X 닫기 | `onboarding_wizard_seen = Date.now()` | 다음 로그인 시 즉시 재노출 |
+| **"오늘 하루 보지 않기"** | `onboarding_wizard_dismissed_until = Date.now() + 24h` | 24h 안 미노출 + 24h 경과 후 자동 재노출 |
+| "지금 시작" → step 진행 | onboarding_wizard_state INSERT/UPDATE | 진행률 이어서 노출 |
+| Wizard step 7 완료 | onboarding_wizard_state.completed_at = NOW() | 영구 미노출 (단 admin 영역 "다시 진입" 카드 활용) |
+
+= 강압 X + 사용자 자유 닫기 + "오늘 하루 보지 않기" 옵션 (24h cooldown) 흐름 정합.
