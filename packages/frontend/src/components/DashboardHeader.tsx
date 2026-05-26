@@ -18,6 +18,8 @@ interface DashboardHeaderProps {
   // D53: 게이팅 콜백 — 잠긴 기능 클릭 시 업그레이드 모달
   onFeatureLocked?: (featureName: string, requiredPlan: string) => void;
   customerDbEnabled?: boolean;
+  // ★ D220+ Task 8 (2026-05-27): ai_messaging 게이팅 — BASIC+ 영역 (세그먼트 메뉴 등)
+  aiMessagingEnabled?: boolean;
   // ★ D88: 구독 만료 시 전체 잠금
   isSubscriptionLocked?: boolean;
   onSubscriptionLocked?: () => void;
@@ -63,6 +65,7 @@ export default function DashboardHeader({
   onLogout,
   onFeatureLocked,
   customerDbEnabled,
+  aiMessagingEnabled,
   isSubscriptionLocked,
   onSubscriptionLocked,
   planCode,
@@ -122,6 +125,21 @@ export default function DashboardHeader({
     // ★ D162-4 (2026-05-15) 2차: Harold님 명시 정합 — DashboardHeader 메뉴에서 '알림톡 발송' 제거.
     //   직접발송/직접타겟발송 모달 헤더 안에서 알림톡 모달 진입 (카카오 노란색 버튼). 메뉴 분리 시 사용자 혼란 차단.
     //   onAlimtalkSend prop은 호환성 위해 유지 (Dashboard에서 직접발송/타겟발송 → 알림톡 모달 진입 callback).
+    // ★ D220+ Task 6+8 (2026-05-27): 고객 세그먼트 메뉴 — 자연어 AI 변환 + 발송 흐름 재활용
+    //   ai_messaging 게이팅 (BASIC+) — FREE/STARTER = 메뉴는 자물쇠 표시 + 클릭 시 가치 안내 모달
+    {
+      label: '세그먼트',
+      onClick: () => {
+        if (aiMessagingEnabled === false) {
+          onFeatureLocked?.('고객 세그먼트', '베이직');
+          return;
+        }
+        navigate('/segments');
+      },
+      color: 'gold',
+      locked: aiMessagingEnabled === false,
+      path: '/segments',
+    },
     { label: '발송결과', onClick: onResults, color: 'green', path: '/' },
     { label: '수신거부', onClick: () => navigate('/unsubscribes'), color: 'gold', path: '/unsubscribes' },
     { label: '설정', onClick: () => navigate('/settings'), color: 'green', path: '/settings' },

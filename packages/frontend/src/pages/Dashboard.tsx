@@ -2257,6 +2257,8 @@ const campaignData = {
         department={(user as any)?.department}
         isCompanyAdmin={user?.userType === 'company_admin'}
         planCode={planInfo?.plan_code}
+        // ★ D220+ Task 8 (2026-05-27): 세그먼트 메뉴 잠금 게이팅 (ai_messaging — BASIC+)
+        aiMessagingEnabled={planInfo?.ai_messaging_enabled}
         onAiOperatorClick={async () => {
           // ★ D178 (2026-05-19) + D209+ (Harold 명시 2026-05-23) AI Operator 메뉴 클릭 — backend isAiOperatorAllowed 호출 결과 처리.
           //   ENV AI_OPERATOR_ALLOWED_USERS 설정 시 본 list 등록 사용자만 진입, 그 외 모두 AiOperatorWalkthroughModal 표시.

@@ -44,6 +44,7 @@ import AiExplainPage from './pages/AiExplainPage';
 import PaymentResultPage from './pages/PaymentResultPage';
 import JourneyPausePage from './pages/JourneyPausePage'; // ★ D218+ Public 정지 페이지 (인증 X)
 import OnboardingWizardPage from './pages/OnboardingWizardPage'; // ★ D219+ Part 2 (2026-05-27) AI 오퍼레이션 무료체험 사용자 온보딩 7 step
+import SegmentsPage from './pages/SegmentsPage'; // ★ D220+ Task 6 (2026-05-27) 일반 segment 관리 메뉴 — Braze 동급 자산
 // ★ D187 (2026-05-20): Journey Builder Lite — 7 표준 여정 + 자연어 진입
 import JourneysPage from './pages/JourneysPage';
 // ★ D192 (2026-05-22): Journey monitoring + 통계 페이지 신규
@@ -389,6 +390,15 @@ function App() {
           element={
             <PrivateRoute allowedTypes={['company_admin', 'company_user']}>
               <OnboardingWizardPage />
+            </PrivateRoute>
+          }
+        />
+        {/* ★ D220+ Task 6 (2026-05-27): 고객 세그먼트 관리 메뉴 — Braze 동급 자산 */}
+        <Route
+          path="/segments"
+          element={
+            <PrivateRoute allowedTypes={['company_admin', 'company_user']}>
+              <SegmentsPage />
             </PrivateRoute>
           }
         />

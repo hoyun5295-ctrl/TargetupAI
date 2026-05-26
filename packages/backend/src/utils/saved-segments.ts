@@ -22,6 +22,9 @@ export interface SaveSegmentData {
   url?: string;
   channel?: string;
   isAd?: boolean;
+  // ★ D220+ (2026-05-27 Task 6): saved_segments.filter_jsonb 활용 — CT-01 호환 structured filter
+  //   자연어 → CT-97 변환 결과 + 매칭 수 즉시 미리보기 가능 영역.
+  filter?: Record<string, { operator: string; value: any }> | null;
 }
 
 export interface SavedSegment {
@@ -38,6 +41,7 @@ export interface SavedSegment {
   url: string | null;
   channel: string | null;
   is_ad: boolean;
+  filter_jsonb: Record<string, { operator: string; value: any }> | null;
   last_used_at: string | null;
   created_at: string;
 }
@@ -63,10 +67,12 @@ export async function saveSegment(
     `INSERT INTO saved_segments (
       id, company_id, user_id, name, emoji, segment_type,
       prompt, auto_relax, selected_fields, briefing, url, channel, is_ad,
+      filter_jsonb,
       created_at, updated_at
     ) VALUES (
       gen_random_uuid(), $1, $2, $3, $4, $5,
       $6, $7, $8, $9, $10, $11, $12,
+      $13::jsonb,
       NOW(), NOW()
     ) RETURNING *`,
     [
@@ -76,12 +82,13 @@ export async function saveSegment(
       data.emoji || '📋',
       data.segmentType,
       data.prompt || null,
-      false, // ★ D171 영구 원칙: auto_relax 항상 false 박음 (DB 컬럼 보존, 값 무효화)
+      false, // ★ D171 영구 원칙: auto_relax 항상 false (DB 컬럼 보존, 값 무효화)
       data.selectedFields || null,
       data.briefing || null,
       data.url || null,
       data.channel || null,
       data.isAd || false,
+      data.filter ? JSON.stringify(data.filter) : null,
     ]
   );
 
@@ -141,6 +148,7 @@ export async function updateSegment(
       url = COALESCE($11, url),
       channel = COALESCE($12, channel),
       is_ad = COALESCE($13, is_ad),
+      filter_jsonb = COALESCE($14::jsonb, filter_jsonb),
       updated_at = NOW()
     WHERE id = $1 AND company_id = $2 AND user_id = $3
     RETURNING *`,
@@ -150,12 +158,13 @@ export async function updateSegment(
       data.emoji ?? null,
       data.segmentType ?? null,
       data.prompt ?? null,
-      null, // ★ D171 영구 원칙: auto_relax UPDATE 박지 X (null → COALESCE 기존 값 유지)
+      null, // ★ D171 영구 원칙: auto_relax UPDATE 적용 X (null → COALESCE 기존 값 유지)
       data.selectedFields ?? null,
       data.briefing ?? null,
       data.url ?? null,
       data.channel ?? null,
       data.isAd ?? null,
+      data.filter !== undefined && data.filter !== null ? JSON.stringify(data.filter) : null,
     ]
   );
   return result.rows[0] || null;

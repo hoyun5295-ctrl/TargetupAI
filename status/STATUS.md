@@ -107,7 +107,38 @@
 
 ---
 
-### 🚀 다음 세션 진입 가이드 (D218+ Phase 1~3 부분 종결 후 — **D219+ 잔여 영역 완성 진입**)
+### 🚀 다음 세션 진입 가이드 (D219+ Part 2 + 후속 통합 종결 후 — **D220+ 한줄로AI 모달 재작성 진입**)
+
+> **★ D220+ 진입 매트릭스 (Harold 명시 2026-05-27 D219+ Part 2 후속 통합 종결 직후)**:
+> D219+ Part 2 + 후속 통합 종결 = AI 오퍼레이션 30일 무료체험 분리 흐름 + Wizard 7 step + 박과장님 신고 + Task 1 자연어 segment 모드 + Task 2 AddressBookModal AI 매핑 영구 폐기 + Task 5 Performance 일일 인사이트 카드 + Task 7 isAiOperatorTrialActive duplicate 영구 폐기. D220+ = 한줄로AI / 맞춤한줄 모달 7건 (3,065 라인) 전면 재작성 진입 (Harold 캡처 신고 — 옛 라이트 톤 + 조잡 → D215+ design_quality_minimum_journey_level 정합).
+>
+> **D220+ 진입 명령어 (다음 세션 첫 메시지 — 즉시 복사 가능)**:
+> ```
+> docs/superpowers/handoffs/2026-05-27-ai-hanjullo-modal-redesign-handoff.md 정독 + memory/feedback_design_quality_minimum_journey_level.md 정독 + memory/feedback_no_bakkeum_usage.md 정독 + memory/feedback_default_superpowers_workflow.md 정독 + memory/feedback_cto_mandate_for_vito.md 정독 + memory/project_d219_part2_completed.md 정독 → D220+ 진입 (한줄로AI / 맞춤한줄 모달 7건 전면 재작성 — Step 1 AiCampaignResultPopup 우선 진입)
+> ```
+>
+> **★ D219+ Part 2 + 후속 통합 종결 매트릭스 (2026-05-27)**:
+> - **Phase 1+2+3+4 종결** = companies ALTER 2 컬럼 + plan-guard 4분기 확장 + ai-operator-trial-expire-worker + AdminDashboard UI (fuchsia 카드) + CT-95/96/97/98 4건 + routes/onboarding 8 endpoint + OnboardingWizardPage + 7 step 컴포넌트 + Dashboard OnboardingCard + 24h cooldown
+> - **박과장님 신고 종결** = 주소록 xlsx 다운로드 + 기존 그룹 append (중복 phone skip) + 기존 PRO 무료체험 native confirm 4건 동시 정정
+> - **Task 1 종결** = DirectTargetFilterModal 자연어 모드 (CT-97 + `ai_messaging` BASIC+ 게이팅 + 0건 자동 완화 X)
+> - **Task 2 영구 폐기** = AddressBookModal AI 매핑 영구 제거 (Harold "FREE 회사 사치 X" — 직접발송 영역 AI X 정합)
+> - **Task 5 종결** = Performance 일일 인사이트 카드 (CT-98 collectCompanyInsight export + routes/insight.ts 신설 + PerformancePage 카드 — 매일 9시 메일과 동일한 인사이트 화면 안 즉시 확인)
+> - **Task 7 종결** = isAiOperatorTrialActive duplicate 영구 폐기 (onboarding-wizard 함수 제거 + plan-guard loadPlanContext 단일 진입점 통합)
+> - **Task 3+4 폐기** = Task 3 폐기 (이미 매칭 수 표시 영역 존재) + Task 4 폐기 (기존 endpoint 유지 + 신뢰도 score 조잡 영역)
+> - **Task 6 종결** = 일반 segment 관리 메뉴 신설 — utils/saved-segments + routes/saved-segments 안 filter_jsonb 활용 + generate-from-text/preview endpoint 2건 신설 + SegmentsPage 신설 (다크 톤 + violet + segment 목록 카드 + 자연어 신규 모달 + 미리보기 확장 토글 + Source caption) + App.tsx /segments 라우트 + DashboardHeader 메뉴 추가. Braze/Salesforce 동급 자산
+> - **Task 8 종결** = PlanUpgradeModal 전면 강화 (다크 톤 + violet/fuchsia 그라데이션 + 자물쇠 아이콘 + FEATURE_VALUE_MAP 5건 매핑 — 가치 카드 3건 + 화면 안내) + DashboardHeader 안 aiMessagingEnabled props + 세그먼트 메뉴 잠금 흐름 (FREE/STARTER → 잠긴 메뉴 + 클릭 시 강화 모달 = 구매욕구 자극). 기존 활용 영역 4건 (AI 추천 발송 / AI 문구 추천 / 직접 타겟 발송 / 고객 DB 업로드) 동시 강화 부수 효과
+>
+> **★ D220+ 한줄로AI 모달 재작성 매트릭스 (Harold 명시 2026-05-27)**:
+> - **분류 A 전면 재작성** = AiCampaignResultPopup (451) + AiCustomSendFlow (1,246) — 19~25h
+> - **분류 B 다크 톤 정정** = AiCampaignSendModal (411) + RecommendTemplateModal (559) + AiMessageSuggestModal (135) + AiPreviewModal (132) + AiSendTypeModal (131) — 8~10h
+> - **총 분량** = 27~35h (3~4 세션 분할 의무)
+> - **상세 매핑** = `docs/superpowers/handoffs/2026-05-27-ai-hanjullo-modal-redesign-handoff.md` 정독 의무
+>
+> **자가 검증 evidence (D219+ Part 2 후속 통합)** = backend + frontend tsc 0 errors + 박/옛/진정/영영 + 모델명 + native dialog 신규 영역 0건 + Harold 직접 PG SQL 5건 + tp-push 배포 완료
+
+---
+
+### 🚀 옛 D219+ 진입 가이드 (D218+ Phase 1~3 부분 종결 후 — 참조용)
 
 > **★ D219+ 진입 매트릭스 (Harold 명시 2026-05-26 D218+ 부분 종결 직후)**:
 > D218+ Phase 1~3 부분 종결 = AI Operator 여정 자동화 안전 강화 (스팸필터테스트 + 발송 2시간 전 담당자 알림 + 즉시 정지 + 결과 알림 + 7일 학습) = CT-92/93/94 신규 + journey-builder 강화 + endpoint 6건 + worker 2건 + Public 라우터 + app.ts 등록. D219+ = 잔여 영역 (Task 7 journey-executor 강화 + Task 12 campaign-sync-worker 강화 + Phase 4 Frontend 4건 신규 + 2건 강화 + Phase 5 자가 검증 + Phase 6 배포 + Phase 7 메모리 갱신) 완성 진입.
