@@ -236,7 +236,10 @@ export async function syncPendingTemplatesJob(): Promise<void> {
               t.alarm_notified_status
          FROM kakao_templates t
          JOIN kakao_sender_profiles p ON p.id = t.profile_id
-        WHERE t.status IN ('REQUESTED','REVIEWING','REG','REQ','REV','KREQ')
+        WHERE (
+          t.status IN ('REQUESTED','REVIEWING','REG','REQ','REV','KREQ')
+          OR (t.status IN ('APPROVED','REJECTED','KREJ') AND t.alarm_notified_status IS NULL)
+        )
           AND (t.last_synced_at IS NULL OR t.last_synced_at < now() - INTERVAL '5 minutes')
         LIMIT 100`,
     );
@@ -444,14 +447,39 @@ async function notifyTemplateInspectionResult(params: {
     }
   }
 
+  // Fallback 2: 회사의 첫 활성 kakao_alarm_users.phone_number (회사 검증 phone — 회신 안전)
+  // ★ D218+ (2026-05-26) PDF 신고 #1 사고 영구 차단: 인비토 발신프로필 admin_phone_number 누락 +
+  //   sender_registrations approved 0건 회사도 알림 발화 정합. kakao_alarm_users는
+  //   회사 admin이 직접 등록한 본인 검증 수신자 phone — 회신 안전 + 회사당 3명 제한.
+  if (!callback) {
+    try {
+      const auRes = await query(
+        `SELECT phone_number FROM kakao_alarm_users
+          WHERE company_id = $1 AND COALESCE(active_yn, 'Y') = 'Y'
+          ORDER BY created_at ASC
+          LIMIT 1`,
+        [params.companyId],
+      );
+      callback = String(auRes.rows[0]?.phone_number || '').replace(/\D/g, '');
+      if (callback) {
+        log(
+          'notifyTemplateInspectionResult',
+          `admin_phone_number + sender_registrations 둘 다 비어있어 kakao_alarm_users fallback 사용 (profile_key=${params.profileKey}, callback=${callback})`,
+        );
+      }
+    } catch (fallback2Err) {
+      logErr('notifyTemplateInspectionResult-fallback2', fallback2Err);
+    }
+  }
+
   if (!callback) {
     // 모든 fallback 실패 시 발송 불가. 로그만 남기고 스킵 (기간계 안정성 우선)
     logErr(
       'notifyTemplateInspectionResult',
       new Error(
-        `admin_phone_number + sender_registrations fallback 모두 빈 영역 — ` +
+        `admin_phone_number + sender_registrations + kakao_alarm_users fallback 모두 비어있음 — ` +
           `profile_key=${params.profileKey}, company_id=${params.companyId}. ` +
-          `회사 admin에게 발신프로필 admin_phone_number 등록 또는 발신번호 승인 안내 필요.`,
+          `회사 admin에게 발신프로필 admin_phone_number 등록 또는 발신번호 승인 또는 검수 알림 수신자 등록 안내 필요.`,
       ),
     );
     return 0;

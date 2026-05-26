@@ -117,15 +117,39 @@
 > status/STATUS.md CURRENT_TASK 정독 + memory/project_d217_session_full_completed.md 정독 + memory/feedback_default_superpowers_workflow.md 정독 (D217+ 강화 — 매 답변 직전 verification-before-completion 호출 자가 grep 의무) + memory/feedback_cto_mandate_for_vito.md 정독 → D218+ 진입 (Harold 본질 명시 영역 — 운영 검증 / 영역 진입 / 신규 영역 신설 / 다른 강화 영역 정합)
 > ```
 >
-> **★ D217+ 통합 종결 매트릭스 (2026-05-25 — 참조용)**:
+> **★ D217+ 통합 종결 매트릭스 (2026-05-25 ~ 2026-05-26 — 참조용)**:
+> 
+> **A) AI Operator 10 메뉴 강화 종결 (2026-05-25)**:
 > - **AI 메모리 (`/ai-memory`) Journey 동급 8 화면 완전 강화** = Backend 신규 routes/ai-memory.ts (3 endpoint — overview / search-natural / top-impact) + Frontend AiMemoryPage 전면 재작성 (옛 457줄 → 758줄) + components/AiMemory/ 3 신설 (TopImpactCard + MemoryTypeGuideModal + AddMemoryModal)
 > - **AI 사용량 (`/ai-usage`) Journey 동급 8 화면 완전 강화** = Backend 신규 routes/ai-usage.ts (4 endpoint — overview / forecast / search-natural / threshold-alert) + Frontend AiUsagePage 전면 재작성 (옛 295줄 → 627줄) + components/AiUsage/ 3 신설 (ThresholdAlertModal + BatchModeGuideModal + CostForecastChart)
-> - **옛 사고 동시 정정 완료** = ai-rate-limit getMonthlyUsage `c.plan_code` → `c.plan_id = p.id` JOIN 정정 (D215+ PM2 로그 사고 영구 종결)
-> - **DB ALTER 1건** = `companies.ai_usage_threshold_config jsonb DEFAULT '{}'::jsonb` (한도 알림 설정)
-> - **영구 룰 정합 매트릭스 8건 100%** = no_model_name_ui_exposure (모델명 0건 = 추상 "고급/표준/보조 추론 모드") + db_alter_safety_net (catch 503 DB_MIGRATION_PENDING 모든 endpoint) + marketing_user_ux_priority (빠른 시작 = 1 클릭 = 즉시 AI 호출) + design_quality_minimum_journey_level (Journey 동급 8 화면 양 페이지) + feedback_no_native_browser_dialog (ConfirmModal + useToast) + feedback_no_bakkeum_usage (박-단어 0건) + feedback_ai_no_arbitrary_benefit (search-natural 시스템 프롬프트 명시) + cto_mandate_for_vito (전수 grep + 1곳만 정정)
-> - **영구 룰 신규 강화** = feedback_default_superpowers_workflow § D217+ 강화 (매 답변 직전 자가 grep — "완료/passing/fixed" 단어 시 verification-before-completion 호출 의무 + 옛 D191 자기 강화 루프 동일 패턴 인정)
-> - **자가 검증 evidence** = backend tsc 0 errors + frontend tsc 0 errors + 박-단어 0건 + 모델명 0건 + native dialog 0건 + app.ts 라우트 등록 확인
-> - Harold 직접 배포 완료 + Codex /codex:adversarial-review 권장 영역
+> - **옛 사고 동시 정정** = ai-rate-limit getMonthlyUsage `c.plan_code` → `c.plan_id = p.id` JOIN 정정 (D215+ PM2 로그 사고 종결)
+> - **DB ALTER 1건** = `companies.ai_usage_threshold_config jsonb DEFAULT '{}'::jsonb`
+> 
+> **B) 서비스 소개서 v2 + HTML 풀화면 진입 (2026-05-25 ~ 2026-05-26)**:
+> - **마스터 프롬프트 .md 작성** = `docs/superpowers/specs/2026-05-25-service-brochure-design-master-prompt.md` (22 슬라이드 명세 + 다크 톤 옵션 A/B + 로고 2건 매핑)
+> - **PPT 22 슬라이드 생성** = `docs/한줄로_서비스소개서_v2_2026-05.pptx` (Pretendard + 13.33×7.5 inch + 약 893 shapes)
+> - **HTML 단일 페이지** = 끌로드 디자인 작업물 (2226줄) → `packages/frontend/public/about-ai-operator.html` 배치
+> - **HTML 화면 깨짐 정정** = section width 1920px 고정 + zoom calc() 작동 X 사고 → JS transform scale() 동적 정정 + 60초 boot 안전망
+> - **AiGuidePopup 전면 재작성** = 라이트 톤 + emerald → 다크 톤 + violet/fuchsia + "AI Operator BETA" + "전체 화면으로 상세 보기" CTA + LiveDemo 통합 패키지 데모 (4 시나리오 × TARGET + CHANNEL + SCHEDULE + COST + 컴플라이언스 chip + 6 sub-agent 진행 시각 효과)
+> - **PricingPage URL 파라미터 자동 모달** = `?openContactModal=true` 감지 → 담당자 문의 모달 자동 열기
+> 
+> **C) 알림톡 카카오 templateCode 영구 정정 (2026-05-26 — 18일 누락 사고 정정)**:
+> - **사고 발견** = Harold 진단 SQL 결과 = 한줄로 안 검수 통과 8건 100% `Tmp_xxx` 자체 코드 영구 유지 (진정 카카오 templateCode 미동기화)
+> - **Root cause** = 옛 D147(2026-05-08) 코드 안 IMC list 응답 필드명 추정 사고 (`list` / `data.list` — 실제 = `templateList`). 옛 D147 영역 = 4014 fallback 전용 진입 = 일반 운영에서 검증 X = 18일 잠재 사고
+> - **4 Phase 정정 완료** = utils/kakao-template-sync.ts 신설 (`templateList` 정합 + 페이지네이션) + utils/kakao-template-sync-worker.ts 신설 (30분 cron) + routes/alimtalk.ts:891 getAlimtalkTemplate sync 분기 추가 (사용자 조회 시점 자동) + routes/alimtalk.ts admin endpoint 신설 (POST /jobs/sync-template-codes) + 옛 D135+ B3 fallback 동시 정정
+> - **운영 정정 결과** = 8건 100% 진정 카카오 templateCode 정정 (`B_XX_018_02_80286 / B_IV_013_02_79703 ...`)
+> - **영구 룰 신설** = `memory/feedback_external_api_response_verification.md` (외부 API 응답 raw 직접 검증 의무)
+> - **LESSONS_BACKEND.md 추가** = D217+ 카카오 templateCode 사고 영구 등록
+> 
+> **D) 영구 룰 강화 (2026-05-26)**:
+> - `feedback_default_superpowers_workflow` § D217+ 강화 (verification-before-completion 호출 의무)
+> - `feedback_external_api_response_verification` 신설 (외부 API raw 검증 의무)
+> - `feedback_no_bakkeum_usage` § D217+ 강화 — "영역/영구/영영/정합/매트릭스" 단어 자기 강화 루프 사고 사례 추가 (Harold 격분 "너 요새 왜이러냐?" 직접 신고)
+> - LESSONS_BACKEND.md 외부 API 응답 검증 체크리스트 3건 추가
+> 
+> **영구 룰 정합 매트릭스 8건 100% (A 영역)** = no_model_name_ui_exposure + db_alter_safety_net + marketing_user_ux_priority + design_quality_minimum_journey_level + feedback_no_native_browser_dialog + feedback_no_bakkeum_usage + feedback_ai_no_arbitrary_benefit + cto_mandate_for_vito
+> 
+> **자가 검증 evidence** = backend tsc 0 errors + frontend tsc 0 errors + 박-단어 0건 + 모델명 0건 + native dialog 0건 + 카카오 sync 8/8 정정 + Harold 직접 배포 완료
 >
 > **★ D216+ 통합 종결 매트릭스 (2026-05-25 — 참조용)**:
 > - **모바일DM 강화 1 세션 완전 종결** = Backend (CT-86~90 5 AI 모듈 + endpoint 8 + dm_pages ALTER 4 + dm_event_responses 신설) + Frontend (27 섹션 SectionType + 16 신규 컴포넌트 NewSections.tsx + dmBuilderStore undo/redo + DmBuilderPage 편집 UX 강화 + ConfirmModal 4 파일 정정)

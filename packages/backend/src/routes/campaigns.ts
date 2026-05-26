@@ -1352,7 +1352,14 @@ router.post('/direct-send', async (req: Request, res: Response) => {
     }
 
     // ★ D91: LMS/MMS 제목 필수 검증
-    if ((msgType === 'LMS' || msgType === 'MMS') && !subject?.trim()) {
+    // ★ D218+ (2026-05-26) PDF 신고 #4 사고 정정: alimtalk 발송 path (frontend msgType='LMS' 강제 설정 — D162-4 정합)
+    //   에서 alimtalkNextType이 'L'(LMS 대체) 또는 'B'(LMS+문구) 아닐 경우 subject 검증 skip 의무.
+    //   옛 사고 = 'N'(대체 안 함) / 'S'(SMS 대체) / 'A'(SMS+문구) 모든 옵션에서 동일 토스트 발화 (Harold PDF 신고).
+    const isAlimtalkSend = sendChannel === 'alimtalk';
+    const requiresLmsSubject =
+      (msgType === 'LMS' || msgType === 'MMS') &&
+      (!isAlimtalkSend || alimtalkNextType === 'L' || alimtalkNextType === 'B');
+    if (requiresLmsSubject && !subject?.trim()) {
       return res.status(400).json({ success: false, error: 'LMS/MMS 발송 시 제목을 입력해주세요.' });
     }
 

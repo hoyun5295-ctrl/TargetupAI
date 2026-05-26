@@ -449,8 +449,27 @@ export default function AlimtalkManagementSection() {
                     <tr key={p.id} className="border-t border-gray-100">
                       <td className="px-3 py-2">
                         <div className="font-medium text-gray-800">{p.profile_name}</div>
-                        <div className="text-[10px] text-gray-400 font-mono">
-                          {p.profile_key?.slice(0, 24)}…
+                        {/* ★ D218+ (2026-05-26) PDF 신고 #3: 발신프로필 키값 전체 노출 + 복사 버튼 추가. */}
+                        <div className="flex items-center gap-1.5 mt-0.5">
+                          <div className="text-[10px] text-gray-400 font-mono break-all flex-1 min-w-0">
+                            {p.profile_key || '-'}
+                          </div>
+                          {p.profile_key && (
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                navigator.clipboard
+                                  .writeText(p.profile_key!)
+                                  .then(() => setToast('발신프로필 키값 복사 완료'))
+                                  .catch(() => setToast('복사 실패 — 직접 선택 후 복사해주세요'));
+                              }}
+                              className="px-1.5 py-0.5 text-[10px] bg-gray-100 hover:bg-gray-200 text-gray-600 rounded transition shrink-0"
+                              title="발신프로필 키값 복사"
+                            >
+                              복사
+                            </button>
+                          )}
                         </div>
                         {p.approval_status === 'REJECTED' && p.reject_reason && (
                           <div className="text-[11px] text-red-500 mt-0.5">

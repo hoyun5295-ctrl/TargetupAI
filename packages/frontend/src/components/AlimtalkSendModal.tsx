@@ -420,6 +420,23 @@ export default function AlimtalkSendModal({
     }
   };
 
+  // ★ D218+ (2026-05-26) PDF 신고 #5 사고 정정: show prop 변경 + unmount path body overflow 강제 복원 안전망.
+  //   옛 D188 handleClose 구현 = 외부 onClose 버튼 클릭 path만 cover. show=false prop 직접 변경 또는
+  //   부모 unmount 흐름에서 body.style.overflow = 'hidden' 잔존 시 직접발송 패널 스크롤 X 사고 영구 차단.
+  //   외부 다른 모달(BetaFeatureModal / ModalBase 등)이 hidden 설정 후 cleanup 누락한 경우도 cover.
+  useEffect(() => {
+    if (!show) {
+      if (typeof document !== 'undefined' && document.body) {
+        document.body.style.overflow = '';
+      }
+    }
+    return () => {
+      if (typeof document !== 'undefined' && document.body) {
+        document.body.style.overflow = '';
+      }
+    };
+  }, [show]);
+
   // ★ D188 (2026-05-21) 영업팀장 신고 #6-(2): close 시 sending state + body overflow 명시 reset 안전망.
   //   모달 close 후 직접 발송 패널 복귀 시 스크롤 차단 잔존 사고 영구 차단.
   //   document.body.style.overflow 적용된 영역 자체는 본 모달에서 변경 X 확인됨 — 영구 안전망으로 reset 명시.

@@ -116,6 +116,47 @@
 
 ---
 
+## 외부 API 응답 검증 사고 (D217+ 추가)
+
+### D217+ (2026-05-26) — 카카오 알림톡 templateCode 18일 누락 사고
+
+**Critical 사고**: 옛 D147(2026-05-08) 코드 안 IMC list 응답 구조 추정 사고. 운영 환경 8건 (검수 통과) 100% 자체 코드(`Tmp_xxx`)로 18일 유지. 진정 카카오 templateCode(`B_XX_xxx_xx_xxxxx`) 동기화 누락.
+
+**Root cause**:
+- 옛 D147 코드: `(lst.data as any)?.list || (lst.data as any)?.data?.list || []`
+- 본 코드 = 4014 fallback 전용 진입 경로라 일반 운영에서 검증 X = 잠재 사고
+- 실제 IMC 응답 키 = `[hasNext, total, templateList]` — 옛 fallback 매트릭스 어디에도 없음
+- D217+ sync worker 신설 시 옛 코드 그대로 차용 = 첫 사이클 `matched=0/failed=8` 사고
+
+**진정 정정** (`utils/kakao-template-sync.ts` + `routes/alimtalk.ts:706`):
+```typescript
+const items: any[] =
+  (r.data as any)?.templateList ||   // 진정 IMC 필드명
+  (r.data as any)?.list ||
+  (r.data as any)?.data?.list ||
+  [];
+```
+
+**4 Phase 동시 정합** (영구 안전망):
+1. `POST /api/alimtalk/jobs/sync-template-codes` 백필 endpoint (1회성)
+2. `getAlimtalkTemplate` 사용자 조회 시점 자동 동기화
+3. `kakao-template-sync-worker.ts` 30분 cron worker
+4. 옛 D135+ B3 fallback 동시 정정
+
+**진단 흐름 (영구 사례)**:
+- 1차 진단: `matched=0/failed=8` 결과만 보고 stderr 추정 사고 가설
+- 2차 진단: 디버그 로그 추가 (응답 키 / 첫 item / raw 500자)
+- 3차 진단: Harold raw 정독 = `templateList` 필드명 영구 발견
+- 4차 정정: 진정 root cause fix = 8건 모두 정정 완료
+
+**교훈**:
+- **외부 API 응답 구조는 추측 또는 옛 코드 차용 X — 실제 raw 직접 확인 의무** (영구 룰 `feedback_external_api_response_verification` 신설)
+- 옛 fallback 매트릭스가 있다면 = 옛 코드가 실제로 진입한 경로인지 git log + PM2 로그 검증 의무
+- `console.error` / `console.warn` 진단 의존 X (stderr 분기 진입 차단) — `console.log` (stdout) 의무
+- 페이지네이션 (`hasNext`) 처리 — 첫 페이지만 break X
+
+---
+
 ## 자가 검증 매트릭스 (Backend 작업 시)
 
 - [ ] 발송 5경로 전수 점검 (AI/직접/타겟/스케줄/테스트)
@@ -127,3 +168,6 @@
 - [ ] SMS/LMS 발송 영역 = EUC-KR 화이트리스트 + stripIncompatibleEmojis
 - [ ] 외부 라이브러리 활용 시 한글 케이스 검증 필수
 - [ ] template literal raw 백틱 X
+- [ ] **외부 API 응답 구조 = 옛 코드 차용 X = 실제 raw 디버그 로그로 직접 확인 의무 (D217+ 영구 룰 `feedback_external_api_response_verification`)**
+- [ ] **`console.error` / `console.warn` 진단 의존 X = `console.log` (stdout) 의무 (grep 누락 차단)**
+- [ ] **list API 페이지네이션 `hasNext` 처리 — 첫 페이지만 break X**
