@@ -67,6 +67,9 @@ import { startJourneyTriggerWatcher } from './utils/journey-trigger-watcher';
 import { startPredictiveWorker } from './utils/predictive-worker';
 // ★ D210+ Phase 3 (2026-05-23 Harold 명시): 자동 재진입 worker — 6시간 주기 + 회사 admin 명시 활성 정합 (default OFF)
 import { startJourneyReentryWorker } from './utils/journey-reentry-worker';
+// ★ D217+ (2026-05-26 Harold 명시 진단 정정): 카카오 templateCode 동기화 worker — 30분 주기
+//   옛 D147 영역 = 검수 통과 후 진정 카카오 templateCode 영역 = 한줄로 안 동기화 누락 사고 (8건 100%) 영구 정정
+import { startKakaoTemplateSyncWorker } from './utils/kakao-template-sync-worker';
 
 // 공용 관리 라우트 (슈퍼관리자 + 고객사관리자)
 import manageUsersRoutes from './routes/manage-users';
@@ -268,6 +271,12 @@ app.listen(PORT, () => {
   //   AI_OPERATOR_ALLOWED_USERS=hoyun 게이팅 (routes/ai.ts 영역)
   startJourneyExecutor();
   startJourneyTriggerWatcher();
+
+  // ★ D217+ (2026-05-26 Harold 명시 진단 정정): 카카오 templateCode 동기화 (30분 주기)
+  //   옛 D147 영역 = 검수 통과 후 IMC 안 진정 카카오 templateCode 영역 = 한줄로 안 동기화 누락 사고 정정
+  //   운영 환경 8건 100% 사고 (template_code = Tmp_xxx 자체 코드 영구 유지) 영구 안전망
+  //   Phase 1 백필 endpoint (POST /api/alimtalk/jobs/sync-template-codes) + Phase 2 getAlimtalkTemplate 영역 분기 정합
+  startKakaoTemplateSyncWorker();
 
   // ★ D197 (2026-05-22) Phase B-2: Predictive Suite worker — 1시간 주기 customer 예측 점수 자동 갱신
   //   클릭률 + 이탈 위험 + 구매 가능성 (Logistic Regression + cold start fallback)

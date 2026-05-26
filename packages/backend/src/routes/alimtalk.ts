@@ -31,6 +31,8 @@ import {
   getRecentWebhookEvents,
 } from '../utils/alimtalk-webhook-handler';
 import { resolveImcCode } from '../utils/alimtalk-result-map';
+// ★ D217+ (2026-05-26 Harold 명시 진단 영역 정정): 옛 Tmp_xxx 영역 = 진정 카카오 templateCode 영역 동기화
+import { syncTemplateCodes, syncSingleTemplateCode } from '../utils/kakao-template-sync';
 import {
   syncCategoriesJob,
   syncPendingTemplatesJob,
@@ -903,6 +905,18 @@ router.get('/templates/:templateCode', async (req: Request, res: Response) => {
             WHERE id = $2`,
           [(r.data as any).status || 'UNKNOWN', ctx.id],
         );
+
+        // ★ D217+ (2026-05-26 Harold 명시 진단 영역 정정):
+        //   옛 D147 영역 = 검수 통과 후 IMC 안 진정 카카오 templateCode (B_XX_xxx_xx_xxxxx) 영역
+        //   영구 발급 영역 → 한줄로 안 영역 = 옛 Tmp_xxx 영구 유지 사고 영역 (운영 환경 8건 100% 사고).
+        //   본 분기 = IMC 응답 영역 안 진정 templateCode 영역 = 옛 Tmp_xxx 영역 영구 정정.
+        //   syncSingleTemplateCode 영역 안 idempotent (이미 카카오 코드 영역 = skip).
+        const syncResult = await syncSingleTemplateCode(ctx.id, r.data);
+        if (syncResult.updated) {
+          console.log(
+            `[alimtalk][templateCode 정합] id=${ctx.id} ${syncResult.oldCode} → ${syncResult.newCode}`,
+          );
+        }
       }
     } catch {
       /* IMC 실패 시 DB 값으로 폴백 */
@@ -2339,6 +2353,40 @@ router.post(
       await syncSenderStatusJob();
       res.json({ success: true });
     } catch (err) { return handleImcError(res, err); }
+  },
+);
+
+// ★ D217+ (2026-05-26 Harold 명시 진단 영역 정정):
+//   옛 D147 영역 = 검수 통과 후 IMC 안 진정 카카오 templateCode (B_XX_xxx_xx_xxxxx) 영역 영구 발급 →
+//   한줄로 안 = 옛 Tmp_xxx 영구 유지 사고 (운영 환경 8건 100% 사고 영역).
+//   본 endpoint = 옛 Tmp_xxx 영역 = 진정 카카오 templateCode 영역 일괄 백필.
+//
+//   Phase 1 — 1회성 백필 (옛 사고 영역 즉시 정정).
+//   Phase 3 — 30분 cron 영역 (kakao-template-sync-worker) = 향후 영구 안전망.
+//   Phase 2 — getAlimtalkTemplate 영역 (사용자 조회 시점 자동 정합) = 옛 routes/alimtalk.ts:891 영역.
+//
+//   슈퍼관리자 전용 영역. dryRun=true 시 시뮬레이션 영역 (UPDATE X).
+//   companyId 지정 시 본 회사 영역만 sync.
+router.post(
+  '/jobs/sync-template-codes',
+  requireSuperAdmin as any,
+  async (req: Request, res: Response) => {
+    try {
+      const dryRun = req.body?.dryRun === true;
+      const companyId = req.body?.companyId ? String(req.body.companyId) : undefined;
+      const startedAt = Date.now();
+      console.log(
+        `[alimtalk][jobs/sync-template-codes] 진입 — dryRun=${dryRun} companyId=${companyId || '(all)'}`,
+      );
+      const result = await syncTemplateCodes({ dryRun, companyId });
+      const elapsedMs = Date.now() - startedAt;
+      console.log(
+        `[alimtalk][jobs/sync-template-codes] 종결 — scanned=${result.scanned} matched=${result.matched} updated=${result.updated} skipped=${result.skipped} failed=${result.failed} (${elapsedMs}ms)`,
+      );
+      res.json({ success: true, dryRun, elapsedMs, ...result });
+    } catch (err) {
+      return handleImcError(res, err);
+    }
   },
 );
 
