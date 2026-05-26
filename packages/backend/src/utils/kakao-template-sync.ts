@@ -39,8 +39,11 @@ export interface SyncResult {
   }>;
 }
 
-const IMC_PAGE_SIZE = 500;
-const IMC_MAX_PAGES = 20;  // 최대 10,000건 영역 (운영 영역 영구 안전)
+// ★ D217+ fix v2 (2026-05-26 Harold 명시 진단): IMC API 영역 안 count 영역 = 100 영역 정합
+//   옛 routes/alimtalk.ts:706 D135+ B3 영역 = `count: 100` 영역 영구 작동 영역 정합 = 본 영역 영구 정합.
+//   옛 500 영역 = IMC API 영역 영구 영역 영영 X 가능성 영역 = 영구 정정.
+const IMC_PAGE_SIZE = 100;
+const IMC_MAX_PAGES = 100;  // 최대 10,000건 영역 (운영 영역 영구 안전)
 
 /**
  * 한줄로 안 옛 Tmp_xxx 영역 = 진정 카카오 templateCode 영역 영구 정정.
@@ -87,16 +90,24 @@ export async function syncTemplateCodes(
 
   // 2) IMC 안 전체 목록 조회 (페이지네이션 영역)
   const imcByKey = new Map<string, any>();
+  console.log(`[kakao-template-sync] IMC listAlimtalkTemplates 호출 영역 영구 시작 — count=${IMC_PAGE_SIZE} max_pages=${IMC_MAX_PAGES}`);
   for (let page = 0; page < IMC_MAX_PAGES; page++) {
     let r;
     try {
       r = await imc.listAlimtalkTemplates({ page, count: IMC_PAGE_SIZE });
     } catch (err: any) {
-      console.error(`[kakao-template-sync] IMC list page ${page} 오류:`, err?.message || err);
+      // ★ D217+ fix v2: stderr 영역 영구 X — console.log 영구 영역 영구 진단 영역
+      console.log(
+        `[kakao-template-sync] IMC list page ${page} 오류 — name=${err?.name || '(X)'} code=${err?.code || '(X)'} message=${err?.message || String(err)} httpStatus=${err?.httpStatus || '(X)'}`,
+      );
       break;
     }
+    // ★ D217+ fix v2: 응답 영역 영구 영역 영구 출력 (모든 페이지 영역 영구 영역)
+    console.log(
+      `[kakao-template-sync] IMC 응답 page=${page} r.code=${r.code} r.message=${(r.message || '').slice(0, 80)}`,
+    );
     if (r.code !== '0000') {
-      console.warn(`[kakao-template-sync] IMC list page ${page} code=${r.code} msg=${r.message}`);
+      console.log(`[kakao-template-sync] IMC list page ${page} code=${r.code} ≠ 0000 — break 영역`);
       break;
     }
     // ★ D217+ fix (2026-05-26 Harold 명시 진단): IMC 응답 영역 구조 영역 영구 디버그 로그
