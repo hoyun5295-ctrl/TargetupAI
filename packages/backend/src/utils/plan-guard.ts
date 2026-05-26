@@ -83,6 +83,12 @@ export interface PlanContext {
   autoCampaignOverride: number | null;   // 회사별 오버라이드 (D76)
   directRecipientLimit: number | null;   // 직접발송 주소록 최대 건수 (FREE=99,999, 나머지 NULL=무제한)
   legacyGrandfathered: boolean;          // ★ D209+ (Harold 명시 2026-05-23): 기존 고객사 영역 (PRO + AI Operator 진입 허용 — 레퍼런스 확보 본질)
+  // ★ D219+ Part 2 (2026-05-27): AI 오퍼레이션 30일 무료체험 별도 컬럼.
+  //   기존 plan_id(TRIAL) + trial_expires_at = 전체 PRO 기능 무료 흐름과 분리.
+  //   본 2 컬럼 = AI 오퍼레이션 메뉴만 무료체험 부여 (BASIC 사용자도 부여 가능).
+  aiOperatorTrialStartedAt: Date | null;
+  aiOperatorTrialUntil: Date | null;
+  isAiOperatorTrialActive: boolean;      // ai_operator_trial_until > NOW()
 }
 
 export interface FeatureCheckResult {
@@ -112,7 +118,8 @@ export const PLAN_STATUS_SELECT_EXPR = `
   p.cdp_events_per_month,
   p.direct_recipient_limit,
   c.auto_campaign_override, c.subscription_status, c.trial_expires_at,
-  COALESCE(c.legacy_grandfathered, false) AS legacy_grandfathered
+  COALESCE(c.legacy_grandfathered, false) AS legacy_grandfathered,
+  c.ai_operator_trial_started_at, c.ai_operator_trial_until
 `.trim();
 
 // ═══════════════════════════════════════════════════════════
@@ -141,6 +148,17 @@ export async function loadPlanContext(companyId: string): Promise<PlanContext | 
     trialExpiresAt !== null &&
     trialExpiresAt.getTime() > now;
 
+  // ★ D219+ Part 2 (2026-05-27): AI 오퍼레이션 30일 무료체험 별도 흐름.
+  //   기존 PRO 무료체험과 완전히 분리. plan_code 무관하게 ai_operator_trial_until 컬럼만 검사.
+  const aiOperatorTrialStartedAt: Date | null = row.ai_operator_trial_started_at
+    ? new Date(row.ai_operator_trial_started_at)
+    : null;
+  const aiOperatorTrialUntil: Date | null = row.ai_operator_trial_until
+    ? new Date(row.ai_operator_trial_until)
+    : null;
+  const isAiOperatorTrialActive =
+    aiOperatorTrialUntil !== null && aiOperatorTrialUntil.getTime() > now;
+
   return {
     companyId,
     planCode,
@@ -165,6 +183,9 @@ export async function loadPlanContext(companyId: string): Promise<PlanContext | 
     autoCampaignOverride: row.auto_campaign_override != null ? Number(row.auto_campaign_override) : null,
     directRecipientLimit: row.direct_recipient_limit != null ? Number(row.direct_recipient_limit) : null,
     legacyGrandfathered: !!row.legacy_grandfathered,
+    aiOperatorTrialStartedAt,
+    aiOperatorTrialUntil,
+    isAiOperatorTrialActive,
   };
 }
 
@@ -209,42 +230,49 @@ export function isBetaAccessAllowed(ctx: PlanContext): boolean {
 }
 
 /**
- * ★ D178 (2026-05-19) + D209+ (2026-05-23 Harold 명시) — AI Operator 진입 게이팅:
+ * ★ D178 (2026-05-19) + D209+ (2026-05-23) + D219+ Part 2 (2026-05-27 Harold 명시) — AI Operator 진입 게이팅:
  *
- *   [현재 매트릭스 — 개발 진행 영역]
- *   - ENV `AI_OPERATOR_ALLOWED_USERS` 설정 시 본 list에 포함된 loginId/userId만 진입 (Harold = hoyun 본질).
- *   - ENV 미설정 시 → 모두 차단 (개발 진행 영역 안전 default).
- *   - legacy_grandfathered / BUSINESS / ENTERPRISE 영역도 현재 진입 X (개발 진행 영역).
+ *   [4분기 확장 매트릭스 — D219+ Part 2 (2026-05-27)]
+ *   1. user.userType === 'super_admin' → true (슈퍼관리자 진입 허용 — 디버깅/검증)
+ *   2. ENV `AI_OPERATOR_ALLOWED_USERS` 설정 + 본 list 사용자 → true (베타/디버깅 화이트리스트)
+ *   3. planCode === 'ENTERPRISE' → true (정식 ENTERPRISE 플랜 자동 진입)
+ *   4. ai_operator_trial_until > NOW() → true (슈퍼관리자 1-click 부여한 30일 무료체험)
+ *   그 외 → false (BetaFeatureModal 표시)
  *
- *   [개발 종결 후 직원 + 회사 admin 공개 시점 매트릭스 — 향후 활성 본질]
- *   1. BUSINESS / ENTERPRISE = 진입 허용 (신규/legacy 무관)
- *   2. legacy_grandfathered + PRO = 기존 73개 회사 진입 허용 (레퍼런스 확보 본질 — Harold 명시)
- *   3. 그 외 (BASIC/STARTER/FREE/TRIAL + 신규 PRO) = BetaFeatureModal 표시 (기능 소개 한정)
+ *   ※ 기존 PRO 무료체험(plan_code='TRIAL' + trial_expires_at) = 본 함수 무관.
+ *     TRIAL 플랜은 PRO 기능 전체 무료 + AI 오퍼레이션은 별도 부여 매트릭스.
  *
- *   DB schema (companies.legacy_grandfathered + first_signup_discount_until) = 영역 유지 (향후 활성 정합).
+ *   ※ legacy_grandfathered + PRO = 현재 false 반환 (D209+ Harold 명시 — 영역 진입 X).
+ *     향후 정합 시 본 함수 안 분기 추가.
  *
  * @param ctx loadPlanContext 결과
- * @param user req.user (auth 미들웨어 처리 영역 — JwtPayload = loginId + userId 포함)
+ * @param user req.user (auth 미들웨어 처리 영역 — JwtPayload = loginId + userId + userType 포함)
  */
 export function isAiOperatorAllowed(
-  _ctx: PlanContext,
-  user: { loginId?: string; userId?: string } | null | undefined
+  ctx: PlanContext,
+  user: { loginId?: string; userId?: string; userType?: string } | null | undefined,
 ): boolean {
-  // ★ D209+ (Harold 명시 2026-05-23) — 개발 진행 영역 본질:
-  //   현재 = ENV whitelist만 진입 허용 (Harold = hoyun 본질). ENV 미설정 시 모두 차단.
-  //   개발 종결 후 직원 + 회사 admin 공개 시점 → JSDoc 영역 매트릭스 활성 본질 (legacy + BUSINESS+ 매트릭스).
+  // 1. 슈퍼관리자 = 자동 진입 (디버깅/검증 영역)
+  if (user?.userType === 'super_admin') return true;
+
+  // 2. ENV 화이트리스트 (베타/디버깅) — 설정된 경우만 적용, 미설정 시 skip
   const raw = process.env.AI_OPERATOR_ALLOWED_USERS || '';
   const allowedList = raw.split(',').map((s) => s.trim().toLowerCase()).filter(Boolean);
-
-  if (allowedList.length === 0) {
-    // ENV 미설정 → 모두 차단 (개발 진행 영역 안전 default)
-    return false;
+  if (allowedList.length > 0) {
+    const loginId = (user?.loginId || '').toLowerCase();
+    const userId = (user?.userId || '').toLowerCase();
+    if (allowedList.some((entry) => entry === loginId || entry === userId)) {
+      return true;
+    }
   }
 
-  // ENV 설정 → 본 list에 포함된 사용자만 진입 (등급/회사 무관)
-  const loginId = (user?.loginId || '').toLowerCase();
-  const userId = (user?.userId || '').toLowerCase();
-  return allowedList.some((entry) => entry === loginId || entry === userId);
+  // 3. ENTERPRISE 플랜 = 자동 진입 (정식 가입 사용자)
+  if (ctx.planCode === 'ENTERPRISE') return true;
+
+  // 4. AI 오퍼레이션 30일 무료체험 부여 + 미만료 = 진입 허용 (D219+ Part 2 신규)
+  if (ctx.isAiOperatorTrialActive) return true;
+
+  return false;
 }
 
 // ═══════════════════════════════════════════════════════════

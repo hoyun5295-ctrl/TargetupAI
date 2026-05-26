@@ -43,6 +43,7 @@ import AiExplainPage from './pages/AiExplainPage';
 // ★ D184 (2026-05-20): 이니시스 결제 결과 fallback 페이지 (새 창 자동 close 영역에 fallback 본질)
 import PaymentResultPage from './pages/PaymentResultPage';
 import JourneyPausePage from './pages/JourneyPausePage'; // ★ D218+ Public 정지 페이지 (인증 X)
+import OnboardingWizardPage from './pages/OnboardingWizardPage'; // ★ D219+ Part 2 (2026-05-27) AI 오퍼레이션 무료체험 사용자 온보딩 7 step
 // ★ D187 (2026-05-20): Journey Builder Lite — 7 표준 여정 + 자연어 진입
 import JourneysPage from './pages/JourneysPage';
 // ★ D192 (2026-05-22): Journey monitoring + 통계 페이지 신규
@@ -382,6 +383,15 @@ function App() {
           }
         />
 
+        {/* ★ D219+ Part 2 (2026-05-27): AI 오퍼레이션 무료체험 사용자 온보딩 Wizard 7 step */}
+        <Route
+          path="/onboarding"
+          element={
+            <PrivateRoute allowedTypes={['company_admin', 'company_user']}>
+              <OnboardingWizardPage />
+            </PrivateRoute>
+          }
+        />
         {/* ★ D187 (2026-05-20): Journey Builder Lite — 7 표준 여정 + 자연어 진입 */}
         <Route
           path="/ai-journeys"

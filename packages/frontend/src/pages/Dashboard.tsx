@@ -20,6 +20,7 @@ import { LmsConvertModal, SmsConvertModal } from '../components/ChannelConvertMo
 import CustomerDBModal from '../components/CustomerDBModal';
 import CustomerInsightModal from '../components/CustomerInsightModal';
 import DashboardHeader from '../components/DashboardHeader';
+import OnboardingCard from '../components/onboarding/OnboardingCard'; // ★ D219+ Part 2 (2026-05-27): AI 오퍼레이션 무료체험 사용자 진입 안내 카드
 import DirectPreviewModal from '../components/DirectPreviewModal';
 import DirectTargetFilterModal, { type FieldMeta } from '../components/DirectTargetFilterModal';
 import TargetSendModal from '../components/TargetSendModal';
@@ -2251,6 +2252,7 @@ const campaignData = {
       {/* 헤더 */}
       <DashboardHeader
         companyName={companyNameFromDB || user?.company?.name || '한줄로'}
+        // ★ D219+ Part 2 (2026-05-27): AI 오퍼레이션 무료체험 사용자 진입 카드 = DashboardHeader 직후 inline 노출
         userName={user?.name || ''}
         department={(user as any)?.department}
         isCompanyAdmin={user?.userType === 'company_admin'}
@@ -2321,6 +2323,9 @@ const campaignData = {
           setShowPlanUpgradeModal(true);
         }}
       />
+
+      {/* ★ D219+ Part 2 (2026-05-27): AI 오퍼레이션 무료체험 사용자 Wizard 진입 안내 카드 */}
+      <OnboardingCard />
 
       {/* 메인 */}
       <main className="max-w-7xl mx-auto px-3 md:px-4 py-4 md:py-8">

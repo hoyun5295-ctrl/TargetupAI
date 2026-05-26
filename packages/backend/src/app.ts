@@ -14,6 +14,8 @@ import syncRoutes from './routes/sync';
 // 라우트 import
 import authRoutes from './routes/auth';
 import companiesRoutes from './routes/companies';
+// ★ D219+ Part 2 (2026-05-27): Onboarding Wizard 7 step endpoints
+import onboardingRoutes from './routes/onboarding';
 import plansRoutes from './routes/plans';
 import customersRoutes from './routes/customers';
 import campaignsRoutes from './routes/campaigns';
@@ -58,6 +60,10 @@ import { startJourneyPretestNotifierWorker } from './utils/journey-pretest-notif
 import { startAiMemoryAccumulatorWorker } from './utils/ai-memory-accumulator-worker';
 // ★ CT-17: 30일 PRO 무료체험 자동 강등 Cron (2026-04-22)
 import { startTrialDowngradeWorker } from './utils/trial-downgrade-worker';
+// ★ D219+ Part 2 (2026-05-27): AI 오퍼레이션 30일 무료체험 자동 만료 Cron (매일 04:00 KST 로그)
+import { startAiOperatorTrialExpireWorker } from './utils/ai-operator-trial-expire-worker';
+// ★ D219+ Part 2 (2026-05-27): Wizard 종결 회사 매일 9시 인사이트 메일 (1시간 cron)
+import { startDailyInsightMailer } from './utils/daily-insight-mailer';
 // ★ D151 (2026-05-11): 캠페인 결과 자동 sync 워커 (5분 주기, 환불 누락 영구 차단)
 import { startCampaignSyncWorker } from './utils/campaign-sync-worker';
 // ★ D153 (2026-05-13): MySQL 진실 원천 환불 sweep 워커 (5분 주기, PG fail_count 의존 X 뿌리뽑기)
@@ -165,6 +171,7 @@ app.get('/api', (req, res) => {
 // 라우트 등록
 app.use('/api/auth', authRoutes);
 app.use('/api/companies', companiesRoutes);
+app.use('/api/onboarding', onboardingRoutes);
 app.use('/api/plans', plansRoutes);
 app.use('/api/customers', customersRoutes);
 app.use('/api/campaigns', campaignsRoutes);
@@ -259,6 +266,12 @@ app.listen(PORT, () => {
 
   // ★ CT-17: 30일 PRO 무료체험 자동 강등 (매일 04:00 KST)
   startTrialDowngradeWorker();
+
+  // ★ D219+ Part 2 (2026-05-27): AI 오퍼레이션 30일 무료체험 자동 만료 로그 (매일 04:00 KST)
+  startAiOperatorTrialExpireWorker();
+
+  // ★ D219+ Part 2 (2026-05-27): Wizard 종결 회사 매일 9시 인사이트 메일 (1시간 cron, 9시 정각만 발송)
+  startDailyInsightMailer();
 
   // ★ D151 (2026-05-11): 캠페인 결과 자동 sync (5분 주기) — fire-and-forget 사용자 진입 의존 → 백그라운드 자동
   startCampaignSyncWorker();

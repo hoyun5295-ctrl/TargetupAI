@@ -1425,6 +1425,116 @@ router.post('/:id/revoke-trial', requireUuidId, requireSuperAdmin, async (req: R
   }
 });
 
+// ============================================================
+// ★ D219+ Part 2 (2026-05-27): AI 오퍼레이션 30일 무료체험 부여/취소 (슈퍼관리자 전용)
+//   - 기존 grant-trial(CT-17 PRO 무료체험)과 완전히 분리.
+//     · 본 흐름은 AI 오퍼레이션 메뉴만 무료체험 부여 (plan_code 유지 — BASIC 사용자도 부여 가능).
+//     · 게이팅 = plan-guard.isAiOperatorAllowed 안 ai_operator_trial_until > NOW() 분기.
+//   - 만료 자동 처리: utils/ai-operator-trial-expire-worker.ts (매일 04:00 KST 로그 + NOW() 비교로 자동 차단).
+//   - DB ALTER 미실행 시 → 503 + DB_MIGRATION_PENDING 안내 (db_alter_safety_net 영구 룰 정합).
+// ============================================================
+
+/**
+ * POST /api/companies/:id/grant-ai-operator-trial
+ * body: { days?: number = 30 }
+ */
+router.post(
+  '/:id/grant-ai-operator-trial',
+  requireUuidId,
+  requireSuperAdmin,
+  async (req: Request, res: Response) => {
+    try {
+      const { id } = req.params;
+      const days = Math.max(1, Math.min(Number((req.body as any)?.days) || 30, 365));
+
+      // 회사 존재 확인
+      const companyRes = await query(`SELECT id FROM companies WHERE id = $1`, [id]);
+      if (companyRes.rows.length === 0) {
+        return res.status(404).json({ error: '고객사를 찾을 수 없습니다.' });
+      }
+
+      const updated = await query(
+        `UPDATE companies
+            SET ai_operator_trial_started_at = NOW(),
+                ai_operator_trial_until      = NOW() + ($1::int || ' days')::interval,
+                updated_at                   = NOW()
+          WHERE id = $2
+        RETURNING id, ai_operator_trial_started_at, ai_operator_trial_until`,
+        [days, id],
+      );
+
+      return res.json({
+        success: true,
+        message: `${days}일 AI 오퍼레이션 무료체험이 부여되었습니다.`,
+        company: updated.rows[0],
+      });
+    } catch (err: any) {
+      const msg = err?.message || '';
+      if (msg.includes('column') && msg.includes('does not exist')) {
+        console.error('[grant-ai-operator-trial] DB 마이그레이션 미실행:', msg);
+        return res.status(503).json({
+          success: false,
+          code: 'DB_MIGRATION_PENDING',
+          error:
+            'DB 마이그레이션이 필요합니다. 운영자에게 companies ALTER 2 컬럼 (ai_operator_trial_started_at + ai_operator_trial_until) 실행을 요청하세요.',
+        });
+      }
+      console.error('grant-ai-operator-trial 실패:', err);
+      return res.status(500).json({ error: 'AI 오퍼레이션 체험 부여 실패' });
+    }
+  },
+);
+
+/**
+ * POST /api/companies/:id/revoke-ai-operator-trial
+ *   - 활성 AI 오퍼레이션 무료체험 즉시 종료 → ai_operator_trial_until = NOW()
+ *   - plan_id / subscription_status 변경 X (본 흐름은 AI 오퍼레이션 메뉴 한정 분리).
+ */
+router.post(
+  '/:id/revoke-ai-operator-trial',
+  requireUuidId,
+  requireSuperAdmin,
+  async (req: Request, res: Response) => {
+    try {
+      const { id } = req.params;
+
+      const updated = await query(
+        `UPDATE companies
+            SET ai_operator_trial_until = NOW(),
+                updated_at              = NOW()
+          WHERE id = $1
+            AND ai_operator_trial_until IS NOT NULL
+            AND ai_operator_trial_until > NOW()
+        RETURNING id, ai_operator_trial_started_at, ai_operator_trial_until`,
+        [id],
+      );
+
+      if (updated.rows.length === 0) {
+        return res.status(400).json({ error: '취소할 활성 AI 오퍼레이션 무료체험이 없습니다.' });
+      }
+
+      return res.json({
+        success: true,
+        message: 'AI 오퍼레이션 무료체험이 취소되었습니다.',
+        company: updated.rows[0],
+      });
+    } catch (err: any) {
+      const msg = err?.message || '';
+      if (msg.includes('column') && msg.includes('does not exist')) {
+        console.error('[revoke-ai-operator-trial] DB 마이그레이션 미실행:', msg);
+        return res.status(503).json({
+          success: false,
+          code: 'DB_MIGRATION_PENDING',
+          error:
+            'DB 마이그레이션이 필요합니다. 운영자에게 companies ALTER 2 컬럼 (ai_operator_trial_started_at + ai_operator_trial_until) 실행을 요청하세요.',
+        });
+      }
+      console.error('revoke-ai-operator-trial 실패:', err);
+      return res.status(500).json({ error: 'AI 오퍼레이션 체험 취소 실패' });
+    }
+  },
+);
+
 // PUT /api/companies/:id - 고객사 수정 (전체 설정 포함)
 // ★ D162-4 (2026-05-15): `/:id` UUID 검증 미들웨어 — 미래에 1-segment 명시 PUT 라우트 추가 시 충돌 방지
 router.put('/:id', requireUuidId, requireSuperAdmin, async (req: Request, res: Response) => {

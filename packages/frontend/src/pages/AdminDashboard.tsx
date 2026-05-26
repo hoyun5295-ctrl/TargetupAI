@@ -120,6 +120,9 @@ export default function AdminDashboard() {
     // ★ CT-17: 30일 PRO 체험 관리 (표시용)
     trialExpiresAt: '' as string | null | '',
     planCode: '',
+    // ★ D219+ Part 2 (2026-05-27): AI 오퍼레이션 30일 무료체험 분리 흐름 (기존 PRO 무료체험과 별도)
+    aiOperatorTrialStartedAt: '' as string | null | '',
+    aiOperatorTrialUntil: '' as string | null | '',
   });
   const [editCompanyTab, setEditCompanyTab] = useState<'basic' | 'send' | 'cost' | 'ai' | 'store' | 'fields' | 'cards' | 'customers' | 'sync'>('basic');
   const [standardFields, setStandardFields] = useState<any[]>([]);
@@ -1865,6 +1868,9 @@ const handleApproveRequest = async (id: string) => {
           // ★ CT-17
           trialExpiresAt: c.trial_expires_at || '',
           planCode: c.plan_code || '',
+          // ★ D219+ Part 2: AI 오퍼레이션 무료체험 컬럼 (DB ALTER 미실행 회사 = '' 정합)
+          aiOperatorTrialStartedAt: c.ai_operator_trial_started_at || '',
+          aiOperatorTrialUntil: c.ai_operator_trial_until || '',
         });
         setEditCompanyTab('basic');
         setShowEditCompanyModal(true);
@@ -1874,63 +1880,147 @@ const handleApproveRequest = async (id: string) => {
     }
   };
 
-  // ★ CT-17: 30일 PRO 무료체험 부여
-  const handleGrantTrial = async () => {
+  // ★ CT-17: 30일 PRO 무료체험 부여 (D219+ Part 2 — native confirm() → showConfirm 변환)
+  const handleGrantTrial = () => {
     if (!editCompany.id) return;
-    if (!confirm(`"${editCompany.companyName}" 에 30일 PRO 무료체험을 부여할까요?\n(30일 후 자동으로 미가입(FREE)으로 강등됩니다)`)) return;
-    try {
-      const token = localStorage.getItem('token');
-      const res = await fetch(`/api/companies/${editCompany.id}/grant-trial`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ days: 30 }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data?.error || '체험 부여 실패');
-      // 모달 state 갱신 (모달은 열린 채 유지)
-      if (data.company) {
-        setEditCompany((prev) => ({
-          ...prev,
-          subscriptionStatus: data.company.subscription_status || 'trial',
-          trialExpiresAt: data.company.trial_expires_at || '',
-          planId: data.company.plan_id || prev.planId,
-          // ★ API 응답의 plan_code 사용 (TRIAL 부여 시 'TRIAL'). 과거 'PRO' 하드코딩은 UI 혼란 유발
-          planCode: data.company.plan_code || 'TRIAL',
-        }));
-      }
-      showAlert('성공', data.message || '30일 PRO 체험이 부여되었습니다.', 'success');
-      loadData();
-    } catch (err: any) {
-      showAlert('실패', err?.message || '체험 부여 실패', 'error');
-    }
+    showConfirm(
+      '30일 PRO 무료체험 부여',
+      `"${editCompany.companyName}" 에 30일 PRO 무료체험을 부여할까요?\n(30일 후 자동으로 미가입(FREE)으로 강등됩니다)`,
+      async () => {
+        try {
+          const token = localStorage.getItem('token');
+          const res = await fetch(`/api/companies/${editCompany.id}/grant-trial`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+            body: JSON.stringify({ days: 30 }),
+          });
+          const data = await res.json();
+          if (!res.ok) throw new Error(data?.error || '체험 부여 실패');
+          if (data.company) {
+            setEditCompany((prev) => ({
+              ...prev,
+              subscriptionStatus: data.company.subscription_status || 'trial',
+              trialExpiresAt: data.company.trial_expires_at || '',
+              planId: data.company.plan_id || prev.planId,
+              // ★ API 응답의 plan_code 사용 (TRIAL 부여 시 'TRIAL').
+              planCode: data.company.plan_code || 'TRIAL',
+            }));
+          }
+          showAlert('성공', data.message || '30일 PRO 체험이 부여되었습니다.', 'success');
+          loadData();
+        } catch (err: any) {
+          showAlert('실패', err?.message || '체험 부여 실패', 'error');
+        }
+      },
+    );
   };
 
-  // ★ CT-17: 체험 즉시 취소 (FREE 강등)
-  const handleRevokeTrial = async () => {
+  // ★ CT-17: 체험 즉시 취소 (FREE 강등) (D219+ Part 2 — native confirm() → showConfirm 변환)
+  const handleRevokeTrial = () => {
     if (!editCompany.id) return;
-    if (!confirm(`"${editCompany.companyName}" 의 무료체험을 즉시 취소하고 미가입(FREE)으로 강등할까요?`)) return;
-    try {
-      const token = localStorage.getItem('token');
-      const res = await fetch(`/api/companies/${editCompany.id}/revoke-trial`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data?.error || '체험 취소 실패');
-      if (data.company) {
-        setEditCompany((prev) => ({
-          ...prev,
-          subscriptionStatus: data.company.subscription_status || 'trial_expired',
-          planId: data.company.plan_id || prev.planId,
-          // ★ API 응답의 plan_code 사용 (revoke 시 'FREE'로 강등). 응답에 plan_code 없을 때만 폴백
-          planCode: data.company.plan_code || 'FREE',
-        }));
-      }
-      showAlert('완료', data.message || '무료체험이 취소되었습니다.', 'success');
-      loadData();
-    } catch (err: any) {
-      showAlert('실패', err?.message || '체험 취소 실패', 'error');
-    }
+    showConfirm(
+      'PRO 무료체험 취소',
+      `"${editCompany.companyName}" 의 무료체험을 즉시 취소하고 미가입(FREE)으로 강등할까요?`,
+      async () => {
+        try {
+          const token = localStorage.getItem('token');
+          const res = await fetch(`/api/companies/${editCompany.id}/revoke-trial`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+          });
+          const data = await res.json();
+          if (!res.ok) throw new Error(data?.error || '체험 취소 실패');
+          if (data.company) {
+            setEditCompany((prev) => ({
+              ...prev,
+              subscriptionStatus: data.company.subscription_status || 'trial_expired',
+              planId: data.company.plan_id || prev.planId,
+              planCode: data.company.plan_code || 'FREE',
+            }));
+          }
+          showAlert('완료', data.message || '무료체험이 취소되었습니다.', 'success');
+          loadData();
+        } catch (err: any) {
+          showAlert('실패', err?.message || '체험 취소 실패', 'error');
+        }
+      },
+    );
+  };
+
+  // ★ D219+ Part 2 (2026-05-27): AI 오퍼레이션 30일 무료체험 부여 (기존 PRO 체험과 분리)
+  //   본 흐름은 ai_operator_trial_until > NOW() 검사로 AI 오퍼레이션 메뉴만 무료체험 부여.
+  //   plan_code 변경 X (BASIC 사용자도 부여 가능 — Harold 명시 2026-05-26).
+  const handleGrantAiOperatorTrial = () => {
+    if (!editCompany.id) return;
+    showConfirm(
+      'AI 오퍼레이션 30일 무료체험 부여',
+      `"${editCompany.companyName}" 에 30일 AI 오퍼레이션 무료체험을 부여할까요?\n\n· AI 오퍼레이션 메뉴만 무료 개방 (기존 요금제 유지)\n· 30일 후 자동 만료 + Wizard 진입 가능`,
+      async () => {
+        try {
+          const token = localStorage.getItem('token');
+          const res = await fetch(`/api/companies/${editCompany.id}/grant-ai-operator-trial`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+            body: JSON.stringify({ days: 30 }),
+          });
+          const data = await res.json();
+          if (!res.ok) {
+            if (data?.code === 'DB_MIGRATION_PENDING') {
+              showAlert('DB 마이그레이션 필요', data.error, 'warning');
+              return;
+            }
+            throw new Error(data?.error || 'AI 오퍼레이션 체험 부여 실패');
+          }
+          if (data.company) {
+            setEditCompany((prev) => ({
+              ...prev,
+              aiOperatorTrialStartedAt: data.company.ai_operator_trial_started_at || '',
+              aiOperatorTrialUntil: data.company.ai_operator_trial_until || '',
+            }));
+          }
+          showAlert('성공', data.message || '30일 AI 오퍼레이션 무료체험이 부여되었습니다.', 'success');
+          loadData();
+        } catch (err: any) {
+          showAlert('실패', err?.message || 'AI 오퍼레이션 체험 부여 실패', 'error');
+        }
+      },
+    );
+  };
+
+  // ★ D219+ Part 2: AI 오퍼레이션 무료체험 즉시 취소
+  const handleRevokeAiOperatorTrial = () => {
+    if (!editCompany.id) return;
+    showConfirm(
+      'AI 오퍼레이션 무료체험 취소',
+      `"${editCompany.companyName}" 의 AI 오퍼레이션 무료체험을 즉시 취소할까요?\n(기존 요금제는 영향 없음)`,
+      async () => {
+        try {
+          const token = localStorage.getItem('token');
+          const res = await fetch(`/api/companies/${editCompany.id}/revoke-ai-operator-trial`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+          });
+          const data = await res.json();
+          if (!res.ok) {
+            if (data?.code === 'DB_MIGRATION_PENDING') {
+              showAlert('DB 마이그레이션 필요', data.error, 'warning');
+              return;
+            }
+            throw new Error(data?.error || 'AI 오퍼레이션 체험 취소 실패');
+          }
+          if (data.company) {
+            setEditCompany((prev) => ({
+              ...prev,
+              aiOperatorTrialUntil: data.company.ai_operator_trial_until || '',
+            }));
+          }
+          showAlert('완료', data.message || 'AI 오퍼레이션 무료체험이 취소되었습니다.', 'success');
+          loadData();
+        } catch (err: any) {
+          showAlert('실패', err?.message || 'AI 오퍼레이션 체험 취소 실패', 'error');
+        }
+      },
+    );
   };
 
   const handleUpdateCompany = async (e: React.FormEvent) => {
@@ -5049,6 +5139,45 @@ const handleApproveRequest = async (id: string) => {
                           <button
                             type="button"
                             onClick={handleRevokeTrial}
+                            className="px-3 py-2 bg-white border border-red-200 text-red-600 hover:bg-red-50 rounded-lg text-xs font-semibold"
+                          >
+                            체험 취소
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                  {/* ★ D219+ Part 2 (2026-05-27): AI 오퍼레이션 30일 무료체험 (기존 PRO와 분리 — BASIC 사용자도 부여 가능) */}
+                  <div className="col-span-2 rounded-lg border border-fuchsia-200 bg-fuchsia-50/40 p-3">
+                    <div className="flex items-center justify-between gap-3 flex-wrap">
+                      <div>
+                        <p className="text-sm font-semibold text-fuchsia-900">AI 오퍼레이션 30일 무료체험</p>
+                        {editCompany.aiOperatorTrialUntil && new Date(editCompany.aiOperatorTrialUntil).getTime() > Date.now() ? (
+                          <p className="text-xs text-fuchsia-700 mt-0.5">
+                            체험 중 — 만료: <b>{new Date(editCompany.aiOperatorTrialUntil).toLocaleString('ko-KR')}</b>
+                            {' '}
+                            (D-{Math.max(0, Math.ceil((new Date(editCompany.aiOperatorTrialUntil).getTime() - Date.now()) / 86400000))})
+                          </p>
+                        ) : editCompany.aiOperatorTrialUntil ? (
+                          <p className="text-xs text-gray-600 mt-0.5">
+                            만료됨 — 종료: {new Date(editCompany.aiOperatorTrialUntil).toLocaleString('ko-KR')}
+                          </p>
+                        ) : (
+                          <p className="text-xs text-fuchsia-600 mt-0.5">미부여 상태. 부여 시 AI 오퍼레이션 메뉴만 무료 개방 (기존 요금제 유지). 30일 후 자동 만료.</p>
+                        )}
+                      </div>
+                      <div className="flex gap-2">
+                        <button
+                          type="button"
+                          onClick={handleGrantAiOperatorTrial}
+                          className="px-3 py-2 bg-fuchsia-600 hover:bg-fuchsia-700 text-white rounded-lg text-xs font-semibold"
+                        >
+                          30일 AI 오퍼레이션 체험 부여
+                        </button>
+                        {editCompany.aiOperatorTrialUntil && new Date(editCompany.aiOperatorTrialUntil).getTime() > Date.now() && (
+                          <button
+                            type="button"
+                            onClick={handleRevokeAiOperatorTrial}
                             className="px-3 py-2 bg-white border border-red-200 text-red-600 hover:bg-red-50 rounded-lg text-xs font-semibold"
                           >
                             체험 취소
