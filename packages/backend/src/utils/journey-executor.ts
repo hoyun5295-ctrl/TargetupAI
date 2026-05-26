@@ -47,6 +47,7 @@ import { normalizePhone } from './normalize-phone';
 import { getCompanyCosts } from '../config/defaults';
 import { sanitizeForSms } from './message-sanitizer';
 import { shortenUrlsInText } from './short-url';
+import { autoPauseExecution } from './journey-pause-handler';
 
 // ════════════════════════════════════════════════════════════════════
 // 타입
@@ -112,7 +113,8 @@ interface CustomerRow {
 }
 
 // ★ D188 Phase 2-B-1 (2026-05-21): wait/condition step 신규 outcome — 통계 분리 영역.
-type StepOutcome = 'sent' | 'skipped_hours' | 'skipped_opt_out' | 'skipped_no_customer' | 'waited' | 'condition_passed' | 'condition_failed' | 'paused_balance' | 'paused_budget' | 'paused_threshold' | 'failed' | 'completed';
+// ★ D218+ (2026-05-26): paused_external 추가 — 담당자 단축 URL 정지 / 관리자 직접 정지 / race condition 안전망 사고 차단.
+type StepOutcome = 'sent' | 'skipped_hours' | 'skipped_opt_out' | 'skipped_no_customer' | 'waited' | 'condition_passed' | 'condition_failed' | 'paused_balance' | 'paused_budget' | 'paused_threshold' | 'paused_external' | 'failed' | 'completed';
 
 // ════════════════════════════════════════════════════════════════════
 // Worker — 5분 cron
@@ -193,6 +195,17 @@ export function startJourneyExecutor(): void {
 // ════════════════════════════════════════════════════════════════════
 
 async function processExecution(exec: ExecutionRow): Promise<StepOutcome> {
+  // ★ D218+ (2026-05-26) 시점 1: 진입 직전 status 재확인 — race condition 안전망.
+  //   옛 worker 조회 시점(line 133) 이후 = 단축 URL 정지 / 관리자 직접 정지 / pauseJourney 발화 사고 차단.
+  const statusCheck1 = await query(
+    `SELECT status FROM journey_executions WHERE id = $1::uuid`,
+    [exec.execution_id]
+  );
+  if (statusCheck1.rows[0]?.status === 'paused') {
+    console.log(`[JourneyExecutor] execution=${exec.execution_id} 진입 시점 paused 감지 → skip`);
+    return 'paused_external';
+  }
+
   // 1. 다음 step 조회 (현재 current_step_order + 1)
   const nextStepOrder = exec.current_step_order + 1;
   const stepRes = await query(
@@ -211,6 +224,31 @@ async function processExecution(exec: ExecutionRow): Promise<StepOutcome> {
   }
 
   const step = stepRes.rows[0] as StepRow;
+
+  // ★ D218+ (2026-05-26) snapshot 우선 조회 — 활성화 시점 본문 보존 안전망.
+  //   회사 admin이 활성화 후 step 본문 편집해도 발송 시점 = 활성화 시점 본문 100% 동일 보장.
+  //   variant 영역(activeVariantId)은 옛 영역에서 별도 덮어쓰기 정합.
+  try {
+    const snapRes = await query(
+      `SELECT message_body, message_subject
+         FROM journey_step_snapshots
+        WHERE step_id = $1::uuid AND journey_id = $2::uuid
+        ORDER BY created_at DESC LIMIT 1`,
+      [step.id, exec.journey_id]
+    );
+    if (snapRes.rows.length > 0) {
+      const snap = snapRes.rows[0];
+      if (snap.message_body) {
+        step.message_template = snap.message_body;
+      }
+      if (snap.message_subject) {
+        step.subject = snap.message_subject;
+      }
+    }
+  } catch (snapErr: any) {
+    // snapshot 조회 실패 = step 본 영역 fallback (안전망 — 발송 차단 X)
+    console.warn(`[JourneyExecutor] snapshot 조회 실패 fallback:`, snapErr?.message);
+  }
 
   // ★ D188 Phase 2-B-1 (2026-05-21): step_type 분기 신규 — wait/condition은 메시지 발송 영역 우회.
   //   wait step = 메시지 발송 0 + 다음 step 진입 (delay_hours는 advanceOrComplete가 다음 step 영역 사용).
@@ -512,19 +550,56 @@ async function processExecution(exec: ExecutionRow): Promise<StepOutcome> {
     }
   }
 
+  // ★ D218+ (2026-05-26) 시점 2: 잔액 차감 직전 status 재확인 — 단축 URL 정지 / 관리자 직접 정지 race condition 안전망.
+  //   본 시점 이후 = 잔액 차감 + queue INSERT 흐름 = 정지 효과 0건 사고 차단 의무.
+  const statusCheck2 = await query(
+    `SELECT status FROM journey_executions WHERE id = $1::uuid`,
+    [exec.execution_id]
+  );
+  if (statusCheck2.rows[0]?.status === 'paused') {
+    console.log(`[JourneyExecutor] execution=${exec.execution_id} 발송 직전 paused 감지 → skip (잔액 차감 X / queue INSERT X)`);
+    return 'paused_external';
+  }
+
   // 8. 잔액 차감 (atomic) — KAKAO는 prepaidDeduct가 'KAKAO' msgType 지원 정합 (없으면 fallback 'SMS' 단가)
   const prepaidMsgType = msgType === 'KAKAO' ? 'KAKAO' : (msgType as 'SMS' | 'LMS' | 'MMS');
   const deduct = await prepaidDeduct(exec.company_id, 1, prepaidMsgType as any, exec.journey_id, exec.created_by || undefined);
   if (!deduct.ok) {
+    // ★ D218+ (2026-05-26) 잔액 부족 실패 분기 — autoPauseExecution + journey-level pause + journey_step_pause_logs 영구 기록.
     await pauseJourney(exec.journey_id, deduct.error || '잔액 부족');
     await logFailedStep(exec.execution_id, step.id, 'insufficient_balance');
+    try {
+      await autoPauseExecution({
+        companyId: exec.company_id,
+        journeyId: exec.journey_id,
+        stepId: step.id,
+        executionId: exec.execution_id,
+        pauseReason: 'balance_insufficient',
+        pauseTriggerSource: 'auto_balance_check',
+      });
+    } catch (apErr: any) {
+      console.warn(`[JourneyExecutor] autoPauseExecution(balance_insufficient) 사고 (skip):`, apErr?.message);
+    }
     return 'paused_balance';
   }
 
   // 9. campaigns INSERT (source='journey' — 추적 정합)
   const cleanPhone = normalizePhone(customer.phone);
   if (!cleanPhone) {
+    // ★ D218+ (2026-05-26) phone 무효 실패 분기 — autoPauseExecution(phone_invalid) + 옛 흐름 정합 (재시도 X = advance).
     await logFailedStep(exec.execution_id, step.id, 'invalid_phone');
+    try {
+      await autoPauseExecution({
+        companyId: exec.company_id,
+        journeyId: exec.journey_id,
+        stepId: step.id,
+        executionId: exec.execution_id,
+        pauseReason: 'phone_invalid',
+        pauseTriggerSource: 'auto_phone_check',
+      });
+    } catch (apErr: any) {
+      console.warn(`[JourneyExecutor] autoPauseExecution(phone_invalid) 사고 (skip):`, apErr?.message);
+    }
     await advanceOrComplete(exec, step, sendCost);
     return 'failed';
   }
@@ -599,10 +674,72 @@ async function processExecution(exec: ExecutionRow): Promise<StepOutcome> {
       await bulkInsertSmsQueue(tables, [row], true);
     }
   } catch (sendErr: any) {
+    // ★ D218+ (2026-05-26) 통신사 일시 fail 분기 — error_count < 1 = 5분 후 자동 재시도 1회 / 그 이상 = autoPauseExecution + pauseJourney.
     console.error('[JourneyExecutor] queue 발송 실패:', sendErr?.message || sendErr);
+    const errMsg = String(sendErr?.message || '');
+    try {
+      const ecRes = await query(
+        `SELECT COALESCE(error_count, 0) AS ec FROM journey_executions WHERE id = $1::uuid`,
+        [exec.execution_id]
+      );
+      const errorCount = Number(ecRes.rows[0]?.ec || 0);
+      if (errorCount < 1) {
+        // 1회 자동 재시도 — 5분 후
+        const errorLogEntry = JSON.stringify([
+          { at: new Date().toISOString(), reason: 'queue_insert_failed', error: errMsg.slice(0, 300) },
+        ]);
+        await query(
+          `UPDATE journey_executions SET
+             next_run_at = NOW() + INTERVAL '5 minutes',
+             error_count = COALESCE(error_count, 0) + 1,
+             last_error_at = NOW(),
+             error_log = COALESCE(error_log, '[]'::jsonb) || $2::jsonb
+           WHERE id = $1::uuid`,
+          [exec.execution_id, errorLogEntry]
+        );
+        await logFailedStep(exec.execution_id, step.id, 'queue_insert_failed_retry_scheduled');
+        console.log(`[JourneyExecutor] execution=${exec.execution_id} 5분 후 자동 재시도 예약 (error_count=${errorCount + 1})`);
+        return 'failed';
+      }
+      // 재시도 1회 후에도 fail → autoPauseExecution(carrier_temp_fail) + pauseJourney + advance.
+      await autoPauseExecution({
+        companyId: exec.company_id,
+        journeyId: exec.journey_id,
+        stepId: step.id,
+        executionId: exec.execution_id,
+        pauseReason: 'carrier_temp_fail',
+        pauseTriggerSource: 'auto_retry_exhausted',
+      });
+      await pauseJourney(exec.journey_id, '통신사 일시 발송 실패 (자동 재시도 1회 후에도 fail)');
+    } catch (retryErr: any) {
+      console.warn(`[JourneyExecutor] 재시도 분기 사고 (skip):`, retryErr?.message);
+    }
     await logFailedStep(exec.execution_id, step.id, 'queue_insert_failed');
     await advanceOrComplete(exec, step, sendCost);
     return 'failed';
+  }
+
+  // ★ D218+ (2026-05-26) 시점 3: 발송 직후 status 재확인 — MySQL 큐 INSERT 도중 paused 동시 발화 사고 기록 안전망.
+  //   본 시점 = MySQL 큐 INSERT 종결 후 = SMS 발송 영구 진행 영역. 정지 효과 X = log + execution_status_at_pause 추적.
+  try {
+    const statusCheck3 = await query(
+      `SELECT status FROM journey_executions WHERE id = $1::uuid`,
+      [exec.execution_id]
+    );
+    if (statusCheck3.rows[0]?.status === 'paused') {
+      console.warn(`[JourneyExecutor] execution=${exec.execution_id} 발송 직후 paused 감지 — MySQL 큐 INSERT 종결 후 = SMS 발송 진행 영역 (정지 효과 X / 본 건 추적)`);
+      // pause log INSERT — execution_status_at_pause = 'sent_after_pause' 영역 추적 (journey-pause-handler.ts 의무 X = 직접 INSERT)
+      await query(
+        `INSERT INTO journey_step_pause_logs
+           (company_id, journey_id, step_id, execution_id,
+            pause_reason, pause_trigger_source,
+            target_count_snapshot, execution_status_at_pause)
+         VALUES ($1, $2, $3, $4, 'race_after_send', 'auto_status_check_3', $5, 'sent_after_pause')`,
+        [exec.company_id, exec.journey_id, step.id, exec.execution_id, 1]
+      );
+    }
+  } catch (s3Err: any) {
+    console.warn(`[JourneyExecutor] 시점 3 status 재확인 사고 (skip):`, s3Err?.message);
   }
 
   // 11. step_log INSERT

@@ -73,6 +73,7 @@ import {
   activateJourney,
   pauseJourney,
   endJourney,
+  resumeJourney,
   archiveJourney,
   unarchiveJourney,
   deleteJourney,
@@ -84,6 +85,9 @@ import {
   JourneyTemplateCode,
   JourneyStatus,
 } from '../utils/journey-builder';
+// ★ D218+ (2026-05-26): 활성화 검증 + 정지 이력 조회
+import { validateJourneyForActivation } from '../utils/journey-pretest-validator';
+import { getPauseLogs } from '../utils/journey-pause-handler';
 // ★ D187-fix3 (2026-05-21): Journey AI Generator — One-shot 자연어 + 시즌 + 회사 메모리
 import { generateJourneyPackage, refineStepMessage } from '../utils/journey-ai-generator';
 // ★ D210+ Phase 2-fix1 (Harold 명시 2026-05-23): CT-58 — 회사 customer DB 실측 프로필 조회.
@@ -2366,12 +2370,14 @@ router.patch('/operator/journeys/:id/steps/:stepId', async (req: Request, res: R
       return res.status(403).json({ success: false, error: 'AI Operator 진입 권한이 없습니다.', code: 'AI_OPERATOR_GATED' });
     }
     // ★ D188 Phase 2-B-1+2 (2026-05-21): stepType + conditionJsonb + 알림톡 + MMS 영역 patch 확장.
+    // ★ D218+ (2026-05-26): notifyManagerOnPretest 추가 — step별 담당자 알림 ON/OFF/default 3 상태
     const {
       messageTemplate, subject, channel, delayHours, isAd,
       stepType, conditionJsonb,
       alimtalkProfileId, alimtalkTemplateCode, alimtalkVariableMap,
       alimtalkNextType, alimtalkNextContents, alimtalkNextSubject,
       mmsImagePaths,
+      notifyManagerOnPretest,
     } = req.body || {};
     const ok = await updateJourneyStep(companyId, req.params.id, req.params.stepId, {
       messageTemplate,
@@ -2388,6 +2394,7 @@ router.patch('/operator/journeys/:id/steps/:stepId', async (req: Request, res: R
       alimtalkNextContents,
       alimtalkNextSubject,
       mmsImagePaths,
+      notifyManagerOnPretest,
     });
     if (!ok) return res.status(404).json({ success: false, error: 'step을 찾을 수 없거나 수정 권한이 없습니다.' });
     return res.json({ success: true });
@@ -2794,6 +2801,85 @@ router.post('/operator/journeys/:id/pause', async (req: Request, res: Response) 
   } catch (err: any) {
     console.error('[Journeys pause] 오류:', err);
     return res.status(500).json({ success: false, error: err?.message || '일시정지 실패' });
+  }
+});
+
+// ════════════════════════════════════════════════════════════════════
+// ★ D218+ (2026-05-26): 활성화 검증 + 재활성화 + 정지 이력 조회 endpoint 3건
+// ════════════════════════════════════════════════════════════════════
+
+// POST /api/ai/operator/journeys/:id/pretest-validate — 활성화 직전 자동 검증
+router.post('/operator/journeys/:id/pretest-validate', async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+    const planCtx = await loadPlanContext(companyId);
+    if (!planCtx) return res.status(404).json({ success: false, error: '회사 정보를 찾을 수 없습니다.' });
+    if (!isAiOperatorAllowed(planCtx, req.user)) {
+      return res.status(403).json({ success: false, error: 'AI Operator 진입 권한이 없습니다.', code: 'AI_OPERATOR_GATED' });
+    }
+
+    const result = await validateJourneyForActivation(companyId, req.params.id);
+    return res.json({ success: true, ...result });
+  } catch (err: any) {
+    // ★ D214+ db_alter_safety_net 정합 — DB 마이그레이션 미실행 시 503 + 사용자 친화 안내
+    const msg = err?.message || '';
+    if (msg.includes('column') && msg.includes('does not exist')) {
+      return res.status(503).json({
+        success: false,
+        error: 'DB 마이그레이션 필요 — journey_step_snapshots / journey_pretest_schedules / journey_step_pause_logs 테이블 생성 요청 의무',
+        code: 'DB_MIGRATION_PENDING',
+      });
+    }
+    console.error('[Journey pretest-validate] 오류:', err);
+    return res.status(500).json({ success: false, error: err?.message || '검증 실패' });
+  }
+});
+
+// POST /api/ai/operator/journeys/:id/resume — 일시정지 → 재활성화
+router.post('/operator/journeys/:id/resume', async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+    const planCtx = await loadPlanContext(companyId);
+    if (!planCtx) return res.status(404).json({ success: false, error: '회사 정보를 찾을 수 없습니다.' });
+    if (!isAiOperatorAllowed(planCtx, req.user)) {
+      return res.status(403).json({ success: false, error: 'AI Operator 진입 권한이 없습니다.', code: 'AI_OPERATOR_GATED' });
+    }
+
+    await resumeJourney(companyId, req.params.id);
+    return res.json({ success: true });
+  } catch (err: any) {
+    console.error('[Journey resume] 오류:', err);
+    return res.status(500).json({ success: false, error: err?.message || '재활성화 실패' });
+  }
+});
+
+// GET /api/ai/operator/journeys/:id/pause-logs — 정지 이력 조회 (admin UI 활용)
+router.get('/operator/journeys/:id/pause-logs', async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+    const planCtx = await loadPlanContext(companyId);
+    if (!planCtx) return res.status(404).json({ success: false, error: '회사 정보를 찾을 수 없습니다.' });
+    if (!isAiOperatorAllowed(planCtx, req.user)) {
+      return res.status(403).json({ success: false, error: 'AI Operator 진입 권한이 없습니다.', code: 'AI_OPERATOR_GATED' });
+    }
+
+    const limit = Number(req.query?.limit) || 50;
+    const logs = await getPauseLogs(companyId, req.params.id, limit);
+    return res.json({ success: true, logs });
+  } catch (err: any) {
+    const msg = err?.message || '';
+    if (msg.includes('column') && msg.includes('does not exist')) {
+      return res.status(503).json({
+        success: false,
+        error: 'DB 마이그레이션 필요 — journey_step_pause_logs 테이블 생성 요청 의무',
+        code: 'DB_MIGRATION_PENDING',
+      });
+    }
+    console.error('[Journey pause-logs] 오류:', err);
+    return res.status(500).json({ success: false, error: err?.message || '조회 실패' });
   }
 });
 

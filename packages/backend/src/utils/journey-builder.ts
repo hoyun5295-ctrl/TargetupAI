@@ -649,7 +649,90 @@ export async function activateJourney(companyId: string, journeyId: string, user
      RETURNING id`,
     [journeyId, companyId, userId]
   );
+
+  // ★ D218+ (2026-05-26) 활성화 종결 직후 = snapshot 보존 + 알림 스케줄 INSERT 의무.
+  //   본문 변경 사고 차단 (활성화 시점 본문 = 발송 시점 본문 100% 동일 보장)
+  //   + 발송 2시간 전 담당자 LMS 자동 발송 스케줄.
+  if (r.rows.length > 0) {
+    try {
+      await createJourneyStepSnapshots(companyId, journeyId);
+      const { scheduleNotificationsForActivation } = await import('./journey-pretest-notifier');
+      await scheduleNotificationsForActivation(companyId, journeyId);
+    } catch (err: any) {
+      console.warn('[activateJourney] D218+ snapshot/schedule 사고 (skip):', err?.message);
+    }
+  }
+
   return { ok: r.rows.length > 0 };
+}
+
+/**
+ * ★ D218+ (2026-05-26) 활성화 시점 본문 + 변수 매핑 snapshot 저장.
+ *   본문 변경 사고 차단 + 정지 이력 보존 안전망.
+ */
+export async function createJourneyStepSnapshots(companyId: string, journeyId: string): Promise<void> {
+  const stepsRes = await query(
+    `SELECT id, channel, message_template, subject, is_ad, callback_number,
+            alimtalk_template_code, alimtalk_variable_map
+       FROM journey_steps
+      WHERE journey_id = $1
+        AND COALESCE(step_type, 'message') = 'message'`,
+    [journeyId],
+  );
+
+  for (const step of stepsRes.rows) {
+    const variantsRes = await query(
+      `SELECT id, message_body FROM journey_step_variants WHERE step_id = $1`,
+      [step.id],
+    );
+    const variants = variantsRes.rows.length > 0
+      ? variantsRes.rows
+      : [{ id: null, message_body: step.message_template }];
+
+    for (const variant of variants) {
+      await query(
+        `INSERT INTO journey_step_snapshots
+           (company_id, journey_id, step_id, variant_id, message_body, message_subject,
+            variable_map, channel, is_ad, callback_number, alimtalk_template_code, confidence_score)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
+        [
+          companyId,
+          journeyId,
+          step.id,
+          variant.id,
+          variant.message_body,
+          step.subject,
+          step.alimtalk_variable_map || {},
+          step.channel,
+          step.is_ad,
+          step.callback_number,
+          step.alimtalk_template_code,
+          100,
+        ],
+      );
+    }
+  }
+}
+
+/**
+ * ★ D218+ (2026-05-26) 여정 재활성화 (일시 정지 → 활성).
+ *   옛 paused → active + 알림 스케줄 재진행.
+ */
+export async function resumeJourney(companyId: string, journeyId: string): Promise<void> {
+  const r = await query(
+    `UPDATE journeys SET status = 'active', paused_at = NULL, pause_reason = NULL
+      WHERE id = $1 AND company_id = $2 AND status = 'paused'
+      RETURNING id`,
+    [journeyId, companyId],
+  );
+  if (r.rows.length > 0) {
+    try {
+      const { scheduleNotificationsForActivation } = await import('./journey-pretest-notifier');
+      await scheduleNotificationsForActivation(companyId, journeyId);
+    } catch (err: any) {
+      console.warn('[resumeJourney] D218+ schedule 사고 (skip):', err?.message);
+    }
+  }
 }
 
 // step 본문 갱신 (활성화 전 회사 admin이 직접 편집)
@@ -677,6 +760,8 @@ export async function updateJourneyStep(
     // ★ D210+ Phase 3 (2026-05-23 Harold 명시): wait step 정확도 영역 patch
     delayMode?: 'relative' | 'specific_hour' | 'next_business_day' | null;
     targetHourKst?: number | null;
+    // ★ D218+ (2026-05-26): step별 담당자 알림 ON/OFF/default 토글
+    notifyManagerOnPretest?: boolean | null;
   }
 ): Promise<boolean> {
   // 회사 격리 + 활성 상태에서는 step 수정 차단
@@ -711,7 +796,8 @@ export async function updateJourneyStep(
        alimtalk_next_subject = COALESCE($16, alimtalk_next_subject),
        mms_image_paths = COALESCE($17::text[], mms_image_paths),
        delay_mode = COALESCE($18, delay_mode),
-       target_hour_kst = COALESCE($19, target_hour_kst)
+       target_hour_kst = COALESCE($19, target_hour_kst),
+       notify_manager_on_pretest = CASE WHEN $20::boolean IS NULL AND $21::boolean = false THEN notify_manager_on_pretest ELSE $20::boolean END
      WHERE id = $1::uuid AND journey_id = $2::uuid
      RETURNING id`,
     [
@@ -734,6 +820,9 @@ export async function updateJourneyStep(
       Array.isArray(patch.mmsImagePaths) ? patch.mmsImagePaths : null,
       patch.delayMode ?? null,
       patch.targetHourKst != null ? Math.max(0, Math.min(23, Number(patch.targetHourKst))) : null,
+      // ★ D218+ (2026-05-26): notify_manager_on_pretest — true/false/null 3 상태 (NULL = default 첫/마지막 ON / 중간 OFF)
+      patch.notifyManagerOnPretest !== undefined ? patch.notifyManagerOnPretest : null,
+      patch.notifyManagerOnPretest !== undefined,
     ]
   );
   return r.rows.length > 0;
@@ -762,6 +851,14 @@ export async function pauseJourney(companyId: string, journeyId: string, reason?
      RETURNING id`,
     [journeyId, companyId, reason || null]
   );
+  // ★ D218+ (2026-05-26): 미발송 executions 일제 paused — race condition 안전망.
+  if (r.rows.length > 0) {
+    await query(
+      `UPDATE journey_executions SET status = 'paused'
+        WHERE journey_id = $1::uuid AND status IN ('pending', 'scheduled')`,
+      [journeyId],
+    );
+  }
   return r.rows.length > 0;
 }
 

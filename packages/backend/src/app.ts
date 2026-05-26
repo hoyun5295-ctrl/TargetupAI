@@ -48,10 +48,14 @@ import voiceRoutes from './routes/voice';
 // ★ D180 (2026-05-19): Email 채널 (SendGrid Web API v3)
 import emailRoutes from './routes/email';
 import shortUrlRoutes from './routes/short-url';  // D183: 단축 URL redirect (/c/:hash) — 공개 endpoint
+import journeyPausePublicRouter from './routes/journey-pause-public';  // ★ D218+: 여정 즉시 정지 페이지 (/journey-pause/:token) — 공개 endpoint
 import { startAutoCampaignScheduler } from './utils/auto-campaign-worker';
 import { ensureMonthlyLogTables } from './utils/sms-queue';
 import { startSpamTestQueueWorker } from './utils/spam-test-queue';
 import { startAlimtalkScheduler } from './utils/alimtalk-jobs';
+// ★ D218+ (2026-05-26) 여정 발송 2시간 전 담당자 알림 + 7일 KPI 학습 worker
+import { startJourneyPretestNotifierWorker } from './utils/journey-pretest-notifier-worker';
+import { startAiMemoryAccumulatorWorker } from './utils/ai-memory-accumulator-worker';
 // ★ CT-17: 30일 PRO 무료체험 자동 강등 Cron (2026-04-22)
 import { startTrialDowngradeWorker } from './utils/trial-downgrade-worker';
 // ★ D151 (2026-05-11): 캠페인 결과 자동 sync 워커 (5분 주기, 환불 누락 영구 차단)
@@ -134,6 +138,8 @@ app.use('/api/sync', syncRoutes);
 app.use('/api/spam-filter', spamFilterRoutes);
 // D183 (2026-05-20): 단축 URL redirect — 공개 endpoint (/c/:hash) — SMS/카톡 수신자 클릭 트래킹
 app.use('/', shortUrlRoutes);
+// ★ D218+ (2026-05-26): 여정 즉시 정지 페이지 — 공개 endpoint (/journey-pause/:token) — 담당자 LMS 안 단축 URL
+app.use('/', journeyPausePublicRouter);
 
 // 헬스체크
 app.get('/health', (req, res) => {
@@ -261,6 +267,12 @@ app.listen(PORT, () => {
   //   balance_transactions 회계 진실 + MySQL status_code 직접 카운트로 차액 환불 보정
   //   기존 syncCampaignResults가 `target > success+fail` 조건으로 SELECT 누락된 캠페인까지 sweep
   startMysqlRefundSweeper();
+
+  // ★ D218+ (2026-05-26): 여정 발송 2시간 전 담당자 LMS 자동 발송 (5분 cron)
+  startJourneyPretestNotifierWorker();
+
+  // ★ D218+ (2026-05-26): 7일 KPI 누적 + ai_company_memory 자동 학습 (1시간 cron)
+  startAiMemoryAccumulatorWorker();
 
   // ★ D176 (2026-05-19): Continuous Operator — 5분 주기 due Operator 체크 + 매일 09:00 KST 제안서 박음
   //   AI 단독 실행 X 영구 원칙 — 제안서만 박고 사용자 승인 대기. ENT 자동 실행 옵션은 default OFF + 임계값 통과 시만

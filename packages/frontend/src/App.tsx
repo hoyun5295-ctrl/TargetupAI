@@ -42,6 +42,7 @@ import AiBatchesPage from './pages/AiBatchesPage';
 import AiExplainPage from './pages/AiExplainPage';
 // ★ D184 (2026-05-20): 이니시스 결제 결과 fallback 페이지 (새 창 자동 close 영역에 fallback 본질)
 import PaymentResultPage from './pages/PaymentResultPage';
+import JourneyPausePage from './pages/JourneyPausePage'; // ★ D218+ Public 정지 페이지 (인증 X)
 // ★ D187 (2026-05-20): Journey Builder Lite — 7 표준 여정 + 자연어 진입
 import JourneysPage from './pages/JourneysPage';
 // ★ D192 (2026-05-22): Journey monitoring + 통계 페이지 신규
@@ -455,6 +456,9 @@ function App() {
         <Route path="/terms" element={<TermsPage />} />
         {/* D184: 이니시스 결제 결과 fallback (인증 X — 새 창 자동 close 차단 시 표시) */}
         <Route path="/payment/result" element={<PaymentResultPage />} />
+
+        {/* ★ D218+ (2026-05-26): 여정 발송 2시간 전 담당자 알림 안 단축 URL 진입 페이지 (인증 X) */}
+        <Route path="/journey-pause/:token" element={<JourneyPausePage />} />
 
         {/* 404 */}
         <Route path="*" element={<Navigate to="/" replace />} />

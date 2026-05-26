@@ -19,6 +19,10 @@ import LiquidPreviewModal from '../components/journey/LiquidPreviewModal';
 import JourneyActionConfirmModal, { JourneyActionMode } from '../components/journey/JourneyActionConfirmModal';
 // ★ D211+ Phase A 4번 (2026-05-23 Harold 명시): 흐름 다이어그램 시각화
 import JourneyFlowDiagram from '../components/journey/JourneyFlowDiagram';
+// ★ D218+ (2026-05-26): 활성화 자동 검증 + 정지 이력 + 담당자 알림 토글 신규
+import JourneyActivationConfirmModal from '../components/journey/JourneyActivationConfirmModal';
+import JourneyPauseLogsModal from '../components/journey/JourneyPauseLogsModal';
+import JourneyStepNotifyToggle from '../components/journey/JourneyStepNotifyToggle';
 import AlimtalkChannelPanel, { type AlimtalkSenderProfile, type AlimtalkTemplate, type AlimtalkChannelState } from '../components/alimtalk/AlimtalkChannelPanel';
 import { detectLiquidSyntax, renderLiquid, flattenCustomerForLiquid, SAMPLE_CUSTOMERS } from '../utils/liquid-templating';
 // ★ D210+ Phase 2-fix6 (Harold 명시 2026-05-23): 변수 하이라이트 + 머지 미리보기 컨트롤타워.
@@ -86,6 +90,8 @@ interface StepRow {
   channel: string | null;
   message_template: string | null;
   is_ad: boolean;
+  // ★ D218+ (2026-05-26): step별 담당자 알림 ON/OFF/default 3 상태
+  notify_manager_on_pretest?: boolean | null;
 }
 
 interface JourneyDetail {
@@ -357,6 +363,9 @@ export default function JourneysPage() {
   const [statusFilter, setStatusFilter] = useState<JourneyStatusFilter>('all');
   // ★ D211+ Phase 3-fix (2026-05-23 Harold 명시): archive/unarchive/delete 영역 커스텀 다크 톤 모달 (native confirm/prompt 폐기)
   const [actionModal, setActionModal] = useState<{ mode: JourneyActionMode; journeyId: string; journeyName: string } | null>(null);
+  // ★ D218+ (2026-05-26): 활성화 자동 검증 모달 + 정지 이력 모달
+  const [activationModal, setActivationModal] = useState<{ journeyId: string; journeyName: string } | null>(null);
+  const [pauseLogsModal, setPauseLogsModal] = useState<{ journeyId: string; journeyName: string } | null>(null);
   // ★ D211+ Phase A (2026-05-23 Harold 명시): 시뮬레이션 + 실시간 위치 영역
   const [simulationMap, setSimulationMap] = useState<Record<string, any>>({});
   const [simulationLoading, setSimulationLoading] = useState<Record<string, boolean>>({});
@@ -882,20 +891,28 @@ export default function JourneysPage() {
   };
 
   // ★ D211+ Phase 3-fix (2026-05-23 Harold 명시): archive/unarchive/delete 영역 = 커스텀 다크 톤 모달 진입만 (실제 처리 = executeAction)
+  // ★ D218+ (2026-05-26): activate 영역 = JourneyActivationConfirmModal 진입 (자동 검증 + 비용 + 잔액 + 확인 흐름)
   const handleAction = async (
     journeyId: string,
     action: 'activate' | 'pause' | 'end' | 'archive' | 'unarchive' | 'delete',
   ) => {
+    const journey = journeys.find((j) => j.id === journeyId);
+    const journeyName = journey?.name || '여정';
+
     // archive/unarchive/delete = 커스텀 모달 진입 (native confirm/prompt 영구 폐기)
     if (action === 'archive' || action === 'unarchive' || action === 'delete') {
-      const journey = journeys.find((j) => j.id === journeyId);
-      setActionModal({ mode: action, journeyId, journeyName: journey?.name || '여정' });
+      setActionModal({ mode: action, journeyId, journeyName });
       return;
     }
 
-    // activate/pause/end = 옛 매트릭스 (추후 커스텀 모달 통합 영역 — 본 세션 범위 외)
+    // ★ D218+ (2026-05-26): activate = 자동 검증 모달 진입 (옛 native confirm 폐기 + ConfirmModal 정합)
+    if (action === 'activate') {
+      setActivationModal({ journeyId, journeyName });
+      return;
+    }
+
+    // pause/end = 옛 매트릭스 (추후 커스텀 모달 통합 영역)
     const confirmMsg =
-      action === 'activate' ? '여정을 활성화하시겠습니까? 트리거 조건에 맞는 고객이 진입하고 step별 메시지가 자동 발송됩니다.\n\n광고 자동 검증 4건이 모두 자동 부착됩니다.' :
       action === 'pause' ? '여정을 일시정지하시겠습니까?' :
       '여정을 종료하시겠습니까? 종료 후 재시작 불가합니다.';
     if (!confirm(confirmMsg)) return;
@@ -1175,6 +1192,10 @@ export default function JourneysPage() {
                             </button>
                             <button onClick={(e) => { e.stopPropagation(); navigate(`/ai-journeys/${j.id}/stats`); }} className="p-2 rounded bg-violet-500/20 hover:bg-violet-500/30 text-violet-300" title="통계 분석">
                               <BarChart3 className="w-4 h-4" />
+                            </button>
+                            {/* ★ D218+ (2026-05-26): 정지 이력 영구 기록 진입 — 담당자 단축 URL 정지 + 자동 정지 통합 표시 */}
+                            <button onClick={(e) => { e.stopPropagation(); setPauseLogsModal({ journeyId: j.id, journeyName: j.name }); }} className="p-2 rounded bg-fuchsia-500/20 hover:bg-fuchsia-500/30 text-fuchsia-300" title="정지 이력 영구 기록">
+                              <AlertTriangle className="w-4 h-4" />
                             </button>
                             {/* ★ D211+ Phase 3 (2026-05-23 Harold 명시): archived 영역 안 unarchive 영역 진입 + 그 외 영역 옛 매트릭스 정합 */}
                             {!j.archived_at && (j.status === 'draft' || j.status === 'paused') && (
@@ -1619,6 +1640,20 @@ export default function JourneysPage() {
                                       )}
                                     </div>
                                     {s.message_template && <div className="text-xs text-white/85 whitespace-pre-wrap">{s.message_template}</div>}
+                                    {/* ★ D218+ (2026-05-26): message step 영역 = 담당자 알림 토글 (발송 2시간 전 + 발송 결과) */}
+                                    {s.step_type === 'message' && (
+                                      <div className="mt-3">
+                                        <JourneyStepNotifyToggle
+                                          journeyId={j.id}
+                                          stepId={s.id}
+                                          stepOrder={s.step_order}
+                                          totalSteps={detail.steps.filter((st) => st.step_type === 'message').length}
+                                          currentValue={s.notify_manager_on_pretest ?? null}
+                                          token={token() || ''}
+                                          onChange={() => loadAll()}
+                                        />
+                                      </div>
+                                    )}
                                   </div>
                                 </div>
                                 {supportsVariants && variantsExpanded && (
@@ -2500,6 +2535,27 @@ export default function JourneysPage() {
           journeyName={actionModal.journeyName}
           onConfirm={executeArchiveAction}
           onClose={() => setActionModal(null)}
+        />
+      )}
+
+      {/* ★ D218+ (2026-05-26): 활성화 자동 검증 모달 — 비용 + 잔액 + ConfirmModal */}
+      {activationModal && (
+        <JourneyActivationConfirmModal
+          journeyId={activationModal.journeyId}
+          journeyName={activationModal.journeyName}
+          token={token() || ''}
+          onClose={() => setActivationModal(null)}
+          onActivated={() => loadAll()}
+        />
+      )}
+
+      {/* ★ D218+ (2026-05-26): 정지 이력 영구 기록 모달 */}
+      {pauseLogsModal && (
+        <JourneyPauseLogsModal
+          journeyId={pauseLogsModal.journeyId}
+          journeyName={pauseLogsModal.journeyName}
+          token={token() || ''}
+          onClose={() => setPauseLogsModal(null)}
         />
       )}
     </div>

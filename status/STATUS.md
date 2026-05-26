@@ -107,12 +107,33 @@
 
 ---
 
-### 🚀 다음 세션 진입 가이드 (D217+ AI Operator 10 메뉴 강화 종결 후 — **D218+ 운영 검증 + 다른 영역 진입**)
+### 🚀 다음 세션 진입 가이드 (D218+ Phase 1~3 부분 종결 후 — **D219+ 잔여 영역 완성 진입**)
 
-> **★ D218+ 진입 매트릭스 (Harold 명시 2026-05-25 D217+ 종결 직후)**:
-> D217+ 종결 = AI Operator 10 메뉴 (1번 여정 자동화 / 2번 AI 자율 예측 / 3번 AI 자동 마케팅 / 4번 성과리포트 / 5번 자사몰+데이터 융합 / 6번 인앱메시지 / 7번 Email 캠페인 / 8번 모바일 DM / **9번 AI 메모리 / 10번 AI 사용량**) Journey Builder 동급 강화 완료. D218+ = 운영 검증 (Harold + 직원 직접) + 다른 영역 진입.
+> **★ D219+ 진입 매트릭스 (Harold 명시 2026-05-26 D218+ 부분 종결 직후)**:
+> D218+ Phase 1~3 부분 종결 = AI Operator 여정 자동화 안전 강화 (스팸필터테스트 + 발송 2시간 전 담당자 알림 + 즉시 정지 + 결과 알림 + 7일 학습) = CT-92/93/94 신규 + journey-builder 강화 + endpoint 6건 + worker 2건 + Public 라우터 + app.ts 등록. D219+ = 잔여 영역 (Task 7 journey-executor 강화 + Task 12 campaign-sync-worker 강화 + Phase 4 Frontend 4건 신규 + 2건 강화 + Phase 5 자가 검증 + Phase 6 배포 + Phase 7 메모리 갱신) 완성 진입.
 >
-> **D218+ 진입 명령어 (다음 세션 첫 메시지 — 즉시 복사 가능)**:
+> **D219+ 진입 명령어 (다음 세션 첫 메시지 — 즉시 복사 가능)**:
+> ```
+> status/STATUS.md CURRENT_TASK § D219+ 진입 가이드 정독 + docs/superpowers/specs/2026-05-26-journey-spam-filter-notification-design.md 정독 + docs/superpowers/plans/2026-05-26-journey-spam-filter-notification-plan.md 정독 + docs/superpowers/handoffs/2026-05-26-d218-next-session-handoff.md 정독 + memory/feedback_no_bakkeum_usage.md § D218+ 강화 룰 정독 ("진정" 단어 절대 0건 영구 의무 + 박-단어 0건) + memory/feedback_default_superpowers_workflow.md 정독 + memory/feedback_cto_mandate_for_vito.md 정독 → D218+ 잔여 영역 진행 (Task 7 journey-executor 강화 + Task 12 campaign-sync-worker 강화 + Phase 4 Frontend 컴포넌트 4건 신규 + 2건 강화 + Phase 5 자가 검증 + Phase 6 배포 명령어 안내 + Phase 7 영구 룰 + 메모리 갱신)
+> ```
+>
+> **★ D218+ Part 1 종결 매트릭스 (2026-05-26)**:
+> - **Phase 1 ✓ 종결** = CT-92 `journey-pretest-validator.ts` 신규 (활성화 자동 검증) + CT-93 `journey-pretest-notifier.ts` 신규 (2시간 전 담당자 알림) + CT-94 `journey-pause-handler.ts` 신규 (token + 정지 + 기록 보존) + DB SQL 8건 안내
+> - **Phase 2 ✓ 부분 종결** = journey-builder 강화 (createJourneyStepSnapshots + pauseJourney executions UPDATE + resumeJourney 신규) + endpoint 6건 (pretest-validate / resume / pause-logs + Public 라우터 + app.ts 등록) + Task 7 journey-executor 강화 = 잔여
+> - **Phase 3 ✓ 부분 종결** = journey-pretest-notifier-worker (5분 cron) + ai-memory-accumulator-worker (1시간 cron) + app.ts 등록 + Task 12 campaign-sync-worker 강화 = 잔여
+> - **자가 검증 evidence** = backend tsc 0 errors + 신규 5 파일 박-단어/"진정"/모델명 = 0건
+> - **본 세션 사고** = "진정 진정" 단어 자기 강화 루프 사고 3회 발생 — D218+ 영구 룰 `feedback_no_bakkeum_usage § D218+` 강화 (다음 세션 첫 답변부터 "진정" 0건 절대 의무)
+>
+> **상세 매핑** = `docs/superpowers/handoffs/2026-05-26-d218-next-session-handoff.md` 정독 의무
+
+---
+
+### 🚀 옛 D218+ 진입 가이드 (D217+ AI Operator 10 메뉴 강화 종결 후 — **참조용**)
+
+> **★ 옛 D218+ 진입 매트릭스 (Harold 명시 2026-05-25 D217+ 종결 직후 — 참조용)**:
+> D217+ 종결 = AI Operator 10 메뉴 (1번 여정 자동화 / 2번 AI 자율 예측 / 3번 AI 자동 마케팅 / 4번 성과리포트 / 5번 자사몰+데이터 융합 / 6번 인앱메시지 / 7번 Email 캠페인 / 8번 모바일 DM / **9번 AI 메모리 / 10번 AI 사용량**) Journey Builder 동급 강화 완료. D218+ = 여정 자동화 안전 강화 진입 (Phase 1~3 부분 종결).
+>
+> **옛 D218+ 진입 명령어 (참조용)**:
 > ```
 > status/STATUS.md CURRENT_TASK 정독 + memory/project_d217_session_full_completed.md 정독 + memory/feedback_default_superpowers_workflow.md 정독 (D217+ 강화 — 매 답변 직전 verification-before-completion 호출 자가 grep 의무) + memory/feedback_cto_mandate_for_vito.md 정독 → D218+ 진입 (Harold 본질 명시 영역 — 운영 검증 / 영역 진입 / 신규 영역 신설 / 다른 강화 영역 정합)
 > ```
