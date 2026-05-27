@@ -542,7 +542,7 @@ function submitInicisForm(form: any) {
     signature: form.signature,
     verification: form.verification,
     mKey: form.mKey,
-    use_chkfake: 'true',          // 이니시스 위변조 검증 활성 (매뉴얼 영역 필수)
+    use_chkfake: 'Y',             // 이니시스 위변조 검증 활성 (이니시스 표준 = 'Y' / 'N' 의무 — D224+ V023 사고 정정)
     currency: form.currency,
     goodname: form.productName,
     buyername: form.buyerName,
