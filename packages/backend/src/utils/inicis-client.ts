@@ -152,7 +152,10 @@ export interface InicisCallbackUrls {
  */
 export function getInicisCallbackUrls(req: Request): InicisCallbackUrls {
   const xfProto = (req.headers['x-forwarded-proto'] as string | undefined)?.split(',')[0]?.trim();
-  const proto = xfProto || req.protocol || 'https';
+  // 운영 환경 = HTTPS 강제 fallback (이니시스 결제 = HTTPS 의무).
+  // nginx 안 X-Forwarded-Proto header 누락 시 req.protocol = 'http' (nginx → backend 내부 HTTP)
+  // → closeUrl/returnUrl HTTP protocol 활용 시 = 이니시스 V023 사고 발생 (HTTP vs HTTPS 불일치)
+  const proto = xfProto || 'https';
   const host = req.get('host') || 'app.hanjul.ai';
   const baseUrl = `${proto}://${host}`;
   return {
