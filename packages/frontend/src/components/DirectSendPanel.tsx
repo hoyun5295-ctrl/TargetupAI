@@ -241,6 +241,18 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
     return () => document.removeEventListener('focus-ai-refine-btn', handler);
   }, []);
 
+  // ★ D224+ (2026-05-27) 영업팀장 박성용 신고 #2 fix: DirectSendPanel unmount 시 body.style.overflow='' reset 영구 안전망.
+  //   옛 D218+ = AlimtalkSendModal:427~438 useEffect 안전망만 추가됨 + DirectSendPanel 대칭 안전망 누락 사고.
+  //   외부 다른 모달이 body.overflow='hidden' 적용 후 cleanup 누락 시 DirectSendPanel 안 스크롤 영구 차단 사고 영구 차단.
+  //   (AlimtalkSendModal:427~438 패턴 정확 미러)
+  useEffect(() => {
+    return () => {
+      if (typeof document !== 'undefined' && document.body) {
+        document.body.style.overflow = '';
+      }
+    };
+  }, []);
+
   // ★ D137 UI: 변수 삽입 드롭다운 (발신번호 옆 병치)
   const [varMenuOpen, setVarMenuOpen] = useState(false);
   const varMenuRef = useRef<HTMLDivElement>(null);
@@ -382,6 +394,16 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
     if (directRecipients.length === 0) { setToast({ show: true, type: 'error', message: '수신자를 추가해주세요' }); return; }
     if (!kakaoSelectedTemplate) { setToast({ show: true, type: 'error', message: '템플릿을 선택해주세요' }); return; }
     if (!['approved', 'APPROVED', 'APR', 'A'].includes(kakaoSelectedTemplate.status)) { setToast({ show: true, type: 'error', message: '승인된 템플릿만 발송 가능합니다' }); return; }
+    // ★ D224+ (2026-05-27) 영업팀장 박성용 신고 fix: frontend self-fail-safe 검증 분기 추가 (AlimtalkSendModal:371~384 패턴 미러).
+    //   옛 사고 = 본 함수 검증 누락 → backend 진입 후 catch → toast 발생 + 사용자 혼란.
+    if (['A', 'B'].includes(alimtalkFallback) && !alimtalkNextContents.trim()) {
+      setToast({ show: true, type: 'error', message: '대체 문구를 입력해주세요.' });
+      return;
+    }
+    if (['L', 'B'].includes(alimtalkFallback) && !(alimtalkNextSubject || '').trim()) {
+      setToast({ show: true, type: 'error', message: 'LMS 대체 발송 시 LMS 제목을 입력해주세요.' });
+      return;
+    }
     let finalContent = kakaoSelectedTemplate.content;
     Object.entries(kakaoTemplateVars).forEach(([k, v]) => { finalContent = finalContent.replace(new RegExp(k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g'), v); });
     setKakaoMessage(finalContent);
@@ -1035,6 +1057,9 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
                     variableMap: kakaoTemplateVars,
                     nextType: alimtalkFallback,
                     nextContents: alimtalkNextContents,
+                    // ★ D224+ (2026-05-27) 영업팀장 박성용 신고 fix: LMS 대체 제목 매핑 누락 정정.
+                    //   옛 사고 = AlimtalkChannelPanel 안 사용자 입력 nextSubject 값이 DirectSendPanel state에 반영 X → backend payload alimtalkNextSubject = '' 영구 사고.
+                    nextSubject: alimtalkNextSubject,
                   }}
                   onChange={(v: AlimtalkChannelState) => {
                     if (setAlimtalkProfileId) setAlimtalkProfileId(v.profileId);
@@ -1043,6 +1068,8 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
                     setKakaoTemplateVars(v.variableMap);
                     setAlimtalkFallback(v.nextType);
                     if (setAlimtalkNextContents) setAlimtalkNextContents(v.nextContents);
+                    // ★ D224+ (2026-05-27) 영업팀장 박성용 신고 fix: nextSubject 변경 시 state 반영 (옛 D188 setter 호출 누락 정정).
+                    if (setAlimtalkNextSubject) setAlimtalkNextSubject(v.nextSubject || '');
                   }}
                 />
                 <button

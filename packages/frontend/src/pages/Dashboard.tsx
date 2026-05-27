@@ -273,6 +273,15 @@ export default function Dashboard() {
   const [showUploadProgressModal, setShowUploadProgressModal] = useState(false);
   const uploadProgressIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const [showDirectSend, setShowDirectSend] = useState(false);
+  // ★ D224+ (2026-05-27) 영업팀장 박성용 신고 #2 fix: showDirectSend 변경 시 body.overflow='' reset 이중 안전망.
+  //   옛 D218+ = AlimtalkSendModal useEffect 안전망만 추가됨 + Dashboard 부모 흐름 누락 사고. DirectSendPanel cleanup + 본 이중 안전망 동시 작동 = 스크롤 영구 차단 영구 사고 차단.
+  useEffect(() => {
+    if (!showDirectSend) {
+      if (typeof document !== 'undefined' && document.body) {
+        document.body.style.overflow = '';
+      }
+    }
+  }, [showDirectSend]);
   // ★ D162-4 (2026-05-15) PDF 0515 알림톡 #1+#3 후속: 알림톡 발송 전용 풀 화면 모달 진입 state.
   //   Harold님 명시 의도 — 직접발송 모달에 알림톡 squeeze 사고 영구 종결. AlimtalkSendModal 별도 풀 화면.
   const [showAlimtalkSend, setShowAlimtalkSend] = useState(false);
@@ -3506,6 +3515,9 @@ const campaignData = {
           setKakaoTemplateVars(data.variableMap);
           setAlimtalkFallback(data.fallback);
           setAlimtalkNextContents(data.nextContents);
+          // ★ D224+ (2026-05-27) 영업팀장 박성용 신고 fix: AlimtalkSendModal handleSend payload nextSubject 값 Dashboard state 반영 누락 정정.
+          //   옛 D188 fix = fallback/nextContents만 setter 호출 + nextSubject setter 누락 → executeDirectSend 시 alimtalkNextSubject = '' 영구 사고.
+          setAlimtalkNextSubject(data.nextSubject || '');
           setAlimtalkProfileId(data.profileId);
           setSendConfirm({
             show: data.show,

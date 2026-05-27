@@ -107,7 +107,39 @@
 
 ---
 
-### 🚀 다음 세션 진입 가이드 (D222+ 전체 종결 후 — **배포 + 스크린샷 + CHAPTER 10 신설**)
+### 🚀 다음 세션 진입 가이드 (D224+ 세션 종결 후 — **Task #5 매뉴얼 이미지 + CHAPTER 10 신설**)
+
+> **★★★ D224+ 세션 종결 매트릭스 (2026-05-27) ★★★**:
+> 6 작업 완료 — (1) 한줄로 이니시스 V023 사고 영구 차단 (3 단계 누적 정정: closeUrl baseUrl 동적 helper + proto https 강제 + 운영 mid/signKey + use_chkfake 'Y') + (2) 레거시 HTTPS 인증서 갱신 (acme.sh webroot Aug 25 2026 — ZeroSSL ECC DV SSL CA 2) + (3) 레거시 운영 검증 (시크릿 모드 안전 + Mixed Content X) + (4) Dashboard DB 현황 본격 정정 (D222+ Phase 1 신설 5 부분 영구 제거 + CardDetailModal Journey 동급 재작성 + 6 carousel Linear/Stripe/Vercel 모던 + 라벨/숫자 1:1.7 비율) + (5) backend dashboard.ts 파일 영구 삭제 + (6) Task #5 매뉴얼 다음 세션 진입 핸드오프 신설.
+>
+> **★ Harold 통합 배포 명령어** (D224+ 세션 종결):
+> ```
+> tp-push "D224+ 세션 종결 — 이니시스 V023 영구 차단 (closeUrl helper + proto https + mid/signKey + use_chkfake Y) + HTTPS 인증서 갱신 + Dashboard DB 현황 본격 정정 (D222+ Phase 1 영구 제거 + CardDetailModal Journey 동급 + 6 carousel Linear/Stripe/Vercel 모던 + 라벨/숫자 1:1.7 비율) + backend dashboard.ts 파일 영구 삭제"
+> ```
+> 서버 SSH 후 = `cd ~/targetup-app && git pull` + backend `build:safe` + `pm2 restart all` + frontend `build:safe`. DB 변경 X.
+>
+> **★ 다음 세션 진입 명령어 (Harold 복붙 영역) — Task #5 매뉴얼 이미지 + CHAPTER 10 신설**:
+> ```
+> docs/superpowers/handoffs/2026-05-27-session-d224-handoff.md 정독 + memory/project_d224_session_completed.md 정독 + docs/manual/claude-design-master-prompt-chapter10-ai-operator.md 정독 + memory/project_d222_violet_gradient_unification_completed.md 정독 → 매뉴얼 이미지 입히기 + CHAPTER 10 신설 진입 (Harold 업로드 이미지 32~43건 + Claude Design HTML 활용)
+> ```
+>
+> **★ Harold 사전 진행 의무**:
+> 1. ✅ D224+ 세션 작업 통합 배포 (위 명령어)
+> 2. ⏳ 스크린샷 캡처 32건 (CHAPTER 01~09)
+> 3. ⏳ Claude Design 호출 → CHAPTER 10 article HTML 수령 (마스터 프롬프트 = `docs/manual/claude-design-master-prompt-chapter10-ai-operator.md`)
+> 4. ⏳ 추가 스크린샷 11건 (CHAPTER 10 영역) = 총 43건
+> 5. ⏳ 본 AI 새 세션 진입 + 이미지 + HTML 업로드 → Task #5 본격 진입
+>
+> **★ 본 AI 다음 세션 진입 의무**:
+> - 이미지 `packages/frontend/public/manual/` 저장
+> - manual.html placeholder 약 23건 → `<div class="shot"><img ... /></div>` 정정
+> - CHAPTER 10 article 삽입 (기존 CHAPTER 09 직후)
+> - JS 정정 (CHAPTERS 배열 + goto + renderPager 9 → 10)
+> - 자가 검증 (frontend tsc + 박-단어/옛/모델명 0건)
+
+---
+
+### 🚀 옛 D222+ 다음 세션 진입 가이드 (D222+ 전체 종결 후 — **배포 + 스크린샷 + CHAPTER 10 신설**)
 
 > **★★★ D222+ 보라 그라데이션 통일 + 매뉴얼 신설 전체 종결 매트릭스 (2026-05-27) ★★★**:
 > Phase 1+2+3+4+5 모두 ✅ 완료 — 약 19,000 라인 정정 + backend dashboard.ts endpoint 4건 신설 + 매뉴얼 HTML 교체 (1240 라인). 한 세션 안 Harold 4번 컨펌 흐름 종결 (Phase 1 → 2 → 3 → 4 → 5). frontend + backend tsc 0 errors + 자가 grep 전체 0건.

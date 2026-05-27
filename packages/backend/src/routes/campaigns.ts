@@ -603,7 +603,10 @@ router.post('/:id/send', async (req: Request, res: Response) => {
     const campaign = campaignResult.rows[0];
 
     // ★ D91: LMS/MMS 제목 필수 검증
-    if ((campaign.message_type === 'LMS' || campaign.message_type === 'MMS') && !campaign.message_subject?.trim() && !campaign.subject?.trim()) {
+    // ★ D224+ (2026-05-27) 영업팀장 박성용 신고 fix: 알림톡 캠페인(send_channel='alimtalk') 흐름 시 = LMS 제목 검증 skip.
+    //   알림톡 자체는 제목 무관, LMS 대체 발송(L/B 타입) 시점만 alimtalk_next_subject 사용 (직접발송 endpoint와 정합).
+    const isAlimtalkCampaign = campaign.send_channel === 'alimtalk';
+    if (!isAlimtalkCampaign && (campaign.message_type === 'LMS' || campaign.message_type === 'MMS') && !campaign.message_subject?.trim() && !campaign.subject?.trim()) {
       return res.status(400).json({ error: 'LMS/MMS 발송 시 제목을 입력해주세요.' });
     }
 
@@ -1305,6 +1308,7 @@ router.post('/direct-send', async (req: Request, res: Response) => {
       alimtalkButtonJson,    // 알림톡 버튼 JSON (k_button_json 형식)
       alimtalkNextType,      // 실패 시 폴백 (N/S/L/A/B)
       alimtalkNextContents,  // A/B 타입일 때 대체 문구 (k_next_contents)
+      alimtalkNextSubject,   // ★ D224+ (2026-05-27) 영업팀장 박성용 신고 fix: L/B 타입일 때 LMS 대체 제목 (옛 D218+ destructure 누락)
       // ★ D102: 중복제거/수신거부제거 사용자 선택 (기본 true)
       dedupEnabled = true,
       unsubFilterEnabled = true,
@@ -1355,13 +1359,22 @@ router.post('/direct-send', async (req: Request, res: Response) => {
     // ★ D218+ (2026-05-26) PDF 신고 #4 사고 정정: alimtalk 발송 path (frontend msgType='LMS' 강제 설정 — D162-4 정합)
     //   에서 alimtalkNextType이 'L'(LMS 대체) 또는 'B'(LMS+문구) 아닐 경우 subject 검증 skip 의무.
     //   옛 사고 = 'N'(대체 안 함) / 'S'(SMS 대체) / 'A'(SMS+문구) 모든 옵션에서 동일 토스트 발화 (Harold PDF 신고).
+    // ★ D224+ (2026-05-27) 영업팀장 박성용 신고 fix: 알림톡 흐름 시 검증 대상 컬럼 정정.
+    //   옛 D218+ = subject 검증 → 알림톡 흐름에서 subject는 일반 directSubject (사용자 입력 X) = 항상 빈 값 → L/B 시 alimtalkNextSubject 입력했어도 영구 알럴 발생 사고.
+    //   진정 fix = 알림톡 L/B 흐름 시 alimtalkNextSubject 검증 + 일반 LMS/MMS 흐름 시 subject 검증 (분기 분리).
     const isAlimtalkSend = sendChannel === 'alimtalk';
-    const requiresLmsSubject =
-      (msgType === 'LMS' || msgType === 'MMS') &&
-      (!isAlimtalkSend || alimtalkNextType === 'L' || alimtalkNextType === 'B');
-    if (requiresLmsSubject && !subject?.trim()) {
-      return res.status(400).json({ success: false, error: 'LMS/MMS 발송 시 제목을 입력해주세요.' });
+    if (isAlimtalkSend && (alimtalkNextType === 'L' || alimtalkNextType === 'B')) {
+      // 알림톡 L/B 흐름: LMS 대체 제목 (alimtalkNextSubject) 검증
+      if (!alimtalkNextSubject?.trim()) {
+        return res.status(400).json({ success: false, error: 'LMS 대체 발송 시 LMS 제목을 입력해주세요.' });
+      }
+    } else if (!isAlimtalkSend && (msgType === 'LMS' || msgType === 'MMS')) {
+      // 일반 LMS/MMS 발송: 기존 subject 검증 유지 (옛 D91)
+      if (!subject?.trim()) {
+        return res.status(400).json({ success: false, error: 'LMS/MMS 발송 시 제목을 입력해주세요.' });
+      }
     }
+    // N(대체안함) / S(SMS 대체) / A(SMS+문구) = 알림톡 LMS 제목 검증 skip (옛 D218+ 흐름 정합 유지)
 
     if (!callback && !useIndividualCallback) {
       return res.status(400).json({ success: false, error: '회신번호를 선택해주세요' });
