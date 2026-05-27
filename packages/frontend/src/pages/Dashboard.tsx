@@ -2558,7 +2558,7 @@ const campaignData = {
                                   <div className={`w-10 h-10 rounded-xl bg-gradient-to-br ${accent.iconFrom} ${accent.iconTo} ring-1 ${accent.ring} flex items-center justify-center group-hover:scale-110 group-hover:rotate-[-4deg] transition-all duration-300`}>
                                     <IconComp className={`w-5 h-5 ${accent.iconText}`} />
                                   </div>
-                                  <span className="text-[11px] text-gray-400 font-medium tracking-tight">{card.label}</span>
+                                  <span className="text-sm text-gray-700 font-semibold tracking-tight">{card.label}</span>
                                 </div>
                                 <div className="space-y-2.5">
                                   {items.map((item, j) => {
@@ -2617,13 +2617,13 @@ const campaignData = {
                                   <div className={`w-10 h-10 rounded-xl bg-gradient-to-br ${accent.iconFrom} ${accent.iconTo} ring-1 ${accent.ring} flex items-center justify-center group-hover:scale-110 group-hover:rotate-[-4deg] transition-all duration-300`}>
                                     <IconComp className={`w-5 h-5 ${accent.iconText}`} />
                                   </div>
-                                  <span className="text-[11px] text-gray-400 font-medium tracking-tight">{card.label}</span>
+                                  <span className="text-sm text-gray-700 font-semibold tracking-tight">{card.label}</span>
                                 </div>
 
                                 {/* 본격 숫자 영역 — tabular + baseline + 단위 분리 */}
                                 <div className="flex items-baseline gap-1.5">
-                                  <span className="text-3xl font-bold text-gray-900 tracking-tight tabular-nums leading-none">{displayVal}</span>
-                                  <span className="text-sm font-medium text-gray-400 leading-none">{suffix}</span>
+                                  <span className="text-2xl font-bold text-gray-900 tracking-tight tabular-nums leading-none">{displayVal}</span>
+                                  <span className="text-xs font-medium text-gray-400 leading-none">{suffix}</span>
                                 </div>
 
                                 {/* delta badge — 본격 강화 */}
