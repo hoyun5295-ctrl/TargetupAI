@@ -2667,7 +2667,8 @@ function validateAndNormalizeRefinedCandidates(
   const out: RefineCandidate[] = [];
   void rejectNumber; // 미사용 — stripRejectNumberPatterns는 일반 패턴으로 검출. 향후 회사별 reject_number 정확 매칭 시 활용.
   // ★ D152+ Harold님 PM2 진단: dropout 단계별 카운트 — 어느 필터에서 제외되는지 정확히 파악
-  const dropCounts = { tooShort: 0, tooLong: 0, infoLoss: 0, similar: 0, notEnriched: 0 };
+  // ★ D224+ (2026-05-27) 남지현 신고 fix: notEnriched 분기 영구 폐기 — similar/infoLoss 분기로 중복 cover + 105% 임계값 영구 catch 사고 차단.
+  const dropCounts = { tooShort: 0, tooLong: 0, infoLoss: 0, similar: 0 };
   for (const c of candidates) {
     if (!c?.text || typeof c.text !== 'string') continue;
     let text = c.text.trim();
@@ -2717,15 +2718,11 @@ function validateAndNormalizeRefinedCandidates(
       continue;
     }
 
-    // (e) ★ D152-5 정정 (2026-05-12 Harold님 명시): "있는 문안을 더 읽고 싶고 궁금하고 풍성하게" — 표현 풍성화 부족 검출.
-    //   원본 300자+ 긴 메시지에서 결과 길이가 원본 105% 미만 = "정리 수준" 다듬기 자동 제외.
-    //   본문 항목 보존 + 도입/마무리 자연 풍성화 시 결과는 자연스럽게 105~130% 도달.
-    //   덴프스 브랜드위크 케이스(원본 ~500자, 결과 ~510자 = ratio 102%) 같은 정리 수준 자동 차단.
-    //   임계 110% → 105%로 완화 (사실 추가 강요 X, 표현 풍성화만으로 자연 도달 가능한 수준).
-    if (originalMessage.length >= 300 && text.length < originalMessage.length * 1.05) {
-      dropCounts.notEnriched += 1;
-      continue;
-    }
+    // ★ D224+ (2026-05-27) 남지현 신고 fix — 옛 notEnriched 분기 (원본 300자+ 시 결과 105% 미만 catch) 영구 폐기.
+    //   사고 본질: 폴라초이스 326자 LMS 원본 시 결과 326~342자 = ratio 105~107% = 영구 catch 사고.
+    //   PM2 운영 로그 = 5/7 시도 notEnriched=1 catch 사고 확인 (2026-05-27T05:58~T06:00 UTC).
+    //   진정 fix: similar 분기 (0.85 유사도 + 길이 기반 동적 임계값) + infoLoss 분기 (50% 미만) 이미 단순 정리 자동 차단 = 중복 catch 분기 영구 폐기.
+    //   AI 응답 자연 풍성화 결과 105~119% 영역 자동 통과 = 사용자 다듬기 정상 진입.
 
     out.push({ text, bytes, type: classifyType(bytes) });
   }
@@ -2733,7 +2730,7 @@ function validateAndNormalizeRefinedCandidates(
     console.warn(
       `[ai][refineDirectMessage] validateAndNormalize dropout — raw=${candidates.length} out=0 ` +
       `(tooShort=${dropCounts.tooShort}, tooLong=${dropCounts.tooLong}, infoLoss=${dropCounts.infoLoss}, ` +
-      `similar=${dropCounts.similar}, notEnriched=${dropCounts.notEnriched})`,
+      `similar=${dropCounts.similar})`,
     );
   }
   return out;
