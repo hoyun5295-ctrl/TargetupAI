@@ -107,34 +107,61 @@
 
 ---
 
-### 🚀 다음 세션 진입 가이드 (D219+ Part 2 + 후속 통합 종결 후 — **D220+ 한줄로AI 모달 재작성 진입**)
+### 🚀 다음 세션 진입 가이드 (D220+ + D221+ 종결 후 — **D222+ 보라 그라데이션 통일 + Phase 1 진입**)
 
-> **★ D220+ 진입 매트릭스 (Harold 명시 2026-05-27 D219+ Part 2 후속 통합 종결 직후)**:
-> D219+ Part 2 + 후속 통합 종결 = AI 오퍼레이션 30일 무료체험 분리 흐름 + Wizard 7 step + 박과장님 신고 + Task 1 자연어 segment 모드 + Task 2 AddressBookModal AI 매핑 영구 폐기 + Task 5 Performance 일일 인사이트 카드 + Task 7 isAiOperatorTrialActive duplicate 영구 폐기. D220+ = 한줄로AI / 맞춤한줄 모달 7건 (3,065 라인) 전면 재작성 진입 (Harold 캡처 신고 — 옛 라이트 톤 + 조잡 → D215+ design_quality_minimum_journey_level 정합).
+> **★ D222+ 진입 매트릭스 (Harold 명시 2026-05-27 D220+ + D221+ 종결 직후)**:
+> D220+ 종결 = 한줄로AI 모달 6건 (Step 1 AiCampaignResultPopup 644 라인 + Step 2 5 모달 다크 톤 정정 + 폰 미리보기 3 파일 다크 폰 모드 통일). D221+ 종결 = 보라 그라데이션 통일 + 매뉴얼 신설 대규모 작업 설계 4 파일 신설 (spec + 매뉴얼 본문 v2 + Claude Design 마스터 프롬프트 + 새 세션 진입 핸드오프). D222+ = 보라 그라데이션 통일 본격 작업 진입 — 계층 3 흐름 (AI 영역 보라 그라데이션 톤 다운 + 입력 영역 흰 톤 + 모달 톤 다운) + Phase 1 Dashboard + JourneysPage 우선 정정.
 >
-> **D220+ 진입 명령어 (다음 세션 첫 메시지 — 즉시 복사 가능)**:
+> **D222+ 진입 명령어 (다음 세션 첫 메시지 — 즉시 복사 가능)**:
+> ```
+> docs/superpowers/handoffs/2026-05-27-violet-gradient-unification-handoff.md 정독 + docs/superpowers/specs/2026-05-27-violet-gradient-unification-design.md 정독 + memory/feedback_cto_mandate_for_vito.md 정독 + memory/feedback_design_quality_minimum_journey_level.md 정독 + memory/feedback_marketing_user_ux_priority.md 정독 + memory/feedback_no_bakkeum_usage.md 정독 + memory/feedback_default_superpowers_workflow.md 정독 + memory/project_d220_d221_session_completed.md 정독 → D222+ 진입 (보라 그라데이션 통일 대규모 작업 — Phase 1 Dashboard + JourneysPage 우선 진입)
+> ```
+>
+> **★ D220+ 종결 매트릭스 (2026-05-27)**:
+> - **Step 1 종결** = AiCampaignResultPopup 전면 재작성 (451 → 644 라인) — 다크 톤 + violet 액센트 + sticky 헤더 + BETA 배지 + lucide-react 22 아이콘 + 6 sub-agent 로딩 시각 효과 (700ms 간격) + 1-click 3 액션 카드 + Source caption + LMS sub-modal 다크 톤 정정 + Spec 신설 (`docs/superpowers/specs/2026-05-27-aicampaignresultpopup-redesign-design.md` 407 라인)
+> - **Step 2 종결** = 5 모달 다크 톤 정정 — AiCampaignSendModal (alert 3건 → inline error state) + RecommendTemplateModal (EditSegmentModal sub-modal 동시 정정) + AiMessageSuggestModal + AiPreviewModal + AiSendTypeModal
+> - **추가 다크 폰 모드 통일** = AiCampaignResultPopup + AiCampaignSendModal + AiPreviewModal 폰 메시지 영역 = bg-white → bg-slate-900 + 메시지 버블 bg-slate-800 + highlightVars/mergeAndHighlightVars `theme='dark'` 인자 적용 + 변수 강조 amber 다크 + 머지 결과 emerald 다크
+>
+> **★ D221+ 설계 파일 신설 매트릭스 (2026-05-27)**:
+> - **본 작업 spec** = `docs/superpowers/specs/2026-05-27-violet-gradient-unification-design.md` (약 320 라인) — Phase 분할 + 영구 룰 정합 + 디자인 표준 + 계층 3 흐름
+> - **매뉴얼 본문 v2** = `docs/manual/manual-content-v2.md` (약 270 라인) — 9 카테고리 본문 (Claude Design 입력 자료)
+> - **Claude Design 마스터 프롬프트** = `docs/manual/claude-design-master-prompt.md` (약 315 라인) — Harold 직접 Claude Design 호출 시 복붙 영역
+> - **D222+ 새 세션 진입 핸드오프** = `docs/superpowers/handoffs/2026-05-27-violet-gradient-unification-handoff.md` (약 380 라인) — § 4 시인성 매트릭스 강화 + § 12 비토 본 AI 의무 인지
+>
+> **★ D221+ 톤 다운 + 계층 3 흐름 정정 매트릭스 (직원 "어둡다" 신고 본질 차단)**:
+> - **계층 1 (AI 영역 — 11 페이지)** = `bg-gradient-to-br from-violet-900 via-fuchsia-900 to-violet-900` (slate-950 → violet-900 톤 다운 + slate 제거 + violet 강화) — Dashboard + JourneysPage + AI Operator + Performance + CDP + ContinuousOperator + InAppMessages + Email + Predictive + AiMemory + AiUsage + Segments + Onboarding
+> - **계층 2 (입력 영역 — 4 페이지)** = `bg-gray-50` + violet 액센트 (흰 톤 default — Braze 동급 흐름) — 직접발송 + 발송결과 + 고객 DB / 주소록 + AdminDashboard
+> - **계층 3 (모든 모달 — D220+ 종결 6건)** = `bg-slate-800` (slate-900 → slate-800 톤 다운)
+> - **시인성 매트릭스 강화** = text-white/95 본문 + text-white/80 보조 + text-white/55 caption (40 이하 금지 의무) + text-violet-200 강조 (300 → 200 강화)
+>
+> **★ D222+ Phase 분할 매트릭스**:
+> - **Phase 1** (8~10h) = Dashboard + JourneysPage 우선 진입
+> - **Phase 2** (6~8h) = Performance + CDP + ContinuousOperator
+> - **Phase 3** (10~12h) = InAppMessages + Email + Predictive + AiMemory + AiUsage + Segments + Onboarding
+> - **Phase 4** (8~10h) = AdminDashboard + 발송결과 + 고객 DB / 주소록 + 직접발송 (계층 2 흰 톤 정정)
+> - **Phase 5** (4~6h) = 매뉴얼 페이지 (Claude Design 수령 HTML 정정)
+> - **총 분량** = 약 30~40h × 4~5 세션 분할
+>
+> **자가 검증 evidence (D220+ + D221+ 종결)** = frontend tsc 0 errors + 박/D219+ 영구 룰 단어 (옛/진정/영영) + 모델명 + native dialog + 이모지 = 0건 자가 grep 통과 + Harold 직접 배포 의무
+
+---
+
+### 🚀 옛 D220+ 진입 가이드 (D219+ Part 2 + 후속 통합 종결 후 — 참조용)
+
+> **★ 옛 D220+ 진입 매트릭스 (Harold 명시 2026-05-27 — 참조용)**:
+> D219+ Part 2 + 후속 통합 종결 = AI 오퍼레이션 30일 무료체험 분리 흐름 + Wizard 7 step + 박과장님 신고 + Task 1 자연어 segment 모드 + Task 2 AddressBookModal AI 매핑 영구 폐기 + Task 5 Performance 일일 인사이트 카드 + Task 7 isAiOperatorTrialActive duplicate 영구 폐기. D220+ = 한줄로AI / 맞춤한줄 모달 7건 (3,065 라인) 전면 재작성 진입.
+>
+> **옛 D220+ 진입 명령어 (참조용)**:
 > ```
 > docs/superpowers/handoffs/2026-05-27-ai-hanjullo-modal-redesign-handoff.md 정독 + memory/feedback_design_quality_minimum_journey_level.md 정독 + memory/feedback_no_bakkeum_usage.md 정독 + memory/feedback_default_superpowers_workflow.md 정독 + memory/feedback_cto_mandate_for_vito.md 정독 + memory/project_d219_part2_completed.md 정독 → D220+ 진입 (한줄로AI / 맞춤한줄 모달 7건 전면 재작성 — Step 1 AiCampaignResultPopup 우선 진입)
 > ```
 >
-> **★ D219+ Part 2 + 후속 통합 종결 매트릭스 (2026-05-27)**:
-> - **Phase 1+2+3+4 종결** = companies ALTER 2 컬럼 + plan-guard 4분기 확장 + ai-operator-trial-expire-worker + AdminDashboard UI (fuchsia 카드) + CT-95/96/97/98 4건 + routes/onboarding 8 endpoint + OnboardingWizardPage + 7 step 컴포넌트 + Dashboard OnboardingCard + 24h cooldown
-> - **박과장님 신고 종결** = 주소록 xlsx 다운로드 + 기존 그룹 append (중복 phone skip) + 기존 PRO 무료체험 native confirm 4건 동시 정정
-> - **Task 1 종결** = DirectTargetFilterModal 자연어 모드 (CT-97 + `ai_messaging` BASIC+ 게이팅 + 0건 자동 완화 X)
-> - **Task 2 영구 폐기** = AddressBookModal AI 매핑 영구 제거 (Harold "FREE 회사 사치 X" — 직접발송 영역 AI X 정합)
-> - **Task 5 종결** = Performance 일일 인사이트 카드 (CT-98 collectCompanyInsight export + routes/insight.ts 신설 + PerformancePage 카드 — 매일 9시 메일과 동일한 인사이트 화면 안 즉시 확인)
-> - **Task 7 종결** = isAiOperatorTrialActive duplicate 영구 폐기 (onboarding-wizard 함수 제거 + plan-guard loadPlanContext 단일 진입점 통합)
-> - **Task 3+4 폐기** = Task 3 폐기 (이미 매칭 수 표시 영역 존재) + Task 4 폐기 (기존 endpoint 유지 + 신뢰도 score 조잡 영역)
-> - **Task 6 종결** = 일반 segment 관리 메뉴 신설 — utils/saved-segments + routes/saved-segments 안 filter_jsonb 활용 + generate-from-text/preview endpoint 2건 신설 + SegmentsPage 신설 (다크 톤 + violet + segment 목록 카드 + 자연어 신규 모달 + 미리보기 확장 토글 + Source caption) + App.tsx /segments 라우트 + DashboardHeader 메뉴 추가. Braze/Salesforce 동급 자산
-> - **Task 8 종결** = PlanUpgradeModal 전면 강화 (다크 톤 + violet/fuchsia 그라데이션 + 자물쇠 아이콘 + FEATURE_VALUE_MAP 5건 매핑 — 가치 카드 3건 + 화면 안내) + DashboardHeader 안 aiMessagingEnabled props + 세그먼트 메뉴 잠금 흐름 (FREE/STARTER → 잠긴 메뉴 + 클릭 시 강화 모달 = 구매욕구 자극). 기존 활용 영역 4건 (AI 추천 발송 / AI 문구 추천 / 직접 타겟 발송 / 고객 DB 업로드) 동시 강화 부수 효과
->
-> **★ D220+ 한줄로AI 모달 재작성 매트릭스 (Harold 명시 2026-05-27)**:
+> **★ D220+ 한줄로AI 모달 재작성 매트릭스 (참조용)**:
 > - **분류 A 전면 재작성** = AiCampaignResultPopup (451) + AiCustomSendFlow (1,246) — 19~25h
 > - **분류 B 다크 톤 정정** = AiCampaignSendModal (411) + RecommendTemplateModal (559) + AiMessageSuggestModal (135) + AiPreviewModal (132) + AiSendTypeModal (131) — 8~10h
-> - **총 분량** = 27~35h (3~4 세션 분할 의무)
-> - **상세 매핑** = `docs/superpowers/handoffs/2026-05-27-ai-hanjullo-modal-redesign-handoff.md` 정독 의무
+> - **상세 매핑** = `docs/superpowers/handoffs/2026-05-27-ai-hanjullo-modal-redesign-handoff.md`
 >
-> **자가 검증 evidence (D219+ Part 2 후속 통합)** = backend + frontend tsc 0 errors + 박/옛/진정/영영 + 모델명 + native dialog 신규 영역 0건 + Harold 직접 PG SQL 5건 + tp-push 배포 완료
+> **D220+ 종결 상태**: Step 1 + Step 2 종결 (D220+ + D221+ 통합 세션 안에서 6 모달 정정 완료). AiCustomSendFlow (1,246 라인) 정정 = D222+ Phase 4 또는 별 세션 진입 영역.
 
 ---
 
