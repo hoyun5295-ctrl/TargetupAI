@@ -7,7 +7,7 @@
  *   - 모든 발송 흐름 안 재활용 가능 (Braze/Salesforce 동급 자산)
  *
  * 영구 룰 정합 (D215+ design_quality_minimum_journey_level):
- *   - 다크 톤 (bg-slate-950 + violet 액센트)
+ *   - 보라 톤 (violet 그라데이션 + 액센트) — D222+ Phase 3 정정
  *   - sticky 헤더 + Sparkles 아이콘 + BETA 배지
  *   - 자연어 입력 카드 (Sparkles + 빠른 시작 예시 4건)
  *   - segment 목록 카드 매트릭스 (확장 토글 시 매칭 수 + 샘플 5건)
@@ -253,9 +253,10 @@ export default function SegmentsPage() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 text-white">
-      {/* sticky 헤더 */}
-      <div className="sticky top-0 z-30 bg-slate-950/80 backdrop-blur-sm border-b border-white/10">
+    // ★ D222+ Phase 3 (2026-05-27): 다크 → 보라 그라데이션 톤 다운
+    <div className="min-h-screen bg-gradient-to-br from-violet-900 via-fuchsia-900 to-violet-900 text-white">
+      {/* sticky 헤더 — D222+ Phase 3 보라 톤 다운 */}
+      <div className="sticky top-0 z-30 bg-violet-800/50 backdrop-blur-md border-b border-violet-400/30">
         <div className="max-w-6xl mx-auto px-4 md:px-6 py-3 md:py-4 flex items-center gap-3 flex-wrap">
           <button onClick={() => navigate('/dashboard')} className="p-2 rounded-lg hover:bg-white/10 transition-colors">
             <ArrowLeft className="w-5 h-5" />
@@ -378,7 +379,7 @@ export default function SegmentsPage() {
                         </div>
                       )}
                       {preview.samples.length > 0 && (
-                        <div className="rounded-lg border border-white/10 bg-slate-950/50 p-3">
+                        <div className="rounded-lg border border-white/10 bg-violet-900/50/50 p-3">
                           <p className="text-[10px] text-white/60 mb-2 font-medium">샘플 5건</p>
                           <div className="space-y-1">
                             {preview.samples.map((s) => (
@@ -419,8 +420,8 @@ export default function SegmentsPage() {
       {/* 신규 세그먼트 모달 */}
       {createOpen && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-slate-900 border border-white/10 rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
-            <div className="sticky top-0 bg-slate-900 border-b border-white/10 px-5 py-4 flex items-center justify-between gap-3">
+          <div className="bg-violet-900/40 border border-white/10 rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
+            <div className="sticky top-0 bg-violet-900/40 border-b border-white/10 px-5 py-4 flex items-center justify-between gap-3">
               <div className="flex items-center gap-2.5">
                 <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-violet-500 to-fuchsia-500 flex items-center justify-center">
                   <Sparkles className="w-4 h-4 text-white" />
@@ -459,7 +460,7 @@ export default function SegmentsPage() {
                   value={nlInput}
                   onChange={(e) => setNlInput(e.target.value)}
                   placeholder="예: 30일 안 구매하지 않은 30대 여성"
-                  className="w-full bg-slate-950/50 border border-white/10 rounded-lg px-3 py-2.5 text-sm text-white placeholder:text-white/30 focus:outline-none focus:border-violet-400"
+                  className="w-full bg-violet-900/50/50 border border-white/10 rounded-lg px-3 py-2.5 text-sm text-white placeholder:text-white/30 focus:outline-none focus:border-violet-400"
                   rows={3}
                   disabled={nlGenerating}
                 />
@@ -524,7 +525,7 @@ export default function SegmentsPage() {
                         value={newName}
                         onChange={(e) => setNewName(e.target.value)}
                         placeholder="세그먼트 이름 (예: 30일 미구매 30대 여성)"
-                        className="flex-1 bg-slate-950/50 border border-white/10 rounded-lg px-3 py-2 text-sm text-white placeholder:text-white/30 focus:outline-none focus:border-violet-400"
+                        className="flex-1 bg-violet-900/50/50 border border-white/10 rounded-lg px-3 py-2 text-sm text-white placeholder:text-white/30 focus:outline-none focus:border-violet-400"
                         disabled={saving}
                       />
                       <button
@@ -547,7 +548,7 @@ export default function SegmentsPage() {
       {/* 삭제 확인 모달 */}
       {deleteTarget && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-slate-900 border border-rose-400/30 rounded-2xl shadow-2xl w-full max-w-md p-5">
+          <div className="bg-violet-900/40 border border-rose-400/30 rounded-2xl shadow-2xl w-full max-w-md p-5">
             <div className="flex items-start gap-3 mb-4">
               <div className="w-10 h-10 rounded-lg bg-rose-500/20 flex items-center justify-center flex-shrink-0">
                 <AlertCircle className="w-5 h-5 text-rose-300" />

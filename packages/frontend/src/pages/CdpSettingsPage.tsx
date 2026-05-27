@@ -1,7 +1,7 @@
 /**
  * CdpSettingsPage.tsx — D214+ (2026-05-24) 5번 메뉴 자사몰 연동 전면 재작성
  *
- * 옛 1059줄 → 신규 (Performance/Predictive 매트릭스 정합 12 화면 영역)
+ * 기존 1059줄 → 신규 (Performance/Predictive 매트릭스 정합 12 화면)
  *
  * 영역:
  *   1. 상단 + 새로고침
@@ -19,7 +19,7 @@
  *
  * ⛔ 영구 룰:
  *   - native dialog 영역 0건 의무 (ConfirmModal + useToast 활용 — feedback_no_native_browser_dialog)
- *   - 다크 톤 정합 (bg-slate-950 + violet 액센트)
+ *   - 보라 톤 정합 (violet 그라데이션 + 액센트) — D222+ Phase 2 정정
  *   - Source caption 의무 (feedback_no_mock_data_in_production)
  */
 
@@ -277,7 +277,7 @@ export default function CdpSettingsPage() {
   const [explanation, setExplanation] = useState<CdpExplanation | null>(null);
   const [explainLoading, setExplainLoading] = useState(false);
 
-  // 옛 영역 (운영 영역 유지)
+  // 기존 (운영 유지)
   const [usage, setUsage] = useState<CdpUsage | null>(null);
   const [issuedSecret, setIssuedSecret] = useState<IssueKeyResponse | null>(null);
   const [issuing, setIssuing] = useState(false);
@@ -651,7 +651,7 @@ export default function CdpSettingsPage() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-slate-950 text-white flex items-center justify-center">
+      <div className="min-h-screen bg-gradient-to-br from-violet-900 via-fuchsia-900 to-violet-900 text-white flex items-center justify-center">
         <div className="text-white/50 flex items-center gap-2">
           <Loader2 className="w-4 h-4 animate-spin text-violet-400" />
           자사몰 영역 진단 + 매트릭스 로드 중...
@@ -661,11 +661,12 @@ export default function CdpSettingsPage() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-950 text-white">
+    <div className="min-h-screen bg-gradient-to-br from-violet-900 via-fuchsia-900 to-violet-900 text-white">
       <ConfirmModal state={confirm} onClose={() => setConfirm(null)} />
 
       {/* 1. 상단 헤더 */}
-      <div className="bg-slate-950/80 backdrop-blur-sm border-b border-white/10 sticky top-0 z-30">
+      {/* ★ D222+ Phase 2 (2026-05-27): 다크 → 보라 톤 다운 sticky 헤더 */}
+      <div className="bg-violet-800/50 backdrop-blur-md border-b border-violet-400/30 sticky top-0 z-30">
         <div className="max-w-7xl mx-auto px-4 md:px-6 py-3 md:py-4 flex items-center gap-3 flex-wrap">
           <button onClick={() => navigate('/ai-operator')} className="p-2 rounded-lg hover:bg-white/10 transition-colors">
             <ArrowLeft className="w-5 h-5" />
@@ -1159,7 +1160,7 @@ export default function CdpSettingsPage() {
                     value={cafe24MallId}
                     onChange={(e) => setCafe24MallId(e.target.value)}
                     placeholder="예: hanjullo-test"
-                    className="flex-1 px-3 py-2 bg-slate-900 border border-white/10 rounded-lg text-sm text-white placeholder-white/30 focus:outline-none focus:border-amber-400/50"
+                    className="flex-1 px-3 py-2 bg-violet-900/40 border border-white/10 rounded-lg text-sm text-white placeholder-white/30 focus:outline-none focus:border-amber-400/50"
                   />
                   <button onClick={handleCafe24Connect} disabled={cafe24Connecting || !isAdmin || !cafe24MallId.trim()} className="px-4 py-2 bg-amber-500/30 hover:bg-amber-500/50 text-amber-100 text-sm font-medium rounded-lg disabled:opacity-40 flex items-center gap-2">
                     <Link2 className="w-4 h-4" /> {cafe24Connecting ? '연동 중...' : '카페24 연동'}
@@ -1207,7 +1208,7 @@ export default function CdpSettingsPage() {
                     value={naverStoreId}
                     onChange={(e) => setNaverStoreId(e.target.value)}
                     placeholder="네이버 스마트스토어 store_id"
-                    className="flex-1 px-3 py-2 bg-slate-900 border border-white/10 rounded-lg text-sm text-white placeholder-white/30 focus:outline-none focus:border-emerald-400/50"
+                    className="flex-1 px-3 py-2 bg-violet-900/40 border border-white/10 rounded-lg text-sm text-white placeholder-white/30 focus:outline-none focus:border-emerald-400/50"
                   />
                   <button onClick={handleNaverConnect} disabled={naverConnecting || !isAdmin || !naverStoreId.trim()} className="px-4 py-2 bg-emerald-500/30 hover:bg-emerald-500/50 text-emerald-100 text-sm font-medium rounded-lg disabled:opacity-40 flex items-center gap-2">
                     <Link2 className="w-4 h-4" /> {naverConnecting ? '연동 중...' : '네이버 연동'}
@@ -1395,7 +1396,7 @@ function SecretRow({ label, value, copied, onCopy, danger }: { label: string; va
     <div>
       <label className="text-xs font-medium text-white/80 block mb-1">{label}</label>
       <div className="flex gap-2">
-        <input readOnly value={value} className={`flex-1 px-3 py-2 bg-slate-900 border rounded-lg text-xs font-mono text-white/80 ${danger ? 'border-rose-400/40 border-2' : 'border-white/10'}`} />
+        <input readOnly value={value} className={`flex-1 px-3 py-2 bg-violet-900/40 border rounded-lg text-xs font-mono text-white/80 ${danger ? 'border-rose-400/40 border-2' : 'border-white/10'}`} />
         <button onClick={onCopy} className={`px-3 py-2 ${danger ? 'bg-rose-500/40 hover:bg-rose-500/60' : 'bg-indigo-500/40 hover:bg-indigo-500/60'} text-white rounded-lg text-xs font-medium flex items-center gap-1.5`}>
           {copied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
           {copied ? '복사됨' : '복사'}

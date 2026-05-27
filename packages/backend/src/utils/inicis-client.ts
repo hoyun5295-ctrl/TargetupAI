@@ -11,6 +11,7 @@
 //  5) processPaymentSuccess(payment-processor.ts) → payments INSERT + balance 증가
 
 import crypto from 'crypto';
+import type { Request } from 'express';
 
 // 이니시스 표준 테스트 영역 (이니시스 공식 매뉴얼 표준 영역)
 const INICIS_TEST_MID = 'INIpayTest';
@@ -133,6 +134,31 @@ export function prepareInicisPayment(input: PrepareInicisInput): PrepareInicisOu
     // 카드결제만 + 할부 0/2/3/6개월 + 무이자 X + 신용카드만(체크카드 포함)
     acceptmethod: 'HPP(1):below1000:va_receipt:no_receipt',
     isProduction: config.isProduction,
+  };
+}
+
+// ── 이니시스 callback URL 동적 helper (V023 사고 차단 — 사용자 진입 origin 정합) ────────────────────
+
+export interface InicisCallbackUrls {
+  baseUrl: string;
+  returnUrl: string;
+  closeUrl: string;
+}
+
+/**
+ * 사용자 진입 origin (req.get('host')) 활용하여 closeUrl/returnUrl 동적 생성.
+ * 이니시스 V023 에러 ("closeUrl의 domain이 요청페이지의 domain과 다름") 차단 의무.
+ * trust proxy 'loopback' 정합 (app.ts L111) → req.protocol 자동 X-Forwarded-Proto 인식.
+ */
+export function getInicisCallbackUrls(req: Request): InicisCallbackUrls {
+  const xfProto = (req.headers['x-forwarded-proto'] as string | undefined)?.split(',')[0]?.trim();
+  const proto = xfProto || req.protocol || 'https';
+  const host = req.get('host') || 'app.hanjul.ai';
+  const baseUrl = `${proto}://${host}`;
+  return {
+    baseUrl,
+    returnUrl: `${baseUrl}/api/payments/inicis/return`,
+    closeUrl: `${baseUrl}/api/payments/inicis/close`,
   };
 }
 

@@ -457,8 +457,9 @@ export default function ContinuousOperatorPage() {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 text-white">
-      <div className="bg-slate-950/80 backdrop-blur-sm border-b border-white/10 sticky top-0 z-30">
+    // ★ D222+ Phase 2 (2026-05-27): 다크 → 보라 그라데이션 톤 다운 + 시인성 강화
+    <div className="min-h-screen bg-gradient-to-br from-violet-900 via-fuchsia-900 to-violet-900 text-white">
+      <div className="bg-violet-800/50 backdrop-blur-md border-b border-violet-400/30 sticky top-0 z-30">
         <div className="max-w-7xl mx-auto px-4 md:px-6 py-3 md:py-4 flex items-center gap-3">
           <button onClick={() => navigate('/ai-operator')} className="p-2 rounded-lg hover:bg-white/10 transition-colors">
             <ArrowLeft className="w-5 h-5" />
@@ -562,7 +563,7 @@ export default function ContinuousOperatorPage() {
                 </div>
               </div>
             </div>
-            {/* 옛 winner variant 영역 */}
+            {/* 기존 winner variant */}
             {learningSummary.variantWinner && learningSummary.variantWinner.sent > 0 && (
               <div className="flex items-center gap-2 text-[11px] text-white/70 p-2 bg-violet-500/10 border border-violet-400/20 rounded-lg mb-2">
                 <Sparkles className="w-3 h-3 text-violet-300 flex-shrink-0" />
@@ -607,7 +608,7 @@ export default function ContinuousOperatorPage() {
               <select
                 value={proposalStatus}
                 onChange={(e) => setProposalStatus(e.target.value as any)}
-                className="text-xs px-2 py-1 bg-slate-900 border border-white/10 rounded text-white focus:outline-none focus:border-violet-400/50"
+                className="text-xs px-2 py-1 bg-violet-900/40 border border-white/10 rounded text-white focus:outline-none focus:border-violet-400/50"
               >
                 <option value="pending">대기 중</option>
                 <option value="all">전체 보기</option>
@@ -888,7 +889,7 @@ export default function ContinuousOperatorPage() {
 
                         {/* ★ D212+ 5번 (2026-05-23 Harold 명시): 예산 영역 시각화 */}
                         {monthBudget > 0 && (
-                          <div className="mt-3 p-2.5 bg-slate-950/50 border border-white/10 rounded-lg">
+                          <div className="mt-3 p-2.5 bg-violet-900/30 border border-white/10 rounded-lg">
                             <div className="flex items-center justify-between text-[11px] mb-1.5">
                               <span className={isMonthOver ? 'text-rose-300 font-semibold' : isMonthAlert ? 'text-amber-300 font-semibold' : 'text-white/60'}>
                                 이번 달 예산 사용
@@ -939,7 +940,7 @@ export default function ContinuousOperatorPage() {
       {/* ★ D179 Multi-Goal 분석 모달 */}
       {showMultiGoal && (
         <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 z-50" onClick={() => setShowMultiGoal(false)}>
-          <div className="bg-slate-900 border border-violet-400/30 rounded-2xl shadow-2xl w-full max-w-3xl max-h-[90vh] overflow-hidden flex flex-col" onClick={(e) => e.stopPropagation()}>
+          <div className="bg-violet-900/40 border border-violet-400/30 rounded-2xl shadow-2xl w-full max-w-3xl max-h-[90vh] overflow-hidden flex flex-col" onClick={(e) => e.stopPropagation()}>
             {/* 헤더 영역 sticky */}
             <div className="flex items-center gap-3 p-5 border-b border-white/10 flex-shrink-0">
               <div className="w-10 h-10 rounded-xl bg-violet-500/20 flex items-center justify-center">
@@ -985,7 +986,7 @@ export default function ContinuousOperatorPage() {
                             setMultiGoals(next);
                           }}
                           placeholder="예: VIP 재구매"
-                          className="px-3 py-2 bg-slate-900 border border-white/10 rounded text-sm text-white placeholder-white/30 focus:outline-none focus:border-violet-400/50"
+                          className="px-3 py-2 bg-violet-900/40 border border-white/10 rounded text-sm text-white placeholder-white/30 focus:outline-none focus:border-violet-400/50"
                           maxLength={100}
                         />
                         <div>
@@ -1001,7 +1002,7 @@ export default function ContinuousOperatorPage() {
                               next[idx] = { ...next[idx], weight: parseFloat(e.target.value) || 0 };
                               setMultiGoals(next);
                             }}
-                            className="px-3 py-2 bg-slate-900 border border-white/10 rounded text-sm text-white placeholder-white/30 w-full focus:outline-none focus:border-violet-400/50"
+                            className="px-3 py-2 bg-violet-900/40 border border-white/10 rounded text-sm text-white placeholder-white/30 w-full focus:outline-none focus:border-violet-400/50"
                           />
                         </div>
                       </div>
@@ -1013,7 +1014,7 @@ export default function ContinuousOperatorPage() {
                           setMultiGoals(next);
                         }}
                         placeholder="자연어 상세 (선택) — 예: VIP 등급 + 최근 30일 미구매 고객"
-                        className="w-full px-3 py-2 bg-slate-900 border border-white/10 rounded text-xs text-white placeholder-white/30 resize-none h-16 focus:outline-none focus:border-violet-400/50"
+                        className="w-full px-3 py-2 bg-violet-900/40 border border-white/10 rounded text-xs text-white placeholder-white/30 resize-none h-16 focus:outline-none focus:border-violet-400/50"
                         maxLength={500}
                       />
                     </div>
@@ -1103,7 +1104,7 @@ export default function ContinuousOperatorPage() {
       {/* 편집 모달 — D212+ 시인성 강화 (다크 톤 + 헤더 sticky + 명확한 input 영역) */}
       {editing && (
         <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 z-50" onClick={() => setEditing(null)}>
-          <div className="bg-slate-900 border border-indigo-400/30 rounded-2xl shadow-2xl w-full max-w-xl max-h-[90vh] overflow-hidden flex flex-col" onClick={(e) => e.stopPropagation()}>
+          <div className="bg-violet-900/40 border border-indigo-400/30 rounded-2xl shadow-2xl w-full max-w-xl max-h-[90vh] overflow-hidden flex flex-col" onClick={(e) => e.stopPropagation()}>
             {/* 헤더 영역 */}
             <div className="flex items-center gap-3 p-5 border-b border-white/10 flex-shrink-0">
               <div className="w-10 h-10 rounded-xl bg-indigo-500/20 flex items-center justify-center">
@@ -1126,7 +1127,7 @@ export default function ContinuousOperatorPage() {
                   type="text"
                   value={editing.name || ''}
                   onChange={(e) => setEditing({ ...editing, name: e.target.value })}
-                  className="w-full px-3 py-2 bg-slate-950 border border-white/10 rounded-lg text-sm text-white placeholder-white/30 focus:outline-none focus:border-indigo-400/50 transition-colors"
+                  className="w-full px-3 py-2 bg-violet-900/50 border border-white/10 rounded-lg text-sm text-white placeholder-white/30 focus:outline-none focus:border-indigo-400/50 transition-colors"
                   placeholder="예: VIP 재구매 자동 마케팅"
                   maxLength={100}
                 />
@@ -1138,7 +1139,7 @@ export default function ContinuousOperatorPage() {
                 <textarea
                   value={editing.objective || ''}
                   onChange={(e) => setEditing({ ...editing, objective: e.target.value })}
-                  className="w-full px-3 py-2 bg-slate-950 border border-white/10 rounded-lg text-sm text-white placeholder-white/30 resize-none h-24 focus:outline-none focus:border-indigo-400/50 transition-colors"
+                  className="w-full px-3 py-2 bg-violet-900/50 border border-white/10 rounded-lg text-sm text-white placeholder-white/30 resize-none h-24 focus:outline-none focus:border-indigo-400/50 transition-colors"
                   placeholder="예: VIP 등급 고객 중 최근 30일 미구매 고객에게 재구매 유도 메시지를 매일 추천"
                   maxLength={500}
                 />
@@ -1150,7 +1151,7 @@ export default function ContinuousOperatorPage() {
                   <select
                     value={editing.schedule || 'daily'}
                     onChange={(e) => setEditing({ ...editing, schedule: e.target.value as Schedule })}
-                    className="w-full px-3 py-2 bg-slate-950 border border-white/10 rounded-lg text-sm text-white focus:outline-none focus:border-indigo-400/50 transition-colors"
+                    className="w-full px-3 py-2 bg-violet-900/50 border border-white/10 rounded-lg text-sm text-white focus:outline-none focus:border-indigo-400/50 transition-colors"
                   >
                     <option value="daily">매일</option>
                     <option value="weekly">매주</option>
@@ -1163,7 +1164,7 @@ export default function ContinuousOperatorPage() {
                     type="time"
                     value={editing.scheduleTime || '09:00'}
                     onChange={(e) => setEditing({ ...editing, scheduleTime: e.target.value })}
-                    className="w-full px-3 py-2 bg-slate-950 border border-white/10 rounded-lg text-sm text-white focus:outline-none focus:border-indigo-400/50 transition-colors"
+                    className="w-full px-3 py-2 bg-violet-900/50 border border-white/10 rounded-lg text-sm text-white focus:outline-none focus:border-indigo-400/50 transition-colors"
                   />
                 </div>
               </div>
@@ -1173,7 +1174,7 @@ export default function ContinuousOperatorPage() {
                   <select
                     value={editing.status || 'active'}
                     onChange={(e) => setEditing({ ...editing, status: e.target.value as OperatorStatus })}
-                    className="w-full px-3 py-2 bg-slate-950 border border-white/10 rounded-lg text-sm text-white focus:outline-none focus:border-indigo-400/50 transition-colors"
+                    className="w-full px-3 py-2 bg-violet-900/50 border border-white/10 rounded-lg text-sm text-white focus:outline-none focus:border-indigo-400/50 transition-colors"
                   >
                     <option value="active">활성 (매일 새 캠페인 추천)</option>
                     <option value="paused">일시 중지 (추천 멈춤)</option>
@@ -1192,7 +1193,7 @@ export default function ContinuousOperatorPage() {
                   <select
                     value={editing.deliveryPolicy || 'daily'}
                     onChange={(e) => setEditing({ ...editing, deliveryPolicy: e.target.value as 'daily' | 'weekly' | 'monthly' })}
-                    className="w-full px-3 py-2 bg-slate-950 border border-white/10 rounded-lg text-sm text-white focus:outline-none focus:border-indigo-400/50 transition-colors"
+                    className="w-full px-3 py-2 bg-violet-900/50 border border-white/10 rounded-lg text-sm text-white focus:outline-none focus:border-indigo-400/50 transition-colors"
                   >
                     <option value="daily">매일 — 옵트아웃 본질 (최초 N일 검증 후 자동)</option>
                     <option value="weekly">매주 — 발송 2시간 전 담당자 안내 (5분 옵트아웃)</option>
@@ -1208,7 +1209,7 @@ export default function ContinuousOperatorPage() {
                       max="30"
                       value={editing.verificationRequiredDays ?? 7}
                       onChange={(e) => setEditing({ ...editing, verificationRequiredDays: Number(e.target.value) })}
-                      className="w-full px-3 py-2 bg-slate-950 border border-white/10 rounded-lg text-sm text-white focus:outline-none focus:border-indigo-400/50 transition-colors"
+                      className="w-full px-3 py-2 bg-violet-900/50 border border-white/10 rounded-lg text-sm text-white focus:outline-none focus:border-indigo-400/50 transition-colors"
                     />
                     <div className="text-[10px] text-white/40 mt-1">처음 N일 = 회사 admin 매일 명시 컨펌 → N일 통과 후 자동 (기본 7일)</div>
                   </div>
@@ -1224,7 +1225,7 @@ export default function ContinuousOperatorPage() {
                         adminPhoneNumbers: e.target.value.split(',').map((s) => s.trim()).filter(Boolean).slice(0, 3),
                       })}
                       placeholder="예: 01012345678, 01098765432"
-                      className="w-full px-3 py-2 bg-slate-950 border border-white/10 rounded-lg text-sm text-white placeholder-white/30 focus:outline-none focus:border-indigo-400/50 transition-colors"
+                      className="w-full px-3 py-2 bg-violet-900/50 border border-white/10 rounded-lg text-sm text-white placeholder-white/30 focus:outline-none focus:border-indigo-400/50 transition-colors"
                     />
                   </div>
                   <div>
@@ -1234,7 +1235,7 @@ export default function ContinuousOperatorPage() {
                       value={editing.backupAdminPhone ?? ''}
                       onChange={(e) => setEditing({ ...editing, backupAdminPhone: e.target.value.trim() || null })}
                       placeholder="예: 01087654321"
-                      className="w-full px-3 py-2 bg-slate-950 border border-white/10 rounded-lg text-sm text-white placeholder-white/30 focus:outline-none focus:border-indigo-400/50 transition-colors"
+                      className="w-full px-3 py-2 bg-violet-900/50 border border-white/10 rounded-lg text-sm text-white placeholder-white/30 focus:outline-none focus:border-indigo-400/50 transition-colors"
                     />
                   </div>
                 </div>
@@ -1244,7 +1245,7 @@ export default function ContinuousOperatorPage() {
                     <select
                       value={editing.adminAlertChannel || 'sms'}
                       onChange={(e) => setEditing({ ...editing, adminAlertChannel: e.target.value as 'sms' | 'kakao' | 'email' })}
-                      className="w-full px-3 py-2 bg-slate-950 border border-white/10 rounded-lg text-sm text-white focus:outline-none focus:border-indigo-400/50 transition-colors"
+                      className="w-full px-3 py-2 bg-violet-900/50 border border-white/10 rounded-lg text-sm text-white focus:outline-none focus:border-indigo-400/50 transition-colors"
                     >
                       <option value="sms">SMS</option>
                       <option value="kakao">카카오 알림톡</option>
@@ -1259,7 +1260,7 @@ export default function ContinuousOperatorPage() {
                       max="60"
                       value={editing.optOutMinutes ?? 5}
                       onChange={(e) => setEditing({ ...editing, optOutMinutes: Number(e.target.value) })}
-                      className="w-full px-3 py-2 bg-slate-950 border border-white/10 rounded-lg text-sm text-white focus:outline-none focus:border-indigo-400/50 transition-colors"
+                      className="w-full px-3 py-2 bg-violet-900/50 border border-white/10 rounded-lg text-sm text-white focus:outline-none focus:border-indigo-400/50 transition-colors"
                     />
                   </div>
                 </div>
@@ -1284,7 +1285,7 @@ export default function ContinuousOperatorPage() {
                       value={editing.budgetMonthly ?? ''}
                       onChange={(e) => setEditing({ ...editing, budgetMonthly: e.target.value === '' ? null : Number(e.target.value) })}
                       placeholder="예: 500000"
-                      className="w-full px-3 py-2 bg-slate-950 border border-white/10 rounded-lg text-sm text-white placeholder-white/30 focus:outline-none focus:border-emerald-400/50 transition-colors"
+                      className="w-full px-3 py-2 bg-violet-900/50 border border-white/10 rounded-lg text-sm text-white placeholder-white/30 focus:outline-none focus:border-emerald-400/50 transition-colors"
                     />
                   </div>
                   <div>
@@ -1296,7 +1297,7 @@ export default function ContinuousOperatorPage() {
                       value={editing.budgetDaily ?? ''}
                       onChange={(e) => setEditing({ ...editing, budgetDaily: e.target.value === '' ? null : Number(e.target.value) })}
                       placeholder="예: 50000"
-                      className="w-full px-3 py-2 bg-slate-950 border border-white/10 rounded-lg text-sm text-white placeholder-white/30 focus:outline-none focus:border-emerald-400/50 transition-colors"
+                      className="w-full px-3 py-2 bg-violet-900/50 border border-white/10 rounded-lg text-sm text-white placeholder-white/30 focus:outline-none focus:border-emerald-400/50 transition-colors"
                     />
                   </div>
                 </div>
@@ -1309,7 +1310,7 @@ export default function ContinuousOperatorPage() {
                     step="5"
                     value={editing.budgetAlertThreshold ?? 80}
                     onChange={(e) => setEditing({ ...editing, budgetAlertThreshold: Number(e.target.value) })}
-                    className="w-full px-3 py-2 bg-slate-950 border border-white/10 rounded-lg text-sm text-white focus:outline-none focus:border-emerald-400/50 transition-colors"
+                    className="w-full px-3 py-2 bg-violet-900/50 border border-white/10 rounded-lg text-sm text-white focus:outline-none focus:border-emerald-400/50 transition-colors"
                   />
                   <div className="text-[10px] text-white/40 mt-1">예산 사용률이 임계값에 도달하면 자동 알림 (기본 80%)</div>
                 </div>
@@ -1334,7 +1335,7 @@ export default function ContinuousOperatorPage() {
             </div>
 
             {/* 액션 영역 sticky 하단 */}
-            <div className="flex items-center gap-2 p-5 border-t border-white/10 bg-slate-950/50 flex-shrink-0">
+            <div className="flex items-center gap-2 p-5 border-t border-white/10 bg-violet-900/30 flex-shrink-0">
               <button onClick={() => setEditing(null)} className="flex-1 px-4 py-2 bg-white/5 hover:bg-white/10 text-white/80 rounded-lg text-sm font-medium transition-colors">
                 취소
               </button>

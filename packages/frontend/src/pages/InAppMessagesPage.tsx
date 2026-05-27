@@ -433,7 +433,7 @@ export default function InAppMessagesPage() {
         headers: authHeaders(),
         body: JSON.stringify({
           ...editing,
-          // 옛 컬럼 호환 (position = template)
+          // 기존 컬럼 호환 (position = template)
           position: editing.template || editing.position,
           backgroundColor: editing.background_color,
           textColor: editing.text_color,
@@ -572,9 +572,10 @@ export default function InAppMessagesPage() {
   // ════════════════════════════════════════════════════════════════
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 text-white">
-      {/* ▼ 영역 1: 상단 헤더 (sticky + BETA badge) */}
-      <div className="bg-slate-950/80 backdrop-blur-sm border-b border-white/10 sticky top-0 z-30">
+    // ★ D222+ Phase 3 (2026-05-27): 다크 → 보라 그라데이션 톤 다운
+    <div className="min-h-screen bg-gradient-to-br from-violet-900 via-fuchsia-900 to-violet-900 text-white">
+      {/* ▼ 1: 상단 헤더 (sticky + BETA badge) — D222+ Phase 3 보라 톤 다운 */}
+      <div className="bg-violet-800/50 backdrop-blur-md border-b border-violet-400/30 sticky top-0 z-30">
         <div className="max-w-7xl mx-auto px-4 md:px-6 py-3 md:py-4 flex items-center gap-3">
           <button onClick={() => navigate('/ai-operator')} className="p-2 rounded-lg hover:bg-white/10 transition-colors" aria-label="뒤로가기">
             <ArrowLeft className="w-5 h-5" />
@@ -694,7 +695,7 @@ export default function InAppMessagesPage() {
               onChange={(e) => setAiObjective(e.target.value)}
               onKeyDown={(e) => { if (e.key === 'Enter') handleAIGenerate(aiObjective); }}
               placeholder="예: 장바구니 24시간 후 회복 메시지 / 신규 가입자 환영 인사"
-              className="flex-1 min-w-[240px] px-4 py-2.5 bg-slate-900/60 border border-fuchsia-400/30 rounded-lg text-sm text-white placeholder-white/40 focus:outline-none focus:border-fuchsia-400/60"
+              className="flex-1 min-w-[240px] px-4 py-2.5 bg-violet-900/40/60 border border-fuchsia-400/30 rounded-lg text-sm text-white placeholder-white/40 focus:outline-none focus:border-fuchsia-400/60"
               disabled={aiGenerating}
             />
             <button
@@ -730,7 +731,7 @@ export default function InAppMessagesPage() {
 
         {/* ▼ 영역 6: 6 sub-agent 진행 카드 (조건부 — 생성 중일 때만) */}
         {aiGenerating && (
-          <div className="bg-slate-900/60 border border-white/10 rounded-xl p-5">
+          <div className="bg-violet-900/40/60 border border-white/10 rounded-xl p-5">
             <h3 className="text-sm font-bold text-white mb-3">AI 생성 진행 중...</h3>
             <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
               {Object.entries(SUB_AGENT_VISUAL).map(([key, visual], idx) => {
@@ -742,7 +743,7 @@ export default function InAppMessagesPage() {
                     className={`p-3 rounded-lg border transition-all ${
                       isDone
                         ? `bg-gradient-to-br ${visual.gradient} border-white/30 shadow-lg`
-                        : 'bg-slate-900/40 border-white/5 opacity-50'
+                        : 'bg-violet-900/40/40 border-white/5 opacity-50'
                     }`}
                   >
                     <div className="flex items-center gap-2 mb-1">
@@ -832,7 +833,7 @@ export default function InAppMessagesPage() {
               <select
                 value={statusFilter}
                 onChange={(e) => setStatusFilter(e.target.value as Status | 'all')}
-                className="text-xs bg-slate-900 border border-white/10 rounded-lg px-2 py-1.5 text-white"
+                className="text-xs bg-violet-900/40 border border-white/10 rounded-lg px-2 py-1.5 text-white"
               >
                 <option value="all">전체 상태</option>
                 <option value="active">활성</option>
@@ -842,7 +843,7 @@ export default function InAppMessagesPage() {
               <select
                 value={templateFilter}
                 onChange={(e) => setTemplateFilter(e.target.value as Template | 'all')}
-                className="text-xs bg-slate-900 border border-white/10 rounded-lg px-2 py-1.5 text-white"
+                className="text-xs bg-violet-900/40 border border-white/10 rounded-lg px-2 py-1.5 text-white"
               >
                 <option value="all">전체 템플릿</option>
                 {Object.entries(TEMPLATE_LABELS).map(([key, label]) => (
@@ -852,7 +853,7 @@ export default function InAppMessagesPage() {
               <select
                 value={sortMode}
                 onChange={(e) => setSortMode(e.target.value as SortMode)}
-                className="text-xs bg-slate-900 border border-white/10 rounded-lg px-2 py-1.5 text-white"
+                className="text-xs bg-violet-900/40 border border-white/10 rounded-lg px-2 py-1.5 text-white"
               >
                 <option value="created_desc">최신순</option>
                 <option value="ctr_desc">CTR 높은순</option>
@@ -1044,9 +1045,9 @@ function EditModal({ editing, setEditing, availableVariables, onSave, fileInputR
 
   return (
     <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50" onClick={() => setEditing(null)}>
-      <div className="bg-slate-900 border border-white/10 rounded-2xl shadow-2xl w-full max-w-5xl max-h-[95vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+      <div className="bg-violet-900/40 border border-white/10 rounded-2xl shadow-2xl w-full max-w-5xl max-h-[95vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
         {/* 헤더 */}
-        <div className="sticky top-0 bg-slate-900 border-b border-white/10 px-6 py-4 flex items-center justify-between">
+        <div className="sticky top-0 bg-violet-900/40 border-b border-white/10 px-6 py-4 flex items-center justify-between">
           <h3 className="text-lg font-bold text-white">{editing.id ? '메시지 수정' : '신규 메시지'}</h3>
           <button onClick={() => setEditing(null)} className="text-white/50 hover:text-white p-1.5 rounded hover:bg-white/10">
             <X className="w-5 h-5" />
@@ -1075,14 +1076,14 @@ function EditModal({ editing, setEditing, availableVariables, onSave, fileInputR
                 value={editing.title || ''}
                 onChange={(e) => updateField('title', e.target.value)}
                 placeholder="메시지 제목 (20자 안, 변수 X)"
-                className="w-full px-3 py-2 mb-2 bg-slate-950 border border-white/10 rounded-lg text-sm text-white placeholder-white/30 focus:outline-none focus:border-violet-400/50"
+                className="w-full px-3 py-2 mb-2 bg-violet-900/50 border border-white/10 rounded-lg text-sm text-white placeholder-white/30 focus:outline-none focus:border-violet-400/50"
                 maxLength={100}
               />
               <textarea
                 value={editing.body || ''}
                 onChange={(e) => updateField('body', e.target.value)}
                 placeholder="본문 200~400자 풍성하게. 혜택 부분은 [혜택 안내 — 직접 작성해주세요] placeholder 사용"
-                className="w-full px-3 py-2 bg-slate-950 border border-white/10 rounded-lg text-sm text-white placeholder-white/30 resize-y h-32 focus:outline-none focus:border-violet-400/50"
+                className="w-full px-3 py-2 bg-violet-900/50 border border-white/10 rounded-lg text-sm text-white placeholder-white/30 resize-y h-32 focus:outline-none focus:border-violet-400/50"
                 maxLength={500}
               />
             </div>
@@ -1100,7 +1101,7 @@ function EditModal({ editing, setEditing, availableVariables, onSave, fileInputR
                     className={`text-xs px-2 py-2 rounded-lg border transition-colors ${
                       editing.template === tpl
                         ? 'bg-violet-500/30 border-violet-400/60 text-white'
-                        : 'bg-slate-950 border-white/10 text-white/70 hover:bg-white/5'
+                        : 'bg-violet-900/50 border-white/10 text-white/70 hover:bg-white/5'
                     }`}
                   >
                     {TEMPLATE_LABELS[tpl]}
@@ -1129,7 +1130,7 @@ function EditModal({ editing, setEditing, availableVariables, onSave, fileInputR
                 ) : (
                   <button
                     onClick={() => fileInputRef.current?.click()}
-                    className="px-3 py-2 bg-slate-950 border border-dashed border-white/20 rounded-lg text-xs text-white/70 hover:bg-white/5 flex items-center gap-2"
+                    className="px-3 py-2 bg-violet-900/50 border border-dashed border-white/20 rounded-lg text-xs text-white/70 hover:bg-white/5 flex items-center gap-2"
                   >
                     <Upload className="w-3.5 h-3.5" />
                     이미지 업로드 (2MB 이하)
@@ -1162,7 +1163,7 @@ function EditModal({ editing, setEditing, availableVariables, onSave, fileInputR
                         updateField('buttons', newButtons);
                       }}
                       placeholder="버튼 라벨"
-                      className="px-2 py-1.5 bg-slate-950 border border-white/10 rounded text-xs text-white placeholder-white/30"
+                      className="px-2 py-1.5 bg-violet-900/50 border border-white/10 rounded text-xs text-white placeholder-white/30"
                     />
                     <input
                       type="url"
@@ -1173,7 +1174,7 @@ function EditModal({ editing, setEditing, availableVariables, onSave, fileInputR
                         updateField('buttons', newButtons);
                       }}
                       placeholder="이동 URL"
-                      className="px-2 py-1.5 bg-slate-950 border border-white/10 rounded text-xs text-white placeholder-white/30"
+                      className="px-2 py-1.5 bg-violet-900/50 border border-white/10 rounded text-xs text-white placeholder-white/30"
                     />
                     <select
                       value={btn.style}
@@ -1182,7 +1183,7 @@ function EditModal({ editing, setEditing, availableVariables, onSave, fileInputR
                         newButtons[idx] = { ...newButtons[idx], style: e.target.value as any };
                         updateField('buttons', newButtons);
                       }}
-                      className="px-2 py-1.5 bg-slate-950 border border-white/10 rounded text-xs text-white"
+                      className="px-2 py-1.5 bg-violet-900/50 border border-white/10 rounded text-xs text-white"
                     >
                       <option value="primary">강조</option>
                       <option value="secondary">보통</option>
@@ -1220,7 +1221,7 @@ function EditModal({ editing, setEditing, availableVariables, onSave, fileInputR
               <h4 className="text-xs font-bold text-white/80 mb-2 flex items-center gap-1.5">
                 <Target className="w-3 h-3" /> 5. 세그먼트 조건
               </h4>
-              <div className="bg-slate-950 border border-white/10 rounded-lg p-3 space-y-2">
+              <div className="bg-violet-900/50 border border-white/10 rounded-lg p-3 space-y-2">
                 <div className="grid grid-cols-2 gap-2">
                   <input
                     type="text"
@@ -1233,7 +1234,7 @@ function EditModal({ editing, setEditing, availableVariables, onSave, fileInputR
                         customer: { ...(editing.segment_conditions?.customer || {}), grade: grades.length > 0 ? grades : undefined },
                       });
                     }}
-                    className="px-2 py-1.5 bg-slate-900 border border-white/10 rounded text-xs text-white placeholder-white/30"
+                    className="px-2 py-1.5 bg-violet-900/40 border border-white/10 rounded text-xs text-white placeholder-white/30"
                   />
                   <input
                     type="text"
@@ -1246,7 +1247,7 @@ function EditModal({ editing, setEditing, availableVariables, onSave, fileInputR
                         customer: { ...(editing.segment_conditions?.customer || {}), region: regions.length > 0 ? regions : undefined },
                       });
                     }}
-                    className="px-2 py-1.5 bg-slate-900 border border-white/10 rounded text-xs text-white placeholder-white/30"
+                    className="px-2 py-1.5 bg-violet-900/40 border border-white/10 rounded text-xs text-white placeholder-white/30"
                   />
                 </div>
                 <div className="text-[11px] text-cyan-300 flex items-center gap-2 pt-1 border-t border-white/5">
@@ -1263,7 +1264,7 @@ function EditModal({ editing, setEditing, availableVariables, onSave, fileInputR
               <h4 className="text-xs font-bold text-white/80 mb-2 flex items-center gap-1.5">
                 <Wand2 className="w-3 h-3" /> 6. 개인화 변수 (본문 안 활용)
               </h4>
-              <div className="bg-slate-950 border border-white/10 rounded-lg p-3 grid grid-cols-2 md:grid-cols-3 gap-1.5">
+              <div className="bg-violet-900/50 border border-white/10 rounded-lg p-3 grid grid-cols-2 md:grid-cols-3 gap-1.5">
                 {availableVariables.slice(0, 9).map((v) => (
                   <button
                     key={v.key}
@@ -1271,7 +1272,7 @@ function EditModal({ editing, setEditing, availableVariables, onSave, fileInputR
                       const cursorBody = (editing.body || '') + ' ' + v.key;
                       updateField('body', cursorBody);
                     }}
-                    className="text-[10px] bg-slate-900 hover:bg-violet-500/20 border border-white/10 rounded px-2 py-1 text-left transition-colors"
+                    className="text-[10px] bg-violet-900/40 hover:bg-violet-500/20 border border-white/10 rounded px-2 py-1 text-left transition-colors"
                     title={v.hint}
                   >
                     <div className="text-violet-300 font-mono truncate">{v.key}</div>
@@ -1294,7 +1295,7 @@ function EditModal({ editing, setEditing, availableVariables, onSave, fileInputR
                     updateField('trigger_event', event);
                     updateField('trigger_conditions', { ...(editing.trigger_conditions || {}), event });
                   }}
-                  className="px-2 py-1.5 bg-slate-950 border border-white/10 rounded text-xs text-white"
+                  className="px-2 py-1.5 bg-violet-900/50 border border-white/10 rounded text-xs text-white"
                 >
                   <option value="page_load">페이지 로드</option>
                   <option value="cart_add">장바구니 담음</option>
@@ -1308,7 +1309,7 @@ function EditModal({ editing, setEditing, availableVariables, onSave, fileInputR
                 <select
                   value={editing.display_frequency || 'once_per_session'}
                   onChange={(e) => updateField('display_frequency', e.target.value as Frequency)}
-                  className="px-2 py-1.5 bg-slate-950 border border-white/10 rounded text-xs text-white"
+                  className="px-2 py-1.5 bg-violet-900/50 border border-white/10 rounded text-xs text-white"
                 >
                   <option value="once_per_session">세션당 1회</option>
                   <option value="once_per_day">하루 1회</option>
@@ -1338,7 +1339,7 @@ function EditModal({ editing, setEditing, availableVariables, onSave, fileInputR
                       value={editing.send_start_hour ?? ''}
                       onChange={(e) => updateField('send_start_hour', e.target.value ? Number(e.target.value) : null)}
                       placeholder="9"
-                      className="w-full px-2 py-1.5 bg-slate-950 border border-white/10 rounded text-xs text-white placeholder-white/30"
+                      className="w-full px-2 py-1.5 bg-violet-900/50 border border-white/10 rounded text-xs text-white placeholder-white/30"
                     />
                   </div>
                   <div>
@@ -1349,7 +1350,7 @@ function EditModal({ editing, setEditing, availableVariables, onSave, fileInputR
                       value={editing.send_end_hour ?? ''}
                       onChange={(e) => updateField('send_end_hour', e.target.value ? Number(e.target.value) : null)}
                       placeholder="22"
-                      className="w-full px-2 py-1.5 bg-slate-950 border border-white/10 rounded text-xs text-white placeholder-white/30"
+                      className="w-full px-2 py-1.5 bg-violet-900/50 border border-white/10 rounded text-xs text-white placeholder-white/30"
                     />
                   </div>
                 </div>
@@ -1367,7 +1368,7 @@ function EditModal({ editing, setEditing, availableVariables, onSave, fileInputR
                             updateField('allowed_weekdays', next);
                           }}
                           className={`flex-1 py-1.5 text-[11px] rounded ${
-                            allowed ? 'bg-emerald-500/30 text-emerald-100 border border-emerald-400/40' : 'bg-slate-950 border border-white/10 text-white/40'
+                            allowed ? 'bg-emerald-500/30 text-emerald-100 border border-emerald-400/40' : 'bg-violet-900/50 border border-white/10 text-white/40'
                           }`}
                         >
                           {day}
@@ -1385,7 +1386,7 @@ function EditModal({ editing, setEditing, availableVariables, onSave, fileInputR
                       value={editing.auto_dismiss_seconds ?? ''}
                       onChange={(e) => updateField('auto_dismiss_seconds', e.target.value ? Number(e.target.value) : null)}
                       placeholder="비우면 수동"
-                      className="w-full px-2 py-1.5 bg-slate-950 border border-white/10 rounded text-xs text-white placeholder-white/30"
+                      className="w-full px-2 py-1.5 bg-violet-900/50 border border-white/10 rounded text-xs text-white placeholder-white/30"
                     />
                   </div>
                   <div>
@@ -1396,7 +1397,7 @@ function EditModal({ editing, setEditing, availableVariables, onSave, fileInputR
                       value={editing.max_displays_per_user ?? ''}
                       onChange={(e) => updateField('max_displays_per_user', e.target.value ? Number(e.target.value) : null)}
                       placeholder="비우면 무한"
-                      className="w-full px-2 py-1.5 bg-slate-950 border border-white/10 rounded text-xs text-white placeholder-white/30"
+                      className="w-full px-2 py-1.5 bg-violet-900/50 border border-white/10 rounded text-xs text-white placeholder-white/30"
                     />
                   </div>
                 </div>
@@ -1405,7 +1406,7 @@ function EditModal({ editing, setEditing, availableVariables, onSave, fileInputR
                   <select
                     value={editing.animation || 'fade'}
                     onChange={(e) => updateField('animation', e.target.value as Animation)}
-                    className="w-full px-2 py-1.5 bg-slate-950 border border-white/10 rounded text-xs text-white"
+                    className="w-full px-2 py-1.5 bg-violet-900/50 border border-white/10 rounded text-xs text-white"
                   >
                     <option value="fade">Fade (default)</option>
                     <option value="slide">Slide</option>
@@ -1428,7 +1429,7 @@ function EditModal({ editing, setEditing, availableVariables, onSave, fileInputR
                     type="color"
                     value={editing.background_color || '#4f46e5'}
                     onChange={(e) => updateField('background_color', e.target.value)}
-                    className="w-full h-9 bg-slate-950 border border-white/10 rounded cursor-pointer"
+                    className="w-full h-9 bg-violet-900/50 border border-white/10 rounded cursor-pointer"
                   />
                 </div>
                 <div>
@@ -1437,7 +1438,7 @@ function EditModal({ editing, setEditing, availableVariables, onSave, fileInputR
                     type="color"
                     value={editing.text_color || '#ffffff'}
                     onChange={(e) => updateField('text_color', e.target.value)}
-                    className="w-full h-9 bg-slate-950 border border-white/10 rounded cursor-pointer"
+                    className="w-full h-9 bg-violet-900/50 border border-white/10 rounded cursor-pointer"
                   />
                 </div>
                 <div>
@@ -1445,7 +1446,7 @@ function EditModal({ editing, setEditing, availableVariables, onSave, fileInputR
                   <select
                     value={editing.status || 'active'}
                     onChange={(e) => updateField('status', e.target.value as Status)}
-                    className="w-full h-9 px-2 bg-slate-950 border border-white/10 rounded text-xs text-white"
+                    className="w-full h-9 px-2 bg-violet-900/50 border border-white/10 rounded text-xs text-white"
                   >
                     <option value="active">활성</option>
                     <option value="paused">일시 중지</option>
@@ -1456,7 +1457,7 @@ function EditModal({ editing, setEditing, availableVariables, onSave, fileInputR
           </div>
 
           {/* 우측 — 실시간 미리보기 (영역 10) */}
-          <div className="bg-slate-950/60 p-6 space-y-3 sticky top-[60px] h-fit max-h-[80vh] overflow-y-auto">
+          <div className="bg-violet-900/50/60 p-6 space-y-3 sticky top-[60px] h-fit max-h-[80vh] overflow-y-auto">
             <h4 className="text-xs font-bold text-white/80 mb-1 flex items-center gap-1.5">
               <Eye className="w-3 h-3" /> 10. 실시간 미리보기
             </h4>
@@ -1468,7 +1469,7 @@ function EditModal({ editing, setEditing, availableVariables, onSave, fileInputR
                   className={`flex-1 px-2 py-1.5 text-xs rounded ${
                     previewCustomer === pc
                       ? 'bg-violet-500/30 border border-violet-400/40 text-white'
-                      : 'bg-slate-900 border border-white/10 text-white/50'
+                      : 'bg-violet-900/40 border border-white/10 text-white/50'
                   }`}
                 >
                   {pc}
@@ -1512,7 +1513,7 @@ function EditModal({ editing, setEditing, availableVariables, onSave, fileInputR
         </div>
 
         {/* 푸터 */}
-        <div className="sticky bottom-0 bg-slate-900 border-t border-white/10 px-6 py-3 flex justify-end gap-2">
+        <div className="sticky bottom-0 bg-violet-900/40 border-t border-white/10 px-6 py-3 flex justify-end gap-2">
           <button onClick={() => setEditing(null)} className="px-4 py-2 text-sm text-white/70 hover:bg-white/5 rounded-lg">취소</button>
           <button onClick={onSave} className="px-5 py-2 bg-gradient-to-r from-violet-500 to-purple-500 hover:from-violet-600 hover:to-purple-600 text-white text-sm font-bold rounded-lg">
             저장
@@ -1537,8 +1538,8 @@ interface DrillDownProps {
 function DrillDownModal({ loading, stats, explain, onClose }: DrillDownProps) {
   return (
     <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50" onClick={onClose}>
-      <div className="bg-slate-900 border border-white/10 rounded-2xl shadow-2xl w-full max-w-4xl max-h-[95vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
-        <div className="sticky top-0 bg-slate-900 border-b border-white/10 px-6 py-4 flex items-center justify-between">
+      <div className="bg-violet-900/40 border border-white/10 rounded-2xl shadow-2xl w-full max-w-4xl max-h-[95vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+        <div className="sticky top-0 bg-violet-900/40 border-b border-white/10 px-6 py-4 flex items-center justify-between">
           <h3 className="text-lg font-bold text-white flex items-center gap-2">
             <BarChart3 className="w-5 h-5 text-cyan-300" />
             메시지 통계 + AI 영향 요인 분석
@@ -1569,7 +1570,7 @@ function DrillDownModal({ loading, stats, explain, onClose }: DrillDownProps) {
                           <span className="text-white/70">{step.name}</span>
                           <span className="text-white font-bold">{step.count.toLocaleString()} ({step.percentOfTotal.toFixed(1)}%)</span>
                         </div>
-                        <div className="h-6 bg-slate-950 rounded overflow-hidden">
+                        <div className="h-6 bg-violet-900/50 rounded overflow-hidden">
                           <div className={`h-full ${colors[idx]} transition-all`} style={{ width: `${Math.max(step.percentOfTotal, 2)}%` }} />
                         </div>
                         {step.dropoffReason && (
@@ -1614,7 +1615,7 @@ function DrillDownModal({ loading, stats, explain, onClose }: DrillDownProps) {
                 <h4 className="text-sm font-bold text-white mb-3">디바이스 분포</h4>
                 <div className="grid grid-cols-2 gap-3">
                   {stats.device.map((d) => (
-                    <div key={d.device} className="bg-slate-950 rounded p-3">
+                    <div key={d.device} className="bg-violet-900/50 rounded p-3">
                       <div className="text-xs text-white/50">{d.device === 'mobile' ? '모바일' : 'PC'}</div>
                       <div className="text-lg font-bold text-white">{d.impressions.toLocaleString()}</div>
                       <div className="text-xs text-emerald-300">CTR {(d.ctr * 100).toFixed(2)}%</div>
@@ -1636,7 +1637,7 @@ function DrillDownModal({ loading, stats, explain, onClose }: DrillDownProps) {
               <div className="text-xs text-violet-100 mb-3 italic">{explain.topInsight}</div>
               <div className="space-y-2">
                 {explain.factors.map((f, idx) => (
-                  <div key={idx} className="bg-slate-950/60 rounded p-3">
+                  <div key={idx} className="bg-violet-900/50/60 rounded p-3">
                     <div className="flex items-center justify-between mb-1">
                       <span className="text-xs font-bold text-white">{f.factor}</span>
                       <span className={`text-[10px] px-2 py-0.5 rounded-full ${
@@ -1648,7 +1649,7 @@ function DrillDownModal({ loading, stats, explain, onClose }: DrillDownProps) {
                       </span>
                     </div>
                     <div className="text-[11px] text-white/70 mb-1">{f.description}</div>
-                    <div className="h-1.5 bg-slate-900 rounded overflow-hidden mb-1">
+                    <div className="h-1.5 bg-violet-900/40 rounded overflow-hidden mb-1">
                       <div
                         className={`h-full transition-all ${
                           f.direction === 'positive' ? 'bg-emerald-500' :

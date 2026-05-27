@@ -1,6 +1,10 @@
 // routes/payments.ts — 이니시스 표준결제 라우트
 // SoT: status/legacy-payment-migration.md §6-3
 // CT-41 inicis-client + CT-42 payment-processor 통합
+//
+// D224+ closeUrl V023 사고 fix (2026-05-27 Harold 신고):
+//   기존 = process.env.PUBLIC_BASE_URL 정적 baseUrl → 사용자 진입 origin (hanjul.ai) ≠ closeUrl domain (app.hanjul.ai) 불일치
+//   정정 = utils/inicis-client.ts getInicisCallbackUrls(req) helper 활용 = 동적 baseUrl (req.get('host') 정합)
 
 import { Router, Request, Response, urlencoded } from 'express';
 import { pool } from '../config/database';
@@ -10,6 +14,7 @@ import {
   approveInicisPayment,
   netCancelInicisPayment,
   generateOrderId,
+  getInicisCallbackUrls,
   type InicisCallbackBody,
 } from '../utils/inicis-client';
 import {
@@ -23,10 +28,13 @@ const router = Router();
 // 이니시스 callback form POST는 application/x-www-form-urlencoded
 const inicisFormParser = urlencoded({ extended: true, limit: '1mb' });
 
-// ── 공용 helper: 결제 결과 HTML 응답 영역 ────────────────────────
+// ── 공용 helper: 결제 결과 HTML 응답 ────────────────────────
 
-function renderResultHtml(status: 'success' | 'failed' | 'cancelled', data: Record<string, any>): string {
-  const baseUrl = process.env.PUBLIC_BASE_URL || 'https://app.hanjul.ai';
+function renderResultHtml(
+  status: 'success' | 'failed' | 'cancelled',
+  data: Record<string, any>,
+  baseUrl: string,
+): string {
   const escape = (s: string) => s.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c] || c));
   const safeStatus = escape(status);
   const dataJson = JSON.stringify({ type: 'INICIS_PAYMENT_RESULT', status, ...data });
@@ -79,21 +87,23 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Appl
 }
 
 // ────────────────────────────────────────────────────────────
-// 1) 이니시스 callback 라우트 (인증 X — 이니시스 측 form POST 본질)
+// 1) 이니시스 callback 라우트 (인증 X — 이니시스 측 form POST)
 // ────────────────────────────────────────────────────────────
 
 // POST /api/payments/inicis/return — 결제 완료 callback (P_NEXT_URL)
 router.post('/inicis/return', inicisFormParser, async (req: Request, res: Response) => {
   const body: Record<string, any> = req.body || {};
+  const { baseUrl } = getInicisCallbackUrls(req);
   console.log('[payments] /inicis/return callback:', {
     resultCode: body.resultCode,
     orderNumber: body.orderNumber,
     mid: body.mid,
+    requestHost: req.get('host'),
   });
 
   const orderId = String(body.orderNumber || body.MOID || '').trim();
   if (!orderId) {
-    res.status(400).send(renderResultHtml('failed', { resultMsg: 'orderNumber 누락' }));
+    res.status(400).send(renderResultHtml('failed', { resultMsg: 'orderNumber 누락' }, baseUrl));
     return;
   }
 
@@ -111,7 +121,7 @@ router.post('/inicis/return', inicisFormParser, async (req: Request, res: Respon
         paymentId: fail.paymentId,
         resultCode: body.resultCode,
         resultMsg: body.resultMsg,
-      }));
+      }, baseUrl));
       return;
     }
 
@@ -148,7 +158,7 @@ router.post('/inicis/return', inicisFormParser, async (req: Request, res: Respon
         paymentId: fail.paymentId,
         resultCode: approval.resultCode,
         resultMsg: approval.resultMsg,
-      }));
+      }, baseUrl));
       return;
     }
 
@@ -160,7 +170,7 @@ router.post('/inicis/return', inicisFormParser, async (req: Request, res: Respon
         amount: result.amount,
         newBalance: result.newBalance,
         alreadyProcessed: result.alreadyProcessed,
-      }));
+      }, baseUrl));
     } catch (finalErr: any) {
       // finalize 실패 시 netCancel 호출 (이니시스 측 망취소)
       console.error('[payments] /inicis/return finalize 실패 → netCancel 호출:', finalErr.message || finalErr);
@@ -176,19 +186,20 @@ router.post('/inicis/return', inicisFormParser, async (req: Request, res: Respon
       });
       res.status(200).send(renderResultHtml('failed', {
         resultMsg: '결제 확정 실패 (망취소 처리됨)',
-      }));
+      }, baseUrl));
     }
   } catch (err: any) {
     console.error('[payments] /inicis/return 처리 실패:', err.message || err);
-    res.status(200).send(renderResultHtml('failed', { resultMsg: '결제 처리 중 오류' }));
+    res.status(200).send(renderResultHtml('failed', { resultMsg: '결제 처리 중 오류' }, baseUrl));
   }
 });
 
 // POST /api/payments/inicis/close — 결제창 닫기 callback (P_CLOSE_URL)
 router.post('/inicis/close', inicisFormParser, async (req: Request, res: Response) => {
   const body: Record<string, any> = req.body || {};
+  const { baseUrl } = getInicisCallbackUrls(req);
   const orderId = String(body.orderNumber || body.MOID || body.oid || '').trim();
-  console.log('[payments] /inicis/close callback:', { orderId, body });
+  console.log('[payments] /inicis/close callback:', { orderId, body, requestHost: req.get('host') });
 
   if (orderId) {
     await finalizePaymentFailure({
@@ -199,7 +210,7 @@ router.post('/inicis/close', inicisFormParser, async (req: Request, res: Respons
       status: 'cancelled',
     });
   }
-  res.status(200).send(renderResultHtml('cancelled', { orderId }));
+  res.status(200).send(renderResultHtml('cancelled', { orderId }, baseUrl));
 });
 
 // ────────────────────────────────────────────────────────────
@@ -208,7 +219,7 @@ router.post('/inicis/close', inicisFormParser, async (req: Request, res: Respons
 
 router.use(authenticate);
 
-// POST /api/payments/inicis/prepare — 결제창 호출 영역
+// POST /api/payments/inicis/prepare — 결제창 호출
 router.post('/inicis/prepare', async (req: Request, res: Response) => {
   try {
     const companyId = req.user?.companyId;
@@ -230,7 +241,7 @@ router.post('/inicis/prepare', async (req: Request, res: Response) => {
       return res.status(400).json({ error: '구매자명을 입력해주세요.' });
     }
 
-    // 회사 영역 + 선불 영역 확인
+    // 회사 + 선불 요금제 확인
     const companyResult = await pool.query(
       'SELECT id, billing_type, company_name FROM companies WHERE id = $1',
       [companyId]
@@ -260,8 +271,11 @@ router.post('/inicis/prepare', async (req: Request, res: Response) => {
       buyerTel: buyerTelSafe,
     });
 
+    // ★ V023 fix — 사용자 진입 origin (req.get('host')) 정합 closeUrl/returnUrl 동적 생성
+    const { returnUrl, closeUrl } = getInicisCallbackUrls(req);
+    console.log('[payments] /inicis/prepare callback URLs:', { returnUrl, closeUrl, requestHost: req.get('host') });
+
     // 이니시스 결제창 form 데이터
-    const baseUrl = process.env.PUBLIC_BASE_URL || 'https://app.hanjul.ai';
     const form = prepareInicisPayment({
       orderId,
       companyId,
@@ -271,8 +285,8 @@ router.post('/inicis/prepare', async (req: Request, res: Response) => {
       buyerName: buyerNameSafe,
       buyerEmail: buyerEmailSafe,
       buyerTel: buyerTelSafe,
-      returnUrl: `${baseUrl}/api/payments/inicis/return`,
-      closeUrl: `${baseUrl}/api/payments/inicis/close`,
+      returnUrl,
+      closeUrl,
     });
 
     res.json({

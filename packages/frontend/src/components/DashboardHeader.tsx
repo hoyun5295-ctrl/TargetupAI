@@ -31,7 +31,9 @@ interface DashboardHeaderProps {
   onAiOperatorClick?: () => void;
 }
 
-type MenuColor = 'green' | 'gold' | 'gray' | 'beta';
+// ★ D222+ Phase 1 (2026-05-27): AI Operator 메뉴 제거 + 매뉴얼 (NEW) 메뉴 신규 추가.
+//   'new' 색상 = 매뉴얼 메뉴 강조 (그라데이션 violet→fuchsia).
+type MenuColor = 'green' | 'gold' | 'gray' | 'beta' | 'new';
 
 interface MenuItem {
   label: string;
@@ -40,16 +42,19 @@ interface MenuItem {
   emphasized?: boolean;
   locked?: boolean;
   betaBadge?: boolean; // ★ D163: BETA 뱃지 노출 (AI Operator 등 베타 메뉴)
+  newBadge?: boolean; // ★ D222+ Phase 1: NEW 뱃지 노출 (매뉴얼 등 신규 메뉴)
   path?: string; // 현재 페이지 활성 감지용
 }
 
 // ★ D95: 필(pill) 스타일 메뉴 — 밑줄 제거, 호버/강조 시 배경색
 // ★ D163: 'beta' 색상 추가 — AI Operator 등 베타 메뉴 강조 (그라데이션 amber→fuchsia)
+// ★ D222+ Phase 1: 'new' 색상 추가 — 매뉴얼 등 신규 메뉴 강조 (violet 톤)
 const COLOR_CONFIG: Record<MenuColor, { text: string; hoverText: string; hoverBg: string; activeBg: string; activeText: string }> = {
   green: { text: '#4b5563', hoverText: '#15803d', hoverBg: '#f0fdf4', activeBg: '#ecfdf5', activeText: '#15803d' },
   gold:  { text: '#4b5563', hoverText: '#b45309', hoverBg: '#fffbeb', activeBg: '#fef3c7', activeText: '#b45309' },
   gray:  { text: '#9ca3af', hoverText: '#6b7280', hoverBg: '#f3f4f6', activeBg: '#f3f4f6', activeText: '#6b7280' },
   beta:  { text: '#4b5563', hoverText: '#a21caf', hoverBg: '#fdf4ff', activeBg: '#fae8ff', activeText: '#a21caf' },
+  new:   { text: '#4b5563', hoverText: '#7c3aed', hoverBg: '#f5f3ff', activeBg: '#ede9fe', activeText: '#7c3aed' },
 };
 
 export default function DashboardHeader({
@@ -98,18 +103,15 @@ export default function DashboardHeader({
   };
 
   const menuItems: MenuItem[] = [
-    // ★ D163 (2026-05-19) Braze급 SaaS Step 0 — AI Operator 베타 메뉴.
-    // ★ D177-ux2 (2026-05-19) Harold 명시 정정 — dropdown 미사용, AI Operator 페이지 안에 sub-menu 배치.
-    //   메뉴 깊이 적용된 영역에 신규 기능 노출 = 영업/노출 정합. 헤더에는 AI Operator 메뉴만 배치.
-    ...(onAiOperatorClick
-      ? [{
-          label: 'AI Operator',
-          onClick: onAiOperatorClick,
-          color: 'beta' as MenuColor,
-          betaBadge: true,
-          path: '/ai-operator',
-        }]
-      : []),
+    // ★ D222+ Phase 1 (2026-05-27): AI Operator (BETA) 메뉴 영구 제거 — Dashboard 우측 카드 "AI Operator" 라벨 통합 진입.
+    //   onAiOperatorClick prop = 호환성 유지 (Dashboard 우측 카드 클릭 callback). 헤더 메뉴 영역 = 제거.
+    // ★ D222+ Phase 1: 매뉴얼 (NEW) 메뉴 신규 추가 — manual.html 새 탭 진입.
+    {
+      label: '매뉴얼',
+      onClick: () => window.open('/manual/manual.html', '_blank', 'noopener'),
+      color: 'new',
+      newBadge: true,
+    },
     // ★ D188 Phase 2-B-4 (2026-05-21) 자동발송 메뉴 영구 제거 — Harold 명시 "사용 고객사 0 + 여정 빌더가 진짜 업그레이드".
     //   /auto-send 라우트 진입 시 AutoSendPage.tsx가 여정 빌더 안내 페이지로 노출. auto_campaigns 운영 데이터는 보존 (worker 유지).
     // ★ D182 (2026-05-19): 모바일DM 헤더 메뉴 영구 제거 — AI Operator 페이지 안 SUB_MODULE_CARDS로 이동 (Harold 명시 — 헤더 간소화)
@@ -209,6 +211,11 @@ export default function DashboardHeader({
                 {item.betaBadge && (
                   <span className="text-[9px] font-bold tracking-wider px-1.5 py-0.5 rounded-full bg-gradient-to-r from-amber-400 to-fuchsia-500 text-white shadow-sm">
                     BETA
+                  </span>
+                )}
+                {item.newBadge && (
+                  <span className="text-[9px] font-bold tracking-wider px-1.5 py-0.5 rounded-full bg-gradient-to-r from-violet-500 to-fuchsia-500 text-white shadow-sm">
+                    NEW
                   </span>
                 )}
               </button>

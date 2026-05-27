@@ -516,21 +516,21 @@ export default function AiOperatorPage() {
   const showAbout = !loading && !proposal;
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-indigo-950 via-purple-950 to-fuchsia-950 text-white">
-      {/* 배경 글로우 */}
+    <div className="min-h-screen bg-gradient-to-br from-violet-900 via-fuchsia-900 to-violet-900 text-white">
+      {/* 배경 글로우 — D222+ Phase 1 톤 다운 정정 */}
       <div className="pointer-events-none fixed inset-0 overflow-hidden">
-        <div className="absolute -top-40 -left-40 w-[600px] h-[600px] rounded-full bg-fuchsia-500/10 blur-3xl" />
-        <div className="absolute -bottom-40 -right-40 w-[600px] h-[600px] rounded-full bg-indigo-500/10 blur-3xl" />
-        <div className="absolute top-1/3 left-1/2 -translate-x-1/2 w-[800px] h-[800px] rounded-full bg-purple-500/5 blur-3xl" />
+        <div className="absolute -top-40 -left-40 w-[600px] h-[600px] rounded-full bg-fuchsia-400/15 blur-3xl" />
+        <div className="absolute -bottom-40 -right-40 w-[600px] h-[600px] rounded-full bg-violet-400/15 blur-3xl" />
+        <div className="absolute top-1/3 left-1/2 -translate-x-1/2 w-[800px] h-[800px] rounded-full bg-purple-400/10 blur-3xl" />
       </div>
 
-      {/* 헤더 */}
-      <header className="relative border-b border-white/10 backdrop-blur-md bg-white/5 sticky top-0 z-30">
+      {/* 헤더 — D222+ Phase 1: 보라 톤 다운 + 시인성 강화 */}
+      <header className="relative border-b border-violet-400/30 backdrop-blur-md bg-violet-800/50 sticky top-0 z-30">
         <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
           <button
             type="button"
             onClick={() => navigate('/dashboard')}
-            className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-white/70 hover:text-white hover:bg-white/10 transition-all text-sm"
+            className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-white/80 hover:text-white hover:bg-white/15 transition-all text-sm"
           >
             <ArrowLeft className="w-4 h-4" />
             대시보드로 돌아가기

@@ -1,7 +1,7 @@
 /**
  * PerformancePage.tsx — D213+ (2026-05-24) 4번 메뉴 성과리포트 전면 재작성
  *
- * 옛 278줄 → 신규 영역 (Predictive 매트릭스 정합 12 화면 영역)
+ * 기존 278줄 → 신규 (Predictive 매트릭스 정합 12 화면)
  *
  * 영역:
  *   1. 상단 + 기간 선택 토글 (7d/14d/30d/90d)
@@ -19,7 +19,7 @@
  * ⛔ 영구 룰:
  *   - native confirm/alert/prompt X (feedback_no_native_browser_dialog)
  *   - 모든 카드/차트 source 명시 의무 (feedback_no_mock_data_in_production)
- *   - 다크 톤 정합 (bg-slate-950 + violet 액센트)
+ *   - 보라 톤 정합 (violet 그라데이션 + 액센트) — D222+ Phase 2 정정
  */
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
@@ -445,8 +445,9 @@ export default function PerformancePage() {
   }, [cohort]);
 
   return (
-    <div className="min-h-screen bg-slate-950 text-white">
-      <div className="bg-slate-950/80 backdrop-blur-sm border-b border-white/10 sticky top-0 z-30">
+    // ★ D222+ Phase 2 (2026-05-27): 다크 → 보라 그라데이션 톤 다운 + 시인성 강화
+    <div className="min-h-screen bg-gradient-to-br from-violet-900 via-fuchsia-900 to-violet-900 text-white">
+      <div className="bg-violet-800/50 backdrop-blur-md border-b border-violet-400/30 sticky top-0 z-30">
         <div className="max-w-7xl mx-auto px-4 md:px-6 py-3 md:py-4 flex items-center gap-3 flex-wrap">
           <button onClick={() => navigate('/ai-operator')} className="p-2 rounded-lg hover:bg-white/10 transition-colors">
             <ArrowLeft className="w-5 h-5" />
@@ -982,7 +983,7 @@ export default function PerformancePage() {
                 </div>
 
                 {campaignsExpanded && (
-                  <div className="border-t border-white/10 bg-slate-950/40">
+                  <div className="border-t border-white/10 bg-violet-900/30">
                     <div className="p-3 border-b border-white/10 flex flex-col md:flex-row gap-2">
                       <form onSubmit={handleSearch} className="flex-1 flex gap-2">
                         <div className="relative flex-1">
@@ -991,7 +992,7 @@ export default function PerformancePage() {
                             value={searchInput}
                             onChange={(e) => setSearchInput(e.target.value)}
                             placeholder="캠페인명 검색"
-                            className="w-full pl-8 pr-3 py-1.5 bg-slate-900 border border-white/10 rounded text-xs text-white placeholder-white/30 focus:outline-none focus:border-violet-400/50"
+                            className="w-full pl-8 pr-3 py-1.5 bg-violet-900/40 border border-white/10 rounded text-xs text-white placeholder-white/30 focus:outline-none focus:border-violet-400/50"
                           />
                         </div>
                         <button type="submit" className="px-3 py-1.5 bg-violet-500/30 hover:bg-violet-500/50 text-violet-100 rounded text-xs font-medium">검색</button>
@@ -999,29 +1000,29 @@ export default function PerformancePage() {
                       <div className="flex items-center gap-2">
                         <div className="relative">
                           <Filter className="w-3 h-3 absolute left-2 top-1/2 -translate-y-1/2 text-white/40 pointer-events-none" />
-                          <select value={filterChannel} onChange={(e) => { setFilterChannel(e.target.value); setCampaignsPage(1); }} className="pl-6 pr-7 py-1.5 bg-slate-900 border border-white/10 rounded text-xs text-white focus:outline-none focus:border-violet-400/50 appearance-none">
-                            <option value="all" className="bg-slate-900">전체 채널</option>
-                            <option value="sms" className="bg-slate-900">SMS</option>
-                            <option value="lms" className="bg-slate-900">LMS</option>
-                            <option value="mms" className="bg-slate-900">MMS</option>
-                            <option value="kakao" className="bg-slate-900">KAKAO</option>
+                          <select value={filterChannel} onChange={(e) => { setFilterChannel(e.target.value); setCampaignsPage(1); }} className="pl-6 pr-7 py-1.5 bg-violet-900/40 border border-white/10 rounded text-xs text-white focus:outline-none focus:border-violet-400/50 appearance-none">
+                            <option value="all" className="bg-violet-900/40">전체 채널</option>
+                            <option value="sms" className="bg-violet-900/40">SMS</option>
+                            <option value="lms" className="bg-violet-900/40">LMS</option>
+                            <option value="mms" className="bg-violet-900/40">MMS</option>
+                            <option value="kakao" className="bg-violet-900/40">KAKAO</option>
                           </select>
                         </div>
                         <div className="relative">
                           <Filter className="w-3 h-3 absolute left-2 top-1/2 -translate-y-1/2 text-white/40 pointer-events-none" />
-                          <select value={filterAd} onChange={(e) => { setFilterAd(e.target.value); setCampaignsPage(1); }} className="pl-6 pr-7 py-1.5 bg-slate-900 border border-white/10 rounded text-xs text-white focus:outline-none focus:border-violet-400/50 appearance-none">
-                            <option value="all" className="bg-slate-900">광고/안내</option>
-                            <option value="ad" className="bg-slate-900">광고만</option>
-                            <option value="info" className="bg-slate-900">안내만</option>
+                          <select value={filterAd} onChange={(e) => { setFilterAd(e.target.value); setCampaignsPage(1); }} className="pl-6 pr-7 py-1.5 bg-violet-900/40 border border-white/10 rounded text-xs text-white focus:outline-none focus:border-violet-400/50 appearance-none">
+                            <option value="all" className="bg-violet-900/40">광고/안내</option>
+                            <option value="ad" className="bg-violet-900/40">광고만</option>
+                            <option value="info" className="bg-violet-900/40">안내만</option>
                           </select>
                         </div>
                         <div className="relative">
                           <ArrowUpDown className="w-3 h-3 absolute left-2 top-1/2 -translate-y-1/2 text-white/40 pointer-events-none" />
-                          <select value={sort} onChange={(e) => { setSort(e.target.value); setCampaignsPage(1); }} className="pl-6 pr-7 py-1.5 bg-slate-900 border border-white/10 rounded text-xs text-white focus:outline-none focus:border-violet-400/50 appearance-none">
-                            <option value="sent_desc" className="bg-slate-900">발송 ↓</option>
-                            <option value="success_rate_desc" className="bg-slate-900">성공률 ↓</option>
-                            <option value="sent_at_desc" className="bg-slate-900">최근 ↓</option>
-                            <option value="sent_at_asc" className="bg-slate-900">오래된 순 ↓</option>
+                          <select value={sort} onChange={(e) => { setSort(e.target.value); setCampaignsPage(1); }} className="pl-6 pr-7 py-1.5 bg-violet-900/40 border border-white/10 rounded text-xs text-white focus:outline-none focus:border-violet-400/50 appearance-none">
+                            <option value="sent_desc" className="bg-violet-900/40">발송 ↓</option>
+                            <option value="success_rate_desc" className="bg-violet-900/40">성공률 ↓</option>
+                            <option value="sent_at_desc" className="bg-violet-900/40">최근 ↓</option>
+                            <option value="sent_at_asc" className="bg-violet-900/40">오래된 순 ↓</option>
                           </select>
                         </div>
                       </div>

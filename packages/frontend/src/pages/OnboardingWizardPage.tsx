@@ -4,7 +4,7 @@
  * 🎯 Harold 명시 본질 (2026-05-26): "강압 X + 사용자 자유 닫기 + 오늘 하루 보지 않기 옵션 (24h cooldown)"
  *
  * 7 step 흐름 + 진행률 카드 + skip + 재진입 가능.
- * 다크 톤 (bg-slate-950) + violet 액센트 (D215+ design_quality_minimum_journey_level 정합).
+ * 보라 톤 (violet 그라데이션) + 액센트 (D222+ Phase 3 정정 — D215+ design_quality_minimum_journey_level 정합).
  */
 
 import { useEffect, useState } from 'react';
@@ -199,7 +199,7 @@ export default function OnboardingWizardPage() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-slate-950 flex items-center justify-center">
+      <div className="min-h-screen bg-gradient-to-br from-violet-900 via-fuchsia-900 to-violet-900 flex items-center justify-center">
         <div className="text-white/60 text-sm">Wizard 로딩 중...</div>
       </div>
     );
@@ -207,8 +207,8 @@ export default function OnboardingWizardPage() {
 
   if (error) {
     return (
-      <div className="min-h-screen bg-slate-950 flex items-center justify-center px-4">
-        <div className="max-w-md w-full bg-slate-900 border border-rose-500/30 rounded-2xl p-6">
+      <div className="min-h-screen bg-gradient-to-br from-violet-900 via-fuchsia-900 to-violet-900 flex items-center justify-center px-4">
+        <div className="max-w-md w-full bg-violet-900/40 border border-rose-500/30 rounded-2xl p-6">
           <div className="flex items-center gap-3 mb-3">
             <AlertCircle className="w-6 h-6 text-rose-400" />
             <h2 className="text-lg font-semibold text-white">Wizard 진입 불가</h2>
@@ -230,9 +230,10 @@ export default function OnboardingWizardPage() {
     : 0;
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 text-white">
-      {/* sticky 헤더 */}
-      <div className="sticky top-0 z-30 bg-slate-950/80 backdrop-blur-sm border-b border-white/10">
+    // ★ D222+ Phase 3 (2026-05-27): 다크 → 보라 그라데이션 톤 다운
+    <div className="min-h-screen bg-gradient-to-br from-violet-900 via-fuchsia-900 to-violet-900 text-white">
+      {/* sticky 헤더 — D222+ Phase 3 보라 톤 다운 */}
+      <div className="sticky top-0 z-30 bg-violet-800/50 backdrop-blur-md border-b border-violet-400/30">
         <div className="max-w-6xl mx-auto px-4 md:px-6 py-4">
           <div className="flex items-center justify-between gap-3 flex-wrap">
             <div className="flex items-center gap-3">

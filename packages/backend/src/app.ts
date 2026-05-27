@@ -18,6 +18,8 @@ import companiesRoutes from './routes/companies';
 import onboardingRoutes from './routes/onboarding';
 // ★ D219+ Part 2 후속 (2026-05-27): 일일 인사이트 API (Performance 카드 + 메일 양쪽 활용)
 import insightRoutes from './routes/insight';
+// ★ D222+ Phase 1 (2026-05-27): Dashboard DB 현황 endpoint 2건 (customer-trend + customer-distribution)
+import dashboardRoutes from './routes/dashboard';
 import plansRoutes from './routes/plans';
 import customersRoutes from './routes/customers';
 import campaignsRoutes from './routes/campaigns';
@@ -175,6 +177,7 @@ app.use('/api/auth', authRoutes);
 app.use('/api/companies', companiesRoutes);
 app.use('/api/onboarding', onboardingRoutes);
 app.use('/api/insight', insightRoutes);
+app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/plans', plansRoutes);
 app.use('/api/customers', customersRoutes);
 app.use('/api/campaigns', campaignsRoutes);

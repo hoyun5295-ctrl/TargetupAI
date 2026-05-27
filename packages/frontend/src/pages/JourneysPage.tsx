@@ -285,11 +285,12 @@ const TEMPLATE_VISUAL: Record<TemplateCode, { icon: typeof UserPlus; gradient: s
   custom:      { icon: Sparkles,     gradient: 'from-fuchsia-400 to-purple-500', label: '자유 여정',       hint: 'AI가 자동 설계' },
 };
 
+// ★ D222+ Phase 1 (2026-05-27): status badge 시인성 강화 (-300 → -200)
 const STATUS_BADGE: Record<JourneyStatus, { label: string; cls: string }> = {
-  draft:  { label: '초안',     cls: 'bg-slate-700 text-slate-200' },
-  active: { label: '활성',     cls: 'bg-emerald-500/20 text-emerald-300 border border-emerald-400/30' },
-  paused: { label: '일시정지', cls: 'bg-amber-500/20 text-amber-300 border border-amber-400/30' },
-  ended:  { label: '종료',     cls: 'bg-slate-800 text-slate-400' },
+  draft:  { label: '초안',     cls: 'bg-violet-700/40 text-violet-100 border border-violet-400/30' },
+  active: { label: '활성',     cls: 'bg-emerald-500/25 text-emerald-200 border border-emerald-400/40' },
+  paused: { label: '일시정지', cls: 'bg-amber-500/25 text-amber-200 border border-amber-400/40' },
+  ended:  { label: '종료',     cls: 'bg-slate-700/50 text-white/60 border border-white/15' },
 };
 
 function buildPreview(message: string, isAd: boolean, channel: ChannelType, opt080: string): string {
@@ -987,26 +988,27 @@ export default function JourneysPage() {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 text-white">
-      {/* 헤더 */}
-      <div className="border-b border-white/10 bg-slate-950/80 backdrop-blur-sm sticky top-0 z-30">
+    // ★ D222+ Phase 1 (2026-05-27): 다크 톤 → 보라 그라데이션 톤 다운 + 시인성 강화 (text-white/50 → /80, /40 → /55)
+    <div className="min-h-screen bg-gradient-to-br from-violet-900 via-fuchsia-900 to-violet-900 text-white">
+      {/* 헤더 — D222+ Phase 1: 보라 톤 다운 sticky */}
+      <div className="border-b border-violet-400/30 bg-violet-800/50 backdrop-blur-md sticky top-0 z-30">
         <div className="max-w-7xl mx-auto px-3 md:px-6 py-3 md:py-4 flex items-center gap-2 md:gap-4">
           <button
             onClick={() => view === 'review' ? (confirm('생성한 여정이 사라집니다. 메인으로 돌아가시겠습니까?') && (setView('main'), setAiPkg(null))) : navigate('/ai-operator')}
-            className="p-2 rounded-lg hover:bg-white/10 transition-colors"
+            className="p-2 rounded-lg hover:bg-white/15 transition-colors"
           >
             <ArrowLeft className="w-5 h-5" />
           </button>
           <div className="flex-1 min-w-0">
-            <h1 className="text-lg md:text-2xl font-bold truncate">
+            <h1 className="text-lg md:text-2xl font-bold truncate text-white">
               {view === 'review' ? 'AI 생성 여정 검토' : '여정 자동화 — AI Operator'}
             </h1>
-            <p className="text-xs md:text-sm text-white/50 mt-0.5">
+            <p className="text-xs md:text-sm text-white/80 mt-0.5">
               {view === 'review' ? 'AI가 설계한 흐름을 검토 + 혜택 부분 수정 후 활성화' : '자연어 한 줄 또는 빠른 시작 — AI가 시즌·회사 톤 반영해 완전 자동 생성'}
             </p>
           </div>
           {view === 'main' && (
-            <button onClick={loadAll} disabled={loading} className="p-2 rounded-lg hover:bg-white/10 transition-colors disabled:opacity-50">
+            <button onClick={loadAll} disabled={loading} className="p-2 rounded-lg hover:bg-white/15 transition-colors disabled:opacity-50">
               <RefreshCw className={`w-5 h-5 ${loading ? 'animate-spin' : ''}`} />
             </button>
           )}

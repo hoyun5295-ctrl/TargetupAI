@@ -107,7 +107,7 @@ export default function JourneyPausePage() {
     : '— 시각 미정 —';
 
   return (
-    <div className="min-h-screen bg-slate-950 text-white px-4 py-8 md:py-16">
+    <div className="min-h-screen bg-gradient-to-br from-violet-900 via-fuchsia-900 to-violet-900 text-white px-4 py-8 md:py-16">
       <div className="max-w-2xl mx-auto">
         {/* 헤더 */}
         <div className="flex items-center gap-3 mb-6">
@@ -127,7 +127,7 @@ export default function JourneyPausePage() {
 
         {/* loading */}
         {phase === 'loading' && (
-          <div className="bg-slate-900 border border-white/10 rounded-2xl shadow-2xl p-8 text-center">
+          <div className="bg-violet-900/40 border border-white/10 rounded-2xl shadow-2xl p-8 text-center">
             <Loader2 className="w-8 h-8 text-violet-300 animate-spin mx-auto mb-3" />
             <div className="text-[13px] text-white/60">발송 정보 조회 중</div>
           </div>
@@ -135,7 +135,7 @@ export default function JourneyPausePage() {
 
         {/* invalid token */}
         {phase === 'invalid' && (
-          <div className="bg-slate-900 border border-rose-400/30 rounded-2xl shadow-2xl p-8">
+          <div className="bg-violet-900/40 border border-rose-400/30 rounded-2xl shadow-2xl p-8">
             <div className="flex items-start gap-3">
               <AlertTriangle className="w-6 h-6 text-rose-300 flex-shrink-0 mt-0.5" />
               <div>
@@ -158,7 +158,7 @@ export default function JourneyPausePage() {
 
         {/* error */}
         {phase === 'error' && (
-          <div className="bg-slate-900 border border-amber-400/30 rounded-2xl shadow-2xl p-8">
+          <div className="bg-violet-900/40 border border-amber-400/30 rounded-2xl shadow-2xl p-8">
             <div className="flex items-start gap-3">
               <AlertTriangle className="w-6 h-6 text-amber-300 flex-shrink-0 mt-0.5" />
               <div>
@@ -181,7 +181,7 @@ export default function JourneyPausePage() {
         {(phase === 'ready' || phase === 'confirming') && info && (
           <div className="space-y-4">
             {/* 발송 정보 카드 */}
-            <div className="bg-slate-900 border border-white/10 rounded-2xl shadow-2xl overflow-hidden">
+            <div className="bg-violet-900/40 border border-white/10 rounded-2xl shadow-2xl overflow-hidden">
               <div className="p-5 border-b border-white/10 bg-gradient-to-r from-violet-500/10 via-fuchsia-500/10 to-purple-500/10">
                 <div className="text-[11px] text-white/50 mb-1">여정명</div>
                 <div className="text-lg font-semibold text-white">{info.journey_name}</div>
@@ -235,7 +235,7 @@ export default function JourneyPausePage() {
 
             {/* 정지 확인 카드 */}
             {phase === 'ready' && (
-              <div className="bg-slate-900 border border-amber-400/30 rounded-2xl shadow-2xl p-5">
+              <div className="bg-violet-900/40 border border-amber-400/30 rounded-2xl shadow-2xl p-5">
                 <div className="flex items-start gap-2 mb-3">
                   <AlertTriangle className="w-5 h-5 text-amber-300 flex-shrink-0 mt-0.5" />
                   <div>
@@ -258,7 +258,7 @@ export default function JourneyPausePage() {
             )}
 
             {phase === 'confirming' && (
-              <div className="bg-slate-900 border border-rose-400/40 rounded-2xl shadow-2xl p-5">
+              <div className="bg-violet-900/40 border border-rose-400/40 rounded-2xl shadow-2xl p-5">
                 <div className="text-[14px] font-semibold text-rose-100 mb-3">최종 확인 — 정지 후 복구 의무</div>
                 <div className="mb-4">
                   <label className="block text-[12px] text-white/60 mb-1.5 flex items-center gap-1.5">
@@ -270,7 +270,7 @@ export default function JourneyPausePage() {
                     value={pausedPhone}
                     onChange={(e) => setPausedPhone(e.target.value)}
                     placeholder="010-1234-5678"
-                    className="w-full px-3 py-2 bg-slate-950 border border-white/10 rounded-lg text-sm text-white placeholder-white/20 focus:outline-none focus:border-rose-400/50"
+                    className="w-full px-3 py-2 bg-violet-900/50 border border-white/10 rounded-lg text-sm text-white placeholder-white/20 focus:outline-none focus:border-rose-400/50"
                   />
                   <div className="text-[10px] text-white/40 mt-1">
                     journey_step_pause_logs.paused_phone 영구 기록 영역
@@ -298,7 +298,7 @@ export default function JourneyPausePage() {
 
         {/* pausing */}
         {phase === 'pausing' && (
-          <div className="bg-slate-900 border border-white/10 rounded-2xl shadow-2xl p-8 text-center">
+          <div className="bg-violet-900/40 border border-white/10 rounded-2xl shadow-2xl p-8 text-center">
             <Loader2 className="w-8 h-8 text-rose-300 animate-spin mx-auto mb-3" />
             <div className="text-[13px] text-white/70">발송 정지 진행 중 — DB 트랜잭션 + journey_step_pause_logs 영구 기록</div>
           </div>
@@ -306,7 +306,7 @@ export default function JourneyPausePage() {
 
         {/* paused */}
         {phase === 'paused' && (
-          <div className="bg-slate-900 border border-emerald-400/40 rounded-2xl shadow-2xl p-8">
+          <div className="bg-violet-900/40 border border-emerald-400/40 rounded-2xl shadow-2xl p-8">
             <div className="flex items-start gap-3">
               <CheckCircle2 className="w-7 h-7 text-emerald-300 flex-shrink-0 mt-0.5" />
               <div>

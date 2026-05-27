@@ -1,8 +1,8 @@
 /**
  * PredictiveDashboardPage.tsx
- *   - D197 (2026-05-22) Phase B-2 Predictive Suite 옛 영역
+ *   - D197 (2026-05-22) Phase B-2 Predictive Suite 기존영역
  *   - D210+ Phase 3 (2026-05-23 Harold 명시) 영구 진화:
- *     · 옛 Top 50명 영역 폐기 → 회사 전체 customer 페이지네이션 + 검색 + 필터 + 정렬
+ *     · 기존Top 50명 영역 폐기 → 회사 전체 customer 페이지네이션 + 검색 + 필터 + 정렬
  *     · 상단 카드 8건 = 회사 전체 / 예측 계산 / cold vs trained / 위험 / 가능성 / 평균 3건
  *     · 모든 지표 = 실제 DB 테이블 source caption 명시 의무 ([[feedback_no_mock_data_in_production]])
  *     · cold start 신뢰도 안내 카드 (isAllColdStart 시 amber 영역)
@@ -11,7 +11,7 @@
  * AI 자율 판단 시각화:
  *   - 회사 전체 예측 점수 히스토그램 3건 (클릭률 / 이탈 위험 / 구매 가능성)
  *   - 회사 전체 customer 영역 페이지네이션 (10개씩 + 검색 + 5 필터 + 5 정렬)
- *   - 모델 정확도 검증 (옛 예측 vs 실 결과 비교 — trained 영역 진입 후 활성)
+ *   - 모델 정확도 검증 (기존예측 vs 실 결과 비교 — trained 영역 진입 후 활성)
  *   - AI 자율 추천 안내 (insightText)
  */
 
@@ -249,7 +249,7 @@ export default function PredictiveDashboardPage() {
         setTotalPages(data.totalPages);
       }
     } catch {
-      // 네트워크 오류 — 옛 데이터 영역 유지
+      // 네트워크 오류 — 기존데이터 영역 유지
     } finally {
       setCustomerLoading(false);
     }
@@ -306,7 +306,7 @@ export default function PredictiveDashboardPage() {
   };
 
   // ★ D211+ Predictive 강화 (2026-05-23 Harold 명시): 1-click 액션 — AI 자동 마케팅 prefill 진입
-  // ★ D212+ 4번 (2026-05-23 Harold 명시): Predictive 1-click → 매일 자동 마케팅 영역 (1회성 X — 진정 자동 본질)
+  // ★ D212+ 4번 (2026-05-23 Harold 명시): Predictive 1-click → 매일 자동 마케팅 (1회성 X — 자동 흐름)
   const handleQuickAction = async (actionType: 'churn_recovery' | 'purchase_push' | 'vip_engagement') => {
     setQuickActionLoading(actionType);
     try {
@@ -331,7 +331,7 @@ export default function PredictiveDashboardPage() {
           suggestedChannel: data.suggestedChannel,
           suggestedTone: data.suggestedTone,
         }));
-        // 옛 영역 정합 (1회성 발송 영역 활용 가능 본질)
+        // 기존영역 정합 (1회성 발송 영역 활용 가능 본질)
         sessionStorage.setItem('aiOperatorPrefill', JSON.stringify({
           objective: data.objective,
           targetFilters: data.targetFilters,
@@ -348,7 +348,7 @@ export default function PredictiveDashboardPage() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-slate-950 text-white flex items-center justify-center">
+      <div className="min-h-screen bg-gradient-to-br from-violet-900 via-fuchsia-900 to-violet-900 text-white flex items-center justify-center">
         <Loader2 className="w-8 h-8 animate-spin text-violet-400" />
       </div>
     );
@@ -356,7 +356,7 @@ export default function PredictiveDashboardPage() {
 
   if (error || !distribution || !summary) {
     return (
-      <div className="min-h-screen bg-slate-950 text-white flex items-center justify-center">
+      <div className="min-h-screen bg-gradient-to-br from-violet-900 via-fuchsia-900 to-violet-900 text-white flex items-center justify-center">
         <div className="text-center">
           <div className="text-rose-300 mb-2">{error || '데이터 조회 실패'}</div>
           <button onClick={() => navigate('/ai-operator')} className="px-4 py-2 bg-violet-500/20 hover:bg-violet-500/30 text-violet-200 rounded">
@@ -368,7 +368,7 @@ export default function PredictiveDashboardPage() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-950 text-white">
+    <div className="min-h-screen bg-gradient-to-br from-violet-900 via-fuchsia-900 to-violet-900 text-white">
       <div className="max-w-7xl mx-auto p-4 md:p-6">
         {/* 헤더 */}
         <div className="flex items-center gap-3 mb-6">
@@ -415,7 +415,7 @@ export default function PredictiveDashboardPage() {
           </div>
         </div>
 
-        {/* ★ D211+ Predictive 강화 (2026-05-23 Harold 명시): 1-click 액션 3 카드 (회사 admin 진정 본질 영역) */}
+        {/* ★ D211+ Predictive 강화 (2026-05-23 Harold 명시): 1-click 액션 3 카드 (회사 admin 활용 흐름) */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-6">
           <QuickActionCard
             icon={<AlertTriangle className="w-5 h-5" />}
@@ -527,7 +527,7 @@ export default function PredictiveDashboardPage() {
               />
             </div>
 
-            {/* 옛 8 카드 (회사 전체 / 예측 계산 / cold vs trained / 위험 / 가능성 / 평균 3건) */}
+            {/* 기존8 카드 (회사 전체 / 예측 계산 / cold vs trained / 위험 / 가능성 / 평균 3건) */}
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
               <Card
                 icon={<Users className="w-4 h-4" />}
@@ -613,7 +613,7 @@ export default function PredictiveDashboardPage() {
               />
             </div>
 
-            {/* 모델 정확도 — trained 0명 영역 = 안내 카드 / 그 외 = 옛 매트릭스 */}
+            {/* 모델 정확도 — trained 0명 영역 = 안내 카드 / 그 외 = 기존매트릭스 */}
             {summary.trainedCount === 0 ? (
               <div className="mb-6 p-4 bg-white/5 border border-white/10 rounded-xl">
                 <div className="flex items-center gap-2 mb-2">
@@ -629,7 +629,7 @@ export default function PredictiveDashboardPage() {
               <div className="mb-6 p-4 bg-white/5 border border-white/10 rounded-xl">
                 <div className="flex items-center gap-2 mb-3">
                   <Brain className="w-4 h-4 text-violet-300" />
-                  <h2 className="text-sm font-semibold">모델 정확도 검증 (옛 예측 vs 실 결과)</h2>
+                  <h2 className="text-sm font-semibold">모델 정확도 검증 (기존예측 vs 실 결과)</h2>
                   <span className="text-[10px] text-white/40 ml-auto">trained {summary.trainedCount.toLocaleString()}명 영역</span>
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -662,7 +662,7 @@ export default function PredictiveDashboardPage() {
                   value={searchInput}
                   onChange={(e) => setSearchInput(e.target.value)}
                   placeholder="고객명 / 연락처 / 등급 / 지역 검색"
-                  className="w-full pl-8 pr-3 py-1.5 bg-slate-950/60 border border-white/10 rounded text-xs text-white placeholder-white/30 focus:outline-none focus:border-violet-400/50"
+                  className="w-full pl-8 pr-3 py-1.5 bg-violet-900/30 border border-white/10 rounded text-xs text-white placeholder-white/30 focus:outline-none focus:border-violet-400/50"
                 />
               </div>
               <button
@@ -678,10 +678,10 @@ export default function PredictiveDashboardPage() {
                 <select
                   value={filter}
                   onChange={(e) => handleFilterChange(e.target.value as FilterType)}
-                  className="pl-6 pr-7 py-1.5 bg-slate-950/60 border border-white/10 rounded text-xs text-white focus:outline-none focus:border-violet-400/50 appearance-none"
+                  className="pl-6 pr-7 py-1.5 bg-violet-900/30 border border-white/10 rounded text-xs text-white focus:outline-none focus:border-violet-400/50 appearance-none"
                 >
                   {FILTER_OPTIONS.map((o) => (
-                    <option key={o.value} value={o.value} className="bg-slate-900">{o.label}</option>
+                    <option key={o.value} value={o.value} className="bg-violet-900/40">{o.label}</option>
                   ))}
                 </select>
               </div>
@@ -690,10 +690,10 @@ export default function PredictiveDashboardPage() {
                 <select
                   value={sort}
                   onChange={(e) => handleSortChange(e.target.value as SortType)}
-                  className="pl-6 pr-7 py-1.5 bg-slate-950/60 border border-white/10 rounded text-xs text-white focus:outline-none focus:border-violet-400/50 appearance-none"
+                  className="pl-6 pr-7 py-1.5 bg-violet-900/30 border border-white/10 rounded text-xs text-white focus:outline-none focus:border-violet-400/50 appearance-none"
                 >
                   {SORT_OPTIONS.map((o) => (
-                    <option key={o.value} value={o.value} className="bg-slate-900">{o.label}</option>
+                    <option key={o.value} value={o.value} className="bg-violet-900/40">{o.label}</option>
                   ))}
                 </select>
               </div>
@@ -773,7 +773,7 @@ export default function PredictiveDashboardPage() {
                       </tr>
                       {/* ★ D211+ Predictive 강화 (2026-05-23 Harold 명시): Explainability expand 영역 */}
                       {isExpanded && (
-                        <tr className="bg-slate-950/60 border-b border-white/5">
+                        <tr className="bg-violet-900/30 border-b border-white/5">
                           <td colSpan={9} className="px-4 py-4">
                             {explainLoading[c.customerId] ? (
                               <div className="flex items-center justify-center py-6">
@@ -1059,7 +1059,7 @@ function AccuracyCard({
 }: { title: string; predicted: number; actual: number; accuracy: number }) {
   const formatPct = (n: number) => `${(n * 100).toFixed(1)}%`;
   return (
-    <div className="p-3 bg-slate-950/40 border border-white/5 rounded-lg">
+    <div className="p-3 bg-violet-900/30 border border-white/5 rounded-lg">
       <div className="text-xs text-white/60 mb-2">{title}</div>
       <div className="grid grid-cols-3 gap-2 text-xs">
         <div>

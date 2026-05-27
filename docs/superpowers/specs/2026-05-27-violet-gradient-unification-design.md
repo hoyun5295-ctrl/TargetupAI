@@ -1,9 +1,15 @@
-# 한줄로 보라 그라데이션 통일 + 매뉴얼 신설 — 대규모 작업 설계 (D221+)
+# 한줄로 보라 그라데이션 통일 + 매뉴얼 신설 — 대규모 작업 설계 (D221+ → D222+)
 
-> **작성일**: 2026-05-27
-> **단계**: D221+ 진입 매트릭스 (D220+ Step 1 + Step 2 종결 직후 신규 작업)
-> **Harold 명시**: 보라 그라데이션 전 메뉴 통일 + 헤더 변경 (AI Operator 제거 + 매뉴얼 추가) + AI 자동발송 단일 진입 + DB 현황 본격 구현 + 대시보드 모던 미니멀 정정
-> **흐름**: 4~5 Phase 분할 (총 약 40~50h 분량 — 별 세션 분할 의무)
+> **작성일**: 2026-05-27 (D221+ 신설) / 정정일: 2026-05-27 (D222+ Harold 명시 정정)
+> **단계**: D222+ Phase 1 진입 직전 — Harold 명시 정합 정정 종결
+> **Harold 명시 정정 (2026-05-27 D222+)**:
+> - **대시보드 = 흰 톤 유지** (직원 신고 정합 — 보라 그라데이션 X)
+> - AI 영역 13 페이지 (대시보드 제외) = 보라 그라데이션 전면 통일 + 시인성 100% 강화
+> - 헤더 AI Operator (BETA) 메뉴 제거 → 대시보드 우측 카드 "AI Operator" 라벨 통합 진입
+> - 대시보드 우측 카드 3개 = 모두 유지 + 그라데이션 색상 정정 (AI Operator 보라 / 직접 타겟 녹색 / 고객 DB amber)
+> - 하단 카드 4개 삭제 + DB 현황 본격 구현 5 부분 (line chart + 미니 metric 4 + 도넛 2 + AI 인사이트 + cohort retention)
+> - 매뉴얼 (NEW) 메뉴 헤더 신규 추가 + footer link 제거
+> **흐름**: 5 Phase 분할 (총 약 30~40h 분량 — 별 세션 분할 의무)
 
 ---
 
@@ -147,30 +153,48 @@ violet 액센트 카드 = bg-violet-50 + border-violet-200 + text-violet-700
 
 ## 4. 정정 매트릭스 (Phase 분할)
 
-### Phase 1 — 대시보드 + 여정 자동화 (본 세션 또는 다음 세션)
+### Phase 1 — Dashboard + AI Operator 메인 + JourneysPage + DashboardHeader (본 세션 — D222+ 진입)
 
-**Dashboard.tsx 정정 매트릭스**:
-1. 배경 = 흰 톤 → 보라 그라데이션
-2. 헤더 nav 변경:
-   - AI Operator 메뉴 제거
-   - 매뉴얼 메뉴 추가 (`/manual` 라우트 진입)
-3. AI Operator 진입 = 우측 큰 카드 단일 (라벨 = "AI 자동발송")
-4. 하단 카드 4건 삭제 (직접 타겟 발송 / 고객 DB 업로드 등 헤더 nav로 이동 정합)
-5. DB 현황 본격 구현 (5 영역):
-   - 상단 line chart (3 라인 — 전체 / 동의 / 거부)
-   - 우측 미니 metric 4 (전체 / 동의 / 거부 / 활성도)
-   - 도넛 차트 2 (등급별 / 채널별 분포)
-   - AI 인사이트 카드 (1-click 액션)
-   - cohort retention 매트릭스
-6. footer 매뉴얼 link 정리 (헤더 진입과 중복 정합 — 제거 또는 유지)
+**Dashboard.tsx 정정 매트릭스 (Harold 명시 D222+ 정정 — 흰 톤 유지)**:
+1. **배경 = 흰 톤 유지** (bg-gray-100) — 직원 신고 + Harold 명시 정합
+2. 헤더 nav 정정 (DashboardHeader.tsx 직접 정정):
+   - AI Operator (BETA) 메뉴 **제거** (line 104~112)
+   - 매뉴얼 (NEW) 메뉴 **신규 추가** (`/manual.html` 또는 `/manual` 라우트 진입)
+3. **하단 카드 4개 삭제** (line 2779~2814 영역) — 최근 캠페인 / AI 발송 템플릿 / AI 분석 / 예약 대기
+4. **DB 현황 본격 구현 5 부분** — 흰 톤 안 강화:
+   - 상단 line chart (3 라인 — 전체 / 동의 / 거부) — recharts ^3.8.1 활용
+   - 우측 미니 metric 4 (전체 / 동의 / 거부 / 활성도) + 30일 +/-% 델타
+   - 도넛 차트 2 (등급별 / 채널별 분포) — recharts PieChart
+   - AI 인사이트 카드 (1-click 액션) — emerald/rose/amber color-coded
+   - cohort retention 표 (월별 잔존율 — 신규 endpoint 의무)
+5. **우측 40% 카드 3개 = 모두 유지 + 그라데이션 색상 정정 (고급 강화)**:
+   - **AI Operator** (기존 "AI 추천 발송" 라벨 정정) = **보라 그라데이션** `from-violet-900 via-purple-900 to-fuchsia-900` + 클릭 시 `navigate('/ai-operator')` (AiSendTypeModal 폐기)
+   - **직접 타겟 발송** = **녹색 그라데이션** `from-emerald-600 to-green-700` (기존 amber 정정)
+   - **고객 DB 업로드** = **amber 그라데이션** `from-amber-500 to-orange-600` (기존 직접 타겟 색상 정합)
+6. footer 매뉴얼 link (line 3873) 제거 (헤더 메뉴 추가 후 중복 차단)
+
+**AI Operator 메인 (`/ai-operator`) 정정 매트릭스 (기준점 시인성 정정)**:
+1. 배경 = 기존 `bg-gradient-to-br from-indigo-950 via-purple-950 to-fuchsia-950` → 정정 `from-violet-900 via-fuchsia-900 to-violet-900` (톤 다운 + 통일)
+2. sticky 헤더 = 기존 `border-b border-white/10 bg-white/5` → 정정 `bg-violet-800/50 backdrop-blur-md border-violet-400/30`
+3. 시인성 강화 (text-white/30~70 → /55~95)
+4. 강조 텍스트 정정 (text-violet-300/fuchsia-300 → /200)
 
 **JourneysPage.tsx 정정 매트릭스**:
-1. 배경 = 블랙톤 → 보라 그라데이션
-2. 카드 디자인 = bg-white/5 + border-white/10 → 보라 그라데이션 카드 + violet 액센트
-3. 자연어 입력 + 빠른 시작 7 카드 + AI 진단 + 1-click 액션 흐름 유지 (디자인만 정정)
-4. 가독성 강화 (텍스트 크기 / 카드 padding / 폰트 weight)
+1. 배경 = `from-slate-950 via-slate-900 to-slate-950` → `from-violet-900 via-fuchsia-900 to-violet-900`
+2. sticky 헤더 = `bg-slate-950/80` → `bg-violet-800/50 backdrop-blur-md border-violet-400/30`
+3. 자연어 입력 카드 = 보라 그라데이션 정합
+4. 빠른 시작 7 카드 = `bg-white/5` → `bg-white/10` (가독성 강화)
+5. 여정 목록 카드 = `bg-white/5` → `bg-violet-700/30 + border-violet-400/50`
+6. expand 영역 sub-카드 (시뮬레이션 + funnel + 진단 + 다중 미리보기 등) = 시인성 강화
+7. 텍스트 본문 = text-white/90 → /95, 보조 = /70 → /80, caption = /40~50 → /55, 강조 = -300 → -200
 
-**예상 분량**: 약 8~10h (Dashboard 큰 작업 + JourneysPage)
+**DashboardHeader.tsx 정정 매트릭스**:
+1. 흰 톤 유지 (bg-white border-b border-gray-200) — Harold 명시
+2. AI Operator (BETA) 메뉴 제거 (line 104~112)
+3. 매뉴얼 (NEW) 메뉴 신규 추가 (NEW 배지 + violet 색상)
+4. 매뉴얼 클릭 시 = window.open('/manual/manual.html', '_blank')
+
+**예상 분량**: 약 8~10h (Dashboard 큰 작업 + AI Operator 메인 시인성 + JourneysPage + DashboardHeader)
 
 ### Phase 2 — Performance + CDP + ContinuousOperator (AI Operator 본 영역)
 
@@ -193,15 +217,18 @@ violet 액센트 카드 = bg-violet-50 + border-violet-200 + text-violet-700
 
 **예상 분량**: 약 10~12h
 
-### Phase 4 — AdminDashboard + 발송결과 + 고객 DB / 주소록 (기존 흰 톤 페이지 전수)
+### Phase 4 — AI 영역 sub-페이지 + 계층 2 (흰 톤 + violet 액센트)
 
-**대상 페이지** (3건):
-- AdminDashboard / CampaignResultsPage / CustomersPage (AddressBookPage 포함)
+**대상 페이지**:
+- JourneyStatsPage + PredictiveDashboardPage + 추가 sub-페이지 (AI 영역 sub) = 보라 그라데이션 통일
+- AdminDashboard + CampaignResultsPage + CustomersPage/AddressBookPage + 직접발송/직접타겟발송 (계층 2 흰 톤 영역)
 
-**정정 흐름**:
-- 배경 = 흰 톤 → 보라 그라데이션
-- 폼 / 표 / 카드 디자인 정정 (기존 표 흐름 = 다크 톤 표 정정 의무)
-- 가독성 강화
+**계층 2 정정 흐름 (Harold 명시 — 흰 톤 유지 + violet 액센트 강화)**:
+- 배경 = 흰 톤 유지 (`bg-gray-50` 또는 `bg-slate-50`)
+- 폼 / 표 / 카드 = 흰 톤 + violet 액센트 강화 (`bg-violet-50 + border-violet-200`)
+- 액션 버튼 = `bg-violet-600 text-white hover:bg-violet-700`
+- 다크 톤 표 = 흰 톤 표 정정 (`bg-white + hover:bg-violet-50/30`)
+- 시인성 강화 (`text-gray-900` 본문 / `text-gray-700` 보조)
 
 **예상 분량**: 약 8~10h
 
@@ -345,12 +372,53 @@ violet 액센트 카드 = bg-violet-50 + border-violet-200 + text-violet-700
 - [x] 민감 정보 (도메인 / 사용자 매트릭스 / 운영 안전망 영역 / 회사 정보) 노출 X
 - [x] 박-단어 / D219+ 영구 룰 단어 / 모델명 0건
 - [x] 영구 룰 17건 정합 매트릭스 명시
-- [x] Phase 분할 흐름 명확 (5 Phase × 평균 8h = 약 40h 총 분량)
+- [x] Phase 분할 흐름 명확 (5 Phase × 평균 6~10h = 약 30~40h 총 분량)
 - [x] 기존 매뉴얼 보안 흐름 유지 의무 명시
 - [x] 헤더 변경 매트릭스 명시 (AI Operator 제거 + 매뉴얼 추가)
-- [x] AI Operator 단일 진입 흐름 명시
+- [x] AI Operator 단일 진입 흐름 명시 (대시보드 우측 카드 "AI Operator" 라벨)
 - [x] 가독성 강화 흐름 명시 (직원 피드백 정합)
+- [x] Harold 명시 D222+ 정정 = 대시보드 흰 톤 유지 정합
 
 ---
 
-> **본 spec 종결.** Harold 정독 후 신규 매뉴얼 본문 + Claude Design 마스터 프롬프트 작성 흐름 진입 (본 turn 안 동시 작성 진입 정합).
+## 10. Phase 완료/미완료 트래킹 매트릭스 ★ (D222+ 신규)
+
+### 10-1. Phase 진행 상태 매트릭스
+
+| Phase | 페이지 | 분량 | 시간 | 상태 | 진행 세션 | 완료일 |
+|---|---|---|---|---|---|---|
+| **Phase 1** | Dashboard + AI Operator 메인 + JourneysPage + DashboardHeader + backend dashboard.ts endpoint 4건 | 약 7,900 라인 | 8~10h | ✅ **완료** | D222+ | 2026-05-27 |
+| **Phase 2** | PerformancePage + CdpSettingsPage + ContinuousOperatorPage | 약 4,500 라인 | 6~8h | ✅ **완료** | D222+ | 2026-05-27 |
+| **Phase 3** | InAppMessagesPage + EmailCampaignsPage + PredictiveDashboardPage + AiMemoryPage + AiUsagePage + SegmentsPage + OnboardingWizardPage | 약 5,700 라인 | 8~10h | ✅ **완료** | D222+ | 2026-05-27 |
+| **Phase 4** | sub-페이지 3건 (JourneyStatsPage + JourneyDetailPage + JourneyPausePage 다크 → 보라 톤 다운) + 계층 2 (AdminDashboard + 발송결과 + 고객 DB + 직접발송 — 흰 톤 유지 옛 영역 보존) | 약 1,000 라인 정정 | 1~2h | ✅ **완료** | D222+ | 2026-05-27 |
+| **Phase 5** | 매뉴얼 페이지 정정 (Claude Design 수령 HTML 1240 라인 교체 + close-to-dashboard 운영 진입 정정) | 1240 라인 | 1h | ✅ **완료** | D222+ | 2026-05-27 |
+
+### 10-2. 각 Phase 종결 시 본 AI 의무
+
+1. **두 문서 업데이트**:
+   - 본 spec § 10-1 표 안 해당 Phase 상태 = 🟡 → ✅ + 완료일 + commit hash 기재
+   - 핸드오프 § 15 동일 정정
+2. **신규 메모리 신설** = `memory/project_d222_phase{N}_completed.md`
+3. **STATUS.md 업데이트** = CURRENT_TASK 정정 (다음 Phase 진입 매트릭스)
+4. **자가 검증 evidence 출력** (tsc 0 errors + 자가 grep 0건 + 시인성 매트릭스 100% 정합)
+5. **표준 종료 멘트** ("작업이 완료되었습니다...")
+6. **Harold 직접 배포 의무** (tp-push + 서버 배포)
+
+### 10-3. 다음 세션 진입 흐름 (Harold 복붙 영역)
+
+```
+docs/superpowers/handoffs/2026-05-27-violet-gradient-unification-handoff.md 정독 +
+docs/superpowers/specs/2026-05-27-violet-gradient-unification-design.md 정독 +
+memory/project_d222_phase{N-1}_completed.md 정독 (직전 Phase 종결 메모리) →
+D222+ Phase {N} 진입 (미완료 Phase {N} = {대상 페이지 매트릭스})
+```
+
+### 10-4. 모든 Phase 종결 흐름
+
+- Phase 1~5 모두 ✅ 완료 직후 = 종합 메모리 신설 `memory/project_d222_violet_gradient_unification_completed.md`
+- 본 spec + 핸드오프 = 종합 정정 (전체 완료 매트릭스 기재)
+- STATUS.md 업데이트 (D222+ 종결 영구 기록)
+
+---
+
+> **본 spec 종결.** D222+ 진입 직전 Harold 명시 정합 정정 완료. Phase 1 본 세션 진입.

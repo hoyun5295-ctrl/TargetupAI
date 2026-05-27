@@ -1,4 +1,6 @@
-﻿import { Award, BarChart3, Bell, BellOff, Cake, Calendar, ChevronLeft, ChevronRight, Clock, CreditCard, DollarSign, HelpCircle, Mail, MapPin, Percent, Rocket, Send, ShoppingCart, Sparkles, Store, User, UserPlus, Users, UserX } from 'lucide-react';
+﻿import { AlertTriangle, Award, BarChart3, Bell, BellOff, Cake, Calendar, ChevronLeft, ChevronRight, Clock, CreditCard, DollarSign, HelpCircle, Lightbulb, Mail, MapPin, Percent, Rocket, Send, ShoppingCart, Sparkles, Store, TrendingDown, TrendingUp, User, UserPlus, Users, UserX } from 'lucide-react';
+// ★ D222+ Phase 1 (2026-05-27): DB 현황 본격 분석 5 부분 — recharts LineChart + PieChart
+import { CartesianGrid, Cell, Legend, Line, LineChart, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { aiApi, campaignsApi, customersApi } from '../api/client';
@@ -232,6 +234,12 @@ export default function Dashboard() {
   // D41 동적 카드 + D77 페이징 뷰 (6개씩)
   const [dashboardCards, setDashboardCards] = useState<DashboardCardsResponse | null>(null);
   const [dbCardPage, setDbCardPage] = useState(0); // 현재 페이지 (0-indexed)
+  // ★ D222+ Phase 1 (2026-05-27): DB 현황 본격 분석 5 부분 state
+  const [dbTrend, setDbTrend] = useState<{ trend: Array<{ date: string; total: number; optIn: number; optOut: number }>; deltas: { totalDelta30: number | null; optInDelta30: number | null; optOutDelta30: number | null; activeRateDelta30: number | null } } | null>(null);
+  const [dbDistribution, setDbDistribution] = useState<{ tiers: Array<{ label: string; value: number; color: string }>; channels: Array<{ label: string; value: number; color: string }> } | null>(null);
+  const [aiInsights, setAiInsights] = useState<Array<{ id: string; priority: number; type: string; title: string; count: number; description: string; oneClickObjective: string; accentColor: string }>>([]);
+  const [cohortRetention, setCohortRetention] = useState<Array<{ cohortMonth: string; cohortSize: number; retention: Array<{ monthOffset: number; activeCount: number; retentionRate: number }> }>>([]);
+  const [dbInsightLoading, setDbInsightLoading] = useState(true);
   // 5개 카드 모달 state
   const [showRecentCampaigns, setShowRecentCampaigns] = useState(false);
   const [showFileUpload, setShowFileUpload] = useState(false);
@@ -970,6 +978,44 @@ export default function Dashboard() {
     }, 4000);
     return () => clearTimeout(timer);
   }, [toast.show, toast.message]);
+
+  // ★ D222+ Phase 1 (2026-05-27): DB 현황 본격 분석 5 부분 — endpoint 4건 fetch
+  useEffect(() => {
+    const loadDbInsights = async () => {
+      setDbInsightLoading(true);
+      try {
+        const token = localStorage.getItem('token');
+        const headers = { Authorization: `Bearer ${token}` };
+        const [trendR, distR, insightR, cohortR] = await Promise.all([
+          fetch('/api/dashboard/customer-trend?days=30', { headers }),
+          fetch('/api/dashboard/customer-distribution', { headers }),
+          fetch('/api/dashboard/ai-insight', { headers }),
+          fetch('/api/dashboard/cohort-retention?months=6', { headers }),
+        ]);
+        if (trendR.ok) {
+          const d = await trendR.json();
+          if (d.success) setDbTrend({ trend: d.trend || [], deltas: d.deltas || {} });
+        }
+        if (distR.ok) {
+          const d = await distR.json();
+          if (d.success) setDbDistribution({ tiers: d.tiers || [], channels: d.channels || [] });
+        }
+        if (insightR.ok) {
+          const d = await insightR.json();
+          if (d.success) setAiInsights(d.insights || []);
+        }
+        if (cohortR.ok) {
+          const d = await cohortR.json();
+          if (d.success) setCohortRetention(d.cohorts || []);
+        }
+      } catch (e) {
+        console.error('[Dashboard] DB 현황 본격 분석 로드 실패:', e);
+      } finally {
+        setDbInsightLoading(false);
+      }
+    };
+    loadDbInsights();
+  }, []);
 
   // B13-06: 이모지 감지 함수
   const hasEmoji = (text: string): boolean => {
@@ -2613,124 +2659,330 @@ const campaignData = {
             </div>
           </div>
 
-          {/* ===== 우측 40%: 버튼 3개 세로 스택 ===== */}
+          {/* ===== 우측 40%: 버튼 3개 세로 스택 — D222+ Phase 1 그라데이션 정정 ===== */}
+          {/* ★ D222+ Phase 1 (2026-05-27): Harold 명시 정합 — 흰 톤 유지 + 카드 3개 그라데이션 정정 (고급 강화).
+              - AI Operator (기존 "AI 추천 발송") = 보라 그라데이션 + navigate('/ai-operator') (AiSendTypeModal 폐기)
+              - 직접 타겟 발송 = 녹색 그라데이션
+              - 고객 DB 업로드 = amber 그라데이션 */}
           <div className="w-full lg:w-[40%] flex flex-col gap-4">
             {hideAi ? (
               <>
-                <button 
+                <button
                   onClick={() => { setShowDirectTargeting(true); }}
-                  className="p-5 bg-amber-500 hover:bg-amber-600 rounded-xl transition-all hover:shadow-lg text-right flex-1 flex flex-col justify-between"
+                  className="p-5 bg-gradient-to-br from-emerald-600 to-green-700 hover:from-emerald-500 hover:to-green-600 rounded-xl transition-all hover:shadow-lg hover:shadow-emerald-500/30 text-right flex-1 flex flex-col justify-between"
                 >
                   <div>
                     <div className="text-xl font-bold text-white mb-1">직접 타겟 발송</div>
-                    <div className="text-sm text-amber-100">원하는 고객을 직접 필터링</div>
+                    <div className="text-sm text-emerald-100">원하는 고객을 직접 필터링</div>
                   </div>
-                  <div className="text-3xl text-amber-200 self-end">→</div>
+                  <div className="text-3xl text-emerald-200 self-end">→</div>
                 </button>
                 {!hideFileUpload && (
-                <button 
+                <button
                   onClick={() => openFileUpload()}
-                  className="p-5 bg-slate-600 hover:bg-slate-700 rounded-xl transition-all hover:shadow-lg text-right flex-1 flex flex-col justify-between"
+                  className="p-5 bg-gradient-to-br from-amber-500 to-orange-600 hover:from-amber-400 hover:to-orange-500 rounded-xl transition-all hover:shadow-lg hover:shadow-amber-500/30 text-right flex-1 flex flex-col justify-between"
                 >
                   <div>
                     <div className="text-xl font-bold text-white mb-1">고객 DB 업로드</div>
-                    <div className="text-sm text-slate-200">엑셀/CSV로 고객 추가</div>
+                    <div className="text-sm text-amber-100">엑셀/CSV로 고객 추가</div>
                   </div>
-                  <div className="text-3xl text-slate-300 self-end">→</div>
+                  <div className="text-3xl text-amber-200 self-end">→</div>
                 </button>
                 )}
               </>
             ) : (
               <>
-                {/* AI 추천 발송 */}
+                {/* AI Operator — D222+ Phase 1 정정: 라벨 "AI Operator" + 보라 그라데이션 + navigate('/ai-operator') 직접 진입 */}
                 <button
                   onClick={async () => {
                     if (isSubscriptionLocked) { setShowSubscriptionLock(true); return; }
-                    // D53: AI 발송 게이팅
-                    if (isAiMessagingLocked) { setPlanUpgradeFeature('AI 추천 발송'); setPlanUpgradeRequired('베이직'); setShowPlanUpgradeModal(true); return; }
-                    setShowAiSendType(true);
+                    if (isAiMessagingLocked) { setPlanUpgradeFeature('AI Operator'); setPlanUpgradeRequired('베이직'); setShowPlanUpgradeModal(true); return; }
+                    // ★ D222+ Phase 1: AI Operator access 게이팅 + 진입 (기존 헤더 메뉴 흐름 정합)
                     try {
-                      const token = localStorage.getItem('token');
-                      const settingsRes = await fetch('/api/companies/settings', {
-                        headers: { Authorization: `Bearer ${token}` }
+                      const t = localStorage.getItem('token');
+                      const res = await fetch('/api/ai/operator/access', {
+                        headers: { Authorization: `Bearer ${t}` },
                       });
-                      if (settingsRes.ok) {
-                        const settingsData = await settingsRes.json();
-                        if (settingsData.reject_number) setOptOutNumber(settingsData.reject_number);
+                      const data = await res.json();
+                      if (data.success && data.allowed) {
+                        navigate('/ai-operator');
+                      } else {
+                        setShowWalkthroughModal(true);
                       }
-                      const cbRes = await fetch('/api/companies/callback-numbers', {
-                        headers: { Authorization: `Bearer ${token}` }
-                      });
-                      const cbData = await cbRes.json();
-                      if (cbData.success) {
-                        setCallbackNumbers(cbData.numbers || []);
-                        const defaultCb = cbData.numbers?.find((n: any) => n.is_default);
-                        if (defaultCb) setSelectedCallback(defaultCb.phone);
-                      }
-                    } catch (err) {
-                      console.error('회신번호 로드 실패:', err);
+                    } catch {
+                      setShowWalkthroughModal(true);
                     }
                   }}
-                  disabled={aiLoading}
-                  className={`p-5 bg-green-700 hover:bg-green-800 rounded-xl transition-all hover:shadow-lg disabled:opacity-50 disabled:cursor-not-allowed text-right flex-1 flex flex-col justify-between relative ${isSubscriptionLocked || isAiMessagingLocked ? 'opacity-60' : ''}`}
+                  className={`p-5 bg-gradient-to-br from-violet-900 via-purple-900 to-fuchsia-900 hover:from-violet-800 hover:via-purple-800 hover:to-fuchsia-800 rounded-xl transition-all hover:shadow-lg hover:shadow-violet-500/40 text-right flex-1 flex flex-col justify-between relative ${isSubscriptionLocked || isAiMessagingLocked ? 'opacity-60' : ''}`}
                 >
-                  <div className="absolute -top-2 right-3 bg-white text-green-700 text-xs font-bold px-2 py-0.5 rounded-full shadow">
-                    MAIN
+                  <div className="absolute -top-2 right-3 bg-gradient-to-r from-amber-400 to-fuchsia-500 text-white text-[10px] font-bold tracking-wider px-2 py-0.5 rounded-full shadow">
+                    BETA
                   </div>
-                  {aiLoading ? (
-                    <>
-                      <div>
-                        <div className="text-xl font-bold text-white mb-1">AI 분석 중...</div>
-                        <div className="text-sm text-green-200">잠시만 기다려주세요</div>
-                      </div>
-                      <div className="text-3xl text-green-300 self-end animate-pulse">⏳</div>
-                    </>
-                  ) : (
-                    <>
-                      <div>
-                        <div className="text-xl font-bold text-white mb-1">{(isSubscriptionLocked || isAiMessagingLocked) ? '🔒 ' : ''}AI 추천 발송</div>
-                        <div className="text-sm text-green-200">자연어로 AI가 자동 설계</div>
-                      </div>
-                      <div className="text-3xl text-green-300 self-end">→</div>
-                    </>
-                  )}
+                  <div>
+                    <div className="text-xl font-bold text-white mb-1">{(isSubscriptionLocked || isAiMessagingLocked) ? '🔒 ' : ''}AI Operator</div>
+                    <div className="text-sm text-violet-200">자연어 한 줄로 AI가 자동 설계</div>
+                  </div>
+                  <div className="text-3xl text-fuchsia-200 self-end">→</div>
                 </button>
 
-                {/* 직접 타겟 발송 */}
+                {/* 직접 타겟 발송 — D222+ Phase 1: 녹색 그라데이션 */}
                 <button
                   onClick={() => {
                     if (isSubscriptionLocked) { setShowSubscriptionLock(true); return; }
-                    // D53: 고객DB 게이팅 (직접타겟은 고객DB 필요)
                     if (isCustomerDbLocked) { setPlanUpgradeFeature('직접 타겟 발송'); setPlanUpgradeRequired('스타터'); setShowPlanUpgradeModal(true); return; }
                     setShowDirectTargeting(true);
                   }}
-                  className={`p-5 bg-amber-500 hover:bg-amber-600 rounded-xl transition-all hover:shadow-lg text-right flex-1 flex flex-col justify-between ${isSubscriptionLocked || isCustomerDbLocked ? 'opacity-60' : ''}`}
+                  className={`p-5 bg-gradient-to-br from-emerald-600 to-green-700 hover:from-emerald-500 hover:to-green-600 rounded-xl transition-all hover:shadow-lg hover:shadow-emerald-500/30 text-right flex-1 flex flex-col justify-between ${isSubscriptionLocked || isCustomerDbLocked ? 'opacity-60' : ''}`}
                 >
                   <div>
                     <div className="text-xl font-bold text-white mb-1">{(isSubscriptionLocked || isCustomerDbLocked) ? '🔒 ' : ''}직접 타겟 발송</div>
-                    <div className="text-sm text-amber-100">원하는 고객을 직접 필터링</div>
+                    <div className="text-sm text-emerald-100">원하는 고객을 직접 필터링</div>
                   </div>
-                  <div className="text-3xl text-amber-200 self-end">→</div>
+                  <div className="text-3xl text-emerald-200 self-end">→</div>
                 </button>
 
-                {/* 고객 DB 업로드 */}
+                {/* 고객 DB 업로드 — D222+ Phase 1: amber 그라데이션 */}
                 <button
                   onClick={() => {
-                    // v1.5.0: 싱크 사용 중 최우선 차단
                     if (syncBlockActive) { setShowSyncActiveBlock(true); return; }
                     if (isSubscriptionLocked) { setShowSubscriptionLock(true); return; }
-                    // D53: 고객DB 게이팅
                     if (isCustomerDbLocked) { setPlanUpgradeFeature('고객 DB 업로드'); setPlanUpgradeRequired('스타터'); setShowPlanUpgradeModal(true); return; }
                     setShowFileUpload(true);
                   }}
-                  className={`p-5 bg-slate-600 hover:bg-slate-700 rounded-xl transition-all hover:shadow-lg text-right flex-1 flex flex-col justify-between ${isSubscriptionLocked || isCustomerDbLocked ? 'opacity-60' : ''}`}
+                  className={`p-5 bg-gradient-to-br from-amber-500 to-orange-600 hover:from-amber-400 hover:to-orange-500 rounded-xl transition-all hover:shadow-lg hover:shadow-amber-500/30 text-right flex-1 flex flex-col justify-between ${isSubscriptionLocked || isCustomerDbLocked ? 'opacity-60' : ''}`}
                 >
                   <div>
                     <div className="text-xl font-bold text-white mb-1">{(isSubscriptionLocked || isCustomerDbLocked) ? '🔒 ' : ''}고객 DB 업로드</div>
-                    <div className="text-sm text-slate-200">엑셀/CSV로 고객 추가</div>
+                    <div className="text-sm text-amber-100">엑셀/CSV로 고객 추가</div>
                   </div>
-                  <div className="text-3xl text-slate-300 self-end">→</div>
+                  <div className="text-3xl text-amber-200 self-end">→</div>
                 </button>
+              </>
+            )}
+          </div>
+        </div>
+
+        {/* ★ D222+ Phase 1 (2026-05-27): DB 현황 본격 분석 5 부분 — line chart + 미니 metric 4 + 도넛 2 + AI 인사이트 + cohort retention */}
+        <div className="mb-4">
+          <div className="bg-white rounded-2xl p-4 md:p-6 border border-gray-100 shadow-sm">
+            <div className="flex items-center justify-between mb-5 flex-wrap gap-2">
+              <div className="flex items-center gap-2">
+                <div className="w-1 h-4 bg-violet-600 rounded-full" />
+                <span className="text-sm font-semibold text-gray-800">DB 현황 본격 분석</span>
+                <span className="text-[10px] font-bold tracking-wider px-1.5 py-0.5 rounded-full bg-gradient-to-r from-violet-500 to-fuchsia-500 text-white shadow-sm">
+                  NEW
+                </span>
+              </div>
+              <span className="text-[10px] text-gray-400 italic">Data source — customers DB / 직전 30일 기준</span>
+            </div>
+
+            {dbInsightLoading ? (
+              <div className="flex items-center justify-center py-12 text-gray-400">
+                <Sparkles className="w-5 h-5 mr-2 animate-pulse text-violet-400" />
+                <span className="text-sm">DB 현황 분석 중...</span>
+              </div>
+            ) : (
+              <>
+                {/* 1행 — line chart (좌측 60%) + 미니 metric 4 (우측 40%) */}
+                <div className="grid grid-cols-1 lg:grid-cols-5 gap-4 mb-6">
+                  {/* line chart */}
+                  <div className="lg:col-span-3 p-4 rounded-xl border border-violet-100 bg-gradient-to-br from-violet-50/40 to-fuchsia-50/30">
+                    <div className="text-xs font-semibold text-gray-700 mb-2 flex items-center gap-1.5">
+                      <TrendingUp className="w-3.5 h-3.5 text-violet-600" />
+                      고객 추이 — 30일 (신규 가입 / SMS 동의 / 수신거부)
+                    </div>
+                    {dbTrend && dbTrend.trend.length > 0 ? (
+                      <ResponsiveContainer width="100%" height={200}>
+                        <LineChart data={dbTrend.trend} margin={{ top: 5, right: 10, left: -10, bottom: 0 }}>
+                          <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                          <XAxis dataKey="date" tick={{ fontSize: 10, fill: '#6b7280' }} tickFormatter={(v: string) => v.slice(5)} />
+                          <YAxis tick={{ fontSize: 10, fill: '#6b7280' }} />
+                          <Tooltip contentStyle={{ fontSize: 12, borderRadius: 8, border: '1px solid #c4b5fd' }} />
+                          <Legend wrapperStyle={{ fontSize: 11 }} />
+                          <Line type="monotone" dataKey="total" stroke="#8b5cf6" strokeWidth={2} name="신규 가입" dot={false} />
+                          <Line type="monotone" dataKey="optIn" stroke="#10b981" strokeWidth={2} name="SMS 동의" dot={false} />
+                          <Line type="monotone" dataKey="optOut" stroke="#ef4444" strokeWidth={2} name="수신거부" dot={false} />
+                        </LineChart>
+                      </ResponsiveContainer>
+                    ) : (
+                      <div className="h-[200px] flex items-center justify-center text-xs text-gray-400">최근 30일 데이터가 없습니다</div>
+                    )}
+                  </div>
+
+                  {/* 미니 metric 4 */}
+                  <div className="lg:col-span-2 grid grid-cols-2 gap-2">
+                    {[
+                      { label: '신규 가입', value: dbTrend?.trend.reduce((s, t) => s + (t.total || 0), 0) || 0, delta: dbTrend?.deltas.totalDelta30 ?? null, color: 'violet' },
+                      { label: 'SMS 동의', value: dbTrend?.trend.reduce((s, t) => s + (t.optIn || 0), 0) || 0, delta: dbTrend?.deltas.optInDelta30 ?? null, color: 'emerald' },
+                      { label: '수신거부', value: dbTrend?.trend.reduce((s, t) => s + (t.optOut || 0), 0) || 0, delta: dbTrend?.deltas.optOutDelta30 ?? null, color: 'rose', invert: true },
+                      { label: '활성도', value: dbTrend?.deltas.activeRateDelta30 != null ? Number(dbTrend.deltas.activeRateDelta30) : 0, delta: dbTrend?.deltas.activeRateDelta30 ?? null, color: 'cyan', isRate: true },
+                    ].map((m) => {
+                      const isPositive = m.delta != null && m.delta > 0;
+                      const isNegative = m.delta != null && m.delta < 0;
+                      // 수신거부 = 증가 = 부정적
+                      const positive = m.invert ? isNegative : isPositive;
+                      const negative = m.invert ? isPositive : isNegative;
+                      return (
+                        <div key={m.label} className={`p-3 rounded-lg border bg-gradient-to-br from-${m.color}-50/60 to-${m.color}-100/30 border-${m.color}-100`}>
+                          <div className="text-[10px] text-gray-500 mb-1">{m.label}</div>
+                          <div className={`text-lg font-bold text-${m.color}-700 tabular-nums`}>
+                            {m.isRate ? `${m.value > 0 ? '+' : ''}${m.value}%p` : m.value.toLocaleString()}
+                          </div>
+                          {m.delta != null && (
+                            <div className={`flex items-center gap-0.5 text-[10px] mt-1 ${positive ? 'text-emerald-600' : negative ? 'text-rose-600' : 'text-gray-400'}`}>
+                              {positive ? <TrendingUp className="w-3 h-3" /> : negative ? <TrendingDown className="w-3 h-3" /> : null}
+                              <span>{m.delta > 0 ? '+' : ''}{m.delta}%</span>
+                              <span className="text-gray-400">(이전 30일 대비)</span>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* 2행 — 도넛 차트 2 (등급별 + 채널별) */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+                  {/* 등급별 도넛 */}
+                  <div className="p-4 rounded-xl border border-gray-100 bg-gradient-to-br from-gray-50/60 to-violet-50/30">
+                    <div className="text-xs font-semibold text-gray-700 mb-2 flex items-center gap-1.5">
+                      <Award className="w-3.5 h-3.5 text-violet-600" />
+                      등급별 분포 (전체 활성 고객)
+                    </div>
+                    {dbDistribution && dbDistribution.tiers.length > 0 ? (
+                      <ResponsiveContainer width="100%" height={200}>
+                        <PieChart>
+                          <Pie data={dbDistribution.tiers} cx="50%" cy="50%" innerRadius={45} outerRadius={75} paddingAngle={2} dataKey="value" nameKey="label">
+                            {dbDistribution.tiers.map((t, i) => (
+                              <Cell key={i} fill={t.color} />
+                            ))}
+                          </Pie>
+                          <Tooltip contentStyle={{ fontSize: 12, borderRadius: 8, border: '1px solid #c4b5fd' }} formatter={(v: any) => Number(v).toLocaleString()} />
+                          <Legend wrapperStyle={{ fontSize: 10 }} layout="vertical" align="right" verticalAlign="middle" />
+                        </PieChart>
+                      </ResponsiveContainer>
+                    ) : (
+                      <div className="h-[200px] flex items-center justify-center text-xs text-gray-400">등급 데이터 없음</div>
+                    )}
+                  </div>
+
+                  {/* 채널별 도넛 */}
+                  <div className="p-4 rounded-xl border border-gray-100 bg-gradient-to-br from-gray-50/60 to-emerald-50/30">
+                    <div className="text-xs font-semibold text-gray-700 mb-2 flex items-center gap-1.5">
+                      <Send className="w-3.5 h-3.5 text-emerald-600" />
+                      채널별 분포 (SMS 동의 / 비동의 / 수신거부)
+                    </div>
+                    {dbDistribution && dbDistribution.channels.length > 0 ? (
+                      <ResponsiveContainer width="100%" height={200}>
+                        <PieChart>
+                          <Pie data={dbDistribution.channels} cx="50%" cy="50%" innerRadius={45} outerRadius={75} paddingAngle={2} dataKey="value" nameKey="label">
+                            {dbDistribution.channels.map((c, i) => (
+                              <Cell key={i} fill={c.color} />
+                            ))}
+                          </Pie>
+                          <Tooltip contentStyle={{ fontSize: 12, borderRadius: 8, border: '1px solid #c4b5fd' }} formatter={(v: any) => Number(v).toLocaleString()} />
+                          <Legend wrapperStyle={{ fontSize: 10 }} layout="vertical" align="right" verticalAlign="middle" />
+                        </PieChart>
+                      </ResponsiveContainer>
+                    ) : (
+                      <div className="h-[200px] flex items-center justify-center text-xs text-gray-400">채널 데이터 없음</div>
+                    )}
+                  </div>
+                </div>
+
+                {/* 3행 — AI 인사이트 카드 (1-click 액션) */}
+                {aiInsights.length > 0 && (
+                  <div className="mb-6">
+                    <div className="text-xs font-semibold text-gray-700 mb-2 flex items-center gap-1.5">
+                      <Lightbulb className="w-3.5 h-3.5 text-amber-500" />
+                      AI 인사이트 — 1-click 자동 캠페인 추천
+                    </div>
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                      {aiInsights.map((ins) => {
+                        const accentMap: Record<string, { bg: string; border: string; text: string; btn: string }> = {
+                          rose: { bg: 'from-rose-50/80 to-pink-50/40', border: 'border-rose-200', text: 'text-rose-700', btn: 'bg-rose-600 hover:bg-rose-700' },
+                          amber: { bg: 'from-amber-50/80 to-orange-50/40', border: 'border-amber-200', text: 'text-amber-700', btn: 'bg-amber-600 hover:bg-amber-700' },
+                          emerald: { bg: 'from-emerald-50/80 to-teal-50/40', border: 'border-emerald-200', text: 'text-emerald-700', btn: 'bg-emerald-600 hover:bg-emerald-700' },
+                        };
+                        const c = accentMap[ins.accentColor] || accentMap.amber;
+                        return (
+                          <div key={ins.id} className={`p-4 rounded-xl border ${c.border} bg-gradient-to-br ${c.bg}`}>
+                            <div className="flex items-center gap-1.5 mb-1.5">
+                              <AlertTriangle className={`w-3.5 h-3.5 ${c.text}`} />
+                              <span className={`text-xs font-semibold ${c.text}`}>{ins.title}</span>
+                            </div>
+                            <div className={`text-2xl font-bold ${c.text} mb-1 tabular-nums`}>{ins.count.toLocaleString()}명</div>
+                            <p className="text-[11px] text-gray-600 leading-relaxed mb-3">{ins.description}</p>
+                            <button
+                              onClick={() => {
+                                sessionStorage.setItem('ai_operator_prefill_objective', ins.oneClickObjective);
+                                navigate('/ai-operator');
+                              }}
+                              className={`w-full px-3 py-1.5 rounded-md ${c.btn} text-white text-xs font-medium transition-colors flex items-center justify-center gap-1`}
+                            >
+                              <Sparkles className="w-3 h-3" />
+                              AI Operator로 발송
+                            </button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                {/* 4행 — cohort retention 표 */}
+                {cohortRetention.length > 0 && (
+                  <div>
+                    <div className="text-xs font-semibold text-gray-700 mb-2 flex items-center gap-1.5">
+                      <Users className="w-3.5 h-3.5 text-violet-600" />
+                      Cohort Retention — 가입월별 잔존율 (6개월)
+                    </div>
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-[11px] border-collapse">
+                        <thead>
+                          <tr className="border-b border-gray-200">
+                            <th className="text-left py-2 px-2 font-semibold text-gray-600">가입월</th>
+                            <th className="text-right py-2 px-2 font-semibold text-gray-600">cohort 크기</th>
+                            {Array.from({ length: 6 }).map((_, i) => (
+                              <th key={i} className="text-center py-2 px-2 font-semibold text-gray-600">M{i}</th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {cohortRetention.map((cohort) => (
+                            <tr key={cohort.cohortMonth} className="border-b border-gray-100 hover:bg-violet-50/30">
+                              <td className="py-2 px-2 font-mono text-gray-700">{cohort.cohortMonth?.slice(0, 7) || '-'}</td>
+                              <td className="text-right py-2 px-2 font-mono text-gray-700 tabular-nums">{cohort.cohortSize.toLocaleString()}</td>
+                              {Array.from({ length: 6 }).map((_, i) => {
+                                const entry = cohort.retention.find((r) => r.monthOffset === i);
+                                const rate = entry?.retentionRate ?? 0;
+                                const bgIntensity = Math.min(100, rate);
+                                return (
+                                  <td key={i} className="text-center py-2 px-2 tabular-nums">
+                                    {entry ? (
+                                      <div
+                                        className="inline-block px-2 py-1 rounded font-mono"
+                                        style={{
+                                          backgroundColor: `rgba(139, 92, 246, ${bgIntensity / 100 * 0.3})`,
+                                          color: rate > 50 ? '#5b21b6' : rate > 20 ? '#7c3aed' : '#9ca3af',
+                                        }}
+                                      >
+                                        {rate.toFixed(0)}%
+                                      </div>
+                                    ) : (
+                                      <span className="text-gray-300">-</span>
+                                    )}
+                                  </td>
+                                );
+                              })}
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                    <div className="text-[10px] text-gray-400 italic mt-2">M0 = 가입 직후 / M1 = 1개월 후 / ... / 활성 = last_login_at 기준</div>
+                  </div>
+                )}
               </>
             )}
           </div>
@@ -2772,47 +3024,11 @@ const campaignData = {
             </div>
 
             <div className="px-4 pt-1 pb-4">
-             {/* 타겟 추출 탭 */}
+             {/* 타겟 추출 탭 — D222+ Phase 1 (2026-05-27): Harold 명시 정합 — 하단 카드 4개 (최근 캠페인 / AI 발송 템플릿 / AI 분석 / 예약 대기) 전수 삭제.
+                 기존 카드 영역 = DB 현황 본격 구현 영역 (좌측 60% 안)으로 통합 + 헤더 nav 진입 흐름 정합.
+                 모달 (showRecentCampaigns / showTemplates / showAnalysis / showScheduled) + state (recentCampaigns / scheduledCampaigns) 보존 — 다른 영역 호출 영역 정합. */}
             {activeTab === 'target' && (
-              <div>
-{/* 5개 기능 카드 — D186: 모바일 2열 + md+ 4열 */}
-<div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                  {/* 최근 캠페인 */}
-                  <div onClick={() => { if (isSubscriptionLocked) { setShowSubscriptionLock(true); return; } loadRecentCampaigns(); setShowRecentCampaigns(true); }} className={`bg-white/50 shadow-sm rounded-xl p-6 min-h-[140px] cursor-pointer hover:shadow-lg transition-all text-center border border-green-200 ${isSubscriptionLocked ? 'opacity-60' : ''}`}>
-                    <BarChart3 className="w-8 h-8 mx-auto mb-3 text-green-700" />
-                    <div className="font-semibold text-gray-800 mb-1">{isSubscriptionLocked ? '🔒 ' : ''}최근 캠페인</div>
-                    <div className="text-xs text-gray-500 mb-3">최근 발송 내역</div>
-                    <div className="text-xl font-bold text-green-700">{recentCampaigns.length}건</div>
-                  </div>
-
-                  {/* AI 발송 템플릿 — AI 기능이므로 ai_messaging 잠금도 체크 (CT-17) */}
-                  <div onClick={() => { if (isSubscriptionLocked || isAiMessagingLocked) { setShowSubscriptionLock(true); return; } setShowTemplates(true); }} className={`bg-white/50 shadow-sm rounded-xl p-6 min-h-[140px] cursor-pointer hover:shadow-lg transition-all text-center border border-green-200 ${(isSubscriptionLocked || isAiMessagingLocked) ? 'opacity-60' : ''}`}>
-                    <Sparkles className="w-8 h-8 mx-auto mb-3 text-green-600" />
-                    <div className="font-semibold text-gray-800 mb-1">{(isSubscriptionLocked || isAiMessagingLocked) ? '🔒 ' : ''}AI 발송 템플릿</div>
-                    <div className="text-xs text-gray-500 mb-3">저장 & 바로 실행</div>
-                    <div className="text-xl font-bold text-green-700">관리</div>
-                  </div>
-
-                  {/* AI 분석 (발송 성과 + 예시 리포트) */}
-                  <div onClick={() => { setShowAnalysis(true); }} className={`bg-white/50 shadow-sm rounded-xl p-6 min-h-[140px] cursor-pointer hover:shadow-lg transition-all text-center border border-green-200 relative overflow-hidden`}>
-                    <Sparkles className="w-8 h-8 mx-auto mb-3 text-amber-500" />
-                    <div className="font-semibold text-gray-800 mb-1">AI 분석</div>
-                    <div className="text-xs text-gray-500 mb-2">성과 분석 리포트</div>
-                    <div className="text-xs text-gray-400 leading-relaxed" style={{ WebkitMaskImage: 'linear-gradient(to bottom, black 40%, transparent)', maskImage: 'linear-gradient(to bottom, black 40%, transparent)' }}>
-                      화요일 오전 10시 발송이 가장 효과적...
-                    </div>
-                    <div className="absolute bottom-2 left-0 right-0 text-[10px] text-amber-600 font-medium">예시 리포트 보기 →</div>
-                  </div>
-
-                  {/* 예약 대기 */}
-                  <div onClick={() => { if (isSubscriptionLocked) { setShowSubscriptionLock(true); return; } loadScheduledCampaigns(); setShowScheduled(true); }} className={`bg-white/50 shadow-sm rounded-xl p-6 min-h-[140px] cursor-pointer hover:shadow-lg transition-all text-center border border-amber-200 ${isSubscriptionLocked ? 'opacity-60' : ''}`}>
-                    <Clock className="w-8 h-8 mx-auto mb-3 text-amber-500" />
-                    <div className="font-semibold text-gray-800 mb-1">{isSubscriptionLocked ? '🔒 ' : ''}예약 대기</div>
-                    <div className="text-xs text-gray-500 mb-3">곧 발송될 캠페인</div>
-                    <div className="text-xl font-bold text-amber-600">{scheduledCampaigns.length}건</div>
-                  </div>
-                </div>
-              </div>
+              <div className="hidden" />
             )}
             {/* 캠페인 설정 탭 */}
             {activeTab === 'campaign' && (
@@ -3864,13 +4080,11 @@ const campaignData = {
           ENT/BUSINESS 외 등급 사용자가 헤더 "AI Operator" 메뉴 클릭 시 노출. */}
       <AiOperatorWalkthroughModal forceShow={showWalkthroughModal} onClose={() => setShowWalkthroughModal(false)} />
 
-      {/* 하단 링크 */}
+      {/* 하단 링크 — D222+ Phase 1 (2026-05-27): 매뉴얼 link 제거 (헤더 매뉴얼 NEW 메뉴 신설 후 중복 차단) */}
       <div className="max-w-7xl mx-auto px-4 py-6 mt-8 border-t border-gray-200 text-center text-xs text-gray-400 space-x-3">
         <a href="/privacy" target="_blank" className="hover:text-gray-600 transition">개인정보처리방침</a>
         <span>|</span>
         <a href="/terms" target="_blank" className="hover:text-gray-600 transition">이용약관</a>
-        <span>|</span>
-        <a href="/manual/manual.html" target="_blank" rel="noopener" className="hover:text-emerald-600 transition">사용자 매뉴얼</a>
         <span>|</span>
         <span>© {new Date().getFullYear()} INVITO</span>
       </div>

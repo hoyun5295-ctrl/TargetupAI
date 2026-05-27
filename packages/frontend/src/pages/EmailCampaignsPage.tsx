@@ -448,9 +448,10 @@ export default function EmailCampaignsPage() {
   // ════════════════════════════════════════════════════════════════
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 text-white">
-      {/* 상단 헤더 */}
-      <div className="bg-slate-950/80 backdrop-blur-sm border-b border-white/10 sticky top-0 z-30">
+    // ★ D222+ Phase 3 (2026-05-27): 다크 → 보라 그라데이션 톤 다운
+    <div className="min-h-screen bg-gradient-to-br from-violet-900 via-fuchsia-900 to-violet-900 text-white">
+      {/* 상단 헤더 — D222+ Phase 3 보라 톤 다운 */}
+      <div className="bg-violet-800/50 backdrop-blur-md border-b border-violet-400/30 sticky top-0 z-30">
         <div className="max-w-7xl mx-auto px-4 md:px-6 py-3 md:py-4 flex items-center gap-3">
           <button onClick={() => navigate('/ai-operator')} className="p-2 rounded-lg hover:bg-white/10 transition-colors" aria-label="뒤로가기">
             <ArrowLeft className="w-5 h-5" />
@@ -558,7 +559,7 @@ export default function EmailCampaignsPage() {
                 value={testEmail}
                 onChange={(e) => setTestEmail(e.target.value)}
                 placeholder="테스트 수신 이메일 (예: admin@example.com)"
-                className="flex-1 min-w-[200px] px-3 py-2 bg-slate-950 border border-white/10 rounded-lg text-sm text-white placeholder-white/30 focus:outline-none focus:border-cyan-400/50"
+                className="flex-1 min-w-[200px] px-3 py-2 bg-violet-900/50 border border-white/10 rounded-lg text-sm text-white placeholder-white/30 focus:outline-none focus:border-cyan-400/50"
               />
               <button
                 onClick={handleTestSend}
@@ -733,8 +734,8 @@ function SmtpFormModal({ form, setForm, presetKey, setPresetKey, showPassword, s
   const currentPreset = SMTP_PRESETS.find((p) => p.key === presetKey);
   return (
     <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50" onClick={onClose}>
-      <div className="bg-slate-900 border border-white/10 rounded-2xl shadow-2xl w-full max-w-2xl max-h-[95vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
-        <div className="sticky top-0 bg-slate-900 border-b border-white/10 px-6 py-4 flex items-center justify-between">
+      <div className="bg-violet-900/40 border border-white/10 rounded-2xl shadow-2xl w-full max-w-2xl max-h-[95vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+        <div className="sticky top-0 bg-violet-900/40 border-b border-white/10 px-6 py-4 flex items-center justify-between">
           <h3 className="text-lg font-bold text-white flex items-center gap-2">
             <Server className="w-5 h-5 text-blue-300" />
             {isUpdate ? 'SMTP 설정 수정' : 'SMTP 설정 등록'}
@@ -756,7 +757,7 @@ function SmtpFormModal({ form, setForm, presetKey, setPresetKey, showPassword, s
                   className={`text-xs px-2 py-2 rounded-lg border transition-colors ${
                     presetKey === preset.key
                       ? 'bg-blue-500/30 border-blue-400/60 text-white'
-                      : 'bg-slate-950 border-white/10 text-white/70 hover:bg-white/5'
+                      : 'bg-violet-900/50 border-white/10 text-white/70 hover:bg-white/5'
                   }`}
                 >
                   {preset.label}
@@ -785,7 +786,7 @@ function SmtpFormModal({ form, setForm, presetKey, setPresetKey, showPassword, s
                 value={form.host}
                 onChange={(e) => setForm({ ...form, host: e.target.value })}
                 placeholder="smtp.gmail.com"
-                className="w-full px-3 py-2 bg-slate-950 border border-white/10 rounded-lg text-sm text-white placeholder-white/30 focus:outline-none focus:border-blue-400/50"
+                className="w-full px-3 py-2 bg-violet-900/50 border border-white/10 rounded-lg text-sm text-white placeholder-white/30 focus:outline-none focus:border-blue-400/50"
               />
             </div>
             <div>
@@ -797,7 +798,7 @@ function SmtpFormModal({ form, setForm, presetKey, setPresetKey, showPassword, s
                 value={form.port}
                 onChange={(e) => setForm({ ...form, port: parseInt(e.target.value, 10) || 587 })}
                 placeholder="587"
-                className="w-full px-3 py-2 bg-slate-950 border border-white/10 rounded-lg text-sm text-white placeholder-white/30 focus:outline-none focus:border-blue-400/50"
+                className="w-full px-3 py-2 bg-violet-900/50 border border-white/10 rounded-lg text-sm text-white placeholder-white/30 focus:outline-none focus:border-blue-400/50"
               />
             </div>
           </div>
@@ -809,7 +810,7 @@ function SmtpFormModal({ form, setForm, presetKey, setPresetKey, showPassword, s
               value={form.user}
               onChange={(e) => setForm({ ...form, user: e.target.value })}
               placeholder="admin@example.com"
-              className="w-full px-3 py-2 bg-slate-950 border border-white/10 rounded-lg text-sm text-white placeholder-white/30 focus:outline-none focus:border-blue-400/50"
+              className="w-full px-3 py-2 bg-violet-900/50 border border-white/10 rounded-lg text-sm text-white placeholder-white/30 focus:outline-none focus:border-blue-400/50"
             />
           </div>
 
@@ -823,7 +824,7 @@ function SmtpFormModal({ form, setForm, presetKey, setPresetKey, showPassword, s
                 value={form.password}
                 onChange={(e) => setForm({ ...form, password: e.target.value })}
                 placeholder={isUpdate ? '변경 시에만 새 비밀번호 입력' : '앱 비밀번호 (16자)'}
-                className="w-full px-3 py-2 pr-10 bg-slate-950 border border-white/10 rounded-lg text-sm text-white placeholder-white/30 focus:outline-none focus:border-blue-400/50"
+                className="w-full px-3 py-2 pr-10 bg-violet-900/50 border border-white/10 rounded-lg text-sm text-white placeholder-white/30 focus:outline-none focus:border-blue-400/50"
                 autoComplete="new-password"
               />
               <button
@@ -859,7 +860,7 @@ function SmtpFormModal({ form, setForm, presetKey, setPresetKey, showPassword, s
                 value={form.from_email}
                 onChange={(e) => setForm({ ...form, from_email: e.target.value })}
                 placeholder="noreply@example.com"
-                className="w-full px-3 py-2 bg-slate-950 border border-white/10 rounded-lg text-sm text-white placeholder-white/30 focus:outline-none focus:border-blue-400/50"
+                className="w-full px-3 py-2 bg-violet-900/50 border border-white/10 rounded-lg text-sm text-white placeholder-white/30 focus:outline-none focus:border-blue-400/50"
               />
             </div>
             <div>
@@ -869,13 +870,13 @@ function SmtpFormModal({ form, setForm, presetKey, setPresetKey, showPassword, s
                 value={form.from_name}
                 onChange={(e) => setForm({ ...form, from_name: e.target.value })}
                 placeholder="브랜드명 또는 회사명"
-                className="w-full px-3 py-2 bg-slate-950 border border-white/10 rounded-lg text-sm text-white placeholder-white/30 focus:outline-none focus:border-blue-400/50"
+                className="w-full px-3 py-2 bg-violet-900/50 border border-white/10 rounded-lg text-sm text-white placeholder-white/30 focus:outline-none focus:border-blue-400/50"
               />
             </div>
           </div>
         </div>
 
-        <div className="sticky bottom-0 bg-slate-900 border-t border-white/10 px-6 py-3 flex justify-end gap-2">
+        <div className="sticky bottom-0 bg-violet-900/40 border-t border-white/10 px-6 py-3 flex justify-end gap-2">
           <button onClick={onClose} className="px-4 py-2 text-sm text-white/70 hover:bg-white/5 rounded-lg">취소</button>
           <button
             onClick={onSave}
@@ -905,8 +906,8 @@ interface CampaignFormModalProps {
 function CampaignFormModal({ editing, setEditing, saving, onSave }: CampaignFormModalProps) {
   return (
     <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50" onClick={() => setEditing(null)}>
-      <div className="bg-slate-900 border border-white/10 rounded-2xl shadow-2xl w-full max-w-2xl max-h-[95vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
-        <div className="sticky top-0 bg-slate-900 border-b border-white/10 px-6 py-4 flex items-center justify-between">
+      <div className="bg-violet-900/40 border border-white/10 rounded-2xl shadow-2xl w-full max-w-2xl max-h-[95vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+        <div className="sticky top-0 bg-violet-900/40 border-b border-white/10 px-6 py-4 flex items-center justify-between">
           <h3 className="text-lg font-bold text-white">{editing.id ? '캠페인 수정' : '신규 Email 캠페인'}</h3>
           <button onClick={() => setEditing(null)} className="text-white/50 hover:text-white p-1.5 rounded hover:bg-white/10" aria-label="닫기">
             <X className="w-5 h-5" />
@@ -921,7 +922,7 @@ function CampaignFormModal({ editing, setEditing, saving, onSave }: CampaignForm
               value={editing.name || ''}
               onChange={(e) => setEditing({ ...editing, name: e.target.value })}
               placeholder="VIP 5월 재구매 안내"
-              className="w-full px-3 py-2 bg-slate-950 border border-white/10 rounded-lg text-sm text-white placeholder-white/30 focus:outline-none focus:border-blue-400/50"
+              className="w-full px-3 py-2 bg-violet-900/50 border border-white/10 rounded-lg text-sm text-white placeholder-white/30 focus:outline-none focus:border-blue-400/50"
               maxLength={200}
             />
           </div>
@@ -932,7 +933,7 @@ function CampaignFormModal({ editing, setEditing, saving, onSave }: CampaignForm
               value={editing.subject || ''}
               onChange={(e) => setEditing({ ...editing, subject: e.target.value })}
               placeholder="VIP 회원님께 드리는 5월 특별 안내"
-              className="w-full px-3 py-2 bg-slate-950 border border-white/10 rounded-lg text-sm text-white placeholder-white/30 focus:outline-none focus:border-blue-400/50"
+              className="w-full px-3 py-2 bg-violet-900/50 border border-white/10 rounded-lg text-sm text-white placeholder-white/30 focus:outline-none focus:border-blue-400/50"
               maxLength={200}
             />
           </div>
@@ -944,7 +945,7 @@ function CampaignFormModal({ editing, setEditing, saving, onSave }: CampaignForm
                 value={editing.fromName || ''}
                 onChange={(e) => setEditing({ ...editing, fromName: e.target.value })}
                 placeholder="SMTP 설정 default 활용"
-                className="w-full px-3 py-2 bg-slate-950 border border-white/10 rounded-lg text-sm text-white placeholder-white/30 focus:outline-none focus:border-blue-400/50"
+                className="w-full px-3 py-2 bg-violet-900/50 border border-white/10 rounded-lg text-sm text-white placeholder-white/30 focus:outline-none focus:border-blue-400/50"
                 maxLength={100}
               />
             </div>
@@ -955,7 +956,7 @@ function CampaignFormModal({ editing, setEditing, saving, onSave }: CampaignForm
                 value={editing.fromEmail || ''}
                 onChange={(e) => setEditing({ ...editing, fromEmail: e.target.value })}
                 placeholder="SMTP 설정 default 활용"
-                className="w-full px-3 py-2 bg-slate-950 border border-white/10 rounded-lg text-sm text-white placeholder-white/30 focus:outline-none focus:border-blue-400/50"
+                className="w-full px-3 py-2 bg-violet-900/50 border border-white/10 rounded-lg text-sm text-white placeholder-white/30 focus:outline-none focus:border-blue-400/50"
               />
             </div>
           </div>
@@ -965,7 +966,7 @@ function CampaignFormModal({ editing, setEditing, saving, onSave }: CampaignForm
               value={editing.htmlBody || ''}
               onChange={(e) => setEditing({ ...editing, htmlBody: e.target.value })}
               placeholder="<p>안녕하세요, {{name}}님</p>"
-              className="w-full px-3 py-2 bg-slate-950 border border-white/10 rounded-lg text-xs font-mono resize-y h-48 text-white placeholder-white/30 focus:outline-none focus:border-blue-400/50"
+              className="w-full px-3 py-2 bg-violet-900/50 border border-white/10 rounded-lg text-xs font-mono resize-y h-48 text-white placeholder-white/30 focus:outline-none focus:border-blue-400/50"
             />
             <div className="text-[10px] text-white/40 mt-1">{`{{변수}}`} = 발송 시 recipients substitutions 자동 치환</div>
           </div>
@@ -975,7 +976,7 @@ function CampaignFormModal({ editing, setEditing, saving, onSave }: CampaignForm
               value={editing.textBody || ''}
               onChange={(e) => setEditing({ ...editing, textBody: e.target.value })}
               placeholder="안녕하세요, {{name}}님"
-              className="w-full px-3 py-2 bg-slate-950 border border-white/10 rounded-lg text-xs resize-y h-20 text-white placeholder-white/30 focus:outline-none focus:border-blue-400/50"
+              className="w-full px-3 py-2 bg-violet-900/50 border border-white/10 rounded-lg text-xs resize-y h-20 text-white placeholder-white/30 focus:outline-none focus:border-blue-400/50"
             />
           </div>
           <div className="flex items-center gap-2 bg-amber-500/10 border border-amber-400/30 rounded-lg p-3">
@@ -992,7 +993,7 @@ function CampaignFormModal({ editing, setEditing, saving, onSave }: CampaignForm
           </div>
         </div>
 
-        <div className="sticky bottom-0 bg-slate-900 border-t border-white/10 px-6 py-3 flex justify-end gap-2">
+        <div className="sticky bottom-0 bg-violet-900/40 border-t border-white/10 px-6 py-3 flex justify-end gap-2">
           <button onClick={() => setEditing(null)} className="px-4 py-2 text-sm text-white/70 hover:bg-white/5 rounded-lg">취소</button>
           <button
             onClick={onSave}
@@ -1024,7 +1025,7 @@ function RecipientsModal({ campaign, recipientsText, setRecipientsText, onSend, 
   const validCount = recipientsText.split(/[,\n;]+/).filter((e) => e.trim().includes('@')).length;
   return (
     <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50" onClick={onClose}>
-      <div className="bg-slate-900 border border-white/10 rounded-2xl shadow-2xl w-full max-w-xl" onClick={(e) => e.stopPropagation()}>
+      <div className="bg-violet-900/40 border border-white/10 rounded-2xl shadow-2xl w-full max-w-xl" onClick={(e) => e.stopPropagation()}>
         <div className="border-b border-white/10 px-6 py-4 flex items-center justify-between">
           <h3 className="text-lg font-bold text-white flex items-center gap-2">
             <Send className="w-5 h-5 text-blue-300" />
@@ -1043,7 +1044,7 @@ function RecipientsModal({ campaign, recipientsText, setRecipientsText, onSend, 
             value={recipientsText}
             onChange={(e) => setRecipientsText(e.target.value)}
             placeholder="수신 이메일 (콤마/세미콜론/줄바꿈 구분)&#10;예: user1@example.com, user2@example.com"
-            className="w-full px-3 py-2 bg-slate-950 border border-white/10 rounded-lg text-sm text-white placeholder-white/30 resize-y h-32 focus:outline-none focus:border-blue-400/50"
+            className="w-full px-3 py-2 bg-violet-900/50 border border-white/10 rounded-lg text-sm text-white placeholder-white/30 resize-y h-32 focus:outline-none focus:border-blue-400/50"
           />
           <div className="text-xs text-cyan-300">유효 이메일: <strong>{validCount.toLocaleString()}건</strong></div>
         </div>

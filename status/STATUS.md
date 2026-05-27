@@ -107,7 +107,163 @@
 
 ---
 
-### 🚀 다음 세션 진입 가이드 (D220+ + D221+ 종결 후 — **D222+ 보라 그라데이션 통일 + Phase 1 진입**)
+### 🚀 다음 세션 진입 가이드 (D222+ 전체 종결 후 — **배포 + 스크린샷 + CHAPTER 10 신설**)
+
+> **★★★ D222+ 보라 그라데이션 통일 + 매뉴얼 신설 전체 종결 매트릭스 (2026-05-27) ★★★**:
+> Phase 1+2+3+4+5 모두 ✅ 완료 — 약 19,000 라인 정정 + backend dashboard.ts endpoint 4건 신설 + 매뉴얼 HTML 교체 (1240 라인). 한 세션 안 Harold 4번 컨펌 흐름 종결 (Phase 1 → 2 → 3 → 4 → 5). frontend + backend tsc 0 errors + 자가 grep 전체 0건.
+>
+> **★ 추후 진행 매트릭스 (Harold 명시 흐름 정합)**:
+>
+> **Step 1 — Harold 본 세션 배포** (Phase 1~5 통합 배포):
+> ```
+> tp-push "D222+ 보라 그라데이션 통일 + 매뉴얼 신설 전체 종결 — Phase 1~5"
+> ```
+> 서버 SSH 후 = `cd ~/targetup-app && git pull` + backend `build:safe` + `pm2 restart all` + frontend `build:safe`
+>
+> **Step 2 — Harold 운영 안 스크린샷 캡처** (총 32건):
+> - CHAPTER 01 (3건) — 메인 대시보드 + DB 현황 본격 분석 5 부분 + 헤더 매뉴얼 NEW 메뉴
+> - CHAPTER 02 (3건) — 엑셀 업로드 + AI 자동 매핑 + 고객 DB 조회
+> - CHAPTER 03 (4건) — AI Operator 메인 + 자율 진단 + 메시지 3안 + 캠페인 확정
+> - CHAPTER 04 (2건) — 직접발송 + 변수 적용 미리보기
+> - CHAPTER 05 (2건) — 필터 조건 + AI 자연어 모드
+> - CHAPTER 06 (2건) — 여정 자동화 메인 + 5단계 위저드
+> - CHAPTER 07 (1건) — 자연어 세그먼트 생성
+> - CHAPTER 08 (3건) — 발송결과 목록 + 캠페인 상세 + 캘린더
+> - CHAPTER 09 (3건) — AI 발송 템플릿 + 수신거부 + 예약 대기
+>
+> **Step 3 — Harold Claude Design 호출 → CHAPTER 10 신설**:
+> - 마스터 프롬프트 위치 = `docs/manual/claude-design-master-prompt-chapter10-ai-operator.md`
+> - 본 영역 = AI Operator 10 sub-메뉴 본질 (여정 자동화 + 자율 마케팅 + Predictive + 자율 진단 + 성과리포트 + CDP + 인앱 + Email + AI 메모리 + AI 사용량)
+> - 스크린샷 추가 11건 (CHAPTER 10 영역) = 총 43건
+>
+> **Step 4 — 본 AI 새 세션 진입 (D223+ 또는 D222+ Part 2)**:
+> - Harold 업로드: 이미지 파일 32~43건 + Claude Design 출력 HTML (CHAPTER 10)
+> - 본 AI 정정 의무:
+>   1. `packages/frontend/public/manual/` 안 이미지 파일 위치
+>   2. 매뉴얼 HTML 안 hero shot placeholder → `<div class="shot"><img src="..." alt="..." /></div>` 정정 (CHAPTER 01~09 = 약 23건)
+>   3. CHAPTER 10 article 신설 (옛 CHAPTER 09 직후 삽입) + JS CHAPTERS 배열 + goto + renderPager 9 → 10 정정
+>   4. 사이드바 nav 자동 활성 확인 (라이트박스 영역 자동 활용)
+>   5. frontend tsc + 자가 grep + Harold 시각 확인
+>
+> **★ 다음 세션 진입 명령어 (Harold 복붙 영역)**:
+> ```
+> docs/superpowers/handoffs/2026-05-27-violet-gradient-unification-handoff.md 정독 + docs/manual/claude-design-master-prompt-chapter10-ai-operator.md 정독 + memory/project_d222_violet_gradient_unification_completed.md 정독 → 매뉴얼 이미지 입히기 + CHAPTER 10 신설 진입 (Harold 업로드 이미지 + Claude Design HTML 활용)
+> ```
+>
+> **D222+ 종합 정정 매트릭스**:
+> - Phase 1 = Dashboard 흰 톤 유지 + DB 현황 본격 분석 5 부분 + AI Operator 단일 진입 + DashboardHeader + AiOperatorPage/JourneysPage 보라 톤 다운 + backend endpoint 4건
+> - Phase 2 = PerformancePage + CdpSettingsPage + ContinuousOperatorPage 보라 톤 다운 (3 페이지 약 4,500 라인)
+> - Phase 3 = 7 페이지 보라 톤 다운 (InAppMessages + Email + PredictiveDashboard + AiMemory + AiUsage + Segments + Onboarding 약 5,700 라인)
+> - Phase 4 = sub-페이지 3건 보라 톤 다운 (JourneyStats + JourneyDetail + JourneyPause) + 계층 2 흰 톤 유지
+> - Phase 5 = 매뉴얼 페이지 (Claude Design HTML 교체 + 보안 흐름 통합 + close-to-dashboard 운영 진입)
+>
+> **★ Harold 통합 배포 명령어**:
+> ```
+> tp-push "D222+ 보라 그라데이션 통일 + 매뉴얼 신설 전체 종결 — Phase 1~5 (Dashboard 흰 톤 유지 + DB 현황 본격 분석 5 부분 + AI Operator 단일 진입 + 보라 톤 다운 13 페이지 + 매뉴얼 HTML 1240 라인 신규 + backend dashboard.ts endpoint 4건 신설) — 약 19,000 라인 정정 + tsc 0 errors + 자가 grep 0건"
+> ```
+> 서버 SSH 후 = `cd ~/targetup-app && git pull` + backend `build:safe` + `pm2 restart all` + frontend `build:safe`. DB 변경 X.
+>
+> **★ 다음 세션 진입 흐름 (D223+ 또는 운영 검증)**:
+> - 운영 검증 = Harold + 직원 직접 시각 확인 (보라 그라데이션 통일 + Dashboard 흰 톤 유지 + 매뉴얼 NEW 메뉴 진입)
+> - D223+ = Harold 명시 영역 (별 작업 진입)
+> - 종합 메모리 = [project_d222_violet_gradient_unification_completed.md](memory/project_d222_violet_gradient_unification_completed.md)
+
+---
+
+### 🚀 옛 D222+ Phase 5 진입 가이드 (D222+ Phase 4 종결 후 — 참조용)
+
+> **★ D222+ Phase 4 ✅ 종결 매트릭스 (2026-05-27)**:
+> sub-페이지 3건 (JourneyStatsPage + JourneyDetailPage + JourneyPausePage) 다크 → 보라 그라데이션 정정. 계층 2 흰 톤 페이지 (AdminDashboard + 발송결과 + 고객 DB + 직접발송) = 흰 톤 유지 옛 영역 보존 (Dashboard 흐름 정합). frontend tsc 0 errors + 자가 grep 0건. Phase 1~4 누적 종결 = 약 19,000 라인 정정.
+>
+> **★ D222+ Phase 5 진입 명령어 (다음 세션 첫 메시지 — 즉시 복사 가능)**:
+> ```
+> docs/superpowers/handoffs/2026-05-27-violet-gradient-unification-handoff.md 정독 + docs/superpowers/specs/2026-05-27-violet-gradient-unification-design.md 정독 + memory/project_d222_phase1_completed.md 정독 + memory/project_d222_phase2_completed.md 정독 + memory/project_d222_phase3_completed.md 정독 + memory/project_d222_phase4_completed.md 정독 → D222+ Phase 5 진입 (매뉴얼 페이지 — Claude Design 수령 HTML 정정)
+> ```
+>
+> **★ Phase 5 흐름 (매뉴얼 페이지 별 영역)**:
+> - Harold 직접 Claude Design 호출 → 신규 매뉴얼 HTML 수령
+> - 기존 manual.html 정정 또는 신규 `/manual` 라우트 신설 결정
+> - 헤더 매뉴얼 메뉴 진입 link 정합
+> - 보안 흐름 유지 (세션 검증 + DevTools 차단 + 인쇄 차단 + robots noindex)
+
+---
+
+### 🚀 옛 D222+ Phase 4 진입 가이드 (D222+ Phase 3 종결 후 — 참조용)
+
+> **★ D222+ Phase 3 ✅ 종결 매트릭스 (2026-05-27)**:
+> InAppMessages + EmailCampaigns + PredictiveDashboard + AiMemory + AiUsage + Segments + Onboarding 7 페이지 약 5,700 라인 다크 → 보라 그라데이션 패턴 매칭 정정 (Phase 2 동일 패턴). 옛 단어 10건 + 진정 2건 + 옛 30일 5건 + 헤더 주석 정정 (영구 룰 정합). frontend tsc 0 errors + 자가 grep 0건.
+>
+> **★ D222+ Phase 4 진입 명령어 (다음 세션 첫 메시지 — 즉시 복사 가능)**:
+> ```
+> docs/superpowers/handoffs/2026-05-27-violet-gradient-unification-handoff.md 정독 + docs/superpowers/specs/2026-05-27-violet-gradient-unification-design.md 정독 + memory/project_d222_phase1_completed.md 정독 + memory/project_d222_phase2_completed.md 정독 + memory/project_d222_phase3_completed.md 정독 → D222+ Phase 4 진입 (sub-페이지 + 계층 2 흰 톤 — AdminDashboard + 발송결과 + 고객 DB + 직접발송 약 4,000 라인 / 8~10h)
+> ```
+>
+> **★ D222+ Phase 4 정정 매트릭스 (계층 2 — 흰 톤 + violet 액센트)**:
+> - 대상 페이지 = JourneyStatsPage/sub-페이지 (계층 1) + AdminDashboard + CampaignResultsPage + CustomersPage/AddressBookPage + 직접발송 (계층 2 흰 톤)
+> - 정정 흐름 = 흰 톤 유지 + violet 액센트 강화 + 다크 톤 표 → 흰 톤 표
+> - 분량 약 4,000 라인 / 8~10h
+>
+> **★ Phase 5 흐름 (별 세션)**:
+> - Phase 5 = 매뉴얼 페이지 (Claude Design 수령 HTML 정정 — 4~6h)
+
+---
+
+### 🚀 옛 D222+ Phase 3 진입 가이드 (D222+ Phase 2 종결 후 — 참조용)
+
+> **★ D222+ Phase 2 ✅ 종결 매트릭스 (2026-05-27)**:
+> PerformancePage + CdpSettingsPage + ContinuousOperatorPage 3 페이지 약 4,500 라인 다크 → 보라 그라데이션 톤 다운 패턴 매칭 정정. 배경 (bg-slate-950 → violet-900) + sticky 헤더 (bg-violet-800/50 + border-violet-400/30) + bg-slate-900 → bg-violet-900/40 + bg-slate-950/40~50 → bg-violet-900/30 + bg-slate-950 (input/select) → bg-violet-900/50 + 옛 코드 주석 정정. frontend tsc 0 errors + 자가 grep 0건.
+>
+> **★ D222+ Phase 3 진입 명령어 (다음 세션 첫 메시지 — 즉시 복사 가능)**:
+> ```
+> docs/superpowers/handoffs/2026-05-27-violet-gradient-unification-handoff.md 정독 + docs/superpowers/specs/2026-05-27-violet-gradient-unification-design.md 정독 + memory/project_d222_phase1_completed.md 정독 + memory/project_d222_phase2_completed.md 정독 + memory/feedback_cto_mandate_for_vito.md 정독 + memory/feedback_no_bakkeum_usage.md 정독 → D222+ Phase 3 진입 (InAppMessages + Email + Predictive + AiMemory + AiUsage + Segments + Onboarding 7 페이지 약 5,150 라인 / 8~10h)
+> ```
+>
+> **★ D222+ Phase 3 정정 매트릭스 (계층 1 — AI 영역 보라 톤 다운)**:
+> - 대상 페이지 7건 = InAppMessagesPage (`/inapp-messages`) + EmailCampaignsPage (`/email-campaigns`) + PredictivePage (`/predictive`) + AiMemoryPage (`/ai-memory`) + AiUsagePage (`/ai-usage`) + SegmentsPage (`/segments`) + OnboardingWizardPage (`/onboarding`)
+> - Phase 2 동일 패턴 매칭 정정 (배경 + sticky 헤더 + bg-slate-* swap + 옛 코드 주석 정정)
+> - 분량 약 5,150 라인 / 8~10h
+>
+> **★ Phase 4~5 흐름 (별 세션 분할)**:
+> - Phase 4 = sub-페이지 + 계층 2 (AdminDashboard + 발송결과 + 고객 DB + 직접발송 흰 톤 + violet 액센트 — 약 4,000 라인 / 8~10h)
+> - Phase 5 = 매뉴얼 페이지 (Claude Design 수령 HTML 정정 — 4~6h)
+>
+> **★ Harold 배포 흐름 (Harold 명시 — Phase 1~5 통합 배포)**:
+> Phase 1+2+3+4+5 종결 직후 Harold 통합 배포 정합. 본 세션 = 배포 X = Phase 5 종결 후 또는 Harold 결정 시점.
+
+---
+
+### 🚀 옛 D222+ Phase 2 진입 가이드 (D222+ Phase 1 종결 후 — 참조용)
+
+> **★ D222+ Phase 1 ✅ 종결 매트릭스 (2026-05-27)**:
+> Dashboard 흰 톤 유지 (Harold 명시 — 직원 신고 정합) + 카드 3 그라데이션 (AI Operator 보라 + 직접 타겟 녹색 + 고객 DB amber) + AI Operator 단일 진입 (navigate('/ai-operator') + AiSendTypeModal 폐기) + 하단 카드 4 삭제 + DB 현황 본격 분석 5 부분 (line chart + 미니 metric 4 + 도넛 2 + AI 인사이트 + cohort retention — recharts ^3.8.1 + 신규 endpoint 4건) + DashboardHeader 메뉴 정정 (AI Operator 제거 + 매뉴얼 NEW 신규) + footer 매뉴얼 link 제거 + AiOperatorPage 보라 톤 다운 (from-indigo-950 → from-violet-900) + JourneysPage 다크 → 보라 그라데이션 톤 다운 + 시인성 강화. frontend + backend tsc 0 errors + 자가 grep 0건.
+>
+> **★ D222+ Phase 2 진입 명령어 (다음 세션 첫 메시지 — 즉시 복사 가능)**:
+> ```
+> docs/superpowers/handoffs/2026-05-27-violet-gradient-unification-handoff.md 정독 + docs/superpowers/specs/2026-05-27-violet-gradient-unification-design.md 정독 + memory/project_d222_phase1_completed.md 정독 + memory/feedback_cto_mandate_for_vito.md 정독 + memory/feedback_no_bakkeum_usage.md 정독 → D222+ Phase 2 진입 (PerformancePage + CdpSettingsPage + ContinuousOperatorPage — 약 4,500 라인 / 6~8h)
+> ```
+>
+> **★ D222+ Phase 2 정정 매트릭스 (계층 1 — AI 영역 보라 톤 다운)**:
+> - 대상 페이지 3건 = PerformancePage (`/performance`) + CdpSettingsPage (`/cdp-settings`) + ContinuousOperatorPage (`/continuous-operator`)
+> - 배경 = `from-slate-950 via-slate-900 to-slate-950` → `from-violet-900 via-fuchsia-900 to-violet-900`
+> - sticky 헤더 = `bg-slate-950/80` → `bg-violet-800/50 backdrop-blur-md border-violet-400/30`
+> - 시인성 강화 (text-white/30~50 → /55~80, text-violet-300 → /200)
+> - Source caption 의무 (모든 차트/카드)
+> - 분량 약 4,500 라인 / 6~8h
+>
+> **★ Phase 3~5 흐름 (별 세션 분할)**:
+> - Phase 3 = InAppMessages + Email + Predictive + AiMemory + AiUsage + Segments + Onboarding (7 페이지 / 약 5,150 라인 / 8~10h)
+> - Phase 4 = sub-페이지 + 계층 2 (AdminDashboard + 발송결과 + 고객 DB + 직접발송 흰 톤 + violet 액센트 — 약 4,000 라인 / 8~10h)
+> - Phase 5 = 매뉴얼 페이지 (Claude Design 수령 HTML 정정 — 4~6h)
+>
+> **★ Harold 직접 배포 명령어 (D222+ Phase 1 종결)**:
+> ```
+> tp-push "D222+ Phase 1 종결 — Dashboard 흰 톤 유지 + 카드 3 그라데이션 + DB 현황 본격 분석 5 부분 + DashboardHeader 메뉴 정정 + AiOperatorPage/JourneysPage 보라 톤 다운 + backend dashboard.ts endpoint 4건 신설"
+> ```
+> 서버 SSH 후 = `cd ~/targetup-app && git pull` + backend `build:safe` + `pm2 restart all` + frontend `build:safe`. DB 변경 X.
+
+---
+
+### 🚀 옛 D222+ Phase 1 진입 가이드 (D220+ + D221+ 종결 후 — 참조용)
 
 > **★ D222+ 진입 매트릭스 (Harold 명시 2026-05-27 D220+ + D221+ 종결 직후)**:
 > D220+ 종결 = 한줄로AI 모달 6건 (Step 1 AiCampaignResultPopup 644 라인 + Step 2 5 모달 다크 톤 정정 + 폰 미리보기 3 파일 다크 폰 모드 통일). D221+ 종결 = 보라 그라데이션 통일 + 매뉴얼 신설 대규모 작업 설계 4 파일 신설 (spec + 매뉴얼 본문 v2 + Claude Design 마스터 프롬프트 + 새 세션 진입 핸드오프). D222+ = 보라 그라데이션 통일 본격 작업 진입 — 계층 3 흐름 (AI 영역 보라 그라데이션 톤 다운 + 입력 영역 흰 톤 + 모달 톤 다운) + Phase 1 Dashboard + JourneysPage 우선 정정.

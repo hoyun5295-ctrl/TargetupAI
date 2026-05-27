@@ -136,9 +136,9 @@ const QUICK_START_CARDS: QuickStartCard[] = [
     id: 'trend',
     icon: TrendingUp,
     label: '월별 트렌드 분석',
-    hint: '옛 30일 호출 추이 + 변동 원인',
+    hint: '기존 30일 호출 추이 + 변동 원인',
     gradient: 'from-sky-400 to-cyan-500',
-    query: '옛 30일간 AI 호출 추이를 분석해주세요. 증가 또는 감소 패턴이 있다면 어떤 출처가 영향을 주었나요?',
+    query: '직전 30일간 AI 호출 추이를 분석해주세요. 증가 또는 감소 패턴이 있다면 어떤 출처가 영향을 주었나요?',
   },
   {
     id: 'model',
@@ -424,9 +424,10 @@ export default function AiUsagePage() {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 text-white">
-      {/* ───────── 1. sticky 헤더 ───────── */}
-      <div className="bg-slate-950/80 backdrop-blur-sm border-b border-white/10 sticky top-0 z-30">
+    // ★ D222+ Phase 3 (2026-05-27): 다크 → 보라 그라데이션 톤 다운
+    <div className="min-h-screen bg-gradient-to-br from-violet-900 via-fuchsia-900 to-violet-900 text-white">
+      {/* ───────── 1. sticky 헤더 — D222+ Phase 3 보라 톤 다운 ───────── */}
+      <div className="bg-violet-800/50 backdrop-blur-md border-b border-violet-400/30 sticky top-0 z-30">
         <div className="max-w-7xl mx-auto px-4 md:px-6 py-3 md:py-4 flex items-center gap-3">
           <button onClick={() => navigate('/ai-operator')} className="p-2 rounded-lg hover:bg-white/10 transition-colors" aria-label="AI Operator로 돌아가기">
             <ArrowLeft className="w-5 h-5" />
@@ -536,7 +537,7 @@ export default function AiUsagePage() {
                 placeholder="질문을 입력하고 Enter 키를 눌러주세요 (2~500자)"
                 maxLength={500}
                 disabled={naturalLoading}
-                className="flex-1 px-4 py-2.5 bg-slate-950/60 border border-white/10 rounded-lg text-sm text-white placeholder-white/30 focus:outline-none focus:border-cyan-400/50 focus:ring-1 focus:ring-cyan-400/30 disabled:opacity-40"
+                className="flex-1 px-4 py-2.5 bg-violet-900/50/60 border border-white/10 rounded-lg text-sm text-white placeholder-white/30 focus:outline-none focus:border-cyan-400/50 focus:ring-1 focus:ring-cyan-400/30 disabled:opacity-40"
               />
               <button
                 onClick={() => runNaturalSearch(naturalQuery)}
@@ -648,7 +649,7 @@ export default function AiUsagePage() {
             gradient="from-violet-400 to-purple-500"
             footer={overview?.predicted_days_to_limit !== null && overview
               ? <span className="text-[10px] text-amber-300">한도 도달 {overview.predicted_days_to_limit}일 후 예측</span>
-              : <span className="text-[10px] text-white/40">옛 30일 평균</span>}
+              : <span className="text-[10px] text-white/40">직전 30일 평균</span>}
           />
           <MetricCard
             icon={Layers}
@@ -656,7 +657,7 @@ export default function AiUsagePage() {
             value={overview ? overview.batch_calls.toLocaleString() : '—'}
             unit="건"
             gradient="from-amber-400 to-orange-500"
-            footer={<span className="text-[10px] text-white/60">옛 30일 일괄 처리 (50% 절감)</span>}
+            footer={<span className="text-[10px] text-white/60">직전 30일 일괄 처리 (50% 절감)</span>}
           />
         </div>
 
@@ -682,7 +683,7 @@ export default function AiUsagePage() {
             loading={forecastLoading}
           />
           <div className="text-[10px] text-white/30 italic mt-3">
-            Data source — ai_call_log 옛 30일 일별 + 선형 회귀 (y = ax + b) 향후 30일 예측 + 일평균 한도 비교
+            Data source — ai_call_log 직전 30일 일별 + 선형 회귀 (y = ax + b) 향후 30일 예측 + 일평균 한도 비교
           </div>
         </div>
 
@@ -820,7 +821,7 @@ export default function AiUsagePage() {
 
                   {/* c. 일별 비용 area */}
                   <div className="p-4 bg-white/5 border border-white/10 rounded-xl md:col-span-2">
-                    <div className="text-xs font-semibold text-white mb-3">옛 30일 일별 비용 추이</div>
+                    <div className="text-xs font-semibold text-white mb-3">직전 30일 일별 비용 추이</div>
                     {!dailyCosts ? (
                       <div className="text-center py-6 text-white/40 text-xs">데이터 부족</div>
                     ) : (
