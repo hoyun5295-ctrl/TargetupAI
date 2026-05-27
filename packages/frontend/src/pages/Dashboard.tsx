@@ -2428,196 +2428,253 @@ const campaignData = {
               </div>
             </div>
 
-            {/* 2행: DB 현황 — 동적 카드 (D224+ 현대적 + 모던 정정 — Harold 명시 정합) */}
-            <div className="bg-gradient-to-br from-white via-gray-50/40 to-white rounded-3xl p-6 border border-gray-200/70 shadow-md hover:shadow-lg transition-shadow flex-1">
-              <div className="flex items-center justify-between mb-5">
-                <div className="flex items-center gap-2.5">
-                  <div className="w-1.5 h-5 bg-gradient-to-b from-emerald-500 to-green-600 rounded-full" />
-                  <span className="text-base font-bold text-gray-900 tracking-tight">DB 현황</span>
-                  <span className="text-[10px] font-semibold tracking-wider px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-100">REAL-TIME</span>
-                </div>
-                <button onClick={() => isSubscriptionLocked ? setShowSubscriptionLock(true) : setShowCustomerDB(true)} className="group inline-flex items-center gap-1 text-xs font-semibold text-gray-500 hover:text-emerald-700 transition-colors">
-                  상세보기
-                  <ChevronRight className="w-3.5 h-3.5 group-hover:translate-x-0.5 transition-transform" />
-                </button>
-              </div>
+            {/* 2행: DB 현황 — 모던 본격 디자인 (D224+ Harold 명시 본격 재정정 — Linear/Stripe/Vercel 동급) */}
+            <div className="relative bg-white rounded-3xl border border-gray-200/60 shadow-sm hover:shadow-md transition-all flex-1 overflow-hidden">
+              {/* 미세 dot 패턴 배경 (subtle) */}
+              <div
+                className="absolute inset-0 opacity-[0.018] pointer-events-none"
+                style={{ backgroundImage: 'radial-gradient(circle at 1px 1px, rgb(15 23 42) 1px, transparent 0)', backgroundSize: '20px 20px' }}
+              />
 
-              {/* 카드 미설정 */}
-              {(!dashboardCards || !dashboardCards.configured) && (
-                <div className="flex items-center justify-center py-14 text-gray-400">
-                  <div className="text-center">
-                    <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-gray-50 to-gray-100 flex items-center justify-center mx-auto mb-3 shadow-inner">
-                      <BarChart3 className="w-7 h-7 text-gray-300" />
-                    </div>
-                    <div className="text-sm text-gray-400">관리자가 대시보드 카드를 설정하면 표시됩니다</div>
+              <div className="relative p-6">
+                {/* 헤더 */}
+                <div className="flex items-center justify-between mb-6">
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-1.5 h-5 bg-gradient-to-b from-emerald-500 to-green-600 rounded-full" />
+                    <span className="text-base font-bold text-gray-900 tracking-tight">DB 현황</span>
+                    <span className="inline-flex items-center gap-1.5 text-[10px] font-bold tracking-wider px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-100">
+                      <span className="relative flex w-1.5 h-1.5">
+                        <span className="absolute inline-flex w-full h-full rounded-full bg-emerald-400 opacity-75 animate-ping" />
+                        <span className="relative inline-flex w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                      </span>
+                      REAL-TIME
+                    </span>
                   </div>
+                  <button onClick={() => isSubscriptionLocked ? setShowSubscriptionLock(true) : setShowCustomerDB(true)} className="group inline-flex items-center gap-1 text-xs font-semibold text-gray-500 hover:text-emerald-700 transition-colors">
+                    상세보기
+                    <ChevronRight className="w-3.5 h-3.5 group-hover:translate-x-0.5 transition-transform" />
+                  </button>
                 </div>
-              )}
 
-              {/* 고객 DB 미업로드 — 전체 블러 + CTA */}
-              {dashboardCards?.configured && dashboardCards?.hasCustomerData === false && (
-                <div className="relative">
-                  <div className="grid grid-cols-2 md:grid-cols-3 gap-3 filter blur-sm pointer-events-none select-none">
-                    {dashboardCards.cards.slice(0, 6).map((card) => (
-                      <div key={card.cardId} className="p-4 bg-gray-50/50 rounded-2xl">
-                        <div className="text-lg font-bold text-gray-200">0</div>
-                        <div className="text-[10px] text-gray-300 mt-1">{card.label}</div>
-                      </div>
-                    ))}
-                  </div>
-                  <div className="absolute inset-0 flex items-center justify-center bg-white/75 backdrop-blur-[3px] rounded-2xl">
+                {/* 카드 미설정 */}
+                {(!dashboardCards || !dashboardCards.configured) && (
+                  <div className="flex items-center justify-center py-14 text-gray-400">
                     <div className="text-center">
-                      <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-emerald-50 to-green-100 flex items-center justify-center mx-auto mb-3 shadow-inner">
-                        <Users className="w-7 h-7 text-emerald-500" />
+                      <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-gray-50 to-gray-100 flex items-center justify-center mx-auto mb-3 shadow-inner">
+                        <BarChart3 className="w-7 h-7 text-gray-300" />
                       </div>
-                      <div className="text-sm text-gray-700 font-semibold mb-3">고객 DB를 업로드하면 현황을 확인할 수 있습니다</div>
-                      <button
-                        onClick={() => { openFileUpload(); }}
-                        className="px-6 py-2.5 bg-gradient-to-r from-gray-900 to-gray-800 text-white text-xs font-bold rounded-2xl hover:shadow-lg hover:shadow-gray-900/30 transition-all shadow-md"
-                      >
-                        고객 DB 업로드
-                      </button>
+                      <div className="text-sm text-gray-400">관리자가 대시보드 카드를 설정하면 표시됩니다</div>
                     </div>
                   </div>
-                </div>
-              )}
+                )}
 
-              {/* 정상 표시: 6개씩 페이징 카드 렌더링 (D224+ 본격 현대적 정정) */}
-              {dashboardCards?.configured && dashboardCards?.hasCustomerData && (() => {
-                const CARDS_PER_PAGE = 6;
-                const allCards = dashboardCards.cards;
-                const totalPages = Math.ceil(allCards.length / CARDS_PER_PAGE);
-                const safePage = Math.min(dbCardPage, totalPages - 1);
-                const pageCards = allCards.slice(safePage * CARDS_PER_PAGE, (safePage + 1) * CARDS_PER_PAGE);
+                {/* 고객 DB 미업로드 — 전체 블러 + CTA */}
+                {dashboardCards?.configured && dashboardCards?.hasCustomerData === false && (
+                  <div className="relative">
+                    <div className="grid grid-cols-2 md:grid-cols-3 gap-3 filter blur-sm pointer-events-none select-none">
+                      {dashboardCards.cards.slice(0, 6).map((card) => (
+                        <div key={card.cardId} className="p-4 bg-gray-50/50 rounded-2xl">
+                          <div className="text-lg font-bold text-gray-200">0</div>
+                          <div className="text-[10px] text-gray-300 mt-1">{card.label}</div>
+                        </div>
+                      ))}
+                    </div>
+                    <div className="absolute inset-0 flex items-center justify-center bg-white/75 backdrop-blur-[3px] rounded-2xl">
+                      <div className="text-center">
+                        <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-emerald-50 to-green-100 flex items-center justify-center mx-auto mb-3 shadow-inner">
+                          <Users className="w-7 h-7 text-emerald-500" />
+                        </div>
+                        <div className="text-sm text-gray-700 font-semibold mb-3">고객 DB를 업로드하면 현황을 확인할 수 있습니다</div>
+                        <button
+                          onClick={() => { openFileUpload(); }}
+                          className="px-6 py-2.5 bg-gradient-to-r from-gray-900 to-gray-800 text-white text-xs font-bold rounded-2xl hover:shadow-lg hover:shadow-gray-900/30 transition-all shadow-md"
+                        >
+                          고객 DB 업로드
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )}
 
-                return (
-                  <div>
-                    <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-                      {pageCards.map((card, i) => {
-                        const globalIdx = safePage * CARDS_PER_PAGE + i;
-                        const color = CARD_COLORS[globalIdx % CARD_COLORS.length];
-                        const IconComp = CARD_ICON_MAP[card.icon] || HelpCircle;
+                {/* 정상 표시: 6개씩 페이징 카드 렌더링 (D224+ Harold 명시 본격 재정정 — 모던 SaaS 표준) */}
+                {dashboardCards?.configured && dashboardCards?.hasCustomerData && (() => {
+                  const CARDS_PER_PAGE = 6;
+                  const allCards = dashboardCards.cards;
+                  const totalPages = Math.ceil(allCards.length / CARDS_PER_PAGE);
+                  const safePage = Math.min(dbCardPage, totalPages - 1);
+                  const pageCards = allCards.slice(safePage * CARDS_PER_PAGE, (safePage + 1) * CARDS_PER_PAGE);
 
-                        // 데이터 없는 카드
-                        if (!card.hasData) {
-                          return (
-                            <div key={card.cardId} className="relative p-4 rounded-2xl border border-gray-100 bg-gradient-to-br from-gray-50/50 to-white">
-                              <div className="text-xs text-gray-400 mb-2">{card.label}</div>
-                              <div className="text-lg font-bold text-gray-200">-</div>
-                              <span className="absolute top-2 right-2 text-[9px] text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded-md font-medium">N/A</span>
-                            </div>
-                          );
-                        }
+                  // 카드별 그라데이션 매핑 (cardId 기반 — accent line + 아이콘 톤 통일)
+                  const CARD_ACCENT_MAP: Record<string, { line: string; iconFrom: string; iconTo: string; iconText: string; ring: string; glowHover: string }> = {
+                    total_customers:     { line: 'from-violet-500 to-fuchsia-500',  iconFrom: 'from-violet-100',  iconTo: 'to-violet-50',   iconText: 'text-violet-600',  ring: 'ring-violet-100',  glowHover: 'group-hover:shadow-violet-200/40' },
+                    gender_male:         { line: 'from-blue-500 to-indigo-500',     iconFrom: 'from-blue-100',    iconTo: 'to-blue-50',     iconText: 'text-blue-600',    ring: 'ring-blue-100',    glowHover: 'group-hover:shadow-blue-200/40' },
+                    gender_female:       { line: 'from-pink-500 to-rose-500',       iconFrom: 'from-pink-100',    iconTo: 'to-pink-50',     iconText: 'text-pink-600',    ring: 'ring-pink-100',    glowHover: 'group-hover:shadow-pink-200/40' },
+                    birthday_this_month: { line: 'from-amber-500 to-orange-500',    iconFrom: 'from-amber-100',   iconTo: 'to-amber-50',    iconText: 'text-amber-600',   ring: 'ring-amber-100',   glowHover: 'group-hover:shadow-amber-200/40' },
+                    opt_in_count:        { line: 'from-emerald-500 to-teal-500',    iconFrom: 'from-emerald-100', iconTo: 'to-emerald-50',  iconText: 'text-emerald-600', ring: 'ring-emerald-100', glowHover: 'group-hover:shadow-emerald-200/40' },
+                    new_this_month:      { line: 'from-cyan-500 to-blue-500',       iconFrom: 'from-cyan-100',    iconTo: 'to-cyan-50',     iconText: 'text-cyan-600',    ring: 'ring-cyan-100',    glowHover: 'group-hover:shadow-cyan-200/40' },
+                    recent_30d_purchase: { line: 'from-emerald-500 to-green-500',   iconFrom: 'from-emerald-100', iconTo: 'to-emerald-50',  iconText: 'text-emerald-600', ring: 'ring-emerald-100', glowHover: 'group-hover:shadow-emerald-200/40' },
+                    inactive_90d:        { line: 'from-rose-500 to-red-500',        iconFrom: 'from-rose-100',    iconTo: 'to-rose-50',     iconText: 'text-rose-600',    ring: 'ring-rose-100',    glowHover: 'group-hover:shadow-rose-200/40' },
+                    monthly_cost:        { line: 'from-violet-500 to-purple-500',   iconFrom: 'from-violet-100',  iconTo: 'to-violet-50',   iconText: 'text-violet-600',  ring: 'ring-violet-100',  glowHover: 'group-hover:shadow-violet-200/40' },
+                    age_distribution:    { line: 'from-violet-500 to-fuchsia-500',  iconFrom: 'from-violet-100',  iconTo: 'to-violet-50',   iconText: 'text-violet-600',  ring: 'ring-violet-100',  glowHover: 'group-hover:shadow-violet-200/40' },
+                    grade_distribution:  { line: 'from-amber-500 to-yellow-500',    iconFrom: 'from-amber-100',   iconTo: 'to-amber-50',    iconText: 'text-amber-600',   ring: 'ring-amber-100',   glowHover: 'group-hover:shadow-amber-200/40' },
+                    region_top:          { line: 'from-cyan-500 to-teal-500',       iconFrom: 'from-cyan-100',    iconTo: 'to-cyan-50',     iconText: 'text-cyan-600',    ring: 'ring-cyan-100',    glowHover: 'group-hover:shadow-cyan-200/40' },
+                    store_distribution:  { line: 'from-indigo-500 to-purple-500',   iconFrom: 'from-indigo-100',  iconTo: 'to-indigo-50',   iconText: 'text-indigo-600',  ring: 'ring-indigo-100',  glowHover: 'group-hover:shadow-indigo-200/40' },
+                  };
+                  const DEFAULT_ACCENT = { line: 'from-violet-500 to-fuchsia-500', iconFrom: 'from-violet-100', iconTo: 'to-violet-50', iconText: 'text-violet-600', ring: 'ring-violet-100', glowHover: 'group-hover:shadow-violet-200/40' };
 
-                        // distribution 타입 — 프로그레스 바 시각화
-                        if (card.type === 'distribution' && Array.isArray(card.value)) {
-                          const items = card.value.slice(0, 3);
-                          const maxCount = Math.max(...items.map(it => it.count), 1);
+                  return (
+                    <div>
+                      <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                        {pageCards.map((card) => {
+                          const accent = CARD_ACCENT_MAP[card.cardId] || DEFAULT_ACCENT;
+                          const IconComp = CARD_ICON_MAP[card.icon] || HelpCircle;
+
+                          // 데이터 없는 카드
+                          if (!card.hasData) {
+                            return (
+                              <div key={card.cardId} className="relative p-5 rounded-2xl border border-gray-100 bg-gray-50/40 overflow-hidden">
+                                <div className="text-xs text-gray-400 mb-2">{card.label}</div>
+                                <div className="text-2xl font-bold text-gray-200 tracking-tight">-</div>
+                                <span className="absolute top-3 right-3 text-[9px] text-gray-400 bg-white border border-gray-200 px-1.5 py-0.5 rounded-md font-medium tracking-wider">N/A</span>
+                              </div>
+                            );
+                          }
+
+                          // distribution 타입 — 본격 progress 시각 강화
+                          if (card.type === 'distribution' && Array.isArray(card.value)) {
+                            const items = card.value.slice(0, 3);
+                            const maxCount = Math.max(...items.map(it => it.count), 1);
+                            const totalCount = items.reduce((s, it) => s + it.count, 0);
+                            return (
+                              <div
+                                key={card.cardId}
+                                onClick={() => setDetailCard(card)}
+                                className={`group relative p-5 rounded-2xl border border-gray-100 bg-white hover:border-gray-200 hover:shadow-xl ${accent.glowHover} hover:-translate-y-1 cursor-pointer transition-all duration-300 overflow-hidden`}
+                              >
+                                {/* 상단 accent line */}
+                                <div className={`absolute top-0 left-0 right-0 h-[3px] bg-gradient-to-r ${accent.line}`} />
+
+                                <div className="flex items-center justify-between mb-4">
+                                  <div className={`w-10 h-10 rounded-xl bg-gradient-to-br ${accent.iconFrom} ${accent.iconTo} ring-1 ${accent.ring} flex items-center justify-center group-hover:scale-110 group-hover:rotate-[-4deg] transition-all duration-300`}>
+                                    <IconComp className={`w-5 h-5 ${accent.iconText}`} />
+                                  </div>
+                                  <span className="text-[11px] text-gray-400 font-medium tracking-tight">{card.label}</span>
+                                </div>
+                                <div className="space-y-2.5">
+                                  {items.map((item, j) => {
+                                    const pct = totalCount > 0 ? (item.count / totalCount) * 100 : 0;
+                                    return (
+                                      <div key={j}>
+                                        <div className="flex items-baseline justify-between mb-1">
+                                          <span className="text-[11px] text-gray-600 truncate max-w-[55%] font-medium">{item.label}</span>
+                                          <span className="text-xs font-bold text-gray-900 tabular-nums">
+                                            {item.count.toLocaleString()}
+                                            <span className="text-[10px] text-gray-400 font-normal ml-1">({pct.toFixed(0)}%)</span>
+                                          </span>
+                                        </div>
+                                        <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                                          <div
+                                            className={`h-full bg-gradient-to-r ${accent.line} rounded-full transition-all duration-700`}
+                                            style={{ width: `${(item.count / maxCount) * 100}%` }}
+                                          />
+                                        </div>
+                                      </div>
+                                    );
+                                  })}
+                                  {items.length === 0 && <div className="text-[11px] text-gray-300 text-center py-2">-</div>}
+                                </div>
+                              </div>
+                            );
+                          }
+
+                          // count / rate / sum 타입 — 본격 모던 숫자 카드
+                          const numVal = typeof card.value === 'number' ? card.value : 0;
+                          let displayVal = numVal.toLocaleString();
+                          let suffix = '';
+                          if (card.type === 'rate') { displayVal = numVal.toFixed(1); suffix = '%'; }
+                          else if (card.type === 'sum') { displayVal = numVal >= 10000 ? `${Math.round(numVal / 10000).toLocaleString()}만` : numVal.toLocaleString(); suffix = '원'; }
+                          else if (card.cardId === 'active_campaigns') { suffix = '건'; }
+                          else { suffix = '명'; }
+
                           return (
                             <div
                               key={card.cardId}
                               onClick={() => setDetailCard(card)}
-                              className="group p-4 rounded-2xl border border-gray-100 bg-gradient-to-br from-white to-gray-50/40 hover:shadow-lg hover:-translate-y-1 hover:border-violet-200 cursor-pointer transition-all duration-300"
+                              className={`group relative p-5 rounded-2xl border border-gray-100 bg-white hover:border-gray-200 hover:shadow-xl ${accent.glowHover} hover:-translate-y-1 cursor-pointer transition-all duration-300 overflow-hidden`}
                             >
-                              <div className="flex items-center gap-2 mb-3">
-                                <div className={`w-8 h-8 rounded-xl ${color.iconBg} border border-white shadow-sm flex items-center justify-center group-hover:scale-110 transition-transform`}>
-                                  <IconComp className={`w-4 h-4 ${color.accent}`} />
-                                </div>
-                                <span className="text-xs text-gray-600 font-semibold">{card.label}</span>
-                              </div>
-                              <div className="space-y-2">
-                                {items.map((item, j) => (
-                                  <div key={j}>
-                                    <div className="flex justify-between text-[11px] mb-1">
-                                      <span className="text-gray-500 truncate max-w-[60%]">{item.label}</span>
-                                      <span className="font-bold text-gray-800 tabular-nums">{item.count.toLocaleString()}</span>
-                                    </div>
-                                    <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
-                                      <div className={`h-full ${color.barColor} rounded-full transition-all duration-700`} style={{ width: `${(item.count / maxCount) * 100}%` }} />
-                                    </div>
+                              {/* 상단 accent line */}
+                              <div className={`absolute top-0 left-0 right-0 h-[3px] bg-gradient-to-r ${accent.line}`} />
+
+                              {/* 호버 시 미세 radial 강조 */}
+                              <div
+                                className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-500 pointer-events-none"
+                                style={{ background: 'radial-gradient(circle at 100% 0%, rgba(139, 92, 246, 0.05), transparent 50%)' }}
+                              />
+
+                              <div className="relative">
+                                {/* 아이콘 + 라벨 (헤더) */}
+                                <div className="flex items-center justify-between mb-4">
+                                  <div className={`w-10 h-10 rounded-xl bg-gradient-to-br ${accent.iconFrom} ${accent.iconTo} ring-1 ${accent.ring} flex items-center justify-center group-hover:scale-110 group-hover:rotate-[-4deg] transition-all duration-300`}>
+                                    <IconComp className={`w-5 h-5 ${accent.iconText}`} />
                                   </div>
-                                ))}
-                                {items.length === 0 && <div className="text-[11px] text-gray-300 text-center py-2">-</div>}
+                                  <span className="text-[11px] text-gray-400 font-medium tracking-tight">{card.label}</span>
+                                </div>
+
+                                {/* 본격 숫자 영역 — tabular + baseline + 단위 분리 */}
+                                <div className="flex items-baseline gap-1.5">
+                                  <span className="text-3xl font-bold text-gray-900 tracking-tight tabular-nums leading-none">{displayVal}</span>
+                                  <span className="text-sm font-medium text-gray-400 leading-none">{suffix}</span>
+                                </div>
+
+                                {/* delta badge — 본격 강화 */}
+                                {card.hasTrend && card.delta !== null && card.delta !== undefined && (
+                                  <div className="mt-3 flex items-center gap-1.5">
+                                    <DeltaBadge delta={card.delta} deltaPercent={card.deltaPercent} baseline={card.deltaBaseline} suffix={suffix} />
+                                    <span className="text-[10px] text-gray-400">지난달 대비</span>
+                                  </div>
+                                )}
                               </div>
                             </div>
                           );
-                        }
-
-                        // count / rate / sum 타입 — 숫자 카드 (현대적 + 모던 정합)
-                        const numVal = typeof card.value === 'number' ? card.value : 0;
-                        let displayVal = numVal.toLocaleString();
-                        let suffix = '';
-                        if (card.type === 'rate') { displayVal = numVal.toFixed(1); suffix = '%'; }
-                        else if (card.type === 'sum') { displayVal = numVal >= 10000 ? `${Math.round(numVal / 10000).toLocaleString()}만` : numVal.toLocaleString(); suffix = '원'; }
-                        else if (card.cardId === 'active_campaigns') { suffix = '건'; }
-                        else { suffix = '명'; }
-
-                        return (
-                          <div
-                            key={card.cardId}
-                            onClick={() => setDetailCard(card)}
-                            className="group relative p-4 rounded-2xl border border-gray-100 bg-gradient-to-br from-white to-gray-50/40 hover:shadow-lg hover:-translate-y-1 hover:border-violet-200 cursor-pointer transition-all duration-300 overflow-hidden"
-                          >
-                            {/* 호버 시 미세 그라데이션 강조 */}
-                            <div className="absolute inset-0 bg-gradient-to-br from-violet-50/0 to-fuchsia-50/0 group-hover:from-violet-50/40 group-hover:to-fuchsia-50/30 transition-all duration-300 pointer-events-none" />
-                            <div className="relative">
-                              <div className="flex items-center gap-2 mb-3">
-                                <div className={`w-9 h-9 rounded-xl ${color.iconBg} border border-white shadow-sm flex items-center justify-center group-hover:scale-110 transition-transform`}>
-                                  <IconComp className={`w-4 h-4 ${color.accent}`} />
-                                </div>
-                                <span className="text-xs text-gray-500 font-medium">{card.label}</span>
-                              </div>
-                              <div className="text-2xl md:text-3xl font-bold text-gray-900 tracking-tight tabular-nums">
-                                {displayVal}<span className="text-sm font-normal text-gray-400 ml-1">{suffix}</span>
-                              </div>
-                              {/* 델타 뱃지 — 30일 전 동일 시점 대비 증감 */}
-                              {card.hasTrend && card.delta !== null && card.delta !== undefined && (
-                                <div className="mt-2 flex items-center gap-1.5">
-                                  <DeltaBadge delta={card.delta} deltaPercent={card.deltaPercent} baseline={card.deltaBaseline} suffix={suffix} />
-                                  <span className="text-[10px] text-gray-400">지난달 대비</span>
-                                </div>
-                              )}
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-
-                    {/* 페이지 인디케이터 + 좌우 화살표 (현대적 강화) */}
-                    {totalPages > 1 && (
-                      <div className="flex items-center justify-between mt-5">
-                        <button
-                          onClick={() => setDbCardPage(p => Math.max(0, p - 1))}
-                          disabled={safePage === 0}
-                          className="w-8 h-8 rounded-xl flex items-center justify-center text-emerald-600 bg-emerald-50 hover:bg-emerald-100 disabled:opacity-20 disabled:hover:bg-emerald-50 transition-all hover:shadow-sm"
-                        >
-                          <ChevronLeft className="w-4 h-4" />
-                        </button>
-                        <div className="flex items-center gap-1.5">
-                          {Array.from({ length: totalPages }, (_, idx) => (
-                            <button
-                              key={idx}
-                              onClick={() => setDbCardPage(idx)}
-                              className={`h-2 rounded-full transition-all duration-300 ${
-                                idx === safePage
-                                  ? 'bg-gradient-to-r from-violet-500 to-fuchsia-500 w-6 shadow-sm shadow-violet-300/50'
-                                  : 'bg-gray-200 w-2 hover:bg-gray-300'
-                              }`}
-                            />
-                          ))}
-                        </div>
-                        <button
-                          onClick={() => setDbCardPage(p => Math.min(totalPages - 1, p + 1))}
-                          disabled={safePage >= totalPages - 1}
-                          className="w-8 h-8 rounded-xl flex items-center justify-center text-emerald-600 bg-emerald-50 hover:bg-emerald-100 disabled:opacity-20 disabled:hover:bg-emerald-50 transition-all hover:shadow-sm"
-                        >
-                          <ChevronRight className="w-4 h-4" />
-                        </button>
+                        })}
                       </div>
-                    )}
-                  </div>
-                );
-              })()}
+
+                      {/* 페이지 인디케이터 + 좌우 화살표 (본격 모던) */}
+                      {totalPages > 1 && (
+                        <div className="flex items-center justify-between mt-6">
+                          <button
+                            onClick={() => setDbCardPage(p => Math.max(0, p - 1))}
+                            disabled={safePage === 0}
+                            className="w-9 h-9 rounded-xl flex items-center justify-center text-gray-600 bg-white border border-gray-200 hover:border-gray-300 hover:bg-gray-50 disabled:opacity-30 disabled:hover:bg-white disabled:hover:border-gray-200 transition-all shadow-sm"
+                          >
+                            <ChevronLeft className="w-4 h-4" />
+                          </button>
+                          <div className="flex items-center gap-2">
+                            {Array.from({ length: totalPages }, (_, idx) => (
+                              <button
+                                key={idx}
+                                onClick={() => setDbCardPage(idx)}
+                                className={`h-2 rounded-full transition-all duration-500 ${
+                                  idx === safePage
+                                    ? 'bg-gradient-to-r from-violet-500 to-fuchsia-500 w-8 shadow-md shadow-violet-400/40'
+                                    : 'bg-gray-200 w-2 hover:bg-gray-300 hover:w-3'
+                                }`}
+                              />
+                            ))}
+                          </div>
+                          <button
+                            onClick={() => setDbCardPage(p => Math.min(totalPages - 1, p + 1))}
+                            disabled={safePage >= totalPages - 1}
+                            className="w-9 h-9 rounded-xl flex items-center justify-center text-gray-600 bg-white border border-gray-200 hover:border-gray-300 hover:bg-gray-50 disabled:opacity-30 disabled:hover:bg-white disabled:hover:border-gray-200 transition-all shadow-sm"
+                          >
+                            <ChevronRight className="w-4 h-4" />
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
+              </div>
             </div>
           </div>
 
