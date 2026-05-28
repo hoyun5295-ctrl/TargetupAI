@@ -83,6 +83,8 @@ export default function ResultsModal({ onClose, token, customerDbEnabled, isSubs
   // 발송내역 팝업 상태
   const [showSendDetail, setShowSendDetail] = useState(false);
   const [messages, setMessages] = useState<any[]>([]);
+  // ★ D225+ (2026-05-28 영업팀장 박성용 신고 fix): 알림톡 영역 시 templateCode + templateName 응답 영역
+  const [alimtalkTemplateInfo, setAlimtalkTemplateInfo] = useState<{ code: string; name: string } | null>(null);
   const [messageTotal, setMessageTotal] = useState(0);
   const [messagePage, setMessagePage] = useState(1);
   const [messageSearchType, setMessageSearchType] = useState('phone');
@@ -170,6 +172,8 @@ export default function ResultsModal({ onClose, token, customerDbEnabled, isSubs
       setMessages(data.messages || []);
       setMessageTotal(data.pagination?.total || 0);
       setMessagePage(page);
+      // ★ D225+ Brand Voice — 알림톡 영역 시 templateInfo 응답 반영
+      setAlimtalkTemplateInfo(data.alimtalkTemplateInfo || null);
     } catch (error) {
       console.error('발송내역 조회 에러:', error);
     } finally {
@@ -450,9 +454,15 @@ export default function ResultsModal({ onClose, token, customerDbEnabled, isSubs
                           </td>
                           <td className="px-3 py-2.5 text-center">
                             <span className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-medium ${
-                              c.send_channel === 'kakao' ? 'bg-yellow-100 text-yellow-700' : 'bg-blue-50 text-blue-600'
+                              c.send_channel === 'kakao' ? 'bg-yellow-100 text-yellow-700'
+                                : c.send_channel === 'alimtalk' ? 'bg-emerald-100 text-emerald-700'
+                                : 'bg-blue-50 text-blue-600'
                             }`}>
-                              {c.send_channel === 'kakao' ? '💬 카카오' : c.send_channel === 'both' ? '📱+💬' : `📱 ${msgTypeLabel[c.message_type] || 'SMS'}`}
+                              {/* ★ D225+ (2026-05-28): alimtalk 채널 표기 분기 추가 — 옛 흐름 = message_type='LMS' 강제 적용 → "📱 LMS" 표기 사고 정정 */}
+                              {c.send_channel === 'kakao' ? '💬 카카오'
+                                : c.send_channel === 'alimtalk' ? '📨 알림톡'
+                                : c.send_channel === 'both' ? '📱+💬'
+                                : `📱 ${msgTypeLabel[c.message_type] || 'SMS'}`}
                             </span>
                           </td>
                           {/* ★ D145 P0+ (2026-05-07 폴라초이스 사고): sent_count 우선 — MySQL 실제 발송 건수가 정확.
@@ -852,8 +862,9 @@ export default function ResultsModal({ onClose, token, customerDbEnabled, isSubs
                       <div className="bg-white rounded-[1.6rem] overflow-hidden flex flex-col" style={{ height: '400px' }}>
                         {/* 상단 */}
                         <div className="px-4 py-2.5 bg-gradient-to-r from-gray-50 to-gray-100 flex justify-between items-center shrink-0 border-b">
-                          <span className="text-[11px] text-gray-400 font-medium">문자메시지</span>
-                          <span className="text-[11px] font-bold text-emerald-600">{msgTypeLabel[selectedCampaign.message_type] || selectedCampaign.message_type}</span>
+                          <span className="text-[11px] text-gray-400 font-medium">{selectedCampaign.send_channel === 'alimtalk' ? '알림톡' : selectedCampaign.send_channel === 'kakao' ? '카카오톡' : '문자메시지'}</span>
+                          {/* ★ D225+ (2026-05-28): alimtalk 채널 표기 분기 추가 — 옛 흐름 = message_type='LMS' 강제 적용 표기 정정 */}
+                          <span className="text-[11px] font-bold text-emerald-600">{selectedCampaign.send_channel === 'alimtalk' ? '알림톡' : selectedCampaign.send_channel === 'kakao' ? '카카오' : (msgTypeLabel[selectedCampaign.message_type] || selectedCampaign.message_type)}</span>
                         </div>
                         {/* 메시지 영역 */}
                         <div className="flex-1 overflow-y-auto p-3 bg-gradient-to-b from-emerald-50/30 to-white">
@@ -898,7 +909,15 @@ export default function ResultsModal({ onClose, token, customerDbEnabled, isSubs
                         ...((selectedCampaign.message_type === 'LMS' || selectedCampaign.message_type === 'MMS' || selectedCampaign.message_type === 'L' || selectedCampaign.message_type === 'M') && (selectedCampaign.subject || selectedCampaign.message_subject)
                           ? [{ label: '제목', value: buildAdSubjectFront(selectedCampaign.subject || selectedCampaign.message_subject || '', selectedCampaign.message_type, selectedCampaign.is_ad ?? false) }]
                           : []),
-                        { label: '유형', value: `${selectedCampaign.send_type === 'direct' ? '수동' : 'AI'} / ${msgTypeLabel[selectedCampaign.message_type] || selectedCampaign.message_type}` },
+                        // ★ D225+ (2026-05-28): alimtalk 채널 표기 — 옛 흐름 = message_type='LMS' 강제 적용 → "수동 / LMS" 사고 정정
+                        { label: '유형', value: `${selectedCampaign.send_type === 'direct' ? '수동' : 'AI'} / ${selectedCampaign.send_channel === 'alimtalk' ? '알림톡' : selectedCampaign.send_channel === 'kakao' ? '카카오' : (msgTypeLabel[selectedCampaign.message_type] || selectedCampaign.message_type)}` },
+                        // ★ D225+ Brand Voice — 알림톡 영역 시 templateCode + templateName 표시 (Harold 기대 동작)
+                        ...(selectedCampaign.send_channel === 'alimtalk' && alimtalkTemplateInfo
+                          ? [
+                              { label: '템플릿코드', value: alimtalkTemplateInfo.code || '-' },
+                              { label: '템플릿명', value: alimtalkTemplateInfo.name || '(이름 미설정)' },
+                            ]
+                          : []),
                         { label: '발송자', value: selectedCampaign.created_by_name || '-' },
                         { label: '회신번호', value: selectedCampaign.callback_number || '-' },
                         { label: '전송건수', value: `${(selectedCampaign.sent_count || selectedCampaign.target_count || 0).toLocaleString()}건` },

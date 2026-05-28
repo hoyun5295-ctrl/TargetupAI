@@ -50,7 +50,9 @@ const SMS_DETAIL_FIELDS = `seqno, dest_no, call_back, msg_type, msg_contents, st
   DATE_ADD(mobsend_time, INTERVAL 9 HOUR) AS mobsend_time,
   'sms' AS _channel, sendreq_time AS _sort_time,
   '' AS kakao_bubble_type, '' AS kakao_report_code,
-  '' AS resend_type, '' AS resend_report_code`;
+  '' AS resend_type, '' AS resend_report_code,
+  IFNULL(k_template_code, '') AS k_template_code,
+  IFNULL(k_next_type, '') AS k_next_type`;
 
 /** 엑셀 export용 SMS 필드 (seqno 제외) — 엑셀 2컬럼 유지: 전송요청/발송 (B10: 수신확인 제거) */
 const SMS_EXPORT_FIELDS = `dest_no, call_back, msg_type, msg_contents, status_code, mob_company,
@@ -504,7 +506,8 @@ router.get('/campaigns/:id/messages', async (req: Request, res: Response) => {
     const countParams: any[] = [];
 
     // ----- SMS 서브쿼리 (테이블 수만큼 UNION ALL) -----
-    if (sendChannel === 'sms' || sendChannel === 'both') {
+    // ★ D225+ (2026-05-28 영업팀장 박성용 신고 fix): alimtalk 영역 추가 — 옛 흐름 = SMSQ_SEND msg_type='K' 영역 사용 + sendChannel='alimtalk' 분기 X → 발송 결과 안 messages 영역 0건 사고
+    if (sendChannel === 'sms' || sendChannel === 'both' || sendChannel === 'alimtalk') {
       let smsWhere = 'WHERE app_etc1 = ?';
       const smsBaseParams: any[] = [id];
 
@@ -667,8 +670,37 @@ router.get('/campaigns/:id/messages', async (req: Request, res: Response) => {
       carrier_label: m._channel === 'kakao' ? '카카오' : getCarrierLabel(m.mob_company),
     }));
 
+    // ★ D225+ (2026-05-28 영업팀장 박성용 신고 fix): 알림톡 발송 영역 = 응답 안 templateInfo 추가
+    //   Harold 기대 = 전송 결과 상세 안 [템플릿코드] + [템플릿명] 확인 가능 의무
+    let alimtalkTemplateInfo: { code: string; name: string } | null = null;
+    if (sendChannel === 'alimtalk' && enrichedMessages.length > 0) {
+      const firstTemplateCode = enrichedMessages.find((m: any) => m.k_template_code)?.k_template_code || '';
+      if (firstTemplateCode) {
+        try {
+          const tplResult = await query(
+            `SELECT template_code, template_name FROM kakao_templates
+             WHERE company_id = $1::uuid AND template_code = $2 LIMIT 1`,
+            [companyId, firstTemplateCode],
+          );
+          if (tplResult.rows.length > 0) {
+            alimtalkTemplateInfo = {
+              code: tplResult.rows[0].template_code,
+              name: tplResult.rows[0].template_name || '',
+            };
+          } else {
+            // PG 미발견 영역 — MySQL queue 영역 templateCode 만 응답
+            alimtalkTemplateInfo = { code: firstTemplateCode, name: '' };
+          }
+        } catch (tplErr) {
+          console.warn('[results messages] 알림톡 템플릿 조회 실패 — code 영역만 응답:', tplErr);
+          alimtalkTemplateInfo = { code: firstTemplateCode, name: '' };
+        }
+      }
+    }
+
     return res.json({
       messages: enrichedMessages,
+      alimtalkTemplateInfo,
       pagination: {
         total,
         page: pageNum,

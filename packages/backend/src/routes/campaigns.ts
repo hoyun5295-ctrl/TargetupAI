@@ -1797,6 +1797,10 @@ router.post('/direct-send', async (req: Request, res: Response) => {
           templateCode: alimtalkTemplateCode,
           nextType: alimtalkNextType || 'L',
           nextContents: (alimtalkNextType === 'A' || alimtalkNextType === 'B') ? (alimtalkNextContents || '') : undefined,
+          // ★ D225+ (2026-05-28 영업팀장 박성용 신고 재발 fix): alimtalkNextSubject → QTmsg title_str 매핑 누락 정정.
+          //   옛 D224+ fix = destructure + 검증만. 실제 QTmsg INSERT 시 titleStr 영역 누락 = title_str NULL.
+          //   결과 = 알림톡 발송 실패 후 LMS 자동 대체 발송 시 = 제목 NULL = 통신사 검증 실패 = 미수신 사고.
+          titleStr: (alimtalkNextType === 'L' || alimtalkNextType === 'B') ? (alimtalkNextSubject || '') : undefined,
           buttonJson: alimtalkButtonJson || null,
           etcJson: etcJson || undefined,
           companyId,

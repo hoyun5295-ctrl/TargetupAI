@@ -3532,7 +3532,9 @@ const campaignData = {
             from: 'direct',
             msgType: '알림톡',
           } as any);
-          setShowAlimtalkSend(false);
+          // ★ D225+ (2026-05-28 영업팀장 박성용 신고 재발 fix): 알림톡 팝업 close 호출 제거 — 옛 흐름 = 모달 유지 (executeDirectSend line 556 주석 정합).
+          //   옛 D224+ 후속 사고 = setShowAlimtalkSend(false) 호출 = 발송 후 알림톡 팝업 닫힘 + 직접발송 팝업 복귀 사고.
+          //   Harold 기대 = 알림톡 직접발송 팝업 잔존 유지 (사용자 직접 close 의무 영역).
         }}
         setToast={setToast}
       />
