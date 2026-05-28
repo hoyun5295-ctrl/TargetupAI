@@ -28,6 +28,8 @@
 import { Router, Request, Response, json } from 'express';
 import { authenticate } from '../middlewares/auth';
 import { isCdpEnabledForPlan } from '../utils/cdp-auth';
+// ★ D225+ (2026-05-28): Email 캠페인 events 이력 조회 endpoint 신설 — email_events 직접 SELECT
+import { query } from '../config/database';
 import {
   createEmailCampaign,
   listEmailCampaigns,
@@ -356,6 +358,108 @@ router.post('/campaigns/:id/send', async (req: Request, res: Response) => {
     if (handleEncryptionKeyError(err, res)) return;
     const status = err?.message?.includes('0건') || err?.message?.includes('필수') || err?.message?.includes('미완료') ? 400 : 500;
     return res.status(status).json({ success: false, error: err?.message || '발송 실패' });
+  }
+});
+
+// ════════════════════════════════════════════════════════════════════
+// ★ D225+ (2026-05-28 Harold 명시): Email 캠페인 발송 이력 조회 endpoint 신설
+//   - GET /api/email/campaigns/:id/events — 수신자별 매트릭스 (delivered/open/click/bounce/unsubscribe)
+//   - 옛 흐름 = email_events 테이블 누적 + 조회 endpoint X 사고 = 사용자 이력 확인 불가
+//   - Harold 기대 = 캠페인 카드 안 [이력 보기] → 모달 안 수신자별 매트릭스 + 이벤트 목록 표시
+// ════════════════════════════════════════════════════════════════════
+router.get('/campaigns/:id/events', async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+
+    const campaignId = req.params.id;
+    const limit = Math.min(parseInt(String(req.query.limit || '100')) || 100, 500);
+    const offset = Math.max(parseInt(String(req.query.offset || '0')) || 0, 0);
+    const eventType = req.query.event_type ? String(req.query.event_type) : null;
+
+    // 캠페인 권한 검증 (회사 격리)
+    const campaign = await getEmailCampaign(companyId, campaignId);
+    if (!campaign) return res.status(404).json({ success: false, error: '캠페인을 찾을 수 없습니다.' });
+
+    // 1. 수신자별 매트릭스 — email 안 events 영역 GROUP
+    const recipientResult = await query(
+      `SELECT email,
+              MIN(CASE WHEN event_type IN ('delivered','processed','sent') THEN occurred_at END) AS delivered_at,
+              MIN(CASE WHEN event_type = 'open' THEN occurred_at END) AS opened_at,
+              MIN(CASE WHEN event_type = 'click' THEN occurred_at END) AS clicked_at,
+              MIN(CASE WHEN event_type IN ('bounce','dropped','spamreport') THEN occurred_at END) AS bounced_at,
+              MIN(CASE WHEN event_type = 'unsubscribe' THEN occurred_at END) AS unsubscribed_at,
+              COUNT(*) FILTER (WHERE event_type = 'click') AS click_count,
+              COUNT(*) FILTER (WHERE event_type = 'open') AS open_count,
+              MAX(occurred_at) AS last_event_at
+       FROM email_events
+       WHERE campaign_id = $1::uuid
+       GROUP BY email
+       ORDER BY MAX(occurred_at) DESC
+       LIMIT $2 OFFSET $3`,
+      [campaignId, limit, offset],
+    );
+
+    const recipientTotalResult = await query(
+      `SELECT COUNT(DISTINCT email)::int AS total FROM email_events WHERE campaign_id = $1::uuid`,
+      [campaignId],
+    );
+
+    // 2. raw events 목록 — 옵션 (event_type 필터)
+    let eventsWhere = 'campaign_id = $1::uuid';
+    const eventsParams: any[] = [campaignId];
+    if (eventType) {
+      eventsWhere += ' AND event_type = $2';
+      eventsParams.push(eventType);
+    }
+    const eventsResult = await query(
+      `SELECT id, email, event_type, url, reason, occurred_at
+       FROM email_events
+       WHERE ${eventsWhere}
+       ORDER BY occurred_at DESC
+       LIMIT $${eventsParams.length + 1} OFFSET $${eventsParams.length + 2}`,
+      [...eventsParams, limit, offset],
+    );
+
+    return res.json({
+      success: true,
+      campaign: {
+        id: campaign.id,
+        name: campaign.name,
+        subject: campaign.subject,
+        sentCount: campaign.sentCount,
+        openCount: campaign.openCount,
+        clickCount: campaign.clickCount,
+        bounceCount: campaign.bounceCount,
+        unsubscribeCount: campaign.unsubscribeCount,
+        sentAt: campaign.sentAt,
+      },
+      recipients: recipientResult.rows.map((r: any) => ({
+        email: r.email,
+        deliveredAt: r.delivered_at,
+        openedAt: r.opened_at,
+        clickedAt: r.clicked_at,
+        bouncedAt: r.bounced_at,
+        unsubscribedAt: r.unsubscribed_at,
+        openCount: Number(r.open_count) || 0,
+        clickCount: Number(r.click_count) || 0,
+        lastEventAt: r.last_event_at,
+      })),
+      recipients_total: recipientTotalResult.rows[0]?.total || 0,
+      events: eventsResult.rows.map((e: any) => ({
+        id: e.id,
+        email: e.email,
+        eventType: e.event_type,
+        url: e.url,
+        reason: e.reason,
+        occurredAt: e.occurred_at,
+      })),
+      pagination: { limit, offset },
+    });
+  } catch (err: any) {
+    console.error('[Email /campaigns/:id/events] 오류:', err);
+    if (handleDbMigrationError(err, res, 'email_events')) return;
+    return res.status(500).json({ success: false, error: err?.message || '이력 조회 실패' });
   }
 });
 

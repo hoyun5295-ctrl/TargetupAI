@@ -7,6 +7,8 @@ import {
 } from 'lucide-react';
 import ConfirmModal, { ConfirmState } from '../components/ConfirmModal';
 import { useToast } from '../components/ToastProvider';
+// ★ D225+ (2026-05-28 Harold 명시): Email 발송 이력 모달 신설
+import EmailEventsModal from '../components/email/EmailEventsModal';
 
 // ════════════════════════════════════════════════════════════════════
 // ★ D215+ (2026-05-25) Email 캠페인 전면 재작성 — SMTP relay 흐름
@@ -147,6 +149,8 @@ export default function EmailCampaignsPage() {
   // 캠페인 발송 진행 상태
   const [sendingId, setSendingId] = useState<string | null>(null);
   const [recipientsModal, setRecipientsModal] = useState<{ campaign: EmailCampaign; recipientsText: string } | null>(null);
+  // ★ D225+ (2026-05-28): 발송 이력 모달 — sentCount > 0 영역 시 활성
+  const [eventsModal, setEventsModal] = useState<{ id: string; name: string } | null>(null);
 
   const token = () => localStorage.getItem('token');
   const authHeaders = () => ({ Authorization: `Bearer ${token()}`, 'Content-Type': 'application/json' });
@@ -656,6 +660,15 @@ export default function EmailCampaignsPage() {
                         {sendingId === c.id ? '발송 중...' : '발송'}
                       </button>
                     )}
+                    {/* ★ D225+ (2026-05-28): 발송 이력 보기 — sentCount > 0 영역 시 활성 */}
+                    {c.sentCount > 0 && (
+                      <button
+                        onClick={() => setEventsModal({ id: c.id, name: c.name })}
+                        className="text-[11px] text-emerald-300 hover:bg-emerald-500/10 px-2.5 py-1 rounded flex items-center gap-1"
+                      >
+                        <Eye className="w-3 h-3" /> 이력
+                      </button>
+                    )}
                     <button onClick={() => setEditing(c)} className="text-[11px] text-indigo-300 hover:bg-indigo-500/10 px-2.5 py-1 rounded flex items-center gap-1">
                       <Edit2 className="w-3 h-3" /> 수정
                     </button>
@@ -669,6 +682,22 @@ export default function EmailCampaignsPage() {
           </div>
         )}
       </div>
+
+      {/* ★ D225+ 발송 이력 모달 */}
+      {eventsModal && (
+        <EmailEventsModal
+          campaignId={eventsModal.id}
+          campaignName={eventsModal.name}
+          onClose={() => setEventsModal(null)}
+          token={localStorage.getItem('token') || ''}
+          onToast={(msg, type) => {
+            if (type === 'success') toast.success(msg);
+            else if (type === 'error') toast.error(msg);
+            else if (type === 'warning') toast.warning(msg);
+            else toast.info(msg);
+          }}
+        />
+      )}
 
       {/* SMTP 설정 모달 */}
       {smtpFormOpen && (

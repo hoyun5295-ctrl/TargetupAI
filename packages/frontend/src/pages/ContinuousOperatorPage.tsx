@@ -617,59 +617,132 @@ export default function ContinuousOperatorPage() {
 
             {proposals.length === 0 ? (
               operators.filter((o) => o.status === 'active').length === 0 ? (
-                /* ★ D212+ (2026-05-23 Harold 명시): 첫 진입 가이드 — 마케팅팀 친화 본질 */
-                <div className="bg-gradient-to-br from-indigo-500/10 via-violet-500/5 to-fuchsia-500/10 border border-indigo-400/30 rounded-2xl p-6 md:p-8">
-                  <div className="text-center mb-6">
-                    <div className="w-14 h-14 mx-auto mb-3 rounded-2xl bg-gradient-to-br from-indigo-400 to-violet-500 flex items-center justify-center shadow-lg shadow-indigo-500/20">
-                      <Brain className="w-7 h-7 text-white" />
-                    </div>
-                    <h3 className="text-base md:text-lg font-semibold text-white mb-1">자동 마케팅을 시작해보세요</h3>
-                    <p className="text-xs md:text-sm text-white/60">매일 아침 AI가 회사 데이터를 분석해 새 캠페인을 추천합니다</p>
-                  </div>
-                  {/* 3 step 안내 */}
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-5">
-                    {[
-                      { num: 1, title: '목표 입력', desc: '마케팅 목표를 자연어 한 줄로' },
-                      { num: 2, title: '매일 추천 받기', desc: '아침 9시 AI가 새 캠페인 제안' },
-                      { num: 3, title: '확인 후 발송', desc: '1-click 승인 → 즉시 발송' },
-                    ].map((s) => (
-                      <div key={s.num} className="p-3 bg-white/5 border border-white/10 rounded-lg">
-                        <div className="flex items-center gap-2 mb-1.5">
-                          <div className="w-6 h-6 rounded-lg bg-indigo-500/30 text-indigo-200 text-xs font-bold flex items-center justify-center">{s.num}</div>
-                          <div className="text-sm font-semibold text-white">{s.title}</div>
-                        </div>
-                        <div className="text-[11px] text-white/60 leading-relaxed pl-8">{s.desc}</div>
+                /* ★ D212+ (2026-05-23 Harold 명시): 첫 진입 가이드 — 마케팅팀 친화 본질
+                   ★ D225+ (2026-05-28): lg:grid-cols-2 분할 — 큰 화면 우측 빈 공간 사고 차단 */
+                <div className="grid grid-cols-1 lg:grid-cols-5 gap-4">
+                  {/* ───────── 좌측 (3/5) — 첫 진입 가이드 ───────── */}
+                  <div className="lg:col-span-3 bg-gradient-to-br from-indigo-500/10 via-violet-500/5 to-fuchsia-500/10 border border-indigo-400/30 rounded-2xl p-6 md:p-7">
+                    <div className="text-center mb-6">
+                      <div className="w-14 h-14 mx-auto mb-3 rounded-2xl bg-gradient-to-br from-indigo-400 to-violet-500 flex items-center justify-center shadow-lg shadow-indigo-500/20">
+                        <Brain className="w-7 h-7 text-white" />
                       </div>
-                    ))}
-                  </div>
-                  {/* 예시 영역 */}
-                  <div className="mb-5">
-                    <div className="text-[11px] text-white/40 mb-2 font-medium">예시 목표</div>
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
+                      <h3 className="text-base md:text-lg font-semibold text-white mb-1">자동 마케팅을 시작해보세요</h3>
+                      <p className="text-xs md:text-sm text-white/60">매일 아침 AI가 회사 데이터를 분석해 새 캠페인을 추천합니다</p>
+                    </div>
+                    {/* 3 step 안내 */}
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-5">
                       {[
-                        { label: 'VIP 재구매 유도', desc: 'VIP 등급 고객 90일 안 재구매 캠페인' },
-                        { label: '휴면 회복', desc: '60일 미구매 고객 복귀 유도 캠페인' },
-                        { label: '생일 축하', desc: 'D-7 사전 + 당일 축하 + 혜택 안내' },
-                      ].map((ex) => (
-                        <button
-                          key={ex.label}
-                          onClick={() => setEditing({ name: ex.label, objective: ex.desc, schedule: 'daily', scheduleTime: '09:00', status: 'active' })}
-                          className="p-2.5 bg-white/5 hover:bg-white/10 border border-white/10 hover:border-indigo-400/30 rounded-lg text-left transition-all"
-                        >
-                          <div className="text-xs font-semibold text-white mb-0.5">{ex.label}</div>
-                          <div className="text-[10px] text-white/50">{ex.desc}</div>
-                        </button>
+                        { num: 1, title: '목표 입력', desc: '마케팅 목표를 자연어 한 줄로' },
+                        { num: 2, title: '매일 추천 받기', desc: '아침 9시 AI가 새 캠페인 제안' },
+                        { num: 3, title: '확인 후 발송', desc: '1-click 승인 → 즉시 발송' },
+                      ].map((s) => (
+                        <div key={s.num} className="p-3 bg-white/5 border border-white/10 rounded-lg">
+                          <div className="flex items-center gap-2 mb-1.5">
+                            <div className="w-6 h-6 rounded-lg bg-indigo-500/30 text-indigo-200 text-xs font-bold flex items-center justify-center">{s.num}</div>
+                            <div className="text-sm font-semibold text-white">{s.title}</div>
+                          </div>
+                          <div className="text-[11px] text-white/60 leading-relaxed pl-8">{s.desc}</div>
+                        </div>
                       ))}
                     </div>
+                    {/* 예시 목표 */}
+                    <div className="mb-5">
+                      <div className="text-[11px] text-white/40 mb-2 font-medium">예시 목표</div>
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
+                        {[
+                          { label: 'VIP 재구매 유도', desc: 'VIP 등급 고객 90일 안 재구매 캠페인' },
+                          { label: '휴면 회복', desc: '60일 미구매 고객 복귀 유도 캠페인' },
+                          { label: '생일 축하', desc: 'D-7 사전 + 당일 축하 + 혜택 안내' },
+                        ].map((ex) => (
+                          <button
+                            key={ex.label}
+                            onClick={() => setEditing({ name: ex.label, objective: ex.desc, schedule: 'daily', scheduleTime: '09:00', status: 'active' })}
+                            className="p-2.5 bg-white/5 hover:bg-white/10 border border-white/10 hover:border-indigo-400/30 rounded-lg text-left transition-all"
+                          >
+                            <div className="text-xs font-semibold text-white mb-0.5">{ex.label}</div>
+                            <div className="text-[10px] text-white/50">{ex.desc}</div>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                    {/* 큰 시작 버튼 */}
+                    <button
+                      onClick={() => setEditing({ name: '', objective: '', schedule: 'daily', scheduleTime: '09:00', status: 'active' })}
+                      className="w-full px-4 py-3 bg-gradient-to-r from-indigo-500/40 to-violet-500/40 hover:from-indigo-500/60 hover:to-violet-500/60 text-white rounded-lg text-sm font-semibold flex items-center justify-center gap-2 border border-indigo-400/30 transition-colors"
+                    >
+                      <Plus className="w-4 h-4" />
+                      새 자동 마케팅 만들기
+                    </button>
                   </div>
-                  {/* 큰 시작 버튼 */}
-                  <button
-                    onClick={() => setEditing({ name: '', objective: '', schedule: 'daily', scheduleTime: '09:00', status: 'active' })}
-                    className="w-full px-4 py-3 bg-gradient-to-r from-indigo-500/40 to-violet-500/40 hover:from-indigo-500/60 hover:to-violet-500/60 text-white rounded-lg text-sm font-semibold flex items-center justify-center gap-2 border border-indigo-400/30 transition-colors"
-                  >
-                    <Plus className="w-4 h-4" />
-                    새 자동 마케팅 만들기
-                  </button>
+
+                  {/* ───────── 우측 (2/5) — AI 자율 진단 + 차별점 + 가치 안내 ───────── */}
+                  <div className="lg:col-span-2 space-y-4">
+                    {/* AI 자율 진단 카드 */}
+                    <div className="bg-gradient-to-br from-violet-500/15 via-fuchsia-500/10 to-pink-500/10 border border-violet-400/30 rounded-2xl p-5">
+                      <div className="flex items-center gap-2 mb-3">
+                        <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-violet-400 to-fuchsia-500 flex items-center justify-center flex-shrink-0">
+                          <Sparkles className="w-4 h-4 text-white" />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="text-sm font-bold text-white">AI 자율 진단</div>
+                          <div className="text-[10px] text-white/50">매일 아침 회사 데이터 분석</div>
+                        </div>
+                      </div>
+                      <div className="space-y-2 text-xs">
+                        <div className="flex items-start gap-2 text-white/80">
+                          <Check className="w-3.5 h-3.5 text-emerald-300 flex-shrink-0 mt-0.5" />
+                          <span>고객 세그먼트 자동 분류 (VIP / 일반 / 휴면 / 신규)</span>
+                        </div>
+                        <div className="flex items-start gap-2 text-white/80">
+                          <Check className="w-3.5 h-3.5 text-emerald-300 flex-shrink-0 mt-0.5" />
+                          <span>최적 발송 시각 + 채널 추천 (SMS / LMS / 카카오 / 알림톡)</span>
+                        </div>
+                        <div className="flex items-start gap-2 text-white/80">
+                          <Check className="w-3.5 h-3.5 text-emerald-300 flex-shrink-0 mt-0.5" />
+                          <span>회사 톤에 맞춘 문안 자동 생성 (Brand Voice 학습)</span>
+                        </div>
+                        <div className="flex items-start gap-2 text-white/80">
+                          <Check className="w-3.5 h-3.5 text-emerald-300 flex-shrink-0 mt-0.5" />
+                          <span>예상 응답률 + 비용 + ROI 사전 계산</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* 한줄로 차별점 */}
+                    <div className="bg-white/5 border border-white/10 rounded-2xl p-5">
+                      <div className="flex items-center gap-2 mb-3">
+                        <Zap className="w-4 h-4 text-amber-300" />
+                        <div className="text-sm font-bold text-white">한줄로 차별점</div>
+                      </div>
+                      <div className="space-y-2.5 text-[11px] text-white/70 leading-relaxed">
+                        <div>
+                          <span className="text-amber-200 font-semibold">1-click 승인 발송</span>
+                          <div className="text-white/50 pl-1">AI 제안 → 회사 admin 확인 → 즉시 발송 (복잡한 워크플로우 X)</div>
+                        </div>
+                        <div>
+                          <span className="text-amber-200 font-semibold">Self-Optimizing Bandit</span>
+                          <div className="text-white/50 pl-1">발송 결과 누적 학습 → 다음 캠페인 응답률 자동 향상</div>
+                        </div>
+                        <div>
+                          <span className="text-amber-200 font-semibold">Multi-Goal Decisioning</span>
+                          <div className="text-white/50 pl-1">여러 목표 동시 운영 + 충돌 자동 조정 + 우선순위 자동 결정</div>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* 안전 보장 */}
+                    <div className="bg-emerald-500/5 border border-emerald-400/20 rounded-2xl p-4">
+                      <div className="flex items-center gap-2 mb-2">
+                        <Check className="w-3.5 h-3.5 text-emerald-300" />
+                        <div className="text-xs font-bold text-emerald-200">안전 보장</div>
+                      </div>
+                      <div className="text-[10px] text-white/60 leading-relaxed space-y-1">
+                        <div>• AI 단독 발송 X — 회사 admin 확인 후만 진행</div>
+                        <div>• Zero-Count 자동 차단 (대상 0명 = 발송 차단)</div>
+                        <div>• 광고성 캠페인 (광고) + 080 자동 부착</div>
+                      </div>
+                    </div>
+                  </div>
                 </div>
               ) : (
                 <div className="bg-white/5 border border-white/10 rounded-xl p-12 text-center text-sm text-white/50">
