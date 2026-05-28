@@ -88,13 +88,119 @@ import {
   quickActionTimeOptimize,
   quickActionSegmentRefine,
 } from '../utils/inapp-quick-action';
-import { query } from '../config/database';
+import { query, pool } from '../config/database';
+// ★ D226+ (2026-05-29) v0.3.5-a Auto-Capture batch ingestion 정합 PII masking 2차 안전망
+import { maskPII } from '../utils/pii-masking';
 
 const router = Router();
 
 // ════════════════════════════════════════════════════════════════════
 // 외부 API (X-Hanjullo-Key + X-Hanjullo-Secret 인증)
 // ════════════════════════════════════════════════════════════════════
+
+// ════════════════════════════════════════════════════════════════════
+// ★ D226+ (2026-05-29) v0.3.5-a — Auto-Capture batch ingestion endpoint
+// §12 #5 — schema_version 'v1' 의무 + 7 분류 PII masking 자동 (이중 안전망)
+// ════════════════════════════════════════════════════════════════════
+
+router.post('/ingest', requireCdpApiKey, async (req: Request, res: Response) => {
+  try {
+    const { schema_version, anonymous_id, session_id, sent_at, events } = req.body || {};
+
+    if (schema_version !== 'v1') {
+      return res.status(400).json({
+        success: false,
+        error: `schema_version 'v1' 의무 — 옛 값 = ${schema_version || '(누락)'}`,
+        code: 'INVALID_SCHEMA_VERSION',
+      });
+    }
+
+    if (!Array.isArray(events) || events.length === 0) {
+      return res.status(400).json({
+        success: false,
+        error: 'events 배열 비어 있음',
+        code: 'EMPTY_EVENTS',
+      });
+    }
+
+    if (events.length > 100) {
+      return res.status(413).json({
+        success: false,
+        error: 'events 최대 100건/batch 한도 초과',
+        code: 'BATCH_TOO_LARGE',
+      });
+    }
+
+    // ★ PII masking 2차 안전망 — SDK 안 1차 + 백엔드 안 2차 (이중)
+    const masked = events.map((e) => maskPII(e)) as Array<Record<string, unknown>>;
+
+    const companyId = (req as any).cdpAuth?.companyId || (req as any).cdp?.companyId;
+    if (!companyId) {
+      return res.status(401).json({
+        success: false,
+        error: 'CDP API key 인증 실패',
+        code: 'AUTH_FAILED',
+      });
+    }
+
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      for (const e of masked) {
+        await client.query(
+          `INSERT INTO cdp_events (
+             company_id, anonymous_id, session_id, event_type, payload, trust_level, schema_version, sent_at, received_at
+           ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())`,
+          [
+            companyId,
+            anonymous_id || null,
+            session_id || null,
+            (e.type as string) || 'unknown',
+            JSON.stringify(e),
+            (e.trust_level as string) || 'observed',
+            schema_version,
+            sent_at || new Date().toISOString(),
+          ],
+        );
+      }
+      await client.query('COMMIT');
+    } catch (err) {
+      await client.query('ROLLBACK');
+      throw err;
+    } finally {
+      client.release();
+    }
+
+    return res.json({
+      success: true,
+      accepted: events.length,
+      schema_version,
+    });
+  } catch (err: any) {
+    // ★ db_alter_safety_net 룰 정합 — column / relation does not exist 분기
+    const msg = err?.message || '';
+    if (msg.includes('column') && msg.includes('does not exist')) {
+      return res.status(503).json({
+        success: false,
+        error: 'DB 마이그레이션 의무 — 운영자에게 cdp_events ALTER 요청',
+        code: 'DB_MIGRATION_PENDING',
+      });
+    }
+    if (msg.includes('relation') && msg.includes('does not exist')) {
+      return res.status(503).json({
+        success: false,
+        error: 'cdp_events 테이블 X — DB 마이그레이션 의무',
+        code: 'DB_TABLE_MISSING',
+      });
+    }
+    console.error('[CDP /ingest] 오류:', err);
+    return res.status(500).json({
+      success: false,
+      error: '서버 오류 — 잠시 후 재시도',
+      code: 'INTERNAL_ERROR',
+    });
+  }
+});
 
 // POST /api/cdp/identify — 회원 식별 / upsert
 router.post('/identify', requireCdpApiKey, async (req: Request, res: Response) => {

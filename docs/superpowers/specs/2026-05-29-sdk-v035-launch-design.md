@@ -56,11 +56,11 @@
 
 ### 2.5. 1차 승리 전장 
 
-- **고객군** = 한국 자사몰 SMB/mid-market 우선 (Enterprise X)
+- **고객군** = 한국 자사몰 mid-market 우선 (Enterprise X — SMB도 100만원/월+ 진입 자격 영역 한정)
 - **도입** = self-service + preset + 자동 진단 (컨설팅 X)
 - **채널** = 알림톡/SMS/LMS/MMS/080/한국 동의 native
 - **AI** = 한국 커머스 use case 좁고 깊게
-- **가격** = 무료 시작 + 사용량 기반
+- **가격** = **100만원/월+ 요금제 진입 자격 의무** (무료 진입 X — Harold 확정 §10.3 참조)
 - **증명** = 매출 회복/재구매/이탈 방지 성과
 
 ---
@@ -358,7 +358,7 @@
 ### 10.1. 30일 (D-Day = 2026-05-29)
 
 - v0.3.5 출시 (D+7)
-- POPPON first event 검증 (D+10)
+- POPPON first event 검증 (D+10) — POPPON = 한줄로 옛 활용 자사몰 = 100만원/월+ 요금제 정합 영역
 - v0.4.0 trust_level/postback 설계 완료 (D+20)
 - 카페24/메이크샵 샘플 fixture 수집 시작 (D+25)
 - 데이터 품질 대시보드 MVP 설계 (D+30)
@@ -369,10 +369,17 @@
 - revenue-ready postback beta
 - Cafe24/MakeShop adapter alpha (D+50)
 - AI 추천 Level 1 MVP
-- 첫 실제 파일럿 3곳 확보:
+- 첫 실제 파일럿 3곳 확보 — **100만원/월+ 요금제 진입 자격 영역 한정**:
   - 패션/잡화 1건
   - 식품/생활용품 1건
   - B2B 또는 고관여 상품 1건
+
+### 10.3. 가격 정책 (Harold 확정 2026-05-28)
+
+- **SDK + CDP event ingestion = 100만원/월+ 요금제 진입 자격 의무** (무료 진입 X)
+- **AI Operator 활용 = 100만원/월+ 요금제 안 별 진입 자격 의무** (별 결정 영역 — 향후 spec 별 정의)
+- Round 6 GPT 권장 Free 폐기 (Harold 명시 — SMB SaaS 흐름 한정 X = 한줄로 = mid-market 정합 진입 자격 의무)
+- 본 정책 정합 = POPPON / 카페24 샘플몰 / 파일럿 3곳 = 한줄로 옛 활용 영역 진입 자사몰 한정 검증 영역
 
 ---
 
@@ -390,22 +397,38 @@
 
 ---
 
-## 12. v0.3.5 착수 전 필수 결정 10 (Harold 확정 의무)
+## 12. v0.3.5 착수 전 필수 결정 10 (Harold 확정 종결 2026-05-28)
 
-1. **기본 수집 이벤트 범위** — pageview + click + identify + consent + heartbeat 한정?
-2. **body data attribute 이름 규칙** — `data-hjl-*` 확정?
-3. **평문 email/phone 금지 여부** — 해시 의무?
-4. **consent mode 모델** — analytics / marketing / ad / kakao 4 분리?
-5. **event schema version** — `v1` 명시?
-6. **anonymous_id ↔ user_id merge 규칙** — 가입 시점 자동 merge + 이전 익명 활동 보존?
-7. **PII masking 정책** — 이메일/휴대폰/카드/주민/계좌/세션토큰 자동 마스킹?
-8. **event endpoint rate limit** — 무료 10K/일 + 유료 100K/일?
-9. **script CDN pinned version 전략** (GPT Round 7 권장):
-   - **pinned (기본)** = `https://cdn.hanjul.ai/sdk/v0.3.5/hanjul.min.js`
-   - **latest alias (옵션)** = `https://cdn.hanjul.ai/sdk/latest/hanjul.min.js`
-   - 기존 `?v={version}` 형식 = 폐기 ("갑자기 SDK 바뀜" 사고 차단 — 운영 안정성)
-   - 고객사 운영 기본 = pinned version 권장
-10. **POPPON 검증 성공 기준** — 15분 안 first event + PII leakage 0 + 핵심 퍼널 확인?
+본 §12 = brainstorming skill 안 §12 10 결정 = Harold 직접 확정 종결. 본 결정 매트릭스 = §19 신규 영역에서 단일 표 형식 명시.
+
+1. **기본 수집 이벤트 범위** — **5 한정 확정** (pageview + click 보수 + identify + consent + heartbeat)
+2. **body data attribute 이름 규칙** — **`data-hjl-*` 접두사 확정**
+3. **평문 email/phone 금지 여부** — **평문 OK + 백엔드 PII masking 자동 확정** (SDK 안 raw 전송 OK + 백엔드 ingestion 시 자동 마스킹 + PG 저장 시 마스킹 형식 한정)
+4. **consent mode 모델** — **4 분리 확정** (analytics / marketing / ad / kakao)
+5. **event schema version** — **`v1` 명시 의무 확정** (모든 ingestion payload `schema_version: 'v1'` 의무 필드)
+6. **anonymous_id ↔ user_id merge 규칙** — **전체 보존 확정** (가입 시점 자동 merge + 이전 익명 활동 customer_id 매핑 전체 보존 — 휴면 복귀 cohort 분석 가능)
+7. **PII masking 범위** — **7 분류 강화 확정** (email + 휴대폰 + 카드번호 + 주민번호 + URL token sanitization + 계좌번호 + 세션토큰 — 한국 정보통신망법 + 은행/회원제 자사몰 수용 영역 강화)
+8. **SDK + CDP 진입 자격** — **무료 진입 X = 100만원/월+ 요금제 진입 자격 의무 확정** (Round 6 권장 Free 폐기 + Harold 명시 — SDK + CDP 활용 자체 = 한줄로 자사몰 요금제 가입 의무 + AI Operator 활용 시 추가 진입 자격 의무)
+9. **script CDN pinned version 전략** — **pinned 기본 + latest alias 옵션 확정**:
+   - **pinned (기본 — 고객사 운영)** = `https://cdn.hanjul.ai/sdk/v0.3.5/hanjul.min.js`
+   - **latest alias (옵션 — 기술 이해 고객사)** = `https://cdn.hanjul.ai/sdk/latest/hanjul.min.js`
+   - 옛 `?v={version}` 형식 = 폐기 ("갑자기 SDK 바뀜" 사고 차단 — 운영 안정성)
+10. **POPPON 검증 성공 기준** — **기본 확정** (15분 안 first event + PII leakage 0건 + Next.js 15 App Router SPA route 수신 + 회원 1~2명 identify + pageview + click + heartbeat 5 단계 작동)
+
+### 12.1. 결정 매트릭스 단일 표 (Harold 확정 종결)
+
+| # | 결정 영역 | 확정 내용 | 비고 |
+|---|----------|----------|------|
+| 1 | 자동 수집 범위 | 5 한정 (pageview + click 보수 + identify + consent + heartbeat) | declared (`hjl.track`) + verified (postback) = v0.4.0~v0.4.5 진입 |
+| 2 | data attribute | `data-hjl-*` 접두사 | `data-hjl-user-id` / `data-hjl-consent-marketing` / `data-hjl-event` 등 |
+| 3 | 평문 email/phone | 평문 OK + 백엔드 PII masking 자동 | HTTPS 의무 + 백엔드 ingestion 시 자동 마스킹 |
+| 4 | consent mode | 4 분리 (analytics / marketing / ad / kakao) | 한국 정보통신망법 정합 |
+| 5 | event schema | `schema_version: 'v1'` 의무 | 향후 v2 migration 시 backend 분기 처리 |
+| 6 | ID 병합 | 전체 보존 (가입 시점 자동 + 이전 익명 활동 customer_id 매핑 보존) | 휴면 복귀 cohort 분석 가능 |
+| 7 | PII masking | 7 분류 (email + 휴대폰 + 카드 + 주민 + URL token + 계좌 + 세션토큰) | 한국 정보통신망법 + 은행/회원제 자사몰 수용 강화 |
+| 8 | 진입 자격 | 100만원/월+ 요금제 진입 자격 의무 (무료 X) | Round 6 권장 Free 폐기 + Harold 명시 |
+| 9 | CDN 버전 | pinned 기본 + latest alias 옵션 | pinned = `cdn.hanjul.ai/sdk/v0.3.5/hanjul.min.js` |
+| 10 | POPPON 기준 | 15분 first event + PII 0 + 핵심 퍼널 | Next.js 15 App Router 정합 |
 
 ---
 

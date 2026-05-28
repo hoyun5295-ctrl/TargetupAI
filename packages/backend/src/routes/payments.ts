@@ -213,6 +213,41 @@ router.post('/inicis/close', inicisFormParser, async (req: Request, res: Respons
   res.status(200).send(renderResultHtml('cancelled', { orderId }, baseUrl));
 });
 
+// ★ D226+ (2026-05-29): GET fallback — 이니시스 SDK 일부 흐름 안 closeUrl GET redirect 사고 차단
+//   (사용자 결제 취소 직후 별 탭 = JSON raw "No token provided" 노출 사고 정정)
+//   POST 표준 흐름 보존 + GET 호출 시 = HTML 응답 (자동 close + postMessage 흐름 동일)
+router.get('/inicis/close', async (req: Request, res: Response) => {
+  const { baseUrl } = getInicisCallbackUrls(req);
+  const orderId = String(req.query.orderNumber || req.query.MOID || req.query.oid || '').trim();
+  console.log('[payments] /inicis/close GET fallback:', { orderId, query: req.query, requestHost: req.get('host') });
+
+  if (orderId) {
+    try {
+      await finalizePaymentFailure({
+        orderId,
+        resultCode: 'USER_CANCELLED_GET',
+        resultMsg: '사용자가 결제창을 닫았습니다 (GET fallback)',
+        rawResponse: req.query as Record<string, any>,
+        status: 'cancelled',
+      });
+    } catch (err: any) {
+      console.error('[payments] /inicis/close GET fallback finalize 사고:', err.message || err);
+    }
+  }
+  res.status(200).send(renderResultHtml('cancelled', { orderId }, baseUrl));
+});
+
+// ★ D226+ (2026-05-29): /inicis/return GET fallback — 안전망 (POST 표준 흐름 보존)
+router.get('/inicis/return', async (req: Request, res: Response) => {
+  const { baseUrl } = getInicisCallbackUrls(req);
+  const orderId = String(req.query.orderNumber || req.query.MOID || req.query.oid || '').trim();
+  console.log('[payments] /inicis/return GET fallback:', { orderId, query: req.query, requestHost: req.get('host') });
+  res.status(200).send(renderResultHtml('failed', {
+    orderId,
+    resultMsg: '결제 결과 확인 실패 (GET fallback) — 결제 진행 여부는 발송결과 영역 안 확인 의무',
+  }, baseUrl));
+});
+
 // ────────────────────────────────────────────────────────────
 // 2) 회사 admin/사용자 인증 라우트
 // ────────────────────────────────────────────────────────────
