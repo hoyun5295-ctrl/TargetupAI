@@ -107,6 +107,35 @@
 
 ---
 
+### 🚀 D225+ 세션 전체 종결 (2026-05-28) — Brand Voice Learning + 알림톡 fix + Email 이력 + UI 정정 + SDK v0.3.5 설계도 + 비토 정체성 강화
+
+> **★★★ D225+ 세션 전체 종결 (2026-05-28) ★★★**:
+>
+> **8 작업 모두 완료**:
+>
+> (1) **Brand Voice Learning 신설** (Phase 1~4) — 회사별 LMS 대표 문안 5건 학습 + AI 자동 가이드라인 9 항목 추출 + 6 AI 호출 위치 buildSystemPromptWithBrandVoice 통합 + CT-99 brand-voice-prompt + CT-100 brand-voice-validator 신설 + ai_company_memory 안 representative_message + brand_guideline 2 타입 추가 (DB ALTER X — varchar(50) 단순) + 신규 endpoint 5건 (GET + save-messages + extract-guideline + delete + update-guideline) + frontend BrandVoiceCard + BrandVoiceNudgeCard (24h cooldown) 신설.
+>
+> (2) **알림톡 발송 사고 fix** (영업팀장 박성용 재발 신고) — routes/campaigns.ts:1789 titleStr 누락 정정 (LMS 대체 발송 시 제목 NULL = 미수신 근본 원인) + Dashboard 안 알림톡 팝업 close 호출 제거 (사고 2 fix — D224+ 후속 사고) + ResultsModal 채널 표기 4 분기 alimtalk 추가 (목록 + 상세 폰 미리보기 + 캠페인 정보 안 templateCode/templateName 표시) + routes/results.ts 안 sendChannel='alimtalk' 분기 + alimtalkTemplateInfo 응답 추가 + SMS_DETAIL_FIELDS 안 k_template_code SELECT 추가.
+>
+> (3) **Email 캠페인 발송 이력 영역 신설** — backend GET /api/email/campaigns/:id/events endpoint 신설 (수신자별 표 + 이벤트 로그 + 페이지네이션 + event_type 필터) + frontend EmailEventsModal 신규 컴포넌트 (요약 5 카드 + 수신자/이벤트 탭 + 다크 violet 톤) + EmailCampaignsPage 카드 안 "이력 보기" 버튼 통합.
+>
+> (4) **ContinuousOperatorPage 첫 진입 가이드 UI 정정** — lg:grid-cols-5 분할 (좌측 3/5 기존 가이드 + 우측 2/5 AI 자율 진단 + 한줄로 차별점 + 안전 보장 3 카드 신설) — 큰 화면 우측 빈 공간 사고 차단.
+>
+> (5) **6,000사+ 영역 영구 제거** (Harold 격분) — 메모리 17 파일 + codebase 13 파일 영구 제거 (Braze 헷갈림 사고 정정).
+>
+> (6) **SDK Auto-Capture v0.3.5 설계도 신설** — POPPON 회신서 받은 후 = Round 1~7 Claude + GPT 공동 토론 종결 + 압도 7 카테고리 도출 (통합 속도 3계층 / trust_level 4 / 한국 채널 native / AI Operator Level 1~2 + 5 / Brand Voice = Message Quality Layer / Compliance & Trust Layer / Proof-of-Revenue Dashboard) + 5 단계 진입 순서 (v0.3.5 → v0.5.5+) + 설계도 6 보완 (v0.3.5-a + v0.3.5-b 분할 + click 보수 + data-hjl-* declared 강조 + CDN pinned version + archive 보관 + 외부 문구 정정).
+>
+> (7) **비토 정체성 강화 + 자연 한국어 default 룰 신설** (Harold 명시 "본 AI 절대 금지 + 근본 차단") — feedback_cto_mandate_for_vito § D225+ 비토 정체성 강화 추가 + feedback_natural_korean_default 신설 + feedback_no_bakkeum_usage = archive 이동 + 단순 룰 변환 + MEMORY.md 최상단 grep 패턴 확장 (옛/박/진정/정합/매트릭스/영영/본격/본 AI 모두 포함).
+>
+> (8) 메모리 + STATUS + 설계도 업데이트.
+>
+> **★ 다음 세션 진입 명령어 (Harold 복붙)**:
+> ```
+> docs/superpowers/specs/2026-05-29-sdk-v035-launch-design.md 정독 → v0.3.5-a 출시 진입 (§5 필수 10 + §12 필수 결정 10 Harold 확정 후 진입 + 본 작업 종결 직후 docs/superpowers/archive/ 이동 의무)
+> ```
+
+---
+
 ### 🚀 D224+ 세션 전체 종결 매트릭스 (2026-05-27) — 9 작업 모두 완료
 
 > **★★★ D224+ 세션 전체 종결 (2026-05-27) ★★★**:
