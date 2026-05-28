@@ -35,7 +35,10 @@ export type MemoryType =
   | 'customer_insight'
   | 'brand_tone_evolution'
   | 'channel_performance'
-  | 'compliance_learning';
+  | 'compliance_learning'
+  // ★ D225+ (2026-05-28 Harold 명시): Brand Voice Learning — 회사별 LMS 대표 문안 5건 학습
+  | 'representative_message'   // 회사 admin 수동 등록 (5건 — 5 row)
+  | 'brand_guideline';         // 자동 추출 가이드라인 9 항목 (1건 — 1 row, JSON)
 
 export interface MemoryEntry {
   id: string;
@@ -169,10 +172,16 @@ export async function buildMemoryPromptContext(companyId: string, maxEntries: nu
     brand_tone_evolution: '브랜드 톤 진화',
     channel_performance: '채널 성과',
     compliance_learning: '컴플라이언스 학습',
+    // ★ D225+ Brand Voice Learning — AI Operator 호출 영역 분리 (별도 buildSystemPromptWithBrandVoice 헬퍼 활용)
+    representative_message: '대표 문안',
+    brand_guideline: 'Brand Voice 가이드라인',
   };
 
+  // ★ D225+ AI Operator 호출 시점 = 옛 5 타입 한정 (Brand Voice 2 타입 자동 제외 — buildSystemPromptWithBrandVoice 별도 활용)
+  const OPERATOR_TYPES: MemoryType[] = ['success_pattern', 'customer_insight', 'brand_tone_evolution', 'channel_performance', 'compliance_learning'];
+
   const sections: string[] = [];
-  for (const type of Object.keys(typeLabels) as MemoryType[]) {
+  for (const type of OPERATOR_TYPES) {
     const arr = byType.get(type) || [];
     if (arr.length === 0) continue;
     const lines = arr.map((m, i) => `${i + 1}. [중요도 ${m.importance}] ${m.memoryKey} — ${m.memoryValue}`);

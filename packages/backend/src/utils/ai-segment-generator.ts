@@ -6,7 +6,7 @@
  *   진짜 중요한 부분이야 이건 책임소재의 부분들이 있을 수도 있는거고."
  *
  *   본 CT = 자연어 자유 입력 → AI Opus 4.7 호출 → CT-01 호환 structured filter 변환 → preview.
- *   기존 CT-01 (customer-filter.ts) 안전 SQL 빌더 재활용 = 6,000사+ 운영 검증 안전망 정합.
+ *   기존 CT-01 (customer-filter.ts) 안전 SQL 빌더 재활용 = 한줄로 운영 검증 안전망 정합.
  *
  *   ★ 책임소재 차단 영구 룰:
  *     - AI는 SQL 직접 생성 절대 X = CT-01 structured filter 매트릭스만 출력

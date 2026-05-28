@@ -9,7 +9,7 @@
  * 영구 룰 정합:
  *   - 회사 격리 의무 (companyId)
  *   - AI 호출 X (단순 SQL + 자연어 템플릿 — 비용 영역 0)
- *   - 6,000사+ 운영 영향 0 (Read-only)
+ *   - 한줄로 운영 영향 0 (Read-only)
  *
  * 사용처:
  *   - GET /operator/predictive/customers/:id/explain

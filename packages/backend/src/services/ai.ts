@@ -8,6 +8,8 @@ import { cleanLeftoverVars } from '../utils/messageUtils';
 // ★ D210+ Phase 2 (Harold 명시 2026-05-23): CT-58 — 회사별 customer DB 실측 데이터 프로필.
 //   AI 시스템 프롬프트 안 동적 주입 → 어설픈 개인화 사고 차단.
 import { CompanyDataProfile, formatProfileForAiPrompt } from '../utils/company-data-profile';
+// ★ D225+ (2026-05-28 Harold 명시): Brand Voice Learning — 회사별 LMS 대표 문안 5건 + 자동 가이드라인 자동 주입.
+import { buildSystemPromptWithBrandVoice } from '../utils/brand-voice-prompt';
 
 if (!process.env.ANTHROPIC_API_KEY) console.warn('[AI] ANTHROPIC_API_KEY not configured — Claude AI 기능 비활성 상태');
 if (!process.env.OPENAI_API_KEY) console.warn('[AI] OPENAI_API_KEY not configured — OpenAI 기능 비활성 상태');
@@ -992,6 +994,8 @@ export async function generateMessages(
     // ★ D170+ (2026-05-19) Harold 명시 — AI Operator 메시지 = Opus 4.7로 격상:
     //   기본 호출(/generate-message)은 model 미박힘 → default sonnet. AI Operator는 'opus' 전달.
     model?: 'sonnet' | 'opus';
+    // ★ D225+ (2026-05-28 Harold 명시): Brand Voice Learning — 회사별 LMS 대표 문안 5건 + 가이드라인 자동 주입.
+    companyId?: string;
   }
 ): Promise<AIRecommendResult> {
   if (!process.env.ANTHROPIC_API_KEY) {
@@ -1116,13 +1120,17 @@ ${usePersonalization ? `- 사용할 개인화 변수: ${personalizationTags}
 - 변수는 반드시 %변수명% 형태로 작성 (예: %이름%, %포인트%)
 - ⚠️ 위 "사용 가능한 개인화 변수" 목록에 있는 것만 사용! 다른 변수 생성 금지!` : '- 개인화 변수 없이 일반 문안으로 작성\n- %...% 형태의 변수를 사용하지 마세요.'}`;
 
+  // ★ D225+ Brand Voice Learning — 회사별 가이드라인 자동 주입 (회사 등록 미존재 시 옛 BRAND_SYSTEM_PROMPT 그대로)
+  const enrichedSystemPrompt = await buildSystemPromptWithBrandVoice(extraContext?.companyId, BRAND_SYSTEM_PROMPT);
+
   try {
     const text = await callAIWithFallback({
-      system: BRAND_SYSTEM_PROMPT,
+      system: enrichedSystemPrompt,
       userMessage,
       maxTokens: 2048,
       temperature: 0.7,
       model: extraContext?.model, // ★ D170+: AI Operator는 'opus' 전달 (1M ctx + 회사 history 활용 본문 품질 최상)
+      companyId: extraContext?.companyId,
     });
 
     let jsonStr = text;
@@ -1915,6 +1923,8 @@ interface CustomMessageOptions {
   channel: string;
   isAd: boolean;
   rejectNumber?: string;
+  // ★ D225+ Brand Voice Learning — 회사별 가이드라인 자동 주입
+  companyId?: string;
 }
 
 /**
@@ -1948,7 +1958,7 @@ export async function generateCustomMessages(options: CustomMessageOptions): Pro
 }> {
   const {
     briefing, promotionCard, personalFields, fieldLabels, url, tone,
-    brandName, brandTone, channel, isAd, rejectNumber,
+    brandName, brandTone, channel, isAd, rejectNumber, companyId,
   } = options;
 
   const varNames = personalFields
@@ -2019,7 +2029,7 @@ ${channel} 채널에 최적화된 3가지 맞춤 문안(A/B/C)을 생성해주�
 - 개인화 변수(${varTags})를 활용하여 고객별 맞춤 느낌 극대화
 - 각 시안은 서로 다른 컨셉으로 차별화`;
 
-  const systemPrompt = `당신은 대한민국 최고의 개인화 마케팅 문자 메시지 카피라이터입니다.
+  const baseSystemPrompt = `당신은 대한민국 최고의 개인화 마케팅 문자 메시지 카피라이터입니다.
 
 ## 핵심 임무
 프로모션 정보와 개인화 변수를 활용하여, 고객 한 명 한 명에게 맞춤형으로 느껴지는 마케팅 문안을 작성합니다.
@@ -2074,6 +2084,9 @@ ${channel} 채널에 최적화된 3가지 맞춤 문안(A/B/C)을 생성해주�
   "recommendation": "A",
   "recommendation_reason": "추천 이유"
 }`;
+
+  // ★ D225+ Brand Voice Learning — 회사별 가이드라인 자동 주입 (회사 등록 미존재 시 옛 흐름 그대로)
+  const systemPrompt = await buildSystemPromptWithBrandVoice(companyId, baseSystemPrompt);
 
   if (!process.env.ANTHROPIC_API_KEY) {
     return {
@@ -2405,6 +2418,7 @@ export interface RefineDirectMessageOptions {
   maxBytes?: number;        // 기본 90바이트(SMS) — 결과는 SMS/LMS 자동 분류
   recentMessages?: string[]; // D120 패턴 미러: 회사별 최근 발송 문안 few-shot 학습용
   rejectNumber?: string;    // 무료수신거부 번호 — 후처리에서 AI 임의 추가/중복 제거
+  companyId?: string;       // ★ D225+ Brand Voice Learning — 회사별 가이드라인 자동 주입
 }
 
 export interface RefineCandidate {
@@ -2933,12 +2947,14 @@ JSON 배열(원소 1개)만, 다른 설명/주석/코드펜스 금지:
 export async function refineDirectMessage(
   opts: RefineDirectMessageOptions,
 ): Promise<{ candidates: RefineCandidate[] }> {
-  const { message, tone = 'seasonal', companyName, maxBytes, recentMessages, rejectNumber } = opts;
+  const { message, tone = 'seasonal', companyName, maxBytes, recentMessages, rejectNumber, companyId } = opts;
   if (!message || !message.trim()) {
     return { candidates: [] };
   }
 
-  const systemPrompt = buildRefineSystemPrompt({ tone, companyName, maxBytes, recentMessages });
+  // ★ D225+ Brand Voice Learning — 회사별 LMS 대표 문안 5건 + 가이드라인 자동 주입 (회사 등록 미존재 시 옛 흐름 그대로)
+  const baseSystemPrompt = buildRefineSystemPrompt({ tone, companyName, maxBytes, recentMessages });
+  const systemPrompt = await buildSystemPromptWithBrandVoice(companyId, baseSystemPrompt);
 
   // Claude 우선
   if (process.env.ANTHROPIC_API_KEY) {

@@ -20,7 +20,7 @@
  * 영구 원칙 정합:
  *   - feedback_no_target_auto_relax — 자동화 본질 = 사용자 승인하 정합 (default OFF + 회사 admin 토글 의무)
  *   - 회사 격리 — journey 영역 통한 company_id FK 정합 (journey_executions 영역 직접 X)
- *   - 6,000사+ 운영 영향 0 — worker 실패 시 발송 영향 0
+ *   - 한줄로 운영 영향 0 — worker 실패 시 발송 영향 0
  *   - workerRunning guard — 중복 진입 차단
  *   - 한 회사 batch limit 1,000명 (큰 회사 영역 분산 정합 — 다음 cron 영역 잔존 매트릭스 정합)
  */

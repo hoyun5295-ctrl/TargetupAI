@@ -9,7 +9,7 @@
  * 영구 원칙 정합:
  *  - 회사 격리 의무 (journeyId → company_id 검증 진입 직전)
  *  - cdp_events + journey_executions + journey_step_logs + journey_step_variants 통합
- *  - 6,000사+ 운영 영향 0 (Read-only 집계)
+ *  - 한줄로 운영 영향 0 (Read-only 집계)
  */
 
 import { query } from '../config/database';

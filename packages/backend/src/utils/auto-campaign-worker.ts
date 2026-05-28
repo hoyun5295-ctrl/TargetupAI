@@ -269,6 +269,8 @@ async function generateMessageForAutoCampaign(ac: any): Promise<void> {
       // ★ B+0407-4: 개인화 활성화 + 변수 목록 전달 (services/ai.ts 시그니처와 일치)
       usePersonalization,
       personalizationVars,
+      // ★ D225+ Brand Voice Learning — 회사별 가이드라인 자동 주입
+      companyId: ac.company_id,
     };
 
     const aiResult = await generateMessages(ac.ai_prompt || ac.campaign_name, targetInfo, extraContext);

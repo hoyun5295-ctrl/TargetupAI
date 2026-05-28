@@ -16,7 +16,7 @@
  *
  * 영구 원칙 정합:
  *  - 회사 격리 (companyId 단위 batch)
- *  - 6,000사+ 운영 영향 0 (worker 실패 시 발송 영향 0)
+ *  - 한줄로 운영 영향 0 (worker 실패 시 발송 영향 0)
  *  - workerRunning guard (중복 진입 차단)
  */
 

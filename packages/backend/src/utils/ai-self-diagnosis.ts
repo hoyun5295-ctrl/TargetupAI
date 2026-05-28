@@ -16,7 +16,7 @@
  *  - 회사 격리 (companyId)
  *  - 모델명 사용자 노출 X
  *  - AI 임의 혜택 X (placeholder 유지)
- *  - 6,000사+ 운영 영향 0 (Read-only 진단)
+ *  - 한줄로 운영 영향 0 (Read-only 진단)
  */
 
 import { query } from '../config/database';

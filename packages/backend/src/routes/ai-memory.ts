@@ -11,7 +11,7 @@
  */
 
 import { Request, Response, Router } from 'express';
-import { query } from '../config/database';
+import { query, pool } from '../config/database';
 import { authenticate } from '../middlewares/auth';
 import { callAIWithFallback } from '../services/ai';
 import { buildMemoryPromptContext, listMemories, MemoryType } from '../utils/company-memory';
@@ -25,6 +25,9 @@ const TYPE_LABEL: Record<MemoryType, string> = {
   brand_tone_evolution: '브랜드 톤',
   channel_performance: '채널 성과',
   compliance_learning: '컴플라이언스 학습',
+  // ★ D225+ Brand Voice Learning
+  representative_message: '대표 문안',
+  brand_guideline: 'Brand Voice 가이드라인',
 };
 
 // ════════════════════════════════════════════════════════════════════
@@ -276,6 +279,480 @@ router.get('/top-impact', async (req: Request, res: Response) => {
       });
     }
     return res.status(500).json({ success: false, error: err?.message || '조회 실패' });
+  }
+});
+
+// ════════════════════════════════════════════════════════════════════
+// ★ D225+ Brand Voice Learning — 회사별 LMS 대표 문안 5건 + 자동 가이드라인 추출 (2026-05-28 Harold 명시)
+//
+//   1. GET    /api/ai-memory/brand-voice                  — 5 대표 문안 + 가이드라인 조회
+//   2. POST   /api/ai-memory/brand-voice/save-messages    — 5 대표 문안 저장 (옛 5건 삭제 + 신규 5건 INSERT)
+//   3. POST   /api/ai-memory/brand-voice/extract-guideline — Sonnet 4.6 자동 추출 + 1 row UPSERT
+//   4. DELETE /api/ai-memory/brand-voice/message/:id      — 1건 삭제
+//
+//   본질: 회사별 마케팅 톤 100% 일치 — 일반 한국어 AI 생성 거부감 차단.
+//   SMS 학습 제외 (33글자 한도 = 톤 분석 의미 X) — LMS 위주 학습.
+// ════════════════════════════════════════════════════════════════════
+
+interface RepresentativeMessageValue {
+  channel: 'LMS' | 'MMS';
+  message_text: string;
+  message_subject?: string;
+  image_url?: string | null;
+  manual_priority: number;
+  created_by_admin: boolean;
+}
+
+interface BrandGuidelineValue {
+  tone_signature: string;
+  avg_length_chars: number;
+  avg_length_bytes: number;
+  frequent_expressions: string[];
+  ad_prefix_position: 'front' | 'back';
+  greeting_pattern: string;
+  cta_patterns: string[];
+  signature: string;
+  reject_position: 'front' | 'back';
+  emoji_whitelist: string[];
+  extracted_at: string;
+  admin_edited: boolean;
+}
+
+// ─────────────────────────────────────────────────────────────
+// 1. GET /api/ai-memory/brand-voice
+// ─────────────────────────────────────────────────────────────
+router.get('/brand-voice', async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    if (!companyId) {
+      return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+    }
+
+    const messagesRes = await query(
+      `SELECT id, memory_key, memory_value, created_at, updated_at
+       FROM ai_company_memory
+       WHERE company_id = $1::uuid AND memory_type = 'representative_message'
+       ORDER BY memory_key ASC`,
+      [companyId],
+    );
+
+    const guidelineRes = await query(
+      `SELECT memory_value, updated_at
+       FROM ai_company_memory
+       WHERE company_id = $1::uuid AND memory_type = 'brand_guideline'
+       LIMIT 1`,
+      [companyId],
+    );
+
+    const messages = messagesRes.rows.map((row: any) => {
+      let value: RepresentativeMessageValue | null = null;
+      try {
+        value = typeof row.memory_value === 'string' ? JSON.parse(row.memory_value) : row.memory_value;
+      } catch {
+        value = null;
+      }
+      return {
+        id: row.id,
+        priority: value?.manual_priority || 0,
+        channel: value?.channel || 'LMS',
+        subject: value?.message_subject || '',
+        text: value?.message_text || '',
+        imageUrl: value?.image_url || null,
+        createdAt: row.created_at,
+        updatedAt: row.updated_at,
+      };
+    }).sort((a: any, b: any) => a.priority - b.priority);
+
+    let guideline: BrandGuidelineValue | null = null;
+    let guidelineUpdatedAt: string | null = null;
+    if (guidelineRes.rows[0]) {
+      try {
+        const raw = guidelineRes.rows[0].memory_value;
+        guideline = typeof raw === 'string' ? JSON.parse(raw) : raw;
+        guidelineUpdatedAt = guidelineRes.rows[0].updated_at;
+      } catch {
+        guideline = null;
+      }
+    }
+
+    return res.json({
+      success: true,
+      messages,
+      guideline,
+      guideline_updated_at: guidelineUpdatedAt,
+      registered: messages.length >= 1,
+      guideline_extracted: guideline !== null,
+    });
+  } catch (err: any) {
+    console.error('[Brand Voice GET] 오류:', err);
+    return res.status(500).json({ success: false, error: err?.message || '조회 실패' });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────
+// 2. POST /api/ai-memory/brand-voice/save-messages
+// ─────────────────────────────────────────────────────────────
+router.post('/brand-voice/save-messages', async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    const userType = req.user?.userType;
+    if (!companyId) {
+      return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+    }
+    if (userType !== 'company_admin') {
+      return res.status(403).json({ success: false, error: '대표 문안 등록은 회사 관리자만 가능합니다.' });
+    }
+
+    const messages = Array.isArray(req.body?.messages) ? req.body.messages : [];
+    if (messages.length < 1 || messages.length > 5) {
+      return res.status(400).json({ success: false, error: '대표 문안은 1~5건 등록 가능합니다.' });
+    }
+
+    const normalized: Array<{ priority: number; value: RepresentativeMessageValue }> = [];
+    for (let i = 0; i < messages.length; i++) {
+      const m = messages[i] || {};
+      const channel = m.channel === 'MMS' ? 'MMS' : 'LMS';
+      const text = String(m.text || '').trim();
+      const subject = String(m.subject || '').trim();
+      const imageUrl = m.imageUrl ? String(m.imageUrl).trim() : null;
+      const priority = Number(m.priority) || i + 1;
+
+      if (text.length < 10) {
+        return res.status(400).json({
+          success: false,
+          error: `대표 문안 ${i + 1}번 본문은 10자 이상 입력해주세요.`,
+        });
+      }
+      if (text.length > 2000) {
+        return res.status(400).json({
+          success: false,
+          error: `대표 문안 ${i + 1}번 본문은 2000자 이내로 입력해주세요.`,
+        });
+      }
+
+      normalized.push({
+        priority,
+        value: {
+          channel,
+          message_text: text,
+          message_subject: subject || undefined,
+          image_url: imageUrl,
+          manual_priority: priority,
+          created_by_admin: true,
+        },
+      });
+    }
+
+    // ★ D225+ transaction 안전 영역 — 단일 client 활용 (pool.connect + finally release 의무)
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+
+      await client.query(
+        `DELETE FROM ai_company_memory
+         WHERE company_id = $1::uuid AND memory_type = 'representative_message'`,
+        [companyId],
+      );
+
+      for (const item of normalized) {
+        const memoryKey = `msg_${String(item.priority).padStart(2, '0')}`;
+        await client.query(
+          `INSERT INTO ai_company_memory (
+            id, company_id, memory_type, memory_key, memory_value,
+            importance, source, metadata, last_accessed_at, created_at, updated_at
+          ) VALUES (
+            gen_random_uuid(), $1::uuid, 'representative_message', $2, $3,
+            8, 'admin_input', '{}'::jsonb, NOW(), NOW(), NOW()
+          )`,
+          [companyId, memoryKey, JSON.stringify(item.value)],
+        );
+      }
+
+      await client.query('COMMIT');
+    } catch (txErr) {
+      await client.query('ROLLBACK');
+      throw txErr;
+    } finally {
+      client.release();
+    }
+
+    const { invalidateBrandVoiceCache } = await import('../utils/brand-voice-prompt');
+    invalidateBrandVoiceCache(companyId);
+
+    return res.json({ success: true, saved_count: normalized.length });
+  } catch (err: any) {
+    console.error('[Brand Voice save-messages] 오류:', err);
+    return res.status(500).json({ success: false, error: err?.message || '저장 실패' });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────
+// 3. POST /api/ai-memory/brand-voice/extract-guideline
+// ─────────────────────────────────────────────────────────────
+router.post('/brand-voice/extract-guideline', async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    const userType = req.user?.userType;
+    if (!companyId) {
+      return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+    }
+    if (userType !== 'company_admin') {
+      return res.status(403).json({ success: false, error: '가이드라인 추출은 회사 관리자만 가능합니다.' });
+    }
+
+    const messagesRes = await query(
+      `SELECT memory_value FROM ai_company_memory
+       WHERE company_id = $1::uuid AND memory_type = 'representative_message'
+       ORDER BY memory_key ASC`,
+      [companyId],
+    );
+    if (messagesRes.rows.length < 1) {
+      return res.status(400).json({
+        success: false,
+        error: '대표 문안을 1건 이상 먼저 등록해주세요.',
+      });
+    }
+
+    const parsedMessages: RepresentativeMessageValue[] = [];
+    for (const row of messagesRes.rows) {
+      try {
+        const value = typeof row.memory_value === 'string' ? JSON.parse(row.memory_value) : row.memory_value;
+        if (value && typeof value.message_text === 'string') {
+          parsedMessages.push(value);
+        }
+      } catch {
+        // 잘못된 JSON 영역 = skip
+      }
+    }
+    if (parsedMessages.length < 1) {
+      return res.status(400).json({
+        success: false,
+        error: '대표 문안을 다시 등록해주세요. (JSON 영역 손상)',
+      });
+    }
+
+    const messagesText = parsedMessages.map((m, i) =>
+      `### 문안 ${i + 1} (채널: ${m.channel}${m.message_subject ? `, 제목: ${m.message_subject}` : ''})\n${m.message_text}`,
+    ).join('\n\n');
+
+    const systemPrompt = `당신은 회사 마케팅 메시지를 분석하여 회사별 brand voice 가이드라인을 JSON으로 자동 추출하는 전문가입니다.
+
+분석 대상 = 동일 회사의 대표 LMS/MMS 문안 ${parsedMessages.length}건. 본 문안 = 회사 brand voice 자체.
+
+## 추출 의무 9 항목 (JSON 응답 형식)
+
+\`\`\`json
+{
+  "tone_signature": "친근/캐주얼 | 정중/격조 | 활기/감성 | 정보/실용 | 럭셔리/세련 중 1 선택",
+  "avg_length_chars": 245,
+  "avg_length_bytes": 380,
+  "frequent_expressions": ["빈출 표현 1", "빈출 표현 2", "빈출 표현 3"],
+  "ad_prefix_position": "front 또는 back",
+  "greeting_pattern": "자주 활용 인사말 패턴 1건",
+  "cta_patterns": ["CTA 패턴 1", "CTA 패턴 2", "CTA 패턴 3"],
+  "signature": "회사 시그니처 (있을 시, 없으면 빈 문자열)",
+  "reject_position": "front 또는 back",
+  "emoji_whitelist": ["★", "♥", "▶"]
+}
+\`\`\`
+
+## 분석 원칙
+
+1. tone_signature — 5 분류 중 1 선택. 메시지 톤이 친근/격조 어느 영역인지 정확 판단.
+2. avg_length_chars + avg_length_bytes — ${parsedMessages.length}건 본문 평균 길이 (한글 2바이트 기준).
+3. frequent_expressions — 2건 이상 출현한 표현 3~5건 추출. 빈도 높은 영역 우선.
+4. ad_prefix_position — "(광고)" 위치가 본문 앞이면 front, 뒤면 back.
+5. greeting_pattern — "[브랜드명] OOO님께" 등 자주 활용한 인사말 1건. 없으면 빈 문자열.
+6. cta_patterns — "지금 바로 ~", "5월이 끝나기 전 ~" 등 행동 유도 표현 3건. 다양성 우선.
+7. signature — 회사 슬로건 또는 영문 시그니처. 없으면 빈 문자열.
+8. reject_position — "무료수신거부 080..." 위치가 본문 앞이면 front, 뒤면 back.
+9. emoji_whitelist — 실제 활용된 이모지/특수문자 배열 (★ ♥ ▶ 등). 활용 없으면 빈 배열.
+
+## 응답 형식
+
+JSON 단 1건만 출력. 다른 설명/주석/마크다운 코드블록 없음. 응답 시작 = "{" / 응답 끝 = "}".`;
+
+    const { callAIWithFallback } = await import('../services/ai');
+    let rawResponse: string;
+    try {
+      rawResponse = await callAIWithFallback({
+        system: systemPrompt,
+        userMessage: messagesText,
+        maxTokens: 1500,
+        temperature: 0.2,
+        model: 'sonnet',
+        companyId,
+        source: 'brand-voice-extract',
+      });
+    } catch (aiErr: any) {
+      if (aiErr?.name === 'AiRateLimitExceeded') {
+        return res.status(429).json({ success: false, error: aiErr.message, code: 'AI_RATE_LIMIT' });
+      }
+      throw aiErr;
+    }
+
+    let guideline: BrandGuidelineValue | null = null;
+    const jsonMatch = rawResponse.match(/\{[\s\S]*\}/);
+    if (jsonMatch) {
+      try {
+        const parsed = JSON.parse(jsonMatch[0]);
+        guideline = {
+          tone_signature: String(parsed.tone_signature || '정보/실용'),
+          avg_length_chars: Number(parsed.avg_length_chars) || 0,
+          avg_length_bytes: Number(parsed.avg_length_bytes) || 0,
+          frequent_expressions: Array.isArray(parsed.frequent_expressions)
+            ? parsed.frequent_expressions.map((s: any) => String(s)).slice(0, 5)
+            : [],
+          ad_prefix_position: parsed.ad_prefix_position === 'back' ? 'back' : 'front',
+          greeting_pattern: String(parsed.greeting_pattern || ''),
+          cta_patterns: Array.isArray(parsed.cta_patterns)
+            ? parsed.cta_patterns.map((s: any) => String(s)).slice(0, 5)
+            : [],
+          signature: String(parsed.signature || ''),
+          reject_position: parsed.reject_position === 'front' ? 'front' : 'back',
+          emoji_whitelist: Array.isArray(parsed.emoji_whitelist)
+            ? parsed.emoji_whitelist.map((s: any) => String(s)).slice(0, 20)
+            : [],
+          extracted_at: new Date().toISOString(),
+          admin_edited: false,
+        };
+      } catch (parseErr) {
+        console.error('[Brand Voice extract] JSON parse 실패:', parseErr, rawResponse.slice(0, 500));
+      }
+    }
+
+    if (!guideline) {
+      return res.status(500).json({
+        success: false,
+        error: 'AI 응답 JSON 형식 오류 — 재시도해주세요.',
+      });
+    }
+
+    await query(
+      `INSERT INTO ai_company_memory (
+        id, company_id, memory_type, memory_key, memory_value,
+        importance, source, metadata, last_accessed_at, created_at, updated_at
+      ) VALUES (
+        gen_random_uuid(), $1::uuid, 'brand_guideline', 'main', $2,
+        10, 'ai_auto', '{}'::jsonb, NOW(), NOW(), NOW()
+      )
+      ON CONFLICT (company_id, memory_type, memory_key) DO UPDATE SET
+        memory_value = EXCLUDED.memory_value,
+        importance = 10,
+        updated_at = NOW(),
+        last_accessed_at = NOW()`,
+      [companyId, JSON.stringify(guideline)],
+    );
+
+    const { invalidateBrandVoiceCache } = await import('../utils/brand-voice-prompt');
+    invalidateBrandVoiceCache(companyId);
+
+    return res.json({ success: true, guideline });
+  } catch (err: any) {
+    console.error('[Brand Voice extract-guideline] 오류:', err);
+    return res.status(500).json({ success: false, error: err?.message || '가이드라인 추출 실패' });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────
+// 4. DELETE /api/ai-memory/brand-voice/message/:id
+// ─────────────────────────────────────────────────────────────
+router.delete('/brand-voice/message/:id', async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    const userType = req.user?.userType;
+    if (!companyId) {
+      return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+    }
+    if (userType !== 'company_admin') {
+      return res.status(403).json({ success: false, error: '대표 문안 삭제는 회사 관리자만 가능합니다.' });
+    }
+
+    const memoryId = String(req.params.id || '').trim();
+    if (!memoryId) {
+      return res.status(400).json({ success: false, error: 'memory id가 필요합니다.' });
+    }
+
+    const result = await query(
+      `DELETE FROM ai_company_memory
+       WHERE id = $1::uuid AND company_id = $2::uuid AND memory_type = 'representative_message'
+       RETURNING id`,
+      [memoryId, companyId],
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ success: false, error: '대표 문안을 찾을 수 없습니다.' });
+    }
+
+    const { invalidateBrandVoiceCache } = await import('../utils/brand-voice-prompt');
+    invalidateBrandVoiceCache(companyId);
+
+    return res.json({ success: true });
+  } catch (err: any) {
+    console.error('[Brand Voice delete-message] 오류:', err);
+    return res.status(500).json({ success: false, error: err?.message || '삭제 실패' });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────
+// 5. POST /api/ai-memory/brand-voice/update-guideline (회사 admin 직접 정정)
+// ─────────────────────────────────────────────────────────────
+router.post('/brand-voice/update-guideline', async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    const userType = req.user?.userType;
+    if (!companyId) {
+      return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+    }
+    if (userType !== 'company_admin') {
+      return res.status(403).json({ success: false, error: '가이드라인 정정은 회사 관리자만 가능합니다.' });
+    }
+
+    const input = req.body?.guideline || {};
+    const guideline: BrandGuidelineValue = {
+      tone_signature: String(input.tone_signature || '정보/실용'),
+      avg_length_chars: Number(input.avg_length_chars) || 0,
+      avg_length_bytes: Number(input.avg_length_bytes) || 0,
+      frequent_expressions: Array.isArray(input.frequent_expressions)
+        ? input.frequent_expressions.map((s: any) => String(s)).slice(0, 5)
+        : [],
+      ad_prefix_position: input.ad_prefix_position === 'back' ? 'back' : 'front',
+      greeting_pattern: String(input.greeting_pattern || ''),
+      cta_patterns: Array.isArray(input.cta_patterns)
+        ? input.cta_patterns.map((s: any) => String(s)).slice(0, 5)
+        : [],
+      signature: String(input.signature || ''),
+      reject_position: input.reject_position === 'front' ? 'front' : 'back',
+      emoji_whitelist: Array.isArray(input.emoji_whitelist)
+        ? input.emoji_whitelist.map((s: any) => String(s)).slice(0, 20)
+        : [],
+      extracted_at: new Date().toISOString(),
+      admin_edited: true,
+    };
+
+    await query(
+      `INSERT INTO ai_company_memory (
+        id, company_id, memory_type, memory_key, memory_value,
+        importance, source, metadata, last_accessed_at, created_at, updated_at
+      ) VALUES (
+        gen_random_uuid(), $1::uuid, 'brand_guideline', 'main', $2,
+        10, 'admin_input', '{}'::jsonb, NOW(), NOW(), NOW()
+      )
+      ON CONFLICT (company_id, memory_type, memory_key) DO UPDATE SET
+        memory_value = EXCLUDED.memory_value,
+        source = 'admin_input',
+        updated_at = NOW(),
+        last_accessed_at = NOW()`,
+      [companyId, JSON.stringify(guideline)],
+    );
+
+    const { invalidateBrandVoiceCache } = await import('../utils/brand-voice-prompt');
+    invalidateBrandVoiceCache(companyId);
+
+    return res.json({ success: true, guideline });
+  } catch (err: any) {
+    console.error('[Brand Voice update-guideline] 오류:', err);
+    return res.status(500).json({ success: false, error: err?.message || '정정 실패' });
   }
 });
 

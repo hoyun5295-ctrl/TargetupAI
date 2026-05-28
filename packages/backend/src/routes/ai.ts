@@ -236,6 +236,7 @@ router.post('/generate-message', async (req: Request, res: Response) => {
       availableVarsCatalog: varCatalog,
       availableVars: availableVars,
       recentMessages,
+      companyId,  // ★ D225+ Brand Voice Learning — 회사별 가이드라인 자동 주입
     };
 
     const result = await generateMessages(prompt, targetInfo, extraContext);
@@ -884,6 +885,7 @@ router.post('/refine-message', requirePlanFeature('ai_messaging'), async (req: R
       companyName,
       recentMessages,
       rejectNumber,
+      companyId,  // ★ D225+ Brand Voice Learning — 회사별 가이드라인 자동 주입
     });
 
     if (result.candidates.length === 0) {
@@ -2047,7 +2049,10 @@ router.post('/operator/memory', async (req: Request, res: Response) => {
     if (!memory_type || !memory_key || !memory_value) {
       return res.status(400).json({ success: false, error: 'memory_type, memory_key, memory_value는 필수입니다.' });
     }
-    const validTypes: MemoryType[] = ['success_pattern', 'customer_insight', 'brand_tone_evolution', 'channel_performance', 'compliance_learning'];
+    const validTypes: MemoryType[] = [
+      'success_pattern', 'customer_insight', 'brand_tone_evolution', 'channel_performance', 'compliance_learning',
+      'representative_message', 'brand_guideline',  // ★ D225+ Brand Voice Learning
+    ];
     if (!validTypes.includes(memory_type)) {
       return res.status(400).json({ success: false, error: `memory_type은 ${validTypes.join('/')} 중 하나여야 합니다.` });
     }

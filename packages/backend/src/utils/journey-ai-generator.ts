@@ -16,6 +16,8 @@
 
 import { callAIWithFallback } from '../services/ai';
 import { buildMemoryPromptContext } from './company-memory';
+// ★ D225+ (2026-05-28 Harold 명시): Brand Voice Learning — 회사별 LMS 대표 문안 5건 + 가이드라인 자동 주입.
+import { buildSystemPromptWithBrandVoice } from './brand-voice-prompt';
 import { query } from '../config/database';
 import { sanitizeForSms } from './message-sanitizer';
 // ★ D210+ Phase 2 (Harold 명시 2026-05-23): CT-58 — 회사 customer DB 실측 프로필 동적 주입.
@@ -165,7 +167,7 @@ export async function generateJourneyPackage(input: JourneyAIGenerateInput): Pro
   const dataProfile = await getCompanyDataProfile(input.companyId).catch(() => null);
   const dataProfilePrompt = dataProfile ? formatProfileForAiPrompt(dataProfile) : '';
 
-  const system = `당신은 한국 마케팅 자동화 여정 설계 전문가입니다.
+  let system = `당신은 한국 마케팅 자동화 여정 설계 전문가입니다.
 회사 admin이 입력한 자연어 목표 또는 표준 템플릿 진입을 받아 완전한 여정 패키지를 JSON으로 응답합니다.
 
 [회사 컨텍스트]
@@ -480,6 +482,9 @@ VIP 회원님만을 위해 준비한 이번 봄 특별 안내,
     userMessage = `7 표준 시리즈 단축 진입: ${input.templateHint}\n\n위 회사 컨텍스트 + 시즌 + 메모리에 맞춰 ${input.templateHint} 시리즈의 표준 흐름을 풍성하게 작성한 JSON 응답하세요.`;
   }
 
+  // ★ D225+ Brand Voice Learning — 회사별 가이드라인 자동 주입 (회사 등록 미존재 시 옛 흐름 그대로)
+  system = await buildSystemPromptWithBrandVoice(input.companyId, system);
+
   // ★ D209+ (Harold 명시 2026-05-22): Sonnet 4.6 전환 — 기존 ai.ts generateMessages 시스템 프롬프트
   //   매트릭스(D152 + D80 정합) 정합 본질 + 비용 80% 절감.
   //   Phase D 통합: companyId + source 전달 → 회사별 월 한도 + cache + 통계 자동 활성.
@@ -572,7 +577,7 @@ export async function refineStepMessage(input: StepRefineInput): Promise<{ candi
 
   const maxBytes = input.channel === 'sms' ? 90 : 2000;
 
-  const system = `당신은 한국 마케팅 메시지 다듬기 전문가입니다.
+  let system = `당신은 한국 마케팅 메시지 다듬기 전문가입니다.
 회사 admin이 작성한 step 메시지를 받아 3가지 톤의 후보로 다듬어 JSON으로 응답합니다.
 
 [회사 컨텍스트]
@@ -617,6 +622,9 @@ ${memoryContext}
 }`;
 
   const userMessage = `원본 메시지:\n${input.currentMessage}\n\n위 메시지를 3가지 톤 후보로 다듬어 JSON으로 응답하세요. 혜택 placeholder + 변수는 그대로 유지하고 안내문/감성 텍스트만 정련하세요.`;
+
+  // ★ D225+ Brand Voice Learning — 회사별 가이드라인 자동 주입 (회사 등록 미존재 시 옛 흐름 그대로)
+  system = await buildSystemPromptWithBrandVoice(input.companyId, system);
 
   // ★ D209+ (Harold 명시 2026-05-22): Sonnet 4.6 전환 — D152 AI 다듬기 정합 본질
   //   (기존 ai.ts 흐름과 동일 모델) + 비용 80% 절감.

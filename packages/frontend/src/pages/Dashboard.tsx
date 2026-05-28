@@ -21,6 +21,7 @@ import CustomerDBModal from '../components/CustomerDBModal';
 import CustomerInsightModal from '../components/CustomerInsightModal';
 import DashboardHeader from '../components/DashboardHeader';
 import OnboardingCard from '../components/onboarding/OnboardingCard'; // ★ D219+ Part 2 (2026-05-27): AI 오퍼레이션 무료체험 사용자 진입 안내 카드
+import BrandVoiceNudgeCard from '../components/onboarding/BrandVoiceNudgeCard'; // ★ D225+ (2026-05-28): Brand Voice 미등록 회사 강력 push 카드
 import DirectPreviewModal from '../components/DirectPreviewModal';
 import DirectTargetFilterModal, { type FieldMeta } from '../components/DirectTargetFilterModal';
 import TargetSendModal from '../components/TargetSendModal';
@@ -2340,6 +2341,9 @@ const campaignData = {
 
       {/* 메인 */}
       <main className="max-w-7xl mx-auto px-3 md:px-4 py-4 md:py-8">
+        {/* ★ D225+ Brand Voice 미등록 회사 강력 push 카드 — 등록 완료 시 자동 사라짐 (24h cooldown 지원) */}
+        <BrandVoiceNudgeCard />
+
         {/* ===== 상단: 좌(60%) + 우(40%) 통합 — D186: 모바일 stacked + 데스크탑 좌우 ===== */}
         <div className="flex flex-col lg:flex-row gap-4 mb-4">
           {/* ===== 좌측 60%: 요금제/발송현황 + 동적카드 ===== */}

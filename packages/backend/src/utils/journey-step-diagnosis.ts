@@ -18,7 +18,7 @@
  *   - 모델 분리 (Sonnet 4.6 — 단순 분석/추천 영역, D209+ 정합)
  *   - AI 임의 혜택 X (placeholder 유지)
  *   - feedback_no_target_auto_relax (자동 정정 X — 회사 admin 명시 적용 의무)
- *   - 6,000사+ 운영 영향 0 (Read-only 진단 + 추천만)
+ *   - 한줄로 운영 영향 0 (Read-only 진단 + 추천만)
  */
 
 import { query } from '../config/database';

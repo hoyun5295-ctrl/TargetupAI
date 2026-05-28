@@ -107,14 +107,23 @@
 
 ---
 
-### 🚀 다음 세션 진입 가이드 (D224+ 세션 종결 후 — **Task #5 매뉴얼 이미지 + CHAPTER 10 신설**)
+### 🚀 D224+ 세션 전체 종결 매트릭스 (2026-05-27) — 9 작업 모두 완료
 
-> **★★★ D224+ 세션 종결 매트릭스 (2026-05-27) ★★★**:
-> 6 작업 완료 — (1) 한줄로 이니시스 V023 사고 영구 차단 (3 단계 누적 정정: closeUrl baseUrl 동적 helper + proto https 강제 + 운영 mid/signKey + use_chkfake 'Y') + (2) 레거시 HTTPS 인증서 갱신 (acme.sh webroot Aug 25 2026 — ZeroSSL ECC DV SSL CA 2) + (3) 레거시 운영 검증 (시크릿 모드 안전 + Mixed Content X) + (4) Dashboard DB 현황 본격 정정 (D222+ Phase 1 신설 5 부분 영구 제거 + CardDetailModal Journey 동급 재작성 + 6 carousel Linear/Stripe/Vercel 모던 + 라벨/숫자 1:1.7 비율) + (5) backend dashboard.ts 파일 영구 삭제 + (6) Task #5 매뉴얼 다음 세션 진입 핸드오프 신설.
+> **★★★ D224+ 세션 전체 종결 (2026-05-27) ★★★**:
+> 9 작업 모두 완료 —
+> (1) 한줄로 이니시스 V023 사고 영구 차단 (3 단계 누적 정정: closeUrl baseUrl 동적 helper + proto https 강제 + 운영 mid/signKey + use_chkfake 'Y') +
+> (2) 레거시 HTTPS 인증서 갱신 (acme.sh webroot Aug 25 2026 — ZeroSSL ECC DV SSL CA 2) +
+> (3) 레거시 운영 검증 (시크릿 모드 안전 + Mixed Content X) +
+> (4) Dashboard DB 현황 본격 정정 (D222+ Phase 1 신설 5 부분 영구 제거 + CardDetailModal Journey 동급 재작성 + 6 carousel Linear/Stripe/Vercel 모던 + 라벨/숫자 1:1.7 비율) +
+> (5) backend dashboard.ts 파일 영구 삭제 +
+> (6) 매뉴얼 v3 정정 + CHAPTER 10 신설 + 챕터 재정렬 (AI 오퍼레이션 1번 메뉴 이동 — Harold 명시 한줄로 차별점 1순위 + 옛 CHAPTER 03 AI 자동발송 + 옛 CHAPTER 06 자동발송 BETA article 영구 제거 + 챕터 번호 재정렬 8 챕터 + Harold 업로드 이미지 3건 활용 + 별로 5건 + 내용 X 3건 placeholder 제거) +
+> (7) 영업팀장 박성용 신고 fix (알림톡 LMS 대체 제목 영구 알럴 + 직접발송 스크롤 사라짐 — backend campaigns.ts destructure + 검증 분기 정정 + frontend AlimtalkChannelPanel/Dashboard nextSubject 매핑 + DirectSendPanel useEffect cleanup + 8 Edit) +
+> (8) 영업팀장 남지현 신고 fix (AI 다듬기 폴라초이스 326자 영구 실패 — services/ai.ts validateAndNormalizeRefinedCandidates 안 notEnriched 분기 영구 폐기 — 105% 임계값 영구 catch 사고 3 Edit) +
+> (9) 메모리 + STATUS 업데이트.
 >
-> **★ Harold 통합 배포 명령어** (D224+ 세션 종결):
+> **★ Harold 통합 배포 명령어** (D224+ 전체 세션 종결):
 > ```
-> tp-push "D224+ 세션 종결 — 이니시스 V023 영구 차단 (closeUrl helper + proto https + mid/signKey + use_chkfake Y) + HTTPS 인증서 갱신 + Dashboard DB 현황 본격 정정 (D222+ Phase 1 영구 제거 + CardDetailModal Journey 동급 + 6 carousel Linear/Stripe/Vercel 모던 + 라벨/숫자 1:1.7 비율) + backend dashboard.ts 파일 영구 삭제"
+> tp-push "D224+ 세션 전체 종결 — 이니시스 V023 영구 차단 + HTTPS 인증서 갱신 + Dashboard DB 현황 본격 정정 (CardDetailModal Journey 동급 + 6 carousel 모던) + backend dashboard.ts 영구 삭제 + 매뉴얼 v3 정정 (CHAPTER 10 AI 오퍼레이션 1번 메뉴 이동 + 옛 CHAPTER 03 + 06 영구 제거 + 챕터 재정렬 8 챕터) + 영업팀장 박성용 알림톡 LMS 대체 제목 + 직접발송 스크롤 영구 fix (campaigns.ts destructure + 검증 분기 + AlimtalkChannelPanel nextSubject 매핑 + handleAlimtalkSend 안전망 + DirectSendPanel/Dashboard useEffect cleanup) + 영업팀장 남지현 AI 다듬기 폴라초이스 326자 영구 실패 fix (ai.ts notEnriched 분기 영구 폐기 — 105% 임계값 영구 catch 사고)"
 > ```
 > 서버 SSH 후 = `cd ~/targetup-app && git pull` + backend `build:safe` + `pm2 restart all` + frontend `build:safe`. DB 변경 X.
 >

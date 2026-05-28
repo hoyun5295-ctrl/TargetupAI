@@ -44,7 +44,7 @@ export default function Step1Welcome({ onNext }: Props) {
           <BarChart3 className="w-6 h-6 text-cyan-400 mb-3" />
           <h3 className="text-sm font-semibold text-white mb-1">정확한 추출</h3>
           <p className="text-[12px] text-white/60 leading-relaxed">
-            6,000사+ 운영 검증 안전망. AI 단순 SQL 생성 절대 X — 검증된 필드/연산자만 사용.
+            한줄로 운영 검증 안전망. AI 단순 SQL 생성 절대 X — 검증된 필드/연산자만 사용.
           </p>
         </div>
         <div className="rounded-xl border border-white/10 bg-white/5 p-5">

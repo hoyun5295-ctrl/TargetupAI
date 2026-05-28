@@ -33,6 +33,8 @@ import { useToast } from '../components/ToastProvider';
 import TopImpactCard, { TopImpactMemory, MemoryType } from '../components/AiMemory/TopImpactCard';
 import MemoryTypeGuideModal from '../components/AiMemory/MemoryTypeGuideModal';
 import AddMemoryModal, { NewMemoryInput } from '../components/AiMemory/AddMemoryModal';
+// ★ D225+ Brand Voice Learning (2026-05-28 Harold 명시)
+import BrandVoiceCard from '../components/AiMemory/BrandVoiceCard';
 
 // ════════════════════════════════════════════════════════════════════
 // 타입
@@ -606,6 +608,24 @@ export default function AiMemoryPage() {
             </div>
           </div>
         )}
+
+        {/* ───────── ★ D225+ Brand Voice Learning — 회사별 LMS 대표 문안 5건 + AI 자동 가이드라인 ───────── */}
+        <BrandVoiceCard
+          apiBase=""
+          token={token() || ''}
+          onToast={(msg, type) => {
+            if (type === 'success') toast.success(msg);
+            else if (type === 'error') toast.error(msg);
+            else toast.info(msg);
+          }}
+          onConfirm={(opts) => setConfirmState({
+            title: opts.title,
+            description: opts.description,
+            confirmLabel: opts.confirmLabel,
+            cancelLabel: opts.cancelLabel,
+            onConfirm: opts.onConfirm,
+          })}
+        />
 
         {/* ───────── 2. AI 자율 진단 카드 ───────── */}
         <div className="p-5 bg-gradient-to-br from-violet-500/20 via-fuchsia-500/15 to-pink-500/20 border border-violet-400/30 rounded-2xl">

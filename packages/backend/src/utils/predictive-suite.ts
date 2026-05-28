@@ -19,7 +19,7 @@
  *  - cold start fallback (데이터 부족 신규 회사도 정합)
  *  - 안전 fallback (모델 오류 시 0.5 중립값 + 발송 차단 X)
  *  - caching (cdp_customer_predictions 24h TTL)
- *  - 6,000사+ 운영 영향 0 (predictions 미사용 회사 영향 0)
+ *  - 한줄로 운영 영향 0 (predictions 미사용 회사 영향 0)
  */
 
 import { query } from '../config/database';
