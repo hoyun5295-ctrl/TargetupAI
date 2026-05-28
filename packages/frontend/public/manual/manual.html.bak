@@ -151,9 +151,9 @@
   <main id="main" class="min-w-0 selectable">
 
     <!-- ====================================================== CHAPTER 1 -->
-    <article class="chapter" data-ch="2">
+    <article class="chapter" data-ch="1">
       <header class="mb-10">
-        <div class="text-[11px] tracking-[0.2em] font-mono text-violet-300">CHAPTER 02</div>
+        <div class="text-[11px] tracking-[0.2em] font-mono text-violet-300">CHAPTER 01</div>
         <h1 class="mt-2 text-3xl sm:text-4xl text-white font-semibold tracking-tight">시작하기 — 메인 대시보드</h1>
         <p class="mt-3 text-white/55 max-w-2xl leading-relaxed">로그인 후 가장 먼저 보이는 화면. 회사의 발송 현황과 고객 DB 통계를 한눈에 확인하고, 자주 쓰는 발송 기능으로 빠르게 진입할 수 있습니다.</p>
         <div class="mt-6 h-px bg-gradient-to-r from-violet-400/50 via-fuchsia-400/30 to-transparent"></div>
@@ -178,28 +178,28 @@
             <tr class="border-b border-white/10"><td class="px-4 py-3 text-white/60">요금제 현황</td><td class="px-4 py-3 leading-relaxed">현재 요금제 + 고객 DB 사용량 (예: <code class="bg-violet-500/10 text-violet-200 rounded px-1.5 py-0.5 font-mono text-[12px]">29,997 / 999,999,999명</code>)</td></tr>
             <tr class="border-b border-white/10"><td class="px-4 py-3 text-white/60">발송 현황</td><td class="px-4 py-3 leading-relaxed">이번 달 성공 건수, 평균 성공률, 총 사용 금액</td></tr>
             <tr class="border-b border-white/10"><td class="px-4 py-3 text-white/60">DB 현황</td><td class="px-4 py-3 leading-relaxed">전체 고객, 수신동의/거부, 이번달 사용금액, 평균객단가·등급·채널·시간대별 분포, AI 인사이트 카드</td></tr>
-            <tr><td class="px-4 py-3 text-white/60">AI 오퍼레이션 카드</td><td class="px-4 py-3 leading-relaxed">우측 큰 카드 — 자연어 한 줄 입력으로 AI가 타겟·메시지·채널·시점을 자동 설계 (메인 액션 · Chapter 01 영역 본질)</td></tr>
+            <tr><td class="px-4 py-3 text-white/60">AI 자동발송 카드</td><td class="px-4 py-3 leading-relaxed">우측 큰 카드 — 자연어 한 줄 입력으로 AI가 타겟·메시지·채널·시점을 자동 설계 (메인 액션)</td></tr>
           </tbody>
         </table>
       </div>
 
       <h2 class="text-lg font-semibold text-white mb-3">헤더 매뉴얼 메뉴</h2>
-      <p class="text-white/75 leading-relaxed mb-10 max-w-2xl">상단 헤더 안 <strong class="text-violet-300 font-semibold">매뉴얼</strong> 메뉴를 클릭하면 본 가이드 페이지로 진입합니다. 한줄로의 모든 기능을 8 카테고리로 정리한 안내서이며, Chapter 01은 한줄로 차별점 영역인 <strong class="text-fuchsia-200">AI 오퍼레이션</strong>으로 시작합니다.</p>
+      <p class="text-white/75 leading-relaxed mb-10 max-w-2xl">상단 헤더 안 <strong class="text-violet-300 font-semibold">매뉴얼</strong> 메뉴를 클릭하면 본 가이드 페이지로 진입합니다. 한줄로의 모든 기능을 9 카테고리로 정리한 안내서입니다.</p>
 
       <!-- Tip -->
       <div class="rounded-xl border border-emerald-400/30 bg-emerald-500/10 p-4 mb-12 flex gap-3">
         <svg class="shrink-0 text-emerald-200 mt-0.5" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18h6M10 22h4M12 2a7 7 0 0 0-4 12.7c.6.5 1 1.3 1 2.1V18h6v-1.2c0-.8.4-1.6 1-2.1A7 7 0 0 0 12 2Z"/></svg>
         <div>
           <div class="text-emerald-200 font-semibold text-sm mb-1">Tip — 가장 빠른 발송 흐름</div>
-          <div class="text-emerald-100/85 text-sm leading-relaxed">우측 보라 그라데이션 카드 <strong>AI 오퍼레이션</strong>이 가장 빠른 발송 경로입니다. "30대 여성 VVIP에게 봄 신상 안내" 같은 자연어 한 줄로 캠페인을 만들 수 있습니다(Chapter 01 영역 본질).</div>
+          <div class="text-emerald-100/85 text-sm leading-relaxed">우측 보라 그라데이션 카드 <strong>AI 자동발송</strong>이 가장 빠른 발송 경로입니다. "30대 여성 VVIP에게 봄 신상 안내" 같은 자연어 한 줄로 캠페인을 만들 수 있습니다.</div>
         </div>
       </div>
     </article>
 
     <!-- ====================================================== CHAPTER 2 -->
-    <article class="chapter" data-ch="3">
+    <article class="chapter" data-ch="2">
       <header class="mb-10">
-        <div class="text-[11px] tracking-[0.2em] font-mono text-violet-300">CHAPTER 03</div>
+        <div class="text-[11px] tracking-[0.2em] font-mono text-violet-300">CHAPTER 02</div>
         <h1 class="mt-2 text-3xl sm:text-4xl text-white font-semibold tracking-tight">고객 데이터 관리</h1>
         <p class="mt-3 text-white/55 max-w-2xl leading-relaxed">발송의 출발점은 고객 데이터입니다. 엑셀/CSV를 AI가 표준 필드에 자동 매핑하고, 고유 필드는 커스텀 슬롯에 저장해 발송 변수로 활용할 수 있습니다.</p>
         <div class="mt-6 h-px bg-gradient-to-r from-violet-400/50 via-fuchsia-400/30 to-transparent"></div>
@@ -351,7 +351,7 @@
       <header class="mb-10">
         <div class="text-[11px] tracking-[0.2em] font-mono text-violet-300">CHAPTER 05</div>
         <h1 class="mt-2 text-3xl sm:text-4xl text-white font-semibold tracking-tight">직접 타겟 발송</h1>
-        <p class="mt-3 text-white/55 max-w-2xl leading-relaxed">조건 필터로 정밀 타겟팅. 고객 DB에서 조건에 맞는 고객만 정확히 추출해 발송합니다. AI 오퍼레이션보다 더 세밀한 수동 제어가 필요한 캠페인에 적합합니다.</p>
+        <p class="mt-3 text-white/55 max-w-2xl leading-relaxed">조건 필터로 정밀 타겟팅. 고객 DB에서 조건에 맞는 고객만 정확히 추출해 발송합니다. AI 자동발송보다 더 세밀한 수동 제어가 필요한 캠페인에 적합합니다.</p>
         <div class="mt-6 h-px bg-gradient-to-r from-violet-400/50 via-fuchsia-400/30 to-transparent"></div>
       </header>
 
@@ -395,7 +395,7 @@
             <div class="w-10 h-10 shrink-0 rounded-lg bg-gradient-to-br from-emerald-500 to-teal-500 text-white font-semibold grid place-items-center text-sm">3</div>
             <div class="min-w-0 flex-1">
               <div class="text-white font-semibold mb-1">메시지 작성 및 발송</div>
-              <p class="text-white/70 text-sm leading-relaxed">추출된 고객을 확인하고 메시지를 작성합니다. AI 문구 추천, 스팸필터 사전 검사, 변수 적용, 광고 표시 등 AI 오퍼레이션에서 쓰던 모든 부가 기능을 동일하게 사용할 수 있습니다.</p>
+              <p class="text-white/70 text-sm leading-relaxed">추출된 고객을 확인하고 메시지를 작성합니다. AI 문구 추천, 스팸필터 사전 검사, 변수 적용, 광고 표시 등 AI 자동발송에서 쓰던 모든 부가 기능을 동일하게 사용할 수 있습니다.</p>
             </div>
           </div>
         </div>
@@ -410,10 +410,115 @@
       </div>
     </article>
 
-    <!-- ====================================================== CHAPTER 7 -->
+    <!-- ====================================================== CHAPTER 6 -->
     <article class="chapter" data-ch="6">
       <header class="mb-10">
-        <div class="text-[11px] tracking-[0.2em] font-mono text-violet-300">CHAPTER 06</div>
+        <div class="flex items-center gap-2">
+          <div class="text-[11px] tracking-[0.2em] font-mono text-violet-300">CHAPTER 06</div>
+          <span class="px-2 py-0.5 rounded-md text-[10px] tracking-widest font-mono uppercase bg-fuchsia-400/15 text-fuchsia-200 border border-fuchsia-400/30">BETA</span>
+        </div>
+        <h1 class="mt-2 text-3xl sm:text-4xl text-white font-semibold tracking-tight">자동발송</h1>
+        <p class="mt-3 text-white/55 max-w-2xl leading-relaxed">반복 스케줄 캠페인. 한 번 설정해 두면 매월·매주 자동으로 발송되는 반복 캠페인입니다. 생일 축하, VIP 주간 프로모션, 휴면 고객 리마인드 같은 정기 발송을 자동화합니다.</p>
+        <div class="mt-6 h-px bg-gradient-to-r from-violet-400/50 via-fuchsia-400/30 to-transparent"></div>
+      </header>
+
+      <div class="rounded-xl border border-amber-400/30 bg-amber-500/10 p-4 mb-10 flex gap-3">
+        <svg class="shrink-0 text-amber-200 mt-0.5" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21.7 18-8-14a2 2 0 0 0-3.4 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.7-3Z"/><path d="M12 9v4M12 17h.01"/></svg>
+        <div>
+          <div class="text-amber-200 font-semibold text-sm mb-1">Warn — BETA 안내</div>
+          <div class="text-amber-100/85 text-sm leading-relaxed">현재 베타테스트 진행 중입니다. 안정성 검증을 위해 일부 요금제에 한해 제공되며, 정식 오픈 전까지 한줄로 운영팀의 모니터링 하에 운영됩니다.</div>
+        </div>
+      </div>
+
+      <h2 class="text-lg font-semibold text-white mb-3">5단계 위저드</h2>
+      <div class="space-y-4 mb-12">
+        <div class="step rounded-xl border border-violet-400/20 bg-gradient-to-br from-violet-500/10 via-fuchsia-500/5 to-transparent p-5 hover:border-violet-400/40 transition-colors">
+          <div class="flex items-start gap-4">
+            <div class="w-10 h-10 shrink-0 rounded-lg bg-gradient-to-br from-violet-500 to-fuchsia-500 text-white font-semibold grid place-items-center text-sm">1</div>
+            <div class="min-w-0 flex-1">
+              <div class="text-white font-semibold mb-1">기본 정보</div>
+              <p class="text-white/70 text-sm leading-relaxed">캠페인 이름 + 설명 입력. 운영팀과 다른 담당자가 알아볼 수 있는 이름을 권장합니다.</p>
+            </div>
+          </div>
+        </div>
+        <div class="step rounded-xl border border-violet-400/20 bg-gradient-to-br from-violet-500/10 via-fuchsia-500/5 to-transparent p-5 hover:border-violet-400/40 transition-colors">
+          <div class="flex items-start gap-4">
+            <div class="w-10 h-10 shrink-0 rounded-lg bg-gradient-to-br from-violet-500 to-fuchsia-500 text-white font-semibold grid place-items-center text-sm">2</div>
+            <div class="min-w-0 flex-1">
+              <div class="text-white font-semibold mb-1">활용 필드 선택</div>
+              <p class="text-white/70 text-sm leading-relaxed">개인화에 사용할 고객 필드를 선택합니다. 매번 발송 시점의 최신 고객 데이터로 치환됩니다.</p>
+            </div>
+          </div>
+        </div>
+        <div class="step rounded-xl border border-violet-400/20 bg-gradient-to-br from-violet-500/10 via-fuchsia-500/5 to-transparent p-5 hover:border-violet-400/40 transition-colors">
+          <div class="flex items-start gap-4">
+            <div class="w-10 h-10 shrink-0 rounded-lg bg-gradient-to-br from-violet-500 to-fuchsia-500 text-white font-semibold grid place-items-center text-sm">3</div>
+            <div class="min-w-0 flex-1">
+              <div class="text-white font-semibold mb-1">스케줄 설정</div>
+              <p class="text-white/70 text-sm leading-relaxed">매월 N일 또는 매주 N요일 중 반복 주기를 선택. 발송 시각은 한국 시간(KST) 기준입니다.</p>
+            </div>
+          </div>
+        </div>
+        <div class="step rounded-xl border border-violet-400/20 bg-gradient-to-br from-violet-500/10 via-fuchsia-500/5 to-transparent p-5 hover:border-violet-400/40 transition-colors">
+          <div class="flex items-start gap-4">
+            <div class="w-10 h-10 shrink-0 rounded-lg bg-gradient-to-br from-violet-500 to-fuchsia-500 text-white font-semibold grid place-items-center text-sm">4</div>
+            <div class="min-w-0 flex-1">
+              <div class="text-white font-semibold mb-1">메시지 작성</div>
+              <p class="text-white/70 text-sm leading-relaxed">SMS · LMS · MMS 채널 선택 + 메시지 작성. AI 문안 자동 생성 모드 활용 시 발송 하루 전 AI가 최신 문안을 자동 생성하고, 실패 시 폴백 메시지로 안전하게 발송됩니다.</p>
+            </div>
+          </div>
+        </div>
+        <div class="step rounded-xl border border-violet-400/20 bg-gradient-to-br from-violet-500/10 via-fuchsia-500/5 to-transparent p-5 hover:border-violet-400/40 transition-colors">
+          <div class="flex items-start gap-4">
+            <div class="w-10 h-10 shrink-0 rounded-lg bg-gradient-to-br from-emerald-500 to-teal-500 text-white font-semibold grid place-items-center text-sm">5</div>
+            <div class="min-w-0 flex-1">
+              <div class="text-white font-semibold mb-1">최종 확인</div>
+              <p class="text-white/70 text-sm leading-relaxed">전체 설정을 요약 화면에서 확인하고 첫 회차 미리보기를 검토합니다. 문제 없으면 활성화하여 자동발송 시작.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <h2 class="text-lg font-semibold text-white mb-3">자동 라이프사이클</h2>
+      <p class="text-white/60 text-sm leading-relaxed mb-4 max-w-2xl">한줄로는 발송 전 단계적으로 안전 검사를 수행합니다.</p>
+
+      <div class="relative pl-6 mb-10 border-l border-violet-400/30">
+        <div class="absolute -left-1 top-1.5 w-3 h-3 rounded-full bg-violet-400 ring-4 ring-violet-400/15"></div>
+        <div class="mb-6">
+          <div class="font-mono text-[10px] tracking-[0.2em] text-violet-300 mb-1">D-1 · 24시간 전</div>
+          <div class="text-white font-semibold text-sm mb-1">AI 문안 생성 + 사전 알림</div>
+          <p class="text-white/65 text-sm leading-relaxed">자동 스팸테스트 후 담당자에게 알림 전송.</p>
+        </div>
+
+        <div class="absolute left-[-5px] top-[120px] w-3 h-3 rounded-full bg-fuchsia-400 ring-4 ring-fuchsia-400/15 hidden"></div>
+        <div class="mb-6 relative">
+          <div class="absolute -left-[25px] top-1.5 w-3 h-3 rounded-full bg-fuchsia-400 ring-4 ring-fuchsia-400/15"></div>
+          <div class="font-mono text-[10px] tracking-[0.2em] text-fuchsia-300 mb-1">D-DAY · 2시간 전</div>
+          <div class="text-white font-semibold text-sm mb-1">스팸 재테스트 + 담당자 테스트 발송</div>
+          <p class="text-white/65 text-sm leading-relaxed">LMS 자동 알림으로 담당자에게 1건 테스트 발송.</p>
+        </div>
+
+        <div class="relative">
+          <div class="absolute -left-[25px] top-1.5 w-3 h-3 rounded-full bg-emerald-400 ring-4 ring-emerald-400/15"></div>
+          <div class="font-mono text-[10px] tracking-[0.2em] text-emerald-300 mb-1">D-DAY · 발송 시각</div>
+          <div class="text-white font-semibold text-sm mb-1">실제 발송 + 결과 기록</div>
+          <p class="text-white/65 text-sm leading-relaxed">발송 완료 후 통계가 자동 기록됩니다.</p>
+        </div>
+      </div>
+
+      <h2 class="text-lg font-semibold text-white mb-3">안전 강화 흐름</h2>
+      <div class="grid sm:grid-cols-2 gap-3">
+        <div class="rounded-lg border border-white/10 bg-white/5 p-3.5"><div class="text-white text-sm font-semibold mb-0.5">snapshot 보존</div><div class="text-white/55 text-xs leading-relaxed">발송 직전 메시지 상태 저장</div></div>
+        <div class="rounded-lg border border-white/10 bg-white/5 p-3.5"><div class="text-white text-sm font-semibold mb-0.5">즉시 정지 단축 URL</div><div class="text-white/55 text-xs leading-relaxed">담당자 알림에 포함된 1-click 정지 링크</div></div>
+        <div class="rounded-lg border border-white/10 bg-white/5 p-3.5"><div class="text-white text-sm font-semibold mb-0.5">결과 알림 LMS</div><div class="text-white/55 text-xs leading-relaxed">발송 완료 후 통계 자동 안내</div></div>
+        <div class="rounded-lg border border-white/10 bg-white/5 p-3.5"><div class="text-white text-sm font-semibold mb-0.5">7일 학습 통합</div><div class="text-white/55 text-xs leading-relaxed">성공/실패 패턴 AI 자동 학습</div></div>
+      </div>
+    </article>
+
+    <!-- ====================================================== CHAPTER 7 -->
+    <article class="chapter" data-ch="7">
+      <header class="mb-10">
+        <div class="text-[11px] tracking-[0.2em] font-mono text-violet-300">CHAPTER 07</div>
         <h1 class="mt-2 text-3xl sm:text-4xl text-white font-semibold tracking-tight">세그먼트</h1>
         <p class="mt-3 text-white/55 max-w-2xl leading-relaxed">자연어 세그먼트 생성 + 저장 + 재활용. 자주 사용하는 고객 추출 조건을 자연어로 생성하고 저장하여 모든 발송 흐름에서 재활용합니다.</p>
         <div class="mt-6 h-px bg-gradient-to-r from-violet-400/50 via-fuchsia-400/30 to-transparent"></div>
@@ -445,7 +550,7 @@
             <div class="w-10 h-10 shrink-0 rounded-lg bg-gradient-to-br from-emerald-500 to-teal-500 text-white font-semibold grid place-items-center text-sm">3</div>
             <div class="min-w-0 flex-1">
               <div class="text-white font-semibold mb-1">저장</div>
-              <p class="text-white/70 text-sm leading-relaxed">세그먼트 이름 + 이모지 아이콘 + 설명을 입력하여 저장합니다. 저장된 세그먼트는 모든 발송 흐름(AI 오퍼레이션 / 직접 타겟 발송 / AI 오퍼레이션 안 자동 마케팅)에서 재활용 가능합니다.</p>
+              <p class="text-white/70 text-sm leading-relaxed">세그먼트 이름 + 이모지 아이콘 + 설명을 입력하여 저장합니다. 저장된 세그먼트는 모든 발송 흐름(AI 자동발송 / 직접 타겟 발송 / 자동발송)에서 재활용 가능합니다.</p>
             </div>
           </div>
         </div>
@@ -471,9 +576,9 @@
     </article>
 
     <!-- ====================================================== CHAPTER 8 -->
-    <article class="chapter" data-ch="7">
+    <article class="chapter" data-ch="8">
       <header class="mb-10">
-        <div class="text-[11px] tracking-[0.2em] font-mono text-violet-300">CHAPTER 07</div>
+        <div class="text-[11px] tracking-[0.2em] font-mono text-violet-300">CHAPTER 08</div>
         <h1 class="mt-2 text-3xl sm:text-4xl text-white font-semibold tracking-tight">발송 결과 &amp; 분석</h1>
         <p class="mt-3 text-white/55 max-w-2xl leading-relaxed">캠페인 성과 추적 + AI 인사이트. 발송한 모든 캠페인의 결과를 한 곳에서 추적합니다. 캠페인별 통계, 수신자별 상세 결과, 캘린더 일정 보기, AI 성과 분석까지 제공합니다.</p>
         <div class="mt-6 h-px bg-gradient-to-r from-violet-400/50 via-fuchsia-400/30 to-transparent"></div>
@@ -482,7 +587,7 @@
       <div class="space-y-4 mb-10">
         <div class="step rounded-xl border border-violet-400/20 bg-gradient-to-br from-violet-500/10 via-fuchsia-500/5 to-transparent p-5 hover:border-violet-400/40 transition-colors">
           <div class="flex items-start gap-4">
-            <div class="w-10 h-10 shrink-0 rounded-lg bg-gradient-to-br from-violet-500 to-fuchsia-500 text-white font-semibold grid place-items-center text-sm font-mono text-[12px]">7·1</div>
+            <div class="w-10 h-10 shrink-0 rounded-lg bg-gradient-to-br from-violet-500 to-fuchsia-500 text-white font-semibold grid place-items-center text-sm font-mono text-[12px]">8·1</div>
             <div class="min-w-0 flex-1">
               <div class="text-white font-semibold mb-1">발송 결과 목록</div>
               <p class="text-white/70 text-sm leading-relaxed">모든 캠페인을 카드 형태로 정렬해 보여줍니다. 일별/월별 토글, 상태별 필터(발송중·완료·예약·취소·실패), 광고 여부 표시.</p>
@@ -492,7 +597,7 @@
 
         <div class="step rounded-xl border border-violet-400/20 bg-gradient-to-br from-violet-500/10 via-fuchsia-500/5 to-transparent p-5 hover:border-violet-400/40 transition-colors">
           <div class="flex items-start gap-4">
-            <div class="w-10 h-10 shrink-0 rounded-lg bg-gradient-to-br from-violet-500 to-fuchsia-500 text-white font-semibold grid place-items-center text-sm font-mono text-[12px]">7·2</div>
+            <div class="w-10 h-10 shrink-0 rounded-lg bg-gradient-to-br from-violet-500 to-fuchsia-500 text-white font-semibold grid place-items-center text-sm font-mono text-[12px]">8·2</div>
             <div class="min-w-0 flex-1">
               <div class="text-white font-semibold mb-2">캠페인 상세</div>
               <p class="text-white/70 text-sm leading-relaxed mb-3">특정 캠페인을 클릭하면 발송 통계, 통신사별 분포, 사용된 메시지, 비용 정산 내역을 확인할 수 있습니다.</p>
@@ -508,7 +613,7 @@
 
         <div class="step rounded-xl border border-violet-400/20 bg-gradient-to-br from-violet-500/10 via-fuchsia-500/5 to-transparent p-5 hover:border-violet-400/40 transition-colors">
           <div class="flex items-start gap-4">
-            <div class="w-10 h-10 shrink-0 rounded-lg bg-gradient-to-br from-cyan-500 to-blue-500 text-white font-semibold grid place-items-center text-sm font-mono text-[12px]">7·3</div>
+            <div class="w-10 h-10 shrink-0 rounded-lg bg-gradient-to-br from-cyan-500 to-blue-500 text-white font-semibold grid place-items-center text-sm font-mono text-[12px]">8·3</div>
             <div class="min-w-0 flex-1">
               <div class="text-white font-semibold mb-1">발송 상세 내역</div>
               <p class="text-white/70 text-sm leading-relaxed">수신자 한 명 한 명의 발송 결과를 확인합니다. 휴대폰번호 · 통신사 · 상태 · 발송시각 · 결과코드. 엑셀 다운로드(한글 헤더 + KST 시간), 실패 사유 분석.</p>
@@ -518,7 +623,7 @@
 
         <div class="step rounded-xl border border-violet-400/20 bg-gradient-to-br from-violet-500/10 via-fuchsia-500/5 to-transparent p-5 hover:border-violet-400/40 transition-colors">
           <div class="flex items-start gap-4">
-            <div class="w-10 h-10 shrink-0 rounded-lg bg-gradient-to-br from-cyan-500 to-blue-500 text-white font-semibold grid place-items-center text-sm font-mono text-[12px]">7·4</div>
+            <div class="w-10 h-10 shrink-0 rounded-lg bg-gradient-to-br from-cyan-500 to-blue-500 text-white font-semibold grid place-items-center text-sm font-mono text-[12px]">8·4</div>
             <div class="min-w-0 flex-1">
               <div class="text-white font-semibold mb-1">캘린더</div>
               <p class="text-white/70 text-sm leading-relaxed">월별 캘린더 뷰로 발송 일정을 한눈에 봅니다. 일자를 클릭하면 그날의 캠페인 목록 모달이 열립니다.</p>
@@ -528,7 +633,7 @@
 
         <div class="step rounded-xl border border-violet-400/20 bg-gradient-to-br from-violet-500/10 via-fuchsia-500/5 to-transparent p-5 hover:border-violet-400/40 transition-colors">
           <div class="flex items-start gap-4">
-            <div class="w-10 h-10 shrink-0 rounded-lg bg-gradient-to-br from-slate-500 to-gray-500 text-white font-semibold grid place-items-center text-sm font-mono text-[12px]">7·5</div>
+            <div class="w-10 h-10 shrink-0 rounded-lg bg-gradient-to-br from-slate-500 to-gray-500 text-white font-semibold grid place-items-center text-sm font-mono text-[12px]">8·5</div>
             <div class="min-w-0 flex-1">
               <div class="text-white font-semibold mb-1">최근 캠페인</div>
               <p class="text-white/70 text-sm leading-relaxed">대시보드의 최근 캠페인 카드를 클릭하면 가장 최근에 보낸 5건을 빠르게 다시 볼 수 있습니다.</p>
@@ -538,7 +643,7 @@
 
         <div class="step rounded-xl border border-violet-400/20 bg-gradient-to-br from-violet-500/10 via-fuchsia-500/5 to-transparent p-5 hover:border-violet-400/40 transition-colors">
           <div class="flex items-start gap-4">
-            <div class="w-10 h-10 shrink-0 rounded-lg bg-gradient-to-br from-violet-500 to-fuchsia-500 text-white font-semibold grid place-items-center text-sm font-mono text-[12px]">7·6</div>
+            <div class="w-10 h-10 shrink-0 rounded-lg bg-gradient-to-br from-violet-500 to-fuchsia-500 text-white font-semibold grid place-items-center text-sm font-mono text-[12px]">8·6</div>
             <div class="min-w-0 flex-1">
               <div class="text-white font-semibold mb-2">AI 분석</div>
               <p class="text-white/70 text-sm leading-relaxed mb-3">발송 데이터를 AI가 분석하여 마케팅 인사이트를 제공합니다.</p>
@@ -546,7 +651,7 @@
                 <li>· 가장 효과적인 발송 시간대 (예: "화요일 오전 10시 발송이 가장 효과적")</li>
                 <li>· 가장 반응이 좋은 메시지 패턴</li>
                 <li>· 다음 캠페인 추천 (요금제별 제공)</li>
-                <li>· 1-click 액션 (추천 → AI 오퍼레이션 진입)</li>
+                <li>· 1-click 액션 (추천 → AI 자동발송 진입)</li>
               </ul>
             </div>
           </div>
@@ -554,7 +659,7 @@
 
         <div class="step rounded-xl border border-violet-400/20 bg-gradient-to-br from-violet-500/10 via-fuchsia-500/5 to-transparent p-5 hover:border-violet-400/40 transition-colors">
           <div class="flex items-start gap-4">
-            <div class="w-10 h-10 shrink-0 rounded-lg bg-gradient-to-br from-emerald-500 to-teal-500 text-white font-semibold grid place-items-center text-sm font-mono text-[12px]">7·7</div>
+            <div class="w-10 h-10 shrink-0 rounded-lg bg-gradient-to-br from-emerald-500 to-teal-500 text-white font-semibold grid place-items-center text-sm font-mono text-[12px]">8·7</div>
             <div class="min-w-0 flex-1">
               <div class="text-white font-semibold mb-1">일일 인사이트 메일</div>
               <p class="text-white/70 text-sm leading-relaxed">매일 9시 정각 자동 발송되는 AI 인사이트 메일. 어제 발송 통계 요약, 등급별/채널별 분포 변화, 오늘 추천 캠페인 한 줄, 1-click 진입 링크.</p>
@@ -565,9 +670,9 @@
     </article>
 
     <!-- ====================================================== CHAPTER 9 -->
-    <article class="chapter" data-ch="8">
+    <article class="chapter" data-ch="9">
       <header class="mb-10">
-        <div class="text-[11px] tracking-[0.2em] font-mono text-violet-300">CHAPTER 08</div>
+        <div class="text-[11px] tracking-[0.2em] font-mono text-violet-300">CHAPTER 09</div>
         <h1 class="mt-2 text-3xl sm:text-4xl text-white font-semibold tracking-tight">부가 기능</h1>
         <p class="mt-3 text-white/55 max-w-2xl leading-relaxed">템플릿 · 수신거부 · 예약. 일상적으로 자주 쓰는 보조 기능들입니다.</p>
         <div class="mt-6 h-px bg-gradient-to-r from-violet-400/50 via-fuchsia-400/30 to-transparent"></div>
@@ -576,7 +681,7 @@
       <div class="space-y-4 mb-10">
         <div class="step rounded-xl border border-violet-400/20 bg-gradient-to-br from-violet-500/10 via-fuchsia-500/5 to-transparent p-5 hover:border-violet-400/40 transition-colors">
           <div class="flex items-start gap-4">
-            <div class="w-10 h-10 shrink-0 rounded-lg bg-gradient-to-br from-violet-500 to-fuchsia-500 text-white font-semibold grid place-items-center text-sm font-mono text-[12px]">8·1</div>
+            <div class="w-10 h-10 shrink-0 rounded-lg bg-gradient-to-br from-violet-500 to-fuchsia-500 text-white font-semibold grid place-items-center text-sm font-mono text-[12px]">9·1</div>
             <div class="min-w-0 flex-1">
               <div class="text-white font-semibold mb-2">AI 발송 템플릿</div>
               <p class="text-white/70 text-sm leading-relaxed mb-2">한 번 만든 캠페인을 템플릿으로 저장해 두면 다음에 한 번의 클릭으로 같은 캠페인을 다시 보낼 수 있습니다.</p>
@@ -584,7 +689,7 @@
                 <li>· AI 한줄로 / 맞춤한줄 모두 템플릿 저장 가능</li>
                 <li>· 템플릿별 이모지 아이콘 + 이름 + 설명</li>
                 <li>· 검색 + 페이지네이션 (8건 / 페이지)</li>
-                <li>· 클릭 한 번으로 AI 오퍼레이션 흐름 즉시 실행</li>
+                <li>· 클릭 한 번으로 AI 자동발송 흐름 즉시 실행</li>
               </ul>
             </div>
           </div>
@@ -592,7 +697,7 @@
 
         <div class="step rounded-xl border border-violet-400/20 bg-gradient-to-br from-violet-500/10 via-fuchsia-500/5 to-transparent p-5 hover:border-violet-400/40 transition-colors">
           <div class="flex items-start gap-4">
-            <div class="w-10 h-10 shrink-0 rounded-lg bg-gradient-to-br from-rose-500 to-pink-500 text-white font-semibold grid place-items-center text-sm font-mono text-[12px]">8·2</div>
+            <div class="w-10 h-10 shrink-0 rounded-lg bg-gradient-to-br from-rose-500 to-pink-500 text-white font-semibold grid place-items-center text-sm font-mono text-[12px]">9·2</div>
             <div class="min-w-0 flex-1">
               <div class="text-white font-semibold mb-2">수신거부 관리</div>
               <p class="text-white/70 text-sm leading-relaxed mb-2">수신거부 고객을 관리합니다.</p>
@@ -608,7 +713,7 @@
 
         <div class="step rounded-xl border border-violet-400/20 bg-gradient-to-br from-violet-500/10 via-fuchsia-500/5 to-transparent p-5 hover:border-violet-400/40 transition-colors">
           <div class="flex items-start gap-4">
-            <div class="w-10 h-10 shrink-0 rounded-lg bg-gradient-to-br from-cyan-500 to-blue-500 text-white font-semibold grid place-items-center text-sm font-mono text-[12px]">8·3</div>
+            <div class="w-10 h-10 shrink-0 rounded-lg bg-gradient-to-br from-cyan-500 to-blue-500 text-white font-semibold grid place-items-center text-sm font-mono text-[12px]">9·3</div>
             <div class="min-w-0 flex-1">
               <div class="text-white font-semibold mb-2">예약 대기</div>
               <p class="text-white/70 text-sm leading-relaxed mb-2">예약된 모든 캠페인과 자동발송의 다음 회차를 한 곳에서 봅니다.</p>
@@ -633,15 +738,15 @@
       <div class="rounded-2xl border border-violet-400/20 bg-gradient-to-br from-violet-500/10 via-fuchsia-500/5 to-transparent p-6">
         <div class="text-[10px] tracking-[0.2em] font-mono text-violet-300 mb-2">END OF MANUAL</div>
         <div class="text-white font-semibold text-lg mb-2">매뉴얼 종결 안내</div>
-        <p class="text-white/65 text-sm leading-relaxed">본 가이드는 한줄로의 8 핵심 챕터를 정리한 매뉴얼입니다. Chapter 01 AI 오퍼레이션이 서비스 차별점 핵심이며, 일반 발송 흐름은 Chapter 04~05(직접발송 / 직접 타겟) · Chapter 06(세그먼트) · Chapter 07(발송 결과) 영역을 활용해 주세요. 추가 질의가 있으시면 1:1 고객 지원 영역으로 진입해 주세요.</p>
+        <p class="text-white/65 text-sm leading-relaxed">본 가이드는 한줄로의 9 핵심 기능 + AI Operator 베타 영역(Chapter 10)을 정리한 매뉴얼입니다. 각 카테고리는 좌측 사이드바에서 진입하거나, 키보드 좌우 화살표로 이동할 수 있습니다. 추가 질의가 있으시면 1:1 고객 지원 영역으로 진입해 주세요.</p>
       </div>
     </article>
 
     <!-- ====================================================== CHAPTER 10 -->
-    <article class="chapter" data-ch="1">
+    <article class="chapter" data-ch="10">
       <header class="mb-10">
         <div class="flex items-center gap-2">
-          <div class="text-[11px] tracking-[0.2em] font-mono text-violet-300">CHAPTER 01</div>
+          <div class="text-[11px] tracking-[0.2em] font-mono text-violet-300">CHAPTER 10</div>
           <span class="px-2 py-0.5 rounded-md text-[10px] tracking-widest font-mono uppercase bg-fuchsia-400/15 text-fuchsia-200 border border-fuchsia-400/30">BETA</span>
         </div>
         <h1 class="mt-2 text-3xl sm:text-4xl text-white font-semibold tracking-tight">AI Operator <span class="text-white/40 font-normal">— 10 sub-메뉴</span></h1>
@@ -1122,14 +1227,16 @@
   //  CHAPTERS DATA
   // ============================================================
   const CHAPTERS = [
-    { n: 1, title: 'AI 오퍼레이션',     sub: '한줄로 차별점 · 10 sub-메뉴', beta: true },
-    { n: 2, title: '시작하기',          sub: '메인 대시보드' },
-    { n: 3, title: '고객 데이터 관리',  sub: '엑셀 업로드 · AI 매핑' },
+    { n: 1, title: '시작하기',          sub: '메인 대시보드' },
+    { n: 2, title: '고객 데이터 관리',  sub: '엑셀 업로드 · AI 매핑' },
+    { n: 3, title: 'AI 자동발송',       sub: '자연어 한 줄 캠페인' },
     { n: 4, title: '직접발송',          sub: '즉시 발송' },
     { n: 5, title: '직접 타겟 발송',    sub: '조건 필터 타겟팅' },
-    { n: 6, title: '세그먼트',          sub: '저장 + 재활용' },
-    { n: 7, title: '발송 결과 & 분석',  sub: '성과 추적 · 인사이트' },
-    { n: 8, title: '부가 기능',         sub: '템플릿 · 수신거부 · 예약' },
+    { n: 6, title: '자동발송',          sub: '반복 스케줄', beta: true },
+    { n: 7, title: '세그먼트',          sub: '저장 + 재활용' },
+    { n: 8, title: '발송 결과 & 분석',  sub: '성과 추적 · 인사이트' },
+    { n: 9, title: '부가 기능',         sub: '템플릿 · 수신거부 · 예약' },
+    { n: 10, title: 'AI Operator',      sub: '10 sub-메뉴', beta: true },
   ];
 
   // ============================================================
@@ -1159,7 +1266,7 @@
   // ============================================================
   let activeCh = 1;
   function goto(n) {
-    n = Math.max(1, Math.min(8, n));
+    n = Math.max(1, Math.min(10, n));
     activeCh = n;
     document.querySelectorAll('.chapter').forEach(el => {
       el.classList.toggle('active', +el.dataset.ch === n);
@@ -1183,7 +1290,7 @@
   function renderPager(n) {
     const pager = document.getElementById('pager');
     const prev = n > 1 ? CHAPTERS[n - 2] : null;
-    const next = n < 8 ? CHAPTERS[n]     : null;
+    const next = n < 10 ? CHAPTERS[n]    : null;
     pager.innerHTML = '';
 
     const cell = (c, dir) => {
