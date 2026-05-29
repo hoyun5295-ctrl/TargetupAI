@@ -261,7 +261,6 @@ router.get('/campaigns', async (req: Request, res: Response) => {
         c.target_count,
         c.is_ad, c.scheduled_at, c.sent_at, c.created_at, c.send_channel, c.callback_number,
         c.subject, c.message_subject, c.mms_image_paths,
-        c.alimtalk_template_code,
         (c.created_at AT TIME ZONE 'Asia/Seoul')::date as created_date_kst,
         c.cancelled_by_type, c.cancel_reason,
         u.login_id as created_by_name,
@@ -507,8 +506,16 @@ router.get('/campaigns/:id/messages', async (req: Request, res: Response) => {
     const msgTables = await getCompanySmsTablesWithLogs(companyId, userId);
 
     // 캠페인 채널+상태 확인
-    // ★ D227+ (2026-05-28 영업팀장 박성용 재신고 fix): alimtalk_template_code 영역 추가 — 발송 X 영역 시 (messages 영역 X) campaigns 안 fallback 활용
-    const campResult = await query('SELECT send_channel, status, alimtalk_template_code FROM campaigns WHERE id = $1 AND company_id = $2', [id, companyId]);
+    // ★ D227+-3 (2026-05-28 사이트 다운 긴급 복구): campaigns 테이블 = alimtalk_template_code 컬럼 X (kakao_template_id uuid FK만 존재).
+    //   옛 D227+ 영역 = 없는 컬럼 SELECT → SQL 에러 → 발송결과 endpoint 500 전체 다운 사고 정정.
+    //   알림톡 templateCode = kakao_template_id JOIN 으로 안전 조회.
+    const campResult = await query(
+      `SELECT c.send_channel, c.status, kt.template_code AS alimtalk_template_code
+       FROM campaigns c
+       LEFT JOIN kakao_templates kt ON c.kakao_template_id = kt.id
+       WHERE c.id = $1 AND c.company_id = $2`,
+      [id, companyId],
+    );
     const sendChannel = campResult.rows[0]?.send_channel || 'sms';
     const campStatus = campResult.rows[0]?.status || '';
     const campAlimtalkTemplateCode = campResult.rows[0]?.alimtalk_template_code || '';
