@@ -1,0 +1,16 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "f=$(cat); echo \"$f\" | grep -qE 'backend.{1,4}src.{1,4}(routes|utils)' && echo \"$f\" | grep -q '[.]ts' && printf '%s' '{\"hookSpecificOutput\":{\"hookEventName\":\"PostToolUse\",\"additionalContext\":\"[DB 컬럼 검증 의무 db_column_verify_before_code] backend routes/utils 변경 — 신규 DB 컬럼/테이블/JOIN 참조가 있다면 information_schema 검증 SQL을 Harold님께 먼저 제공하고 결과 확인 후 코드 작성. tsc 통과는 SQL 유효를 보장하지 않음 (D227+ 발송결과 전체 다운 사고).\"}}' || true",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}

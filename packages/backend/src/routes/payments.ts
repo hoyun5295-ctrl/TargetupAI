@@ -86,6 +86,17 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Appl
 </html>`;
 }
 
+// ★ D227+ (2026-05-28): 결제 결과 페이지 CSP 완화 helper
+//   renderResultHtml = inline <script>(자동 window.close + opener/parent.postMessage + location.replace) 포함.
+//   helmet 전역 CSP(script-src 'self')가 inline script 차단 → 자동 close X + 결제 전 복귀 X 사고.
+//   본 4개 callback 결과 페이지만 CSP override (정적 결제결과 + 자동 close 스크립트 = unsafe-inline 위험 낮음).
+function setResultPageCsp(res: Response) {
+  res.setHeader(
+    'Content-Security-Policy',
+    "default-src 'self'; script-src 'unsafe-inline'; style-src 'unsafe-inline' 'self'",
+  );
+}
+
 // ────────────────────────────────────────────────────────────
 // 1) 이니시스 callback 라우트 (인증 X — 이니시스 측 form POST)
 // ────────────────────────────────────────────────────────────
@@ -94,6 +105,7 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Appl
 router.post('/inicis/return', inicisFormParser, async (req: Request, res: Response) => {
   const body: Record<string, any> = req.body || {};
   const { baseUrl } = getInicisCallbackUrls(req);
+  setResultPageCsp(res); // ★ D227+ inline script 자동 close/복귀 스크립트 CSP 차단 사고 정정
   console.log('[payments] /inicis/return callback:', {
     resultCode: body.resultCode,
     orderNumber: body.orderNumber,
@@ -198,6 +210,7 @@ router.post('/inicis/return', inicisFormParser, async (req: Request, res: Respon
 router.post('/inicis/close', inicisFormParser, async (req: Request, res: Response) => {
   const body: Record<string, any> = req.body || {};
   const { baseUrl } = getInicisCallbackUrls(req);
+  setResultPageCsp(res); // ★ D227+ inline script 자동 close/복귀 스크립트 CSP 차단 사고 정정
   const orderId = String(body.orderNumber || body.MOID || body.oid || '').trim();
   console.log('[payments] /inicis/close callback:', { orderId, body, requestHost: req.get('host') });
 
@@ -218,6 +231,7 @@ router.post('/inicis/close', inicisFormParser, async (req: Request, res: Respons
 //   POST 표준 흐름 보존 + GET 호출 시 = HTML 응답 (자동 close + postMessage 흐름 동일)
 router.get('/inicis/close', async (req: Request, res: Response) => {
   const { baseUrl } = getInicisCallbackUrls(req);
+  setResultPageCsp(res); // ★ D227+ inline script 자동 close/복귀 스크립트 CSP 차단 사고 정정
   const orderId = String(req.query.orderNumber || req.query.MOID || req.query.oid || '').trim();
   console.log('[payments] /inicis/close GET fallback:', { orderId, query: req.query, requestHost: req.get('host') });
 
@@ -240,6 +254,7 @@ router.get('/inicis/close', async (req: Request, res: Response) => {
 // ★ D226+ (2026-05-29): /inicis/return GET fallback — 안전망 (POST 표준 흐름 보존)
 router.get('/inicis/return', async (req: Request, res: Response) => {
   const { baseUrl } = getInicisCallbackUrls(req);
+  setResultPageCsp(res); // ★ D227+ inline script 자동 close/복귀 스크립트 CSP 차단 사고 정정
   const orderId = String(req.query.orderNumber || req.query.MOID || req.query.oid || '').trim();
   console.log('[payments] /inicis/return GET fallback:', { orderId, query: req.query, requestHost: req.get('host') });
   res.status(200).send(renderResultHtml('failed', {

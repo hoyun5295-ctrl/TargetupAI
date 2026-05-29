@@ -124,6 +124,19 @@
       DB 마이그레이션 미실행 시 = 503 + 사용자 친화 안내. 500 에러 노출 X.
     </RULE>
 
+    <RULE id="db_column_verify_before_code" priority="HIGHEST">
+      ★ D227+ 신규 — campaigns.alimtalk_template_code 없는 컬럼 SELECT 추가 → 발송결과 endpoint 500 → 전체 고객사(운영 기간계) 다운 사고 영구 차단 룰 (Harold 명시 2026-05-28).
+      [근본 원인] tsc는 SQL 문자열 안 컬럼명을 검증 못 한다. `c.없는컬럼`도 그냥 문자열로 통과 → tsc 0 errors → 런타임 PG "column does not exist" 폭발. 즉 tsc 통과 ≠ SQL 유효.
+      [강제 행동 — 순서 절대 준수]
+      1. SQL(SELECT/INSERT/UPDATE/JOIN/WHERE)에 신규 컬럼·테이블을 추가하거나 수정하기 직전, 반드시 다음 검증 SQL을 Harold님께 먼저 제공한다:
+         `SELECT column_name FROM information_schema.columns WHERE table_name = '[테이블]' AND column_name = '[컬럼]';`
+         (테이블 자체 신규 시 = `SELECT table_name FROM information_schema.tables WHERE table_name = '[테이블]';`)
+      2. Harold님 검증 결과(실제 존재 확인)를 받은 후에만 코드를 작성한다.
+      3. SCHEMA.md는 참조용일 뿐 — "SCHEMA.md에 있으니 맞겠지" 추측 신뢰 절대 금지. 실제 컬럼 존재는 information_schema로만 확정한다.
+      [절대 금지] 컬럼 존재 미검증 상태로 SQL 코드 작성 후 "tsc 통과했으니 OK" 보고. = no_guess_strict 0번 원칙 위반 = 운영 다운 사고.
+      [적용 범위] FK로 다른 테이블 컬럼을 JOIN으로 가져올 때도 동일 — JOIN 대상 테이블·컬럼·FK 컬럼 3개 모두 information_schema 검증 의무.
+    </RULE>
+
     <RULE id="codex_review_after_code_change" priority="HIGHEST">
       ★ D215+ 신규 — OpenAI 공식 Codex Plugin 이중 검증 영구 룰 (Harold 명시 2026-05-25).
       한줄로 작업 종결 직전 = Codex Plugin (`codex-plugin-cc`) 의무 호출. 본 AI + Codex 이중 검증 = 6,000사+ 운영 안전망 + D214+ 자기 강화 루프 사고 차단.
@@ -214,6 +227,7 @@
     - [ ] **신규 코드 안 박-단어(박음/박힘/박는/박지/박을/박혀/박힌/박혔/박힐/박았) 자가 grep = 0건 검증했는가?** (Y/N) ★ D214+ 강화
     - [ ] **답변에 "영역/본질/정합/매트릭스" 단어 과다 사용 자가 점검했는가?** (자연 한국어 재작성) (Y/N) ★ D214+ 신규
     - [ ] **DB ALTER 새 컬럼 활용 endpoint catch에 `column does not exist` 분기 처리했는가?** (db_alter_safety_net) (Y/N) ★ D214+ 신규
+    - [ ] **SQL에 신규 컬럼/테이블/JOIN 추가·수정 시 `information_schema` 검증 SQL을 Harold님께 먼저 제공하고 결과 확인했는가? (tsc 통과 ≠ SQL 유효 — SCHEMA.md 추측 신뢰 금지)** (db_column_verify_before_code) (Y/N) ★ D227+ 신규
     - [ ] **native dialog(alert/confirm/prompt) grep = 0건 확인했는가?** (ConfirmModal + useToast 활용) (Y/N)
     - [ ] **마케팅 담당자 UX 자가 점검 — 사용자 클릭 수 = 1 단계? 사용자 추가 입력 X? AI 자동 흐름 정합?** (marketing_user_ux_priority) (Y/N) ★ D216+ 신규
     - [ ] **AI 생성 메시지에 구체 혜택(%/원/쿠폰/무료) 미포함 확인했는가?** (feedback_ai_no_arbitrary_benefit) (Y/N)
