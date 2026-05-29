@@ -23,12 +23,15 @@ router.get('/', async (req: Request, res: Response) => {
   try {
     const companyScope = getCompanyScope(req);
 
-    // ★ D145 P0: scheduled_at 지난 status='scheduled' 자동 정리 (컨트롤타워)
-    await cleanupScheduledCampaigns({
-      companyId: companyScope || undefined,
-      filterUserId: req.query.filter_user_id ? String(req.query.filter_user_id) : undefined,
-    });
+    // ★ D227+ (2026-05-28): cleanupScheduledCampaigns 동기 호출 제거 — 6만건 안 30~40초 사고 정정.
+    //   = utils/scheduled-cleanup-worker.ts 안 1분 cron 영역 통합 (app.ts:startScheduledCleanupWorker).
 
+    // ★ D227+ (2026-05-28): 페이지네이션 + COUNT(*) 영역 추가 — 옛 흐름 = 전체 조회 → LIMIT/OFFSET 적용.
+    const page = Number(req.query.page) || 1;
+    const limit = Number(req.query.limit) || 50;
+    const offset = (page - 1) * limit;
+
+    let countSql = `SELECT COUNT(*) FROM campaigns c WHERE c.status IN ('scheduled', 'cancelled')`;
     let sql = `
       SELECT
         c.id, c.campaign_name, c.status, c.scheduled_at, c.target_count,
@@ -45,6 +48,7 @@ router.get('/', async (req: Request, res: Response) => {
     if (companyScope) {
       params.push(companyScope);
       sql += ` AND c.company_id = $${params.length}`;
+      countSql += ` AND c.company_id = $${params.length}`;
     }
 
     // 사용자 필터 (고객사관리자용)
@@ -52,12 +56,23 @@ router.get('/', async (req: Request, res: Response) => {
     if (filterUserId) {
       params.push(filterUserId);
       sql += ` AND c.created_by = $${params.length}`;
+      countSql += ` AND c.created_by = $${params.length}`;
     }
 
-    sql += ' ORDER BY c.created_at DESC';
+    const countParams = [...params];
+    sql += ` ORDER BY c.created_at DESC LIMIT $${params.length + 1} OFFSET $${params.length + 2}`;
+    params.push(limit, offset);
 
-    const result = await query(sql, params);
-    res.json({ campaigns: result.rows });
+    const [countResult, result] = await Promise.all([
+      query(countSql, countParams),
+      query(sql, params),
+    ]);
+    const total = parseInt(countResult.rows[0].count);
+
+    res.json({
+      campaigns: result.rows,
+      pagination: { total, page, limit, totalPages: Math.ceil(total / limit) },
+    });
   } catch (error) {
     console.error('예약 캠페인 조회 실패:', error);
     res.status(500).json({ error: '예약 캠페인 조회 실패' });

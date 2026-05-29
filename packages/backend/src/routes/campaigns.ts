@@ -124,16 +124,9 @@ router.get('/', async (req: Request, res: Response) => {
     }
 
     if (status) {
-      // ★ D145 P0: 컨트롤타워 cleanupScheduledCampaigns 호출로 통합
-      //   사용자/공용/슈퍼관리자 모든 라우트에서 동일 함수 호출 → 정합성 보장
-      if (status === 'scheduled') {
-        await cleanupScheduledCampaigns({
-          companyId,
-          userId: userType === 'company_user' ? userId : undefined,
-          filterUserId: (userType === 'company_admin' && req.query.filter_user_id) ? String(req.query.filter_user_id) : undefined,
-        });
-      }
-
+      // ★ D227+ (2026-05-28): cleanupScheduledCampaigns 동기 호출 제거 — 6만건 안 30~40초 사고 정정.
+      //   = utils/scheduled-cleanup-worker.ts 안 1분 cron 영역 통합 (app.ts:startScheduledCleanupWorker).
+      //   옛 응답 직전 동기 cleanup 영역 → 백그라운드 worker 영역 진행 = 응답 영역 즉시.
       whereClause += ` AND status = $${paramIndex++}`;
       params.push(status);
     }

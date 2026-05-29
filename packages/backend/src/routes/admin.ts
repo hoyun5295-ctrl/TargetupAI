@@ -730,11 +730,8 @@ router.get('/campaigns/scheduled', authenticate, requireSuperAdmin, async (req: 
     const endDate = (req.query.endDate as string) || '';
     const loginId = (req.query.loginId as string) || '';     // 사용자 계정 검색
 
-    // ★ D145 P0: scheduled_at 지난 status='scheduled' 자동 정리 (컨트롤타워)
-    //   슈퍼관리자는 전체 회사 대상 (filter X)
-    await cleanupScheduledCampaigns({
-      companyId: companyId || undefined,
-    });
+    // ★ D227+ (2026-05-28): cleanupScheduledCampaigns 동기 호출 제거 — 6만건 안 30~40초 사고 정정.
+    //   = utils/scheduled-cleanup-worker.ts 안 1분 cron 영역 통합 (app.ts:startScheduledCleanupWorker).
 
     let where = `WHERE c.status IN ('scheduled', 'cancelled')`;
     const params: any[] = [];

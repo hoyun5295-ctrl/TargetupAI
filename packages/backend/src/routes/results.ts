@@ -212,10 +212,22 @@ router.get('/campaigns', async (req: Request, res: Response) => {
     // ★ D143 (2026-05-04, shiseido6 신고): 발송결과 출력 기준 = 발송일시
     //   발송 완료(sent_at) 우선 → 예약 대기(scheduled_at) → 미발송(created_at) 폴백
     //   정산이 발송일 기준이므로 4/30 등록 + 5/7 예약 캠페인은 5월 결과에 표시되어야 함
+    // ★ D227+ (2026-05-28 영업팀장 박성용 신고 fix): from/to/fromDate/toDate 모두 누락 시 default 7일 한정
+    //   옛 흐름 = 전체 조회 → 톤28 524,331건+ 영역 = 30초 로딩 사고 정정
+    let effectiveFromDate = fromDate ? String(fromDate) : undefined;
+    let effectiveToDate = toDate ? String(toDate) : undefined;
+    const effectiveYearMonth = from ? String(from) : undefined;
+    if (!effectiveFromDate && !effectiveToDate && !effectiveYearMonth) {
+      const today = new Date();
+      const sevenDaysAgo = new Date(today.getTime() - 7 * 24 * 60 * 60 * 1000);
+      effectiveFromDate = sevenDaysAgo.toISOString().split('T')[0];
+      effectiveToDate = today.toISOString().split('T')[0];
+      console.log('[results/campaigns] default 7일 한정 적용:', { effectiveFromDate, effectiveToDate });
+    }
     const campDr = buildPeriodFilter('COALESCE(sent_at, scheduled_at, created_at)', {
-      fromDate: fromDate ? String(fromDate) : undefined,
-      toDate: toDate ? String(toDate) : undefined,
-      yearMonth: (!fromDate || !toDate) ? (from ? String(from) : undefined) : undefined,
+      fromDate: effectiveFromDate,
+      toDate: effectiveToDate,
+      yearMonth: (!effectiveFromDate || !effectiveToDate) ? effectiveYearMonth : undefined,
     }, paramIndex);
     whereClause += campDr.sql;
     params.push(...campDr.params);
@@ -250,6 +262,7 @@ router.get('/campaigns', async (req: Request, res: Response) => {
         c.target_count,
         c.is_ad, c.scheduled_at, c.sent_at, c.created_at, c.send_channel, c.callback_number,
         c.subject, c.message_subject, c.mms_image_paths,
+        c.alimtalk_template_code,
         (c.created_at AT TIME ZONE 'Asia/Seoul')::date as created_date_kst,
         c.cancelled_by_type, c.cancel_reason,
         u.login_id as created_by_name,
@@ -495,9 +508,11 @@ router.get('/campaigns/:id/messages', async (req: Request, res: Response) => {
     const msgTables = await getCompanySmsTablesWithLogs(companyId, userId);
 
     // 캠페인 채널+상태 확인
-    const campResult = await query('SELECT send_channel, status FROM campaigns WHERE id = $1 AND company_id = $2', [id, companyId]);
+    // ★ D227+ (2026-05-28 영업팀장 박성용 재신고 fix): alimtalk_template_code 영역 추가 — 발송 X 영역 시 (messages 영역 X) campaigns 안 fallback 활용
+    const campResult = await query('SELECT send_channel, status, alimtalk_template_code FROM campaigns WHERE id = $1 AND company_id = $2', [id, companyId]);
     const sendChannel = campResult.rows[0]?.send_channel || 'sms';
     const campStatus = campResult.rows[0]?.status || '';
+    const campAlimtalkTemplateCode = campResult.rows[0]?.alimtalk_template_code || '';
 
     // ===== UNION ALL 서브쿼리 빌드 =====
     const dataSubqueries: string[] = [];
@@ -672,9 +687,17 @@ router.get('/campaigns/:id/messages', async (req: Request, res: Response) => {
 
     // ★ D225+ (2026-05-28 영업팀장 박성용 신고 fix): 알림톡 발송 영역 = 응답 안 templateInfo 추가
     //   Harold 기대 = 전송 결과 상세 안 [템플릿코드] + [템플릿명] 확인 가능 의무
+    // ★ D227+ (2026-05-28 재발 fix): 발송 X 영역 시 (messages 영역 0건) campaigns 안 alimtalk_template_code fallback 활용
     let alimtalkTemplateInfo: { code: string; name: string } | null = null;
-    if (sendChannel === 'alimtalk' && enrichedMessages.length > 0) {
-      const firstTemplateCode = enrichedMessages.find((m: any) => m.k_template_code)?.k_template_code || '';
+    if (sendChannel === 'alimtalk') {
+      // 1차 = messages 안 k_template_code 영역 (옛 D225+ fix 흐름)
+      let firstTemplateCode = enrichedMessages.length > 0
+        ? (enrichedMessages.find((m: any) => m.k_template_code)?.k_template_code || '')
+        : '';
+      // 2차 fallback = campaigns 안 alimtalk_template_code (옛 D227+ 재발 fix 흐름)
+      if (!firstTemplateCode && campAlimtalkTemplateCode) {
+        firstTemplateCode = campAlimtalkTemplateCode;
+      }
       if (firstTemplateCode) {
         try {
           const tplResult = await query(

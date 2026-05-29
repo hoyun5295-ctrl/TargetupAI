@@ -82,6 +82,9 @@ import { startJourneyReentryWorker } from './utils/journey-reentry-worker';
 // ★ D217+ (2026-05-26 Harold 명시 진단 정정): 카카오 templateCode 동기화 worker — 30분 주기
 //   옛 D147 영역 = 검수 통과 후 진정 카카오 templateCode 영역 = 한줄로 안 동기화 누락 사고 (8건 100%) 영구 정정
 import { startKakaoTemplateSyncWorker } from './utils/kakao-template-sync-worker';
+// ★ D227+ (2026-05-28 영업팀장 박성용 신고 fix): 예약 캠페인 자동 정리 worker — 1분 cron
+//   옛 흐름 = 응답 영역 직전 동기 호출 → 6만건 안 30~40초 사고 → 백그라운드 영역 분리
+import { startScheduledCleanupWorker } from './utils/scheduled-cleanup-worker';
 
 // 공용 관리 라우트 (슈퍼관리자 + 고객사관리자)
 import manageUsersRoutes from './routes/manage-users';
@@ -315,6 +318,11 @@ app.listen(PORT, () => {
   //   journeys.auto_reentry_enabled = true 영역만 진입 (default OFF — feedback_no_target_auto_relax 정합)
   //   completed 영역 + cooldown 경과 + customer 활성 영역 → 신규 execution INSERT
   startJourneyReentryWorker();
+
+  // ★ D227+ (2026-05-28 영업팀장 박성용 신고 fix): 예약 캠페인 자동 정리 worker — 1분 cron
+  //   옛 흐름 = manage-scheduled/admin/campaigns 안 응답 영역 직전 동기 cleanupScheduledCampaigns 호출 → 6만건 안 30~40초 사고
+  //   = 백그라운드 1분 cron 영역 분리 → 응답 영역 즉시 + 정리 영역 보장
+  startScheduledCleanupWorker();
 });
 
 export default app;

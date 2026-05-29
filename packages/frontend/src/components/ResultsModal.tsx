@@ -51,9 +51,11 @@ export default function ResultsModal({ onClose, token, customerDbEnabled, isSubs
     return `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}`;
   });
   // 일자별 기간 필터
+  // ★ D227+ (2026-05-28 영업팀장 박성용 신고 fix): default 영역 = 이번 달 1일~오늘 → 옛 흐름 = 톤28 524,331건 30초 로딩 사고
+  //   = 옛 default = 최근 7일 한정 (backend default 정렬 정합 — routes/results.ts:182 영역 동일 흐름)
   const [startDate, setStartDate] = useState(() => {
-    const now = new Date();
-    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`;
+    const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+    return `${sevenDaysAgo.getFullYear()}-${String(sevenDaysAgo.getMonth() + 1).padStart(2, '0')}-${String(sevenDaysAgo.getDate()).padStart(2, '0')}`;
   });
   const [endDate, setEndDate] = useState(() => {
     const now = new Date();
@@ -871,12 +873,23 @@ export default function ResultsModal({ onClose, token, customerDbEnabled, isSubs
                           <div className="flex gap-2">
                             <div className="w-7 h-7 rounded-full bg-emerald-100 flex items-center justify-center shrink-0 text-[10px] font-bold text-emerald-600">T</div>
                             <div className="bg-white rounded-2xl rounded-tl-sm p-3 shadow-sm border border-gray-100 text-[11.5px] leading-[1.7] whitespace-pre-wrap break-all text-gray-700 max-w-[95%]">
-                              {/* ★ D91: LMS/MMS 제목 표시 */}
-                              {(selectedCampaign.message_type === 'LMS' || selectedCampaign.message_type === 'MMS' || selectedCampaign.message_type === 'L' || selectedCampaign.message_type === 'M') && (selectedCampaign.subject || selectedCampaign.message_subject) && (
-                                <div className="font-bold text-gray-900 mb-1 pb-1 border-b border-gray-200">{buildAdSubjectFront(selectedCampaign.subject || selectedCampaign.message_subject || '', selectedCampaign.message_type, selectedCampaign.is_ad ?? false)}</div>
+                              {/* ★ D227+ (2026-05-28 영업팀장 박성용 신고 fix): 알림톡 = templateCode + templateName 표시 영역 */}
+                              {selectedCampaign.send_channel === 'alimtalk' && alimtalkTemplateInfo ? (
+                                <>
+                                  <div className="font-bold text-emerald-700 mb-1 pb-1 border-b border-emerald-100">📨 {alimtalkTemplateInfo.name || '(템플릿명 미설정)'}</div>
+                                  <div className="text-[10px] text-gray-400 mb-2">템플릿코드: {alimtalkTemplateInfo.code || '-'}</div>
+                                  <div>{formatCampaignMessageForDisplay(selectedCampaign, messages[0]?.msg_contents)}</div>
+                                </>
+                              ) : (
+                                <>
+                                  {/* ★ D91: LMS/MMS 제목 표시 */}
+                                  {(selectedCampaign.message_type === 'LMS' || selectedCampaign.message_type === 'MMS' || selectedCampaign.message_type === 'L' || selectedCampaign.message_type === 'M') && (selectedCampaign.subject || selectedCampaign.message_subject) && (
+                                    <div className="font-bold text-gray-900 mb-1 pb-1 border-b border-gray-200">{buildAdSubjectFront(selectedCampaign.subject || selectedCampaign.message_subject || '', selectedCampaign.message_type, selectedCampaign.is_ad ?? false)}</div>
+                                  )}
+                                  {/* ★ B2: 컨트롤타워 — 실발송 텍스트(MySQL) 우선, 없으면 순수본문에 (광고)+080 부착 */}
+                                  {formatCampaignMessageForDisplay(selectedCampaign, messages[0]?.msg_contents)}
+                                </>
                               )}
-                              {/* ★ B2: 컨트롤타워 — 실발송 텍스트(MySQL) 우선, 없으면 순수본문에 (광고)+080 부착 */}
-                              {formatCampaignMessageForDisplay(selectedCampaign, messages[0]?.msg_contents)}
                               {/* ★ B5/B7: 공용 컴포넌트 MmsImagePreview 사용 (클릭 확대 지원) */}
                               {selectedCampaign.mms_image_paths && Array.isArray(selectedCampaign.mms_image_paths) && selectedCampaign.mms_image_paths.length > 0 && (
                                 <MmsImagePreview

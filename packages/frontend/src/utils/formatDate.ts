@@ -1005,11 +1005,26 @@ export function formatCampaignMessageForDisplay(
     message_type?: string | null;
     is_ad?: boolean | null;
     opt_out_080_number?: string | null;
+    send_channel?: string | null;
+    alimtalk_template_code?: string | null;
   } | null | undefined,
   realSentMessage?: string | null
 ): string {
   const source = realSentMessage || campaign?.message_content || '';
   if (!campaign) return source;
+
+  // ★ D227+ (2026-05-28 영업팀장 박성용 신고 fix): 알림톡 = message_content 영역 = 사용자 직접 입력 X 영역
+  //   = 표시 시 templateCode 영역 활용 의무 (메시지 내용 영역 = 빈 영역 표시 사고 정정)
+  if (campaign.send_channel === 'alimtalk') {
+    if (source && source.trim()) {
+      // 실발송 텍스트 영역 OR 사용자 직접 본문 영역 = 영역 보존
+      return source;
+    }
+    // 본문 영역 X = templateCode 영역 활용
+    return campaign.alimtalk_template_code
+      ? `[알림톡 템플릿] ${campaign.alimtalk_template_code}`
+      : '[알림톡 템플릿 미설정]';
+  }
 
   // ★ D143 (2026-05-04, 정식 오픈 D-Day 1일 전) — Harold님 명시 정책:
   //   광고체크 OFF (is_ad=false) → 사용자 입력 본문 그대로 표시 (어떤 처리도 안 함)
