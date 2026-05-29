@@ -212,22 +212,12 @@ router.get('/campaigns', async (req: Request, res: Response) => {
     // ★ D143 (2026-05-04, shiseido6 신고): 발송결과 출력 기준 = 발송일시
     //   발송 완료(sent_at) 우선 → 예약 대기(scheduled_at) → 미발송(created_at) 폴백
     //   정산이 발송일 기준이므로 4/30 등록 + 5/7 예약 캠페인은 5월 결과에 표시되어야 함
-    // ★ D227+ (2026-05-28 영업팀장 박성용 신고 fix): from/to/fromDate/toDate 모두 누락 시 default 7일 한정
-    //   옛 흐름 = 전체 조회 → 톤28 524,331건+ 영역 = 30초 로딩 사고 정정
-    let effectiveFromDate = fromDate ? String(fromDate) : undefined;
-    let effectiveToDate = toDate ? String(toDate) : undefined;
-    const effectiveYearMonth = from ? String(from) : undefined;
-    if (!effectiveFromDate && !effectiveToDate && !effectiveYearMonth) {
-      const today = new Date();
-      const sevenDaysAgo = new Date(today.getTime() - 7 * 24 * 60 * 60 * 1000);
-      effectiveFromDate = sevenDaysAgo.toISOString().split('T')[0];
-      effectiveToDate = today.toISOString().split('T')[0];
-      console.log('[results/campaigns] default 7일 한정 적용:', { effectiveFromDate, effectiveToDate });
-    }
+    // ★ D227+ (2026-05-28): default = 이번 달 1일 ~ 오늘 영역 흐름 보존 (사용자 친화 영역 — frontend default 정합)
+    //   옛 7일 default 시도 = 사용자 데이터 0건 표시 사고 → 이번 달 영역 복구 + PG 인덱스 영역 별 fix 의무
     const campDr = buildPeriodFilter('COALESCE(sent_at, scheduled_at, created_at)', {
-      fromDate: effectiveFromDate,
-      toDate: effectiveToDate,
-      yearMonth: (!effectiveFromDate || !effectiveToDate) ? effectiveYearMonth : undefined,
+      fromDate: fromDate ? String(fromDate) : undefined,
+      toDate: toDate ? String(toDate) : undefined,
+      yearMonth: (!fromDate || !toDate) ? (from ? String(from) : undefined) : undefined,
     }, paramIndex);
     whereClause += campDr.sql;
     params.push(...campDr.params);

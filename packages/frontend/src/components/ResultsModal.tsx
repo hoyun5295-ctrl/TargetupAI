@@ -51,11 +51,11 @@ export default function ResultsModal({ onClose, token, customerDbEnabled, isSubs
     return `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}`;
   });
   // 일자별 기간 필터
-  // ★ D227+ (2026-05-28 영업팀장 박성용 신고 fix): default 영역 = 이번 달 1일~오늘 → 옛 흐름 = 톤28 524,331건 30초 로딩 사고
-  //   = 옛 default = 최근 7일 한정 (backend default 정렬 정합 — routes/results.ts:182 영역 동일 흐름)
+  // ★ D227+-2 (2026-05-28 영업팀장 박성용 신고 fix 정정): default = 이번 달 1일~오늘 영역 복구
+  //   옛 7일 default 시도 = 사용자 데이터 0건 표시 사고 → 이번 달 영역 복구 + PG 인덱스 영역 별 성능 영역 fix 의무
   const [startDate, setStartDate] = useState(() => {
-    const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
-    return `${sevenDaysAgo.getFullYear()}-${String(sevenDaysAgo.getMonth() + 1).padStart(2, '0')}-${String(sevenDaysAgo.getDate()).padStart(2, '0')}`;
+    const now = new Date();
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`;
   });
   const [endDate, setEndDate] = useState(() => {
     const now = new Date();
