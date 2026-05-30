@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react';
-import { calculateSmsBytes, formatCampaignMessageForDisplay, buildAdSubjectFront, formatPhoneNumber } from '../utils/formatDate';
+import { calculateSmsBytes, formatCampaignMessageForDisplay, formatPhoneNumber } from '../utils/formatDate';
 import MmsImagePreview from './shared/MmsImagePreview';
 import CalendarModal from './CalendarModal';
+import CampaignDetailModal from './CampaignDetailModal';
+import { Send, CheckCircle2, XCircle, TrendingUp, Wallet } from 'lucide-react';
 
 interface ResultsModalProps {
   onClose: () => void;
@@ -21,7 +23,7 @@ interface ResultsModalProps {
 function MessageCell({ content, maxWidth, onShowDetail }: { content: string; maxWidth?: string; onShowDetail: (text: string) => void }) {
   const display = content.length > 40 ? content.slice(0, 40) + '...' : content;
   return (
-    <td className={`px-3 py-2.5 text-xs text-gray-600 ${maxWidth || 'max-w-[250px]'}`}>
+    <td className={`px-3 py-2.5 text-xs text-slate-600 ${maxWidth || 'max-w-[250px]'}`}>
       <button
         onClick={() => onShowDetail(content)}
         className="text-left truncate block max-w-full hover:text-emerald-600 hover:underline cursor-pointer"
@@ -66,6 +68,7 @@ export default function ResultsModal({ onClose, token, customerDbEnabled, isSubs
   const [testCurrentPage, setTestCurrentPage] = useState(1);
   const itemsPerPage = 10;
   const [cancelTarget, setCancelTarget] = useState<any>(null);
+  const [draftCancelTarget, setDraftCancelTarget] = useState<any>(null);
   const [toast, setToast] = useState<{show: boolean, type: 'success' | 'error', message: string}>({show: false, type: 'success', message: ''});
   // ★ B6+B7(0417 PDF #6 #7): msgDetailContent state 확장
   //   #6 타입라벨 오류(바이트 기반 판정 → 실제 msgType 우선) + #7 MMS 이미지 누락(mmsImages 전달)
@@ -85,7 +88,7 @@ export default function ResultsModal({ onClose, token, customerDbEnabled, isSubs
   const [showSendDetail, setShowSendDetail] = useState(false);
   const [messages, setMessages] = useState<any[]>([]);
   // ★ D225+ (2026-05-28 영업팀장 박성용 신고 fix): 알림톡 영역 시 templateCode + templateName 응답 영역
-  const [alimtalkTemplateInfo, setAlimtalkTemplateInfo] = useState<{ code: string; name: string } | null>(null);
+  const [alimtalkTemplateInfo, setAlimtalkTemplateInfo] = useState<{ code: string; name: string; status: string } | null>(null);
   const [messageTotal, setMessageTotal] = useState(0);
   const [messagePage, setMessagePage] = useState(1);
   const [messageSearchType, setMessageSearchType] = useState('phone');
@@ -205,7 +208,6 @@ export default function ResultsModal({ onClose, token, customerDbEnabled, isSubs
   };
 
   const msgTypeLabel: Record<string, string> = { SMS: 'SMS', LMS: 'LMS', MMS: 'MMS', S: 'SMS', L: 'LMS', M: 'MMS', K: '알림톡', F: '친구톡' };
-  const getStatusBadge = (rate: number) => rate >= 98 ? 'bg-green-100 text-green-700' : rate >= 95 ? 'bg-yellow-100 text-yellow-700' : 'bg-red-100 text-red-700';
 
 
 
@@ -244,22 +246,22 @@ export default function ResultsModal({ onClose, token, customerDbEnabled, isSubs
     if (c.status === 'completed') return 'bg-green-50 text-green-700 border border-green-200';
     if (c.status === 'scheduled') return 'bg-blue-50 text-blue-700 border border-blue-200';
     if (c.status === 'sending') return 'bg-yellow-50 text-yellow-700 border border-yellow-200';
-    if (c.status === 'cancelled') return 'bg-gray-100 text-gray-600 border border-gray-200';
+    if (c.status === 'cancelled') return 'bg-slate-100 text-slate-600 border border-slate-200';
     if (c.status === 'failed' || c.status === 'draft') return 'bg-red-50 text-red-700 border border-red-200';
-    return 'bg-gray-50 text-gray-600 border border-gray-200';
+    return 'bg-slate-50 text-slate-600 border border-slate-200';
   };
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-2 md:p-4">
-      <div className="bg-white rounded-xl shadow-2xl w-full max-w-[1300px] max-h-[95vh] overflow-hidden flex flex-col">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-[1300px] max-h-[95vh] overflow-hidden flex flex-col">
         {/* 헤더 */}
         <div className="flex justify-between items-center px-6 py-4 border-b bg-white">
-          <h2 className="text-lg font-bold text-gray-800">발송 결과</h2>
-          <button onClick={onClose} className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-gray-100 text-gray-400 hover:text-gray-600 transition-colors text-lg">&times;</button>
+          <h2 className="text-lg font-bold text-slate-800">발송 결과</h2>
+          <button onClick={onClose} className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors text-lg">&times;</button>
         </div>
 
         {/* 탭 */}
-        <div className="flex border-b bg-gray-50">
+        <div className="flex border-b bg-slate-50">
           {[
             { key: 'summary', label: '요약 및 비용현황', color: 'emerald' },
             { key: 'test', label: '테스트 발송', color: 'orange' },
@@ -270,7 +272,7 @@ export default function ResultsModal({ onClose, token, customerDbEnabled, isSubs
               className={`flex-1 py-3 text-center text-sm font-medium transition-colors ${
                 activeTab === tab.key
                   ? `border-b-2 border-${tab.color}-500 text-${tab.color}-600 bg-white`
-                  : 'text-gray-500 hover:text-gray-700'
+                  : 'text-slate-500 hover:text-slate-700'
               }`}
             >
               {tab.label}
@@ -290,8 +292,8 @@ export default function ResultsModal({ onClose, token, customerDbEnabled, isSubs
               }}
               className={`absolute top-4 right-5 px-4 py-1.5 rounded-lg text-sm font-medium transition-colors z-10 ${
                 isSubscriptionLocked || customerDbEnabled === false
-                  ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
-                  : 'bg-purple-500 text-white hover:bg-purple-600'
+                  ? 'bg-slate-200 text-slate-400 cursor-not-allowed'
+                  : 'bg-violet-500 text-white hover:bg-violet-600'
               }`}
             >
               {(isSubscriptionLocked || customerDbEnabled === false) && <span className="mr-1">🔒</span>}📅 캘린더
@@ -301,36 +303,36 @@ export default function ResultsModal({ onClose, token, customerDbEnabled, isSubs
             <div className="space-y-4">
               {/* 기간 선택 + 필터 */}
               <div className="flex items-center gap-3 flex-wrap">
-                <span className="text-sm text-gray-500 font-medium">기간</span>
+                <span className="text-sm text-slate-500 font-medium">기간</span>
                 <input
                   type="date"
                   value={startDate}
                   onChange={(e) => setStartDate(e.target.value)}
-                  className="border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-200 focus:border-emerald-400"
+                  className="border border-slate-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-violet-200 focus:border-violet-400"
                 />
-                <span className="text-gray-400">~</span>
+                <span className="text-slate-400">~</span>
                 <input
                   type="date"
                   value={endDate}
                   onChange={(e) => setEndDate(e.target.value)}
-                  className="border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-200 focus:border-emerald-400"
+                  className="border border-slate-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-violet-200 focus:border-violet-400"
                 />
-                <div className="w-px h-6 bg-gray-200" />
-                <span className="text-sm text-gray-500 font-medium">유형</span>
+                <div className="w-px h-6 bg-slate-200" />
+                <span className="text-sm text-slate-500 font-medium">유형</span>
                 <select
                   value={filterType}
                   onChange={(e) => setFilterType(e.target.value)}
-                  className="border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-200 focus:border-emerald-400"
+                  className="border border-slate-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-violet-200 focus:border-violet-400"
                 >
                   <option value="all">전체</option>
                   <option value="ai">AI</option>
                   <option value="direct">수동</option>
                 </select>
-                <span className="text-sm text-gray-500 font-medium">발송자</span>
+                <span className="text-sm text-slate-500 font-medium">발송자</span>
                 <select
                   value={filterSender}
                   onChange={(e) => setFilterSender(e.target.value)}
-                  className="border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-200 focus:border-emerald-400"
+                  className="border border-slate-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-violet-200 focus:border-violet-400"
                 >
                   <option value="all">전체</option>
                   {uniqueSenders.map(s => <option key={s} value={s}>{s}</option>)}
@@ -339,7 +341,7 @@ export default function ResultsModal({ onClose, token, customerDbEnabled, isSubs
                   onClick={() => fetchData()}
                   disabled={cooldown > 0 || loading}
                   className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-colors ${
-                    cooldown > 0 ? 'bg-gray-100 text-gray-400 cursor-not-allowed' : 'bg-emerald-500 text-white hover:bg-emerald-600'
+                    cooldown > 0 ? 'bg-slate-100 text-slate-400 cursor-not-allowed' : 'bg-violet-500 text-white hover:bg-violet-600'
                   }`}
                 >
                   {loading ? '조회 중...' : cooldown > 0 ? `${cooldown}초` : '조회'}
@@ -350,7 +352,7 @@ export default function ResultsModal({ onClose, token, customerDbEnabled, isSubs
               {(summary || campaigns.length > 0) && (() => {
                 const totalSuccess = filteredCampaigns.reduce((sum, c) => sum + (c.success_count || 0), 0);
                 const totalFail = filteredCampaigns.reduce((sum, c) => sum + (c.fail_count || 0), 0);
-                // D183 fix: 전송 영역 = sent_count(통신사 발송 누계) 또는 target_count(목표 수) — 대기 영역 포함 분모 정합
+                // D183: 전송 분모 = sent_count(통신사 발송 누계) 또는 target_count(목표 수) — 대기분 포함
                 const totalSent = filteredCampaigns.reduce((sum, c) => sum + (c.sent_count || c.target_count || 0), 0);
                 const successRate = totalSent > 0 ? Math.round((totalSuccess / totalSent) * 100) : 0;
                 // 메시지 타입별 단가 적용 (SMS/LMS/MMS/카카오 구분)
@@ -368,174 +370,221 @@ export default function ResultsModal({ onClose, token, customerDbEnabled, isSubs
                   return sum + success * perSms;
                 }, 0);
                 return (
-                  <div className="grid grid-cols-5 gap-3">
+                  <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
                     {[
-                      { label: '총 발송', value: totalSent.toLocaleString(), color: 'text-blue-600', bg: 'bg-blue-50 border-blue-100' },
-                      { label: '성공', value: totalSuccess.toLocaleString(), color: 'text-green-600', bg: 'bg-green-50 border-green-100' },
-                      { label: '실패', value: totalFail.toLocaleString(), color: 'text-red-600', bg: 'bg-red-50 border-red-100' },
-                      { label: '성공률', value: `${successRate}%`, color: 'text-violet-600', bg: 'bg-violet-50 border-violet-100' },
-                      { label: '예상 비용', value: `${Math.round(estimatedCost).toLocaleString()}원`, color: 'text-amber-600', bg: 'bg-amber-50 border-amber-100' },
-                    ].map(card => (
-                      <div key={card.label} className={`rounded-lg p-4 text-center border ${card.bg}`}>
-                        <div className={`text-2xl font-bold ${card.color}`}>{card.value}</div>
-                        <div className="text-xs text-gray-500 mt-1">{card.label}</div>
-                      </div>
-                    ))}
+                      { key: 'sent', label: '총 발송', value: totalSent.toLocaleString(), Icon: Send, grad: 'from-violet-500 to-violet-600', cls: 'text-slate-900', progress: undefined as number | undefined },
+                      { key: 'success', label: '성공', value: totalSuccess.toLocaleString(), Icon: CheckCircle2, grad: 'from-emerald-500 to-emerald-600', cls: 'text-emerald-600', progress: undefined as number | undefined },
+                      { key: 'fail', label: '실패', value: totalFail.toLocaleString(), Icon: XCircle, grad: 'from-rose-500 to-rose-600', cls: 'text-rose-600', progress: undefined as number | undefined },
+                      { key: 'rate', label: '성공률', value: `${successRate}%`, Icon: TrendingUp, grad: 'from-violet-500 to-fuchsia-600', cls: 'text-violet-600', progress: successRate as number | undefined },
+                      { key: 'cost', label: '예상 비용', value: `₩${Math.round(estimatedCost).toLocaleString()}`, Icon: Wallet, grad: 'from-amber-500 to-orange-500', cls: 'text-amber-600', progress: undefined as number | undefined },
+                    ].map(card => {
+                      const Icon = card.Icon;
+                      return (
+                        <div key={card.key} className="rounded-2xl border border-slate-200 bg-white shadow-sm p-4">
+                          <div className="flex items-center gap-2 mb-2">
+                            <div className={`w-10 h-10 rounded-xl bg-gradient-to-br ${card.grad} flex items-center justify-center shadow-sm`}>
+                              <Icon className="w-5 h-5 text-white" />
+                            </div>
+                            <span className="text-xs text-slate-500">{card.label}</span>
+                          </div>
+                          <div className={`text-2xl font-bold ${card.cls}`}>{card.value}</div>
+                          {card.progress !== undefined && (
+                            <div className="mt-2 h-1.5 rounded-full bg-slate-100 overflow-hidden">
+                              <div className="h-full bg-gradient-to-r from-violet-500 to-fuchsia-500 rounded-full" style={{ width: `${Math.min(100, card.progress)}%` }} />
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
                   </div>
                 );
               })()}
 
               {/* 채널통합조회 테이블 */}
-              <div className="border border-gray-200 rounded-lg overflow-hidden">
-                <div className="bg-gray-50 px-4 py-2.5 font-medium text-sm text-gray-700 border-b">
+              {(() => {
+                const pageRows = filteredCampaigns.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
+                const rateBarClass = (rate: number) => rate >= 98 ? 'bg-emerald-500' : rate >= 95 ? 'bg-amber-500' : 'bg-rose-500';
+                const channelChip = (c: any) => {
+                  const isLmsMms = c.message_type === 'LMS' || c.message_type === 'MMS' || c.message_type === 'L' || c.message_type === 'M';
+                  const cls = c.send_channel === 'kakao' ? 'bg-yellow-50 text-yellow-700 border border-yellow-200'
+                    : c.send_channel === 'alimtalk' ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                    : c.send_channel === 'both' || isLmsMms ? 'bg-violet-50 text-violet-700 border border-violet-200'
+                    : 'bg-slate-100 text-slate-600 border border-slate-200';
+                  const label = c.send_channel === 'kakao' ? '💬 카카오'
+                    : c.send_channel === 'alimtalk' ? '📨 알림톡'
+                    : c.send_channel === 'both' ? '📱+💬'
+                    : `📱 ${msgTypeLabel[c.message_type] || 'SMS'}`;
+                  return { cls, label };
+                };
+                return (
+              <div className="rounded-2xl border border-slate-200 overflow-hidden">
+                <div className="bg-slate-50 px-4 py-2.5 font-medium text-sm text-slate-700 border-b border-slate-200">
                   채널통합조회
-                  <span className="text-gray-400 font-normal ml-2">{filteredCampaigns.length}건</span>
+                  <span className="text-slate-400 font-normal ml-2">{filteredCampaigns.length}건</span>
                 </div>
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="bg-gray-50 border-b">
-                      <th className="px-3 py-2.5 text-left text-xs font-semibold text-gray-500 uppercase">유형</th>
-                      <th className="px-3 py-2.5 text-center text-xs font-semibold text-gray-500 uppercase">발송자</th>
-                      <th className="px-3 py-2.5 text-left text-xs font-semibold text-gray-500 uppercase">메시지 내용</th>
-                      <th className="px-3 py-2.5 text-center text-xs font-semibold text-gray-500 uppercase">등록일시</th>
-                      <th className="px-3 py-2.5 text-center text-xs font-semibold text-gray-500 uppercase">발송일시</th>
-                      <th className="px-3 py-2.5 text-center text-xs font-semibold text-gray-500 uppercase">채널</th>
-                      <th className="px-3 py-2.5 text-center text-xs font-semibold text-gray-500 uppercase">전송건수</th>
-                      <th className="px-3 py-2.5 text-center text-xs font-semibold text-gray-500 uppercase">성공</th>
-                      <th className="px-3 py-2.5 text-center text-xs font-semibold text-gray-500 uppercase">실패</th>
-                      <th className="px-3 py-2.5 text-center text-xs font-semibold text-gray-500 uppercase">대기</th>
-                      <th className="px-3 py-2.5 text-center text-xs font-semibold text-gray-500 uppercase">성공률</th>
-                      <th className="px-3 py-2.5 text-center text-xs font-semibold text-gray-500 uppercase min-w-[80px]">보기</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {filteredCampaigns.length === 0 ? (
-                      <tr><td colSpan={12} className="px-4 py-10 text-center text-gray-400">조회된 데이터가 없습니다.</td></tr>
-                    ) : (
-                      filteredCampaigns
-                        .slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage)
-                        .map((c) => (
-                        <tr key={c.id} className="border-t hover:bg-gray-50 transition-colors">
-                          <td className="px-3 py-2.5">
-                            <span
-                              className={`inline-block px-2 py-0.5 rounded text-xs font-medium ${getStatusColor(c)}`}
-                              title={c.status === 'cancelled' && c.cancelled_by_type === 'super_admin' ? `관리자 취소 / 사유: ${c.cancel_reason || '없음'}` : ''}
-                            >
-                              {getStatusLabel(c)}
-                            </span>
-                          </td>
-                          <td className="px-3 py-2.5 text-center text-xs text-gray-600">{c.created_by_name || '-'}</td>
-                          <MessageCell
-                            content={formatCampaignMessageForDisplay(c)}
-                            onShowDetail={(content) => setMsgDetailContent({
-                              content,
-                              msgType: c.message_type,
-                              mmsImages: Array.isArray(c.mms_image_paths) ? c.mms_image_paths : (typeof c.mms_image_paths === 'string' ? (() => { try { return JSON.parse(c.mms_image_paths); } catch { return []; } })() : []),
-                            })}
-                          />
-                          <td className="px-3 py-2.5 text-center text-xs text-gray-500">
-                          {new Date(c.created_at).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}
-                          </td>
-                          <td className="px-3 py-2.5 text-center text-xs">
-                            {c.scheduled_at ? (
-                              c.status === 'cancelled' ? (
-                                <span className="text-gray-400 line-through">
-                                  {new Date(c.scheduled_at).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}
-                                  <span className="text-[10px] ml-1">(예약취소)</span>
-                                </span>
-                              ) : (
-                                <span className="text-blue-600">
-                                  {new Date(c.scheduled_at).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}
-                                  <span className="text-[10px] ml-1 text-blue-400">(예약)</span>
-                                </span>
-                              )
-                            ) : c.sent_at ? (
-                              <span className="text-gray-500">{new Date(c.sent_at).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}</span>
-                            ) : '-'}
-                          </td>
-                          <td className="px-3 py-2.5 text-center">
-                            <span className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-medium ${
-                              c.send_channel === 'kakao' ? 'bg-yellow-100 text-yellow-700'
-                                : c.send_channel === 'alimtalk' ? 'bg-emerald-100 text-emerald-700'
-                                : 'bg-blue-50 text-blue-600'
-                            }`}>
-                              {/* ★ D225+ (2026-05-28): alimtalk 채널 표기 분기 추가 — 옛 흐름 = message_type='LMS' 강제 적용 → "📱 LMS" 표기 사고 정정 */}
-                              {c.send_channel === 'kakao' ? '💬 카카오'
-                                : c.send_channel === 'alimtalk' ? '📨 알림톡'
-                                : c.send_channel === 'both' ? '📱+💬'
-                                : `📱 ${msgTypeLabel[c.message_type] || 'SMS'}`}
-                            </span>
-                          </td>
-                          {/* ★ D145 P0+ (2026-05-07 폴라초이스 사고): sent_count 우선 — MySQL 실제 발송 건수가 정확.
-                              PG target_count는 발송 시점 INSERT 누락 가능성(폴라초이스 466건 차이)으로 잘못된 값일 수 있음. */}
-                          <td className="px-3 py-2.5 text-center font-medium">{(c.sent_count || c.target_count || 0).toLocaleString()}</td>
-                          <td className="px-3 py-2.5 text-center text-green-600 font-medium">{(c.success_count || 0).toLocaleString()}</td>
-                          <td className="px-3 py-2.5 text-center text-red-600 font-medium">{(c.fail_count || 0).toLocaleString()}</td>
-                          <td className="px-3 py-2.5 text-center text-amber-500 font-medium">
-                            {/* 대기 = sent - success - fail (음수 가드 — target_count가 잘못된 경우 방지) */}
-                            {Math.max(0, (c.sent_count || c.target_count || 0) - (c.success_count || 0) - (c.fail_count || 0)).toLocaleString()}
-                          </td>
-                          <td className="px-3 py-2.5 text-center">
-                            {(() => {
-                              // D183 fix: 전송 영역 = sent_count 또는 target_count (대기 영역 포함 분모)
-                              const total = c.sent_count || c.target_count || 0;
-                              const rate = total > 0 ? Math.round(((c.success_count || 0) / total) * 100) : 0;
-                              return <span className={`px-2 py-0.5 rounded text-xs font-medium ${getStatusBadge(rate)}`}>{rate}%</span>;
-                            })()}
-                          </td>
-                          <td className="px-3 py-2.5 text-center">
-                            <div className="flex items-center justify-center gap-1">
-                              <button
-                                onClick={() => { setMessages([]); setShowSendDetail(false); setSelectedCampaign(c); fetchCampaignDetail(c.id); }}
-                                className="text-blue-500 hover:text-blue-700 text-xs font-medium hover:underline"
+
+                {/* 데스크탑: 테이블 (md 이상) */}
+                <div className="hidden md:block overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="bg-slate-50 border-b border-slate-200">
+                        <th className="px-3 py-2.5 text-left text-xs font-semibold text-slate-500">유형</th>
+                        <th className="px-3 py-2.5 text-center text-xs font-semibold text-slate-500">발송자</th>
+                        <th className="px-3 py-2.5 text-left text-xs font-semibold text-slate-500">메시지 내용</th>
+                        <th className="px-3 py-2.5 text-center text-xs font-semibold text-slate-500">등록일시</th>
+                        <th className="px-3 py-2.5 text-center text-xs font-semibold text-slate-500">발송일시</th>
+                        <th className="px-3 py-2.5 text-center text-xs font-semibold text-slate-500">채널</th>
+                        <th className="px-3 py-2.5 text-center text-xs font-semibold text-slate-500">전송건수</th>
+                        <th className="px-3 py-2.5 text-center text-xs font-semibold text-slate-500">성공</th>
+                        <th className="px-3 py-2.5 text-center text-xs font-semibold text-slate-500">실패</th>
+                        <th className="px-3 py-2.5 text-center text-xs font-semibold text-slate-500">대기</th>
+                        <th className="px-3 py-2.5 text-center text-xs font-semibold text-slate-500">성공률</th>
+                        <th className="px-3 py-2.5 text-center text-xs font-semibold text-slate-500 min-w-[80px]">보기</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {pageRows.length === 0 ? (
+                        <tr><td colSpan={12} className="px-4 py-10 text-center text-slate-400">조회된 데이터가 없습니다.</td></tr>
+                      ) : (
+                        pageRows.map((c) => {
+                          const sent = c.sent_count || c.target_count || 0;
+                          const successCnt = c.success_count || 0;
+                          const failCnt = c.fail_count || 0;
+                          const pendingCnt = Math.max(0, sent - successCnt - failCnt);
+                          const rate = sent > 0 ? Math.round((successCnt / sent) * 100) : 0;
+                          const ch = channelChip(c);
+                          return (
+                          <tr key={c.id} className="border-t border-slate-100 hover:bg-slate-50 transition-colors">
+                            <td className="px-3 py-2.5">
+                              <span
+                                className={`inline-block px-2 py-0.5 rounded-md text-xs font-medium ${getStatusColor(c)}`}
+                                title={c.status === 'cancelled' && c.cancelled_by_type === 'super_admin' ? `관리자 취소 / 사유: ${c.cancel_reason || '없음'}` : ''}
                               >
-                                상세
-                              </button>
-                              {c.status === 'scheduled' && (
-                                <button onClick={() => setCancelTarget(c)} className="text-red-400 hover:text-red-600 text-xs font-medium hover:underline ml-1">
-                                  취소
-                                </button>
-                              )}
-                              {c.status === 'draft' && c.scheduled_at && new Date(c.scheduled_at) > new Date() && (new Date(c.scheduled_at).getTime() - Date.now()) >= 15 * 60 * 1000 && (
+                                {getStatusLabel(c)}
+                              </span>
+                            </td>
+                            <td className="px-3 py-2.5 text-center text-xs text-slate-600">{c.created_by_name || '-'}</td>
+                            <MessageCell
+                              content={formatCampaignMessageForDisplay(c)}
+                              onShowDetail={(content) => setMsgDetailContent({
+                                content,
+                                msgType: c.message_type,
+                                mmsImages: Array.isArray(c.mms_image_paths) ? c.mms_image_paths : (typeof c.mms_image_paths === 'string' ? (() => { try { return JSON.parse(c.mms_image_paths); } catch { return []; } })() : []),
+                              })}
+                            />
+                            <td className="px-3 py-2.5 text-center text-xs text-slate-500">
+                              {new Date(c.created_at).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}
+                            </td>
+                            <td className="px-3 py-2.5 text-center text-xs">
+                              {c.scheduled_at ? (
+                                c.status === 'cancelled' ? (
+                                  <span className="text-slate-400 line-through">
+                                    {new Date(c.scheduled_at).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}
+                                    <span className="text-[10px] ml-1">(예약취소)</span>
+                                  </span>
+                                ) : (
+                                  <span className="text-blue-600">
+                                    {new Date(c.scheduled_at).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}
+                                    <span className="text-[10px] ml-1 text-blue-400">(예약)</span>
+                                  </span>
+                                )
+                              ) : c.sent_at ? (
+                                <span className="text-slate-500">{new Date(c.sent_at).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}</span>
+                              ) : '-'}
+                            </td>
+                            <td className="px-3 py-2.5 text-center">
+                              <span className={`inline-block px-1.5 py-0.5 rounded-md text-[10px] font-medium ${ch.cls}`}>{ch.label}</span>
+                            </td>
+                            <td className="px-3 py-2.5 text-center font-medium text-slate-700">{sent.toLocaleString()}</td>
+                            <td className="px-3 py-2.5 text-center text-emerald-600 font-medium">{successCnt.toLocaleString()}</td>
+                            <td className="px-3 py-2.5 text-center text-rose-600 font-medium">{failCnt.toLocaleString()}</td>
+                            <td className="px-3 py-2.5 text-center text-amber-500 font-medium">{pendingCnt.toLocaleString()}</td>
+                            <td className="px-3 py-2.5 text-center">
+                              <div className="flex items-center justify-center gap-1.5">
+                                <div className="w-12 h-1.5 rounded-full bg-slate-100 overflow-hidden">
+                                  <div className={`h-full rounded-full ${rateBarClass(rate)}`} style={{ width: `${rate}%` }} />
+                                </div>
+                                <span className="text-xs font-medium text-slate-600">{rate}%</span>
+                              </div>
+                            </td>
+                            <td className="px-3 py-2.5 text-center">
+                              <div className="flex items-center justify-center gap-1">
                                 <button
-                                  onClick={async () => {
-                                    if (!window.confirm(`"${c.campaign_name}" 예약을 취소하시겠습니까?`)) return;
-                                    try {
-                                      const token = localStorage.getItem('token');
-                                      const res = await fetch(`/api/campaigns/${c.id}`, {
-                                        method: 'DELETE',
-                                        headers: { Authorization: `Bearer ${token}` }
-                                      });
-                                      const data = await res.json();
-                                      if (data.success) {
-                                        setCampaigns((prev: any[]) => prev.map((x: any) => x.id === c.id ? { ...x, status: 'cancelled' } : x));
-                                      } else {
-                                        alert(data.error || '취소에 실패했습니다');
-                                      }
-                                    } catch (err) {
-                                      alert('서버 연결 오류가 발생했습니다.');
-                                    }
-                                  }}
-                                  className="text-red-400 hover:text-red-600 text-xs font-medium hover:underline ml-1"
+                                  onClick={() => { setMessages([]); setShowSendDetail(false); setSelectedCampaign(c); fetchCampaignDetail(c.id); }}
+                                  className="text-violet-600 hover:text-violet-700 text-xs font-medium hover:underline"
                                 >
-                                  취소
+                                  상세
                                 </button>
-                              )}
+                                {c.status === 'scheduled' && (
+                                  <button onClick={() => setCancelTarget(c)} className="text-rose-400 hover:text-rose-600 text-xs font-medium hover:underline ml-1">
+                                    취소
+                                  </button>
+                                )}
+                                {c.status === 'draft' && c.scheduled_at && new Date(c.scheduled_at) > new Date() && (new Date(c.scheduled_at).getTime() - Date.now()) >= 15 * 60 * 1000 && (
+                                  <button onClick={() => setDraftCancelTarget(c)} className="text-rose-400 hover:text-rose-600 text-xs font-medium hover:underline ml-1">
+                                    취소
+                                  </button>
+                                )}
+                              </div>
+                            </td>
+                          </tr>
+                          );
+                        })
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+
+                {/* 모바일: 카드형 행 (md 미만) */}
+                <div className="md:hidden divide-y divide-slate-100">
+                  {pageRows.length === 0 ? (
+                    <div className="px-4 py-10 text-center text-slate-400 text-sm">조회된 데이터가 없습니다.</div>
+                  ) : (
+                    pageRows.map((c) => {
+                      const sent = c.sent_count || c.target_count || 0;
+                      const successCnt = c.success_count || 0;
+                      const rate = sent > 0 ? Math.round((successCnt / sent) * 100) : 0;
+                      const ch = channelChip(c);
+                      const msgPreview = formatCampaignMessageForDisplay(c);
+                      return (
+                        <div key={c.id} className="p-4">
+                          <div className="flex items-center justify-between gap-2 mb-2">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span className={`inline-block px-2 py-0.5 rounded-md text-xs font-medium ${getStatusColor(c)}`}>{getStatusLabel(c)}</span>
+                              <span className={`inline-block px-1.5 py-0.5 rounded-md text-[10px] font-medium ${ch.cls}`}>{ch.label}</span>
                             </div>
-                          </td>
-                        </tr>
-                      ))
-                    )}
-                  </tbody>
-                </table>
+                            <button
+                              onClick={() => { setMessages([]); setShowSendDetail(false); setSelectedCampaign(c); fetchCampaignDetail(c.id); }}
+                              className="text-violet-600 hover:text-violet-700 text-xs font-medium hover:underline shrink-0"
+                            >
+                              상세
+                            </button>
+                          </div>
+                          <div className="text-sm text-slate-700 mb-2 break-all">{msgPreview.length > 60 ? msgPreview.slice(0, 60) + '…' : msgPreview}</div>
+                          <div className="flex items-center gap-3 text-xs">
+                            <span className="text-slate-500">전송 <span className="font-medium text-slate-700">{sent.toLocaleString()}</span></span>
+                            <span className="text-slate-500">성공 <span className="font-medium text-emerald-600">{successCnt.toLocaleString()}</span></span>
+                            <span className="flex items-center gap-1">
+                              <span className="w-10 h-1.5 rounded-full bg-slate-100 overflow-hidden inline-block">
+                                <span className={`block h-full rounded-full ${rateBarClass(rate)}`} style={{ width: `${rate}%` }} />
+                              </span>
+                              <span className="font-medium text-slate-600">{rate}%</span>
+                            </span>
+                            {c.created_by_name && <span className="text-slate-400 ml-auto">{c.created_by_name}</span>}
+                          </div>
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
 
                 {/* 페이지네이션 */}
                 {totalFilteredPages > 1 && (
-                  <div className="flex items-center justify-center gap-1.5 py-3 border-t bg-gray-50">
+                  <div className="flex items-center justify-center gap-1.5 py-3 border-t border-slate-200 bg-slate-50">
                     <button
                       onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
                       disabled={currentPage === 1}
-                      className="px-3 py-1 text-sm rounded-md border bg-white hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                      className="px-3 py-1 text-sm rounded-md border border-slate-200 bg-white hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
                     >
                       이전
                     </button>
@@ -543,11 +592,11 @@ export default function ResultsModal({ onClose, token, customerDbEnabled, isSubs
                       .filter(page => Math.abs(page - currentPage) <= 2 || page === 1 || page === totalFilteredPages)
                       .map((page, idx, arr) => (
                         <span key={page}>
-                          {idx > 0 && arr[idx - 1] !== page - 1 && <span className="px-1 text-gray-300">...</span>}
+                          {idx > 0 && arr[idx - 1] !== page - 1 && <span className="px-1 text-slate-300">...</span>}
                           <button
                             onClick={() => setCurrentPage(page)}
                             className={`w-8 h-8 text-sm rounded-md border transition-colors ${
-                              currentPage === page ? 'bg-emerald-500 text-white border-emerald-500' : 'bg-white hover:bg-gray-50'
+                              currentPage === page ? 'bg-violet-500 text-white border-violet-500' : 'border-slate-200 bg-white hover:bg-slate-50'
                             }`}
                           >
                             {page}
@@ -558,13 +607,16 @@ export default function ResultsModal({ onClose, token, customerDbEnabled, isSubs
                     <button
                       onClick={() => setCurrentPage(p => Math.min(totalFilteredPages, p + 1))}
                       disabled={currentPage === totalFilteredPages}
-                      className="px-3 py-1 text-sm rounded-md border bg-white hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                      className="px-3 py-1 text-sm rounded-md border border-slate-200 bg-white hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
                     >
                       다음
                     </button>
                   </div>
                 )}
+                <div className="px-4 py-2 text-[10px] text-slate-400 italic border-t border-slate-100">Data source — 캠페인 발송 집계(PG/MySQL)</div>
               </div>
+                );
+              })()}
             </div>
           )}
 
@@ -572,25 +624,25 @@ export default function ResultsModal({ onClose, token, customerDbEnabled, isSubs
             <div className="space-y-4">
               {/* 기간 선택 */}
               <div className="flex items-center gap-4">
-                <span className="text-sm text-gray-500 font-medium">기간</span>
+                <span className="text-sm text-slate-500 font-medium">기간</span>
                 <input
                   type="date"
                   value={startDate}
                   onChange={(e) => setStartDate(e.target.value)}
-                  className="border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-orange-200 focus:border-orange-400"
+                  className="border border-slate-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-orange-200 focus:border-orange-400"
                 />
-                <span className="text-gray-400">~</span>
+                <span className="text-slate-400">~</span>
                 <input
                   type="date"
                   value={endDate}
                   onChange={(e) => setEndDate(e.target.value)}
-                  className="border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-orange-200 focus:border-orange-400"
+                  className="border border-slate-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-orange-200 focus:border-orange-400"
                 />
                 <button
                   onClick={fetchTestStats}
                   disabled={testCooldown > 0}
                   className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-colors ${
-                    testCooldown > 0 ? 'bg-gray-100 text-gray-400 cursor-not-allowed' : 'bg-orange-500 text-white hover:bg-orange-600'
+                    testCooldown > 0 ? 'bg-slate-100 text-slate-400 cursor-not-allowed' : 'bg-orange-500 text-white hover:bg-orange-600'
                   }`}
                 >
                   {testCooldown > 0 ? `${testCooldown}초` : '조회'}
@@ -599,43 +651,43 @@ export default function ResultsModal({ onClose, token, customerDbEnabled, isSubs
 
               {/* 요약 카드 */}
               <div className="grid grid-cols-3 gap-4">
-                <div className="bg-amber-50 border border-amber-100 rounded-lg p-4">
-                  <div className="font-medium text-gray-700 mb-2">전체 테스트</div>
+                <div className="bg-amber-50 border border-amber-100 rounded-2xl p-4 shadow-sm">
+                  <div className="font-medium text-slate-700 mb-2">전체 테스트</div>
                   <div className="flex justify-between items-end">
                     <div>
                       <span className="text-2xl font-bold text-amber-600">{testStats?.total || 0}</span>
-                      <span className="text-sm text-gray-500 ml-1">건</span>
+                      <span className="text-sm text-slate-500 ml-1">건</span>
                     </div>
                     <div className="text-right">
-                      <div className="text-sm text-gray-500">성공 {testStats?.success || 0} / 실패 {testStats?.fail || 0}</div>
+                      <div className="text-sm text-slate-500">성공 {testStats?.success || 0} / 실패 {testStats?.fail || 0}</div>
                       <div className="text-lg font-bold text-amber-600">{(testStats?.cost || 0).toLocaleString()}원</div>
                     </div>
                   </div>
                 </div>
-                <div className="bg-orange-50 border border-orange-100 rounded-lg p-4">
-                  <div className="font-medium text-gray-700 mb-2">담당자 테스트</div>
+                <div className="bg-orange-50 border border-orange-100 rounded-2xl p-4 shadow-sm">
+                  <div className="font-medium text-slate-700 mb-2">담당자 테스트</div>
                   <div className="flex justify-between items-end">
                     <div>
                       <span className="text-xl font-bold text-orange-600">{(testList || []).length}</span>
-                      <span className="text-sm text-gray-500 ml-1">건</span>
+                      <span className="text-sm text-slate-500 ml-1">건</span>
                     </div>
                     <div className="text-right">
-                      <div className="text-xs text-gray-400">담당자 발송 테스트</div>
+                      <div className="text-xs text-slate-400">담당자 발송 테스트</div>
                     </div>
                   </div>
                 </div>
-                <div className="bg-violet-50 border border-violet-100 rounded-lg p-4">
-                  <div className="font-medium text-gray-700 mb-2">스팸필터 테스트</div>
+                <div className="bg-violet-50 border border-violet-100 rounded-2xl p-4 shadow-sm">
+                  <div className="font-medium text-slate-700 mb-2">스팸필터 테스트</div>
                   <div className="flex justify-between items-end">
                     <div>
                       <span className="text-xl font-bold text-violet-600">{spamFilterStats?.total || 0}</span>
-                      <span className="text-sm text-gray-500 ml-1">건</span>
+                      <span className="text-sm text-slate-500 ml-1">건</span>
                     </div>
                     <div className="text-right">
                       {spamFilterStats && spamFilterStats.total > 0 ? (
-                        <div className="text-xs text-gray-400">SMS {spamFilterStats.sms} · LMS {spamFilterStats.lms}</div>
+                        <div className="text-xs text-slate-400">SMS {spamFilterStats.sms} · LMS {spamFilterStats.lms}</div>
                       ) : (
-                        <div className="text-xs text-gray-400">통신사별 스팸 판정</div>
+                        <div className="text-xs text-slate-400">통신사별 스팸 판정</div>
                       )}
                     </div>
                   </div>
@@ -643,32 +695,32 @@ export default function ResultsModal({ onClose, token, customerDbEnabled, isSubs
               </div>
 
               {/* 담당자 테스트 리스트 */}
-              <div className="border border-gray-200 rounded-lg overflow-hidden">
-                <div className="bg-gray-50 px-4 py-2.5 font-medium text-sm text-gray-700 border-b">담당자 테스트 이력</div>
+              <div className="border border-slate-200 rounded-2xl overflow-hidden">
+                <div className="bg-slate-50 px-4 py-2.5 font-medium text-sm text-slate-700 border-b">담당자 테스트 이력</div>
                 <div className="max-h-[300px] overflow-y-auto">
                   <table className="w-full text-sm">
-                    <thead className="bg-gray-50 sticky top-0">
+                    <thead className="bg-slate-50 sticky top-0">
                       <tr>
-                        <th className="px-3 py-2 text-left text-xs font-semibold text-gray-500">날짜</th>
-                        <th className="px-3 py-2 text-left text-xs font-semibold text-gray-500">발송자</th>
-                        <th className="px-3 py-2 text-left text-xs font-semibold text-gray-500">유형</th>
-                        <th className="px-3 py-2 text-left text-xs font-semibold text-gray-500">수신번호</th>
-                        <th className="px-3 py-2 text-left text-xs font-semibold text-gray-500">내용</th>
-                        <th className="px-3 py-2 text-center text-xs font-semibold text-gray-500">결과</th>
+                        <th className="px-3 py-2 text-left text-xs font-semibold text-slate-500">날짜</th>
+                        <th className="px-3 py-2 text-left text-xs font-semibold text-slate-500">발송자</th>
+                        <th className="px-3 py-2 text-left text-xs font-semibold text-slate-500">유형</th>
+                        <th className="px-3 py-2 text-left text-xs font-semibold text-slate-500">수신번호</th>
+                        <th className="px-3 py-2 text-left text-xs font-semibold text-slate-500">내용</th>
+                        <th className="px-3 py-2 text-center text-xs font-semibold text-slate-500">결과</th>
                       </tr>
                     </thead>
                     <tbody>
                       {(!testList || testList.length === 0) ? (
-                        <tr><td colSpan={6} className="px-3 py-8 text-center text-gray-400">테스트 발송 이력이 없습니다</td></tr>
+                        <tr><td colSpan={6} className="px-3 py-8 text-center text-slate-400">테스트 발송 이력이 없습니다</td></tr>
                       ) : (
                         (testList || [])
                           .slice((testCurrentPage - 1) * itemsPerPage, testCurrentPage * itemsPerPage)
                           .map((t: any) => (
-                          <tr key={t.id} className="border-t hover:bg-gray-50">
-                            <td className="px-3 py-2 text-xs text-gray-500">
+                          <tr key={t.id} className="border-t hover:bg-slate-50">
+                            <td className="px-3 py-2 text-xs text-slate-500">
                             {new Date(t.sentAt).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}
                             </td>
-                            <td className="px-3 py-2 text-xs text-gray-700">{t.senderName || '-'}</td>
+                            <td className="px-3 py-2 text-xs text-slate-700">{t.senderName || '-'}</td>
                             <td className="px-3 py-2">
                               <span className={`px-2 py-0.5 rounded text-xs font-medium ${t.type === 'SMS' ? 'bg-blue-50 text-blue-700 border border-blue-200' : 'bg-violet-50 text-violet-700 border border-violet-200'}`}>
                                 {t.type}
@@ -694,41 +746,41 @@ export default function ResultsModal({ onClose, token, customerDbEnabled, isSubs
                   </table>
                 </div>
                 {testList && testList.length > itemsPerPage && (
-                  <div className="flex justify-center items-center gap-2 py-3 border-t bg-gray-50">
-                    <button onClick={() => setTestCurrentPage(p => Math.max(1, p - 1))} disabled={testCurrentPage === 1} className="px-3 py-1 text-sm rounded-md border bg-white hover:bg-gray-50 disabled:opacity-40">이전</button>
-                    <span className="text-sm text-gray-500">{testCurrentPage} / {Math.ceil(testList.length / itemsPerPage)}</span>
-                    <button onClick={() => setTestCurrentPage(p => Math.min(Math.ceil(testList.length / itemsPerPage), p + 1))} disabled={testCurrentPage >= Math.ceil(testList.length / itemsPerPage)} className="px-3 py-1 text-sm rounded-md border bg-white hover:bg-gray-50 disabled:opacity-40">다음</button>
+                  <div className="flex justify-center items-center gap-2 py-3 border-t bg-slate-50">
+                    <button onClick={() => setTestCurrentPage(p => Math.max(1, p - 1))} disabled={testCurrentPage === 1} className="px-3 py-1 text-sm rounded-md border bg-white hover:bg-slate-50 disabled:opacity-40">이전</button>
+                    <span className="text-sm text-slate-500">{testCurrentPage} / {Math.ceil(testList.length / itemsPerPage)}</span>
+                    <button onClick={() => setTestCurrentPage(p => Math.min(Math.ceil(testList.length / itemsPerPage), p + 1))} disabled={testCurrentPage >= Math.ceil(testList.length / itemsPerPage)} className="px-3 py-1 text-sm rounded-md border bg-white hover:bg-slate-50 disabled:opacity-40">다음</button>
                   </div>
                 )}
               </div>
 
               {/* 스팸필터 테스트 리스트 */}
-              <div className="border border-gray-200 rounded-lg overflow-hidden">
+              <div className="border border-slate-200 rounded-2xl overflow-hidden">
                 <div className="bg-violet-50 px-4 py-2.5 font-medium text-sm text-violet-700 border-b">스팸필터 테스트 이력</div>
                 <div className="max-h-[300px] overflow-y-auto">
                   <table className="w-full text-sm">
-                    <thead className="bg-gray-50 sticky top-0">
+                    <thead className="bg-slate-50 sticky top-0">
                       <tr>
-                        <th className="px-3 py-2 text-left text-xs font-semibold text-gray-500">날짜</th>
-                        <th className="px-3 py-2 text-left text-xs font-semibold text-gray-500">발송자</th>
-                        <th className="px-3 py-2 text-left text-xs font-semibold text-gray-500">유형</th>
-                        <th className="px-3 py-2 text-left text-xs font-semibold text-gray-500">통신사</th>
-                        <th className="px-3 py-2 text-left text-xs font-semibold text-gray-500">문안</th>
-                        <th className="px-3 py-2 text-center text-xs font-semibold text-gray-500">판정</th>
+                        <th className="px-3 py-2 text-left text-xs font-semibold text-slate-500">날짜</th>
+                        <th className="px-3 py-2 text-left text-xs font-semibold text-slate-500">발송자</th>
+                        <th className="px-3 py-2 text-left text-xs font-semibold text-slate-500">유형</th>
+                        <th className="px-3 py-2 text-left text-xs font-semibold text-slate-500">통신사</th>
+                        <th className="px-3 py-2 text-left text-xs font-semibold text-slate-500">문안</th>
+                        <th className="px-3 py-2 text-center text-xs font-semibold text-slate-500">판정</th>
                       </tr>
                     </thead>
                     <tbody>
                     {(!spamFilterList || spamFilterList.length === 0) ? (
-                        <tr><td colSpan={6} className="px-3 py-8 text-center text-gray-400">스팸필터 테스트 이력이 없습니다</td></tr>
+                        <tr><td colSpan={6} className="px-3 py-8 text-center text-slate-400">스팸필터 테스트 이력이 없습니다</td></tr>
                       ) : (
                         spamFilterList
                           .slice((spamCurrentPage - 1) * itemsPerPage, spamCurrentPage * itemsPerPage)
                           .map((t: any, idx: number) => (
-                          <tr key={t.id || idx} className="border-t hover:bg-gray-50">
-                            <td className="px-3 py-2 text-xs text-gray-500">
+                          <tr key={t.id || idx} className="border-t hover:bg-slate-50">
+                            <td className="px-3 py-2 text-xs text-slate-500">
                               {new Date(t.sentAt).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}
                             </td>
-                            <td className="px-3 py-2 text-xs text-gray-700">{t.senderName || '-'}</td>
+                            <td className="px-3 py-2 text-xs text-slate-700">{t.senderName || '-'}</td>
                             <td className="px-3 py-2">
                               <span className={`px-2 py-0.5 rounded text-xs font-medium ${t.type === 'SMS' ? 'bg-blue-50 text-blue-700 border border-blue-200' : 'bg-violet-50 text-violet-700 border border-violet-200'}`}>
                                 {t.type}
@@ -761,10 +813,10 @@ export default function ResultsModal({ onClose, token, customerDbEnabled, isSubs
                   </table>
                   </div>
                 {spamFilterList && spamFilterList.length > itemsPerPage && (
-                  <div className="flex justify-center items-center gap-2 py-3 border-t bg-gray-50">
-                    <button onClick={() => setSpamCurrentPage(p => Math.max(1, p - 1))} disabled={spamCurrentPage === 1} className="px-3 py-1 text-sm rounded-md border bg-white hover:bg-gray-50 disabled:opacity-40">이전</button>
-                    <span className="text-sm text-gray-500">{spamCurrentPage} / {Math.ceil(spamFilterList.length / itemsPerPage)}</span>
-                    <button onClick={() => setSpamCurrentPage(p => Math.min(Math.ceil(spamFilterList.length / itemsPerPage), p + 1))} disabled={spamCurrentPage >= Math.ceil(spamFilterList.length / itemsPerPage)} className="px-3 py-1 text-sm rounded-md border bg-white hover:bg-gray-50 disabled:opacity-40">다음</button>
+                  <div className="flex justify-center items-center gap-2 py-3 border-t bg-slate-50">
+                    <button onClick={() => setSpamCurrentPage(p => Math.max(1, p - 1))} disabled={spamCurrentPage === 1} className="px-3 py-1 text-sm rounded-md border bg-white hover:bg-slate-50 disabled:opacity-40">이전</button>
+                    <span className="text-sm text-slate-500">{spamCurrentPage} / {Math.ceil(spamFilterList.length / itemsPerPage)}</span>
+                    <button onClick={() => setSpamCurrentPage(p => Math.min(Math.ceil(spamFilterList.length / itemsPerPage), p + 1))} disabled={spamCurrentPage >= Math.ceil(spamFilterList.length / itemsPerPage)} className="px-3 py-1 text-sm rounded-md border bg-white hover:bg-slate-50 disabled:opacity-40">다음</button>
                   </div>
                 )}
               </div>
@@ -773,222 +825,53 @@ export default function ResultsModal({ onClose, token, customerDbEnabled, isSubs
 
         </div>
 
-        {/* ==================== 캠페인 상세 모달 ==================== */}
+        {/* ==================== 캠페인 상세 모달 (CampaignDetailModal로 분리) ==================== */}
         {selectedCampaign && (
-          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[60] p-2 md:p-4">
-            <div className="bg-white rounded-xl shadow-2xl w-full max-w-[820px] max-h-[90vh] overflow-hidden flex flex-col">
-              {/* 헤더 */}
-              <div className="flex justify-between items-center px-6 py-4 border-b">
-                <h3 className="font-bold text-gray-800">캠페인 상세</h3>
-                <button onClick={() => { setSelectedCampaign(null); setShowSendDetail(false); }} className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-gray-100 text-gray-400 hover:text-gray-600 transition-colors text-lg">&times;</button>
-              </div>
-
-              <div className="flex-1 overflow-y-auto p-6 space-y-5">
-                {/* 상단 4카드 (D183: 클릭률 카드 추가 — 단축 URL 트래킹 통합) */}
-                <div className="grid grid-cols-4 gap-4">
-                  <div className="border border-gray-200 rounded-lg p-4 text-center">
-                    <div className="text-xs text-gray-500 mb-1">성공률</div>
-                    <div className={`text-3xl font-bold ${
-                      (() => {
-                        // D183 fix: 전송 영역 = s.sent 우선 (대기 영역 포함 분모) + fallback = success+fail
-                        const s = campaignDetail?.charts?.successFail;
-                        const denom = s ? (s.sent || (s.success + s.fail) || 1) : 1;
-                        const rate = s ? Math.round((s.success / denom) * 100) : 0;
-                        return rate >= 50 ? 'text-green-600' : 'text-red-500';
-                      })()
-                    }`}>
-                      {(() => {
-                        const s = campaignDetail?.charts?.successFail;
-                        if (!s) return 0;
-                        const denom = s.sent || (s.success + s.fail) || 1;
-                        return Math.round((s.success / denom) * 100);
-                      })()}%
-                    </div>
-                  </div>
-                  {/* D183 신규: 클릭률 카드 — cdp_events 'message_click' 영역 집계 */}
-                  <div className="border border-gray-200 rounded-lg p-4 text-center">
-                    <div className="text-xs text-gray-500 mb-1">클릭률</div>
-                    <div className="text-3xl font-bold text-blue-600">
-                      {(() => {
-                        const s = campaignDetail?.charts?.successFail;
-                        if (!s || !s.clicks || !s.success) return 0;
-                        return Math.round((s.clicks / s.success) * 100);
-                      })()}%
-                    </div>
-                    <div className="text-xs text-gray-400 mt-1">
-                      {(campaignDetail?.charts?.successFail?.clicks || 0).toLocaleString()} 클릭
-                    </div>
-                  </div>
-                  <div className="border border-gray-200 rounded-lg p-4">
-                    <div className="text-xs text-gray-500 mb-2 text-center">통신사별 분포</div>
-                    {campaignDetail?.charts?.carriers && Object.keys(campaignDetail.charts.carriers).length > 0 ? (
-                      <div className="space-y-1.5">
-                        {Object.entries(campaignDetail.charts.carriers).map(([carrier, count]) => {
-                          const colors: Record<string, string> = { 'SKT': 'bg-red-100 text-red-700', 'KT': 'bg-orange-100 text-orange-700', 'LG U+': 'bg-pink-100 text-pink-700' };
-                          return (
-                            <div key={carrier} className={`flex justify-between items-center px-2.5 py-1 rounded-md text-xs ${colors[carrier] || 'bg-gray-100 text-gray-600'}`}>
-                              <span className="font-medium">{carrier}</span>
-                              <span className="font-bold">{(count as number).toLocaleString()}</span>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    ) : (
-                      <div className="text-xs text-gray-400 text-center mt-2">성공 건 없음</div>
-                    )}
-                  </div>
-                  <div className="border border-gray-200 rounded-lg p-4">
-                    <div className="text-xs text-gray-500 mb-2 text-center">실패사유 분포</div>
-                    {campaignDetail?.charts?.errors && Object.keys(campaignDetail.charts.errors).length > 0 ? (
-                      <div className="space-y-1">
-                        {Object.entries(campaignDetail.charts.errors).map(([error, count]) => (
-                          <div key={error} className="flex justify-between text-xs">
-                            <span className="text-red-600">{error}</span>
-                            <span className="font-medium text-gray-700">{(count as number).toLocaleString()}</span>
-                          </div>
-                        ))}
-                      </div>
-                    ) : (
-                      <div className="text-xs text-gray-400 text-center mt-2">실패 건 없음</div>
-                    )}
-                  </div>
-                </div>
-
-                {/* 폰 미리보기 + 캠페인 정보 */}
-                <div className="flex gap-5">
-                  {/* 폰 미리보기 */}
-                  <div className="flex-shrink-0">
-                    <div className="text-xs text-gray-500 mb-2 font-medium">메시지 미리보기</div>
-                    <div className="w-[240px] rounded-[1.8rem] p-[3px] bg-gradient-to-b from-emerald-400 to-emerald-600 shadow-lg shadow-emerald-200/50">
-                      <div className="bg-white rounded-[1.6rem] overflow-hidden flex flex-col" style={{ height: '400px' }}>
-                        {/* 상단 */}
-                        <div className="px-4 py-2.5 bg-gradient-to-r from-gray-50 to-gray-100 flex justify-between items-center shrink-0 border-b">
-                          <span className="text-[11px] text-gray-400 font-medium">{selectedCampaign.send_channel === 'alimtalk' ? '알림톡' : selectedCampaign.send_channel === 'kakao' ? '카카오톡' : '문자메시지'}</span>
-                          {/* ★ D225+ (2026-05-28): alimtalk 채널 표기 분기 추가 — 옛 흐름 = message_type='LMS' 강제 적용 표기 정정 */}
-                          <span className="text-[11px] font-bold text-emerald-600">{selectedCampaign.send_channel === 'alimtalk' ? '알림톡' : selectedCampaign.send_channel === 'kakao' ? '카카오' : (msgTypeLabel[selectedCampaign.message_type] || selectedCampaign.message_type)}</span>
-                        </div>
-                        {/* 메시지 영역 */}
-                        <div className="flex-1 overflow-y-auto p-3 bg-gradient-to-b from-emerald-50/30 to-white">
-                          <div className="flex gap-2">
-                            <div className="w-7 h-7 rounded-full bg-emerald-100 flex items-center justify-center shrink-0 text-[10px] font-bold text-emerald-600">T</div>
-                            <div className="bg-white rounded-2xl rounded-tl-sm p-3 shadow-sm border border-gray-100 text-[11.5px] leading-[1.7] whitespace-pre-wrap break-all text-gray-700 max-w-[95%]">
-                              {/* ★ D227+ (2026-05-28 영업팀장 박성용 신고 fix): 알림톡 = templateCode + templateName 표시 영역 */}
-                              {selectedCampaign.send_channel === 'alimtalk' && alimtalkTemplateInfo ? (
-                                <>
-                                  <div className="font-bold text-emerald-700 mb-1 pb-1 border-b border-emerald-100">📨 {alimtalkTemplateInfo.name || '(템플릿명 미설정)'}</div>
-                                  <div className="text-[10px] text-gray-400 mb-2">템플릿코드: {alimtalkTemplateInfo.code || '-'}</div>
-                                  <div>{formatCampaignMessageForDisplay(selectedCampaign, messages[0]?.msg_contents)}</div>
-                                </>
-                              ) : (
-                                <>
-                                  {/* ★ D91: LMS/MMS 제목 표시 */}
-                                  {(selectedCampaign.message_type === 'LMS' || selectedCampaign.message_type === 'MMS' || selectedCampaign.message_type === 'L' || selectedCampaign.message_type === 'M') && (selectedCampaign.subject || selectedCampaign.message_subject) && (
-                                    <div className="font-bold text-gray-900 mb-1 pb-1 border-b border-gray-200">{buildAdSubjectFront(selectedCampaign.subject || selectedCampaign.message_subject || '', selectedCampaign.message_type, selectedCampaign.is_ad ?? false)}</div>
-                                  )}
-                                  {/* ★ B2: 컨트롤타워 — 실발송 텍스트(MySQL) 우선, 없으면 순수본문에 (광고)+080 부착 */}
-                                  {formatCampaignMessageForDisplay(selectedCampaign, messages[0]?.msg_contents)}
-                                </>
-                              )}
-                              {/* ★ B5/B7: 공용 컴포넌트 MmsImagePreview 사용 (클릭 확대 지원) */}
-                              {selectedCampaign.mms_image_paths && Array.isArray(selectedCampaign.mms_image_paths) && selectedCampaign.mms_image_paths.length > 0 && (
-                                <MmsImagePreview
-                                  images={selectedCampaign.mms_image_paths}
-                                  size="sm"
-                                  onImageClick={(url, filename) => setEnlargedImage({ url, filename })}
-                                />
-                              )}
-                            </div>
-                          </div>
-                        </div>
-                        {/* 하단 바이트 */}
-                        <div className="px-3 py-2 border-t bg-gray-50 text-center shrink-0">
-                          <span className="text-[10px] text-gray-400">
-                            {/* ★ B2: 바이트 계산도 (광고)+080 부착된 최종 텍스트 기준 */}
-                            {calculateSmsBytes(formatCampaignMessageForDisplay(selectedCampaign, messages[0]?.msg_contents))} / {selectedCampaign.message_type === 'SMS' || selectedCampaign.message_type === 'S' ? 90 : 2000} bytes
-                          </span>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* 캠페인 정보 */}
-                  <div className="flex-1">
-                    <div className="text-xs text-gray-500 mb-2 font-medium">캠페인 정보</div>
-                    <div className="border border-gray-200 rounded-lg divide-y">
-                      {[
-                        { label: '캠페인명', value: selectedCampaign.campaign_name },
-                        // ★ D91: LMS/MMS 제목 표시
-                        ...((selectedCampaign.message_type === 'LMS' || selectedCampaign.message_type === 'MMS' || selectedCampaign.message_type === 'L' || selectedCampaign.message_type === 'M') && (selectedCampaign.subject || selectedCampaign.message_subject)
-                          ? [{ label: '제목', value: buildAdSubjectFront(selectedCampaign.subject || selectedCampaign.message_subject || '', selectedCampaign.message_type, selectedCampaign.is_ad ?? false) }]
-                          : []),
-                        // ★ D225+ (2026-05-28): alimtalk 채널 표기 — 옛 흐름 = message_type='LMS' 강제 적용 → "수동 / LMS" 사고 정정
-                        { label: '유형', value: `${selectedCampaign.send_type === 'direct' ? '수동' : 'AI'} / ${selectedCampaign.send_channel === 'alimtalk' ? '알림톡' : selectedCampaign.send_channel === 'kakao' ? '카카오' : (msgTypeLabel[selectedCampaign.message_type] || selectedCampaign.message_type)}` },
-                        // ★ D225+ Brand Voice — 알림톡 영역 시 templateCode + templateName 표시 (Harold 기대 동작)
-                        ...(selectedCampaign.send_channel === 'alimtalk' && alimtalkTemplateInfo
-                          ? [
-                              { label: '템플릿코드', value: alimtalkTemplateInfo.code || '-' },
-                              { label: '템플릿명', value: alimtalkTemplateInfo.name || '(이름 미설정)' },
-                            ]
-                          : []),
-                        { label: '발송자', value: selectedCampaign.created_by_name || '-' },
-                        { label: '회신번호', value: selectedCampaign.callback_number || '-' },
-                        { label: '전송건수', value: `${(selectedCampaign.sent_count || selectedCampaign.target_count || 0).toLocaleString()}건` },
-                        { label: '성공 / 실패', value: `${(selectedCampaign.success_count || 0).toLocaleString()} / ${(selectedCampaign.fail_count || 0).toLocaleString()}` },
-                        { label: '등록일시', value: new Date(selectedCampaign.created_at).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) },
-                        // ★ D131: 취소 건은 (예약) 대신 (예약취소)로 표시 (서수란 팀장 제보)
-                        { label: '발송일시', value: selectedCampaign.sent_at ? new Date(selectedCampaign.sent_at).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : selectedCampaign.scheduled_at ? `${new Date(selectedCampaign.scheduled_at).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })} (${selectedCampaign.status === 'cancelled' ? '예약취소' : '예약'})` : '-' },
-                      ].map(row => (
-                        <div key={row.label} className="flex px-4 py-2.5 text-sm">
-                          <span className="w-24 flex-shrink-0 text-gray-500">{row.label}</span>
-                          <span className="text-gray-800 font-medium">{row.value}</span>
-                        </div>
-                      ))}
-                    </div>
-                    <button
-                      onClick={() => {
-                        setShowSendDetail(true);
-                        setMessagePage(1);
-                        setMessageSearchValue('');
-                        setMessageStatus('all');
-                        fetchMessages(selectedCampaign.id, 1, { status: 'all', searchValue: '' });
-                      }}
-                      className="mt-4 w-full py-2.5 bg-emerald-500 text-white rounded-lg hover:bg-emerald-600 text-sm font-medium transition-colors"
-                    >
-                      발송 내역 보기
-                    </button>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
+          <CampaignDetailModal
+            campaign={selectedCampaign}
+            detail={campaignDetail}
+            alimtalkTemplateInfo={alimtalkTemplateInfo}
+            firstMessageContent={messages[0]?.msg_contents}
+            statusLabel={getStatusLabel(selectedCampaign)}
+            statusBadgeClass={getStatusColor(selectedCampaign)}
+            onClose={() => { setSelectedCampaign(null); setShowSendDetail(false); }}
+            onShowMessages={() => {
+              setShowSendDetail(true);
+              setMessagePage(1);
+              setMessageSearchValue('');
+              setMessageStatus('all');
+              fetchMessages(selectedCampaign.id, 1, { status: 'all', searchValue: '' });
+            }}
+            onImageClick={(url, filename) => setEnlargedImage({ url, filename })}
+          />
         )}
 
         {/* ==================== 발송 내역 팝업 ==================== */}
         {/* ★ D124: 모달 폭 960→1300px 확대 + 각 셀 whitespace-nowrap — 수신번호/날짜/결과코드 줄바꿈 방지 */}
         {showSendDetail && selectedCampaign && (
           <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[70] p-2 md:p-4">
-            <div className="bg-white rounded-xl shadow-2xl w-full max-w-[1300px] max-h-[90vh] overflow-hidden flex flex-col">
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-[1300px] max-h-[90vh] overflow-hidden flex flex-col">
               {/* 헤더 */}
               <div className="flex justify-between items-center px-6 py-4 border-b">
                 <div>
-                  <h3 className="font-bold text-gray-800">발송 내역</h3>
-                  <div className="text-xs text-gray-500 mt-0.5">
+                  <h3 className="font-bold text-slate-800">발송 내역</h3>
+                  <div className="text-xs text-slate-500 mt-0.5">
                     {selectedCampaign.campaign_name}
-                    <span className="mx-1.5 text-gray-300">|</span>
+                    <span className="mx-1.5 text-slate-300">|</span>
                     발송자: {selectedCampaign.created_by_name || '-'}
-                    <span className="mx-1.5 text-gray-300">|</span>
+                    <span className="mx-1.5 text-slate-300">|</span>
                     총 {messageTotal.toLocaleString()}건
                   </div>
                 </div>
-                <button onClick={() => setShowSendDetail(false)} className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-gray-100 text-gray-400 hover:text-gray-600 transition-colors text-lg">&times;</button>
+                <button onClick={() => setShowSendDetail(false)} className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors text-lg">&times;</button>
               </div>
 
               {/* 검색 + 필터 + 다운로드 */}
-              <div className="px-6 py-3 border-b bg-gray-50 flex items-center gap-3 flex-wrap">
+              <div className="px-6 py-3 border-b bg-slate-50 flex items-center gap-3 flex-wrap">
                 <select
                   value={messageSearchType}
                   onChange={(e) => setMessageSearchType(e.target.value)}
-                  className="border border-gray-300 rounded-lg px-3 py-1.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-emerald-200"
+                  className="border border-slate-300 rounded-lg px-3 py-1.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-emerald-200"
                 >
                   <option value="phone">수신번호</option>
                   <option value="callback">회신번호</option>
@@ -999,7 +882,7 @@ export default function ResultsModal({ onClose, token, customerDbEnabled, isSubs
                   onChange={(e) => setMessageSearchValue(e.target.value)}
                   onKeyDown={(e) => { if (e.key === 'Enter') { setMessagePage(1); fetchMessages(selectedCampaign.id, 1); }}}
                   placeholder="번호 입력"
-                  className="border border-gray-300 rounded-lg px-3 py-1.5 text-sm w-48 focus:outline-none focus:ring-2 focus:ring-emerald-200 focus:border-emerald-400"
+                  className="border border-slate-300 rounded-lg px-3 py-1.5 text-sm w-48 focus:outline-none focus:ring-2 focus:ring-emerald-200 focus:border-emerald-400"
                 />
                 <button
                   onClick={() => { setMessagePage(1); fetchMessages(selectedCampaign.id, 1); }}
@@ -1007,15 +890,15 @@ export default function ResultsModal({ onClose, token, customerDbEnabled, isSubs
                 >
                   검색
                 </button>
-                <div className="w-px h-6 bg-gray-200" />
+                <div className="w-px h-6 bg-slate-200" />
                 {['all', 'success', 'fail'].map(st => (
                   <button
                     key={st}
                     onClick={() => { setMessageStatus(st); setMessagePage(1); fetchMessages(selectedCampaign.id, 1, { status: st }); }}
                     className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
                       messageStatus === st
-                        ? st === 'success' ? 'bg-green-100 text-green-700 border border-green-300' : st === 'fail' ? 'bg-red-100 text-red-700 border border-red-300' : 'bg-gray-700 text-white'
-                        : 'bg-white border border-gray-300 text-gray-600 hover:bg-gray-50'
+                        ? st === 'success' ? 'bg-green-100 text-green-700 border border-green-300' : st === 'fail' ? 'bg-red-100 text-red-700 border border-red-300' : 'bg-slate-700 text-white'
+                        : 'bg-white border border-slate-300 text-slate-600 hover:bg-slate-50'
                     }`}
                   >
                     {st === 'all' ? '전체' : st === 'success' ? '성공' : '실패'}
@@ -1024,7 +907,7 @@ export default function ResultsModal({ onClose, token, customerDbEnabled, isSubs
                 <div className="flex-1" />
                 <button
                   onClick={() => handleExport(selectedCampaign.id)}
-                  className="px-4 py-1.5 bg-gray-700 text-white rounded-lg text-sm font-medium hover:bg-gray-800 transition-colors"
+                  className="px-4 py-1.5 bg-slate-700 text-white rounded-lg text-sm font-medium hover:bg-slate-800 transition-colors"
                 >
                   엑셀 다운로드
                 </button>
@@ -1033,24 +916,24 @@ export default function ResultsModal({ onClose, token, customerDbEnabled, isSubs
               {/* 테이블 */}
               <div className="flex-1 overflow-y-auto">
                 <table className="w-full text-sm">
-                  <thead className="bg-gray-50 sticky top-0 z-[110]">
+                  <thead className="bg-slate-50 sticky top-0 z-[110]">
                     <tr>
-                      <th className="px-3 py-2.5 text-center text-xs font-semibold text-gray-500 w-12">#</th>
-                      <th className="px-3 py-2.5 text-left text-xs font-semibold text-gray-500">수신번호</th>
-                      <th className="px-3 py-2.5 text-left text-xs font-semibold text-gray-500">회신번호</th>
-                      <th className="px-3 py-2.5 text-left text-xs font-semibold text-gray-500">메시지내용</th>
-                      <th className="px-3 py-2.5 text-center text-xs font-semibold text-gray-500">등록일시</th>
-                      <th className="px-3 py-2.5 text-center text-xs font-semibold text-gray-500">발송일시</th>
-                      <th className="px-3 py-2.5 text-center text-xs font-semibold text-gray-500">전송결과</th>
-                      <th className="px-3 py-2.5 text-center text-xs font-semibold text-gray-500">결과코드</th>
-                      <th className="px-3 py-2.5 text-center text-xs font-semibold text-gray-500">통신사</th>
+                      <th className="px-3 py-2.5 text-center text-xs font-semibold text-slate-500 w-12">#</th>
+                      <th className="px-3 py-2.5 text-left text-xs font-semibold text-slate-500">수신번호</th>
+                      <th className="px-3 py-2.5 text-left text-xs font-semibold text-slate-500">회신번호</th>
+                      <th className="px-3 py-2.5 text-left text-xs font-semibold text-slate-500">메시지내용</th>
+                      <th className="px-3 py-2.5 text-center text-xs font-semibold text-slate-500">등록일시</th>
+                      <th className="px-3 py-2.5 text-center text-xs font-semibold text-slate-500">발송일시</th>
+                      <th className="px-3 py-2.5 text-center text-xs font-semibold text-slate-500">전송결과</th>
+                      <th className="px-3 py-2.5 text-center text-xs font-semibold text-slate-500">결과코드</th>
+                      <th className="px-3 py-2.5 text-center text-xs font-semibold text-slate-500">통신사</th>
                     </tr>
                   </thead>
                   <tbody>
                     {messageLoading ? (
-                      <tr><td colSpan={9} className="py-10 text-center text-gray-400">조회 중...</td></tr>
+                      <tr><td colSpan={9} className="py-10 text-center text-slate-400">조회 중...</td></tr>
                     ) : messages.length === 0 ? (
-                      <tr><td colSpan={9} className="py-10 text-center text-gray-400">
+                      <tr><td colSpan={9} className="py-10 text-center text-slate-400">
                         {selectedCampaign?.status === 'cancelled'
                           ? '취소된 캠페인입니다. 대기중이던 메시지는 취소 시 삭제되었습니다.'
                           : messageSearchValue ? '검색 결과가 없습니다.' : '데이터가 없습니다.'}
@@ -1060,10 +943,10 @@ export default function ResultsModal({ onClose, token, customerDbEnabled, isSubs
                         const statusInfo = { label: m.status_label || `코드 ${m.status_code}`, type: (m.status_type || 'fail') as 'success' | 'fail' | 'pending' };
                         const carrier = m.carrier_label || '-';
                         return (
-                          <tr key={m.seqno} className="border-t hover:bg-gray-50 transition-colors">
-                            <td className="px-3 py-2.5 text-center text-xs text-gray-400">{(messagePage - 1) * messagePerPage + idx + 1}</td>
+                          <tr key={m.seqno} className="border-t hover:bg-slate-50 transition-colors">
+                            <td className="px-3 py-2.5 text-center text-xs text-slate-400">{(messagePage - 1) * messagePerPage + idx + 1}</td>
                             <td className="px-3 py-2.5 font-mono text-xs whitespace-nowrap">{formatPhone(m.dest_no)}</td>
-                            <td className="px-3 py-2.5 font-mono text-xs text-gray-600 whitespace-nowrap">{formatPhone(m.call_back)}</td>
+                            <td className="px-3 py-2.5 font-mono text-xs text-slate-600 whitespace-nowrap">{formatPhone(m.call_back)}</td>
                             <MessageCell
                               content={m.msg_contents || ''}
                               onShowDetail={(content) => setMsgDetailContent({
@@ -1073,8 +956,8 @@ export default function ResultsModal({ onClose, token, customerDbEnabled, isSubs
                               })}
                             />
                             {/* ★ D124: 등록일시 = 캠페인 created_at (한줄로에서 발송을 건 시간). 모든 행 동일 */}
-                            <td className="px-3 py-2.5 text-center text-xs text-gray-500 whitespace-nowrap">{selectedCampaign.created_at ? formatDateTime(selectedCampaign.created_at) : '-'}</td>
-                            <td className="px-3 py-2.5 text-center text-xs text-gray-500 whitespace-nowrap">{formatDateTime(m.mobsend_time)}</td>
+                            <td className="px-3 py-2.5 text-center text-xs text-slate-500 whitespace-nowrap">{selectedCampaign.created_at ? formatDateTime(selectedCampaign.created_at) : '-'}</td>
+                            <td className="px-3 py-2.5 text-center text-xs text-slate-500 whitespace-nowrap">{formatDateTime(m.mobsend_time)}</td>
                             <td className="px-3 py-2.5 text-center whitespace-nowrap">
                               <span className={`inline-block px-2 py-0.5 rounded text-xs font-medium ${
                                 statusInfo.type === 'success' ? 'bg-green-50 text-green-700' : statusInfo.type === 'pending' ? 'bg-yellow-50 text-yellow-700' : 'bg-red-50 text-red-700'
@@ -1082,7 +965,7 @@ export default function ResultsModal({ onClose, token, customerDbEnabled, isSubs
                                 {statusInfo.type === 'success' ? '성공' : statusInfo.type === 'pending' ? '대기' : '실패'}
                               </span>
                             </td>
-                            <td className="px-3 py-2.5 text-center text-xs text-gray-500 whitespace-nowrap">{m.status_code} ({statusInfo.label})</td>
+                            <td className="px-3 py-2.5 text-center text-xs text-slate-500 whitespace-nowrap">{m.status_code} ({statusInfo.label})</td>
                             <td className="px-3 py-2.5 text-center text-xs font-medium whitespace-nowrap">{carrier}</td>
                           </tr>
                         );
@@ -1094,11 +977,11 @@ export default function ResultsModal({ onClose, token, customerDbEnabled, isSubs
 
               {/* 페이지네이션 */}
               {messageTotalPages > 0 && (
-                <div className="flex items-center justify-center gap-1.5 py-3 border-t bg-gray-50">
+                <div className="flex items-center justify-center gap-1.5 py-3 border-t bg-slate-50">
                   <button
                     onClick={() => { const p = Math.max(1, messagePage - 1); setMessagePage(p); fetchMessages(selectedCampaign.id, p); }}
                     disabled={messagePage <= 1}
-                    className="px-3 py-1 text-sm rounded-md border bg-white hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                    className="px-3 py-1 text-sm rounded-md border bg-white hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
                   >
                     이전
                   </button>
@@ -1111,7 +994,7 @@ export default function ResultsModal({ onClose, token, customerDbEnabled, isSubs
                       key={page}
                       onClick={() => { setMessagePage(page); fetchMessages(selectedCampaign.id, page); }}
                       className={`w-8 h-8 text-sm rounded-md border transition-colors ${
-                        messagePage === page ? 'bg-emerald-500 text-white border-emerald-500' : 'bg-white hover:bg-gray-50'
+                        messagePage === page ? 'bg-emerald-500 text-white border-emerald-500' : 'bg-white hover:bg-slate-50'
                       }`}
                     >
                       {page}
@@ -1120,11 +1003,11 @@ export default function ResultsModal({ onClose, token, customerDbEnabled, isSubs
                   <button
                     onClick={() => { const p = Math.min(messageTotalPages, messagePage + 1); setMessagePage(p); fetchMessages(selectedCampaign.id, p); }}
                     disabled={messagePage >= messageTotalPages}
-                    className="px-3 py-1 text-sm rounded-md border bg-white hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                    className="px-3 py-1 text-sm rounded-md border bg-white hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
                   >
                     다음
                   </button>
-                  <span className="text-xs text-gray-400 ml-2">{messagePage} / {messageTotalPages} 페이지</span>
+                  <span className="text-xs text-slate-400 ml-2">{messagePage} / {messageTotalPages} 페이지</span>
                 </div>
               )}
             </div>
@@ -1134,24 +1017,24 @@ export default function ResultsModal({ onClose, token, customerDbEnabled, isSubs
         {/* ==================== 예약 취소 확인 모달 ==================== */}
         {cancelTarget && (
           <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[60] p-4">
-            <div className="bg-white rounded-xl shadow-2xl w-full max-w-[400px] max-h-[90vh] overflow-hidden">
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-[400px] max-h-[90vh] overflow-hidden">
               <div className="bg-red-50 px-6 py-4 border-b">
                 <h3 className="text-lg font-bold text-red-700">예약 취소</h3>
               </div>
               <div className="p-6">
-                <p className="text-gray-700 mb-2">다음 예약 발송을 취소하시겠습니까?</p>
-                <div className="bg-gray-50 rounded-lg p-3 text-sm">
-                  <div className="text-gray-500">예약 시간</div>
+                <p className="text-slate-700 mb-2">다음 예약 발송을 취소하시겠습니까?</p>
+                <div className="bg-slate-50 rounded-lg p-3 text-sm">
+                  <div className="text-slate-500">예약 시간</div>
                   <div className="font-medium text-blue-600">
                     {cancelTarget.scheduled_at && new Date(cancelTarget.scheduled_at).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul', year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
                   </div>
-                  <div className="text-gray-500 mt-2">발송 건수</div>
+                  <div className="text-slate-500 mt-2">발송 건수</div>
                   <div className="font-medium">{cancelTarget.target_count?.toLocaleString()}건</div>
                 </div>
                 <p className="text-xs text-red-500 mt-3">* 취소된 예약은 복구할 수 없습니다.</p>
               </div>
               <div className="flex border-t">
-                <button onClick={() => setCancelTarget(null)} className="flex-1 py-3 text-gray-600 hover:bg-gray-50 font-medium transition-colors">닫기</button>
+                <button onClick={() => setCancelTarget(null)} className="flex-1 py-3 text-slate-600 hover:bg-slate-50 font-medium transition-colors">닫기</button>
                 <button
                   onClick={async () => {
                     try {
@@ -1177,6 +1060,46 @@ export default function ResultsModal({ onClose, token, customerDbEnabled, isSubs
           </div>
         )}
 
+        {/* ==================== 예약(draft) 취소 확인 모달 (native dialog 대체) ==================== */}
+        {draftCancelTarget && (
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60] p-4" onClick={() => setDraftCancelTarget(null)}>
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-[400px] overflow-hidden" onClick={(e) => e.stopPropagation()}>
+              <div className="bg-rose-50 px-6 py-4 border-b border-rose-100">
+                <h3 className="text-lg font-bold text-rose-700">예약 취소</h3>
+              </div>
+              <div className="p-6">
+                <p className="text-slate-700">"{draftCancelTarget.campaign_name}" 예약 발송을 취소하시겠습니까?</p>
+                <p className="text-xs text-rose-500 mt-3">* 취소된 예약은 복구할 수 없습니다.</p>
+              </div>
+              <div className="flex border-t border-slate-200">
+                <button onClick={() => setDraftCancelTarget(null)} className="flex-1 py-3 text-slate-600 hover:bg-slate-50 font-medium transition-colors">닫기</button>
+                <button
+                  onClick={async () => {
+                    const c = draftCancelTarget;
+                    try {
+                      const tk = localStorage.getItem('token');
+                      const res = await fetch(`/api/campaigns/${c.id}`, { method: 'DELETE', headers: { Authorization: `Bearer ${tk}` } });
+                      const data = await res.json();
+                      if (data.success) {
+                        setCampaigns((prev: any[]) => prev.map((x: any) => x.id === c.id ? { ...x, status: 'cancelled' } : x));
+                        setDraftCancelTarget(null);
+                        showToast('success', '예약이 취소되었습니다.');
+                      } else {
+                        showToast('error', data.error || '취소에 실패했습니다.');
+                      }
+                    } catch {
+                      showToast('error', '서버 연결 오류가 발생했습니다.');
+                    }
+                  }}
+                  className="flex-1 py-3 bg-rose-500 text-white hover:bg-rose-600 font-medium transition-colors"
+                >
+                  예약 취소
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* 토스트 */}
         {toast.show && (
           <div className={`fixed top-6 left-1/2 transform -translate-x-1/2 px-6 py-3 rounded-lg shadow-lg z-[100] text-sm font-medium ${
@@ -1194,7 +1117,7 @@ export default function ResultsModal({ onClose, token, customerDbEnabled, isSubs
             <div className="relative max-w-[90vw] max-h-[90vh] flex flex-col items-center" onClick={(e) => e.stopPropagation()}>
               <button
                 onClick={() => setEnlargedImage(null)}
-                className="absolute top-2 right-2 z-10 w-8 h-8 bg-white/90 rounded-full flex items-center justify-center text-gray-700 hover:bg-white shadow"
+                className="absolute top-2 right-2 z-10 w-8 h-8 bg-white/90 rounded-full flex items-center justify-center text-slate-700 hover:bg-white shadow"
                 aria-label="닫기"
               >✕</button>
               <img
@@ -1202,7 +1125,7 @@ export default function ResultsModal({ onClose, token, customerDbEnabled, isSubs
                 alt={enlargedImage.filename}
                 className="max-w-[90vw] max-h-[80vh] object-contain rounded-lg shadow-2xl animate-in zoom-in-95 duration-200"
               />
-              <div className="mt-3 px-4 py-2 bg-white/90 rounded-lg text-sm text-gray-700 font-medium shadow">
+              <div className="mt-3 px-4 py-2 bg-white/90 rounded-lg text-sm text-slate-700 font-medium shadow">
                 {enlargedImage.filename}
               </div>
             </div>
@@ -1226,21 +1149,21 @@ export default function ResultsModal({ onClose, token, customerDbEnabled, isSubs
               <div className="bg-white rounded-2xl shadow-2xl w-full max-w-[400px] max-h-[90vh] overflow-hidden animate-in zoom-in-95 duration-200" onClick={(e) => e.stopPropagation()}>
                 <div className="p-4 border-b bg-emerald-50 flex justify-between items-center">
                   <h3 className="font-bold text-lg">📱 메시지 내용</h3>
-                  <button onClick={() => setMsgDetailContent(null)} className="text-gray-500 hover:text-gray-700 text-xl">✕</button>
+                  <button onClick={() => setMsgDetailContent(null)} className="text-slate-500 hover:text-slate-700 text-xl">✕</button>
                 </div>
                 <div className="p-4">
                   <div className="mx-auto w-[280px]">
                     <div className="rounded-[1.8rem] p-[3px] bg-gradient-to-b from-purple-400 to-purple-600 shadow-lg shadow-purple-200">
                       <div className="bg-white rounded-[1.6rem] overflow-hidden flex flex-col" style={{ height: '460px' }}>
-                        <div className="px-4 py-2.5 bg-gradient-to-r from-gray-50 to-gray-100 flex justify-between items-center shrink-0 border-b">
-                          <span className="text-[11px] text-gray-400 font-medium">문자메시지</span>
+                        <div className="px-4 py-2.5 bg-gradient-to-r from-slate-50 to-slate-100 flex justify-between items-center shrink-0 border-b">
+                          <span className="text-[11px] text-slate-400 font-medium">문자메시지</span>
                           <span className="text-[11px] font-bold text-purple-600">{typeLabel}</span>
                         </div>
                         <div className="flex-1 overflow-y-auto p-3 bg-gradient-to-b from-purple-50/30 to-white select-text">
                           {/* ★ D131: 첫 화면(폰프레임)과 동일 구조 — 이미지는 본문 아래, size=sm (일관성) */}
                           <div className="flex gap-2">
                             <div className="w-7 h-7 rounded-full bg-purple-100 flex items-center justify-center shrink-0 text-xs">📱</div>
-                            <div className="bg-white rounded-2xl rounded-tl-sm p-3 shadow-sm border border-gray-100 text-[12px] leading-[1.6] whitespace-pre-wrap break-all text-gray-700 max-w-[95%] select-text cursor-text">
+                            <div className="bg-white rounded-2xl rounded-tl-sm p-3 shadow-sm border border-slate-100 text-[12px] leading-[1.6] whitespace-pre-wrap break-all text-slate-700 max-w-[95%] select-text cursor-text">
                               {content}
                               {isMms && hasImages && (
                                 <MmsImagePreview
@@ -1252,8 +1175,8 @@ export default function ResultsModal({ onClose, token, customerDbEnabled, isSubs
                             </div>
                           </div>
                         </div>
-                        <div className="px-3 py-2 border-t bg-gray-50 text-center shrink-0">
-                          <span className="text-[10px] text-gray-400">
+                        <div className="px-3 py-2 border-t bg-slate-50 text-center shrink-0">
+                          <span className="text-[10px] text-slate-400">
                             {calculateSmsBytes(content)} / {maxBytes} bytes
                           </span>
                         </div>

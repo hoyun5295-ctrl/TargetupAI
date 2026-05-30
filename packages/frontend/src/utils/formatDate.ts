@@ -1201,3 +1201,30 @@ export function cellToString(val: unknown): string {
   if (val instanceof Date) return val.toISOString();
   return String(val);
 }
+
+/**
+ * ★ 알림톡 템플릿 검수상태 → 라벨 + 흰 톤 badge 클래스 (단일 출처).
+ *   발송결과 모달(CampaignDetailModal)의 알림톡 캠페인 검수상태 표시에 사용.
+ *   실제 저장 값(APPROVED/DELETED/DRAFT/KREJ) + 동기화 진행 중 가능 값
+ *   (REG/REQ/REV/REQUESTED/REVIEWING/KREQ/APR/APPROVAL/REJ/REJECTED/HREJ) 모두 매핑.
+ *   - 승인계열 emerald / 검수요청·진행계열 amber / 반려계열 rose / 작성중·삭제·기타 slate
+ */
+export function getAlimtalkTemplateStatus(
+  status: string | null | undefined,
+): { label: string; badgeClass: string } {
+  const s = (status || '').toUpperCase();
+  const NEUTRAL = 'bg-slate-100 text-slate-600 border border-slate-200';
+  if (s === 'APPROVED' || s === 'APPROVAL' || s === 'APR') {
+    return { label: '승인', badgeClass: 'bg-emerald-50 text-emerald-700 border border-emerald-200' };
+  }
+  if (s === 'REQUESTED' || s === 'REVIEWING' || s === 'REQ' || s === 'REV' || s === 'REG' || s === 'KREQ') {
+    return { label: '검수중', badgeClass: 'bg-amber-50 text-amber-700 border border-amber-200' };
+  }
+  if (s === 'REJECTED' || s === 'REJ' || s === 'KREJ' || s === 'HREJ') {
+    return { label: '반려', badgeClass: 'bg-rose-50 text-rose-700 border border-rose-200' };
+  }
+  if (s === 'DRAFT') return { label: '작성중', badgeClass: NEUTRAL };
+  if (s === 'DELETED') return { label: '삭제됨', badgeClass: NEUTRAL };
+  if (!s) return { label: '확인 중', badgeClass: NEUTRAL };
+  return { label: s, badgeClass: NEUTRAL };
+}

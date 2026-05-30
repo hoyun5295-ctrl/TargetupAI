@@ -739,7 +739,7 @@ router.get('/campaigns/:id/messages', async (req: Request, res: Response) => {
     // ★ D225+ (2026-05-28 영업팀장 박성용 신고 fix): 알림톡 발송 영역 = 응답 안 templateInfo 추가
     //   Harold 기대 = 전송 결과 상세 안 [템플릿코드] + [템플릿명] 확인 가능 의무
     // ★ D227+ (2026-05-28 재발 fix): 발송 X 영역 시 (messages 영역 0건) campaigns 안 alimtalk_template_code fallback 활용
-    let alimtalkTemplateInfo: { code: string; name: string } | null = null;
+    let alimtalkTemplateInfo: { code: string; name: string; status: string } | null = null;
     if (sendChannel === 'alimtalk') {
       // 1차 = messages 안 k_template_code 영역 (옛 D225+ fix 흐름)
       let firstTemplateCode = enrichedMessages.length > 0
@@ -752,7 +752,7 @@ router.get('/campaigns/:id/messages', async (req: Request, res: Response) => {
       if (firstTemplateCode) {
         try {
           const tplResult = await query(
-            `SELECT template_code, template_name FROM kakao_templates
+            `SELECT template_code, template_name, status FROM kakao_templates
              WHERE company_id = $1::uuid AND template_code = $2 LIMIT 1`,
             [companyId, firstTemplateCode],
           );
@@ -760,14 +760,15 @@ router.get('/campaigns/:id/messages', async (req: Request, res: Response) => {
             alimtalkTemplateInfo = {
               code: tplResult.rows[0].template_code,
               name: tplResult.rows[0].template_name || '',
+              status: tplResult.rows[0].status || '',
             };
           } else {
-            // PG 미발견 영역 — MySQL queue 영역 templateCode 만 응답
-            alimtalkTemplateInfo = { code: firstTemplateCode, name: '' };
+            // PG 미발견 — MySQL 큐의 templateCode만 응답 (검수상태는 빈 값)
+            alimtalkTemplateInfo = { code: firstTemplateCode, name: '', status: '' };
           }
         } catch (tplErr) {
-          console.warn('[results messages] 알림톡 템플릿 조회 실패 — code 영역만 응답:', tplErr);
-          alimtalkTemplateInfo = { code: firstTemplateCode, name: '' };
+          console.warn('[results messages] 알림톡 템플릿 조회 실패 — code만 응답:', tplErr);
+          alimtalkTemplateInfo = { code: firstTemplateCode, name: '', status: '' };
         }
       }
     }
