@@ -1770,20 +1770,22 @@ router.get('/campaigns/:id/sms-detail', authenticate, requireSuperAdmin, async (
 
       totalSms = await smsCountAll(smsTables, mysqlWhere, mysqlParams);
 
-      // 전체 테이블에서 수집 후 seqno DESC 정렬 + 인메모리 페이지네이션
       // ★ D124: 수신확인(repmsg_recvtm) 전경로 제거 — 등록/발송 2컬럼 통일
       //   sendreq_time: 우리 앱 NOW() → KST (DATE_ADD 불필요)
       //   mobsend_time: QTmsg Agent → UTC → DATE_ADD(+9h) 필요
-      const allRows = await smsSelectAll(
+      // ★ D228+ (2026-05-30) 속도: 페이지네이션을 SQL outer로 내림 (기존 전량 SELECT + JS sort/slice 안티패턴).
+      //   2.3만건 캠페인이 msg_contents(LMS 본문)까지 전부 Node로 전송돼 50건 표시에 10초 → SQL이 50건만 반환.
+      //   카카오 분기(아래) + campaigns.ts 수신자 조회와 동일 패턴. seqno DESC + dest_no tie-breaker(D150-4 — UNION seqno 중복 시 결정적 페이지네이션).
+      //   limit/offset은 상단 parseInt 정수라 SQL 리터럴 안전.
+      const rows = await smsSelectAll(
         smsTables,
         `seqno, dest_no, call_back, msg_contents, msg_type, status_code, mob_company,
          sendreq_time,
          DATE_ADD(mobsend_time, INTERVAL 9 HOUR) AS mobsend_time`,
         mysqlWhere,
-        mysqlParams
+        mysqlParams,
+        `ORDER BY seqno DESC, dest_no ASC LIMIT ${Number(limit)} OFFSET ${Number(offset)}`
       );
-      allRows.sort((a: any, b: any) => Number(b.seqno) - Number(a.seqno));
-      const rows = allRows.slice(Number(offset), Number(offset) + Number(limit));
 
       (rows as any[]).forEach(r => {
         allDetail.push({
