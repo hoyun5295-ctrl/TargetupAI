@@ -1629,6 +1629,7 @@ router.get('/campaigns/all', authenticate, requireSuperAdmin, async (req: Reques
       SELECT
         c.id, c.campaign_name as name, c.status, c.send_type as campaign_type, c.created_at,
         c.company_id, c.created_by, c.message_type, c.send_channel, c.scheduled_at, c.sent_at,
+        c.result_final, c.sent_count, c.success_count, c.fail_count,
         co.company_name, co.company_code,
         u.name as created_by_name, u.login_id as created_by_login,
         (SELECT cr.target_count FROM campaign_runs cr WHERE cr.campaign_id = c.id ORDER BY cr.run_number DESC LIMIT 1) as last_target_count,
@@ -1641,9 +1642,12 @@ router.get('/campaigns/all', authenticate, requireSuperAdmin, async (req: Reques
       LIMIT $${paramIdx} OFFSET $${paramIdx + 1}
     `, [...params, limit, offset]);
 
-    const adminCampSmsMap = await aggregateSmsCountsByCampaign(result.rows);
-    const adminCampKakaoMap = await kakaoBatchAggByGroup(result.rows.map((c: any) => c.id));
-    const adminCampSentTimeMap = await aggregateSmsSendTimesByCampaign(result.rows);
+    // ★ D228+ (2026-05-30) 속도: result_final=true는 PG 캐시(워커 확정값), 진행 중만 MySQL 집계 (results.ts 동일 패턴).
+    //   대형 캠페인(2만~3만건)이 페이지에 끼면 매 조회마다 11테이블 UNION 집계가 도는 병목 제거.
+    const adminNonFinal = result.rows.filter((c: any) => !c.result_final);
+    const adminCampSmsMap = await aggregateSmsCountsByCampaign(adminNonFinal);
+    const adminCampKakaoMap = await kakaoBatchAggByGroup(adminNonFinal.map((c: any) => c.id));
+    const adminCampSentTimeMap = await aggregateSmsSendTimesByCampaign(adminNonFinal);
 
     // ★ D144 P4/P7 후속 (2026-05-07): 슈퍼관리자 캠페인 목록 조회 시 status='sending' 자동 정리
     //   사용자가 Dashboard 안 들어가면 fire-and-forget sync-results가 안 돌아 'sending' 영구 잔존.
@@ -1651,6 +1655,15 @@ router.get('/campaigns/all', authenticate, requireSuperAdmin, async (req: Reques
     //   PG status를 'completed'로 자동 정리 (응답에 즉시 반영 + 백그라운드 DB UPDATE).
     const autoCompleteIds: string[] = [];
     const campaigns = result.rows.map((c: any) => {
+      if (c.result_final) {
+        // PG 캐시 — 6h 경과 완료 캠페인 (pending=0, sent_count=success+fail). MySQL 집계 skip.
+        return {
+          ...c,
+          total_sent: Number(c.sent_count || 0),
+          total_success: Number(c.success_count || 0),
+          total_fail: Number(c.fail_count || 0),
+        };
+      }
       const sms = adminCampSmsMap.get(c.id) || { total_count: 0, success_count: 0, fail_count: 0, pending_count: 0 };
       const kakao = adminCampKakaoMap.get(c.id) || { total: 0, success: 0, fail: 0, pending: 0 };
       const totalSuccess = Number(sms.success_count || 0) + kakao.success;
@@ -1687,7 +1700,15 @@ router.get('/campaigns/all', authenticate, requireSuperAdmin, async (req: Reques
       page,
       totalPages: Math.ceil(total / limit)
     });
-  } catch (error) {
+  } catch (error: any) {
+    // ★ D228+ db_alter_safety_net: result_final 등 신규 컬럼 미마이그레이션 시 500 대신 503 안내.
+    const msg = error?.message || '';
+    if (msg.includes('column') && msg.includes('does not exist')) {
+      return res.status(503).json({
+        error: 'DB 마이그레이션 필요 — 운영자에게 campaigns ALTER(result_final/result_synced_at) 실행 요청 의무',
+        code: 'DB_MIGRATION_PENDING',
+      });
+    }
     console.error('전체 캠페인 조회 실패:', error);
     res.status(500).json({ error: '전체 캠페인 조회 실패' });
   }
