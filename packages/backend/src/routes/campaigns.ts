@@ -33,6 +33,8 @@ import { filterByIndividualCallback, buildCallbackErrorResponse, buildCallbackCo
 import { deduplicateByPhone } from '../utils/deduplicate';
 import { getUserTestContacts } from '../utils/test-contact-helper';
 import { validateScheduledAt } from '../utils/campaign-validation';
+import { calcSplitSendTime } from '../utils/send-time-util';
+import { triggerDirectSendWorker } from '../utils/direct-send-worker';
 
 // ★ toKoreaTimeStr → utils/sms-queue.ts로 이동 (import 사용)
 
@@ -47,35 +49,7 @@ import { validateScheduledAt } from '../utils/campaign-validation';
  * @param sendEndHour - 발송 종료 시각 (회사별 또는 기본값)
  * @returns 조정된 발송 시간
  */
-function calcSplitSendTime(
-  baseTime: Date,
-  batchIndex: number,
-  sendStartHour: number = SEND_HOURS.start,
-  sendEndHour: number = SEND_HOURS.end
-): Date {
-  const result = new Date(baseTime.getTime());
-  result.setMinutes(result.getMinutes() + batchIndex);
-
-  // 한국시간 기준으로 시각 확인 (KST = UTC+9)
-  const kstHour = parseInt(
-    result.toLocaleString('en-US', { timeZone: 'Asia/Seoul', hour: '2-digit', hour12: false })
-  );
-
-  if (kstHour >= sendEndHour) {
-    // 종료 시각 초과 → 다음날 시작 시각으로 이월
-    // 초과한 분수 계산
-    const kstMinutes = parseInt(
-      result.toLocaleString('en-US', { timeZone: 'Asia/Seoul', minute: '2-digit' })
-    );
-    const overflowMinutes = (kstHour - sendEndHour) * 60 + kstMinutes;
-    // 다음날 시작 시각 기준으로 재설정
-    result.setDate(result.getDate() + 1);
-    result.setHours(result.getHours() - kstHour + sendStartHour);
-    result.setMinutes(overflowMinutes);
-  }
-
-  return result;
-}
+// calcSplitSendTime → utils/send-time-util.ts로 이동 (2026-05-30 worker 공용, import 사용)
 
 // ★ GP-04: MySQL TZ는 database.ts의 mysqlQuery 헬퍼에서 매 커넥션마다 자동 설정
 // (커넥션 풀 전체 보장 — 단일 SET으로는 1개 커넥션에만 적용되므로 제거)
@@ -1247,6 +1221,213 @@ router.post('/sync-results', async (req: Request, res: Response) => {
   }
 });
 // 직접발송 API
+// ★ 대량 발송 파이프라인 (2026-05-30) — Task 3: 수신자 청크 적재 (1만건/요청)
+//   18만~500만 건도 청크로 staging에 누적 → body 한도/timeout 구조적 제거.
+router.post('/direct-send/stage', async (req: Request, res: Response) => {
+  try {
+    const companyId = (req as any).user?.companyId;
+    if (!companyId) return res.status(401).json({ success: false, error: '인증 필요' });
+    const { stagingId: incoming, recipients } = req.body || {};
+    if (!Array.isArray(recipients) || recipients.length === 0) {
+      return res.status(400).json({ success: false, error: 'recipients 비어 있음' });
+    }
+    if (recipients.length > 50000) {
+      return res.status(413).json({ success: false, error: '청크는 최대 5만건입니다', code: 'CHUNK_TOO_LARGE' });
+    }
+    const stagingId = incoming || randomUUID();
+    // ★ UNNEST 배열 방식 — 파라미터 8개 고정 (행 수 무관). 다중 행 VALUES는 행×8 파라미터라
+    //   5만 청크 = 40만 파라미터로 PostgreSQL 한도(65,535)를 초과 → UNNEST 필수.
+    const phones: string[] = [];
+    const names: (string | null)[] = [];
+    const extra1s: (string | null)[] = [];
+    const extra2s: (string | null)[] = [];
+    const extra3s: (string | null)[] = [];
+    const callbacks: (string | null)[] = [];
+    recipients.forEach((r: any) => {
+      phones.push(normalizePhone(r.phone));
+      names.push(r.name ?? null);
+      extra1s.push(r.extra1 ?? null);
+      extra2s.push(r.extra2 ?? null);
+      extra3s.push(r.extra3 ?? null);
+      callbacks.push(r.callback ?? null);
+    });
+    await query(
+      `INSERT INTO campaign_send_staging (staging_id, company_id, phone, name, extra1, extra2, extra3, callback)
+       SELECT $1::uuid, $2::uuid, u.phone, u.name, u.extra1, u.extra2, u.extra3, u.callback
+       FROM UNNEST($3::text[], $4::text[], $5::text[], $6::text[], $7::text[], $8::text[])
+         AS u(phone, name, extra1, extra2, extra3, callback)`,
+      [stagingId, companyId, phones, names, extra1s, extra2s, extra3s, callbacks]
+    );
+    return res.json({ success: true, stagingId, staged: recipients.length });
+  } catch (err: any) {
+    const msg = err?.message || '';
+    if (msg.includes('relation') && msg.includes('does not exist')) {
+      return res.status(503).json({ success: false, code: 'DB_MIGRATION_PENDING', error: 'DB 마이그레이션 필요 — campaign_send_staging 테이블' });
+    }
+    console.error('[direct-send/stage] 적재 오류:', err);
+    return res.status(500).json({ success: false, error: '수신자 적재 중 오류가 발생했습니다.' });
+  }
+});
+
+// ★ 대량 발송 파이프라인 (2026-05-30) — Task 4: 발송 커밋
+//   staging 전체 정제(수신거부 DELETE → 중복제거 DELETE) → 정제 후 건수로 차감 → 즉시 202 접수.
+//   실제 청크 발송은 direct-send-worker가 백그라운드 처리(진행률은 send-progress 조회).
+router.post('/direct-send/commit', async (req: Request, res: Response) => {
+  try {
+    const companyId = (req as any).user?.companyId;
+    const userId = (req as any).user?.userId;
+    if (!companyId) return res.status(401).json({ success: false, error: '인증 필요' });
+
+    if (!(await hasCompanyLineGroup(companyId))) {
+      return res.status(400).json({ success: false, error: '발송 라인그룹이 설정되지 않았습니다. 관리자에게 문의해주세요.', code: 'LINE_GROUP_NOT_SET' });
+    }
+
+    const {
+      stagingId, msgType, subject, message, callback, sendChannel,
+      adEnabled, scheduled, scheduledAt, splitEnabled, splitCount,
+      useIndividualCallback, individualCallbackColumn, mmsImagePaths,
+      dedupEnabled = true, unsubFilterEnabled = true,
+      kakaoBubbleType, kakaoSenderKey, kakaoTargeting, kakaoAttachmentJson, kakaoCarouselJson, kakaoResendType,
+      alimtalkTemplateCode, alimtalkVariableMap, alimtalkButtonJson,
+      alimtalkNextType, alimtalkNextContents, alimtalkNextSubject,
+    } = req.body;
+
+    if (!stagingId) return res.status(400).json({ success: false, error: 'stagingId 누락' });
+
+    const stagedCount = await query(
+      `SELECT COUNT(*)::int AS c FROM campaign_send_staging WHERE staging_id = $1 AND company_id = $2`,
+      [stagingId, companyId]
+    );
+    if ((stagedCount.rows[0]?.c || 0) === 0) {
+      return res.status(400).json({ success: false, error: '적재된 수신자가 없습니다' });
+    }
+
+    // 검증 (즉시 피드백) — 제목 / 회신번호 등록 / 알림톡 승인
+    const isAlimtalkSend = sendChannel === 'alimtalk';
+    if (isAlimtalkSend && (alimtalkNextType === 'L' || alimtalkNextType === 'B')) {
+      if (!alimtalkNextSubject?.trim()) return res.status(400).json({ success: false, error: 'LMS 대체 발송 시 LMS 제목을 입력해주세요.' });
+    } else if (!isAlimtalkSend && (msgType === 'LMS' || msgType === 'MMS')) {
+      if (!subject?.trim()) return res.status(400).json({ success: false, error: 'LMS/MMS 발송 시 제목을 입력해주세요.' });
+    }
+    if (!callback && !useIndividualCallback) return res.status(400).json({ success: false, error: '회신번호를 선택해주세요' });
+    if (!useIndividualCallback && callback) {
+      const nc = normalizePhone(callback);
+      if (nc.length < 8 || nc.length > 11) return res.status(400).json({ success: false, error: '유효하지 않은 회신번호입니다.', code: 'INVALID_CALLBACK_FORMAT' });
+      const senderCheck = await query(
+        `SELECT phone FROM (SELECT REPLACE(phone_number, '-', '') AS phone FROM sender_numbers WHERE company_id = $1 AND is_active = true UNION SELECT REPLACE(phone, '-', '') AS phone FROM callback_numbers WHERE company_id = $1) t WHERE phone = $2 LIMIT 1`,
+        [companyId, nc]
+      );
+      if (senderCheck.rows.length === 0) return res.status(400).json({ success: false, error: '등록되지 않은 회신번호입니다. 발신번호 관리에서 번호를 등록해주세요.', code: 'INVALID_SENDER_NUMBER' });
+    }
+    let alimtalkEtcJson: string | null = null;
+    if (isAlimtalkSend) {
+      if (!alimtalkTemplateCode) return res.status(400).json({ success: false, error: '알림톡 템플릿 코드가 필요합니다' });
+      const gate = await query(
+        `SELECT t.status AS tstatus, p.approval_status, p.profile_key FROM kakao_templates t JOIN kakao_sender_profiles p ON p.id = t.profile_id WHERE t.company_id = $1 AND t.template_code = $2 LIMIT 1`,
+        [companyId, alimtalkTemplateCode]
+      );
+      if (gate.rows.length === 0) return res.status(404).json({ success: false, error: '템플릿을 찾을 수 없습니다' });
+      const g = gate.rows[0];
+      if (!['APPROVED', 'APR', 'A'].includes(String(g.tstatus).toUpperCase())) return res.status(400).json({ success: false, error: '승인 완료된 템플릿만 발송할 수 있습니다' });
+      if (g.approval_status !== 'APPROVED') return res.status(400).json({ success: false, error: '승인 완료된 발신프로필만 사용할 수 있습니다' });
+      if (g.profile_key) alimtalkEtcJson = JSON.stringify({ senderkey: g.profile_key });
+    }
+    if (scheduled) {
+      const dsCheck = validateScheduledAt(scheduledAt, { allowNull: false });
+      if (!dsCheck.valid) return res.status(400).json({ success: false, error: dsCheck.error });
+    }
+
+    // ★ 전체 정제 (staging 전체 대상 1회 — 청크 전에 제대로 제거: 주인님 명시)
+    if (unsubFilterEnabled !== false) {
+      await query(
+        `DELETE FROM campaign_send_staging s USING unsubscribes u WHERE s.staging_id = $1 AND u.user_id = $2 AND u.phone = s.phone`,
+        [stagingId, userId]
+      );
+    }
+    if (dedupEnabled !== false) {
+      await query(
+        `DELETE FROM campaign_send_staging a USING campaign_send_staging b WHERE a.staging_id = $1 AND b.staging_id = $1 AND a.phone = b.phone AND a.id > b.id`,
+        [stagingId]
+      );
+    }
+
+    const finalCount = await query(`SELECT COUNT(*)::int AS c FROM campaign_send_staging WHERE staging_id = $1`, [stagingId]);
+    const total = finalCount.rows[0]?.c || 0;
+    if (total === 0) return res.status(400).json({ success: false, error: '정제 후 발송 대상이 없습니다 (전부 수신거부 또는 중복).' });
+
+    // 캠페인 생성 (send_phase='queued')
+    const finalIsAd = adEnabled === true;
+    const directChannel = sendChannel || 'sms';
+    const sendConfig = {
+      msgType, sendChannel: directChannel, message, subject, callback, useIndividualCallback, individualCallbackColumn,
+      adEnabled: finalIsAd, scheduled, scheduledAt, splitEnabled, splitCount, mmsImagePaths,
+      kakaoBubbleType, kakaoSenderKey, kakaoTargeting, kakaoAttachmentJson, kakaoCarouselJson, kakaoResendType,
+      alimtalkTemplateCode, alimtalkVariableMap, alimtalkButtonJson, alimtalkNextType, alimtalkNextContents, alimtalkNextSubject, alimtalkEtcJson,
+    };
+    const campaignResult = await query(
+      `INSERT INTO campaigns (company_id, campaign_name, message_type, message_content, subject, callback_number, target_count, send_type, status, scheduled_at, message_template, message_subject, created_by, is_ad, send_channel, staging_id, send_phase, processed_count, send_config, created_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, 'direct', $8, $9, $10, $11, $12, $13, $14, $15, 'queued', 0, $16, NOW()) RETURNING id`,
+      [companyId, `직접발송 ${new Date().toLocaleString('ko-KR')}`, msgType, message || '', subject || null, callback || null, total,
+       scheduled ? 'scheduled' : 'sending', scheduled && scheduledAt ? new Date(scheduledAt) : null, message || '', subject || null,
+       userId, finalIsAd, directChannel, stagingId, JSON.stringify(sendConfig)]
+    );
+    const campaignId = campaignResult.rows[0].id;
+
+    // 잔액 차감 (정제 후 total) — 실패 시 캠페인 롤백
+    const directDeductType = directChannel === 'kakao' ? 'KAKAO' : msgType;
+    const deduct = await prepaidDeduct(companyId, total, directDeductType, campaignId, userId);
+    if (!deduct.ok) {
+      await query('DELETE FROM campaigns WHERE id = $1', [campaignId]);
+      return res.status(402).json({ success: false, error: deduct.error, insufficientBalance: true, balance: deduct.balance, requiredAmount: deduct.amount });
+    }
+
+    // worker 즉시 트리거 (5초 대기 없이)
+    triggerDirectSendWorker(campaignId);
+
+    return res.status(202).json({
+      success: true, campaignId, accepted: total,
+      message: `${total}건 발송이 접수됐습니다. 진행 상황은 발송결과에서 확인하세요.`,
+    });
+  } catch (err: any) {
+    const msg = err?.message || '';
+    if (msg.includes('column') && msg.includes('does not exist')) {
+      return res.status(503).json({ success: false, code: 'DB_MIGRATION_PENDING', error: 'DB 마이그레이션 필요 — campaigns staging 컬럼 ALTER 요청' });
+    }
+    if (msg.includes('relation') && msg.includes('does not exist')) {
+      return res.status(503).json({ success: false, code: 'DB_MIGRATION_PENDING', error: 'DB 마이그레이션 필요 — campaign_send_staging 테이블' });
+    }
+    console.error('[direct-send/commit] 오류:', err);
+    return res.status(500).json({ success: false, error: '발송 접수 중 오류가 발생했습니다.' });
+  }
+});
+
+// ★ 대량 발송 파이프라인 (2026-05-30) — Task 6: 발송 진행률 조회 (적재 → 처리 → 완료)
+router.get('/:id/send-progress', async (req: Request, res: Response) => {
+  try {
+    const companyId = (req as any).user?.companyId;
+    if (!companyId) return res.status(401).json({ success: false, error: '인증 필요' });
+    const result = await query(
+      `SELECT target_count, processed_count, send_phase, sent_count, fail_count FROM campaigns WHERE id = $1 AND company_id = $2`,
+      [req.params.id, companyId]
+    );
+    if (result.rows.length === 0) return res.status(404).json({ success: false, error: '캠페인을 찾을 수 없습니다' });
+    const r = result.rows[0];
+    const total = r.target_count || 0;
+    const processed = r.processed_count || 0;
+    const percent = total > 0 ? Math.floor((processed / total) * 100) : 0;
+    return res.json({
+      success: true,
+      total, processed, percent,
+      phase: r.send_phase || null,
+      sentCount: r.sent_count || 0,
+      failCount: r.fail_count || 0,
+    });
+  } catch (err: any) {
+    console.error('[send-progress] 진행률 조회 오류:', err);
+    return res.status(500).json({ success: false, error: '진행률 조회 중 오류가 발생했습니다.' });
+  }
+});
+
 router.post('/direct-send', async (req: Request, res: Response) => {
   try {
     const companyId = (req as any).user?.companyId;

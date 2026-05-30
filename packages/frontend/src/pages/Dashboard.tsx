@@ -447,14 +447,46 @@ export default function Dashboard() {
     }
     setDirectSending(true);
     try {
-      // 알림톡 버튼을 QTmsg k_button_json 형식으로 변환
+      const token = localStorage.getItem('token') || '';
+      const CHUNK = 50000; // UNNEST 적재라 PG 파라미터 한도 무관 — body 한도(50MB) 기준 5만 (500만 = 100회)
+      let stagingId: string | undefined;
+
+      // 1) 수신자 청크 적재 (1만건씩) — 단일 body 한도·timeout 구조적 제거 (18만~500만 대응)
+      for (let i = 0; i < directRecipients.length; i += CHUNK) {
+        const slice = directRecipients.slice(i, i + CHUNK).map((r: any) => ({
+          // ★ D150-3: 0/'0' 보존 (cellToString)
+          phone: r.phone,
+          name: cellToString(r.name),
+          extra1: cellToString(r.extra1),
+          extra2: cellToString(r.extra2),
+          extra3: cellToString(r.extra3),
+          callback: resolveRecipientCallback(r, useIndividualCallback, individualCallbackColumn) || r.callback || null,
+        }));
+        const stageRes = await fetch('/api/campaigns/direct-send/stage', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+          body: JSON.stringify({ stagingId, recipients: slice }),
+        });
+        const stageData = await stageRes.json();
+        if (!stageData.success) {
+          setToast({ show: true, type: 'error', message: `수신자 업로드 실패: ${stageData.error || ''}` });
+          setTimeout(() => setToast({ show: false, type: 'error', message: '' }), 4000);
+          setDirectSending(false);
+          return;
+        }
+        stagingId = stageData.stagingId;
+        const staged = Math.min(i + CHUNK, directRecipients.length);
+        setToast({ show: true, type: 'success', message: `수신자 업로드 중… ${staged.toLocaleString()}/${directRecipients.length.toLocaleString()}건` });
+      }
+
+      // 2) 발송 커밋 (설정만 — recipients 제외. 수신거부·중복제거·차감은 서버가 전체 1회 처리)
+      const isAlimtalk = directSendChannel === 'kakao_alimtalk';
       const convertButtonsToQTmsg = (buttons: any[]) => {
         if (!buttons || buttons.length === 0) return null;
         const obj: Record<string, string> = {};
         buttons.forEach((btn: any, i: number) => {
           const n = i + 1;
           obj[`name${n}`] = btn.name || '';
-          // linkType → QTmsg type 코드: WL=2(웹링크), AL=3(앱링크), DS=1(배송조회), BK=4(봇키워드), MD=5(메시지전달), CA=6(채널추가)
           const typeMap: Record<string, string> = { WL: '2', AL: '3', DS: '1', BK: '4', MD: '5', CA: '6' };
           obj[`type${n}`] = typeMap[btn.linkType] || '2';
           obj[`url${n}_1`] = btn.linkM || btn.linkP || '';
@@ -462,42 +494,23 @@ export default function Dashboard() {
         });
         return JSON.stringify(obj);
       };
-
-      const isAlimtalk = directSendChannel === 'kakao_alimtalk';
-      const sendBody = {
+      const commitBody = {
+        stagingId,
         msgType: directSendChannel === 'rcs' ? 'LMS' : isAlimtalk ? 'LMS' : directMsgType,
         sendChannel: directSendChannel === 'sms' ? 'sms' : directSendChannel === 'rcs' ? 'rcs' : 'alimtalk',
         subject: directSubject,
-        message: isAlimtalk ? kakaoMessage : (directSendChannel === 'rcs' ? kakaoMessage : directMessage),  // ★ D103: 순수 본문만. (광고)+080은 백엔드 prepareSendMessage에서 추가
+        message: isAlimtalk ? kakaoMessage : (directSendChannel === 'rcs' ? kakaoMessage : directMessage),
         callback: isAlimtalk ? (callbackNumbers[0]?.phone || '') : (useIndividualCallback ? null : selectedCallback),
         useIndividualCallback: isAlimtalk ? false : useIndividualCallback,
         individualCallbackColumn: (!isAlimtalk && useIndividualCallback) ? individualCallbackColumn : undefined,
-        // ★ D137 (0424-NIGHT): recipients 페이로드 경량화 — executeTargetSend와 동일 패턴.
-        // 이전 `...r` 스프레드 시도는 원본 엑셀 row(한글 컬럼 키 + Date 등)가 그대로 섞여 nginx body size/JSON 파싱
-        // 실패로 fetch가 throw되어 "발송 실패" 토스트(catch 블록)에 직행했음. 백엔드 CT-08은 callbackColumn 없이
-        // 호출되므로 c.callback 하나만 정확히 전달하면 미등록 회신번호 확인 모달(callbackConfirmRequired)까지 정상 동작.
-        recipients: directRecipients.map((r: any) => ({
-          // ★ D150-3 (2026-05-09) PDF #5: 0/'0' 보존
-          phone: r.phone,
-          name: cellToString(r.name),
-          extra1: cellToString(r.extra1),
-          extra2: cellToString(r.extra2),
-          extra3: cellToString(r.extra3),
-          callback: resolveRecipientCallback(r, useIndividualCallback, individualCallbackColumn) || r.callback || null,
-        })),
         adEnabled: isAlimtalk ? false : adTextEnabled,
         scheduled: reserveEnabled,
         scheduledAt: reserveEnabled && reserveDateTime ? new Date(reserveDateTime).toISOString() : null,
         splitEnabled: isAlimtalk ? false : splitEnabled,
         splitCount: isAlimtalk ? null : (splitEnabled ? splitCount : null),
-        // ★ D141 B4 심화: 채널이 MMS일 때만 이미지 paths 전달 (5경로 일관성)
-        //   채널 변경 로직(setMmsUploadedImages([]))이 깨질 경우에도 LMS+MMS paths 불일치 차단
         mmsImagePaths: (isAlimtalk || directMsgType !== 'MMS') ? [] : toMmsImagePaths(mmsUploadedImages),
-        ...(confirmCallbackExclusion ? { confirmCallbackExclusion: true } : {}),
-        // ★ D102: 중복제거/수신거부제거 사용자 선택 전달
         dedupEnabled: sendConfirm.dedupEnabled ?? true,
         unsubFilterEnabled: sendConfirm.unsubFilterEnabled ?? true,
-        // 알림톡 전용 파라미터 (D130: 설계서 §6-3-D 반영 — profileId + nextContents + variableMap)
         ...(isAlimtalk && kakaoSelectedTemplate ? {
           alimtalkProfileId: alimtalkProfileId || kakaoSelectedTemplate.profile_id || '',
           alimtalkTemplateCode: kakaoSelectedTemplate.template_code || '',
@@ -506,17 +519,13 @@ export default function Dashboard() {
           alimtalkButtonJson: convertButtonsToQTmsg(kakaoSelectedTemplate.buttons) || null,
           alimtalkNextType: alimtalkFallback,
           alimtalkNextContents: (alimtalkFallback === 'A' || alimtalkFallback === 'B') ? alimtalkNextContents : '',
-          // ★ D188 (2026-05-21) 영업팀장 신고 #7-(2): L/B 시 LMS 제목 backend 전달.
           alimtalkNextSubject: (alimtalkFallback === 'L' || alimtalkFallback === 'B') ? alimtalkNextSubject : '',
         } : {}),
       };
-      const res = await fetch('/api/campaigns/direct-send', {
+      const res = await fetch('/api/campaigns/direct-send/commit', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
-        },
-        body: JSON.stringify(sendBody)
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify(commitBody),
       });
       const data = await res.json();
       if (res.status === 402 && data.insufficientBalance) {
@@ -531,48 +540,52 @@ export default function Dashboard() {
         setDirectSending(false);
         return;
       }
-      // ★ 미등록 회신번호 확인 모달 — callbackConfirmRequired 응답 처리
-      if (data.callbackConfirmRequired) {
-        setSendConfirm({show: false, type: 'immediate', count: 0, unsubscribeCount: 0});
-        setCallbackConfirm({
-          show: true,
-          callbackMissingCount: data.callbackMissingCount,
-          callbackUnregisteredCount: data.callbackUnregisteredCount,
-          unregisteredDetails: data.unregisteredDetails || [],
-          remainingCount: data.remainingCount,
-          message: data.message,
-          sendType: 'direct',
-        });
+      if (!data.success) {
+        setToast({show: true, type: 'error', message: data.error || '발송 접수에 실패했습니다.'});
+        setTimeout(() => setToast({show: false, type: 'error', message: ''}), 4000);
         setDirectSending(false);
         return;
       }
-      if (data.success) {
-        setToast({show: true, type: 'success', message: data.message});
-        setTimeout(() => setToast({show: false, type: 'success', message: ''}), 3000);
-        if (balanceInfo?.billingType === 'prepaid') {
-          const balanceRes = await fetch('/api/balance', { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } });
-          if (balanceRes.ok) setBalanceInfo(await balanceRes.json());
-        }
-        // 모달 유지, 입력 필드만 초기화
-        setDirectMessage('');
-        setDirectSubject('');
-        setDirectRecipients([]);
-        setDirectMsgType('SMS');
-        setKakaoMessage('');
-        setMmsUploadedImages([]);  // ★ MMS 이미지 초기화
-        setReserveEnabled(false);
-        setReserveDateTime('');
-        loadRecentCampaigns();
-        loadScheduledCampaigns();
-      } else {
-        setToast({show: true, type: 'error', message: data.error});
-        setTimeout(() => setToast({show: false, type: 'error', message: ''}), 3000);
+      // 3) 접수 성공 (202) — 입력 초기화 + 진행률 polling
+      const campaignId = data.campaignId;
+      const acceptedCount = data.accepted || 0;
+      setToast({show: true, type: 'success', message: data.message || `${acceptedCount.toLocaleString()}건 발송이 접수됐습니다. 발송 중…`});
+      setDirectMessage('');
+      setDirectSubject('');
+      setDirectRecipients([]);
+      setDirectMsgType('SMS');
+      setKakaoMessage('');
+      setMmsUploadedImages([]);
+      setReserveEnabled(false);
+      setReserveDateTime('');
+      if (balanceInfo?.billingType === 'prepaid') {
+        const balanceRes = await fetch('/api/balance', { headers: { Authorization: `Bearer ${token}` } });
+        if (balanceRes.ok) setBalanceInfo(await balanceRes.json());
       }
+      loadRecentCampaigns();
+      loadScheduledCampaigns();
+      // 진행률 polling (3초) — sent/failed 시 완료 토스트
+      const poll = setInterval(async () => {
+        try {
+          const pr = await fetch(`/api/campaigns/${campaignId}/send-progress`, { headers: { Authorization: `Bearer ${token}` } });
+          const pd = await pr.json();
+          if (pd.success && (pd.phase === 'sent' || pd.phase === 'failed')) {
+            clearInterval(poll);
+            setToast({
+              show: true,
+              type: pd.phase === 'sent' ? 'success' : 'error',
+              message: pd.phase === 'sent'
+                ? `발송 완료 — 성공 ${(pd.sentCount || 0).toLocaleString()}건${pd.failCount > 0 ? `, 실패 ${pd.failCount.toLocaleString()}건` : ''}`
+                : '발송 처리 중 오류가 발생했습니다.',
+            });
+            setTimeout(() => setToast({ show: false, type: 'success', message: '' }), 5000);
+            loadRecentCampaigns();
+          }
+        } catch { /* polling 일시 오류 무시 */ }
+      }, 3000);
     } catch (err: any) {
-      // ★ D137 (0424-NIGHT): F12 차단 환경에서 원인 파악 가능하도록 에러 상세 노출.
-      // 기존에는 "발송 실패"만 떠서 fetch/JSON.stringify throw 원인(페이로드 과대/네트워크/CORS 등) 구분 불가했음.
       const errMsg = err?.message || String(err) || '알 수 없는 오류';
-      console.error('[direct-send] fetch 실패:', err);
+      console.error('[direct-send] 실패:', err);
       setToast({show: true, type: 'error', message: `발송 실패: ${errMsg.substring(0, 120)}`});
       setTimeout(() => setToast({show: false, type: 'error', message: ''}), 6000);
     } finally {

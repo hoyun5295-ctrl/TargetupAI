@@ -107,6 +107,21 @@
 
 ---
 
+### 🚀 D226~D227+ 세션 종결 (2026-05-29) — SDK v0.3.5-a 코드 + 운영 긴급 fix 4건 + DB 컬럼 다운 3중 안전망
+
+> **★★★ 다음 세션 진입 = `docs/superpowers/handoffs/2026-05-29-session-handoff.md` 정독 우선 ★★★**
+>
+> **본 세션 종결 (commit `4d7a37a`까지 배포 완료)**:
+> - **SDK v0.3.5-a 코드** — auto-capture 9 모듈 + 8 테스트 + backend /ingest endpoint (commit `46ef104`). 미완료 = cdp_events ALTER 확인 / CDN 배포 / POPPON 검증 / **v0.3.5-b** (백오피스 발급 UI + first event 화면).
+> - **D226+ 이니시스 결제 취소 fix** — GET /inicis/close + return endpoint 신설 + **결제 결과 페이지 CSP override** (helmet script-src 'self'가 inline 자동 close 스크립트 차단 → 멈춤 사고 정정).
+> - **D227+ 발송결과 전체 다운 사고 + 복구** — campaigns 없는 컬럼(alimtalk_template_code) SELECT → SQL 500 전체 고객사 다운 → 컬럼 제거 복구 + messages kakao_template_id JOIN + default 7일.
+> - **예약조회 성능** — cleanupScheduledCampaigns 동기 호출 제거 → 1분 cron worker 분리 + manage-scheduled 페이지네이션 + PG 인덱스 2건.
+> - **DB 컬럼 다운 3중 안전망** — CLAUDE.md `db_column_verify_before_code` 영구 룰 + .claude/settings.json Edit hook + post-deploy-smoke.sh.
+>
+> **다음 세션 잔여 확인**: (1) 결제 취소 자동 닫힘/복귀 실제 동작 (2) messages JOIN information_schema 검증 (3) v0.3.5-b 진입.
+
+---
+
 ### 🚀 D225+ 세션 전체 종결 (2026-05-28) — Brand Voice Learning + 알림톡 fix + Email 이력 + UI 정정 + SDK v0.3.5 설계도 + 비토 정체성 강화
 
 > **★★★ D225+ 세션 전체 종결 (2026-05-28) ★★★**:

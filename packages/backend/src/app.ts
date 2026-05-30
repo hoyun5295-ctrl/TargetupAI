@@ -85,6 +85,8 @@ import { startKakaoTemplateSyncWorker } from './utils/kakao-template-sync-worker
 // ★ D227+ (2026-05-28 영업팀장 박성용 신고 fix): 예약 캠페인 자동 정리 worker — 1분 cron
 //   옛 흐름 = 응답 영역 직전 동기 호출 → 6만건 안 30~40초 사고 → 백그라운드 영역 분리
 import { startScheduledCleanupWorker } from './utils/scheduled-cleanup-worker';
+// ★ 대량 발송 파이프라인 (2026-05-30): direct-send-worker — staging 청크 발송 + 진행률 (5초 주기)
+import { startDirectSendWorker } from './utils/direct-send-worker';
 
 // 공용 관리 라우트 (슈퍼관리자 + 고객사관리자)
 import manageUsersRoutes from './routes/manage-users';
@@ -323,6 +325,9 @@ app.listen(PORT, () => {
   //   옛 흐름 = manage-scheduled/admin/campaigns 안 응답 영역 직전 동기 cleanupScheduledCampaigns 호출 → 6만건 안 30~40초 사고
   //   = 백그라운드 1분 cron 영역 분리 → 응답 영역 즉시 + 정리 영역 보장
   startScheduledCleanupWorker();
+
+  // ★ 대량 발송 (2026-05-30): staging 청크 발송 worker — 5초 주기 queued 처리 + commit 즉시 트리거
+  startDirectSendWorker();
 });
 
 export default app;
