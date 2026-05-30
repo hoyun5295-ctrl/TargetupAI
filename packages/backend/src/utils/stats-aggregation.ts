@@ -341,6 +341,51 @@ export async function aggregateSmsSendTimesByCampaign(
  * 모든 카운트는 MySQL 큐(SMSQ_SEND_*) + 카카오(IMC_BM_FREE_BIZ_MSG)에서 직접 집계.
  * billing.ts 정상 패턴 미러. 응답 키(summary/rows) 형태는 그대로 유지하여 frontend 변경 0.
  */
+/**
+ * ★ D228+ (2026-05-30) 발송결과 속도 — 캠페인별 결과 카운트(SMS+카카오 합산) 캐시 인지 조회 CT.
+ *   result_final=true = campaign-sync-worker가 발송 6h 경과 후 확정한 PG 캐시(이미 SMS+카카오 합산, pending=0)
+ *     → MySQL 집계 skip (대형 캠페인 GROUP BY 제거 = 발송결과/상세/통계 공통 병목 해소).
+ *   진행 중(result_final=false) = aggregateSmsCountsByCampaign(SMS) + kakaoBatchAggByGroup(카카오) 실시간 합산.
+ *   반환 = Map<campaignId, { sent, success, fail }> — 이미 SMS+카카오 합산 완료값.
+ *   ★ 호출부는 카카오를 따로 더하지 말 것 (final PG값이 이미 합산이라 이중 합산 위험).
+ *   ★ 필요 필드: id, company_id, created_by, result_final, sent_count, success_count, fail_count.
+ *   ★ pending은 sent - success - fail로 호출부 파생 (final은 sent=success+fail이라 0).
+ */
+export async function getCampaignResultCounts(
+  campaigns: Array<{ id: string; company_id: string; created_by: string | null; result_final?: boolean; sent_count?: number | null; success_count?: number | null; fail_count?: number | null }>
+): Promise<Map<string, { sent: number; success: number; fail: number }>> {
+  const out = new Map<string, { sent: number; success: number; fail: number }>();
+  if (campaigns.length === 0) return out;
+
+  // 완료 캠페인 = PG 캐시 (워커 확정 SMS+카카오 합산값, pending=0)
+  for (const c of campaigns) {
+    if (c.result_final) {
+      const success = Number(c.success_count || 0);
+      const fail = Number(c.fail_count || 0);
+      const sent = Number(c.sent_count || 0) || success + fail;
+      out.set(c.id, { sent, success, fail });
+    }
+  }
+
+  // 진행 중 캠페인만 MySQL 실시간 집계 (SMS + 카카오)
+  const nonFinal = campaigns.filter((c) => !c.result_final);
+  if (nonFinal.length > 0) {
+    const smsMap = await aggregateSmsCountsByCampaign(nonFinal);
+    const kakaoMap = await kakaoBatchAggByGroup(nonFinal.map((c) => c.id));
+    for (const c of nonFinal) {
+      const sms = smsMap.get(c.id) || { total_count: 0, success_count: 0, fail_count: 0 };
+      const kakao = (kakaoMap.get(c.id) as any) || { total: 0, success: 0, fail: 0, pending: 0 };
+      out.set(c.id, {
+        sent: Number(sms.total_count || 0) + Number(kakao.total || 0),
+        success: Number(sms.success_count || 0) + Number(kakao.success || 0),
+        fail: Number(sms.fail_count || 0) + Number(kakao.fail || 0),
+      });
+    }
+  }
+
+  return out;
+}
+
 export async function querySendStats(options: SendStatsOptions): Promise<SendStatsResult> {
   const { view, page, limit } = options;
   let { startDate, endDate } = options;

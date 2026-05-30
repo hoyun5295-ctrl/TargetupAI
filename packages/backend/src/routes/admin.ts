@@ -12,7 +12,7 @@ import { validateSmsTables } from '../utils/sms-table-validator';
 // ★ D145 P0: 예약 캠페인 자동 정리 (모든 발송 관련 라우트 정합성)
 import { cleanupScheduledCampaigns } from '../utils/campaign-lifecycle';
 import { getUserUnsubscribes, deleteUserUnsubscribes, exportUserUnsubscribes, CAMPAIGN_OPT080_SELECT_EXPR, CAMPAIGN_OPT080_LEFT_JOIN } from '../utils/unsubscribe-helper';
-import { buildDateRangeFilter, aggregateSmsCountsByCampaign, aggregateSmsSendTimesByCampaign } from '../utils/stats-aggregation';
+import { buildDateRangeFilter, aggregateSmsCountsByCampaign, aggregateSmsSendTimesByCampaign, getCampaignResultCounts } from '../utils/stats-aggregation';
 import { normalizePhone } from '../utils/normalize-phone';
 
 const router = Router();
@@ -1731,6 +1731,7 @@ router.get('/campaigns/:id/sms-detail', authenticate, requireSuperAdmin, async (
       SELECT c.id, c.company_id, c.created_by, c.created_at,
              c.campaign_name, c.message_type, c.send_type, c.status, c.scheduled_at, c.sent_at, c.target_count,
              c.send_channel,
+             c.result_final, c.sent_count, c.success_count, c.fail_count,
              co.company_name, co.company_code,
              u.name as created_by_name, u.login_id as created_by_login
       FROM campaigns c
@@ -1743,16 +1744,19 @@ router.get('/campaigns/:id/sms-detail', authenticate, requireSuperAdmin, async (
     }
     const campaign = campResult.rows[0];
     {
-      const headerSmsMap = await aggregateSmsCountsByCampaign([campaign]);
-      const headerKakaoMap = await kakaoBatchAggByGroup([campaign.id]);
-      const headerSentTimeMap = await aggregateSmsSendTimesByCampaign([campaign]);
-      const hSms = headerSmsMap.get(campaign.id) || { total_count: 0, success_count: 0, fail_count: 0 };
-      const hKakao = headerKakaoMap.get(campaign.id) || { total: 0, success: 0, fail: 0, pending: 0 };
-      campaign.success_count = Number(hSms.success_count || 0) + hKakao.success;
-      campaign.fail_count = Number(hSms.fail_count || 0) + hKakao.fail;
-      campaign.sent_count = Number(hSms.total_count || 0) + hKakao.total;
-      const hSentTime = headerSentTimeMap.get(campaign.id);
-      if (hSentTime) campaign.sent_at = hSentTime;
+      // ★ D228+ (2026-05-30) 속도: 완료(result_final) 캠페인은 PG 캐시, 진행 중만 MySQL 집계.
+      //   sms-detail 헤더가 대형 캠페인 1건이라도 무조건 GROUP BY를 돌던 병목 제거 (상세조회 지연 원인).
+      const headerCounts = await getCampaignResultCounts([campaign]);
+      const hc = headerCounts.get(campaign.id) || { sent: 0, success: 0, fail: 0 };
+      campaign.success_count = hc.success;
+      campaign.fail_count = hc.fail;
+      campaign.sent_count = hc.sent;
+      // 발송시각: 완료는 PG sent_at 그대로, 진행 중만 MySQL MIN(sendreq_time) 보정.
+      if (!campaign.result_final) {
+        const headerSentTimeMap = await aggregateSmsSendTimesByCampaign([campaign]);
+        const hSentTime = headerSentTimeMap.get(campaign.id);
+        if (hSentTime) campaign.sent_at = hSentTime;
+      }
     }
     const sendChannel = campaign.send_channel || 'sms';
     const showSms = (!channelFilter || channelFilter === 'sms') && (sendChannel === 'sms' || sendChannel === 'both');
