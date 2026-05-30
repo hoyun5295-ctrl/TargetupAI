@@ -46,6 +46,14 @@ async function runOnce(): Promise<void> {
   _running = true;
   const startedAt = Date.now();
   try {
+    // ★ D228+ (2026-05-30) 발송결과 속도 — 완료 6h 경과 캠페인 result_final 마킹.
+    //   sync 대상 회사 유무와 독립이므로 사이클 진입 직후 항상 실행 (조기 return 전에 수행).
+    try {
+      await markFinalizedCampaigns();
+    } catch (markErr: any) {
+      log('result_final 마킹 오류 (skip):', markErr?.message || markErr);
+    }
+
     const r = await query(`
       SELECT DISTINCT company_id FROM (
         SELECT c.company_id
@@ -208,6 +216,34 @@ async function notifyJourneyResultsToManagers(): Promise<void> {
     } catch (oneErr: any) {
       log(`✗ 여정 결과 알림 1건 사고 execution=${exec.execution_id}:`, oneErr?.message || oneErr);
     }
+  }
+}
+
+/**
+ * ★ D228+ (2026-05-30) 발송결과 속도 — 완료 캠페인 result_final 확정.
+ *   발송 6시간 경과 + status terminal(completed/failed) = 통신사 응답 완료
+ *   (D182 통신사 응답 99%ile 120분 내 + 안전 마진 3배).
+ *   이 시점 PG success/fail/sent_count는 두 워커가 MySQL과 일치시켜 둔 불변 확정값:
+ *     - 선불: mysql-refund-sweeper(30초 cron)가 PG=MySQL 갱신 (14일 윈도우, result_final 무관 지속)
+ *     - 후불: syncCampaignResults(5분 cron)가 갱신
+ *   result_final=true 후 results.ts가 PG만 읽어 MySQL 집계 3종(카운트/카카오/발송시각)을 제거.
+ *
+ *   ★ 부작용 없음 — 플래그/타임스탬프만 UPDATE. 집계·환불 호출 X. 돈 경로(syncCampaignResults/sweeper) 무수정.
+ *   ★ D144 교훈대로 — "완료 판정된 것만 캐시 신뢰". 진행 중(<6h)은 result_final=false라 MySQL 실시간 유지.
+ */
+async function markFinalizedCampaigns(): Promise<void> {
+  const r = await query(`
+    UPDATE campaigns
+       SET result_final = true,
+           result_synced_at = NOW()
+     WHERE result_final = false
+       AND status IN ('completed', 'failed')
+       AND sent_at IS NOT NULL
+       AND sent_at < NOW() - INTERVAL '6 hours'
+       AND (COALESCE(success_count, 0) + COALESCE(fail_count, 0)) > 0
+  `);
+  if (r.rowCount && r.rowCount > 0) {
+    log(`result_final 확정 ${r.rowCount}건 (발송 6h 경과 완료 캠페인 → PG 캐시 전환)`);
   }
 }
 

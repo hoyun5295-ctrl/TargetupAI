@@ -96,10 +96,12 @@ router.get('/summary', async (req: Request, res: Response) => {
     const userId = req.user?.userId;
     const userType = req.user?.userType;
     
-    // ★ D144: PG sent_count/success_count/fail_count 캐시 의존 제거.
-    //   PG는 캠페인 메타(id/target)만 SELECT → MySQL 큐 + 카카오 직접 카운트 → JS 합산.
+    // ★ D144: PG sent_count/success_count/fail_count 캐시 의존 제거 (진행 중 캠페인은 MySQL 직접).
+    // ★ D228+ (2026-05-30): 완료 캠페인(result_final=true)은 PG 캐시값 그대로 읽어 MySQL 집계 제거.
+    //   result_final/sent/success/fail을 함께 SELECT → 완료분은 PG, 진행 중분만 MySQL.
     let summaryQuery = `SELECT
-        c.id, c.company_id, c.created_by, c.target_count
+        c.id, c.company_id, c.created_by, c.target_count,
+        c.sent_count, c.success_count, c.fail_count, c.result_final
        FROM campaigns c
        WHERE c.company_id = $1`;
 
@@ -130,12 +132,22 @@ router.get('/summary', async (req: Request, res: Response) => {
     }
 
     const summaryMeta = await query(summaryQuery, summaryParams);
-    const summarySmsMap = await aggregateSmsCountsByCampaign(summaryMeta.rows);
-    const summaryKakaoMap = await kakaoBatchAggByGroup(summaryMeta.rows.map((c: any) => c.id));
+    // ★ D228+ 발송결과 속도: 진행 중(result_final=false)만 MySQL 실시간 집계.
+    //   완료 캠페인은 PG 캐시(워커 확정값 — SMS+카카오 합산 저장됨)를 그대로 합산.
+    const summaryNonFinal = summaryMeta.rows.filter((c: any) => !c.result_final);
+    const summarySmsMap = await aggregateSmsCountsByCampaign(summaryNonFinal);
+    const summaryKakaoMap = await kakaoBatchAggByGroup(summaryNonFinal.map((c: any) => c.id));
 
     let totalSent = 0, totalSuccess = 0, totalFail = 0, totalTarget = 0;
     for (const c of summaryMeta.rows) {
       totalTarget += Number(c.target_count || 0);
+      if (c.result_final) {
+        // PG 캐시 — 6h 경과 완료 캠페인. sent_count = success+fail (워커 저장), pending 없음.
+        totalSent += Number(c.sent_count || 0);
+        totalSuccess += Number(c.success_count || 0);
+        totalFail += Number(c.fail_count || 0);
+        continue;
+      }
       const sms = summarySmsMap.get(c.id) || { total_count: 0, success_count: 0, fail_count: 0 };
       const kakao = summaryKakaoMap.get(c.id) || { total: 0, success: 0, fail: 0, pending: 0 };
       totalSent += Number(sms.total_count || 0) + kakao.total;
@@ -170,7 +182,15 @@ router.get('/summary', async (req: Request, res: Response) => {
         perKakao: parseFloat(costs.cost_per_kakao) || DEFAULT_COSTS.kakao,
       },
     });
-  } catch (error) {
+  } catch (error: any) {
+    // ★ D228+ db_alter_safety_net: result_final 등 신규 컬럼 미마이그레이션 시 500 대신 503 안내.
+    const msg = error?.message || '';
+    if (msg.includes('column') && msg.includes('does not exist')) {
+      return res.status(503).json({
+        error: 'DB 마이그레이션 필요 — 운영자에게 campaigns ALTER(result_final/result_synced_at) 실행 요청 의무',
+        code: 'DB_MIGRATION_PENDING',
+      });
+    }
     console.error('결과 요약 조회 에러:', error);
     return res.status(500).json({ error: '서버 오류가 발생했습니다.' });
   }
@@ -259,6 +279,7 @@ router.get('/campaigns', async (req: Request, res: Response) => {
       `SELECT
         c.id, c.company_id, c.created_by, c.campaign_name, c.message_type, c.message_content, c.send_type, c.status,
         c.target_count,
+        c.sent_count, c.success_count, c.fail_count, c.result_final,
         c.is_ad, c.scheduled_at, c.sent_at, c.created_at, c.send_channel, c.callback_number,
         c.subject, c.message_subject, c.mms_image_paths,
         (c.created_at AT TIME ZONE 'Asia/Seoul')::date as created_date_kst,
@@ -274,10 +295,26 @@ router.get('/campaigns', async (req: Request, res: Response) => {
       params
     );
 
-    const campListSmsMap = await aggregateSmsCountsByCampaign(result.rows);
-    const campListKakaoMap = await kakaoBatchAggByGroup(result.rows.map((c: any) => c.id));
-    const campListSentTimeMap = await aggregateSmsSendTimesByCampaign(result.rows);
+    // ★ D228+ 발송결과 속도: 진행 중(result_final=false)만 MySQL 집계 3종. 완료분은 PG 캐시.
+    const campListNonFinal = result.rows.filter((c: any) => !c.result_final);
+    const campListSmsMap = await aggregateSmsCountsByCampaign(campListNonFinal);
+    const campListKakaoMap = await kakaoBatchAggByGroup(campListNonFinal.map((c: any) => c.id));
+    const campListSentTimeMap = await aggregateSmsSendTimesByCampaign(campListNonFinal);
     const campaigns = result.rows.map((c: any) => {
+      if (c.result_final) {
+        // PG 캐시 — 6h 경과 완료 캠페인. 워커 확정값(SMS+카카오 합산). sent_at은 PG 값 사용.
+        const fSuccess = Number(c.success_count || 0);
+        const fFail = Number(c.fail_count || 0);
+        const fSent = Number(c.sent_count || 0);
+        return {
+          ...c,
+          sent_count: fSent,
+          success_count: fSuccess,
+          fail_count: fFail,
+          success_rate: fSent > 0 ? Math.round((fSuccess / fSent) * 1000) / 10 : 0,
+          sent_at: c.sent_at,
+        };
+      }
       const sms = campListSmsMap.get(c.id) || { total_count: 0, success_count: 0, fail_count: 0 };
       const kakao = campListKakaoMap.get(c.id) || { total: 0, success: 0, fail: 0, pending: 0 };
       const sent = Number(sms.total_count || 0) + kakao.total;
@@ -302,7 +339,15 @@ router.get('/campaigns', async (req: Request, res: Response) => {
         totalPages: Math.ceil(total / Number(limit)),
       },
     });
-  } catch (error) {
+  } catch (error: any) {
+    // ★ D228+ db_alter_safety_net: result_final 등 신규 컬럼 미마이그레이션 시 500 대신 503 안내.
+    const msg = error?.message || '';
+    if (msg.includes('column') && msg.includes('does not exist')) {
+      return res.status(503).json({
+        error: 'DB 마이그레이션 필요 — 운영자에게 campaigns ALTER(result_final/result_synced_at) 실행 요청 의무',
+        code: 'DB_MIGRATION_PENDING',
+      });
+    }
     console.error('캠페인 목록 조회 에러:', error);
     return res.status(500).json({ error: '서버 오류가 발생했습니다.' });
   }
