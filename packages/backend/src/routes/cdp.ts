@@ -25,7 +25,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { authenticate } from '../middlewares/auth';
 import { requireCdpApiKey, requireCdpBrowserOrigin, recordCdpApiCall, issueCdpKeyPair, isCdpEnabledForPlan } from '../utils/cdp-auth';
 import { identifyCustomer } from '../utils/cdp-identity';
-import { trackEvent, getRecentEvents } from '../utils/cdp-events';
+import { trackEvent, getRecentEvents, ingestBrowserEvents } from '../utils/cdp-events';
 import { syncOrder, bulkImport } from '../utils/cdp-orders';
 // ★ D214+ (2026-05-24) CDP 진단 + multi-source 융합 신규 CT 6건
 // (query import = line 67 영역에서 단일 등록 — duplicate import X)
@@ -88,9 +88,7 @@ import {
   quickActionTimeOptimize,
   quickActionSegmentRefine,
 } from '../utils/inapp-quick-action';
-import { query, pool } from '../config/database';
-// ★ D226+ (2026-05-29) v0.3.5-a Auto-Capture batch ingestion 정합 PII masking 2차 안전망
-import { maskPII } from '../utils/pii-masking';
+import { query } from '../config/database';
 
 const router = Router();
 
@@ -131,9 +129,6 @@ router.post('/ingest', requireCdpBrowserOrigin, async (req: Request, res: Respon
       });
     }
 
-    // ★ PII masking 2차 안전망 — SDK 안 1차 + 백엔드 안 2차 (이중)
-    const masked = events.map((e) => maskPII(e)) as Array<Record<string, unknown>>;
-
     const companyId = (req as any).cdpAuth?.companyId || (req as any).cdp?.companyId;
     if (!companyId) {
       return res.status(401).json({
@@ -143,40 +138,31 @@ router.post('/ingest', requireCdpBrowserOrigin, async (req: Request, res: Respon
       });
     }
 
-    const client = await pool.connect();
-    try {
-      await client.query('BEGIN');
-      for (const e of masked) {
-        await client.query(
-          `INSERT INTO cdp_events (
-             company_id, anonymous_id, session_id, event_type, payload, trust_level, schema_version, sent_at, received_at
-           ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())`,
-          [
-            companyId,
-            anonymous_id || null,
-            session_id || null,
-            (e.type as string) || 'unknown',
-            JSON.stringify(e),
-            (e.trust_level as string) || 'observed',
-            schema_version,
-            sent_at || new Date().toISOString(),
-          ],
-        );
-      }
-      await client.query('COMMIT');
-    } catch (err) {
-      await client.query('ROLLBACK');
-      throw err;
-    } finally {
-      client.release();
-    }
+    // ★ 정규화 적재 (CT-21 ingestBrowserEvents) — SDK type → 표준 event_name +
+    //   identify 식별 + 익명→회원 소급. PII masking 2차 안전망은 함수 내부 normalizeBrowserEvent에서 수행.
+    //   옛 inline INSERT는 없는 event_type/payload 컬럼 참조로 항상 503이었음.
+    const ingestResult = await ingestBrowserEvents(companyId, {
+      anonymousId: anonymous_id || null,
+      sessionId: session_id || null,
+      schemaVersion: schema_version,
+      sentAt: sent_at || null,
+      events: events as Array<Record<string, any>>,
+    });
 
     return res.json({
       success: true,
-      accepted: events.length,
+      accepted: ingestResult.accepted,
       schema_version,
     });
   } catch (err: any) {
+    // 월간 호출 한도 초과 — 429 (다른 endpoint와 동일 코드)
+    if (err?.code === 'MONTHLY_LIMIT_EXCEEDED') {
+      return res.status(429).json({
+        success: false,
+        error: '이번 달 CDP 호출 한도를 초과했습니다.',
+        code: 'MONTHLY_LIMIT_EXCEEDED',
+      });
+    }
     // ★ db_alter_safety_net 룰 정합 — column / relation does not exist 분기
     const msg = err?.message || '';
     if (msg.includes('column') && msg.includes('does not exist')) {
@@ -762,10 +748,10 @@ router.get('/install-status', async (req: Request, res: Response) => {
          MIN(received_at) AS first_event_at,
          COUNT(*) AS total,
          COUNT(*) FILTER (WHERE received_at >= NOW() - INTERVAL '24 hours') AS count_24h,
-         BOOL_OR(event_type = 'pageview') AS has_pageview,
-         BOOL_OR(event_type = 'identify') AS has_identify,
-         BOOL_OR(event_type = 'consent')  AS has_consent,
-         BOOL_OR(event_type = 'click')    AS has_click
+         BOOL_OR(event_name = 'page_view') AS has_pageview,
+         BOOL_OR(event_name = 'identify')  AS has_identify,
+         BOOL_OR(event_name = 'consent')   AS has_consent,
+         BOOL_OR(event_name = 'click')     AS has_click
        FROM cdp_events
        WHERE company_id = $1::uuid`,
       [companyId],

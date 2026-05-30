@@ -27,8 +27,10 @@
  *   - source는 cdp_identity_links.source와 일치 필수
  */
 
-import { query } from '../config/database';
-import { ensureAnonymousLink } from './cdp-identity';
+import { query, pool } from '../config/database';
+import { ensureAnonymousLink, identifyCustomer } from './cdp-identity';
+import { maskPII } from './pii-masking';
+import { isOverMonthlyCdpLimit, recordCdpApiCall } from './cdp-auth';
 // ★ D214+ (2026-05-24) Unified Customer Profile 정합
 import { fuseEventToCustomer } from './customer-cdp-fusion';
 import { recomputeProfile } from './unified-customer-profile';
@@ -285,4 +287,250 @@ export async function getRecentEvents(
     })),
     total: totalResult.rows[0].total,
   };
+}
+
+// ═══════════════════════════════════════════════════════════
+// 장바구니 리커버리 — 발송 메시지에 담은 상품 노출 (Liquid {{ cart.* }})
+//   journey-executor가 cart 여정 발송 직전 호출. connected-content와 동일 패턴:
+//   템플릿이 {{ cart.* }} 참조할 때만 조회(불요 쿼리 0) + 실패 시 빈 객체(발송 차단 X).
+// ═══════════════════════════════════════════════════════════
+
+/** 본문에 {{ cart.* }} Liquid 변수가 있는지 (게이팅) */
+export function hasCartLiquidVars(template: string): boolean {
+  return /\{\{\s*cart\./.test(template || '');
+}
+
+/**
+ * 고객의 가장 최근 cart_add 이벤트 properties를 Liquid 컨텍스트 { cart: {...} }로 반환.
+ * - 템플릿이 {{ cart.* }} 미참조 시 빈 객체 (쿼리 skip)
+ * - 이벤트 없거나 오류 시 빈 객체 (발송 차단 X)
+ * - 사용 예: {{ cart.product_name }} / {{ cart.price }} / {{ cart.product_url }}
+ */
+export async function enrichLiquidContextWithCart(
+  template: string,
+  companyId: string,
+  customerId: string | null
+): Promise<Record<string, any>> {
+  if (!customerId || !hasCartLiquidVars(template)) return {};
+  try {
+    const r = await query(
+      `SELECT properties FROM cdp_events
+       WHERE company_id = $1::uuid AND customer_id = $2::uuid AND event_name = 'cart_add'
+       ORDER BY occurred_at DESC LIMIT 1`,
+      [companyId, customerId]
+    );
+    if (r.rows.length === 0) return {};
+    const props = r.rows[0].properties;
+    if (!props || typeof props !== 'object') return {};
+    return { cart: props };
+  } catch (err: any) {
+    console.log('[CDP cart context] skip:', err?.message || err);
+    return {};
+  }
+}
+
+// ═══════════════════════════════════════════════════════════
+// 브라우저 SDK 배치 ingestion (v0.3.5) — POST /api/cdp/ingest 전용
+//   SDK type → 표준 event_name 정규화 + identify 식별 + 익명→회원 소급(stitching).
+//   옛 inline INSERT는 없는 event_type/payload 컬럼 참조로 항상 503 → 본 함수로 교체.
+//   장바구니 리커버리 엔진(matchCartAbandon)이 customer_id IS NOT NULL만 잡으므로,
+//   로그인 전 담은 카트도 식별 시점에 소급 연결되어야 발송 대상이 된다.
+// ═══════════════════════════════════════════════════════════
+
+// SDK 이벤트 type → cdp_events.event_name 정규화 매핑 (track은 e.event 직접 사용)
+const BROWSER_TYPE_TO_EVENT_NAME: Record<string, string> = {
+  pageview: 'page_view',
+  click: 'click',
+  identify: 'identify',
+  consent: 'consent',
+};
+
+// 정규화 시 properties에서 제외할 control 키 (식별 정보 + 구조 키)
+const BROWSER_CONTROL_KEYS = new Set([
+  'type', 'trust_level', 'external_id', 'email', 'phone', 'name', 'event', 'properties',
+]);
+
+export interface BrowserIngestBatch {
+  anonymousId: string | null;
+  sessionId: string | null;
+  schemaVersion: string;
+  sentAt: string | null;
+  events: Array<Record<string, any>>;
+}
+
+export interface BrowserIngestResult {
+  accepted: number;
+  customerId: string | null;
+  backfilled: number;
+}
+
+interface NormalizedBrowserEvent {
+  eventName: string;
+  properties: Record<string, any>;
+  trustLevel: string;
+}
+
+/**
+ * SDK 원본 이벤트 1건 → (event_name, properties, trust_level) 정규화.
+ * - track: e.event = event_name (validateEventName 통과 시), e.properties = properties
+ * - pageview/click/identify/consent: 매핑 테이블 + 잔여 필드 properties
+ * 미지원 type 또는 미허용 track event = null (skip).
+ */
+function normalizeBrowserEvent(e: Record<string, any>): NormalizedBrowserEvent | null {
+  const type = String(e?.type || '');
+  const trustLevel = String(e?.trust_level || 'observed');
+
+  if (type === 'track') {
+    const eventName = String(e?.event || '');
+    if (!validateEventName(eventName).ok) return null;
+    const props = e?.properties && typeof e.properties === 'object' && !Array.isArray(e.properties)
+      ? e.properties
+      : {};
+    return { eventName, properties: maskPII(props) as Record<string, any>, trustLevel };
+  }
+
+  const mapped = BROWSER_TYPE_TO_EVENT_NAME[type];
+  if (!mapped) return null;
+
+  const rest: Record<string, any> = {};
+  for (const [k, v] of Object.entries(e)) {
+    if (!BROWSER_CONTROL_KEYS.has(k)) rest[k] = v;
+  }
+  return { eventName: mapped, properties: maskPII(rest) as Record<string, any>, trustLevel };
+}
+
+/**
+ * 브라우저 SDK 배치 1건을 cdp_events에 정규화 적재.
+ * 1) 배치 식별 해소: identify 이벤트(external_id) → identifyCustomer / 없으면 anonymous_id 기존 known customer 재사용
+ * 2) 트랜잭션 INSERT (정규화된 모든 이벤트)
+ * 3) identify로 신규 식별 시 같은 anonymous_id의 옛 익명 이벤트에 customer_id 소급(stitching)
+ */
+export async function ingestBrowserEvents(
+  companyId: string,
+  batch: BrowserIngestBatch
+): Promise<BrowserIngestResult> {
+  const anonymousId = batch.anonymousId || null;
+  const parsedSentAt = batch.sentAt ? new Date(batch.sentAt) : new Date();
+  const occurred = isNaN(parsedSentAt.getTime()) ? new Date() : parsedSentAt;
+
+  // ── 0. 월간 호출 한도 게이팅 (요금제별) — 다른 endpoint와 동일 안전장치 ──
+  if (await isOverMonthlyCdpLimit(companyId)) {
+    void recordCdpApiCall(companyId, 'event', 429, 0);
+    const err: any = new Error('이번 달 CDP 호출 한도를 초과했습니다.');
+    err.code = 'MONTHLY_LIMIT_EXCEEDED';
+    throw err;
+  }
+
+  // ── 1. 배치 식별 해소 ──
+  let customerId: string | null = null;
+  let identityLinkId: string | null = null;
+  let didIdentify = false;
+
+  const identifyEvt = batch.events.find((e) => e?.type === 'identify' && e?.external_id);
+  if (identifyEvt) {
+    try {
+      const r = await identifyCustomer(companyId, {
+        source: 'sdk',
+        externalId: String(identifyEvt.external_id),
+        email: identifyEvt.email ? String(identifyEvt.email) : undefined,
+        phone: identifyEvt.phone ? String(identifyEvt.phone) : undefined,
+        name: identifyEvt.name ? String(identifyEvt.name) : undefined,
+      });
+      customerId = r.customerId;
+      identityLinkId = r.linkId;
+      didIdentify = true;
+    } catch (err: any) {
+      // 식별 실패(예: 신규인데 phone 누락) — 이벤트 적재는 익명으로 계속
+      console.log('[CDP ingestBrowser] identify skip:', err?.message || err);
+    }
+  }
+
+  // identify 없으면 anonymous_id로 기존 known customer 재사용 (이전 배치에서 식별된 경우)
+  if (!customerId && anonymousId) {
+    const prior = await query(
+      `SELECT customer_id FROM cdp_events
+       WHERE company_id = $1::uuid AND anonymous_id = $2 AND customer_id IS NOT NULL
+       ORDER BY received_at DESC LIMIT 1`,
+      [companyId, anonymousId]
+    );
+    if (prior.rows.length > 0) customerId = prior.rows[0].customer_id;
+  }
+
+  // 익명 이벤트라도 anonymous link 1건 보장 (추후 회원 가입 시 추적 흐름 일치)
+  if (!identityLinkId && anonymousId) {
+    try {
+      identityLinkId = await ensureAnonymousLink(companyId, 'sdk', `anon_${anonymousId}`);
+    } catch (err: any) {
+      console.log('[CDP ingestBrowser] anonymous link skip:', err?.message || err);
+    }
+  }
+
+  // ── 2. 정규화 + 트랜잭션 INSERT ──
+  const client = await pool.connect();
+  let accepted = 0;
+  try {
+    await client.query('BEGIN');
+    for (const e of batch.events) {
+      const norm = normalizeBrowserEvent(e);
+      if (!norm) continue;
+      // properties 10KB 한도 — 초과 이벤트만 skip (다른 이벤트 적재는 계속, trackEvent와 동일 규칙)
+      if (!validateProperties(norm.properties).ok) {
+        console.log(`[CDP ingestBrowser] properties 한도 초과 skip — event=${norm.eventName}`);
+        continue;
+      }
+      await client.query(
+        `INSERT INTO cdp_events (
+           id, company_id, identity_link_id, customer_id,
+           event_name, properties, source,
+           anonymous_id, session_id, trust_level, schema_version,
+           occurred_at, sent_at, received_at, created_at
+         ) VALUES (
+           gen_random_uuid(), $1::uuid, $2::uuid, $3::uuid,
+           $4, $5::jsonb, 'sdk',
+           $6, $7, $8, $9,
+           $10, $11, NOW(), NOW()
+         )`,
+        [
+          companyId,
+          identityLinkId,
+          customerId,
+          norm.eventName,
+          JSON.stringify(norm.properties || {}),
+          anonymousId,
+          batch.sessionId || null,
+          norm.trustLevel,
+          batch.schemaVersion,
+          occurred,
+          batch.sentAt || occurred.toISOString(),
+        ]
+      );
+      accepted++;
+    }
+    await client.query('COMMIT');
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
+
+  // ── 3. 익명→회원 소급 (stitching) ──
+  let backfilled = 0;
+  if (customerId && anonymousId && didIdentify) {
+    const upd = await query(
+      `UPDATE cdp_events SET customer_id = $1::uuid
+       WHERE company_id = $2::uuid AND anonymous_id = $3
+         AND customer_id IS NULL
+         AND received_at >= NOW() - INTERVAL '30 days'`,
+      [customerId, companyId, anonymousId]
+    );
+    backfilled = upd.rowCount || 0;
+  }
+
+  // ── 4. 호출 한도 집계 (fire-and-forget) — accepted 건수만큼 누적 ──
+  if (accepted > 0) {
+    void recordCdpApiCall(companyId, 'event', 200, accepted);
+  }
+
+  return { accepted, customerId, backfilled };
 }

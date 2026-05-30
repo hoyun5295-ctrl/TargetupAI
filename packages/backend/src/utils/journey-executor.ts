@@ -417,6 +417,22 @@ async function processExecution(exec: ExecutionRow): Promise<StepOutcome> {
     console.warn('[JourneyExecutor] Connected Content skip:', err?.message);
   }
 
+  // ★ 장바구니 리커버리 — 담은 상품 노출 ({{ cart.product_name }} 등). cart 여정 외에는
+  //   템플릿에 {{ cart.* }}가 없어 쿼리 skip. 실패 시 빈 객체 (발송 차단 X) — connected-content 동일 패턴.
+  try {
+    const { enrichLiquidContextWithCart } = await import('./cdp-events');
+    const cartContext = await enrichLiquidContextWithCart(
+      step.message_template || '',
+      exec.company_id,
+      exec.customer_id || null,
+    );
+    if (cartContext && Object.keys(cartContext).length > 0) {
+      externalContext = { ...externalContext, ...cartContext };
+    }
+  } catch (err: any) {
+    console.warn('[JourneyExecutor] cart context skip:', err?.message);
+  }
+
   // 광고 표기 — step.is_ad (DB default true) → buildAdMessage가 (광고)+080+KISA 제목 자동 합성 (알림톡 영역 무관 = 정보성 메시지)
   const isAd = step.is_ad !== false;
 

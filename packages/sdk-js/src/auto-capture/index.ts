@@ -8,6 +8,7 @@
  */
 
 import { getAnonymousId, getSessionId } from './storage';
+import { isValidEventName } from './events';
 import { detectIdentify, watchIdentifyChanges } from './identify';
 import { detectConsent } from './consent';
 import { setupPageviewTracking } from './pageview';
@@ -126,6 +127,11 @@ function createHjlGlobal(): HjlGlobal {
     track(eventName: string, properties?: Record<string, unknown>) {
       if (!hjl._transport) {
         throw new Error('[Hanjullo] init() 호출 의무');
+      }
+      if (!isValidEventName(eventName)) {
+        throw new Error(
+          `[Hanjullo] 허용되지 않는 eventName: "${eventName}". 표준 이벤트명(cart_add 등) 또는 custom_ 접두사만 사용하세요.`,
+        );
       }
       hjl._transport.queue({
         type: 'track',

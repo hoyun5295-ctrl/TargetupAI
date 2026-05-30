@@ -107,6 +107,27 @@
 
 ---
 
+### 🚀 2026-05-31 세션 종결 — 발송결과 모달 재설계 + SDK v0.3.5-b + SDK 듀얼 플랫폼 토대(카페24·고도몰)
+
+> **★★★ 다음 세션 진입 = `docs/superpowers/handoffs/2026-06-01-session-handoff.md` 정독 우선 ★★★**
+>
+> **본 세션 완료**:
+> - **발송결과 모달 재설계** — `CampaignDetailModal.tsx` 분리 + 흰 톤 모던 + 알림톡 검수상태(status, `kakao_templates` information_schema 검증 후) + native dialog 3건(draft 예약취소) 제거. (results.ts + formatDate.ts + CampaignDetailModal.tsx + ResultsModal.tsx)
+> - **SDK v0.3.5-b** — 설치 스크립트 스니펫 카드 + first-event 온보딩(`GET /install-status` 서버 관측 신호). heartbeat 5단계는 SDK 클라이언트 로컬(서버 미전송) 확인 → 서버 관측 신호(pageview/identify/consent/click 수신)로 진단 변경. (cdp.ts + CdpSettingsPage.tsx)
+> - **SDK 듀얼 플랫폼 브라우저 ingest 토대(Task 1~5)** — 브라우저 SDK가 public key만 보내는데 `/ingest`가 secret 필수라 전부 401이던 블로커 근본 fix: `requireCdpBrowserOrigin`(public key + 등록 Origin 검증, secret 불요) + `/ingest` 전환 + `/allowed-origins` GET/POST/DELETE + app.ts CORS delegate 예외 + 도메인 등록 UI. (cdp-auth.ts + cdp.ts + app.ts + CdpSettingsPage.tsx)
+> - DB 적용 = `cdp_events` ALTER(확인) + `companies.cdp_allowed_origins` ALTER(적용). backend/frontend tsc 0 + 박-단어·모델명·native dialog grep 0.
+>
+> **핵심 사실**: dibambi(www.dibambi.com)·isae(isae.shop) 둘 다 Cafe24(고도몰 아님) — 첫 실측 Cafe24. 회원ID = 고도몰 `{=gSess.memNo}` / Cafe24 `CAPP_ASYNC_METHODS.AppCommon.getMemberInfo().member_id`. 인증 이원화 = 브라우저(public key+Origin) / 서버(secret).
+>
+> **다음 할일**: SDK Task 6(identify 플랫폼 감지 — Cafe24 CAPP_ASYNC_METHODS + 고도몰 data-attr, vitest + IIFE 재빌드) → Task 7 설치 가이드 → CDN 배포(인프라) → 도메인 등록 + 실측 → `/codex:review`. v0.3.5-a 잔여 = package.json 0.3.5 범프 + spec archive 이동. (별도 트랙 미배포 = 발송결과 속도 batch2 — stats-aggregation getCampaignResultCounts CT + admin.ts)
+>
+> **★ 다음 세션 진입 명령어 (Harold 복붙)**:
+> ```
+> docs/superpowers/handoffs/2026-06-01-session-handoff.md 정독 + docs/superpowers/plans/2026-05-31-sdk-browser-ingest-dual-platform.md 정독 + status/lessons/LESSONS_BACKEND.md 정독 → SDK Task 6(identify 플랫폼 감지) 진입: Cafe24 CAPP_ASYNC_METHODS 반환 형태 개발자 문서 확인 → sdk-js identify.ts 보강(Cafe24 + 고도몰) → vitest + IIFE 재빌드 → Task 7 설치 가이드 → /codex:review
+> ```
+
+---
+
 ### 🚀 D226~D227+ 세션 종결 (2026-05-29) — SDK v0.3.5-a 코드 + 운영 긴급 fix 4건 + DB 컬럼 다운 3중 안전망
 
 > **★★★ 다음 세션 진입 = `docs/superpowers/handoffs/2026-05-29-session-handoff.md` 정독 우선 ★★★**
