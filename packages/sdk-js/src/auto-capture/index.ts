@@ -1,14 +1,15 @@
 /**
  * @hanjullo/sdk v0.3.5-a — Auto-Capture IIFE 진입점
  *
- * CDN 활용: <script src="https://cdn.hanjul.ai/sdk/v0.3.5/hanjul.min.js"></script>
- * §12 결정 매트릭스 — 무료 진입 X = 100만원/월+ 요금제 진입 자격 의무 (백엔드 검증).
+ * 설치: <script src="https://app.hanjul.ai/sdk/v0.3.5/hanjul.min.js" data-hjl-key="hjl_..." async></script>
+ * 비즈니스+ 요금제부터 이용 가능 (백엔드 검증).
  *
  * 매뉴얼: https://hanjul.ai/docs/sdk/v0.3.5
  */
 
 import { getAnonymousId, getSessionId } from './storage';
 import { isValidEventName } from './events';
+import { autoInitFromScriptTag } from './auto-init';
 import { detectIdentify, watchIdentifyChanges } from './identify';
 import { detectConsent } from './consent';
 import { setupPageviewTracking } from './pageview';
@@ -164,6 +165,8 @@ function createHjlGlobal(): HjlGlobal {
 
 if (typeof window !== 'undefined') {
   (window as any).hjl = createHjlGlobal();
+  // 스니펫 data-hjl-key 자동 init — 설치 담당자 추가 코드 0
+  autoInitFromScriptTag();
 }
 
 export { createHjlGlobal, VERSION };

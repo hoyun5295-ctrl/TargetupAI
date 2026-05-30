@@ -1421,7 +1421,7 @@ export default function CdpSettingsPage() {
               </div>
             </div>
             {(() => {
-              const snippet = `<script src="https://cdn.hanjul.ai/sdk/v0.3.5/hanjul.min.js" data-hjl-key="${usage.public_key}" async></script>`;
+              const snippet = `<script src="https://app.hanjul.ai/sdk/v0.3.5/hanjul.min.js" data-hjl-key="${usage.public_key}" async></script>`;
               return (
                 <>
                   <pre className="bg-slate-950 border border-white/10 rounded-xl p-3 text-[11px] text-emerald-200 overflow-x-auto whitespace-pre-wrap break-all">{snippet}</pre>
@@ -1434,7 +1434,7 @@ export default function CdpSettingsPage() {
                 </>
               );
             })()}
-            <div className="text-[10px] text-white/30 italic mt-2">Data source — pinned CDN(cdn.hanjul.ai/sdk/v0.3.5)</div>
+            <div className="text-[10px] text-white/30 italic mt-2">Data source — app.hanjul.ai/sdk/v0.3.5</div>
           </div>
         )}
 

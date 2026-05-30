@@ -14,14 +14,14 @@
 
 ## 1. 스크립트 설치 (모든 플랫폼 공통)
 
-쇼핑몰 모든 페이지의 `<head>`에 아래 스니펫을 넣습니다. `hjl_...` 자리에 발급받은 공개 키를 넣습니다.
+쇼핑몰 모든 페이지의 `<head>`에 아래 한 줄을 넣습니다. `hjl_...` 자리에 발급받은 공개 키를 넣습니다. (한줄로 관리자 → CDP 설정에서 공개 키가 자동으로 채워진 스니펫을 복사할 수 있습니다.)
 
 ```html
 <!-- 한줄로 CDP -->
-<script>
-!function(){var s=document.createElement('script');s.src='https://cdn.hanjul.ai/sdk/v0.3.5/hanjul.min.js';s.async=true;s.onload=function(){window.hjl&&window.hjl.init({apiKey:'hjl_여기에_공개키'});};document.head.appendChild(s);}();
-</script>
+<script src="https://app.hanjul.ai/sdk/v0.3.5/hanjul.min.js" data-hjl-key="hjl_여기에_공개키" async></script>
 ```
+
+`data-hjl-key`에 공개 키만 넣으면 별도 init 코드 없이 수집이 시작됩니다.
 
 설치 직후부터 페이지 방문(`page_view`)·클릭이 자동 수집됩니다. 익명 방문자도 익명 ID로 누적되며, 이후 회원으로 식별되면 그동안의 익명 행동이 자동으로 회원에게 연결됩니다(소급 연결, 최근 30일).
 
