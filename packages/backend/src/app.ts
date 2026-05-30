@@ -130,15 +130,25 @@ const corsAllowedOrigins = (process.env.CORS_ORIGIN || '')
 if (corsAllowedOrigins.length === 0) {
   console.warn('[CORS] CORS_ORIGIN 미설정 — 전 origin 허용 중. 운영 배포 시 .env에 운영 도메인 추가 필수');
 }
-app.use(cors({
-  origin: (origin, cb) => {
-    if (corsAllowedOrigins.length === 0) return cb(null, true); // fallback: 전면 허용
-    if (process.env.NODE_ENV !== 'production') return cb(null, true);
-    if (!origin) return cb(null, true); // curl / same-origin / server-to-server
-    if (corsAllowedOrigins.includes(origin)) return cb(null, true);
-    cb(new Error(`CORS blocked: ${origin}`));
-  },
-  credentials: true,
+app.use(cors((req, cb) => {
+  // ★ 브라우저 SDK 수집 endpoint — 등록 도메인 검증을 POST 인증(requireCdpBrowserOrigin)에서 수행.
+  //   preflight/응답은 요청 Origin reflect 허용 (전역 화이트리스트와 무관). 실 보안 경계는 POST의 key+Origin 검증.
+  if (req.path === '/api/cdp/ingest') {
+    cb(null, {
+      origin: true,
+      methods: ['POST', 'OPTIONS'],
+      allowedHeaders: ['Content-Type', 'X-Hanjullo-Key', 'X-Hanjullo-Schema-Version', 'X-Hanjullo-SDK-Version'],
+      credentials: false,
+      maxAge: 86400,
+    });
+    return;
+  }
+  const origin = req.headers.origin as string | undefined;
+  if (corsAllowedOrigins.length === 0) return cb(null, { origin: true, credentials: true }); // fallback: 전면 허용
+  if (process.env.NODE_ENV !== 'production') return cb(null, { origin: true, credentials: true });
+  if (!origin) return cb(null, { origin: true, credentials: true }); // curl / same-origin / server-to-server
+  if (corsAllowedOrigins.includes(origin)) return cb(null, { origin: true, credentials: true });
+  cb(new Error(`CORS blocked: ${origin}`));
 }));
 
 app.use(morgan('dev'));

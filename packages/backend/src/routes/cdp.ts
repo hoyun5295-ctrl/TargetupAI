@@ -23,7 +23,7 @@ import path from 'path';
 import fs from 'fs';
 import { v4 as uuidv4 } from 'uuid';
 import { authenticate } from '../middlewares/auth';
-import { requireCdpApiKey, recordCdpApiCall, issueCdpKeyPair, isCdpEnabledForPlan } from '../utils/cdp-auth';
+import { requireCdpApiKey, requireCdpBrowserOrigin, recordCdpApiCall, issueCdpKeyPair, isCdpEnabledForPlan } from '../utils/cdp-auth';
 import { identifyCustomer } from '../utils/cdp-identity';
 import { trackEvent, getRecentEvents } from '../utils/cdp-events';
 import { syncOrder, bulkImport } from '../utils/cdp-orders';
@@ -103,7 +103,7 @@ const router = Router();
 // §12 #5 — schema_version 'v1' 의무 + 7 분류 PII masking 자동 (이중 안전망)
 // ════════════════════════════════════════════════════════════════════
 
-router.post('/ingest', requireCdpApiKey, async (req: Request, res: Response) => {
+router.post('/ingest', requireCdpBrowserOrigin, async (req: Request, res: Response) => {
   try {
     const { schema_version, anonymous_id, session_id, sent_at, events } = req.body || {};
 
@@ -792,6 +792,82 @@ router.get('/install-status', async (req: Request, res: Response) => {
     }
     console.error('[CDP /install-status] 오류:', err);
     return res.status(500).json({ success: false, error: '조회 실패' });
+  }
+});
+
+// GET /api/cdp/allowed-origins — 브라우저 SDK 수집 허용 도메인 목록 (Origin allowlist)
+router.get('/allowed-origins', async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+    const r = await query(`SELECT cdp_allowed_origins FROM companies WHERE id = $1::uuid`, [companyId]);
+    return res.json({ success: true, origins: r.rows[0]?.cdp_allowed_origins || [] });
+  } catch (err: any) {
+    const msg = err?.message || '';
+    if (msg.includes('column') && msg.includes('does not exist')) {
+      return res.status(503).json({ success: false, error: 'DB 마이그레이션 필요 — companies.cdp_allowed_origins ALTER 실행 요청', code: 'DB_MIGRATION_PENDING' });
+    }
+    console.error('[CDP /allowed-origins GET] 오류:', err);
+    return res.status(500).json({ success: false, error: '조회 실패' });
+  }
+});
+
+// POST /api/cdp/allowed-origins — 도메인 추가 (회사 관리자) body { origin }
+router.post('/allowed-origins', async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    const userType = req.user?.userType;
+    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+    if (userType !== 'company_admin') {
+      return res.status(403).json({ success: false, error: '도메인 등록은 회사 관리자만 가능합니다.' });
+    }
+    const origin = String(req.body?.origin || '').trim().toLowerCase().replace(/\/+$/, '');
+    if (!/^https:\/\/[a-z0-9.-]+(:\d+)?$/.test(origin)) {
+      return res.status(400).json({ success: false, error: 'https:// 도메인 형식만 허용됩니다. (예: https://www.example.com)' });
+    }
+    await query(
+      `UPDATE companies
+         SET cdp_allowed_origins = ARRAY(SELECT DISTINCT unnest(COALESCE(cdp_allowed_origins, '{}'::text[]) || $2::text[])),
+             updated_at = NOW()
+       WHERE id = $1::uuid`,
+      [companyId, [origin]],
+    );
+    const r = await query(`SELECT cdp_allowed_origins FROM companies WHERE id = $1::uuid`, [companyId]);
+    return res.json({ success: true, origins: r.rows[0]?.cdp_allowed_origins || [] });
+  } catch (err: any) {
+    const msg = err?.message || '';
+    if (msg.includes('column') && msg.includes('does not exist')) {
+      return res.status(503).json({ success: false, error: 'DB 마이그레이션 필요 — companies.cdp_allowed_origins ALTER 실행 요청', code: 'DB_MIGRATION_PENDING' });
+    }
+    console.error('[CDP /allowed-origins POST] 오류:', err);
+    return res.status(500).json({ success: false, error: '등록 실패' });
+  }
+});
+
+// DELETE /api/cdp/allowed-origins — 도메인 삭제 (회사 관리자) body { origin }
+router.delete('/allowed-origins', async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    const userType = req.user?.userType;
+    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+    if (userType !== 'company_admin') {
+      return res.status(403).json({ success: false, error: '도메인 삭제는 회사 관리자만 가능합니다.' });
+    }
+    const origin = String(req.body?.origin || '').trim().toLowerCase().replace(/\/+$/, '');
+    await query(
+      `UPDATE companies SET cdp_allowed_origins = array_remove(COALESCE(cdp_allowed_origins, '{}'::text[]), $2), updated_at = NOW()
+       WHERE id = $1::uuid`,
+      [companyId, origin],
+    );
+    const r = await query(`SELECT cdp_allowed_origins FROM companies WHERE id = $1::uuid`, [companyId]);
+    return res.json({ success: true, origins: r.rows[0]?.cdp_allowed_origins || [] });
+  } catch (err: any) {
+    const msg = err?.message || '';
+    if (msg.includes('column') && msg.includes('does not exist')) {
+      return res.status(503).json({ success: false, error: 'DB 마이그레이션 필요 — companies.cdp_allowed_origins ALTER 실행 요청', code: 'DB_MIGRATION_PENDING' });
+    }
+    console.error('[CDP /allowed-origins DELETE] 오류:', err);
+    return res.status(500).json({ success: false, error: '삭제 실패' });
   }
 });
 

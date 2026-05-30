@@ -200,6 +200,72 @@ export async function requireCdpApiKey(req: Request, res: Response, next: NextFu
   }
 }
 
+/**
+ * 브라우저 SDK 전용 인증 — public key + 등록 도메인(Origin) 검증 (secret 미요구).
+ *   secret을 브라우저 <script>에 두면 view-source 탈취 → 회사 사칭 사고.
+ *   따라서 브라우저 수집 경로는 cdp_allowed_origins(등록 도메인)이 보안 경계.
+ *   서버-투-서버(identify/order 등)는 requireCdpApiKey(secret) 그대로 사용.
+ */
+export async function requireCdpBrowserOrigin(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const cdpApiKey = (req.headers['x-hanjullo-key'] || req.headers['X-Hanjullo-Key']) as string | undefined;
+    if (!cdpApiKey || !cdpApiKey.startsWith('hjl_')) {
+      res.status(401).json({ success: false, error: 'X-Hanjullo-Key 누락 또는 포맷 오류입니다.', code: 'MISSING_KEY' });
+      return;
+    }
+
+    const result = await query(
+      `SELECT id, company_name, status, cdp_allowed_origins
+       FROM companies
+       WHERE cdp_api_key = $1`,
+      [cdpApiKey],
+    );
+    if (result.rows.length === 0) {
+      res.status(401).json({ success: false, error: 'CDP 인증에 실패했습니다.', code: 'INVALID_KEY' });
+      return;
+    }
+
+    const company = result.rows[0];
+    if (company.status !== 'active') {
+      res.status(403).json({ success: false, error: `회사 상태가 ${company.status} 입니다.`, code: 'COMPANY_INACTIVE' });
+      return;
+    }
+    if (!(await isCdpEnabledForPlan(company.id))) {
+      res.status(403).json({ success: false, error: '한줄로 CDP는 비즈니스 요금제부터 이용 가능합니다.', code: 'PLAN_FEATURE_LOCKED' });
+      return;
+    }
+    if (await isOverMonthlyCdpLimit(company.id)) {
+      res.status(429).json({ success: false, error: '이번 달 CDP API 호출 한도를 초과했습니다.', code: 'MONTHLY_LIMIT_EXCEEDED' });
+      return;
+    }
+
+    // 등록 도메인(Origin) 검증 — 정규화(소문자 + trailing slash 제거) 후 정확 일치
+    const norm = (o: string) => o.trim().toLowerCase().replace(/\/+$/, '');
+    const origin = norm((req.headers['origin'] as string) || '');
+    const allowed: string[] = Array.isArray(company.cdp_allowed_origins) ? company.cdp_allowed_origins.map(norm) : [];
+    if (!origin || !allowed.includes(origin)) {
+      res.status(403).json({
+        success: false,
+        error: '등록되지 않은 도메인입니다. 관리자 → CDP 설정에서 도메인을 먼저 등록해주세요.',
+        code: 'ORIGIN_NOT_ALLOWED',
+      });
+      return;
+    }
+
+    req.cdpAuth = { companyId: company.id, companyName: company.company_name, source: 'sdk' };
+    next();
+  } catch (err: any) {
+    // db_alter_safety_net — cdp_allowed_origins 미마이그레이션 시 503
+    const msg = err?.message || '';
+    if (msg.includes('column') && msg.includes('does not exist')) {
+      res.status(503).json({ success: false, error: 'DB 마이그레이션 필요 — companies.cdp_allowed_origins ALTER 실행 요청', code: 'DB_MIGRATION_PENDING' });
+      return;
+    }
+    console.error('[CDP BrowserAuth] 인증 처리 실패:', err);
+    res.status(500).json({ success: false, error: 'CDP 브라우저 인증 처리 중 오류가 발생했습니다.' });
+  }
+}
+
 // ═══════════════════════════════════════════════════════════
 // 헬퍼 — 요금제 게이팅
 // ═══════════════════════════════════════════════════════════
