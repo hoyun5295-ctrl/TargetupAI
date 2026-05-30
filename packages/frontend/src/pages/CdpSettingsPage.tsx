@@ -32,7 +32,7 @@ import {
 import {
   ArrowLeft, Database, Brain, Loader2, RefreshCw, Sparkles, Users, AlertTriangle,
   Activity, ChevronRight, ChevronLeft, Info, Link2, Store, Server,
-  KeyRound, Copy, Check, Unlink, MousePointerClick, AlertCircle, ShoppingCart,
+  KeyRound, Copy, Check, Unlink, MousePointerClick, AlertCircle, ShoppingCart, Code2,
 } from 'lucide-react';
 import { useAuthStore } from '../stores/authStore';
 import ConfirmModal, { type ConfirmState } from '../components/ConfirmModal';
@@ -47,9 +47,18 @@ interface CdpUsage {
   plan_code: string;
   plan_name: string;
   has_key: boolean;
+  public_key: string | null;
   issued_at: string | null;
   monthly_limit: number | null;
   used: number;
+}
+
+interface InstallStatus {
+  keyIssuedAt: string | null;
+  firstEventAt: string | null;
+  total: number;
+  count24h: number;
+  signals: { pageview: boolean; identify: boolean; consent: boolean; click: boolean };
 }
 
 interface IssueKeyResponse {
@@ -279,6 +288,7 @@ export default function CdpSettingsPage() {
 
   // 기존 (운영 유지)
   const [usage, setUsage] = useState<CdpUsage | null>(null);
+  const [installStatus, setInstallStatus] = useState<InstallStatus | null>(null);
   const [issuedSecret, setIssuedSecret] = useState<IssueKeyResponse | null>(null);
   const [issuing, setIssuing] = useState(false);
   const [copyStatus, setCopyStatus] = useState<'idle' | 'key' | 'secret'>('idle');
@@ -302,6 +312,26 @@ export default function CdpSettingsPage() {
 
   const token = () => localStorage.getItem('token');
   const isAdmin = user?.userType === 'company_admin';
+
+  // first-event 설치 진단 — 키 발급 후 첫 이벤트 수신 전까지 10초 폴링 (수신되면 중단)
+  useEffect(() => {
+    if (!usage?.has_key) return;
+    let stopped = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const poll = async () => {
+      try {
+        const res = await fetch('/api/cdp/install-status', { headers: { Authorization: `Bearer ${token()}` } });
+        const data = await res.json();
+        if (!stopped && data.success) {
+          setInstallStatus(data);
+          if (data.firstEventAt) return; // 첫 이벤트 수신 → 폴링 종료
+        }
+      } catch { /* 네트워크 일시 오류 무시 */ }
+      if (!stopped) timer = setTimeout(poll, 10000);
+    };
+    poll();
+    return () => { stopped = true; if (timer) clearTimeout(timer); };
+  }, [usage?.has_key]);
 
   const loadAll = useCallback(async () => {
     setLoading(true);
@@ -1292,6 +1322,80 @@ export default function CdpSettingsPage() {
             )}
           </div>
         )}
+
+        {/* 12-1. SDK 설치 스크립트 스니펫 (public key 자동 주입 — v0.3.5-b) */}
+        {usage?.cdp_enabled && usage?.public_key && (
+          <div className="bg-white/5 border border-white/10 rounded-2xl p-6">
+            <div className="flex items-center gap-2 mb-3">
+              <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-violet-500 to-fuchsia-600 flex items-center justify-center">
+                <Code2 className="w-5 h-5 text-white" />
+              </div>
+              <div>
+                <h2 className="text-base font-bold text-white">SDK 설치 스크립트</h2>
+                <div className="text-xs text-white/50">자사몰 &lt;head&gt;에 붙여넣으면 고객 행동 수집이 시작됩니다.</div>
+              </div>
+            </div>
+            {(() => {
+              const snippet = `<script src="https://cdn.hanjul.ai/sdk/v0.3.5/hanjul.min.js" data-hjl-key="${usage.public_key}" async></script>`;
+              return (
+                <>
+                  <pre className="bg-slate-950 border border-white/10 rounded-xl p-3 text-[11px] text-emerald-200 overflow-x-auto whitespace-pre-wrap break-all">{snippet}</pre>
+                  <button
+                    onClick={() => copyText(snippet, '설치 스크립트')}
+                    className="mt-2 px-3 py-2 bg-violet-500/40 hover:bg-violet-500/60 text-white rounded-lg text-xs font-medium inline-flex items-center gap-1.5"
+                  >
+                    <Copy className="w-3.5 h-3.5" />복사
+                  </button>
+                </>
+              );
+            })()}
+            <div className="text-[10px] text-white/30 italic mt-2">Data source — pinned CDN(cdn.hanjul.ai/sdk/v0.3.5)</div>
+          </div>
+        )}
+
+        {/* 12-2. 설치 검증 — 첫 이벤트 진단 (v0.3.5-b, 서버 관측 신호) */}
+        {usage?.cdp_enabled && usage?.public_key && installStatus && (() => {
+          const issued = installStatus.keyIssuedAt ? new Date(installStatus.keyIssuedAt).getTime() : null;
+          const mins = issued ? Math.floor((Date.now() - issued) / 60000) : 0;
+          const received = !!installStatus.firstEventAt;
+          const guide = received
+            ? '첫 이벤트 수신 완료 — 설치가 정상 동작합니다.'
+            : mins < 5 ? '설치 후 첫 이벤트 대기 중 — 자사몰 페이지를 한 번 열어보세요.'
+            : mins < 10 ? '5분 경과 — 스크립트가 <head>에 들어갔는지, 자사몰을 방문했는지 확인하세요.'
+            : mins < 30 ? '10분 경과 — 스크립트 경로/키 값과 광고/보안 차단을 점검하세요.'
+            : '30분 경과 — 설치 점검이 필요합니다. 스크립트 로드 여부와 키 발급 상태를 확인하세요.';
+          const steps = [
+            { label: '첫 이벤트 수신', done: received },
+            { label: '페이지뷰', done: installStatus.signals.pageview },
+            { label: '회원 식별(data-hjl-user-id)', done: installStatus.signals.identify },
+            { label: '마케팅 동의', done: installStatus.signals.consent },
+          ];
+          return (
+            <div className={`border rounded-2xl p-6 ${received ? 'bg-emerald-500/10 border-emerald-400/30' : 'bg-white/5 border-white/10'}`}>
+              <div className="flex items-center gap-2 mb-3 flex-wrap">
+                <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${received ? 'bg-emerald-500/30' : 'bg-gradient-to-br from-violet-500 to-fuchsia-600'}`}>
+                  {received ? <Check className="w-5 h-5 text-emerald-200" /> : <Activity className="w-5 h-5 text-white" />}
+                </div>
+                <div className="min-w-0">
+                  <h2 className="text-base font-bold text-white">설치 검증 — 첫 이벤트</h2>
+                  <div className="text-xs text-white/50">{guide}</div>
+                </div>
+                {received && (
+                  <span className="ml-auto text-xs text-emerald-200 shrink-0">총 {installStatus.total.toLocaleString()}건 · 24h {installStatus.count24h.toLocaleString()}건</span>
+                )}
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                {steps.map((s) => (
+                  <div key={s.label} className={`flex items-center gap-2 rounded-lg px-3 py-2 text-xs ${s.done ? 'bg-emerald-500/10 text-emerald-200' : 'bg-white/5 text-white/50'}`}>
+                    {s.done ? <Check className="w-3.5 h-3.5 shrink-0" /> : <div className="w-3.5 h-3.5 rounded-full border border-white/30 shrink-0" />}
+                    {s.label}
+                  </div>
+                ))}
+              </div>
+              <div className="text-[10px] text-white/30 italic mt-2">Data source — cdp_events 수신 신호(서버 관측)</div>
+            </div>
+          );
+        })()}
 
         {/* 13. 컴퓨팅 시점 */}
         {diagnostics && (

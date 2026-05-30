@@ -712,6 +712,7 @@ router.get('/usage', async (req: Request, res: Response) => {
               AND occurred_at >= date_trunc('month', NOW() AT TIME ZONE 'Asia/Seoul') AT TIME ZONE 'Asia/Seoul'
           ), 0) AS used,
           c.cdp_api_key IS NOT NULL AS has_key,
+          c.cdp_api_key AS public_key,
           c.cdp_api_key_issued_at AS issued_at,
           COALESCE(p.cdp_enabled, false) AS cdp_enabled,
           p.plan_code,
@@ -732,6 +733,7 @@ router.get('/usage', async (req: Request, res: Response) => {
       plan_code: row.plan_code,
       plan_name: row.plan_name,
       has_key: !!row.has_key,
+      public_key: row.public_key || null,
       issued_at: row.issued_at,
       monthly_limit: row.monthly_limit,           // NULL = 무제한
       used: parseInt(row.used || '0'),
@@ -739,6 +741,57 @@ router.get('/usage', async (req: Request, res: Response) => {
   } catch (err: any) {
     console.error('[CDP /usage] 오류:', err);
     return res.status(500).json({ success: false, error: err?.message || '조회 실패' });
+  }
+});
+
+// GET /api/cdp/install-status — SDK 설치 후 첫 이벤트 수신 진단 (v0.3.5-b)
+//   heartbeat 5단계는 SDK 클라이언트 로컬 mark(서버 미전송)라, 서버 관측 신호(수신 이벤트 타입)로 진단한다.
+router.get('/install-status', async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+
+    const keyRow = await query(
+      `SELECT cdp_api_key_issued_at FROM companies WHERE id = $1::uuid`,
+      [companyId],
+    );
+    const keyIssuedAt = keyRow.rows[0]?.cdp_api_key_issued_at || null;
+
+    const ev = await query(
+      `SELECT
+         MIN(received_at) AS first_event_at,
+         COUNT(*) AS total,
+         COUNT(*) FILTER (WHERE received_at >= NOW() - INTERVAL '24 hours') AS count_24h,
+         BOOL_OR(event_type = 'pageview') AS has_pageview,
+         BOOL_OR(event_type = 'identify') AS has_identify,
+         BOOL_OR(event_type = 'consent')  AS has_consent,
+         BOOL_OR(event_type = 'click')    AS has_click
+       FROM cdp_events
+       WHERE company_id = $1::uuid`,
+      [companyId],
+    );
+    const row = ev.rows[0] || {};
+    return res.json({
+      success: true,
+      keyIssuedAt,
+      firstEventAt: row.first_event_at || null,
+      total: parseInt(row.total || '0'),
+      count24h: parseInt(row.count_24h || '0'),
+      signals: {
+        pageview: !!row.has_pageview,
+        identify: !!row.has_identify,
+        consent: !!row.has_consent,
+        click: !!row.has_click,
+      },
+    });
+  } catch (err: any) {
+    // db_alter_safety_net — cdp_events 신규 컬럼 미마이그레이션 시 503
+    const msg = err?.message || '';
+    if (msg.includes('column') && msg.includes('does not exist')) {
+      return res.status(503).json({ success: false, error: 'DB 마이그레이션 필요 — 운영자에게 cdp_events ALTER 실행 요청', code: 'DB_MIGRATION_PENDING' });
+    }
+    console.error('[CDP /install-status] 오류:', err);
+    return res.status(500).json({ success: false, error: '조회 실패' });
   }
 });
 
