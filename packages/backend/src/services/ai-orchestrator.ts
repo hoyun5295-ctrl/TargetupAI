@@ -34,6 +34,8 @@ import {
   filterVarCatalogByData,
   countFilteredCustomers,
 } from './ai';
+// ★ D227+ 성과 추정 실데이터 전환 — calculateCostROI(하드코딩) 대체
+import { estimatePerformance } from '../utils/operator-performance-estimator';
 
 // ★ D171-D (2026-05-19): 진정 Orchestrator AI 전용 Anthropic 인스턴스 (Tool Use 직접 호출)
 const orchestratorAnthropic = new Anthropic({
@@ -100,6 +102,15 @@ export interface OrchestratorResult {
     expectedRevenue: number;
     clickRate: number;
     conversionRate: number;
+    // ★ D227+ 실데이터 추정 — 타겟 객단가 + ROI + 추정 근거
+    avgRevenue: number;
+    roi: number;
+    basis: {
+      level: string;
+      label: string;
+      confidence: string;
+      notes: string[];
+    };
   };
   meta: {
     usePersonalization: boolean;
@@ -249,60 +260,10 @@ passed=true 이면 warnings/suggestions 빈 배열 가능. 사소한 issue는 me
 }
 
 // ============================================================
-// Cost-ROI Sub-agent (단순 산술 — AI 호출 X)
+// ★ D227+ Cost-ROI 추정 — calculateCostROI(전 회사 0.8% 하드코딩) 제거.
+//   utils/operator-performance-estimator.ts estimatePerformance로 대체:
+//   타겟 실제 객단가 + 과거 캠페인 실측 3단계 추정. (옛 VIP "매출 50만원" 비현실 수치 정정)
 // ============================================================
-
-interface CostROIInput {
-  count: number;
-  channel: string;
-  companyInfo: Record<string, any>;
-  avgRevenue: number;
-}
-
-interface CostROIResult {
-  cost: {
-    estimated: number;
-    unitCost: number;
-    breakdown: string;
-  };
-  performance: {
-    expectedClicks: number;
-    expectedConversions: number;
-    expectedRevenue: number;
-    clickRate: number;
-    conversionRate: number;
-  };
-}
-
-function calculateCostROI(input: CostROIInput): CostROIResult {
-  const { count, channel, companyInfo, avgRevenue } = input;
-  const costs = getCompanyCosts(companyInfo);
-  const channelKey = (channel || 'SMS').toLowerCase();
-  const unitCost: number = (costs as Record<string, number>)[channelKey] ?? costs.sms;
-  const estimatedCost = Math.round(count * unitCost);
-
-  // 성과 예측 — D169 Extended Thinking이 활성화된 D170+ 단계에서 reasoning 기반 정합 강화 예정
-  const expectedClickRate = 0.03;
-  const expectedConversionRate = 0.008;
-  const expectedClicks = Math.round(count * expectedClickRate);
-  const expectedConversions = Math.round(count * expectedConversionRate);
-  const expectedRevenue = Math.round(expectedConversions * avgRevenue);
-
-  return {
-    cost: {
-      estimated: estimatedCost,
-      unitCost,
-      breakdown: `${channel} ${count.toLocaleString()}건 × ${unitCost.toLocaleString()}원`,
-    },
-    performance: {
-      expectedClicks,
-      expectedConversions,
-      expectedRevenue,
-      clickRate: expectedClickRate,
-      conversionRate: expectedConversionRate,
-    },
-  };
-}
 
 // ============================================================
 // Orchestrator main — 6 Sub-agent 호출 + 결과 통합
@@ -410,13 +371,18 @@ export async function orchestrate(ctx: AgentContext): Promise<OrchestratorResult
   );
   mark('compliance', complianceStart);
 
-  // ============ 5. Cost-ROI Sub-agent (산술) ============
+  // ============ 5. 성과 추정 (D227+ 실데이터 — 타겟 객단가 + 과거 실측) ============
   const costStart = Date.now();
-  const costRoi = calculateCostROI({
+  const channelKey5 = (targetResult.recommended_channel || 'SMS').toLowerCase();
+  const costs5 = getCompanyCosts(ctx.companyInfo);
+  const unitCost5 = (costs5 as Record<string, number>)[channelKey5] ?? costs5.sms;
+  const est = await estimatePerformance({
+    companyId: ctx.companyId,
+    filters: targetResult.filters,
     count: estimatedCount,
     channel: targetResult.recommended_channel || 'SMS',
-    companyInfo: ctx.companyInfo,
-    avgRevenue: parseFloat(ctx.customerStats.avg_total_spent) || 50000,
+    unitCost: unitCost5,
+    fallbackAvgRevenue: parseFloat(ctx.customerStats.avg_total_spent) || 0,
   });
   mark('costRoi', costStart);
 
@@ -441,8 +407,8 @@ export async function orchestrate(ctx: AgentContext): Promise<OrchestratorResult
       recommendedTime: targetResult.recommended_time,
     },
     compliance,
-    cost: costRoi.cost,
-    performance: costRoi.performance,
+    cost: est.cost,
+    performance: { ...est.performance, basis: est.basis },
     meta: {
       usePersonalization: !!targetResult.use_personalization,
       personalizationVars: targetResult.personalization_vars || [],
@@ -828,13 +794,18 @@ ${memoryContext}
     return orchestrate(ctx);
   }
 
-  // ============ Cost-ROI 계산 (산술, AI tool X) ============
+  // ============ 성과 추정 (D227+ 실데이터 — 타겟 객단가 + 과거 실측) ============
   const costStart = Date.now();
-  const costRoi = calculateCostROI({
+  const channelKeyAI = (targetResult.recommended_channel || 'SMS').toLowerCase();
+  const costsAI = getCompanyCosts(ctx.companyInfo);
+  const unitCostAI = (costsAI as Record<string, number>)[channelKeyAI] ?? costsAI.sms;
+  const est = await estimatePerformance({
+    companyId: ctx.companyId,
+    filters: targetResult.filters || {},
     count: estimatedCount,
     channel: targetResult.recommended_channel || 'SMS',
-    companyInfo: ctx.companyInfo,
-    avgRevenue: parseFloat(ctx.customerStats.avg_total_spent) || 50000,
+    unitCost: unitCostAI,
+    fallbackAvgRevenue: parseFloat(ctx.customerStats.avg_total_spent) || 0,
   });
   mark('costRoi', costStart);
 
@@ -859,8 +830,8 @@ ${memoryContext}
       recommendedTime: targetResult.recommended_time || '',
     },
     compliance,
-    cost: costRoi.cost,
-    performance: costRoi.performance,
+    cost: est.cost,
+    performance: { ...est.performance, basis: est.basis },
     meta: {
       usePersonalization: !!targetResult.use_personalization,
       personalizationVars: targetResult.personalization_vars || [],
