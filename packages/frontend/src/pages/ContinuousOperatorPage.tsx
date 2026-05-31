@@ -62,7 +62,7 @@ interface MultiGoalAnalysis {
 
 type Schedule = 'daily' | 'weekly' | 'monthly';
 type OperatorStatus = 'active' | 'paused' | 'archived';
-type ProposalStatus = 'pending' | 'approved' | 'rejected' | 'auto_executed' | 'expired';
+type ProposalStatus = 'pending' | 'approved' | 'rejected' | 'auto_executed' | 'expired' | 'admin_review';
 
 interface ContinuousOperator {
   id: string;
@@ -523,9 +523,13 @@ export default function ContinuousOperatorPage() {
         <div className="bg-amber-500/10 border border-amber-400/30 rounded-lg p-3 text-xs text-amber-100 flex items-start gap-2">
           <AlertCircle className="w-4 h-4 mt-0.5 shrink-0" />
           <div>
-            <strong>안전 정책:</strong> AI는 매일 회사 데이터를 분석해 캠페인을 추천할 뿐, 발송은 항상 회사 admin 확인 후에만 진행됩니다.
-            Enterprise 플랜의 '자동 발송' 옵션은 기본 OFF — 활성화하더라도 1,000건 미만 + 5만원 미만 + 안전 단계 낮음 + 비광고 캠페인일 때만 자동 발송됩니다.
-            조건에 맞는 고객이 0명이면 제안이 만들어지지 않습니다.
+            <strong>안전장치:</strong> AI는 매일 회사 데이터를 분석해 캠페인을 추천하며, 발송은 회사 admin 확인 후 진행됩니다.
+            <span className="block mt-1.5 space-y-0.5">
+              <span className="block">· <strong>0건 차단</strong> — 조건에 맞는 고객이 0명이면 제안 자체가 만들어지지 않습니다</span>
+              <span className="block">· <strong>예산 제어</strong> — 월/일 예산을 설정하면 초과 시 제안 생성이 자동 중단됩니다</span>
+              <span className="block">· <strong>스팸 검사</strong> — 모든 문안은 발송 전 스팸 필터를 거치며, 걸리면 AI가 다시 작성해 재검사하고, 끝내 통과 못 하면 담당자 검토 대기로 넘어갑니다</span>
+              <span className="block">· <strong>자동 발송</strong>(Enterprise/Business)을 켜면 회사가 정한 인원·비용·위험도 한도 안에서만 발송되며, 즉시 알림이 갑니다. 기본은 항상 수동 확인입니다</span>
+            </span>
           </div>
         </div>
 
@@ -774,6 +778,12 @@ export default function ContinuousOperatorPage() {
                             )}
                           </div>
                           <div className="text-xs text-white/50 mb-2">목표: "{p.operatorObjective}"</div>
+                          {p.status === 'admin_review' && (
+                            <div className="mb-2 flex items-start gap-1.5 text-[11px] text-amber-100 bg-amber-500/10 border border-amber-400/30 rounded-lg p-2">
+                              <AlertCircle className="w-3 h-3 mt-0.5 shrink-0" />
+                              <span>{p.autoExecuteReason || '스팸 필터를 끝내 통과하지 못했습니다.'} — 문안을 확인하고 발송 여부를 직접 판단해주세요.</span>
+                            </div>
+                          )}
                           <div className="flex flex-wrap gap-3 text-xs text-white/70">
                             <span>대상 <strong className="text-indigo-300">{p.recipientCount.toLocaleString()}명</strong></span>
                             <span>·</span>
@@ -787,7 +797,7 @@ export default function ContinuousOperatorPage() {
                           </div>
                         </div>
                         <div className="flex flex-col gap-1.5 shrink-0">
-                          {p.status === 'pending' && (
+                          {(p.status === 'pending' || p.status === 'admin_review') && (
                             <>
                               <button onClick={() => handleApprove(p.id)} className="text-xs bg-emerald-500/30 hover:bg-emerald-500/50 text-emerald-100 px-3 py-1.5 rounded flex items-center gap-1">
                                 <Check className="w-3 h-3" /> 승인 + 발송

@@ -30,8 +30,12 @@ import { orchestrate } from '../services/ai-orchestrator';
 import { getCompanyCosts } from '../config/defaults';
 // ★ D177 (2026-05-19): Self-Optimizing Bandit — message variants 박음 + Thompson Sampling
 import { insertProposalVariants } from './bandit-optimizer';
-// ★ D212+ 정책 (2026-05-23 Harold 명시): CT-64 영역 통합 — 스팸필터테스트 + 검증 영역 + 담당자 학습
-import { spamTestWithRetry, isAutoSendAllowed, recordAdminStopLearning } from './continuous-operator-policy';
+// ★ D212+ 정책 (2026-05-23 Harold 명시): CT-64 영역 통합 — 검증 영역 + 담당자 학습
+// ★ D227+ 스팸 안전망 격상 — decideSpamOutcome(실제 테스트 결과 → 상태) + buildSpamRegeneratePrompt(AI 재작성)
+import { isAutoSendAllowed, recordAdminStopLearning, decideSpamOutcome, buildSpamRegeneratePrompt } from './continuous-operator-policy';
+// ★ D227+ 검증된 스팸 자산 재사용 (auto-campaign-worker와 동일 패턴) — 실제 테스트폰 발송 + AI 재생성 + 재테스트
+import { autoSpamTestWithRegenerate } from './spam-test-queue';
+import { generateMessages } from '../services/ai';
 
 // ════════════════════════════════════════════════════════════════════
 // 타입
@@ -39,7 +43,7 @@ import { spamTestWithRetry, isAutoSendAllowed, recordAdminStopLearning } from '.
 
 export type OperatorSchedule = 'daily' | 'weekly' | 'monthly';
 export type OperatorStatus = 'active' | 'paused' | 'archived';
-export type ProposalStatus = 'pending' | 'approved' | 'rejected' | 'auto_executed' | 'expired';
+export type ProposalStatus = 'pending' | 'approved' | 'rejected' | 'auto_executed' | 'expired' | 'admin_review';
 
 export interface CreateOperatorInput {
   companyId: string;
@@ -447,48 +451,79 @@ export async function generateProposalForOperator(operatorId: string): Promise<O
     }
   }
 
-  // 9. ★ D212+ 정책 (2026-05-23 Harold 명시): 스팸필터테스트 자동 통합 본질
-  //    - 통과 X 영역 = 발송 자동 차단 (status='spam_blocked')
-  //    - 통과 영역 = 정책 분기 본질 (daily 검증 / weekly·monthly 옵트아웃)
+  // 9. ★ D227+ 스팸 안전망 격상 — 실제 테스트폰 발송 → 차단 시 AI 재생성(2회) → 재테스트 → 끝내 실패 시 담당자 검토.
+  //    auto-campaign-worker와 동일한 검증된 자산(autoSpamTestWithRegenerate + generateMessages) 재사용.
+  //    callbackNumber 없으면(SMS 발신번호 미설정) 테스트 불가 → 스킵(기존 pending 흐름 유지).
+  const channelForSpam = (orchestratorResult.channel?.recommended || 'SMS').toUpperCase();
+  const callbackForSpam = String(companyInfo.callback || companyInfo.callback_number || ctx.reject_number || '').trim();
   const bestMessage = messages[0] ? String(messages[0].body || messages[0].message || '') : '';
-  if (bestMessage) {
+  const bestSubject = messages[0] ? String(messages[0].subject || '') : '';
+  if (bestMessage && callbackForSpam && channelForSpam !== '카카오' && channelForSpam !== 'KAKAO') {
     try {
-      const spamResult = await spamTestWithRetry(
-        proposalRes.rows[0].id,
-        bestMessage,
-        operator.maxSpamRetries || 3,
-        operator.spamScoreThreshold || 30,
-      );
+      const spamResult = await autoSpamTestWithRegenerate({
+        companyId: operator.companyId,
+        userId: operator.createdBy || operator.companyId,
+        callbackNumber: callbackForSpam,
+        messageType: (channelForSpam === 'LMS' || channelForSpam === 'MMS' ? channelForSpam : 'SMS') as 'SMS' | 'LMS' | 'MMS',
+        subject: bestSubject || undefined,
+        variants: [{ variantId: 'A', messageText: bestMessage, subject: bestSubject || undefined }],
+        isAd: !!isAd,
+        rejectNumber: ctx.reject_number || undefined,
+        maxRetries: 2,  // ★ Harold 2026-05-31: AI 재생성 2회
+        // 차단 시 AI 재작성 (Opus) — buildSpamRegeneratePrompt: 목표 유지 + 구체 혜택 생성 금지
+        regenerateCallback: async () => {
+          try {
+            const regen = await generateMessages(
+              buildSpamRegeneratePrompt(operator.objective),
+              { count: recipientCount, segmentName: orchestratorResult.target?.suggestedName || operator.name, criteria: orchestratorResult.target?.criteria || '' } as any,
+              { channel: channelForSpam, isAd: !!isAd, rejectNumber: ctx.reject_number || undefined, model: 'opus', companyId: operator.companyId },
+            );
+            const nv = regen.variants?.[0] as any;
+            if (nv) return { messageText: String(nv.message_text || nv.sms_text || nv.lms_text || nv.body || ''), subject: nv.subject };
+            return null;
+          } catch { return null; }
+        },
+      });
 
-      // 스팸테스트 결과 영역 저장
+      const variantResult = spamResult.variants[0];
+      const finalResult = (variantResult?.spamResult || 'failed') as 'pass' | 'blocked' | 'failed' | 'timeout';
+      const regenCount = variantResult?.regenerateCount || 0;
+
+      // 재생성된 문안이 통과했으면 proposal_json의 best 메시지를 교체 (실제 발송될 문안 = 통과 문안)
+      if (variantResult?.regenerated && variantResult.messageText) {
+        try {
+          const pj = orchestratorResult;
+          if (pj.messages?.[0]) {
+            pj.messages[0].body = variantResult.messageText;
+            if (variantResult.subject) pj.messages[0].subject = variantResult.subject;
+          }
+          await query(`UPDATE operator_proposals SET proposal_json = $2::jsonb WHERE id = $1::uuid`,
+            [proposalRes.rows[0].id, JSON.stringify(pj)]);
+        } catch (e: any) { console.warn('[ContinuousOperator] 재생성 문안 반영 skip:', e?.message); }
+      }
+
+      // 스팸 결과 저장 + 상태 결정 (decideSpamOutcome 순수 정책)
+      const outcome = decideSpamOutcome(finalResult, regenCount);
       await query(
         `UPDATE operator_proposals SET
-           spam_test_status = $2,
-           spam_test_score = $3,
-           spam_test_retry_count = $4,
-           spam_test_reasoning = $5,
-           updated_at = NOW()
+           spam_test_status = $2, spam_test_retry_count = $3, spam_test_reasoning = $4, updated_at = NOW()
          WHERE id = $1::uuid`,
-        [
-          proposalRes.rows[0].id,
-          spamResult.status,
-          spamResult.score,
-          spamResult.retryCount,
-          spamResult.reasoning,
-        ],
+        [proposalRes.rows[0].id, finalResult, regenCount, outcome.reason],
       );
 
-      if (spamResult.status === 'failed') {
-        // 스팸 통과 X = 발송 차단 + status='spam_blocked'
+      if (outcome.status === 'admin_review') {
+        // 끝내 통과 X → 담당자 검토 대기 (자동 발송 차단, 자동 폐기 X)
         await query(
-          `UPDATE operator_proposals SET status = 'spam_blocked', auto_execute_reason = $2
+          `UPDATE operator_proposals SET status = 'admin_review', auto_executed = false, auto_execute_reason = $2
            WHERE id = $1::uuid`,
-          [proposalRes.rows[0].id, `스팸필터 통과 X — ${spamResult.reasoning}`],
+          [proposalRes.rows[0].id, outcome.reason],
         );
-        console.warn(`[ContinuousOperator] ${operator.name} 스팸필터 통과 X — 발송 자동 차단`);
+        console.warn(`[ContinuousOperator] ${operator.name} 스팸 미통과 (재생성 ${regenCount}회) → 담당자 검토 대기`);
+      } else {
+        console.log(`[ContinuousOperator] ${operator.name} 스팸 통과 (재생성 ${regenCount}회)`);
       }
     } catch (err: any) {
-      console.warn(`[ContinuousOperator] 스팸테스트 영역 오류 (skip):`, err?.message);
+      console.warn(`[ContinuousOperator] 스팸테스트 오류 (skip):`, err?.message);
     }
   }
 
@@ -628,7 +663,12 @@ export async function listProposals(
     [companyId]
   );
 
-  const statusFilter = status === 'all' ? '' : `AND p.status = '${status}'`;
+  // ★ D227+ pending 조회 시 admin_review(스팸 미통과 담당자 검토 대기)도 함께 노출 — 담당자가 한 탭에서 처리
+  const statusFilter = status === 'all'
+    ? ''
+    : status === 'pending'
+      ? `AND p.status IN ('pending', 'admin_review')`
+      : `AND p.status = '${status}'`;
   const result = await query(
     `SELECT p.*, o.name AS operator_name, o.objective AS operator_objective
      FROM operator_proposals p
@@ -651,12 +691,12 @@ export async function approveProposal(
        status = 'approved',
        reviewed_by = $3::uuid,
        reviewed_at = NOW()
-     WHERE id = $1::uuid AND company_id = $2::uuid AND status = 'pending'
+     WHERE id = $1::uuid AND company_id = $2::uuid AND status IN ('pending', 'admin_review')
      RETURNING *`,
     [proposalId, companyId, userId]
   );
   if (result.rows.length === 0) {
-    return { proposal: null as any, ok: false, reason: 'pending 상태가 아니거나 권한이 없는 제안서입니다.' };
+    return { proposal: null as any, ok: false, reason: '승인 가능한 상태가 아니거나 권한이 없는 제안서입니다.' };
   }
 
   // 통계 갱신
@@ -680,7 +720,7 @@ export async function rejectProposal(
        status = 'rejected',
        reviewed_by = $3::uuid,
        reviewed_at = NOW()
-     WHERE id = $1::uuid AND company_id = $2::uuid AND status = 'pending'
+     WHERE id = $1::uuid AND company_id = $2::uuid AND status IN ('pending', 'admin_review')
      RETURNING id, operator_id`,
     [proposalId, companyId, userId]
   );

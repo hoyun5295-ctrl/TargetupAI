@@ -26,13 +26,16 @@ export interface TopImpactMemory {
   createdAt: string;
 }
 
-const TYPE_META: Record<MemoryType, { label: string; gradient: string; badgeBg: string; badgeText: string }> = {
+const TYPE_META: Record<string, { label: string; gradient: string; badgeBg: string; badgeText: string }> = {
   success_pattern:        { label: '성공 패턴',          gradient: 'from-emerald-400 to-teal-500',  badgeBg: 'bg-emerald-500/20',  badgeText: 'text-emerald-200' },
   customer_insight:       { label: '고객 인사이트',      gradient: 'from-sky-400 to-cyan-500',      badgeBg: 'bg-sky-500/20',      badgeText: 'text-sky-200' },
   brand_tone_evolution:   { label: '브랜드 톤',          gradient: 'from-violet-400 to-purple-500', badgeBg: 'bg-violet-500/20',   badgeText: 'text-violet-200' },
   channel_performance:    { label: '채널 성과',          gradient: 'from-amber-400 to-orange-500',  badgeBg: 'bg-amber-500/20',    badgeText: 'text-amber-200' },
   compliance_learning:    { label: '컴플라이언스 학습',  gradient: 'from-rose-400 to-pink-500',     badgeBg: 'bg-rose-500/20',     badgeText: 'text-rose-200' },
 };
+
+// ★ D227+ defense-in-depth — 미지의 memory_type이 와도 전체 화면 blank(크래시) 차단
+const FALLBACK_META = { label: '학습', gradient: 'from-slate-400 to-slate-500', badgeBg: 'bg-white/10', badgeText: 'text-white/70' };
 
 interface Props {
   memory: TopImpactMemory;
@@ -42,7 +45,7 @@ interface Props {
 }
 
 export default function TopImpactCard({ memory, rank, canDelete, onDelete }: Props) {
-  const meta = TYPE_META[memory.memoryType];
+  const meta = TYPE_META[memory.memoryType] || FALLBACK_META;
   const lastUsed = new Date(memory.lastAccessedAt);
   const daysAgo = Math.max(0, Math.floor((Date.now() - lastUsed.getTime()) / 86_400_000));
   const lastUsedLabel = daysAgo === 0 ? '오늘 사용' : `${daysAgo}일 전 사용`;

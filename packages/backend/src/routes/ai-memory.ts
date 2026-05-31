@@ -63,6 +63,7 @@ router.get('/overview', async (req: Request, res: Response) => {
               COALESCE(usage_count, 0)::int AS usage_count
        FROM ai_company_memory
        WHERE company_id = $1::uuid
+         AND memory_type NOT IN ('representative_message', 'brand_guideline')
        ORDER BY COALESCE(usage_count, 0) DESC, importance DESC, last_accessed_at DESC
        LIMIT 1`,
       [companyId],
@@ -198,6 +199,8 @@ ${memoryContext}
 
     const lowerQ = q.toLowerCase();
     const related = allMemories
+      // ★ D227+ Brand Voice 2 타입은 학습 메모리 5종이 아니라 별도 데이터 — 관련 메모리 표시에서 제외 (프론트 TYPE_META 미존재 크래시 차단)
+      .filter((m) => m.memoryType !== 'representative_message' && m.memoryType !== 'brand_guideline')
       .map((m) => {
         const keyMatch = m.memoryKey.toLowerCase().includes(lowerQ.slice(0, 20)) ? 5 : 0;
         const valueMatch = m.memoryValue.toLowerCase().includes(lowerQ.slice(0, 20)) ? 3 : 0;
@@ -248,6 +251,7 @@ router.get('/top-impact', async (req: Request, res: Response) => {
               last_accessed_at, created_at, updated_at
        FROM ai_company_memory
        WHERE company_id = $1::uuid
+         AND memory_type NOT IN ('representative_message', 'brand_guideline')
        ORDER BY COALESCE(usage_count, 0) DESC, importance DESC, last_accessed_at DESC
        LIMIT $2`,
       [companyId, limit],

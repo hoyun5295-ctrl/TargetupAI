@@ -76,13 +76,16 @@ interface SearchResponse {
 // 상수 — 5 타입 메타
 // ════════════════════════════════════════════════════════════════════
 
-const TYPE_META: Record<MemoryType, { label: string; color: string; gradient: string }> = {
+const TYPE_META: Record<string, { label: string; color: string; gradient: string }> = {
   success_pattern:      { label: '성공 패턴',         color: '#34d399', gradient: 'from-emerald-400 to-teal-500' },
   channel_performance:  { label: '채널 성과',         color: '#fbbf24', gradient: 'from-amber-400 to-orange-500' },
   customer_insight:     { label: '고객 인사이트',     color: '#38bdf8', gradient: 'from-sky-400 to-cyan-500' },
   brand_tone_evolution: { label: '브랜드 톤',         color: '#a78bfa', gradient: 'from-violet-400 to-purple-500' },
   compliance_learning:  { label: '컴플라이언스 학습', color: '#fb7185', gradient: 'from-rose-400 to-pink-500' },
 };
+
+// ★ D227+ defense-in-depth — 미지의 memory_type이 와도 전체 화면 blank(크래시) 차단
+const FALLBACK_TYPE_META = { label: '학습', color: '#94a3b8', gradient: 'from-slate-400 to-slate-500' };
 
 const TYPE_ORDER: MemoryType[] = [
   'success_pattern',
@@ -764,7 +767,7 @@ export default function AiMemoryPage() {
                 <div className="text-[10px] text-white/40 mb-2">관련 학습 {naturalResult.related.length}건</div>
                 <div className="space-y-1.5">
                   {naturalResult.related.map((m) => {
-                    const meta = TYPE_META[m.memoryType];
+                    const meta = TYPE_META[m.memoryType] || FALLBACK_TYPE_META;
                     return (
                       <div key={m.id} className="p-2 bg-white/5 border border-white/10 rounded-lg flex items-start gap-2">
                         <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium bg-gradient-to-r ${meta.gradient} text-white flex-shrink-0`}>
@@ -1047,7 +1050,7 @@ export default function AiMemoryPage() {
                     </div>
                     <div className="space-y-1.5 max-h-44 overflow-y-auto">
                       {detailedStats.recentTimeline.map((m) => {
-                        const meta = TYPE_META[m.memoryType];
+                        const meta = TYPE_META[m.memoryType] || FALLBACK_TYPE_META;
                         const last = new Date(m.lastAccessedAt);
                         const daysAgo = Math.max(0, Math.floor((Date.now() - last.getTime()) / 86_400_000));
                         return (
