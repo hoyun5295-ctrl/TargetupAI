@@ -36,6 +36,15 @@ import {
 } from './ai';
 // ★ D227+ 성과 추정 실데이터 전환 — calculateCostROI(하드코딩) 대체
 import { estimatePerformance } from '../utils/operator-performance-estimator';
+// ★ D227+ AI 성과 분석가 sub-agent — 통계 결과 위에 진단·전략·리스크 자연어 (숫자 생성 X)
+import { extractJsonFromAiText } from '../utils/ai-json';
+import {
+  buildInsightPrompt,
+  normalizeInsight,
+  buildInsufficientInsight,
+  InsightInput,
+  InsightResult,
+} from '../utils/performance-insight';
 
 // ★ D171-D (2026-05-19): 진정 Orchestrator AI 전용 Anthropic 인스턴스 (Tool Use 직접 호출)
 const orchestratorAnthropic = new Anthropic({
@@ -110,7 +119,10 @@ export interface OrchestratorResult {
       label: string;
       confidence: string;
       notes: string[];
+      eventWindowDays?: number;
+      gradeBreakdown?: Array<{ grade: string; count: number; conversionRate: number; expectedConversions: number; expectedRevenue: number; source: string }>;
     };
+    insight?: InsightResult;
   };
   meta: {
     usePersonalization: boolean;
@@ -386,6 +398,24 @@ export async function orchestrate(ctx: AgentContext): Promise<OrchestratorResult
   });
   mark('costRoi', costStart);
 
+  // ★ D227+ 성과 인사이트 sub-agent (Opus) — 통계 숫자 위에 진단·전략·리스크 (숫자 생성 X)
+  const insight = await generatePerformanceInsight({
+    level: est.basis.level,
+    companyName: String(ctx.companyInfo?.name || ctx.companyInfo?.company_name || '고객사'),
+    objective: ctx.objective,
+    channel: targetResult.recommended_channel || 'SMS',
+    targetCount: estimatedCount,
+    expectedConversions: est.performance.expectedConversions,
+    conversionRate: est.performance.conversionRate,
+    expectedRevenue: est.performance.expectedRevenue,
+    estimatedCost: est.cost.estimated,
+    multiple: est.cost.estimated > 0 ? est.performance.expectedRevenue / est.cost.estimated : 0,
+    eventWindowDays: est.basis.eventWindowDays,
+    confidence: est.basis.confidence,
+    gradeBreakdown: est.basis.gradeBreakdown || [],
+    basisLabel: est.basis.label,
+  }, ctx.companyId);
+
   return {
     target: {
       count: estimatedCount,
@@ -408,7 +438,7 @@ export async function orchestrate(ctx: AgentContext): Promise<OrchestratorResult
     },
     compliance,
     cost: est.cost,
-    performance: { ...est.performance, basis: est.basis },
+    performance: { ...est.performance, basis: est.basis, insight },
     meta: {
       usePersonalization: !!targetResult.use_personalization,
       personalizationVars: targetResult.personalization_vars || [],
@@ -809,6 +839,24 @@ ${memoryContext}
   });
   mark('costRoi', costStart);
 
+  // ★ D227+ 성과 인사이트 sub-agent (Opus) — 통계 숫자 위에 진단·전략·리스크 (숫자 생성 X)
+  const insight = await generatePerformanceInsight({
+    level: est.basis.level,
+    companyName: String(ctx.companyInfo?.name || ctx.companyInfo?.company_name || '고객사'),
+    objective: ctx.objective,
+    channel: targetResult.recommended_channel || 'SMS',
+    targetCount: estimatedCount,
+    expectedConversions: est.performance.expectedConversions,
+    conversionRate: est.performance.conversionRate,
+    expectedRevenue: est.performance.expectedRevenue,
+    estimatedCost: est.cost.estimated,
+    multiple: est.cost.estimated > 0 ? est.performance.expectedRevenue / est.cost.estimated : 0,
+    eventWindowDays: est.basis.eventWindowDays,
+    confidence: est.basis.confidence,
+    gradeBreakdown: est.basis.gradeBreakdown || [],
+    basisLabel: est.basis.label,
+  }, ctx.companyId);
+
   return {
     target: {
       count: estimatedCount,
@@ -831,7 +879,7 @@ ${memoryContext}
     },
     compliance,
     cost: est.cost,
-    performance: { ...est.performance, basis: est.basis },
+    performance: { ...est.performance, basis: est.basis, insight },
     meta: {
       usePersonalization: !!targetResult.use_personalization,
       personalizationVars: targetResult.personalization_vars || [],
@@ -843,4 +891,30 @@ ${memoryContext}
       aiDecisionTrace: trace,
     },
   };
+}
+
+// ============================================================
+// ★ D227+ 성과 인사이트 Sub-agent (Opus) — 통계 결과를 받아 진단·전략·리스크를 자연어로 생성.
+//   숫자는 통계가 만든 것만 인용 (buildInsightPrompt의 system 가드 + normalizeInsight 정규화).
+//   데이터 부족(insufficient_data) → AI 호출 스킵 + 데이터 연동 안내.
+//   AI 실패 → graceful degrade (빈 인사이트, 통계는 그대로 표시, 발송 차단 X).
+// ============================================================
+async function generatePerformanceInsight(input: InsightInput, companyId?: string): Promise<InsightResult> {
+  if (input.level === 'insufficient_data') return buildInsufficientInsight();
+  try {
+    const { system, userMessage } = buildInsightPrompt(input);
+    const text = await callAIWithFallback({
+      system,
+      userMessage,
+      maxTokens: 1200,
+      temperature: 0.5,
+      model: 'opus',
+      companyId,
+      source: 'performance-insight',
+    });
+    return normalizeInsight(extractJsonFromAiText(text));
+  } catch (e: any) {
+    console.log('[performance-insight] AI skip:', e?.message || e);
+    return { diagnosis: '', insights: [], strategy: [], risks: [], generated: false };
+  }
 }

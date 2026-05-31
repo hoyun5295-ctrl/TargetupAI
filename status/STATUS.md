@@ -107,17 +107,23 @@
 
 ---
 
-### 🚀 D227+ 2026-05-31 세션 종결 — 장바구니 리커버리 토대 + AI Operator 본문 0 bytes 사고 정정 + 3원칙 영구 룰
+### 🚀 D227+ 2026-05-31 세션 종결 — 장바구니 리커버리 토대 + AI Operator 본문 0 bytes 정정 + 3원칙 룰 + 성과추정 재설계도
 
-> **상태: 코드 종결 + 배포 완료. 다음 = 배포 후 실측.**
+> **★★★ 다음 세션 진입 = `docs/superpowers/specs/2026-06-01-operator-performance-data-driven-redesign.md` 정독 → 성과 추정 완전 데이터 기반 구현 (구현 후 spec 삭제) ★★★**
 >
-> 1. **장바구니 리커버리 토대** — SDK `/ingest` 정규화 적재(없는 event_type/payload 컬럼 INSERT → event_name/customer_id 실재 컬럼 사고 정정, D226+ 이후 브라우저 수집 전건 503이던 것 복구) + 익명→회원 30일 소급 + `data-hjl-key` 스니펫 자동 init(없던 코드 신설 — 스니펫만으론 수집 0이던 격차) + cart_add 표준 이벤트 검증 + 메시지 상품 노출(`{{ cart.* }}`) + `app.hanjul.ai/sdk/v0.3.5` 정적 서빙(CDN 미구축 대체, company-frontend public) + 설치 가이드(고도몰/자사몰/Cafe24). Cafe24 회원 식별 = 사업자 인증완료 후 앱(Service Key) 트랙 = v0.4.5.
-> 2. **AI Operator 본문 0 bytes 사고 정정 (핵심 BM)** — 근본(PM2 로그 확정): JSON 파싱 취약(코드펜스 없이 설명문 혼입 시 SyntaxError → fallback) + fallback 필드 미스매치(sms_text/lms_text ↔ orchestrator가 읽는 message_text)로 본문 0 bytes. D225 Brand Voice few-shot이 방아쇠. 3층 fix: `utils/ai-json.ts` 안전 파서 CT 신설(ai.ts 인라인 파싱 5곳 교체) + fallback message_text 정정 + 임의 할인 수치 제거(placeholder, feedback_ai_no_arbitrary_benefit 정합) + brand-voice-prompt.ts JSON 강제 재확인.
-> 3. **3원칙 영구 룰 신설** — MEMORY.md 0번 원칙 (자가진단 + 클로드 원칙 + 슈퍼파워즈 스킬 활용). 상세 = memory/feedback_three_principles_default.md.
+> **배포 완료 (1·2·3):**
+> 1. **장바구니 리커버리 토대** — SDK `/ingest` 정규화 적재(없는 event_type/payload 컬럼 INSERT → event_name/customer_id 실재 컬럼 사고 정정, D226+ 이후 브라우저 수집 전건 503이던 것 복구) + 익명→회원 30일 소급 + `data-hjl-key` 스니펫 자동 init + cart_add 표준 이벤트 검증 + 메시지 상품 노출(`{{ cart.* }}`) + `app.hanjul.ai/sdk/v0.3.5` 정적 서빙 + 설치 가이드. Cafe24 회원 식별 = 사업자 인증완료 후 v0.4.5 앱 트랙.
+> 2. **AI Operator 본문 0 bytes 사고 정정 (핵심 BM)** — 근본: JSON 파싱 취약 + fallback 필드 미스매치. 3층 fix: `utils/ai-json.ts` 안전 파서 CT(ai.ts 5곳 교체) + fallback message_text 정정 + 임의 할인 placeholder + brand-voice-prompt JSON 강제. 배포 후 본문 정상 노출 확인됨.
+> 3. **3원칙 영구 룰** — MEMORY.md 0번 원칙 (자가진단 + 클로드 원칙 + 슈퍼파워즈). 상세 = memory/feedback_three_principles_default.md.
 >
-> **변경 파일**: backend `services/ai.ts` + `utils/ai-json.ts`(신규) + `utils/brand-voice-prompt.ts` + `utils/cdp-events.ts` + `routes/cdp.ts` + `utils/journey-executor.ts` / sdk-js `auto-capture/index.ts` + `events.ts`(신규) + `auto-init.ts`(신규) + 테스트 / frontend `CdpSettingsPage.tsx` / company-frontend `public/sdk/v0.3.5/` / docs `sdk/install-guide.md`. backend tsc 0 + sdk vitest 59/59 + 안전 파서 8/8.
+> **미배포 / 다음 세션 재설계 (4) — 성과 추정 산식:**
+> 4. AI Operator 예상 성과가 옛 하드코딩(전환 0.8% × 객단가 5만)으로 "VIP 1301명 매출 50만원" 비현실 → 이번 세션에 객단가 실측 + 구매력 모델로 여러 차례 정정했으나 **여전히 임의 상수(CVR 상한 10% / uplift 1.4 / window 3일) 잔존 = 하드코딩 룰 위반**. ROI 38,950% 등 포화. **로컬 코드만 변경, 미배포.** 다음 세션에 spec 기반 완전 재설계로 한 번에 구현+배포.
+>    - 재설계 핵심(spec): 등급별 과거 실측(cdp_events.purchase + customers.grade + campaigns.target_filter) 우선 → 개인별 구매주기(created_at÷purchase_count 포아송) 보완 → 둘 다 부족 시 'insufficient_data' 안내. 임의 상수 0개. ltv_score 전부 0 = 사용 금지 확정.
+>    - 현재 estimator 로컬 파일(`utils/operator-performance-estimator.ts` + orchestrator 2곳 교체 + AiOperatorPage basis)은 spec 구현 시 전면 대체 예정. backend tsc 0 / 테스트 7/7 (단 산식 자체가 미완).
 >
-> **다음 할일**: 배포 후 실측 (CDP 설정 키 발급 + 수집 도메인 등록 + AI Operator 같은 입력 "VIP 30% 할인"으로 본문 채워짐 재확인 + `/install-status` pageview 수신) → Cafe24 사업자 인증완료 시 v0.4.5 앱 트랙 진입.
+> **변경 파일(배포분 1·2·3)**: backend `services/ai.ts` + `utils/ai-json.ts`(신규) + `brand-voice-prompt.ts` + `cdp-events.ts` + `routes/cdp.ts` + `journey-executor.ts` / sdk-js `auto-capture/index.ts` + `events.ts`·`auto-init.ts`(신규) / frontend `CdpSettingsPage.tsx` / company-frontend `public/sdk/v0.3.5/` / docs `sdk/install-guide.md`.
+>
+> **다음 할일 우선순위**: ① 성과 추정 완전 재설계 구현 (spec 정독 → Task 0~7) → ② 배포 후 실측 (VIP 입력으로 등급별 실측 전환율 노출 확인) → ③ Cafe24 인증완료 시 v0.4.5.
 
 ---
 
