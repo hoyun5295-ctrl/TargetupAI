@@ -10,6 +10,8 @@ import { cleanLeftoverVars } from '../utils/messageUtils';
 import { CompanyDataProfile, formatProfileForAiPrompt } from '../utils/company-data-profile';
 // ★ D225+ (2026-05-28 Harold 명시): Brand Voice Learning — 회사별 LMS 대표 문안 5건 + 자동 가이드라인 자동 주입.
 import { buildSystemPromptWithBrandVoice } from '../utils/brand-voice-prompt';
+// ★ D227+ AI 응답 JSON 안전 추출 (코드펜스 없이 설명문 혼입 방어 — 본문 0 bytes 사고 정정)
+import { extractJsonFromAiText } from '../utils/ai-json';
 
 if (!process.env.ANTHROPIC_API_KEY) console.warn('[AI] ANTHROPIC_API_KEY not configured — Claude AI 기능 비활성 상태');
 if (!process.env.OPENAI_API_KEY) console.warn('[AI] OPENAI_API_KEY not configured — OpenAI 기능 비활성 상태');
@@ -1133,18 +1135,8 @@ ${usePersonalization ? `- 사용할 개인화 변수: ${personalizationTags}
       companyId: extraContext?.companyId,
     });
 
-    let jsonStr = text;
-    if (text.includes('```json')) {
-      const start = text.indexOf('```json') + 7;
-      const end = text.indexOf('```', start);
-      jsonStr = text.slice(start, end).trim();
-    } else if (text.includes('```')) {
-      const start = text.indexOf('```') + 3;
-      const end = text.indexOf('```', start);
-      jsonStr = text.slice(start, end).trim();
-    }
-
-    const result = JSON.parse(jsonStr) as AIRecommendResult;
+    // ★ D227+ 안전 파싱 — 코드펜스 없이 설명문 혼입돼도 JSON 추출 (CT ai-json). 본문 0 bytes 사고 정정.
+    const result = extractJsonFromAiText(text) as AIRecommendResult;
     
     // ★ 생성된 메시지에서 잘못된 변수 검증 + 자동 제거 (안전장치)
     if (result.variants) {
@@ -1522,18 +1514,8 @@ ${varCatalogPrompt}
       model: options?.model, // ★ D170+ (Harold 명시): AI Operator 호출 시 'opus' 전달, 기본 호출(/recommend-target)은 default sonnet
     });
     
-    let jsonStr = text;
-    if (text.includes('```json')) {
-      const start = text.indexOf('```json') + 7;
-      const end = text.indexOf('```', start);
-      jsonStr = text.slice(start, end).trim();
-    } else if (text.includes('```')) {
-      const start = text.indexOf('```') + 3;
-      const end = text.indexOf('```', start);
-      jsonStr = text.slice(start, end).trim();
-    }
-
-    const result = JSON.parse(jsonStr);
+    // ★ D227+ 안전 파싱 — 코드펜스 없이 설명문 혼입돼도 JSON 추출 (CT ai-json).
+    const result = extractJsonFromAiText(text);
     
     // ★ AI가 반환한 personalization_vars 검증 — available_vars에 없는 것 제거
     let aiPersonalizationVars = result.personalization_vars || personalizationVars;
@@ -1588,41 +1570,72 @@ ${varCatalogPrompt}
 
 function getFallbackVariants(extraContext?: any): AIRecommendResult {
   const brand = extraContext?.brandName || '브랜드';
-  const product = extraContext?.productName || '상품';
-  const discount = extraContext?.discountRate ? `${extraContext.discountRate}%` : '특별';
+  const channel = (extraContext?.channel || 'SMS').toUpperCase();
+  const isKakao = channel === '카카오' || channel === 'KAKAO';
+
+  // ★ D227+ 본문 0 bytes 사고 정정:
+  //   1) orchestrator/worker는 variant.message_text를 읽는다 → fallback도 message_text 채움 (옛 sms_text/lms_text 미스매치 = 본문 빈 채 노출 사고).
+  //   2) feedback_ai_no_arbitrary_benefit: 구체 혜택(%/원/할인 수치) 임의 생성 절대 금지.
+  //      AI 호출 실패 시 비상 골격은 혜택 placeholder([혜택 내용을 입력해주세요])만 두고, 회사 admin이 직접 작성.
+  const benefitPlaceholder = '[혜택 내용을 입력해주세요]';
+
+  const buildBody = (head: string, tail: string): string => {
+    if (channel === 'SMS') {
+      // SMS는 짧게 — placeholder + CTA 한 줄
+      return `[${brand}] ${head} ${benefitPlaceholder} 자세히 보기▶`;
+    }
+    // LMS/MMS/카카오 — 풍성하게 (줄바꿈 골격)
+    return `[${brand}] ${head}\n\n${benefitPlaceholder}\n\n${tail}`;
+  };
+
+  const variants: MessageVariant[] = [
+    {
+      variant_id: 'A',
+      variant_name: '혜택 직접형',
+      concept: '혜택 직접 전달',
+      sms_text: '',
+      lms_text: '',
+      score: 70,
+    },
+    {
+      variant_id: 'B',
+      variant_name: '긴급/한정',
+      concept: '마감 임박 긴급함 강조',
+      sms_text: '',
+      lms_text: '',
+      score: 65,
+    },
+    {
+      variant_id: 'C',
+      variant_name: '재방문 유도',
+      concept: '재방문 유도',
+      sms_text: '',
+      lms_text: '',
+      score: 60,
+    },
+  ];
+
+  const bodies = [
+    buildBody('안내드립니다.', '지금 바로 확인해보세요.'),
+    buildBody('마감이 임박했습니다.', '서둘러 확인해보세요.'),
+    buildBody('오랜만이에요. 다시 만나 반가워요.', '다시 찾아주시면 감사하겠습니다.'),
+  ];
+
+  variants.forEach((v, i) => {
+    const body = bodies[i];
+    // orchestrator/worker가 읽는 표준 필드 (계약 일치 — 본문 0 bytes 차단)
+    (v as any).message_text = body;
+    // 옛 소비처 호환 (auto-campaign-worker fallback 체인)
+    v.sms_text = body;
+    v.lms_text = body;
+    if (isKakao) (v as any).kakao_text = body;
+    if (channel !== 'SMS') (v as any).subject = `[${brand}] 안내`;
+  });
 
   return {
-    variants: [
-      {
-        variant_id: 'A',
-        variant_name: '혜택 직접형',
-        concept: '할인 혜택 직접 전달',
-        sms_text: `[${brand}] ${product} ${discount} 할인! 지금 확인▶`,
-        lms_text: `[${brand}] ${product} ${discount} 할인\n\n지금 바로 확인하세요!\n\n▶ 바로가기`,
-        kakao_text: `${brand}에서 알려드려요 🎉\n\n${product} ${discount} 할인 이벤트가 진행 중이에요!\n\n지금 바로 확인해보세요 ✨`,
-        score: 70,
-      },
-      {
-        variant_id: 'B',
-        variant_name: '긴급/한정',
-        concept: '마감 임박 긴급함 강조',
-        sms_text: `[${brand}] 마감임박! ${product} ${discount} 할인▶`,
-        lms_text: `[${brand}] 마감 임박!\n\n${product} ${discount} 할인\n\n서두르세요!\n\n▶ 바로가기`,
-        kakao_text: `⏰ 마감 임박!\n\n${brand} ${product} ${discount} 할인이 곧 종료됩니다.\n\n서두르세요!`,
-        score: 65,
-      },
-      {
-        variant_id: 'C',
-        variant_name: '재방문 유도',
-        concept: '휴면 고객 재활성화',
-        sms_text: `[${brand}] 오랜만이에요! ${product} ${discount} 할인▶`,
-        lms_text: `[${brand}] 오랜만이에요!\n\n다시 만나 반가워요!\n${product} ${discount} 할인\n\n▶ 바로가기`,
-        kakao_text: `오랜만이에요! 💝\n\n${brand}에서 다시 만나 반가워요.\n${product} ${discount} 할인으로 준비했어요.\n\n다시 만나러 와주실 거죠?`,
-        score: 60,
-      },
-    ],
+    variants,
     recommendation: 'A',
-    recommendation_reason: '기본 추천입니다.',
+    recommendation_reason: 'AI 호출 일시 오류로 기본 골격을 제공합니다. 혜택 내용을 직접 입력해주세요.',
   };
 }
 
@@ -1860,18 +1873,8 @@ export async function parseBriefing(briefing: string, companyId?: string): Promi
       temperature: 0.3,
     });
 
-    let jsonStr = text;
-    if (text.includes('```json')) {
-      const start = text.indexOf('```json') + 7;
-      const end = text.indexOf('```', start);
-      jsonStr = text.slice(start, end).trim();
-    } else if (text.includes('```')) {
-      const start = text.indexOf('```') + 3;
-      const end = text.indexOf('```', start);
-      jsonStr = text.slice(start, end).trim();
-    }
-
-    const result = JSON.parse(jsonStr);
+    // ★ D227+ 안전 파싱 — 코드펜스 없이 설명문 혼입돼도 JSON 추출 (CT ai-json).
+    const result = extractJsonFromAiText(text);
     return {
       promotionCard: result.promotionCard || {
         name: '', benefit: '', condition: '', period: '', target: '', couponCode: '', extra: '',
@@ -2111,18 +2114,8 @@ ${channel} 채널에 최적화된 3가지 맞춤 문안(A/B/C)을 생성해주�
       temperature: 0.7,
     });
 
-    let jsonStr = text;
-    if (text.includes('```json')) {
-      const start = text.indexOf('```json') + 7;
-      const end = text.indexOf('```', start);
-      jsonStr = text.slice(start, end).trim();
-    } else if (text.includes('```')) {
-      const start = text.indexOf('```') + 3;
-      const end = text.indexOf('```', start);
-      jsonStr = text.slice(start, end).trim();
-    }
-
-    const result = JSON.parse(jsonStr);
+    // ★ D227+ 안전 파싱 — 코드펜스 없이 설명문 혼입돼도 JSON 추출 (CT ai-json).
+    const result = extractJsonFromAiText(text);
 
     // 안전장치: 광고표기 자동 제거 + 변수 검증 + SMS 바이트 체크
     if (result.variants) {
@@ -2345,18 +2338,8 @@ ${JSON.stringify(performanceData, null, 2)}
       temperature: 0.3,
     });
 
-    let jsonStr = text;
-    if (text.includes('```json')) {
-      const start = text.indexOf('```json') + 7;
-      const end = text.indexOf('```', start);
-      jsonStr = text.slice(start, end).trim();
-    } else if (text.includes('```')) {
-      const start = text.indexOf('```') + 3;
-      const end = text.indexOf('```', start);
-      jsonStr = text.slice(start, end).trim();
-    }
-
-    const result = JSON.parse(jsonStr);
+    // ★ D227+ 안전 파싱 — 코드펜스 없이 설명문 혼입돼도 JSON 추출 (CT ai-json).
+    const result = extractJsonFromAiText(text);
     // ★ D142+ B1(0429 PDF B2): [브랜드] placeholder → [실제브랜드명] 후처리
     return deepReplaceBrand({
       recommended_target: result.recommended_target || { filters: {}, reasoning: '' },
