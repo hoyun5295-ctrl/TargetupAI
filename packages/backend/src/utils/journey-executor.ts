@@ -625,10 +625,10 @@ async function processExecution(exec: ExecutionRow): Promise<StepOutcome> {
   const campaignRes = await query(
     `INSERT INTO campaigns (
       company_id, campaign_name, message_type, message_content, subject, message_subject, message_template,
-      is_ad, target_count, sent_count, created_by, send_channel, callback_number, status, scheduled_at, sent_at, kakao_template_id
+      is_ad, target_count, sent_count, created_by, send_channel, callback_number, status, scheduled_at, sent_at, kakao_template_id, mms_image_paths
     ) VALUES (
       $1::uuid, $2, $3, $4, $5, $5, $4,
-      $6, 1, 1, $7::uuid, $9, $8, 'sending', NOW(), NOW(), $10::uuid
+      $6, 1, 1, $7::uuid, $9, $8, 'sending', NOW(), NOW(), $10::uuid, $11
     ) RETURNING id`,
     [
       exec.company_id,
@@ -641,6 +641,8 @@ async function processExecution(exec: ExecutionRow): Promise<StepOutcome> {
       callbackNumber,
       sendChannelForCampaign,
       isKakao && kakaoTemplateRow ? kakaoTemplateRow.id : null,  // ★ #4-a (2026-06-01): 알림톡 여정 결과 조회용 FK (results.ts:560 JOIN)
+      // ★ MMS 이미지 fix (2026-06-01): 여정 MMS도 결과·캘린더 표시 위해 mms_image_paths 컬럼 저장 (직접발송 동일 패턴)
+      (msgType === 'MMS' && step.mms_image_paths && step.mms_image_paths.length > 0) ? JSON.stringify(step.mms_image_paths) : null,
     ]
   );
   const campaignId = campaignRes.rows[0].id as string;
