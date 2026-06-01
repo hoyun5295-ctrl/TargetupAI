@@ -19,12 +19,21 @@ interface CreditTx {
   created_at: string;
 }
 
+interface CreditSummary {
+  total?: number;
+  planCredits?: number;
+  baseRemaining?: number;
+  purchased?: number;
+  monthlyUsed?: number;
+}
+
 interface Props {
   onClose: () => void;
   onGoPricing?: () => void;
+  creditInfo?: CreditSummary | null;
 }
 
-const fmt = (n: number) => Number(n || 0).toLocaleString();
+const fmt = (n: number | undefined | null) => Number(n || 0).toLocaleString();
 const fmtDate = (s: string) => {
   const d = new Date(s);
   if (isNaN(d.getTime())) return '';
@@ -35,7 +44,7 @@ const fmtDate = (s: string) => {
 const isPlus = (t: string) => t === 'grant' || t === 'purchase' || t === 'postpaid_grant';
 const isReset = (t: string) => t === 'reset';
 
-export default function CreditHistoryModal({ onClose, onGoPricing }: Props) {
+export default function CreditHistoryModal({ onClose, onGoPricing, creditInfo }: Props) {
   const [rows, setRows] = useState<CreditTx[]>([]);
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
@@ -61,7 +70,7 @@ export default function CreditHistoryModal({ onClose, onGoPricing }: Props) {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
-      <div className="w-full max-w-md overflow-hidden rounded-2xl border border-gray-100 bg-white shadow-2xl" onClick={(e) => e.stopPropagation()}>
+      <div className="w-full max-w-lg overflow-hidden rounded-2xl border border-gray-100 bg-white shadow-2xl" onClick={(e) => e.stopPropagation()}>
         {/* 헤더 */}
         <div className="flex items-center justify-between border-b border-gray-100 px-5 py-4">
           <div className="flex items-center gap-2">
@@ -69,14 +78,38 @@ export default function CreditHistoryModal({ onClose, onGoPricing }: Props) {
               <Sparkles className="h-4 w-4 text-white" />
             </div>
             <div>
-              <div className="text-sm font-bold text-gray-900">AI 크레딧 사용 이력</div>
-              <div className="text-[11px] text-gray-400">총 {fmt(total)}건</div>
+              <div className="text-sm font-bold text-gray-900">AI 크레딧</div>
+              <div className="text-[11px] text-gray-400">사용 이력 총 {fmt(total)}건</div>
             </div>
           </div>
           <button onClick={onClose} className="rounded-lg p-1.5 text-gray-400 transition hover:bg-gray-100 hover:text-gray-700">
             <X className="h-4 w-4" />
           </button>
         </div>
+
+        {/* 잔여 + 3칸 요약 (기본 제공 · 이번달 사용 · 충전) */}
+        {creditInfo && (
+          <div className="border-b border-gray-100 px-5 py-4">
+            <div className="mb-3 flex items-baseline gap-1.5">
+              <span className="text-2xl font-bold tabular-nums text-violet-700">{fmt(creditInfo.total)}</span>
+              <span className="text-sm text-gray-400">크레딧 잔여</span>
+            </div>
+            <div className="grid grid-cols-3 gap-2">
+              <div className="rounded-xl bg-violet-50 p-3 text-center">
+                <div className="text-[11px] text-gray-500">기본 제공</div>
+                <div className="mt-0.5 text-base font-bold tabular-nums text-violet-700">{fmt(creditInfo.planCredits)}</div>
+              </div>
+              <div className="rounded-xl bg-amber-50 p-3 text-center">
+                <div className="text-[11px] text-gray-500">이번달 사용</div>
+                <div className="mt-0.5 text-base font-bold tabular-nums text-amber-600">{fmt(creditInfo.monthlyUsed)}</div>
+              </div>
+              <div className="rounded-xl bg-emerald-50 p-3 text-center">
+                <div className="text-[11px] text-gray-500">충전</div>
+                <div className="mt-0.5 text-base font-bold tabular-nums text-emerald-600">{fmt(creditInfo.purchased)}</div>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* 목록 */}
         <div className="max-h-[55vh] min-h-[200px] overflow-y-auto px-2 py-2">

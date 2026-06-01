@@ -2442,7 +2442,32 @@ const campaignData = {
                 {planInfo?.plan_code !== 'FREE' && !planInfo?.max_customers && (
                   <div className="text-xs text-gray-400">정상 이용 중</div>
                 )}
+                {/* AI 크레딧 잔여 — 클릭 시 이력 모달 (카드 navigate와 분리) */}
+                {creditInfo?.creditEnabled && (creditInfo.planCredits > 0 || creditInfo.purchased > 0) && (
+                  <button
+                    onClick={(e) => { e.stopPropagation(); setShowCreditHistory(true); }}
+                    className="mt-3 flex w-full items-center justify-between border-t border-gray-100 pt-3 group"
+                  >
+                    <span className="flex items-center gap-1.5">
+                      <span className="flex h-5 w-5 items-center justify-center rounded-md bg-gradient-to-br from-violet-500 to-fuchsia-500">
+                        <Sparkles className="h-3 w-3 text-white" />
+                      </span>
+                      <span className="text-xs text-gray-400 group-hover:text-violet-600 transition-colors">AI 크레딧 잔여</span>
+                    </span>
+                    <span className="flex items-baseline gap-1">
+                      <span className="text-base font-bold text-violet-700">{Number(creditInfo.total || 0).toLocaleString()}</span>
+                      <span className="text-xs text-gray-400">크레딧</span>
+                    </span>
+                  </button>
+                )}
               </div>
+              {showCreditHistory && (
+                <CreditHistoryModal
+                  creditInfo={creditInfo}
+                  onClose={() => setShowCreditHistory(false)}
+                  onGoPricing={() => { setShowCreditHistory(false); navigate('/pricing'); }}
+                />
+              )}
 
               {/* 발송 현황 */}
               <div className="w-full sm:w-[60%] bg-white rounded-2xl p-5 border border-gray-100 shadow-sm">
@@ -2469,30 +2494,6 @@ const campaignData = {
                     <div className="text-xs text-gray-400 mt-1">총 사용금액</div>
                   </div>
                 </div>
-                {/* 종량제: AI 크레딧 잔여 (선불·후불 모두 — 잔액 현황) */}
-                {creditInfo?.creditEnabled && (creditInfo.planCredits > 0 || creditInfo.purchased > 0) && (
-                  <div className="mt-3 pt-3 border-t border-gray-100 flex items-center justify-between flex-wrap gap-2">
-                    <button onClick={() => setShowCreditHistory(true)} className="flex items-center gap-1.5 group">
-                      <span className="flex h-5 w-5 items-center justify-center rounded-md bg-gradient-to-br from-violet-500 to-fuchsia-500">
-                        <Sparkles className="h-3 w-3 text-white" />
-                      </span>
-                      <span className="text-xs text-gray-400 group-hover:text-violet-600 transition-colors">AI 크레딧 잔여</span>
-                      <span className="text-base font-bold text-violet-700">{Number(creditInfo.total || 0).toLocaleString()}</span>
-                      <span className="text-xs text-gray-400">크레딧</span>
-                    </button>
-                    <div className="flex items-center gap-3 text-xs">
-                      <span className="text-gray-500">기본 <b className="font-semibold text-violet-600">{Number(creditInfo.baseRemaining || 0).toLocaleString()}</b></span>
-                      <span className="text-gray-500">구매 <b className="font-semibold text-emerald-600">{Number(creditInfo.purchased || 0).toLocaleString()}</b></span>
-                      <span className="text-gray-500">이번달 사용 <b className="font-semibold text-amber-600">{Number(creditInfo.monthlyUsed || 0).toLocaleString()}</b></span>
-                    </div>
-                  </div>
-                )}
-                {showCreditHistory && (
-                  <CreditHistoryModal
-                    onClose={() => setShowCreditHistory(false)}
-                    onGoPricing={() => { setShowCreditHistory(false); navigate('/pricing'); }}
-                  />
-                )}
               </div>
             </div>
 
