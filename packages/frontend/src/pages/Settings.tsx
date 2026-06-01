@@ -2,7 +2,16 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../stores/authStore';
 import { formatPhoneNumber } from '../utils/formatDate';
+import {
+  Building2, Users, PhoneCall, Wallet, Clock, ArrowLeft, Trash2, Plus,
+  Save, CheckCircle2, XCircle, ChevronLeft, ChevronRight,
+} from 'lucide-react';
 
+const inputCls =
+  'w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-800 outline-none transition placeholder:text-gray-300 focus:border-violet-400 focus:ring-2 focus:ring-violet-100';
+const disabledInputCls =
+  'w-full rounded-lg border border-gray-100 bg-gray-50 px-3 py-2 text-sm text-gray-400 outline-none cursor-not-allowed';
+const labelCls = 'mb-1.5 block text-xs font-medium text-gray-500';
 
 export default function Settings() {
   const navigate = useNavigate();
@@ -16,7 +25,6 @@ export default function Settings() {
   const [callbackNumbers, setCallbackNumbers] = useState<{id: string, phone: string, label: string, is_default: boolean, store_code?: string, store_name?: string}[]>([]);
   const [callbackPage, setCallbackPage] = useState(0);
   const callbackPageSize = 5;
-
 
   // 토스트
   const [toast, setToast] = useState<{show: boolean, type: 'success' | 'error', message: string}>({show: false, type: 'success', message: ''});
@@ -106,8 +114,7 @@ export default function Settings() {
     }
   };
 
-  // 담당자 번호 포맷
-  // ★ D123 P6: 인라인 제거 → formatPhoneNumber 컨트롤타워 사용
+  // 담당자 번호 포맷 — ★ D123 P6: 인라인 제거 → formatPhoneNumber 컨트롤타워 사용
   const formatPhone = formatPhoneNumber;
 
   // 사전수신 번호 추가
@@ -148,228 +155,240 @@ export default function Settings() {
     }
   };
 
+  if (loading) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-gray-50 text-sm text-gray-400">
+        불러오는 중...
+      </div>
+    );
+  }
 
-  if (loading) return <div className="p-8 text-center">로딩 중...</div>;
+  const totalCbPages = Math.ceil(callbackNumbers.length / callbackPageSize);
 
   return (
-    <div className="min-h-screen bg-gray-100">
-      <header className="bg-white shadow">
-        <div className="max-w-4xl mx-auto px-4 py-4 flex justify-between items-center">
-          <h1 className="text-xl font-bold">회사 설정</h1>
-          <button onClick={() => navigate('/')} className="text-gray-500 hover:text-gray-700">
-            ← 대시보드
-          </button>
+    <div className="min-h-screen bg-gray-50">
+      {/* sticky 헤더 */}
+      <header className="sticky top-0 z-30 border-b border-gray-100 bg-white/80 backdrop-blur">
+        <div className="mx-auto flex max-w-5xl items-center justify-between px-5 py-3.5">
+          <div className="flex items-center gap-2.5">
+            <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-violet-500 to-fuchsia-500">
+              <Building2 className="h-[18px] w-[18px] text-white" />
+            </div>
+            <div>
+              <h1 className="text-[15px] font-bold leading-tight text-gray-900">회사 설정</h1>
+              <p className="text-[11px] text-gray-400">브랜드 · 발송 · 요금 환경</p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <button onClick={() => navigate('/')} className="flex items-center gap-1 rounded-lg px-3 py-2 text-xs font-medium text-gray-500 transition hover:bg-gray-100 hover:text-gray-700">
+              <ArrowLeft className="h-3.5 w-3.5" /> 대시보드
+            </button>
+            <button onClick={handleSave} disabled={saving} className="flex items-center gap-1.5 rounded-lg bg-violet-600 px-4 py-2 text-xs font-semibold text-white transition hover:bg-violet-700 disabled:opacity-50">
+              <Save className="h-3.5 w-3.5" /> {saving ? '저장 중...' : '저장'}
+            </button>
+          </div>
         </div>
       </header>
 
-      <main className="max-w-6xl mx-auto px-4 py-8">
-        <div className="grid grid-cols-2 gap-6">
+      <main className="mx-auto max-w-5xl px-5 py-6">
+        <div className="grid grid-cols-1 items-start gap-5 lg:grid-cols-2">
 
-        {/* 기본 정보 */}
-        <section className="bg-white rounded-lg shadow p-6 min-h-[280px]">
-          <h2 className="text-lg font-semibold mb-4">기본 정보</h2>
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">브랜드명</label>
-              <input
-                type="text"
-                value={settings.brand_name || ''}
-                onChange={(e) => setSettings({ ...settings, brand_name: e.target.value })}
-                className="w-full px-3 py-2 border rounded-lg"
-                placeholder="예: 타겟업"
-              />
+          {/* 기본 정보 */}
+          <section className="rounded-2xl border border-gray-100 bg-white p-5 shadow-sm">
+            <div className="mb-4 flex items-center gap-2.5">
+              <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-violet-50 text-violet-600"><Building2 className="h-[18px] w-[18px]" /></div>
+              <div>
+                <h2 className="text-sm font-semibold text-gray-900">기본 정보</h2>
+                <p className="text-[11px] text-gray-400">브랜드명 · 업종 · 수신거부번호</p>
+              </div>
             </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">업종</label>
-              <select
-                value={settings.business_type || ''}
-                onChange={(e) => setSettings({ ...settings, business_type: e.target.value })}
-                className="w-full px-3 py-2 border rounded-lg"
-              >
-                <option value="">선택</option>
-                <option value="cosmetics">화장품</option>
-                <option value="food">식품</option>
-                <option value="fashion">패션</option>
-                <option value="education">교육</option>
-                <option value="healthcare">헬스케어</option>
-                <option value="other">기타</option>
-              </select>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <div>
+                <label className={labelCls}>브랜드명</label>
+                <input type="text" value={settings.brand_name || ''} onChange={(e) => setSettings({ ...settings, brand_name: e.target.value })} className={inputCls} placeholder="예: 타겟업" />
+              </div>
+              <div>
+                <label className={labelCls}>업종</label>
+                <select value={settings.business_type || ''} onChange={(e) => setSettings({ ...settings, business_type: e.target.value })} className={inputCls}>
+                  <option value="">선택</option>
+                  <option value="cosmetics">화장품</option>
+                  <option value="food">식품</option>
+                  <option value="fashion">패션</option>
+                  <option value="education">교육</option>
+                  <option value="healthcare">헬스케어</option>
+                  <option value="other">기타</option>
+                </select>
+              </div>
+              <div className="sm:col-span-2">
+                <label className={labelCls}>080 수신거부번호</label>
+                <input type="text" value={settings.reject_number || ''} onChange={(e) => setSettings({ ...settings, reject_number: e.target.value })} className={inputCls} placeholder="예: 080-123-4567" />
+              </div>
             </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">080 수신거부번호</label>
-              <input
-                type="text"
-                value={settings.reject_number || ''}
-                onChange={(e) => setSettings({ ...settings, reject_number: e.target.value })}
-                className="w-full px-3 py-2 border rounded-lg"
-                placeholder="예: 080-123-4567"
-              />
-            </div>
-          </div>
-        </section>
+          </section>
 
-        {/* 담당자 사전수신 */}
-        <section className="bg-white rounded-lg shadow p-6 min-h-[280px]">
-          <h2 className="text-lg font-semibold mb-4">담당자 사전수신</h2>
-          <p className="text-sm text-gray-500 mb-4">
-            캠페인 발송 전 등록된 담당자 전원에게 테스트 문자를 보내 확인할 수 있습니다.
-          </p>
+          {/* 담당자 사전수신 */}
+          <section className="rounded-2xl border border-gray-100 bg-white p-5 shadow-sm">
+            <div className="mb-4 flex items-center gap-2.5">
+              <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-emerald-50 text-emerald-600"><Users className="h-[18px] w-[18px]" /></div>
+              <div>
+                <h2 className="text-sm font-semibold text-gray-900">담당자 사전수신</h2>
+                <p className="text-[11px] text-gray-400">발송 전 담당자 전원에게 테스트 문자 발송</p>
+              </div>
+            </div>
 
-          {managerContacts.length > 0 ? (
-            <div className="space-y-2 mb-4">
-              {managerContacts.map((contact, idx) => (
-                <div
-                  key={contact.id || contact.phone}
-                  className="flex items-center gap-3 rounded-lg px-4 py-2.5 bg-emerald-50 border border-emerald-200"
-                >
-                  <span className="flex-1 font-medium text-gray-800">
-                    {contact.name || `담당자 ${idx + 1}`}: {formatPhone(contact.phone)}
-                  </span>
-                  <button
-                    onClick={() => contact.id && handleRemovePhone(contact.id)}
-                    className="px-2.5 py-1 text-sm bg-white border border-red-300 text-red-600 rounded-lg hover:bg-red-50"
-                  >
-                    삭제
-                  </button>
+            {managerContacts.length > 0 ? (
+              <div className="mb-3 space-y-1.5">
+                {managerContacts.map((contact, idx) => (
+                  <div key={contact.id || contact.phone} className="flex items-center gap-2 rounded-lg border border-emerald-100 bg-emerald-50/60 px-3 py-2">
+                    <span className="flex-1 truncate text-sm text-gray-700">
+                      <b className="font-semibold text-gray-800">{contact.name || `담당자 ${idx + 1}`}</b>
+                      <span className="ml-1.5 tabular-nums text-gray-500">{formatPhone(contact.phone)}</span>
+                    </span>
+                    <button onClick={() => contact.id && handleRemovePhone(contact.id)} className="flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-rose-500 transition hover:bg-rose-50">
+                      <Trash2 className="h-3.5 w-3.5" /> 삭제
+                    </button>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="mb-3 rounded-lg border border-dashed border-gray-200 py-6 text-center text-xs text-gray-400">등록된 담당자가 없습니다</div>
+            )}
+
+            <div className="flex items-end gap-2">
+              <div className="w-24 shrink-0">
+                <label className={labelCls}>이름</label>
+                <input type="text" value={newName} onChange={(e) => setNewName(e.target.value)} className={inputCls} placeholder="홍길동" />
+              </div>
+              <div className="flex-1">
+                <label className={labelCls}>전화번호</label>
+                <input type="text" value={newPhone} onChange={(e) => setNewPhone(e.target.value.replace(/[^\d-]/g, ''))} onKeyDown={(e) => { if (e.key === 'Enter') handleAddPhone(); }} className={inputCls} placeholder="01012345678" />
+              </div>
+              <button onClick={handleAddPhone} disabled={!newPhone.replace(/\D/g, '')} className="flex shrink-0 items-center gap-1 rounded-lg bg-violet-600 px-3.5 py-2 text-xs font-semibold text-white transition hover:bg-violet-700 disabled:opacity-40">
+                <Plus className="h-3.5 w-3.5" /> 추가
+              </button>
+            </div>
+          </section>
+
+          {/* 등록 회신번호 (읽기전용) */}
+          <section className="rounded-2xl border border-gray-100 bg-white p-5 shadow-sm">
+            <div className="mb-4 flex items-center gap-2.5">
+              <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-sky-50 text-sky-600"><PhoneCall className="h-[18px] w-[18px]" /></div>
+              <div>
+                <h2 className="text-sm font-semibold text-gray-900">등록 회신번호</h2>
+                <p className="text-[11px] text-gray-400">승인된 발신번호 · 신규 등록은 '발신번호 관리'</p>
+              </div>
+            </div>
+
+            {callbackNumbers.length > 0 ? (
+              <div className="space-y-1.5">
+                {callbackNumbers.slice(callbackPage * callbackPageSize, (callbackPage + 1) * callbackPageSize).map((cb) => (
+                  <div key={cb.id} className="flex items-center gap-2 rounded-lg border border-gray-100 bg-gray-50 px-3 py-2">
+                    <span className="flex-1 truncate text-sm tabular-nums text-gray-700">
+                      {cb.phone}
+                      {cb.store_name && <span className="ml-1.5 text-xs text-gray-400">({cb.store_name})</span>}
+                      {!cb.store_name && cb.label && <span className="ml-1.5 text-xs text-gray-400">({cb.label})</span>}
+                    </span>
+                    {cb.is_default && <span className="rounded-full bg-emerald-500 px-2 py-0.5 text-[10px] font-bold text-white">기본</span>}
+                  </div>
+                ))}
+                {totalCbPages > 1 && (
+                  <div className="flex items-center justify-center gap-1 pt-2">
+                    <button onClick={() => setCallbackPage(p => Math.max(0, p - 1))} disabled={callbackPage === 0} className="rounded-lg p-1.5 text-gray-400 transition hover:bg-gray-100 disabled:opacity-30"><ChevronLeft className="h-4 w-4" /></button>
+                    <span className="px-1 text-[11px] tabular-nums text-gray-400">{callbackPage + 1} / {totalCbPages}</span>
+                    <button onClick={() => setCallbackPage(p => Math.min(totalCbPages - 1, p + 1))} disabled={callbackPage >= totalCbPages - 1} className="rounded-lg p-1.5 text-gray-400 transition hover:bg-gray-100 disabled:opacity-30"><ChevronRight className="h-4 w-4" /></button>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div className="rounded-lg border border-dashed border-gray-200 py-6 text-center text-xs text-gray-400">
+                등록된 회신번호가 없습니다<br />
+                <span className="text-[11px]">관리 메뉴에서 발신번호 등록을 신청해주세요</span>
+              </div>
+            )}
+          </section>
+
+          {/* 요금 설정 — 관리자만 */}
+          {isAdmin && (
+            <section className="rounded-2xl border border-gray-100 bg-white p-5 shadow-sm">
+              <div className="mb-4 flex items-center gap-2.5">
+                <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-amber-50 text-amber-600"><Wallet className="h-[18px] w-[18px]" /></div>
+                <div>
+                  <h2 className="text-sm font-semibold text-gray-900">요금 설정</h2>
+                  <p className="text-[11px] text-gray-400">월 예산은 직접, 단가는 관리자 설정</p>
                 </div>
-              ))}
-            </div>
-          ) : (
-            <div className="text-center py-4 text-gray-400 mb-4">등록된 담당자가 없습니다</div>
+              </div>
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <div>
+                  <label className={labelCls}>월 예산 <span className="text-gray-300">(원)</span></label>
+                  <input type="number" value={settings.monthly_budget} onChange={(e) => setSettings({ ...settings, monthly_budget: Number(e.target.value) })} className={inputCls} />
+                </div>
+                <div>
+                  <label className={labelCls}>SMS 단가 <span className="text-gray-300">(원)</span></label>
+                  <input type="number" step="0.1" value={settings.cost_per_sms} disabled className={disabledInputCls} />
+                </div>
+                <div>
+                  <label className={labelCls}>LMS 단가 <span className="text-gray-300">(원)</span></label>
+                  <input type="number" step="0.1" value={settings.cost_per_lms} disabled className={disabledInputCls} />
+                </div>
+                <div>
+                  <label className={labelCls}>MMS 단가 <span className="text-gray-300">(원)</span></label>
+                  <input type="number" step="0.1" value={settings.cost_per_mms} disabled className={disabledInputCls} />
+                </div>
+                <div>
+                  <label className={labelCls}>카카오 단가 <span className="text-gray-300">(원)</span></label>
+                  <input type="number" step="0.1" value={settings.cost_per_kakao} disabled className={disabledInputCls} />
+                </div>
+              </div>
+              <p className="mt-2.5 text-[11px] text-gray-400">※ 단가는 관리자가 설정합니다</p>
+            </section>
           )}
 
-          <div className="flex items-end gap-2">
-            <div className="w-24">
-              <label className="block text-sm font-medium text-gray-700 mb-1">이름</label>
-              <input type="text" value={newName} onChange={(e) => setNewName(e.target.value)} className="w-full px-3 py-2 border rounded-lg" placeholder="홍길동" />
-            </div>
-            <div className="flex-1">
-              <label className="block text-sm font-medium text-gray-700 mb-1">전화번호</label>
-              <input type="text" value={newPhone} onChange={(e) => setNewPhone(e.target.value.replace(/[^\d-]/g, ''))} onKeyDown={(e) => { if (e.key === 'Enter') handleAddPhone(); }} className="w-full px-3 py-2 border rounded-lg" placeholder="01012345678" />
-            </div>
-            <button onClick={handleAddPhone} disabled={!newPhone.replace(/\D/g, '')} className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm font-medium disabled:opacity-40 disabled:cursor-not-allowed">
-              + 추가
-            </button>
-          </div>
-        </section>
-
-        {/* 등록 회신번호 (읽기전용) */}
-        <section className="bg-white rounded-lg shadow p-6 min-h-[280px]">
-          <h2 className="text-lg font-semibold mb-4">등록 회신번호</h2>
-          <p className="text-sm text-gray-500 mb-4">
-            승인 완료된 발신번호 목록입니다. 새 번호 등록은 관리 메뉴의 '발신번호 관리'에서 신청해주세요.
-          </p>
-
-          {callbackNumbers.length > 0 ? (
-            <div className="space-y-2 mb-4">
-              {callbackNumbers.slice(callbackPage * callbackPageSize, (callbackPage + 1) * callbackPageSize).map((cb) => (
-                <div key={cb.id} className="flex items-center gap-3 bg-emerald-50 border border-emerald-200 rounded-lg px-4 py-3">
-                  <span className="flex-1 font-medium text-gray-800">
-                    {cb.phone}
-                    {cb.store_name && <span className="ml-2 text-sm text-gray-500">({cb.store_name})</span>}
-                    {!cb.store_name && cb.label && <span className="ml-2 text-sm text-gray-500">({cb.label})</span>}
-                  </span>
-                  {cb.is_default && (
-                    <span className="px-2 py-0.5 bg-emerald-500 text-white text-xs rounded-full">기본</span>
-                  )}
+          {/* 발송 정책 — 관리자만 */}
+          {isAdmin && (
+            <section className="rounded-2xl border border-gray-100 bg-white p-5 shadow-sm lg:col-span-2">
+              <div className="mb-4 flex items-center gap-2.5">
+                <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-indigo-50 text-indigo-600"><Clock className="h-[18px] w-[18px]" /></div>
+                <div>
+                  <h2 className="text-sm font-semibold text-gray-900">발송 정책</h2>
+                  <p className="text-[11px] text-gray-400">발송 시간대 · 한도 · 중복 방지</p>
                 </div>
-              ))}
-              {callbackNumbers.length > callbackPageSize && (
-                <div className="flex items-center justify-center gap-2 pt-3">
-                  <button onClick={() => setCallbackPage(p => Math.max(0, p - 1))} disabled={callbackPage === 0} className="px-3 py-1 text-sm border rounded-lg disabled:opacity-30 hover:bg-gray-50">이전</button>
-                  <span className="text-sm text-gray-600">{callbackPage + 1} / {Math.ceil(callbackNumbers.length / callbackPageSize)}</span>
-                  <button onClick={() => setCallbackPage(p => Math.min(Math.ceil(callbackNumbers.length / callbackPageSize) - 1, p + 1))} disabled={callbackPage >= Math.ceil(callbackNumbers.length / callbackPageSize) - 1} className="px-3 py-1 text-sm border rounded-lg disabled:opacity-30 hover:bg-gray-50">다음</button>
+              </div>
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                <div>
+                  <label className={labelCls}>발송 시작시간</label>
+                  <select value={settings.send_start_hour} onChange={(e) => setSettings({ ...settings, send_start_hour: Number(e.target.value) })} className={inputCls}>
+                    {Array.from({ length: 24 }, (_, i) => (<option key={i} value={i}>{i}시</option>))}
+                  </select>
                 </div>
-              )}
-            </div>
-          ) : (
-            <div className="text-center py-8 text-gray-400">
-              <p>등록된 회신번호가 없습니다</p>
-              <p className="text-sm mt-1">관리 메뉴에서 발신번호 등록을 신청해주세요</p>
-            </div>
-          )}
-        </section>
-
-        {/* 요금 설정 - 관리자만 */}
-        {isAdmin && (
-        <section className="bg-white rounded-lg shadow p-6 min-h-[240px]">
-          <h2 className="text-lg font-semibold mb-4">요금 설정</h2>
-          <div className="grid grid-cols-3 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">월 예산 (원)</label>
-              <input type="number" value={settings.monthly_budget} onChange={(e) => setSettings({ ...settings, monthly_budget: Number(e.target.value) })} className="w-full px-3 py-2 border rounded-lg" />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">SMS 단가 <span className="text-gray-400">(원)</span></label>
-              <input type="number" step="0.1" value={settings.cost_per_sms} disabled className="w-full px-3 py-2 border rounded-lg bg-gray-100 text-gray-500 cursor-not-allowed" />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">LMS 단가 <span className="text-gray-400">(원)</span></label>
-              <input type="number" step="0.1" value={settings.cost_per_lms} disabled className="w-full px-3 py-2 border rounded-lg bg-gray-100 text-gray-500 cursor-not-allowed" />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">MMS 단가 <span className="text-gray-400">(원)</span></label>
-              <input type="number" step="0.1" value={settings.cost_per_mms} disabled className="w-full px-3 py-2 border rounded-lg bg-gray-100 text-gray-500 cursor-not-allowed" />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">카카오 단가 <span className="text-gray-400">(원)</span></label>
-              <input type="number" step="0.1" value={settings.cost_per_kakao} disabled className="w-full px-3 py-2 border rounded-lg bg-gray-100 text-gray-500 cursor-not-allowed" />
-            </div>
-          </div>
-          <p className="text-xs text-gray-400 mt-2">※ 단가는 관리자가 설정합니다</p>
-        </section>
-        )}
-
-        {/* 발송 정책 - 관리자만 */}
-        {isAdmin && (
-        <section className="bg-white rounded-lg shadow p-6 min-h-[240px]">
-          <h2 className="text-lg font-semibold mb-4">발송 정책</h2>
-          <div className="grid grid-cols-3 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">발송 시작시간</label>
-              <select value={settings.send_start_hour} onChange={(e) => setSettings({ ...settings, send_start_hour: Number(e.target.value) })} className="w-full px-3 py-2 border rounded-lg">
-                {Array.from({ length: 24 }, (_, i) => (<option key={i} value={i}>{i}시</option>))}
-              </select>
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">발송 종료시간</label>
-              <select value={settings.send_end_hour} onChange={(e) => setSettings({ ...settings, send_end_hour: Number(e.target.value) })} className="w-full px-3 py-2 border rounded-lg">
-                {Array.from({ length: 24 }, (_, i) => (<option key={i} value={i}>{i}시</option>))}
-              </select>
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">고객당 일일 한도</label>
-              <input type="number" value={settings.daily_limit_per_customer} onChange={(e) => setSettings({ ...settings, daily_limit_per_customer: Number(e.target.value) })} className="w-full px-3 py-2 border rounded-lg" />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">중복 방지 기간 (일)</label>
-              <input type="number" value={settings.duplicate_prevention_days} onChange={(e) => setSettings({ ...settings, duplicate_prevention_days: Number(e.target.value) })} className="w-full px-3 py-2 border rounded-lg" />
-            </div>
-            <div className="flex items-center pt-6">
-              <label className="flex items-center gap-2 cursor-pointer">
-                <input type="checkbox" checked={settings.holiday_send_allowed} onChange={(e) => setSettings({ ...settings, holiday_send_allowed: e.target.checked })} className="rounded" />
+                <div>
+                  <label className={labelCls}>발송 종료시간</label>
+                  <select value={settings.send_end_hour} onChange={(e) => setSettings({ ...settings, send_end_hour: Number(e.target.value) })} className={inputCls}>
+                    {Array.from({ length: 24 }, (_, i) => (<option key={i} value={i}>{i}시</option>))}
+                  </select>
+                </div>
+                <div>
+                  <label className={labelCls}>고객당 일일 한도</label>
+                  <input type="number" value={settings.daily_limit_per_customer} onChange={(e) => setSettings({ ...settings, daily_limit_per_customer: Number(e.target.value) })} className={inputCls} />
+                </div>
+                <div>
+                  <label className={labelCls}>중복 방지 기간 <span className="text-gray-300">(일)</span></label>
+                  <input type="number" value={settings.duplicate_prevention_days} onChange={(e) => setSettings({ ...settings, duplicate_prevention_days: Number(e.target.value) })} className={inputCls} />
+                </div>
+              </div>
+              <label className="mt-3 flex w-fit cursor-pointer items-center gap-2 rounded-lg border border-gray-100 bg-gray-50 px-3 py-2">
+                <input type="checkbox" checked={settings.holiday_send_allowed} onChange={(e) => setSettings({ ...settings, holiday_send_allowed: e.target.checked })} className="h-4 w-4 rounded accent-violet-600" />
                 <span className="text-sm text-gray-700">휴일 발송 허용</span>
               </label>
-            </div>
-          </div>
-        </section>
-        )}
+            </section>
+          )}
 
-        </div>
-
-        {/* 저장 버튼 */}
-        <div className="flex justify-center mt-6">
-          <button onClick={handleSave} disabled={saving} className="bg-blue-600 hover:bg-blue-700 text-white px-8 py-3 rounded-lg font-medium disabled:opacity-50">
-            {saving ? '저장 중...' : '설정 저장'}
-          </button>
         </div>
       </main>
 
       {/* 토스트 */}
       {toast.show && (
-        <div className={`fixed top-6 left-1/2 transform -translate-x-1/2 px-6 py-3 rounded-lg shadow-lg z-[100] text-sm font-medium ${
-          toast.type === 'success' ? 'bg-green-600 text-white' : 'bg-red-600 text-white'
-        }`}>
+        <div className={`fixed left-1/2 top-5 z-[100] flex -translate-x-1/2 items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-medium text-white shadow-lg ${toast.type === 'success' ? 'bg-emerald-600' : 'bg-rose-600'}`}>
+          {toast.type === 'success' ? <CheckCircle2 className="h-4 w-4" /> : <XCircle className="h-4 w-4" />}
           {toast.message}
         </div>
       )}
