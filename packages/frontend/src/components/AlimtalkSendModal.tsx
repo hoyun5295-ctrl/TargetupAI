@@ -23,6 +23,7 @@ import AlimtalkChannelPanel, {
 import AlimtalkVariableMappingPanel from './alimtalk/AlimtalkVariableMappingPanel';
 import AddressBookModal from './AddressBookModal';
 import { normalizePhoneKr } from '../utils/formatDate';
+import { validateAlimtalkVariables } from '../utils/alimtalkVars';
 
 export interface AlimtalkSendModalProps {
   show: boolean;
@@ -72,6 +73,9 @@ export interface AlimtalkSendModalProps {
   /** ★ D162-4 (2026-05-15) 4차: 직접타겟발송에서 추출된 수신자 그대로 인계받기 (Harold님 명시 정합).
    *   show=true 진입 + initialRecipients 길이 > 0이면 자동 setRecipients. 사용자 별도 입력 X. */
   initialRecipients?: any[];
+
+  /** ★ #2 (2026-06-01): 발송 성공 시 증가하는 신호 — 수신자 리스트만 초기화(모달은 열린 채 유지). */
+  resetSignal?: number;
 }
 
 export default function AlimtalkSendModal({
@@ -95,6 +99,7 @@ export default function AlimtalkSendModal({
   onSendConfirm,
   setToast,
   initialRecipients,
+  resetSignal,
 }: AlimtalkSendModalProps) {
   // 수신자 영역 — 알림톡 전용 state (직접발송 directRecipients와 격리)
   const [inputMode, setInputMode] = useState<'direct' | 'file' | 'address'>('direct');
@@ -352,6 +357,14 @@ export default function AlimtalkSendModal({
     });
   };
 
+  // ★ #2 (2026-06-01): 발송 성공 신호 수신 시 수신자 리스트만 초기화 (모달은 열린 채 — D225+ 흐름 유지).
+  useEffect(() => {
+    if (resetSignal && resetSignal > 0) {
+      setRecipients([]);
+      setDirectInput('');
+    }
+  }, [resetSignal]);
+
   // 발송 — 직접발송과 동일 검증 + onSendConfirm 위임
   const handleSend = async () => {
     if (sending) return;
@@ -380,6 +393,19 @@ export default function AlimtalkSendModal({
       !(alimtalkNextSubject || '').trim()
     ) {
       setToast({ show: true, type: 'error', message: 'LMS 대체 발송 시 제목을 입력해주세요.' });
+      return;
+    }
+    // ★ #3-2 (2026-06-01): 발송 전 변수 검증 — 빈 변수 / 데이터 없는 @@필드@@ 차단 (깨진 알림톡·미수신 방지)
+    const varCheck = validateAlimtalkVariables(kakaoTemplateVars, recipients);
+    if (!varCheck.ok) {
+      const unfilled = varCheck.issues.filter((i) => i.kind === 'unfilled').map((i) => i.variable);
+      const noData = varCheck.issues.find((i) => i.kind === 'no_data');
+      const msg = unfilled.length > 0
+        ? `값을 지정하지 않은 변수가 있습니다: ${unfilled.join(', ')}`
+        : noData
+          ? `${noData.missingCount}명의 수신자에게 '${noData.variable}' 변수 데이터가 없습니다. 데이터를 추가하거나 변수에 직접 값을 입력해주세요.`
+          : '변수 설정을 확인해주세요.';
+      setToast({ show: true, type: 'error', message: msg });
       return;
     }
     setSending(true);

@@ -953,7 +953,7 @@ async function executeAutoCampaign(ac: any): Promise<void> {
           companyId: ac.company_id,
         };
       });
-      sentCount = await insertAlimtalkQueue(companyTables, alimRows);
+      sentCount = await insertAlimtalkQueue(companyTables, alimRows, campaignId);
     } else {
       // ★ D102: (광고)+080 — CT-AD 컨트롤타워 사용 (기존 누락 수정)
       const autoOpt080 = (ac.is_ad) ? await getOpt080Number(ac.user_id, ac.company_id) : '';

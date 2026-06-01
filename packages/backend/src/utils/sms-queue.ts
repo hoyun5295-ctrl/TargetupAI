@@ -730,7 +730,8 @@ export async function insertAlimtalkQueue(
     titleStr?: string;
     reservedDate?: string;
     companyId?: string;
-  }[]
+  }[],
+  appEtc1?: string,   // ★ #4-c (2026-06-01): app_etc1 = 캠페인/추적 식별자 — 결과·정산 매칭(results.ts WHERE app_etc1=?). 누락 시 알림톡 발송 결과 미조회.
 ): Promise<number> {
   if (rows.length === 0) return 0;
 
@@ -746,7 +747,7 @@ export async function insertAlimtalkQueue(
 
     for (const r of batch) {
       const idx = params.length;
-      values.push(`(?, ?, ?, 'K', ?, ?, ?, ?, ?, NOW(), NOW(), '1', ?, ?)`);
+      values.push(`(?, ?, ?, 'K', ?, ?, ?, ?, ?, NOW(), NOW(), '1', ?, ?, ?)`);
       params.push(
         r.phone,                       // dest_no
         r.callback,                    // call_back
@@ -757,6 +758,7 @@ export async function insertAlimtalkQueue(
         r.nextContents || null,        // k_next_contents
         r.buttonJson || null,          // k_button_json
         r.etcJson || null,             // k_etc_json
+        appEtc1 || null,               // app_etc1 (캠페인/추적 식별자 — #4-c 결과 매칭 fix)
         r.companyId || null,           // app_etc2 (companyId 추적용)
       );
     }
@@ -765,7 +767,7 @@ export async function insertAlimtalkQueue(
       `INSERT INTO ${table} (
         dest_no, call_back, msg_contents, msg_type, title_str,
         k_template_code, k_next_type, k_next_contents, k_button_json,
-        sendreq_time, msg_instm, rsv1, k_etc_json, app_etc2
+        sendreq_time, msg_instm, rsv1, k_etc_json, app_etc1, app_etc2
       ) VALUES ${values.join(',')}`,
       params
     );

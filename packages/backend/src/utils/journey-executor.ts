@@ -625,10 +625,10 @@ async function processExecution(exec: ExecutionRow): Promise<StepOutcome> {
   const campaignRes = await query(
     `INSERT INTO campaigns (
       company_id, campaign_name, message_type, message_content, subject, message_subject, message_template,
-      is_ad, target_count, sent_count, created_by, send_channel, callback_number, status, scheduled_at, sent_at
+      is_ad, target_count, sent_count, created_by, send_channel, callback_number, status, scheduled_at, sent_at, kakao_template_id
     ) VALUES (
       $1::uuid, $2, $3, $4, $5, $5, $4,
-      $6, 1, 1, $7::uuid, $9, $8, 'sending', NOW(), NOW()
+      $6, 1, 1, $7::uuid, $9, $8, 'sending', NOW(), NOW(), $10::uuid
     ) RETURNING id`,
     [
       exec.company_id,
@@ -640,6 +640,7 @@ async function processExecution(exec: ExecutionRow): Promise<StepOutcome> {
       exec.created_by,
       callbackNumber,
       sendChannelForCampaign,
+      isKakao && kakaoTemplateRow ? kakaoTemplateRow.id : null,  // ★ #4-a (2026-06-01): 알림톡 여정 결과 조회용 FK (results.ts:560 JOIN)
     ]
   );
   const campaignId = campaignRes.rows[0].id as string;
@@ -669,7 +670,8 @@ async function processExecution(exec: ExecutionRow): Promise<StepOutcome> {
           buttonJson: buttonJson || undefined,
           etcJson: undefined,
           companyId: exec.company_id,
-        }]
+        }],
+        `journey:${exec.journey_id}:${step.id}`,  // ★ #4-c: app_etc1 — 여정 SMS(아래 685행)와 동일 추적키
       );
     } else {
       // SMS/LMS/MMS 영역 — bulkInsertSmsQueue 정합.

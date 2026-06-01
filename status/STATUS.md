@@ -107,7 +107,23 @@
 
 ---
 
-### 🚀 D229+ 2026-06-01 세션 종결 (최신) — 종량제 Phase 3 + Phase 4/5 (크레딧 가시성·관리) 구현·배포
+### 🟢 2026-06-01 세션 (최신) — 크레딧 UI 폴리시 + 충전/이력 완성 + 알림톡 디버깅 4건 설계도
+
+> **이번 세션 = 크레딧 코드 다수 + 알림톡 디버깅 조사·설계. 다음 세션 = 알림톡 디버깅 4건 수정.**
+>
+> **A. 크레딧 UI 폴리시 (배포 완료 — Harold 화면 확인):** PricingPage 전면 재설계(컴팩트 요약 바 CreditSummaryBar + 작업당 칩 + 플랜 카드 값-시각화: 월 크레딧 히어로·환산·상대 게이지·인프라 등급 / 등급별 기능 나열 폐기, 스타터부터 동일 / 인프라 = 표준 공유[스타터~프로]·전용 서버[비즈]·전용 AI 서버[엔터, 당사 IDC 입고·전담 관리] / 만원당·가성비 표기 제거). 사용 이력 모달(CreditHistoryModal) + 선불 잔액 모달 현대화(BalanceModals 돈자루 제거) + AI Operator 칩→이력 모달 연결. 전부 화이트/모던(대시보드 톤 — Harold 명시). constants/credit.ts 신설.
+>
+> **B. 크레딧 충전 (구현·검증 완료, 배포는 Harold):** 단가 2,000원/크레딧+VAT 10%, 보너스 없음(비싸게 둬 구독 유도). 선불=발송 잔액 즉시 차감, 후불=슈퍼관리자 승인+월말 문자요금 합산. CT `utils/ai-credit-recharge.ts`(선불 즉시·후불 요청/승인/거절, 단일 원자 트랜잭션 FOR UPDATE) + 단가 calc(ai-credit-calc.ts) + endpoint(사용자 3·슈퍼관리자 3) + CreditRechargeModal(화이트) + 슈퍼관리자 충전 큐 + 후불 정산서 자동 합산(billing.ts subtotal+VAT+billed + PDF/이메일 명세). DB(Harold 실행): `ai_credit_requests` 신설 + `billings` ai_credit_count/ai_credit_supply ALTER. backend·frontend tsc 0 + 자가 grep 0. 배포 전 `/codex:adversarial-review` 권장(돈). 미사용 CreditGauge.tsx=죽은 코드(삭제 보류).
+>
+> **C. 알림톡 디버깅 4건 — 근본원인 조사·설계도 완료 (코드 수정 0):** 설계도 = `docs/superpowers/specs/2026-06-01-alimtalk-debug-4-design.md`(airtight + 시작 가이드). #1 모달 닫을 때 `directSendChannel` 'sms' 미복원(Dashboard 3545) / #2 발송 후 모달 recipients 미초기화 / #3-1 변수 자동매핑(데이터 없이, AlimtalkChannelPanel 178) / #3-2 변수 미검증 발송(handleSend) / #4-a 발송 시 `campaigns.kakao_template_id` 미저장(campaigns.ts 1367 INSERT) ↔ 결과는 그 FK JOIN(results.ts 557) → 항상 "[알림톡 템플릿 미설정]" / #4-b 미수신(QTmsg raw 필요) / #4-c LMS 대체 결과 미집계.
+>
+> **다음 세션 = 알림톡 디버깅 4건 수정** (설계도 정독 → C #4-a → B #3 → A #1·#2 → C #4-b/#4-c). 수정 전 `campaigns.kakao_template_id` information_schema 검증.
+>
+> **★ 2026-06-01 갱신 — 알림톡 디버깅 코드·검증 완료 (배포 Harold):** #4-a campaigns.kakao_template_id 저장(commit·direct-send·journey) + #3 변수 검증(프론트 utils/alimtalkVars.ts validateAlimtalkVariables 7/7 + handleSend + 백엔드 utils/alimtalk-vars.ts findUnfilledAlimtalkVars, 자동매핑 유지) + #1 모달 onClose 채널 복원 + #2 resetSignal 리스트 초기화 + **#4-c 진짜 원인 = insertAlimtalkQueue app_etc1 누락(설계도 resend 컬럼 오진) → 4 호출처 app_etc1 저장(direct/commit워커/auto=campaignId, journey=journey:id:step)**. #4-b는 #3로 빈변수 차단(잔여=QTmsg 반려코드 Harold). DB 변경 0(kakao_template_id·app_etc1 기존 컬럼). backend·frontend tsc 0. 배포 전 /codex:adversarial-review 권장(app_etc1=정산 itemize 영향). 변경=routes/campaigns.ts·utils/{journey-executor,sms-queue,auto-campaign-worker,direct-send-processor,alimtalk-vars}.ts·components/AlimtalkSendModal.tsx·pages/Dashboard.tsx·utils/alimtalkVars.ts.
+
+---
+
+### 🚀 D229+ 2026-06-01 세션 종결 — 종량제 Phase 3 + Phase 4/5 (크레딧 가시성·관리) 구현·배포
 
 > **★★★ 종량제 크레딧 시스템 전 구간 구현·배포 완료. 정상 작동(엔터프라이즈 7,000 크레딧 표시 확인). 남은 건 UI 디자인 폴리시뿐 — `docs/superpowers/specs/2026-06-01-credit-ui-design-polish.md` 정독(다음 세션 완료 후 삭제). ★★★**
 >

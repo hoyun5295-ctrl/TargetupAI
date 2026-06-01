@@ -23,6 +23,7 @@ import {
 } from 'lucide-react';
 import AiRefineModal from '../components/AiRefineModal';
 import AiOperatorWalkthroughModal from '../components/AiOperatorWalkthroughModal';
+import CreditHistoryModal from '../components/credit/CreditHistoryModal';
 // ★ D210+ Phase 2-fix1 (Harold 명시 2026-05-23): 회사 데이터 활용 매트릭스 안내 카드 (3축 100% 보완).
 import CompanyDataProfileCard from '../components/CompanyDataProfileCard';
 // ★ D210+ Phase 2-fix4 (Harold 명시 2026-05-23): 변수 하이라이트 + 머지 결과 미리보기 컨트롤타워.
@@ -240,6 +241,7 @@ export default function AiOperatorPage() {
   const companyName = (user as any)?.company?.name || '';
   // 종량제: AI 크레딧 잔여 (헤더 칩 — creditEnabled일 때만 표시)
   const [aiCredit, setAiCredit] = useState<any>(null);
+  const [showCreditHistory, setShowCreditHistory] = useState(false); // 크레딧 사용 이력 모달
   useEffect(() => {
     (async () => {
       try {
@@ -566,9 +568,9 @@ export default function AiOperatorPage() {
             {aiCredit?.creditEnabled && (aiCredit.planCredits > 0 || aiCredit.purchased > 0) && (
               <button
                 type="button"
-                onClick={() => navigate('/pricing')}
+                onClick={() => setShowCreditHistory(true)}
                 className="hidden sm:inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-white/10 px-3 py-1.5 text-xs transition-all hover:bg-white/15"
-                title="요금제 · 크레딧 보기"
+                title="AI 크레딧 사용 이력"
               >
                 <Sparkles className="w-3.5 h-3.5 text-fuchsia-300" />
                 <span className="font-semibold tabular-nums text-white/90">{Number(aiCredit.total).toLocaleString()}</span>
@@ -592,6 +594,13 @@ export default function AiOperatorPage() {
           </div>
         </div>
       </header>
+
+      {showCreditHistory && (
+        <CreditHistoryModal
+          onClose={() => setShowCreditHistory(false)}
+          onGoPricing={() => { setShowCreditHistory(false); navigate('/pricing'); }}
+        />
+      )}
 
       {/* 메인 본문 */}
       <main className="relative max-w-5xl mx-auto px-6 py-10 md:py-14">

@@ -29,6 +29,7 @@ import { validateMmsPayload } from '../utils/mms-validator';
 import { buildDateRangeFilter, aggregateSmsCountsByCampaign, aggregateSmsSendTimesByCampaign } from '../utils/stats-aggregation';
 import { cancelCampaign, syncCampaignResults, cleanupScheduledCampaigns } from '../utils/campaign-lifecycle';
 import { buildFilterQueryCompat } from '../utils/customer-filter';
+import { findUnfilledAlimtalkVars } from '../utils/alimtalk-vars';
 import { filterByIndividualCallback, buildCallbackErrorResponse, buildCallbackConfirmResponse, resolveCustomerCallback } from '../utils/callback-filter';
 import { deduplicateByPhone } from '../utils/deduplicate';
 import { getUserTestContacts } from '../utils/test-contact-helper';
@@ -1320,10 +1321,11 @@ router.post('/direct-send/commit', async (req: Request, res: Response) => {
       if (senderCheck.rows.length === 0) return res.status(400).json({ success: false, error: '등록되지 않은 회신번호입니다. 발신번호 관리에서 번호를 등록해주세요.', code: 'INVALID_SENDER_NUMBER' });
     }
     let alimtalkEtcJson: string | null = null;
+    let alimtalkTemplateUuid: string | null = null;  // ★ #4-a (2026-06-01): 결과 조회용 campaigns.kakao_template_id FK (results.ts:560 JOIN)
     if (isAlimtalkSend) {
       if (!alimtalkTemplateCode) return res.status(400).json({ success: false, error: '알림톡 템플릿 코드가 필요합니다' });
       const gate = await query(
-        `SELECT t.status AS tstatus, p.approval_status, p.profile_key FROM kakao_templates t JOIN kakao_sender_profiles p ON p.id = t.profile_id WHERE t.company_id = $1 AND t.template_code = $2 LIMIT 1`,
+        `SELECT t.id AS tid, t.status AS tstatus, p.approval_status, p.profile_key FROM kakao_templates t JOIN kakao_sender_profiles p ON p.id = t.profile_id WHERE t.company_id = $1 AND t.template_code = $2 LIMIT 1`,
         [companyId, alimtalkTemplateCode]
       );
       if (gate.rows.length === 0) return res.status(404).json({ success: false, error: '템플릿을 찾을 수 없습니다' });
@@ -1331,6 +1333,12 @@ router.post('/direct-send/commit', async (req: Request, res: Response) => {
       if (!['APPROVED', 'APR', 'A'].includes(String(g.tstatus).toUpperCase())) return res.status(400).json({ success: false, error: '승인 완료된 템플릿만 발송할 수 있습니다' });
       if (g.approval_status !== 'APPROVED') return res.status(400).json({ success: false, error: '승인 완료된 발신프로필만 사용할 수 있습니다' });
       if (g.profile_key) alimtalkEtcJson = JSON.stringify({ senderkey: g.profile_key });
+      alimtalkTemplateUuid = g.tid || null;  // ★ #4-a: 검증 통과한 템플릿 id 보관 → INSERT 저장
+      // ★ #3-2 (2026-06-01): 변수 미지정 발송 차단 (백엔드 이중 안전망 — 프론트 우회 대비)
+      const commitUnfilled = findUnfilledAlimtalkVars(alimtalkVariableMap);
+      if (commitUnfilled.length > 0) {
+        return res.status(400).json({ success: false, error: `값을 지정하지 않은 알림톡 변수가 있습니다: ${commitUnfilled.join(', ')}`, code: 'ALIMTALK_VAR_UNFILLED' });
+      }
     }
     if (scheduled) {
       const dsCheck = validateScheduledAt(scheduledAt, { allowNull: false });
@@ -1365,11 +1373,11 @@ router.post('/direct-send/commit', async (req: Request, res: Response) => {
       alimtalkTemplateCode, alimtalkVariableMap, alimtalkButtonJson, alimtalkNextType, alimtalkNextContents, alimtalkNextSubject, alimtalkEtcJson,
     };
     const campaignResult = await query(
-      `INSERT INTO campaigns (company_id, campaign_name, message_type, message_content, subject, callback_number, target_count, send_type, status, scheduled_at, message_template, message_subject, created_by, is_ad, send_channel, staging_id, send_phase, processed_count, send_config, created_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, 'direct', $8, $9, $10, $11, $12, $13, $14, $15, 'queued', 0, $16, NOW()) RETURNING id`,
+      `INSERT INTO campaigns (company_id, campaign_name, message_type, message_content, subject, callback_number, target_count, send_type, status, scheduled_at, message_template, message_subject, created_by, is_ad, send_channel, staging_id, send_phase, processed_count, send_config, kakao_template_id, created_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, 'direct', $8, $9, $10, $11, $12, $13, $14, $15, 'queued', 0, $16, $17, NOW()) RETURNING id`,
       [companyId, `직접발송 ${new Date().toLocaleString('ko-KR')}`, msgType, message || '', subject || null, callback || null, total,
        scheduled ? 'scheduled' : 'sending', scheduled && scheduledAt ? new Date(scheduledAt) : null, message || '', subject || null,
-       userId, finalIsAd, directChannel, stagingId, JSON.stringify(sendConfig)]
+       userId, finalIsAd, directChannel, stagingId, JSON.stringify(sendConfig), alimtalkTemplateUuid]
     );
     const campaignId = campaignResult.rows[0].id;
 
@@ -1549,6 +1557,14 @@ router.post('/direct-send', async (req: Request, res: Response) => {
       }
     }
     // N(대체안함) / S(SMS 대체) / A(SMS+문구) = 알림톡 LMS 제목 검증 skip (옛 D218+ 흐름 정합 유지)
+
+    // ★ #3-2 (2026-06-01): 알림톡 변수 미지정 발송 차단 (백엔드 이중 안전망)
+    if (isAlimtalkSend) {
+      const directUnfilled = findUnfilledAlimtalkVars(alimtalkVariableMap);
+      if (directUnfilled.length > 0) {
+        return res.status(400).json({ success: false, error: `값을 지정하지 않은 알림톡 변수가 있습니다: ${directUnfilled.join(', ')}`, code: 'ALIMTALK_VAR_UNFILLED' });
+      }
+    }
 
     if (!callback && !useIndividualCallback) {
       return res.status(400).json({ success: false, error: '회신번호를 선택해주세요' });
@@ -1928,6 +1944,17 @@ router.post('/direct-send', async (req: Request, res: Response) => {
         return res.status(400).json({ success: false, error: '승인 완료된 발신프로필만 사용할 수 있습니다' });
       }
 
+      // ★ #4-a (2026-06-01 알림톡 디버깅): 결과 조회용 campaigns.kakao_template_id FK 저장 (results.ts:560 JOIN).
+      //   INSERT(위 1686)가 게이트보다 앞이라 검증 통과 후 UPDATE. gate.tid 재사용(추가 조회 없음).
+      //   결과 표시용 FK 저장 실패가 실제 발송을 막지 않도록 try/catch 격리.
+      if (gate.tid) {
+        try {
+          await query('UPDATE campaigns SET kakao_template_id = $1 WHERE id = $2', [gate.tid, campaignId]);
+        } catch (fkErr) {
+          console.warn('[direct-send] kakao_template_id 저장 실패 (발송은 계속):', fkErr);
+        }
+      }
+
       // ★ D130: k_etc_json 빌드 — senderkey(발신프로필 키) + 강조 타이틀 등
       const etcObj: Record<string, string> = {};
       if (gate.profile_key) etcObj.senderkey = gate.profile_key;
@@ -1982,7 +2009,7 @@ router.post('/direct-send', async (req: Request, res: Response) => {
       });
 
       try {
-        directAlimtalkSentCount = await insertAlimtalkQueue(companyTables, alimtalkRows);
+        directAlimtalkSentCount = await insertAlimtalkQueue(companyTables, alimtalkRows, campaignId);
         console.log(`[직접발송] 알림톡 INSERT 완료: ${directAlimtalkSentCount}건`);
       } catch (alimtalkErr) {
         console.error('[직접발송] 알림톡 INSERT 실패:', alimtalkErr);

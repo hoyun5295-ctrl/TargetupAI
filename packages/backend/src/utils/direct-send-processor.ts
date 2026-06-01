@@ -213,7 +213,7 @@ export async function processSendChunk(p: SendChunkParams): Promise<SendChunkRes
       };
     });
     try {
-      sentCount = await insertAlimtalkQueue(p.companyTables, alimtalkRows);
+      sentCount = await insertAlimtalkQueue(p.companyTables, alimtalkRows, p.campaignId);
     } catch (alimtalkErr) {
       console.error('[direct-send-processor] 알림톡 INSERT 실패:', alimtalkErr);
       sentCount = 0;

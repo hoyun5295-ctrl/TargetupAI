@@ -302,6 +302,7 @@ export default function Dashboard() {
   const [showAlimtalkSend, setShowAlimtalkSend] = useState(false);
   // ★ D162-4 (2026-05-15) 4차: 직접타겟발송 → 알림톡 진입 시 추출된 수신자 그대로 인계 (Harold님 명시).
   const [alimtalkInitialRecipients, setAlimtalkInitialRecipients] = useState<any[]>([]);
+  const [alimtalkResetSignal, setAlimtalkResetSignal] = useState(0);  // ★ #2 (2026-06-01): 알림톡 발송 성공 → 모달 수신자 리스트 초기화 신호
   const [showTargetSend, setShowTargetSend] = useState(false);
   // ★ D152+ (PDF 0511 funnel fix): 직접발송 진입 시 24h 1회 AI 다듬기 안내 팝업.
   //   67사 무료체험 funnel(고객DB 업로드 3%) 절대 병목 해소 — AI 가치 DB 없이 즉시 체감 동선.
@@ -569,6 +570,8 @@ export default function Dashboard() {
       setDirectRecipients([]);
       setDirectMsgType('SMS');
       setKakaoMessage('');
+      // ★ #2 (2026-06-01): 알림톡 발송 성공 시 알림톡 모달 수신자 리스트 초기화 신호 (모달 유지·리스트만 비움)
+      if (isAlimtalk) setAlimtalkResetSignal((n) => n + 1);
       setMmsUploadedImages([]);
       setReserveEnabled(false);
       setReserveDateTime('');
@@ -3545,8 +3548,10 @@ const campaignData = {
         onClose={() => {
           setShowAlimtalkSend(false);
           setAlimtalkInitialRecipients([]);
+          setDirectSendChannel('sms');  // ★ #1 (2026-06-01): 알림톡 닫을 때 채널 복원 — 밑 직접발송 패널 알림톡 잔존 방지
         }}
         initialRecipients={alimtalkInitialRecipients}
+        resetSignal={alimtalkResetSignal}
         alimtalkSenders={alimtalkSenders}
         alimtalkTemplates={kakaoTemplates as any}
         customerFieldOptions={[]}
