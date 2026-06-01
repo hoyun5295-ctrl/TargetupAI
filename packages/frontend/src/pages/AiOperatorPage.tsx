@@ -238,6 +238,17 @@ export default function AiOperatorPage() {
   const navigate = useNavigate();
   const { user } = useAuthStore();
   const companyName = (user as any)?.company?.name || '';
+  // 종량제: AI 크레딧 잔여 (헤더 칩 — creditEnabled일 때만 표시)
+  const [aiCredit, setAiCredit] = useState<any>(null);
+  useEffect(() => {
+    (async () => {
+      try {
+        const token = localStorage.getItem('token');
+        const res = await fetch('/api/companies/my-credit', { headers: { Authorization: `Bearer ${token}` } });
+        if (res.ok) { const d = await res.json(); if (d && d.success !== false) setAiCredit(d); }
+      } catch { /* 조회 실패 시 칩 숨김 */ }
+    })();
+  }, []);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   // ★ D174 (2026-05-19): PerformancePage가 sessionStorage에 저장한 prefill objective 자동 로드
   const [objective, setObjective] = useState(() => {
@@ -552,6 +563,21 @@ export default function AiOperatorPage() {
           </button>
 
           <div className="flex items-center gap-3">
+            {aiCredit?.creditEnabled && (aiCredit.planCredits > 0 || aiCredit.purchased > 0) && (
+              <button
+                type="button"
+                onClick={() => navigate('/pricing')}
+                className="hidden sm:inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-white/10 px-3 py-1.5 text-xs transition-all hover:bg-white/15"
+                title="요금제 · 크레딧 보기"
+              >
+                <Sparkles className="w-3.5 h-3.5 text-fuchsia-300" />
+                <span className="font-semibold tabular-nums text-white/90">{Number(aiCredit.total).toLocaleString()}</span>
+                <span className="text-white/40">크레딧</span>
+                {Number(aiCredit.monthlyUsed) > 0 && (
+                  <span className="text-white/40">· 이번달 {Number(aiCredit.monthlyUsed).toLocaleString()}</span>
+                )}
+              </button>
+            )}
             <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-amber-300 to-fuchsia-400 flex items-center justify-center shadow-lg shadow-fuchsia-500/30">
               <Sparkles className="w-5 h-5 text-indigo-950" />
             </div>

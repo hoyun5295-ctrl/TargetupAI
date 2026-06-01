@@ -12,7 +12,6 @@ import AiPreviewModal from '../components/AiPreviewModal';
 import AiSendTypeModal from '../components/AiSendTypeModal';
 import AnalysisModal from '../components/AnalysisModal';
 import BalanceModals from '../components/BalanceModals';
-import CreditGauge from '../components/credit/CreditGauge';
 import CalendarModal from '../components/CalendarModal';
 import DeltaBadge from '../components/dashboard/DeltaBadge';
 import CardDetailModal from '../components/dashboard/CardDetailModal';
@@ -2374,22 +2373,6 @@ const campaignData = {
         <div className="flex flex-col lg:flex-row gap-4 mb-4">
           {/* ===== 좌측 60%: 요금제/발송현황 + 동적카드 ===== */}
           <div className="w-full lg:w-[60%] flex flex-col gap-4">
-            {/* 종량제 Phase 5: AI 크레딧 잔여 (요금제 크레딧 또는 구매분이 있을 때만 — FREE 0크레딧 카드 숨김) */}
-            {creditInfo?.creditEnabled && (creditInfo.planCredits > 0 || creditInfo.purchased > 0) && (
-              <CreditGauge
-                variant="light"
-                compact
-                total={creditInfo.total}
-                baseRemaining={creditInfo.baseRemaining}
-                purchased={creditInfo.purchased}
-                planCredits={creditInfo.planCredits}
-                monthlyUsed={creditInfo.monthlyUsed}
-                resetAt={creditInfo.resetAt}
-                billingType={creditInfo.billingType}
-                overageLimit={creditInfo.overageLimit}
-                onRecharge={() => navigate('/pricing?openContactModal=true')}
-              />
-            )}
             {/* 1행: 요금제 + 발송현황 — 모바일 stacked + sm+ 좌우 */}
             <div className="flex flex-col sm:flex-row gap-4">
               {/* 요금제 현황 */}
@@ -2480,6 +2463,24 @@ const campaignData = {
                     <div className="text-xs text-gray-400 mt-1">총 사용금액</div>
                   </div>
                 </div>
+                {/* 종량제: AI 크레딧 잔여 (선불·후불 모두 — 잔액 현황) */}
+                {creditInfo?.creditEnabled && (creditInfo.planCredits > 0 || creditInfo.purchased > 0) && (
+                  <div className="mt-3 pt-3 border-t border-gray-100 flex items-center justify-between flex-wrap gap-2">
+                    <button onClick={() => navigate('/pricing')} className="flex items-center gap-1.5 group">
+                      <span className="flex h-5 w-5 items-center justify-center rounded-md bg-gradient-to-br from-violet-500 to-fuchsia-500">
+                        <Sparkles className="h-3 w-3 text-white" />
+                      </span>
+                      <span className="text-xs text-gray-400 group-hover:text-violet-600 transition-colors">AI 크레딧 잔여</span>
+                      <span className="text-lg font-bold text-violet-700">{Number(creditInfo.total || 0).toLocaleString()}</span>
+                      <span className="text-xs text-gray-400">크레딧</span>
+                    </button>
+                    <div className="flex items-center gap-3 text-[11px] text-gray-400">
+                      <span>기본 {Number(creditInfo.baseRemaining || 0).toLocaleString()}</span>
+                      <span>구매 {Number(creditInfo.purchased || 0).toLocaleString()}</span>
+                      <span>이번달 사용 {Number(creditInfo.monthlyUsed || 0).toLocaleString()}</span>
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
 

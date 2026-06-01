@@ -107,7 +107,25 @@
 
 ---
 
-### 🚀 D228+ 2026-06-01 세션 종결 (최신) — 종량제 Phase 1 + Phase 2 전체 완료 + 스팸 정책 변경
+### 🚀 D229+ 2026-06-01 세션 종결 (최신) — 종량제 Phase 3 + Phase 4/5 (크레딧 가시성·관리) 구현·배포
+
+> **★★★ 종량제 크레딧 시스템 전 구간 구현·배포 완료. 정상 작동(엔터프라이즈 7,000 크레딧 표시 확인). 남은 건 UI 디자인 폴리시뿐 — `docs/superpowers/specs/2026-06-01-credit-ui-design-polish.md` 정독(다음 세션 완료 후 삭제). ★★★**
+>
+> **배포 완료:**
+> - Phase 3 plan-guard: 5 AI 잠금(ai_messaging/ai_premium/mobile_dm/auto_campaign/ai_cdp) 전 유료 개방 + isAiOperatorAllowed 전 유료(ENTERPRISE 전용 폐지) + cdp-auth.ts CDP 전 유료. 스팸(spam_filter/auto_spam_test)은 플래그 기반 유지(현금/후불).
+> - Phase 4/5 backend: ai-credit CT 확장(getMonthlyUsage·adjustCredit·getCreditTransactions·sumDeductRows) + 고객 `GET /api/companies/my-credit` + 슈퍼관리자 5 endpoint(credit·credit-adjust·credit-transactions·postpaid-overage-limit + plans PUT ai_credits_per_month). 단위검증 adjust 8 GREEN + calc 26 + plan-guard 31 회귀 GREEN.
+> - Phase 5 frontend: CreditGauge 공용 + PricingPage(게이지·작업당·요금제별 월크레딧·만원당) + 슈퍼관리자 크레딧 패널.
+> - DB: plans.ai_credits_per_month UPDATE(STARTER70/BASIC200/PRO1000/BUSINESS3500/ENTERPRISE7000/TRIAL1000/FREE0) + ai_credit_transactions.reason ALTER.
+>
+> **미배포 로컬(다음 세션 폴리시와 함께 배포):** Dashboard 맨 위 큰 카드 → 발송 현황 안 "AI 크레딧 잔여" 한 줄 / AdminDashboard 고객사 상세 "AI설정"→"크레딧 💳" 탭 전환.
+>
+> **다음 세션 = UI 디자인 폴리시**(위 .md): AI Operator 우측상단 크레딧 + PricingPage 게이지 컴팩트화 + 요금제별 기능 종량제 재정리 + 슈퍼관리자 패널 현대화 + 전체 균형 → tsc + 자가 grep + tp-push → .md 삭제.
+>
+> **교훈(이번 세션):** ① 패키지 — 메인 대시보드·서비스·슈퍼관리자=`packages/frontend` / 고객사 관리자 "관리" 페이지만=`packages/company-frontend`. ② 난독화 번들은 grep으로 문자열 확인 불가 — 배포 반영은 화면(시크릿창)으로만 확인. ③ Harold 보고("안 보인다")는 그대로 인정, 번들 grep으로 반박 금지.
+
+---
+
+### 🚀 D228+ 2026-06-01 세션 — 종량제 Phase 1 + Phase 2 전체 완료 + 스팸 정책 변경
 
 > **★★★ [2026-06-01 갱신] Phase 2 전체 완료(①companyId 전수 + ②dm-builder 묶음 + ③스팸 크레딧 비대상 환원 + ④운영 안전망 + 후불 overage 코어). 다음 세션 = Phase 3 plan-guard + Phase 2~3 통합 배포. 진입 = `docs/superpowers/handoffs/2026-06-02-credit-pricing-phase3-deploy-handoff.md` 정독. ★★★**
 >

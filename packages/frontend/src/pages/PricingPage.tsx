@@ -3,7 +3,9 @@ import { useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../stores/authStore';
 import { formatDate } from '../utils/formatDate';
 import { COMPANY_PHONE, COMPANY_PHONE_TEL } from '../constants/company';
-import CreditGauge from '../components/credit/CreditGauge';
+import { Sparkles, Users, Server, Cpu, Check } from 'lucide-react';
+import CreditSummaryBar from '../components/credit/CreditSummaryBar';
+import { PLAN_INFRA, creditConversions, COMMON_SERVICE_LINE } from '../constants/credit';
 
 interface Plan {
   id: string;
@@ -214,33 +216,11 @@ export default function PricingPage() {
     return Math.min(100, (Number(companyInfo.current_customers) / Number(companyInfo.max_customers)) * 100);
   };
 
-  const getPlanFeatures = (planCode: string) => {
-    const features: Record<string, string[]> = {
-      STARTER: ['기본 SMS/LMS/MMS 발송', '엑셀 업로드 · AI 자동매핑', '직접타겟발송', '캘린더 관리', '발송 결과 조회', '스팸필터 테스트'],
-      BASIC: ['STARTER 기능 포함', 'AI 타겟 추천', 'AI 문구 생성', 'AI 문안 다듬기', 'AI 추천발송', '대행발송 서비스'],
-      PRO: [
-        'BASIC 기능 포함',
-        '자동발송 5건 · AI 문안생성',
-        '캠페인 성과분석 · 리타겟팅',
-        '모바일 DM 제작',
-        '스팸필터 테스트 자동화',
-        '실시간 DB 동기화',
-      ],
-      BUSINESS: [
-        'PRO 기능 포함',
-        'AI 마케팅분석(고급)',
-        '자동발송 10건',
-        '맞춤 리포트',
-        '전담 매니저 · SLA 보장',
-      ],
-      ENTERPRISE: [
-        'BUSINESS 기능 포함',
-        '자동발송 무제한',
-        '온프레미스 설치',
-        '커스텀 개발 · 24/7 지원',
-      ],
-    };
-    return features[planCode] || [];
+  // 종량제 — 등급별 기능 차등 폐지(스타터부터 전 기능 동일). 인프라 등급 아이콘만 등급별로 구분.
+  const infraIcon = (planCode: string) => {
+    if (planCode === 'ENTERPRISE') return Cpu;
+    if (planCode === 'BUSINESS') return Server;
+    return Users;
   };
 
   const getRecommendedPlan = () => {
@@ -251,6 +231,9 @@ export default function PricingPage() {
   };
 
   const recommendedPlanId = getRecommendedPlan();
+
+  // 크레딧 시각화 기준값 — 상대 게이지(최대 크레딧 기준)
+  const maxCredits = Math.max(1, ...plans.map(p => Number(p.ai_credits_per_month) || 0));
 
   if (loading) {
     return (
@@ -416,35 +399,40 @@ export default function PricingPage() {
           </div>
         )}
 
-        {/* 종량제 Phase 5: 내 크레딧 게이지 + 작업당 안내 (FREE 0크레딧 숨김) */}
+        {/* 종량제: 크레딧 요약 바 (FREE 0크레딧 숨김) */}
         {myCredit?.creditEnabled && (myCredit.planCredits > 0 || myCredit.purchased > 0) && (
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6">
-            <CreditGauge
-              variant="light"
+          <div className="mb-6">
+            <CreditSummaryBar
               total={myCredit.total}
               baseRemaining={myCredit.baseRemaining}
               purchased={myCredit.purchased}
               planCredits={myCredit.planCredits}
               monthlyUsed={myCredit.monthlyUsed}
-              resetAt={myCredit.resetAt}
               billingType={myCredit.billingType}
               overageLimit={myCredit.overageLimit}
               onRecharge={() => setShowContactModal(true)}
             />
-            <div className="rounded-2xl bg-white border border-violet-100 shadow-sm p-5">
-              <div className="text-xs font-medium text-slate-500 mb-2">작업당 크레딧</div>
-              <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-sm text-slate-600">
-                <span>풀분석 <b className="text-slate-900">20</b></span>
-                <span>여정 설계 <b className="text-slate-900">10</b></span>
-                <span>모바일 DM <b className="text-slate-900">5</b></span>
-                <span>인앱·생성 <b className="text-slate-900">3</b></span>
-                <span>문안·분석 <b className="text-slate-900">2</b></span>
-                <span>다듬기·질문 <b className="text-slate-900">1</b></span>
-              </div>
-              <p className="mt-3 text-[11px] text-slate-400">AI 작업이 성공했을 때만 차감되고, 실패 시 차감되지 않습니다. 스팸필터 테스트는 크레딧과 무관합니다.</p>
-            </div>
           </div>
         )}
+
+        {/* 종량제 이득 띠 — 왜 크레딧이 이득인지 한눈에 */}
+        <div className="mb-5 overflow-hidden rounded-2xl bg-gradient-to-r from-violet-600 via-fuchsia-600 to-violet-600 p-px shadow-sm">
+          <div className="flex flex-wrap items-center gap-x-6 gap-y-3 rounded-[15px] bg-white px-5 py-4">
+            <div className="flex items-center gap-2.5">
+              <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-violet-500 to-fuchsia-500 shadow-md shadow-violet-200">
+                <Sparkles className="h-5 w-5 text-white" />
+              </div>
+              <div>
+                <div className="text-sm font-bold text-slate-900">종량제 — 쓴 만큼만</div>
+                <div className="text-[11px] text-slate-500">성공한 작업만 차감 · 실패 0 차감 · 스팸필터 무관</div>
+              </div>
+            </div>
+            <div className="hidden h-9 w-px bg-slate-200 md:block" />
+            <div className="text-xs text-slate-600">
+              <b className="text-slate-900">전 플랜 동일 서비스</b><br className="hidden sm:block" /> 차이는 크레딧 양과 인프라뿐
+            </div>
+          </div>
+        </div>
 
         <h2 className="text-lg font-semibold mb-4">요금제 비교</h2>
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4">
@@ -455,23 +443,37 @@ export default function PricingPage() {
             const isFreeOrTrial = companyInfo?.plan_code === 'FREE' || companyInfo?.plan_code === 'TRIAL';
             const isUpgrade = companyInfo && (isFreeOrTrial || plan.max_customers > (companyInfo.max_customers || 0));
             const isRecommended = plan.id === recommendedPlanId && companyInfo?.plan_code === 'FREE';
+            // 종량제 크레딧 시각화 (전부 실제 plan 데이터 — 임의 상수 없음)
+            const credits = Number(plan.ai_credits_per_month) || 0;
+            const creditPct = Math.max(4, Math.round((credits / maxCredits) * 100));
+            const conv = creditConversions(credits);
+            const infra = PLAN_INFRA[plan.plan_code] || { label: '고성능 공유 서버', benefit: '당사 IDC 고성능 서버를 멀티테넌트로 사용', premium: false };
+            const InfraIcon = infraIcon(plan.plan_code);
             
             return (
               <div
                 key={plan.id}
-                className={`bg-white rounded-xl shadow-sm overflow-hidden flex flex-col ${
-                  isCurrentPlan ? 'ring-2 ring-blue-500' : ''
-                } ${isRecommended ? 'ring-2 ring-purple-500' : ''}`}
+                className={`relative bg-white rounded-xl overflow-hidden flex flex-col transition-shadow ${
+                  isCurrentPlan ? 'ring-2 ring-blue-500 shadow-sm' :
+                  isRecommended ? 'ring-2 ring-purple-500 shadow-sm' :
+                  infra.premium ? 'ring-1 ring-violet-200 shadow-md shadow-violet-100' : 'shadow-sm'
+                }`}
               >
                 <div className={`p-4 ${
                   isRecommended ? 'bg-gradient-to-r from-purple-600 to-blue-600 text-white' :
-                  isCurrentPlan ? 'bg-blue-50' : 'bg-gray-50'
+                  isCurrentPlan ? 'bg-blue-50' :
+                  infra.premium ? 'bg-gradient-to-r from-violet-50 to-fuchsia-50' : 'bg-gray-50'
                 }`}>
                   {isRecommended && (
                     <div className="text-xs font-semibold mb-1 text-yellow-300">👉 추천</div>
                   )}
                   {isCurrentPlan && (
                     <div className="text-xs font-semibold mb-1 text-blue-600">현재 플랜</div>
+                  )}
+                  {!isRecommended && !isCurrentPlan && infra.premium && (
+                    <div className="mb-1 inline-flex items-center gap-1 text-[10px] font-bold text-violet-600">
+                      <Sparkles className="h-3 w-3" /> 전용 인프라
+                    </div>
                   )}
                   <h3 className={`text-lg font-bold ${
                     isRecommended ? 'text-white' : 'text-gray-900'
@@ -492,28 +494,48 @@ export default function PricingPage() {
                 </div>
 
                 <div className="p-4 flex-1 flex flex-col">
-                  <div className="text-sm text-gray-600 mb-3">
+                  <div className="text-xs text-gray-500 mb-3">
                     관리 가능 DB <span className="font-semibold text-gray-900">{plan.plan_code === 'ENTERPRISE' ? '제한없음' : `${formatNumber(plan.max_customers)}명`}</span>
                   </div>
-                  {plan.ai_credits_per_month != null && plan.ai_credits_per_month > 0 && (
-                    <div className="text-sm text-gray-600 mb-3">
-                      월 AI 크레딧 <span className="font-semibold text-violet-700">{formatNumber(plan.ai_credits_per_month)}</span>
-                      {plan.monthly_price > 0 && (
-                        <span className="ml-1 text-[11px] text-gray-400">만원당 {Math.round(plan.ai_credits_per_month / (plan.monthly_price / 10000))}</span>
-                      )}
+
+                  {/* 월 AI 크레딧 — 히어로 + 크레딧 환산(능력 기반) */}
+                  {credits > 0 ? (
+                    <div className="rounded-xl border border-violet-100 bg-violet-50/40 p-3 mb-3">
+                      <div className="text-[11px] font-medium text-violet-700">월 AI 크레딧</div>
+                      <div className="mt-0.5 flex items-end gap-1">
+                        <span className="text-2xl font-bold tabular-nums text-slate-900">{formatNumber(credits)}</span>
+                        <span className="mb-0.5 text-[11px] text-slate-400">크레딧</span>
+                      </div>
+                      <div className="mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-violet-100">
+                        <div className="h-full rounded-full bg-gradient-to-r from-violet-500 to-fuchsia-500" style={{ width: `${creditPct}%` }} />
+                      </div>
+                      <div className="mt-2 text-[11px] leading-relaxed text-slate-500">
+                        <span className="text-slate-400">이 크레딧으로</span> 풀분석 <b className="text-slate-700">{formatNumber(conv.fullAnalysis)}</b>회 · DM <b className="text-slate-700">{formatNumber(conv.dm)}</b>건 · 문안 <b className="text-slate-700">{formatNumber(conv.copy)}</b>건
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="rounded-xl border border-violet-100 bg-violet-50/40 p-3 mb-3 text-[11px] text-slate-500">
+                      월 AI 크레딧 <b className="text-violet-700">맞춤 산정</b> · 상담 시 안내
                     </div>
                   )}
 
-                  <ul className="space-y-2 text-sm">
-                    {getPlanFeatures(plan.plan_code).map((feature, idx) => (
-                      <li key={idx} className="flex items-start gap-2">
-                        <svg className="w-4 h-4 text-green-500 mt-0.5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                        </svg>
-                        <span className="text-gray-600">{feature}</span>
-                      </li>
-                    ))}
-                  </ul>
+                  {/* 인프라 등급 — 비즈니스·엔터 전용 강조 */}
+                  <div className={`rounded-xl border p-2.5 mb-3 ${infra.premium ? 'border-violet-200 bg-gradient-to-r from-violet-50 to-fuchsia-50' : 'border-gray-100 bg-gray-50'}`}>
+                    <div className="flex items-center gap-1.5">
+                      <InfraIcon className={`h-4 w-4 flex-shrink-0 ${infra.premium ? 'text-violet-600' : 'text-slate-400'}`} />
+                      <span className={`text-xs font-bold ${infra.premium ? 'text-violet-800' : 'text-slate-600'}`}>{infra.label}</span>
+                      {infra.premium && (
+                        <span className="ml-auto rounded-full bg-violet-600 px-1.5 py-0.5 text-[9px] font-bold text-white">전용</span>
+                      )}
+                    </div>
+                    <div className="mt-1 text-[10px] leading-snug text-slate-400">{infra.benefit}</div>
+                  </div>
+
+                  {/* 공통 — 스타터부터 전 기능 동일 */}
+                  <div className="flex items-start gap-1.5 text-[11px] text-slate-500">
+                    <Check className="mt-0.5 h-3.5 w-3.5 flex-shrink-0 text-emerald-500" />
+                    <span>{COMMON_SERVICE_LINE}</span>
+                  </div>
 
                   <div className="mt-auto pt-4">
                     {isCurrentPlan ? (
