@@ -1373,11 +1373,13 @@ router.post('/direct-send/commit', async (req: Request, res: Response) => {
       alimtalkTemplateCode, alimtalkVariableMap, alimtalkButtonJson, alimtalkNextType, alimtalkNextContents, alimtalkNextSubject, alimtalkEtcJson,
     };
     const campaignResult = await query(
-      `INSERT INTO campaigns (company_id, campaign_name, message_type, message_content, subject, callback_number, target_count, send_type, status, scheduled_at, message_template, message_subject, created_by, is_ad, send_channel, staging_id, send_phase, processed_count, send_config, kakao_template_id, created_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, 'direct', $8, $9, $10, $11, $12, $13, $14, $15, 'queued', 0, $16, $17, NOW()) RETURNING id`,
+      `INSERT INTO campaigns (company_id, campaign_name, message_type, message_content, subject, callback_number, target_count, send_type, status, scheduled_at, message_template, message_subject, created_by, is_ad, send_channel, staging_id, send_phase, processed_count, send_config, kakao_template_id, mms_image_paths, created_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, 'direct', $8, $9, $10, $11, $12, $13, $14, $15, 'queued', 0, $16, $17, $18, NOW()) RETURNING id`,
       [companyId, `직접발송 ${new Date().toLocaleString('ko-KR')}`, msgType, message || '', subject || null, callback || null, total,
        scheduled ? 'scheduled' : 'sending', scheduled && scheduledAt ? new Date(scheduledAt) : null, message || '', subject || null,
-       userId, finalIsAd, directChannel, stagingId, JSON.stringify(sendConfig), alimtalkTemplateUuid]
+       userId, finalIsAd, directChannel, stagingId, JSON.stringify(sendConfig), alimtalkTemplateUuid,
+       // ★ MMS 이미지 미표시 fix (2026-06-01): commit 경로가 send_config에만 저장 → 결과·캘린더가 읽는 mms_image_paths 컬럼에도 저장(옛 /direct-send 동일 패턴)
+       mmsImagePaths && mmsImagePaths.length > 0 ? JSON.stringify(mmsImagePaths) : null]
     );
     const campaignId = campaignResult.rows[0].id;
 

@@ -232,7 +232,15 @@ export default function CalendarModal({ onClose, token, onEdit, embedded }: Cale
                     <span className="text-gray-500 w-16">채널</span>
                     <span className="font-medium">{selectedCampaign.message_type}</span>
                   </div>
-                  
+
+                  {/* 제목 (LMS/MMS) — 직원 신고(2026-06-01): 리뉴얼 후 캘린더에서 제목 미표시 정정 */}
+                  {(selectedCampaign.subject || selectedCampaign.message_subject) && (
+                    <div className="flex items-start gap-2">
+                      <span className="text-gray-500 w-16 shrink-0">제목</span>
+                      <span className="font-medium flex-1 break-all">{selectedCampaign.subject || selectedCampaign.message_subject}</span>
+                    </div>
+                  )}
+
                   {/* 대상 */}
                   <div className="flex items-center gap-2">
                     <span className="text-gray-500 w-16">대상</span>
