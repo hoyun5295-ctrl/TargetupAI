@@ -112,6 +112,19 @@ export function getCreditCost(source: string | undefined | null): number {
   return CREDIT_COST_MAP[source] ?? 0;
 }
 
+// ── 크레딧 충전 단가 (D229+ 종량제 — Harold 확정) ─────────────────
+/** 1 크레딧당 원가(VAT 별도). 스타터 수준(150,000/70≈2,143) 기준 2,000원. 화면 단가 노출 금지. */
+export const CREDIT_UNIT_PRICE = 2000;
+export const CREDIT_VAT_RATE = 0.1;
+
+/** 충전 크레딧 수량 → 결제 금액(공급가/부가세/합계). 보너스 없음. */
+export function calcRechargeAmount(credits: number): { credits: number; supply: number; vat: number; total: number } {
+  const c = Math.max(0, Math.floor(Number(credits) || 0));
+  const supply = c * CREDIT_UNIT_PRICE;
+  const vat = Math.round(supply * CREDIT_VAT_RATE);
+  return { credits: c, supply, vat, total: supply + vat };
+}
+
 /** 이번달 사용량 = type 'deduct' 행의 amount 합 (순수). reset/grant/admin_deduct는 제외. */
 export function sumDeductRows(rows: Array<{ type: string; amount: number | string }>): number {
   return rows.reduce((sum, r) => sum + (r.type === 'deduct' ? (Number(r.amount) || 0) : 0), 0);

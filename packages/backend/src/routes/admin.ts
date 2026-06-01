@@ -2304,6 +2304,57 @@ router.put('/companies/:id/postpaid-overage-limit', authenticate, requireSuperAd
   }
 });
 
+// ===== AI 크레딧 충전 요청 관리 (후불 — 슈퍼관리자 승인) =====
+
+// 크레딧 충전 요청 목록 (status 필터)
+router.get('/credit-requests', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
+  try {
+    const page = parseInt(req.query.page as string) || 1;
+    const status = (req.query.status as string) || undefined;
+    const { getRechargeRequests } = await import('../utils/ai-credit-recharge');
+    const r = await getRechargeRequests({ status, page, pageSize: 20 });
+    res.json({ requests: r.rows, total: r.total, page, totalPages: Math.ceil(r.total / 20) });
+  } catch (err: any) {
+    if ((err?.message || '').includes('does not exist')) {
+      return res.status(503).json({ error: 'DB 마이그레이션 필요 — ai_credit_requests 테이블 생성 요청', code: 'DB_MIGRATION_PENDING' });
+    }
+    console.error('충전 요청 목록 실패:', err);
+    res.status(500).json({ error: '충전 요청 목록 실패' });
+  }
+});
+
+// 크레딧 충전 요청 승인 (구매분 지급 + 월말 청구 대상)
+router.put('/credit-requests/:id/approve', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
+  const { id } = req.params;
+  const adminId = (req as any).user?.userId;
+  try {
+    const { approveRechargeRequest } = await import('../utils/ai-credit-recharge');
+    const r = await approveRechargeRequest({ requestId: id, adminId, adminNote: req.body?.adminNote });
+    res.json({ message: `${r.credits.toLocaleString()} 크레딧을 지급했습니다. (월말 청구 대상)`, ...r });
+  } catch (err: any) {
+    if (err?.name === 'RechargeError') return res.status(400).json({ error: err.message, code: err.code });
+    console.error('충전 요청 승인 실패:', err);
+    res.status(500).json({ error: '충전 요청 승인 실패' });
+  }
+});
+
+// 크레딧 충전 요청 거절
+router.put('/credit-requests/:id/reject', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
+  const { id } = req.params;
+  const adminId = (req as any).user?.userId;
+  const adminNote = (req.body?.adminNote || '').trim();
+  if (!adminNote) return res.status(400).json({ error: '거절 사유를 입력해주세요.' });
+  try {
+    const { rejectRechargeRequest } = await import('../utils/ai-credit-recharge');
+    await rejectRechargeRequest({ requestId: id, adminId, adminNote });
+    res.json({ message: '충전 요청을 거절했습니다.' });
+  } catch (err: any) {
+    if (err?.name === 'RechargeError') return res.status(400).json({ error: err.message, code: err.code });
+    console.error('충전 요청 거절 실패:', err);
+    res.status(500).json({ error: '충전 요청 거절 실패' });
+  }
+});
+
 // ===== 충전 요청 관리 API =====
 
 // 충전 요청 목록 조회 (필터 + 페이지네이션)

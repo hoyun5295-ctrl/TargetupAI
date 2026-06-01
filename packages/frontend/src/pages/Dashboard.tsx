@@ -12,6 +12,7 @@ import AiPreviewModal from '../components/AiPreviewModal';
 import AiSendTypeModal from '../components/AiSendTypeModal';
 import AnalysisModal from '../components/AnalysisModal';
 import BalanceModals from '../components/BalanceModals';
+import CreditHistoryModal from '../components/credit/CreditHistoryModal';
 import CalendarModal from '../components/CalendarModal';
 import DeltaBadge from '../components/dashboard/DeltaBadge';
 import CardDetailModal from '../components/dashboard/CardDetailModal';
@@ -286,6 +287,7 @@ export default function Dashboard() {
 
   // 종량제 Phase 5: AI 크레딧 잔여 조회 (상시 노출 카드용 — creditEnabled일 때만 표시)
   const [creditInfo, setCreditInfo] = useState<any>(null);
+  const [showCreditHistory, setShowCreditHistory] = useState(false); // 크레딧 사용 이력 모달
   useEffect(() => {
     (async () => {
       try {
@@ -2466,7 +2468,7 @@ const campaignData = {
                 {/* 종량제: AI 크레딧 잔여 (선불·후불 모두 — 잔액 현황) */}
                 {creditInfo?.creditEnabled && (creditInfo.planCredits > 0 || creditInfo.purchased > 0) && (
                   <div className="mt-3 pt-3 border-t border-gray-100 flex items-center justify-between flex-wrap gap-2">
-                    <button onClick={() => navigate('/pricing')} className="flex items-center gap-1.5 group">
+                    <button onClick={() => setShowCreditHistory(true)} className="flex items-center gap-1.5 group">
                       <span className="flex h-5 w-5 items-center justify-center rounded-md bg-gradient-to-br from-violet-500 to-fuchsia-500">
                         <Sparkles className="h-3 w-3 text-white" />
                       </span>
@@ -2480,6 +2482,12 @@ const campaignData = {
                       <span>이번달 사용 {Number(creditInfo.monthlyUsed || 0).toLocaleString()}</span>
                     </div>
                   </div>
+                )}
+                {showCreditHistory && (
+                  <CreditHistoryModal
+                    onClose={() => setShowCreditHistory(false)}
+                    onGoPricing={() => { setShowCreditHistory(false); navigate('/pricing'); }}
+                  />
                 )}
               </div>
             </div>

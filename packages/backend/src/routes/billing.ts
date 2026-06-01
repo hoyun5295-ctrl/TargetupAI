@@ -370,11 +370,23 @@ router.post('/generate', async (req: Request, res: Response) => {
     const spamSmsCost = prices.SMS;
     const spamLmsCost = prices.LMS;
 
+    // ★ D229+ 후불 AI 크레딧 충전 합산 — 이 기간 승인·미청구분(supply=공급가 VAT 별도)을 정산서에 합산.
+    //   선불 충전은 status='completed'(즉시 결제)라 미포함 — 후불(status='approved')만 월말 청구 대상.
+    const creditChargeRes = await pool.query(
+      `SELECT id, credits, supply_amount FROM ai_credit_requests
+        WHERE company_id = $1::uuid AND status = 'approved' AND billed = false
+          AND processed_at::date >= $2 AND processed_at::date <= $3`,
+      [company_id, billing_start, billing_end]
+    );
+    const aiCreditSupply = creditChargeRes.rows.reduce((s: number, r: any) => s + Number(r.supply_amount || 0), 0);
+    const aiCreditCount = creditChargeRes.rows.reduce((s: number, r: any) => s + Number(r.credits || 0), 0); // 총 크레딧 수량(명세 수량 칸 = 크레딧×단가=공급가)
+
     const subtotal =
       (totalSms * prices.SMS) + (totalLms * prices.LMS) +
       (totalMms * prices.MMS) + (totalKakao * prices.KAKAO) +
       (totalTestSms * prices.TEST_SMS) + (totalTestLms * prices.TEST_LMS) +
-      (totalSpamSms * spamSmsCost) + (totalSpamLms * spamLmsCost);
+      (totalSpamSms * spamSmsCost) + (totalSpamLms * spamLmsCost) +
+      aiCreditSupply;
     const vat = Math.round(subtotal * 0.1);
     const totalAmount = subtotal + vat;
 
@@ -386,8 +398,8 @@ router.post('/generate', async (req: Request, res: Response) => {
         sms_unit_price, lms_unit_price, mms_unit_price, kakao_unit_price,
         test_sms_count, test_lms_count, test_sms_unit_price, test_lms_unit_price,
         spam_filter_sms_count, spam_filter_lms_count, spam_filter_sms_unit_price, spam_filter_lms_unit_price,
-        subtotal, vat, total_amount, created_by
-      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26)
+        subtotal, vat, total_amount, ai_credit_count, ai_credit_supply, created_by
+      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28)
       RETURNING *`,
       [
         company_id, user_id || null, billing_year, billing_month, billing_start, billing_end,
@@ -395,10 +407,18 @@ router.post('/generate', async (req: Request, res: Response) => {
         prices.SMS, prices.LMS, prices.MMS, prices.KAKAO,
         totalTestSms, totalTestLms, prices.TEST_SMS, prices.TEST_LMS,
         totalSpamSms, totalSpamLms, spamSmsCost, spamLmsCost,
-        subtotal, vat, totalAmount, adminId
+        subtotal, vat, totalAmount, aiCreditCount, aiCreditSupply, adminId
       ]
     );
     const billing = billingResult.rows[0];
+
+    // ★ D229+ 합산한 후불 크레딧 충전 행을 billed 처리 (id 배열로 정확히 — 중복 청구 차단)
+    if (creditChargeRes.rows.length > 0) {
+      await pool.query(
+        `UPDATE ai_credit_requests SET billed = true, billed_invoice_id = $1::uuid WHERE id = ANY($2::uuid[])`,
+        [billing.id, creditChargeRes.rows.map((r: any) => r.id)]
+      );
+    }
 
     // 9) billing_items INSERT (일자별 상세)
     const itemValues: any[][] = [];
@@ -700,6 +720,7 @@ router.get('/:id/pdf', async (req: Request, res: Response) => {
     drawRow('테스트 LMS', n(bil.test_lms_count), n(bil.test_lms_unit_price), n(bil.test_lms_count) * n(bil.test_lms_unit_price), '#fefce8');
     drawRow('스팸필터 SMS', n(bil.spam_filter_sms_count), n(bil.spam_filter_sms_unit_price), n(bil.spam_filter_sms_count) * n(bil.spam_filter_sms_unit_price), '#fef3c7');
     drawRow('스팸필터 LMS', n(bil.spam_filter_lms_count), n(bil.spam_filter_lms_unit_price), n(bil.spam_filter_lms_count) * n(bil.spam_filter_lms_unit_price), '#fef3c7');
+    drawRow('AI 크레딧 충전', n(bil.ai_credit_count), n(bil.ai_credit_count) > 0 ? Math.round(n(bil.ai_credit_supply) / n(bil.ai_credit_count)) : 0, n(bil.ai_credit_supply), '#f5f3ff');
 
     // 합계
     y += 15;
@@ -1450,6 +1471,11 @@ router.post('/:id/send-email', async (req: Request, res: Response) => {
               <td style="padding: 8px 0; color: #6B7280;">스팸필터</td>
               <td style="padding: 8px 0; text-align: right;">SMS ${n(bil.spam_filter_sms_count).toLocaleString()}건 + LMS ${n(bil.spam_filter_lms_count).toLocaleString()}건</td>
               <td style="padding: 8px 0; text-align: right; font-weight: 600;">₩${(n(bil.spam_filter_sms_count) * n(bil.spam_filter_sms_unit_price) + n(bil.spam_filter_lms_count) * n(bil.spam_filter_lms_unit_price)).toLocaleString()}</td>
+            </tr>` : ''}
+            ${n(bil.ai_credit_supply) > 0 ? `<tr style="border-bottom: 1px solid #F3F4F6; background: #F5F3FF;">
+              <td style="padding: 8px 0; color: #6B7280;">AI 크레딧 충전</td>
+              <td style="padding: 8px 0; text-align: right;">${n(bil.ai_credit_count).toLocaleString()} 크레딧</td>
+              <td style="padding: 8px 0; text-align: right; font-weight: 600;">₩${n(bil.ai_credit_supply).toLocaleString()}</td>
             </tr>` : ''}
           </table>
           <div style="background: #EEF2FF; padding: 16px; border-radius: 8px; text-align: right;">

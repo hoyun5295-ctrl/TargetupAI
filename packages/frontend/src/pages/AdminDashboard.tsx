@@ -281,6 +281,7 @@ const [messageDetailContent, setMessageDetailContent] = useState<{ name: string;
   const [showDepositRejectModal, setShowDepositRejectModal] = useState(false);
   const [depositTarget, setDepositTarget] = useState<any>(null);
   const [depositAdminNote, setDepositAdminNote] = useState('');
+  const [creditRequests, setCreditRequests] = useState<any[]>([]); // AI 크레딧 충전 요청 (후불 승인 대기)
 
 // ===== 정산 관리 =====
 const [billingCompanyId, setBillingCompanyId] = useState('');
@@ -421,6 +422,7 @@ const [emailSending, setEmailSending] = useState(false);
 useEffect(() => { if (activeTab === 'billing') { loadBillings(); loadInvoices(); } }, [activeTab]);
 useEffect(() => { if (activeTab === 'billing') loadBillings(); }, [filterYear]);
 useEffect(() => { if (activeTab === 'deposits') loadChargeManagement(1); }, [activeTab, chargeTxCompanyFilter, chargeTxTypeFilter, chargeTxMethodFilter, chargeTxStartDate, chargeTxEndDate]);
+useEffect(() => { if (activeTab === 'deposits') loadCreditRequests(); }, [activeTab]);
 useEffect(() => { if (activeTab === 'stats') loadSendStats(1); }, [activeTab]);
 useEffect(() => { if (activeTab === 'syncAgents') loadSyncAgents(); }, [activeTab]);
 useEffect(() => { if (activeTab === 'auditLogs') loadAuditLogs(1); }, [activeTab]);
@@ -1390,6 +1392,50 @@ const handleSendBillingEmail = async () => {
     } catch (error) {
       setModal({ type: 'alert', title: '오류', message: '네트워크 오류', variant: 'error' });
     }
+  };
+
+  // ── AI 크레딧 충전 요청 (후불 — 슈퍼관리자 승인) ───────────────
+  const loadCreditRequests = async () => {
+    try {
+      const token = localStorage.getItem('token');
+      const res = await fetch('/api/admin/credit-requests?status=pending', { headers: { Authorization: `Bearer ${token}` } });
+      if (res.ok) { const d = await res.json(); setCreditRequests(d.requests || []); }
+    } catch (e) { console.error('크레딧 충전 요청 로드 실패:', e); }
+  };
+
+  const handleApproveCreditRequest = (cr: any) => {
+    setModal({
+      type: 'confirm', title: 'AI 크레딧 충전 승인', variant: 'info',
+      message: `${cr.company_name} · ${Number(cr.credits).toLocaleString()} 크레딧을 지급하고 ${Number(cr.total_amount).toLocaleString()}원을 월말 청구 대상으로 처리합니다. 승인할까요?`,
+      onConfirm: async () => {
+        try {
+          const token = localStorage.getItem('token');
+          const res = await fetch(`/api/admin/credit-requests/${cr.id}/approve`, { method: 'PUT', headers: { Authorization: `Bearer ${token}` } });
+          const d = await res.json().catch(() => ({}));
+          if (res.ok) { setModal({ type: 'alert', title: '승인 완료', message: d.message || '지급되었습니다.', variant: 'success' }); loadCreditRequests(); }
+          else setModal({ type: 'alert', title: '승인 실패', message: d.error || '오류', variant: 'error' });
+        } catch { setModal({ type: 'alert', title: '오류', message: '네트워크 오류', variant: 'error' }); }
+      },
+    });
+  };
+
+  const handleRejectCreditRequest = (cr: any) => {
+    setModal({
+      type: 'confirm', title: 'AI 크레딧 충전 거절', variant: 'warning',
+      message: `${cr.company_name}의 ${Number(cr.credits).toLocaleString()} 크레딧 충전 요청을 거절할까요?`,
+      onConfirm: async () => {
+        try {
+          const token = localStorage.getItem('token');
+          const res = await fetch(`/api/admin/credit-requests/${cr.id}/reject`, {
+            method: 'PUT', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+            body: JSON.stringify({ adminNote: '슈퍼관리자 거절' }),
+          });
+          const d = await res.json().catch(() => ({}));
+          if (res.ok) { setModal({ type: 'alert', title: '거절 완료', message: d.message || '거절되었습니다.', variant: 'success' }); loadCreditRequests(); }
+          else setModal({ type: 'alert', title: '거절 실패', message: d.error || '오류', variant: 'error' });
+        } catch { setModal({ type: 'alert', title: '오류', message: '네트워크 오류', variant: 'error' }); }
+      },
+    });
   };
 
   const loadAllCampaigns = async (page = 1) => {
@@ -3624,6 +3670,30 @@ const handleApproveRequest = async (id: string) => {
         {/* 충전 관리 탭 (통합) */}
         {activeTab === 'deposits' && (
           <div className="space-y-4">
+            {/* AI 크레딧 충전 요청 (후불 — 승인 시 구매분 지급 + 월말 청구) */}
+            {creditRequests.length > 0 && (
+              <div className="bg-violet-50 border border-violet-200 rounded-lg p-4">
+                <h3 className="font-semibold text-violet-800 mb-3">AI 크레딧 충전 요청 {creditRequests.length}건 (후불)</h3>
+                <div className="space-y-2">
+                  {creditRequests.map((cr) => (
+                    <div key={cr.id} className="flex items-center justify-between bg-white rounded-lg px-4 py-3 border border-violet-100 flex-wrap gap-2">
+                      <div className="flex items-center gap-4 flex-wrap">
+                        <span className="px-2 py-0.5 rounded text-xs font-medium bg-violet-100 text-violet-800">크레딧 충전</span>
+                        <span className="font-medium text-gray-900">{cr.company_name}</span>
+                        <span className="font-bold text-lg text-violet-700">{Number(cr.credits).toLocaleString()} 크레딧</span>
+                        <span className="text-sm text-gray-500">월말 청구 {Number(cr.total_amount).toLocaleString()}원</span>
+                        <span className="text-xs text-gray-400">{formatDateTime(cr.created_at)}</span>
+                      </div>
+                      <div className="flex gap-2 flex-shrink-0">
+                        <button onClick={() => handleApproveCreditRequest(cr)} className="px-4 py-1.5 bg-violet-600 text-white rounded-lg text-sm font-medium hover:bg-violet-700 transition-colors">승인</button>
+                        <button onClick={() => handleRejectCreditRequest(cr)} className="px-4 py-1.5 bg-red-500 text-white rounded-lg text-sm font-medium hover:bg-red-600 transition-colors">거절</button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
             {/* 대기 건 알림 */}
             {pendingDeposits.length > 0 && (
               <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">

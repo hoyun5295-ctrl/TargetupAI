@@ -1,0 +1,137 @@
+import { useEffect, useState } from 'react';
+import { X, Sparkles, ArrowDownRight, ArrowUpRight, RotateCcw, ChevronLeft, ChevronRight, Loader2 } from 'lucide-react';
+import { creditTxLabel } from '../../constants/credit';
+
+/**
+ * CreditHistoryModal — AI 크레딧 사용/충전 이력 모달 (D229+).
+ * 무엇으로 얼마가 차감/충전됐는지 투명하게. 화이트/모던(대시보드 톤 일치).
+ * 데이터: GET /api/companies/my-credit/transactions (ai_credit_transactions).
+ */
+interface CreditTx {
+  id: string;
+  type: string;
+  amount: number;
+  bucket?: string;
+  source?: string | null;
+  balance_base_after?: number;
+  balance_purchased_after?: number;
+  reason?: string | null;
+  created_at: string;
+}
+
+interface Props {
+  onClose: () => void;
+  onGoPricing?: () => void;
+}
+
+const fmt = (n: number) => Number(n || 0).toLocaleString();
+const fmtDate = (s: string) => {
+  const d = new Date(s);
+  if (isNaN(d.getTime())) return '';
+  const p = (x: number) => String(x).padStart(2, '0');
+  return `${d.getMonth() + 1}.${d.getDate()} ${p(d.getHours())}:${p(d.getMinutes())}`;
+};
+
+const isPlus = (t: string) => t === 'grant' || t === 'purchase' || t === 'postpaid_grant';
+const isReset = (t: string) => t === 'reset';
+
+export default function CreditHistoryModal({ onClose, onGoPricing }: Props) {
+  const [rows, setRows] = useState<CreditTx[]>([]);
+  const [page, setPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
+  const [total, setTotal] = useState(0);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      setLoading(true);
+      try {
+        const token = localStorage.getItem('token');
+        const res = await fetch(`/api/companies/my-credit/transactions?page=${page}`, { headers: { Authorization: `Bearer ${token}` } });
+        if (res.ok) {
+          const d = await res.json();
+          if (alive) { setRows(d.transactions || []); setTotalPages(d.totalPages || 1); setTotal(d.total || 0); }
+        }
+      } catch { /* 조회 실패 시 빈 목록 */ }
+      finally { if (alive) setLoading(false); }
+    })();
+    return () => { alive = false; };
+  }, [page]);
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
+      <div className="w-full max-w-md overflow-hidden rounded-2xl border border-gray-100 bg-white shadow-2xl" onClick={(e) => e.stopPropagation()}>
+        {/* 헤더 */}
+        <div className="flex items-center justify-between border-b border-gray-100 px-5 py-4">
+          <div className="flex items-center gap-2">
+            <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-gradient-to-br from-violet-500 to-fuchsia-500">
+              <Sparkles className="h-4 w-4 text-white" />
+            </div>
+            <div>
+              <div className="text-sm font-bold text-gray-900">AI 크레딧 사용 이력</div>
+              <div className="text-[11px] text-gray-400">총 {fmt(total)}건</div>
+            </div>
+          </div>
+          <button onClick={onClose} className="rounded-lg p-1.5 text-gray-400 transition hover:bg-gray-100 hover:text-gray-700">
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+
+        {/* 목록 */}
+        <div className="max-h-[55vh] min-h-[200px] overflow-y-auto px-2 py-2">
+          {loading ? (
+            <div className="flex h-40 items-center justify-center text-gray-300"><Loader2 className="h-5 w-5 animate-spin" /></div>
+          ) : rows.length === 0 ? (
+            <div className="flex h-40 flex-col items-center justify-center gap-1 text-gray-300">
+              <Sparkles className="h-6 w-6" />
+              <span className="text-sm">아직 사용 이력이 없습니다</span>
+            </div>
+          ) : (
+            rows.map((tx) => {
+              const plus = isPlus(tx.type);
+              const reset = isReset(tx.type);
+              const after = Number(tx.balance_base_after || 0) + Number(tx.balance_purchased_after || 0);
+              const Icon = reset ? RotateCcw : plus ? ArrowUpRight : ArrowDownRight;
+              const tone = reset ? 'text-cyan-600 bg-cyan-50' : plus ? 'text-emerald-600 bg-emerald-50' : 'text-rose-600 bg-rose-50';
+              const amtTone = reset ? 'text-cyan-600' : plus ? 'text-emerald-600' : 'text-rose-600';
+              return (
+                <div key={tx.id} className="flex items-center gap-3 rounded-xl px-3 py-2.5 transition hover:bg-gray-50">
+                  <div className={`flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg ${tone}`}><Icon className="h-4 w-4" /></div>
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate text-sm font-medium text-gray-800">{creditTxLabel(tx.type, tx.source)}</div>
+                    <div className="truncate text-[11px] text-gray-400">{fmtDate(tx.created_at)}{tx.reason ? ` · ${tx.reason}` : ''}</div>
+                  </div>
+                  <div className="flex-shrink-0 text-right">
+                    <div className={`text-sm font-bold tabular-nums ${amtTone}`}>{reset ? '' : plus ? '+' : '-'}{fmt(tx.amount)}</div>
+                    <div className="text-[10px] text-gray-400">잔여 {fmt(after)}</div>
+                  </div>
+                </div>
+              );
+            })
+          )}
+        </div>
+
+        {/* 푸터 — 페이지네이션 + 요금제·충전 */}
+        <div className="flex items-center justify-between border-t border-gray-100 px-5 py-3">
+          <div className="flex items-center gap-1">
+            <button disabled={page <= 1} onClick={() => setPage((p) => Math.max(1, p - 1))}
+              className="rounded-lg p-1.5 text-gray-400 transition hover:bg-gray-100 hover:text-gray-700 disabled:opacity-30">
+              <ChevronLeft className="h-4 w-4" />
+            </button>
+            <span className="px-1 text-[11px] tabular-nums text-gray-400">{page} / {totalPages}</span>
+            <button disabled={page >= totalPages} onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+              className="rounded-lg p-1.5 text-gray-400 transition hover:bg-gray-100 hover:text-gray-700 disabled:opacity-30">
+              <ChevronRight className="h-4 w-4" />
+            </button>
+          </div>
+          {onGoPricing && (
+            <button onClick={onGoPricing} className="rounded-lg bg-violet-600 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-violet-700">
+              요금제 · 충전
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}

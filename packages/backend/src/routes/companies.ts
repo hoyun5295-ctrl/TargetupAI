@@ -150,6 +150,96 @@ router.get('/my-credit', async (req: Request, res: Response) => {
   }
 });
 
+// GET /api/companies/my-credit/transactions - 회사 AI 크레딧 사용/충전 이력 (페이지네이션)
+//   슈퍼관리자 credit-transactions의 사용자 버전. CT getCreditTransactions 재사용.
+router.get('/my-credit/transactions', async (req: Request, res: Response) => {
+  try {
+    const companyId = (req as any).user?.companyId;
+    if (!companyId) return res.status(401).json({ success: false, error: '인증 필요' });
+    const page = parseInt(req.query.page as string) || 1;
+    const { getCreditTransactions } = await import('../utils/ai-credit');
+    const r = await getCreditTransactions(companyId, page, 20);
+    return res.json({ success: true, transactions: r.rows, total: r.total, page, totalPages: Math.ceil(r.total / 20) });
+  } catch (err: any) {
+    const msg = err?.message || '';
+    if (msg.includes('column') && msg.includes('does not exist')) {
+      return res.status(503).json({ success: false, error: 'DB 마이그레이션 필요', code: 'DB_MIGRATION_PENDING' });
+    }
+    console.error('크레딧 이력 조회 에러:', err);
+    return res.status(500).json({ success: false, error: '크레딧 이력 조회 실패' });
+  }
+});
+
+// POST /api/companies/my-credit/recharge - 선불 즉시 충전 (발송 잔액 차감 + 크레딧 지급)
+router.post('/my-credit/recharge', async (req: Request, res: Response) => {
+  try {
+    const companyId = (req as any).user?.companyId;
+    const userId = (req as any).user?.userId;
+    if (!companyId) return res.status(401).json({ success: false, error: '인증 필요' });
+    const credits = Number(req.body?.credits);
+    if (!Number.isFinite(credits) || credits <= 0) return res.status(400).json({ success: false, error: '충전 크레딧을 입력해주세요.' });
+
+    const { rechargePrepaid } = await import('../utils/ai-credit-recharge');
+    const r = await rechargePrepaid({ companyId, credits: Math.floor(credits), userId });
+    return res.json({ success: true, ...r });
+  } catch (err: any) {
+    if (err?.name === 'RechargeError') {
+      const status = err.code === 'INSUFFICIENT_BALANCE' ? 409 : 400;
+      return res.status(status).json({ success: false, error: err.message, code: err.code });
+    }
+    const msg = err?.message || '';
+    if (msg.includes('does not exist')) {
+      return res.status(503).json({ success: false, error: 'DB 마이그레이션 필요 — ai_credit_requests 테이블 생성 요청', code: 'DB_MIGRATION_PENDING' });
+    }
+    console.error('선불 충전 에러:', err);
+    return res.status(500).json({ success: false, error: '충전 처리 실패' });
+  }
+});
+
+// POST /api/companies/my-credit/recharge-request - 후불 충전 요청 (슈퍼관리자 승인 대기)
+router.post('/my-credit/recharge-request', async (req: Request, res: Response) => {
+  try {
+    const companyId = (req as any).user?.companyId;
+    const userId = (req as any).user?.userId;
+    if (!companyId) return res.status(401).json({ success: false, error: '인증 필요' });
+    const credits = Number(req.body?.credits);
+    if (!Number.isFinite(credits) || credits <= 0) return res.status(400).json({ success: false, error: '충전 크레딧을 입력해주세요.' });
+
+    const { createRechargeRequest } = await import('../utils/ai-credit-recharge');
+    const r = await createRechargeRequest({ companyId, credits: Math.floor(credits), userId });
+    return res.json({ success: true, ...r });
+  } catch (err: any) {
+    if (err?.name === 'RechargeError') {
+      const status = err.code === 'DUPLICATE_PENDING' ? 409 : 400;
+      return res.status(status).json({ success: false, error: err.message, code: err.code });
+    }
+    const msg = err?.message || '';
+    if (msg.includes('does not exist')) {
+      return res.status(503).json({ success: false, error: 'DB 마이그레이션 필요 — ai_credit_requests 테이블 생성 요청', code: 'DB_MIGRATION_PENDING' });
+    }
+    console.error('후불 충전 요청 에러:', err);
+    return res.status(500).json({ success: false, error: '충전 요청 실패' });
+  }
+});
+
+// GET /api/companies/my-credit/recharge-requests - 내 충전 요청 이력 (pending 포함)
+router.get('/my-credit/recharge-requests', async (req: Request, res: Response) => {
+  try {
+    const companyId = (req as any).user?.companyId;
+    if (!companyId) return res.status(401).json({ success: false, error: '인증 필요' });
+    const page = parseInt(req.query.page as string) || 1;
+    const { getRechargeRequests } = await import('../utils/ai-credit-recharge');
+    const r = await getRechargeRequests({ companyId, page });
+    return res.json({ success: true, ...r });
+  } catch (err: any) {
+    if ((err?.message || '').includes('does not exist')) {
+      return res.status(503).json({ success: false, error: 'DB 마이그레이션 필요', code: 'DB_MIGRATION_PENDING' });
+    }
+    console.error('충전 요청 이력 에러:', err);
+    return res.status(500).json({ success: false, error: '충전 요청 이력 실패' });
+  }
+});
+
 // GET /api/companies/my-plan - 현재 회사 플랜 정보
 router.get('/my-plan', async (req: Request, res: Response) => {
   try {

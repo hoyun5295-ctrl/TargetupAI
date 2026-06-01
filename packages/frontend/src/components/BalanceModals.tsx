@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { Wallet, AlertTriangle, X } from 'lucide-react';
 import { useAuthStore } from '../stores/authStore';
 import { COMPANY_NAME } from '../constants/company';
 
@@ -108,48 +109,61 @@ export default function BalanceModals({
 
   return (
     <>
-      {/* 잔액 현황 모달 */}
+      {/* 잔액 현황 모달 — 화이트/모던 (D229+, 대시보드 톤 일치) */}
       {showBalanceModal && balanceInfo && (
-        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-[60]" onClick={() => setShowBalanceModal(false)}>
-          <div className="bg-white rounded-2xl shadow-2xl w-[380px] overflow-hidden animate-in fade-in zoom-in" onClick={e => e.stopPropagation()}>
-            <div className="p-5 bg-gradient-to-r from-emerald-50 to-green-50 border-b">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 bg-emerald-100 rounded-full flex items-center justify-center text-xl">💰</div>
-                <div>
-                  <div className="text-sm text-gray-500">충전 잔액</div>
-                  <div className={`text-2xl font-bold ${balanceInfo.balance < 10000 ? 'text-red-600' : 'text-emerald-700'}`}>
-                    {balanceInfo.balance.toLocaleString()}원
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 p-4" onClick={() => setShowBalanceModal(false)}>
+          <div className="w-full max-w-sm overflow-hidden rounded-2xl border border-gray-100 bg-white shadow-2xl" onClick={e => e.stopPropagation()}>
+            {/* 헤더 — 충전 잔액 */}
+            <div className="relative overflow-hidden border-b border-gray-100 px-5 py-5">
+              <div className="absolute -right-6 -top-6 h-24 w-24 rounded-full bg-emerald-100/60 blur-2xl" />
+              <div className="relative flex items-start justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-emerald-500 to-teal-500 shadow-md shadow-emerald-200">
+                    <Wallet className="h-5 w-5 text-white" />
+                  </div>
+                  <div>
+                    <div className="text-xs text-gray-400">충전 잔액</div>
+                    <div className={`text-2xl font-bold tabular-nums ${balanceInfo.balance < 10000 ? 'text-rose-600' : 'text-emerald-600'}`}>
+                      {balanceInfo.balance.toLocaleString()}<span className="ml-0.5 text-sm font-normal text-gray-400">원</span>
+                    </div>
                   </div>
                 </div>
+                <button onClick={() => setShowBalanceModal(false)} className="rounded-lg p-1.5 text-gray-400 transition hover:bg-gray-100 hover:text-gray-700">
+                  <X className="h-4 w-4" />
+                </button>
               </div>
               {balanceInfo.balance < 10000 && (
-                <div className="mt-2 text-xs text-red-500 bg-red-50 rounded-lg px-3 py-1.5 flex items-center gap-1">
-                  <span>⚠️</span> 잔액이 부족합니다. 충전 후 발송해주세요.
+                <div className="relative mt-3 flex items-center gap-1.5 rounded-lg bg-rose-50 px-3 py-1.5 text-xs text-rose-600">
+                  <AlertTriangle className="h-3.5 w-3.5 flex-shrink-0" /> 잔액이 부족합니다. 충전 후 발송해주세요.
                 </div>
               )}
             </div>
-            <div className="p-5">
-              <div className="text-xs text-gray-400 font-medium mb-3">발송 가능 건수</div>
-              <div className="space-y-2.5">
+
+            {/* 발송 가능 건수 */}
+            <div className="px-5 py-4">
+              <div className="mb-2.5 text-[11px] font-medium text-gray-400">발송 가능 건수</div>
+              <div className="space-y-1.5">
                 {[
                   { label: 'SMS', price: balanceInfo.costPerSms },
                   { label: 'LMS', price: balanceInfo.costPerLms },
                   ...(balanceInfo.costPerMms && balanceInfo.costPerMms > 0 ? [{ label: 'MMS' as const, price: balanceInfo.costPerMms }] : []),
                   ...(balanceInfo.costPerKakao && balanceInfo.costPerKakao > 0 ? [{ label: '카카오톡' as const, price: balanceInfo.costPerKakao }] : []),
                 ].map(item => (
-                  <div key={item.label} className="flex items-center justify-between py-2 px-3 bg-gray-50 rounded-lg">
+                  <div key={item.label} className="flex items-center justify-between rounded-lg bg-gray-50 px-3 py-2">
                     <div className="flex items-center gap-2">
                       <span className="text-sm font-medium text-gray-700">{item.label}</span>
-                      <span className="text-xs text-gray-400">@{item.price}원</span>
+                      <span className="text-[11px] text-gray-400">@{item.price}원</span>
                     </div>
-                    <span className="text-sm font-bold text-gray-800">
+                    <span className="text-sm font-bold tabular-nums text-gray-900">
                       {item.price > 0 ? `${Math.floor(balanceInfo.balance / item.price).toLocaleString()}건` : '-'}
                     </span>
                   </div>
                 ))}
               </div>
             </div>
-            <div className="px-5 pb-5 space-y-2">
+
+            {/* 액션 */}
+            <div className="space-y-2 px-5 pb-5">
               <button
                 onClick={() => {
                   setShowBalanceModal(false);
@@ -157,13 +171,13 @@ export default function BalanceModals({
                   setDepositSuccess(false);
                   setShowChargeModal(true);
                 }}
-                className="w-full py-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-medium transition-colors text-sm"
+                className="w-full rounded-xl bg-gradient-to-r from-emerald-500 to-teal-500 py-3 text-sm font-semibold text-white transition hover:from-emerald-600 hover:to-teal-600"
               >
                 잔액 충전하기
               </button>
               <button
                 onClick={() => setShowBalanceModal(false)}
-                className="w-full py-2.5 text-gray-500 hover:text-gray-700 text-sm transition-colors"
+                className="w-full py-2 text-sm text-gray-400 transition hover:text-gray-600"
               >
                 닫기
               </button>

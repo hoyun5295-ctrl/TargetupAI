@@ -5,6 +5,7 @@ import { formatDate } from '../utils/formatDate';
 import { COMPANY_PHONE, COMPANY_PHONE_TEL } from '../constants/company';
 import { Sparkles, Users, Server, Cpu, Check } from 'lucide-react';
 import CreditSummaryBar from '../components/credit/CreditSummaryBar';
+import CreditRechargeModal from '../components/credit/CreditRechargeModal';
 import { PLAN_INFRA, creditConversions, COMMON_SERVICE_LINE } from '../constants/credit';
 
 interface Plan {
@@ -44,6 +45,7 @@ export default function PricingPage() {
   const [showSuccessModal, setShowSuccessModal] = useState(false);
   const [successModalType, setSuccessModalType] = useState<'plan' | 'inquiry'>('plan');
   const [showContactModal, setShowContactModal] = useState(false);
+  const [showRecharge, setShowRecharge] = useState(false);
   const [inquiryForm, setInquiryForm] = useState({
     companyName: '', contactName: '', phone: '', email: '', planInterest: '', subject: '', message: '',
   });
@@ -410,7 +412,7 @@ export default function PricingPage() {
               monthlyUsed={myCredit.monthlyUsed}
               billingType={myCredit.billingType}
               overageLimit={myCredit.overageLimit}
-              onRecharge={() => setShowContactModal(true)}
+              onRecharge={() => setShowRecharge(true)}
             />
           </div>
         )}
@@ -704,6 +706,10 @@ export default function PricingPage() {
             </div>
           </div>
         </div>
+      )}
+
+      {showRecharge && (
+        <CreditRechargeModal onClose={() => setShowRecharge(false)} onSuccess={loadData} />
       )}
 
       {showContactModal && (

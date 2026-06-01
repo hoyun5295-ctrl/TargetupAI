@@ -63,3 +63,53 @@ export const PLAN_INFRA: Record<string, PlanInfra> = {
 
 /** 전 플랜 공통 서비스 한 줄 — 등급별 기능 차등 폐지(스타터부터 동일). */
 export const COMMON_SERVICE_LINE = '스타터부터 AI 전 기능 · 전 채널 발송 동일';
+
+/**
+ * ai_credit_transactions.source → 한글 작업명 (사용 이력 표시).
+ * 백엔드 CREDIT_COST_MAP source와 1:1. 미등록 source는 'AI 작업'으로 fallback.
+ */
+export const CREDIT_SOURCE_LABELS: Record<string, string> = {
+  orchestrate: '풀분석', orchestrateWithAI: '풀분석',
+  'journey-ai-generate': '여정 설계', 'journey-builder-custom': '여정 설계',
+  'dm-builder': '모바일 DM',
+  'inapp-ai-generator': '인앱 생성', 'inapp-quick-action': '인앱 생성',
+  'generate-messages': '문구 생성', 'generate-custom-messages': '문구 생성',
+  'recommend-target': '타겟 추천', 'recommend-next-campaign': '캠페인 추천',
+  'variant-generator': '문안 변형', 'performance-explainer': '성과 분석',
+  'performance-quick-action': '성과 분석', 'next-action-advisor': '액션 추천',
+  'multi-goal-decisioning': '목표 분석', 'cdp-fusion-explainer': 'CDP 분석',
+  'voice-inbound': '음성 분석', 'dm-event-recommender': '이벤트 추천',
+  'journey-ai-refine': '다듬기', 'journey-step-diagnosis': '진단',
+  'dm-quick-action-refine': '다듬기', 'dm-self-diagnosis': '진단',
+  'inapp-explainer': '인앱 설명', 'alimtalk-matcher': '알림톡 매칭',
+  'ai-memory-search': '메모리 검색', 'ai-usage-search': '사용 검색',
+  'ai-segment-generator': '세그먼트 생성', 'ai-column-mapper': '컬럼 매핑',
+  'brand-voice-extract': '브랜드보이스 추출', 'parse-briefing': '브리핑 분석',
+};
+
+/** ai_credit_transactions.type → 한글. deduct는 source 라벨 우선. */
+export const CREDIT_TYPE_LABELS: Record<string, string> = {
+  deduct: 'AI 작업', grant: '관리자 지급', admin_deduct: '관리자 차감',
+  purchase: '크레딧 충전', reset: '월 기본분 리셋', postpaid_grant: '후불 지급',
+};
+
+/** 크레딧 거래 1건 → 표시 라벨 (deduct=작업명, 그 외=type 라벨). */
+export function creditTxLabel(type: string, source?: string | null): string {
+  if (type === 'deduct') return (source && CREDIT_SOURCE_LABELS[source]) || 'AI 작업';
+  return CREDIT_TYPE_LABELS[type] || type;
+}
+
+/**
+ * 크레딧 충전 단가 — 백엔드 ai-credit-calc.ts와 동일값(미리보기 전용).
+ * 실제 청구 금액은 백엔드가 계산(진실의 원천). 화면에 단가 자체를 노출하지 말 것. 보너스 없음.
+ */
+export const CREDIT_UNIT_PRICE = 2000;
+export const CREDIT_VAT_RATE = 0.1;
+
+/** 충전 크레딧 수량 → 결제 금액(공급가/부가세/합계). */
+export function calcRechargeAmount(credits: number): { credits: number; supply: number; vat: number; total: number } {
+  const c = Math.max(0, Math.floor(Number(credits) || 0));
+  const supply = c * CREDIT_UNIT_PRICE;
+  const vat = Math.round(supply * CREDIT_VAT_RATE);
+  return { credits: c, supply, vat, total: supply + vat };
+}
