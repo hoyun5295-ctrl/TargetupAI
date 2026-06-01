@@ -273,6 +273,8 @@ export default function PricingPage() {
           const isOnTrial = companyInfo.plan_code === 'TRIAL' && !!companyInfo.trial_expires_at;
           const isTrialExpired = companyInfo.subscription_status === 'trial_expired';
           const isUnsubscribed = companyInfo.plan_code === 'FREE' && !isTrialExpired;
+          // 크레딧 보유 시 요금제+DB는 아래 크레딧 카드가 보여줌 → 이 단독 카드는 미가입/FREE에서만 표시
+          const isCreditEnabled = !!myCredit?.creditEnabled && (((myCredit?.planCredits || 0) > 0) || ((myCredit?.purchased || 0) > 0));
           const daysRemaining = isOnTrial && companyInfo.trial_expires_at
             ? Math.max(0, Math.ceil((new Date(companyInfo.trial_expires_at).getTime() - Date.now()) / 86400000))
             : 0;
@@ -280,52 +282,10 @@ export default function PricingPage() {
           const equivalentPlan = plans.find(p => Number(p.max_customers) === Number(companyInfo.max_customers));
           const equivalentPlanName = equivalentPlan?.plan_name || '프로';
           return (
-          <div className="bg-white rounded-xl shadow-sm p-6 mb-8">
-            <h2 className="text-lg font-semibold mb-4">현재 이용 중인 플랜</h2>
-            <div className="flex items-center justify-between">
-              <div>
-                <div className="flex items-baseline gap-2 flex-wrap">
-                  <span className="text-2xl font-bold text-blue-600">
-                    {isOnTrial ? '무료체험중' : (isTrialExpired ? '미가입' : companyInfo.plan_name)}
-                  </span>
-                  {isOnTrial && (
-                    <span className="text-sm text-gray-500 font-medium">
-                      (요금제 프로플랜 체험)
-                    </span>
-                  )}
-                  {isOnTrial && (
-                    <span className="px-2.5 py-1 bg-violet-100 text-violet-800 text-xs font-bold rounded-full whitespace-nowrap">
-                      D-{daysRemaining}
-                    </span>
-                  )}
-                  {isTrialExpired && (
-                    <span className="px-2.5 py-1 bg-red-100 text-red-700 text-xs font-bold rounded-full">
-                      체험 만료
-                    </span>
-                  )}
-                  {isUnsubscribed && (
-                    <span className="px-2.5 py-1 bg-gray-100 text-gray-700 text-xs font-bold rounded-full">
-                      요금제 미가입
-                    </span>
-                  )}
-                </div>
-                {isTrialExpired && (
-                  <p className="text-sm text-gray-600 mt-2">
-                    무료체험이 종료되어 미가입 상태로 전환되었습니다. 직접발송 등 기본 기능은 계속 이용 가능합니다. 아래에서 요금제를 선택해 주세요.
-                  </p>
-                )}
-              </div>
-              <div className="text-right">
-                <div className="text-sm text-gray-500">고객 DB 사용량</div>
-                <div className="text-lg font-semibold">
-                  {formatNumber(Number(companyInfo.current_customers))} / {formatNumber(Number(companyInfo.max_customers))}명
-                </div>
-              </div>
-            </div>
-
-            {/* ★ CT-17: 무료체험 안내 카드 — 동급 유료 플랜 명시 + 이용 가능 기능 + 만료일·D-N 재강조 */}
+          <>
+            {/* 무료체험 D-N 만료 안내 — 요금제·DB는 아래 크레딧 카드가 보여주므로 만료 강조만 분리 */}
             {isOnTrial && (
-              <div className="mt-5 p-4 bg-gradient-to-r from-violet-50 via-purple-50 to-violet-50 border border-violet-200 rounded-xl">
+              <div className="mb-6 p-4 bg-gradient-to-r from-violet-50 via-purple-50 to-violet-50 border border-violet-200 rounded-xl">
                 <div className="flex items-start gap-3">
                   <div className="w-10 h-10 bg-gradient-to-br from-violet-500 to-purple-600 rounded-xl flex items-center justify-center flex-shrink-0 shadow-md shadow-violet-200">
                     <svg className="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -357,30 +317,67 @@ export default function PricingPage() {
               </div>
             )}
 
-            <div className="mt-4">
-              <div className="h-3 bg-gray-200 rounded-full overflow-hidden">
-                <div 
-                  className={`h-full transition-all ${
-                    getUsagePercent() >= 90 ? 'bg-red-500' : 
-                    getUsagePercent() >= 70 ? 'bg-yellow-500' : 'bg-blue-500'
-                  }`}
-                  style={{ width: `${getUsagePercent()}%` }}
-                />
-              </div>
-              <div className="flex justify-between text-xs text-gray-500 mt-1">
-                <span>{getUsagePercent().toFixed(1)}% 사용 중</span>
-                <span>{formatNumber(Number(companyInfo.max_customers) - Number(companyInfo.current_customers))}명 여유</span>
-              </div>
-            </div>
+            {/* 크레딧 미적용(미가입/FREE)에서만 단독 플랜 카드 — 크레딧 보유 시 아래 반반 카드가 요금제+DB를 표시 */}
+            {!isCreditEnabled && (
+              <div className="bg-white rounded-xl shadow-sm p-6 mb-8">
+                <h2 className="text-lg font-semibold mb-4">현재 이용 중인 플랜</h2>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <div className="flex items-baseline gap-2 flex-wrap">
+                      <span className="text-2xl font-bold text-blue-600">
+                        {isTrialExpired ? '미가입' : companyInfo.plan_name}
+                      </span>
+                      {isTrialExpired && (
+                        <span className="px-2.5 py-1 bg-red-100 text-red-700 text-xs font-bold rounded-full">
+                          체험 만료
+                        </span>
+                      )}
+                      {isUnsubscribed && (
+                        <span className="px-2.5 py-1 bg-gray-100 text-gray-700 text-xs font-bold rounded-full">
+                          요금제 미가입
+                        </span>
+                      )}
+                    </div>
+                    {isTrialExpired && (
+                      <p className="text-sm text-gray-600 mt-2">
+                        무료체험이 종료되어 미가입 상태로 전환되었습니다. 직접발송 등 기본 기능은 계속 이용 가능합니다. 아래에서 요금제를 선택해 주세요.
+                      </p>
+                    )}
+                  </div>
+                  <div className="text-right">
+                    <div className="text-sm text-gray-500">고객 DB 사용량</div>
+                    <div className="text-lg font-semibold">
+                      {formatNumber(Number(companyInfo.current_customers))} / {formatNumber(Number(companyInfo.max_customers))}명
+                    </div>
+                  </div>
+                </div>
 
-            {isTrialExpired && (
-              <div className="mt-4 p-4 bg-red-50 border border-red-200 rounded-lg">
-                <p className="text-sm text-red-700">
-                  ⚠️ 무료 체험 기간이 만료되었습니다. AI 기능을 계속 사용하려면 유료 플랜으로 업그레이드해주세요.
-                </p>
+                <div className="mt-4">
+                  <div className="h-3 bg-gray-200 rounded-full overflow-hidden">
+                    <div
+                      className={`h-full transition-all ${
+                        getUsagePercent() >= 90 ? 'bg-red-500' :
+                        getUsagePercent() >= 70 ? 'bg-yellow-500' : 'bg-blue-500'
+                      }`}
+                      style={{ width: `${getUsagePercent()}%` }}
+                    />
+                  </div>
+                  <div className="flex justify-between text-xs text-gray-500 mt-1">
+                    <span>{getUsagePercent().toFixed(1)}% 사용 중</span>
+                    <span>{formatNumber(Number(companyInfo.max_customers) - Number(companyInfo.current_customers))}명 여유</span>
+                  </div>
+                </div>
+
+                {isTrialExpired && (
+                  <div className="mt-4 p-4 bg-red-50 border border-red-200 rounded-lg">
+                    <p className="text-sm text-red-700">
+                      ⚠️ 무료 체험 기간이 만료되었습니다. AI 기능을 계속 사용하려면 유료 플랜으로 업그레이드해주세요.
+                    </p>
+                  </div>
+                )}
               </div>
             )}
-          </div>
+          </>
           );
         })()}
 
@@ -405,6 +402,10 @@ export default function PricingPage() {
         {myCredit?.creditEnabled && (myCredit.planCredits > 0 || myCredit.purchased > 0) && (
           <div className="mb-6">
             <CreditSummaryBar
+              planName={companyInfo?.plan_name || '—'}
+              currentCustomers={Number(companyInfo?.current_customers) || 0}
+              maxCustomers={Number(companyInfo?.max_customers) || 0}
+              usagePercent={getUsagePercent()}
               total={myCredit.total}
               baseRemaining={myCredit.baseRemaining}
               purchased={myCredit.purchased}
@@ -416,25 +417,6 @@ export default function PricingPage() {
             />
           </div>
         )}
-
-        {/* 종량제 이득 띠 — 왜 크레딧이 이득인지 한눈에 */}
-        <div className="mb-5 overflow-hidden rounded-2xl bg-gradient-to-r from-violet-600 via-fuchsia-600 to-violet-600 p-px shadow-sm">
-          <div className="flex flex-wrap items-center gap-x-6 gap-y-3 rounded-[15px] bg-white px-5 py-4">
-            <div className="flex items-center gap-2.5">
-              <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-violet-500 to-fuchsia-500 shadow-md shadow-violet-200">
-                <Sparkles className="h-5 w-5 text-white" />
-              </div>
-              <div>
-                <div className="text-sm font-bold text-slate-900">종량제 — 쓴 만큼만</div>
-                <div className="text-[11px] text-slate-500">성공한 작업만 차감 · 실패 0 차감 · 스팸필터 무관</div>
-              </div>
-            </div>
-            <div className="hidden h-9 w-px bg-slate-200 md:block" />
-            <div className="text-xs text-slate-600">
-              <b className="text-slate-900">전 플랜 동일 서비스</b><br className="hidden sm:block" /> 차이는 크레딧 양과 인프라뿐
-            </div>
-          </div>
-        </div>
 
         <h2 className="text-lg font-semibold mb-4">요금제 비교</h2>
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4">
