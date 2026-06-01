@@ -1,6 +1,10 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { formatDateTime, formatPhoneNumber } from '../utils/formatDate';
+import {
+  Ban, Search, Plus, Upload, RefreshCw, Trash2, Phone,
+  ChevronLeft, ChevronRight, ArrowLeft, CheckCircle2, Info, AlertCircle, ShieldAlert,
+} from 'lucide-react';
 
 export default function Unsubscribes() {
   const navigate = useNavigate();
@@ -190,57 +194,58 @@ export default function Unsubscribes() {
   const formatPhone = formatPhoneNumber;
 
   const sourceLabel: Record<string, { text: string; color: string }> = {
-    '080_ars': { text: '080 ARS', color: 'bg-orange-100 text-orange-700' },
-    api: { text: '080 자동', color: 'bg-blue-100 text-blue-700' },
-    upload: { text: '파일 업로드', color: 'bg-purple-100 text-purple-700' },
-    manual: { text: '직접 입력', color: 'bg-gray-100 text-gray-700' },
-    db_upload: { text: 'DB 업로드', color: 'bg-teal-100 text-teal-700' },
-    sync: { text: 'Sync 연동', color: 'bg-indigo-100 text-indigo-700' },
+    '080_ars': { text: '080 ARS', color: 'bg-amber-50 text-amber-700 ring-1 ring-amber-100' },
+    api: { text: '080 자동', color: 'bg-sky-50 text-sky-700 ring-1 ring-sky-100' },
+    upload: { text: '파일 업로드', color: 'bg-violet-50 text-violet-700 ring-1 ring-violet-100' },
+    manual: { text: '직접 입력', color: 'bg-slate-100 text-slate-600 ring-1 ring-slate-200' },
+    db_upload: { text: 'DB 업로드', color: 'bg-teal-50 text-teal-700 ring-1 ring-teal-100' },
+    sync: { text: 'Sync 연동', color: 'bg-indigo-50 text-indigo-700 ring-1 ring-indigo-100' },
   };
 
   return (
-    <div className="min-h-screen bg-gray-100">
+    <div className="min-h-screen bg-slate-50">
       {/* 토스트 */}
       {toast.show && (
-        <div className={`fixed top-4 right-4 z-50 px-6 py-3 rounded-lg shadow-lg text-white ${
-          toast.type === 'success' ? 'bg-gradient-to-r from-green-500 to-emerald-500' 
-          : toast.type === 'info' ? 'bg-gradient-to-r from-blue-500 to-cyan-500'
-          : 'bg-gradient-to-r from-red-500 to-rose-500'
-        }`}>
-          {toast.message}
+        <div className="fixed top-4 right-4 z-50 flex items-center gap-3 px-4 py-3 rounded-xl bg-white shadow-lg ring-1 ring-slate-200 max-w-sm animate-in fade-in slide-in-from-top-2 duration-200">
+          {toast.type === 'success' ? (
+            <CheckCircle2 className="w-5 h-5 text-emerald-500 shrink-0" />
+          ) : toast.type === 'info' ? (
+            <Info className="w-5 h-5 text-sky-500 shrink-0" />
+          ) : (
+            <AlertCircle className="w-5 h-5 text-rose-500 shrink-0" />
+          )}
+          <span className="text-sm text-slate-700">{toast.message}</span>
         </div>
       )}
 
       {/* 삭제 확인 모달 */}
       {deleteModal.show && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center">
-          <div className="absolute inset-0 bg-black/40" onClick={() => !deleting && setDeleteModal({ show: false, id: '', phone: '' })} />
-          <div className="relative bg-white rounded-2xl shadow-2xl max-w-sm w-full mx-4 animate-in fade-in zoom-in duration-200">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm" onClick={() => !deleting && setDeleteModal({ show: false, id: '', phone: '' })} />
+          <div className="relative bg-white rounded-2xl shadow-xl ring-1 ring-slate-200 max-w-sm w-full animate-in fade-in zoom-in duration-200">
             <div className="p-6 text-center">
-              <div className="w-14 h-14 mx-auto mb-4 bg-red-100 rounded-full flex items-center justify-center">
-                <svg className="w-7 h-7 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                </svg>
+              <div className="w-14 h-14 mx-auto mb-4 bg-rose-50 rounded-2xl flex items-center justify-center">
+                <Trash2 className="w-6 h-6 text-rose-500" />
               </div>
-              <h3 className="text-lg font-bold text-gray-900 mb-2">수신거부 해제</h3>
-              <p className="text-sm text-gray-600 mb-1">
-                <span className="font-mono font-semibold text-gray-800">{formatPhone(deleteModal.phone)}</span>
+              <h3 className="text-lg font-bold text-slate-900 mb-2">수신거부 해제</h3>
+              <p className="text-sm mb-1">
+                <span className="font-mono font-semibold text-slate-800">{formatPhone(deleteModal.phone)}</span>
               </p>
-              <p className="text-sm text-gray-500 mb-6">
+              <p className="text-sm text-slate-500 mb-6">
                 삭제 시 해당 번호의 수신동의가 복원됩니다.
               </p>
               <div className="flex gap-3">
                 <button
                   onClick={() => setDeleteModal({ show: false, id: '', phone: '' })}
                   disabled={deleting}
-                  className="flex-1 px-4 py-2.5 border border-gray-300 text-gray-700 rounded-xl hover:bg-gray-50 font-medium transition-colors"
+                  className="flex-1 px-4 py-2.5 border border-slate-200 text-slate-700 rounded-xl hover:bg-slate-50 font-medium transition-colors disabled:opacity-50"
                 >
                   취소
                 </button>
                 <button
                   onClick={handleDeleteConfirm}
                   disabled={deleting}
-                  className="flex-1 px-4 py-2.5 bg-red-500 text-white rounded-xl hover:bg-red-600 font-medium transition-colors disabled:opacity-50"
+                  className="flex-1 px-4 py-2.5 bg-rose-500 text-white rounded-xl hover:bg-rose-600 font-medium transition-colors disabled:opacity-50"
                 >
                   {deleting ? '처리중...' : '삭제'}
                 </button>
@@ -252,24 +257,22 @@ export default function Unsubscribes() {
 
       {/* D43-4: 080 연동 테스트 안내 모달 — opt_out_auto_sync=true일 때만 열림 */}
       {syncTestModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center">
-          <div className="absolute inset-0 bg-black/40" onClick={() => setSyncTestModal(false)} />
-          <div className="relative bg-white rounded-2xl shadow-2xl max-w-sm w-full mx-4 animate-in fade-in zoom-in duration-200">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm" onClick={() => setSyncTestModal(false)} />
+          <div className="relative bg-white rounded-2xl shadow-xl ring-1 ring-slate-200 max-w-sm w-full animate-in fade-in zoom-in duration-200">
             <div className="p-6 text-center">
-              <div className="w-14 h-14 mx-auto mb-4 bg-blue-100 rounded-full flex items-center justify-center">
-                <svg className="w-7 h-7 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z" />
-                </svg>
+              <div className="w-14 h-14 mx-auto mb-4 bg-sky-50 rounded-2xl flex items-center justify-center">
+                <Phone className="w-6 h-6 text-sky-500" />
               </div>
-              <h3 className="text-lg font-bold text-gray-900 mb-2">080 연동 테스트</h3>
-              <div className="text-sm text-gray-600 mb-4 leading-relaxed">
+              <h3 className="text-lg font-bold text-slate-900 mb-2">080 연동 테스트</h3>
+              <div className="text-sm text-slate-600 mb-4 leading-relaxed">
                 <p className="mb-3">아래 번호로 전화하여 수신거부를 등록하세요.</p>
-                <div className="bg-gray-50 rounded-xl py-3 px-4 mb-3">
-                  <p className="text-2xl font-bold text-gray-900 font-mono tracking-wider">
+                <div className="bg-slate-50 rounded-xl py-3 px-4 mb-3 ring-1 ring-slate-100">
+                  <p className="text-2xl font-bold text-slate-900 font-mono tracking-wider">
                     {format080Number(opt080Number)}
                   </p>
                 </div>
-                <p className="text-xs text-gray-400">
+                <p className="text-xs text-slate-400">
                   ARS 안내에 따라 수신거부 등록 후<br />
                   아래 버튼을 눌러 연동 상태를 확인하세요.
                 </p>
@@ -277,7 +280,7 @@ export default function Unsubscribes() {
               <div className="flex gap-3">
                 <button
                   onClick={() => setSyncTestModal(false)}
-                  className="flex-1 px-4 py-2.5 border border-gray-300 text-gray-700 rounded-xl hover:bg-gray-50 font-medium transition-colors"
+                  className="flex-1 px-4 py-2.5 border border-slate-200 text-slate-700 rounded-xl hover:bg-slate-50 font-medium transition-colors"
                 >
                   닫기
                 </button>
@@ -287,8 +290,9 @@ export default function Unsubscribes() {
                     handleSyncTest();
                   }}
                   disabled={syncTesting}
-                  className="flex-1 px-4 py-2.5 bg-blue-600 text-white rounded-xl hover:bg-blue-700 font-medium transition-colors disabled:opacity-50"
+                  className="flex-1 inline-flex items-center justify-center gap-1.5 px-4 py-2.5 bg-slate-900 text-white rounded-xl hover:bg-slate-800 font-medium transition-colors disabled:opacity-50"
                 >
+                  <RefreshCw className={`w-4 h-4 ${syncTesting ? 'animate-spin' : ''}`} />
                   {syncTesting ? '확인중...' : '연동 확인'}
                 </button>
               </div>
@@ -297,22 +301,34 @@ export default function Unsubscribes() {
         </div>
       )}
 
-      <header className="bg-white shadow">
+      {/* 헤더 */}
+      <header className="sticky top-0 z-30 bg-white/80 backdrop-blur-md border-b border-slate-200">
         <div className="max-w-6xl mx-auto px-4 py-4 flex justify-between items-center">
-          <h1 className="text-xl font-bold">🚫 수신거부 관리</h1>
-          <button onClick={() => navigate('/')} className="text-gray-500 hover:text-gray-700">
-            ← 대시보드
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-rose-50 flex items-center justify-center">
+              <Ban className="w-5 h-5 text-rose-500" />
+            </div>
+            <div>
+              <h1 className="text-lg font-bold text-slate-900">수신거부 관리</h1>
+              <p className="text-xs text-slate-400">차단된 번호 관리 · 080 자동 연동</p>
+            </div>
+          </div>
+          <button
+            onClick={() => navigate('/')}
+            className="inline-flex items-center gap-1.5 text-sm text-slate-500 hover:text-slate-900 transition-colors"
+          >
+            <ArrowLeft className="w-4 h-4" /> 대시보드
           </button>
         </div>
       </header>
 
       <main className="max-w-6xl mx-auto px-4 py-8">
         {/* 상단 액션 영역 */}
-        <div className="bg-white rounded-lg shadow p-6 mb-6">
+        <div className="bg-white rounded-2xl ring-1 ring-slate-200 shadow-sm p-6 mb-6">
           <div className="flex flex-wrap gap-4 items-end">
             {/* 검색 */}
-            <div className="flex-1 min-w-[200px]">
-              <label className="block text-sm font-medium text-gray-700 mb-1">전화번호 검색</label>
+            <div className="flex-1 min-w-[220px]">
+              <label className="block text-xs font-semibold text-slate-500 mb-1.5">전화번호 검색</label>
               <div className="flex gap-2">
                 <input
                   type="text"
@@ -320,20 +336,20 @@ export default function Unsubscribes() {
                   onChange={(e) => setSearch(e.target.value)}
                   onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
                   placeholder="010-1234-5678"
-                  className="flex-1 px-3 py-2 border rounded-lg"
+                  className="flex-1 px-3.5 py-2.5 bg-white border border-slate-200 rounded-xl text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-400 transition"
                 />
                 <button
                   onClick={handleSearch}
-                  className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+                  className="inline-flex items-center gap-1.5 px-4 py-2.5 bg-slate-900 text-white text-sm font-medium rounded-xl hover:bg-slate-800 transition-colors"
                 >
-                  검색
+                  <Search className="w-4 h-4" /> 검색
                 </button>
               </div>
             </div>
 
             {/* 직접 추가 — 격리 ON + 고객사관리자 차단 */}
             <div className="min-w-[200px]">
-              <label className="block text-sm font-medium text-gray-700 mb-1">직접 추가</label>
+              <label className="block text-xs font-semibold text-slate-500 mb-1.5">직접 추가</label>
               <div className="flex gap-2">
                 <input
                   type="text"
@@ -342,23 +358,23 @@ export default function Unsubscribes() {
                   onKeyDown={(e) => e.key === 'Enter' && canManageUnsubscribes && handleAdd()}
                   placeholder="01012345678"
                   disabled={!canManageUnsubscribes}
-                  className={`w-36 px-3 py-2 border rounded-lg ${!canManageUnsubscribes ? 'bg-gray-100 cursor-not-allowed' : ''}`}
+                  className={`w-36 px-3.5 py-2.5 bg-white border border-slate-200 rounded-xl text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-400 transition ${!canManageUnsubscribes ? 'bg-slate-50 cursor-not-allowed' : ''}`}
                 />
                 <button
                   onClick={handleAdd}
                   disabled={!canManageUnsubscribes}
-                  className={`px-4 py-2 text-white rounded-lg ${canManageUnsubscribes ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-gray-400 cursor-not-allowed'}`}
+                  className={`inline-flex items-center gap-1.5 px-4 py-2.5 text-sm font-medium rounded-xl transition-colors ${canManageUnsubscribes ? 'bg-slate-900 text-white hover:bg-slate-800' : 'bg-slate-200 text-slate-400 cursor-not-allowed'}`}
                 >
-                  추가
+                  <Plus className="w-4 h-4" /> 추가
                 </button>
               </div>
             </div>
 
             {/* 파일 업로드 — 격리 ON + 고객사관리자 차단 */}
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">파일 업로드</label>
-              <label className={`inline-flex items-center gap-2 px-4 py-2 text-white rounded-lg ${canManageUnsubscribes ? 'bg-purple-600 hover:bg-purple-700 cursor-pointer' : 'bg-gray-400 cursor-not-allowed'} ${uploading ? 'opacity-50' : ''}`}>
-                <span>📁</span>
+              <label className="block text-xs font-semibold text-slate-500 mb-1.5">파일 업로드</label>
+              <label className={`inline-flex items-center gap-2 px-4 py-2.5 text-sm font-medium rounded-xl border transition-colors ${canManageUnsubscribes ? 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50 cursor-pointer' : 'bg-slate-100 border-slate-200 text-slate-400 cursor-not-allowed'} ${uploading ? 'opacity-60' : ''}`}>
+                <Upload className="w-4 h-4" />
                 <span>{uploading ? '처리중...' : 'CSV/TXT'}</span>
                 <input
                   type="file"
@@ -373,22 +389,20 @@ export default function Unsubscribes() {
             {/* D43-4: 080 연동 테스트 — opt_out_auto_sync=true일 때만 표시 */}
             {optOutAutoSync && opt080Number && (
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">080 연동</label>
+                <label className="block text-xs font-semibold text-slate-500 mb-1.5">080 연동</label>
                 <button
                   onClick={() => setSyncTestModal(true)}
                   disabled={syncTesting}
-                  className="inline-flex items-center gap-2 px-4 py-2 bg-orange-500 text-white rounded-lg hover:bg-orange-600 transition-colors disabled:opacity-50"
+                  className="inline-flex items-center gap-2 px-4 py-2.5 bg-white border border-slate-200 text-sm font-medium text-slate-700 rounded-xl hover:bg-slate-50 transition-colors disabled:opacity-50"
                 >
-                  <svg className={`w-4 h-4 ${syncTesting ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                  </svg>
+                  <RefreshCw className={`w-4 h-4 ${syncTesting ? 'animate-spin' : ''}`} />
                   <span>{syncTesting ? '확인중...' : '연동 테스트'}</span>
                 </button>
               </div>
             )}
           </div>
 
-          <p className="text-xs text-gray-400 mt-3">
+          <p className="text-xs text-slate-400 mt-3">
             {optOutAutoSync
               ? `※ 080 수신거부(${format080Number(opt080Number)}) 시 자동 등록됩니다. 유료 요금제 업체는 고객 DB의 수신동의 상태도 자동 연동됩니다.`
               : '※ 파일 업로드는 한 줄에 하나의 전화번호 형식입니다.'
@@ -397,83 +411,92 @@ export default function Unsubscribes() {
 
           {/* ★ D162-3 격리 ON + 고객사관리자 안내 */}
           {!canManageUnsubscribes && userIsolationEnabled && (
-            <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
-              <strong>수신거부 사용자격리기능이 적용되어있습니다.</strong> 한줄로 운영실에 문의하세요.
-              <div className="text-xs text-amber-700 mt-1">고객사관리자는 조회만 가능합니다. 각 사용자가 등록한 수신거부 결과가 본 화면에 자동 동기화됩니다.</div>
+            <div className="mt-4 flex items-start gap-3 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+              <ShieldAlert className="w-5 h-5 text-amber-500 shrink-0 mt-0.5" />
+              <div>
+                <strong>수신거부 사용자격리기능이 적용되어 있습니다.</strong> 한줄로 운영실에 문의하세요.
+                <div className="text-xs text-amber-700 mt-1">고객사관리자는 조회만 가능합니다. 각 사용자가 등록한 수신거부 결과가 본 화면에 자동 동기화됩니다.</div>
+              </div>
             </div>
           )}
         </div>
 
         {/* 목록 */}
-        <div className="bg-white rounded-lg shadow">
-          <div className="p-4 border-b flex justify-between items-center">
-            <h2 className="font-semibold">수신거부 목록</h2>
-            <span className="text-sm text-gray-500">총 {pagination.total.toLocaleString()}건</span>
+        <div className="bg-white rounded-2xl ring-1 ring-slate-200 shadow-sm overflow-hidden">
+          <div className="px-5 py-4 border-b border-slate-100 flex justify-between items-center">
+            <h2 className="text-sm font-bold text-slate-900">수신거부 목록</h2>
+            <span className="text-sm text-slate-400">총 <span className="font-semibold text-slate-700">{pagination.total.toLocaleString()}</span>건</span>
           </div>
 
           {loading ? (
-            <div className="p-8 text-center text-gray-500">로딩 중...</div>
+            <div className="p-12 flex flex-col items-center justify-center gap-2 text-sm text-slate-400">
+              <RefreshCw className="w-5 h-5 animate-spin text-slate-300" />
+              로딩 중...
+            </div>
           ) : unsubscribes.length === 0 ? (
-            <div className="p-8 text-center text-gray-400">수신거부 목록이 없습니다</div>
+            <div className="p-12 text-center text-sm text-slate-400">수신거부 목록이 없습니다</div>
           ) : (
-            <table className="w-full">
-              <thead className="bg-gray-50">
-                <tr>
-                  <th className="px-4 py-3 text-left text-sm font-medium text-gray-600">전화번호</th>
-                  <th className="px-4 py-3 text-left text-sm font-medium text-gray-600">등록 경로</th>
-                  <th className="px-4 py-3 text-left text-sm font-medium text-gray-600">등록일시</th>
-                  <th className="px-4 py-3 text-center text-sm font-medium text-gray-600">삭제</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y">
-                {unsubscribes.map((item) => {
-                  const src = sourceLabel[item.source] || { text: item.source, color: 'bg-gray-100 text-gray-700' };
-                  return (
-                    <tr key={item.id} className="hover:bg-gray-50">
-                      <td className="px-4 py-3 font-mono">{formatPhone(item.phone)}</td>
-                      <td className="px-4 py-3">
-                        <span className={`px-2 py-1 rounded text-xs ${src.color}`}>
-                          {src.text}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3 text-sm text-gray-500">
-                        {formatDateTime(item.created_at)}
-                      </td>
-                      <td className="px-4 py-3 text-center">
-                        <button
-                          onClick={() => canManageUnsubscribes && setDeleteModal({ show: true, id: item.id, phone: item.phone })}
-                          disabled={!canManageUnsubscribes}
-                          className={`text-sm ${canManageUnsubscribes ? 'text-red-500 hover:text-red-700' : 'text-gray-300 cursor-not-allowed'}`}
-                        >
-                          삭제
-                        </button>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+            <div className="overflow-x-auto">
+              <table className="w-full">
+                <thead>
+                  <tr className="border-b border-slate-100">
+                    <th className="px-5 py-3 text-left text-xs font-semibold text-slate-400 uppercase tracking-wider">전화번호</th>
+                    <th className="px-5 py-3 text-left text-xs font-semibold text-slate-400 uppercase tracking-wider">등록 경로</th>
+                    <th className="px-5 py-3 text-left text-xs font-semibold text-slate-400 uppercase tracking-wider">등록일시</th>
+                    <th className="px-5 py-3 text-center text-xs font-semibold text-slate-400 uppercase tracking-wider">삭제</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-50">
+                  {unsubscribes.map((item) => {
+                    const src = sourceLabel[item.source] || { text: item.source, color: 'bg-slate-100 text-slate-600 ring-1 ring-slate-200' };
+                    return (
+                      <tr key={item.id} className="hover:bg-slate-50/60 transition-colors">
+                        <td className="px-5 py-3.5 font-mono text-sm text-slate-900">{formatPhone(item.phone)}</td>
+                        <td className="px-5 py-3.5">
+                          <span className={`inline-flex px-2.5 py-1 rounded-lg text-xs font-medium ${src.color}`}>
+                            {src.text}
+                          </span>
+                        </td>
+                        <td className="px-5 py-3.5 text-sm text-slate-500">
+                          {formatDateTime(item.created_at)}
+                        </td>
+                        <td className="px-5 py-3.5 text-center">
+                          <button
+                            onClick={() => canManageUnsubscribes && setDeleteModal({ show: true, id: item.id, phone: item.phone })}
+                            disabled={!canManageUnsubscribes}
+                            className={`inline-flex items-center justify-center w-8 h-8 rounded-lg transition-colors ${canManageUnsubscribes ? 'text-slate-400 hover:text-rose-600 hover:bg-rose-50' : 'text-slate-200 cursor-not-allowed'}`}
+                            title="수신거부 해제"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
           )}
 
           {/* 페이지네이션 */}
           {pagination.totalPages > 1 && (
-            <div className="p-4 border-t flex justify-center gap-2">
+            <div className="px-5 py-4 border-t border-slate-100 flex justify-center items-center gap-2">
               <button
                 onClick={() => setPagination(prev => ({ ...prev, page: prev.page - 1 }))}
                 disabled={pagination.page === 1}
-                className="px-3 py-1 border rounded hover:bg-gray-100 disabled:opacity-50"
+                className="inline-flex items-center justify-center w-9 h-9 rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
               >
-                이전
+                <ChevronLeft className="w-4 h-4" />
               </button>
-              <span className="px-3 py-1 text-sm text-gray-600">
-                {pagination.page} / {pagination.totalPages}
+              <span className="px-3 text-sm text-slate-500">
+                {pagination.page} <span className="text-slate-300">/</span> {pagination.totalPages}
               </span>
               <button
                 onClick={() => setPagination(prev => ({ ...prev, page: prev.page + 1 }))}
                 disabled={pagination.page === pagination.totalPages}
-                className="px-3 py-1 border rounded hover:bg-gray-100 disabled:opacity-50"
+                className="inline-flex items-center justify-center w-9 h-9 rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
               >
-                다음
+                <ChevronRight className="w-4 h-4" />
               </button>
             </div>
           )}
