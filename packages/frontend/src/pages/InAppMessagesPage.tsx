@@ -695,7 +695,7 @@ export default function InAppMessagesPage() {
               onChange={(e) => setAiObjective(e.target.value)}
               onKeyDown={(e) => { if (e.key === 'Enter') handleAIGenerate(aiObjective); }}
               placeholder="예: 장바구니 24시간 후 회복 메시지 / 신규 가입자 환영 인사"
-              className="flex-1 min-w-[240px] px-4 py-2.5 bg-violet-900/40/60 border border-fuchsia-400/30 rounded-lg text-sm text-white placeholder-white/40 focus:outline-none focus:border-fuchsia-400/60"
+              className="flex-1 min-w-[240px] px-4 py-2.5 bg-violet-900/40 border border-fuchsia-400/30 rounded-lg text-sm text-white placeholder-white/40 focus:outline-none focus:border-fuchsia-400/60"
               disabled={aiGenerating}
             />
             <button
@@ -731,7 +731,7 @@ export default function InAppMessagesPage() {
 
         {/* ▼ 영역 6: 6 sub-agent 진행 카드 (조건부 — 생성 중일 때만) */}
         {aiGenerating && (
-          <div className="bg-violet-900/40/60 border border-white/10 rounded-xl p-5">
+          <div className="bg-violet-900/40 border border-white/10 rounded-xl p-5">
             <h3 className="text-sm font-bold text-white mb-3">AI 생성 진행 중...</h3>
             <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
               {Object.entries(SUB_AGENT_VISUAL).map(([key, visual], idx) => {
@@ -743,7 +743,7 @@ export default function InAppMessagesPage() {
                     className={`p-3 rounded-lg border transition-all ${
                       isDone
                         ? `bg-gradient-to-br ${visual.gradient} border-white/30 shadow-lg`
-                        : 'bg-violet-900/40/40 border-white/5 opacity-50'
+                        : 'bg-violet-900/40 border-white/5 opacity-50'
                     }`}
                   >
                     <div className="flex items-center gap-2 mb-1">
@@ -1457,7 +1457,7 @@ function EditModal({ editing, setEditing, availableVariables, onSave, fileInputR
           </div>
 
           {/* 우측 — 실시간 미리보기 (영역 10) */}
-          <div className="bg-violet-900/50/60 p-6 space-y-3 sticky top-[60px] h-fit max-h-[80vh] overflow-y-auto">
+          <div className="bg-violet-900/50 p-6 space-y-3 sticky top-[60px] h-fit max-h-[80vh] overflow-y-auto">
             <h4 className="text-xs font-bold text-white/80 mb-1 flex items-center gap-1.5">
               <Eye className="w-3 h-3" /> 10. 실시간 미리보기
             </h4>
@@ -1637,7 +1637,7 @@ function DrillDownModal({ loading, stats, explain, onClose }: DrillDownProps) {
               <div className="text-xs text-violet-100 mb-3 italic">{explain.topInsight}</div>
               <div className="space-y-2">
                 {explain.factors.map((f, idx) => (
-                  <div key={idx} className="bg-violet-900/50/60 rounded p-3">
+                  <div key={idx} className="bg-violet-900/50 rounded p-3">
                     <div className="flex items-center justify-between mb-1">
                       <span className="text-xs font-bold text-white">{f.factor}</span>
                       <span className={`text-[10px] px-2 py-0.5 rounded-full ${

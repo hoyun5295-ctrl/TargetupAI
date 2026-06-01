@@ -702,7 +702,7 @@ export default function AiMemoryPage() {
                 placeholder="질문을 입력하고 Enter 키를 눌러주세요 (2~500자)"
                 maxLength={500}
                 disabled={naturalLoading}
-                className="flex-1 px-4 py-2.5 bg-violet-900/50/60 border border-white/10 rounded-lg text-sm text-white placeholder-white/30 focus:outline-none focus:border-fuchsia-400/50 focus:ring-1 focus:ring-fuchsia-400/30 disabled:opacity-40"
+                className="flex-1 px-4 py-2.5 bg-violet-900/50 border border-white/10 rounded-lg text-sm text-white placeholder-white/30 focus:outline-none focus:border-fuchsia-400/50 focus:ring-1 focus:ring-fuchsia-400/30 disabled:opacity-40"
               />
               <button
                 onClick={() => runNaturalSearch(naturalQuery)}

@@ -3,6 +3,8 @@
 > 2026-06-01 조사. systematic-debugging Phase 1~3 완료(근본원인 코드 확정). **수정은 다음 세션(Phase 4).**
 > 원칙: 묶음별 하나씩 세심하게, 추측 금지(전부 file:line 증거). 발송/돈 영역 = 수정 후 검증 + 필요 시 codex 이중검증.
 
+> ★ 2026-06-01 구현 완료 + 정정 (이후 참조): #4-a·#3·#1·#2 + 추가발견 C3·C1 수정·검증 완료(backend·frontend tsc 0, 배포 Harold). **정정** — #4-c는 results.ts의 resend_type/resend_report_code(실재하지 않는 컬럼)가 아니라 **app_etc1 누락**이 원인: insertAlimtalkQueue가 app_etc1을 안 넣어 결과·통계(GROUP BY app_etc1)에 미매칭 → 전송 0. 대체발송 = **별도 LMS L행**(status_code 1000=성공, k_oriseq=원본 K seqno), 매뉴얼 ver3.1의 "같은 행 7831"과 다름(실측 확인). **C3 추가발견** — 모달 알림톡이 본문을 빈 kakaoMessage로 전송(Dashboard:517) → 템플릿 content로 수정. 빈 본문→카카오 반려(K행 status 92)→불필요 대체 폭증의 근본 원인. **C1** — 부달 옵션 N(대체안함)·L(LMS대체) 2개로 축소 + amber 폴리시(박성용 신고). **C2 대기** — 대체 L행을 k_oriseq로 캠페인 귀속 + 수신자당 최종 1건 집계(대용량, 카운트 기준 확정 후). 상세 = memory/project_2026_0601_credit_recharge_alimtalk_debug.md (B·D 섹션).
+
 ## 4건 요약 (묶음)
 
 | # | 증상 | 묶음 |

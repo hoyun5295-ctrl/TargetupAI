@@ -379,7 +379,7 @@ export default function SegmentsPage() {
                         </div>
                       )}
                       {preview.samples.length > 0 && (
-                        <div className="rounded-lg border border-white/10 bg-violet-900/50/50 p-3">
+                        <div className="rounded-lg border border-white/10 bg-violet-900/50 p-3">
                           <p className="text-[10px] text-white/60 mb-2 font-medium">샘플 5건</p>
                           <div className="space-y-1">
                             {preview.samples.map((s) => (
@@ -460,7 +460,7 @@ export default function SegmentsPage() {
                   value={nlInput}
                   onChange={(e) => setNlInput(e.target.value)}
                   placeholder="예: 30일 안 구매하지 않은 30대 여성"
-                  className="w-full bg-violet-900/50/50 border border-white/10 rounded-lg px-3 py-2.5 text-sm text-white placeholder:text-white/30 focus:outline-none focus:border-violet-400"
+                  className="w-full bg-violet-900/50 border border-white/10 rounded-lg px-3 py-2.5 text-sm text-white placeholder:text-white/30 focus:outline-none focus:border-violet-400"
                   rows={3}
                   disabled={nlGenerating}
                 />
@@ -525,7 +525,7 @@ export default function SegmentsPage() {
                         value={newName}
                         onChange={(e) => setNewName(e.target.value)}
                         placeholder="세그먼트 이름 (예: 30일 미구매 30대 여성)"
-                        className="flex-1 bg-violet-900/50/50 border border-white/10 rounded-lg px-3 py-2 text-sm text-white placeholder:text-white/30 focus:outline-none focus:border-violet-400"
+                        className="flex-1 bg-violet-900/50 border border-white/10 rounded-lg px-3 py-2 text-sm text-white placeholder:text-white/30 focus:outline-none focus:border-violet-400"
                         disabled={saving}
                       />
                       <button
