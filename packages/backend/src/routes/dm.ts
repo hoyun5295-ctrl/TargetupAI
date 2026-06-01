@@ -27,7 +27,7 @@ import {
   oneShotGenerate,
   type CampaignSpec, type ToneKey,
 } from '../utils/dm/dm-ai';
-import { checkCredit, deductCredit } from '../utils/ai-credit';
+import { checkCredit, deductCreditSafe } from '../utils/ai-credit';
 import { runInCreditBundle } from '../utils/ai-credit-context';
 import type { Section } from '../utils/dm/dm-section-registry';
 import { selectSampleCustomers, selectSampleCustomerByKey, type SampleCustomerKey } from '../utils/dm/dm-sample-customer';
@@ -330,7 +330,7 @@ dmRouter.post('/ai/one-shot-generate', async (req: any, res: any) => {
     await checkCredit(companyId, 5);
     const result = await runInCreditBundle(async () => {
       const r = await oneShotGenerate({ prompt, scenario, brandName, companyId });
-      await deductCredit({ companyId, cost: 5, source: 'dm-builder', createdBy: req.user?.userId });
+      await deductCreditSafe({ companyId, cost: 5, source: 'dm-builder', createdBy: req.user?.userId });
       return r;
     });
     return res.json({

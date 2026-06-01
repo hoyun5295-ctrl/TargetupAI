@@ -144,11 +144,13 @@ export async function callAIWithFallback(params: {
 
     // ★ D209+ Phase D: 정상 응답 시점 cache 저장 + 통계 INSERT (companyId 박힘 영역만)
     if (params.companyId && cacheKey && text) {
+      let aiCallLogId: string | null = null;
+      // 캐시·통계 = best-effort (실패해도 무방, 차감과 분리)
       try {
         const { setCachedResponse } = await import('../utils/ai-cache');
         setCachedResponse(cacheKey, text);
         const { recordAiCall } = await import('../utils/ai-rate-limit');
-        const aiCallLogId = await recordAiCall({
+        aiCallLogId = await recordAiCall({
           companyId: params.companyId,
           source: params.source || 'unknown',
           modelType: params.model === 'opus' ? 'opus' : 'sonnet',
@@ -156,19 +158,19 @@ export async function callAIWithFallback(params: {
           outputTokens: usage?.output_tokens || 0,
           success: true,
         });
-        // ★ D227+ 종량제: 성공 후 크레딧 차감 (실패 시 미차감, aiCallLogId로 idempotency)
-        if (creditCost > 0) {
-          const { deductCredit } = await import('../utils/ai-credit');
-          await deductCredit({
-            companyId: params.companyId,
-            cost: creditCost,
-            source: params.source || 'unknown',
-            aiCallLogId,
-            createdBy: params.userId || null,
-          });
-        }
       } catch (trackErr: any) {
-        console.warn('[AI] Phase D 통계/크레딧 기록 오류 (silent skip):', trackErr?.message);
+        console.warn('[AI] Phase D 캐시/통계 기록 skip:', trackErr?.message);
+      }
+      // ★ D227+ 종량제: 크레딧 차감 = 돈, 통계와 분리해 끝까지 보장(재시도+멱등+stdout 추적)
+      if (creditCost > 0) {
+        const { deductCreditSafe } = await import('../utils/ai-credit');
+        await deductCreditSafe({
+          companyId: params.companyId,
+          cost: creditCost,
+          source: params.source || 'unknown',
+          aiCallLogId,
+          createdBy: params.userId || null,
+        });
       }
     }
     return text;
@@ -213,12 +215,14 @@ export async function callAIWithFallback(params: {
 
     // ★ D209+ Phase D: GPT fallback 정상 응답 시점 cache 저장 + 통계 INSERT (companyId 박힘 영역만)
     if (params.companyId && cacheKey && text) {
+      let aiCallLogId: string | null = null;
+      const gptUsage = gptResponse.usage as unknown as Record<string, number | undefined> | undefined;
+      // 캐시·통계 = best-effort (실패해도 무방, 차감과 분리)
       try {
         const { setCachedResponse } = await import('../utils/ai-cache');
         setCachedResponse(cacheKey, text);
         const { recordAiCall } = await import('../utils/ai-rate-limit');
-        const gptUsage = gptResponse.usage as unknown as Record<string, number | undefined> | undefined;
-        const aiCallLogId = await recordAiCall({
+        aiCallLogId = await recordAiCall({
           companyId: params.companyId,
           source: params.source || 'unknown',
           modelType: 'gpt-fallback',
@@ -226,19 +230,19 @@ export async function callAIWithFallback(params: {
           outputTokens: gptUsage?.completion_tokens || 0,
           success: true,
         });
-        // ★ D227+ 종량제: 성공 후 크레딧 차감 (실패 시 미차감, aiCallLogId로 idempotency)
-        if (creditCost > 0) {
-          const { deductCredit } = await import('../utils/ai-credit');
-          await deductCredit({
-            companyId: params.companyId,
-            cost: creditCost,
-            source: params.source || 'unknown',
-            aiCallLogId,
-            createdBy: params.userId || null,
-          });
-        }
       } catch (trackErr: any) {
-        console.warn('[AI] Phase D 통계 기록 오류 (silent skip):', trackErr?.message);
+        console.warn('[AI] Phase D 캐시/통계 기록 skip:', trackErr?.message);
+      }
+      // ★ D227+ 종량제: 크레딧 차감 = 돈, 통계와 분리해 끝까지 보장(재시도+멱등+stdout 추적)
+      if (creditCost > 0) {
+        const { deductCreditSafe } = await import('../utils/ai-credit');
+        await deductCreditSafe({
+          companyId: params.companyId,
+          cost: creditCost,
+          source: params.source || 'unknown',
+          aiCallLogId,
+          createdBy: params.userId || null,
+        });
       }
     }
     return text;

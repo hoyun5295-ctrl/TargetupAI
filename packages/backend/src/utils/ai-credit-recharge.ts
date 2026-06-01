@@ -29,7 +29,7 @@ function idemKey(prefix: string, companyId: string): string {
 }
 
 /** 선불 즉시 충전 — 발송 잔액 차감 + 구매분 지급 (원자 트랜잭션). */
-export async function rechargePrepaid(opts: { companyId: string; credits: number; userId?: string | null }) {
+export async function rechargePrepaid(opts: { companyId: string; credits: number; userId?: string | null; idempotencyKey?: string }) {
   const { credits: c, supply, vat, total } = calcRechargeAmount(opts.credits);
   if (c <= 0) throw new RechargeError('충전 크레딧은 1 이상이어야 합니다.', 'INVALID_AMOUNT');
 
@@ -45,6 +45,15 @@ export async function rechargePrepaid(opts: { companyId: string; credits: number
     if (co.rows.length === 0) { await client.query('ROLLBACK'); throw new RechargeError('회사를 찾을 수 없습니다.'); }
     const row = co.rows[0];
     if (String(row.billing_type) !== 'prepaid') { await client.query('ROLLBACK'); throw new RechargeError('선불 회사가 아닙니다.', 'NOT_PREPAID'); }
+
+    // ★ 멱등: 클라이언트 키가 오면 이미 처리된 충전인지 확인(FOR UPDATE 뒤 = 더블클릭·재전송 직렬화). 키 없으면 기존 동작.
+    if (opts.idempotencyKey) {
+      const dup = await client.query(`SELECT 1 FROM ai_credit_transactions WHERE idempotency_key = $1 LIMIT 1`, [opts.idempotencyKey]);
+      if (dup.rows.length > 0) {
+        await client.query('ROLLBACK');
+        throw new RechargeError('이미 처리된 충전 요청입니다.', 'DUPLICATE_RECHARGE');
+      }
+    }
 
     const balance = Number(row.balance) || 0;
     if (balance < total) {
@@ -69,7 +78,7 @@ export async function rechargePrepaid(opts: { companyId: string; credits: number
          (company_id, type, amount, bucket, source, idempotency_key, balance_base_after, balance_purchased_after, created_by, reason)
        VALUES ($1::uuid, 'purchase', $2, 'purchased', 'credit-recharge', $3, $4, $5, $6, $7)
        RETURNING id`,
-      [opts.companyId, c, idemKey('recharge', opts.companyId), Number(row.base) || 0, purchasedAfter, opts.userId || null,
+      [opts.companyId, c, opts.idempotencyKey || idemKey('recharge', opts.companyId), Number(row.base) || 0, purchasedAfter, opts.userId || null,
         `선불 충전 ${c.toLocaleString()} 크레딧 (VAT 포함 ${total.toLocaleString()}원)`]
     );
     const creditTxId = txRes.rows[0].id;

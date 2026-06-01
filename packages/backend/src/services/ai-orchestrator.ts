@@ -46,7 +46,7 @@ import {
   InsightResult,
 } from '../utils/performance-insight';
 // ★ D227+ 종량제: 풀분석 묶음 차감 — 진입점 1회, sub-agent는 묶음 컨텍스트로 0(과차감 방지)
-import { checkCredit, deductCredit } from '../utils/ai-credit';
+import { checkCredit, deductCreditSafe } from '../utils/ai-credit';
 import { runInCreditBundle } from '../utils/ai-credit-context';
 
 /** AI Operator 풀분석(orchestrate) 1회 크레딧 (CREDIT_COST_MAP의 orchestrate와 동일). */
@@ -295,7 +295,7 @@ export async function orchestrate(ctx: AgentContext): Promise<OrchestratorResult
   await checkCredit(ctx.companyId, ORCHESTRATE_CREDIT);
   return runInCreditBundle(async () => {
     const result = await _orchestrateImpl(ctx);
-    await deductCredit({ companyId: ctx.companyId, cost: ORCHESTRATE_CREDIT, source: 'orchestrate', createdBy: ctx.userId });
+    await deductCreditSafe({ companyId: ctx.companyId, cost: ORCHESTRATE_CREDIT, source: 'orchestrate', createdBy: ctx.userId });
     return result;
   });
 }
@@ -560,7 +560,7 @@ export async function orchestrateWithAI(ctx: AgentContext): Promise<Orchestrator
   await checkCredit(ctx.companyId, ORCHESTRATE_CREDIT);
   return runInCreditBundle(async () => {
     const result = await _orchestrateWithAIImpl(ctx);
-    await deductCredit({ companyId: ctx.companyId, cost: ORCHESTRATE_CREDIT, source: 'orchestrate', createdBy: ctx.userId });
+    await deductCreditSafe({ companyId: ctx.companyId, cost: ORCHESTRATE_CREDIT, source: 'orchestrate', createdBy: ctx.userId });
     return result;
   });
 }

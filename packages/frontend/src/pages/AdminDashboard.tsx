@@ -5713,12 +5713,13 @@ const handleApproveRequest = async (id: string) => {
                             className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-violet-500 outline-none" />
                           <button type="button" disabled={creditAdj.busy || !creditAdj.amount || !creditAdj.reason}
                             onClick={async () => {
+                              const idemKey = (typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : `a-${Date.now()}-${Math.random().toString(36).slice(2)}`;
                               setCreditAdj(prev => ({ ...prev, busy: true }));
                               try {
                                 const token = localStorage.getItem('token');
                                 const res = await fetch(`/api/admin/companies/${editCompany.id}/credit-adjust`, {
                                   method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-                                  body: JSON.stringify({ type: creditAdj.type, amount: Number(creditAdj.amount), reason: creditAdj.reason })
+                                  body: JSON.stringify({ type: creditAdj.type, amount: Number(creditAdj.amount), reason: creditAdj.reason, idempotencyKey: idemKey })
                                 });
                                 const data = await res.json();
                                 if (res.ok) {

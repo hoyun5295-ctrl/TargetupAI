@@ -5,6 +5,7 @@ import pool, { mysqlQuery } from '../config/database';
 import { SUCCESS_CODES_SQL, PENDING_CODES_SQL } from '../utils/sms-result-map';
 import { INVITO_INFO } from '../config/defaults';
 import { getCompanySmsTables, getTestSmsTables } from '../utils/sms-queue';
+import { CREDIT_UNIT_PRICE } from '../utils/ai-credit-calc';
 
 // SMTP transporter (재사용)
 const getTransporter = () => nodemailer.createTransport({
@@ -378,8 +379,19 @@ router.post('/generate', async (req: Request, res: Response) => {
           AND processed_at::date >= $2 AND processed_at::date <= $3`,
       [company_id, billing_start, billing_end]
     );
-    const aiCreditSupply = creditChargeRes.rows.reduce((s: number, r: any) => s + Number(r.supply_amount || 0), 0);
-    const aiCreditCount = creditChargeRes.rows.reduce((s: number, r: any) => s + Number(r.credits || 0), 0); // 총 크레딧 수량(명세 수량 칸 = 크레딧×단가=공급가)
+    const chargeSupply = creditChargeRes.rows.reduce((s: number, r: any) => s + Number(r.supply_amount || 0), 0);
+    const chargeCount = creditChargeRes.rows.reduce((s: number, r: any) => s + Number(r.credits || 0), 0);
+    // ★ #3 후불 overage(기본 크레딧 초과해 한도 음수로 쓴 분)도 같은 기간 합산 — 솔루션 이용요금 통합(단가 동일 2,000원)
+    //   이중 방지: 위 기간 겹침 중복 차단(409)으로 월 1회만 생성 → created_at 기간 집계가 다음 달과 안 겹침.
+    const overageRes = await pool.query(
+      `SELECT COALESCE(SUM(overage_credits), 0) AS oc FROM ai_credit_transactions
+        WHERE company_id = $1::uuid AND type = 'deduct' AND overage_credits > 0
+          AND created_at >= $2::date AND created_at < ($3::date + interval '1 day')`,
+      [company_id, billing_start, billing_end]
+    );
+    const overageCount = Number(overageRes.rows[0]?.oc) || 0;
+    const aiCreditCount = chargeCount + overageCount;                       // 충전 + 초과사용 크레딧 수량
+    const aiCreditSupply = chargeSupply + overageCount * CREDIT_UNIT_PRICE; // 공급가(크레딧×단가=공급가 일관)
 
     const subtotal =
       (totalSms * prices.SMS) + (totalLms * prices.LMS) +
@@ -458,6 +470,10 @@ router.post('/generate', async (req: Request, res: Response) => {
       summary: { totalSms, totalLms, totalMms, totalKakao, totalTestSms, totalTestLms, totalSpamSms, totalSpamLms, subtotal, vat, totalAmount }
     });
   } catch (error: any) {
+    const emsg = error?.message || '';
+    if (emsg.includes('column') && emsg.includes('does not exist')) {
+      return res.status(503).json({ error: 'DB 마이그레이션 필요 — ai_credit_transactions.overage_credits 컬럼 ALTER 실행 요청', code: 'DB_MIGRATION_PENDING' });
+    }
     console.error('정산 생성 오류:', error);
     return res.status(500).json({ error: error.message });
   }
@@ -720,7 +736,7 @@ router.get('/:id/pdf', async (req: Request, res: Response) => {
     drawRow('테스트 LMS', n(bil.test_lms_count), n(bil.test_lms_unit_price), n(bil.test_lms_count) * n(bil.test_lms_unit_price), '#fefce8');
     drawRow('스팸필터 SMS', n(bil.spam_filter_sms_count), n(bil.spam_filter_sms_unit_price), n(bil.spam_filter_sms_count) * n(bil.spam_filter_sms_unit_price), '#fef3c7');
     drawRow('스팸필터 LMS', n(bil.spam_filter_lms_count), n(bil.spam_filter_lms_unit_price), n(bil.spam_filter_lms_count) * n(bil.spam_filter_lms_unit_price), '#fef3c7');
-    drawRow('AI 크레딧 충전', n(bil.ai_credit_count), n(bil.ai_credit_count) > 0 ? Math.round(n(bil.ai_credit_supply) / n(bil.ai_credit_count)) : 0, n(bil.ai_credit_supply), '#f5f3ff');
+    drawRow('AI 크레딧', n(bil.ai_credit_count), n(bil.ai_credit_count) > 0 ? Math.round(n(bil.ai_credit_supply) / n(bil.ai_credit_count)) : 0, n(bil.ai_credit_supply), '#f5f3ff');
 
     // 합계
     y += 15;
@@ -1473,7 +1489,7 @@ router.post('/:id/send-email', async (req: Request, res: Response) => {
               <td style="padding: 8px 0; text-align: right; font-weight: 600;">₩${(n(bil.spam_filter_sms_count) * n(bil.spam_filter_sms_unit_price) + n(bil.spam_filter_lms_count) * n(bil.spam_filter_lms_unit_price)).toLocaleString()}</td>
             </tr>` : ''}
             ${n(bil.ai_credit_supply) > 0 ? `<tr style="border-bottom: 1px solid #F3F4F6; background: #F5F3FF;">
-              <td style="padding: 8px 0; color: #6B7280;">AI 크레딧 충전</td>
+              <td style="padding: 8px 0; color: #6B7280;">AI 크레딧</td>
               <td style="padding: 8px 0; text-align: right;">${n(bil.ai_credit_count).toLocaleString()} 크레딧</td>
               <td style="padding: 8px 0; text-align: right; font-weight: 600;">₩${n(bil.ai_credit_supply).toLocaleString()}</td>
             </tr>` : ''}

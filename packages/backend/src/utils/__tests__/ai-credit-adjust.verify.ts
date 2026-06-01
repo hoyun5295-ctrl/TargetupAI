@@ -16,12 +16,15 @@ async function ok(name: string, fn: () => void | Promise<void>) {
 }
 
 /** loadCreditRow의 SELECT에만 행을 돌려주는 mock client. */
-function mockClient(row: any) {
+function mockClient(row: any, dupOpts?: { dupExists?: boolean }) {
   const calls: string[] = [];
   return {
     calls,
     async query(sql: string, _params?: any[]) {
       calls.push(sql.trim().split('\n')[0]);
+      if (sql.includes('ai_credit_transactions') && sql.includes('idempotency_key') && sql.trim().startsWith('SELECT')) {
+        return { rows: dupOpts?.dupExists ? [{ ok: 1 }] : [] };
+      }
       if (sql.includes('SELECT') && sql.includes('ai_credits_purchased')) return { rows: [row] };
       return { rows: [] };
     },
@@ -58,6 +61,25 @@ function mockClient(row: any) {
   await ok('금액 0 이하 → throw', async () => {
     const c = mockClient({ purchased: 100, base: 0 });
     await assert.rejects(() => adjustCreditWithClient(c as any, { companyId: 'c1', amount: 0, type: 'grant', adminId: 'a1', reason: 'x' }, new Date()));
+  });
+
+  console.log('[ai-credit] adjustCreditWithClient 멱등 (idempotencyKey 중복 차단)');
+  await ok('키 있고 dup 없음 → 정상 지급', async () => {
+    const c = mockClient({ purchased: 0, base: 0 });
+    const r = await adjustCreditWithClient(c as any, { companyId: 'c1', amount: 100, type: 'grant', adminId: 'a1', reason: 'x', idempotencyKey: 'k1' }, new Date());
+    assert.strictEqual(r.purchasedAfter, 100);
+    assert.ok(c.calls.includes('COMMIT'));
+  });
+  await ok('키 있고 dup 있음 → throw + ROLLBACK, 지급 UPDATE 없음', async () => {
+    const c = mockClient({ purchased: 0, base: 0 }, { dupExists: true });
+    await assert.rejects(() => adjustCreditWithClient(c as any, { companyId: 'c1', amount: 100, type: 'grant', adminId: 'a1', reason: 'x', idempotencyKey: 'k1' }, new Date()));
+    assert.ok(c.calls.includes('ROLLBACK'));
+    assert.ok(!c.calls.some((s) => s.includes('UPDATE companies')), '지급 UPDATE 없어야');
+  });
+  await ok('키 없으면 멱등 SELECT 안 함(기존 동작 보존)', async () => {
+    const c = mockClient({ purchased: 0, base: 0 });
+    await adjustCreditWithClient(c as any, { companyId: 'c1', amount: 100, type: 'grant', adminId: 'a1', reason: 'x' }, new Date());
+    assert.ok(!c.calls.some((s) => s.includes('ai_credit_transactions') && s.includes('idempotency_key') && s.startsWith('SELECT')), '멱등 SELECT 호출 안 함');
   });
 
   console.log(`\n${passed} assertions passed`);

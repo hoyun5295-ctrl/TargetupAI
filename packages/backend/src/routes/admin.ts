@@ -2238,7 +2238,7 @@ router.get('/companies/:id/credit', authenticate, requireSuperAdmin, async (req:
 // 수동 크레딧 지급/조정 (grant | admin_deduct)
 router.post('/companies/:id/credit-adjust', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
   const { id } = req.params;
-  const { type, amount, reason } = req.body;
+  const { type, amount, reason, idempotencyKey } = req.body;
   const adminId = (req as any).user?.userId;
   if (!type || !['grant', 'admin_deduct'].includes(type)) {
     return res.status(400).json({ error: '올바른 유형을 선택해주세요. (grant 또는 admin_deduct)' });
@@ -2248,7 +2248,7 @@ router.post('/companies/:id/credit-adjust', authenticate, requireSuperAdmin, asy
   if (!reason || String(reason).trim() === '') return res.status(400).json({ error: '사유를 입력해주세요.' });
   try {
     const { adjustCredit } = await import('../utils/ai-credit');
-    const r = await adjustCredit({ companyId: id, amount: Math.floor(amt), type, reason: String(reason).trim(), adminId });
+    const r = await adjustCredit({ companyId: id, amount: Math.floor(amt), type, reason: String(reason).trim(), adminId, idempotencyKey: typeof idempotencyKey === 'string' ? idempotencyKey.slice(0, 100) : undefined });
     console.log(`[관리자크레딧] ${id} ${type} ${amt} → 구매분 ${r.purchasedAfter}`);
     res.json({
       message: type === 'grant' ? `${amt.toLocaleString()} 크레딧을 지급했습니다.` : `${amt.toLocaleString()} 크레딧을 차감했습니다.`,
@@ -2259,6 +2259,7 @@ router.post('/companies/:id/credit-adjust', authenticate, requireSuperAdmin, asy
     if (msg.includes('column') && msg.includes('does not exist')) {
       return res.status(503).json({ error: 'DB 마이그레이션 필요 — ai_credit_transactions.reason 컬럼 ALTER 실행 요청', code: 'DB_MIGRATION_PENDING' });
     }
+    if (msg.includes('이미 처리')) return res.status(409).json({ error: msg, code: 'DUPLICATE_ADJUST' });
     if (msg.includes('부족') || msg.includes('찾을 수 없')) return res.status(400).json({ error: msg });
     console.error('크레딧 조정 실패:', err);
     res.status(500).json({ error: '크레딧 조정 실패' });

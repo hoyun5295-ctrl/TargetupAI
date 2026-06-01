@@ -191,6 +191,20 @@ async function ok(name: string, fn: () => Promise<void>) {
     assert.ok(threw instanceof InsufficientCreditError, '선불은 overage 무시 → throw');
   });
 
+  console.log('[ai-credit-tx] overage_credits 기록 (한도 음수 초과분 shortfall만, 청구 대상)');
+  await ok('후불 overage: overage_credits = shortfall (base2 cost5 → 3)', async () => {
+    const client = makeMockClient({ row: { base: 2, purchased: 0, cap: null, reset_at: SAME_MONTH_RESET, plan_credits: 1000, billing_type: 'postpaid', overage_limit: 100 } });
+    await _deductWithClient(client, { companyId: 'c1', cost: 5, source: 'orchestrate', aiCallLogId: 'ov1' }, NOW);
+    const insert = client.calls.find((c) => /^INSERT INTO ai_credit_transactions/.test(c.sql));
+    assert.ok(insert && insert.params && insert.params[9] === 3, 'overage_credits = shortfall 3 (기본분 2 제외)');
+  });
+  await ok('기본분 충당: overage_credits = 0 (청구 대상 아님)', async () => {
+    const client = makeMockClient({ row: { base: 100, purchased: 0, cap: null, reset_at: SAME_MONTH_RESET, plan_credits: 800 } });
+    await _deductWithClient(client, { companyId: 'c1', cost: 10, source: 'orchestrate', aiCallLogId: 'ov2' }, NOW);
+    const insert = client.calls.find((c) => /^INSERT INTO ai_credit_transactions/.test(c.sql));
+    assert.ok(insert && insert.params && insert.params[9] === 0, 'overage_credits = 0');
+  });
+
   console.log(`\n${passed} assertions passed`);
 })().catch((e) => {
   console.error('FAILED:', e);

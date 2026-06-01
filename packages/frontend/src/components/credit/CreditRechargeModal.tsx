@@ -25,6 +25,9 @@ export default function CreditRechargeModal({ onClose, onSuccess }: Props) {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
   const [done, setDone] = useState<null | { mode: 'prepaid' | 'request'; credits: number; newBalance?: number }>(null);
+  // 멱등키 — 모달 mount 시 1회 생성. 더블클릭·재전송은 같은 키(백엔드 중복 차단). 성공 후 모달 닫힘 → 재충전은 새 모달=새 키.
+  const [idemKey] = useState<string>(() =>
+    (typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : `r-${Date.now()}-${Math.random().toString(36).slice(2)}`);
 
   useEffect(() => {
     (async () => {
@@ -57,11 +60,15 @@ export default function CreditRechargeModal({ onClose, onSuccess }: Props) {
       const res = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ credits }),
+        body: JSON.stringify({ credits, idempotencyKey: idemKey }),
       });
       const d = await res.json().catch(() => ({}));
       if (res.ok && d?.success !== false) {
         setDone({ mode: isPostpaid ? 'request' : 'prepaid', credits, newBalance: d?.newBalance });
+        onSuccess?.();
+      } else if (d?.code === 'DUPLICATE_RECHARGE') {
+        // 멱등: 같은 요청이 이미 처리됨 — 오류가 아니라 완료로 표시(이중 차감 0)
+        setDone({ mode: 'prepaid', credits });
         onSuccess?.();
       } else {
         setError(d?.error || '처리에 실패했습니다.');

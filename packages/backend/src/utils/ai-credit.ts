@@ -81,6 +81,7 @@ export async function deductCredit(opts: {
   source: string;
   aiCallLogId?: string | null;
   createdBy?: string | null;
+  idempotencyKey?: string;
 }): Promise<DeductResult> {
   const empty: DeductResult = { deducted: false, fromBase: 0, fromPurchased: 0, baseAfter: 0, purchasedAfter: 0 };
   if (!opts.companyId || !opts.cost || opts.cost <= 0) return empty;
@@ -96,6 +97,7 @@ export async function deductCredit(opts: {
         source: opts.source,
         aiCallLogId: opts.aiCallLogId,
         createdBy: opts.createdBy,
+        idempotencyKey: opts.idempotencyKey,
       },
       now
     );
@@ -104,6 +106,59 @@ export async function deductCredit(opts: {
     throw err;
   } finally {
     client.release();
+  }
+}
+
+/**
+ * 차감 안전 실행 래퍼 — AI 호출 성공 후 차감을 끝까지 보장한다.
+ *  - 캐시·통계 기록과 분리해 호출(통계 실패가 차감을 막지 않음).
+ *  - 일시 오류(deadlock·연결·잠금 경합) 시 최대 3회 재시도(차감은 원자·멱등이라 재호출해도 중복 0).
+ *  - aiCallLogId가 없으면(통계 실패) 호출당 고정 대체 멱등키를 부여 → 재시도 이중 차감 차단.
+ *  - 최종 실패 = stdout 명시 로그([CREDIT][MISS])로 추적 + 그 키로 수동 재차감. AI 응답은 막지 않는다(throw 안 함).
+ *  - _deps = 단위검증 주입용(prod 미사용).
+ */
+export async function deductCreditSafe(
+  opts: {
+    companyId: string | null;
+    cost: number;
+    source: string;
+    aiCallLogId?: string | null;
+    createdBy?: string | null;
+  },
+  _deps?: { deductFn?: typeof deductCredit; sleep?: (ms: number) => Promise<void> }
+): Promise<void> {
+  if (!opts.companyId || !opts.cost || opts.cost <= 0) return;
+  const deduct = _deps?.deductFn ?? deductCredit;
+  const sleep = _deps?.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
+  // 통계 실패로 aiCallLogId가 없으면 호출당 1회 고정 대체 멱등키(재시도 루프 내내 동일) → 이중 차감 차단
+  const idempotencyKey = opts.aiCallLogId
+    ? undefined
+    : `fallback:${opts.companyId}:${opts.source}:${Date.now()}`;
+  const MAX_ATTEMPTS = 3;
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    try {
+      await deduct({
+        companyId: opts.companyId,
+        cost: opts.cost,
+        source: opts.source,
+        aiCallLogId: opts.aiCallLogId,
+        createdBy: opts.createdBy,
+        idempotencyKey,
+      });
+      return;
+    } catch (err: any) {
+      // 잔액 부족 = 정상 차단(사전 checkCredit 통과 후 동시 소진). 재시도 무의미.
+      if (err instanceof InsufficientCreditError) {
+        console.log(`[CREDIT][SKIP] insufficient company=${opts.companyId} source=${opts.source} cost=${opts.cost} aiCallLogId=${opts.aiCallLogId || 'none'}`);
+        return;
+      }
+      if (attempt < MAX_ATTEMPTS) {
+        await sleep(attempt * 200);
+        continue;
+      }
+      // 영구 실패 — stdout 추적(LESSONS_BACKEND: console.log 의무). aiCallLogId로 수동 재차감 가능.
+      console.log(`[CREDIT][MISS] company=${opts.companyId} source=${opts.source} cost=${opts.cost} aiCallLogId=${opts.aiCallLogId || 'none'} attempts=${MAX_ATTEMPTS} err=${err?.message}`);
+    }
   }
 }
 

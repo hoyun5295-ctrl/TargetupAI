@@ -178,13 +178,14 @@ router.post('/my-credit/recharge', async (req: Request, res: Response) => {
     if (!companyId) return res.status(401).json({ success: false, error: '인증 필요' });
     const credits = Number(req.body?.credits);
     if (!Number.isFinite(credits) || credits <= 0) return res.status(400).json({ success: false, error: '충전 크레딧을 입력해주세요.' });
+    const idempotencyKey = typeof req.body?.idempotencyKey === 'string' ? req.body.idempotencyKey.slice(0, 100) : undefined;
 
     const { rechargePrepaid } = await import('../utils/ai-credit-recharge');
-    const r = await rechargePrepaid({ companyId, credits: Math.floor(credits), userId });
+    const r = await rechargePrepaid({ companyId, credits: Math.floor(credits), userId, idempotencyKey });
     return res.json({ success: true, ...r });
   } catch (err: any) {
     if (err?.name === 'RechargeError') {
-      const status = err.code === 'INSUFFICIENT_BALANCE' ? 409 : 400;
+      const status = (err.code === 'INSUFFICIENT_BALANCE' || err.code === 'DUPLICATE_RECHARGE') ? 409 : 400;
       return res.status(status).json({ success: false, error: err.message, code: err.code });
     }
     const msg = err?.message || '';

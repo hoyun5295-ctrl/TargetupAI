@@ -51,6 +51,8 @@ export interface DeductOpts {
   source: string;
   aiCallLogId?: string | null;
   createdBy?: string | null;
+  /** 멱등키 직접 지정. 미지정 시 source+aiCallLogId 기반. aiCallLogId가 없을 때 호출측이 대체 키를 부여하는 용도. */
+  idempotencyKey?: string;
 }
 
 /** companies 크레딧 행 + 요금제 기본 크레딧. forUpdate 시 companies 행 잠금. */
@@ -102,7 +104,7 @@ export async function applyResetIfNeeded(client: any, companyId: string, row: an
  */
 export async function _deductWithClient(client: any, opts: DeductOpts, now: Date): Promise<DeductResult> {
   const empty: DeductResult = { deducted: false, fromBase: 0, fromPurchased: 0, baseAfter: 0, purchasedAfter: 0 };
-  const idemKey = buildIdempotencyKey(opts.source, opts.aiCallLogId);
+  const idemKey = opts.idempotencyKey ?? buildIdempotencyKey(opts.source, opts.aiCallLogId);
 
   await client.query('BEGIN');
 
@@ -156,12 +158,12 @@ export async function _deductWithClient(client: any, opts: DeductOpts, now: Date
   await client.query(
     `INSERT INTO ai_credit_transactions
        (company_id, type, amount, bucket, source, ai_call_log_id, idempotency_key,
-        balance_base_after, balance_purchased_after, created_by)
-     VALUES ($1::uuid, 'deduct', $2, $3, $4, $5, $6, $7, $8, $9)
+        balance_base_after, balance_purchased_after, created_by, overage_credits)
+     VALUES ($1::uuid, 'deduct', $2, $3, $4, $5, $6, $7, $8, $9, $10)
      ON CONFLICT (idempotency_key) DO NOTHING`,
     [
       opts.companyId, opts.cost, bucket, opts.source.slice(0, 60),
-      opts.aiCallLogId || null, idemKey, baseAfter, purchasedAfter, opts.createdBy || null,
+      opts.aiCallLogId || null, idemKey, baseAfter, purchasedAfter, opts.createdBy || null, shortfall,
     ]
   );
 
@@ -175,6 +177,8 @@ export interface AdjustOpts {
   type: 'grant' | 'admin_deduct';
   reason: string;
   adminId: string;
+  /** 멱등키. 지정 시 같은 키 재요청은 중복 차단. 미지정 시 기존 동작(매번 신규). */
+  idempotencyKey?: string;
 }
 
 /**
@@ -191,6 +195,15 @@ export async function adjustCreditWithClient(client: any, opts: AdjustOpts, now:
   if (!locked) {
     await client.query('ROLLBACK');
     throw new Error('회사를 찾을 수 없습니다.');
+  }
+
+  // ★ 멱등: 키가 오면 이미 처리된 지급/조정인지 확인(FOR UPDATE 뒤 = 더블클릭 직렬화). 키 없으면 기존 동작.
+  if (opts.idempotencyKey) {
+    const dup = await client.query(`SELECT 1 FROM ai_credit_transactions WHERE idempotency_key = $1 LIMIT 1`, [opts.idempotencyKey]);
+    if (dup.rows.length > 0) {
+      await client.query('ROLLBACK');
+      throw new Error('이미 처리된 요청입니다.');
+    }
   }
 
   const base = Number(locked.base) || 0;
@@ -214,7 +227,7 @@ export async function adjustCreditWithClient(client: any, opts: AdjustOpts, now:
      VALUES ($1::uuid, $2, $3, 'purchased', $4, $5, $6, $7, $8, $9)`,
     [
       opts.companyId, opts.type, opts.amount, `admin-${opts.type}`,
-      `${opts.type}:${opts.companyId}:${now.getTime()}:${Math.floor(Math.random() * 1e9)}`,
+      opts.idempotencyKey || `${opts.type}:${opts.companyId}:${now.getTime()}:${Math.floor(Math.random() * 1e9)}`,
       base, purchasedAfter, opts.adminId, (opts.reason || '').slice(0, 500),
     ]
   );
