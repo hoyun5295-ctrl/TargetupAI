@@ -144,6 +144,7 @@ ${rawPrompt}
     userMessage,
     maxTokens: 1200,
     temperature: 0.2,
+    model: 'opus',
     companyId,
     source: 'dm-parse', // ★ D227+ 종량제: 집계용(맵 미등록=0). dm-builder 묶음 안에선 자동 0
   });
@@ -328,6 +329,7 @@ ${schema}`;
     userMessage,
     maxTokens: 800,
     temperature: 0.8,
+    model: 'opus',
     companyId,
     source: 'dm-copy', // ★ D227+ 종량제: 집계용(맵 미등록=0). dm-builder 묶음 안에선 자동 0
   });
@@ -365,6 +367,7 @@ export async function transformTone(text: string, targetTone: ToneKey, companyId
     userMessage,
     maxTokens: 300,
     temperature: 0.7,
+    model: 'opus',
     companyId,
     source: 'dm-tone', // ★ D227+ 종량제: 집계용(맵 미등록=0)
   });
@@ -422,6 +425,7 @@ ${JSON.stringify(payload, null, 2)}
     userMessage,
     maxTokens: 1800,
     temperature: 0.5,
+    model: 'opus',
     companyId,
     source: 'dm-improve', // ★ D227+ 종량제: 집계용(맵 미등록=0)
   });

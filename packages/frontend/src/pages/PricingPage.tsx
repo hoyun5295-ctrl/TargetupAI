@@ -6,7 +6,7 @@ import { COMPANY_PHONE, COMPANY_PHONE_TEL } from '../constants/company';
 import { Sparkles, Users, Server, Cpu, Check } from 'lucide-react';
 import CreditSummaryBar from '../components/credit/CreditSummaryBar';
 import CreditRechargeModal from '../components/credit/CreditRechargeModal';
-import { PLAN_INFRA, creditConversions, COMMON_SERVICE_LINE } from '../constants/credit';
+import { PLAN_INFRA, creditConversions, planBonusPct, COMMON_SERVICE_LINE } from '../constants/credit';
 
 interface Plan {
   id: string;
@@ -431,6 +431,7 @@ export default function PricingPage() {
             const credits = Number(plan.ai_credits_per_month) || 0;
             const creditPct = Math.max(4, Math.round((credits / maxCredits) * 100));
             const conv = creditConversions(credits);
+            const bonusPct = planBonusPct(Number(plan.monthly_price) || 0, credits);
             const infra = PLAN_INFRA[plan.plan_code] || { label: '고성능 공유 서버', benefit: '당사 IDC 고성능 서버를 멀티테넌트로 사용', premium: false };
             const InfraIcon = infraIcon(plan.plan_code);
             
@@ -485,7 +486,12 @@ export default function PricingPage() {
                   {/* 월 AI 크레딧 — 히어로 + 크레딧 환산(능력 기반) */}
                   {credits > 0 ? (
                     <div className="rounded-xl border border-violet-100 bg-violet-50/40 p-3 mb-3">
-                      <div className="text-[11px] font-medium text-violet-700">월 AI 크레딧</div>
+                      <div className="flex items-center justify-between">
+                        <div className="text-[11px] font-medium text-violet-700">월 AI 크레딧</div>
+                        {bonusPct > 0 && (
+                          <span className="rounded-full bg-gradient-to-r from-violet-600 to-fuchsia-600 px-1.5 py-0.5 text-[9px] font-bold text-white">보너스 +{bonusPct}%</span>
+                        )}
+                      </div>
                       <div className="mt-0.5 flex items-end gap-1">
                         <span className="text-2xl font-bold tabular-nums text-slate-900">{formatNumber(credits)}</span>
                         <span className="mb-0.5 text-[11px] text-slate-400">크레딧</span>

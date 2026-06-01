@@ -14,14 +14,14 @@ interface Props {
   onSuccess?: () => void;
 }
 
-const PRESETS = [100, 500, 1000, 5000];
+const PRESETS = [50, 100, 300, 500];
 const fmt = (n: number) => Number(n || 0).toLocaleString();
 
 export default function CreditRechargeModal({ onClose, onSuccess }: Props) {
   const [billingType, setBillingType] = useState('prepaid');
   const [balance, setBalance] = useState(0);
   const [loading, setLoading] = useState(true);
-  const [credits, setCredits] = useState(500);
+  const [credits, setCredits] = useState(100);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
   const [done, setDone] = useState<null | { mode: 'prepaid' | 'request'; credits: number; newBalance?: number }>(null);

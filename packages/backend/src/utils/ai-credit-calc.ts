@@ -61,36 +61,39 @@ export function buildIdempotencyKey(source: string, aiCallLogId?: string | null)
 }
 
 /**
- * 작업 source → 크레딧 비용 (handoff §4 지도 + 실측 source 문자열 기준).
- *  - 풀분석 10 / 생성 3 / 다듬기·분석 2 / 질문·매핑 1.
- *  - orchestrate sub-agent 내부 호출은 호출측이 creditCost:0을 명시(묶음 회피) → 여기 단가는 진입점 1회용.
+ * 작업 source → 크레딧 비용 (가치 기반 재설계 — 2026-06-01, 1크레딧 = 500원).
+ *  - 풀분석 300 / 여정 150 / 자동마케팅 50 / 모바일DM 30 / 인앱 15 / 문안·분석 5 / 다듬기·질문·매핑 1.
+ *  - orchestrate·continuous-operator는 진입점 1회만 차감, 내부 sub 호출은 호출측이 creditCost:0 명시(묶음 회피).
  *  - 미등록 source는 getCreditCost가 0 반환(차감 안 함) — 신규 작업 추가 시 여기 등록 의무.
+ *  - frontend constants/credit.ts CREDIT_TASK_COSTS와 1:1 일치 유지 (한쪽만 바꾸지 말 것).
  */
 export const CREDIT_COST_MAP: Record<string, number> = {
-  // 풀분석 (20) — 타겟+문안+검수+성과 종합 (orchestrate 진입점 1회, sub는 묶음 0)
-  'orchestrate': 20,
-  'orchestrateWithAI': 20,
-  // 여정 (10) — 다단계 캠페인 자동화 설계
-  'journey-ai-generate': 10,
-  'journey-builder-custom': 10,
-  // 모바일 DM 묶음 (5) — parse+copy+tone+improve 여러 호출 1작업
-  'dm-builder': 5,
-  // 생성 (3) — inapp·CDP 단일 콘텐츠
-  'inapp-ai-generator': 3,
-  'inapp-quick-action': 3,
-  // 문안 생성·분석·추천 (2)
-  'generate-messages': 2,
-  'generate-custom-messages': 2,
-  'recommend-target': 2,
-  'recommend-next-campaign': 2,
-  'variant-generator': 2,
-  'performance-explainer': 2,
-  'performance-quick-action': 2,
-  'next-action-advisor': 2,
-  'multi-goal-decisioning': 2,
-  'cdp-fusion-explainer': 2,
-  'voice-inbound': 2,
-  'dm-event-recommender': 2,
+  // 풀분석 (300) — 타겟+문안+검수+성과 종합 (orchestrate 진입점 1회, sub는 묶음 0)
+  'orchestrate': 300,
+  'orchestrateWithAI': 300,
+  // 여정 설계 (150) — 다단계 캠페인 자동화 설계
+  'journey-ai-generate': 150,
+  'journey-builder-custom': 150,
+  // 자동 마케팅 (200) — continuous-operator 사이클 = 풀분석 자동(할인). 내부 orchestrate·문안 생성은 묶음 0.
+  'continuous-operator': 200,
+  // 모바일 DM (30) — parse+copy+tone+improve 여러 호출 1작업
+  'dm-builder': 30,
+  // 인앱 생성 (15) — inapp·CDP 단일 콘텐츠
+  'inapp-ai-generator': 15,
+  'inapp-quick-action': 15,
+  // 문안 생성·분석·추천 (5)
+  'generate-messages': 5,
+  'generate-custom-messages': 5,
+  'recommend-target': 5,
+  'recommend-next-campaign': 5,
+  'variant-generator': 5,
+  'performance-explainer': 5,
+  'performance-quick-action': 5,
+  'next-action-advisor': 5,
+  'multi-goal-decisioning': 5,
+  'cdp-fusion-explainer': 5,
+  'voice-inbound': 5,
+  'dm-event-recommender': 5,
   // 다듬기·진단·질문·매핑 (1) — 스팸필터는 크레딧 비대상(현금/후불 청구)
   'journey-ai-refine': 1,
   'journey-step-diagnosis': 1,
@@ -113,8 +116,8 @@ export function getCreditCost(source: string | undefined | null): number {
 }
 
 // ── 크레딧 충전 단가 (D229+ 종량제 — Harold 확정) ─────────────────
-/** 1 크레딧당 원가(VAT 별도). 스타터 수준(150,000/70≈2,143) 기준 2,000원. 화면 단가 노출 금지. */
-export const CREDIT_UNIT_PRICE = 2000;
+/** 1 크레딧당 단가(VAT 별도). 가치 기반 재설계 — 다듬기 1크레딧 = 500원 기준. 화면 단가 노출 금지. */
+export const CREDIT_UNIT_PRICE = 500;
 export const CREDIT_VAT_RATE = 0.1;
 
 /** 충전 크레딧 수량 → 결제 금액(공급가/부가세/합계). 보너스 없음. */

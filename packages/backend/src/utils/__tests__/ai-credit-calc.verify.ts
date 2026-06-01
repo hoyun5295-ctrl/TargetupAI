@@ -67,11 +67,12 @@ ok('aiCallLogId 없음 → null', () => {
 });
 
 console.log('[ai-credit-calc] getCreditCost (source → 크레딧)');
-ok('풀분석 orchestrate = 20', () => assert.strictEqual(getCreditCost('orchestrate'), 20));
-ok('여정 journey-ai-generate = 10', () => assert.strictEqual(getCreditCost('journey-ai-generate'), 10));
-ok('DM dm-builder = 5', () => assert.strictEqual(getCreditCost('dm-builder'), 5));
-ok('생성 inapp-ai-generator = 3', () => assert.strictEqual(getCreditCost('inapp-ai-generator'), 3));
-ok('문안·분석 generate-messages = 2', () => assert.strictEqual(getCreditCost('generate-messages'), 2));
+ok('풀분석 orchestrate = 300', () => assert.strictEqual(getCreditCost('orchestrate'), 300));
+ok('여정 journey-ai-generate = 150', () => assert.strictEqual(getCreditCost('journey-ai-generate'), 150));
+ok('자동마케팅 continuous-operator = 200', () => assert.strictEqual(getCreditCost('continuous-operator'), 200));
+ok('모바일DM dm-builder = 30', () => assert.strictEqual(getCreditCost('dm-builder'), 30));
+ok('인앱 inapp-ai-generator = 15', () => assert.strictEqual(getCreditCost('inapp-ai-generator'), 15));
+ok('문안·분석 generate-messages = 5', () => assert.strictEqual(getCreditCost('generate-messages'), 5));
 ok('다듬기 journey-ai-refine = 1', () => assert.strictEqual(getCreditCost('journey-ai-refine'), 1));
 ok('스팸 spam-filter-test = 0 (크레딧 비대상 — 현금/후불 청구)', () => assert.strictEqual(getCreditCost('spam-filter-test'), 0));
 ok('미등록 source = 0', () => assert.strictEqual(getCreditCost('unknown'), 0));

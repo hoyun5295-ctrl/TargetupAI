@@ -38,6 +38,7 @@ import { autoSpamTestWithRegenerate } from './spam-test-queue';
 import { generateMessages } from '../services/ai';
 // ★ D227+ 종량제: AI 사이클 크레딧 부족 감지 + 담당자 무과금 알림(인증 라인 재사용)
 import { InsufficientCreditError } from './ai-credit';
+import { runInCreditBundle } from './ai-credit-context';
 import { getAuthSmsTable, bulkInsertSmsQueue } from './sms-queue';
 
 // ════════════════════════════════════════════════════════════════════
@@ -367,7 +368,7 @@ export async function generateProposalForOperator(operatorId: string): Promise<O
       objective: operator.objective,
       companyInfo,
       customerStats,
-    });
+    }, { source: 'continuous-operator' });  // 자동마케팅 = 풀분석 자동(200, 할인). source로 단가·이력 분리.
     // ★ D227+ 종량제: 크레딧 충분해 정상 실행 — paused_no_credit였으면 자동 재개
     await query(
       `UPDATE continuous_operators SET status = 'active', updated_at = NOW()
@@ -500,11 +501,12 @@ export async function generateProposalForOperator(operatorId: string): Promise<O
         // 차단 시 AI 재작성 (Opus) — buildSpamRegeneratePrompt: 목표 유지 + 구체 혜택 생성 금지
         regenerateCallback: async () => {
           try {
-            const regen = await generateMessages(
+            // 스팸 재생성은 자동마케팅 사이클 안전망(품질 보증) → 묶음으로 차감 0 (사이클 1회 200에 포함).
+            const regen = await runInCreditBundle(() => generateMessages(
               buildSpamRegeneratePrompt(operator.objective),
               { count: recipientCount, segmentName: orchestratorResult.target?.suggestedName || operator.name, criteria: orchestratorResult.target?.criteria || '' } as any,
               { channel: channelForSpam, isAd: !!isAd, rejectNumber: ctx.reject_number || undefined, model: 'opus', companyId: operator.companyId },
-            );
+            ));
             const nv = regen.variants?.[0] as any;
             if (nv) return { messageText: String(nv.message_text || nv.sms_text || nv.lms_text || nv.body || ''), subject: nv.subject };
             return null;

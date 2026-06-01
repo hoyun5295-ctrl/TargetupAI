@@ -2477,13 +2477,13 @@ const campaignData = {
                         <Sparkles className="h-3 w-3 text-white" />
                       </span>
                       <span className="text-xs text-gray-400 group-hover:text-violet-600 transition-colors">AI 크레딧 잔여</span>
-                      <span className="text-lg font-bold text-violet-700">{Number(creditInfo.total || 0).toLocaleString()}</span>
+                      <span className="text-base font-bold text-violet-700">{Number(creditInfo.total || 0).toLocaleString()}</span>
                       <span className="text-xs text-gray-400">크레딧</span>
                     </button>
-                    <div className="flex items-center gap-3 text-[11px] text-gray-400">
-                      <span>기본 {Number(creditInfo.baseRemaining || 0).toLocaleString()}</span>
-                      <span>구매 {Number(creditInfo.purchased || 0).toLocaleString()}</span>
-                      <span>이번달 사용 {Number(creditInfo.monthlyUsed || 0).toLocaleString()}</span>
+                    <div className="flex items-center gap-3 text-xs">
+                      <span className="text-gray-500">기본 <b className="font-semibold text-violet-600">{Number(creditInfo.baseRemaining || 0).toLocaleString()}</b></span>
+                      <span className="text-gray-500">구매 <b className="font-semibold text-emerald-600">{Number(creditInfo.purchased || 0).toLocaleString()}</b></span>
+                      <span className="text-gray-500">이번달 사용 <b className="font-semibold text-amber-600">{Number(creditInfo.monthlyUsed || 0).toLocaleString()}</b></span>
                     </div>
                   </div>
                 )}

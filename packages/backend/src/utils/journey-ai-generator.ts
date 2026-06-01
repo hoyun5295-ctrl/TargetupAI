@@ -6,7 +6,7 @@
  *   Sonnet 4.6 + ai_company_memory + 시즌 컨텍스트 + 회사 톤 + 메모리 통합 (D209+ 전환 — 기존 ai.ts 흐름 정합).
  *
  * 영구 룰 정합
- *   - ai_operator_model_isolation: model:'sonnet' (D209+ Harold 명시 전환 — 기존 ai.ts 정합 모델)
+ *   - 여정 생성 model:'opus' (2026-06-01 가치 가격 — 핵심 작업 고급), 여정 다듬기는 'sonnet' 유지
  *   - ai_no_arbitrary_benefit: 구체 혜택(% / 원 / 무료 / 쿠폰) 임의 작성 X
  *       안내문/인사/감성 텍스트는 풍성, 혜택 영역만 [혜택 안내 — 직접 수정해주세요] placeholder
  *   - no_humuson_keyword_exposure: 검수 단어 X
@@ -493,7 +493,7 @@ VIP 회원님만을 위해 준비한 이번 봄 특별 안내,
     userMessage,
     maxTokens: 4096,
     temperature: 0.4,
-    model: 'sonnet',
+    model: 'opus',
     companyId: input.companyId,
     source: 'journey-ai-generate',
   });

@@ -1,4 +1,4 @@
-import { Sparkles, Route, Smartphone, Layers, PenLine, Wand2, type LucideIcon } from 'lucide-react';
+import { Sparkles, Route, Smartphone, Layers, PenLine, Wand2, Repeat, type LucideIcon } from 'lucide-react';
 
 /**
  * 종량제 크레딧 공용 상수 (D229+ UI 폴리시).
@@ -14,29 +14,30 @@ export interface CreditTaskCost {
 }
 
 /**
- * 작업당 AI 크레딧 단가 — 백엔드 CREDIT_COST_MAP 기준.
- *  orchestrate 20(풀분석) · journey 10(여정) · dm-builder 5(모바일 DM)
- *  · 생성 3(인앱·CDP) · 문안·분석 2 · 다듬기·질문·매핑 1. 스팸필터 테스트는 비대상(0, 미표기).
+ * 작업당 AI 크레딧 단가 — 백엔드 CREDIT_COST_MAP 기준 (가치 기반 재설계, 1크레딧 = 500원).
+ *  풀분석 300 · 여정 150 · 자동마케팅 50 · 모바일DM 30 · 인앱 15 · 문안·분석 5 · 다듬기·질문 1.
+ *  스팸필터 테스트는 비대상(0, 미표기).
  */
 export const CREDIT_TASK_COSTS: CreditTaskCost[] = [
-  { key: 'full', label: '풀분석', cost: 20, icon: Sparkles },
-  { key: 'journey', label: '여정 설계', cost: 10, icon: Route },
-  { key: 'dm', label: '모바일 DM', cost: 5, icon: Smartphone },
-  { key: 'inapp', label: '인앱·생성', cost: 3, icon: Layers },
-  { key: 'copy', label: '문안·분석', cost: 2, icon: PenLine },
+  { key: 'full', label: '풀분석', cost: 300, icon: Sparkles },
+  { key: 'journey', label: '여정 설계', cost: 150, icon: Route },
+  { key: 'auto', label: '자동 마케팅', cost: 200, icon: Repeat },
+  { key: 'dm', label: '모바일 DM', cost: 30, icon: Smartphone },
+  { key: 'inapp', label: '인앱 생성', cost: 15, icon: Layers },
+  { key: 'copy', label: '문안·분석', cost: 5, icon: PenLine },
   { key: 'refine', label: '다듬기·질문', cost: 1, icon: Wand2 },
 ];
 
 /**
- * 크레딧 → 대표 작업 환산 횟수. 실제 단가(풀분석 20·DM 5·문안 2)로만 계산 — 임의 상수 없음.
- * "1,000 크레딧"이 막연하지 않게 "풀분석 50회"처럼 손에 잡히는 양으로 보여주는 용도.
+ * 크레딧 → 대표 작업 환산 횟수. 실제 단가(풀분석 300·DM 30·문안 5)로만 계산 — 임의 상수 없음.
+ * "2,400 크레딧"이 막연하지 않게 "풀분석 8회"처럼 손에 잡히는 양으로 보여주는 용도.
  */
 export function creditConversions(credits: number) {
   const c = Math.max(0, Math.floor(Number(credits) || 0));
   return {
-    fullAnalysis: Math.floor(c / 20),
-    dm: Math.floor(c / 5),
-    copy: Math.floor(c / 2),
+    fullAnalysis: Math.floor(c / 300),
+    dm: Math.floor(c / 30),
+    copy: Math.floor(c / 5),
   };
 }
 
@@ -71,6 +72,7 @@ export const COMMON_SERVICE_LINE = '스타터부터 AI 전 기능 · 전 채널 
 export const CREDIT_SOURCE_LABELS: Record<string, string> = {
   orchestrate: '풀분석', orchestrateWithAI: '풀분석',
   'journey-ai-generate': '여정 설계', 'journey-builder-custom': '여정 설계',
+  'continuous-operator': '자동 마케팅',
   'dm-builder': '모바일 DM',
   'inapp-ai-generator': '인앱 생성', 'inapp-quick-action': '인앱 생성',
   'generate-messages': '문구 생성', 'generate-custom-messages': '문구 생성',
@@ -103,7 +105,7 @@ export function creditTxLabel(type: string, source?: string | null): string {
  * 크레딧 충전 단가 — 백엔드 ai-credit-calc.ts와 동일값(미리보기 전용).
  * 실제 청구 금액은 백엔드가 계산(진실의 원천). 화면에 단가 자체를 노출하지 말 것. 보너스 없음.
  */
-export const CREDIT_UNIT_PRICE = 2000;
+export const CREDIT_UNIT_PRICE = 500;
 export const CREDIT_VAT_RATE = 0.1;
 
 /** 충전 크레딧 수량 → 결제 금액(공급가/부가세/합계). */
@@ -112,4 +114,15 @@ export function calcRechargeAmount(credits: number): { credits: number; supply: 
   const supply = c * CREDIT_UNIT_PRICE;
   const vat = Math.round(supply * CREDIT_VAT_RATE);
   return { credits: c, supply, vat, total: supply + vat };
+}
+
+/**
+ * 요금제 보너스 % — 지급 크레딧이 (월정액 ÷ 단가) 기본분 대비 몇 % 더인지.
+ * 요금제 카드 "+XX%" 배지용. 0 이하면 미표시.
+ * 예: 프로 100만 / 단가 500 = 기본 2,000, 지급 2,400 → +20%.
+ */
+export function planBonusPct(monthlyPrice: number, credits: number): number {
+  const base = Math.floor((Number(monthlyPrice) || 0) / CREDIT_UNIT_PRICE);
+  if (base <= 0) return 0;
+  return Math.round(((Number(credits) || 0) / base - 1) * 100);
 }

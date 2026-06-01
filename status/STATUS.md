@@ -107,7 +107,20 @@
 
 ---
 
-### 🟢 2026-06-01 세션 (최신) — 크레딧 UI 폴리시 + 충전/이력 완성 + 알림톡 디버깅 4건 설계도
+### 🟢 2026-06-01 세션 (최신) — 크레딧 점검 #1/#2/#3 + 요금제 UI 재구성
+
+> **점검·UI 코드·검증 완료, 배포 Harold.** 상세 = `memory/project_2026_0601_credit_audit_ui.md`
+> - **UI**: 세그먼트 모달 흰배경+흰글씨(Tailwind 중복불투명도 `bg-violet-900/50/50` 10곳 — SegmentsPage·InAppMessages·AiUsage·AiMemory) fix / 수신거부 관리 흰톤 모던 재작성(이모지→lucide) / 직접발송 3버튼 색차별화(미리보기 sky·스팸 amber·AI violet+glow, dead CSS `.ds-btn-sec--primary/--ghost` 제거·"파일 선택" 라벨 emerald 보존).
+> - **크레딧 점검 #1 차감무결성**: `deductCreditSafe` 신설(통계와 분리 + 재시도3 + stdout `[CREDIT][MISS/SKIP]` + aiCallLogId 없을 때 fallback 멱등키) → 5곳 통일(ai.ts 2·orchestrator 2·dm 1). spec=`2026-06-01-credit-deduct-integrity-design`. safe.verify 8 GREEN.
+> - **#2 충전·지급 멱등**: 클라이언트 멱등키(모달 mount uuid) + 서버 FOR UPDATE 뒤 dup 체크(`idempotency_key` UNIQUE 재사용, DB변경0), 하위호환(키 없으면 기존). spec=`recharge-idempotency`. adjust dup 3 GREEN.
+> - **#3 overage 월말청구**: `ai_credit_transactions.overage_credits` ALTER(Harold 완료) + `_deductWithClient` shortfall 기록 + billing generate 기간 `SUM(overage_credits)×2000`을 ai_credit_supply 통합(이중방지=기존 기간겹침 차단). spec=`overage-billing`. tx.verify 16 GREEN. catch 503.
+> - **요금제 반반카드**: CreditSummaryBar 재작성(좌 요금제+DB게이지 | 우 크레딧잔여+6칩 3열) + 종량제 띠 삭제 + 어필문구 제거(Harold "굳이 어필 X") + 현재플랜카드 분기(무료체험 D-N 분리·미가입/FREE만 단독) + 주요 라벨 1.45배. backend·frontend tsc 0.
+> - **보류**: 크레딧 양(프로 1000=풀분석50회/월) 과함 직관(Harold) — 사용 업체 0이라 실데이터 없음 → 데이터 쌓인 후 `plans.ai_credits_per_month` 등급별 조정(임의상수 금지). 화면 6칩·캡션 크기 미세조정도 배포 후. **#4 설계문서 과거값 정리 미완**(2026-05-31-credit-based-pricing-redesign 의 50/200/800/2500/5500·10체계·1200/1000/900 ↔ 실제 70/200/1000/3500/7000·20체계·2000).
+> - 배포(Harold): tp-push + git pull + backend build:safe + pm2 restart all + frontend build:safe.
+
+---
+
+### 🟢 2026-06-01 세션 — 크레딧 UI 폴리시 + 충전/이력 완성 + 알림톡 디버깅 4건 설계도
 
 > **이번 세션 = 크레딧 코드 다수 + 알림톡 디버깅 조사·설계. 다음 세션 = 알림톡 디버깅 4건 수정.**
 >

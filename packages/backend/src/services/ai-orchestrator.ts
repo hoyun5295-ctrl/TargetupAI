@@ -48,9 +48,9 @@ import {
 // ★ D227+ 종량제: 풀분석 묶음 차감 — 진입점 1회, sub-agent는 묶음 컨텍스트로 0(과차감 방지)
 import { checkCredit, deductCreditSafe } from '../utils/ai-credit';
 import { runInCreditBundle } from '../utils/ai-credit-context';
+import { getCreditCost } from '../utils/ai-credit-calc';
 
-/** AI Operator 풀분석(orchestrate) 1회 크레딧 (CREDIT_COST_MAP의 orchestrate와 동일). */
-const ORCHESTRATE_CREDIT = 20;
+// 풀분석/자동마케팅 크레딧 = CREDIT_COST_MAP 단일 진실(getCreditCost(source)). orchestrate=300, continuous-operator=200.
 
 // ★ D171-D (2026-05-19): 진정 Orchestrator AI 전용 Anthropic 인스턴스 (Tool Use 직접 호출)
 const orchestratorAnthropic = new Anthropic({
@@ -290,12 +290,15 @@ passed=true 이면 warnings/suggestions 빈 배열 가능. 사소한 issue는 me
 // Orchestrator main — 6 Sub-agent 호출 + 결과 통합
 // ============================================================
 
-export async function orchestrate(ctx: AgentContext): Promise<OrchestratorResult> {
+export async function orchestrate(ctx: AgentContext, creditOpts?: { source?: string; cost?: number }): Promise<OrchestratorResult> {
   // ★ D227+ 종량제: 풀분석 묶음 — 진입 사전 체크 → 본문(sub는 묶음으로 차감 0) → 성공 후 1회 차감.
-  await checkCredit(ctx.companyId, ORCHESTRATE_CREDIT);
+  //   creditOpts: 자동마케팅 등이 source/cost 오버라이드(예: source 'continuous-operator' → 200). 미지정 시 풀분석 300.
+  const source = creditOpts?.source ?? 'orchestrate';
+  const cost = creditOpts?.cost ?? getCreditCost(source);
+  await checkCredit(ctx.companyId, cost);
   return runInCreditBundle(async () => {
     const result = await _orchestrateImpl(ctx);
-    await deductCreditSafe({ companyId: ctx.companyId, cost: ORCHESTRATE_CREDIT, source: 'orchestrate', createdBy: ctx.userId });
+    await deductCreditSafe({ companyId: ctx.companyId, cost, source, createdBy: ctx.userId });
     return result;
   });
 }
@@ -555,12 +558,14 @@ const ORCHESTRATOR_TOOLS: Anthropic.Tool[] = [
   },
 ];
 
-export async function orchestrateWithAI(ctx: AgentContext): Promise<OrchestratorResult> {
+export async function orchestrateWithAI(ctx: AgentContext, creditOpts?: { source?: string; cost?: number }): Promise<OrchestratorResult> {
   // ★ D227+ 종량제: 풀분석 묶음 (orchestrate와 동일 — 진입 1회 차감). fallback은 _orchestrateImpl 직접(이중차감 방지).
-  await checkCredit(ctx.companyId, ORCHESTRATE_CREDIT);
+  const source = creditOpts?.source ?? 'orchestrate';
+  const cost = creditOpts?.cost ?? getCreditCost(source);
+  await checkCredit(ctx.companyId, cost);
   return runInCreditBundle(async () => {
     const result = await _orchestrateWithAIImpl(ctx);
-    await deductCreditSafe({ companyId: ctx.companyId, cost: ORCHESTRATE_CREDIT, source: 'orchestrate', createdBy: ctx.userId });
+    await deductCreditSafe({ companyId: ctx.companyId, cost, source, createdBy: ctx.userId });
     return result;
   });
 }
