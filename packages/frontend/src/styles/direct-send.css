@@ -719,24 +719,7 @@
   border: 1px solid transparent;
   font-family: inherit;
 }
-.ds-btn-sec.ds-btn-sec--primary {
-  background: var(--ds-emerald-50);
-  color: var(--ds-emerald-700);
-  border-color: var(--ds-emerald-200);
-}
-.ds-btn-sec.ds-btn-sec--primary:hover {
-  background: var(--ds-emerald-100);
-  transform: translateY(-1px);
-}
-.ds-btn-sec.ds-btn-sec--ghost {
-  background: #FFFFFF;
-  color: var(--ds-stone-700);
-  border-color: var(--ds-stone-200);
-}
-.ds-btn-sec.ds-btn-sec--ghost:hover {
-  background: var(--ds-stone-50);
-  border-color: var(--ds-stone-300);
-}
+/* 보조 액션 버튼 색 = 각 버튼 className 인라인(미리보기 sky / 스팸 amber / AI violet)으로 이전 — 3버튼 차별화 */
 .ds-btn-sec svg { width: 14px; height: 14px; stroke-width: 1.75; }
 
 /* ============================================================

@@ -872,7 +872,7 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
                 <div className="grid grid-cols-3 gap-2">
                   <button
                     type="button"
-                    className="ds-btn-sec ds-btn-sec--primary ds-t"
+                    className="ds-btn-sec ds-t border border-sky-200 bg-sky-50 text-sky-700 hover:bg-sky-100 hover:border-sky-300 transition-all"
                     onClick={() => {
                       if (!directMessage.trim()) { setToast({ show: true, type: 'error', message: '메시지를 입력해주세요' }); return; }
                       setShowDirectPreview(true);
@@ -883,7 +883,7 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
                   </button>
                   <button
                     type="button"
-                    className={`ds-btn-sec ds-btn-sec--ghost ds-t ${isSpamFilterLocked ? 'opacity-60' : ''}`}
+                    className={`ds-btn-sec ds-t border border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100 hover:border-amber-300 transition-all ${isSpamFilterLocked ? 'opacity-60' : ''}`}
                     onClick={handleSpamFilter}
                   >
                     {isSpamFilterLocked ? <Lock size={14} strokeWidth={1.75} /> : <ShieldCheck size={14} strokeWidth={1.75} />}
@@ -893,7 +893,7 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
                     ref={aiRefineBtnRef}
                     type="button"
                     data-ai-refine-btn
-                    className={`ds-btn-sec ds-t flex items-center justify-center gap-1.5 rounded-lg border-2 border-emerald-200 bg-gradient-to-r from-emerald-50 to-emerald-100/50 hover:from-emerald-100 hover:to-emerald-200/60 hover:border-emerald-300 text-emerald-700 font-semibold transition-all ${aiBtnGlowing ? 'animate-pulse ring-4 ring-emerald-400/60 shadow-lg shadow-emerald-300/50' : ''}`}
+                    className={`ds-btn-sec ds-t flex items-center justify-center gap-1.5 rounded-lg border-2 border-violet-200 bg-gradient-to-r from-violet-50 to-fuchsia-50 hover:from-violet-100 hover:to-fuchsia-100 hover:border-violet-300 text-violet-700 font-semibold transition-all ${aiBtnGlowing ? 'animate-pulse ring-4 ring-violet-400/60 shadow-lg shadow-violet-300/50' : ''}`}
                     onClick={() => {
                       // ★ D152+ FREE/STARTER 잠금 시 — 기능 안내 + 베이직 이상 업그레이드 동선
                       if (isAiMessagingLocked) {
@@ -904,7 +904,7 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
                       setShowAiRefineModal(true);
                     }}
                   >
-                    <Sparkles size={14} strokeWidth={2} className="text-emerald-600" />
+                    <Sparkles size={14} strokeWidth={2} className="text-fuchsia-500" />
                     <span>AI 다듬기</span>
                   </button>
                 </div>
@@ -1266,7 +1266,7 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
                             <div className="text-[12.5px] text-stone-500 mt-1">CSV · XLSX · XLS 형식을 지원합니다</div>
                           </div>
                           <div className="flex items-center gap-2 mt-1">
-                            <span className="ds-btn-sec ds-btn-sec--primary px-4 pointer-events-none">
+                            <span className="ds-btn-sec px-4 pointer-events-none border border-emerald-200 bg-emerald-50 text-emerald-700">
                               <Upload size={14} strokeWidth={1.75} />
                               <span>파일 선택</span>
                             </span>
