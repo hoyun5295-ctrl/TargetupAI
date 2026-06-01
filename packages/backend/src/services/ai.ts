@@ -12,6 +12,10 @@ import { CompanyDataProfile, formatProfileForAiPrompt } from '../utils/company-d
 import { buildSystemPromptWithBrandVoice } from '../utils/brand-voice-prompt';
 // ★ D227+ AI 응답 JSON 안전 추출 (코드펜스 없이 설명문 혼입 방어 — 본문 0 bytes 사고 정정)
 import { extractJsonFromAiText } from '../utils/ai-json';
+// ★ D227+ 종량제: 작업당 크레딧 단가 맵 (순수 함수, DB 의존 0)
+import { getCreditCost } from '../utils/ai-credit-calc';
+// ★ D227+ 종량제: orchestrate 묶음 차감 컨텍스트 (묶음 안 sub 호출은 차감 skip)
+import { isInCreditBundle } from '../utils/ai-credit-context';
 
 if (!process.env.ANTHROPIC_API_KEY) console.warn('[AI] ANTHROPIC_API_KEY not configured — Claude AI 기능 비활성 상태');
 if (!process.env.OPENAI_API_KEY) console.warn('[AI] OPENAI_API_KEY not configured — OpenAI 기능 비활성 상태');
@@ -53,7 +57,13 @@ export async function callAIWithFallback(params: {
   //   - recordAiCall: 정상 응답 시 ai_call_log INSERT (월 통계)
   companyId?: string;
   source?: string;
+  // ★ D227+ 종량제: 작업당 크레딧. 미지정 시 source 맵(getCreditCost). orchestrate sub-agent는 0 전달(묶음 회피).
+  creditCost?: number;
+  userId?: string;  // 차감 이력 created_by
 }): Promise<string> {
+  // ★ D227+ 종량제: 작업당 크레딧 (creditCost 우선, 없으면 source 맵).
+  //   orchestrate 묶음(runInCreditBundle) 안의 sub 호출은 0 — 진입점에서 1회만 차감(과차감 방지).
+  const creditCost = isInCreditBundle() ? 0 : (params.creditCost ?? getCreditCost(params.source));
   // ★ D209+ Phase D: Rate limit 검증 + cache 조회 (companyId 박힘 영역만)
   let cacheKey: string | null = null;
   if (params.companyId) {
@@ -66,6 +76,12 @@ export async function callAIWithFallback(params: {
     if (cached) {
       console.log(`[AI] cache hit (company ${params.companyId.slice(0, 8)}, source ${params.source || 'unknown'})`);
       return cached;
+    }
+
+    // ★ D227+ 종량제: cache miss 시점 크레딧 사전 체크 (부족 시 throw → 호출측 안내, AI 호출 안 함)
+    if (creditCost > 0) {
+      const { checkCredit } = await import('../utils/ai-credit');
+      await checkCredit(params.companyId, creditCost);
     }
   }
 
@@ -132,7 +148,7 @@ export async function callAIWithFallback(params: {
         const { setCachedResponse } = await import('../utils/ai-cache');
         setCachedResponse(cacheKey, text);
         const { recordAiCall } = await import('../utils/ai-rate-limit');
-        await recordAiCall({
+        const aiCallLogId = await recordAiCall({
           companyId: params.companyId,
           source: params.source || 'unknown',
           modelType: params.model === 'opus' ? 'opus' : 'sonnet',
@@ -140,8 +156,19 @@ export async function callAIWithFallback(params: {
           outputTokens: usage?.output_tokens || 0,
           success: true,
         });
+        // ★ D227+ 종량제: 성공 후 크레딧 차감 (실패 시 미차감, aiCallLogId로 idempotency)
+        if (creditCost > 0) {
+          const { deductCredit } = await import('../utils/ai-credit');
+          await deductCredit({
+            companyId: params.companyId,
+            cost: creditCost,
+            source: params.source || 'unknown',
+            aiCallLogId,
+            createdBy: params.userId || null,
+          });
+        }
       } catch (trackErr: any) {
-        console.warn('[AI] Phase D 통계 기록 오류 (silent skip):', trackErr?.message);
+        console.warn('[AI] Phase D 통계/크레딧 기록 오류 (silent skip):', trackErr?.message);
       }
     }
     return text;
@@ -191,7 +218,7 @@ export async function callAIWithFallback(params: {
         setCachedResponse(cacheKey, text);
         const { recordAiCall } = await import('../utils/ai-rate-limit');
         const gptUsage = gptResponse.usage as unknown as Record<string, number | undefined> | undefined;
-        await recordAiCall({
+        const aiCallLogId = await recordAiCall({
           companyId: params.companyId,
           source: params.source || 'unknown',
           modelType: 'gpt-fallback',
@@ -199,6 +226,17 @@ export async function callAIWithFallback(params: {
           outputTokens: gptUsage?.completion_tokens || 0,
           success: true,
         });
+        // ★ D227+ 종량제: 성공 후 크레딧 차감 (실패 시 미차감, aiCallLogId로 idempotency)
+        if (creditCost > 0) {
+          const { deductCredit } = await import('../utils/ai-credit');
+          await deductCredit({
+            companyId: params.companyId,
+            cost: creditCost,
+            source: params.source || 'unknown',
+            aiCallLogId,
+            createdBy: params.userId || null,
+          });
+        }
       } catch (trackErr: any) {
         console.warn('[AI] Phase D 통계 기록 오류 (silent skip):', trackErr?.message);
       }
@@ -1133,6 +1171,7 @@ ${usePersonalization ? `- 사용할 개인화 변수: ${personalizationTags}
       temperature: 0.7,
       model: extraContext?.model, // ★ D170+: AI Operator는 'opus' 전달 (1M ctx + 회사 history 활용 본문 품질 최상)
       companyId: extraContext?.companyId,
+      source: 'generate-messages', // ★ D227+ 종량제: 문안 생성 2크레딧 (orchestrate 묶음 안에선 자동 0)
     });
 
     // ★ D227+ 안전 파싱 — 코드펜스 없이 설명문 혼입돼도 JSON 추출 (CT ai-json). 본문 0 bytes 사고 정정.
@@ -1512,6 +1551,8 @@ ${varCatalogPrompt}
       maxTokens: 1024,
       temperature: 0.3,
       model: options?.model, // ★ D170+ (Harold 명시): AI Operator 호출 시 'opus' 전달, 기본 호출(/recommend-target)은 default sonnet
+      companyId,
+      source: 'recommend-target', // ★ D227+ 종량제: 타겟 추천 2크레딧 (orchestrate 묶음 안에선 자동 0)
     });
     
     // ★ D227+ 안전 파싱 — 코드펜스 없이 설명문 혼입돼도 JSON 추출 (CT ai-json).
@@ -1871,6 +1912,8 @@ export async function parseBriefing(briefing: string, companyId?: string): Promi
       userMessage: `오늘 날짜: ${getKoreanToday()}\n\n${getKoreanCalendar()}\n⚠️ 날짜→요일 변환 시 반드시 위 달력을 참조하세요!\n\n다음 프로모션 브리핑을 구조화해주세요:\n\n${briefing}`,
       maxTokens: 1024,
       temperature: 0.3,
+      companyId,
+      source: 'parse-briefing', // ★ D227+ 종량제: 브리핑 파싱 1크레딧
     });
 
     // ★ D227+ 안전 파싱 — 코드펜스 없이 설명문 혼입돼도 JSON 추출 (CT ai-json).
@@ -2112,6 +2155,8 @@ ${channel} 채널에 최적화된 3가지 맞춤 문안(A/B/C)을 생성해주�
       userMessage,
       maxTokens: 2048,
       temperature: 0.7,
+      companyId: options.companyId,
+      source: 'generate-custom-messages', // ★ D227+ 종량제: 맞춤 문안 생성 2크레딧
     });
 
     // ★ D227+ 안전 파싱 — 코드펜스 없이 설명문 혼입돼도 JSON 추출 (CT ai-json).
@@ -2336,6 +2381,8 @@ ${JSON.stringify(performanceData, null, 2)}
       userMessage,
       maxTokens: 1024,
       temperature: 0.3,
+      companyId,
+      source: 'recommend-next-campaign', // ★ D227+ 종량제: 다음 캠페인 추천 2크레딧
     });
 
     // ★ D227+ 안전 파싱 — 코드펜스 없이 설명문 혼입돼도 JSON 추출 (CT ai-json).

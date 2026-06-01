@@ -12,6 +12,7 @@ import AiPreviewModal from '../components/AiPreviewModal';
 import AiSendTypeModal from '../components/AiSendTypeModal';
 import AnalysisModal from '../components/AnalysisModal';
 import BalanceModals from '../components/BalanceModals';
+import CreditGauge from '../components/credit/CreditGauge';
 import CalendarModal from '../components/CalendarModal';
 import DeltaBadge from '../components/dashboard/DeltaBadge';
 import CardDetailModal from '../components/dashboard/CardDetailModal';
@@ -283,6 +284,18 @@ export default function Dashboard() {
       }
     }
   }, [showDirectSend]);
+
+  // 종량제 Phase 5: AI 크레딧 잔여 조회 (상시 노출 카드용 — creditEnabled일 때만 표시)
+  const [creditInfo, setCreditInfo] = useState<any>(null);
+  useEffect(() => {
+    (async () => {
+      try {
+        const token = localStorage.getItem('token');
+        const res = await fetch('/api/companies/my-credit', { headers: { Authorization: `Bearer ${token}` } });
+        if (res.ok) { const d = await res.json(); if (d && d.success !== false) setCreditInfo(d); }
+      } catch { /* 조회 실패 시 카드 숨김 */ }
+    })();
+  }, []);
   // ★ D162-4 (2026-05-15) PDF 0515 알림톡 #1+#3 후속: 알림톡 발송 전용 풀 화면 모달 진입 state.
   //   Harold님 명시 의도 — 직접발송 모달에 알림톡 squeeze 사고 영구 종결. AlimtalkSendModal 별도 풀 화면.
   const [showAlimtalkSend, setShowAlimtalkSend] = useState(false);
@@ -2361,6 +2374,22 @@ const campaignData = {
         <div className="flex flex-col lg:flex-row gap-4 mb-4">
           {/* ===== 좌측 60%: 요금제/발송현황 + 동적카드 ===== */}
           <div className="w-full lg:w-[60%] flex flex-col gap-4">
+            {/* 종량제 Phase 5: AI 크레딧 잔여 (요금제 크레딧 또는 구매분이 있을 때만 — FREE 0크레딧 카드 숨김) */}
+            {creditInfo?.creditEnabled && (creditInfo.planCredits > 0 || creditInfo.purchased > 0) && (
+              <CreditGauge
+                variant="light"
+                compact
+                total={creditInfo.total}
+                baseRemaining={creditInfo.baseRemaining}
+                purchased={creditInfo.purchased}
+                planCredits={creditInfo.planCredits}
+                monthlyUsed={creditInfo.monthlyUsed}
+                resetAt={creditInfo.resetAt}
+                billingType={creditInfo.billingType}
+                overageLimit={creditInfo.overageLimit}
+                onRecharge={() => navigate('/pricing?openContactModal=true')}
+              />
+            )}
             {/* 1행: 요금제 + 발송현황 — 모바일 stacked + sm+ 좌우 */}
             <div className="flex flex-col sm:flex-row gap-4">
               {/* 요금제 현황 */}

@@ -131,6 +131,25 @@ router.put('/settings', authenticate, async (req: Request, res: Response) => {
     res.status(500).json({ error: '설정 저장 실패' });
   }
 });
+
+// GET /api/companies/my-credit - 회사 AI 크레딧 잔여 + 이번달 사용량 (종량제 Phase 5)
+router.get('/my-credit', async (req: Request, res: Response) => {
+  try {
+    const companyId = (req as any).user?.companyId;
+    if (!companyId) return res.status(401).json({ success: false, error: '인증 필요' });
+    const { getCreditState, getMonthlyUsage } = await import('../utils/ai-credit');
+    const [state, used] = await Promise.all([getCreditState(companyId), getMonthlyUsage(companyId)]);
+    return res.json({ success: true, ...state, monthlyUsed: used });
+  } catch (err: any) {
+    const msg = err?.message || '';
+    if (msg.includes('column') && msg.includes('does not exist')) {
+      return res.status(503).json({ success: false, error: 'DB 마이그레이션 필요', code: 'DB_MIGRATION_PENDING' });
+    }
+    console.error('크레딧 조회 에러:', err);
+    return res.status(500).json({ success: false, error: '크레딧 조회 실패' });
+  }
+});
+
 // GET /api/companies/my-plan - 현재 회사 플랜 정보
 router.get('/my-plan', async (req: Request, res: Response) => {
   try {

@@ -1034,7 +1034,7 @@ router.post('/plans', authenticate, requireSuperAdmin, async (req: Request, res:
 // 요금제 수정
 router.put('/plans/:id', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
   const { id } = req.params;
-  const { planName, maxCustomers, monthlyPrice, isActive } = req.body;
+  const { planName, maxCustomers, monthlyPrice, isActive, aiCreditsPerMonth } = req.body;
   
   try {
     const result = await query(`
@@ -1042,10 +1042,11 @@ router.put('/plans/:id', authenticate, requireSuperAdmin, async (req: Request, r
       SET plan_name = COALESCE($1, plan_name),
           max_customers = COALESCE($2, max_customers),
           monthly_price = COALESCE($3, monthly_price),
-          is_active = COALESCE($4, is_active)
+          is_active = COALESCE($4, is_active),
+          ai_credits_per_month = COALESCE($6, ai_credits_per_month)
       WHERE id = $5
       RETURNING *
-    `, [planName, maxCustomers, monthlyPrice, isActive, id]);
+    `, [planName, maxCustomers, monthlyPrice, isActive, id, aiCreditsPerMonth]);
     
     if (result.rows.length === 0) {
       return res.status(404).json({ error: '요금제를 찾을 수 없습니다.' });
@@ -2208,6 +2209,98 @@ router.get('/companies/:id/balance-transactions', authenticate, requireSuperAdmi
   } catch (error) {
     console.error('잔액 이력 조회 실패:', error);
     res.status(500).json({ error: '잔액 이력 조회 실패' });
+  }
+});
+
+// ===== AI 크레딧 관리 API (종량제 Phase 4) =====
+
+// 회사별 크레딧 현황 (잔여 + 이번달 사용량 + 최근 이력 5)
+router.get('/companies/:id/credit', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
+  const { id } = req.params;
+  try {
+    const { getCreditState, getMonthlyUsage, getCreditTransactions } = await import('../utils/ai-credit');
+    const [state, used, history] = await Promise.all([
+      getCreditState(id),
+      getMonthlyUsage(id),
+      getCreditTransactions(id, 1, 5),
+    ]);
+    res.json({ ...state, monthlyUsed: used, recent: history.rows });
+  } catch (err: any) {
+    const msg = err?.message || '';
+    if (msg.includes('column') && msg.includes('does not exist')) {
+      return res.status(503).json({ error: 'DB 마이그레이션 필요 — ai_credit_transactions.reason 컬럼 ALTER 실행 요청', code: 'DB_MIGRATION_PENDING' });
+    }
+    console.error('크레딧 현황 조회 실패:', err);
+    res.status(500).json({ error: '크레딧 현황 조회 실패' });
+  }
+});
+
+// 수동 크레딧 지급/조정 (grant | admin_deduct)
+router.post('/companies/:id/credit-adjust', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
+  const { id } = req.params;
+  const { type, amount, reason } = req.body;
+  const adminId = (req as any).user?.userId;
+  if (!type || !['grant', 'admin_deduct'].includes(type)) {
+    return res.status(400).json({ error: '올바른 유형을 선택해주세요. (grant 또는 admin_deduct)' });
+  }
+  const amt = Number(amount);
+  if (!amt || amt <= 0) return res.status(400).json({ error: '크레딧은 1 이상이어야 합니다.' });
+  if (!reason || String(reason).trim() === '') return res.status(400).json({ error: '사유를 입력해주세요.' });
+  try {
+    const { adjustCredit } = await import('../utils/ai-credit');
+    const r = await adjustCredit({ companyId: id, amount: Math.floor(amt), type, reason: String(reason).trim(), adminId });
+    console.log(`[관리자크레딧] ${id} ${type} ${amt} → 구매분 ${r.purchasedAfter}`);
+    res.json({
+      message: type === 'grant' ? `${amt.toLocaleString()} 크레딧을 지급했습니다.` : `${amt.toLocaleString()} 크레딧을 차감했습니다.`,
+      purchasedAfter: r.purchasedAfter,
+    });
+  } catch (err: any) {
+    const msg = err?.message || '';
+    if (msg.includes('column') && msg.includes('does not exist')) {
+      return res.status(503).json({ error: 'DB 마이그레이션 필요 — ai_credit_transactions.reason 컬럼 ALTER 실행 요청', code: 'DB_MIGRATION_PENDING' });
+    }
+    if (msg.includes('부족') || msg.includes('찾을 수 없')) return res.status(400).json({ error: msg });
+    console.error('크레딧 조정 실패:', err);
+    res.status(500).json({ error: '크레딧 조정 실패' });
+  }
+});
+
+// 회사별 크레딧 이력 (페이지네이션)
+router.get('/companies/:id/credit-transactions', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
+  const { id } = req.params;
+  const page = parseInt(req.query.page as string) || 1;
+  try {
+    const { getCreditTransactions } = await import('../utils/ai-credit');
+    const r = await getCreditTransactions(id, page, 20);
+    res.json({ transactions: r.rows, total: r.total, page, totalPages: Math.ceil(r.total / 20) });
+  } catch (err: any) {
+    const msg = err?.message || '';
+    if (msg.includes('column') && msg.includes('does not exist')) {
+      return res.status(503).json({ error: 'DB 마이그레이션 필요', code: 'DB_MIGRATION_PENDING' });
+    }
+    console.error('크레딧 이력 조회 실패:', err);
+    res.status(500).json({ error: '크레딧 이력 조회 실패' });
+  }
+});
+
+// 후불 추가 사용 한도 설정 (postpaid_overage_limit)
+router.put('/companies/:id/postpaid-overage-limit', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
+  const { id } = req.params;
+  const limit = Number(req.body?.overageLimit);
+  if (!Number.isFinite(limit) || limit < 0) {
+    return res.status(400).json({ error: '한도는 0 이상 정수여야 합니다.' });
+  }
+  try {
+    const result = await query(
+      'UPDATE companies SET postpaid_overage_limit = $1, updated_at = NOW() WHERE id = $2 RETURNING company_name, postpaid_overage_limit',
+      [Math.floor(limit), id]
+    );
+    if (result.rows.length === 0) return res.status(404).json({ error: '회사를 찾을 수 없습니다.' });
+    console.log(`[후불한도] ${result.rows[0].company_name}: ${result.rows[0].postpaid_overage_limit} 크레딧`);
+    res.json({ message: '후불 한도가 저장되었습니다.', overageLimit: Number(result.rows[0].postpaid_overage_limit) });
+  } catch (err: any) {
+    console.error('후불 한도 설정 실패:', err);
+    res.status(500).json({ error: '후불 한도 설정 실패' });
   }
 });
 

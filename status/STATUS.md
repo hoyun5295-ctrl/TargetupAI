@@ -107,9 +107,46 @@
 
 ---
 
-### 🚀 D227+ 2026-05-31 세션 종결 — 장바구니 리커버리 토대 + AI Operator 본문 0 bytes 정정 + 3원칙 룰 + 성과추정 재설계도
+### 🚀 D228+ 2026-06-01 세션 종결 (최신) — 종량제 Phase 1 + Phase 2 전체 완료 + 스팸 정책 변경
 
-> **★★★ 다음 세션 진입 = `docs/superpowers/specs/2026-06-01-operator-performance-data-driven-redesign.md` 정독 → 성과 추정 완전 데이터 기반 구현 (구현 후 spec 삭제) ★★★**
+> **★★★ [2026-06-01 갱신] Phase 2 전체 완료(①companyId 전수 + ②dm-builder 묶음 + ③스팸 크레딧 비대상 환원 + ④운영 안전망 + 후불 overage 코어). 다음 세션 = Phase 3 plan-guard + Phase 2~3 통합 배포. 진입 = `docs/superpowers/handoffs/2026-06-02-credit-pricing-phase3-deploy-handoff.md` 정독. ★★★**
+>
+> **완료 (tsc 0 + 단위검증 40개 통과):**
+> - **Phase 1 크레딧 토대**: `utils/ai-credit-calc.ts`(순수: splitDeduction 2버킷·needsMonthlyReset KST·getCreditCost·CREDIT_COST_MAP) / `ai-credit-tx.ts`(트랜잭션: FOR UPDATE·_deductWithClient·plan_credits NULL skip 게이트) / `ai-credit.ts`(CT) / `ai-credit-context.ts`(묶음 ALS). DB ALTER 완료(plans.ai_credits_per_month, companies 4컬럼, ai_credit_transactions). 2버킷(base→purchased)+idempotent+SELECT FOR UPDATE 음수방지+성공 후 차감.
+> - **Phase 2 코어**: callAIWithFallback 통합(cache miss 후 checkCredit, 성공 후 recordAiCall(id)→deductCredit, isInCreditBundle()이면 0) + orchestrate/orchestrateWithAI 묶음(ALS, checkCredit(20)+deductCredit(20), fallback=_orchestrateImpl 이중차감 방지). C 배선 6곳(generateMessages/recommendTarget/parseBriefing/generateCustomMessages/recommendNextCampaign/inapp).
+> - **가격 확정(Harold)**: 등급 풀분석20/여정10/DM5/생성3/문안·분석2/다듬기·질문·매핑·스팸1. 크레딧 STARTER70/BASIC200/PRO1000/BUSINESS3500/ENTERPRISE7000/TRIAL1000/FREE0. 크레딧 1개≈80원(스팸필터 1회). 싱크에이전트·자사몰 연동·DB관리·발송=무료, AI 호출+스팸필터만 크레딧.
+>
+> **다음 세션 — Phase 2 잔여 → Phase 3 (설계도 정독 필수):**
+> - **Phase 2 잔여(우선)**: ① source 호출부 companyId 전수 점검 ② dm-ai route 배선+dm-builder 묶음 ③ 스팸필터 1크레딧 통합(현금 과금 폐지) ④ 크레딧 운영 안전망(continuous-operator paused_no_credit + 담당자 알림톡→문자 자동전환 + 재생성 상한 3).
+> - **Phase 3**: plan-guard 6 AI잠금→크레딧 게이트, isAiOperatorAllowed 전 플랜 개방, spam_filter 잠금 해제.
+> - **Phase 4~6**: 슈퍼관리자(크레딧 설정/충전/후불승인/이력) / 요금제페이지 리빌딩(크레딧 게이지+만원당 비교) / TDD 통합검증.
+> - 운영 plans UPDATE(설계도 §0 SQL) + tp-push 배포 = Phase 2~3 통합 검증 후 Harold 진행.
+
+---
+
+### 🗄️ D227+ 2026-05-31 — AI Operator 5개 배포 완료 + 요금제 종량제(AI 크레딧) 설계도
+
+> **★★★ 다음 세션 진입 = `docs/superpowers/handoffs/2026-06-03-credit-pricing-handoff.md` + `docs/superpowers/specs/2026-05-31-credit-based-pricing-redesign.md` 정독 → 요금제 종량제 Phase 1부터 구현 ★★★**
+>
+> **배포 완료 — AI Operator 5개 작업 (Harold 직접 배포 + /ai-memory 정상 로딩 확인):**
+> 1. **성과 추정 3계층 엔진** — operator-performance-estimator.ts 전면 재작성 (임의 상수 0). Layer 1 등급 cdp 실측(grade-conversion-stats.ts 신규) → Layer 2 등급 구매주기(포아송) → Layer 3 insufficient_data. 프론트 basis 4종 + ROI 절대액(배수). [성과추정 spec 삭제 완료]
+> 2. **AI 성과 분석가 sub-agent (Opus)** — performance-insight.ts 신규. 통계 위 진단·전략·리스크 (숫자 생성 금지 가드). orchestrate 6번째 sub-agent + AiOperatorPage AI 분석 섹션.
+> 3. **스팸 안전망 진짜 작동** — continuous-operator.ts 단어치환 폐기 → autoSpamTestWithRegenerate(실제 발송 + AI 재작성 2회 + 재테스트). 끝내 실패 = admin_review(담당자 검토). continuous-operator-policy decideSpamOutcome/buildSpamRegeneratePrompt.
+> 4. **ContinuousOperatorPage 안전정책 문구 정정** — 잘못된 4중 AND → 실제 안전장치 4종.
+> 5. **/ai-memory 빈 화면 fix** — brand voice 타입이 학습통계 3쿼리에 섞여 TYPE_META undefined 크래시 → 백엔드 제외 + 프론트 fallback (2중 방어).
+>
+> **다음 세션 — 요금제 종량제(AI 크레딧) 전면 재설계 구현 (설계도 완성, 종일+ 작업):**
+> - 요금제 = 기능 등급 폐기 → AI 크레딧 양 + 관리 DB 규모. 낮은 요금제도 AI 오퍼레이션 맛보기(PLG).
+> - 크레딧: 스타터 50 / 베이직 200 / 프로 800 / 비즈 2,500 / 엔터 5,500. 작업당: 풀분석 10 / 생성 3 / 다듬기·분석 2 / 질문·매핑 1 / 스팸재생성 0.
+> - 차감 = 호출 성공 후(실패 시 미차감 = 환불 불필요). 기본분 먼저→구매분. idempotent + 트랜잭션 원자성.
+> - 구현 6 Phase: 크레딧 토대 → callAIWithFallback 단일 진입점 집계/차감 → plan-guard 재편 → 슈퍼관리자 → 요금제 페이지 리빌딩 → TDD.
+> - **현재 결함 동시 해결**: recordAiCall이 ai.ts 2곳만 호출 = AI 작업 대부분 quota 누락 → Phase 2에서 단일 진입점 흡수.
+
+---
+
+### 🗄️ 옛 D227+ 세션 (성과추정 재설계 이전) — 장바구니 리커버리 + 본문 0 bytes 정정 + 3원칙
+
+> **위 최신 세션에서 성과추정 재설계 배포 완료. 아래는 이력 보존용.**
 >
 > **배포 완료 (1·2·3):**
 > 1. **장바구니 리커버리 토대** — SDK `/ingest` 정규화 적재(없는 event_type/payload 컬럼 INSERT → event_name/customer_id 실재 컬럼 사고 정정, D226+ 이후 브라우저 수집 전건 503이던 것 복구) + 익명→회원 30일 소급 + `data-hjl-key` 스니펫 자동 init + cart_add 표준 이벤트 검증 + 메시지 상품 노출(`{{ cart.* }}`) + `app.hanjul.ai/sdk/v0.3.5` 정적 서빙 + 설치 가이드. Cafe24 회원 식별 = 사업자 인증완료 후 v0.4.5 앱 트랙.

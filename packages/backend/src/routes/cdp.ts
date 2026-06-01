@@ -887,7 +887,7 @@ router.post('/push/send', async (req: Request, res: Response) => {
     }
     const cdpEnabled = await isCdpEnabledForPlan(companyId);
     if (!cdpEnabled) {
-      return res.status(403).json({ success: false, error: 'Web Push는 비즈니스 요금제부터 이용 가능합니다.', code: 'PLAN_FEATURE_LOCKED' });
+      return res.status(403).json({ success: false, error: 'Web Push는 유료 요금제 가입 후 이용 가능합니다.', code: 'PLAN_FEATURE_LOCKED' });
     }
 
     const { title, body, url, icon, badge } = req.body;
@@ -953,7 +953,7 @@ router.post('/inapp', async (req: Request, res: Response) => {
     }
     const cdpEnabled = await isCdpEnabledForPlan(companyId);
     if (!cdpEnabled) {
-      return res.status(403).json({ success: false, error: 'In-app 메시지는 비즈니스 요금제부터 이용 가능합니다.', code: 'PLAN_FEATURE_LOCKED' });
+      return res.status(403).json({ success: false, error: 'In-app 메시지는 유료 요금제 가입 후 이용 가능합니다.', code: 'PLAN_FEATURE_LOCKED' });
     }
 
     const message = await createInAppMessage(companyId, userId, req.body);
@@ -1040,7 +1040,7 @@ async function ensureInAppAdmin(req: Request, res: Response): Promise<{ companyI
   }
   const cdpEnabled = await isCdpEnabledForPlan(companyId);
   if (!cdpEnabled) {
-    res.status(403).json({ success: false, error: '인앱 메시지는 비즈니스 요금제부터 이용 가능합니다.', code: 'PLAN_FEATURE_LOCKED' });
+    res.status(403).json({ success: false, error: '인앱 메시지는 유료 요금제 가입 후 이용 가능합니다.', code: 'PLAN_FEATURE_LOCKED' });
     return null;
   }
   return { companyId, userId };
@@ -1424,7 +1424,7 @@ router.post('/custom/issue-secret', async (req: Request, res: Response) => {
     if (!cdpEnabled) {
       return res.status(403).json({
         success: false,
-        error: '자체 호스팅 자사몰 연동은 비즈니스 요금제부터 이용 가능합니다.',
+        error: '자체 호스팅 자사몰 연동은 유료 요금제 가입 후 이용 가능합니다.',
         code: 'PLAN_FEATURE_LOCKED',
       });
     }
@@ -1474,7 +1474,7 @@ router.post('/issue-key', async (req: Request, res: Response) => {
     if (!cdpEnabled) {
       return res.status(403).json({
         success: false,
-        error: '한줄로 CDP는 비즈니스 요금제부터 이용 가능합니다.',
+        error: '한줄로 CDP는 유료 요금제 가입 후 이용 가능합니다.',
         code: 'PLAN_FEATURE_LOCKED',
       });
     }

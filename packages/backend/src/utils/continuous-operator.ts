@@ -36,13 +36,16 @@ import { isAutoSendAllowed, recordAdminStopLearning, decideSpamOutcome, buildSpa
 // ★ D227+ 검증된 스팸 자산 재사용 (auto-campaign-worker와 동일 패턴) — 실제 테스트폰 발송 + AI 재생성 + 재테스트
 import { autoSpamTestWithRegenerate } from './spam-test-queue';
 import { generateMessages } from '../services/ai';
+// ★ D227+ 종량제: AI 사이클 크레딧 부족 감지 + 담당자 무과금 알림(인증 라인 재사용)
+import { InsufficientCreditError } from './ai-credit';
+import { getAuthSmsTable, bulkInsertSmsQueue } from './sms-queue';
 
 // ════════════════════════════════════════════════════════════════════
 // 타입
 // ════════════════════════════════════════════════════════════════════
 
 export type OperatorSchedule = 'daily' | 'weekly' | 'monthly';
-export type OperatorStatus = 'active' | 'paused' | 'archived';
+export type OperatorStatus = 'active' | 'paused' | 'paused_no_credit' | 'archived';
 export type ProposalStatus = 'pending' | 'approved' | 'rejected' | 'auto_executed' | 'expired' | 'admin_review';
 
 export interface CreateOperatorInput {
@@ -365,7 +368,31 @@ export async function generateProposalForOperator(operatorId: string): Promise<O
       companyInfo,
       customerStats,
     });
+    // ★ D227+ 종량제: 크레딧 충분해 정상 실행 — paused_no_credit였으면 자동 재개
+    await query(
+      `UPDATE continuous_operators SET status = 'active', updated_at = NOW()
+       WHERE id = $1::uuid AND status = 'paused_no_credit'`,
+      [operator.id],
+    );
   } catch (err: any) {
+    // ★ D227+ 종량제: AI 크레딧 부족 → paused_no_credit(가시성) + 담당자 무과금 알림(전환 시 1회) + 다음 주기 재확인
+    if (err instanceof InsufficientCreditError) {
+      const transit = await query(
+        `UPDATE continuous_operators SET status = 'paused_no_credit', updated_at = NOW()
+         WHERE id = $1::uuid AND status <> 'paused_no_credit' RETURNING id`,
+        [operator.id],
+      );
+      if (transit.rows.length > 0) {
+        await notifyOperatorAdmins(
+          operator,
+          '[AI 오퍼레이션 일시 중지]',
+          `AI 크레딧이 부족하여 '${operator.name}' 자동 운영이 일시 중지됐습니다. 크레딧 충전 시 다음 주기에 자동 재개됩니다.`,
+        ).catch((e: any) => console.error('[ContinuousOperator] 크레딧 알림 발송 실패:', e?.message || e));
+      }
+      await updateOperatorAfterRun(operator.id, operator.schedule, operator.scheduleTime, 0);
+      console.warn(`[ContinuousOperator] ${operator.name} 크레딧 부족 → paused_no_credit (다음 주기 재확인)`);
+      return null;
+    }
     console.error(`[ContinuousOperator] orchestrate 실패 ${operator.name}:`, err?.message || err);
     // Operator의 next_run_at만 갱신하고 제안서는 박지 X
     await updateOperatorAfterRun(operator.id, operator.schedule, operator.scheduleTime, 0);
@@ -760,7 +787,7 @@ export async function runOperatorWorker(): Promise<{ processed: number; failed: 
   try {
     const dueRes = await query(
       `SELECT id FROM continuous_operators
-       WHERE status = 'active'
+       WHERE status IN ('active', 'paused_no_credit')
          AND (next_run_at IS NULL OR next_run_at <= NOW())
        ORDER BY next_run_at NULLS FIRST
        LIMIT 100`
@@ -805,6 +832,37 @@ export function startContinuousOperatorScheduler(): void {
 // ════════════════════════════════════════════════════════════════════
 // 헬퍼
 // ════════════════════════════════════════════════════════════════════
+
+/**
+ * ★ D227+ 종량제: AI 오퍼레이션 담당자 알림 — 무과금(회사 발송비 차감 X, 인증 라인 사용 = 우리 서비스 부담).
+ * 현재 = 문자(LMS). 알림톡 템플릿 등록 후 = 1순위 알림톡 → 2순위 문자 fallback으로 교체 예정(아래 TODO seam).
+ */
+async function notifyOperatorAdmins(
+  operator: { adminPhoneNumbers: string[]; backupAdminPhone: string | null; companyId: string },
+  title: string,
+  body: string,
+): Promise<void> {
+  const phones = [...(operator.adminPhoneNumbers || []), operator.backupAdminPhone || '']
+    .map((p) => String(p || '').replace(/\D/g, ''))
+    .filter((p) => /^01\d{8,9}$/.test(p));
+  const unique = Array.from(new Set(phones));
+  if (unique.length === 0) return;
+
+  // TODO(알림톡 템플릿 등록 후): 1순위 알림톡(insertAlimtalkQueue) → 실패 시 아래 문자(2순위)로 fallback.
+  const authTable = await getAuthSmsTable();
+  const rows = unique.map((phone) => [
+    phone,                  // dest_no
+    phone,                  // call_back
+    body,                   // msg_contents
+    'L',                    // msg_type (LMS)
+    title.slice(0, 40),     // title_str
+    null,                   // sendreq_time (useNow)
+    '',                     // app_etc1
+    operator.companyId,     // app_etc2
+    '', '', '',             // file_name 1/2/3
+  ]);
+  await bulkInsertSmsQueue([authTable], rows as any, true);
+}
 
 function computeNextRun(schedule: OperatorSchedule, scheduleTime: string): Date {
   // KST 기준 schedule_time(HH:mm)에 다음 실행

@@ -129,7 +129,7 @@ const PROMPT_PARSER_SYSTEM = `당신은 리테일·이커머스 마케팅 캠페
 - 추측하지 말 것. 정보가 없으면 해당 필드는 null 또는 기본값.
 - JSON 외 다른 텍스트 절대 출력하지 마세요.`;
 
-export async function parsePrompt(rawPrompt: string): Promise<CampaignSpec> {
+export async function parsePrompt(rawPrompt: string, companyId?: string): Promise<CampaignSpec> {
   const now = new Date();
   const kst = new Date(now.getTime() + 9 * 3600 * 1000).toISOString().replace('Z', '+09:00');
   const userMessage = `현재 한국 시각: ${kst}
@@ -144,6 +144,8 @@ ${rawPrompt}
     userMessage,
     maxTokens: 1200,
     temperature: 0.2,
+    companyId,
+    source: 'dm-parse', // ★ D227+ 종량제: 집계용(맵 미등록=0). dm-builder 묶음 안에선 자동 0
   });
 
   const parsed = extractJson<Partial<CampaignSpec>>(text);
@@ -244,7 +246,7 @@ const COPY_GEN_SYSTEM = `당신은 리테일 브랜드 모바일 DM 카피라이
 - 개인화 변수는 %고객명% 같은 형태 유지
 - JSON 외 다른 텍스트 출력 금지`;
 
-export async function generateCopy(spec: CampaignSpec, section: Section): Promise<CopyDraft> {
+export async function generateCopy(spec: CampaignSpec, section: Section, companyId?: string): Promise<CopyDraft> {
   const specSummary = JSON.stringify({
     brand: spec.brand.name,
     objective: spec.objective,
@@ -326,6 +328,8 @@ ${schema}`;
     userMessage,
     maxTokens: 800,
     temperature: 0.8,
+    companyId,
+    source: 'dm-copy', // ★ D227+ 종량제: 집계용(맵 미등록=0). dm-builder 묶음 안에선 자동 0
   });
   return extractJson<CopyDraft>(text);
 }
@@ -350,7 +354,7 @@ const TONE_SYSTEM = `당신은 카피 톤 변환 전문가입니다.
 - 출력은 JSON: { "text": "변환된 문장" }
 - JSON 외 다른 텍스트 금지`;
 
-export async function transformTone(text: string, targetTone: ToneKey): Promise<string> {
+export async function transformTone(text: string, targetTone: ToneKey, companyId?: string): Promise<string> {
   const userMessage = `원문: "${text}"
 목표 톤: ${targetTone} (${TONE_LABELS[targetTone] || targetTone})
 
@@ -361,6 +365,8 @@ export async function transformTone(text: string, targetTone: ToneKey): Promise<
     userMessage,
     maxTokens: 300,
     temperature: 0.7,
+    companyId,
+    source: 'dm-tone', // ★ D227+ 종량제: 집계용(맵 미등록=0)
   });
   const parsed = extractJson<{ text: string }>(raw);
   return parsed.text || text;
@@ -392,7 +398,7 @@ export type ImprovementSuggestion = {
   reason: string;
 };
 
-export async function improveMessage(sections: Section[], brandKit?: DmBrandKit): Promise<ImprovementSuggestion[]> {
+export async function improveMessage(sections: Section[], brandKit?: DmBrandKit, companyId?: string): Promise<ImprovementSuggestion[]> {
   // AI가 분석 가능한 섹션만 추려 페이로드 축소
   const payload = sections
     .filter((s) => SECTION_META[s.type].aiAware && s.visible && !s.ai_locked)
@@ -416,6 +422,8 @@ ${JSON.stringify(payload, null, 2)}
     userMessage,
     maxTokens: 1800,
     temperature: 0.5,
+    companyId,
+    source: 'dm-improve', // ★ D227+ 종량제: 집계용(맵 미등록=0)
   });
   const parsed = extractJson<{ suggestions?: ImprovementSuggestion[] }>(raw);
   return parsed.suggestions || [];
@@ -509,6 +517,7 @@ export async function oneShotGenerate(opts: {
   prompt: string;
   scenario?: string;
   brandName?: string;
+  companyId?: string; // ★ D227+ 종량제: 묶음 집계용 — 내부 parse/copy에 전파
 }): Promise<OneShotResult> {
   const prompt = (opts.prompt || '').trim();
   if (!prompt && !opts.scenario) {
@@ -520,7 +529,7 @@ export async function oneShotGenerate(opts: {
   let scenarioMeta = opts.scenario ? SCENARIO_MAP[opts.scenario] : undefined;
 
   if (prompt) {
-    spec = await parsePrompt(prompt);
+    spec = await parsePrompt(prompt, opts.companyId);
   } else {
     // scenario 영역만 지정 시 = 옛 CampaignSpec 타입 정합 default spec
     spec = {
@@ -554,7 +563,7 @@ export async function oneShotGenerate(opts: {
     // 4. 섹션별 카피 자동 생성 (AI 영역 = 옛 영역 정합) + 신규 16 영역 = default props 정합
     if (SECTION_META[type].aiAware) {
       try {
-        const copy = await generateCopy(spec, section);
+        const copy = await generateCopy(spec, section, opts.companyId);
         section.props = mergeCopyIntoProps(section.props as any, type, copy) as any;
       } catch (err) {
         console.warn(`[oneShotGenerate] generateCopy 실패 type=${type}:`, (err as any)?.message);

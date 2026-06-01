@@ -27,6 +27,8 @@ import {
   oneShotGenerate,
   type CampaignSpec, type ToneKey,
 } from '../utils/dm/dm-ai';
+import { checkCredit, deductCredit } from '../utils/ai-credit';
+import { runInCreditBundle } from '../utils/ai-credit-context';
 import type { Section } from '../utils/dm/dm-section-registry';
 import { selectSampleCustomers, selectSampleCustomerByKey, type SampleCustomerKey } from '../utils/dm/dm-sample-customer';
 import { getAvailableVariables } from '../utils/dm/dm-variable-resolver';
@@ -311,6 +313,8 @@ dmRouter.get('/:id/stats', async (req: any, res: any) => {
 // ★ D216+ POST /api/dm/ai/one-shot-generate — 자연어 OR 시나리오 → 완성된 sections[] 통합 생성
 dmRouter.post('/ai/one-shot-generate', async (req: any, res: any) => {
   try {
+    const companyId = req.user?.companyId;
+    if (!companyId) return res.status(403).json({ error: '회사 권한이 필요합니다.' });
     const prompt: string = (req.body?.prompt || '').toString().trim();
     const scenario: string | undefined = req.body?.scenario;
     const brandName: string | undefined = req.body?.brand_name;
@@ -322,7 +326,13 @@ dmRouter.post('/ai/one-shot-generate', async (req: any, res: any) => {
       return res.status(400).json({ error: '프롬프트는 2000자 이내로 입력해주세요.' });
     }
 
-    const result = await oneShotGenerate({ prompt, scenario, brandName });
+    // ★ D227+ 종량제: DM 자동 생성 1작업 = 5크레딧 묶음 (내부 parse/copy는 집계만, 차감 0)
+    await checkCredit(companyId, 5);
+    const result = await runInCreditBundle(async () => {
+      const r = await oneShotGenerate({ prompt, scenario, brandName, companyId });
+      await deductCredit({ companyId, cost: 5, source: 'dm-builder', createdBy: req.user?.userId });
+      return r;
+    });
     return res.json({
       success: true,
       data: {
@@ -344,7 +354,9 @@ dmRouter.post('/ai/parse-prompt', async (req: any, res: any) => {
     const prompt: string = (req.body?.prompt || '').toString().trim();
     if (!prompt) return res.status(400).json({ error: '프롬프트가 비어있어요.' });
     if (prompt.length > 2000) return res.status(400).json({ error: '프롬프트는 2000자 이내로 입력해주세요.' });
-    const spec = await parsePrompt(prompt);
+    const companyId = req.user?.companyId;
+    if (!companyId) return res.status(403).json({ error: '회사 권한이 필요합니다.' });
+    const spec = await parsePrompt(prompt, companyId);
     return res.json({ spec });
   } catch (err: any) {
     console.error('[DM AI parse-prompt] 오류:', err.message);
@@ -371,7 +383,9 @@ dmRouter.post('/ai/generate-copy', async (req: any, res: any) => {
     const spec = req.body?.spec as CampaignSpec | undefined;
     const section = req.body?.section as Section | undefined;
     if (!spec || !section) return res.status(400).json({ error: 'spec + section이 필요해요.' });
-    const copy = await generateCopy(spec, section);
+    const companyId = req.user?.companyId;
+    if (!companyId) return res.status(403).json({ error: '회사 권한이 필요합니다.' });
+    const copy = await generateCopy(spec, section, companyId);
     return res.json({ copy });
   } catch (err: any) {
     console.error('[DM AI generate-copy] 오류:', err.message);
@@ -386,7 +400,9 @@ dmRouter.post('/ai/transform-tone', async (req: any, res: any) => {
     const targetTone: ToneKey = (req.body?.target_tone || 'friendly') as ToneKey;
     if (!text.trim()) return res.status(400).json({ error: '원문이 비어있어요.' });
     if (text.length > 500) return res.status(400).json({ error: '500자 이내로 입력해주세요.' });
-    const result = await transformTone(text, targetTone);
+    const companyId = req.user?.companyId;
+    if (!companyId) return res.status(403).json({ error: '회사 권한이 필요합니다.' });
+    const result = await transformTone(text, targetTone, companyId);
     return res.json({ text: result });
   } catch (err: any) {
     console.error('[DM AI transform-tone] 오류:', err.message);
@@ -778,7 +794,9 @@ dmRouter.post('/ai/improve', async (req: any, res: any) => {
     const sections = req.body?.sections as Section[] | undefined;
     const brandKit = req.body?.brand_kit;
     if (!Array.isArray(sections)) return res.status(400).json({ error: 'sections 배열이 필요해요.' });
-    const suggestions = await improveMessage(sections, brandKit);
+    const companyId = req.user?.companyId;
+    if (!companyId) return res.status(403).json({ error: '회사 권한이 필요합니다.' });
+    const suggestions = await improveMessage(sections, brandKit, companyId);
     return res.json({ suggestions });
   } catch (err: any) {
     console.error('[DM AI improve] 오류:', err.message);

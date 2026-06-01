@@ -131,7 +131,7 @@ router.get('/oauth/authorize', async (req: Request, res: Response) => {
     if (!cdpEnabled) {
       return res.status(403).json({
         success: false,
-        error: '네이버 스마트스토어 연동은 비즈니스 요금제부터 이용 가능합니다.',
+        error: '네이버 스마트스토어 연동은 유료 요금제 가입 후 이용 가능합니다.',
         code: 'PLAN_FEATURE_LOCKED',
       });
     }

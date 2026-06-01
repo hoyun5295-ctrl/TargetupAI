@@ -139,7 +139,7 @@ async function ensureEmailAdmin(req: Request, res: Response): Promise<{ companyI
   }
   const cdpEnabled = await isCdpEnabledForPlan(companyId);
   if (!cdpEnabled) {
-    res.status(403).json({ success: false, error: 'Email 캠페인은 비즈니스 요금제부터 이용 가능합니다.', code: 'PLAN_FEATURE_LOCKED' });
+    res.status(403).json({ success: false, error: 'Email 캠페인은 유료 요금제 가입 후 이용 가능합니다.', code: 'PLAN_FEATURE_LOCKED' });
     return null;
   }
   return { companyId, userId };

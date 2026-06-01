@@ -104,15 +104,16 @@ export async function recordAiCall(opts: {
   outputTokens?: number;
   costWon?: number;
   success?: boolean;
-}): Promise<void> {
-  if (!opts.companyId) return;
+}): Promise<string | null> {
+  // ★ D227+ 종량제: INSERT된 ai_call_log.id를 반환 → deductCredit의 aiCallLogId(idempotency)로 연결.
+  if (!opts.companyId) return null;
   try {
-    await query(
+    const res = await query(
       `INSERT INTO ai_call_log (
         id, company_id, called_at, source, model_type, input_tokens, output_tokens, cost_won, success
       ) VALUES (
         gen_random_uuid(), $1::uuid, NOW(), $2, $3, $4, $5, $6, $7
-      )`,
+      ) RETURNING id`,
       [
         opts.companyId,
         opts.source.slice(0, 50),
@@ -124,8 +125,10 @@ export async function recordAiCall(opts: {
       ]
     );
     usageCache.delete(opts.companyId);
+    return res.rows[0]?.id || null;
   } catch (err: any) {
     console.warn('[AiRateLimit] recordAiCall 오류 (silent skip):', err?.message);
+    return null;
   }
 }
 

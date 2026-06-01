@@ -15,15 +15,16 @@
  *
  *   + 정식 가입 (STARTER/BASIC/PRO/BUSINESS/ENTERPRISE) — plans 플래그대로
  *
- * 🔓 기능별 허용 매트릭스 (Harold님 확정)
- *   FREE        : 직접발송·수신거부·발송결과·예약(직접)·고객DB            (스팸필터 X)
- *   STARTER+    : FREE + 스팸필터테스트(수동)
- *   BASIC+      : STARTER + AI 메시지·AI 타겟·엑셀AI매핑
- *   PRO+        : BASIC + 자동발송·모바일DM·AI프리미엄·스팸자동화
+ * 🔓 기능별 허용 표 (종량제 전환 Phase 3 — Harold님 확정 2026-06-02)
+ *   FREE        : 직접발송·수신거부·발송결과·예약(직접)·고객DB            (스팸필터 X, AI X)
+ *   STARTER+    : 위 + 스팸필터테스트 + AI 전 기능(크레딧 잔액으로 통제)
  *
- *   ※ 판정은 plans 테이블 플래그가 진실의 원천. plan_code 하드코딩 금지.
- *   ※ plans 플래그 확정: FREE(customer_db=t, spam_filter=f), STARTER(+spam_filter=t),
- *     BASIC(+ai_messaging=t), PRO(+ai_premium=t, auto_campaign=t, auto_spam_test=t, mobile_dm=t).
+ *   ※ 종량제 = AI 기능(ai_messaging/ai_premium/mobile_dm/auto_campaign/ai_cdp)을
+ *     요금제로 잠그지 않고 전 유료 플랜 개방 + AI 크레딧으로만 통제(checkCredit이 차단).
+ *     plan-guard는 FREE(미가입)만 차단. 실제 사용량 차단은 callAIWithFallback.
+ *   ※ 스팸(spam_filter/auto_spam_test) = 크레딧 무관(현금/후불) → 플래그 기반 그대로 유지.
+ *   ※ 규모 제약(max_customers·max_auto_campaigns)·비-AI 게이트(customer_db 등) = 유지.
+ *   ※ 판정은 plans 플래그가 진실의 원천. plan_code 하드코딩 금지(예외: isUnsubscribed=FREE).
  */
 
 import { query } from '../config/database';
@@ -232,18 +233,18 @@ export function isBetaAccessAllowed(ctx: PlanContext): boolean {
 /**
  * ★ D178 (2026-05-19) + D209+ (2026-05-23) + D219+ Part 2 (2026-05-27 Harold 명시) — AI Operator 진입 게이팅:
  *
- *   [4분기 확장 매트릭스 — D219+ Part 2 (2026-05-27)]
+ *   [4분기 확장 표 — D219+ Part 2 (2026-05-27)]
  *   1. user.userType === 'super_admin' → true (슈퍼관리자 진입 허용 — 디버깅/검증)
  *   2. ENV `AI_OPERATOR_ALLOWED_USERS` 설정 + 본 list 사용자 → true (베타/디버깅 화이트리스트)
- *   3. planCode === 'ENTERPRISE' → true (정식 ENTERPRISE 플랜 자동 진입)
- *   4. ai_operator_trial_until > NOW() → true (슈퍼관리자 1-click 부여한 30일 무료체험)
- *   그 외 → false (BetaFeatureModal 표시)
+ *   3. 전 유료 플랜(FREE 아님) → true (종량제 전환 Phase 3 — 기존 ENTERPRISE 전용 폐지)
+ *   4. ai_operator_trial_until > NOW() → true (FREE라도 1-click 부여한 30일 무료체험)
+ *   그 외(FREE + 체험 없음) → false (BetaFeatureModal 표시)
  *
  *   ※ 기존 PRO 무료체험(plan_code='TRIAL' + trial_expires_at) = 본 함수 무관.
- *     TRIAL 플랜은 PRO 기능 전체 무료 + AI 오퍼레이션은 별도 부여 매트릭스.
+ *     TRIAL 플랜은 PRO 기능 전체 무료 + AI 오퍼레이션은 별도 부여 흐름.
  *
- *   ※ legacy_grandfathered + PRO = 현재 false 반환 (D209+ Harold 명시 — 영역 진입 X).
- *     향후 정합 시 본 함수 안 분기 추가.
+ *   ※ 종량제 전환(Phase 3)으로 legacy_grandfathered + PRO 등 전 유료 플랜 진입 허용
+ *     (D209+ ENTERPRISE 전용 제한 해제). 사용량 통제는 크레딧.
  *
  * @param ctx loadPlanContext 결과
  * @param user req.user (auth 미들웨어 처리 영역 — JwtPayload = loginId + userId + userType 포함)
@@ -266,8 +267,9 @@ export function isAiOperatorAllowed(
     }
   }
 
-  // 3. ENTERPRISE 플랜 = 자동 진입 (정식 가입 사용자)
-  if (ctx.planCode === 'ENTERPRISE') return true;
+  // 3. 종량제 전환(Phase 3): 전 유료 플랜 개방 (기존 ENTERPRISE 전용 게이팅 폐지).
+  //    AI Operator 사용량 통제는 크레딧(checkCredit). FREE(미가입)만 아래 체험 분기로.
+  if (!isUnsubscribed(ctx)) return true;
 
   // 4. AI 오퍼레이션 30일 무료체험 부여 + 미만료 = 진입 허용 (D219+ Part 2 신규)
   if (ctx.isAiOperatorTrialActive) return true;
@@ -321,32 +323,36 @@ export function canUseFeature(ctx: PlanContext, key: FeatureKey): FeatureCheckRe
         ? { allowed: true }
         : { allowed: false, errorMsg: '스팸필터 테스트는 스타터 요금제부터 이용 가능합니다.', errorCode: 'PLAN_FEATURE_LOCKED' };
 
+    // 종량제 전환(Phase 3): AI 기능 잠금 해제 → 전 유료 플랜 개방. 사용량 통제는
+    //   callAIWithFallback의 checkCredit(크레딧 잔액). FREE(미가입)만 차단.
     case 'ai_messaging':
-      return ctx.features.ai_messaging_enabled
-        ? { allowed: true }
-        : { allowed: false, errorMsg: 'AI 기능은 베이직 요금제 이상에서 이용 가능합니다.', errorCode: 'PLAN_FEATURE_LOCKED' };
+      return isUnsubscribed(ctx)
+        ? { allowed: false, errorMsg: 'AI 기능은 유료 요금제 가입 후 이용 가능합니다.', errorCode: 'PLAN_FEATURE_LOCKED' }
+        : { allowed: true };
 
     case 'ai_premium':
-      return ctx.features.ai_premium_enabled
-        ? { allowed: true }
-        : { allowed: false, errorMsg: 'AI 프리미엄 기능은 프로 요금제 이상에서 이용 가능합니다.', errorCode: 'PLAN_FEATURE_LOCKED' };
+      return isUnsubscribed(ctx)
+        ? { allowed: false, errorMsg: 'AI 기능은 유료 요금제 가입 후 이용 가능합니다.', errorCode: 'PLAN_FEATURE_LOCKED' }
+        : { allowed: true };
 
     case 'auto_campaign':
-      // 회사별 오버라이드(D76)가 있으면 그 값 우선
+      // 회사별 오버라이드(D76)가 있으면 그 값 우선 (관리자 비활성 = 0 이하 → 차단 유지)
       if (ctx.autoCampaignOverride != null) {
         if (ctx.autoCampaignOverride <= 0) {
           return { allowed: false, errorMsg: '자동발송이 비활성화되어 있습니다.', errorCode: 'PLAN_FEATURE_LOCKED' };
         }
         return { allowed: true };
       }
-      return ctx.features.auto_campaign_enabled
-        ? { allowed: true }
-        : { allowed: false, errorMsg: '자동발송은 프로 요금제 이상에서 이용 가능합니다.', errorCode: 'PLAN_FEATURE_LOCKED' };
+      // 종량제 전환(Phase 3): 플랜 잠금 해제 → 전 유료 개방. 건수 한도는 max_auto_campaigns 유지.
+      return isUnsubscribed(ctx)
+        ? { allowed: false, errorMsg: '자동발송은 유료 요금제 가입 후 이용 가능합니다.', errorCode: 'PLAN_FEATURE_LOCKED' }
+        : { allowed: true };
 
     case 'mobile_dm':
-      return ctx.features.mobile_dm_enabled
-        ? { allowed: true }
-        : { allowed: false, errorMsg: '모바일 DM 제작 기능은 프로 요금제 이상에서 이용 가능합니다.', errorCode: 'PLAN_FEATURE_LOCKED' };
+      // 종량제 전환(Phase 3): 잠금 해제 → 전 유료 개방. 사용량은 크레딧(checkCredit).
+      return isUnsubscribed(ctx)
+        ? { allowed: false, errorMsg: '모바일 DM 제작은 유료 요금제 가입 후 이용 가능합니다.', errorCode: 'PLAN_FEATURE_LOCKED' }
+        : { allowed: true };
 
     case 'auto_spam_test':
       return ctx.features.auto_spam_test_enabled
@@ -354,9 +360,11 @@ export function canUseFeature(ctx: PlanContext, key: FeatureKey): FeatureCheckRe
         : { allowed: false, errorMsg: '스팸테스트 자동화는 프로 요금제 이상에서 이용 가능합니다.', errorCode: 'PLAN_FEATURE_LOCKED' };
 
     case 'ai_cdp':
-      return ctx.features.cdp_enabled
-        ? { allowed: true }
-        : { allowed: false, errorMsg: '한줄로 CDP는 비즈니스 요금제 이상에서 이용 가능합니다.', errorCode: 'PLAN_FEATURE_LOCKED' };
+      // 종량제 전환(Phase 3): 전 유료 개방. ※ 런타임 실 게이트는 cdp-auth.ts isCdpEnabledForPlan
+      //   (자사몰/이메일/네이버 연동 경유). 여기는 plan-guard 일관성용 — FREE만 차단.
+      return isUnsubscribed(ctx)
+        ? { allowed: false, errorMsg: '한줄로 CDP는 유료 요금제 가입 후 이용 가능합니다.', errorCode: 'PLAN_FEATURE_LOCKED' }
+        : { allowed: true };
 
     default: {
       const _exhaustive: never = key;

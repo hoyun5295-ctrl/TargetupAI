@@ -3,15 +3,15 @@
  *
  * 🎯 목적
  *   자사몰 → 한줄로AI sync API 인증의 유일한 진입점.
- *   - companies.cdp_api_key (public) + companies.cdp_api_secret_hash (bcrypt) 박힘
+ *   - companies.cdp_api_key (public) + companies.cdp_api_secret_hash (bcrypt) 저장
  *   - 기존 companies.api_key / api_secret (싱크에이전트 인증)와 영역 분리
  *   - requireCdpApiKey 미들웨어로 routes/cdp.ts + routes/cafe24.ts 인증 공용
  *
  * 🔑 발급 흐름 (한 번만 노출)
  *   1. CdpSettingsPage에서 '발급' 클릭
  *   2. issueCdpKeyPair() — key prefix 'hjl_' + 32 random bytes hex / secret prefix 'sk_' + 32 random bytes hex
- *   3. companies.cdp_api_key에 key, cdp_api_secret_hash에 bcrypt(secret) 박음
- *   4. 응답에 raw secret 1회 노출 → 사용자가 자사몰에 복사 박음
+ *   3. companies.cdp_api_key에 key, cdp_api_secret_hash에 bcrypt(secret) 저장
+ *   4. 응답에 raw secret 1회 노출 → 사용자가 자사몰에 복사해 붙여넣음
  *   5. DB에는 hash만 보관 (raw 추출 불가)
  *
  * 🔐 인증 흐름
@@ -21,9 +21,9 @@
  *   - 인증 실패 시 401 + IP 실패 카운터 (sync-agent와 동일 정책)
  *
  * 🛡 안전장치
- *   - public key 미박힘/포맷 불일치 → 400
+ *   - public key 없음/포맷 불일치 → 400
  *   - 회사 status != 'active' → 403
- *   - 요금제 cdp_enabled = false → 403 + 'PLAN_FEATURE_LOCKED'
+ *   - 요금제 = FREE(미가입) → 403 + 'PLAN_FEATURE_LOCKED' (종량제 전환 Phase 3: 전 유료 개방)
  *   - 월 호출 한도 초과 → 429 (cdp_api_call_log 누적 vs plans.cdp_events_per_month)
  */
 
@@ -40,7 +40,7 @@ import { loadPlanContext } from './plan-guard';
 export interface CdpAuthContext {
   companyId: string;
   companyName: string;
-  source: string; // 'sdk' / 'webhook' / 'admin' — 후속 로직에서 cdp_events.source 박는 용도
+  source: string; // 'sdk' / 'webhook' / 'admin' — 후속 로직에서 cdp_events.source에 기록하는 용도
 }
 
 export interface CdpKeyPair {
@@ -49,7 +49,7 @@ export interface CdpKeyPair {
   issuedAt: Date;
 }
 
-// Request에 companyId 박는 확장 (다른 라우트도 동일 패턴 사용 중)
+// Request에 companyId 넣는 확장 (다른 라우트도 동일 패턴 사용 중)
 declare module 'express-serve-static-core' {
   interface Request {
     cdpAuth?: CdpAuthContext;
@@ -61,7 +61,7 @@ declare module 'express-serve-static-core' {
 // ═══════════════════════════════════════════════════════════
 
 /**
- * 신규 public key + raw secret 생성 (DB 저장은 호출부에서 박음).
+ * 신규 public key + raw secret 생성 (DB 저장은 호출부에서 담당).
  * - key: 'hjl_' + 64 hex (총 68자, varchar(100) 안전)
  * - secret: 'sk_' + 64 hex (총 67자)
  */
@@ -100,7 +100,7 @@ export async function issueCdpKeyPair(companyId: string): Promise<CdpKeyPair> {
 
 /**
  * 헤더에서 CDP key pair 추출 + 회사 식별 + plans 게이팅.
- * 통과 시 req.cdpAuth에 박음, 실패 시 401/403/429.
+ * 통과 시 req.cdpAuth에 담음, 실패 시 401/403/429.
  */
 export async function requireCdpApiKey(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
@@ -171,7 +171,7 @@ export async function requireCdpApiKey(req: Request, res: Response, next: NextFu
     if (!cdpEnabled) {
       res.status(403).json({
         success: false,
-        error: '한줄로 CDP는 비즈니스 요금제부터 이용 가능합니다.',
+        error: '한줄로 CDP는 유료 요금제 가입 후 이용 가능합니다.',
         code: 'PLAN_FEATURE_LOCKED',
       });
       return;
@@ -191,7 +191,7 @@ export async function requireCdpApiKey(req: Request, res: Response, next: NextFu
     req.cdpAuth = {
       companyId: company.id,
       companyName: company.company_name,
-      source: 'sdk', // 기본 — 카페24/Shopify 등 webhook receiver는 source 별도 박음
+      source: 'sdk', // 기본 — 카페24/Shopify 등 webhook receiver는 source 별도 지정
     };
     next();
   } catch (err: any) {
@@ -231,7 +231,7 @@ export async function requireCdpBrowserOrigin(req: Request, res: Response, next:
       return;
     }
     if (!(await isCdpEnabledForPlan(company.id))) {
-      res.status(403).json({ success: false, error: '한줄로 CDP는 비즈니스 요금제부터 이용 가능합니다.', code: 'PLAN_FEATURE_LOCKED' });
+      res.status(403).json({ success: false, error: '한줄로 CDP는 유료 요금제 가입 후 이용 가능합니다.', code: 'PLAN_FEATURE_LOCKED' });
       return;
     }
     if (await isOverMonthlyCdpLimit(company.id)) {
@@ -271,14 +271,18 @@ export async function requireCdpBrowserOrigin(req: Request, res: Response, next:
 // ═══════════════════════════════════════════════════════════
 
 export async function isCdpEnabledForPlan(companyId: string): Promise<boolean> {
+  // 종량제 전환(Phase 3, 2026-06-02): CDP(자사몰/이메일/네이버 연동) = 전 유료 플랜 개방.
+  //   기존 cdp_enabled 플래그(BUSINESS+) 게이팅 폐지 → FREE(미가입)만 차단.
+  //   월 호출 한도(cdp_events_per_month)는 isOverMonthlyCdpLimit이 별도 통제(유지).
   const result = await query(
-    `SELECT COALESCE(p.cdp_enabled, false) AS cdp_enabled
+    `SELECT UPPER(COALESCE(p.plan_code, 'FREE')) AS plan_code
      FROM companies c
      LEFT JOIN plans p ON c.plan_id = p.id
      WHERE c.id = $1::uuid`,
     [companyId]
   );
-  return result.rows.length > 0 && !!result.rows[0].cdp_enabled;
+  if (result.rows.length === 0) return false;
+  return result.rows[0].plan_code !== 'FREE';
 }
 
 /**
@@ -312,8 +316,8 @@ export async function isOverMonthlyCdpLimit(companyId: string): Promise<boolean>
 // ═══════════════════════════════════════════════════════════
 
 /**
- * CDP API 호출 1건을 cdp_api_call_log에 박음 (요금제 한도 집계용).
- * - fire-and-forget 정합 (실패해도 응답 차단 X)
+ * CDP API 호출 1건을 cdp_api_call_log에 기록 (요금제 한도 집계용).
+ * - fire-and-forget 방식 (실패해도 응답 차단 X)
  */
 export async function recordCdpApiCall(
   companyId: string,

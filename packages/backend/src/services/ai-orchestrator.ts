@@ -45,6 +45,12 @@ import {
   InsightInput,
   InsightResult,
 } from '../utils/performance-insight';
+// ★ D227+ 종량제: 풀분석 묶음 차감 — 진입점 1회, sub-agent는 묶음 컨텍스트로 0(과차감 방지)
+import { checkCredit, deductCredit } from '../utils/ai-credit';
+import { runInCreditBundle } from '../utils/ai-credit-context';
+
+/** AI Operator 풀분석(orchestrate) 1회 크레딧 (CREDIT_COST_MAP의 orchestrate와 동일). */
+const ORCHESTRATE_CREDIT = 20;
 
 // ★ D171-D (2026-05-19): 진정 Orchestrator AI 전용 Anthropic 인스턴스 (Tool Use 직접 호출)
 const orchestratorAnthropic = new Anthropic({
@@ -198,7 +204,8 @@ ${memoryContext}`;
 export async function checkCompliance(
   message: string,
   channel: string,
-  isAd: boolean
+  isAd: boolean,
+  companyId?: string // ★ D227+ 종량제: orchestrate 묶음 sub(차감 0) — 토큰 집계용
 ): Promise<ComplianceResult> {
   // 본문 비어있으면 검수 skip
   if (!message || message.trim().length < 5) {
@@ -243,6 +250,8 @@ passed=true 이면 warnings/suggestions 빈 배열 가능. 사소한 issue는 me
       // ★ D170+ (Harold 명시 2026-05-19): Compliance도 Opus 4.7로 격상.
       //   Haiku 4.5는 빠른 비용 절감 가치이나 한국 정책 검수 품질에서 Opus가 정합. 비용은 ENT 전용이라 한정.
       model: 'opus',
+      companyId,
+      source: 'compliance-check', // ★ D227+ 종량제: orchestrate 묶음 sub — 차감 0(집계만)
     });
 
     let jsonStr = text;
@@ -282,6 +291,16 @@ passed=true 이면 warnings/suggestions 빈 배열 가능. 사소한 issue는 me
 // ============================================================
 
 export async function orchestrate(ctx: AgentContext): Promise<OrchestratorResult> {
+  // ★ D227+ 종량제: 풀분석 묶음 — 진입 사전 체크 → 본문(sub는 묶음으로 차감 0) → 성공 후 1회 차감.
+  await checkCredit(ctx.companyId, ORCHESTRATE_CREDIT);
+  return runInCreditBundle(async () => {
+    const result = await _orchestrateImpl(ctx);
+    await deductCredit({ companyId: ctx.companyId, cost: ORCHESTRATE_CREDIT, source: 'orchestrate', createdBy: ctx.userId });
+    return result;
+  });
+}
+
+async function _orchestrateImpl(ctx: AgentContext): Promise<OrchestratorResult> {
   const durations: Record<string, number> = {};
   const mark = (key: string, start: number) => { durations[key] = Date.now() - start; };
 
@@ -379,7 +398,8 @@ export async function orchestrate(ctx: AgentContext): Promise<OrchestratorResult
   const compliance = await checkCompliance(
     primaryBody,
     targetResult.recommended_channel || 'SMS',
-    !!targetResult.is_ad
+    !!targetResult.is_ad,
+    ctx.companyId
   );
   mark('compliance', complianceStart);
 
@@ -536,6 +556,16 @@ const ORCHESTRATOR_TOOLS: Anthropic.Tool[] = [
 ];
 
 export async function orchestrateWithAI(ctx: AgentContext): Promise<OrchestratorResult> {
+  // ★ D227+ 종량제: 풀분석 묶음 (orchestrate와 동일 — 진입 1회 차감). fallback은 _orchestrateImpl 직접(이중차감 방지).
+  await checkCredit(ctx.companyId, ORCHESTRATE_CREDIT);
+  return runInCreditBundle(async () => {
+    const result = await _orchestrateWithAIImpl(ctx);
+    await deductCredit({ companyId: ctx.companyId, cost: ORCHESTRATE_CREDIT, source: 'orchestrate', createdBy: ctx.userId });
+    return result;
+  });
+}
+
+async function _orchestrateWithAIImpl(ctx: AgentContext): Promise<OrchestratorResult> {
   console.log('[OrchestratorAI] 진입 — Opus 4.7 Tool Use 기반 sub-agent 호출 흐름');
 
   const durations: Record<string, number> = {};
@@ -666,7 +696,8 @@ export async function orchestrateWithAI(ctx: AgentContext): Promise<Orchestrator
         compliance = await checkCompliance(
           primaryBody,
           targetResult.recommended_channel || 'SMS',
-          !!targetResult.is_ad
+          !!targetResult.is_ad,
+          ctx.companyId
         );
         mark('compliance', start);
         return {
@@ -820,8 +851,8 @@ ${memoryContext}
       console.warn(`[OrchestratorAI] max_iterations(${maxIterations}) 도달 — 부분 결과로 진행`);
     }
   } catch (orchErr: any) {
-    console.error('[OrchestratorAI] 흐름 실패 — orchestrate() fallback:', orchErr?.message || orchErr);
-    return orchestrate(ctx);
+    console.error('[OrchestratorAI] 흐름 실패 — _orchestrateImpl fallback:', orchErr?.message || orchErr);
+    return _orchestrateImpl(ctx);
   }
 
   // ============ 성과 추정 (D227+ 실데이터 — 타겟 객단가 + 과거 실측) ============

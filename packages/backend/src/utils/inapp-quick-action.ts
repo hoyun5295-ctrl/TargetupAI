@@ -109,6 +109,8 @@ export async function quickActionAIRefine(
     model: 'opus',
     maxTokens: 2048,
     temperature: 0.8,
+    companyId,
+    source: 'inapp-quick-action', // ★ D227+ 종량제: 인앱 빠른액션 다듬기 3크레딧
   });
 
   const jsonText = extractJSON(aiResult || '');

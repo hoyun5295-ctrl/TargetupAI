@@ -477,6 +477,8 @@ buttons 배열 (최대 3개):
     model: 'opus',
     maxTokens: 4096,
     temperature: 0.7,
+    companyId: input.companyId,
+    source: 'inapp-ai-generator', // ★ D227+ 종량제: 인앱 생성 3크레딧
   });
 
   const jsonText = extractJSON(aiResult || '');

@@ -255,6 +255,9 @@ const [messageDetailContent, setMessageDetailContent] = useState<{ name: string;
   const [rejectReason, setRejectReason] = useState('');
   const [showPlanModal, setShowPlanModal] = useState(false);
   const [editingPlan, setEditingPlan] = useState<any>(null);
+  // 종량제 Phase 4: 회사별 AI 크레딧 관리 (_forId = 현재 editCompany와 일치할 때만 표시)
+  const [companyCredit, setCompanyCredit] = useState<any>(null);
+  const [creditAdj, setCreditAdj] = useState<{ type: string; amount: string; reason: string; busy: boolean }>({ type: 'grant', amount: '', reason: '', busy: false });
   const [newPlan, setNewPlan] = useState({
     planCode: '',
     planName: '',
@@ -2239,6 +2242,7 @@ const handleApproveRequest = async (id: string) => {
           maxCustomers: editingPlan.max_customers,
           monthlyPrice: editingPlan.monthly_price,
           isActive: editingPlan.is_active,
+          aiCreditsPerMonth: editingPlan.ai_credits_per_month,
         })
       });
       
@@ -5428,6 +5432,96 @@ const handleApproveRequest = async (id: string) => {
                     </div>
                   </div>
 
+                  {/* AI 크레딧 (종량제 Phase 4 — 모든 요금제) */}
+                  <div className="bg-gradient-to-r from-violet-50 to-fuchsia-50 rounded-xl p-4 border border-violet-200">
+                    <div className="flex items-center justify-between mb-3">
+                      <div className="text-sm font-bold text-gray-800">AI 크레딧</div>
+                      <button type="button" onClick={async () => {
+                        try {
+                          const token = localStorage.getItem('token');
+                          const res = await fetch(`/api/admin/companies/${editCompany.id}/credit`, { headers: { Authorization: `Bearer ${token}` } });
+                          if (res.ok) { const d = await res.json(); setCompanyCredit({ ...d, _forId: editCompany.id }); }
+                          else { const d = await res.json().catch(() => ({})); setModal({ type: 'alert', title: '조회 실패', message: d.error || '오류', variant: 'error' }); }
+                        } catch { setModal({ type: 'alert', title: '오류', message: '크레딧 조회 실패', variant: 'error' }); }
+                      }} className="text-[10px] text-violet-600 hover:underline">조회 / 새로고침</button>
+                    </div>
+                    {companyCredit && companyCredit._forId === editCompany.id ? (
+                      <>
+                        <div className="flex items-center justify-between text-sm mb-2">
+                          <span className="text-gray-600">총 잔여</span>
+                          <span className="font-bold text-violet-700">{Number(companyCredit.total || 0).toLocaleString()} 크레딧</span>
+                        </div>
+                        <div className="grid grid-cols-3 gap-2 text-[11px] text-gray-500 mb-3">
+                          <span>기본분 {Number(companyCredit.baseRemaining || 0).toLocaleString()}</span>
+                          <span>구매분 {Number(companyCredit.purchased || 0).toLocaleString()}</span>
+                          <span>이번달 사용 {Number(companyCredit.monthlyUsed || 0).toLocaleString()}</span>
+                        </div>
+                        <div className="flex gap-2 mb-2">
+                          <button type="button" onClick={() => setCreditAdj({ ...creditAdj, type: 'grant' })}
+                            className={`flex-1 py-1.5 text-xs font-medium rounded-lg ${creditAdj.type === 'grant' ? 'bg-violet-600 text-white' : 'bg-white border text-gray-600'}`}>지급</button>
+                          <button type="button" onClick={() => setCreditAdj({ ...creditAdj, type: 'admin_deduct' })}
+                            className={`flex-1 py-1.5 text-xs font-medium rounded-lg ${creditAdj.type === 'admin_deduct' ? 'bg-rose-600 text-white' : 'bg-white border text-gray-600'}`}>차감</button>
+                        </div>
+                        <div className="space-y-2">
+                          <input type="number" placeholder="크레딧" value={creditAdj.amount}
+                            onChange={(e) => setCreditAdj({ ...creditAdj, amount: e.target.value })}
+                            className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-violet-500 outline-none" />
+                          <input type="text" placeholder="사유 (필수)" value={creditAdj.reason}
+                            onChange={(e) => setCreditAdj({ ...creditAdj, reason: e.target.value })}
+                            className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-violet-500 outline-none" />
+                          <button type="button" disabled={creditAdj.busy || !creditAdj.amount || !creditAdj.reason}
+                            onClick={async () => {
+                              setCreditAdj(prev => ({ ...prev, busy: true }));
+                              try {
+                                const token = localStorage.getItem('token');
+                                const res = await fetch(`/api/admin/companies/${editCompany.id}/credit-adjust`, {
+                                  method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+                                  body: JSON.stringify({ type: creditAdj.type, amount: Number(creditAdj.amount), reason: creditAdj.reason })
+                                });
+                                const data = await res.json();
+                                if (res.ok) {
+                                  setCreditAdj({ type: 'grant', amount: '', reason: '', busy: false });
+                                  const r2 = await fetch(`/api/admin/companies/${editCompany.id}/credit`, { headers: { Authorization: `Bearer ${token}` } });
+                                  if (r2.ok) { const d2 = await r2.json(); setCompanyCredit({ ...d2, _forId: editCompany.id }); }
+                                  setModal({ type: 'alert', title: '완료', message: data.message, variant: 'success' });
+                                } else {
+                                  setCreditAdj(prev => ({ ...prev, busy: false }));
+                                  setModal({ type: 'alert', title: '실패', message: data.error, variant: 'error' });
+                                }
+                              } catch { setCreditAdj(prev => ({ ...prev, busy: false })); setModal({ type: 'alert', title: '오류', message: '크레딧 조정 실패', variant: 'error' }); }
+                            }}
+                            className={`w-full py-2.5 text-sm font-medium rounded-lg disabled:opacity-50 ${creditAdj.type === 'grant' ? 'bg-violet-600 hover:bg-violet-700 text-white' : 'bg-rose-600 hover:bg-rose-700 text-white'}`}
+                          >{creditAdj.busy ? '처리 중...' : creditAdj.type === 'grant' ? '지급하기' : '차감하기'}</button>
+                        </div>
+                        {companyCredit.billingType === 'postpaid' && (
+                          <div className="mt-3 pt-3 border-t border-violet-200">
+                            <label className="text-[11px] font-bold text-gray-700">후불 추가 사용 한도 (크레딧)</label>
+                            <div className="flex gap-2 mt-1">
+                              <input type="number" defaultValue={Number(companyCredit.overageLimit || 0)} id="overageLimitInput"
+                                className="flex-1 px-3 py-1.5 border rounded-lg text-sm focus:ring-2 focus:ring-violet-500 outline-none" />
+                              <button type="button" onClick={async () => {
+                                const el = document.getElementById('overageLimitInput') as HTMLInputElement | null;
+                                const v = Number(el?.value || 0);
+                                try {
+                                  const token = localStorage.getItem('token');
+                                  const res = await fetch(`/api/admin/companies/${editCompany.id}/postpaid-overage-limit`, {
+                                    method: 'PUT', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+                                    body: JSON.stringify({ overageLimit: v })
+                                  });
+                                  const data = await res.json();
+                                  if (res.ok) { setCompanyCredit({ ...companyCredit, overageLimit: data.overageLimit }); setModal({ type: 'alert', title: '완료', message: data.message, variant: 'success' }); }
+                                  else setModal({ type: 'alert', title: '실패', message: data.error, variant: 'error' });
+                                } catch { setModal({ type: 'alert', title: '오류', message: '한도 설정 실패', variant: 'error' }); }
+                              }} className="px-3 py-1.5 bg-violet-600 text-white text-xs rounded-lg hover:bg-violet-700">저장</button>
+                            </div>
+                          </div>
+                        )}
+                      </>
+                    ) : (
+                      <div className="text-xs text-gray-400 text-center py-2">위 조회 버튼으로 크레딧 현황을 불러오세요.</div>
+                    )}
+                  </div>
+
                   {/* 선불 잔액 관리 (선불일 때만) */}
                   {editCompany.billingType === 'prepaid' && (
                     <div className="bg-gradient-to-r from-emerald-50 to-teal-50 rounded-xl p-4 border border-emerald-200">
@@ -6688,6 +6782,17 @@ const handleApproveRequest = async (id: string) => {
                   className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
                   min="0"
                   required
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">월 AI 크레딧</label>
+                <input
+                  type="number"
+                  value={editingPlan.ai_credits_per_month ?? ''}
+                  onChange={(e) => setEditingPlan({ ...editingPlan, ai_credits_per_month: e.target.value === '' ? null : Number(e.target.value) })}
+                  className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-violet-500 outline-none"
+                  min="0"
+                  placeholder="비워두면 크레딧 차감 미적용 (NULL)"
                 />
               </div>
               <div className="flex items-center gap-2">

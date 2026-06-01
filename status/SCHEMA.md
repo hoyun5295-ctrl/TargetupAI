@@ -284,6 +284,10 @@
 | ai_usage_threshold_config | jsonb | ★ D217+ (2026-05-25) — AI 사용량 한도 알림 설정 `{ enabled, threshold_percent: 50\|80\|95, channels: ['email','sms','inapp'], updated_at }` (기본 `{}`) |
 | max_users | integer | 최대 사용자 수 (기본 5) |
 | session_timeout_minutes | integer | 세션 타임아웃 분 (기본 30) |
+| ai_credits_base_remaining | integer | ★ D227+ 종량제: 이번 달 남은 기본 크레딧 (매월 리셋, DEFAULT 0 NOT NULL) |
+| ai_credits_purchased | integer | ★ D227+ 종량제: 구매분 크레딧 잔액 (이월, DEFAULT 0 NOT NULL) |
+| ai_credits_reset_at | timestamptz | ★ D227+ 종량제: 마지막 월 리셋 시각 (KST 월 기준) |
+| ai_credits_monthly_cap | integer | ★ D227+ 종량제: 자동충전 월 상한 (NULL=무제한, 0=자동차감 끔). Phase 1=컬럼만 |
 | created_by | uuid | |
 | created_at | timestamp | |
 | updated_at | timestamp | |
@@ -790,6 +794,7 @@
 | **direct_recipient_limit** | **integer** | **CT-17: 직접발송 주소록 최대 건수. FREE=99,999, 나머지 NULL(무제한)** |
 | **cdp_enabled** | **boolean DEFAULT false** | **★ D172: 한줄로 CDP (자사몰 → 한줄로 customers/이벤트 sync) feature 플래그. BUSINESS+ true** |
 | **cdp_events_per_month** | **integer** | **★ D172: CDP API 월 호출 한도. BASIC=10,000 / PRO=100,000 / BUSINESS=1,000,000 / ENTERPRISE NULL(무제한)** |
+| **ai_credits_per_month** | **integer** | **★ D227+ 종량제: 요금제별 월 기본 AI 크레딧 (NULL=0). 스타터50/베이직200/프로800/비즈2500/엔터5500** |
 | created_at | timestamp | |
 
 **companies 추가 컬럼 (CT-17 활용):**
@@ -1243,6 +1248,24 @@
 | created_by | uuid | ★ D98: 차감 실행 사용자 (사용자별 사용금액 격리) |
 | message_type | varchar(10) | ★ D145 P0+ (2026-05-07): SMS/LMS/MMS/KAKAO 분리 — `directChannel='both'` 환불 차단 위험 해결. 옛 row는 NULL (호환). prepaidRefund alreadyRefunded/totalDeducted 조회 시 `message_type = $X OR IS NULL` 필터 적용 |
 | created_at | timestamptz | |
+
+### ai_credit_transactions (AI 크레딧 차감/충전/리셋 이력) — ★ D227+ 종량제 신설 (2026-05-31)
+| 컬럼 | 타입 | 설명 |
+|------|------|------|
+| id | uuid PK | gen_random_uuid() |
+| company_id | uuid FK | companies(id) |
+| type | varchar(20) | deduct / grant / purchase / reset / postpaid_grant |
+| amount | integer | 크레딧 양 (항상 양수, 방향은 type) |
+| bucket | varchar(10) | base / purchased / mixed (reset=base) |
+| source | varchar(60) | AI 작업 source (orchestrate / dm-ai / generate-messages 등) |
+| ai_call_log_id | uuid FK | ai_call_log(id) nullable — 토큰 기록과 연결 |
+| idempotency_key | varchar(150) UNIQUE | 재시도 중복 차감 차단 (deduct=`source:aiCallLogId`, reset=`reset:company:YYYYMM`) |
+| balance_base_after | integer | 차감/리셋 후 기본분 잔액 (감사) |
+| balance_purchased_after | integer | 차감/리셋 후 구매분 잔액 (감사) |
+| created_by | uuid | 차감 유발 사용자 (nullable) |
+| created_at | timestamptz | DEFAULT now() |
+
+> CT `utils/ai-credit.ts` (checkCredit/deductCredit/resetMonthlyCreditsIfNeeded) 단일 진입점. 2버킷(base→purchased) 트랜잭션 차감 + SELECT FOR UPDATE 음수 방지 + idempotency_key 중복 차단. 순수 계산은 `utils/ai-credit-calc.ts`(node:assert 검증). 차감=호출 성공 후(실패 시 미차감). 인덱스 `idx_ai_credit_tx_company_created (company_id, created_at DESC)`.
 
 ### campaigns 보호 trigger (★ D145 PDF 후속 — 2026-05-07)
 

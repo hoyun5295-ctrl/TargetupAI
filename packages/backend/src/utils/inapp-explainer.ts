@@ -277,6 +277,8 @@ priority: high / medium / low
     model: 'opus',
     maxTokens: 3072,
     temperature: 0.5,
+    companyId,
+    source: 'inapp-explainer', // ★ D227+ 종량제: 인앱 설명·개선추천 1크레딧
   });
 
   const jsonText = extractJSON(aiResult || '');

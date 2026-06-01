@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../stores/authStore';
 import { formatDate } from '../utils/formatDate';
 import { COMPANY_PHONE, COMPANY_PHONE_TEL } from '../constants/company';
+import CreditGauge from '../components/credit/CreditGauge';
 
 interface Plan {
   id: string;
@@ -11,6 +12,7 @@ interface Plan {
   max_customers: number;
   monthly_price: number;
   is_active: boolean;
+  ai_credits_per_month?: number;
 }
 
 interface CompanyInfo {
@@ -30,6 +32,7 @@ export default function PricingPage() {
   const navigate = useNavigate();
   const { user } = useAuthStore();
   const [plans, setPlans] = useState<Plan[]>([]);
+  const [myCredit, setMyCredit] = useState<any>(null);
   const [companyInfo, setCompanyInfo] = useState<CompanyInfo | null>(null);
   const [loading, setLoading] = useState(true);
   const [showRequestModal, setShowRequestModal] = useState(false);
@@ -67,6 +70,12 @@ export default function PricingPage() {
         .filter((p: Plan) => p.plan_code !== 'FREE' && p.plan_code !== 'TRIAL' && p.is_active)
         .sort((a: Plan, b: Plan) => a.monthly_price - b.monthly_price);
       setPlans(sortedPlans);
+
+      // 종량제 Phase 5: 내 AI 크레딧 잔여
+      try {
+        const creditRes = await fetch('/api/companies/my-credit', { headers: { Authorization: `Bearer ${token}` } });
+        if (creditRes.ok) { const cd = await creditRes.json(); if (cd && cd.success !== false) setMyCredit(cd); }
+      } catch { /* 조회 실패 시 게이지 숨김 */ }
 
       const companyRes = await fetch('/api/companies/my-plan', {
         headers: { Authorization: `Bearer ${token}` },
@@ -407,6 +416,36 @@ export default function PricingPage() {
           </div>
         )}
 
+        {/* 종량제 Phase 5: 내 크레딧 게이지 + 작업당 안내 (FREE 0크레딧 숨김) */}
+        {myCredit?.creditEnabled && (myCredit.planCredits > 0 || myCredit.purchased > 0) && (
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6">
+            <CreditGauge
+              variant="light"
+              total={myCredit.total}
+              baseRemaining={myCredit.baseRemaining}
+              purchased={myCredit.purchased}
+              planCredits={myCredit.planCredits}
+              monthlyUsed={myCredit.monthlyUsed}
+              resetAt={myCredit.resetAt}
+              billingType={myCredit.billingType}
+              overageLimit={myCredit.overageLimit}
+              onRecharge={() => setShowContactModal(true)}
+            />
+            <div className="rounded-2xl bg-white border border-violet-100 shadow-sm p-5">
+              <div className="text-xs font-medium text-slate-500 mb-2">작업당 크레딧</div>
+              <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-sm text-slate-600">
+                <span>풀분석 <b className="text-slate-900">20</b></span>
+                <span>여정 설계 <b className="text-slate-900">10</b></span>
+                <span>모바일 DM <b className="text-slate-900">5</b></span>
+                <span>인앱·생성 <b className="text-slate-900">3</b></span>
+                <span>문안·분석 <b className="text-slate-900">2</b></span>
+                <span>다듬기·질문 <b className="text-slate-900">1</b></span>
+              </div>
+              <p className="mt-3 text-[11px] text-slate-400">AI 작업이 성공했을 때만 차감되고, 실패 시 차감되지 않습니다. 스팸필터 테스트는 크레딧과 무관합니다.</p>
+            </div>
+          </div>
+        )}
+
         <h2 className="text-lg font-semibold mb-4">요금제 비교</h2>
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4">
           {plans.map((plan) => {
@@ -456,7 +495,15 @@ export default function PricingPage() {
                   <div className="text-sm text-gray-600 mb-3">
                     관리 가능 DB <span className="font-semibold text-gray-900">{plan.plan_code === 'ENTERPRISE' ? '제한없음' : `${formatNumber(plan.max_customers)}명`}</span>
                   </div>
-                  
+                  {plan.ai_credits_per_month != null && plan.ai_credits_per_month > 0 && (
+                    <div className="text-sm text-gray-600 mb-3">
+                      월 AI 크레딧 <span className="font-semibold text-violet-700">{formatNumber(plan.ai_credits_per_month)}</span>
+                      {plan.monthly_price > 0 && (
+                        <span className="ml-1 text-[11px] text-gray-400">만원당 {Math.round(plan.ai_credits_per_month / (plan.monthly_price / 10000))}</span>
+                      )}
+                    </div>
+                  )}
+
                   <ul className="space-y-2 text-sm">
                     {getPlanFeatures(plan.plan_code).map((feature, idx) => (
                       <li key={idx} className="flex items-start gap-2">
