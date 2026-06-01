@@ -514,7 +514,8 @@ export default function Dashboard() {
         msgType: directSendChannel === 'rcs' ? 'LMS' : isAlimtalk ? 'LMS' : directMsgType,
         sendChannel: directSendChannel === 'sms' ? 'sms' : directSendChannel === 'rcs' ? 'rcs' : 'alimtalk',
         subject: directSubject,
-        message: isAlimtalk ? kakaoMessage : (directSendChannel === 'rcs' ? kakaoMessage : directMessage),
+        // ★ 알림톡 빈 본문 fix (2026-06-01): 모달은 kakaoMessage를 채우지 않음 → 템플릿 본문(content)으로 발송(타겟 경로 678행과 동일). 빈 본문→카카오 반려→불필요 대체 차단.
+        message: isAlimtalk ? (kakaoSelectedTemplate?.content || '') : (directSendChannel === 'rcs' ? kakaoMessage : directMessage),
         callback: isAlimtalk ? (callbackNumbers[0]?.phone || '') : (useIndividualCallback ? null : selectedCallback),
         useIndividualCallback: isAlimtalk ? false : useIndividualCallback,
         individualCallbackColumn: (!isAlimtalk && useIndividualCallback) ? individualCallbackColumn : undefined,

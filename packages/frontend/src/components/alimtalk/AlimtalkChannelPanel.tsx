@@ -97,11 +97,9 @@ export function createEmptyAlimtalkState(): AlimtalkChannelState {
 }
 
 const NEXT_TYPE_OPTIONS: { value: AlimtalkNextType; label: string; desc: string }[] = [
-  { value: 'N', label: '대체 안함', desc: '실패 시 미발송 (에러)' },
-  { value: 'S', label: 'SMS 대체', desc: '동일 문구 SMS 발송' },
-  { value: 'L', label: 'LMS 대체', desc: '동일 문구 LMS 발송' },
-  { value: 'A', label: 'A: SMS+문구', desc: '대체 문구로 SMS' },
-  { value: 'B', label: 'B: LMS+문구', desc: '대체 문구로 LMS' },
+  // ★ 2026-06-01 (영업팀장 박성용 신고): 알림톡 문구는 길어 SMS 대체가 어려움 → SMS 대체·문구형 제거, 2개만 유지.
+  { value: 'N', label: '대체 안함', desc: '알림톡 실패 시 발송 안 함' },
+  { value: 'L', label: 'LMS 대체', desc: '알림톡 실패 시 LMS로 자동 발송' },
 ];
 
 const APPROVED_TEMPLATE_STATUSES = new Set(['APPROVED', 'APR', 'A', 'approved']);
@@ -433,22 +431,25 @@ export default function AlimtalkChannelPanel({
             <p className="text-[11px] text-gray-400 mb-2">
               알림톡 전송 실패 시 자동 대체 발송 정책
             </p>
-            <div className="grid grid-cols-5 gap-1">
-              {NEXT_TYPE_OPTIONS.map((opt) => (
-                <button
-                  key={opt.value}
-                  type="button"
-                  onClick={() => setNextType(opt.value)}
-                  title={opt.desc}
-                  className={`py-1.5 text-[11px] font-medium rounded-lg border transition-colors ${
-                    value.nextType === opt.value
-                      ? 'bg-blue-600 border-blue-600 text-white'
-                      : 'bg-white border-gray-200 text-gray-600 hover:border-blue-300'
-                  }`}
-                >
-                  {opt.label}
-                </button>
-              ))}
+            <div className="grid grid-cols-2 gap-2">
+              {NEXT_TYPE_OPTIONS.map((opt) => {
+                const active = value.nextType === opt.value;
+                return (
+                  <button
+                    key={opt.value}
+                    type="button"
+                    onClick={() => setNextType(opt.value)}
+                    className={`text-left px-3 py-2.5 rounded-xl border transition-all ${
+                      active
+                        ? 'bg-amber-50 border-amber-400 ring-2 ring-amber-300/50 shadow-sm'
+                        : 'bg-white border-gray-200 hover:border-amber-300 hover:bg-amber-50/40'
+                    }`}
+                  >
+                    <div className={`text-xs font-bold ${active ? 'text-amber-900' : 'text-gray-700'}`}>{opt.label}</div>
+                    <div className={`text-[10.5px] mt-0.5 leading-tight ${active ? 'text-amber-700' : 'text-gray-400'}`}>{opt.desc}</div>
+                  </button>
+                );
+              })}
             </div>
             {/* ★ D188 (2026-05-21) 영업팀장 신고 #7-(2): L/B 시 LMS 제목 input 신규. */}
             {requiresNextSubject && (
