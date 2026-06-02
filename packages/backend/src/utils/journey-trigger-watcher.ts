@@ -25,8 +25,8 @@
  */
 
 import { query } from '../config/database';
-// ★ D211+ Phase A 5번 (2026-05-23 Harold 명시): customer_conditions 복합 조합 영역 (AND/OR + 5 operator)
-import { applyCustomerConditions } from './journey-simulator';
+// 추출 조건 = journey-target-extractor 공유 컨트롤타워 (발송·미리보기 동일 기준 단일 진입점)
+import { selectJourneyTargetCustomerIds } from './journey-target-extractor';
 
 // ════════════════════════════════════════════════════════════════════
 // 타입
@@ -108,161 +108,12 @@ export function startJourneyTriggerWatcher(): void {
 // ════════════════════════════════════════════════════════════════════
 
 async function processJourneyTrigger(j: ActiveJourney): Promise<{ matched: number; enqueued: number; skipped: number }> {
-  const filters = j.trigger_filters || {};
-
-  switch (j.trigger_event) {
-    case 'customer.created':
-      return matchCustomerCreated(j, Number(filters.recent_hours || 24));
-    case 'cdp.purchase':
-      return matchCdpEvent(j, 'purchase', 5);
-    case 'customer.dormant':
-      return matchCustomerDormant(j, Number(filters.dormant_days || 30));
-    case 'cdp.cart_abandon':
-      return matchCartAbandon(j, Number(filters.abandon_hours || 24));
-    case 'customer.birthday_approaching':
-      return matchBirthdayApproaching(j, Number(filters.days_before || 7));
-    case 'cdp.reservation_created':
-      return matchCdpEvent(j, 'reservation_created', 5);
-    default:
-      return { matched: 0, enqueued: 0, skipped: 0 };
+  // 추출 = journey-target-extractor 공유 컨트롤타워 (발송·미리보기 동일 기준). LIMIT 500은 발송 동작 보존.
+  const ids = await selectJourneyTargetCustomerIds(j.company_id, j.trigger_event, j.trigger_filters || {}, 500);
+  if (ids.length === 0) {
+    return { matched: 0, enqueued: 0, skipped: 0 };
   }
-}
-
-// 1. 신규 가입 (customers.created_at 직전 N시간 안)
-async function matchCustomerCreated(j: ActiveJourney, recentHours: number): Promise<{ matched: number; enqueued: number; skipped: number }> {
-  // ★ D211+ Phase A 5번 (2026-05-23 Harold 명시): customer_conditions 복합 영역 통합
-  const params: any[] = [j.company_id, String(recentHours)];
-  const customerCond = applyCustomerConditions(
-    (j.trigger_filters as any)?.customer_conditions || [],
-    (j.trigger_filters as any)?.logic || 'AND',
-    params,
-  );
-  const condClause = customerCond ? ` AND ${customerCond.replace(/c\./g, '')}` : '';
-
-  const candidates = await query(
-    `SELECT id AS customer_id FROM customers c
-     WHERE c.company_id = $1::uuid
-       AND c.is_active = true
-       AND c.sms_opt_in = true
-       AND c.created_at >= NOW() - ($2 || ' hours')::interval
-       ${customerCond ? ` AND ${customerCond}` : ''}
-     ORDER BY c.created_at DESC
-     LIMIT 500`,
-    params,
-  );
-  void condClause;
-  return enqueueCandidates(j, candidates.rows.map((r: any) => r.customer_id));
-}
-
-// 2. 재구매 / 6. 예약 (cdp_events 직전 N분)
-async function matchCdpEvent(j: ActiveJourney, eventName: string, recentMinutes: number): Promise<{ matched: number; enqueued: number; skipped: number }> {
-  // ★ D211+ Phase A 5번 (2026-05-23 Harold 명시): customer_conditions 복합 영역 통합 (customers JOIN)
-  const params: any[] = [j.company_id, eventName, String(recentMinutes)];
-  const customerCond = applyCustomerConditions(
-    (j.trigger_filters as any)?.customer_conditions || [],
-    (j.trigger_filters as any)?.logic || 'AND',
-    params,
-  );
-  const candidates = await query(
-    `SELECT DISTINCT e.customer_id FROM cdp_events e
-     ${customerCond ? `INNER JOIN customers c ON c.id = e.customer_id` : ''}
-     WHERE e.company_id = $1::uuid
-       AND e.event_name = $2
-       AND e.customer_id IS NOT NULL
-       AND e.occurred_at >= NOW() - ($3 || ' minutes')::interval
-       ${customerCond ? ` AND ${customerCond}` : ''}
-     LIMIT 500`,
-    params,
-  );
-  return enqueueCandidates(j, candidates.rows.map((r: any) => r.customer_id));
-}
-
-// 3. 휴면 (customers.recent_purchase_date < NOW - N일)
-async function matchCustomerDormant(j: ActiveJourney, dormantDays: number): Promise<{ matched: number; enqueued: number; skipped: number }> {
-  // ★ D211+ Phase A 5번 (2026-05-23 Harold 명시): customer_conditions 복합 영역 통합
-  const params: any[] = [j.company_id, String(dormantDays), String(dormantDays + 7)];
-  const customerCond = applyCustomerConditions(
-    (j.trigger_filters as any)?.customer_conditions || [],
-    (j.trigger_filters as any)?.logic || 'AND',
-    params,
-  );
-  const candidates = await query(
-    `SELECT id AS customer_id FROM customers c
-     WHERE c.company_id = $1::uuid
-       AND c.is_active = true
-       AND c.sms_opt_in = true
-       AND c.recent_purchase_date IS NOT NULL
-       AND c.recent_purchase_date < (CURRENT_DATE - ($2 || ' days')::interval)
-       AND c.recent_purchase_date > (CURRENT_DATE - ($3 || ' days')::interval)
-       ${customerCond ? ` AND ${customerCond}` : ''}
-     ORDER BY c.recent_purchase_date DESC
-     LIMIT 500`,
-    params,
-  );
-  return enqueueCandidates(j, candidates.rows.map((r: any) => r.customer_id));
-}
-
-// 4. 장바구니 포기 (cdp_events cart_add 직전 abandon_hours, 이후 checkout_start 없음)
-async function matchCartAbandon(j: ActiveJourney, abandonHours: number): Promise<{ matched: number; enqueued: number; skipped: number }> {
-  // ★ D211+ Phase A 5번 (2026-05-23 Harold 명시): customer_conditions 복합 영역 통합 (customers JOIN)
-  const params: any[] = [j.company_id, String(abandonHours)];
-  const customerCond = applyCustomerConditions(
-    (j.trigger_filters as any)?.customer_conditions || [],
-    (j.trigger_filters as any)?.logic || 'AND',
-    params,
-  );
-  const candidates = await query(
-    `WITH abandoned AS (
-       SELECT DISTINCT ON (customer_id) customer_id, occurred_at AS cart_add_at
-       FROM cdp_events
-       WHERE company_id = $1::uuid
-         AND event_name = 'cart_add'
-         AND customer_id IS NOT NULL
-         AND occurred_at >= NOW() - (($2::int + 1) || ' hours')::interval
-         AND occurred_at <= NOW() - ($2 || ' hours')::interval
-       ORDER BY customer_id, occurred_at DESC
-     )
-     SELECT a.customer_id
-     FROM abandoned a
-     ${customerCond ? `INNER JOIN customers c ON c.id = a.customer_id` : ''}
-     WHERE NOT EXISTS (
-       SELECT 1 FROM cdp_events e2
-       WHERE e2.company_id = $1::uuid
-         AND e2.customer_id = a.customer_id
-         AND e2.event_name IN ('checkout_start', 'purchase')
-         AND e2.occurred_at > a.cart_add_at
-     )
-     ${customerCond ? ` AND ${customerCond}` : ''}
-     LIMIT 500`,
-    params,
-  );
-  return enqueueCandidates(j, candidates.rows.map((r: any) => r.customer_id));
-}
-
-// 5. 생일 (D-N): NOW + N days의 MM-DD가 customers.birth_month_day 또는 birth_date와 일치
-async function matchBirthdayApproaching(j: ActiveJourney, daysBefore: number): Promise<{ matched: number; enqueued: number; skipped: number }> {
-  // ★ D211+ Phase A 5번 (2026-05-23 Harold 명시): customer_conditions 복합 영역 통합
-  const params: any[] = [j.company_id, String(daysBefore)];
-  const customerCond = applyCustomerConditions(
-    (j.trigger_filters as any)?.customer_conditions || [],
-    (j.trigger_filters as any)?.logic || 'AND',
-    params,
-  );
-  const candidates = await query(
-    `SELECT id AS customer_id FROM customers c
-     WHERE c.company_id = $1::uuid
-       AND c.is_active = true
-       AND c.sms_opt_in = true
-       AND (
-         (c.birth_month_day IS NOT NULL AND c.birth_month_day = TO_CHAR((CURRENT_DATE + ($2 || ' days')::interval), 'MM-DD'))
-         OR
-         (c.birth_date IS NOT NULL AND TO_CHAR(c.birth_date, 'MM-DD') = TO_CHAR((CURRENT_DATE + ($2 || ' days')::interval), 'MM-DD'))
-       )
-       ${customerCond ? ` AND ${customerCond}` : ''}
-     LIMIT 500`,
-    params,
-  );
-  return enqueueCandidates(j, candidates.rows.map((r: any) => r.customer_id));
+  return enqueueCandidates(j, ids);
 }
 
 // ════════════════════════════════════════════════════════════════════

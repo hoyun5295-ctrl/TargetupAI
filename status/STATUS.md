@@ -107,7 +107,20 @@
 
 ---
 
-### 🟢 2026-06-01 세션 (최신) — 크레딧 점검 #1/#2/#3 + 요금제 UI 재구성
+### 🟢 2026-06-01 세션 (최신) — AI 크레딧 가치 기반 전면 재설계 + 모델 핵심 고급 + 설정 페이지 재개편
+
+> **코드·검증 완료, plans/동기화/이력 SQL Harold 실행, 배포 Harold.** 상세 = `memory/project_2026_0601_credit_value_redesign.md`
+> - **가치 재설계(1크레딧 500원)**: 작업당 풀분석 300·여정 150·자동마케팅 200·모바일DM 30·인앱 15·문안 5·다듬기 1. 요금제+보너스(스타터 300 / 베이직 750+7% / 프로 2400+20% / 비즈 7800+30% / 엔터 16500+50% / TRIAL 600 / FREE 0). 충전 500·단위 50/100/300/500. ai-credit-calc CREDIT_COST_MAP + constants/credit.ts 1:1 + planBonusPct.
+> - **ORCHESTRATE_CREDIT 20 하드코딩 제거** → getCreditCost(source) 단일 진실. orchestrate/orchestrateWithAI creditOpts(source). **자동마케팅 = 풀분석 자동**(continuous-operator source 200 차감 + 스팸 재생성 runInCreditBundle 묶음 0). verify 27 GREEN.
+> - **모델 핵심만 고급**(Harold "한번에 다"): 여정 생성·DM 4호출 sonnet→opus(인앱·풀분석 기존 opus, 다듬기·문안·분석 경량 유지). feedback_ai_operator_model_isolation §7 갱신.
+> - **SQL(Harold 실행)**: plans 7건 UPDATE + 동기화(companies.base=plan + reset_at NOW 71곳 — reset_at 이번달이라 인상 미반영된 것 fix) + 이력 정합(ai_credit_transactions type 'reset' 보정 INSERT, idempotency_key + ON CONFLICT). ai_call_log cost_won=0 원가 미기록(토큰 직접 환산).
+> - **대시보드 UI**: 발송현황 크레딧 제거 → 요금제 카드 이동(stopPropagation) + CreditHistoryModal max-w-lg + 3칸(기본/사용/충전 violet/amber/emerald). **Settings.tsx 전면 재개편**(sticky 헤더·저장 상단·min-h 제거·grid-cols-1 lg:grid-cols-2·섹션 색 아이콘·focus ring·글씨 위계 축소, 기능 보존).
+> - backend·frontend tsc 0 + verify 27 GREEN + 자가 grep(모델명·native dialog·박-단어) 0. 배포 전 /codex:adversarial-review 권장(돈·요금제).
+> - **다음 세션**: ① plans 변경/동기화 시 ai_credit_transactions 거래 기록 자동 동반 코드화(이번엔 수동 SQL) ② 자동마케팅 빈도(daily/weekly)별 월 소모 점검 ③ status/lessons/LESSONS_BACKEND "기존 한줄로AI sonnet 절대" 본문 갱신.
+
+---
+
+### 🟢 2026-06-01 세션 — 크레딧 점검 #1/#2/#3 + 요금제 UI 재구성
 
 > **점검·UI 코드·검증 완료, 배포 Harold.** 상세 = `memory/project_2026_0601_credit_audit_ui.md`
 > - **UI**: 세그먼트 모달 흰배경+흰글씨(Tailwind 중복불투명도 `bg-violet-900/50/50` 10곳 — SegmentsPage·InAppMessages·AiUsage·AiMemory) fix / 수신거부 관리 흰톤 모던 재작성(이모지→lucide) / 직접발송 3버튼 색차별화(미리보기 sky·스팸 amber·AI violet+glow, dead CSS `.ds-btn-sec--primary/--ghost` 제거·"파일 선택" 라벨 emerald 보존).

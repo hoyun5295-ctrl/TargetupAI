@@ -13,38 +13,58 @@ import { useMemo, useState } from 'react';
 import { Code, Eye, X, AlertCircle, Sparkles, User } from 'lucide-react';
 import {
   renderLiquid,
-  flattenCustomerForLiquid,
-  SAMPLE_CUSTOMERS,
   type LiquidError,
 } from '../../utils/liquid-templating';
+
+export interface PreviewSample {
+  label: string;
+  customerId: string;
+  sampleCustomer: Record<string, any>;
+  sampleCustomerFields: Record<string, any>;
+  modelVersion: string | null;
+}
 
 interface LiquidPreviewModalProps {
   messageTemplate: string;
   subject: string;
+  samples: PreviewSample[];
   onClose: () => void;
 }
 
-export default function LiquidPreviewModal({ messageTemplate, subject, onClose }: LiquidPreviewModalProps) {
+export default function LiquidPreviewModal({ messageTemplate, subject, samples, onClose }: LiquidPreviewModalProps) {
   const [selectedIdx, setSelectedIdx] = useState(0);
 
   const previews = useMemo(() => {
-    return SAMPLE_CUSTOMERS.map((sample) => {
-      const customer = flattenCustomerForLiquid(sample.data);
+    return samples.map((sample) => {
+      const customer = sample.sampleCustomerFields;
       const messageResult = renderLiquid(messageTemplate, { customer });
       const subjectResult = subject ? renderLiquid(subject, { customer }) : { rendered: '', errors: [] as LiquidError[], hasLiquidSyntax: false };
       return {
         label: sample.label,
-        data: sample.data,
+        data: sample.sampleCustomerFields,
         messageRendered: messageResult.rendered,
         messageErrors: messageResult.errors,
         subjectRendered: subjectResult.rendered,
         subjectErrors: subjectResult.errors,
       };
     });
-  }, [messageTemplate, subject]);
+  }, [messageTemplate, subject, samples]);
 
   const selected = previews[selectedIdx];
   const totalErrors = previews.reduce((sum, p) => sum + p.messageErrors.length + p.subjectErrors.length, 0);
+
+  if (samples.length === 0) {
+    return (
+      <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4" onClick={onClose}>
+        <div className="bg-slate-900 border border-violet-400/30 rounded-xl max-w-md w-full p-6 text-center" onClick={(e) => e.stopPropagation()}>
+          <Code className="w-8 h-8 text-violet-400 mx-auto mb-3" />
+          <h3 className="text-base font-semibold mb-2">미리보기 대상 없음</h3>
+          <p className="text-sm text-white/60 mb-4 leading-relaxed">현재 이 여정 조건에 맞는 고객이 아직 없습니다. 여정을 켜두면 조건을 충족하는 고객이 생기는 즉시 자동 발송됩니다.</p>
+          <button onClick={onClose} className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white/80 rounded text-sm">닫기</button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4" onClick={onClose}>

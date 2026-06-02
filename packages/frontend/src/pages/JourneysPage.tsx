@@ -400,6 +400,7 @@ export default function JourneysPage() {
   const [saving, setSaving] = useState(false);
   // ★ D191 (2026-05-22) Phase B-1 Liquid Templating: 미리보기 모달 state
   const [liquidPreview, setLiquidPreview] = useState<{ stepIdx: number; messageTemplate: string; subject: string } | null>(null);
+  const [previewSamples, setPreviewSamples] = useState<PreviewSample[]>([]);
 
   const token = () => localStorage.getItem('token');
 
@@ -696,12 +697,11 @@ export default function JourneysPage() {
         await new Promise((resolve) => setTimeout(resolve, 3700));
         setView('review');
 
-        // ★ D210+ Phase 2-fix6 (Harold 명시 2026-05-23): 회사 상위 고객 1건 자동 fetch — 원본/치환 토글 머지 영역 정합.
-        //   여정 영역 = 트리거 기반 (filter X) → 전체 customer 안 LTV 상위 1건 fallback.
+        // 여정 trigger 기준 미리보기 고객 1건 fetch — 발송과 동일 기준(신규가입 등)으로 추출.
         fetch('/api/ai/operator/sample-customer', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token()}` },
-          body: JSON.stringify({ filters: {} }),
+          body: JSON.stringify({ triggerEvent: pkg.triggerEvent, triggerFilters: pkg.triggerFilters || {} }),
         })
           .then((sr) => sr.json())
           .then((sd) => {
@@ -717,6 +717,18 @@ export default function JourneysPage() {
             setSampleCustomer(null);
             setSampleCustomerFields(null);
           });
+
+        // 10명 미리보기 모달용 실제 타겟 샘플 (trigger 기준, preview-target-samples)
+        fetch('/api/ai/operator/preview-target-samples', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token()}` },
+          body: JSON.stringify({ triggerEvent: pkg.triggerEvent, triggerFilters: pkg.triggerFilters || {} }),
+        })
+          .then((sr) => sr.json())
+          .then((sd) => {
+            setPreviewSamples(sd?.success && Array.isArray(sd.samples) ? sd.samples : []);
+          })
+          .catch(() => setPreviewSamples([]));
       } else {
         alert(data.error || 'AI 생성 실패. 다시 시도해주세요.');
       }
@@ -1785,7 +1797,7 @@ export default function JourneysPage() {
               <div className="bg-emerald-500/10 border border-emerald-400/30 rounded-lg p-3 text-xs text-emerald-100 flex items-start gap-2">
                 <Sparkles className="w-3.5 h-3.5 mt-0.5 shrink-0 text-emerald-300" />
                 <div>
-                  <span className="font-semibold">상위 고객 데이터 자동 치환 활성</span> — 각 step 본문은 변수가 강조된 <span className="text-amber-200">원본</span>으로 표시되며, 아래 <span className="text-emerald-200">실제 발송 미리보기</span> 영역에서 실제 발송 형태(변수 치환 + Liquid 렌더링 + 광고/무료거부 합성)를 확인할 수 있어요.
+                  <span className="font-semibold">타겟 고객 데이터 자동 치환 활성</span> — 각 step 본문은 변수가 강조된 <span className="text-amber-200">원본</span>으로 표시되며, 아래 <span className="text-emerald-200">실제 발송 미리보기</span> 영역에서 실제 발송 형태(변수 치환 + Liquid 렌더링 + 광고/무료거부 합성)를 확인할 수 있어요.
                 </div>
               </div>
             )}
@@ -2377,9 +2389,14 @@ export default function JourneysPage() {
                             <div className="text-white/40 mb-1 flex items-center justify-between flex-wrap gap-1">
                               <span>실제 발송 미리보기 ({previewBytes} bytes)</span>
                               {sampleCustomer && (
-                                <span className="text-emerald-300/80 text-[10px]">상위 고객 데이터 치환 + Liquid 렌더링 적용</span>
+                                <span className="text-emerald-300/80 text-[10px]">타겟 고객 데이터 치환 + Liquid 렌더링 적용</span>
                               )}
                             </div>
+                            {!sampleCustomer && (
+                              <div className="mb-1.5 text-amber-300/80 text-[10px] leading-relaxed">
+                                현재 이 조건에 맞는 고객이 아직 없어 원본(변수 미치환)으로 표시됩니다. 여정을 켜두면 조건을 충족하는 고객이 생기는 즉시 자동 발송됩니다.
+                              </div>
+                            )}
                             <div className="whitespace-pre-wrap text-white/80 font-mono">
                               {sampleCustomer
                                 ? mergeAndHighlightVars(preview, sampleCustomer, 'dark', sampleCustomerFields || undefined)
@@ -2526,6 +2543,7 @@ export default function JourneysPage() {
         <LiquidPreviewModal
           messageTemplate={liquidPreview.messageTemplate}
           subject={liquidPreview.subject}
+          samples={previewSamples}
           onClose={() => setLiquidPreview(null)}
         />
       )}

@@ -90,6 +90,7 @@ import { validateJourneyForActivation } from '../utils/journey-pretest-validator
 import { getPauseLogs } from '../utils/journey-pause-handler';
 // ★ D187-fix3 (2026-05-21): Journey AI Generator — One-shot 자연어 + 시즌 + 회사 메모리
 import { generateJourneyPackage, refineStepMessage } from '../utils/journey-ai-generator';
+import { selectJourneyTargetCustomerIds, buildJourneyPreviewSamples } from '../utils/journey-target-extractor';
 // ★ D210+ Phase 2-fix1 (Harold 명시 2026-05-23): CT-58 — 회사 customer DB 실측 프로필 조회.
 //   /operator/data-profile endpoint = 마케팅 담당자 검토 UI 안내 카드 data source.
 import { getCompanyDataProfile } from '../utils/company-data-profile';
@@ -982,43 +983,43 @@ router.post('/operator/sample-customer', async (req: Request, res: Response) => 
       return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
     }
 
-    const { filters } = req.body || {};
+    const { triggerEvent, triggerFilters } = req.body || {};
+    if (!triggerEvent || typeof triggerEvent !== 'string') {
+      return res.json({ success: true, sampleCustomer: null });
+    }
+
+    // 여정 trigger 기준 후보 추출 (발송과 동일 컨트롤타워). 상위 30명 추출 후 store-scope 통과 첫 1명.
+    const targetIds = await selectJourneyTargetCustomerIds(companyId, triggerEvent, triggerFilters || {}, 30);
+    if (targetIds.length === 0) {
+      return res.json({ success: true, sampleCustomer: null });
+    }
 
     // ★ B16-01: 브랜드 격리 — store-scope 컨트롤타워 (preview-recipients 정합)
     let storeFilter = '';
-    const baseParams: any[] = [companyId];
+    const allParams: any[] = [companyId, targetIds];
     if (userType === 'company_user' && userId) {
       const scope = await getStoreScope(companyId, userId);
       if (scope.type === 'filtered') {
-        storeFilter = ' AND id IN (SELECT customer_id FROM customer_stores WHERE company_id = $1 AND store_code = ANY($2::text[]))';
-        baseParams.push(scope.storeCodes);
+        storeFilter = ' AND id IN (SELECT customer_id FROM customer_stores WHERE company_id = $1 AND store_code = ANY($3::text[]))';
+        allParams.push(scope.storeCodes);
       } else if (scope.type === 'blocked') {
         return res.json({ success: true, sampleCustomer: null });
       }
     }
 
-    // ★ CT-01: 필터 → SQL (preview-recipients 정합 미러). filters X 영역 시 = 전체 매칭 fallback.
-    let filterWhere = '';
-    let filterParams: any[] = [];
-    if (filters && typeof filters === 'object' && Object.keys(filters).length > 0) {
-      const built = buildFilterWhereClauseCompat(filters, baseParams.length + 1);
-      filterWhere = built.sql;
-      filterParams = built.params;
-    }
-    const allParams = [...baseParams, ...filterParams];
-
+    // 추출 순서(trigger ORDER BY — 신규가입=created_at DESC 등) 유지 = array_position
     const sql = `
       SELECT name, grade, gender, age, birth_date, email, region, address,
              store_name, registered_store, points, recent_purchase_date, recent_purchase_amount,
              recent_purchase_store, total_purchase_amount, purchase_count, avg_order_value,
              ltv_score, wedding_anniversary
       FROM customers
-      WHERE company_id = $1
+      WHERE company_id = $1::uuid
+        AND id = ANY($2::uuid[])
         AND is_active = true
         AND sms_opt_in = true
         ${storeFilter}
-        ${filterWhere}
-      ORDER BY ltv_score DESC NULLS LAST, total_purchase_amount DESC NULLS LAST, created_at ASC
+      ORDER BY array_position($2::uuid[], id)
       LIMIT 1
     `;
 
@@ -2571,93 +2572,48 @@ router.get('/operator/journeys/:id/preview-samples', async (req: Request, res: R
       return res.status(403).json({ success: false, error: 'AI Operator 진입 권한이 없습니다.', code: 'AI_OPERATOR_GATED' });
     }
 
-    // 회사 격리 검증
-    const j = await query(`SELECT 1 FROM journeys WHERE id = $1::uuid AND company_id = $2::uuid`, [req.params.id, companyId]);
-    if (j.rows.length === 0) return res.status(404).json({ success: false, error: '여정을 찾을 수 없습니다.' });
-
-    // 6 영역 customer 영역 자동 추출 (UNION ALL 단일 SQL)
-    const r = await query(
-      `(SELECT 'VIP' AS label, c.*, p.click_score, p.churn_risk, p.purchase_likelihood, p.model_version
-        FROM customers c
-        LEFT JOIN cdp_customer_predictions p ON p.customer_id = c.id
-        WHERE c.company_id = $1::uuid AND c.grade = 'VIP' AND c.is_active = true
-        ORDER BY c.total_purchase_amount DESC NULLS LAST LIMIT 1)
-       UNION ALL
-       (SELECT 'Gold' AS label, c.*, p.click_score, p.churn_risk, p.purchase_likelihood, p.model_version
-        FROM customers c
-        LEFT JOIN cdp_customer_predictions p ON p.customer_id = c.id
-        WHERE c.company_id = $1::uuid AND c.grade = 'Gold' AND c.is_active = true
-        ORDER BY c.total_purchase_amount DESC NULLS LAST LIMIT 1)
-       UNION ALL
-       (SELECT 'Silver' AS label, c.*, p.click_score, p.churn_risk, p.purchase_likelihood, p.model_version
-        FROM customers c
-        LEFT JOIN cdp_customer_predictions p ON p.customer_id = c.id
-        WHERE c.company_id = $1::uuid AND c.grade = 'Silver' AND c.is_active = true
-        ORDER BY c.total_purchase_amount DESC NULLS LAST LIMIT 1)
-       UNION ALL
-       (SELECT '신규' AS label, c.*, p.click_score, p.churn_risk, p.purchase_likelihood, p.model_version
-        FROM customers c
-        LEFT JOIN cdp_customer_predictions p ON p.customer_id = c.id
-        WHERE c.company_id = $1::uuid AND (c.grade = '신규' OR c.grade IS NULL) AND c.is_active = true
-        ORDER BY c.created_at DESC LIMIT 1)
-       UNION ALL
-       (SELECT '이탈 위험 70%+' AS label, c.*, p.click_score, p.churn_risk, p.purchase_likelihood, p.model_version
-        FROM customers c
-        INNER JOIN cdp_customer_predictions p ON p.customer_id = c.id
-        WHERE c.company_id = $1::uuid AND p.churn_risk > 0.7 AND c.is_active = true
-        ORDER BY p.churn_risk DESC LIMIT 1)
-       UNION ALL
-       (SELECT '구매 가능성 60%+' AS label, c.*, p.click_score, p.churn_risk, p.purchase_likelihood, p.model_version
-        FROM customers c
-        INNER JOIN cdp_customer_predictions p ON p.customer_id = c.id
-        WHERE c.company_id = $1::uuid AND p.purchase_likelihood > 0.6 AND c.is_active = true
-        ORDER BY p.purchase_likelihood DESC LIMIT 1)`,
-      [companyId]
+    // 여정 trigger 조회 + 회사 격리
+    const jr = await query(
+      `SELECT trigger_event, trigger_filters FROM journeys WHERE id = $1::uuid AND company_id = $2::uuid`,
+      [req.params.id, companyId]
     );
+    if (jr.rows.length === 0) return res.status(404).json({ success: false, error: '여정을 찾을 수 없습니다.' });
 
-    // 응답 매트릭스 (sampleCustomer + sampleCustomerFields 영역 양쪽 — JourneysPage 미러)
-    const samples = r.rows.map((row: any) => {
-      const sampleCustomer: Record<string, any> = {
-        고객명: row.name || '',
-        이름: row.name || '',
-        등급: row.grade || '',
-        지역: row.region || '',
-        전화번호: row.phone || '',
-        포인트: row.points != null ? Number(row.points).toLocaleString() : '',
-        최근구매일: row.recent_purchase_date ? new Date(row.recent_purchase_date).toLocaleDateString('ko-KR') : '',
-        총구매액: row.total_purchase_amount != null ? Number(row.total_purchase_amount).toLocaleString() : '',
-        누적구매횟수: row.purchase_count != null ? String(row.purchase_count) : '',
-      };
-      const sampleCustomerFields: Record<string, any> = {
-        name: row.name || null,
-        phone: row.phone || null,
-        grade: row.grade || null,
-        region: row.region || null,
-        age: row.age != null ? Number(row.age) : null,
-        gender: row.gender || null,
-        purchase_count: row.purchase_count != null ? Number(row.purchase_count) : 0,
-        total_purchase_amount: row.total_purchase_amount != null ? Number(row.total_purchase_amount) : 0,
-        recent_purchase_amount: row.recent_purchase_amount != null ? Number(row.recent_purchase_amount) : 0,
-        recent_purchase_date: row.recent_purchase_date || null,
-        birth_date: row.birth_date || null,
-        points: row.points != null ? Number(row.points) : 0,
-        email: row.email || null,
-        click_score: row.click_score != null ? Number(row.click_score) : 0.5,
-        churn_risk: row.churn_risk != null ? Number(row.churn_risk) : 0.5,
-        purchase_likelihood: row.purchase_likelihood != null ? Number(row.purchase_likelihood) : 0.5,
-      };
-      return {
-        label: row.label,
-        customerId: row.id,
-        sampleCustomer,
-        sampleCustomerFields,
-        modelVersion: row.model_version || null,
-      };
-    });
+    // 여정 trigger 기준 상위 10명 미리보기 샘플 (발송과 동일 컨트롤타워). 0명이면 빈 결과 (자동완화 X).
+    const samples = await buildJourneyPreviewSamples(
+      companyId,
+      String(jr.rows[0].trigger_event || ''),
+      jr.rows[0].trigger_filters || {},
+      10,
+    );
 
     return res.json({ success: true, samples });
   } catch (err: any) {
     console.error('[Journeys preview-samples] 오류:', err);
+    return res.status(500).json({ success: false, error: err?.message || '미리보기 샘플 조회 실패' });
+  }
+});
+
+// review 단계(저장 전) 미리보기 샘플 — triggerEvent/triggerFilters로 직접 추출 (preview-samples와 동일 빌더).
+router.post('/operator/preview-target-samples', async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+    const planCtx = await loadPlanContext(companyId);
+    if (!planCtx) return res.status(404).json({ success: false, error: '회사 정보를 찾을 수 없습니다.' });
+    if (!isAiOperatorAllowed(planCtx, req.user)) {
+      return res.status(403).json({ success: false, error: 'AI Operator 진입 권한이 없습니다.', code: 'AI_OPERATOR_GATED' });
+    }
+
+    const { triggerEvent, triggerFilters } = req.body || {};
+    if (!triggerEvent || typeof triggerEvent !== 'string') {
+      return res.json({ success: true, samples: [] });
+    }
+
+    const samples = await buildJourneyPreviewSamples(companyId, triggerEvent, triggerFilters || {}, 10);
+    return res.json({ success: true, samples });
+  } catch (err: any) {
+    console.error('[Journeys preview-target-samples] 오류:', err);
     return res.status(500).json({ success: false, error: err?.message || '미리보기 샘플 조회 실패' });
   }
 });
