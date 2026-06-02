@@ -97,9 +97,11 @@ export function createEmptyAlimtalkState(): AlimtalkChannelState {
 }
 
 const NEXT_TYPE_OPTIONS: { value: AlimtalkNextType; label: string; desc: string }[] = [
-  // ★ 2026-06-01 (영업팀장 박성용 신고): 알림톡 문구는 길어 SMS 대체가 어려움 → SMS 대체·문구형 제거, 2개만 유지.
+  // ★ 2026-06-01 (영업팀장 박성용 신고): SMS 대체 계열(S·A:SMS+문구) 제거 — 알림톡 문구가 길어 SMS 대체 부적합.
+  // ★ 2026-06-02 (직원 신고): LMS+문구(B) 재추가 — LMS로 대체하되 별도 문구가 필요한 경우. SMS 계열(S·A)은 계속 제외.
   { value: 'N', label: '대체 안함', desc: '알림톡 실패 시 발송 안 함' },
   { value: 'L', label: 'LMS 대체', desc: '알림톡 실패 시 LMS로 자동 발송' },
+  { value: 'B', label: 'LMS+문구', desc: '알림톡 실패 시 별도 문구로 LMS 발송' },
 ];
 
 const APPROVED_TEMPLATE_STATUSES = new Set(['APPROVED', 'APR', 'A', 'approved']);
@@ -431,7 +433,7 @@ export default function AlimtalkChannelPanel({
             <p className="text-[11px] text-gray-400 mb-2">
               알림톡 전송 실패 시 자동 대체 발송 정책
             </p>
-            <div className="grid grid-cols-2 gap-2">
+            <div className="grid grid-cols-3 gap-2">
               {NEXT_TYPE_OPTIONS.map((opt) => {
                 const active = value.nextType === opt.value;
                 return (
