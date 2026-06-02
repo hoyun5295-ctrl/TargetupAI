@@ -1325,7 +1325,7 @@ router.post('/direct-send/commit', async (req: Request, res: Response) => {
     if (isAlimtalkSend) {
       if (!alimtalkTemplateCode) return res.status(400).json({ success: false, error: '알림톡 템플릿 코드가 필요합니다' });
       const gate = await query(
-        `SELECT t.id AS tid, t.status AS tstatus, p.approval_status, p.profile_key FROM kakao_templates t JOIN kakao_sender_profiles p ON p.id = t.profile_id WHERE t.company_id = $1 AND t.template_code = $2 LIMIT 1`,
+        `SELECT t.id AS tid, t.status AS tstatus, t.content AS tcontent, p.approval_status, p.profile_key FROM kakao_templates t JOIN kakao_sender_profiles p ON p.id = t.profile_id WHERE t.company_id = $1 AND t.template_code = $2 LIMIT 1`,
         [companyId, alimtalkTemplateCode]
       );
       if (gate.rows.length === 0) return res.status(404).json({ success: false, error: '템플릿을 찾을 수 없습니다' });
@@ -1335,7 +1335,7 @@ router.post('/direct-send/commit', async (req: Request, res: Response) => {
       if (g.profile_key) alimtalkEtcJson = JSON.stringify({ senderkey: g.profile_key });
       alimtalkTemplateUuid = g.tid || null;  // ★ #4-a: 검증 통과한 템플릿 id 보관 → INSERT 저장
       // ★ #3-2 (2026-06-01): 변수 미지정 발송 차단 (백엔드 이중 안전망 — 프론트 우회 대비)
-      const commitUnfilled = findUnfilledAlimtalkVars(alimtalkVariableMap);
+      const commitUnfilled = findUnfilledAlimtalkVars(g.tcontent, alimtalkVariableMap);
       if (commitUnfilled.length > 0) {
         return res.status(400).json({ success: false, error: `값을 지정하지 않은 알림톡 변수가 있습니다: ${commitUnfilled.join(', ')}`, code: 'ALIMTALK_VAR_UNFILLED' });
       }
@@ -1561,8 +1561,17 @@ router.post('/direct-send', async (req: Request, res: Response) => {
     // N(대체안함) / S(SMS 대체) / A(SMS+문구) = 알림톡 LMS 제목 검증 skip (옛 D218+ 흐름 정합 유지)
 
     // ★ #3-2 (2026-06-01): 알림톡 변수 미지정 발송 차단 (백엔드 이중 안전망)
+    // ★ 2026-06-02: 템플릿 본문 변수 전체 기준 검증 — variableMap이 비어 변수가 통째로 누락돼도 잡도록 content 조회 후 전달.
     if (isAlimtalkSend) {
-      const directUnfilled = findUnfilledAlimtalkVars(alimtalkVariableMap);
+      let directTplContent = '';
+      if (alimtalkTemplateCode) {
+        const tplRow = await query(
+          `SELECT content FROM kakao_templates WHERE company_id = $1 AND template_code = $2 LIMIT 1`,
+          [companyId, alimtalkTemplateCode]
+        );
+        directTplContent = tplRow.rows[0]?.content || '';
+      }
+      const directUnfilled = findUnfilledAlimtalkVars(directTplContent, alimtalkVariableMap);
       if (directUnfilled.length > 0) {
         return res.status(400).json({ success: false, error: `값을 지정하지 않은 알림톡 변수가 있습니다: ${directUnfilled.join(', ')}`, code: 'ALIMTALK_VAR_UNFILLED' });
       }

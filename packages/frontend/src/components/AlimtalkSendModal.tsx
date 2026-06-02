@@ -396,7 +396,7 @@ export default function AlimtalkSendModal({
       return;
     }
     // ★ #3-2 (2026-06-01): 발송 전 변수 검증 — 빈 변수 / 데이터 없는 @@필드@@ 차단 (깨진 알림톡·미수신 방지)
-    const varCheck = validateAlimtalkVariables(kakaoTemplateVars, recipients);
+    const varCheck = validateAlimtalkVariables(kakaoSelectedTemplate?.content, kakaoTemplateVars, recipients);
     if (!varCheck.ok) {
       const unfilled = varCheck.issues.filter((i) => i.kind === 'unfilled').map((i) => i.variable);
       const noData = varCheck.issues.find((i) => i.kind === 'no_data');

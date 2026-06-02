@@ -22,16 +22,27 @@ export interface AlimtalkVarValidation {
   issues: AlimtalkVarIssue[];
 }
 
+/** 템플릿 본문에서 #{...} 변수 추출 (중복 제거). */
+export function extractAlimtalkVariables(content: string | null | undefined): string[] {
+  if (!content) return [];
+  const matches = content.match(/#\{[^}]+\}/g) || [];
+  return Array.from(new Set(matches));
+}
+
 export function validateAlimtalkVariables(
+  templateContent: string | null | undefined,
   variableMap: Record<string, string>,
   recipients: Array<Record<string, any>>,
 ): AlimtalkVarValidation {
   const issues: AlimtalkVarIssue[] = [];
   const list = Array.isArray(recipients) ? recipients : [];
-  for (const [variable, rawVal] of Object.entries(variableMap || {})) {
-    const val = String(rawVal ?? '').trim();
+  const map = variableMap || {};
+  // ★ 검증 기준은 variableMap이 아니라 "템플릿 본문에 실제로 있는 변수" 전체.
+  //   매핑이 비어(예: {}) 변수가 통째로 누락돼도 unfilled로 잡아 깨진 발송을 막는다.
+  for (const variable of extractAlimtalkVariables(templateContent)) {
+    const val = String(map[variable] ?? '').trim();
     if (val === '') {
-      // 미지정 — 매핑/값이 비어 있음
+      // 미지정 — 매핑/값이 비어 있거나 variableMap에 아예 없음
       issues.push({ variable, missingCount: list.length, kind: 'unfilled' });
       continue;
     }
