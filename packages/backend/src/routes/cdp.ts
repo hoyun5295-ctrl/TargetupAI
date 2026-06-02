@@ -89,6 +89,8 @@ import {
   quickActionSegmentRefine,
 } from '../utils/inapp-quick-action';
 import { query } from '../config/database';
+import { checkCredit, deductCreditSafe, InsufficientCreditError } from '../utils/ai-credit';
+import { getCreditCost } from '../utils/ai-credit-calc';
 
 const router = Router();
 
@@ -956,9 +958,21 @@ router.post('/inapp', async (req: Request, res: Response) => {
       return res.status(403).json({ success: false, error: 'In-app 메시지는 유료 요금제 가입 후 이용 가능합니다.', code: 'PLAN_FEATURE_LOCKED' });
     }
 
+    // ★ 종량제: 인앱 게시(확정) = 15, status=active 저장 시 최초 1회(멱등 inapp-publish:messageId). paused/archived 저장은 미과금.
+    const willPublish = (req.body?.status ?? 'active') === 'active';
+    if (willPublish) await checkCredit(companyId, getCreditCost('inapp-publish'));
     const message = await createInAppMessage(companyId, userId, req.body);
+    if (message?.status === 'active') {
+      await deductCreditSafe({
+        companyId, cost: getCreditCost('inapp-publish'), source: 'inapp-publish', createdBy: userId,
+        idempotencyKey: `inapp-publish:${message.id}`,
+      });
+    }
     return res.json({ success: true, message });
   } catch (err: any) {
+    if (err instanceof InsufficientCreditError) {
+      return res.status(402).json({ success: false, error: err.message, code: 'INSUFFICIENT_CREDIT' });
+    }
     console.error('[CDP /inapp POST] 오류:', err);
     return res.status(500).json({ success: false, error: err?.message || '생성 실패' });
   }
@@ -974,6 +988,13 @@ router.put('/inapp/:id', async (req: Request, res: Response) => {
     }
     const message = await updateInAppMessage(companyId, req.params.id, req.body);
     if (!message) return res.status(404).json({ success: false, error: '메시지를 찾을 수 없습니다.' });
+    // ★ 종량제: paused→active 게시 시 15(멱등 inapp-publish:messageId — POST에서 이미 과금됐으면 0).
+    if (message.status === 'active') {
+      await deductCreditSafe({
+        companyId, cost: getCreditCost('inapp-publish'), source: 'inapp-publish', createdBy: req.user?.userId,
+        idempotencyKey: `inapp-publish:${message.id}`,
+      });
+    }
     return res.json({ success: true, message });
   } catch (err: any) {
     console.error('[CDP /inapp PUT] 오류:', err);

@@ -27,7 +27,8 @@ import {
   oneShotGenerate,
   type CampaignSpec, type ToneKey,
 } from '../utils/dm/dm-ai';
-import { checkCredit, deductCreditSafe } from '../utils/ai-credit';
+import { checkCredit, deductCreditSafe, InsufficientCreditError } from '../utils/ai-credit';
+import { getCreditCost } from '../utils/ai-credit-calc';
 import { runInCreditBundle } from '../utils/ai-credit-context';
 import type { Section } from '../utils/dm/dm-section-registry';
 import { selectSampleCustomers, selectSampleCustomerByKey, type SampleCustomerKey } from '../utils/dm/dm-sample-customer';
@@ -281,13 +282,30 @@ dmRouter.post('/:id/publish', async (req: any, res: any) => {
   try {
     const companyId = req.user?.companyId;
     if (!companyId) return res.status(403).json({ error: '회사 권한이 필요합니다.' });
+    // ★ 종량제: 발행(단축URL 확정) = 30, 최초 1회만(멱등키 dm-publish:dmId). test-send 자동발행(publishDm 직접 호출)은 라우트 미경유=미과금. 재발행은 멱등 0.
+    const pubCost = getCreditCost('dm-builder');  // 30
+    const charged = await query(
+      `SELECT 1 FROM ai_credit_transactions WHERE company_id = $1::uuid AND idempotency_key = $2 LIMIT 1`,
+      [companyId, `dm-publish:${req.params.id}`]
+    );
+    const firstPublish = charged.rows.length === 0;
+    if (firstPublish) await checkCredit(companyId, pubCost);
     const result = await publishDm(req.params.id, companyId);
     if (!result) return res.status(404).json({ error: 'DM을 찾을 수 없습니다.' });
+    if (firstPublish) {
+      await deductCreditSafe({
+        companyId, cost: pubCost, source: 'dm-builder', createdBy: req.user?.userId,
+        idempotencyKey: `dm-publish:${req.params.id}`,
+      });
+    }
     return res.json({
       short_code: result.short_code,
       short_url: `https://hanjul-flyer.kr/dm-${result.short_code}`,
     });
   } catch (err: any) {
+    if (err instanceof InsufficientCreditError) {
+      return res.status(402).json({ error: err.message, code: 'INSUFFICIENT_CREDIT' });
+    }
     console.error('[DM발행] 오류:', err.message);
     return res.status(500).json({ error: '서버 오류' });
   }
@@ -326,11 +344,12 @@ dmRouter.post('/ai/one-shot-generate', async (req: any, res: any) => {
       return res.status(400).json({ error: '프롬프트는 2000자 이내로 입력해주세요.' });
     }
 
-    // ★ D227+ 종량제: DM 자동 생성 1작업 = 5크레딧 묶음 (내부 parse/copy는 집계만, 차감 0)
-    await checkCredit(companyId, 5);
+    // ★ 종량제: DM 생성(돌려보기) = 3크레딧 묶음 (내부 parse/copy/tone은 집계만, 차감 0). 발행 시 30 별도.
+    const genCost = getCreditCost('dm-ai-generate');  // 3
+    await checkCredit(companyId, genCost);
     const result = await runInCreditBundle(async () => {
       const r = await oneShotGenerate({ prompt, scenario, brandName, companyId });
-      await deductCreditSafe({ companyId, cost: 5, source: 'dm-builder', createdBy: req.user?.userId });
+      await deductCreditSafe({ companyId, cost: genCost, source: 'dm-ai-generate', createdBy: req.user?.userId });
       return r;
     });
     return res.json({

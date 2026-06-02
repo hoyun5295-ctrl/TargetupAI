@@ -80,8 +80,11 @@ ok('여정 저장(활성화) journey-activate = 150', () => assert.strictEqual(g
 ok('자동마케팅 저장(활성화) continuous-operator = 200', () => assert.strictEqual(getCreditCost('continuous-operator'), 200));
 ok('자동마케팅 발송 문안 continuous-operator-send = 3', () => assert.strictEqual(getCreditCost('continuous-operator-send'), 3));
 ok('예측 predictive-daily = 3', () => assert.strictEqual(getCreditCost('predictive-daily'), 3));
-ok('모바일DM dm-builder = 30', () => assert.strictEqual(getCreditCost('dm-builder'), 30));
-ok('인앱 inapp-ai-generator = 15', () => assert.strictEqual(getCreditCost('inapp-ai-generator'), 15));
+ok('모바일DM 생성(돌려보기) dm-ai-generate = 3', () => assert.strictEqual(getCreditCost('dm-ai-generate'), 3));
+ok('모바일DM 발행(확정) dm-builder = 30', () => assert.strictEqual(getCreditCost('dm-builder'), 30));
+ok('인앱 생성(돌려보기) inapp-ai-generator = 3', () => assert.strictEqual(getCreditCost('inapp-ai-generator'), 3));
+ok('인앱 게시(확정) inapp-publish = 15', () => assert.strictEqual(getCreditCost('inapp-publish'), 15));
+ok('인앱 빠른액션(다듬기) inapp-quick-action = 1', () => assert.strictEqual(getCreditCost('inapp-quick-action'), 1));
 ok('문안·분석 generate-messages = 5', () => assert.strictEqual(getCreditCost('generate-messages'), 5));
 ok('다듬기 journey-ai-refine = 1', () => assert.strictEqual(getCreditCost('journey-ai-refine'), 1));
 ok('스팸 spam-filter-test = 0 (크레딧 비대상 — 현금/후불 청구)', () => assert.strictEqual(getCreditCost('spam-filter-test'), 0));

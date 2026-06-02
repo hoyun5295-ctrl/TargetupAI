@@ -107,7 +107,15 @@
 
 ---
 
-### 🟢 2026-06-02 세션 (최신) — 여정 미리보기 타겟 연동 + 크레딧 재매핑 작업1 + 작업2~5 핸드오프
+### 🟢 2026-06-03 세션 (최신) — 알림톡 변수검증 강화 + 부달 B 재추가 + 자동마케팅 크레딧 재배치 + 이폴리움 연동 문서화
+> **이번 세션(구현·검증·배포 완료 2026-06-03) = ① 알림톡 변수 미지정·누락 발송 차단(검증 기준 variableMap→템플릿 본문 변수 전체, alimtalkVars·alimtalk-vars CT 시그니처+호출부4) ② 부달 B(LMS+문구) 재추가(NEXT_TYPE_OPTIONS+grid3, 백엔드 무수정) ③ 자동마케팅 크레딧 재배치(저장200 createOperator 멱등operatorId / 제안서0 orchestrate cost:0 / 발송3 auto+approve 멱등proposalId / 스팸0, continuous-operator-send=3·주석50→200, TDD verify33) ④ 이폴리움 연동(고도몰 SDK + 네이버 스마트스토어 D178 멀티테넌트) 문서화. 상세=`memory/project_2026_0603_alimtalk_credit_epolium.md`.**
+> - 배포 완료(2026-06-03): tp-push + backend·frontend build:safe + pm2 restart all 완료 (company-frontend X).
+> - 선결: 고도몰 SDK = CDN URL 확정(app vs cdn.hanjul.ai/sdk) + hjl_ 키 발급 + 수집 허용 도메인 등록 / 스마트스토어 = 한줄로 개발사 계정(스토어 심사 ~3영업일 [신청중]).
+> - 문서: `docs/이폴리움_연동_진행.md` · `docs/고도몰_SDK_설치가이드.md` (업체 전달 docx는 Harold 별도 제작).
+
+---
+
+### 🟢 2026-06-02 세션 — 여정 미리보기 타겟 연동 + 크레딧 재매핑 작업1 + 작업2~5 핸드오프
 > **이번 세션 = ① 여정 미리보기 타겟 연동(완료·tsc0) ② 크레딧 재설계 토론·확정 ③ 작업1(한줄입력 풀분석300→문안·분석5) 완료·검증 ④ 작업2~5 핸드오프 작성. 전부 미배포 — 통합 배포 예정.**
 > - **여정 미리보기**: 항상 남다은(LTV1위) 고정 → 여정 trigger 기준 실제 고객 추출(`utils/journey-target-extractor.ts` 신규, 발송 SQL 1:1 이전 동작 보존). Liquid `{{}}` 치환값 하이라이트 누락 fix(highlightVars 토큰 재작성). 0명 안내. plan=`docs/superpowers/plans/2026-06-02-journey-preview-target-fix.md`.
 > - **크레딧 재매핑 확정(Harold 토론)**: 한줄입력(코드명 orchestrate=풀분석이나 실제는 일회성 타겟+문안) → **문안·분석 5** / **풀분석 300 = 성과 리포트(기간 성과분석)+PDF 보고서** / 여정 **돌려보기 3 + 저장 150**(재사용 자산) / 예측 자동 = 연동(`sync_agents`·`cdp_events.source='custom_sdk'`) 회사만 **매일 3** + 온오프(`companies.predictive_enabled` ALTER) / 여정 **수정 버튼** 신설. **작업당 크레딧 금액표·플랜 크레딧 실값(스타터300/베이직750/프로2400/비즈7800/엔터16500)은 불변, 매핑만 변경. ⚠️ SCHEMA.md `ai_credits_per_month` 옛값(스타터50)은 stale — plans row로만 확정.**
