@@ -2,6 +2,7 @@ import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
 import { query } from '../config/database';
 import { TIMEOUTS, LIMITS } from '../config/defaults';
+import { requestContext } from '../utils/request-context';
 
 export interface JwtPayload {
   userId: string;
@@ -45,6 +46,8 @@ export const authenticate = async (req: Request, res: Response, next: NextFuncti
   try {
     const decoded = jwt.verify(token, JWT_SECRET) as JwtPayload;
     req.user = decoded;
+    // 이후 호출 체인(callAIWithFallback 등)이 현재 사용자 ID를 인자 없이 읽도록 컨텍스트 저장
+    requestContext.enterWith({ userId: decoded.userId, companyId: decoded.companyId, userType: decoded.userType });
 
     // sessionId 없는 기존 토큰은 통과 (배포 후 자연 만료)
     if (!decoded.sessionId) {

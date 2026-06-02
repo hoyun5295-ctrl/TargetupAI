@@ -2,6 +2,7 @@ import Anthropic from '@anthropic-ai/sdk';
 import OpenAI from 'openai';
 import { FIELD_MAP, getFieldByKey, getColumnFields, applyFieldAliases } from '../utils/standard-field-map';
 import { query } from '../config/database';
+import { currentUserId } from '../utils/request-context';
 import { AI_MODELS, AI_MAX_TOKENS, TIMEOUTS } from '../config/defaults';
 import { buildFilterWhereClauseCompat } from '../utils/customer-filter';
 import { cleanLeftoverVars } from '../utils/messageUtils';
@@ -169,7 +170,7 @@ export async function callAIWithFallback(params: {
           cost: creditCost,
           source: params.source || 'unknown',
           aiCallLogId,
-          createdBy: params.userId || null,
+          createdBy: params.userId || currentUserId() || null,
         });
       }
     }
@@ -241,7 +242,7 @@ export async function callAIWithFallback(params: {
           cost: creditCost,
           source: params.source || 'unknown',
           aiCallLogId,
-          createdBy: params.userId || null,
+          createdBy: params.userId || currentUserId() || null,
         });
       }
     }

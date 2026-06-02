@@ -110,11 +110,17 @@ async function runPredictiveBatch(): Promise<void> {
         totalTrained += result.trainedCount;
         totalCold += result.coldCount;
         companiesProcessed++;
+        // created_by = 회사 대표 admin(예측 자동 차감의 설정 주체). 없으면 null('자동').
+        const adminRes = await query(
+          `SELECT id FROM users WHERE company_id = $1::uuid AND user_type = 'company_admin' ORDER BY id LIMIT 1`,
+          [row.id]
+        );
         // 성공 후 차감 — 회사+날짜 멱등키로 하루 1회 보장(재시작·재진입 중복 차감 0).
         await deductCreditSafe({
           companyId: row.id,
           cost,
           source: 'predictive-daily',
+          createdBy: adminRes.rows[0]?.id || null,
           idempotencyKey: `predictive-daily:${row.id}:${todayKst}`,
         });
       } catch (err: any) {

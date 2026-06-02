@@ -47,6 +47,7 @@ import {
 } from '../utils/performance-insight';
 // ★ D227+ 종량제: 풀분석 묶음 차감 — 진입점 1회, sub-agent는 묶음 컨텍스트로 0(과차감 방지)
 import { checkCredit, deductCreditSafe } from '../utils/ai-credit';
+import { currentUserId } from '../utils/request-context';
 import { runInCreditBundle } from '../utils/ai-credit-context';
 import { getCreditCost } from '../utils/ai-credit-calc';
 
@@ -298,7 +299,7 @@ export async function orchestrate(ctx: AgentContext, creditOpts?: { source?: str
   await checkCredit(ctx.companyId, cost);
   return runInCreditBundle(async () => {
     const result = await _orchestrateImpl(ctx);
-    await deductCreditSafe({ companyId: ctx.companyId, cost, source, createdBy: ctx.userId });
+    await deductCreditSafe({ companyId: ctx.companyId, cost, source, createdBy: ctx.userId || currentUserId() || null });
     return result;
   });
 }
@@ -565,7 +566,7 @@ export async function orchestrateWithAI(ctx: AgentContext, creditOpts?: { source
   await checkCredit(ctx.companyId, cost);
   return runInCreditBundle(async () => {
     const result = await _orchestrateWithAIImpl(ctx);
-    await deductCreditSafe({ companyId: ctx.companyId, cost, source, createdBy: ctx.userId });
+    await deductCreditSafe({ companyId: ctx.companyId, cost, source, createdBy: ctx.userId || currentUserId() || null });
     return result;
   });
 }
