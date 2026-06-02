@@ -186,9 +186,11 @@ export default function ResultsModal({ onClose, token, customerDbEnabled, isSubs
   };
 
   // 엑셀 다운로드
-  const handleExport = async (campaignId: string) => {
+  const handleExport = async (campaignId: string, status?: string) => {
     try {
-      const res = await fetch(`/api/v1/results/campaigns/${campaignId}/export`, { headers: { Authorization: `Bearer ${token}` } });
+      const sp = new URLSearchParams();
+      if (status && status !== 'all') sp.set('status', status);
+      const res = await fetch(`/api/v1/results/campaigns/${campaignId}/export?${sp}`, { headers: { Authorization: `Bearer ${token}` } });
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
@@ -891,22 +893,26 @@ export default function ResultsModal({ onClose, token, customerDbEnabled, isSubs
                   검색
                 </button>
                 <div className="w-px h-6 bg-slate-200" />
-                {['all', 'success', 'fail'].map(st => (
-                  <button
-                    key={st}
-                    onClick={() => { setMessageStatus(st); setMessagePage(1); fetchMessages(selectedCampaign.id, 1, { status: st }); }}
-                    className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
-                      messageStatus === st
-                        ? st === 'success' ? 'bg-green-100 text-green-700 border border-green-300' : st === 'fail' ? 'bg-red-100 text-red-700 border border-red-300' : 'bg-slate-700 text-white'
-                        : 'bg-white border border-slate-300 text-slate-600 hover:bg-slate-50'
-                    }`}
-                  >
-                    {st === 'all' ? '전체' : st === 'success' ? '성공' : '실패'}
-                  </button>
-                ))}
+                {(['all', 'success', 'fail', 'substitute'] as const).map(st => {
+                  const active = messageStatus === st;
+                  const label = st === 'all' ? '전체' : st === 'success' ? '성공' : st === 'fail' ? '실패' : '대체';
+                  const activeCls = st === 'success' ? 'bg-green-500 text-white shadow-sm shadow-green-200'
+                    : st === 'fail' ? 'bg-rose-500 text-white shadow-sm shadow-rose-200'
+                    : st === 'substitute' ? 'bg-amber-400 text-[#3C1E1E] shadow-sm shadow-amber-200'
+                    : 'bg-slate-800 text-white shadow-sm';
+                  return (
+                    <button
+                      key={st}
+                      onClick={() => { setMessageStatus(st); setMessagePage(1); fetchMessages(selectedCampaign.id, 1, { status: st }); }}
+                      className={`px-3.5 py-1.5 rounded-full text-sm font-medium transition-all ${active ? activeCls : 'bg-white border border-slate-200 text-slate-500 hover:border-slate-300 hover:text-slate-700'}`}
+                    >
+                      {label}
+                    </button>
+                  );
+                })}
                 <div className="flex-1" />
                 <button
-                  onClick={() => handleExport(selectedCampaign.id)}
+                  onClick={() => handleExport(selectedCampaign.id, messageStatus)}
                   className="px-4 py-1.5 bg-slate-700 text-white rounded-lg text-sm font-medium hover:bg-slate-800 transition-colors"
                 >
                   엑셀 다운로드
@@ -1137,6 +1143,41 @@ export default function ResultsModal({ onClose, token, customerDbEnabled, isSubs
         {/* ★ B6+B7(0417 PDF #6 #7): msgType 우선 타입 판정 + MMS 이미지 표시 */}
         {msgDetailContent !== null && (() => {
           const { content, msgType, mmsImages } = msgDetailContent;
+          // ★ 알림톡(msg_type='K')은 카카오 톤 미리보기 — 문자(LMS/SMS/MMS·카카오실패 대체발송)는 아래 기존 문자창
+          if (msgType === 'K') {
+            return (
+              <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[80] animate-in fade-in duration-150 p-4" onClick={() => setMsgDetailContent(null)}>
+                <div className="bg-white rounded-2xl shadow-2xl w-full max-w-[400px] max-h-[90vh] overflow-hidden animate-in zoom-in-95 duration-200" onClick={(e) => e.stopPropagation()}>
+                  <div className="p-4 border-b bg-amber-50 flex justify-between items-center">
+                    <h3 className="font-bold text-lg">📱 메시지 내용</h3>
+                    <button onClick={() => setMsgDetailContent(null)} className="text-slate-500 hover:text-slate-700 text-xl">✕</button>
+                  </div>
+                  <div className="p-4">
+                    <div className="mx-auto w-[280px]">
+                      <div className="rounded-[1.8rem] p-[3px] bg-gradient-to-b from-[#FEE500] to-[#EAD000] shadow-lg shadow-amber-200">
+                        <div className="bg-[#9BBBD4] rounded-[1.6rem] overflow-hidden flex flex-col" style={{ height: '460px' }}>
+                          <div className="px-4 py-2.5 bg-[#FEE500] flex items-center gap-1.5 shrink-0">
+                            <span className="text-[13px]">💬</span>
+                            <span className="text-[12px] font-bold text-[#3C1E1E]">알림톡</span>
+                          </div>
+                          <div className="flex-1 overflow-y-auto p-3 select-text">
+                            <div className="bg-white rounded-xl overflow-hidden shadow-sm max-w-[92%] border border-black/5">
+                              <div className="bg-[#FEE500] px-3 py-2 text-[12px] font-bold text-[#3C1E1E]">알림톡 도착</div>
+                              <div className="p-3 text-[12px] leading-[1.6] whitespace-pre-wrap break-all text-slate-700 select-text cursor-text">{content}</div>
+                              <div className="border-t border-slate-100 px-3 py-2 text-center text-[11px] text-slate-500 bg-slate-50">채널 추가</div>
+                            </div>
+                          </div>
+                          <div className="px-3 py-2 border-t border-black/10 bg-[#FEE500]/40 text-center shrink-0">
+                            <span className="text-[10px] text-[#3C1E1E]/70">{calculateSmsBytes(content)} / 2000 bytes</span>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            );
+          }
           // #6 타입 판정: 명시 msgType 우선 (MMS/M, LMS/L, SMS/S). 없으면 바이트 기반 추정
           const typeLabel =
             (msgType === 'MMS' || msgType === 'M') ? 'MMS' :

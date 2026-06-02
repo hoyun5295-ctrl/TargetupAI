@@ -141,3 +141,16 @@ backend tsc 0 / frontend tsc 0 / TDD 15/15 / 변경분 자가 grep 0(박-단어�
 
 ### 배포 (Harold)
 DB 작업 없음. 코드만 — backend + frontend `build:safe` + pm2 restart.
+
+---
+
+## 건 1 후속 — 발송내역 모달 개선 (2026-06-02, 배포 완료)
+
+ResultsModal(고객사 Dashboard 발송결과) 3가지:
+- ① 알림톡(`msg_type='K'`) 카카오 톤 미리보기(노란 #FEE500 + 알림톡 카드) / 문자는 기존 보라
+- ② 필터 모던 pill + "대체"(substitute = `msg_type='L' AND k_oriseq>0`, 카카오 분기 skip) — results.ts messages 메인+fallback + ResultsModal 필터
+- ③ 엑셀: handleExport에 현재 필터 전달 + results.ts export status 필터 + alimtalk 분기 보완(기존 export 누락 정정). 유형 컬럼은 건1 적용분.
+- AdminDashboard sms-detail(슈퍼관리자) 통일은 보류 — Harold 결정 대기.
+- backend/frontend tsc 0 + 변경분 grep 0.
+
+세션 전체(건1~3 + 발송내역) 배포 완료(tp-push + build:safe×2 + pm2 restart).

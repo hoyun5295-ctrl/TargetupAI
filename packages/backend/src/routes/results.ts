@@ -591,6 +591,7 @@ router.get('/campaigns/:id/messages', async (req: Request, res: Response) => {
 
       if (status === 'success') smsWhere += ` AND status_code IN (${SUCCESS_CODES.join(',')})`;
       else if (status === 'fail') smsWhere += ` AND status_code NOT IN (${[...SUCCESS_CODES, ...PENDING_CODES].join(',')})`;
+      else if (status === 'substitute') smsWhere += ` AND msg_type = 'L' AND k_oriseq > 0`;
 
       const smsFields = SMS_DETAIL_FIELDS;
 
@@ -603,7 +604,7 @@ router.get('/campaigns/:id/messages', async (req: Request, res: Response) => {
     }
 
     // ----- 카카오 서브쿼리 (단일 테이블) -----
-    if (sendChannel === 'kakao' || sendChannel === 'both') {
+    if ((sendChannel === 'kakao' || sendChannel === 'both') && status !== 'substitute') {
       let kakaoWhere = 'WHERE REQUEST_UID = ?';
       const kakaoBaseParams: any[] = [id];
 
@@ -712,6 +713,7 @@ router.get('/campaigns/:id/messages', async (req: Request, res: Response) => {
       }
       if (status === 'success') smsWhere += ` AND status_code IN (${SUCCESS_CODES.join(',')})`;
       else if (status === 'fail') smsWhere += ` AND status_code NOT IN (${[...SUCCESS_CODES, ...PENDING_CODES].join(',')})`;
+      else if (status === 'substitute') smsWhere += ` AND msg_type = 'L' AND k_oriseq > 0`;
 
       for (const t of msgTables) {
         if (logPattern.test(t)) continue; // LOG 테이블 스킵
@@ -818,16 +820,27 @@ router.get('/campaigns/:id/export', async (req: Request, res: Response) => {
     const subqueries: string[] = [];
     const baseParams: any[] = [];
 
-    if (sendChannel === 'sms' || sendChannel === 'both') {
+    // ★ 발송내역 화면 필터(전체/성공/실패/대체) 반영 — 보이는 그대로 다운로드
+    const exportStatus = (req.query.status as string) || '';
+    let smsStatusWhere = '';
+    if (exportStatus === 'success') smsStatusWhere = ` AND status_code IN (${SUCCESS_CODES.join(',')})`;
+    else if (exportStatus === 'fail') smsStatusWhere = ` AND status_code NOT IN (${[...SUCCESS_CODES, ...PENDING_CODES].join(',')})`;
+    else if (exportStatus === 'substitute') smsStatusWhere = ` AND msg_type = 'L' AND k_oriseq > 0`;
+
+    // ★ 알림톡(alimtalk)도 SMSQ_SEND msg_type='K' 경로라 SMS 분기에 포함 (messages 조회와 동일)
+    if (sendChannel === 'sms' || sendChannel === 'both' || sendChannel === 'alimtalk') {
       const exportTables = await getCompanySmsTablesWithLogs(companyId, userId);
       const smsFields = SMS_EXPORT_FIELDS;
       for (const t of exportTables) {
-        subqueries.push(`(SELECT ${smsFields} FROM ${t} WHERE app_etc1 = ?)`);
+        subqueries.push(`(SELECT ${smsFields} FROM ${t} WHERE app_etc1 = ?${smsStatusWhere})`);
         baseParams.push(id);
       }
     }
 
-    if (sendChannel === 'kakao' || sendChannel === 'both') {
+    if ((sendChannel === 'kakao' || sendChannel === 'both') && exportStatus !== 'substitute') {
+      let kakaoStatusWhere = '';
+      if (exportStatus === 'success') kakaoStatusWhere = ` AND REPORT_CODE = '0000'`;
+      else if (exportStatus === 'fail') kakaoStatusWhere = ` AND REPORT_CODE != '0000' AND STATUS IN ('3','4')`;
       // ★ D124: 엑셀은 전송요청/발송/수신확인 3컬럼 유지 (UI 발송내역만 수신확인 제거)
       const kakaoFields = `PHONE_NUMBER AS dest_no, '-' AS call_back,
         CONCAT('카카오(', COALESCE(CHAT_BUBBLE_TYPE, 'TEXT'), ')') AS msg_type,
@@ -836,7 +849,7 @@ router.get('/campaigns/:id/export', async (req: Request, res: Response) => {
         '카카오' AS mob_company,
         REQUEST_DATE AS sendreq_time, RESPONSE_DATE AS mobsend_time, REPORT_DATE AS repmsg_recvtm,
         'kakao' AS _channel, REPORT_CODE AS report_code_raw, NULL AS k_oriseq`;
-      subqueries.push(`(SELECT ${kakaoFields} FROM IMC_BM_FREE_BIZ_MSG WHERE REQUEST_UID = ?)`);
+      subqueries.push(`(SELECT ${kakaoFields} FROM IMC_BM_FREE_BIZ_MSG WHERE REQUEST_UID = ?${kakaoStatusWhere})`);
       baseParams.push(id);
     }
 
