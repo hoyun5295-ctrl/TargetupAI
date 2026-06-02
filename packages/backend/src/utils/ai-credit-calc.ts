@@ -76,7 +76,7 @@ export function buildIdempotencyKey(source: string, aiCallLogId?: string | null)
 
 /**
  * 작업 source → 크레딧 비용 (가치 기반 재설계 — 2026-06-01, 1크레딧 = 500원).
- *  - 풀분석 300 / 여정 150 / 자동마케팅 50 / 모바일DM 30 / 인앱 15 / 문안·분석 5 / 다듬기·질문·매핑 1.
+ *  - 풀분석 300 / 여정 생성 3·저장 150 / 자동마케팅 저장 200·발송 3 / 모바일DM 30 / 인앱 15 / 문안·분석 5 / 다듬기·질문·매핑 1.
  *  - orchestrate·continuous-operator는 진입점 1회만 차감, 내부 sub 호출은 호출측이 creditCost:0 명시(묶음 회피).
  *  - 미등록 source는 getCreditCost가 0 반환(차감 안 함) — 신규 작업 추가 시 여기 등록 의무.
  *  - frontend constants/credit.ts CREDIT_TASK_COSTS와 1:1 일치 유지 (한쪽만 바꾸지 말 것).
@@ -92,8 +92,10 @@ export const CREDIT_COST_MAP: Record<string, number> = {
   'journey-builder-custom': 3,
   // 여정 설계 저장(활성화) 150 — draft→active 최초 1회만 차감(멱등키=journeyId). paused→active 재개는 0.
   'journey-activate': 150,
-  // 자동 마케팅 (200) — continuous-operator 사이클 = 풀분석 자동(할인). 내부 orchestrate·문안 생성은 묶음 0.
+  // 자동 마케팅 저장(활성화) 200 — operator 최초 생성·활성화 1회(멱등키 operatorId). 여정 activate(150) 대응. 매일 제안서 생성(orchestrate)은 0(묶음).
   'continuous-operator': 200,
+  // 자동 마케팅 발송 문안 3 — 제안서 발송 확정(수동 승인/자동 실행) 시 문안 1건당. 멱등키 proposalId. 스팸 재생성은 묶음 0.
+  'continuous-operator-send': 3,
   // 예측 자동 분석 (3) — 연동 회사(싱크에이전트/SDK) 매일 1회 예측 점수 갱신. 회사+날짜 멱등.
   'predictive-daily': 3,
   // 모바일 DM (30) — parse+copy+tone+improve 여러 호출 1작업

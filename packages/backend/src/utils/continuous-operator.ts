@@ -37,7 +37,8 @@ import { isAutoSendAllowed, recordAdminStopLearning, decideSpamOutcome, buildSpa
 import { autoSpamTestWithRegenerate } from './spam-test-queue';
 import { generateMessages } from '../services/ai';
 // ★ D227+ 종량제: AI 사이클 크레딧 부족 감지 + 담당자 무과금 알림(인증 라인 재사용)
-import { InsufficientCreditError } from './ai-credit';
+import { InsufficientCreditError, checkCredit, deductCreditSafe } from './ai-credit';
+import { getCreditCost } from './ai-credit-calc';
 import { runInCreditBundle } from './ai-credit-context';
 import { getAuthSmsTable, bulkInsertSmsQueue } from './sms-queue';
 
@@ -126,6 +127,9 @@ export async function createOperator(input: CreateOperatorInput): Promise<Contin
   const scheduleTime = input.scheduleTime || '09:00';
   const nextRunAt = computeNextRun(schedule, scheduleTime);
 
+  // ★ 2026-06-02 종량제: 자동마케팅 저장(활성화) = 200 1회. 사전 잔액 확인(선불 부족 차단) → INSERT → 성공 후 차감(멱등키 operatorId).
+  const saveCost = getCreditCost('continuous-operator');
+  await checkCredit(input.companyId, saveCost);
   const result = await query(
     `INSERT INTO continuous_operators (
       id, company_id, created_by, name, objective,
@@ -138,7 +142,15 @@ export async function createOperator(input: CreateOperatorInput): Promise<Contin
     ) RETURNING *`,
     [input.companyId, input.createdBy, input.name, input.objective.trim(), schedule, scheduleTime, nextRunAt]
   );
-  return mapRowToOperator(result.rows[0]);
+  const operator = mapRowToOperator(result.rows[0]);
+  await deductCreditSafe({
+    companyId: input.companyId,
+    cost: saveCost,
+    source: 'continuous-operator',
+    createdBy: input.createdBy,
+    idempotencyKey: `continuous-operator:${operator.id}`,
+  });
+  return operator;
 }
 
 export async function listOperators(companyId: string): Promise<ContinuousOperator[]> {
@@ -368,7 +380,7 @@ export async function generateProposalForOperator(operatorId: string): Promise<O
       objective: operator.objective,
       companyInfo,
       customerStats,
-    }, { source: 'continuous-operator' });  // 자동마케팅 = 풀분석 자동(200, 할인). source로 단가·이력 분리.
+    }, { source: 'continuous-operator', cost: 0 });  // ★ 2026-06-02: 제안서 생성(매일)은 무과금 — 200은 저장 1회, 발송 시 문안 3로 재배치. source는 이력용 유지.
     // ★ D227+ 종량제: 크레딧 충분해 정상 실행 — paused_no_credit였으면 자동 재개
     await query(
       `UPDATE continuous_operators SET status = 'active', updated_at = NOW()
@@ -576,6 +588,18 @@ export async function generateProposalForOperator(operatorId: string): Promise<O
 
   console.log(`[ContinuousOperator] ${operator.name} 제안서 박힘 (${recipientCount}명 / ${costEstimate}원 / ${autoExecuteEligible ? '자동 실행' : 'pending'} / variants ${messages.length}건 / 정책 ${operator.deliveryPolicy})`);
 
+  // ★ 2026-06-02 종량제: 자동 발송 확정(status='auto_executed') 시 문안 3 차감 (멱등키 proposalId — 재호출 0). 스팸·검증 미통과면 status가 auto_executed가 아니라 미차감.
+  const finalProposalStatus = (await query(`SELECT status FROM operator_proposals WHERE id = $1::uuid`, [proposalRes.rows[0].id])).rows[0]?.status;
+  if (finalProposalStatus === 'auto_executed') {
+    await deductCreditSafe({
+      companyId: operator.companyId,
+      cost: getCreditCost('continuous-operator-send'),
+      source: 'continuous-operator-send',
+      createdBy: operator.createdBy,
+      idempotencyKey: `continuous-operator-send:${proposalRes.rows[0].id}`,
+    });
+  }
+
   return mapRowToProposal(proposalRes.rows[0]);
 }
 
@@ -735,6 +759,14 @@ export async function approveProposal(
     [proposalId]
   );
 
+  // ★ 2026-06-02 종량제: 발송 확정(수동 승인) 시 문안 3 차감 (멱등키 proposalId — auto/frontend 재호출 1회).
+  await deductCreditSafe({
+    companyId,
+    cost: getCreditCost('continuous-operator-send'),
+    source: 'continuous-operator-send',
+    createdBy: userId,
+    idempotencyKey: `continuous-operator-send:${proposalId}`,
+  });
   // 실 발송은 routes/ai.ts에서 /direct-send 호출 (분리 정합)
   return { proposal: mapRowToProposal(result.rows[0]), ok: true };
 }

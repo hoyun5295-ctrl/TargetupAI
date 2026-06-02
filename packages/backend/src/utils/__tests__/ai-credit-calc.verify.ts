@@ -77,7 +77,8 @@ ok('풀분석 orchestrate = 300', () => assert.strictEqual(getCreditCost('orches
 ok('여정 생성(돌려보기) journey-ai-generate = 3', () => assert.strictEqual(getCreditCost('journey-ai-generate'), 3));
 ok('여정 생성(돌려보기) journey-builder-custom = 3', () => assert.strictEqual(getCreditCost('journey-builder-custom'), 3));
 ok('여정 저장(활성화) journey-activate = 150', () => assert.strictEqual(getCreditCost('journey-activate'), 150));
-ok('자동마케팅 continuous-operator = 200', () => assert.strictEqual(getCreditCost('continuous-operator'), 200));
+ok('자동마케팅 저장(활성화) continuous-operator = 200', () => assert.strictEqual(getCreditCost('continuous-operator'), 200));
+ok('자동마케팅 발송 문안 continuous-operator-send = 3', () => assert.strictEqual(getCreditCost('continuous-operator-send'), 3));
 ok('예측 predictive-daily = 3', () => assert.strictEqual(getCreditCost('predictive-daily'), 3));
 ok('모바일DM dm-builder = 30', () => assert.strictEqual(getCreditCost('dm-builder'), 30));
 ok('인앱 inapp-ai-generator = 15', () => assert.strictEqual(getCreditCost('inapp-ai-generator'), 15));

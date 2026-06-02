@@ -1793,6 +1793,9 @@ router.post('/operator/continuous', async (req: Request, res: Response) => {
     });
     return res.json({ success: true, operator });
   } catch (err: any) {
+    if (err instanceof InsufficientCreditError) {
+      return res.status(402).json({ success: false, error: '자동 마케팅 시작에 필요한 크레딧이 부족합니다. 크레딧을 충전해 주세요.', code: 'INSUFFICIENT_CREDIT' });
+    }
     console.error('[Operator continuous POST] 오류:', err);
     return res.status(500).json({ success: false, error: err?.message || 'Continuous Operator 신설 실패' });
   }

@@ -15,7 +15,7 @@ export interface CreditTaskCost {
 
 /**
  * 작업당 AI 크레딧 단가 — 백엔드 CREDIT_COST_MAP 기준 (가치 기반 재설계, 1크레딧 = 500원).
- *  풀분석 300 · 여정 150 · 자동마케팅 50 · 모바일DM 30 · 인앱 15 · 문안·분석 5 · 다듬기·질문 1.
+ *  풀분석 300 · 여정 생성 3·설계 150 · 자동마케팅 저장 200·발송 3 · 모바일DM 30 · 인앱 15 · 문안·분석 5 · 다듬기·질문 1.
  *  스팸필터 테스트는 비대상(0, 미표기).
  */
 export const CREDIT_TASK_COSTS: CreditTaskCost[] = [
@@ -74,7 +74,7 @@ export const CREDIT_SOURCE_LABELS: Record<string, string> = {
   'ai-operator-propose': '문안·분석',
   'journey-ai-generate': '여정 생성', 'journey-builder-custom': '여정 생성',
   'journey-activate': '여정 설계',
-  'continuous-operator': '자동 마케팅',
+  'continuous-operator': '자동 마케팅', 'continuous-operator-send': '자동 마케팅 발송',
   'predictive-daily': '예측 분석',
   'dm-builder': '모바일 DM',
   'inapp-ai-generator': '인앱 생성', 'inapp-quick-action': '인앱 생성',
