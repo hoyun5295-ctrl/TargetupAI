@@ -233,15 +233,48 @@ export async function getCreditTransactions(
   const offset = (Math.max(1, page) - 1) * pageSize;
   const [list, cnt] = await Promise.all([
     pool.query(
-      `SELECT id, type, amount, bucket, source, balance_purchased_after, balance_base_after,
-              created_by, created_at, reason
-         FROM ai_credit_transactions
-        WHERE company_id = $1::uuid
-        ORDER BY created_at DESC
+      `SELECT t.id, t.type, t.amount, t.bucket, t.source, t.balance_purchased_after, t.balance_base_after,
+              t.created_by, t.created_at, t.reason,
+              COALESCE(u.name, u.login_id) AS created_by_name
+         FROM ai_credit_transactions t
+         LEFT JOIN users u ON u.id = t.created_by
+        WHERE t.company_id = $1::uuid
+        ORDER BY t.created_at DESC
         LIMIT $2 OFFSET $3`,
       [companyId, pageSize, offset]
     ),
     pool.query(`SELECT COUNT(*) AS c FROM ai_credit_transactions WHERE company_id = $1::uuid`, [companyId]),
+  ]);
+  return { rows: list.rows, total: Number(cnt.rows[0].c) || 0 };
+}
+
+/** 전체 회사 크레딧 거래 (슈퍼관리자 — 회사명·사용자명 포함, 회사/타입 필터 + 페이지네이션). */
+export async function getAllCreditTransactions(
+  opts: { companyId?: string; type?: string; page?: number; pageSize?: number } = {},
+): Promise<{ rows: any[]; total: number }> {
+  const page = Math.max(1, opts.page || 1);
+  const pageSize = Math.min(100, Math.max(1, opts.pageSize || 30));
+  const offset = (page - 1) * pageSize;
+  const conds: string[] = [];
+  const params: any[] = [];
+  let i = 1;
+  if (opts.companyId) { conds.push(`t.company_id = $${i++}::uuid`); params.push(opts.companyId); }
+  if (opts.type) { conds.push(`t.type = $${i++}`); params.push(opts.type); }
+  const whereSql = conds.length ? `WHERE ${conds.join(' AND ')}` : '';
+  const [list, cnt] = await Promise.all([
+    pool.query(
+      `SELECT t.id, t.company_id, t.type, t.amount, t.bucket, t.source,
+              t.balance_base_after, t.balance_purchased_after, t.created_at, t.reason,
+              c.company_name, COALESCE(u.name, u.login_id) AS created_by_name
+         FROM ai_credit_transactions t
+         LEFT JOIN companies c ON c.id = t.company_id
+         LEFT JOIN users u ON u.id = t.created_by
+         ${whereSql}
+        ORDER BY t.created_at DESC
+        LIMIT $${i++} OFFSET $${i++}`,
+      [...params, pageSize, offset],
+    ),
+    pool.query(`SELECT COUNT(*) AS c FROM ai_credit_transactions t ${whereSql}`, params),
   ]);
   return { rows: list.rows, total: Number(cnt.rows[0].c) || 0 };
 }

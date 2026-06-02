@@ -9,6 +9,7 @@ import MessageDetailModal from '../components/MessageDetailModal'; // ★ D144 �
 import SearchableSelect from '../components/SearchableSelect'; // ★ D144 P11+P13: 검색 가능 select (사용자 추가 소속회사 + 발송통계 회사 필터)
 import LoginBlocksManagement from '../components/admin/LoginBlocksManagement'; // ★ D145 P0 (2026-05-07): 로그인 차단 관리 (B안: IP+loginId 쌍)
 import { COMPANY_NAME_EN, COMPANY_EMAIL } from '../constants/company';
+import { creditTxLabel } from '../constants/credit'; // 크레딧 사용 이력 작업명 라벨
 
 interface Company {
   id: string;
@@ -64,7 +65,7 @@ export default function AdminDashboard() {
   const navigate = useNavigate();
   const { user, logout } = useAuthStore();
 
-  const [activeTab, setActiveTab] = useState<'companies' | 'users' | 'scheduled' | 'callbacks' | 'plans' | 'requests' | 'deposits' | 'allCampaigns' | 'stats' | 'billing' | 'syncAgents' | 'auditLogs' | 'lineGroups' | 'templates' | 'loginBlocks'>('companies');
+  const [activeTab, setActiveTab] = useState<'companies' | 'users' | 'scheduled' | 'callbacks' | 'plans' | 'requests' | 'deposits' | 'credits' | 'allCampaigns' | 'stats' | 'billing' | 'syncAgents' | 'auditLogs' | 'lineGroups' | 'templates' | 'loginBlocks'>('companies');
   const [openMenu, setOpenMenu] = useState<string | null>(null);
   const [companies, setCompanies] = useState<Company[]>([]);
   const [plans, setPlans] = useState<Plan[]>([]);
@@ -282,6 +283,12 @@ const [messageDetailContent, setMessageDetailContent] = useState<{ name: string;
   const [depositTarget, setDepositTarget] = useState<any>(null);
   const [depositAdminNote, setDepositAdminNote] = useState('');
   const [creditRequests, setCreditRequests] = useState<any[]>([]); // AI 크레딧 충전 요청 (후불 승인 대기)
+  // 크레딧 사용 이력 (전체 회사 — 크레딧 관리 탭)
+  const [creditTxAll, setCreditTxAll] = useState<any[]>([]);
+  const [creditTxPage, setCreditTxPage] = useState(1);
+  const [creditTxTotalPages, setCreditTxTotalPages] = useState(1);
+  const [creditTxCompany, setCreditTxCompany] = useState('');
+  const [creditTxLoading, setCreditTxLoading] = useState(false);
 
 // ===== 정산 관리 =====
 const [billingCompanyId, setBillingCompanyId] = useState('');
@@ -422,7 +429,8 @@ const [emailSending, setEmailSending] = useState(false);
 useEffect(() => { if (activeTab === 'billing') { loadBillings(); loadInvoices(); } }, [activeTab]);
 useEffect(() => { if (activeTab === 'billing') loadBillings(); }, [filterYear]);
 useEffect(() => { if (activeTab === 'deposits') loadChargeManagement(1); }, [activeTab, chargeTxCompanyFilter, chargeTxTypeFilter, chargeTxMethodFilter, chargeTxStartDate, chargeTxEndDate]);
-useEffect(() => { if (activeTab === 'deposits') loadCreditRequests(); }, [activeTab]);
+useEffect(() => { if (activeTab === 'deposits' || activeTab === 'credits') loadCreditRequests(); if (activeTab === 'credits') loadAllCreditTx(1); }, [activeTab]);
+useEffect(() => { loadCreditRequests(); }, []);  // 크레딧 관리 알람 badge 상시 표시용 mount 로드
 useEffect(() => { if (activeTab === 'stats') loadSendStats(1); }, [activeTab]);
 useEffect(() => { if (activeTab === 'syncAgents') loadSyncAgents(); }, [activeTab]);
 useEffect(() => { if (activeTab === 'auditLogs') loadAuditLogs(1); }, [activeTab]);
@@ -1395,6 +1403,19 @@ const handleSendBillingEmail = async () => {
   };
 
   // ── AI 크레딧 충전 요청 (후불 — 슈퍼관리자 승인) ───────────────
+  const loadAllCreditTx = async (page = 1, company = creditTxCompany) => {
+    setCreditTxLoading(true);
+    try {
+      const token = localStorage.getItem('token');
+      const qs = new URLSearchParams({ page: String(page) });
+      if (company.trim()) qs.set('company', company.trim());
+      const res = await fetch(`/api/admin/credit-transactions-all?${qs.toString()}`, { headers: { Authorization: `Bearer ${token}` } });
+      const d = await res.json();
+      if (res.ok) { setCreditTxAll(d.transactions || []); setCreditTxPage(d.page || 1); setCreditTxTotalPages(d.totalPages || 1); }
+    } catch (e) { console.error('크레딧 사용 이력 로드 실패:', e); }
+    finally { setCreditTxLoading(false); }
+  };
+
   const loadCreditRequests = async () => {
     try {
       const token = localStorage.getItem('token');
@@ -2464,11 +2485,12 @@ const handleApproveRequest = async (id: string) => {
               },
               {
                 label: '요금/정산', color: 'amber',
-                tabs: ['plans', 'requests', 'deposits', 'billing'] as const,
+                tabs: ['plans', 'requests', 'deposits', 'credits', 'billing'] as const,
                 items: [
                   { key: 'plans', label: '요금제 관리' },
                   { key: 'requests', label: '플랜 신청', badge: planRequests.filter(r => r.status === 'pending').length },
                   { key: 'deposits', label: '충전 관리', badge: pendingDeposits.length },
+                  { key: 'credits', label: '크레딧 관리', badge: creditRequests.length },
                   { key: 'billing', label: '정산 관리' },
                 ],
               },
@@ -3667,13 +3689,15 @@ const handleApproveRequest = async (id: string) => {
           </div>
         )}
 
-        {/* 충전 관리 탭 (통합) */}
-        {activeTab === 'deposits' && (
+        {/* 크레딧 관리 탭 — AI 크레딧 충전 요청(후불 승인) + 전체 회사 사용 이력 */}
+        {activeTab === 'credits' && (
           <div className="space-y-4">
-            {/* AI 크레딧 충전 요청 (후불 — 승인 시 구매분 지급 + 월말 청구) */}
-            {creditRequests.length > 0 && (
-              <div className="bg-violet-50 border border-violet-200 rounded-lg p-4">
-                <h3 className="font-semibold text-violet-800 mb-3">AI 크레딧 충전 요청 {creditRequests.length}건 (후불)</h3>
+            {/* 크레딧 충전/관리 — 후불 충전 요청 승인·거절 */}
+            <div className="bg-violet-50 border border-violet-200 rounded-lg p-4">
+              <h3 className="font-semibold text-violet-800 mb-3">크레딧 충전 요청 {creditRequests.length}건 (후불)</h3>
+              {creditRequests.length === 0 ? (
+                <p className="text-sm text-violet-600/80">대기 중인 크레딧 충전 요청이 없습니다.</p>
+              ) : (
                 <div className="space-y-2">
                   {creditRequests.map((cr) => (
                     <div key={cr.id} className="flex items-center justify-between bg-white rounded-lg px-4 py-3 border border-violet-100 flex-wrap gap-2">
@@ -3691,9 +3715,72 @@ const handleApproveRequest = async (id: string) => {
                     </div>
                   ))}
                 </div>
-              </div>
-            )}
+              )}
+            </div>
 
+            {/* 크레딧 사용 이력 — 전체 회사 */}
+            <div className="bg-white rounded-lg shadow">
+              <div className="px-6 py-4 border-b flex flex-wrap justify-between items-center gap-3">
+                <h2 className="text-lg font-semibold">크레딧 사용 이력</h2>
+                <div className="flex items-center gap-2">
+                  <input
+                    value={creditTxCompany}
+                    onChange={(e) => setCreditTxCompany(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === 'Enter') loadAllCreditTx(1); }}
+                    placeholder="회사 ID로 필터 (선택 · 비우면 전체)"
+                    className="px-3 py-1.5 border border-gray-200 rounded-lg text-sm w-64"
+                  />
+                  <button onClick={() => loadAllCreditTx(1)} className="px-4 py-1.5 bg-gray-100 hover:bg-gray-200 rounded-lg text-sm font-medium transition-colors">조회</button>
+                </div>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="text-left text-gray-500 border-b">
+                      <th className="px-4 py-2 font-medium">회사</th>
+                      <th className="px-4 py-2 font-medium">작업</th>
+                      <th className="px-4 py-2 font-medium">사용자</th>
+                      <th className="px-4 py-2 font-medium text-right">변동</th>
+                      <th className="px-4 py-2 font-medium text-right">잔여</th>
+                      <th className="px-4 py-2 font-medium text-right">일시</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {creditTxLoading ? (
+                      <tr><td colSpan={6} className="px-4 py-8 text-center text-gray-400">불러오는 중...</td></tr>
+                    ) : creditTxAll.length === 0 ? (
+                      <tr><td colSpan={6} className="px-4 py-8 text-center text-gray-400">사용 이력이 없습니다.</td></tr>
+                    ) : (
+                      creditTxAll.map((tx) => {
+                        const plus = tx.type === 'grant' || tx.type === 'purchase' || tx.type === 'postpaid_grant';
+                        const after = Number(tx.balance_base_after || 0) + Number(tx.balance_purchased_after || 0);
+                        return (
+                          <tr key={tx.id} className="border-b last:border-0 hover:bg-gray-50">
+                            <td className="px-4 py-2 text-gray-900">{tx.company_name || '-'}</td>
+                            <td className="px-4 py-2 text-gray-700">{creditTxLabel(tx.type, tx.source)}</td>
+                            <td className="px-4 py-2 text-gray-600">{tx.created_by_name || '자동'}</td>
+                            <td className={`px-4 py-2 text-right font-semibold ${plus ? 'text-emerald-600' : 'text-rose-600'}`}>{plus ? '+' : '-'}{Number(tx.amount).toLocaleString()}</td>
+                            <td className="px-4 py-2 text-right text-gray-500">{after.toLocaleString()}</td>
+                            <td className="px-4 py-2 text-right text-gray-400 whitespace-nowrap">{formatDateTime(tx.created_at)}</td>
+                          </tr>
+                        );
+                      })
+                    )}
+                  </tbody>
+                </table>
+              </div>
+              <div className="flex items-center justify-center gap-2 px-6 py-3 border-t">
+                <button disabled={creditTxPage <= 1} onClick={() => loadAllCreditTx(creditTxPage - 1)} className="px-3 py-1 rounded border border-gray-200 text-sm disabled:opacity-30">이전</button>
+                <span className="text-sm text-gray-500">{creditTxPage} / {creditTxTotalPages}</span>
+                <button disabled={creditTxPage >= creditTxTotalPages} onClick={() => loadAllCreditTx(creditTxPage + 1)} className="px-3 py-1 rounded border border-gray-200 text-sm disabled:opacity-30">다음</button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* 충전 관리 탭 (통합) */}
+        {activeTab === 'deposits' && (
+          <div className="space-y-4">
             {/* 대기 건 알림 */}
             {pendingDeposits.length > 0 && (
               <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">

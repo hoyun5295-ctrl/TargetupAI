@@ -2356,6 +2356,21 @@ router.put('/credit-requests/:id/reject', authenticate, requireSuperAdmin, async
   }
 });
 
+// GET /credit-transactions-all — 전체 회사 AI 크레딧 사용 이력 (슈퍼관리자 · 회사/타입 필터 + 페이지네이션)
+router.get('/credit-transactions-all', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
+  try {
+    const page = Number(req.query.page) || 1;
+    const companyId = req.query.company ? String(req.query.company) : undefined;
+    const type = req.query.type ? String(req.query.type) : undefined;
+    const { getAllCreditTransactions } = await import('../utils/ai-credit');
+    const r = await getAllCreditTransactions({ companyId, type, page, pageSize: 30 });
+    res.json({ transactions: r.rows, total: r.total, page, totalPages: Math.max(1, Math.ceil(r.total / 30)) });
+  } catch (err: any) {
+    console.error('전체 크레딧 사용 이력 조회 실패:', err);
+    res.status(500).json({ error: '크레딧 사용 이력 조회 실패' });
+  }
+});
+
 // ===== 충전 요청 관리 API =====
 
 // 충전 요청 목록 조회 (필터 + 페이지네이션)

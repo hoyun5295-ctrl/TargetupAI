@@ -17,6 +17,7 @@ interface CreditTx {
   balance_purchased_after?: number;
   reason?: string | null;
   created_at: string;
+  created_by_name?: string | null;  // 사용자명(시스템 자동 차감은 null → '자동' 표기)
 }
 
 interface CreditSummary {
@@ -133,7 +134,7 @@ export default function CreditHistoryModal({ onClose, onGoPricing, creditInfo }:
                   <div className={`flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg ${tone}`}><Icon className="h-4 w-4" /></div>
                   <div className="min-w-0 flex-1">
                     <div className="truncate text-sm font-medium text-gray-800">{creditTxLabel(tx.type, tx.source)}</div>
-                    <div className="truncate text-[11px] text-gray-400">{fmtDate(tx.created_at)}{tx.reason ? ` · ${tx.reason}` : ''}</div>
+                    <div className="truncate text-[11px] text-gray-400">{fmtDate(tx.created_at)} · {tx.created_by_name || '자동'}{tx.reason ? ` · ${tx.reason}` : ''}</div>
                   </div>
                   <div className="flex-shrink-0 text-right">
                     <div className={`text-sm font-bold tabular-nums ${amtTone}`}>{reset ? '' : plus ? '+' : '-'}{fmt(tx.amount)}</div>
