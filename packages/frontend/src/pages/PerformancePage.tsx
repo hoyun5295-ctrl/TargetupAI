@@ -30,8 +30,9 @@ import {
 import {
   ArrowLeft, BarChart3, Brain, Clock, Loader2, RefreshCw, Sparkles, Target, TrendingUp, Users,
   AlertTriangle, MousePointerClick, Database, Activity, ChevronRight, ChevronLeft,
-  Info, Search, Filter, ArrowUpDown,
+  Info, Search, Filter, ArrowUpDown, FileDown,
 } from 'lucide-react';
+import { useToast } from '../components/ToastProvider';
 
 type PerformancePeriod = '7d' | '14d' | '30d' | '90d';
 
@@ -237,6 +238,8 @@ export default function PerformancePage() {
   const [benchmark, setBenchmark] = useState<BenchmarkResult | null>(null);
   const [attribution, setAttribution] = useState<AttributionResult | null>(null);
   const [loading, setLoading] = useState(true);
+  const [pdfLoading, setPdfLoading] = useState(false);
+  const toast = useToast();
   const [error, setError] = useState<string | null>(null);
   const [detailsExpanded, setDetailsExpanded] = useState(false);
 
@@ -270,6 +273,43 @@ export default function PerformancePage() {
   } | null>(null);
 
   const token = () => localStorage.getItem('token');
+
+  // 기간 성과 PDF 보고서 — 풀분석 차감(같은 날 같은 기간 재다운로드는 backend 멱등으로 무료)
+  const downloadPdf = async () => {
+    if (pdfLoading) return;
+    setPdfLoading(true);
+    try {
+      const res = await fetch('/api/ai/operator/performance/report-pdf', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token()}` },
+        body: JSON.stringify({ period }),
+      });
+      if (res.status === 402) {
+        const d = await res.json().catch(() => ({}));
+        toast.error(d?.error || 'AI 크레딧이 부족합니다.');
+        setPdfLoading(false);
+        return;
+      }
+      if (!res.ok) {
+        toast.error('PDF 보고서 생성에 실패했습니다.');
+        setPdfLoading(false);
+        return;
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `성과리포트_${period}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      toast.success('PDF 보고서를 내려받았습니다.');
+    } catch (e: any) {
+      toast.error(e?.message || 'PDF 다운로드 중 오류가 발생했습니다.');
+    }
+    setPdfLoading(false);
+  };
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -476,6 +516,15 @@ export default function PerformancePage() {
                 {o.label}
               </button>
             ))}
+            <button
+              onClick={downloadPdf}
+              disabled={pdfLoading || loading || !snapshot || snapshot.totalCampaigns.current === 0}
+              className="flex items-center gap-1.5 px-2.5 py-1 rounded text-[11px] font-medium bg-gradient-to-r from-violet-500/80 to-fuchsia-500/80 hover:from-violet-500 hover:to-fuchsia-500 text-white disabled:opacity-40 disabled:cursor-not-allowed transition-colors ml-1"
+              title="기간 성과 PDF 보고서 — 풀분석 크레딧 차감(같은 날 같은 기간 재다운로드는 무료)"
+            >
+              {pdfLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <FileDown className="w-3.5 h-3.5" />}
+              PDF 보고서
+            </button>
             <button
               onClick={load}
               disabled={loading}

@@ -20,6 +20,20 @@ export function kstMonthTag(d: Date): string {
   return `${y}${m}`;
 }
 
+/** KST 기준 'YYYYMMDD' 태그. 일 단위 idempotency key 용도(예: 예측 매일 1회 차감). */
+export function kstDateTag(d: Date): string {
+  const kst = new Date(d.getTime() + 9 * 60 * 60 * 1000);
+  const y = kst.getUTCFullYear();
+  const m = String(kst.getUTCMonth() + 1).padStart(2, '0');
+  const day = String(kst.getUTCDate()).padStart(2, '0');
+  return `${y}${m}${day}`;
+}
+
+/** KST 기준 시(0~23). cron worker 시간대 판별용. */
+export function kstHour(d: Date): number {
+  return new Date(d.getTime() + 9 * 60 * 60 * 1000).getUTCHours();
+}
+
 /**
  * 월 리셋 필요 판단.
  *  - resetAt 없음(최초 가입/미설정) → true
@@ -68,14 +82,20 @@ export function buildIdempotencyKey(source: string, aiCallLogId?: string | null)
  *  - frontend constants/credit.ts CREDIT_TASK_COSTS와 1:1 일치 유지 (한쪽만 바꾸지 말 것).
  */
 export const CREDIT_COST_MAP: Record<string, number> = {
-  // 풀분석 (300) — 타겟+문안+검수+성과 종합 (orchestrate 진입점 1회, sub는 묶음 0)
+  // 풀분석 (300) — 기간 성과 리포트(매출·ROI·채널 종합 분석 + PDF). orchestrate source가 그 자리.
   'orchestrate': 300,
   'orchestrateWithAI': 300,
-  // 여정 설계 (150) — 다단계 캠페인 자동화 설계
-  'journey-ai-generate': 150,
-  'journey-builder-custom': 150,
+  // AI Operator 한줄 입력 (타겟추출+문안 일회성 제안) = 문안·분석 5. 풀분석과 분리.
+  'ai-operator-propose': 5,
+  // 여정 생성(돌려보기) 3 — 자연어→여정 패키지 생성. 호출(돌려보기)마다 3. 저장은 'journey-activate' 150 별도.
+  'journey-ai-generate': 3,
+  'journey-builder-custom': 3,
+  // 여정 설계 저장(활성화) 150 — draft→active 최초 1회만 차감(멱등키=journeyId). paused→active 재개는 0.
+  'journey-activate': 150,
   // 자동 마케팅 (200) — continuous-operator 사이클 = 풀분석 자동(할인). 내부 orchestrate·문안 생성은 묶음 0.
   'continuous-operator': 200,
+  // 예측 자동 분석 (3) — 연동 회사(싱크에이전트/SDK) 매일 1회 예측 점수 갱신. 회사+날짜 멱등.
+  'predictive-daily': 3,
   // 모바일 DM (30) — parse+copy+tone+improve 여러 호출 1작업
   'dm-builder': 30,
   // 인앱 생성 (15) — inapp·CDP 단일 콘텐츠

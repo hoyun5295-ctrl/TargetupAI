@@ -71,8 +71,11 @@ export const COMMON_SERVICE_LINE = '스타터부터 AI 전 기능 · 전 채널 
  */
 export const CREDIT_SOURCE_LABELS: Record<string, string> = {
   orchestrate: '풀분석', orchestrateWithAI: '풀분석',
-  'journey-ai-generate': '여정 설계', 'journey-builder-custom': '여정 설계',
+  'ai-operator-propose': '문안·분석',
+  'journey-ai-generate': '여정 생성', 'journey-builder-custom': '여정 생성',
+  'journey-activate': '여정 설계',
   'continuous-operator': '자동 마케팅',
+  'predictive-daily': '예측 분석',
   'dm-builder': '모바일 DM',
   'inapp-ai-generator': '인앱 생성', 'inapp-quick-action': '인앱 생성',
   'generate-messages': '문구 생성', 'generate-custom-messages': '문구 생성',

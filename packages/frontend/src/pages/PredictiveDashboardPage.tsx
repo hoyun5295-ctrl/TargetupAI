@@ -201,6 +201,39 @@ export default function PredictiveDashboardPage() {
   // ★ D211+ Predictive UX 간소화 (2026-05-23 Harold 명시): 자세히 분석 토글 (default = 숨김 / 본질 영역만 default 노출)
   const [detailsExpanded, setDetailsExpanded] = useState(false);
 
+  // 매일 자동 예측 ON/OFF (연동 회사 매일 1회 갱신·3크레딧 / OFF면 갱신·차감 0)
+  const [predictiveEnabled, setPredictiveEnabled] = useState<boolean | null>(null);
+  const [settingsSaving, setSettingsSaving] = useState(false);
+  const [settingsMigrationPending, setSettingsMigrationPending] = useState(false);
+
+  useEffect(() => {
+    void (async () => {
+      try {
+        const res = await fetch('/api/ai/operator/predictive/settings', { headers: { Authorization: `Bearer ${token()}` } });
+        if (res.status === 503) { setSettingsMigrationPending(true); return; }
+        const d = await res.json();
+        if (d.success) setPredictiveEnabled(!!d.predictiveEnabled);
+      } catch { /* 설정 조회 실패 — 토글 숨김 */ }
+    })();
+  }, []);
+
+  const togglePredictive = async () => {
+    if (settingsSaving || predictiveEnabled === null) return;
+    const next = !predictiveEnabled;
+    setSettingsSaving(true);
+    try {
+      const res = await fetch('/api/ai/operator/predictive/settings', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token()}` },
+        body: JSON.stringify({ enabled: next }),
+      });
+      if (res.status === 503) { setSettingsMigrationPending(true); setSettingsSaving(false); return; }
+      const d = await res.json();
+      if (d.success) setPredictiveEnabled(!!d.predictiveEnabled);
+    } catch { /* 변경 실패 — 상태 유지 */ }
+    setSettingsSaving(false);
+  };
+
   const token = () => localStorage.getItem('token');
 
   // 첫 mount = distribution + summary 동시 로드
@@ -382,6 +415,23 @@ export default function PredictiveDashboardPage() {
             </h1>
             <p className="text-sm text-white/50 mt-0.5">사용자별 미래 행동 예측 — 클릭 가능성 / 이탈 위험 / 구매 가능성</p>
           </div>
+          {/* 매일 자동 예측 ON/OFF — 연동 회사 매일 1회 갱신(3크레딧). OFF면 갱신·차감 0 */}
+          {!settingsMigrationPending && predictiveEnabled !== null && (
+            <div className="flex flex-col items-end gap-1 shrink-0">
+              <button onClick={togglePredictive} disabled={settingsSaving} className="flex items-center gap-2 disabled:opacity-50" title="매일 자동 예측 ON/OFF">
+                <span className="text-xs text-white/70 hidden sm:inline">매일 자동 예측</span>
+                <span className={`relative w-10 h-5 rounded-full transition-colors ${predictiveEnabled ? 'bg-violet-500' : 'bg-white/20'}`}>
+                  <span className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white transition-transform ${predictiveEnabled ? 'translate-x-5' : ''}`} />
+                </span>
+              </button>
+              <span className="text-[10px] text-white/40">{predictiveEnabled ? '매일 자동 갱신 · 3크레딧' : '꺼짐 · 갱신 0'}</span>
+            </div>
+          )}
+          {settingsMigrationPending && (
+            <div className="shrink-0 text-[11px] text-amber-300/90 bg-amber-500/10 border border-amber-400/30 rounded-lg px-2.5 py-1.5 flex items-center gap-1">
+              <Info className="w-3 h-3" /> DB 준비 중
+            </div>
+          )}
         </div>
 
         {/* ★ D210+ Phase 3: cold start 신뢰도 안내 카드 (isAllColdStart 시 amber) */}

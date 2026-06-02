@@ -15,6 +15,9 @@ import { getCompanyCosts } from '../config/defaults';
 import { getMonthlyUsage, getDailyUsage, getModelBreakdown } from '../utils/ai-rate-limit';
 import { getCacheStats } from '../utils/ai-cache';
 import { orchestrate, orchestrateWithAI } from '../services/ai-orchestrator';
+// ★ 크레딧 종량제 — 여정 저장(활성화) 등 endpoint 직접 차감용 (callAIWithFallback 경유 외)
+import { checkCredit, deductCreditSafe, InsufficientCreditError } from '../utils/ai-credit';
+import { getCreditCost, kstDateTag } from '../utils/ai-credit-calc';
 // ★ D174 (2026-05-19): Step 1 Next Action Advisor — Opus 4.7
 import { buildPerformanceSnapshot, recommendNextAction, buildPerformanceSnapshotV2, type PerformancePeriod } from '../utils/next-action-advisor';
 import { explainPerformance } from '../utils/performance-explainer';
@@ -1165,13 +1168,14 @@ router.post('/operator/propose', async (req: Request, res: Response) => {
     const envUseAI = process.env.AI_OPERATOR_USE_AI_DECISION === 'true';
     const useAIDecision = companyUseAI || envUseAI;
     const orchestratorFn = useAIDecision ? orchestrateWithAI : orchestrate;
+    // 한줄 입력(propose) = 문안·분석 5. 풀분석(300)은 성과 리포트 전용으로 분리.
     const result = await orchestratorFn({
       companyId,
       userId: userId || null,
       objective: objective.trim(),
       companyInfo,
       customerStats,
-    });
+    }, { source: 'ai-operator-propose', cost: 5 });
 
     return res.json({ success: true, ...result });
   } catch (err: any) {
@@ -1341,6 +1345,167 @@ router.get('/operator/performance/snapshot-v2', async (req: Request, res: Respon
   } catch (err: any) {
     console.error('[Performance] snapshot-v2 오류:', err);
     return res.status(500).json({ success: false, error: err?.message || '성과 매트릭스 조회 실패' });
+  }
+});
+
+// POST /api/ai/operator/performance/report-pdf — 기간 성과 종합 PDF 보고서 (풀분석 300 · 회사+기간+날짜 멱등)
+//   화면 조회(snapshot-v2)는 무료. 보고서 생성(PDF 다운로드)에만 풀분석 차감. 같은 날 같은 기간 재다운로드는 멱등(무료).
+router.post('/operator/performance/report-pdf', async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    const userId = req.user?.userId;
+    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+    const planCtx = await loadPlanContext(companyId);
+    if (!planCtx) return res.status(404).json({ success: false, error: '회사 정보를 찾을 수 없습니다.' });
+    if (!isAiOperatorAllowed(planCtx, req.user)) {
+      return res.status(403).json({ success: false, error: '본 기능은 엔터프라이즈 베타 운영 중입니다.', code: 'BETA_GATE' });
+    }
+
+    const periodParam = String(req.body?.period || '30d');
+    const period: PerformancePeriod = (['7d', '14d', '30d', '90d'] as const).includes(periodParam as any)
+      ? (periodParam as PerformancePeriod)
+      : '30d';
+
+    // 풀분석 300 — 사전 차단(부족 시 402, PDF 스트림 시작 전)
+    const cost = getCreditCost('orchestrate');  // 300
+    await checkCredit(companyId, cost);
+
+    const snapshot = await buildPerformanceSnapshotV2(companyId, period);
+    const companyRow = await query(`SELECT company_name FROM companies WHERE id = $1::uuid`, [companyId]);
+    const companyName = companyRow.rows[0]?.company_name || '';
+
+    // 차감 — 회사+기간+날짜 멱등(같은 날 같은 기간 재다운로드는 무료)
+    const todayKst = kstDateTag(new Date());
+    await deductCreditSafe({
+      companyId, cost, source: 'orchestrate', createdBy: userId,
+      idempotencyKey: `perf-report:${companyId}:${period}:${todayKst}`,
+    });
+
+    // PDF 생성 (billing.ts 패턴 — malgun.ttf 한글 폰트, res 직접 스트림)
+    const PDFDocument = require('pdfkit');
+    const fs = require('fs');
+    const path = require('path');
+    const fontPath = path.join(__dirname, '../../fonts/malgun.ttf');
+    const fontBoldPath = path.join(__dirname, '../../fonts/malgunbd.ttf');
+    const hasFont = fs.existsSync(fontPath);
+    const doc = new PDFDocument({ size: 'A4', margin: 50 });
+
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="performance_${period}_${todayKst}.pdf"`);
+    doc.pipe(res);
+
+    const setFont = (bold = false) => { if (hasFont) doc.font(bold ? fontBoldPath : fontPath); };
+    const primary = '#7c3aed';
+    const dark = '#1f2937';
+    const gray = '#6b7280';
+    const won = (v: any) => `${Math.round(Number(v) || 0).toLocaleString()}원`;
+    const pctStr = (v: any) => `${((Number(v) || 0) * 100).toFixed(1)}%`;
+    const dpct = (m: any) => { const d = Number(m?.diffPct) || 0; return `${d >= 0 ? '+' : ''}${d.toFixed(1)}%`; };
+    const periodLabel: Record<string, string> = { '7d': '최근 7일', '14d': '최근 14일', '30d': '최근 30일', '90d': '최근 90일' };
+    const today = new Date().toISOString().slice(0, 10);
+
+    // 헤더
+    setFont(true);
+    doc.fontSize(22).fillColor(primary).text('성과 리포트', 50, 50);
+    setFont(false);
+    doc.fontSize(9).fillColor(gray).text('PERFORMANCE REPORT', 50, 78);
+    const rx = 350;
+    doc.fontSize(9).fillColor(gray).text('회사:', rx, 50, { continued: true });
+    setFont(true); doc.fillColor(dark).text(`  ${companyName || '-'}`);
+    setFont(false); doc.fontSize(9).fillColor(gray).text('기간:', rx, 65, { continued: true });
+    doc.fillColor(dark).text(`  ${periodLabel[period] || period}`);
+    doc.fontSize(9).fillColor(gray).text('발행일:', rx, 80, { continued: true });
+    doc.fillColor(dark).text(`  ${today}`);
+    doc.moveTo(50, 102).lineTo(545, 102).strokeColor('#e5e7eb').stroke();
+
+    // 요약 6 metric (2열 × 3행)
+    let y = 116;
+    setFont(true); doc.fontSize(13).fillColor(primary).text('요약', 50, y); y += 20;
+    const metrics: Array<[string, string, any]> = [
+      ['발송 캠페인', (snapshot.totalCampaigns.current || 0).toLocaleString(), snapshot.totalCampaigns],
+      ['총 발송', (snapshot.totalSent.current || 0).toLocaleString(), snapshot.totalSent],
+      ['성공률', pctStr(snapshot.successRate.current), snapshot.successRate],
+      ['신규 고객', (snapshot.newCustomers.current || 0).toLocaleString(), snapshot.newCustomers],
+      ['활성 고객', (snapshot.activeCustomers.current || 0).toLocaleString(), snapshot.activeCustomers],
+      ['추정 매출', won(snapshot.estimatedRevenue.current), snapshot.estimatedRevenue],
+    ];
+    for (let i = 0; i < metrics.length; i++) {
+      const col = i % 2;
+      const x = 50 + col * 260;
+      if (col === 0 && i > 0) y += 46;
+      const [label, val, m] = metrics[i];
+      const d = Number(m?.diffPct) || 0;
+      setFont(false); doc.fillColor(gray).fontSize(9).text(label, x, y);
+      setFont(true); doc.fillColor(dark).fontSize(15).text(val, x, y + 11);
+      setFont(false); doc.fillColor(d >= 0 ? '#059669' : '#dc2626').fontSize(8).text(`직전 대비 ${dpct(m)}`, x + 120, y + 16);
+    }
+    y += 60;
+    doc.moveTo(50, y).lineTo(545, y).strokeColor('#e5e7eb').stroke(); y += 16;
+
+    // 채널별 ROI
+    setFont(true); doc.fontSize(13).fillColor(primary).text('채널별 ROI', 50, y); y += 20;
+    setFont(true); doc.fontSize(9).fillColor(gray);
+    doc.text('채널', 50, y); doc.text('발송', 170, y); doc.text('성공률', 250, y); doc.text('추정 매출', 340, y); doc.text('ROAS', 470, y);
+    y += 13; doc.moveTo(50, y).lineTo(545, y).strokeColor('#e5e7eb').stroke(); y += 6;
+    setFont(false); doc.fontSize(9);
+    if (snapshot.byChannelROI.length === 0) {
+      doc.fillColor(gray).text('데이터 없음', 50, y); y += 16;
+    } else {
+      for (const c of snapshot.byChannelROI.slice(0, 8)) {
+        doc.fillColor(dark).text(c.channel, 50, y);
+        doc.text((c.sent || 0).toLocaleString(), 170, y);
+        doc.text(pctStr(c.successRate), 250, y);
+        doc.text(won(c.estimatedRevenue), 340, y);
+        doc.text(`${(Number(c.roas) || 0).toFixed(2)}x`, 470, y);
+        y += 16;
+      }
+    }
+    y += 12;
+
+    // 상위 캠페인
+    if (snapshot.topCampaigns.length > 0) {
+      if (y > 660) { doc.addPage(); y = 50; }
+      setFont(true); doc.fontSize(13).fillColor(primary).text('상위 캠페인', 50, y); y += 20;
+      setFont(true); doc.fontSize(9).fillColor(gray);
+      doc.text('캠페인', 50, y); doc.text('채널', 300, y); doc.text('발송', 360, y); doc.text('성공률', 430, y); doc.text('ROAS', 500, y);
+      y += 13; doc.moveTo(50, y).lineTo(545, y).strokeColor('#e5e7eb').stroke(); y += 6;
+      setFont(false); doc.fontSize(9);
+      for (const t of snapshot.topCampaigns.slice(0, 5)) {
+        doc.fillColor(dark).text((t.name || '-').slice(0, 28), 50, y, { width: 240 });
+        doc.text(t.messageType || '-', 300, y);
+        doc.text((t.sent || 0).toLocaleString(), 360, y);
+        doc.text(pctStr(t.successRate), 430, y);
+        doc.text(`${(Number(t.roas) || 0).toFixed(2)}x`, 500, y);
+        y += 16;
+      }
+      y += 12;
+    }
+
+    // 요약 진단 (snapshot 수치 기반 — AI 호출 없음)
+    if (y > 690) { doc.addPage(); y = 50; }
+    const best = [...snapshot.byChannelROI].sort((a, b) => (b.roas || 0) - (a.roas || 0))[0];
+    setFont(true); doc.fontSize(12).fillColor(primary).text('요약 진단', 50, y); y += 18;
+    setFont(false); doc.fontSize(9).fillColor(dark);
+    const lines = [
+      `· 기간 추정 매출 ${won(snapshot.estimatedRevenue.current)} (직전 대비 ${dpct(snapshot.estimatedRevenue)})`,
+      best ? `· 최고 효율 채널: ${best.channel} (ROAS ${(best.roas || 0).toFixed(2)}x)` : '',
+      `· 평균 성공률 ${pctStr(snapshot.successRate.current)} · 활성 고객 ${(snapshot.activeCustomers.current || 0).toLocaleString()}명`,
+    ].filter(Boolean);
+    for (const ln of lines) { doc.text(ln, 50, y); y += 15; }
+    y += 10;
+
+    // Source caption
+    setFont(false); doc.fontSize(8).fillColor(gray).text(`Data source — ${snapshot.source} · ${today} 생성`, 50, y);
+
+    doc.end();
+    console.log(`[Performance] report-pdf 생성 company=${companyId} period=${period}`);
+  } catch (err: any) {
+    if (err instanceof InsufficientCreditError) {
+      if (!res.headersSent) return res.status(402).json({ success: false, error: '성과 리포트에 필요한 크레딧이 부족합니다. 크레딧을 충전해 주세요.', code: 'INSUFFICIENT_CREDIT' });
+    }
+    console.error('[Performance] report-pdf 오류:', err);
+    if (!res.headersSent) return res.status(500).json({ success: false, error: err?.message || 'PDF 보고서 생성 실패' });
+    try { res.end(); } catch { /* 이미 종료된 스트림 */ }
   }
 });
 
@@ -2356,10 +2521,33 @@ router.post('/operator/journeys/:id/activate', async (req: Request, res: Respons
       return res.status(403).json({ success: false, error: 'AI Operator 진입 권한이 없습니다.', code: 'AI_OPERATOR_GATED' });
     }
 
+    // ★ 크레딧: 최초 활성화(draft→active)만 '여정 설계' 150 차감. paused→active 재개는 0(돌려보기 생성은 호출당 3 별도).
+    //   멱등키=journey-activate:${journeyId} 고정 → 재개·재시도·동시요청 중복 차감 0(ai_call_log_id FK 무관).
+    const stRow = await query(
+      `SELECT status FROM journeys WHERE id = $1::uuid AND company_id = $2::uuid`,
+      [req.params.id, companyId]
+    );
+    if (stRow.rows.length === 0) return res.status(404).json({ success: false, error: '여정을 찾을 수 없습니다.' });
+    const firstActivation = stRow.rows[0].status === 'draft';
+    if (firstActivation) await checkCredit(companyId, getCreditCost('journey-activate'));
+
     const result = await activateJourney(companyId, req.params.id, userId);
     if (!result.ok) return res.status(400).json({ success: false, error: result.reason || '활성화 실패' });
+
+    if (firstActivation) {
+      await deductCreditSafe({
+        companyId,
+        cost: getCreditCost('journey-activate'),
+        source: 'journey-activate',
+        createdBy: userId,
+        idempotencyKey: `journey-activate:${req.params.id}`,
+      });
+    }
     return res.json({ success: true });
   } catch (err: any) {
+    if (err instanceof InsufficientCreditError) {
+      return res.status(402).json({ success: false, error: '여정 저장에 필요한 크레딧이 부족합니다. 크레딧을 충전해 주세요.', code: 'INSUFFICIENT_CREDIT' });
+    }
     console.error('[Journeys activate] 오류:', err);
     return res.status(500).json({ success: false, error: err?.message || '활성화 실패' });
   }
@@ -2988,6 +3176,51 @@ router.get('/operator/predictive/distribution', async (req: Request, res: Respon
   } catch (err: any) {
     console.error('[Predictive distribution] 오류:', err);
     return res.status(500).json({ success: false, error: err?.message || '예측 분포 조회 실패' });
+  }
+});
+
+// GET /api/ai/operator/predictive/settings — 예측 자동 ON/OFF 조회 (연동 회사 매일 자동 분석)
+router.get('/operator/predictive/settings', async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+    const planCtx = await loadPlanContext(companyId);
+    if (!planCtx) return res.status(404).json({ success: false, error: '회사 정보를 찾을 수 없습니다.' });
+    if (!isAiOperatorAllowed(planCtx, req.user)) {
+      return res.status(403).json({ success: false, error: 'AI Operator 진입 권한이 없습니다.', code: 'AI_OPERATOR_GATED' });
+    }
+    const r = await query(`SELECT COALESCE(predictive_enabled, true) AS enabled FROM companies WHERE id = $1::uuid`, [companyId]);
+    return res.json({ success: true, predictiveEnabled: r.rows[0]?.enabled !== false });
+  } catch (err: any) {
+    const msg = err?.message || '';
+    if (msg.includes('column') && msg.includes('does not exist')) {
+      return res.status(503).json({ success: false, error: 'DB 마이그레이션 필요 — companies.predictive_enabled 컬럼 추가 요청 의무', code: 'DB_MIGRATION_PENDING' });
+    }
+    console.error('[Predictive settings GET] 오류:', err);
+    return res.status(500).json({ success: false, error: err?.message || '예측 설정 조회 실패' });
+  }
+});
+
+// PATCH /api/ai/operator/predictive/settings — 예측 자동 ON/OFF 변경 (OFF 시 매일 갱신·차감 0)
+router.patch('/operator/predictive/settings', async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+    const planCtx = await loadPlanContext(companyId);
+    if (!planCtx) return res.status(404).json({ success: false, error: '회사 정보를 찾을 수 없습니다.' });
+    if (!isAiOperatorAllowed(planCtx, req.user)) {
+      return res.status(403).json({ success: false, error: 'AI Operator 진입 권한이 없습니다.', code: 'AI_OPERATOR_GATED' });
+    }
+    const enabled = !!req.body?.enabled;
+    await query(`UPDATE companies SET predictive_enabled = $2 WHERE id = $1::uuid`, [companyId, enabled]);
+    return res.json({ success: true, predictiveEnabled: enabled });
+  } catch (err: any) {
+    const msg = err?.message || '';
+    if (msg.includes('column') && msg.includes('does not exist')) {
+      return res.status(503).json({ success: false, error: 'DB 마이그레이션 필요 — companies.predictive_enabled 컬럼 추가 요청 의무', code: 'DB_MIGRATION_PENDING' });
+    }
+    console.error('[Predictive settings PATCH] 오류:', err);
+    return res.status(500).json({ success: false, error: err?.message || '예측 설정 변경 실패' });
   }
 });
 

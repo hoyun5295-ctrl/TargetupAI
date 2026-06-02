@@ -22,6 +22,8 @@ import JourneyFlowDiagram from '../components/journey/JourneyFlowDiagram';
 // ★ D218+ (2026-05-26): 활성화 자동 검증 + 정지 이력 + 담당자 알림 토글 신규
 import JourneyActivationConfirmModal from '../components/journey/JourneyActivationConfirmModal';
 import JourneyPauseLogsModal from '../components/journey/JourneyPauseLogsModal';
+// 저장 여정 문안(본문·제목) 수정 — 초안·일시정지만(구조·일정 변경은 새 여정)
+import JourneyMessageEditModal from '../components/journey/JourneyMessageEditModal';
 import JourneyStepNotifyToggle from '../components/journey/JourneyStepNotifyToggle';
 import AlimtalkChannelPanel, { type AlimtalkSenderProfile, type AlimtalkTemplate, type AlimtalkChannelState } from '../components/alimtalk/AlimtalkChannelPanel';
 import { detectLiquidSyntax, renderLiquid, flattenCustomerForLiquid, SAMPLE_CUSTOMERS } from '../utils/liquid-templating';
@@ -367,6 +369,8 @@ export default function JourneysPage() {
   // ★ D218+ (2026-05-26): 활성화 자동 검증 모달 + 정지 이력 모달
   const [activationModal, setActivationModal] = useState<{ journeyId: string; journeyName: string } | null>(null);
   const [pauseLogsModal, setPauseLogsModal] = useState<{ journeyId: string; journeyName: string } | null>(null);
+  // 문안 수정 모달 — 초안·일시정지 여정만 (활성은 일시정지 후)
+  const [editMessageModal, setEditMessageModal] = useState<{ journeyId: string; journeyName: string; journeyStatus: string } | null>(null);
   // ★ D211+ Phase A (2026-05-23 Harold 명시): 시뮬레이션 + 실시간 위치 영역
   const [simulationMap, setSimulationMap] = useState<Record<string, any>>({});
   const [simulationLoading, setSimulationLoading] = useState<Record<string, boolean>>({});
@@ -1207,6 +1211,12 @@ export default function JourneysPage() {
                             <button onClick={(e) => { e.stopPropagation(); navigate(`/ai-journeys/${j.id}/stats`); }} className="p-2 rounded bg-violet-500/20 hover:bg-violet-500/30 text-violet-300" title="통계 분석">
                               <BarChart3 className="w-4 h-4" />
                             </button>
+                            {/* 문안 수정 — 초안·일시정지만(활성은 일시정지 후 / 일정·구조 변경은 새 여정) */}
+                            {!j.archived_at && (j.status === 'draft' || j.status === 'paused') && (
+                              <button onClick={(e) => { e.stopPropagation(); setEditMessageModal({ journeyId: j.id, journeyName: j.name, journeyStatus: j.status }); }} className="p-2 rounded bg-purple-500/20 hover:bg-purple-500/30 text-purple-300" title="문안 수정">
+                                <Edit2 className="w-4 h-4" />
+                              </button>
+                            )}
                             {/* ★ D218+ (2026-05-26): 정지 이력 영구 기록 진입 — 담당자 단축 URL 정지 + 자동 정지 통합 표시 */}
                             <button onClick={(e) => { e.stopPropagation(); setPauseLogsModal({ journeyId: j.id, journeyName: j.name }); }} className="p-2 rounded bg-fuchsia-500/20 hover:bg-fuchsia-500/30 text-fuchsia-300" title="정지 이력 영구 기록">
                               <AlertTriangle className="w-4 h-4" />
@@ -2576,6 +2586,17 @@ export default function JourneysPage() {
           journeyName={pauseLogsModal.journeyName}
           token={token() || ''}
           onClose={() => setPauseLogsModal(null)}
+        />
+      )}
+
+      {editMessageModal && (
+        <JourneyMessageEditModal
+          journeyId={editMessageModal.journeyId}
+          journeyName={editMessageModal.journeyName}
+          journeyStatus={editMessageModal.journeyStatus}
+          token={token() || ''}
+          onClose={() => setEditMessageModal(null)}
+          onSaved={() => { void loadAll(); }}
         />
       )}
     </div>

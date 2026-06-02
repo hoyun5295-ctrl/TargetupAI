@@ -337,6 +337,16 @@ export default function JourneyActivationConfirmModal({
                 </div>
               </div>
 
+              {/* AI 크레딧 안내 — 위 비용 카드(발송 예치금)와 별개 */}
+              <div className="p-3 rounded-xl bg-fuchsia-500/5 border border-fuchsia-400/20">
+                <div className="flex items-start gap-2">
+                  <Sparkles className="w-4 h-4 text-fuchsia-300 flex-shrink-0 mt-0.5" />
+                  <div className="text-[12px] text-fuchsia-100/90 leading-relaxed">
+                    최초 활성화(초안 → 활성) 시 여정 설계 AI 크레딧 150이 함께 차감됩니다. 일시정지 후 재개는 차감되지 않습니다.
+                  </div>
+                </div>
+              </div>
+
               <div className="text-[10px] text-white/30 italic">
                 Data source — CT-92 journey-pretest-validator + CT-93 journey-pretest-notifier (D218+ 신설)
               </div>

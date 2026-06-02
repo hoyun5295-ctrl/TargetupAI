@@ -114,6 +114,7 @@ export async function deductCredit(opts: {
  *  - 캐시·통계 기록과 분리해 호출(통계 실패가 차감을 막지 않음).
  *  - 일시 오류(deadlock·연결·잠금 경합) 시 최대 3회 재시도(차감은 원자·멱등이라 재호출해도 중복 0).
  *  - aiCallLogId가 없으면(통계 실패) 호출당 고정 대체 멱등키를 부여 → 재시도 이중 차감 차단.
+ *  - idempotencyKey를 직접 주면(예: journey-activate:${journeyId}) 그 키로 고정 → 재개·재요청 중복 차감 0(ai_call_log_id FK 무관).
  *  - 최종 실패 = stdout 명시 로그([CREDIT][MISS])로 추적 + 그 키로 수동 재차감. AI 응답은 막지 않는다(throw 안 함).
  *  - _deps = 단위검증 주입용(prod 미사용).
  */
@@ -124,16 +125,20 @@ export async function deductCreditSafe(
     source: string;
     aiCallLogId?: string | null;
     createdBy?: string | null;
+    /** 멱등키 직접 지정(회사+행위 고정 키). 재시도·재개·동시요청 중복 차감 차단. 미지정 시 aiCallLogId/fallback 기준. */
+    idempotencyKey?: string;
   },
   _deps?: { deductFn?: typeof deductCredit; sleep?: (ms: number) => Promise<void> }
 ): Promise<void> {
   if (!opts.companyId || !opts.cost || opts.cost <= 0) return;
   const deduct = _deps?.deductFn ?? deductCredit;
   const sleep = _deps?.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
-  // 통계 실패로 aiCallLogId가 없으면 호출당 1회 고정 대체 멱등키(재시도 루프 내내 동일) → 이중 차감 차단
-  const idempotencyKey = opts.aiCallLogId
-    ? undefined
-    : `fallback:${opts.companyId}:${opts.source}:${Date.now()}`;
+  // 호출측이 멱등키를 직접 주면 그걸 우선(고정). 아니면 aiCallLogId 있을 때 deductCredit이 source+aiCallLogId로,
+  // 둘 다 없으면 호출당 1회 고정 대체 멱등키(재시도 루프 내내 동일) → 이중 차감 차단.
+  const idempotencyKey = opts.idempotencyKey
+    ?? (opts.aiCallLogId
+      ? undefined
+      : `fallback:${opts.companyId}:${opts.source}:${Date.now()}`);
   const MAX_ATTEMPTS = 3;
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
     try {

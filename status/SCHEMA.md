@@ -794,7 +794,7 @@
 | **direct_recipient_limit** | **integer** | **CT-17: 직접발송 주소록 최대 건수. FREE=99,999, 나머지 NULL(무제한)** |
 | **cdp_enabled** | **boolean DEFAULT false** | **★ D172: 한줄로 CDP (자사몰 → 한줄로 customers/이벤트 sync) feature 플래그. BUSINESS+ true** |
 | **cdp_events_per_month** | **integer** | **★ D172: CDP API 월 호출 한도. BASIC=10,000 / PRO=100,000 / BUSINESS=1,000,000 / ENTERPRISE NULL(무제한)** |
-| **ai_credits_per_month** | **integer** | **★ D227+ 종량제: 요금제별 월 기본 AI 크레딧 (NULL=0). 스타터50/베이직200/프로800/비즈2500/엔터5500** |
+| **ai_credits_per_month** | **integer** | **★ D227+ 종량제: 요금제별 월 기본 AI 크레딧 (NULL=0). 실 DB 기준 2026-06-02 확인: 스타터300/베이직750/프로2400/비즈7800/엔터16500 (FREE 0·TRIAL 600). 과거 설계값(스타터50 등)은 폐기 — plans row(SQL)가 진실** |
 | created_at | timestamp | |
 
 **companies 추가 컬럼 (CT-17 활용):**

@@ -107,7 +107,14 @@
 
 ---
 
-### 🟢 2026-06-01 세션 (최신) — AI 크레딧 가치 기반 전면 재설계 + 모델 핵심 고급 + 설정 페이지 재개편
+### 🟢 2026-06-02 세션 (최신) — 여정 미리보기 타겟 연동 + 크레딧 재매핑 작업1 + 작업2~5 핸드오프
+> **이번 세션 = ① 여정 미리보기 타겟 연동(완료·tsc0) ② 크레딧 재설계 토론·확정 ③ 작업1(한줄입력 풀분석300→문안·분석5) 완료·검증 ④ 작업2~5 핸드오프 작성. 전부 미배포 — 통합 배포 예정.**
+> - **여정 미리보기**: 항상 남다은(LTV1위) 고정 → 여정 trigger 기준 실제 고객 추출(`utils/journey-target-extractor.ts` 신규, 발송 SQL 1:1 이전 동작 보존). Liquid `{{}}` 치환값 하이라이트 누락 fix(highlightVars 토큰 재작성). 0명 안내. plan=`docs/superpowers/plans/2026-06-02-journey-preview-target-fix.md`.
+> - **크레딧 재매핑 확정(Harold 토론)**: 한줄입력(코드명 orchestrate=풀분석이나 실제는 일회성 타겟+문안) → **문안·분석 5** / **풀분석 300 = 성과 리포트(기간 성과분석)+PDF 보고서** / 여정 **돌려보기 3 + 저장 150**(재사용 자산) / 예측 자동 = 연동(`sync_agents`·`cdp_events.source='custom_sdk'`) 회사만 **매일 3** + 온오프(`companies.predictive_enabled` ALTER) / 여정 **수정 버튼** 신설. **작업당 크레딧 금액표·플랜 크레딧 실값(스타터300/베이직750/프로2400/비즈7800/엔터16500)은 불변, 매핑만 변경. ⚠️ SCHEMA.md `ai_credits_per_month` 옛값(스타터50)은 stale — plans row로만 확정.**
+> - **작업1 완료**: `CREDIT_COST_MAP`에 `ai-operator-propose:5` 신규(orchestrate 300 보존), propose가 creditOpts로 5 차감, credit.ts 라벨. backend·frontend tsc0 · verify ok.
+> - **다음 세션**: `docs/superpowers/handoffs/2026-06-02-credit-remap-handoff.md` 정독 → 작업2~5 빈틈없이 (멱등키·DB ALTER·PDF 주의). spec=`docs/superpowers/specs/2026-06-02-credit-remap-and-features.md`.
+
+### 🟢 2026-06-01 세션 — AI 크레딧 가치 기반 전면 재설계 + 모델 핵심 고급 + 설정 페이지 재개편
 
 > **코드·검증 완료, plans/동기화/이력 SQL Harold 실행, 배포 Harold.** 상세 = `memory/project_2026_0601_credit_value_redesign.md`
 > - **가치 재설계(1크레딧 500원)**: 작업당 풀분석 300·여정 150·자동마케팅 200·모바일DM 30·인앱 15·문안 5·다듬기 1. 요금제+보너스(스타터 300 / 베이직 750+7% / 프로 2400+20% / 비즈 7800+30% / 엔터 16500+50% / TRIAL 600 / FREE 0). 충전 500·단위 50/100/300/500. ai-credit-calc CREDIT_COST_MAP + constants/credit.ts 1:1 + planBonusPct.
