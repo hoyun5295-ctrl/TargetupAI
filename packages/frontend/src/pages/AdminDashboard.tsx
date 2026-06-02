@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { companiesApi, plansApi, billingApi } from '../api/client';
 import { useAuthStore } from '../stores/authStore';
-import { formatDateTime, formatDate, formatDateTimeShort, formatCampaignMessageForDisplay } from '../utils/formatDate';
+import { formatDateTime, formatDate, formatDateTimeShort, formatCampaignMessageForDisplay, getAlimtalkTemplateStatus } from '../utils/formatDate';
 import SessionTimer from '../components/SessionTimer';
 import AlimtalkSendersSection from '../components/alimtalk/AlimtalkSendersSection'; // ★ D130
 import MessageDetailModal from '../components/MessageDetailModal'; // ★ D144 후속: 발송 상세 내역 모달의 메시지 셀 클릭 시 표시 + 복사
@@ -446,7 +446,7 @@ const loadAdminTemplates = async () => {
   try {
     const tk = localStorage.getItem('token');
     const params = new URLSearchParams();
-    if (templateFilter !== 'all') params.set('status', templateFilter);
+    // 상태 필터는 클라이언트(getAlimtalkTemplateStatus 라벨 기준)로 적용 — DB 대문자/동기화 값(KREJ 등) 호환
     const res = await fetch(`/api/admin/kakao-templates?${params}`, { headers: { Authorization: `Bearer ${tk}` } });
     const data = await res.json();
     if (data.success) setAdminTemplates(data.templates);
@@ -460,7 +460,7 @@ const loadAdminRcsTemplates = async () => {
   try {
     const tk = localStorage.getItem('token');
     const params = new URLSearchParams();
-    if (templateFilter !== 'all') params.set('status', templateFilter);
+    // 상태 필터는 클라이언트(getAlimtalkTemplateStatus 라벨 기준)로 적용 — DB 대문자/동기화 값 호환
     const res = await fetch(`/api/admin/rcs-templates?${params}`, { headers: { Authorization: `Bearer ${tk}` } });
     const data = await res.json();
     if (data.success) setAdminRcsTemplates(data.templates);
@@ -4359,7 +4359,11 @@ const handleApproveRequest = async (id: string) => {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-100">
-                    {adminTemplates.map((t: any) => (
+                    {adminTemplates.filter((t: any) => {
+                      if (templateFilter === 'all') return true;
+                      const lb = getAlimtalkTemplateStatus(t.status).label;
+                      return templateFilter === 'pending' ? lb === '검수중' : templateFilter === 'approved' ? lb === '승인' : lb === '반려';
+                    }).map((t: any) => (
                       <tr key={t.id} className="hover:bg-gray-50">
                         <td className="px-4 py-3 text-gray-900 font-medium">{t.company_name || '-'}</td>
                         <td className="px-4 py-3">
@@ -4368,17 +4372,13 @@ const handleApproveRequest = async (id: string) => {
                         </td>
                         <td className="px-4 py-3 text-gray-600">{t.category || '-'}</td>
                         <td className="px-4 py-3 text-center">
-                          <span className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium ${
-                            t.status === 'approved' ? 'bg-green-100 text-green-700' :
-                            t.status === 'rejected' ? 'bg-red-100 text-red-700' :
-                            'bg-amber-100 text-amber-700'
-                          }`}>
-                            {t.status === 'approved' ? '승인' : t.status === 'rejected' ? '반려' : '승인대기'}
+                          <span className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium ${getAlimtalkTemplateStatus(t.status).badgeClass}`}>
+                            {getAlimtalkTemplateStatus(t.status).label}
                           </span>
                         </td>
                         <td className="px-4 py-3 text-gray-500 text-xs">{t.requested_at ? new Date(t.requested_at).toLocaleDateString('ko-KR') : '-'}</td>
                         <td className="px-4 py-3 text-center">
-                          {t.status === 'pending' && (
+                          {getAlimtalkTemplateStatus(t.status).label === '검수중' && (
                             <div className="flex gap-1 justify-center">
                               <button onClick={() => handleTemplateApprove('kakao', t.id)}
                                 className="text-xs px-2 py-1 bg-green-50 text-green-700 rounded hover:bg-green-100">승인</button>
@@ -4412,22 +4412,22 @@ const handleApproveRequest = async (id: string) => {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-100">
-                    {adminRcsTemplates.map((t: any) => (
+                    {adminRcsTemplates.filter((t: any) => {
+                      if (templateFilter === 'all') return true;
+                      const lb = getAlimtalkTemplateStatus(t.status).label;
+                      return templateFilter === 'pending' ? lb === '검수중' : templateFilter === 'approved' ? lb === '승인' : lb === '반려';
+                    }).map((t: any) => (
                       <tr key={t.id} className="hover:bg-gray-50">
                         <td className="px-4 py-3 text-gray-900 font-medium">{t.company_name || '-'}</td>
                         <td className="px-4 py-3 text-gray-900">{t.template_name}</td>
                         <td className="px-4 py-3 text-gray-600">{t.message_type}</td>
                         <td className="px-4 py-3 text-center">
-                          <span className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium ${
-                            t.status === 'approved' ? 'bg-green-100 text-green-700' :
-                            t.status === 'rejected' ? 'bg-red-100 text-red-700' :
-                            'bg-amber-100 text-amber-700'
-                          }`}>
-                            {t.status === 'approved' ? '승인' : t.status === 'rejected' ? '반려' : '승인대기'}
+                          <span className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium ${getAlimtalkTemplateStatus(t.status).badgeClass}`}>
+                            {getAlimtalkTemplateStatus(t.status).label}
                           </span>
                         </td>
                         <td className="px-4 py-3 text-center">
-                          {t.status === 'pending' && (
+                          {getAlimtalkTemplateStatus(t.status).label === '검수중' && (
                             <div className="flex gap-1 justify-center">
                               <button onClick={() => handleTemplateApprove('rcs', t.id)}
                                 className="text-xs px-2 py-1 bg-green-50 text-green-700 rounded hover:bg-green-100">승인</button>
@@ -6476,6 +6476,7 @@ const handleApproveRequest = async (id: string) => {
                       <th className="px-3 py-2.5 text-center text-xs font-medium text-gray-500 whitespace-nowrap">No.</th>
                       <th className="px-3 py-2.5 text-center text-xs font-medium text-gray-500 whitespace-nowrap">등록일시</th>
                       <th className="px-3 py-2.5 text-center text-xs font-medium text-gray-500 whitespace-nowrap">발송일시</th>
+                      <th className="px-3 py-2.5 text-center text-xs font-medium text-gray-500 whitespace-nowrap">유형</th>
                       <th className="px-3 py-2.5 text-center text-xs font-medium text-gray-500 whitespace-nowrap">수신번호</th>
                       <th className="px-3 py-2.5 text-center text-xs font-medium text-gray-500 whitespace-nowrap">회신번호</th>
                       <th className="px-3 py-2.5 text-left text-xs font-medium text-gray-500 whitespace-nowrap">메시지 내용</th>
@@ -6486,7 +6487,7 @@ const handleApproveRequest = async (id: string) => {
                   </thead>
                   <tbody className="divide-y divide-gray-100">
                     {smsDetailRows.length === 0 ? (
-                      <tr><td colSpan={9} className="px-4 py-12 text-center text-gray-400">
+                      <tr><td colSpan={10} className="px-4 py-12 text-center text-gray-400">
                         {smsDetailCampaign?.status === 'scheduled' ? '아직 발송 전입니다.' : '발송 내역이 없습니다.'}
                       </td></tr>
                     ) : smsDetailRows.map((r: any, idx: number) => (
@@ -6495,6 +6496,7 @@ const handleApproveRequest = async (id: string) => {
                         {/* ★ D124: 등록일시 = 캠페인 created_at (모든 행 동일) */}
                         <td className="px-3 py-2 text-center text-xs text-gray-500 whitespace-nowrap">{smsDetailCampaign?.created_at ? new Date(smsDetailCampaign.created_at).toLocaleString('ko-KR', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : '-'}</td>
                         <td className="px-3 py-2 text-center text-xs text-gray-500 whitespace-nowrap">{r.mobsendTime ? new Date(r.mobsendTime).toLocaleString('ko-KR', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : '-'}</td>
+                        <td className="px-3 py-2 text-center text-xs text-gray-600 whitespace-nowrap">{r.sendType || '-'}</td>
                         <td className="px-3 py-2 text-center text-gray-700 font-mono text-xs">{r.destNo}</td>
                         <td className="px-3 py-2 text-center text-gray-500 font-mono text-xs">{r.callBack}</td>
                         <td className="px-3 py-2 text-gray-700 text-xs max-w-xs">

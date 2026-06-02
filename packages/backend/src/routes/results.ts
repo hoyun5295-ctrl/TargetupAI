@@ -11,7 +11,7 @@ import {
   kakaoGroupBy,
   kakaoBatchAggByGroup,
 } from '../utils/sms-queue';
-import { STATUS_CODE_MAP, CARRIER_MAP, SUCCESS_CODES, PENDING_CODES, getStatusLabel, getStatusType, getCarrierLabel, isSuccess } from '../utils/sms-result-map';
+import { STATUS_CODE_MAP, CARRIER_MAP, SUCCESS_CODES, PENDING_CODES, getStatusLabel, getStatusType, getCarrierLabel, isSuccess, getSendTypeLabel } from '../utils/sms-result-map';
 import { DEFAULT_COSTS, redis, CACHE_TTL } from '../config/defaults';
 import { buildDateRangeFilter, buildPeriodFilter, aggregateSmsCountsByCampaign, aggregateSmsSendTimesByCampaign } from '../utils/stats-aggregation';
 import { CAMPAIGN_OPT080_SELECT_EXPR, CAMPAIGN_OPT080_LEFT_JOIN } from '../utils/unsubscribe-helper';
@@ -52,13 +52,14 @@ const SMS_DETAIL_FIELDS = `seqno, dest_no, call_back, msg_type, msg_contents, st
   '' AS kakao_bubble_type, '' AS kakao_report_code,
   '' AS resend_type, '' AS resend_report_code,
   IFNULL(k_template_code, '') AS k_template_code,
-  IFNULL(k_next_type, '') AS k_next_type`;
+  IFNULL(k_next_type, '') AS k_next_type,
+  IFNULL(k_oriseq, 0) AS k_oriseq`;
 
 /** 엑셀 export용 SMS 필드 (seqno 제외) — 엑셀 2컬럼 유지: 전송요청/발송 (B10: 수신확인 제거) */
 const SMS_EXPORT_FIELDS = `dest_no, call_back, msg_type, msg_contents, status_code, mob_company,
   sendreq_time,
   DATE_ADD(mobsend_time, INTERVAL 9 HOUR) AS mobsend_time,
-  'sms' AS _channel, NULL AS report_code_raw`;
+  'sms' AS _channel, NULL AS report_code_raw, IFNULL(k_oriseq, 0) AS k_oriseq`;
 
 // ===== UNION ALL 기반 MySQL 헬퍼 — CT-04(sms-queue.ts)로 승격됨 =====
 // smsUnionCount → smsCountAll, smsUnionGroupBy → smsGroupByAll, kakao 헬퍼 → CT-04
@@ -734,6 +735,7 @@ router.get('/campaigns/:id/messages', async (req: Request, res: Response) => {
       status_label: getStatusLabel(m.status_code),
       status_type: getStatusType(m.status_code),
       carrier_label: m._channel === 'kakao' ? '카카오' : getCarrierLabel(m.mob_company),
+      send_type: m._channel === 'kakao' ? '카카오' : getSendTypeLabel(m.msg_type, m.k_oriseq),
     }));
 
     // ★ D225+ (2026-05-28 영업팀장 박성용 신고 fix): 알림톡 발송 영역 = 응답 안 templateInfo 추가
@@ -833,7 +835,7 @@ router.get('/campaigns/:id/export', async (req: Request, res: Response) => {
         CASE WHEN REPORT_CODE='0000' THEN 1800 WHEN STATUS='1' THEN 100 ELSE 9999 END AS status_code,
         '카카오' AS mob_company,
         REQUEST_DATE AS sendreq_time, RESPONSE_DATE AS mobsend_time, REPORT_DATE AS repmsg_recvtm,
-        'kakao' AS _channel, REPORT_CODE AS report_code_raw`;
+        'kakao' AS _channel, REPORT_CODE AS report_code_raw, NULL AS k_oriseq`;
       subqueries.push(`(SELECT ${kakaoFields} FROM IMC_BM_FREE_BIZ_MSG WHERE REQUEST_UID = ?)`);
       baseParams.push(id);
     }
@@ -883,7 +885,7 @@ router.get('/campaigns/:id/export', async (req: Request, res: Response) => {
             : `카카오실패(${m.report_code_raw || '미수신'})`;
           carrierDisplay = '카카오';
         } else {
-          msgTypeDisplay = m.msg_type === 'S' ? 'SMS' : m.msg_type === 'L' ? 'LMS' : m.msg_type;
+          msgTypeDisplay = getSendTypeLabel(m.msg_type, m.k_oriseq);
           statusDisplay = getStatusLabel(m.status_code);
           carrierDisplay = getCarrierLabel(m.mob_company);
         }

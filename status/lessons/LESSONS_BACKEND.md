@@ -99,6 +99,12 @@
 
 ## AI 호출 매트릭스 (D170+ ~ D214+)
 
+### 크레딧 created_by = 요청 컨텍스트 자동 (2026-06-02)
+- callAIWithFallback createdBy = `params.userId || currentUserId() || null`. currentUserId = AsyncLocalStorage(`utils/request-context.ts`), authenticate가 `enterWith`로 요청 사용자 전파.
+- 새 AI 작업(callAIWithFallback 경유)은 호출부 무수정으로 자동 created_by 기록. orchestrate도 동일 fallback.
+- cron/worker(예측·operator)는 요청 컨텍스트 없음 → 호출측 명시(예측=회사 대표 admin / operator=operator.createdBy). 월 리셋=created_by 없음='자동'.
+- 이력은 정산·감사 근거 = 모르는 과거 건에 부정확 ID 소급 X(created_by null='자동' 정직). enterWith 전파는 환경따라 불안정 가능 — 런타임 확인 후 미작동 시 명시 전달 fallback.
+
 ### 모델 분리 룰 (`feedback_ai_operator_model_isolation`)
 - **AI Operator** = Opus 4.7 (callAIWithFallback `model: 'opus'`)
 - **기존 한줄로AI** = Sonnet 4.6 (절대 건드리지 말 것 — 6,000사+ 운영 영향)

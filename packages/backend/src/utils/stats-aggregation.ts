@@ -172,6 +172,13 @@ export function kstDate(column: string): string {
   return `(${column} AT TIME ZONE 'Asia/Seoul')::date`;
 }
 
+/**
+ * ★ 발송통계 날짜 기준 — 예약은 발송예정일(scheduled_at), 즉시발송은 실제 발송일(sent_at).
+ * 예약 캠페인이 등록일에 잡히던 문제 정정. sent_at 컬럼 자체는 환불/결과동기화 의존이 있어 보존하고,
+ * 통계 표시 날짜만 이 식으로 산출한다. 캠페인 alias는 'c' 고정.
+ */
+export const STAT_DATE_EXPR = `COALESCE(c.scheduled_at, c.sent_at)`;
+
 // ============================================================
 // ★ 발송통계 컨트롤타워 — manage-stats.ts, results.ts 등 공용
 // 슈퍼관리자/고객사관리자/고객사사용자 모두 이 함수를 import해서 사용
@@ -401,8 +408,8 @@ export async function querySendStats(options: SendStatsOptions): Promise<SendSta
     }
   }
 
-  // WHERE 절 동적 구성
-  const dr = buildDateRangeFilter('c.sent_at', startDate, endDate, 1);
+  // WHERE 절 동적 구성 — 발송통계는 발송예정일(예약)/발송일(즉시) 기준 (STAT_DATE_EXPR)
+  const dr = buildDateRangeFilter(STAT_DATE_EXPR, startDate, endDate, 1);
   const dateWhere = dr.sql;
   const baseParams: any[] = [...dr.params];
   let paramIdx = dr.nextIndex;
@@ -421,8 +428,8 @@ export async function querySendStats(options: SendStatsOptions): Promise<SendSta
     paramIdx++;
   }
 
-  const baseWhereSql = `c.sent_at IS NOT NULL AND c.status NOT IN ('cancelled', 'draft') ${dateWhere} ${companyWhere} ${userWhere}`;
-  const groupCol = kstGroupBy('c.sent_at', view);
+  const baseWhereSql = `${STAT_DATE_EXPR} IS NOT NULL AND c.status NOT IN ('cancelled', 'draft') ${dateWhere} ${companyWhere} ${userWhere}`;
+  const groupCol = kstGroupBy(STAT_DATE_EXPR, view);
 
   // 1) PG에서 캠페인 메타만 SELECT (sent_count/success_count/fail_count 제거).
   //    period(KST 일/월)은 PG에서 미리 계산 — JS에서 timezone 변환 추가 부담 없음.
@@ -528,7 +535,7 @@ export async function querySendStatsDetail(
 ): Promise<SendStatsDetailResult> {
   const { view, date, companyId, filterUserId } = options;
 
-  const groupCol = kstGroupBy('c.sent_at', view);
+  const groupCol = kstGroupBy(STAT_DATE_EXPR, view);
 
   const userFilter = filterUserId ? ` AND c.created_by = $3` : '';
   const detailParams: any[] = filterUserId ? [date, companyId, filterUserId] : [date, companyId];
@@ -549,7 +556,7 @@ export async function querySendStatsDetail(
     FROM campaigns c
     LEFT JOIN users u ON c.created_by = u.id
     ${CAMPAIGN_OPT080_LEFT_JOIN}
-    WHERE c.sent_at IS NOT NULL
+    WHERE ${STAT_DATE_EXPR} IS NOT NULL
       AND ${groupCol} = $1
       AND c.company_id = $2
       AND c.status NOT IN ('cancelled', 'draft')

@@ -6,13 +6,13 @@ import { authenticate, requireSuperAdmin } from '../middlewares/auth';
 import { ALL_SMS_TABLES, invalidateLineGroupCache, getCampaignSmsTables, smsCountAll, smsSelectAll, smsAggAll, getTestSmsTables, kakaoCountWhere, kakaoSelectWhere, kakaoBatchAggByGroup } from '../utils/sms-queue';
 import { DASHBOARD_CARD_POOL, validateCardIds, getRequiredFields, filterPoolByAvailableData, generateDynamicCards } from '../utils/dashboard-card-pool';
 import { detectEnabledFields } from '../utils/enabled-fields';
-import { SUCCESS_CODES_SQL, PENDING_CODES_SQL, getStatusLabel, getStatusType, getCarrierLabel, isSuccess, isPending } from '../utils/sms-result-map';
+import { SUCCESS_CODES_SQL, PENDING_CODES_SQL, getStatusLabel, getStatusType, getCarrierLabel, isSuccess, isPending, getSendTypeLabel, getCampaignChannelLabel } from '../utils/sms-result-map';
 import { DEFAULT_COSTS } from '../config/defaults';
 import { validateSmsTables } from '../utils/sms-table-validator';
 // ★ D145 P0: 예약 캠페인 자동 정리 (모든 발송 관련 라우트 정합성)
 import { cleanupScheduledCampaigns } from '../utils/campaign-lifecycle';
 import { getUserUnsubscribes, deleteUserUnsubscribes, exportUserUnsubscribes, CAMPAIGN_OPT080_SELECT_EXPR, CAMPAIGN_OPT080_LEFT_JOIN } from '../utils/unsubscribe-helper';
-import { buildDateRangeFilter, aggregateSmsCountsByCampaign, aggregateSmsSendTimesByCampaign, getCampaignResultCounts } from '../utils/stats-aggregation';
+import { buildDateRangeFilter, aggregateSmsCountsByCampaign, aggregateSmsSendTimesByCampaign, getCampaignResultCounts, STAT_DATE_EXPR } from '../utils/stats-aggregation';
 import { normalizePhone } from '../utils/normalize-phone';
 
 const router = Router();
@@ -1234,7 +1234,7 @@ router.get('/stats/send', authenticate, requireSuperAdmin, async (req: Request, 
     const offset = (page - 1) * limit;
 
     // ★ D104: 날짜 필터 컨트롤타워 사용
-    const dr = buildDateRangeFilter('c.sent_at', startDate, endDate, 1);
+    const dr = buildDateRangeFilter(STAT_DATE_EXPR, startDate, endDate, 1);
     let dateWhere = dr.sql;
     const baseParams: any[] = [...dr.params];
     let paramIdx = dr.nextIndex;
@@ -1250,8 +1250,8 @@ router.get('/stats/send', authenticate, requireSuperAdmin, async (req: Request, 
     //   PG에서 캠페인 메타만 SELECT → MySQL 큐 + 카카오에서 직접 카운트 → JS에서 (period, company)별 그룹핑 + summary.
     //   응답 키(summary/rows) 형태는 그대로 유지하여 frontend 변경 0.
     const groupCol = view === 'monthly'
-      ? `TO_CHAR(c.sent_at AT TIME ZONE 'Asia/Seoul', 'YYYY-MM')`
-      : `TO_CHAR(c.sent_at AT TIME ZONE 'Asia/Seoul', 'YYYY-MM-DD')`;
+      ? `TO_CHAR(${STAT_DATE_EXPR} AT TIME ZONE 'Asia/Seoul', 'YYYY-MM')`
+      : `TO_CHAR(${STAT_DATE_EXPR} AT TIME ZONE 'Asia/Seoul', 'YYYY-MM-DD')`;
     const groupAlias = view === 'monthly' ? 'month' : 'date';
 
     const metaResult = await query(`
@@ -1263,7 +1263,7 @@ router.get('/stats/send', authenticate, requireSuperAdmin, async (req: Request, 
       FROM campaigns c
       JOIN companies co ON c.company_id = co.id
       LEFT JOIN sms_line_groups lg ON co.line_group_id = lg.id
-      WHERE c.sent_at IS NOT NULL
+      WHERE ${STAT_DATE_EXPR} IS NOT NULL
         AND c.status NOT IN ('cancelled', 'draft') ${dateWhere} ${companyWhere}
     `, baseParams);
 
@@ -1411,8 +1411,8 @@ router.get('/stats/send/detail', authenticate, requireSuperAdmin, async (req: Re
     }
 
     const groupCol = view === 'monthly'
-      ? `TO_CHAR(c.sent_at AT TIME ZONE 'Asia/Seoul', 'YYYY-MM')`
-      : `TO_CHAR(c.sent_at AT TIME ZONE 'Asia/Seoul', 'YYYY-MM-DD')`;
+      ? `TO_CHAR(${STAT_DATE_EXPR} AT TIME ZONE 'Asia/Seoul', 'YYYY-MM')`
+      : `TO_CHAR(${STAT_DATE_EXPR} AT TIME ZONE 'Asia/Seoul', 'YYYY-MM-DD')`;
 
     // ★ D144: PG sent_count/success_count/fail_count 캐시 의존 제거.
     //   PG에서 캠페인+사용자+opt080 메타만 SELECT → MySQL 큐 + 카카오 직접 카운트 → JS 집계.
@@ -1426,7 +1426,7 @@ router.get('/stats/send/detail', authenticate, requireSuperAdmin, async (req: Re
       FROM campaigns c
       LEFT JOIN users u ON c.created_by = u.id
       ${CAMPAIGN_OPT080_LEFT_JOIN}
-      WHERE c.sent_at IS NOT NULL
+      WHERE ${STAT_DATE_EXPR} IS NOT NULL
         AND c.status NOT IN ('cancelled', 'draft')
         AND ${groupCol} = $1
         AND c.company_id = $2
@@ -1806,7 +1806,7 @@ router.get('/campaigns/:id/sms-detail', authenticate, requireSuperAdmin, async (
       const rows = await smsSelectAll(
         smsTables,
         `seqno, dest_no, call_back, msg_contents, msg_type, status_code, mob_company,
-         sendreq_time,
+         sendreq_time, k_oriseq,
          DATE_ADD(mobsend_time, INTERVAL 9 HOUR) AS mobsend_time`,
         mysqlWhere,
         mysqlParams,
@@ -1820,6 +1820,7 @@ router.get('/campaigns/:id/sms-detail', authenticate, requireSuperAdmin, async (
           callBack: r.call_back,
           msgContents: r.msg_contents,
           msgType: r.msg_type === 'S' ? 'SMS' : r.msg_type === 'L' ? 'LMS' : r.msg_type === 'M' ? 'MMS' : r.msg_type,
+          sendType: getSendTypeLabel(r.msg_type, r.k_oriseq),
           statusCode: r.status_code,
           statusText: getStatusLabel(r.status_code),
           statusType: getStatusType(r.status_code),
@@ -1871,6 +1872,7 @@ router.get('/campaigns/:id/sms-detail', authenticate, requireSuperAdmin, async (
           callBack: '-',
           msgContents: r.MESSAGE,
           msgType: `카카오(${r.CHAT_BUBBLE_TYPE || 'TEXT'})`,
+          sendType: '카카오',
           statusCode: r.REPORT_CODE === '0000' ? 1800 : (r.STATUS <= '2' ? 100 : 9999),
           statusText: kakaoStatusMap[r.REPORT_CODE] || `카카오:${r.REPORT_CODE || '처리중'}`,
           statusType: r.REPORT_CODE === '0000' ? 'success' : (r.STATUS <= '2' ? 'pending' : 'fail'),
@@ -3195,8 +3197,8 @@ router.get('/stats/export', authenticate, requireSuperAdmin, async (req: Request
       return res.status(400).json({ error: '시작일과 종료일을 입력해주세요.' });
     }
 
-    let whereClause = `WHERE c.sent_at >= ($1 || ' 00:00:00+09')::timestamptz
-                          AND c.sent_at < ($2 || ' 00:00:00+09')::timestamptz + INTERVAL '1 day'`;
+    let whereClause = `WHERE ${STAT_DATE_EXPR} >= ($1 || ' 00:00:00+09')::timestamptz
+                          AND ${STAT_DATE_EXPR} < ($2 || ' 00:00:00+09')::timestamptz + INTERVAL '1 day'`;
     const params: any[] = [startDate, endDate];
     let paramIdx = 3;
 
@@ -3209,8 +3211,8 @@ router.get('/stats/export', authenticate, requireSuperAdmin, async (req: Request
     //   PG는 캠페인 메타 + 회사+사용자만 SELECT → MySQL 큐 + 카카오 직접 카운트 → JS에서 6-key 그룹핑.
     const exportMetaResult = await query(
       `SELECT
-        c.id, c.company_id, c.created_by, c.target_count, c.message_type, c.send_type,
-        TO_CHAR(c.sent_at AT TIME ZONE 'Asia/Seoul', 'YYYY-MM-DD') as send_date,
+        c.id, c.company_id, c.created_by, c.target_count, c.message_type, c.send_channel, c.send_type,
+        TO_CHAR(${STAT_DATE_EXPR} AT TIME ZONE 'Asia/Seoul', 'YYYY-MM-DD') as send_date,
         co.company_name,
         co.company_code,
         u.login_id,
@@ -3228,7 +3230,7 @@ router.get('/stats/export', authenticate, requireSuperAdmin, async (req: Request
 
     type ExportBucket = {
       send_date: string; company_name: any; company_code: any; login_id: any; user_name: any;
-      message_type: any; send_type: any;
+      message_type: any; send_channel: any; send_type: any;
       campaign_count: number; total_target: number;
       total_sent: number; total_success: number; total_fail: number; total_pending: number;
     };
@@ -3241,7 +3243,7 @@ router.get('/stats/export', authenticate, requireSuperAdmin, async (req: Request
       const fail = Number(sms.fail_count || 0) + kakao.fail;
       const pending = Number(sms.pending_count || 0) + kakao.pending;
 
-      const key = `${c.send_date}|${c.company_id}|${c.created_by || ''}|${c.message_type || ''}|${c.send_type || ''}`;
+      const key = `${c.send_date}|${c.company_id}|${c.created_by || ''}|${c.message_type || ''}|${c.send_channel || ''}|${c.send_type || ''}`;
       if (!exportByKey.has(key)) {
         exportByKey.set(key, {
           send_date: c.send_date,
@@ -3250,6 +3252,7 @@ router.get('/stats/export', authenticate, requireSuperAdmin, async (req: Request
           login_id: c.login_id,
           user_name: c.user_name,
           message_type: c.message_type,
+          send_channel: c.send_channel,
           send_type: c.send_type,
           campaign_count: 0, total_target: 0,
           total_sent: 0, total_success: 0, total_fail: 0, total_pending: 0,
@@ -3287,7 +3290,7 @@ router.get('/stats/export', authenticate, requireSuperAdmin, async (req: Request
       csvEscape(r.company_name),
       csvEscape(r.login_id || '-'),
       csvEscape(r.user_name || '-'),
-      r.message_type,
+      getCampaignChannelLabel(r.send_channel, r.message_type),
       r.send_type === 'auto' ? '자동' : r.send_type === 'direct' ? '직접' : 'AI',
       r.campaign_count,
       r.total_target,

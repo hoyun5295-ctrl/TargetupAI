@@ -170,6 +170,42 @@ export const SUCCESS_CODES_SQL = SUCCESS_CODES.join(', ');
 /** SQL용: 대기 코드 IN 절 문자열 — 예: "100, 104" */
 export const PENDING_CODES_SQL = PENDING_CODES.join(', ');
 
+/**
+ * 발송내역 행별 유형 라벨 (QTmsg SMSQ_SEND의 msg_type + k_oriseq 기반).
+ * 발송내역 상세/엑셀에서 행마다 표시. 카카오 실패 후 LMS 대체발송을 별도 구분.
+ * - 'K'                          → 알림톡
+ * - 'L' + k_oriseq(원본 K행 seqno) → 카카오실패 대체발송
+ * - 'L'                          → LMS
+ * - 'S'                          → SMS
+ * - 'M'                          → MMS
+ * - 그 외(IMC '카카오(TEXT)' 등)   → 원본 그대로
+ */
+export function getSendTypeLabel(msgType: string, kOriseq?: number | string | null): string {
+  if (msgType === 'K') return '알림톡';
+  if (msgType === 'L') {
+    const ori = Number(kOriseq);
+    if (kOriseq != null && kOriseq !== '' && !Number.isNaN(ori) && ori > 0) {
+      return '카카오실패 대체발송';
+    }
+    return 'LMS';
+  }
+  if (msgType === 'S') return 'SMS';
+  if (msgType === 'M') return 'MMS';
+  return msgType;
+}
+
+/**
+ * 통계/엑셀 문자타입 라벨 (캠페인 send_channel + message_type 기반).
+ * 알림톡 캠페인은 message_type이 'LMS'로 저장되므로 send_channel로 구분.
+ * 정산 단가는 message_type 기준 유지, 화면 표기만 알림톡으로 분리.
+ * - send_channel='alimtalk' → 알림톡
+ * - 그 외 → message_type (SMS/LMS/MMS)
+ */
+export function getCampaignChannelLabel(sendChannel: string | null | undefined, messageType: string): string {
+  if (sendChannel === 'alimtalk') return '알림톡';
+  return messageType;
+}
+
 // ========================
 // Part 2: 통신사 코드 매핑
 // ========================

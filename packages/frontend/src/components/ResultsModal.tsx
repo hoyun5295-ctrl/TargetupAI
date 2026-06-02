@@ -919,6 +919,7 @@ export default function ResultsModal({ onClose, token, customerDbEnabled, isSubs
                   <thead className="bg-slate-50 sticky top-0 z-[110]">
                     <tr>
                       <th className="px-3 py-2.5 text-center text-xs font-semibold text-slate-500 w-12">#</th>
+                      <th className="px-3 py-2.5 text-left text-xs font-semibold text-slate-500">유형</th>
                       <th className="px-3 py-2.5 text-left text-xs font-semibold text-slate-500">수신번호</th>
                       <th className="px-3 py-2.5 text-left text-xs font-semibold text-slate-500">회신번호</th>
                       <th className="px-3 py-2.5 text-left text-xs font-semibold text-slate-500">메시지내용</th>
@@ -931,9 +932,9 @@ export default function ResultsModal({ onClose, token, customerDbEnabled, isSubs
                   </thead>
                   <tbody>
                     {messageLoading ? (
-                      <tr><td colSpan={9} className="py-10 text-center text-slate-400">조회 중...</td></tr>
+                      <tr><td colSpan={10} className="py-10 text-center text-slate-400">조회 중...</td></tr>
                     ) : messages.length === 0 ? (
-                      <tr><td colSpan={9} className="py-10 text-center text-slate-400">
+                      <tr><td colSpan={10} className="py-10 text-center text-slate-400">
                         {selectedCampaign?.status === 'cancelled'
                           ? '취소된 캠페인입니다. 대기중이던 메시지는 취소 시 삭제되었습니다.'
                           : messageSearchValue ? '검색 결과가 없습니다.' : '데이터가 없습니다.'}
@@ -945,6 +946,7 @@ export default function ResultsModal({ onClose, token, customerDbEnabled, isSubs
                         return (
                           <tr key={m.seqno} className="border-t hover:bg-slate-50 transition-colors">
                             <td className="px-3 py-2.5 text-center text-xs text-slate-400">{(messagePage - 1) * messagePerPage + idx + 1}</td>
+                            <td className="px-3 py-2.5 text-xs whitespace-nowrap text-slate-600">{m.send_type || '-'}</td>
                             <td className="px-3 py-2.5 font-mono text-xs whitespace-nowrap">{formatPhone(m.dest_no)}</td>
                             <td className="px-3 py-2.5 font-mono text-xs text-slate-600 whitespace-nowrap">{formatPhone(m.call_back)}</td>
                             <MessageCell
