@@ -16,6 +16,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import SenderRegistrationWizard from './SenderRegistrationWizard';
 import UnsubscribeSettingModal from './UnsubscribeSettingModal';
+import ConfirmModal, { type ConfirmState } from '../ConfirmModal';
 
 type ApprovalStatus = 'PENDING_APPROVAL' | 'APPROVED' | 'REJECTED';
 
@@ -88,6 +89,7 @@ export default function AlimtalkSendersSection() {
   const [rejectTarget, setRejectTarget] = useState<Sender | null>(null);
   const [rejectReason, setRejectReason] = useState('');
   const [submittingAction, setSubmittingAction] = useState(false);
+  const [confirm, setConfirm] = useState<ConfirmState | null>(null);
 
   const load = async () => {
     setLoading(true);
@@ -165,33 +167,47 @@ export default function AlimtalkSendersSection() {
     }
   };
 
-  const releaseDormant = async (s: Sender) => {
-    if (!confirm(`'${s.profile_name}' 프로필의 휴면을 해제할까요?`)) return;
-    const res = await fetch(`/api/alimtalk/senders/${s.id}/release`, {
-      method: 'PUT',
-      headers: { Authorization: `Bearer ${getToken()}` },
+  const releaseDormant = (s: Sender) => {
+    setConfirm({
+      mode: 'warning',
+      title: '휴면 해제',
+      description: `'${s.profile_name}' 프로필의 휴면을 해제할까요?`,
+      confirmLabel: '해제',
+      onConfirm: async () => {
+        const res = await fetch(`/api/alimtalk/senders/${s.id}/release`, {
+          method: 'PUT',
+          headers: { Authorization: `Bearer ${getToken()}` },
+        });
+        const data = await res.json();
+        setToast(data.success ? '휴면 해제 완료' : data?.error || '실패');
+        load();
+      },
     });
-    const data = await res.json();
-    setToast(data.success ? '휴면 해제 완료' : data?.error || '실패');
-    load();
   };
 
-  const approveSender = async (s: Sender) => {
-    if (!confirm(`'${s.profile_name}' 발신프로필을 승인합니다. 계속할까요?`)) return;
-    setSubmittingAction(true);
-    try {
-      const res = await fetch(`/api/alimtalk/senders/${s.id}/approve`, {
-        method: 'PUT',
-        headers: { Authorization: `Bearer ${getToken()}` },
-      });
-      const data = await res.json();
-      setToast(data.success ? '승인 처리 완료' : data?.error || '승인 실패');
-      load();
-    } catch (e: any) {
-      setToast(e?.message || '승인 실패');
-    } finally {
-      setSubmittingAction(false);
-    }
+  const approveSender = (s: Sender) => {
+    setConfirm({
+      mode: 'default',
+      title: '발신프로필 승인',
+      description: `'${s.profile_name}' 발신프로필을 승인합니다. 계속할까요?`,
+      confirmLabel: '승인',
+      onConfirm: async () => {
+        setSubmittingAction(true);
+        try {
+          const res = await fetch(`/api/alimtalk/senders/${s.id}/approve`, {
+            method: 'PUT',
+            headers: { Authorization: `Bearer ${getToken()}` },
+          });
+          const data = await res.json();
+          setToast(data.success ? '승인 처리 완료' : data?.error || '승인 실패');
+          load();
+        } catch (e: any) {
+          setToast(e?.message || '승인 실패');
+        } finally {
+          setSubmittingAction(false);
+        }
+      },
+    });
   };
 
   const submitReject = async () => {
@@ -246,6 +262,7 @@ export default function AlimtalkSendersSection() {
 
   return (
     <div className="bg-white rounded-lg shadow">
+      <ConfirmModal state={confirm} onClose={() => setConfirm(null)} />
       {/* 섹션 헤더 */}
       <div className="px-6 py-4 border-b flex justify-between items-center">
         <div>

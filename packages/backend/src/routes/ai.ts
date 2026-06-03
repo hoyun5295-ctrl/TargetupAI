@@ -2966,14 +2966,15 @@ router.post('/operator/journeys/:id/pause', async (req: Request, res: Response) 
 router.post('/operator/journeys/:id/pretest-validate', async (req: Request, res: Response) => {
   try {
     const companyId = req.user?.companyId;
-    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+    const userId = req.user?.userId;
+    if (!companyId || !userId) return res.status(403).json({ success: false, error: '회사/사용자 권한이 필요합니다.' });
     const planCtx = await loadPlanContext(companyId);
     if (!planCtx) return res.status(404).json({ success: false, error: '회사 정보를 찾을 수 없습니다.' });
     if (!isAiOperatorAllowed(planCtx, req.user)) {
       return res.status(403).json({ success: false, error: 'AI Operator 진입 권한이 없습니다.', code: 'AI_OPERATOR_GATED' });
     }
 
-    const result = await validateJourneyForActivation(companyId, req.params.id);
+    const result = await validateJourneyForActivation(companyId, req.params.id, userId);
     return res.json({ success: true, ...result });
   } catch (err: any) {
     // ★ D214+ db_alter_safety_net 정합 — DB 마이그레이션 미실행 시 503 + 사용자 친화 안내

@@ -55,6 +55,7 @@ export interface ValidationResult {
 export async function validateJourneyForActivation(
   companyId: string,
   journeyId: string,
+  userId: string,
 ): Promise<ValidationResult> {
   // 1. step 조회 (step_type='message'만 — wait/condition 검증 제외)
   const stepsRes = await query(
@@ -142,7 +143,7 @@ export async function validateJourneyForActivation(
           const batchId = `jpt_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
           const enqueueResult = await enqueueSpamTest({
             companyId,
-            userId: '00000000-0000-0000-0000-000000000000',
+            userId,
             callbackNumber: step.callback_number || '',
             messageContentSms: step.channel === 'sms' ? msg.body : '',
             messageContentLms: step.channel !== 'sms' ? msg.body : '',

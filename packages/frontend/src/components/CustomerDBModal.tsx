@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { formatDate, formatPreviewValue, formatPhoneNumber, compactTimestamp } from '../utils/formatDate';
+import { useToast } from './ToastProvider';
 
 interface CustomerDBModalProps {
   onClose: () => void;
@@ -8,6 +9,7 @@ interface CustomerDBModalProps {
 }
 
 export default function CustomerDBModal({ onClose, token, userType }: CustomerDBModalProps) {
+  const toast = useToast();
   const [customers, setCustomers] = useState<any[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
@@ -323,7 +325,7 @@ export default function CustomerDBModal({ onClose, token, userType }: CustomerDB
       window.URL.revokeObjectURL(url);
     } catch (err: any) {
       console.error('고객 DB 다운로드 실패:', err);
-      alert(`다운로드 실패: ${err?.message || '알 수 없는 오류'}`);
+      toast.error(`다운로드 실패: ${err?.message || '알 수 없는 오류'}`);
     } finally {
       setDownloading(false);
     }

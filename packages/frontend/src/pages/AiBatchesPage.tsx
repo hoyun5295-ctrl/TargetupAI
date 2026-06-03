@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { AlertCircle, ArrowLeft, CheckCircle2, Layers, Loader2, RefreshCw, XCircle, Zap } from 'lucide-react';
+import { useToast } from '../components/ToastProvider';
 
 // ★ D181 (2026-05-19): Anthropic Batch API 모니터링 페이지
 //   대량 발송 50% 비용 절감 — 24h SLA. 회사 admin이 진행 상태 확인 + manual poll
@@ -31,6 +32,7 @@ const STATUS_META: Record<BatchStatus, { label: string; cls: string; icon: typeo
 
 export default function AiBatchesPage() {
   const navigate = useNavigate();
+  const toast = useToast();
   const [batches, setBatches] = useState<BatchJob[]>([]);
   const [loading, setLoading] = useState(true);
   const [pollingId, setPollingId] = useState<string | null>(null);
@@ -69,9 +71,9 @@ export default function AiBatchesPage() {
       });
       const data = await res.json();
       if (data.success) await load();
-      else alert(data.error || 'poll 실패');
+      else toast.error(data.error || 'poll 실패');
     } catch (e: any) {
-      alert(e?.message || 'poll 중 오류');
+      toast.error(e?.message || 'poll 중 오류');
     } finally {
       setPollingId(null);
     }

@@ -7,6 +7,7 @@ import { Sparkles, Users, Server, Cpu, Check } from 'lucide-react';
 import CreditSummaryBar from '../components/credit/CreditSummaryBar';
 import CreditRechargeModal from '../components/credit/CreditRechargeModal';
 import { PLAN_INFRA, creditConversions, planBonusPct, COMMON_SERVICE_LINE } from '../constants/credit';
+import { useToast } from '../components/ToastProvider';
 
 interface Plan {
   id: string;
@@ -33,6 +34,7 @@ interface CompanyInfo {
 
 export default function PricingPage() {
   const navigate = useNavigate();
+  const toast = useToast();
   const { user } = useAuthStore();
   const [plans, setPlans] = useState<Plan[]>([]);
   const [myCredit, setMyCredit] = useState<any>(null);
@@ -147,7 +149,7 @@ export default function PricingPage() {
 
   const handleInquirySubmit = async () => {
     if (!inquiryForm.contactName || !inquiryForm.phone || !inquiryForm.email || !inquiryForm.subject || !inquiryForm.message) {
-      alert('필수 항목을 모두 입력해주세요.');
+      toast.warning('필수 항목을 모두 입력해주세요.');
       return;
     }
     setInquirySubmitting(true);
@@ -164,10 +166,10 @@ export default function PricingPage() {
         setShowSuccessModal(true);
       } else {
         const data = await res.json();
-        alert(data.error || '문의 전송에 실패했습니다.');
+        toast.error(data.error || '문의 전송에 실패했습니다.');
       }
     } catch {
-      alert('문의 전송 중 오류가 발생했습니다.');
+      toast.error('문의 전송 중 오류가 발생했습니다.');
     } finally {
       setInquirySubmitting(false);
     }
@@ -203,11 +205,11 @@ export default function PricingPage() {
           setShowRequestModal(false);
           setHasPending(true);
         } else {
-          alert(data.error || '신청 실패');
+          toast.error(data.error || '신청 실패');
         }
       }
     } catch (error) {
-      alert('신청 중 오류가 발생했습니다.');
+      toast.error('신청 중 오류가 발생했습니다.');
     } finally {
       setSubmitting(false);
     }

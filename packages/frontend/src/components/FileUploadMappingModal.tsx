@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import UploadMappingConflictModal, { type MappingConflict, type ConflictResolution } from './UploadMappingConflictModal';
 import { formatPreviewValue } from '../utils/formatDate';
+import { useToast } from './ToastProvider';
 
 // ─── 타입 ───
 
@@ -40,6 +41,7 @@ const CATEGORY_ORDER = ['basic', 'purchase', 'store', 'membership', 'marketing']
 // ─── 컴포넌트 ───
 
 export default function FileUploadMappingModal({ show, onClose, onSaveStart, onPlanLimitExceeded }: FileUploadMappingModalProps) {
+  const toast = useToast();
   // Step
   const [step, setStep] = useState<'upload' | 'mapping'>('upload');
 
@@ -157,10 +159,10 @@ export default function FileUploadMappingModal({ show, onClose, onSaveStart, onP
         setFileTotalRows(data.totalRows);
         setFileId(data.fileId);
       } else {
-        alert(data.error || '파일 처리 실패');
+        toast.error(data.error || '파일 처리 실패');
       }
     } catch {
-      alert('파일 업로드 중 오류가 발생했습니다.');
+      toast.error('파일 업로드 중 오류가 발생했습니다.');
     } finally {
       setLoading(false);
     }
@@ -194,10 +196,10 @@ export default function FileUploadMappingModal({ show, onClose, onSaveStart, onP
         setCustomSlots(slots);
         setStep('mapping');
       } else {
-        alert(data.error || '매핑 실패');
+        toast.error(data.error || '매핑 실패');
       }
     } catch {
-      alert('매핑 중 오류가 발생했습니다.');
+      toast.error('매핑 중 오류가 발생했습니다.');
     } finally {
       setLoading(false);
     }
@@ -302,7 +304,7 @@ export default function FileUploadMappingModal({ show, onClose, onSaveStart, onP
       });
       const validateData = await validateRes.json();
       if (!validateRes.ok || !validateData.success) {
-        alert(validateData.error || '매핑 검증 실패');
+        toast.error(validateData.error || '매핑 검증 실패');
         setLoading(false);
         return;
       }
@@ -324,7 +326,7 @@ export default function FileUploadMappingModal({ show, onClose, onSaveStart, onP
       // 충돌 없음 → 저장
       await handleSaveCore(mapping, customLabels);
     } catch {
-      alert('저장 요청 중 오류가 발생했습니다.');
+      toast.error('저장 요청 중 오류가 발생했습니다.');
       setLoading(false);
     }
   };
@@ -351,7 +353,7 @@ export default function FileUploadMappingModal({ show, onClose, onSaveStart, onP
         return;
       }
       if (!data.success) {
-        alert(data.error || '저장 실패');
+        toast.error(data.error || '저장 실패');
         setLoading(false);
         return;
       }
@@ -359,7 +361,7 @@ export default function FileUploadMappingModal({ show, onClose, onSaveStart, onP
       onSaveStart(fileId, data.totalRows || fileTotalRows);
       onClose();
     } catch {
-      alert('저장 요청 중 오류가 발생했습니다.');
+      toast.error('저장 요청 중 오류가 발생했습니다.');
     } finally {
       setLoading(false);
     }

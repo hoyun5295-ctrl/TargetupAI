@@ -8,6 +8,7 @@
 const MAX_ALARM_USERS = 3;
 
 import { useEffect, useState } from 'react';
+import ConfirmModal, { type ConfirmState } from '../ConfirmModal';
 
 interface AlarmUser {
   id: string;
@@ -31,6 +32,7 @@ export default function AlarmUserManager({ onClose }: Props) {
   const [users, setUsers] = useState<AlarmUser[]>([]);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [confirm, setConfirm] = useState<ConfirmState | null>(null);
 
   const [newName, setNewName] = useState('');
   const [newPhone, setNewPhone] = useState('');
@@ -102,19 +104,27 @@ export default function AlarmUserManager({ onClose }: Props) {
     load();
   };
 
-  const remove = async (u: AlarmUser) => {
-    if (!confirm(`'${u.phone_number}' 수신자를 삭제할까요?`)) return;
-    await fetch(`/api/alimtalk/alarm-users/${u.id}`, {
-      method: 'DELETE',
-      headers: { Authorization: `Bearer ${getToken()}` },
+  const remove = (u: AlarmUser) => {
+    setConfirm({
+      mode: 'danger',
+      title: '수신자 삭제',
+      description: `'${u.phone_number}' 수신자를 삭제할까요?`,
+      confirmLabel: '삭제',
+      onConfirm: async () => {
+        await fetch(`/api/alimtalk/alarm-users/${u.id}`, {
+          method: 'DELETE',
+          headers: { Authorization: `Bearer ${getToken()}` },
+        });
+        load();
+      },
     });
-    load();
   };
 
   const activeCount = users.filter((u) => u.active_yn === 'Y').length;
 
   return (
     <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+      <ConfirmModal state={confirm} onClose={() => setConfirm(null)} />
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden flex flex-col max-h-[85vh]">
         <div className="px-6 py-4 border-b bg-gradient-to-r from-amber-50 to-white flex justify-between items-center">
           <div>
