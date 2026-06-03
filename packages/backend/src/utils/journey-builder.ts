@@ -800,6 +800,7 @@ export async function updateJourneyStep(
        target_hour_kst = COALESCE($19, target_hour_kst),
        notify_manager_on_pretest = CASE WHEN $20::boolean IS NULL AND $21::boolean = false THEN notify_manager_on_pretest ELSE $20::boolean END
      WHERE id = $1::uuid AND journey_id = $2::uuid
+       AND EXISTS (SELECT 1 FROM journeys j WHERE j.id = $2::uuid AND j.company_id = $3::uuid)
      RETURNING id`,
     [
       stepId,
