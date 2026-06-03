@@ -200,7 +200,7 @@ ${memoryContext}
 6. subject (제목): LMS/MMS 채널 시 필수 — 한 줄 20자 안 / 본문 핵심을 단순 요약 / 호기심 유발 / 시즌감
    ★ Harold 명시 영구 룰: 제목은 변수(%고객명% / %이름% 등) + Liquid 문법({{ }} / {% %}) 절대 사용 금지. 모든 수신자에게 동일 단순 텍스트만 사용 (가독성 + 통신사 표시 영역 좁음 + 개인화는 본문에서).
    좋은 예시: "곧 다가올 생일을 미리 축하해요" / "VIP만 받는 봄 안내" / "오랜만에 안부 전해요" / "이번 달 감사 인사" / "봄나들이 시즌 새 소식"
-   나쁜 예시: "%고객명%님, 곧 생일이에요" (변수 X) / "{{ customer.name }}님 안내" (Liquid X)
+   나쁜 예시: "%고객명%님, 곧 생일이에요" (변수 X) / "{{ customer.name | default: '고객' }}님 안내" (Liquid X)
    SMS 채널은 빈 문자열 ""로 응답 (제목 없음).
 7. allow_reentry / reentry_cooldown_days: 시리즈에 맞춰 자동 결정
    - 가입 온보딩: false / null
@@ -257,7 +257,7 @@ ${memoryContext}
 ✗ "안녕하세요 고객님" — 금지 (시즌감 / 질문 / 숫자로 시작)
 ✗ "특별한 혜택 / 소식 / 선물" — 금지 (구체 혜택 placeholder 사용)
 ✗ "준비했어요 / 준비했습니다" — 금지 ("지금 ~할 수 있어요" 또는 시즌 도입부로)
-✗ "소중한 고객님" — 금지 (%고객명% 또는 {{ customer.name }} 직접 활용)
+✗ "소중한 고객님" — 금지 (%고객명% 또는 {{ customer.name | default: '고객' }} 직접 활용)
 ✗ "다양한 혜택" — 금지 (핵심 1가지 구체 placeholder)
 ✗ "많은 관심 부탁드립니다" — 금지 (구체 CTA로)
 ✗ 느낌표 폭탄 (!!!) — 전체에서 최대 2~3개
@@ -265,8 +265,9 @@ ${memoryContext}
 
 [★ Liquid 동적 콘텐츠 — D191 강화 (사용자별 1:1 개인화)]
 회사 admin이 고급 1:1 동적 콘텐츠를 원할 때 Liquid 문법 활용 권장. 발송 시점 사용자별 자동 분기 + 변수 계산:
-✓ 변수 출력: {{ customer.name }} / {{ customer.grade }} / {{ customer.points }}
+✓ 변수 출력: {{ customer.name | default: '고객' }} / {{ customer.grade }} / {{ customer.points }}
 ✓ 기본값 fallback: {{ customer.name | default: '고객' }} (값 없으면 '고객'으로 자동 대체)
+✓ ★★ 필수 규칙: 모든 {{ customer.X }} 출력 변수에는 반드시 | default 를 붙인다. default 없는 {{ customer.X }}는 값 없는 고객에게 그 자리가 비어 발송되므로 절대 금지. 예: {{ customer.name | default: '고객' }} / {{ customer.grade | default: '' }} / {{ customer.region | default: '' }} (format_number 등 다른 필터가 이미 있으면 그대로 둔다)
 ✓ 숫자 포맷: {{ customer.points | format_number }} → 2,300 (한국 천 단위 콤마 자동)
 ✓ 조건 분기: {% if customer.grade == 'VIP' %} VIP 안내 {% elsif customer.purchase_count > 10 %} 오래 함께한 고객 안내 {% else %} 일반 안내 {% endif %}
 ✓ 계산: {{ customer.points | minus: 1000 }} (포인트 차감) / {{ customer.amount | times: 0.1 | round: 0 }} (10% 환산)
@@ -305,17 +306,17 @@ ${dataProfilePrompt}
 [AI 자율 분기 작성 가이드 — 회사 admin이 "이탈 고객 회복" / "구매 유도" / "AI가 알아서 분기" 영역 명시 시 적극 활용]
 
 예시 1 — 이탈 위험 분기:
-{{ customer.name }}님,
+{{ customer.name | default: '고객' }}님,
 {% if customer.churn_risk > 0.7 %}
 오랜만에 인사드려요. 곧 봄을 맞아 [회복 안내 — 직접 작성해주세요] 준비했어요.
 {% elsif customer.purchase_likelihood > 0.6 %}
-{{ customer.name }}님께 어울리는 새 상품 [추천 안내 — 직접 작성해주세요]
+{{ customer.name | default: '고객' }}님께 어울리는 새 상품 [추천 안내 — 직접 작성해주세요]
 {% else %}
 이번 봄 새로운 소식 전해드려요.
 {% endif %}
 
 예시 2 — 클릭 가능성 + 등급 통합:
-{{ customer.name }}님,
+{{ customer.name | default: '고객' }}님,
 {% if customer.click_score > 0.4 and customer.grade == 'VIP' %}
 VIP 회원님께 먼저 안내드리는 봄 소식.
 {% elsif customer.churn_risk > 0.6 %}
@@ -372,7 +373,7 @@ VIP 회원님께 먼저 안내드리는 봄 소식.
 {{ customer.name | default: '고객' }}님, 안녕하세요.
 
 {% if customer.grade == 'VIP' %}
-저희 매장의 VIP 회원님이신 {{ customer.name }}님께
+저희 매장의 VIP 회원님이신 {{ customer.name | default: '고객' }}님께
 먼저 전하고 싶은 봄 소식이 있어 인사드려요.
 
 오랜 시간 변함없이 찾아주시는 발걸음 하나하나가
@@ -381,17 +382,17 @@ VIP 회원님께 먼저 안내드리는 봄 소식.
 VIP 회원님만을 위해 준비한 이번 봄 특별 안내,
 가장 먼저 받아보실 수 있도록 정성껏 준비했답니다.
 {% elsif customer.purchase_count > 10 %}
-{{ customer.name }}님과 함께한 {{ customer.purchase_count }}번의 만남,
+{{ customer.name | default: '고객' }}님과 함께한 {{ customer.purchase_count }}번의 만남,
 어느덧 오랜 시간 함께해주신 소중한 고객님이 되어주셨네요.
 
 매번 변함없는 신뢰로 찾아주셔서 진심으로 감사드려요.
-{{ customer.name }}님 같은 고객님이 계셔서
+{{ customer.name | default: '고객' }}님 같은 고객님이 계셔서
 저희가 더 좋은 제품과 서비스를 고민할 수 있어요.
 
 봄을 맞아 오래 함께해주신 분들께만 전해드리는 특별한 인사 준비했어요.
 {% else %}
 봄꽃이 한창인 요즘, 새로운 소식 전해드리고 싶어
-{{ customer.name }}님께 인사드려요.
+{{ customer.name | default: '고객' }}님께 인사드려요.
 
 따뜻해진 날씨처럼 마음도 한결 가벼워지는 계절이에요.
 이번 봄, 저희가 준비한 새로운 이야기에

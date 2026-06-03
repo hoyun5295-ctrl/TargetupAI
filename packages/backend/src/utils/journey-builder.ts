@@ -306,7 +306,7 @@ export async function createJourneyFromTemplate(input: CreateJourneyInput): Prom
         step.stepType,
         step.delayHours,
         step.channel || null,
-        step.messageTemplate || null,
+        step.messageTemplate ? applyVariableDefaults(step.messageTemplate) : null,
         step.subject || null,
         step.isAd !== undefined ? !!step.isAd : true,
         step.conditionJsonb ? JSON.stringify(step.conditionJsonb) : null,
@@ -346,6 +346,23 @@ async function loadCompanyContext(companyId: string): Promise<CompanyContext> {
     businessType: row.business_type || null,
     rejectNumber: row.reject_number || null,
   };
+}
+
+/**
+ * Liquid 출력 변수 {{ customer.X }} 중 필터(default 등)가 없는 것에 default를 자동 주입한다.
+ *
+ * AI 생성/사용자 작성 본문에서 일부 변수만 default가 빠지면(예: {{ customer.name }}) 값이 없는
+ * 고객에게 그 자리가 비어 발송된다. 저장 직전 한 번 보정해 모든 customer 변수에 default를 보장한다.
+ * 이미 필터가 있는 변수({{ customer.points | format_number }} 등)는 건드리지 않는다.
+ * name은 '고객'으로, 그 외 필드는 빈 문자열로 대체한다.
+ */
+export function applyVariableDefaults(text: string): string {
+  if (!text) return text;
+  return text.replace(/\{\{\s*(customer\.[a-zA-Z_][a-zA-Z0-9_]*)\s*\}\}/g, (_match, varPath: string) => {
+    const field = varPath.split('.')[1] || '';
+    const def = field === 'name' ? '고객' : '';
+    return `{{ ${varPath} | default: '${def}' }}`;
+  });
 }
 
 function customizeMessage(template: string, ctx: CompanyContext): string {
@@ -806,7 +823,7 @@ export async function updateJourneyStep(
       stepId,
       journeyId,
       companyId,
-      patch.messageTemplate?.slice(0, 2000) ?? null,
+      patch.messageTemplate != null ? applyVariableDefaults(patch.messageTemplate.slice(0, 2000)) : null,
       patch.channel ?? null,
       patch.delayHours != null ? Math.max(0, Math.min(720, Number(patch.delayHours))) : null,
       patch.isAd !== undefined ? !!patch.isAd : null,

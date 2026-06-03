@@ -229,12 +229,17 @@ export default function JourneyMessageEditModal({
           ) : steps.length === 0 ? (
             <div className="h-full flex items-center justify-center text-white/50 text-sm">수정할 문안 단계가 없습니다.</div>
           ) : (
-            <div className="h-full flex gap-4 overflow-x-auto pb-2">
+            <div className={`h-full flex gap-4 pb-2 ${steps.length > 3 ? 'overflow-x-auto' : ''}`}>
               {steps.map((s) => {
                 const needSubject = s.channel === 'lms' || s.channel === 'mms';
                 const undefaulted = findUndefaultedLiquidVars(s.messageTemplate);
                 return (
-                  <div key={s.id} className="w-[360px] shrink-0 h-full flex flex-col rounded-xl bg-white/5 border border-white/10 overflow-hidden">
+                  <div
+                    key={s.id}
+                    className={`h-full flex flex-col rounded-xl bg-white/5 border border-white/10 overflow-hidden ${
+                      steps.length > 3 ? 'w-[360px] shrink-0' : 'flex-1 min-w-0'
+                    }`}
+                  >
                     {/* 컬럼 헤더 */}
                     <div className="p-3 border-b border-white/10 bg-slate-950/40 space-y-2 shrink-0">
                       <div className="flex items-center gap-2 flex-wrap">
