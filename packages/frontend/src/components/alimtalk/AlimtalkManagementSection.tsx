@@ -18,6 +18,7 @@ import UnsubscribeSettingModal from './UnsubscribeSettingModal';
 import TemplateHistoryModal from './TemplateHistoryModal';
 import { formatTemplateType } from './alimtalk-types';
 import { useAuthStore } from '../../stores/authStore';
+import ConfirmModal, { type ConfirmState } from '../ConfirmModal';
 
 interface Template {
   id: string;
@@ -166,6 +167,7 @@ export default function AlimtalkManagementSection() {
   const [inspectionSubmitting, setInspectionSubmitting] = useState(false);
   const [unsubTarget, setUnsubTarget] = useState<Profile | null>(null);
   const [toast, setToast] = useState<string | null>(null);
+  const [confirm, setConfirm] = useState<ConfirmState | null>(null);
 
   // ★ D150-2 (2026-05-09): 슈퍼관리자 전용 변경 이력 조회 모달
   const [historyTarget, setHistoryTarget] = useState<{
@@ -323,32 +325,46 @@ export default function AlimtalkManagementSection() {
     }
   };
 
-  const cancelInspect = async (t: Template) => {
-    if (!confirm('검수요청을 취소할까요?')) return;
-    const res = await fetch(
-      `/api/alimtalk/templates/${t.template_code}/cancel-inspect`,
-      { method: 'PUT', headers: { Authorization: `Bearer ${getToken()}` } },
-    );
-    const data = await res.json();
-    setToast(data.success ? '검수요청 취소' : data?.error || '실패');
-    load();
+  const cancelInspect = (t: Template) => {
+    setConfirm({
+      mode: 'warning',
+      title: '검수요청 취소',
+      description: '검수요청을 취소할까요?',
+      confirmLabel: '취소 요청',
+      onConfirm: async () => {
+        const res = await fetch(
+          `/api/alimtalk/templates/${t.template_code}/cancel-inspect`,
+          { method: 'PUT', headers: { Authorization: `Bearer ${getToken()}` } },
+        );
+        const data = await res.json();
+        setToast(data.success ? '검수요청 취소' : data?.error || '실패');
+        load();
+      },
+    });
   };
 
-  const remove = async (t: Template) => {
+  const remove = (t: Template) => {
     // ★ D139 #4-1 (0425): 삭제는 등록(DRAFT) 상태에서만 허용 (직원 검수 요청 정책).
     // ★ D152-4 (2026-05-12): IMC 6단계 정합 — DRAFT + REG(IMC raw) 둘 다 허용.
     if (!['DRAFT', 'REG'].includes(t.status)) {
       setToast('등록 상태에서만 삭제할 수 있습니다.');
       return;
     }
-    if (!confirm(`'${t.template_name || t.template_code}' 템플릿을 삭제할까요?`)) return;
-    const res = await fetch(`/api/alimtalk/templates/${t.template_code}`, {
-      method: 'DELETE',
-      headers: { Authorization: `Bearer ${getToken()}` },
+    setConfirm({
+      mode: 'danger',
+      title: '템플릿 삭제',
+      description: `'${t.template_name || t.template_code}' 템플릿을 삭제할까요?`,
+      confirmLabel: '삭제',
+      onConfirm: async () => {
+        const res = await fetch(`/api/alimtalk/templates/${t.template_code}`, {
+          method: 'DELETE',
+          headers: { Authorization: `Bearer ${getToken()}` },
+        });
+        const data = await res.json();
+        setToast(data.success ? '삭제 완료' : data?.error || '실패');
+        load();
+      },
     });
-    const data = await res.json();
-    setToast(data.success ? '삭제 완료' : data?.error || '실패');
-    load();
   };
 
   const toFormData = (t: Template): Partial<TemplateFormData> => ({
@@ -389,6 +405,7 @@ export default function AlimtalkManagementSection() {
 
   return (
     <div className="space-y-5">
+      <ConfirmModal state={confirm} onClose={() => setConfirm(null)} />
       {/* ── 발신프로필 ───────────────────────────── */}
       <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4">
         <div className="flex items-center justify-between mb-3">

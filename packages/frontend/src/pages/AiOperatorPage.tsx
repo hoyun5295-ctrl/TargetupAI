@@ -31,6 +31,7 @@ import { highlightVars, mergeAndHighlightVars } from '../utils/highlightVars';
 import { useAuthStore } from '../stores/authStore';
 // ★ D210+ (Harold 명시 2026-05-23): SUB_MODULE_CARDS constants/ 모듈 추출 — Walkthrough STEP 6 공통 사용 정합.
 import { SUB_MODULE_CARDS } from '../constants/ai-operator-modules';
+import ConfirmModal, { type ConfirmState } from '../components/ConfirmModal';
 
 // ============================================================
 // 타입 정의
@@ -274,6 +275,7 @@ export default function AiOperatorPage() {
   // ★ D166: 승인 → 발송 흐름 (preview-recipients + /direct-send 2-step)
   const [sending, setSending] = useState(false);
   const [sendError, setSendError] = useState<string | null>(null);
+  const [confirm, setConfirm] = useState<ConfirmState | null>(null);
   const [sendResult, setSendResult] = useState<{
     campaignId: string;
     sentCount: number;
@@ -402,6 +404,39 @@ export default function AiOperatorPage() {
     textareaRef.current?.focus();
   };
 
+  // 실제 발송 실행 — /direct-send 호출 + 결과 반영 (검증/확인 통과 후 진입)
+  const performDirectSend = async (
+    sendBody: Record<string, unknown>,
+    suggestedName: string,
+  ) => {
+    setSending(true);
+    setSendError(null);
+    try {
+      const token = localStorage.getItem('token');
+      const sendRes = await fetch('/api/campaigns/direct-send', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify(sendBody),
+      });
+      const sendData = await sendRes.json();
+      if (!sendRes.ok || !sendData.success) {
+        throw new Error(sendData.error || '발송 처리 실패');
+      }
+      setSendResult({
+        campaignId: sendData.campaignId,
+        sentCount: sendData.sentCount || 0,
+        failCount: sendData.failCount || 0,
+        unsubscribeCount: sendData.unsubscribeCount || 0,
+        message: sendData.message || '',
+        suggestedName,
+      });
+    } catch (err) {
+      setSendError(err instanceof Error ? err.message : '발송 오류가 발생했습니다.');
+    } finally {
+      setSending(false);
+    }
+  };
+
   // ★ D166: 승인 발송 — 2-step (preview-recipients → /direct-send)
   const handleApprove = async () => {
     if (!proposal || sending) return;
@@ -483,50 +518,39 @@ export default function AiOperatorPage() {
         scheduledAt = customDate.toISOString();
       }
 
+      // 3. 발송 페이로드 구성 (기존 /direct-send 재사용 — 검증된 흐름 + 라인그룹/중복제거/회신번호 가드 자동)
+      const sendBody: Record<string, unknown> = {
+        msgType: channel,
+        subject,
+        message: body,
+        callback: previewData.defaultCallback,
+        recipients,
+        adEnabled: !!proposal.channel.isAd,
+        scheduled,
+        scheduledAt,
+        sendChannel: 'sms',
+        dedupEnabled: true,
+        unsubFilterEnabled: true,
+      };
+      const suggestedName = proposal.target.suggestedName || 'AI Operator 캠페인';
+
       // ★ D170+ (Harold 명시 안전장치): 즉시 발송 시 사용자 확인 — 회수 불가 안내
       if (!scheduled) {
         const isAiPast = sendMode === 'aiRecommended';
         const confirmMsg = isAiPast
           ? `AI 추천 시점이 과거이거나 임박해서 ${recipients.length.toLocaleString()}명에게 지금 즉시 발송됩니다.\n발송 후 회수 불가합니다. 진행하시겠습니까?`
           : `${recipients.length.toLocaleString()}명에게 지금 즉시 발송됩니다.\n발송 후 회수 불가합니다. 진행하시겠습니까?`;
-        if (!window.confirm(confirmMsg)) {
-          setSending(false);
-          setSendError(null);
-          return;
-        }
+        setConfirm({
+          mode: 'warning',
+          title: '즉시 발송 — 회수 불가',
+          description: confirmMsg,
+          confirmLabel: '지금 발송',
+          onConfirm: () => performDirectSend(sendBody, suggestedName),
+        });
+        return;
       }
 
-      // 3. 발송 (기존 /direct-send 재사용 — 검증된 흐름 + 라인그룹/중복제거/회신번호 가드 자동)
-      const sendRes = await fetch('/api/campaigns/direct-send', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({
-          msgType: channel,
-          subject,
-          message: body,
-          callback: previewData.defaultCallback,
-          recipients,
-          adEnabled: !!proposal.channel.isAd,
-          scheduled,
-          scheduledAt,
-          sendChannel: 'sms',
-          dedupEnabled: true,
-          unsubFilterEnabled: true,
-        }),
-      });
-      const sendData = await sendRes.json();
-      if (!sendRes.ok || !sendData.success) {
-        throw new Error(sendData.error || '발송 처리 실패');
-      }
-
-      setSendResult({
-        campaignId: sendData.campaignId,
-        sentCount: sendData.sentCount || 0,
-        failCount: sendData.failCount || 0,
-        unsubscribeCount: sendData.unsubscribeCount || 0,
-        message: sendData.message || '',
-        suggestedName: proposal.target.suggestedName || 'AI Operator 캠페인',
-      });
+      await performDirectSend(sendBody, suggestedName);
     } catch (err) {
       setSendError(err instanceof Error ? err.message : '발송 오류가 발생했습니다.');
     } finally {
@@ -545,6 +569,7 @@ export default function AiOperatorPage() {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-violet-900 via-fuchsia-900 to-violet-900 text-white">
+      <ConfirmModal state={confirm} onClose={() => setConfirm(null)} />
       {/* 배경 글로우 — D222+ Phase 1 톤 다운 정정 */}
       <div className="pointer-events-none fixed inset-0 overflow-hidden">
         <div className="absolute -top-40 -left-40 w-[600px] h-[600px] rounded-full bg-fuchsia-400/15 blur-3xl" />

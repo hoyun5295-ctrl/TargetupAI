@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { Wallet, AlertTriangle, X } from 'lucide-react';
 import { useAuthStore } from '../stores/authStore';
 import { COMPANY_NAME } from '../constants/company';
+import { useToast } from './ToastProvider';
 
 interface BalanceInfo {
   billingType: string;
@@ -32,6 +33,7 @@ export default function BalanceModals({
   balanceInfo,
   showInsufficientBalance, setShowInsufficientBalance,
 }: BalanceModalsProps) {
+  const toast = useToast();
   const [chargeStep, setChargeStep] = useState<ChargeStep>('select');
 
   // 무통장입금 영역
@@ -56,9 +58,9 @@ export default function BalanceModals({
         const amt = Number(data.amount || 0);
         const bal = Number(data.newBalance || 0);
         if (data.alreadyProcessed) {
-          alert('이미 처리된 결제입니다.');
+          toast.info('이미 처리된 결제입니다.');
         } else {
-          alert(`결제가 완료되었습니다.\n충전: ${amt.toLocaleString()}원\n잔액: ${bal.toLocaleString()}원`);
+          toast.success(`결제가 완료되었습니다. 충전 ${amt.toLocaleString()}원 · 잔액 ${bal.toLocaleString()}원`);
         }
         setShowChargeModal(false);
         setChargeStep('select');
@@ -66,7 +68,7 @@ export default function BalanceModals({
       } else if (data.status === 'cancelled') {
         // 사용자 취소 = 별도 안내 X
       } else if (data.status === 'failed') {
-        alert(`결제 실패: ${data.resultMsg || '알 수 없는 오류'}`);
+        toast.error(`결제 실패: ${data.resultMsg || '알 수 없는 오류'}`);
       }
     }
     window.addEventListener('message', handleMessage);
@@ -75,9 +77,9 @@ export default function BalanceModals({
 
   async function handleCardSubmit() {
     const amt = Number(cardAmount);
-    if (!amt || amt < 1000) { alert('1,000원 이상 입력해주세요.'); return; }
-    if (amt > 100_000_000) { alert('1억원 이하 입력해주세요.'); return; }
-    if (!cardBuyerName.trim()) { alert('구매자명을 입력해주세요.'); return; }
+    if (!amt || amt < 1000) { toast.error('1,000원 이상 입력해주세요.'); return; }
+    if (amt > 100_000_000) { toast.error('1억원 이하 입력해주세요.'); return; }
+    if (!cardBuyerName.trim()) { toast.error('구매자명을 입력해주세요.'); return; }
 
     setCardSubmitting(true);
     try {
@@ -93,7 +95,7 @@ export default function BalanceModals({
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
-        alert(err.error || '결제 준비 실패');
+        toast.error(err.error || '결제 준비 실패');
         setCardSubmitting(false);
         return;
       }
@@ -101,7 +103,7 @@ export default function BalanceModals({
       await loadInicisStdPay(form.stdpayUrl);
       submitInicisForm(form);
     } catch (e: any) {
-      alert(`네트워크 오류: ${e.message || e}`);
+      toast.error(e?.message || '네트워크 오류가 발생했습니다.');
     } finally {
       setCardSubmitting(false);
     }
@@ -409,8 +411,8 @@ export default function BalanceModals({
                 <div className="px-6 pb-6 space-y-2">
                   <button
                     onClick={async () => {
-                      if (!depositAmount || Number(depositAmount) < 1000) return alert('1,000원 이상 입력해주세요.');
-                      if (!depositorName.trim()) return alert('입금자명을 입력해주세요.');
+                      if (!depositAmount || Number(depositAmount) < 1000) { toast.error('1,000원 이상 입력해주세요.'); return; }
+                      if (!depositorName.trim()) { toast.error('입금자명을 입력해주세요.'); return; }
                       setDepositSubmitting(true);
                       try {
                         const res = await fetch('/api/balance/deposit-request', {
@@ -422,9 +424,9 @@ export default function BalanceModals({
                           setDepositSuccess(true);
                         } else {
                           const err = await res.json();
-                          alert(err.error || '요청 실패');
+                          toast.error(err.error || '요청 실패');
                         }
-                      } catch (e) { alert('네트워크 오류'); }
+                      } catch (e) { toast.error('네트워크 오류'); }
                       setDepositSubmitting(false);
                     }}
                     disabled={depositSubmitting || !depositAmount || !depositorName.trim()}
@@ -584,6 +586,6 @@ function submitInicisForm(form: any) {
   try {
     (window as any).INIStdPay.pay('SendPayForm_id');
   } catch (e: any) {
-    alert(`결제창 호출 실패: ${e?.message || e}`);
+    throw new Error(`결제창 호출 실패: ${e?.message || e}`);
   }
 }

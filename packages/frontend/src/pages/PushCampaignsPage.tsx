@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { AlertCircle, ArrowLeft, Bell, Loader2, RefreshCw, Send } from 'lucide-react';
+import { useToast } from '../components/ToastProvider';
+import ConfirmModal, { type ConfirmState } from '../components/ConfirmModal';
 
 // ★ D175-A (2026-05-19): Web Push 캠페인 발송 + 구독자 수 모니터링
 //   BUSINESS+ 베타 게이팅 (백엔드 isCdpEnabledForPlan).
@@ -35,6 +37,8 @@ export default function PushCampaignsPage() {
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [lastResult, setLastResult] = useState<{ success: number; fail: number; total: number } | null>(null);
+  const [confirm, setConfirm] = useState<ConfirmState | null>(null);
+  const toast = useToast();
 
   const token = () => localStorage.getItem('token');
 
@@ -58,12 +62,7 @@ export default function PushCampaignsPage() {
 
   useEffect(() => { load(); }, []);
 
-  const handleSend = async () => {
-    if (!title.trim() || !body.trim()) {
-      alert('제목과 본문은 필수입니다.');
-      return;
-    }
-    if (!confirm(`${stats?.active || 0}명의 구독자에게 Web Push를 발송하시겠습니까?`)) return;
+  const doSend = async () => {
     setSending(true);
     setError(null);
     setLastResult(null);
@@ -88,8 +87,23 @@ export default function PushCampaignsPage() {
     }
   };
 
+  const handleSend = () => {
+    if (!title.trim() || !body.trim()) {
+      toast.error('제목과 본문은 필수입니다.');
+      return;
+    }
+    setConfirm({
+      mode: 'default',
+      title: 'Web Push 발송',
+      description: `${stats?.active || 0}명의 구독자에게 Web Push를 발송하시겠습니까?`,
+      confirmLabel: '발송',
+      onConfirm: doSend,
+    });
+  };
+
   return (
     <div className="min-h-screen bg-gray-50">
+      <ConfirmModal state={confirm} onClose={() => setConfirm(null)} />
       <div className="bg-white border-b">
         <div className="max-w-5xl mx-auto px-6 py-4 flex items-center gap-3">
           <button onClick={() => navigate('/ai-operator')} className="text-gray-500 hover:text-gray-700 p-1">

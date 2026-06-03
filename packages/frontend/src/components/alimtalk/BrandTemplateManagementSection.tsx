@@ -21,6 +21,7 @@ import { useEffect, useState } from 'react';
 import TemplateHistoryModal from './TemplateHistoryModal';
 import BrandTemplateForm from './BrandTemplateForm';
 import { useAuthStore } from '../../stores/authStore';
+import ConfirmModal, { type ConfirmState } from '../ConfirmModal';
 
 interface Profile {
   id: string;
@@ -91,6 +92,7 @@ export default function BrandTemplateManagementSection({ profiles, setToast }: P
     templateKey: string;
     templateName: string;
   } | null>(null);
+  const [confirm, setConfirm] = useState<ConfirmState | null>(null);
 
   const isSuperAdmin = authUser?.userType === 'super_admin';
   const canManage =
@@ -132,43 +134,46 @@ export default function BrandTemplateManagementSection({ profiles, setToast }: P
     ? templates.filter((t) => t.profile_id === profileFilter)
     : templates;
 
-  const remove = async (t: BrandTemplate) => {
-    if (
-      !confirm(
-        `'${t.manage_name || t.template_key}' 템플릿을 삭제할까요?\n\n발송 중인 캠페인이 있다면 영향받을 수 있습니다.`,
-      )
-    )
-      return;
-    try {
-      const res = await fetch(
-        `/api/alimtalk/brand-templates/${encodeURIComponent(t.template_key)}`,
-        {
-          method: 'DELETE',
-          headers: { Authorization: `Bearer ${getToken()}` },
-        },
-      );
-      const data = await res.json();
-      if (data.success) {
-        setToast({ show: true, type: 'success', message: '삭제 완료' });
-        load();
-      } else {
-        setToast({
-          show: true,
-          type: 'error',
-          message: data.error || '삭제 실패',
-        });
-      }
-    } catch (e: any) {
-      setToast({
-        show: true,
-        type: 'error',
-        message: e?.message || '삭제 중 오류',
-      });
-    }
+  const remove = (t: BrandTemplate) => {
+    setConfirm({
+      mode: 'danger',
+      title: '템플릿 삭제',
+      description: `'${t.manage_name || t.template_key}' 템플릿을 삭제할까요?\n\n발송 중인 캠페인이 있다면 영향받을 수 있습니다.`,
+      confirmLabel: '삭제',
+      onConfirm: async () => {
+        try {
+          const res = await fetch(
+            `/api/alimtalk/brand-templates/${encodeURIComponent(t.template_key)}`,
+            {
+              method: 'DELETE',
+              headers: { Authorization: `Bearer ${getToken()}` },
+            },
+          );
+          const data = await res.json();
+          if (data.success) {
+            setToast({ show: true, type: 'success', message: '삭제 완료' });
+            load();
+          } else {
+            setToast({
+              show: true,
+              type: 'error',
+              message: data.error || '삭제 실패',
+            });
+          }
+        } catch (e: any) {
+          setToast({
+            show: true,
+            type: 'error',
+            message: e?.message || '삭제 중 오류',
+          });
+        }
+      },
+    });
   };
 
   return (
     <div className="space-y-4">
+      <ConfirmModal state={confirm} onClose={() => setConfirm(null)} />
       {/* 헤더 */}
       <div className="flex items-center justify-between">
         <div>

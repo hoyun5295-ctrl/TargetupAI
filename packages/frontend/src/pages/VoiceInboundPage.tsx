@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { AlertCircle, ArrowLeft, Loader2, Mic, MicOff, Phone, RefreshCw } from 'lucide-react';
+import { useToast } from '../components/ToastProvider';
+import ConfirmModal, { type ConfirmState } from '../components/ConfirmModal';
 
 // ★ D178 (2026-05-19): 인바운드 AI 음성 응답 페이지
 //   영구 원칙 — 사용자 능동 클릭(인바운드) + 회사 admin 명시 활성 + 트랜스크립트 사후 확인
@@ -28,6 +30,8 @@ export default function VoiceInboundPage() {
   const [loading, setLoading] = useState(true);
   const [toggling, setToggling] = useState(false);
   const [expandedCall, setExpandedCall] = useState<string | null>(null);
+  const [confirm, setConfirm] = useState<ConfirmState | null>(null);
+  const toast = useToast();
 
   const token = () => localStorage.getItem('token');
 
@@ -51,9 +55,8 @@ export default function VoiceInboundPage() {
 
   useEffect(() => { loadAll(); }, []);
 
-  const handleToggle = async () => {
+  const doToggle = async () => {
     if (!status) return;
-    if (!status.enabled && !confirm('인바운드 음성 AI 응답을 활성하시겠습니까? 활성 후 자사몰 사용자가 한줄로 inbound 번호로 통화 시 AI가 자동 응답합니다.')) return;
     setToggling(true);
     try {
       const res = await fetch('/api/voice/toggle', {
@@ -63,16 +66,32 @@ export default function VoiceInboundPage() {
       });
       const data = await res.json();
       if (data.success) await loadAll();
-      else alert(data.error || '토글 실패');
+      else toast.error(data.error || '토글 실패');
     } catch (e: any) {
-      alert(e?.message || '토글 중 오류');
+      toast.error(e?.message || '토글 중 오류');
     } finally {
       setToggling(false);
     }
   };
 
+  const handleToggle = () => {
+    if (!status) return;
+    if (!status.enabled) {
+      setConfirm({
+        mode: 'warning',
+        title: '인바운드 음성 AI 활성',
+        description: '인바운드 음성 AI 응답을 활성하시겠습니까? 활성 후 자사몰 사용자가 한줄로 inbound 번호로 통화 시 AI가 자동 응답합니다.',
+        confirmLabel: '활성',
+        onConfirm: doToggle,
+      });
+      return;
+    }
+    void doToggle();
+  };
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-violet-50">
+      <ConfirmModal state={confirm} onClose={() => setConfirm(null)} />
       <div className="bg-white border-b">
         <div className="max-w-6xl mx-auto px-6 py-4 flex items-center gap-3">
           <button onClick={() => navigate('/ai-operator')} className="text-gray-500 hover:text-gray-700 p-1">

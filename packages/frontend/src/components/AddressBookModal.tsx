@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { cellToString } from '../utils/formatDate';
+import ConfirmModal, { type ConfirmState } from './ConfirmModal';
 
 interface AddressBookModalProps {
   show: boolean;
@@ -44,6 +45,12 @@ export default function AddressBookModal({
   // ★ D219+ Part 2 (2026-05-27): 박과장님 신고 — 기존 그룹에 번호 추가 모드
   //   null = 신규 그룹 신설 모드 / string = 기존 그룹명 (append endpoint 호출 분기)
   const [appendingGroupName, setAppendingGroupName] = useState<string | null>(null);
+  const [confirm, setConfirm] = useState<ConfirmState | null>(null);
+
+  const showError = (message: string) => {
+    setToast({ show: true, type: 'error', message });
+    setTimeout(() => setToast({ show: false, type: 'error', message: '' }), 3000);
+  };
 
 
   // ★ D219+ Part 2 (2026-05-27): 박과장님 신고 — 그룹 단위 xlsx 다운로드
@@ -166,6 +173,7 @@ export default function AddressBookModal({
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[60]">
+      <ConfirmModal state={confirm} onClose={() => setConfirm(null)} />
       <div className="bg-white rounded-xl shadow-2xl w-[750px] max-h-[85vh] overflow-hidden relative">
         {/* ★ D185: 업로드 영역 로딩 오버레이 (모달 본체 absolute 영역) */}
         {isUploading && (
@@ -284,8 +292,8 @@ export default function AddressBookModal({
                 <button
                   onClick={async () => {
                     const valid = directInputRows.filter(r => r.phone.trim().replace(/\D/g, '').length >= 10);
-                    if (valid.length === 0) { alert('유효한 번호를 1건 이상 입력하세요'); return; }
-                    if (!appendingGroupName && !newGroupName.trim()) { alert('그룹명을 입력하세요'); return; }
+                    if (valid.length === 0) { showError('유효한 번호를 1건 이상 입력하세요'); return; }
+                    if (!appendingGroupName && !newGroupName.trim()) { showError('그룹명을 입력하세요'); return; }
                     const token = localStorage.getItem('token');
                     setIsUploading(true);
                     setUploadingMsg(`주소록 ${appendingGroupName ? '추가' : '등록'} 중... ${valid.length.toLocaleString()}건 잠시만 기다려주세요`);
@@ -313,9 +321,9 @@ export default function AddressBookModal({
                         const groupRes = await fetch('/api/address-books/groups', { headers: { Authorization: `Bearer ${token}` } });
                         const groupData = await groupRes.json();
                         if (groupData.success) setAddressGroups(groupData.groups || []);
-                      } else { alert(data.error || '저장 실패'); }
+                      } else { showError(data.error || '저장 실패'); }
                     } catch (err: any) {
-                      alert(`네트워크 오류: ${err?.message || err}`);
+                      showError(`네트워크 오류: ${err?.message || err}`);
                     } finally {
                       setIsUploading(false);
                     }
@@ -364,10 +372,10 @@ export default function AddressBookModal({
                         setAddressFileData(data.allData || data.preview || []);
                         setAddressSaveMode(true);
                       } else {
-                        alert(data.error || '파일 파싱 실패');
+                        showError(data.error || '파일 파싱 실패');
                       }
                     } catch (err: any) {
-                      alert(`파일 파싱 실패: ${err?.message || err}`);
+                      showError(`파일 파싱 실패: ${err?.message || err}`);
                     } finally {
                       setIsUploading(false);
                       e.target.value = '';
@@ -431,11 +439,11 @@ export default function AddressBookModal({
                 <button
                   onClick={async () => {
                     if (!addressColumnMapping.phone) {
-                      alert('수신번호 컬럼을 선택하세요');
+                      showError('수신번호 컬럼을 선택하세요');
                       return;
                     }
                     if (!newGroupName.trim()) {
-                      alert('그룹명을 입력하세요');
+                      showError('그룹명을 입력하세요');
                       return;
                     }
                     const contacts = addressFileData.map((row: any) => ({
@@ -467,10 +475,10 @@ export default function AddressBookModal({
                         const groupData = await groupRes.json();
                         if (groupData.success) setAddressGroups(groupData.groups || []);
                       } else {
-                        alert(data.error || '저장 실패');
+                        showError(data.error || '저장 실패');
                       }
                     } catch (err: any) {
-                      alert(`네트워크 오류: ${err?.message || err}`);
+                      showError(`네트워크 오류: ${err?.message || err}`);
                     } finally {
                       setIsUploading(false);
                     }
@@ -502,7 +510,7 @@ export default function AddressBookModal({
                 <button
                   onClick={async () => {
                     if (!newGroupName.trim()) {
-                      alert('그룹명을 입력하세요');
+                      showError('그룹명을 입력하세요');
                       return;
                     }
                     const token = localStorage.getItem('token');
@@ -524,10 +532,10 @@ export default function AddressBookModal({
                         const groupData = await groupRes.json();
                         if (groupData.success) setAddressGroups(groupData.groups || []);
                       } else {
-                        alert(data.error || '저장 실패');
+                        showError(data.error || '저장 실패');
                       }
                     } catch (err: any) {
-                      alert(`네트워크 오류: ${err?.message || err}`);
+                      showError(`네트워크 오류: ${err?.message || err}`);
                     } finally {
                       setIsUploading(false);
                     }
@@ -645,24 +653,29 @@ export default function AddressBookModal({
                           title="Excel 다운로드"
                         >↓ 다운로드</button>
                         <button
-                          onClick={async () => {
-                            if (!confirm(`"${group.group_name}" 주소록을 삭제하시겠습니까?`)) return;
-                            const token = localStorage.getItem('token');
-                            const res = await fetch(`/api/address-books/${encodeURIComponent(group.group_name)}`, {
-                              method: 'DELETE',
-                              headers: { Authorization: `Bearer ${token}` }
-                            });
-                            const data = await res.json();
-                            if (data.success) {
-                              setAddressGroups(prev => prev.filter(g => g.group_name !== group.group_name));
-                              if (addressViewGroup === group.group_name) {
-                                setAddressViewGroup(null);
-                                setAddressViewContacts([]);
+                          onClick={() => setConfirm({
+                            mode: 'danger',
+                            title: '주소록 삭제',
+                            description: `"${group.group_name}" 주소록을 삭제하시겠습니까?`,
+                            confirmLabel: '삭제',
+                            onConfirm: async () => {
+                              const token = localStorage.getItem('token');
+                              const res = await fetch(`/api/address-books/${encodeURIComponent(group.group_name)}`, {
+                                method: 'DELETE',
+                                headers: { Authorization: `Bearer ${token}` }
+                              });
+                              const data = await res.json();
+                              if (data.success) {
+                                setAddressGroups(prev => prev.filter(g => g.group_name !== group.group_name));
+                                if (addressViewGroup === group.group_name) {
+                                  setAddressViewGroup(null);
+                                  setAddressViewContacts([]);
+                                }
+                                setToast({show: true, type: 'success', message: '삭제되었습니다'});
+                                setTimeout(() => setToast({show: false, type: 'success', message: ''}), 3000);
                               }
-                              setToast({show: true, type: 'success', message: '삭제되었습니다'});
-                              setTimeout(() => setToast({show: false, type: 'success', message: ''}), 3000);
-                            }
-                          }}
+                            },
+                          })}
                           className="px-3 py-1 bg-red-100 text-red-700 rounded hover:bg-red-200 text-sm"
                         >삭제</button>
                       </div>

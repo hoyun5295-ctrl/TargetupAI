@@ -3,6 +3,8 @@
 // 기능: 활성 차단 목록 / 이력 / 즉시 해제 / 수동 차단 추가
 
 import { useEffect, useState } from 'react';
+import { useToast } from '../ToastProvider';
+import ConfirmModal, { type ConfirmState } from '../ConfirmModal';
 
 interface LoginBlock {
   id: string;
@@ -53,6 +55,8 @@ export default function LoginBlocksManagement() {
   const [addDuration, setAddDuration] = useState(30);
   const [addReason, setAddReason] = useState('');
   const [refreshTick, setRefreshTick] = useState(0);
+  const [confirm, setConfirm] = useState<ConfirmState | null>(null);
+  const toast = useToast();
 
   const token = () => localStorage.getItem('token');
 
@@ -108,32 +112,39 @@ export default function LoginBlocksManagement() {
     return () => clearInterval(t);
   }, [tab]);
 
-  const handleUnblock = async (blockId: string) => {
-    if (!window.confirm('이 차단을 즉시 해제하시겠습니까?')) return;
-    try {
-      const res = await fetch(`/api/admin/login-blocks/${blockId}`, {
-        method: 'DELETE',
-        headers: { Authorization: `Bearer ${token()}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ reason: 'admin_unblock' }),
-      });
-      const data = await res.json();
-      if (res.ok && data.success) {
-        setRefreshTick((v) => v + 1);
-      } else {
-        alert(data.error || '해제 실패');
-      }
-    } catch (e: any) {
-      alert(e?.message || '해제 중 오류');
-    }
+  const handleUnblock = (blockId: string) => {
+    setConfirm({
+      mode: 'danger',
+      title: '차단 해제',
+      description: '이 차단을 즉시 해제하시겠습니까?',
+      confirmLabel: '즉시 해제',
+      onConfirm: async () => {
+        try {
+          const res = await fetch(`/api/admin/login-blocks/${blockId}`, {
+            method: 'DELETE',
+            headers: { Authorization: `Bearer ${token()}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ reason: 'admin_unblock' }),
+          });
+          const data = await res.json();
+          if (res.ok && data.success) {
+            setRefreshTick((v) => v + 1);
+          } else {
+            toast.error(data.error || '해제 실패');
+          }
+        } catch (e: any) {
+          toast.error(e?.message || '해제 중 오류');
+        }
+      },
+    });
   };
 
   const handleAddBlock = async () => {
     if (!addIp.trim() || !addLoginId.trim()) {
-      alert('IP와 loginId를 모두 입력해주세요.');
+      toast.error('IP와 loginId를 모두 입력해주세요.');
       return;
     }
     if (!Number.isFinite(addDuration) || addDuration <= 0) {
-      alert('차단 시간은 1분 이상이어야 합니다.');
+      toast.error('차단 시간은 1분 이상이어야 합니다.');
       return;
     }
     try {
@@ -156,15 +167,16 @@ export default function LoginBlocksManagement() {
         setAddReason('');
         setRefreshTick((v) => v + 1);
       } else {
-        alert(data.error || '차단 추가 실패');
+        toast.error(data.error || '차단 추가 실패');
       }
     } catch (e: any) {
-      alert(e?.message || '차단 추가 중 오류');
+      toast.error(e?.message || '차단 추가 중 오류');
     }
   };
 
   return (
     <div className="bg-white rounded-lg shadow">
+      <ConfirmModal state={confirm} onClose={() => setConfirm(null)} />
       <div className="px-6 py-4 border-b flex justify-between items-center">
         <h2 className="text-lg font-semibold">로그인 차단 관리</h2>
         <div className="flex gap-2">

@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react';
 import { useAuthStore } from '../stores/authStore';
 import { formatDateTime, formatCampaignMessageForDisplay } from '../utils/formatDate';
 import MmsImagePreview from './shared/MmsImagePreview';
+import { useToast } from './ToastProvider';
+import ConfirmModal, { type ConfirmState } from './ConfirmModal';
 
 interface CalendarModalProps {
   onClose: () => void;
@@ -15,6 +17,8 @@ export default function CalendarModal({ onClose, token, onEdit, embedded }: Cale
   const [currentDate, setCurrentDate] = useState(new Date());
   const [selectedDate, setSelectedDate] = useState<number | null>(null);
   const [selectedCampaign, setSelectedCampaign] = useState<any>(null);
+  const [confirm, setConfirm] = useState<ConfirmState | null>(null);
+  const toast = useToast();
 
   const year = currentDate.getFullYear();
   const month = currentDate.getMonth();
@@ -76,8 +80,65 @@ export default function CalendarModal({ onClose, token, onEdit, embedded }: Cale
 
   const selectedDateCampaigns = selectedDate ? getCampaignsForDay(selectedDate) : [];
 
+  const cancelScheduled = () => {
+    if (!selectedCampaign) return;
+    setConfirm({
+      mode: 'danger',
+      title: '예약 취소',
+      description: '이 예약을 취소하시겠습니까?',
+      confirmLabel: '예약 취소',
+      onConfirm: async () => {
+        try {
+          const token = localStorage.getItem('token');
+          const res = await fetch(`/api/campaigns/${selectedCampaign.id}/cancel`, {
+            method: 'POST',
+            headers: { Authorization: `Bearer ${token}` },
+          });
+          const data = await res.json();
+          if (data.success) {
+            fetchCampaigns();
+            setSelectedCampaign(null);
+          } else {
+            toast.error(data.error || '예약 취소에 실패했습니다');
+          }
+        } catch (err) {
+          toast.error('서버 연결 오류가 발생했습니다. 잠시 후 다시 시도해주세요.');
+        }
+      },
+    });
+  };
+
+  const cancelDraft = () => {
+    if (!selectedCampaign) return;
+    setConfirm({
+      mode: 'danger',
+      title: '예약 취소',
+      description: `"${selectedCampaign.campaign_name}" 예약을 취소하시겠습니까?`,
+      confirmLabel: '예약 취소',
+      onConfirm: async () => {
+        try {
+          const token = localStorage.getItem('token');
+          const res = await fetch(`/api/campaigns/${selectedCampaign.id}`, {
+            method: 'DELETE',
+            headers: { Authorization: `Bearer ${token}` },
+          });
+          const data = await res.json();
+          if (data.success) {
+            fetchCampaigns();
+            setSelectedCampaign(null);
+          } else {
+            toast.error(data.error || '취소에 실패했습니다');
+          }
+        } catch (err) {
+          toast.error('서버 연결 오류가 발생했습니다. 잠시 후 다시 시도해주세요.');
+        }
+      },
+    });
+  };
+
   const calendarContent = (
     <>
+        <ConfirmModal state={confirm} onClose={() => setConfirm(null)} />
         {/* 헤더 */}
         <div className="flex justify-between items-center p-4 border-b bg-gray-50">
           <button onClick={() => setCurrentDate(new Date(year, month - 1, 1))} className="px-3 py-1 hover:bg-gray-200 rounded">←</button>
@@ -310,25 +371,7 @@ export default function CalendarModal({ onClose, token, onEdit, embedded }: Cale
                   {selectedCampaign.status === 'scheduled' && (
                     <div className="pt-4">
                       <button
-                        onClick={async () => {
-                          if (!window.confirm('이 예약을 취소하시겠습니까?')) return;
-                          try {
-                            const token = localStorage.getItem('token');
-                            const res = await fetch(`/api/campaigns/${selectedCampaign.id}/cancel`, {
-                              method: 'POST',
-                              headers: { Authorization: `Bearer ${token}` }
-                            });
-                            const data = await res.json();
-                            if (data.success) {
-                              fetchCampaigns();
-                              setSelectedCampaign(null);
-                            } else {
-                              alert(data.error || '예약 취소에 실패했습니다');
-                            }
-                          } catch (err) {
-                            alert('서버 연결 오류가 발생했습니다. 잠시 후 다시 시도해주세요.');
-                          }
-                        }}
+                        onClick={cancelScheduled}
                         className="w-full py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 text-sm font-medium transition-colors">
                         🚫 예약 취소
                       </button>
@@ -344,25 +387,7 @@ export default function CalendarModal({ onClose, token, onEdit, embedded }: Cale
                     return (
                     <div className="pt-4">
                       <button
-                        onClick={async () => {
-                          if (!window.confirm(`"${selectedCampaign.campaign_name}" 예약을 취소하시겠습니까?`)) return;
-                          try {
-                            const token = localStorage.getItem('token');
-                            const res = await fetch(`/api/campaigns/${selectedCampaign.id}`, {
-                              method: 'DELETE',
-                              headers: { Authorization: `Bearer ${token}` }
-                            });
-                            const data = await res.json();
-                            if (data.success) {
-                              fetchCampaigns();
-                              setSelectedCampaign(null);
-                            } else {
-                              alert(data.error || '취소에 실패했습니다');
-                            }
-                          } catch (err) {
-                            alert('서버 연결 오류가 발생했습니다. 잠시 후 다시 시도해주세요.');
-                          }
-                        }}
+                        onClick={cancelDraft}
                         disabled={disabled}
                         className={`w-full py-2 rounded-lg text-sm font-medium transition-colors ${
                           disabled ? 'bg-gray-300 text-gray-500 cursor-not-allowed' : 'bg-red-500 text-white hover:bg-red-600'

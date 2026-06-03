@@ -675,10 +675,7 @@ const handleSyncDelete = async (force = false) => {
     if (!res.ok) {
       if (data.code === 'AGENT_ACTIVE') {
         // 활성 Agent — 사용자에게 강제 삭제 여부 확인
-        if (window.confirm(`${data.error}\n\n그래도 강제 삭제하시겠습니까?`)) {
-          await handleSyncDelete(true);
-          return;
-        }
+        showConfirm('강제 삭제', `${data.error}\n\n그래도 강제 삭제하시겠습니까?`, () => { void handleSyncDelete(true); });
         setSyncDeleting(false);
         return;
       }
@@ -850,7 +847,7 @@ const handleSyncRegenerate = async () => {
       setSyncKeys(data.syncKeys);
       setSyncKeyVisible(true);
       setSyncSecretVisible(true);
-      alert(data.message);
+      showAlert('재발급 완료', data.message, 'success');
     }
   } catch (error) {
     console.error('SyncAgent 키 재발급 실패:', error);
@@ -4199,7 +4196,7 @@ const handleApproveRequest = async (id: string) => {
               <button
                 onClick={async () => {
                   const token = localStorage.getItem('token');
-                  if (!statsStartDate || !statsEndDate) { alert('시작일과 종료일을 선택해주세요.'); return; }
+                  if (!statsStartDate || !statsEndDate) { showAlert('안내', '시작일과 종료일을 선택해주세요.', 'warning'); return; }
                   const params = new URLSearchParams();
                   params.set('startDate', statsStartDate);
                   params.set('endDate', statsEndDate);
@@ -4208,7 +4205,7 @@ const handleApproveRequest = async (id: string) => {
                     const res = await fetch(`/api/admin/stats/export?${params.toString()}`, {
                       headers: { Authorization: `Bearer ${token}` },
                     });
-                    if (!res.ok) { const err = await res.json().catch(() => ({})); alert((err as any).error || '다운로드 실패'); return; }
+                    if (!res.ok) { const err = await res.json().catch(() => ({})); showAlert('오류', (err as any).error || '다운로드 실패', 'error'); return; }
                     const blob = await res.blob();
                     const url = URL.createObjectURL(blob);
                     const a = document.createElement('a');
@@ -4216,7 +4213,7 @@ const handleApproveRequest = async (id: string) => {
                     a.download = `발송통계_${statsStartDate}_${statsEndDate}.csv`;
                     a.click();
                     URL.revokeObjectURL(url);
-                  } catch { alert('다운로드 중 오류가 발생했습니다.'); }
+                  } catch { showAlert('오류', '다운로드 중 오류가 발생했습니다.', 'error'); }
                 }}
                 className="px-4 py-1.5 bg-emerald-600 text-white rounded-lg text-sm hover:bg-emerald-700"
               >
@@ -5033,8 +5030,7 @@ const handleApproveRequest = async (id: string) => {
                       <span className="text-sm text-gray-600">업로드 고객 DB: <strong>{Number(editingUser.uploaded_customer_count).toLocaleString()}건</strong></span>
                       <button
                         type="button"
-                        onClick={async () => {
-                          if (!confirm(`이 사용자가 업로드한 고객 ${Number(editingUser.uploaded_customer_count).toLocaleString()}건을 전부 삭제하시겠습니까?\n연관 구매내역도 함께 삭제되며, 복구할 수 없습니다.`)) return;
+                        onClick={() => showConfirm('고객 DB 삭제', `이 사용자가 업로드한 고객 ${Number(editingUser.uploaded_customer_count).toLocaleString()}건을 전부 삭제하시겠습니까?\n연관 구매내역도 함께 삭제되며, 복구할 수 없습니다.`, async () => {
                           try {
                             const token = localStorage.getItem('token');
                             const res = await fetch(`/api/admin/users/${editingUser.id}/customers`, {
@@ -5050,7 +5046,7 @@ const handleApproveRequest = async (id: string) => {
                               showAlert('오류', data.error || '삭제 실패', 'error');
                             }
                           } catch { showAlert('오류', '삭제 실패', 'error'); }
-                        }}
+                        })}
                         className="px-3 py-1 text-xs bg-red-100 text-red-700 rounded-lg hover:bg-red-200"
                       >
                         🗑️ 고객 DB 삭제
@@ -5089,8 +5085,7 @@ const handleApproveRequest = async (id: string) => {
                         </button>
                         <button
                           type="button"
-                          onClick={async () => {
-                            if (!confirm(`이 사용자의 수신거부 ${Number(editingUser.unsubscribe_count).toLocaleString()}건을 전부 삭제하시겠습니까?\n삭제 후 복구할 수 없습니다.`)) return;
+                          onClick={() => showConfirm('수신거부 삭제', `이 사용자의 수신거부 ${Number(editingUser.unsubscribe_count).toLocaleString()}건을 전부 삭제하시겠습니까?\n삭제 후 복구할 수 없습니다.`, async () => {
                             try {
                               const token = localStorage.getItem('token');
                               const res = await fetch(`/api/admin/users/${editingUser.id}/unsubscribes`, {
@@ -5103,7 +5098,7 @@ const handleApproveRequest = async (id: string) => {
                                 setEditingUser({ ...editingUser, unsubscribe_count: 0 });
                               }
                             } catch { showAlert('오류', '삭제 실패', 'error'); }
-                          }}
+                          })}
                           className="px-3 py-1 text-xs bg-red-100 text-red-700 rounded-lg hover:bg-red-200"
                         >
                           🗑️ 전체삭제
@@ -5457,13 +5452,13 @@ const handleApproveRequest = async (id: string) => {
                             });
                             const data = await res.json();
                             if (!res.ok) {
-                              alert(data?.error || 'AI Orchestrator 토글 실패');
+                              showAlert('오류', data?.error || 'AI Orchestrator 토글 실패', 'error');
                               setEditCompany({ ...editCompany, useAiOrchestrator: prev });
                             } else {
-                              alert(data?.message || 'AI Orchestrator 토글 완료');
+                              showAlert('완료', data?.message || 'AI Orchestrator 토글 완료', 'success');
                             }
                           } catch (err: any) {
-                            alert(err?.message || '네트워크 오류');
+                            showAlert('오류', err?.message || '네트워크 오류', 'error');
                             setEditCompany({ ...editCompany, useAiOrchestrator: prev });
                           }
                         }}
@@ -6321,7 +6316,7 @@ const handleApproveRequest = async (id: string) => {
                             </div>
                             {syncKeys.api_key && syncKeyVisible && (
                               <button type="button"
-                                onClick={() => { navigator.clipboard.writeText(syncKeys.api_key || ''); alert('복사되었습니다.'); }}
+                                onClick={() => { navigator.clipboard.writeText(syncKeys.api_key || ''); showAlert('복사 완료', '복사되었습니다.', 'success'); }}
                                 className="px-3 py-2 border rounded-lg text-xs text-gray-600 hover:bg-gray-50 whitespace-nowrap">
                                 복사
                               </button>
@@ -6346,7 +6341,7 @@ const handleApproveRequest = async (id: string) => {
                             </div>
                             {syncKeys.api_secret && syncSecretVisible && (
                               <button type="button"
-                                onClick={() => { navigator.clipboard.writeText(syncKeys.api_secret || ''); alert('복사되었습니다.'); }}
+                                onClick={() => { navigator.clipboard.writeText(syncKeys.api_secret || ''); showAlert('복사 완료', '복사되었습니다.', 'success'); }}
                                 className="px-3 py-2 border rounded-lg text-xs text-gray-600 hover:bg-gray-50 whitespace-nowrap">
                                 복사
                               </button>

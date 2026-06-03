@@ -201,3 +201,28 @@ function highlightPercentVars(
 
   return parts.length > 0 ? parts : [renderedText];
 }
+
+/**
+ * default 필터 없는 Liquid 출력 변수({{ ... }})를 추출.
+ *
+ * `{{ customer.grade | default: '고객' }}`처럼 default 필터가 있으면 값이 없어도 대체값이 나가지만,
+ * `{{ customer.grade }}`는 값이 없으면 그 자리가 통째로 비어 발송 문구의 줄이 빈다.
+ * 작성자에게 default 추가를 권하기 위해 위험한 변수만 모아 반환한다.
+ *
+ * 사용처: JourneyMessageEditModal 빈 변수 경고.
+ *
+ * @param text 메시지 본문
+ * @returns default 없는 {{ }} 출력 변수 목록(중복 제거, 원형 그대로)
+ */
+export function findUndefaultedLiquidVars(text: string): string[] {
+  if (!text) return [];
+  const found: string[] = [];
+  const regex = /\{\{([^}]+)\}\}/g;
+  let match;
+  while ((match = regex.exec(text)) !== null) {
+    // default 필터가 있으면 값 누락 시에도 대체값으로 채워져 안전
+    if (/\|\s*default\s*:/.test(match[1])) continue;
+    found.push(match[0].trim());
+  }
+  return Array.from(new Set(found));
+}
