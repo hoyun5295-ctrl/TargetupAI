@@ -12,6 +12,7 @@
 
 import { query } from '../config/database';
 import { enqueueSpamTest, getSpamTestBatchResults } from './spam-test-queue';
+import { randomUUID } from 'crypto';
 
 export type FailedReason =
   | 'placeholder_unedited'
@@ -140,7 +141,7 @@ export async function validateJourneyForActivation(
       } else if (step.channel === 'sms' || step.channel === 'lms' || step.channel === 'mms') {
         // SMS/LMS/MMS = 스팸필터테스트 진행
         try {
-          const batchId = `jpt_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+          const batchId = randomUUID();
           const enqueueResult = await enqueueSpamTest({
             companyId,
             userId,
