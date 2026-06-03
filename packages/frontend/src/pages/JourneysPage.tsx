@@ -403,12 +403,11 @@ export default function JourneysPage() {
   const [reviewThreshold, setReviewThreshold] = useState('');
 
   // step 수정
-  const [editingStepIdx, setEditingStepIdx] = useState<number | null>(null);
+  const [previewSteps, setPreviewSteps] = useState<Set<number>>(new Set());
   const [refining, setRefining] = useState<{ stepIdx: number; candidates: RefineCandidate[] } | null>(null);
   const [refineLoading, setRefineLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   // ★ D191 (2026-05-22) Phase B-1 Liquid Templating: 미리보기 모달 state
-  const [liquidPreview, setLiquidPreview] = useState<{ stepIdx: number; messageTemplate: string; subject: string } | null>(null);
   const [previewSamples, setPreviewSamples] = useState<PreviewSample[]>([]);
 
   const token = () => localStorage.getItem('token');
@@ -1818,13 +1817,11 @@ export default function JourneysPage() {
               </div>
             </div>
 
-            {/* ★ D210+ Phase 2-fix10 (Harold 명시 2026-05-23): 옛 토글 영역 폐기 — 위/아래 영역 명확 분리 정합.
-                위 본문 박스 = 원본 (변수 강조) / 아래 "실제 발송 미리보기" = 적용 (변수 치환 + Liquid 렌더링 + 광고/무료거부 영역). */}
             {sampleCustomer && (
               <div className="bg-emerald-500/10 border border-emerald-400/30 rounded-lg p-3 text-xs text-emerald-100 flex items-start gap-2">
                 <Sparkles className="w-3.5 h-3.5 mt-0.5 shrink-0 text-emerald-300" />
                 <div>
-                  <span className="font-semibold">타겟 고객 데이터 자동 치환 활성</span> — 각 step 본문은 변수가 강조된 <span className="text-amber-200">원본</span>으로 표시되며, 아래 <span className="text-emerald-200">실제 발송 미리보기</span> 영역에서 실제 발송 형태(변수 치환 + Liquid 렌더링 + 광고/무료거부 합성)를 확인할 수 있어요.
+                  <span className="font-semibold">타겟 고객 데이터 연동됨</span> — 각 step에서 <span className="text-emerald-200">발송 미리보기</span> 토글을 누르면, 추출된 타겟 최상위 고객 기준으로 실제 발송될 형태(변수 치환 + 광고·무료거부)를 볼 수 있어요.
                 </div>
               </div>
             )}
@@ -1868,14 +1865,14 @@ export default function JourneysPage() {
             </div>
 
             {/* Step 시계열 — 가로 3분할 카드 (4개+는 다음 줄 자동 줄바꿈) */}
-            <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-3 items-start">
+            <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-4 items-start">
               {aiPkg.steps.map((s, idx) => {
                 const bytes = getByteLength(s.messageTemplate);
                 const maxBytes = s.channel === 'sms' ? 90 : 2000;
                 const preview = buildPreview(s.messageTemplate, s.isAd, s.channel, opt080Number);
                 const previewBytes = getByteLength(preview);
                 const placeholderWarn = hasPlaceholder(s.messageTemplate);
-                const isEditing = editingStepIdx === idx;
+                const isPreview = previewSteps.has(idx);
 
                 // ★ D188 Phase 2-B-1 (2026-05-21): step_type별 다른 UI — message/wait/condition.
                 //   헤더는 공통 (step_type select 추가) / 본문은 step_type별 분기.
@@ -1884,9 +1881,9 @@ export default function JourneysPage() {
                   s.stepType === 'condition' ? 'bg-emerald-500/20 text-emerald-300' :
                   'bg-fuchsia-500/20 text-fuchsia-300';
                 return (
-                  <div key={idx} className="bg-white/5 border border-white/10 rounded-xl p-4 space-y-2">
-                    {/* 제목바 — step 순번 + 의도 (3분할 카드 상단) */}
-                    <div className="flex items-center gap-2 pb-2 mb-1 border-b border-white/10">
+                  <div key={idx} className="bg-white/[0.04] border border-white/15 rounded-2xl p-4 space-y-3 shadow-lg shadow-black/20">
+                    {/* 제목바 — step 순번 + 의도 (3분할 카드 상단, 유형색 좌측 바) */}
+                    <div className={`flex items-center gap-2 px-3 py-2 mb-1 rounded-lg border-l-4 ${s.stepType === 'wait' ? 'border-sky-400 bg-sky-500/10' : s.stepType === 'condition' ? 'border-emerald-400 bg-emerald-500/10' : 'border-fuchsia-400 bg-fuchsia-500/10'}`}>
                       <div className={`shrink-0 w-7 h-7 rounded-full flex items-center justify-center text-xs font-semibold ${stepTypeColor}`}>{s.stepOrder}</div>
                       <div className="text-sm font-semibold text-white/90 flex-1 min-w-0 truncate">{s.stepIntent || `Step ${s.stepOrder}`}</div>
                     </div>
@@ -2315,30 +2312,32 @@ export default function JourneysPage() {
                           />
                         )}
 
-                        {isEditing ? (
-                          <textarea value={s.messageTemplate} onChange={(e) => updateStep(idx, { messageTemplate: e.target.value })} rows={6} className="w-full px-3 py-2 bg-slate-900 border border-fuchsia-400/50 rounded text-sm font-mono focus:outline-none resize-y" />
-                        ) : (
-                          <div className="px-3 py-2 bg-slate-900/60 border border-white/10 rounded text-sm whitespace-pre-wrap font-mono text-white/90 cursor-pointer" onClick={() => setEditingStepIdx(idx)}>
-                            {/* ★ D210+ Phase 2-fix10 (Harold 명시 2026-05-23): 위 본문 박스 = 원본 (변수 강조만) — 토글 분기 폐기. */}
-                            {/*    아래 "실제 발송 미리보기" 영역 = 적용본 (mergeAndHighlightVars + Liquid 렌더링 + 광고/무료거부). */}
-                            {highlightVars(s.messageTemplate, 'dark')}
+                        {/* 원본 편집 / 발송 미리보기 토글 — 미리보기는 추출된 타겟 최상위 고객 1명 치환 + 광고/무료거부 합성 */}
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="flex rounded-lg bg-white/5 border border-white/10 p-0.5 text-[11px]">
+                            <button type="button" onClick={() => setPreviewSteps((p) => { const n = new Set(p); n.delete(idx); return n; })}
+                              className={`px-2.5 py-1 rounded-md font-medium transition-colors ${!isPreview ? 'bg-violet-500/30 text-violet-100' : 'text-white/50 hover:text-white/80'}`}>원본 편집</button>
+                            <button type="button" onClick={() => setPreviewSteps((p) => { const n = new Set(p); n.add(idx); return n; })}
+                              className={`px-2.5 py-1 rounded-md font-medium transition-colors ${isPreview ? 'bg-emerald-500/30 text-emerald-100' : 'text-white/50 hover:text-white/80'}`}>발송 미리보기</button>
                           </div>
-                        )}
+                          {isPreview && sampleCustomer && (
+                            <span className="text-[10px] text-emerald-300/70">타겟 최상위 고객 기준 · 실제 발송 형태</span>
+                          )}
+                        </div>
 
-                        {/* ★ D191 (2026-05-22) Phase B-1 Liquid Templating: Liquid 문법 감지 + 미리보기 진입 */}
-                        {detectLiquidSyntax(s.messageTemplate + ' ' + s.subject) && (
-                          <div className="p-2 bg-violet-500/10 border border-violet-400/30 rounded text-[11px] flex items-center justify-between gap-2">
-                            <div className="flex items-center gap-1.5 text-violet-200">
-                              <Code className="w-3.5 h-3.5" />
-                              <span>Liquid 동적 콘텐츠 감지 — 사용자별 1:1 분기 + 변수 계산</span>
-                            </div>
-                            <button
-                              onClick={() => setLiquidPreview({ stepIdx: idx, messageTemplate: s.messageTemplate, subject: s.subject || '' })}
-                              className="px-2 py-1 bg-violet-500/20 hover:bg-violet-500/30 text-violet-200 rounded text-[10px] font-medium flex items-center gap-1"
-                            >
-                              <Sparkles className="w-3 h-3" /> 10명 미리보기
-                            </button>
+                        {isPreview ? (
+                          <div className="px-3 py-2 bg-slate-950/60 border border-white/10 rounded text-sm whitespace-pre-wrap font-mono text-white/90 min-h-[140px] leading-relaxed">
+                            {!sampleCustomer && (
+                              <div className="mb-2 text-amber-300/80 text-[11px] leading-relaxed">
+                                아직 이 조건의 타겟 고객이 없어 원본으로 표시됩니다. 여정을 켜면 조건을 충족하는 고객에게 자동 발송됩니다.
+                              </div>
+                            )}
+                            {sampleCustomer
+                              ? mergeAndHighlightVars(preview, sampleCustomer, 'dark', sampleCustomerFields || undefined)
+                              : preview}
                           </div>
+                        ) : (
+                          <textarea value={s.messageTemplate} onChange={(e) => updateStep(idx, { messageTemplate: e.target.value })} rows={7} placeholder="본문을 입력하세요" className="w-full px-3 py-2 bg-slate-900 border border-fuchsia-400/50 rounded text-sm font-mono focus:outline-none resize-y leading-relaxed" />
                         )}
 
                         <div className="flex flex-wrap items-center gap-x-3 text-[11px] text-white/40">
@@ -2358,87 +2357,76 @@ export default function JourneysPage() {
                             );
                           })()}
                         </div>
-
-                        {s.isAd && s.messageTemplate.trim().length >= 10 && (
-                          <div className="p-2 bg-slate-950/60 border border-white/5 rounded text-[11px]">
-                            {/* ★ D210+ Phase 2-fix10 (Harold 명시 2026-05-23): 실제 발송 미리보기 = 적용 영역 (변수 치환 + Liquid 렌더링 + 광고/무료거부 합성). */}
-                            <div className="text-white/40 mb-1 flex items-center justify-between flex-wrap gap-1">
-                              <span>실제 발송 미리보기 ({previewBytes} bytes)</span>
-                              {sampleCustomer && (
-                                <span className="text-emerald-300/80 text-[10px]">타겟 고객 데이터 치환 + Liquid 렌더링 적용</span>
-                              )}
-                            </div>
-                            {!sampleCustomer && (
-                              <div className="mb-1.5 text-amber-300/80 text-[10px] leading-relaxed">
-                                현재 이 조건에 맞는 고객이 아직 없어 원본(변수 미치환)으로 표시됩니다. 여정을 켜두면 조건을 충족하는 고객이 생기는 즉시 자동 발송됩니다.
-                              </div>
-                            )}
-                            <div className="whitespace-pre-wrap text-white/80 font-mono">
-                              {sampleCustomer
-                                ? mergeAndHighlightVars(preview, sampleCustomer, 'dark', sampleCustomerFields || undefined)
-                                : preview}
-                            </div>
-                          </div>
-                        )}
                       </>
                     )}
-                    {/* 기능버튼 — 유형·시간·발송시각·채널·광고·수정·다듬기·삭제 (3분할 카드 하단) */}
-                    <div className="flex flex-wrap items-center gap-1.5 pt-2 mt-1 border-t border-white/10 text-xs">
-                      <select
-                        value={s.stepType}
-                        onChange={(e) => {
-                          const newType = e.target.value as StepType;
-                          const patch: Partial<AIGeneratedStep> = { stepType: newType };
-                          if (newType === 'condition' && !s.conditionJsonb) {
-                            patch.conditionJsonb = { type: 'customer_field', field: 'recent_purchase_amount', operator: '>=', value: 100000 };
-                          }
-                          updateStep(idx, patch);
-                        }}
-                        className="px-2 py-1 bg-slate-800 border border-white/10 rounded" title="step 유형"
-                      >
-                        <option value="message">메시지</option>
-                        <option value="wait">대기</option>
-                        <option value="condition">조건</option>
-                      </select>
-                      <div className="flex items-center gap-1">
-                        <Clock className="w-3.5 h-3.5 text-white/40" />
-                        <input type="number" min={0} max={720} value={s.delayHours} onChange={(e) => updateStep(idx, { delayHours: Number(e.target.value) || 0 })} className="w-14 px-2 py-1 bg-slate-800 border border-white/10 rounded" />
-                        <span className="text-white/50">h</span>
-                      </div>
-                      {s.stepType === 'message' && (
-                        <>
-                          <select value={s.delayMode === 'specific_hour' ? 'specific_hour' : 'relative'} onChange={(e) => {
-                            updateStep(idx, e.target.value === 'specific_hour' ? { delayMode: 'specific_hour', targetHourKst: s.targetHourKst ?? 10 } : { delayMode: 'relative', targetHourKst: undefined });
-                          }} className="px-2 py-1 bg-slate-800 border border-white/10 rounded" title="발송 시각 — 야간(21~08시) 자동 회피">
-                            <option value="relative">시간 뒤 바로</option>
-                            <option value="specific_hour">지정 시각</option>
-                          </select>
-                          {s.delayMode === 'specific_hour' && (
-                            <select value={String(s.targetHourKst ?? 10)} onChange={(e) => updateStep(idx, { targetHourKst: Number(e.target.value) })} className="px-2 py-1 bg-slate-800 border border-white/10 rounded">
-                              {Array.from({ length: 13 }, (_, i) => i + 8).map((h) => <option key={h} value={h}>{h}시</option>)}
-                            </select>
+                    {/* 발송 시점(자연어) + 컨트롤 (3분할 카드 하단) */}
+                    <div className="pt-2.5 mt-1 border-t border-white/10 space-y-2">
+                      {(s.stepType === 'message' || s.stepType === 'wait') && (
+                        <div className="flex flex-wrap items-center gap-1.5 text-xs bg-white/[0.03] rounded-lg px-2.5 py-2">
+                          <Clock className="w-3.5 h-3.5 text-violet-300 shrink-0" />
+                          <span className="text-white/50">{s.stepType === 'wait' ? '대기' : '발송'}</span>
+                          {s.stepType === 'message' && s.delayMode === 'specific_hour' ? (
+                            <>
+                              <span className="text-white/85">다음</span>
+                              <select value={String(s.targetHourKst ?? 10)} onChange={(e) => updateStep(idx, { targetHourKst: Number(e.target.value) })} className="px-1.5 py-0.5 bg-slate-800 border border-white/10 rounded">
+                                {Array.from({ length: 13 }, (_, i) => i + 8).map((h) => <option key={h} value={h}>{h}시</option>)}
+                              </select>
+                              <span className="text-white/85">에 발송</span>
+                              <button type="button" onClick={() => updateStep(idx, { delayMode: 'relative', targetHourKst: undefined })} className="ml-1 text-violet-300 hover:text-violet-200 underline text-[10px]">시간 기준으로</button>
+                            </>
+                          ) : (
+                            <>
+                              {s.stepType !== 'wait' && <span className="text-white/85">트리거 후</span>}
+                              <input type="number" min={0} max={720} value={s.delayHours} onChange={(e) => updateStep(idx, { delayHours: Number(e.target.value) || 0 })} className="w-14 px-2 py-0.5 bg-slate-800 border border-white/10 rounded" />
+                              <span className="text-white/85">시간 {s.stepType === 'wait' ? '대기' : '뒤'}</span>
+                              {s.stepType === 'message' && (
+                                <>
+                                  <button type="button" onClick={() => updateStep(idx, { delayMode: 'specific_hour', targetHourKst: s.targetHourKst ?? 10 })} className="ml-1 text-violet-300 hover:text-violet-200 underline text-[10px]">정해진 시각으로</button>
+                                  <span className="text-white/35 text-[10px]">밤이면 아침 자동</span>
+                                </>
+                              )}
+                            </>
                           )}
-                          <select value={s.channel} onChange={(e) => updateStep(idx, { channel: e.target.value as ChannelType })} className="px-2 py-1 bg-slate-800 border border-white/10 rounded">
-                            <option value="sms">SMS</option>
-                            <option value="lms">LMS</option>
-                            <option value="mms">MMS</option>
-                            <option value="kakao">알림톡</option>
-                          </select>
-                          <label className="flex items-center gap-1 cursor-pointer">
-                            <input type="checkbox" checked={s.isAd} onChange={(e) => updateStep(idx, { isAd: e.target.checked })} className="rounded" />
-                            <span className="text-amber-300/80">광고</span>
-                          </label>
-                          <button onClick={() => setEditingStepIdx(isEditing ? null : idx)} className="p-1.5 bg-slate-700 hover:bg-slate-600 rounded" title={isEditing ? '닫기' : '직접 수정'}>
-                            {isEditing ? <Save className="w-3.5 h-3.5" /> : <Edit2 className="w-3.5 h-3.5" />}
-                          </button>
-                          <button onClick={() => handleRefineOpen(idx)} disabled={refineLoading} className="px-2 py-1.5 bg-violet-500/20 hover:bg-violet-500/30 text-violet-300 rounded flex items-center gap-1 disabled:opacity-50">
-                            {refineLoading ? <Loader2 className="w-3 h-3 animate-spin" /> : <Wand2 className="w-3 h-3" />}다듬기
-                          </button>
-                        </>
+                        </div>
                       )}
-                      <button onClick={() => deleteStep(idx)} className="p-1.5 bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 rounded ml-auto" title="삭제">
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
+                      <div className="flex flex-wrap items-center gap-1.5 text-xs">
+                        <select
+                          value={s.stepType}
+                          onChange={(e) => {
+                            const newType = e.target.value as StepType;
+                            const patch: Partial<AIGeneratedStep> = { stepType: newType };
+                            if (newType === 'condition' && !s.conditionJsonb) {
+                              patch.conditionJsonb = { type: 'customer_field', field: 'recent_purchase_amount', operator: '>=', value: 100000 };
+                            }
+                            updateStep(idx, patch);
+                          }}
+                          className="px-2 py-1 bg-slate-800 border border-white/10 rounded" title="step 유형"
+                        >
+                          <option value="message">메시지</option>
+                          <option value="wait">대기</option>
+                          <option value="condition">조건</option>
+                        </select>
+                        {s.stepType === 'message' && (
+                          <>
+                            <select value={s.channel} onChange={(e) => updateStep(idx, { channel: e.target.value as ChannelType })} className="px-2 py-1 bg-slate-800 border border-white/10 rounded">
+                              <option value="sms">SMS</option>
+                              <option value="lms">LMS</option>
+                              <option value="mms">MMS</option>
+                              <option value="kakao">알림톡</option>
+                            </select>
+                            <label className="flex items-center gap-1 cursor-pointer px-2 py-1 rounded bg-slate-800 border border-white/10">
+                              <input type="checkbox" checked={s.isAd} onChange={(e) => updateStep(idx, { isAd: e.target.checked })} className="rounded" />
+                              <span className="text-amber-300/80">광고 표기</span>
+                            </label>
+                            <button onClick={() => handleRefineOpen(idx)} disabled={refineLoading} className="px-2 py-1 bg-violet-500/20 hover:bg-violet-500/30 text-violet-300 rounded flex items-center gap-1 disabled:opacity-50">
+                              {refineLoading ? <Loader2 className="w-3 h-3 animate-spin" /> : <Wand2 className="w-3 h-3" />}AI 다듬기
+                            </button>
+                          </>
+                        )}
+                        <button onClick={() => deleteStep(idx)} className="p-1.5 bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 rounded ml-auto" title="이 단계 삭제">
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
                     </div>
                   </div>
                 );
@@ -2570,16 +2558,6 @@ export default function JourneysPage() {
             </div>
           </div>
         </div>
-      )}
-
-      {/* ★ D191 (2026-05-22) Phase B-1: Liquid Templating 미리보기 modal */}
-      {liquidPreview && (
-        <LiquidPreviewModal
-          messageTemplate={liquidPreview.messageTemplate}
-          subject={liquidPreview.subject}
-          samples={previewSamples}
-          onClose={() => setLiquidPreview(null)}
-        />
       )}
 
       {/* ★ D211+ Phase 3-fix (2026-05-23 Harold 명시): archive/unarchive/delete 영역 커스텀 다크 톤 모달 (native confirm/prompt 영구 폐기) */}
