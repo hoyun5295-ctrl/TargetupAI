@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { AlertCircle, ArrowLeft, Brain, Check, ChevronDown, ChevronUp, Clock, Edit2, GitMerge, Loader2, Play, Plus, RefreshCw, Sparkles, Target, Trash2, X, Zap } from 'lucide-react';
 // ★ D212+ (2026-05-23 Harold 명시): native confirm/alert 영구 폐기 — ConfirmModal + Toast 정합
 import ConfirmModal, { ConfirmState } from '../components/ConfirmModal';
+import CreditConfirmModal from '../components/credit/CreditConfirmModal';
 import { useToast } from '../components/ToastProvider';
 
 // ★ D176 (2026-05-19): Continuous Agentic Operator — AI는 매일 제안서 생성 / 실행은 사용자 동의 후
@@ -291,6 +292,8 @@ export default function ContinuousOperatorPage() {
       sessionStorage.removeItem('continuousOperatorPrefill');
     }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const [confirmCreate, setConfirmCreate] = useState(false);
 
   const handleSave = async () => {
     if (!editing?.name?.trim() || !editing?.objective?.trim()) {
@@ -1423,7 +1426,7 @@ export default function ContinuousOperatorPage() {
                 취소
               </button>
               <button
-                onClick={handleSave}
+                onClick={() => (editing.id ? handleSave() : setConfirmCreate(true))}
                 disabled={saving || !editing.name?.trim() || !editing.objective?.trim()}
                 className="flex-1 px-4 py-2 bg-indigo-500/40 hover:bg-indigo-500/60 disabled:opacity-30 disabled:cursor-not-allowed text-indigo-50 rounded-lg text-sm font-semibold flex items-center justify-center gap-1.5 transition-colors"
               >
@@ -1442,6 +1445,12 @@ export default function ContinuousOperatorPage() {
 
       {/* ★ D212+ (2026-05-23 Harold 명시): 커스텀 ConfirmModal — native confirm 영구 폐기 정합 */}
       <ConfirmModal state={confirmState} onClose={() => setConfirmState(null)} />
+      <CreditConfirmModal
+        open={confirmCreate}
+        source="continuous-operator"
+        onConfirm={() => { setConfirmCreate(false); handleSave(); }}
+        onCancel={() => setConfirmCreate(false)}
+      />
     </div>
   );
 }

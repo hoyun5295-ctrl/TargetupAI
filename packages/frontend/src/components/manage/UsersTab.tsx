@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { manageUsersApi } from '../../api/client';
 import CustomModal from '../CustomModal';
-import Toast from '../Toast';
+import { useLegacyToast } from '../ToastProvider';
 import { formatDateTime } from '../../utils/formatDate';
 
 interface User {
@@ -22,7 +22,7 @@ export default function UsersTab() {
   const [users, setUsers] = useState<User[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
-  const [toast, setToast] = useState<{ msg: string; type: 'success' | 'error' } | null>(null);
+  const setToast = useLegacyToast();
   const [storeCodeList, setStoreCodeList] = useState<string[]>([]);
 
   // 추가/수정 모달
@@ -201,7 +201,6 @@ export default function UsersTab() {
 
   return (
     <>
-      {toast && <Toast message={toast.msg} type={toast.type} onClose={() => setToast(null)} />}
       <CustomModal
         show={modal.show} title={modal.title} message={modal.message}
         variant={modal.variant} type={modal.type}

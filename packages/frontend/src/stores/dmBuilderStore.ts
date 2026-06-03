@@ -12,6 +12,7 @@
  */
 import { create } from 'zustand';
 import axios from 'axios';
+import { attachCreditInterceptor } from '../lib/credit-interceptor';
 import type { Section, SectionType, SectionProps } from '../utils/dm-section-defaults';
 import { createSection as newSection, normalizeOrder, isMaxCountExceeded, SECTION_META } from '../utils/dm-section-defaults';
 
@@ -228,6 +229,7 @@ function cloneSnapshot(pages: DmPage[], sections: Section[]): { pages: DmPage[];
 // ────────────── 유틸 ──────────────
 
 const api = axios.create({ baseURL: '/api' });
+attachCreditInterceptor(api);
 api.interceptors.request.use((cfg) => {
   const t = localStorage.getItem('token');
   if (t) cfg.headers.Authorization = `Bearer ${t}`;

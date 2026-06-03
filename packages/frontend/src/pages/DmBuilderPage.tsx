@@ -9,9 +9,11 @@
 import { useEffect, useState, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
+import { attachCreditInterceptor } from '../lib/credit-interceptor';
 import { useDmBuilderStore } from '../stores/dmBuilderStore';
 import { useDmKeyboardShortcuts } from '../hooks/useDmKeyboardShortcuts';
 import ConfirmModal, { type ConfirmState } from '../components/ConfirmModal';
+import CreditConfirmModal from '../components/credit/CreditConfirmModal';
 import DmTopBar from '../components/dm/DmTopBar';
 import DmLeftPanel from '../components/dm/DmLeftPanel';
 import DmCanvas from '../components/dm/DmCanvas';
@@ -26,6 +28,7 @@ import ModalBase, { ModalButton } from '../components/dm/modals/ModalBase';
 import '../styles/dm-builder.css';
 
 const api = axios.create({ baseURL: '/api' });
+attachCreditInterceptor(api);
 api.interceptors.request.use((cfg) => {
   const t = localStorage.getItem('token');
   if (t) cfg.headers.Authorization = `Bearer ${t}`;
@@ -892,6 +895,7 @@ function TopBarWithBack({ onBack, onPublishDone }: { onBack: () => void; onPubli
   const saveStore = useDmBuilderStore((s) => s.save);
   const dmId = useDmBuilderStore((s) => s.dmId);
   const setToast = useDmBuilderStore((s) => s.setToast);
+  const [confirmPublish, setConfirmPublish] = useState(false);
 
   const handleTestSend = async () => {
     if (!dmId) {
@@ -906,24 +910,34 @@ function TopBarWithBack({ onBack, onPublishDone }: { onBack: () => void; onPubli
     }
   };
 
+  const handlePublish = async () => {
+    await saveStore();
+    if (dmId) {
+      try {
+        await api.post(`/dm/${dmId}/publish`);
+        setToast({ type: 'success', message: '발행했어요.' });
+      } catch (err: any) {
+        setToast({ type: 'error', message: err?.response?.data?.error || '발행 실패' });
+        return;
+      }
+    }
+    onPublishDone();
+  };
+
   return (
-    <DmTopBar
-      onBack={onBack}
-      onTestSendClick={handleTestSend}
-      onPublishClick={async () => {
-        await saveStore();
-        if (dmId) {
-          try {
-            await api.post(`/dm/${dmId}/publish`);
-            setToast({ type: 'success', message: '발행했어요.' });
-          } catch (err: any) {
-            setToast({ type: 'error', message: err?.response?.data?.error || '발행 실패' });
-            return;
-          }
-        }
-        onPublishDone();
-      }}
-    />
+    <>
+      <DmTopBar
+        onBack={onBack}
+        onTestSendClick={handleTestSend}
+        onPublishClick={() => setConfirmPublish(true)}
+      />
+      <CreditConfirmModal
+        open={confirmPublish}
+        source="dm-builder"
+        onConfirm={() => { setConfirmPublish(false); handlePublish(); }}
+        onCancel={() => setConfirmPublish(false)}
+      />
+    </>
   );
 }
 

@@ -94,6 +94,15 @@ export const CREDIT_SOURCE_LABELS: Record<string, string> = {
   'brand-voice-extract': '브랜드보이스 추출', 'parse-briefing': '브리핑 분석',
 };
 
+/** 사전 확인 모달 대상 — 큰 확정 차감 source→cost (백엔드 CREDIT_COST_MAP의 확정 차감과 1:1). */
+export const CONFIRM_CREDIT_COSTS: Record<string, number> = {
+  'dm-builder': 30,           // DM 발행
+  'inapp-publish': 15,        // 인앱 게시
+  'journey-activate': 150,    // 여정 저장
+  'continuous-operator': 200, // 자동 마케팅 저장
+  'orchestrate': 300,         // 풀분석
+};
+
 /** ai_credit_transactions.type → 한글. deduct는 source 라벨 우선. */
 export const CREDIT_TYPE_LABELS: Record<string, string> = {
   deduct: 'AI 작업', grant: '관리자 지급', admin_deduct: '관리자 차감',

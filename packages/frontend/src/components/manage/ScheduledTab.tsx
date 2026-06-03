@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { manageScheduledApi } from '../../api/client';
 import CustomModal from '../CustomModal';
-import Toast from '../Toast';
+import { useLegacyToast } from '../ToastProvider';
 import { formatDateTime } from '../../utils/formatDate';
 
 interface Campaign {
@@ -61,7 +61,7 @@ function Pagination({ page, totalPages, total, perPage, onPage }: {
 export default function ScheduledTab() {
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [loading, setLoading] = useState(true);
-  const [toast, setToast] = useState<{ msg: string; type: 'success' | 'error' } | null>(null);
+  const setToast = useLegacyToast();
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | 'scheduled' | 'cancelled'>('all');
   const [filterUser, setFilterUser] = useState('');
@@ -146,7 +146,6 @@ export default function ScheduledTab() {
 
   return (
     <>
-      {toast && <Toast message={toast.msg} type={toast.type} onClose={() => setToast(null)} />}
       <CustomModal
         show={modal.show} title={modal.title} message={modal.message}
         variant={modal.variant} type={modal.type}

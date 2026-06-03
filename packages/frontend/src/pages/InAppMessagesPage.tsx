@@ -7,6 +7,7 @@ import {
   TrendingUp, Upload, UserPlus, Users, Wand2, X,
 } from 'lucide-react';
 import ConfirmModal, { ConfirmState } from '../components/ConfirmModal';
+import CreditConfirmModal from '../components/credit/CreditConfirmModal';
 import { useToast } from '../components/ToastProvider';
 
 // ════════════════════════════════════════════════════════════════════
@@ -411,6 +412,8 @@ export default function InAppMessagesPage() {
   };
 
   // ────────────────────────────────────────────────────────────────
+  const [confirmPublish, setConfirmPublish] = useState(false);
+
   // 메시지 저장 / 삭제 / 상태 변경
   // ────────────────────────────────────────────────────────────────
 
@@ -936,11 +939,18 @@ export default function InAppMessagesPage() {
           editing={editing}
           setEditing={setEditing}
           availableVariables={availableVariables}
-          onSave={handleSave}
+          onSave={() => (editing?.status === 'active' ? setConfirmPublish(true) : handleSave())}
           fileInputRef={fileInputRef}
           onImageUpload={handleImageUpload}
         />
       )}
+
+      <CreditConfirmModal
+        open={confirmPublish}
+        source="inapp-publish"
+        onConfirm={() => { setConfirmPublish(false); handleSave(); }}
+        onCancel={() => setConfirmPublish(false)}
+      />
 
       {/* ▼ 영역 12: 드릴다운 통계 모달 */}
       {drillMessageId && (

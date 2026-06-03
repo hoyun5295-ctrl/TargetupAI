@@ -6,6 +6,7 @@ import aiRoutes from './routes/ai';
 import aiMemoryRoutes from './routes/ai-memory';
 import aiUsageRoutes from './routes/ai-usage';
 import express from 'express';
+import { getCreditEvent } from './utils/request-context';
 import cors from 'cors';
 import helmet from 'helmet';
 import morgan from 'morgan';
@@ -156,6 +157,25 @@ app.use(morgan('dev'));
 //    express.json()이 먼저 파싱하면 rawBody 손실되므로 이 경로만 선처리
 app.use('/api/alimtalk/webhook', express.raw({ type: '*/*', limit: '10mb' }));
 app.use(express.json({ limit: LIMITS.requestBodySize }));
+
+// 사후 토스트용 — 크레딧 차감이 일어난 요청의 JSON 응답에 _credit 자동 첨부(호출처 무수정).
+app.use((_req, res, next) => {
+  const orig = res.json.bind(res);
+  res.json = ((body: any) => {
+    try {
+      const ev = getCreditEvent();
+      if (ev && !res.headersSent) {
+        res.setHeader('X-Credit-Used', String(ev.used));
+        res.setHeader('X-Credit-Balance', String(ev.balance));
+        res.setHeader('X-Credit-Source', ev.source);
+        res.setHeader('Access-Control-Expose-Headers', 'X-Credit-Used, X-Credit-Balance, X-Credit-Source');
+      }
+    } catch { /* 헤더 첨부 실패는 무시 */ }
+    return orig(body);
+  }) as any;
+  next();
+});
+
 app.use('/api/upload', uploadRoutes);
 app.use('/api/sync', syncRoutes);
 app.use('/api/spam-filter', spamFilterRoutes);

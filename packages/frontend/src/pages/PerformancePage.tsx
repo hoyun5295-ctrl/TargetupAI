@@ -33,6 +33,7 @@ import {
   Info, Search, Filter, ArrowUpDown, FileDown,
 } from 'lucide-react';
 import { useToast } from '../components/ToastProvider';
+import CreditConfirmModal from '../components/credit/CreditConfirmModal';
 
 type PerformancePeriod = '7d' | '14d' | '30d' | '90d';
 
@@ -273,6 +274,8 @@ export default function PerformancePage() {
   } | null>(null);
 
   const token = () => localStorage.getItem('token');
+
+  const [confirmReport, setConfirmReport] = useState(false);
 
   // 기간 성과 PDF 보고서 — 풀분석 차감(같은 날 같은 기간 재다운로드는 backend 멱등으로 무료)
   const downloadPdf = async () => {
@@ -517,7 +520,7 @@ export default function PerformancePage() {
               </button>
             ))}
             <button
-              onClick={downloadPdf}
+              onClick={() => setConfirmReport(true)}
               disabled={pdfLoading || loading || !snapshot || snapshot.totalCampaigns.current === 0}
               className="flex items-center gap-1.5 px-2.5 py-1 rounded text-[11px] font-medium bg-gradient-to-r from-violet-500/80 to-fuchsia-500/80 hover:from-violet-500 hover:to-fuchsia-500 text-white disabled:opacity-40 disabled:cursor-not-allowed transition-colors ml-1"
               title="기간 성과 PDF 보고서 — 풀분석 크레딧 차감(같은 날 같은 기간 재다운로드는 무료)"
@@ -525,6 +528,12 @@ export default function PerformancePage() {
               {pdfLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <FileDown className="w-3.5 h-3.5" />}
               PDF 보고서
             </button>
+            <CreditConfirmModal
+              open={confirmReport}
+              source="orchestrate"
+              onConfirm={() => { setConfirmReport(false); downloadPdf(); }}
+              onCancel={() => setConfirmReport(false)}
+            />
             <button
               onClick={load}
               disabled={loading}

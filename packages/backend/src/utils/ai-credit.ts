@@ -15,6 +15,7 @@
 
 import { pool } from '../config/database';
 import { needsMonthlyReset } from './ai-credit-calc';
+import { setCreditEvent } from './request-context';
 import {
   loadCreditRow,
   applyResetIfNeeded,
@@ -142,7 +143,7 @@ export async function deductCreditSafe(
   const MAX_ATTEMPTS = 3;
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
     try {
-      await deduct({
+      const result = await deduct({
         companyId: opts.companyId,
         cost: opts.cost,
         source: opts.source,
@@ -150,6 +151,10 @@ export async function deductCreditSafe(
         createdBy: opts.createdBy,
         idempotencyKey,
       });
+      // 사후 토스트용 — 차감 성공 시 요청 컨텍스트에 기록(응답 미들웨어가 _credit 첨부). worker는 no-op.
+      if (result?.deducted) {
+        setCreditEvent({ used: opts.cost, balance: (result.baseAfter || 0) + (result.purchasedAfter || 0), source: opts.source });
+      }
       return;
     } catch (err: any) {
       // 잔액 부족 = 정상 차단(사전 checkCredit 통과 후 동시 소진). 재시도 무의미.

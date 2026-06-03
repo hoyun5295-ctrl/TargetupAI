@@ -19,6 +19,7 @@
 
 import { createContext, useContext, useState, useCallback, useEffect, ReactNode } from 'react';
 import { CheckCircle2, AlertCircle, Info, AlertTriangle, X } from 'lucide-react';
+import { CONFIRM_CREDIT_COSTS, CREDIT_SOURCE_LABELS } from '../constants/credit';
 
 export type ToastType = 'success' | 'error' | 'info' | 'warning';
 
@@ -39,35 +40,12 @@ interface ToastContextValue {
 
 const ToastContext = createContext<ToastContextValue | null>(null);
 
-const TYPE_CONFIG: Record<ToastType, { icon: typeof CheckCircle2; bg: string; border: string; text: string; iconColor: string }> = {
-  success: {
-    icon: CheckCircle2,
-    bg: 'bg-emerald-500/15',
-    border: 'border-emerald-400/40',
-    text: 'text-emerald-100',
-    iconColor: 'text-emerald-300',
-  },
-  error: {
-    icon: AlertCircle,
-    bg: 'bg-rose-500/15',
-    border: 'border-rose-400/40',
-    text: 'text-rose-100',
-    iconColor: 'text-rose-300',
-  },
-  info: {
-    icon: Info,
-    bg: 'bg-cyan-500/15',
-    border: 'border-cyan-400/40',
-    text: 'text-cyan-100',
-    iconColor: 'text-cyan-300',
-  },
-  warning: {
-    icon: AlertTriangle,
-    bg: 'bg-amber-500/15',
-    border: 'border-amber-400/40',
-    text: 'text-amber-100',
-    iconColor: 'text-amber-300',
-  },
+// 통일 다크 톤 — 베이스는 slate-900, 타입 구분은 좌측 액센트 바 + 아이콘 색만(알록달록 배경 제거).
+const TYPE_CONFIG: Record<ToastType, { icon: typeof CheckCircle2; accent: string; iconColor: string }> = {
+  success: { icon: CheckCircle2, accent: 'bg-emerald-400', iconColor: 'text-emerald-300' },
+  error: { icon: AlertCircle, accent: 'bg-rose-400', iconColor: 'text-rose-300' },
+  info: { icon: Info, accent: 'bg-cyan-400', iconColor: 'text-cyan-300' },
+  warning: { icon: AlertTriangle, accent: 'bg-amber-400', iconColor: 'text-amber-300' },
 };
 
 export function ToastProvider({ children }: { children: ReactNode }) {
@@ -81,6 +59,19 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     const id = `${Date.now()}-${Math.random()}`;
     setToasts((prev) => [...prev, { id, type, message, duration }]);
   }, []);
+
+  // 사후 크레딧 토스트 — 전역 인터셉터가 dispatch한 credit:used 수신(큰 차감은 사전 모달이 안내하므로 skip).
+  useEffect(() => {
+    const onCredit = (e: Event) => {
+      const d = (e as CustomEvent).detail;
+      if (!d || !d.source) return;
+      if (CONFIRM_CREDIT_COSTS[d.source]) return; // 발행·게시·저장·풀분석 등 큰 차감은 모달이 안내
+      const label = CREDIT_SOURCE_LABELS[d.source] || 'AI 작업';
+      show('info', `${label} · ${Number(d.used).toLocaleString()} 크레딧 사용 · 잔여 ${Number(d.balance).toLocaleString()}`);
+    };
+    window.addEventListener('credit:used', onCredit);
+    return () => window.removeEventListener('credit:used', onCredit);
+  }, [show]);
 
   const value: ToastContextValue = {
     show,
@@ -114,11 +105,12 @@ function ToastBox({ item, onClose }: { item: ToastItem; onClose: () => void }) {
 
   return (
     <div
-      className={`${config.bg} border ${config.border} backdrop-blur-md rounded-xl shadow-2xl px-4 py-3 min-w-[280px] max-w-md flex items-start gap-3 pointer-events-auto`}
+      className="relative overflow-hidden bg-slate-900/95 backdrop-blur-xl border border-white/10 rounded-xl shadow-2xl shadow-black/40 pl-4 pr-3 py-3 min-w-[280px] max-w-md flex items-start gap-3 pointer-events-auto"
       role="status"
     >
+      <span className={`absolute left-0 top-0 bottom-0 w-1 ${config.accent}`} aria-hidden />
       <Icon className={`w-4 h-4 ${config.iconColor} flex-shrink-0 mt-0.5`} />
-      <div className={`flex-1 text-[13px] ${config.text} leading-relaxed whitespace-pre-wrap`}>{item.message}</div>
+      <div className="flex-1 text-[13px] text-white/90 leading-relaxed whitespace-pre-wrap">{item.message}</div>
       <button
         onClick={onClose}
         className="p-0.5 hover:bg-white/10 rounded transition-colors flex-shrink-0"
@@ -143,4 +135,12 @@ export function useToast(): ToastContextValue {
     };
   }
   return ctx;
+}
+
+/** 옛 Toast.tsx 호환 shim — setToast({msg,type}) 시그니처 유지(전환용). 신규 코드는 useToast() 직접 사용. */
+export function useLegacyToast() {
+  const toast = useToast();
+  return (t: { msg: string; type: 'success' | 'error' } | null) => {
+    if (t) toast[t.type](t.msg);
+  };
 }

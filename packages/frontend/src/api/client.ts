@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { attachCreditInterceptor } from '../lib/credit-interceptor';
 
 const api = axios.create({
   baseURL: '/api',
@@ -6,6 +7,7 @@ const api = axios.create({
     'Content-Type': 'application/json',
   },
 });
+attachCreditInterceptor(api);
 
 // 요청 인터셉터 - 토큰 추가
 api.interceptors.request.use((config) => {

@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { manageCallbacksApi } from '../../api/client';
 import CustomModal from '../CustomModal';
-import Toast from '../Toast';
+import { useLegacyToast } from '../ToastProvider';
 import { formatDate, formatPhoneNumber } from '../../utils/formatDate';
 
 interface CallbackNumber {
@@ -71,7 +71,7 @@ export default function CallbacksTab() {
   const [numbers, setNumbers] = useState<CallbackNumber[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
-  const [toast, setToast] = useState<{ msg: string; type: 'success' | 'error' } | null>(null);
+  const setToast = useLegacyToast();
   const [allowSelfRegister, setAllowSelfRegister] = useState(false);
   const [showAdd, setShowAdd] = useState(false);
   const [addForm, setAddForm] = useState({ phone: '', label: '', isDefault: false, storeCode: '', storeName: '' });
@@ -404,7 +404,6 @@ export default function CallbacksTab() {
 
   return (
     <>
-      {toast && <Toast message={toast.msg} type={toast.type} onClose={() => setToast(null)} />}
       {modal.show && (
         <CustomModal show={modal.show} title={modal.title} message={modal.message} variant={modal.variant} type="confirm"
           onClose={() => setModal(prev => ({ ...prev, show: false }))} onConfirm={modal.onConfirm} />

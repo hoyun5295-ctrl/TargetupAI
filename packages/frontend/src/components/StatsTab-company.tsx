@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { manageStatsApi, manageUsersApi } from '../api/client';
-import Toast from './Toast';
+import { useLegacyToast } from './ToastProvider';
 import { formatDateTime } from '../utils/formatDate';
 
 export default function StatsTab() {
@@ -10,7 +10,7 @@ export default function StatsTab() {
   const [page, setPage] = useState(1);
   const [stats, setStats] = useState<any>(null);
   const [loading, setLoading] = useState(true);
-  const [toast, setToast] = useState<{ msg: string; type: 'success' | 'error' } | null>(null);
+  const setToast = useLegacyToast();
 
   // 사용자 필터
   const [users, setUsers] = useState<{ id: string; name: string; login_id: string }[]>([]);
@@ -90,7 +90,6 @@ export default function StatsTab() {
 
   return (
     <>
-      {toast && <Toast message={toast.msg} type={toast.type} onClose={() => setToast(null)} />}
 
       <div className="bg-white rounded-lg shadow">
         <div className="px-6 py-4 border-b">
