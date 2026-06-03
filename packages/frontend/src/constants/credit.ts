@@ -86,7 +86,7 @@ export const CREDIT_SOURCE_LABELS: Record<string, string> = {
   'performance-quick-action': '성과 분석', 'next-action-advisor': '액션 추천',
   'multi-goal-decisioning': '목표 분석', 'cdp-fusion-explainer': 'CDP 분석',
   'voice-inbound': '음성 분석', 'dm-event-recommender': '이벤트 추천',
-  'journey-ai-refine': '다듬기', 'journey-step-diagnosis': '진단',
+  'refine-direct': '문안 다듬기', 'journey-ai-refine': '다듬기', 'journey-step-diagnosis': '진단',
   'dm-quick-action-refine': '다듬기', 'dm-self-diagnosis': '진단',
   'inapp-explainer': '인앱 설명', 'alimtalk-matcher': '알림톡 매칭',
   'ai-memory-search': '메모리 검색', 'ai-usage-search': '사용 검색',

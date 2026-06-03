@@ -928,22 +928,10 @@ export default function JourneysPage() {
       return;
     }
 
-    // pause/end = 옛 매트릭스 (추후 커스텀 모달 통합 영역)
-    const confirmMsg =
-      action === 'pause' ? '여정을 일시정지하시겠습니까?' :
-      '여정을 종료하시겠습니까? 종료 후 재시작 불가합니다.';
-    if (!confirm(confirmMsg)) return;
-
-    try {
-      const res = await fetch(`/api/ai/operator/journeys/${journeyId}/${action}`, {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${token()}` },
-      });
-      const data = await res.json();
-      if (data.success) await loadAll();
-      else alert(data.error || '처리 실패');
-    } catch (e: any) {
-      alert(e?.message || '처리 중 오류');
+    // pause/end = 커스텀 모달(JourneyActionConfirmModal) 통합 — native confirm 폐기.
+    if (action === 'pause' || action === 'end') {
+      setActionModal({ mode: action, journeyId, journeyName });
+      return;
     }
   };
 
@@ -951,7 +939,7 @@ export default function JourneysPage() {
   const executeArchiveAction = async () => {
     if (!actionModal) return;
     const { mode, journeyId } = actionModal;
-    const method = mode === 'delete' ? 'DELETE' : 'PATCH';
+    const method = mode === 'delete' ? 'DELETE' : (mode === 'pause' || mode === 'end') ? 'POST' : 'PATCH';
     const path = mode === 'delete' ? '' : '/' + mode;
     try {
       const res = await fetch(`/api/ai/operator/journeys/${journeyId}${path}`, {

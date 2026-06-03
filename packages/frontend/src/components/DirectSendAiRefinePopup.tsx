@@ -82,7 +82,6 @@ export default function DirectSendAiRefinePopup({
                 className="text-[17px] font-bold text-white tracking-tight leading-tight flex items-center gap-2"
               >
                 AI가 문안을 다듬어드려요
-                <span className="text-[9px] px-1.5 py-0.5 rounded bg-violet-500/30 text-violet-200 font-mono uppercase">D219+</span>
               </h2>
               <p className="text-[12px] text-white/60 mt-1 leading-relaxed">
                 직접 쓰신 메시지를 톤·길이·이모지·스팸 회피까지 한 번에 정리

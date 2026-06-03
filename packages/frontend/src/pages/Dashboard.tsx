@@ -1,6 +1,7 @@
 ﻿import { AlertTriangle, Award, BarChart3, Bell, BellOff, Cake, Calendar, ChevronLeft, ChevronRight, Clock, CreditCard, DollarSign, HelpCircle, Lightbulb, Mail, MapPin, Percent, Rocket, Send, ShoppingCart, Sparkles, Store, TrendingDown, TrendingUp, User, UserPlus, Users, UserX } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useToast } from '../components/ToastProvider';
 import { aiApi, campaignsApi, customersApi } from '../api/client';
 import AddressBookModal from '../components/AddressBookModal';
 import AiCampaignResultPopup from '../components/AiCampaignResultPopup';
@@ -1001,16 +1002,11 @@ export default function Dashboard() {
       setDirectMessage(prev => stripAd(prev));
     }
   };
-  const [toast, setToast] = useState<{show: boolean, type: 'success' | 'error' | 'warning', message: string}>({show: false, type: 'success', message: ''});
-
-  // ★ B17-15: Toast 자동 해제 — show=true 될 때마다 4초 후 자동 닫힘
-  useEffect(() => {
-    if (!toast.show) return;
-    const timer = setTimeout(() => {
-      setToast(prev => ({ ...prev, show: false }));
-    }, 4000);
-    return () => clearTimeout(timer);
-  }, [toast.show, toast.message]);
+  // 직접발송 자체 토스트 → 공용 useToast(다크 톤) shim. 기존 setToast({show,type,message}) 호출 유지.
+  const _toast = useToast();
+  const setToast = (t: { show: boolean; type: 'success' | 'error' | 'warning'; message: string }) => {
+    if (t.show && t.message) _toast[t.type](t.message);
+  };
 
   // B13-06: 이모지 감지 함수
   const hasEmoji = (text: string): boolean => {
@@ -2273,22 +2269,6 @@ const campaignData = {
             </div>
           </div>
           </div>
-      )}
-      {/* 토스트 알림 */}
-      {toast.show && (
-        <div className="fixed top-6 left-1/2 -translate-x-1/2 z-[100] animate-bounce">
-          <div className={`px-6 py-4 rounded-2xl shadow-2xl flex items-center gap-3 ${
-            toast.type === 'success'
-              ? 'bg-gradient-to-r from-emerald-500 to-green-500 text-white'
-              : toast.type === 'warning'
-              ? 'bg-gradient-to-r from-amber-500 to-yellow-500 text-white'
-              : 'bg-gradient-to-r from-red-500 to-rose-500 text-white'
-          }`}>
-            <span className="text-2xl">{toast.type === 'success' ? '✅' : toast.type === 'warning' ? '⚠️' : '❌'}</span>
-            <span className="font-medium text-lg">{toast.message}</span>
-            <button onClick={() => setToast(prev => ({...prev, show: false}))} className="ml-2 text-white/80 hover:text-white text-lg">✕</button>
-          </div>
-        </div>
       )}
       {/* 헤더 */}
       <DashboardHeader

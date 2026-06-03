@@ -12,9 +12,9 @@
  */
 
 import { useState, useEffect } from 'react';
-import { X, Archive, ArchiveRestore, Trash2, AlertTriangle, Info } from 'lucide-react';
+import { X, Archive, ArchiveRestore, Trash2, AlertTriangle, Info, Pause, Power } from 'lucide-react';
 
-export type JourneyActionMode = 'archive' | 'unarchive' | 'delete';
+export type JourneyActionMode = 'archive' | 'unarchive' | 'delete' | 'pause' | 'end';
 
 interface Props {
   mode: JourneyActionMode;
@@ -66,6 +66,28 @@ const MODE_CONFIG: Record<JourneyActionMode, {
     buttonHover: 'hover:bg-rose-500/60',
     buttonText: 'text-rose-50',
     confirmLabel: '영구 삭제',
+  },
+  pause: {
+    icon: Pause,
+    iconBg: 'bg-amber-500/20',
+    iconColor: 'text-amber-300',
+    title: '여정 일시정지',
+    accent: 'border-amber-400/30',
+    buttonBg: 'bg-amber-500/30',
+    buttonHover: 'hover:bg-amber-500/50',
+    buttonText: 'text-amber-100',
+    confirmLabel: '일시정지',
+  },
+  end: {
+    icon: Power,
+    iconBg: 'bg-rose-500/20',
+    iconColor: 'text-rose-300',
+    title: '여정 종료 (재시작 불가)',
+    accent: 'border-rose-400/40',
+    buttonBg: 'bg-rose-500/40',
+    buttonHover: 'hover:bg-rose-500/60',
+    buttonText: 'text-rose-50',
+    confirmLabel: '종료',
   },
 };
 
@@ -132,6 +154,19 @@ export default function JourneyActionConfirmModal({ mode, journeyName, onConfirm
               <div className="flex gap-2">
                 <Info className="w-4 h-4 text-cyan-300 flex-shrink-0 mt-0.5" />
                 <span>보관함에서 복원하면 여정 목록에 다시 노출됩니다. 옛 통계 영역 영향 없음.</span>
+              </div>
+            </div>
+          )}
+
+          {(mode === 'pause' || mode === 'end') && (
+            <div className="text-[13px] text-white/80 leading-relaxed">
+              <div className="flex gap-2">
+                <Info className={`w-4 h-4 ${mode === 'end' ? 'text-rose-300' : 'text-amber-300'} flex-shrink-0 mt-0.5`} />
+                <span>
+                  {mode === 'pause'
+                    ? '일시정지하면 발송이 멈춥니다. 언제든 다시 재개할 수 있습니다.'
+                    : '종료하면 발송이 멈추고 다시 시작할 수 없습니다. 통계는 보존됩니다.'}
+                </span>
               </div>
             </div>
           )}

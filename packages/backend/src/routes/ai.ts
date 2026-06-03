@@ -899,6 +899,8 @@ router.post('/refine-message', requirePlanFeature('ai_messaging'), async (req: R
         candidates: [],
       });
     }
+    // 성공(다듬은 안 생성) 후 차감 — 문안 다듬기 1크레딧. refineDirectMessage는 callAIWithFallback 우회라 여기서 직접 차감. 실패 시 미차감.
+    await deductCreditSafe({ companyId, cost: getCreditCost('refine-direct'), source: 'refine-direct', createdBy: req.user?.userId });
     return res.json({ success: true, candidates: result.candidates });
   } catch (err: any) {
     console.error('[ai/refine-message] 오류:', err);
@@ -2976,14 +2978,14 @@ router.post('/operator/journeys/:id/pretest-validate', async (req: Request, res:
   } catch (err: any) {
     // ★ D214+ db_alter_safety_net 정합 — DB 마이그레이션 미실행 시 503 + 사용자 친화 안내
     const msg = err?.message || '';
+    console.error('[Journey pretest-validate] 오류:', err);  // 실제 에러(컬럼명 포함) 항상 로그 — 503 분기가 삼키지 않게
     if (msg.includes('column') && msg.includes('does not exist')) {
       return res.status(503).json({
         success: false,
-        error: 'DB 마이그레이션 필요 — journey_step_snapshots / journey_pretest_schedules / journey_step_pause_logs 테이블 생성 요청 의무',
+        error: '여정 자동 검증을 준비 중입니다. 잠시 후 다시 시도해 주세요.',
         code: 'DB_MIGRATION_PENDING',
       });
     }
-    console.error('[Journey pretest-validate] 오류:', err);
     return res.status(500).json({ success: false, error: err?.message || '검증 실패' });
   }
 });

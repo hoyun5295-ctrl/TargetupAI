@@ -162,7 +162,7 @@ export default function EmailCampaignsPage() {
   const handle503 = (data: any): boolean => {
     if (data?.code === 'DB_MIGRATION_PENDING') {
       setError(data.error || 'DB 마이그레이션 필요 — 운영자에게 문의해주세요.');
-      showToast('DB 마이그레이션 대기 중 — 운영자에게 문의해주세요.', 'warning');
+      showToast('기능을 준비 중입니다. 잠시 후 다시 시도해 주세요.', 'warning');
       return true;
     }
     if (data?.code === 'SMTP_ENCRYPTION_KEY_MISSING') {

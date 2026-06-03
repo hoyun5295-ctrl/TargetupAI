@@ -606,8 +606,8 @@ export default function AiMemoryPage() {
           <div className="p-4 bg-amber-500/10 border border-amber-400/30 rounded-xl flex items-start gap-3">
             <Info className="w-5 h-5 text-amber-300 flex-shrink-0 mt-0.5" />
             <div className="flex-1">
-              <div className="text-sm font-semibold text-amber-100 mb-1">DB 마이그레이션 대기 중</div>
-              <div className="text-xs text-white/70 leading-relaxed">{migrationPending}</div>
+              <div className="text-sm font-semibold text-amber-100 mb-1">잠시 후 다시 시도해 주세요</div>
+              <div className="text-xs text-white/70 leading-relaxed">기능을 준비 중입니다. 잠시 후 다시 시도해 주세요.</div>
             </div>
           </div>
         )}

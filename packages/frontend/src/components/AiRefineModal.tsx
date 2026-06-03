@@ -192,7 +192,6 @@ export default function AiRefineModal({
             <div>
               <h2 className="text-base font-bold text-white leading-tight flex items-center gap-2">
                 AI 문안 다듬기
-                <span className="text-[9px] px-1.5 py-0.5 rounded bg-violet-500/30 text-violet-200 font-mono uppercase">D219+</span>
               </h2>
               <p className="text-[11px] text-white/50 mt-0.5">톤 · 길이 · 이모지 · 스팸 회피를 한 번에</p>
             </div>

@@ -86,6 +86,7 @@ ok('인앱 생성(돌려보기) inapp-ai-generator = 3', () => assert.strictEqua
 ok('인앱 게시(확정) inapp-publish = 15', () => assert.strictEqual(getCreditCost('inapp-publish'), 15));
 ok('인앱 빠른액션(다듬기) inapp-quick-action = 1', () => assert.strictEqual(getCreditCost('inapp-quick-action'), 1));
 ok('문안·분석 generate-messages = 5', () => assert.strictEqual(getCreditCost('generate-messages'), 5));
+ok('직접발송 다듬기 refine-direct = 1', () => assert.strictEqual(getCreditCost('refine-direct'), 1));
 ok('다듬기 journey-ai-refine = 1', () => assert.strictEqual(getCreditCost('journey-ai-refine'), 1));
 ok('스팸 spam-filter-test = 0 (크레딧 비대상 — 현금/후불 청구)', () => assert.strictEqual(getCreditCost('spam-filter-test'), 0));
 ok('미등록 source = 0', () => assert.strictEqual(getCreditCost('unknown'), 0));

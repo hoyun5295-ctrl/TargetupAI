@@ -120,6 +120,7 @@ export const CREDIT_COST_MAP: Record<string, number> = {
   'voice-inbound': 5,
   'dm-event-recommender': 5,
   // 다듬기·진단·질문·매핑 (1) — 스팸필터는 크레딧 비대상(현금/후불 청구)
+  'refine-direct': 1,
   'journey-ai-refine': 1,
   'journey-step-diagnosis': 1,
   'dm-quick-action-refine': 1,

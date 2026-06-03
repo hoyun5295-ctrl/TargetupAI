@@ -193,9 +193,8 @@ export default function JourneyActivationConfirmModal({
               <Sparkles className="w-5 h-5 text-white" />
             </div>
             <div>
-              <h3 className="text-base font-semibold text-white flex items-center gap-2">
+              <h3 className="text-base font-semibold text-white">
                 여정 활성화 자동 검증
-                <span className="text-[10px] px-1.5 py-0.5 rounded bg-violet-500/30 text-violet-200 font-mono uppercase">D218+</span>
               </h3>
               <p className="text-[11px] text-white/50 mt-0.5">{journeyName}</p>
             </div>
@@ -251,7 +250,7 @@ export default function JourneyActivationConfirmModal({
                 })}
               </div>
               <div className="text-[10px] text-white/30 italic mt-3">
-                Data source — CT-92 journey-pretest-validator (D218+ 신설)
+                Data source — 여정 자동 검증 엔진
               </div>
             </div>
           )}
@@ -262,10 +261,10 @@ export default function JourneyActivationConfirmModal({
               <div className="flex items-start gap-2">
                 <AlertTriangle className="w-4 h-4 text-amber-300 flex-shrink-0 mt-0.5" />
                 <div>
-                  <div className="text-[13px] font-semibold text-amber-100">DB 마이그레이션 대기 중</div>
+                  <div className="text-[13px] font-semibold text-amber-100">잠시 후 다시 시도해 주세요</div>
                   <div className="text-[12px] text-amber-100/80 mt-1 leading-relaxed">
-                    여정 자동 검증 영역 신규 DB 테이블 (journey_step_snapshots + journey_pretest_schedules + journey_step_pause_logs) 추가 필요.
-                    운영 admin이 PG ALTER 진행 후 다시 시도 의무.
+                    여정 자동 검증 기능을 준비 중입니다. 잠시 후 다시 활성화를 눌러주세요.
+                    계속 반복되면 고객센터로 문의해 주세요.
                   </div>
                 </div>
               </div>
@@ -348,7 +347,7 @@ export default function JourneyActivationConfirmModal({
               </div>
 
               <div className="text-[10px] text-white/30 italic">
-                Data source — CT-92 journey-pretest-validator + CT-93 journey-pretest-notifier (D218+ 신설)
+                Data source — 여정 자동 검증 엔진
               </div>
             </div>
           )}
@@ -402,7 +401,7 @@ export default function JourneyActivationConfirmModal({
                   </div>
 
                   <div className="text-[10px] text-white/30 italic">
-                    Data source — CT-92 journey-pretest-validator (D218+ 신설)
+                    Data source — 여정 자동 검증 엔진
                   </div>
                 </>
               )}

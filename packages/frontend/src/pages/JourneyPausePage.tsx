@@ -117,7 +117,6 @@ export default function JourneyPausePage() {
           <div>
             <h1 className="text-xl md:text-2xl font-bold text-white flex items-center gap-2">
               발송 정지 페이지
-              <span className="text-[10px] px-1.5 py-0.5 rounded bg-violet-500/30 text-violet-200 font-mono uppercase">D218+</span>
             </h1>
             <p className="text-[11px] md:text-[12px] text-white/50 mt-0.5">
               여정 자동 발송 2시간 전 안내 — 담당자 1-click 정지 영역

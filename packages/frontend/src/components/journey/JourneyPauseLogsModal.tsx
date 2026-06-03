@@ -116,7 +116,7 @@ export default function JourneyPauseLogsModal({ journeyId, journeyName, onClose,
         headers: { Authorization: `Bearer ${token}` },
       });
       if (res.status === 503) {
-        setError('DB 마이그레이션 대기 중 — 운영 admin이 ALTER 진행 후 다시 시도 의무');
+        setError('잠시 후 다시 시도해 주세요.');
         return;
       }
       const data = await res.json();
@@ -175,7 +175,6 @@ export default function JourneyPauseLogsModal({ journeyId, journeyName, onClose,
             <div>
               <h3 className="text-base font-semibold text-white flex items-center gap-2">
                 정지 이력 영구 기록
-                <span className="text-[10px] px-1.5 py-0.5 rounded bg-fuchsia-500/30 text-fuchsia-200 font-mono uppercase">D218+</span>
               </h3>
               <p className="text-[11px] text-white/50 mt-0.5">{journeyName}</p>
             </div>
