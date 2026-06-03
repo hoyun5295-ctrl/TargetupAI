@@ -370,7 +370,7 @@ export default function JourneysPage() {
   // ★ D211+ Phase 3-fix (2026-05-23 Harold 명시): archive/unarchive/delete 영역 커스텀 다크 톤 모달 (native confirm/prompt 폐기)
   const [actionModal, setActionModal] = useState<{ mode: JourneyActionMode; journeyId: string; journeyName: string } | null>(null);
   // ★ D218+ (2026-05-26): 활성화 자동 검증 모달 + 정지 이력 모달
-  const [activationModal, setActivationModal] = useState<{ journeyId: string; journeyName: string } | null>(null);
+  const [activationModal, setActivationModal] = useState<{ journeyId: string; journeyName: string; journeyStatus: string } | null>(null);
   const [confirm, setConfirm] = useState<ConfirmState | null>(null);
   const [pauseLogsModal, setPauseLogsModal] = useState<{ journeyId: string; journeyName: string } | null>(null);
   // 문안 수정 모달 — 초안·일시정지 여정만 (활성은 일시정지 후)
@@ -942,7 +942,7 @@ export default function JourneysPage() {
 
     // ★ D218+ (2026-05-26): activate = 자동 검증 모달 진입 (옛 native confirm 폐기 + ConfirmModal 정합)
     if (action === 'activate') {
-      setActivationModal({ journeyId, journeyName });
+      setActivationModal({ journeyId, journeyName, journeyStatus: journey?.status || 'draft' });
       return;
     }
 
@@ -2591,6 +2591,7 @@ export default function JourneysPage() {
         <JourneyActivationConfirmModal
           journeyId={activationModal.journeyId}
           journeyName={activationModal.journeyName}
+          journeyStatus={activationModal.journeyStatus}
           token={token() || ''}
           onClose={() => setActivationModal(null)}
           onActivated={() => loadAll()}

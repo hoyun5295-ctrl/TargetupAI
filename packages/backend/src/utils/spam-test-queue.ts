@@ -182,13 +182,13 @@ export async function enqueueSpamTest(params: SpamTestEnqueueParams): Promise<Sp
     const testResult = await query(
       `INSERT INTO spam_filter_tests
        (company_id, user_id, callback_number, message_content_sms, message_content_lms,
-        message_hash, spam_check_number, status, source, variant_id, batch_id)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, 'queued', $8, $9, $10)
+        message_hash, spam_check_number, status, source, variant_id, batch_id, subject)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, 'queued', $8, $9, $10, $11)
        RETURNING id, created_at`,
       [companyId, userId, callbackNumber,
        messageContentSms || null, messageContentLms || null,
        messageHash || null, spamCheckNumber,
-       source, variantId || null, batchId || null]
+       source, variantId || null, batchId || null, subject || null]
     );
     const testId = testResult.rows[0].id;
 

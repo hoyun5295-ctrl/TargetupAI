@@ -12,6 +12,7 @@
 
 import { query } from '../config/database';
 import { enqueueSpamTest, getSpamTestBatchResults } from './spam-test-queue';
+import { buildAdMessage, buildAdSubject, getOpt080Number } from './messageUtils';
 import { randomUUID } from 'crypto';
 
 export type FailedReason =
@@ -85,6 +86,8 @@ export async function validateJourneyForActivation(
   const failedSteps: FailedStep[] = [];
   let confidenceSum = 0;
   let scoredCount = 0;
+  // 실제 발송과 동일한 본문으로 검증 — 무료수신거부 080 조회 (buildAdMessage 합성용)
+  const opt080 = await getOpt080Number(userId, companyId);
 
   for (const step of steps) {
     // variant 조회 (옛 D188 Phase 2-B-3 정합)
@@ -142,14 +145,19 @@ export async function validateJourneyForActivation(
         // SMS/LMS/MMS = 스팸필터테스트 진행
         try {
           const batchId = randomUUID();
+          // 실제 발송(journey-executor prepareSendMessage)과 동일하게 (광고)+무료거부+제목 합성 후 검증.
+          const stMsgType = step.channel.toUpperCase() as 'SMS' | 'LMS' | 'MMS';
+          const stIsAd = step.is_ad !== false;
+          const adBody = buildAdMessage(msg.body, stMsgType, stIsAd, opt080);
+          const adSubject = buildAdSubject(step.subject || '', stMsgType, stIsAd);
           const enqueueResult = await enqueueSpamTest({
             companyId,
             userId,
             callbackNumber: step.callback_number || '',
-            messageContentSms: step.channel === 'sms' ? msg.body : '',
-            messageContentLms: step.channel !== 'sms' ? msg.body : '',
-            messageType: step.channel.toUpperCase() as 'SMS' | 'LMS' | 'MMS',
-            subject: step.subject || undefined,
+            messageContentSms: step.channel === 'sms' ? adBody : '',
+            messageContentLms: step.channel !== 'sms' ? adBody : '',
+            messageType: stMsgType,
+            subject: adSubject || undefined,
             source: 'auto_ai',
             variantId: msg.variantId || undefined,
             batchId,

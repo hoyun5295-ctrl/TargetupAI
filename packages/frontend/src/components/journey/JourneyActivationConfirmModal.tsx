@@ -21,10 +21,12 @@ import {
   ShieldCheck, MessageSquare, FileText, Hash, Calculator, Wand2,
 } from 'lucide-react';
 import { useToast } from '../ToastProvider';
+import CreditConfirmModal from '../credit/CreditConfirmModal';
 
 interface Props {
   journeyId: string;
   journeyName: string;
+  journeyStatus: string;
   onClose: () => void;
   onActivated: () => void;
   token: string;
@@ -48,7 +50,6 @@ interface ValidationResult {
     skt: number;
     kt: number;
     lguplus: number;
-    mvno: number;
   };
 }
 
@@ -67,13 +68,13 @@ const SUB_AGENT_CARDS = [
   { icon: FileText, label: 'placeholder 잔존 검증', color: 'from-violet-500 to-purple-500' },
   { icon: Hash, label: '변수 매핑 검증', color: 'from-fuchsia-500 to-pink-500' },
   { icon: MessageSquare, label: 'LMS/MMS 제목 검증', color: 'from-indigo-500 to-blue-500' },
-  { icon: ShieldCheck, label: '스팸필터 통신사 4종 검증', color: 'from-cyan-500 to-teal-500' },
+  { icon: ShieldCheck, label: '통신3사 스팸필터 검증', color: 'from-cyan-500 to-teal-500' },
   { icon: Calculator, label: '비용 합산 + 7일 누적 예상', color: 'from-emerald-500 to-green-500' },
   { icon: Wallet, label: '회사 잔액 정합 확인', color: 'from-amber-500 to-orange-500' },
 ];
 
 export default function JourneyActivationConfirmModal({
-  journeyId, journeyName, onClose, onActivated, token,
+  journeyId, journeyName, journeyStatus, onClose, onActivated, token,
 }: Props) {
   const toast = useToast();
   const [phase, setPhase] = useState<'validating' | 'failed' | 'ready' | 'activating' | 'migration_pending'>('validating');
@@ -81,6 +82,7 @@ export default function JourneyActivationConfirmModal({
   const [result, setResult] = useState<ValidationResult | null>(null);
   const [balance, setBalance] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [creditConfirm, setCreditConfirm] = useState(false);
 
   // sub-agent 카드 700ms 간격 진행
   useEffect(() => {
@@ -122,7 +124,7 @@ export default function JourneyActivationConfirmModal({
 
       const validateData = await validateRes.json();
       if (!validateRes.ok) {
-        setError(validateData?.error || '활성화 검증 사고');
+        setError(validateData?.error || '활성화 검증 오류');
         setPhase('failed');
         return;
       }
@@ -139,7 +141,7 @@ export default function JourneyActivationConfirmModal({
 
       setPhase(validateData.ok ? 'ready' : 'failed');
     } catch (e: any) {
-      setError(e?.message || '검증 호출 사고');
+      setError(e?.message || '검증 호출 오류');
       setPhase('failed');
     }
   };
@@ -157,16 +159,16 @@ export default function JourneyActivationConfirmModal({
         onActivated();
         onClose();
       } else {
-        toast.error(data?.error || '활성화 사고');
+        toast.error(data?.error || '활성화 오류');
         setPhase('ready');
       }
     } catch (e: any) {
-      toast.error(e?.message || '활성화 호출 사고');
+      toast.error(e?.message || '활성화 호출 오류');
       setPhase('ready');
     }
   };
 
-  // AI 자동 재생성 1-click — step 단위 placeholder/spam 사고 정정 호출 (옛 영역 X = backend 추가 endpoint 영역 — 본 모달은 안내만 + JourneysPage 편집 진입)
+  // AI 자동 재생성 1-click — step 단위 placeholder/spam 오류 정정 호출 (backend 추가 endpoint — 본 모달은 안내만 + JourneysPage 편집 진입)
   const onRegenerate = (failedStep: FailedStep) => {
     toast.info('JourneysPage 편집 영역에서 step 본문을 정정 후 다시 활성화 의무');
     onClose();
@@ -178,10 +180,17 @@ export default function JourneyActivationConfirmModal({
   const isInsufficientBalance = balance != null && result != null && balance < result.totalCost;
 
   return (
-    <div
-      className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 p-4"
-      onClick={phase === 'activating' ? undefined : onClose}
-    >
+    <>
+      <CreditConfirmModal
+        open={creditConfirm}
+        source="journey-activate"
+        onConfirm={() => { setCreditConfirm(false); void runActivate(); }}
+        onCancel={() => setCreditConfirm(false)}
+      />
+      <div
+        className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 p-4"
+        onClick={phase === 'activating' ? undefined : onClose}
+      >
       <div
         className="bg-slate-900 border border-white/10 rounded-2xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-hidden flex flex-col"
         onClick={(e) => e.stopPropagation()}
@@ -283,11 +292,10 @@ export default function JourneyActivationConfirmModal({
                   <div className="text-[12px] text-emerald-100/80">
                     스팸필터 신뢰도 점수 — <span className="font-mono font-semibold">{result.confidenceScore}</span> / 100
                     {result.perCarrierScore && (
-                      <div className="grid grid-cols-4 gap-1 mt-2 text-[10px] text-emerald-100/60">
+                      <div className="grid grid-cols-3 gap-1 mt-2 text-[10px] text-emerald-100/60">
                         <div>SKT {result.perCarrierScore.skt}</div>
                         <div>KT {result.perCarrierScore.kt}</div>
                         <div>LG U+ {result.perCarrierScore.lguplus}</div>
-                        <div>MVNO {result.perCarrierScore.mvno}</div>
                       </div>
                     )}
                   </div>
@@ -332,16 +340,6 @@ export default function JourneyActivationConfirmModal({
                   <div className="text-[12px] text-violet-100/90 leading-relaxed">
                     활성화 직후 = 모든 step + variant 본문 snapshot 저장 + 발송 2시간 전 담당자 LMS 자동 발송 스케줄 진행.
                     회사 admin이 step 본문을 편집해도 발송 시점 = 활성화 시점 본문 100% 동일 보장.
-                  </div>
-                </div>
-              </div>
-
-              {/* AI 크레딧 안내 — 위 비용 카드(발송 예치금)와 별개 */}
-              <div className="p-3 rounded-xl bg-fuchsia-500/5 border border-fuchsia-400/20">
-                <div className="flex items-start gap-2">
-                  <Sparkles className="w-4 h-4 text-fuchsia-300 flex-shrink-0 mt-0.5" />
-                  <div className="text-[12px] text-fuchsia-100/90 leading-relaxed">
-                    최초 활성화(초안 → 활성) 시 여정 설계 AI 크레딧 150이 함께 차감됩니다. 일시정지 후 재개는 차감되지 않습니다.
                   </div>
                 </div>
               </div>
@@ -420,11 +418,11 @@ export default function JourneyActivationConfirmModal({
                 취소
               </button>
               <button
-                onClick={runActivate}
+                onClick={journeyStatus === 'draft' ? () => setCreditConfirm(true) : runActivate}
                 disabled={isInsufficientBalance}
                 className="flex-1 px-4 py-2 bg-gradient-to-r from-violet-500 to-fuchsia-500 hover:from-violet-600 hover:to-fuchsia-600 disabled:opacity-30 disabled:cursor-not-allowed text-white rounded-lg text-sm font-semibold transition-colors shadow-lg shadow-violet-500/30"
               >
-                활성화 확인
+                {journeyStatus === 'draft' ? '활성화 확인' : '재개 확인'}
               </button>
             </>
           )}
@@ -469,6 +467,7 @@ export default function JourneyActivationConfirmModal({
           )}
         </div>
       </div>
-    </div>
+      </div>
+    </>
   );
 }
