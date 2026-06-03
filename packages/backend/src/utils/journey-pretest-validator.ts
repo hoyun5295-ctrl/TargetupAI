@@ -59,7 +59,7 @@ export async function validateJourneyForActivation(
   // 1. step 조회 (step_type='message'만 — wait/condition 검증 제외)
   const stepsRes = await query(
     `SELECT s.id AS step_id, s.channel, s.message_template, s.subject,
-            s.is_ad, s.callback_number, s.alimtalk_template_code,
+            s.is_ad, j.callback_number, s.alimtalk_template_code,
             s.alimtalk_variable_map, s.step_order
        FROM journey_steps s
        JOIN journeys j ON j.id = s.journey_id
@@ -87,14 +87,14 @@ export async function validateJourneyForActivation(
   for (const step of steps) {
     // variant 조회 (옛 D188 Phase 2-B-3 정합)
     const variantsRes = await query(
-      `SELECT id, message_body
+      `SELECT id, message_template
          FROM journey_step_variants
         WHERE step_id = $1`,
       [step.step_id],
     );
     const variants = variantsRes.rows;
     const messagesToValidate = variants.length > 0
-      ? variants.map((v: any) => ({ variantId: v.id as string, body: v.message_body as string }))
+      ? variants.map((v: any) => ({ variantId: v.id as string, body: v.message_template as string }))
       : [{ variantId: null, body: step.message_template as string }];
 
     for (const msg of messagesToValidate) {

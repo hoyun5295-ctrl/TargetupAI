@@ -261,12 +261,9 @@ async function processExecution(exec: ExecutionRow): Promise<StepOutcome> {
   }
 
   if (step.step_type === 'condition') {
-    // condition step도 customer 조회 필요 (조건 평가 영역)
+    // condition step도 customer 조회 필요 — 조건이 어떤 필드든 평가할 수 있게 SELECT *.
     const condCustRes = await query(
-      `SELECT id, phone, name, is_active, sms_opt_in, callback, custom_fields, email, birth_date,
-              recent_purchase_date, recent_purchase_amount, total_purchase_amount, purchase_count,
-              grade, points, age, gender, region
-       FROM customers WHERE id = $1::uuid AND company_id = $2::uuid`,
+      `SELECT * FROM customers WHERE id = $1::uuid AND company_id = $2::uuid`,
       [exec.customer_id, exec.company_id]
     );
     if (condCustRes.rows.length === 0) {
@@ -329,9 +326,10 @@ async function processExecution(exec: ExecutionRow): Promise<StepOutcome> {
   }
 
   // 3. 고객 조회 + opt-in 검증
+  //   치환은 customer의 모든 직접 컬럼(등급·지역·나이·성별·구매정보 등)을 참조하므로 SELECT *.
+  //   컬럼을 한정하면 발송 시 그 변수들이 빈 값으로 치환되는 문제가 생긴다.
   const custRes = await query(
-    `SELECT id, phone, name, is_active, sms_opt_in, callback, custom_fields, email, birth_date, recent_purchase_date
-     FROM customers WHERE id = $1::uuid AND company_id = $2::uuid`,
+    `SELECT * FROM customers WHERE id = $1::uuid AND company_id = $2::uuid`,
     [exec.customer_id, exec.company_id]
   );
   if (custRes.rows.length === 0) {

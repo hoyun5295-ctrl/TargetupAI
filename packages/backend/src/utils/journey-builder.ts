@@ -672,22 +672,23 @@ export async function activateJourney(companyId: string, journeyId: string, user
  */
 export async function createJourneyStepSnapshots(companyId: string, journeyId: string): Promise<void> {
   const stepsRes = await query(
-    `SELECT id, channel, message_template, subject, is_ad, callback_number,
-            alimtalk_template_code, alimtalk_variable_map
-       FROM journey_steps
-      WHERE journey_id = $1
-        AND COALESCE(step_type, 'message') = 'message'`,
+    `SELECT s.id, s.channel, s.message_template, s.subject, s.is_ad, j.callback_number,
+            s.alimtalk_template_code, s.alimtalk_variable_map
+       FROM journey_steps s
+       JOIN journeys j ON j.id = s.journey_id
+      WHERE s.journey_id = $1
+        AND COALESCE(s.step_type, 'message') = 'message'`,
     [journeyId],
   );
 
   for (const step of stepsRes.rows) {
     const variantsRes = await query(
-      `SELECT id, message_body FROM journey_step_variants WHERE step_id = $1`,
+      `SELECT id, message_template FROM journey_step_variants WHERE step_id = $1`,
       [step.id],
     );
     const variants = variantsRes.rows.length > 0
       ? variantsRes.rows
-      : [{ id: null, message_body: step.message_template }];
+      : [{ id: null, message_template: step.message_template }];
 
     for (const variant of variants) {
       await query(
@@ -700,7 +701,7 @@ export async function createJourneyStepSnapshots(companyId: string, journeyId: s
           journeyId,
           step.id,
           variant.id,
-          variant.message_body,
+          variant.message_template,
           step.subject,
           step.alimtalk_variable_map || {},
           step.channel,

@@ -29,6 +29,8 @@ import AlimtalkChannelPanel, { type AlimtalkSenderProfile, type AlimtalkTemplate
 import { detectLiquidSyntax, renderLiquid, flattenCustomerForLiquid, SAMPLE_CUSTOMERS } from '../utils/liquid-templating';
 // ★ D210+ Phase 2-fix6 (Harold 명시 2026-05-23): 변수 하이라이트 + 머지 미리보기 컨트롤타워.
 import { highlightVars, mergeAndHighlightVars } from '../utils/highlightVars';
+import ConfirmModal, { type ConfirmState } from '../components/ConfirmModal';
+import { useToast } from '../components/ToastProvider';
 
 // ★ D210+ Phase 2-fix6 (Harold 명시 2026-05-23): 여정 생성 6 sub-agent 진행 카드 매트릭스.
 //   본질 = 옛 단순 로딩 → 6 sub-agent 시각 효과 → 사용자가 5~10초 기다리기 편함.
@@ -344,6 +346,7 @@ function detectUnsafe(text: string): { emoji: string[]; special: string[] } {
 
 export default function JourneysPage() {
   const navigate = useNavigate();
+  const toast = useToast();
   const [view, setView] = useState<'main' | 'review'>('main');
   const [journeys, setJourneys] = useState<JourneyRow[]>([]);
   const [callbackOptions, setCallbackOptions] = useState<CallbackOption[]>([]);
@@ -368,6 +371,7 @@ export default function JourneysPage() {
   const [actionModal, setActionModal] = useState<{ mode: JourneyActionMode; journeyId: string; journeyName: string } | null>(null);
   // ★ D218+ (2026-05-26): 활성화 자동 검증 모달 + 정지 이력 모달
   const [activationModal, setActivationModal] = useState<{ journeyId: string; journeyName: string } | null>(null);
+  const [confirm, setConfirm] = useState<ConfirmState | null>(null);
   const [pauseLogsModal, setPauseLogsModal] = useState<{ journeyId: string; journeyName: string } | null>(null);
   // 문안 수정 모달 — 초안·일시정지 여정만 (활성은 일시정지 후)
   const [editMessageModal, setEditMessageModal] = useState<{ journeyId: string; journeyName: string; journeyStatus: string } | null>(null);
@@ -470,7 +474,7 @@ export default function JourneysPage() {
     if (!aiPkg) return;
     const matchObjective = aiPkg.name || aiPkg.reasoning || objective || '캠페인 발송';
     if (!matchObjective || matchObjective.trim().length < 3) {
-      alert('캠페인 의도가 비어있습니다. 여정 이름 또는 목표를 입력해주세요.');
+      toast.warning('캠페인 의도가 비어있습니다. 여정 이름 또는 목표를 입력해주세요.');
       return;
     }
     try {
@@ -484,11 +488,11 @@ export default function JourneysPage() {
       });
       const data = await res.json();
       if (!res.ok || !data.success) {
-        alert(data.error || 'AI 매칭 실패');
+        toast.error(data.error || 'AI 매칭 실패');
         return;
       }
       if (!data.matched || !data.template) {
-        alert(data.suggestion || '정합되는 알림톡 템플릿이 없습니다. 캠페인 의도에 맞는 템플릿을 추가 등록해주세요.');
+        toast.warning(data.suggestion || '정합되는 알림톡 템플릿이 없습니다. 캠페인 의도에 맞는 템플릿을 추가 등록해주세요.');
         return;
       }
       // 매칭 결과 자동 적용 — 회사 admin 검토 후 추가 정정 가능
@@ -504,7 +508,7 @@ export default function JourneysPage() {
         alimtalkVariableMap: variableMap,
       });
       const unmappedCount = (data.variableMappings || []).filter((m: any) => !m.customerFieldKey).length;
-      alert(
+      toast.success(
         `AI 자동 매칭 완료 (정합 점수 ${data.matchScore})\n\n` +
         `템플릿: ${data.template.template_name}\n` +
         `근거: ${data.matchReason}\n\n` +
@@ -512,7 +516,7 @@ export default function JourneysPage() {
         `회사 admin 검토 + 정정 후 활성화해주세요.`
       );
     } catch (err: any) {
-      alert(err?.message || 'AI 매칭 중 오류');
+      toast.error(err?.message || 'AI 매칭 중 오류');
     }
   };
 
@@ -669,7 +673,7 @@ export default function JourneysPage() {
   // ════════ One-shot AI 생성 ════════
   const handleAIGenerate = async (templateHint?: TemplateCode) => {
     if (!templateHint && objective.trim().length < 3) {
-      alert('여정 목표를 자연어로 입력하거나 빠른 시작 카드를 선택해주세요.');
+      toast.warning('여정 목표를 자연어로 입력하거나 빠른 시작 카드를 선택해주세요.');
       return;
     }
     setGenerating(true);
@@ -734,10 +738,10 @@ export default function JourneysPage() {
           })
           .catch(() => setPreviewSamples([]));
       } else {
-        alert(data.error || 'AI 생성 실패. 다시 시도해주세요.');
+        toast.error(data.error || 'AI 생성 실패. 다시 시도해주세요.');
       }
     } catch (e: any) {
-      alert(e?.message || '생성 중 오류');
+      toast.error(e?.message || '생성 중 오류');
     } finally {
       setGenerating(false);
     }
@@ -753,10 +757,17 @@ export default function JourneysPage() {
     return () => clearTimeout(timer);
   }, [generating, progressStep]);
 
-  const handleRegenerate = async () => {
+  const handleRegenerate = () => {
     if (!aiPkg) return;
-    if (!confirm('현재 생성된 여정을 폐기하고 다시 생성하시겠습니까? 수정한 내용은 사라집니다.')) return;
-    await handleAIGenerate(aiPkg.templateCode === 'custom' && objective ? undefined : aiPkg.templateCode);
+    setConfirm({
+      mode: 'warning',
+      title: '여정 다시 생성',
+      description: '현재 생성된 여정을 폐기하고 다시 생성하시겠습니까? 수정한 내용은 사라집니다.',
+      confirmLabel: '다시 생성',
+      onConfirm: () => {
+        void handleAIGenerate(aiPkg.templateCode === 'custom' && objective ? undefined : aiPkg.templateCode);
+      },
+    });
   };
 
   // ════════ step 수정 ════════
@@ -769,16 +780,23 @@ export default function JourneysPage() {
 
   const deleteStep = (idx: number) => {
     if (!aiPkg) return;
-    if (aiPkg.steps.length <= 1) { alert('최소 1개 step은 필요합니다.'); return; }
-    if (!confirm(`step ${idx + 1}을(를) 삭제하시겠습니까?`)) return;
-    const newSteps = aiPkg.steps.filter((_, i) => i !== idx).map((s, i) => ({ ...s, stepOrder: i + 1 }));
-    setAiPkg({ ...aiPkg, steps: newSteps });
+    if (aiPkg.steps.length <= 1) { toast.warning('최소 1개 step은 필요합니다.'); return; }
+    setConfirm({
+      mode: 'danger',
+      title: 'step 삭제',
+      description: `step ${idx + 1}을(를) 삭제하시겠습니까?`,
+      confirmLabel: '삭제',
+      onConfirm: () => {
+        const newSteps = aiPkg.steps.filter((_, i) => i !== idx).map((s, i) => ({ ...s, stepOrder: i + 1 }));
+        setAiPkg({ ...aiPkg, steps: newSteps });
+      },
+    });
   };
 
   const addStep = () => {
     if (!aiPkg) return;
     // ★ D188 Phase 2-B-1 (2026-05-21): 최대 step 5개 → 7개 확장 (wait/condition 추가 영역 확보).
-    if (aiPkg.steps.length >= 7) { alert('최대 7개 step까지 가능합니다.'); return; }
+    if (aiPkg.steps.length >= 7) { toast.warning('최대 7개 step까지 가능합니다.'); return; }
     const lastDelay = aiPkg.steps[aiPkg.steps.length - 1]?.delayHours || 0;
     const newStep: AIGeneratedStep = {
       stepOrder: aiPkg.steps.length + 1,
@@ -797,7 +815,7 @@ export default function JourneysPage() {
     if (!aiPkg) return;
     const step = aiPkg.steps[idx];
     if (step.messageTemplate.trim().length < 10) {
-      alert('메시지를 10자 이상 작성한 후 다듬기를 사용해주세요.');
+      toast.warning('메시지를 10자 이상 작성한 후 다듬기를 사용해주세요.');
       return;
     }
     setRefineLoading(true);
@@ -816,10 +834,10 @@ export default function JourneysPage() {
       if (data.success) {
         setRefining({ stepIdx: idx, candidates: data.candidates || [] });
       } else {
-        alert(data.error || 'AI 다듬기 실패');
+        toast.error(data.error || 'AI 다듬기 실패');
       }
     } catch (e: any) {
-      alert(e?.message || '다듬기 중 오류');
+      toast.error(e?.message || '다듬기 중 오류');
     } finally {
       setRefineLoading(false);
     }
@@ -834,14 +852,14 @@ export default function JourneysPage() {
   // ════════ 저장 + 활성화 ════════
   const handleSaveDraft = async () => {
     if (!aiPkg) return;
-    if (!reviewCallback) { alert('회신번호를 선택해주세요.'); return; }
+    if (!reviewCallback) { toast.warning('회신번호를 선택해주세요.'); return; }
     // ★ D188 Phase 2-B-1 (2026-05-21): step_type별 다른 검증 분기.
     //   message = 본문 + subject 검증 / wait = delay_hours>0 / condition = conditionJsonb 정합.
     const validOps = ['==', '!=', '>=', '<=', '>', '<', 'in', 'not_in', 'is_null', 'not_null'];
     for (const s of aiPkg.steps) {
       if (s.stepType === 'wait') {
         if (Number(s.delayHours) <= 0) {
-          alert(`step ${s.stepOrder} (wait) 대기 시간이 0 이하입니다. 1시간 이상 설정해주세요.`);
+          toast.warning(`step ${s.stepOrder} (wait) 대기 시간이 0 이하입니다. 1시간 이상 설정해주세요.`);
           return;
         }
         continue;
@@ -849,26 +867,26 @@ export default function JourneysPage() {
       if (s.stepType === 'condition') {
         const c = s.conditionJsonb;
         if (!c || c.type !== 'customer_field' || !c.field || !c.field.trim()) {
-          alert(`step ${s.stepOrder} (condition) 조건 필드를 선택해주세요.`);
+          toast.warning(`step ${s.stepOrder} (condition) 조건 필드를 선택해주세요.`);
           return;
         }
         if (!validOps.includes(c.operator)) {
-          alert(`step ${s.stepOrder} (condition) 연산자를 선택해주세요.`);
+          toast.warning(`step ${s.stepOrder} (condition) 연산자를 선택해주세요.`);
           return;
         }
         if (!['is_null', 'not_null'].includes(c.operator) && (c.value === undefined || c.value === null || c.value === '')) {
-          alert(`step ${s.stepOrder} (condition) 비교값을 입력해주세요.`);
+          toast.warning(`step ${s.stepOrder} (condition) 비교값을 입력해주세요.`);
           return;
         }
         continue;
       }
       // message step = 본문 + subject 검증
       if (!s.messageTemplate.trim() || s.messageTemplate.trim().length < 10) {
-        alert(`step ${s.stepOrder} 본문이 비어있거나 너무 짧습니다.`);
+        toast.warning(`step ${s.stepOrder} 본문이 비어있거나 너무 짧습니다.`);
         return;
       }
       if ((s.channel === 'lms' || s.channel === 'mms') && (!s.subject || !s.subject.trim())) {
-        alert(`step ${s.stepOrder} LMS/MMS 제목이 비어있습니다.`);
+        toast.warning(`step ${s.stepOrder} LMS/MMS 제목이 비어있습니다.`);
         return;
       }
     }
@@ -896,12 +914,12 @@ export default function JourneysPage() {
         setObjective('');
         setView('main');
         await loadAll();
-        alert('초안 여정이 저장되었습니다. 활성 여정 목록에서 활성화 가능합니다.');
+        toast.success('초안 여정이 저장되었습니다. 활성 여정 목록에서 활성화 가능합니다.');
       } else {
-        alert(data.error || '저장 실패');
+        toast.error(data.error || '저장 실패');
       }
     } catch (e: any) {
-      alert(e?.message || '저장 중 오류');
+      toast.error(e?.message || '저장 중 오류');
     } finally {
       setSaving(false);
     }
@@ -952,42 +970,51 @@ export default function JourneysPage() {
         setActionModal(null);
         await loadAll();
       } else {
-        alert(data.error || '처리 실패');
+        toast.error(data.error || '처리 실패');
       }
     } catch (e: any) {
-      alert(e?.message || '처리 중 오류');
+      toast.error(e?.message || '처리 중 오류');
     }
   };
 
   // ★ D210+ Phase 3 (2026-05-23 Harold 명시): 자동 재진입 토글 (회사 admin 명시 활성 — feedback_no_target_auto_relax 정합)
   //   activate 시 강력 안내 모달 의무 — 회사 admin 책임 영역 명시 + cooldown 영역 안내
-  const handleToggleAutoReentry = async (journeyId: string, currentEnabled: boolean, cooldownDays: number | null) => {
+  const handleToggleAutoReentry = (journeyId: string, currentEnabled: boolean, cooldownDays: number | null) => {
     const newEnabled = !currentEnabled;
+    const doToggle = async () => {
+      try {
+        const res = await fetch(`/api/ai/operator/journeys/${journeyId}/auto-reentry`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token()}` },
+          body: JSON.stringify({ enabled: newEnabled }),
+        });
+        const data = await res.json();
+        if (data.success) await loadAll();
+        else toast.error(data.error || '자동 재진입 토글 실패');
+      } catch (e: any) {
+        toast.error(e?.message || '자동 재진입 토글 중 오류');
+      }
+    };
     if (newEnabled) {
-      const confirmMsg =
-        `자동 재진입 활성화 확인 의무\n\n` +
-        `여정 완료한 customer 영역이 cooldown 영역 (${cooldownDays ?? 0}일) 경과 후 자동으로 다시 진입합니다.\n` +
-        `6시간 cron worker 영역 자동 진입 정합.\n\n` +
-        `매트릭스 영역:\n` +
-        `· customer 영역 활성 (is_active = true) + sms_opt_in 영역만 진입\n` +
-        `· 중복 active execution 영역 차단 (1 customer 영역 안 1 active execution 정합)\n` +
-        `· 회사 admin 책임 영역 — 비용 영역 + 발송 영역 회사 admin 명시 확인 의무\n\n` +
-        `활성화하시겠습니까?`;
-      if (!confirm(confirmMsg)) return;
-    } else {
-      if (!confirm('자동 재진입 비활성화하시겠습니까? 옛 자동 진입한 active execution 영역 영향 X 정합.')) return;
-    }
-    try {
-      const res = await fetch(`/api/ai/operator/journeys/${journeyId}/auto-reentry`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token()}` },
-        body: JSON.stringify({ enabled: newEnabled }),
+      setConfirm({
+        mode: 'warning',
+        title: '자동 재진입 활성화',
+        description:
+          `여정을 완료한 고객이 cooldown(${cooldownDays ?? 0}일) 경과 후 자동으로 다시 진입합니다. 6시간 주기로 자동 진입합니다.\n\n` +
+          `· 활성 상태 + 광고 수신 동의 고객만 진입\n` +
+          `· 한 고객당 진행 중 1건만 — 중복 진입 차단\n` +
+          `· 비용·발송은 회사 담당자 책임이므로 직접 확인이 필요합니다.`,
+        confirmLabel: '활성화',
+        onConfirm: doToggle,
       });
-      const data = await res.json();
-      if (data.success) await loadAll();
-      else alert(data.error || '자동 재진입 토글 실패');
-    } catch (e: any) {
-      alert(e?.message || '자동 재진입 토글 중 오류');
+    } else {
+      setConfirm({
+        mode: 'warning',
+        title: '자동 재진입 비활성화',
+        description: '자동 재진입을 비활성화하시겠습니까? 이미 진입해 진행 중인 건에는 영향이 없습니다.',
+        confirmLabel: '비활성화',
+        onConfirm: doToggle,
+      });
     }
   };
 
@@ -998,7 +1025,7 @@ export default function JourneysPage() {
       <div className="border-b border-violet-400/30 bg-violet-800/50 backdrop-blur-md sticky top-0 z-30">
         <div className="max-w-7xl mx-auto px-3 md:px-6 py-3 md:py-4 flex items-center gap-2 md:gap-4">
           <button
-            onClick={() => view === 'review' ? (confirm('생성한 여정이 사라집니다. 메인으로 돌아가시겠습니까?') && (setView('main'), setAiPkg(null))) : navigate('/ai-operator')}
+            onClick={() => view === 'review' ? setConfirm({ mode: 'warning', title: '메인으로 돌아가기', description: '생성한 여정이 사라집니다. 메인으로 돌아가시겠습니까?', confirmLabel: '나가기', onConfirm: () => { setView('main'); setAiPkg(null); } }) : navigate('/ai-operator')}
             className="p-2 rounded-lg hover:bg-white/15 transition-colors"
           >
             <ArrowLeft className="w-5 h-5" />
@@ -2420,7 +2447,7 @@ export default function JourneysPage() {
               <button onClick={handleRegenerate} disabled={generating || saving} className="px-4 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-sm flex items-center gap-2 disabled:opacity-50">
                 <RefreshCw className="w-4 h-4" /> AI 다시 생성
               </button>
-              <button onClick={() => { if (confirm('변경사항이 사라집니다. 메인으로 돌아가시겠습니까?')) { setView('main'); setAiPkg(null); } }} disabled={saving} className="px-4 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-sm">취소</button>
+              <button onClick={() => setConfirm({ mode: 'warning', title: '메인으로 돌아가기', description: '변경사항이 사라집니다. 메인으로 돌아가시겠습니까?', confirmLabel: '나가기', onConfirm: () => { setView('main'); setAiPkg(null); } })} disabled={saving} className="px-4 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-sm">취소</button>
               <button onClick={handleSaveDraft} disabled={saving || !reviewCallback} className="flex-1 px-4 py-2 rounded-lg bg-gradient-to-r from-fuchsia-500 to-purple-500 text-sm font-medium hover:opacity-90 disabled:opacity-50 flex items-center justify-center gap-2">
                 {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}초안 저장
               </button>
@@ -2555,6 +2582,9 @@ export default function JourneysPage() {
           onClose={() => setActionModal(null)}
         />
       )}
+
+      {/* native confirm 폐기 — 공용 다크 톤 확인 모달 */}
+      <ConfirmModal state={confirm} onClose={() => setConfirm(null)} />
 
       {/* ★ D218+ (2026-05-26): 활성화 자동 검증 모달 — 비용 + 잔액 + ConfirmModal */}
       {activationModal && (

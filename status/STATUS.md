@@ -107,7 +107,15 @@
 
 ---
 
-### 🟢 2026-06-03 세션 (최신) — 알림톡 변수검증 강화 + 부달 B 재추가 + 자동마케팅 크레딧 재배치 + 이폴리움 연동 문서화
+### 🟡 2026-06-03 세션 (최신·미완) — 크레딧 UI 강화 + 여정 503 디버깅
+> **크레딧 UI(사전모달+사후토스트+토스트 다크톤 통일) 완료·미배포 + 여정503/native dialog 미완. 다음 세션 핸드오프 `docs/superpowers/handoffs/2026-06-03-credit-ui-journey503-handoff.md` 정독 의무.**
+> - **완료(tsc0·미배포)**: 크레딧 차감 2단계(DM 생성3·발행30 / 인앱 생성3·게시15 / 직접발송 다듬기 refine-direct 1 = refineDirectMessage callAIWithFallback 우회로 누락이었음) + 안내카드 9칸 + CreditConfirmModal 5곳 + 사후토스트 전역(request-context+app.ts 헤더+credit-interceptor) + 토스트 다크톤 통일(옛 Toast.tsx 제거·Dashboard shim) + D배지 6곳 제거 + "DB마이그레이션" 노출 5곳 친화 + 여정 종료/일시정지 모달 + pretest-validate catch 에러로그.
+> - **미완(다음 세션)**: ①여정 활성화 503 — buildJourneyStats 6함수 중 variant 외 한 함수가 없는 컬럼 조회. backend 배포→여정 활성화→`pm2 logs grep pretest-validate`→정확 컬럼→information_schema 확인→ALTER. (journey_step_variants variant_label/arm 추가완료, snapshots/schedules/pause_logs는 이미존재 오진) ②JourneysPage native dialog 29곳(alert25+confirm4) 전수 교체.
+> - **교훈**: DB 컬럼 ALTER 전 information_schema 실제 확인→없는 것만 ADD 의무(이번 3번 틀려 Harold 격분). PM2 실제 에러 먼저. catch가 에러 삼키면 디버깅 불가.
+
+---
+
+### 🟢 2026-06-03 세션 — 알림톡 변수검증 강화 + 부달 B 재추가 + 자동마케팅 크레딧 재배치 + 이폴리움 연동 문서화
 > **이번 세션(구현·검증·배포 완료 2026-06-03) = ① 알림톡 변수 미지정·누락 발송 차단(검증 기준 variableMap→템플릿 본문 변수 전체, alimtalkVars·alimtalk-vars CT 시그니처+호출부4) ② 부달 B(LMS+문구) 재추가(NEXT_TYPE_OPTIONS+grid3, 백엔드 무수정) ③ 자동마케팅 크레딧 재배치(저장200 createOperator 멱등operatorId / 제안서0 orchestrate cost:0 / 발송3 auto+approve 멱등proposalId / 스팸0, continuous-operator-send=3·주석50→200, TDD verify33) ④ 이폴리움 연동(고도몰 SDK + 네이버 스마트스토어 D178 멀티테넌트) 문서화. 상세=`memory/project_2026_0603_alimtalk_credit_epolium.md`.**
 > - 배포 완료(2026-06-03): tp-push + backend·frontend build:safe + pm2 restart all 완료 (company-frontend X).
 > - 선결: 고도몰 SDK = CDN URL 확정(app vs cdn.hanjul.ai/sdk) + hjl_ 키 발급 + 수집 허용 도메인 등록 / 스마트스토어 = 한줄로 개발사 계정(스토어 심사 ~3영업일 [신청중]).
