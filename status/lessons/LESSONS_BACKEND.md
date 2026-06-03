@@ -163,6 +163,26 @@ const items: any[] =
 
 ---
 
+## 여정 검증/테스트 경로 본문 불일치 사고 (D230+ 추가)
+
+### D230+ (2026-06-03) — 여정 스팸테스트 본문 ≠ 실제 발송 본문 (광고 표기·무료거부·제목 누락)
+
+**사고**: 여정 스팸필터 테스트(활성화 검증 시 테스트폰 3대 발송)에 (광고) 표기·무료수신거부·LMS 제목이 모두 누락. 광고성 메시지인데 정보통신망법 표기 누락 = 큰일 직전. (실고객 발송이 아니라 테스트폰이었으나, 같은 누락이면 실발송도 위험했음.)
+
+**Root cause**:
+- 실고객 발송(`journey-executor` 484-508)은 `prepareSendMessage`로 (광고)+080+제목을 합성 → **정상**.
+- 스팸테스트(`journey-pretest-validator` 145)는 원본 `msg.body`/`step.subject`를 `enqueueSpamTest`에 그대로 전달 → `buildAdMessage`/`buildAdSubject` 미적용 → (광고)/무료거부 없음.
+- `spam_filter_tests`에 `subject` 컬럼 부재(information_schema 0 rows) → 제목이 저장조차 안 됨 → `executeSpamTest` 339 `test.subject`=null → 제목 빈칸.
+
+**정정**:
+1. pretest-validator에서 `getOpt080Number`로 080 조회 → `buildAdMessage`(본문)·`buildAdSubject`(제목) 합성 후 enqueue.
+2. `enqueueSpamTest` INSERT에 `subject` 추가.
+3. `ALTER TABLE spam_filter_tests ADD COLUMN subject text` (executeSpamTest는 `t.*` 조회라 자동 반영).
+
+**교훈**: **검증/테스트 경로가 실제 발송 경로와 다른 본문을 쓰면 사고.** 스팸 판정이 부정확해지고 테스트폰에도 비정상 본문이 나간다. 광고 합성·무료거부·제목 등 발송 가공은 **실발송/검증/미리보기 전 경로가 동일 CT(`prepareSendMessage`·`buildAdMessage`·`buildAdSubject`)를 거치게** 정합. 발송 5경로 전수 점검에 **검증·테스트 경로 포함**.
+
+---
+
 ## 자가 검증 매트릭스 (Backend 작업 시)
 
 - [ ] 발송 5경로 전수 점검 (AI/직접/타겟/스케줄/테스트)

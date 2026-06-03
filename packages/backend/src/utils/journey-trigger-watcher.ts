@@ -27,6 +27,7 @@
 import { query } from '../config/database';
 // 추출 조건 = journey-target-extractor 공유 컨트롤타워 (발송·미리보기 동일 기준 단일 진입점)
 import { selectJourneyTargetCustomerIds } from './journey-target-extractor';
+import { shiftToSendableHour } from './send-time-util';
 
 // ════════════════════════════════════════════════════════════════════
 // 타입
@@ -141,7 +142,7 @@ async function enqueueCandidates(j: ActiveJourney, customerIds: string[]): Promi
       continue;
     }
 
-    const nextRunAt = new Date(Date.now() + Number(firstStep.delay_hours || 0) * 60 * 60 * 1000);
+    const nextRunAt = shiftToSendableHour(new Date(Date.now() + Number(firstStep.delay_hours || 0) * 60 * 60 * 1000));
 
     await query(
       `INSERT INTO journey_executions (

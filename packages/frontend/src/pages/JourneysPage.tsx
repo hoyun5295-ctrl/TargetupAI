@@ -392,6 +392,7 @@ export default function JourneysPage() {
   const [aiPkg, setAiPkg] = useState<AIJourneyPackage | null>(null);
   const [reviewName, setReviewName] = useState('');
   const [reviewCallback, setReviewCallback] = useState('');
+  const [reviewUseStorePhone, setReviewUseStorePhone] = useState(false);
   // ★ D189 #1 (2026-05-22): JourneyVariantsEditor 토글 — main view step별 A/B 테스트 편집 영역
   const [variantsExpandedStepIds, setVariantsExpandedStepIds] = useState<Set<string>>(new Set());
   // ★ D189 #2 (2026-05-22): 알림톡 채널 패널 데이터 — 회사 발신프로필 + 템플릿 + 활성 필드 (review view kakao step UI용)
@@ -897,6 +898,7 @@ export default function JourneysPage() {
         name: reviewName.trim() || undefined,
         customObjective: aiPkg.templateCode === 'custom' ? objective.trim() || undefined : undefined,
         callbackNumber: reviewCallback,
+        callbackMode: reviewUseStorePhone ? 'store' : 'fixed',
         steps: aiPkg.steps,
         budgetMonthly: reviewBudget ? Number(reviewBudget) : null,
         thresholdCost: reviewThreshold ? Number(reviewThreshold) : null,
@@ -1844,6 +1846,10 @@ export default function JourneysPage() {
                       </option>
                     ))}
                   </select>
+                  <label className="flex items-center gap-1.5 mt-2 text-xs text-white/70 cursor-pointer">
+                    <input type="checkbox" checked={reviewUseStorePhone} onChange={(e) => setReviewUseStorePhone(e.target.checked)} className="rounded" />
+                    <span>고객 매장번호로 발송 (매장번호 없는 고객은 위 번호로)</span>
+                  </label>
                 </div>
                 <div>
                   <label className="block text-xs text-white/60 mb-1">월간 예산 (원, 선택)</label>
@@ -1861,8 +1867,8 @@ export default function JourneysPage() {
               </div>
             </div>
 
-            {/* Step 시계열 */}
-            <div className="space-y-3">
+            {/* Step 시계열 — 가로 3분할 카드 (4개+는 다음 줄 자동 줄바꿈) */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-3 items-start">
               {aiPkg.steps.map((s, idx) => {
                 const bytes = getByteLength(s.messageTemplate);
                 const maxBytes = s.channel === 'sms' ? 90 : 2000;
@@ -1879,65 +1885,10 @@ export default function JourneysPage() {
                   'bg-fuchsia-500/20 text-fuchsia-300';
                 return (
                   <div key={idx} className="bg-white/5 border border-white/10 rounded-xl p-4 space-y-2">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <div className={`shrink-0 w-8 h-8 rounded-full flex items-center justify-center font-semibold ${stepTypeColor}`}>{s.stepOrder}</div>
-                      <div className="text-sm font-medium text-white/80 flex-1 min-w-0 truncate">
-                        {s.stepIntent || `Step ${s.stepOrder}`}
-                      </div>
-                      {/* step_type select — 모든 step에 공통 */}
-                      <select
-                        value={s.stepType}
-                        onChange={(e) => {
-                          const newType = e.target.value as StepType;
-                          const patch: Partial<AIGeneratedStep> = { stepType: newType };
-                          // condition 진입 시 빈 conditionJsonb 자동 생성
-                          if (newType === 'condition' && !s.conditionJsonb) {
-                            patch.conditionJsonb = { type: 'customer_field', field: 'recent_purchase_amount', operator: '>=', value: 100000 };
-                          }
-                          updateStep(idx, patch);
-                        }}
-                        className="px-2 py-1 bg-slate-800 border border-white/10 rounded text-xs"
-                        title="step 유형"
-                      >
-                        <option value="message">메시지</option>
-                        <option value="wait">대기</option>
-                        <option value="condition">조건</option>
-                      </select>
-                      <div className="flex items-center gap-1 text-xs">
-                        <Clock className="w-3.5 h-3.5 text-white/40" />
-                        <input type="number" min={0} max={720} value={s.delayHours} onChange={(e) => updateStep(idx, { delayHours: Number(e.target.value) || 0 })} className="w-16 px-2 py-1 bg-slate-800 border border-white/10 rounded text-xs" />
-                        <span className="text-white/50">h</span>
-                      </div>
-                      {/* channel select + 광고 toggle — message step만 */}
-                      {s.stepType === 'message' && (
-                        <>
-                          {/* ★ D188 Phase 2-B-2 (2026-05-21): kakao + mms 채널 옵션 신규. */}
-                          <select value={s.channel} onChange={(e) => updateStep(idx, { channel: e.target.value as ChannelType })} className="px-2 py-1 bg-slate-800 border border-white/10 rounded text-xs">
-                            <option value="sms">SMS</option>
-                            <option value="lms">LMS</option>
-                            <option value="mms">MMS</option>
-                            <option value="kakao">알림톡</option>
-                          </select>
-                          <label className="flex items-center gap-1 text-xs cursor-pointer">
-                            <input type="checkbox" checked={s.isAd} onChange={(e) => updateStep(idx, { isAd: e.target.checked })} className="rounded" />
-                            <span className="text-amber-300/80">광고</span>
-                          </label>
-                        </>
-                      )}
-                      {/* 직접 수정 + AI 다듬기 — message step만 */}
-                      {s.stepType === 'message' && (
-                        <>
-                          <button onClick={() => setEditingStepIdx(isEditing ? null : idx)} className="p-1.5 bg-slate-700 hover:bg-slate-600 rounded" title={isEditing ? '닫기' : '직접 수정'}>
-                            {isEditing ? <Save className="w-3.5 h-3.5" /> : <Edit2 className="w-3.5 h-3.5" />}
-                          </button>
-                          <button onClick={() => handleRefineOpen(idx)} disabled={refineLoading} className="px-2 py-1.5 bg-violet-500/20 hover:bg-violet-500/30 text-violet-300 rounded text-xs flex items-center gap-1 disabled:opacity-50">
-                            {refineLoading ? <Loader2 className="w-3 h-3 animate-spin" /> : <Wand2 className="w-3 h-3" />}AI 다듬기
-                          </button>
-                        </>
-                      )}
-                      <button onClick={() => deleteStep(idx)} className="p-1.5 bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 rounded" title="삭제">
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
+                    {/* 제목바 — step 순번 + 의도 (3분할 카드 상단) */}
+                    <div className="flex items-center gap-2 pb-2 mb-1 border-b border-white/10">
+                      <div className={`shrink-0 w-7 h-7 rounded-full flex items-center justify-center text-xs font-semibold ${stepTypeColor}`}>{s.stepOrder}</div>
+                      <div className="text-sm font-semibold text-white/90 flex-1 min-w-0 truncate">{s.stepIntent || `Step ${s.stepOrder}`}</div>
                     </div>
 
                     {/* ★ D188 Phase 2-B-1: wait step UI — 시간 대기만 명시 */}
@@ -2431,6 +2382,64 @@ export default function JourneysPage() {
                         )}
                       </>
                     )}
+                    {/* 기능버튼 — 유형·시간·발송시각·채널·광고·수정·다듬기·삭제 (3분할 카드 하단) */}
+                    <div className="flex flex-wrap items-center gap-1.5 pt-2 mt-1 border-t border-white/10 text-xs">
+                      <select
+                        value={s.stepType}
+                        onChange={(e) => {
+                          const newType = e.target.value as StepType;
+                          const patch: Partial<AIGeneratedStep> = { stepType: newType };
+                          if (newType === 'condition' && !s.conditionJsonb) {
+                            patch.conditionJsonb = { type: 'customer_field', field: 'recent_purchase_amount', operator: '>=', value: 100000 };
+                          }
+                          updateStep(idx, patch);
+                        }}
+                        className="px-2 py-1 bg-slate-800 border border-white/10 rounded" title="step 유형"
+                      >
+                        <option value="message">메시지</option>
+                        <option value="wait">대기</option>
+                        <option value="condition">조건</option>
+                      </select>
+                      <div className="flex items-center gap-1">
+                        <Clock className="w-3.5 h-3.5 text-white/40" />
+                        <input type="number" min={0} max={720} value={s.delayHours} onChange={(e) => updateStep(idx, { delayHours: Number(e.target.value) || 0 })} className="w-14 px-2 py-1 bg-slate-800 border border-white/10 rounded" />
+                        <span className="text-white/50">h</span>
+                      </div>
+                      {s.stepType === 'message' && (
+                        <>
+                          <select value={s.delayMode === 'specific_hour' ? 'specific_hour' : 'relative'} onChange={(e) => {
+                            updateStep(idx, e.target.value === 'specific_hour' ? { delayMode: 'specific_hour', targetHourKst: s.targetHourKst ?? 10 } : { delayMode: 'relative', targetHourKst: undefined });
+                          }} className="px-2 py-1 bg-slate-800 border border-white/10 rounded" title="발송 시각 — 야간(21~08시) 자동 회피">
+                            <option value="relative">시간 뒤 바로</option>
+                            <option value="specific_hour">지정 시각</option>
+                          </select>
+                          {s.delayMode === 'specific_hour' && (
+                            <select value={String(s.targetHourKst ?? 10)} onChange={(e) => updateStep(idx, { targetHourKst: Number(e.target.value) })} className="px-2 py-1 bg-slate-800 border border-white/10 rounded">
+                              {Array.from({ length: 13 }, (_, i) => i + 8).map((h) => <option key={h} value={h}>{h}시</option>)}
+                            </select>
+                          )}
+                          <select value={s.channel} onChange={(e) => updateStep(idx, { channel: e.target.value as ChannelType })} className="px-2 py-1 bg-slate-800 border border-white/10 rounded">
+                            <option value="sms">SMS</option>
+                            <option value="lms">LMS</option>
+                            <option value="mms">MMS</option>
+                            <option value="kakao">알림톡</option>
+                          </select>
+                          <label className="flex items-center gap-1 cursor-pointer">
+                            <input type="checkbox" checked={s.isAd} onChange={(e) => updateStep(idx, { isAd: e.target.checked })} className="rounded" />
+                            <span className="text-amber-300/80">광고</span>
+                          </label>
+                          <button onClick={() => setEditingStepIdx(isEditing ? null : idx)} className="p-1.5 bg-slate-700 hover:bg-slate-600 rounded" title={isEditing ? '닫기' : '직접 수정'}>
+                            {isEditing ? <Save className="w-3.5 h-3.5" /> : <Edit2 className="w-3.5 h-3.5" />}
+                          </button>
+                          <button onClick={() => handleRefineOpen(idx)} disabled={refineLoading} className="px-2 py-1.5 bg-violet-500/20 hover:bg-violet-500/30 text-violet-300 rounded flex items-center gap-1 disabled:opacity-50">
+                            {refineLoading ? <Loader2 className="w-3 h-3 animate-spin" /> : <Wand2 className="w-3 h-3" />}다듬기
+                          </button>
+                        </>
+                      )}
+                      <button onClick={() => deleteStep(idx)} className="p-1.5 bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 rounded ml-auto" title="삭제">
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
                   </div>
                 );
               })}

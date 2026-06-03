@@ -33,3 +33,28 @@ export function calcSplitSendTime(
 
   return result;
 }
+
+/**
+ * 발송 가능 시간(SEND_HOURS) 밖이면 다음 발송 가능 시각(startHour)으로 이동.
+ * - 새벽(0 ~ startHour 미만) → 당일 startHour
+ * - endHour 이후(21시~) → 익일 startHour
+ * - startHour ~ endHour-1 = 그대로 (발송 가능)
+ *
+ * 여정 트리거(가입 등)가 야간에 발생해도 광고 SMS가 새벽/심야에 나가지 않게 막는다.
+ * calcSplitSendTime은 endHour 초과만 처리(새벽 미처리)하므로 여정 진입/다음 step용으로 분리.
+ * KST(UTC+9) 기준 — journey-executor calculateNextRunAt와 동일 패턴.
+ */
+export function shiftToSendableHour(
+  date: Date,
+  startHour: number = SEND_HOURS.start,
+  endHour: number = SEND_HOURS.end,
+): Date {
+  const kst = new Date(date.getTime() + 9 * 60 * 60 * 1000);
+  const kstHour = kst.getUTCHours();
+  if (kstHour >= startHour && kstHour < endHour) return date; // 발송 가능 시간 — 그대로
+  const y = kst.getUTCFullYear();
+  const m = kst.getUTCMonth();
+  const d = kst.getUTCDate();
+  const addDay = kstHour >= endHour ? 1 : 0; // endHour 이후 = 익일 / 새벽 = 당일
+  return new Date(Date.UTC(y, m, d + addDay, startHour - 9, 0, 0)); // KST startHour = UTC (startHour-9)
+}

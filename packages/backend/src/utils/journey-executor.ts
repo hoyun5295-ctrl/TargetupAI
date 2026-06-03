@@ -48,6 +48,7 @@ import { getCompanyCosts } from '../config/defaults';
 import { sanitizeForSms } from './message-sanitizer';
 import { shortenUrlsInText } from './short-url';
 import { autoPauseExecution } from './journey-pause-handler';
+import { shiftToSendableHour } from './send-time-util';
 
 // ════════════════════════════════════════════════════════════════════
 // 타입
@@ -72,6 +73,7 @@ interface ExecutionRow {
   stats_total_cost: number;
   created_by: string | null;
   journey_callback_number: string | null;
+  callback_mode: string | null;
 }
 
 interface StepRow {
@@ -106,6 +108,7 @@ interface CustomerRow {
   is_active: boolean;
   sms_opt_in: boolean;
   callback: string | null;
+  store_phone: string | null;
   custom_fields: Record<string, any> | null;
   email: string | null;
   birth_date: Date | null;
@@ -140,7 +143,8 @@ export async function runJourneyExecutor(): Promise<{ processed: number; sent: n
          j.company_id, j.status AS journey_status,
          j.budget_monthly, j.threshold_cost_per_step, j.threshold_recipients_per_step,
          j.stats_total_completed, j.stats_total_cost, j.created_by,
-         j.callback_number AS journey_callback_number
+         j.callback_number AS journey_callback_number,
+         j.callback_mode
        FROM journey_executions e
        JOIN journeys j ON e.journey_id = j.id
        WHERE e.status = 'active'
@@ -365,8 +369,11 @@ async function processExecution(exec: ExecutionRow): Promise<StepOutcome> {
     return 'failed';
   }
 
-  // 5-2. 회신번호 정합 — 회사 admin 선택(journey.callback_number) 우선, fallback customer.callback
-  const callbackNumber = String(exec.journey_callback_number || customer.callback || '').trim();
+  // 5-2. 회신번호 — callback_mode='store'면 고객 매장번호(store_phone) 우선, 없으면 고정번호/주소록 fallback.
+  //   callback-filter CT의 store_phone 폴백 개념을 여정 단건/기존 호환에 맞춰 적용(기존 우선순위 보존).
+  const useStoreCallback = exec.callback_mode === 'store';
+  const storePhoneCallback = useStoreCallback ? String(customer.store_phone || '').trim() : '';
+  const callbackNumber = String(storePhoneCallback || exec.journey_callback_number || customer.callback || '').trim();
   if (!callbackNumber) {
     await pauseJourney(exec.journey_id, '회신번호가 비어있어 발송 차단됨');
     await logFailedStep(exec.execution_id, step.id, 'callback_number_empty');
@@ -884,7 +891,7 @@ function calculateNextRunAt(
 
   // 'relative' = 옛 매트릭스 (default)
   if (delayMode === 'relative' || !delayMode) {
-    return new Date(now.getTime() + delayHours * 60 * 60 * 1000);
+    return shiftToSendableHour(new Date(now.getTime() + delayHours * 60 * 60 * 1000));
   }
 
   // 'specific_hour' = 오늘/내일 target_hour_kst 영역 KST
@@ -906,7 +913,7 @@ function calculateNextRunAt(
     // KST 영역 (kstYear, kstMonth, kstDate + daysToAdd) 영역 targetHour 시 = UTC 영역 (targetHour - 9) 시
     // 단순 매트릭스 — UTC 영역 직접 계산
     const utcTargetMs = Date.UTC(kstYear, kstMonth, kstDate + daysToAdd, targetHour - 9, 0, 0);
-    return new Date(utcTargetMs);
+    return shiftToSendableHour(new Date(utcTargetMs));
   }
 
   // 'next_business_day' = 다음 평일 (월~금) 09시 KST
@@ -927,11 +934,11 @@ function calculateNextRunAt(
 
     // KST 영역 다음 평일 09시 = UTC 0시 (= 그 전날 00시 UTC + 24h = 다음날 00시 UTC)
     const utcTargetMs = Date.UTC(kstYear, kstMonth, kstDate + daysToAdd, 9 - 9, 0, 0);  // 9-9=0 (KST 09시 = UTC 00시)
-    return new Date(utcTargetMs);
+    return shiftToSendableHour(new Date(utcTargetMs));
   }
 
   // fallback = relative
-  return new Date(now.getTime() + delayHours * 60 * 60 * 1000);
+  return shiftToSendableHour(new Date(now.getTime() + delayHours * 60 * 60 * 1000));
 }
 
 async function markExecutionCompleted(executionId: string, journeyId: string): Promise<void> {

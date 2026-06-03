@@ -80,6 +80,7 @@ export interface CreateJourneyInput {
   name?: string;
   customObjective?: string;
   callbackNumber: string;
+  callbackMode?: string; // 'fixed'(고정번호) | 'store'(고객 매장번호 store_phone 우선)
   steps?: JourneyStepDefinition[];
   thresholdRecipients?: number | null;
   thresholdCost?: number | null;
@@ -257,14 +258,14 @@ export async function createJourneyFromTemplate(input: CreateJourneyInput): Prom
       id, company_id, name, template_code, trigger_event, trigger_filters,
       status, budget_monthly, allow_reentry, reentry_cooldown_days,
       threshold_recipients_per_step, threshold_cost_per_step, threshold_risk_level,
-      callback_number,
+      callback_number, callback_mode,
       created_by, created_at, updated_at
     ) VALUES (
       gen_random_uuid(), $1::uuid, $2, $3, $4, $5::jsonb,
       'draft', $6, $7, $8,
       $9, $10, $11,
-      $12,
-      $13::uuid, NOW(), NOW()
+      $12, $13,
+      $14::uuid, NOW(), NOW()
     ) RETURNING id`,
     [
       input.companyId,
@@ -279,6 +280,7 @@ export async function createJourneyFromTemplate(input: CreateJourneyInput): Prom
       input.thresholdCost ?? null,
       input.thresholdRiskLevel || 'low',
       input.callbackNumber.trim().slice(0, 20),
+      input.callbackMode === 'store' ? 'store' : 'fixed',
       input.createdBy,
     ]
   );
