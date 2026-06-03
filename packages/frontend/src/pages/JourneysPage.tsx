@@ -28,7 +28,7 @@ import JourneyStepNotifyToggle from '../components/journey/JourneyStepNotifyTogg
 import AlimtalkChannelPanel, { type AlimtalkSenderProfile, type AlimtalkTemplate, type AlimtalkChannelState } from '../components/alimtalk/AlimtalkChannelPanel';
 import { detectLiquidSyntax, renderLiquid, flattenCustomerForLiquid, SAMPLE_CUSTOMERS } from '../utils/liquid-templating';
 // ★ D210+ Phase 2-fix6 (Harold 명시 2026-05-23): 변수 하이라이트 + 머지 미리보기 컨트롤타워.
-import { highlightVars, mergeAndHighlightVars } from '../utils/highlightVars';
+import { highlightVars, mergeAndHighlightVars, mergeVarsPlain } from '../utils/highlightVars';
 import ConfirmModal, { type ConfirmState } from '../components/ConfirmModal';
 import { useToast } from '../components/ToastProvider';
 
@@ -2332,9 +2332,13 @@ export default function JourneysPage() {
                                 아직 이 조건의 타겟 고객이 없어 원본으로 표시됩니다. 여정을 켜면 조건을 충족하는 고객에게 자동 발송됩니다.
                               </div>
                             )}
-                            {sampleCustomer
-                              ? mergeAndHighlightVars(preview, sampleCustomer, 'dark', sampleCustomerFields || undefined)
-                              : preview}
+                            {(s.channel === 'lms' || s.channel === 'mms') && s.subject && (
+                              <div className="mb-2 pb-2 border-b border-white/10 text-[12px]">
+                                <span className="text-white/45">제목 </span>
+                                <span className="text-white/85">{s.isAd ? (s.subject.startsWith('(광고)') ? s.subject : `(광고) ${s.subject}`) : s.subject}</span>
+                              </div>
+                            )}
+                            {sampleCustomer ? mergeVarsPlain(preview, sampleCustomer, sampleCustomerFields || undefined) : preview}
                           </div>
                         ) : (
                           <textarea value={s.messageTemplate} onChange={(e) => updateStep(idx, { messageTemplate: e.target.value })} rows={7} placeholder="본문을 입력하세요" className="w-full px-3 py-2 bg-slate-900 border border-fuchsia-400/50 rounded text-sm font-mono focus:outline-none resize-y leading-relaxed" />

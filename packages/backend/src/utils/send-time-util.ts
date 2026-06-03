@@ -55,6 +55,7 @@ export function shiftToSendableHour(
   const y = kst.getUTCFullYear();
   const m = kst.getUTCMonth();
   const d = kst.getUTCDate();
+  const ARRIVE_HOUR = 9; // ★ 야간(발송 불가 시간) 트리거는 일괄 아침 9시로 발송 (Harold 명시) — 시각 미지정 시 default
   const addDay = kstHour >= endHour ? 1 : 0; // endHour 이후 = 익일 / 새벽 = 당일
-  return new Date(Date.UTC(y, m, d + addDay, startHour - 9, 0, 0)); // KST startHour = UTC (startHour-9)
+  return new Date(Date.UTC(y, m, d + addDay, ARRIVE_HOUR - 9, 0, 0)); // KST 09시 = UTC 00시
 }

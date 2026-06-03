@@ -17,7 +17,7 @@
 import { useEffect, useState } from 'react';
 import { X, PenLine, Loader2, Save, Info, MessageSquare, Eye, Pencil, AlertTriangle } from 'lucide-react';
 import { useToast } from '../ToastProvider';
-import { mergeAndHighlightVars, findUndefaultedLiquidVars } from '../../utils/highlightVars';
+import { mergeVarsPlain, findUndefaultedLiquidVars } from '../../utils/highlightVars';
 import { SAMPLE_CUSTOMERS } from '../../utils/liquid-templating';
 
 interface MessageStep {
@@ -26,6 +26,7 @@ interface MessageStep {
   channel: string;
   messageTemplate: string;
   subject: string;
+  isAd: boolean;
 }
 
 interface Props {
@@ -95,6 +96,7 @@ export default function JourneyMessageEditModal({
           channel: s.channel || 'sms',
           messageTemplate: s.message_template || '',
           subject: s.subject || '',
+          isAd: s.is_ad !== false,
         }));
       setSteps(msgSteps);
       const init: Record<string, { messageTemplate: string; subject: string }> = {};
@@ -282,7 +284,7 @@ export default function JourneyMessageEditModal({
                           ) : (
                             <div className="w-full px-3 py-2 rounded-lg bg-slate-950/60 border border-white/10 text-sm text-white whitespace-pre-wrap break-words min-h-[38px]">
                               {s.subject
-                                ? mergeAndHighlightVars(s.subject, SAMPLE_KO, 'dark', SAMPLE)
+                                ? (() => { const t = mergeVarsPlain(s.subject, SAMPLE_KO, SAMPLE); return (s.isAd && !t.startsWith('(광고)')) ? '(광고) ' + t : t; })()
                                 : <span className="text-white/30">(제목 없음)</span>}
                             </div>
                           )}
@@ -307,7 +309,7 @@ export default function JourneyMessageEditModal({
                         ) : (
                           <div className="flex-1 min-h-0 overflow-y-auto w-full px-3 py-2 rounded-lg bg-slate-950/60 border border-white/10 text-sm text-white whitespace-pre-wrap break-words leading-relaxed">
                             {s.messageTemplate
-                              ? mergeAndHighlightVars(s.messageTemplate, SAMPLE_KO, 'dark', SAMPLE)
+                              ? mergeVarsPlain(s.messageTemplate, SAMPLE_KO, SAMPLE)
                               : <span className="text-white/30">(본문 없음)</span>}
                           </div>
                         )}

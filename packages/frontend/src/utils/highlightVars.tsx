@@ -160,6 +160,37 @@ export function mergeAndHighlightVars(
   return parts.length > 0 ? parts : [text];
 }
 
+/**
+ * 미리보기 전용 — 강조(span) 없이 순수 치환 결과 문자열만 반환.
+ * 조건 블록({% %}) 유무와 무관하게 모든 step이 동일하게 "실제 발송 모습"으로 보이도록 통일.
+ * (mergeAndHighlightVars는 블록이 있으면 {{ }} 강조가 빠져 step마다 강조가 들쭉날쭉했음)
+ */
+export function mergeVarsPlain(
+  text: string,
+  sampleCustomer?: Record<string, string | number | null | undefined>,
+  sampleCustomerFields?: Record<string, any>,
+): string {
+  if (!text) return '';
+  let result = text;
+  // Liquid 렌더 ({% if %} 블록 + {{ 변수 }})
+  if (sampleCustomerFields && /\{[{%]/.test(text)) {
+    try {
+      const r = renderLiquid(text, { customer: sampleCustomerFields });
+      if (r.errors.length === 0) result = r.rendered;
+    } catch {
+      // 렌더 오류 시 원본 fallback
+    }
+  }
+  // %변수% (한국어 키) 치환
+  if (sampleCustomer) {
+    result = result.replace(/%([^%\s]{1,20})%/g, (_m, name: string) => {
+      const v = sampleCustomer[name];
+      return (v !== null && v !== undefined && v !== '') ? String(v) : _m;
+    });
+  }
+  return result;
+}
+
 // %변수%만 강조 (조건 블록 Liquid 렌더링 후 사용)
 function highlightPercentVars(
   renderedText: string,
