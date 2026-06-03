@@ -222,9 +222,9 @@ export async function enqueueSpamTest(params: SpamTestEnqueueParams): Promise<Sp
     console.log(`[SpamTestQueue] 큐 등록 — testId=${testId}, source=${source}, variant=${variantId || '-'}, batch=${batchId || '-'}`);
 
     return { ok: true, testId };
-  } catch (err) {
-    console.error('[SpamTestQueue] 큐 등록 오류:', err);
-    return { ok: false, error: '스팸 테스트 큐 등록 중 오류가 발생했습니다.' };
+  } catch (err: any) {
+    console.log('[SpamTestQueue] 큐 등록 오류(상세):', err?.message || err);
+    return { ok: false, error: `스팸 테스트 큐 등록 오류: ${err?.message || '알 수 없는 오류'}` };
   }
 }
 
