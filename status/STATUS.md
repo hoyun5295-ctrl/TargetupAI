@@ -107,7 +107,27 @@
 
 ---
 
-### 🟡 2026-06-03 세션 (최신·미완) — 크레딧 UI 강화 + 여정 503 디버깅
+### 🟢 2026-06-04 세션2 (최신) — 여정 엔진 재설계 Phase 1~5 완료·배포 (6~9 다음 세션)
+> **여정 엔진 전면 재설계 Phase 1~5 코드·검증 완료, 배포(Harold). 다음 세션 핸드오프 `docs/superpowers/handoffs/2026-06-04-journey-redesign-phase6-9-handoff.md` 정독 의무.**
+> - **완료**: 1 공통 안전필터(`utils/journey-safety-filter.ts`) · 2 신규가입 진입 원장(`journey-entry-ledger.ts` + entry_baseline_at + 대량 차단기) · 3 cdp 이벤트 커서(last_event_cursor + 원자 진입/커서 전진) · 4 자유여정 진입(audience 안티조인) · 5 묶음 발송(`journey-step-campaign.ts`, (journey,step,날짜)당 campaign 1건 + app_etc1=campaignId 정정). **결함 #1·#2·#3·#5·#6(cdp)·#8 닫힘.**
+> - **검증**: 매 단계 tsc 0 / 순수 테스트 8+7 GREEN / 박-단어·모델명 0. 직접발송·billing 무수정(여정=prepaid 차감, campaign_runs 밖 → app_etc1 변경 영향 0).
+> - **DDL(1회)**: `docs/superpowers/plans/2026-06-04-journey-redesign.sql`(journey_entry_ledger · journey_step_campaigns · entry_baseline_at · last_event_cursor + 백필).
+> - **배포**: PG 마이그레이션 → `tp-push "여정 엔진 재설계 Phase 1-5"` → backend `build:safe` → `pm2 restart all`.
+> - **남은 것(다음 세션)**: **7 조건평가 안전분기[권장 우선, DB오류 시 발송 차단]** · 6 step 시점+스팸 2h(깨진 notifier — journey_executions에 scheduled_at·step_id 없음) · 8 포인트 trigger(소멸일 출처 Harold 확인) · 9 미리보기 통일·UI. 설계서 `docs/superpowers/specs/2026-06-04-journey-engine-redesign-design.md`.
+> - **핵심 발견**: 여정 SMS 큐 app_etc1/app_etc2 뒤바뀜(app_etc1=company_id였음) → 여정 SMS 수신자 상세 미조회 원인, Phase 5에서 정정.
+
+---
+
+### 🔴 2026-06-04 세션 — 톤28 504 실증 완료 + 여정 엔진 전면 재설계 필요(결함 9개)
+> **① 톤28 504 fix 실증 ② 아이디룩 동일 뿌리 닫음 ③ 여정 점검 → 엔진 결함 9개(전면 재설계 필요). 핸드오프 `docs/superpowers/handoffs/2026-06-04-journey-engine-redesign-handoff.md` 정독 의무.**
+> - **톤28 504 실증**: commit=정제 DELETE 제거+COUNT 3개만(countStagingFiltered) hoyun 더미 10만 **266ms** / 정제 ctid+ROW_NUMBER **107ms**(self-join 240초 대비). nginx 실측 08:13/21/34(KST) 504+upstream timeout, 백엔드 error.log commit 예외 0 = "백엔드 정상·nginx만 504" 확정. cancelled 2건(948/939) status='completed' 정정(통계=MySQL 집계라 completed면 잡힘, 톤28 후불 환불무관).
+> - **아이디룩**: 5/29 에러로 발송못함 = 톤28 동일 뿌리(대량→백엔드 응답불가→프론트 HTML JSON파싱 "Unexpected token <"). 톤28 fix가 OOM·타임아웃 둘 다 커버. 추가조사 X.
+> - **여정 결함 9개(라인=핸드오프/LESSONS_BACKEND D232+)**: ①자유여정 진입 부재(activateJourney enqueue 0+trigger-watcher 제외=발송0) ②신규가입 created_at 재업로드 취약(2만 일괄→전체 신규 오인) ③cdp opt-out/is_active 필터 누락(JOIN 조건부=수신거부 발송) ④조건평가 default pass(DB오류 통과) ⑤고객당 개별 campaign(500명=500건 폭주) ⑥LIMIT 500 ⑦step 시점 now+delay(전일묶음·지정시각 아님) ⑧is_invalid 누락 ⑨미리보기(30)vs실발송(500) 불일치. 긍정=2h전 담당자 알림 토대 있음(scheduleNotificationsForActivation).
+> - **다음 세션**: 핸드오프 정독 → 신규가입 판정 기준(가입일 컬럼/진짜 신규 유입) Harold 확인 → superpowers brainstorming 여정 전면 재설계(진입·발송 staging묶음·step시점·스팸필터·조건평가 안전분기·UI) → 설계문서 승인 → 단계별 구현. **최우선=조건 맞는 타겟 정확·실수없이 추출(자유여정 포함)**. 기존 미완(여정[3]spam_filter_tests first_recipient ALTER·[4]dead resume 제거)은 재설계에 흡수.
+
+---
+
+### 🟡 2026-06-03 세션 (미완) — 크레딧 UI 강화 + 여정 503 디버깅
 > **크레딧 UI(사전모달+사후토스트+토스트 다크톤 통일) 완료·미배포 + 여정503/native dialog 미완. 다음 세션 핸드오프 `docs/superpowers/handoffs/2026-06-03-credit-ui-journey503-handoff.md` 정독 의무.**
 > - **완료(tsc0·미배포)**: 크레딧 차감 2단계(DM 생성3·발행30 / 인앱 생성3·게시15 / 직접발송 다듬기 refine-direct 1 = refineDirectMessage callAIWithFallback 우회로 누락이었음) + 안내카드 9칸 + CreditConfirmModal 5곳 + 사후토스트 전역(request-context+app.ts 헤더+credit-interceptor) + 토스트 다크톤 통일(옛 Toast.tsx 제거·Dashboard shim) + D배지 6곳 제거 + "DB마이그레이션" 노출 5곳 친화 + 여정 종료/일시정지 모달 + pretest-validate catch 에러로그.
 > - **미완(다음 세션)**: ①여정 활성화 503 — buildJourneyStats 6함수 중 variant 외 한 함수가 없는 컬럼 조회. backend 배포→여정 활성화→`pm2 logs grep pretest-validate`→정확 컬럼→information_schema 확인→ALTER. (journey_step_variants variant_label/arm 추가완료, snapshots/schedules/pause_logs는 이미존재 오진) ②JourneysPage native dialog 29곳(alert25+confirm4) 전수 교체.

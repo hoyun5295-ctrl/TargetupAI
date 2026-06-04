@@ -18,6 +18,7 @@
 import { query } from '../config/database';
 import { callAIWithFallback } from '../services/ai';
 import { buildMemoryPromptContext } from './company-memory';
+import { seedBaselineForJourney } from './journey-entry-ledger';
 
 // ════════════════════════════════════════════════════════════════════
 // 타입
@@ -679,6 +680,32 @@ export async function activateJourney(companyId: string, journeyId: string, user
       await scheduleNotificationsForActivation(companyId, journeyId);
     } catch (err: any) {
       console.warn('[activateJourney] D218+ snapshot/schedule 사고 (skip):', err?.message);
+    }
+    // ★ Phase 2: 신규가입(customer.created) 여정 첫 활성화 시 진입 원장 baseline 적재.
+    //   그 시점 회사 전체 고객 식별자(회사+매장코드+전화번호)를 'baseline'으로 1회 → 이후 원장에 없는 식별자만 신규.
+    try {
+      const jrow = await query(
+        `SELECT trigger_event, entry_baseline_at FROM journeys WHERE id = $1::uuid`,
+        [journeyId],
+      );
+      if (jrow.rows[0]?.trigger_event === 'customer.created' && !jrow.rows[0]?.entry_baseline_at) {
+        const { seeded } = await seedBaselineForJourney(journeyId, companyId);
+        console.log(`[activateJourney] 진입 원장 baseline 적재 journey=${journeyId} seeded=${seeded}`);
+      }
+    } catch (e: any) {
+      console.warn('[activateJourney] 진입 원장 baseline 적재 실패:', e?.message);
+    }
+    // ★ Phase 3: cdp 구매·예약 여정 첫 활성화 시 이벤트 커서=NOW (과거 이벤트 소급 발송 0).
+    try {
+      await query(
+        `UPDATE journeys SET last_event_cursor = NOW()
+          WHERE id = $1::uuid
+            AND trigger_event IN ('cdp.purchase', 'cdp.reservation_created')
+            AND last_event_cursor IS NULL`,
+        [journeyId],
+      );
+    } catch (e: any) {
+      console.warn('[activateJourney] cdp 이벤트 커서 초기화 실패:', e?.message);
     }
   }
 

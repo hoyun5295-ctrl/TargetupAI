@@ -18,27 +18,40 @@
 
 import { query } from '../config/database';
 import { applyCustomerConditions } from './journey-simulator';
+import { buildJourneySafetyFilter } from './journey-safety-filter';
+import { buildLedgerAntiJoin, hasBaseline } from './journey-entry-ledger';
 
 export async function selectJourneyTargetCustomerIds(
   companyId: string,
   triggerEvent: string,
   triggerFilters: Record<string, any>,
   limit: number,
+  journeyId?: string,
 ): Promise<string[]> {
   const filters = triggerFilters || {};
 
   switch (triggerEvent) {
     // 1. 신규 가입 (customers.created_at 직전 N시간 안)
     case 'customer.created': {
-      const params: any[] = [companyId, String(Number(filters.recent_hours || 24))];
+      // ★ Phase 2: created_at 의존 제거 — 활성(baseline 적재됨) 여정은 진입 원장에 없는 식별자만 신규.
+      //   초안/미리보기(baseline 없음)는 created_at 최근 창으로 "추정"만(실발송 아님).
+      const params: any[] = [companyId];
+      const useLedger = !!journeyId && (await hasBaseline(journeyId));
+      let entryClause: string;
+      if (useLedger) {
+        params.push(journeyId);                                     // $2 = journeyId
+        entryClause = buildLedgerAntiJoin('c', params.length);
+      } else {
+        params.push(String(Number(filters.recent_hours || 24)));    // $2 = hours (추정)
+        entryClause = `c.created_at > NOW() - ($${params.length} || ' hours')::interval`;
+      }
       const cond = applyCustomerConditions(filters.customer_conditions || [], filters.logic || 'AND', params);
       params.push(String(limit));
       const r = await query(
         `SELECT id AS customer_id FROM customers c
          WHERE c.company_id = $1::uuid
-           AND c.is_active = true
-           AND c.sms_opt_in = true
-           AND c.created_at >= NOW() - ($2 || ' hours')::interval
+           AND ${buildJourneySafetyFilter('c')}
+           AND ${entryClause}
            ${cond ? ` AND ${cond}` : ''}
          ORDER BY c.created_at DESC
          LIMIT $${params.length}::int`,
@@ -48,10 +61,11 @@ export async function selectJourneyTargetCustomerIds(
     }
 
     // 2. 재구매 / 6. 예약 (cdp_events 직전 N분)
+    // 라이브 발송은 trigger-watcher가 selectCdpEvent를 커서 모드로 직접 호출. 여기(미리보기)는 추정 모드.
     case 'cdp.purchase':
-      return selectCdpEvent(companyId, 'purchase', 5, filters, limit);
+      return selectCdpEvent(companyId, 'purchase', filters, limit);
     case 'cdp.reservation_created':
-      return selectCdpEvent(companyId, 'reservation_created', 5, filters, limit);
+      return selectCdpEvent(companyId, 'reservation_created', filters, limit);
 
     // 3. 휴면 (customers.recent_purchase_date < NOW - N일)
     case 'customer.dormant': {
@@ -62,8 +76,7 @@ export async function selectJourneyTargetCustomerIds(
       const r = await query(
         `SELECT id AS customer_id FROM customers c
          WHERE c.company_id = $1::uuid
-           AND c.is_active = true
-           AND c.sms_opt_in = true
+           AND ${buildJourneySafetyFilter('c')}
            AND c.recent_purchase_date IS NOT NULL
            AND c.recent_purchase_date < (CURRENT_DATE - ($2 || ' days')::interval)
            AND c.recent_purchase_date > (CURRENT_DATE - ($3 || ' days')::interval)
@@ -88,13 +101,14 @@ export async function selectJourneyTargetCustomerIds(
            WHERE company_id = $1::uuid
              AND event_name = 'cart_add'
              AND customer_id IS NOT NULL
-             AND occurred_at >= NOW() - (($2::int + 1) || ' hours')::interval
+             -- ★ Phase 3: 창 [N, N+24h]로 확대 — 워처 다운타임(최대 ~1일) 견딤. cooldown 7일이 중복 진입 차단.
+             AND occurred_at >= NOW() - (($2::int + 24) || ' hours')::interval
              AND occurred_at <= NOW() - ($2 || ' hours')::interval
            ORDER BY customer_id, occurred_at DESC
          )
          SELECT a.customer_id
          FROM abandoned a
-         ${cond ? `INNER JOIN customers c ON c.id = a.customer_id` : ''}
+         INNER JOIN customers c ON c.id = a.customer_id AND c.company_id = $1::uuid
          WHERE NOT EXISTS (
            SELECT 1 FROM cdp_events e2
            WHERE e2.company_id = $1::uuid
@@ -102,6 +116,7 @@ export async function selectJourneyTargetCustomerIds(
              AND e2.event_name IN ('checkout_start', 'purchase')
              AND e2.occurred_at > a.cart_add_at
          )
+           AND ${buildJourneySafetyFilter('c')}
          ${cond ? ` AND ${cond}` : ''}
          LIMIT $${params.length}::int`,
         params,
@@ -118,8 +133,7 @@ export async function selectJourneyTargetCustomerIds(
       const r = await query(
         `SELECT id AS customer_id FROM customers c
          WHERE c.company_id = $1::uuid
-           AND c.is_active = true
-           AND c.sms_opt_in = true
+           AND ${buildJourneySafetyFilter('c')}
            AND (
              (c.birth_month_day IS NOT NULL AND c.birth_month_day = TO_CHAR((CURRENT_DATE + ($2 || ' days')::interval), 'MM-DD'))
              OR
@@ -132,28 +146,64 @@ export async function selectJourneyTargetCustomerIds(
       return r.rows.map((x: any) => x.customer_id);
     }
 
+    // 7. 자유여정(custom) — audience(customer_conditions) + 안전필터 + 미진입(execution 안티조인) 고객만.
+    //   조건 없으면 전체 활성 고객(브로드캐스트). 진입한 고객 제외 → 폴마다 미진입분만, 각 1회.
+    case 'custom': {
+      const params: any[] = [companyId];
+      let dedupClause = '';
+      if (journeyId) {
+        params.push(journeyId);
+        dedupClause = `AND NOT EXISTS (SELECT 1 FROM journey_executions je WHERE je.journey_id = $${params.length}::uuid AND je.customer_id = c.id)`;
+      }
+      const cond = applyCustomerConditions(filters.customer_conditions || [], filters.logic || 'AND', params);
+      params.push(String(limit));
+      const r = await query(
+        `SELECT id AS customer_id FROM customers c
+         WHERE c.company_id = $1::uuid
+           AND ${buildJourneySafetyFilter('c')}
+           ${dedupClause}
+           ${cond ? ` AND ${cond}` : ''}
+         ORDER BY c.id
+         LIMIT $${params.length}::int`,
+        params,
+      );
+      return r.rows.map((x: any) => x.customer_id);
+    }
+
     default:
       return [];
   }
 }
 
-async function selectCdpEvent(
+// ★ Phase 3: 이벤트 커서 — cursorStart+windowEnd 주어지면(라이브) 그 창의 이벤트 전수,
+//   없으면(미리보기) 최근 7일 추정. 라이브는 trigger-watcher가 커서/윈도우를 넘기고 처리 후 커서 전진.
+export async function selectCdpEvent(
   companyId: string,
   eventName: string,
-  recentMinutes: number,
   filters: Record<string, any>,
   limit: number,
+  cursorStart?: Date | string | null,
+  windowEnd?: Date | string | null,
 ): Promise<string[]> {
-  const params: any[] = [companyId, eventName, String(recentMinutes)];
+  const params: any[] = [companyId, eventName];
+  let timeClause: string;
+  if (cursorStart && windowEnd) {
+    params.push(cursorStart);
+    params.push(windowEnd);
+    timeClause = `e.occurred_at > $${params.length - 1} AND e.occurred_at <= $${params.length}`;
+  } else {
+    timeClause = `e.occurred_at >= NOW() - INTERVAL '7 days'`;
+  }
   const cond = applyCustomerConditions(filters.customer_conditions || [], filters.logic || 'AND', params);
   params.push(String(limit));
   const r = await query(
     `SELECT DISTINCT e.customer_id FROM cdp_events e
-     ${cond ? `INNER JOIN customers c ON c.id = e.customer_id` : ''}
+     INNER JOIN customers c ON c.id = e.customer_id AND c.company_id = $1::uuid
      WHERE e.company_id = $1::uuid
        AND e.event_name = $2
        AND e.customer_id IS NOT NULL
-       AND e.occurred_at >= NOW() - ($3 || ' minutes')::interval
+       AND ${timeClause}
+       AND ${buildJourneySafetyFilter('c')}
        ${cond ? ` AND ${cond}` : ''}
      LIMIT $${params.length}::int`,
     params,
@@ -179,8 +229,9 @@ export async function buildJourneyPreviewSamples(
   triggerEvent: string,
   triggerFilters: Record<string, any>,
   limit: number,
+  journeyId?: string,
 ): Promise<JourneyPreviewSample[]> {
-  const ids = await selectJourneyTargetCustomerIds(companyId, triggerEvent, triggerFilters, limit);
+  const ids = await selectJourneyTargetCustomerIds(companyId, triggerEvent, triggerFilters, limit, journeyId);
   if (ids.length === 0) return [];
 
   // 추출 순서(trigger ORDER BY — 신규가입=created_at DESC 등) 유지 + 예측 점수 LEFT JOIN

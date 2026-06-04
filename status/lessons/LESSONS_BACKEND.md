@@ -183,6 +183,64 @@ const items: any[] =
 
 ---
 
+## 직접발송 대량 504 사고 (D231+ 추가)
+
+### D231+ (2026-06-04) — 톤28 8~30만 발송 504 + 중복 발송 (응답 전 동기 정제 self-join 폭발)
+
+**사고**: 톤28(toun28) 8~30만 직접발송 시 빨간 알럿(504) 반복 → 오류로 알고 재시도 → 중복 64만건 처리(취소·예약도 send_phase='sent'로 게이트웨이 송출).
+
+**Root cause**: commit endpoint가 정제(수신거부 DELETE + **중복제거 self-join** `a.phone=b.phone AND a.id>b.id`)를 **응답 전 동기로** 수행. `(staging_id,phone)` 인덱스가 있어도 **같은 테이블 자기조인**이라 10만에 59초(\timing 실측 239,674ms) → commit 60초 초과 → **nginx 504(upstream timeout)**. 백엔드는 완주 → 발송 + status='scheduled' 잔존 → 재시도 중복.
+- 진단: 백엔드 out.log 완료만, error.log에 commit 에러 0 → **백엔드 안 죽음, nginx가 응답 못 받아 504**. nginx access.log `POST /direct-send/commit 504`, error.log `upstream timed out`.
+
+**정정** (`routes/campaigns.ts` + `utils/direct-send-worker.ts` + `DirectSendPanel.tsx`/`Dashboard.tsx`):
+1. commit 정제 제거 → 발송 건수만 COUNT(헬퍼 `countStagingFiltered`) → 즉시 202.
+2. 정제(중복 ctid+ROW_NUMBER O(N log N) + 수신거부 인덱스 JOIN)를 worker 발송 직전(processed===0)으로 이동.
+3. 모달 카운트도 phones 통째 POST·프론트 계산 폐기 → stage 적재 후 count endpoint(같은 헬퍼). count=commit=worker 동일 기준이라 모달=차감=발송 일치.
+
+**교훈**:
+- **응답 전 동기로 대량 정제(DELETE/JOIN) 금지** — 타임아웃은 백엔드 에러 안 남고 nginx 504. commit/모달은 즉시 응답, 무거운 작업은 worker 청크.
+- **self-join(자기조인 `a.id>b.id`)은 인덱스로도 폭발** — 중복제거는 ctid+ROW_NUMBER 한 패스(O(N log N)).
+- **진단은 백엔드 error.log + nginx access/error 둘 다** — 백엔드 완주 시 백엔드 로그엔 안 남는다.
+- 대량 정제 카운트(모달)는 프론트 메모리/phones 통째 POST 금지 → staging 서버 COUNT.
+
+---
+
+## 여정 엔진 전면 결함 (D232+ 추가)
+
+### D232+ (2026-06-04) — 여정 타겟 추출·발송·시점 전반 결함 (자유여정 진입 부재 포함)
+
+**배경**: 신규가입 여정 시연 중 신규가입자 0(목업 고객DB 재업로드)인데 500건 발송. 추적 결과 여정 엔진 전반 결함. 핸드오프 `docs/superpowers/handoffs/2026-06-04-journey-engine-redesign-handoff.md`.
+
+**결함(라인 근거)**:
+1. **자유여정(custom) 진입 부재** [CRITICAL] — `journey-builder.ts:685` activateJourney가 status active+snapshot+알림스케줄만, journey_executions INSERT 0. `journey-trigger-watcher.ts:71` custom 제외 + `journey-target-extractor.ts:135` default 빈배열. → 자유여정 활성화해도 발송 0(사용자 최다 사용 타입).
+2. **신규가입 created_at 재업로드 취약** [CRITICAL] — `journey-target-extractor.ts:41` `created_at >= NOW()-N시간`. 고객DB 전체 재업로드 시 created_at 갱신 → 전원 신규 오인(실측 2만명 일괄→전체→LIMIT 500 발송).
+3. **cdp trigger opt-out/is_active 필터 누락** [CRITICAL] — `extractor.ts:97`(cart)·`152`(purchase/reservation): customer_conditions 없으면 customers JOIN 스킵 → sms_opt_in/is_active 미적용 → 수신거부 발송.
+4. **조건평가 default pass** [HIGH] — `journey-executor.ts:1014/1029/1039/1043/1078` null·DB오류·미지원 전부 return true → 조건 무시 발송. (활성화 형식검증은 있으나 런타임 DB오류 못 막음.)
+5. **고객당 개별 campaign** [CRITICAL] — `executor.ts:630` 고객 1명당 campaigns INSERT(target=1)+차감(587 ref=journey_id)+큐(702). 500명=500 campaign+500 차감+발송결과 500행 폭주. **여정도 직접발송처럼 staging 묶음+청크+%고객명% 필요.**
+6. **LIMIT 500** [HIGH] — `trigger-watcher.ts:113`. 조건 10만이면 500만. 제거 필요(묶음 동반).
+7. **step 시점 = now+delay** [HIGH] — `trigger-watcher.ts:145`. 전일 대상 묶어 다음날 지정 시각이어야(step1=충족 후 N일+시각, step2=step1+72h 등).
+8. **is_invalid(무효번호) 전 trigger 누락** [HIGH].
+9. **미리보기(LIMIT 30) vs 실발송(LIMIT 500) 규모 불일치** [MEDIUM].
+
+**긍정(이미 있음)**: 발송 2h 전 담당자 알림 스케줄 `journey-builder.ts:679 scheduleNotificationsForActivation`(스팸필터 2h 전 토대).
+
+**교훈**:
+- **trigger 추출은 "레코드 생성 시각(created_at)"이 아닌 "안정 기준(가입일·이벤트 occurred_at)"으로** — 재업로드/갱신에 무너지면 전체 오발송.
+- **공통 안전 필터(sms_opt_in·is_active·is_invalid·is_opt_out)는 모든 trigger·customer_conditions 유무 무관 적용** — JOIN 조건부면 누락.
+- **조건평가 DB 실패 = default pass(발송) 금지 → 안전 분기(미충족 취급)**.
+- **여정 발송도 직접발송 staging 묶음 구조 재사용** — 고객당 개별 campaign = 500명 500건 폭주.
+- **자유여정도 진입 worker 필수** — trigger 제외 + extractor case 부재면 발송 0.
+- **점검 보조 도구(서브에이전트)가 구버전 schema.sql을 보면 오진**(region·birth_month_day "없음" 보고했으나 실 customers엔 존재) — 실DB 컬럼 기준 의무.
+
+**★ 2026-06-04 세션2 — Phase 1~5 fixed (배포)**:
+- 결함 **#1·#2·#3·#5·#6(cdp)·#8 수정**. 남은 #4(조건평가 default pass)=Phase 7 · #7(step 시점)=Phase 6 · #9(미리보기)=Phase 9.
+- **여정 SMS 큐 app_etc1/app_etc2 뒤바뀜 발견·정정** — `bulkInsertSmsQueue`는 app_etc1=row[6]·app_etc2=row[7](`sms-queue.ts:942·944`)인데, 여정 SMS가 row[6]=company_id·row[7]=`journey:...`로 뒤바뀌어 여정 SMS 수신자 상세(`results.ts` WHERE app_etc1=campaignId)가 안 잡혔음. Phase 5에서 row[6]=campaignId로 정정.
+- **여정 과금 = prepaidDeduct(발송 시, `executor:587`), campaign_runs 월정산 밖**(여정은 campaign_runs 미생성) → app_etc1 변경이 billing에 영향 0. billing은 `campaign_runs.id`(run_id) GROUP BY app_etc1로 집계.
+- **진입 원장 키 = 시스템 upsert 식별자(회사+매장코드+전화번호)** — created_at 의존 0. 업로드=`customer-upsert` upsert(키 동일)라 created_at·id 보존, 전체삭제(`customers.ts:1533`)·업로더별삭제(`admin.ts:231`)만 리셋(드묾).
+- **묶음 발송 = (journey,step,KST날짜)당 campaign 1건 공유**(journey_step_campaigns find-or-create) — staging/사전렌더 불요(executor 5분 소량 처리 → OOM 위험 0, 톤28 무관). 직접발송 파이프라인 격리.
+
+---
+
 ## 자가 검증 매트릭스 (Backend 작업 시)
 
 - [ ] 발송 5경로 전수 점검 (AI/직접/타겟/스케줄/테스트)

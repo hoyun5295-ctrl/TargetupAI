@@ -19,6 +19,7 @@
  */
 
 import { query } from '../config/database';
+import { buildJourneySafetyFilter } from './journey-safety-filter';
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // 외부 노출 인터페이스
@@ -199,7 +200,7 @@ async function matchTriggerCustomers(
   const filters = journey.trigger_filters || {};
 
   // 트리거별 SQL 매트릭스 (옛 trigger-watcher 패턴 정합)
-  let baseWhere = `c.company_id = $1::uuid AND c.is_active = true AND c.sms_opt_in = true`;
+  let baseWhere = `c.company_id = $1::uuid AND ${buildJourneySafetyFilter('c')}`;
   const params: any[] = [companyId];
 
   switch (journey.trigger_event) {

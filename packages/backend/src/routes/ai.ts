@@ -2780,6 +2780,7 @@ router.get('/operator/journeys/:id/preview-samples', async (req: Request, res: R
       String(jr.rows[0].trigger_event || ''),
       jr.rows[0].trigger_filters || {},
       10,
+      req.params.id,
     );
 
     return res.json({ success: true, samples });

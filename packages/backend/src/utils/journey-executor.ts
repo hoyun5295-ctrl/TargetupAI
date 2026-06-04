@@ -49,6 +49,7 @@ import { sanitizeForSms } from './message-sanitizer';
 import { shortenUrlsInText } from './short-url';
 import { autoPauseExecution } from './journey-pause-handler';
 import { shiftToSendableHour } from './send-time-util';
+import { getOrCreateStepCampaign, bumpStepCampaignCount } from './journey-step-campaign';
 
 // ════════════════════════════════════════════════════════════════════
 // 타입
@@ -625,32 +626,24 @@ async function processExecution(exec: ExecutionRow): Promise<StepOutcome> {
     return 'failed';
   }
 
-  // ★ D188 Phase 2-B-2 (2026-05-21): campaigns INSERT — send_channel은 알림톡 시 'alimtalk' / 그 외 'sms' 정합.
+  // ★ Phase 5: 고객당 새 campaign 폐기 → (journey, step, 오늘 KST)당 campaign 1건 공유(find-or-create).
+  //   발송결과 목록 1줄 + 상세는 app_etc1=campaignId로 N명 전화번호 검색(아래 큐). 개인화는 고객별 렌더 그대로.
   const sendChannelForCampaign = isKakao ? 'alimtalk' : 'sms';
-  const campaignRes = await query(
-    `INSERT INTO campaigns (
-      company_id, campaign_name, message_type, message_content, subject, message_subject, message_template,
-      is_ad, target_count, sent_count, created_by, send_channel, callback_number, status, scheduled_at, sent_at, kakao_template_id, mms_image_paths
-    ) VALUES (
-      $1::uuid, $2, $3, $4, $5, $5, $4,
-      $6, 1, 1, $7::uuid, $9, $8, 'sending', NOW(), NOW(), $10::uuid, $11
-    ) RETURNING id`,
-    [
-      exec.company_id,
-      `[여정] step ${step.step_order}`,
-      msgType,
-      message,
-      subject || null,
-      isAd,
-      exec.created_by,
-      callbackNumber,
-      sendChannelForCampaign,
-      isKakao && kakaoTemplateRow ? kakaoTemplateRow.id : null,  // ★ #4-a (2026-06-01): 알림톡 여정 결과 조회용 FK (results.ts:560 JOIN)
-      // ★ MMS 이미지 fix (2026-06-01): 여정 MMS도 결과·캘린더 표시 위해 mms_image_paths 컬럼 저장 (직접발송 동일 패턴)
-      (msgType === 'MMS' && step.mms_image_paths && step.mms_image_paths.length > 0) ? JSON.stringify(step.mms_image_paths) : null,
-    ]
-  );
-  const campaignId = campaignRes.rows[0].id as string;
+  const campaignId = await getOrCreateStepCampaign({
+    companyId: exec.company_id,
+    journeyId: exec.journey_id,
+    stepId: step.id,
+    stepOrder: step.step_order,
+    msgType,
+    representativeMessage: message,
+    subject: subject || null,
+    isAd,
+    createdBy: exec.created_by,
+    sendChannel: sendChannelForCampaign,
+    callbackNumber,
+    kakaoTemplateId: isKakao && kakaoTemplateRow ? kakaoTemplateRow.id : null,  // 알림톡 결과 조회용 FK (results.ts JOIN)
+    mmsImagePaths: (msgType === 'MMS' && step.mms_image_paths && step.mms_image_paths.length > 0) ? JSON.stringify(step.mms_image_paths) : null,
+  });
 
   // ★ D188 Phase 2-B-2 (2026-05-21): 10. queue INSERT — channel별 분기 (SMS/LMS/MMS = bulkInsertSmsQueue / KAKAO = insertAlimtalkQueue).
   try {
@@ -681,7 +674,7 @@ async function processExecution(exec: ExecutionRow): Promise<StepOutcome> {
           etcJson: undefined,
           companyId: exec.company_id,
         }],
-        `journey:${exec.journey_id}:${step.id}`,  // ★ #4-c: app_etc1 — 여정 SMS(아래 685행)와 동일 추적키
+        campaignId,  // ★ Phase 5: app_etc1 = 공유 campaignId (결과 상세 app_etc1=campaignId 검색 일치)
       );
     } else {
       // SMS/LMS/MMS 영역 — bulkInsertSmsQueue 정합.
@@ -692,8 +685,10 @@ async function processExecution(exec: ExecutionRow): Promise<StepOutcome> {
         msgType,
         subject || '',
         new Date(),
+        // ★ Phase 5: row[6]=app_etc1=공유 campaignId(결과 상세 검색 일치), row[7]=app_etc2=companyId.
+        //   기존엔 app_etc1=company_id, app_etc2=journey:... 로 뒤바뀌어 여정 SMS 수신자 상세가 안 잡혔음 — 직접발송과 동일 순서로 정정.
+        campaignId,
         exec.company_id,
-        `journey:${exec.journey_id}:${step.id}`,
         // MMS 영역 — mms_image_paths[0..2] 사용 (basename 추출, sms-queue file_name1~3 정합)
         (msgType === 'MMS' && step.mms_image_paths && step.mms_image_paths[0]) ? extractBasename(step.mms_image_paths[0]) : '',
         (msgType === 'MMS' && step.mms_image_paths && step.mms_image_paths[1]) ? extractBasename(step.mms_image_paths[1]) : '',
@@ -779,6 +774,10 @@ async function processExecution(exec: ExecutionRow): Promise<StepOutcome> {
     )`,
     [exec.execution_id, step.id, campaignId, sendCost]
   );
+
+  // ★ Phase 5: 공유 campaign 카운트 +1 (이 step+날짜 campaign의 발송 누적 — 발송결과 목록 "N명" 표시).
+  await bumpStepCampaignCount(campaignId).catch((e: any) =>
+    console.warn('[JourneyExecutor] bumpStepCampaignCount 실패:', e?.message));
 
   // ★ D188 Phase 2-B-3 (2026-05-21): variants reward 누적 — sent=1 (click/conversion은 추후 트래킹 endpoint 영역).
   if (activeVariantId) {

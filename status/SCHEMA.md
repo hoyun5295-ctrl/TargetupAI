@@ -2218,3 +2218,12 @@ CREATE INDEX IF NOT EXISTS idx_journey_executions_customer ON journey_executions
 CREATE INDEX IF NOT EXISTS idx_journey_executions_journey_status ON journey_executions(journey_id, status, entered_at DESC);
 CREATE INDEX IF NOT EXISTS idx_journey_step_logs_execution ON journey_step_logs(execution_id, sent_at DESC);
 ```
+
+### 여정 엔진 재설계 신규 (2026-06-04 세션2 — Harold 실행: `docs/superpowers/plans/2026-06-04-journey-redesign.sql`)
+
+> 미적용 — Harold 직접 PG 실행 후 갱신.
+
+- **journeys.entry_baseline_at** `timestamptz` — 신규가입 baseline 설정 시각(첫 활성화 1회·불변). created_at 의존 제거(진입 원장 anti-join 모드 가름).
+- **journeys.last_event_cursor** `timestamptz` — cdp 구매·예약 이벤트 처리 커서(이 시각 이후~지금 전수 처리 → 워처 멈춰도 누락 0).
+- **journey_entry_ledger**(`journey_id` uuid FK→journeys CASCADE, `company_id` uuid, `store_code` varchar null, `phone` varchar, `kind` varchar 'baseline'|'entered', `created_at`) · **UNIQUE(journey_id, company_id, COALESCE(store_code,'__NONE__'), phone)** + idx(journey_id) — 신규가입 "전에 본 적 없는 식별자"만 진입. 키 = 시스템 upsert 식별자(회사+매장코드+전화번호).
+- **journey_step_campaigns**(`journey_id` uuid FK→journeys CASCADE, `step_id` uuid, `send_date` date, `campaign_id` uuid, `created_at`) · **PK(journey_id, step_id, send_date)** — 묶음 발송: (journey,step,KST날짜)당 campaign 1건 공유(발송결과 1줄 + app_etc1=campaignId 상세 검색).

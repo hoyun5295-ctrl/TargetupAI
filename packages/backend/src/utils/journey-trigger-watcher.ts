@@ -11,7 +11,7 @@
  *   - cdp.cart_abandon (cart): cdp_events.event_name='cart_add' 직전 abandon_hours 시점, 이후 checkout_start 없음
  *   - customer.birthday_approaching (birthday): customers.birth_month_day = (NOW + days_before) MM-DD
  *   - cdp.reservation_created (reservation): cdp_events.event_name='reservation_created' 직전 5분
- *   - custom: 영역 처리 없음 (custom 여정은 활성화 시 외부 호출로 enqueue)
+ *   - custom: audience(customer_conditions) + 안전필터 매칭 중 미진입분만 진입 (execution 안티조인 dedup, 상시 세그먼트)
  *
  * 재진입 cooldown 정합
  *   - allow_reentry=false → 이미 execution 1건 이상이면 skip
@@ -24,9 +24,10 @@
  *   - ai_operator_model_isolation: AI 호출 없음 (Sonnet 4.6 흐름 영향 0)
  */
 
-import { query } from '../config/database';
+import { query, pool } from '../config/database';
 // 추출 조건 = journey-target-extractor 공유 컨트롤타워 (발송·미리보기 동일 기준 단일 진입점)
-import { selectJourneyTargetCustomerIds } from './journey-target-extractor';
+import { selectJourneyTargetCustomerIds, selectCdpEvent } from './journey-target-extractor';
+import { recordEnteredWithClient } from './journey-entry-ledger';
 import { shiftToSendableHour } from './send-time-util';
 
 // ════════════════════════════════════════════════════════════════════
@@ -42,12 +43,24 @@ interface ActiveJourney {
   allow_reentry: boolean;
   reentry_cooldown_days: number | null;
   stats_total_entered: number;
+  threshold_recipients_per_step: number | null;
+  last_event_cursor: Date | null;
 }
 
 interface FirstStepRow {
   id: string;
   delay_hours: number;
 }
+
+// 진입 INSERT — enqueueCandidates / processCdpCursorJourney 공용(중복 정의 방지).
+const INSERT_EXECUTION_SQL =
+  `INSERT INTO journey_executions (
+     id, journey_id, customer_id, current_step_order, status,
+     entered_at, next_run_at, created_at
+   ) VALUES (
+     gen_random_uuid(), $1::uuid, $2::uuid, 0, 'active',
+     NOW(), $3, NOW()
+   )`;
 
 // ════════════════════════════════════════════════════════════════════
 // Worker — 5분 cron
@@ -66,9 +79,10 @@ export async function runJourneyTriggerWatcher(): Promise<{ matched: number; enq
   try {
     const activeRes = await query(
       `SELECT id, company_id, template_code, trigger_event, trigger_filters,
-              allow_reentry, reentry_cooldown_days, stats_total_entered
+              allow_reentry, reentry_cooldown_days, stats_total_entered,
+              threshold_recipients_per_step, last_event_cursor
        FROM journeys
-       WHERE status = 'active' AND template_code != 'custom'
+       WHERE status = 'active'
        ORDER BY created_at ASC`
     );
 
@@ -109,12 +123,93 @@ export function startJourneyTriggerWatcher(): void {
 // ════════════════════════════════════════════════════════════════════
 
 async function processJourneyTrigger(j: ActiveJourney): Promise<{ matched: number; enqueued: number; skipped: number }> {
-  // 추출 = journey-target-extractor 공유 컨트롤타워 (발송·미리보기 동일 기준). LIMIT 500은 발송 동작 보존.
-  const ids = await selectJourneyTargetCustomerIds(j.company_id, j.trigger_event, j.trigger_filters || {}, 500);
+  // ★ Phase 3: cdp 구매·예약은 이벤트 커서 경로(누락 0 + 정확히 1회). 그 외는 공유 컨트롤타워 추출.
+  if (j.trigger_event === 'cdp.purchase' || j.trigger_event === 'cdp.reservation_created') {
+    const eventName = j.trigger_event === 'cdp.purchase' ? 'purchase' : 'reservation_created';
+    return processCdpCursorJourney(j, eventName);
+  }
+  // 추출 = journey-target-extractor 공유 컨트롤타워. journeyId 전달 → 신규가입은 진입 원장 기준.
+  const ids = await selectJourneyTargetCustomerIds(j.company_id, j.trigger_event, j.trigger_filters || {}, 500, j.id);
   if (ids.length === 0) {
     return { matched: 0, enqueued: 0, skipped: 0 };
   }
+  // ★ Phase 2 대량 차단기: 한 번 진입 후보가 회사 설정 상한 초과 → 자동발송 X, 여정 정지 + 사유 기록(담당자 확인).
+  //   임의 상수 X — 회사가 설정한 threshold_recipients_per_step(NULL=무제한)만 사용.
+  const cap = j.threshold_recipients_per_step;
+  if (cap != null && ids.length > Number(cap)) {
+    await query(
+      `UPDATE journeys SET status = 'paused', paused_at = NOW(),
+         pause_reason = $2, updated_at = NOW()
+       WHERE id = $1::uuid AND status = 'active'`,
+      [j.id, `대량 진입 감지 (${ids.length}건 > 상한 ${cap}건) — 자동 정지, 담당자 확인 필요`]
+    );
+    console.warn(`[JourneyTrigger] 대량 차단 — journey=${j.id} 후보=${ids.length} 상한=${cap} → 정지`);
+    return { matched: ids.length, enqueued: 0, skipped: ids.length };
+  }
   return enqueueCandidates(j, ids);
+}
+
+// ════════════════════════════════════════════════════════════════════
+// ★ Phase 3: cdp 이벤트 커서 처리 (구매·예약) — 커서 이후~지금 이벤트 전수, 진입+커서 전진을 한 트랜잭션.
+// ════════════════════════════════════════════════════════════════════
+
+async function processCdpCursorJourney(j: ActiveJourney, eventName: string): Promise<{ matched: number; enqueued: number; skipped: number }> {
+  const windowEnd = new Date();  // 이번 윈도우 끝 — 추출과 커서 전진에 동일 값
+  const cursorStart = j.last_event_cursor || windowEnd;  // 커서 없으면 빈 창(다음 회차부터)
+  const ids = await selectCdpEvent(j.company_id, eventName, j.trigger_filters || {}, 500, cursorStart, windowEnd);
+
+  // 대량 차단기 — 후보 과다 시 정지+사유(커서 전진 안 함 → 재활성화 시 재평가).
+  const cap = j.threshold_recipients_per_step;
+  if (cap != null && ids.length > Number(cap)) {
+    await query(
+      `UPDATE journeys SET status = 'paused', paused_at = NOW(), pause_reason = $2, updated_at = NOW()
+       WHERE id = $1::uuid AND status = 'active'`,
+      [j.id, `대량 진입 감지 (${ids.length}건 > 상한 ${cap}건) — 자동 정지, 담당자 확인 필요`]
+    );
+    console.warn(`[JourneyTrigger] 대량 차단(cdp) — journey=${j.id} 후보=${ids.length} 상한=${cap} → 정지`);
+    return { matched: ids.length, enqueued: 0, skipped: ids.length };
+  }
+
+  const firstStepRes = await query(
+    `SELECT id, delay_hours FROM journey_steps WHERE journey_id = $1::uuid AND step_order = 1`,
+    [j.id]
+  );
+  // step 없거나 후보 0이어도 커서는 전진(이 창 처리 완료 표시 — 누락 방지).
+  if (firstStepRes.rows.length === 0 || ids.length === 0) {
+    await query(`UPDATE journeys SET last_event_cursor = $2 WHERE id = $1::uuid`, [j.id, windowEnd]);
+    return { matched: ids.length, enqueued: 0, skipped: ids.length };
+  }
+  const firstStep = firstStepRes.rows[0] as FirstStepRow;
+
+  // ★ 정확히 1회: 진입 전부 + 커서 전진을 한 트랜잭션 (크래시 시 통째 롤백 → 다음 회차 동일 창 재처리, 중복 0).
+  let enqueued = 0;
+  let skipped = 0;
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    for (const customerId of ids) {
+      const allowed = await checkCooldown(j, customerId);
+      if (!allowed) { skipped++; continue; }
+      const nextRunAt = shiftToSendableHour(new Date(Date.now() + Number(firstStep.delay_hours || 0) * 60 * 60 * 1000));
+      await client.query(INSERT_EXECUTION_SQL, [j.id, customerId, nextRunAt]);
+      enqueued++;
+    }
+    await client.query(`UPDATE journeys SET last_event_cursor = $2 WHERE id = $1::uuid`, [j.id, windowEnd]);
+    if (enqueued > 0) {
+      await client.query(
+        `UPDATE journeys SET stats_total_entered = stats_total_entered + $2, updated_at = NOW() WHERE id = $1::uuid`,
+        [j.id, enqueued]
+      );
+    }
+    await client.query('COMMIT');
+  } catch (e) {
+    await client.query('ROLLBACK');
+    throw e;
+  } finally {
+    client.release();
+  }
+
+  return { matched: ids.length, enqueued, skipped };
 }
 
 // ════════════════════════════════════════════════════════════════════
@@ -135,6 +230,19 @@ async function enqueueCandidates(j: ActiveJourney, customerIds: string[]): Promi
   }
   const firstStep = firstStepRes.rows[0] as FirstStepRow;
 
+  // ★ Phase 2: 신규가입은 진입 시 원장에 'entered' 기록(execution과 원자 트랜잭션). 식별자(매장코드+전화번호) 일괄 조회.
+  const isSignup = j.trigger_event === 'customer.created';
+  const identityMap = new Map<string, { store_code: string | null; phone: string }>();
+  if (isSignup) {
+    const idRes = await query(
+      `SELECT id, store_code, phone FROM customers WHERE id = ANY($1::uuid[]) AND company_id = $2::uuid`,
+      [customerIds, j.company_id]
+    );
+    for (const row of idRes.rows) identityMap.set(row.id, { store_code: row.store_code, phone: row.phone });
+  }
+
+  const insertExecSql = INSERT_EXECUTION_SQL;
+
   for (const customerId of customerIds) {
     const allowed = await checkCooldown(j, customerId);
     if (!allowed) {
@@ -143,17 +251,28 @@ async function enqueueCandidates(j: ActiveJourney, customerIds: string[]): Promi
     }
 
     const nextRunAt = shiftToSendableHour(new Date(Date.now() + Number(firstStep.delay_hours || 0) * 60 * 60 * 1000));
+    const insertExecParams = [j.id, customerId, nextRunAt];
 
-    await query(
-      `INSERT INTO journey_executions (
-         id, journey_id, customer_id, current_step_order, status,
-         entered_at, next_run_at, created_at
-       ) VALUES (
-         gen_random_uuid(), $1::uuid, $2::uuid, 0, 'active',
-         NOW(), $3, NOW()
-       )`,
-      [j.id, customerId, nextRunAt]
-    );
+    if (isSignup) {
+      // 진입 원장 'entered' 기록을 execution INSERT와 한 트랜잭션으로 (원자성 — 한쪽만 남는 사고 차단).
+      const ident = identityMap.get(customerId);
+      const client = await pool.connect();
+      try {
+        await client.query('BEGIN');
+        await client.query(insertExecSql, insertExecParams);
+        if (ident?.phone) {
+          await recordEnteredWithClient(client, j.id, j.company_id, ident.store_code, ident.phone);
+        }
+        await client.query('COMMIT');
+      } catch (e) {
+        await client.query('ROLLBACK');
+        throw e;
+      } finally {
+        client.release();
+      }
+    } else {
+      await query(insertExecSql, insertExecParams);
+    }
 
     summary.enqueued++;
   }
