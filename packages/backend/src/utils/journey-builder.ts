@@ -248,12 +248,22 @@ export async function createJourneyFromTemplate(input: CreateJourneyInput): Prom
       return {
         stepOrder: s.stepOrder || idx + 1,
         stepType: s.stepType || 'message',
-        delayHours: Math.max(0, Math.min(720, Number(s.delayHours) || 0)),
+        delayHours: Math.max(0, Math.min(8760, Number(s.delayHours) || 0)),
         channel,
         messageTemplate: (s.messageTemplate || '').slice(0, 2000),
         subject: channel === 'sms' ? '' : (s.subject || '').slice(0, 50),
         isAd: s.isAd !== undefined ? !!s.isAd : true,
         conditionJsonb: s.conditionJsonb,
+        // ★ Phase 9 fix: 발송 시점(시각) + 알림톡/MMS 필드 보존 — 이전엔 map에서 누락돼 09시·알림톡 설정이 저장 안 됐음.
+        delayMode: s.delayMode,
+        targetHourKst: typeof s.targetHourKst === 'number' ? s.targetHourKst : undefined,
+        alimtalkProfileId: s.alimtalkProfileId,
+        alimtalkTemplateCode: s.alimtalkTemplateCode,
+        alimtalkVariableMap: s.alimtalkVariableMap,
+        alimtalkNextType: s.alimtalkNextType,
+        alimtalkNextContents: s.alimtalkNextContents,
+        alimtalkNextSubject: s.alimtalkNextSubject,
+        mmsImagePaths: s.mmsImagePaths,
       };
     });
   } else if (input.templateCode === 'custom' && input.customObjective) {
