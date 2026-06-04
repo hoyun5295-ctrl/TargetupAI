@@ -38,11 +38,14 @@ function csvEscape(v: unknown): string {
   return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 }
 
+/** 메시지내용의 줄바꿈을 공백 1개로 눌러 한 줄로 — 엑셀 셀 내부 개행(행 폭발) 방지. 비즈웹 엑셀 정합. */
+const oneLine = (s: unknown): string => String(s ?? '').replace(/[\r\n]+/g, ' ').trim();
+
 /** 캠페인 행 배열 → CSV 문자열(BOM 포함, 엑셀 한글 깨짐 방지). 빈 배열이면 헤더만. */
 export function buildCampaignListCsv(rows: CampaignCsvRow[]): string {
   const BOM = '﻿';
   const lines = rows.map(r =>
-    [r.message, r.createdAt, r.sentAt, r.channel, r.sent, r.success, r.fail, r.pending, r.rate, r.sender]
+    [oneLine(r.message), r.createdAt, r.sentAt, r.channel, r.sent, r.success, r.fail, r.pending, r.rate, r.sender]
       .map(csvEscape).join(',')
   );
   return BOM + CSV_HEADERS.join(',') + (lines.length ? '\n' + lines.join('\n') : '');

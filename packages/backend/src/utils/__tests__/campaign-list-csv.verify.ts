@@ -33,11 +33,12 @@ ok('BOM + 헤더 + 행 + 콤마 escape', () => {
   assert.ok(lines[1].includes('8,8,0,0,100,suran'));
 });
 
-ok('큰따옴표 escape("" 이중) + 줄바꿈 감쌈', () => {
+ok('메시지 줄바꿈 → 공백 1줄 (엑셀 셀 개행 방지) + 큰따옴표 escape', () => {
   const csv = buildCampaignListCsv([
-    { message: '제목 "특가"\n둘째줄', createdAt: '', sentAt: '', channel: 'SMS', sent: 1, success: 1, fail: 0, pending: 0, rate: 100, sender: '' },
+    { message: '제목 "특가"\n\n둘째줄', createdAt: '', sentAt: '', channel: 'SMS', sent: 1, success: 1, fail: 0, pending: 0, rate: 100, sender: '' },
   ]);
-  assert.ok(csv.includes('"제목 ""특가""\n둘째줄"'));
+  assert.ok(csv.includes('"제목 ""특가"" 둘째줄"')); // \n\n → 공백 1개, " → ""
+  assert.ok(!/특가""\s*\n/.test(csv));               // 메시지 셀 내부 개행 없음(행 폭발 방지)
 });
 
 ok('빈 배열 → 헤더만', () => {
