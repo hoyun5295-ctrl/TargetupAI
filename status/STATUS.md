@@ -118,6 +118,7 @@
 > - **검증**: backend tsc 0 · frontend tsc 0 · 순수 테스트 75건 green(send-time 9·step-format 9·validator 12·simulator-core 5·points 16·condition 16·safety 8) · 신규 컬럼/마이그레이션 0(전부 information_schema 확인) · 박-단어/모델명/native dialog 신규 0.
 > - **배포**: 시뮬레이트 응답 shape 변경(매출/클릭/전환 null 허용) → **backend+frontend 함께**(별도 시 시뮬 카드 깨짐). 나머지(라벨·total·옵션 PATCH)는 추가 필드 안전. DB 마이그레이션 0. Codex `/codex:adversarial-review`(DB 만진 추출기/시뮬레이터/옵션) 권장.
 > - **남은 것**: cdp 미리보기 "추정" 배지(minor). ※ 2026-06-03 메모의 "JourneysPage native dialog 29곳"은 2026-06-05 grep 재확인 결과 0건(이미 ConfirmModal/useToast로 교체 완료) — stale 정정.
+> - **배포 후 발견·수정(2026-06-05, 운영 실측)**: 발송 시각(09/10시) 저장 안 되던 버그 = `journey-builder.ts` `createJourneyFromTemplate`의 `input.steps.map`(246)이 step 재생성 시 `delayMode`·`targetHourKst`·알림톡 6필드·`mmsImagePaths`를 **안 담음** → 프론트가 보내고 백엔드가 받아도(PM2 로그 입증) INSERT 직전 누락. 9필드 map 보존 + 일 상한 720h→8760h. **검토 캔버스로 만든 모든 여정이 발송시각·알림톡·MMS 설정을 잃던 이전부터의 버그**. 옵셔널 필드라 tsc·순수테스트 미검출 → 생성→DB 왕복 실측으로 확정. 배포=ts-node라 pull+pm2 restart(빌드 X). 기존 2개 여정은 재생성 필요. 미완=저장된 여정 발송시각 편집 컨트롤(JourneyMessageEditModal에 없음, PATCH는 지원). **운영 실측(2026-06-05)**: 발송시각 relative_at_hour/10 저장 정상 + 신규가입 baseline 2만=2만·entered 0(폭발 차단 입증) + 생일 추출 active 59=하루치 D-7 코호트(고객2만/365≈55 일치, 폭발 아님). 단 실제 step1 발송은 미검증(일시정지 상태) — 스모크 남음. 핸드오프 `docs/superpowers/handoffs/2026-06-05-journey-phase9-postdeploy-handoff.md`.
 
 ---
 

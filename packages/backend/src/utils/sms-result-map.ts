@@ -206,6 +206,50 @@ export function getCampaignChannelLabel(sendChannel: string | null | undefined, 
   return messageType;
 }
 
+/**
+ * 발송 채널 분류 (집계 키) — getSendTypeLabel과 동일 규칙의 영문 키 버전.
+ * 통계에서 알림톡(K)과 카카오실패 대체발송(L·k_oriseq>0)을 분리 집계할 때 사용.
+ */
+export type SmsChannel = 'alimtalk' | 'substitute' | 'lms' | 'sms' | 'mms' | 'other';
+
+export function classifyMsgChannel(msgType: string, kOriseq?: number | string | null): SmsChannel {
+  if (msgType === 'K') return 'alimtalk';
+  if (msgType === 'L') {
+    const ori = Number(kOriseq);
+    if (kOriseq != null && kOriseq !== '' && !Number.isNaN(ori) && ori > 0) return 'substitute';
+    return 'lms';
+  }
+  if (msgType === 'S') return 'sms';
+  if (msgType === 'M') return 'mms';
+  return 'other';
+}
+
+export interface ChannelCount { total: number; success: number; fail: number; pending: number; }
+
+/**
+ * msg_type/k_oriseq/status_code별 집계 행 배열을 채널별 성공·실패·대기로 누적.
+ * status 판정은 SUCCESS_CODES/PENDING_CODES(이 파일) 단일 진실 재사용.
+ */
+export function tallySmsChannelCounts(
+  rows: Array<{ msg_type: string; k_oriseq?: number | string | null; status_code: number | string; cnt: number | string }>
+): Record<SmsChannel, ChannelCount> {
+  const init = (): ChannelCount => ({ total: 0, success: 0, fail: 0, pending: 0 });
+  const out: Record<SmsChannel, ChannelCount> = {
+    alimtalk: init(), substitute: init(), lms: init(), sms: init(), mms: init(), other: init(),
+  };
+  for (const r of rows) {
+    const ch = classifyMsgChannel(r.msg_type, r.k_oriseq);
+    const cnt = Number(r.cnt || 0);
+    const code = Number(r.status_code);
+    const b = out[ch];
+    b.total += cnt;
+    if (isSuccess(code)) b.success += cnt;
+    else if (isPending(code)) b.pending += cnt;
+    else b.fail += cnt;
+  }
+  return out;
+}
+
 // ========================
 // Part 2: 통신사 코드 매핑
 // ========================

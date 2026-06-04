@@ -11,7 +11,7 @@ import { query, mysqlQuery } from '../config/database';
 import { CAMPAIGN_OPT080_SELECT_EXPR, CAMPAIGN_OPT080_LEFT_JOIN } from './unsubscribe-helper';
 // ★ D144: PG sent_count 캐시 의존 제거 — MySQL 직접 카운트로 전환
 import { getCompanySmsTablesWithLogs, smsBatchAggByGroup, kakaoBatchAggByGroup } from './sms-queue';
-import { SUCCESS_CODES_SQL, PENDING_CODES_SQL } from './sms-result-map';
+import { SUCCESS_CODES_SQL, PENDING_CODES_SQL, tallySmsChannelCounts, SmsChannel, ChannelCount } from './sms-result-map';
 
 // ============================================================
 // KST 날짜 범위 필터 빌더
@@ -271,6 +271,74 @@ export async function aggregateSmsCountsByCampaign(
     const partial = await smsBatchAggByGroup(group.tables, 'app_etc1', smsAggFields, group.ids);
     for (const [cid, v] of partial) result.set(cid, v);
   }
+  return result;
+}
+
+/**
+ * ★ 알림톡 통계 분리 — 캠페인의 SMS 큐를 채널(알림톡 K / 대체발송 L·k_oriseq>0 / lms·sms·mms)별로
+ *   성공·실패·대기 집계. 통계 엑셀에서 알림톡 캠페인을 "알림톡"/"알림톡대체발송" 2행으로 가르는 전용.
+ *   aggregateSmsCountsByCampaign(전 통계·결과 공유)은 불변 — 이 함수는 엑셀에서만 호출.
+ *   ★ 신규 SQL 컬럼 0: msg_type·k_oriseq·status_code·app_etc1 모두 SMSQ_SEND 실측(29컬럼 덤프) 확정.
+ * @returns Map<campaignId, Record<SmsChannel, {total,success,fail,pending}>>
+ */
+export async function aggregateSmsChannelSplitByCampaign(
+  campaigns: Array<{ id: string; company_id: string; created_by: string | null }>
+): Promise<Map<string, Record<SmsChannel, ChannelCount>>> {
+  const result = new Map<string, Record<SmsChannel, ChannelCount>>();
+  if (campaigns.length === 0) return result;
+
+  // (company_id, created_by)별 → 라인그룹 테이블셋별 묶기 (aggregateSmsCountsByCampaign과 동일)
+  type UserGroup = { companyId: string; userId: string | null; ids: string[] };
+  const byUser = new Map<string, UserGroup>();
+  for (const c of campaigns) {
+    const key = `${c.company_id}::${c.created_by || ''}`;
+    if (!byUser.has(key)) byUser.set(key, { companyId: c.company_id, userId: c.created_by, ids: [] });
+    byUser.get(key)!.ids.push(c.id);
+  }
+  const userGroupTables: Array<{ ug: UserGroup; tables: string[] }> = await Promise.all(
+    Array.from(byUser.values()).map(async (ug) => ({
+      ug, tables: await getCompanySmsTablesWithLogs(ug.companyId, ug.userId || undefined),
+    }))
+  );
+  const byTableSet = new Map<string, { tables: string[]; ids: string[] }>();
+  for (const { ug, tables } of userGroupTables) {
+    if (tables.length === 0) continue;
+    const tableKey = [...tables].sort().join(',');
+    if (!byTableSet.has(tableKey)) byTableSet.set(tableKey, { tables, ids: [] });
+    byTableSet.get(tableKey)!.ids.push(...ug.ids);
+  }
+
+  // 라인그룹 테이블셋별 raw 집계: app_etc1 + msg_type + (대체 여부) + status_code
+  const rawByCampaign = new Map<string, Array<{ msg_type: string; k_oriseq: number | null; status_code: number; cnt: number }>>();
+  for (const [, group] of byTableSet) {
+    if (group.ids.length === 0 || group.tables.length === 0) continue;
+    const placeholders = group.ids.map(() => '?').join(',');
+    const unions = group.tables
+      .map(t => `SELECT app_etc1 AS _grp, msg_type,
+                   CASE WHEN k_oriseq IS NOT NULL AND k_oriseq > 0 THEN 1 ELSE 0 END AS is_sub,
+                   status_code, COUNT(*) AS cnt
+                 FROM ${t} WHERE app_etc1 IN (${placeholders})
+                 GROUP BY app_etc1, msg_type, is_sub, status_code`)
+      .join(' UNION ALL ');
+    // 같은 캠페인이 LIVE+LOG 여러 테이블로 쪼개질 수 있어 outer 재합산
+    const sql = `SELECT _grp, msg_type, is_sub, status_code, SUM(cnt) AS cnt
+                 FROM (${unions}) u GROUP BY _grp, msg_type, is_sub, status_code`;
+    const params: any[] = [];
+    for (let i = 0; i < group.tables.length; i++) params.push(...group.ids);
+    const rows = await mysqlQuery(sql, params) as any[];
+    for (const r of rows) {
+      const cid = String(r._grp);
+      if (!rawByCampaign.has(cid)) rawByCampaign.set(cid, []);
+      rawByCampaign.get(cid)!.push({
+        msg_type: String(r.msg_type),
+        k_oriseq: Number(r.is_sub) === 1 ? 1 : null,  // tallySmsChannelCounts는 k_oriseq>0 여부만 봄
+        status_code: Number(r.status_code),
+        cnt: Number(r.cnt || 0),
+      });
+    }
+  }
+
+  for (const [cid, rows] of rawByCampaign) result.set(cid, tallySmsChannelCounts(rows));
   return result;
 }
 

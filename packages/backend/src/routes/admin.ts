@@ -12,7 +12,7 @@ import { validateSmsTables } from '../utils/sms-table-validator';
 // ★ D145 P0: 예약 캠페인 자동 정리 (모든 발송 관련 라우트 정합성)
 import { cleanupScheduledCampaigns } from '../utils/campaign-lifecycle';
 import { getUserUnsubscribes, deleteUserUnsubscribes, exportUserUnsubscribes, CAMPAIGN_OPT080_SELECT_EXPR, CAMPAIGN_OPT080_LEFT_JOIN } from '../utils/unsubscribe-helper';
-import { buildDateRangeFilter, aggregateSmsCountsByCampaign, aggregateSmsSendTimesByCampaign, getCampaignResultCounts, STAT_DATE_EXPR } from '../utils/stats-aggregation';
+import { buildDateRangeFilter, aggregateSmsCountsByCampaign, aggregateSmsChannelSplitByCampaign, aggregateSmsSendTimesByCampaign, getCampaignResultCounts, STAT_DATE_EXPR } from '../utils/stats-aggregation';
 import { normalizePhone } from '../utils/normalize-phone';
 
 const router = Router();
@@ -3227,44 +3227,60 @@ router.get('/stats/export', authenticate, requireSuperAdmin, async (req: Request
 
     const exportSmsMap = await aggregateSmsCountsByCampaign(exportMetaResult.rows);
     const exportKakaoMap = await kakaoBatchAggByGroup(exportMetaResult.rows.map((c: any) => c.id));
+    // 알림톡 캠페인만 채널 분리 집계(알림톡 K / 대체발송 L·k_oriseq>0) → 엑셀에서 2행으로 분리
+    const alimtalkCampaigns = exportMetaResult.rows.filter((c: any) => c.send_channel === 'alimtalk');
+    const exportSplitMap = await aggregateSmsChannelSplitByCampaign(alimtalkCampaigns);
 
     type ExportBucket = {
       send_date: string; company_name: any; company_code: any; login_id: any; user_name: any;
-      message_type: any; send_channel: any; send_type: any;
+      message_type: any; send_channel: any; send_type: any; channel_label: string;
       campaign_count: number; total_target: number;
       total_sent: number; total_success: number; total_fail: number; total_pending: number;
     };
     const exportByKey = new Map<string, ExportBucket>();
-    for (const c of exportMetaResult.rows) {
-      const sms = exportSmsMap.get(c.id) || { total_count: 0, success_count: 0, fail_count: 0, pending_count: 0 };
-      const kakao = exportKakaoMap.get(c.id) || { total: 0, success: 0, fail: 0, pending: 0 };
-      const sent = Number(sms.total_count || 0) + kakao.total;
-      const success = Number(sms.success_count || 0) + kakao.success;
-      const fail = Number(sms.fail_count || 0) + kakao.fail;
-      const pending = Number(sms.pending_count || 0) + kakao.pending;
 
-      const key = `${c.send_date}|${c.company_id}|${c.created_by || ''}|${c.message_type || ''}|${c.send_channel || ''}|${c.send_type || ''}`;
+    const addExportBucket = (c: any, channelKey: string, channelLabel: string,
+                             target: number, sent: number, success: number, fail: number, pending: number) => {
+      const key = `${c.send_date}|${c.company_id}|${c.created_by || ''}|${channelKey}|${c.send_type || ''}`;
       if (!exportByKey.has(key)) {
         exportByKey.set(key, {
-          send_date: c.send_date,
-          company_name: c.company_name,
-          company_code: c.company_code,
-          login_id: c.login_id,
-          user_name: c.user_name,
-          message_type: c.message_type,
-          send_channel: c.send_channel,
-          send_type: c.send_type,
+          send_date: c.send_date, company_name: c.company_name, company_code: c.company_code,
+          login_id: c.login_id, user_name: c.user_name,
+          message_type: c.message_type, send_channel: c.send_channel, send_type: c.send_type,
+          channel_label: channelLabel,
           campaign_count: 0, total_target: 0,
           total_sent: 0, total_success: 0, total_fail: 0, total_pending: 0,
         });
       }
       const b = exportByKey.get(key)!;
       b.campaign_count++;
-      b.total_target += Number(c.target_count || 0);
-      b.total_sent += sent;
-      b.total_success += success;
-      b.total_fail += fail;
-      b.total_pending += pending;
+      b.total_target += target;
+      b.total_sent += sent; b.total_success += success; b.total_fail += fail; b.total_pending += pending;
+    };
+
+    for (const c of exportMetaResult.rows) {
+      const kakao = exportKakaoMap.get(c.id) || { total: 0, success: 0, fail: 0, pending: 0 };
+      if (c.send_channel === 'alimtalk') {
+        const split = exportSplitMap.get(c.id);
+        const a = split?.alimtalk ?? { total: 0, success: 0, fail: 0, pending: 0 };
+        const s = split?.substitute ?? { total: 0, success: 0, fail: 0, pending: 0 };
+        // 알림톡 행 — SMS 큐 K + 카카오 IMC 합산(이 운영은 IMC 0이라 kakao=0). 대상건수는 여기에 귀속.
+        addExportBucket(c, 'alimtalk', '알림톡', Number(c.target_count || 0),
+          a.total + kakao.total, a.success + kakao.success, a.fail + kakao.fail, a.pending + kakao.pending);
+        // 알림톡대체발송 행 — 카카오 실패 후 LMS 대체분만(0이면 행 생략, 대상건수 중복 합산 방지 0).
+        if (s.total > 0) {
+          addExportBucket(c, 'substitute', '알림톡대체발송', 0, s.total, s.success, s.fail, s.pending);
+        }
+      } else {
+        const sms = exportSmsMap.get(c.id) || { total_count: 0, success_count: 0, fail_count: 0, pending_count: 0 };
+        const channelKey = `${c.message_type || ''}|${c.send_channel || ''}`;
+        addExportBucket(c, channelKey, getCampaignChannelLabel(c.send_channel, c.message_type),
+          Number(c.target_count || 0),
+          Number(sms.total_count || 0) + kakao.total,
+          Number(sms.success_count || 0) + kakao.success,
+          Number(sms.fail_count || 0) + kakao.fail,
+          Number(sms.pending_count || 0) + kakao.pending);
+      }
     }
 
     const exportRows = Array.from(exportByKey.values()).sort((a, b) => {
@@ -3290,7 +3306,7 @@ router.get('/stats/export', authenticate, requireSuperAdmin, async (req: Request
       csvEscape(r.company_name),
       csvEscape(r.login_id || '-'),
       csvEscape(r.user_name || '-'),
-      getCampaignChannelLabel(r.send_channel, r.message_type),
+      r.channel_label,
       r.send_type === 'auto' ? '자동' : r.send_type === 'direct' ? '직접' : 'AI',
       r.campaign_count,
       r.total_target,

@@ -247,6 +247,13 @@ const items: any[] =
 - **남은 #9 미리보기** = Phase 9: simulator matchTriggerCustomers 폐기 → selectJourneyTargetCustomerIds 단일 진입점 통일 + 임의 상수 교체 + UI. 핸드오프 `docs/superpowers/handoffs/2026-06-04-journey-phase9-handoff.md`.
 - **교훈**: tsc는 SQL 컬럼 검증 못 함 → information_schema 순수 덤프로 실컬럼 확인 후 작성(scheduled_at·step_id 부재 확정). DB-의존 wrapper(AI 호출·스팸 enqueue)는 순수 테스트 불가 → 순수 코어(조건·dedup·config)만 분리 TDD, 통합은 tsc+검증된 패턴 재사용.
 
+**★ 2026-06-05 Phase 9 + 배포후 map 누락 fix (운영 실측)**:
+- Phase 9 완료(미리보기=실발송 통일·실데이터 예측·시점 N일+시각 relative_at_hour·여정 옵션 PATCH·타임라인). 상세 = `memory/project_2026_0605_journey_phase9_done.md`.
+- **배포후 버그**: 발송 시각(relative_at_hour) 저장 안 됨. 근본 = `journey-builder.ts:246` `createJourneyFromTemplate`의 `input.steps.map`이 step 재생성 시 신규 필드(`delayMode`·`targetHourKst`·알림톡 6·`mmsImagePaths`)를 **객체에 안 담음** → 프론트 전송·백엔드 수신(console.log 입증)에도 INSERT 직전 누락 → relative/null. **검토 캔버스(input.steps)로 만든 모든 여정이 이전부터 발송시각·알림톡·MMS를 잃던 잠재 버그**(옵셔널 필드라 무증상). fix=9필드 보존 + 720h→8760h.
+- **교훈 1**: 신규 step 필드 추가 시 `createJourneyFromTemplate`·`generateCustomStepsWithAI`·`tmpl.steps` 등 **모든 transform/map 경로를 grep**해 보존 확인. 한 곳이라도 map이 새 필드를 안 따라가면 받아도 누락. (full_pattern_grep_required = falsy뿐 아니라 "필드 보존"에도 적용.)
+- **교훈 2**: 옵셔널 신규 필드는 tsc 통과 + 순수 테스트 미적용으로 **자동 검증 못 잡음** → 생성→DB 왕복 1건 실측이 유일한 안전망. "완료" 보고 전 운영 흐름 1건 실측 의무.
+- **교훈 3**: 디버깅 시 "배포 안 됐을 것" 추측 금지 → `console.log`(stdout)+PM2 로그로 **수신값 실측**부터. (배포상태 추측으로 헤매다 Harold 격분 — no_guess 위반.) 백엔드는 ts-node(소스 직접 실행)라 dist 빌드 무관, pull+pm2 restart면 반영.
+
 ---
 
 ## 자가 검증 매트릭스 (Backend 작업 시)
