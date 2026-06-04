@@ -2465,6 +2465,11 @@ router.post('/operator/journeys', async (req: Request, res: Response) => {
       reentryCooldownDays,
     } = req.body || {};
 
+    // [임시 디버그 Phase 9] 백엔드가 받은 step 시점 — 09시(relative_at_hour) 누락 추적용. 확인 후 제거.
+    console.log('[Journey create] 수신 step 시점:', JSON.stringify(
+      (Array.isArray(steps) ? steps : []).map((s: any) => ({ order: s.stepOrder, mode: s.delayMode, hour: s.targetHourKst, hours: s.delayHours }))
+    ));
+
     if (!templateCode || !JOURNEY_TEMPLATES[templateCode as JourneyTemplateCode]) {
       return res.status(400).json({ success: false, error: '템플릿 코드가 유효하지 않습니다.' });
     }
