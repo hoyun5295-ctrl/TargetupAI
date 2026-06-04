@@ -29,6 +29,7 @@
 import { query } from '../config/database';
 import { buildFilterQueryCompat } from './customer-filter';
 import { getOpt080Number, prepareFieldMappings, prepareSendMessage } from './messageUtils';
+import { fillAlimtalkVarMap } from './alimtalk-vars';
 import {
   toKoreaTimeStr, toQtmsgType,
   getCompanySmsTables, getAuthSmsTable, hasCompanyLineGroup, getNextSmsTable,
@@ -942,13 +943,21 @@ async function executeAutoCampaign(ac: any): Promise<void> {
         }
         const cleanPhone = normalizePhone(customer.phone);
         const callback = resolveCustomerCallback(customer, ac.use_individual_callback || false, ac.callback_number);
+        // ★ 대체문구(k_next_contents)도 본문과 동일 치환 — raw 발송 시 #{변수} 노출 차단.
+        let finalNextContents: string | undefined;
+        if ((ac.alimtalk_next_type === 'A' || ac.alimtalk_next_type === 'B') && ac.alimtalk_next_contents) {
+          const { message: ncBase } = prepareSendMessage(ac.alimtalk_next_contents, customer, fieldMappings, {
+            msgType: 'LMS', isAd: false, opt080Number: '', subject: '',
+          });
+          finalNextContents = fillAlimtalkVarMap(ncBase, ac.alimtalk_variable_map || {}, customer);
+        }
         return {
           phone: cleanPhone,
           callback,
           message: finalMessage,
           templateCode: ac.alimtalk_template_code,
           nextType: ac.alimtalk_next_type || 'L',
-          nextContents: (ac.alimtalk_next_type === 'A' || ac.alimtalk_next_type === 'B') ? (ac.alimtalk_next_contents || '') : undefined,
+          nextContents: finalNextContents,
           etcJson,
           companyId: ac.company_id,
         };

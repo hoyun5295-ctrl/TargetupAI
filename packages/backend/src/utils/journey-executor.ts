@@ -673,7 +673,10 @@ async function processExecution(exec: ExecutionRow): Promise<StepOutcome> {
           titleStr: subject || undefined,  // L/B 시 LMS 대체 제목
           templateCode: step.alimtalk_template_code || '',
           nextType: (step.alimtalk_next_type as 'N' | 'S' | 'L' | 'A' | 'B' | undefined) || 'L',
-          nextContents: step.alimtalk_next_contents || undefined,
+          // ★ 알림톡 실패 대체문구(k_next_contents)도 본문(472)과 동일 변수 치환 — raw 발송 시 #{변수} 노출 차단.
+          nextContents: step.alimtalk_next_contents
+            ? replaceAlimtalkVars(step.alimtalk_next_contents, customer as Record<string, any>, step.alimtalk_variable_map || {})
+            : undefined,
           buttonJson: buttonJson || undefined,
           etcJson: undefined,
           companyId: exec.company_id,

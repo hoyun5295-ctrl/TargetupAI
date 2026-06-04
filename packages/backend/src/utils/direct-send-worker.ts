@@ -61,6 +61,29 @@ async function processCampaign(campaignId: string): Promise<void> {
   let processed: number = c.processed_count || 0;
   let sent = 0;
 
+  // ★ 2026-06-04 정정: commit에서 옮긴 정제 — 발송 직전 1회. count/commit과 같은 기준이라 모달=차감=발송 일치.
+  //   첫 처리(processed===0)에만 수행(재시작 시 중복 정제 방지). dedup/unsub은 send_config 기준.
+  if (processed === 0) {
+    if (cfg.unsubFilterEnabled !== false) {
+      await query(
+        `DELETE FROM campaign_send_staging s USING unsubscribes u WHERE s.staging_id = $1 AND u.user_id = $2 AND u.phone = s.phone`,
+        [stagingId, userId]
+      );
+    }
+    if (cfg.dedupEnabled !== false) {
+      await query(
+        `DELETE FROM campaign_send_staging
+         WHERE ctid IN (
+           SELECT ctid FROM (
+             SELECT ctid, ROW_NUMBER() OVER (PARTITION BY phone ORDER BY id) AS rn
+             FROM campaign_send_staging WHERE staging_id = $1
+           ) t WHERE rn > 1
+         )`,
+        [stagingId]
+      );
+    }
+  }
+
   while (processed < total) {
     const chunkRes = await query(
       `SELECT id, phone, name, extra1, extra2, extra3, callback

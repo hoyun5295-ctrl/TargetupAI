@@ -38,6 +38,7 @@ import {
   detectPhoneHeaders,
   normalizePhoneKr,
   cellToString,
+  resolveRecipientCallback,
 } from '../utils/formatDate';
 import { insertAtCursorPos } from '../utils/textInsert';
 import MmsImagePreview from './shared/MmsImagePreview';
@@ -364,28 +365,56 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
       }
     }
 
-    const token = localStorage.getItem('token');
-    const phones = directRecipients.map((r: any) => r.phone);
-    const checkRes = await fetch('/api/unsubscribes/check', {
+    const token = localStorage.getItem('token') || '';
+    // ★ 2026-06-04 재배치: 모달 전에 staging 적재 → 서버 count(중복/수신거부)로 모달 카운트.
+    //   옛 phones 통째 POST(/unsubscribes/check) + 프론트 중복 계산 폐기 — 대량(50만+)에서도 안 죽고
+    //   commit/worker와 숫자가 정확히 일치. 청크(5만) 적재라 body 한도·timeout 무관.
+    const CHUNK = 50000;
+    let stagingId: string | undefined;
+    for (let i = 0; i < directRecipients.length; i += CHUNK) {
+      const slice = directRecipients.slice(i, i + CHUNK).map((r: any) => ({
+        phone: r.phone,
+        name: cellToString(r.name),
+        extra1: cellToString(r.extra1),
+        extra2: cellToString(r.extra2),
+        extra3: cellToString(r.extra3),
+        callback: resolveRecipientCallback(r, useIndividualCallback, individualCallbackColumn) || r.callback || null,
+      }));
+      const stageRes = await fetch('/api/campaigns/direct-send/stage', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ stagingId, recipients: slice }),
+      });
+      const stageData = await stageRes.json();
+      if (!stageData.success) {
+        setToast({ show: true, type: 'error', message: `수신자 업로드 실패: ${stageData.error || ''}` });
+        return;
+      }
+      stagingId = stageData.stagingId;
+    }
+    const countRes = await fetch('/api/campaigns/direct-send/count', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-      body: JSON.stringify({ phones })
+      body: JSON.stringify({ stagingId, dedupEnabled, unsubFilterEnabled }),
     });
-    const checkData = await checkRes.json();
-    const unsubCount = checkData.unsubscribeCount || 0;
-    const dupCount = checkData.duplicateCount || 0;
+    const countData = await countRes.json();
+    if (!countData.success) {
+      setToast({ show: true, type: 'error', message: countData.error || '발송 대상 집계에 실패했습니다.' });
+      return;
+    }
 
     onSendConfirm({
       show: true,
       type: reserveEnabled ? 'scheduled' : 'immediate',
-      count: directRecipients.length - (unsubFilterEnabled ? unsubCount : 0) - (dedupEnabled ? dupCount : 0),
-      unsubscribeCount: unsubFilterEnabled ? unsubCount : 0,
-      duplicateCount: dedupEnabled ? dupCount : 0,
+      count: countData.sendCount,
+      unsubscribeCount: countData.unsubscribeCount,
+      duplicateCount: countData.duplicateCount,
       dateTime: reserveEnabled && reserveDateTime ? reserveDateTime : undefined,
       from: 'direct',
       msgType: directMsgType,
       dedupEnabled,
       unsubFilterEnabled,
+      stagingId,
     });
   };
 

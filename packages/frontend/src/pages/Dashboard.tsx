@@ -464,35 +464,13 @@ export default function Dashboard() {
     setDirectSending(true);
     try {
       const token = localStorage.getItem('token') || '';
-      const CHUNK = 50000; // UNNEST 적재라 PG 파라미터 한도 무관 — body 한도(50MB) 기준 5만 (500만 = 100회)
-      let stagingId: string | undefined;
-
-      // 1) 수신자 청크 적재 (1만건씩) — 단일 body 한도·timeout 구조적 제거 (18만~500만 대응)
-      for (let i = 0; i < directRecipients.length; i += CHUNK) {
-        const slice = directRecipients.slice(i, i + CHUNK).map((r: any) => ({
-          // ★ D150-3: 0/'0' 보존 (cellToString)
-          phone: r.phone,
-          name: cellToString(r.name),
-          extra1: cellToString(r.extra1),
-          extra2: cellToString(r.extra2),
-          extra3: cellToString(r.extra3),
-          callback: resolveRecipientCallback(r, useIndividualCallback, individualCallbackColumn) || r.callback || null,
-        }));
-        const stageRes = await fetch('/api/campaigns/direct-send/stage', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-          body: JSON.stringify({ stagingId, recipients: slice }),
-        });
-        const stageData = await stageRes.json();
-        if (!stageData.success) {
-          setToast({ show: true, type: 'error', message: `수신자 업로드 실패: ${stageData.error || ''}` });
-          setTimeout(() => setToast({ show: false, type: 'error', message: '' }), 4000);
-          setDirectSending(false);
-          return;
-        }
-        stagingId = stageData.stagingId;
-        const staged = Math.min(i + CHUNK, directRecipients.length);
-        setToast({ show: true, type: 'success', message: `수신자 업로드 중… ${staged.toLocaleString()}/${directRecipients.length.toLocaleString()}건` });
+      // ★ 2026-06-04 재배치: staging 적재·count는 모달 전(DirectSendPanel handleSend)에서 끝났다 → 여기선 그 stagingId로 commit만.
+      const stagingId: string | undefined = (sendConfirm as any).stagingId;
+      if (!stagingId) {
+        setToast({ show: true, type: 'error', message: '발송 준비 정보가 없습니다. 다시 시도해주세요.' });
+        setTimeout(() => setToast({ show: false, type: 'error', message: '' }), 4000);
+        setDirectSending(false);
+        return;
       }
 
       // 2) 발송 커밋 (설정만 — recipients 제외. 수신거부·중복제거·차감은 서버가 전체 1회 처리)

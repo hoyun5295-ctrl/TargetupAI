@@ -29,7 +29,7 @@ import { validateMmsPayload } from '../utils/mms-validator';
 import { buildDateRangeFilter, aggregateSmsCountsByCampaign, aggregateSmsSendTimesByCampaign } from '../utils/stats-aggregation';
 import { cancelCampaign, syncCampaignResults, cleanupScheduledCampaigns } from '../utils/campaign-lifecycle';
 import { buildFilterQueryCompat } from '../utils/customer-filter';
-import { findUnfilledAlimtalkVars } from '../utils/alimtalk-vars';
+import { findUnfilledAlimtalkVars, fillAlimtalkVarMap } from '../utils/alimtalk-vars';
 import { filterByIndividualCallback, buildCallbackErrorResponse, buildCallbackConfirmResponse, resolveCustomerCallback } from '../utils/callback-filter';
 import { deduplicateByPhone } from '../utils/deduplicate';
 import { getUserTestContacts } from '../utils/test-contact-helper';
@@ -1270,6 +1270,62 @@ router.post('/direct-send/stage', async (req: Request, res: Response) => {
   }
 });
 
+// ★ 대량 발송 (2026-06-04 톤28 504 정정): 모달 카운트 + commit 차감 공용 헬퍼 — 실제 삭제 없이 COUNT만.
+//   중복 = phone당 1건 유지(total - distinct), 수신거부 = distinct phone 중 user_id+phone 매칭.
+//   count endpoint / commit / worker가 모두 이 기준이라 모달 숫자 = 실제 발송 정확히 일치.
+async function countStagingFiltered(
+  stagingId: string, companyId: string, userId: string,
+  dedupEnabled: boolean, unsubFilterEnabled: boolean,
+): Promise<{ total: number; duplicateCount: number; unsubscribeCount: number; sendCount: number }> {
+  const totalR = await query(
+    `SELECT COUNT(*)::int AS c FROM campaign_send_staging WHERE staging_id = $1 AND company_id = $2`,
+    [stagingId, companyId]
+  );
+  const total = totalR.rows[0]?.c || 0;
+  let duplicateCount = 0;
+  if (dedupEnabled !== false) {
+    const r = await query(
+      `SELECT (COUNT(*) - COUNT(DISTINCT phone))::int AS c FROM campaign_send_staging WHERE staging_id = $1`,
+      [stagingId]
+    );
+    duplicateCount = r.rows[0]?.c || 0;
+  }
+  let unsubscribeCount = 0;
+  if (unsubFilterEnabled !== false) {
+    // (user_id, phone) 인덱스 사용 — staging × unsubscribes 균등 조인이라 self-join과 달리 대량에서도 빠르다.
+    const r = await query(
+      `SELECT COUNT(DISTINCT s.phone)::int AS c
+       FROM campaign_send_staging s
+       JOIN unsubscribes u ON u.user_id = $2 AND u.phone = s.phone
+       WHERE s.staging_id = $1`,
+      [stagingId, userId]
+    );
+    unsubscribeCount = r.rows[0]?.c || 0;
+  }
+  const sendCount = Math.max(total - duplicateCount - unsubscribeCount, 0);
+  return { total, duplicateCount, unsubscribeCount, sendCount };
+}
+
+// 프론트가 phones를 통째 POST(/unsubscribes/check)하던 옛 방식 폐기 → stage 적재 후 이 endpoint로 모달 카운트 조회.
+router.post('/direct-send/count', async (req: Request, res: Response) => {
+  try {
+    const companyId = (req as any).user?.companyId;
+    const userId = (req as any).user?.userId;
+    if (!companyId) return res.status(401).json({ success: false, error: '인증 필요' });
+    const { stagingId, dedupEnabled = true, unsubFilterEnabled = true } = req.body || {};
+    if (!stagingId) return res.status(400).json({ success: false, error: 'stagingId 누락' });
+    const r = await countStagingFiltered(stagingId, companyId, userId, dedupEnabled, unsubFilterEnabled);
+    return res.json({ success: true, ...r });
+  } catch (err: any) {
+    const msg = err?.message || '';
+    if (msg.includes('relation') && msg.includes('does not exist')) {
+      return res.status(503).json({ success: false, code: 'DB_MIGRATION_PENDING', error: 'DB 마이그레이션 필요 — campaign_send_staging 테이블' });
+    }
+    console.error('[direct-send/count] 오류:', err);
+    return res.status(500).json({ success: false, error: '정제 카운트 중 오류가 발생했습니다.' });
+  }
+});
+
 // ★ 대량 발송 파이프라인 (2026-05-30) — Task 4: 발송 커밋
 //   staging 전체 정제(수신거부 DELETE → 중복제거 DELETE) → 정제 후 건수로 차감 → 즉시 202 접수.
 //   실제 청크 발송은 direct-send-worker가 백그라운드 처리(진행률은 send-progress 조회).
@@ -1345,22 +1401,10 @@ router.post('/direct-send/commit', async (req: Request, res: Response) => {
       if (!dsCheck.valid) return res.status(400).json({ success: false, error: dsCheck.error });
     }
 
-    // ★ 전체 정제 (staging 전체 대상 1회 — 청크 전에 제대로 제거: 주인님 명시)
-    if (unsubFilterEnabled !== false) {
-      await query(
-        `DELETE FROM campaign_send_staging s USING unsubscribes u WHERE s.staging_id = $1 AND u.user_id = $2 AND u.phone = s.phone`,
-        [stagingId, userId]
-      );
-    }
-    if (dedupEnabled !== false) {
-      await query(
-        `DELETE FROM campaign_send_staging a USING campaign_send_staging b WHERE a.staging_id = $1 AND b.staging_id = $1 AND a.phone = b.phone AND a.id > b.id`,
-        [stagingId]
-      );
-    }
-
-    const finalCount = await query(`SELECT COUNT(*)::int AS c FROM campaign_send_staging WHERE staging_id = $1`, [stagingId]);
-    const total = finalCount.rows[0]?.c || 0;
+    // ★ 2026-06-04 정정: 정제(DELETE)를 commit에서 빼고 worker가 발송 직전에 수행 → commit 즉시 응답(504 원천 차단).
+    //   여기선 count endpoint와 같은 헬퍼로 발송 예정 건수만 COUNT(차감·캠페인 target_count). staging은 안 건드린다.
+    //   worker가 같은 기준으로 실제 제거하므로 모달 숫자 = 차감 = 실제 발송이 일치한다.
+    const { sendCount: total } = await countStagingFiltered(stagingId, companyId, userId, dedupEnabled, unsubFilterEnabled);
     if (total === 0) return res.status(400).json({ success: false, error: '정제 후 발송 대상이 없습니다 (전부 수신거부 또는 중복).' });
 
     // 캠페인 생성 (send_phase='queued')
@@ -1371,6 +1415,8 @@ router.post('/direct-send/commit', async (req: Request, res: Response) => {
       adEnabled: finalIsAd, scheduled, scheduledAt, splitEnabled, splitCount, mmsImagePaths,
       kakaoBubbleType, kakaoSenderKey, kakaoTargeting, kakaoAttachmentJson, kakaoCarouselJson, kakaoResendType,
       alimtalkTemplateCode, alimtalkVariableMap, alimtalkButtonJson, alimtalkNextType, alimtalkNextContents, alimtalkNextSubject, alimtalkEtcJson,
+      // ★ 2026-06-04: worker가 발송 직전 정제 시 사용자 선택(중복/수신거부 제거)을 반영하도록 send_config로 전달.
+      dedupEnabled, unsubFilterEnabled,
     };
     const campaignResult = await query(
       `INSERT INTO campaigns (company_id, campaign_name, message_type, message_content, subject, callback_number, target_count, send_type, status, scheduled_at, message_template, message_subject, created_by, is_ad, send_channel, staging_id, send_phase, processed_count, send_config, kakao_template_id, mms_image_paths, created_at)
@@ -2002,13 +2048,22 @@ router.post('/direct-send', async (req: Request, res: Response) => {
         for (const [k, v] of Object.entries(extraVars)) {
           finalMessage = finalMessage.replace(new RegExp(`#\\{${k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\}`, 'g'), v);
         }
+        // ★ 대체문구(k_next_contents)도 본문과 동일 치환 — raw 발송 시 #{변수} 노출 차단. (%변수% + #{} 변수맵)
+        let finalNextContents: string | undefined;
+        if ((alimtalkNextType === 'A' || alimtalkNextType === 'B') && alimtalkNextContents) {
+          const ncBase = replaceVariables(alimtalkNextContents, dbAlimCustomer, directFieldMappings, {
+            name: recipient.name, extra1: recipient.extra1, extra2: recipient.extra2,
+            extra3: recipient.extra3, callback: recipient.callback,
+          }, { skipNumberFormatting: true });
+          finalNextContents = fillAlimtalkVarMap(ncBase, alimtalkVariableMap, dbAlimCustomer, recipient);
+        }
         return {
           phone: normalizePhone(recipient.phone),
           callback: normalizePhone(callback),
           message: finalMessage,
           templateCode: alimtalkTemplateCode,
           nextType: alimtalkNextType || 'L',
-          nextContents: (alimtalkNextType === 'A' || alimtalkNextType === 'B') ? (alimtalkNextContents || '') : undefined,
+          nextContents: finalNextContents,
           // ★ D225+ (2026-05-28 영업팀장 박성용 신고 재발 fix): alimtalkNextSubject → QTmsg title_str 매핑 누락 정정.
           //   옛 D224+ fix = destructure + 검증만. 실제 QTmsg INSERT 시 titleStr 영역 누락 = title_str NULL.
           //   결과 = 알림톡 발송 실패 후 LMS 자동 대체 발송 시 = 제목 NULL = 통신사 검증 실패 = 미수신 사고.

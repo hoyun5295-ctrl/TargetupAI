@@ -25,3 +25,44 @@ export function findUnfilledAlimtalkVars(
   }
   return unfilled;
 }
+
+/**
+ * 알림톡 #{변수} 치환 컨트롤타워.
+ *   variableMap = { '#{name}': '@@필드키@@' | '직접 입력값' }
+ *   - '@@필드키@@' → primary → primary.custom_fields → secondary → secondary.custom_fields 순으로
+ *     값이 있는(공백 아닌) 첫 소스를 사용하고, 없으면 빈 문자(변수 노출 방지).
+ *   - 그 외 문자열 → 직접 입력값 그대로.
+ * journey-executor의 replaceAlimtalkVars(고객 1-소스)와 같은 규칙 + 직접발송용 2-소스(고객+주소록) fallback.
+ * 알림톡 실패 시 대체문구(k_next_contents)가 raw로 나가 #{변수}가 노출되던 문제의 4경로 통합 fix에 사용.
+ */
+export function fillAlimtalkVarMap(
+  content: string,
+  variableMap: Record<string, string> | null | undefined,
+  primary: Record<string, any> | null,
+  secondary?: Record<string, any> | null,
+): string {
+  if (!content) return '';
+  const resolveField = (fieldKey: string): string => {
+    const sources: Array<Record<string, any> | null | undefined> = [
+      primary,
+      primary?.custom_fields,
+      secondary,
+      secondary?.custom_fields,
+    ];
+    for (const src of sources) {
+      if (src && typeof src === 'object' && fieldKey in src) {
+        const cv = src[fieldKey];
+        if (cv != null && String(cv).trim() !== '') return String(cv);
+      }
+    }
+    return '';
+  };
+  let out = content;
+  for (const [rawKey, rawVal] of Object.entries(variableMap || {})) {
+    const escapedKey = rawKey.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const v = typeof rawVal === 'string' ? rawVal : String(rawVal ?? '');
+    const replacement = (v.startsWith('@@') && v.endsWith('@@')) ? resolveField(v.slice(2, -2)) : (v || '');
+    out = out.replace(new RegExp(escapedKey, 'g'), replacement);
+  }
+  return out;
+}

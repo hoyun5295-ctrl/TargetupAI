@@ -26,6 +26,7 @@
  */
 
 import { query } from '../config/database';
+import { applyVariableDefaults } from './journey-builder';
 
 // ════════════════════════════════════════════════════════════════════
 // 타입
@@ -494,7 +495,7 @@ export async function createJourneyStepVariant(input: {
     [
       input.stepId,
       input.variantId.slice(0, 8),
-      input.messageTemplate?.slice(0, 2000) || null,
+      input.messageTemplate != null ? applyVariableDefaults(input.messageTemplate.slice(0, 2000)) : null,
       input.subject?.slice(0, 50) || null,
       input.channel || null,
       input.alimtalkTemplateCode || null,

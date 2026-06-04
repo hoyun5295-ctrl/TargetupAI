@@ -182,13 +182,14 @@ export async function enqueueSpamTest(params: SpamTestEnqueueParams): Promise<Sp
     const testResult = await query(
       `INSERT INTO spam_filter_tests
        (company_id, user_id, callback_number, message_content_sms, message_content_lms,
-        message_hash, spam_check_number, status, source, variant_id, batch_id, subject)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, 'queued', $8, $9, $10, $11)
+        message_hash, spam_check_number, status, source, variant_id, batch_id, subject, first_recipient)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, 'queued', $8, $9, $10, $11, $12)
        RETURNING id, created_at`,
       [companyId, userId, callbackNumber,
        messageContentSms || null, messageContentLms || null,
        messageHash || null, spamCheckNumber,
-       source, variantId || null, batchId || null, subject || null]
+       source, variantId || null, batchId || null, subject || null,
+       firstCustomer && Object.keys(firstCustomer).length > 0 ? JSON.stringify(firstCustomer) : null]
     );
     const testId = testResult.rows[0].id;
 
@@ -223,6 +224,12 @@ export async function enqueueSpamTest(params: SpamTestEnqueueParams): Promise<Sp
 
     return { ok: true, testId };
   } catch (err: any) {
+    const msg = err?.message || '';
+    // ★ db_alter_safety_net: first_recipient 컬럼 미생성(ALTER 누락) 시 500 대신 친화 안내.
+    if (msg.includes('column') && msg.includes('does not exist')) {
+      console.log('[SpamTestQueue] DB 마이그레이션 필요 — spam_filter_tests.first_recipient ALTER 요청:', msg);
+      return { ok: false, error: 'DB 마이그레이션 필요 — 운영자에게 spam_filter_tests 컬럼 추가를 요청하세요', errorCode: 'DB_MIGRATION_PENDING' };
+    }
     console.log('[SpamTestQueue] 큐 등록 오류(상세):', err?.message || err);
     return { ok: false, error: `스팸 테스트 큐 등록 오류: ${err?.message || '알 수 없는 오류'}` };
   }
@@ -316,13 +323,20 @@ async function executeSpamTest(testId: string, isAuto: boolean): Promise<void> {
     const fieldMappings = extractVarCatalog(test.customer_schema).fieldMappings;
     await enrichWithCustomFields(fieldMappings, test.company_id);
 
-    const mappingCols = Object.values(fieldMappings).filter((m: any) => m.storageType !== 'custom_fields').map((m: any) => m.column);
-    const selectCols = [...new Set(['phone', 'custom_fields', ...mappingCols])].join(', ');
-    const firstResult = await query(
-      `SELECT ${selectCols} FROM customers WHERE company_id = $1 AND is_active = true AND sms_opt_in = true ORDER BY created_at DESC LIMIT 1`,
-      [test.company_id]
-    );
-    const firstCustomer = firstResult.rows[0] || {};
+    // ★ enqueue 시점 첫 고객(해시·미리보기 기준)을 그대로 재사용 — 발송 본문이 해시·미리보기와 일치.
+    //   과거 레코드(first_recipient 컬럼 도입 전)는 enqueue와 같은 name ASC NULLS LAST fallback으로 정렬 통일.
+    let firstCustomer: Record<string, any>;
+    if (test.first_recipient && typeof test.first_recipient === 'object' && Object.keys(test.first_recipient).length > 0) {
+      firstCustomer = test.first_recipient;
+    } else {
+      const mappingCols = Object.values(fieldMappings).filter((m: any) => m.storageType !== 'custom_fields').map((m: any) => m.column);
+      const selectCols = [...new Set(['phone', 'custom_fields', ...mappingCols])].join(', ');
+      const firstResult = await query(
+        `SELECT ${selectCols} FROM customers WHERE company_id = $1 AND is_active = true AND sms_opt_in = true ORDER BY name ASC NULLS LAST LIMIT 1`,
+        [test.company_id]
+      );
+      firstCustomer = firstResult.rows[0] || {};
+    }
 
     // 미발송 결과 행 조회
     const resultRows = await query(

@@ -11,6 +11,7 @@
 import { query } from '../config/database';
 import { normalizePhone } from './normalize-phone';
 import { prepareSendMessage, replaceVariables } from './messageUtils';
+import { fillAlimtalkVarMap } from './alimtalk-vars';
 import { bulkInsertSmsQueue, insertKakaoQueue, insertAlimtalkQueue, toQtmsgType } from './sms-queue';
 import { normalizeMmsImagePaths } from './mms-image-util';
 import { resolveCustomerCallback } from './callback-filter';
@@ -199,13 +200,22 @@ export async function processSendChunk(p: SendChunkParams): Promise<SendChunkRes
           new RegExp(`#\\{${k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\}`, 'g'), v
         );
       }
+      // ★ 대체문구(k_next_contents)도 본문과 동일 치환 — raw 발송 시 #{변수} 노출 차단.
+      let finalNextContents: string | undefined;
+      if ((p.alimtalkNextType === 'A' || p.alimtalkNextType === 'B') && p.alimtalkNextContents) {
+        const ncBase = replaceVariables(
+          p.alimtalkNextContents, dbCustomer, p.directFieldMappings,
+          toAddressBookFields(recipient), { skipNumberFormatting: true }
+        );
+        finalNextContents = fillAlimtalkVarMap(ncBase, p.alimtalkVariableMap, dbCustomer, recipient as Record<string, any>);
+      }
       return {
         phone: cleanPhone,
         callback: normalizePhone(p.callback),
         message: finalMessage,
         templateCode: p.alimtalkTemplateCode as string,
         nextType: p.alimtalkNextType || 'L',
-        nextContents: (p.alimtalkNextType === 'A' || p.alimtalkNextType === 'B') ? (p.alimtalkNextContents || '') : undefined,
+        nextContents: finalNextContents,
         titleStr: (p.alimtalkNextType === 'L' || p.alimtalkNextType === 'B') ? (p.alimtalkNextSubject || '') : undefined,
         buttonJson: p.alimtalkButtonJson || undefined,
         etcJson: p.alimtalkEtcJson || undefined,
