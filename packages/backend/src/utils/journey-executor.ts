@@ -48,8 +48,9 @@ import { getCompanyCosts } from '../config/defaults';
 import { sanitizeForSms } from './message-sanitizer';
 import { shortenUrlsInText } from './short-url';
 import { autoPauseExecution } from './journey-pause-handler';
-import { shiftToSendableHour } from './send-time-util';
+import { calculateNextRunAt } from './send-time-util';
 import { getOrCreateStepCampaign, bumpStepCampaignCount } from './journey-step-campaign';
+import { evaluateCustomerFieldCondition, type ConditionOutcome } from './journey-condition';
 
 // ════════════════════════════════════════════════════════════════════
 // 타입
@@ -277,23 +278,27 @@ async function processExecution(exec: ExecutionRow): Promise<StepOutcome> {
       return 'skipped_no_customer';
     }
     const condCustomer = condCustRes.rows[0];
-    // ★ D210+ Phase 3 (2026-05-23 Harold 명시): evaluateCondition async 변환 — 신규 type 'cdp_event_exists' / 'journey_step_clicked' 영역은 DB SELECT 의무
-    const passed = await evaluateCondition(step.condition_jsonb, condCustomer, exec.execution_id, exec.company_id);
-    if (passed) {
+    // ★ D210+ Phase 3 + Phase 7 (2026-06-04): evaluateCondition 3분기 — met(다음 step) / not_met(종료) / error(보류·재시도).
+    //   "조건을 확인 못 함"은 "보내도 됨"이 아니다. DB 오류는 발송이 아니라 재시도/정지로 받는다.
+    const outcome = await evaluateCondition(step.condition_jsonb, condCustomer, exec.execution_id, exec.company_id);
+    if (outcome === 'met') {
       await logSkippedStep(exec.execution_id, step.id, 'condition_passed');
       await advanceOrComplete(exec, step, 0);
       return 'condition_passed';
-    } else {
-      // 조건 미만족 → execution 종료 (Phase 2-B-1 단순 매트릭스 — 분기 step은 Phase 2-B-2)
-      await query(
-        `UPDATE journey_executions SET status = 'ended', completed_at = NOW(), current_step_order = $2
-         WHERE id = $1::uuid`,
-        [exec.execution_id, step.step_order]
-      );
-      await logSkippedStep(exec.execution_id, step.id, 'condition_failed_ended');
-      console.log(`[JourneyExecutor] execution=${exec.execution_id} step=${step.step_order} condition 미만족 → ended`);
-      return 'condition_failed';
     }
+    if (outcome === 'error') {
+      // 조건 DB 평가 실패 → 발송 보류 + 재시도 (발송 실패 흐름과 동일 — error_count<1 재시도, 넘으면 정지).
+      return await handleConditionEvalError(exec, step);
+    }
+    // not_met → execution 종료 (조건 확정 미충족 — 현 동작 보존)
+    await query(
+      `UPDATE journey_executions SET status = 'ended', completed_at = NOW(), current_step_order = $2
+       WHERE id = $1::uuid`,
+      [exec.execution_id, step.step_order]
+    );
+    await logSkippedStep(exec.execution_id, step.id, 'condition_failed_ended');
+    console.log(`[JourneyExecutor] execution=${exec.execution_id} step=${step.step_order} condition 미충족 → ended`);
+    return 'condition_failed';
   }
 
   // ──────────── message step (기존 흐름) ────────────
@@ -872,76 +877,7 @@ async function advanceOrComplete(exec: ExecutionRow, currentStep: StepRow, added
   }
 }
 
-/**
- * ★ D210+ Phase 3 (2026-05-23 Harold 명시): wait step KST 시간대 영역 계산 헬퍼
- *
- * delay_mode 3 영역:
- *   - 'relative'           = NOW() + delay_hours (옛 매트릭스)
- *   - 'specific_hour'      = 오늘/내일 target_hour_kst 영역 KST (오늘 영역 안 지난 영역 = 오늘 / 지난 영역 = 내일)
- *   - 'next_business_day'  = 다음 평일 (월~금) 09시 KST (단순 매트릭스 — 한국 공휴일 영역 X)
- *
- * KST 계산 매트릭스 (UTC+9):
- *   - KST 영역 = UTC + 9시간 = JS Date 영역 안 UTC 함수 활용 정합
- *   - 예: KST 오전 9시 = UTC 0시 (그 전날 09시 영역 UTC)
- */
-function calculateNextRunAt(
-  delayMode: string,
-  delayHours: number,
-  targetHourKst: number | null,
-): Date {
-  const now = new Date();
-
-  // 'relative' = 옛 매트릭스 (default)
-  if (delayMode === 'relative' || !delayMode) {
-    return shiftToSendableHour(new Date(now.getTime() + delayHours * 60 * 60 * 1000));
-  }
-
-  // 'specific_hour' = 오늘/내일 target_hour_kst 영역 KST
-  if (delayMode === 'specific_hour' && targetHourKst !== null) {
-    const targetHour = Math.max(0, Math.min(23, targetHourKst));
-    // KST 현재 영역 = UTC + 9
-    const kstNow = new Date(now.getTime() + 9 * 60 * 60 * 1000);
-    const kstYear = kstNow.getUTCFullYear();
-    const kstMonth = kstNow.getUTCMonth();
-    const kstDate = kstNow.getUTCDate();
-    const kstHour = kstNow.getUTCHours();
-
-    // KST 영역 target 시간 영역 = UTC 영역 (target - 9) (음수 시 그 전날)
-    let daysToAdd = 0;
-    if (kstHour >= targetHour) {
-      // 오늘 target 영역 이미 지난 영역 → 내일
-      daysToAdd = 1;
-    }
-    // KST 영역 (kstYear, kstMonth, kstDate + daysToAdd) 영역 targetHour 시 = UTC 영역 (targetHour - 9) 시
-    // 단순 매트릭스 — UTC 영역 직접 계산
-    const utcTargetMs = Date.UTC(kstYear, kstMonth, kstDate + daysToAdd, targetHour - 9, 0, 0);
-    return shiftToSendableHour(new Date(utcTargetMs));
-  }
-
-  // 'next_business_day' = 다음 평일 (월~금) 09시 KST
-  if (delayMode === 'next_business_day') {
-    const kstNow = new Date(now.getTime() + 9 * 60 * 60 * 1000);
-    const kstYear = kstNow.getUTCFullYear();
-    const kstMonth = kstNow.getUTCMonth();
-    const kstDate = kstNow.getUTCDate();
-    const kstHour = kstNow.getUTCHours();
-    const kstDayOfWeek = kstNow.getUTCDay();  // 0=일 ~ 6=토
-
-    let daysToAdd: number;
-    if (kstDayOfWeek === 0) daysToAdd = 1;          // 일 → 월
-    else if (kstDayOfWeek === 6) daysToAdd = 2;     // 토 → 월
-    else if (kstDayOfWeek === 5 && kstHour >= 9) daysToAdd = 3;  // 금 09시 이후 → 월
-    else if (kstHour >= 9) daysToAdd = 1;           // 평일 09시 이후 → 내일
-    else daysToAdd = 0;                              // 평일 09시 이전 → 오늘
-
-    // KST 영역 다음 평일 09시 = UTC 0시 (= 그 전날 00시 UTC + 24h = 다음날 00시 UTC)
-    const utcTargetMs = Date.UTC(kstYear, kstMonth, kstDate + daysToAdd, 9 - 9, 0, 0);  // 9-9=0 (KST 09시 = UTC 00시)
-    return shiftToSendableHour(new Date(utcTargetMs));
-  }
-
-  // fallback = relative
-  return shiftToSendableHour(new Date(now.getTime() + delayHours * 60 * 60 * 1000));
-}
+// calculateNextRunAt — send-time-util.ts CT로 이동(Phase 6A). advanceOrComplete·trigger-watcher가 거기서 import해 공유.
 
 async function markExecutionCompleted(executionId: string, journeyId: string): Promise<void> {
   await query(
@@ -988,20 +924,64 @@ async function logFailedStep(executionId: string, stepId: string, reason: string
 }
 
 // ════════════════════════════════════════════════════════════════════
-// ★ D188 Phase 2-B-1 (2026-05-21) + D210+ Phase 3 (2026-05-23 Harold 명시): evaluateCondition — condition step 평가 함수
+// ★ Phase 7 (2026-06-04): 조건 평가 DB 오류 → 발송 보류 + 재시도/정지.
+//   발송 실패 재시도(processExecution queue catch)와 동일 흐름 — error_count<1이면 5분 뒤 재평가,
+//   넘으면 autoPauseExecution + pauseJourney. 조건을 확인 못 했으므로 종료(ended)도 전진(advance)도 하지 않는다.
+//   사용 컬럼 전부 기존 운영 컬럼(error_count·last_error_at·error_log·next_run_at) — 신규 컬럼 0.
+// ════════════════════════════════════════════════════════════════════
+async function handleConditionEvalError(exec: ExecutionRow, step: StepRow): Promise<StepOutcome> {
+  try {
+    const ecRes = await query(
+      `SELECT COALESCE(error_count, 0) AS ec FROM journey_executions WHERE id = $1::uuid`,
+      [exec.execution_id]
+    );
+    const errorCount = Number(ecRes.rows[0]?.ec || 0);
+    if (errorCount < 1) {
+      // 1회 자동 재평가 — 5분 후. 발송 안 함.
+      const errorLogEntry = JSON.stringify([
+        { at: new Date().toISOString(), reason: 'condition_eval_db_error', step_order: step.step_order },
+      ]);
+      await query(
+        `UPDATE journey_executions SET
+           next_run_at = NOW() + INTERVAL '5 minutes',
+           error_count = COALESCE(error_count, 0) + 1,
+           last_error_at = NOW(),
+           error_log = COALESCE(error_log, '[]'::jsonb) || $2::jsonb
+         WHERE id = $1::uuid`,
+        [exec.execution_id, errorLogEntry]
+      );
+      await logFailedStep(exec.execution_id, step.id, 'condition_eval_db_error_retry_scheduled');
+      console.log(`[JourneyExecutor] execution=${exec.execution_id} step=${step.step_order} 조건 DB 평가 실패 → 5분 후 재평가 (error_count=${errorCount + 1})`);
+      return 'failed';
+    }
+    // 재평가 1회 후에도 실패 → 발송 안 하고 정지 + 담당자 안내 (pauseReason은 기존 값 재사용).
+    await autoPauseExecution({
+      companyId: exec.company_id,
+      journeyId: exec.journey_id,
+      stepId: step.id,
+      executionId: exec.execution_id,
+      pauseReason: 'auto_retry_exhausted',
+      pauseTriggerSource: 'condition_eval_db_error',
+    });
+    await pauseJourney(exec.journey_id, '조건 평가 DB 오류 (자동 재시도 후에도 실패)');
+  } catch (retryErr: any) {
+    console.warn('[JourneyExecutor] 조건 평가 재시도 분기 처리 실패 (skip):', retryErr?.message);
+  }
+  await logFailedStep(exec.execution_id, step.id, 'condition_eval_db_error');
+  return 'failed';
+}
+
+// ════════════════════════════════════════════════════════════════════
+// evaluateCondition — condition step 평가 (D188 Phase 2-B-1 + D210+ Phase 3 + Phase 7 안전 분기)
 //
-// 지원 type 3건:
-//   1. customer_field — { "type": "customer_field", "field": "<컬럼명>", "operator": "<연산자>", "value": <값> }
-//      · 9 operator: ==, !=, >=, <=, >, <, in, not_in, is_null, not_null
-//      · 지원 필드: customers 테이블 컬럼 + custom_fields JSONB 영역
-//   2. cdp_event_exists — { "type": "cdp_event_exists", "event_name": "<이벤트명>", "within_days": <N>, "presence": "exists"|"not_exists" }
-//      · 본질: 지난 N일 안 특정 이벤트 영역 EXISTS 여부 (예: "지난 7일 안 'purchase' 이벤트 0건 영역" → 리마인드 발송 정합)
-//      · 사용 영역: cdp_events 테이블 + 회사 격리 의무
-//   3. journey_step_clicked — { "type": "journey_step_clicked", "step_order": <N>, "within_days": <N>, "clicked": true|false }
-//      · 본질: 옛 step N 발송 후 within_days 안 클릭 영역 EXISTS 여부 (예: "Step 1 발송 후 5일 안 클릭 X 영역" → 재시도 정합)
-//      · 사용 영역: journey_step_logs + cdp_events (event_name='message_click') 매트릭스
+// 지원 type 3종:
+//   1. customer_field   — { field, operator(== != >= <= > < in not_in is_null not_null), value }. customers 컬럼 + custom_fields fallback. (CT journey-condition.ts 순수 평가)
+//   2. cdp_event_exists — { event_name, within_days, presence: exists|not_exists }. 지난 N일 이벤트 EXISTS 여부 (cdp_events, 회사 격리).
+//   3. journey_step_clicked — { step_order, within_days, clicked }. 직전 step 발송 후 클릭 EXISTS 여부 (journey_step_logs + cdp_events message_click).
 //
-// 잘못된 형식 / 미지원 type / 미지원 operator = default pass (true) — activateJourney에서 사전 검증 정합.
+// ★ Phase 7 (2026-06-04): 반환 'met' | 'not_met' | 'error'.
+//   확인 불가(null · 미지원 type · 미지원 operator · 빈 field · 빈 event_name) = not_met → 발송 안 함.
+//   DB 평가 오류(cdp / clicked) = error → 호출부가 발송 보류 + 재시도. 활성화 형식검증(activateJourney)은 그대로 유지.
 // ════════════════════════════════════════════════════════════════════
 
 async function evaluateCondition(
@@ -1009,73 +989,41 @@ async function evaluateCondition(
   customer: Record<string, any>,
   executionId: string,
   companyId: string,
-): Promise<boolean> {
-  if (!condJsonb || typeof condJsonb !== 'object') return true;
+): Promise<ConditionOutcome> {
+  // ★ Phase 7 (2026-06-04): 확인 불가 = 미충족(발송 안 함). DB 평가 오류 = error(보류).
+  if (!condJsonb || typeof condJsonb !== 'object') return 'not_met';
 
   const type = String(condJsonb.type || '');
 
-  // 1. customer_field — 옛 매트릭스 (sync 영역 매트릭스)
+  // 1. customer_field — 순수 평가 (CT journey-condition).
   if (type === 'customer_field') {
-    return evaluateCustomerFieldCondition(condJsonb, customer);
+    return evaluateCustomerFieldCondition(condJsonb, customer) ? 'met' : 'not_met';
   }
 
-  // 2. cdp_event_exists — 신규 (D210+ Phase 3)
+  // 2. cdp_event_exists — DB SELECT. 오류 시 발송 안 하고 보류(error).
   if (type === 'cdp_event_exists') {
     try {
-      return await evaluateCdpEventExistsCondition(condJsonb, customer.id, companyId);
+      const matched = await evaluateCdpEventExistsCondition(condJsonb, customer.id, companyId);
+      return matched ? 'met' : 'not_met';
     } catch (err: any) {
-      console.warn('[Journey condition] cdp_event_exists 평가 오류, default pass:', err?.message);
-      return true;
+      console.error('[Journey condition] cdp_event_exists 평가 DB 오류 → 발송 보류(재시도):', err?.message);
+      return 'error';
     }
   }
 
-  // 3. journey_step_clicked — 신규 (D210+ Phase 3)
+  // 3. journey_step_clicked — DB SELECT. 오류 시 발송 안 하고 보류(error).
   if (type === 'journey_step_clicked') {
     try {
-      return await evaluateJourneyStepClickedCondition(condJsonb, executionId);
+      const matched = await evaluateJourneyStepClickedCondition(condJsonb, executionId);
+      return matched ? 'met' : 'not_met';
     } catch (err: any) {
-      console.warn('[Journey condition] journey_step_clicked 평가 오류, default pass:', err?.message);
-      return true;
+      console.error('[Journey condition] journey_step_clicked 평가 DB 오류 → 발송 보류(재시도):', err?.message);
+      return 'error';
     }
   }
 
-  return true;
-}
-
-/**
- * type='customer_field' 평가 (옛 D188 매트릭스 — sync 영역).
- * customer 영역 = 직접 컬럼 우선 / fallback custom_fields JSONB.
- */
-function evaluateCustomerFieldCondition(
-  condJsonb: Record<string, unknown>,
-  customer: Record<string, any>,
-): boolean {
-  const field = String(condJsonb.field || '');
-  const operator = String(condJsonb.operator || '');
-  const value = (condJsonb as any).value;
-
-  if (!field) return true;
-
-  let cv: any = null;
-  if (field in customer) {
-    cv = customer[field];
-  } else if (customer.custom_fields && typeof customer.custom_fields === 'object' && field in customer.custom_fields) {
-    cv = customer.custom_fields[field];
-  }
-
-  switch (operator) {
-    case '==':       return String(cv ?? '') === String(value ?? '');
-    case '!=':       return String(cv ?? '') !== String(value ?? '');
-    case '>=':       return Number(cv) >= Number(value);
-    case '<=':       return Number(cv) <= Number(value);
-    case '>':        return Number(cv) > Number(value);
-    case '<':        return Number(cv) < Number(value);
-    case 'in':       return Array.isArray(value) && value.map((v) => String(v)).includes(String(cv ?? ''));
-    case 'not_in':   return Array.isArray(value) && !value.map((v) => String(v)).includes(String(cv ?? ''));
-    case 'is_null':  return cv == null || cv === '';
-    case 'not_null': return cv != null && cv !== '';
-    default:         return true;
-  }
+  // 미지원 type — 발송 안 함.
+  return 'not_met';
 }
 
 /**
@@ -1094,7 +1042,7 @@ async function evaluateCdpEventExistsCondition(
   const withinDays = Math.max(1, Math.min(365, Number(condJsonb.within_days) || 7));
   const presence = String(condJsonb.presence || 'exists');
 
-  if (!eventName) return true;
+  if (!eventName) return false;  // Phase 7: 빈 event_name = 확인 불가 = 미충족(발송 안 함)
 
   const r = await query(
     `SELECT EXISTS (

@@ -59,3 +59,57 @@ export function shiftToSendableHour(
   const addDay = kstHour >= endHour ? 1 : 0; // endHour 이후 = 익일 / 새벽 = 당일
   return new Date(Date.UTC(y, m, d + addDay, ARRIVE_HOUR - 9, 0, 0)); // KST 09시 = UTC 00시
 }
+
+/**
+ * 여정 step 발송 시각 계산 — delay_mode 3종 + 야간가드.
+ *   - 'relative'          = now + delay_hours (default)
+ *   - 'specific_hour'     = 오늘/내일 target_hour_kst 시 KST (오늘 시각이 지났으면 내일)
+ *   - 'next_business_day' = 다음 평일(월~금) 09시 KST (공휴일 미반영)
+ * 전부 shiftToSendableHour로 야간(발송 불가 시간)을 09시 KST로 밀어 광고 새벽 발송을 막는다.
+ * now는 테스트 주입용 — 미지정 시 현재 시각. KST(UTC+9) 기준.
+ */
+export function calculateNextRunAt(
+  delayMode: string,
+  delayHours: number,
+  targetHourKst: number | null,
+  now: Date = new Date(),
+): Date {
+  // 'relative' (default)
+  if (delayMode === 'relative' || !delayMode) {
+    return shiftToSendableHour(new Date(now.getTime() + delayHours * 60 * 60 * 1000));
+  }
+
+  // 'specific_hour' = 오늘/내일 target_hour_kst 시 KST
+  if (delayMode === 'specific_hour' && targetHourKst !== null) {
+    const targetHour = Math.max(0, Math.min(23, targetHourKst));
+    const kstNow = new Date(now.getTime() + 9 * 60 * 60 * 1000);
+    const kstYear = kstNow.getUTCFullYear();
+    const kstMonth = kstNow.getUTCMonth();
+    const kstDate = kstNow.getUTCDate();
+    const kstHour = kstNow.getUTCHours();
+    const daysToAdd = kstHour >= targetHour ? 1 : 0; // 오늘 시각이 지났으면 내일
+    const utcTargetMs = Date.UTC(kstYear, kstMonth, kstDate + daysToAdd, targetHour - 9, 0, 0);
+    return shiftToSendableHour(new Date(utcTargetMs));
+  }
+
+  // 'next_business_day' = 다음 평일(월~금) 09시 KST
+  if (delayMode === 'next_business_day') {
+    const kstNow = new Date(now.getTime() + 9 * 60 * 60 * 1000);
+    const kstYear = kstNow.getUTCFullYear();
+    const kstMonth = kstNow.getUTCMonth();
+    const kstDate = kstNow.getUTCDate();
+    const kstHour = kstNow.getUTCHours();
+    const kstDayOfWeek = kstNow.getUTCDay(); // 0=일 ~ 6=토
+    let daysToAdd: number;
+    if (kstDayOfWeek === 0) daysToAdd = 1; // 일 → 월
+    else if (kstDayOfWeek === 6) daysToAdd = 2; // 토 → 월
+    else if (kstDayOfWeek === 5 && kstHour >= 9) daysToAdd = 3; // 금 09시 이후 → 월
+    else if (kstHour >= 9) daysToAdd = 1; // 평일 09시 이후 → 내일
+    else daysToAdd = 0; // 평일 09시 이전 → 오늘
+    const utcTargetMs = Date.UTC(kstYear, kstMonth, kstDate + daysToAdd, 0, 0, 0); // KST 09시 = UTC 00시
+    return shiftToSendableHour(new Date(utcTargetMs));
+  }
+
+  // fallback = relative (미지원 mode)
+  return shiftToSendableHour(new Date(now.getTime() + delayHours * 60 * 60 * 1000));
+}

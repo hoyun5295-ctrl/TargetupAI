@@ -19,6 +19,7 @@
 import { query } from '../config/database';
 import { applyCustomerConditions } from './journey-simulator';
 import { buildJourneySafetyFilter } from './journey-safety-filter';
+import { resolvePointsExpiringConfig } from './journey-points-trigger';
 import { buildLedgerAntiJoin, hasBaseline } from './journey-entry-ledger';
 
 export async function selectJourneyTargetCustomerIds(
@@ -140,6 +141,36 @@ export async function selectJourneyTargetCustomerIds(
              (c.birth_date IS NOT NULL AND TO_CHAR(c.birth_date, 'MM-DD') = TO_CHAR((CURRENT_DATE + ($2 || ' days')::interval), 'MM-DD'))
            )
            ${cond ? ` AND ${cond}` : ''}
+         LIMIT $${params.length}::int`,
+        params,
+      );
+      return r.rows.map((x: any) => x.customer_id);
+    }
+
+    // 8. 포인트 소멸 임박 (Phase 8): points 임계 + (미사용 또는 연 단위 소멸일 D-N). 둘 다 공통 안전필터.
+    case 'customer.points_expiring': {
+      const cfg = resolvePointsExpiringConfig(filters);
+      const params: any[] = [companyId, String(cfg.pointsMin)];
+      let edgeClause: string;
+      if (cfg.mode === 'annual_date') {
+        if (!cfg.expiryMonthDay) return [];  // 소멸일 미설정 = 발송 0 (안전)
+        params.push(String(cfg.daysBefore));   // $3
+        params.push(cfg.expiryMonthDay);       // $4
+        edgeClause = `TO_CHAR((CURRENT_DATE + ($3 || ' days')::interval), 'MM-DD') = $4`;
+      } else {
+        params.push(String(cfg.inactiveDays));  // $3
+        edgeClause = `(c.recent_purchase_date IS NULL OR c.recent_purchase_date < (CURRENT_DATE - ($3 || ' days')::interval))`;
+      }
+      const cond = applyCustomerConditions(filters.customer_conditions || [], filters.logic || 'AND', params);
+      params.push(String(limit));
+      const r = await query(
+        `SELECT id AS customer_id FROM customers c
+         WHERE c.company_id = $1::uuid
+           AND ${buildJourneySafetyFilter('c')}
+           AND c.points IS NOT NULL AND c.points >= $2::int
+           AND ${edgeClause}
+           ${cond ? ` AND ${cond}` : ''}
+         ORDER BY c.points DESC
          LIMIT $${params.length}::int`,
         params,
       );

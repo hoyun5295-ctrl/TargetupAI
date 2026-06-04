@@ -142,58 +142,40 @@ export async function validateJourneyForActivation(
         confidenceSum += 100;
         scoredCount += 1;
       } else if (step.channel === 'sms' || step.channel === 'lms' || step.channel === 'mms') {
-        // SMS/LMS/MMS = 스팸필터테스트 진행
-        try {
-          const batchId = randomUUID();
-          // 실제 발송(journey-executor prepareSendMessage)과 동일하게 (광고)+무료거부+제목 합성 후 검증.
-          const stMsgType = step.channel.toUpperCase() as 'SMS' | 'LMS' | 'MMS';
-          const stIsAd = step.is_ad !== false;
-          const adBody = buildAdMessage(msg.body, stMsgType, stIsAd, opt080);
-          const adSubject = buildAdSubject(step.subject || '', stMsgType, stIsAd);
-          const enqueueResult = await enqueueSpamTest({
-            companyId,
-            userId,
-            callbackNumber: step.callback_number || '',
-            messageContentSms: step.channel === 'sms' ? adBody : '',
-            messageContentLms: step.channel !== 'sms' ? adBody : '',
-            messageType: stMsgType,
-            subject: adSubject || undefined,
-            source: 'auto_ai',
-            variantId: msg.variantId || undefined,
-            batchId,
-            skipPrepaid: false,
-          });
-          if (!enqueueResult.ok) {
-            failedSteps.push({
-              stepId: step.step_id,
-              variantId: msg.variantId,
-              reason: 'spam_filter_failed',
-              details: `스팸필터 enqueue 실패 — ${enqueueResult.error || enqueueResult.errorCode || 'unknown'}`,
-            });
-            continue;
-          }
-
-          const spamScore = await pollSpamResult(batchId, 30000);
-          if (!spamScore.allPassed) {
-            failedSteps.push({
-              stepId: step.step_id,
-              variantId: msg.variantId,
-              reason: 'spam_filter_failed',
-              details: `통신사 차단: ${spamScore.failedCarriers.join(', ')}`,
-              matchedStopWords: spamScore.matchedStopWords,
-            });
-            continue;
-          }
-          confidenceSum += spamScore.score;
-          scoredCount += 1;
-        } catch (err: any) {
+        // SMS/LMS/MMS = 스팸필터테스트 (공용 runStepSpamTest — 스캐너와 동일 경로)
+        const stIsAd = step.is_ad !== false;
+        const r = await runStepSpamTest({
+          companyId,
+          userId,
+          body: msg.body,
+          subject: step.subject,
+          channel: step.channel as 'sms' | 'lms' | 'mms',
+          isAd: stIsAd,
+          callbackNumber: step.callback_number || '',
+          opt080,
+          variantId: msg.variantId || undefined,
+        });
+        if (!r.enqueueOk) {
           failedSteps.push({
             stepId: step.step_id,
             variantId: msg.variantId,
             reason: 'spam_filter_failed',
-            details: `스팸필터 큐 일시 실패 — ${err?.message || 'unknown'}`,
+            details: `스팸필터 enqueue 실패 — ${r.error || 'unknown'}`,
           });
+          continue;
         }
+        if (!r.ok) {
+          failedSteps.push({
+            stepId: step.step_id,
+            variantId: msg.variantId,
+            reason: 'spam_filter_failed',
+            details: `통신사 차단: ${r.failedCarriers.join(', ')}`,
+            matchedStopWords: r.matchedStopWords,
+          });
+          continue;
+        }
+        confidenceSum += r.score;
+        scoredCount += 1;
       }
     }
   }
@@ -268,6 +250,65 @@ async function pollSpamResult(
     await new Promise((resolve) => setTimeout(resolve, 1000));
   }
   return { allPassed: false, failedCarriers: ['timeout'], matchedStopWords: [], score: 0 };
+}
+
+// ════════════════════════════════════════════════════════════════════
+// runStepSpamTest — 공용 스팸테스트 (활성화 검증 + Phase 6B 발송 2시간 전 스캐너 공유)
+//   (광고)+무료거부+제목 합성 후 enqueue + 결과 폴링. 실발송과 동일 본문 가공.
+// ════════════════════════════════════════════════════════════════════
+export interface StepSpamTestResult {
+  ok: boolean;            // 모든 통신사 통과
+  enqueueOk: boolean;     // enqueue 자체 성공 여부 (실패/예외면 false)
+  failedCarriers: string[];
+  matchedStopWords: string[];
+  score: number;
+  error?: string;
+}
+
+export async function runStepSpamTest(params: {
+  companyId: string;
+  userId: string;
+  body: string;
+  subject: string | null;
+  channel: 'sms' | 'lms' | 'mms';
+  isAd: boolean;
+  callbackNumber: string;
+  opt080: string;
+  variantId?: string;
+}): Promise<StepSpamTestResult> {
+  try {
+    const batchId = randomUUID();
+    const stMsgType = params.channel.toUpperCase() as 'SMS' | 'LMS' | 'MMS';
+    // 실제 발송(journey-executor prepareSendMessage)과 동일하게 (광고)+무료거부+제목 합성 후 검증.
+    const adBody = buildAdMessage(params.body, stMsgType, params.isAd, params.opt080);
+    const adSubject = buildAdSubject(params.subject || '', stMsgType, params.isAd);
+    const enqueueResult = await enqueueSpamTest({
+      companyId: params.companyId,
+      userId: params.userId,
+      callbackNumber: params.callbackNumber || '',
+      messageContentSms: params.channel === 'sms' ? adBody : '',
+      messageContentLms: params.channel !== 'sms' ? adBody : '',
+      messageType: stMsgType,
+      subject: adSubject || undefined,
+      source: 'auto_ai',
+      variantId: params.variantId || undefined,
+      batchId,
+      skipPrepaid: false,
+    });
+    if (!enqueueResult.ok) {
+      return { ok: false, enqueueOk: false, failedCarriers: [], matchedStopWords: [], score: 0, error: enqueueResult.error || enqueueResult.errorCode || 'enqueue_failed' };
+    }
+    const spamScore = await pollSpamResult(batchId, 30000);
+    return {
+      ok: spamScore.allPassed,
+      enqueueOk: true,
+      failedCarriers: spamScore.failedCarriers,
+      matchedStopWords: spamScore.matchedStopWords,
+      score: spamScore.score,
+    };
+  } catch (err: any) {
+    return { ok: false, enqueueOk: false, failedCarriers: [], matchedStopWords: [], score: 0, error: err?.message || 'spam_test_exception' };
+  }
 }
 
 async function estimateCost(

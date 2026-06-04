@@ -75,6 +75,14 @@ export interface StepRefineCandidate {
   reasoning: string;
 }
 
+export interface StepSpamRegenInput {
+  companyId: string;
+  currentMessage: string;
+  channel: 'sms' | 'lms' | 'mms';
+  isAd: boolean;
+  matchedStopWords: string[];  // 스팸 판정에 걸린 단어 — 이 표현을 피해 재작성
+}
+
 // ════════════════════════════════════════════════════════════════════
 // 시즌 컨텍스트 매트릭스 (KST 월 기준)
 // ════════════════════════════════════════════════════════════════════
@@ -662,4 +670,51 @@ ${memoryContext}
   });
 
   return { candidates };
+}
+
+// ════════════════════════════════════════════════════════════════════
+// 스팸필터 회피 재생성 — 걸린 step 문안을 1회 재작성 (Phase 6B)
+//   source 'journey-ai-refine' → callAIWithFallback가 1크레딧 자동 차감.
+//   혜택/숫자/약속/placeholder/Liquid는 그대로 보존 (거짓 혜택 생성 금지).
+// ════════════════════════════════════════════════════════════════════
+export async function regenerateStepAvoidingSpam(input: StepSpamRegenInput): Promise<string | null> {
+  if (!input.currentMessage || input.currentMessage.trim().length < 5) return null;
+
+  const ctx = await loadCompanyContext(input.companyId);
+  const maxBytes = input.channel === 'sms' ? 90 : 2000;
+  const avoid = (input.matchedStopWords || []).filter(Boolean).slice(0, 30);
+
+  let system = `당신은 한국 마케팅 문안을 통신사 스팸필터에 걸리지 않게 재작성하는 전문가입니다.
+회사 admin이 작성한 문안이 스팸필터에 걸렸습니다. 같은 의미·같은 정보를 유지하되, 걸린 표현만 자연스럽게 바꿔 1개 문안으로 재작성하세요.
+
+[회사]
+- 회사명: ${ctx.companyName}
+- 톤앤매너: ${ctx.brandTone || '친근함'}
+
+[절대 규칙]
+- 혜택(% / 원 / 무료 / 쿠폰 / 사은품 / 할인)·숫자·일시·장소·약속은 절대 바꾸거나 새로 만들지 말 것. 원본 그대로 유지.
+- [직접 작성해주세요] 같은 placeholder와 Liquid 문법({{ }}, {% %})은 정확히 보존.
+- 유니코드 이모지 금지 — SMS 호환 특수문자만.
+- 최대 ${maxBytes}바이트.
+
+[출력 — 다른 텍스트 없이 재작성된 문안만]`;
+
+  system = await buildSystemPromptWithBrandVoice(input.companyId, system);
+
+  const userMessage = `원본 문안:\n${input.currentMessage}\n\n스팸필터에 걸린 표현: ${avoid.length ? avoid.join(', ') : '(불명 — 광고성 과장·금지 표현 추정)'}\n\n위 표현을 피해 같은 의미로 1개 문안만 재작성하세요. 혜택·숫자·placeholder·Liquid는 그대로 두세요.`;
+
+  const text = await callAIWithFallback({
+    system,
+    userMessage,
+    maxTokens: 1500,
+    temperature: 0.5,
+    model: 'sonnet',
+    companyId: input.companyId,
+    source: 'journey-ai-refine',
+  });
+
+  const cleaned = String(text || '').trim();
+  if (!cleaned) return null;
+  const san = sanitizeForSms(cleaned.slice(0, maxBytes * 2));
+  return san.sanitized || null;
 }

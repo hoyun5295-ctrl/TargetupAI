@@ -136,6 +136,19 @@ export async function executePause(
 }
 
 /**
+ * 여정 전체 정지 (status='active' → 'paused'). 스팸 끝까지 걸린 step·잔액 부족 등 그 step 본문 자체가 문제일 때
+ *   모든 execution 발송을 한 번에 차단. 스캐너 등 외부 호출 공용 CT.
+ *   (journey-executor.ts 안 file-local pauseJourney와 동일 UPDATE — 컬럼은 journeys 실재 확인.)
+ */
+export async function pauseJourney(journeyId: string, reason: string): Promise<void> {
+  await query(
+    `UPDATE journeys SET status = 'paused', paused_at = NOW(), pause_reason = $2, updated_at = NOW()
+      WHERE id = $1::uuid AND status = 'active'`,
+    [journeyId, reason.slice(0, 500)],
+  );
+}
+
+/**
  * 자동 정지 (잔액 부족 / 통신사 fail 등 시스템 발화).
  * journey-executor.ts 안 실패 catch 영역에서 호출.
  */

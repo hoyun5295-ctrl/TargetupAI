@@ -28,6 +28,7 @@ export type JourneyTemplateCode =
   | 'onboarding'
   | 'repeat'
   | 'dormant'
+  | 'points_expiring'
   | 'cart'
   | 'birthday'
   | 'reservation'
@@ -153,6 +154,19 @@ export const JOURNEY_TEMPLATES: Record<JourneyTemplateCode, JourneyTemplate> = {
       { stepOrder: 1, stepType: 'message', delayHours: 0, channel: 'lms', isAd: true, messageTemplate: '%고객명%님, 오랜만에 인사드립니다.\n\n[안부 메시지와 회사가 제공할 혜택을 직접 작성해주세요]\n\n자세히 → [URL 입력]' },
       { stepOrder: 2, stepType: 'message', delayHours: 168, channel: 'lms', isAd: true, messageTemplate: '%고객명%님께 안내드립니다.\n\n[회복 안내 또는 회사가 제공할 혜택을 직접 작성해주세요]\n\n자세히 → [URL 입력]' },
       { stepOrder: 3, stepType: 'message', delayHours: 336, channel: 'lms', isAd: true, messageTemplate: '%고객명%님께 마지막 안내드립니다.\n\n[최종 안내 또는 회사가 제공할 혜택과 유효기간을 직접 작성해주세요]\n\n자세히 → [URL 입력]' },
+    ],
+  },
+  points_expiring: {
+    templateCode: 'points_expiring',
+    name: '포인트 소멸 임박',
+    description: '포인트 N점 이상 미사용 또는 연 소멸일 D-N 사용 독려 (2 step). N·일수·소멸일은 회사가 설정.',
+    triggerEvent: 'customer.points_expiring',
+    triggerFilters: { expiry_mode: 'inactivity', points_min: 0, inactive_days: 180 },
+    allowReentry: true,
+    reentryCooldownDays: 90,
+    steps: [
+      { stepOrder: 1, stepType: 'message', delayHours: 0, channel: 'lms', isAd: true, messageTemplate: '%고객명%님, 보유하신 포인트가 있어요.\n\n[포인트 사용 안내 또는 회사가 제공할 혜택을 직접 작성해주세요]\n\n자세히 → [URL 입력]' },
+      { stepOrder: 2, stepType: 'message', delayHours: 168, channel: 'lms', isAd: true, messageTemplate: '%고객명%님께 다시 안내드립니다.\n\n[포인트 소멸 전 사용 안내 또는 회사가 제공할 혜택과 유효기간을 직접 작성해주세요]\n\n자세히 → [URL 입력]' },
     ],
   },
   cart: {
@@ -670,16 +684,13 @@ export async function activateJourney(companyId: string, journeyId: string, user
     [journeyId, companyId, userId]
   );
 
-  // ★ D218+ (2026-05-26) 활성화 종결 직후 = snapshot 보존 + 알림 스케줄 INSERT 의무.
-  //   본문 변경 사고 차단 (활성화 시점 본문 = 발송 시점 본문 100% 동일 보장)
-  //   + 발송 2시간 전 담당자 LMS 자동 발송 스케줄.
+  // 활성화 종결 직후 = step snapshot 보존 (활성화 시점 본문 = 발송 시점 본문 동일 보장).
+  //   발송 2시간 전 스팸테스트·담당자 안내는 journey-pretest-notifier 스캐너가 실제 next_run_at 기준으로 처리(Phase 6B).
   if (r.rows.length > 0) {
     try {
       await createJourneyStepSnapshots(companyId, journeyId);
-      const { scheduleNotificationsForActivation } = await import('./journey-pretest-notifier');
-      await scheduleNotificationsForActivation(companyId, journeyId);
     } catch (err: any) {
-      console.warn('[activateJourney] D218+ snapshot/schedule 사고 (skip):', err?.message);
+      console.warn('[activateJourney] snapshot 생성 실패 (skip):', err?.message);
     }
     // ★ Phase 2: 신규가입(customer.created) 여정 첫 활성화 시 진입 원장 baseline 적재.
     //   그 시점 회사 전체 고객 식별자(회사+매장코드+전화번호)를 'baseline'으로 1회 → 이후 원장에 없는 식별자만 신규.
@@ -762,24 +773,15 @@ export async function createJourneyStepSnapshots(companyId: string, journeyId: s
 }
 
 /**
- * ★ D218+ (2026-05-26) 여정 재활성화 (일시 정지 → 활성).
- *   옛 paused → active + 알림 스케줄 재진행.
+ * 여정 재활성화 (일시 정지 → 활성).
+ *   발송 2시간 전 스팸테스트·담당자 안내는 journey-pretest-notifier 스캐너가 next_run_at 기준으로 처리(Phase 6B).
  */
 export async function resumeJourney(companyId: string, journeyId: string): Promise<void> {
-  const r = await query(
+  await query(
     `UPDATE journeys SET status = 'active', paused_at = NULL, pause_reason = NULL
-      WHERE id = $1 AND company_id = $2 AND status = 'paused'
-      RETURNING id`,
+      WHERE id = $1 AND company_id = $2 AND status = 'paused'`,
     [journeyId, companyId],
   );
-  if (r.rows.length > 0) {
-    try {
-      const { scheduleNotificationsForActivation } = await import('./journey-pretest-notifier');
-      await scheduleNotificationsForActivation(companyId, journeyId);
-    } catch (err: any) {
-      console.warn('[resumeJourney] D218+ schedule 사고 (skip):', err?.message);
-    }
-  }
 }
 
 // step 본문 갱신 (활성화 전 회사 admin이 직접 편집)

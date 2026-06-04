@@ -28,7 +28,7 @@ import { query, pool } from '../config/database';
 // 추출 조건 = journey-target-extractor 공유 컨트롤타워 (발송·미리보기 동일 기준 단일 진입점)
 import { selectJourneyTargetCustomerIds, selectCdpEvent } from './journey-target-extractor';
 import { recordEnteredWithClient } from './journey-entry-ledger';
-import { shiftToSendableHour } from './send-time-util';
+import { calculateNextRunAt } from './send-time-util';
 
 // ════════════════════════════════════════════════════════════════════
 // 타입
@@ -50,6 +50,8 @@ interface ActiveJourney {
 interface FirstStepRow {
   id: string;
   delay_hours: number;
+  delay_mode: string;
+  target_hour_kst: number | null;
 }
 
 // 진입 INSERT — enqueueCandidates / processCdpCursorJourney 공용(중복 정의 방지).
@@ -171,7 +173,7 @@ async function processCdpCursorJourney(j: ActiveJourney, eventName: string): Pro
   }
 
   const firstStepRes = await query(
-    `SELECT id, delay_hours FROM journey_steps WHERE journey_id = $1::uuid AND step_order = 1`,
+    `SELECT id, delay_hours, delay_mode, target_hour_kst FROM journey_steps WHERE journey_id = $1::uuid AND step_order = 1`,
     [j.id]
   );
   // step 없거나 후보 0이어도 커서는 전진(이 창 처리 완료 표시 — 누락 방지).
@@ -190,7 +192,7 @@ async function processCdpCursorJourney(j: ActiveJourney, eventName: string): Pro
     for (const customerId of ids) {
       const allowed = await checkCooldown(j, customerId);
       if (!allowed) { skipped++; continue; }
-      const nextRunAt = shiftToSendableHour(new Date(Date.now() + Number(firstStep.delay_hours || 0) * 60 * 60 * 1000));
+      const nextRunAt = calculateNextRunAt(firstStep.delay_mode, Number(firstStep.delay_hours || 0), firstStep.target_hour_kst);
       await client.query(INSERT_EXECUTION_SQL, [j.id, customerId, nextRunAt]);
       enqueued++;
     }
@@ -222,7 +224,7 @@ async function enqueueCandidates(j: ActiveJourney, customerIds: string[]): Promi
 
   // 첫 step 조회 (step_order=1)
   const firstStepRes = await query(
-    `SELECT id, delay_hours FROM journey_steps WHERE journey_id = $1::uuid AND step_order = 1`,
+    `SELECT id, delay_hours, delay_mode, target_hour_kst FROM journey_steps WHERE journey_id = $1::uuid AND step_order = 1`,
     [j.id]
   );
   if (firstStepRes.rows.length === 0) {
@@ -250,7 +252,7 @@ async function enqueueCandidates(j: ActiveJourney, customerIds: string[]): Promi
       continue;
     }
 
-    const nextRunAt = shiftToSendableHour(new Date(Date.now() + Number(firstStep.delay_hours || 0) * 60 * 60 * 1000));
+    const nextRunAt = calculateNextRunAt(firstStep.delay_mode, Number(firstStep.delay_hours || 0), firstStep.target_hour_kst);
     const insertExecParams = [j.id, customerId, nextRunAt];
 
     if (isSignup) {
