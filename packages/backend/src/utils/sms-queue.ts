@@ -487,9 +487,18 @@ export async function getCampaignSmsTables(
   return result;
 }
 
+/** 두 라인그룹 테이블 배열을 순서 보존 합집합(중복 제거). 집계 조회가 발송 라인을 놓치지 않게. */
+export function mergeLineTables(a: string[], b: string[]): string[] {
+  return [...new Set([...a, ...b])];
+}
+
 /** 회사 발송 테이블 + 로그 테이블 (결과 조회용) */
 export async function getCompanySmsTablesWithLogs(companyId: string, userId?: string): Promise<string[]> {
-  const liveTables = await getCompanySmsTables(companyId, userId);
+  // ★ 집계 전용 — user 라인그룹 + company 라인그룹 합집합 (발송이 둘 중 어느 라인으로 나갔든 포함).
+  //   발송 후 라인그룹이 바뀌어도 과거 발송 집계가 안 깨지는 내성. 발송 경로(getCompanySmsTables)는 불변.
+  const userLive = await getCompanySmsTables(companyId, userId);
+  const companyLive = userId ? await getCompanySmsTables(companyId) : userLive;
+  const liveTables = mergeLineTables(userLive, companyLive);
   const existingLogs = await getExistingLogTables();
 
   const now = new Date();
