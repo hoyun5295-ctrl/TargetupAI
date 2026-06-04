@@ -3,7 +3,7 @@ import { calculateSmsBytes, formatCampaignMessageForDisplay, formatPhoneNumber }
 import MmsImagePreview from './shared/MmsImagePreview';
 import CalendarModal from './CalendarModal';
 import CampaignDetailModal from './CampaignDetailModal';
-import { Send, CheckCircle2, XCircle, TrendingUp, Wallet } from 'lucide-react';
+import { Send, CheckCircle2, XCircle, TrendingUp, Wallet, Download } from 'lucide-react';
 
 interface ResultsModalProps {
   onClose: () => void;
@@ -207,6 +207,29 @@ export default function ResultsModal({ onClose, token, customerDbEnabled, isSubs
   const showToast = (type: 'success' | 'error', message: string) => {
     setToast({ show: true, type, message });
     setTimeout(() => setToast({ show: false, type: 'success', message: '' }), 3000);
+  };
+
+  // 채널통합조회(요약 탭) 목록 전체 엑셀 다운로드 — 현재 기간+유형+발송자 필터 그대로 서버 전달
+  const handleExportList = async () => {
+    try {
+      const sp = new URLSearchParams();
+      sp.set('fromDate', startDate);
+      sp.set('toDate', endDate);
+      if (filterType !== 'all') sp.set('sendType', filterType);
+      if (filterSender !== 'all') sp.set('sender', filterSender);
+      const res = await fetch(`/api/v1/results/campaigns/export?${sp}`, { headers: { Authorization: `Bearer ${token}` } });
+      if (!res.ok) { showToast('error', '다운로드에 실패했습니다.'); return; }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `발송결과_${startDate}_${endDate}.csv`;
+      a.click();
+      URL.revokeObjectURL(url);
+      showToast('success', '다운로드가 시작되었습니다.');
+    } catch (error) {
+      showToast('error', '다운로드에 실패했습니다.');
+    }
   };
 
   const msgTypeLabel: Record<string, string> = { SMS: 'SMS', LMS: 'LMS', MMS: 'MMS', S: 'SMS', L: 'LMS', M: 'MMS', K: '알림톡', F: '친구톡' };
@@ -420,9 +443,18 @@ export default function ResultsModal({ onClose, token, customerDbEnabled, isSubs
                 };
                 return (
               <div className="rounded-2xl border border-slate-200 overflow-hidden">
-                <div className="bg-slate-50 px-4 py-2.5 font-medium text-sm text-slate-700 border-b border-slate-200">
-                  채널통합조회
-                  <span className="text-slate-400 font-normal ml-2">{filteredCampaigns.length}건</span>
+                <div className="bg-slate-50 px-4 py-2.5 border-b border-slate-200 flex items-center justify-between gap-2">
+                  <span className="font-medium text-sm text-slate-700">
+                    채널통합조회
+                    <span className="text-slate-400 font-normal ml-2">{filteredCampaigns.length}건</span>
+                  </span>
+                  <button
+                    onClick={handleExportList}
+                    disabled={filteredCampaigns.length === 0}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-emerald-500 text-white hover:bg-emerald-600 disabled:bg-slate-200 disabled:text-slate-400 disabled:cursor-not-allowed transition-colors"
+                  >
+                    <Download className="w-3.5 h-3.5" /> 엑셀 다운로드
+                  </button>
                 </div>
 
                 {/* 데스크탑: 테이블 (md 이상) */}

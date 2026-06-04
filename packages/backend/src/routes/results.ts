@@ -15,6 +15,7 @@ import { STATUS_CODE_MAP, CARRIER_MAP, SUCCESS_CODES, PENDING_CODES, getStatusLa
 import { DEFAULT_COSTS, redis, CACHE_TTL } from '../config/defaults';
 import { buildDateRangeFilter, buildPeriodFilter, aggregateSmsCountsByCampaign, aggregateSmsSendTimesByCampaign } from '../utils/stats-aggregation';
 import { CAMPAIGN_OPT080_SELECT_EXPR, CAMPAIGN_OPT080_LEFT_JOIN } from '../utils/unsubscribe-helper';
+import { buildCampaignListCsv, channelPlainLabel, CampaignCsvRow } from '../utils/campaign-list-csv';
 
 const router = Router();
 
@@ -351,6 +352,139 @@ router.get('/campaigns', async (req: Request, res: Response) => {
     }
     console.error('캠페인 목록 조회 에러:', error);
     return res.status(500).json({ error: '서버 오류가 발생했습니다.' });
+  }
+});
+
+// ======================================================================
+// GET /api/v1/results/campaigns/export — 채널통합조회 목록 CSV (기간 전체)
+//   /campaigns(203) 조회·필터를 LIMIT만 빼고 재사용 + 카운트 + campaign-list-csv 빌더.
+//   ★ 신규 SQL 컬럼 0 — /campaigns와 동일 기존 컬럼만. :id 라우트보다 먼저 둬야 매칭 정확.
+// ======================================================================
+router.get('/campaigns/export', async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    if (!companyId) {
+      return res.status(403).json({ error: '권한이 필요합니다.' });
+    }
+    const { from, fromDate, toDate, sendType, sender } = req.query;
+    const userId = req.user?.userId;
+    const userType = req.user?.userType;
+
+    let whereClause = 'WHERE company_id = $1';
+    const params: any[] = [companyId];
+    let paramIndex = 2;
+
+    // 권한: company_user는 본인 발송분만 (화면 권한과 동일)
+    if (userType === 'company_user') {
+      whereClause += ` AND created_by = $${paramIndex++}`;
+      params.push(userId);
+    }
+
+    // 기간 필터 — /campaigns와 동일 (발송일 우선: COALESCE(sent_at, scheduled_at, created_at)). 누락 시 7일.
+    let effectiveFromDate = fromDate ? String(fromDate) : undefined;
+    let effectiveToDate = toDate ? String(toDate) : undefined;
+    const effectiveYearMonth = from ? String(from) : undefined;
+    if (!effectiveFromDate && !effectiveToDate && !effectiveYearMonth) {
+      const today = new Date();
+      const sevenDaysAgo = new Date(today.getTime() - 7 * 24 * 60 * 60 * 1000);
+      effectiveFromDate = sevenDaysAgo.toISOString().split('T')[0];
+      effectiveToDate = today.toISOString().split('T')[0];
+    }
+    const campDr = buildPeriodFilter('COALESCE(sent_at, scheduled_at, created_at)', {
+      fromDate: effectiveFromDate,
+      toDate: effectiveToDate,
+      yearMonth: (!effectiveFromDate || !effectiveToDate) ? effectiveYearMonth : undefined,
+    }, paramIndex);
+    whereClause += campDr.sql;
+    params.push(...campDr.params);
+    paramIndex = campDr.nextIndex;
+
+    // 화면 필터 정합 — 유형(filterType: ai/direct = send_type), 발송자(filterSender = u.login_id)
+    if (sendType === 'direct') {
+      whereClause += ` AND send_type = $${paramIndex++}`;
+      params.push('direct');
+    } else if (sendType === 'ai') {
+      whereClause += ` AND send_type <> $${paramIndex++}`;
+      params.push('direct');
+    }
+    let senderFilter = '';
+    if (sender && sender !== 'all' && typeof sender === 'string') {
+      senderFilter = ` AND u.login_id = $${paramIndex++}`;
+      params.push(sender);
+    }
+
+    const aliasedWhere = whereClause
+      .replace(/company_id/g, 'c.company_id')
+      .replace(/created_by/g, 'c.created_by')
+      .replace(/\bstatus\b/g, 'c.status')
+      .replace(/\bsent_count\b/g, 'c.sent_count')
+      .replace(/\bsent_at\b/g, 'c.sent_at')
+      .replace(/\bcreated_at\b/g, 'c.created_at')
+      .replace(/\bsend_type\b/g, 'c.send_type');
+
+    // ★ LIMIT/OFFSET 없음 — 조회 기간 전체. 컬럼은 /campaigns(281)와 동일 기존 컬럼.
+    const result = await query(
+      `SELECT
+        c.id, c.company_id, c.created_by, c.message_type, c.message_content, c.status,
+        c.target_count, c.sent_count, c.success_count, c.fail_count, c.result_final,
+        c.scheduled_at, c.sent_at, c.created_at, c.send_channel,
+        u.login_id as created_by_name
+       FROM campaigns c
+       LEFT JOIN users u ON c.created_by = u.id
+       ${aliasedWhere}${senderFilter}
+       ORDER BY c.created_at DESC`,
+      params
+    );
+
+    // 카운트: 완료(result_final)는 PG 캐시, 진행 중만 MySQL 집계 (/campaigns와 동일 규칙)
+    const nonFinal = result.rows.filter((c: any) => !c.result_final);
+    const smsMap = await aggregateSmsCountsByCampaign(nonFinal);
+    const kakaoMap = await kakaoBatchAggByGroup(nonFinal.map((c: any) => c.id));
+
+    const fmtKst = (d: any) => d
+      ? new Date(d).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
+      : '';
+
+    const csvRows: CampaignCsvRow[] = result.rows.map((c: any) => {
+      let sent: number, success: number, fail: number;
+      if (c.result_final) {
+        success = Number(c.success_count || 0);
+        fail = Number(c.fail_count || 0);
+        sent = Number(c.sent_count || 0) || success + fail;
+      } else {
+        const sms = smsMap.get(c.id) || { total_count: 0, success_count: 0, fail_count: 0 };
+        const kakao = (kakaoMap.get(c.id) as any) || { total: 0, success: 0, fail: 0 };
+        sent = Number(sms.total_count || 0) + Number(kakao.total || 0);
+        success = Number(sms.success_count || 0) + Number(kakao.success || 0);
+        fail = Number(sms.fail_count || 0) + Number(kakao.fail || 0);
+      }
+      const pending = Math.max(0, sent - success - fail);
+      const rate = sent > 0 ? Math.round((success / sent) * 1000) / 10 : 0;
+      return {
+        message: String(c.message_content || ''),
+        createdAt: fmtKst(c.created_at),
+        sentAt: fmtKst(c.scheduled_at || c.sent_at),
+        channel: channelPlainLabel(c.send_channel, c.message_type),
+        sent, success, fail, pending, rate,
+        sender: c.created_by_name || '',
+      };
+    });
+
+    const csv = buildCampaignListCsv(csvRows);
+    const filename = `발송결과_${effectiveFromDate || ''}_${effectiveToDate || ''}.csv`;
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(filename)}"`);
+    return res.send(csv);
+  } catch (error: any) {
+    const msg = error?.message || '';
+    if (msg.includes('column') && msg.includes('does not exist')) {
+      return res.status(503).json({
+        error: 'DB 마이그레이션 필요 — 운영자에게 campaigns ALTER 실행 요청 의무',
+        code: 'DB_MIGRATION_PENDING',
+      });
+    }
+    console.error('발송결과 목록 엑셀 export 에러:', error);
+    return res.status(500).json({ error: '다운로드에 실패했습니다.' });
   }
 });
 
