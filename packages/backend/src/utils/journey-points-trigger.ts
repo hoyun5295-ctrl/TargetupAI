@@ -17,14 +17,14 @@ export interface PointsExpiringConfig {
   expiryMonthDay: string; // 'MM-DD' (검증 통과한 값) 또는 '' (미설정/오류)
 }
 
-function isValidMmdd(mmdd: string): boolean {
+export function isValidMmdd(mmdd: string): boolean {
   if (!/^\d{2}-\d{2}$/.test(mmdd)) return false;
   const [m, d] = mmdd.split('-').map(Number);
   return m >= 1 && m <= 12 && d >= 1 && d <= 31;
 }
 
 /** 미설정(null/빈/NaN) → 기본값, 설정값(0 포함) → [min,max] 클램프. `|| ` falsy 함정 회피. */
-function clampInt(val: any, def: number, min: number, max: number): number {
+export function clampInt(val: any, def: number, min: number, max: number): number {
   if (val == null || val === '' || Number.isNaN(Number(val))) return def;
   return Math.max(min, Math.min(max, Math.floor(Number(val))));
 }

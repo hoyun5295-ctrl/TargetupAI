@@ -93,7 +93,7 @@ import { validateJourneyForActivation } from '../utils/journey-pretest-validator
 import { getPauseLogs } from '../utils/journey-pause-handler';
 // ★ D187-fix3 (2026-05-21): Journey AI Generator — One-shot 자연어 + 시즌 + 회사 메모리
 import { generateJourneyPackage, refineStepMessage } from '../utils/journey-ai-generator';
-import { selectJourneyTargetCustomerIds, buildJourneyPreviewSamples } from '../utils/journey-target-extractor';
+import { selectJourneyTargetCustomerIds, buildJourneyPreviewSamples, countJourneyTargetCustomers } from '../utils/journey-target-extractor';
 // ★ D210+ Phase 2-fix1 (Harold 명시 2026-05-23): CT-58 — 회사 customer DB 실측 프로필 조회.
 //   /operator/data-profile endpoint = 마케팅 담당자 검토 UI 안내 카드 data source.
 import { getCompanyDataProfile } from '../utils/company-data-profile';
@@ -114,6 +114,7 @@ import { diagnoseCompanyHealth } from '../utils/ai-self-diagnosis';
 import { diagnoseJourneySteps, recommendNextJourneyStep } from '../utils/journey-step-diagnosis';
 // ★ D211+ Phase A (2026-05-23 Harold 명시): CT-60/CT-61 시뮬레이션 + variant 자동 생성 + 실시간 위치
 import { simulateJourney } from '../utils/journey-simulator';
+import { normalizeJourneyOptions } from '../utils/journey-options-validator';
 import { generateVariantsFromMessage } from '../utils/variant-generator';
 import { getJourneyLiveSnapshot } from '../utils/journey-stats';
 // ★ D211+ Predictive 강화 (2026-05-23 Harold 명시): CT-63 Explainability
@@ -2774,16 +2775,13 @@ router.get('/operator/journeys/:id/preview-samples', async (req: Request, res: R
     );
     if (jr.rows.length === 0) return res.status(404).json({ success: false, error: '여정을 찾을 수 없습니다.' });
 
-    // 여정 trigger 기준 상위 10명 미리보기 샘플 (발송과 동일 컨트롤타워). 0명이면 빈 결과 (자동완화 X).
-    const samples = await buildJourneyPreviewSamples(
-      companyId,
-      String(jr.rows[0].trigger_event || ''),
-      jr.rows[0].trigger_filters || {},
-      10,
-      req.params.id,
-    );
+    // 여정 trigger 기준 미리보기 샘플 10명 + 전체 매칭 수 (발송과 동일 추출 함수). 0명이면 빈 결과 (자동완화 X).
+    const triggerEvent = String(jr.rows[0].trigger_event || '');
+    const triggerFilters = jr.rows[0].trigger_filters || {};
+    const samples = await buildJourneyPreviewSamples(companyId, triggerEvent, triggerFilters, 10, req.params.id);
+    const count = await countJourneyTargetCustomers(companyId, triggerEvent, triggerFilters, req.params.id);
 
-    return res.json({ success: true, samples });
+    return res.json({ success: true, samples, total: count.total, segments: count.segments, capped: count.capped });
   } catch (err: any) {
     console.error('[Journeys preview-samples] 오류:', err);
     return res.status(500).json({ success: false, error: err?.message || '미리보기 샘플 조회 실패' });
@@ -2803,11 +2801,12 @@ router.post('/operator/preview-target-samples', async (req: Request, res: Respon
 
     const { triggerEvent, triggerFilters } = req.body || {};
     if (!triggerEvent || typeof triggerEvent !== 'string') {
-      return res.json({ success: true, samples: [] });
+      return res.json({ success: true, samples: [], total: 0, segments: [], capped: false });
     }
 
     const samples = await buildJourneyPreviewSamples(companyId, triggerEvent, triggerFilters || {}, 10);
-    return res.json({ success: true, samples });
+    const count = await countJourneyTargetCustomers(companyId, triggerEvent, triggerFilters || {});
+    return res.json({ success: true, samples, total: count.total, segments: count.segments, capped: count.capped });
   } catch (err: any) {
     console.error('[Journeys preview-target-samples] 오류:', err);
     return res.status(500).json({ success: false, error: err?.message || '미리보기 샘플 조회 실패' });
@@ -2845,6 +2844,69 @@ router.patch('/operator/journeys/:id/auto-reentry', async (req: Request, res: Re
   } catch (err: any) {
     console.error('[Journeys auto-reentry] 오류:', err);
     return res.status(500).json({ success: false, error: err?.message || '자동 재진입 토글 실패' });
+  }
+});
+
+// PATCH /api/ai/operator/journeys/:id/options — 여정별 운영 옵션 편집 (Phase 9)
+//   트리거 타이밍·포인트 + 임계·예산·재진입·회신을 한 번에. draft/paused만(운영 중 차단).
+//   부분 갱신: req.body에 있는 키만 UPDATE(미전달 옵션을 기본값으로 덮어쓰지 않음).
+//   값은 normalizeJourneyOptions로 안전 범위 클램프. 컬럼명은 코드 고정(주입 무관, 전부 information_schema 확인).
+router.patch('/operator/journeys/:id/options', async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+    const planCtx = await loadPlanContext(companyId);
+    if (!planCtx) return res.status(404).json({ success: false, error: '회사 정보를 찾을 수 없습니다.' });
+    if (!isAiOperatorAllowed(planCtx, req.user)) {
+      return res.status(403).json({ success: false, error: 'AI Operator 진입 권한이 없습니다.', code: 'AI_OPERATOR_GATED' });
+    }
+
+    const cur = await query(
+      `SELECT status, trigger_filters FROM journeys WHERE id = $1::uuid AND company_id = $2::uuid`,
+      [req.params.id, companyId]
+    );
+    if (cur.rows.length === 0) return res.status(404).json({ success: false, error: '여정을 찾을 수 없습니다.' });
+    if (cur.rows[0].status !== 'draft' && cur.rows[0].status !== 'paused') {
+      return res.status(400).json({ success: false, error: '운영 중인 여정은 옵션을 바꿀 수 없습니다. 먼저 일시정지해 주세요.' });
+    }
+
+    const body = req.body || {};
+    const norm = normalizeJourneyOptions(body);
+
+    const params: any[] = [req.params.id, companyId];
+    const sets: string[] = [];
+    const add = (col: string, val: any) => { params.push(val); sets.push(`${col} = $${params.length}`); };
+
+    // trigger_filters는 기존 jsonb에 병합(customer_conditions/logic 등 보존, 정규화된 키만 덮어씀).
+    params.push(JSON.stringify({ ...(cur.rows[0].trigger_filters || {}), ...norm.triggerFilters }));
+    sets.push(`trigger_filters = $${params.length}::jsonb`);
+
+    // 옵션 컬럼 — body에 실제로 온 키만(부분 갱신 안전).
+    if ('thresholdRecipients' in body) add('threshold_recipients_per_step', norm.options.thresholdRecipients);
+    if ('thresholdCost' in body) add('threshold_cost_per_step', norm.options.thresholdCost);
+    if ('thresholdRiskLevel' in body) add('threshold_risk_level', norm.options.thresholdRiskLevel);
+    if ('budgetMonthly' in body) add('budget_monthly', norm.options.budgetMonthly);
+    if ('allowReentry' in body) add('allow_reentry', norm.options.allowReentry);
+    if ('reentryCooldownDays' in body) add('reentry_cooldown_days', norm.options.reentryCooldownDays);
+    if ('autoReentryEnabled' in body) add('auto_reentry_enabled', norm.options.autoReentryEnabled);
+    if ('callbackNumber' in body && norm.options.callbackNumber) add('callback_number', norm.options.callbackNumber);
+    if ('callbackMode' in body) add('callback_mode', norm.options.callbackMode);
+
+    sets.push('updated_at = NOW()');
+
+    const r = await query(
+      `UPDATE journeys SET ${sets.join(', ')} WHERE id = $1::uuid AND company_id = $2::uuid RETURNING id`,
+      params
+    );
+    if (r.rows.length === 0) return res.status(404).json({ success: false, error: '여정을 찾을 수 없습니다.' });
+    return res.json({ success: true });
+  } catch (err: any) {
+    const msg = err?.message || '';
+    if (msg.includes('column') && msg.includes('does not exist')) {
+      return res.status(503).json({ success: false, error: 'DB 마이그레이션이 필요합니다 — 운영자에게 journeys 옵션 컬럼 확인을 요청해 주세요.', code: 'DB_MIGRATION_PENDING' });
+    }
+    console.error('[Journeys update options] 오류:', err);
+    return res.status(500).json({ success: false, error: err?.message || '여정 옵션 수정 실패' });
   }
 });
 

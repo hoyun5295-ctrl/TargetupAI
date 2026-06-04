@@ -36,5 +36,15 @@ ok('다음 평일 09시 KST (UTC 00시 + 평일)', () => {
   assert.ok(kstDay >= 1 && kstDay <= 5);                  // 월~금
 });
 
+console.log('[journey-send-time] relative_at_hour');
+ok('3일(72h) 후 09시 → 6/7 09시 KST(6/7 00:00Z)', () =>
+  assert.strictEqual(calculateNextRunAt('relative_at_hour', 72, 9, noonKst).toISOString(), '2026-06-07T00:00:00.000Z'));
+ok('0일 후 09시(오늘 09시 이미 지남, 현재 11시) → 내일 09시(6/5 00:00Z)', () =>
+  assert.strictEqual(calculateNextRunAt('relative_at_hour', 0, 9, noonKst).toISOString(), '2026-06-05T00:00:00.000Z'));
+ok('1일(24h) 후 15시 → 6/5 15시 KST(6/5 06:00Z)', () =>
+  assert.strictEqual(calculateNextRunAt('relative_at_hour', 24, 15, noonKst).toISOString(), '2026-06-05T06:00:00.000Z'));
+ok('target null이면 relative로 폴백(+2h)', () =>
+  assert.strictEqual(calculateNextRunAt('relative_at_hour', 2, null, noonKst).toISOString(), '2026-06-04T04:00:00.000Z'));
+
 console.log(`\n${passed} assertions passed`);
 process.exit(0);  // send-time-util → config/defaults 측 비동기 핸들(Redis 재시도) 정리용 — 검증 완료 후 즉시 종료

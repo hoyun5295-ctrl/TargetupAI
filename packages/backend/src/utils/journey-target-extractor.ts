@@ -17,10 +17,10 @@
  */
 
 import { query } from '../config/database';
-import { applyCustomerConditions } from './journey-simulator';
 import { buildJourneySafetyFilter } from './journey-safety-filter';
 import { resolvePointsExpiringConfig } from './journey-points-trigger';
 import { buildLedgerAntiJoin, hasBaseline } from './journey-entry-ledger';
+import { buildSegmentBreakdown, SegmentBreakdown } from './journey-simulator-core';
 
 export async function selectJourneyTargetCustomerIds(
   companyId: string,
@@ -309,4 +309,116 @@ export async function buildJourneyPreviewSamples(
     },
     modelVersion: row.model_version || null,
   }));
+}
+
+// ════════════════════════════════════════════════════════════════════
+// 전체 매칭 수 + 등급 분포 — 미리보기·시뮬레이션 공용 (Phase 9)
+//   발송과 동일한 selectJourneyTargetCustomerIds로 ID를 받아(상한 JOURNEY_COUNT_CAP) 등급만 집계.
+//   → 미리보기·시뮬레이션 = 실발송 대상 100% 일치(같은 함수). 상한 초과 시 capped=true(정직 표기).
+//   grade/company_id/id = information_schema 확인 컬럼(2026-06-04).
+// ════════════════════════════════════════════════════════════════════
+
+export const JOURNEY_COUNT_CAP = 100000;
+
+export interface JourneyTargetCount {
+  total: number;
+  segments: SegmentBreakdown[];
+  capped: boolean;
+}
+
+/** 주어진 customer id 집합의 등급 분포(grade GROUP BY → 셰이핑). */
+export async function gradeBreakdownForIds(
+  companyId: string,
+  ids: string[],
+): Promise<{ total: number; segments: SegmentBreakdown[] }> {
+  if (ids.length === 0) return { total: 0, segments: [] };
+  const r = await query(
+    `SELECT COALESCE(grade, '일반') AS segment, COUNT(*)::int AS cnt
+     FROM customers
+     WHERE company_id = $1::uuid AND id = ANY($2::uuid[])
+     GROUP BY COALESCE(grade, '일반')`,
+    [companyId, ids],
+  );
+  return buildSegmentBreakdown(r.rows);
+}
+
+/** 주어진 customer id 집합의 실데이터 평균 — 객단가·전환·클릭. 행/값 없으면 null(추정 생략용). */
+export async function averageScoresForIds(
+  companyId: string,
+  ids: string[],
+): Promise<{ avgOrderValue: number | null; avgConversion: number | null; avgClick: number | null }> {
+  if (ids.length === 0) return { avgOrderValue: null, avgConversion: null, avgClick: null };
+  const r = await query(
+    `SELECT AVG(c.avg_order_value) AS aov,
+            AVG(p.purchase_likelihood) AS conv,
+            AVG(p.click_score) AS clk
+     FROM customers c
+     LEFT JOIN cdp_customer_predictions p ON p.customer_id = c.id
+     WHERE c.company_id = $1::uuid AND c.id = ANY($2::uuid[])`,
+    [companyId, ids],
+  );
+  const row = r.rows[0] || {};
+  const num = (v: any) => (v != null ? Number(v) : null);
+  return { avgOrderValue: num(row.aov), avgConversion: num(row.conv), avgClick: num(row.clk) };
+}
+
+/** 전체 매칭 수 + 등급 분포 (미리보기·시뮬레이션 공용). 발송과 동일 함수로 ID 추출. */
+export async function countJourneyTargetCustomers(
+  companyId: string,
+  triggerEvent: string,
+  triggerFilters: Record<string, any>,
+  journeyId?: string,
+): Promise<JourneyTargetCount> {
+  const ids = await selectJourneyTargetCustomerIds(companyId, triggerEvent, triggerFilters, JOURNEY_COUNT_CAP, journeyId);
+  const { total, segments } = await gradeBreakdownForIds(companyId, ids);
+  return { total, segments, capped: ids.length >= JOURNEY_COUNT_CAP };
+}
+
+// ════════════════════════════════════════════════════════════════════
+// customer_conditions 복합 조건 → SQL 조각 (5번 트리거 복합 조합)
+//   순수(파라미터 배열에 push). journey-simulator에서 이동(Phase 9 순환 참조 제거).
+// ════════════════════════════════════════════════════════════════════
+
+export function applyCustomerConditions(
+  conditions: Array<{ field: string; op: string; value: any }>,
+  logic: 'AND' | 'OR',
+  params: any[],
+): string | null {
+  if (!conditions || conditions.length === 0) return null;
+  const allowedFields = ['grade', 'region', 'age', 'purchase_count', 'total_purchase_amount', 'sms_opt_in'];
+  const allowedOps = ['==', '!=', '>=', '<=', '>', '<', 'in', 'not_in', 'is_null', 'not_null'];
+  const clauses: string[] = [];
+
+  for (const cond of conditions) {
+    if (!allowedFields.includes(cond.field)) continue;
+    if (!allowedOps.includes(cond.op)) continue;
+
+    const col = `c.${cond.field}`;
+    if (cond.op === 'is_null') {
+      clauses.push(`${col} IS NULL`);
+      continue;
+    }
+    if (cond.op === 'not_null') {
+      clauses.push(`${col} IS NOT NULL`);
+      continue;
+    }
+    if (cond.op === 'in' || cond.op === 'not_in') {
+      const values = Array.isArray(cond.value) ? cond.value : [cond.value];
+      if (values.length === 0) continue;
+      const placeholders = values.map((v) => {
+        params.push(v);
+        return `$${params.length}`;
+      });
+      clauses.push(`${col} ${cond.op === 'in' ? 'IN' : 'NOT IN'} (${placeholders.join(', ')})`);
+      continue;
+    }
+    // 일반 비교 operator
+    const sqlOp = cond.op === '==' ? '=' : cond.op;
+    params.push(cond.value);
+    clauses.push(`${col} ${sqlOp} $${params.length}`);
+  }
+
+  if (clauses.length === 0) return null;
+  const joiner = logic === 'OR' ? ' OR ' : ' AND ';
+  return `(${clauses.join(joiner)})`;
 }

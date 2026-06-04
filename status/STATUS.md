@@ -107,7 +107,33 @@
 
 ---
 
-### 🟢 2026-06-04 세션2 (최신) — 여정 엔진 재설계 Phase 1~5 완료·배포 (6~9 다음 세션)
+### 🟢 2026-06-05 세션4 (최신) — 여정 엔진 Phase 9 완료 (미배포)
+> **Phase 9 전면 구현·검증 완료, 미배포(Harold 배포). 설계 `docs/superpowers/specs/2026-06-04-journey-phase9-design.md` · 계획 `docs/superpowers/plans/2026-06-04-journey-phase9.md`.**
+> - **9-1 미리보기=실발송 통일**: 시뮬레이터 `matchTriggerCustomers`(cdp 30일/custom 전체 분기) 폐기 → 발송과 같은 `selectJourneyTargetCustomerIds` 재사용. 신규 `countJourneyTargetCustomers`(ID 추출 후 등급 집계, 상한 10만 capped)·`gradeBreakdownForIds`·`averageScoresForIds`. 미리보기 2 endpoint + 시뮬레이트 = 같은 함수.
+> - **실데이터 예측(임의 상수 제거)**: 잔존율 0.85·객단가 5만·0.15/0.05 폐기 → 객단가 `customers.avg_order_value`·전환/클릭 `cdp_customer_predictions`·비용 `companies.cost_per_*`(회사 실 단가). 없으면 "데이터 부족" 정직 표기. 조건 step 하류 발송=null(변동). `journey-simulator-core.ts`(순수 buildSegmentBreakdown+buildProjection).
+> - **시점 N일+시각**: `send-time-util` `relative_at_hour` 모드 신설(기존 3모드 불변). 편집 캔버스 발송 시점 시간→**일+시간 입력 + 발송 시각** 드롭다운. `journey-builder` 339행 target_hour_kst를 relative_at_hour도 저장(specific_hour 전용→확장). 타입 union 3곳 + AIGeneratedStep.
+> - **타임라인·라벨**: `journey-step-format.ts`(순수 formatStepTiming/formatConditionChip) → `getJourneyDetail`가 timingLabel·conditionLabel 부착. 저장 여정 step 리스트 = 시점 배지 + 조건 칩.
+> - **여정 옵션 편집**: `PATCH /operator/journeys/:id/options`(draft/paused만, 부분 갱신, 컬럼 고정·503분기) + `journey-options-validator.ts`(순수 normalizeJourneyOptions, clampInt/isValidMmdd export 재사용) + `JourneyOptionsEditor.tsx`(트리거 타이밍·포인트·한도·예산·재진입, useToast). 표시 전용 트리거 카드 대체.
+> - **미리보기 total**: 샘플 카드 "전체 N명 중 10명".
+> - **검증**: backend tsc 0 · frontend tsc 0 · 순수 테스트 75건 green(send-time 9·step-format 9·validator 12·simulator-core 5·points 16·condition 16·safety 8) · 신규 컬럼/마이그레이션 0(전부 information_schema 확인) · 박-단어/모델명/native dialog 신규 0.
+> - **배포**: 시뮬레이트 응답 shape 변경(매출/클릭/전환 null 허용) → **backend+frontend 함께**(별도 시 시뮬 카드 깨짐). 나머지(라벨·total·옵션 PATCH)는 추가 필드 안전. DB 마이그레이션 0. Codex `/codex:adversarial-review`(DB 만진 추출기/시뮬레이터/옵션) 권장.
+> - **남은 것**: cdp 미리보기 "추정" 배지(minor). ※ 2026-06-03 메모의 "JourneysPage native dialog 29곳"은 2026-06-05 grep 재확인 결과 0건(이미 ConfirmModal/useToast로 교체 완료) — stale 정정.
+
+---
+
+### 🟢 2026-06-04 세션3 — 여정 엔진 Phase 7·6A·6B·8 완료·배포 (Phase 9만 남음)
+> **여정 엔진 재설계 Phase 7·6A·6B·8 코드·검증·배포(408f6e9). 다음 세션 핸드오프 `docs/superpowers/handoffs/2026-06-04-journey-phase9-handoff.md` 정독 의무.**
+> - **Phase 7** 조건평가 안전분기 — `evaluateCondition` met/not_met/error 3분기, DB오류=발송 보류+재시도(발송 X). `journey-condition.ts`(신규 순수 CT)+executor `handleConditionEvalError`.
+> - **Phase 6A** step1 시점 — `calculateNextRunAt`를 `send-time-util.ts` CT로 이동(now 인자), trigger-watcher 두 enqueue에 delay_mode·target_hour_kst 적용.
+> - **Phase 6B** 발송 2시간 전 스팸테스트 — `journey-pretest-notifier` 재작성(`scanAndPretest`, 깨진 `predictNextSendTimes` 폐기), 걸리면 1회 재생성(`regenerateStepAvoidingSpam`, journey-ai-refine=1크레딧)+재테스트→통과면 snapshot 갱신, 또 걸리면 `pauseJourney`. `runStepSpamTest` 공용 추출, `pauseJourney` 공용 CT, `journey-pretest-scan.ts`(신규 순수).
+> - **Phase 8** 포인트 소멸 trigger — `customer.points_expiring`(points 임계+미사용 / 연 소멸일 D-N). `journey-points-trigger.ts`(신규 순수)+extractor case+JOURNEY_TEMPLATE. 소멸일은 고객 필드 X = 여정 정책.
+> - **검증**: backend tsc 0 / 순수 테스트 5종 55단언 GREEN / 자가 grep 0 / 신규 컬럼·마이그레이션 0(기존 컬럼만).
+> - **배포**: 408f6e9 push 완료. 서버 = `cd /home/administrator/targetup-app` → `git pull` → backend `build:safe` → `pm2 restart targetup-backend`(restart all은 한줄전단까지 건드림 — 변경된 프로세스만).
+> - **남은 것**: Phase 9(미리보기 실발송 일치 통일 + step 시점·조건 UI). 설계서 §10·§13.
+
+---
+
+### 🟢 2026-06-04 세션2 — 여정 엔진 재설계 Phase 1~5 완료·배포 (6~9 다음 세션)
 > **여정 엔진 전면 재설계 Phase 1~5 코드·검증 완료, 배포(Harold). 다음 세션 핸드오프 `docs/superpowers/handoffs/2026-06-04-journey-redesign-phase6-9-handoff.md` 정독 의무.**
 > - **완료**: 1 공통 안전필터(`utils/journey-safety-filter.ts`) · 2 신규가입 진입 원장(`journey-entry-ledger.ts` + entry_baseline_at + 대량 차단기) · 3 cdp 이벤트 커서(last_event_cursor + 원자 진입/커서 전진) · 4 자유여정 진입(audience 안티조인) · 5 묶음 발송(`journey-step-campaign.ts`, (journey,step,날짜)당 campaign 1건 + app_etc1=campaignId 정정). **결함 #1·#2·#3·#5·#6(cdp)·#8 닫힘.**
 > - **검증**: 매 단계 tsc 0 / 순수 테스트 8+7 GREEN / 박-단어·모델명 0. 직접발송·billing 무수정(여정=prepaid 차감, campaign_runs 밖 → app_etc1 변경 영향 0).

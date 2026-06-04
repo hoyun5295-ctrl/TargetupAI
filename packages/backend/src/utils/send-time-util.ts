@@ -61,8 +61,9 @@ export function shiftToSendableHour(
 }
 
 /**
- * 여정 step 발송 시각 계산 — delay_mode 3종 + 야간가드.
+ * 여정 step 발송 시각 계산 — delay_mode 4종 + 야간가드.
  *   - 'relative'          = now + delay_hours (default)
+ *   - 'relative_at_hour'  = (now + delay_hours)가 속한 날의 target_hour_kst 시 KST ("N일 후 그 날 HH시")
  *   - 'specific_hour'     = 오늘/내일 target_hour_kst 시 KST (오늘 시각이 지났으면 내일)
  *   - 'next_business_day' = 다음 평일(월~금) 09시 KST (공휴일 미반영)
  * 전부 shiftToSendableHour로 야간(발송 불가 시간)을 09시 KST로 밀어 광고 새벽 발송을 막는다.
@@ -107,6 +108,20 @@ export function calculateNextRunAt(
     else if (kstHour >= 9) daysToAdd = 1; // 평일 09시 이후 → 내일
     else daysToAdd = 0; // 평일 09시 이전 → 오늘
     const utcTargetMs = Date.UTC(kstYear, kstMonth, kstDate + daysToAdd, 0, 0, 0); // KST 09시 = UTC 00시
+    return shiftToSendableHour(new Date(utcTargetMs));
+  }
+
+  // 'relative_at_hour' = (now + delayHours)가 속한 KST 날짜의 targetHourKst시. 그 시각이 과거면 +1일.
+  //   "N일 후 그 날 HH시" 표현용(N = delayHours/24). targetHourKst null이면 relative로 폴백.
+  if (delayMode === 'relative_at_hour' && targetHourKst !== null) {
+    const targetHour = Math.max(0, Math.min(23, targetHourKst));
+    const landed = new Date(now.getTime() + delayHours * 60 * 60 * 1000);
+    const kstLanded = new Date(landed.getTime() + 9 * 60 * 60 * 1000);
+    const y = kstLanded.getUTCFullYear();
+    const m = kstLanded.getUTCMonth();
+    const d = kstLanded.getUTCDate();
+    let utcTargetMs = Date.UTC(y, m, d, targetHour - 9, 0, 0); // KST targetHour = UTC(targetHour-9)
+    if (utcTargetMs < now.getTime()) utcTargetMs = Date.UTC(y, m, d + 1, targetHour - 9, 0, 0);
     return shiftToSendableHour(new Date(utcTargetMs));
   }
 

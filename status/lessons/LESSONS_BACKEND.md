@@ -239,6 +239,14 @@ const items: any[] =
 - **진입 원장 키 = 시스템 upsert 식별자(회사+매장코드+전화번호)** — created_at 의존 0. 업로드=`customer-upsert` upsert(키 동일)라 created_at·id 보존, 전체삭제(`customers.ts:1533`)·업로더별삭제(`admin.ts:231`)만 리셋(드묾).
 - **묶음 발송 = (journey,step,KST날짜)당 campaign 1건 공유**(journey_step_campaigns find-or-create) — staging/사전렌더 불요(executor 5분 소량 처리 → OOM 위험 0, 톤28 무관). 직접발송 파이프라인 격리.
 
+**★ 2026-06-04 세션3 — Phase 6·7·8 fixed (배포 408f6e9)**:
+- **#4 조건평가 안전분기** = Phase 7: `evaluateCondition` boolean→`met`/`not_met`/`error` 3분기. DB오류=`error`→발송 보류+재시도(`handleConditionEvalError`, 발송실패 재시도 패턴 재사용, 발송 X). null·미지원 type·미지원 operator·빈 field·빈 event_name=`not_met`. customer_field 순수 평가 `journey-condition.ts`(신규 CT) 분리. 활성화 형식검증 유지.
+- **#7 step 시점** = Phase 6A: `calculateNextRunAt`를 `send-time-util.ts` CT로 이동(now 인자→순수 테스트). trigger-watcher 두 enqueue가 step1 SELECT에 delay_mode·target_hour_kst 추가 후 calculateNextRunAt 사용 → step1도 specific_hour(다음날 지정 시각)·next_business_day 적용.
+- **발송 2시간 전 스팸테스트** = Phase 6B: 깨진 `predictNextSendTimes`(journey_executions에 없는 scheduled_at·step_id 조회 → 활성화 catch가 삼켜 2h 알림 0건) 폐기 → `scanAndPretest`(active execution 중 next_run_at 2시간 안 + 다음 step이 message인 것을 (journey,step,KST날짜)당 1회, journey_pretest_schedules dedup). 통과면 담당자 LMS, enqueue 실패(잔액)면 다음 주기 재시도, 걸리면 `regenerateStepAvoidingSpam`(source `journey-ai-refine`=1크레딧 자동, callAIWithFallback)+재테스트→통과면 최신 snapshot UPDATE(executor가 최신 snapshot 본문 발송 238~252행)+안내, 또 걸리면 `pauseJourney`(공용 CT 추가). `runStepSpamTest` 공용 추출(활성화 검증+스캐너 공유). 순수 코어 `journey-pretest-scan.ts`(신규). **걸렸을 때만 1크레딧 — 통과는 무료(Harold 정책).**
+- **trigger 확장** = Phase 8: `customer.points_expiring` — points 임계 + (미사용 recent_purchase_date 오래됨 / 연 소멸일 MM-DD D-N). extractor case + watcher 자동(active 전수) + JOURNEY_TEMPLATE + union. `resolvePointsExpiringConfig` 순수(미설정 vs 0 구분 — `Number(x) || def` falsy 함정 clampInt로 교체). **포인트 소멸일은 고객 필드가 아니라 여정 정책(회사 1개 날짜).**
+- **남은 #9 미리보기** = Phase 9: simulator matchTriggerCustomers 폐기 → selectJourneyTargetCustomerIds 단일 진입점 통일 + 임의 상수 교체 + UI. 핸드오프 `docs/superpowers/handoffs/2026-06-04-journey-phase9-handoff.md`.
+- **교훈**: tsc는 SQL 컬럼 검증 못 함 → information_schema 순수 덤프로 실컬럼 확인 후 작성(scheduled_at·step_id 부재 확정). DB-의존 wrapper(AI 호출·스팸 enqueue)는 순수 테스트 불가 → 순수 코어(조건·dedup·config)만 분리 TDD, 통합은 tsc+검증된 패턴 재사용.
+
 ---
 
 ## 자가 검증 매트릭스 (Backend 작업 시)

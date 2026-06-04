@@ -19,6 +19,7 @@ import { query } from '../config/database';
 import { callAIWithFallback } from '../services/ai';
 import { buildMemoryPromptContext } from './company-memory';
 import { seedBaselineForJourney } from './journey-entry-ledger';
+import { formatStepTiming, formatConditionChip } from './journey-step-format';
 
 // ════════════════════════════════════════════════════════════════════
 // 타입
@@ -51,7 +52,7 @@ export interface JourneyStepDefinition {
   //   'relative' (default) = 옛 매트릭스 (delay_hours 영역 NOW() + N시간)
   //   'specific_hour'      = 오늘/내일 target_hour_kst 영역 (예: "내일 오전 9시 발송 영역")
   //   'next_business_day'  = 다음 평일 09시 KST (단순 월~금 정합)
-  delayMode?: 'relative' | 'specific_hour' | 'next_business_day';
+  delayMode?: 'relative' | 'relative_at_hour' | 'specific_hour' | 'next_business_day';
   targetHourKst?: number;  // 0~23 (specific_hour 영역 사용)
   // ★ D188 Phase 2-B-2 (2026-05-21): 알림톡 (channel='kakao') 영역 — sms-queue insertAlimtalkQueue 정합.
   alimtalkProfileId?: string;
@@ -335,7 +336,7 @@ export async function createJourneyFromTemplate(input: CreateJourneyInput): Prom
         step.alimtalkNextSubject || null,
         Array.isArray(step.mmsImagePaths) && step.mmsImagePaths.length > 0 ? step.mmsImagePaths : null,
         step.delayMode || 'relative',
-        step.delayMode === 'specific_hour' && typeof step.targetHourKst === 'number' ? step.targetHourKst : null,
+        (step.delayMode === 'specific_hour' || step.delayMode === 'relative_at_hour') && typeof step.targetHourKst === 'number' ? step.targetHourKst : null,
       ]
     );
   }
@@ -807,7 +808,7 @@ export async function updateJourneyStep(
     alimtalkNextSubject?: string | null;
     mmsImagePaths?: string[] | null;
     // ★ D210+ Phase 3 (2026-05-23 Harold 명시): wait step 정확도 영역 patch
-    delayMode?: 'relative' | 'specific_hour' | 'next_business_day' | null;
+    delayMode?: 'relative' | 'relative_at_hour' | 'specific_hour' | 'next_business_day' | null;
     targetHourKst?: number | null;
     // ★ D218+ (2026-05-26): step별 담당자 알림 ON/OFF/default 토글
     notifyManagerOnPretest?: boolean | null;
@@ -1015,7 +1016,13 @@ export async function getJourneyDetail(companyId: string, journeyId: string) {
     `SELECT * FROM journey_steps WHERE journey_id = $1::uuid ORDER BY step_order ASC`,
     [journeyId]
   );
-  return { journey: j.rows[0], steps: steps.rows };
+  // Phase 9: 타임라인용 사람이 읽는 라벨(시점·조건) 부착. 첫 step(i===0)은 "트리거 후", 이후는 "직전 단계 후".
+  const stepsWithLabels = steps.rows.map((s: any, i: number) => ({
+    ...s,
+    timingLabel: formatStepTiming({ delayMode: s.delay_mode, delayHours: s.delay_hours, targetHourKst: s.target_hour_kst }, i === 0),
+    conditionLabel: s.step_type === 'condition' ? formatConditionChip(s.condition_jsonb) : null,
+  }));
+  return { journey: j.rows[0], steps: stepsWithLabels };
 }
 
 export async function listExecutions(

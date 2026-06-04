@@ -30,6 +30,7 @@ import { detectLiquidSyntax, renderLiquid, flattenCustomerForLiquid, SAMPLE_CUST
 // ★ D210+ Phase 2-fix6 (Harold 명시 2026-05-23): 변수 하이라이트 + 머지 미리보기 컨트롤타워.
 import { highlightVars, mergeAndHighlightVars, mergeVarsPlain } from '../utils/highlightVars';
 import ConfirmModal, { type ConfirmState } from '../components/ConfirmModal';
+import JourneyOptionsEditor from '../components/journey/JourneyOptionsEditor';
 import { useToast } from '../components/ToastProvider';
 
 // ★ D210+ Phase 2-fix6 (Harold 명시 2026-05-23): 여정 생성 6 sub-agent 진행 카드 매트릭스.
@@ -96,6 +97,12 @@ interface StepRow {
   is_ad: boolean;
   // ★ D218+ (2026-05-26): step별 담당자 알림 ON/OFF/default 3 상태
   notify_manager_on_pretest?: boolean | null;
+  // Phase 9: 시점/조건 원본 + 백엔드 getJourneyDetail가 붙이는 타임라인 라벨
+  delay_mode?: string | null;
+  target_hour_kst?: number | null;
+  condition_jsonb?: any;
+  timingLabel?: string;
+  conditionLabel?: string | null;
 }
 
 interface JourneyDetail {
@@ -245,8 +252,8 @@ interface AIGeneratedStep {
   //   'relative' (default) = 옛 매트릭스 (delay_hours 영역)
   //   'specific_hour'      = target_hour_kst 영역 (오늘/내일 KST 정합)
   //   'next_business_day'  = 다음 평일 09시 KST
-  delayMode?: 'relative' | 'specific_hour' | 'next_business_day';
-  targetHourKst?: number;  // 0~23 (specific_hour 영역만)
+  delayMode?: 'relative' | 'relative_at_hour' | 'specific_hour' | 'next_business_day';
+  targetHourKst?: number;  // 0~23 (relative_at_hour / specific_hour)
   // ★ D188 Phase 2-B-2 (2026-05-21): 알림톡 (channel='kakao') 영역.
   alimtalkProfileId?: string;
   alimtalkTemplateCode?: string;
@@ -359,6 +366,7 @@ export default function JourneysPage() {
   const [statsMap, setStatsMap] = useState<Record<string, JourneyStepStatFrontend[]>>({});
   // ★ D210+ Phase 3 (2026-05-23 Harold 명시): 다중 미리보기 영역 (preview-samples endpoint 활용)
   const [samplesMap, setSamplesMap] = useState<Record<string, PreviewSample[]>>({});
+  const [samplesTotalMap, setSamplesTotalMap] = useState<Record<string, { total: number; capped: boolean }>>({});
   const [activeSampleLabel, setActiveSampleLabel] = useState<Record<string, string>>({});
   // ★ D211+ Phase 2 (2026-05-23 Harold 명시): step 진단 + next step 추천 영역
   const [diagnosisMap, setDiagnosisMap] = useState<Record<string, JourneyStepDiagnosis>>({});
@@ -580,6 +588,7 @@ export default function JourneysPage() {
       const data = await res.json();
       if (data.success && Array.isArray(data.samples)) {
         setSamplesMap((prev) => ({ ...prev, [journeyId]: data.samples }));
+        setSamplesTotalMap((prev) => ({ ...prev, [journeyId]: { total: Number(data.total) || 0, capped: !!data.capped } }));
         if (data.samples.length > 0 && !activeSampleLabel[journeyId]) {
           setActiveSampleLabel((prev) => ({ ...prev, [journeyId]: data.samples[0].label }));
         }
@@ -1304,7 +1313,7 @@ export default function JourneysPage() {
                               {!simulationMap[j.id] ? (
                                 <div>
                                   <p className="text-[11px] text-white/60 leading-relaxed mb-2">
-                                    트리거 매칭 customer + 예상 발송 건수 + 예상 비용 + 예상 매출 영향 영역 사전 확인 (실제 발송 X).
+                                    트리거 매칭 고객 + 예상 발송 건수 + 예상 비용을 활성화 전에 미리 확인합니다 (실제 발송 안 함).
                                   </p>
                                   <button
                                     onClick={(e) => { e.stopPropagation(); loadSimulation(j.id); }}
@@ -1324,7 +1333,7 @@ export default function JourneysPage() {
                                   <div className="grid grid-cols-2 gap-2">
                                     <div className="p-2 bg-white/5 rounded">
                                       <div className="text-[10px] text-white/40">트리거 매칭</div>
-                                      <div className="text-base font-semibold text-emerald-200 font-mono">{simulationMap[j.id].matchedCustomers.toLocaleString()}명</div>
+                                      <div className="text-base font-semibold text-emerald-200 font-mono">{simulationMap[j.id].matchedCustomers.toLocaleString()}명{simulationMap[j.id].capped ? ' 이상' : ''}</div>
                                     </div>
                                     <div className="p-2 bg-white/5 rounded">
                                       <div className="text-[10px] text-white/40">총 예상 발송</div>
@@ -1335,8 +1344,8 @@ export default function JourneysPage() {
                                       <div className="text-base font-semibold text-amber-200 font-mono">{simulationMap[j.id].totalEstimatedCost.toLocaleString()}원</div>
                                     </div>
                                     <div className="p-2 bg-white/5 rounded">
-                                      <div className="text-[10px] text-white/40">예상 매출 영향</div>
-                                      <div className="text-base font-semibold text-cyan-200 font-mono">{simulationMap[j.id].estimatedRevenue.toLocaleString()}원</div>
+                                      <div className="text-[10px] text-white/40">예상 매출</div>
+                                      <div className="text-base font-semibold text-cyan-200 font-mono">{simulationMap[j.id].estimatedRevenue != null ? `${simulationMap[j.id].estimatedRevenue.toLocaleString()}원` : '데이터 부족'}</div>
                                     </div>
                                   </div>
                                   {/* 등급 분포 */}
@@ -1361,8 +1370,8 @@ export default function JourneysPage() {
                                     {simulationMap[j.id].reasoning}
                                   </div>
                                   <div className="flex items-center gap-3 text-[10px] text-white/50">
-                                    <span><MousePointerClick className="w-2.5 h-2.5 inline text-cyan-300" /> 예상 클릭률 {(simulationMap[j.id].estimatedClickRate * 100).toFixed(1)}%</span>
-                                    <span><TrendingUp className="w-2.5 h-2.5 inline text-emerald-300" /> 예상 전환율 {(simulationMap[j.id].estimatedConversionRate * 100).toFixed(1)}%</span>
+                                    <span><MousePointerClick className="w-2.5 h-2.5 inline text-cyan-300" /> 예상 클릭률 {simulationMap[j.id].estimatedClickRate != null ? `${(simulationMap[j.id].estimatedClickRate * 100).toFixed(1)}%` : '데이터 부족'}</span>
+                                    <span><TrendingUp className="w-2.5 h-2.5 inline text-emerald-300" /> 예상 전환율 {simulationMap[j.id].estimatedConversionRate != null ? `${(simulationMap[j.id].estimatedConversionRate * 100).toFixed(1)}%` : '데이터 부족'}</span>
                                   </div>
                                   {/* 경고 영역 */}
                                   {simulationMap[j.id].warnings?.length > 0 && (
@@ -1380,49 +1389,9 @@ export default function JourneysPage() {
                             </div>
                           )}
 
-                          {/* ★ D211+ Phase A 5번 (2026-05-23 Harold 명시): 트리거 복합 조건 영역 (trigger_event + trigger_filters + customer_conditions) */}
+                          {/* Phase 9: 여정 옵션 편집 (트리거 타이밍·포인트·한도·예산·재진입) — 표시 전용 → 편집 가능 */}
                           {detail.journey && (
-                            <div className="p-3 bg-violet-500/5 border border-violet-400/20 rounded-lg space-y-1.5">
-                              <div className="flex items-center gap-2">
-                                <FilterIcon className="w-4 h-4 text-violet-300" />
-                                <span className="text-sm font-semibold text-violet-100">트리거 조건</span>
-                                <span className="ml-auto text-[10px] text-white/40 font-mono">{detail.journey.trigger_event || 'custom'}</span>
-                              </div>
-                              {/* 기본 트리거 필터 영역 */}
-                              {detail.journey.trigger_filters && Object.keys(detail.journey.trigger_filters).filter((k) => k !== 'customer_conditions' && k !== 'logic').length > 0 && (
-                                <div className="flex flex-wrap gap-1.5">
-                                  {Object.entries(detail.journey.trigger_filters).filter(([k]) => k !== 'customer_conditions' && k !== 'logic').map(([k, v]) => (
-                                    <span key={k} className="px-2 py-0.5 bg-white/5 border border-white/10 rounded text-[10px] text-white/70 font-mono">
-                                      {k}: {String(v)}
-                                    </span>
-                                  ))}
-                                </div>
-                              )}
-                              {/* customer_conditions 복합 영역 */}
-                              {Array.isArray(detail.journey.trigger_filters?.customer_conditions) && detail.journey.trigger_filters.customer_conditions.length > 0 ? (
-                                <div className="space-y-1 pt-1.5 border-t border-white/10">
-                                  <div className="flex items-center gap-2">
-                                    <span className="text-[10px] text-white/40 font-semibold">고객 복합 조건</span>
-                                    <span className="px-1.5 py-0.5 bg-violet-500/20 text-violet-200 rounded text-[9px] font-mono">
-                                      {detail.journey.trigger_filters?.logic || 'AND'}
-                                    </span>
-                                  </div>
-                                  <div className="space-y-0.5">
-                                    {detail.journey.trigger_filters.customer_conditions.map((cond: any, idx: number) => (
-                                      <div key={idx} className="flex items-center gap-1.5 text-[10px] text-white/70 font-mono">
-                                        <span className="text-violet-300">{cond.field}</span>
-                                        <span className="text-white/40">{cond.op}</span>
-                                        <span className="text-white/80">{Array.isArray(cond.value) ? cond.value.join(', ') : String(cond.value ?? '')}</span>
-                                      </div>
-                                    ))}
-                                  </div>
-                                </div>
-                              ) : (
-                                <div className="pt-1.5 border-t border-white/10 text-[10px] text-white/40 leading-relaxed">
-                                  고객 복합 조건 영역 없음 — 트리거 이벤트 만족 시 모든 active customer 영역 진입. 등급/지역/연령 등 추가 조건 영역은 다음 업데이트 안 편집 UI 영역 신설.
-                                </div>
-                              )}
-                            </div>
+                            <JourneyOptionsEditor journey={detail.journey} token={token() || ''} onSaved={loadAll} />
                           )}
 
                           {/* ★ D211+ Phase A 2번 (2026-05-23 Harold 명시): 실시간 진행 위치 요약 (active 여정 영역만) */}
@@ -1554,8 +1523,11 @@ export default function JourneysPage() {
                             <div className="p-3 bg-cyan-500/5 border border-cyan-400/30 rounded-lg space-y-2">
                               <div className="flex items-center gap-2 mb-1">
                                 <Eye className="w-4 h-4 text-cyan-300" />
-                                <span className="text-sm font-semibold text-cyan-100">다중 시뮬레이션 — 6 영역 자동 추출</span>
-                                <span className="text-[10px] text-white/40 ml-auto">cdp_customer_predictions + customers 영역 source</span>
+                                <span className="text-sm font-semibold text-cyan-100">미리보기 샘플</span>
+                                {samplesTotalMap[j.id] && (
+                                  <span className="text-[10px] text-cyan-200/80">전체 {samplesTotalMap[j.id].total.toLocaleString()}명{samplesTotalMap[j.id].capped ? ' 이상' : ''} 중 {samplesMap[j.id].length}명</span>
+                                )}
+                                <span className="text-[10px] text-white/30 italic ml-auto">Data source — customers + 예측</span>
                               </div>
                               <div className="flex flex-wrap gap-1">
                                 {samplesMap[j.id].map((sample) => (
@@ -1663,7 +1635,9 @@ export default function JourneysPage() {
                                   <div className="shrink-0 w-7 h-7 rounded-full bg-fuchsia-500/20 text-fuchsia-300 flex items-center justify-center text-xs font-semibold">{s.step_order}</div>
                                   <div className="flex-1 min-w-0">
                                     <div className="text-[10px] text-white/50 mb-1 flex items-center gap-2 flex-wrap">
-                                      <span><Clock className="w-3 h-3 inline" /> {s.delay_hours}h · {s.channel?.toUpperCase()} {s.is_ad && '· 광고'}</span>
+                                      <span className="inline-flex items-center gap-1"><Clock className="w-3 h-3" /> {s.timingLabel || `${s.delay_hours}시간 뒤`}</span>
+                                      {s.channel && <span className="px-1.5 py-0.5 rounded bg-white/10 text-white/70">{s.channel.toUpperCase()}{s.is_ad ? ' · 광고' : ''}</span>}
+                                      {s.conditionLabel && <span className="px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-200">{s.conditionLabel}</span>}
                                       {supportsVariants && (
                                         <button
                                           onClick={toggleVariants}
@@ -1921,23 +1895,22 @@ export default function JourneysPage() {
                           </select>
                         </div>
 
-                        {/* mode 1: relative — delay_hours input */}
+                        {/* mode 1: relative — 일 + 시간 (마케팅 담당자가 시간 환산 불필요) */}
                         {(!s.delayMode || s.delayMode === 'relative') && (
                           <div className="space-y-1">
                             <div className="flex items-center gap-2">
-                              <label className="text-[10px] text-sky-200/70 w-20">대기 시간</label>
-                              <input
-                                type="number"
-                                min={1}
-                                max={720}
-                                value={s.delayHours}
-                                onChange={(e) => updateStep(idx, { delayHours: Math.max(1, Math.min(720, Number(e.target.value) || 1)) })}
-                                className="w-24 px-2 py-1 bg-slate-900 border border-white/10 rounded text-xs"
-                              />
-                              <span className="text-[11px] text-sky-200/70">시간 (1~720h)</span>
+                              <label className="text-[10px] text-sky-200/70 w-20">대기 기간</label>
+                              <input type="number" min={0} max={365} value={Math.floor((s.delayHours ?? 0) / 24)}
+                                onChange={(e) => { const days = Math.max(0, Math.min(365, Number(e.target.value) || 0)); updateStep(idx, { delayHours: days * 24 + ((s.delayHours ?? 0) % 24) }); }}
+                                className="w-16 px-2 py-1 bg-slate-900 border border-white/10 rounded text-xs" />
+                              <span className="text-[11px] text-sky-200/70">일</span>
+                              <input type="number" min={0} max={23} value={(s.delayHours ?? 0) % 24}
+                                onChange={(e) => { const hrs = Math.max(0, Math.min(23, Number(e.target.value) || 0)); updateStep(idx, { delayHours: Math.floor((s.delayHours ?? 0) / 24) * 24 + hrs }); }}
+                                className="w-16 px-2 py-1 bg-slate-900 border border-white/10 rounded text-xs" />
+                              <span className="text-[11px] text-sky-200/70">시간 대기</span>
                             </div>
                             <div className="text-[10px] text-sky-200/50">
-                              예: 72시간 (3일) 대기 후 후기 요청 발송
+                              예: 3일 0시간 대기 후 후기 요청 발송
                             </div>
                           </div>
                         )}
@@ -2365,32 +2338,27 @@ export default function JourneysPage() {
                     )}
                     {/* 발송 시점(자연어) + 컨트롤 (3분할 카드 하단) */}
                     <div className="pt-2.5 mt-1 border-t border-white/10 space-y-2">
-                      {(s.stepType === 'message' || s.stepType === 'wait') && (
+                      {s.stepType === 'message' && (
                         <div className="flex flex-wrap items-center gap-1.5 text-xs bg-white/[0.03] rounded-lg px-2.5 py-2">
                           <Clock className="w-3.5 h-3.5 text-violet-300 shrink-0" />
-                          <span className="text-white/50">{s.stepType === 'wait' ? '대기' : '발송'}</span>
-                          {s.stepType === 'message' && s.delayMode === 'specific_hour' ? (
-                            <>
-                              <span className="text-white/85">다음</span>
-                              <select value={String(s.targetHourKst ?? 10)} onChange={(e) => updateStep(idx, { targetHourKst: Number(e.target.value) })} className="px-1.5 py-0.5 bg-slate-800 border border-white/10 rounded">
-                                {Array.from({ length: 13 }, (_, i) => i + 8).map((h) => <option key={h} value={h}>{h}시</option>)}
-                              </select>
-                              <span className="text-white/85">에 발송</span>
-                              <button type="button" onClick={() => updateStep(idx, { delayMode: 'relative', targetHourKst: undefined })} className="ml-1 text-violet-300 hover:text-violet-200 underline text-[10px]">시간 기준으로</button>
-                            </>
-                          ) : (
-                            <>
-                              {s.stepType !== 'wait' && <span className="text-white/85">트리거 후</span>}
-                              <input type="number" min={0} max={720} value={s.delayHours} onChange={(e) => updateStep(idx, { delayHours: Number(e.target.value) || 0 })} className="w-14 px-2 py-0.5 bg-slate-800 border border-white/10 rounded" />
-                              <span className="text-white/85">시간 {s.stepType === 'wait' ? '대기' : '뒤'}</span>
-                              {s.stepType === 'message' && (
-                                <>
-                                  <button type="button" onClick={() => updateStep(idx, { delayMode: 'specific_hour', targetHourKst: s.targetHourKst ?? 10 })} className="ml-1 text-violet-300 hover:text-violet-200 underline text-[10px]">정해진 시각으로</button>
-                                  <span className="text-white/35 text-[10px]">밤이면 아침 자동</span>
-                                </>
-                              )}
-                            </>
-                          )}
+                          <span className="text-white/50">{idx === 0 ? '트리거 후' : '직전 단계 후'}</span>
+                          {/* 일 단위 우선 — 마케팅 담당자가 시간으로 환산할 필요 없음(일 + 시간 둘 다 입력) */}
+                          <input type="number" min={0} max={365} value={Math.floor((s.delayHours ?? 0) / 24)}
+                            onChange={(e) => { const days = Math.max(0, Math.min(365, Number(e.target.value) || 0)); updateStep(idx, { delayHours: days * 24 + ((s.delayHours ?? 0) % 24) }); }}
+                            className="w-12 px-2 py-0.5 bg-slate-800 border border-white/10 rounded" />
+                          <span className="text-white/85">일</span>
+                          <input type="number" min={0} max={23} value={(s.delayHours ?? 0) % 24}
+                            onChange={(e) => { const hrs = Math.max(0, Math.min(23, Number(e.target.value) || 0)); updateStep(idx, { delayHours: Math.floor((s.delayHours ?? 0) / 24) * 24 + hrs }); }}
+                            className="w-12 px-2 py-0.5 bg-slate-800 border border-white/10 rounded" />
+                          <span className="text-white/85">시간 뒤</span>
+                          <span className="text-white/50 ml-1">· 발송 시각</span>
+                          <select value={s.delayMode === 'relative_at_hour' && s.targetHourKst != null ? String(s.targetHourKst) : ''}
+                            onChange={(e) => { const v = e.target.value; if (v === '') updateStep(idx, { delayMode: 'relative', targetHourKst: undefined }); else updateStep(idx, { delayMode: 'relative_at_hour', targetHourKst: Number(v) }); }}
+                            className="px-1.5 py-0.5 bg-slate-800 border border-white/10 rounded">
+                            <option value="">지정 안 함</option>
+                            {Array.from({ length: 13 }, (_, i) => i + 8).map((h) => <option key={h} value={h}>{String(h).padStart(2, '0')}시</option>)}
+                          </select>
+                          <span className="text-white/35 text-[10px]">밤이면 아침 자동</span>
                         </div>
                       )}
                       <div className="flex flex-wrap items-center gap-1.5 text-xs">
