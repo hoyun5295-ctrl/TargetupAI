@@ -504,6 +504,7 @@ export async function querySendStats(options: SendStatsOptions): Promise<SendSta
   const metaResult = await query(`
     SELECT
       c.id, c.company_id, c.created_by, c.message_type,
+      c.result_final, c.sent_count, c.success_count, c.fail_count,
       ${groupCol} as period
     FROM campaigns c
     WHERE ${baseWhereSql}
@@ -520,9 +521,9 @@ export async function querySendStats(options: SendStatsOptions): Promise<SendSta
     };
   }
 
-  // 2) MySQL 큐 + 카카오 배치 집계 (CT-04 컨트롤타워)
-  const smsCountMap = await aggregateSmsCountsByCampaign(campaigns);
-  const kakaoCountMap = await kakaoBatchAggByGroup(campaigns.map((c: any) => c.id));
+  // 2) ★ result_final 캐시 우선 — 완료(6h 경과) 캠페인은 PG 캐시(MySQL skip), 진행 중만 실시간 집계.
+  //    getCampaignResultCounts가 SMS+카카오 합산까지 끝낸 {sent,success,fail} 반환 (이중 합산 방지).
+  const resultCountMap = await getCampaignResultCounts(campaigns);
 
   // 3) JS에서 KST period 그룹핑 + 요약 합산
   const byPeriod = new Map<string, { runs: Set<string>; sent: number; success: number; fail: number }>();
@@ -531,12 +532,11 @@ export async function querySendStats(options: SendStatsOptions): Promise<SendSta
   let totalFail = 0;
 
   for (const c of campaigns) {
-    const sms = smsCountMap.get(c.id) || { total_count: 0, success_count: 0, fail_count: 0 };
-    const kakao = kakaoCountMap.get(c.id) || { total: 0, success: 0, fail: 0, pending: 0 };
+    const counts = resultCountMap.get(c.id) || { sent: 0, success: 0, fail: 0 };
 
-    const sent = Number(sms.total_count || 0) + kakao.total;
-    const success = Number(sms.success_count || 0) + kakao.success;
-    const fail = Number(sms.fail_count || 0) + kakao.fail;
+    const sent = counts.sent;
+    const success = counts.success;
+    const fail = counts.fail;
 
     totalSent += sent;
     totalSuccess += success;
@@ -619,6 +619,7 @@ export async function querySendStatsDetail(
     SELECT
       c.id, c.company_id, c.created_by, c.campaign_name, c.send_type, c.message_content,
       c.message_type, c.is_ad, c.callback_number, c.target_count, c.sent_at,
+      c.result_final, c.sent_count, c.success_count, c.fail_count,
       ${CAMPAIGN_OPT080_SELECT_EXPR},
       u.id as user_id, u.name as user_name, u.login_id, u.department, u.store_codes
     FROM campaigns c
@@ -637,9 +638,8 @@ export async function querySendStatsDetail(
     return { userStats: [], campaigns: [], unitCost: { sms: cSms, lms: cLms } };
   }
 
-  // 2) MySQL 큐 + 카카오 배치 집계 + 첫 발송 시각
-  const smsCountMap = await aggregateSmsCountsByCampaign(metaRows);
-  const kakaoCountMap = await kakaoBatchAggByGroup(metaRows.map((c: any) => c.id));
+  // 2) ★ result_final 캐시 우선 (카운트, MySQL skip) + 첫 발송 시각(실시간 유지)
+  const resultCountMap = await getCampaignResultCounts(metaRows);
   const sentTimeMap = await aggregateSmsSendTimesByCampaign(metaRows);
 
   // 3) JS에서 사용자별 집계 + 캠페인 row 빌드
@@ -652,12 +652,11 @@ export async function querySendStatsDetail(
   const campaignRows: any[] = [];
 
   for (const c of metaRows) {
-    const sms = smsCountMap.get(c.id) || { total_count: 0, success_count: 0, fail_count: 0 };
-    const kakao = kakaoCountMap.get(c.id) || { total: 0, success: 0, fail: 0, pending: 0 };
+    const counts = resultCountMap.get(c.id) || { sent: 0, success: 0, fail: 0 };
 
-    const sent = Number(sms.total_count || 0) + kakao.total;
-    const success = Number(sms.success_count || 0) + kakao.success;
-    const fail = Number(sms.fail_count || 0) + kakao.fail;
+    const sent = counts.sent;
+    const success = counts.success;
+    const fail = counts.fail;
 
     // 사용자별 집계 (created_by NULL인 캠페인은 'null' 키로 묶임 → user_name 등 NULL)
     const uKey = c.user_id || 'null';

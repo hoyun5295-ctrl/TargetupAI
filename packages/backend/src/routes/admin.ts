@@ -1257,6 +1257,7 @@ router.get('/stats/send', authenticate, requireSuperAdmin, async (req: Request, 
     const metaResult = await query(`
       SELECT
         c.id, c.company_id, c.created_by, c.message_type,
+        c.result_final, c.sent_count, c.success_count, c.fail_count,
         ${groupCol} as period,
         co.company_name,
         lg.group_name as line_group_name
@@ -1268,8 +1269,8 @@ router.get('/stats/send', authenticate, requireSuperAdmin, async (req: Request, 
     `, baseParams);
 
     const metaCampaigns = metaResult.rows;
-    const smsCountMap = await aggregateSmsCountsByCampaign(metaCampaigns);
-    const kakaoCountMap = await kakaoBatchAggByGroup(metaCampaigns.map((c: any) => c.id));
+    // ★ result_final 캐시 우선 — 완료 캠페인 MySQL skip, 진행 중만 실시간(라인그룹 합집합 포함).
+    const resultCountMap = await getCampaignResultCounts(metaCampaigns);
 
     // (period, company_id)별 그룹핑 + 전체 summary 합산
     type Bucket = { period: string; company_id: any; company_name: any; line_group_name: any; runs: Set<string>; sent: number; success: number; fail: number };
@@ -1277,11 +1278,10 @@ router.get('/stats/send', authenticate, requireSuperAdmin, async (req: Request, 
     let totalSent = 0, totalSuccess = 0, totalFail = 0;
 
     for (const c of metaCampaigns) {
-      const sms = smsCountMap.get(c.id) || { total_count: 0, success_count: 0, fail_count: 0 };
-      const kakao = kakaoCountMap.get(c.id) || { total: 0, success: 0, fail: 0, pending: 0 };
-      const sent = Number(sms.total_count || 0) + kakao.total;
-      const success = Number(sms.success_count || 0) + kakao.success;
-      const fail = Number(sms.fail_count || 0) + kakao.fail;
+      const counts = resultCountMap.get(c.id) || { sent: 0, success: 0, fail: 0 };
+      const sent = counts.sent;
+      const success = counts.success;
+      const fail = counts.fail;
       totalSent += sent; totalSuccess += success; totalFail += fail;
 
       const key = `${c.period}|${c.company_id}`;
@@ -1421,6 +1421,7 @@ router.get('/stats/send/detail', authenticate, requireSuperAdmin, async (req: Re
       SELECT
         c.id, c.company_id, c.created_by, c.campaign_name, c.send_type, c.message_content,
         c.message_type, c.is_ad, c.callback_number, c.target_count, c.created_at, c.sent_at,
+        c.result_final, c.sent_count, c.success_count, c.fail_count,
         ${CAMPAIGN_OPT080_SELECT_EXPR},
         u.id as user_id, u.name as user_name, u.login_id, u.department, u.store_codes
       FROM campaigns c
@@ -1434,8 +1435,8 @@ router.get('/stats/send/detail', authenticate, requireSuperAdmin, async (req: Re
     `, [dateVal, companyId]);
 
     const detailMetaRows = metaResult.rows;
-    const detailSmsMap = await aggregateSmsCountsByCampaign(detailMetaRows);
-    const detailKakaoMap = await kakaoBatchAggByGroup(detailMetaRows.map((c: any) => c.id));
+    // ★ result_final 캐시 우선(카운트, MySQL skip) + 첫 발송시각(실시간 유지)
+    const detailResultMap = await getCampaignResultCounts(detailMetaRows);
     const detailSentTimeMap = await aggregateSmsSendTimesByCampaign(detailMetaRows);
 
     type DetailUserAgg = { user_id: any; user_name: any; login_id: any; department: any; store_codes: any; runs: Set<string>; sent: number; success: number; fail: number };
@@ -1443,11 +1444,10 @@ router.get('/stats/send/detail', authenticate, requireSuperAdmin, async (req: Re
     const campaignRows: any[] = [];
 
     for (const c of detailMetaRows) {
-      const sms = detailSmsMap.get(c.id) || { total_count: 0, success_count: 0, fail_count: 0 };
-      const kakao = detailKakaoMap.get(c.id) || { total: 0, success: 0, fail: 0, pending: 0 };
-      const sent = Number(sms.total_count || 0) + kakao.total;
-      const success = Number(sms.success_count || 0) + kakao.success;
-      const fail = Number(sms.fail_count || 0) + kakao.fail;
+      const counts = detailResultMap.get(c.id) || { sent: 0, success: 0, fail: 0 };
+      const sent = counts.sent;
+      const success = counts.success;
+      const fail = counts.fail;
 
       const uKey = c.user_id || 'null';
       if (!byUser.has(uKey)) {
@@ -3212,6 +3212,7 @@ router.get('/stats/export', authenticate, requireSuperAdmin, async (req: Request
     const exportMetaResult = await query(
       `SELECT
         c.id, c.company_id, c.created_by, c.target_count, c.message_type, c.send_channel, c.send_type,
+        c.result_final, c.sent_count, c.success_count, c.fail_count,
         TO_CHAR(${STAT_DATE_EXPR} AT TIME ZONE 'Asia/Seoul', 'YYYY-MM-DD') as send_date,
         co.company_name,
         co.company_code,
@@ -3225,7 +3226,8 @@ router.get('/stats/export', authenticate, requireSuperAdmin, async (req: Request
       params
     );
 
-    const exportSmsMap = await aggregateSmsCountsByCampaign(exportMetaResult.rows);
+    // 일반 캠페인 — result_final 캐시 우선(완료 MySQL skip). 알림톡은 채널 분리라 실시간 유지.
+    const exportResultMap = await getCampaignResultCounts(exportMetaResult.rows);
     const exportKakaoMap = await kakaoBatchAggByGroup(exportMetaResult.rows.map((c: any) => c.id));
     // 알림톡 캠페인만 채널 분리 집계(알림톡 K / 대체발송 L·k_oriseq>0) → 엑셀에서 2행으로 분리
     const alimtalkCampaigns = exportMetaResult.rows.filter((c: any) => c.send_channel === 'alimtalk');
@@ -3272,14 +3274,12 @@ router.get('/stats/export', authenticate, requireSuperAdmin, async (req: Request
           addExportBucket(c, 'substitute', '알림톡대체발송', 0, s.total, s.success, s.fail, s.pending);
         }
       } else {
-        const sms = exportSmsMap.get(c.id) || { total_count: 0, success_count: 0, fail_count: 0, pending_count: 0 };
+        const counts = exportResultMap.get(c.id) || { sent: 0, success: 0, fail: 0 };
+        const pending = Math.max(0, counts.sent - counts.success - counts.fail);
         const channelKey = `${c.message_type || ''}|${c.send_channel || ''}`;
         addExportBucket(c, channelKey, getCampaignChannelLabel(c.send_channel, c.message_type),
           Number(c.target_count || 0),
-          Number(sms.total_count || 0) + kakao.total,
-          Number(sms.success_count || 0) + kakao.success,
-          Number(sms.fail_count || 0) + kakao.fail,
-          Number(sms.pending_count || 0) + kakao.pending);
+          counts.sent, counts.success, counts.fail, pending);
       }
     }
 
