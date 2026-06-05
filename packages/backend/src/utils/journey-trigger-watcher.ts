@@ -26,9 +26,8 @@
 
 import { query, pool } from '../config/database';
 // 추출 조건 = journey-target-extractor 공유 컨트롤타워 (발송·미리보기 동일 기준 단일 진입점)
-import { selectJourneyTargetCustomerIds, selectCdpEventRowsForCursor } from './journey-target-extractor';
+import { selectJourneyTargetCustomerIds, selectCdpEventRowsForCursor, JOURNEY_COUNT_CAP } from './journey-target-extractor';
 import { planCdpCursorBatch } from './journey-cdp-cursor';
-import { recordEnteredWithClient } from './journey-entry-ledger';
 import { calculateNextRunAt } from './send-time-util';
 
 // ════════════════════════════════════════════════════════════════════
@@ -137,7 +136,7 @@ async function processJourneyTrigger(j: ActiveJourney): Promise<{ matched: numbe
   // ★ Fix #2 (2026-06-05): 대량 차단기를 LIMIT 500이 무력화하던 문제 정정.
   //   상한 설정 시 cap+1까지 추출 → 진짜 급증(후보 > 상한)만 정지. 미설정(무제한)이면 500 스로틀로 회차 분산.
   const cap = j.threshold_recipients_per_step;
-  const extractLimit = cap != null ? Number(cap) + 1 : 500;
+  const extractLimit = cap != null ? Number(cap) + 1 : JOURNEY_COUNT_CAP;
   const ids = await selectJourneyTargetCustomerIds(j.company_id, j.trigger_event, j.trigger_filters || {}, extractLimit, j.id, reentry);
   if (ids.length === 0) {
     return { matched: 0, enqueued: 0, skipped: 0 };
@@ -229,8 +228,8 @@ async function processCdpCursorJourney(j: ActiveJourney, eventName: string): Pro
 // ════════════════════════════════════════════════════════════════════
 
 async function enqueueCandidates(j: ActiveJourney, customerIds: string[]): Promise<{ matched: number; enqueued: number; skipped: number }> {
-  const summary = { matched: customerIds.length, enqueued: 0, skipped: 0 };
-  if (customerIds.length === 0) return summary;
+  const matched = customerIds.length;
+  if (matched === 0) return { matched: 0, enqueued: 0, skipped: 0 };
 
   // 첫 step 조회 (step_order=1)
   const firstStepRes = await query(
@@ -238,66 +237,61 @@ async function enqueueCandidates(j: ActiveJourney, customerIds: string[]): Promi
     [j.id]
   );
   if (firstStepRes.rows.length === 0) {
-    return summary;
+    return { matched, enqueued: 0, skipped: matched };
   }
   const firstStep = firstStepRes.rows[0] as FirstStepRow;
-
-  // ★ Phase 2: 신규가입은 진입 시 원장에 'entered' 기록(execution과 원자 트랜잭션). 식별자(매장코드+전화번호) 일괄 조회.
+  const nextRunAt = calculateNextRunAt(firstStep.delay_mode, Number(firstStep.delay_hours || 0), firstStep.target_hour_kst);
   const isSignup = j.trigger_event === 'customer.created';
-  const identityMap = new Map<string, { store_code: string | null; phone: string }>();
-  if (isSignup) {
-    const idRes = await query(
-      `SELECT id, store_code, phone FROM customers WHERE id = ANY($1::uuid[]) AND company_id = $2::uuid`,
-      [customerIds, j.company_id]
+
+  // ★ Fix #6 (2026-06-05): 한 명씩 루프 폐기 → 조건 맞는 전원을 한 방 일괄 INSERT(원래 의도 = 전체 진입).
+  //   중복·cooldown은 추출 단계 안티조인(원장·재진입·execution)이 이미 제외. 아래 NOT EXISTS는 추가 안전망 —
+  //   재진입 가능 = active만 / 재진입 불가 = 어떤 execution이라도 있으면 제외(checkCooldown과 동일 기준).
+  const reentryGuard = j.allow_reentry ? `AND je.status = 'active'` : ``;
+  let enqueued = 0;
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const insRes = await client.query(
+      `INSERT INTO journey_executions (id, journey_id, customer_id, current_step_order, status, entered_at, next_run_at, created_at)
+       SELECT gen_random_uuid(), $1::uuid, cid, 0, 'active', NOW(), $3, NOW()
+         FROM unnest($2::uuid[]) AS cid
+        WHERE NOT EXISTS (
+          SELECT 1 FROM journey_executions je
+           WHERE je.journey_id = $1::uuid AND je.customer_id = cid ${reentryGuard}
+        )
+       RETURNING customer_id`,
+      [j.id, customerIds, nextRunAt]
     );
-    for (const row of idRes.rows) identityMap.set(row.id, { store_code: row.store_code, phone: row.phone });
-  }
+    enqueued = insRes.rows.length;
 
-  const insertExecSql = INSERT_EXECUTION_SQL;
-
-  for (const customerId of customerIds) {
-    const allowed = await checkCooldown(j, customerId);
-    if (!allowed) {
-      summary.skipped++;
-      continue;
+    // 신규가입: 실제 진입한 고객만 진입 원장 'entered' 일괄 기록(같은 트랜잭션 — 원자성). 식별자=회사+매장코드+전화번호.
+    if (isSignup && enqueued > 0) {
+      const enteredIds = insRes.rows.map((r: any) => r.customer_id);
+      await client.query(
+        `INSERT INTO journey_entry_ledger (journey_id, company_id, store_code, phone, kind)
+         SELECT $1::uuid, c.company_id, c.store_code, c.phone, 'entered'
+           FROM customers c
+          WHERE c.id = ANY($2::uuid[]) AND c.company_id = $3::uuid AND c.phone IS NOT NULL AND c.phone <> ''
+         ON CONFLICT (journey_id, company_id, COALESCE(store_code, '__NONE__'), phone) DO NOTHING`,
+        [j.id, enteredIds, j.company_id]
+      );
     }
 
-    const nextRunAt = calculateNextRunAt(firstStep.delay_mode, Number(firstStep.delay_hours || 0), firstStep.target_hour_kst);
-    const insertExecParams = [j.id, customerId, nextRunAt];
-
-    if (isSignup) {
-      // 진입 원장 'entered' 기록을 execution INSERT와 한 트랜잭션으로 (원자성 — 한쪽만 남는 사고 차단).
-      const ident = identityMap.get(customerId);
-      const client = await pool.connect();
-      try {
-        await client.query('BEGIN');
-        await client.query(insertExecSql, insertExecParams);
-        if (ident?.phone) {
-          await recordEnteredWithClient(client, j.id, j.company_id, ident.store_code, ident.phone);
-        }
-        await client.query('COMMIT');
-      } catch (e) {
-        await client.query('ROLLBACK');
-        throw e;
-      } finally {
-        client.release();
-      }
-    } else {
-      await query(insertExecSql, insertExecParams);
+    if (enqueued > 0) {
+      await client.query(
+        `UPDATE journeys SET stats_total_entered = stats_total_entered + $2, updated_at = NOW() WHERE id = $1::uuid`,
+        [j.id, enqueued]
+      );
     }
-
-    summary.enqueued++;
+    await client.query('COMMIT');
+  } catch (e) {
+    await client.query('ROLLBACK');
+    throw e;
+  } finally {
+    client.release();
   }
 
-  if (summary.enqueued > 0) {
-    await query(
-      `UPDATE journeys SET stats_total_entered = stats_total_entered + $2, updated_at = NOW()
-       WHERE id = $1::uuid`,
-      [j.id, summary.enqueued]
-    );
-  }
-
-  return summary;
+  return { matched, enqueued, skipped: matched - enqueued };
 }
 
 async function checkCooldown(j: ActiveJourney, customerId: string): Promise<boolean> {

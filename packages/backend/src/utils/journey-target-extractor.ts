@@ -96,6 +96,7 @@ export async function selectJourneyTargetCustomerIds(
     case 'cdp.cart_abandon': {
       const h = Number(filters.abandon_hours || 24);
       const params: any[] = [companyId, String(h)];
+      const antiJoin = journeyId && reentry ? buildReentryAntiJoin('c', params, journeyId, reentry.allowReentry, reentry.cooldownDays) : '';
       const cond = applyCustomerConditions(filters.customer_conditions || [], filters.logic || 'AND', params);
       params.push(String(limit));
       const r = await query(
@@ -121,6 +122,7 @@ export async function selectJourneyTargetCustomerIds(
              AND e2.occurred_at > a.cart_add_at
          )
            AND ${buildJourneySafetyFilter('c')}
+         ${antiJoin}
          ${cond ? ` AND ${cond}` : ''}
          LIMIT $${params.length}::int`,
         params,
