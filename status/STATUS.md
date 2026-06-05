@@ -107,7 +107,15 @@
 
 ---
 
-### 🟢 2026-06-05 세션6 (최신) — 발송결과 markFinalized 완전집계 + 알림톡 변수매칭 필드 노출
+### 🟢 2026-06-05 세션7 (최신) — 여정 결함 11건 fix(배포) + 자동마케팅 점검 + 자율발송 설계
+> **여정 엔진 결함 11건 fix(설계서 대조 전수점검·전부 배포) + 자동마케팅(Continuous Operator) 점검(★자동실행 실발송 코드 없음 CRITICAL) + 자율발송 설계서. 다음 세션 = 자동발송 spec §6 질의 10건 → 구현.**
+> - **여정 11건(배포)**: ①발송/재진입 공통 안전필터(isCustomerSendable+reentry buildJourneySafetyFilter) ②휴면/생일/포인트 진입안티조인(buildReentryAntiJoin)+워처 cap+1 ③목록 status SQL주입 화이트리스트(journey-list-filter) ④활성화 전 검증 마커게이트(journeys.last_pretest_passed_at ALTER 완료+503) ⑤정지 레이스(executor statusCheck가 journey.status까지)+무효UPDATE제거 ⑥**전원진입(원래의도)=추출 LIMIT제거+일괄INSERT(루프폐기)+장바구니 재진입안티조인** ⑦검증비용 회사실단가(임의상수 제거) ⑧죽은 resumeJourney제거 ⑨지연상한 8760h통일 ⑩wait delayMode relative_at_hour ⑪cdp커서 LIMIT누락(planCdpCursorBatch 마지막이벤트시각까지). 신규순수TDD safety-filter/list-filter/cdp-cursor · 백엔드 tsc0 · 여정 순수테스트 127건 green · 박단어0. 방식차이3(의도충족)=§6일괄INSERT·§7 campaign공유멱등·§11 마커게이트.
+> - **자동마케팅 점검(CRITICAL)**: 자동실행(auto_executed)이 크레딧만 차감하고 **실제 발송 코드 전무**(continuous-operator:593 차감, markProposalExecuted 호출0, 발송 워커·엔드포인트0). +안전필터갭(countFilteredCustomers services/ai.ts:2282 is_opt_out·is_invalid 누락 — 여정 #1과 동일)+검증기간 차단불완전(580 vs 593)+compliance fail-open(ai-orchestrator:280)+죽은 스팸코드.
+> - **자동발송 설계(Harold 확정)**: 매달 계절문안 AI생성+조건타겟 자동추출+테스트후 자율발송. 첫 달부터 자율, 운영자가 발송시각 T 선택, 2h전 담당자 테스트/알림(정지창), 스팸 2회재생성 실패시 운영자정지+사유알림, 타겟0건이면 스킵. 발송=직접발송 파이프라인 재사용(sendCampaignDirect 추출). spec=`docs/superpowers/specs/2026-06-05-continuous-operator-autosend-design.md` §6 비토 질의 10건. 핸드오프=`docs/superpowers/handoffs/2026-06-05-journey-fixes-automarketing-handoff.md`.
+
+---
+
+### 🟢 2026-06-05 세션6 — 발송결과 markFinalized 완전집계 + 알림톡 변수매칭 필드 노출
 > **① soos 발송결과 목록↔상세 불일치 + ② 알림톡 발송 주소록/엑셀 변수매칭 필드 미노출. 둘 다 코드·검증·배포 완료(2026-06-05). ★다음 세션 = 여정 점검(executor/builder/step-campaign/trigger 전면).**
 > - **① soos 발송결과(운영 고객사 수스_대행)**: 목록=PG캐시(과소 2,304) vs 상세=MySQL실시간(정확 2,685) 불일치. 원인 = 5/30 result_final 일괄 마킹(4,517건) 때 success+fail(2,362)<sent(2,840)인 **4건이 미완성으로 확정**(markFinalizedCampaigns가 `(success+fail)>0`만 검사). 5/31~6/5 신규 935건 gap 0(일회성). 정산(billing.ts /generate·admin 요금정산)은 MySQL 직접 집계라 **영향 0**. 수정 = `campaign-sync-worker.ts:243`에 `sent_count>0 AND (success+fail)>=sent_count` 강화 + soos 4건 `result_final=false`(실시간 복귀) + hoyun 542 `cancelled`+`result_final=true`(폭발 해소, 차감 reference_id≠campaign.id라 prepaidRefund(campaign.id) 환불 0·후불).
 > - **② 알림톡 변수매칭(직원 psy5868 신고)**: 주소록/엑셀 불러오면 수신자에 phone만·드롭다운에 필드 0. 원인 = 수신자 미리보기가 `mappedColumns`(변수매칭 선택된 것만) 렌더 + 드롭다운 라벨 영문 + 자동매핑이 변수명=필드명 완전일치만. backend(`address-books.ts:57` SELECT 5컬럼)·불러오기(`AddressBookModal:624` 5키 map)는 정상 → 미리보기 표시 로직이 버그. 수정 = `AlimtalkSendModal.tsx` previewColumns(recipients[0] keys 항상 표시) + FIELD_LABEL_MAP 한글(이름·기타1~3) + 자동매핑 useEffect(변수↔필드 의미일치). tsc 0.

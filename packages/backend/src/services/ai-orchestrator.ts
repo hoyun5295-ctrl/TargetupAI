@@ -68,6 +68,7 @@ export interface AgentContext {
   objective: string;
   companyInfo: Record<string, any>;
   customerStats: Record<string, any>;
+  seasonHint?: string;   // 계절 문안 힌트 — 메시지 생성에만 주입(objective·타겟 불변). 자동마케팅에서 사용.
 }
 
 export interface ComplianceResult {
@@ -276,8 +277,9 @@ passed=true 이면 warnings/suggestions 빈 배열 가능. 사소한 issue는 me
       suggestions: Array.isArray(parsed.suggestions) ? parsed.suggestions.slice(0, 5).map(String) : [],
     };
   } catch (err) {
-    console.warn('[Compliance Sub-agent] 검수 실패, passed=true fallback:', err);
-    return { passed: true, riskLevel: 'low', warnings: [], suggestions: [] };
+    // ★ 자동발송 fail-closed: 검수를 완료하지 못하면 passed=false → 자동발송 자격 제외(수동 검토는 가능).
+    console.warn('[Compliance Sub-agent] 검수 실패 → passed=false(자동발송 보류):', err);
+    return { passed: false, riskLevel: 'medium', warnings: ['자동 검수를 완료하지 못해 자동발송을 보류합니다.'], suggestions: [] };
   }
 }
 
@@ -351,7 +353,7 @@ async function _orchestrateImpl(ctx: AgentContext): Promise<OrchestratorResult> 
   const companyDataProfile = await getCompanyDataProfile(ctx.companyId);
 
   const messagesResult = await generateMessages(
-    ctx.objective,
+    ctx.seasonHint ? `${ctx.objective}\n\n${ctx.seasonHint}` : ctx.objective,
     {
       total_count: estimatedCount,
       avg_purchase_count: parseFloat(ctx.customerStats.avg_purchase_count) || 0,

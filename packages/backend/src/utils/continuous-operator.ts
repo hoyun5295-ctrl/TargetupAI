@@ -32,7 +32,8 @@ import { getCompanyCosts } from '../config/defaults';
 import { insertProposalVariants } from './bandit-optimizer';
 // ★ D212+ 정책 (2026-05-23 Harold 명시): CT-64 영역 통합 — 검증 영역 + 담당자 학습
 // ★ D227+ 스팸 안전망 격상 — decideSpamOutcome(실제 테스트 결과 → 상태) + buildSpamRegeneratePrompt(AI 재작성)
-import { isAutoSendAllowed, recordAdminStopLearning, decideSpamOutcome, buildSpamRegeneratePrompt } from './continuous-operator-policy';
+import { recordAdminStopLearning, decideSpamOutcome, buildSpamRegeneratePrompt } from './continuous-operator-policy';
+import { resolveAutoSendLeadMinutes, computeScheduledSendAt, decideSendOutcome } from './autosend-policy';
 // ★ D227+ 검증된 스팸 자산 재사용 (auto-campaign-worker와 동일 패턴) — 실제 테스트폰 발송 + AI 재생성 + 재테스트
 import { autoSpamTestWithRegenerate } from './spam-test-queue';
 import { generateMessages } from '../services/ai';
@@ -41,6 +42,12 @@ import { InsufficientCreditError, checkCredit, deductCreditSafe } from './ai-cre
 import { getCreditCost } from './ai-credit-calc';
 import { runInCreditBundle } from './ai-credit-context';
 import { getAuthSmsTable, bulkInsertSmsQueue } from './sms-queue';
+import { randomUUID } from 'crypto';
+import { buildFilterWhereClauseCompat } from './customer-filter';
+import { buildSendableRecipientsSql } from './operator-recipients';
+import { createDirectSendCampaign } from './direct-send-core';
+import { DirectSendError } from './direct-send-spec';
+import { buildSeasonPromptBlock, getSeasonContext } from './season-context';
 
 // ════════════════════════════════════════════════════════════════════
 // 타입
@@ -48,7 +55,7 @@ import { getAuthSmsTable, bulkInsertSmsQueue } from './sms-queue';
 
 export type OperatorSchedule = 'daily' | 'weekly' | 'monthly';
 export type OperatorStatus = 'active' | 'paused' | 'paused_no_credit' | 'archived';
-export type ProposalStatus = 'pending' | 'approved' | 'rejected' | 'auto_executed' | 'expired' | 'admin_review';
+export type ProposalStatus = 'pending' | 'approved' | 'rejected' | 'auto_executed' | 'expired' | 'admin_review' | 'admin_stopped' | 'scheduled' | 'sending' | 'sent' | 'skipped';
 
 export interface CreateOperatorInput {
   companyId: string;
@@ -91,6 +98,7 @@ export interface ContinuousOperator {
   optOutMinutes: number;                            // default 5 (담당자 옵트아웃)
   spamScoreThreshold: number;                       // default 30
   maxSpamRetries: number;                           // default 3
+  autoSendLeadMinutes: number | null;               // 자율 발송 준비·정지 창(분) — null→120
 }
 
 export interface OperatorProposal {
@@ -161,13 +169,13 @@ export async function listOperators(companyId: string): Promise<ContinuousOperat
          SELECT SUM(cost_estimate) FROM operator_proposals
          WHERE operator_id = o.id
            AND created_at >= date_trunc('month', NOW())
-           AND status IN ('approved', 'auto_executed')
+           AND status IN ('approved', 'auto_executed', 'sent')
        ), 0) AS budget_spent_month,
        COALESCE((
          SELECT SUM(cost_estimate) FROM operator_proposals
          WHERE operator_id = o.id
            AND created_at >= CURRENT_DATE
-           AND status IN ('approved', 'auto_executed')
+           AND status IN ('approved', 'auto_executed', 'sent')
        ), 0) AS budget_spent_today
      FROM continuous_operators o
      WHERE o.company_id = $1::uuid AND o.status != 'archived'
@@ -298,13 +306,13 @@ export async function generateProposalForOperator(operatorId: string): Promise<O
          SELECT SUM(cost_estimate) FROM operator_proposals
          WHERE operator_id = o.id
            AND created_at >= date_trunc('month', NOW())
-           AND status IN ('approved', 'auto_executed')
+           AND status IN ('approved', 'auto_executed', 'sent')
        ), 0) AS budget_spent_month,
        COALESCE((
          SELECT SUM(cost_estimate) FROM operator_proposals
          WHERE operator_id = o.id
            AND created_at >= CURRENT_DATE
-           AND status IN ('approved', 'auto_executed')
+           AND status IN ('approved', 'auto_executed', 'sent')
        ), 0) AS budget_spent_today
      FROM continuous_operators o
      JOIN companies c ON o.company_id = c.id
@@ -380,6 +388,8 @@ export async function generateProposalForOperator(operatorId: string): Promise<O
       objective: operator.objective,
       companyInfo,
       customerStats,
+      // ★ 계절 문안 주입 — objective는 불변, 그 달 시즌을 메시지 톤·소재로만(§6-8).
+      seasonHint: buildSeasonPromptBlock(getSeasonContext(new Date()).month, ctx.business_type),
     }, { source: 'continuous-operator', cost: 0 });  // ★ 2026-06-02: 제안서 생성(매일)은 무과금 — 200은 저장 1회, 발송 시 문안 3로 재배치. source는 이력용 유지.
     // ★ D227+ 종량제: 크레딧 충분해 정상 실행 — paused_no_credit였으면 자동 재개
     await query(
@@ -420,13 +430,20 @@ export async function generateProposalForOperator(operatorId: string): Promise<O
     return null;
   }
 
-  // 6. 자동 실행 임계값 체크 (ENT 옵션)
+  // 6. 자동 발송 자격 체크 (ENT 옵션)
   const costEstimate = orchestratorResult.cost?.estimated || 0;
   const compliance = orchestratorResult.compliance || { passed: true, riskLevel: 'low' };
   const isAd = orchestratorResult.channel?.isAd || false;
 
-  // ★ D210+ Phase 3 B-1 (2026-05-23 Harold 명시): risk 영역 회사별 max_risk 비교 매트릭스
-  //   매트릭스 순위 = low(1) < medium(2) < high(3) — 회사 max_risk 영역 이상 영역 차단
+  // 자율 발송 가능 조건(발신번호 + 문안 + SMS/LMS) — 스팸테스트·실발송에 필수. 미충족이면 수동 검토(pending)로.
+  const channelForSpam = (orchestratorResult.channel?.recommended || 'SMS').toUpperCase();
+  const callbackForSpam = String(companyInfo.callback || companyInfo.callback_number || ctx.reject_number || '').trim();
+  const firstMsg = ((orchestratorResult.messages as any[]) || [])[0];
+  const bestMessage = firstMsg ? String(firstMsg.body || firstMsg.message || '') : '';
+  const bestSubject = firstMsg ? String(firstMsg.subject || '') : '';
+  const canAutoSend = !!bestMessage && !!callbackForSpam && channelForSpam !== '카카오' && channelForSpam !== 'KAKAO';
+
+  // ★ D210+ Phase 3 B-1: risk 회사별 max_risk 비교 (low<medium<high — 회사 max 초과 차단)
   const riskRank: Record<string, number> = { low: 1, medium: 2, high: 3 };
   const proposalRiskRank = riskRank[compliance.riskLevel] || 1;
   const maxRiskRank = riskRank[ctx.cdp_auto_execute_max_risk] || 1;
@@ -439,7 +456,7 @@ export async function generateProposalForOperator(operatorId: string): Promise<O
     costEstimate <= ctx.cdp_auto_execute_max_cost_krw &&
     riskWithinThreshold &&
     compliance.passed &&
-    !isAd;
+    canAutoSend;
 
   const autoExecuteReason = autoExecuteEligible
     ? `자동 실행 임계값 통과: ${recipientCount}명 / ${costEstimate.toLocaleString()}원 / ${compliance.riskLevel} risk (회사 max ${ctx.cdp_auto_execute_max_risk}) / non-ad`
@@ -450,17 +467,19 @@ export async function generateProposalForOperator(operatorId: string): Promise<O
         costEstimate > ctx.cdp_auto_execute_max_cost_krw && `${costEstimate}원 > ${ctx.cdp_auto_execute_max_cost_krw}원`,
         !riskWithinThreshold && `compliance ${compliance.riskLevel} > 회사 max ${ctx.cdp_auto_execute_max_risk}`,
         !compliance.passed && 'compliance fail',
-        isAd && '광고성 메시지',
+        !canAutoSend && '발신번호·문안·채널(SMS/LMS) 미충족',
       ].filter(Boolean).join(', ')}`;
 
-  // 7. 제안서 INSERT
+  // 7. 제안서 INSERT — auto-eligible은 'scheduled'(T에 자율 발송) + scheduled_send_at, 아니면 'pending'(수동 검토)
+  const leadMinutes = resolveAutoSendLeadMinutes(operator.autoSendLeadMinutes);
+  const scheduledSendAt = computeScheduledSendAt(new Date(), leadMinutes);
   const proposalRes = await query(
     `INSERT INTO operator_proposals (
       id, operator_id, company_id, proposal_json, recipient_count, cost_estimate,
-      status, auto_executed, auto_execute_reason, expires_at, created_at
+      status, auto_executed, auto_execute_reason, scheduled_send_at, expires_at, created_at
     ) VALUES (
       gen_random_uuid(), $1::uuid, $2::uuid, $3::jsonb, $4, $5,
-      $6, $7, $8, NOW() + INTERVAL '7 days', NOW()
+      $6, $7, $8, $9, NOW() + INTERVAL '7 days', NOW()
     ) RETURNING *`,
     [
       operator.id,
@@ -468,9 +487,10 @@ export async function generateProposalForOperator(operatorId: string): Promise<O
       JSON.stringify(orchestratorResult),
       recipientCount,
       costEstimate,
-      autoExecuteEligible ? 'auto_executed' : 'pending',
+      autoExecuteEligible ? 'scheduled' : 'pending',
       autoExecuteEligible,
       autoExecuteReason,
+      autoExecuteEligible ? scheduledSendAt : null,
     ]
   );
 
@@ -491,14 +511,10 @@ export async function generateProposalForOperator(operatorId: string): Promise<O
     }
   }
 
-  // 9. ★ D227+ 스팸 안전망 격상 — 실제 테스트폰 발송 → 차단 시 AI 재생성(2회) → 재테스트 → 끝내 실패 시 담당자 검토.
+  // 9. ★ D227+ 스팸 안전망 — 실제 테스트폰 발송 → 차단 시 AI 재생성(2회) → 재테스트 → 끝내 실패 시 담당자 검토.
   //    auto-campaign-worker와 동일한 검증된 자산(autoSpamTestWithRegenerate + generateMessages) 재사용.
-  //    callbackNumber 없으면(SMS 발신번호 미설정) 테스트 불가 → 스킵(기존 pending 흐름 유지).
-  const channelForSpam = (orchestratorResult.channel?.recommended || 'SMS').toUpperCase();
-  const callbackForSpam = String(companyInfo.callback || companyInfo.callback_number || ctx.reject_number || '').trim();
-  const bestMessage = messages[0] ? String(messages[0].body || messages[0].message || '') : '';
-  const bestSubject = messages[0] ? String(messages[0].subject || '') : '';
-  if (bestMessage && callbackForSpam && channelForSpam !== '카카오' && channelForSpam !== 'KAKAO') {
+  //    channelForSpam·callbackForSpam·bestMessage·bestSubject·canAutoSend는 위 자격 판정에서 계산됨.
+  if (canAutoSend) {
     try {
       const spamResult = await autoSpamTestWithRegenerate({
         companyId: operator.companyId,
@@ -547,59 +563,50 @@ export async function generateProposalForOperator(operatorId: string): Promise<O
       const outcome = decideSpamOutcome(finalResult, regenCount);
       await query(
         `UPDATE operator_proposals SET
-           spam_test_status = $2, spam_test_retry_count = $3, spam_test_reasoning = $4, updated_at = NOW()
+           spam_test_status = $2, spam_test_retry_count = $3, spam_test_reasoning = $4
          WHERE id = $1::uuid`,
         [proposalRes.rows[0].id, finalResult, regenCount, outcome.reason],
       );
 
       if (outcome.status === 'admin_review') {
-        // 끝내 통과 X → 담당자 검토 대기 (자동 발송 차단, 자동 폐기 X)
+        // 끝내 통과 X → 담당자 검토 대기 (자동 발송 차단 + scheduled 해제, 자동 폐기 X)
         await query(
-          `UPDATE operator_proposals SET status = 'admin_review', auto_executed = false, auto_execute_reason = $2
+          `UPDATE operator_proposals SET status = 'admin_review', auto_executed = false, scheduled_send_at = NULL, auto_execute_reason = $2
            WHERE id = $1::uuid`,
           [proposalRes.rows[0].id, outcome.reason],
         );
         console.warn(`[ContinuousOperator] ${operator.name} 스팸 미통과 (재생성 ${regenCount}회) → 담당자 검토 대기`);
+        // ★ 스팸 2회 재생성 후에도 실패 → 운영자 일시정지 + 담당자 사유 알림(설계 §1)
+        await query(`UPDATE continuous_operators SET status = 'paused', updated_at = NOW() WHERE id = $1::uuid AND status = 'active'`, [operator.id]).catch(() => {});
+        await notifyOperatorAdmins(operator, '[AI 자동마케팅] 일시정지', `'${operator.name}' 문안이 스팸필터를 통과하지 못해 자동마케팅을 일시정지했습니다. 문안 검토 후 재개해주세요.`).catch((e: any) => console.warn('[ContinuousOperator] 정지 알림 경고:', e?.message));
       } else {
         console.log(`[ContinuousOperator] ${operator.name} 스팸 통과 (재생성 ${regenCount}회)`);
+        // 자율 발송 예정(scheduled) → 담당자에 실문안 + 정지 안내 (준비 시점 알림, 무과금 인증 라인)
+        if (autoExecuteEligible) {
+          await sendAutoSendPrepNotice(operator, proposalRes.rows[0].id, bestMessage, scheduledSendAt).catch((e: any) => console.warn('[ContinuousOperator] 준비 알림 경고:', e?.message));
+        }
       }
     } catch (err: any) {
-      console.warn(`[ContinuousOperator] 스팸테스트 오류 (skip):`, err?.message);
+      console.warn(`[ContinuousOperator] 스팸테스트 오류:`, err?.message);
+      // 스팸 검증 실패 = 자동 발송 금지. scheduled였으면 담당자 검토로 내림(미검증 발송 차단).
+      if (autoExecuteEligible) {
+        await query(
+          `UPDATE operator_proposals SET status = 'admin_review', auto_executed = false, scheduled_send_at = NULL,
+             auto_execute_reason = '스팸 검증 오류 — 담당자 검토 필요' WHERE id = $1::uuid`,
+          [proposalRes.rows[0].id],
+        ).catch(() => {});
+      }
     }
   }
 
-  // 10. ★ D212+ 정책 (2026-05-23 Harold 명시): 검증 영역 안 확인 (daily 영역 안 처음 N일 = 회사 admin 명시 컨펌 의무)
-  const verifyResult = isAutoSendAllowed({
-    deliveryPolicy: operator.deliveryPolicy,
-    verificationRequiredDays: operator.verificationRequiredDays,
-    verificationPassedDays: operator.verificationPassedDays,
-  });
-  if (!verifyResult.allowed) {
-    // 검증 영역 안 = 회사 admin 명시 컨펌 영역 (옛 영역 = autoExecute 영역 X)
-    await query(
-      `UPDATE operator_proposals SET auto_executed = false, auto_execute_reason = $2
-       WHERE id = $1::uuid`,
-      [proposalRes.rows[0].id, `검증 영역 안 — ${verifyResult.reason}`],
-    );
-  }
+  // (검증 7일 게이팅 제거 — verification_* 컬럼은 보존하되 자율 발송 흐름에서 미사용. 스팸 통과만으로 'scheduled'.)
 
   // 11. Operator 통계 갱신
   await updateOperatorAfterRun(operator.id, operator.schedule, operator.scheduleTime, 1, autoExecuteEligible);
 
   console.log(`[ContinuousOperator] ${operator.name} 제안서 박힘 (${recipientCount}명 / ${costEstimate}원 / ${autoExecuteEligible ? '자동 실행' : 'pending'} / variants ${messages.length}건 / 정책 ${operator.deliveryPolicy})`);
 
-  // ★ 2026-06-02 종량제: 자동 발송 확정(status='auto_executed') 시 문안 3 차감 (멱등키 proposalId — 재호출 0). 스팸·검증 미통과면 status가 auto_executed가 아니라 미차감.
-  const finalProposalStatus = (await query(`SELECT status FROM operator_proposals WHERE id = $1::uuid`, [proposalRes.rows[0].id])).rows[0]?.status;
-  if (finalProposalStatus === 'auto_executed') {
-    await deductCreditSafe({
-      companyId: operator.companyId,
-      cost: getCreditCost('continuous-operator-send'),
-      source: 'continuous-operator-send',
-      createdBy: operator.createdBy,
-      idempotencyKey: `continuous-operator-send:${proposalRes.rows[0].id}`,
-    });
-  }
-
+  // 자율 발송 크레딧(continuous-operator-send)은 실제 발송 성공 시점에 1회 차감(멱등키 proposalId) — runAutoSendPass에서 처리.
   return mapRowToProposal(proposalRes.rows[0]);
 }
 
@@ -609,10 +616,10 @@ export async function adminStopProposal(
   proposalId: string,
   stopReason: { reason: 'spam_suspicion' | 'content_correction' | 'no_send' | 'other'; detail?: string },
 ): Promise<boolean> {
-  // 회사 격리 + proposal 조회
+  // 회사 격리 + proposal 조회 (scheduled = 자율 발송 대기분도 정지 가능 — 정지 창)
   const r = await query(
     `SELECT id, proposal_json FROM operator_proposals
-     WHERE id = $1::uuid AND company_id = $2::uuid AND status IN ('pending', 'admin_review')`,
+     WHERE id = $1::uuid AND company_id = $2::uuid AND status IN ('pending', 'admin_review', 'scheduled')`,
     [proposalId, companyId],
   );
   if (r.rows.length === 0) return false;
@@ -620,18 +627,19 @@ export async function adminStopProposal(
   const proposal = r.rows[0];
   const messageBody = proposal.proposal_json?.messages?.[0]?.body || proposal.proposal_json?.messages?.[0]?.message || '';
 
-  // 정지 영역 처리
+  // 정지 처리 — scheduled_send_at 해제로 발송 패스에서 제외
   await query(
     `UPDATE operator_proposals SET
        status = 'admin_stopped',
        admin_response = 'stopped',
        admin_stop_reason = $2,
+       scheduled_send_at = NULL,
        reviewed_at = NOW()
      WHERE id = $1::uuid`,
     [proposalId, JSON.stringify(stopReason)],
   );
 
-  // AI 학습 영역 본질 (ai_company_memory 영역 안)
+  // 담당자 정지 사유 → ai_company_memory 학습 (다음 생성에 반영)
   await recordAdminStopLearning(companyId, proposalId, stopReason, messageBody);
 
   return true;
@@ -720,7 +728,7 @@ export async function listProposals(
   const statusFilter = status === 'all'
     ? ''
     : status === 'pending'
-      ? `AND p.status IN ('pending', 'admin_review')`
+      ? `AND p.status IN ('pending', 'admin_review', 'scheduled')`
       : `AND p.status = '${status}'`;
   const result = await query(
     `SELECT p.*, o.name AS operator_name, o.objective AS operator_objective
@@ -840,11 +848,150 @@ export async function runOperatorWorker(): Promise<{ processed: number; failed: 
     if (dueRes.rows.length > 0) {
       console.log(`[ContinuousOperator Worker] 처리 완료 — ${processed} 성공 / ${failed} 실패`);
     }
+
+    // 발송 패스 — scheduled_send_at(준비+lead) 도달한 자율 발송 제안서를 직접발송 파이프라인으로 처리.
+    await runAutoSendPass().catch((e: any) => console.error('[ContinuousOperator AutoSend] 패스 예외:', e?.message || e));
   } finally {
     workerRunning = false;
   }
 
   return { processed, failed };
+}
+
+// ════════════════════════════════════════════════════════════════════
+// 자율 발송 패스 — scheduled_send_at(준비+lead) 도달 제안서를 직접발송 파이프라인으로 발송
+// ════════════════════════════════════════════════════════════════════
+
+export async function runAutoSendPass(limit: number = 20): Promise<{ sent: number; skipped: number }> {
+  let sent = 0;
+  let skipped = 0;
+  const due = await query(
+    `SELECT id FROM operator_proposals
+     WHERE status = 'scheduled' AND scheduled_send_at IS NOT NULL AND scheduled_send_at <= NOW()
+     ORDER BY scheduled_send_at ASC
+     LIMIT $1`,
+    [limit],
+  );
+  for (const row of due.rows) {
+    try {
+      const r = await sendScheduledProposal(row.id);
+      if (r === 'sent') sent++; else skipped++;
+    } catch (err: any) {
+      skipped++;
+      console.error(`[ContinuousOperator AutoSend] ${row.id} 발송 실패:`, err?.message || err);
+    }
+  }
+  if (due.rows.length > 0) {
+    console.log(`[ContinuousOperator AutoSend] ${sent} 발송 / ${skipped} 스킵`);
+  }
+  return { sent, skipped };
+}
+
+async function sendScheduledProposal(proposalId: string): Promise<'sent' | 'skipped'> {
+  // 1. claim (scheduled → sending) — 동시 발송/중복 방지
+  const claim = await query(
+    `UPDATE operator_proposals SET status = 'sending'
+     WHERE id = $1::uuid AND status = 'scheduled' RETURNING *`,
+    [proposalId],
+  );
+  if (claim.rows.length === 0) return 'skipped'; // 다른 패스가 선점했거나 담당자가 정지함
+  const p = claim.rows[0];
+  const companyId: string = p.company_id;
+  const pj: any = p.proposal_json || {};
+
+  // operator(통지 대상 · created_by)
+  const opRes = await query(
+    `SELECT created_by, name, admin_phone_numbers, backup_admin_phone FROM continuous_operators WHERE id = $1::uuid`,
+    [p.operator_id],
+  );
+  const op = opRes.rows[0] || {};
+  const userId: string = op.created_by || companyId;
+  const notify = (title: string, body: string) =>
+    notifyOperatorAdmins(
+      { adminPhoneNumbers: Array.isArray(op.admin_phone_numbers) ? op.admin_phone_numbers : [], backupAdminPhone: op.backup_admin_phone || null, companyId },
+      title, body,
+    ).catch((e: any) => console.warn('[ContinuousOperator AutoSend] 통지 경고:', e?.message));
+
+  // 2. 발송 시점 타겟 재추출 (공통 안전필터 — 정지 창 동안 새 수신거부 반영)
+  const filters = pj.target?.filters || {};
+  const { sql: filterWhere, params: filterParams } = buildFilterWhereClauseCompat(filters, 2);
+  const { sql: recSql, params: recParams } = buildSendableRecipientsSql(filterWhere, filterParams, [companyId], '');
+  const rows = (await query(recSql, recParams)).rows;
+
+  // 3. 0건 → 스킵 + 통지 (operator는 다음 주기 정상)
+  const outcome = decideSendOutcome({ recipientCount: rows.length, balanceOk: true });
+  if (outcome.action === 'skip') {
+    await query(`UPDATE operator_proposals SET status = 'skipped', auto_execute_reason = $2 WHERE id = $1::uuid`, [proposalId, outcome.reason]);
+    if (outcome.notify) await notify('[AI 자동마케팅] 발송 생략', `'${op.name || ''}' 이번 사이클은 ${outcome.reason}.`);
+    return 'skipped';
+  }
+
+  // 4. 발송 발신번호 (회사 기본 등록 번호)
+  const cbRes = await query(
+    `SELECT REPLACE(phone, '-', '') AS phone FROM callback_numbers WHERE company_id = $1 AND is_default = true LIMIT 1`,
+    [companyId],
+  );
+  const callback = cbRes.rows[0]?.phone || null;
+  if (!callback) {
+    await query(`UPDATE operator_proposals SET status = 'admin_review', scheduled_send_at = NULL, auto_execute_reason = '발신번호 미설정 — 발송 보류' WHERE id = $1::uuid`, [proposalId]);
+    await notify('[AI 자동마케팅] 발송 보류', `'${op.name || ''}' 등록된 발신번호가 없어 발송을 보류했습니다.`);
+    return 'skipped';
+  }
+
+  // 5. staging 적재 (phone + name — %고객명% 치환용)
+  const stagingId = randomUUID();
+  const phones = rows.map((r: any) => String(r.phone || '').replace(/\D/g, ''));
+  const names = rows.map((r: any) => (r.name ?? null));
+  await query(
+    `INSERT INTO campaign_send_staging (staging_id, company_id, phone, name)
+     SELECT $1::uuid, $2::uuid, u.phone, u.name FROM UNNEST($3::text[], $4::text[]) AS u(phone, name)`,
+    [stagingId, companyId, phones, names],
+  );
+
+  // 6. 메시지/채널 (스팸 통과 본문)
+  const msg = pj.messages?.[0] || {};
+  const body = String(msg.body || msg.message || '');
+  const subject = String(msg.subject || '');
+  const channel = String(pj.channel?.recommended || 'SMS').toUpperCase();
+  const msgType = (channel === 'LMS' || channel === 'MMS') ? channel : 'SMS';
+  const isAd = !!(pj.channel?.isAd);  // 광고성이면 발송 시 (광고)·무료거부 080 자동 합성(direct-send-worker)
+
+  // 7. 발송 (직접발송 파이프라인 공유) — 잔액 부족이면 skip+통지
+  let campaignId: string;
+  try {
+    const res = await createDirectSendCampaign(
+      {
+        stagingId,
+        campaignName: `AI 자동마케팅 ${op.name || ''} ${new Date().toLocaleDateString('ko-KR')}`,
+        msgType, message: body, subject: subject || null, callback, sendChannel: 'sms',
+        adEnabled: isAd, total: rows.length, dedupEnabled: true, unsubFilterEnabled: true,
+      },
+      { companyId, userId },
+    );
+    campaignId = res.campaignId;
+  } catch (e: any) {
+    if (e instanceof DirectSendError && e.code === 'INSUFFICIENT_BALANCE') {
+      await query(`UPDATE operator_proposals SET status = 'skipped', auto_execute_reason = '잔액 부족 — 발송 생략' WHERE id = $1::uuid`, [proposalId]);
+      await notify('[AI 자동마케팅] 발송 생략', `'${op.name || ''}' 잔액 부족으로 이번 사이클 발송을 생략했습니다.`);
+      return 'skipped';
+    }
+    await query(`UPDATE operator_proposals SET status = 'admin_review', scheduled_send_at = NULL, auto_execute_reason = '발송 오류 — 담당자 검토' WHERE id = $1::uuid`, [proposalId]).catch(() => {});
+    throw e;
+  }
+
+  // 8. 기능 크레딧 1회 차감 (멱등키 proposalId) — 발송 성공 시점에만
+  await deductCreditSafe({
+    companyId, cost: getCreditCost('continuous-operator-send'), source: 'continuous-operator-send',
+    createdBy: userId, idempotencyKey: `continuous-operator-send:${proposalId}`,
+  }).catch((e: any) => console.warn('[ContinuousOperator AutoSend] 크레딧 차감 경고:', e?.message));
+
+  // 9. 완료 표시 + 통지
+  await query(
+    `UPDATE operator_proposals SET status = 'sent', campaign_id = $2::uuid, auto_sent_at = NOW() WHERE id = $1::uuid`,
+    [proposalId, campaignId],
+  );
+  await notify('[AI 자동마케팅] 발송 완료', `'${op.name || ''}' ${rows.length}명에게 발송을 완료했습니다.`);
+  return 'sent';
 }
 
 export function startContinuousOperatorScheduler(): void {
@@ -896,6 +1043,27 @@ async function notifyOperatorAdmins(
     '', '', '',             // file_name 1/2/3
   ]);
   await bulkInsertSmsQueue([authTable], rows as any, true);
+}
+
+/** 준비 시점 담당자 알림 — 실문안 1건 + 정지 안내 1건(무과금 인증 라인). admin_notified_at 기록. */
+async function sendAutoSendPrepNotice(
+  operator: { adminPhoneNumbers: string[]; backupAdminPhone: string | null; companyId: string; name: string },
+  proposalId: string,
+  messageBody: string,
+  scheduledSendAt: Date,
+): Promise<void> {
+  const when = scheduledSendAt.toLocaleString('ko-KR', {
+    timeZone: 'Asia/Seoul', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false,
+  });
+  // 1. 실문안 (고객이 받을 본문 그대로)
+  await notifyOperatorAdmins(operator, '[AI 자동마케팅] 발송 예정 문안', messageBody);
+  // 2. 정지 안내
+  await notifyOperatorAdmins(
+    operator,
+    '[AI 자동마케팅] 발송 예정 안내',
+    `${when}에 위 문안이 자동 발송됩니다. 원치 않으시면 그 전에 자동마케팅 메뉴에서 [정지]를 눌러주세요.`,
+  );
+  await query(`UPDATE operator_proposals SET admin_notified_at = NOW() WHERE id = $1::uuid`, [proposalId]);
 }
 
 function computeNextRun(schedule: OperatorSchedule, scheduleTime: string): Date {
@@ -952,6 +1120,7 @@ function mapRowToOperator(row: any): ContinuousOperator {
     optOutMinutes: Number(row.opt_out_minutes) || 5,
     spamScoreThreshold: Number(row.spam_score_threshold) || 30,
     maxSpamRetries: Number(row.max_spam_retries) || 3,
+    autoSendLeadMinutes: row.auto_send_lead_minutes !== null && row.auto_send_lead_minutes !== undefined ? Number(row.auto_send_lead_minutes) : null,
   };
 }
 

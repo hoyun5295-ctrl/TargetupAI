@@ -35,7 +35,8 @@ import { deduplicateByPhone } from '../utils/deduplicate';
 import { getUserTestContacts } from '../utils/test-contact-helper';
 import { validateScheduledAt } from '../utils/campaign-validation';
 import { calcSplitSendTime } from '../utils/send-time-util';
-import { triggerDirectSendWorker } from '../utils/direct-send-worker';
+import { countStagingFiltered, createDirectSendCampaign } from '../utils/direct-send-core';
+import { DirectSendError } from '../utils/direct-send-spec';
 
 // ★ toKoreaTimeStr → utils/sms-queue.ts로 이동 (import 사용)
 
@@ -1270,43 +1271,9 @@ router.post('/direct-send/stage', async (req: Request, res: Response) => {
   }
 });
 
-// ★ 대량 발송 (2026-06-04 톤28 504 정정): 모달 카운트 + commit 차감 공용 헬퍼 — 실제 삭제 없이 COUNT만.
-//   중복 = phone당 1건 유지(total - distinct), 수신거부 = distinct phone 중 user_id+phone 매칭.
-//   count endpoint / commit / worker가 모두 이 기준이라 모달 숫자 = 실제 발송 정확히 일치.
-async function countStagingFiltered(
-  stagingId: string, companyId: string, userId: string,
-  dedupEnabled: boolean, unsubFilterEnabled: boolean,
-): Promise<{ total: number; duplicateCount: number; unsubscribeCount: number; sendCount: number }> {
-  const totalR = await query(
-    `SELECT COUNT(*)::int AS c FROM campaign_send_staging WHERE staging_id = $1 AND company_id = $2`,
-    [stagingId, companyId]
-  );
-  const total = totalR.rows[0]?.c || 0;
-  let duplicateCount = 0;
-  if (dedupEnabled !== false) {
-    const r = await query(
-      `SELECT (COUNT(*) - COUNT(DISTINCT phone))::int AS c FROM campaign_send_staging WHERE staging_id = $1`,
-      [stagingId]
-    );
-    duplicateCount = r.rows[0]?.c || 0;
-  }
-  let unsubscribeCount = 0;
-  if (unsubFilterEnabled !== false) {
-    // (user_id, phone) 인덱스 사용 — staging × unsubscribes 균등 조인이라 self-join과 달리 대량에서도 빠르다.
-    const r = await query(
-      `SELECT COUNT(DISTINCT s.phone)::int AS c
-       FROM campaign_send_staging s
-       JOIN unsubscribes u ON u.user_id = $2 AND u.phone = s.phone
-       WHERE s.staging_id = $1`,
-      [stagingId, userId]
-    );
-    unsubscribeCount = r.rows[0]?.c || 0;
-  }
-  const sendCount = Math.max(total - duplicateCount - unsubscribeCount, 0);
-  return { total, duplicateCount, unsubscribeCount, sendCount };
-}
+// countStagingFiltered / createDirectSendCampaign = utils/direct-send-core.ts (commit·count·자율발송 공유).
 
-// 프론트가 phones를 통째 POST(/unsubscribes/check)하던 옛 방식 폐기 → stage 적재 후 이 endpoint로 모달 카운트 조회.
+// 프론트가 phones를 통째 POST(/unsubscribes/check)하던 방식 대신, stage 적재 후 이 endpoint로 모달 카운트 조회.
 router.post('/direct-send/count', async (req: Request, res: Response) => {
   try {
     const companyId = (req as any).user?.companyId;
@@ -1407,43 +1374,28 @@ router.post('/direct-send/commit', async (req: Request, res: Response) => {
     const { sendCount: total } = await countStagingFiltered(stagingId, companyId, userId, dedupEnabled, unsubFilterEnabled);
     if (total === 0) return res.status(400).json({ success: false, error: '정제 후 발송 대상이 없습니다 (전부 수신거부 또는 중복).' });
 
-    // 캠페인 생성 (send_phase='queued')
-    const finalIsAd = adEnabled === true;
-    const directChannel = sendChannel || 'sms';
-    const sendConfig = {
-      msgType, sendChannel: directChannel, message, subject, callback, useIndividualCallback, individualCallbackColumn,
-      adEnabled: finalIsAd, scheduled, scheduledAt, splitEnabled, splitCount, mmsImagePaths,
-      kakaoBubbleType, kakaoSenderKey, kakaoTargeting, kakaoAttachmentJson, kakaoCarouselJson, kakaoResendType,
-      alimtalkTemplateCode, alimtalkVariableMap, alimtalkButtonJson, alimtalkNextType, alimtalkNextContents, alimtalkNextSubject, alimtalkEtcJson,
-      // ★ 2026-06-04: worker가 발송 직전 정제 시 사용자 선택(중복/수신거부 제거)을 반영하도록 send_config로 전달.
-      dedupEnabled, unsubFilterEnabled,
-    };
-    const campaignResult = await query(
-      `INSERT INTO campaigns (company_id, campaign_name, message_type, message_content, subject, callback_number, target_count, send_type, status, scheduled_at, message_template, message_subject, created_by, is_ad, send_channel, staging_id, send_phase, processed_count, send_config, kakao_template_id, mms_image_paths, created_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, 'direct', $8, $9, $10, $11, $12, $13, $14, $15, 'queued', 0, $16, $17, $18, NOW()) RETURNING id`,
-      [companyId, `직접발송 ${new Date().toLocaleString('ko-KR')}`, msgType, message || '', subject || null, callback || null, total,
-       scheduled ? 'scheduled' : 'sending', scheduled && scheduledAt ? new Date(scheduledAt) : null, message || '', subject || null,
-       userId, finalIsAd, directChannel, stagingId, JSON.stringify(sendConfig), alimtalkTemplateUuid,
-       // ★ MMS 이미지 미표시 fix (2026-06-01): commit 경로가 send_config에만 저장 → 결과·캘린더가 읽는 mms_image_paths 컬럼에도 저장(옛 /direct-send 동일 패턴)
-       mmsImagePaths && mmsImagePaths.length > 0 ? JSON.stringify(mmsImagePaths) : null]
-    );
-    const campaignId = campaignResult.rows[0].id;
+    // 캠페인 생성 + 차감 + worker 트리거 — createDirectSendCampaign 공유(자율 발송과 동일 경로, MMS 이미지 컬럼 저장 포함).
+    try {
+      const { campaignId, accepted } = await createDirectSendCampaign({
+        stagingId, campaignName: `직접발송 ${new Date().toLocaleString('ko-KR')}`,
+        msgType, message, subject, callback, sendChannel, adEnabled, total,
+        scheduled, scheduledAt, splitEnabled, splitCount, useIndividualCallback, individualCallbackColumn, mmsImagePaths,
+        dedupEnabled, unsubFilterEnabled,
+        kakaoBubbleType, kakaoSenderKey, kakaoTargeting, kakaoAttachmentJson, kakaoCarouselJson, kakaoResendType,
+        alimtalkTemplateCode, alimtalkVariableMap, alimtalkButtonJson, alimtalkNextType, alimtalkNextContents, alimtalkNextSubject,
+        alimtalkEtcJson, alimtalkTemplateUuid,
+      }, { companyId, userId });
 
-    // 잔액 차감 (정제 후 total) — 실패 시 캠페인 롤백
-    const directDeductType = directChannel === 'kakao' ? 'KAKAO' : msgType;
-    const deduct = await prepaidDeduct(companyId, total, directDeductType, campaignId, userId);
-    if (!deduct.ok) {
-      await query('DELETE FROM campaigns WHERE id = $1', [campaignId]);
-      return res.status(402).json({ success: false, error: deduct.error, insufficientBalance: true, balance: deduct.balance, requiredAmount: deduct.amount });
+      return res.status(202).json({
+        success: true, campaignId, accepted,
+        message: `${accepted}건 발송이 접수됐습니다. 진행 상황은 발송결과에서 확인하세요.`,
+      });
+    } catch (e: any) {
+      if (e instanceof DirectSendError && e.code === 'INSUFFICIENT_BALANCE') {
+        return res.status(402).json({ success: false, error: e.message, ...(e.extra || {}) });
+      }
+      throw e;
     }
-
-    // worker 즉시 트리거 (5초 대기 없이)
-    triggerDirectSendWorker(campaignId);
-
-    return res.status(202).json({
-      success: true, campaignId, accepted: total,
-      message: `${total}건 발송이 접수됐습니다. 진행 상황은 발송결과에서 확인하세요.`,
-    });
   } catch (err: any) {
     const msg = err?.message || '';
     if (msg.includes('column') && msg.includes('does not exist')) {

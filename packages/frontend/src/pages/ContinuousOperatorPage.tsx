@@ -63,7 +63,7 @@ interface MultiGoalAnalysis {
 
 type Schedule = 'daily' | 'weekly' | 'monthly';
 type OperatorStatus = 'active' | 'paused' | 'archived';
-type ProposalStatus = 'pending' | 'approved' | 'rejected' | 'auto_executed' | 'expired' | 'admin_review';
+type ProposalStatus = 'pending' | 'approved' | 'rejected' | 'auto_executed' | 'expired' | 'admin_review' | 'admin_stopped' | 'scheduled' | 'sending' | 'sent' | 'skipped';
 
 interface ContinuousOperator {
   id: string;
@@ -95,6 +95,7 @@ interface ContinuousOperator {
   optOutMinutes?: number;
   spamScoreThreshold?: number;
   maxSpamRetries?: number;
+  autoSendLeadMinutes?: number | null;
 }
 
 // ★ D212+ 1+2+3번 (2026-05-23 Harold 명시): AI 학습 영역 요약 응답
@@ -459,6 +460,33 @@ export default function ContinuousOperatorPage() {
     });
   };
 
+  const handleStop = (id: string) => {
+    setConfirmState({
+      mode: 'warning',
+      title: '자동 발송 정지',
+      description: '예정된 자동 발송을 정지하시겠습니까?\n정지하면 이번 회차는 발송되지 않습니다.',
+      confirmLabel: '정지',
+      onConfirm: async () => {
+        try {
+          const res = await fetch(`/api/ai/operator/proposals/${id}/admin-stop`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token()}` },
+            body: JSON.stringify({ reason: 'no_send' }),
+          });
+          const data = await res.json();
+          if (data.success) {
+            toast.info('자동 발송을 정지했습니다.');
+            await loadAll();
+          } else {
+            toast.error(data.error || '정지에 실패했습니다.');
+          }
+        } catch (e: any) {
+          toast.error(e?.message || '오류가 발생했습니다.');
+        }
+      },
+    });
+  };
+
   return (
     // ★ D222+ Phase 2 (2026-05-27): 다크 → 보라 그라데이션 톤 다운 + 시인성 강화
     <div className="min-h-screen bg-gradient-to-br from-violet-900 via-fuchsia-900 to-violet-900 text-white">
@@ -809,6 +837,11 @@ export default function ContinuousOperatorPage() {
                                 <X className="w-3 h-3" /> 거부
                               </button>
                             </>
+                          )}
+                          {p.status === 'scheduled' && (
+                            <button onClick={() => handleStop(p.id)} className="text-xs bg-white/5 border border-rose-400/30 hover:bg-rose-500/20 text-rose-300 px-3 py-1.5 rounded flex items-center gap-1">
+                              <X className="w-3 h-3" /> 자동 발송 정지
+                            </button>
                           )}
                           <button
                             onClick={() => toggleExpand(p.id)}
@@ -1464,6 +1497,12 @@ function StatusBadge({ status }: { status: string }) {
     approved: { label: '승인됨', cls: 'bg-emerald-500/20 text-emerald-300 border border-emerald-400/30' },
     rejected: { label: '거부됨', cls: 'bg-white/10 text-white/50' },
     auto_executed: { label: '자동 실행됨', cls: 'bg-violet-500/20 text-violet-300' },
+    admin_review: { label: '검토 필요', cls: 'bg-amber-500/20 text-amber-300 border border-amber-400/30' },
+    scheduled: { label: '발송 예정', cls: 'bg-indigo-500/20 text-indigo-300 border border-indigo-400/30' },
+    sending: { label: '발송 중', cls: 'bg-indigo-500/20 text-indigo-300' },
+    sent: { label: '발송 완료', cls: 'bg-emerald-500/20 text-emerald-300 border border-emerald-400/30' },
+    skipped: { label: '이번 회차 생략', cls: 'bg-white/10 text-white/50' },
+    admin_stopped: { label: '담당자 정지', cls: 'bg-rose-500/20 text-rose-300 border border-rose-400/30' },
     expired: { label: '만료됨', cls: 'bg-rose-500/20 text-rose-300 border border-rose-400/30' },
   };
   const e = map[status] || { label: status, cls: 'bg-white/10 text-white/70' };

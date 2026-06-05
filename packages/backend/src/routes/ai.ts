@@ -7,6 +7,7 @@ import { FIELD_MAP, FIELD_DISPLAY_MAP, reverseDisplayValue } from '../utils/stan
 import { isValidCustomFieldKey } from '../utils/safe-field-name';
 import { getStoreScope } from '../utils/store-scope';
 import { buildFilterWhereClauseCompat } from '../utils/customer-filter';
+import { buildSendableRecipientsSql } from '../utils/operator-recipients';
 import { aggregateCampaignPerformance } from '../utils/stats-aggregation';
 import { formatDateValue, getOpt080Number } from '../utils/messageUtils';
 import { loadPlanContext, canUseFeature, requirePlanFeature, isBetaAccessAllowed, isAiOperatorAllowed } from '../utils/plan-guard';
@@ -1224,22 +1225,11 @@ router.post('/operator/preview-recipients', async (req: Request, res: Response) 
       }
     }
 
-    // ★ CT-01: 필터 → SQL (ai.ts /recommend-target L309 패턴 미러)
+    // ★ CT-01 + 공통 안전필터(buildJourneySafetyFilter) — is_opt_out·is_invalid·수신거부(회사+전화) 통일.
     const { sql: filterWhere, params: filterParams } = buildFilterWhereClauseCompat(filters, baseParams.length + 1);
-    const allParams = [...baseParams, ...filterParams];
+    const { sql, params } = buildSendableRecipientsSql(filterWhere, filterParams, baseParams, storeFilter);
 
-    const sql = `
-      SELECT id, phone, name, gender, region, birth_date, age, grade, custom_fields
-      FROM customers
-      WHERE company_id = $1
-        AND is_active = true
-        AND sms_opt_in = true
-        ${storeFilter}
-        ${filterWhere}
-      LIMIT 10000
-    `;
-
-    const result = await query(sql, allParams);
+    const result = await query(sql, params);
 
     // recipients 빌드 — /direct-send body 구조 정합 ({phone, name, extra1~3})
     const recipients = result.rows.map((r: any) => {

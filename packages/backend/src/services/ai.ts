@@ -5,6 +5,7 @@ import { query } from '../config/database';
 import { currentUserId } from '../utils/request-context';
 import { AI_MODELS, AI_MAX_TOKENS, TIMEOUTS } from '../config/defaults';
 import { buildFilterWhereClauseCompat } from '../utils/customer-filter';
+import { buildJourneySafetyFilter } from '../utils/journey-safety-filter';
 import { cleanLeftoverVars } from '../utils/messageUtils';
 // ★ D210+ Phase 2 (Harold 명시 2026-05-23): CT-58 — 회사별 customer DB 실측 데이터 프로필.
 //   AI 시스템 프롬프트 안 동적 주입 → 어설픈 개인화 사고 차단.
@@ -2275,24 +2276,27 @@ export async function countFilteredCustomers(
   try {
     const effectiveBaseParams = baseParams.length > 0 ? baseParams : [companyId];
     const { sql: filterWhere, params: filterParams } = buildFilterWhereClauseCompat(filters, effectiveBaseParams.length + 1);
-    const unsubIdx = effectiveBaseParams.length + filterParams.length + 1;
+    const allParams = [...effectiveBaseParams, ...filterParams];
 
+    // ★ 공통 안전필터(CT)로 통일 — is_active·sms_opt_in·is_opt_out·is_invalid·수신거부(회사+전화 안티조인).
+    //   기존 user_id 기준 수신거부 + is_opt_out·is_invalid 누락 갭을 buildJourneySafetyFilter로 일원화.
     const countResult = await query(
       `SELECT COUNT(*) FROM customers c
-       WHERE c.company_id = $1 AND c.is_active = true AND c.sms_opt_in = true${storeFilter} ${filterWhere}
-       AND NOT EXISTS (SELECT 1 FROM unsubscribes u WHERE u.user_id = $${unsubIdx} AND u.phone = c.phone)`,
-      [...effectiveBaseParams, ...filterParams, userId]
+       WHERE c.company_id = $1 AND ${buildJourneySafetyFilter('c')}${storeFilter} ${filterWhere}`,
+      allParams
     );
     const count = parseInt(countResult.rows[0].count);
 
+    // 수신거부로 제외된 수(정보용) — 활성·수신동의 매칭 중 수신거부(회사+전화) 보유분.
     const unsubResult = await query(
       `SELECT COUNT(*) FROM customers c
        WHERE c.company_id = $1 AND c.is_active = true AND c.sms_opt_in = true${storeFilter} ${filterWhere}
-       AND EXISTS (SELECT 1 FROM unsubscribes u WHERE u.user_id = $${unsubIdx} AND u.phone = c.phone)`,
-      [...effectiveBaseParams, ...filterParams, userId]
+       AND EXISTS (SELECT 1 FROM unsubscribes u WHERE u.company_id = c.company_id AND u.phone = c.phone)`,
+      allParams
     );
     const unsubscribeCount = parseInt(unsubResult.rows[0].count);
 
+    void userId; // 수신거부 기준을 user_id→회사+전화로 통일하며 미사용(시그니처는 호출부 호환 유지)
     return { count, unsubscribeCount };
   } catch (err) {
     // ★ 에러를 삼키지 않고 상위로 전파 — 조용히 0 반환하면 디버깅 불가
