@@ -13,6 +13,7 @@
 import { query } from '../config/database';
 import { enqueueSpamTest, getSpamTestBatchResults } from './spam-test-queue';
 import { buildAdMessage, buildAdSubject, getOpt080Number } from './messageUtils';
+import { getCompanyCosts } from '../config/defaults';
 import { randomUUID } from 'crypto';
 
 export type FailedReason =
@@ -181,7 +182,7 @@ export async function validateJourneyForActivation(
   }
 
   // 2. 비용 합산 + 7일 누적 예상
-  const { totalCost, estimatedWeeklyTriggerCount } = await estimateCost(journeyId, steps);
+  const { totalCost, estimatedWeeklyTriggerCount } = await estimateCost(companyId, journeyId, steps);
 
   return {
     ok: failedSteps.length === 0,
@@ -312,6 +313,7 @@ export async function runStepSpamTest(params: {
 }
 
 async function estimateCost(
+  companyId: string,
   journeyId: string,
   steps: any[],
 ): Promise<{ totalCost: number; estimatedWeeklyTriggerCount: number }> {
@@ -323,20 +325,23 @@ async function estimateCost(
   );
   const weeklyTriggerCount = Number(triggerRes.rows[0]?.cnt || 0);
 
+  // ★ Fix #7 (2026-06-05): 임의 단가(9.9/27/81/8) 제거 → 회사 실 단가(companies.cost_per_*).
+  //   executor·simulator와 동일 CT(getCompanyCosts). 채널 기준 단가로 실제 차감과 일치.
+  const costRes = await query(
+    `SELECT cost_per_sms, cost_per_lms, cost_per_mms, cost_per_kakao FROM companies WHERE id = $1::uuid`,
+    [companyId],
+  );
+  const costs = getCompanyCosts(costRes.rows[0] || {});
   let totalCost = 0;
   for (const step of steps) {
-    const byteCount = (step.message_template || '').length * 2;
-    const unitCost = getUnitCost(step.channel, byteCount);
-    totalCost += unitCost * weeklyTriggerCount;
+    const ch = String(step.channel || 'lms').toLowerCase();
+    const unitCost =
+      ch === 'kakao' ? Number(costs.kakao) :
+      ch === 'mms'   ? Number(costs.mms) :
+      ch === 'lms'   ? Number(costs.lms) :
+                       Number(costs.sms);
+    totalCost += Math.round(unitCost) * weeklyTriggerCount;
   }
 
   return { totalCost, estimatedWeeklyTriggerCount: weeklyTriggerCount };
-}
-
-function getUnitCost(channel: string, byteCount: number): number {
-  if (channel === 'sms') return 9.9;
-  if (channel === 'lms') return byteCount > 90 ? 27 : 9.9;
-  if (channel === 'mms') return 81;
-  if (channel === 'kakao') return 8;
-  return 0;
 }

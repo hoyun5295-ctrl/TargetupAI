@@ -20,6 +20,7 @@ import { callAIWithFallback } from '../services/ai';
 import { buildMemoryPromptContext } from './company-memory';
 import { seedBaselineForJourney } from './journey-entry-ledger';
 import { formatStepTiming, formatConditionChip } from './journey-step-format';
+import { journeyListWhere, executionStatusFilter } from './journey-list-filter';
 
 // ════════════════════════════════════════════════════════════════════
 // 타입
@@ -94,6 +95,9 @@ export interface CreateJourneyInput {
 }
 
 const PLACEHOLDER_MARKERS = ['[', ']'];
+
+// 여정 step 최대 지연(시간) = 365일. 생성·AI생성·편집 전 경로 공통(상한 불일치 정정 #9).
+const MAX_STEP_DELAY_HOURS = 8760;
 
 export function hasUneditedPlaceholder(message: string | null | undefined): boolean {
   if (!message) return true;
@@ -248,7 +252,7 @@ export async function createJourneyFromTemplate(input: CreateJourneyInput): Prom
       return {
         stepOrder: s.stepOrder || idx + 1,
         stepType: s.stepType || 'message',
-        delayHours: Math.max(0, Math.min(8760, Number(s.delayHours) || 0)),
+        delayHours: Math.max(0, Math.min(MAX_STEP_DELAY_HOURS, Number(s.delayHours) || 0)),
         channel,
         messageTemplate: (s.messageTemplate || '').slice(0, 2000),
         subject: channel === 'sms' ? '' : (s.subject || '').slice(0, 50),
@@ -491,7 +495,7 @@ JSON 형식만 응답:
     const base: JourneyStepDefinition = {
       stepOrder: idx + 1,
       stepType,
-      delayHours: Math.max(0, Math.min(720, Number(s.delayHours) || 0)),
+      delayHours: Math.max(0, Math.min(MAX_STEP_DELAY_HOURS, Number(s.delayHours) || 0)),
     };
     if (stepType === 'message') {
       base.channel = ['sms', 'lms', 'mms', 'kakao', 'email'].includes(s.channel) ? s.channel : 'sms';
@@ -556,22 +560,23 @@ export async function activateJourney(companyId: string, journeyId: string, user
     // ★ D210+ Phase 3 (2026-05-23 Harold 명시): wait step delay_mode 영역 검증 추가
     if (stepType === 'wait') {
       const delayMode = String(s.delayMode || 'relative');
-      const validDelayModes = ['relative', 'specific_hour', 'next_business_day'];
+      // ★ Fix #10 (2026-06-05): relative_at_hour 추가 — 다른 경로(타입·생성·calculateNextRunAt)는 다 지원하는데 wait 검증만 빠져 거부되던 문제.
+      const validDelayModes = ['relative', 'relative_at_hour', 'specific_hour', 'next_business_day'];
       if (!validDelayModes.includes(delayMode)) {
         return { ok: false, reason: `step ${s.order} (wait) delay_mode = ${validDelayModes.join(' / ')} 중 하나 의무.` };
       }
 
       if (delayMode === 'relative') {
-        // relative = delay_hours > 0 필수 (의미 있는 대기 영역)
+        // relative = delay_hours > 0 필수 (의미 있는 대기)
         const delay = Number(s.delay || 0);
         if (delay <= 0) {
           return { ok: false, reason: `step ${s.order} (wait relative) 대기 시간이 0 이하입니다. 1시간 이상 설정해주세요.` };
         }
-      } else if (delayMode === 'specific_hour') {
-        // specific_hour = target_hour_kst 영역 (0~23) 의무
+      } else if (delayMode === 'specific_hour' || delayMode === 'relative_at_hour') {
+        // specific_hour / relative_at_hour = target_hour_kst (0~23) 의무
         const targetHour = Number(s.targetHourKst);
         if (!Number.isFinite(targetHour) || targetHour < 0 || targetHour > 23) {
-          return { ok: false, reason: `step ${s.order} (wait specific_hour) target_hour_kst = 0~23 의무.` };
+          return { ok: false, reason: `step ${s.order} (wait ${delayMode}) target_hour_kst = 0~23 의무.` };
         }
       }
       // next_business_day = 추가 검증 0건 (다음 평일 09시 KST 고정 영역)
@@ -783,18 +788,6 @@ export async function createJourneyStepSnapshots(companyId: string, journeyId: s
   }
 }
 
-/**
- * 여정 재활성화 (일시 정지 → 활성).
- *   발송 2시간 전 스팸테스트·담당자 안내는 journey-pretest-notifier 스캐너가 next_run_at 기준으로 처리(Phase 6B).
- */
-export async function resumeJourney(companyId: string, journeyId: string): Promise<void> {
-  await query(
-    `UPDATE journeys SET status = 'active', paused_at = NULL, pause_reason = NULL
-      WHERE id = $1 AND company_id = $2 AND status = 'paused'`,
-    [journeyId, companyId],
-  );
-}
-
 // step 본문 갱신 (활성화 전 회사 admin이 직접 편집)
 // ★ D188 Phase 2-B-1 (2026-05-21): step_type + conditionJsonb patch 추가 — wait/condition step 편집 영역.
 export async function updateJourneyStep(
@@ -867,7 +860,7 @@ export async function updateJourneyStep(
       companyId,
       patch.messageTemplate != null ? applyVariableDefaults(patch.messageTemplate.slice(0, 2000)) : null,
       patch.channel ?? null,
-      patch.delayHours != null ? Math.max(0, Math.min(720, Number(patch.delayHours))) : null,
+      patch.delayHours != null ? Math.max(0, Math.min(MAX_STEP_DELAY_HOURS, Number(patch.delayHours))) : null,
       patch.isAd !== undefined ? !!patch.isAd : null,
       patch.subject !== undefined ? patch.subject.slice(0, 50) : null,
       patch.stepType ?? null,
@@ -912,14 +905,9 @@ export async function pauseJourney(companyId: string, journeyId: string, reason?
      RETURNING id`,
     [journeyId, companyId, reason || null]
   );
-  // ★ D218+ (2026-05-26): 미발송 executions 일제 paused — race condition 안전망.
-  if (r.rows.length > 0) {
-    await query(
-      `UPDATE journey_executions SET status = 'paused'
-        WHERE journey_id = $1::uuid AND status IN ('pending', 'scheduled')`,
-      [journeyId],
-    );
-  }
+  // ★ Fix #5 (2026-06-05): 기존 'pending'/'scheduled' 일괄 UPDATE는 execution에 존재하지 않는 상태값이라 0건(무효)이었다.
+  //   개별 execution을 paused로 바꾸면 재개 시 balance/단축URL 정지분과 섞여 복구가 꼬인다 → 무효 UPDATE 제거.
+  //   여정 정지 즉시 반영은 executor 발송 직전 status 재확인이 journey.status까지 보게 강화해 처리(레이스 차단).
   return r.rows.length > 0;
 }
 
@@ -996,17 +984,9 @@ export async function deleteJourney(companyId: string, journeyId: string): Promi
 // ════════════════════════════════════════════════════════════════════
 
 export async function listJourneys(companyId: string, status?: JourneyStatus | 'all' | 'archived') {
-  // ★ D211+ Phase 3 (2026-05-23 Harold 명시): archived 영역 분리 매트릭스
-  //   - status === 'archived' → archived_at IS NOT NULL (보관함 전용)
-  //   - 그 외 → archived_at IS NULL (default — 옛 매트릭스 영역 영구 보존)
-  let where = '';
-  if (status === 'archived') {
-    where = `AND archived_at IS NOT NULL`;
-  } else if (status && status !== 'all') {
-    where = `AND status = '${status}' AND archived_at IS NULL`;
-  } else {
-    where = `AND archived_at IS NULL`;
-  }
+  // ★ Fix #3 (2026-06-05): status는 라우트가 받은 신뢰 불가 값(타입 캐스팅은 런타임 보장 X) →
+  //   화이트리스트 CT로 검증해 SQL 주입을 차단한다. archived 분리 + 허용 상태만 보간.
+  const where = journeyListWhere(status);
   const r = await query(
     `SELECT * FROM journeys
      WHERE company_id = $1::uuid ${where}
@@ -1040,7 +1020,8 @@ export async function listExecutions(
   journeyId: string,
   opts: { limit?: number; offset?: number; status?: string } = {}
 ) {
-  const statusFilter = opts.status ? `AND e.status = '${opts.status}'` : '';
+  // ★ Fix #3 (2026-06-05): 실행 status도 화이트리스트 검증(SQL 주입 차단).
+  const statusFilter = executionStatusFilter(opts.status);
   const r = await query(
     `SELECT e.*, c.name AS customer_name, c.phone AS customer_phone
      FROM journey_executions e

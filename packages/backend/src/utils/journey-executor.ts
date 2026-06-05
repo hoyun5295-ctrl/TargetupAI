@@ -51,6 +51,7 @@ import { autoPauseExecution } from './journey-pause-handler';
 import { calculateNextRunAt } from './send-time-util';
 import { getOrCreateStepCampaign, bumpStepCampaignCount } from './journey-step-campaign';
 import { evaluateCustomerFieldCondition, type ConditionOutcome } from './journey-condition';
+import { isCustomerSendable } from './journey-safety-filter';
 
 // ════════════════════════════════════════════════════════════════════
 // 타입
@@ -115,11 +116,13 @@ interface CustomerRow {
   email: string | null;
   birth_date: Date | null;
   recent_purchase_date: Date | null;
+  is_opt_out: boolean | null;
+  is_invalid: boolean | null;
 }
 
 // ★ D188 Phase 2-B-1 (2026-05-21): wait/condition step 신규 outcome — 통계 분리 영역.
 // ★ D218+ (2026-05-26): paused_external 추가 — 담당자 단축 URL 정지 / 관리자 직접 정지 / race condition 안전망 사고 차단.
-type StepOutcome = 'sent' | 'skipped_hours' | 'skipped_opt_out' | 'skipped_no_customer' | 'waited' | 'condition_passed' | 'condition_failed' | 'paused_balance' | 'paused_budget' | 'paused_threshold' | 'paused_external' | 'failed' | 'completed';
+type StepOutcome = 'sent' | 'skipped_hours' | 'skipped_opt_out' | 'skipped_no_customer' | 'skipped_already_sent' | 'waited' | 'condition_passed' | 'condition_failed' | 'paused_balance' | 'paused_budget' | 'paused_threshold' | 'paused_external' | 'failed' | 'completed';
 
 // ════════════════════════════════════════════════════════════════════
 // Worker — 5분 cron
@@ -203,12 +206,16 @@ export function startJourneyExecutor(): void {
 async function processExecution(exec: ExecutionRow): Promise<StepOutcome> {
   // ★ D218+ (2026-05-26) 시점 1: 진입 직전 status 재확인 — race condition 안전망.
   //   옛 worker 조회 시점(line 133) 이후 = 단축 URL 정지 / 관리자 직접 정지 / pauseJourney 발화 사고 차단.
+  // ★ Fix #5 (2026-06-05): execution.status뿐 아니라 journey.status까지 확인 — 관리자/단축URL 정지가
+  //   이번 tick 조회 이후 발화한 경우(레이스)도 발송 직전 차단. 기존 검사의 상위집합(더 막고 덜 막지 않음).
   const statusCheck1 = await query(
-    `SELECT status FROM journey_executions WHERE id = $1::uuid`,
+    `SELECT je.status AS estatus, j.status AS jstatus
+       FROM journey_executions je JOIN journeys j ON j.id = je.journey_id
+      WHERE je.id = $1::uuid`,
     [exec.execution_id]
   );
-  if (statusCheck1.rows[0]?.status === 'paused') {
-    console.log(`[JourneyExecutor] execution=${exec.execution_id} 진입 시점 paused 감지 → skip`);
+  if (statusCheck1.rows[0]?.estatus === 'paused' || statusCheck1.rows[0]?.jstatus !== 'active') {
+    console.log(`[JourneyExecutor] execution=${exec.execution_id} 진입 시점 정지 감지(execution/journey) → skip`);
     return 'paused_external';
   }
 
@@ -303,6 +310,18 @@ async function processExecution(exec: ExecutionRow): Promise<StepOutcome> {
 
   // ──────────── message step (기존 흐름) ────────────
 
+  // ★ Fix #6 (2026-06-05): 묶음 멱등 가드 — 이 execution+step이 이미 'sent' 로그면(크래시 후 재처리)
+  //   deduct(잔액)~advance 사이 중복 차감·발송 없이 그대로 다음 step으로. 신규 컬럼 0(기존 journey_step_logs).
+  const alreadySent = await query(
+    `SELECT 1 FROM journey_step_logs WHERE execution_id = $1::uuid AND step_id = $2::uuid AND status = 'sent' LIMIT 1`,
+    [exec.execution_id, step.id]
+  );
+  if (alreadySent.rows.length > 0) {
+    console.warn(`[JourneyExecutor] execution=${exec.execution_id} step=${step.step_order} 이미 발송됨(재처리 감지) → 중복 차감/발송 없이 advance`);
+    await advanceOrComplete(exec, step, 0);
+    return 'skipped_already_sent';
+  }
+
   // ★ D188 Phase 2-B-3 (2026-05-21): variants 선택 — Bandit Thompson Sampling.
   //   step에 variants ≥ 1건 있으면 선택 후 step 변수 덮어쓰기. 발송 후 recordJourneyStepVariantReward 호출.
   let activeVariantId: string | null = null;
@@ -349,23 +368,23 @@ async function processExecution(exec: ExecutionRow): Promise<StepOutcome> {
   }
   const customer = custRes.rows[0] as CustomerRow;
 
-  if (!customer.is_active || !customer.sms_opt_in) {
+  // ★ Fix #1 (2026-06-05): 발송 직전 안전필터 재적용 — 추출 기준과 동일(is_active·sms_opt_in·is_opt_out·is_invalid).
+  //   진입과 발송 사이(다단계는 며칠)에 고객이 비활성/수신거부/무효로 바뀌어도 발송 직전 한 번 더 막는다.
+  if (!isCustomerSendable(customer)) {
     await logSkippedStep(exec.execution_id, step.id, 'opt_out_or_inactive');
     await advanceOrComplete(exec, step, 0);
     return 'skipped_opt_out';
   }
 
-  // 4. 수신거부 별 검증 (user_id 기준)
-  if (exec.created_by) {
-    const unsubRes = await query(
-      `SELECT 1 FROM unsubscribes WHERE user_id = $1::uuid AND phone = $2 LIMIT 1`,
-      [exec.created_by, customer.phone]
-    );
-    if (unsubRes.rows.length > 0) {
-      await logSkippedStep(exec.execution_id, step.id, 'unsubscribed');
-      await advanceOrComplete(exec, step, 0);
-      return 'skipped_opt_out';
-    }
+  // 4. 수신거부 검증 — 안전필터와 동일 기준(회사+전화). user_id 기준보다 넓게, 진입 후 수신거부분까지 발송 직전 차단.
+  const unsubRes = await query(
+    `SELECT 1 FROM unsubscribes WHERE company_id = $1::uuid AND phone = $2 LIMIT 1`,
+    [exec.company_id, customer.phone]
+  );
+  if (unsubRes.rows.length > 0) {
+    await logSkippedStep(exec.execution_id, step.id, 'unsubscribed');
+    await advanceOrComplete(exec, step, 0);
+    return 'skipped_opt_out';
   }
 
   // 5. 라인그룹 검증
@@ -580,11 +599,13 @@ async function processExecution(exec: ExecutionRow): Promise<StepOutcome> {
   // ★ D218+ (2026-05-26) 시점 2: 잔액 차감 직전 status 재확인 — 단축 URL 정지 / 관리자 직접 정지 race condition 안전망.
   //   본 시점 이후 = 잔액 차감 + queue INSERT 흐름 = 정지 효과 0건 사고 차단 의무.
   const statusCheck2 = await query(
-    `SELECT status FROM journey_executions WHERE id = $1::uuid`,
+    `SELECT je.status AS estatus, j.status AS jstatus
+       FROM journey_executions je JOIN journeys j ON j.id = je.journey_id
+      WHERE je.id = $1::uuid`,
     [exec.execution_id]
   );
-  if (statusCheck2.rows[0]?.status === 'paused') {
-    console.log(`[JourneyExecutor] execution=${exec.execution_id} 발송 직전 paused 감지 → skip (잔액 차감 X / queue INSERT X)`);
+  if (statusCheck2.rows[0]?.estatus === 'paused' || statusCheck2.rows[0]?.jstatus !== 'active') {
+    console.log(`[JourneyExecutor] execution=${exec.execution_id} 발송 직전 정지 감지(execution/journey) → skip (잔액 차감 X / queue INSERT X)`);
     return 'paused_external';
   }
 

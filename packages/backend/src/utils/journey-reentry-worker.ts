@@ -26,6 +26,7 @@
  */
 
 import { query } from '../config/database';
+import { buildJourneySafetyFilter } from './journey-safety-filter';
 
 const WORKER_INTERVAL_MS = 6 * 60 * 60 * 1000;  // 6h
 const PER_JOURNEY_BATCH_LIMIT = 1000;  // 한 journey당 1 cron 진입 영역 limit (큰 회사 영역 분산 정합)
@@ -94,8 +95,8 @@ async function runReentryBatch(): Promise<void> {
              AND je.status = 'completed'
              AND je.completed_at IS NOT NULL
              AND je.completed_at <= NOW() - ($3 * INTERVAL '1 day')
-             AND c.is_active = true
-             AND c.sms_opt_in = true
+             -- ★ Fix #1 (2026-06-05): 추출과 동일한 공통 안전필터(is_active·sms_opt_in·is_opt_out·is_invalid·수신거부 회사+전화).
+             AND ${buildJourneySafetyFilter('c')}
              -- 옛 customer 영역 안 신규 active execution 영역 X (중복 진입 차단)
              AND NOT EXISTS (
                SELECT 1 FROM journey_executions je2

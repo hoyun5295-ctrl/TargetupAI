@@ -75,9 +75,7 @@ import {
   createJourneyFromTemplate,
   activateJourney,
   pauseJourney,
-  endJourney,
-  resumeJourney,
-  archiveJourney,
+  endJourney,  archiveJourney,
   unarchiveJourney,
   deleteJourney,
   listJourneys,
@@ -3053,25 +3051,6 @@ router.post('/operator/journeys/:id/pretest-validate', async (req: Request, res:
       });
     }
     return res.status(500).json({ success: false, error: err?.message || '검증 실패' });
-  }
-});
-
-// POST /api/ai/operator/journeys/:id/resume — 일시정지 → 재활성화
-router.post('/operator/journeys/:id/resume', async (req: Request, res: Response) => {
-  try {
-    const companyId = req.user?.companyId;
-    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
-    const planCtx = await loadPlanContext(companyId);
-    if (!planCtx) return res.status(404).json({ success: false, error: '회사 정보를 찾을 수 없습니다.' });
-    if (!isAiOperatorAllowed(planCtx, req.user)) {
-      return res.status(403).json({ success: false, error: 'AI Operator 진입 권한이 없습니다.', code: 'AI_OPERATOR_GATED' });
-    }
-
-    await resumeJourney(companyId, req.params.id);
-    return res.json({ success: true });
-  } catch (err: any) {
-    console.error('[Journey resume] 오류:', err);
-    return res.status(500).json({ success: false, error: err?.message || '재활성화 실패' });
   }
 });
 

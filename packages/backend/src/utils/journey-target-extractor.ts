@@ -17,7 +17,7 @@
  */
 
 import { query } from '../config/database';
-import { buildJourneySafetyFilter } from './journey-safety-filter';
+import { buildJourneySafetyFilter, buildReentryAntiJoin } from './journey-safety-filter';
 import { resolvePointsExpiringConfig } from './journey-points-trigger';
 import { buildLedgerAntiJoin, hasBaseline } from './journey-entry-ledger';
 import { buildSegmentBreakdown, SegmentBreakdown } from './journey-simulator-core';
@@ -28,6 +28,7 @@ export async function selectJourneyTargetCustomerIds(
   triggerFilters: Record<string, any>,
   limit: number,
   journeyId?: string,
+  reentry?: { allowReentry: boolean; cooldownDays: number },
 ): Promise<string[]> {
   const filters = triggerFilters || {};
 
@@ -72,6 +73,7 @@ export async function selectJourneyTargetCustomerIds(
     case 'customer.dormant': {
       const d = Number(filters.dormant_days || 30);
       const params: any[] = [companyId, String(d), String(d + 7)];
+      const antiJoin = journeyId && reentry ? buildReentryAntiJoin('c', params, journeyId, reentry.allowReentry, reentry.cooldownDays) : '';
       const cond = applyCustomerConditions(filters.customer_conditions || [], filters.logic || 'AND', params);
       params.push(String(limit));
       const r = await query(
@@ -81,6 +83,7 @@ export async function selectJourneyTargetCustomerIds(
            AND c.recent_purchase_date IS NOT NULL
            AND c.recent_purchase_date < (CURRENT_DATE - ($2 || ' days')::interval)
            AND c.recent_purchase_date > (CURRENT_DATE - ($3 || ' days')::interval)
+           ${antiJoin}
            ${cond ? ` AND ${cond}` : ''}
          ORDER BY c.recent_purchase_date DESC
          LIMIT $${params.length}::int`,
@@ -129,6 +132,7 @@ export async function selectJourneyTargetCustomerIds(
     case 'customer.birthday_approaching': {
       const days = Number(filters.days_before || 7);
       const params: any[] = [companyId, String(days)];
+      const antiJoin = journeyId && reentry ? buildReentryAntiJoin('c', params, journeyId, reentry.allowReentry, reentry.cooldownDays) : '';
       const cond = applyCustomerConditions(filters.customer_conditions || [], filters.logic || 'AND', params);
       params.push(String(limit));
       const r = await query(
@@ -140,6 +144,7 @@ export async function selectJourneyTargetCustomerIds(
              OR
              (c.birth_date IS NOT NULL AND TO_CHAR(c.birth_date, 'MM-DD') = TO_CHAR((CURRENT_DATE + ($2 || ' days')::interval), 'MM-DD'))
            )
+           ${antiJoin}
            ${cond ? ` AND ${cond}` : ''}
          LIMIT $${params.length}::int`,
         params,
@@ -161,6 +166,7 @@ export async function selectJourneyTargetCustomerIds(
         params.push(String(cfg.inactiveDays));  // $3
         edgeClause = `(c.recent_purchase_date IS NULL OR c.recent_purchase_date < (CURRENT_DATE - ($3 || ' days')::interval))`;
       }
+      const antiJoin = journeyId && reentry ? buildReentryAntiJoin('c', params, journeyId, reentry.allowReentry, reentry.cooldownDays) : '';
       const cond = applyCustomerConditions(filters.customer_conditions || [], filters.logic || 'AND', params);
       params.push(String(limit));
       const r = await query(
@@ -169,6 +175,7 @@ export async function selectJourneyTargetCustomerIds(
            AND ${buildJourneySafetyFilter('c')}
            AND c.points IS NOT NULL AND c.points >= $2::int
            AND ${edgeClause}
+           ${antiJoin}
            ${cond ? ` AND ${cond}` : ''}
          ORDER BY c.points DESC
          LIMIT $${params.length}::int`,
@@ -240,6 +247,35 @@ export async function selectCdpEvent(
     params,
   );
   return r.rows.map((x: any) => x.customer_id);
+}
+
+// ★ Fix #11 (2026-06-05): cdp 커서용 — (cursor, windowEnd] 이벤트를 occurred_at ASC로 chunk만큼(안전필터+조건).
+//   distinct가 아니라 행+시각을 반환 → 호출부가 커서를 마지막 처리 이벤트 시각까지만 전진(LIMIT로 이벤트 누락하던 문제 정정).
+export async function selectCdpEventRowsForCursor(
+  companyId: string,
+  eventName: string,
+  filters: Record<string, any>,
+  cursorStart: Date | string,
+  windowEnd: Date | string,
+  chunkLimit: number,
+): Promise<{ customerId: string; occurredAt: Date }[]> {
+  const params: any[] = [companyId, eventName, cursorStart, windowEnd];
+  const cond = applyCustomerConditions(filters.customer_conditions || [], filters.logic || 'AND', params);
+  params.push(String(chunkLimit));
+  const r = await query(
+    `SELECT e.customer_id, e.occurred_at FROM cdp_events e
+     INNER JOIN customers c ON c.id = e.customer_id AND c.company_id = $1::uuid
+     WHERE e.company_id = $1::uuid
+       AND e.event_name = $2
+       AND e.customer_id IS NOT NULL
+       AND e.occurred_at > $3 AND e.occurred_at <= $4
+       AND ${buildJourneySafetyFilter('c')}
+       ${cond ? ` AND ${cond}` : ''}
+     ORDER BY e.occurred_at ASC
+     LIMIT $${params.length}::int`,
+    params,
+  );
+  return r.rows.map((x: any) => ({ customerId: x.customer_id, occurredAt: x.occurred_at }));
 }
 
 // ════════════════════════════════════════════════════════════════════

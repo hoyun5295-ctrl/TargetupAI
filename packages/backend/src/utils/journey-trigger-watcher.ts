@@ -26,7 +26,8 @@
 
 import { query, pool } from '../config/database';
 // 추출 조건 = journey-target-extractor 공유 컨트롤타워 (발송·미리보기 동일 기준 단일 진입점)
-import { selectJourneyTargetCustomerIds, selectCdpEvent } from './journey-target-extractor';
+import { selectJourneyTargetCustomerIds, selectCdpEventRowsForCursor } from './journey-target-extractor';
+import { planCdpCursorBatch } from './journey-cdp-cursor';
 import { recordEnteredWithClient } from './journey-entry-ledger';
 import { calculateNextRunAt } from './send-time-util';
 
@@ -130,22 +131,25 @@ async function processJourneyTrigger(j: ActiveJourney): Promise<{ matched: numbe
     const eventName = j.trigger_event === 'cdp.purchase' ? 'purchase' : 'reservation_created';
     return processCdpCursorJourney(j, eventName);
   }
-  // 추출 = journey-target-extractor 공유 컨트롤타워. journeyId 전달 → 신규가입은 진입 원장 기준.
-  const ids = await selectJourneyTargetCustomerIds(j.company_id, j.trigger_event, j.trigger_filters || {}, 500, j.id);
+  // 추출 = journey-target-extractor 공유 컨트롤타워. journeyId + 재진입 정보 전달.
+  //   휴면·생일·포인트는 진입 안티조인으로 회차마다 다음 분이 들어와 501번째+ 누락이 없다.
+  const reentry = { allowReentry: j.allow_reentry, cooldownDays: Number(j.reentry_cooldown_days || 0) };
+  // ★ Fix #2 (2026-06-05): 대량 차단기를 LIMIT 500이 무력화하던 문제 정정.
+  //   상한 설정 시 cap+1까지 추출 → 진짜 급증(후보 > 상한)만 정지. 미설정(무제한)이면 500 스로틀로 회차 분산.
+  const cap = j.threshold_recipients_per_step;
+  const extractLimit = cap != null ? Number(cap) + 1 : 500;
+  const ids = await selectJourneyTargetCustomerIds(j.company_id, j.trigger_event, j.trigger_filters || {}, extractLimit, j.id, reentry);
   if (ids.length === 0) {
     return { matched: 0, enqueued: 0, skipped: 0 };
   }
-  // ★ Phase 2 대량 차단기: 한 번 진입 후보가 회사 설정 상한 초과 → 자동발송 X, 여정 정지 + 사유 기록(담당자 확인).
-  //   임의 상수 X — 회사가 설정한 threshold_recipients_per_step(NULL=무제한)만 사용.
-  const cap = j.threshold_recipients_per_step;
   if (cap != null && ids.length > Number(cap)) {
     await query(
       `UPDATE journeys SET status = 'paused', paused_at = NOW(),
          pause_reason = $2, updated_at = NOW()
        WHERE id = $1::uuid AND status = 'active'`,
-      [j.id, `대량 진입 감지 (${ids.length}건 > 상한 ${cap}건) — 자동 정지, 담당자 확인 필요`]
+      [j.id, `대량 진입 감지 (신규 후보 ${Number(cap)}건 초과) — 자동 정지, 담당자 확인 필요`]
     );
-    console.warn(`[JourneyTrigger] 대량 차단 — journey=${j.id} 후보=${ids.length} 상한=${cap} → 정지`);
+    console.warn(`[JourneyTrigger] 대량 차단 — journey=${j.id} 신규 후보 > 상한 ${cap} → 정지`);
     return { matched: ids.length, enqueued: 0, skipped: ids.length };
   }
   return enqueueCandidates(j, ids);
@@ -156,9 +160,15 @@ async function processJourneyTrigger(j: ActiveJourney): Promise<{ matched: numbe
 // ════════════════════════════════════════════════════════════════════
 
 async function processCdpCursorJourney(j: ActiveJourney, eventName: string): Promise<{ matched: number; enqueued: number; skipped: number }> {
-  const windowEnd = new Date();  // 이번 윈도우 끝 — 추출과 커서 전진에 동일 값
+  const windowEnd = new Date();  // 이번 윈도우 끝
   const cursorStart = j.last_event_cursor || windowEnd;  // 커서 없으면 빈 창(다음 회차부터)
-  const ids = await selectCdpEvent(j.company_id, eventName, j.trigger_filters || {}, 500, cursorStart, windowEnd);
+  // ★ Fix #11 (2026-06-05): 한 윈도우 이벤트가 상한을 넘어도 LIMIT로 영구 누락하던 문제 정정.
+  //   occurred_at 순으로 chunk+1 조회 후, 절단 시 커서를 마지막 처리 이벤트 시각까지만 전진(나머지 다음 회차).
+  const CDP_EVENT_CHUNK = 1000;
+  const rows = await selectCdpEventRowsForCursor(j.company_id, eventName, j.trigger_filters || {}, cursorStart, windowEnd, CDP_EVENT_CHUNK + 1);
+  const batch = planCdpCursorBatch(rows, CDP_EVENT_CHUNK, windowEnd);
+  const ids = batch.ids;
+  const newCursor = batch.newCursor;
 
   // 대량 차단기 — 후보 과다 시 정지+사유(커서 전진 안 함 → 재활성화 시 재평가).
   const cap = j.threshold_recipients_per_step;
@@ -176,9 +186,9 @@ async function processCdpCursorJourney(j: ActiveJourney, eventName: string): Pro
     `SELECT id, delay_hours, delay_mode, target_hour_kst FROM journey_steps WHERE journey_id = $1::uuid AND step_order = 1`,
     [j.id]
   );
-  // step 없거나 후보 0이어도 커서는 전진(이 창 처리 완료 표시 — 누락 방지).
+  // step 없거나 후보 0이어도 커서는 전진(이 창/chunk 처리 완료 표시 — 누락 방지).
   if (firstStepRes.rows.length === 0 || ids.length === 0) {
-    await query(`UPDATE journeys SET last_event_cursor = $2 WHERE id = $1::uuid`, [j.id, windowEnd]);
+    await query(`UPDATE journeys SET last_event_cursor = $2 WHERE id = $1::uuid`, [j.id, newCursor]);
     return { matched: ids.length, enqueued: 0, skipped: ids.length };
   }
   const firstStep = firstStepRes.rows[0] as FirstStepRow;
@@ -196,7 +206,7 @@ async function processCdpCursorJourney(j: ActiveJourney, eventName: string): Pro
       await client.query(INSERT_EXECUTION_SQL, [j.id, customerId, nextRunAt]);
       enqueued++;
     }
-    await client.query(`UPDATE journeys SET last_event_cursor = $2 WHERE id = $1::uuid`, [j.id, windowEnd]);
+    await client.query(`UPDATE journeys SET last_event_cursor = $2 WHERE id = $1::uuid`, [j.id, newCursor]);
     if (enqueued > 0) {
       await client.query(
         `UPDATE journeys SET stats_total_entered = stats_total_entered + $2, updated_at = NOW() WHERE id = $1::uuid`,
