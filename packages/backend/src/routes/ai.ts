@@ -2529,11 +2529,26 @@ router.post('/operator/journeys/:id/activate', async (req: Request, res: Respons
 
     // ★ 크레딧: 최초 활성화(draft→active)만 '여정 설계' 150 차감. paused→active 재개는 0(돌려보기 생성은 호출당 3 별도).
     //   멱등키=journey-activate:${journeyId} 고정 → 재개·재시도·동시요청 중복 차감 0(ai_call_log_id FK 무관).
-    const stRow = await query(
-      `SELECT status FROM journeys WHERE id = $1::uuid AND company_id = $2::uuid`,
-      [req.params.id, companyId]
-    );
+    let stRow;
+    try {
+      stRow = await query(
+        `SELECT status, last_pretest_passed_at FROM journeys WHERE id = $1::uuid AND company_id = $2::uuid`,
+        [req.params.id, companyId]
+      );
+    } catch (colErr: any) {
+      // ★ Fix #4 + db_alter_safety_net: 컬럼 미존재(미마이그레이션) = 503 + 운영자 안내(500 노출 X).
+      const cm = colErr?.message || '';
+      if (cm.includes('column') && cm.includes('does not exist')) {
+        return res.status(503).json({ success: false, error: 'DB 마이그레이션 필요 — 운영자에게 journeys.last_pretest_passed_at ALTER 실행 요청 의무', code: 'DB_MIGRATION_PENDING' });
+      }
+      throw colErr;
+    }
     if (stRow.rows.length === 0) return res.status(404).json({ success: false, error: '여정을 찾을 수 없습니다.' });
+    // ★ Fix #4 (2026-06-05): 발송 전 문안 검증(스팸필터+형식) 통과 마커 필수 — 프론트 우회로 미검증 활성화 차단.
+    //   step/변이 편집 시 마커는 NULL로 무효화되므로, 편집 후엔 재검증해야 활성화된다.
+    if (!stRow.rows[0].last_pretest_passed_at) {
+      return res.status(400).json({ success: false, error: '발송 전 문안 검증을 먼저 통과해 주세요. 미리보기에서 검증 후 활성화할 수 있습니다.', code: 'PRETEST_REQUIRED' });
+    }
     const firstActivation = stRow.rows[0].status === 'draft';
     if (firstActivation) await checkCredit(companyId, getCreditCost('journey-activate'));
 
@@ -3038,6 +3053,10 @@ router.post('/operator/journeys/:id/pretest-validate', async (req: Request, res:
     }
 
     const result = await validateJourneyForActivation(companyId, req.params.id, userId);
+    // ★ Fix #4 (2026-06-05): 검증 통과 시 발송 전 검증 마커 기록 — /activate가 이 마커로 미검증(프론트 우회) 활성화를 차단한다.
+    if (result.ok) {
+      await query(`UPDATE journeys SET last_pretest_passed_at = NOW() WHERE id = $1::uuid AND company_id = $2::uuid`, [req.params.id, companyId]);
+    }
     return res.json({ success: true, ...result });
   } catch (err: any) {
     // ★ D214+ db_alter_safety_net 정합 — DB 마이그레이션 미실행 시 503 + 사용자 친화 안내

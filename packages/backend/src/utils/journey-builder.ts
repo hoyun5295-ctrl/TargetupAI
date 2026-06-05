@@ -879,6 +879,10 @@ export async function updateJourneyStep(
       patch.notifyManagerOnPretest !== undefined,
     ]
   );
+  // ★ Fix #4 (2026-06-05): step 편집 시 발송 전 검증 마커 무효화 — 편집 후 재검증해야 활성화 가능.
+  if (r.rows.length > 0) {
+    await query(`UPDATE journeys SET last_pretest_passed_at = NULL WHERE id = $1::uuid`, [journeyId]);
+  }
   return r.rows.length > 0;
 }
 

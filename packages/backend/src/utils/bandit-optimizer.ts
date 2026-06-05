@@ -503,6 +503,12 @@ export async function createJourneyStepVariant(input: {
       input.trafficWeight != null ? Math.max(0, Math.min(1, input.trafficWeight)) : 0.5,
     ]
   );
+  // ★ Fix #4 (2026-06-05): 변이 본문 추가/수정 시 발송 전 검증 마커 무효화(재검증 필요).
+  await query(
+    `UPDATE journeys SET last_pretest_passed_at = NULL
+      WHERE id = (SELECT journey_id FROM journey_steps WHERE id = $1::uuid)`,
+    [input.stepId]
+  );
   return r.rows[0].id as string;
 }
 
