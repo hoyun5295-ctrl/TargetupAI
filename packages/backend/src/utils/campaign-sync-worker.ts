@@ -230,6 +230,8 @@ async function notifyJourneyResultsToManagers(): Promise<void> {
  *
  *   ★ 부작용 없음 — 플래그/타임스탬프만 UPDATE. 집계·환불 호출 X. 돈 경로(syncCampaignResults/sweeper) 무수정.
  *   ★ D144 교훈대로 — "완료 판정된 것만 캐시 신뢰". 진행 중(<6h)은 result_final=false라 MySQL 실시간 유지.
+ *   ★ 2026-06-05: 확정 조건에 success+fail >= sent_count 추가 — 완전 집계분만 캐시 확정.
+ *     미완성(LIVE→LOG 이동 중 등)이 과소 확정돼 발송결과가 실제보다 적게 굳던 문제 차단.
  */
 async function markFinalizedCampaigns(): Promise<void> {
   const r = await query(`
@@ -240,7 +242,8 @@ async function markFinalizedCampaigns(): Promise<void> {
        AND status IN ('completed', 'failed')
        AND sent_at IS NOT NULL
        AND sent_at < NOW() - INTERVAL '6 hours'
-       AND (COALESCE(success_count, 0) + COALESCE(fail_count, 0)) > 0
+       AND sent_count > 0
+       AND (COALESCE(success_count, 0) + COALESCE(fail_count, 0)) >= sent_count
   `);
   if (r.rowCount && r.rowCount > 0) {
     log(`result_final 확정 ${r.rowCount}건 (발송 6h 경과 완료 캠페인 → PG 캐시 전환)`);

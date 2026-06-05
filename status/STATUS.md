@@ -107,7 +107,18 @@
 
 ---
 
-### 🟢 2026-06-05 세션4 (최신) — 여정 엔진 Phase 9 완료 (미배포)
+### 🟢 2026-06-05 세션5 (최신) — 직원 디버깅 3건 + 발송통계 캐시·라인그룹
+> **① 알림톡 대체발송 통계 분리(배포) ② 발송결과 채널통합조회 엑셀 다운로드+줄바꿈fix(배포) ③ hpio 발송통계 0=라인그룹 합집합(배포) ④ 발송통계 5곳 result_final 캐시 전환(미배포). 핸드오프 `docs/superpowers/handoffs/2026-06-05-session5-stats-cache-handoff.md` 정독 의무. ★여정 코드 절대 X.**
+> - **알림톡 대체발송 분리**: 통계 엑셀 알림톡 캠페인 "알림톡"(K)/"알림톡대체발송"(L·k_oriseq>0) 2행. sms-result-map classifyMsgChannel/tallySmsChannelCounts(순수 TDD) + aggregateSmsChannelSplitByCampaign + admin /stats/export.
+> - **발송결과 엑셀**: 프론트 ESM라 backend CSV(campaign-list-csv 순수 TDD) + results.ts /campaigns/export(필터 sendType/sender=login_id, :id보다 먼저 라우팅) + ResultsModal 버튼. 메시지 줄바꿈→공백 fix.
+> - **hpio 0**: 발송 company라인{7,8,9} vs 집계 user라인{1,2,3} 어긋남(user 개별 라인그룹 발송후 부여). mergeLineTables(순수)+getCompanySmsTablesWithLogs user+company 합집합. 발송 무영향.
+> - **발송통계 캐시**: 5곳(querySendStats·Detail·admin send·detail·export else) getCampaignResultCounts(result_final 캐시). 완료=PG캐시 MySQL skip, 진행중=실시간. result_final/sent_count/success_count/fail_count information_schema 확인. tsc0·grep0·미배포.
+> - **hoyun 500 폭발**: 6/4 여정 500 campaign status='sending'+result_final=false(syncCampaignResults app_etc1 매칭 0→status 미전환)→캐시없음→발송결과 조회 raw 폭발. 인덱스OK(6.7ms). **여정 코드 X(주인님 격분 — 묶음 이미 고침)**.
+> - **잔여**: ②캐시 배포검증 ③hoyun status sending→failed 정리(환불 실측 먼저) ④status 안전망(campaign-sync-worker). 여정 코드 0.
+
+---
+
+### 🟢 2026-06-05 세션4 — 여정 엔진 Phase 9 완료 (미배포)
 > **Phase 9 전면 구현·검증 완료, 미배포(Harold 배포). 설계 `docs/superpowers/specs/2026-06-04-journey-phase9-design.md` · 계획 `docs/superpowers/plans/2026-06-04-journey-phase9.md`.**
 > - **9-1 미리보기=실발송 통일**: 시뮬레이터 `matchTriggerCustomers`(cdp 30일/custom 전체 분기) 폐기 → 발송과 같은 `selectJourneyTargetCustomerIds` 재사용. 신규 `countJourneyTargetCustomers`(ID 추출 후 등급 집계, 상한 10만 capped)·`gradeBreakdownForIds`·`averageScoresForIds`. 미리보기 2 endpoint + 시뮬레이트 = 같은 함수.
 > - **실데이터 예측(임의 상수 제거)**: 잔존율 0.85·객단가 5만·0.15/0.05 폐기 → 객단가 `customers.avg_order_value`·전환/클릭 `cdp_customer_predictions`·비용 `companies.cost_per_*`(회사 실 단가). 없으면 "데이터 부족" 정직 표기. 조건 step 하류 발송=null(변동). `journey-simulator-core.ts`(순수 buildSegmentBreakdown+buildProjection).

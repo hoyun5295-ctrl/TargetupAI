@@ -254,6 +254,14 @@ const items: any[] =
 - **교훈 2**: 옵셔널 신규 필드는 tsc 통과 + 순수 테스트 미적용으로 **자동 검증 못 잡음** → 생성→DB 왕복 1건 실측이 유일한 안전망. "완료" 보고 전 운영 흐름 1건 실측 의무.
 - **교훈 3**: 디버깅 시 "배포 안 됐을 것" 추측 금지 → `console.log`(stdout)+PM2 로그로 **수신값 실측**부터. (배포상태 추측으로 헤매다 Harold 격분 — no_guess 위반.) 백엔드는 ts-node(소스 직접 실행)라 dist 빌드 무관, pull+pm2 restart면 반영.
 
+**★ 2026-06-05 세션5 발송통계 hpio 0 + hoyun 폭발 + result_final 캐시**:
+- **hpio 0**: 발송 데이터가 회사 라인 `{SMSQ_SEND_7,8,9}`인데 집계는 created_by의 user 라인 `{1,2,3}` 우선 조회 → 매칭 0. user 개별 라인그룹이 발송(5/30) 후 부여돼 발송/집계 라인이 어긋남. fix = `getCompanySmsTablesWithLogs`(집계 전용)를 `mergeLineTables`로 user+company **합집합**. 발송 경로(`getCompanySmsTables` user 우선)는 불변.
+- **교훈**: 집계가 라인그룹 한정 조회라 발송 후 라인그룹이 바뀌면 과거 발송 집계가 깨진다. 집계는 합집합으로 내성 확보. (발송내역 상세 `getCampaignSmsTables`도 같은 잠재 — 추후 동일 적용 검토.)
+- **hoyun 폭발**: 여정 500 campaign `status='sending'`+`result_final=false`. `syncCampaignResults`(campaign-lifecycle:238 직접발송 섹션)가 `app_etc1=campaignId`로 결과 0집계 → status 전환 조건(433) 미충족 → sending 영영 방치 → 캐시 없음 → 발송결과 조회마다 500 생집계 폭발. 인덱스 OK(`idx_app_etc1_status`, PG 6.7ms)라 인덱스 문제 아님.
+- **fix(②)**: 발송통계 5곳을 `getCampaignResultCounts`(result_final이면 PG 캐시 MySQL skip)로 전환. ★ **복제(read replica)는 부하분리지 속도 아님**(같은 GROUP BY) — 속도는 pre-aggregation(캐시).
+- **교훈**: D144가 PG 캐시 뺀 건 속도가 아니라 정확성(`billing.ts` 미러). D228+ `result_final`(6h 확정)이 그 정확성 문제를 해결 — 발송통계만 캐시 미적용이라 느렸음.
+- **프론트 순수 TDD**: `type:module`(ESM)라 ts-node 순수 함수 TDD가 `ERR_UNKNOWN_FILE_EXTENSION`로 막힘 → 순수 로직을 backend로 옮겨 TDD(`campaign-list-csv.ts`).
+
 ---
 
 ## 자가 검증 매트릭스 (Backend 작업 시)
