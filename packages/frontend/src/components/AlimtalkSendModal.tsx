@@ -25,6 +25,13 @@ import AddressBookModal from './AddressBookModal';
 import { normalizePhoneKr } from '../utils/formatDate';
 import { validateAlimtalkVariables } from '../utils/alimtalkVars';
 
+// 주소록/엑셀 표준 필드 → 사용자 표시 라벨. 미리보기 컬럼 + 변수 매칭 드롭다운 공용.
+const FIELD_LABEL_MAP: Record<string, string> = { name: '이름', extra1: '기타1', extra2: '기타2', extra3: '기타3' };
+// 변수명 → 자동 매핑 대상 필드 별칭 (의미 일치 시 자동 선택)
+const FIELD_NAME_ALIASES: Record<string, string[]> = {
+  name: ['이름', '성함', '성명', '고객명', '고객', '수신자', '수신자명', '회원명'],
+};
+
 export interface AlimtalkSendModalProps {
   show: boolean;
   onClose: () => void;
@@ -151,7 +158,7 @@ export default function AlimtalkSendModal({
   }, [show]);
 
   // ★ D162-4 (2026-05-15) 8차: initialRecipients 변경 감지 — Harold님 명시 정합.
-  //   직접타겟발송에서 추출된 수신자가 인계될 때 useEffect deps에 initialRecipients 누락되어 빈 배열로 박히던 사고 영구 차단.
+  //   직접타겟발송에서 추출된 수신자가 인계될 때 useEffect deps에 initialRecipients 누락되어 빈 배열로 남던 문제 차단.
   //   show=true 시 initialRecipients가 있으면 그대로 적용, 없으면 빈 배열(직접발송 자체 입력).
   //   매핑/state reset은 show=true 진입 시 1회만(위 useEffect) — 사용자 매핑 변경이 reset되는 사고 방지.
   useEffect(() => {
@@ -186,7 +193,7 @@ export default function AlimtalkSendModal({
     if (sample) {
       const keys = Object.keys(sample).filter((k) => k !== 'phone');
       if (keys.length > 0) {
-        return keys.map((k) => ({ key: k, label: k }));
+        return keys.map((k) => ({ key: k, label: FIELD_LABEL_MAP[k] || k }));
       }
     }
     // (2) 고객 DB 표준 필드
@@ -200,17 +207,38 @@ export default function AlimtalkSendModal({
     return customerFieldOptions;
   }, [recipients, enabledFields, customerFieldOptions]);
 
-  // ★ D162-4 (2026-05-15) 4차: 매핑된 변수 컬럼 추출 — Harold님 명시 "리스트에 매핑 내용 표시" 정합.
-  //   kakaoTemplateVars의 값 중 `@@헤더@@` placeholder인 항목들의 헤더명만 unique 추출.
-  const mappedColumns = useMemo(() => {
-    return Array.from(
-      new Set(
-        Object.values(kakaoTemplateVars)
-          .filter((v): v is string => typeof v === 'string' && v.startsWith('@@') && v.endsWith('@@'))
-          .map((v) => v.slice(2, -2)),
-      ),
-    );
-  }, [kakaoTemplateVars]);
+  // ★ 2026-06-05: 수신자 미리보기 컬럼 — 변수 매칭 여부와 무관하게 recipients의 실제 필드(phone 외)를 항상 표시.
+  //   기존 방식(매핑된 변수 컬럼만 표시)은 주소록/엑셀을 불러와도 수신번호만 노출시켜 직원 신고 발생.
+  const previewColumns = useMemo(() => {
+    const sample = recipients[0];
+    if (!sample) return [] as string[];
+    return Object.keys(sample).filter((k) => k !== 'phone');
+  }, [recipients]);
+
+  // ★ 2026-06-05: 주소록/엑셀 불러오면 변수↔필드 자동 매핑 (변수명 = 필드명/라벨/별칭 일치 시).
+  //   사용자가 비워 둔 변수만 채움 — 직접 입력·선택한 매핑은 보존.
+  useEffect(() => {
+    if (recipients.length === 0 || !kakaoSelectedTemplate?.content) return;
+    const fields = Object.keys(recipients[0]).filter((k) => k !== 'phone');
+    if (fields.length === 0) return;
+    const vars = Array.from(new Set(kakaoSelectedTemplate.content.match(/#\{[^}]+\}/g) || [])) as string[];
+    const autoMap: Record<string, string> = {};
+    vars.forEach((v) => {
+      const inner = v.replace(/^#\{|\}$/g, '').trim();
+      const matched = fields.find(
+        (f) => f === inner || FIELD_LABEL_MAP[f] === inner || (FIELD_NAME_ALIASES[f] || []).includes(inner),
+      );
+      if (matched) autoMap[v] = `@@${matched}@@`;
+    });
+    if (Object.keys(autoMap).length === 0) return;
+    setKakaoTemplateVars((prev) => {
+      const next = { ...prev };
+      for (const [k, val] of Object.entries(autoMap)) {
+        if (!next[k]) next[k] = val;
+      }
+      return next;
+    });
+  }, [recipients, kakaoSelectedTemplate]);
 
   // AlimtalkChannelPanel 통합 state
   const channelState: AlimtalkChannelState = useMemo(
@@ -658,18 +686,18 @@ export default function AlimtalkSendModal({
                   </div>
                   <div className="max-h-48 overflow-y-auto overflow-x-auto">
                     <table className="w-full text-xs">
-                      {mappedColumns.length > 0 && (
+                      {previewColumns.length > 0 && (
                         <thead className="bg-gray-50/70 sticky top-0">
                           <tr>
                             <th className="px-3 py-1 text-left text-[10px] font-medium text-gray-500 whitespace-nowrap">
                               수신번호
                             </th>
-                            {mappedColumns.map((col) => (
+                            {previewColumns.map((col) => (
                               <th
                                 key={col}
                                 className="px-3 py-1 text-left text-[10px] font-medium text-gray-500 whitespace-nowrap"
                               >
-                                {col}
+                                {FIELD_LABEL_MAP[col] || col}
                               </th>
                             ))}
                             <th className="px-3 py-1 text-right"></th>
@@ -683,7 +711,7 @@ export default function AlimtalkSendModal({
                             className="border-b border-gray-100 last:border-0"
                           >
                             <td className="px-3 py-1 font-mono text-gray-700 whitespace-nowrap">{r.phone}</td>
-                            {mappedColumns.map((col) => (
+                            {previewColumns.map((col) => (
                               <td
                                 key={col}
                                 className="px-3 py-1 text-gray-700 truncate max-w-[140px] whitespace-nowrap"
