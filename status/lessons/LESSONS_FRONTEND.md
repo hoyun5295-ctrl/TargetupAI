@@ -17,6 +17,12 @@
 
 ## 사고 이력
 
+### 2026-06-05 세션6 — 알림톡 변수매칭 필드 미노출 (미리보기가 매핑된 컬럼만 표시)
+- **현상**: 주소록/엑셀 불러오면 수신자 미리보기에 phone만·변수매칭 드롭다운에 필드 0 (직원 psy5868 신고).
+- **근본**: `AlimtalkSendModal.tsx` 수신자 미리보기 테이블이 `mappedColumns`(변수매칭에서 `@@컬럼@@`로 선택된 것만)를 헤더/본문으로 렌더 → 변수매칭 안 하면 recipients에 이름·기타1~3이 다 있어도 수신번호만 표시. backend(`address-books.ts:57` SELECT 5컬럼)·불러오기(`AddressBookModal:624` 5키 map)·recipients 연결은 정상 → **표시 로직이 버그**.
+- **fix**: `previewColumns`(recipients[0] keys, phone 외 항상 표시) + `FIELD_LABEL_MAP`(name→이름·extra1~3→기타1~3) 한글 라벨(미리보기+드롭다운 공용) + 자동매핑 useEffect(변수명=필드명/라벨/별칭 일치 시 `@@필드@@`, 비워둔 변수만).
+- **교훈 (메타)**: 코드를 읽고 "정상으로 보인다"고 단정 = 디버깅 아님. 직원이 화면 버그를 신고했으면 어딘가 결함이 있다. 데이터 흐름(backend→불러오기→recipients→미리보기 렌더)을 끝까지 따라가 **"표시 단계"에서 막힌 곳**을 찾아야. "정상" 단정 반복 → Harold 격분.
+
 ### D214+ — Opus 4.7 UI 노출 반복 위반 (Critical) ★ 신규
 - **사례**: D190-fix1 (UI 모델명 노출 9건 전수 정정) 영구 룰 박혀있음에도 D214+ CdpSettingsPage 전면 재작성 안 "AI 자율 진단 (Opus 4.7)" 4건 노출:
   - line 10/367/744 (주석)

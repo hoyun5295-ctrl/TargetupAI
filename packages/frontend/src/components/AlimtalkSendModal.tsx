@@ -73,6 +73,8 @@ export interface AlimtalkSendModalProps {
     /** ★ D188 (2026-05-21) 영업팀장 신고 #7-(2): LMS 대체 제목 — L/B 시 필수 (Dashboard 발송 fetch에 전달). */
     nextSubject?: string;
     profileId: string;
+    /** ★ 2026-06-05: stage 적재로 생성된 stagingId — Dashboard commit이 이 값으로 발송(staging 기반). */
+    stagingId?: string;
   }) => void;
 
   setToast: (t: { show: boolean; type: 'success' | 'error' | 'warning'; message: string }) => void;
@@ -140,19 +142,9 @@ export default function AlimtalkSendModal({
       setShowMapping(false);
       setDirectInput('');
       setInputMode('direct');
-      // ★ D162-4 (2026-05-15) 7차: 직접발송 진입 시 고객 DB 표준 필드 fetch — 변수 매칭 옵션 제공.
-      //   Harold님 명시 정합. 직접타겟발송도 recipients[0] keys 우선이지만 fallback으로 활용.
-      const token = localStorage.getItem('token');
-      fetch('/api/customers/enabled-fields', { headers: { Authorization: `Bearer ${token}` } })
-        .then((r) => r.json())
-        .then((data) => {
-          if (data && Array.isArray(data.fields)) {
-            setEnabledFields(data.fields);
-          }
-        })
-        .catch(() => {
-          /* 권한/네트워크 실패 시 빈 배열 유지 — recipients[0] 또는 props fallback */
-        });
+      // ★ 2026-06-05: 직접발송 알림톡은 사용자가 올린 데이터(recipients keys)만 변수 매칭 옵션으로 사용.
+      //   기존 고객 DB 표준 필드 fetch는 수신자 0건에도 DB 필드가 노출돼
+      //   #{고객명}→name 자동 매핑·고정 발송을 유발해 제거(직원 신고).
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [show]);
@@ -172,23 +164,10 @@ export default function AlimtalkSendModal({
   const [fileHeaders, setFileHeaders] = useState<string[]>([]);
   const [fileAllData, setFileAllData] = useState<any[]>([]);
   const [phoneColumn, setPhoneColumn] = useState('');
-  // ★ D162-4 (2026-05-15) 7차: 직접발송 진입 시 고객 DB 표준 필드(/api/customers/enabled-fields)를 변수 매칭 옵션으로 활용.
-  //   Harold님 명시 정합 "직접발송은 싱크에이전트나 이미 업로드된 고객DB를 가지고 보내는거잖아".
-  //   발송 시 backend가 phone으로 고객 조회 + 자동 치환(기존 SMS 발송 패턴 동일).
-  const [enabledFields, setEnabledFields] = useState<Array<{
-    field_key: string;
-    display_name?: string;
-    field_label?: string;
-  }>>([]);
 
-  // ★ D162-4 (2026-05-15) 7차: 동적 컬럼 옵션 — Harold님 명시 정합 (직접발송 vs 직접타겟발송 차이 반영).
-  //   우선순위:
-  //   (1) 직접타겟발송 — recipients[0] keys(phone 외): 추출된 row의 실제 컬럼이 그대로 매칭 옵션
-  //   (2) 직접발송 — enabledFields(/api/customers/enabled-fields): 고객 DB 표준 필드(name/gender/birth_date 등)
-  //                  backend가 발송 시점에 phone으로 customers 조회 + 자동 치환 (기존 SMS 발송 패턴 동일)
-  //   (3) Fallback — props customerFieldOptions
+  // ★ 2026-06-05: 변수 매칭 옵션 — 사용자가 올린 데이터(recipients[0] keys)만 사용.
+  //   직접발송 알림톡에 고객 DB 표준 필드를 노출하지 않음(수신자 0건에 DB 필드 노출·고정 발송 문제 차단, 직원 신고).
   const dynamicFieldOptions = useMemo(() => {
-    // (1) 추출된 row가 있으면 그 keys 우선
     const sample = recipients[0];
     if (sample) {
       const keys = Object.keys(sample).filter((k) => k !== 'phone');
@@ -196,16 +175,9 @@ export default function AlimtalkSendModal({
         return keys.map((k) => ({ key: k, label: FIELD_LABEL_MAP[k] || k }));
       }
     }
-    // (2) 고객 DB 표준 필드
-    if (enabledFields.length > 0) {
-      return enabledFields.map((f) => ({
-        key: f.field_key,
-        label: f.display_name || f.field_label || f.field_key,
-      }));
-    }
-    // (3) props fallback
+    // 업로드 데이터가 없으면 옵션 없음(직접 입력만).
     return customerFieldOptions;
-  }, [recipients, enabledFields, customerFieldOptions]);
+  }, [recipients, customerFieldOptions]);
 
   // ★ 2026-06-05: 수신자 미리보기 컬럼 — 변수 매칭 여부와 무관하게 recipients의 실제 필드(phone 외)를 항상 표시.
   //   기존 방식(매핑된 변수 컬럼만 표시)은 주소록/엑셀을 불러와도 수신번호만 노출시켜 직원 신고 발생.
@@ -439,6 +411,65 @@ export default function AlimtalkSendModal({
     setSending(true);
     try {
       const token = localStorage.getItem('token');
+
+      // ★ 2026-06-05: 변수 매칭에 쓰인 컬럼 → stage 고정 슬롯(name/extra1~3) 매핑.
+      //   campaign_send_staging이 고정 컬럼이라, 엑셀 임의 컬럼(이름/매장명 등)을 슬롯에 옮겨 담아야
+      //   worker가 @@슬롯@@으로 변수 치환 가능. 주소록(name/extra1~3)은 그대로 유지됨.
+      const SLOTS = ['name', 'extra1', 'extra2', 'extra3'];
+      const usedCols = Array.from(new Set(
+        Object.values(kakaoTemplateVars)
+          .filter((v): v is string => typeof v === 'string' && v.startsWith('@@') && v.endsWith('@@'))
+          .map((v) => v.slice(2, -2)),
+      ));
+      const colToSlot: Record<string, string> = {};
+      const usedSlots = new Set<string>();
+      usedCols.forEach((c) => { if (SLOTS.includes(c)) { colToSlot[c] = c; usedSlots.add(c); } });
+      usedCols.forEach((c) => {
+        if (colToSlot[c]) return;
+        const free = SLOTS.find((s) => !usedSlots.has(s));
+        if (free) { colToSlot[c] = free; usedSlots.add(free); }
+      });
+      const overflow = usedCols.filter((c) => !colToSlot[c]);
+      if (overflow.length > 0) {
+        setToast({ show: true, type: 'error', message: `변수 매칭 컬럼은 최대 4개까지만 발송됩니다. 초과: ${overflow.join(', ')}` });
+        setSending(false);
+        return;
+      }
+      const stageRecipients = recipients.map((r) => {
+        const out: Record<string, any> = { phone: r.phone };
+        for (const [col, slot] of Object.entries(colToSlot)) out[slot] = r[col] ?? null;
+        return out;
+      });
+      const stagedVariableMap: Record<string, string> = {};
+      for (const [varKey, val] of Object.entries(kakaoTemplateVars)) {
+        if (typeof val === 'string' && val.startsWith('@@') && val.endsWith('@@')) {
+          const col = val.slice(2, -2);
+          stagedVariableMap[varKey] = colToSlot[col] ? `@@${colToSlot[col]}@@` : val;
+        } else {
+          stagedVariableMap[varKey] = val;
+        }
+      }
+
+      // ★ 2026-06-05: stage 청크 적재 → stagingId (DirectSendPanel과 동일 파이프라인).
+      //   기존엔 이 단계가 없어 commit이 stagingId 없이 "발송 준비 정보가 없습니다"로 차단됐음.
+      const CHUNK = 50000;
+      let stagingId: string | undefined;
+      for (let i = 0; i < stageRecipients.length; i += CHUNK) {
+        const slice = stageRecipients.slice(i, i + CHUNK);
+        const stageRes = await fetch('/api/campaigns/direct-send/stage', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+          body: JSON.stringify({ stagingId, recipients: slice }),
+        });
+        const stageData = await stageRes.json();
+        if (!stageData.success) {
+          setToast({ show: true, type: 'error', message: stageData.error || '수신자 적재에 실패했습니다.' });
+          setSending(false);
+          return;
+        }
+        stagingId = stageData.stagingId;
+      }
+
       const phones = recipients.map((r) => r.phone);
       let unsubCount = 0;
       let dupCount = 0;
@@ -460,9 +491,10 @@ export default function AlimtalkSendModal({
         duplicateCount: dupCount,
         from: 'alimtalk',
         msgType: '알림톡',
+        stagingId,
         recipients,
         selectedTemplate: kakaoSelectedTemplate,
-        variableMap: kakaoTemplateVars,
+        variableMap: stagedVariableMap,
         fallback: alimtalkFallback,
         nextContents: alimtalkNextContents,
         // ★ D188 (2026-05-21) 영업팀장 신고 #7-(2): LMS 대체 제목 payload 전달.

@@ -107,7 +107,16 @@
 
 ---
 
-### 🟢 2026-06-05 세션5 (최신) — 직원 디버깅 3건 + 발송통계 캐시·라인그룹
+### 🟢 2026-06-05 세션6 (최신) — 발송결과 markFinalized 완전집계 + 알림톡 변수매칭 필드 노출
+> **① soos 발송결과 목록↔상세 불일치 + ② 알림톡 발송 주소록/엑셀 변수매칭 필드 미노출. 둘 다 코드·검증·배포 완료(2026-06-05). ★다음 세션 = 여정 점검(executor/builder/step-campaign/trigger 전면).**
+> - **① soos 발송결과(운영 고객사 수스_대행)**: 목록=PG캐시(과소 2,304) vs 상세=MySQL실시간(정확 2,685) 불일치. 원인 = 5/30 result_final 일괄 마킹(4,517건) 때 success+fail(2,362)<sent(2,840)인 **4건이 미완성으로 확정**(markFinalizedCampaigns가 `(success+fail)>0`만 검사). 5/31~6/5 신규 935건 gap 0(일회성). 정산(billing.ts /generate·admin 요금정산)은 MySQL 직접 집계라 **영향 0**. 수정 = `campaign-sync-worker.ts:243`에 `sent_count>0 AND (success+fail)>=sent_count` 강화 + soos 4건 `result_final=false`(실시간 복귀) + hoyun 542 `cancelled`+`result_final=true`(폭발 해소, 차감 reference_id≠campaign.id라 prepaidRefund(campaign.id) 환불 0·후불).
+> - **② 알림톡 변수매칭(직원 psy5868 신고)**: 주소록/엑셀 불러오면 수신자에 phone만·드롭다운에 필드 0. 원인 = 수신자 미리보기가 `mappedColumns`(변수매칭 선택된 것만) 렌더 + 드롭다운 라벨 영문 + 자동매핑이 변수명=필드명 완전일치만. backend(`address-books.ts:57` SELECT 5컬럼)·불러오기(`AddressBookModal:624` 5키 map)는 정상 → 미리보기 표시 로직이 버그. 수정 = `AlimtalkSendModal.tsx` previewColumns(recipients[0] keys 항상 표시) + FIELD_LABEL_MAP 한글(이름·기타1~3) + 자동매핑 useEffect(변수↔필드 의미일치). tsc 0.
+> - **배포 완료(2026-06-05)**: backend `campaign-sync-worker.ts` + frontend `AlimtalkSendModal.tsx` + soos/hoyun SQL 2개 실행 완료.
+> - **다음 세션 = 여정 점검**: 이번 세션 내내 여정 코드 X 원칙 유지. 여정 엔진(executor/builder/step-campaign/trigger) 전면 점검 진입. 핸드오프 = `memory/project_2026_0605_session6.md`.
+
+---
+
+### 🟢 2026-06-05 세션5 — 직원 디버깅 3건 + 발송통계 캐시·라인그룹
 > **① 알림톡 대체발송 통계 분리(배포) ② 발송결과 채널통합조회 엑셀 다운로드+줄바꿈fix(배포) ③ hpio 발송통계 0=라인그룹 합집합(배포) ④ 발송통계 5곳 result_final 캐시 전환(미배포). 핸드오프 `docs/superpowers/handoffs/2026-06-05-session5-stats-cache-handoff.md` 정독 의무. ★여정 코드 절대 X.**
 > - **알림톡 대체발송 분리**: 통계 엑셀 알림톡 캠페인 "알림톡"(K)/"알림톡대체발송"(L·k_oriseq>0) 2행. sms-result-map classifyMsgChannel/tallySmsChannelCounts(순수 TDD) + aggregateSmsChannelSplitByCampaign + admin /stats/export.
 > - **발송결과 엑셀**: 프론트 ESM라 backend CSV(campaign-list-csv 순수 TDD) + results.ts /campaigns/export(필터 sendType/sender=login_id, :id보다 먼저 라우팅) + ResultsModal 버튼. 메시지 줄바꿈→공백 fix.

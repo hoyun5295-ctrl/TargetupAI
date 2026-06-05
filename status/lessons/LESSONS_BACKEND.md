@@ -254,6 +254,14 @@ const items: any[] =
 - **교훈 2**: 옵셔널 신규 필드는 tsc 통과 + 순수 테스트 미적용으로 **자동 검증 못 잡음** → 생성→DB 왕복 1건 실측이 유일한 안전망. "완료" 보고 전 운영 흐름 1건 실측 의무.
 - **교훈 3**: 디버깅 시 "배포 안 됐을 것" 추측 금지 → `console.log`(stdout)+PM2 로그로 **수신값 실측**부터. (배포상태 추측으로 헤매다 Harold 격분 — no_guess 위반.) 백엔드는 ts-node(소스 직접 실행)라 dist 빌드 무관, pull+pm2 restart면 반영.
 
+**★ 2026-06-05 세션6 발송결과 markFinalized 미완성 확정 (목록↔상세 불일치)**:
+- **현상**: 운영 고객사 발송결과 목록(성공 2,304)과 상세 모달(성공 2,685)이 다름. 직원 "대기 0→478 변동" 신고.
+- **근본**: `markFinalizedCampaigns`(campaign-sync-worker.ts)가 확정 조건으로 `(success+fail)>0`만 검사 → 5/30 result_final 일괄 마킹 때 LIVE→LOG 이동이 덜 끝난 4건이 success+fail(2,362)<sent(2,840)인 **미완성 상태로 확정**. 이후 LOG로 더 들어온 결과가 영구 미반영(24h sync 윈도우 밖이라 PG success_count 안 갱신). 목록=PG캐시(과소)·상세=MySQL실시간(정확) 두 소스라 어긋남.
+- **fix**: 확정 조건에 `sent_count>0 AND (success+fail)>=sent_count` 추가(완전 집계분만 캐시 확정). 굳은 4건은 `result_final=false`로 되돌려 실시간(LIVE+LOG) 복귀. 라인그룹 캐시(`LINE_GROUP_CACHE_TTL`)라 두 번 조회 시 LOG 갱신되어 값 바뀜.
+- **교훈 1**: 캐시 확정(result_final) = "완전 집계(success+fail=sent) 검증" 의무. 단순 `>0`은 진행 중을 확정시킴.
+- **교훈 2**: 정산(billing.ts /generate·admin 요금정산)은 D144 이후 **MySQL 직접 집계**라 PG 캐시 과소와 무관 — 발송결과 화면(result_final 캐시 분기)만 영향. 돈 영향 판단 시 정산 산출 소스부터 확인.
+- **교훈 3 (메타)**: `LEFT JOIN bt ON bt.reference_id=c.id`가 0건일 때 "차감 없음"으로 단정 = 추측. reference_id가 campaign.id가 아닐 수 있음(여정 발송은 제3 id) — `(matched, status)` 교차 집계로 reference 정체부터 확정해야. no_guess 위반 반복 사례.
+
 **★ 2026-06-05 세션5 발송통계 hpio 0 + hoyun 폭발 + result_final 캐시**:
 - **hpio 0**: 발송 데이터가 회사 라인 `{SMSQ_SEND_7,8,9}`인데 집계는 created_by의 user 라인 `{1,2,3}` 우선 조회 → 매칭 0. user 개별 라인그룹이 발송(5/30) 후 부여돼 발송/집계 라인이 어긋남. fix = `getCompanySmsTablesWithLogs`(집계 전용)를 `mergeLineTables`로 user+company **합집합**. 발송 경로(`getCompanySmsTables` user 우선)는 불변.
 - **교훈**: 집계가 라인그룹 한정 조회라 발송 후 라인그룹이 바뀌면 과거 발송 집계가 깨진다. 집계는 합집합으로 내성 확보. (발송내역 상세 `getCampaignSmsTables`도 같은 잠재 — 추후 동일 적용 검토.)
