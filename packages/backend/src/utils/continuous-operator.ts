@@ -906,12 +906,28 @@ async function reconcileStuckSending(staleMinutes: number = 30): Promise<void> {
       staleMinutes,
     );
     if (action === 'mark_sent') {
-      // 발송 커밋됨(마커 있음) → 최종 상태만 마감.
-      await query(
+      // 발송 커밋됨(마커 있음) → 최종 상태만 마감 + 크래시로 누락됐을 수 있는 크레딧 멱등 보강.
+      const upd = await query(
         `UPDATE operator_proposals SET status = 'sent', auto_sent_at = COALESCE(auto_sent_at, NOW())
-         WHERE id = $1::uuid AND status = 'sending' AND campaign_id IS NOT NULL`,
+         WHERE id = $1::uuid AND status = 'sending' AND campaign_id IS NOT NULL RETURNING id`,
         [row.id],
-      ).catch(() => {});
+      ).catch(() => ({ rows: [] as any[] }));
+      if (upd.rows.length > 0) {
+        // 발송 직후(campaign_id 마커)~차감 사이 중단으로 차감이 빠졌을 수 있어 1회 보강.
+        // 멱등키 proposalId = dispatchProposalSend의 정상 차감과 동일 키 → 정상분은 skip(중복 0).
+        const opRes = await query(
+          `SELECT created_by FROM continuous_operators WHERE id = $1::uuid`,
+          [row.operator_id],
+        ).catch(() => ({ rows: [] as any[] }));
+        const createdBy = opRes.rows[0]?.created_by || row.company_id;
+        await deductCreditSafe({
+          companyId: row.company_id,
+          cost: getCreditCost('continuous-operator-send'),
+          source: 'continuous-operator-send',
+          createdBy,
+          idempotencyKey: `continuous-operator-send:${row.id}`,
+        }).catch((e: any) => console.warn('[ContinuousOperator AutoSend] 정지복구 크레딧 보강 경고:', e?.message));
+      }
     } else if (action === 'demote_admin_review') {
       // 커밋 전 중단(마커 없음) + 노후 → 담당자 검토(절대 자동 재발송 X).
       const upd = await query(
