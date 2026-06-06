@@ -205,6 +205,7 @@ export async function updateOperator(
     backupAdminPhone?: string | null;
     adminAlertChannel?: 'sms' | 'kakao' | 'email';
     optOutMinutes?: number;
+    autoSendLeadMinutes?: number | null;
     spamScoreThreshold?: number;
     maxSpamRetries?: number;
   }
@@ -241,6 +242,7 @@ export async function updateOperator(
       opt_out_minutes = COALESCE($17, opt_out_minutes),
       spam_score_threshold = COALESCE($18, spam_score_threshold),
       max_spam_retries = COALESCE($19, max_spam_retries),
+      auto_send_lead_minutes = COALESCE($20, auto_send_lead_minutes),
       updated_at = NOW()
      WHERE id = $1::uuid AND company_id = $2::uuid
      RETURNING *`,
@@ -263,6 +265,7 @@ export async function updateOperator(
       patch.optOutMinutes ?? null,
       patch.spamScoreThreshold ?? null,
       patch.maxSpamRetries ?? null,
+      patch.autoSendLeadMinutes ?? null,
     ]
   );
   return result.rows.length > 0 ? mapRowToOperator(result.rows[0]) : null;
@@ -746,37 +749,31 @@ export async function approveProposal(
   companyId: string,
   proposalId: string,
   userId: string
-): Promise<{ proposal: OperatorProposal; ok: boolean; reason?: string }> {
-  const result = await query(
+): Promise<{ ok: boolean; reason?: string; action?: 'sent' | 'skipped'; campaignId?: string; sentCount?: number }> {
+  // claim: pending/admin_review → sending. 백엔드에서 바로 발송(자동 경로와 동일)해 크레딧↔발송 원자성 확보.
+  const claim = await query(
     `UPDATE operator_proposals SET
-       status = 'approved',
+       status = 'sending',
        reviewed_by = $3::uuid,
        reviewed_at = NOW()
      WHERE id = $1::uuid AND company_id = $2::uuid AND status IN ('pending', 'admin_review')
      RETURNING *`,
     [proposalId, companyId, userId]
   );
-  if (result.rows.length === 0) {
-    return { proposal: null as any, ok: false, reason: '승인 가능한 상태가 아니거나 권한이 없는 제안서입니다.' };
+  if (claim.rows.length === 0) {
+    return { ok: false, reason: '승인 가능한 상태가 아니거나 권한이 없는 제안서입니다.' };
   }
 
   // 통계 갱신
   await query(
     `UPDATE continuous_operators SET total_approved = total_approved + 1, updated_at = NOW()
-     WHERE id = (SELECT operator_id FROM operator_proposals WHERE id = $1::uuid)`,
-    [proposalId]
+     WHERE id = $1::uuid`,
+    [claim.rows[0].operator_id]
   );
 
-  // ★ 2026-06-02 종량제: 발송 확정(수동 승인) 시 문안 3 차감 (멱등키 proposalId — auto/frontend 재호출 1회).
-  await deductCreditSafe({
-    companyId,
-    cost: getCreditCost('continuous-operator-send'),
-    source: 'continuous-operator-send',
-    createdBy: userId,
-    idempotencyKey: `continuous-operator-send:${proposalId}`,
-  });
-  // 실 발송은 routes/ai.ts에서 /direct-send 호출 (분리 정합)
-  return { proposal: mapRowToProposal(result.rows[0]), ok: true };
+  // 발송 — dispatchProposalSend 공유. 크레딧은 발송 성공 시점 1회(멱등키 proposalId).
+  const r = await dispatchProposalSend(claim.rows[0]);
+  return { ok: true, ...r };
 }
 
 export async function rejectProposal(
@@ -888,14 +885,23 @@ export async function runAutoSendPass(limit: number = 20): Promise<{ sent: numbe
 }
 
 async function sendScheduledProposal(proposalId: string): Promise<'sent' | 'skipped'> {
-  // 1. claim (scheduled → sending) — 동시 발송/중복 방지
+  // claim (scheduled → sending) — 동시 발송/중복 방지
   const claim = await query(
     `UPDATE operator_proposals SET status = 'sending'
      WHERE id = $1::uuid AND status = 'scheduled' RETURNING *`,
     [proposalId],
   );
   if (claim.rows.length === 0) return 'skipped'; // 다른 패스가 선점했거나 담당자가 정지함
-  const p = claim.rows[0];
+  const r = await dispatchProposalSend(claim.rows[0]);
+  return r.action;
+}
+
+/**
+ * claim된('sending') 제안을 직접발송 파이프라인으로 발송 — 자동(scheduled)·수동(승인) 공유.
+ * 크레딧은 발송 성공 시점 1회(멱등). 0건/잔액/발신번호 미설정은 skip + 통지.
+ */
+async function dispatchProposalSend(p: any): Promise<{ action: 'sent' | 'skipped'; campaignId?: string; sentCount?: number; reason?: string }> {
+  const proposalId: string = p.id;
   const companyId: string = p.company_id;
   const pj: any = p.proposal_json || {};
 
@@ -923,7 +929,7 @@ async function sendScheduledProposal(proposalId: string): Promise<'sent' | 'skip
   if (outcome.action === 'skip') {
     await query(`UPDATE operator_proposals SET status = 'skipped', auto_execute_reason = $2 WHERE id = $1::uuid`, [proposalId, outcome.reason]);
     if (outcome.notify) await notify('[AI 자동마케팅] 발송 생략', `'${op.name || ''}' 이번 사이클은 ${outcome.reason}.`);
-    return 'skipped';
+    return { action: 'skipped', reason: outcome.reason };
   }
 
   // 4. 발송 발신번호 (회사 기본 등록 번호)
@@ -935,7 +941,7 @@ async function sendScheduledProposal(proposalId: string): Promise<'sent' | 'skip
   if (!callback) {
     await query(`UPDATE operator_proposals SET status = 'admin_review', scheduled_send_at = NULL, auto_execute_reason = '발신번호 미설정 — 발송 보류' WHERE id = $1::uuid`, [proposalId]);
     await notify('[AI 자동마케팅] 발송 보류', `'${op.name || ''}' 등록된 발신번호가 없어 발송을 보류했습니다.`);
-    return 'skipped';
+    return { action: 'skipped', reason: '발신번호 미설정' };
   }
 
   // 5. staging 적재 (phone + name — %고객명% 치환용)
@@ -973,7 +979,7 @@ async function sendScheduledProposal(proposalId: string): Promise<'sent' | 'skip
     if (e instanceof DirectSendError && e.code === 'INSUFFICIENT_BALANCE') {
       await query(`UPDATE operator_proposals SET status = 'skipped', auto_execute_reason = '잔액 부족 — 발송 생략' WHERE id = $1::uuid`, [proposalId]);
       await notify('[AI 자동마케팅] 발송 생략', `'${op.name || ''}' 잔액 부족으로 이번 사이클 발송을 생략했습니다.`);
-      return 'skipped';
+      return { action: 'skipped', reason: '잔액 부족' };
     }
     await query(`UPDATE operator_proposals SET status = 'admin_review', scheduled_send_at = NULL, auto_execute_reason = '발송 오류 — 담당자 검토' WHERE id = $1::uuid`, [proposalId]).catch(() => {});
     throw e;
@@ -991,7 +997,7 @@ async function sendScheduledProposal(proposalId: string): Promise<'sent' | 'skip
     [proposalId, campaignId],
   );
   await notify('[AI 자동마케팅] 발송 완료', `'${op.name || ''}' ${rows.length}명에게 발송을 완료했습니다.`);
-  return 'sent';
+  return { action: 'sent', campaignId, sentCount: rows.length };
 }
 
 export function startContinuousOperatorScheduler(): void {

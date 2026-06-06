@@ -327,6 +327,7 @@ export default function ContinuousOperatorPage() {
           backup_admin_phone: editing.backupAdminPhone,
           admin_alert_channel: editing.adminAlertChannel || 'sms',
           opt_out_minutes: editing.optOutMinutes ?? 5,
+          auto_send_lead_minutes: editing.autoSendLeadMinutes ?? 120,
           spam_score_threshold: editing.spamScoreThreshold ?? 30,
           max_spam_retries: editing.maxSpamRetries ?? 3,
         }),
@@ -404,9 +405,9 @@ export default function ContinuousOperatorPage() {
   const handleApprove = (id: string) => {
     setConfirmState({
       mode: 'default',
-      title: '제안 승인',
-      description: '이 제안을 승인하시겠습니까?\n승인 후 AI Operator 화면으로 이동하여 발송을 진행할 수 있습니다.',
-      confirmLabel: '승인',
+      title: '제안 승인 + 발송',
+      description: '이 제안을 승인하고 바로 발송하시겠습니까?\n승인 즉시 대상 고객에게 발송됩니다.',
+      confirmLabel: '승인 + 발송',
       onConfirm: async () => {
         try {
           const res = await fetch(`/api/ai/operator/proposals/${id}/approve`, {
@@ -415,14 +416,7 @@ export default function ContinuousOperatorPage() {
           });
           const data = await res.json();
           if (data.success) {
-            const proposal = proposals.find((p) => p.id === id);
-            if (proposal?.operatorObjective) {
-              sessionStorage.setItem('ai_operator_prefill_objective', proposal.operatorObjective);
-              toast.success('승인되었습니다. AI Operator 화면으로 이동합니다.');
-              setTimeout(() => navigate('/ai-operator'), 800);
-              return;
-            }
-            toast.success('제안이 승인되었습니다.');
+            toast.success(data.message || '발송했습니다.');
             await loadAll();
           } else {
             toast.error(data.error || '승인에 실패했습니다.');
@@ -1382,9 +1376,20 @@ export default function ContinuousOperatorPage() {
                       className="w-full px-3 py-2 bg-violet-900/50 border border-white/10 rounded-lg text-sm text-white focus:outline-none focus:border-indigo-400/50 transition-colors"
                     />
                   </div>
+                  <div>
+                    <label className="text-[11px] text-white/60 block mb-1">자율 발송 준비 시간 (분)</label>
+                    <input
+                      type="number"
+                      min="10"
+                      max="1440"
+                      value={editing.autoSendLeadMinutes ?? 120}
+                      onChange={(e) => setEditing({ ...editing, autoSendLeadMinutes: Number(e.target.value) })}
+                      className="w-full px-3 py-2 bg-violet-900/50 border border-white/10 rounded-lg text-sm text-white focus:outline-none focus:border-indigo-400/50 transition-colors"
+                    />
+                  </div>
                 </div>
                 <div className="text-[10px] text-indigo-200/70 leading-relaxed">
-                  매주/매달 영역 = 발송 N분 전 담당자 안내 → 정지 X = 자동 발송 본질. 모든 발송 = 스팸필터테스트 통과 영역만.
+                  설정한 시각에 문안을 생성·담당자에게 안내하고, 위 준비 시간(기본 120분) 뒤 자동 발송합니다. 그 사이에 정지할 수 있습니다. 모든 발송은 스팸필터 테스트를 통과한 문안만 나갑니다.
                 </div>
               </div>
 

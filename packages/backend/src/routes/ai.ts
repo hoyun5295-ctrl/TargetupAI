@@ -1818,7 +1818,7 @@ router.put('/operator/continuous/:id', async (req: Request, res: Response) => {
       // ★ D212+ 정책 (2026-05-23 Harold 명시)
       delivery_policy, verification_required_days,
       admin_phone_numbers, backup_admin_phone, admin_alert_channel,
-      opt_out_minutes, spam_score_threshold, max_spam_retries,
+      opt_out_minutes, auto_send_lead_minutes, spam_score_threshold, max_spam_retries,
     } = req.body;
     const operator = await updateOperator(companyId, req.params.id, {
       name, objective, schedule, scheduleTime: schedule_time, status,
@@ -1832,6 +1832,7 @@ router.put('/operator/continuous/:id', async (req: Request, res: Response) => {
       backupAdminPhone: backup_admin_phone === undefined ? undefined : (backup_admin_phone === null ? null : String(backup_admin_phone)),
       adminAlertChannel: ['sms', 'kakao', 'email'].includes(admin_alert_channel) ? admin_alert_channel : undefined,
       optOutMinutes: opt_out_minutes !== undefined ? Number(opt_out_minutes) : undefined,
+      autoSendLeadMinutes: auto_send_lead_minutes !== undefined ? Number(auto_send_lead_minutes) : undefined,
       spamScoreThreshold: spam_score_threshold !== undefined ? Number(spam_score_threshold) : undefined,
       maxSpamRetries: max_spam_retries !== undefined ? Number(max_spam_retries) : undefined,
     });
@@ -2026,8 +2027,11 @@ router.post('/operator/proposals/:id/approve', async (req: Request, res: Respons
     }
     const result = await approveProposal(companyId, req.params.id, userId);
     if (!result.ok) return res.status(400).json({ success: false, error: result.reason });
-    // 실제 발송은 frontend가 proposal.proposalJson을 가지고 /preview-recipients + /direct-send 흐름으로 박음
-    return res.json({ success: true, proposal: result.proposal });
+    // 승인 = 백엔드 즉시 발송(자동 경로와 동일). 크레딧↔발송 원자성.
+    const message = result.action === 'sent'
+      ? `${result.sentCount ?? 0}명에게 발송했습니다.`
+      : (result.reason || '발송 대상이 없어 발송하지 않았습니다.');
+    return res.json({ success: true, action: result.action, campaignId: result.campaignId, sentCount: result.sentCount, message });
   } catch (err: any) {
     console.error('[Proposals approve] 오류:', err);
     return res.status(500).json({ success: false, error: err?.message || '승인 실패' });
