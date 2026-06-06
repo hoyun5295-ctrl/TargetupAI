@@ -583,14 +583,19 @@ async function processExecution(exec: ExecutionRow): Promise<StepOutcome> {
   }
 
   if (exec.budget_monthly != null) {
+    // ★ 2026-06-06 J2 정정: 월 예산 = 이번 달 실제 발송 비용(journey_step_logs.cost · sent_at 당월) 합으로 비교.
+    //   옛 코드는 journeys.stats_total_cost(전기간 누적)를 updated_at 월 필터로 SUM해 사실상 전기간 한도(월 리셋 없음)였다.
     const monthCostRes = await query(
-      `SELECT COALESCE(SUM(stats_total_cost), 0) AS month_cost
-       FROM journeys WHERE id = $1::uuid AND DATE_TRUNC('month', updated_at) = DATE_TRUNC('month', NOW())`,
+      `SELECT COALESCE(SUM(l.cost), 0) AS month_cost
+       FROM journey_step_logs l
+       JOIN journey_executions e ON e.id = l.execution_id
+       WHERE e.journey_id = $1::uuid AND l.status = 'sent'
+         AND l.sent_at >= date_trunc('month', NOW())`,
       [exec.journey_id]
     );
     const monthCost = Number(monthCostRes.rows[0]?.month_cost || 0);
     if (monthCost + sendCost > Number(exec.budget_monthly)) {
-      await pauseJourney(exec.journey_id, `월간 누적 ${(monthCost + sendCost).toLocaleString()}원 > 예산 ${Number(exec.budget_monthly).toLocaleString()}원`);
+      await pauseJourney(exec.journey_id, `이번 달 누적 ${(monthCost + sendCost).toLocaleString()}원 > 월 예산 ${Number(exec.budget_monthly).toLocaleString()}원`);
       await logFailedStep(exec.execution_id, step.id, 'budget_monthly_exceeded');
       return 'paused_budget';
     }
@@ -609,12 +614,18 @@ async function processExecution(exec: ExecutionRow): Promise<StepOutcome> {
     return 'paused_external';
   }
 
-  // 8. 잔액 차감 (atomic) — KAKAO는 prepaidDeduct가 'KAKAO' msgType 지원 정합 (없으면 fallback 'SMS' 단가)
+  // 8. 잔액 사전 확인 (read-only 게이트) — 실제 차감은 큐 INSERT 성공 직후(아래).
+  //    ★ 2026-06-06 J1: 옛 코드는 차감을 큐보다 먼저 해 큐 실패·재시도 시 과금만 되고 환불이 없었다(중복 차감) → 발송 성공 시점 차감으로 교정.
   const prepaidMsgType = msgType === 'KAKAO' ? 'KAKAO' : (msgType as 'SMS' | 'LMS' | 'MMS');
-  const deduct = await prepaidDeduct(exec.company_id, 1, prepaidMsgType as any, exec.journey_id, exec.created_by || undefined);
-  if (!deduct.ok) {
+  const balRes = await query(
+    `SELECT billing_type, balance FROM companies WHERE id = $1::uuid`,
+    [exec.company_id]
+  );
+  const isPrepaid = balRes.rows[0]?.billing_type === 'prepaid';
+  const curBalance = Number(balRes.rows[0]?.balance || 0);
+  if (isPrepaid && curBalance < sendCost) {
     // ★ D218+ (2026-05-26) 잔액 부족 실패 분기 — autoPauseExecution + journey-level pause + journey_step_pause_logs 영구 기록.
-    await pauseJourney(exec.journey_id, deduct.error || '잔액 부족');
+    await pauseJourney(exec.journey_id, `잔액 부족 (보유 ${curBalance.toLocaleString()}원 < 필요 ${sendCost.toLocaleString()}원)`);
     await logFailedStep(exec.execution_id, step.id, 'insufficient_balance');
     try {
       await autoPauseExecution({
@@ -648,7 +659,7 @@ async function processExecution(exec: ExecutionRow): Promise<StepOutcome> {
     } catch (apErr: any) {
       console.warn(`[JourneyExecutor] autoPauseExecution(phone_invalid) 사고 (skip):`, apErr?.message);
     }
-    await advanceOrComplete(exec, step, sendCost);
+    await advanceOrComplete(exec, step, 0);  // ★ J1: 발송 0 → 비용 0 (옛 sendCost 가산은 미발송인데 통계·예산 부풀림)
     return 'failed';
   }
 
@@ -764,8 +775,24 @@ async function processExecution(exec: ExecutionRow): Promise<StepOutcome> {
       console.warn(`[JourneyExecutor] 재시도 분기 사고 (skip):`, retryErr?.message);
     }
     await logFailedStep(exec.execution_id, step.id, 'queue_insert_failed');
-    await advanceOrComplete(exec, step, sendCost);
+    await advanceOrComplete(exec, step, 0);  // ★ J1: 발송 실패 → 비용 0 (차감은 발송 성공 시점에만)
     return 'failed';
+  }
+
+  // ★ 2026-06-06 J1: 큐 INSERT 성공 = 발송 확정 → ① 멱등 마커(step_log 'sent') 먼저 기록(재시도 중복발송 차단)
+  //   ② 실제 잔액 차감(발송 성공 시점). 사전확인 후 동시 소진(드묾)으로 차감 실패면 이미 발송됨 → 정지만(1건 부담), 발송은 진행.
+  await query(
+    `INSERT INTO journey_step_logs (
+      id, execution_id, step_id, campaign_id, sent_at, status, cost
+    ) VALUES (
+      gen_random_uuid(), $1::uuid, $2::uuid, $3::uuid, NOW(), 'sent', $4
+    )`,
+    [exec.execution_id, step.id, campaignId, sendCost]
+  );
+  const deduct = await prepaidDeduct(exec.company_id, 1, prepaidMsgType as any, exec.journey_id, exec.created_by || undefined);
+  if (!deduct.ok) {
+    console.warn(`[JourneyExecutor] execution=${exec.execution_id} 발송 후 차감 실패(잔액 동시 소진) — 1건 부담 + 여정 정지`);
+    await pauseJourney(exec.journey_id, deduct.error || '잔액 부족(발송 후)');
   }
 
   // ★ D218+ (2026-05-26) 시점 3: 발송 직후 status 재확인 — MySQL 큐 INSERT 도중 paused 동시 발화 사고 기록 안전망.
@@ -791,15 +818,7 @@ async function processExecution(exec: ExecutionRow): Promise<StepOutcome> {
     console.warn(`[JourneyExecutor] 시점 3 status 재확인 사고 (skip):`, s3Err?.message);
   }
 
-  // 11. step_log INSERT
-  await query(
-    `INSERT INTO journey_step_logs (
-      id, execution_id, step_id, campaign_id, sent_at, status, cost
-    ) VALUES (
-      gen_random_uuid(), $1::uuid, $2::uuid, $3::uuid, NOW(), 'sent', $4
-    )`,
-    [exec.execution_id, step.id, campaignId, sendCost]
-  );
+  // (step_log 'sent' + 차감은 위 J1 블록에서 큐 성공 직후 처리 — 멱등 마커 우선)
 
   // ★ Phase 5: 공유 campaign 카운트 +1 (이 step+날짜 campaign의 발송 누적 — 발송결과 목록 "N명" 표시).
   await bumpStepCampaignCount(campaignId).catch((e: any) =>

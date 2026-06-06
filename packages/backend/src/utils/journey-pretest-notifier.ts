@@ -81,11 +81,14 @@ export async function scanAndPretest(): Promise<{
       }
 
       const opt080 = await getOpt080Number(b.createdBy, b.companyId);
+      // ★ 2026-06-06: 2시간전 재검도 활성화 검증과 같은 회신번호로 테스트 — 빈 callback이면 테스트 발송이 실패해 오탐 정지 위험.
+      const cbRes = await query(`SELECT REPLACE(callback_number, '-', '') AS cb FROM journeys WHERE id = $1::uuid`, [b.journeyId]);
+      const stepCallback = String(cbRes.rows[0]?.cb || '');
       summary.tested++;
       const r1 = await runStepSpamTest({
         companyId: b.companyId, userId: b.createdBy || '',
         body, subject: snap.message_subject ?? b.subject,
-        channel: b.channel, isAd: b.isAd, callbackNumber: '', opt080,
+        channel: b.channel, isAd: b.isAd, callbackNumber: stepCallback, opt080,
       });
 
       // 통과 → 담당자 안내(opt-in) + 기록.
@@ -118,7 +121,7 @@ export async function scanAndPretest(): Promise<{
         const r2 = await runStepSpamTest({
           companyId: b.companyId, userId: b.createdBy || '',
           body: regenBody, subject: snap.message_subject ?? b.subject,
-          channel: b.channel, isAd: b.isAd, callbackNumber: '', opt080,
+          channel: b.channel, isAd: b.isAd, callbackNumber: stepCallback, opt080,
         });
         if (r2.enqueueOk && r2.ok) {
           // 재생성 통과 → 최신 snapshot 갱신(실발송이 고친 본문 사용) + 안내.

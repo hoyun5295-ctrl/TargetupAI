@@ -413,21 +413,24 @@ async function getJourneyWeekdayStats(journeyId: string): Promise<JourneyWeekday
 
 async function getJourneyVariantStats(journeyId: string): Promise<JourneyVariantStat[]> {
   const r = await query(
+    // ★ 2026-06-06 J3 정정: journey_step_variants의 쓰기·선택 경로는 bandit_alpha/bandit_beta/variant_id를 쓴다.
+    //   옛 코드는 한 번도 갱신되지 않는 arm_alpha/arm_beta/variant_label(503 정정 때 추가만)을 읽어 사후확률이 0.5 고정이었다.
+    //   map이 쓰는 출력명(arm_alpha/arm_beta/variant_label/variant_id)에 실제 컬럼을 별칭으로 맞춰 map은 그대로 둔다.
     `SELECT
        v.step_id,
        v.id AS variant_id,
-       v.variant_label,
+       v.variant_id AS variant_label,
        v.traffic_weight,
        v.sent_count,
        v.click_count,
        v.conversion_count,
-       v.arm_alpha,
-       v.arm_beta,
-       CASE WHEN (v.arm_alpha + v.arm_beta) > 0 THEN v.arm_alpha / (v.arm_alpha + v.arm_beta) ELSE 0.5 END AS posterior_mean
+       v.bandit_alpha AS arm_alpha,
+       v.bandit_beta AS arm_beta,
+       CASE WHEN (v.bandit_alpha + v.bandit_beta) > 0 THEN v.bandit_alpha / (v.bandit_alpha + v.bandit_beta) ELSE 0.5 END AS posterior_mean
      FROM journey_step_variants v
      INNER JOIN journey_steps s ON s.id = v.step_id
      WHERE s.journey_id = $1::uuid
-     ORDER BY s.step_order ASC, v.variant_label ASC`,
+     ORDER BY s.step_order ASC, v.variant_id ASC`,
     [journeyId]
   );
 
