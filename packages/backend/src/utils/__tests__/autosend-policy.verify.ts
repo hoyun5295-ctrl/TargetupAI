@@ -4,7 +4,7 @@
  * (DB import 0 — 순수 로직만.)
  */
 import assert from 'node:assert';
-import { resolveAutoSendLeadMinutes, computeScheduledSendAt, decideSendOutcome } from '../autosend-policy';
+import { resolveAutoSendLeadMinutes, computeScheduledSendAt, decideSendOutcome, decideStuckSendingRecovery } from '../autosend-policy';
 
 let passed = 0;
 function ok(name: string, fn: () => void) { fn(); passed++; console.log(`  ok - ${name}`); }
@@ -38,6 +38,40 @@ ok('잔액 부족 → skip + notify', () => {
 ok('정상 → send', () => {
   const o = decideSendOutcome({ recipientCount: 10, balanceOk: true });
   assert.strictEqual(o.action, 'send'); assert.strictEqual(o.notify, false);
+});
+
+console.log('[autosend-policy] decideStuckSendingRecovery — sending 정지 복구 판정');
+ok('campaign_id 있음 → mark_sent (이미 커밋, 시각 무관)', () => {
+  const now = new Date('2026-12-01T01:00:00Z');
+  assert.strictEqual(
+    decideStuckSendingRecovery({ campaignId: 'c1', reviewedAt: new Date('2026-12-01T00:59:50Z') }, now),
+    'mark_sent',
+  );
+});
+ok('campaign_id null + 노후(>=30분) → demote_admin_review', () => {
+  const now = new Date('2026-12-01T01:00:00Z');
+  assert.strictEqual(
+    decideStuckSendingRecovery({ campaignId: null, reviewedAt: new Date('2026-12-01T00:25:00Z') }, now),
+    'demote_admin_review',
+  );
+});
+ok('campaign_id null + 최근(<30분) → keep', () => {
+  const now = new Date('2026-12-01T01:00:00Z');
+  assert.strictEqual(
+    decideStuckSendingRecovery({ campaignId: null, reviewedAt: new Date('2026-12-01T00:40:00Z') }, now),
+    'keep',
+  );
+});
+ok('campaign_id null + reviewedAt null → keep (시각 모르면 손대지 X)', () => {
+  const now = new Date('2026-12-01T01:00:00Z');
+  assert.strictEqual(decideStuckSendingRecovery({ campaignId: null, reviewedAt: null }, now), 'keep');
+});
+ok('staleMinutes 커스텀 경계', () => {
+  const now = new Date('2026-12-01T01:00:00Z');
+  assert.strictEqual(
+    decideStuckSendingRecovery({ campaignId: null, reviewedAt: new Date('2026-12-01T00:50:00Z') }, now, 10),
+    'demote_admin_review',
+  );
 });
 
 console.log(`\n${passed} assertions passed`);

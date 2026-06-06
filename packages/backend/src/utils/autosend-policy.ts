@@ -31,3 +31,22 @@ export function decideSendOutcome(input: { recipientCount: number; balanceOk: bo
   }
   return { action: 'send', notify: false, reason: '발송 진행' };
 }
+
+/**
+ * 'sending'에 정지된 제안 복구 판정(순수). campaign 'sending' 자동정리 패턴 미러(admin.ts).
+ *  - campaignId 있음 = 발송 커밋 완료(마커) → 최종 상태만 'sent'로 마감. 노후 시각 무관 안전.
+ *  - campaignId 없음 + claim 후 staleMinutes 경과 = 커밋 전 중단(예외/프로세스 종료) → 'admin_review'로 내려 사람 판단(절대 자동 재발송 X).
+ *  - 그 외(최근 / claim 시각 모름) = keep(진행 중일 수 있어 손대지 않음).
+ */
+export type StuckSendingAction = 'mark_sent' | 'demote_admin_review' | 'keep';
+export function decideStuckSendingRecovery(
+  row: { campaignId: string | null; reviewedAt: Date | null },
+  now: Date,
+  staleMinutes: number = 30,
+): StuckSendingAction {
+  if (row.campaignId) return 'mark_sent';
+  if (row.reviewedAt && now.getTime() - row.reviewedAt.getTime() >= staleMinutes * 60 * 1000) {
+    return 'demote_admin_review';
+  }
+  return 'keep';
+}

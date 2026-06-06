@@ -8,6 +8,12 @@
 
 ---
 
+## 🆕 2026-06-05 세션8 — 자동마케팅(Continuous Operator) 자율 발송 완성 (미배포)
+
+자동실행이 크레딧만 차감하고 실발송 코드가 없던 CRITICAL 해소 + 자율 발송 전 구현. 신규 CT 5종(순수 38 assertion) + prep('scheduled'+scheduled_send_at) → 발송 패스(createDirectSendCampaign·크레딧 멱등·통지) + 워커 2단계. 스팸 실패→operator 정지·정지창·계절 주입·광고성 허용·수동승인 원자성·lead 설정 UI. compliance fail-closed·예산 'sent' 집계·죽은코드 정리. ALTER 완료(scheduled_send_at·auto_send_lead_minutes). 상세 = `memory/project_2026_0605_session8_autosend_backend.md`. **다음 세션 = 자동마케팅 코드 전수 점검** = `docs/superpowers/handoffs/2026-06-05-continuous-operator-audit-handoff.md`.
+
+---
+
 ## 🟢 완료 현황 매트릭스
 
 | Phase | 핵심 | 상태 | 배포 |

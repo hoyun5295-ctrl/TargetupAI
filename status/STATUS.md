@@ -107,7 +107,18 @@
 
 ---
 
-### 🟢 2026-06-05 세션7 (최신) — 여정 결함 11건 fix(배포) + 자동마케팅 점검 + 자율발송 설계
+### 🟢 2026-06-05 세션8 (최신) — 자동마케팅 자율 발송 구현 완성 (미배포)
+> **세션7 점검의 CRITICAL(자동실행이 크레딧만 차감·실발송 코드 전무) 해소 + 자율 발송 전 구현. spec §6 질의 10건 Harold 확정 → §7 TDD 구현. backend·frontend tsc0 · 순수 38 assertion · 박/모델명/native dialog 0 · 미배포. ★다음 세션 = 자동마케팅 코드 전수 점검.**
+> - **신규 CT 5종(순수 TDD)**: season-context(월별 시즌+업종톤) / operator-recipients(buildSendableRecipientsSql, filterWhere 주입형 DB-free) / direct-send-spec(buildDirectSendCampaignParams 18컬럼 고정) / direct-send-core(countStagingFiltered 이동·createDirectSendCampaign) / autosend-policy(resolveAutoSendLeadMinutes·computeScheduledSendAt·decideSendOutcome).
+> - **흐름**: prep(schedule_time<=NOW)=계절 문안 생성→스팸 2회 재생성→통과 시 status='scheduled'+scheduled_send_at=now+lead+담당자 실문안/정지안내 → 발송 패스(scheduled_send_at<=NOW)=타겟 재추출(안전필터)→staging→createDirectSendCampaign(직접발송 공유)→크레딧 멱등(continuous-operator-send:proposalId)→status='sent'+campaign_id→완료통지. 스팸 끝내 실패→operator 'paused'+알림 / 0건·잔액→skip+알림 / 정지창(adminStopProposal 'scheduled' 허용).
+> - **안전필터 통일**: countFilteredCustomers·preview-recipients가 buildJourneySafetyFilter(is_opt_out·is_invalid·수신거부 회사+전화). 직접발송 commit→createDirectSendCampaign 위임(톤28 504 정정 동작 보존).
+> - **정정**: compliance fail-open→passed=false / 검증 7일 게이팅 제거(컬럼 보존) / operator_proposals updated_at 없는 컬럼 버그 / 예산 집계 status IN 'sent' 추가 / 광고성 허용(adEnabled=isAd, (광고)/080 합성=스팸테스트와 buildAdMessage 공유) / 수동 승인 원자성(dispatchProposalSend 공유, 발송 성공 시점 차감) / lead 설정 UI(auto_send_lead_minutes) / 죽은 스팸코드 제거.
+> - **ALTER 완료(Harold)**: operator_proposals.scheduled_send_at · continuous_operators.auto_send_lead_minutes. 타이밍=운영자 설정 시각=준비·알림, 발송=+lead(2h)=정지 창.
+> - 상세 = `memory/project_2026_0605_session8_autosend_backend.md`. 다음 세션 핸드오프 = `docs/superpowers/handoffs/2026-06-05-continuous-operator-audit-handoff.md`(점검 체크리스트 10항 + 진입 명령어).
+
+---
+
+### 🟢 2026-06-05 세션7 — 여정 결함 11건 fix(배포) + 자동마케팅 점검 + 자율발송 설계
 > **여정 엔진 결함 11건 fix(설계서 대조 전수점검·전부 배포) + 자동마케팅(Continuous Operator) 점검(★자동실행 실발송 코드 없음 CRITICAL) + 자율발송 설계서. 다음 세션 = 자동발송 spec §6 질의 10건 → 구현.**
 > - **여정 11건(배포)**: ①발송/재진입 공통 안전필터(isCustomerSendable+reentry buildJourneySafetyFilter) ②휴면/생일/포인트 진입안티조인(buildReentryAntiJoin)+워처 cap+1 ③목록 status SQL주입 화이트리스트(journey-list-filter) ④활성화 전 검증 마커게이트(journeys.last_pretest_passed_at ALTER 완료+503) ⑤정지 레이스(executor statusCheck가 journey.status까지)+무효UPDATE제거 ⑥**전원진입(원래의도)=추출 LIMIT제거+일괄INSERT(루프폐기)+장바구니 재진입안티조인** ⑦검증비용 회사실단가(임의상수 제거) ⑧죽은 resumeJourney제거 ⑨지연상한 8760h통일 ⑩wait delayMode relative_at_hour ⑪cdp커서 LIMIT누락(planCdpCursorBatch 마지막이벤트시각까지). 신규순수TDD safety-filter/list-filter/cdp-cursor · 백엔드 tsc0 · 여정 순수테스트 127건 green · 박단어0. 방식차이3(의도충족)=§6일괄INSERT·§7 campaign공유멱등·§11 마커게이트.
 > - **자동마케팅 점검(CRITICAL)**: 자동실행(auto_executed)이 크레딧만 차감하고 **실제 발송 코드 전무**(continuous-operator:593 차감, markProposalExecuted 호출0, 발송 워커·엔드포인트0). +안전필터갭(countFilteredCustomers services/ai.ts:2282 is_opt_out·is_invalid 누락 — 여정 #1과 동일)+검증기간 차단불완전(580 vs 593)+compliance fail-open(ai-orchestrator:280)+죽은 스팸코드.

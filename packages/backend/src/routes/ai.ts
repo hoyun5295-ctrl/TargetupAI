@@ -2003,7 +2003,7 @@ router.get('/operator/proposals', async (req: Request, res: Response) => {
     const companyId = req.user?.companyId;
     if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
     const status = (req.query.status as string) || 'pending';
-    const validStatuses = ['pending', 'approved', 'rejected', 'auto_executed', 'expired', 'all'];
+    const validStatuses = ['pending', 'approved', 'rejected', 'auto_executed', 'expired', 'scheduled', 'sending', 'sent', 'skipped', 'admin_review', 'admin_stopped', 'all'];
     const proposals = await listProposals(
       companyId,
       validStatuses.includes(status) ? (status as any) : 'pending',

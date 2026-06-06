@@ -558,7 +558,7 @@ export default function ContinuousOperatorPage() {
           </div>
         </div>
 
-        {/* ★ D212+ 1+2+3번 (2026-05-23 Harold 명시): AI 학습 영역 안내 카드 — 회사별 누적 학습 본질 */}
+        {/* ★ D212+ 1+2+3번 (2026-05-23 Harold 명시): AI 학습 안내 카드 — 회사별 누적 학습 */}
         {learningSummary && learningSummary.memory.total > 0 && (
           <div className="bg-gradient-to-br from-indigo-500/10 via-violet-500/5 to-fuchsia-500/10 border border-indigo-400/30 rounded-xl p-4">
             <div className="flex items-center gap-2 mb-3">
@@ -646,7 +646,7 @@ export default function ContinuousOperatorPage() {
 
             {proposals.length === 0 ? (
               operators.filter((o) => o.status === 'active').length === 0 ? (
-                /* ★ D212+ (2026-05-23 Harold 명시): 첫 진입 가이드 — 마케팅팀 친화 본질
+                /* ★ D212+ (2026-05-23 Harold 명시): 첫 진입 가이드 — 마케팅팀 친화
                    ★ D225+ (2026-05-28): lg:grid-cols-2 분할 — 큰 화면 우측 빈 공간 사고 차단 */
                 <div className="grid grid-cols-1 lg:grid-cols-5 gap-4">
                   {/* ───────── 좌측 (3/5) — 첫 진입 가이드 ───────── */}
@@ -963,42 +963,11 @@ export default function ContinuousOperatorPage() {
                           <span>·</span>
                           <span>제안 {op.totalProposals}건 (승인 {op.totalApproved} / 거부 {op.totalRejected} / 자동 {op.totalAutoExecuted})</span>
                         </div>
-                        {/* ★ D212+ 정책 (2026-05-23 Harold 명시): 검증 영역 상태 표시 (daily 영역만) */}
-                        {(op.deliveryPolicy === 'daily' || !op.deliveryPolicy) && (op.verificationRequiredDays ?? 7) > 0 && (op.verificationPassedDays ?? 0) < (op.verificationRequiredDays ?? 7) && (
-                          <div className="mt-3 p-2.5 bg-amber-500/10 border border-amber-400/30 rounded-lg">
-                            <div className="flex items-center justify-between text-[11px] mb-1.5">
-                              <span className="text-amber-200 font-semibold flex items-center gap-1">
-                                <AlertCircle className="w-3 h-3" /> 검증 영역 안 (회사 admin 명시 컨펌 의무)
-                              </span>
-                              <span className="text-amber-100 font-mono">
-                                {op.verificationPassedDays ?? 0} / {op.verificationRequiredDays ?? 7}일
-                              </span>
-                            </div>
-                            <div className="h-1.5 bg-white/10 rounded-full overflow-hidden">
-                              <div
-                                className="h-full bg-amber-400"
-                                style={{ width: `${Math.min(100, ((op.verificationPassedDays ?? 0) / (op.verificationRequiredDays ?? 7)) * 100)}%` }}
-                              />
-                            </div>
-                            <div className="mt-1.5 text-[10px] text-amber-100/70">
-                              매일 제안 영역 = "오늘 받은 제안" 탭 영역 안 명시 컨펌 의무. 검증 통과 시 자동 발송 전환 본질.
-                            </div>
-                          </div>
-                        )}
-                        {(op.deliveryPolicy === 'daily' || !op.deliveryPolicy) && (op.verificationPassedDays ?? 0) >= (op.verificationRequiredDays ?? 7) && (op.verificationRequiredDays ?? 7) > 0 && (
-                          <div className="mt-3 p-2 bg-emerald-500/10 border border-emerald-400/30 rounded-lg flex items-center gap-2 text-[11px]">
-                            <Check className="w-3 h-3 text-emerald-300" />
-                            <span className="text-emerald-200">검증 영역 통과 ({op.verificationPassedDays}일+) — 매일 자동 발송 진행</span>
-                          </div>
-                        )}
-                        {op.deliveryPolicy && op.deliveryPolicy !== 'daily' && (
-                          <div className="mt-3 p-2 bg-cyan-500/10 border border-cyan-400/30 rounded-lg flex items-center gap-2 text-[11px]">
-                            <Clock className="w-3 h-3 text-cyan-300" />
-                            <span className="text-cyan-200">
-                              {op.deliveryPolicy === 'weekly' ? '매주' : '매달'} 발송 — 발송 {op.optOutMinutes ?? 5}분 전 담당자 안내 → 정지 X 시 자동 발송
-                            </span>
-                          </div>
-                        )}
+                        {/* 발송 방식 안내 — 자율 발송이 켜진 경우 준비 알림 뒤 정지 창을 거쳐 발송, 기본은 제안 승인 후 발송. */}
+                        <div className="mt-3 p-2 bg-indigo-500/10 border border-indigo-400/30 rounded-lg flex items-start gap-2 text-[11px]">
+                          <Clock className="w-3 h-3 text-indigo-300 mt-0.5 shrink-0" />
+                          <span className="text-indigo-200">제안은 "오늘 받은 제안" 탭에서 승인하면 발송됩니다. 자율 발송이 켜진 경우 준비 알림 뒤 설정한 시간이 지나면 자동 발송되며, 그 사이에 정지할 수 있습니다.</span>
+                        </div>
 
                         {/* ★ D212+ 5번 (2026-05-23 Harold 명시): 예산 영역 시각화 */}
                         {monthBudget > 0 && (
@@ -1071,7 +1040,7 @@ export default function ContinuousOperatorPage() {
             <div className="bg-amber-500/10 border border-amber-400/30 rounded-lg p-3 mb-4 text-xs text-amber-100 flex items-start gap-2">
               <AlertCircle className="w-4 h-4 mt-0.5 shrink-0" />
               <div>
-                <strong>안전 정책:</strong> 여러 목표를 동시에 설정하면 AI가 충돌 영역 (동일 고객 중복 발송 / 메시지 중복 / 시점 겹침) 을 분석 + 회사 admin 검토 후 자동 마케팅 등록.
+                <strong>안전 정책:</strong> 여러 목표를 동시에 설정하면 AI가 충돌 (동일 고객 중복 발송 / 메시지 중복 / 시점 겹침) 을 분석 + 회사 admin 검토 후 자동 마케팅 등록.
                 실행은 사용자 승인 후에만 진행됩니다.
               </div>
             </div>
@@ -1299,7 +1268,7 @@ export default function ContinuousOperatorPage() {
               <div className="p-3 bg-indigo-500/5 border border-indigo-400/30 rounded-lg space-y-3">
                 <div className="flex items-center gap-1.5 text-xs font-semibold text-indigo-200">
                   <Brain className="w-3.5 h-3.5" />
-                  발송 정책 (안전 영역)
+                  발송 정책 (안전장치)
                 </div>
                 <div>
                   <label className="text-[11px] text-white/60 block mb-1">발송 주기</label>
@@ -1308,25 +1277,11 @@ export default function ContinuousOperatorPage() {
                     onChange={(e) => setEditing({ ...editing, deliveryPolicy: e.target.value as 'daily' | 'weekly' | 'monthly' })}
                     className="w-full px-3 py-2 bg-violet-900/50 border border-white/10 rounded-lg text-sm text-white focus:outline-none focus:border-indigo-400/50 transition-colors"
                   >
-                    <option value="daily">매일 — 옵트아웃 본질 (최초 N일 검증 후 자동)</option>
-                    <option value="weekly">매주 — 발송 2시간 전 담당자 안내 (5분 옵트아웃)</option>
-                    <option value="monthly">매달 — 발송 2시간 전 담당자 안내 (5분 옵트아웃)</option>
+                    <option value="daily">매일 — 매일 새 제안</option>
+                    <option value="weekly">매주 — 주 1회 새 제안</option>
+                    <option value="monthly">매달 — 월 1회 새 제안</option>
                   </select>
                 </div>
-                {editing.deliveryPolicy === 'daily' && (
-                  <div>
-                    <label className="text-[11px] text-white/60 block mb-1">검증 기간 (일)</label>
-                    <input
-                      type="number"
-                      min="0"
-                      max="30"
-                      value={editing.verificationRequiredDays ?? 7}
-                      onChange={(e) => setEditing({ ...editing, verificationRequiredDays: Number(e.target.value) })}
-                      className="w-full px-3 py-2 bg-violet-900/50 border border-white/10 rounded-lg text-sm text-white focus:outline-none focus:border-indigo-400/50 transition-colors"
-                    />
-                    <div className="text-[10px] text-white/40 mt-1">처음 N일 = 회사 admin 매일 명시 컨펌 → N일 통과 후 자동 (기본 7일)</div>
-                  </div>
-                )}
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <label className="text-[11px] text-white/60 block mb-1">담당자 연락처 (쉼표 구분, 최대 3명)</label>
@@ -1342,7 +1297,7 @@ export default function ContinuousOperatorPage() {
                     />
                   </div>
                   <div>
-                    <label className="text-[11px] text-white/60 block mb-1">백업 담당자 (휴가 영역)</label>
+                    <label className="text-[11px] text-white/60 block mb-1">백업 담당자 (휴가 대비)</label>
                     <input
                       type="text"
                       value={editing.backupAdminPhone ?? ''}
@@ -1364,17 +1319,6 @@ export default function ContinuousOperatorPage() {
                       <option value="kakao">카카오 알림톡</option>
                       <option value="email">이메일</option>
                     </select>
-                  </div>
-                  <div>
-                    <label className="text-[11px] text-white/60 block mb-1">옵트아웃 시간 (분)</label>
-                    <input
-                      type="number"
-                      min="1"
-                      max="60"
-                      value={editing.optOutMinutes ?? 5}
-                      onChange={(e) => setEditing({ ...editing, optOutMinutes: Number(e.target.value) })}
-                      className="w-full px-3 py-2 bg-violet-900/50 border border-white/10 rounded-lg text-sm text-white focus:outline-none focus:border-indigo-400/50 transition-colors"
-                    />
                   </div>
                   <div>
                     <label className="text-[11px] text-white/60 block mb-1">자율 발송 준비 시간 (분)</label>
@@ -1439,7 +1383,7 @@ export default function ContinuousOperatorPage() {
                   <div className="text-[10px] text-white/40 mt-1">예산 사용률이 임계값에 도달하면 자동 알림 (기본 80%)</div>
                 </div>
                 <div className="text-[10px] text-emerald-200/70 leading-relaxed">
-                  예산 초과 시 새 제안 생성이 자동 차단됩니다. 회사 admin 신뢰 본질입니다.
+                  예산 초과 시 새 제안 생성이 자동 차단됩니다. 회사 admin 신뢰를 지킵니다.
                 </div>
               </div>
 

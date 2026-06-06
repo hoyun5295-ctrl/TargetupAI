@@ -2,38 +2,39 @@
  * ★ CT-28: Continuous Agentic Operator 컨트롤타워 — D176 (2026-05-19)
  *
  * 🎯 목적
- *   한줄로 BEYOND BRAZE 비전 압축 로드맵 1순위 — "AI가 매일 회고 + 제안서 박음 / 실행은 사용자 동의 후".
- *   - 회사 admin이 자연어 한 줄로 영구 운영 목표 박음 ("VIP 재구매 영구 운영")
- *   - 매일 09:00 KST worker가 활성 Operator의 제안서 박음
- *   - 사용자가 받은 제안서 일괄 승인 / 개별 승인 / 거부 박음
+ *   한줄로 BEYOND BRAZE 비전 압축 로드맵 1순위 — "AI가 매일 회고 + 제안서 생성 / 실행은 사용자 동의 후".
+ *   - 회사 admin이 자연어 한 줄로 영구 운영 목표 등록 ("VIP 재구매 영구 운영")
+ *   - 매일 09:00 KST worker가 활성 Operator의 제안서 생성
+ *   - 사용자가 받은 제안서 일괄 승인 / 개별 승인 / 거부
  *   - ENT 자동 실행 옵션 활성 + 임계값 통과 시에만 AI가 자동 실행 (default OFF)
  *
  * ⛔ 영구 원칙 (Harold 명시 100% 정합)
- *   - AI는 의견을 박을 뿐, 실행은 항상 사용자 동의 후
+ *   - AI는 의견을 낼 뿐, 실행은 항상 사용자 동의 후
  *   - 자동 실행은 default OFF (ENT 명시 ON + 1,000건/5만원/low risk 임계값 통과 시만)
  *   - 자동 실행 시에도 회사 admin에게 즉시 SMS/이메일 알림 (사후 통지)
- *   - 타겟 매칭 0건이면 제안서 박지 X (Zero-Count 영구 원칙)
- *   - 7일 후 미응답 제안서는 expired 박음 (방치 차단)
+ *   - 타겟 매칭 0건이면 제안서 생성 안 함 (Zero-Count 영구 원칙)
+ *   - 7일 후 미응답 제안서는 expired 처리 (방치 차단)
  *
  * 📊 사용 흐름
  *   1. 사용자: createOperator(companyId, name, objective) → DB INSERT
- *   2. Worker:매일 09:00 KST → listActiveOperators() → 각 Operator에 대해 generateProposal()
+ *   2. Worker: 매일 09:00 KST → listActiveOperators() → 각 Operator에 대해 generateProposal()
  *   3. AI: orchestrate() 호출하여 OrchestratorResult 생성 → operator_proposals INSERT
- *   4. Auto-Execute 임계값 체크 (ENT 옵션) → 통과 시 즉시 발송 + 사후 통지 / 미통과 시 status='pending'
- *   5. 사용자: GET /api/ai/operator/proposals → 대기 중인 제안서 목록 박음
- *   6. 사용자: POST /api/ai/operator/proposals/:id/approve → 승인 + 발송 → status='approved'
+ *   4. Auto-eligible은 'scheduled'(준비+lead 뒤 자율 발송) / 그 외 status='pending'(수동 검토)
+ *   5. 사용자: GET /api/ai/operator/proposals → 대기 중인 제안서 목록 조회
+ *   6. 사용자: POST /api/ai/operator/proposals/:id/approve → 승인 + 즉시 발송 → status='sent'
  *   7. 사용자: POST /api/ai/operator/proposals/:id/reject → 거부 → status='rejected'
  */
 
 import { query } from '../config/database';
 import { orchestrate } from '../services/ai-orchestrator';
 import { getCompanyCosts } from '../config/defaults';
-// ★ D177 (2026-05-19): Self-Optimizing Bandit — message variants 박음 + Thompson Sampling
+// ★ D177 (2026-05-19): Self-Optimizing Bandit — message variants 생성 + Thompson Sampling
 import { insertProposalVariants } from './bandit-optimizer';
 // ★ D212+ 정책 (2026-05-23 Harold 명시): CT-64 영역 통합 — 검증 영역 + 담당자 학습
 // ★ D227+ 스팸 안전망 격상 — decideSpamOutcome(실제 테스트 결과 → 상태) + buildSpamRegeneratePrompt(AI 재작성)
 import { recordAdminStopLearning, decideSpamOutcome, buildSpamRegeneratePrompt } from './continuous-operator-policy';
-import { resolveAutoSendLeadMinutes, computeScheduledSendAt, decideSendOutcome } from './autosend-policy';
+import { resolveAutoSendLeadMinutes, computeScheduledSendAt, decideSendOutcome, decideStuckSendingRecovery } from './autosend-policy';
+import { getOpt080Number } from './messageUtils';
 // ★ D227+ 검증된 스팸 자산 재사용 (auto-campaign-worker와 동일 패턴) — 실제 테스트폰 발송 + AI 재생성 + 재테스트
 import { autoSpamTestWithRegenerate } from './spam-test-queue';
 import { generateMessages } from '../services/ai';
@@ -281,7 +282,7 @@ export async function archiveOperator(companyId: string, operatorId: string): Pr
 }
 
 // ════════════════════════════════════════════════════════════════════
-// 제안서 — 매일 worker가 박는 영역
+// 제안서 — 매일 worker가 생성
 // ════════════════════════════════════════════════════════════════════
 
 interface CompanyContextRow {
@@ -325,7 +326,7 @@ export async function generateProposalForOperator(operatorId: string): Promise<O
   if (operRes.rows.length === 0) return null;
   const operator = mapRowToOperator(operRes.rows[0]);
 
-  // ★ D212+ 5번 (2026-05-23 Harold 명시): 예산 초과 영역 차단 — 회사 admin 신뢰 본질
+  // ★ D212+ 5번 (2026-05-23 Harold 명시): 예산 초과 차단 — 회사 admin 신뢰
   if (operator.budgetMonthly !== null && operator.budgetSpentMonth >= operator.budgetMonthly) {
     console.log(`[ContinuousOperator] ${operator.name} 월 예산 초과 (${operator.budgetSpentMonth.toLocaleString()}원 / ${operator.budgetMonthly.toLocaleString()}원) → 제안서 생성 차단`);
     await updateOperatorAfterRun(operator.id, operator.schedule, operator.scheduleTime, 0);
@@ -368,7 +369,7 @@ export async function generateProposalForOperator(operatorId: string): Promise<O
   );
   const customerStats = statsRes.rows[0];
 
-  // 4. AI Operator 호출 (orchestrate) — 제안서 박음
+  // 4. AI Operator 호출 (orchestrate) — 제안서 생성
   const companyInfo: any = {
     company_name: ctx.company_name,
     business_type: ctx.business_type,
@@ -420,15 +421,15 @@ export async function generateProposalForOperator(operatorId: string): Promise<O
       return null;
     }
     console.error(`[ContinuousOperator] orchestrate 실패 ${operator.name}:`, err?.message || err);
-    // Operator의 next_run_at만 갱신하고 제안서는 박지 X
+    // Operator의 next_run_at만 갱신하고 제안서는 생성 안 함
     await updateOperatorAfterRun(operator.id, operator.schedule, operator.scheduleTime, 0);
     return null;
   }
 
-  // 5. Zero-Count 영구 원칙 — 0건 매칭 시 제안서 박지 X
+  // 5. Zero-Count 영구 원칙 — 0건 매칭 시 제안서 생성 안 함
   const recipientCount = orchestratorResult.target?.count || 0;
   if (recipientCount === 0) {
-    console.log(`[ContinuousOperator] ${operator.name} 0건 매칭 → 제안서 박지 X (Zero-Count 영구 원칙)`);
+    console.log(`[ContinuousOperator] ${operator.name} 0건 매칭 → 제안서 생성 안 함 (Zero-Count 영구 원칙)`);
     await updateOperatorAfterRun(operator.id, operator.schedule, operator.scheduleTime, 0);
     return null;
   }
@@ -446,6 +447,10 @@ export async function generateProposalForOperator(operatorId: string): Promise<O
   const bestSubject = firstMsg ? String(firstMsg.subject || '') : '';
   const canAutoSend = !!bestMessage && !!callbackForSpam && channelForSpam !== '카카오' && channelForSpam !== 'KAKAO';
 
+  // ★ 2026-06-06 광고 가드: 광고면 무료거부 번호(080) 해석 결과가 있어야 자율 발송 자격(정보통신망법). 발송 직전 dispatchProposalSend에서도 재확인.
+  const adOpt080 = isAd ? await getOpt080Number(operator.createdBy, operator.companyId) : '';
+  const adRejectOk = !isAd || !!adOpt080;
+
   // ★ D210+ Phase 3 B-1: risk 회사별 max_risk 비교 (low<medium<high — 회사 max 초과 차단)
   const riskRank: Record<string, number> = { low: 1, medium: 2, high: 3 };
   const proposalRiskRank = riskRank[compliance.riskLevel] || 1;
@@ -459,7 +464,8 @@ export async function generateProposalForOperator(operatorId: string): Promise<O
     costEstimate <= ctx.cdp_auto_execute_max_cost_krw &&
     riskWithinThreshold &&
     compliance.passed &&
-    canAutoSend;
+    canAutoSend &&
+    adRejectOk;
 
   const autoExecuteReason = autoExecuteEligible
     ? `자동 실행 임계값 통과: ${recipientCount}명 / ${costEstimate.toLocaleString()}원 / ${compliance.riskLevel} risk (회사 max ${ctx.cdp_auto_execute_max_risk}) / non-ad`
@@ -471,6 +477,7 @@ export async function generateProposalForOperator(operatorId: string): Promise<O
         !riskWithinThreshold && `compliance ${compliance.riskLevel} > 회사 max ${ctx.cdp_auto_execute_max_risk}`,
         !compliance.passed && 'compliance fail',
         !canAutoSend && '발신번호·문안·채널(SMS/LMS) 미충족',
+        !adRejectOk && '광고 무료거부 번호(080) 미설정',
       ].filter(Boolean).join(', ')}`;
 
   // 7. 제안서 INSERT — auto-eligible은 'scheduled'(T에 자율 발송) + scheduled_send_at, 아니면 'pending'(수동 검토)
@@ -497,7 +504,7 @@ export async function generateProposalForOperator(operatorId: string): Promise<O
     ]
   );
 
-  // 8. D177 Self-Optimizing — message variants 박음 (Bandit 학습 기반)
+  // 8. D177 Self-Optimizing — message variants 생성 (Bandit 학습 기반)
   const messages: any[] = (orchestratorResult.messages as any[]) || [];
   if (messages.length > 0) {
     try {
@@ -510,7 +517,7 @@ export async function generateProposalForOperator(operatorId: string): Promise<O
         }))
       );
     } catch (err: any) {
-      console.warn(`[ContinuousOperator] variant 박음 실패 (proposal=${proposalRes.rows[0].id}):`, err?.message || err);
+      console.warn(`[ContinuousOperator] variant 생성 실패 (proposal=${proposalRes.rows[0].id}):`, err?.message || err);
     }
   }
 
@@ -607,13 +614,13 @@ export async function generateProposalForOperator(operatorId: string): Promise<O
   // 11. Operator 통계 갱신
   await updateOperatorAfterRun(operator.id, operator.schedule, operator.scheduleTime, 1, autoExecuteEligible);
 
-  console.log(`[ContinuousOperator] ${operator.name} 제안서 박힘 (${recipientCount}명 / ${costEstimate}원 / ${autoExecuteEligible ? '자동 실행' : 'pending'} / variants ${messages.length}건 / 정책 ${operator.deliveryPolicy})`);
+  console.log(`[ContinuousOperator] ${operator.name} 제안서 생성 완료 (${recipientCount}명 / ${costEstimate}원 / ${autoExecuteEligible ? '자동 실행' : 'pending'} / variants ${messages.length}건 / 정책 ${operator.deliveryPolicy})`);
 
   // 자율 발송 크레딧(continuous-operator-send)은 실제 발송 성공 시점에 1회 차감(멱등키 proposalId) — runAutoSendPass에서 처리.
   return mapRowToProposal(proposalRes.rows[0]);
 }
 
-// ★ D212+ 정책 (2026-05-23 Harold 명시): 담당자 정지 영역 본질 — AI 학습 통합
+// ★ D212+ 정책 (2026-05-23 Harold 명시): 담당자 정지 — AI 학습 통합
 export async function adminStopProposal(
   companyId: string,
   proposalId: string,
@@ -648,7 +655,7 @@ export async function adminStopProposal(
   return true;
 }
 
-// ★ D212+ 정책 (2026-05-23 Harold 명시): 회사 admin 매일 컨펌 영역 본질 (검증 영역 안)
+// ★ D212+ 정책 (2026-05-23 Harold 명시): 회사 admin 매일 컨펌
 export async function adminConfirmProposal(
   companyId: string,
   proposalId: string,
@@ -720,7 +727,7 @@ export async function listProposals(
   status: ProposalStatus | 'all' = 'pending',
   limit: number = 50
 ): Promise<OperatorProposal[]> {
-  // 만료 자동 처리 (조회 시점에 한 번 박음)
+  // 만료 자동 처리 (조회 시점에 한 번 실행)
   await query(
     `UPDATE operator_proposals SET status = 'expired'
      WHERE company_id = $1::uuid AND status = 'pending' AND expires_at < NOW()`,
@@ -728,19 +735,25 @@ export async function listProposals(
   );
 
   // ★ D227+ pending 조회 시 admin_review(스팸 미통과 담당자 검토 대기)도 함께 노출 — 담당자가 한 탭에서 처리
-  const statusFilter = status === 'all'
-    ? ''
-    : status === 'pending'
-      ? `AND p.status IN ('pending', 'admin_review', 'scheduled')`
-      : `AND p.status = '${status}'`;
+  const params: any[] = [companyId];
+  let statusFilter = '';
+  if (status !== 'all') {
+    if (status === 'pending') {
+      statusFilter = `AND p.status IN ('pending', 'admin_review', 'scheduled')`;
+    } else {
+      params.push(status);
+      statusFilter = `AND p.status = $${params.length}`;
+    }
+  }
+  params.push(Math.min(limit, 200));
   const result = await query(
     `SELECT p.*, o.name AS operator_name, o.objective AS operator_objective
      FROM operator_proposals p
      LEFT JOIN continuous_operators o ON p.operator_id = o.id
      WHERE p.company_id = $1::uuid ${statusFilter}
      ORDER BY p.created_at DESC
-     LIMIT $2`,
-    [companyId, Math.min(limit, 200)]
+     LIMIT $${params.length}`,
+    params
   );
   return result.rows.map(mapRowToProposal);
 }
@@ -798,13 +811,6 @@ export async function rejectProposal(
     [result.rows[0].operator_id]
   );
   return true;
-}
-
-export async function markProposalExecuted(proposalId: string, campaignId: string): Promise<void> {
-  await query(
-    `UPDATE operator_proposals SET campaign_id = $2::uuid WHERE id = $1::uuid`,
-    [proposalId, campaignId]
-  );
 }
 
 // ════════════════════════════════════════════════════════════════════
@@ -878,16 +884,61 @@ export async function runAutoSendPass(limit: number = 20): Promise<{ sent: numbe
       console.error(`[ContinuousOperator AutoSend] ${row.id} 발송 실패:`, err?.message || err);
     }
   }
+  // 'sending' 정지 복구 — 매 패스 점검: campaign_id 있으면 'sent' 마감, 없고 claim 후 노후면 'admin_review'(자동 재발송 X).
+  await reconcileStuckSending().catch((e: any) => console.error('[ContinuousOperator AutoSend] 정지 복구 예외:', e?.message || e));
+
   if (due.rows.length > 0) {
     console.log(`[ContinuousOperator AutoSend] ${sent} 발송 / ${skipped} 스킵`);
   }
   return { sent, skipped };
 }
 
+/** 'sending'에 정지된 제안 복구(decideStuckSendingRecovery 순수 정책). campaign 'sending' 자동정리 패턴 미러. */
+async function reconcileStuckSending(staleMinutes: number = 30): Promise<void> {
+  const stuck = await query(
+    `SELECT id, company_id, operator_id, campaign_id, reviewed_at
+     FROM operator_proposals WHERE status = 'sending' LIMIT 100`,
+  );
+  for (const row of stuck.rows) {
+    const action = decideStuckSendingRecovery(
+      { campaignId: row.campaign_id || null, reviewedAt: row.reviewed_at ? new Date(row.reviewed_at) : null },
+      new Date(),
+      staleMinutes,
+    );
+    if (action === 'mark_sent') {
+      // 발송 커밋됨(마커 있음) → 최종 상태만 마감.
+      await query(
+        `UPDATE operator_proposals SET status = 'sent', auto_sent_at = COALESCE(auto_sent_at, NOW())
+         WHERE id = $1::uuid AND status = 'sending' AND campaign_id IS NOT NULL`,
+        [row.id],
+      ).catch(() => {});
+    } else if (action === 'demote_admin_review') {
+      // 커밋 전 중단(마커 없음) + 노후 → 담당자 검토(절대 자동 재발송 X).
+      const upd = await query(
+        `UPDATE operator_proposals SET status = 'admin_review', scheduled_send_at = NULL,
+           auto_execute_reason = '발송 준비 중단 — 담당자 검토 (자동 복구)'
+         WHERE id = $1::uuid AND status = 'sending' AND campaign_id IS NULL RETURNING id`,
+        [row.id],
+      ).catch(() => ({ rows: [] as any[] }));
+      if (upd.rows.length > 0) {
+        const opRes = await query(
+          `SELECT name, admin_phone_numbers, backup_admin_phone FROM continuous_operators WHERE id = $1::uuid`,
+          [row.operator_id],
+        ).catch(() => ({ rows: [] as any[] }));
+        const op = opRes.rows[0] || {};
+        await notifyOperatorAdmins(
+          { adminPhoneNumbers: Array.isArray(op.admin_phone_numbers) ? op.admin_phone_numbers : [], backupAdminPhone: op.backup_admin_phone || null, companyId: row.company_id },
+          '[AI 자동마케팅] 발송 보류', `'${op.name || ''}' 발송 준비가 중단되어 담당자 검토로 전환했습니다.`,
+        ).catch(() => {});
+      }
+    }
+  }
+}
+
 async function sendScheduledProposal(proposalId: string): Promise<'sent' | 'skipped'> {
   // claim (scheduled → sending) — 동시 발송/중복 방지
   const claim = await query(
-    `UPDATE operator_proposals SET status = 'sending'
+    `UPDATE operator_proposals SET status = 'sending', reviewed_at = NOW()
      WHERE id = $1::uuid AND status = 'scheduled' RETURNING *`,
     [proposalId],
   );
@@ -905,56 +956,16 @@ async function dispatchProposalSend(p: any): Promise<{ action: 'sent' | 'skipped
   const companyId: string = p.company_id;
   const pj: any = p.proposal_json || {};
 
-  // operator(통지 대상 · created_by)
-  const opRes = await query(
-    `SELECT created_by, name, admin_phone_numbers, backup_admin_phone FROM continuous_operators WHERE id = $1::uuid`,
-    [p.operator_id],
-  );
-  const op = opRes.rows[0] || {};
-  const userId: string = op.created_by || companyId;
+  // 통지/발신자 컨텍스트 — 커밋 전 예외는 아래 try가 'sending'을 admin_review로 내려 정지 방지.
+  let op: any = {};
+  let userId: string = companyId;
   const notify = (title: string, body: string) =>
     notifyOperatorAdmins(
       { adminPhoneNumbers: Array.isArray(op.admin_phone_numbers) ? op.admin_phone_numbers : [], backupAdminPhone: op.backup_admin_phone || null, companyId },
       title, body,
     ).catch((e: any) => console.warn('[ContinuousOperator AutoSend] 통지 경고:', e?.message));
 
-  // 2. 발송 시점 타겟 재추출 (공통 안전필터 — 정지 창 동안 새 수신거부 반영)
-  const filters = pj.target?.filters || {};
-  const { sql: filterWhere, params: filterParams } = buildFilterWhereClauseCompat(filters, 2);
-  const { sql: recSql, params: recParams } = buildSendableRecipientsSql(filterWhere, filterParams, [companyId], '');
-  const rows = (await query(recSql, recParams)).rows;
-
-  // 3. 0건 → 스킵 + 통지 (operator는 다음 주기 정상)
-  const outcome = decideSendOutcome({ recipientCount: rows.length, balanceOk: true });
-  if (outcome.action === 'skip') {
-    await query(`UPDATE operator_proposals SET status = 'skipped', auto_execute_reason = $2 WHERE id = $1::uuid`, [proposalId, outcome.reason]);
-    if (outcome.notify) await notify('[AI 자동마케팅] 발송 생략', `'${op.name || ''}' 이번 사이클은 ${outcome.reason}.`);
-    return { action: 'skipped', reason: outcome.reason };
-  }
-
-  // 4. 발송 발신번호 (회사 기본 등록 번호)
-  const cbRes = await query(
-    `SELECT REPLACE(phone, '-', '') AS phone FROM callback_numbers WHERE company_id = $1 AND is_default = true LIMIT 1`,
-    [companyId],
-  );
-  const callback = cbRes.rows[0]?.phone || null;
-  if (!callback) {
-    await query(`UPDATE operator_proposals SET status = 'admin_review', scheduled_send_at = NULL, auto_execute_reason = '발신번호 미설정 — 발송 보류' WHERE id = $1::uuid`, [proposalId]);
-    await notify('[AI 자동마케팅] 발송 보류', `'${op.name || ''}' 등록된 발신번호가 없어 발송을 보류했습니다.`);
-    return { action: 'skipped', reason: '발신번호 미설정' };
-  }
-
-  // 5. staging 적재 (phone + name — %고객명% 치환용)
-  const stagingId = randomUUID();
-  const phones = rows.map((r: any) => String(r.phone || '').replace(/\D/g, ''));
-  const names = rows.map((r: any) => (r.name ?? null));
-  await query(
-    `INSERT INTO campaign_send_staging (staging_id, company_id, phone, name)
-     SELECT $1::uuid, $2::uuid, u.phone, u.name FROM UNNEST($3::text[], $4::text[]) AS u(phone, name)`,
-    [stagingId, companyId, phones, names],
-  );
-
-  // 6. 메시지/채널 (스팸 통과 본문)
+  // 메시지/채널 (스팸 통과 본문) — 광고 가드에 isAd 필요해 먼저 계산.
   const msg = pj.messages?.[0] || {};
   const body = String(msg.body || msg.message || '');
   const subject = String(msg.subject || '');
@@ -962,7 +973,71 @@ async function dispatchProposalSend(p: any): Promise<{ action: 'sent' | 'skipped
   const msgType = (channel === 'LMS' || channel === 'MMS') ? channel : 'SMS';
   const isAd = !!(pj.channel?.isAd);  // 광고성이면 발송 시 (광고)·무료거부 080 자동 합성(direct-send-worker)
 
-  // 7. 발송 (직접발송 파이프라인 공유) — 잔액 부족이면 skip+통지
+  let stagingId = '';
+  let rows: any[] = [];
+  let callback: string | null = null;
+  try {
+    // operator(통지 대상 · created_by)
+    const opRes = await query(
+      `SELECT created_by, name, admin_phone_numbers, backup_admin_phone FROM continuous_operators WHERE id = $1::uuid`,
+      [p.operator_id],
+    );
+    op = opRes.rows[0] || {};
+    userId = op.created_by || companyId;
+
+    // 광고 가드 — 광고면 무료거부 번호(080) 해석 결과 필수(정보통신망법). 없으면 발송 보류(담당자 검토).
+    if (isAd) {
+      const opt080 = await getOpt080Number(op.created_by || null, companyId);
+      if (!opt080) {
+        await query(`UPDATE operator_proposals SET status = 'admin_review', scheduled_send_at = NULL, auto_execute_reason = '광고 무료거부 번호(080) 미설정 — 발송 보류' WHERE id = $1::uuid`, [proposalId]);
+        await notify('[AI 자동마케팅] 발송 보류', `'${op.name || ''}' 광고 무료거부 번호(080)가 없어 발송을 보류했습니다. 080 등록 후 다시 진행해주세요.`);
+        return { action: 'skipped', reason: '광고 무료거부 번호(080) 미설정' };
+      }
+    }
+
+    // 발송 시점 타겟 재추출 (공통 안전필터 — 정지 창 동안 새 수신거부 반영)
+    const filters = pj.target?.filters || {};
+    const { sql: filterWhere, params: filterParams } = buildFilterWhereClauseCompat(filters, 2);
+    const { sql: recSql, params: recParams } = buildSendableRecipientsSql(filterWhere, filterParams, [companyId], '');
+    rows = (await query(recSql, recParams)).rows;
+
+    // 0건 → 스킵 + 통지 (operator는 다음 주기 정상)
+    const outcome = decideSendOutcome({ recipientCount: rows.length, balanceOk: true });
+    if (outcome.action === 'skip') {
+      await query(`UPDATE operator_proposals SET status = 'skipped', auto_execute_reason = $2 WHERE id = $1::uuid`, [proposalId, outcome.reason]);
+      if (outcome.notify) await notify('[AI 자동마케팅] 발송 생략', `'${op.name || ''}' 이번 사이클은 ${outcome.reason}.`);
+      return { action: 'skipped', reason: outcome.reason };
+    }
+
+    // 발송 발신번호 (회사 기본 등록 번호)
+    const cbRes = await query(
+      `SELECT REPLACE(phone, '-', '') AS phone FROM callback_numbers WHERE company_id = $1 AND is_default = true LIMIT 1`,
+      [companyId],
+    );
+    callback = cbRes.rows[0]?.phone || null;
+    if (!callback) {
+      await query(`UPDATE operator_proposals SET status = 'admin_review', scheduled_send_at = NULL, auto_execute_reason = '발신번호 미설정 — 발송 보류' WHERE id = $1::uuid`, [proposalId]);
+      await notify('[AI 자동마케팅] 발송 보류', `'${op.name || ''}' 등록된 발신번호가 없어 발송을 보류했습니다.`);
+      return { action: 'skipped', reason: '발신번호 미설정' };
+    }
+
+    // staging 적재 (phone + name — %고객명% 치환용; 그 외 변수는 발송기가 customers 재조회로 치환)
+    stagingId = randomUUID();
+    const phones = rows.map((r: any) => String(r.phone || '').replace(/\D/g, ''));
+    const names = rows.map((r: any) => (r.name ?? null));
+    await query(
+      `INSERT INTO campaign_send_staging (staging_id, company_id, phone, name)
+       SELECT $1::uuid, $2::uuid, u.phone, u.name FROM UNNEST($3::text[], $4::text[]) AS u(phone, name)`,
+      [stagingId, companyId, phones, names],
+    );
+  } catch (preErr: any) {
+    // 발송 커밋 전 예외 → 'sending' 정지 방지: 담당자 검토로 내리고(자동 재발송 X) 통지 후 재던짐.
+    await query(`UPDATE operator_proposals SET status = 'admin_review', scheduled_send_at = NULL, auto_execute_reason = '발송 준비 오류 — 담당자 검토' WHERE id = $1::uuid AND status = 'sending'`, [proposalId]).catch(() => {});
+    await notify('[AI 자동마케팅] 발송 보류', `'${op.name || ''}' 발송 준비 중 오류로 보류했습니다. 담당자 검토가 필요합니다.`);
+    throw preErr;
+  }
+
+  // 발송 (직접발송 파이프라인 공유) — 잔액 부족이면 skip+통지
   let campaignId: string;
   try {
     const res = await createDirectSendCampaign(
@@ -985,16 +1060,19 @@ async function dispatchProposalSend(p: any): Promise<{ action: 'sent' | 'skipped
     throw e;
   }
 
-  // 8. 기능 크레딧 1회 차감 (멱등키 proposalId) — 발송 성공 시점에만
+  // 발송 커밋 마커 — campaign_id 즉시 기록. 이후 최종 UPDATE가 실패해도 정리 패스가 'sent'로 마감(정지 방지·재발송 X).
+  await query(`UPDATE operator_proposals SET campaign_id = $2::uuid WHERE id = $1::uuid`, [proposalId, campaignId]).catch((e: any) => console.warn('[ContinuousOperator AutoSend] campaign_id 기록 경고:', e?.message));
+
+  // 기능 크레딧 1회 차감 (멱등키 proposalId) — 발송 성공 시점에만
   await deductCreditSafe({
     companyId, cost: getCreditCost('continuous-operator-send'), source: 'continuous-operator-send',
     createdBy: userId, idempotencyKey: `continuous-operator-send:${proposalId}`,
   }).catch((e: any) => console.warn('[ContinuousOperator AutoSend] 크레딧 차감 경고:', e?.message));
 
-  // 9. 완료 표시 + 통지
+  // 완료 표시 + 통지
   await query(
-    `UPDATE operator_proposals SET status = 'sent', campaign_id = $2::uuid, auto_sent_at = NOW() WHERE id = $1::uuid`,
-    [proposalId, campaignId],
+    `UPDATE operator_proposals SET status = 'sent', auto_sent_at = NOW() WHERE id = $1::uuid AND status = 'sending'`,
+    [proposalId],
   );
   await notify('[AI 자동마케팅] 발송 완료', `'${op.name || ''}' ${rows.length}명에게 발송을 완료했습니다.`);
   return { action: 'sent', campaignId, sentCount: rows.length };
@@ -1013,7 +1091,7 @@ export function startContinuousOperatorScheduler(): void {
       console.error('[ContinuousOperator Worker] 초기 실행 예외:', err);
     });
   }, 60 * 1000);
-  console.log('[ContinuousOperator Worker] 스케줄러 박힘 (5분 주기)');
+  console.log('[ContinuousOperator Worker] 스케줄러 시작 (5분 주기)');
 }
 
 // ════════════════════════════════════════════════════════════════════

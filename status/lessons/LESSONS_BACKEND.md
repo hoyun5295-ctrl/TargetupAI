@@ -272,6 +272,36 @@ const items: any[] =
 
 ---
 
+## 자동마케팅 자율 발송 (D233+ / 2026-06-05 세션8)
+
+### 자동실행이 크레딧만 차감하고 실발송 코드 전무 (CRITICAL) — 해소
+
+**사고 구조**: 자동마케팅(Continuous Operator) 자동실행이 status='auto_executed' INSERT + 문안 크레딧 차감까지만 하고 **실제 발송 코드가 없었다**(markProposalExecuted 호출 0, 발송 워커·엔드포인트 0). ENT가 켜면 크레딧만 빠지고 고객은 메시지를 못 받음.
+
+**해소(세션8)**: prep('scheduled'+scheduled_send_at) → 발송 패스(runAutoSendPass: 타겟 재추출·staging·createDirectSendCampaign·크레딧 멱등·통지). 직접발송 파이프라인을 createDirectSendCampaign으로 추출해 공유.
+
+**교훈**:
+- **자동실행/자율발송류 = "실발송 코드가 끝까지 있는지 + 차감↔발송 원자성"을 꼭 확인.** 차감만·미발송이 가장 큰 사고. 크레딧은 **발송 성공 시점에만 멱등 1회**(키=proposalId). 생성/승인 시점 차감 금지.
+- **발송 코어 공유(dispatchProposalSend)** — 자동·수동이 같은 발송 경로를 타게 해야 본문·안전필터·(광고)/080·크레딧이 일관(D230+ 검증=발송 본문 일치 정신). 수동 승인도 백엔드에서 즉시 발송 = 원자성.
+- **상태 값 전환 시 집계 SQL 전수 갱신** — auto_executed→'sent'로 바꾸면서 예산 sub-query `status IN ('approved','auto_executed')`에 'sent'를 안 더하면 예산 집계가 누락. 상태 추가/변경 시 그 상태를 읽는 모든 WHERE/집계 grep 전수.
+- **claim 패턴(scheduled→sending UPDATE RETURNING)** = 동시 발송/중복 차단. 단 claim 후 예외로 throw하면 'sending'에 stuck될 수 있음 → 복구(타임아웃) 고려.
+
+### 순수 테스트 DB-free 분리 — config/database import 시 process.exit(1)
+
+`config/database.ts`는 import 시점에 `pool.query("SELECT 1")` + MYSQL_PASSWORD 미설정 시 `process.exit(1)`. 따라서 그 모듈을(또는 transitive로 끌어오는 customer-filter 등을) import한 모듈은 `.verify.ts` 순수 테스트가 즉시 종료된다.
+
+**대책**: 순수 함수는 **DB import가 없는 파일**로 분리. SQL 빌더는 filterWhere를 **주입**받게 설계(operator-recipients.buildSendableRecipientsSql처럼) → journey-safety-filter 같은 순수 CT만 import → DB-free 테스트 가능. buildFilterWhereClauseCompat 호출은 DB-쓰는 호출부가 담당.
+
+### updated_at 없는 컬럼을 UPDATE에 박아 조용히 실패
+
+`operator_proposals`에는 `updated_at` 컬럼이 없는데 스팸 결과 UPDATE에 `updated_at = NOW()`를 박아 → catch에 삼켜져 spam_test_* 저장이 매번 조용히 실패하던 잠재 버그. **information_schema로 컬럼 실재 확인 후 UPDATE 작성**(db_column_verify_before_code). tsc는 SQL 문자열 컬럼을 검증 못 함.
+
+### 직접발송 함수 추출(createDirectSendCampaign) — 동작 보존
+
+/direct-send/commit 본문(라인그룹·검증 후 staging COUNT·campaign INSERT·prepaidDeduct·trigger)을 함수로 추출해 HTTP 엔드포인트와 자율 발송 워커가 공유. **INSERT 18 컬럼 파라미터를 순수 빌더(buildDirectSendCampaignParams)로 빼 테스트로 고정** → 톤28 504 정정(즉시 202+COUNT-only) 동작을 회귀 없이 보존.
+
+---
+
 ## 자가 검증 매트릭스 (Backend 작업 시)
 
 - [ ] 발송 5경로 전수 점검 (AI/직접/타겟/스케줄/테스트)
