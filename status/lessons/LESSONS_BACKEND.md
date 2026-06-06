@@ -302,6 +302,26 @@ const items: any[] =
 
 ---
 
+## 자동마케팅·여정 점검 정정 (2026-06-06 / 배포)
+
+### 차감↔발송 원자성 — 건당 발송은 "발송 성공 시점 차감"이 환불보다 깨끗 (여정 J1)
+- **사고 구조**: journey-executor가 prepaidDeduct를 큐 INSERT 앞·비멱등(reference=journey_id)으로 호출 → 큐 실패 시 환불 없이 재시도가 재차감(중복 차감), 큐 성공인데 step_log 실패 시 재발송. 직접발송 워커는 실패분 환불하나 여정은 안 했음.
+- **교정**: 큐 앞 = read-only 잔액 사전 확인만. 큐 성공 직후 = 멱등 마커(step_log 'sent') 먼저 기록 → 실제 차감. 큐 실패·발신번호 무효 = 차감 0·비용 0(advance 0). 재시도는 마커(alreadySent 가드)로 중복 차단.
+- **원리**: 배치(직접발송)는 차감-후-환불(idempotent prepaidRefund, reference=campaignId 누적). 건당(여정)은 발송 성공 시점 차감 + 멱등 마커가 더 단순·안전(환불·reference 변경 불필요). **prepaidDeduct는 멱등 아님 — 같은 reference 매 호출 차감.**
+
+### 월 예산은 누적 컬럼이 아니라 당월 로그 SUM (여정 J2)
+- budget_monthly 검사가 journeys.stats_total_cost(전기간 누적)를 updated_at 당월 필터로 SUM = 단일 행이라 사실상 전기간 한도(월 리셋 없음). → 이번 달 journey_step_logs.cost(status='sent', sent_at >= date_trunc('month', NOW())) 합으로 교정.
+
+### 같은 테이블 두 컬럼 세트 공존 = 쓰기/읽기 불일치 stale (여정 J3)
+- journey_step_variants에 arm_alpha/arm_beta/variant_label(과거 503 "없는 컬럼" 정정 때 추가만)과 bandit_alpha/bandit_beta/variant_id(쓰기·선택 경로)가 공존. journey-stats는 arm_*/variant_label을 읽는데 그 컬럼은 한 번도 갱신 안 돼 변이 사후확률이 0.5 고정. → 쓰기 경로 컬럼(bandit_*/variant_id)을 출력 별칭으로 읽게 교정(map 무변).
+- **교훈**: "없는 컬럼" 503을 컬럼 추가로만 막으면 데이터는 안 흐른다 — 쓰기 경로가 쓰는 컬럼으로 읽기를 통일. 두 세트 의심 시 information_schema 덤프로 실재 확정(0번 원칙). (operator_proposal_variants의 arm_*는 그 테이블 정상 컬럼 — 혼동 주의.)
+
+### 자동마케팅 자율발송 'sending' 정지 복구 + 광고 080 가드
+- claim(scheduled/pending→sending) 후 발송 커밋 전 예외면 'sending'에 영구 정지(runAutoSendPass는 scheduled만 조회). → dispatchProposalSend 커밋 전 try/catch가 admin_review로 내림 + createDirectSendCampaign 직후 campaign_id 마커 + 매 패스 reconcileStuckSending(campaign_id 있으면 sent 마감 / 없고 노후면 admin_review, 자동 재발송 X). 순수 decideStuckSendingRecovery + verify.
+- 광고(isAd)인데 무료거부 번호(080·reject 폴백) 없으면 "(광고)…무료거부"가 번호 없이 발송(정보통신망법) → 자동·수동 공유 dispatchProposalSend에 가드(없으면 admin_review).
+
+---
+
 ## 자가 검증 매트릭스 (Backend 작업 시)
 
 - [ ] 발송 5경로 전수 점검 (AI/직접/타겟/스케줄/테스트)

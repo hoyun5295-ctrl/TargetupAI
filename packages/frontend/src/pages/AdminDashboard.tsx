@@ -117,6 +117,10 @@ export default function AdminDashboard() {
     kakaoEnabled: false,
     userIsolationEnabled: false,  // ★ D162-3 (2026-05-15) 수신거부 사용자격리 ON/OFF
     useAiOrchestrator: false,  // ★ D190 #2 (2026-05-22) AI Orchestrator Tool Use 회사별 토글
+    cdpAutoExecuteEnabled: false,  // ★ 2026-06-06 자동마케팅 자율발송 게이트
+    cdpAutoExecuteMaxRecipients: 1000,
+    cdpAutoExecuteMaxCostKrw: 50000,
+    cdpAutoExecuteMaxRisk: 'low',
     subscriptionStatus: 'trial',
     // ★ CT-17: 30일 PRO 체험 관리 (표시용)
     trialExpiresAt: '' as string | null | '',
@@ -1931,6 +1935,10 @@ const handleApproveRequest = async (id: string) => {
           kakaoEnabled: c.kakao_enabled ?? false,
           userIsolationEnabled: c.user_isolation_enabled ?? false,  // ★ D162-3 수신거부 사용자격리
           useAiOrchestrator: c.use_ai_orchestrator ?? false,  // ★ D190 #2 AI Orchestrator
+          cdpAutoExecuteEnabled: c.cdp_auto_execute_enabled ?? false,  // ★ 2026-06-06 자동마케팅 자율발송 게이트
+          cdpAutoExecuteMaxRecipients: c.cdp_auto_execute_max_recipients ?? 1000,
+          cdpAutoExecuteMaxCostKrw: c.cdp_auto_execute_max_cost_krw ?? 50000,
+          cdpAutoExecuteMaxRisk: c.cdp_auto_execute_max_risk ?? 'low',
           subscriptionStatus: c.subscription_status || 'trial',
           // ★ CT-17
           trialExpiresAt: c.trial_expires_at || '',
@@ -5466,6 +5474,90 @@ const handleApproveRequest = async (id: string) => {
                       />
                       <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-violet-500"></div>
                     </label>
+                  </div>
+
+                  {/* ★ 2026-06-06 자동마케팅 자율발송 게이트 — 슈퍼관리자 회사별 ON/임계값 (cdp_auto_execute_*) */}
+                  <div className="p-4 bg-rose-50 border border-rose-200 rounded-lg mt-3">
+                    <div className="flex items-start justify-between">
+                      <div className="flex-1">
+                        <div className="flex items-center gap-2">
+                          <span className="text-lg">🚀</span>
+                          <span className="font-semibold text-gray-800">자동마케팅 자율발송 게이트</span>
+                          <span className="text-xs bg-rose-500 text-white px-1.5 py-0.5 rounded">BETA</span>
+                        </div>
+                        <p className="text-xs text-gray-500 mt-1">
+                          ON = AI 자동마케팅 제안서가 담당자 승인 없이 임계값 이내에서 <b>자율 발송</b> (회사 잔액 자동 차감 + 고객 자동 발송).<br/>
+                          OFF = 제안서는 담당자 수동 승인 대기 (기본). 발신번호·무료거부(080)·잔액은 발송 직전 자동 확인.
+                        </p>
+                      </div>
+                      <label className="relative inline-flex items-center cursor-pointer ml-3">
+                        <input
+                          type="checkbox"
+                          checked={editCompany.cdpAutoExecuteEnabled}
+                          onChange={(e) => setEditCompany({ ...editCompany, cdpAutoExecuteEnabled: e.target.checked })}
+                          className="sr-only peer"
+                        />
+                        <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-rose-500"></div>
+                      </label>
+                    </div>
+                    <div className={`grid grid-cols-3 gap-2 mt-3 ${editCompany.cdpAutoExecuteEnabled ? '' : 'opacity-40 pointer-events-none'}`}>
+                      <div>
+                        <label className="block text-[11px] font-medium text-gray-600 mb-1">최대 수신자(명)</label>
+                        <input type="number" min="1" value={editCompany.cdpAutoExecuteMaxRecipients}
+                          onChange={(e) => setEditCompany({ ...editCompany, cdpAutoExecuteMaxRecipients: Number(e.target.value) })}
+                          className="w-full px-2 py-1.5 border rounded text-sm focus:ring-2 focus:ring-rose-400 outline-none" />
+                      </div>
+                      <div>
+                        <label className="block text-[11px] font-medium text-gray-600 mb-1">최대 회당 비용(원)</label>
+                        <input type="number" min="1" value={editCompany.cdpAutoExecuteMaxCostKrw}
+                          onChange={(e) => setEditCompany({ ...editCompany, cdpAutoExecuteMaxCostKrw: Number(e.target.value) })}
+                          className="w-full px-2 py-1.5 border rounded text-sm focus:ring-2 focus:ring-rose-400 outline-none" />
+                      </div>
+                      <div>
+                        <label className="block text-[11px] font-medium text-gray-600 mb-1">최대 위험도</label>
+                        <select value={editCompany.cdpAutoExecuteMaxRisk}
+                          onChange={(e) => setEditCompany({ ...editCompany, cdpAutoExecuteMaxRisk: e.target.value })}
+                          className="w-full px-2 py-1.5 border rounded text-sm focus:ring-2 focus:ring-rose-400 outline-none bg-white">
+                          <option value="low">low</option>
+                          <option value="medium">medium</option>
+                          <option value="high">high</option>
+                        </select>
+                      </div>
+                    </div>
+                    <button
+                      onClick={async () => {
+                        try {
+                          const token = localStorage.getItem('token');
+                          const res = await fetch(`/api/admin/companies/${editCompany.id}/cdp-auto-execute`, {
+                            method: 'PATCH',
+                            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+                            body: JSON.stringify({
+                              enabled: editCompany.cdpAutoExecuteEnabled,
+                              maxRecipients: editCompany.cdpAutoExecuteMaxRecipients,
+                              maxCostKrw: editCompany.cdpAutoExecuteMaxCostKrw,
+                              maxRisk: editCompany.cdpAutoExecuteMaxRisk,
+                            }),
+                          });
+                          const data = await res.json();
+                          if (!res.ok) {
+                            showAlert('오류', data?.error || '자율발송 게이트 저장 실패', 'error');
+                          } else {
+                            const cc = data.company;
+                            setEditCompany({ ...editCompany,
+                              cdpAutoExecuteEnabled: cc.cdp_auto_execute_enabled,
+                              cdpAutoExecuteMaxRecipients: cc.cdp_auto_execute_max_recipients,
+                              cdpAutoExecuteMaxCostKrw: cc.cdp_auto_execute_max_cost_krw,
+                              cdpAutoExecuteMaxRisk: cc.cdp_auto_execute_max_risk,
+                            });
+                            showAlert('완료', data?.message || '자율발송 게이트 저장 완료', 'success');
+                          }
+                        } catch (err: any) {
+                          showAlert('오류', err?.message || '네트워크 오류', 'error');
+                        }
+                      }}
+                      className="mt-3 w-full py-2 bg-rose-500 hover:bg-rose-600 text-white text-sm font-medium rounded-lg transition-colors">
+                      자율발송 게이트 저장
+                    </button>
                   </div>
                 </div>
               )}

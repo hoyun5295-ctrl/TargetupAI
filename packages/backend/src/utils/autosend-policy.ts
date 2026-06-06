@@ -4,7 +4,9 @@
  * - resolveAutoSendLeadMinutes: 준비·정지 창(분). null/0/음수 → 120 기본, 상한 1440.
  * - computeScheduledSendAt: 발송 예정 시각 = 준비 시각(now) + lead분. 그 사이가 담당자 정지 창.
  * - decideSendOutcome: 발송 시점 0건·잔액부족 → skip+알림 / 정상 → send.
+ * - normalizeCdpAutoExecuteGate: 슈퍼관리자 자율발송 게이트 입력 정규화(clamp·화이트리스트).
  */
+import { clampInt } from './journey-points-trigger'; // 순수(DB 미import) CT — 테스트 DB-free 유지
 
 export function resolveAutoSendLeadMinutes(raw: number | null | undefined): number {
   const n = Math.floor(Number(raw));
@@ -49,4 +51,29 @@ export function decideStuckSendingRecovery(
     return 'demote_admin_review';
   }
   return 'keep';
+}
+
+/**
+ * 슈퍼관리자 자율발송 게이트 입력 정규화(순수). companies.cdp_auto_execute_* 4컬럼 UPDATE 직전 적용.
+ *  - enabled: boolean true만 ON(문자열/숫자 → false).
+ *  - maxRecipients: 1건 미만·과대 운영자 오타 방지 [1, 1,000,000], 미설정 1000.
+ *  - maxCostKrw: [1, 100,000,000], 미설정 50000.
+ *  - maxRisk: low/medium/high 화이트리스트, 그 외 'low'(가장 보수적).
+ */
+export type CdpRiskLevel = 'low' | 'medium' | 'high';
+const CDP_RISK_LEVELS: CdpRiskLevel[] = ['low', 'medium', 'high'];
+export interface CdpAutoExecuteGate {
+  enabled: boolean;
+  maxRecipients: number;
+  maxCostKrw: number;
+  maxRisk: CdpRiskLevel;
+}
+export function normalizeCdpAutoExecuteGate(raw: any): CdpAutoExecuteGate {
+  const r = raw || {};
+  return {
+    enabled: r.enabled === true,
+    maxRecipients: clampInt(r.maxRecipients, 1000, 1, 1_000_000),
+    maxCostKrw: clampInt(r.maxCostKrw, 50000, 1, 100_000_000),
+    maxRisk: CDP_RISK_LEVELS.includes(r.maxRisk) ? r.maxRisk : 'low',
+  };
 }

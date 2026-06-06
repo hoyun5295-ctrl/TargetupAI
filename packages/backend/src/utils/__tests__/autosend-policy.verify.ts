@@ -4,7 +4,7 @@
  * (DB import 0 — 순수 로직만.)
  */
 import assert from 'node:assert';
-import { resolveAutoSendLeadMinutes, computeScheduledSendAt, decideSendOutcome, decideStuckSendingRecovery } from '../autosend-policy';
+import { resolveAutoSendLeadMinutes, computeScheduledSendAt, decideSendOutcome, decideStuckSendingRecovery, normalizeCdpAutoExecuteGate } from '../autosend-policy';
 
 let passed = 0;
 function ok(name: string, fn: () => void) { fn(); passed++; console.log(`  ok - ${name}`); }
@@ -72,6 +72,33 @@ ok('staleMinutes 커스텀 경계', () => {
     decideStuckSendingRecovery({ campaignId: null, reviewedAt: new Date('2026-12-01T00:50:00Z') }, now, 10),
     'demote_admin_review',
   );
+});
+
+console.log('[autosend-policy] normalizeCdpAutoExecuteGate — 슈퍼관리자 게이트 입력 정규화');
+ok('enabled — boolean true만 ON', () => {
+  assert.strictEqual(normalizeCdpAutoExecuteGate({ enabled: true }).enabled, true);
+  assert.strictEqual(normalizeCdpAutoExecuteGate({ enabled: 'true' }).enabled, false);
+  assert.strictEqual(normalizeCdpAutoExecuteGate({ enabled: 1 }).enabled, false);
+  assert.strictEqual(normalizeCdpAutoExecuteGate({}).enabled, false);
+});
+ok('maxRecipients — 미설정 1000, clamp [1, 1000000]', () => {
+  assert.strictEqual(normalizeCdpAutoExecuteGate({}).maxRecipients, 1000);
+  assert.strictEqual(normalizeCdpAutoExecuteGate({ maxRecipients: 0 }).maxRecipients, 1);
+  assert.strictEqual(normalizeCdpAutoExecuteGate({ maxRecipients: 9_000_000 }).maxRecipients, 1_000_000);
+  assert.strictEqual(normalizeCdpAutoExecuteGate({ maxRecipients: 500 }).maxRecipients, 500);
+});
+ok('maxCostKrw — 미설정 50000, clamp [1, 100000000]', () => {
+  assert.strictEqual(normalizeCdpAutoExecuteGate({}).maxCostKrw, 50000);
+  assert.strictEqual(normalizeCdpAutoExecuteGate({ maxCostKrw: 0 }).maxCostKrw, 1);
+  assert.strictEqual(normalizeCdpAutoExecuteGate({ maxCostKrw: 999_999_999 }).maxCostKrw, 100_000_000);
+  assert.strictEqual(normalizeCdpAutoExecuteGate({ maxCostKrw: 30000 }).maxCostKrw, 30000);
+});
+ok('maxRisk — 화이트리스트, 그 외 low', () => {
+  assert.strictEqual(normalizeCdpAutoExecuteGate({ maxRisk: 'high' }).maxRisk, 'high');
+  assert.strictEqual(normalizeCdpAutoExecuteGate({ maxRisk: 'medium' }).maxRisk, 'medium');
+  assert.strictEqual(normalizeCdpAutoExecuteGate({ maxRisk: 'low' }).maxRisk, 'low');
+  assert.strictEqual(normalizeCdpAutoExecuteGate({ maxRisk: 'extreme' }).maxRisk, 'low');
+  assert.strictEqual(normalizeCdpAutoExecuteGate({}).maxRisk, 'low');
 });
 
 console.log(`\n${passed} assertions passed`);

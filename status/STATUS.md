@@ -107,7 +107,15 @@
 
 ---
 
-### 🟢 2026-06-05 세션8 (최신) — 자동마케팅 자율 발송 구현 완성 (미배포)
+### 🟢 2026-06-06 (최신) — 자동마케팅 점검+정정 & 여정 엔진 재점검+정정 (전부 배포)
+> **자동마케팅(Continuous Operator) 10항 점검+정정 & 여정 엔진 24파일 전수 재점검+정정. 전부 배포 완료. 다음 세션 = 다시 전수 재점검 + C 게이트 결정.**
+> - **자동마케팅**: A 정지복구(reviewed_at·dispatchProposalSend 커밋 전 try/catch→admin_review·createDirectSendCampaign 직후 campaign_id 마커·runAutoSendPass reconcileStuckSending·순수 decideStuckSendingRecovery+verify) / B 광고080 가드(자격+발송 직전) / D listProposals status 파라미터화+validStatuses 6 추가 / E markProposalExecuted 제거 / F 프론트 죽은 검증·옵트아웃 UI 제거·카피·누출단어 정리. **C 게이트(cdp_auto_execute_enabled 설정 화면·API 부재=DB 전용)=Harold 의도 미정(자가서브 토글 vs 베타 DB 전용).**
+> - **여정**: J1 차감↔발송 원자성(**발송 성공 시점 차감**·큐 앞 read-only 사전확인·멱등 마커 'sent' 먼저·미발송 경로 비용 0) / J2 budget_monthly=당월 journey_step_logs 실발송 비용 SUM(옛 stats_total_cost 전기간) / J3 변이 통계 bandit_alpha/bandit_beta/variant_id 별칭(arm_*/variant_label은 503 때 추가만·미갱신 stale 0.5고정) / 2h 스캐너 journey callback 전달. 세션7·D232·D230 정정 전부 유지 확인. 신규 DB 컬럼 0.
+> - 상세=`memory/project_2026_0606_operator_journey_audit_fixes.md`. 핸드오프=`docs/superpowers/handoffs/2026-06-06-operator-journey-reaudit-handoff.md`(회귀 확인 + 미결 + 진입 명령어).
+
+---
+
+### 🟢 2026-06-05 세션8 — 자동마케팅 자율 발송 구현 완성 (배포 완료)
 > **세션7 점검의 CRITICAL(자동실행이 크레딧만 차감·실발송 코드 전무) 해소 + 자율 발송 전 구현. spec §6 질의 10건 Harold 확정 → §7 TDD 구현. backend·frontend tsc0 · 순수 38 assertion · 박/모델명/native dialog 0 · 미배포. ★다음 세션 = 자동마케팅 코드 전수 점검.**
 > - **신규 CT 5종(순수 TDD)**: season-context(월별 시즌+업종톤) / operator-recipients(buildSendableRecipientsSql, filterWhere 주입형 DB-free) / direct-send-spec(buildDirectSendCampaignParams 18컬럼 고정) / direct-send-core(countStagingFiltered 이동·createDirectSendCampaign) / autosend-policy(resolveAutoSendLeadMinutes·computeScheduledSendAt·decideSendOutcome).
 > - **흐름**: prep(schedule_time<=NOW)=계절 문안 생성→스팸 2회 재생성→통과 시 status='scheduled'+scheduled_send_at=now+lead+담당자 실문안/정지안내 → 발송 패스(scheduled_send_at<=NOW)=타겟 재추출(안전필터)→staging→createDirectSendCampaign(직접발송 공유)→크레딧 멱등(continuous-operator-send:proposalId)→status='sent'+campaign_id→완료통지. 스팸 끝내 실패→operator 'paused'+알림 / 0건·잔액→skip+알림 / 정지창(adminStopProposal 'scheduled' 허용).

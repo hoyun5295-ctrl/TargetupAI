@@ -14,6 +14,7 @@ import { cleanupScheduledCampaigns } from '../utils/campaign-lifecycle';
 import { getUserUnsubscribes, deleteUserUnsubscribes, exportUserUnsubscribes, CAMPAIGN_OPT080_SELECT_EXPR, CAMPAIGN_OPT080_LEFT_JOIN } from '../utils/unsubscribe-helper';
 import { buildDateRangeFilter, aggregateSmsCountsByCampaign, aggregateSmsChannelSplitByCampaign, aggregateSmsSendTimesByCampaign, getCampaignResultCounts, STAT_DATE_EXPR } from '../utils/stats-aggregation';
 import { normalizePhone } from '../utils/normalize-phone';
+import { normalizeCdpAutoExecuteGate } from '../utils/autosend-policy';
 
 const router = Router();
 
@@ -487,6 +488,51 @@ router.patch('/companies/:id/ai-orchestrator', authenticate, requireSuperAdmin, 
   } catch (error) {
     console.error('AI Orchestrator 토글 실패:', error);
     res.status(500).json({ error: 'AI Orchestrator 토글 실패' });
+  }
+});
+
+// ★ 2026-06-06 자동마케팅 자율발송 게이트 — 슈퍼관리자 회사별 ON/임계값(companies.cdp_auto_execute_* 4컬럼).
+//   잔액 자동 차감 + 고객 자동 발송 직결이라 운영자(슈퍼관리자)만 제어. 입력은 normalizeCdpAutoExecuteGate로 clamp·화이트리스트.
+router.patch('/companies/:id/cdp-auto-execute', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
+  const { id } = req.params;
+  const gate = normalizeCdpAutoExecuteGate(req.body);
+
+  try {
+    const result = await query(
+      `UPDATE companies
+       SET cdp_auto_execute_enabled = $1,
+           cdp_auto_execute_max_recipients = $2,
+           cdp_auto_execute_max_cost_krw = $3,
+           cdp_auto_execute_max_risk = $4,
+           updated_at = NOW()
+       WHERE id = $5::uuid
+       RETURNING id, company_name, cdp_auto_execute_enabled,
+                 cdp_auto_execute_max_recipients, cdp_auto_execute_max_cost_krw, cdp_auto_execute_max_risk`,
+      [gate.enabled, gate.maxRecipients, gate.maxCostKrw, gate.maxRisk, id]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: '회사를 찾을 수 없습니다.' });
+    }
+
+    console.log(`[Admin] 자율발송 게이트: company=${result.rows[0].company_name} → enabled=${gate.enabled} / max ${gate.maxRecipients}명·${gate.maxCostKrw}원·risk ${gate.maxRisk}`);
+    res.json({
+      company: result.rows[0],
+      message: gate.enabled
+        ? `자율발송 ON — 최대 ${gate.maxRecipients.toLocaleString()}명 / 회당 ${gate.maxCostKrw.toLocaleString()}원 / 위험도 ${gate.maxRisk}`
+        : '자율발송 OFF — 이후 제안서는 담당자 수동 승인 대기',
+    });
+  } catch (error: any) {
+    const msg = error?.message || '';
+    if (msg.includes('column') && msg.includes('does not exist')) {
+      return res.status(503).json({
+        success: false,
+        code: 'DB_MIGRATION_PENDING',
+        error: 'DB 마이그레이션 필요 — companies 자율발송 게이트 컬럼(cdp_auto_execute_*) ALTER 실행 요청',
+      });
+    }
+    console.error('자율발송 게이트 저장 실패:', error);
+    res.status(500).json({ error: '자율발송 게이트 저장 실패' });
   }
 });
 
