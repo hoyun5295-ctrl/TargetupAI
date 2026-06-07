@@ -3340,14 +3340,14 @@ router.get('/operator/predictive/customers', async (req: Request, res: Response)
     const limit = Math.min(100, Math.max(1, parseInt(String(req.query.limit || '10'), 10) || 10));
     const search = typeof req.query.search === 'string' ? req.query.search.trim() : '';
 
-    const validFilters: PredictionFilterType[] = ['all', 'high_risk', 'high_potential', 'high_click', 'cold_start'];
+    const validFilters: PredictionFilterType[] = ['all', 'high_risk', 'high_potential', 'high_click', 'high_ltv', 'cold_start'];
     const filterRaw = String(req.query.filter || 'all');
     const filter: PredictionFilterType = (validFilters as string[]).includes(filterRaw)
       ? (filterRaw as PredictionFilterType)
       : 'all';
 
     const validSorts: PredictionSortType[] = [
-      'churn_risk_desc', 'purchase_likelihood_desc', 'click_score_desc',
+      'churn_risk_desc', 'purchase_likelihood_desc', 'click_score_desc', 'ltv_365d_desc',
       'last_activity_asc', 'last_activity_desc',
     ];
     const sortRaw = String(req.query.sort || 'churn_risk_desc');
@@ -3382,7 +3382,7 @@ router.get('/operator/predictive/customers/:id/explain', async (req: Request, re
   } catch (err: any) {
     console.error('[Predictive explain] 오류:', err);
     const isAuthErr = err?.message?.includes('회사 격리');
-    return res.status(isAuthErr ? 403 : 500).json({ success: false, error: err?.message || '예측 안내 영역 오류' });
+    return res.status(isAuthErr ? 403 : 500).json({ success: false, error: err?.message || '예측 근거 조회 오류' });
   }
 });
 
@@ -3401,7 +3401,7 @@ router.post('/operator/predictive/quick-action', async (req: Request, res: Respo
     const { actionType } = req.body || {};
     const validTypes = ['churn_recovery', 'purchase_push', 'vip_engagement'];
     if (!validTypes.includes(actionType)) {
-      return res.status(400).json({ success: false, error: 'actionType 영역 churn_recovery / purchase_push / vip_engagement 의무.' });
+      return res.status(400).json({ success: false, error: 'actionType은 churn_recovery / purchase_push / vip_engagement 중 하나여야 합니다.' });
     }
 
     // 영역별 매칭 customer 카운트 + AI Operator orchestrate 영역 prefill 안내
@@ -3418,7 +3418,7 @@ router.post('/operator/predictive/quick-action', async (req: Request, res: Respo
         [companyId]
       );
       targetCount = Number(r.rows[0]?.cnt) || 0;
-      objective = `이탈 위험 70%+ 고객 ${targetCount.toLocaleString()}명 영역 회복 캠페인 — 옛 클릭 채널 + 감성 톤 + 옛 구매 카테고리 영역 추천`;
+      objective = `이탈 위험 70% 이상 고객 ${targetCount.toLocaleString()}명에게 회복 캠페인 — 자주 반응한 채널과 감성적인 메시지로 다시 찾게 만듭니다.`;
       targetFilters = { predictive_churn_risk_min: 0.7 };
       suggestedChannel = 'lms';
       suggestedTone = '감성적';
@@ -3429,7 +3429,7 @@ router.post('/operator/predictive/quick-action', async (req: Request, res: Respo
         [companyId]
       );
       targetCount = Number(r.rows[0]?.cnt) || 0;
-      objective = `구매 가능성 60%+ 고객 ${targetCount.toLocaleString()}명 영역 추천 상품 캠페인 — 옛 next_purchase_days 영역 D-1 시점 발송 권장`;
+      objective = `구매 가능성 60% 이상 고객 ${targetCount.toLocaleString()}명에게 추천 상품 캠페인 — 다음 구매 예측 시점 직전에 발송하면 효과적입니다.`;
       targetFilters = { predictive_purchase_likelihood_min: 0.6 };
       suggestedChannel = 'sms';
       suggestedTone = '실용적';
@@ -3446,7 +3446,7 @@ router.post('/operator/predictive/quick-action', async (req: Request, res: Respo
         [companyId, avgLtv * 2]
       );
       targetCount = Number(r.rows[0]?.cnt) || 0;
-      objective = `LTV 상위 ${targetCount.toLocaleString()}명 영역 (평균 ${avgLtv.toLocaleString()}원 × 2 영역 초과) VIP 전용 혜택 + 감사 인사 캠페인`;
+      objective = `예측 LTV 상위 고객 ${targetCount.toLocaleString()}명에게 VIP 전용 혜택과 감사 인사 캠페인 — 평균의 두 배가 넘는 핵심 고객층입니다.`;
       targetFilters = { predictive_ltv_365d_min: avgLtv * 2 };
       suggestedChannel = 'kakao';
       suggestedTone = '감성적';
@@ -3463,7 +3463,7 @@ router.post('/operator/predictive/quick-action', async (req: Request, res: Respo
     });
   } catch (err: any) {
     console.error('[Predictive quick-action] 오류:', err);
-    return res.status(500).json({ success: false, error: err?.message || '1-click 액션 영역 오류' });
+    return res.status(500).json({ success: false, error: err?.message || '1-click 액션 처리 오류' });
   }
 });
 

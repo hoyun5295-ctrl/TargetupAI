@@ -107,7 +107,18 @@
 
 ---
 
-### 🟢 2026-06-06 (최신) — 자동마케팅 점검+정정 & 여정 엔진 재점검+정정 (전부 배포)
+### 🟢 2026-06-07 (최신) — 재검증(이상0) + C게이트 토글 + 크레딧 보강 + 자율예측 재설계 완료(미배포)
+> **자동마케팅+여정 전수 재검증(결함 0) / C게이트 슈퍼관리자 토글 / 크레딧 멱등 보강 / 자율예측 재설계 완료(메인 3블록 발견세그먼트 주인공 + 전부 모달 + backend discoveredSegments 실데이터 근거 TDD). 다음 = 배포 + 운영검증.**
+> - **재검증**: 자동마케팅(A진입/B발송/C돈/D정확/E표시) + 여정(진입 안전필터·발송직전 isCustomerSendable·알림톡 승인3중·J1~J3·마커게이트·cdp커서·조건 fail-safe·변이 bandit_*) 전수 — 결함 0. send_type default 'ai' 확인(여정 표시 정상).
+> - **C게이트**: `autosend-policy` normalizeCdpAutoExecuteGate(+verify 19) / `admin.ts` PATCH `/companies/:id/cdp-auto-execute`(503 분기) / `AdminDashboard` editCompany 모달. companies 4컬럼 information_schema 실재 확인.
+> - **크레딧 보강**: `continuous-operator` reconcileStuckSending mark_sent 멱등 차감(키 proposalId).
+> - **자율예측 UI 1차**: PredictiveDashboardPage 안내2→1·인라인→모달·metric→큰카드6·자세히→모달·액션통합·cold start 흐림 + backend predictive-explainer 텍스트 정리. **Harold "어정쩡"(큰 카드만으론 부족)** → 2차 재설계.
+> - **자율예측 2차 재설계(미배포)**: 메인 3블록(헤더+안내 1줄+**AI 발견 세그먼트 3장 주인공**[N명+근거 한 줄+「근거 보기」「캠페인 만들기」]+작은 요약 바 5)+나머지 전부 모달(전체고객목록·분포정확도·고객상세). `predictive-segments-core.ts` 신규(순수·TDD 11 green) buildDiscoveredSegments(실측→근거 한 줄)·`predictive-suite` getCompanyPredictionSummary discoveredSegments(보조집계 1쿼리: 이탈 avg미활동일·구매 avg다음구매일·VIP 합산365LTV·신규컬럼0)+고객목록 high_ltv/ltv_365d_desc·`routes/ai` quick-action objective/error 자연 한국어. 큰카드6·미사용컴포넌트 제거·slate-950. backend+frontend tsc OK·grep 0(모델명/박단어/native/영역). 상세=`memory/project_2026_0607_predictive_redesign_brainstorm.md`.
+> - **다음 = 배포(Harold 비번)+운영검증**. **미점검(별도)**: billing send_type='manual' 정산 / impactScore·churn 임의상수 실데이터 점검. 핸드오프=`docs/superpowers/handoffs/2026-06-07-ai-predictive-redesign-handoff.md`.
+
+---
+
+### 🟢 2026-06-06 — 자동마케팅 점검+정정 & 여정 엔진 재점검+정정 (전부 배포)
 > **자동마케팅(Continuous Operator) 10항 점검+정정 & 여정 엔진 24파일 전수 재점검+정정. 전부 배포 완료. 다음 세션 = 다시 전수 재점검 + C 게이트 결정.**
 > - **자동마케팅**: A 정지복구(reviewed_at·dispatchProposalSend 커밋 전 try/catch→admin_review·createDirectSendCampaign 직후 campaign_id 마커·runAutoSendPass reconcileStuckSending·순수 decideStuckSendingRecovery+verify) / B 광고080 가드(자격+발송 직전) / D listProposals status 파라미터화+validStatuses 6 추가 / E markProposalExecuted 제거 / F 프론트 죽은 검증·옵트아웃 UI 제거·카피·누출단어 정리. **C 게이트(cdp_auto_execute_enabled 설정 화면·API 부재=DB 전용)=Harold 의도 미정(자가서브 토글 vs 베타 DB 전용).**
 > - **여정**: J1 차감↔발송 원자성(**발송 성공 시점 차감**·큐 앞 read-only 사전확인·멱등 마커 'sent' 먼저·미발송 경로 비용 0) / J2 budget_monthly=당월 journey_step_logs 실발송 비용 SUM(옛 stats_total_cost 전기간) / J3 변이 통계 bandit_alpha/bandit_beta/variant_id 별칭(arm_*/variant_label은 503 때 추가만·미갱신 stale 0.5고정) / 2h 스캐너 journey callback 전달. 세션7·D232·D230 정정 전부 유지 확인. 신규 DB 컬럼 0.
