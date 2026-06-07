@@ -3340,7 +3340,7 @@ router.get('/operator/predictive/customers', async (req: Request, res: Response)
     const limit = Math.min(100, Math.max(1, parseInt(String(req.query.limit || '10'), 10) || 10));
     const search = typeof req.query.search === 'string' ? req.query.search.trim() : '';
 
-    const validFilters: PredictionFilterType[] = ['all', 'high_risk', 'high_potential', 'high_click', 'high_ltv', 'cold_start'];
+    const validFilters: PredictionFilterType[] = ['all', 'high_risk', 'high_potential', 'high_click', 'high_ltv', 'first_purchase', 'repurchase', 'cold_start'];
     const filterRaw = String(req.query.filter || 'all');
     const filter: PredictionFilterType = (validFilters as string[]).includes(filterRaw)
       ? (filterRaw as PredictionFilterType)
@@ -3399,9 +3399,9 @@ router.post('/operator/predictive/quick-action', async (req: Request, res: Respo
       return res.status(403).json({ success: false, error: 'AI Operator 진입 권한이 없습니다.', code: 'AI_OPERATOR_GATED' });
     }
     const { actionType } = req.body || {};
-    const validTypes = ['churn_recovery', 'purchase_push', 'vip_engagement'];
+    const validTypes = ['churn_recovery', 'purchase_push', 'vip_engagement', 'first_purchase', 'high_engagement', 'repurchase_imminent'];
     if (!validTypes.includes(actionType)) {
-      return res.status(400).json({ success: false, error: 'actionType은 churn_recovery / purchase_push / vip_engagement 중 하나여야 합니다.' });
+      return res.status(400).json({ success: false, error: 'actionType이 올바르지 않습니다.' });
     }
 
     // 영역별 매칭 customer 카운트 + AI Operator orchestrate 영역 prefill 안내
@@ -3450,6 +3450,40 @@ router.post('/operator/predictive/quick-action', async (req: Request, res: Respo
       targetFilters = { predictive_ltv_365d_min: avgLtv * 2 };
       suggestedChannel = 'kakao';
       suggestedTone = '감성적';
+    } else if (actionType === 'first_purchase') {
+      const r = await query(
+        `SELECT COUNT(*)::int AS cnt FROM cdp_customer_predictions p
+         INNER JOIN customers c ON c.id = p.customer_id
+         WHERE p.company_id = $1::uuid AND COALESCE(c.purchase_count, 0) = 0`,
+        [companyId]
+      );
+      targetCount = Number(r.rows[0]?.cnt) || 0;
+      objective = `아직 첫 구매를 하지 않은 고객 ${targetCount.toLocaleString()}명에게 환영·첫 거래 유도 캠페인 — 부담 없는 첫 메시지로 거래를 트는 데 집중합니다.`;
+      targetFilters = { purchase_count_max: 0 };
+      suggestedChannel = 'sms';
+      suggestedTone = '친근한';
+    } else if (actionType === 'high_engagement') {
+      const r = await query(
+        `SELECT COUNT(*)::int AS cnt FROM cdp_customer_predictions
+         WHERE company_id = $1::uuid AND click_score > 0.5`,
+        [companyId]
+      );
+      targetCount = Number(r.rows[0]?.cnt) || 0;
+      objective = `메시지에 잘 반응하는 고객 ${targetCount.toLocaleString()}명에게 신상품·이벤트 우선 알림 — 클릭 가능성이 높아 반응을 빠르게 끌어낼 수 있습니다.`;
+      targetFilters = { predictive_click_score_min: 0.5 };
+      suggestedChannel = 'sms';
+      suggestedTone = '활기찬';
+    } else if (actionType === 'repurchase_imminent') {
+      const r = await query(
+        `SELECT COUNT(*)::int AS cnt FROM cdp_customer_predictions
+         WHERE company_id = $1::uuid AND next_purchase_days BETWEEN 0 AND 14`,
+        [companyId]
+      );
+      targetCount = Number(r.rows[0]?.cnt) || 0;
+      objective = `2주 안에 다시 살 것으로 예측되는 고객 ${targetCount.toLocaleString()}명에게 적시 추천 캠페인 — 구매 직전 타이밍에 추천 상품을 보냅니다.`;
+      targetFilters = { predictive_next_purchase_days_max: 14 };
+      suggestedChannel = 'sms';
+      suggestedTone = '실용적';
     }
 
     return res.json({

@@ -638,30 +638,44 @@ export async function getCompanyPredictionSummary(companyId: string): Promise<Co
     );
     const highLtvCount = Number(highLtvRes.rows[0]?.cnt) || 0;
 
-    // ★ 2026-06-07: 발견 세그먼트 근거용 보조 실측 (이탈 평균 미활동일 · 구매 평균 다음 구매일 · VIP 합산 LTV)
-    //   신규 컬럼/테이블/JOIN 0 — highLtv 쿼리 + topRisk 쿼리(INNER JOIN customers)가 쓰는 기존 컬럼/JOIN 재사용
+    // ★ 2026-06-07: 발견 세그먼트 6종 근거용 보조 실측 (신규 컬럼/테이블/JOIN 0 — 기존 컬럼 + INNER JOIN customers 재사용)
+    //   첫구매 = customers.purchase_count 0 · 관심 = click_score>0.5 · 재구매 = next_purchase_days 0~14
     const segAuxRes = await query(
       `SELECT
          AVG(CASE WHEN p.churn_risk > 0.7
              THEN EXTRACT(EPOCH FROM (NOW() - c.recent_purchase_date)) / 86400 END) AS churn_avg_inactive_days,
          AVG(CASE WHEN p.purchase_likelihood > 0.6
              THEN p.next_purchase_days END) AS purchase_avg_next_days,
-         COALESCE(SUM(CASE WHEN p.ltv_365d > $2 THEN p.ltv_365d ELSE 0 END), 0) AS vip_sum_ltv
+         COALESCE(SUM(CASE WHEN p.ltv_365d > $2 THEN p.ltv_365d ELSE 0 END), 0) AS vip_sum_ltv,
+         COUNT(*) FILTER (WHERE COALESCE(c.purchase_count, 0) = 0) AS first_purchase_count,
+         COUNT(*) FILTER (WHERE p.click_score > 0.5) AS engagement_count,
+         AVG(CASE WHEN p.click_score > 0.5 THEN p.click_score END) AS engagement_avg_click,
+         COUNT(*) FILTER (WHERE p.next_purchase_days BETWEEN 0 AND 14) AS repurchase_count,
+         AVG(CASE WHEN p.next_purchase_days BETWEEN 0 AND 14 THEN p.next_purchase_days END) AS repurchase_avg_days
        FROM cdp_customer_predictions p
        INNER JOIN customers c ON c.id = p.customer_id
        WHERE p.company_id = $1::uuid`,
       [companyId, highLtvThreshold]
     );
     const segRow = segAuxRes.rows[0] || {};
-    const churnAvgInactiveDays = segRow.churn_avg_inactive_days !== null && segRow.churn_avg_inactive_days !== undefined
-      ? Math.round(Number(segRow.churn_avg_inactive_days)) : null;
-    const purchaseAvgNextDays = segRow.purchase_avg_next_days !== null && segRow.purchase_avg_next_days !== undefined
-      ? Math.round(Number(segRow.purchase_avg_next_days)) : null;
+    const roundOrNull = (v: any): number | null =>
+      v !== null && v !== undefined ? Math.round(Number(v)) : null;
+    const churnAvgInactiveDays = roundOrNull(segRow.churn_avg_inactive_days);
+    const purchaseAvgNextDays = roundOrNull(segRow.purchase_avg_next_days);
     const vipSumLtv = Math.round(Number(segRow.vip_sum_ltv) || 0);
+    const firstPurchaseCount = Number(segRow.first_purchase_count) || 0;
+    const engagementCount = Number(segRow.engagement_count) || 0;
+    const engagementAvgClickPct = segRow.engagement_avg_click !== null && segRow.engagement_avg_click !== undefined
+      ? Math.round(Number(segRow.engagement_avg_click) * 100) : null;
+    const repurchaseCount = Number(segRow.repurchase_count) || 0;
+    const repurchaseAvgDays = roundOrNull(segRow.repurchase_avg_days);
     const discoveredSegments = buildDiscoveredSegments({
       churn: { count: highRisk, avgInactiveDays: churnAvgInactiveDays },
       purchase: { count: highPotential, avgNextPurchaseDays: purchaseAvgNextDays },
       vip: { count: highLtvCount, sumLtv365d: vipSumLtv },
+      firstPurchase: { count: firstPurchaseCount },
+      engagement: { count: engagementCount, avgClickPct: engagementAvgClickPct },
+      repurchase: { count: repurchaseCount, avgNextPurchaseDays: repurchaseAvgDays },
     });
 
     // ★ D211+ Predictive 강화 (2026-05-23 Harold 명시): 채널 분포 + 시간대 분포
@@ -772,7 +786,7 @@ export async function getCompanyPredictionSummary(companyId: string): Promise<Co
 //    회사 전체 customer 영역 페이지네이션 + 검색 + 필터 + 정렬 매트릭스 (Top 50명 영역 폐기)
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-export type PredictionFilterType = 'all' | 'high_risk' | 'high_potential' | 'high_click' | 'high_ltv' | 'cold_start';
+export type PredictionFilterType = 'all' | 'high_risk' | 'high_potential' | 'high_click' | 'high_ltv' | 'first_purchase' | 'repurchase' | 'cold_start';
 export type PredictionSortType =
   | 'churn_risk_desc'
   | 'purchase_likelihood_desc'
@@ -816,6 +830,8 @@ export async function listCompanyPredictionCustomers(
       case 'high_potential': return 'AND p.purchase_likelihood > 0.6';
       case 'high_click': return 'AND p.click_score > 0.5';
       case 'high_ltv': return `AND p.ltv_365d > (SELECT COALESCE(AVG(ltv_365d), 0) * 2 FROM cdp_customer_predictions WHERE company_id = $1::uuid)`;
+      case 'first_purchase': return 'AND COALESCE(c.purchase_count, 0) = 0';
+      case 'repurchase': return 'AND p.next_purchase_days BETWEEN 0 AND 14';
       case 'cold_start': return `AND p.model_version = 'v1.0-cold'`;
       case 'all':
       default: return '';

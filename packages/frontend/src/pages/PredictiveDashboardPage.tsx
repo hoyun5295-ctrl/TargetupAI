@@ -16,7 +16,7 @@ import {
 import {
   ArrowLeft, Brain, MousePointerClick, AlertTriangle, ShoppingCart, Loader2,
   TrendingUp, Users, Sparkles, Search, Filter, ArrowUpDown,
-  ChevronLeft, ChevronRight, Database, Info, X, Crown, ArrowRight,
+  ChevronLeft, ChevronRight, Database, Info, X, Crown, ArrowRight, UserPlus, Repeat,
 } from 'lucide-react';
 
 interface HistogramBin {
@@ -96,11 +96,11 @@ interface Distribution {
 
 // ★ 2026-06-07: AI 발견 세그먼트 (backend discoveredSegments)
 interface DiscoveredSegment {
-  key: 'churn_recovery' | 'purchase_push' | 'vip_engagement';
+  key: 'churn_recovery' | 'purchase_push' | 'vip_engagement' | 'first_purchase' | 'high_engagement' | 'repurchase_imminent';
   label: string;
   count: number;
   reasonSummary: string;
-  accent: 'rose' | 'emerald' | 'fuchsia';
+  accent: 'rose' | 'emerald' | 'fuchsia' | 'indigo' | 'cyan' | 'amber';
 }
 
 interface Summary {
@@ -139,7 +139,7 @@ interface CustomerListResponse {
   limit: number;
 }
 
-type FilterType = 'all' | 'high_risk' | 'high_potential' | 'high_click' | 'high_ltv' | 'cold_start';
+type FilterType = 'all' | 'high_risk' | 'high_potential' | 'high_click' | 'high_ltv' | 'first_purchase' | 'repurchase' | 'cold_start';
 type SortType =
   | 'churn_risk_desc'
   | 'purchase_likelihood_desc'
@@ -154,6 +154,8 @@ const FILTER_OPTIONS: { value: FilterType; label: string }[] = [
   { value: 'high_potential', label: '구매 가능성 60%+' },
   { value: 'high_click', label: '클릭 가능성 50%+' },
   { value: 'high_ltv', label: 'VIP (LTV 상위)' },
+  { value: 'first_purchase', label: '첫 구매 전' },
+  { value: 'repurchase', label: '재구매 임박' },
   { value: 'cold_start', label: '초기 추정' },
 ];
 
@@ -171,6 +173,9 @@ const SEG_FILTER: Record<DiscoveredSegment['key'], FilterType> = {
   churn_recovery: 'high_risk',
   purchase_push: 'high_potential',
   vip_engagement: 'high_ltv',
+  first_purchase: 'first_purchase',
+  high_engagement: 'high_click',
+  repurchase_imminent: 'repurchase',
 };
 const ACCENT: Record<DiscoveredSegment['accent'], {
   grad: string; text: string; iconBg: string; border: string; btn: string;
@@ -186,6 +191,18 @@ const ACCENT: Record<DiscoveredSegment['accent'], {
   fuchsia: {
     grad: 'from-fuchsia-500 to-purple-500', text: 'text-fuchsia-300', iconBg: 'bg-fuchsia-500/20',
     border: 'border-fuchsia-400/25', btn: 'from-fuchsia-500 to-purple-500 hover:from-fuchsia-600 hover:to-purple-600',
+  },
+  indigo: {
+    grad: 'from-indigo-500 to-blue-500', text: 'text-indigo-300', iconBg: 'bg-indigo-500/20',
+    border: 'border-indigo-400/25', btn: 'from-indigo-500 to-blue-500 hover:from-indigo-600 hover:to-blue-600',
+  },
+  cyan: {
+    grad: 'from-cyan-500 to-sky-500', text: 'text-cyan-300', iconBg: 'bg-cyan-500/20',
+    border: 'border-cyan-400/25', btn: 'from-cyan-500 to-sky-500 hover:from-cyan-600 hover:to-sky-600',
+  },
+  amber: {
+    grad: 'from-amber-500 to-orange-500', text: 'text-amber-300', iconBg: 'bg-amber-500/20',
+    border: 'border-amber-400/25', btn: 'from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600',
   },
 };
 
@@ -377,7 +394,7 @@ export default function PredictiveDashboardPage() {
   };
 
   // 1-click 액션 — AI 자동 마케팅(ContinuousOperator) prefill 진입
-  const handleQuickAction = async (actionType: 'churn_recovery' | 'purchase_push' | 'vip_engagement') => {
+  const handleQuickAction = async (actionType: DiscoveredSegment['key']) => {
     setQuickActionLoading(actionType);
     try {
       const res = await fetch('/api/ai/operator/predictive/quick-action', {
@@ -391,6 +408,9 @@ export default function PredictiveDashboardPage() {
           churn_recovery: '이탈 위험 회복',
           purchase_push: '구매 유도',
           vip_engagement: 'VIP LTV 보존',
+          first_purchase: '첫 구매 유도',
+          high_engagement: '관심·반응 활성화',
+          repurchase_imminent: '재구매 유도',
         };
         sessionStorage.setItem('continuousOperatorPrefill', JSON.stringify({
           name: actionLabelMap[actionType] || '자동 마케팅',
@@ -822,9 +842,14 @@ function SegmentCard({
   onCampaign: () => void;
 }) {
   const A = ACCENT[seg.accent];
-  const Icon = seg.key === 'churn_recovery' ? AlertTriangle : seg.key === 'purchase_push' ? ShoppingCart : Crown;
+  const ICON_MAP = {
+    churn_recovery: AlertTriangle, purchase_push: ShoppingCart, vip_engagement: Crown,
+    first_purchase: UserPlus, high_engagement: MousePointerClick, repurchase_imminent: Repeat,
+  } as const;
+  const Icon = ICON_MAP[seg.key];
+  const isActive = seg.count > 0;
   return (
-    <div className={`relative rounded-2xl bg-white/[0.04] border ${A.border} p-5 flex flex-col overflow-hidden`}>
+    <div className={`relative rounded-2xl bg-white/[0.04] border ${A.border} p-5 flex flex-col overflow-hidden ${isActive ? '' : 'opacity-55'}`}>
       <div className={`absolute top-0 left-0 right-0 h-1 bg-gradient-to-r ${A.grad}`} />
       <div className="flex items-center gap-3 mb-3">
         <div className={`w-11 h-11 rounded-xl ${A.iconBg} flex items-center justify-center shrink-0`}>
@@ -835,7 +860,7 @@ function SegmentCard({
           <div className="flex items-baseline gap-1">
             <span className="text-2xl font-bold text-white tracking-tight">{seg.count.toLocaleString()}</span>
             <span className="text-sm text-white/45">명</span>
-            {isColdStart && <span className="ml-1 text-[9px] px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300">추정</span>}
+            {isActive && isColdStart && <span className="ml-1 text-[9px] px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300">추정</span>}
           </div>
         </div>
       </div>
@@ -843,16 +868,17 @@ function SegmentCard({
       <div className="flex gap-2">
         <button
           onClick={onSeeReason}
-          className="flex-1 px-3 py-2 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 text-xs text-white/80 font-medium transition-colors"
+          disabled={!isActive}
+          className="flex-1 px-3 py-2 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 text-xs text-white/80 font-medium transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-white/5"
         >
           근거 보기
         </button>
         <button
           onClick={onCampaign}
-          disabled={actionLoading}
-          className={`flex-1 px-3 py-2 rounded-lg bg-gradient-to-r ${A.btn} text-xs font-semibold text-white flex items-center justify-center gap-1 disabled:opacity-50 transition-colors`}
+          disabled={!isActive || actionLoading}
+          className={`flex-1 px-3 py-2 rounded-lg text-xs font-semibold text-white flex items-center justify-center gap-1 transition-colors disabled:opacity-60 disabled:cursor-not-allowed ${isActive ? `bg-gradient-to-r ${A.btn}` : 'bg-white/10'}`}
         >
-          {actionLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <>캠페인 만들기 <ArrowRight className="w-3.5 h-3.5" /></>}
+          {actionLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : isActive ? <>캠페인 만들기 <ArrowRight className="w-3.5 h-3.5" /></> : '활성화 대기'}
         </button>
       </div>
     </div>
