@@ -107,7 +107,17 @@
 
 ---
 
-### 🟢 2026-06-07 (최신) — 재검증(이상0) + C게이트 토글 + 크레딧 보강 + 자율예측 재설계 완료(미배포)
+### 🟢 2026-06-07 (최신) — 발송 버그 3건 리포트 (조사 완료, 수정은 다음 세션)
+> **① 알림톡 버튼/유형 발송 실패(게이트웨이 btnJson 빈값) ② 발송내역 검색이 발송일 아닌 등록일 섞임 + 즉시발송 발송일시 − ③ 정산 통계 대체발송 SMS/LMS 미구분. 원인 grep 확정 + 버그리포팅 .md 작성. 다음 세션 = 이 .md로 수정.**
+> - 리포트 = `docs/superpowers/handoffs/2026-06-07-send-bugs-report.md` (버그별 증상·원인 라인·수정 방향·1차 확인·주의).
+> - 버그1: `campaigns.ts:2023` buttonJson=alimtalkButtonJson(req.body)||null → 프론트 미전송 시 btnJson[]. kakao_templates 버튼=represent_link/item_*(jsonb)라 백엔드 조회·변환 필요.
+> - 버그2: 검색 `admin.ts:797`·`results.ts` COALESCE(sent_at,scheduled_at,created_at)의 created_at fallback + admin 표시 scheduled_at만(즉시발송 −). sent_at은 `campaign-lifecycle:321`서 채워짐. fix=COALESCE(sent_at,scheduled_at) 통일.
+> - 버그3: `sms-result-map:215` classifyMsgChannel substitute(L+oriseq) SMS/LMS 미구분, export `admin.ts:3320` 라벨 단일. fix=substitute_sms/lms 세분화 + TDD.
+> - 미배포 자율예측(6종·VIP numeric·재계산 버튼·worker 조건)은 별도.
+
+---
+
+### 🟢 2026-06-07 — 재검증(이상0) + C게이트 토글 + 크레딧 보강 + 자율예측 재설계 완료(미배포)
 > **자동마케팅+여정 전수 재검증(결함 0) / C게이트 슈퍼관리자 토글 / 크레딧 멱등 보강 / 자율예측 재설계 완료(메인 3블록 발견세그먼트 주인공 + 전부 모달 + backend discoveredSegments 실데이터 근거 TDD). 다음 = 배포 + 운영검증.**
 > - **재검증**: 자동마케팅(A진입/B발송/C돈/D정확/E표시) + 여정(진입 안전필터·발송직전 isCustomerSendable·알림톡 승인3중·J1~J3·마커게이트·cdp커서·조건 fail-safe·변이 bandit_*) 전수 — 결함 0. send_type default 'ai' 확인(여정 표시 정상).
 > - **C게이트**: `autosend-policy` normalizeCdpAutoExecuteGate(+verify 19) / `admin.ts` PATCH `/companies/:id/cdp-auto-execute`(503 분기) / `AdminDashboard` editCompany 모달. companies 4컬럼 information_schema 실재 확인.

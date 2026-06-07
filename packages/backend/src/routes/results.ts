@@ -115,7 +115,7 @@ router.get('/summary', async (req: Request, res: Response) => {
     // ★ D143 (2026-05-04, shiseido6 신고): 발송결과 출력 기준 = 발송일시
     //   발송 완료(sent_at) 우선 → 예약 대기(scheduled_at) → 미발송(created_at) 폴백
     //   정산이 발송일 기준이므로 4/30 등록 + 5/7 예약 캠페인은 5월 결과에 표시되어야 함
-    const summaryDr = buildPeriodFilter('COALESCE(c.sent_at, c.scheduled_at, c.created_at)', {
+    const summaryDr = buildPeriodFilter('COALESCE(c.sent_at, c.scheduled_at)', {
       fromDate: fromDate ? String(fromDate) : undefined,
       toDate: toDate ? String(toDate) : undefined,
       yearMonth: (!fromDate || !toDate) ? yearMonth : undefined,
@@ -245,7 +245,7 @@ router.get('/campaigns', async (req: Request, res: Response) => {
       effectiveFromDate = sevenDaysAgo.toISOString().split('T')[0];
       effectiveToDate = today.toISOString().split('T')[0];
     }
-    const campDr = buildPeriodFilter('COALESCE(sent_at, scheduled_at, created_at)', {
+    const campDr = buildPeriodFilter('COALESCE(sent_at, scheduled_at)', {
       fromDate: effectiveFromDate,
       toDate: effectiveToDate,
       yearMonth: (!effectiveFromDate || !effectiveToDate) ? effectiveYearMonth : undefined,
@@ -390,7 +390,7 @@ router.get('/campaigns/export', async (req: Request, res: Response) => {
       effectiveFromDate = sevenDaysAgo.toISOString().split('T')[0];
       effectiveToDate = today.toISOString().split('T')[0];
     }
-    const campDr = buildPeriodFilter('COALESCE(sent_at, scheduled_at, created_at)', {
+    const campDr = buildPeriodFilter('COALESCE(sent_at, scheduled_at)', {
       fromDate: effectiveFromDate,
       toDate: effectiveToDate,
       yearMonth: (!effectiveFromDate || !effectiveToDate) ? effectiveYearMonth : undefined,
@@ -463,7 +463,7 @@ router.get('/campaigns/export', async (req: Request, res: Response) => {
       return {
         message: String(c.message_content || ''),
         createdAt: fmtKst(c.created_at),
-        sentAt: fmtKst(c.scheduled_at || c.sent_at),
+        sentAt: fmtKst(c.sent_at || c.scheduled_at),
         channel: channelPlainLabel(c.send_channel, c.message_type),
         sent, success, fail, pending, rate,
         sender: c.created_by_name || '',
@@ -725,7 +725,7 @@ router.get('/campaigns/:id/messages', async (req: Request, res: Response) => {
 
       if (status === 'success') smsWhere += ` AND status_code IN (${SUCCESS_CODES.join(',')})`;
       else if (status === 'fail') smsWhere += ` AND status_code NOT IN (${[...SUCCESS_CODES, ...PENDING_CODES].join(',')})`;
-      else if (status === 'substitute') smsWhere += ` AND msg_type = 'L' AND k_oriseq > 0`;
+      else if (status === 'substitute') smsWhere += ` AND k_oriseq > 0 AND msg_type IN ('L', 'S')`;
 
       const smsFields = SMS_DETAIL_FIELDS;
 
@@ -847,7 +847,7 @@ router.get('/campaigns/:id/messages', async (req: Request, res: Response) => {
       }
       if (status === 'success') smsWhere += ` AND status_code IN (${SUCCESS_CODES.join(',')})`;
       else if (status === 'fail') smsWhere += ` AND status_code NOT IN (${[...SUCCESS_CODES, ...PENDING_CODES].join(',')})`;
-      else if (status === 'substitute') smsWhere += ` AND msg_type = 'L' AND k_oriseq > 0`;
+      else if (status === 'substitute') smsWhere += ` AND k_oriseq > 0 AND msg_type IN ('L', 'S')`;
 
       for (const t of msgTables) {
         if (logPattern.test(t)) continue; // LOG 테이블 스킵
@@ -959,7 +959,7 @@ router.get('/campaigns/:id/export', async (req: Request, res: Response) => {
     let smsStatusWhere = '';
     if (exportStatus === 'success') smsStatusWhere = ` AND status_code IN (${SUCCESS_CODES.join(',')})`;
     else if (exportStatus === 'fail') smsStatusWhere = ` AND status_code NOT IN (${[...SUCCESS_CODES, ...PENDING_CODES].join(',')})`;
-    else if (exportStatus === 'substitute') smsStatusWhere = ` AND msg_type = 'L' AND k_oriseq > 0`;
+    else if (exportStatus === 'substitute') smsStatusWhere = ` AND k_oriseq > 0 AND msg_type IN ('L', 'S')`;
 
     // ★ 알림톡(alimtalk)도 SMSQ_SEND msg_type='K' 경로라 SMS 분기에 포함 (messages 조회와 동일)
     if (sendChannel === 'sms' || sendChannel === 'both' || sendChannel === 'alimtalk') {

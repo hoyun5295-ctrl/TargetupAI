@@ -181,15 +181,11 @@ export const PENDING_CODES_SQL = PENDING_CODES.join(', ');
  * - 그 외(IMC '카카오(TEXT)' 등)   → 원본 그대로
  */
 export function getSendTypeLabel(msgType: string, kOriseq?: number | string | null): string {
+  const ori = Number(kOriseq);
+  const isSub = kOriseq != null && kOriseq !== '' && !Number.isNaN(ori) && ori > 0;
   if (msgType === 'K') return '알림톡';
-  if (msgType === 'L') {
-    const ori = Number(kOriseq);
-    if (kOriseq != null && kOriseq !== '' && !Number.isNaN(ori) && ori > 0) {
-      return '카카오실패 대체발송';
-    }
-    return 'LMS';
-  }
-  if (msgType === 'S') return 'SMS';
+  if (msgType === 'L') return isSub ? '카카오실패 대체발송(LMS)' : 'LMS';
+  if (msgType === 'S') return isSub ? '카카오실패 대체발송(SMS)' : 'SMS';
   if (msgType === 'M') return 'MMS';
   return msgType;
 }
@@ -210,16 +206,14 @@ export function getCampaignChannelLabel(sendChannel: string | null | undefined, 
  * 발송 채널 분류 (집계 키) — getSendTypeLabel과 동일 규칙의 영문 키 버전.
  * 통계에서 알림톡(K)과 카카오실패 대체발송(L·k_oriseq>0)을 분리 집계할 때 사용.
  */
-export type SmsChannel = 'alimtalk' | 'substitute' | 'lms' | 'sms' | 'mms' | 'other';
+export type SmsChannel = 'alimtalk' | 'substitute_lms' | 'substitute_sms' | 'lms' | 'sms' | 'mms' | 'other';
 
 export function classifyMsgChannel(msgType: string, kOriseq?: number | string | null): SmsChannel {
+  const ori = Number(kOriseq);
+  const isSub = kOriseq != null && kOriseq !== '' && !Number.isNaN(ori) && ori > 0;
   if (msgType === 'K') return 'alimtalk';
-  if (msgType === 'L') {
-    const ori = Number(kOriseq);
-    if (kOriseq != null && kOriseq !== '' && !Number.isNaN(ori) && ori > 0) return 'substitute';
-    return 'lms';
-  }
-  if (msgType === 'S') return 'sms';
+  if (msgType === 'L') return isSub ? 'substitute_lms' : 'lms';  // 카카오 실패 → LMS 대체
+  if (msgType === 'S') return isSub ? 'substitute_sms' : 'sms';  // 카카오 실패 → SMS 대체
   if (msgType === 'M') return 'mms';
   return 'other';
 }
@@ -235,7 +229,7 @@ export function tallySmsChannelCounts(
 ): Record<SmsChannel, ChannelCount> {
   const init = (): ChannelCount => ({ total: 0, success: 0, fail: 0, pending: 0 });
   const out: Record<SmsChannel, ChannelCount> = {
-    alimtalk: init(), substitute: init(), lms: init(), sms: init(), mms: init(), other: init(),
+    alimtalk: init(), substitute_lms: init(), substitute_sms: init(), lms: init(), sms: init(), mms: init(), other: init(),
   };
   for (const r of rows) {
     const ch = classifyMsgChannel(r.msg_type, r.k_oriseq);

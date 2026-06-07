@@ -4075,7 +4075,7 @@ const handleApproveRequest = async (id: string) => {
                         {c.created_at ? formatDateTimeShort(c.created_at) : '-'}
                       </td>
                       <td className="px-3 py-3 text-center text-gray-500 text-xs whitespace-nowrap">
-                        {c.last_sent_at ? formatDateTimeShort(c.last_sent_at) : c.scheduled_at ? formatDateTimeShort(c.scheduled_at) : '-'}
+                        {c.last_sent_at ? formatDateTimeShort(c.last_sent_at) : c.sent_at ? formatDateTimeShort(c.sent_at) : c.scheduled_at ? formatDateTimeShort(c.scheduled_at) : '-'}
                       </td>
                       <td className="px-3 py-3 text-center">
                         <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${

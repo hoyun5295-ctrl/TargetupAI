@@ -794,12 +794,12 @@ router.get('/campaigns/scheduled', authenticate, requireSuperAdmin, async (req: 
       paramIdx++;
     }
     if (startDate) {
-      where += ` AND COALESCE(c.sent_at, c.scheduled_at, c.created_at) >= $${paramIdx}::date`;
+      where += ` AND COALESCE(c.sent_at, c.scheduled_at) >= $${paramIdx}::date`;
       params.push(startDate);
       paramIdx++;
     }
     if (endDate) {
-      where += ` AND COALESCE(c.sent_at, c.scheduled_at, c.created_at) < ($${paramIdx}::date + INTERVAL '1 day')`;
+      where += ` AND COALESCE(c.sent_at, c.scheduled_at) < ($${paramIdx}::date + INTERVAL '1 day')`;
       params.push(endDate);
       paramIdx++;
     }
@@ -1653,12 +1653,12 @@ router.get('/campaigns/all', authenticate, requireSuperAdmin, async (req: Reques
       paramIdx++;
     }
     if (startDate) {
-      where += ` AND COALESCE(c.sent_at, c.scheduled_at, c.created_at) >= $${paramIdx}::date`;
+      where += ` AND COALESCE(c.sent_at, c.scheduled_at) >= $${paramIdx}::date`;
       params.push(startDate);
       paramIdx++;
     }
     if (endDate) {
-      where += ` AND COALESCE(c.sent_at, c.scheduled_at, c.created_at) < ($${paramIdx}::date + INTERVAL '1 day')`;
+      where += ` AND COALESCE(c.sent_at, c.scheduled_at) < ($${paramIdx}::date + INTERVAL '1 day')`;
       params.push(endDate);
       paramIdx++;
     }
@@ -3311,13 +3311,17 @@ router.get('/stats/export', authenticate, requireSuperAdmin, async (req: Request
       if (c.send_channel === 'alimtalk') {
         const split = exportSplitMap.get(c.id);
         const a = split?.alimtalk ?? { total: 0, success: 0, fail: 0, pending: 0 };
-        const s = split?.substitute ?? { total: 0, success: 0, fail: 0, pending: 0 };
+        const sLms = split?.substitute_lms ?? { total: 0, success: 0, fail: 0, pending: 0 };
+        const sSms = split?.substitute_sms ?? { total: 0, success: 0, fail: 0, pending: 0 };
         // 알림톡 행 — SMS 큐 K + 카카오 IMC 합산(이 운영은 IMC 0이라 kakao=0). 대상건수는 여기에 귀속.
         addExportBucket(c, 'alimtalk', '알림톡', Number(c.target_count || 0),
           a.total + kakao.total, a.success + kakao.success, a.fail + kakao.fail, a.pending + kakao.pending);
-        // 알림톡대체발송 행 — 카카오 실패 후 LMS 대체분만(0이면 행 생략, 대상건수 중복 합산 방지 0).
-        if (s.total > 0) {
-          addExportBucket(c, 'substitute', '알림톡대체발송', 0, s.total, s.success, s.fail, s.pending);
+        // 알림톡대체발송 — 카카오 실패 후 LMS/SMS 대체분 각각(0이면 행 생략, 대상건수 중복 방지 0). 정산 단가 구분용.
+        if (sLms.total > 0) {
+          addExportBucket(c, 'substitute_lms', '알림톡대체발송(LMS)', 0, sLms.total, sLms.success, sLms.fail, sLms.pending);
+        }
+        if (sSms.total > 0) {
+          addExportBucket(c, 'substitute_sms', '알림톡대체발송(SMS)', 0, sSms.total, sSms.success, sSms.fail, sSms.pending);
         }
       } else {
         const counts = exportResultMap.get(c.id) || { sent: 0, success: 0, fail: 0 };
