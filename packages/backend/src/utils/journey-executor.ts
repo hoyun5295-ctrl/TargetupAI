@@ -32,6 +32,7 @@ import {
   bulkInsertSmsQueue,
   insertAlimtalkQueue,
 } from './sms-queue';
+import { convertButtonsToQTmsg } from './alimtalk-button';
 import {
   listJourneyStepVariants,
   selectJourneyStepVariant,
@@ -693,7 +694,7 @@ async function processExecution(exec: ExecutionRow): Promise<StepOutcome> {
 
     if (isKakao && kakaoTemplateRow) {
       // 알림톡 영역 — insertAlimtalkQueue 사용. buttons → buttonJson 변환.
-      const buttonJson = convertButtonsToQTmsgInline(kakaoTemplateRow.buttons || []);
+      const buttonJson = convertButtonsToQTmsg(kakaoTemplateRow.buttons || []);
       await insertAlimtalkQueue(
         tables,
         [{
@@ -1168,35 +1169,6 @@ function replaceAlimtalkVars(
     out = out.replace(new RegExp(escapedKey, 'g'), replacement);
   });
   return out;
-}
-
-/**
- * 알림톡 버튼 JSON 변환 (kakao_templates.buttons → QTmsg k_button_json 형식).
- * 입력: [{ name, type, url1, url2 }, ...] (또는 buttonName/buttonType/buttonUrlMobile/buttonUrlPc)
- * 출력: {"name1":"...","type1":"2","url1_1":"...","url1_2":"...","name2":...}  (최대 5개)
- */
-function convertButtonsToQTmsgInline(buttons: any[]): string | null {
-  if (!Array.isArray(buttons) || buttons.length === 0) return null;
-  const TYPE_MAP: Record<string, string> = {
-    DS: '1',       // 배송조회
-    WL: '2',       // 웹링크
-    AL: '3',       // 앱링크
-    BK: '4',       // 봇키워드
-    MD: '5',       // 메시지전달
-    AC: '6',       // 채널추가
-    BC: '4',       // 봇전환
-    BF: '4',
-    PD: '2',
-  };
-  const out: Record<string, string> = {};
-  buttons.slice(0, 5).forEach((b, i) => {
-    const n = i + 1;
-    out[`name${n}`] = b.name || b.buttonName || b.label || `버튼${n}`;
-    out[`type${n}`] = TYPE_MAP[b.type || b.buttonType] || '2';
-    out[`url${n}_1`] = b.url1 || b.urlMobile || b.buttonUrlMobile || b.url || '';
-    out[`url${n}_2`] = b.url2 || b.urlPc || b.buttonUrlPc || '';
-  });
-  return JSON.stringify(out);
 }
 
 /**

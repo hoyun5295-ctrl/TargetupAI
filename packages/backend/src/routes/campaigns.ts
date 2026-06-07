@@ -11,6 +11,7 @@ import { DEFAULT_COSTS, redis, CACHE_TTL, BATCH_SIZES, SEND_HOURS } from '../con
 import { isValidSmsTable } from '../utils/sms-table-validator';
 import { normalizePhone } from '../utils/normalize-phone';
 import { isValidCustomFieldKey } from '../utils/safe-field-name';
+import { convertButtonsToQTmsg } from '../utils/alimtalk-button';
 import { getStoreScope } from '../utils/store-scope';
 import { CAMPAIGN_OPT080_SELECT_EXPR, CAMPAIGN_OPT080_LEFT_JOIN } from '../utils/unsubscribe-helper';
 // ★ 메시징 컨트롤타워 import
@@ -1345,17 +1346,23 @@ router.post('/direct-send/commit', async (req: Request, res: Response) => {
     }
     let alimtalkEtcJson: string | null = null;
     let alimtalkTemplateUuid: string | null = null;  // ★ #4-a (2026-06-01): 결과 조회용 campaigns.kakao_template_id FK (results.ts:560 JOIN)
+    let alimtalkButtonJsonResolved: string | null = alimtalkButtonJson || null;  // ★ 버그1: 템플릿 buttons로 보강(아래)
     if (isAlimtalkSend) {
       if (!alimtalkTemplateCode) return res.status(400).json({ success: false, error: '알림톡 템플릿 코드가 필요합니다' });
       const gate = await query(
-        `SELECT t.id AS tid, t.status AS tstatus, t.content AS tcontent, p.approval_status, p.profile_key FROM kakao_templates t JOIN kakao_sender_profiles p ON p.id = t.profile_id WHERE t.company_id = $1 AND t.template_code = $2 LIMIT 1`,
+        `SELECT t.id AS tid, t.status AS tstatus, t.content AS tcontent, t.buttons AS tbuttons, t.emphasize_title AS temphasize_title, p.approval_status, p.profile_key FROM kakao_templates t JOIN kakao_sender_profiles p ON p.id = t.profile_id WHERE t.company_id = $1 AND t.template_code = $2 LIMIT 1`,
         [companyId, alimtalkTemplateCode]
       );
       if (gate.rows.length === 0) return res.status(404).json({ success: false, error: '템플릿을 찾을 수 없습니다' });
       const g = gate.rows[0];
       if (!['APPROVED', 'APR', 'A'].includes(String(g.tstatus).toUpperCase())) return res.status(400).json({ success: false, error: '승인 완료된 템플릿만 발송할 수 있습니다' });
       if (g.approval_status !== 'APPROVED') return res.status(400).json({ success: false, error: '승인 완료된 발신프로필만 사용할 수 있습니다' });
-      if (g.profile_key) alimtalkEtcJson = JSON.stringify({ senderkey: g.profile_key });
+      // ★ 버그1: k_etc_json = senderkey + 강조표기 title / k_button_json = 템플릿 buttons(프론트 전송은 폴백)
+      const etcObjCommit: Record<string, string> = {};
+      if (g.profile_key) etcObjCommit.senderkey = g.profile_key;
+      if (g.temphasize_title) etcObjCommit.title = String(g.temphasize_title);
+      alimtalkEtcJson = Object.keys(etcObjCommit).length > 0 ? JSON.stringify(etcObjCommit) : null;
+      alimtalkButtonJsonResolved = convertButtonsToQTmsg(g.tbuttons) || alimtalkButtonJson || null;
       alimtalkTemplateUuid = g.tid || null;  // ★ #4-a: 검증 통과한 템플릿 id 보관 → INSERT 저장
       // ★ #3-2 (2026-06-01): 변수 미지정 발송 차단 (백엔드 이중 안전망 — 프론트 우회 대비)
       const commitUnfilled = findUnfilledAlimtalkVars(g.tcontent, alimtalkVariableMap);
@@ -1382,7 +1389,7 @@ router.post('/direct-send/commit', async (req: Request, res: Response) => {
         scheduled, scheduledAt, splitEnabled, splitCount, useIndividualCallback, individualCallbackColumn, mmsImagePaths,
         dedupEnabled, unsubFilterEnabled,
         kakaoBubbleType, kakaoSenderKey, kakaoTargeting, kakaoAttachmentJson, kakaoCarouselJson, kakaoResendType,
-        alimtalkTemplateCode, alimtalkVariableMap, alimtalkButtonJson, alimtalkNextType, alimtalkNextContents, alimtalkNextSubject,
+        alimtalkTemplateCode, alimtalkVariableMap, alimtalkButtonJson: alimtalkButtonJsonResolved, alimtalkNextType, alimtalkNextContents, alimtalkNextSubject,
         alimtalkEtcJson, alimtalkTemplateUuid,
       }, { companyId, userId });
 
@@ -1932,6 +1939,8 @@ router.post('/direct-send', async (req: Request, res: Response) => {
       const gateCheck = await query(
         `SELECT t.id AS tid,
                 t.status AS tstatus,
+                t.buttons AS tbuttons,
+                t.emphasize_title AS temphasize_title,
                 p.id AS pid,
                 p.approval_status,
                 p.profile_key
@@ -1964,9 +1973,11 @@ router.post('/direct-send', async (req: Request, res: Response) => {
         }
       }
 
-      // ★ D130: k_etc_json 빌드 — senderkey(발신프로필 키) + 강조 타이틀 등
+      // ★ D130: k_etc_json 빌드 — senderkey(발신프로필 키) + 강조 타이틀
       const etcObj: Record<string, string> = {};
       if (gate.profile_key) etcObj.senderkey = gate.profile_key;
+      // ★ 버그1 fix: 강조표기형 템플릿의 k_etc_json title 누락 → 강조 유형 발송 실패. emphasize_title 주입.
+      if (gate.temphasize_title) etcObj.title = String(gate.temphasize_title);
       const etcJson = Object.keys(etcObj).length > 0 ? JSON.stringify(etcObj) : null;
 
       // ★ D130: 프론트에서 온 variableMap을 백엔드 변수 치환용 extra 인자로 변환
@@ -2020,7 +2031,8 @@ router.post('/direct-send', async (req: Request, res: Response) => {
           //   옛 D224+ fix = destructure + 검증만. 실제 QTmsg INSERT 시 titleStr 영역 누락 = title_str NULL.
           //   결과 = 알림톡 발송 실패 후 LMS 자동 대체 발송 시 = 제목 NULL = 통신사 검증 실패 = 미수신 사고.
           titleStr: (alimtalkNextType === 'L' || alimtalkNextType === 'B') ? (alimtalkNextSubject || '') : undefined,
-          buttonJson: alimtalkButtonJson || null,
+          // ★ 버그1 fix: 검수 승인 템플릿 buttons로 k_button_json 생성(QTmsg 매뉴얼 형식). 프론트 전송값은 폴백.
+          buttonJson: convertButtonsToQTmsg(gate.tbuttons) || alimtalkButtonJson || null,
           etcJson: etcJson || undefined,
           companyId,
         };

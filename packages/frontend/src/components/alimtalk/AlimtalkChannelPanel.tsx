@@ -523,12 +523,13 @@ export function convertButtonsToQTmsg(buttons: any[] | null | undefined): string
   const out: Record<string, string> = {};
   buttons.slice(0, 5).forEach((b, i) => {
     const n = i + 1;
+    // 필드명: 프론트 폼(buttonName/buttonType/buttonUrlMobile) + IMC 응답(name/linkType/linkMo/linkPc) 양쪽 호환
     out[`name${n}`] =
       b.name || b.buttonName || b.label || `버튼${n}`;
-    out[`type${n}`] = TYPE_MAP[b.type || b.buttonType] || '2';
+    out[`type${n}`] = TYPE_MAP[b.type || b.buttonType || b.linkType] || '2';
     out[`url${n}_1`] =
-      b.url1 || b.urlMobile || b.buttonUrlMobile || b.url || '';
-    out[`url${n}_2`] = b.url2 || b.urlPc || b.buttonUrlPc || '';
+      b.url1 || b.urlMobile || b.buttonUrlMobile || b.linkMo || b.url || '';
+    out[`url${n}_2`] = b.url2 || b.urlPc || b.buttonUrlPc || b.linkPc || '';
   });
   return JSON.stringify(out);
 }

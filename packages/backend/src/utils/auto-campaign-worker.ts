@@ -30,6 +30,7 @@ import { query } from '../config/database';
 import { buildFilterQueryCompat } from './customer-filter';
 import { getOpt080Number, prepareFieldMappings, prepareSendMessage } from './messageUtils';
 import { fillAlimtalkVarMap } from './alimtalk-vars';
+import { convertButtonsToQTmsg } from './alimtalk-button';
 import {
   toKoreaTimeStr, toQtmsgType,
   getCompanySmsTables, getAuthSmsTable, hasCompanyLineGroup, getNextSmsTable,
@@ -902,7 +903,7 @@ async function executeAutoCampaign(ac: any): Promise<void> {
         return;
       }
       const gate = await query(
-        `SELECT t.status AS tstatus, p.approval_status, p.profile_key
+        `SELECT t.status AS tstatus, t.buttons AS tbuttons, t.emphasize_title AS temphasize_title, p.approval_status, p.profile_key
            FROM kakao_templates t
            JOIN kakao_sender_profiles p ON p.id = t.profile_id
           WHERE t.id = $1 AND t.company_id = $2 LIMIT 1`,
@@ -918,7 +919,11 @@ async function executeAutoCampaign(ac: any): Promise<void> {
         return;
       }
       const senderKey = gate.rows[0].profile_key;
-      const etcJson = JSON.stringify({ senderkey: senderKey });
+      // ★ 버그1: k_etc_json = senderkey + 강조표기 title / k_button_json = 템플릿 buttons
+      const autoEtcObj: Record<string, string> = { senderkey: senderKey };
+      if (gate.rows[0].temphasize_title) autoEtcObj.title = String(gate.rows[0].temphasize_title);
+      const etcJson = JSON.stringify(autoEtcObj);
+      const autoButtonJson = convertButtonsToQTmsg(gate.rows[0].tbuttons || []);
 
       const { insertAlimtalkQueue } = await import('./sms-queue');
       const alimRows = filteredCustomers.map((customer: any) => {
@@ -958,6 +963,7 @@ async function executeAutoCampaign(ac: any): Promise<void> {
           templateCode: ac.alimtalk_template_code,
           nextType: ac.alimtalk_next_type || 'L',
           nextContents: finalNextContents,
+          buttonJson: autoButtonJson || undefined,
           etcJson,
           companyId: ac.company_id,
         };
