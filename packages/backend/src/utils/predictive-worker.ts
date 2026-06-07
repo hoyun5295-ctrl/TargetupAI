@@ -79,8 +79,9 @@ async function runPredictiveBatch(): Promise<void> {
   const cost = getCreditCost('predictive-daily');  // 3
 
   try {
-    // 대상 = 연동 회사(싱크에이전트 등록 OR SDK cdp_events)만 + 예측 ON(predictive_enabled).
-    //   predictive_enabled 컬럼 ALTER 전제 — COALESCE로 미설정 시 ON 취급(배포 후 컬럼 default true).
+    // 대상 = 연동 회사(싱크/SDK) OR 예측 토글 명시 ON + 고객 보유 회사. 예측 OFF(predictive_enabled=false)는 제외.
+    //   ★ 2026-06-07: 비연동이라도 운영자가 "매일 자동 예측"을 명시 ON하고 고객이 있으면 매일 갱신(토글 의미 정합).
+    //   default(미설정 NULL)는 연동 회사만 — 명시 ON 아닌 전체 회사 매일 차감 폭주 방지.
     const companyRes = await query(
       `SELECT DISTINCT c.id
          FROM companies c
@@ -88,6 +89,7 @@ async function runPredictiveBatch(): Promise<void> {
           AND (
             EXISTS (SELECT 1 FROM sync_agents sa WHERE sa.company_id = c.id)
             OR EXISTS (SELECT 1 FROM cdp_events ce WHERE ce.company_id = c.id AND ce.source = 'custom_sdk')
+            OR (c.predictive_enabled IS TRUE AND EXISTS (SELECT 1 FROM customers cu WHERE cu.company_id = c.id))
           )
         ORDER BY c.id`
     );

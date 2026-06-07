@@ -633,7 +633,7 @@ export async function getCompanyPredictionSummary(companyId: string): Promise<Co
     const highLtvThreshold = avgLtv365d * 2;
     const highLtvRes = await query(
       `SELECT COUNT(*)::int AS cnt FROM cdp_customer_predictions
-       WHERE company_id = $1::uuid AND ltv_365d > $2`,
+       WHERE company_id = $1::uuid AND ltv_365d > $2::numeric`,
       [companyId, highLtvThreshold]
     );
     const highLtvCount = Number(highLtvRes.rows[0]?.cnt) || 0;
@@ -646,7 +646,7 @@ export async function getCompanyPredictionSummary(companyId: string): Promise<Co
              THEN EXTRACT(EPOCH FROM (NOW() - c.recent_purchase_date)) / 86400 END) AS churn_avg_inactive_days,
          AVG(CASE WHEN p.purchase_likelihood > 0.6
              THEN p.next_purchase_days END) AS purchase_avg_next_days,
-         COALESCE(SUM(CASE WHEN p.ltv_365d > $2 THEN p.ltv_365d ELSE 0 END), 0) AS vip_sum_ltv,
+         COALESCE(SUM(CASE WHEN p.ltv_365d > $2::numeric THEN p.ltv_365d ELSE 0 END), 0) AS vip_sum_ltv,
          COUNT(*) FILTER (WHERE COALESCE(c.purchase_count, 0) = 0) AS first_purchase_count,
          COUNT(*) FILTER (WHERE p.click_score > 0.5) AS engagement_count,
          AVG(CASE WHEN p.click_score > 0.5 THEN p.click_score END) AS engagement_avg_click,

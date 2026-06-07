@@ -101,6 +101,7 @@ import { buildJourneyStats, listJourneyEnteredCustomers } from '../utils/journey
 // ★ D197 (2026-05-22) Phase B-2: Predictive Suite — 회사 예측 점수 분포 + Top 위험/구매 가능성 + 모델 정확도
 // ★ D210+ Phase 3 (2026-05-23 Harold 명시): listCompanyPredictionCustomers — 회사 전체 customer 영역 페이지네이션 + 검색 + 필터 + 정렬
 import {
+  computeCompanyPredictionsBatch,
   getCompanyPredictionDistribution,
   getCompanyPredictionSummary,
   listCompanyPredictionCustomers,
@@ -3442,7 +3443,7 @@ router.post('/operator/predictive/quick-action', async (req: Request, res: Respo
       const avgLtv = Number(avgRes.rows[0]?.avg_ltv) || 0;
       const r = await query(
         `SELECT COUNT(*)::int AS cnt FROM cdp_customer_predictions
-         WHERE company_id = $1::uuid AND ltv_365d > $2`,
+         WHERE company_id = $1::uuid AND ltv_365d > $2::numeric`,
         [companyId, avgLtv * 2]
       );
       targetCount = Number(r.rows[0]?.cnt) || 0;
@@ -3498,6 +3499,34 @@ router.post('/operator/predictive/quick-action', async (req: Request, res: Respo
   } catch (err: any) {
     console.error('[Predictive quick-action] 오류:', err);
     return res.status(500).json({ success: false, error: err?.message || '1-click 액션 처리 오류' });
+  }
+});
+
+// POST /api/ai/operator/predictive/recompute — 지금 전체 재계산 (연동 무관·회사 전체 즉시)
+//   매일 워커는 연동 회사(싱크/SDK)만 돌려 비연동 회사는 갱신이 안 된다. 운영자가 직접 전체 갱신.
+//   크레딧 = 매일 자동과 동일 멱등키(회사+날짜) — 그날 이미 차감됐으면 0.
+router.post('/operator/predictive/recompute', async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+    const planCtx = await loadPlanContext(companyId);
+    if (!planCtx) return res.status(404).json({ success: false, error: '회사 정보를 찾을 수 없습니다.' });
+    if (!isAiOperatorAllowed(planCtx, req.user)) {
+      return res.status(403).json({ success: false, error: 'AI Operator 진입 권한이 없습니다.', code: 'AI_OPERATOR_GATED' });
+    }
+    const result = await computeCompanyPredictionsBatch(companyId);
+    const cost = getCreditCost('predictive-daily');
+    await deductCreditSafe({
+      companyId,
+      cost,
+      source: 'predictive-daily',
+      createdBy: req.user?.userId || null,
+      idempotencyKey: `predictive-daily:${companyId}:${kstDateTag(new Date())}`,
+    });
+    return res.json({ success: true, ...result });
+  } catch (err: any) {
+    console.error('[Predictive recompute] 오류:', err);
+    return res.status(500).json({ success: false, error: err?.message || '전체 재계산 오류' });
   }
 });
 

@@ -16,7 +16,7 @@ import {
 import {
   ArrowLeft, Brain, MousePointerClick, AlertTriangle, ShoppingCart, Loader2,
   TrendingUp, Users, Sparkles, Search, Filter, ArrowUpDown,
-  ChevronLeft, ChevronRight, Database, Info, X, Crown, ArrowRight, UserPlus, Repeat,
+  ChevronLeft, ChevronRight, Database, Info, X, Crown, ArrowRight, UserPlus, Repeat, RefreshCw,
 } from 'lucide-react';
 
 interface HistogramBin {
@@ -234,6 +234,7 @@ export default function PredictiveDashboardPage() {
   const [showCustomersModal, setShowCustomersModal] = useState(false);
   const [segmentReason, setSegmentReason] = useState<string | null>(null);
   const [showDetails, setShowDetails] = useState(false);  // 분포·정확도 모달
+  const [recomputing, setRecomputing] = useState(false);  // 지금 전체 재계산 진행
 
   // 매일 자동 예측 ON/OFF
   const [predictiveEnabled, setPredictiveEnabled] = useState<boolean | null>(null);
@@ -435,6 +436,20 @@ export default function PredictiveDashboardPage() {
     }
   };
 
+  // 지금 전체 재계산 (연동 무관·회사 전체) — 매일 워커가 비연동 회사를 skip하는 문제 우회
+  const handleRecompute = async () => {
+    if (recomputing) return;
+    setRecomputing(true);
+    try {
+      const res = await fetch('/api/ai/operator/predictive/recompute', {
+        method: 'POST', headers: { Authorization: `Bearer ${token()}` },
+      });
+      const d = await res.json();
+      if (d.success) { window.location.reload(); return; }
+    } catch { /* 재계산 실패 — 상태 복구 */ }
+    setRecomputing(false);
+  };
+
   if (loading) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-violet-900 via-fuchsia-900 to-violet-900 text-white flex items-center justify-center">
@@ -476,6 +491,15 @@ export default function PredictiveDashboardPage() {
             </h1>
             <p className="text-xs text-white/50 mt-0.5 truncate">위험·기회 고객을 AI가 먼저 찾아 제안합니다</p>
           </div>
+          <button
+            onClick={handleRecompute}
+            disabled={recomputing}
+            className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 text-xs text-white/80 disabled:opacity-50 transition-colors"
+            title="회사 전체 고객을 지금 다시 계산합니다 (하루 1회 3크레딧)"
+          >
+            {recomputing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
+            <span className="hidden sm:inline">{recomputing ? '계산 중' : '지금 재계산'}</span>
+          </button>
           {!settingsMigrationPending && predictiveEnabled !== null && (
             <div className="flex flex-col items-end gap-1 shrink-0">
               <button onClick={togglePredictive} disabled={settingsSaving} className="flex items-center gap-2 disabled:opacity-50" title="매일 자동 예측 ON/OFF">
