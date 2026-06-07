@@ -31,6 +31,7 @@ import { buildFilterQueryCompat } from './customer-filter';
 import { getOpt080Number, prepareFieldMappings, prepareSendMessage } from './messageUtils';
 import { fillAlimtalkVarMap } from './alimtalk-vars';
 import { convertButtonsToQTmsg } from './alimtalk-button';
+import { buildAlimtalkEtcJson } from './alimtalk-emphasize';
 import {
   toKoreaTimeStr, toQtmsgType,
   getCompanySmsTables, getAuthSmsTable, hasCompanyLineGroup, getNextSmsTable,
@@ -919,10 +920,8 @@ async function executeAutoCampaign(ac: any): Promise<void> {
         return;
       }
       const senderKey = gate.rows[0].profile_key;
-      // ★ 버그1: k_etc_json = senderkey + 강조표기 title / k_button_json = 템플릿 buttons
-      const autoEtcObj: Record<string, string> = { senderkey: senderKey };
-      if (gate.rows[0].temphasize_title) autoEtcObj.title = String(gate.rows[0].temphasize_title);
-      const etcJson = JSON.stringify(autoEtcObj);
+      // ★ 버그1: k_etc_json = senderkey + 강조표기 title(#{변수} row별 치환) / k_button_json = 템플릿 buttons
+      const emphasizeTitleRaw = gate.rows[0].temphasize_title || null;
       const autoButtonJson = convertButtonsToQTmsg(gate.rows[0].tbuttons || []);
 
       const { insertAlimtalkQueue } = await import('./sms-queue');
@@ -964,7 +963,15 @@ async function executeAutoCampaign(ac: any): Promise<void> {
           nextType: ac.alimtalk_next_type || 'L',
           nextContents: finalNextContents,
           buttonJson: autoButtonJson || undefined,
-          etcJson,
+          // ★ 버그1: senderkey + 강조표기 title(#{변수} 본문과 동일 치환) → row별 k_etc_json.
+          etcJson: buildAlimtalkEtcJson({
+            senderKey,
+            emphasizeTitle: emphasizeTitleRaw,
+            substitute: (raw) => {
+              const { message: base } = prepareSendMessage(raw, customer, fieldMappings, { msgType: 'LMS', isAd: false, opt080Number: '', subject: '' });
+              return fillAlimtalkVarMap(base, ac.alimtalk_variable_map || {}, customer);
+            },
+          }),
           companyId: ac.company_id,
         };
       });

@@ -33,6 +33,7 @@ import {
   insertAlimtalkQueue,
 } from './sms-queue';
 import { convertButtonsToQTmsg } from './alimtalk-button';
+import { buildAlimtalkEtcJson } from './alimtalk-emphasize';
 import {
   listJourneyStepVariants,
   selectJourneyStepVariant,
@@ -469,7 +470,7 @@ async function processExecution(exec: ExecutionRow): Promise<StepOutcome> {
 
   let message: string;
   let subject: string;
-  let kakaoTemplateRow: { id: string; template_code: string; content: string; buttons: any[]; status: string } | null = null;
+  let kakaoTemplateRow: { id: string; template_code: string; content: string; buttons: any[]; status: string; emphasize_title?: string | null; profile_key?: string | null } | null = null;
 
   if (isKakao) {
     // ★ D188 Phase 2-B-2 (2026-05-21): 알림톡 영역 — kakao_templates 조회 + alimtalk_variable_map 치환.
@@ -479,8 +480,10 @@ async function processExecution(exec: ExecutionRow): Promise<StepOutcome> {
       return 'failed';
     }
     const tplRes = await query(
-      `SELECT id, template_code, content, buttons, status
-       FROM kakao_templates WHERE template_code = $1 AND company_id = $2::uuid LIMIT 1`,
+      `SELECT t.id, t.template_code, t.content, t.buttons, t.status, t.emphasize_title, p.profile_key
+         FROM kakao_templates t
+         LEFT JOIN kakao_sender_profiles p ON p.id = t.profile_id
+        WHERE t.template_code = $1 AND t.company_id = $2::uuid LIMIT 1`,
       [step.alimtalk_template_code, exec.company_id]
     );
     if (tplRes.rows.length === 0) {
@@ -709,7 +712,12 @@ async function processExecution(exec: ExecutionRow): Promise<StepOutcome> {
             ? replaceAlimtalkVars(step.alimtalk_next_contents, customer as Record<string, any>, step.alimtalk_variable_map || {})
             : undefined,
           buttonJson: buttonJson || undefined,
-          etcJson: undefined,
+          // ★ 버그1: senderkey + 강조표기형 emphasize_title(본문과 동일 치환) → k_etc_json (raw #{변수} 발송 시 카카오 반려 차단). 직접/자동과 동일 형태.
+          etcJson: buildAlimtalkEtcJson({
+            senderKey: kakaoTemplateRow.profile_key,
+            emphasizeTitle: kakaoTemplateRow.emphasize_title,
+            substitute: (raw) => replaceAlimtalkVars(raw, customer as Record<string, any>, step.alimtalk_variable_map || {}),
+          }),
           companyId: exec.company_id,
         }],
         campaignId,  // ★ Phase 5: app_etc1 = 공유 campaignId (결과 상세 app_etc1=campaignId 검색 일치)

@@ -107,13 +107,14 @@
 
 ---
 
-### 🟢 2026-06-07 (최신) — 발송 버그 3건 리포트 (조사 완료, 수정은 다음 세션)
-> **① 알림톡 버튼/유형 발송 실패(게이트웨이 btnJson 빈값) ② 발송내역 검색이 발송일 아닌 등록일 섞임 + 즉시발송 발송일시 − ③ 정산 통계 대체발송 SMS/LMS 미구분. 원인 grep 확정 + 버그리포팅 .md 작성. 다음 세션 = 이 .md로 수정.**
-> - 리포트 = `docs/superpowers/handoffs/2026-06-07-send-bugs-report.md` (버그별 증상·원인 라인·수정 방향·1차 확인·주의).
-> - 버그1: `campaigns.ts:2023` buttonJson=alimtalkButtonJson(req.body)||null → 프론트 미전송 시 btnJson[]. kakao_templates 버튼=represent_link/item_*(jsonb)라 백엔드 조회·변환 필요.
-> - 버그2: 검색 `admin.ts:797`·`results.ts` COALESCE(sent_at,scheduled_at,created_at)의 created_at fallback + admin 표시 scheduled_at만(즉시발송 −). sent_at은 `campaign-lifecycle:321`서 채워짐. fix=COALESCE(sent_at,scheduled_at) 통일.
-> - 버그3: `sms-result-map:215` classifyMsgChannel substitute(L+oriseq) SMS/LMS 미구분, export `admin.ts:3320` 라벨 단일. fix=substitute_sms/lms 세분화 + TDD.
-> - 미배포 자율예측(6종·VIP numeric·재계산 버튼·worker 조건)은 별도.
+### 🟢 2026-06-07 (최신) — 발송 버그 3건 수정 (버그2·3 완료 / 버그1 부분 · 전부 미배포)
+> **① 알림톡 버튼/강조 ② 발송내역 발송일 검색기준 ③ 대체발송 SMS/LMS 정산구분. 버그2·3 코드 완료, 버그1 버튼 5경로+직접발송 강조 완료·나머지 경로 강조 title+채널추가형 buttons=0 조사 남음. 전부 미배포. 다음 세션 = 리포트 .md로 이어서.**
+> - 리포트(현 상태+남은 것+진입 명령어) = `docs/superpowers/handoffs/2026-06-07-send-bugs-report.md`.
+> - 검증: backend tsc OK · frontend tsc OK · TDD(alimtalk-button 9 · sms-channel-split 13).
+> - 버그2: 검색 COALESCE(sent_at,scheduled_at) created_at 제거(admin 4곳·results 3곳)+표시 sent_at(AdminDashboard 4078·results 466). 완료.
+> - 버그3: sms-result-map classifyMsgChannel substitute_lms/sms 세분화+export 2행+대체필터 L/S. 완료.
+> - 버그1: 신규 CT alimtalk-button(IMC linkType/linkMo+프론트 형식)+버튼 5경로(직접/staging/여정/자동)+직접발송 강조 title 변수치환 완료. **남은것=나머지 3경로(staging-processor/여정/자동) 강조 title 치환(공통CT 권장)+채널추가형 80149 btn_cnt 0 조사**. SQL=buttons 다수 존재(btn_cnt 1=발송코드 작동), 79738 강조표기(버튼없음=etcJson title 원인).
+> - 미배포 자율예측(6종·VIP numeric·재계산 버튼·worker 조건)도 별도 미배포.
 
 ---
 

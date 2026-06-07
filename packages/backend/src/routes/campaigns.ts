@@ -12,6 +12,7 @@ import { isValidSmsTable } from '../utils/sms-table-validator';
 import { normalizePhone } from '../utils/normalize-phone';
 import { isValidCustomFieldKey } from '../utils/safe-field-name';
 import { convertButtonsToQTmsg } from '../utils/alimtalk-button';
+import { buildAlimtalkEtcJson } from '../utils/alimtalk-emphasize';
 import { getStoreScope } from '../utils/store-scope';
 import { CAMPAIGN_OPT080_SELECT_EXPR, CAMPAIGN_OPT080_LEFT_JOIN } from '../utils/unsubscribe-helper';
 // ★ 메시징 컨트롤타워 import
@@ -1357,11 +1358,9 @@ router.post('/direct-send/commit', async (req: Request, res: Response) => {
       const g = gate.rows[0];
       if (!['APPROVED', 'APR', 'A'].includes(String(g.tstatus).toUpperCase())) return res.status(400).json({ success: false, error: '승인 완료된 템플릿만 발송할 수 있습니다' });
       if (g.approval_status !== 'APPROVED') return res.status(400).json({ success: false, error: '승인 완료된 발신프로필만 사용할 수 있습니다' });
-      // ★ 버그1: k_etc_json = senderkey + 강조표기 title / k_button_json = 템플릿 buttons(프론트 전송은 폴백)
-      const etcObjCommit: Record<string, string> = {};
-      if (g.profile_key) etcObjCommit.senderkey = g.profile_key;
-      if (g.temphasize_title) etcObjCommit.title = String(g.temphasize_title);
-      alimtalkEtcJson = Object.keys(etcObjCommit).length > 0 ? JSON.stringify(etcObjCommit) : null;
+      // ★ 버그1: k_etc_json = senderkey + 강조표기 title(raw) / k_button_json = 템플릿 buttons(프론트 전송은 폴백)
+      //   title은 #{변수} 포함 가능 — staging worker(direct-send-processor)가 수신자 row별로 치환해 재생성한다.
+      alimtalkEtcJson = buildAlimtalkEtcJson({ senderKey: g.profile_key, emphasizeTitle: g.temphasize_title }) ?? null;
       alimtalkButtonJsonResolved = convertButtonsToQTmsg(g.tbuttons) || alimtalkButtonJson || null;
       alimtalkTemplateUuid = g.tid || null;  // ★ #4-a: 검증 통과한 템플릿 id 보관 → INSERT 저장
       // ★ #3-2 (2026-06-01): 변수 미지정 발송 차단 (백엔드 이중 안전망 — 프론트 우회 대비)
@@ -1973,12 +1972,7 @@ router.post('/direct-send', async (req: Request, res: Response) => {
         }
       }
 
-      // ★ D130: k_etc_json 빌드 — senderkey(발신프로필 키) + 강조 타이틀
-      const etcObj: Record<string, string> = {};
-      if (gate.profile_key) etcObj.senderkey = gate.profile_key;
-      // ★ 버그1 fix: 강조표기형 템플릿의 k_etc_json title 누락 → 강조 유형 발송 실패. emphasize_title 주입.
-      if (gate.temphasize_title) etcObj.title = String(gate.temphasize_title);
-      const etcJson = Object.keys(etcObj).length > 0 ? JSON.stringify(etcObj) : null;
+      // ★ D130/버그1: k_etc_json(senderkey + 강조표기 title)은 수신자 row별로 생성 — buildAlimtalkEtcJson CT(아래).
 
       // ★ D130: 프론트에서 온 variableMap을 백엔드 변수 치환용 extra 인자로 변환
       //   "@@fieldKey@@" 형태는 recipient/dbCustomer에서 자동 치환, 그 외는 직접값
@@ -2020,6 +2014,21 @@ router.post('/direct-send', async (req: Request, res: Response) => {
           }, { skipNumberFormatting: true });
           finalNextContents = fillAlimtalkVarMap(ncBase, alimtalkVariableMap, dbAlimCustomer, recipient);
         }
+        // ★ 버그1: senderkey + 강조표기 title(#{변수} 본문과 동일 치환) → row별 k_etc_json (raw 발송 시 카카오 반려 차단)
+        const rowEtcJson = buildAlimtalkEtcJson({
+          senderKey: gate.profile_key,
+          emphasizeTitle: gate.temphasize_title,
+          substitute: (raw) => {
+            let t = replaceVariables(raw, dbAlimCustomer, directFieldMappings, {
+              name: recipient.name, extra1: recipient.extra1, extra2: recipient.extra2,
+              extra3: recipient.extra3, callback: recipient.callback,
+            }, { skipNumberFormatting: true });
+            for (const [k, v] of Object.entries(extraVars)) {
+              t = t.replace(new RegExp(`#\\{${k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\}`, 'g'), v);
+            }
+            return t;
+          },
+        });
         return {
           phone: normalizePhone(recipient.phone),
           callback: normalizePhone(callback),
@@ -2033,7 +2042,7 @@ router.post('/direct-send', async (req: Request, res: Response) => {
           titleStr: (alimtalkNextType === 'L' || alimtalkNextType === 'B') ? (alimtalkNextSubject || '') : undefined,
           // ★ 버그1 fix: 검수 승인 템플릿 buttons로 k_button_json 생성(QTmsg 매뉴얼 형식). 프론트 전송값은 폴백.
           buttonJson: convertButtonsToQTmsg(gate.tbuttons) || alimtalkButtonJson || null,
-          etcJson: etcJson || undefined,
+          etcJson: rowEtcJson,
           companyId,
         };
       });

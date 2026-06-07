@@ -15,6 +15,7 @@ import { fillAlimtalkVarMap } from './alimtalk-vars';
 import { bulkInsertSmsQueue, insertKakaoQueue, insertAlimtalkQueue, toQtmsgType } from './sms-queue';
 import { normalizeMmsImagePaths } from './mms-image-util';
 import { resolveCustomerCallback } from './callback-filter';
+import { buildAlimtalkEtcJson } from './alimtalk-emphasize';
 
 /** 청크 1건 수신자 — worker가 staging row + 계산된 sendTime을 채워 전달 */
 export interface ChunkRecipient {
@@ -186,6 +187,16 @@ export async function processSendChunk(p: SendChunkParams): Promise<SendChunkRes
       return out;
     };
 
+    // ★ 버그1: 공통 k_etc_json(commit) = {senderkey, 강조 title(raw)} — row별로 title #{변수}를 치환해 재생성한다.
+    let alimSenderKey: string | undefined;
+    let alimEmphasizeTitleRaw: string | undefined;
+    if (p.alimtalkEtcJson) {
+      try {
+        const parsedEtc = JSON.parse(p.alimtalkEtcJson) as { senderkey?: string; title?: string };
+        alimSenderKey = parsedEtc?.senderkey;
+        alimEmphasizeTitleRaw = parsedEtc?.title;
+      } catch { /* 형식 오류 → senderkey/title 없음 취급 */ }
+    }
     const alimtalkRows = recipients.map((recipient) => {
       const cleanPhone = normalizePhone(recipient.phone);
       const dbCustomer = custMap.get(cleanPhone) || null;
@@ -218,7 +229,15 @@ export async function processSendChunk(p: SendChunkParams): Promise<SendChunkRes
         nextContents: finalNextContents,
         titleStr: (p.alimtalkNextType === 'L' || p.alimtalkNextType === 'B') ? (p.alimtalkNextSubject || '') : undefined,
         buttonJson: p.alimtalkButtonJson || undefined,
-        etcJson: p.alimtalkEtcJson || undefined,
+        // ★ 버그1: senderkey + 강조표기 title(#{변수} 본문과 동일 치환) → row별 k_etc_json.
+        etcJson: buildAlimtalkEtcJson({
+          senderKey: alimSenderKey,
+          emphasizeTitle: alimEmphasizeTitleRaw,
+          substitute: (raw) => {
+            const base = replaceVariables(raw, dbCustomer, p.directFieldMappings, toAddressBookFields(recipient), { skipNumberFormatting: true });
+            return fillAlimtalkVarMap(base, p.alimtalkVariableMap, dbCustomer, recipient as Record<string, any>);
+          },
+        }),
         companyId: p.companyId,
       };
     });
