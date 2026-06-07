@@ -2,7 +2,7 @@
  * AI 다듬기 잠금 안내 모달 (D152+ → D219+ Phase 0 다크 톤 정정)
  *
  * FREE/STARTER 회사가 AI 다듬기 버튼 클릭 시 노출.
- * "어떤 기능인지" 가치 안내 + "베이직 요금제(35만원/월) 이상에서 이용 가능" 업그레이드 동선.
+ * "어떤 기능인지" 가치 안내 + "스타터 요금제 이상에서 이용 가능" 업그레이드 동선.
  *
  * D219+ 정정 (Harold 명시 2026-05-26):
  *   - 흰 톤 + emerald → 다크 톤 (bg-slate-900) + violet 액센트
@@ -145,10 +145,10 @@ export default function AiRefineLockedModal({ isOpen, onClose }: Props) {
           <div className="mb-5 rounded-xl border border-amber-400/40 bg-amber-500/10 px-4 py-3">
             <div className="flex items-center justify-center gap-2 text-[13px] font-semibold text-amber-200 mb-1.5">
               <Lock className="w-3.5 h-3.5" strokeWidth={2.5} />
-              <span>베이직 요금제 이상에서 이용 가능</span>
+              <span>스타터 요금제 이상에서 이용 가능</span>
             </div>
             <p className="text-[11.5px] text-amber-100/70 leading-relaxed text-center">
-              월 35만원 · 베이직 / 프로 / 비즈니스 / 엔터프라이즈 요금제에서{'\n'}
+              스타터 / 베이직 / 프로 / 비즈니스 / 엔터프라이즈 요금제에서{'\n'}
               AI 다듬기를 자유롭게 사용하실 수 있어요.
             </p>
           </div>

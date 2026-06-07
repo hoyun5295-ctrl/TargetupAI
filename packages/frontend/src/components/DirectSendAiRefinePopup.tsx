@@ -181,7 +181,7 @@ export default function DirectSendAiRefinePopup({
           <div className={`mt-3 text-[11px] text-center ${isTrialActive ? 'text-violet-300' : 'text-white/40'}`}>
             {isTrialActive
               ? '무료체험 기간 안 무제한 이용 가능'
-              : '베이직 요금제(35만원/월) 이상에서 이용 가능'}
+              : '스타터 요금제 이상에서 이용 가능'}
           </div>
 
           {/* Source caption */}

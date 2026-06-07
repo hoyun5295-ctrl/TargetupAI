@@ -2742,7 +2742,7 @@ const campaignData = {
                 <button
                   onClick={async () => {
                     if (isSubscriptionLocked) { setShowSubscriptionLock(true); return; }
-                    if (isAiMessagingLocked) { setPlanUpgradeFeature('AI Operator'); setPlanUpgradeRequired('베이직'); setShowPlanUpgradeModal(true); return; }
+                    if (isAiMessagingLocked) { setPlanUpgradeFeature('AI Operator'); setPlanUpgradeRequired('스타터'); setShowPlanUpgradeModal(true); return; }
                     // ★ D222+ Phase 1: AI Operator access 게이팅 + 진입 (기존 헤더 메뉴 흐름 정합)
                     try {
                       const t = localStorage.getItem('token');

@@ -128,12 +128,12 @@ export default function DashboardHeader({
     //   직접발송/직접타겟발송 모달 헤더 안에서 알림톡 모달 진입 (카카오 노란색 버튼). 메뉴 분리 시 사용자 혼란 차단.
     //   onAlimtalkSend prop은 호환성 위해 유지 (Dashboard에서 직접발송/타겟발송 → 알림톡 모달 진입 callback).
     // ★ D220+ Task 6+8 (2026-05-27): 고객 세그먼트 메뉴 — 자연어 AI 변환 + 발송 흐름 재활용
-    //   ai_messaging 게이팅 (BASIC+) — FREE/STARTER = 메뉴는 자물쇠 표시 + 클릭 시 가치 안내 모달
+    //   ai_messaging 게이팅 (STARTER+) — FREE = 메뉴는 자물쇠 표시 + 클릭 시 가치 안내 모달
     {
       label: '세그먼트',
       onClick: () => {
         if (aiMessagingEnabled === false) {
-          onFeatureLocked?.('고객 세그먼트', '베이직');
+          onFeatureLocked?.('고객 세그먼트', '스타터');
           return;
         }
         navigate('/segments');

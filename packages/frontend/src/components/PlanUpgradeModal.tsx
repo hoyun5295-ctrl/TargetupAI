@@ -23,7 +23,7 @@ import { Lock, Sparkles, X, ArrowRight, Check, Zap, BarChart3, Target } from 'lu
 interface PlanUpgradeModalProps {
   show: boolean;
   onClose: () => void;
-  // D53: 범용화 — 잠긴 기능명 + 필요 요금제 (기본값: AI 문구 추천 / 베이직)
+  // D53: 범용화 — 잠긴 기능명 + 필요 요금제 (기본값: AI 문구 추천 / 스타터)
   featureName?: string;
   requiredPlan?: string;
 }
@@ -83,7 +83,7 @@ export default function PlanUpgradeModal({ show, onClose, featureName, requiredP
   if (!show) return null;
 
   const displayFeature = featureName || 'AI 문구 추천';
-  const displayPlan = requiredPlan || '베이직';
+  const displayPlan = requiredPlan || '스타터';
 
   const config = FEATURE_VALUE_MAP[displayFeature] || FEATURE_VALUE_MAP['AI 문구 추천'];
   const Icon = config.icon;

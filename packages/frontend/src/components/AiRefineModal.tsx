@@ -144,7 +144,7 @@ export default function AiRefineModal({
       const data = await res.json();
       if (!res.ok) {
         if (res.status === 403) {
-          throw new Error(data?.error || 'AI 다듬기는 베이직 요금제(35만원/월) 이상에서 이용 가능합니다');
+          throw new Error(data?.error || 'AI 다듬기는 스타터 요금제 이상에서 이용 가능합니다');
         }
         throw new Error(data?.error || 'AI 다듬기에 실패했습니다');
       }

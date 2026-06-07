@@ -37,28 +37,32 @@ function logErr(tag: string, err: any) {
 export async function runTrialDowngradeJob(): Promise<{ downgraded: number }> {
   // FREE plan id 조회 (plans 캐시 대신 매번 조회 — plan_id 바뀔 위험 낮고 안전성 우선)
   const freeRes = await query(
-    `SELECT id FROM plans WHERE plan_code = 'FREE' LIMIT 1`,
+    `SELECT id, COALESCE(ai_credits_per_month, 0) AS base_credits FROM plans WHERE plan_code = 'FREE' LIMIT 1`,
   );
   if (freeRes.rows.length === 0) {
     logErr('job', new Error('FREE plan 미존재'));
     return { downgraded: 0 };
   }
   const freePlanId = freeRes.rows[0].id;
+  // ★ 체험 잔여 AI 크레딧 제거 — 강등 시 base를 FREE 월 기본분(=0)으로 리셋. purchased(구매분)는 미변경.
+  const freeBaseCredits = Number(freeRes.rows[0].base_credits) || 0;
 
   // 만료 대상 일괄 강등 (plan_code='TRIAL' + 만료됨)
   // ※ subscription_status 조건 없음 — 'trial'/'paid' 어느 쪽으로 바뀌어 있어도 강등. plan_code가 진실의 원천.
   const res = await query(
     `UPDATE companies c
-        SET plan_id             = $1,
-            subscription_status = 'trial_expired',
-            updated_at          = NOW()
+        SET plan_id                   = $1,
+            subscription_status       = 'trial_expired',
+            ai_credits_base_remaining = $2,
+            ai_credits_reset_at       = NOW(),
+            updated_at                = NOW()
        FROM plans p
       WHERE c.plan_id = p.id
         AND p.plan_code = 'TRIAL'
         AND c.trial_expires_at IS NOT NULL
         AND c.trial_expires_at < NOW()
     RETURNING c.id, c.company_name`,
-    [freePlanId],
+    [freePlanId, freeBaseCredits],
   );
 
   const rows = res.rows as Array<{ id: string; company_name: string }>;

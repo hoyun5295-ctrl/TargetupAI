@@ -222,9 +222,9 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
   const directCursorPosRef = useRef<number>(0);
 
   // ★ D152+ (PDF 0511 funnel fix): AI 인라인 다듬기 모달 토글.
-  //   BASIC(35만원/월) 이상 + TRIAL 자동. CT-17 ai_messaging_enabled 게이팅은 백엔드에서.
+  //   STARTER 이상 + TRIAL 자동. CT-17 ai_messaging_enabled 게이팅은 백엔드에서.
   const [showAiRefineModal, setShowAiRefineModal] = useState(false);
-  // ★ D152+ FREE/STARTER 잠금 사용자에게 가치 안내 + 업그레이드 동선 (어떤 기능인지 + 베이직 이상 안내)
+  // ★ D152+ FREE 잠금 사용자에게 가치 안내 + 업그레이드 동선 (어떤 기능인지 + 스타터 이상 안내)
   const [showAiRefineLockedModal, setShowAiRefineLockedModal] = useState(false);
 
   // ★ D152+ 진입 안내 팝업의 "지금 써볼게요" → CustomEvent 'focus-ai-refine-btn' → 버튼 3초 glow + focus.
@@ -924,7 +924,7 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
                     data-ai-refine-btn
                     className={`ds-btn-sec ds-t flex items-center justify-center gap-1.5 rounded-lg border-2 border-violet-200 bg-gradient-to-r from-violet-50 to-fuchsia-50 hover:from-violet-100 hover:to-fuchsia-100 hover:border-violet-300 text-violet-700 font-semibold transition-all ${aiBtnGlowing ? 'animate-pulse ring-4 ring-violet-400/60 shadow-lg shadow-violet-300/50' : ''}`}
                     onClick={() => {
-                      // ★ D152+ FREE/STARTER 잠금 시 — 기능 안내 + 베이직 이상 업그레이드 동선
+                      // ★ D152+ FREE 잠금 시 — 기능 안내 + 스타터 이상 업그레이드 동선
                       if (isAiMessagingLocked) {
                         setShowAiRefineLockedModal(true);
                         return;
@@ -1621,7 +1621,7 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
           }}
         />
 
-        {/* ★ D152+ FREE/STARTER 잠금 안내 — 기능 설명 + 베이직 이상 업그레이드 동선 */}
+        {/* ★ D152+ FREE 잠금 안내 — 기능 설명 + 스타터 이상 업그레이드 동선 */}
         <AiRefineLockedModal
           isOpen={showAiRefineLockedModal}
           onClose={() => setShowAiRefineLockedModal(false)}
