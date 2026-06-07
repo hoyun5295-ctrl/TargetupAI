@@ -456,93 +456,79 @@ export default function PredictiveDashboardPage() {
           </div>
         </div>
 
-        {/* ★ D211+ Predictive 강화 (2026-05-23 Harold 명시): 1-click 액션 3 카드 (회사 admin 활용 흐름) */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-6">
-          <QuickActionCard
+        {/* 핵심 지표 — DB 현황식 큰 카드 그리드 (이탈/구매/VIP 카드 클릭 = 캠페인) */}
+        <div className="grid grid-cols-2 lg:grid-cols-3 gap-3 mb-4">
+          <PredictiveBigCard
+            icon={<Users className="w-5 h-5" />}
+            label="전체 고객"
+            value={summary.totalCustomersInCompany.toLocaleString()}
+            unit="명"
+            bar="from-violet-500 to-fuchsia-500"
+          />
+          <PredictiveBigCard
+            icon={<Database className="w-5 h-5" />}
+            label="예측 진행"
+            value={`${(summary.predictionCoverage * 100).toFixed(0)}%`}
+            unit={`· ${summary.totalCustomersInPredictions.toLocaleString()}명`}
+            bar="from-indigo-500 to-blue-500"
+          />
+          <PredictiveBigCard
+            icon={<TrendingUp className="w-5 h-5" />}
+            label="평균 LTV (90일)"
+            value={formatWon(summary.avgLtv90d)}
+            bar="from-amber-500 to-orange-500"
+          />
+          <PredictiveBigCard
             icon={<AlertTriangle className="w-5 h-5" />}
-            title="이탈 위험 회복"
-            count={summary.highRiskCount}
-            desc="이탈 위험 70%+ 고객을 되살리는 회복 캠페인 자동 설계"
-            color="rose"
-            loading={quickActionLoading === 'churn_recovery'}
+            label="이탈 위험 고객"
+            value={summary.highRiskCount.toLocaleString()}
+            unit="명"
+            bar="from-rose-500 to-pink-500"
             onClick={() => handleQuickAction('churn_recovery')}
           />
-          <QuickActionCard
+          <PredictiveBigCard
             icon={<ShoppingCart className="w-5 h-5" />}
-            title="구매 유도"
-            count={summary.highPotentialCount}
-            desc="구매 가능성 60%+ 고객에게 보내는 추천 캠페인 자동 설계"
-            color="emerald"
-            loading={quickActionLoading === 'purchase_push'}
+            label="구매 기회 고객"
+            value={summary.highPotentialCount.toLocaleString()}
+            unit="명"
+            bar="from-emerald-500 to-teal-500"
             onClick={() => handleQuickAction('purchase_push')}
           />
-          <QuickActionCard
+          <PredictiveBigCard
             icon={<TrendingUp className="w-5 h-5" />}
-            title="VIP LTV 보존"
-            count={summary.highLtvCount}
-            desc={`평균 LTV 2배 초과 고객 — 365일 누적 ${formatWon(summary.totalProjectedLtv365d)}`}
-            color="amber"
-            loading={quickActionLoading === 'vip_engagement'}
+            label="VIP 보존 대상"
+            value={summary.highLtvCount.toLocaleString()}
+            unit="명"
+            bar="from-fuchsia-500 to-purple-500"
             onClick={() => handleQuickAction('vip_engagement')}
           />
         </div>
-
-        {/* ★ D211+ Predictive UX 간소화 (2026-05-23 Harold 명시): 요약 한 줄 + 자세히 분석 토글 */}
-        <div className="mb-6 p-4 bg-white/5 border border-white/10 rounded-xl">
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-3">
-            <SummaryMetric
-              icon={<Users className="w-3.5 h-3.5" />}
-              label="전체 고객"
-              value={summary.totalCustomersInCompany.toLocaleString()}
-              color="text-blue-300"
-            />
-            <SummaryMetric
-              icon={<TrendingUp className="w-3.5 h-3.5" />}
-              label="평균 LTV (90일)"
-              value={formatWon(summary.avgLtv90d)}
-              color="text-amber-300"
-            />
-            <SummaryMetric
-              icon={<AlertTriangle className="w-3.5 h-3.5" />}
-              label="이탈 위험 고객"
-              value={`${summary.highRiskCount.toLocaleString()}명`}
-              color="text-rose-300"
-            />
-            <SummaryMetric
-              icon={<ShoppingCart className="w-3.5 h-3.5" />}
-              label="구매 기회 고객"
-              value={`${summary.highPotentialCount.toLocaleString()}명`}
-              color="text-emerald-300"
-            />
-          </div>
+        <div className="flex justify-end mb-6">
           <button
             onClick={() => setDetailsExpanded(!detailsExpanded)}
-            className="w-full px-3 py-1.5 bg-white/5 hover:bg-white/10 rounded text-[11px] text-white/60 flex items-center justify-center gap-1.5 transition-colors"
+            className="text-xs text-white/55 hover:text-white/85 flex items-center gap-1 transition-colors"
           >
-            {detailsExpanded ? (
-              <><ChevronLeft className="w-3 h-3 rotate-90" /> 간소 보기 — 자세한 분석 숨기기</>
-            ) : (
-              <><ChevronRight className="w-3 h-3 rotate-90" /> 자세한 분석 펼치기 (분포 히스토그램 + 모델 정확도 + LTV 상세)</>
-            )}
+            {detailsExpanded ? '분포·정확도 숨기기' : '분포·정확도 상세보기'}
+            <ChevronRight className={`w-3.5 h-3.5 transition-transform ${detailsExpanded ? 'rotate-90' : ''}`} />
           </button>
         </div>
 
-        {/* ★ D211+ Predictive UX 간소화 (2026-05-23 Harold 명시): 자세히 영역 토글 안 통합 */}
+        {/* 분포·정확도 상세 모달 */}
         {detailsExpanded && (
-          <>
-            {/* 고유 지표 — 위 요약 4개와 중복되지 않는 것만 (평균값은 아래 분포 차트로 대체) */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-6">
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm" onClick={() => setDetailsExpanded(false)}>
+            <div className="bg-slate-900 border border-white/10 rounded-2xl shadow-2xl w-full max-w-4xl max-h-[85vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+              <div className="sticky top-0 bg-slate-900/95 backdrop-blur border-b border-white/10 px-5 py-4 flex items-center justify-between z-10">
+                <h2 className="text-base font-semibold text-white">분포 · 모델 정확도 상세</h2>
+                <button onClick={() => setDetailsExpanded(false)} className="p-1.5 hover:bg-white/10 rounded-lg text-white/60"><X className="w-5 h-5" /></button>
+              </div>
+              <div className="p-5">
+            {/* 고유 지표 — 위 큰 카드와 중복되지 않는 것만 */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-6">
               <Card
                 icon={<TrendingUp className="w-4 h-4" />}
                 label="전체 LTV (365일)"
                 value={formatWon(summary.totalProjectedLtv365d)}
                 color="text-emerald-300"
-              />
-              <Card
-                icon={<Database className="w-4 h-4" />}
-                label="예측 진행"
-                value={`${summary.totalCustomersInPredictions.toLocaleString()}명 (${(summary.predictionCoverage * 100).toFixed(0)}%)`}
-                color="text-indigo-300"
               />
               <Card
                 icon={<Brain className="w-4 h-4" />}
@@ -610,10 +596,12 @@ export default function PredictiveDashboardPage() {
                 </div>
               </div>
             )}
-          </>
+              </div>
+            </div>
+          </div>
         )}
 
-        {/* ★ D210+ Phase 3: 회사 전체 customer 영역 (페이지네이션 + 검색 + 필터 + 정렬) */}
+        {/* ★ D210+ Phase 3: 회사 전체 고객 (페이지네이션 + 검색 + 필터 + 정렬) */}
         <div className="bg-white/5 border border-white/10 rounded-xl overflow-hidden">
           {/* 검색/필터/정렬 영역 */}
           <div className="px-4 py-3 border-b border-white/10 flex flex-col md:flex-row md:items-center gap-3">
@@ -878,6 +866,36 @@ function PredictiveDetailModal({
         </div>
       </div>
     </div>
+  );
+}
+
+// DB 현황식 큰 지표 카드 (다크 톤 + 상단 그라데이션 바 + 큰 숫자) — 클릭 시 세부 모달
+function PredictiveBigCard({
+  icon, label, value, unit, bar, onClick,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  value: string;
+  unit?: string;
+  bar: string;
+  onClick?: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`relative text-left rounded-2xl bg-white/[0.04] border border-white/10 p-5 overflow-hidden transition-colors ${onClick ? 'hover:bg-white/[0.07] cursor-pointer' : 'cursor-default'}`}
+    >
+      <div className={`absolute top-0 left-0 right-0 h-1 bg-gradient-to-r ${bar}`} />
+      <div className="flex items-start justify-between mb-4">
+        <div className="w-11 h-11 rounded-xl bg-white/10 flex items-center justify-center text-white/80">{icon}</div>
+        <span className="text-sm text-white/55">{label}</span>
+      </div>
+      <div className="flex items-baseline gap-1">
+        <span className="text-3xl font-bold text-white tracking-tight">{value}</span>
+        {unit && <span className="text-sm text-white/45">{unit}</span>}
+      </div>
+    </button>
   );
 }
 
