@@ -530,95 +530,25 @@ export default function PredictiveDashboardPage() {
         {/* ★ D211+ Predictive UX 간소화 (2026-05-23 Harold 명시): 자세히 영역 토글 안 통합 */}
         {detailsExpanded && (
           <>
-            {/* LTV + 채널 + 시간대 4 카드 */}
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
-              <Card
-                icon={<TrendingUp className="w-4 h-4" />}
-                label="평균 LTV (90일)"
-                value={formatWon(summary.avgLtv90d)}
-                color="text-amber-300"
-                source="cdp_customer_predictions.ltv_90d"
-              />
+            {/* 고유 지표 — 위 요약 4개와 중복되지 않는 것만 (평균값은 아래 분포 차트로 대체) */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-6">
               <Card
                 icon={<TrendingUp className="w-4 h-4" />}
                 label="전체 LTV (365일)"
                 value={formatWon(summary.totalProjectedLtv365d)}
                 color="text-emerald-300"
-                source="SUM(ltv_365d)"
-              />
-              <Card
-                icon={<MousePointerClick className="w-4 h-4" />}
-                label="선호 채널 Top"
-                value={summary.channelDistribution.length > 0 ? `${summary.channelDistribution[0].channel.toUpperCase()} ${(summary.channelDistribution[0].pct * 100).toFixed(0)}%` : '-'}
-                color="text-cyan-300"
-                source="channel_preference"
-              />
-              <Card
-                icon={<Activity className="w-4 h-4" />}
-                label="최적 발송 시간대"
-                value={summary.bestHourDistribution.length > 0 ? `${summary.bestHourDistribution[0].hour}시 ${(summary.bestHourDistribution[0].pct * 100).toFixed(0)}%` : '-'}
-                color="text-violet-300"
-                source="best_hour"
-              />
-            </div>
-
-            {/* 기존8 카드 (회사 전체 / 예측 계산 / cold vs trained / 위험 / 가능성 / 평균 3건) */}
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
-              <Card
-                icon={<Users className="w-4 h-4" />}
-                label="회사 전체 고객"
-                value={summary.totalCustomersInCompany.toLocaleString()}
-                color="text-blue-300"
-                source="customers 테이블"
               />
               <Card
                 icon={<Database className="w-4 h-4" />}
-                label="예측 계산 완료"
-                value={`${summary.totalCustomersInPredictions.toLocaleString()} (${(summary.predictionCoverage * 100).toFixed(0)}%)`}
+                label="예측 진행"
+                value={`${summary.totalCustomersInPredictions.toLocaleString()}명 (${(summary.predictionCoverage * 100).toFixed(0)}%)`}
                 color="text-indigo-300"
-                source="cdp_customer_predictions 누적"
               />
               <Card
                 icon={<Brain className="w-4 h-4" />}
-                label="Cold / Trained 분포"
+                label="학습 상태 (초기 / 완료)"
                 value={`${summary.coldStartCount.toLocaleString()} / ${summary.trainedCount.toLocaleString()}`}
                 color={summary.trainedCount > 0 ? 'text-emerald-300' : 'text-amber-300'}
-                source="model_version"
-              />
-              <Card
-                icon={<AlertTriangle className="w-4 h-4" />}
-                label="이탈 위험 70%+"
-                value={summary.highRiskCount.toLocaleString()}
-                color="text-rose-300"
-                source="churn_risk > 0.7"
-              />
-              <Card
-                icon={<ShoppingCart className="w-4 h-4" />}
-                label="구매 가능성 60%+"
-                value={summary.highPotentialCount.toLocaleString()}
-                color="text-emerald-300"
-                source="purchase_likelihood > 0.6"
-              />
-              <Card
-                icon={<MousePointerClick className="w-4 h-4" />}
-                label="평균 클릭 가능성"
-                value={formatPct(summary.avgClickScore)}
-                color="text-cyan-300"
-                source={summary.isAllColdStart ? 'AVG(click_score) · 추정치' : 'AVG(click_score)'}
-              />
-              <Card
-                icon={<Activity className="w-4 h-4" />}
-                label="평균 이탈 위험"
-                value={formatPct(summary.avgChurnRisk)}
-                color="text-amber-300"
-                source={summary.isAllColdStart ? 'AVG(churn_risk) · 추정치' : 'AVG(churn_risk)'}
-              />
-              <Card
-                icon={<TrendingUp className="w-4 h-4" />}
-                label="평균 구매 가능성"
-                value={formatPct(summary.avgPurchaseLikelihood)}
-                color="text-fuchsia-300"
-                source={summary.isAllColdStart ? 'AVG(purchase_likelihood) · 추정치' : 'AVG(purchase_likelihood)'}
               />
             </div>
 
@@ -629,7 +559,6 @@ export default function PredictiveDashboardPage() {
                 icon={<MousePointerClick className="w-4 h-4 text-cyan-300" />}
                 data={distribution.histogram.clickScore}
                 color="#06b6d4"
-                source="cdp_customer_predictions.click_score (10 bin)"
               />
               <HistogramCard
                 title="이탈 위험 분포"
@@ -637,14 +566,12 @@ export default function PredictiveDashboardPage() {
                 data={distribution.histogram.churnRisk}
                 color="#f43f5e"
                 invertColor
-                source="cdp_customer_predictions.churn_risk (10 bin)"
               />
               <HistogramCard
                 title="구매 가능성 분포"
                 icon={<ShoppingCart className="w-4 h-4 text-emerald-300" />}
                 data={distribution.histogram.purchaseLikelihood}
                 color="#10b981"
-                source="cdp_customer_predictions.purchase_likelihood (10 bin)"
               />
             </div>
 
