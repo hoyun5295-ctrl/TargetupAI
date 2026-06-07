@@ -76,13 +76,13 @@ export async function explainCustomerPrediction(
   );
 
   if (r.rows.length === 0) {
-    throw new Error('고객 영역 접근 권한 없음 (회사 격리)');
+    throw new Error('고객 접근 권한 없음 (회사 격리)');
   }
 
   const row = r.rows[0];
   const factors: ExplainFactor[] = [];
 
-  // 1. Recency 영역 (마지막 활동 영역)
+  // 1. Recency (마지막 활동)
   const lastActivity = row.recent_purchase_date || row.last_click_at;
   if (lastActivity) {
     const daysSince = Math.floor((Date.now() - new Date(lastActivity).getTime()) / (1000 * 60 * 60 * 24));
@@ -92,10 +92,10 @@ export async function explainCustomerPrediction(
       impactScore: daysSince <= 30 ? 0.9 : daysSince <= 90 ? 0.5 : 0.95,
       direction: daysSince <= 30 ? 'positive' : daysSince <= 90 ? 'neutral' : 'negative',
       detail: daysSince <= 30
-        ? `최근 ${daysSince}일 안 활동 — 활성 영역`
+        ? `최근 ${daysSince}일 안에 활동 — 활성 고객`
         : daysSince <= 90
-        ? `${daysSince}일 전 마지막 활동 — 주의 영역`
-        : `${daysSince}일+ 활동 없음 — 휴면 위험 영역`,
+        ? `${daysSince}일 전 마지막 활동 — 주의`
+        : `${daysSince}일 넘게 활동 없음 — 휴면 위험`,
       sourceField: 'customers.recent_purchase_date + cdp_events.message_click',
     });
   } else {
@@ -104,12 +104,12 @@ export async function explainCustomerPrediction(
       label: '최근 활동',
       impactScore: 0.7,
       direction: 'negative',
-      detail: '활동 이력 영역 없음 — 신규 또는 휴면 영역',
+      detail: '활동 이력 없음 — 신규 또는 휴면',
       sourceField: 'customers.recent_purchase_date',
     });
   }
 
-  // 2. Click history 영역
+  // 2. Click history (메시지 클릭 이력)
   const totalClicks = Number(row.total_clicks) || 0;
   const totalSent = Number(row.total_sent) || 0;
   const clickRate = totalSent > 0 ? totalClicks / totalSent : 0;
@@ -128,12 +128,12 @@ export async function explainCustomerPrediction(
       label: '메시지 클릭 이력',
       impactScore: 0.3,
       direction: 'neutral',
-      detail: `누적 발송 ${totalSent}건 — 데이터 영역 부족 (cold start)`,
+      detail: `누적 발송 ${totalSent}건 — 데이터 부족 (cold start)`,
       sourceField: 'journey_step_logs',
     });
   }
 
-  // 3. Purchase frequency 영역
+  // 3. Purchase frequency (구매 빈도)
   const purchaseCount = Number(row.purchase_count) || 0;
   const totalAmount = Number(row.total_purchase_amount) || 0;
   if (purchaseCount > 0) {
@@ -151,12 +151,12 @@ export async function explainCustomerPrediction(
       label: '구매 빈도',
       impactScore: 0.5,
       direction: 'negative',
-      detail: '구매 이력 영역 없음 — 첫 구매 유도 영역',
+      detail: '구매 이력 없음 — 첫 구매 유도 대상',
       sourceField: 'customers.purchase_count',
     });
   }
 
-  // 4. Grade 영역
+  // 4. Grade (고객 등급)
   const grade = row.grade || '일반';
   const gradeImpact: Record<string, { score: number; dir: 'positive' | 'negative' | 'neutral' }> = {
     'VIP': { score: 0.95, dir: 'positive' },
@@ -171,29 +171,29 @@ export async function explainCustomerPrediction(
     label: '고객 등급',
     impactScore: gi.score,
     direction: gi.dir,
-    detail: `${grade} 등급 — 옛 등급별 평균 클릭률 + 평균 객단가 영역 기준`,
+    detail: `${grade} 등급 — 등급별 평균 클릭률·객단가 기준`,
     sourceField: 'customers.grade',
   });
 
-  // 5. Engagement 영역 (회사 admin 안 진정 본질)
+  // 5. Engagement (브랜드 반응)
   const engagementScore = Math.min(1, (Number(row.click_score) || 0) * 0.5 + clickRate * 0.5);
   factors.push({
     category: 'engagement',
-    label: '브랜드 engagement',
+    label: '브랜드 반응',
     impactScore: engagementScore,
     direction: engagementScore > 0.3 ? 'positive' : 'neutral',
-    detail: `클릭 점수 ${((Number(row.click_score) || 0) * 100).toFixed(0)}% · 옛 발송 영역 클릭 영역 종합`,
+    detail: `클릭 점수 ${((Number(row.click_score) || 0) * 100).toFixed(0)}% · 발송 클릭 종합`,
     sourceField: 'cdp_customer_predictions.click_score + journey_step_logs',
   });
 
-  // 6. Channel 영역 (preferred 영역 표시)
+  // 6. Channel (선호 채널)
   if (row.channel_preference) {
     factors.push({
       category: 'channel',
       label: '선호 채널',
       impactScore: 0.6,
       direction: 'positive',
-      detail: `${String(row.channel_preference).toUpperCase()} 영역 가장 많이 클릭`,
+      detail: `${String(row.channel_preference).toUpperCase()} 채널을 가장 많이 클릭`,
       sourceField: 'journey_step_logs.channel + cdp_events.message_click',
     });
   }
@@ -201,18 +201,18 @@ export async function explainCustomerPrediction(
   // 영향 점수 내림차순 정렬
   factors.sort((a, b) => b.impactScore - a.impactScore);
 
-  // 1순위 권장 영역 (자연어 템플릿)
+  // 1순위 권장 (자연어 템플릿)
   const churnRisk = Number(row.churn_risk) || 0;
   const purchaseLikelihood = Number(row.purchase_likelihood) || 0;
   let topRecommendation: string;
   if (churnRisk > 0.7) {
-    topRecommendation = `이탈 위험 영역 ${(churnRisk * 100).toFixed(0)}% — 회복 캠페인 (감성 톤 + 옛 클릭 채널 ${row.channel_preference || 'SMS'} 영역) 권장`;
+    topRecommendation = `이탈 위험 ${(churnRisk * 100).toFixed(0)}% — 회복 캠페인을 권장합니다 (감성 톤 + 자주 클릭한 ${row.channel_preference || 'SMS'} 채널)`;
   } else if (purchaseLikelihood > 0.5) {
-    topRecommendation = `구매 가능성 영역 ${(purchaseLikelihood * 100).toFixed(0)}% — 추천 상품 캠페인 ${row.next_purchase_days !== null ? `(다음 구매 예상 D+${row.next_purchase_days}일 전 발송)` : ''} 권장`;
+    topRecommendation = `구매 가능성 ${(purchaseLikelihood * 100).toFixed(0)}% — 추천 상품 캠페인을 권장합니다${row.next_purchase_days !== null ? ` (다음 구매 예상 D+${row.next_purchase_days}일 전 발송)` : ''}`;
   } else if (grade === 'VIP' || grade === 'Gold') {
-    topRecommendation = `${grade} 등급 영역 — 옛 LTV ${Math.round(Number(row.ltv_90d) || 0).toLocaleString()}원 (90일) 영역 보존 + VIP 전용 혜택 영역 권장`;
+    topRecommendation = `${grade} 등급 — 90일 LTV ${Math.round(Number(row.ltv_90d) || 0).toLocaleString()}원을 지키는 VIP 전용 혜택을 권장합니다`;
   } else {
-    topRecommendation = `${grade} 등급 영역 — 옛 클릭 이력 영역 분석 후 채널/시간대 영역 맞춤 발송 권장`;
+    topRecommendation = `${grade} 등급 — 클릭 이력을 분석해 채널·시간대를 맞춘 발송을 권장합니다`;
   }
 
   return {

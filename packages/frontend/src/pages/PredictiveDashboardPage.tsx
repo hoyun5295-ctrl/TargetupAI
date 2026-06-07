@@ -23,7 +23,7 @@ import {
 import {
   ArrowLeft, Brain, MousePointerClick, AlertTriangle, ShoppingCart, Loader2,
   TrendingUp, Activity, Users, Sparkles, Search, Filter, ArrowUpDown,
-  ChevronLeft, ChevronRight, Database, Info,
+  ChevronLeft, ChevronRight, Database, Info, X,
 } from 'lucide-react';
 
 interface HistogramBin {
@@ -329,14 +329,11 @@ export default function PredictiveDashboardPage() {
     }
   };
 
-  const toggleCustomerExpand = (customerId: string) => {
-    if (expandedCustomerId === customerId) {
-      setExpandedCustomerId(null);
-    } else {
-      setExpandedCustomerId(customerId);
-      loadExplanation(customerId);
-    }
+  const openDetail = (customerId: string) => {
+    setExpandedCustomerId(customerId);
+    loadExplanation(customerId);
   };
+  const closeDetail = () => setExpandedCustomerId(null);
 
   // ★ D211+ Predictive 강화 (2026-05-23 Harold 명시): 1-click 액션 — AI 자동 마케팅 prefill 진입
   // ★ D212+ 4번 (2026-05-23 Harold 명시): Predictive 1-click → 매일 자동 마케팅 (1회성 X — 자동 흐름)
@@ -434,33 +431,27 @@ export default function PredictiveDashboardPage() {
           )}
         </div>
 
-        {/* ★ D210+ Phase 3: cold start 신뢰도 안내 카드 (isAllColdStart 시 amber) */}
-        {summary.isAllColdStart && summary.totalCustomersInPredictions > 0 && (
-          <div className="mb-6 p-4 bg-amber-500/10 border border-amber-400/30 rounded-xl">
-            <div className="flex items-start gap-3">
-              <div className="w-10 h-10 rounded-lg bg-amber-500/20 flex items-center justify-center flex-shrink-0">
-                <Info className="w-5 h-5 text-amber-300" />
-              </div>
-              <div className="flex-1 text-sm">
-                <div className="font-semibold text-amber-200 mb-1">신뢰도 안내 — Cold start 영역</div>
-                <div className="text-amber-100/80 leading-relaxed">
-                  현재 {summary.totalCustomersInPredictions.toLocaleString()}명 모두 등급/활동 기반 추정치 (실제 발송 누적 0건).
-                  실제 발송 + 클릭 누적 시 24시간 안에 trained 모델로 자동 진화 — 정확도 시간 흐름과 함께 향상됩니다.
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* AI 자율 추천 안내 카드 */}
-        <div className="mb-4 p-4 bg-gradient-to-br from-violet-500/15 via-fuchsia-500/10 to-indigo-500/15 border border-violet-400/30 rounded-xl">
+        {/* 안내 1개로 통합 — cold start면 추정 안내(amber), 학습 후면 AI 자율 추천(violet) */}
+        <div className={`mb-6 p-4 rounded-xl border ${summary.isAllColdStart
+          ? 'bg-amber-500/10 border-amber-400/30'
+          : 'bg-gradient-to-br from-violet-500/15 via-fuchsia-500/10 to-indigo-500/15 border-violet-400/30'}`}>
           <div className="flex items-start gap-3">
-            <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-violet-400 to-fuchsia-500 flex items-center justify-center flex-shrink-0">
-              <Sparkles className="w-5 h-5 text-white" />
+            <div className={`w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0 ${summary.isAllColdStart
+              ? 'bg-amber-500/20'
+              : 'bg-gradient-to-br from-violet-400 to-fuchsia-500'}`}>
+              {summary.isAllColdStart
+                ? <Info className="w-5 h-5 text-amber-300" />
+                : <Sparkles className="w-5 h-5 text-white" />}
             </div>
-            <div className="flex-1">
-              <div className="text-sm font-medium text-violet-100 mb-1">AI 자율 추천</div>
-              <div className="text-xs text-white/80 leading-relaxed">{summary.insightText}</div>
+            <div className="flex-1 text-sm">
+              <div className={`font-semibold mb-1 ${summary.isAllColdStart ? 'text-amber-200' : 'text-violet-100'}`}>
+                {summary.isAllColdStart ? '지금은 추정값입니다 — 발송이 쌓이면 정밀해집니다' : 'AI 자율 추천'}
+              </div>
+              <div className={`leading-relaxed text-xs ${summary.isAllColdStart ? 'text-amber-100/80' : 'text-white/80'}`}>
+                {summary.isAllColdStart
+                  ? `현재 ${summary.totalCustomersInPredictions.toLocaleString()}명이 등급·활동 기반 추정치입니다(실제 발송 0건). 발송·클릭이 쌓이면 24시간 안에 실측 모델로 자동 전환되고, 이탈 위험 같은 값도 점차 정밀해집니다.`
+                  : summary.insightText}
+              </div>
             </div>
           </div>
         </div>
@@ -471,7 +462,7 @@ export default function PredictiveDashboardPage() {
             icon={<AlertTriangle className="w-5 h-5" />}
             title="이탈 위험 회복"
             count={summary.highRiskCount}
-            desc="이탈 위험 70%+ 고객 영역 회복 캠페인 자동 설계"
+            desc="이탈 위험 70%+ 고객을 되살리는 회복 캠페인 자동 설계"
             color="rose"
             loading={quickActionLoading === 'churn_recovery'}
             onClick={() => handleQuickAction('churn_recovery')}
@@ -480,7 +471,7 @@ export default function PredictiveDashboardPage() {
             icon={<ShoppingCart className="w-5 h-5" />}
             title="구매 유도"
             count={summary.highPotentialCount}
-            desc="구매 가능성 60%+ 고객 영역 추천 캠페인 자동 설계"
+            desc="구매 가능성 60%+ 고객에게 보내는 추천 캠페인 자동 설계"
             color="emerald"
             loading={quickActionLoading === 'purchase_push'}
             onClick={() => handleQuickAction('purchase_push')}
@@ -489,7 +480,7 @@ export default function PredictiveDashboardPage() {
             icon={<TrendingUp className="w-5 h-5" />}
             title="VIP LTV 보존"
             count={summary.highLtvCount}
-            desc={`평균 LTV × 2 영역 초과 고객 — 365일 누적 ${formatWon(summary.totalProjectedLtv365d)}`}
+            desc={`평균 LTV 2배 초과 고객 — 365일 누적 ${formatWon(summary.totalProjectedLtv365d)}`}
             color="amber"
             loading={quickActionLoading === 'vip_engagement'}
             onClick={() => handleQuickAction('vip_engagement')}
@@ -498,18 +489,12 @@ export default function PredictiveDashboardPage() {
 
         {/* ★ D211+ Predictive UX 간소화 (2026-05-23 Harold 명시): 요약 한 줄 + 자세히 분석 토글 */}
         <div className="mb-6 p-4 bg-white/5 border border-white/10 rounded-xl">
-          <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-3">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-3">
             <SummaryMetric
               icon={<Users className="w-3.5 h-3.5" />}
               label="전체 고객"
               value={summary.totalCustomersInCompany.toLocaleString()}
               color="text-blue-300"
-            />
-            <SummaryMetric
-              icon={<Database className="w-3.5 h-3.5" />}
-              label="예측 진행"
-              value={`${(summary.predictionCoverage * 100).toFixed(0)}%`}
-              color="text-indigo-300"
             />
             <SummaryMetric
               icon={<TrendingUp className="w-3.5 h-3.5" />}
@@ -519,14 +504,14 @@ export default function PredictiveDashboardPage() {
             />
             <SummaryMetric
               icon={<AlertTriangle className="w-3.5 h-3.5" />}
-              label="평균 이탈 위험"
-              value={formatPct(summary.avgChurnRisk)}
+              label="이탈 위험 고객"
+              value={`${summary.highRiskCount.toLocaleString()}명`}
               color="text-rose-300"
             />
             <SummaryMetric
               icon={<ShoppingCart className="w-3.5 h-3.5" />}
-              label="평균 구매 가능성"
-              value={formatPct(summary.avgPurchaseLikelihood)}
+              label="구매 기회 고객"
+              value={`${summary.highPotentialCount.toLocaleString()}명`}
               color="text-emerald-300"
             />
           </div>
@@ -566,14 +551,14 @@ export default function PredictiveDashboardPage() {
                 label="선호 채널 Top"
                 value={summary.channelDistribution.length > 0 ? `${summary.channelDistribution[0].channel.toUpperCase()} ${(summary.channelDistribution[0].pct * 100).toFixed(0)}%` : '-'}
                 color="text-cyan-300"
-                source="channel_preference 영역"
+                source="channel_preference"
               />
               <Card
                 icon={<Activity className="w-4 h-4" />}
                 label="최적 발송 시간대"
                 value={summary.bestHourDistribution.length > 0 ? `${summary.bestHourDistribution[0].hour}시 ${(summary.bestHourDistribution[0].pct * 100).toFixed(0)}%` : '-'}
                 color="text-violet-300"
-                source="best_hour 영역"
+                source="best_hour"
               />
             </div>
 
@@ -598,7 +583,7 @@ export default function PredictiveDashboardPage() {
                 label="Cold / Trained 분포"
                 value={`${summary.coldStartCount.toLocaleString()} / ${summary.trainedCount.toLocaleString()}`}
                 color={summary.trainedCount > 0 ? 'text-emerald-300' : 'text-amber-300'}
-                source="model_version 영역"
+                source="model_version"
               />
               <Card
                 icon={<AlertTriangle className="w-4 h-4" />}
@@ -671,8 +656,8 @@ export default function PredictiveDashboardPage() {
                   <h2 className="text-sm font-semibold">모델 정확도 검증</h2>
                 </div>
                 <div className="text-xs text-white/60 leading-relaxed">
-                  발송 누적 부족 — 검증 불가 영역입니다.
-                  발송 누적 3건+ 영역 진입 시 trained 모델 자동 활성 + 24시간 후 정확도 자동 표시 영역 활성됩니다.
+                  발송 누적이 부족해 아직 정확도를 검증할 수 없습니다.
+                  발송이 3건 이상 쌓이면 학습 모델이 자동 활성되고, 24시간 뒤 정확도가 자동 표시됩니다.
                 </div>
               </div>
             ) : distribution.modelAccuracy && (
@@ -680,7 +665,7 @@ export default function PredictiveDashboardPage() {
                 <div className="flex items-center gap-2 mb-3">
                   <Brain className="w-4 h-4 text-violet-300" />
                   <h2 className="text-sm font-semibold">모델 정확도 검증 (기존예측 vs 실 결과)</h2>
-                  <span className="text-[10px] text-white/40 ml-auto">trained {summary.trainedCount.toLocaleString()}명 영역</span>
+                  <span className="text-[10px] text-white/40 ml-auto">학습 완료 {summary.trainedCount.toLocaleString()}명</span>
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <AccuracyCard
@@ -791,110 +776,34 @@ export default function PredictiveDashboardPage() {
                   <tr><td colSpan={9} className="text-center py-12 text-white/40">
                     {search || filter !== 'all' ? '검색/필터 결과 없음' : '예측 데이터 누적 중 — 1시간 안에 자동 계산됩니다.'}
                   </td></tr>
-                ) : customers.map((c) => {
-                  const isExpanded = expandedCustomerId === c.customerId;
-                  const explanation = explanationMap[c.customerId];
-                  return (
-                    <React.Fragment key={c.customerId}>
-                      <tr
-                        className={`border-b border-white/5 hover:bg-white/5 cursor-pointer ${isExpanded ? 'bg-violet-500/10' : ''}`}
-                        onClick={() => toggleCustomerExpand(c.customerId)}
-                      >
-                        <td className="px-3 py-2.5">
-                          <div>{c.customerName || '-'}</div>
-                          <div className="text-[10px] text-white/40 font-mono">{c.customerPhone || ''} · {c.customerRegion || ''}</div>
-                        </td>
-                        <td className="px-3 py-2.5">{c.customerGrade || '-'}</td>
-                        <td className="px-3 py-2.5 text-right font-mono text-cyan-300">{formatPct(c.clickScore)}</td>
-                        <td className={`px-3 py-2.5 text-right font-mono ${c.churnRisk > 0.7 ? 'text-rose-300 font-semibold' : 'text-white/70'}`}>{formatPct(c.churnRisk)}</td>
-                        <td className={`px-3 py-2.5 text-right font-mono ${c.purchaseLikelihood > 0.6 ? 'text-emerald-300 font-semibold' : 'text-white/70'}`}>{formatPct(c.purchaseLikelihood)}</td>
-                        <td className="px-3 py-2.5 text-right font-mono text-amber-300">{c.ltv365d !== undefined ? formatWon(c.ltv365d) : '-'}</td>
-                        <td className="px-3 py-2.5 text-right text-xs text-white/70">{c.nextPurchaseDays !== null && c.nextPurchaseDays !== undefined ? `D+${c.nextPurchaseDays}` : '-'}</td>
-                        <td className="px-3 py-2.5 text-center">
-                          {c.channelPreference ? (
-                            <span className="text-[10px] px-1.5 py-0.5 bg-cyan-500/20 text-cyan-300 rounded font-mono">{c.channelPreference.toUpperCase()}</span>
-                          ) : (
-                            <span className="text-[10px] text-white/30">-</span>
-                          )}
-                        </td>
-                        <td className="px-3 py-2.5 text-center">
-                          <ChevronRight className={`w-3.5 h-3.5 text-white/40 transition-transform ${isExpanded ? 'rotate-90' : ''}`} />
-                        </td>
-                      </tr>
-                      {/* ★ D211+ Predictive 강화 (2026-05-23 Harold 명시): Explainability expand 영역 */}
-                      {isExpanded && (
-                        <tr className="bg-violet-900/30 border-b border-white/5">
-                          <td colSpan={9} className="px-4 py-4">
-                            {explainLoading[c.customerId] ? (
-                              <div className="flex items-center justify-center py-6">
-                                <Loader2 className="w-4 h-4 animate-spin text-violet-400" />
-                              </div>
-                            ) : !explanation ? (
-                              <div className="text-center py-6 text-white/40 text-xs">예측 안내 영역 조회 실패</div>
-                            ) : (
-                              <div className="space-y-3">
-                                {/* 1순위 권장 */}
-                                <div className="p-3 bg-violet-500/10 border border-violet-400/30 rounded-lg">
-                                  <div className="flex items-start gap-2">
-                                    <Sparkles className="w-4 h-4 text-violet-300 flex-shrink-0 mt-0.5" />
-                                    <div className="flex-1">
-                                      <div className="text-[11px] font-semibold text-violet-200 mb-1">AI 1순위 권장</div>
-                                      <div className="text-xs text-white/85 leading-relaxed">{explanation.topRecommendation}</div>
-                                    </div>
-                                  </div>
-                                </div>
-                                {/* 영향 요인 막대 */}
-                                <div>
-                                  <div className="text-[11px] font-semibold text-white/70 mb-2">영향 요인 (AI 영역 안 어떤 영역이 본 예측에 영향)</div>
-                                  <div className="space-y-1.5">
-                                    {explanation.factors.map((f, idx) => {
-                                      const dirColor = f.direction === 'positive' ? 'bg-emerald-400' : f.direction === 'negative' ? 'bg-rose-400' : 'bg-amber-400';
-                                      const dirTextColor = f.direction === 'positive' ? 'text-emerald-300' : f.direction === 'negative' ? 'text-rose-300' : 'text-amber-300';
-                                      return (
-                                        <div key={idx} className="grid grid-cols-12 gap-2 items-center text-[11px]">
-                                          <div className="col-span-3 text-white/70 font-medium">{f.label}</div>
-                                          <div className="col-span-5">
-                                            <div className="h-2 bg-white/10 rounded-full overflow-hidden">
-                                              <div className={`h-full ${dirColor}`} style={{ width: `${f.impactScore * 100}%` }} />
-                                            </div>
-                                          </div>
-                                          <div className={`col-span-1 text-right font-mono ${dirTextColor}`}>{(f.impactScore * 100).toFixed(0)}%</div>
-                                          <div className="col-span-3 text-[10px] text-white/50 truncate" title={f.detail}>{f.detail}</div>
-                                        </div>
-                                      );
-                                    })}
-                                  </div>
-                                  <div className="mt-2 text-[10px] text-white/30 italic">
-                                    Data source — {explanation.factors.map((f) => f.sourceField).filter((s, i, arr) => arr.indexOf(s) === i).slice(0, 3).join(' · ')}
-                                  </div>
-                                </div>
-                                {/* 예측 매트릭스 요약 */}
-                                <div className="grid grid-cols-2 md:grid-cols-4 gap-2 pt-2 border-t border-white/10">
-                                  <div className="p-2 bg-white/5 rounded">
-                                    <div className="text-[9px] text-white/40">LTV 90일</div>
-                                    <div className="text-xs font-mono text-amber-300">{formatWon(explanation.predictions.ltv90d)}</div>
-                                  </div>
-                                  <div className="p-2 bg-white/5 rounded">
-                                    <div className="text-[9px] text-white/40">다음 구매</div>
-                                    <div className="text-xs font-mono text-emerald-300">{explanation.predictions.nextPurchaseDays !== null ? `D+${explanation.predictions.nextPurchaseDays}일` : '데이터 부족'}</div>
-                                  </div>
-                                  <div className="p-2 bg-white/5 rounded">
-                                    <div className="text-[9px] text-white/40">선호 채널</div>
-                                    <div className="text-xs font-mono text-cyan-300">{explanation.predictions.channelPreference?.toUpperCase() || '데이터 부족'}</div>
-                                  </div>
-                                  <div className="p-2 bg-white/5 rounded">
-                                    <div className="text-[9px] text-white/40">최적 시간대</div>
-                                    <div className="text-xs font-mono text-violet-300">{explanation.predictions.bestHour !== null ? `${explanation.predictions.bestHour}시` : '데이터 부족'}</div>
-                                  </div>
-                                </div>
-                              </div>
-                            )}
-                          </td>
-                        </tr>
+                ) : customers.map((c) => (
+                  <tr
+                    key={c.customerId}
+                    className="border-b border-white/5 hover:bg-white/5 cursor-pointer"
+                    onClick={() => openDetail(c.customerId)}
+                  >
+                    <td className="px-3 py-2.5">
+                      <div>{c.customerName || '-'}</div>
+                      <div className="text-[10px] text-white/40 font-mono">{c.customerPhone || ''} · {c.customerRegion || ''}</div>
+                    </td>
+                    <td className="px-3 py-2.5">{c.customerGrade || '-'}</td>
+                    <td className={`px-3 py-2.5 text-right font-mono ${summary.isAllColdStart ? 'text-white/25' : 'text-cyan-300'}`}>{formatPct(c.clickScore)}</td>
+                    <td className={`px-3 py-2.5 text-right font-mono ${summary.isAllColdStart ? 'text-white/25' : c.churnRisk > 0.7 ? 'text-rose-300 font-semibold' : 'text-white/70'}`}>{formatPct(c.churnRisk)}</td>
+                    <td className={`px-3 py-2.5 text-right font-mono ${summary.isAllColdStart ? 'text-white/25' : c.purchaseLikelihood > 0.6 ? 'text-emerald-300 font-semibold' : 'text-white/70'}`}>{formatPct(c.purchaseLikelihood)}</td>
+                    <td className="px-3 py-2.5 text-right font-mono text-amber-300">{c.ltv365d !== undefined ? formatWon(c.ltv365d) : '-'}</td>
+                    <td className="px-3 py-2.5 text-right text-xs text-white/70">{c.nextPurchaseDays !== null && c.nextPurchaseDays !== undefined ? `D+${c.nextPurchaseDays}` : '-'}</td>
+                    <td className="px-3 py-2.5 text-center">
+                      {c.channelPreference ? (
+                        <span className="text-[10px] px-1.5 py-0.5 bg-cyan-500/20 text-cyan-300 rounded font-mono">{c.channelPreference.toUpperCase()}</span>
+                      ) : (
+                        <span className="text-[10px] text-white/30">-</span>
                       )}
-                    </React.Fragment>
-                  );
-                })}
+                    </td>
+                    <td className="px-3 py-2.5 text-center">
+                      <ChevronRight className="w-3.5 h-3.5 text-white/40" />
+                    </td>
+                  </tr>
+                ))}
               </tbody>
             </table>
           </div>
@@ -947,15 +856,105 @@ export default function PredictiveDashboardPage() {
         {/* 컴퓨팅 시점 */}
         {summary.lastComputedAt && (
           <div className="mt-4 text-center text-[11px] text-white/40">
-            마지막 계산: {new Date(summary.lastComputedAt).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' })} · 1시간 주기 자동 갱신 · 회사 전체 영역
+            마지막 계산: {new Date(summary.lastComputedAt).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' })} · 1시간 주기 자동 갱신 · 회사 전체 기준
           </div>
         )}
+
+        {/* 고객 상세 모달 — 행 클릭 시 */}
+        {expandedCustomerId && (() => {
+          const sel = customers.find((x) => x.customerId === expandedCustomerId);
+          if (!sel) return null;
+          return (
+            <PredictiveDetailModal
+              customer={sel}
+              explanation={explanationMap[expandedCustomerId]}
+              loading={!!explainLoading[expandedCustomerId]}
+              onClose={closeDetail}
+              onQuickAction={() => { closeDetail(); handleQuickAction(sel.churnRisk > 0.7 ? 'churn_recovery' : sel.purchaseLikelihood > 0.6 ? 'purchase_push' : 'vip_engagement'); }}
+            />
+          );
+        })()}
       </div>
     </div>
   );
 }
 
-// ★ D211+ Predictive UX 간소화 (2026-05-23 Harold 명시): 요약 한 줄 metric 컴포넌트
+// 고객 상세 모달 — 예측 3 + AI 권장 + 영향 요인 + 1클릭
+function PredictiveDetailModal({
+  customer, explanation, loading, onClose, onQuickAction,
+}: {
+  customer: CustomerRow;
+  explanation: CustomerExplanation | undefined;
+  loading: boolean;
+  onClose: () => void;
+  onQuickAction: () => void;
+}) {
+  const fmtPct = (n: number) => `${(n * 100).toFixed(1)}%`;
+  const fmtWon = (n: number) => `${Math.round(n).toLocaleString()}원`;
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm" onClick={onClose}>
+      <div className="bg-slate-900 border border-white/10 rounded-2xl shadow-2xl w-full max-w-lg max-h-[85vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+        <div className="sticky top-0 bg-slate-900/95 backdrop-blur border-b border-white/10 px-5 py-4 flex items-center justify-between z-10">
+          <div>
+            <div className="text-base font-semibold text-white">{customer.customerName || '-'}</div>
+            <div className="text-[11px] text-white/40 font-mono">{customer.customerGrade || '-'} · {customer.customerPhone || ''} · {customer.customerRegion || ''}</div>
+          </div>
+          <button onClick={onClose} className="p-1.5 hover:bg-white/10 rounded-lg text-white/60"><X className="w-5 h-5" /></button>
+        </div>
+        <div className="p-5 space-y-4">
+          <div className="grid grid-cols-3 gap-2">
+            <div className="p-3 bg-cyan-500/10 rounded-lg text-center"><div className="text-[10px] text-white/50">클릭</div><div className="text-lg font-bold text-cyan-300">{fmtPct(customer.clickScore)}</div></div>
+            <div className="p-3 bg-rose-500/10 rounded-lg text-center"><div className="text-[10px] text-white/50">이탈 위험</div><div className="text-lg font-bold text-rose-300">{fmtPct(customer.churnRisk)}</div></div>
+            <div className="p-3 bg-emerald-500/10 rounded-lg text-center"><div className="text-[10px] text-white/50">구매 가능성</div><div className="text-lg font-bold text-emerald-300">{fmtPct(customer.purchaseLikelihood)}</div></div>
+          </div>
+          {loading ? (
+            <div className="flex justify-center py-8"><Loader2 className="w-5 h-5 animate-spin text-violet-400" /></div>
+          ) : !explanation ? (
+            <div className="text-center py-6 text-white/40 text-xs">예측 근거를 불러오지 못했습니다.</div>
+          ) : (
+            <>
+              <div className="p-3 bg-violet-500/10 border border-violet-400/30 rounded-lg">
+                <div className="flex items-start gap-2">
+                  <Sparkles className="w-4 h-4 text-violet-300 flex-shrink-0 mt-0.5" />
+                  <div><div className="text-[11px] font-semibold text-violet-200 mb-1">AI 1순위 권장</div><div className="text-xs text-white/85 leading-relaxed">{explanation.topRecommendation}</div></div>
+                </div>
+              </div>
+              <div>
+                <div className="text-[11px] font-semibold text-white/70 mb-2">왜 이렇게 예측했나 (영향 요인)</div>
+                <div className="space-y-1.5">
+                  {explanation.factors.map((f, idx) => {
+                    const dirColor = f.direction === 'positive' ? 'bg-emerald-400' : f.direction === 'negative' ? 'bg-rose-400' : 'bg-amber-400';
+                    const dirText = f.direction === 'positive' ? 'text-emerald-300' : f.direction === 'negative' ? 'text-rose-300' : 'text-amber-300';
+                    return (
+                      <div key={idx} className="grid grid-cols-12 gap-2 items-center text-[11px]">
+                        <div className="col-span-3 text-white/70 font-medium">{f.label}</div>
+                        <div className="col-span-5"><div className="h-2 bg-white/10 rounded-full overflow-hidden"><div className={`h-full ${dirColor}`} style={{ width: `${Math.round(f.impactScore * 100)}%` }} /></div></div>
+                        <div className={`col-span-1 text-right font-mono ${dirText}`}>{(f.impactScore * 100).toFixed(0)}%</div>
+                        <div className="col-span-3 text-[10px] text-white/50 truncate" title={f.detail}>{f.detail}</div>
+                      </div>
+                    );
+                  })}
+                </div>
+                <div className="mt-2 text-[10px] text-white/30 italic">Data source — {explanation.factors.map((f) => f.sourceField).filter((s, i, arr) => arr.indexOf(s) === i).slice(0, 3).join(' · ')}</div>
+              </div>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-2 pt-2 border-t border-white/10">
+                <div className="p-2 bg-white/5 rounded text-center"><div className="text-[9px] text-white/40">LTV 90일</div><div className="text-xs font-mono text-amber-300">{fmtWon(explanation.predictions.ltv90d)}</div></div>
+                <div className="p-2 bg-white/5 rounded text-center"><div className="text-[9px] text-white/40">다음 구매</div><div className="text-xs font-mono text-emerald-300">{explanation.predictions.nextPurchaseDays !== null ? `D+${explanation.predictions.nextPurchaseDays}일` : '데이터 부족'}</div></div>
+                <div className="p-2 bg-white/5 rounded text-center"><div className="text-[9px] text-white/40">선호 채널</div><div className="text-xs font-mono text-cyan-300">{explanation.predictions.channelPreference?.toUpperCase() || '데이터 부족'}</div></div>
+                <div className="p-2 bg-white/5 rounded text-center"><div className="text-[9px] text-white/40">최적 시간대</div><div className="text-xs font-mono text-violet-300">{explanation.predictions.bestHour !== null ? `${explanation.predictions.bestHour}시` : '데이터 부족'}</div></div>
+              </div>
+              <button onClick={onQuickAction} className="w-full py-2.5 bg-gradient-to-r from-violet-500 to-fuchsia-500 hover:from-violet-600 hover:to-fuchsia-600 text-white text-sm font-semibold rounded-xl transition-colors">
+                이 고객에게 맞는 캠페인 만들기
+              </button>
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// 요약 metric 컴포넌트
 function SummaryMetric({
   icon, label, value, color,
 }: {
