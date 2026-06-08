@@ -13,7 +13,7 @@ import {
 } from '../utils/sms-queue';
 import { STATUS_CODE_MAP, CARRIER_MAP, SUCCESS_CODES, PENDING_CODES, getStatusLabel, getStatusType, getCarrierLabel, isSuccess, getSendTypeLabel } from '../utils/sms-result-map';
 import { DEFAULT_COSTS, redis, CACHE_TTL } from '../config/defaults';
-import { buildDateRangeFilter, buildPeriodFilter, aggregateSmsCountsByCampaign, aggregateSmsSendTimesByCampaign } from '../utils/stats-aggregation';
+import { buildDateRangeFilter, buildPeriodFilter, STAT_DATE_EXPR, aggregateSmsCountsByCampaign, aggregateSmsSendTimesByCampaign } from '../utils/stats-aggregation';
 import { CAMPAIGN_OPT080_SELECT_EXPR, CAMPAIGN_OPT080_LEFT_JOIN } from '../utils/unsubscribe-helper';
 import { buildCampaignListCsv, channelPlainLabel, CampaignCsvRow } from '../utils/campaign-list-csv';
 
@@ -115,7 +115,7 @@ router.get('/summary', async (req: Request, res: Response) => {
     // ★ D143 (2026-05-04, shiseido6 신고): 발송결과 출력 기준 = 발송일시
     //   발송 완료(sent_at) 우선 → 예약 대기(scheduled_at) → 미발송(created_at) 폴백
     //   정산이 발송일 기준이므로 4/30 등록 + 5/7 예약 캠페인은 5월 결과에 표시되어야 함
-    const summaryDr = buildPeriodFilter('COALESCE(c.sent_at, c.scheduled_at)', {
+    const summaryDr = buildPeriodFilter(STAT_DATE_EXPR, {
       fromDate: fromDate ? String(fromDate) : undefined,
       toDate: toDate ? String(toDate) : undefined,
       yearMonth: (!fromDate || !toDate) ? yearMonth : undefined,
@@ -245,7 +245,7 @@ router.get('/campaigns', async (req: Request, res: Response) => {
       effectiveFromDate = sevenDaysAgo.toISOString().split('T')[0];
       effectiveToDate = today.toISOString().split('T')[0];
     }
-    const campDr = buildPeriodFilter('COALESCE(sent_at, scheduled_at)', {
+    const campDr = buildPeriodFilter('COALESCE(scheduled_at, sent_at)', {
       fromDate: effectiveFromDate,
       toDate: effectiveToDate,
       yearMonth: (!effectiveFromDate || !effectiveToDate) ? effectiveYearMonth : undefined,
@@ -390,7 +390,7 @@ router.get('/campaigns/export', async (req: Request, res: Response) => {
       effectiveFromDate = sevenDaysAgo.toISOString().split('T')[0];
       effectiveToDate = today.toISOString().split('T')[0];
     }
-    const campDr = buildPeriodFilter('COALESCE(sent_at, scheduled_at)', {
+    const campDr = buildPeriodFilter('COALESCE(scheduled_at, sent_at)', {
       fromDate: effectiveFromDate,
       toDate: effectiveToDate,
       yearMonth: (!effectiveFromDate || !effectiveToDate) ? effectiveYearMonth : undefined,

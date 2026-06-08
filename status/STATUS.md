@@ -107,7 +107,16 @@
 
 ---
 
-### 🟢 2026-06-08 (최신) — 발송버그1 마무리 + 체험크레딧 정리 + AI게이팅 스타터화 + AI Operator 소개 메뉴 + 로그인 팝업 교체 (전부 배포)
+### 🟢 2026-06-08 (최신) — 성과 리포트 전면 재설계 + 세그먼트 메뉴 이동 + BASIC 무료체험 시스템 (전부 배포)
+> **① 성과리포트(/performance) 3단 위계 재설계(헤드라인 KPI4+AI진단 → 요약칩 → 9 다크모달·slate-950·CDP적응형)+백엔드 estimatedRoas/report-pdf 풀보고서 ② 세그먼트 메뉴 AI Operator 서브메뉴 이동(AI Operator 전 유료 개방 확인) ③ BASIC 1개월 무료체험(팝업신청→슈퍼관리자 승인 grantBasicTrial→30일 후 자동 FREE강등)+요금제변경 모달+만료 D-N+FREE 고객DB업로드 차단/주소록 전체10만cap+TRIAL max_customers 30만통일. 전부 배포.**
+> - **①**: PerformancePage 전면 재작성(단일파일+인라인 컴포넌트). `performance-roas-core`(TDD6)·`next-action-advisor` estimatedRoas·`ai.ts` report-pdf 확장. 성과 엔드포인트 전부 실데이터(explain impactScore=AI 판정). 상세=`memory/project_2026_0608_performance_redesign_segment.md`.
+> - **②**: `ai-operator-modules` SUB_MODULE_CARDS 세그먼트 추가·`DashboardHeader` 제거. `isAiOperatorAllowed=!isUnsubscribed`(전 유료 개방) 코드 확인.
+> - **③**: `basic-trial.ts grantBasicTrial`(plan=BASIC+status=trial+30일+base750·purchased보존)·companies/admin/trial-downgrade-worker(status='trial' 강등)·`OpenTrialPopup`·`PlanChangeModal`·`customers.ts` FREE 차단(customer_db_enabled)·`address-books` 전체10만cap. message 센티넬 마커 ALTER0. 상세=`memory/project_2026_0608_basic_trial_system.md`.
+> - 검증: backend tsc0·frontend tsc0·ROAS TDD6·모델명/native dialog/박-단어0. 배포교훈=backend는 ts-node지만 build:safe 항상 포함이 안전(단정 정정·`feedback_push_and_deploy_commands` 갱신).
+
+---
+
+### 🟢 2026-06-08 — 발송버그1 마무리 + 체험크레딧 정리 + AI게이팅 스타터화 + AI Operator 소개 메뉴 + 로그인 팝업 교체 (전부 배포)
 > **① 발송버그1(알림톡 강조 title 4경로 공통 CT 통일 + 여정 senderkey·채널추가형 0=정상) ② 체험만료 크레딧 정리(base만 0·purchased 불가침)+강등워커 자동리셋 ③ AI 게이팅 베이직→스타터 ④ AI Operator 소개 메뉴(매뉴얼 옆·모든 요금제) ⑤ 로그인 팝업=오픈 기념 구독할인(12개월 약정 시 2개월 무료) 교체. 전부 배포.**
 > - **①**: `utils/alimtalk-emphasize.ts buildAlimtalkEtcJson`({senderkey,title}·본문동일 #{변수}치환·치환함수 주입)로 직접/staging/여정/자동 4경로 통일 + 여정 LEFT JOIN profile_key. 채널추가형 80149=message_type BA(이름만)·AD는 카카오 자동=버그 아님. TDD emphasize7. 상세=`memory/project_2026_0607_alimtalk_emphasize_ct.md`.
 > - **②③**: 크레딧 2버킷 base(체험600 매월리셋) vs purchased(구매=돈). trial-downgrade-worker가 강등 시 base 안 지움→FREE/trial_expired 64곳 base 38,394·purchased 0 → SQL base=0(Harold)+강등 UPDATE에 base 리셋 추가. 게이팅=백엔드 canUseFeature는 이미 isUnsubscribed(스타터+)·프론트가 ai_messaging_enabled 플래그(STARTER=f)로 잠금→SQL STARTER 플래그 true(Harold)+프론트 "베이직"→"스타터" 14곳. 상세=`memory/project_2026_0608_credit_cleanup_gating.md`.

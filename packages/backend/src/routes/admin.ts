@@ -794,16 +794,11 @@ router.get('/campaigns/scheduled', authenticate, requireSuperAdmin, async (req: 
       params.push(companyId);
       paramIdx++;
     }
-    if (startDate) {
-      where += ` AND COALESCE(c.sent_at, c.scheduled_at) >= $${paramIdx}::date`;
-      params.push(startDate);
-      paramIdx++;
-    }
-    if (endDate) {
-      where += ` AND COALESCE(c.sent_at, c.scheduled_at) < ($${paramIdx}::date + INTERVAL '1 day')`;
-      params.push(endDate);
-      paramIdx++;
-    }
+    // ★ 발송결과/발송통계와 동일하게 송출일 기준(scheduled 우선)으로 통일
+    const dateDr = buildDateRangeFilter(STAT_DATE_EXPR, startDate, endDate, paramIdx);
+    where += dateDr.sql;
+    params.push(...dateDr.params);
+    paramIdx = dateDr.nextIndex;
     if (search) {
       where += ` AND (c.campaign_name ILIKE $${paramIdx} OR co.company_name ILIKE $${paramIdx})`;
       params.push(`%${search}%`);
@@ -1659,16 +1654,11 @@ router.get('/campaigns/all', authenticate, requireSuperAdmin, async (req: Reques
       params.push(companyId);
       paramIdx++;
     }
-    if (startDate) {
-      where += ` AND COALESCE(c.sent_at, c.scheduled_at) >= $${paramIdx}::date`;
-      params.push(startDate);
-      paramIdx++;
-    }
-    if (endDate) {
-      where += ` AND COALESCE(c.sent_at, c.scheduled_at) < ($${paramIdx}::date + INTERVAL '1 day')`;
-      params.push(endDate);
-      paramIdx++;
-    }
+    // ★ 발송결과/발송통계와 동일하게 송출일 기준(scheduled 우선)으로 통일 — 예약발송 날짜 어긋남 정정
+    const dateDr = buildDateRangeFilter(STAT_DATE_EXPR, startDate, endDate, paramIdx);
+    where += dateDr.sql;
+    params.push(...dateDr.params);
+    paramIdx = dateDr.nextIndex;
 
     const countResult = await query(
       `SELECT COUNT(*) FROM campaigns c LEFT JOIN companies co ON c.company_id = co.id LEFT JOIN users u ON c.created_by = u.id ${where}`,
