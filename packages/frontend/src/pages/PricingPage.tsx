@@ -272,7 +272,7 @@ export default function PricingPage() {
           //   plan_code='TRIAL'을 진실의 원천으로 사용 (subscription_status에 의존하지 않음).
           //   이유: admin.ts 요금제 승인 API 등 여러 경로가 subscription_status를 'paid'로 덮어쓰는 이슈가 있어
           //   subscription_status 기반 판정은 견고하지 않음. plan_code는 grant-trial/revoke-trial/Cron 강등 3곳에서만 변경됨.
-          const isOnTrial = companyInfo.plan_code === 'TRIAL' && !!companyInfo.trial_expires_at;
+          const isOnTrial = (companyInfo.plan_code === 'TRIAL' || companyInfo.subscription_status === 'trial') && !!companyInfo.trial_expires_at;
           const isTrialExpired = companyInfo.subscription_status === 'trial_expired';
           const isUnsubscribed = companyInfo.plan_code === 'FREE' && !isTrialExpired;
           // 크레딧 보유 시 요금제+DB는 아래 크레딧 카드가 보여줌 → 이 단독 카드는 미가입/FREE에서만 표시

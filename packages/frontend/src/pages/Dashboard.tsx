@@ -2372,8 +2372,8 @@ const campaignData = {
                   <span className="text-lg font-bold text-gray-800">
                     {planInfo?.plan_name || '로딩...'}
                   </span>
-                  {/* TRIAL 체험 중 → 요금제 만료 D-N 뱃지 (PricingPage와 톤 통일) */}
-                  {planInfo?.plan_code === 'TRIAL' && planInfo?.trial_expires_at && (() => {
+                  {/* 무료체험 중 → 요금제 만료 D-N 뱃지 (BASIC 체험 = plan=BASIC + status='trial') */}
+                  {planInfo?.subscription_status === 'trial' && planInfo?.trial_expires_at && (() => {
                     const daysLeft = Math.max(0, Math.ceil((new Date(planInfo.trial_expires_at).getTime() - Date.now()) / 86400000));
                     return (
                       <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-violet-100 text-violet-700 rounded-full">

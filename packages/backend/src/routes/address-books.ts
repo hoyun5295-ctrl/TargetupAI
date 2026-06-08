@@ -69,6 +69,18 @@ router.get('/:groupName', async (req: Request, res: Response) => {
 });
 
 // POST /api/address-books - 주소록 저장 (user_id 포함)
+// ★ 2026-06-08: 주소록 전체 10만건 cap (전 요금제 공통 — 요금제의 '관리 가능 DB'=고객 DB 업로드와는 별개 기능).
+//   null=통과, 문자열=차단 사유. 회사 단위 address_books 누적 기준.
+const ADDRESS_BOOK_LIMIT = 100000;
+async function checkAddressBookLimit(companyId: string, addCount: number): Promise<string | null> {
+  const cntRes = await query(`SELECT COUNT(*)::int AS cnt FROM address_books WHERE company_id = $1`, [companyId]);
+  const current = Number(cntRes.rows[0]?.cnt) || 0;
+  if (current + addCount > ADDRESS_BOOK_LIMIT) {
+    return `주소록은 최대 ${ADDRESS_BOOK_LIMIT.toLocaleString()}건까지만 등록할 수 있습니다. (현재 ${current.toLocaleString()}건)`;
+  }
+  return null;
+}
+
 router.post('/', async (req: Request, res: Response) => {
   try {
     const companyId = req.user?.companyId;
@@ -91,6 +103,9 @@ router.post('/', async (req: Request, res: Response) => {
     if (parseInt(existCheck.rows[0].count) > 0) {
       return res.status(400).json({ error: '이미 존재하는 그룹명입니다.' });
     }
+
+    const limitErr = await checkAddressBookLimit(companyId, contacts.length);
+    if (limitErr) return res.status(403).json({ error: limitErr, code: 'ADDRESS_BOOK_LIMIT' });
 
     let insertCount = 0;
     for (const contact of contacts) {
@@ -199,6 +214,9 @@ router.post('/:groupName/append', async (req: Request, res: Response) => {
     if (!Array.isArray(contacts) || contacts.length === 0) {
       return res.status(400).json({ error: '추가할 연락처가 필요합니다.' });
     }
+
+    const limitErrA = await checkAddressBookLimit(companyId, contacts.length);
+    if (limitErrA) return res.status(403).json({ error: limitErrA, code: 'ADDRESS_BOOK_LIMIT' });
 
     // 기존 그룹 존재 검증 (본인 그룹만 추가 가능 — company_user 격리)
     const userType = req.user?.userType;

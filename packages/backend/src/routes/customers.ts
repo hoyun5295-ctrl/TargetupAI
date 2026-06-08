@@ -486,10 +486,11 @@ router.post('/', blockIfSyncActive, async (req: Request, res: Response) => {
 
     // 요금제 제한 체크
     const limitCheck = await query(`
-      SELECT 
+      SELECT
         c.id,
         p.max_customers,
         p.plan_name,
+        p.customer_db_enabled,
         (SELECT COUNT(*) FROM customers WHERE company_id = c.id AND is_active = true) as current_count
       FROM companies c
       LEFT JOIN plans p ON c.plan_id = p.id
@@ -497,7 +498,11 @@ router.post('/', blockIfSyncActive, async (req: Request, res: Response) => {
     `, [companyId]);
 
     if (limitCheck.rows.length > 0) {
-      const { max_customers, current_count, plan_name } = limitCheck.rows[0];
+      const { max_customers, current_count, plan_name, customer_db_enabled } = limitCheck.rows[0];
+      // ★ 2026-06-08: 고객 DB 업로드는 유료 요금제만 (FREE/미가입 customer_db_enabled=false → 차단)
+      if (!customer_db_enabled) {
+        return res.status(403).json({ error: '고객 DB 업로드는 유료 요금제에서 이용 가능합니다.', code: 'CUSTOMER_DB_LOCKED', planName: plan_name });
+      }
       if (max_customers && current_count >= max_customers) {
         return res.status(403).json({ 
           error: '요금제 고객 수 제한을 초과했습니다.',
@@ -570,10 +575,11 @@ router.post('/bulk', blockIfSyncActive, async (req: Request, res: Response) => {
 
     // 요금제 제한 체크
     const limitCheck = await query(`
-      SELECT 
+      SELECT
         c.id,
         p.max_customers,
         p.plan_name,
+        p.customer_db_enabled,
         (SELECT COUNT(*) FROM customers WHERE company_id = c.id AND is_active = true) as current_count
       FROM companies c
       LEFT JOIN plans p ON c.plan_id = p.id
@@ -581,7 +587,11 @@ router.post('/bulk', blockIfSyncActive, async (req: Request, res: Response) => {
     `, [companyId]);
 
     if (limitCheck.rows.length > 0) {
-      const { max_customers, current_count, plan_name } = limitCheck.rows[0];
+      const { max_customers, current_count, plan_name, customer_db_enabled } = limitCheck.rows[0];
+      // ★ 2026-06-08: 고객 DB 업로드는 유료 요금제만 (FREE/미가입 customer_db_enabled=false → 차단)
+      if (!customer_db_enabled) {
+        return res.status(403).json({ error: '고객 DB 업로드는 유료 요금제에서 이용 가능합니다.', code: 'CUSTOMER_DB_LOCKED', planName: plan_name });
+      }
       const newTotal = Number(current_count) + customers.length;
       if (max_customers && newTotal > max_customers) {
         const available = max_customers - current_count;
