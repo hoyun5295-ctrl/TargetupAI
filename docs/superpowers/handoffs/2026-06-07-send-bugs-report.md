@@ -1,6 +1,6 @@
 # 발송 버그 3건 — 진행 상태 + 다음 세션 (2026-06-07 갱신)
 
-> 이 문서만으로 다음 세션 바로 진행. **코드 전부 미배포**(working tree, Harold 배포).
+> **2026-06-08 전부 배포완료** (버그1 강조 title 4경로 CT + 여정 senderkey 포함). 버그1·2·3 모두 종결.
 > 검증 현황: backend tsc OK · frontend tsc OK · TDD(alimtalk-button 9, sms-channel-split 13).
 > 진입 시 `status/lessons/LESSONS_BACKEND.md`(발송 5경로) + `Alimtalk/`(IMC API 명세) 정독. 추측 금지(raw/SQL/명세 확인 후 작성).
 

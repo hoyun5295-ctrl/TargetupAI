@@ -18,6 +18,8 @@ import { query } from '../config/database';
 import { callAIWithFallback } from '../services/ai';
 import { aggregateCampaignPerformance, aggregateSmsCountsByCampaign } from './stats-aggregation';
 import { kakaoBatchAggByGroup } from './sms-queue';
+import { computeRoasMetric } from './performance-roas-core';
+import type { RoasMetric } from './performance-roas-core';
 
 // ════════════════════════════════════════════════════════════════════
 // 타입
@@ -389,6 +391,7 @@ export interface PerformanceSnapshotV2 {
   newCustomers: PerformanceMetricV2;
   activeCustomers: PerformanceMetricV2;
   estimatedRevenue: PerformanceMetricV2;
+  estimatedRoas: RoasMetric;  // 블렌디드 ROAS (기간 매출 ÷ 기간 비용). 헤드라인 ROAS 카드용
   // 자세히 매트릭스
   byChannelROI: PerformanceChannelROI[];
   byHourWeekday: HourWeekdayCell[];
@@ -656,6 +659,11 @@ export async function buildPerformanceSnapshotV2(
   const currentSuccessRate = currentSent > 0 ? currentSuccess / currentSent : 0;
   const previousSuccessRate = previousSent > 0 ? previousSuccess / previousSent : 0;
 
+  // 블렌디드 ROAS (기간 전체 매출 ÷ 기간 전체 비용) — 헤드라인 ROAS 카드
+  const currentCost = currentMetrics.reduce((s, m) => s + m.cost, 0);
+  const previousCost = previousMetrics.reduce((s, m) => s + m.cost, 0);
+  const estimatedRoas = computeRoasMetric(currentRevenue, currentCost, previousRevenue, previousCost);
+
   return {
     period,
     periodDays: days,
@@ -695,6 +703,7 @@ export async function buildPerformanceSnapshotV2(
       diffPct: calcDiffPct(currentRevenue, previousRevenue),
       betterThan: currentRevenue > previousRevenue,
     },
+    estimatedRoas,
     byChannelROI,
     byHourWeekday,
     byDailyTrend,

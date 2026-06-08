@@ -42,5 +42,6 @@ export const SUB_MODULE_CARDS: SubModuleCard[] = [
   { icon: Mail,         gradient: 'from-blue-400 to-cyan-500',      label: 'Email 캠페인',   description: '이메일 자동 발송 + 트래킹',      path: '/email-campaigns',  adminOnly: true },
   { icon: Smartphone,   gradient: 'from-amber-400 to-yellow-500',   label: '모바일 DM',      description: '카드형 미디어 메시지 빌더',      path: '/dm-builder' },
   { icon: Brain,        gradient: 'from-emerald-400 to-teal-500',   label: 'AI 메모리',      description: '회사별 누적 학습 정확도↑',       path: '/ai-memory' },
+  { icon: Target,       gradient: 'from-teal-400 to-cyan-500',      label: '세그먼트',       description: '자연어로 고객 그룹 추출',        path: '/segments' },
   { icon: Activity,     gradient: 'from-blue-400 to-sky-500',       label: 'AI 사용량',      description: '월 한도 + 일별 통계 진단',       path: '/ai-usage' },
 ];

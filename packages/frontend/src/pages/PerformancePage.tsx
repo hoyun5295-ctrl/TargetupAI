@@ -1,25 +1,18 @@
 /**
- * PerformancePage.tsx — D213+ (2026-05-24) 4번 메뉴 성과리포트 전면 재작성
+ * PerformancePage.tsx — 성과 리포트 전면 재설계 (2026-06-08)
  *
- * 기존 278줄 → 신규 (Predictive 매트릭스 정합 12 화면)
+ * 분석 중심 3단 위계 (난잡 금지):
+ *   Tier 1 — 헤드라인: 핵심 KPI 4 큰 카드(매출·ROAS·성공률·활성고객) + AI 한 줄 진단
+ *   Tier 2 — 요약 아이콘 바: 칩 클릭 → 세부 모달 (채널/시간대/퍼널/기여/코호트/벤치마크/추세)
+ *   Tier 3 — 액션 & 보조: 1-click 액션 3 + Top 캠페인 + 어제 인사이트 접이식 칩
+ *   세부 차트 = 전부 다크 모달(PerfModal)로 격리. 자사몰 연동 여부로 매출/ROAS/퍼널/기여 적응형.
  *
- * 영역:
- *   1. 상단 + 기간 선택 토글 (7d/14d/30d/90d)
- *   2. 데이터 부족 안내 카드 (CDP 미연동 / 발송 부족 / 이벤트 부족)
- *   3. AI 자율 진단 안내 카드 (Explainability — 비동기 로드)
- *   4. 1-click 액션 3 카드 (채널 ROI 회복 / 시간대 최적화 / 최고 성과 복제)
- *   5. 요약 6 metric + 격차 표시 (current vs previous)
- *   6. 자세히 분석 토글 (default 숨김)
- *   7. 자세히 영역 6 차트 (채널 ROI / 시간대 히트맵 / Funnel / 일별 추세 / 캠페인 반응 / 코호트 / 벤치마크)
- *   8. AI 영향 요인 매트릭스
- *   9. Top 캠페인 + 전체 드릴다운 (검색 + 필터 + 정렬 + 페이지네이션)
- *   10. Data source caption 의무 (feedback_no_mock_data_in_production)
- *   11. 컴퓨팅 시점 표기
- *
- * ⛔ 영구 룰:
- *   - native confirm/alert/prompt X (feedback_no_native_browser_dialog)
- *   - 모든 카드/차트 source 명시 의무 (feedback_no_mock_data_in_production)
- *   - 보라 톤 정합 (violet 그라데이션 + 액센트) — D222+ Phase 2 정정
+ * 영구 룰:
+ *   - 다크 톤 bg-slate-950 + violet 액센트
+ *   - 모델명 UI 노출 0 (AI 모델 추상 표기만)
+ *   - native dialog(alert/confirm/prompt) 0 — ConfirmModal/useToast/CreditConfirmModal
+ *   - 모든 카드/차트 source caption 의무
+ *   - 모바일 반응형 + 임의상수 0(실데이터 근거)
  */
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
@@ -28,9 +21,9 @@ import {
   BarChart, Bar, LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Legend,
 } from 'recharts';
 import {
-  ArrowLeft, BarChart3, Brain, Clock, Loader2, RefreshCw, Sparkles, Target, TrendingUp, Users,
-  AlertTriangle, MousePointerClick, Database, Activity, ChevronRight, ChevronLeft,
-  Info, Search, Filter, ArrowUpDown, FileDown,
+  ArrowLeft, BarChart3, Brain, Clock, Loader2, RefreshCw, Sparkles, TrendingUp, Users,
+  AlertTriangle, MousePointerClick, Database, Activity, ChevronRight, ChevronLeft, ChevronDown, ChevronUp,
+  Search, Filter, ArrowUpDown, FileDown, X,
 } from 'lucide-react';
 import { useToast } from '../components/ToastProvider';
 import CreditConfirmModal from '../components/credit/CreditConfirmModal';
@@ -100,6 +93,7 @@ interface SnapshotV2 {
   newCustomers: PerformanceMetricV2;
   activeCustomers: PerformanceMetricV2;
   estimatedRevenue: PerformanceMetricV2;
+  estimatedRoas: PerformanceMetricV2;  // 블렌디드 ROAS (백엔드 신규)
   byChannelROI: ChannelROI[];
   byHourWeekday: HourWeekdayCell[];
   byDailyTrend: PerformanceTrend[];
@@ -218,6 +212,12 @@ interface DrillCampaign {
   sentAt: string;
 }
 
+type ModalKey =
+  | null | 'revenue' | 'channel' | 'hour' | 'funnel'
+  | 'cohort' | 'benchmark' | 'trend' | 'diagnosis' | 'campaigns';
+
+type QuickActionType = 'channel_recovery' | 'time_optimization' | 'top_performer_replication';
+
 const PERIOD_OPTIONS: { value: PerformancePeriod; label: string }[] = [
   { value: '7d', label: '7일' },
   { value: '14d', label: '14일' },
@@ -228,6 +228,14 @@ const PERIOD_OPTIONS: { value: PerformancePeriod; label: string }[] = [
 const WEEKDAY_LABEL = ['일', '월', '화', '수', '목', '금', '토'];
 
 const periodToDays = (p: PerformancePeriod): number => ({ '7d': 7, '14d': 14, '30d': 30, '90d': 90 }[p]);
+
+// ─── 순수 포맷 헬퍼 (DB-free) ───
+const formatPct = (n: number) => `${(n * 100).toFixed(1)}%`;
+const formatWon = (n: number) => `${Math.round(n).toLocaleString()}원`;
+const formatRoas = (n: number) => (n > 0 ? `${n.toFixed(2)}×` : '—');
+const formatNum = (n: number) => Math.round(n).toLocaleString();
+const formatDiff = (m: PerformanceMetricV2) =>
+  m.diffPct === 0 ? '변동 없음' : `${m.diffPct >= 0 ? '+' : ''}${m.diffPct.toFixed(1)}%`;
 
 export default function PerformancePage() {
   const navigate = useNavigate();
@@ -242,11 +250,12 @@ export default function PerformancePage() {
   const [pdfLoading, setPdfLoading] = useState(false);
   const toast = useToast();
   const [error, setError] = useState<string | null>(null);
-  const [detailsExpanded, setDetailsExpanded] = useState(false);
+
+  const [activeModal, setActiveModal] = useState<ModalKey>(null);
+  const [insightExpanded, setInsightExpanded] = useState(false);
 
   const [quickActionLoading, setQuickActionLoading] = useState<string | null>(null);
 
-  const [campaignsExpanded, setCampaignsExpanded] = useState(false);
   const [campaigns, setCampaigns] = useState<DrillCampaign[]>([]);
   const [campaignsLoading, setCampaignsLoading] = useState(false);
   const [campaignsTotal, setCampaignsTotal] = useState(0);
@@ -260,8 +269,7 @@ export default function PerformancePage() {
 
   const [explainLoading, setExplainLoading] = useState(false);
 
-  // ★ D219+ Part 2 후속 (2026-05-27): 일일 인사이트 카드 — CT-98 collectCompanyInsight 활용
-  //   매일 9시 메일 + 화면 안 즉시 확인 양쪽 흐름. 사용자가 화면 진입 시 어제 발송 + 활성 고객 즉시 확인 가능.
+  // 일일 인사이트 (CT-98 collectCompanyInsight) — Tier 3 접이식 칩
   const [dailyInsight, setDailyInsight] = useState<{
     companyId: string;
     companyName: string;
@@ -277,7 +285,7 @@ export default function PerformancePage() {
 
   const [confirmReport, setConfirmReport] = useState(false);
 
-  // 기간 성과 PDF 보고서 — 풀분석 차감(같은 날 같은 기간 재다운로드는 backend 멱등으로 무료)
+  // 기간 성과 PDF 풀 보고서 — 풀분석 차감(같은 날 같은 기간 재다운로드는 backend 멱등으로 무료)
   const downloadPdf = async () => {
     if (pdfLoading) return;
     setPdfLoading(true);
@@ -327,7 +335,6 @@ export default function PerformancePage() {
         fetch('/api/ai/operator/performance/cohort?months=12', { headers }),
         fetch(`/api/ai/operator/performance/benchmark?days=${days}`, { headers }),
         fetch(`/api/ai/operator/performance/attribution?days=${days}`, { headers }),
-        // ★ D219+ Part 2 후속 (2026-05-27): 일일 인사이트 fetch
         fetch('/api/insight/daily', { headers }),
       ]);
       const snapData = await snapRes.json();
@@ -335,7 +342,6 @@ export default function PerformancePage() {
       const cohortData = await cohortRes.json();
       const bmData = await bmRes.json();
       const attrData = await attrRes.json();
-      // 일일 인사이트 (실패 시 단순 skip — 본 화면 핵심 기능 X)
       try {
         const insightData = await insightRes.json();
         if (insightRes.ok && insightData.success && insightData.insight) {
@@ -350,7 +356,7 @@ export default function PerformancePage() {
         if (snapData.code === 'BETA_GATE') {
           setError('이 기능은 비즈니스 / 엔터프라이즈 요금제에서 이용 가능합니다.');
         } else {
-          setError(snapData.error || '성과 매트릭스 조회 실패');
+          setError(snapData.error || '성과 데이터 조회 실패');
         }
         return;
       }
@@ -413,8 +419,8 @@ export default function PerformancePage() {
   }, [period, campaignsPage, searchQuery, filterChannel, filterAd, sort]);
 
   useEffect(() => {
-    if (campaignsExpanded) loadCampaigns();
-  }, [campaignsExpanded, loadCampaigns]);
+    if (activeModal === 'campaigns') loadCampaigns();
+  }, [activeModal, loadCampaigns]);
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
@@ -422,7 +428,7 @@ export default function PerformancePage() {
     setCampaignsPage(1);
   };
 
-  const handleQuickAction = async (actionType: 'channel_recovery' | 'time_optimization' | 'top_performer_replication') => {
+  const handleQuickAction = async (actionType: QuickActionType) => {
     setQuickActionLoading(actionType);
     try {
       const res = await fetch('/api/ai/operator/performance/quick-action', {
@@ -453,15 +459,22 @@ export default function PerformancePage() {
           suggestedTone: r.suggestedTone,
         }));
         navigate('/continuous-operator');
+      } else {
+        toast.error('1-click 액션 생성에 실패했습니다.');
       }
-    } catch {}
+    } catch {
+      toast.error('1-click 액션 생성 중 오류가 발생했습니다.');
+    }
     finally {
       setQuickActionLoading(null);
     }
   };
 
-  const formatPct = (n: number) => `${(n * 100).toFixed(1)}%`;
-  const formatWon = (n: number) => `${Math.round(n).toLocaleString()}원`;
+  const openModal = (key: ModalKey) => {
+    if (key === 'diagnosis') loadExplanation();
+    setActiveModal(key);
+  };
+  const closeModal = () => setActiveModal(null);
 
   const hourWeekdayMaxSent = useMemo(() => {
     if (!snapshot) return 0;
@@ -487,23 +500,64 @@ export default function PerformancePage() {
     })).reverse();
   }, [cohort]);
 
+  // ─── 요약 칩 한 줄 표현 (실데이터 기반) ───
+  const hasCdp = !!availability?.hasCdpIntegration;
+  const topRoasChannel = snapshot && snapshot.byChannelROI.length
+    ? [...snapshot.byChannelROI].sort((a, b) => b.roas - a.roas)[0] : null;
+  const peakCell = snapshot
+    ? snapshot.byHourWeekday.reduce<HourWeekdayCell>(
+        (mx, c) => (c.sent > mx.sent ? c : mx),
+        { hour: 0, weekday: 0, sent: 0, successRate: 0 },
+      )
+    : null;
+  const attr7d = attribution?.windows.find((w) => w.windowLabel.includes('7'));
+
+  const channelSummary = snapshot && snapshot.byChannelROI.length
+    ? `${snapshot.byChannelROI.length}개 채널 · 최고 ${topRoasChannel && topRoasChannel.roas > 0 ? topRoasChannel.roas.toFixed(2) + '×' : '—'}`
+    : '발송 데이터 준비 중';
+  const hourSummary = peakCell && peakCell.sent > 0
+    ? `최다 ${peakCell.hour}시 (${WEEKDAY_LABEL[peakCell.weekday]})`
+    : '발송 데이터 준비 중';
+  const funnelSummary = snapshot?.funnelStats && snapshot.funnelStats.viewCount > 0
+    ? `구매 전환 ${formatPct(snapshot.funnelStats.purchaseConversionRate)}`
+    : '연동 시 활성';
+  const attrSummary = attr7d
+    ? (attribution!.hasCdpData
+        ? `7일 구매 ${formatNum(attr7d.cdpPurchaseCount)}건`
+        : `7일 구매 ${formatNum(attr7d.customerPurchaseCount)}명`)
+    : '발송 후 반응';
+  const cohortSummary = cohort && cohort.totalCohortCustomers > 0
+    ? `30일 잔존 ${formatPct(cohort.avgM1Rate)}`
+    : '데이터 준비 중';
+  const benchmarkSummary = benchmark && benchmark.peerCompanyCount > 0
+    ? `${benchmark.planName} ${benchmark.peerCompanyCount}개사 대비`
+    : '동일 요금제 비교';
+
   return (
-    // ★ D222+ Phase 2 (2026-05-27): 다크 → 보라 그라데이션 톤 다운 + 시인성 강화
-    <div className="min-h-screen bg-gradient-to-br from-violet-900 via-fuchsia-900 to-violet-900 text-white">
-      <div className="bg-violet-800/50 backdrop-blur-md border-b border-violet-400/30 sticky top-0 z-30">
+    <div className="min-h-screen bg-slate-950 text-white">
+      <div className="bg-slate-950/80 backdrop-blur-sm border-b border-white/10 sticky top-0 z-30">
         <div className="max-w-7xl mx-auto px-4 md:px-6 py-3 md:py-4 flex items-center gap-3 flex-wrap">
           <button onClick={() => navigate('/ai-operator')} className="p-2 rounded-lg hover:bg-white/10 transition-colors">
             <ArrowLeft className="w-5 h-5" />
           </button>
-          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-fuchsia-400 to-pink-500 flex items-center justify-center flex-shrink-0 shadow-lg shadow-fuchsia-500/20">
+          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-violet-500 to-fuchsia-500 flex items-center justify-center flex-shrink-0 shadow-lg shadow-violet-500/20">
             <BarChart3 className="w-5 h-5 text-white" />
           </div>
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2 flex-wrap">
               <h1 className="text-xl md:text-2xl font-semibold text-white">성과 리포트</h1>
               <span className="text-[10px] bg-gradient-to-r from-amber-400 to-orange-500 text-white px-2 py-0.5 rounded-full font-bold tracking-wide">BETA</span>
+              {availability && (
+                <span className={`text-[10px] px-2 py-0.5 rounded-full font-semibold border ${
+                  hasCdp
+                    ? 'bg-emerald-500/15 text-emerald-300 border-emerald-400/30'
+                    : 'bg-white/5 text-white/50 border-white/15'
+                }`}>
+                  {hasCdp ? '자사몰 연동됨' : '자사몰 미연동'}
+                </span>
+              )}
             </div>
-            <p className="text-xs md:text-sm text-white/50 mt-0.5">매출 / ROI / 채널·시간대 분석 + AI 자율 진단 + 기간 비교 + 1-click 액션</p>
+            <p className="text-xs md:text-sm text-white/50 mt-0.5">과거~현재 마케팅 성과 분석 — 결과 · 원인 · 제안</p>
           </div>
           <div className="flex items-center gap-1 flex-wrap">
             {PERIOD_OPTIONS.map((o) => (
@@ -512,7 +566,7 @@ export default function PerformancePage() {
                 onClick={() => setPeriod(o.value)}
                 className={`px-2.5 py-1 rounded text-[11px] font-medium transition-colors ${
                   period === o.value
-                    ? 'bg-violet-500/30 text-violet-100 border border-violet-400/50'
+                    ? 'bg-violet-500/20 text-violet-200 border border-violet-400/40'
                     : 'bg-white/5 hover:bg-white/10 text-white/60 border border-white/10'
                 }`}
               >
@@ -523,7 +577,7 @@ export default function PerformancePage() {
               onClick={() => setConfirmReport(true)}
               disabled={pdfLoading || loading || !snapshot || snapshot.totalCampaigns.current === 0}
               className="flex items-center gap-1.5 px-2.5 py-1 rounded text-[11px] font-medium bg-gradient-to-r from-violet-500/80 to-fuchsia-500/80 hover:from-violet-500 hover:to-fuchsia-500 text-white disabled:opacity-40 disabled:cursor-not-allowed transition-colors ml-1"
-              title="기간 성과 PDF 보고서 — 풀분석 크레딧 차감(같은 날 같은 기간 재다운로드는 무료)"
+              title="기간 성과 PDF 풀 보고서 — 풀분석 크레딧 차감(같은 날 같은 기간 재다운로드는 무료)"
             >
               {pdfLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <FileDown className="w-3.5 h-3.5" />}
               PDF 보고서
@@ -547,66 +601,10 @@ export default function PerformancePage() {
       </div>
 
       <div className="max-w-7xl mx-auto px-4 md:px-6 py-6 space-y-5">
-        {/* ★ D219+ Part 2 후속 (2026-05-27): 일일 인사이트 카드 (CT-98 collectCompanyInsight 활용) */}
-        {dailyInsight && (
-          <div className="rounded-2xl border border-violet-400/30 bg-gradient-to-br from-violet-500/10 via-fuchsia-500/10 to-indigo-500/10 p-5">
-            <div className="flex items-start gap-4 flex-wrap">
-              <div className="w-11 h-11 rounded-xl bg-gradient-to-br from-violet-500 to-fuchsia-500 flex items-center justify-center flex-shrink-0">
-                <Sparkles className="w-5 h-5 text-white" />
-              </div>
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2 flex-wrap mb-1">
-                  <h3 className="text-base font-semibold text-white">{dailyInsight.companyName} 일일 인사이트</h3>
-                  {dailyInsight.trialDaysRemaining > 0 && (
-                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-violet-500/30 text-violet-200 border border-violet-400/30 font-semibold">
-                      체험 D-{dailyInsight.trialDaysRemaining}
-                    </span>
-                  )}
-                </div>
-                <p className="text-[11px] text-white/60">매일 9시 자동 메일과 동일한 인사이트 — 화면 안 즉시 확인 가능</p>
-              </div>
-            </div>
-
-            <div className="mt-4 grid grid-cols-2 md:grid-cols-4 gap-3">
-              <div className="rounded-xl border border-white/10 bg-white/5 p-3">
-                <p className="text-[10px] text-white/50">어제 발송</p>
-                <p className="text-2xl font-bold text-violet-200 mt-1">{dailyInsight.yesterdaySent.toLocaleString()}</p>
-              </div>
-              <div className="rounded-xl border border-white/10 bg-white/5 p-3">
-                <p className="text-[10px] text-white/50">성공</p>
-                <p className="text-2xl font-bold text-emerald-300 mt-1">{dailyInsight.yesterdaySuccess.toLocaleString()}</p>
-              </div>
-              <div className="rounded-xl border border-white/10 bg-white/5 p-3">
-                <p className="text-[10px] text-white/50">실패</p>
-                <p className="text-2xl font-bold text-rose-300 mt-1">{dailyInsight.yesterdayFail.toLocaleString()}</p>
-              </div>
-              <div className="rounded-xl border border-white/10 bg-white/5 p-3">
-                <p className="text-[10px] text-white/50">활성 고객</p>
-                <p className="text-2xl font-bold text-fuchsia-300 mt-1">{dailyInsight.totalCustomers.toLocaleString()}</p>
-              </div>
-            </div>
-
-            <div className="mt-3 p-3 rounded-xl border border-violet-400/20 bg-violet-500/10">
-              <p className="text-[11px] text-violet-100 leading-relaxed">
-                <span className="font-semibold">오늘의 추천 — </span>
-                {dailyInsight.totalCustomers === 0
-                  ? '고객 데이터를 임포트하면 첫 발송이 가능합니다.'
-                  : dailyInsight.yesterdaySent === 0
-                  ? '어제 발송이 없었습니다. AI 자동 마케팅을 활용해보세요.'
-                  : '꾸준한 발송이 이어지고 있습니다. 성과를 분석해 다음 캠페인을 정교화하세요.'}
-              </p>
-            </div>
-
-            <p className="mt-2 text-[10px] text-white/30 italic">
-              Data source — CT-98 daily-insight-mailer collectCompanyInsight (어제 0~24시 sms_send_results + customers is_active)
-            </p>
-          </div>
-        )}
-
         {loading && (
           <div className="bg-white/5 border border-white/10 rounded-xl p-12 flex flex-col items-center gap-3 text-white/50">
-            <Loader2 className="w-6 h-6 animate-spin text-indigo-300" />
-            <div className="text-sm">최근 {period} 성과 매트릭스 + 데이터 영역 진단 중...</div>
+            <Loader2 className="w-6 h-6 animate-spin text-violet-300" />
+            <div className="text-sm">최근 {period} 성과 분석 + 데이터 진단 중...</div>
           </div>
         )}
 
@@ -616,9 +614,10 @@ export default function PerformancePage() {
 
         {!loading && !error && snapshot && (
           <>
-            {availability && availability.cards.length > 0 && (
+            {/* 데이터 부족 안내 (critical/warning만 눈에 띄게) */}
+            {availability && availability.cards.filter((c) => c.level === 'critical' || c.level === 'warning').length > 0 && (
               <div className="space-y-2">
-                {availability.cards.map((card, i) => {
+                {availability.cards.filter((c) => c.level === 'critical' || c.level === 'warning').map((card, i) => {
                   const styleMap = {
                     critical: 'bg-rose-500/10 border-rose-400/30 text-rose-100',
                     warning: 'bg-amber-500/10 border-amber-400/30 text-amber-100',
@@ -626,16 +625,10 @@ export default function PerformancePage() {
                     good: 'bg-emerald-500/10 border-emerald-400/30 text-emerald-100',
                   }[card.level];
                   const iconColor = {
-                    critical: 'text-rose-300',
-                    warning: 'text-amber-300',
-                    info: 'text-cyan-300',
-                    good: 'text-emerald-300',
+                    critical: 'text-rose-300', warning: 'text-amber-300', info: 'text-cyan-300', good: 'text-emerald-300',
                   }[card.level];
                   const IconComp =
-                    card.icon === 'cdp' ? Database :
-                    card.icon === 'campaign' ? Sparkles :
-                    card.icon === 'customer' ? Users :
-                    Activity;
+                    card.icon === 'cdp' ? Database : card.icon === 'campaign' ? Sparkles : card.icon === 'customer' ? Users : Activity;
                   return (
                     <div key={i} className={`p-4 border rounded-xl ${styleMap}`}>
                       <div className="flex items-start gap-3">
@@ -661,484 +654,137 @@ export default function PerformancePage() {
               </div>
             )}
 
-            <div className="p-4 bg-gradient-to-br from-violet-500/15 via-fuchsia-500/10 to-indigo-500/15 border border-violet-400/30 rounded-xl">
-              <div className="flex items-start gap-3">
-                <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-violet-400 to-fuchsia-500 flex items-center justify-center flex-shrink-0">
-                  <Sparkles className="w-5 h-5 text-white" />
-                </div>
-                <div className="flex-1">
-                  <div className="text-sm font-medium text-violet-100 mb-1">AI 자율 진단</div>
-                  {explanation ? (
-                    <div className="text-xs text-white/80 leading-relaxed">{explanation.topInsight}</div>
-                  ) : explainLoading ? (
-                    <div className="text-xs text-white/60 flex items-center gap-1.5">
-                      <Loader2 className="w-3 h-3 animate-spin" /> AI 분석 중 (10~20초)
-                    </div>
-                  ) : (
-                    <button
-                      onClick={loadExplanation}
-                      className="text-xs text-violet-200 hover:text-violet-100 underline-offset-2 hover:underline"
-                    >
-                      AI 자율 진단 시작 →
-                    </button>
-                  )}
-                </div>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-              <QuickActionCard
-                icon={<AlertTriangle className="w-5 h-5" />}
-                title="채널 ROI 회복"
-                desc="저성과 채널 회복 캠페인 자동 설계"
-                color="rose"
-                loading={quickActionLoading === 'channel_recovery'}
-                disabled={snapshot.totalCampaigns.current === 0}
-                onClick={() => handleQuickAction('channel_recovery')}
+            {/* ════ Tier 1 — 헤드라인 ════ */}
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+              <HeadlineKpiCard
+                label="매출" accent="violet" icon={<TrendingUp className="w-4 h-4" />}
+                value={hasCdp && snapshot.estimatedRevenue.current > 0 ? formatWon(snapshot.estimatedRevenue.current) : '—'}
+                metric={hasCdp && snapshot.estimatedRevenue.current > 0 ? snapshot.estimatedRevenue : undefined}
+                sub={hasCdp ? '실매출(자사몰)' : '자사몰 연동 시 집계'}
+                onClick={() => openModal('revenue')}
               />
-              <QuickActionCard
-                icon={<Clock className="w-5 h-5" />}
-                title="시간대 최적화"
-                desc="저성과 시간대 최적화 캠페인 자동 설계"
-                color="emerald"
-                loading={quickActionLoading === 'time_optimization'}
-                disabled={snapshot.totalCampaigns.current === 0}
-                onClick={() => handleQuickAction('time_optimization')}
+              <HeadlineKpiCard
+                label="ROAS" accent="cyan" icon={<BarChart3 className="w-4 h-4" />}
+                value={formatRoas(snapshot.estimatedRoas.current)}
+                metric={snapshot.estimatedRoas.current > 0 ? snapshot.estimatedRoas : undefined}
+                sub={snapshot.estimatedRoas.current > 0 ? '매출 ÷ 비용' : '자사몰 매출 연동 시 산출'}
+                onClick={() => openModal('channel')}
               />
-              <QuickActionCard
-                icon={<TrendingUp className="w-5 h-5" />}
-                title="최고 성과 복제"
-                desc={`${period} 안 top 캠페인 복제 + 강화 매트릭스`}
-                color="amber"
-                loading={quickActionLoading === 'top_performer_replication'}
-                disabled={snapshot.topCampaigns.length === 0}
-                onClick={() => handleQuickAction('top_performer_replication')}
+              <HeadlineKpiCard
+                label="성공률" accent="emerald" icon={<Activity className="w-4 h-4" />}
+                value={formatPct(snapshot.successRate.current)} metric={snapshot.successRate}
+                onClick={() => openModal('trend')}
+              />
+              <HeadlineKpiCard
+                label="활성 고객" accent="amber" icon={<Users className="w-4 h-4" />}
+                value={formatNum(snapshot.activeCustomers.current)} metric={snapshot.activeCustomers}
+                onClick={() => openModal('cohort')}
               />
             </div>
 
-            <div className="bg-white/5 border border-white/10 rounded-xl p-4">
-              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
-                <SummaryMetricCard label="발송 캠페인" value={snapshot.totalCampaigns.current.toLocaleString()} metric={snapshot.totalCampaigns} icon={<Sparkles className="w-3.5 h-3.5" />} />
-                <SummaryMetricCard label="총 발송" value={snapshot.totalSent.current.toLocaleString()} metric={snapshot.totalSent} icon={<Target className="w-3.5 h-3.5" />} />
-                <SummaryMetricCard label="성공률" value={formatPct(snapshot.successRate.current)} metric={snapshot.successRate} icon={<Activity className="w-3.5 h-3.5" />} />
-                <SummaryMetricCard label="신규 고객" value={snapshot.newCustomers.current.toLocaleString()} metric={snapshot.newCustomers} icon={<Users className="w-3.5 h-3.5" />} />
-                <SummaryMetricCard label="활성 고객" value={snapshot.activeCustomers.current.toLocaleString()} metric={snapshot.activeCustomers} icon={<MousePointerClick className="w-3.5 h-3.5" />} />
-                <SummaryMetricCard label="추정 매출" value={formatWon(snapshot.estimatedRevenue.current)} metric={snapshot.estimatedRevenue} icon={<TrendingUp className="w-3.5 h-3.5" />} />
-              </div>
-              <div className="mt-2 text-[10px] text-white/40">이전 동기간(직전 {period}) 대비 격차 표시 · {snapshot.source}</div>
+            <div className="text-[11px] text-white/40">
+              이 기간 캠페인 {formatNum(snapshot.totalCampaigns.current)}건 · 총 발송 {formatNum(snapshot.totalSent.current)}건 · 신규 고객 {formatNum(snapshot.newCustomers.current)}명 · 직전 {period} 대비 비교
             </div>
 
-            <button
-              onClick={() => setDetailsExpanded(!detailsExpanded)}
-              className="w-full px-3 py-2 bg-white/5 hover:bg-white/10 rounded-lg text-xs text-white/60 flex items-center justify-center gap-1.5 transition-colors"
-            >
-              {detailsExpanded ? (
-                <><ChevronLeft className="w-3 h-3 rotate-90" /> 간소 보기 — 자세한 차트 숨기기</>
+            <AiDiagnosisLine explanation={explanation} loading={explainLoading} onOpen={() => openModal('diagnosis')} />
+
+            {/* ════ Tier 2 — 요약 아이콘 바 ════ */}
+            <div className="flex flex-wrap gap-2">
+              <SummaryChip icon={<Sparkles className="w-4 h-4" />} accent="text-fuchsia-300" label="채널 ROI" summary={channelSummary} onClick={() => openModal('channel')} />
+              <SummaryChip icon={<Clock className="w-4 h-4" />} accent="text-cyan-300" label="시간대" summary={hourSummary} onClick={() => openModal('hour')} />
+              {hasCdp ? (
+                <>
+                  <SummaryChip icon={<Activity className="w-4 h-4" />} accent="text-emerald-300" label="퍼널" badge="자사몰" summary={funnelSummary} onClick={() => openModal('funnel')} />
+                  <SummaryChip icon={<MousePointerClick className="w-4 h-4" />} accent="text-violet-300" label="기여도" badge="자사몰" summary={attrSummary} onClick={() => openModal('revenue')} />
+                </>
               ) : (
-                <><ChevronRight className="w-3 h-3 rotate-90" /> 자세한 분석 펼치기 (채널 / 시간대 / Funnel / 추세 / 캠페인 반응 / 코호트 / 벤치마크)</>
+                <SummaryChip icon={<Database className="w-4 h-4" />} accent="text-cyan-300" label="자사몰 연동" summary="실매출·퍼널·기여도 보기" onClick={() => navigate('/cdp-settings')} />
               )}
-            </button>
+              <SummaryChip icon={<Users className="w-4 h-4" />} accent="text-violet-300" label="코호트" summary={cohortSummary} onClick={() => openModal('cohort')} />
+              <SummaryChip icon={<BarChart3 className="w-4 h-4" />} accent="text-amber-300" label="벤치마크" summary={benchmarkSummary} onClick={() => openModal('benchmark')} />
+              <SummaryChip icon={<TrendingUp className="w-4 h-4" />} accent="text-emerald-300" label="추세" summary={`${period} 일별 추이`} onClick={() => openModal('trend')} />
+            </div>
 
-            {detailsExpanded && (
-              <div className="space-y-4">
-                {snapshot.byChannelROI.length > 0 ? (
-                  <ChartCard title="채널별 ROI 비교 (현재 vs 직전)" source="campaigns + MySQL 큐 직접 집계 (D144 정합)" icon={<Sparkles className="w-4 h-4 text-fuchsia-300" />}>
-                    <ResponsiveContainer width="100%" height={240}>
-                      <BarChart data={snapshot.byChannelROI.map((c) => ({
-                        channel: c.channel,
-                        current: c.sent,
-                        previous: c.previousSent,
-                      }))}>
-                        <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.1)" />
-                        <XAxis dataKey="channel" stroke="rgba(255,255,255,0.5)" fontSize={11} />
-                        <YAxis stroke="rgba(255,255,255,0.5)" fontSize={11} />
-                        <Tooltip contentStyle={{ backgroundColor: '#0f172a', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 8, fontSize: 12 }} />
-                        <Legend wrapperStyle={{ fontSize: 11 }} />
-                        <Bar dataKey="current" name={`현재 ${period}`} fill="#a78bfa" />
-                        <Bar dataKey="previous" name={`직전 ${period}`} fill="#475569" />
-                      </BarChart>
-                    </ResponsiveContainer>
-                    <div className="mt-2 space-y-1">
-                      {snapshot.byChannelROI.map((c) => (
-                        <div key={c.channel} className="flex items-center justify-between text-[11px]">
-                          <span className="text-white/70 font-medium w-12">{c.channel}</span>
-                          <div className="flex items-center gap-3 text-white/50">
-                            <span>성공률 <span className="text-emerald-300 font-mono">{formatPct(c.successRate)}</span></span>
-                            <span>비용 <span className="text-amber-300 font-mono">{formatWon(c.estimatedCost)}</span></span>
-                            <span>ROAS <span className="text-cyan-300 font-mono">{c.roas > 0 ? c.roas.toFixed(2) + '×' : '-'}</span></span>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </ChartCard>
-                ) : (
-                  <ChartCard title="채널별 ROI 비교" source="campaigns" icon={<Sparkles className="w-4 h-4 text-fuchsia-300" />}>
-                    <div className="text-center text-xs text-white/40 py-6">발송 데이터 없음 — 첫 캠페인 발송 후 활성</div>
-                  </ChartCard>
-                )}
-
-                <ChartCard title="시간대 × 요일 히트맵" source="campaigns.sent_at (KST)" icon={<Clock className="w-4 h-4 text-cyan-300" />}>
-                  {hourWeekdayMaxSent === 0 ? (
-                    <div className="text-center text-xs text-white/40 py-6">발송 데이터 없음</div>
-                  ) : (
-                    <div className="overflow-x-auto">
-                      <table className="text-[10px] mx-auto">
-                        <thead>
-                          <tr>
-                            <th className="w-10 text-white/40 font-medium">시</th>
-                            {WEEKDAY_LABEL.map((w) => (
-                              <th key={w} className="w-10 text-white/40 font-medium">{w}</th>
-                            ))}
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {Array.from({ length: 24 }).map((_, h) => (
-                            <tr key={h}>
-                              <td className="text-white/40 font-mono text-center">{h}시</td>
-                              {Array.from({ length: 7 }).map((_, w) => {
-                                const cell = snapshot.byHourWeekday.find((c) => c.hour === h && c.weekday === w);
-                                const intensity = hourWeekdayMaxSent > 0 && cell ? cell.sent / hourWeekdayMaxSent : 0;
-                                return (
-                                  <td
-                                    key={w}
-                                    className="w-10 h-7 text-center text-white/80 font-mono"
-                                    style={{
-                                      backgroundColor: intensity > 0 ? `rgba(167, 139, 250, ${0.15 + intensity * 0.7})` : 'rgba(255,255,255,0.03)',
-                                    }}
-                                    title={cell ? `${cell.sent.toLocaleString()}건 성공률 ${formatPct(cell.successRate)}` : '0건'}
-                                  >
-                                    {cell && cell.sent > 0 ? cell.sent : ''}
-                                  </td>
-                                );
-                              })}
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  )}
-                </ChartCard>
-
-                {snapshot.funnelStats && snapshot.funnelStats.viewCount > 0 ? (
-                  <ChartCard title="자사몰 Funnel 시각화" source="cdp_events (page_view → cart_add → purchase)" icon={<Activity className="w-4 h-4 text-emerald-300" />}>
-                    <div className="space-y-2">
-                      <FunnelBar label="page_view" count={snapshot.funnelStats.viewCount} max={snapshot.funnelStats.viewCount} color="#6366f1" />
-                      <FunnelBar label="cart_add" count={snapshot.funnelStats.cartAddCount} max={snapshot.funnelStats.viewCount} color="#06b6d4" />
-                      <FunnelBar label="wishlist_add" count={snapshot.funnelStats.wishlistAddCount} max={snapshot.funnelStats.viewCount} color="#a78bfa" />
-                      <FunnelBar label="purchase" count={snapshot.funnelStats.purchaseCount} max={snapshot.funnelStats.viewCount} color="#10b981" />
-                    </div>
-                    <div className="mt-3 grid grid-cols-3 gap-2 text-[10px]">
-                      <div className="p-2 bg-white/5 rounded text-center">
-                        <div className="text-white/40">cart 전환율</div>
-                        <div className="text-cyan-300 font-mono font-bold">{formatPct(snapshot.funnelStats.cartConversionRate)}</div>
-                      </div>
-                      <div className="p-2 bg-white/5 rounded text-center">
-                        <div className="text-white/40">구매 전환율</div>
-                        <div className="text-emerald-300 font-mono font-bold">{formatPct(snapshot.funnelStats.purchaseConversionRate)}</div>
-                      </div>
-                      <div className="p-2 bg-white/5 rounded text-center">
-                        <div className="text-white/40">cart → 구매</div>
-                        <div className="text-fuchsia-300 font-mono font-bold">{formatPct(snapshot.funnelStats.cartToPurchaseRate)}</div>
-                      </div>
-                    </div>
-                  </ChartCard>
-                ) : (
-                  <div className="p-4 bg-white/5 border border-white/10 rounded-xl">
-                    <div className="flex items-start gap-3">
-                      <Info className="w-4 h-4 text-cyan-300 mt-0.5" />
-                      <div>
-                        <div className="text-sm font-semibold text-white/80 mb-0.5">자사몰 Funnel 비활성</div>
-                        <div className="text-xs text-white/50">자사몰 연동 시 page_view → cart_add → purchase 전환율 영역 자동 시각화.</div>
-                      </div>
-                    </div>
-                  </div>
-                )}
-
-                <ChartCard title={`${period} 일별 추세 (현재 + 직전 overlay)`} source="campaigns (KST 일별 그룹)" icon={<TrendingUp className="w-4 h-4 text-amber-300" />}>
-                  {trendData.length === 0 || trendData.every((d) => d.current === 0 && d.previous === 0) ? (
-                    <div className="text-center text-xs text-white/40 py-6">발송 데이터 없음</div>
-                  ) : (
-                    <ResponsiveContainer width="100%" height={240}>
-                      <LineChart data={trendData}>
-                        <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.1)" />
-                        <XAxis dataKey="date" stroke="rgba(255,255,255,0.5)" fontSize={10} />
-                        <YAxis stroke="rgba(255,255,255,0.5)" fontSize={10} />
-                        <Tooltip contentStyle={{ backgroundColor: '#0f172a', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 8, fontSize: 12 }} />
-                        <Legend wrapperStyle={{ fontSize: 11 }} />
-                        <Line type="monotone" dataKey="current" name="현재" stroke="#a78bfa" strokeWidth={2} dot={false} />
-                        <Line type="monotone" dataKey="previous" name="직전" stroke="#64748b" strokeWidth={2} dot={false} strokeDasharray="4 4" />
-                      </LineChart>
-                    </ResponsiveContainer>
-                  )}
-                </ChartCard>
-
-                {attribution && (
-                  <ChartCard title="캠페인 진행 후 반응 매트릭스" source={attribution.source} icon={<MousePointerClick className="w-4 h-4 text-fuchsia-300" />}>
-                    {attribution.totalCampaigns === 0 ? (
-                      <div className="text-xs text-white/40 py-4 text-center">발송 캠페인 X — 캠페인 발송 후 반응 영역 활성됩니다.</div>
-                    ) : (
-                      <div className="space-y-3">
-                        <div className="text-[11px] text-white/60">
-                          분석 기간: {attribution.analysisPeriodDays}일 / 캠페인 {attribution.totalCampaigns}건 / 발송 {attribution.totalSent.toLocaleString()}건 / 성공 {attribution.totalSuccess.toLocaleString()}건
-                        </div>
-                        <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
-                          {attribution.windows.map((w) => (
-                            <div key={w.windowLabel} className="p-3 bg-white/5 border border-white/10 rounded-lg">
-                              <div className="text-[10px] text-white/40 mb-1">캠페인 발송 후 {w.windowLabel}</div>
-                              {attribution.hasCdpData ? (
-                                <>
-                                  <div className="text-base font-bold text-emerald-300 font-mono">{w.cdpPurchaseCount.toLocaleString()}건</div>
-                                  <div className="text-[10px] text-white/60 mt-0.5">CDP 구매 / 매출 <span className="text-amber-300 font-mono">{formatWon(w.cdpRevenue)}</span></div>
-                                </>
-                              ) : (
-                                <>
-                                  <div className="text-base font-bold text-cyan-300 font-mono">{w.customerPurchaseCount.toLocaleString()}명</div>
-                                  <div className="text-[10px] text-white/60 mt-0.5">recent_purchase_date 갱신 (CDP 미연동 fallback)</div>
-                                </>
-                              )}
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-                  </ChartCard>
-                )}
-
-                {cohort && cohort.cohorts.length > 0 && (
-                  <ChartCard title="가입월별 Retention Curve" source={cohort.source} icon={<Users className="w-4 h-4 text-violet-300" />}>
-                    <ResponsiveContainer width="100%" height={240}>
-                      <LineChart data={cohortChartData}>
-                        <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.1)" />
-                        <XAxis dataKey="month" stroke="rgba(255,255,255,0.5)" fontSize={10} />
-                        <YAxis stroke="rgba(255,255,255,0.5)" fontSize={10} unit="%" />
-                        <Tooltip contentStyle={{ backgroundColor: '#0f172a', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 8, fontSize: 12 }} />
-                        <Legend wrapperStyle={{ fontSize: 11 }} />
-                        <Line type="monotone" dataKey="M1" name="가입 후 30일" stroke="#06b6d4" strokeWidth={2} dot={{ r: 3 }} />
-                        <Line type="monotone" dataKey="M3" name="가입 후 90일" stroke="#a78bfa" strokeWidth={2} dot={{ r: 3 }} />
-                        <Line type="monotone" dataKey="M6" name="가입 후 180일" stroke="#f59e0b" strokeWidth={2} dot={{ r: 3 }} />
-                      </LineChart>
-                    </ResponsiveContainer>
-                    <div className="mt-2 text-[11px] text-white/60">
-                      평균 M1 retention: <span className="text-cyan-300 font-mono">{formatPct(cohort.avgM1Rate)}</span> · M3 retention: <span className="text-violet-300 font-mono">{formatPct(cohort.avgM3Rate)}</span>
-                    </div>
-                  </ChartCard>
-                )}
-
-                {benchmark && benchmark.peerCompanyCount > 0 && (
-                  <ChartCard title={`${benchmark.planName} 요금제 평균 대비 벤치마크`} source={benchmark.source} icon={<BarChart3 className="w-4 h-4 text-amber-300" />}>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-                      {benchmark.metrics.map((m) => (
-                        <div key={m.label} className="p-3 bg-white/5 border border-white/10 rounded-lg">
-                          <div className="flex items-center justify-between mb-1">
-                            <div className="text-[11px] text-white/60">{m.label}</div>
-                            <span className={`text-[10px] font-mono font-bold ${m.betterThan ? 'text-emerald-300' : 'text-rose-300'}`}>
-                              {m.diffPct >= 0 ? '+' : ''}{m.diffPct.toFixed(1)}%
-                            </span>
-                          </div>
-                          <div className="flex items-baseline gap-2 flex-wrap">
-                            <div className="text-base font-mono font-bold text-white">
-                              {typeof m.companyValue === 'number' && m.companyValue < 1 && m.companyValue > 0 ? formatPct(m.companyValue) : Math.round(m.companyValue).toLocaleString()}
-                            </div>
-                            <div className="text-[10px] text-white/40">vs 평균 <span className="font-mono text-white/60">
-                              {typeof m.industryAvg === 'number' && m.industryAvg < 1 && m.industryAvg > 0 ? formatPct(m.industryAvg) : Math.round(m.industryAvg).toLocaleString()}
-                            </span></div>
-                          </div>
-                          <div className="mt-1 text-[9px] text-white/30 truncate" title={m.source}>{m.source}</div>
-                        </div>
-                      ))}
-                    </div>
-                  </ChartCard>
-                )}
-                {benchmark && benchmark.peerCompanyCount === 0 && (
-                  <div className="p-4 bg-white/5 border border-white/10 rounded-xl text-xs text-white/50">
-                    {benchmark.source}
-                  </div>
-                )}
+            {/* ════ Tier 3 — 액션 & 보조 ════ */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+              <div className="bg-white/5 border border-white/10 rounded-2xl p-4">
+                <div className="text-xs font-semibold text-white/70 mb-2.5">추천 액션 — AI 자동 마케팅</div>
+                <div className="space-y-2">
+                  <QuickActionRow
+                    icon={<AlertTriangle className="w-4 h-4" />} title="채널 ROI 회복" desc="저성과 채널 회복 캠페인 자동 설계" color="rose"
+                    loading={quickActionLoading === 'channel_recovery'} disabled={snapshot.totalCampaigns.current === 0}
+                    onClick={() => handleQuickAction('channel_recovery')}
+                  />
+                  <QuickActionRow
+                    icon={<Clock className="w-4 h-4" />} title="시간대 최적화" desc="저성과 시간대 최적화 캠페인 자동 설계" color="emerald"
+                    loading={quickActionLoading === 'time_optimization'} disabled={snapshot.totalCampaigns.current === 0}
+                    onClick={() => handleQuickAction('time_optimization')}
+                  />
+                  <QuickActionRow
+                    icon={<TrendingUp className="w-4 h-4" />} title="최고 성과 복제" desc={`${period} 안 top 캠페인 복제 + 강화`} color="amber"
+                    loading={quickActionLoading === 'top_performer_replication'} disabled={snapshot.topCampaigns.length === 0}
+                    onClick={() => handleQuickAction('top_performer_replication')}
+                  />
+                </div>
+                <div className="mt-2 text-[10px] text-white/30 italic">Data source — performance quick-action (AI 자동 설계 · 사용자 검토 후 발송)</div>
               </div>
-            )}
 
-            {explanation && explanation.factors.length > 0 && (
-              <div className="p-4 bg-white/5 border border-white/10 rounded-xl">
-                <div className="flex items-center gap-2 mb-3">
-                  <Brain className="w-4 h-4 text-violet-300" />
-                  <h2 className="text-sm font-semibold">AI 영향 요인 매트릭스</h2>
-                  <span className="ml-auto text-[10px] text-white/40">전체 성과 스코어 <span className="text-violet-300 font-mono font-bold">{explanation.overallScore}</span>/100</span>
+              <div className="bg-white/5 border border-white/10 rounded-2xl p-4">
+                <div className="flex items-center justify-between mb-2.5">
+                  <span className="text-xs font-semibold text-white/70">Top 캠페인</span>
+                  <button onClick={() => openModal('campaigns')} className="text-[11px] text-violet-300 hover:text-violet-200">전체 보기 →</button>
                 </div>
-                <div className="space-y-1.5">
-                  {explanation.factors.map((f, i) => {
-                    const dirColor = f.direction === 'positive' ? 'bg-emerald-400' : f.direction === 'negative' ? 'bg-rose-400' : 'bg-amber-400';
-                    const dirTextColor = f.direction === 'positive' ? 'text-emerald-300' : f.direction === 'negative' ? 'text-rose-300' : 'text-amber-300';
-                    return (
-                      <div key={i} className="grid grid-cols-12 gap-2 items-center text-[11px]">
-                        <div className="col-span-3 text-white/70 font-medium">{f.label}</div>
-                        <div className="col-span-5">
-                          <div className="h-2 bg-white/10 rounded-full overflow-hidden">
-                            <div className={`h-full ${dirColor}`} style={{ width: `${f.impactScore * 100}%` }} />
-                          </div>
-                        </div>
-                        <div className={`col-span-1 text-right font-mono ${dirTextColor}`}>{(f.impactScore * 100).toFixed(0)}%</div>
-                        <div className="col-span-3 text-[10px] text-white/50 truncate" title={f.detail}>{f.detail}</div>
+                {snapshot.topCampaigns.length === 0 ? (
+                  <div className="text-xs text-white/40 py-4 text-center">발송 캠페인 없음 — 첫 캠페인 발송 후 활성</div>
+                ) : (
+                  <div className="space-y-1.5">
+                    {snapshot.topCampaigns.slice(0, 3).map((c) => (
+                      <div key={c.id} className="flex items-center gap-2 text-xs">
+                        <span className="text-[10px] px-1.5 py-0.5 bg-violet-500/20 text-violet-300 rounded font-mono flex-shrink-0">{c.messageType}</span>
+                        <span className="text-white/80 truncate flex-1" title={c.name}>{c.name}</span>
+                        <span className="text-white/50 font-mono flex-shrink-0">{formatNum(c.sent)}건</span>
+                        <span className="text-emerald-300 font-mono flex-shrink-0">{formatPct(c.successRate)}</span>
                       </div>
-                    );
-                  })}
-                </div>
-                {explanation.recommendation && (
-                  <div className="mt-3 p-2 bg-violet-500/10 border border-violet-400/30 rounded text-[11px] text-violet-100">
-                    <strong>1순위 권장:</strong> {explanation.recommendation}
+                    ))}
                   </div>
                 )}
-                <div className="mt-2 text-[10px] text-white/30 italic">
-                  Data source — {Array.from(new Set(explanation.factors.map((f) => f.sourceField))).slice(0, 3).join(' · ')}
-                </div>
+                <div className="mt-2 text-[10px] text-white/30 italic">Data source — campaigns + MySQL 큐 직접 집계</div>
               </div>
-            )}
+            </div>
 
-            {snapshot.topCampaigns.length > 0 && (
-              <div className="bg-white/5 border border-white/10 rounded-xl overflow-hidden">
-                <div className="px-4 py-3 border-b border-white/10 flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <Sparkles className="w-4 h-4 text-fuchsia-300" />
-                    <h2 className="text-sm font-semibold">Top 캠페인 ({period})</h2>
-                  </div>
-                  <button
-                    onClick={() => setCampaignsExpanded(!campaignsExpanded)}
-                    className="text-[11px] text-violet-200 hover:text-violet-100 underline-offset-2 hover:underline"
-                  >
-                    {campaignsExpanded ? '전체 드릴다운 숨기기' : '전체 드릴다운 펼치기 →'}
-                  </button>
-                </div>
-                <div className="overflow-x-auto">
-                  <table className="w-full text-xs">
-                    <thead className="bg-white/5 border-b border-white/10">
-                      <tr className="text-left text-white/60">
-                        <th className="px-3 py-2 font-medium">캠페인</th>
-                        <th className="px-3 py-2 font-medium text-center">채널</th>
-                        <th className="px-3 py-2 font-medium text-right">발송</th>
-                        <th className="px-3 py-2 font-medium text-right">성공률</th>
-                        <th className="px-3 py-2 font-medium text-right">매출</th>
-                        <th className="px-3 py-2 font-medium text-right">ROAS</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {snapshot.topCampaigns.map((c) => (
-                        <tr key={c.id} className="border-b border-white/5 hover:bg-white/5">
-                          <td className="px-3 py-2">
-                            <div className="text-white/80">{c.name}</div>
-                            <div className="text-[10px] text-white/40">{new Date(c.sentAt).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' })}</div>
-                          </td>
-                          <td className="px-3 py-2 text-center">
-                            <span className="text-[10px] px-1.5 py-0.5 bg-violet-500/20 text-violet-300 rounded font-mono">{c.messageType}</span>
-                            {c.isAd && <span className="text-[10px] px-1 py-0.5 ml-1 bg-amber-500/20 text-amber-300 rounded">광고</span>}
-                          </td>
-                          <td className="px-3 py-2 text-right font-mono">{c.sent.toLocaleString()}</td>
-                          <td className="px-3 py-2 text-right font-mono text-emerald-300">{formatPct(c.successRate)}</td>
-                          <td className="px-3 py-2 text-right font-mono text-amber-300">{c.estimatedRevenue > 0 ? formatWon(c.estimatedRevenue) : '-'}</td>
-                          <td className="px-3 py-2 text-right font-mono text-cyan-300">{c.roas > 0 ? c.roas.toFixed(2) + '×' : '-'}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-
-                {campaignsExpanded && (
-                  <div className="border-t border-white/10 bg-violet-900/30">
-                    <div className="p-3 border-b border-white/10 flex flex-col md:flex-row gap-2">
-                      <form onSubmit={handleSearch} className="flex-1 flex gap-2">
-                        <div className="relative flex-1">
-                          <Search className="w-4 h-4 absolute left-2.5 top-1/2 -translate-y-1/2 text-white/40" />
-                          <input
-                            value={searchInput}
-                            onChange={(e) => setSearchInput(e.target.value)}
-                            placeholder="캠페인명 검색"
-                            className="w-full pl-8 pr-3 py-1.5 bg-violet-900/40 border border-white/10 rounded text-xs text-white placeholder-white/30 focus:outline-none focus:border-violet-400/50"
-                          />
-                        </div>
-                        <button type="submit" className="px-3 py-1.5 bg-violet-500/30 hover:bg-violet-500/50 text-violet-100 rounded text-xs font-medium">검색</button>
-                      </form>
-                      <div className="flex items-center gap-2">
-                        <div className="relative">
-                          <Filter className="w-3 h-3 absolute left-2 top-1/2 -translate-y-1/2 text-white/40 pointer-events-none" />
-                          <select value={filterChannel} onChange={(e) => { setFilterChannel(e.target.value); setCampaignsPage(1); }} className="pl-6 pr-7 py-1.5 bg-violet-900/40 border border-white/10 rounded text-xs text-white focus:outline-none focus:border-violet-400/50 appearance-none">
-                            <option value="all" className="bg-violet-900/40">전체 채널</option>
-                            <option value="sms" className="bg-violet-900/40">SMS</option>
-                            <option value="lms" className="bg-violet-900/40">LMS</option>
-                            <option value="mms" className="bg-violet-900/40">MMS</option>
-                            <option value="kakao" className="bg-violet-900/40">KAKAO</option>
-                          </select>
-                        </div>
-                        <div className="relative">
-                          <Filter className="w-3 h-3 absolute left-2 top-1/2 -translate-y-1/2 text-white/40 pointer-events-none" />
-                          <select value={filterAd} onChange={(e) => { setFilterAd(e.target.value); setCampaignsPage(1); }} className="pl-6 pr-7 py-1.5 bg-violet-900/40 border border-white/10 rounded text-xs text-white focus:outline-none focus:border-violet-400/50 appearance-none">
-                            <option value="all" className="bg-violet-900/40">광고/안내</option>
-                            <option value="ad" className="bg-violet-900/40">광고만</option>
-                            <option value="info" className="bg-violet-900/40">안내만</option>
-                          </select>
-                        </div>
-                        <div className="relative">
-                          <ArrowUpDown className="w-3 h-3 absolute left-2 top-1/2 -translate-y-1/2 text-white/40 pointer-events-none" />
-                          <select value={sort} onChange={(e) => { setSort(e.target.value); setCampaignsPage(1); }} className="pl-6 pr-7 py-1.5 bg-violet-900/40 border border-white/10 rounded text-xs text-white focus:outline-none focus:border-violet-400/50 appearance-none">
-                            <option value="sent_desc" className="bg-violet-900/40">발송 ↓</option>
-                            <option value="success_rate_desc" className="bg-violet-900/40">성공률 ↓</option>
-                            <option value="sent_at_desc" className="bg-violet-900/40">최근 ↓</option>
-                            <option value="sent_at_asc" className="bg-violet-900/40">오래된 순 ↓</option>
-                          </select>
-                        </div>
+            {/* 어제 인사이트 (CT-98) — 작은 접이식 칩 */}
+            {dailyInsight && (
+              <div className="bg-white/5 border border-white/10 rounded-xl">
+                <button onClick={() => setInsightExpanded(!insightExpanded)} className="w-full flex items-center gap-2 px-4 py-2.5 text-left">
+                  <Sparkles className="w-3.5 h-3.5 text-violet-300 flex-shrink-0" />
+                  <span className="text-xs text-white/70">
+                    어제 발송 {formatNum(dailyInsight.yesterdaySent)}건 · 성공 {formatNum(dailyInsight.yesterdaySuccess)} · 활성 고객 {formatNum(dailyInsight.totalCustomers)}
+                  </span>
+                  {insightExpanded ? <ChevronUp className="w-3.5 h-3.5 ml-auto text-white/40" /> : <ChevronDown className="w-3.5 h-3.5 ml-auto text-white/40" />}
+                </button>
+                {insightExpanded && (
+                  <div className="px-4 pb-3">
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                      <div className="rounded-lg border border-white/10 bg-white/5 p-2.5">
+                        <p className="text-[10px] text-white/50">어제 발송</p>
+                        <p className="text-lg font-bold text-violet-200 mt-0.5">{formatNum(dailyInsight.yesterdaySent)}</p>
+                      </div>
+                      <div className="rounded-lg border border-white/10 bg-white/5 p-2.5">
+                        <p className="text-[10px] text-white/50">성공</p>
+                        <p className="text-lg font-bold text-emerald-300 mt-0.5">{formatNum(dailyInsight.yesterdaySuccess)}</p>
+                      </div>
+                      <div className="rounded-lg border border-white/10 bg-white/5 p-2.5">
+                        <p className="text-[10px] text-white/50">실패</p>
+                        <p className="text-lg font-bold text-rose-300 mt-0.5">{formatNum(dailyInsight.yesterdayFail)}</p>
+                      </div>
+                      <div className="rounded-lg border border-white/10 bg-white/5 p-2.5">
+                        <p className="text-[10px] text-white/50">활성 고객</p>
+                        <p className="text-lg font-bold text-fuchsia-300 mt-0.5">{formatNum(dailyInsight.totalCustomers)}</p>
                       </div>
                     </div>
-
-                    {campaignsLoading ? (
-                      <div className="flex items-center justify-center py-8">
-                        <Loader2 className="w-5 h-5 animate-spin text-violet-400" />
-                      </div>
-                    ) : campaigns.length === 0 ? (
-                      <div className="text-center py-8 text-white/40 text-xs">검색/필터 결과 없음</div>
-                    ) : (
-                      <div className="overflow-x-auto">
-                        <table className="w-full text-xs">
-                          <thead className="bg-white/5 border-b border-white/10">
-                            <tr className="text-left text-white/60">
-                              <th className="px-3 py-2 font-medium">캠페인</th>
-                              <th className="px-3 py-2 font-medium text-center">채널</th>
-                              <th className="px-3 py-2 font-medium text-right">발송</th>
-                              <th className="px-3 py-2 font-medium text-right">성공률</th>
-                              <th className="px-3 py-2 font-medium text-right">비용</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {campaigns.map((c) => (
-                              <tr key={c.id} className="border-b border-white/5 hover:bg-white/5">
-                                <td className="px-3 py-2">
-                                  <div className="text-white/80">{c.name}</div>
-                                  <div className="text-[10px] text-white/40">{new Date(c.sentAt).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' })}</div>
-                                </td>
-                                <td className="px-3 py-2 text-center">
-                                  <span className="text-[10px] px-1.5 py-0.5 bg-violet-500/20 text-violet-300 rounded font-mono">{c.messageType}</span>
-                                  {c.isAd && <span className="text-[10px] px-1 py-0.5 ml-1 bg-amber-500/20 text-amber-300 rounded">광고</span>}
-                                </td>
-                                <td className="px-3 py-2 text-right font-mono">{c.sent.toLocaleString()}</td>
-                                <td className="px-3 py-2 text-right font-mono text-emerald-300">{formatPct(c.successRate)}</td>
-                                <td className="px-3 py-2 text-right font-mono text-amber-300">{formatWon(c.cost)}</td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
-                    )}
-
-                    {campaignsTotalPages > 1 && (
-                      <div className="px-4 py-3 border-t border-white/10 flex items-center justify-between text-[11px] text-white/50">
-                        <div>전체 {campaignsTotal.toLocaleString()}건</div>
-                        <div className="flex items-center gap-2">
-                          <button onClick={() => setCampaignsPage(Math.max(1, campaignsPage - 1))} disabled={campaignsPage === 1} className="p-1 hover:bg-white/5 rounded disabled:opacity-30">
-                            <ChevronLeft className="w-4 h-4" />
-                          </button>
-                          <span className="font-mono">{campaignsPage} / {campaignsTotalPages}</span>
-                          <button onClick={() => setCampaignsPage(Math.min(campaignsTotalPages, campaignsPage + 1))} disabled={campaignsPage === campaignsTotalPages} className="p-1 hover:bg-white/5 rounded disabled:opacity-30">
-                            <ChevronRight className="w-4 h-4" />
-                          </button>
-                        </div>
-                      </div>
-                    )}
+                    <p className="mt-2 text-[10px] text-white/30 italic">
+                      Data source — CT-98 daily-insight-mailer (어제 0~24시 sms_send_results + customers is_active)
+                    </p>
                   </div>
                 )}
               </div>
@@ -1147,44 +793,498 @@ export default function PerformancePage() {
             <div className="text-center text-[11px] text-white/40 pt-2">
               마지막 계산: {new Date(snapshot.computedAt).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' })}
               <br />
-              이 추천은 AI 분석 결과이며 사용자 검토 + 승인 후 발송됩니다 (AI 단독 발송 X). 0건 자동완화 X — 발송 차단 정책 정합.
+              이 분석은 AI 결과이며 액션은 사용자 검토 + 승인 후 발송됩니다 (AI 단독 발송 X). 0건 자동완화 X — 발송 차단 정책.
             </div>
           </>
         )}
       </div>
+
+      {/* ════════════ 모달 ════════════ */}
+      {snapshot && (
+        <>
+          {/* 매출 · 기여 모달 */}
+          <PerfModal open={activeModal === 'revenue'} onClose={closeModal} title="매출 · 발송 후 기여" icon={<TrendingUp className="w-4 h-4 text-violet-300" />} source={attribution?.source || 'cdp_events.purchase'} wide>
+            {hasCdp ? (
+              <div className="space-y-4">
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="p-3 bg-white/5 border border-white/10 rounded-xl">
+                    <div className="text-[11px] text-white/50">기간 실매출</div>
+                    <div className="text-xl font-bold text-violet-200 mt-1">{formatWon(snapshot.estimatedRevenue.current)}</div>
+                    <div className={`text-[11px] font-mono mt-0.5 ${snapshot.estimatedRevenue.betterThan ? 'text-emerald-300' : 'text-rose-300'}`}>직전 대비 {formatDiff(snapshot.estimatedRevenue)}</div>
+                  </div>
+                  <div className="p-3 bg-white/5 border border-white/10 rounded-xl">
+                    <div className="text-[11px] text-white/50">블렌디드 ROAS</div>
+                    <div className="text-xl font-bold text-cyan-200 mt-1">{formatRoas(snapshot.estimatedRoas.current)}</div>
+                    <div className={`text-[11px] font-mono mt-0.5 ${snapshot.estimatedRoas.betterThan ? 'text-emerald-300' : 'text-rose-300'}`}>직전 대비 {formatDiff(snapshot.estimatedRoas)}</div>
+                  </div>
+                </div>
+                {attribution && attribution.totalCampaigns > 0 ? (
+                  <div className="space-y-2">
+                    <div className="text-[11px] text-white/60">분석 기간 {attribution.analysisPeriodDays}일 / 캠페인 {formatNum(attribution.totalCampaigns)}건 / 발송 {formatNum(attribution.totalSent)}건</div>
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
+                      {attribution.windows.map((w) => (
+                        <div key={w.windowLabel} className="p-3 bg-white/5 border border-white/10 rounded-lg">
+                          <div className="text-[10px] text-white/40 mb-1">발송 후 {w.windowLabel}</div>
+                          {attribution.hasCdpData ? (
+                            <>
+                              <div className="text-base font-bold text-emerald-300 font-mono">{formatNum(w.cdpPurchaseCount)}건</div>
+                              <div className="text-[10px] text-white/60 mt-0.5">매출 <span className="text-amber-300 font-mono">{formatWon(w.cdpRevenue)}</span></div>
+                            </>
+                          ) : (
+                            <>
+                              <div className="text-base font-bold text-cyan-300 font-mono">{formatNum(w.customerPurchaseCount)}명</div>
+                              <div className="text-[10px] text-white/60 mt-0.5">recent_purchase_date 갱신</div>
+                            </>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="text-center text-xs text-white/40 py-4">발송 캠페인 후 구매 반응이 쌓이면 여기에 표시됩니다.</div>
+                )}
+              </div>
+            ) : (
+              <CdpUpsellCard onConnect={() => navigate('/cdp-settings')} lines="실매출 · 발송 후 구매 기여를 자사몰 연동 시 집계합니다." />
+            )}
+          </PerfModal>
+
+          {/* 채널 ROI 모달 */}
+          <PerfModal open={activeModal === 'channel'} onClose={closeModal} title="채널 ROI" icon={<Sparkles className="w-4 h-4 text-fuchsia-300" />} source="campaigns + MySQL 큐 직접 집계 (D144 기준)" wide>
+            {snapshot.byChannelROI.length > 0 ? (
+              <>
+                <ResponsiveContainer width="100%" height={240}>
+                  <BarChart data={snapshot.byChannelROI.map((c) => ({ channel: c.channel, current: c.sent, previous: c.previousSent }))}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.1)" />
+                    <XAxis dataKey="channel" stroke="rgba(255,255,255,0.5)" fontSize={11} />
+                    <YAxis stroke="rgba(255,255,255,0.5)" fontSize={11} />
+                    <Tooltip contentStyle={{ backgroundColor: '#0f172a', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 8, fontSize: 12 }} />
+                    <Legend wrapperStyle={{ fontSize: 11 }} />
+                    <Bar dataKey="current" name={`현재 ${period}`} fill="#a78bfa" />
+                    <Bar dataKey="previous" name={`직전 ${period}`} fill="#475569" />
+                  </BarChart>
+                </ResponsiveContainer>
+                <div className="mt-3 space-y-1">
+                  {snapshot.byChannelROI.map((c) => (
+                    <div key={c.channel} className="flex items-center justify-between text-[11px]">
+                      <span className="text-white/70 font-medium w-12">{c.channel}</span>
+                      <div className="flex items-center gap-3 text-white/50">
+                        <span>성공률 <span className="text-emerald-300 font-mono">{formatPct(c.successRate)}</span></span>
+                        <span>비용 <span className="text-amber-300 font-mono">{formatWon(c.estimatedCost)}</span></span>
+                        <span>ROAS <span className="text-cyan-300 font-mono">{c.roas > 0 ? c.roas.toFixed(2) + '×' : '-'}</span></span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </>
+            ) : (
+              <div className="text-center text-xs text-white/40 py-8">발송 데이터 없음 — 첫 캠페인 발송 후 활성</div>
+            )}
+          </PerfModal>
+
+          {/* 시간대 모달 */}
+          <PerfModal open={activeModal === 'hour'} onClose={closeModal} title="시간대 × 요일" icon={<Clock className="w-4 h-4 text-cyan-300" />} source="campaigns.sent_at (KST)" wide>
+            {hourWeekdayMaxSent === 0 ? (
+              <div className="text-center text-xs text-white/40 py-8">발송 데이터 없음</div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="text-[10px] mx-auto">
+                  <thead>
+                    <tr>
+                      <th className="w-10 text-white/40 font-medium">시</th>
+                      {WEEKDAY_LABEL.map((w) => (<th key={w} className="w-10 text-white/40 font-medium">{w}</th>))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {Array.from({ length: 24 }).map((_, h) => (
+                      <tr key={h}>
+                        <td className="text-white/40 font-mono text-center">{h}시</td>
+                        {Array.from({ length: 7 }).map((_, w) => {
+                          const cell = snapshot.byHourWeekday.find((c) => c.hour === h && c.weekday === w);
+                          const intensity = hourWeekdayMaxSent > 0 && cell ? cell.sent / hourWeekdayMaxSent : 0;
+                          return (
+                            <td
+                              key={w}
+                              className="w-10 h-7 text-center text-white/80 font-mono"
+                              style={{ backgroundColor: intensity > 0 ? `rgba(167, 139, 250, ${0.15 + intensity * 0.7})` : 'rgba(255,255,255,0.03)' }}
+                              title={cell ? `${formatNum(cell.sent)}건 성공률 ${formatPct(cell.successRate)}` : '0건'}
+                            >
+                              {cell && cell.sent > 0 ? cell.sent : ''}
+                            </td>
+                          );
+                        })}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </PerfModal>
+
+          {/* 퍼널 모달 */}
+          <PerfModal open={activeModal === 'funnel'} onClose={closeModal} title="자사몰 퍼널" icon={<Activity className="w-4 h-4 text-emerald-300" />} source="cdp_events (page_view → cart_add → purchase)" wide>
+            {snapshot.funnelStats && snapshot.funnelStats.viewCount > 0 ? (
+              <>
+                <div className="space-y-2">
+                  <FunnelBar label="조회 (page_view)" count={snapshot.funnelStats.viewCount} max={snapshot.funnelStats.viewCount} color="#6366f1" />
+                  <FunnelBar label="장바구니 (cart_add)" count={snapshot.funnelStats.cartAddCount} max={snapshot.funnelStats.viewCount} color="#06b6d4" />
+                  <FunnelBar label="위시 (wishlist_add)" count={snapshot.funnelStats.wishlistAddCount} max={snapshot.funnelStats.viewCount} color="#a78bfa" />
+                  <FunnelBar label="구매 (purchase)" count={snapshot.funnelStats.purchaseCount} max={snapshot.funnelStats.viewCount} color="#10b981" />
+                </div>
+                <div className="mt-3 grid grid-cols-3 gap-2 text-[10px]">
+                  <div className="p-2 bg-white/5 rounded text-center">
+                    <div className="text-white/40">장바구니 전환율</div>
+                    <div className="text-cyan-300 font-mono font-bold">{formatPct(snapshot.funnelStats.cartConversionRate)}</div>
+                  </div>
+                  <div className="p-2 bg-white/5 rounded text-center">
+                    <div className="text-white/40">구매 전환율</div>
+                    <div className="text-emerald-300 font-mono font-bold">{formatPct(snapshot.funnelStats.purchaseConversionRate)}</div>
+                  </div>
+                  <div className="p-2 bg-white/5 rounded text-center">
+                    <div className="text-white/40">장바구니 → 구매</div>
+                    <div className="text-fuchsia-300 font-mono font-bold">{formatPct(snapshot.funnelStats.cartToPurchaseRate)}</div>
+                  </div>
+                </div>
+              </>
+            ) : (
+              <CdpUpsellCard onConnect={() => navigate('/cdp-settings')} lines="조회 → 장바구니 → 구매 전환 퍼널을 자사몰 연동 시 시각화합니다." />
+            )}
+          </PerfModal>
+
+          {/* 코호트 모달 */}
+          <PerfModal open={activeModal === 'cohort'} onClose={closeModal} title="가입월별 잔존" icon={<Users className="w-4 h-4 text-violet-300" />} source={cohort?.source || 'customers.created_at + recent_purchase_date'} wide>
+            {cohort && cohort.cohorts.length > 0 ? (
+              <>
+                <ResponsiveContainer width="100%" height={240}>
+                  <LineChart data={cohortChartData}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.1)" />
+                    <XAxis dataKey="month" stroke="rgba(255,255,255,0.5)" fontSize={10} />
+                    <YAxis stroke="rgba(255,255,255,0.5)" fontSize={10} unit="%" />
+                    <Tooltip contentStyle={{ backgroundColor: '#0f172a', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 8, fontSize: 12 }} />
+                    <Legend wrapperStyle={{ fontSize: 11 }} />
+                    <Line type="monotone" dataKey="M1" name="가입 후 30일" stroke="#06b6d4" strokeWidth={2} dot={{ r: 3 }} />
+                    <Line type="monotone" dataKey="M3" name="가입 후 90일" stroke="#a78bfa" strokeWidth={2} dot={{ r: 3 }} />
+                    <Line type="monotone" dataKey="M6" name="가입 후 180일" stroke="#f59e0b" strokeWidth={2} dot={{ r: 3 }} />
+                  </LineChart>
+                </ResponsiveContainer>
+                <div className="mt-2 text-[11px] text-white/60">
+                  평균 30일 잔존: <span className="text-cyan-300 font-mono">{formatPct(cohort.avgM1Rate)}</span> · 90일 잔존: <span className="text-violet-300 font-mono">{formatPct(cohort.avgM3Rate)}</span>
+                </div>
+              </>
+            ) : (
+              <div className="text-center text-xs text-white/40 py-8">가입 · 구매 데이터가 쌓이면 잔존 곡선이 활성됩니다.</div>
+            )}
+          </PerfModal>
+
+          {/* 벤치마크 모달 */}
+          <PerfModal open={activeModal === 'benchmark'} onClose={closeModal} title="업계 벤치마크" icon={<BarChart3 className="w-4 h-4 text-amber-300" />} source={benchmark?.source || '같은 요금제 회사 평균 (anonymized)'} wide>
+            {benchmark && benchmark.peerCompanyCount > 0 ? (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                {benchmark.metrics.map((m) => (
+                  <div key={m.label} className="p-3 bg-white/5 border border-white/10 rounded-lg">
+                    <div className="flex items-center justify-between mb-1">
+                      <div className="text-[11px] text-white/60">{m.label}</div>
+                      <span className={`text-[10px] font-mono font-bold ${m.betterThan ? 'text-emerald-300' : 'text-rose-300'}`}>
+                        {m.diffPct >= 0 ? '+' : ''}{m.diffPct.toFixed(1)}%
+                      </span>
+                    </div>
+                    <div className="flex items-baseline gap-2 flex-wrap">
+                      <div className="text-base font-mono font-bold text-white">
+                        {m.companyValue < 1 && m.companyValue > 0 ? formatPct(m.companyValue) : formatNum(m.companyValue)}
+                      </div>
+                      <div className="text-[10px] text-white/40">vs 평균 <span className="font-mono text-white/60">
+                        {m.industryAvg < 1 && m.industryAvg > 0 ? formatPct(m.industryAvg) : formatNum(m.industryAvg)}
+                      </span></div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="text-center text-xs text-white/40 py-8">{benchmark?.source || '같은 요금제 다른 회사가 없어 벤치마크 비활성'}</div>
+            )}
+          </PerfModal>
+
+          {/* 추세 모달 */}
+          <PerfModal open={activeModal === 'trend'} onClose={closeModal} title={`${period} 일별 추세`} icon={<TrendingUp className="w-4 h-4 text-emerald-300" />} source="campaigns (KST 일별 그룹)" wide>
+            {trendData.length === 0 || trendData.every((d) => d.current === 0 && d.previous === 0) ? (
+              <div className="text-center text-xs text-white/40 py-8">발송 데이터 없음</div>
+            ) : (
+              <>
+                <div className="mb-3 flex items-center gap-3 text-[11px]">
+                  <span className="text-white/50">성공률 <span className="text-emerald-300 font-mono">{formatPct(snapshot.successRate.current)}</span></span>
+                  <span className={`font-mono ${snapshot.successRate.betterThan ? 'text-emerald-300' : 'text-rose-300'}`}>직전 대비 {formatDiff(snapshot.successRate)}</span>
+                </div>
+                <ResponsiveContainer width="100%" height={240}>
+                  <LineChart data={trendData}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.1)" />
+                    <XAxis dataKey="date" stroke="rgba(255,255,255,0.5)" fontSize={10} />
+                    <YAxis stroke="rgba(255,255,255,0.5)" fontSize={10} />
+                    <Tooltip contentStyle={{ backgroundColor: '#0f172a', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 8, fontSize: 12 }} />
+                    <Legend wrapperStyle={{ fontSize: 11 }} />
+                    <Line type="monotone" dataKey="current" name="현재" stroke="#a78bfa" strokeWidth={2} dot={false} />
+                    <Line type="monotone" dataKey="previous" name="직전" stroke="#64748b" strokeWidth={2} dot={false} strokeDasharray="4 4" />
+                  </LineChart>
+                </ResponsiveContainer>
+              </>
+            )}
+          </PerfModal>
+
+          {/* AI 진단 모달 */}
+          <PerfModal open={activeModal === 'diagnosis'} onClose={closeModal} title="AI 자율 진단" icon={<Brain className="w-4 h-4 text-violet-300" />} source={explanation ? Array.from(new Set(explanation.factors.map((f) => f.sourceField))).slice(0, 3).join(' · ') : '최근 30일 campaigns · cdp_events'} wide>
+            {explainLoading ? (
+              <div className="flex flex-col items-center gap-2 py-10 text-white/50">
+                <Loader2 className="w-6 h-6 animate-spin text-violet-300" />
+                <div className="text-xs">AI 분석 중 (10~20초)</div>
+              </div>
+            ) : explanation ? (
+              <div className="space-y-4">
+                <div className="flex items-center gap-2">
+                  <span className="text-sm text-white/80">전체 성과 스코어</span>
+                  <span className="text-lg font-bold text-violet-200 font-mono">{explanation.overallScore}</span>
+                  <span className="text-xs text-white/40">/100</span>
+                </div>
+                <p className="text-sm text-white/80 leading-relaxed p-3 bg-violet-500/10 border border-violet-400/20 rounded-xl">{explanation.topInsight}</p>
+                {explanation.factors.length > 0 && (
+                  <div>
+                    <div className="text-xs font-semibold text-white/60 mb-2">영향 요인 (성과를 이끈 / 새는 곳)</div>
+                    <div className="space-y-1.5">
+                      {explanation.factors.map((f, i) => {
+                        const dirColor = f.direction === 'positive' ? 'bg-emerald-400' : f.direction === 'negative' ? 'bg-rose-400' : 'bg-amber-400';
+                        const dirTextColor = f.direction === 'positive' ? 'text-emerald-300' : f.direction === 'negative' ? 'text-rose-300' : 'text-amber-300';
+                        return (
+                          <div key={i} className="grid grid-cols-12 gap-2 items-center text-[11px]">
+                            <div className="col-span-3 text-white/70 font-medium truncate" title={f.label}>{f.label}</div>
+                            <div className="col-span-4">
+                              <div className="h-2 bg-white/10 rounded-full overflow-hidden">
+                                <div className={`h-full ${dirColor}`} style={{ width: `${f.impactScore * 100}%` }} />
+                              </div>
+                            </div>
+                            <div className={`col-span-1 text-right font-mono ${dirTextColor}`}>{(f.impactScore * 100).toFixed(0)}%</div>
+                            <div className="col-span-4 text-[10px] text-white/50 truncate" title={f.detail}>{f.detail}</div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+                {explanation.recommendation && (
+                  <div className="p-3 bg-violet-500/10 border border-violet-400/30 rounded-xl text-[12px] text-violet-100">
+                    <strong>1순위 권장:</strong> {explanation.recommendation}
+                  </div>
+                )}
+                <div>
+                  <div className="text-xs font-semibold text-white/60 mb-2">제안 → 1-click 액션</div>
+                  <div className="space-y-2">
+                    <QuickActionRow icon={<AlertTriangle className="w-4 h-4" />} title="채널 ROI 회복" desc="저성과 채널 회복 캠페인" color="rose" loading={quickActionLoading === 'channel_recovery'} disabled={snapshot.totalCampaigns.current === 0} onClick={() => handleQuickAction('channel_recovery')} />
+                    <QuickActionRow icon={<Clock className="w-4 h-4" />} title="시간대 최적화" desc="저성과 시간대 최적화 캠페인" color="emerald" loading={quickActionLoading === 'time_optimization'} disabled={snapshot.totalCampaigns.current === 0} onClick={() => handleQuickAction('time_optimization')} />
+                    <QuickActionRow icon={<TrendingUp className="w-4 h-4" />} title="최고 성과 복제" desc="top 캠페인 복제 + 강화" color="amber" loading={quickActionLoading === 'top_performer_replication'} disabled={snapshot.topCampaigns.length === 0} onClick={() => handleQuickAction('top_performer_replication')} />
+                  </div>
+                </div>
+                <p className="text-[10px] text-white/30 italic">AI 자율 진단은 최근 30일 데이터 기준입니다.</p>
+              </div>
+            ) : (
+              <div className="text-center py-8">
+                <button onClick={loadExplanation} className="px-4 py-2 bg-violet-500/30 hover:bg-violet-500/50 text-violet-100 rounded-lg text-sm font-medium">AI 자율 진단 시작 →</button>
+              </div>
+            )}
+          </PerfModal>
+
+          {/* 캠페인 드릴다운 모달 */}
+          <PerfModal open={activeModal === 'campaigns'} onClose={closeModal} title="캠페인 드릴다운" icon={<Sparkles className="w-4 h-4 text-fuchsia-300" />} source="campaigns + MySQL 큐 직접 집계 (D144 기준)" wide>
+            <div className="flex flex-col md:flex-row gap-2 mb-3">
+              <form onSubmit={handleSearch} className="flex-1 flex gap-2">
+                <div className="relative flex-1">
+                  <Search className="w-4 h-4 absolute left-2.5 top-1/2 -translate-y-1/2 text-white/40" />
+                  <input
+                    value={searchInput}
+                    onChange={(e) => setSearchInput(e.target.value)}
+                    placeholder="캠페인명 검색"
+                    className="w-full pl-8 pr-3 py-1.5 bg-slate-800 border border-white/10 rounded text-xs text-white placeholder-white/30 focus:outline-none focus:border-violet-400/50"
+                  />
+                </div>
+                <button type="submit" className="px-3 py-1.5 bg-violet-500/30 hover:bg-violet-500/50 text-violet-100 rounded text-xs font-medium">검색</button>
+              </form>
+              <div className="flex items-center gap-2 flex-wrap">
+                <div className="relative">
+                  <Filter className="w-3 h-3 absolute left-2 top-1/2 -translate-y-1/2 text-white/40 pointer-events-none" />
+                  <select value={filterChannel} onChange={(e) => { setFilterChannel(e.target.value); setCampaignsPage(1); }} className="pl-6 pr-7 py-1.5 bg-slate-800 border border-white/10 rounded text-xs text-white focus:outline-none focus:border-violet-400/50 appearance-none">
+                    <option value="all">전체 채널</option>
+                    <option value="sms">SMS</option>
+                    <option value="lms">LMS</option>
+                    <option value="mms">MMS</option>
+                    <option value="kakao">KAKAO</option>
+                  </select>
+                </div>
+                <div className="relative">
+                  <Filter className="w-3 h-3 absolute left-2 top-1/2 -translate-y-1/2 text-white/40 pointer-events-none" />
+                  <select value={filterAd} onChange={(e) => { setFilterAd(e.target.value); setCampaignsPage(1); }} className="pl-6 pr-7 py-1.5 bg-slate-800 border border-white/10 rounded text-xs text-white focus:outline-none focus:border-violet-400/50 appearance-none">
+                    <option value="all">광고/안내</option>
+                    <option value="ad">광고만</option>
+                    <option value="info">안내만</option>
+                  </select>
+                </div>
+                <div className="relative">
+                  <ArrowUpDown className="w-3 h-3 absolute left-2 top-1/2 -translate-y-1/2 text-white/40 pointer-events-none" />
+                  <select value={sort} onChange={(e) => { setSort(e.target.value); setCampaignsPage(1); }} className="pl-6 pr-7 py-1.5 bg-slate-800 border border-white/10 rounded text-xs text-white focus:outline-none focus:border-violet-400/50 appearance-none">
+                    <option value="sent_desc">발송 ↓</option>
+                    <option value="success_rate_desc">성공률 ↓</option>
+                    <option value="sent_at_desc">최근 ↓</option>
+                    <option value="sent_at_asc">오래된 순</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+
+            {campaignsLoading ? (
+              <div className="flex items-center justify-center py-8"><Loader2 className="w-5 h-5 animate-spin text-violet-400" /></div>
+            ) : campaigns.length === 0 ? (
+              <div className="text-center py-8 text-white/40 text-xs">검색/필터 결과 없음</div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs">
+                  <thead className="bg-white/5 border-b border-white/10">
+                    <tr className="text-left text-white/60">
+                      <th className="px-3 py-2 font-medium">캠페인</th>
+                      <th className="px-3 py-2 font-medium text-center">채널</th>
+                      <th className="px-3 py-2 font-medium text-right">발송</th>
+                      <th className="px-3 py-2 font-medium text-right">성공률</th>
+                      <th className="px-3 py-2 font-medium text-right">비용</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {campaigns.map((c) => (
+                      <tr key={c.id} className="border-b border-white/5 hover:bg-white/5">
+                        <td className="px-3 py-2">
+                          <div className="text-white/80">{c.name}</div>
+                          <div className="text-[10px] text-white/40">{new Date(c.sentAt).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' })}</div>
+                        </td>
+                        <td className="px-3 py-2 text-center">
+                          <span className="text-[10px] px-1.5 py-0.5 bg-violet-500/20 text-violet-300 rounded font-mono">{c.messageType}</span>
+                          {c.isAd && <span className="text-[10px] px-1 py-0.5 ml-1 bg-amber-500/20 text-amber-300 rounded">광고</span>}
+                        </td>
+                        <td className="px-3 py-2 text-right font-mono">{formatNum(c.sent)}</td>
+                        <td className="px-3 py-2 text-right font-mono text-emerald-300">{formatPct(c.successRate)}</td>
+                        <td className="px-3 py-2 text-right font-mono text-amber-300">{formatWon(c.cost)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            {campaignsTotalPages > 1 && (
+              <div className="mt-3 flex items-center justify-between text-[11px] text-white/50">
+                <div>전체 {formatNum(campaignsTotal)}건</div>
+                <div className="flex items-center gap-2">
+                  <button onClick={() => setCampaignsPage(Math.max(1, campaignsPage - 1))} disabled={campaignsPage === 1} className="p-1 hover:bg-white/5 rounded disabled:opacity-30"><ChevronLeft className="w-4 h-4" /></button>
+                  <span className="font-mono">{campaignsPage} / {campaignsTotalPages}</span>
+                  <button onClick={() => setCampaignsPage(Math.min(campaignsTotalPages, campaignsPage + 1))} disabled={campaignsPage === campaignsTotalPages} className="p-1 hover:bg-white/5 rounded disabled:opacity-30"><ChevronRight className="w-4 h-4" /></button>
+                </div>
+              </div>
+            )}
+          </PerfModal>
+        </>
+      )}
     </div>
   );
 }
 
 // ════════════════════════════════════════════════════════════════════
-// 컴포넌트
+// 인라인 컴포넌트
 // ════════════════════════════════════════════════════════════════════
 
-function SummaryMetricCard({
-  label, value, metric, icon,
+function HeadlineKpiCard({
+  label, value, metric, icon, accent, sub, onClick,
 }: {
   label: string;
   value: string;
-  metric: PerformanceMetricV2;
+  metric?: PerformanceMetricV2;
   icon: React.ReactNode;
+  accent: 'violet' | 'emerald' | 'cyan' | 'amber';
+  sub?: string;
+  onClick: () => void;
 }) {
-  const diffColor = metric.diffPct === 0 ? 'text-white/40' : metric.betterThan ? 'text-emerald-300' : 'text-rose-300';
-  const arrow = metric.diffPct === 0 ? '─' : metric.betterThan ? '↑' : '↓';
+  const ring: Record<string, string> = {
+    violet: 'hover:border-violet-400/50', emerald: 'hover:border-emerald-400/50',
+    cyan: 'hover:border-cyan-400/50', amber: 'hover:border-amber-400/50',
+  };
+  const iconBg: Record<string, string> = {
+    violet: 'bg-violet-500/20 text-violet-300', emerald: 'bg-emerald-500/20 text-emerald-300',
+    cyan: 'bg-cyan-500/20 text-cyan-300', amber: 'bg-amber-500/20 text-amber-300',
+  };
+  const diffColor = !metric ? '' : metric.diffPct === 0 ? 'text-white/40' : metric.betterThan ? 'text-emerald-300' : 'text-rose-300';
+  const arrow = !metric ? '' : metric.diffPct === 0 ? '─' : metric.betterThan ? '↑' : '↓';
   return (
-    <div className="p-3 bg-white/5 rounded-lg">
-      <div className="flex items-center gap-1.5 text-[10px] text-white/40 mb-1">
-        {icon}
-        <span>{label}</span>
+    <button onClick={onClick} className={`text-left p-4 md:p-5 bg-white/5 border border-white/10 rounded-2xl transition-colors ${ring[accent]}`}>
+      <div className="flex items-center gap-2 mb-2">
+        <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${iconBg[accent]}`}>{icon}</div>
+        <span className="text-xs text-white/50">{label}</span>
       </div>
-      <div className="text-base md:text-lg font-bold text-white truncate" title={value}>{value}</div>
-      <div className={`text-[10px] font-mono ${diffColor}`}>
-        {arrow} {metric.diffPct === 0 ? '변동 없음' : `${metric.diffPct >= 0 ? '+' : ''}${metric.diffPct.toFixed(1)}%`}
+      <div className="text-2xl md:text-3xl font-bold text-white truncate" title={value}>{value}</div>
+      <div className="flex items-center gap-2 mt-1 flex-wrap">
+        {metric && <span className={`text-[11px] font-mono ${diffColor}`}>{arrow} {formatDiff(metric)}</span>}
+        {sub && <span className="text-[10px] text-white/40">{sub}</span>}
+      </div>
+    </button>
+  );
+}
+
+function AiDiagnosisLine({
+  explanation, loading, onOpen,
+}: {
+  explanation: PerformanceExplanation | null;
+  loading: boolean;
+  onOpen: () => void;
+}) {
+  return (
+    <div className="p-4 bg-gradient-to-br from-violet-500/15 via-fuchsia-500/10 to-indigo-500/15 border border-violet-400/30 rounded-2xl">
+      <div className="flex items-start gap-3">
+        <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-violet-400 to-fuchsia-500 flex items-center justify-center flex-shrink-0">
+          <Sparkles className="w-4 h-4 text-white" />
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 mb-1">
+            <span className="text-sm font-medium text-violet-100">AI 자율 진단</span>
+            {explanation && <span className="text-[10px] px-1.5 py-0.5 rounded bg-violet-500/30 text-violet-200 border border-violet-400/30 font-mono">{explanation.overallScore}/100</span>}
+          </div>
+          {explanation ? (
+            <>
+              <p className="text-xs text-white/80 leading-relaxed">{explanation.topInsight}</p>
+              <button onClick={onOpen} className="mt-1.5 text-[11px] text-violet-300 hover:text-violet-200 underline-offset-2 hover:underline">자세히 보기 →</button>
+            </>
+          ) : loading ? (
+            <div className="text-xs text-white/60 flex items-center gap-1.5"><Loader2 className="w-3 h-3 animate-spin" /> AI 분석 중 (10~20초)</div>
+          ) : (
+            <button onClick={onOpen} className="text-xs text-violet-200 hover:text-violet-100 underline-offset-2 hover:underline">AI 자율 진단 시작 →</button>
+          )}
+          <p className="mt-2 text-[10px] text-white/30 italic">Data source — 최근 30일 campaigns · cdp_events 기반 AI 진단</p>
+        </div>
       </div>
     </div>
   );
 }
 
-function QuickActionCard({
+function SummaryChip({
+  icon, label, summary, accent, badge, onClick,
+}: {
+  icon: React.ReactNode; label: string; summary: string;
+  accent: string; badge?: string; onClick: () => void;
+}) {
+  return (
+    <button onClick={onClick} className="flex items-center gap-2 px-3 py-2 bg-white/5 border border-white/10 rounded-xl hover:bg-white/10 hover:border-white/20 transition-colors text-left flex-shrink-0">
+      <span className={accent}>{icon}</span>
+      <span className="flex flex-col">
+        <span className="text-xs font-medium text-white/80 flex items-center gap-1">
+          {label}
+          {badge && <span className="text-[9px] px-1 py-0.5 rounded bg-violet-500/20 text-violet-300">{badge}</span>}
+        </span>
+        <span className="text-[10px] text-white/40">{summary}</span>
+      </span>
+    </button>
+  );
+}
+
+function QuickActionRow({
   icon, title, desc, color, loading, disabled, onClick,
 }: {
   icon: React.ReactNode;
@@ -1195,58 +1295,68 @@ function QuickActionCard({
   disabled: boolean;
   onClick: () => void;
 }) {
-  const colorMap: Record<string, { bg: string; border: string; text: string; iconBg: string; iconText: string; btn: string }> = {
-    rose: { bg: 'bg-rose-500/10', border: 'border-rose-400/30', text: 'text-rose-100', iconBg: 'bg-rose-500/30', iconText: 'text-rose-200', btn: 'bg-rose-500/30 hover:bg-rose-500/50 text-rose-50' },
-    emerald: { bg: 'bg-emerald-500/10', border: 'border-emerald-400/30', text: 'text-emerald-100', iconBg: 'bg-emerald-500/30', iconText: 'text-emerald-200', btn: 'bg-emerald-500/30 hover:bg-emerald-500/50 text-emerald-50' },
-    amber: { bg: 'bg-amber-500/10', border: 'border-amber-400/30', text: 'text-amber-100', iconBg: 'bg-amber-500/30', iconText: 'text-amber-200', btn: 'bg-amber-500/30 hover:bg-amber-500/50 text-amber-50' },
+  const c: Record<string, { border: string; iconBg: string }> = {
+    rose: { border: 'border-l-rose-400/60', iconBg: 'bg-rose-500/20 text-rose-300' },
+    emerald: { border: 'border-l-emerald-400/60', iconBg: 'bg-emerald-500/20 text-emerald-300' },
+    amber: { border: 'border-l-amber-400/60', iconBg: 'bg-amber-500/20 text-amber-300' },
   };
-  const c = colorMap[color];
+  const s = c[color];
   return (
-    <div className={`p-4 ${c.bg} border ${c.border} rounded-xl`}>
-      <div className="flex items-start gap-2.5 mb-2">
-        <div className={`w-9 h-9 rounded-lg ${c.iconBg} flex items-center justify-center flex-shrink-0`}>
-          <span className={c.iconText}>{icon}</span>
-        </div>
-        <div className="flex-1 min-w-0">
-          <div className={`text-sm font-semibold ${c.text}`}>{title}</div>
-        </div>
+    <button
+      onClick={onClick}
+      disabled={loading || disabled}
+      className={`w-full flex items-center gap-2.5 p-2.5 bg-white/5 border border-white/10 border-l-2 ${s.border} rounded-lg hover:bg-white/10 disabled:opacity-30 disabled:cursor-not-allowed transition-colors text-left`}
+    >
+      <div className={`w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 ${s.iconBg}`}>{icon}</div>
+      <div className="flex-1 min-w-0">
+        <div className="text-xs font-semibold text-white/85">{title}</div>
+        <div className="text-[10px] text-white/50 truncate">{desc}</div>
       </div>
-      <div className="text-[11px] text-white/60 leading-relaxed mb-2.5">{desc}</div>
-      <button
-        onClick={onClick}
-        disabled={loading || disabled}
-        className={`w-full px-3 py-1.5 ${c.btn} disabled:opacity-30 disabled:cursor-not-allowed rounded text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors`}
-      >
-        {loading ? (
-          <><Loader2 className="w-3 h-3 animate-spin" /> 준비 중</>
-        ) : (
-          <><Sparkles className="w-3 h-3" /> AI 자동 마케팅 진입</>
-        )}
-      </button>
+      {loading ? <Loader2 className="w-3.5 h-3.5 animate-spin text-white/50 flex-shrink-0" /> : <ChevronRight className="w-3.5 h-3.5 text-white/40 flex-shrink-0" />}
+    </button>
+  );
+}
+
+function PerfModal({
+  open, title, icon, source, onClose, children, wide,
+}: {
+  open: boolean; title: string; icon: React.ReactNode; source?: string;
+  onClose: () => void; children: React.ReactNode; wide?: boolean;
+}) {
+  useEffect(() => {
+    if (!open) return;
+    const h = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', h);
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => { window.removeEventListener('keydown', h); document.body.style.overflow = prev; };
+  }, [open, onClose]);
+  if (!open) return null;
+  return (
+    <div
+      className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-sm"
+      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
+    >
+      <div className={`w-full ${wide ? 'max-w-3xl' : 'max-w-xl'} max-h-[calc(100vh-2rem)] flex flex-col bg-slate-900 border border-white/10 rounded-2xl shadow-2xl`}>
+        <div className="flex items-center gap-2 px-5 py-3.5 border-b border-white/10 flex-shrink-0">
+          {icon}
+          <h2 className="text-sm font-semibold text-white flex-1">{title}</h2>
+          <button onClick={onClose} aria-label="닫기" className="p-1.5 rounded-lg hover:bg-white/10 text-white/60"><X className="w-4 h-4" /></button>
+        </div>
+        <div className="p-5 overflow-y-auto flex-1">{children}</div>
+        {source && <div className="px-5 py-2.5 border-t border-white/10 text-[10px] text-white/30 italic flex-shrink-0">Data source — {source}</div>}
+      </div>
     </div>
   );
 }
 
-function ChartCard({
-  title, source, icon, children,
-}: {
-  title: string;
-  source?: string;
-  icon: React.ReactNode;
-  children: React.ReactNode;
-}) {
+function CdpUpsellCard({ onConnect, lines }: { onConnect: () => void; lines: string }) {
   return (
-    <div className="bg-white/5 border border-white/10 rounded-xl overflow-hidden">
-      <div className="px-4 py-2.5 border-b border-white/10 flex items-center gap-1.5">
-        {icon}
-        <span className="text-sm font-semibold">{title}</span>
-      </div>
-      <div className="p-4">
-        {children}
-        {source && (
-          <div className="text-[10px] text-white/30 italic mt-2 truncate" title={source}>Data source — {source}</div>
-        )}
-      </div>
+    <div className="p-6 bg-gradient-to-br from-cyan-500/10 to-violet-500/10 border border-cyan-400/30 rounded-xl text-center">
+      <Database className="w-8 h-8 mx-auto text-cyan-300 mb-2" />
+      <div className="text-sm font-semibold text-white mb-1">자사몰 연동하면 보입니다</div>
+      <div className="text-xs text-white/60 mb-3">{lines}</div>
+      <button onClick={onConnect} className="px-3 py-1.5 bg-cyan-500/30 hover:bg-cyan-500/50 text-cyan-50 rounded text-xs font-semibold">자사몰 연동 진입 →</button>
     </div>
   );
 }

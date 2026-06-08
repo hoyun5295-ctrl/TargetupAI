@@ -107,7 +107,17 @@
 
 ---
 
-### 🟢 2026-06-07 (최신) — 발송 버그 3건 수정 (버그2·3 완료 / 버그1 부분 · 전부 미배포)
+### 🟢 2026-06-08 (최신) — 발송버그1 마무리 + 체험크레딧 정리 + AI게이팅 스타터화 + AI Operator 소개 메뉴 + 로그인 팝업 교체 (전부 배포)
+> **① 발송버그1(알림톡 강조 title 4경로 공통 CT 통일 + 여정 senderkey·채널추가형 0=정상) ② 체험만료 크레딧 정리(base만 0·purchased 불가침)+강등워커 자동리셋 ③ AI 게이팅 베이직→스타터 ④ AI Operator 소개 메뉴(매뉴얼 옆·모든 요금제) ⑤ 로그인 팝업=오픈 기념 구독할인(12개월 약정 시 2개월 무료) 교체. 전부 배포.**
+> - **①**: `utils/alimtalk-emphasize.ts buildAlimtalkEtcJson`({senderkey,title}·본문동일 #{변수}치환·치환함수 주입)로 직접/staging/여정/자동 4경로 통일 + 여정 LEFT JOIN profile_key. 채널추가형 80149=message_type BA(이름만)·AD는 카카오 자동=버그 아님. TDD emphasize7. 상세=`memory/project_2026_0607_alimtalk_emphasize_ct.md`.
+> - **②③**: 크레딧 2버킷 base(체험600 매월리셋) vs purchased(구매=돈). trial-downgrade-worker가 강등 시 base 안 지움→FREE/trial_expired 64곳 base 38,394·purchased 0 → SQL base=0(Harold)+강등 UPDATE에 base 리셋 추가. 게이팅=백엔드 canUseFeature는 이미 isUnsubscribed(스타터+)·프론트가 ai_messaging_enabled 플래그(STARTER=f)로 잠금→SQL STARTER 플래그 true(Harold)+프론트 "베이직"→"스타터" 14곳. 상세=`memory/project_2026_0608_credit_cleanup_gating.md`.
+> - **④⑤**: `DashboardHeader` "AI Operator 소개"(새 탭→/about-ai-operator.html·게이팅 없음) + 로그인 팝업 `AiGuidePopup`→`OpenPromoPopup`(오픈기념 구독할인·셀프게이팅·24h dismiss·옛 파일 삭제) 교체. 마스터프롬프트=`docs/promo-popup-master-prompt.md`. 상세=`memory/project_2026_0608_promo_popup_menu.md`.
+> - 검증: backend tsc 0 · frontend tsc 0 · TDD 29(emphasize7/button9/channel-split13). SQL 3건 Harold 직접(크레딧 64행·STARTER 플래그·게이팅 확인).
+> - **★ 다음 세션 = 성과 리포트(`/performance`) 전면 재설계 구현** (설계 문서 완료·미구현). 성과리포트=과거 성과 분석(자율예측=미래 예측과 다름). 분석 서사(결과→원인→제안)·헤드라인 KPI4+AI 한줄 진단·요약 바 클릭→모달·자사몰 적응형(hasCdpIntegration)·PDF 풀 보고서. 백엔드 데이터 완비=프론트 재구성 중심. 설계=`docs/superpowers/specs/2026-06-08-performance-report-redesign-design.md`.
+
+---
+
+### 🟢 2026-06-07 — 발송 버그 3건 수정 (버그2·3 완료 / 버그1 부분 · 전부 미배포)
 > **① 알림톡 버튼/강조 ② 발송내역 발송일 검색기준 ③ 대체발송 SMS/LMS 정산구분. 버그2·3 코드 완료, 버그1 버튼 5경로+직접발송 강조 완료·나머지 경로 강조 title+채널추가형 buttons=0 조사 남음. 전부 미배포. 다음 세션 = 리포트 .md로 이어서.**
 > - 리포트(현 상태+남은 것+진입 명령어) = `docs/superpowers/handoffs/2026-06-07-send-bugs-report.md`.
 > - 검증: backend tsc OK · frontend tsc OK · TDD(alimtalk-button 9 · sms-channel-split 13).

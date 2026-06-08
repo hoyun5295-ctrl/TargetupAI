@@ -1363,8 +1363,22 @@ router.post('/operator/performance/report-pdf', async (req: Request, res: Respon
     await checkCredit(companyId, cost);
 
     const snapshot = await buildPerformanceSnapshotV2(companyId, period);
-    const companyRow = await query(`SELECT company_name FROM companies WHERE id = $1::uuid`, [companyId]);
-    const companyName = companyRow.rows[0]?.company_name || '';
+    const days = { '7d': 7, '14d': 14, '30d': 30, '90d': 90 }[period];
+    const companyMeta = await query(
+      `SELECT company_name, business_type, brand_name, brand_tone FROM companies WHERE id = $1::uuid`,
+      [companyId],
+    );
+    const companyInfo = companyMeta.rows[0] || {};
+    const companyName = companyInfo.company_name || '';
+    // 풀 보고서 부가 데이터 (실패 graceful — PDF 생성은 계속). AI 진단은 최근 30일 기준.
+    let explanation: Awaited<ReturnType<typeof explainPerformance>> | null = null;
+    let cohort: Awaited<ReturnType<typeof buildCohortRetention>> | null = null;
+    let benchmark: Awaited<ReturnType<typeof buildBenchmark>> | null = null;
+    let attribution: Awaited<ReturnType<typeof buildCampaignAttribution>> | null = null;
+    try { const sn = await buildPerformanceSnapshot(companyId); explanation = await explainPerformance(companyId, sn, companyInfo); } catch (e: any) { console.log('[report-pdf] explain skip:', e?.message); }
+    try { cohort = await buildCohortRetention(companyId, 12); } catch (e: any) { console.log('[report-pdf] cohort skip:', e?.message); }
+    try { benchmark = await buildBenchmark(companyId, days); } catch (e: any) { console.log('[report-pdf] benchmark skip:', e?.message); }
+    try { attribution = await buildCampaignAttribution(companyId, days); } catch (e: any) { console.log('[report-pdf] attribution skip:', e?.message); }
 
     // 차감 — 회사+기간+날짜 멱등(같은 날 같은 기간 재다운로드는 무료)
     const todayKst = kstDateTag(new Date());
@@ -1473,18 +1487,107 @@ router.post('/operator/performance/report-pdf', async (req: Request, res: Respon
       y += 12;
     }
 
-    // 요약 진단 (snapshot 수치 기반 — AI 호출 없음)
-    if (y > 690) { doc.addPage(); y = 50; }
-    const best = [...snapshot.byChannelROI].sort((a, b) => (b.roas || 0) - (a.roas || 0))[0];
-    setFont(true); doc.fontSize(12).fillColor(primary).text('요약 진단', 50, y); y += 18;
-    setFont(false); doc.fontSize(9).fillColor(dark);
-    const lines = [
-      `· 기간 추정 매출 ${won(snapshot.estimatedRevenue.current)} (직전 대비 ${dpct(snapshot.estimatedRevenue)})`,
-      best ? `· 최고 효율 채널: ${best.channel} (ROAS ${(best.roas || 0).toFixed(2)}x)` : '',
-      `· 평균 성공률 ${pctStr(snapshot.successRate.current)} · 활성 고객 ${(snapshot.activeCustomers.current || 0).toLocaleString()}명`,
-    ].filter(Boolean);
-    for (const ln of lines) { doc.text(ln, 50, y); y += 15; }
+    // AI 자율 진단 서사 (풀분석 — explanation 있으면 AI 서사, 없으면 snapshot 요약 fallback)
+    if (y > 660) { doc.addPage(); y = 50; }
+    setFont(true); doc.fontSize(13).fillColor(primary).text('AI 자율 진단', 50, y); y += 20;
+    if (explanation && explanation.topInsight) {
+      setFont(true); doc.fontSize(10).fillColor(dark).text(`전체 성과 스코어 ${explanation.overallScore}/100`, 50, y); y += 16;
+      setFont(false); doc.fontSize(9).fillColor(dark).text(explanation.topInsight, 50, y, { width: 495 }); y += 24;
+      if (explanation.factors.length > 0) {
+        setFont(true); doc.fontSize(9).fillColor(gray).text('영향 요인', 50, y); y += 14;
+        setFont(false); doc.fontSize(9);
+        for (const f of explanation.factors.slice(0, 6)) {
+          if (y > 740) { doc.addPage(); y = 50; }
+          const dir = f.direction === 'positive' ? '▲' : f.direction === 'negative' ? '▼' : '-';
+          doc.fillColor(dark).text(`${dir} ${f.label} (${Math.round(f.impactScore * 100)}%) — ${f.detail}`, 60, y, { width: 485 }); y += 14;
+        }
+        y += 4;
+      }
+      if (explanation.recommendation) {
+        setFont(true); doc.fontSize(9).fillColor(primary).text('1순위 권장', 50, y); y += 13;
+        setFont(false); doc.fontSize(9).fillColor(dark).text(explanation.recommendation, 60, y, { width: 485 }); y += 18;
+      }
+      setFont(false); doc.fontSize(7).fillColor(gray).text('AI 자율 진단은 최근 30일 데이터 기준입니다.', 50, y); y += 14;
+    } else {
+      const best = [...snapshot.byChannelROI].sort((a, b) => (b.roas || 0) - (a.roas || 0))[0];
+      setFont(false); doc.fontSize(9).fillColor(dark);
+      const lines = [
+        `· 기간 추정 매출 ${won(snapshot.estimatedRevenue.current)} (직전 대비 ${dpct(snapshot.estimatedRevenue)})`,
+        best ? `· 최고 효율 채널: ${best.channel} (ROAS ${(best.roas || 0).toFixed(2)}x)` : '',
+        `· 평균 성공률 ${pctStr(snapshot.successRate.current)} · 활성 고객 ${(snapshot.activeCustomers.current || 0).toLocaleString()}명`,
+      ].filter(Boolean);
+      for (const ln of lines) { doc.text(ln, 50, y); y += 15; }
+    }
     y += 10;
+
+    // 시간대 분석 (발송량 상위 5)
+    if (y > 690) { doc.addPage(); y = 50; }
+    setFont(true); doc.fontSize(13).fillColor(primary).text('시간대 분석', 50, y); y += 20;
+    const hourAgg = new Map<number, { sent: number; success: number }>();
+    for (const cell of snapshot.byHourWeekday) {
+      const a = hourAgg.get(cell.hour) || { sent: 0, success: 0 };
+      a.sent += cell.sent; a.success += Math.round(cell.sent * cell.successRate);
+      hourAgg.set(cell.hour, a);
+    }
+    const hourRows = Array.from(hourAgg.entries()).filter(([, a]) => a.sent > 0).sort((a, b) => b[1].sent - a[1].sent).slice(0, 5);
+    setFont(false); doc.fontSize(9);
+    if (hourRows.length === 0) { doc.fillColor(gray).text('발송 데이터 없음', 50, y); y += 16; }
+    else {
+      for (const [hour, a] of hourRows) {
+        const sr = a.sent > 0 ? a.success / a.sent : 0;
+        doc.fillColor(dark).text(`${hour}시 — 발송 ${a.sent.toLocaleString()}건 / 성공률 ${pctStr(sr)}`, 50, y); y += 15;
+      }
+    }
+    y += 12;
+
+    // 자사몰 퍼널
+    if (snapshot.funnelStats && snapshot.funnelStats.viewCount > 0) {
+      if (y > 700) { doc.addPage(); y = 50; }
+      const f = snapshot.funnelStats;
+      setFont(true); doc.fontSize(13).fillColor(primary).text('자사몰 퍼널', 50, y); y += 20;
+      setFont(false); doc.fontSize(9).fillColor(dark);
+      doc.text(`조회 ${f.viewCount.toLocaleString()} → 장바구니 ${f.cartAddCount.toLocaleString()} → 위시 ${f.wishlistAddCount.toLocaleString()} → 구매 ${f.purchaseCount.toLocaleString()}`, 50, y); y += 15;
+      doc.text(`장바구니 전환율 ${pctStr(f.cartConversionRate)} · 구매 전환율 ${pctStr(f.purchaseConversionRate)} · 장바구니→구매 ${pctStr(f.cartToPurchaseRate)}`, 50, y); y += 18;
+    }
+
+    // 캠페인 발송 후 기여
+    if (attribution && attribution.totalCampaigns > 0 && attribution.windows.length > 0) {
+      if (y > 700) { doc.addPage(); y = 50; }
+      setFont(true); doc.fontSize(13).fillColor(primary).text('캠페인 발송 후 기여', 50, y); y += 20;
+      setFont(false); doc.fontSize(9).fillColor(dark);
+      for (const w of attribution.windows) {
+        const line = attribution.hasCdpData
+          ? `발송 후 ${w.windowLabel} — CDP 구매 ${w.cdpPurchaseCount.toLocaleString()}건 / 매출 ${won(w.cdpRevenue)}`
+          : `발송 후 ${w.windowLabel} — 구매 고객 ${w.customerPurchaseCount.toLocaleString()}명 (CDP 미연동 추정)`;
+        doc.text(line, 50, y); y += 15;
+      }
+      y += 8;
+    }
+
+    // 가입월별 잔존 (코호트)
+    if (cohort && cohort.cohorts.length > 0) {
+      if (y > 700) { doc.addPage(); y = 50; }
+      setFont(true); doc.fontSize(13).fillColor(primary).text('가입월별 잔존', 50, y); y += 20;
+      setFont(false); doc.fontSize(9).fillColor(dark);
+      doc.text(`평균 30일 잔존율 ${pctStr(cohort.avgM1Rate)} · 90일 잔존율 ${pctStr(cohort.avgM3Rate)}`, 50, y); y += 15;
+      for (const c of cohort.cohorts.slice(0, 6)) {
+        doc.text(`${c.cohortMonth} — 가입 ${c.totalCustomers.toLocaleString()}명 / 30일 ${pctStr(c.m1Rate)} / 90일 ${pctStr(c.m3Rate)}`, 50, y); y += 14;
+      }
+      y += 8;
+    }
+
+    // 업계 벤치마크
+    if (benchmark && benchmark.peerCompanyCount > 0 && benchmark.metrics.length > 0) {
+      if (y > 700) { doc.addPage(); y = 50; }
+      setFont(true); doc.fontSize(13).fillColor(primary).text(`업계 벤치마크 (${benchmark.planName})`, 50, y); y += 20;
+      setFont(false); doc.fontSize(9).fillColor(dark);
+      for (const m of benchmark.metrics) {
+        const cv = m.companyValue < 1 && m.companyValue > 0 ? pctStr(m.companyValue) : Math.round(m.companyValue).toLocaleString();
+        const iv = m.industryAvg < 1 && m.industryAvg > 0 ? pctStr(m.industryAvg) : Math.round(m.industryAvg).toLocaleString();
+        doc.text(`${m.label} — 우리 ${cv} vs 업계 ${iv} (${m.diffPct >= 0 ? '+' : ''}${m.diffPct.toFixed(1)}%)`, 50, y); y += 14;
+      }
+      y += 8;
+    }
 
     // Source caption
     setFont(false); doc.fontSize(8).fillColor(gray).text(`Data source — ${snapshot.source} · ${today} 생성`, 50, y);
