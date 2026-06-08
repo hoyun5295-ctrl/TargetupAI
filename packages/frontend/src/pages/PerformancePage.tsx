@@ -16,6 +16,7 @@
  */
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
 import {
   BarChart, Bar, LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Legend,
@@ -597,15 +598,18 @@ export default function PerformancePage() {
               <Sparkles className="w-3.5 h-3.5" />
               풀분석 보고서
             </button>
-            <CreditConfirmModal
-              open={confirmReport}
-              source="orchestrate"
-              onConfirm={() => { setConfirmReport(false); startFullAnalysis(); }}
-              onCancel={() => setConfirmReport(false)}
-            />
+            {createPortal(
+              <CreditConfirmModal
+                open={confirmReport}
+                source="orchestrate"
+                onConfirm={() => { setConfirmReport(false); startFullAnalysis(); }}
+                onCancel={() => setConfirmReport(false)}
+              />,
+              document.body,
+            )}
 
             {/* 풀분석 설정 모달 — 기간 + 초점 + 제목 */}
-            {showSettings && (
+            {showSettings && createPortal(
               <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/60 backdrop-blur-sm px-4" onClick={() => setShowSettings(false)}>
                 <div className="w-full max-w-md bg-slate-900 border border-white/10 rounded-2xl shadow-2xl p-6" onClick={(e) => e.stopPropagation()}>
                   <div className="flex items-center gap-3">
@@ -646,11 +650,12 @@ export default function PerformancePage() {
                     <button onClick={() => { setShowSettings(false); setConfirmReport(true); }} className="flex-1 py-2.5 rounded-xl bg-gradient-to-r from-violet-500 to-fuchsia-500 hover:opacity-90 text-[13px] font-semibold text-white transition-opacity">분석 실행</button>
                   </div>
                 </div>
-              </div>
+              </div>,
+              document.body,
             )}
 
             {/* 풀분석 진행도 모달 — 실제 단계 폴링 */}
-            {showProgress && progress && (
+            {showProgress && progress && createPortal(
               <div className="fixed inset-0 z-[130] flex items-center justify-center bg-black/70 backdrop-blur-sm px-4">
                 <div className="w-full max-w-md bg-slate-900 border border-white/10 rounded-2xl shadow-2xl p-6">
                   <div className="flex items-center gap-3 mb-5">
@@ -679,7 +684,8 @@ export default function PerformancePage() {
                   </div>
                   <p className="text-[10px] text-white/30 mt-5 text-center">분석에는 보통 1~3분이 걸립니다. 창을 닫아도 진행됩니다.</p>
                 </div>
-              </div>
+              </div>,
+              document.body,
             )}
             <button
               onClick={load}
