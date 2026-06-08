@@ -4,21 +4,28 @@
 import type { buildPerformanceSnapshotV2 } from './next-action-advisor';
 import type { explainPerformance } from './performance-explainer';
 import type { buildCohortRetention } from './performance-cohort';
-import type { buildBenchmark } from './performance-benchmark';
 import type { buildCampaignAttribution } from './campaign-response-attribution';
+import type { SegmentAnalysis } from './segment-analysis';
+import type { MultiDimComparison, MessageAnalysis, ForecastResult } from './full-analysis-collect';
+import type { ActionItem } from './action-plan';
 
 export interface PerformancePdfData {
   snapshot: Awaited<ReturnType<typeof buildPerformanceSnapshotV2>>;
   explanation: Awaited<ReturnType<typeof explainPerformance>> | null;
   cohort: Awaited<ReturnType<typeof buildCohortRetention>> | null;
-  benchmark: Awaited<ReturnType<typeof buildBenchmark>> | null;
   attribution: Awaited<ReturnType<typeof buildCampaignAttribution>> | null;
   companyName: string;
   period: string;
+  // 풀분석 보강 섹션 (무료 report-pdf는 미전달 → optional). 각 값 없으면 섹션 생략·데이터부족 표기.
+  segment?: SegmentAnalysis | null;
+  multidim?: MultiDimComparison | null;
+  message?: MessageAnalysis | null;
+  forecast?: ForecastResult | null;
+  actionPlan?: ActionItem[] | null;
 }
 
 export function renderPerformanceReportPdf(doc: any, data: PerformancePdfData): void {
-  const { snapshot, explanation, cohort, benchmark, attribution, companyName, period } = data;
+  const { snapshot, explanation, cohort, attribution, companyName, period, segment, multidim, message, forecast, actionPlan } = data;
   const path = require('path');
   const fs = require('fs');
   const fontPath = path.join(__dirname, '../../fonts/malgun.ttf');
@@ -50,6 +57,16 @@ export function renderPerformanceReportPdf(doc: any, data: PerformancePdfData): 
 
   // 요약 6 metric (2열 × 3행)
   let y = 116;
+  // 익스큐티브 서머리 (explanation 1p 요약)
+  if (explanation && explanation.topInsight) {
+    setFont(true); doc.fontSize(13).fillColor(primary).text('익스큐티브 서머리', 50, y); y += 18;
+    setFont(true); doc.fontSize(10).fillColor(dark).text(`성과 스코어 ${explanation.overallScore}/100`, 50, y); y += 15;
+    setFont(false); doc.fontSize(9).fillColor(dark).text(explanation.topInsight, 50, y, { width: 495 }); y += 22;
+    if (explanation.recommendation) {
+      setFont(false); doc.fontSize(9).fillColor(primary).text(`1순위 권장: ${explanation.recommendation}`, 50, y, { width: 495 }); y += 18;
+    }
+    doc.moveTo(50, y).lineTo(545, y).strokeColor('#e5e7eb').stroke(); y += 14;
+  }
   setFont(true); doc.fontSize(13).fillColor(primary).text('요약', 50, y); y += 20;
   const metrics: Array<[string, string, any]> = [
     ['발송 캠페인', (snapshot.totalCampaigns.current || 0).toLocaleString(), snapshot.totalCampaigns],
@@ -200,18 +217,132 @@ export function renderPerformanceReportPdf(doc: any, data: PerformancePdfData): 
     y += 8;
   }
 
-  // 업계 벤치마크 (Plan 3에서 제거 예정)
-  if (benchmark && benchmark.peerCompanyCount > 0 && benchmark.metrics.length > 0) {
-    if (y > 700) { doc.addPage(); y = 50; }
-    setFont(true); doc.fontSize(13).fillColor(primary).text(`업계 벤치마크 (${benchmark.planName})`, 50, y); y += 20;
-    setFont(false); doc.fontSize(9).fillColor(dark);
-    for (const m of benchmark.metrics) {
-      const cv = m.companyValue < 1 && m.companyValue > 0 ? pctStr(m.companyValue) : Math.round(m.companyValue).toLocaleString();
-      const iv = m.industryAvg < 1 && m.industryAvg > 0 ? pctStr(m.industryAvg) : Math.round(m.industryAvg).toLocaleString();
-      doc.text(`${m.label} — 우리 ${cv} vs 업계 ${iv} (${m.diffPct >= 0 ? '+' : ''}${m.diffPct.toFixed(1)}%)`, 50, y); y += 14;
+  // 세그먼트 심층 (RFM + 등급 + LTV)
+  if (segment) {
+    if (y > 640) { doc.addPage(); y = 50; }
+    setFont(true); doc.fontSize(13).fillColor(primary).text('세그먼트 심층 분석', 50, y); y += 20;
+    setFont(false); doc.fontSize(9).fillColor(dark).text(`활성 고객 ${segment.totalActive.toLocaleString()}명`, 50, y); y += 16;
+    if (segment.rfm.sufficient) {
+      setFont(true); doc.fontSize(10).fillColor(dark).text(`RFM 세그먼트 (구매 데이터 보유 ${segment.rfm.withPurchaseData.toLocaleString()}명)`, 50, y); y += 15;
+      setFont(false); doc.fontSize(9);
+      for (const s of segment.rfm.segments.slice(0, 8)) {
+        if (y > 760) { doc.addPage(); y = 50; }
+        doc.fillColor(dark).text(`· ${s.label} — ${s.count.toLocaleString()}명 (${s.pct.toFixed(1)}%) / 평균 구매액 ${won(s.avgMonetary)}`, 60, y, { width: 485 }); y += 14;
+      }
+      y += 4;
+    } else {
+      setFont(false); doc.fontSize(9).fillColor(gray).text('RFM — 데이터 부족 (구매 이력 데이터 필요)', 60, y); y += 16;
     }
-    y += 8;
+    if (segment.byGrade.length > 0) {
+      if (y > 700) { doc.addPage(); y = 50; }
+      setFont(true); doc.fontSize(10).fillColor(dark).text('등급 분포', 50, y); y += 15;
+      setFont(false); doc.fontSize(9);
+      for (const g of segment.byGrade.slice(0, 6)) {
+        doc.fillColor(dark).text(`· ${g.grade} — ${g.count.toLocaleString()}명 (${g.pct.toFixed(1)}%)`, 60, y); y += 14;
+      }
+      y += 4;
+    }
+    if (segment.ltvAvailable && segment.avgLtv != null) {
+      setFont(false); doc.fontSize(9).fillColor(dark).text(`평균 LTV 스코어 ${Math.round(segment.avgLtv).toLocaleString()}`, 50, y); y += 16;
+    } else {
+      setFont(false); doc.fontSize(9).fillColor(gray).text('LTV 스코어 — 데이터 부족', 50, y); y += 16;
+    }
+    y += 6;
   }
+
+  // 다차원 비교 (발송 유형 / 신규·기존)
+  if (multidim) {
+    if (y > 640) { doc.addPage(); y = 50; }
+    setFont(true); doc.fontSize(13).fillColor(primary).text('다차원 비교', 50, y); y += 20;
+    setFont(true); doc.fontSize(10).fillColor(dark).text('발송 유형별 성과', 50, y); y += 15;
+    setFont(false); doc.fontSize(9);
+    if (multidim.byType.length === 0) {
+      doc.fillColor(gray).text('발송 데이터 없음', 60, y); y += 14;
+    } else {
+      for (const t of multidim.byType) {
+        if (y > 760) { doc.addPage(); y = 50; }
+        doc.fillColor(dark).text(`· ${t.label} — 발송 ${t.sent.toLocaleString()}건 / 성공률 ${pctStr(t.successRate)} (캠페인 ${t.campaigns}건)`, 60, y, { width: 485 }); y += 14;
+      }
+    }
+    y += 4;
+    const nv = multidim.newVsExisting;
+    if (y > 720) { doc.addPage(); y = 50; }
+    setFont(true); doc.fontSize(10).fillColor(dark).text('신규 vs 기존 고객', 50, y); y += 15;
+    setFont(false); doc.fontSize(9).fillColor(dark).text(`신규(기간 내 가입) ${nv.newCount.toLocaleString()}명 (${nv.newPct.toFixed(1)}%) · 기존 ${nv.existingCount.toLocaleString()}명`, 60, y); y += 14;
+    setFont(false); doc.fontSize(8).fillColor(gray).text('발송 반응(구매) 비교는 자사몰 연동 데이터가 필요합니다.', 60, y); y += 16;
+    y += 4;
+  }
+
+  // 메시지 분석 (유형별 / 길이 분포)
+  if (message) {
+    if (y > 640) { doc.addPage(); y = 50; }
+    setFont(true); doc.fontSize(13).fillColor(primary).text('메시지 분석', 50, y); y += 20;
+    setFont(true); doc.fontSize(10).fillColor(dark).text('메시지 유형별 성과', 50, y); y += 15;
+    setFont(false); doc.fontSize(9);
+    if (message.byType.length === 0) {
+      doc.fillColor(gray).text('발송 데이터 없음', 60, y); y += 14;
+    } else {
+      for (const t of message.byType) {
+        if (y > 760) { doc.addPage(); y = 50; }
+        const costStr = t.estimatedCost != null ? ` / 추정 비용 ${won(t.estimatedCost)}` : ' / 비용 데이터 부족';
+        doc.fillColor(dark).text(`· ${t.label} — 발송 ${t.sent.toLocaleString()}건 / 성공률 ${pctStr(t.successRate)}${costStr}`, 60, y, { width: 485 }); y += 14;
+      }
+    }
+    y += 4;
+    if (y > 720) { doc.addPage(); y = 50; }
+    setFont(true); doc.fontSize(10).fillColor(dark).text('본문 길이 분포', 50, y); y += 15;
+    setFont(false); doc.fontSize(9).fillColor(dark);
+    const ld = message.lengthDist.map((b) => `${b.bucket} ${b.count.toLocaleString()}건`).join(' · ');
+    doc.text(ld || '데이터 없음', 60, y); y += 16;
+    y += 4;
+  }
+
+  // 예측·기회 (발송 추세 / 놓친 기회. 매출은 데이터부족)
+  if (forecast) {
+    if (y > 640) { doc.addPage(); y = 50; }
+    setFont(true); doc.fontSize(13).fillColor(primary).text('예측·기회', 50, y); y += 20;
+    const tr = forecast.trend;
+    setFont(false); doc.fontSize(9);
+    if (tr.available) {
+      const dirLabel = tr.direction === 'up' ? '증가' : tr.direction === 'down' ? '감소' : '유지';
+      doc.fillColor(dark).text(`발송량 추세: ${dirLabel} (최근 평균 ${Math.round(tr.recentAvg).toLocaleString()}건/일)`, 50, y); y += 14;
+      if (tr.projectedNextPeriod != null) {
+        doc.fillColor(dark).text(`다음 동일 기간 예상 발송 ${Math.round(tr.projectedNextPeriod).toLocaleString()}건 (실측 추세 기준)`, 50, y); y += 14;
+      }
+    } else {
+      doc.fillColor(gray).text('발송 추세 — 데이터 부족 (최소 3일 발송 필요)', 50, y); y += 14;
+    }
+    setFont(false); doc.fontSize(8).fillColor(gray).text('매출 예측은 자사몰 매출 연동 데이터가 필요합니다.', 50, y); y += 16;
+    const mo = forecast.missed;
+    if (y > 720) { doc.addPage(); y = 50; }
+    setFont(true); doc.fontSize(10).fillColor(dark).text('놓친 기회', 50, y); y += 15;
+    setFont(false); doc.fontSize(9).fillColor(dark).text(`이탈위험 ${mo.atRiskCount.toLocaleString()}명 · 휴면 ${mo.dormantCount.toLocaleString()}명 — 재참여 캠페인 대상`, 60, y); y += 14;
+    setFont(false); doc.fontSize(8).fillColor(gray).text('잠재 회복 매출은 구매 데이터 연동 시 산출됩니다.', 60, y); y += 16;
+    y += 4;
+  }
+
+  // 우선순위 액션 플랜
+  if (actionPlan && actionPlan.length > 0) {
+    if (y > 620) { doc.addPage(); y = 50; }
+    setFont(true); doc.fontSize(13).fillColor(primary).text('우선순위 액션 플랜', 50, y); y += 20;
+    for (const a of actionPlan) {
+      if (y > 730) { doc.addPage(); y = 50; }
+      setFont(true); doc.fontSize(10).fillColor(dark).text(`${a.priority}. ${a.title}`, 50, y, { width: 495 }); y += 14;
+      setFont(false); doc.fontSize(8).fillColor(gray).text(`근거: ${a.basis}`, 60, y, { width: 485 }); y += 12;
+      if (a.linkHint) { setFont(false); doc.fontSize(8).fillColor(primary).text(`실행: ${a.linkHint}`, 60, y, { width: 485 }); y += 12; }
+      y += 4;
+    }
+    y += 4;
+  }
+
+  // 부록 — 데이터 출처 / 부족 항목
+  if (y > 680) { doc.addPage(); y = 50; }
+  setFont(true); doc.fontSize(11).fillColor(primary).text('부록 — 데이터 출처', 50, y); y += 16;
+  setFont(false); doc.fontSize(8).fillColor(gray);
+  doc.text(`· 발송 성과: campaigns 발송일 기준 (${snapshot.source})`, 50, y); y += 11;
+  doc.text('· 세그먼트/RFM/등급/LTV: customers (구매 이력·등급·LTV 보유분)', 50, y); y += 11;
+  doc.text('· 매출/퍼널/기여/반응: 자사몰 연동(CDP) 데이터 — 미연동 시 데이터 부족으로 표기', 50, y); y += 11;
+  doc.text('· 모든 추정치는 실측에서만 산출하며 임의 상수를 쓰지 않습니다.', 50, y); y += 14;
 
   // Source caption
   setFont(false); doc.fontSize(8).fillColor(gray).text(`Data source — ${snapshot.source} · ${today} 생성`, 50, y);

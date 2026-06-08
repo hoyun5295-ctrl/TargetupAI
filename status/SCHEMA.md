@@ -213,6 +213,22 @@
 | cancelled_at | timestamp |
 | created_at | timestamptz |
 | updated_at | timestamptz |
+| mms_image_paths | jsonb | ★ 2026-06-08 실측 보강 |
+| send_channel | varchar(20) | ★ 실측 |
+| send_phase | varchar(20) | ★ 실측 (발송 단계) |
+| send_config | jsonb | ★ 실측 |
+| staging_id | uuid | ★ 실측 (직접발송 staging) |
+| processed_count | integer | ★ 실측 |
+| result_final | boolean | ★ 실측 (D228+ 발송결과 캐시 확정) |
+| result_synced_at | timestamptz | ★ 실측 |
+| kakao_bubble_type | varchar(20) | ★ 실측 |
+| kakao_sender_key | varchar | ★ 실측 |
+| kakao_targeting | char(1) | ★ 실측 |
+| kakao_attachment_json | text | ★ 실측 |
+| kakao_carousel_json | text | ★ 실측 |
+| kakao_resend_type | varchar(20) | ★ 실측 |
+| use_individual_callback | boolean | ★ 실측 |
+| individual_callback_column | varchar | ★ 실측 |
 
 ### companies (고객사)
 | 컬럼 | 타입 | 설명 |
@@ -291,6 +307,48 @@
 | created_by | uuid | |
 | created_at | timestamp | |
 | updated_at | timestamp | |
+| service_type | varchar | ★ 2026-06-08 실측 보강 |
+| subscription_status | varchar | ★ 실측 |
+| line_group_id | uuid | ★ 실측 (발송 라인그룹) |
+| kakao_enabled | boolean | ★ 실측 |
+| billing_cycle_start | integer | ★ 실측 |
+| billing_cycle_type | varchar | ★ 실측 |
+| cost_per_test_sms | numeric | ★ 실측 |
+| cost_per_test_lms | numeric | ★ 실측 |
+| cost_per_spam_filter | numeric | ★ 실측 |
+| business_category | varchar | ★ 실측 |
+| business_item | varchar | ★ 실측 |
+| allow_callback_self_register | boolean | ★ 실측 |
+| opt_out_auto_sync | boolean | ★ 실측 |
+| brand_kit | jsonb | ★ 실측 |
+| ai_mapping_calls_month | integer | ★ 실측 |
+| ai_mapping_last_month | varchar | ★ 실측 |
+| user_isolation_enabled | boolean | ★ 실측 |
+| cdp_auto_execute_enabled | boolean | ★ 실측 (자동마케팅 C게이트) |
+| cdp_auto_execute_max_recipients | integer | ★ 실측 |
+| cdp_auto_execute_max_cost_krw | integer | ★ 실측 |
+| cdp_auto_execute_max_risk | varchar | ★ 실측 |
+| cdp_allowed_origins | text[] | ★ 실측 (CDP CORS) |
+| voice_inbound_enabled | boolean | ★ 실측 |
+| use_ai_orchestrator | boolean | ★ 실측 |
+| legacy_grandfathered | boolean | ★ 실측 |
+| first_signup_discount_until | timestamptz | ★ 실측 (오픈 기념 구독할인) |
+| predictive_enabled | boolean | ★ 실측 (자율예측 게이트) |
+| postpaid_overage_limit | integer | ★ 실측 |
+| onboarding_progress | jsonb | ★ 실측 |
+| ai_operator_trial_started_at | timestamptz | ★ 실측 |
+| ai_operator_trial_until | timestamptz | ★ 실측 |
+| smtp_host | varchar | ★ 실측 (회사 SMTP 발신) |
+| smtp_port | integer | ★ 실측 |
+| smtp_user | varchar | ★ 실측 |
+| smtp_password_encrypted | text | ★ 실측 |
+| smtp_secure | boolean | ★ 실측 |
+| smtp_from_email | varchar | ★ 실측 |
+| smtp_from_name | varchar | ★ 실측 |
+| send_hour_start | integer | ★ 실측 레거시(send_start_hour 우선) |
+| send_hour_end | integer | ★ 실측 레거시(send_end_hour 우선) |
+| holiday_send | boolean | ★ 실측 레거시(holiday_send_allowed 우선) |
+| duplicate_days | integer | ★ 실측 레거시(duplicate_prevention_days 우선) |
 
 ### company_settings (고객사 설정 KV)
 | 컬럼 | 타입 |
@@ -385,6 +443,18 @@
 | uploaded_by | uuid FK (users.id) | 업로드한 사용자 ID |
 | created_at | timestamp |
 | updated_at | timestamp |
+| customer_code | varchar(50) | ★ 2026-06-08 실측 보강 |
+| email_opt_in | boolean | ★ 실측 |
+| last_activity_at | timestamptz | ★ 실측 |
+| active_sources | jsonb | ★ 실측 (CDP 다중 소스) |
+| primary_source | varchar | ★ 실측 |
+| preferred_channel | varchar | ★ 실측 |
+| source_priority_resolved | varchar | ★ 실측 |
+| last_cart_add_at | timestamptz | ★ 실측 (CDP 행동) |
+| cart_add_count_30d | integer | ★ 실측 |
+| last_wishlist_add_at | timestamptz | ★ 실측 |
+| wishlist_add_count_30d | integer | ★ 실측 |
+| last_page_view_at | timestamptz | ★ 실측 |
 - UNIQUE: (company_id, COALESCE(store_code,'__NONE__'), phone)
 - INDEX: uploaded_by
 - INDEX: **idx_customers_active_smsable** (company_id, store_code) WHERE is_active=true AND sms_opt_in=true — ★ D150-3 (2026-05-10) 자동발송 worker `runAutoCampaignWorker` D-day 발송 + customer-filter 매 회차 SELECT 시 활성 SMS 가능 고객 부분 인덱스. 1만+ 고객 회사에서 풀스캔 → Bitmap Index Scan 전환.

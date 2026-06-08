@@ -162,24 +162,6 @@ interface CohortResult {
   computedAt: string;
 }
 
-interface BenchmarkMetric {
-  label: string;
-  companyValue: number;
-  industryAvg: number;
-  diffPct: number;
-  betterThan: boolean;
-  source: string;
-}
-
-interface BenchmarkResult {
-  planCode: string;
-  planName: string;
-  peerCompanyCount: number;
-  metrics: BenchmarkMetric[];
-  computedAt: string;
-  source: string;
-}
-
 interface AttributionWindow {
   windowLabel: string;
   windowHours: number;
@@ -214,7 +196,7 @@ interface DrillCampaign {
 
 type ModalKey =
   | null | 'revenue' | 'channel' | 'hour' | 'funnel'
-  | 'cohort' | 'benchmark' | 'trend' | 'diagnosis' | 'campaigns';
+  | 'cohort' | 'trend' | 'diagnosis' | 'campaigns';
 
 type QuickActionType = 'channel_recovery' | 'time_optimization' | 'top_performer_replication';
 
@@ -244,7 +226,6 @@ export default function PerformancePage() {
   const [availability, setAvailability] = useState<DataAvailability | null>(null);
   const [explanation, setExplanation] = useState<PerformanceExplanation | null>(null);
   const [cohort, setCohort] = useState<CohortResult | null>(null);
-  const [benchmark, setBenchmark] = useState<BenchmarkResult | null>(null);
   const [attribution, setAttribution] = useState<AttributionResult | null>(null);
   const [loading, setLoading] = useState(true);
   const toast = useToast();
@@ -369,18 +350,16 @@ export default function PerformancePage() {
     try {
       const headers = { Authorization: `Bearer ${token()}` };
       const days = periodToDays(period);
-      const [snapRes, availRes, cohortRes, bmRes, attrRes, insightRes] = await Promise.all([
+      const [snapRes, availRes, cohortRes, attrRes, insightRes] = await Promise.all([
         fetch(`/api/ai/operator/performance/snapshot-v2?period=${period}`, { headers }),
         fetch('/api/ai/operator/performance/data-availability', { headers }),
         fetch('/api/ai/operator/performance/cohort?months=12', { headers }),
-        fetch(`/api/ai/operator/performance/benchmark?days=${days}`, { headers }),
         fetch(`/api/ai/operator/performance/attribution?days=${days}`, { headers }),
         fetch('/api/insight/daily', { headers }),
       ]);
       const snapData = await snapRes.json();
       const availData = await availRes.json();
       const cohortData = await cohortRes.json();
-      const bmData = await bmRes.json();
       const attrData = await attrRes.json();
       try {
         const insightData = await insightRes.json();
@@ -403,7 +382,6 @@ export default function PerformancePage() {
       setSnapshot(snapData.snapshot);
       if (availData.success) setAvailability(availData.availability);
       if (cohortData.success) setCohort(cohortData.cohort);
-      if (bmData.success) setBenchmark(bmData.benchmark);
       if (attrData.success) setAttribution(attrData.attribution);
     } catch (e: any) {
       setError(e?.message || '네트워크 오류');
@@ -569,9 +547,6 @@ export default function PerformancePage() {
   const cohortSummary = cohort && cohort.totalCohortCustomers > 0
     ? `30일 잔존 ${formatPct(cohort.avgM1Rate)}`
     : '데이터 준비 중';
-  const benchmarkSummary = benchmark && benchmark.peerCompanyCount > 0
-    ? `${benchmark.planName} ${benchmark.peerCompanyCount}개사 대비`
-    : '동일 요금제 비교';
 
   return (
     <div className="min-h-screen bg-slate-950 text-white">
@@ -804,10 +779,12 @@ export default function PerformancePage() {
               이 기간 캠페인 {formatNum(snapshot.totalCampaigns.current)}건 · 총 발송 {formatNum(snapshot.totalSent.current)}건 · 신규 고객 {formatNum(snapshot.newCustomers.current)}명 · 직전 {period} 대비 비교
             </div>
 
-            <AiDiagnosisLine explanation={explanation} loading={explainLoading} onOpen={() => openModal('diagnosis')} />
-
-            {/* ════ Tier 2 — 요약 아이콘 바 ════ */}
-            <div className="flex flex-wrap gap-2">
+            {/* ════ AI 자율 진단(좌) + 요약 아이콘 카드(우) 동일 높이 2단 ════ */}
+            <div className="flex flex-col lg:flex-row gap-3 lg:items-stretch">
+              <div className="lg:w-[36%] flex-shrink-0">
+                <AiDiagnosisLine explanation={explanation} loading={explainLoading} onOpen={() => openModal('diagnosis')} />
+              </div>
+              <div className="flex-1 grid grid-cols-2 md:grid-cols-3 gap-2 auto-rows-fr">
               <SummaryChip icon={<Sparkles className="w-4 h-4" />} accent="text-fuchsia-300" label="채널 ROI" summary={channelSummary} onClick={() => openModal('channel')} />
               <SummaryChip icon={<Clock className="w-4 h-4" />} accent="text-cyan-300" label="시간대" summary={hourSummary} onClick={() => openModal('hour')} />
               {hasCdp ? (
@@ -819,8 +796,8 @@ export default function PerformancePage() {
                 <SummaryChip icon={<Database className="w-4 h-4" />} accent="text-cyan-300" label="자사몰 연동" summary="실매출·퍼널·기여도 보기" onClick={() => navigate('/cdp-settings')} />
               )}
               <SummaryChip icon={<Users className="w-4 h-4" />} accent="text-violet-300" label="코호트" summary={cohortSummary} onClick={() => openModal('cohort')} />
-              <SummaryChip icon={<BarChart3 className="w-4 h-4" />} accent="text-amber-300" label="벤치마크" summary={benchmarkSummary} onClick={() => openModal('benchmark')} />
               <SummaryChip icon={<TrendingUp className="w-4 h-4" />} accent="text-emerald-300" label="추세" summary={`${period} 일별 추이`} onClick={() => openModal('trend')} />
+              </div>
             </div>
 
             {/* ════ Tier 3 — 액션 & 보조 ════ */}
@@ -1094,34 +1071,6 @@ export default function PerformancePage() {
             )}
           </PerfModal>
 
-          {/* 벤치마크 모달 */}
-          <PerfModal open={activeModal === 'benchmark'} onClose={closeModal} title="업계 벤치마크" icon={<BarChart3 className="w-4 h-4 text-amber-300" />} source={benchmark?.source || '같은 요금제 회사 평균 (anonymized)'} wide>
-            {benchmark && benchmark.peerCompanyCount > 0 ? (
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-                {benchmark.metrics.map((m) => (
-                  <div key={m.label} className="p-3 bg-white/5 border border-white/10 rounded-lg">
-                    <div className="flex items-center justify-between mb-1">
-                      <div className="text-[11px] text-white/60">{m.label}</div>
-                      <span className={`text-[10px] font-mono font-bold ${m.betterThan ? 'text-emerald-300' : 'text-rose-300'}`}>
-                        {m.diffPct >= 0 ? '+' : ''}{m.diffPct.toFixed(1)}%
-                      </span>
-                    </div>
-                    <div className="flex items-baseline gap-2 flex-wrap">
-                      <div className="text-base font-mono font-bold text-white">
-                        {m.companyValue < 1 && m.companyValue > 0 ? formatPct(m.companyValue) : formatNum(m.companyValue)}
-                      </div>
-                      <div className="text-[10px] text-white/40">vs 평균 <span className="font-mono text-white/60">
-                        {m.industryAvg < 1 && m.industryAvg > 0 ? formatPct(m.industryAvg) : formatNum(m.industryAvg)}
-                      </span></div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <div className="text-center text-xs text-white/40 py-8">{benchmark?.source || '같은 요금제 다른 회사가 없어 벤치마크 비활성'}</div>
-            )}
-          </PerfModal>
-
           {/* 추세 모달 */}
           <PerfModal open={activeModal === 'trend'} onClose={closeModal} title={`${period} 일별 추세`} icon={<TrendingUp className="w-4 h-4 text-emerald-300" />} source="campaigns (KST 일별 그룹)" wide>
             {trendData.length === 0 || trendData.every((d) => d.current === 0 && d.previous === 0) ? (
@@ -1355,29 +1304,29 @@ function AiDiagnosisLine({
   onOpen: () => void;
 }) {
   return (
-    <div className="p-4 bg-gradient-to-br from-violet-500/15 via-fuchsia-500/10 to-indigo-500/15 border border-violet-400/30 rounded-2xl">
-      <div className="flex items-start gap-3">
+    <div className="h-full p-4 bg-gradient-to-br from-violet-500/15 via-fuchsia-500/10 to-indigo-500/15 border border-violet-400/30 rounded-2xl flex flex-col">
+      <div className="flex items-center gap-2 mb-2">
         <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-violet-400 to-fuchsia-500 flex items-center justify-center flex-shrink-0">
           <Sparkles className="w-4 h-4 text-white" />
         </div>
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 mb-1">
-            <span className="text-sm font-medium text-violet-100">AI 자율 진단</span>
-            {explanation && <span className="text-[10px] px-1.5 py-0.5 rounded bg-violet-500/30 text-violet-200 border border-violet-400/30 font-mono">{explanation.overallScore}/100</span>}
-          </div>
-          {explanation ? (
-            <>
-              <p className="text-xs text-white/80 leading-relaxed">{explanation.topInsight}</p>
-              <button onClick={onOpen} className="mt-1.5 text-[11px] text-violet-300 hover:text-violet-200 underline-offset-2 hover:underline">자세히 보기 →</button>
-            </>
-          ) : loading ? (
-            <div className="text-xs text-white/60 flex items-center gap-1.5"><Loader2 className="w-3 h-3 animate-spin" /> AI 분석 중 (10~20초)</div>
-          ) : (
-            <button onClick={onOpen} className="text-xs text-violet-200 hover:text-violet-100 underline-offset-2 hover:underline">AI 자율 진단 시작 →</button>
-          )}
-          <p className="mt-2 text-[10px] text-white/30 italic">Data source — 최근 30일 campaigns · cdp_events 기반 AI 진단</p>
-        </div>
+        <span className="text-sm font-medium text-violet-100">AI 자율 진단</span>
+        {explanation && <span className="text-[10px] px-1.5 py-0.5 rounded bg-violet-500/30 text-violet-200 border border-violet-400/30 font-mono">{explanation.overallScore}/100</span>}
       </div>
+      <div className="flex-1 min-h-0">
+        {explanation ? (
+          <p className="text-xs text-white/80 leading-relaxed line-clamp-3">{explanation.topInsight}</p>
+        ) : loading ? (
+          <div className="text-xs text-white/60 flex items-center gap-1.5"><Loader2 className="w-3 h-3 animate-spin" /> AI 분석 중 (10~20초)</div>
+        ) : (
+          <p className="text-xs text-white/60 leading-relaxed">클릭 한 번으로 최근 30일 성과의 원인과 다음 액션을 AI가 진단합니다.</p>
+        )}
+      </div>
+      {!loading && (
+        <button onClick={onOpen} className="mt-3 w-full px-4 py-2.5 rounded-xl bg-gradient-to-r from-violet-500 to-fuchsia-500 hover:opacity-90 text-white text-xs font-semibold transition-opacity shadow-lg shadow-violet-500/20">
+          {explanation ? '자세히 보기 →' : 'AI 진단 시작 →'}
+        </button>
+      )}
+      <p className="mt-2 text-[10px] text-white/30 italic">Data source — 최근 30일 campaigns · cdp_events 기반 AI 진단</p>
     </div>
   );
 }
@@ -1389,14 +1338,14 @@ function SummaryChip({
   accent: string; badge?: string; onClick: () => void;
 }) {
   return (
-    <button onClick={onClick} className="flex items-center gap-2 px-3 py-2 bg-white/5 border border-white/10 rounded-xl hover:bg-white/10 hover:border-white/20 transition-colors text-left flex-shrink-0">
-      <span className={accent}>{icon}</span>
-      <span className="flex flex-col">
+    <button onClick={onClick} className="flex items-center gap-2 px-3 py-2 bg-white/5 border border-white/10 rounded-xl hover:bg-white/10 hover:border-white/20 transition-colors text-left w-full min-w-0">
+      <span className={`flex-shrink-0 ${accent}`}>{icon}</span>
+      <span className="flex flex-col min-w-0">
         <span className="text-xs font-medium text-white/80 flex items-center gap-1">
           {label}
-          {badge && <span className="text-[9px] px-1 py-0.5 rounded bg-violet-500/20 text-violet-300">{badge}</span>}
+          {badge && <span className="text-[9px] px-1 py-0.5 rounded bg-violet-500/20 text-violet-300 flex-shrink-0">{badge}</span>}
         </span>
-        <span className="text-[10px] text-white/40">{summary}</span>
+        <span className="text-[10px] text-white/40 truncate">{summary}</span>
       </span>
     </button>
   );

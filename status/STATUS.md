@@ -107,7 +107,18 @@
 
 ---
 
-### 🟢 2026-06-08 (최신) — 성과 리포트 전면 재설계 + 세그먼트 메뉴 이동 + BASIC 무료체험 시스템 (전부 배포)
+### 🟢 2026-06-08 (최신) — 발송일시 송출일 기준 통일(배포) + 풀분석 프리미엄 보고서 Plan1+2·레이아웃 완료·Plan3 설계(미배포)
+> **① 발송일시 버그(배포 완료): 슈퍼관리자 캠페인관리·발송결과 날짜 기준을 발송통계와 동일 `STAT_DATE_EXPR`(`COALESCE(scheduled_at,sent_at)` scheduled 우선)로 통일 — 예약발송(scheduled≠sent)이 통계 8건↔관리 9건 어긋나던 것 정정. ② 풀분석 = 성과리포트 내 기간종합 AI 분석 PDF(15만원/300크레딧). Plan1 백엔드+Plan2 프론트+레이아웃+Plan3 RFM 완료, 나머지 Plan3는 설계서로 다음 세션. 미배포(Plan1+2+3 한 번에).**
+> - ①: 날짜 기준이 `sent` 우선이라 예약발송이 처리일(등록계열)로 잡혔음. admin.ts 798·1663, results.ts 118·248·393, AdminDashboard 발송일시 표시를 `scheduled` 우선으로 통일(=발송통계). 근본=직접발송 worker가 PDF처럼 `sent_at=NOW()`를 처리시점에 기록.
+> - 풀분석 Plan1: `full-analysis-steps/job/runner`+`performance-pdf-render`(추출)+`ai.ts` endpoint3(start/status/download). `full_analysis_jobs` 테이블 생성. 차감=PDF성공후 멱등·실패시0.
+> - Plan2: `PerformancePage` 풀분석버튼+설정/동의(CreditConfirmModal 재사용)/진행도모달 폴링. 레이아웃=AI진단 좌측 좁은카드(36%)+6카드 우측 grid 2단·벤치마크 칩 제거.
+> - Plan3 RFM: `rfm-segment.ts`(순수 분위수 TDD)+`segment-analysis.ts`(호출부 RFM+등급+LTV).
+> - **★ 풀분석 Plan 3 완료(T1~T9 구현·검증) — 미배포(Plan1+2+3 한 번에 배포 대기).** 신규 순수 CT 5(multidim-comparison·message-analysis·message-byte·forecast·action-plan, 전부 .verify TDD)+호출부 full-analysis-collect(campaigns/customers/companies SELECT·발송일 COALESCE(scheduled_at,sent_at)·단가 0/null→null 임의상수0)+PDF 10섹션(익스큐티브 서머리·세그먼트 심층 RFM/등급/LTV·다차원·메시지·예측·액션·부록)·벤치마크 전 영역 제거(PDF/러너/프론트 모달·state·fetch)·ai.ts report-pdf 인라인 200줄→공통 render(중복 제거). 검증=backend tsc0·frontend tsc0·순수 7+스모크 1 PASS·박단어/모델명/native 0. SCHEMA.md 3테이블 실측 보강. 상세=`memory/project_2026_0608_full_analysis_premium_report.md`.
+> - 검증: backend tsc0·frontend tsc0·순수 TDD(steps/rfm-segment) PASS·박-단어/모델명/native 0.
+
+---
+
+### 🟢 2026-06-08 — 성과 리포트 전면 재설계 + 세그먼트 메뉴 이동 + BASIC 무료체험 시스템 (전부 배포)
 > **① 성과리포트(/performance) 3단 위계 재설계(헤드라인 KPI4+AI진단 → 요약칩 → 9 다크모달·slate-950·CDP적응형)+백엔드 estimatedRoas/report-pdf 풀보고서 ② 세그먼트 메뉴 AI Operator 서브메뉴 이동(AI Operator 전 유료 개방 확인) ③ BASIC 1개월 무료체험(팝업신청→슈퍼관리자 승인 grantBasicTrial→30일 후 자동 FREE강등)+요금제변경 모달+만료 D-N+FREE 고객DB업로드 차단/주소록 전체10만cap+TRIAL max_customers 30만통일. 전부 배포.**
 > - **①**: PerformancePage 전면 재작성(단일파일+인라인 컴포넌트). `performance-roas-core`(TDD6)·`next-action-advisor` estimatedRoas·`ai.ts` report-pdf 확장. 성과 엔드포인트 전부 실데이터(explain impactScore=AI 판정). 상세=`memory/project_2026_0608_performance_redesign_segment.md`.
 > - **②**: `ai-operator-modules` SUB_MODULE_CARDS 세그먼트 추가·`DashboardHeader` 제거. `isAiOperatorAllowed=!isUnsubscribed`(전 유료 개방) 코드 확인.
