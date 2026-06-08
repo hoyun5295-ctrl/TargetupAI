@@ -112,6 +112,13 @@ export default function DashboardHeader({
       color: 'new',
       newBadge: true,
     },
+    // ★ AI Operator 소개 — about-ai-operator.html 새 탭 진입(매뉴얼과 동일 패턴). 모든 요금제 공통(게이팅 없음).
+    {
+      label: 'AI Operator 소개',
+      onClick: () => window.open('/about-ai-operator.html', '_blank', 'noopener'),
+      color: 'new',
+      newBadge: true,
+    },
     // ★ D188 Phase 2-B-4 (2026-05-21) 자동발송 메뉴 영구 제거 — Harold 명시 "사용 고객사 0 + 여정 빌더가 진짜 업그레이드".
     //   /auto-send 라우트 진입 시 AutoSendPage.tsx가 여정 빌더 안내 페이지로 노출. auto_campaigns 운영 데이터는 보존 (worker 유지).
     // ★ D182 (2026-05-19): 모바일DM 헤더 메뉴 영구 제거 — AI Operator 페이지 안 SUB_MODULE_CARDS로 이동 (Harold 명시 — 헤더 간소화)

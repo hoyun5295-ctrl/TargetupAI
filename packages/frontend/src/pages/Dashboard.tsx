@@ -7,7 +7,7 @@ import AddressBookModal from '../components/AddressBookModal';
 import AiCampaignResultPopup from '../components/AiCampaignResultPopup';
 import AiCampaignSendModal from '../components/AiCampaignSendModal';
 import AiCustomSendFlow from '../components/AiCustomSendFlow';
-import AiGuidePopup from '../components/AiGuidePopup';
+import OpenPromoPopup from '../components/OpenPromoPopup';
 import AiMessageSuggestModal from '../components/AiMessageSuggestModal';
 import AiPreviewModal from '../components/AiPreviewModal';
 import AiSendTypeModal from '../components/AiSendTypeModal';
@@ -3902,7 +3902,7 @@ const campaignData = {
       />
 
       {/* AI 활용 안내 팝업 — 로그인 직후 1회 노출 (24h localStorage 차단) */}
-      <AiGuidePopup />
+      <OpenPromoPopup />
 
       {/* ★ D163 (2026-05-19) Braze급 SaaS Step 0 — AI Operator 베타 안내 모달.
           ENT/BUSINESS 외 등급 사용자가 헤더 "AI Operator" 메뉴 클릭 시 노출. */}
