@@ -107,7 +107,16 @@
 
 ---
 
-### 🟢 2026-06-08 (최신) — 발송일시 송출일 기준 통일(배포) + 풀분석 프리미엄 보고서 Plan1+2·레이아웃 완료·Plan3 설계(미배포)
+### 🟢 2026-06-09 — CDP 페이지 재설계 진입 (게이팅 전 유료 개방·매트릭스 제거 완료 / 모달화 미완, 미배포)
+> **CDP(자사몰 연동) 페이지 재설계. Task1·2 완료, Task3~9 미완(다음 세션 plan 이어감).**
+> - **Task1 게이팅(완료)**: `CdpSettingsPage` `cdp_enabled` 판정 11곳 → `cdpLocked`(`!!usage && usage.plan_code==='FREE'`) 전수 교체 = STARTER+ 전부 개방, FREE만 안내. 안내 문구 "비즈니스 의무"→"스타터부터". 핵심=백엔드(plan-guard ai_cdp·cdp-auth isCdpEnabledForPlan) 이미 FREE만 차단 = 프론트 표시만 불일치였음. usage.plan_code 이미 존재→프론트 판정만(백엔드 무수정). tsc 0.
+> - **Task2 매트릭스(완료)**: "지원 자사몰 매트릭스" skeleton 나열(providers.map, Phase2 예정) 제거 → "어떤 자사몰이든 연동" 안내 카드(연락처 "고객센터" placeholder — Harold 제공 시 교체). tsc 0. ※ providers state·makeshop/sixshop 라벨 상수는 미사용 잔존→Task7 정리.
+> - **Task3~7 모달화(미완)**: CdpSettingsPage 1596줄 → 메인 요약 + 4모달(AI진단/데이터분석/Provider연동/활성customer). 모달=createPortal(헤더 backdrop-filter 갇힘 회피 — 성과리포트 교훈). **Task9 SDK 소스 재점검(cdp.ts·cdp-auth·cafe24/naver webhook·스니펫)도 미완.**
+> - spec=`docs/superpowers/specs/2026-06-09-cdp-page-redesign-design.md`, plan=`docs/superpowers/plans/2026-06-09-cdp-page-redesign.md`. 다음 세션=plan Task3부터 이어감.
+
+---
+
+### 🟢 2026-06-08 — 발송일시 송출일 기준 통일(배포) + 풀분석 프리미엄 보고서 Plan1+2·레이아웃 완료·Plan3 설계(미배포)
 > **① 발송일시 버그(배포 완료): 슈퍼관리자 캠페인관리·발송결과 날짜 기준을 발송통계와 동일 `STAT_DATE_EXPR`(`COALESCE(scheduled_at,sent_at)` scheduled 우선)로 통일 — 예약발송(scheduled≠sent)이 통계 8건↔관리 9건 어긋나던 것 정정. ② 풀분석 = 성과리포트 내 기간종합 AI 분석 PDF(15만원/300크레딧). Plan1 백엔드+Plan2 프론트+레이아웃+Plan3 RFM 완료, 나머지 Plan3는 설계서로 다음 세션. 미배포(Plan1+2+3 한 번에).**
 > - ①: 날짜 기준이 `sent` 우선이라 예약발송이 처리일(등록계열)로 잡혔음. admin.ts 798·1663, results.ts 118·248·393, AdminDashboard 발송일시 표시를 `scheduled` 우선으로 통일(=발송통계). 근본=직접발송 worker가 PDF처럼 `sent_at=NOW()`를 처리시점에 기록.
 > - 풀분석 Plan1: `full-analysis-steps/job/runner`+`performance-pdf-render`(추출)+`ai.ts` endpoint3(start/status/download). `full_analysis_jobs` 테이블 생성. 차감=PDF성공후 멱등·실패시0.

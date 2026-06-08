@@ -314,6 +314,8 @@ export default function CdpSettingsPage() {
 
   const token = () => localStorage.getItem('token');
   const isAdmin = user?.userType === 'company_admin';
+  // CDP 진입 = FREE(미가입)만 차단 (백엔드 cdp-auth.isCdpEnabledForPlan = plan_code !== 'FREE'와 일치 — 전 유료 개방)
+  const cdpLocked = !!usage && usage.plan_code === 'FREE';
 
   // first-event 설치 진단 — 키 발급 후 첫 이벤트 수신 전까지 10초 폴링 (수신되면 중단)
   useEffect(() => {
@@ -764,12 +766,23 @@ export default function CdpSettingsPage() {
         )}
 
         {/* 2. 요금제 게이팅 안내 */}
-        {!usage?.cdp_enabled && (
+        {cdpLocked && (
           <div className="bg-amber-500/10 border border-amber-400/30 rounded-xl p-5 flex items-start gap-3">
             <AlertCircle className="w-5 h-5 text-amber-300 mt-0.5 shrink-0" />
             <div>
-              <div className="font-bold text-amber-100 mb-1">현재 요금제: {usage?.plan_name || '미가입'} — CDP 사용 불가</div>
-              <div className="text-sm text-amber-200">자사몰 회원 DB 영역 ↔ 한줄로AI 실시간 동기화 영역 = <strong>비즈니스 요금제</strong> 의무.</div>
+              <div className="font-bold text-amber-100 mb-1">CDP는 유료 요금제부터 이용 가능합니다</div>
+              <div className="text-sm text-amber-200">스타터 요금제 이상에서 자사몰 연동(SDK·webhook)이 모두 열립니다. 현재: {usage?.plan_name || '미가입'}.</div>
+            </div>
+          </div>
+        )}
+
+        {/* 어떤 자사몰이든 연동 안내 (지원 매트릭스 대체) */}
+        {!cdpLocked && (
+          <div className="bg-white/5 border border-white/10 rounded-xl p-5 flex items-start gap-3">
+            <Database className="w-5 h-5 text-violet-300 mt-0.5 shrink-0" />
+            <div>
+              <div className="font-semibold text-white mb-1">어떤 자사몰이든 연동해 드립니다</div>
+              <div className="text-sm text-white/70 leading-relaxed">표준 SDK·webhook로 대부분 바로 연동됩니다. 특수한 환경이라 연동이 막히면 개발 담당자가 <span className="text-violet-200">고객센터</span>로 문의 주시면 직접 맞춤 연동을 도와드립니다.</div>
             </div>
           </div>
         )}
@@ -814,7 +827,7 @@ export default function CdpSettingsPage() {
         )}
 
         {/* 4. AI 자율 진단 */}
-        {usage?.cdp_enabled && (
+        {!cdpLocked && (
           <div className="p-4 bg-gradient-to-br from-violet-500/15 via-fuchsia-500/10 to-indigo-500/15 border border-violet-400/30 rounded-xl">
             <div className="flex items-start gap-3">
               <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-violet-400 to-fuchsia-500 flex items-center justify-center flex-shrink-0">
@@ -841,7 +854,7 @@ export default function CdpSettingsPage() {
         )}
 
         {/* 5. 1-click 액션 3 카드 */}
-        {usage?.cdp_enabled && (
+        {!cdpLocked && (
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
             <QuickActionCard
               icon={<Server className="w-5 h-5" />}
@@ -882,7 +895,7 @@ export default function CdpSettingsPage() {
         )}
 
         {/* 7. 자세히 분석 토글 */}
-        {usage?.cdp_enabled && (
+        {!cdpLocked && (
           <button
             onClick={() => setDetailsExpanded(!detailsExpanded)}
             className="w-full px-3 py-2 bg-white/5 hover:bg-white/10 rounded-lg text-xs text-white/60 flex items-center justify-center gap-1.5 transition-colors"
@@ -1133,7 +1146,7 @@ export default function CdpSettingsPage() {
         )}
 
         {/* 11. Provider 매트릭스 — 자체 호스팅 */}
-        {usage?.cdp_enabled && (
+        {!cdpLocked && (
           <div id="section-custom" className="bg-white/5 border border-white/10 rounded-xl p-6">
             <div className="flex items-center gap-2 mb-1">
               <Server className="w-5 h-5 text-indigo-300" />
@@ -1197,7 +1210,7 @@ export default function CdpSettingsPage() {
         )}
 
         {/* 11. Provider 매트릭스 — 카페24 */}
-        {usage?.cdp_enabled && (
+        {!cdpLocked && (
           <div id="section-cafe24" className="bg-white/5 border border-white/10 rounded-xl p-6">
             <div className="flex items-center gap-2 mb-4">
               <Store className="w-5 h-5 text-amber-300" />
@@ -1244,7 +1257,7 @@ export default function CdpSettingsPage() {
         )}
 
         {/* 11. Provider 매트릭스 — 네이버 스마트스토어 */}
-        {usage?.cdp_enabled && (
+        {!cdpLocked && (
           <div id="section-naver" className="bg-white/5 border border-white/10 rounded-xl p-6">
             <div className="flex items-center gap-2 mb-4">
               <ShoppingCart className="w-5 h-5 text-emerald-300" />
@@ -1290,33 +1303,9 @@ export default function CdpSettingsPage() {
           </div>
         )}
 
-        {/* 11. Provider 매트릭스 — skeleton (coming soon) */}
-        {providers.length > 0 && (
-          <div className="bg-white/5 border border-white/10 rounded-xl p-6">
-            <div className="flex items-center gap-2 mb-4">
-              <Database className="w-5 h-5 text-white/60" />
-              <h2 className="text-base font-bold text-white">지원 자사몰 매트릭스</h2>
-            </div>
-            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2">
-              {providers.map((p) => (
-                <div key={p.provider} className={`p-3 rounded-lg border ${p.status === 'available' ? 'bg-emerald-500/10 border-emerald-400/30' : 'bg-white/5 border-white/10'}`}>
-                  <div className="text-sm font-semibold text-white">{p.displayName}</div>
-                  <div className="text-[10px] text-white/40 mt-0.5">
-                    {p.capabilities.oauth && 'OAuth · '}
-                    {p.capabilities.webhook && 'Webhook · '}
-                    {p.capabilities.adminApi && 'Admin API'}
-                  </div>
-                  <div className={`mt-1 text-[10px] font-semibold ${p.status === 'available' ? 'text-emerald-300' : 'text-white/40'}`}>
-                    {p.status === 'available' ? '지원' : 'Phase 2 예정'}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
 
         {/* 12. CDP 키 발급 + 사용량 */}
-        {usage?.cdp_enabled && !customInfo?.hasSecret && (
+        {!cdpLocked && usage && !customInfo?.hasSecret && (
           <div className="bg-white/5 border border-white/10 rounded-xl p-6">
             <div className="flex items-center gap-2 mb-4">
               <KeyRound className="w-5 h-5 text-indigo-300" />
@@ -1347,7 +1336,7 @@ export default function CdpSettingsPage() {
                 )}
               </div>
             )}
-            {usage.cdp_enabled && (
+            {!cdpLocked && usage && (
               <div className="mt-4 pt-4 border-t border-white/10">
                 <div className="text-xs text-white/50 mb-1">이번 달 API 호출</div>
                 <div className="flex items-baseline gap-2">
@@ -1365,7 +1354,7 @@ export default function CdpSettingsPage() {
         )}
 
         {/* 12-0. 수집 허용 도메인 등록 (브라우저 SDK Origin allowlist) */}
-        {usage?.cdp_enabled && (
+        {!cdpLocked && (
           <div className="bg-white/5 border border-white/10 rounded-2xl p-6">
             <div className="flex items-center gap-2 mb-3">
               <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-violet-500 to-fuchsia-600 flex items-center justify-center">
@@ -1409,7 +1398,7 @@ export default function CdpSettingsPage() {
         )}
 
         {/* 12-1. SDK 설치 스크립트 스니펫 (public key 자동 주입 — v0.3.5-b) */}
-        {usage?.cdp_enabled && usage?.public_key && (
+        {!cdpLocked && usage?.public_key && (
           <div className="bg-white/5 border border-white/10 rounded-2xl p-6">
             <div className="flex items-center gap-2 mb-3">
               <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-violet-500 to-fuchsia-600 flex items-center justify-center">
@@ -1439,7 +1428,7 @@ export default function CdpSettingsPage() {
         )}
 
         {/* 12-2. 설치 검증 — 첫 이벤트 진단 (v0.3.5-b, 서버 관측 신호) */}
-        {usage?.cdp_enabled && usage?.public_key && installStatus && (() => {
+        {!cdpLocked && usage?.public_key && installStatus && (() => {
           const issued = installStatus.keyIssuedAt ? new Date(installStatus.keyIssuedAt).getTime() : null;
           const mins = issued ? Math.floor((Date.now() - issued) / 60000) : 0;
           const received = !!installStatus.firstEventAt;
