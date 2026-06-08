@@ -26,6 +26,9 @@ import { generateQuickAction, type QuickActionType } from '../utils/performance-
 import { buildCohortRetention } from '../utils/performance-cohort';
 import { buildBenchmark } from '../utils/performance-benchmark';
 import { buildCampaignAttribution } from '../utils/campaign-response-attribution';
+import { createJob, getJob } from '../utils/full-analysis-job';
+import { stepProgress } from '../utils/full-analysis-steps';
+import { runFullAnalysis } from '../utils/full-analysis-runner';
 import { buildDataAvailability } from '../utils/performance-data-availability';
 import { aggregateSmsCountsByCampaign } from '../utils/stats-aggregation';
 import { kakaoBatchAggByGroup } from '../utils/sms-queue';
@@ -1601,6 +1604,63 @@ router.post('/operator/performance/report-pdf', async (req: Request, res: Respon
     console.error('[Performance] report-pdf 오류:', err);
     if (!res.headersSent) return res.status(500).json({ success: false, error: err?.message || 'PDF 보고서 생성 실패' });
     try { res.end(); } catch { /* 이미 종료된 스트림 */ }
+  }
+});
+
+// === 풀분석(Full Analysis) 비동기 job — start/status/download (spec 2026-06-08) ===
+router.post('/operator/performance/full-analysis/start', async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId; const userId = req.user?.userId;
+    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+    const planCtx = await loadPlanContext(companyId);
+    if (!planCtx || !isAiOperatorAllowed(planCtx, req.user)) {
+      return res.status(403).json({ success: false, code: 'BETA_GATE', error: '본 기능은 엔터프라이즈 베타 운영 중입니다.' });
+    }
+    const periodParam = String(req.body?.period || '30d');
+    const period: PerformancePeriod = (['7d', '14d', '30d', '90d'] as const).includes(periodParam as any) ? (periodParam as PerformancePeriod) : '30d';
+    const purposeParam = String(req.body?.purpose || 'overall');
+    const purpose = ['overall', 'revenue', 'retention', 'channel'].includes(purposeParam) ? purposeParam : 'overall';
+    const cost = getCreditCost('orchestrate'); // 300
+    try { await checkCredit(companyId, cost); }
+    catch (e: any) {
+      if (e instanceof InsufficientCreditError) return res.status(402).json({ success: false, code: 'INSUFFICIENT_CREDIT', error: '풀분석에 필요한 크레딧이 부족합니다. 크레딧을 충전해 주세요.' });
+      throw e;
+    }
+    const job = await createJob({ companyId, createdBy: userId ?? null, period, purpose, reportTitle: req.body?.reportTitle ?? null });
+    // 차감은 러너가 분석·PDF 성공 직후 수행(멱등 키=jobId). 어느 단계든 실패 시 차감 0 → 환불 불요.
+    setImmediate(() => { runFullAnalysis(job.id, companyId, period, userId ?? null).catch((e) => console.log('[full-analysis] runner throw', e?.message)); });
+    return res.json({ success: true, jobId: job.id, totalSteps: job.total_steps });
+  } catch (err: any) {
+    console.error('[full-analysis] start 오류:', err);
+    return res.status(500).json({ success: false, error: err?.message || '풀분석 시작 실패' });
+  }
+});
+
+router.get('/operator/performance/full-analysis/status/:id', async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+    const job = await getJob(req.params.id, companyId);
+    if (!job) return res.status(404).json({ success: false, error: 'job을 찾을 수 없습니다.' });
+    return res.json({ success: true, status: job.status, currentStep: job.current_step, totalSteps: job.total_steps, stepLabel: job.step_label, progress: stepProgress(job.current_step), error: job.error });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err?.message || '상태 조회 실패' });
+  }
+});
+
+router.get('/operator/performance/full-analysis/download/:id', async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+    const job = await getJob(req.params.id, companyId);
+    if (!job || job.status !== 'done' || !job.pdf_path) return res.status(409).json({ success: false, error: '아직 준비되지 않았습니다.' });
+    const fsmod = require('fs');
+    if (!fsmod.existsSync(job.pdf_path)) return res.status(404).json({ success: false, error: 'PDF 파일이 없습니다.' });
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="full_analysis_${job.period}.pdf"`);
+    fsmod.createReadStream(job.pdf_path).pipe(res);
+  } catch (err: any) {
+    if (!res.headersSent) return res.status(500).json({ success: false, error: err?.message || 'PDF 다운로드 실패' });
   }
 });
 

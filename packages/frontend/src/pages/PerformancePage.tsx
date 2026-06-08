@@ -15,7 +15,7 @@
  *   - 모바일 반응형 + 임의상수 0(실데이터 근거)
  */
 
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   BarChart, Bar, LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Legend,
@@ -23,7 +23,7 @@ import {
 import {
   ArrowLeft, BarChart3, Brain, Clock, Loader2, RefreshCw, Sparkles, TrendingUp, Users,
   AlertTriangle, MousePointerClick, Database, Activity, ChevronRight, ChevronLeft, ChevronDown, ChevronUp,
-  Search, Filter, ArrowUpDown, FileDown, X,
+  Search, Filter, ArrowUpDown, FileDown, X, Check,
 } from 'lucide-react';
 import { useToast } from '../components/ToastProvider';
 import CreditConfirmModal from '../components/credit/CreditConfirmModal';
@@ -247,7 +247,6 @@ export default function PerformancePage() {
   const [benchmark, setBenchmark] = useState<BenchmarkResult | null>(null);
   const [attribution, setAttribution] = useState<AttributionResult | null>(null);
   const [loading, setLoading] = useState(true);
-  const [pdfLoading, setPdfLoading] = useState(false);
   const toast = useToast();
   const [error, setError] = useState<string | null>(null);
 
@@ -284,43 +283,84 @@ export default function PerformancePage() {
   const token = () => localStorage.getItem('token');
 
   const [confirmReport, setConfirmReport] = useState(false);
+  // 풀분석 흐름: 설정 모달 → CreditConfirmModal(동의) → start → 진행도 모달(폴링) → 다운로드
+  const [showSettings, setShowSettings] = useState(false);
+  const [analysisPurpose, setAnalysisPurpose] = useState<'overall' | 'revenue' | 'retention' | 'channel'>('overall');
+  const [reportTitle, setReportTitle] = useState('');
+  const [showProgress, setShowProgress] = useState(false);
+  const [progress, setProgress] = useState<{ currentStep: number; totalSteps: number; stepLabel: string; progress: number; status: string } | null>(null);
+  const analysisAlive = useRef(false);
 
-  // 기간 성과 PDF 풀 보고서 — 풀분석 차감(같은 날 같은 기간 재다운로드는 backend 멱등으로 무료)
-  const downloadPdf = async () => {
-    if (pdfLoading) return;
-    setPdfLoading(true);
+  // ── 풀분석(비동기 job) ──
+  const startFullAnalysis = async () => {
     try {
-      const res = await fetch('/api/ai/operator/performance/report-pdf', {
+      analysisAlive.current = true;
+      setShowProgress(true);
+      setProgress({ currentStep: 0, totalSteps: 9, stepLabel: '데이터 수집', progress: 0, status: 'queued' });
+      const res = await fetch('/api/ai/operator/performance/full-analysis/start', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token()}` },
-        body: JSON.stringify({ period }),
+        body: JSON.stringify({ period, purpose: analysisPurpose, reportTitle: reportTitle || undefined }),
       });
       if (res.status === 402) {
         const d = await res.json().catch(() => ({}));
         toast.error(d?.error || 'AI 크레딧이 부족합니다.');
-        setPdfLoading(false);
+        setShowProgress(false);
         return;
       }
       if (!res.ok) {
-        toast.error('PDF 보고서 생성에 실패했습니다.');
-        setPdfLoading(false);
+        toast.error('풀분석 시작에 실패했습니다.');
+        setShowProgress(false);
         return;
       }
+      const d = await res.json();
+      pollAnalysisStatus(String(d.jobId));
+    } catch (e: any) {
+      toast.error(e?.message || '풀분석 시작 중 오류가 발생했습니다.');
+      setShowProgress(false);
+    }
+  };
+
+  const pollAnalysisStatus = async (jobId: string) => {
+    if (!analysisAlive.current) return;
+    try {
+      const res = await fetch(`/api/ai/operator/performance/full-analysis/status/${jobId}`, {
+        headers: { Authorization: `Bearer ${token()}` },
+      });
+      if (!res.ok) { toast.error('진행 상태 조회에 실패했습니다.'); setShowProgress(false); return; }
+      const d = await res.json();
+      setProgress({ currentStep: d.currentStep, totalSteps: d.totalSteps, stepLabel: d.stepLabel || '', progress: d.progress || 0, status: d.status });
+      if (d.status === 'done') { await downloadAnalysisPdf(jobId); setShowProgress(false); return; }
+      if (d.status === 'failed') { toast.error('풀분석에 실패했습니다. ' + (d.error || '')); setShowProgress(false); return; }
+      setTimeout(() => pollAnalysisStatus(jobId), 1500);
+    } catch (e: any) {
+      toast.error(e?.message || '진행 상태 조회 중 오류가 발생했습니다.');
+      setShowProgress(false);
+    }
+  };
+
+  const downloadAnalysisPdf = async (jobId: string) => {
+    try {
+      const res = await fetch(`/api/ai/operator/performance/full-analysis/download/${jobId}`, {
+        headers: { Authorization: `Bearer ${token()}` },
+      });
+      if (!res.ok) { toast.error('보고서 다운로드에 실패했습니다.'); return; }
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `성과리포트_${period}.pdf`;
+      a.download = `풀분석보고서_${period}.pdf`;
       document.body.appendChild(a);
       a.click();
       a.remove();
       URL.revokeObjectURL(url);
-      toast.success('PDF 보고서를 내려받았습니다.');
+      toast.success('풀분석 보고서를 내려받았습니다.');
     } catch (e: any) {
-      toast.error(e?.message || 'PDF 다운로드 중 오류가 발생했습니다.');
+      toast.error(e?.message || '보고서 다운로드 중 오류가 발생했습니다.');
     }
-    setPdfLoading(false);
   };
+
+  useEffect(() => () => { analysisAlive.current = false; }, []);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -574,20 +614,98 @@ export default function PerformancePage() {
               </button>
             ))}
             <button
-              onClick={() => setConfirmReport(true)}
-              disabled={pdfLoading || loading || !snapshot || snapshot.totalCampaigns.current === 0}
-              className="flex items-center gap-1.5 px-2.5 py-1 rounded text-[11px] font-medium bg-gradient-to-r from-violet-500/80 to-fuchsia-500/80 hover:from-violet-500 hover:to-fuchsia-500 text-white disabled:opacity-40 disabled:cursor-not-allowed transition-colors ml-1"
-              title="기간 성과 PDF 풀 보고서 — 풀분석 크레딧 차감(같은 날 같은 기간 재다운로드는 무료)"
+              onClick={() => setShowSettings(true)}
+              disabled={loading || !snapshot || snapshot.totalCampaigns.current === 0}
+              className="flex items-center gap-1.5 px-3 py-1 rounded text-[11px] font-semibold bg-gradient-to-r from-violet-500 to-fuchsia-500 hover:opacity-90 text-white disabled:opacity-40 disabled:cursor-not-allowed transition-opacity ml-1 shadow-lg shadow-violet-500/20"
+              title="기간 종합 마케팅 분석보고서 — 300크레딧"
             >
-              {pdfLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <FileDown className="w-3.5 h-3.5" />}
-              PDF 보고서
+              <Sparkles className="w-3.5 h-3.5" />
+              풀분석 보고서
             </button>
             <CreditConfirmModal
               open={confirmReport}
               source="orchestrate"
-              onConfirm={() => { setConfirmReport(false); downloadPdf(); }}
+              onConfirm={() => { setConfirmReport(false); startFullAnalysis(); }}
               onCancel={() => setConfirmReport(false)}
             />
+
+            {/* 풀분석 설정 모달 — 기간 + 초점 + 제목 */}
+            {showSettings && (
+              <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/60 backdrop-blur-sm px-4" onClick={() => setShowSettings(false)}>
+                <div className="w-full max-w-md bg-slate-900 border border-white/10 rounded-2xl shadow-2xl p-6" onClick={(e) => e.stopPropagation()}>
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-violet-500 to-fuchsia-500 flex items-center justify-center flex-shrink-0"><FileDown className="w-5 h-5 text-white" /></div>
+                    <div className="min-w-0">
+                      <div className="text-sm font-semibold text-white flex items-center gap-2">풀분석 보고서 <span className="px-1.5 py-0.5 rounded bg-violet-500/20 text-violet-200 text-[9px] font-bold">300 크레딧</span></div>
+                      <div className="text-[11px] text-white/40">기간 종합 마케팅 분석 — 회사 보고용</div>
+                    </div>
+                    <button onClick={() => setShowSettings(false)} className="ml-auto p-1 hover:bg-white/10 rounded-lg flex-shrink-0" aria-label="닫기"><X className="w-4 h-4 text-white/40" /></button>
+                  </div>
+                  <div className="mt-5 space-y-4">
+                    <div>
+                      <div className="text-[11px] font-medium text-white/50 mb-2">분석 기간</div>
+                      <div className="flex gap-1.5 flex-wrap">
+                        {PERIOD_OPTIONS.map((o) => (
+                          <button key={o.value} onClick={() => setPeriod(o.value)} className={`px-3 py-1.5 rounded-lg text-[12px] font-medium transition-colors ${period === o.value ? 'bg-violet-500/20 text-violet-200 border border-violet-400/40' : 'bg-white/5 text-white/60 border border-white/10 hover:bg-white/10'}`}>{o.label}</button>
+                        ))}
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-[11px] font-medium text-white/50 mb-2">보고서 초점</div>
+                      <div className="grid grid-cols-2 gap-2">
+                        {[{ v: 'overall', l: '종합', d: '전 영역 균형' }, { v: 'revenue', l: '매출 성장', d: '매출·ROAS 중심' }, { v: 'retention', l: '고객 유지', d: '리텐션·이탈' }, { v: 'channel', l: '채널 효율', d: '채널·캠페인' }].map((o) => (
+                          <button key={o.v} onClick={() => setAnalysisPurpose(o.v as any)} className={`text-left px-3 py-2.5 rounded-xl border transition-colors ${analysisPurpose === o.v ? 'bg-violet-500/15 border-violet-400/40' : 'bg-white/5 border-white/10 hover:bg-white/10'}`}>
+                            <div className={`text-[12px] font-semibold ${analysisPurpose === o.v ? 'text-violet-200' : 'text-white/80'}`}>{o.l}</div>
+                            <div className="text-[10px] text-white/40 mt-0.5">{o.d}</div>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-[11px] font-medium text-white/50 mb-2">보고서 제목 <span className="text-white/30">(선택)</span></div>
+                      <input value={reportTitle} onChange={(e) => setReportTitle(e.target.value)} placeholder="예: 2026년 6월 마케팅 성과 보고" className="w-full px-3 py-2 rounded-lg bg-white/5 border border-white/10 text-[12px] text-white placeholder:text-white/25 focus:outline-none focus:border-violet-400/40" />
+                    </div>
+                  </div>
+                  <div className="flex gap-2 mt-6">
+                    <button onClick={() => setShowSettings(false)} className="flex-1 py-2.5 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-[13px] text-white/70 transition-colors">취소</button>
+                    <button onClick={() => { setShowSettings(false); setConfirmReport(true); }} className="flex-1 py-2.5 rounded-xl bg-gradient-to-r from-violet-500 to-fuchsia-500 hover:opacity-90 text-[13px] font-semibold text-white transition-opacity">분석 실행</button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* 풀분석 진행도 모달 — 실제 단계 폴링 */}
+            {showProgress && progress && (
+              <div className="fixed inset-0 z-[130] flex items-center justify-center bg-black/70 backdrop-blur-sm px-4">
+                <div className="w-full max-w-md bg-slate-900 border border-white/10 rounded-2xl shadow-2xl p-6">
+                  <div className="flex items-center gap-3 mb-5">
+                    <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-violet-500 to-fuchsia-500 flex items-center justify-center flex-shrink-0"><Sparkles className="w-5 h-5 text-white animate-pulse" /></div>
+                    <div className="min-w-0">
+                      <div className="text-sm font-semibold text-white">AI가 풀분석 보고서를 작성 중입니다</div>
+                      <div className="text-[11px] text-white/40 truncate">{progress.stepLabel} · {Math.round(progress.progress)}%</div>
+                    </div>
+                  </div>
+                  <div className="h-1.5 rounded-full bg-white/10 overflow-hidden mb-5">
+                    <div className="h-full bg-gradient-to-r from-violet-500 to-fuchsia-500 transition-all duration-500" style={{ width: `${progress.progress}%` }} />
+                  </div>
+                  <div className="space-y-1.5">
+                    {['데이터 수집', '성과 진단', '원인 분석', '세그먼트', '다차원 비교', '채널·캠페인', '메시지 분석', '예측', '액션 플랜', 'PDF 생성'].map((label, i) => {
+                      const done = i < progress.currentStep;
+                      const active = i === progress.currentStep;
+                      return (
+                        <div key={label} className={`flex items-center gap-2.5 text-[12px] ${active ? 'text-white' : done ? 'text-white/50' : 'text-white/25'}`}>
+                          <div className={`w-4 h-4 rounded-full flex items-center justify-center flex-shrink-0 ${done ? 'bg-violet-500/30' : active ? 'bg-gradient-to-br from-violet-500 to-fuchsia-500' : 'bg-white/5'}`}>
+                            {done ? <Check className="w-3 h-3 text-violet-300" /> : active ? <Loader2 className="w-3 h-3 text-white animate-spin" /> : null}
+                          </div>
+                          {label}
+                        </div>
+                      );
+                    })}
+                  </div>
+                  <p className="text-[10px] text-white/30 mt-5 text-center">분석에는 보통 1~3분이 걸립니다. 창을 닫아도 진행됩니다.</p>
+                </div>
+              </div>
+            )}
             <button
               onClick={load}
               disabled={loading}
