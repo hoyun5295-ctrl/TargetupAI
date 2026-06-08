@@ -7,7 +7,8 @@ import AddressBookModal from '../components/AddressBookModal';
 import AiCampaignResultPopup from '../components/AiCampaignResultPopup';
 import AiCampaignSendModal from '../components/AiCampaignSendModal';
 import AiCustomSendFlow from '../components/AiCustomSendFlow';
-import OpenPromoPopup from '../components/OpenPromoPopup';
+import OpenTrialPopup from '../components/OpenTrialPopup';
+import PlanChangeModal from '../components/PlanChangeModal';
 import AiMessageSuggestModal from '../components/AiMessageSuggestModal';
 import AiPreviewModal from '../components/AiPreviewModal';
 import AiSendTypeModal from '../components/AiSendTypeModal';
@@ -162,6 +163,21 @@ export default function Dashboard() {
 
   const [stats, setStats] = useState<Stats | null>(null);
   const [planInfo, setPlanInfo] = useState<PlanInfo | null>(null);
+  // ★ 2026-06-08: 요금제 변경(무료체험 활성/종료 포함) 최초 1회 알림 모달 (localStorage 비교)
+  const [planChange, setPlanChange] = useState<{ from: string; to: string; toStatus?: string } | null>(null);
+  useEffect(() => {
+    if (!planInfo?.plan_code) return;
+    try {
+      const KEY = 'targetup_last_seen_plan';
+      const last = localStorage.getItem(KEY);
+      const cur = planInfo.plan_code;
+      if (last && last !== cur) {
+        setPlanChange({ from: last, to: cur, toStatus: planInfo.subscription_status });
+      }
+      localStorage.setItem(KEY, cur);
+    } catch { /* noop */ }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [planInfo?.plan_code]);
   // ★ CT-17 (2026-04-22): subscription_status === expired/suspended 만 전체 잠금.
   //   FREE(미가입) 자체는 기본 발송/수신거부/발송결과 허용 → 전체 잠금 아님.
   //   각 기능(AI·자동발송·모바일DM)은 plans 플래그 기반 개별 잠금으로 처리.
@@ -3901,8 +3917,18 @@ const campaignData = {
         }}
       />
 
-      {/* AI 활용 안내 팝업 — 로그인 직후 1회 노출 (24h localStorage 차단) */}
-      <OpenPromoPopup />
+      {/* 무료체험 신청 팝업 — 로그인 직후 1회 노출 (FREE/미가입 + 24h localStorage 차단) */}
+      {planInfo?.plan_code === 'FREE' && <OpenTrialPopup />}
+
+      {/* 요금제 변경(무료체험 활성/종료) 최초 1회 알림 */}
+      {planChange && (
+        <PlanChangeModal
+          fromPlan={planChange.from}
+          toPlan={planChange.to}
+          toStatus={planChange.toStatus}
+          onClose={() => setPlanChange(null)}
+        />
+      )}
 
       {/* ★ D163 (2026-05-19) Braze급 SaaS Step 0 — AI Operator 베타 안내 모달.
           ENT/BUSINESS 외 등급 사용자가 헤더 "AI Operator" 메뉴 클릭 시 노출. */}

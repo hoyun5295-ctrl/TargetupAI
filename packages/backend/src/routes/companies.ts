@@ -6,6 +6,7 @@ import { authenticate, requireSuperAdmin, requireUuidId } from '../middlewares/a
 import { getCardDef, isDynamicCardId, parseDynamicCardId, type ParsedDynamicCardId } from '../utils/dashboard-card-pool';
 import { getStoreScope } from '../utils/store-scope';
 import { getOpt080Number } from '../utils/messageUtils';
+import { grantBasicTrial } from '../utils/basic-trial';
 
 const router = Router();
 
@@ -319,6 +320,49 @@ router.post('/plan-request', async (req: Request, res: Response) => {
   } catch (error) {
     console.error('플랜 신청 실패:', error);
     res.status(500).json({ error: '플랜 신청 실패' });
+  }
+});
+
+// POST /api/companies/trial-request - BASIC 1개월 무료체험 신청 (FREE만, [무료체험] 센티넬)
+//   팝업(OpenTrialPopup) → 본 신청 → plan_requests 'pending' → 슈퍼관리자 승인 시 grantBasicTrial.
+router.post('/trial-request', async (req: Request, res: Response) => {
+  try {
+    const companyId = (req as any).user?.companyId;
+    const userId = (req as any).user?.userId;
+    if (!companyId) return res.status(401).json({ error: '인증 필요' });
+
+    // 무료체험은 미가입(FREE) 상태에서만 신청 가능
+    const comp = await query(
+      `SELECT p.plan_code FROM companies c LEFT JOIN plans p ON c.plan_id = p.id WHERE c.id = $1`,
+      [companyId],
+    );
+    const planCode = comp.rows[0]?.plan_code;
+    if (planCode && planCode !== 'FREE') {
+      return res.status(400).json({ error: '무료체험은 미가입(FREE) 상태에서만 신청할 수 있습니다.' });
+    }
+
+    // 중복 신청 방지 (pending 1건)
+    const pendingCheck = await query(
+      `SELECT id FROM plan_requests WHERE company_id = $1 AND status = 'pending' LIMIT 1`,
+      [companyId],
+    );
+    if (pendingCheck.rows.length > 0) {
+      return res.status(409).json({ error: '이미 처리 대기 중인 신청이 있습니다.', code: 'DUPLICATE_PENDING' });
+    }
+
+    const basic = await query(`SELECT id FROM plans WHERE plan_code = 'BASIC' AND is_active = true LIMIT 1`);
+    if (basic.rows.length === 0) return res.status(500).json({ error: 'BASIC 요금제가 존재하지 않습니다.' });
+
+    await query(
+      `INSERT INTO plan_requests (company_id, user_id, requested_plan_id, message, status)
+       VALUES ($1, $2, $3, $4, 'pending')`,
+      [companyId, userId, basic.rows[0].id, '[무료체험] AI Operator 베이직 1개월 무료체험 신청'],
+    );
+
+    res.json({ success: true, message: '무료체험 신청이 접수되었습니다.' });
+  } catch (error) {
+    console.error('무료체험 신청 실패:', error);
+    res.status(500).json({ error: '무료체험 신청 실패' });
   }
 });
 
@@ -1644,6 +1688,53 @@ router.post(
     }
   },
 );
+
+// ============================================================
+// ★ 2026-06-08: BASIC 1개월 무료체험 부여/취소 (슈퍼관리자 전용)
+//   - 부여 = grantBasicTrial CT (plan=BASIC + status='trial' + 30일 + base 크레딧=BASIC, purchased 보존).
+//   - 만료 자동 강등 = trial-downgrade-worker (subscription_status='trial' 기준).
+//   - 기존 grant-trial(PRO)/grant-ai-operator-trial(overlay) 대체.
+// ============================================================
+router.post('/:id/grant-basic-trial', requireUuidId, requireSuperAdmin, async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const days = Math.max(1, Math.min(Number((req.body as any)?.days) || 30, 365));
+    const exists = await query(`SELECT id FROM companies WHERE id = $1`, [id]);
+    if (exists.rows.length === 0) return res.status(404).json({ error: '고객사를 찾을 수 없습니다.' });
+    const company = await grantBasicTrial(id, days);
+    return res.json({ success: true, message: `${days}일 BASIC 무료체험이 부여되었습니다.`, company });
+  } catch (err: any) {
+    console.error('grant-basic-trial 실패:', err);
+    return res.status(500).json({ error: err?.message || 'BASIC 무료체험 부여 실패' });
+  }
+});
+
+router.post('/:id/revoke-basic-trial', requireUuidId, requireSuperAdmin, async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const freeRes = await query(
+      `SELECT id, COALESCE(ai_credits_per_month, 0) AS credits FROM plans WHERE plan_code = 'FREE' LIMIT 1`,
+    );
+    if (freeRes.rows.length === 0) return res.status(500).json({ error: 'FREE 요금제가 존재하지 않습니다.' });
+    // ⛔ 크레딧 불변식: base만 FREE(0)로, purchased 컬럼 미포함 = 보존.
+    const updated = await query(
+      `UPDATE companies
+          SET plan_id                   = $1,
+              subscription_status       = 'trial_expired',
+              ai_credits_base_remaining = $2,
+              ai_credits_reset_at       = NOW(),
+              updated_at                = NOW()
+        WHERE id = $3 AND subscription_status = 'trial'
+      RETURNING id, plan_id, subscription_status`,
+      [freeRes.rows[0].id, Number(freeRes.rows[0].credits) || 0, id],
+    );
+    if (updated.rows.length === 0) return res.status(400).json({ error: '취소할 활성 무료체험이 없습니다.' });
+    return res.json({ success: true, message: '무료체험이 취소되고 미가입(FREE)으로 전환되었습니다.', company: updated.rows[0] });
+  } catch (err: any) {
+    console.error('revoke-basic-trial 실패:', err);
+    return res.status(500).json({ error: 'BASIC 무료체험 취소 실패' });
+  }
+});
 
 // PUT /api/companies/:id - 고객사 수정 (전체 설정 포함)
 // ★ D162-4 (2026-05-15): `/:id` UUID 검증 미들웨어 — 미래에 1-segment 명시 PUT 라우트 추가 시 충돌 방지

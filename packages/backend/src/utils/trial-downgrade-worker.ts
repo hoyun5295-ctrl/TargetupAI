@@ -47,8 +47,10 @@ export async function runTrialDowngradeJob(): Promise<{ downgraded: number }> {
   // ★ 체험 잔여 AI 크레딧 제거 — 강등 시 base를 FREE 월 기본분(=0)으로 리셋. purchased(구매분)는 미변경.
   const freeBaseCredits = Number(freeRes.rows[0].base_credits) || 0;
 
-  // 만료 대상 일괄 강등 (plan_code='TRIAL' + 만료됨)
-  // ※ subscription_status 조건 없음 — 'trial'/'paid' 어느 쪽으로 바뀌어 있어도 강등. plan_code가 진실의 원천.
+  // 만료 대상 일괄 강등 — subscription_status='trial'(BASIC 무료체험 포함) + 만료됨.
+  // ※ 2026-06-08: plan_code='TRIAL' 한정 → status='trial' 기준 확장 (BASIC 체험은 plan_code='BASIC'이라 옛 조건에 안 잡힘).
+  //   정식 구독(status='paid')은 제외. 일반 플랜변경 승인은 'paid'로 세팅하므로 안전.
+  // ⛔ 크레딧 불변식: base만 FREE(0)로 리셋, purchased(구매분) 컬럼 미포함 = 보존.
   const res = await query(
     `UPDATE companies c
         SET plan_id                   = $1,
@@ -56,9 +58,7 @@ export async function runTrialDowngradeJob(): Promise<{ downgraded: number }> {
             ai_credits_base_remaining = $2,
             ai_credits_reset_at       = NOW(),
             updated_at                = NOW()
-       FROM plans p
-      WHERE c.plan_id = p.id
-        AND p.plan_code = 'TRIAL'
+      WHERE c.subscription_status = 'trial'
         AND c.trial_expires_at IS NOT NULL
         AND c.trial_expires_at < NOW()
     RETURNING c.id, c.company_name`,

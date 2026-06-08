@@ -15,6 +15,7 @@ import { getUserUnsubscribes, deleteUserUnsubscribes, exportUserUnsubscribes, CA
 import { buildDateRangeFilter, aggregateSmsCountsByCampaign, aggregateSmsChannelSplitByCampaign, aggregateSmsSendTimesByCampaign, getCampaignResultCounts, STAT_DATE_EXPR } from '../utils/stats-aggregation';
 import { normalizePhone } from '../utils/normalize-phone';
 import { normalizeCdpAutoExecuteGate } from '../utils/autosend-policy';
+import { grantBasicTrial } from '../utils/basic-trial';
 
 const router = Router();
 
@@ -1170,7 +1171,7 @@ router.put('/plan-requests/:id/approve', authenticate, requireSuperAdmin, async 
   try {
     // 신청 정보 조회
     const requestResult = await query(
-      'SELECT company_id, requested_plan_id, status FROM plan_requests WHERE id = $1',
+      'SELECT company_id, requested_plan_id, status, message FROM plan_requests WHERE id = $1',
       [id]
     );
     
@@ -1184,15 +1185,21 @@ router.put('/plan-requests/:id/approve', authenticate, requireSuperAdmin, async 
       return res.status(400).json({ error: '이미 처리된 신청입니다.' });
     }
     
-    // ★ CT-17: 요금제 승인 시 TRIAL plan이면 'trial' 유지, 그 외는 'paid'(정식 구독).
-    //   (과거: 무조건 'active'로 덮어써서 ① 체험 상태 파괴 ② companies.status='active'와 네이밍 충돌)
-    const approvedPlanRes = await query(`SELECT plan_code FROM plans WHERE id = $1`, [request.requested_plan_id]);
-    const approvedIsTrial = approvedPlanRes.rows[0]?.plan_code === 'TRIAL';
-    const approvedStatus = approvedIsTrial ? 'trial' : 'paid';
-    await query(
-      `UPDATE companies SET plan_id = $1, subscription_status = $2, updated_at = NOW() WHERE id = $3`,
-      [request.requested_plan_id, approvedStatus, request.company_id]
-    );
+    // ★ 2026-06-08: 무료체험 신청([무료체험] 센티넬)이면 BASIC 1개월 체험 부여(grantBasicTrial), 그 외는 일반 플랜 변경.
+    const isTrialReq = typeof request.message === 'string' && request.message.startsWith('[무료체험]');
+    if (isTrialReq) {
+      await grantBasicTrial(request.company_id);
+    } else {
+      // ★ CT-17: 요금제 승인 시 TRIAL plan이면 'trial' 유지, 그 외는 'paid'(정식 구독).
+      //   (과거: 무조건 'active'로 덮어써서 ① 체험 상태 파괴 ② companies.status='active'와 네이밍 충돌)
+      const approvedPlanRes = await query(`SELECT plan_code FROM plans WHERE id = $1`, [request.requested_plan_id]);
+      const approvedIsTrial = approvedPlanRes.rows[0]?.plan_code === 'TRIAL';
+      const approvedStatus = approvedIsTrial ? 'trial' : 'paid';
+      await query(
+        `UPDATE companies SET plan_id = $1, subscription_status = $2, updated_at = NOW() WHERE id = $3`,
+        [request.requested_plan_id, approvedStatus, request.company_id]
+      );
+    }
     
     // 신청 상태 변경
     const result = await query(`
