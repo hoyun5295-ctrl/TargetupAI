@@ -12,7 +12,7 @@ import { validateSmsTables } from '../utils/sms-table-validator';
 // ★ D145 P0: 예약 캠페인 자동 정리 (모든 발송 관련 라우트 정합성)
 import { cleanupScheduledCampaigns } from '../utils/campaign-lifecycle';
 import { getUserUnsubscribes, deleteUserUnsubscribes, exportUserUnsubscribes, CAMPAIGN_OPT080_SELECT_EXPR, CAMPAIGN_OPT080_LEFT_JOIN } from '../utils/unsubscribe-helper';
-import { buildDateRangeFilter, aggregateSmsCountsByCampaign, aggregateSmsChannelSplitByCampaign, aggregateSmsSendTimesByCampaign, getCampaignResultCounts, STAT_DATE_EXPR } from '../utils/stats-aggregation';
+import { buildDateRangeFilter, aggregateSmsCountsByCampaign, aggregateSmsChannelSplitByCampaign, aggregateSmsSendTimesByCampaign, getCampaignResultCounts, STAT_DATE_EXPR, STAT_STARTED_GUARD } from '../utils/stats-aggregation';
 import { normalizePhone } from '../utils/normalize-phone';
 import { normalizeCdpAutoExecuteGate } from '../utils/autosend-policy';
 import { grantBasicTrial } from '../utils/basic-trial';
@@ -799,6 +799,8 @@ router.get('/campaigns/scheduled', authenticate, requireSuperAdmin, async (req: 
     where += dateDr.sql;
     params.push(...dateDr.params);
     paramIdx = dateDr.nextIndex;
+    // ★ 발송 시작된 캠페인만 (전송시각 미도래 예약 제외) — Harold 명시 2026-06-09
+    where += ` AND ${STAT_STARTED_GUARD}`;
     if (search) {
       where += ` AND (c.campaign_name ILIKE $${paramIdx} OR co.company_name ILIKE $${paramIdx})`;
       params.push(`%${search}%`);
@@ -1313,6 +1315,7 @@ router.get('/stats/send', authenticate, requireSuperAdmin, async (req: Request, 
       JOIN companies co ON c.company_id = co.id
       LEFT JOIN sms_line_groups lg ON co.line_group_id = lg.id
       WHERE ${STAT_DATE_EXPR} IS NOT NULL
+        AND ${STAT_STARTED_GUARD}
         AND c.status NOT IN ('cancelled', 'draft') ${dateWhere} ${companyWhere}
     `, baseParams);
 
@@ -1476,6 +1479,7 @@ router.get('/stats/send/detail', authenticate, requireSuperAdmin, async (req: Re
       LEFT JOIN users u ON c.created_by = u.id
       ${CAMPAIGN_OPT080_LEFT_JOIN}
       WHERE ${STAT_DATE_EXPR} IS NOT NULL
+        AND ${STAT_STARTED_GUARD}
         AND c.status NOT IN ('cancelled', 'draft')
         AND ${groupCol} = $1
         AND c.company_id = $2
@@ -1659,6 +1663,8 @@ router.get('/campaigns/all', authenticate, requireSuperAdmin, async (req: Reques
     where += dateDr.sql;
     params.push(...dateDr.params);
     paramIdx = dateDr.nextIndex;
+    // ★ 발송 시작된 캠페인만 (전송시각 미도래 예약 제외) — Harold 명시 2026-06-09
+    where += ` AND ${STAT_STARTED_GUARD}`;
 
     const countResult = await query(
       `SELECT COUNT(*) FROM campaigns c LEFT JOIN companies co ON c.company_id = co.id LEFT JOIN users u ON c.created_by = u.id ${where}`,
@@ -3265,6 +3271,7 @@ router.get('/stats/export', authenticate, requireSuperAdmin, async (req: Request
       JOIN companies co ON c.company_id = co.id
       LEFT JOIN users u ON c.created_by = u.id
       ${whereClause}
+        AND ${STAT_STARTED_GUARD}
         AND c.status NOT IN ('draft', 'cancelled')`,
       params
     );

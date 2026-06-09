@@ -179,6 +179,13 @@ export function kstDate(column: string): string {
  */
 export const STAT_DATE_EXPR = `COALESCE(c.scheduled_at, c.sent_at)`;
 
+/**
+ * ★ 발송 시작된 캠페인만 집계 — 전송시각(scheduled_at) 미도래 예약은 발송 전이라 통계에서 제외 (Harold 명시 2026-06-09).
+ *   예약은 전송시각이 되어야 발송이 시작되고(그 전엔 취소 가능), 발송 시작 후에만 통계에 잡혀야 한다.
+ *   STAT_DATE_EXPR을 쓰는 모든 통계/집계/목록 WHERE에 ` AND ${STAT_STARTED_GUARD}` 동반. 캠페인 alias 'c' 고정.
+ */
+export const STAT_STARTED_GUARD = `NOT (c.status = 'scheduled' AND COALESCE(c.scheduled_at, c.sent_at) > NOW())`;
+
 // ============================================================
 // ★ 발송통계 컨트롤타워 — manage-stats.ts, results.ts 등 공용
 // 슈퍼관리자/고객사관리자/고객사사용자 모두 이 함수를 import해서 사용
@@ -496,7 +503,7 @@ export async function querySendStats(options: SendStatsOptions): Promise<SendSta
     paramIdx++;
   }
 
-  const baseWhereSql = `${STAT_DATE_EXPR} IS NOT NULL AND c.status NOT IN ('cancelled', 'draft') ${dateWhere} ${companyWhere} ${userWhere}`;
+  const baseWhereSql = `${STAT_DATE_EXPR} IS NOT NULL AND ${STAT_STARTED_GUARD} AND c.status NOT IN ('cancelled', 'draft') ${dateWhere} ${companyWhere} ${userWhere}`;
   const groupCol = kstGroupBy(STAT_DATE_EXPR, view);
 
   // 1) PG에서 캠페인 메타만 SELECT (sent_count/success_count/fail_count 제거).
@@ -626,6 +633,7 @@ export async function querySendStatsDetail(
     LEFT JOIN users u ON c.created_by = u.id
     ${CAMPAIGN_OPT080_LEFT_JOIN}
     WHERE ${STAT_DATE_EXPR} IS NOT NULL
+      AND ${STAT_STARTED_GUARD}
       AND ${groupCol} = $1
       AND c.company_id = $2
       AND c.status NOT IN ('cancelled', 'draft')
@@ -796,8 +804,8 @@ export async function aggregateCampaignPerformance(
     // 기본 조건: N개월 이내 + 발송 후 24시간 경과 + completed/sending 상태
     const baseWhere = `
       c.company_id = $1
-      AND c.sent_at >= NOW() - INTERVAL '${months} months'
-      AND c.sent_at < NOW() - INTERVAL '24 hours'
+      AND COALESCE(c.scheduled_at, c.sent_at) >= NOW() - INTERVAL '${months} months'
+      AND COALESCE(c.scheduled_at, c.sent_at) < NOW() - INTERVAL '24 hours'
       AND c.status IN ('completed', 'sending')
       AND c.sent_count > 0
     `;
@@ -834,7 +842,7 @@ export async function aggregateCampaignPerformance(
     // 3) KST 시간대별 성과
     const byTimeResult = await query(
       `SELECT
-        EXTRACT(HOUR FROM c.sent_at AT TIME ZONE 'Asia/Seoul')::int as hour,
+        EXTRACT(HOUR FROM COALESCE(c.scheduled_at, c.sent_at) AT TIME ZONE 'Asia/Seoul')::int as hour,
         COUNT(*) as campaign_count,
         ROUND(AVG(
           CASE WHEN c.sent_count > 0
@@ -885,7 +893,7 @@ export async function aggregateCampaignPerformance(
         CASE WHEN c.sent_count > 0
           THEN ROUND(COALESCE(c.success_count, 0)::numeric / c.sent_count * 100, 1)
           ELSE 0 END as success_rate,
-        TO_CHAR(c.sent_at AT TIME ZONE 'Asia/Seoul', 'YYYY-MM-DD HH24:MI') as sent_at
+        TO_CHAR(COALESCE(c.scheduled_at, c.sent_at) AT TIME ZONE 'Asia/Seoul', 'YYYY-MM-DD HH24:MI') as sent_at
        FROM campaigns c
        WHERE ${baseWhere}
        ORDER BY success_rate DESC, c.sent_count DESC

@@ -79,7 +79,7 @@ async function runOnce(): Promise<void> {
       WHERE co.billing_type = 'prepaid'
         AND c.status IN ('sending', 'completed')
         AND c.message_type IS NOT NULL
-        AND c.created_at >= NOW() - INTERVAL '14 days'
+        AND COALESCE(c.scheduled_at, c.sent_at, c.created_at) >= NOW() - INTERVAL '14 days'
       ORDER BY c.created_at DESC
     `);
 
@@ -366,7 +366,7 @@ async function accumulateCampaignLearning(): Promise<{ learned: number }> {
     FROM campaigns c
     WHERE c.status = 'completed'
       AND c.sent_at IS NOT NULL
-      AND c.sent_at > NOW() - INTERVAL '24 hours'
+      AND COALESCE(c.scheduled_at, c.sent_at) > NOW() - INTERVAL '24 hours'
       AND COALESCE(c.sent_count, 0) >= 10
       AND NOT EXISTS (
         -- ★ D216+ 비효율 정정 (Harold 명시 2026-05-25):

@@ -246,7 +246,8 @@ export async function syncCampaignResults(companyId: string): Promise<SyncResult
      JOIN campaigns c ON c.id = cr.campaign_id
      WHERE c.company_id = $1
        AND cr.status IN ('sending', 'scheduled', 'completed')
-       AND cr.created_at >= NOW() - INTERVAL '7 days'
+       AND (c.scheduled_at IS NULL OR c.scheduled_at <= NOW())
+       AND COALESCE(c.scheduled_at, c.sent_at, cr.created_at) >= NOW() - INTERVAL '7 days'
        AND (cr.target_count IS NULL
             OR cr.success_count IS NULL
             OR cr.target_count > COALESCE(cr.success_count, 0) + COALESCE(cr.fail_count, 0))`,
@@ -294,7 +295,8 @@ export async function syncCampaignResults(companyId: string): Promise<SyncResult
       // ★ D182 (2026-05-19): 30분 → 120분 변경 (직원 신고 — 30~34분 시점 통신사 응답 도착하는데 환불 처리되어 회사 손해 발생)
       //   통신사 응답 99%ile 분포 + 안전 마진 = 120분. mysql-refund-sweeper의 reverse refund 로직과 함께 영구 안전망 구축.
       const campTimeInfo = await query('SELECT sent_at, scheduled_at, created_at FROM campaigns WHERE id = $1', [run.campaign_id]);
-      const campSentAt = campTimeInfo.rows[0]?.sent_at || campTimeInfo.rows[0]?.scheduled_at || campTimeInfo.rows[0]?.created_at;
+      // ★ 발송시각 기준 — 예약은 scheduled_at(실제 전송 시작)이 우선. sent_at은 등록 시점이라 예약이 발송 전에 타임아웃 오발화 (Harold 명시 2026-06-09)
+      const campSentAt = campTimeInfo.rows[0]?.scheduled_at || campTimeInfo.rows[0]?.sent_at || campTimeInfo.rows[0]?.created_at;
       const minutesSinceSend = campSentAt ? (Date.now() - new Date(campSentAt).getTime()) / (1000 * 60) : 0;
       const isTimedOut = minutesSinceSend > 120 && pendingCount > 0 && successCount === 0 && failCount === 0;
 
@@ -385,7 +387,7 @@ export async function syncCampaignResults(companyId: string): Promise<SyncResult
        AND (target_count IS NULL
             OR success_count IS NULL
             OR target_count > COALESCE(success_count, 0) + COALESCE(fail_count, 0))
-       AND created_at >= NOW() - INTERVAL '7 days'`,
+       AND COALESCE(scheduled_at, sent_at, created_at) >= NOW() - INTERVAL '7 days'`,
     [companyId]
   );
 
@@ -425,8 +427,8 @@ export async function syncCampaignResults(companyId: string): Promise<SyncResult
       // 직접발송 타임아웃: 120분 경과 + pending만 남아있으면 강제 완료
       // ★ D182 (2026-05-19): 30분 → 120분 변경 (직원 신고 — 30~34분 시점 통신사 응답 도착하는데 환불 처리되어 회사 손해 발생)
       //   AI 캠페인 영역과 동일 임계값. mysql-refund-sweeper의 reverse refund 로직과 함께 영구 안전망 구축.
-      // ★ sent_at → scheduled_at → created_at 우선순위 (AI캠페인과 동일 패턴)
-      const directSentAt = campaign.sent_at || campaign.scheduled_at || campaign.created_at;
+      // ★ 발송시각 기준 — scheduled_at(예약=실제 전송 시작) → sent_at → created_at (AI캠페인과 동일, Harold 명시 2026-06-09)
+      const directSentAt = campaign.scheduled_at || campaign.sent_at || campaign.created_at;
       const directMinutesSince = directSentAt ? (Date.now() - new Date(directSentAt).getTime()) / (1000 * 60) : 0;
       const directTimedOut = directMinutesSince > 120 && pendingCount > 0 && successCount === 0 && failCount === 0;
 

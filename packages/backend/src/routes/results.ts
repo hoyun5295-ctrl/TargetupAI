@@ -13,7 +13,7 @@ import {
 } from '../utils/sms-queue';
 import { STATUS_CODE_MAP, CARRIER_MAP, SUCCESS_CODES, PENDING_CODES, getStatusLabel, getStatusType, getCarrierLabel, isSuccess, getSendTypeLabel } from '../utils/sms-result-map';
 import { DEFAULT_COSTS, redis, CACHE_TTL } from '../config/defaults';
-import { buildDateRangeFilter, buildPeriodFilter, STAT_DATE_EXPR, aggregateSmsCountsByCampaign, aggregateSmsSendTimesByCampaign } from '../utils/stats-aggregation';
+import { buildDateRangeFilter, buildPeriodFilter, STAT_DATE_EXPR, STAT_STARTED_GUARD, aggregateSmsCountsByCampaign, aggregateSmsSendTimesByCampaign } from '../utils/stats-aggregation';
 import { CAMPAIGN_OPT080_SELECT_EXPR, CAMPAIGN_OPT080_LEFT_JOIN } from '../utils/unsubscribe-helper';
 import { buildCampaignListCsv, channelPlainLabel, CampaignCsvRow } from '../utils/campaign-list-csv';
 
@@ -111,6 +111,8 @@ router.get('/summary', async (req: Request, res: Response) => {
 
     // ★ D98: draft/cancelled도 실패로 카운트 (목록에서 제외하지 않음)
     summaryQuery += ` AND c.status NOT IN ('cancelled')`;
+    // ★ 발송 시작된 캠페인만 (전송시각 미도래 예약 제외) — Harold 명시 2026-06-09
+    summaryQuery += ` AND ${STAT_STARTED_GUARD}`;
 
     // ★ D143 (2026-05-04, shiseido6 신고): 발송결과 출력 기준 = 발송일시
     //   발송 완료(sent_at) 우선 → 예약 대기(scheduled_at) → 미발송(created_at) 폴백
@@ -253,6 +255,8 @@ router.get('/campaigns', async (req: Request, res: Response) => {
     whereClause += campDr.sql;
     params.push(...campDr.params);
     paramIndex = campDr.nextIndex;
+    // ★ 발송 시작된 캠페인만 (전송시각 미도래 예약 제외) — STAT_STARTED_GUARD 무alias형(regex 재alias 호환) — Harold 명시 2026-06-09
+    whereClause += ` AND NOT (status = 'scheduled' AND COALESCE(scheduled_at, sent_at) > NOW())`;
 
     if (channel && channel !== 'all') {
       whereClause += ` AND message_type = $${paramIndex++}`;
@@ -398,6 +402,8 @@ router.get('/campaigns/export', async (req: Request, res: Response) => {
     whereClause += campDr.sql;
     params.push(...campDr.params);
     paramIndex = campDr.nextIndex;
+    // ★ 발송 시작된 캠페인만 (전송시각 미도래 예약 제외) — STAT_STARTED_GUARD 무alias형(regex 재alias 호환) — Harold 명시 2026-06-09
+    whereClause += ` AND NOT (status = 'scheduled' AND COALESCE(scheduled_at, sent_at) > NOW())`;
 
     // 화면 필터 정합 — 유형(filterType: ai/direct = send_type), 발송자(filterSender = u.login_id)
     if (sendType === 'direct') {

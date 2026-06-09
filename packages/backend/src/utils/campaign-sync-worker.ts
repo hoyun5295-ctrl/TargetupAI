@@ -58,7 +58,7 @@ async function runOnce(): Promise<void> {
       SELECT DISTINCT company_id FROM (
         SELECT c.company_id
         FROM campaigns c
-        WHERE c.created_at >= NOW() - INTERVAL '24 hours'
+        WHERE COALESCE(c.scheduled_at, c.sent_at, c.created_at) >= NOW() - INTERVAL '24 hours'
           AND c.status IN ('sending', 'scheduled', 'completed')
           AND c.target_count IS NOT NULL
           AND c.target_count > COALESCE(c.success_count, 0) + COALESCE(c.fail_count, 0)
@@ -66,7 +66,7 @@ async function runOnce(): Promise<void> {
         SELECT c.company_id
         FROM campaign_runs cr
         JOIN campaigns c ON c.id = cr.campaign_id
-        WHERE cr.created_at >= NOW() - INTERVAL '24 hours'
+        WHERE COALESCE(c.scheduled_at, c.sent_at, cr.created_at) >= NOW() - INTERVAL '24 hours'
           AND cr.status IN ('sending', 'scheduled', 'completed')
           AND cr.target_count IS NOT NULL
           AND cr.target_count > COALESCE(cr.success_count, 0) + COALESCE(cr.fail_count, 0)
@@ -241,7 +241,7 @@ async function markFinalizedCampaigns(): Promise<void> {
      WHERE result_final = false
        AND status IN ('completed', 'failed')
        AND sent_at IS NOT NULL
-       AND sent_at < NOW() - INTERVAL '6 hours'
+       AND COALESCE(scheduled_at, sent_at) < NOW() - INTERVAL '6 hours'
        AND sent_count > 0
        AND (COALESCE(success_count, 0) + COALESCE(fail_count, 0)) >= sent_count
   `);
