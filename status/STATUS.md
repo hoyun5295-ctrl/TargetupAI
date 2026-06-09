@@ -107,12 +107,13 @@
 
 ---
 
-### 🟢 2026-06-09 — CDP 페이지 재설계 진입 (게이팅 전 유료 개방·매트릭스 제거 완료 / 모달화 미완, 미배포)
-> **CDP(자사몰 연동) 페이지 재설계. Task1·2 완료, Task3~9 미완(다음 세션 plan 이어감).**
-> - **Task1 게이팅(완료)**: `CdpSettingsPage` `cdp_enabled` 판정 11곳 → `cdpLocked`(`!!usage && usage.plan_code==='FREE'`) 전수 교체 = STARTER+ 전부 개방, FREE만 안내. 안내 문구 "비즈니스 의무"→"스타터부터". 핵심=백엔드(plan-guard ai_cdp·cdp-auth isCdpEnabledForPlan) 이미 FREE만 차단 = 프론트 표시만 불일치였음. usage.plan_code 이미 존재→프론트 판정만(백엔드 무수정). tsc 0.
-> - **Task2 매트릭스(완료)**: "지원 자사몰 매트릭스" skeleton 나열(providers.map, Phase2 예정) 제거 → "어떤 자사몰이든 연동" 안내 카드(연락처 "고객센터" placeholder — Harold 제공 시 교체). tsc 0. ※ providers state·makeshop/sixshop 라벨 상수는 미사용 잔존→Task7 정리.
-> - **Task3~7 모달화(미완)**: CdpSettingsPage 1596줄 → 메인 요약 + 4모달(AI진단/데이터분석/Provider연동/활성customer). 모달=createPortal(헤더 backdrop-filter 갇힘 회피 — 성과리포트 교훈). **Task9 SDK 소스 재점검(cdp.ts·cdp-auth·cafe24/naver webhook·스니펫)도 미완.**
-> - spec=`docs/superpowers/specs/2026-06-09-cdp-page-redesign-design.md`, plan=`docs/superpowers/plans/2026-06-09-cdp-page-redesign.md`. 다음 세션=plan Task3부터 이어감.
+### 🟢 2026-06-09 — CDP 페이지 전면 모달화 Task1~9 완료 (미배포, frontend-only)
+> **CDP(자사몰 연동) 페이지 재설계 끝까지 구현. 단일 파일 `CdpSettingsPage.tsx` 재배치(신규 백엔드 0). frontend tsc 0 + 금지패턴 grep 0.**
+> - **Task1 게이팅(완료·기배포)**: `cdp_enabled` 판정 → `cdpLocked`(`plan_code==='FREE'`) = STARTER+ 전부 개방, FREE만 안내. 백엔드(plan-guard ai_cdp·cdp-auth isCdpEnabledForPlan) 이미 FREE만 차단.
+> - **Task2 매트릭스(완료·기배포)**: "지원 자사몰 매트릭스" 나열 제거 → "어떤 자사몰이든 연동" 안내.
+> - **Task3~8 모달화(완료·미배포)**: 메인 압축 = 헤더 → 게이팅 → "어떤 자사몰이든 연동" 카드(연동 상태 표시 + **"자사몰 연동하기" 버튼 1개**) → 5 metric → 요약 칩(데이터 분석·AI진단 / 활성 고객, `hasCdpData`일 때만). **3 모달(createPortal·slate-900)**: ①연동(자체호스팅·카페24·네이버·키·도메인·SDK·검증·그 외 안내 통합) ②데이터 분석·AI진단(자율진단 모달 open 시 자동 로드+영향요인+6차트+컴퓨팅) ③활성 고객(+빈 상태). ESC 닫기. 제거=AI진단 큰 카드·3개 고정 카드·자세히 토글·인라인 도메인/키 / 죽은 코드(providers·ProviderInfo·detailsExpanded·handleQuickAction·QuickActionCard·dataAvailabilityCards·/cdp/providers fetch). CdpModal=QuickActionCard 자리에 신설. 모델명/native/박-단어 0.
+> - **Task9 SDK 소스 재점검(완료·블로킹 이슈 0)**: cdp.ts·cdp-auth.ts·cafe24.ts·naver-commerce.ts 정독. 게이팅 전 유료 일치(isCdpEnabledForPlan=plan_code≠FREE 전 엔드포인트)·DB ALTER 503 안전망 ~15곳·회사 격리(SDK=key→company / admin=req.user.companyId, body 미신뢰)·webhook 서명검증+멱등(cdp_webhook_deliveries ON CONFLICT)+duplicate 마커·OAuth state CSRF+10분 TTL. 모델명 grep 2건=백엔드 코드 주석(룰 예외)=사용자 노출 0. (경미: cdp.ts 주석 "BUSINESS+" stale·webhook 실패 retry는 Phase2 cron 미구현 — 백엔드 무수정 유지.)
+> - **배포(frontend-only)**: `tp-push` → `git pull` → `packages/frontend npm run build:safe` (backend 무수정 → 빌드/restart 불요). **미결 1: 연동 안내 "고객센터" placeholder 실제 연락처 Harold 제공 시 교체.** 핸드오프=`docs/superpowers/handoffs/2026-06-09-cdp-redesign-handoff.md`(수정 설계 진실 원천).
 
 ---
 

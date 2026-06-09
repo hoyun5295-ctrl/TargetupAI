@@ -25,14 +25,15 @@
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { createPortal } from 'react-dom';
 import {
   BarChart, Bar, LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Legend,
   PieChart, Pie, Cell,
 } from 'recharts';
 import {
   ArrowLeft, Database, Brain, Loader2, RefreshCw, Sparkles, Users, AlertTriangle,
-  Activity, ChevronRight, ChevronLeft, Info, Link2, Store, Server,
-  KeyRound, Copy, Check, Unlink, MousePointerClick, AlertCircle, ShoppingCart, Code2,
+  Activity, Info, Link2, Store, Server,
+  KeyRound, Copy, Check, Unlink, MousePointerClick, AlertCircle, ShoppingCart, Code2, X,
 } from 'lucide-react';
 import { useAuthStore } from '../stores/authStore';
 import ConfirmModal, { type ConfirmState } from '../components/ConfirmModal';
@@ -83,18 +84,6 @@ interface NaverCommerceStatus {
   status?: string;
   token_expires_at?: string;
   scope?: string;
-}
-
-interface ProviderInfo {
-  provider: string;
-  displayName: string;
-  capabilities: {
-    oauth: boolean;
-    webhook: boolean;
-    webhookSignatureVerification: boolean;
-    adminApi: boolean;
-  };
-  status: 'available' | 'coming_soon';
 }
 
 interface CustomWebhookInfo {
@@ -300,7 +289,6 @@ export default function CdpSettingsPage() {
   const [naverStatus, setNaverStatus] = useState<NaverCommerceStatus | null>(null);
   const [naverStoreId, setNaverStoreId] = useState('');
   const [naverConnecting, setNaverConnecting] = useState(false);
-  const [providers, setProviders] = useState<ProviderInfo[]>([]);
   const [customInfo, setCustomInfo] = useState<CustomWebhookInfo | null>(null);
   const [customIssuedSecret, setCustomIssuedSecret] = useState<CustomIssuedSecret | null>(null);
   const [customIssuing, setCustomIssuing] = useState(false);
@@ -309,13 +297,26 @@ export default function CdpSettingsPage() {
   // UI 영역
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [detailsExpanded, setDetailsExpanded] = useState(false);
+  type CdpModalKey = null | 'connect' | 'analytics' | 'customers';
+  const [activeModal, setActiveModal] = useState<CdpModalKey>(null);
+  const closeModal = () => setActiveModal(null);
   const [confirm, setConfirm] = useState<ConfirmState | null>(null);
 
   const token = () => localStorage.getItem('token');
   const isAdmin = user?.userType === 'company_admin';
   // CDP 진입 = FREE(미가입)만 차단 (백엔드 cdp-auth.isCdpEnabledForPlan = plan_code !== 'FREE'와 일치 — 전 유료 개방)
   const cdpLocked = !!usage && usage.plan_code === 'FREE';
+
+  // 연동 상태 — 진입 카드 강조 + 요약 칩 노출 판정
+  const connectedProviders = useMemo(() => {
+    const list: string[] = [];
+    if (customInfo?.hasSecret) list.push('자체 호스팅');
+    if (cafe24Status?.connected) list.push('카페24');
+    if (naverStatus?.connected) list.push('네이버 스마트스토어');
+    return list;
+  }, [customInfo?.hasSecret, cafe24Status?.connected, naverStatus?.connected]);
+  const isConnected = connectedProviders.length > 0 || !!usage?.has_key;
+  const hasCdpData = isConnected || (diagnostics?.events30d ?? 0) > 0;
 
   // first-event 설치 진단 — 키 발급 후 첫 이벤트 수신 전까지 10초 폴링 (수신되면 중단)
   useEffect(() => {
@@ -384,7 +385,7 @@ export default function CdpSettingsPage() {
       const headers = { Authorization: `Bearer ${token()}` };
       const [
         usageRes, diagRes, funnelRes, timelineRes, activeRes, chDistRes,
-        cafe24Res, naverRes, providersRes, customRes,
+        cafe24Res, naverRes, customRes,
       ] = await Promise.all([
         fetch('/api/cdp/usage', { headers }),
         fetch('/api/cdp/diagnostics', { headers }),
@@ -394,7 +395,6 @@ export default function CdpSettingsPage() {
         fetch('/api/cdp/channel-distribution', { headers }),
         fetch('/api/cafe24/status', { headers }),
         fetch('/api/naver-commerce/status', { headers }),
-        fetch('/api/cdp/providers', { headers }),
         fetch('/api/cdp/custom/info', { headers }),
       ]);
       const usageData = await usageRes.json();
@@ -405,7 +405,6 @@ export default function CdpSettingsPage() {
       const chDistData = await chDistRes.json();
       const cafe24Data = await cafe24Res.json();
       const naverData = await naverRes.json();
-      const providersData = await providersRes.json();
       const customData = await customRes.json();
 
       if (usageData.success) setUsage(usageData);
@@ -419,7 +418,6 @@ export default function CdpSettingsPage() {
       }
       if (cafe24Data.success) setCafe24Status(cafe24Data);
       if (naverData.success) setNaverStatus(naverData);
-      if (providersData.success) setProviders(providersData.providers || []);
       if (customData.success) {
         setCustomInfo({
           hasSecret: customData.hasSecret,
@@ -453,6 +451,20 @@ export default function CdpSettingsPage() {
     } catch { toast.error('AI 진단 네트워크 오류'); }
     finally { setExplainLoading(false); }
   };
+
+  // 데이터 분석 모달이 열릴 때 AI 진단 자동 로드 (회사 관리자)
+  useEffect(() => {
+    if (activeModal === 'analytics' && isAdmin) loadExplanation();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeModal]);
+
+  // 모달 ESC 닫기
+  useEffect(() => {
+    if (!activeModal) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setActiveModal(null); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [activeModal]);
 
   // CDP 키 발급
   const handleIssueKey = async () => {
@@ -594,17 +606,6 @@ export default function CdpSettingsPage() {
     });
   };
 
-  // 1-click 액션 진입
-  const handleQuickAction = (action: 'custom' | 'cafe24' | 'naver') => {
-    if (action === 'custom') {
-      document.getElementById('section-custom')?.scrollIntoView({ behavior: 'smooth' });
-    } else if (action === 'cafe24') {
-      document.getElementById('section-cafe24')?.scrollIntoView({ behavior: 'smooth' });
-    } else {
-      document.getElementById('section-naver')?.scrollIntoView({ behavior: 'smooth' });
-    }
-  };
-
   // 복사
   const copyText = async (text: string, label: string) => {
     try {
@@ -623,69 +624,6 @@ export default function CdpSettingsPage() {
 
   const formatPct = (n: number) => `${(n * 100).toFixed(1)}%`;
   const formatWon = (n: number) => `${Math.round(n).toLocaleString()}원`;
-
-  // 데이터 부족 안내 카드 매트릭스
-  const dataAvailabilityCards = useMemo(() => {
-    if (!diagnostics) return [];
-    const cards: Array<{ level: 'critical' | 'warning' | 'info' | 'good'; icon: typeof Database; title: string; message: string; actionLabel?: string; actionId?: string }> = [];
-
-    const hasAnyProvider = diagnostics.byProvider.length > 0;
-    if (!hasAnyProvider) {
-      cards.push({
-        level: 'warning',
-        icon: Database,
-        title: '자사몰 미연동',
-        message: '자사몰 연동 시 funnel / 매출 / ROAS / 캠페인 반응 매트릭스 자동 활성. 자체 호스팅 / 카페24 / 네이버 영역 중 선택.',
-        actionLabel: '자체 호스팅 연동',
-        actionId: 'section-custom',
-      });
-    } else if (diagnostics.events30d === 0) {
-      cards.push({
-        level: 'warning',
-        icon: Activity,
-        title: '자사몰 이벤트 0건',
-        message: '자사몰 연동되었으나 최근 30일 이벤트 0건 — SDK 설치 또는 webhook 동작 확인 필요.',
-        actionLabel: 'SDK 가이드',
-        actionId: 'section-custom',
-      });
-    } else if (diagnostics.events30d < 100) {
-      cards.push({
-        level: 'info',
-        icon: Activity,
-        title: 'CDP 이벤트 누적 부족',
-        message: `최근 30일 ${diagnostics.events30d}건 — 100건+ 누적 시 funnel + attribution 정확도 향상.`,
-      });
-    }
-
-    if (hasAnyProvider && diagnostics.overallMappingRate < 0.5 && diagnostics.totalIdentityLinks > 0) {
-      cards.push({
-        level: 'warning',
-        icon: Users,
-        title: `매핑률 ${formatPct(diagnostics.overallMappingRate)} — 회원 매칭 영역 약함`,
-        message: '자사몰 회원 영역 안 phone/email 영역 있는지 확인 의무. 익명 이벤트 영역 = trigger 영역만 활용 가능.',
-      });
-    }
-
-    const failedWebhooks = diagnostics.webhookReliability.filter((w) => w.failedCount > 0);
-    if (failedWebhooks.length > 0) {
-      cards.push({
-        level: 'warning',
-        icon: AlertTriangle,
-        title: `Webhook 실패 ${failedWebhooks.reduce((s, w) => s + w.failedCount, 0)}건 (30일)`,
-        message: `${failedWebhooks.map((w) => SOURCE_LABEL[w.source] || w.source).join(', ')} 영역 = 서명 검증 또는 endpoint 확인 의무.`,
-      });
-    }
-
-    if (cards.length === 0 && hasAnyProvider) {
-      cards.push({
-        level: 'good',
-        icon: Check,
-        title: '자사몰 영역 정상 작동',
-        message: `${diagnostics.byProvider.length}개 Provider 연동 / 30일 ${diagnostics.events30d.toLocaleString()}건 이벤트 / 매핑률 ${formatPct(diagnostics.overallMappingRate)} — 모든 매트릭스 활성.`,
-      });
-    }
-    return cards;
-  }, [diagnostics]);
 
   // POS ↔ CDP 격차 도넛 데이터
   const fusionPieData = useMemo(() => {
@@ -776,107 +714,25 @@ export default function CdpSettingsPage() {
           </div>
         )}
 
-        {/* 어떤 자사몰이든 연동 안내 (지원 매트릭스 대체) */}
+        {/* 자사몰 연동 진입 카드 — "자사몰 연동하기" 버튼 1개 → 연동 모달 */}
         {!cdpLocked && (
-          <div className="bg-white/5 border border-white/10 rounded-xl p-5 flex items-start gap-3">
-            <Database className="w-5 h-5 text-violet-300 mt-0.5 shrink-0" />
-            <div>
-              <div className="font-semibold text-white mb-1">어떤 자사몰이든 연동해 드립니다</div>
-              <div className="text-sm text-white/70 leading-relaxed">표준 SDK·webhook로 대부분 바로 연동됩니다. 특수한 환경이라 연동이 막히면 개발 담당자가 <span className="text-violet-200">고객센터</span>로 문의 주시면 직접 맞춤 연동을 도와드립니다.</div>
-            </div>
-          </div>
-        )}
-
-        {/* 3. 데이터 부족 안내 카드 */}
-        {dataAvailabilityCards.length > 0 && (
-          <div className="space-y-2">
-            {dataAvailabilityCards.map((card, i) => {
-              const styleMap = {
-                critical: 'bg-rose-500/10 border-rose-400/30 text-rose-100',
-                warning: 'bg-amber-500/10 border-amber-400/30 text-amber-100',
-                info: 'bg-cyan-500/10 border-cyan-400/30 text-cyan-100',
-                good: 'bg-emerald-500/10 border-emerald-400/30 text-emerald-100',
-              }[card.level];
-              const iconColor = {
-                critical: 'text-rose-300', warning: 'text-amber-300', info: 'text-cyan-300', good: 'text-emerald-300',
-              }[card.level];
-              const IconComp = card.icon;
-              return (
-                <div key={i} className={`p-4 border rounded-xl ${styleMap}`}>
-                  <div className="flex items-start gap-3">
-                    <div className={`w-9 h-9 rounded-lg bg-white/10 flex items-center justify-center flex-shrink-0 ${iconColor}`}>
-                      <IconComp className="w-5 h-5" />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="text-sm font-semibold mb-0.5">{card.title}</div>
-                      <div className="text-xs leading-relaxed opacity-90">{card.message}</div>
-                      {card.actionLabel && card.actionId && (
-                        <button
-                          onClick={() => document.getElementById(card.actionId!)?.scrollIntoView({ behavior: 'smooth' })}
-                          className="mt-2 px-2.5 py-1 bg-white/15 hover:bg-white/25 rounded text-[11px] font-medium transition-colors"
-                        >
-                          {card.actionLabel} →
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        )}
-
-        {/* 4. AI 자율 진단 */}
-        {!cdpLocked && (
-          <div className="p-4 bg-gradient-to-br from-violet-500/15 via-fuchsia-500/10 to-indigo-500/15 border border-violet-400/30 rounded-xl">
-            <div className="flex items-start gap-3">
-              <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-violet-400 to-fuchsia-500 flex items-center justify-center flex-shrink-0">
-                <Sparkles className="w-5 h-5 text-white" />
+          <div className={`rounded-xl p-5 border ${isConnected ? 'bg-white/5 border-white/10' : 'bg-gradient-to-br from-violet-500/15 via-fuchsia-500/10 to-indigo-500/15 border-violet-400/30'}`}>
+            <div className="flex items-start gap-3 flex-wrap">
+              <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-emerald-400 to-cyan-500 flex items-center justify-center flex-shrink-0 shadow-lg shadow-emerald-500/20">
+                <Database className="w-5 h-5 text-white" />
               </div>
-              <div className="flex-1">
-                <div className="text-sm font-medium text-violet-100 mb-1">AI 자율 진단</div>
-                {explanation ? (
-                  <div className="text-xs text-white/80 leading-relaxed">{explanation.topInsight}</div>
-                ) : explainLoading ? (
-                  <div className="text-xs text-white/60 flex items-center gap-1.5">
-                    <Loader2 className="w-3 h-3 animate-spin" /> AI 분석 중 (10~20초)
-                  </div>
-                ) : isAdmin ? (
-                  <button onClick={loadExplanation} className="text-xs text-violet-200 hover:text-violet-100 underline-offset-2 hover:underline">
-                    AI 자율 진단 시작 →
-                  </button>
+              <div className="flex-1 min-w-0">
+                <div className="font-semibold text-white mb-1">{isConnected ? '자사몰이 연동되어 있습니다' : '어떤 자사몰이든 연동해 드립니다'}</div>
+                {isConnected ? (
+                  <div className="text-sm text-white/70 leading-relaxed">연동됨: <span className="text-emerald-200">{connectedProviders.length > 0 ? connectedProviders.join(' · ') : 'CDP 키 발급'}</span>. 도메인·SDK·연동 추가는 아래 버튼에서 관리할 수 있습니다.</div>
                 ) : (
-                  <div className="text-xs text-white/50">AI 진단은 회사 관리자만 가능합니다.</div>
+                  <div className="text-sm text-white/70 leading-relaxed">아직 연동된 자사몰이 없습니다. 표준 SDK·webhook로 대부분 바로 연동되고, 환경이 특수해 연동이 막히면 개발 담당자가 <span className="text-violet-200">고객센터</span>로 문의 주시면 직접 맞춤 연동을 도와드립니다.</div>
                 )}
               </div>
+              <button onClick={() => setActiveModal('connect')} className="px-4 py-2.5 rounded-lg bg-gradient-to-r from-violet-500 to-fuchsia-500 hover:from-violet-400 hover:to-fuchsia-400 text-white text-sm font-semibold flex items-center gap-1.5 shadow-lg shadow-violet-500/20 transition-colors flex-shrink-0">
+                <Link2 className="w-4 h-4" /> 자사몰 연동하기
+              </button>
             </div>
-          </div>
-        )}
-
-        {/* 5. 1-click 액션 3 카드 */}
-        {!cdpLocked && (
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-            <QuickActionCard
-              icon={<Server className="w-5 h-5" />}
-              title="자체 호스팅 (권장)"
-              desc="자체 서버 자사몰 — webhook_secret 발급 + 표준 endpoint"
-              color="violet"
-              onClick={() => handleQuickAction('custom')}
-            />
-            <QuickActionCard
-              icon={<Store className="w-5 h-5" />}
-              title="카페24"
-              desc="OAuth 자동 연동 — 코딩 0건"
-              color="amber"
-              onClick={() => handleQuickAction('cafe24')}
-            />
-            <QuickActionCard
-              icon={<ShoppingCart className="w-5 h-5" />}
-              title="네이버 스마트스토어"
-              desc="Naver Commerce OAuth — 주문 + 회원 sync"
-              color="emerald"
-              onClick={() => handleQuickAction('naver')}
-            />
           </div>
         )}
 
@@ -894,22 +750,45 @@ export default function CdpSettingsPage() {
           </div>
         )}
 
-        {/* 7. 자세히 분석 토글 */}
-        {!cdpLocked && (
-          <button
-            onClick={() => setDetailsExpanded(!detailsExpanded)}
-            className="w-full px-3 py-2 bg-white/5 hover:bg-white/10 rounded-lg text-xs text-white/60 flex items-center justify-center gap-1.5 transition-colors"
-          >
-            {detailsExpanded ? (
-              <><ChevronLeft className="w-3 h-3 rotate-90" /> 간소 보기 — 자세한 차트 숨기기</>
-            ) : (
-              <><ChevronRight className="w-3 h-3 rotate-90" /> 자세한 분석 펼치기 (funnel / timeline / Provider / POS↔CDP / Webhook / 채널 분포)</>
-            )}
-          </button>
+        {/* 요약 칩 — 연동 데이터 있을 때만 노출 (미연동이면 숨김) */}
+        {!cdpLocked && hasCdpData && (
+          <div className="flex gap-2 flex-wrap">
+            <button onClick={() => setActiveModal('analytics')} className="flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 text-[12px] text-white/80 transition-colors">
+              <Activity className="w-3.5 h-3.5 text-cyan-300" /> 데이터 분석 · AI 진단
+            </button>
+            <button onClick={() => setActiveModal('customers')} className="flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 text-[12px] text-white/80 transition-colors">
+              <Users className="w-3.5 h-3.5 text-violet-300" /> 활성 고객
+            </button>
+          </div>
         )}
 
-        {detailsExpanded && (
+        {/* 데이터 분석 · AI 진단 모달 (createPortal) */}
+        <CdpModal open={activeModal === 'analytics'} onClose={closeModal} title="데이터 분석 · AI 진단" icon={<Sparkles className="w-4 h-4 text-violet-300" />}>
           <div className="space-y-4">
+            {/* AI 자율 진단 — 모달 open 시 자동 로드 */}
+            <div className="p-4 bg-gradient-to-br from-violet-500/15 via-fuchsia-500/10 to-indigo-500/15 border border-violet-400/30 rounded-xl">
+              <div className="flex items-start gap-3">
+                <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-violet-400 to-fuchsia-500 flex items-center justify-center flex-shrink-0">
+                  <Sparkles className="w-5 h-5 text-white" />
+                </div>
+                <div className="flex-1">
+                  <div className="text-sm font-medium text-violet-100 mb-1">AI 자율 진단</div>
+                  {explanation ? (
+                    <div className="text-xs text-white/80 leading-relaxed">{explanation.topInsight}</div>
+                  ) : explainLoading ? (
+                    <div className="text-xs text-white/60 flex items-center gap-1.5">
+                      <Loader2 className="w-3 h-3 animate-spin" /> AI 분석 중 (10~20초)
+                    </div>
+                  ) : isAdmin ? (
+                    <button onClick={loadExplanation} className="text-xs text-violet-200 hover:text-violet-100 underline-offset-2 hover:underline">
+                      AI 자율 진단 시작 →
+                    </button>
+                  ) : (
+                    <div className="text-xs text-white/50">AI 진단은 회사 관리자만 가능합니다.</div>
+                  )}
+                </div>
+              </div>
+            </div>
             {/* 자사몰 funnel */}
             {funnel && funnel.pageViewCount > 0 ? (
               <ChartCard title="자사몰 이벤트 Funnel (30일)" source={funnel.source} icon={<Activity className="w-4 h-4 text-emerald-300" />}>
@@ -1050,8 +929,6 @@ export default function CdpSettingsPage() {
                 )}
               </ChartCard>
             )}
-          </div>
-        )}
 
         {/* 9. AI 영향 요인 매트릭스 */}
         {explanation && explanation.factors.length > 0 && (
@@ -1090,9 +967,20 @@ export default function CdpSettingsPage() {
             )}
           </div>
         )}
+            {/* 컴퓨팅 시점 */}
+            {diagnostics && (
+              <div className="text-center text-[11px] text-white/40 pt-2">
+                마지막 진단: {new Date(diagnostics.computedAt).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' })}
+                <br />
+                Unified Customer Profile 영역 = 5분 cron 자동 재계산 (CT-71) · 이벤트 ingestion 즉시 union (CT-72)
+              </div>
+            )}
+          </div>
+        </CdpModal>
 
-        {/* 10. 자사몰 활성 customer top 10 */}
-        {activeCustomers && activeCustomers.topCustomers.length > 0 && (
+        {/* 활성 고객 모달 (createPortal) */}
+        <CdpModal open={activeModal === 'customers'} onClose={closeModal} title="자사몰 활성 고객" icon={<Users className="w-4 h-4 text-cyan-300" />}>
+          {activeCustomers && activeCustomers.topCustomers.length > 0 ? (
           <div className="bg-white/5 border border-white/10 rounded-xl overflow-hidden">
             <div className="px-4 py-3 border-b border-white/10 flex items-center gap-2">
               <Users className="w-4 h-4 text-cyan-300" />
@@ -1143,8 +1031,17 @@ export default function CdpSettingsPage() {
               </table>
             </div>
           </div>
-        )}
+          ) : (
+            <div className="text-sm text-white/50 py-10 text-center">아직 자사몰 활성 고객 데이터가 없습니다.</div>
+          )}
+        </CdpModal>
 
+        {/* 연동 모달 (createPortal) — 자체호스팅 · 카페24 · 네이버 · 키 · 도메인 · SDK · 검증 통합 */}
+        <CdpModal open={activeModal === 'connect'} onClose={closeModal} title="자사몰 연동" icon={<Database className="w-4 h-4 text-violet-300" />}>
+          <div className="space-y-4">
+            <div className="text-xs text-white/60 leading-relaxed bg-white/5 border border-white/10 rounded-lg p-3">
+              표준 SDK·webhook로 대부분 바로 연동됩니다. 자체 호스팅이 가장 범용적이라 고도몰·가비아 등 어떤 자사몰이든 커버하고, 카페24·네이버는 OAuth로 더 간편하게 연결됩니다.
+            </div>
         {/* 11. Provider 매트릭스 — 자체 호스팅 */}
         {!cdpLocked && (
           <div id="section-custom" className="bg-white/5 border border-white/10 rounded-xl p-6">
@@ -1470,15 +1367,12 @@ export default function CdpSettingsPage() {
             </div>
           );
         })()}
-
-        {/* 13. 컴퓨팅 시점 */}
-        {diagnostics && (
-          <div className="text-center text-[11px] text-white/40 pt-2">
-            마지막 진단: {new Date(diagnostics.computedAt).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' })}
-            <br />
-            Unified Customer Profile 영역 = 5분 cron 자동 재계산 (CT-71) · 이벤트 ingestion 즉시 union (CT-72)
+            {/* 그 외 자사몰 안내 */}
+            <div className="bg-white/5 border border-white/10 rounded-lg p-3 text-xs text-white/60 leading-relaxed">
+              목록에 없는 자사몰도 자체 호스팅(webhook) 방식으로 대부분 연동됩니다. 환경이 특수해 연동이 막히면 개발 담당자가 <span className="text-violet-200">고객센터</span>로 문의 주시면 직접 맞춤 연동을 도와드립니다.
+            </div>
           </div>
-        )}
+        </CdpModal>
       </div>
     </div>
   );
@@ -1498,27 +1392,20 @@ function MetricBlock({ label, value, sub, color }: { label: string; value: strin
   );
 }
 
-function QuickActionCard({ icon, title, desc, color, onClick }: { icon: React.ReactNode; title: string; desc: string; color: 'violet' | 'amber' | 'emerald'; onClick: () => void }) {
-  const colorMap = {
-    violet: { bg: 'bg-violet-500/10', border: 'border-violet-400/30', text: 'text-violet-100', iconBg: 'bg-violet-500/30', iconText: 'text-violet-200', btn: 'bg-violet-500/30 hover:bg-violet-500/50 text-violet-50' },
-    amber: { bg: 'bg-amber-500/10', border: 'border-amber-400/30', text: 'text-amber-100', iconBg: 'bg-amber-500/30', iconText: 'text-amber-200', btn: 'bg-amber-500/30 hover:bg-amber-500/50 text-amber-50' },
-    emerald: { bg: 'bg-emerald-500/10', border: 'border-emerald-400/30', text: 'text-emerald-100', iconBg: 'bg-emerald-500/30', iconText: 'text-emerald-200', btn: 'bg-emerald-500/30 hover:bg-emerald-500/50 text-emerald-50' },
-  }[color];
-  return (
-    <div className={`p-4 ${colorMap.bg} border ${colorMap.border} rounded-xl`}>
-      <div className="flex items-start gap-2.5 mb-2">
-        <div className={`w-9 h-9 rounded-lg ${colorMap.iconBg} flex items-center justify-center flex-shrink-0`}>
-          <span className={colorMap.iconText}>{icon}</span>
+function CdpModal({ open, onClose, title, icon, children }: { open: boolean; onClose: () => void; title: string; icon: React.ReactNode; children: React.ReactNode }) {
+  if (!open) return null;
+  return createPortal(
+    <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/60 backdrop-blur-sm px-4 py-8 overflow-y-auto" onClick={onClose}>
+      <div className="w-full max-w-3xl bg-slate-900 border border-white/10 rounded-2xl shadow-2xl my-auto" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center gap-3 px-5 py-4 border-b border-white/10 sticky top-0 bg-slate-900 rounded-t-2xl z-10">
+          <div className="w-8 h-8 rounded-lg bg-white/10 flex items-center justify-center flex-shrink-0">{icon}</div>
+          <div className="text-sm font-semibold text-white">{title}</div>
+          <button onClick={onClose} className="ml-auto p-1 hover:bg-white/10 rounded-lg" aria-label="닫기"><X className="w-4 h-4 text-white/40" /></button>
         </div>
-        <div className="flex-1 min-w-0">
-          <div className={`text-sm font-semibold ${colorMap.text}`}>{title}</div>
-        </div>
+        <div className="p-5">{children}</div>
       </div>
-      <div className="text-[11px] text-white/60 leading-relaxed mb-2.5">{desc}</div>
-      <button onClick={onClick} className={`w-full px-3 py-1.5 ${colorMap.btn} rounded text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors`}>
-        <Link2 className="w-3 h-3" /> 연동 영역 진입
-      </button>
-    </div>
+    </div>,
+    document.body,
   );
 }
 
