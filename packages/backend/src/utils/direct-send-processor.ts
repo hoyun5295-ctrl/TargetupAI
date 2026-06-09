@@ -239,6 +239,7 @@ export async function processSendChunk(p: SendChunkParams): Promise<SendChunkRes
       };
     });
     try {
+      console.log(`[ALIMTALK-DEBUG2] tpl=${alimtalkRows[0]?.templateCode} | p.etc=${p.alimtalkEtcJson} | OUT.etc=${alimtalkRows[0]?.etcJson} | next=${alimtalkRows[0]?.nextType} | table=${p.companyTables?.[0]}`);
       sentCount = await insertAlimtalkQueue(p.companyTables, alimtalkRows, p.campaignId);
     } catch (alimtalkErr) {
       console.error('[direct-send-processor] 알림톡 INSERT 실패:', alimtalkErr);
