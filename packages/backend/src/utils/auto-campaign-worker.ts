@@ -919,7 +919,7 @@ async function executeAutoCampaign(ac: any): Promise<void> {
         await advanceNextRun(ac);
         return;
       }
-      const senderKey = gate.rows[0].profile_key;
+      // ★ 매뉴얼: senderkey 제거 — 알림톡은 k_template_code로 중계서버가 자동 처리(k_etc_json엔 title만)
       // ★ 버그1: k_etc_json = senderkey + 강조표기 title(#{변수} row별 치환) / k_button_json = 템플릿 buttons
       const emphasizeTitleRaw = gate.rows[0].temphasize_title || null;
       const autoButtonJson = convertButtonsToQTmsg(gate.rows[0].tbuttons || []);
@@ -963,9 +963,8 @@ async function executeAutoCampaign(ac: any): Promise<void> {
           nextType: ac.alimtalk_next_type || 'L',
           nextContents: finalNextContents,
           buttonJson: autoButtonJson || undefined,
-          // ★ 버그1: senderkey + 강조표기 title(#{변수} 본문과 동일 치환) → row별 k_etc_json.
+          // ★ 매뉴얼(qtmsg): 강조표기 title(#{변수} 본문과 동일 치환)만 → row별 k_etc_json (senderkey 제외 — 알림톡 템플릿코드 자동).
           etcJson: buildAlimtalkEtcJson({
-            senderKey,
             emphasizeTitle: emphasizeTitleRaw,
             substitute: (raw) => {
               const { message: base } = prepareSendMessage(raw, customer, fieldMappings, { msgType: 'LMS', isAd: false, opt080Number: '', subject: '' });

@@ -1,24 +1,25 @@
 /**
- * alimtalk-emphasize.ts — 강조표기형 알림톡 k_etc_json({senderkey, title}) 생성 (CT)
+ * alimtalk-emphasize.ts — 강조표기형 알림톡 k_etc_json({title}) 생성 (CT)
  *
- * 강조표기 title은 본문과 똑같이 #{변수}를 치환해서 보내야 한다.
- *   raw #{변수}가 그대로 발송되면 카카오 검수에서 반려된다(버그1).
- * 치환 방식이 경로마다 달라서(직접발송·staging·자동 = replaceVariables, 여정 = replaceAlimtalkVars)
- * 치환 함수를 주입받는다. 직접발송·staging·여정·자동 4경로가 같은 형태를 쓰도록 통일한다.
+ * ★ QTmsg 매뉴얼(qtmsg-manual.txt 228~239행): 알림톡 강조표기 k_etc_json = {"title":"강조내용"} (title만).
+ *   - senderkey는 알림톡에선 k_template_code로 중계서버가 자동 처리(우선순위 최상위) → k_etc_json에 불필요.
+ *   - k_etc_json의 senderkey는 친구톡(F/G) 전용. 알림톡에 senderkey를 섞으면 QTmsg 에이전트가
+ *     etcJson을 규격대로 못 읽어 통째로 누락 → 강조 title 미전달 → 카카오 7300.
+ *     (2026-06-09 직원 신고 근본원인 = 이전 CT가 {senderkey,title}을 넣어 강조 title이 deliver에서 빠졌음.)
+ *
+ * 강조 title은 본문과 똑같이 #{변수}를 치환해서 보낸다(raw 발송 시 카카오 검수 반려).
+ *   치환 방식이 경로마다 달라(직접발송·staging·자동 = replaceVariables, 여정 = replaceAlimtalkVars)
+ *   치환 함수를 주입받는다. 직접발송·staging·여정·자동 4경로가 같은 형태를 쓰도록 통일한다.
  *
  * DB import 0 (순수). insertAlimtalkQueue의 etcJson 인자로 그대로 전달한다.
- *   senderkey·title 모두 없으면 undefined(etcJson 미전달).
+ *   emphasizeTitle 없으면 undefined(etcJson 미전달 — 기본형/버튼형은 etcJson 자체가 불필요).
  */
 export function buildAlimtalkEtcJson(params: {
-  senderKey?: string | null;
   emphasizeTitle?: string | null;
   substitute?: (raw: string) => string;
 }): string | undefined {
-  const etc: Record<string, string> = {};
-  if (params.senderKey) etc.senderkey = String(params.senderKey);
-  if (params.emphasizeTitle) {
-    const raw = String(params.emphasizeTitle);
-    etc.title = params.substitute ? String(params.substitute(raw)) : raw;
-  }
-  return Object.keys(etc).length > 0 ? JSON.stringify(etc) : undefined;
+  if (!params.emphasizeTitle) return undefined;
+  const raw = String(params.emphasizeTitle);
+  const title = params.substitute ? String(params.substitute(raw)) : raw;
+  return JSON.stringify({ title });
 }

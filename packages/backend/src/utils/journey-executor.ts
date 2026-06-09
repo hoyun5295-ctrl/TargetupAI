@@ -712,9 +712,8 @@ async function processExecution(exec: ExecutionRow): Promise<StepOutcome> {
             ? replaceAlimtalkVars(step.alimtalk_next_contents, customer as Record<string, any>, step.alimtalk_variable_map || {})
             : undefined,
           buttonJson: buttonJson || undefined,
-          // ★ 버그1: senderkey + 강조표기형 emphasize_title(본문과 동일 치환) → k_etc_json (raw #{변수} 발송 시 카카오 반려 차단). 직접/자동과 동일 형태.
+          // ★ 매뉴얼(qtmsg): 강조표기형 emphasize_title(본문과 동일 치환)만 → k_etc_json (senderkey 제외 — 알림톡 템플릿코드 자동). 직접/자동과 동일 형태.
           etcJson: buildAlimtalkEtcJson({
-            senderKey: kakaoTemplateRow.profile_key,
             emphasizeTitle: kakaoTemplateRow.emphasize_title,
             substitute: (raw) => replaceAlimtalkVars(raw, customer as Record<string, any>, step.alimtalk_variable_map || {}),
           }),

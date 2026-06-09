@@ -1358,9 +1358,9 @@ router.post('/direct-send/commit', async (req: Request, res: Response) => {
       const g = gate.rows[0];
       if (!['APPROVED', 'APR', 'A'].includes(String(g.tstatus).toUpperCase())) return res.status(400).json({ success: false, error: '승인 완료된 템플릿만 발송할 수 있습니다' });
       if (g.approval_status !== 'APPROVED') return res.status(400).json({ success: false, error: '승인 완료된 발신프로필만 사용할 수 있습니다' });
-      // ★ 버그1: k_etc_json = senderkey + 강조표기 title(raw) / k_button_json = 템플릿 buttons(프론트 전송은 폴백)
+      // ★ 매뉴얼(qtmsg): k_etc_json = 강조표기 title(raw)만 — senderkey 제외(알림톡은 템플릿코드로 중계서버 자동) / k_button_json = 템플릿 buttons(프론트 전송은 폴백)
       //   title은 #{변수} 포함 가능 — staging worker(direct-send-processor)가 수신자 row별로 치환해 재생성한다.
-      alimtalkEtcJson = buildAlimtalkEtcJson({ senderKey: g.profile_key, emphasizeTitle: g.temphasize_title }) ?? null;
+      alimtalkEtcJson = buildAlimtalkEtcJson({ emphasizeTitle: g.temphasize_title }) ?? null;
       alimtalkButtonJsonResolved = convertButtonsToQTmsg(g.tbuttons) || alimtalkButtonJson || null;
       alimtalkTemplateUuid = g.tid || null;  // ★ #4-a: 검증 통과한 템플릿 id 보관 → INSERT 저장
       // ★ #3-2 (2026-06-01): 변수 미지정 발송 차단 (백엔드 이중 안전망 — 프론트 우회 대비)
@@ -2014,9 +2014,8 @@ router.post('/direct-send', async (req: Request, res: Response) => {
           }, { skipNumberFormatting: true });
           finalNextContents = fillAlimtalkVarMap(ncBase, alimtalkVariableMap, dbAlimCustomer, recipient);
         }
-        // ★ 버그1: senderkey + 강조표기 title(#{변수} 본문과 동일 치환) → row별 k_etc_json (raw 발송 시 카카오 반려 차단)
+        // ★ 매뉴얼(qtmsg): 강조표기 title(#{변수} 본문과 동일 치환)만 → row별 k_etc_json (senderkey 제외 — 알림톡 템플릿코드 자동)
         const rowEtcJson = buildAlimtalkEtcJson({
-          senderKey: gate.profile_key,
           emphasizeTitle: gate.temphasize_title,
           substitute: (raw) => {
             let t = replaceVariables(raw, dbAlimCustomer, directFieldMappings, {

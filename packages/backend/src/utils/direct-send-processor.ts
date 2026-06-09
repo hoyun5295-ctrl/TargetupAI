@@ -187,15 +187,13 @@ export async function processSendChunk(p: SendChunkParams): Promise<SendChunkRes
       return out;
     };
 
-    // ★ 버그1: 공통 k_etc_json(commit) = {senderkey, 강조 title(raw)} — row별로 title #{변수}를 치환해 재생성한다.
-    let alimSenderKey: string | undefined;
+    // ★ QTmsg 매뉴얼: 알림톡 강조 k_etc_json = {title}만 (senderkey는 k_template_code로 중계서버 자동). commit이 {title} 저장 → row별 #{변수} 치환 재생성.
     let alimEmphasizeTitleRaw: string | undefined;
     if (p.alimtalkEtcJson) {
       try {
-        const parsedEtc = JSON.parse(p.alimtalkEtcJson) as { senderkey?: string; title?: string };
-        alimSenderKey = parsedEtc?.senderkey;
+        const parsedEtc = JSON.parse(p.alimtalkEtcJson) as { title?: string };
         alimEmphasizeTitleRaw = parsedEtc?.title;
-      } catch { /* 형식 오류 → senderkey/title 없음 취급 */ }
+      } catch { /* 형식 오류 → title 없음 취급 */ }
     }
     const alimtalkRows = recipients.map((recipient) => {
       const cleanPhone = normalizePhone(recipient.phone);
@@ -229,9 +227,8 @@ export async function processSendChunk(p: SendChunkParams): Promise<SendChunkRes
         nextContents: finalNextContents,
         titleStr: (p.alimtalkNextType === 'L' || p.alimtalkNextType === 'B') ? (p.alimtalkNextSubject || '') : undefined,
         buttonJson: p.alimtalkButtonJson || undefined,
-        // ★ 버그1: senderkey + 강조표기 title(#{변수} 본문과 동일 치환) → row별 k_etc_json.
+        // ★ QTmsg 매뉴얼: 알림톡 강조 k_etc_json = {title}만(senderkey 제외) — #{변수} 본문과 동일 치환.
         etcJson: buildAlimtalkEtcJson({
-          senderKey: alimSenderKey,
           emphasizeTitle: alimEmphasizeTitleRaw,
           substitute: (raw) => {
             const base = replaceVariables(raw, dbCustomer, p.directFieldMappings, toAddressBookFields(recipient), { skipNumberFormatting: true });
@@ -242,7 +239,6 @@ export async function processSendChunk(p: SendChunkParams): Promise<SendChunkRes
       };
     });
     try {
-      console.log(`[ALIMTALK-DEBUG] tpl=${alimtalkRows[0]?.templateCode} | in: etc=${p.alimtalkEtcJson} next=${p.alimtalkNextType} | out: etc=${alimtalkRows[0]?.etcJson} btn=${alimtalkRows[0]?.buttonJson} next=${alimtalkRows[0]?.nextType} title=${alimtalkRows[0]?.titleStr} | table=${p.companyTables?.[0]}`);
       sentCount = await insertAlimtalkQueue(p.companyTables, alimtalkRows, p.campaignId);
     } catch (alimtalkErr) {
       console.error('[direct-send-processor] 알림톡 INSERT 실패:', alimtalkErr);
