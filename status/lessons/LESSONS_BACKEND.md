@@ -322,6 +322,28 @@ const items: any[] =
 
 ---
 
+## 발송 시각 기준 통일 (D233+ 추가)
+
+### D233+ (2026-06-09) — 발송통계 성공→실패 오분류 + 미도래 예약 대기집계 (등록시각 vs 발송시각)
+
+**사고**: shiseido4·라프레리 발송통계에서 정상 성공 건이 실패로 집계(목록=실패/상세=성공), 미발송 예약이 '대기'로 집계. P1 돈/정산.
+
+**Root cause**: **모든 시각 체크가 "발송시각"이 아니라 "등록/요청 시각" 기준**. 예약발송은 `campaigns.sent_at`이 **생성 시점**에 찍히고 실제 통신사 송출은 `scheduled_at`에 일어남.
+- `campaign-lifecycle.ts` 120분 타임아웃이 `sent_at || scheduled_at`(등록 우선) → 예약은 scheduled_at에 발송되는 순간 이미 "120분 초과" → 통신사 결과 몇 초만 늦어도 `pending→실패`로 굳음. 굳으면 `success+fail=target`이라 재sync(`target > success+fail`)에서 **영구 제외**(session6 markFinalized와 같은 뿌리). 상세=MySQL 실시간(성공)·목록·통계=PG 캐시(실패) 불일치.
+- 발송통계가 STAT_DATE_EXPR로 묶기만 하고 "발송 시작됨" 가드가 없어 미도래 예약도 집계.
+
+**정정** (backend ~25곳):
+- 발송시각 = `COALESCE(scheduled_at, sent_at)`로 타임아웃·markFinalized·sync 윈도우·성과집계 전수 통일(`campaign-lifecycle`·`campaign-sync-worker`·`mysql-refund-sweeper`·`stats-aggregation`). AI/직접 sync에 예약 발송전 제외 가드(`scheduled_at <= NOW`).
+- `STAT_STARTED_GUARD = NOT (c.status='scheduled' AND COALESCE(c.scheduled_at,c.sent_at) > NOW())` CT 신설 + STAT_DATE_EXPR 소비처 전수 동반(발송통계·상세·캠페인관리·발송결과·export·results 요약/목록).
+- 후불은 `prepaidRefund` no-op(prepaid.ts:68)이라 돈 영향 0(표시 전용). 굳은 65건 `result_final=false`+counts0 UPDATE로 실시간 복귀+재집계.
+
+**교훈**:
+- **발송 관련 시각 체크는 전부 발송시각(scheduled 우선). 예약 `sent_at`은 등록 때 찍히는 함정** — 타임아웃/통계/sync/확정/윈도우에 sent_at-first면 예약 오작동.
+- **타임아웃류는 값을 굳히면(예: success+fail=target) 재처리에서 빠지는지 확인** — 굳히기 전 발송시각 기준 충분한 유예.
+- **통계 = 발송 시작된 것만**. 미도래 예약은 별개(취소 가능). STAT_DATE_EXPR 소비처엔 STAT_STARTED_GUARD 동반.
+
+---
+
 ## 자가 검증 매트릭스 (Backend 작업 시)
 
 - [ ] 발송 5경로 전수 점검 (AI/직접/타겟/스케줄/테스트)

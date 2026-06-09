@@ -799,8 +799,6 @@ router.get('/campaigns/scheduled', authenticate, requireSuperAdmin, async (req: 
     where += dateDr.sql;
     params.push(...dateDr.params);
     paramIdx = dateDr.nextIndex;
-    // ★ 발송 시작된 캠페인만 (전송시각 미도래 예약 제외) — Harold 명시 2026-06-09
-    where += ` AND ${STAT_STARTED_GUARD}`;
     if (search) {
       where += ` AND (c.campaign_name ILIKE $${paramIdx} OR co.company_name ILIKE $${paramIdx})`;
       params.push(`%${search}%`);
@@ -1663,8 +1661,6 @@ router.get('/campaigns/all', authenticate, requireSuperAdmin, async (req: Reques
     where += dateDr.sql;
     params.push(...dateDr.params);
     paramIdx = dateDr.nextIndex;
-    // ★ 발송 시작된 캠페인만 (전송시각 미도래 예약 제외) — Harold 명시 2026-06-09
-    where += ` AND ${STAT_STARTED_GUARD}`;
 
     const countResult = await query(
       `SELECT COUNT(*) FROM campaigns c LEFT JOIN companies co ON c.company_id = co.id LEFT JOIN users u ON c.created_by = u.id ${where}`,

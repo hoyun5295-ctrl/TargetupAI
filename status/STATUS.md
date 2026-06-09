@@ -107,6 +107,16 @@
 
 ---
 
+### 🟢 2026-06-09 — 발송통계 성공→실패 오분류 + 미도래 예약 대기집계 정정 (코드 완료·미배포 / 데이터 65건 정정 완료, P1 돈/정산)
+> **근본 원인(확정)**: 발송시각이 아니라 등록 시각(예약은 `sent_at`이 생성 때 찍힘) 기준으로 체크하던 것. ① 예약발송 120분 타임아웃이 `sent_at`(=등록) 기준이라, 실제 전송시각(`scheduled_at`)에 발송되는 순간 이미 "120분 초과" → 통신사 결과가 몇 초만 늦어도 pending→실패로 굳고, `success+fail=target`이라 재sync에서 영구 제외(상세는 MySQL 실시간이라 성공, 목록·통계는 캐시라 실패). ② 미도래 예약이 발송통계에 '대기'로 집계됨.
+> **원칙(Harold 명시)**: 모든 통계·sync·타임아웃·확정 = **발송시각 `COALESCE(scheduled_at, sent_at)`** 기준. 전송시각 미도래 예약은 발송 시작 전이라 통계 제외(그 전엔 취소 가능).
+> **수정(backend, ~25곳)**: 발송시각 base = `campaign-lifecycle`(AI·직접 타임아웃 + 예약 발송전 제외 가드 + 윈도우)·`campaign-sync-worker`(후보 윈도우·markFinalized)·`mysql-refund-sweeper`(윈도우)·`stats-aggregation` aggregateCampaignPerformance. 발송시작 가드 = `STAT_STARTED_GUARD` CT 신설(stats-aggregation) + 소비처 전수(querySendStats·querySendStatsDetail·admin 발송통계/상세/캠페인관리/발송결과/export·results 요약+목록2 인라인). 후불은 `prepaidRefund` no-op(prepaid.ts:68)이라 돈 영향 0(표시 전용). backend tsc 0 + grep 전수(옛 타임아웃 순서 0·가드 적용 확인).
+> **데이터 정정(완료)**: 굳은 65건 `result_final=false`+`success/fail=0` UPDATE → MySQL 실시간 복귀 + 워커 재집계. (조건: completed·result_final·success0·fail=target·발송시각 21일내.)
+> **목록 vs 통계 분리(확정)**: STAT_STARTED_GUARD는 **통계/정산/export만**(querySendStats·Detail·admin 발송통계1316/상세1480/export3270·results 요약115). **캠페인관리(admin798)·발송결과 목록(admin1658·results248/393)은 가드 제외** — 예약 그대로 표시(취소·관리용). [1차 실수: 목록까지 가드 넣어 예약관리 화면에서 scheduled 예약이 숨겨짐 → Harold 신고 → 즉시 목록 가드 revert, tsc0. 발송은 무관(MySQL 큐+Agent)이라 사고 아님.] 실측: 미래 예약 `scheduled 91건`(cancelled_at NULL=정상 발송 예정) / cancelled 13건(기존 사용자 취소).
+> **남음**: backend 재배포(tp-push+build:safe+pm2 restart all) → 발송시각 기준+통계 가드+목록 가드 revert 반영. 데이터 65건은 정정 완료.
+
+---
+
 ### 🟢 2026-06-09 — CDP 페이지 전면 모달화 Task1~9 완료 (미배포, frontend-only)
 > **CDP(자사몰 연동) 페이지 재설계 끝까지 구현. 단일 파일 `CdpSettingsPage.tsx` 재배치(신규 백엔드 0). frontend tsc 0 + 금지패턴 grep 0.**
 > - **Task1 게이팅(완료·기배포)**: `cdp_enabled` 판정 → `cdpLocked`(`plan_code==='FREE'`) = STARTER+ 전부 개방, FREE만 안내. 백엔드(plan-guard ai_cdp·cdp-auth isCdpEnabledForPlan) 이미 FREE만 차단.

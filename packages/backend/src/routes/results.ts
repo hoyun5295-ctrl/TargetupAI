@@ -255,8 +255,6 @@ router.get('/campaigns', async (req: Request, res: Response) => {
     whereClause += campDr.sql;
     params.push(...campDr.params);
     paramIndex = campDr.nextIndex;
-    // ★ 발송 시작된 캠페인만 (전송시각 미도래 예약 제외) — STAT_STARTED_GUARD 무alias형(regex 재alias 호환) — Harold 명시 2026-06-09
-    whereClause += ` AND NOT (status = 'scheduled' AND COALESCE(scheduled_at, sent_at) > NOW())`;
 
     if (channel && channel !== 'all') {
       whereClause += ` AND message_type = $${paramIndex++}`;
@@ -402,8 +400,6 @@ router.get('/campaigns/export', async (req: Request, res: Response) => {
     whereClause += campDr.sql;
     params.push(...campDr.params);
     paramIndex = campDr.nextIndex;
-    // ★ 발송 시작된 캠페인만 (전송시각 미도래 예약 제외) — STAT_STARTED_GUARD 무alias형(regex 재alias 호환) — Harold 명시 2026-06-09
-    whereClause += ` AND NOT (status = 'scheduled' AND COALESCE(scheduled_at, sent_at) > NOW())`;
 
     // 화면 필터 정합 — 유형(filterType: ai/direct = send_type), 발송자(filterSender = u.login_id)
     if (sendType === 'direct') {
