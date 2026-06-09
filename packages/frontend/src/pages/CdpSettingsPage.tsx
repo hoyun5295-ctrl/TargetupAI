@@ -256,6 +256,25 @@ const CHANNEL_COLOR: Record<string, string> = {
   NONE: '#64748b',
 };
 
+// 자사몰 선택 카드 — 카드 클릭 시 해당 업체 전용 연동 모달 (가로 2열 그리드)
+type ProviderKey = 'cafe24' | 'naver' | 'godo' | 'gabia' | 'custom';
+
+const PROVIDER_CARDS: Array<{ key: ProviderKey; name: string; desc: string; full?: boolean }> = [
+  { key: 'cafe24', name: '카페24', desc: 'OAuth 자동 연동 — 코딩 없이 회원·주문 동기화' },
+  { key: 'naver', name: '네이버 스마트스토어', desc: 'Commerce OAuth — 주문·회원 동기화' },
+  { key: 'godo', name: '고도몰', desc: 'webhook 방식 — Secret·SDK 설정으로 연동' },
+  { key: 'gabia', name: '가비아', desc: 'webhook 방식 — Secret·SDK 설정으로 연동' },
+  { key: 'custom', name: '자체 호스팅 / 그 외 자사몰', desc: '직접 개발했거나 목록에 없는 자사몰 — webhook 방식', full: true },
+];
+
+const PROVIDER_META: Record<ProviderKey, { title: string; note: string }> = {
+  cafe24: { title: '카페24 연동', note: '카페24 mall_id로 OAuth 인증하면 회원·주문이 자동 동기화됩니다.' },
+  naver: { title: '네이버 스마트스토어 연동', note: '스마트스토어 store_id로 OAuth 인증하면 주문·회원이 동기화됩니다. (네이버 정책상 phone/email이 제한될 수 있어 매칭률이 낮을 수 있습니다.)' },
+  godo: { title: '고도몰 연동', note: '고도몰은 webhook 방식으로 연동합니다. 아래 Secret·도메인·SDK를 고도몰 관리자에 설정하세요.' },
+  gabia: { title: '가비아 연동', note: '가비아 쇼핑몰은 webhook 방식으로 연동합니다. 아래 Secret·도메인·SDK를 설정하세요.' },
+  custom: { title: '자체 호스팅 / 그 외 자사몰 연동', note: '직접 개발했거나 목록에 없는 자사몰은 webhook 방식으로 연동합니다. 환경이 특수해 막히면 고객센터로 문의 주세요.' },
+};
+
 // ════════════════════════════════════════════════════════════════════
 // 메인 컴포넌트
 // ════════════════════════════════════════════════════════════════════
@@ -297,9 +316,11 @@ export default function CdpSettingsPage() {
   // UI 영역
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  type CdpModalKey = null | 'connect' | 'analytics' | 'customers';
+  type CdpModalKey = null | 'analytics' | 'customers';
   const [activeModal, setActiveModal] = useState<CdpModalKey>(null);
-  const closeModal = () => setActiveModal(null);
+  const [connectProvider, setConnectProvider] = useState<ProviderKey | null>(null);
+  const closeModal = () => { setActiveModal(null); setConnectProvider(null); };
+  const webhookProviderOpen = connectProvider === 'custom' || connectProvider === 'godo' || connectProvider === 'gabia';
   const [confirm, setConfirm] = useState<ConfirmState | null>(null);
 
   const token = () => localStorage.getItem('token');
@@ -460,11 +481,11 @@ export default function CdpSettingsPage() {
 
   // 모달 ESC 닫기
   useEffect(() => {
-    if (!activeModal) return;
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setActiveModal(null); };
+    if (!activeModal && !connectProvider) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') { setActiveModal(null); setConnectProvider(null); } };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [activeModal]);
+  }, [activeModal, connectProvider]);
 
   // CDP 키 발급
   const handleIssueKey = async () => {
@@ -714,25 +735,54 @@ export default function CdpSettingsPage() {
           </div>
         )}
 
-        {/* 자사몰 연동 진입 카드 — "자사몰 연동하기" 버튼 1개 → 연동 모달 */}
+        {/* 자사몰 연동 상태 안내 */}
         {!cdpLocked && (
-          <div className={`rounded-xl p-5 border ${isConnected ? 'bg-white/5 border-white/10' : 'bg-gradient-to-br from-violet-500/15 via-fuchsia-500/10 to-indigo-500/15 border-violet-400/30'}`}>
-            <div className="flex items-start gap-3 flex-wrap">
-              <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-emerald-400 to-cyan-500 flex items-center justify-center flex-shrink-0 shadow-lg shadow-emerald-500/20">
-                <Database className="w-5 h-5 text-white" />
-              </div>
-              <div className="flex-1 min-w-0">
-                <div className="font-semibold text-white mb-1">{isConnected ? '자사몰이 연동되어 있습니다' : '어떤 자사몰이든 연동해 드립니다'}</div>
-                {isConnected ? (
-                  <div className="text-sm text-white/70 leading-relaxed">연동됨: <span className="text-emerald-200">{connectedProviders.length > 0 ? connectedProviders.join(' · ') : 'CDP 키 발급'}</span>. 도메인·SDK·연동 추가는 아래 버튼에서 관리할 수 있습니다.</div>
-                ) : (
-                  <div className="text-sm text-white/70 leading-relaxed">아직 연동된 자사몰이 없습니다. 표준 SDK·webhook로 대부분 바로 연동되고, 환경이 특수해 연동이 막히면 개발 담당자가 <span className="text-violet-200">고객센터</span>로 문의 주시면 직접 맞춤 연동을 도와드립니다.</div>
-                )}
-              </div>
-              <button onClick={() => setActiveModal('connect')} className="px-4 py-2.5 rounded-lg bg-gradient-to-r from-violet-500 to-fuchsia-500 hover:from-violet-400 hover:to-fuchsia-400 text-white text-sm font-semibold flex items-center gap-1.5 shadow-lg shadow-violet-500/20 transition-colors flex-shrink-0">
-                <Link2 className="w-4 h-4" /> 자사몰 연동하기
-              </button>
+          <div className="bg-white/5 border border-white/10 rounded-xl p-5 flex items-start gap-3">
+            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-emerald-400 to-cyan-500 flex items-center justify-center flex-shrink-0 shadow-lg shadow-emerald-500/20">
+              <Database className="w-5 h-5 text-white" />
             </div>
+            <div className="flex-1 min-w-0">
+              <div className="font-semibold text-white mb-1">{isConnected ? '자사몰이 연동되어 있습니다' : '어떤 자사몰이든 연동해 드립니다'}</div>
+              <div className="text-sm text-white/70 leading-relaxed">
+                {isConnected
+                  ? <>연동됨: <span className="text-emerald-200">{connectedProviders.length > 0 ? connectedProviders.join(' · ') : 'CDP 키 발급'}</span>. 아래에서 자사몰을 선택해 연동을 추가하거나 관리할 수 있습니다.</>
+                  : <>아래에서 사용 중인 자사몰을 선택하면 바로 연동을 시작합니다. 표준 SDK·webhook로 대부분 연결되고, 특수한 환경이면 <span className="text-violet-200">고객센터</span>로 문의 주세요.</>}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* 자사몰 선택 그리드 (가로 2열) — 카드 클릭 시 해당 업체 전용 연동 모달 */}
+        {!cdpLocked && (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            {PROVIDER_CARDS.map((p) => {
+              const connected = p.key === 'cafe24' ? !!cafe24Status?.connected
+                : p.key === 'naver' ? !!naverStatus?.connected
+                : !!customInfo?.hasSecret;
+              const Icon = p.key === 'cafe24' ? Store : p.key === 'naver' ? ShoppingCart : p.key === 'custom' ? Database : Server;
+              const accent = p.key === 'cafe24' ? 'text-amber-300' : p.key === 'naver' ? 'text-emerald-300' : p.key === 'custom' ? 'text-violet-300' : 'text-indigo-300';
+              return (
+                <button
+                  key={p.key}
+                  onClick={() => setConnectProvider(p.key)}
+                  className={`text-left p-4 rounded-xl border bg-white/5 border-white/10 hover:bg-white/10 hover:border-violet-400/40 transition-colors flex items-start gap-3 ${p.full ? 'md:col-span-2' : ''}`}
+                >
+                  <div className="w-10 h-10 rounded-lg bg-white/10 flex items-center justify-center flex-shrink-0">
+                    <Icon className={`w-5 h-5 ${accent}`} />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="text-sm font-semibold text-white">{p.name}</span>
+                      {connected
+                        ? <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-300 font-medium">연동됨</span>
+                        : <span className="text-[10px] px-1.5 py-0.5 rounded bg-white/10 text-white/50 font-medium">연동하기</span>}
+                    </div>
+                    <div className="text-[11px] text-white/55 leading-relaxed mt-0.5">{p.desc}</div>
+                  </div>
+                  <Link2 className="w-4 h-4 text-white/30 flex-shrink-0 mt-1" />
+                </button>
+              );
+            })}
           </div>
         )}
 
@@ -1036,14 +1086,21 @@ export default function CdpSettingsPage() {
           )}
         </CdpModal>
 
-        {/* 연동 모달 (createPortal) — 자체호스팅 · 카페24 · 네이버 · 키 · 도메인 · SDK · 검증 통합 */}
-        <CdpModal open={activeModal === 'connect'} onClose={closeModal} title="자사몰 연동" icon={<Database className="w-4 h-4 text-violet-300" />}>
+        {/* 연동 모달 (createPortal) — 자사몰 카드 선택 시 해당 업체 전용 모달 */}
+        <CdpModal
+          open={connectProvider !== null}
+          onClose={closeModal}
+          title={connectProvider ? PROVIDER_META[connectProvider].title : '자사몰 연동'}
+          icon={connectProvider === 'cafe24' ? <Store className="w-4 h-4 text-amber-300" /> : connectProvider === 'naver' ? <ShoppingCart className="w-4 h-4 text-emerald-300" /> : connectProvider === 'custom' ? <Database className="w-4 h-4 text-violet-300" /> : <Server className="w-4 h-4 text-indigo-300" />}
+        >
           <div className="space-y-4">
-            <div className="text-xs text-white/60 leading-relaxed bg-white/5 border border-white/10 rounded-lg p-3">
-              표준 SDK·webhook로 대부분 바로 연동됩니다. 자체 호스팅이 가장 범용적이라 고도몰·가비아 등 어떤 자사몰이든 커버하고, 카페24·네이버는 OAuth로 더 간편하게 연결됩니다.
-            </div>
-        {/* 11. Provider 매트릭스 — 자체 호스팅 */}
-        {!cdpLocked && (
+            {connectProvider && (
+              <div className="text-xs text-white/70 leading-relaxed bg-white/5 border border-white/10 rounded-lg p-3">
+                {PROVIDER_META[connectProvider].note}
+              </div>
+            )}
+        {/* 자체 호스팅 / 고도몰 / 가비아 — webhook 방식 */}
+        {webhookProviderOpen && (
           <div id="section-custom" className="bg-white/5 border border-white/10 rounded-xl p-6">
             <div className="flex items-center gap-2 mb-1">
               <Server className="w-5 h-5 text-indigo-300" />
@@ -1106,8 +1163,8 @@ export default function CdpSettingsPage() {
           </div>
         )}
 
-        {/* 11. Provider 매트릭스 — 카페24 */}
-        {!cdpLocked && (
+        {/* 카페24 — OAuth */}
+        {connectProvider === 'cafe24' && (
           <div id="section-cafe24" className="bg-white/5 border border-white/10 rounded-xl p-6">
             <div className="flex items-center gap-2 mb-4">
               <Store className="w-5 h-5 text-amber-300" />
@@ -1153,8 +1210,8 @@ export default function CdpSettingsPage() {
           </div>
         )}
 
-        {/* 11. Provider 매트릭스 — 네이버 스마트스토어 */}
-        {!cdpLocked && (
+        {/* 네이버 스마트스토어 — OAuth */}
+        {connectProvider === 'naver' && (
           <div id="section-naver" className="bg-white/5 border border-white/10 rounded-xl p-6">
             <div className="flex items-center gap-2 mb-4">
               <ShoppingCart className="w-5 h-5 text-emerald-300" />
@@ -1201,8 +1258,8 @@ export default function CdpSettingsPage() {
         )}
 
 
-        {/* 12. CDP 키 발급 + 사용량 */}
-        {!cdpLocked && usage && !customInfo?.hasSecret && (
+        {/* 12. CDP 키 발급 + 사용량 (webhook 방식 자사몰) */}
+        {webhookProviderOpen && usage && !customInfo?.hasSecret && (
           <div className="bg-white/5 border border-white/10 rounded-xl p-6">
             <div className="flex items-center gap-2 mb-4">
               <KeyRound className="w-5 h-5 text-indigo-300" />
@@ -1251,7 +1308,7 @@ export default function CdpSettingsPage() {
         )}
 
         {/* 12-0. 수집 허용 도메인 등록 (브라우저 SDK Origin allowlist) */}
-        {!cdpLocked && (
+        {webhookProviderOpen && (
           <div className="bg-white/5 border border-white/10 rounded-2xl p-6">
             <div className="flex items-center gap-2 mb-3">
               <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-violet-500 to-fuchsia-600 flex items-center justify-center">
@@ -1295,7 +1352,7 @@ export default function CdpSettingsPage() {
         )}
 
         {/* 12-1. SDK 설치 스크립트 스니펫 (public key 자동 주입 — v0.3.5-b) */}
-        {!cdpLocked && usage?.public_key && (
+        {webhookProviderOpen && usage?.public_key && (
           <div className="bg-white/5 border border-white/10 rounded-2xl p-6">
             <div className="flex items-center gap-2 mb-3">
               <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-violet-500 to-fuchsia-600 flex items-center justify-center">
@@ -1325,7 +1382,7 @@ export default function CdpSettingsPage() {
         )}
 
         {/* 12-2. 설치 검증 — 첫 이벤트 진단 (v0.3.5-b, 서버 관측 신호) */}
-        {!cdpLocked && usage?.public_key && installStatus && (() => {
+        {webhookProviderOpen && usage?.public_key && installStatus && (() => {
           const issued = installStatus.keyIssuedAt ? new Date(installStatus.keyIssuedAt).getTime() : null;
           const mins = issued ? Math.floor((Date.now() - issued) / 60000) : 0;
           const received = !!installStatus.firstEventAt;
@@ -1367,10 +1424,6 @@ export default function CdpSettingsPage() {
             </div>
           );
         })()}
-            {/* 그 외 자사몰 안내 */}
-            <div className="bg-white/5 border border-white/10 rounded-lg p-3 text-xs text-white/60 leading-relaxed">
-              목록에 없는 자사몰도 자체 호스팅(webhook) 방식으로 대부분 연동됩니다. 환경이 특수해 연동이 막히면 개발 담당자가 <span className="text-violet-200">고객센터</span>로 문의 주시면 직접 맞춤 연동을 도와드립니다.
-            </div>
           </div>
         </CdpModal>
       </div>
