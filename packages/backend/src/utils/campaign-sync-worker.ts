@@ -289,6 +289,8 @@ async function reconcileFinalizedCampaigns(): Promise<void> {
        AND COALESCE(scheduled_at, sent_at) >= NOW() - INTERVAL '21 days'
        AND (result_synced_at IS NULL
             OR result_synced_at < COALESCE(scheduled_at, sent_at) + INTERVAL '24 hours')
+       -- 같은 캠페인 반복 집계 차단 — 마지막 재대조 후 1시간 지나야 재확인 (MySQL 부하 상한)
+       AND (result_synced_at IS NULL OR result_synced_at < NOW() - INTERVAL '1 hour')
      ORDER BY COALESCE(scheduled_at, sent_at) ASC
      LIMIT ${RECONCILE_BATCH}
   `);
