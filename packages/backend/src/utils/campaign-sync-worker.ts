@@ -19,7 +19,8 @@
 
 import { query } from '../config/database';
 import { syncCampaignResults } from './campaign-lifecycle';
-import { getAuthSmsTable, bulkInsertSmsQueue } from './sms-queue';
+import { getAuthSmsTable, bulkInsertSmsQueue, getCompanySmsTablesWithLogs, smsCountAll } from './sms-queue';
+import { SUCCESS_CODES, PENDING_CODES } from './sms-result-map';
 
 const INTERVAL_MS = 5 * 60 * 1000; // 5분
 const BOOT_DELAY_MS = 60 * 1000;   // 서버 startup 안정화 후 첫 실행
@@ -52,6 +53,13 @@ async function runOnce(): Promise<void> {
       await markFinalizedCampaigns();
     } catch (markErr: any) {
       log('result_final 마킹 오류 (skip):', markErr?.message || markErr);
+    }
+
+    // ★ 2026-06-10: 확정 후 재대조 — 굳은 카운트·failed 오판을 시스템이 스스로 MySQL 진실과 재정렬.
+    try {
+      await reconcileFinalizedCampaigns();
+    } catch (reconErr: any) {
+      log('재대조 오류 (skip):', reconErr?.message || reconErr);
     }
 
     const r = await query(`
@@ -248,6 +256,77 @@ async function markFinalizedCampaigns(): Promise<void> {
   if (r.rowCount && r.rowCount > 0) {
     log(`result_final 확정 ${r.rowCount}건 (발송 6h 경과 완료 캠페인 → PG 캐시 전환)`);
   }
+}
+
+/**
+ * ★ 2026-06-10 확정 후 재대조 — "한 번 굳으면 다시 안 본다"는 빈틈의 근본 차단.
+ *   배경 두 가지(같은 뿌리):
+ *   (1) failed 오판 복원 — 시세이도·에이치피오 예약발송이 라인 라우팅 0건 조회로 status='failed'
+ *       (counts 0/0)가 됐는데 실제 발송은 정상. 복원 경로가 없어 사용자 화면에 실패로 남음.
+ *   (2) 확정 후 늦은 결과 흡수 — 후불 회사는 result_final 확정 후 PG를 다시 맞추는 워커가 없어
+ *       (선불은 mysql-refund-sweeper가 지속 보정) 통신사 결과가 늦으면 캐시가 과소로 영구 굳음
+ *       (리스킨 33건 — 상세 17,192 vs 목록 17,159).
+ *
+ *   동작: 발송시각 기준 21일 안 대상 캠페인을 MySQL 실집계(전 라인 합집합)로 재대조.
+ *   - failed 무리: 발송 +10분 후부터 — MySQL에 발송 기록이 있으면 status='completed' 복원 + counts 교정
+ *   - 확정(completed+result_final) 무리: 발송 +24시간에 1회 재검증 — 늦은 결과 반영
+ *   멱등 마커 = result_synced_at (재대조 시 NOW()로 갱신 → 발송+24h를 넘기면 자연 종료, 신규 컬럼 0).
+ *   돈 경로 무수정 — 환불은 sweeper(선불), 청구는 MySQL 직접 집계(후불)가 기존대로 담당.
+ */
+const RECONCILE_BATCH = 50;
+
+async function reconcileFinalizedCampaigns(): Promise<void> {
+  const targets = await query(`
+    SELECT id, company_id, status, success_count, fail_count, sent_count,
+           COALESCE(scheduled_at, sent_at) AS send_base
+      FROM campaigns
+     WHERE (
+             (status = 'failed'
+               AND COALESCE(scheduled_at, sent_at) < NOW() - INTERVAL '10 minutes')
+          OR (status = 'completed' AND result_final = true
+               AND COALESCE(scheduled_at, sent_at) < NOW() - INTERVAL '24 hours')
+           )
+       AND COALESCE(scheduled_at, sent_at) >= NOW() - INTERVAL '21 days'
+       AND (result_synced_at IS NULL
+            OR result_synced_at < COALESCE(scheduled_at, sent_at) + INTERVAL '24 hours')
+     ORDER BY COALESCE(scheduled_at, sent_at) ASC
+     LIMIT ${RECONCILE_BATCH}
+  `);
+  if (targets.rows.length === 0) return;
+
+  let fixed = 0;
+  for (const camp of targets.rows) {
+    try {
+      const tables = await getCompanySmsTablesWithLogs(camp.company_id);
+      const sentCount = await smsCountAll(tables, 'app_etc1 = ?', [camp.id]);
+      const successCount = await smsCountAll(tables, `app_etc1 = ? AND status_code IN (${SUCCESS_CODES.join(',')})`, [camp.id]);
+      const failCount = await smsCountAll(tables, `app_etc1 = ? AND status_code NOT IN (${[...SUCCESS_CODES, ...PENDING_CODES].join(',')})`, [camp.id]);
+
+      // 발송 기록이 있는 failed = 오판 → completed 복원. 진짜 0건 실패는 failed 유지.
+      const newStatus = (camp.status === 'failed' && sentCount > 0) ? 'completed' : camp.status;
+      const changed =
+        newStatus !== camp.status ||
+        sentCount !== Number(camp.sent_count || 0) ||
+        successCount !== Number(camp.success_count || 0) ||
+        failCount !== Number(camp.fail_count || 0);
+
+      await query(
+        `UPDATE campaigns
+            SET status = $2, sent_count = $3, success_count = $4, fail_count = $5,
+                result_synced_at = NOW(), updated_at = NOW()
+          WHERE id = $1`,
+        [camp.id, newStatus, sentCount, successCount, failCount]
+      );
+      if (changed) {
+        fixed++;
+        log(`재대조 교정 campaign=${camp.id} status ${camp.status}→${newStatus}, ` +
+            `succ ${camp.success_count}→${successCount}, fail ${camp.fail_count}→${failCount}, sent ${camp.sent_count}→${sentCount}`);
+      }
+    } catch (oneErr: any) {
+      log(`재대조 1건 오류 campaign=${camp.id} (skip):`, oneErr?.message || oneErr);
+    }
+  }
+  if (fixed > 0) log(`재대조 사이클 — 대상 ${targets.rows.length}건 중 ${fixed}건 교정`);
 }
 
 export function startCampaignSyncWorker(): void {

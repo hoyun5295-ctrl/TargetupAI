@@ -34,7 +34,7 @@ export interface CleanupScheduledFilter {
 export async function cleanupScheduledCampaigns(filter: CleanupScheduledFilter = {}): Promise<{ cleaned: number }> {
   let cleaned = 0;
 
-  let sql = `SELECT id, company_id FROM campaigns
+  let sql = `SELECT id, company_id, scheduled_at FROM campaigns
              WHERE status = 'scheduled' AND scheduled_at < NOW()`;
   const params: any[] = [];
 
@@ -60,6 +60,13 @@ export async function cleanupScheduledCampaigns(filter: CleanupScheduledFilter =
       const successCount = await smsCountAll(tablesWithLogs, `app_etc1 = ? AND status_code IN (${SUCCESS_CODES.join(',')})`, [camp.id]);
       const failCount = await smsCountAll(tablesWithLogs, `app_etc1 = ? AND status_code NOT IN (${[...SUCCESS_CODES, ...PENDING_CODES].join(',')})`, [camp.id]);
       const newStatus = sentCount === 0 ? 'failed' : 'completed';
+
+      // ★ 2026-06-10: 0건 failed 확정 유예 — 발송시각 +10분까지는 보류하고 다음 사이클 재판정.
+      //   큐 적재/송출 직후 경합이나 라인 캐시 시점 차로 0건이 잡혀 정상 발송이 failed로 굳던 오판 차단.
+      //   (시세이도·에이치피오 6/4~6/6 — 발송은 사용자 라인, 판정은 회사 라인 0건 조회가 결합된 사례)
+      if (sentCount === 0 && new Date(camp.scheduled_at).getTime() > Date.now() - 10 * 60 * 1000) {
+        continue;
+      }
 
       // ★ D145 P0+ (2026-05-07): idempotent 환불 패턴 — 호출측은 누적 failCount 그대로 보냄
       //   prepaidRefund 함수가 alreadyRefunded와 비교해 차이만 환불 (idempotency 함수 측 보장)

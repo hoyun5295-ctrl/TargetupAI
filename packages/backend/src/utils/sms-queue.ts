@@ -492,13 +492,50 @@ export function mergeLineTables(a: string[], b: string[]): string[] {
   return [...new Set([...a, ...b])];
 }
 
+/**
+ * ★ 2026-06-10: 회사 소속 "모든 사용자"의 개별 라인그룹 테이블 합집합 (집계 전용, 캐시).
+ *   배경 — 시세이도·에이치피오 예약발송 failed 오판: 발송은 사용자 개별 라인(대량발송(1))으로
+ *   나갔는데, 1분 cron(cleanupScheduledCampaigns)이 userId 없이 회사 라인(대량발송(3))만 조회해
+ *   0건 → status='failed'. 호출부가 userId를 빠뜨려도 집계 라인이 누락될 수 없도록
+ *   회사 단위 전 사용자 라인을 모아 반환한다.
+ */
+async function getAllCompanyUserLineTables(companyId: string): Promise<string[]> {
+  const cacheKey = `companyUsers:${companyId}`;
+  const cached = lineGroupCache.get(cacheKey);
+  if (cached && cached.expires > Date.now()) return cached.tables;
+
+  const result = await query(`
+    SELECT DISTINCT lg.sms_tables
+    FROM users u
+    JOIN sms_line_groups lg ON lg.id = u.line_group_id
+    WHERE u.company_id = $1 AND lg.is_active = true AND lg.group_type = 'bulk'
+  `, [companyId]);
+
+  const tables: string[] = [];
+  for (const row of result.rows) {
+    const arr: string[] = row.sms_tables || [];
+    for (const t of arr) {
+      if (isValidSmsTable(t)) {
+        if (!tables.includes(t)) tables.push(t);
+      } else {
+        console.error(`[QTmsg] ⚠️ company ${companyId} 사용자 라인그룹에 잘못된 테이블명: "${t}" — 스킵`);
+      }
+    }
+  }
+  lineGroupCache.set(cacheKey, { tables, hasDedicatedGroup: tables.length > 0, expires: Date.now() + LINE_GROUP_CACHE_TTL });
+  return tables;
+}
+
 /** 회사 발송 테이블 + 로그 테이블 (결과 조회용) */
 export async function getCompanySmsTablesWithLogs(companyId: string, userId?: string): Promise<string[]> {
-  // ★ 집계 전용 — user 라인그룹 + company 라인그룹 합집합 (발송이 둘 중 어느 라인으로 나갔든 포함).
-  //   발송 후 라인그룹이 바뀌어도 과거 발송 집계가 안 깨지는 내성. 발송 경로(getCompanySmsTables)는 불변.
+  // ★ 집계 전용 — user 라인그룹 + company 라인그룹 + 회사 소속 전 사용자 라인그룹 합집합.
+  //   발송이 어느 라인으로 나갔든 포함 + 발송 후 라인그룹이 바뀌어도 과거 발송 집계가 안 깨지는 내성.
+  //   2026-06-10: 호출부 userId 의존 제거 — userId 미전달이어도 회사 전 사용자 라인 포함 (failed 오판 근본 차단).
+  //   발송 경로(getCompanySmsTables)는 불변.
   const userLive = await getCompanySmsTables(companyId, userId);
   const companyLive = userId ? await getCompanySmsTables(companyId) : userLive;
-  const liveTables = mergeLineTables(userLive, companyLive);
+  const allUserLive = await getAllCompanyUserLineTables(companyId);
+  const liveTables = mergeLineTables(mergeLineTables(userLive, companyLive), allUserLive);
   const existingLogs = await getExistingLogTables();
 
   const now = new Date();
