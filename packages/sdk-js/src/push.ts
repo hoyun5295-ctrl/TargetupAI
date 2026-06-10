@@ -31,7 +31,7 @@ export interface PushSubscribeResult {
 export class HanjulloPushModule {
   constructor(
     private readonly apiKey: string,
-    private readonly secret: string,
+    _secret: string, // 2026-06-10: 브라우저 모듈은 secret 미사용 (인자 자리만 유지 — 호출부 호환)
     private readonly endpoint: string,
   ) {}
 
@@ -82,9 +82,10 @@ export class HanjulloPushModule {
       const res = await fetch(`${this.endpoint}/push/subscribe`, {
         method: 'POST',
         headers: {
+          // 2026-06-10: 브라우저 모듈은 secret 미전송 — public key + 등록 도메인(Origin) 검증으로 인증.
+          // secret을 브라우저에 두면 view-source로 탈취돼 회사 사칭이 가능하다.
           'Content-Type': 'application/json',
           'X-Hanjullo-Key': this.apiKey,
-          'X-Hanjullo-Secret': this.secret,
         },
         body: JSON.stringify({
           subscription: {
@@ -127,7 +128,6 @@ export class HanjulloPushModule {
           headers: {
             'Content-Type': 'application/json',
             'X-Hanjullo-Key': this.apiKey,
-            'X-Hanjullo-Secret': this.secret,
           },
           body: JSON.stringify({ endpoint }),
         });

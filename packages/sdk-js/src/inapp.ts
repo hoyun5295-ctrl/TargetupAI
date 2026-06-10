@@ -111,7 +111,7 @@ export class HanjulloInAppModule {
 
   constructor(
     private readonly apiKey: string,
-    private readonly secret: string,
+    _secret: string, // 2026-06-10: 브라우저 모듈은 secret 미사용 (인자 자리만 유지 — 호출부 호환)
     private readonly endpoint: string,
   ) {}
 
@@ -174,8 +174,8 @@ export class HanjulloInAppModule {
     const url = `${this.endpoint}/inapp/active?${params.toString()}`;
     const data = await this.fetchWithRetry(url, {
       headers: {
+        // 2026-06-10: 브라우저 모듈은 secret 미전송 — public key + 등록 도메인(Origin) 검증으로 인증
         'X-Hanjullo-Key': this.apiKey,
-        'X-Hanjullo-Secret': this.secret,
       },
     });
 
@@ -900,7 +900,6 @@ export class HanjulloInAppModule {
         headers: {
           'Content-Type': 'application/json',
           'X-Hanjullo-Key': this.apiKey,
-          'X-Hanjullo-Secret': this.secret,
         },
         body: JSON.stringify({
           message_id: messageId,

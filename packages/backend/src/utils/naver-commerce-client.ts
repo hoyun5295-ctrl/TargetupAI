@@ -31,6 +31,7 @@ import {
 import { identifyCustomer } from './cdp-identity';
 import { syncOrder } from './cdp-orders';
 import { trackEvent } from './cdp-events';
+import { buildWebhookIdempotencyKey } from './cdp-idempotency';
 
 const NAVER_COMMERCE_CLIENT_ID = process.env.NAVER_COMMERCE_CLIENT_ID || '';
 const NAVER_COMMERCE_CLIENT_SECRET = process.env.NAVER_COMMERCE_CLIENT_SECRET || '';
@@ -465,8 +466,8 @@ export const naverSmartStoreAdapter: IProviderAdapter = {
   },
 
   buildIdempotencyKey(event, resource, body) {
-    const id = resource?.order_id || resource?.product_order_id || resource?.member_id || body?.event_id || Date.now();
-    return `${event}:${id}`;
+    // CT-85 — 전송 고유값 우선 + 본문 해시. 이전 엔티티ID 단독 키는 두 번째 갱신부터 영구 duplicate가 되는 결함.
+    return buildWebhookIdempotencyKey(event, resource, body);
   },
 };
 

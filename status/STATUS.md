@@ -107,6 +107,14 @@
 
 ---
 
+### 🔴 2026-06-09 — 알림톡 강조표기형 7300 전부 실패 — 근본 확정(QTmsg 에이전트 select_sql), IMC 답변 대기
+> **근본(확정)**: 발송 에이전트 QTmsg(`/home/administrator/agent1~11/bin`, java 11개, PM2 아님)의 `conf/qtmsg.xml` select_sql이 발송 직전 `k_etc_json` 앞에 `sender_code`(인비토 특수유형 부가통신사업자 식별코드)를 concat — 한줄로가 sender_code를 안 채워 NULL → **MySQL concat NULL 하나면 전체 NULL** → k_etc_json 통째 소실 → 강조 title 미전달 → 7300. 채널추가형·기본형은 etcJson 불요라 무증상. 증거=`SMSQ_SEND_1_202606` 강조형 행 k_etc_json `{"title":…}` 정상+sender_code NULL+7300.
+> **한줄로 반영(배포됨)**: buildAlimtalkEtcJson senderkey 제거({title}만, QTmsg 매뉴얼 232행)+5경로 통일+테스트5. 진단로그 `[ALIMTALK-DEBUG2]`(direct-send-processor) 잔존 — 종결 후 제거 의무.
+> **대기**: 서팀장→IMC 메일(①인비토 식별코드 값+넣는 위치/자동 여부 ②문자 SMS/LMS 중계사 자동삽입 확인 ③카카오 식별코드 불필요 확인→select_sql sendercode 합침 제거 가능 ④한줄로 추가 설계 필요 여부 ⑤강조 etcJson 형식 title만/title+subtitle).
+> **답변 후 처리 분기 = `docs/superpowers/handoffs/2026-06-09-alimtalk-emphasize-7300-imc-handoff.md`** (A 카카오 불필요→에이전트 11개 select_sql 수정+재기동 / B 한줄로 sender_code 채움 / C 문자 포함 전수 / D subtitle 추가). 상세=`memory/project_2026_0609_alimtalk_emphasize_etcjson_diagnosis.md`+`LESSONS_BACKEND D234+`.
+
+---
+
 ### 🟢 2026-06-09 — 발송통계 성공→실패 오분류 + 미도래 예약 대기집계 정정 (코드 완료·미배포 / 데이터 65건 정정 완료, P1 돈/정산)
 > **근본 원인(확정)**: 발송시각이 아니라 등록 시각(예약은 `sent_at`이 생성 때 찍힘) 기준으로 체크하던 것. ① 예약발송 120분 타임아웃이 `sent_at`(=등록) 기준이라, 실제 전송시각(`scheduled_at`)에 발송되는 순간 이미 "120분 초과" → 통신사 결과가 몇 초만 늦어도 pending→실패로 굳고, `success+fail=target`이라 재sync에서 영구 제외(상세는 MySQL 실시간이라 성공, 목록·통계는 캐시라 실패). ② 미도래 예약이 발송통계에 '대기'로 집계됨.
 > **원칙(Harold 명시)**: 모든 통계·sync·타임아웃·확정 = **발송시각 `COALESCE(scheduled_at, sent_at)`** 기준. 전송시각 미도래 예약은 발송 시작 전이라 통계 제외(그 전엔 취소 가능).

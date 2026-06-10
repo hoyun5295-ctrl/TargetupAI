@@ -29,9 +29,37 @@
 
 import { Request, Response, NextFunction } from 'express';
 import bcrypt from 'bcryptjs';
-import { randomBytes } from 'crypto';
+import { randomBytes, createHash } from 'crypto';
 import { query } from '../config/database';
 import { loadPlanContext } from './plan-guard';
+
+// ═══════════════════════════════════════════════════════════
+// 인증/한도 캐시 (2026-06-10 — 호출당 bcrypt 비교 + 월 SUM 풀스캔 부하 완화)
+//   - bcrypt 성공 캐시: 같은 key+secret 조합은 5분간 sha256 비교로 단축 (재발급 시 즉시 무효화)
+//   - 월 한도 캐시: 회사별 60초 TTL (한도 초과 인지가 최대 60초 늦는 오차는 허용 범위)
+// ═══════════════════════════════════════════════════════════
+
+const AUTH_CACHE_TTL_MS = 5 * 60 * 1000;
+const LIMIT_CACHE_TTL_MS = 60 * 1000;
+
+interface AuthCacheEntry {
+  secretSha256: string;
+  companyId: string;
+  companyName: string;
+  expiresAt: number;
+}
+const authCache = new Map<string, AuthCacheEntry>();
+const limitCache = new Map<string, { over: boolean; expiresAt: number }>();
+
+function sha256Hex(input: string): string {
+  return createHash('sha256').update(input).digest('hex');
+}
+
+/** 키 재발급/폐기 시 인증 캐시 즉시 무효화 */
+export function invalidateCdpAuthCache(cdpApiKey?: string): void {
+  if (cdpApiKey) authCache.delete(cdpApiKey);
+  else authCache.clear();
+}
 
 // ═══════════════════════════════════════════════════════════
 // 타입
@@ -81,6 +109,10 @@ export async function issueCdpKeyPair(companyId: string): Promise<CdpKeyPair> {
   const cdpApiSecretHash = await bcrypt.hash(cdpApiSecret, 10);
   const issuedAt = new Date();
 
+  // 재발급 시 이전 키의 인증 캐시 즉시 무효화 (이전 키 5분 잔존 차단)
+  const prev = await query(`SELECT cdp_api_key FROM companies WHERE id = $1::uuid`, [companyId]);
+  if (prev.rows[0]?.cdp_api_key) invalidateCdpAuthCache(prev.rows[0].cdp_api_key);
+
   await query(
     `UPDATE companies
      SET cdp_api_key = $1,
@@ -125,31 +157,50 @@ export async function requireCdpApiKey(req: Request, res: Response, next: NextFu
       return;
     }
 
-    const result = await query(
-      `SELECT id, company_name, status, cdp_api_secret_hash
-       FROM companies
-       WHERE cdp_api_key = $1`,
-      [cdpApiKey]
-    );
+    // bcrypt 성공 캐시 — 같은 key+secret 조합은 5분간 sha256 비교로 단축 (호출당 ~100ms CPU 차단)
+    const cached = authCache.get(cdpApiKey);
+    let company: { id: string; company_name: string; status: string; cdp_api_secret_hash?: string };
+    if (cached && cached.expiresAt > Date.now() && cached.secretSha256 === sha256Hex(cdpApiSecret)) {
+      const statusRow = await query(`SELECT status FROM companies WHERE id = $1::uuid`, [cached.companyId]);
+      if (statusRow.rows.length === 0) {
+        authCache.delete(cdpApiKey);
+        res.status(401).json({ success: false, error: 'CDP 인증에 실패했습니다.', code: 'INVALID_CREDENTIALS' });
+        return;
+      }
+      company = { id: cached.companyId, company_name: cached.companyName, status: statusRow.rows[0].status };
+    } else {
+      const result = await query(
+        `SELECT id, company_name, status, cdp_api_secret_hash
+         FROM companies
+         WHERE cdp_api_key = $1`,
+        [cdpApiKey]
+      );
 
-    if (result.rows.length === 0) {
-      res.status(401).json({
-        success: false,
-        error: 'CDP 인증에 실패했습니다.',
-        code: 'INVALID_CREDENTIALS',
-      });
-      return;
-    }
+      if (result.rows.length === 0) {
+        res.status(401).json({
+          success: false,
+          error: 'CDP 인증에 실패했습니다.',
+          code: 'INVALID_CREDENTIALS',
+        });
+        return;
+      }
 
-    const company = result.rows[0];
-    const hashOk = await bcrypt.compare(cdpApiSecret, company.cdp_api_secret_hash || '');
-    if (!hashOk) {
-      res.status(401).json({
-        success: false,
-        error: 'CDP 인증에 실패했습니다.',
-        code: 'INVALID_CREDENTIALS',
+      company = result.rows[0];
+      const hashOk = await bcrypt.compare(cdpApiSecret, company.cdp_api_secret_hash || '');
+      if (!hashOk) {
+        res.status(401).json({
+          success: false,
+          error: 'CDP 인증에 실패했습니다.',
+          code: 'INVALID_CREDENTIALS',
+        });
+        return;
+      }
+      authCache.set(cdpApiKey, {
+        secretSha256: sha256Hex(cdpApiSecret),
+        companyId: company.id,
+        companyName: company.company_name,
+        expiresAt: Date.now() + AUTH_CACHE_TTL_MS,
       });
-      return;
     }
 
     if (company.status !== 'active') {
@@ -291,6 +342,11 @@ export async function isCdpEnabledForPlan(companyId: string): Promise<boolean> {
  * - 한도 초과 시 true 반환 → 429 차단
  */
 export async function isOverMonthlyCdpLimit(companyId: string): Promise<boolean> {
+  // 60초 캐시 — 호출마다 cdp_api_call_log 한 달치 SUM 풀스캔하던 부하 완화
+  const cachedLimit = limitCache.get(companyId);
+  if (cachedLimit && cachedLimit.expiresAt > Date.now()) {
+    return cachedLimit.over;
+  }
   const result = await query(
     `SELECT
         p.cdp_events_per_month AS monthly_limit,
@@ -307,8 +363,26 @@ export async function isOverMonthlyCdpLimit(companyId: string): Promise<boolean>
   if (result.rows.length === 0) return true; // 회사 없음 = 차단
   const limit = result.rows[0].monthly_limit;
   const used = parseInt(result.rows[0].used || '0');
-  if (limit === null || limit === undefined) return false; // ENTERPRISE 무제한
-  return used >= parseInt(limit);
+  const over = (limit === null || limit === undefined) ? false : used >= parseInt(limit);
+  limitCache.set(companyId, { over, expiresAt: Date.now() + LIMIT_CACHE_TTL_MS });
+  return over;
+}
+
+// ═══════════════════════════════════════════════════════════
+// 겸용 미들웨어 — requireCdpKeyOrBrowserOrigin (2026-06-10)
+//   브라우저 기능(인앱/웹푸시/여정 변이 트래킹) endpoint용.
+//   - X-Hanjullo-Secret 헤더가 오면: 서버-투-서버 = requireCdpApiKey (secret 검증)
+//   - 없으면: 브라우저 = requireCdpBrowserOrigin (public key + 등록 도메인 검증)
+//   이전에는 이 endpoint들이 secret을 요구해 브라우저에 secret을 넣어야만 동작했고,
+//   그것은 cdp-auth 설계 주석 스스로 금지한 방식이었다 (view-source 탈취 = 회사 사칭).
+// ═══════════════════════════════════════════════════════════
+
+export async function requireCdpKeyOrBrowserOrigin(req: Request, res: Response, next: NextFunction): Promise<void> {
+  const hasSecret = !!(req.headers['x-hanjullo-secret'] || req.headers['X-Hanjullo-Secret']);
+  if (hasSecret) {
+    return requireCdpApiKey(req, res, next);
+  }
+  return requireCdpBrowserOrigin(req, res, next);
 }
 
 // ═══════════════════════════════════════════════════════════

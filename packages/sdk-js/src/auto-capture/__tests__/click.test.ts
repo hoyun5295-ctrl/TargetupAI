@@ -9,7 +9,7 @@ describe('Click auto-capture (보수 — §5 #5)', () => {
     captured = [];
     document.body.innerHTML = '';
     stop = setupClickTracking((event) => {
-      captured.push(event);
+      captured.push(event as unknown as Record<string, unknown>);
     });
   });
 

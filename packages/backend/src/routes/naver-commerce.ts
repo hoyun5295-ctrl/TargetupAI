@@ -78,9 +78,10 @@ router.post(
       );
 
       if (insertRes.rows.length === 0) {
+        // 2026-06-10 정정: updated_at은 cdp_webhook_deliveries에 없는 컬럼(실측) — 포함 시 중복 응답이 전부 500
         await query(
           `UPDATE cdp_webhook_deliveries
-           SET status = 'duplicate', processed_at = NOW(), updated_at = NOW()
+           SET status = 'duplicate', processed_at = NOW()
            WHERE company_id = $1::uuid AND source = 'naver_smart_store' AND idempotency_key = $2`,
           [integration.companyId, idempotencyKey]
         );

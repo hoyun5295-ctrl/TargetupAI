@@ -686,7 +686,7 @@ export default function CdpSettingsPage() {
       <div className="min-h-screen bg-gradient-to-br from-violet-900 via-fuchsia-900 to-violet-900 text-white flex items-center justify-center">
         <div className="text-white/50 flex items-center gap-2">
           <Loader2 className="w-4 h-4 animate-spin text-violet-400" />
-          자사몰 영역 진단 + 매트릭스 로드 중...
+          자사몰 진단 데이터를 불러오는 중...
         </div>
       </div>
     );
@@ -711,7 +711,7 @@ export default function CdpSettingsPage() {
               <h1 className="text-xl md:text-2xl font-semibold text-white">자사몰 연동 (CDP)</h1>
               <span className="text-[10px] bg-gradient-to-r from-amber-400 to-orange-500 text-white px-2 py-0.5 rounded-full font-bold tracking-wide">BETA</span>
             </div>
-            <p className="text-xs md:text-sm text-white/50 mt-0.5">자체 호스팅 · 네이버 · 카페24 · 싱크에이전트 통합 — Unified Customer Profile 매트릭스</p>
+            <p className="text-xs md:text-sm text-white/50 mt-0.5">자체 호스팅 · 고도몰 · 가비아 · 카페24 · 네이버 · 싱크에이전트 — 고객 데이터를 한 곳으로 모읍니다</p>
           </div>
           <button onClick={loadAll} disabled={loading} className="p-2 rounded-lg hover:bg-white/10 transition-colors" title="새로고침">
             <RefreshCw className={`w-4 h-4 text-white/60 ${loading ? 'animate-spin' : ''}`} />
@@ -790,11 +790,11 @@ export default function CdpSettingsPage() {
         {diagnostics && (
           <div className="bg-white/5 border border-white/10 rounded-xl p-4">
             <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
-              <MetricBlock label="회사 전체 customer" value={diagnostics.totalCustomers.toLocaleString()} color="text-blue-300" />
-              <MetricBlock label="매핑 customer" value={diagnostics.mappedLinks.toLocaleString()} sub={`매핑률 ${formatPct(diagnostics.overallMappingRate)}`} color="text-cyan-300" />
+              <MetricBlock label="전체 고객" value={diagnostics.totalCustomers.toLocaleString()} color="text-blue-300" />
+              <MetricBlock label="자사몰 연결 고객" value={diagnostics.mappedLinks.toLocaleString()} sub={`연결률 ${formatPct(diagnostics.overallMappingRate)}`} color="text-cyan-300" />
               <MetricBlock label="30일 이벤트" value={diagnostics.events30d.toLocaleString()} sub={`24h ${diagnostics.events24h.toLocaleString()}`} color="text-violet-300" />
-              <MetricBlock label="융합 customer" value={diagnostics.fusedCustomers.toLocaleString()} sub={`POS+CDP 양쪽`} color="text-emerald-300" />
-              <MetricBlock label="자사몰만 customer" value={diagnostics.cdpOnlyCustomers.toLocaleString()} sub="(POS 영역 미존재)" color="text-amber-300" />
+              <MetricBlock label="통합 고객" value={diagnostics.fusedCustomers.toLocaleString()} sub="매장·자사몰 양쪽 보유" color="text-emerald-300" />
+              <MetricBlock label="자사몰 전용 고객" value={diagnostics.cdpOnlyCustomers.toLocaleString()} sub="자사몰에서만 확인된 고객" color="text-amber-300" />
             </div>
             <div className="mt-2 text-[10px] text-white/40">{diagnostics.source}</div>
           </div>
@@ -880,7 +880,7 @@ export default function CdpSettingsPage() {
 
             {/* Provider별 매핑률 */}
             {diagnostics && diagnostics.byProvider.length > 0 && (
-              <ChartCard title="Provider별 매핑률 매트릭스" source="cdp_identity_links group by source" icon={<Database className="w-4 h-4 text-violet-300" />}>
+              <ChartCard title="자사몰별 고객 연결률" source="cdp_identity_links group by source" icon={<Database className="w-4 h-4 text-violet-300" />}>
                 <div className="space-y-2">
                   {diagnostics.byProvider.map((p) => (
                     <div key={p.source} className="space-y-1">
@@ -919,7 +919,7 @@ export default function CdpSettingsPage() {
 
             {/* Webhook 신뢰성 */}
             {diagnostics && diagnostics.webhookReliability.length > 0 && (
-              <ChartCard title="Webhook 신뢰성 매트릭스 (30일)" source="cdp_webhook_deliveries status" icon={<AlertTriangle className="w-4 h-4 text-rose-300" />}>
+              <ChartCard title="Webhook 수신 신뢰성 (30일)" source="cdp_webhook_deliveries status" icon={<AlertTriangle className="w-4 h-4 text-rose-300" />}>
                 <div className="space-y-1.5">
                   {diagnostics.webhookReliability.map((w) => (
                     <div key={w.source} className="grid grid-cols-12 gap-2 items-center text-[11px]">
@@ -940,7 +940,7 @@ export default function CdpSettingsPage() {
 
             {/* 채널 분포 */}
             {channelDist && channelPieData.length > 0 && (
-              <ChartCard title="발송 채널 자동 분배 매트릭스" source="customers.preferred_channel (CT-71 unified profile)" icon={<MousePointerClick className="w-4 h-4 text-fuchsia-300" />}>
+              <ChartCard title="발송 채널 자동 분배" source="customers.preferred_channel (CT-71 unified profile)" icon={<MousePointerClick className="w-4 h-4 text-fuchsia-300" />}>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-center">
                   <ResponsiveContainer width="100%" height={200}>
                     <PieChart>
@@ -985,7 +985,7 @@ export default function CdpSettingsPage() {
           <div className="p-4 bg-white/5 border border-white/10 rounded-xl">
             <div className="flex items-center gap-2 mb-3">
               <Brain className="w-4 h-4 text-violet-300" />
-              <h2 className="text-sm font-semibold">AI 자사몰 영향 요인 매트릭스</h2>
+              <h2 className="text-sm font-semibold">AI 자사몰 영향 요인 분석</h2>
               <span className="ml-auto text-[10px] text-white/40">건강도 스코어 <span className="text-violet-300 font-mono font-bold">{explanation.overallHealthScore}</span>/100</span>
             </div>
             <div className="space-y-1.5">
@@ -1022,7 +1022,7 @@ export default function CdpSettingsPage() {
               <div className="text-center text-[11px] text-white/40 pt-2">
                 마지막 진단: {new Date(diagnostics.computedAt).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' })}
                 <br />
-                Unified Customer Profile 영역 = 5분 cron 자동 재계산 (CT-71) · 이벤트 ingestion 즉시 union (CT-72)
+                고객 통합 프로필은 5분 주기로 자동 재계산되고, 주문·식별 이벤트는 수신 즉시 반영됩니다
               </div>
             )}
           </div>
@@ -1118,7 +1118,7 @@ export default function CdpSettingsPage() {
                   <h3 className="text-sm font-bold text-emerald-100">webhook_secret 발급 완료</h3>
                 </div>
                 <div className="text-xs text-emerald-200 mb-4 leading-relaxed">
-                  ★ <strong>본 화면을 닫으면 webhook_secret을 다시 볼 수 없습니다.</strong> 자체 서버 환경변수에 즉시 저장 의무.
+                  ★ <strong>이 화면을 닫으면 webhook_secret을 다시 볼 수 없습니다.</strong> 자사몰 서버 환경변수에 지금 바로 저장해 주세요.
                 </div>
                 <div className="space-y-3">
                   <SecretRow label="Webhook Secret (X-Hanjullo-Signature) ★ 1회 노출" value={customIssuedSecret.webhook_secret} copied={copyStatusCustom === 'secret'} onCopy={() => copyCustom(customIssuedSecret.webhook_secret, 'secret')} danger />
@@ -1160,6 +1160,63 @@ export default function CdpSettingsPage() {
                 ) : <div className="text-xs text-white/50">발급은 회사 관리자만 가능합니다.</div>}
               </div>
             )}
+          </div>
+        )}
+
+        {/* 자체 호스팅 webhook 개발자 안내 — 이벤트 계약 + 서명 예제 (secret 발급 후 표시) */}
+        {webhookProviderOpen && customInfo?.hasSecret && (
+          <div className="bg-white/5 border border-white/10 rounded-xl p-6">
+            <div className="flex items-center gap-2 mb-3">
+              <Code2 className="w-5 h-5 text-indigo-300" />
+              <h2 className="text-base font-bold text-white">Webhook 개발 안내 (자사몰 개발자 전달용)</h2>
+            </div>
+            <div className="space-y-4 text-xs text-white/70 leading-relaxed">
+              <div>
+                <div className="font-semibold text-white/90 mb-1">1. 요청 형식</div>
+                <pre className="bg-slate-950 border border-white/10 rounded-xl p-3 text-[11px] text-emerald-200 overflow-x-auto whitespace-pre">{`POST ${customInfo.webhookUrl}
+Content-Type: application/json
+X-Hanjullo-Company-Id: (이 화면의 Company ID)
+X-Hanjullo-Event: order.created          ← 아래 이벤트명 중 하나
+X-Hanjullo-Signature: (HMAC-SHA256 서명 — hex 또는 base64)
+
+{"event":"order.created","resource":{ ...아래 필드 }}`}</pre>
+              </div>
+              <div>
+                <div className="font-semibold text-white/90 mb-1">2. 이벤트와 resource 필드</div>
+                <table className="w-full text-[11px]">
+                  <thead><tr className="text-left text-white/50 border-b border-white/10"><th className="py-1 pr-2">이벤트</th><th className="py-1 pr-2">시점</th><th className="py-1">resource 필드</th></tr></thead>
+                  <tbody className="text-white/70">
+                    <tr className="border-b border-white/5"><td className="py-1 pr-2 font-mono">customer.created / customer.updated</td><td className="py-1 pr-2">회원 가입·정보 변경</td><td className="py-1">external_id(필수), phone(신규 필수), name, email, birth_date, gender, grade, address, sms_opt_in(수신동의 true/false)</td></tr>
+                    <tr className="border-b border-white/5"><td className="py-1 pr-2 font-mono">order.created / order.updated</td><td className="py-1 pr-2">주문 생성·상태 변경</td><td className="py-1">order_id(필수), external_id(필수), status(pending/paid/completed/shipping), total_amount, ordered_at, items, phone, name</td></tr>
+                    <tr><td className="py-1 pr-2 font-mono">order.cancelled / order.refunded</td><td className="py-1 pr-2">취소·환불</td><td className="py-1">order_id(필수), external_id(필수), total_amount, cancelled_at</td></tr>
+                  </tbody>
+                </table>
+                <div className="text-[11px] text-amber-200/80 mt-1.5">★ 수신동의(sms_opt_in)를 보내지 않으면 신규 고객은 발송 제외로 저장됩니다. 동의받은 회원은 반드시 true로 보내주세요.</div>
+              </div>
+              <div>
+                <div className="font-semibold text-white/90 mb-1">3. 서명 생성 — 전송하는 JSON 문자열 그대로(바이트 동일) 계산</div>
+                <pre className="bg-slate-950 border border-white/10 rounded-xl p-3 text-[11px] text-emerald-200 overflow-x-auto whitespace-pre">{`// Node.js
+const body = JSON.stringify({ event, resource });
+const signature = require('crypto')
+  .createHmac('sha256', WEBHOOK_SECRET).update(body).digest('hex');
+// body 변수를 그대로 전송하세요 (다시 직렬화하면 서명이 어긋납니다)
+
+// PHP
+$body = json_encode(['event' => $event, 'resource' => $resource]);
+$signature = hash_hmac('sha256', $body, $webhook_secret);
+// $body를 그대로 전송하세요`}</pre>
+              </div>
+              <div>
+                <div className="font-semibold text-white/90 mb-1">4. 응답 규칙</div>
+                <ul className="list-disc pl-4 space-y-0.5 text-[11px]">
+                  <li>200 + success true (duplicate true 포함) = 정상 — 재전송 불필요</li>
+                  <li>401 = 서명 또는 secret 불일치 — secret·서명 문자열 점검</li>
+                  <li>429 = 이번 달 호출 한도 초과</li>
+                  <li>5xx 또는 네트워크 오류 = 잠시 후 재전송 권장 (중복 전송은 자동 차단됩니다)</li>
+                </ul>
+              </div>
+            </div>
+            <div className="text-[10px] text-white/30 italic mt-3">Data source — POST /api/cdp/webhook/custom 계약</div>
           </div>
         )}
 
@@ -1238,7 +1295,7 @@ export default function CdpSettingsPage() {
               <div className="space-y-3">
                 <div className="text-sm text-white/70">네이버 스마트스토어 store_id 입력 → OAuth → 주문 + 회원 sync.</div>
                 <div className="text-xs text-amber-200/80 bg-amber-500/10 border border-amber-400/30 rounded p-2">
-                  ★ 네이버 정책 영역: 개인정보 영역 제한 — phone/email 영역 없을 가능. 매칭률 영역 약함 가능.
+                  ★ 네이버 정책상 휴대폰·이메일 등 개인정보 제공이 제한될 수 있어, 기존 고객과의 매칭률이 낮을 수 있습니다.
                 </div>
                 <div className="flex gap-2">
                   <input
@@ -1258,17 +1315,19 @@ export default function CdpSettingsPage() {
         )}
 
 
-        {/* 12. CDP 키 발급 + 사용량 (webhook 방식 자사몰) */}
-        {webhookProviderOpen && usage && !customInfo?.hasSecret && (
+        {/* 12. CDP 키 발급 + 사용량 — SDK 설치(public key)와 서버 API 공용
+            2026-06-10 정정: webhook secret 발급 후에도 표시 (이전에는 숨겨져 public key를 발급할 수 없어
+            SDK 스니펫·설치검증까지 막히던 흐름 결함) */}
+        {webhookProviderOpen && usage && (
           <div className="bg-white/5 border border-white/10 rounded-xl p-6">
             <div className="flex items-center gap-2 mb-4">
               <KeyRound className="w-5 h-5 text-indigo-300" />
-              <h2 className="text-base font-bold text-white">CDP API 키 (legacy 자사몰 직접 호출용)</h2>
+              <h2 className="text-base font-bold text-white">CDP 키 (SDK 설치 · 서버 API 공용)</h2>
             </div>
             {issuedSecret ? (
               <div className="space-y-3">
                 <div className="text-xs text-amber-200 bg-amber-500/10 border border-amber-400/30 rounded p-2">
-                  ★ Secret은 본 화면에서만 1회 노출됩니다. 자사몰에 즉시 저장 의무.
+                  ★ Secret은 이 화면에서만 1회 노출됩니다. 자사몰 서버에 지금 바로 저장해 주세요.
                 </div>
                 <SecretRow label="Public Key (X-Hanjullo-Key)" value={issuedSecret.cdp_api_key} copied={copyStatus === 'key'} onCopy={() => copy(issuedSecret.cdp_api_key, 'key')} />
                 <SecretRow label="Secret Key (X-Hanjullo-Secret) ★ 1회 노출" value={issuedSecret.cdp_api_secret} copied={copyStatus === 'secret'} onCopy={() => copy(issuedSecret.cdp_api_secret, 'secret')} danger />

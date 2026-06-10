@@ -42,6 +42,25 @@ export interface IdentifyInput {
   address?: string;
   // 추가 필드 (custom_fields JSONB에 박음)
   customFields?: Record<string, any>;
+  /**
+   * 마케팅 수신동의 (2026-06-10 신설 — 정보통신망법 사전 동의)
+   * - true/false 명시 전달 시 그 값을 반영
+   * - undefined: 기존 고객은 현재 값 유지, 신규 생성은 false (동의 확인 전 발송 차단이 안전)
+   */
+  smsOptIn?: boolean;
+}
+
+/**
+ * 자사몰이 보내는 다양한 동의 표기(boolean/'true'/'Y'/'1' 등)를 boolean | undefined로 정규화.
+ * 미전달·해석 불가 = undefined (기존값 유지 / 신규는 false).
+ */
+export function parseConsentValue(raw: unknown): boolean | undefined {
+  if (raw === undefined || raw === null) return undefined;
+  if (typeof raw === 'boolean') return raw;
+  const s = String(raw).trim().toLowerCase();
+  if (['true', 'y', 'yes', '1', 'agree', 'agreed', 't'].includes(s)) return true;
+  if (['false', 'n', 'no', '0', 'disagree', 'denied', 'f'].includes(s)) return false;
+  return undefined;
 }
 
 export interface IdentifyResult {
@@ -79,27 +98,33 @@ export async function identifyCustomer(
     [companyId, input.source, input.externalId]
   );
 
+  // 2026-06-10 정정: customer_id가 연결된 link만 조기 반환.
+  // 이전에는 customer_id NULL인 link(이벤트가 identify보다 먼저 온 회원)도 여기서 끝나
+  // customers 행이 영원히 안 만들어지는 결함이 있었다 → NULL이면 아래 매칭/생성으로 계속 진행.
+  let healAnonymousLinkId: string | null = null;
   if (existingLink.rows.length > 0) {
     const linkRow = existingLink.rows[0];
-    // 기존 link → last_seen 갱신 + customer 컬럼 변경 사항만 update
     if (linkRow.customer_id) {
+      // 기존 연결 완료 link → last_seen 갱신 + customer 컬럼 변경 사항만 update
       await syncCustomerFields(linkRow.customer_id, input, normalizedPhone, email);
+      await query(
+        `UPDATE cdp_identity_links
+         SET external_email = COALESCE($2, external_email),
+             external_phone = COALESCE($3, external_phone),
+             last_seen_at = NOW(),
+             updated_at = NOW()
+         WHERE id = $1::uuid`,
+        [linkRow.id, email, normalizedPhone]
+      );
+      return {
+        customerId: linkRow.customer_id,
+        linkId: linkRow.id,
+        wasCreated: false,
+        wasMerged: false,
+      };
     }
-    await query(
-      `UPDATE cdp_identity_links
-       SET external_email = COALESCE($2, external_email),
-           external_phone = COALESCE($3, external_phone),
-           last_seen_at = NOW(),
-           updated_at = NOW()
-       WHERE id = $1::uuid`,
-      [linkRow.id, email, normalizedPhone]
-    );
-    return {
-      customerId: linkRow.customer_id,
-      linkId: linkRow.id,
-      wasCreated: false,
-      wasMerged: false,
-    };
+    // customer_id NULL link = 식별 전 이벤트가 만든 link → 아래에서 customer 연결 후 과거 이벤트 소급
+    healAnonymousLinkId = linkRow.id;
   }
 
   // ★ 2단계: email 매칭 (회사 단위)
@@ -141,6 +166,8 @@ export async function identifyCustomer(
     if (!normalizedPhone) {
       throw new Error('신규 회원 생성 시 phone은 필수입니다 (UNIQUE 제약 정합).');
     }
+    // 2026-06-10 정정: sms_opt_in 무조건 true → 명시 동의값만 반영, 미전달 신규는 false.
+    // (동의 없는 자사몰 회원이 광고 발송 대상이 되던 구조 차단 — 정보통신망법 사전 동의)
     const newCustomer = await query(
       `INSERT INTO customers (
         id, company_id, phone, name, email,
@@ -150,7 +177,7 @@ export async function identifyCustomer(
       ) VALUES (
         gen_random_uuid(), $1::uuid, $2, $3, $4,
         $5, $6, $7, $8,
-        $9::jsonb, $10, true, true,
+        $9::jsonb, $10, true, COALESCE($11::boolean, false),
         NOW(), NOW()
       )
       ON CONFLICT (company_id, COALESCE(store_code, '__NONE__'::varchar), phone)
@@ -161,6 +188,7 @@ export async function identifyCustomer(
         birth_date = COALESCE(EXCLUDED.birth_date, customers.birth_date),
         grade = COALESCE(EXCLUDED.grade, customers.grade),
         address = COALESCE(EXCLUDED.address, customers.address),
+        sms_opt_in = COALESCE($11::boolean, customers.sms_opt_in),
         updated_at = NOW()
       RETURNING id, (xmax = 0) AS was_inserted`,
       [
@@ -174,6 +202,7 @@ export async function identifyCustomer(
         input.address || null,
         JSON.stringify(input.customFields || {}),
         `cdp_${input.source}`,
+        input.smsOptIn ?? null,
       ]
     );
     customerId = newCustomer.rows[0].id;
@@ -212,9 +241,26 @@ export async function identifyCustomer(
     ]
   );
 
-  // ★ D214+ (2026-05-24) unified profile 재계산 (fire-and-forget — active_sources / primary_source / preferred_channel 매트릭스)
+  // ★ 2026-06-10: 식별 전 이벤트가 만든 link였다면 그 link의 과거 이벤트에 customer_id 소급
+  //   (healing 경로에서만 실행 — company_id 조건 동반으로 회사 인덱스 활용)
+  if (healAnonymousLinkId && customerId) {
+    try {
+      const backfilled = await query(
+        `UPDATE cdp_events SET customer_id = $3::uuid
+         WHERE company_id = $1::uuid AND identity_link_id = $2::uuid AND customer_id IS NULL`,
+        [companyId, healAnonymousLinkId, customerId]
+      );
+      if ((backfilled.rowCount || 0) > 0) {
+        console.log(`[CDP Identity] 식별 전 이벤트 ${backfilled.rowCount}건 customer 소급 연결 (link=${healAnonymousLinkId})`);
+      }
+    } catch (err) {
+      console.warn('[CDP Identity] 과거 이벤트 소급 연결 실패 (식별 자체는 완료):', err);
+    }
+  }
+
+  // ★ D214+ (2026-05-24) unified profile 재계산 (fire-and-forget — active_sources / primary_source / preferred_channel)
   void recomputeProfile(companyId, customerId!).catch((err) => {
-    console.warn('[CDP Identity] recomputeProfile 실패 (identifyCustomer 영역 정합):', err);
+    console.warn('[CDP Identity] recomputeProfile 실패 (identifyCustomer 흐름 유지):', err);
   });
 
   return {
@@ -269,6 +315,7 @@ async function syncCustomerFields(
   email: string | null
 ): Promise<void> {
   // 자사몰이 제공한 필드만 COALESCE 덮어쓰기 (NULL은 기존 값 유지)
+  // sms_opt_in은 명시 전달된 경우에만 반영 (동의 부여/철회 모두 자사몰 값이 권위)
   await query(
     `UPDATE customers SET
       name = COALESCE($2, name),
@@ -278,6 +325,7 @@ async function syncCustomerFields(
       grade = COALESCE($6, grade),
       address = COALESCE($7, address),
       custom_fields = COALESCE(custom_fields, '{}'::jsonb) || $8::jsonb,
+      sms_opt_in = COALESCE($9::boolean, sms_opt_in),
       updated_at = NOW()
     WHERE id = $1::uuid`,
     [
@@ -289,6 +337,7 @@ async function syncCustomerFields(
       input.grade || null,
       input.address || null,
       JSON.stringify(input.customFields || {}),
+      input.smsOptIn ?? null,
     ]
   );
   // phone 변경은 UNIQUE 제약 충돌 위험 — 호출부에서 별도 확인 필요. 여기서는 skip.

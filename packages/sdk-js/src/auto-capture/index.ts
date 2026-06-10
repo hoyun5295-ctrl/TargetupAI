@@ -2,12 +2,11 @@
  * @hanjullo/sdk v0.3.5-a — Auto-Capture IIFE 진입점
  *
  * 설치: <script src="https://app.hanjul.ai/sdk/v0.3.5/hanjul.min.js" data-hjl-key="hjl_..." async></script>
- * 비즈니스+ 요금제부터 이용 가능 (백엔드 검증).
+ * 유료 요금제 이용 가능 (백엔드 검증 — 무료 플랜만 차단).
  *
  * 매뉴얼: https://hanjul.ai/docs/sdk/v0.3.5
  */
 
-import { getAnonymousId, getSessionId } from './storage';
 import { isValidEventName } from './events';
 import { autoInitFromScriptTag } from './auto-init';
 import { detectIdentify, watchIdentifyChanges } from './identify';
@@ -37,18 +36,15 @@ interface HjlGlobal {
 const VERSION = '0.3.5-a';
 
 function createHjlGlobal(): HjlGlobal {
-  let stopPageview: (() => void) | null = null;
-  let stopClick: (() => void) | null = null;
-  let stopIdentify: (() => void) | null = null;
   let firstEventSent = false;
 
   const hjl: HjlGlobal = {
     init(config: AutoCaptureConfig) {
       if (!config || !config.apiKey) {
-        throw new Error('[Hanjullo] apiKey 누락 — CdpSettingsPage 안 발급 의무');
+        throw new Error('[Hanjullo] apiKey가 없습니다. 한줄로 관리자 → 자사몰 연동(CDP)에서 발급받으세요.');
       }
       if (!config.apiKey.startsWith('hjl_')) {
-        throw new Error('[Hanjullo] apiKey = hjl_ 접두사 의무');
+        throw new Error('[Hanjullo] apiKey는 hjl_ 접두사로 시작해야 합니다.');
       }
       hjl._config = {
         apiKey: config.apiKey,
@@ -88,7 +84,7 @@ function createHjlGlobal(): HjlGlobal {
           trust_level: 'declared',
         });
       }
-      stopIdentify = watchIdentifyChanges((result) => {
+      watchIdentifyChanges((result) => {
         if (result) {
           transport.queue({
             type: 'identify',
@@ -104,7 +100,7 @@ function createHjlGlobal(): HjlGlobal {
       const consent = detectConsent();
       transport.queue({ type: 'consent', ...consent, trust_level: 'declared' });
 
-      stopPageview = setupPageviewTracking((event) => {
+      setupPageviewTracking((event) => {
         transport.queue({
           type: 'pageview',
           ...event,
@@ -116,7 +112,7 @@ function createHjlGlobal(): HjlGlobal {
         }
       });
 
-      stopClick = setupClickTracking((event) => {
+      setupClickTracking((event) => {
         transport.queue({
           type: 'click',
           ...event,
@@ -127,7 +123,7 @@ function createHjlGlobal(): HjlGlobal {
 
     track(eventName: string, properties?: Record<string, unknown>) {
       if (!hjl._transport) {
-        throw new Error('[Hanjullo] init() 호출 의무');
+        throw new Error('[Hanjullo] init()을 먼저 호출해주세요.');
       }
       if (!isValidEventName(eventName)) {
         throw new Error(
@@ -144,7 +140,7 @@ function createHjlGlobal(): HjlGlobal {
 
     identify(externalId: string, traits?: Record<string, unknown>) {
       if (!hjl._transport) {
-        throw new Error('[Hanjullo] init() 호출 의무');
+        throw new Error('[Hanjullo] init()을 먼저 호출해주세요.');
       }
       hjl._transport.queue({
         type: 'identify',

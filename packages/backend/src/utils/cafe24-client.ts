@@ -35,6 +35,7 @@ import {
 import { identifyCustomer } from './cdp-identity';
 import { syncOrder } from './cdp-orders';
 import { trackEvent } from './cdp-events';
+import { buildWebhookIdempotencyKey } from './cdp-idempotency';
 
 const CAFE24_CLIENT_ID = process.env.CAFE24_CLIENT_ID || '';
 const CAFE24_CLIENT_SECRET = process.env.CAFE24_CLIENT_SECRET || '';
@@ -372,7 +373,10 @@ export async function cafe24ApiCall<T = unknown>(
  * - webhook_secret이 미박힘이면 검증 skip (Phase 2 강화 영역)
  */
 export function verifyCafe24WebhookSignature(rawBody: Buffer | string, signature: string, secret: string | null): boolean {
-  if (!secret) return true; // webhook_secret 미박힘 시 검증 skip — Phase 2 보강
+  // 2026-06-10 정정: secret 미설정 시 무조건 통과시키던 분기 제거.
+  // mall_id는 공개 서브도메인이라 무검증이면 위조 POST로 고객 데이터 오염이 가능했다.
+  // secret 미설정 = 검증 불가 = 거부. (카페24 연동 회사는 webhook 검증 키 저장 후 수신 시작)
+  if (!secret) return false;
   if (!signature) return false;
   try {
     const body = typeof rawBody === 'string' ? rawBody : rawBody.toString('utf8');
@@ -496,6 +500,20 @@ export const cafe24Adapter: IProviderAdapter = {
 
       case 'order.cancelled':
       case 'order.refunded':
+        // 매출 차감은 syncOrder가 담당 (CT-86 revenue_reversed 멱등 마커 — 반영된 주문만 차감)
+        await syncOrder(companyId, {
+          source: 'cafe24',
+          orderId: String(resource.order_id || ''),
+          externalId: String(resource.member_id || resource.customer_id || ''),
+          email: resource.buyer_email,
+          phone: resource.buyer_cellphone || resource.buyer_phone,
+          name: resource.buyer_name,
+          status: event === 'order.refunded' ? 'refunded' : 'cancelled',
+          totalAmount: Number(resource.actual_payment_amount || resource.order_price_amount || 0),
+          orderedAt: resource.cancelled_date || resource.order_date || new Date().toISOString(),
+          currency: 'KRW',
+        });
+        // 여정/캠페인 trigger용 취소 신호 이벤트는 기존대로 기록
         await trackEvent(companyId, {
           source: 'cafe24',
           eventName: 'custom_order_cancelled',
@@ -506,6 +524,8 @@ export const cafe24Adapter: IProviderAdapter = {
             cancelled_amount: resource.actual_payment_amount,
           },
           occurredAt: resource.cancelled_date || new Date().toISOString(),
+        }).catch((err) => {
+          console.log('[Cafe24 Adapter] 취소 신호 이벤트 기록 실패(차감은 완료):', err?.message || err);
         });
         break;
 
@@ -527,7 +547,8 @@ export const cafe24Adapter: IProviderAdapter = {
   },
 
   buildIdempotencyKey(event: string, resource: Record<string, any>, body: Record<string, any>): string {
-    return `${event}:${resource?.order_id || resource?.member_id || body?.event_no || Date.now()}`;
+    // CT-85 — event_no(전송 고유값) 우선 + 본문 해시. 이전 엔티티ID 단독 키는 두 번째 갱신부터 영구 duplicate가 되는 결함.
+    return buildWebhookIdempotencyKey(event, resource, body);
   },
 };
 

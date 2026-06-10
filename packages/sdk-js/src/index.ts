@@ -57,13 +57,13 @@ export class HanjulloSDK {
   constructor(config: HanjulloSDKConfig) {
     if (!config.apiKey || !config.apiKey.startsWith('hjl_')) {
       throw this.makeError(
-        'apiKey는 필수이며 hjl_ 접두사로 시작해야 합니다. CdpSettingsPage에서 발급받으세요.',
+        'apiKey는 필수이며 hjl_ 접두사로 시작해야 합니다. 한줄로 관리자 → 자사몰 연동(CDP)에서 발급받으세요.',
         'INVALID_API_KEY',
       );
     }
     if (!config.secret || !config.secret.startsWith('sk_')) {
       throw this.makeError(
-        'secret은 필수이며 sk_ 접두사로 시작해야 합니다. CdpSettingsPage에서 발급받으세요. (재발급 시 1회만 노출됨)',
+        'secret은 필수이며 sk_ 접두사로 시작해야 합니다. 한줄로 관리자 → 자사몰 연동(CDP)에서 발급받으세요. (재발급 시 1회만 노출됨)',
         'INVALID_SECRET',
       );
     }

@@ -30,9 +30,10 @@ import {
   ProviderTokenResponse,
   registerProvider,
 } from './provider-registry';
-import { identifyCustomer } from './cdp-identity';
+import { identifyCustomer, parseConsentValue } from './cdp-identity';
 import { syncOrder } from './cdp-orders';
 import { trackEvent } from './cdp-events';
+import { buildWebhookIdempotencyKey } from './cdp-idempotency';
 import { query } from '../config/database';
 
 const customCapabilities: ProviderCapabilities = {
@@ -52,7 +53,7 @@ export const customSelfHostedAdapter: IProviderAdapter = {
   capabilities: customCapabilities,
 
   buildAuthorizeUrl(): string {
-    throw new Error('자체 호스팅 자사몰은 OAuth 흐름이 없습니다. CdpSettingsPage에서 webhook_secret을 발급받아 저장해주세요.');
+    throw new Error('자체 호스팅 자사몰은 OAuth 흐름이 없습니다. 한줄로 관리자 → 자사몰 연동(CDP)에서 webhook_secret을 발급받아 저장해주세요.');
   },
 
   async exchangeCode(): Promise<ProviderTokenResponse> {
@@ -99,6 +100,8 @@ export const customSelfHostedAdapter: IProviderAdapter = {
           grade: resource.grade,
           address: resource.address,
           customFields: resource.custom_fields || {},
+          // 마케팅 수신동의 — 자사몰이 보낸 명시값만 반영, 미전달 시 undefined(기존값 유지·신규는 false)
+          smsOptIn: parseConsentValue(resource.sms_opt_in ?? resource.marketing_consent),
         });
         break;
 
@@ -127,6 +130,20 @@ export const customSelfHostedAdapter: IProviderAdapter = {
 
       case 'order.cancelled':
       case 'order.refunded':
+        // 매출 차감은 syncOrder가 담당 (CT-86 revenue_reversed 멱등 마커 — 반영된 주문만 차감)
+        await syncOrder(companyId, {
+          source: 'custom',
+          orderId: String(resource.order_id || ''),
+          externalId: String(resource.external_id || resource.customer_id || ''),
+          email: resource.email,
+          phone: resource.phone,
+          name: resource.name,
+          status: event === 'order.refunded' ? 'refunded' : 'cancelled',
+          totalAmount: Number(resource.total_amount || 0),
+          orderedAt: String(resource.cancelled_at || resource.ordered_at || new Date().toISOString()),
+          currency: String(resource.currency || 'KRW'),
+        });
+        // 여정/캠페인 trigger용 취소 신호 이벤트는 기존대로 기록 (실패해도 차감 결과는 유지)
         await trackEvent(companyId, {
           source: 'custom',
           eventName: 'custom_order_cancelled',
@@ -137,6 +154,8 @@ export const customSelfHostedAdapter: IProviderAdapter = {
             cancelled_amount: resource.total_amount,
           },
           occurredAt: String(resource.cancelled_at || new Date().toISOString()),
+        }).catch((err) => {
+          console.log('[Custom Self-Hosted Adapter] 취소 신호 이벤트 기록 실패(차감은 완료):', err?.message || err);
         });
         break;
 
@@ -159,8 +178,8 @@ export const customSelfHostedAdapter: IProviderAdapter = {
   },
 
   buildIdempotencyKey(event, resource, body): string {
-    const id = resource?.order_id || resource?.external_id || resource?.customer_id || body?.event_id || Date.now();
-    return `${event}:${id}`;
+    // CT-85 — 전송 고유값 우선 + 본문 해시. 이전 엔티티ID 단독 키는 두 번째 갱신부터 영구 duplicate가 되는 결함.
+    return buildWebhookIdempotencyKey(event, resource, body);
   },
 };
 

@@ -10,6 +10,7 @@ import { getCreditEvent } from './utils/request-context';
 import cors from 'cors';
 import helmet from 'helmet';
 import morgan from 'morgan';
+import rateLimit from 'express-rate-limit';
 import syncRoutes from './routes/sync';
 
 // 라우트 import
@@ -88,6 +89,9 @@ import { startKakaoTemplateSyncWorker } from './utils/kakao-template-sync-worker
 import { startScheduledCleanupWorker } from './utils/scheduled-cleanup-worker';
 // ★ 대량 발송 파이프라인 (2026-05-30): direct-send-worker — staging 청크 발송 + 진행률 (5초 주기)
 import { startDirectSendWorker } from './utils/direct-send-worker';
+// ★ 2026-06-10: CDP webhook 실패 재처리 + unified profile 자동 재계산
+import { startCdpWebhookRetryWorker } from './utils/cdp-webhook-retry-worker';
+import { startCdpProfileRecomputeWorker } from './utils/cdp-profile-recompute-worker';
 
 // 공용 관리 라우트 (슈퍼관리자 + 고객사관리자)
 import manageUsersRoutes from './routes/manage-users';
@@ -131,13 +135,17 @@ const corsAllowedOrigins = (process.env.CORS_ORIGIN || '')
 if (corsAllowedOrigins.length === 0) {
   console.warn('[CORS] CORS_ORIGIN 미설정 — 전 origin 허용 중. 운영 배포 시 .env에 운영 도메인 추가 필수');
 }
+// ★ 브라우저 SDK가 고객사 도메인에서 직접 호출하는 CDP 경로 (Origin reflect 허용)
+//   2026-06-10 확장: /ingest 단독 → 인앱/웹푸시/여정 변이 트래킹 포함.
+//   이전에는 /ingest 외 경로가 CORS 화이트리스트에 막혀 인앱 메시지 표시가 고객 사이트에서 불가능했다.
+//   실 보안 경계는 각 endpoint 인증(public key + 등록 도메인 검증)이며 CORS는 통로만 연다.
+const CDP_BROWSER_CORS_RE = /^\/api\/cdp\/(ingest|inapp\/active|inapp\/track|push\/vapid-public-key|push\/subscribe|push\/unsubscribe|journey-variants\/[^/]+\/track)$/;
+
 app.use(cors((req, cb) => {
-  // ★ 브라우저 SDK 수집 endpoint — 등록 도메인 검증을 POST 인증(requireCdpBrowserOrigin)에서 수행.
-  //   preflight/응답은 요청 Origin reflect 허용 (전역 화이트리스트와 무관). 실 보안 경계는 POST의 key+Origin 검증.
-  if (req.path === '/api/cdp/ingest') {
+  if (CDP_BROWSER_CORS_RE.test(req.path)) {
     cb(null, {
       origin: true,
-      methods: ['POST', 'OPTIONS'],
+      methods: ['GET', 'POST', 'OPTIONS'],
       allowedHeaders: ['Content-Type', 'X-Hanjullo-Key', 'X-Hanjullo-Schema-Version', 'X-Hanjullo-SDK-Version'],
       credentials: false,
       maxAge: 86400,
@@ -153,9 +161,26 @@ app.use(cors((req, cb) => {
 }));
 
 app.use(morgan('dev'));
+
+// ★ 2026-06-10: CDP/자사몰 공개 endpoint 과다 호출 차단 (IP당 분 600회 — webhook 폭주/무차별 시도 완화)
+const cdpPublicLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 600,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { success: false, error: '요청이 너무 잦습니다. 잠시 후 다시 시도해주세요.', code: 'RATE_LIMITED' },
+});
+app.use(['/api/cdp/ingest', '/api/cdp/webhook', '/api/cafe24/webhook', '/api/naver-commerce/webhook'], cdpPublicLimiter);
+
 // ★ D130: IMC 웹훅은 HMAC 검증을 위해 raw body 필요
 //    express.json()이 먼저 파싱하면 rawBody 손실되므로 이 경로만 선처리
 app.use('/api/alimtalk/webhook', express.raw({ type: '*/*', limit: '10mb' }));
+// ★ 2026-06-10: 자사몰 webhook 3경로도 동일 — 전역 json이 먼저 파싱하면 라우트 verify가 실행되지 않아
+//    HMAC을 재직렬화 문자열(JSON.stringify)로 계산하던 결함 정정. 서명은 원본 바이트(rawBody) 기준이 정답.
+app.use(
+  ['/api/cdp/webhook/custom', '/api/cafe24/webhook', '/api/naver-commerce/webhook'],
+  express.json({ limit: '1mb', verify: (req: any, _res, buf) => { req.rawBody = buf; } })
+);
 app.use(express.json({ limit: LIMITS.requestBodySize }));
 
 // 사후 토스트용 — 크레딧 차감이 일어난 요청의 JSON 응답에 _credit 자동 첨부(호출처 무수정).
@@ -358,6 +383,12 @@ app.listen(PORT, () => {
 
   // ★ 대량 발송 (2026-05-30): staging 청크 발송 worker — 5초 주기 queued 처리 + commit 즉시 트리거
   startDirectSendWorker();
+
+  // ★ 2026-06-10: CDP webhook 실패 재처리 (5분 주기, 최대 3회) — 일시 오류 데이터 유실 차단
+  startCdpWebhookRetryWorker();
+
+  // ★ 2026-06-10: CDP unified profile 자동 재계산 (5분 증분 + 매일 04시 30일 카운터)
+  startCdpProfileRecomputeWorker();
 });
 
 export default app;

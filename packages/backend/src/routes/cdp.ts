@@ -23,8 +23,8 @@ import path from 'path';
 import fs from 'fs';
 import { v4 as uuidv4 } from 'uuid';
 import { authenticate } from '../middlewares/auth';
-import { requireCdpApiKey, requireCdpBrowserOrigin, recordCdpApiCall, issueCdpKeyPair, isCdpEnabledForPlan } from '../utils/cdp-auth';
-import { identifyCustomer } from '../utils/cdp-identity';
+import { requireCdpApiKey, requireCdpBrowserOrigin, requireCdpKeyOrBrowserOrigin, recordCdpApiCall, issueCdpKeyPair, isCdpEnabledForPlan } from '../utils/cdp-auth';
+import { identifyCustomer, parseConsentValue } from '../utils/cdp-identity';
 import { trackEvent, getRecentEvents, ingestBrowserEvents } from '../utils/cdp-events';
 import { syncOrder, bulkImport } from '../utils/cdp-orders';
 // ★ D214+ (2026-05-24) CDP 진단 + multi-source 융합 신규 CT 6건
@@ -194,7 +194,7 @@ router.post('/ingest', requireCdpBrowserOrigin, async (req: Request, res: Respon
 router.post('/identify', requireCdpApiKey, async (req: Request, res: Response) => {
   const cdpAuth = req.cdpAuth!;
   try {
-    const { external_id, email, phone, name, birth_date, gender, grade, address, custom_fields } = req.body;
+    const { external_id, email, phone, name, birth_date, gender, grade, address, custom_fields, sms_opt_in, marketing_consent } = req.body;
     if (!external_id) {
       await recordCdpApiCall(cdpAuth.companyId, 'identify', 400);
       return res.status(400).json({ success: false, error: 'external_id는 필수입니다.' });
@@ -211,6 +211,8 @@ router.post('/identify', requireCdpApiKey, async (req: Request, res: Response) =
       grade,
       address,
       customFields: custom_fields || {},
+      // 마케팅 수신동의 — 자사몰이 보낸 명시값만 반영 (미전달 시 기존값 유지·신규는 false)
+      smsOptIn: parseConsentValue(sms_opt_in ?? marketing_consent),
     });
 
     await recordCdpApiCall(cdpAuth.companyId, 'identify', 200);
@@ -314,7 +316,7 @@ router.post('/order', requireCdpApiKey, async (req: Request, res: Response) => {
 //   - 기존 회사 admin 인증 endpoint(/api/ai/operator/journeys/variants/:variantId/track)와 별도
 // ════════════════════════════════════════════════════════════════════
 
-router.post('/journey-variants/:variantId/track', requireCdpApiKey, async (req: Request, res: Response) => {
+router.post('/journey-variants/:variantId/track', requireCdpKeyOrBrowserOrigin, async (req: Request, res: Response) => {
   const cdpAuth = req.cdpAuth!;
   try {
     const { variantId } = req.params;
@@ -385,7 +387,7 @@ router.post(
       if (!integration || !integration.webhookSecret) {
         return res.status(401).json({
           success: false,
-          error: 'webhook_secret이 발급되지 않은 회사입니다. CdpSettingsPage에서 발급받아주세요.',
+          error: 'webhook_secret이 발급되지 않은 회사입니다. 한줄로 관리자 → 자사몰 연동(CDP)에서 발급받아주세요.',
         });
       }
       const rawBody = (req as any).rawBody || JSON.stringify(req.body);
@@ -416,9 +418,10 @@ router.post(
       );
 
       if (insertRes.rows.length === 0) {
+        // 2026-06-10 정정: updated_at은 cdp_webhook_deliveries에 없는 컬럼(실측) — 포함 시 중복 응답이 전부 500
         await query(
           `UPDATE cdp_webhook_deliveries
-           SET status = 'duplicate', processed_at = NOW(), updated_at = NOW()
+           SET status = 'duplicate', processed_at = NOW()
            WHERE company_id = $1::uuid AND source = 'custom' AND idempotency_key = $2`,
           [companyId, idempotencyKey]
         );
@@ -463,7 +466,7 @@ router.get('/push/vapid-public-key', (_req: Request, res: Response) => {
 });
 
 // POST /api/cdp/push/subscribe — SDK가 사용자 구독 등록
-router.post('/push/subscribe', requireCdpApiKey, async (req: Request, res: Response) => {
+router.post('/push/subscribe', requireCdpKeyOrBrowserOrigin, async (req: Request, res: Response) => {
   const cdpAuth = req.cdpAuth!;
   try {
     const { subscription, external_id, anonymous_id, user_agent } = req.body;
@@ -504,7 +507,7 @@ router.post('/push/subscribe', requireCdpApiKey, async (req: Request, res: Respo
 });
 
 // POST /api/cdp/push/unsubscribe — SDK가 사용자 구독 해제
-router.post('/push/unsubscribe', requireCdpApiKey, async (req: Request, res: Response) => {
+router.post('/push/unsubscribe', requireCdpKeyOrBrowserOrigin, async (req: Request, res: Response) => {
   const cdpAuth = req.cdpAuth!;
   try {
     const { endpoint } = req.body;
@@ -528,7 +531,7 @@ router.post('/push/unsubscribe', requireCdpApiKey, async (req: Request, res: Res
 
 // GET /api/cdp/inapp/active — SDK가 페이지 로드 시 호출, 현재 사용자에게 표시할 메시지 반환
 // ★ D215+ V2 (2026-05-25) — 시간대 + 세그먼트 + variant 통합 검증 (CT-78 + CT-80 + CT-82)
-router.get('/inapp/active', requireCdpApiKey, async (req: Request, res: Response) => {
+router.get('/inapp/active', requireCdpKeyOrBrowserOrigin, async (req: Request, res: Response) => {
   const cdpAuth = req.cdpAuth!;
   try {
     const trigger = String(req.query.trigger || 'page_load');
@@ -564,7 +567,7 @@ router.get('/inapp/active', requireCdpApiKey, async (req: Request, res: Response
 
 // POST /api/cdp/inapp/track — SDK가 impression/click/dismiss 기록
 // ★ D215+ (2026-05-25) — button_id / dwell_seconds 신규 컬럼 처리 + 503 안전망
-router.post('/inapp/track', requireCdpApiKey, async (req: Request, res: Response) => {
+router.post('/inapp/track', requireCdpKeyOrBrowserOrigin, async (req: Request, res: Response) => {
   const cdpAuth = req.cdpAuth!;
   try {
     const { message_id, event_type, external_id, anonymous_id, button_id, dwell_seconds } = req.body;
@@ -636,6 +639,7 @@ router.post('/bulk-import', requireCdpApiKey, async (req: Request, res: Response
         grade: c.grade,
         address: c.address,
         customFields: c.custom_fields || {},
+        smsOptIn: parseConsentValue(c.sms_opt_in ?? c.marketing_consent),
       })) : undefined,
       orders: Array.isArray(orders) ? orders.map((o: any) => ({
         source: o.source || cdpAuth.source,

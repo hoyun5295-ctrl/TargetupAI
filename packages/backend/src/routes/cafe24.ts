@@ -75,9 +75,9 @@ router.post('/webhook', json({ limit: '1mb', verify: (req: any, _res, buf) => { 
       return res.status(401).json({ success: false, error: '서명 검증에 실패했습니다.' });
     }
 
-    // idempotency_key 박음
+    // idempotency_key — CT-85 단일 진입점 (event_no 전송 고유값 우선 + 본문 해시)
     const resource = req.body?.resource || {};
-    const idempotencyKey = `${event}:${resource.order_id || resource.member_id || req.body?.event_no || Date.now()}`;
+    const idempotencyKey = cafe24Adapter.buildIdempotencyKey(event, resource, req.body || {});
 
     // 중복 차단 + 처리 row INSERT
     const insertRes = await query(
@@ -93,9 +93,10 @@ router.post('/webhook', json({ limit: '1mb', verify: (req: any, _res, buf) => { 
 
     if (insertRes.rows.length === 0) {
       // 중복 webhook — duplicate 마커 갱신
+      // 2026-06-10 정정: updated_at은 cdp_webhook_deliveries에 없는 컬럼(실측) — 포함 시 중복 응답이 전부 500
       await query(
         `UPDATE cdp_webhook_deliveries
-         SET status = 'duplicate', processed_at = NOW(), updated_at = NOW()
+         SET status = 'duplicate', processed_at = NOW()
          WHERE company_id = $1::uuid AND source = 'cafe24' AND idempotency_key = $2`,
         [integration.companyId, idempotencyKey]
       );

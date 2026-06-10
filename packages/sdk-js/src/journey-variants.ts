@@ -18,7 +18,8 @@
  *
  * 백엔드 endpoint:
  *   POST /api/cdp/journey-variants/:variantId/track
- *   - 인증: X-Hanjullo-Key + X-Hanjullo-Secret (CDP secret)
+ *   - 인증(브라우저): X-Hanjullo-Key + 등록 도메인(Origin) 검증 — secret 미전송
+ *   - 인증(서버-투-서버): X-Hanjullo-Key + X-Hanjullo-Secret도 그대로 허용
  *   - body: { clicked: 0|1, converted: 0|1, externalId?, anonymousId? }
  *   - 회사 격리 (variant → step → journey → company_id 검증)
  */
@@ -28,7 +29,7 @@ import type { VariantTrackParams, VariantTrackResponse, HanjulloSDKConfig } from
 export class HanjulloJourneyVariantsModule {
   constructor(
     private readonly apiKey: string,
-    private readonly secret: string,
+    _secret: string, // 2026-06-10: 브라우저 모듈은 secret 미사용 (인자 자리만 유지 — 호출부 호환)
     private readonly endpoint: string,
   ) {}
 
@@ -63,9 +64,9 @@ export class HanjulloJourneyVariantsModule {
       const res = await fetch(`${this.endpoint}/journey-variants/${encodeURIComponent(variantId)}/track`, {
         method: 'POST',
         headers: {
+          // 2026-06-10: 브라우저 모듈은 secret 미전송 (public key + 등록 도메인 검증)
           'Content-Type': 'application/json',
           'X-Hanjullo-Key': this.apiKey,
-          'X-Hanjullo-Secret': this.secret,
         },
         body: JSON.stringify(body),
       });

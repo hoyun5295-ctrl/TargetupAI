@@ -265,6 +265,32 @@ const items: any[] =
 **★ 2026-06-05 세션5 발송통계 hpio 0 + hoyun 폭발 + result_final 캐시**:
 - **hpio 0**: 발송 데이터가 회사 라인 `{SMSQ_SEND_7,8,9}`인데 집계는 created_by의 user 라인 `{1,2,3}` 우선 조회 → 매칭 0. user 개별 라인그룹이 발송(5/30) 후 부여돼 발송/집계 라인이 어긋남. fix = `getCompanySmsTablesWithLogs`(집계 전용)를 `mergeLineTables`로 user+company **합집합**. 발송 경로(`getCompanySmsTables` user 우선)는 불변.
 - **교훈**: 집계가 라인그룹 한정 조회라 발송 후 라인그룹이 바뀌면 과거 발송 집계가 깨진다. 집계는 합집합으로 내성 확보. (발송내역 상세 `getCampaignSmsTables`도 같은 잠재 — 추후 동일 적용 검토.)
+
+---
+
+## 알림톡 강조표기형 7300 — QTmsg 발송 에이전트 select_sql (D234+ 추가)
+
+### D234+ (2026-06-09) — 강조표기형 전부 7300, 근본은 한줄로 밖(에이전트 qtmsg.xml)
+
+**현상**: 알림톡 강조표기형(emphasize_type=TEXT)만 전부 7300(카카오 기타에러) → LMS 대체로만 도달. 기본형·채널추가형 정상. 직원 deliver 로그에 `etcJson[]` 빔.
+
+**2시간 헛다리(전부 정상이었음)**: 한줄로 코드(buildAlimtalkEtcJson CT·insertAlimtalkQueue)·send_config·kakao_templates(emphasize_title 존재)·카카오 검수 승인(강조 변수형)·senderkey 제거(매뉴얼 {title}만) — 다 맞는데도 7300.
+
+**근본(확정)**: 발송 에이전트 QTmsg(java 11개, `/home/administrator/agent1~11/bin`, **PM2 아님** — `ps aux | grep qtmsg`)의 `conf/qtmsg.xml` `<select_sql>`이 발송 직전 k_etc_json을 변형:
+```sql
+else concat(concat(concat('{"sendercode":"',sender_code),'",'), replace(k_etc_json,'{',''))
+```
+`sender_code`(=인비토 특수유형 부가통신사업자 식별코드)가 NULL(한줄로 INSERT가 안 채움) → **MySQL concat은 인자 하나만 NULL이어도 전체 NULL** → k_etc_json 통째 NULL → 강조 title 소실 → 7300. 채널추가형·기본형은 etcJson 불요라 무증상.
+
+**증거**: `SMSQ_SEND_1_202606`(월별 이력) — 강조형 행 k_etc_json `{"title":"…"}` 정상 저장 + sender_code NULL + status_code 7300. 채널추가형 1800 정상. 한줄로 진단로그 OUT.etc 정상.
+
+**미해결**: 인비토=특수유형 부가통신사업자(식별코드 의무). 문자 SMS/LMS는 잘 나감=중계사 자동 삽입 추정 / 카카오는 식별코드 불필요 추정 → **서팀장→IMC 메일 확인 대기**. 답변 후 fix = `docs/superpowers/handoffs/2026-06-09-alimtalk-emphasize-7300-imc-handoff.md` 분기 참조. 진단로그 `[ALIMTALK-DEBUG2]`(direct-send-processor) 원인 확정 후 제거 의무.
+
+**교훈**:
+- **발송이 안 되는데 한줄로 코드·DB·send_config 전부 정상이면 → QTmsg 에이전트 `conf/qtmsg.xml` select_sql부터 의심.** 에이전트가 발송 직전 발송 큐 컬럼(k_etc_json 등)을 SQL 수준에서 변형/덮어쓴다.
+- **발송 큐(SMSQ_SEND_X)는 발송 즉시 비워진다** — 사후 SQL 0건은 "값이 없었다"가 아니다. 발송분 실값은 월별 이력 `SMSQ_SEND_X_YYYYMM`에서 조회.
+- **MySQL `concat`은 NULL 하나로 전체 NULL** — 에이전트/SQL 합성 경로에 NULL 가능 컬럼이 끼면 전체 소실.
+- 발송 에이전트는 PM2 목록에 없다(별도 java 실행파일) — 프로세스 추적은 `ps aux`.
 - **hoyun 폭발**: 여정 500 campaign `status='sending'`+`result_final=false`. `syncCampaignResults`(campaign-lifecycle:238 직접발송 섹션)가 `app_etc1=campaignId`로 결과 0집계 → status 전환 조건(433) 미충족 → sending 영영 방치 → 캐시 없음 → 발송결과 조회마다 500 생집계 폭발. 인덱스 OK(`idx_app_etc1_status`, PG 6.7ms)라 인덱스 문제 아님.
 - **fix(②)**: 발송통계 5곳을 `getCampaignResultCounts`(result_final이면 PG 캐시 MySQL skip)로 전환. ★ **복제(read replica)는 부하분리지 속도 아님**(같은 GROUP BY) — 속도는 pre-aggregation(캐시).
 - **교훈**: D144가 PG 캐시 뺀 건 속도가 아니라 정확성(`billing.ts` 미러). D228+ `result_final`(6h 확정)이 그 정확성 문제를 해결 — 발송통계만 캐시 미적용이라 느렸음.

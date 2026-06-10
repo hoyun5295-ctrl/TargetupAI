@@ -8,20 +8,21 @@
  *   - customers.last_purchase_date도 자사몰 정합
  *   - 'purchase' 이벤트 자동 박음 (cdp_events 박혀서 trigger campaign 활용 가능)
  *
- * 💵 status (자사몰 표준)
- *   - 'completed' / 'paid': 정상 주문 → RFM 갱신
- *   - 'cancelled' / 'refunded': 취소/환불 → RFM 차감 (별건 호출 시)
- *   - 'pending' / 'shipping' 등: 트래킹만, RFM 영향 X
+ * 💵 status (자사몰 표준) — 2026-06-10 CT-86 마커 기반으로 정정
+ *   - 'completed' / 'paid': 매출 미반영 주문만 1회 반영 (revenue_applied 마커)
+ *   - 'cancelled' / 'refunded': 반영된 주문만 1회 차감 (revenue_reversed 마커, 차감액 = 반영 시점 기록 금액)
+ *   - 'pending' / 'shipping' 등: 트래킹만 — 이후 paid가 오면 그때 매출 반영 (전환 누락 결함 정정)
  *
  * ⛔ 영구 원칙
- *   - 자사몰이 박은 order_id는 idempotency key — 같은 order_id 두 번 박혀도 중복 갱신 X
- *   - phone 정규화는 identifyCustomer 경유 (직접 customers 박지 X)
+ *   - 매출 멱등 = revenue_applied/revenue_reversed 마커 (이벤트 존재 여부 아님 — 상태 전환 통과)
+ *   - phone 정규화는 identifyCustomer 경유 (customers 직접 수정 금지)
  *   - 타겟 자동완화 X (D171 영구 원칙)
  */
 
 import { query } from '../config/database';
 import { identifyCustomer, IdentifyInput } from './cdp-identity';
 import { trackEvent } from './cdp-events';
+import { decideOrderRevenueAction } from './cdp-order-revenue';
 
 // ═══════════════════════════════════════════════════════════
 // 타입
@@ -81,23 +82,34 @@ export async function syncOrder(
   };
   const idResult = await identifyCustomer(companyId, identifyInput);
 
-  // 2. 중복 주문 idempotency 확인 (cdp_events에 같은 order_id로 박힌 'purchase' 이벤트 있는지)
-  const dupCheck = await query(
-    `SELECT id FROM cdp_events
+  if (!idResult.customerId) {
+    // identify 정정(2026-06-10) 후에는 도달 불가 경로지만, null로 0행 UPDATE를 침묵 진행하지 않도록 명시 차단
+    throw new Error('주문 처리 중 고객 식별에 실패했습니다. phone 또는 email을 포함해 다시 호출해주세요.');
+  }
+
+  // 2. 같은 order_id의 기존 purchase 이벤트 조회 — 매출 반영 여부는 CT-86 마커(revenue_applied)로 판정
+  //    (2026-06-10 정정: 이벤트 존재 = 무조건 중복이라 pending→paid 전환 매출이 영원히 빠지던 결함 +
+  //     cancelled/refunded 차감 미구현 결함을 함께 해소)
+  const existingRes = await query(
+    `SELECT id, properties FROM cdp_events
      WHERE company_id = $1::uuid
        AND event_name = 'purchase'
        AND source = $2
        AND properties->>'order_id' = $3
+     ORDER BY created_at ASC
      LIMIT 1`,
     [companyId, input.source, input.orderId]
   );
-  const isDuplicate = dupCheck.rows.length > 0;
+  const existing = existingRes.rows.length > 0 ? existingRes.rows[0] : null;
+  const decision = decideOrderRevenueAction(
+    existing ? { properties: existing.properties || null } : null,
+    input.status
+  );
 
   let rfmUpdated = false;
 
-  // 3. 'completed'/'paid' 주문만 RFM 갱신 (중복 아닐 때만)
-  const isRevenueStatus = input.status === 'completed' || input.status === 'paid';
-  if (isRevenueStatus && !isDuplicate) {
+  // 3-A. 결제 확정 — 매출 더하기 (마커 없는 주문만 1회)
+  if (decision.action === 'apply') {
     const orderedDate = new Date(input.orderedAt);
     await query(
       `UPDATE customers SET
@@ -113,10 +125,60 @@ export async function syncOrder(
       [idResult.customerId, input.totalAmount, orderedDate]
     );
     rfmUpdated = true;
+    if (existing) {
+      // pending으로 먼저 기록됐던 이벤트 → 반영 마커 + 확정 상태/금액 갱신
+      await query(
+        `UPDATE cdp_events
+         SET properties = COALESCE(properties, '{}'::jsonb)
+           || jsonb_build_object('revenue_applied', true, 'status', $2::text, 'total_amount', $3::numeric)
+         WHERE id = $1::uuid`,
+        [existing.id, input.status, input.totalAmount]
+      );
+    }
   }
 
-  // 4. cdp_events에 'purchase' 이벤트 박음 (trigger campaign용)
-  if (!isDuplicate) {
+  // 3-B. 취소/환불 — 반영된 주문만 1회 차감 (차감액 = 반영 시점 기록 금액)
+  if (decision.action === 'reverse') {
+    const reverseAmount = decision.reverseAmount ?? input.totalAmount;
+    await query(
+      `UPDATE customers SET
+        total_purchase_amount = GREATEST(COALESCE(total_purchase_amount, 0) - $2, 0),
+        total_purchase = GREATEST(COALESCE(total_purchase, 0) - $2, 0),
+        purchase_count = GREATEST(COALESCE(purchase_count, 0) - 1, 0),
+        avg_order_value = CASE
+          WHEN COALESCE(purchase_count, 0) - 1 > 0
+            THEN GREATEST(COALESCE(total_purchase_amount, 0) - $2, 0) / (COALESCE(purchase_count, 0) - 1)
+          ELSE 0
+        END,
+        updated_at = NOW()
+      WHERE id = $1::uuid`,
+      [idResult.customerId, reverseAmount]
+    );
+    rfmUpdated = true;
+    if (existing) {
+      await query(
+        `UPDATE cdp_events
+         SET properties = COALESCE(properties, '{}'::jsonb)
+           || jsonb_build_object('revenue_reversed', true, 'status', $2::text)
+         WHERE id = $1::uuid`,
+        [existing.id, input.status]
+      );
+    }
+  }
+
+  // 3-C. 매출 변화 없는 상태 갱신 (pending→shipping 등) — 이벤트 status만 추적
+  if (decision.action === 'none' && existing) {
+    await query(
+      `UPDATE cdp_events
+       SET properties = COALESCE(properties, '{}'::jsonb) || jsonb_build_object('status', $2::text)
+       WHERE id = $1::uuid`,
+      [existing.id, input.status]
+    );
+  }
+
+  // 4. 기존 이벤트가 없으면 'purchase' 이벤트 신규 기록 (trigger campaign용)
+  //    매출을 반영한 호출이면 revenue_applied 마커 동봉
+  if (!existing) {
     try {
       await trackEvent(companyId, {
         source: input.source,
@@ -129,11 +191,12 @@ export async function syncOrder(
           item_count: input.itemCount,
           items: input.items,
           currency: input.currency || 'KRW',
+          ...(decision.action === 'apply' ? { revenue_applied: true } : {}),
         },
         occurredAt: input.orderedAt,
       });
     } catch (eventErr) {
-      console.warn('[CDP Orders] purchase 이벤트 박기 실패 (RFM은 이미 박힘):', eventErr);
+      console.warn('[CDP Orders] purchase 이벤트 기록 실패 (RFM 처리 결과는 유지):', eventErr);
     }
   }
 
