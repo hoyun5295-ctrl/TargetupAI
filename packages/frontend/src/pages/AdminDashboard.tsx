@@ -66,6 +66,8 @@ export default function AdminDashboard() {
   const { user, logout } = useAuthStore();
 
   const [activeTab, setActiveTab] = useState<'companies' | 'users' | 'scheduled' | 'callbacks' | 'plans' | 'requests' | 'deposits' | 'credits' | 'allCampaigns' | 'stats' | 'billing' | 'syncAgents' | 'auditLogs' | 'lineGroups' | 'templates' | 'loginBlocks'>('companies');
+  // ★ 2026-06-11: 감사 로그 열람 권한 (AUDIT_LOG_VIEWER_IDS — 기본 ceo 전용) — 허용 계정에만 메뉴/탭 노출
+  const [auditAccessAllowed, setAuditAccessAllowed] = useState(false);
   const [openMenu, setOpenMenu] = useState<string | null>(null);
   const [companies, setCompanies] = useState<Company[]>([]);
   const [plans, setPlans] = useState<Plan[]>([]);
@@ -437,7 +439,18 @@ useEffect(() => { if (activeTab === 'deposits' || activeTab === 'credits') loadC
 useEffect(() => { loadCreditRequests(); }, []);  // 크레딧 관리 알람 badge 상시 표시용 mount 로드
 useEffect(() => { if (activeTab === 'stats') loadSendStats(1); }, [activeTab]);
 useEffect(() => { if (activeTab === 'syncAgents') loadSyncAgents(); }, [activeTab]);
-useEffect(() => { if (activeTab === 'auditLogs') loadAuditLogs(1); }, [activeTab]);
+useEffect(() => { if (activeTab === 'auditLogs' && auditAccessAllowed) loadAuditLogs(1); }, [activeTab, auditAccessAllowed]);
+// ★ 2026-06-11: 감사 로그 열람 권한 확인 (1회) — 허용 계정에만 감사 로그 메뉴 노출
+useEffect(() => {
+  (async () => {
+    try {
+      const token = localStorage.getItem('token');
+      const r = await fetch('/api/admin/audit-logs/access', { headers: { Authorization: `Bearer ${token}` } });
+      const d = await r.json();
+      setAuditAccessAllowed(d.allowed === true);
+    } catch { setAuditAccessAllowed(false); }
+  })();
+}, []);
 useEffect(() => { if (activeTab === 'templates') { loadAdminTemplates(); loadAdminRcsTemplates(); } }, [activeTab, templateFilter]);
 useEffect(() => { if (activeTab === 'callbacks') { loadSenderRegPendingCount(); } }, [activeTab]);
 useEffect(() => { if (activeTab === 'callbacks' && callbackSubTab === 'registrations') { loadSenderRegistrations(senderRegFilter); } }, [activeTab, callbackSubTab, senderRegFilter]);
@@ -2430,7 +2443,8 @@ const handleApproveRequest = async (id: string) => {
                 tabs: ['syncAgents', 'auditLogs', 'loginBlocks'] as const,
                 items: [
                   { key: 'syncAgents', label: 'Sync 모니터링' },
-                  { key: 'auditLogs', label: '감사 로그' },
+                  // ★ 2026-06-11: 감사 로그 = 허용 계정(기본 ceo)에만 노출
+                  ...(auditAccessAllowed ? [{ key: 'auditLogs', label: '감사 로그' }] : []),
                   { key: 'loginBlocks', label: '로그인 차단 관리' },
                 ],
               },
@@ -8035,7 +8049,7 @@ const handleApproveRequest = async (id: string) => {
       )}
 
       {/* 감사 로그 탭 */}
-      {activeTab === 'auditLogs' && (
+      {activeTab === 'auditLogs' && auditAccessAllowed && (
         <div className="bg-white rounded-lg shadow">
           <div className="px-6 py-4 border-b">
             <h2 className="text-lg font-semibold">📋 감사 로그</h2>
@@ -8055,7 +8069,7 @@ const handleApproveRequest = async (id: string) => {
             <select value={auditActionFilter} onChange={(e) => setAuditActionFilter(e.target.value)}
               className="border rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-200">
               <option value="all">전체</option>
-              {auditActions.map(a => { const m={login_success:"로그인 성공",login_fail:"로그인 실패",login_blocked:"로그인 차단",customer_delete:"고객 삭제",customer_bulk_delete:"고객 선택삭제",customer_delete_all:"고객 전체삭제"} as any; return <option key={a} value={a}>{m[a]||a}</option>; })}
+              {auditActions.map(a => { const m={login_success:"로그인 성공",login_fail:"로그인 실패",login_blocked:"로그인 차단",customer_delete:"고객 삭제",customer_bulk_delete:"고객 선택삭제",customer_delete_all:"고객 전체삭제",customer_delete_by_user:"사용자별 고객 삭제",user_update:"사용자 수정",line_group_create:"라인그룹 생성",line_group_update:"라인그룹 수정",line_group_delete:"라인그룹 삭제",company_line_group_change:"회사 라인그룹 변경"} as any; return <option key={a} value={a}>{m[a]||a}</option>; })}
             </select>
             <span className="text-sm text-gray-500 font-medium">고객사</span>
             <select value={auditCompanyFilter} onChange={(e) => setAuditCompanyFilter(e.target.value)}

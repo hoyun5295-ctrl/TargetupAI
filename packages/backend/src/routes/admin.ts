@@ -16,6 +16,8 @@ import { buildDateRangeFilter, aggregateSmsCountsByCampaign, aggregateSmsChannel
 import { normalizePhone } from '../utils/normalize-phone';
 import { normalizeCdpAutoExecuteGate } from '../utils/autosend-policy';
 import { grantBasicTrial } from '../utils/basic-trial';
+// ★ 2026-06-11: 감사 로그 CT — 라인그룹 지정/해제 책임 추적 (에이치피오 예약취소 사고 후속)
+import { recordAuditLog, isAuditLogViewer, diffFields } from '../utils/audit-log';
 
 const router = Router();
 
@@ -106,6 +108,23 @@ router.put('/users/:id', authenticate, requireSuperAdmin, async (req: Request, r
   const { name, email, phone, department, userType, status, storeCodes, lineGroupId, optOut080Number, optOutAutoSync } = req.body;
 
   try {
+    // ★ 2026-06-11: 변경 전 값 조회 — (1) 감사 로그 before 기록 (2) 미전송 필드 보존
+    const beforeRes = await query(
+      `SELECT login_id, name, email, user_type, status, store_codes, line_group_id, opt_out_080_number FROM users WHERE id = $1`,
+      [id]
+    );
+    if (beforeRes.rows.length === 0) {
+      return res.status(404).json({ error: '사용자를 찾을 수 없습니다.' });
+    }
+    const before = beforeRes.rows[0];
+
+    // ★ 2026-06-11: 무조건 덮어쓰기 차단 — 요청 body에 명시된 경우에만 변경, 미전송 시 기존 값 보존.
+    //   (이전에는 lineGroupId 미전송 수정 한 번에 라인그룹이 소리 없이 해제되던 결함)
+    const has = (k: string) => Object.prototype.hasOwnProperty.call(req.body, k);
+    const nextStoreCodes = has('storeCodes') ? (storeCodes || null) : before.store_codes;
+    const nextLineGroupId = has('lineGroupId') ? (lineGroupId || null) : before.line_group_id;
+    const nextOptOut080 = has('optOut080Number') ? (optOut080Number || null) : before.opt_out_080_number;
+
     const result = await query(`
       UPDATE users
       SET name = COALESCE($1, name),
@@ -121,10 +140,23 @@ router.put('/users/:id', authenticate, requireSuperAdmin, async (req: Request, r
           updated_at = NOW()
       WHERE id = $11
       RETURNING id, login_id, name, email, user_type, status, store_codes, line_group_id, opt_out_080_number, opt_out_auto_sync
-    `, [name, email, phone, department, userType, status, storeCodes || null, lineGroupId || null, optOut080Number || null, optOutAutoSync, id]);
+    `, [name, email, phone, department, userType, status, nextStoreCodes, nextLineGroupId, nextOptOut080, optOutAutoSync, id]);
 
     if (result.rows.length === 0) {
       return res.status(404).json({ error: '사용자를 찾을 수 없습니다.' });
+    }
+
+    // ★ 2026-06-11 감사 로그 — 변경된 필드만 before/after 기록 (라인그룹 지정/해제 책임 추적)
+    const d = diffFields(before, result.rows[0], ['name', 'email', 'user_type', 'status', 'store_codes', 'line_group_id', 'opt_out_080_number']);
+    if (d.changed.length > 0) {
+      await recordAuditLog({
+        actorUserId: req.user?.userId,
+        action: 'user_update',
+        targetType: 'user',
+        targetId: id,
+        details: { target_login_id: before.login_id, ...d },
+        req,
+      });
     }
 
     res.json({ user: result.rows[0], message: '수정되었습니다.' });
@@ -404,6 +436,13 @@ router.put('/companies/:id', authenticate, requireSuperAdmin, async (req: Reques
       finalSubscriptionStatus = isTrialPlan ? 'trial' : 'paid';
     }
 
+    // ★ 2026-06-11 감사: 회사 라인그룹 변경 추적 — 변경 전 값 확보
+    let prevCompanyLineGroupId: string | null = null;
+    if (lineGroupId) {
+      const prevLg = await query('SELECT line_group_id FROM companies WHERE id = $1', [id]);
+      prevCompanyLineGroupId = prevLg.rows[0]?.line_group_id ?? null;
+    }
+
     const result = await query(`
       UPDATE companies
       SET company_name = COALESCE($1, company_name),
@@ -447,7 +486,22 @@ router.put('/companies/:id', authenticate, requireSuperAdmin, async (req: Reques
     if (result.rows.length === 0) {
       return res.status(404).json({ error: '회사를 찾을 수 없습니다.' });
     }
-    
+
+    // ★ 2026-06-11 감사 로그 — 회사 라인그룹 변경 추적
+    if (lineGroupId && prevCompanyLineGroupId !== lineGroupId) {
+      await recordAuditLog({
+        actorUserId: req.user?.userId,
+        action: 'company_line_group_change',
+        targetType: 'company',
+        targetId: id,
+        details: {
+          company_name: result.rows[0].company_name,
+          line_group_id: { before: prevCompanyLineGroupId, after: lineGroupId },
+        },
+        req,
+      });
+    }
+
     res.json({ company: result.rows[0], message: '수정되었습니다.' });
   } catch (error) {
     console.error('회사 수정 실패:', error);
@@ -2689,8 +2743,17 @@ router.get('/charge-management', authenticate, requireSuperAdmin, async (req: Re
 });
 
 // ===== 감사 로그 조회 API =====
+// ★ 2026-06-11: 감사 로그 열람 권한 확인 — 메뉴 노출 게이팅용 (AUDIT_LOG_VIEWER_IDS, 기본 'ceo')
+router.get('/audit-logs/access', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
+  res.json({ allowed: await isAuditLogViewer(req.user?.userId) });
+});
+
 router.get('/audit-logs', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
   try {
+    // ★ 2026-06-11: 열람 제한 — AUDIT_LOG_VIEWER_IDS(기본 'ceo')에 포함된 계정만 (Harold 명시)
+    if (!(await isAuditLogViewer(req.user?.userId))) {
+      return res.status(403).json({ error: '감사 로그 열람 권한이 없습니다.' });
+    }
     const { page = 1, limit = 25, action, companyId, fromDate, toDate, userId } = req.query;
     const offset = (Number(page) - 1) * Number(limit);
 
@@ -2810,6 +2873,15 @@ router.post('/line-groups', authenticate, requireSuperAdmin, async (req: Request
     `, [groupName, groupType, smsTables, sortOrder || 0]);
 
     invalidateLineGroupCache();
+    // ★ 2026-06-11 감사 로그 — 라인그룹 생성 추적
+    await recordAuditLog({
+      actorUserId: req.user?.userId,
+      action: 'line_group_create',
+      targetType: 'line_group',
+      targetId: result.rows[0].id,
+      details: { group_name: groupName, group_type: groupType, sms_tables: smsTables, sort_order: sortOrder || 0 },
+      req,
+    });
     res.json({ lineGroup: result.rows[0], message: '라인그룹이 생성되었습니다.' });
   } catch (error) {
     console.error('라인그룹 생성 실패:', error);
@@ -2830,6 +2902,9 @@ router.put('/line-groups/:id', authenticate, requireSuperAdmin, async (req: Requ
         return res.status(400).json({ error: `잘못된 테이블명: ${err instanceof Error ? err.message : String(err)}` });
       }
     }
+    // ★ 2026-06-11: 변경 전 값 조회 — 감사 로그 before 기록
+    const lgBeforeRes = await query('SELECT group_name, group_type, sms_tables, sort_order, is_active FROM sms_line_groups WHERE id = $1', [id]);
+
     const result = await query(`
       UPDATE sms_line_groups
       SET group_name = COALESCE($1, group_name),
@@ -2847,6 +2922,20 @@ router.put('/line-groups/:id', authenticate, requireSuperAdmin, async (req: Requ
     }
 
     invalidateLineGroupCache();
+    // ★ 2026-06-11 감사 로그 — 라인그룹 수정 추적 (변경 필드만)
+    if (lgBeforeRes.rows.length > 0) {
+      const d = diffFields(lgBeforeRes.rows[0], result.rows[0], ['group_name', 'group_type', 'sms_tables', 'sort_order', 'is_active']);
+      if (d.changed.length > 0) {
+        await recordAuditLog({
+          actorUserId: req.user?.userId,
+          action: 'line_group_update',
+          targetType: 'line_group',
+          targetId: id,
+          details: { group_name: result.rows[0].group_name, ...d },
+          req,
+        });
+      }
+    }
     res.json({ lineGroup: result.rows[0], message: '수정되었습니다.' });
   } catch (error) {
     console.error('라인그룹 수정 실패:', error);
@@ -2863,8 +2952,21 @@ router.delete('/line-groups/:id', authenticate, requireSuperAdmin, async (req: R
     if (parseInt(assigned.rows[0].count) > 0) {
       return res.status(400).json({ error: '할당된 고객사가 있어 삭제할 수 없습니다. 먼저 고객사 라인그룹을 변경해주세요.' });
     }
+    // ★ 2026-06-11: 삭제 전 값 확보 — 감사 로그 기록용
+    const lgDelBefore = await query('SELECT group_name, group_type, sms_tables FROM sms_line_groups WHERE id = $1', [id]);
     await query('DELETE FROM sms_line_groups WHERE id = $1', [id]);
     invalidateLineGroupCache();
+    // ★ 2026-06-11 감사 로그 — 라인그룹 삭제 추적
+    if (lgDelBefore.rows.length > 0) {
+      await recordAuditLog({
+        actorUserId: req.user?.userId,
+        action: 'line_group_delete',
+        targetType: 'line_group',
+        targetId: id,
+        details: lgDelBefore.rows[0],
+        req,
+      });
+    }
     res.json({ message: '삭제되었습니다.' });
   } catch (error) {
     console.error('라인그룹 삭제 실패:', error);
