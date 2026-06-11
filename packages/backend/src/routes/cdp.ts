@@ -72,7 +72,7 @@ import {
 // ★ D215+ (2026-05-25) 인앱 메시지 압도적 강화 CT-77~84
 import { generateInAppMessagePackage, listQuickStartCards } from '../utils/inapp-ai-generator';
 import { countSegment, describeSegment } from '../utils/inapp-segment-matcher';
-import { buildPreviewCustomers, renderInAppMessage, listAvailableVariables } from '../utils/inapp-personalization';
+import { buildPreviewCustomers, renderInAppMessage, listAvailableVariables, extractUsedInAppVariables, getInAppCustomerForBrowser } from '../utils/inapp-personalization';
 import { createVariant, listVariantsWithStats, declareWinnerIfReady } from '../utils/inapp-variant-optimizer';
 import { explainInAppMessage } from '../utils/inapp-explainer';
 import {
@@ -547,8 +547,18 @@ router.get('/inapp/active', requireCdpKeyOrBrowserOrigin, async (req: Request, r
       anonymousId,
       seenMessageIds,
     });
+
+    // T3 (2026-06-11) — 자동 기동 개인화: 메시지들이 실제 쓰는 변수만 customer로 동봉 (식별 회원 한정)
+    let customer: Record<string, any> | null = null;
+    if (externalId && messages.length > 0) {
+      const usedVars = extractUsedInAppVariables(messages);
+      if (usedVars.length > 0) {
+        customer = await getInAppCustomerForBrowser(cdpAuth.companyId, externalId, usedVars).catch(() => null);
+      }
+    }
+
     await recordCdpApiCall(cdpAuth.companyId, 'event', 200);
-    return res.json({ success: true, messages });
+    return res.json({ success: true, messages, ...(customer ? { customer } : {}) });
   } catch (err: any) {
     console.error('[CDP /inapp/active] 오류:', err);
     const msg = err?.message || '';

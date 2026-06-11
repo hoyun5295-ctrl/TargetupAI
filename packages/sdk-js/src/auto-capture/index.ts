@@ -7,7 +7,7 @@
  * 매뉴얼: https://hanjul.ai/docs/sdk/v0.3.5
  */
 
-import { isValidEventName } from './events';
+import { isValidEventName, INAPP_BRIDGE_EVENT_NAMES } from './events';
 import { autoInitFromScriptTag } from './auto-init';
 import { detectIdentify, watchIdentifyChanges } from './identify';
 import { detectConsent } from './consent';
@@ -15,23 +15,32 @@ import { setupPageviewTracking } from './pageview';
 import { setupClickTracking } from './click';
 import { Heartbeat } from './heartbeat';
 import { Transport } from './transport';
+import { getAnonymousId } from './storage';
+import { readCartEstimate, updateCartEstimate } from './cart-estimate';
+import { HanjulloInAppModule } from '../inapp';
 
 export interface AutoCaptureConfig {
   apiKey: string;
   secret?: string;
   endpoint?: string;
   debug?: boolean;
+  /** inline_card 템플릿 삽입 위치 선택자 — 스니펫 data-hjl-inapp-container 속성으로 전달 */
+  inappContainer?: string;
 }
 
 interface HjlGlobal {
   init: (config: AutoCaptureConfig) => void;
   track: (eventName: string, properties?: Record<string, unknown>) => void;
   identify: (externalId: string, traits?: Record<string, unknown>) => void;
+  /** 인앱 메시지 모듈 — init() 시 자동 기동. 고급 사용(수동 trigger 등)용 공개 API */
+  inapp: HanjulloInAppModule | null;
   _config: AutoCaptureConfig | null;
   _version: string;
   _heartbeat: Heartbeat | null;
   _transport: Transport | null;
 }
+
+const INAPP_BRIDGE_SET = new Set<string>(INAPP_BRIDGE_EVENT_NAMES);
 
 const VERSION = '0.3.5-a';
 
@@ -51,6 +60,7 @@ function createHjlGlobal(): HjlGlobal {
         secret: config.secret,
         endpoint: config.endpoint || 'https://app.hanjul.ai/api/cdp',
         debug: !!config.debug,
+        inappContainer: config.inappContainer,
       };
 
       const heartbeat = new Heartbeat((stage) => {
@@ -73,6 +83,18 @@ function createHjlGlobal(): HjlGlobal {
         // 단순 무시
       }
 
+      // T1 (2026-06-11) — 인앱 모듈 배선: 설치 스니펫 한 줄로 자동 기동 (추가 코드 0)
+      // secret 인자는 2026-06-10부터 브라우저 미사용 (빈 문자열 자리만 유지)
+      const inapp = new HanjulloInAppModule(hjl._config.apiKey, '', hjl._config.endpoint!);
+      hjl.inapp = inapp;
+      let inappAnonId: string | undefined;
+      try { inappAnonId = getAnonymousId(); } catch { inappAnonId = undefined; }
+      const inappBaseInput = () => ({
+        anonymousId: inappAnonId,
+        debug: hjl._config!.debug,
+        ...(hjl._config!.inappContainer ? { containerSelector: hjl._config!.inappContainer } : {}),
+      });
+
       const id = detectIdentify();
       if (id) {
         transport.queue({
@@ -84,6 +106,9 @@ function createHjlGlobal(): HjlGlobal {
           trust_level: 'declared',
         });
       }
+      // identify 확정 직후 인앱 기동 — 비로그인이면 anonymousId만으로 조회 (세그먼트 조건 메시지는 서버가 제외)
+      inapp.init({ ...inappBaseInput(), externalId: id ? id.externalId : undefined }).catch(() => {});
+
       watchIdentifyChanges((result) => {
         if (result) {
           transport.queue({
@@ -94,6 +119,8 @@ function createHjlGlobal(): HjlGlobal {
             name: result.name,
             trust_level: 'declared',
           });
+          // 늦은 로그인(SPA) — 새 externalId로 인앱 재조회 (과다 호출은 5분 캐시가 흡수)
+          inapp.init({ ...inappBaseInput(), externalId: result.externalId }).catch(() => {});
         }
       });
 
@@ -136,6 +163,20 @@ function createHjlGlobal(): HjlGlobal {
         properties: properties || {},
         trust_level: 'declared',
       });
+
+      // T2 (2026-06-11) — 인앱 트리거 브리지: 커머스 이벤트 적재 직후 동일 이벤트 인앱 평가
+      if (hjl.inapp) {
+        if (eventName === 'cart_add' || eventName === 'cart_remove') {
+          updateCartEstimate(eventName, properties);
+        }
+        if (INAPP_BRIDGE_SET.has(eventName)) {
+          hjl.inapp.trigger(eventName).catch(() => {});
+          if (eventName === 'cart_add') {
+            const est = readCartEstimate();
+            if (est > 0) hjl.inapp.trigger('cart_value', { cartValue: est }).catch(() => {});
+          }
+        }
+      }
     },
 
     identify(externalId: string, traits?: Record<string, unknown>) {
@@ -150,6 +191,7 @@ function createHjlGlobal(): HjlGlobal {
       });
     },
 
+    inapp: null,
     _config: null,
     _version: VERSION,
     _heartbeat: null,

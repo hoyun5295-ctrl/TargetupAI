@@ -1745,7 +1745,7 @@ CAFE24_REDIRECT_URI=https://app.hanjul.ai/api/cafe24/oauth/callback
 | created_at | timestamptz | |
 - INDEX: company_id, created_at DESC
 
-### cdp_inapp_messages (In-app Message 정의) — D175-A 신규
+### cdp_inapp_messages (In-app Message 정의) — D175-A 신규 + D215+ 확장 (★ 2026-06-11 운영 information_schema 실측 32컬럼)
 
 | 컬럼 | 타입 | 비고 |
 |------|------|------|
@@ -1756,7 +1756,7 @@ CAFE24_REDIRECT_URI=https://app.hanjul.ai/api/cafe24/oauth/callback
 | body | text | |
 | action_url | text | CTA 클릭 시 이동 |
 | action_label | varchar(50) | CTA 라벨 (기본 "자세히 보기") |
-| position | varchar(20) DEFAULT 'top_banner' | top_banner / bottom_banner / center_modal |
+| position | varchar(20) DEFAULT 'top_banner' | top_banner / bottom_banner / center_modal (옛 컬럼 — template fallback) |
 | background_color | varchar(20) DEFAULT '#4f46e5' | hex 색상 |
 | text_color | varchar(20) DEFAULT '#ffffff' | |
 | trigger_event | varchar(50) DEFAULT 'page_load' | page_load / cart_add / purchase 등 CDP 이벤트 |
@@ -1766,9 +1766,24 @@ CAFE24_REDIRECT_URI=https://app.hanjul.ai/api/cafe24/oauth/callback
 | status | varchar(20) DEFAULT 'active' | active / paused / archived |
 | created_at | timestamptz | |
 | updated_at | timestamptz | |
+| template | varchar DEFAULT 'top_banner' | ★ 실측 — 8 템플릿 (top/bottom_banner·center_modal·full_screen·slide_in·inline_card·toast·floating_button) |
+| image_url | text | ★ 실측 |
+| buttons | jsonb DEFAULT '[]' | ★ 실측 — 다중 CTA 최대 3 |
+| segment_conditions | jsonb DEFAULT '{}' | ★ 실측 — CT-78 매칭 |
+| trigger_conditions | jsonb DEFAULT '{}' | ★ 실측 — {event, scroll_percent, time_on_page_seconds, cart_value_min} |
+| personalization_vars | jsonb DEFAULT '[]' | ★ 실측 |
+| parent_message_id | uuid | ★ 실측 — A/B variant 부모 (NULL = 부모) |
+| variant_weight | integer DEFAULT 100 | ★ 실측 |
+| auto_dismiss_seconds | integer | ★ 실측 |
+| max_displays_per_user | integer | ★ 실측 |
+| send_start_hour | integer | ★ 실측 — CT-82 시간대 |
+| send_end_hour | integer | ★ 실측 |
+| allowed_weekdays | integer[] DEFAULT '{0,1,2,3,4,5,6}' | ★ 실측 |
+| locale_variants | jsonb DEFAULT '{}' | ★ 실측 |
+| animation | varchar DEFAULT 'fade' | ★ 실측 — fade/slide/bounce/pulse |
 - INDEX: company_id, status, start_at, end_at
 
-### cdp_inapp_impressions (In-app Message 표시/클릭 트래킹) — D175-A 신규
+### cdp_inapp_impressions (In-app Message 표시/클릭 트래킹) — D175-A 신규 + D215+ 확장 (★ 2026-06-11 운영 information_schema 실측 11컬럼)
 
 | 컬럼 | 타입 | 비고 |
 |------|------|------|
@@ -1780,6 +1795,9 @@ CAFE24_REDIRECT_URI=https://app.hanjul.ai/api/cafe24/oauth/callback
 | anonymous_id | varchar(100) | 비회원 브라우저 추적 ID |
 | event_type | varchar(20) | 'impression' / 'click' / 'dismiss' |
 | occurred_at | timestamptz NOT NULL DEFAULT NOW() | |
+| button_id | varchar | ★ 실측 — 다중 CTA click 분리 |
+| dwell_seconds | integer | ★ 실측 — 표시→반응 경과 초 |
+| attributed_purchase_id | uuid | ★ 실측 — 24h purchase attribution |
 - INDEX: company_id, message_id, occurred_at DESC
 - INDEX: message_id, event_type
 

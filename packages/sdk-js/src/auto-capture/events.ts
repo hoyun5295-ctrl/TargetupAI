@@ -21,6 +21,12 @@ export const STANDARD_EVENT_NAMES = [
 
 export type StandardEventName = (typeof STANDARD_EVENT_NAMES)[number];
 
+/**
+ * 인앱 트리거 브리지 대상 — hjl.track() 전송 성공 직후 같은 이름의 인앱 트리거를 자동 호출.
+ * 백엔드 cdp_inapp_messages.trigger_event가 매칭하는 커머스 이벤트만 (2026-06-11 배선 설계서 T2).
+ */
+export const INAPP_BRIDGE_EVENT_NAMES = ['cart_add', 'cart_view', 'checkout_start'] as const;
+
 const STANDARD_SET = new Set<string>(STANDARD_EVENT_NAMES);
 
 /**

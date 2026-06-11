@@ -60,4 +60,18 @@ describe('autoInitFromScriptTag — data-hjl-key 스니펫 자동 init', () => {
 
     expect(init).not.toHaveBeenCalled();
   });
+
+  it('data-hjl-inapp-container 속성이 있으면 init config에 inappContainer 전달', () => {
+    const s = document.createElement('script');
+    s.setAttribute('data-hjl-key', 'hjl_abc123');
+    s.setAttribute('data-hjl-inapp-container', '#promo-slot');
+    document.head.appendChild(s);
+
+    const init = vi.fn();
+    (window as any).hjl = { init };
+
+    autoInitFromScriptTag();
+
+    expect(init).toHaveBeenCalledWith({ apiKey: 'hjl_abc123', inappContainer: '#promo-slot' });
+  });
 });

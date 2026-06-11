@@ -296,6 +296,115 @@ function buildFallbackPreviewCustomers(): PreviewCustomer[] {
 }
 
 // ════════════════════════════════════════════════════════════════════
+// T3 (2026-06-11) — SDK 자동 기동 개인화: 메시지가 실제 쓰는 변수만 추출 + 브라우저 동봉
+//   /inapp/active 응답에 customer 객체를 동봉해 자동 기동 시에도 {{ customer.X }}·%변수%가
+//   진짜 값으로 치환되게 한다. 개인정보 최소화 — 화이트리스트 교차 변수만 SELECT·동봉.
+// ════════════════════════════════════════════════════════════════════
+
+/**
+ * 브라우저 응답 동봉 허용 변수 화이트리스트.
+ * phone 등 연락처 식별 정보는 의도적으로 제외 (브라우저 노출 차단).
+ * enrichCustomerForPreview 출력 키와 1:1 — 신규 키 추가 시 양쪽 동시 갱신.
+ */
+export const INAPP_BROWSER_VAR_WHITELIST: string[] = [
+  'name', 'grade', 'points', 'region',
+  'recent_product', 'recent_purchase_store',
+  'last_purchase_days_ago', 'cart_count',
+  'total_purchase_amount', 'purchase_count',
+];
+
+/** 옛 %변수% 토큰 → customer 객체 키 매핑 (%전화%는 브라우저 동봉 차단으로 의도적 제외) */
+const LEGACY_TOKEN_TO_VAR: Record<string, string> = {
+  '%고객명%': 'name',
+  '%이름%': 'name',
+  '%등급%': 'grade',
+  '%포인트%': 'points',
+  '%지역%': 'region',
+  '%최근구매매장%': 'recent_purchase_store',
+};
+
+interface UsedVarsMessageLike {
+  title?: string | null;
+  body?: string | null;
+  buttons?: Array<{ label?: string | null }> | null;
+  personalizationVars?: string[] | null;
+}
+
+/**
+ * 메시지들이 실제 사용하는 개인화 변수 추출 (화이트리스트 교차 + 중복 제거).
+ * 스캔 대상: personalization_vars 배열 + title/body/buttons[].label의
+ * {{ customer.X }} (| default: 필터 동반 포함) 및 옛 %변수% 토큰.
+ */
+export function extractUsedInAppVariables(messages: UsedVarsMessageLike[]): string[] {
+  const whitelist = new Set(INAPP_BROWSER_VAR_WHITELIST);
+  const used = new Set<string>();
+
+  const scanText = (text: string | null | undefined) => {
+    if (!text) return;
+    const liquidRe = /\{\{\s*customer\.([a-zA-Z_]+)/g;
+    let m: RegExpExecArray | null;
+    while ((m = liquidRe.exec(text)) !== null) {
+      if (whitelist.has(m[1])) used.add(m[1]);
+    }
+    for (const [token, varName] of Object.entries(LEGACY_TOKEN_TO_VAR)) {
+      if (text.includes(token) && whitelist.has(varName)) used.add(varName);
+    }
+  };
+
+  for (const msg of messages || []) {
+    (msg.personalizationVars || []).forEach((v) => {
+      if (whitelist.has(v)) used.add(v);
+    });
+    scanText(msg.title);
+    scanText(msg.body);
+    (msg.buttons || []).forEach((b) => scanText(b?.label));
+  }
+
+  return Array.from(used);
+}
+
+/**
+ * 브라우저 동봉용 customer 객체 조회 — identity 매핑된 회원만, usedVars 키만 추려서 반환.
+ * 미식별/미매핑/변수 0개면 null (응답에 customer 키 자체를 생략).
+ */
+export async function getInAppCustomerForBrowser(
+  companyId: string,
+  externalId: string,
+  usedVars: string[]
+): Promise<Record<string, any> | null> {
+  if (!companyId || !externalId || !usedVars || usedVars.length === 0) return null;
+
+  const linkR = await query(
+    `SELECT customer_id FROM cdp_identity_links
+     WHERE company_id = $1::uuid AND external_id = $2 AND customer_id IS NOT NULL
+     LIMIT 1`,
+    [companyId, externalId]
+  );
+  if (linkR.rows.length === 0) return null;
+  const customerId = String(linkR.rows[0].customer_id);
+
+  // buildPreviewCustomers와 동일 컬럼 집합 (운영 검증된 SELECT — 신규 컬럼 참조 0)
+  const custR = await query(
+    `SELECT id, name, grade, phone, points, region, recent_purchase_store, recent_purchase_date,
+            total_purchase_amount, purchase_count, last_activity_at, cart_add_count_30d
+     FROM customers
+     WHERE id = $1::uuid AND company_id = $2::uuid
+     LIMIT 1`,
+    [customerId, companyId]
+  );
+  if (custR.rows.length === 0) return null;
+
+  const enriched = enrichCustomerForPreview(custR.rows[0]);
+  const out: Record<string, any> = {};
+  for (const v of usedVars) {
+    if (INAPP_BROWSER_VAR_WHITELIST.includes(v) && enriched[v] !== undefined) {
+      out[v] = enriched[v];
+    }
+  }
+  return Object.keys(out).length > 0 ? out : null;
+}
+
+// ════════════════════════════════════════════════════════════════════
 // Frontend UI 드롭다운용 — 사용 가능 변수 매핑
 // ════════════════════════════════════════════════════════════════════
 

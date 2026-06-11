@@ -84,6 +84,8 @@ export interface InAppInitInput {
   customer?: Record<string, any>;
   /** 컨테이너 선택자 (inline_card template 전용) */
   containerSelector?: string;
+  /** 장바구니 누적 금액 추정치 — cart_value 트리거 조건(cart_value_min) 비교용. 미전달 시 cart_value 조건 메시지는 매칭되지 않는다. */
+  cartValue?: number;
   /** 자동 트리거 감지 활성 (default true) */
   enableAutoTriggers?: boolean;
   /** 디버그 로깅 활성 (default false) */
@@ -108,6 +110,10 @@ const MAX_RETRIES = 3;
 
 export class HanjulloInAppModule {
   private autoTriggerSetup = false;
+  /** 마지막 init/trigger input 누적 — identify가 늦게 갱신(SPA)돼도 이후 트리거가 최신 identity를 쓰도록 보존 */
+  private lastInput: InAppInitInput = {};
+  /** 메시지별 렌더 시각 (ms) — click/dismiss 시 dwell_seconds 계산 */
+  private renderTimes = new Map<string, number>();
 
   constructor(
     private readonly apiKey: string,
@@ -117,34 +123,38 @@ export class HanjulloInAppModule {
 
   /**
    * 페이지 로드 시 호출 — 사용자에게 표시할 메시지 자동 fetch + 렌더링.
+   * 재호출(identify 갱신) 시 input은 기존 값과 병합되고, 과다 호출은 5분 캐시가 흡수한다.
    */
   async init(input: InAppInitInput = {}): Promise<void> {
     if (typeof window === 'undefined' || typeof document === 'undefined') return;
+    this.lastInput = { ...this.lastInput, ...input };
     try {
       // Step 1: page_load 트리거 우선 처리
-      await this.fetchAndRender('page_load', input);
+      await this.fetchAndRender('page_load', this.lastInput);
 
-      // Step 2: 자동 트리거 감지 활성 (scroll / time / exit_intent / cart_value 자동 이벤트 리스너)
-      if (input.enableAutoTriggers !== false && !this.autoTriggerSetup) {
-        this.setupAutoTriggers(input);
+      // Step 2: 자동 트리거 감지 활성 (scroll / time / exit_intent 자동 이벤트 리스너)
+      if (this.lastInput.enableAutoTriggers !== false && !this.autoTriggerSetup) {
+        this.setupAutoTriggers();
         this.autoTriggerSetup = true;
       }
     } catch (err) {
       // SDK는 자사몰 페이지 안 동작 — 에러로 자사몰 깨지면 X (조용히 실패)
-      this.debugLog(input, 'init 실패', err);
+      this.debugLog(this.lastInput, 'init 실패', err);
     }
   }
 
   /**
    * 특정 이벤트 트리거 시점 호출 (자사몰에서 직접 호출 가능).
    * 예: hanjullo.inapp.trigger('cart_add', { externalId: '...' });
+   * input 미전달 시 마지막 init/trigger의 identity(lastInput)를 그대로 사용한다.
    */
   async trigger(event: string, input: InAppInitInput = {}): Promise<void> {
     if (typeof window === 'undefined') return;
+    const effective = { ...this.lastInput, ...input };
     try {
-      await this.fetchAndRender(event, input);
+      await this.fetchAndRender(event, effective);
     } catch (err) {
-      this.debugLog(input, `trigger(${event}) 실패`, err);
+      this.debugLog(effective, `trigger(${event}) 실패`, err);
     }
   }
 
@@ -166,7 +176,12 @@ export class HanjulloInAppModule {
     const cached = this.getCachedMessages(cacheKey);
     if (cached) {
       this.debugLog(input, `캐시 hit (${cacheKey})`);
-      cached.forEach((msg) => this.renderMessage(msg, input));
+      const cachedInput = this.withServerCustomer(input, cached.customer);
+      cached.messages.forEach((msg) => {
+        if (!this.canDisplayMessage(msg)) return;
+        if (!this.passesTriggerConditions(msg, trigger, input)) return;
+        this.renderMessage(msg, cachedInput);
+      });
       return;
     }
 
@@ -181,25 +196,48 @@ export class HanjulloInAppModule {
 
     if (!data?.success || !Array.isArray(data.messages)) return;
 
+    // 서버 동봉 customer (T3 — 자동 기동 개인화: input.customer가 없을 때만 사용)
+    const serverCustomer = data.customer && typeof data.customer === 'object' ? data.customer : null;
+
     // 캐시 저장
-    this.setCachedMessages(cacheKey, data.messages);
+    this.setCachedMessages(cacheKey, data.messages, serverCustomer);
 
     // 각 메시지 렌더링 (max_displays_per_user + 트리거 조건 클라이언트 추가 검증)
+    const renderInput = this.withServerCustomer(input, serverCustomer);
     for (const msg of data.messages as InAppMessageSdk[]) {
       if (!this.canDisplayMessage(msg)) {
         this.debugLog(input, `메시지 ${msg.id} 표시 한도 초과 (max_displays_per_user)`);
         continue;
       }
-      this.renderMessage(msg, input);
+      if (!this.passesTriggerConditions(msg, trigger, input)) {
+        this.debugLog(input, `메시지 ${msg.id} 트리거 조건 미충족 (${trigger})`);
+        continue;
+      }
+      this.renderMessage(msg, renderInput);
     }
+  }
+
+  /** input.customer가 없으면 서버 동봉 customer를 사용 (수동 전달이 항상 우선 — 하위 호환) */
+  private withServerCustomer(input: InAppInitInput, serverCustomer: Record<string, any> | null | undefined): InAppInitInput {
+    if (input.customer || !serverCustomer) return input;
+    return { ...input, customer: serverCustomer };
+  }
+
+  /** 트리거별 조건 클라이언트 검증 — cart_value_min은 클라이언트만 아는 값(누적 추정치)이라 여기서 비교 */
+  private passesTriggerConditions(msg: InAppMessageSdk, trigger: string, input: InAppInitInput): boolean {
+    if (trigger !== 'cart_value') return true;
+    const conds = msg.triggerConditions || msg.trigger_conditions;
+    const min = conds?.cart_value_min;
+    if (typeof min !== 'number' || min <= 0) return true;
+    return typeof input.cartValue === 'number' && input.cartValue >= min;
   }
 
   private async fetchWithRetry(url: string, options: RequestInit, attempt: number = 1): Promise<any> {
     try {
       const res = await fetch(url, options);
       if (!res.ok) {
-        // 503 = DB 마이그레이션 — retry X (운영자 영역)
-        if (res.status === 503) return null;
+        // 503 = DB 마이그레이션 / 401·403 = 미인증·플랜 차단 — retry 무의미 (운영자 설정 사항)
+        if (res.status === 503 || res.status === 401 || res.status === 403) return null;
         throw new Error(`HTTP ${res.status}`);
       }
       return await res.json();
@@ -219,7 +257,7 @@ export class HanjulloInAppModule {
   // 캐시 (5분 TTL)
   // ════════════════════════════════════════════════════════════════
 
-  private getCachedMessages(cacheKey: string): InAppMessageSdk[] | null {
+  private getCachedMessages(cacheKey: string): { messages: InAppMessageSdk[]; customer: Record<string, any> | null } | null {
     try {
       const raw = localStorage.getItem(STORAGE_KEY_CACHE);
       if (!raw) return null;
@@ -227,17 +265,18 @@ export class HanjulloInAppModule {
       const entry = cache[cacheKey];
       if (!entry || typeof entry.timestamp !== 'number') return null;
       if (Date.now() - entry.timestamp > CACHE_TTL_MS) return null;
-      return Array.isArray(entry.messages) ? entry.messages : null;
+      if (!Array.isArray(entry.messages)) return null;
+      return { messages: entry.messages, customer: entry.customer && typeof entry.customer === 'object' ? entry.customer : null };
     } catch {
       return null;
     }
   }
 
-  private setCachedMessages(cacheKey: string, messages: InAppMessageSdk[]): void {
+  private setCachedMessages(cacheKey: string, messages: InAppMessageSdk[], customer?: Record<string, any> | null): void {
     try {
       const raw = localStorage.getItem(STORAGE_KEY_CACHE);
       const cache = raw ? JSON.parse(raw) : {};
-      cache[cacheKey] = { timestamp: Date.now(), messages };
+      cache[cacheKey] = { timestamp: Date.now(), messages, ...(customer ? { customer } : {}) };
       // 캐시 크기 제한 (10건 초과 시 오래된 것 제거)
       const keys = Object.keys(cache);
       if (keys.length > 10) {
@@ -282,7 +321,8 @@ export class HanjulloInAppModule {
   // 자동 트리거 감지 (scroll / time_on_page / exit_intent / cart_value)
   // ════════════════════════════════════════════════════════════════
 
-  private setupAutoTriggers(input: InAppInitInput): void {
+  private setupAutoTriggers(): void {
+    // 리스너는 input을 캡처하지 않는다 — trigger()가 lastInput을 참조해 늦은 identify에도 최신 identity 사용
     // Scroll 트리거
     let lastScrollPercent = 0;
     const scrollListener = () => {
@@ -291,7 +331,7 @@ export class HanjulloInAppModule {
       // 10% 증가할 때마다 1회 평가 (50% 등 임계값 매칭)
       if (scrollPercent >= lastScrollPercent + 10) {
         lastScrollPercent = scrollPercent;
-        this.trigger('scroll', input).catch(() => {});
+        this.trigger('scroll').catch(() => {});
       }
     };
     window.addEventListener('scroll', this.throttle(scrollListener, 500));
@@ -299,7 +339,7 @@ export class HanjulloInAppModule {
     // Time on page 트리거 (10초 / 30초 / 60초 시점)
     [10, 30, 60].forEach((seconds) => {
       setTimeout(() => {
-        this.trigger('time_on_page', input).catch(() => {});
+        this.trigger('time_on_page').catch(() => {});
       }, seconds * 1000);
     });
 
@@ -309,7 +349,7 @@ export class HanjulloInAppModule {
       if (exitTriggered) return;
       if (e.clientY <= 0) {
         exitTriggered = true;
-        this.trigger('exit_intent', input).catch(() => {});
+        this.trigger('exit_intent').catch(() => {});
       }
     });
   }
@@ -382,6 +422,7 @@ export class HanjulloInAppModule {
   // ════════════════════════════════════════════════════════════════
 
   private renderMessage(msg: InAppMessageSdk, input: InAppInitInput): void {
+    this.renderTimes.set(msg.id, Date.now());
     const customer = input.customer || {};
     const renderedTitle = this.replaceVariables(msg.title || '', customer);
     const renderedBody = this.replaceVariables(msg.body || '', customer);
@@ -895,6 +936,14 @@ export class HanjulloInAppModule {
     buttonId?: string,
   ): Promise<void> {
     try {
+      // 표시→반응 경과 초 (click/dismiss만 — impression은 표시 순간이라 무의미)
+      let dwellSeconds: number | undefined;
+      if (eventType === 'click' || eventType === 'dismiss') {
+        const renderedAt = this.renderTimes.get(messageId);
+        if (typeof renderedAt === 'number') {
+          dwellSeconds = Math.max(0, Math.floor((Date.now() - renderedAt) / 1000));
+        }
+      }
       await fetch(`${this.endpoint}/inapp/track`, {
         method: 'POST',
         headers: {
@@ -907,6 +956,7 @@ export class HanjulloInAppModule {
           external_id: input.externalId,
           anonymous_id: input.anonymousId,
           button_id: buttonId || undefined,
+          dwell_seconds: dwellSeconds,
         }),
       });
     } catch {

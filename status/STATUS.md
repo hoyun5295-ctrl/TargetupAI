@@ -107,6 +107,21 @@
 
 ---
 
+### 🔴 2026-06-11 — 에이치피오 예약취소 87,014건 실발송 사고 (손해 250만원) — 근본수정 5겹+감사로그 푸시 완료
+> **사고**: 06-10 17:50 취소한 87,014건 LMS가 06-11 10:00 실발송. 근본 = 적재는 사용자 라인(direct-send-worker:55 userId)·취소는 회사 라인만(campaign-lifecycle:158 userId 누락) DELETE 0건 + 효과 검증 없이 cancelled 표시. 라인 불일치는 에이치피오 유일(회사 7,8,9 vs 사용자 1,2,3 — 06-04 09:26 admin 계정이 수동 지정, nginx+audit_logs+MySQL 월별이력 3종 대조로 행위자·시점 확정). 18:00 재예약 bfee8e09 = 그대로 발송 결정.
+> **근본수정 5겹(커밋 93d37a0)**: ① 발송 당시 테이블 기록 send_config.sentTables ② getCampaignQueueTables CT 신설(기록 1순위+전 라인 합집합) — 취소·수신자조회/삭제·시간변경·문안수정·안전망 6곳 단일 헬퍼 ③ 취소 = 삭제 후 잔존 0 검증 후에만 성공(거짓 표시 차단) ④ direct-send-worker 취소 가드 3곳(적재 전/중/직후) ⑤ cancelled-queue-sweeper 1분 안전망 신규.
+> **후속(커밋 83b780f)**: 감사 로그 — utils/audit-log.ts CT + 기록 5곳(사용자 수정 diff·라인그룹 CRUD·회사 라인 변경) + 열람 ceo 전용(AUDIT_LOG_VIEWER_IDS, /audit-logs 403+access+메뉴 게이팅) + 사용자 수정 3필드(line_group_id/store_codes/opt_out_080) 무조건 덮어쓰기 → 명시 시에만 변경.
+> **영구 룰**: CLAUDE.md 최상단 `dev_process_six_rules` 6원칙 신설(전수 grep 쓰기 경로까지/효과 검증 후 성공 표시/이중 진실=안전망 워커/라우팅 축=영향표/실측 1건/수정 전 승인).
+> **잔여**: billing.ts:23 정산이 회사 라인만 집계(돈 — 별도 검증 의무) / 과거 취소 건 실발송 사후 대조 / sync-agent 설치 UI 모델명·단가 노출 13곳 제거(재빌드 필요, Harold 결정 대기).
+
+---
+
+### 🟢 2026-06-11 — 고도몰(이새에프앤씨) 연동 준비 + 인앱메시지 설계도
+> **고도몰**: 업체 전달용 Word 2건 생성 — `docs/고도몰_연동_가이드_업체전달용.docx`(SDK+에이전트 통합) + `sync-agent/SyncAgent_설치매뉴얼_v1_5_4_개정_2026-06.docx`(기존 12장 유지+수신동의/매장구분/체크리스트/FAQ 3건 보강, 구매 전체 재동기화 "중복 없음" 서술을 중복 위험으로 정정). 내부정보·모델명 0 검증. 에이전트 동의 컬럼 미매핑 = 전원 동의(true) 등록(sync.ts:615) — SDK/웹훅(기본 false)과 반대.
+> **인앱메시지(다음 세션)**: 분석 확정 — 백엔드(V2 선별·키+도메인 인증·트래킹)/관리자 화면/SDK inapp.ts 전부 완성인데 **실행 배선 0**(IIFE 미탑재+HanjulloSDK sk_ 모순+identify 미연결+track 브리지 부재) → 현재 모달 절대 안 뜸. 설계도 = `docs/superpowers/plans/2026-06-11-inapp-sdk-wiring-plan.md` (T0 DB 덤프→T1 배선→T2 브리지→T3 개인화 서버 동봉→T5 재빌드→T7 실측 1건 + D절 AI 백로그 5건 + E절 크레딧 권고: 현행 3/15/1 유지+플랜별 활성 메시지 한도).
+
+---
+
 ### 🔴 2026-06-09 — 알림톡 강조표기형 7300 전부 실패 — 근본 확정(QTmsg 에이전트 select_sql), IMC 답변 대기
 > **근본(확정)**: 발송 에이전트 QTmsg(`/home/administrator/agent1~11/bin`, java 11개, PM2 아님)의 `conf/qtmsg.xml` select_sql이 발송 직전 `k_etc_json` 앞에 `sender_code`(인비토 특수유형 부가통신사업자 식별코드)를 concat — 한줄로가 sender_code를 안 채워 NULL → **MySQL concat NULL 하나면 전체 NULL** → k_etc_json 통째 소실 → 강조 title 미전달 → 7300. 채널추가형·기본형은 etcJson 불요라 무증상. 증거=`SMSQ_SEND_1_202606` 강조형 행 k_etc_json `{"title":…}` 정상+sender_code NULL+7300.
 > **한줄로 반영(배포됨)**: buildAlimtalkEtcJson senderkey 제거({title}만, QTmsg 매뉴얼 232행)+5경로 통일+테스트5. 진단로그 `[ALIMTALK-DEBUG2]`(direct-send-processor) 잔존 — 종결 후 제거 의무.

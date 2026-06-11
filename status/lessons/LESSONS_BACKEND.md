@@ -370,6 +370,23 @@ else concat(concat(concat('{"sendercode":"',sender_code),'",'), replace(k_etc_js
 
 ---
 
+## 예약취소 미삭제 실발송 — 라인 불일치 + 무검증 성공 표시 (2026-06-11 추가)
+
+### 2026-06-11 — 에이치피오 예약취소 87,014건 실발송 (손해 250만원, CLAUDE.md 최상단 6원칙의 기원)
+
+**사고**: 06-10 17:50 취소(화면·PG 모두 취소 표시)한 87,014건 LMS가 06-11 10:00 실발송. 예약 직접발송 = 등록 직후 MySQL 큐 선적재(sendreq_time=예약시각)라 취소의 실체는 큐 DELETE인데, 적재는 사용자 라인(`getCompanySmsTables(companyId, userId)`)·취소는 회사 라인만(`getCompanySmsTables(companyId)` — userId 누락) 조회해 DELETE 0건 → 검증 없이 PG만 cancelled → 발송. 전날(0610) 같은 라인 불일치를 집계(읽기)에서 고치고 취소(쓰기) 경로 전수 grep을 빠뜨린 대가.
+
+**근본수정 5겹**: ① 적재 워커가 실제 INSERT 테이블을 `send_config.sentTables`에 기록 ② `getCampaignQueueTables` CT(기록 1순위+회사·사용자·전 사용자 라인 합집합) — 큐를 만지는 6곳(취소/수신자조회/수신자삭제/시간변경/문안수정/안전망) 단일 헬퍼 ③ 취소 = DELETE 후 잔존 0 재카운트 검증 후에만 성공 응답(잔존>0이면 success:false — 환불·PG 변경 전이라 무변경) ④ direct-send-worker 취소 가드 3곳(queued 조회·claim에 status!='cancelled' + 청크마다 감지 시 적재분 삭제 중단 + 완료 UPDATE 가드) ⑤ cancelled-queue-sweeper 1분 안전망(취소됐는데 큐에 남은 행 자동 삭제, SMS+카카오).
+
+**교훈**:
+- **큐를 변경하는 모든 경로(취소/삭제/시간변경/문안수정)는 발송 적재와 같은 테이블 집합을 보고, 변경 후 실제 효과(잔존 0)를 검증한 뒤에만 성공 표시.** DELETE 0건인데 성공 응답 = 시스템이 거짓말 — 예약시간 변경·문안 수정도 같은 결함이라 화면만 바뀌고 옛 시각·옛 문안으로 발송되던 잠재 사고였다.
+- **같은 원인 fix 시 읽기(집계)뿐 아니라 쓰기(DELETE/UPDATE) 경로까지 전수 grep** — 하루 차이로 같은 뿌리 재발.
+- **예약 발송 구조 = 큐 선적재라 PG 상태는 발송을 막지 못한다.** PG 상태 ↔ MySQL 큐처럼 진실이 두 곳이면 자동 대조 안전망 워커 동반 의무.
+- 사후 추적 = nginx access log(시각·IP·UA) + audit_logs login(계정) + MySQL 월별 이력(라인 전환점) 3종 대조로 본문 로그 없이도 행위를 데이터로 닫을 수 있다. 이후는 audit-log CT가 변경 전후를 직접 기록.
+- 상세 = CLAUDE.md `dev_process_six_rules` + `memory/project_2026_0611_cancel_line_mismatch_incident.md`.
+
+---
+
 ## 자가 검증 매트릭스 (Backend 작업 시)
 
 - [ ] 발송 5경로 전수 점검 (AI/직접/타겟/스케줄/테스트)
