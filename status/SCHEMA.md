@@ -535,7 +535,7 @@
 | reviewed_at | timestamptz |
 | reviewed_by | uuid |
 | alarm_notified_status | varchar(10) NULL — D135+ |
-| imc_template_status | varchar(10) NULL — ★ 2026-06-10 신설(CT-87). IMC 템플릿 활성상태 A(정상)/R(활성 대기)/S(중단)/D(삭제). 검수상태(status)와 별개 — APR+R이면 카카오가 발송 전부 7300 거부 (B_IV_013_02_79738 실사례). 동기화 = 30분 워커 syncTemplateStatuses + 5분 job + 단건 GET. 실행 SQL: `ALTER TABLE kakao_templates ADD COLUMN IF NOT EXISTS imc_template_status varchar(10);` |
+| imc_template_status | varchar(10) NULL — ★ 2026-06-10 신설(CT-87) → **2026-06-11 정의 정정(휴머스온 공식)**: S=중지 / A=정상 / R=대기(발송 전 — 첫 발송 시 자동 A 전환, **차단 사유 아님**). 검수상태(status)와 별개. 79738 7300의 진짜 원인은 R이 아니라 대표링크(represent_link) 발송 미동봉이었음 — CT-87의 R 차단은 신규 템플릿 첫 발송을 영구 차단하는 역효과라 해제 정정 의무(미배포). 동기화 = 30분 워커 syncTemplateStatuses + 5분 job + 단건 GET. ALTER 미실행 상태(2026-06-11 운영 실측 — 컬럼 없음, 가드는 null 안전 통과). 실행 SQL: `ALTER TABLE kakao_templates ADD COLUMN IF NOT EXISTS imc_template_status varchar(10);` |
 
 ### kakao_friendtalk_images (카카오 친구톡 이미지, 레거시)
 | 컬럼 | 타입 |

@@ -387,6 +387,20 @@ else concat(concat(concat('{"sendercode":"',sender_code),'",'), replace(k_etc_js
 
 ---
 
+### 2026-06-11 — 알림톡 강조형 7300 최종 근본 = 대표링크 미동봉 (이틀 추적 종결 — 가설 2개 폐기)
+
+**사고/추적**: 79738 강조표기형만 전 건 7300. 가설 1(sender_code concat NULL — 부차, 가드 수정으로 종결)·가설 2(imc_template_status R 차단 — 폐기) 거쳐, 휴머스온 답변+실측으로 최종 확정: **템플릿에 등록된 대표링크(ATTACHMENT.link)를 발송 요청에 미동봉 → 카카오 등록값 불일치 거부**. 한줄로는 `kakao_templates.represent_link`를 저장만 하고 발송 경로 소비 0건이었다.
+
+**교훈**:
+- **카카오 알림톡의 템플릿 부속 데이터(버튼·대표링크)는 "등록값 = 발송 요청 동봉값" 일치 의무.** 저장 컬럼이 있다고 끝이 아니라 발송 적재까지 이어져야 한다. 신규 템플릿 요소 추가 시 = 등록 → 저장 → 발송 동봉 → 게이트웨이 변환 → IMC 4구간 전부 점검.
+- **IMC 템플릿 status 정의(휴머스온 공식): S=중지 / A=정상 / R=대기(발송 전 — 첫 발송 시 자동 A).** R은 차단 사유가 아니다. "발송해야 A가 되는데 발송을 막는" 차단 로직은 신규 템플릿 첫 발송을 영구 차단하는 역효과 — 상태값 의미는 공급사 공식 정의로만 확정하고 추정 차단 금지.
+- **다구간 체인(한줄로→에이전트→게이트웨이→IMC→카카오) 디버깅 = 구간별 운반 실측으로 막힌 지점을 좁힌다.** 형식 추측 반복(LINKTEST 5회) 대신 각 구간 로그(SMSQ 적재값 → 게이트웨이 deliver 전문 → IMC 접수 데이터)를 먼저 대조했으면 1회에 끝났다. "다른 업체는 된다" = 그 업체 발송의 실제 전문을 보는 게 최단 경로(타업체는 전부 대표링크 없는 템플릿이었음).
+- **차이 변수 확정은 대조군 SQL 1방** — 정상 5개 vs 실패 1개 템플릿의 represent_link/buttons 한 줄 비교로 원인 변수가 즉시 드러났다.
+- 게이트웨이(인비토 자체, mmsr3/ngen) deliver 전문 필드 = title/btnJson/etcJson뿐. btnJson=버튼 전용(매뉴얼 name1/type1/url1_1/url1_2 → IMC button 변환 실증), etcJson=평면 변수 봉투(title/senderkey/sendercode 실증). link는 엔진 매핑 추가(서팀장) 후 etcJson `{"link":{"urlMobile","urlPc"}}`로 운반 예정. IMC v1 스펙 = link 최상위 camelCase, link 포함 시 버튼 최대 2개.
+- 상세 = `memory/project_2026_0609_alimtalk_emphasize_etcjson_diagnosis.md` + STATUS.md 2026-06-11 항목.
+
+---
+
 ## 자가 검증 매트릭스 (Backend 작업 시)
 
 - [ ] 발송 5경로 전수 점검 (AI/직접/타겟/스케줄/테스트)

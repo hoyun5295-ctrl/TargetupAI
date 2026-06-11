@@ -116,17 +116,20 @@
 
 ---
 
-### 🟢 2026-06-11 — 고도몰(이새에프앤씨) 연동 준비 + 인앱메시지 설계도
-> **고도몰**: 업체 전달용 Word 2건 생성 — `docs/고도몰_연동_가이드_업체전달용.docx`(SDK+에이전트 통합) + `sync-agent/SyncAgent_설치매뉴얼_v1_5_4_개정_2026-06.docx`(기존 12장 유지+수신동의/매장구분/체크리스트/FAQ 3건 보강, 구매 전체 재동기화 "중복 없음" 서술을 중복 위험으로 정정). 내부정보·모델명 0 검증. 에이전트 동의 컬럼 미매핑 = 전원 동의(true) 등록(sync.ts:615) — SDK/웹훅(기본 false)과 반대.
-> **인앱메시지(다음 세션)**: 분석 확정 — 백엔드(V2 선별·키+도메인 인증·트래킹)/관리자 화면/SDK inapp.ts 전부 완성인데 **실행 배선 0**(IIFE 미탑재+HanjulloSDK sk_ 모순+identify 미연결+track 브리지 부재) → 현재 모달 절대 안 뜸. 설계도 = `docs/superpowers/plans/2026-06-11-inapp-sdk-wiring-plan.md` (T0 DB 덤프→T1 배선→T2 브리지→T3 개인화 서버 동봉→T5 재빌드→T7 실측 1건 + D절 AI 백로그 5건 + E절 크레딧 권고: 현행 3/15/1 유지+플랜별 활성 메시지 한도).
+### 🟢 2026-06-11 — 인앱메시지 SDK 배선 T0~T6 구현 완료(미배포) + 고도몰 SDK 가이드 3차 보강(완성코드판)
+> **인앱 배선(코드 완료·미배포, 커밋 대기)**: 설계도 T0~T6 전 단계 TDD(신규 테스트 16) 구현. T0=운영 43컬럼 실측 ALTER 불요(SCHEMA.md 실측 기록). T1=auto-capture IIFE에 HanjulloInAppModule 생성+window.hjl.inapp 공개+identify 직후 init+늦은 로그인 재조회. T2=track(cart_add/cart_view/checkout_start) 인앱 트리거 브리지+cart-estimate.ts(price×quantity 세션 누적→cart_value). T3=/inapp/active 응답 customer 동봉(CT-79 확장: INAPP_BROWSER_VAR_WHITELIST phone 제외+extractUsedInAppVariables+getInAppCustomerForBrowser)+SDK fallback·캐시 보존. T4=lastInput(늦은 identify에도 최신 identity)+cart_value_min 클라 필터(캐시 hit 포함)+dwell_seconds+data-hjl-inapp-container+401/403 재시도 중단. seenMessageIds는 V2 Step 7 기존 소비 확인(작업 불요). T5=IIFE 재빌드 23,311B(인앱 마커 6종 포함)+v0.3.5 사본 덮어쓰기(해시 동일 — 가이드 기전달·설치 0곳이라 URL 유지 결정). 검증=sdk vitest 75/75·backend ts-node verify OK·tsc 양쪽 0·금지패턴 0. T7 실측 1건(center_modal 표시→impressions 기록→once_per_session→cart_add 트리거)은 배포 후. 발견(추가 과제)=inapp 자동 트리거가 scroll_percent/time_on_page_seconds 조건값 클라 비교 없음.
+> **고도몰 가이드 3차 보강(`docs/고도몰_SDK_설치가이드.md`+docx 129단락)**: ①용어 한눈에 표 14항목(비전공자용, 영업 혼란 사건 — 발급 화면 5종 값 용도 불명 → "SDK 설치는 설치 스크립트 한 줄뿐" 표 신설) ②실변수 완성코드 — 회원식별 `{=gSess.memNo}/{=gSess.cellPhone}/{=gSess.memNm}`(이메일은 gSess 표준에 없음 명시)·장바구니 `{=goodsView['goodsNm']}`/`{=gd_isset(goodsView['goodsPrice'],0)}`+AJAX 성공 콜백 안내·구매 `{=orderInfo.orderNo}` ③PC·모바일 스킨 양쪽 설치 명시 ④트러블슈팅 6단계(허용도메인→스킨반영→한쪽누락→광고차단→키→연락) ⑤인앱 자동표시 절+CDN 내부항목 제거. 다른 페이블 리뷰 4지적 전부 반영.
+> **고도몰(기존)**: 업체 전달용 Word 2건 — `docs/고도몰_연동_가이드_업체전달용.docx` + `sync-agent/SyncAgent_설치매뉴얼_v1_5_4_개정_2026-06.docx`. 에이전트 동의 컬럼 미매핑 = 전원 동의(true) 등록(sync.ts:615) — SDK/웹훅(기본 false)과 반대.
+> **배포(인앱 배선분)**: backend+company-frontend 두 곳 build:safe (frontend 무변경). 설계도 D절 AI 백로그 5건+E절 크레딧 권고는 Harold 선별 대기.
 
 ---
 
-### 🔴 2026-06-09 — 알림톡 강조표기형 7300 전부 실패 — 근본 확정(QTmsg 에이전트 select_sql), IMC 답변 대기
-> **근본(확정)**: 발송 에이전트 QTmsg(`/home/administrator/agent1~11/bin`, java 11개, PM2 아님)의 `conf/qtmsg.xml` select_sql이 발송 직전 `k_etc_json` 앞에 `sender_code`(인비토 특수유형 부가통신사업자 식별코드)를 concat — 한줄로가 sender_code를 안 채워 NULL → **MySQL concat NULL 하나면 전체 NULL** → k_etc_json 통째 소실 → 강조 title 미전달 → 7300. 채널추가형·기본형은 etcJson 불요라 무증상. 증거=`SMSQ_SEND_1_202606` 강조형 행 k_etc_json `{"title":…}` 정상+sender_code NULL+7300.
-> **한줄로 반영(배포됨)**: buildAlimtalkEtcJson senderkey 제거({title}만, QTmsg 매뉴얼 232행)+5경로 통일+테스트5. 진단로그 `[ALIMTALK-DEBUG2]`(direct-send-processor) 잔존 — 종결 후 제거 의무.
-> **대기**: 서팀장→IMC 메일(①인비토 식별코드 값+넣는 위치/자동 여부 ②문자 SMS/LMS 중계사 자동삽입 확인 ③카카오 식별코드 불필요 확인→select_sql sendercode 합침 제거 가능 ④한줄로 추가 설계 필요 여부 ⑤강조 etcJson 형식 title만/title+subtitle).
-> **답변 후 처리 분기 = `docs/superpowers/handoffs/2026-06-09-alimtalk-emphasize-7300-imc-handoff.md`** (A 카카오 불필요→에이전트 11개 select_sql 수정+재기동 / B 한줄로 sender_code 채움 / C 문자 포함 전수 / D subtitle 추가). 상세=`memory/project_2026_0609_alimtalk_emphasize_etcjson_diagnosis.md`+`LESSONS_BACKEND D234+`.
+### 🔴 2026-06-11 — 알림톡 강조표기형 7300 **최종 근본 확정 = 대표링크(ATTACHMENT.link) 미동봉** — 게이트웨이 매핑 추가 대기(서팀장)
+> **최종 근본(휴머스온 답변+실측 5회 확정)**: 79738만 `kakao_templates.represent_link` 등록(`{"urlPc","urlMobile"}` — 정상 발송 5개 템플릿은 전부 미등록, PG 실측)인데 **발송 요청에 link 미동봉 → 카카오 템플릿 불일치 거부**. 한줄로는 represent_link를 저장만 하고 발송 경로 소비 0건(grep). 옛 가설 2개 폐기 — ① sender_code concat(부차: 가드 수정 완료, 식별코드 301170011 엔진 자동삽입) ② imc_template_status R 차단(휴머스온 정의 **S=중지/A=정상/R=발송 전 대기, 첫 발송 시 자동 A** — R은 차단 사유 아님, CT-87 R 차단은 신규 템플릿 첫 발송 영구 차단 역효과라 정정 의무).
+> **운반 구간 실측(LINKTEST1~6, Harold 번호 2개)**: etcJson snake/camel link·btnJson link객체·btnJson 버튼형식(name 유/무) 전부 7300. 게이트웨이(인비토 자체, mmsr3/ngen) 로그 = **etcJson의 link가 게이트웨이까지 온전 도달** + 휴머스온 "IMC 접수에 ATTACHMENT 없음" → **막히는 지점 = 게이트웨이 엔진이 etcJson에서 title만 IMC로 옮기고 link 미전달**. 타업체 성공 사례는 전부 대표링크 없는 템플릿(etcJson title만 — 전달 모양 한줄로와 동일). deliver 전문 필드=title/btnJson/etcJson뿐(link 전용 자리 없음). btnJson 버튼형식은 button으로 변환됨(채널추가 1800 실증 — 버튼 통로 정상).
+> **해법(확정·진행 대기)**: ① 서팀장 — 게이트웨이 엔진에 etcJson 안 `link` 객체 → IMC 요청 최상위 `link`(urlMobile/urlPc) 매핑 추가. ② 한줄로 — 발송 4경로에서 대표링크 템플릿이면 etcJson에 `{"title":…,"link":{"urlMobile":…,"urlPc":…}}` 합성(공통 CT, buildAlimtalkEtcJson 확장) — ① 완료 통보 후 구현+실측 1건. ③ 어제 미배포분 정정 묶음 = CT-87 R 차단 해제(S/D만)+화면 "발송불가" 뱃지 문구+SCHEMA.md imc_template_status 주석 — Harold 동의 대기.
+> **잔여**: 진단로그 `[ALIMTALK-DEBUG2]`(direct-send-processor) 제거 의무(종결 시). LINKTEST1~6 테스트 행 = SMSQ_SEND_1_202606 app_etc1 LIKE 'LINKTEST%' (정산 집계 시 제외 식별 가능). IMC v1 스펙 제약 = link 포함 시 버튼 최대 2개. 5월 79955 버튼 발송 url1_1 빈 값 92 건은 CT(convertButtonsToQTmsg) 도입 전 경로 — 현행 CT는 urlMobile 정상 처리.
+> 상세=`memory/project_2026_0609_alimtalk_emphasize_etcjson_diagnosis.md`(2026-06-11 갱신)+IMC v1 스펙=Developer Portal(link 최상위 camelCase·강조형 link 허용).
 
 ---
 
