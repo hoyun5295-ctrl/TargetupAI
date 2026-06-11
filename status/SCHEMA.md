@@ -535,6 +535,7 @@
 | reviewed_at | timestamptz |
 | reviewed_by | uuid |
 | alarm_notified_status | varchar(10) NULL — D135+ |
+| imc_template_status | varchar(10) NULL — ★ 2026-06-10 신설(CT-87). IMC 템플릿 활성상태 A(정상)/R(활성 대기)/S(중단)/D(삭제). 검수상태(status)와 별개 — APR+R이면 카카오가 발송 전부 7300 거부 (B_IV_013_02_79738 실사례). 동기화 = 30분 워커 syncTemplateStatuses + 5분 job + 단건 GET. 실행 SQL: `ALTER TABLE kakao_templates ADD COLUMN IF NOT EXISTS imc_template_status varchar(10);` |
 
 ### kakao_friendtalk_images (카카오 친구톡 이미지, 레거시)
 | 컬럼 | 타입 |

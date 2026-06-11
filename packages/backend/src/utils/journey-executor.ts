@@ -497,6 +497,18 @@ async function processExecution(exec: ExecutionRow): Promise<StepOutcome> {
       await logFailedStep(exec.execution_id, step.id, 'alimtalk_template_not_approved');
       return 'failed';
     }
+    // ★ CT-87 (2026-06-10): 카카오 활성상태(A) 가드 — 활성 대기(R) 템플릿은 카카오가 전부 7300 거부
+    {
+      const { decideKakaoTemplateSendable, getImcTemplateStatusSafe } = await import('./kakao-template-guard');
+      const journeyTplGuard = decideKakaoTemplateSendable(
+        await getImcTemplateStatusSafe(exec.company_id, step.alimtalk_template_code)
+      );
+      if (!journeyTplGuard.sendable) {
+        await pauseJourney(exec.journey_id, `step ${step.step_order} ${journeyTplGuard.reason || '카카오 템플릿 비활성'}`);
+        await logFailedStep(exec.execution_id, step.id, 'alimtalk_template_inactive');
+        return 'failed';
+      }
+    }
     // 알림톡 본문 = template.content + alimtalk_variable_map 치환 (@@필드키@@ → customer[필드키] / 그 외 = 직접 입력값 그대로)
     message = replaceAlimtalkVars(
       String(kakaoTemplateRow!.content || ''),

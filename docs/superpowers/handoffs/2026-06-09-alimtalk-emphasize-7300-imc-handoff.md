@@ -3,6 +3,17 @@
 > 근본 원인 확정 + IMC 확인 메일 발송 대기 상태에서 세션 종료. IMC 답변 받으면 이 문서 분기대로 처리.
 > 상세 추적 기록 = `memory/project_2026_0609_alimtalk_emphasize_etcjson_diagnosis.md` + `status/lessons/LESSONS_BACKEND.md` D234+.
 
+## ★ 2026-06-10 IMC(서수란 팀장) 답변 수신 — 분기 A 확정
+
+- 인비토 식별코드 = 특부가 등록번호 9자리 **301170011**. KISA 고시 개정 예정(1년마다 재부여) — 개정일 미확정.
+- **한줄로는 인비토 엔진에 식별코드가 등록돼 있어 Agent로 들어온 문자 데이터에 자동 삽입** → 한줄로가 sender_code 컬럼·k_etc_json sendercode를 채울 필요 없음 (분기 B·C 불요).
+- k_etc_json의 `"sendercode"` 합성은 **재판매사가 문자별로 다른 식별코드를 쓸 때만** 쓰는 기능 — 한줄로 해당 없음.
+- 알림톡 LMS 대체발송도 한줄로 자체 insert 구조라 엔진이 자동 삽입 — 문제 없음.
+- 강조표기 = `{"title":"승인 내용"}`만 k_etc_json에 (subtitle 없음 — 분기 D 불요). 한줄로 `buildAlimtalkEtcJson` 현행과 일치.
+- 부가/광고/복합 템플릿 = 카카오가 등록 정보 재활용, 템플릿코드만 정확히. (버튼 있으면 버튼정보 필요 — 채널추가형은 한줄로 실측 1800 정상이라 현행 유지.)
+- 처리 = **아래 분기 A 그대로**: agent1~11 select_sql NULL 가드 + 재기동 (Harold 직접). 한줄로 코드 변경 0.
+- 한줄로 잔여 의무였던 진단 로그 `[ALIMTALK-DEBUG2]`는 2026-06-10 제거 완료(direct-send-processor.ts).
+
 ## 1. 확정된 근본 원인
 
 발송 에이전트 QTmsg(`/home/administrator/agent1~11/bin`, java 11개, PM2 아님)의 `conf/qtmsg.xml` `<select_sql>`:

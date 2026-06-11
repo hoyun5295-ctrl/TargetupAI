@@ -36,6 +36,8 @@ interface Template {
   buttons: any[];
   quick_replies: any[];
   status: string;
+  /** ★ CT-87 (2026-06-10): IMC 템플릿 활성상태 (A=정상/R=활성 대기/S=중단/D=삭제) — A 아니면 발송 거부됨 */
+  imc_template_status?: string | null;
   reject_reason: string | null;
   extra_content: string | null;
   emphasize_title: string | null;
@@ -714,6 +716,18 @@ export default function AlimtalkManagementSection() {
                       >
                         {st.label}
                       </span>
+                      {/* ★ CT-87 (2026-06-10): 검수 승인이어도 카카오 활성상태가 A가 아니면 발송 불가 — 실상태 병기.
+                          (검수 승인인데 활성 대기 R이라 발송이 전부 7300으로 실패하던 사례의 화면 안전망) */}
+                      {['APPROVED', 'APR'].includes(t.status) && t.imc_template_status && t.imc_template_status !== 'A' && (
+                        <span
+                          className={`inline-block text-[10px] px-2 py-0.5 rounded ml-1 ${
+                            t.imc_template_status === 'R' ? 'bg-amber-100 text-amber-700' : 'bg-rose-100 text-rose-700'
+                          }`}
+                          title="카카오 측 템플릿 활성상태가 A(정상)가 아니면 발송이 거부됩니다. 카카오 검수팀에 활성 전환을 요청해주세요."
+                        >
+                          {t.imc_template_status === 'R' ? '활성 대기 · 발송불가' : t.imc_template_status === 'S' ? '중단 · 발송불가' : `${t.imc_template_status} · 발송불가`}
+                        </span>
+                      )}
                     </td>
                     <td className="px-3 py-2 text-[11px] text-gray-500 whitespace-nowrap">
                       {t.created_at

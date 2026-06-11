@@ -89,6 +89,8 @@ import { startKakaoTemplateSyncWorker } from './utils/kakao-template-sync-worker
 import { startScheduledCleanupWorker } from './utils/scheduled-cleanup-worker';
 // ★ 대량 발송 파이프라인 (2026-05-30): direct-send-worker — staging 청크 발송 + 진행률 (5초 주기)
 import { startDirectSendWorker } from './utils/direct-send-worker';
+// ★ 2026-06-11: 취소 잔존 큐 안전망 — 취소됐는데 발송 큐에 남은 행 자동 삭제 (에이치피오 사고 재발 차단)
+import { startCancelledQueueSweeper } from './utils/cancelled-queue-sweeper';
 // ★ 2026-06-10: CDP webhook 실패 재처리 + unified profile 자동 재계산
 import { startCdpWebhookRetryWorker } from './utils/cdp-webhook-retry-worker';
 import { startCdpProfileRecomputeWorker } from './utils/cdp-profile-recompute-worker';
@@ -383,6 +385,9 @@ app.listen(PORT, () => {
 
   // ★ 대량 발송 (2026-05-30): staging 청크 발송 worker — 5초 주기 queued 처리 + commit 즉시 트리거
   startDirectSendWorker();
+
+  // ★ 2026-06-11: 취소 잔존 큐 안전망 (1분 주기) — 취소 경로가 못 지운 발송 대기 행 자동 삭제
+  startCancelledQueueSweeper();
 
   // ★ 2026-06-10: CDP webhook 실패 재처리 (5분 주기, 최대 3회) — 일시 오류 데이터 유실 차단
   startCdpWebhookRetryWorker();

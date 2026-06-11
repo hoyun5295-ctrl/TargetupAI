@@ -262,6 +262,95 @@ export async function syncTemplateCodes(
 }
 
 /**
+ * ★ 2026-06-10 신설 — IMC 템플릿 "활성상태(status A/R/S/D)" 동기화.
+ *
+ * 배경: 강조표기형 7300 추적 종결 — IMC에는 검수상태(inspectionStatus)와 별개로
+ * 템플릿 활성상태(status)가 있고, 검수 APR이어도 status가 R(활성 대기)이면 카카오가
+ * 모든 발송을 7300으로 거부한다. 한줄로는 이 값을 저장하지 않아 화면은 "승인"으로
+ * 보이는데 발송만 계속 실패하는 상태를 만들 수 있었다 (B_IV_013_02_79738 실사례).
+ *
+ * 동작: IMC 전체 목록(이미 검증된 templateList 페이지네이션)을 받아 template_key로
+ * 매칭, imc_template_status·reject_reason 변경분만 UPDATE.
+ * kakao_templates.imc_template_status 컬럼 미마이그레이션(ALTER 전)이면 안내 로그 후 skip.
+ */
+export async function syncTemplateStatuses(): Promise<{
+  scanned: number;
+  updated: number;
+  skipped: boolean;
+}> {
+  // 0) 컬럼 존재 안전 확인 겸 현재 값 로드 (ALTER 전이면 여기서 column 오류 → skip)
+  let pgRows;
+  try {
+    pgRows = await query(
+      `SELECT id, template_key, template_code, imc_template_status, reject_reason
+         FROM kakao_templates
+        WHERE template_key IS NOT NULL`
+    );
+  } catch (err: any) {
+    const msg = err?.message || '';
+    if (msg.includes('column') && msg.includes('does not exist')) {
+      console.log(
+        '[kakao-template-sync] imc_template_status 컬럼 없음 — ALTER 실행 전까지 활성상태 동기화 skip'
+      );
+      return { scanned: 0, updated: 0, skipped: true };
+    }
+    throw err;
+  }
+  if (pgRows.rows.length === 0) return { scanned: 0, updated: 0, skipped: false };
+
+  // 1) IMC 전체 목록 → templateKey 매핑 (syncTemplateCodes와 동일 페이지네이션 패턴)
+  const imcByKey = new Map<string, any>();
+  for (let page = 0; page < IMC_MAX_PAGES; page++) {
+    let r;
+    try {
+      r = await imc.listAlimtalkTemplates({ page, count: IMC_PAGE_SIZE });
+    } catch (err: any) {
+      console.log(`[kakao-template-sync][status] IMC list page ${page} 오류 — ${err?.message || err}`);
+      break;
+    }
+    if (r.code !== '0000') break;
+    const items: any[] = (r.data as any)?.templateList || (r.data as any)?.list || [];
+    if (items.length === 0) break;
+    for (const item of items) {
+      const key = item?.templateKey || item?.template_key;
+      if (key) imcByKey.set(String(key), item);
+    }
+    if (items.length < IMC_PAGE_SIZE) break;
+  }
+  if (imcByKey.size === 0) return { scanned: pgRows.rows.length, updated: 0, skipped: false };
+
+  // 2) 변경분만 UPDATE
+  let updated = 0;
+  for (const row of pgRows.rows) {
+    const item = imcByKey.get(String(row.template_key));
+    if (!item) continue;
+    const imcStatus: string | null = item.status ? String(item.status) : null;
+    const imcReject: string | null = item.rejectReason ? String(item.rejectReason) : null;
+    const statusChanged = imcStatus !== (row.imc_template_status || null);
+    const rejectChanged = !!imcReject && imcReject !== (row.reject_reason || null);
+    if (!statusChanged && !rejectChanged) continue;
+    try {
+      await query(
+        `UPDATE kakao_templates
+            SET imc_template_status = $1,
+                reject_reason = COALESCE($2, reject_reason),
+                last_synced_at = now(),
+                updated_at = now()
+          WHERE id = $3::uuid`,
+        [imcStatus, imcReject, row.id]
+      );
+      updated++;
+      console.log(
+        `[kakao-template-sync][status] ${row.template_code} 활성상태 ${row.imc_template_status || '(없음)'} → ${imcStatus || '(없음)'}`
+      );
+    } catch (err: any) {
+      console.log(`[kakao-template-sync][status] UPDATE 실패 id=${row.id}: ${err?.message || err}`);
+    }
+  }
+  return { scanned: pgRows.rows.length, updated, skipped: false };
+}
+
+/**
  * 단일 templateKey 영역 정정 (Phase 2 getAlimtalkTemplate 영역 안 호출 영역 정합).
  *
  * 옛 endpoint = IMC 응답 안 `r.data.templateCode` 영역 = 진정 카카오 코드 영역 영구 받음 →

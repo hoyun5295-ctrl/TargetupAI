@@ -13,6 +13,7 @@ import { normalizePhone } from '../utils/normalize-phone';
 import { isValidCustomFieldKey } from '../utils/safe-field-name';
 import { convertButtonsToQTmsg } from '../utils/alimtalk-button';
 import { buildAlimtalkEtcJson } from '../utils/alimtalk-emphasize';
+import { decideKakaoTemplateSendable, getImcTemplateStatusSafe } from '../utils/kakao-template-guard';
 import { getStoreScope } from '../utils/store-scope';
 import { CAMPAIGN_OPT080_SELECT_EXPR, CAMPAIGN_OPT080_LEFT_JOIN } from '../utils/unsubscribe-helper';
 // ★ 메시징 컨트롤타워 import
@@ -21,7 +22,7 @@ import {
   getCompanySmsTables, hasCompanyLineGroup, getTestSmsTables, getAuthSmsTable,
   invalidateLineGroupCache, getNextSmsTable,
   smsCountAll, smsAggAll, smsSelectAll, smsMinAll, smsExecAll,
-  getCompanySmsTablesWithLogs,
+  getCompanySmsTablesWithLogs, getCompanyAllLiveSmsTables,
   insertKakaoQueue, kakaoAgg, kakaoCountPending, kakaoCancelPending, kakaoBatchAggByGroup,
   bulkInsertSmsQueue, insertAlimtalkQueue, toQtmsgType, insertTestSmsQueue
 } from '../utils/sms-queue';
@@ -1358,6 +1359,9 @@ router.post('/direct-send/commit', async (req: Request, res: Response) => {
       const g = gate.rows[0];
       if (!['APPROVED', 'APR', 'A'].includes(String(g.tstatus).toUpperCase())) return res.status(400).json({ success: false, error: '승인 완료된 템플릿만 발송할 수 있습니다' });
       if (g.approval_status !== 'APPROVED') return res.status(400).json({ success: false, error: '승인 완료된 발신프로필만 사용할 수 있습니다' });
+      // ★ CT-87 (2026-06-10): 검수 승인 + 카카오 활성(A)까지 확인 — 활성 대기(R) 템플릿은 카카오가 전부 7300으로 거부
+      const commitTplGuard = decideKakaoTemplateSendable(await getImcTemplateStatusSafe(companyId, alimtalkTemplateCode));
+      if (!commitTplGuard.sendable) return res.status(400).json({ success: false, error: commitTplGuard.reason, code: commitTplGuard.code });
       // ★ 매뉴얼(qtmsg): k_etc_json = 강조표기 title(raw)만 — senderkey 제외(알림톡은 템플릿코드로 중계서버 자동) / k_button_json = 템플릿 buttons(프론트 전송은 폴백)
       //   title은 #{변수} 포함 가능 — staging worker(direct-send-processor)가 수신자 row별로 치환해 재생성한다.
       alimtalkEtcJson = buildAlimtalkEtcJson({ emphasizeTitle: g.temphasize_title }) ?? null;
@@ -1960,6 +1964,11 @@ router.post('/direct-send', async (req: Request, res: Response) => {
       if (gate.approval_status !== 'APPROVED') {
         return res.status(400).json({ success: false, error: '승인 완료된 발신프로필만 사용할 수 있습니다' });
       }
+      // ★ CT-87 (2026-06-10): 카카오 활성상태(A) 가드 — 활성 대기(R)/중단(S) 템플릿 사전 차단
+      const directTplGuard = decideKakaoTemplateSendable(await getImcTemplateStatusSafe(companyId, alimtalkTemplateCode));
+      if (!directTplGuard.sendable) {
+        return res.status(400).json({ success: false, error: directTplGuard.reason, code: directTplGuard.code });
+      }
 
       // ★ #4-a (2026-06-01 알림톡 디버깅): 결과 조회용 campaigns.kakao_template_id FK 저장 (results.ts:560 JOIN).
       //   INSERT(위 1686)가 게이트보다 앞이라 검증 통과 후 UPDATE. gate.tid 재사용(추가 조회 없음).
@@ -2174,8 +2183,8 @@ router.get('/:id/recipients', async (req: Request, res: Response) => {
 
     const camp = campaign.rows[0];
 
-    // 예약 상태면 먼저 MySQL 회사 라인그룹 테이블에서 조회 시도
-    const recipientTables = await getCompanySmsTables(companyId);
+    // 예약 상태면 먼저 MySQL 라인 테이블(회사+사용자 전 라인 합집합)에서 조회 시도 — 2026-06-11 라인 불일치 fix
+    const recipientTables = await getCompanyAllLiveSmsTables(companyId, camp.created_by || undefined);
     if (camp.status === 'scheduled') {
       // 검색 조건
       const searchCondition = search ? ` AND dest_no LIKE ?` : '';
@@ -2325,8 +2334,8 @@ router.delete('/:id/recipients/:idx', async (req: Request, res: Response) => {
       return res.status(400).json({ success: false, error: '발송 15분 전에는 수정할 수 없습니다', tooLate: true });
     }
 
-    // MySQL 회사 라인그룹 테이블에서 데이터 있는지 확인
-    const delTables = await getCompanySmsTables(companyId);
+    // MySQL 라인 테이블(회사+사용자 전 라인 합집합)에서 데이터 있는지 확인 — 2026-06-11 라인 불일치 fix
+    const delTables = await getCompanyAllLiveSmsTables(companyId, campaign.rows[0].created_by || undefined);
     const mysqlCount = await smsCountAll(delTables, 'app_etc1 = ? AND status_code = 100', [campaignId]);
 
     if (mysqlCount > 0) {
@@ -2393,8 +2402,8 @@ router.put('/:id/reschedule', async (req: Request, res: Response) => {
       return res.status(400).json({ success: false, error: '발송 15분 전에는 시간을 변경할 수 없습니다', tooLate: true });
     }
 
-    // 1. 회사 라인그룹 테이블에서 MIN(sendreq_time) 찾기
-    const reschTables = await getCompanySmsTables(companyId);
+    // 1. 라인 테이블(회사+사용자 전 라인 합집합)에서 MIN(sendreq_time) 찾기 — 2026-06-11 라인 불일치 fix
+    const reschTables = await getCompanyAllLiveSmsTables(companyId, campaign.rows[0].created_by || undefined);
     const currentMinTime = await smsMinAll(reschTables, 'sendreq_time', 'app_etc1 = ? AND status_code = 100', [campaignId]);
 
     // MySQL에 데이터 있으면 시간 조정 (분할전송 간격 유지)
@@ -2455,8 +2464,8 @@ router.put('/:id/message', async (req: Request, res: Response) => {
       return res.status(400).json({ success: false, error: '발송 15분 전에는 수정할 수 없습니다', tooLate: true });
     }
 
-    // 1. MySQL 회사 라인그룹 테이블에서 수신자 목록 조회 (전화번호, seqno, 테이블명 포함)
-    const msgTables = await getCompanySmsTables(companyId);
+    // 1. MySQL 라인 테이블(회사+사용자 전 라인 합집합)에서 수신자 목록 조회 — 2026-06-11 라인 불일치 fix
+    const msgTables = await getCompanyAllLiveSmsTables(companyId, campaign.rows[0].created_by || undefined);
     const recipients = await smsSelectAll(msgTables,
       'seqno, dest_no',
       'app_etc1 = ? AND status_code = 100',

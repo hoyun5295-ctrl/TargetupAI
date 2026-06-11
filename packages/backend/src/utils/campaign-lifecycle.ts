@@ -6,7 +6,7 @@
 
 import { query } from '../config/database';
 import {
-  getCompanySmsTables, getCompanySmsTablesWithLogs,
+  getCompanySmsTablesWithLogs, getCompanyAllLiveSmsTables,
   smsCountAll, smsExecAll, smsBatchAggByGroup,
   kakaoCountPending, kakaoCancelPending, kakaoBatchAggByGroup
 } from './sms-queue';
@@ -155,7 +155,9 @@ export async function cancelCampaign(
   }
 
   // 3. MySQL 대기 중인 메시지 건수 확인
-  const cancelTables = await getCompanySmsTables(companyId);
+  // ★ 2026-06-11: 적재는 사용자 라인(direct-send-worker가 userId 전달)인데 취소는 회사 라인만 보던
+  //   불일치로 DELETE 0건 → 예약 시각 실발송 사고(에이치피오 87,014건). 회사+사용자 전 라인 합집합에서 삭제.
+  const cancelTables = await getCompanyAllLiveSmsTables(companyId, camp.created_by || undefined);
   const cancelCount = await smsCountAll(cancelTables, 'app_etc1 = ? AND status_code = 100', [campaignId]);
   let kakaoCancelCount = 0;
   try {
@@ -186,6 +188,20 @@ export async function cancelCampaign(
   // 5. 카카오 대기건 삭제
   if (kakaoCancelCount > 0) {
     try { await kakaoCancelPending(campaignId); } catch (kakaoErr) { console.warn(`[취소] 카카오 대기건 삭제 실패 (무시):`, (kakaoErr as Error).message); }
+  }
+
+  // 5-1. ★ 2026-06-11 취소 검증 — 삭제 후 대기(100) 행이 남으면 'cancelled' 표시를 거부한다.
+  //   잘못된 테이블 DELETE 0건인데 화면만 취소로 표시되어 예약 시각에 실발송되던 사고 차단.
+  //   환불·PG 상태 변경 전에 검증하므로 실패 시 아무것도 바뀌지 않는다 (재시도 가능).
+  const remainingPending = await smsCountAll(cancelTables, 'app_etc1 = ? AND status_code = 100', [campaignId]);
+  if (remainingPending > 0) {
+    console.log(`[취소] campaign ${campaignId}: 삭제 후에도 대기 ${remainingPending}건 잔존 — 취소 미완료 처리 (status 유지)`);
+    return {
+      success: false,
+      error: `취소가 완료되지 않았습니다 (발송 대기 ${remainingPending}건 잔존). 다시 시도해주세요.`,
+      cancelledCount: 0,
+      refundedAmount: 0,
+    };
   }
 
   // 6. 선불 환불

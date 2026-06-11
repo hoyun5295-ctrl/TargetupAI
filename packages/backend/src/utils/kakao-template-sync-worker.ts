@@ -15,7 +15,7 @@
  *   - 옛 캠페인 sync worker 영역 패턴 정합 (campaign-sync-worker.ts 영역)
  */
 
-import { syncTemplateCodes } from './kakao-template-sync';
+import { syncTemplateCodes, syncTemplateStatuses } from './kakao-template-sync';
 
 const INTERVAL_MS = 30 * 60 * 1000; // 30분 영역
 const BOOT_DELAY_MS = 60 * 1000;    // 60초 영역 (서버 부팅 영구 안전)
@@ -42,8 +42,16 @@ async function runOnce(): Promise<void> {
       log(
         `사이클 종결 — scanned=${result.scanned} matched=${result.matched} updated=${result.updated} skipped=${result.skipped} failed=${result.failed} (${elapsedMs}ms)`,
       );
-    } else {
-      // scanned 0건 영역 = 옛 Tmp_xxx 영역 영구 X (영구 정합 영역) = 로그 영역 자제
+    }
+
+    // ★ 2026-06-10: IMC 템플릿 활성상태(A/R/S) 동기화 — 검수 승인인데 활성 대기(R)라 7300 나던 사례의 영구 안전망
+    try {
+      const st = await syncTemplateStatuses();
+      if (st.updated > 0) {
+        log(`활성상태 동기화 — scanned=${st.scanned} updated=${st.updated}`);
+      }
+    } catch (stErr: any) {
+      log('활성상태 동기화 오류 (skip):', stErr?.message || stErr);
     }
   } catch (err: any) {
     log('전체 오류:', err?.message || err);

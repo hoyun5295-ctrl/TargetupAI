@@ -919,6 +919,20 @@ async function executeAutoCampaign(ac: any): Promise<void> {
         await advanceNextRun(ac);
         return;
       }
+      // ★ CT-87 (2026-06-10): 카카오 활성상태(A) 가드 — 활성 대기(R) 템플릿은 카카오가 전부 7300 거부
+      {
+        const { decideKakaoTemplateSendable, getImcTemplateStatusByIdSafe } = await import('./kakao-template-guard');
+        const autoTplGuard = decideKakaoTemplateSendable(await getImcTemplateStatusByIdSafe(ac.alimtalk_template_id));
+        if (!autoTplGuard.sendable) {
+          console.warn(`${logPrefix} 알림톡 활성상태 가드 차단 — ${autoTplGuard.code}`);
+          await query(
+            `UPDATE auto_campaign_runs SET status = 'failed', completed_at = NOW(), cancel_reason = $2 WHERE id = $1`,
+            [runId, autoTplGuard.reason || '카카오 템플릿이 활성(A) 상태가 아닙니다']
+          );
+          await advanceNextRun(ac);
+          return;
+        }
+      }
       // ★ 매뉴얼: senderkey 제거 — 알림톡은 k_template_code로 중계서버가 자동 처리(k_etc_json엔 title만)
       // ★ 버그1: k_etc_json = senderkey + 강조표기 title(#{변수} row별 치환) / k_button_json = 템플릿 buttons
       const emphasizeTitleRaw = gate.rows[0].temphasize_title || null;

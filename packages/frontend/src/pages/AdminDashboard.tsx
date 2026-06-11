@@ -4310,6 +4310,15 @@ const handleApproveRequest = async (id: string) => {
                           <span className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium ${getAlimtalkTemplateStatus(t.status).badgeClass}`}>
                             {getAlimtalkTemplateStatus(t.status).label}
                           </span>
+                          {/* ★ CT-87 (2026-06-10): 검수 승인이어도 카카오 활성상태(A 외)면 발송 거부 — 실상태 병기 */}
+                          {getAlimtalkTemplateStatus(t.status).label === '승인' && t.imc_template_status && t.imc_template_status !== 'A' && (
+                            <span
+                              className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium ml-1 ${t.imc_template_status === 'R' ? 'bg-amber-100 text-amber-700' : 'bg-rose-100 text-rose-700'}`}
+                              title="카카오 측 템플릿 활성상태가 A(정상)가 아니면 발송이 거부됩니다."
+                            >
+                              {t.imc_template_status === 'R' ? '활성 대기 · 발송불가' : t.imc_template_status === 'S' ? '중단 · 발송불가' : `${t.imc_template_status} · 발송불가`}
+                            </span>
+                          )}
                         </td>
                         <td className="px-4 py-3 text-gray-500 text-xs">{t.requested_at ? new Date(t.requested_at).toLocaleDateString('ko-KR') : '-'}</td>
                         <td className="px-4 py-3 text-center">

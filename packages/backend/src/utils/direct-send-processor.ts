@@ -239,7 +239,9 @@ export async function processSendChunk(p: SendChunkParams): Promise<SendChunkRes
       };
     });
     try {
-      console.log(`[ALIMTALK-DEBUG2] tpl=${alimtalkRows[0]?.templateCode} | p.etc=${p.alimtalkEtcJson} | OUT.etc=${alimtalkRows[0]?.etcJson} | next=${alimtalkRows[0]?.nextType} | table=${p.companyTables?.[0]}`);
+      // 강조표기형 7300 진단 로그(ALIMTALK-DEBUG2)는 원인 확정으로 제거(2026-06-10).
+      // 근본 = 에이전트 qtmsg.xml select_sql의 sendercode 합성에서 sender_code NULL → k_etc_json 전체 NULL.
+      // 한줄로 측 etcJson은 {"title":치환값}만 — IMC 메일(2026-06-10)로 확정.
       sentCount = await insertAlimtalkQueue(p.companyTables, alimtalkRows, p.campaignId);
     } catch (alimtalkErr) {
       console.error('[direct-send-processor] 알림톡 INSERT 실패:', alimtalkErr);

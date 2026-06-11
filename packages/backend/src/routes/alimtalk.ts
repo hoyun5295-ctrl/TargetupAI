@@ -33,6 +33,7 @@ import {
 import { resolveImcCode } from '../utils/alimtalk-result-map';
 // ★ D217+ (2026-05-26 Harold 명시 진단 영역 정정): 옛 Tmp_xxx 영역 = 진정 카카오 templateCode 영역 동기화
 import { syncTemplateCodes, syncSingleTemplateCode } from '../utils/kakao-template-sync';
+import { normalizeImcTemplateStatus } from '../utils/alimtalk-jobs';
 import {
   syncCategoriesJob,
   syncPendingTemplatesJob,
@@ -847,7 +848,7 @@ router.post(
 
 // 공용 헬퍼: templateCode → {senderKey, id, createdBy} 찾기
 // user 정보가 전달되면 company_user는 본인 소유만 접근 허용 (소유자 체크 D130)
-type TemplateCtx = { senderKey: string; id: string; createdBy: string | null };
+type TemplateCtx = { senderKey: string; id: string; createdBy: string | null; templateKey: string | null };
 
 async function resolveTemplateContext(
   companyId: string,
@@ -855,7 +856,7 @@ async function resolveTemplateContext(
   user?: { userId: string; userType: string } | undefined,
 ): Promise<TemplateCtx | null | 'forbidden'> {
   const r = await query(
-    `SELECT t.id, t.created_by, p.profile_key
+    `SELECT t.id, t.created_by, t.template_key, p.profile_key
        FROM kakao_templates t
        JOIN kakao_sender_profiles p ON p.id = t.profile_id
       WHERE t.template_code = $1 AND t.company_id = $2`,
@@ -866,7 +867,7 @@ async function resolveTemplateContext(
   if (user?.userType === 'company_user' && row.created_by !== user.userId) {
     return 'forbidden';
   }
-  return { senderKey: row.profile_key, id: row.id, createdBy: row.created_by };
+  return { senderKey: row.profile_key, id: row.id, createdBy: row.created_by, templateKey: row.template_key || null };
 }
 
 // 컨트롤타워: 템플릿 접근 체크 + companyId 확보 + 404/403 응답 일원화 (D130)
@@ -902,15 +903,42 @@ router.get('/templates/:templateCode', async (req: Request, res: Response) => {
     if (!ctx) return;
 
     // IMC 최신 상태 동기화
+    // ★ 2026-06-10 정정 2건:
+    //   1) IMC GET 경로 파라미터 = templateKey — D217이 template_code를 카카오 코드로 바꾼 뒤
+    //      code로 호출하면 4013으로 조용히 실패해 단건 동기화가 죽어 있었다.
+    //   2) 기존엔 IMC의 "활성상태(status A/R/S)"를 검수상태 컬럼(status)에 그대로 덮어써
+    //      상태 어휘가 섞였다 → 검수상태는 inspectionStatus 정규화로, 활성상태는 imc_template_status로 분리.
     try {
-      const r = await imc.getAlimtalkTemplate(ctx.senderKey, req.params.templateCode);
+      const r = await imc.getAlimtalkTemplate(ctx.senderKey, ctx.templateKey || req.params.templateCode);
       if (r.code === '0000' && r.data) {
-        await query(
-          `UPDATE kakao_templates
-              SET status = $1, last_synced_at = now()
-            WHERE id = $2`,
-          [(r.data as any).status || 'UNKNOWN', ctx.id],
-        );
+        const d: any = r.data;
+        const inspection = d.inspectionStatus ? normalizeImcTemplateStatus(String(d.inspectionStatus)) : null;
+        const imcTemplateStatus = d.status ? String(d.status) : null;
+        const rejectReason = d.rejectReason ?? null;
+        try {
+          await query(
+            `UPDATE kakao_templates
+                SET status = COALESCE($1, status),
+                    imc_template_status = $2,
+                    reject_reason = COALESCE($3, reject_reason),
+                    last_synced_at = now()
+              WHERE id = $4`,
+            [inspection, imcTemplateStatus, rejectReason, ctx.id],
+          );
+        } catch (colErr: any) {
+          const msg = colErr?.message || '';
+          if (msg.includes('column') && msg.includes('does not exist')) {
+            // imc_template_status ALTER 전 — 검수상태만 갱신
+            await query(
+              `UPDATE kakao_templates
+                  SET status = COALESCE($1, status), last_synced_at = now()
+                WHERE id = $2`,
+              [inspection, ctx.id],
+            );
+          } else {
+            throw colErr;
+          }
+        }
 
         // ★ D217+ (2026-05-26 Harold 명시 진단 영역 정정):
         //   옛 D147 영역 = 검수 통과 후 IMC 안 진정 카카오 templateCode (B_XX_xxx_xx_xxxxx) 영역

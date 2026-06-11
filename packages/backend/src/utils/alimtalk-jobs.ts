@@ -212,6 +212,7 @@ export async function syncPendingTemplatesJob(): Promise<void> {
     company_id: string;
     profile_key: string;
     template_code: string;
+    template_key: string | null;
     template_name: string;
     profile_name: string | null;
     status: string;
@@ -231,6 +232,7 @@ export async function syncPendingTemplatesJob(): Promise<void> {
               p.profile_key,
               p.profile_name,
               t.template_code,
+              t.template_key,
               t.template_name,
               t.status,
               t.alarm_notified_status
@@ -255,9 +257,12 @@ export async function syncPendingTemplatesJob(): Promise<void> {
   let notified = 0;
   for (const row of rows) {
     try {
+      // ★ 2026-06-10 정정: IMC GET 경로 파라미터 = templateKey.
+      //   D217이 template_code를 진짜 카카오 코드(B_XX_...)로 바꾼 뒤로는 code로 호출하면
+      //   4013(찾을 수 없음)으로 조용히 실패해 동기화가 죽어 있었다. template_key 우선, 없으면 code.
       const res = await imc.getAlimtalkTemplate(
         row.profile_key,
-        row.template_code,
+        row.template_key || row.template_code,
       );
       if (res.code !== '0000' || !res.data) continue;
 
@@ -276,16 +281,37 @@ export async function syncPendingTemplatesJob(): Promise<void> {
       const latestStatus = normalizeImcTemplateStatus(rawLatestStatus);
 
       const rejectReason = (res.data as any).rejectReason ?? null;
+      // ★ 2026-06-10: IMC 템플릿 활성상태(A/R/S/D)도 함께 기록 — 검수 APR + 활성 R(발송 불가 7300) 식별용
+      const imcTemplateStatus = (res.data as any).status ? String((res.data as any).status) : null;
 
-      await query(
-        `UPDATE kakao_templates
-            SET status          = $1,
-                reject_reason   = $2,
-                last_synced_at  = now(),
-                updated_at      = now()
-          WHERE id = $3`,
-        [latestStatus, rejectReason, row.id],
-      );
+      try {
+        await query(
+          `UPDATE kakao_templates
+              SET status              = $1,
+                  reject_reason       = $2,
+                  imc_template_status = $3,
+                  last_synced_at      = now(),
+                  updated_at          = now()
+            WHERE id = $4`,
+          [latestStatus, rejectReason, imcTemplateStatus, row.id],
+        );
+      } catch (colErr: any) {
+        const msg = colErr?.message || '';
+        if (msg.includes('column') && msg.includes('does not exist')) {
+          // imc_template_status ALTER 전 — 기존 컬럼만 갱신 (기능 저하 없이 동작 유지)
+          await query(
+            `UPDATE kakao_templates
+                SET status          = $1,
+                    reject_reason   = $2,
+                    last_synced_at  = now(),
+                    updated_at      = now()
+              WHERE id = $3`,
+            [latestStatus, rejectReason, row.id],
+          );
+        } else {
+          throw colErr;
+        }
+      }
       updated++;
 
       // ★ D135+: 검수 상태 종결 전환 감지 → 담당자 SMS 자동 알림
@@ -372,7 +398,7 @@ function toTerminalStatus(status: string): 'APPROVED' | 'REJECTED' | null {
  *  D135부터 D152-1까지 4주 반복 "검수 결과 미반영" 사고 = 이 함수가 KREQ를 받으면 그대로 통과시키지만
  *  syncPendingTemplatesJob SELECT가 KREQ를 폴링 대상에 포함하지 않아 영원히 동기화 안 됨 = root cause.
  */
-function normalizeImcTemplateStatus(status: string): string {
+export function normalizeImcTemplateStatus(status: string): string {
   const u = String(status || '').toUpperCase().trim();
   // 기존 약어 → 풀네임 (D143 호환)
   if (u === 'REQ') return 'REQUESTED';

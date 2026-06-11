@@ -526,16 +526,26 @@ async function getAllCompanyUserLineTables(companyId: string): Promise<string[]>
   return tables;
 }
 
+/**
+ * ★ 2026-06-11: 발송 큐 변경(취소/수신자삭제/예약시간변경/문안수정) 전용 — live 라인 테이블 합집합.
+ *   배경 — 에이치피오 예약취소 미삭제 발송 사고: 적재는 사용자 라인(getCompanySmsTables(companyId, userId)),
+ *   취소는 회사 라인(getCompanySmsTables(companyId))만 DELETE → 0건 삭제 → PG만 cancelled 표시 → 예약 시각 실발송.
+ *   발송 큐 행을 찾거나 바꾸는 모든 경로는 이 함수로 회사+사용자+회사 전 사용자 라인을 전부 본다.
+ */
+export async function getCompanyAllLiveSmsTables(companyId: string, userId?: string): Promise<string[]> {
+  const userLive = await getCompanySmsTables(companyId, userId);
+  const companyLive = userId ? await getCompanySmsTables(companyId) : userLive;
+  const allUserLive = await getAllCompanyUserLineTables(companyId);
+  return mergeLineTables(mergeLineTables(userLive, companyLive), allUserLive);
+}
+
 /** 회사 발송 테이블 + 로그 테이블 (결과 조회용) */
 export async function getCompanySmsTablesWithLogs(companyId: string, userId?: string): Promise<string[]> {
   // ★ 집계 전용 — user 라인그룹 + company 라인그룹 + 회사 소속 전 사용자 라인그룹 합집합.
   //   발송이 어느 라인으로 나갔든 포함 + 발송 후 라인그룹이 바뀌어도 과거 발송 집계가 안 깨지는 내성.
   //   2026-06-10: 호출부 userId 의존 제거 — userId 미전달이어도 회사 전 사용자 라인 포함 (failed 오판 근본 차단).
   //   발송 경로(getCompanySmsTables)는 불변.
-  const userLive = await getCompanySmsTables(companyId, userId);
-  const companyLive = userId ? await getCompanySmsTables(companyId) : userLive;
-  const allUserLive = await getAllCompanyUserLineTables(companyId);
-  const liveTables = mergeLineTables(mergeLineTables(userLive, companyLive), allUserLive);
+  const liveTables = await getCompanyAllLiveSmsTables(companyId, userId);
   const existingLogs = await getExistingLogTables();
 
   const now = new Date();

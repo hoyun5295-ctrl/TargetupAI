@@ -8,7 +8,7 @@
 import { query } from '../config/database';
 import { prepareFieldMappings, getOpt080Number } from './messageUtils';
 import { prepaidRefund } from './prepaid';
-import { getCompanySmsTables, toKoreaTimeStr } from './sms-queue';
+import { getCompanySmsTables, smsExecAll, toKoreaTimeStr } from './sms-queue';
 import { calcSplitSendTime } from './send-time-util';
 import { processSendChunk, type ChunkRecipient } from './direct-send-processor';
 
@@ -21,7 +21,7 @@ export async function runDirectSendOnce(): Promise<void> {
   running = true;
   try {
     const due = await query(
-      `SELECT id FROM campaigns WHERE send_phase = 'queued' ORDER BY created_at ASC LIMIT 5`
+      `SELECT id FROM campaigns WHERE send_phase = 'queued' AND status != 'cancelled' ORDER BY created_at ASC LIMIT 5`
     );
     for (const row of due.rows) {
       try {
@@ -40,7 +40,7 @@ async function processCampaign(campaignId: string): Promise<void> {
   // queued → processing claim (동시 처리/중복 발송 방지)
   const claim = await query(
     `UPDATE campaigns SET send_phase = 'processing', updated_at = NOW()
-     WHERE id = $1 AND send_phase = 'queued'
+     WHERE id = $1 AND send_phase = 'queued' AND status != 'cancelled'
      RETURNING company_id, created_by, target_count, processed_count, staging_id, send_config`,
     [campaignId]
   );
@@ -85,6 +85,15 @@ async function processCampaign(campaignId: string): Promise<void> {
   }
 
   while (processed < total) {
+    // ★ 2026-06-11: 적재 중 취소 감지 — 취소되면 이미 넣은 큐 행을 지우고 중단 (취소-적재 경합 차단).
+    const cancelCheck = await query(`SELECT status FROM campaigns WHERE id = $1`, [campaignId]);
+    if (cancelCheck.rows[0]?.status === 'cancelled') {
+      await smsExecAll(companyTables, `DELETE FROM SMSQ_SEND WHERE app_etc1 = ? AND status_code = 100`, [campaignId]);
+      await query(`DELETE FROM campaign_send_staging WHERE staging_id = $1`, [stagingId]);
+      await query(`UPDATE campaigns SET send_phase = 'sent', updated_at = NOW() WHERE id = $1`, [campaignId]);
+      console.log(`[direct-send-worker] 캠페인 ${campaignId} 적재 중 취소 감지 — 적재분 큐 삭제 후 중단`);
+      return;
+    }
     const chunkRes = await query(
       `SELECT id, phone, name, extra1, extra2, extra3, callback
        FROM campaign_send_staging WHERE staging_id = $1 ORDER BY id ASC LIMIT $2 OFFSET $3`,
@@ -140,11 +149,18 @@ async function processCampaign(campaignId: string): Promise<void> {
   }
 
   // 완료 처리 + staging 정리
+  // ★ 2026-06-11: status != 'cancelled' 가드 — 적재 완료 직전 취소된 캠페인을 'scheduled'로 되돌려
+  //   취소 표시를 덮어쓰던 구멍 차단. 가드에 걸리면 적재분 큐 행도 삭제.
   const finalStatus = cfg.scheduled ? 'scheduled' : (sent === 0 ? 'failed' : 'completed');
-  await query(
-    `UPDATE campaigns SET send_phase = 'sent', status = $1, sent_count = $2, fail_count = $3, sent_at = NOW(), updated_at = NOW() WHERE id = $4`,
+  const fin = await query(
+    `UPDATE campaigns SET send_phase = 'sent', status = $1, sent_count = $2, fail_count = $3, sent_at = NOW(), updated_at = NOW() WHERE id = $4 AND status != 'cancelled'`,
     [finalStatus, sent, failed, campaignId]
   );
+  if (fin.rowCount === 0) {
+    await smsExecAll(companyTables, `DELETE FROM SMSQ_SEND WHERE app_etc1 = ? AND status_code = 100`, [campaignId]);
+    await query(`UPDATE campaigns SET send_phase = 'sent', updated_at = NOW() WHERE id = $1`, [campaignId]);
+    console.log(`[direct-send-worker] 캠페인 ${campaignId} 완료 직전 취소 감지 — 적재분 큐 삭제`);
+  }
   await query(`DELETE FROM campaign_send_staging WHERE staging_id = $1`, [stagingId]);
   console.log(`[direct-send-worker] 캠페인 ${campaignId} 완료 — 발송 ${sent}/${total}, 실패 ${failed}`);
 }
