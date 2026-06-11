@@ -219,11 +219,12 @@ export async function cancelCampaign(
   }
 
   // 7. PostgreSQL 캠페인 상태 변경
+  // ★ 2026-06-11: fail_count=target/success=0 덮어쓰기 제거 — 취소는 status로 표현하고 counts는 실측 보존.
+  //   미발송 취소는 0/0이 진실이고, 취소 전 발송분이 있으면(0611 에이치피오) 그 실측이 청구·정정 근거다.
+  //   화면 취소 표시는 status 기반(line-through·라벨) 확인 — counts 의존 없음.
   await query(
     `UPDATE campaigns SET
       status = 'cancelled',
-      fail_count = COALESCE(target_count, sent_count, 0),
-      success_count = 0,
       cancelled_by = $1,
       cancelled_by_type = $2,
       cancel_reason = $3,
@@ -236,9 +237,7 @@ export async function cancelCampaign(
   // 8. campaign_runs도 cancelled로 변경 (sync-results에서 재처리 방지)
   await query(
     `UPDATE campaign_runs SET
-      status = 'cancelled',
-      fail_count = COALESCE(target_count, sent_count, 0),
-      success_count = 0
+      status = 'cancelled'
      WHERE campaign_id = $1 AND status IN ('scheduled', 'sending')`,
     [campaignId]
   );
@@ -354,9 +353,11 @@ export async function syncCampaignResults(companyId: string): Promise<SyncResult
         // campaigns 테이블도 업데이트
         const runInfo = await query(`SELECT campaign_id FROM campaign_runs WHERE id = $1`, [run.id]);
         if (runInfo.rows.length > 0) {
+          // ★ 2026-06-11: sent_count = 적재 실측(worker/적재 경로 기록)이 진실 — success+fail 덮어쓰기 제거.
+          //   결과 도착 전 "전송"이 작아 보이고 대기가 0으로 굳던 출처 혼선(건5) fix. NULL/0(과거 세대)만 보완.
           await query(
             `UPDATE campaigns SET
-              sent_count = ($1::int + $2::int),
+              sent_count = COALESCE(NULLIF(sent_count, 0), $1::int + $2::int),
               success_count = $1,
               fail_count = $2,
               status = $3::text,
@@ -469,9 +470,11 @@ export async function syncCampaignResults(companyId: string): Promise<SyncResult
         // ★ D145 P0+ (2026-05-07): idempotent 환불 패턴 — 호출측은 누적 dEffectiveFailCount 그대로 보냄
         //   prepaidRefund가 alreadyRefunded와 비교해 차이만 환불 (idempotency 함수 측 보장)
         //   delta 계산 폐기 — 호출/함수 의미 일치 + 누락 사고 자동 보정 (트렉스타 5/7 16,024원 사고)
+        // ★ 2026-06-11: sent_count = 적재 실측(direct-send-worker 기록)이 진실 — success+fail 덮어쓰기 제거.
+        //   폴라초이스 "전송 15,470 / 대기 0" 표시의 직접 원인(결과 도착분 합으로 덮음) fix. NULL/0만 보완.
         await query(
           `UPDATE campaigns SET
-            sent_count = ($1::int + $2::int),
+            sent_count = COALESCE(NULLIF(sent_count, 0), $1::int + $2::int),
             success_count = $1,
             fail_count = $2,
             status = $3::text,

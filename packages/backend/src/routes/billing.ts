@@ -4,7 +4,7 @@ import { authenticate, requireSuperAdmin } from '../middlewares/auth';
 import pool, { mysqlQuery } from '../config/database';
 import { SUCCESS_CODES_SQL, PENDING_CODES_SQL } from '../utils/sms-result-map';
 import { INVITO_INFO } from '../config/defaults';
-import { getCompanySmsTables, getTestSmsTables } from '../utils/sms-queue';
+import { getAllBulkSmsTables, getTestSmsTables } from '../utils/sms-queue';
 import { CREDIT_UNIT_PRICE } from '../utils/ai-credit-calc';
 
 // SMTP transporter (재사용)
@@ -20,7 +20,10 @@ const getTransporter = () => nodemailer.createTransport({
 // ============================================================
 
 // 하위호환 래퍼 (호출부 변경 최소화). 내부적으로 CT-04 함수 사용.
-const getBillingCompanyTables = (companyId: string) => getCompanySmsTables(companyId);
+// ★ 2026-06-11: 회사 라인만 → 전 bulk 라인 합집합. 사용자 개별 라인 발송분(에이치피오 87,014 = 대량발송(1))이
+//   회사 라인({7,8,9})만 보던 정산에서 통째로 빠지던 누락 fix. 라인 해제/재배정에도 내성.
+//   회사 격리는 whereClause(app_etc1 IN (그 회사 run/campaign id) · app_etc2=company_id)가 보장 — 타사 혼입 0.
+const getBillingCompanyTables = (_companyId: string) => getAllBulkSmsTables();
 const getBillingTestTables = () => getTestSmsTables();
 
 async function getBillingLogTables(): Promise<Set<string>> {
@@ -188,7 +191,25 @@ router.post('/generate', async (req: Request, res: Response) => {
       runsParams.push(user_id);
       runsSql += ` AND c.user_id = $${runsParams.length}`;
     }
-    
+
+    // ★ 2026-06-11: 신규 직접발송 파이프라인(staging worker, 5/30+)은 campaign_runs를 만들지 않고
+    //   큐 app_etc1에 campaigns.id를 기록 — campaign_runs만 보던 정산 집계에서 통째로 빠지던 누락 fix.
+    //   양쪽을 IN에 넣어도 MySQL 행은 자기 app_etc1 하나에만 매칭되므로 이중 계상 0.
+    //   발송시각 = COALESCE(scheduled_at, sent_at) (예약 sent_at은 등록 시점 기록 — 2026-06-09 원칙).
+    runsSql += `
+      UNION
+      SELECT c2.id as run_id
+      FROM campaigns c2
+      WHERE c2.company_id = $1
+        AND c2.send_type = 'direct'
+        AND c2.send_phase = 'sent'
+        AND c2.status = 'completed'
+        AND COALESCE(c2.scheduled_at, c2.sent_at) >= $2::date
+        AND COALESCE(c2.scheduled_at, c2.sent_at) < ($3::date + interval '1 day')`;
+    if (user_id) {
+      runsSql += ` AND c2.created_by = $${runsParams.length}`;
+    }
+
     const runsResult = await pool.query(runsSql, runsParams);
     const runIds = runsResult.rows.map((r: any) => r.run_id);
 
@@ -913,6 +934,8 @@ router.get('/preview', async (req: Request, res: Response) => {
     const company = companyResult.rows[0];
 
     // 2) 해당 기간 campaign_run_id 목록 조회 (PostgreSQL)
+    // ★ 2026-06-11: 신규 직접발송(staging worker)은 campaign_runs 미생성 + app_etc1=campaigns.id — UNION으로 포함
+    //   (campaign_runs만 보던 미리보기 누락 fix. 이중 계상 0 — MySQL 행은 자기 app_etc1 하나에만 매칭).
     const runsResult = await pool.query(
       `SELECT cr.id as run_id, c.callback_number, cb.store_code, cb.store_name
        FROM campaign_runs cr
@@ -920,7 +943,17 @@ router.get('/preview', async (req: Request, res: Response) => {
        LEFT JOIN callback_numbers cb ON cb.phone = c.callback_number AND cb.company_id = c.company_id
        WHERE c.company_id = $1
          AND cr.sent_at >= $2::date
-         AND cr.sent_at < ($3::date + interval '1 day')`,
+         AND cr.sent_at < ($3::date + interval '1 day')
+       UNION
+       SELECT c2.id as run_id, c2.callback_number, cb2.store_code, cb2.store_name
+       FROM campaigns c2
+       LEFT JOIN callback_numbers cb2 ON cb2.phone = c2.callback_number AND cb2.company_id = c2.company_id
+       WHERE c2.company_id = $1
+         AND c2.send_type = 'direct'
+         AND c2.send_phase = 'sent'
+         AND c2.status = 'completed'
+         AND COALESCE(c2.scheduled_at, c2.sent_at) >= $2::date
+         AND COALESCE(c2.scheduled_at, c2.sent_at) < ($3::date + interval '1 day')`,
       [company_id, start, end]
     );
 

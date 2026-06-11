@@ -1423,6 +1423,12 @@ async function executePreSendSpamTest(ac: any): Promise<void> {
 export async function runAutoCampaignWorker(): Promise<void> {
   const logPrefix = '[auto-worker]';
 
+  // ★ 2026-06-11 영구 폐기 봉인 — D188 폐기(POST 410) 후에도 active 잔존(인비토 4건)이 매주/매월
+  //   계속 실행·발송되던 사고 차단. 레코드가 다시 active가 되어도 문안생성/스팸테스트/발송 전 단계가 돌지 않는다.
+  //   데이터는 보존(슈퍼관리자 수동 조치용 PUT/DELETE 라우트 유지). 재가동이 필요하면 이 상수만 해제.
+  const AUTO_CAMPAIGN_RETIRED = true;
+  if (AUTO_CAMPAIGN_RETIRED) return;
+
   try {
     // ★ D150-3 (2026-05-10) HIGH#1 안전망: executing 5분 이상 stuck 자동 복원.
     //   advanceNextRun fallback이 실패한 극단 케이스 + 워커 프로세스 강제 종료 케이스 대비.

@@ -107,6 +107,13 @@
 
 ---
 
+### 🔴 2026-06-11(오후) — ★다음 세션 = 디버깅 5건 일괄 작업★ + 싱크에이전트 v1.5.5 + 무료체험 6/30 마감·배너 (전부 배포 완료)
+> **★ 다음 세션 진입 = `status/debug-notes-2026-06-11.md`(현상·실측) + `status/DEBUG-FIX-DESIGN-2026-06-11.md`(수정 설계·우선순위·확정 SQL/로그) 두 문서 정독 → P0부터.** 디버깅 5건: ①[시한 06-16 월 10:00] 인비토 자동발송 잔존 실행(폐기가 POST 410만·active+워커 유지) ②검수알림 지연=6/10 기수정 후폭풍 종결·KREJ 반려 미알림만 확정 필요 ③[청구] 에이치피오 87,014 cancelled 굳음→실측 재집계 정정 ④[돈] 폴라초이스 227건 차감만·미환불(차감=COUNT 산식 예상치 vs 적재=DELETE+INSERT 실측 별개 구현·worker 환불 1회성 catch·sweep은 실패행 기준) ⑤시세이도 기록vs실측 화면 혼용(통계 대상 2,885=실측합/전송 2,895=기록합 증명). 관통 근원=기록↔실측 자동 대조 부재 → 수량 3층 정의+차감↔적재 환불 sweeper+확정 카운트 UPDATE+출처 단일화.
+> **싱크에이전트 v1.5.5(배포·패키지 완료)**: 인비토 3건 — 버전 불일치(배너가 config.enc 저장값 보고+하드코딩 5곳 → AGENT_VERSION 단일 진입점+저장 4경로 강제+`--version` 플래그) / 증분 매주기 207(fallbackToFullSync 소비 0건 → getColumns 실재 검증+전체 동기화 대체+기동 경고) / 정규화 제외=정상 동작 회신. 전달물=`sync-agent/installer/SyncAgent-Setup-1.5.5.zip`(Setup exe+매뉴얼 v1.5.5 PDF). 1.5.4 이하 산출물·이전 매뉴얼 전부 삭제(이전 zip은 4-28 빌드=구버전 전달 추정 원인). vitest 9/9·zip 내부 1.5.5 실측. 상세=`status/SYNC-AGENT-TROUBLESHOOTING.md` § 2-4.
+> **무료체험 6/30 마감+상시 배너(배포 완료)**: 마감 상수 2곳(utils/basic-trial.ts↔OpenTrialPopup.tsx, KST 6-30 23:59:59)+3중 차단(팝업/배너/서버 TRIAL_PERIOD_ENDED)+대시보드 발송현황 아래 와이드 배너(FREE+기한 내, pending '검토 중', forceOpen으로 24h dismiss 무시. 헤더 버튼은 메뉴 과밀로 회수 net 0).
+
+---
+
 ### 🔴 2026-06-11 — 에이치피오 예약취소 87,014건 실발송 사고 (손해 250만원) — 근본수정 5겹+감사로그 푸시 완료
 > **사고**: 06-10 17:50 취소한 87,014건 LMS가 06-11 10:00 실발송. 근본 = 적재는 사용자 라인(direct-send-worker:55 userId)·취소는 회사 라인만(campaign-lifecycle:158 userId 누락) DELETE 0건 + 효과 검증 없이 cancelled 표시. 라인 불일치는 에이치피오 유일(회사 7,8,9 vs 사용자 1,2,3 — 06-04 09:26 admin 계정이 수동 지정, nginx+audit_logs+MySQL 월별이력 3종 대조로 행위자·시점 확정). 18:00 재예약 bfee8e09 = 그대로 발송 결정.
 > **근본수정 5겹(커밋 93d37a0)**: ① 발송 당시 테이블 기록 send_config.sentTables ② getCampaignQueueTables CT 신설(기록 1순위+전 라인 합집합) — 취소·수신자조회/삭제·시간변경·문안수정·안전망 6곳 단일 헬퍼 ③ 취소 = 삭제 후 잔존 0 검증 후에만 성공(거짓 표시 차단) ④ direct-send-worker 취소 가드 3곳(적재 전/중/직후) ⑤ cancelled-queue-sweeper 1분 안전망 신규.

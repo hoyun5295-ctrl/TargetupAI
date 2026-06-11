@@ -12,6 +12,7 @@ import {
   getCampaignQueueTables, smsCountAll, smsExecAll,
   kakaoCountPending, kakaoCancelPending,
 } from './sms-queue';
+import { SUCCESS_CODES } from './sms-result-map';
 
 const INTERVAL_MS = 60 * 1000; // 1분 — 예약 발송은 분 단위라 발송 시각 전 선제 삭제에 충분
 let _timer: ReturnType<typeof setInterval> | null = null;
@@ -39,6 +40,27 @@ export async function sweepCancelledQueuesOnce(): Promise<{ scanned: number; del
         await smsExecAll(tables, `DELETE FROM SMSQ_SEND WHERE app_etc1 = ? AND status_code = 100`, [c.id]);
         deleted += pending;
         console.log(`[cancelled-queue-sweeper] 취소 캠페인 ${c.id} 잔존 대기 ${pending}건 삭제 (취소 경로 누락 안전망 작동)`);
+      }
+
+      // ★ 2026-06-11: 픽업됐다 멈춘 행(비성공·비100) — 취소 마킹 9999 (취소 경로 campaign-lifecycle와 동일 정책).
+      //   에이치피오 사고 캠페인 잔존 2,129건이 status 100 한정 삭제에 안 걸려 에이전트가 계속 내보내던 누수 차단.
+      //   성공 행은 보존(이력 진실). 처리 후 대기(100) 잔존 재카운트 = 효과 검증(6원칙 ②), 남으면 다음 주기 재시도.
+      const stuck = await smsCountAll(
+        tables,
+        `app_etc1 = ? AND status_code NOT IN (${SUCCESS_CODES.join(',')}) AND status_code != 100 AND status_code != 9999`,
+        [c.id]
+      );
+      if (stuck > 0) {
+        await smsExecAll(
+          tables,
+          `UPDATE SMSQ_SEND SET status_code = 9999 WHERE app_etc1 = ? AND status_code NOT IN (${SUCCESS_CODES.join(',')}) AND status_code != 100 AND status_code != 9999`,
+          [c.id]
+        );
+        deleted += stuck;
+      }
+      if (pending > 0 || stuck > 0) {
+        const remain = await smsCountAll(tables, 'app_etc1 = ? AND status_code = 100', [c.id]);
+        console.log(`[cancelled-queue-sweeper] 취소 캠페인 ${c.id} 정리 — 대기 ${pending} 삭제 / 픽업잔존 ${stuck} 취소마킹 / 재카운트 대기 잔존 ${remain}`);
       }
 
       let kakaoPending = 0;

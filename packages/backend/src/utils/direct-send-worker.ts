@@ -66,18 +66,24 @@ async function processCampaign(campaignId: string): Promise<void> {
 
   let processed: number = c.processed_count || 0;
   let sent = 0;
+  // ★ 2026-06-11 (근원 C): 정제 제외·청크 skip 건수를 send_config.exclusions에 기록 —
+  //   "대상−전송 차이 사유"(수신거부/중복/무효)를 업체에 즉시 설명 가능하게 (폴라초이스 227건 문의 계열 차단).
+  let unsubRemoved = 0;
+  let dupRemoved = 0;
+  let chunkSkipped = 0;
 
   // ★ 2026-06-04 정정: commit에서 옮긴 정제 — 발송 직전 1회. count/commit과 같은 기준이라 모달=차감=발송 일치.
   //   첫 처리(processed===0)에만 수행(재시작 시 중복 정제 방지). dedup/unsub은 send_config 기준.
   if (processed === 0) {
     if (cfg.unsubFilterEnabled !== false) {
-      await query(
+      const r1 = await query(
         `DELETE FROM campaign_send_staging s USING unsubscribes u WHERE s.staging_id = $1 AND u.user_id = $2 AND u.phone = s.phone`,
         [stagingId, userId]
       );
+      unsubRemoved = r1.rowCount || 0;
     }
     if (cfg.dedupEnabled !== false) {
-      await query(
+      const r2 = await query(
         `DELETE FROM campaign_send_staging
          WHERE ctid IN (
            SELECT ctid FROM (
@@ -87,6 +93,7 @@ async function processCampaign(campaignId: string): Promise<void> {
          )`,
         [stagingId]
       );
+      dupRemoved = r2.rowCount || 0;
     }
   }
 
@@ -137,30 +144,41 @@ async function processCampaign(campaignId: string): Promise<void> {
       alimtalkEtcJson: cfg.alimtalkEtcJson,
     });
     sent += result.sentCount;
+    chunkSkipped += Math.max(0, chunkRes.rows.length - result.sentCount);
     processed += chunkRes.rows.length;
 
     await query(`UPDATE campaigns SET processed_count = $1, updated_at = NOW() WHERE id = $2`, [processed, campaignId]);
     await new Promise((res) => setImmediate(res)); // 이벤트루프 양보 — 다른 요청 블로킹 방지
   }
 
-  // 실패분(큐 INSERT 실패) 환불
+  // 미적재분(정제 제외 + 큐 INSERT skip) 환불 — 즉시성. 최종 수렴은 mysql-refund-sweeper 단일 산식이 보장.
   const failed = Math.max(0, total - sent);
   if (failed > 0) {
     try {
       const deductType = (cfg.sendChannel === 'kakao') ? 'KAKAO' : cfg.msgType;
-      await prepaidRefund(companyId, failed, deductType, campaignId, `대량 발송 실패 ${failed}건 자동 환불`);
+      await prepaidRefund(companyId, failed, deductType, campaignId, `대량 발송 미적재 ${failed}건 자동 환불`);
     } catch (refundErr) {
-      console.error('[direct-send-worker] 실패분 환불 오류:', refundErr);
+      console.error('[direct-send-worker] 미적재분 환불 오류:', refundErr);
     }
   }
 
   // 완료 처리 + staging 정리
   // ★ 2026-06-11: status != 'cancelled' 가드 — 적재 완료 직전 취소된 캠페인을 'scheduled'로 되돌려
   //   취소 표시를 덮어쓰던 구멍 차단. 가드에 걸리면 적재분 큐 행도 삭제.
+  // ★ 2026-06-11 (근원 C): 제외 사유 기록 — 첫 기록만 보존(재시작 시 정제 카운트 0이라 덮지 않음).
   const finalStatus = cfg.scheduled ? 'scheduled' : (sent === 0 ? 'failed' : 'completed');
+  const exclusions = JSON.stringify({
+    unsub: unsubRemoved, dup: dupRemoved, skipped: chunkSkipped,
+    deducted: total, loaded: sent, recordedAt: new Date().toISOString(),
+  });
   const fin = await query(
-    `UPDATE campaigns SET send_phase = 'sent', status = $1, sent_count = $2, fail_count = $3, sent_at = NOW(), updated_at = NOW() WHERE id = $4 AND status != 'cancelled'`,
-    [finalStatus, sent, failed, campaignId]
+    `UPDATE campaigns SET send_phase = 'sent', status = $1, sent_count = $2, fail_count = $3, sent_at = NOW(),
+       send_config = CASE WHEN send_config->'exclusions' IS NULL
+         THEN jsonb_set(COALESCE(send_config, '{}'::jsonb), '{exclusions}', $5::jsonb)
+         ELSE send_config END,
+       updated_at = NOW()
+     WHERE id = $4 AND status != 'cancelled'`,
+    [finalStatus, sent, failed, campaignId, exclusions]
   );
   if (fin.rowCount === 0) {
     await smsExecAll(companyTables, `DELETE FROM SMSQ_SEND WHERE app_etc1 = ? AND status_code = 100`, [campaignId]);

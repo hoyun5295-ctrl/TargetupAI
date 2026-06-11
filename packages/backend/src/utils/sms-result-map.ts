@@ -52,6 +52,8 @@ export const STATUS_CODE_MAP: Record<number, StatusCodeInfo> = {
 
   // ── SMS/LMS 추가 코드 (QTmsg 매뉴얼 ver4.0) ──
   1:    { label: '시스템 장애',       type: 'fail' },
+  92:   { label: '전송 실패(코드 92)', type: 'fail' }, // ★ 2026-06-11 폴라초이스 6/8 실측 214건 — 매뉴얼 정의 확인 시 라벨 정정
+
   5:    { label: '번호 형식 오류',    type: 'fail' },
   9:    { label: '음영지역',          type: 'fail' },
   10:   { label: '단말기 메시지 Full', type: 'fail' },

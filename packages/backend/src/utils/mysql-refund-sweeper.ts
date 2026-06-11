@@ -26,6 +26,8 @@ import { query } from '../config/database';
 import { getCompanySmsTablesWithLogs, smsBatchAggByGroup, kakaoBatchAggByGroup } from './sms-queue';
 import { SUCCESS_CODES, PENDING_CODES } from './sms-result-map';
 import { prepaidRefund } from './prepaid';
+// ★ 2026-06-11: 환불 누적 단일 산식 — 정당 환불 = 차감 실측 − 성공 − 대기 (미적재분 과소 환불 근본 fix)
+import { calcRefundDue } from './refund-calc';
 // ★ D182 (2026-05-19): 캠페인 종료 시 회사별 학습 메모리 자동 누적
 import { recordCampaignLearning } from './company-memory';
 
@@ -47,6 +49,24 @@ interface CampaignRow {
   message_type: string;
   success_count: number | null;
   fail_count: number | null;
+  send_phase: string | null;
+}
+
+/** 회사·메시지타입별 단가 조회 (사이클 내 캐시) — prepaid.ts와 동일한 단가 컬럼 기준 */
+async function getUnitPrice(companyId: string, messageType: string, cache: Map<string, number>): Promise<number> {
+  const key = `${companyId}:${messageType}`;
+  if (cache.has(key)) return cache.get(key)!;
+  const r = await query(
+    `SELECT CASE $2
+              WHEN 'SMS' THEN cost_per_sms WHEN 'LMS' THEN cost_per_lms
+              WHEN 'MMS' THEN cost_per_mms WHEN 'KAKAO' THEN cost_per_kakao
+              ELSE NULL END AS unit
+     FROM companies WHERE id = $1`,
+    [companyId, messageType]
+  );
+  const unit = Number(r.rows[0]?.unit || 0);
+  cache.set(key, unit);
+  return unit;
 }
 
 /**
@@ -73,7 +93,7 @@ async function runOnce(): Promise<void> {
     // === 1. 후보 캠페인 SELECT (PG fail_count 무관) ===
     const candidates = await query(`
       SELECT c.id, c.company_id, c.created_by, c.message_type,
-             c.success_count, c.fail_count
+             c.success_count, c.fail_count, c.send_phase
       FROM campaigns c
       JOIN companies co ON co.id = c.company_id
       WHERE co.billing_type = 'prepaid'
@@ -118,6 +138,7 @@ async function runOnce(): Promise<void> {
     let pgUpdateCount = 0;
     let refundCount = 0;
     let totalRefundAmount = 0;
+    const unitCache = new Map<string, number>();
 
     for (const camp of candidates.rows as CampaignRow[]) {
       try {
@@ -126,35 +147,54 @@ async function runOnce(): Promise<void> {
 
         const mysqlSuccess = Number(smsAgg.success_count || 0) + kakaoAgg.success;
         const mysqlFail = Number(smsAgg.fail_count || 0) + kakaoAgg.fail;
-        // pending은 환불 대상 아님 — 통신사 처리 대기 중
+        const mysqlPending = Number(smsAgg.pending_count || 0) + kakaoAgg.pending;
 
-        // MySQL 결과가 0/0이면 (아직 발송 안 시작 or 모두 pending) skip
-        if (mysqlSuccess === 0 && mysqlFail === 0) continue;
-
-        // === 4-1. PG count 동시 갱신 (화면 정합 보조) ===
+        // === 4-1. PG count 동시 갱신 (화면 보조) — 결과가 하나라도 있을 때만 ===
         // target_count는 절대 건드리지 않음 (protect_completed_target_count trigger 호환)
-        const pgSuccess = Number(camp.success_count || 0);
-        const pgFail = Number(camp.fail_count || 0);
-        if (pgSuccess !== mysqlSuccess || pgFail !== mysqlFail) {
-          await query(
-            `UPDATE campaigns
-               SET success_count = $1,
-                   fail_count = $2,
-                   sent_count = $1::int + $2::int,
-                   updated_at = NOW()
-             WHERE id = $3 AND status IN ('sending', 'completed')`,
-            [mysqlSuccess, mysqlFail, camp.id]
-          );
-          pgUpdateCount++;
+        // ★ 2026-06-11: sent_count 덮어쓰기 제거 — sent_count는 적재 실측(worker 기록)이 진실.
+        //   success+fail로 덮으면 결과 도착 전 "전송"이 작아 보이고 대기가 0으로 굳는다(건5 출처 혼선).
+        //   worker 이전 세대(sent_count NULL/0)만 success+fail로 보완.
+        if (mysqlSuccess > 0 || mysqlFail > 0) {
+          const pgSuccess = Number(camp.success_count || 0);
+          const pgFail = Number(camp.fail_count || 0);
+          if (pgSuccess !== mysqlSuccess || pgFail !== mysqlFail) {
+            await query(
+              `UPDATE campaigns
+                 SET success_count = $1,
+                     fail_count = $2,
+                     sent_count = COALESCE(NULLIF(sent_count, 0), $1::int + $2::int),
+                     updated_at = NOW()
+               WHERE id = $3 AND status IN ('sending', 'completed')`,
+              [mysqlSuccess, mysqlFail, camp.id]
+            );
+            pgUpdateCount++;
+          }
         }
 
-        // === 4-2. 환불 호출 (idempotent — 차액만 환불) ===
-        if (mysqlFail > 0) {
-          const r = await prepaidRefund(camp.company_id, mysqlFail, camp.message_type, camp.id, '발송 실패 환불 (sweep)');
-          if (r.refunded > 0) {
-            refundCount++;
-            totalRefundAmount += r.refunded;
-            log(`✓ campaign=${camp.id} ${camp.message_type} mysqlFail=${mysqlFail} 차액환불 ${r.refunded}원`);
+        // === 4-2. 환불 — 단일 산식: 정당 환불 = 차감 실측 − 성공 − 대기 (utils/refund-calc.ts) ===
+        // ★ 2026-06-11: 기존 mysqlFail 기준은 미적재분(차감됐는데 큐에 안 들어간 것)을 영구 누락시켰다.
+        //   worker의 미적재 환불과 같은 누적 풀에서 max로 수렴 — 미적재 발생 시(D231 톤28형) 그 몫이 사라짐.
+        //   차감 건수 = balance_transactions deduct 실측(금액/단가) — 기록(target_count)이 아니라 돈이 진실.
+        //   적재가 끝난 캠페인만(send_phase 'sent' 또는 NULL=동기 적재 경로) — 적재 진행 중 오발동 차단.
+        if (camp.send_phase == null || camp.send_phase === 'sent') {
+          const unit = await getUnitPrice(camp.company_id, camp.message_type, unitCache);
+          if (unit > 0) {
+            const dedRes = await query(
+              `SELECT COALESCE(SUM(amount), 0) AS total FROM balance_transactions
+               WHERE company_id = $1 AND type = 'deduct' AND reference_type = 'campaign' AND reference_id = $2
+                 AND (message_type = $3 OR message_type IS NULL)`,
+              [camp.company_id, camp.id, camp.message_type]
+            );
+            const deductedCount = Math.round(Number(dedRes.rows[0].total) / unit);
+            const refundDue = calcRefundDue({ deductedCount, mysqlSuccess, mysqlPending });
+            if (refundDue > 0) {
+              const r = await prepaidRefund(camp.company_id, refundDue, camp.message_type, camp.id, '발송 실패 환불 (sweep)');
+              if (r.refunded > 0) {
+                refundCount++;
+                totalRefundAmount += r.refunded;
+                log(`✓ campaign=${camp.id} ${camp.message_type} 정당환불 ${refundDue}건 (차감 ${deductedCount} − 성공 ${mysqlSuccess} − 대기 ${mysqlPending}) 차액 ${r.refunded}원`);
+              }
+            }
           }
         }
       } catch (campErr: any) {

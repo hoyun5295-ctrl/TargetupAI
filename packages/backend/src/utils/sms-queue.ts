@@ -527,16 +527,49 @@ async function getAllCompanyUserLineTables(companyId: string): Promise<string[]>
 }
 
 /**
+ * ★ 2026-06-11: 시스템 전체 bulk 라인 테이블 합집합 (캐시).
+ *   배경 — 에이치피오 사고 캠페인(취소 잔존 2,129건): sentTables 기록이 없고 사용자 라인도 해제된 캠페인을
+ *   "현재 배정" 기준 합집합이 못 봐 1분 안전망(cancelled-queue-sweeper)이 영구 무력 + 에이전트가 계속 발송.
+ *   라인 해제/재배정과 무관하게 과거 발송분을 항상 보도록 bulk 라인 전체를 합친다.
+ *   DB(sms_line_groups)가 진실, 비어 있으면 환경변수 기반 BULK_ONLY_TABLES fallback.
+ */
+export async function getAllBulkSmsTables(): Promise<string[]> {
+  const cached = lineGroupCache.get('all-bulk');
+  if (cached && cached.expires > Date.now()) return cached.tables;
+
+  const result = await query(
+    `SELECT sms_tables FROM sms_line_groups WHERE group_type = 'bulk' AND is_active = true`
+  );
+  const merged: string[] = [];
+  for (const row of result.rows) {
+    const arr: string[] = row.sms_tables || [];
+    for (const t of arr) {
+      if (isValidSmsTable(t)) {
+        if (!merged.includes(t)) merged.push(t);
+      } else {
+        console.error(`[QTmsg] ⚠️ bulk 라인그룹에 잘못된 테이블명: "${t}" — 스킵`);
+      }
+    }
+  }
+  const tables = merged.length > 0 ? merged : BULK_ONLY_TABLES;
+  lineGroupCache.set('all-bulk', { tables, hasDedicatedGroup: tables.length > 0, expires: Date.now() + LINE_GROUP_CACHE_TTL });
+  return tables;
+}
+
+/**
  * ★ 2026-06-11: 발송 큐 변경(취소/수신자삭제/예약시간변경/문안수정) 전용 — live 라인 테이블 합집합.
  *   배경 — 에이치피오 예약취소 미삭제 발송 사고: 적재는 사용자 라인(getCompanySmsTables(companyId, userId)),
  *   취소는 회사 라인(getCompanySmsTables(companyId))만 DELETE → 0건 삭제 → PG만 cancelled 표시 → 예약 시각 실발송.
  *   발송 큐 행을 찾거나 바꾸는 모든 경로는 이 함수로 회사+사용자+회사 전 사용자 라인을 전부 본다.
+ *   ★ 2026-06-11 보강: 전 bulk 합집합 포함 — 라인 해제/재배정 후에도 과거 발송 라인이 항상 보인다
+ *   (소비처: 큐 작업 6곳 getCampaignQueueTables + 집계 10곳 getCompanySmsTablesWithLogs 자동 보강).
  */
 export async function getCompanyAllLiveSmsTables(companyId: string, userId?: string): Promise<string[]> {
   const userLive = await getCompanySmsTables(companyId, userId);
   const companyLive = userId ? await getCompanySmsTables(companyId) : userLive;
   const allUserLive = await getAllCompanyUserLineTables(companyId);
-  return mergeLineTables(mergeLineTables(userLive, companyLive), allUserLive);
+  const allBulk = await getAllBulkSmsTables();
+  return mergeLineTables(mergeLineTables(mergeLineTables(userLive, companyLive), allUserLive), allBulk);
 }
 
 /**
