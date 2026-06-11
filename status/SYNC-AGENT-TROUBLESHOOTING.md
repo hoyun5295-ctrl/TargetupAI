@@ -110,6 +110,39 @@ ALTER TABLE sync_releases ADD COLUMN IF NOT EXISTS checksum VARCHAR(255);
 
 ---
 
+### 2-4. 2026-06-11 인비토 첫 연동 3건 — 버전 불일치 / 정규화 제외 / 증분 매 주기 실패 (v1.5.5)
+
+**증상 3건** (인비토 직원 캡처 실측):
+1. 전달 파일 라벨 1.5.4인데 실행 배너 `Sync Agent v1.5.1` + 모니터링 버전 1.5.1 (재설치 2~3회 동일)
+2. 전체 동기화 1502건 중 1건 `[NORMALIZE_FAILED]` (18008125000 — 1800 대표번호)
+3. 60분 주기 증분 동기화가 매 주기 `Invalid column name 'updated_at'` (MSSQL 207) 실패 → 신규/수정 데이터 영구 미반영
+
+**원인**:
+1. (a) 배너/heartbeat/등록/업데이터가 전부 **config.enc 저장값(agent.version)** 을 보고 — 실행 파일 자신의 버전 출처가 없었음. (b) 버전 문자열 5곳 하드코딩(1.4.0/1.5.4 혼재). (c) 고객 로그의 raw EREQUEST JSON = D151-5(2026-05-11) 이전 빌드가 실행 중이라는 증거 — 로컬 release exe(5-11 빌드, D151-5 포함)와 다른 구버전이 현장에서 돌고 있었음 (전달물 구버전 또는 교체 미반영 — 현장 판별 수단 부재).
+2. 정상 설계 동작 — 수신 불가 형식 행은 제외 + 로그 기록 (D151-5에서 정책 컨펌 완료).
+3. 웹 설치 마법사가 timestamp 컬럼을 묻지 않고 `updated_at` 고정 기록 + 고객 테이블(SyncTest)에 해당 컬럼 없음 + **fallbackToFullSync가 config 전 경로에 선언만 있고 소비처 0건**이라 동작 안 함.
+
+**해결 (v1.5.5)**:
+1. **버전 단일 진입점** `src/version.ts` AGENT_VERSION 신설 — esbuild define으로 package.json version 주입(dev는 package.json 직접 읽기). 배너/heartbeat/등록/checkVersion/UpdateManager 전부 AGENT_VERSION 사용. 저장 4경로(saveConfigEncrypted/saveConfig/saveConfigJson/updateConfigEncrypted)에서 agent.version을 실행 파일 버전으로 강제. 하드코딩 5곳 제거(잔존 0 grep 확인). 배너에 설정 기록 버전 불일치 안내 1줄 추가.
+2. `--version` 플래그 신설 — 설정 파일 없이 `sync-agent.exe --version` → `sync-agent v1.5.5`. 전달/교체 검증용.
+3. **fallbackToFullSync 실구현** — 증분 직전 `getColumns`로 timestamp 컬럼 실재 검증(대소문자 무관, 전 DB 어댑터 공통): 없으면 true=전체 동기화로 대체(warn) / false=한국어 에러로 중단. 메타 조회 실패(권한 등)=기존처럼 증분 시도(비악화). + 기동 시 `validateTimestampColumnsAtStartup()` 즉시 경고(60분 뒤에야 드러나는 일 차단). vitest 9건.
+
+**전달 패키지 (2026-06-11 v1.5.5 일괄 재생성 — 1.5.4 이하 산출물 전부 삭제)**:
+- `sync-agent/installer/SyncAgent-Setup-1.5.5.zip` (전달용 — Setup exe + 설치매뉴얼 v1.5.5 PDF 동봉)
+- `sync-agent/installer/SyncAgent-Setup-1.5.5.exe` (NSIS 설치 파일, FileVersion 1.5.5)
+- `sync-agent/installer/SyncAgent-1.5.5-linux-x64.tar.gz`
+- `sync-agent/SyncAgent_설치매뉴얼_v1_5_5.docx/.pdf` — v1.5.5 갱신본 (표지/머리글/Setup 파일명/tar 폴더명 1.5.5 + 웹 마법사 Step 3 실동작 정정(timestamp 입력 UI 없음 — updated_at 기본 기록) + 수정일시 컬럼 부재 시 전체 동기화 대체 동작 + --version 명령 + Q4 갱신). 이전 v1_5/v1_5_4 매뉴얼 삭제.
+- 참고: 삭제된 옛 `SyncAgent-Setup-1.5.4.zip`은 4-28 빌드(D151-5 이전)였음 — Setup exe(5-11)와 달리 zip만 미갱신 상태였고, 이것이 인비토에 전달됐다면 구버전 증상과 시점이 일치.
+- 빌드 절차: `npm run build:exe`(+`build:linux`) → makensis 직접 호출 `/DPRODUCT_VERSION=x.y.z /DHAS_ICON` (build-installer.bat은 LF 줄바꿈이라 cmd 파싱이 깨짐 — 직접 호출 필요) → `bash build-linux-package.sh x.y.z` → zip 압축.
+
+**교훈**:
+- 버전의 진실은 빌드 산출물 자신이어야 한다 — 설정 파일 저장값을 표시/보고에 쓰면 교체 검증이 불가능해진다.
+- config 플래그는 선언+기본값만 있고 소비처가 없으면 "있는 척하는 설정"이 된다 — 신규 설정 추가 시 소비처 grep 확인.
+- 현장 실행 파일과 로컬 최신 빌드가 같다는 가정 금지 — `--version`/SHA-256으로 전달물 검증.
+- 산출물은 같은 버전 라벨이라도 생성 시점이 다르면 다른 물건 — 라벨 갱신 시 모든 패키지(exe/zip/tar.gz)를 한 번에 재생성하고 옛 것은 남기지 않는다.
+
+---
+
 ## § 3. 진단 체크리스트 (문제 발생 시 순서대로 실행)
 
 ### STEP 1. 슈퍼관리자 UI에서 상태 확인
@@ -286,3 +319,4 @@ SELECT indexname, indexdef FROM pg_indexes
 | 날짜 | 변경 | 담당 |
 |------|------|------|
 | 2026-04-21 | 문서 신설. D131 실점검 이슈 3건 기록 + 진단 체크리스트 | Claude + Harold |
+| 2026-06-11 | § 2-4 인비토 첫 연동 3건 (버전 단일화 v1.5.5 + --version + fallbackToFullSync 실구현) | 비토 + Harold |

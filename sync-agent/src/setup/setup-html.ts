@@ -958,7 +958,7 @@ export const SETUP_HTML = `<!DOCTYPE html>
       },
       agent: {
         name: $('agentName').value.trim(),
-        version: '1.5.4',
+        // version은 클라이언트가 정하지 않는다 — 저장 시 서버가 실행 파일 버전을 강제 기록 (2026-06-11)
       },
       log: { level: 'info' },
     };

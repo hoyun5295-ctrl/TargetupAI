@@ -28,9 +28,20 @@ dotenv.config();
 
 const args = process.argv;
 
+// ─── 버전 출력 (★ 2026-06-11) ───────────────────────────
+// 설정 파일 없이도 실행 파일 자신의 버전을 즉시 확인 — 전달/교체 검증용.
+// (인비토 실측: 전달 라벨 1.5.4 ↔ 실행 v1.5.1 불일치를 현장에서 판별할 수단이 없었음)
+
+if (args.includes('--version') || args.includes('-v')) {
+  import('./version').then(({ AGENT_VERSION }) => {
+    console.log(`sync-agent v${AGENT_VERSION}`);
+    process.exit(0);
+  });
+}
+
 // ─── 서비스 관리 명령 ───────────────────────────────────
 
-if (args.includes('--install-service')) {
+else if (args.includes('--install-service')) {
   import('./service').then(({ installService }) => {
     installService();
   });

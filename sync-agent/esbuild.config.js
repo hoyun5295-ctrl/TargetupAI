@@ -38,6 +38,9 @@ const buildOptions = {
 
   define: {
     'process.env.NODE_ENV': '"production"',
+    // ★ 2026-06-11: 버전 단일 진입점(src/version.ts) — 빌드 시 package.json version 주입.
+    //   배너/heartbeat/등록/업데이터가 전부 이 값을 사용 (config.enc 저장값 사용 금지)
+    '__AGENT_VERSION__': JSON.stringify(require('./package.json').version),
   },
 
   // 로깅

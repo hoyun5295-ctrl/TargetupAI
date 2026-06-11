@@ -85,6 +85,80 @@ export class SyncEngine {
     return this.config.purchaseTimestampColumn || this.config.timestampColumn;
   }
 
+  // ─── 타임스탬프 컬럼 실재 검증 (2026-06-11) ────────────
+  //
+  // 배경: 인비토 첫 연동 실측 — 고객사 테이블(SyncTest)에 설정된 timestamp 컬럼(updated_at)이
+  //   없으면 증분 동기화가 매 주기 DB 에러(MSSQL 207)로 실패하고, 최초 전체 동기화 이후의
+  //   신규/수정 데이터가 영구히 반영되지 않았다. fallbackToFullSync는 선언만 있고
+  //   소비처가 0건이라 동작하지 않았다. → 증분 직전 getColumns로 실재를 검증하고
+  //   없으면 전체 동기화로 대체(true) 또는 명확한 한국어 에러로 중단(false).
+
+  /** 검증 결과: ok=존재 / missing=없음 / unknown=메타 조회 실패(권한 등 — 증분 시도 유지) */
+  private async checkTimestampColumn(
+    tableName: string,
+    timestampCol: string,
+  ): Promise<'ok' | 'missing' | 'unknown'> {
+    try {
+      const columns = await this.db.getColumns(tableName);
+      if (!columns || columns.length === 0) return 'unknown';
+      const target = timestampCol.toLowerCase();
+      return columns.some((c) => (c.name || '').toLowerCase() === target) ? 'ok' : 'missing';
+    } catch (error) {
+      logger.warn('타임스탬프 컬럼 검증 실패(컬럼 메타 조회 불가) — 증분 시도 계속', {
+        tableName,
+        timestampCol,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return 'unknown';
+    }
+  }
+
+  /**
+   * 기동 시 고객/구매 타임스탬프 컬럼 실재 검증.
+   * index.ts에서 최초 동기화 전에 호출 — 누락이면 즉시 경고를 남겨,
+   * 60분 뒤 첫 증분 주기에서야 문제가 드러나는 일을 차단한다.
+   */
+  async validateTimestampColumnsAtStartup(): Promise<Array<{
+    target: SyncTarget;
+    table: string;
+    column: string;
+    status: 'ok' | 'missing' | 'unknown';
+  }>> {
+    const targets: SyncTarget[] = ['customers'];
+    if (this.config.purchaseTable) targets.push('purchases');
+
+    const report: Array<{
+      target: SyncTarget;
+      table: string;
+      column: string;
+      status: 'ok' | 'missing' | 'unknown';
+    }> = [];
+
+    for (const target of targets) {
+      const table = target === 'customers' ? this.config.customerTable : this.config.purchaseTable;
+      const column = this.getTimestampForTarget(target);
+      const status = await this.checkTimestampColumn(table, column);
+      report.push({ target, table, column, status });
+
+      if (status === 'missing') {
+        if (this.config.fallbackToFullSync) {
+          logger.warn(
+            `[기동 검증] 타임스탬프 컬럼 '${column}'이 테이블 '${table}'에 없습니다 — ` +
+            `증분 주기마다 전체 동기화로 대체합니다. ` +
+            `(권장: 테이블에 갱신 시각 컬럼을 추가하고 --edit-config로 컬럼명 지정)`,
+          );
+        } else {
+          logger.error(
+            `[기동 검증] 타임스탬프 컬럼 '${column}'이 테이블 '${table}'에 없습니다 — ` +
+            `fallbackToFullSync=false 설정이라 증분 동기화가 매 주기 중단됩니다. ` +
+            `--edit-config로 올바른 컬럼을 지정해주세요.`,
+          );
+        }
+      }
+    }
+    return report;
+  }
+
   // ─── 증분 동기화 ──────────────────────────────────────
 
   async runIncremental(target: SyncTarget): Promise<SyncResult> {
@@ -116,6 +190,23 @@ export class SyncEngine {
     if (!lastSyncAt) {
       logger.info('마지막 동기화 기록 없음 → 전체 동기화로 전환');
       return this.runFull(target);
+    }
+
+    // ★ 2026-06-11: 증분 직전 타임스탬프 컬럼 실재 검증 (인비토 SyncTest updated_at 부재 실측)
+    const columnStatus = await this.checkTimestampColumn(tableName, timestampCol);
+    if (columnStatus === 'missing') {
+      if (this.config.fallbackToFullSync) {
+        logger.warn(
+          `타임스탬프 컬럼 '${timestampCol}'이 테이블 '${tableName}'에 없음 → 전체 동기화로 대체합니다. ` +
+          `(권장: 테이블에 갱신 시각 컬럼을 추가하고 --edit-config로 컬럼명 지정)`,
+        );
+        return this.runFull(target);
+      }
+      throw new Error(
+        `타임스탬프 컬럼 '${timestampCol}'이 테이블 '${tableName}'에 없습니다. ` +
+        `fallbackToFullSync=false 설정이라 증분 동기화를 중단합니다. ` +
+        `--edit-config로 올바른 컬럼을 지정해주세요.`,
+      );
     }
 
     let totalCount = 0;

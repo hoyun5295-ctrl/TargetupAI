@@ -29,6 +29,7 @@ import {
   type AgentConfig,
 } from '../config';
 import { initLogger, getLogger } from '../logger';
+import { AGENT_VERSION } from '../version';
 
 const DEV_MODE = process.env.DEV_MODE === 'true';
 
@@ -807,7 +808,8 @@ export async function startSetupCli(
       },
       agent: {
         name: agentName,
-        version: '1.4.0',
+        // ★ 2026-06-11: 하드코딩('1.4.0') 제거 — 실행 파일 버전 단일 진입점 (저장 시 한 번 더 강제됨)
+        version: AGENT_VERSION,
       },
       log: {
         level: 'info',

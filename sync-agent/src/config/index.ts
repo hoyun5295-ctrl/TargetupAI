@@ -33,6 +33,7 @@ import {
   migrateJsonToEncrypted,
 } from './encryption';
 import { ZodError } from 'zod';
+import { AGENT_VERSION } from '../version';
 
 // ─── 경로 상수 ──────────────────────────────────────────
 
@@ -211,8 +212,11 @@ export function updateConfigEncrypted(
   const current = loadConfigDecrypted();
   const updated = updater(current);
 
-  // Zod 재검증
-  const validated = AgentConfigSchema.parse(updated);
+  // Zod 재검증 (★ 2026-06-11: 저장 직전 실행 파일 버전 강제 — withAgentVersion과 동일 원칙)
+  const validated = AgentConfigSchema.parse({
+    ...updated,
+    agent: { ...updated.agent, version: AGENT_VERSION },
+  });
 
   // 재암호화 저장
   const key = loadKey();
@@ -230,13 +234,22 @@ export function updateConfigEncrypted(
 // ─── 설정 저장 ──────────────────────────────────────────
 
 /**
+ * 저장 직전 agent.version을 실행 파일 버전으로 강제합니다. (★ 2026-06-11 단일 관문)
+ * 마법사(웹/CLI)/edit-config 어디서 만들어진 설정이든, 저장 시점의 실행 파일 버전이 기록된다.
+ * (배경: 하드코딩 1.4.0/1.5.4 혼재 + 구버전 기록 영구 잔존 → 인비토 v1.5.1 표시 문제)
+ */
+function withAgentVersion(config: AgentConfig): AgentConfig {
+  return { ...config, agent: { ...config.agent, version: AGENT_VERSION } };
+}
+
+/**
  * 설정을 암호화하여 저장합니다. (프로덕션)
  * 키를 자동 생성하거나 기존 키를 사용합니다.
  */
 export function saveConfigEncrypted(config: AgentConfig): { keyPath: string; encPath: string } {
   ensureDataDir();
   const key = loadOrCreateKey();
-  const plaintext = JSON.stringify(config, null, 2);
+  const plaintext = JSON.stringify(withAgentVersion(config), null, 2);
   const ciphertext = encrypt(plaintext, key);
   fs.writeFileSync(CONFIG_ENC_PATH, ciphertext, 'utf8');
 
@@ -256,7 +269,7 @@ export function saveConfigEncrypted(config: AgentConfig): { keyPath: string; enc
  */
 export function saveConfig(config: AgentConfig, encryptionKey: string): void {
   ensureDataDir();
-  const plaintext = JSON.stringify(config, null, 2);
+  const plaintext = JSON.stringify(withAgentVersion(config), null, 2);
   const ciphertext = encrypt(plaintext, encryptionKey);
   fs.writeFileSync(CONFIG_ENC_PATH, ciphertext, 'utf8');
 }
@@ -266,7 +279,7 @@ export function saveConfig(config: AgentConfig, encryptionKey: string): void {
  */
 export function saveConfigJson(config: AgentConfig): void {
   ensureDataDir();
-  fs.writeFileSync(CONFIG_JSON_PATH, JSON.stringify(config, null, 2), 'utf8');
+  fs.writeFileSync(CONFIG_JSON_PATH, JSON.stringify(withAgentVersion(config), null, 2), 'utf8');
 }
 
 /**
@@ -319,7 +332,7 @@ function buildConfigFromEnv(): Record<string, unknown> {
     },
     agent: {
       name: env.AGENT_NAME || 'sync-agent-001',
-      version: '1.5.4',
+      version: AGENT_VERSION,
     },
     log: {
       level: env.LOG_LEVEL || 'info',

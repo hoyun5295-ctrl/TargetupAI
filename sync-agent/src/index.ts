@@ -39,6 +39,7 @@ import { QueueManager } from './queue';
 import { HeartbeatManager } from './heartbeat';
 import { Scheduler } from './scheduler';
 import { AlertManager, loadAlertConfig } from './alert';
+import { AGENT_VERSION } from './version';
 
 // ★ v1.5.1: Windows 서비스 실행 시 cwd=C:\Windows\System32 → config/data/logs 경로 틀어짐
 //   → 바이너리 실행 경로(process.execPath) 기준으로 cwd 강제 설정
@@ -89,7 +90,12 @@ async function main(): Promise<void> {
   const log = getLogger('main');
 
   log.info('========================================');
-  log.info(`Sync Agent v${config.agent.version} 시작`);
+  // ★ 2026-06-11: 배너/보고 버전은 실행 파일 자신의 버전(AGENT_VERSION)만 사용.
+  //   config.enc 저장값을 쓰면 구버전 설정 보존 시 새 exe도 옛 버전으로 표시되는 문제 (인비토 v1.5.1 실측)
+  log.info(`Sync Agent v${AGENT_VERSION} 시작`);
+  if (config.agent.version && config.agent.version !== AGENT_VERSION) {
+    log.info(`설정 파일 기록 버전 v${config.agent.version} — 표시/보고는 실행 파일 v${AGENT_VERSION} 기준`);
+  }
   log.info(`설정 소스: ${SOURCE_LABELS[configSource]}`);
 
   if (configSource === 'json') {
@@ -180,7 +186,7 @@ async function main(): Promise<void> {
         apiKey: config.server.apiKey,
         apiSecret: config.server.apiSecret,
         agentName: config.agent.name,
-        agentVersion: config.agent.version,
+        agentVersion: AGENT_VERSION,
         osInfo: `${os.platform()} ${os.release()}`,
         dbType: config.database.type,
       });
@@ -271,6 +277,17 @@ async function main(): Promise<void> {
     dryRun: DRY_RUN,
   }, queue, alertManager);
 
+  // 9.5. 타임스탬프 컬럼 실재 검증 (★ 2026-06-11 — 인비토 SyncTest updated_at 부재 실측)
+  //   누락이면 여기서 즉시 경고 — 60분 뒤 첫 증분 주기에서야 드러나는 일 차단.
+  //   증분 실행 시에는 engine.runIncremental이 전체 동기화로 대체(fallbackToFullSync)한다.
+  try {
+    await engine.validateTimestampColumnsAtStartup();
+  } catch (error) {
+    log.warn('타임스탬프 컬럼 기동 검증 실패 (동기화는 계속 진행)', {
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+
   // 10. 최초 동기화
   const isFirstRun = !state.lastFullSyncAt;
 
@@ -351,8 +368,8 @@ async function main(): Promise<void> {
     log.info('✅ Sync Agent 가동 중 (Ctrl+C로 종료)');
     log.info(`   고객 동기화: 매 ${config.sync.customerInterval}분`);
     log.info(`   구매 동기화: ${enablePurchase ? `매 ${config.sync.purchaseInterval}분` : '미사용 (구매 테이블 미설정)'}`);
-    log.info(`   Heartbeat: 매 60분 (v1.5.0)`);
-    log.info(`   큐 재전송: 매 30분 (v1.5.0)`);
+    log.info(`   Heartbeat: 매 60분`);
+    log.info(`   큐 재전송: 매 30분`);
 
     // 12. Graceful Shutdown
     const shutdown = async (signal: string) => {

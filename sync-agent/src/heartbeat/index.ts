@@ -14,6 +14,7 @@ import type { AlertManager } from '../alert';
 import type { AgentCommand } from '../types/api';
 import { UpdateManager } from '../updater';
 import { getLogger } from '../logger';
+import { AGENT_VERSION } from '../version';
 
 const logger = getLogger('heartbeat');
 
@@ -48,9 +49,10 @@ export class HeartbeatManager {
     this.alertManager = alertManager || null;
 
     // 자동 업데이트 매니저 초기화
+    // ★ 2026-06-11: config 저장값이 아닌 실행 파일 버전 기준 — 구버전 config 보존 시 오판 차단
     this.updateManager = new UpdateManager(
       apiClient,
-      config.agent.version,
+      AGENT_VERSION,
     );
   }
 
@@ -74,7 +76,7 @@ export class HeartbeatManager {
     try {
       const response = await this.apiClient.heartbeat({
         agentId: state.agentId || '',
-        agentVersion: this.config.agent.version,
+        agentVersion: AGENT_VERSION,
         // ★ D131 후속: paused 상태면 'paused' 보고, 아니면 'active'
         status: this.paused ? 'paused' : 'active',
         osInfo: `${os.platform()} ${os.release()}`,
@@ -137,7 +139,7 @@ export class HeartbeatManager {
 
     try {
       const versionInfo = await this.apiClient.checkVersion(
-        this.config.agent.version,
+        AGENT_VERSION,
         state.agentId,
       );
       if (!versionInfo) return;

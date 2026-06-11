@@ -11,6 +11,7 @@
  */
 
 import { z } from 'zod';
+import { AGENT_VERSION } from '../version';
 
 // ─── 서버 연결 설정 ─────────────────────────────────────
 
@@ -90,7 +91,8 @@ const MappingConfigSchema = z.object({
 const AgentMetaSchema = z.object({
   id: z.string().uuid().nullish(),
   name: z.string().min(1).default('sync-agent-001'),
-  version: z.string().default('1.5.4'),
+  // ★ 2026-06-11: 하드코딩 금지 — 실행 파일 버전 단일 진입점(src/version.ts) 사용
+  version: z.string().default(AGENT_VERSION),
 });
 
 // ─── 로깅 설정 ──────────────────────────────────────────
