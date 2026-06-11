@@ -6,7 +6,7 @@
 
 import { query } from '../config/database';
 import {
-  getCompanySmsTablesWithLogs, getCompanyAllLiveSmsTables,
+  getCompanySmsTablesWithLogs, getCampaignQueueTables,
   smsCountAll, smsExecAll, smsBatchAggByGroup,
   kakaoCountPending, kakaoCancelPending, kakaoBatchAggByGroup
 } from './sms-queue';
@@ -156,8 +156,9 @@ export async function cancelCampaign(
 
   // 3. MySQL 대기 중인 메시지 건수 확인
   // ★ 2026-06-11: 적재는 사용자 라인(direct-send-worker가 userId 전달)인데 취소는 회사 라인만 보던
-  //   불일치로 DELETE 0건 → 예약 시각 실발송 사고(에이치피오 87,014건). 회사+사용자 전 라인 합집합에서 삭제.
-  const cancelTables = await getCompanyAllLiveSmsTables(companyId, camp.created_by || undefined);
+  //   불일치로 DELETE 0건 → 예약 시각 실발송 사고(에이치피오 87,014건).
+  //   발송 당시 기록(send_config.sentTables) 1순위 + 회사+사용자 전 라인 합집합에서 삭제.
+  const cancelTables = await getCampaignQueueTables(companyId, camp.created_by || undefined, camp.send_config);
   const cancelCount = await smsCountAll(cancelTables, 'app_etc1 = ? AND status_code = 100', [campaignId]);
   let kakaoCancelCount = 0;
   try {

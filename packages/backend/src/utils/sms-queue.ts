@@ -539,6 +539,19 @@ export async function getCompanyAllLiveSmsTables(companyId: string, userId?: str
   return mergeLineTables(mergeLineTables(userLive, companyLive), allUserLive);
 }
 
+/**
+ * ★ 2026-06-11 씨앗 제거 2단계: 캠페인 큐 작업(취소/수신자삭제/시간변경/문안수정/안전망) 대상 테이블.
+ *   적재 워커가 send_config.sentTables에 실제 INSERT한 테이블 목록을 기록하므로 그 기록을 1순위로 합치고,
+ *   라인그룹이 이후 재배정되어도 발송 당시 테이블을 직접 본다. 기록 없는 과거 캠페인은 전 라인 합집합으로 동작.
+ */
+export async function getCampaignQueueTables(companyId: string, userId?: string, sendConfig?: any): Promise<string[]> {
+  const live = await getCompanyAllLiveSmsTables(companyId, userId);
+  const recorded: string[] = Array.isArray(sendConfig?.sentTables)
+    ? sendConfig.sentTables.filter((t: any) => typeof t === 'string' && isValidSmsTable(t))
+    : [];
+  return mergeLineTables(recorded, live);
+}
+
 /** 회사 발송 테이블 + 로그 테이블 (결과 조회용) */
 export async function getCompanySmsTablesWithLogs(companyId: string, userId?: string): Promise<string[]> {
   // ★ 집계 전용 — user 라인그룹 + company 라인그룹 + 회사 소속 전 사용자 라인그룹 합집합.

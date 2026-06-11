@@ -22,7 +22,7 @@ import {
   getCompanySmsTables, hasCompanyLineGroup, getTestSmsTables, getAuthSmsTable,
   invalidateLineGroupCache, getNextSmsTable,
   smsCountAll, smsAggAll, smsSelectAll, smsMinAll, smsExecAll,
-  getCompanySmsTablesWithLogs, getCompanyAllLiveSmsTables,
+  getCompanySmsTablesWithLogs, getCampaignQueueTables,
   insertKakaoQueue, kakaoAgg, kakaoCountPending, kakaoCancelPending, kakaoBatchAggByGroup,
   bulkInsertSmsQueue, insertAlimtalkQueue, toQtmsgType, insertTestSmsQueue
 } from '../utils/sms-queue';
@@ -2183,8 +2183,8 @@ router.get('/:id/recipients', async (req: Request, res: Response) => {
 
     const camp = campaign.rows[0];
 
-    // 예약 상태면 먼저 MySQL 라인 테이블(회사+사용자 전 라인 합집합)에서 조회 시도 — 2026-06-11 라인 불일치 fix
-    const recipientTables = await getCompanyAllLiveSmsTables(companyId, camp.created_by || undefined);
+    // 예약 상태면 먼저 MySQL 라인 테이블(발송 당시 기록 1순위 + 전 라인 합집합)에서 조회 시도 — 2026-06-11 라인 불일치 fix
+    const recipientTables = await getCampaignQueueTables(companyId, camp.created_by || undefined, camp.send_config);
     if (camp.status === 'scheduled') {
       // 검색 조건
       const searchCondition = search ? ` AND dest_no LIKE ?` : '';
@@ -2334,8 +2334,8 @@ router.delete('/:id/recipients/:idx', async (req: Request, res: Response) => {
       return res.status(400).json({ success: false, error: '발송 15분 전에는 수정할 수 없습니다', tooLate: true });
     }
 
-    // MySQL 라인 테이블(회사+사용자 전 라인 합집합)에서 데이터 있는지 확인 — 2026-06-11 라인 불일치 fix
-    const delTables = await getCompanyAllLiveSmsTables(companyId, campaign.rows[0].created_by || undefined);
+    // MySQL 라인 테이블(발송 당시 기록 1순위 + 전 라인 합집합)에서 데이터 있는지 확인 — 2026-06-11 라인 불일치 fix
+    const delTables = await getCampaignQueueTables(companyId, campaign.rows[0].created_by || undefined, campaign.rows[0].send_config);
     const mysqlCount = await smsCountAll(delTables, 'app_etc1 = ? AND status_code = 100', [campaignId]);
 
     if (mysqlCount > 0) {
@@ -2402,8 +2402,8 @@ router.put('/:id/reschedule', async (req: Request, res: Response) => {
       return res.status(400).json({ success: false, error: '발송 15분 전에는 시간을 변경할 수 없습니다', tooLate: true });
     }
 
-    // 1. 라인 테이블(회사+사용자 전 라인 합집합)에서 MIN(sendreq_time) 찾기 — 2026-06-11 라인 불일치 fix
-    const reschTables = await getCompanyAllLiveSmsTables(companyId, campaign.rows[0].created_by || undefined);
+    // 1. 라인 테이블(발송 당시 기록 1순위 + 전 라인 합집합)에서 MIN(sendreq_time) 찾기 — 2026-06-11 라인 불일치 fix
+    const reschTables = await getCampaignQueueTables(companyId, campaign.rows[0].created_by || undefined, campaign.rows[0].send_config);
     const currentMinTime = await smsMinAll(reschTables, 'sendreq_time', 'app_etc1 = ? AND status_code = 100', [campaignId]);
 
     // MySQL에 데이터 있으면 시간 조정 (분할전송 간격 유지)
@@ -2464,8 +2464,8 @@ router.put('/:id/message', async (req: Request, res: Response) => {
       return res.status(400).json({ success: false, error: '발송 15분 전에는 수정할 수 없습니다', tooLate: true });
     }
 
-    // 1. MySQL 라인 테이블(회사+사용자 전 라인 합집합)에서 수신자 목록 조회 — 2026-06-11 라인 불일치 fix
-    const msgTables = await getCompanyAllLiveSmsTables(companyId, campaign.rows[0].created_by || undefined);
+    // 1. MySQL 라인 테이블(발송 당시 기록 1순위 + 전 라인 합집합)에서 수신자 목록 조회 — 2026-06-11 라인 불일치 fix
+    const msgTables = await getCampaignQueueTables(companyId, campaign.rows[0].created_by || undefined, campaign.rows[0].send_config);
     const recipients = await smsSelectAll(msgTables,
       'seqno, dest_no',
       'app_etc1 = ? AND status_code = 100',

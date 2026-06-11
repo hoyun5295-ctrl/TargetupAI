@@ -9,7 +9,7 @@
  */
 import { query } from '../config/database';
 import {
-  getCompanyAllLiveSmsTables, smsCountAll, smsExecAll,
+  getCampaignQueueTables, smsCountAll, smsExecAll,
   kakaoCountPending, kakaoCancelPending,
 } from './sms-queue';
 
@@ -24,7 +24,7 @@ export async function sweepCancelledQueuesOnce(): Promise<{ scanned: number; del
 
   // 최근 7일 내 취소 + 발송 시각이 아직 안 지났거나 하루 이내인 것만 (스캔 비용 최소화)
   const targets = await query(
-    `SELECT id, company_id, created_by FROM campaigns
+    `SELECT id, company_id, created_by, send_config FROM campaigns
      WHERE status = 'cancelled'
        AND cancelled_at >= NOW() - INTERVAL '7 days'
        AND (scheduled_at IS NULL OR scheduled_at >= NOW() - INTERVAL '1 day')`
@@ -33,7 +33,7 @@ export async function sweepCancelledQueuesOnce(): Promise<{ scanned: number; del
   for (const c of targets.rows) {
     try {
       scanned++;
-      const tables = await getCompanyAllLiveSmsTables(c.company_id, c.created_by || undefined);
+      const tables = await getCampaignQueueTables(c.company_id, c.created_by || undefined, c.send_config);
       const pending = await smsCountAll(tables, 'app_etc1 = ? AND status_code = 100', [c.id]);
       if (pending > 0) {
         await smsExecAll(tables, `DELETE FROM SMSQ_SEND WHERE app_etc1 = ? AND status_code = 100`, [c.id]);

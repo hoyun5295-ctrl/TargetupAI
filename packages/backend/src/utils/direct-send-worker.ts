@@ -53,6 +53,12 @@ async function processCampaign(campaignId: string): Promise<void> {
   const total: number = c.target_count || 0;
 
   const companyTables = await getCompanySmsTables(companyId, userId);
+  // ★ 2026-06-11 씨앗 제거: 실제 적재 테이블을 send_config.sentTables에 기록 —
+  //   라인그룹이 이후 재배정되어도 취소/검증/안전망이 발송 당시 테이블을 직접 보게 한다.
+  await query(
+    `UPDATE campaigns SET send_config = jsonb_set(COALESCE(send_config, '{}'::jsonb), '{sentTables}', $1::jsonb), updated_at = NOW() WHERE id = $2`,
+    [JSON.stringify(companyTables), campaignId]
+  );
   const directFieldMappings = await prepareFieldMappings(companyId);
   const finalIsAd = cfg.adEnabled === true;
   const opt080 = finalIsAd ? await getOpt080Number(userId || null, companyId) : '';
