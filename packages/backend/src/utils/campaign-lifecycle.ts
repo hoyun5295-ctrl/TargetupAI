@@ -7,8 +7,9 @@
 import { query } from '../config/database';
 import {
   getCompanySmsTablesWithLogs, getCampaignQueueTables,
-  smsCountAll, smsExecAll, smsBatchAggByGroup,
-  kakaoCountPending, kakaoCancelPending, kakaoBatchAggByGroup
+  smsCountAll, smsExecAll, smsCampaignCountsSafe,
+  kakaoCountPending, kakaoCancelPending, kakaoBatchAggByGroup,
+  type CampaignAggCounts,
 } from './sms-queue';
 import { prepaidRefund } from './prepaid';
 import { SUCCESS_CODES, PENDING_CODES } from './sms-result-map';
@@ -56,9 +57,11 @@ export async function cleanupScheduledCampaigns(filter: CleanupScheduledFilter =
   for (const camp of targets.rows) {
     try {
       const tablesWithLogs = await getCompanySmsTablesWithLogs(camp.company_id);
-      const sentCount = await smsCountAll(tablesWithLogs, 'app_etc1 = ?', [camp.id]);
-      const successCount = await smsCountAll(tablesWithLogs, `app_etc1 = ? AND status_code IN (${SUCCESS_CODES.join(',')})`, [camp.id]);
-      const failCount = await smsCountAll(tablesWithLogs, `app_etc1 = ? AND status_code NOT IN (${[...SUCCESS_CODES, ...PENDING_CODES].join(',')})`, [camp.id]);
+      // ★ 2026-06-11 정합성 100% 산식 — 이력=결과/라이브=대기 분리 (이동 중 이중 카운트 차단)
+      const counts = (await smsCampaignCountsSafe(tablesWithLogs, [camp.id])).get(camp.id);
+      const sentCount = counts?.total || 0;
+      const successCount = counts?.success || 0;
+      const failCount = counts?.fail || 0;
       const newStatus = sentCount === 0 ? 'failed' : 'completed';
 
       // ★ 2026-06-10: 0건 failed 확정 유예 — 발송시각 +10분까지는 보류하고 다음 사이클 재판정.
@@ -287,16 +290,13 @@ export async function syncCampaignResults(companyId: string): Promise<SyncResult
     runsByUser.get(key)!.push(run);
   }
 
-  const aggFields = `COUNT(CASE WHEN status_code IN (${SUCCESS_CODES.join(',')}) THEN 1 END) as success_count,
-     COUNT(CASE WHEN status_code NOT IN (${[...SUCCESS_CODES, ...PENDING_CODES].join(',')}) THEN 1 END) as fail_count,
-     COUNT(CASE WHEN status_code IN (${PENDING_CODES.join(',')}) THEN 1 END) as pending_count`;
-
-  const smsAggMap = new Map<string, Record<string, number>>();
+  // ★ 2026-06-11 정합성 100% 산식 — 이력=결과/라이브=대기 분리 (이동 중 이중 카운트 차단)
+  const smsAggMap = new Map<string, CampaignAggCounts>();
   for (const [key, runs] of runsByUser) {
     const [cid, uid] = key.split('::');
     const runTables = await getCompanySmsTablesWithLogs(cid, uid || undefined);
     const ids = runs.map(r => r.campaign_id);
-    const partial = await smsBatchAggByGroup(runTables, 'app_etc1', aggFields, ids);
+    const partial = await smsCampaignCountsSafe(runTables, ids);
     for (const [g, v] of partial) smsAggMap.set(g, v);
   }
 
@@ -306,12 +306,12 @@ export async function syncCampaignResults(companyId: string): Promise<SyncResult
 
   for (const run of runsResult.rows) {
     try {
-      const smsAgg = smsAggMap.get(run.campaign_id) || {};
+      const smsAgg = smsAggMap.get(run.campaign_id);
       const kakaoResult = kakaoAggMap.get(run.campaign_id) || { total: 0, success: 0, fail: 0, pending: 0 };
 
-      const successCount = (smsAgg.success_count || 0) + kakaoResult.success;
-      const failCount = (smsAgg.fail_count || 0) + kakaoResult.fail;
-      const pendingCount = (smsAgg.pending_count || 0) + kakaoResult.pending;
+      const successCount = (smsAgg?.success || 0) + kakaoResult.success;
+      const failCount = (smsAgg?.fail || 0) + kakaoResult.fail;
+      const pendingCount = (smsAgg?.pending || 0) + kakaoResult.pending;
       console.log(`[sync-results] AI run ${run.id} — success:${successCount}, fail:${failCount}, pending:${pendingCount}`);
 
       // 타임아웃 체크: 발송 후 120분 경과 + pending만 남아있으면 강제 완료
@@ -423,17 +423,13 @@ export async function syncCampaignResults(companyId: string): Promise<SyncResult
     if (!directByUser.has(key)) directByUser.set(key, []);
     directByUser.get(key)!.push(c);
   }
-  const directAggFields = `COUNT(*) as total_count,
-     COUNT(CASE WHEN status_code IN (${SUCCESS_CODES.join(',')}) THEN 1 END) as success_count,
-     COUNT(CASE WHEN status_code NOT IN (${[...SUCCESS_CODES, ...PENDING_CODES].join(',')}) THEN 1 END) as fail_count,
-     COUNT(CASE WHEN status_code IN (${PENDING_CODES.join(',')}) THEN 1 END) as pending_count`;
-
-  const directSmsAggMap = new Map<string, Record<string, number>>();
+  // ★ 2026-06-11 정합성 100% 산식 — 이력=결과/라이브=대기 분리 (이동 중 이중 카운트 차단)
+  const directSmsAggMap = new Map<string, CampaignAggCounts>();
   for (const [key, camps] of directByUser) {
     const [cid, uid] = key.split('::');
     const directTables = await getCompanySmsTablesWithLogs(cid, uid || undefined);
     const ids = camps.map(c => c.id);
-    const partial = await smsBatchAggByGroup(directTables, 'app_etc1', directAggFields, ids);
+    const partial = await smsCampaignCountsSafe(directTables, ids);
     for (const [g, v] of partial) directSmsAggMap.set(g, v);
   }
   const allDirectIds: string[] = directCampaigns.rows.map((c: any) => c.id);
@@ -441,12 +437,12 @@ export async function syncCampaignResults(companyId: string): Promise<SyncResult
 
   for (const campaign of directCampaigns.rows) {
     try {
-      const smsDirectAgg = directSmsAggMap.get(campaign.id) || {};
+      const smsDirectAgg = directSmsAggMap.get(campaign.id);
       const kakaoDirectResult = directKakaoAggMap.get(campaign.id) || { total: 0, success: 0, fail: 0, pending: 0 };
 
-      const successCount = (smsDirectAgg.success_count || 0) + kakaoDirectResult.success;
-      const failCount = (smsDirectAgg.fail_count || 0) + kakaoDirectResult.fail;
-      const pendingCount = (smsDirectAgg.pending_count || 0) + kakaoDirectResult.pending;
+      const successCount = (smsDirectAgg?.success || 0) + kakaoDirectResult.success;
+      const failCount = (smsDirectAgg?.fail || 0) + kakaoDirectResult.fail;
+      const pendingCount = (smsDirectAgg?.pending || 0) + kakaoDirectResult.pending;
       console.log(`[sync-results] direct campaign ${campaign.id} — success:${successCount}, fail:${failCount}, pending:${pendingCount}`);
 
       // 직접발송 타임아웃: 120분 경과 + pending만 남아있으면 강제 완료

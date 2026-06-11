@@ -23,8 +23,8 @@
 // ===========================================================================
 
 import { query } from '../config/database';
-import { getCompanySmsTablesWithLogs, smsBatchAggByGroup, kakaoBatchAggByGroup } from './sms-queue';
-import { SUCCESS_CODES, PENDING_CODES } from './sms-result-map';
+// ★ 2026-06-11: 카운트는 smsCampaignCountsSafe(이력=결과/라이브=대기 분리) — 이동 중 이중 카운트 차단
+import { getCompanySmsTablesWithLogs, smsCampaignCountsSafe, kakaoBatchAggByGroup, type CampaignAggCounts } from './sms-queue';
 import { prepaidRefund } from './prepaid';
 // ★ 2026-06-11: 환불 누적 단일 산식 — 정당 환불 = 차감 실측 − 성공 − 대기 (미적재분 과소 환불 근본 fix)
 import { calcRefundDue } from './refund-calc';
@@ -116,17 +116,13 @@ async function runOnce(): Promise<void> {
       byUserKey.get(key)!.push(c);
     }
 
-    // === 3. 회사/유저별 MySQL 배치 집계 ===
-    const aggFields = `COUNT(CASE WHEN status_code IN (${SUCCESS_CODES.join(',')}) THEN 1 END) as success_count,
-       COUNT(CASE WHEN status_code NOT IN (${[...SUCCESS_CODES, ...PENDING_CODES].join(',')}) THEN 1 END) as fail_count,
-       COUNT(CASE WHEN status_code IN (${PENDING_CODES.join(',')}) THEN 1 END) as pending_count`;
-
-    const smsAggMap = new Map<string, Record<string, number>>();
+    // === 3. 회사/유저별 MySQL 배치 집계 — ★ 2026-06-11 정합성 100% 산식(이력=결과/라이브=대기) ===
+    const smsAggMap = new Map<string, CampaignAggCounts>();
     for (const [key, camps] of byUserKey) {
       const [cid, uid] = key.split('::');
       const tables = await getCompanySmsTablesWithLogs(cid, uid || undefined);
       const ids = camps.map(c => c.id);
-      const partial = await smsBatchAggByGroup(tables, 'app_etc1', aggFields, ids);
+      const partial = await smsCampaignCountsSafe(tables, ids);
       for (const [g, v] of partial) smsAggMap.set(g, v);
     }
 
@@ -142,12 +138,12 @@ async function runOnce(): Promise<void> {
 
     for (const camp of candidates.rows as CampaignRow[]) {
       try {
-        const smsAgg = smsAggMap.get(camp.id) || {};
+        const smsAgg = smsAggMap.get(camp.id);
         const kakaoAgg = kakaoAggMap.get(camp.id) || { total: 0, success: 0, fail: 0, pending: 0 };
 
-        const mysqlSuccess = Number(smsAgg.success_count || 0) + kakaoAgg.success;
-        const mysqlFail = Number(smsAgg.fail_count || 0) + kakaoAgg.fail;
-        const mysqlPending = Number(smsAgg.pending_count || 0) + kakaoAgg.pending;
+        const mysqlSuccess = Number(smsAgg?.success || 0) + kakaoAgg.success;
+        const mysqlFail = Number(smsAgg?.fail || 0) + kakaoAgg.fail;
+        const mysqlPending = Number(smsAgg?.pending || 0) + kakaoAgg.pending;
 
         // === 4-1. PG count 동시 갱신 (화면 보조) — 결과가 하나라도 있을 때만 ===
         // target_count는 절대 건드리지 않음 (protect_completed_target_count trigger 호환)

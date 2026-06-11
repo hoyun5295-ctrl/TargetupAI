@@ -19,8 +19,8 @@
 
 import { query } from '../config/database';
 import { syncCampaignResults } from './campaign-lifecycle';
-import { getAuthSmsTable, bulkInsertSmsQueue, getCompanySmsTablesWithLogs, smsCountAll } from './sms-queue';
-import { SUCCESS_CODES, PENDING_CODES } from './sms-result-map';
+// ★ 2026-06-11: 카운트는 smsCampaignCountsSafe(이력=결과/라이브=대기 분리) — 이동 중 이중 카운트 차단
+import { getAuthSmsTable, bulkInsertSmsQueue, getCompanySmsTablesWithLogs, smsCampaignCountsSafe } from './sms-queue';
 
 const INTERVAL_MS = 5 * 60 * 1000; // 5분
 const BOOT_DELAY_MS = 60 * 1000;   // 서버 startup 안정화 후 첫 실행
@@ -300,9 +300,11 @@ async function reconcileFinalizedCampaigns(): Promise<void> {
   for (const camp of targets.rows) {
     try {
       const tables = await getCompanySmsTablesWithLogs(camp.company_id);
-      const sentCount = await smsCountAll(tables, 'app_etc1 = ?', [camp.id]);
-      const successCount = await smsCountAll(tables, `app_etc1 = ? AND status_code IN (${SUCCESS_CODES.join(',')})`, [camp.id]);
-      const failCount = await smsCountAll(tables, `app_etc1 = ? AND status_code NOT IN (${[...SUCCESS_CODES, ...PENDING_CODES].join(',')})`, [camp.id]);
+      // ★ 2026-06-11 정합성 100% 산식 — 이력=결과/라이브=대기 분리 (이동 중 이중 카운트 차단)
+      const counts = (await smsCampaignCountsSafe(tables, [camp.id])).get(camp.id);
+      const sentCount = counts?.total || 0;
+      const successCount = counts?.success || 0;
+      const failCount = counts?.fail || 0;
 
       // 발송 기록이 있는 failed = 오판 → completed 복원. 진짜 0건 실패는 failed 유지.
       const newStatus = (camp.status === 'failed' && sentCount > 0) ? 'completed' : camp.status;

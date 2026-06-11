@@ -10,7 +10,9 @@
 import { query, mysqlQuery } from '../config/database';
 import { CAMPAIGN_OPT080_SELECT_EXPR, CAMPAIGN_OPT080_LEFT_JOIN } from './unsubscribe-helper';
 // ★ D144: PG sent_count 캐시 의존 제거 — MySQL 직접 카운트로 전환
-import { getCompanySmsTablesWithLogs, smsBatchAggByGroup, kakaoBatchAggByGroup } from './sms-queue';
+// ★ 2026-06-11: 카운트는 smsCampaignCountsSafe(이력=결과/라이브=대기 분리) — 이동 중 이중 카운트 차단
+import { getCompanySmsTablesWithLogs, smsCampaignCountsSafe, kakaoBatchAggByGroup } from './sms-queue';
+import { splitLiveAndLogTables } from './sms-table-split';
 import { SUCCESS_CODES_SQL, PENDING_CODES_SQL, tallySmsChannelCounts, SmsChannel, ChannelCount } from './sms-result-map';
 
 // ============================================================
@@ -238,13 +240,6 @@ export async function aggregateSmsCountsByCampaign(
   const result = new Map<string, Record<string, number>>();
   if (campaigns.length === 0) return result;
 
-  const smsAggFields = `
-    COUNT(*) as total_count,
-    SUM(CASE WHEN status_code IN (${SUCCESS_CODES_SQL}) THEN 1 ELSE 0 END) as success_count,
-    SUM(CASE WHEN status_code NOT IN (${SUCCESS_CODES_SQL}, ${PENDING_CODES_SQL}) THEN 1 ELSE 0 END) as fail_count,
-    SUM(CASE WHEN status_code IN (${PENDING_CODES_SQL}) THEN 1 ELSE 0 END) as pending_count
-  `;
-
   // 1) (company_id, created_by) 쌍별 캠페인 ID 그룹핑
   type UserGroup = { companyId: string; userId: string | null; ids: string[] };
   const byUser = new Map<string, UserGroup>();
@@ -273,10 +268,12 @@ export async function aggregateSmsCountsByCampaign(
     byTableSet.get(tableKey)!.ids.push(...ug.ids);
   }
 
-  // 4) 라인그룹 테이블셋별 1쿼리(UNION ALL) — K회 호출
+  // 4) 라인그룹 테이블셋별 집계 — ★ 2026-06-11 정합성 100% 산식(이력=결과/라이브=대기)으로 교체
   for (const [, group] of byTableSet) {
-    const partial = await smsBatchAggByGroup(group.tables, 'app_etc1', smsAggFields, group.ids);
-    for (const [cid, v] of partial) result.set(cid, v);
+    const partial = await smsCampaignCountsSafe(group.tables, group.ids);
+    for (const [cid, v] of partial) {
+      result.set(cid, { total_count: v.total, success_count: v.success, fail_count: v.fail, pending_count: v.pending });
+    }
   }
   return result;
 }
@@ -316,15 +313,19 @@ export async function aggregateSmsChannelSplitByCampaign(
   }
 
   // 라인그룹 테이블셋별 raw 집계: app_etc1 + msg_type + (대체 여부) + status_code
+  // ★ 2026-06-11: 라이브 큐는 대기 코드만 — 큐→이력 이동 중 같은 행이 양쪽에서 잡히는 이중 카운트 차단
+  //   (결과 행은 이력에서만 — smsCampaignCountsSafe와 동일 산식)
   const rawByCampaign = new Map<string, Array<{ msg_type: string; k_oriseq: number | null; status_code: number; cnt: number }>>();
   for (const [, group] of byTableSet) {
     if (group.ids.length === 0 || group.tables.length === 0) continue;
     const placeholders = group.ids.map(() => '?').join(',');
+    const { live: liveTabs } = splitLiveAndLogTables(group.tables);
+    const liveSet = new Set(liveTabs);
     const unions = group.tables
       .map(t => `SELECT app_etc1 AS _grp, msg_type,
                    CASE WHEN k_oriseq IS NOT NULL AND k_oriseq > 0 THEN 1 ELSE 0 END AS is_sub,
                    status_code, COUNT(*) AS cnt
-                 FROM ${t} WHERE app_etc1 IN (${placeholders})
+                 FROM ${t} WHERE app_etc1 IN (${placeholders})${liveSet.has(t) ? ` AND status_code IN (${PENDING_CODES_SQL})` : ''}
                  GROUP BY app_etc1, msg_type, is_sub, status_code`)
       .join(' UNION ALL ');
     // 같은 캠페인이 LIVE+LOG 여러 테이블로 쪼개질 수 있어 outer 재합산

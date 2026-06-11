@@ -7,6 +7,10 @@ import { mysqlQuery } from '../config/database';
 import { CACHE_TTL, BATCH_SIZES } from '../config/defaults';
 import { isValidSmsTable } from './sms-table-validator';
 import { query } from '../config/database';
+import { SUCCESS_CODES, PENDING_CODES } from './sms-result-map';
+import { splitLiveAndLogTables, mergeCampaignCounts, type CampaignAggCounts } from './sms-table-split';
+
+export type { CampaignAggCounts } from './sms-table-split';
 
 // ===== 환경변수 기반 테이블 설정 =====
 export const ALL_SMS_TABLES = (process.env.SMS_TABLES || 'SMSQ_SEND').split(',').map(t => t.trim());
@@ -393,6 +397,47 @@ export async function smsBatchAggByGroup(
     result.set(grp, existing);
   }
   return result;
+}
+
+/**
+ * ★ 2026-06-11 정합성 100% 캠페인 결과 집계 — 카운트 산식의 유일한 진입점.
+ * 결과(성공/실패)는 월별 이력에서만, 대기는 라이브 큐의 대기 코드(100/104)에서만 센다.
+ * 에이전트가 행을 큐→이력으로 옮기는(복사 후 삭제) 사이에 두 저장소를 합산하면 같은 행이
+ * 양쪽에서 잡혀 부풀린 값이 PG에 굳는다(toun28 6/11: 실재 7,171행 vs 기록 7,520 —
+ * 합이 target을 넘는 순간 재동기화 후보에서 영구 제외). 이력은 append-only라 이 산식은
+ * 과대 집계가 구조적으로 불가능하고, 이동 순간의 일시 과소는 다음 사이클에 자연 수렴한다.
+ * 소비처: sync(AI/직접)·cleanup·reconcile·refund-sweeper·aggregateSmsCountsByCampaign.
+ */
+export async function smsCampaignCountsSafe(
+  tables: string[],
+  ids: (string | number)[],
+  groupField: string = 'app_etc1',
+): Promise<Map<string, CampaignAggCounts>> {
+  const out = new Map<string, CampaignAggCounts>();
+  if (tables.length === 0 || ids.length === 0) return out;
+  const { live, logs } = splitLiveAndLogTables(tables);
+  const SUC = SUCCESS_CODES.join(',');
+  const PEN = PENDING_CODES.join(',');
+
+  const logAgg = logs.length > 0
+    ? await smsBatchAggByGroup(logs, groupField, `
+        COUNT(*) as t,
+        SUM(CASE WHEN status_code IN (${SUC}) THEN 1 ELSE 0 END) as s,
+        SUM(CASE WHEN status_code NOT IN (${SUC}, ${PEN}) THEN 1 ELSE 0 END) as f,
+        SUM(CASE WHEN status_code IN (${PEN}) THEN 1 ELSE 0 END) as p`, ids)
+    : new Map<string, Record<string, number>>();
+  const liveAgg = live.length > 0
+    ? await smsBatchAggByGroup(live, groupField, `
+        SUM(CASE WHEN status_code IN (${PEN}) THEN 1 ELSE 0 END) as lp`, ids)
+    : new Map<string, Record<string, number>>();
+
+  for (const rawId of ids) {
+    const id = String(rawId);
+    const lg = logAgg.get(id) as { t?: number; s?: number; f?: number; p?: number } | undefined;
+    const lv = liveAgg.get(id);
+    out.set(id, mergeCampaignCounts(lg, Number(lv?.lp || 0)));
+  }
+  return out;
 }
 
 /**
