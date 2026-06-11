@@ -12,6 +12,19 @@
 
 import { query } from '../config/database';
 
+/**
+ * ★ 무료체험 신청 마감 (Harold 확정 2026-06-11): 2026-06-30 23:59:59 KST까지만 신청 접수.
+ *   UTC 표기 = 2026-06-30T14:59:59.999Z (KST = UTC+9 — 서버 TZ와 무관하게 동일 epoch).
+ *   frontend 대응 상수 = packages/frontend/src/components/OpenTrialPopup.tsx TRIAL_APPLY_DEADLINE_MS
+ *   (마감 변경 시 양쪽 동시 수정 의무).
+ */
+export const TRIAL_APPLY_DEADLINE = new Date('2026-06-30T14:59:59.999Z');
+
+/** 무료체험 신청 가능 기간 여부 (마감 시각 포함) */
+export function isTrialApplyOpen(now: Date = new Date()): boolean {
+  return now.getTime() <= TRIAL_APPLY_DEADLINE.getTime();
+}
+
 /** BASIC 무료체험 부여. 부여된 companies 행 반환. BASIC 요금제 미존재 시 throw. */
 export async function grantBasicTrial(companyId: string, days = 30): Promise<any> {
   const basic = await query(

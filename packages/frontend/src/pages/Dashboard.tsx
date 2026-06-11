@@ -7,7 +7,7 @@ import AddressBookModal from '../components/AddressBookModal';
 import AiCampaignResultPopup from '../components/AiCampaignResultPopup';
 import AiCampaignSendModal from '../components/AiCampaignSendModal';
 import AiCustomSendFlow from '../components/AiCustomSendFlow';
-import OpenTrialPopup from '../components/OpenTrialPopup';
+import OpenTrialPopup, { isTrialApplyOpen } from '../components/OpenTrialPopup';
 import PlanChangeModal from '../components/PlanChangeModal';
 import AiMessageSuggestModal from '../components/AiMessageSuggestModal';
 import AiPreviewModal from '../components/AiPreviewModal';
@@ -163,6 +163,16 @@ export default function Dashboard() {
 
   const [stats, setStats] = useState<Stats | null>(null);
   const [planInfo, setPlanInfo] = useState<PlanInfo | null>(null);
+  // ★ 2026-06-11 Harold 확정: 무료체험 상시 진입점(발송현황 아래 와이드 배너) — 팝업 24h dismiss 보완.
+  //   trialPending = plan-request/status 응답의 pending 여부 (기존 호출 재사용).
+  //   trialPopupForceOpen = 배너 클릭으로 기존 OpenTrialPopup을 즉시 여는 플래그.
+  const [trialPending, setTrialPending] = useState(false);
+  const [trialPopupForceOpen, setTrialPopupForceOpen] = useState(false);
+  // 노출 조건: FREE + 신청 기간 내(~2026-06-30 KST). 대기 신청 있으면 '검토 중' 표시.
+  const trialCta: 'apply' | 'pending' | undefined =
+    planInfo?.plan_code === 'FREE' && isTrialApplyOpen()
+      ? (trialPending ? 'pending' : 'apply')
+      : undefined;
   // ★ 2026-06-08: 요금제 변경(무료체험 활성/종료 포함) 최초 1회 알림 모달 (localStorage 비교)
   const [planChange, setPlanChange] = useState<{ from: string; to: string; toStatus?: string } | null>(null);
   useEffect(() => {
@@ -1210,6 +1220,8 @@ export default function Dashboard() {
           setPlanApproval({ requestId: approvalData.unconfirmed.id, planName: approvalData.unconfirmed.requested_plan_name });
           setShowPlanApproval(true);
         }
+        // ★ 2026-06-11: 처리 대기 신청 여부 — 헤더 무료체험 버튼을 "검토 중" 표시로 전환 (같은 응답 재사용, 추가 API 0건)
+        setTrialPending(!!approvalData.pending);
       }
     } catch (error) {
       console.error('통계 로드 실패:', error);
@@ -2470,6 +2482,48 @@ const campaignData = {
                 </div>
               </div>
             </div>
+
+            {/* ★ 2026-06-11 Harold 확정: 무료체험 상시 진입 배너 — 발송현황 아래 가로 와이드.
+                팝업 24h dismiss 보완 (헤더는 메뉴 과밀로 제외). FREE + ~6/30 기간 내만 노출,
+                대기 신청 있으면 "검토 중" 상태. 클릭 = 기존 OpenTrialPopup 강제 오픈. */}
+            {trialCta && (
+              <button
+                type="button"
+                onClick={() => trialCta === 'apply' && setTrialPopupForceOpen(true)}
+                disabled={trialCta === 'pending'}
+                className="relative w-full overflow-hidden rounded-2xl bg-gradient-to-r from-violet-600 via-purple-600 to-fuchsia-600 px-5 py-4 text-left shadow-sm transition-all hover:shadow-lg hover:from-violet-500 hover:via-purple-500 hover:to-fuchsia-500 disabled:cursor-default disabled:hover:shadow-sm sm:px-6"
+              >
+                <div className="pointer-events-none absolute -right-10 -top-16 h-48 w-48 rounded-full bg-white/10 blur-2xl" />
+                <div className="pointer-events-none absolute -bottom-20 left-1/3 h-40 w-40 rounded-full bg-fuchsia-300/10 blur-2xl" />
+                <div className="relative flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="flex items-center gap-3">
+                    <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-white/15">
+                      <Sparkles className="h-5 w-5 text-white" />
+                    </span>
+                    <span>
+                      <span className="block text-[15px] font-bold tracking-tight text-white sm:text-base">
+                        AI Operator 무료체험 신청
+                      </span>
+                      <span className="mt-0.5 block text-xs text-white/75 sm:text-[13px]">
+                        베이직 기능 30일 무료 · 약정 없음 · <span className="font-semibold text-amber-200">6월 30일 신청 마감</span>
+                      </span>
+                    </span>
+                  </div>
+                  {trialCta === 'apply' ? (
+                    <span className="inline-flex shrink-0 items-center gap-1.5 self-start rounded-xl bg-white px-4 py-2 text-[13px] font-bold text-violet-700 shadow-sm sm:self-auto">
+                      지금 신청하기
+                      <svg viewBox="0 0 24 24" fill="none" className="h-4 w-4" aria-hidden>
+                        <path d="M5 12h13M13 6l6 6-6 6" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
+                      </svg>
+                    </span>
+                  ) : (
+                    <span className="inline-flex shrink-0 items-center self-start rounded-xl border border-white/25 bg-white/15 px-4 py-2 text-[13px] font-semibold text-white sm:self-auto">
+                      체험 신청 검토 중
+                    </span>
+                  )}
+                </div>
+              </button>
+            )}
 
             {/* 2행: DB 현황 — 모던 본격 디자인 (D224+ Harold 명시 본격 재정정 — Linear/Stripe/Vercel 동급) */}
             <div className="relative bg-white rounded-3xl border border-gray-200/60 shadow-sm hover:shadow-md transition-all flex-1 overflow-hidden">
@@ -3917,8 +3971,21 @@ const campaignData = {
         }}
       />
 
-      {/* 무료체험 신청 팝업 — 로그인 직후 1회 노출 (FREE/미가입 + 24h localStorage 차단) */}
-      {planInfo?.plan_code === 'FREE' && <OpenTrialPopup />}
+      {/* 무료체험 신청 팝업 — 로그인 직후 1회 노출 (FREE/미가입 + 24h localStorage 차단 + ~6/30 기간 내) */}
+      {planInfo?.plan_code === 'FREE' && (
+        <OpenTrialPopup onClose={(reason) => reason === 'done' && setTrialPending(true)} />
+      )}
+
+      {/* ★ 2026-06-11: 헤더 "30일 무료체험" 버튼 진입 — 24h dismiss 무시하고 즉시 오픈 */}
+      {trialPopupForceOpen && (
+        <OpenTrialPopup
+          forceOpen
+          onClose={(reason) => {
+            if (reason === 'done') setTrialPending(true);
+            setTrialPopupForceOpen(false);
+          }}
+        />
+      )}
 
       {/* 요금제 변경(무료체험 활성/종료) 최초 1회 알림 */}
       {planChange && (

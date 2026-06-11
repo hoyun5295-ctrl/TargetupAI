@@ -6,7 +6,7 @@ import { authenticate, requireSuperAdmin, requireUuidId } from '../middlewares/a
 import { getCardDef, isDynamicCardId, parseDynamicCardId, type ParsedDynamicCardId } from '../utils/dashboard-card-pool';
 import { getStoreScope } from '../utils/store-scope';
 import { getOpt080Number } from '../utils/messageUtils';
-import { grantBasicTrial } from '../utils/basic-trial';
+import { grantBasicTrial, isTrialApplyOpen } from '../utils/basic-trial';
 
 const router = Router();
 
@@ -330,6 +330,15 @@ router.post('/trial-request', async (req: Request, res: Response) => {
     const companyId = (req as any).user?.companyId;
     const userId = (req as any).user?.userId;
     if (!companyId) return res.status(401).json({ error: '인증 필요' });
+
+    // ★ 2026-06-11 Harold 확정: 무료체험 신청은 2026-06-30(KST)까지만 접수.
+    //   화면(팝업/헤더 버튼)도 같은 기준으로 숨기지만, 직접 호출 차단은 서버 가드가 담당.
+    if (!isTrialApplyOpen()) {
+      return res.status(400).json({
+        error: '무료체험 신청 기간이 종료되었습니다. (2026년 6월 30일 마감)',
+        code: 'TRIAL_PERIOD_ENDED',
+      });
+    }
 
     // 무료체험은 미가입(FREE) 상태에서만 신청 가능
     const comp = await query(

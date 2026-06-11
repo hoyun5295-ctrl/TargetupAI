@@ -13,12 +13,26 @@ import { useCallback, useEffect, useRef, useState } from "react";
 const DISMISS_KEY = "targetup_trialpromo_dismiss";
 const DISMISS_MS = 24 * 60 * 60 * 1000;
 
+/**
+ * ★ 무료체험 신청 마감 (Harold 확정 2026-06-11): 2026-06-30 23:59:59 KST까지만 신청 접수.
+ *   UTC 표기 = 2026-06-30T14:59:59.999Z (사용자 기기 TZ와 무관하게 동일 epoch 비교).
+ *   backend 대응 상수 = packages/backend/src/utils/basic-trial.ts TRIAL_APPLY_DEADLINE
+ *   (마감 변경 시 양쪽 동시 수정 의무). 서버 trial-request에도 동일 가드가 있어 화면은 안내용.
+ */
+export const TRIAL_APPLY_DEADLINE_MS = Date.parse("2026-06-30T14:59:59.999Z");
+
+/** 무료체험 신청 가능 기간 여부 (마감 시각 포함) — 헤더 버튼 노출 게이팅과 공용 */
+export function isTrialApplyOpen(): boolean {
+  return Date.now() <= TRIAL_APPLY_DEADLINE_MS;
+}
+
 const GRAD =
   "bg-gradient-to-r from-violet-300 via-fuchsia-300 to-fuchsia-400 bg-clip-text text-transparent";
 
-/** 24h dismiss 여부. true면 노출. */
+/** 자동 노출 여부 = 신청 기간 내 + 24h dismiss 아님. */
 export function shouldShowOpenTrial(): boolean {
   if (typeof window === "undefined") return false;
+  if (!isTrialApplyOpen()) return false;
   try {
     const until = Number(localStorage.getItem(DISMISS_KEY) || 0);
     return !(until && Date.now() < until);
@@ -31,10 +45,12 @@ type CloseReason = "x" | "esc" | "backdrop" | "later" | "done";
 
 type Props = {
   onClose?: (reason: CloseReason) => void;
+  /** 헤더 "30일 무료체험" 버튼 진입 — 24h dismiss를 무시하고 즉시 연다 (마감 후에는 열지 않음). */
+  forceOpen?: boolean;
 };
 
-export default function OpenTrialPopup({ onClose }: Props) {
-  const [open, setOpen] = useState(() => shouldShowOpenTrial());
+export default function OpenTrialPopup({ onClose, forceOpen }: Props) {
+  const [open, setOpen] = useState(() => (forceOpen ? isTrialApplyOpen() : shouldShowOpenTrial()));
   const [dontShow, setDontShow] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
@@ -163,12 +179,20 @@ export default function OpenTrialPopup({ onClose }: Props) {
           /* ── 신청 뷰 ── */
           <>
             <div className="relative flex flex-col items-center gap-6 px-7 pb-6 pt-9 sm:px-9 sm:pt-10">
-              <div data-anim="rise" style={{ animationDelay: ".12s" }}>
+              <div data-anim="rise" style={{ animationDelay: ".12s" }} className="flex flex-wrap items-center justify-center gap-2">
                 <span className="inline-flex items-center gap-1.5 rounded-full border border-violet-400/40 bg-violet-500/15 px-3 py-1 text-xs font-semibold text-violet-200">
                   <svg viewBox="0 0 24 24" fill="none" className="h-3.5 w-3.5 text-violet-300" aria-hidden>
                     <path d="M12 2.5l1.7 4.9 4.9 1.7-4.9 1.7L12 15.7l-1.7-4.9L5.4 9.1l4.9-1.7L12 2.5z" fill="currentColor" />
                   </svg>
                   AI Operator BETA · 오픈 기념
+                </span>
+                {/* ★ 2026-06-11 Harold 확정: 신청 마감 표기 — 6월 30일까지만 접수 */}
+                <span className="inline-flex items-center gap-1.5 rounded-full border border-amber-400/40 bg-amber-500/15 px-3 py-1 text-xs font-semibold text-amber-200">
+                  <svg viewBox="0 0 24 24" fill="none" className="h-3.5 w-3.5 text-amber-300" aria-hidden>
+                    <circle cx="12" cy="12" r="8.5" stroke="currentColor" strokeWidth="1.8" />
+                    <path d="M12 7.5V12l3 2" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                  6월 30일 신청 마감
                 </span>
               </div>
 
@@ -219,7 +243,7 @@ export default function OpenTrialPopup({ onClose }: Props) {
                 )}
               </button>
               <p data-anim="rise" style={{ animationDelay: ".6s" }} className="-mt-2 text-[12px] text-white/35">
-                신청은 1분, 약정·위약금 없이 시작합니다.
+                신청 기간 <span className="font-semibold text-amber-200/80">2026년 6월 30일까지</span> · 신청은 1분, 약정·위약금 없이 시작합니다.
               </p>
             </div>
 
