@@ -3,7 +3,7 @@ import crypto from 'crypto';
 import { Request, Response, Router } from 'express';
 import { mysqlQuery, query } from '../config/database';
 import { authenticate, requireSuperAdmin } from '../middlewares/auth';
-import { ALL_SMS_TABLES, invalidateLineGroupCache, getCampaignSmsTables, smsCountAll, smsSelectAll, smsAggAll, getTestSmsTables, kakaoCountWhere, kakaoSelectWhere, kakaoBatchAggByGroup } from '../utils/sms-queue';
+import { ALL_SMS_TABLES, invalidateLineGroupCache, getCampaignSmsTables, smsCountAll, smsSelectAll, smsSelectPagedAll, smsAggAll, getTestSmsTables, kakaoCountWhere, kakaoSelectWhere, kakaoBatchAggByGroup } from '../utils/sms-queue';
 import { DASHBOARD_CARD_POOL, validateCardIds, getRequiredFields, filterPoolByAvailableData, generateDynamicCards } from '../utils/dashboard-card-pool';
 import { detectEnabledFields } from '../utils/enabled-fields';
 import { SUCCESS_CODES_SQL, PENDING_CODES_SQL, getStatusLabel, getStatusType, getCarrierLabel, isSuccess, isPending, getSendTypeLabel, getCampaignChannelLabel, getQueueRowStatus } from '../utils/sms-result-map';
@@ -1916,7 +1916,10 @@ router.get('/campaigns/:id/sms-detail', authenticate, requireSuperAdmin, async (
       //   2.3만건 캠페인이 msg_contents(LMS 본문)까지 전부 Node로 전송돼 50건 표시에 10초 → SQL이 50건만 반환.
       //   카카오 분기(아래) + campaigns.ts 수신자 조회와 동일 패턴. seqno DESC + dest_no tie-breaker(D150-4 — UNION seqno 중복 시 결정적 페이지네이션).
       //   limit/offset은 상단 parseInt 정수라 SQL 리터럴 안전.
-      const rows = await smsSelectAll(
+      // ★ 2026-06-13 속도: smsSelectPagedAll — 테이블별 top-(offset+limit) 선잘라내기 후 병합.
+      //   기존 smsSelectAll(외부 ORDER/LIMIT)은 일치 행 전체(8만 행 + LMS 본문)를 임시 테이블로
+      //   실체화한 뒤 정렬해 페이지당 수 초가 걸렸다 (에이치피오 87,049 예약 상세 10초+ 잔여 병목).
+      const rows = await smsSelectPagedAll(
         smsTables,
         `seqno, dest_no, call_back, msg_contents, msg_type, status_code, mob_company,
          sendreq_time, k_oriseq,
@@ -1924,7 +1927,9 @@ router.get('/campaigns/:id/sms-detail', authenticate, requireSuperAdmin, async (
          (sendreq_time > NOW()) AS is_future`,
         mysqlWhere,
         mysqlParams,
-        `ORDER BY seqno DESC, dest_no ASC LIMIT ${Number(limit)} OFFSET ${Number(offset)}`
+        `seqno DESC, dest_no ASC`,
+        Number(limit),
+        Number(offset)
       );
 
       (rows as any[]).forEach(r => {

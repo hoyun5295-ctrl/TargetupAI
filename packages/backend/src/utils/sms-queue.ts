@@ -347,6 +347,43 @@ export async function smsSelectAll(
   return await mysqlQuery(sql, repeatParams(params, tables.length)) as any[];
 }
 
+/**
+ * ★ 2026-06-13: 페이지네이션 전용 SELECT — 테이블별 top-(offset+limit) 선잘라내기 후 병합.
+ *
+ * 배경(에이스하드웨어 47,846·에이치피오 87,049 예약 상세 10초+):
+ *   smsSelectAll은 `SELECT * FROM (UNION ALL ...) AS _u ORDER BY ... LIMIT` 구조라
+ *   일치 행 전체(본문 mediumtext 포함)를 임시 테이블에 모은 뒤에야 정렬·LIMIT이 걸린다.
+ *   8만 행 캠페인이면 페이지당 8만 행 실체화 = 인덱스가 있어도 수 초.
+ *   각 테이블 안에서 먼저 ORDER BY + LIMIT(offset+limit)으로 자르면(2-pass 정렬 — 정렬 키만 정렬
+ *   후 필요 행만 fetch) 바깥 병합은 테이블 수 × (offset+limit) 행만 다룬다. 결과는 동일
+ *   (각 테이블 상위 K 합집합 ⊇ 전체 상위 K). 깊은 페이지일수록 내부 LIMIT이 커져 완만히 저하.
+ *
+ * orderBy는 "ORDER BY" 키워드 없이 전달 (예: `seqno DESC, dest_no ASC`).
+ */
+export async function smsSelectPagedAll(
+  tables: string[],
+  selectFields: string,
+  whereClause: string,
+  params: any[],
+  orderBy: string,
+  limit: number,
+  offset: number,
+): Promise<any[]> {
+  if (tables.length === 0) return [];
+  const w = normalizeWhere(whereClause);
+  const lim = Math.max(1, Math.floor(Number(limit) || 0));
+  const off = Math.max(0, Math.floor(Number(offset) || 0));
+  const innerLimit = lim + off;
+  // 호출부가 raw 컬럼명으로 정렬을 줘도 alias로 자동 재작성 (smsSelectAll과 동일 안전망)
+  const aliasMap = extractAliasMap(selectFields);
+  const safeOrder = rewriteSuffixWithAliases(`ORDER BY ${orderBy}`, aliasMap).replace(/^\s*ORDER BY\s+/i, '');
+  const unions = tables
+    .map(t => `(SELECT '${t}' AS _sms_table, ${selectFields} FROM ${t} WHERE ${w} ORDER BY ${safeOrder} LIMIT ${innerLimit})`)
+    .join(' UNION ALL ');
+  const sql = `SELECT * FROM (${unions}) AS _u ORDER BY ${safeOrder} LIMIT ${lim} OFFSET ${off}`;
+  return await mysqlQuery(sql, repeatParams(params, tables.length)) as any[];
+}
+
 /** ★ MIN 합산 — UNION ALL 단일 쿼리 */
 export async function smsMinAll(tables: string[], field: string, whereClause: string, params: any[]): Promise<any> {
   if (tables.length === 0) return null;

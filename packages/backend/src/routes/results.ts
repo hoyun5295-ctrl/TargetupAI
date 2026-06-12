@@ -733,8 +733,11 @@ router.get('/campaigns/:id/messages', async (req: Request, res: Response) => {
 
       const smsFields = SMS_DETAIL_FIELDS;
 
+      // ★ 2026-06-13 속도: 테이블별 top-(offset+limit) 선잘라내기 — 일치 행 전체(본문 포함)를
+      //   임시 테이블로 모은 뒤 정렬하던 구조가 대형 캠페인 상세 10초+의 잔여 병목 (admin 상세와 동일 fix).
+      const innerLimit = limitNum + offset;
       for (const t of msgTables) {
-        dataSubqueries.push(`(SELECT ${smsFields} FROM ${t} ${smsWhere})`);
+        dataSubqueries.push(`(SELECT ${smsFields} FROM ${t} ${smsWhere} ORDER BY _sort_time DESC, dest_no ASC LIMIT ${innerLimit})`);
         countSubqueries.push(`SELECT COUNT(*) AS cnt FROM ${t} ${smsWhere}`);
         dataParams.push(...smsBaseParams);
         countParams.push(...smsBaseParams);
@@ -773,7 +776,8 @@ router.get('/campaigns/:id/messages', async (req: Request, res: Response) => {
         '' AS k_template_code, '' AS k_next_type, 0 AS k_oriseq,
         0 AS is_future`;
 
-      dataSubqueries.push(`(SELECT ${kakaoFields} FROM IMC_BM_FREE_BIZ_MSG ${kakaoWhere})`);
+      // ★ 2026-06-13 속도: SMS 분기와 동일한 테이블 내부 선잘라내기
+      dataSubqueries.push(`(SELECT ${kakaoFields} FROM IMC_BM_FREE_BIZ_MSG ${kakaoWhere} ORDER BY _sort_time DESC, dest_no ASC LIMIT ${limitNum + offset})`);
       countSubqueries.push(`SELECT COUNT(*) AS cnt FROM IMC_BM_FREE_BIZ_MSG ${kakaoWhere}`);
       dataParams.push(...kakaoBaseParams);
       countParams.push(...kakaoBaseParams);
@@ -857,7 +861,8 @@ router.get('/campaigns/:id/messages', async (req: Request, res: Response) => {
 
       for (const t of msgTables) {
         if (logPattern.test(t)) continue; // LOG 테이블 스킵
-        liveOnlyDataSubs.push(`(SELECT ${smsFields} FROM ${t} ${smsWhere})`);
+        // ★ 2026-06-13 속도: 본 경로와 동일한 테이블 내부 선잘라내기
+        liveOnlyDataSubs.push(`(SELECT ${smsFields} FROM ${t} ${smsWhere} ORDER BY _sort_time DESC, dest_no ASC LIMIT ${limitNum + offset})`);
         liveOnlyParams.push(...smsBaseParams);
       }
 
