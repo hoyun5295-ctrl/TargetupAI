@@ -94,6 +94,8 @@ import { startCancelledQueueSweeper } from './utils/cancelled-queue-sweeper';
 // ★ 2026-06-10: CDP webhook 실패 재처리 + unified profile 자동 재계산
 import { startCdpWebhookRetryWorker } from './utils/cdp-webhook-retry-worker';
 import { startCdpProfileRecomputeWorker } from './utils/cdp-profile-recompute-worker';
+// ★ 2026-06-13: 시스템 크리티컬 감지 워커 (발송 큐 지연 정체 + 싱크에이전트 중단 → 운영자 문자 통지)
+import { startSystemMonitorWorker } from './utils/system-monitor-worker';
 
 // 공용 관리 라우트 (슈퍼관리자 + 고객사관리자)
 import manageUsersRoutes from './routes/manage-users';
@@ -394,6 +396,10 @@ app.listen(PORT, () => {
 
   // ★ 2026-06-10: CDP unified profile 자동 재계산 (5분 증분 + 매일 04시 30일 카운터)
   startCdpProfileRecomputeWorker();
+
+  // ★ 2026-06-13: 시스템 크리티컬 감지 (5분 주기) — 발송 큐 지연 정체 + 싱크에이전트 중단을
+  //   운영자 문자(SYSTEM_ALERT_PHONES)로 직접 통지. 톤28 지연 실발송·인비토 동기화 중단 실측 후속.
+  startSystemMonitorWorker();
 });
 
 export default app;

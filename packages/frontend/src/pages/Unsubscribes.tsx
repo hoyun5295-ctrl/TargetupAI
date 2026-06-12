@@ -4,6 +4,7 @@ import { formatDateTime, formatPhoneNumber } from '../utils/formatDate';
 import {
   Ban, Search, Plus, Upload, RefreshCw, Trash2, Phone,
   ChevronLeft, ChevronRight, ArrowLeft, CheckCircle2, Info, AlertCircle, ShieldAlert,
+  Download,
 } from 'lucide-react';
 
 export default function Unsubscribes() {
@@ -17,6 +18,7 @@ export default function Unsubscribes() {
   const [toast, setToast] = useState({ show: false, type: '', message: '' });
   const [deleteModal, setDeleteModal] = useState<{ show: boolean; id: string; phone: string }>({ show: false, id: '', phone: '' });
   const [deleting, setDeleting] = useState(false);
+  const [exporting, setExporting] = useState(false);
   // D43-4: 080 연동 상태
   const [opt080Number, setOpt080Number] = useState('');
   const [optOutAutoSync, setOptOutAutoSync] = useState(false);
@@ -67,6 +69,34 @@ export default function Unsubscribes() {
   const handleSearch = () => {
     setPagination(prev => ({ ...prev, page: 1 }));
     loadUnsubscribes();
+  };
+
+  // ★ 2026-06-13: 수신거부 전체 엑셀(CSV) 다운로드 — 현재 검색 조건 그대로 서버에서 전체 생성
+  const handleExportAll = async () => {
+    try {
+      setExporting(true);
+      const token = localStorage.getItem('token');
+      const params = new URLSearchParams();
+      if (search) params.append('search', search);
+      const res = await fetch(`/api/unsubscribes/export?${params}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) throw new Error('다운로드 실패');
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `수신거부_전체_${new Date().toISOString().slice(0, 10)}.csv`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(url);
+    } catch (e) {
+      setToast({ show: true, type: 'error', message: '다운로드에 실패했습니다. 잠시 후 다시 시도해주세요.' });
+      setTimeout(() => setToast({ show: false, type: '', message: '' }), 3000);
+    } finally {
+      setExporting(false);
+    }
   };
 
   const handleAdd = async () => {
@@ -425,7 +455,18 @@ export default function Unsubscribes() {
         <div className="bg-white rounded-2xl ring-1 ring-slate-200 shadow-sm overflow-hidden">
           <div className="px-5 py-4 border-b border-slate-100 flex justify-between items-center">
             <h2 className="text-sm font-bold text-slate-900">수신거부 목록</h2>
-            <span className="text-sm text-slate-400">총 <span className="font-semibold text-slate-700">{pagination.total.toLocaleString()}</span>건</span>
+            <div className="flex items-center gap-3">
+              <span className="text-sm text-slate-400">총 <span className="font-semibold text-slate-700">{pagination.total.toLocaleString()}</span>건</span>
+              {/* ★ 2026-06-13: 전체 엑셀 다운로드 (콤비타·던필드 알파 요청) — 현재 검색 조건 그대로 전체 내려받기 */}
+              <button
+                onClick={handleExportAll}
+                disabled={exporting || pagination.total === 0}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-slate-700 text-white rounded-lg text-xs font-medium hover:bg-slate-800 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                <Download className={`w-3.5 h-3.5 ${exporting ? 'animate-bounce' : ''}`} />
+                {exporting ? '내려받는 중...' : '전체 엑셀 다운로드'}
+              </button>
+            </div>
           </div>
 
           {loading ? (

@@ -292,6 +292,16 @@ if (AUTO_CAMPAIGN_RETIRED) return;
 - [ ] 10-3. 정산 교차: 에이치피오 6월 마감 미리보기에서 87,014 건이 성공 84,259로 잡히는지(전 라인 합집합 효과)
 - [ ] 10-4. P3 전수 SQL(별도 단계): 새 산식 기준 과거 미환불 후보 — 캠페인별 (deduct합/단가 − MySQL성공 − 대기) × 단가 > refund합 목록 → 검토 후 sweep 윈도우 한시 확장으로 일괄 소급
 
+## Task 11 — (세션 중 추가·구현 완료) 집계 이중 카운트 구조 차단 — Harold "100% 일치" 지시
+
+**배경(건6 실측):** sent_count > target 16건. toun28 6/11 — 실재 행 = 큐 92 + 이력 7,079 = 7,171 전원 고유(발송 정상)인데 PG 기록 7,520. 에이전트가 행을 큐→이력으로 옮기는(복사 후 삭제) 사이에 집계가 양쪽을 합산해 +349 과대 기록 → 합이 target을 넘으면 재sync(target > success+fail)에서 영구 제외돼 굳음(0609 굳히기 새 변형 — 시세이도 985/1,906, 테스트계정2 "정확히 2배" 건들 전부 같은 뿌리).
+
+**구현:**
+- Create `utils/sms-table-split.ts` (순수): splitLiveAndLogTables(`_\d{6}$`) + mergeCampaignCounts(결과=이력만·대기=라이브 대기만·total=이력+라이브대기) / Test `__tests__/sms-table-split.verify.ts` 8/8.
+- `utils/sms-queue.ts`: `smsCampaignCountsSafe(tables, ids)` 신설 — 이력은 append-only라 과대 집계 구조적 불가능, 이동 중 일시 과소는 다음 사이클 수렴(굳히기는 과대에서만 발동했으므로 영구 굳음 소멸).
+- 소비처 6곳 전수 교체: campaign-lifecycle sync AI(:290)·direct(:425)·cleanup(:58) / campaign-sync-worker reconcile(:302) / mysql-refund-sweeper(:100) / stats-aggregation aggregateSmsCountsByCampaign(:276 — 화면·통계·엑셀 공유 CT) + aggregateSmsChannelSplitByCampaign 라이브=대기 한정. smsBatchAggByGroup 외부 직접 호출 잔존 0(grep).
+- 데이터: 굳은 16건은 배포 후 `result_synced_at = NULL, result_final = true` 리셋 → reconcile이 새 산식으로 1시간 내 자동 교정(수동 counts UPDATE 불요). toun28은 발송+24h 도달 시 자동.
+
 ## 작업 순서·원칙
 
 1. Task 1→9 순차(하나씩 — 병렬 금지). 각 Task 종료마다 tsc 0 + 해당 grep 증거 확보.

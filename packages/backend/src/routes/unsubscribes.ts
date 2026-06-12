@@ -3,7 +3,7 @@ import { query } from '../config/database';
 import { authenticate } from '../middlewares/auth';
 import { process080Callback, getUserUnsubscribes, registerUnsubscribe, IsolationBlockedError } from '../utils/unsubscribe-helper';
 import { deduplicateByPhone } from '../utils/deduplicate';
-import { normalizePhone } from '../utils/normalize';
+import { normalizePhone, formatPhoneDisplay } from '../utils/normalize';
 
 // ★ D162-3 (2026-05-15) 격리 ON 회사 + company_admin = 등록/삭제 차단 가드
 //   안내 메시지: "수신거부 사용자격리기능이 적용되어있습니다. 한줄로 운영실에 문의하세요"
@@ -165,6 +165,62 @@ router.get('/', async (req: Request, res: Response) => {
     });
   } catch (error) {
     console.error('수신거부 목록 조회 에러:', error);
+    return res.status(500).json({ error: '서버 오류' });
+  }
+});
+
+// ================================================================
+// GET /api/unsubscribes/export - 전체 엑셀(CSV) 다운로드
+// ★ 2026-06-13 신설 (콤비타·던필드 알파 요청): 목록과 같은 격리 기준(CT-03)으로 전체 내려받기.
+//   - company_admin = 회사 전체 / 일반 사용자 = 본인 등록분 (getUserUnsubscribes 그대로)
+//   - 전화번호는 하이픈 포맷(formatPhoneDisplay) — 엑셀 숫자 인식으로 앞 0이 사라지는 것 차단
+// ================================================================
+router.get('/export', async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    const userId = req.user?.userId;
+    const userType = req.user?.userType;
+    if (!companyId || !userId) {
+      return res.status(403).json({ error: '권한이 필요합니다.' });
+    }
+
+    const { search } = req.query;
+    const { data: rows, total } = await getUserUnsubscribes(userId, {
+      page: 1,
+      limit: 500000, // 전체 — 주소록/고객DB 상한(수십만)보다 넉넉히
+      search: search as string | undefined,
+      companyId,
+      userType,
+    });
+
+    const sourceLabel: Record<string, string> = {
+      '080_ars': '080 ARS',
+      api: '080 자동',
+      upload: '파일 업로드',
+      manual: '직접 입력',
+      db_upload: 'DB 업로드',
+      sync: 'Sync 연동',
+    };
+
+    const BOM = '﻿';
+    const today = new Date(Date.now() + 9 * 60 * 60 * 1000).toISOString().slice(0, 10);
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename=unsubscribes_${today}.csv`);
+    res.write(BOM + '전화번호,유입경로,등록일시\n');
+
+    for (const r of rows) {
+      const phone = formatPhoneDisplay(r.phone);
+      const src = sourceLabel[r.source] || r.source || '-';
+      const at = r.created_at
+        ? new Date(new Date(r.created_at).getTime() + 9 * 60 * 60 * 1000).toISOString().slice(0, 19).replace('T', ' ')
+        : '';
+      res.write(`${phone},${src},${at}\n`);
+    }
+    res.end();
+    console.log(`[unsubscribes] 전체 다운로드 — company=${companyId} user=${userId} ${rows.length}/${total}건`);
+    return;
+  } catch (error) {
+    console.error('수신거부 전체 다운로드 에러:', error);
     return res.status(500).json({ error: '서버 오류' });
   }
 });

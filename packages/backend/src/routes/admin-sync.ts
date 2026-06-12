@@ -144,15 +144,17 @@ router.get('/agents/:agentId', authenticate, requireSuperAdmin, async (req: Requ
     const onlineStatus = getOnlineStatus(agent.last_heartbeat_at);
 
     // 최근 동기화 로그 20건
+    // ★ 2026-06-13: failures(실패 행 상세 jsonb) 포함 — 어떤 행이 왜 실패했는지 화면에서 확인 가능하게
+    //   (인비토 매시 1건 고정 실패가 식별 불가였던 구멍). started_at NULL 행도 밀리지 않게 정렬 보강.
     const { rows: recentLogs } = await query(`
       SELECT
         id, sync_type, mode, batch_index, total_batches,
         total_count, success_count, fail_count,
-        duration_ms, error_message,
+        duration_ms, error_message, failures,
         started_at, completed_at
       FROM sync_logs
       WHERE agent_id = $1
-      ORDER BY started_at DESC
+      ORDER BY COALESCE(started_at, completed_at) DESC
       LIMIT 20
     `, [agentId]);
 

@@ -69,9 +69,13 @@ export async function syncTemplateCodes(
     details: [],
   };
 
-  // 1) PG 안 옛 Tmp_xxx 영역 조회
+  // 1) PG에서 내부 키(Tmp...) 상태인 템플릿 조회
+  // ★ 2026-06-13: 승인 한정 → 검수 진행/반려 상태까지 확대.
+  //   IMC 템플릿코드는 카카오 검수 진입 시점에 발급되므로(직원 실측: 반려 템플릿도 B_IV_013_02_80287 발급됨)
+  //   승인만 스캔하면 반려(KREJ)·검수중 템플릿이 내부 키로 영구 잔존한다. 코드 미발급이면 skipped_no_code로
+  //   안전 통과(idempotent)라 확대해도 부작용 없음.
   const whereParts: string[] = [
-    `status IN ('APPROVED', 'APPROVAL')`,
+    `status IN ('APPROVED', 'APPROVAL', 'REQUESTED', 'REVIEWING', 'REG', 'REQ', 'REV', 'KREQ', 'KREJ', 'REJECTED', 'HREJ')`,
     `template_code LIKE 'Tmp%'`,
   ];
   const params: any[] = [];

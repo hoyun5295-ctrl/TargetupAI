@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, Fragment } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { companiesApi, plansApi, billingApi } from '../api/client';
 import { useAuthStore } from '../stores/authStore';
@@ -7322,7 +7322,8 @@ const handleApproveRequest = async (id: string) => {
                                 {c.created_at ? new Date(c.created_at).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : '-'}
                               </td>
                               <td className="px-4 py-2.5 text-center text-gray-500 font-mono text-xs">
-                                {c.sent_at ? new Date(c.sent_at).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : '-'}
+                                {/* ★ 2026-06-13: 예약 우선 — 예약 캠페인 sent_at은 등록 시점 값(0609 교훈) */}
+                                {(c.scheduled_at || c.sent_at) ? new Date(c.scheduled_at || c.sent_at).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : '-'}
                               </td>
                             </tr>
                           ))}
@@ -7985,7 +7986,13 @@ const handleApproveRequest = async (id: string) => {
                       <td className="px-4 py-3 text-gray-500">{agent.db_type || '-'}</td>
                       <td className="px-4 py-3 text-center">{getSyncOnlineBadge(agent.online_status, agent.status)}</td>
                       <td className="px-4 py-3 text-gray-500">{syncTimeAgo(agent.last_heartbeat_at)}</td>
-                      <td className="px-4 py-3 text-gray-500">{syncTimeAgo(agent.last_sync_at)}</td>
+                      <td className="px-4 py-3 text-gray-500">
+                        {syncTimeAgo(agent.last_sync_at)}
+                        {/* ★ 2026-06-13: 통신은 정상인데 동기화만 3시간+ 멈춘 상태 표시 (인비토 6/13 06:00 중단 실측 후속) */}
+                        {agent.is_online && agent.last_sync_at && (Date.now() - new Date(agent.last_sync_at).getTime() > 3 * 3600 * 1000) && (
+                          <span className="ml-1.5 px-1.5 py-0.5 rounded text-[10px] font-medium bg-amber-100 text-amber-700">동기화 지연</span>
+                        )}
+                      </td>
                       <td className="px-4 py-3 text-right text-gray-700">{(agent.total_customers_synced || 0).toLocaleString()}</td>
                       <td className="px-4 py-3 text-right text-gray-700">{agent.today_sync_count || 0}건</td>
                       <td className="px-4 py-3 text-right">
@@ -8279,8 +8286,9 @@ const handleApproveRequest = async (id: string) => {
                       </thead>
                       <tbody className="divide-y">
                         {(syncAgentDetail.recent_logs || []).map((log: any) => (
-                          <tr key={log.id} className="hover:bg-gray-50">
-                            <td className="px-3 py-2 text-gray-500">{log.started_at ? formatDateTimeShort(log.started_at) : '-'}</td>
+                          <Fragment key={log.id}>
+                          <tr className="hover:bg-gray-50">
+                            <td className="px-3 py-2 text-gray-500">{(log.started_at || log.completed_at) ? formatDateTimeShort(log.started_at || log.completed_at) : '-'}</td>
                             <td className="px-3 py-2">
                               <span className={`px-1.5 py-0.5 rounded text-xs ${log.sync_type === 'customers' ? 'bg-blue-100 text-blue-700' : 'bg-purple-100 text-purple-700'}`}>
                                 {log.sync_type === 'customers' ? '고객' : '구매'}
@@ -8294,6 +8302,18 @@ const handleApproveRequest = async (id: string) => {
                             </td>
                             <td className="px-3 py-2 text-right text-gray-500">{log.duration_ms ? `${(log.duration_ms / 1000).toFixed(1)}초` : '-'}</td>
                           </tr>
+                          {/* ★ 2026-06-13: 실패 행 상세(failures jsonb) — 어떤 행이 왜 실패했는지 표시 (식별 불가 구멍 해소) */}
+                          {Array.isArray(log.failures) && log.failures.length > 0 && (
+                            <tr className="bg-red-50/60">
+                              <td colSpan={7} className="px-3 py-1.5 text-[11px] text-red-700">
+                                실패 상세: {log.failures.slice(0, 5).map((f: any, i: number) => (
+                                  <span key={i} className="mr-3 font-mono">{f.phone || '(번호 없음)'} — {f.reason || '원인 미기록'}</span>
+                                ))}
+                                {log.failures.length > 5 && <span className="text-red-400">외 {log.failures.length - 5}건</span>}
+                              </td>
+                            </tr>
+                          )}
+                          </Fragment>
                         ))}
                         {(!syncAgentDetail.recent_logs || syncAgentDetail.recent_logs.length === 0) && (
                           <tr><td colSpan={7} className="px-3 py-4 text-center text-gray-400">동기화 이력이 없습니다.</td></tr>

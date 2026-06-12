@@ -262,6 +262,23 @@ export function isValidKoreanLandline(phone: string): boolean {
 }
 
 /**
+ * 전화번호 표시용 하이픈 포맷 (2026-06-13 — frontend formatDate.ts formatPhoneNumber 미러)
+ * - 엑셀/CSV 내보내기에서 앞 0 소실(숫자 인식)을 막고 화면 표기와 통일.
+ * - 알 수 없는 길이는 원본 그대로 반환 (값 훼손 금지).
+ */
+export function formatPhoneDisplay(value: any): string {
+  if (value == null || value === '') return '';
+  const digits = String(value).replace(/\D/g, '');
+  if (/^01\d{9}$/.test(digits)) return `${digits.slice(0, 3)}-${digits.slice(3, 7)}-${digits.slice(7)}`;   // 11자리 휴대폰
+  if (/^01\d{8}$/.test(digits)) return `${digits.slice(0, 3)}-${digits.slice(3, 6)}-${digits.slice(6)}`;    // 10자리 휴대폰(011 등)
+  if (/^02\d{8}$/.test(digits)) return `${digits.slice(0, 2)}-${digits.slice(2, 6)}-${digits.slice(6)}`;    // 서울 10자리
+  if (/^02\d{7}$/.test(digits)) return `${digits.slice(0, 2)}-${digits.slice(2, 5)}-${digits.slice(5)}`;    // 서울 9자리
+  if (/^0\d{9}$/.test(digits)) return `${digits.slice(0, 3)}-${digits.slice(3, 6)}-${digits.slice(6)}`;     // 지역 10자리
+  if (/^0\d{10}$/.test(digits)) return `${digits.slice(0, 3)}-${digits.slice(3, 7)}-${digits.slice(7)}`;    // 지역 11자리
+  return String(value);
+}
+
+/**
  * 매장전화번호 정규화 (유선번호 + 휴대폰 모두 허용)
  * - 유선번호: 02, 031~055, 070, 080, 1588 등
  * - 휴대폰: 010, 011~019

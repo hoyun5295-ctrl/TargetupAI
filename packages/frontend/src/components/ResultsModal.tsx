@@ -973,7 +973,9 @@ export default function ResultsModal({ onClose, token, customerDbEnabled, isSubs
                       <tr><td colSpan={10} className="py-10 text-center text-slate-400">조회 중...</td></tr>
                     ) : messages.length === 0 ? (
                       <tr><td colSpan={10} className="py-10 text-center text-slate-400">
-                        {selectedCampaign?.status === 'cancelled'
+                        {/* ★ 2026-06-13: 취소 문구는 "발송 이력이 없는 취소"에만 — 취소 후 실발송된 캠페인(에이치피오)이
+                            행 0건 상황에서 이 문구로 오인되던 것 차단 (행이 있으면 정상 표시됨) */}
+                        {selectedCampaign?.status === 'cancelled' && !(Number(selectedCampaign?.success_count) > 0 || Number(selectedCampaign?.fail_count) > 0)
                           ? '취소된 캠페인입니다. 대기중이던 메시지는 취소 시 삭제되었습니다.'
                           : messageSearchValue ? '검색 결과가 없습니다.' : '데이터가 없습니다.'}
                       </td></tr>

@@ -130,8 +130,15 @@ export default function AlarmUserManager({ onClose }: Props) {
           <div>
             <h2 className="text-lg font-bold text-gray-900">검수 알림 수신자</h2>
             <p className="text-xs text-gray-500 mt-0.5">
-              활성 {activeCount}/{MAX_ALARM_USERS}명 · 템플릿 검수 결과 카톡 알림 대상
+              활성 {activeCount}/{MAX_ALARM_USERS}명 · 템플릿 검수 결과 문자 알림 대상
             </p>
+            {/* ★ 2026-06-13: 수신자 0명일 때 동작 안내 — "알림이 안 온다" 문의 차단
+                (발송 코드 기준: kakao_alarm_users 활성 수신자가 없으면 검수 결과 알림이 발송되지 않는다) */}
+            {activeCount === 0 && (
+              <p className="text-[11px] text-amber-600 mt-1">
+                활성 수신자가 없으면 검수 결과 알림 문자가 발송되지 않습니다. 받으실 분을 등록해주세요.
+              </p>
+            )}
           </div>
           <button
             type="button"

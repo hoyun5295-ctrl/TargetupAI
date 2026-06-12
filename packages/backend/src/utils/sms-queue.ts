@@ -512,7 +512,11 @@ export async function getCampaignSmsTables(
   refDate: Date,
   userId?: string
 ): Promise<string[]> {
-  const liveTables = await getCompanySmsTables(companyId, userId);
+  // ★ 2026-06-13: 회사/사용자 단일 라인 → 전 라인 합집합으로 교체 (0610 "발송내역 상세 동일 잠재" 후속).
+  //   에이치피오 실측 — 발송은 당시 사용자 라인, 조회는 회사 라인만 봐서 슈퍼관리자 캠페인 상세가
+  //   0행("발송 내역이 없습니다")이 되던 구멍. 집계 원칙과 동일하게 라인 재배정/해제 내성 확보.
+  //   (소비처 grep: admin.ts sms-detail 1곳 — 발송 경로 아님, 조회 전용이라 합집합 안전.)
+  const liveTables = await getCompanyAllLiveSmsTables(companyId, userId);
   const existingLogs = await getExistingLogTables();
 
   // 발송 기준월 + 전후 1개월(경계/재발송 대비)

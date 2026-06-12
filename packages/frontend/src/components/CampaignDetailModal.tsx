@@ -80,7 +80,11 @@ export default function CampaignDetailModal({
     { label: '전송건수', value: `${(campaign.sent_count || campaign.target_count || 0).toLocaleString()}건` },
     { label: '성공 / 실패', value: `${(campaign.success_count || 0).toLocaleString()} / ${(campaign.fail_count || 0).toLocaleString()}` },
     { label: '등록일시', value: campaign.created_at ? fmtFull(campaign.created_at) : '-' },
-    { label: '발송일시', value: campaign.sent_at ? fmtFull(campaign.sent_at) : campaign.scheduled_at ? `${fmtFull(campaign.scheduled_at)} (${campaign.status === 'cancelled' ? '예약취소' : '예약'})` : '-' },
+    // ★ 2026-06-13: 예약 우선 — 예약 캠페인은 sent_at이 등록 시점에 찍혀(0609 교훈) 발송일시가
+    //   등록일시와 같게 보이던 표시 문제(에이치피오 직원 신고). 실제 발송 시각 = scheduled_at 우선.
+    { label: '발송일시', value: campaign.scheduled_at
+        ? `${fmtFull(campaign.scheduled_at)}${campaign.status === 'cancelled' ? ' (예약취소)' : campaign.status === 'scheduled' ? ' (예약)' : ''}`
+        : campaign.sent_at ? fmtFull(campaign.sent_at) : '-' },
   ];
 
   return (
@@ -94,7 +98,9 @@ export default function CampaignDetailModal({
               <span className={`px-2 py-0.5 rounded-md text-[11px] font-medium ${channelChipClass}`}>{channelLabel}</span>
               <span className={`px-2 py-0.5 rounded-md text-[11px] font-medium ${statusBadgeClass}`}>{statusLabel}</span>
               <span className="text-xs text-slate-400">
-                {campaign.sent_at ? fmtShort(campaign.sent_at) : campaign.scheduled_at ? `${fmtShort(campaign.scheduled_at)} 예약` : ''}
+                {campaign.scheduled_at
+                  ? `${fmtShort(campaign.scheduled_at)}${campaign.status === 'scheduled' ? ' 예약' : campaign.status === 'cancelled' ? ' 예약취소' : ''}`
+                  : campaign.sent_at ? fmtShort(campaign.sent_at) : ''}
               </span>
             </div>
           </div>

@@ -107,6 +107,20 @@
 
 ---
 
+### 🟢 2026-06-13 — 직원 디버깅 5건 전건 원인 확정 + 일괄 수정 (미배포 — backend+frontend build:safe)
+> **검증 결과(전건 SQL·스크린샷 실측)**: ①싱크에이전트 동의 변경 = 이미 반영(sms_opt_in=true·동의 저장값 단일) — 실체는 매시 1건 INSERT 실패(1,504 중 1,503만 존재·기록 부재)+동기화 6/13 06:00 중단 ②발송일시 = 표시 정확(mobsend_time) — 실체는 큐 일부 행 지연 실발송(톤28 92행 익일 10:32~17:07 성공, 시세이도 +24h 3006, 시세이도3 +40분) ③수신거부 전체 다운로드 = 기능 신설 ④알림톡 = 반려 LMS 6/11 21:18 실발송·전달 1000 확정(보고는 그 이전 시점)·반려 템플릿 IMC 코드(B_IV_013_02_80287) 미반영 확정(코드 백필이 승인 한정 스캔) ⑤에이치피오 = 재오염 없음(정정값 유지·reconcile 6/12 10:00 재검증 동일) — 캡처는 정정 이전, 남은 실체는 admin 상세 라인 한정 조회. 별건 발견 = bfee8e09(취소·발송0) fail 87,014 잔존 기록.
+> **수정(미배포)**: [B+D] 시스템 크리티컬 문자 알림 CT `system-alert.ts`(SYSTEM_ALERT_PHONES env·쿨다운 6h·인증라인 LMS) + `system-monitor-worker.ts`(5분 — 발송 큐 지연 정체(60분 경과+12분 비감소 정체 판정·야간 강조) + 에이전트 중단(하트비트 60분/동기화 3×주기)) + 목록 "동기화 지연" 배지 [C] sync.ts agentId status='active' 필터 제거(per-batch failures 기록 누락 구멍)+`/log` 병합(동기화 1회=1행 유지)+실패 stdout+admin-sync failures 응답+상세 화면 실패 행 표시 [E] 상태 동기화 시 reviewed_at 기록+단건 GET 응답으로 템플릿코드 즉시 반영(syncSingleTemplateCode 재사용)+코드 백필 스캔을 검수중/반려까지 확대 [G] getCampaignSmsTables 전 라인 합집합 전환(admin 상세 0행 구멍·0610 예고 후속)+취소 문구는 발송 이력 없는 취소에만 [A] 발송일시 예약 우선 3곳(CampaignDetailModal 2·발송통계 상세 1) [F] 검수 알림 수신자 0명 시 미발송 안내 문구 [H] 수신거부 전체 CSV 다운로드(`GET /api/unsubscribes/export`+버튼, 격리 기준 동일, formatPhoneDisplay 신설로 앞 0 보존). tsc 0×2·refund-calc 8/8·sms-table-split 8/8·direct-send-spec 12·sms-channel-split 13.
+> **배포 후**: SYSTEM_ALERT_PHONES env 추가 → bfee8e09 counts 0 정정 SQL → 인비토 누락 1명 식별(첫 동기화 failures 자동) → Task 10 실측. 외부 = 서팀장(큐 지연 처리·3006 +24h 의미) / 인비토 PC 재기동 / 직원 응대 정정 2건(톤28 익일 실발송·박성용 반려 LMS 6/11 21:18 도착).
+
+---
+
+### 🟢 2026-06-11(밤) — 디버깅 배치 5건+건6 전건 원인 확정·근본 코드 완료 (미배포 — backend build:safe 1회)
+> P0 데이터 3건 종결(인비토 자동발송 active 4건 paused+잔존 0 / 에이치피오 성공 84,259 실측 정정+큐 누수 2,128 삭제+audit 2행, 청구=성공 84,259건 / 폴라초이스 환불 불필요 확정 — 15,697 전량 발송 시도·실패 562 전액 자동환불 완료) + P2 KREJ 반려 미알림=5월 구코드(D188 이전 무조건 마킹) 선기록 잔존 확정·정정(자동 재발송, 전수=시스템 1건뿐) + P3 전수(과거 미환불 0건) + 건6 신규=**큐→이력 이동 중 이중 집계가 굳힘**(sent_count>target 16건, toun28 실재 7,171 전원 고유 vs 기록 7,520).
+> **근본 코드(전부 backend)**: ①환불 단일 산식 refund-calc CT(차감 실측−성공−대기 — worker 미적재분/sweep 실측실패분이 같은 누적 풀에서 max 수렴하던 과소환불 차단, send_phase 가드) ②전 bulk 라인 합집합 getAllBulkSmsTables(라인 해제 내성 — 큐 작업 6곳+집계 10곳 자동 보강) ③billing 정산 2축(회사 라인만→전 라인 + campaign_runs 미생성 신 직접발송 UNION 포함) ④sent_count=적재 실측 보존(sync/sweep success+fail 덮어쓰기 제거) ⑤취소 시 counts 덮어쓰기 제거(실측 보존) ⑥worker 제외 사유 send_config.exclusions 기록 ⑦cancelled-queue-sweeper 픽업 행 9999+잔존 재카운트 ⑧자동발송 워커 영구 가드(AUTO_CAMPAIGN_RETIRED) ⑨**집계 단일 산식 smsCampaignCountsSafe — 결과=월별 이력만(append-only라 과대 불가)·대기=라이브 대기코드만 → 부풀린 값이 기록되는 것 자체 차단**(소비처 6곳 전수 교체+채널분리 동일 적용·기존 합산 함수 외부 호출 잔존 0 grep). tsc 0·refund-calc 8/8·sms-table-split 8/8.
+> **잔여 4(배포 후)**: backend build:safe+pm2 restart → 굳은 16건 리셋 SQL(reconcile 1h 자동 교정·toun28은 발송+24h) → 반려 LMS 수신 확인(박성용) → 소량 실측 1건 시나리오(설계서 Task 10). 설계서=`docs/superpowers/plans/2026-06-11-debug-p1-root-fix.md` · 건별 종결=`status/debug-notes-2026-06-11.md`.
+
+---
+
 ### 🔴 2026-06-11(오후) — ★다음 세션 = 디버깅 5건 일괄 작업★ + 싱크에이전트 v1.5.5 + 무료체험 6/30 마감·배너 (전부 배포 완료)
 > **★ 다음 세션 진입 = `status/debug-notes-2026-06-11.md`(현상·실측) + `status/DEBUG-FIX-DESIGN-2026-06-11.md`(수정 설계·우선순위·확정 SQL/로그) 두 문서 정독 → P0부터.** 디버깅 5건: ①[시한 06-16 월 10:00] 인비토 자동발송 잔존 실행(폐기가 POST 410만·active+워커 유지) ②검수알림 지연=6/10 기수정 후폭풍 종결·KREJ 반려 미알림만 확정 필요 ③[청구] 에이치피오 87,014 cancelled 굳음→실측 재집계 정정 ④[돈] 폴라초이스 227건 차감만·미환불(차감=COUNT 산식 예상치 vs 적재=DELETE+INSERT 실측 별개 구현·worker 환불 1회성 catch·sweep은 실패행 기준) ⑤시세이도 기록vs실측 화면 혼용(통계 대상 2,885=실측합/전송 2,895=기록합 증명). 관통 근원=기록↔실측 자동 대조 부재 → 수량 3층 정의+차감↔적재 환불 sweeper+확정 카운트 UPDATE+출처 단일화.
 > **싱크에이전트 v1.5.5(배포·패키지 완료)**: 인비토 3건 — 버전 불일치(배너가 config.enc 저장값 보고+하드코딩 5곳 → AGENT_VERSION 단일 진입점+저장 4경로 강제+`--version` 플래그) / 증분 매주기 207(fallbackToFullSync 소비 0건 → getColumns 실재 검증+전체 동기화 대체+기동 경고) / 정규화 제외=정상 동작 회신. 전달물=`sync-agent/installer/SyncAgent-Setup-1.5.5.zip`(Setup exe+매뉴얼 v1.5.5 PDF). 1.5.4 이하 산출물·이전 매뉴얼 전부 삭제(이전 zip은 4-28 빌드=구버전 전달 추정 원인). vitest 9/9·zip 내부 1.5.5 실측. 상세=`status/SYNC-AGENT-TROUBLESHOOTING.md` § 2-4.

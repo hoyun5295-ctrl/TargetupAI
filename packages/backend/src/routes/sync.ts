@@ -520,7 +520,9 @@ router.post('/customers', async (req: SyncAuthRequest, res: Response) => {
 
     // agentId 조회 (heartbeat 기록용)
     const agentResult = await query(
-      `SELECT id FROM sync_agents WHERE company_id = $1 AND status = 'active' ORDER BY updated_at DESC LIMIT 1`,
+      // ★ 2026-06-13: status='active' 필터 제거 — 인비토 실측에서 status 값이 'active'가 아니어서
+      //   per-batch sync_logs(failures 포함)가 한 줄도 기록되지 않던 구멍. 회사의 최신 에이전트면 기록한다.
+      `SELECT id FROM sync_agents WHERE company_id = $1 ORDER BY updated_at DESC LIMIT 1`,
       [companyId]
     );
     const agentId = agentResult.rows[0]?.id;
@@ -791,6 +793,10 @@ router.post('/customers', async (req: SyncAuthRequest, res: Response) => {
     const agentConfig = await getSyncConfigForAgent(companyId);
 
     console.log(`[Sync] Customers: ${upsertedCount} upserted, ${failedCount} failed (company: ${req.companyName})`);
+    // ★ 2026-06-13: 실패 행 식별 가능하게 stdout 기록 (인비토 매시 1건 고정 실패가 어떤 행인지 기록이 없던 구멍)
+    if (failedCount > 0) {
+      console.log(`[Sync] Customers 실패 상세 (최대 5건): ${JSON.stringify(failures.slice(0, 5))}`);
+    }
 
     return res.json({
       success: true,
@@ -854,7 +860,9 @@ router.post('/purchases', async (req: SyncAuthRequest, res: Response) => {
 
     // agentId 조회
     const agentResult = await query(
-      `SELECT id FROM sync_agents WHERE company_id = $1 AND status = 'active' ORDER BY updated_at DESC LIMIT 1`,
+      // ★ 2026-06-13: status='active' 필터 제거 — 인비토 실측에서 status 값이 'active'가 아니어서
+      //   per-batch sync_logs(failures 포함)가 한 줄도 기록되지 않던 구멍. 회사의 최신 에이전트면 기록한다.
+      `SELECT id FROM sync_agents WHERE company_id = $1 ORDER BY updated_at DESC LIMIT 1`,
       [companyId]
     );
     const agentId = agentResult.rows[0]?.id;
@@ -1076,22 +1084,51 @@ router.post('/log', async (req: SyncAuthRequest, res: Response) => {
       });
     }
 
-    // sync_logs INSERT (sync_mode → mode 컬럼 매핑)
-    const result = await query(
-      `INSERT INTO sync_logs (
-        agent_id, company_id, sync_type, mode,
-        total_count, success_count, fail_count,
-        duration_ms, error_message,
-        started_at, completed_at, created_at
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW())
+    // ★ 2026-06-13: 같은 동기화의 서버 측 per-batch 기록(failures 상세 보유)이 직전에 있으면
+    //   별도 행을 추가하지 않고 그 행에 에이전트 보고(duration/error/시각)를 병합한다.
+    //   — 동기화 1회 = sync_logs 1행 유지(화면 "오늘 동기화" 카운트 중복 차단) + failures 상세 보존.
+    //   per-batch 행 식별 = batch_index IS NOT NULL(서버 기록) AND duration_ms IS NULL(미병합).
+    let result = await query(
+      `UPDATE sync_logs
+          SET duration_ms = $1,
+              error_message = COALESCE($2, error_message),
+              started_at = COALESCE($3, started_at),
+              completed_at = COALESCE($4, completed_at)
+        WHERE id = (
+          SELECT id FROM sync_logs
+           WHERE agent_id = $5 AND sync_type = $6
+             AND batch_index IS NOT NULL
+             AND duration_ms IS NULL
+             AND completed_at > NOW() - INTERVAL '15 minutes'
+           ORDER BY completed_at DESC
+           LIMIT 1
+        )
       RETURNING id`,
       [
-        agent_id, companyId, sync_type, sync_mode,
-        total_count || 0, success_count || 0, fail_count || 0,
         duration_ms ?? null, error_message || null,
-        started_at || null, completed_at || null
+        started_at || null, completed_at || null,
+        agent_id, sync_type,
       ]
     );
+
+    // 병합 대상이 없으면 기존대로 신규 행 INSERT (sync_mode → mode 컬럼 매핑)
+    if (result.rows.length === 0) {
+      result = await query(
+        `INSERT INTO sync_logs (
+          agent_id, company_id, sync_type, mode,
+          total_count, success_count, fail_count,
+          duration_ms, error_message,
+          started_at, completed_at, created_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW())
+        RETURNING id`,
+        [
+          agent_id, companyId, sync_type, sync_mode,
+          total_count || 0, success_count || 0, fail_count || 0,
+          duration_ms ?? null, error_message || null,
+          started_at || null, completed_at || null
+        ]
+      );
+    }
 
     // sync_agents.last_sync_at 업데이트
     await query(

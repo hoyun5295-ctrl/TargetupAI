@@ -16,6 +16,8 @@
 import { query } from '../config/database';
 import * as imc from './alimtalk-api';
 import { getAuthSmsTable, bulkInsertSmsQueue } from './sms-queue';
+// ★ 2026-06-13: 검수 진입 시 발급되는 IMC 템플릿코드를 상태 동기화 때 함께 반영 (반려 템플릿 코드 미반영 구멍 fix)
+import { syncSingleTemplateCode } from './kakao-template-sync';
 import { buildTemplateInspectionNotifyMessage } from './auto-notify-message';
 
 // ════════════════════════════════════════════════════════════
@@ -284,12 +286,17 @@ export async function syncPendingTemplatesJob(): Promise<void> {
       // ★ 2026-06-10: IMC 템플릿 활성상태(A/R/S/D)도 함께 기록 — 검수 APR + 활성 R(발송 불가 7300) 식별용
       const imcTemplateStatus = (res.data as any).status ? String((res.data as any).status) : null;
 
+      // ★ 2026-06-13: 검수 종결(승인/반려) 도착 시 reviewed_at 기록 — 변경 이력에는 남는데
+      //   본 컬럼이 영구 NULL이던 구멍(인비토 반려 건 실측). 최초 도착 시각만 보존(COALESCE).
+      const reviewedAtExpr = `CASE WHEN $1 IN ('APPROVED','REJECTED','KREJ','HREJ')
+                                   THEN COALESCE(reviewed_at, now()) ELSE reviewed_at END`;
       try {
         await query(
           `UPDATE kakao_templates
               SET status              = $1,
                   reject_reason       = $2,
                   imc_template_status = $3,
+                  reviewed_at         = ${reviewedAtExpr},
                   last_synced_at      = now(),
                   updated_at          = now()
             WHERE id = $4`,
@@ -303,6 +310,7 @@ export async function syncPendingTemplatesJob(): Promise<void> {
             `UPDATE kakao_templates
                 SET status          = $1,
                     reject_reason   = $2,
+                    reviewed_at     = ${reviewedAtExpr},
                     last_synced_at  = now(),
                     updated_at      = now()
               WHERE id = $3`,
@@ -313,6 +321,15 @@ export async function syncPendingTemplatesJob(): Promise<void> {
         }
       }
       updated++;
+
+      // ★ 2026-06-13: 카카오 검수 진입 시 IMC가 발급한 진짜 템플릿코드(B_XX_...)를 상태 동기화 때 함께 반영.
+      //   기존 코드 백필(syncTemplateCodes)은 승인 상태만 스캔해 반려(KREJ) 템플릿이 내부 키(Tmp...)로
+      //   영구 잔존하던 구멍(인비토 B_IV_013_02_80287 실측). 단건 GET 응답을 그대로 재사용 — 추가 IMC 호출 0.
+      try {
+        await syncSingleTemplateCode(row.id, res.data);
+      } catch (codeErr: any) {
+        console.log(`[alimtalk-jobs] 템플릿코드 동기화 생략(${row.template_name}): ${codeErr?.message || codeErr}`);
+      }
 
       // ★ D135+: 검수 상태 종결 전환 감지 → 담당자 SMS 자동 알림
       //   IMC createAlarmUser 권한 없음(4032) → 한줄로가 직접 kakao_alarm_users + QTmsg 인증 라인으로 발송.
