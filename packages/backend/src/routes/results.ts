@@ -11,7 +11,7 @@ import {
   kakaoGroupBy,
   kakaoBatchAggByGroup,
 } from '../utils/sms-queue';
-import { STATUS_CODE_MAP, CARRIER_MAP, SUCCESS_CODES, PENDING_CODES, getStatusLabel, getStatusType, getCarrierLabel, isSuccess, getSendTypeLabel } from '../utils/sms-result-map';
+import { STATUS_CODE_MAP, CARRIER_MAP, SUCCESS_CODES, PENDING_CODES, getStatusLabel, getStatusType, getCarrierLabel, isSuccess, getSendTypeLabel, getQueueRowStatus } from '../utils/sms-result-map';
 import { DEFAULT_COSTS, redis, CACHE_TTL } from '../config/defaults';
 import { buildDateRangeFilter, buildPeriodFilter, STAT_DATE_EXPR, STAT_STARTED_GUARD, aggregateSmsCountsByCampaign, aggregateSmsSendTimesByCampaign } from '../utils/stats-aggregation';
 import { CAMPAIGN_OPT080_SELECT_EXPR, CAMPAIGN_OPT080_LEFT_JOIN } from '../utils/unsubscribe-helper';
@@ -54,13 +54,15 @@ const SMS_DETAIL_FIELDS = `seqno, dest_no, call_back, msg_type, msg_contents, st
   '' AS resend_type, '' AS resend_report_code,
   IFNULL(k_template_code, '') AS k_template_code,
   IFNULL(k_next_type, '') AS k_next_type,
-  IFNULL(k_oriseq, 0) AS k_oriseq`;
+  IFNULL(k_oriseq, 0) AS k_oriseq,
+  (sendreq_time > NOW()) AS is_future`;
 
 /** 엑셀 export용 SMS 필드 (seqno 제외) — 엑셀 2컬럼 유지: 전송요청/발송 (B10: 수신확인 제거) */
 const SMS_EXPORT_FIELDS = `dest_no, call_back, msg_type, msg_contents, status_code, mob_company,
   sendreq_time,
   DATE_ADD(mobsend_time, INTERVAL 9 HOUR) AS mobsend_time,
-  'sms' AS _channel, NULL AS report_code_raw, IFNULL(k_oriseq, 0) AS k_oriseq`;
+  'sms' AS _channel, NULL AS report_code_raw, IFNULL(k_oriseq, 0) AS k_oriseq,
+  (sendreq_time > NOW()) AS is_future`;
 
 // ===== UNION ALL 기반 MySQL 헬퍼 — CT-04(sms-queue.ts)로 승격됨 =====
 // smsUnionCount → smsCountAll, smsUnionGroupBy → smsGroupByAll, kakao 헬퍼 → CT-04
@@ -767,7 +769,9 @@ router.get('/campaigns/:id/messages', async (req: Request, res: Response) => {
         REQUEST_DATE AS sendreq_time, RESPONSE_DATE AS mobsend_time,
         'kakao' AS _channel, REQUEST_DATE AS _sort_time,
         CHAT_BUBBLE_TYPE AS kakao_bubble_type, REPORT_CODE AS kakao_report_code,
-        RESEND_MT_TYPE AS resend_type, RESEND_REPORT_CODE AS resend_report_code`;
+        RESEND_MT_TYPE AS resend_type, RESEND_REPORT_CODE AS resend_report_code,
+        '' AS k_template_code, '' AS k_next_type, 0 AS k_oriseq,
+        0 AS is_future`;
 
       dataSubqueries.push(`(SELECT ${kakaoFields} FROM IMC_BM_FREE_BIZ_MSG ${kakaoWhere})`);
       countSubqueries.push(`SELECT COUNT(*) AS cnt FROM IMC_BM_FREE_BIZ_MSG ${kakaoWhere}`);
@@ -868,13 +872,19 @@ router.get('/campaigns/:id/messages', async (req: Request, res: Response) => {
     }
 
     // sms-result-map.ts 기반 해석값 추가 (프론트 하드코딩 제거용)
-    const enrichedMessages = messages.map((m: any) => ({
-      ...m,
-      status_label: getStatusLabel(m.status_code),
-      status_type: getStatusType(m.status_code),
-      carrier_label: m._channel === 'kakao' ? '카카오' : getCarrierLabel(m.mob_company),
-      send_type: m._channel === 'kakao' ? '카카오' : getSendTypeLabel(m.msg_type, m.k_oriseq),
-    }));
+    // ★ 2026-06-13: 발송 요청 시각이 미래인 대기 행 = "발송 예약" — 결과 대기와 구분 (Harold 지시)
+    const enrichedMessages = messages.map((m: any) => {
+      const rowStatus = getQueueRowStatus(Number(m.status_code), !!Number(m.is_future));
+      return {
+        ...m,
+        status_label: rowStatus.label,
+        status_type: rowStatus.type,
+        carrier_label: m._channel === 'kakao' ? '카카오'
+          : rowStatus.type === 'scheduled' ? '-'
+          : getCarrierLabel(m.mob_company),
+        send_type: m._channel === 'kakao' ? '카카오' : getSendTypeLabel(m.msg_type, m.k_oriseq),
+      };
+    });
 
     // ★ D225+ (2026-05-28 영업팀장 박성용 신고 fix): 알림톡 발송 영역 = 응답 안 templateInfo 추가
     //   Harold 기대 = 전송 결과 상세 안 [템플릿코드] + [템플릿명] 확인 가능 의무
@@ -978,13 +988,16 @@ router.get('/campaigns/:id/export', async (req: Request, res: Response) => {
       if (exportStatus === 'success') kakaoStatusWhere = ` AND REPORT_CODE = '0000'`;
       else if (exportStatus === 'fail') kakaoStatusWhere = ` AND REPORT_CODE != '0000' AND STATUS IN ('3','4')`;
       // ★ D124: 엑셀은 전송요청/발송/수신확인 3컬럼 유지 (UI 발송내역만 수신확인 제거)
+      // ★ 2026-06-13: SMS_EXPORT_FIELDS와 컬럼 위치 1:1 정렬 — repmsg_recvtm 제거(D131에서 CSV 미사용)
+      //   + is_future 동반. UNION ALL은 위치 기반이라 양쪽 컬럼 수·순서가 다르면 both 채널에서 깨진다.
       const kakaoFields = `PHONE_NUMBER AS dest_no, '-' AS call_back,
         CONCAT('카카오(', COALESCE(CHAT_BUBBLE_TYPE, 'TEXT'), ')') AS msg_type,
         MESSAGE AS msg_contents,
         CASE WHEN REPORT_CODE='0000' THEN 1800 WHEN STATUS='1' THEN 100 ELSE 9999 END AS status_code,
         '카카오' AS mob_company,
-        REQUEST_DATE AS sendreq_time, RESPONSE_DATE AS mobsend_time, REPORT_DATE AS repmsg_recvtm,
-        'kakao' AS _channel, REPORT_CODE AS report_code_raw, NULL AS k_oriseq`;
+        REQUEST_DATE AS sendreq_time, RESPONSE_DATE AS mobsend_time,
+        'kakao' AS _channel, REPORT_CODE AS report_code_raw, NULL AS k_oriseq,
+        0 AS is_future`;
       subqueries.push(`(SELECT ${kakaoFields} FROM IMC_BM_FREE_BIZ_MSG WHERE REQUEST_UID = ?${kakaoStatusWhere})`);
       baseParams.push(id);
     }
@@ -1034,9 +1047,11 @@ router.get('/campaigns/:id/export', async (req: Request, res: Response) => {
             : `카카오실패(${m.report_code_raw || '미수신'})`;
           carrierDisplay = '카카오';
         } else {
+          // ★ 2026-06-13: 발송 요청 시각이 미래인 대기 행 = "발송 예약" (화면 상세와 동일 산출)
+          const rowStatus = getQueueRowStatus(Number(m.status_code), !!Number(m.is_future));
           msgTypeDisplay = getSendTypeLabel(m.msg_type, m.k_oriseq);
-          statusDisplay = getStatusLabel(m.status_code);
-          carrierDisplay = getCarrierLabel(m.mob_company);
+          statusDisplay = rowStatus.label;
+          carrierDisplay = rowStatus.type === 'scheduled' ? '-' : getCarrierLabel(m.mob_company);
         }
 
         // ★ D131: 헤더 순서(수신번호→메시지유형)와 일치 — 수신확인시간 컬럼 제거됨

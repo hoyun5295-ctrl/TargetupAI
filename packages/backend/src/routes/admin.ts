@@ -6,7 +6,7 @@ import { authenticate, requireSuperAdmin } from '../middlewares/auth';
 import { ALL_SMS_TABLES, invalidateLineGroupCache, getCampaignSmsTables, smsCountAll, smsSelectAll, smsAggAll, getTestSmsTables, kakaoCountWhere, kakaoSelectWhere, kakaoBatchAggByGroup } from '../utils/sms-queue';
 import { DASHBOARD_CARD_POOL, validateCardIds, getRequiredFields, filterPoolByAvailableData, generateDynamicCards } from '../utils/dashboard-card-pool';
 import { detectEnabledFields } from '../utils/enabled-fields';
-import { SUCCESS_CODES_SQL, PENDING_CODES_SQL, getStatusLabel, getStatusType, getCarrierLabel, isSuccess, isPending, getSendTypeLabel, getCampaignChannelLabel } from '../utils/sms-result-map';
+import { SUCCESS_CODES_SQL, PENDING_CODES_SQL, getStatusLabel, getStatusType, getCarrierLabel, isSuccess, isPending, getSendTypeLabel, getCampaignChannelLabel, getQueueRowStatus } from '../utils/sms-result-map';
 import { DEFAULT_COSTS } from '../config/defaults';
 import { validateSmsTables } from '../utils/sms-table-validator';
 // ★ D145 P0: 예약 캠페인 자동 정리 (모든 발송 관련 라우트 정합성)
@@ -1830,7 +1830,7 @@ router.get('/campaigns/:id/sms-detail', authenticate, requireSuperAdmin, async (
     const campResult = await query(`
       SELECT c.id, c.company_id, c.created_by, c.created_at,
              c.campaign_name, c.message_type, c.send_type, c.status, c.scheduled_at, c.sent_at, c.target_count,
-             c.send_channel,
+             c.send_channel, c.send_config,
              c.result_final, c.sent_count, c.success_count, c.fail_count,
              co.company_name, co.company_code,
              u.name as created_by_name, u.login_id as created_by_login
@@ -1843,7 +1843,14 @@ router.get('/campaigns/:id/sms-detail', authenticate, requireSuperAdmin, async (
       return res.status(404).json({ error: '캠페인을 찾을 수 없습니다.' });
     }
     const campaign = campResult.rows[0];
-    {
+    if (campaign.status === 'scheduled') {
+      // ★ 2026-06-13 속도: 예약 캠페인은 결과가 아직 없다 — MySQL 헤더 집계·발송시각 보정 스캔 자체가 불필요.
+      //   전송건수 = PG 적재 실측(sent_count, 0611부터 워커 기록), 성공/실패 0, 발송시각 = 예약시각.
+      //   예약 8만건 [조회] 10초+의 스캔 4회 중 2회를 여기서 제거 (직원 신고 — 에이스하드웨어 47,846건 실측).
+      campaign.success_count = 0;
+      campaign.fail_count = 0;
+      campaign.sent_count = Number(campaign.sent_count || 0) || Number(campaign.target_count || 0);
+    } else {
       // ★ D228+ (2026-05-30) 속도: 완료(result_final) 캠페인은 PG 캐시, 진행 중만 MySQL 집계.
       //   sms-detail 헤더가 대형 캠페인 1건이라도 무조건 GROUP BY를 돌던 병목 제거 (상세조회 지연 원인).
       const headerCounts = await getCampaignResultCounts([campaign]);
@@ -1872,7 +1879,8 @@ router.get('/campaigns/:id/sms-detail', authenticate, requireSuperAdmin, async (
       // 해당 회사 라인그룹 LIVE 테이블(1~2개) + 발송월 LOG 테이블(1개)만 조회
       // 고객사/테이블 수 증가와 무관하게 O(2~3) 유지
       const refDate = new Date(campaign.sent_at || campaign.scheduled_at || campaign.created_at);
-      const smsTables = await getCampaignSmsTables(campaign.company_id, refDate, campaign.created_by);
+      // ★ 2026-06-13 속도: send_config.sentTables(실제 적재 테이블 기록)가 있으면 그 테이블만 조회
+      const smsTables = await getCampaignSmsTables(campaign.company_id, refDate, campaign.created_by, campaign.send_config);
 
       let mysqlWhere = `app_etc1 = ?`;
       const mysqlParams: any[] = [id];
@@ -1893,7 +1901,13 @@ router.get('/campaigns/:id/sms-detail', authenticate, requireSuperAdmin, async (
         mysqlParams.push(`%${searchValue.replace(/-/g, '')}%`);
       }
 
-      totalSms = await smsCountAll(smsTables, mysqlWhere, mysqlParams);
+      // ★ 2026-06-13 속도: 예약 + 필터/검색 없음 = PG 적재 실측으로 총건수 대체 (COUNT 전체 스캔 제거).
+      //   필터·검색이 있으면 정확한 COUNT가 필요하므로 기존 경로 유지.
+      if (campaign.status === 'scheduled' && !statusFilter && !searchValue) {
+        totalSms = Number(campaign.sent_count || 0);
+      } else {
+        totalSms = await smsCountAll(smsTables, mysqlWhere, mysqlParams);
+      }
 
       // ★ D124: 수신확인(repmsg_recvtm) 전경로 제거 — 등록/발송 2컬럼 통일
       //   sendreq_time: 우리 앱 NOW() → KST (DATE_ADD 불필요)
@@ -1906,13 +1920,16 @@ router.get('/campaigns/:id/sms-detail', authenticate, requireSuperAdmin, async (
         smsTables,
         `seqno, dest_no, call_back, msg_contents, msg_type, status_code, mob_company,
          sendreq_time, k_oriseq,
-         DATE_ADD(mobsend_time, INTERVAL 9 HOUR) AS mobsend_time`,
+         DATE_ADD(mobsend_time, INTERVAL 9 HOUR) AS mobsend_time,
+         (sendreq_time > NOW()) AS is_future`,
         mysqlWhere,
         mysqlParams,
         `ORDER BY seqno DESC, dest_no ASC LIMIT ${Number(limit)} OFFSET ${Number(offset)}`
       );
 
       (rows as any[]).forEach(r => {
+        // ★ 2026-06-13: 발송 요청 시각이 미래인 대기 행 = "발송 예약" (결과 대기와 구분 — Harold 지시)
+        const rowStatus = getQueueRowStatus(Number(r.status_code), !!Number(r.is_future));
         allDetail.push({
           seqno: r.seqno,
           destNo: r.dest_no,
@@ -1921,9 +1938,9 @@ router.get('/campaigns/:id/sms-detail', authenticate, requireSuperAdmin, async (
           msgType: r.msg_type === 'S' ? 'SMS' : r.msg_type === 'L' ? 'LMS' : r.msg_type === 'M' ? 'MMS' : r.msg_type,
           sendType: getSendTypeLabel(r.msg_type, r.k_oriseq),
           statusCode: r.status_code,
-          statusText: getStatusLabel(r.status_code),
-          statusType: getStatusType(r.status_code),
-          carrier: getCarrierLabel(r.mob_company),
+          statusText: rowStatus.label,
+          statusType: rowStatus.type,
+          carrier: rowStatus.type === 'scheduled' ? '-' : getCarrierLabel(r.mob_company),
           sendreqTime: r.sendreq_time,
           mobsendTime: r.mobsend_time,
           channel: 'sms',

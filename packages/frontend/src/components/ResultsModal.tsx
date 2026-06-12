@@ -981,7 +981,8 @@ export default function ResultsModal({ onClose, token, customerDbEnabled, isSubs
                       </td></tr>
                     ) : (
                       messages.map((m: any, idx: number) => {
-                        const statusInfo = { label: m.status_label || `코드 ${m.status_code}`, type: (m.status_type || 'fail') as 'success' | 'fail' | 'pending' };
+                        // ★ 2026-06-13: 'scheduled'(발송 예약 — 미발송) 타입 추가, 결과 대기와 구분
+                        const statusInfo = { label: m.status_label || `코드 ${m.status_code}`, type: (m.status_type || 'fail') as 'success' | 'fail' | 'pending' | 'scheduled' };
                         const carrier = m.carrier_label || '-';
                         return (
                           <tr key={m.seqno} className="border-t hover:bg-slate-50 transition-colors">
@@ -1001,10 +1002,11 @@ export default function ResultsModal({ onClose, token, customerDbEnabled, isSubs
                             <td className="px-3 py-2.5 text-center text-xs text-slate-500 whitespace-nowrap">{selectedCampaign.created_at ? formatDateTime(selectedCampaign.created_at) : '-'}</td>
                             <td className="px-3 py-2.5 text-center text-xs text-slate-500 whitespace-nowrap">{formatDateTime(m.mobsend_time)}</td>
                             <td className="px-3 py-2.5 text-center whitespace-nowrap">
+                              {/* ★ 2026-06-13: 발송 예약(미발송) 행은 파란 칩 — 결과 대기와 구분 */}
                               <span className={`inline-block px-2 py-0.5 rounded text-xs font-medium ${
-                                statusInfo.type === 'success' ? 'bg-green-50 text-green-700' : statusInfo.type === 'pending' ? 'bg-yellow-50 text-yellow-700' : 'bg-red-50 text-red-700'
+                                statusInfo.type === 'success' ? 'bg-green-50 text-green-700' : statusInfo.type === 'scheduled' ? 'bg-blue-50 text-blue-700' : statusInfo.type === 'pending' ? 'bg-yellow-50 text-yellow-700' : 'bg-red-50 text-red-700'
                               }`}>
-                                {statusInfo.type === 'success' ? '성공' : statusInfo.type === 'pending' ? '대기' : '실패'}
+                                {statusInfo.type === 'success' ? '성공' : statusInfo.type === 'scheduled' ? '발송 예약' : statusInfo.type === 'pending' ? '대기' : '실패'}
                               </span>
                             </td>
                             <td className="px-3 py-2.5 text-center text-xs text-slate-500 whitespace-nowrap">{m.status_code} ({statusInfo.label})</td>

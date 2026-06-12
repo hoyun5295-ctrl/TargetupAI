@@ -166,6 +166,27 @@ export function getStatusType(statusCode: number): StatusType {
   return STATUS_CODE_MAP[statusCode]?.type || 'unknown';
 }
 
+/**
+ * ★ 2026-06-13: 발송 큐 행의 표시 상태 — "발송 예약"과 "결과 대기" 구분 (Harold 지시).
+ * 예약 선적재 행은 status_code=100(대기)이라 그대로 보여주면 "결과 대기"로 표시돼
+ * 아직 안 나간 예약 행이 발송된 것처럼 보이는 불안을 만든다 (에이스하드웨어 실측).
+ * - 대기 코드 + 발송 요청 시각이 미래(is_future) = 발송 예약 (type 'scheduled')
+ * - 그 외 = 기존 라벨/타입 그대로
+ * 판정 기준(sendreq_time > NOW())은 발송 에이전트의 픽업 기준과 동일.
+ * 소비처: admin.ts 발송 상세 / results.ts 상세·엑셀 (3표면 동일 산출 의무).
+ */
+export type QueueRowStatusType = StatusType | 'scheduled';
+
+export function getQueueRowStatus(
+  statusCode: number,
+  isFutureSendreq: boolean,
+): { label: string; type: QueueRowStatusType } {
+  if (isFutureSendreq && isPending(Number(statusCode))) {
+    return { label: '발송 예약', type: 'scheduled' };
+  }
+  return { label: getStatusLabel(statusCode), type: getStatusType(statusCode) };
+}
+
 /** SQL용: 성공 코드 IN 절 문자열 — 예: "6, 1000, 1800" */
 export const SUCCESS_CODES_SQL = SUCCESS_CODES.join(', ');
 

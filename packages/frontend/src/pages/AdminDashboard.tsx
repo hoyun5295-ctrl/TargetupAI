@@ -6512,8 +6512,10 @@ const handleApproveRequest = async (id: string) => {
                         <td className="px-3 py-2 text-center text-xs text-gray-600">{r.msgType}</td>
                         <td className="px-3 py-2 text-center text-xs text-gray-600">{r.carrier}</td>
                         <td className="px-3 py-2 text-center">
+                          {/* ★ 2026-06-13: 발송 예약(미발송) 행은 파란 칩 — 결과 대기와 구분 */}
                           <span className={`inline-flex px-1.5 py-0.5 rounded text-xs font-medium ${
                             r.statusType === 'success' ? 'bg-green-100 text-green-700' :
+                            r.statusType === 'scheduled' ? 'bg-blue-100 text-blue-700' :
                             r.statusType === 'pending' ? 'bg-amber-100 text-amber-700' :
                             'bg-red-100 text-red-700'
                           }`}>{r.statusText}</span>
