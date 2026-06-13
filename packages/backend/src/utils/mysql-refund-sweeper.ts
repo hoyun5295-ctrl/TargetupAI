@@ -3,7 +3,7 @@
 // ---------------------------------------------------------------------------
 // ★ D153 (2026-05-13) 신설 — 환불 누락 뿌리뽑기
 //
-// 사고 패턴 (D151-2 cron 박혔는데도 재발):
+// 사고 패턴 (D151-2 cron 도입 후에도 재발):
 //   campaign-sync-worker → syncCampaignResults 흐름이 매 5분 호출되지만
 //   directCampaigns SELECT 결과에 일부 캠페인이 누락되어 PG fail_count 갱신 0회
 //   → prepaidRefund 호출 0회 → 환불 영구 누락
@@ -382,9 +382,9 @@ async function reverseTimeoutRefundIfRecovered(): Promise<{ reversed: number; to
 // ===========================================================================
 // D182 (2026-05-19) — 캠페인 종료 시 회사별 학습 메모리 자동 누적
 // ---------------------------------------------------------------------------
-// D181 Memory tool 본질 — 캠페인 종료 후 ai_company_memory에 자동 누적.
-// 트리거: campaigns.status='completed' + sent_at 박힘 + 학습 누락 (ai_company_memory에 본 campaign_id 박힌 row 없음)
-// 처리: recordCampaignLearning 호출 → success_pattern (클릭률 10%+) + channel_performance 박음
+// 캠페인 종료 후 ai_company_memory에 자동 누적한다.
+// 트리거: status='completed' + sent_at 존재 + 학습 누락 (ai_company_memory에 해당 campaign_id row 없음)
+// 처리: recordCampaignLearning 호출 → success_pattern (클릭률 10%+) + channel_performance
 // idempotency: metadata->>'campaign_id' 기준 중복 차단
 // ===========================================================================
 
@@ -404,9 +404,9 @@ interface LearningCandidateRow {
 }
 
 async function accumulateCampaignLearning(): Promise<{ learned: number }> {
-  // 1. 최근 24h 내 종료된 캠페인 후보 (학습 미박힘만)
-  //   - status='completed' + sent_at 박힘 + sent_count >= 10 (표본 부족 차단)
-  //   - ai_company_memory에 본 campaign_id metadata 박힌 row 미존재
+  // 1. 최근 24h 내 종료된 캠페인 후보 (학습 누락분만)
+  //   - status='completed' + sent_at 존재 + sent_count >= 10 (표본 부족 차단)
+  //   - ai_company_memory에 해당 campaign_id metadata row 미존재
   const candidates = await query(`
     SELECT
       c.id AS campaign_id,
@@ -433,10 +433,9 @@ async function accumulateCampaignLearning(): Promise<{ learned: number }> {
       AND COALESCE(c.scheduled_at, c.sent_at) > NOW() - INTERVAL '24 hours'
       AND COALESCE(c.sent_count, 0) >= 10
       AND NOT EXISTS (
-        -- ★ D216+ 비효율 정정 (Harold 명시 2026-05-25):
-        --   옛 영역 = campaign_id metadata 영역만 매칭 = success_pattern 영역만 차단 + channel_performance 영역 매칭 X
-        --   = 매 30초 사이클마다 14건 UPSERT 반복 사고 (24h 안 약 2,880회 동일 데이터 덮어쓰기)
-        --   정정 = success_pattern 영역(campaign_id) + channel_performance 영역(last_campaign_id) 양쪽 매핑
+        -- D216+ 비효율 정정 (2026-05-25):
+        --   campaign_id만 매칭하면 channel_performance가 안 잡혀 매 사이클 동일 UPSERT가 반복된다.
+        --   success_pattern(campaign_id) + channel_performance(last_campaign_id) 양쪽을 매핑해 캠페인당 1회만 학습.
         SELECT 1 FROM ai_company_memory m
         WHERE m.company_id = c.company_id
           AND m.source = 'campaign_result'
@@ -453,8 +452,8 @@ async function accumulateCampaignLearning(): Promise<{ learned: number }> {
 
   for (const row of candidates.rows as LearningCandidateRow[]) {
     try {
-      // ★ D190 #1 (2026-05-22): click_count = cdp_events 'message_click' 정확 집계 (D183 단축 URL + D190 variant_id/journey_id 추적 통합)
-      // conversion_count는 향후 cdp_events 'purchase' / 'conversion' 이벤트 매트릭스 통합 시 정확 집계 (현재 0 default)
+      // click_count = cdp_events 'message_click' 집계 (campaign_id 매칭).
+      // conversion_count는 cdp_events purchase/order 적재 후 연결 — 현재 데이터 없어 hasConversionData=false.
       const channelLabel = row.send_type === 'direct' ? '직접발송' : 'AI추천';
       await recordCampaignLearning({
         companyId: row.company_id,
@@ -462,10 +461,11 @@ async function accumulateCampaignLearning(): Promise<{ learned: number }> {
         campaignName: row.campaign_name || `${channelLabel} ${new Date(row.sent_at).toLocaleDateString('ko-KR')}`,
         channel: row.message_type,
         targetCriteria: row.send_type,
-        messageBody: '', // 본문 별도 조회 불요 (memory_key는 channel/name으로 박힘)
+        messageBody: '', // 본문 별도 조회 불요 (memory_key는 channel/name 기준)
         sentCount: Number(row.sent_count),
         clickCount: Number(row.click_count || 0),
         conversionCount: Number(row.conversion_count || 0),
+        hasConversionData: false, // cdp_events 0건 — 전환 데이터 없음(가짜 전환율 차단)
         isAd: !!row.is_ad,
       });
       learned++;

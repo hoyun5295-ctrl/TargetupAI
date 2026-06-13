@@ -76,12 +76,12 @@ interface SearchResponse {
 // 상수 — 5 타입 메타
 // ════════════════════════════════════════════════════════════════════
 
-const TYPE_META: Record<string, { label: string; color: string; gradient: string }> = {
-  success_pattern:      { label: '성공 패턴',         color: '#34d399', gradient: 'from-emerald-400 to-teal-500' },
-  channel_performance:  { label: '채널 성과',         color: '#fbbf24', gradient: 'from-amber-400 to-orange-500' },
-  customer_insight:     { label: '고객 인사이트',     color: '#38bdf8', gradient: 'from-sky-400 to-cyan-500' },
-  brand_tone_evolution: { label: '브랜드 톤',         color: '#a78bfa', gradient: 'from-violet-400 to-purple-500' },
-  compliance_learning:  { label: '컴플라이언스 학습', color: '#fb7185', gradient: 'from-rose-400 to-pink-500' },
+const TYPE_META: Record<string, { label: string; color: string; gradient: string; how: string }> = {
+  success_pattern:      { label: '성공 패턴',         color: '#34d399', gradient: 'from-emerald-400 to-teal-500', how: '클릭률 높은 캠페인에서 자동' },
+  channel_performance:  { label: '채널 성과',         color: '#fbbf24', gradient: 'from-amber-400 to-orange-500', how: '캠페인 채널별 클릭 실측에서 자동' },
+  customer_insight:     { label: '고객 인사이트',     color: '#38bdf8', gradient: 'from-sky-400 to-cyan-500', how: '등급별 구매·LTV 집계에서 자동' },
+  brand_tone_evolution: { label: '브랜드 톤',         color: '#a78bfa', gradient: 'from-violet-400 to-purple-500', how: 'Brand Voice 가이드라인 변경 시 자동' },
+  compliance_learning:  { label: '컴플라이언스 학습', color: '#fb7185', gradient: 'from-rose-400 to-pink-500', how: '광고 차단·반려 학습에서 자동' },
 };
 
 // ★ D227+ defense-in-depth — 미지의 memory_type이 와도 전체 화면 blank(크래시) 차단
@@ -130,9 +130,9 @@ const QUICK_START_CARDS: QuickStartCard[] = [
     id: 'channel',
     icon: Layers,
     label: '채널 성과 비교',
-    hint: 'SMS · LMS · 알림톡 전환율',
+    hint: 'SMS · LMS · 알림톡 클릭률',
     gradient: 'from-sky-400 to-cyan-500',
-    query: 'SMS, LMS, 알림톡 채널별 클릭률과 전환율 차이를 메모리에서 요약해주세요.',
+    query: 'SMS, LMS, 알림톡 채널별 클릭률 차이를 메모리에서 요약해주세요.',
   },
   {
     id: 'tone',
@@ -676,7 +676,7 @@ export default function AiMemoryPage() {
             </div>
           </div>
           <div className="text-[10px] text-white/30 italic mt-3 pl-15">
-            Data source — ai_company_memory 5 타입 누적 + 자동 학습 (캠페인 종료 시) + 회사 admin 직접 입력
+            Data source — ai_company_memory 5 타입 자동 누적 (성공 패턴·채널 성과 = 캠페인 클릭 실측 / 고객 인사이트 = 등급 집계 / 브랜드 톤 = 가이드라인 변경 / 컴플라이언스 = 차단·반려) + 회사 admin 직접 입력
           </div>
         </div>
 
@@ -810,7 +810,7 @@ export default function AiMemoryPage() {
             <div className="text-center py-10 text-white/40 text-sm">
               아직 학습 데이터가 없습니다.
               <br />
-              <span className="text-xs">캠페인을 발송하시면 성공 패턴과 채널 성과가 자동 누적됩니다.</span>
+              <span className="text-xs">캠페인 클릭 실측·고객 등급·Brand Voice 가이드라인이 쌓이면 5개 학습이 자동 누적됩니다.</span>
             </div>
           ) : (
             <div className="grid md:grid-cols-2 gap-6 items-center">
@@ -842,7 +842,10 @@ export default function AiMemoryPage() {
                   return (
                     <div key={type} className="flex items-center gap-3">
                       <div className="w-3 h-3 rounded-sm flex-shrink-0" style={{ background: meta.color }} />
-                      <span className="text-sm text-white flex-1">{meta.label}</span>
+                      <div className="flex-1 min-w-0">
+                        <span className="text-sm text-white">{meta.label}</span>
+                        <span className="block text-[10px] text-white/40 truncate">{meta.how}</span>
+                      </div>
                       <span className="text-xs text-white/60 font-mono">{count.toLocaleString()}</span>
                       <span className="text-xs text-white/40 font-mono w-12 text-right">{percent.toFixed(1)}%</span>
                       <div className="w-20 h-1.5 bg-white/10 rounded-full overflow-hidden">
@@ -1077,9 +1080,9 @@ export default function AiMemoryPage() {
 
         {/* ───────── 8. Source caption ───────── */}
         <div className="text-center text-[10px] text-white/30 italic pt-4">
-          Data source — ai_company_memory (자동 학습: 캠페인 종료 시 클릭률 10%+ 자동 누적 / 채널 성과 누적) + 회사 admin 직접 입력
+          Data source — ai_company_memory 자동 학습 (성공 패턴·채널 성과 = 캠페인 클릭 실측에서만 / 고객 인사이트 = 등급별 구매·LTV / 브랜드 톤 = 가이드라인 변경 / 컴플라이언스 = 광고 차단·반려) + 회사 admin 직접 입력
           <br />
-          AI는 시스템 프롬프트에 중요도 3 이상 학습 최대 30건을 자동 포함합니다 — 시간이 지날수록 추천 정확도가 향상됩니다
+          실측 데이터가 없으면 그 학습은 생성되지 않습니다. AI는 시스템 프롬프트에 중요도 3 이상 학습 최대 30건을 자동 포함합니다 — 시간이 지날수록 추천 정확도가 향상됩니다
         </div>
       </div>
 

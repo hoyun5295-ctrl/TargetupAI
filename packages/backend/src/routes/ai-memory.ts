@@ -15,6 +15,7 @@ import { query, pool } from '../config/database';
 import { authenticate } from '../middlewares/auth';
 import { callAIWithFallback } from '../services/ai';
 import { buildMemoryPromptContext, listMemories, MemoryType } from '../utils/company-memory';
+import { fetchBrandGuideline, recordToneEvolution } from '../utils/brand-tone-evolution';
 
 const router = Router();
 router.use(authenticate);
@@ -632,6 +633,8 @@ JSON 단 1건만 출력. 다른 설명/주석/마크다운 코드블록 없음. 
       });
     }
 
+    const prevGuideline = await fetchBrandGuideline(companyId);
+
     await query(
       `INSERT INTO ai_company_memory (
         id, company_id, memory_type, memory_key, memory_value,
@@ -646,6 +649,10 @@ JSON 단 1건만 출력. 다른 설명/주석/마크다운 코드블록 없음. 
         updated_at = NOW(),
         last_accessed_at = NOW()`,
       [companyId, JSON.stringify(guideline)],
+    );
+
+    await recordToneEvolution(companyId, prevGuideline, guideline).catch((e: any) =>
+      console.log('[brand-tone-evolution] extract 기록 오류 —', e?.message || e),
     );
 
     const { invalidateBrandVoiceCache } = await import('../utils/brand-voice-prompt');
@@ -734,6 +741,8 @@ router.post('/brand-voice/update-guideline', async (req: Request, res: Response)
       admin_edited: true,
     };
 
+    const prevGuideline = await fetchBrandGuideline(companyId);
+
     await query(
       `INSERT INTO ai_company_memory (
         id, company_id, memory_type, memory_key, memory_value,
@@ -748,6 +757,10 @@ router.post('/brand-voice/update-guideline', async (req: Request, res: Response)
         updated_at = NOW(),
         last_accessed_at = NOW()`,
       [companyId, JSON.stringify(guideline)],
+    );
+
+    await recordToneEvolution(companyId, prevGuideline, guideline).catch((e: any) =>
+      console.log('[brand-tone-evolution] update 기록 오류 —', e?.message || e),
     );
 
     const { invalidateBrandVoiceCache } = await import('../utils/brand-voice-prompt');

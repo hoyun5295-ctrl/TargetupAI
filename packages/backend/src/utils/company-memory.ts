@@ -2,29 +2,30 @@
  * ★ CT-37: 회사별 메모리 누적 컨트롤타워 — D181 (2026-05-19)
  *
  * 🎯 목적
- *   비전 v0.4 § 9 영구 원칙 #6 — "회사별 메모리 + 학습 — 시간 지날수록 정확도↑".
- *   D162-5 AI 4 결합 #4 박은 영역 — 회사별 메모리 누적 (Anthropic Memory tool 패턴 박음 + 자체 DB 박음).
+ *   비전 v0.4 § 9 영구 원칙 #6 — "회사별 메모리 + 학습 — 시간이 지날수록 정확도↑".
+ *   회사별 학습 메모리를 자체 DB(ai_company_memory)에 누적한다.
  *
- * 📊 메모리 타입 매트릭스
+ * 📊 메모리 타입
  *   - success_pattern: 성공 캠페인 패턴 ("VIP 화·목 알림톡 → 클릭률 18%")
- *   - customer_insight: 고객 인사이트 ("3개월 휴면 고객은 무료 혜택 메시지에 강한 반응")
- *   - brand_tone_evolution: 브랜드 톤 진화 ("이모지 박지 X 톤 정합")
+ *   - customer_insight: 고객 인사이트 (등급별 구매·LTV 집계에서 자동)
+ *   - brand_tone_evolution: 브랜드 톤 변화 (Brand Voice 가이드라인 변경 추적)
  *   - channel_performance: 채널 성과 ("LMS > SMS 클릭률 5%p+")
- *   - compliance_learning: 컴플라이언스 학습 ("'특가' 단어 광고 차단 6건 박음 — '한정 혜택'으로 정정")
+ *   - compliance_learning: 컴플라이언스 학습 (광고 차단·반려 단어 → 안전 대체)
  *
  * 🔐 사용 흐름
- *   1. ai-orchestrator buildCompanyMemoryContext 박은 영역에서 buildMemoryPromptContext 박음 (system prompt 박음)
- *   2. 캠페인 발송 완료 박은 후 recordCampaignLearning 박음 (자동 메모리 박음)
- *   3. 회사 admin이 직접 박음 (UI 박은 영역 박음 — 메모리 박음/검토/삭제)
- *   4. Prompt Caching 박은 영역에 박음 (1h TTL ephemeral, 90% 비용 절감)
+ *   1. AI 호출 시 buildMemoryPromptContext로 system prompt에 포함
+ *   2. 캠페인 발송 완료 후 recordCampaignLearning으로 자동 누적
+ *   3. 회사 admin이 UI에서 직접 입력·검토·삭제
+ *   4. Prompt Caching과 결합 (1h TTL ephemeral, 비용 절감)
  *
- * ⛔ 영구 원칙 정합
- *   - 회사 격리 — 회사별 메모리 박음, 다른 회사 박지 X
- *   - 사용자 신뢰 #4 — 회사 admin이 메모리 박은 영역 검토 + 삭제 박을 수 있음
- *   - 모델 분리 #3 — AI Operator 영역만 박음 (Sonnet 4.6 흐름 영향 0건)
+ * ⛔ 영구 원칙
+ *   - 회사 격리 — 전 쿼리 company_id 필터
+ *   - 회사 admin이 메모리를 직접 검토·삭제 가능
+ *   - 모델 분리 — AI Operator 주입 전용 (기존 한줄로AI 흐름 영향 0)
  */
 
 import { query } from '../config/database';
+import { composeCampaignLearningText, shouldRecordCampaignLearning } from './ai-memory-text';
 
 // ════════════════════════════════════════════════════════════════════
 // 타입
@@ -132,14 +133,14 @@ export async function deleteMemory(companyId: string, memoryId: string): Promise
 }
 
 // ════════════════════════════════════════════════════════════════════
-// AI 호출 박을 영역 — system prompt 박음
+// AI 호출 — system prompt 주입
 // ════════════════════════════════════════════════════════════════════
 
 /**
- * AI 호출 시점에 system prompt 박는 영역 박음.
- * - 중요도 + 최근 접근 순 박음 (top N)
- * - 박은 영역 박은 후 last_accessed_at 갱신 박음
- * - Prompt Caching 박은 영역과 결합 박음 (1h TTL ephemeral)
+ * AI 호출 시점에 system prompt에 회사 메모리를 주입한다.
+ * - 중요도 + 최근 접근 순으로 상위 N건 선택
+ * - 선택분의 last_accessed_at + usage_count 갱신
+ * - Prompt Caching과 결합 (1h TTL ephemeral)
  */
 export async function buildMemoryPromptContext(companyId: string, maxEntries: number = 30): Promise<string> {
   const memories = await listMemories(companyId, { limit: maxEntries, minImportance: 3 });
@@ -148,7 +149,7 @@ export async function buildMemoryPromptContext(companyId: string, maxEntries: nu
   }
 
   // last_accessed_at + usage_count 영역 갱신 (best-effort)
-  // ★ D210+ Phase 3 B-7 (2026-05-23 Harold 명시): usage_count 자동 증가 — 영향도 시각화 매트릭스 정합
+  // usage_count 자동 증가 — 영향도 시각화 근거
   const memoryIds = memories.map((m) => m.id);
   query(
     `UPDATE ai_company_memory
@@ -177,7 +178,7 @@ export async function buildMemoryPromptContext(companyId: string, maxEntries: nu
     brand_guideline: 'Brand Voice 가이드라인',
   };
 
-  // ★ D225+ AI Operator 호출 시점 = 옛 5 타입 한정 (Brand Voice 2 타입 자동 제외 — buildSystemPromptWithBrandVoice 별도 활용)
+  // AI Operator 호출 = 5 학습 타입 한정 (Brand Voice 2 타입은 buildSystemPromptWithBrandVoice로 별도 주입)
   const OPERATOR_TYPES: MemoryType[] = ['success_pattern', 'customer_insight', 'brand_tone_evolution', 'channel_performance', 'compliance_learning'];
 
   const sections: string[] = [];
@@ -194,12 +195,12 @@ export async function buildMemoryPromptContext(companyId: string, maxEntries: nu
 
 ${sections.join('\n\n')}
 
-위 메모리는 본 회사의 운영 누적 학습 결과입니다. 본 메모리에 정합된 패턴을 우선 적용 + 모순 영역은 제외하고 분석해주세요.
+위 메모리는 본 회사의 누적 학습 결과입니다. 여기 담긴 패턴을 우선 적용하고, 모순되는 부분은 제외하고 분석해주세요.
 `;
 }
 
 // ════════════════════════════════════════════════════════════════════
-// 캠페인 결과 박은 후 자동 메모리 박음
+// 캠페인 결과로 자동 메모리 누적
 // ════════════════════════════════════════════════════════════════════
 
 export interface CampaignLearningInput {
@@ -212,56 +213,72 @@ export interface CampaignLearningInput {
   sentCount: number;
   clickCount: number;
   conversionCount: number;
+  hasConversionData: boolean;
   isAd: boolean;
 }
 
 /**
- * 캠페인 결과 박은 후 성과 박은 영역 박은 메모리 박음.
- * - 클릭률 10%+ → success_pattern 박음
- * - 클릭률 2% 미만 → 메모리 박지 X (저성과는 박지 X — 노이즈 박음 차단)
- * - 채널/시점/타겟 박은 영역 박음
+ * 캠페인 결과로 회사 메모리를 자동 누적한다.
+ * - 클릭 실측 표본이 있을 때만 기록(가짜 0% 차단 — shouldRecordCampaignLearning).
+ * - 클릭률 10%+ → success_pattern.
+ * - 채널 성과는 매 캠페인 1건당 1회 누적.
+ * - 전환 데이터가 없으면 문구에 전환율을 넣지 않는다(composeCampaignLearningText).
  */
 export async function recordCampaignLearning(input: CampaignLearningInput): Promise<void> {
-  if (input.sentCount < 10) return; // 표본 부족 — 박지 X
+  // 클릭 실측 표본이 있어야만 학습한다(표본 부족·클릭 0 = 보류, 가짜 0% 차단).
+  if (!shouldRecordCampaignLearning({ sentCount: input.sentCount, clickCount: input.clickCount })) return;
   const clickRate = input.clickCount / input.sentCount;
-  const conversionRate = input.sentCount > 0 ? input.conversionCount / input.sentCount : 0;
+  const conversionRate = input.hasConversionData && input.sentCount > 0
+    ? input.conversionCount / input.sentCount
+    : 0;
 
-  // 성공 패턴 박음 (클릭률 10%+)
+  // 성공 패턴 (클릭률 10%+)
   if (clickRate >= 0.1) {
     await addMemory({
       companyId: input.companyId,
       memoryType: 'success_pattern',
       memoryKey: `${input.channel}/${input.campaignName}`,
-      memoryValue: `${input.channel} 채널 + "${input.campaignName}" 캠페인 발송 결과 → 클릭률 ${(clickRate * 100).toFixed(1)}% / 전환율 ${(conversionRate * 100).toFixed(2)}% (${input.sentCount}명 발송)`,
+      memoryValue: composeCampaignLearningText({
+        kind: 'success_pattern',
+        channel: input.channel,
+        campaignName: input.campaignName,
+        sentCount: input.sentCount,
+        clickRate,
+        hasConversionData: input.hasConversionData,
+        conversionRate,
+      }),
       importance: Math.min(10, Math.floor(clickRate * 50)),
       source: 'campaign_result',
       metadata: {
         campaign_id: input.campaignId,
         click_rate: clickRate,
-        conversion_rate: conversionRate,
+        ...(input.hasConversionData ? { conversion_rate: conversionRate } : {}),
         sent_count: input.sentCount,
         is_ad: input.isAd,
       },
     });
   }
 
-  // 채널 성과 누적 (집계 메모리)
-  // ★ D216+ 비효율 정정 (Harold 명시 2026-05-25):
-  //   옛 영역 = metadata.campaign_id 영역 누락 = mysql-refund-sweeper NOT EXISTS 영역 안 매칭 X 영역
-  //   = 매 30초 사이클마다 동일 14건 UPSERT 반복 사고 (24h 안 약 2,880회 동일 데이터 덮어쓰기)
-  //   정정 = metadata 안 last_campaign_id 추가 → NOT EXISTS 영역 매칭 → 캠페인 1건당 1회만 학습 정합
+  // 채널 성과 누적 — metadata.last_campaign_id로 캠페인 1건당 1회만 학습되게 중복 차단(sweeper NOT EXISTS 매칭).
   const channelKey = `channel_${input.channel}`;
   await addMemory({
     companyId: input.companyId,
     memoryType: 'channel_performance',
     memoryKey: channelKey,
-    memoryValue: `${input.channel} 채널 최근 캠페인 성과 — 클릭률 ${(clickRate * 100).toFixed(1)}% / 전환율 ${(conversionRate * 100).toFixed(2)}%`,
+    memoryValue: composeCampaignLearningText({
+      kind: 'channel_performance',
+      channel: input.channel,
+      sentCount: input.sentCount,
+      clickRate,
+      hasConversionData: input.hasConversionData,
+      conversionRate,
+    }),
     importance: 6,
     source: 'campaign_result',
     metadata: {
       last_campaign_id: input.campaignId,
       last_click_rate: clickRate,
-      last_conversion_rate: conversionRate,
+      ...(input.hasConversionData ? { last_conversion_rate: conversionRate } : {}),
     },
   });
 }
@@ -289,9 +306,9 @@ function mapRow(row: any): MemoryEntry {
 }
 
 // ════════════════════════════════════════════════════════════════════
-// ★ D210+ Phase 3 B-7 (2026-05-23 Harold 명시): 자동 갱신 영역 — deprecate
-//   importance < minImportance + olderThanDays 영역 안 미사용 영역 DELETE
-//   본질: 오래된 + 저영향도 메모리 자동 정리 (회사 admin 명시 호출 의무 — cron worker X)
+// 오래된 저영향 메모리 정리 (cleanup)
+//   importance < minImportance + olderThanDays 미사용 행 DELETE.
+//   accumulator 워커(1일 1회)와 회사 admin 수동 호출 모두 사용.
 // ════════════════════════════════════════════════════════════════════
 
 export async function cleanupDeprecatedMemories(
