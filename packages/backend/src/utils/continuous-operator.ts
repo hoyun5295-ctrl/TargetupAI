@@ -1064,6 +1064,7 @@ async function dispatchProposalSend(p: any): Promise<{ action: 'sent' | 'skipped
         adEnabled: isAd, total: rows.length, dedupEnabled: true, unsubFilterEnabled: true,
       },
       { companyId, userId },
+      { finalSource: 'selected_as_is', aiMessages: [body] },
     );
     campaignId = res.campaignId;
   } catch (e: any) {

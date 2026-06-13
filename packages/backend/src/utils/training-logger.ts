@@ -335,6 +335,44 @@ export async function logTrainingData(params: TrainingLogParams): Promise<void> 
 }
 
 // ============================================================
+// 5b) 캠페인 생성 직후 학습 적재 (회사 정보 조회 포함, fire-and-forget 격리)
+//     직접발송·자율발송 공통 길목(createDirectSendCampaign)에서 1회 호출.
+//     ⚠️ 발송·돈에 영향 없음, source_ref(campaignId) 멱등으로 중복 0.
+// ============================================================
+export async function logCampaignTraining(input: {
+  campaignId: string;
+  companyId: string;
+  messageType: 'SMS' | 'LMS' | 'MMS' | 'KAKAO';
+  isAd: boolean;
+  targetCount?: number;
+  finalMessage: string;
+  finalSource: 'manual' | 'selected_as_is' | 'edited';
+  userPrompt?: string;
+  aiMessages?: string[];
+  sendAt?: Date;
+}): Promise<void> {
+  try {
+    const info = await pool.query('SELECT name, brand_tone FROM companies WHERE id = $1', [input.companyId]);
+    await logTrainingData({
+      campaignRunId: input.campaignId,
+      companyId: input.companyId,
+      companyName: info.rows[0]?.name,
+      brandTone: info.rows[0]?.brand_tone,
+      userPrompt: input.userPrompt,
+      targetCount: input.targetCount,
+      messageType: input.messageType,
+      isAd: input.isAd,
+      aiMessages: input.aiMessages,
+      finalMessage: input.finalMessage,
+      finalSource: input.finalSource,
+      sendAt: input.sendAt,
+    });
+  } catch (err) {
+    console.error('[TrainingLog] logCampaignTraining 실패 (발송에 영향 없음):', err);
+  }
+}
+
+// ============================================================
 // 6) 성과 데이터 업데이트 — 결과 동기화 완료 시 호출
 //    ⚠️ try-catch 격리: 실패해도 동기화 플로우에 영향 없음
 // ============================================================

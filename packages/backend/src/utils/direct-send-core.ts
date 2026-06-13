@@ -9,6 +9,7 @@ import { query } from '../config/database';
 import { prepaidDeduct } from './prepaid';
 import { triggerDirectSendWorker } from './direct-send-worker';
 import { CAMPAIGN_INSERT_SQL, buildDirectSendCampaignParams, DirectSendError, type DirectSendSpec } from './direct-send-spec';
+import { logCampaignTraining } from './training-logger';
 
 // ★ 대량 발송 (2026-06-04 톤28 504 정정): 모달 카운트 + commit 차감 공용 헬퍼 — 실제 삭제 없이 COUNT만.
 //   중복 = phone당 1건 유지(total - distinct), 수신거부 = distinct phone 중 user_id+phone 매칭.
@@ -53,6 +54,7 @@ export async function countStagingFiltered(
 export async function createDirectSendCampaign(
   spec: DirectSendSpec,
   ctx: { companyId: string; userId: string },
+  training?: { finalSource?: 'manual' | 'selected_as_is' | 'edited'; userPrompt?: string; aiMessages?: string[] },
 ): Promise<{ campaignId: string; accepted: number }> {
   const campaignResult = await query(CAMPAIGN_INSERT_SQL, buildDirectSendCampaignParams(spec, ctx));
   const campaignId = campaignResult.rows[0].id;
@@ -67,6 +69,24 @@ export async function createDirectSendCampaign(
       insufficientBalance: true, balance: deduct.balance, requiredAmount: deduct.amount,
     });
   }
+
+  // AI 학습 데이터 적재 — 직접발송·자율발송 공통 길목(fire-and-forget, 발송·돈 영향 0, source_ref 멱등).
+  const trainingMsgType: 'SMS' | 'LMS' | 'MMS' | 'KAKAO' =
+    (directChannel === 'kakao' || directChannel === 'alimtalk')
+      ? 'KAKAO'
+      : (String(spec.msgType || 'LMS').toUpperCase() as 'SMS' | 'LMS' | 'MMS');
+  void logCampaignTraining({
+    campaignId,
+    companyId: ctx.companyId,
+    messageType: trainingMsgType,
+    isAd: spec.adEnabled === true,
+    targetCount: spec.total,
+    finalMessage: spec.message || '',
+    finalSource: training?.finalSource || 'manual',
+    userPrompt: training?.userPrompt,
+    aiMessages: training?.aiMessages,
+    sendAt: spec.scheduled && spec.scheduledAt ? new Date(spec.scheduledAt) : undefined,
+  });
 
   // worker 즉시 트리거 (5초 대기 없이)
   triggerDirectSendWorker(campaignId);

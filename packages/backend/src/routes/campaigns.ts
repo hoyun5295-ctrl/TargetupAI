@@ -1394,7 +1394,7 @@ router.post('/direct-send/commit', async (req: Request, res: Response) => {
         kakaoBubbleType, kakaoSenderKey, kakaoTargeting, kakaoAttachmentJson, kakaoCarouselJson, kakaoResendType,
         alimtalkTemplateCode, alimtalkVariableMap, alimtalkButtonJson: alimtalkButtonJsonResolved, alimtalkNextType, alimtalkNextContents, alimtalkNextSubject,
         alimtalkEtcJson, alimtalkTemplateUuid,
-      }, { companyId, userId });
+      }, { companyId, userId }, { finalSource: 'manual' });
 
       return res.status(202).json({
         success: true, campaignId, accepted,

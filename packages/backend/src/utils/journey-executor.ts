@@ -45,6 +45,7 @@ import {
   getOpt080Number,
 } from './messageUtils';
 import { prepaidDeduct } from './prepaid';
+import { logCampaignTraining } from './training-logger';
 import { normalizePhone } from './normalize-phone';
 import { getCompanyCosts } from '../config/defaults';
 import { sanitizeForSms } from './message-sanitizer';
@@ -696,6 +697,17 @@ async function processExecution(exec: ExecutionRow): Promise<StepOutcome> {
     callbackNumber,
     kakaoTemplateId: isKakao && kakaoTemplateRow ? kakaoTemplateRow.id : null,  // 알림톡 결과 조회용 FK (results.ts JOIN)
     mmsImagePaths: (msgType === 'MMS' && step.mms_image_paths && step.mms_image_paths.length > 0) ? JSON.stringify(step.mms_image_paths) : null,
+  });
+
+  // AI 학습 데이터 적재 — 여정 발송(공유 step campaign, source_ref 멱등으로 (여정,step,일)당 1건, 발송 영향 0).
+  void logCampaignTraining({
+    campaignId,
+    companyId: exec.company_id,
+    messageType: (msgType === 'KAKAO' ? 'KAKAO' : String(msgType || 'LMS').toUpperCase()) as 'SMS' | 'LMS' | 'MMS' | 'KAKAO',
+    isAd,
+    finalMessage: message,
+    finalSource: 'selected_as_is',
+    sendAt: new Date(),
   });
 
   // ★ D188 Phase 2-B-2 (2026-05-21): 10. queue INSERT — channel별 분기 (SMS/LMS/MMS = bulkInsertSmsQueue / KAKAO = insertAlimtalkQueue).
