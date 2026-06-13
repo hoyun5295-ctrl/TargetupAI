@@ -8,6 +8,7 @@ import SessionTimeoutModal from './components/SessionTimeoutModal';
 import { ToastProvider } from './components/ToastProvider';
 import LoginPage from './pages/LoginPage';
 import AdminDashboard from './pages/AdminDashboard';
+import AiTrainingDataPage from './pages/AiTrainingDataPage';
 import Dashboard from './pages/Dashboard';
 import ManagePage from './pages/ManagePage';
 import CalendarPage from './pages/CalendarPage';
@@ -201,6 +202,14 @@ function App() {
           element={
             <PrivateRoute allowedTypes={['super_admin']}>
               <AdminDashboard />
+            </PrivateRoute>
+          }
+        />
+        <Route
+          path="/admin/ai-training"
+          element={
+            <PrivateRoute allowedTypes={['super_admin']}>
+              <AiTrainingDataPage />
             </PrivateRoute>
           }
         />

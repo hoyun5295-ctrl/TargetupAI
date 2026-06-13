@@ -17,7 +17,7 @@ import { normalizePhone } from '../utils/normalize-phone';
 import { normalizeCdpAutoExecuteGate } from '../utils/autosend-policy';
 import { grantBasicTrial } from '../utils/basic-trial';
 // ★ 2026-06-11: 감사 로그 CT — 라인그룹 지정/해제 책임 추적 (에이치피오 예약취소 사고 후속)
-import { recordAuditLog, isAuditLogViewer, diffFields } from '../utils/audit-log';
+import { recordAuditLog, isAuditLogViewer, isAiTrainingViewer, diffFields } from '../utils/audit-log';
 
 const router = Router();
 
@@ -2774,6 +2774,79 @@ router.get('/charge-management', authenticate, requireSuperAdmin, async (req: Re
 // ★ 2026-06-11: 감사 로그 열람 권한 확인 — 메뉴 노출 게이팅용 (AUDIT_LOG_VIEWER_IDS, 기본 'ceo')
 router.get('/audit-logs/access', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
   res.json({ allowed: await isAuditLogViewer(req.user?.userId) });
+});
+
+// ★ 2026-06-13: AI 학습 데이터(인비토AI) 열람 — ceo 전용 (AI_TRAINING_VIEWER_IDS, 기본 'ceo')
+router.get('/ai-training/access', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
+  res.json({ allowed: await isAiTrainingViewer(req.user?.userId) });
+});
+
+router.get('/ai-training/overview', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
+  try {
+    if (!(await isAiTrainingViewer(req.user?.userId))) {
+      return res.status(403).json({ error: 'AI 학습 데이터 열람 권한이 없습니다.' });
+    }
+
+    const summaryR = await query(`
+      SELECT
+        COUNT(*)::int AS total,
+        COUNT(DISTINCT tenant_ref)::int AS companies,
+        COUNT(*) FILTER (WHERE sent_count IS NOT NULL)::int AS metrics_filled,
+        COUNT(*) FILTER (WHERE send_at > NOW() - INTERVAL '7 days')::int AS last_7d,
+        COUNT(*) FILTER (WHERE send_at > NOW() - INTERVAL '30 days')::int AS last_30d,
+        COUNT(*) FILTER (WHERE user_prompt IS NOT NULL AND user_prompt <> '')::int AS with_prompt
+      FROM ai_training_logs
+    `);
+    const channelR = await query(
+      `SELECT COALESCE(NULLIF(message_type, ''), '기타') AS k, COUNT(*)::int AS cnt
+       FROM ai_training_logs GROUP BY 1 ORDER BY cnt DESC`,
+    );
+    const sourceR = await query(
+      `SELECT COALESCE(NULLIF(final_source, ''), '기타') AS k, COUNT(*)::int AS cnt
+       FROM ai_training_logs GROUP BY 1 ORDER BY cnt DESC`,
+    );
+    const trendR = await query(
+      `SELECT to_char((send_at AT TIME ZONE 'Asia/Seoul')::date, 'MM-DD') AS day, COUNT(*)::int AS cnt
+       FROM ai_training_logs
+       WHERE send_at > NOW() - INTERVAL '14 days' AND send_at <= NOW()
+       GROUP BY (send_at AT TIME ZONE 'Asia/Seoul')::date
+       ORDER BY (send_at AT TIME ZONE 'Asia/Seoul')::date`,
+    );
+    const prefR = await query(
+      `SELECT COUNT(*) FILTER (WHERE status IN ('approved','auto_executed'))::int AS accepted,
+              COUNT(*) FILTER (WHERE status = 'rejected')::int AS rejected
+       FROM operator_proposals`,
+    );
+
+    const s = summaryR.rows[0] || {};
+    const pref = prefR.rows[0] || {};
+    const target = 100000; // SCALING.md Phase 2 데이터 축적 목표
+    const total = Number(s.total) || 0;
+    return res.json({
+      success: true,
+      summary: {
+        total,
+        companies: Number(s.companies) || 0,
+        metricsFilled: Number(s.metrics_filled) || 0,
+        last7d: Number(s.last_7d) || 0,
+        last30d: Number(s.last_30d) || 0,
+        target,
+        progressPct: Math.round((total / target) * 1000) / 10,
+      },
+      channels: channelR.rows.map((r: any) => ({ key: r.k, count: Number(r.cnt) || 0 })),
+      sources: sourceR.rows.map((r: any) => ({ key: r.k, count: Number(r.cnt) || 0 })),
+      trend: trendR.rows.map((r: any) => ({ day: r.day, count: Number(r.cnt) || 0 })),
+      preference: { accepted: Number(pref.accepted) || 0, rejected: Number(pref.rejected) || 0 },
+      datasets: {
+        generation: Number(s.with_prompt) || 0,
+        preference: (Number(pref.accepted) || 0) + (Number(pref.rejected) || 0),
+        spam: total,
+      },
+    });
+  } catch (err: any) {
+    console.error('[AI Training overview] 오류:', err);
+    return res.status(500).json({ success: false, error: err?.message || '조회 실패' });
+  }
 });
 
 router.get('/audit-logs', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {

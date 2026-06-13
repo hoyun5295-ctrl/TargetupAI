@@ -56,6 +56,23 @@ export async function isAuditLogViewer(superAdminId?: string | null): Promise<bo
   }
 }
 
+/**
+ * AI 학습 데이터 열람 권한 — AI_TRAINING_VIEWER_IDS(기본 'ceo')에 포함된 super_admins.login_id만 허용.
+ * 인비토AI 학습 데이터는 전사 비식별 집계라 소유자(ceo) 전용. 감사 로그와 분리된 별도 env.
+ */
+export async function isAiTrainingViewer(superAdminId?: string | null): Promise<boolean> {
+  if (!superAdminId) return false;
+  try {
+    const me = await query('SELECT login_id FROM super_admins WHERE id = $1', [superAdminId]);
+    const allowed = (process.env.AI_TRAINING_VIEWER_IDS || 'ceo')
+      .split(',').map((s) => s.trim()).filter(Boolean);
+    return me.rows.length > 0 && allowed.includes(me.rows[0].login_id);
+  } catch (err: any) {
+    console.log('[ai-training] 열람 권한 확인 실패:', err?.message);
+    return false;
+  }
+}
+
 /** 변경 전/후 객체에서 달라진 필드만 추출 — details 용량 최소화 + 변경 없는 수정은 기록 생략용 */
 export function diffFields(
   before: Record<string, any>,

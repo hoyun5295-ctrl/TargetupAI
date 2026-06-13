@@ -68,6 +68,8 @@ export default function AdminDashboard() {
   const [activeTab, setActiveTab] = useState<'companies' | 'users' | 'scheduled' | 'callbacks' | 'plans' | 'requests' | 'deposits' | 'credits' | 'allCampaigns' | 'stats' | 'billing' | 'syncAgents' | 'auditLogs' | 'lineGroups' | 'templates' | 'loginBlocks'>('companies');
   // ★ 2026-06-11: 감사 로그 열람 권한 (AUDIT_LOG_VIEWER_IDS — 기본 ceo 전용) — 허용 계정에만 메뉴/탭 노출
   const [auditAccessAllowed, setAuditAccessAllowed] = useState(false);
+  // ★ 2026-06-13: AI 학습 데이터 열람 권한 (AI_TRAINING_VIEWER_IDS — 기본 ceo 전용) — 허용 계정에만 진입 버튼 노출
+  const [aiTrainingAllowed, setAiTrainingAllowed] = useState(false);
   const [openMenu, setOpenMenu] = useState<string | null>(null);
   const [companies, setCompanies] = useState<Company[]>([]);
   const [plans, setPlans] = useState<Plan[]>([]);
@@ -449,6 +451,12 @@ useEffect(() => {
       const d = await r.json();
       setAuditAccessAllowed(d.allowed === true);
     } catch { setAuditAccessAllowed(false); }
+    try {
+      const token = localStorage.getItem('token');
+      const r = await fetch('/api/admin/ai-training/access', { headers: { Authorization: `Bearer ${token}` } });
+      const d = await r.json();
+      setAiTrainingAllowed(d.allowed === true);
+    } catch { setAiTrainingAllowed(false); }
   })();
 }, []);
 useEffect(() => { if (activeTab === 'templates') { loadAdminTemplates(); loadAdminRcsTemplates(); } }, [activeTab, templateFilter]);
@@ -2443,6 +2451,8 @@ const handleApproveRequest = async (id: string) => {
                   { key: 'syncAgents', label: 'Sync 모니터링' },
                   // ★ 2026-06-11: 감사 로그 = 허용 계정(기본 ceo)에만 노출
                   ...(auditAccessAllowed ? [{ key: 'auditLogs', label: '감사 로그' }] : []),
+                  // ★ 2026-06-13: AI 학습 데이터 = 허용 계정(기본 ceo)에만 노출 (별도 페이지 navigate)
+                  ...(aiTrainingAllowed ? [{ key: 'aiTraining', label: 'AI 학습 데이터', onClick: () => navigate('/admin/ai-training') }] : []),
                   { key: 'loginBlocks', label: '로그인 차단 관리' },
                 ],
               },
