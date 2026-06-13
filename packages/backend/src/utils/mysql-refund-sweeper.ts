@@ -30,6 +30,8 @@ import { prepaidRefund } from './prepaid';
 import { calcRefundDue } from './refund-calc';
 // ★ D182 (2026-05-19): 캠페인 종료 시 회사별 학습 메모리 자동 누적
 import { recordCampaignLearning } from './company-memory';
+// ★ 2026-06-13: 차등 주기 — 발송 48h 이내 매 사이클 / 경과(휴면) 60분 1회 (PROCESSLIST 10초 쿼리 상시 점유 fix)
+import { isSweepDue } from './sweep-cadence';
 
 const INTERVAL_MS = 30 * 1000;     // 30초 — Harold님 명시 (D153 5/13): 레거시 실시간 환불 패턴 정합 + 후불 8.5/선불 1.5 부하 보수 마진 (1.5초/사이클 / 5% 점유 / 후불 업체는 billing_type filter로 쿼리 자체 X)
 const BOOT_DELAY_MS = 90 * 1000;   // campaign-sync-worker(60초)와 시작 시점 차이 둠
@@ -50,7 +52,12 @@ interface CampaignRow {
   success_count: number | null;
   fail_count: number | null;
   send_phase: string | null;
+  send_base: Date | string | null;
 }
+
+// ★ 2026-06-13 차등 주기 마커 — 캠페인별 마지막 실집계 시각(메모리).
+//   재시작 시 비어 첫 사이클만 전수 집계(기존과 동일) 후 다시 차등화 — PG 컬럼 추가 0.
+const _lastSweptAt = new Map<string, number>();
 
 /** 회사·메시지타입별 단가 조회 (사이클 내 캐시) — prepaid.ts와 동일한 단가 컬럼 기준 */
 async function getUnitPrice(companyId: string, messageType: string, cache: Map<string, number>): Promise<number> {
@@ -93,7 +100,8 @@ async function runOnce(): Promise<void> {
     // === 1. 후보 캠페인 SELECT (PG fail_count 무관) ===
     const candidates = await query(`
       SELECT c.id, c.company_id, c.created_by, c.message_type,
-             c.success_count, c.fail_count, c.send_phase
+             c.success_count, c.fail_count, c.send_phase,
+             COALESCE(c.scheduled_at, c.sent_at, c.created_at) AS send_base
       FROM campaigns c
       JOIN companies co ON co.id = c.company_id
       WHERE co.billing_type = 'prepaid'
@@ -108,9 +116,29 @@ async function runOnce(): Promise<void> {
       return;
     }
 
+    // === 1-1. ★ 2026-06-13 차등 주기 — 발송 48h 이내는 매 사이클, 경과(휴면)는 60분 1회만 실집계.
+    //   후보 SELECT(14일 안전망)·환불 산식은 불변 — MySQL 집계 대상만 줄인다.
+    //   30초마다 14일치 전체(IN 380건)를 18개 이력 테이블 UNION으로 돌던 10초 쿼리가
+    //   전 화면을 상시 지연시키던 구조 fix (PROCESSLIST 실측 2026-06-13).
+    const nowMs = Date.now();
+    const allRows = candidates.rows as CampaignRow[];
+    const activeRows: CampaignRow[] = [];
+    for (const c of allRows) {
+      const baseMs = c.send_base ? new Date(c.send_base).getTime() : 0;
+      if (isSweepDue(baseMs, _lastSweptAt.get(c.id), nowMs)) {
+        activeRows.push(c);
+        _lastSweptAt.set(c.id, nowMs);
+      }
+    }
+    // 14일 윈도우를 벗어난 캠페인 마커 정리 (메모리 상한)
+    if (_lastSweptAt.size > allRows.length * 2) {
+      const liveIds = new Set(allRows.map(c => c.id));
+      for (const k of _lastSweptAt.keys()) if (!liveIds.has(k)) _lastSweptAt.delete(k);
+    }
+
     // === 2. 회사/유저 조합별 그룹화 ===
     const byUserKey = new Map<string, CampaignRow[]>();
-    for (const c of candidates.rows as CampaignRow[]) {
+    for (const c of activeRows) {
       const key = `${c.company_id}::${c.created_by || ''}`;
       if (!byUserKey.has(key)) byUserKey.set(key, []);
       byUserKey.get(key)!.push(c);
@@ -126,8 +154,8 @@ async function runOnce(): Promise<void> {
       for (const [g, v] of partial) smsAggMap.set(g, v);
     }
 
-    // 카카오 배치 집계 (단일 테이블)
-    const allIds = (candidates.rows as CampaignRow[]).map(c => c.id);
+    // 카카오 배치 집계 (단일 테이블) — 차등 주기 통과분만
+    const allIds = activeRows.map(c => c.id);
     const kakaoAggMap = await kakaoBatchAggByGroup(allIds);
 
     // === 4. 캠페인별 sweep ===
@@ -136,7 +164,7 @@ async function runOnce(): Promise<void> {
     let totalRefundAmount = 0;
     const unitCache = new Map<string, number>();
 
-    for (const camp of candidates.rows as CampaignRow[]) {
+    for (const camp of activeRows) {
       try {
         const smsAgg = smsAggMap.get(camp.id);
         const kakaoAgg = kakaoAggMap.get(camp.id) || { total: 0, success: 0, fail: 0, pending: 0 };
@@ -217,7 +245,7 @@ async function runOnce(): Promise<void> {
 
     const elapsedMs = Date.now() - startedAt;
     if (pgUpdateCount > 0 || refundCount > 0 || reverseRes.reversed > 0 || learningRes.learned > 0) {
-      log(`사이클 완료 — 후보 ${candidates.rows.length} / PG 갱신 ${pgUpdateCount} / 환불 ${refundCount}건 ${totalRefundAmount}원 / reverse ${reverseRes.reversed}건 ${reverseRes.totalAmount}원 / 학습 ${learningRes.learned}건 / ${elapsedMs}ms`);
+      log(`사이클 완료 — 후보 ${candidates.rows.length}(실집계 ${activeRows.length}/휴면 ${candidates.rows.length - activeRows.length}) / PG 갱신 ${pgUpdateCount} / 환불 ${refundCount}건 ${totalRefundAmount}원 / reverse ${reverseRes.reversed}건 ${reverseRes.totalAmount}원 / 학습 ${learningRes.learned}건 / ${elapsedMs}ms`);
     }
   } catch (err: any) {
     log('전체 오류:', err?.message || err);

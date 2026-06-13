@@ -20,7 +20,7 @@
 import { query } from '../config/database';
 import { syncCampaignResults } from './campaign-lifecycle';
 // ★ 2026-06-11: 카운트는 smsCampaignCountsSafe(이력=결과/라이브=대기 분리) — 이동 중 이중 카운트 차단
-import { getAuthSmsTable, bulkInsertSmsQueue, getCompanySmsTablesWithLogs, smsCampaignCountsSafe } from './sms-queue';
+import { getAuthSmsTable, bulkInsertSmsQueue, getCompanySmsTablesWithLogs, smsCampaignCountsSafe, kakaoBatchAggByGroup } from './sms-queue';
 
 const INTERVAL_MS = 5 * 60 * 1000; // 5분
 const BOOT_DELAY_MS = 60 * 1000;   // 서버 startup 안정화 후 첫 실행
@@ -272,23 +272,42 @@ async function markFinalizedCampaigns(): Promise<void> {
  *   - 확정(completed+result_final) 무리: 발송 +24시간에 1회 재검증 — 늦은 결과 반영
  *   멱등 마커 = result_synced_at (재대조 시 NOW()로 갱신 → 발송+24h를 넘기면 자연 종료, 신규 컬럼 0).
  *   돈 경로 무수정 — 환불은 sweeper(선불), 청구는 MySQL 직접 집계(후불)가 기존대로 담당.
+ *
+ *   ★ 2026-06-13 굳힘 탈출구 무리 추가 — markFinalized의 완전집계 조건(success+fail >= sent_count)을
+ *   영구히 못 채우는 terminal 캠페인(대기 잔존 등)이 result_final=false로 5/7부터 94건 누적,
+ *   발송통계/발송결과가 매 로딩 그 전부를 MySQL 실측하던 화면 지연의 두 번째 원인.
+ *   → terminal + result_final=false + 발송 72h 경과(21일 하한 없음 — 유한 무리·1회 졸업)는
+ *     실측값으로 counts 교정 후 result_final=true로 굳힘. 굳힘값=실측값이라 화면 숫자 연속(퇴행 0),
+ *     굳힘 후에도 선불은 sweeper가 14일까지 계속 보정하므로 정확성 유지.
+ *   ★ 동시에 실측에 카카오(IMC_BM_FREE_BIZ_MSG)를 합산 — PG 값(sweeper가 SMS+카카오 합산 기록)을
+ *     SMS 단독 실측으로 덮어 카카오 몫이 깎이던 잠재 과소 기록도 함께 차단.
  */
 const RECONCILE_BATCH = 50;
+/** 완전집계 미충족 캠페인의 강제 굳힘 시점 — 실측 최장 결과 지연(+24h)의 3배 마진 */
+const FINALIZE_FALLBACK_MS = 72 * 60 * 60 * 1000;
 
 async function reconcileFinalizedCampaigns(): Promise<void> {
   const targets = await query(`
-    SELECT id, company_id, status, success_count, fail_count, sent_count,
+    SELECT id, company_id, status, result_final, success_count, fail_count, sent_count,
            COALESCE(scheduled_at, sent_at) AS send_base
       FROM campaigns
      WHERE (
-             (status = 'failed'
-               AND COALESCE(scheduled_at, sent_at) < NOW() - INTERVAL '10 minutes')
-          OR (status = 'completed' AND result_final = true
-               AND COALESCE(scheduled_at, sent_at) < NOW() - INTERVAL '24 hours')
+             (
+               (
+                 (status = 'failed'
+                   AND COALESCE(scheduled_at, sent_at) < NOW() - INTERVAL '10 minutes')
+              OR (status = 'completed' AND result_final = true
+                   AND COALESCE(scheduled_at, sent_at) < NOW() - INTERVAL '24 hours')
+               )
+               AND COALESCE(scheduled_at, sent_at) >= NOW() - INTERVAL '21 days'
+               AND (result_synced_at IS NULL
+                    OR result_synced_at < COALESCE(scheduled_at, sent_at) + INTERVAL '24 hours')
+             )
+          -- ★ 2026-06-13 굳힘 탈출구 — 완전집계 조건 영구 미충족 terminal 무리(발송 72h 경과).
+          --   21일 하한 없음: 유한 무리(실측 94건)이고 1회 굳힘으로 영구 졸업이라 부하 무한 누적 없음.
+          OR (status IN ('completed', 'failed') AND result_final = false
+               AND COALESCE(scheduled_at, sent_at) < NOW() - INTERVAL '72 hours')
            )
-       AND COALESCE(scheduled_at, sent_at) >= NOW() - INTERVAL '21 days'
-       AND (result_synced_at IS NULL
-            OR result_synced_at < COALESCE(scheduled_at, sent_at) + INTERVAL '24 hours')
        -- 같은 캠페인 반복 집계 차단 — 마지막 재대조 후 1시간 지나야 재확인 (MySQL 부하 상한)
        AND (result_synced_at IS NULL OR result_synced_at < NOW() - INTERVAL '1 hour')
      ORDER BY COALESCE(scheduled_at, sent_at) ASC
@@ -297,17 +316,28 @@ async function reconcileFinalizedCampaigns(): Promise<void> {
   if (targets.rows.length === 0) return;
 
   let fixed = 0;
+  let finalized = 0;
   for (const camp of targets.rows) {
     try {
       const tables = await getCompanySmsTablesWithLogs(camp.company_id);
       // ★ 2026-06-11 정합성 100% 산식 — 이력=결과/라이브=대기 분리 (이동 중 이중 카운트 차단)
       const counts = (await smsCampaignCountsSafe(tables, [camp.id])).get(camp.id);
-      const sentCount = counts?.total || 0;
-      const successCount = counts?.success || 0;
-      const failCount = counts?.fail || 0;
+      // ★ 2026-06-13 카카오 합산 — PG 값은 sweeper가 SMS+카카오 합산으로 기록하므로
+      //   SMS 단독 실측으로 덮으면 카카오 몫이 깎인다. 동일 산식으로 합산 후 기록.
+      const kakao = (await kakaoBatchAggByGroup([camp.id])).get(camp.id) || { total: 0, success: 0, fail: 0, pending: 0 };
+      const sentCount = (counts?.total || 0) + Number(kakao.total || 0);
+      const successCount = (counts?.success || 0) + Number(kakao.success || 0);
+      const failCount = (counts?.fail || 0) + Number(kakao.fail || 0);
 
       // 발송 기록이 있는 failed = 오판 → completed 복원. 진짜 0건 실패는 failed 유지.
       const newStatus = (camp.status === 'failed' && sentCount > 0) ? 'completed' : camp.status;
+      // ★ 2026-06-13 굳힘 탈출구 — 완전집계 미충족 terminal 무리는 발송 72h 경과 시
+      //   방금 쓴 실측값 그대로 굳힘(화면 숫자 연속). 선불은 굳힘 후에도 sweeper가 14일까지 보정.
+      const sendBaseMs = camp.send_base ? new Date(camp.send_base).getTime() : 0;
+      const finalize =
+        camp.result_final === false &&
+        sendBaseMs > 0 &&
+        Date.now() - sendBaseMs > FINALIZE_FALLBACK_MS;
       const changed =
         newStatus !== camp.status ||
         sentCount !== Number(camp.sent_count || 0) ||
@@ -317,20 +347,22 @@ async function reconcileFinalizedCampaigns(): Promise<void> {
       await query(
         `UPDATE campaigns
             SET status = $2, sent_count = $3, success_count = $4, fail_count = $5,
+                result_final = CASE WHEN $6::boolean THEN true ELSE result_final END,
                 result_synced_at = NOW(), updated_at = NOW()
           WHERE id = $1`,
-        [camp.id, newStatus, sentCount, successCount, failCount]
+        [camp.id, newStatus, sentCount, successCount, failCount, finalize]
       );
+      if (finalize) finalized++;
       if (changed) {
         fixed++;
         log(`재대조 교정 campaign=${camp.id} status ${camp.status}→${newStatus}, ` +
-            `succ ${camp.success_count}→${successCount}, fail ${camp.fail_count}→${failCount}, sent ${camp.sent_count}→${sentCount}`);
+            `succ ${camp.success_count}→${successCount}, fail ${camp.fail_count}→${failCount}, sent ${camp.sent_count}→${sentCount}${finalize ? ', 굳힘(72h)' : ''}`);
       }
     } catch (oneErr: any) {
       log(`재대조 1건 오류 campaign=${camp.id} (skip):`, oneErr?.message || oneErr);
     }
   }
-  if (fixed > 0) log(`재대조 사이클 — 대상 ${targets.rows.length}건 중 ${fixed}건 교정`);
+  if (fixed > 0 || finalized > 0) log(`재대조 사이클 — 대상 ${targets.rows.length}건 중 ${fixed}건 교정, ${finalized}건 굳힘(72h 탈출구)`);
 }
 
 export function startCampaignSyncWorker(): void {
