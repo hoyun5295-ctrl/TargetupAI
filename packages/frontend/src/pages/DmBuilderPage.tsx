@@ -8,6 +8,7 @@
  */
 import { useEffect, useState, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { DmThumbnail, QuickStartThumbnail } from '../components/dm/DmThumbnails';
 import axios from 'axios';
 import { attachCreditInterceptor } from '../lib/credit-interceptor';
 import { useDmBuilderStore } from '../stores/dmBuilderStore';
@@ -55,53 +56,16 @@ type DmListItem = {
   updated_at?: string;
 };
 
-// 빠른 시작 7 시나리오 — 목록(추천 카드)·갤러리 공용. thumbTypes = 폰목업 미리보기용 대표 섹션 구성
-const QUICK_STARTS: Array<{ icon: string; label: string; hint: string; gradient: string; border: string; hover: string; thumbTypes: string[] }> = [
-  { icon: '🛍️', label: '신상품 출시', hint: '상품 슬라이드 + 구매 유도',  gradient: 'linear-gradient(135deg, rgba(139, 92, 246, 0.25), rgba(168, 85, 247, 0.15))', border: 'rgba(168, 85, 247, 0.4)',  hover: 'rgba(168, 85, 247, 0.30)', thumbTypes: ['header', 'hero', 'product_carousel', 'cta'] },
-  { icon: '🏷️', label: '시즌 세일',  hint: '카운트다운 + 쿠폰 + CTA',     gradient: 'linear-gradient(135deg, rgba(244, 63, 94, 0.25), rgba(239, 68, 68, 0.15))',  border: 'rgba(244, 63, 94, 0.4)',  hover: 'rgba(244, 63, 94, 0.30)', thumbTypes: ['header', 'countdown', 'coupon', 'cta'] },
-  { icon: '🎁', label: '추첨 이벤트', hint: '응모 form + 자동 추첨',       gradient: 'linear-gradient(135deg, rgba(245, 158, 11, 0.25), rgba(249, 115, 22, 0.15))', border: 'rgba(245, 158, 11, 0.4)', hover: 'rgba(245, 158, 11, 0.30)', thumbTypes: ['header', 'hero', 'survey', 'cta'] },
-  { icon: '🗺️', label: '매장 안내',  hint: '지도 + 매장 위치',            gradient: 'linear-gradient(135deg, rgba(16, 185, 129, 0.25), rgba(20, 184, 166, 0.15))', border: 'rgba(16, 185, 129, 0.4)', hover: 'rgba(16, 185, 129, 0.30)', thumbTypes: ['header', 'hero', 'store_info', 'sns'] },
-  { icon: '📝', label: '설문 + 보상', hint: '설문 + 즉시 쿠폰 발급',       gradient: 'linear-gradient(135deg, rgba(14, 165, 233, 0.25), rgba(6, 182, 212, 0.15))',  border: 'rgba(14, 165, 233, 0.4)', hover: 'rgba(14, 165, 233, 0.30)', thumbTypes: ['header', 'survey', 'coupon', 'cta'] },
-  { icon: '✉️', label: '신규 환영',  hint: '이메일 수집 + 쿠폰',          gradient: 'linear-gradient(135deg, rgba(217, 70, 239, 0.25), rgba(236, 72, 153, 0.15))', border: 'rgba(217, 70, 239, 0.4)', hover: 'rgba(217, 70, 239, 0.30)', thumbTypes: ['header', 'hero', 'email_capture', 'coupon'] },
-  { icon: '🎡', label: '룰렛 이벤트', hint: '8개 칸 회전 + 자동 당첨',     gradient: 'linear-gradient(135deg, rgba(99, 102, 241, 0.25), rgba(139, 92, 246, 0.15))',  border: 'rgba(99, 102, 241, 0.4)', hover: 'rgba(99, 102, 241, 0.30)', thumbTypes: ['header', 'hero', 'roulette', 'cta'] },
+// 빠른 시작 7 시나리오 — key = QuickStartThumbnail 시나리오 일러스트 매핑 (label은 backend scenario 전달용)
+const QUICK_STARTS: Array<{ key: 'cart' | 'sale' | 'draw' | 'store' | 'survey' | 'welcome' | 'roulette'; icon: string; label: string; hint: string; gradient: string; border: string; hover: string }> = [
+  { key: 'cart',     icon: '🛍️', label: '신상품 출시', hint: '상품 슬라이드 + 구매 유도',  gradient: 'linear-gradient(135deg, rgba(139, 92, 246, 0.25), rgba(168, 85, 247, 0.15))', border: 'rgba(168, 85, 247, 0.4)',  hover: 'rgba(168, 85, 247, 0.30)' },
+  { key: 'sale',     icon: '🏷️', label: '시즌 세일',  hint: '카운트다운 + 쿠폰 + CTA',     gradient: 'linear-gradient(135deg, rgba(244, 63, 94, 0.25), rgba(239, 68, 68, 0.15))',  border: 'rgba(244, 63, 94, 0.4)',  hover: 'rgba(244, 63, 94, 0.30)' },
+  { key: 'draw',     icon: '🎁', label: '추첨 이벤트', hint: '응모 form + 자동 추첨',       gradient: 'linear-gradient(135deg, rgba(245, 158, 11, 0.25), rgba(249, 115, 22, 0.15))', border: 'rgba(245, 158, 11, 0.4)', hover: 'rgba(245, 158, 11, 0.30)' },
+  { key: 'store',    icon: '🗺️', label: '매장 안내',  hint: '지도 + 매장 위치',            gradient: 'linear-gradient(135deg, rgba(16, 185, 129, 0.25), rgba(20, 184, 166, 0.15))', border: 'rgba(16, 185, 129, 0.4)', hover: 'rgba(16, 185, 129, 0.30)' },
+  { key: 'survey',   icon: '📝', label: '설문 + 보상', hint: '설문 + 즉시 쿠폰 발급',       gradient: 'linear-gradient(135deg, rgba(14, 165, 233, 0.25), rgba(6, 182, 212, 0.15))',  border: 'rgba(14, 165, 233, 0.4)', hover: 'rgba(14, 165, 233, 0.30)' },
+  { key: 'welcome',  icon: '✉️', label: '신규 환영',  hint: '이메일 수집 + 쿠폰',          gradient: 'linear-gradient(135deg, rgba(217, 70, 239, 0.25), rgba(236, 72, 153, 0.15))', border: 'rgba(217, 70, 239, 0.4)', hover: 'rgba(217, 70, 239, 0.30)' },
+  { key: 'roulette', icon: '🎡', label: '룰렛 이벤트', hint: '8개 칸 회전 + 자동 당첨',     gradient: 'linear-gradient(135deg, rgba(99, 102, 241, 0.25), rgba(139, 92, 246, 0.15))',  border: 'rgba(99, 102, 241, 0.4)', hover: 'rgba(99, 102, 241, 0.30)' },
 ];
-
-// 섹션 타입 → 폰목업 블록 색·높이 (도식 미리보기)
-const SECTION_THUMB: Record<string, { color: string; h: number }> = {
-  header: { color: '#c4b5fd', h: 8 }, hero: { color: '#a855f7', h: 26 },
-  product_carousel: { color: '#60a5fa', h: 22 }, gallery: { color: '#60a5fa', h: 22 }, slideshow: { color: '#60a5fa', h: 22 },
-  video: { color: '#6366f1', h: 20 }, text_card: { color: '#cbd5e1', h: 16 },
-  coupon: { color: '#f59e0b', h: 12 }, promo_code: { color: '#f59e0b', h: 12 }, countdown: { color: '#f43f5e', h: 10 },
-  cta: { color: '#8b5cf6', h: 11 }, poll: { color: '#10b981', h: 18 }, survey: { color: '#10b981', h: 18 },
-  email_capture: { color: '#10b981', h: 16 }, lucky_draw: { color: '#22c55e', h: 20 }, roulette: { color: '#22c55e', h: 22 },
-  store_info: { color: '#14b8a6', h: 14 }, sns: { color: '#ec4899', h: 8 }, footer: { color: '#94a3b8', h: 6 },
-};
-
-// 폰목업 썸네일 — 섹션 타입을 색 블록 스택으로 도식화. types 없으면 legacy pageCount 만큼 generic 블록
-function DmThumbnail({ types, accent, pageCount }: { types?: string[]; accent?: string | null; pageCount?: number }) {
-  let blocks: Array<{ color: string; h: number }>;
-  if (types && types.length > 0) {
-    blocks = types.map((t) => {
-      const v = SECTION_THUMB[t] || { color: '#cbd5e1', h: 12 };
-      return (t === 'hero' || t === 'cta') && accent ? { color: accent, h: v.h } : v;
-    });
-  } else {
-    const n = Math.min(Math.max(pageCount || 1, 1), 4);
-    blocks = Array.from({ length: n }, (_, i) => ({ color: i === 0 ? (accent || '#a855f7') : '#cbd5e1', h: i === 0 ? 24 : 12 }));
-  }
-  return (
-    <div style={{ display: 'flex', justifyContent: 'center' }}>
-      <div style={{ width: 92, borderRadius: 14, border: '1px solid rgba(255,255,255,0.14)', background: '#f5f3ff', padding: 7, boxShadow: '0 4px 12px rgba(0,0,0,0.25)' }}>
-        <div style={{ width: 26, height: 4, borderRadius: 3, background: '#cbd5e1', margin: '0 auto 6px' }} />
-        <div style={{ height: 150, overflow: 'hidden', display: 'flex', flexDirection: 'column', gap: 3 }}>
-          {blocks.map((b, i) => (
-            <div key={i} style={{ height: b.h, borderRadius: 3, background: b.color, opacity: 0.92, flexShrink: 0 }} />
-          ))}
-        </div>
-      </div>
-    </div>
-  );
-}
 
 export default function DmBuilderPage() {
   const navigate = useNavigate();
@@ -690,7 +654,7 @@ export default function DmBuilderPage() {
                     e.currentTarget.style.borderColor = s.border;
                   }}
                 >
-                  <div style={{ marginBottom: 8 }}><DmThumbnail types={s.thumbTypes} /></div>
+                  <div style={{ marginBottom: 8 }}><QuickStartThumbnail scenarioKey={s.key} /></div>
                   <div style={{ fontSize: 18, marginBottom: 2 }}>{s.icon}</div>
                   <div style={{ fontSize: 13, fontWeight: 700, color: '#fff', marginBottom: 4 }}>{s.label}</div>
                   <div style={{ fontSize: 10, color: 'rgba(255,255,255,0.6)', lineHeight: 1.4 }}>{s.hint}</div>
