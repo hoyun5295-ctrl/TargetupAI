@@ -64,6 +64,7 @@ export const SECTION_TYPES: readonly SectionType[] = [
 
 export type HeaderProps = {
   variant: 'logo' | 'banner' | 'countdown' | 'coupon';
+  align?: 'left' | 'center'; // logo형 정렬(기본 center)
   logo_url?: string;
   brand_name?: string;
   phone?: string;
@@ -281,6 +282,13 @@ export type LuckyDrawFormField = {
   required: boolean;
 };
 
+/** 추첨 경품 등급 (A editor 설정 → 발행 시 dm_prizes win_method='random' 동기화) */
+export type LuckyDrawPrize = {
+  rank: number;
+  name: string;
+  count: number;
+};
+
 export type LuckyDrawProps = {
   title: string;
   description?: string;
@@ -288,6 +296,7 @@ export type LuckyDrawProps = {
   draw_at: string;
   result_announce_url?: string;
   consent_text: string;
+  prizes?: LuckyDrawPrize[];
 };
 
 export type RouletteSegment = {
@@ -295,6 +304,7 @@ export type RouletteSegment = {
   label: string;
   probability: number;
   reward_description?: string;
+  prize_count?: number; // 재고(>0=경품, 0/없음=꽝). 발행 시 dm_prizes win_method='roulette' 동기화
 };
 
 export type RouletteProps = {

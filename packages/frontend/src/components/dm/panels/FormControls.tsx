@@ -187,7 +187,57 @@ export function DateTimePicker({ value, onChange }: { value: string | undefined;
   );
 }
 
-// ────────────── ImageUploader (DM 이미지 업로드) ──────────────
+// ────────────── 이미지 리사이즈 + 업로드 공용 ──────────────
+
+/** 업로드 전 브라우저 canvas로 자동 축소(최대 1080px, JPEG 0.85). 작은 파일은 원본 유지, PNG/WebP는 포맷 보존. */
+async function resizeForUpload(file: File, maxDim = 1080, quality = 0.85): Promise<Blob> {
+  if (!file.type.startsWith('image/') || file.type === 'image/gif') return file;
+  try {
+    const dataUrl: string = await new Promise((resolve, reject) => {
+      const fr = new FileReader();
+      fr.onload = () => resolve(fr.result as string);
+      fr.onerror = () => reject(new Error('read'));
+      fr.readAsDataURL(file);
+    });
+    const img: HTMLImageElement = await new Promise((resolve, reject) => {
+      const i = new Image();
+      i.onload = () => resolve(i);
+      i.onerror = () => reject(new Error('img'));
+      i.src = dataUrl;
+    });
+    const big = Math.max(img.width, img.height);
+    if (big <= maxDim && file.size < 1.5 * 1024 * 1024) return file;
+    const scale = Math.min(1, maxDim / big);
+    const w = Math.round(img.width * scale);
+    const h = Math.round(img.height * scale);
+    const canvas = document.createElement('canvas');
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return file;
+    ctx.drawImage(img, 0, 0, w, h);
+    const outType = file.type === 'image/png' ? 'image/png' : file.type === 'image/webp' ? 'image/webp' : 'image/jpeg';
+    const blob: Blob | null = await new Promise((resolve) => canvas.toBlob(resolve, outType, outType === 'image/png' ? undefined : quality));
+    return blob || file;
+  } catch {
+    return file;
+  }
+}
+
+const blobExt = (b: Blob): string => (b.type === 'image/png' ? 'png' : b.type === 'image/webp' ? 'webp' : 'jpg');
+
+/** 단일 파일 리사이즈 후 업로드 → url */
+async function uploadOne(file: File): Promise<string> {
+  const blob = await resizeForUpload(file);
+  const fd = new FormData();
+  fd.append('images', blob, `image.${blobExt(blob)}`);
+  const res = await api.post('/dm/upload-image', fd, { headers: { 'Content-Type': 'multipart/form-data' } });
+  const url = res.data?.images?.[0]?.url;
+  if (!url) throw new Error('업로드 실패 (응답 형식 오류)');
+  return url;
+}
+
+// ────────────── ImageUploader (단일) ──────────────
 
 export function ImageUploader({
   value, onChange, label = '이미지',
@@ -204,14 +254,9 @@ export function ImageUploader({
     setUploading(true);
     setErr(null);
     try {
-      const fd = new FormData();
-      fd.append('images', file);
-      const res = await api.post('/dm/upload-image', fd, { headers: { 'Content-Type': 'multipart/form-data' } });
-      const url = res.data?.images?.[0]?.url || '';
-      if (url) onChange(url);
-      else setErr('업로드 실패 (응답 형식 오류)');
+      onChange(await uploadOne(file));
     } catch (e: any) {
-      setErr(e?.response?.data?.error || '업로드 실패');
+      setErr(e?.response?.data?.error || e?.message || '업로드 실패');
     } finally {
       setUploading(false);
     }
@@ -256,6 +301,68 @@ export function ImageUploader({
         onChange={(e: ChangeEvent<HTMLInputElement>) => {
           const f = e.target.files?.[0];
           if (f) handleFile(f);
+          e.target.value = '';
+        }}
+      />
+      {err && <div style={{ fontSize: 10, color: 'var(--dm-error)', marginTop: 3 }}>{err}</div>}
+    </div>
+  );
+}
+
+// ────────────── MultiImageUploader (여러 장 일괄) ──────────────
+
+export function MultiImageUploader({
+  onAdd, label = '이미지', max = 20,
+}: {
+  onAdd: (urls: string[]) => void;
+  label?: string;
+  max?: number;
+}) {
+  const ref = useRef<HTMLInputElement>(null);
+  const [uploading, setUploading] = useState(false);
+  const [progress, setProgress] = useState('');
+  const [err, setErr] = useState<string | null>(null);
+
+  const handleFiles = async (files: FileList) => {
+    const arr = Array.from(files).slice(0, max);
+    setUploading(true);
+    setErr(null);
+    const urls: string[] = [];
+    try {
+      for (let i = 0; i < arr.length; i++) {
+        setProgress(`${i + 1}/${arr.length}장 업로드 중...`);
+        try { urls.push(await uploadOne(arr[i])); } catch { /* 개별 실패는 건너뜀 */ }
+      }
+      if (urls.length > 0) onAdd(urls);
+      if (urls.length < arr.length) setErr(`${arr.length - urls.length}장 업로드 실패`);
+    } finally {
+      setUploading(false);
+      setProgress('');
+    }
+  };
+
+  return (
+    <div style={{ marginBottom: 8 }}>
+      <button
+        type="button"
+        onClick={() => ref.current?.click()}
+        disabled={uploading}
+        style={{
+          width: '100%', padding: 8, border: '1px dashed var(--dm-primary)', borderRadius: 6,
+          background: 'var(--dm-bg)', color: 'var(--dm-primary)', fontSize: 12, fontWeight: 600, cursor: uploading ? 'wait' : 'pointer',
+        }}
+      >
+        {uploading ? (progress || '업로드 중...') : `+ ${label} 여러 장 한번에`}
+      </button>
+      <input
+        ref={ref}
+        type="file"
+        accept="image/*"
+        multiple
+        style={{ display: 'none' }}
+        onChange={(e: ChangeEvent<HTMLInputElement>) => {
+          const fs = e.target.files;
+          if (fs && fs.length) handleFiles(fs);
           e.target.value = '';
         }}
       />

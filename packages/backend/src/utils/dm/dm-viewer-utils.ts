@@ -34,6 +34,18 @@ export function inlineImage(src: string): string {
 }
 
 /**
+ * 저장된 이미지 src를 공개 뷰어 경로(/api/dm/v/images/:companyId/:filename)로 정규화.
+ * 뷰어와 동일 dmPublicRouter가 서빙 → 뷰어가 뜬 도메인에서 항상 도달. base64보다 HTML 경량.
+ * 외부 URL/data URL은 그대로. (base64 인라인이 필요하면 inlineImage 사용 — fallback)
+ */
+export function publicImageUrl(src: string): string {
+  if (!src || src.startsWith('data:') || src.startsWith('http')) return src;
+  const m = src.match(/\/(?:api\/dm\/images|api\/flyer\/p\/dm-images|api\/dm\/v\/images)\/([^/]+)\/([^/]+)$/);
+  if (!m) return src;
+  return `/api/dm/v/images/${m[1]}/${m[2]}`;
+}
+
+/**
  * YouTube 워치 URL / 짧은 URL / 이미 embed URL → embed URL로 정규화.
  * 변환 불가능하면 null.
  */

@@ -56,8 +56,8 @@ type DmListItem = {
   updated_at?: string;
 };
 
-// 빠른 시작 7 시나리오 — key = QuickStartThumbnail 시나리오 일러스트 매핑 (label은 backend scenario 전달용)
-const QUICK_STARTS: Array<{ key: 'cart' | 'sale' | 'draw' | 'store' | 'survey' | 'welcome' | 'roulette'; icon: string; label: string; hint: string; gradient: string; border: string; hover: string }> = [
+// 빠른 시작 12 시나리오 — key = QuickStartThumbnail 시나리오 일러스트 매핑 (label은 backend scenario 전달용)
+const QUICK_STARTS: Array<{ key: 'cart' | 'sale' | 'draw' | 'store' | 'survey' | 'welcome' | 'roulette' | 'lookbook' | 'reviews' | 'flashsale' | 'poll' | 'vip'; icon: string; label: string; hint: string; gradient: string; border: string; hover: string }> = [
   { key: 'cart',     icon: '🛍️', label: '신상품 출시', hint: '상품 슬라이드 + 구매 유도',  gradient: 'linear-gradient(135deg, rgba(139, 92, 246, 0.25), rgba(168, 85, 247, 0.15))', border: 'rgba(168, 85, 247, 0.4)',  hover: 'rgba(168, 85, 247, 0.30)' },
   { key: 'sale',     icon: '🏷️', label: '시즌 세일',  hint: '카운트다운 + 쿠폰 + CTA',     gradient: 'linear-gradient(135deg, rgba(244, 63, 94, 0.25), rgba(239, 68, 68, 0.15))',  border: 'rgba(244, 63, 94, 0.4)',  hover: 'rgba(244, 63, 94, 0.30)' },
   { key: 'draw',     icon: '🎁', label: '추첨 이벤트', hint: '응모 form + 자동 추첨',       gradient: 'linear-gradient(135deg, rgba(245, 158, 11, 0.25), rgba(249, 115, 22, 0.15))', border: 'rgba(245, 158, 11, 0.4)', hover: 'rgba(245, 158, 11, 0.30)' },
@@ -65,6 +65,11 @@ const QUICK_STARTS: Array<{ key: 'cart' | 'sale' | 'draw' | 'store' | 'survey' |
   { key: 'survey',   icon: '📝', label: '설문 + 보상', hint: '설문 + 즉시 쿠폰 발급',       gradient: 'linear-gradient(135deg, rgba(14, 165, 233, 0.25), rgba(6, 182, 212, 0.15))',  border: 'rgba(14, 165, 233, 0.4)', hover: 'rgba(14, 165, 233, 0.30)' },
   { key: 'welcome',  icon: '✉️', label: '신규 환영',  hint: '이메일 수집 + 쿠폰',          gradient: 'linear-gradient(135deg, rgba(217, 70, 239, 0.25), rgba(236, 72, 153, 0.15))', border: 'rgba(217, 70, 239, 0.4)', hover: 'rgba(217, 70, 239, 0.30)' },
   { key: 'roulette', icon: '🎡', label: '룰렛 이벤트', hint: '8개 칸 회전 + 자동 당첨',     gradient: 'linear-gradient(135deg, rgba(99, 102, 241, 0.25), rgba(139, 92, 246, 0.15))',  border: 'rgba(99, 102, 241, 0.4)', hover: 'rgba(99, 102, 241, 0.30)' },
+  { key: 'lookbook',  icon: '🖼️', label: '갤러리 룩북',   hint: '화보 갤러리 + 상품',     gradient: 'linear-gradient(135deg, rgba(236, 72, 153, 0.25), rgba(168, 85, 247, 0.15))', border: 'rgba(236, 72, 153, 0.4)', hover: 'rgba(236, 72, 153, 0.30)' },
+  { key: 'reviews',   icon: '⭐', label: '리뷰 모음',     hint: '고객 후기 + 전환',       gradient: 'linear-gradient(135deg, rgba(245, 158, 11, 0.25), rgba(234, 179, 8, 0.15))',  border: 'rgba(245, 158, 11, 0.4)', hover: 'rgba(245, 158, 11, 0.30)' },
+  { key: 'flashsale', icon: '⏳', label: '선착순 한정특가', hint: '잔여 수량 + 카운트다운',  gradient: 'linear-gradient(135deg, rgba(239, 68, 68, 0.25), rgba(249, 115, 22, 0.15))',  border: 'rgba(239, 68, 68, 0.4)',  hover: 'rgba(239, 68, 68, 0.30)' },
+  { key: 'poll',      icon: '📊', label: '실시간 투표',   hint: '투표 + 실시간 결과',      gradient: 'linear-gradient(135deg, rgba(6, 182, 212, 0.25), rgba(59, 130, 246, 0.15))',  border: 'rgba(6, 182, 212, 0.4)',  hover: 'rgba(6, 182, 212, 0.30)' },
+  { key: 'vip',       icon: '👑', label: 'VIP 초대',     hint: '프로모션 코드 + 고급 톤',  gradient: 'linear-gradient(135deg, rgba(99, 102, 241, 0.25), rgba(129, 140, 248, 0.15))', border: 'rgba(99, 102, 241, 0.4)', hover: 'rgba(99, 102, 241, 0.30)' },
 ];
 
 export default function DmBuilderPage() {

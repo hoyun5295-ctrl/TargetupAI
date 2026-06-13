@@ -18,7 +18,7 @@
  */
 import type { Section, SectionType, HeaderProps, HeroProps, CouponProps, CountdownProps, TextCardProps, CtaProps, VideoProps, StoreInfoProps, SnsProps, PromoCodeProps, FooterProps } from './dm-section-registry';
 import type { DmBrandKit } from './dm-tokens';
-import { inlineImage, youtubeEmbedUrl } from './dm-viewer-utils';
+import { publicImageUrl, youtubeEmbedUrl } from './dm-viewer-utils';
 
 // ────────────── 렌더 컨텍스트 ──────────────
 
@@ -59,7 +59,7 @@ function renderHeader(props: HeaderProps, ctx: SectionRenderContext): string {
 
   switch (variant) {
     case 'banner': {
-      const img = props.banner_image_url ? inlineImage(props.banner_image_url) : '';
+      const img = props.banner_image_url ? publicImageUrl(props.banner_image_url) : '';
       return `<div class="dm-header dm-header-banner" data-variant="${escapeHtml(variant)}">
         ${img ? `<img src="${escapeHtml(img)}" alt="${brand}" style="width:100%;display:block">` : ''}
       </div>`;
@@ -82,12 +82,20 @@ function renderHeader(props: HeaderProps, ctx: SectionRenderContext): string {
       </div>`;
     }
     default: {
-      const logo = props.logo_url ? inlineImage(props.logo_url) : '';
-      return `<div class="dm-header dm-header-logo" data-variant="${escapeHtml(variant)}" style="background:var(--dm-bg);padding:var(--dm-sp-4) var(--dm-sp-5);border-bottom:1px solid var(--dm-neutral-200);display:flex;align-items:center;justify-content:space-between">
-        <div style="display:flex;align-items:center;gap:var(--dm-sp-2)">
+      const logo = props.logo_url ? publicImageUrl(props.logo_url) : '';
+      const align = props.align || 'center';
+      const logoBrand = `<div style="display:flex;align-items:center;gap:var(--dm-sp-2)">
           ${logo ? `<img src="${escapeHtml(logo)}" alt="${brand}" style="height:32px;border-radius:var(--dm-radius-sm)">` : ''}
           ${brand ? `<div style="font-size:var(--dm-fs-h3);font-weight:700;color:var(--dm-neutral-900)">${brand}</div>` : ''}
-        </div>
+        </div>`;
+      if (align === 'center') {
+        return `<div class="dm-header dm-header-logo" data-variant="${escapeHtml(variant)}" style="background:var(--dm-bg);padding:var(--dm-sp-4) var(--dm-sp-5);border-bottom:1px solid var(--dm-neutral-200);display:flex;flex-direction:column;align-items:center;gap:var(--dm-sp-1);text-align:center">
+        ${logoBrand}
+        ${props.phone ? `<a href="tel:${escapeHtml(props.phone)}" style="font-size:var(--dm-fs-tiny);color:var(--dm-neutral-500)">${escapeHtml(props.phone)}</a>` : ''}
+      </div>`;
+      }
+      return `<div class="dm-header dm-header-logo" data-variant="${escapeHtml(variant)}" style="background:var(--dm-bg);padding:var(--dm-sp-4) var(--dm-sp-5);border-bottom:1px solid var(--dm-neutral-200);display:flex;align-items:center;justify-content:space-between">
+        ${logoBrand}
         ${props.phone ? `<a href="tel:${escapeHtml(props.phone)}" style="font-size:var(--dm-fs-small);color:var(--dm-neutral-500)">${escapeHtml(props.phone)}</a>` : ''}
       </div>`;
     }
@@ -95,7 +103,7 @@ function renderHeader(props: HeaderProps, ctx: SectionRenderContext): string {
 }
 
 function renderHero(props: HeroProps): string {
-  const img = props.image_url ? inlineImage(props.image_url) : '';
+  const img = props.image_url ? publicImageUrl(props.image_url) : '';
   const heightPx = { sm: '200px', md: '320px', lg: '480px', full: '100vh' }[props.height || 'md'];
   const align = props.align || 'center';
   const textAlign = align === 'left' ? 'flex-start' : align === 'right' ? 'flex-end' : 'center';
@@ -144,7 +152,7 @@ function renderCountdown(props: CountdownProps): string {
 }
 
 function renderTextCard(props: TextCardProps): string {
-  const img = props.image_url ? inlineImage(props.image_url) : '';
+  const img = props.image_url ? publicImageUrl(props.image_url) : '';
   const pos = props.image_position || 'top';
   const align = props.align || 'left';
   const isHoriz = pos === 'left' || pos === 'right';
@@ -187,7 +195,7 @@ function renderCta(props: CtaProps): string {
 
 function renderVideo(props: VideoProps): string {
   const embedUrl = props.video_type === 'youtube' ? youtubeEmbedUrl(props.video_url) : null;
-  const thumb = props.thumbnail_url ? inlineImage(props.thumbnail_url) : '';
+  const thumb = props.thumbnail_url ? publicImageUrl(props.thumbnail_url) : '';
 
   const media = embedUrl
     ? `<div style="position:relative;padding-bottom:56.25%;height:0;overflow:hidden">
@@ -326,7 +334,7 @@ function renderProductCarousel(p: any): string {
   }
   const items = products.map((it: any) => `
     <div style="min-width:140px;max-width:160px">
-      ${it.image_url ? `<img src="${escapeHtml(it.image_url)}" alt="${escapeHtml(it.name || '')}" style="width:100%;height:140px;object-fit:cover;border-radius:8px"/>` : `<div style="width:100%;height:140px;background:var(--dm-neutral-100);border-radius:8px"></div>`}
+      ${it.image_url ? `<img src="${escapeHtml(publicImageUrl(it.image_url))}" loading="lazy" alt="${escapeHtml(it.name || '')}" style="width:100%;height:140px;object-fit:cover;border-radius:8px"/>` : `<div style="width:100%;height:140px;background:var(--dm-neutral-100);border-radius:8px"></div>`}
       <div style="font-size:12px;font-weight:600;margin-top:6px">${escapeHtml(it.name || '')}</div>
       <div style="font-size:13px;font-weight:700;margin-top:2px">${Number(it.discount_price || it.price || 0).toLocaleString('ko-KR')}원</div>
     </div>`).join('');
@@ -342,7 +350,7 @@ function renderGallery(p: any): string {
     return `<div class="dm-section dm-gallery" style="padding:var(--dm-sp-4);text-align:center;color:var(--dm-neutral-400);font-style:italic">[이미지를 추가해주세요]</div>`;
   }
   const cols = p?.layout === 'grid_3x3' ? 3 : p?.layout === 'list_1xN' ? 1 : 2;
-  const items = images.map((img: any) => `<img src="${escapeHtml(img.url)}" alt="${escapeHtml(img.caption || '')}" style="width:100%;aspect-ratio:1;object-fit:cover;border-radius:6px"/>`).join('');
+  const items = images.map((img: any) => `<img src="${escapeHtml(publicImageUrl(img.url))}" loading="lazy" alt="${escapeHtml(img.caption || '')}" style="width:100%;aspect-ratio:1;object-fit:cover;border-radius:6px"/>`).join('');
   return `<div class="dm-section dm-gallery" style="padding:var(--dm-sp-4)">
     ${p.title ? `<div style="font-size:15px;font-weight:700;margin-bottom:8px">${escapeHtml(p.title)}</div>` : ''}
     <div style="display:grid;grid-template-columns:repeat(${cols},1fr);gap:6px">${items}</div>
@@ -356,7 +364,7 @@ function renderSlideshow(p: any): string {
   }
   const first = slides[0];
   return `<div class="dm-section dm-slideshow" style="padding:var(--dm-sp-4)">
-    <img src="${escapeHtml(first.image_url || '')}" alt="${escapeHtml(first.caption || '')}" style="width:100%;aspect-ratio:16/9;object-fit:cover;border-radius:8px"/>
+    <img src="${escapeHtml(publicImageUrl(first.image_url || ''))}" loading="lazy" alt="${escapeHtml(first.caption || '')}" style="width:100%;aspect-ratio:16/9;object-fit:cover;border-radius:8px"/>
     ${first.caption ? `<div style="font-size:13px;margin-top:8px">${escapeHtml(first.caption)}</div>` : ''}
   </div>`;
 }
@@ -375,11 +383,12 @@ function renderTabCards(p: any): string {
 
 function renderPoll(p: any): string {
   const options = Array.isArray(p?.options) ? p.options : [];
-  const items = options.map((o: any) => `<div style="padding:10px 14px;background:var(--dm-neutral-50);border:1px solid var(--dm-neutral-200);border-radius:8px;font-size:13px;margin-bottom:8px">${escapeHtml(o.label || '')}</div>`).join('');
-  return `<div class="dm-section dm-poll" style="padding:var(--dm-sp-4)">
+  const items = options.map((o: any, i: number) => `<div data-dm-poll-option data-option-id="${escapeHtml(o.id || String(i))}" style="padding:10px 14px;background:var(--dm-neutral-50);border:1px solid var(--dm-neutral-200);border-radius:8px;font-size:13px;margin-bottom:8px;cursor:pointer">${escapeHtml(o.label || '')}</div>`).join('');
+  return `<div class="dm-section dm-poll" data-dm-poll style="padding:var(--dm-sp-4)">
     <div style="font-size:15px;font-weight:700;margin-bottom:8px">${escapeHtml(p.question || '[질문을 작성해주세요]')}</div>
     ${items}
     ${p.one_vote_per_user ? `<div style="font-size:11px;color:var(--dm-neutral-500);margin-top:8px">1인 1회 투표</div>` : ''}
+    <div data-dm-result style="display:none"></div>
   </div>`;
 }
 
@@ -397,13 +406,14 @@ function renderSurvey(p: any): string {
 }
 
 function renderEmailCapture(p: any): string {
-  return `<div class="dm-section dm-email-capture" style="padding:var(--dm-sp-4)">
+  return `<div class="dm-section dm-email-capture" data-dm-form style="padding:var(--dm-sp-4)">
     <div style="font-size:15px;font-weight:700;margin-bottom:8px">${escapeHtml(p.headline || '[헤드라인을 작성해주세요]')}</div>
     ${p.description ? `<div style="font-size:13px;color:var(--dm-neutral-700);margin-bottom:12px;line-height:1.6">${escapeHtml(p.description)}</div>` : ''}
-    <input type="email" placeholder="이메일 주소" style="width:100%;padding:10px;border:1px solid var(--dm-neutral-200);border-radius:6px;font-size:13px;margin-bottom:10px"/>
-    <label style="display:flex;align-items:flex-start;gap:6px;font-size:12px;color:var(--dm-neutral-700);margin-bottom:10px"><input type="checkbox" style="margin-top:2px"/><span>${escapeHtml(p.consent_text || '')}</span></label>
-    <button style="width:100%;height:40px;background:var(--dm-primary);color:#fff;border:none;border-radius:6px;font-size:13px;font-weight:700">${escapeHtml(p.reward_description ? `참여하고 ${p.reward_description}` : '참여하기')}</button>
+    <input type="email" data-field="email" placeholder="이메일 주소" style="width:100%;padding:10px;border:1px solid var(--dm-neutral-200);border-radius:6px;font-size:13px;margin-bottom:10px"/>
+    <label style="display:flex;align-items:flex-start;gap:6px;font-size:12px;color:var(--dm-neutral-700);margin-bottom:10px"><input type="checkbox" ${p.consent_required ? 'data-consent' : ''} style="margin-top:2px"/><span>${escapeHtml(p.consent_text || '')}</span></label>
+    <button data-dm-submit style="width:100%;height:40px;background:var(--dm-primary);color:#fff;border:none;border-radius:6px;font-size:13px;font-weight:700;cursor:pointer">${escapeHtml(p.reward_description ? `참여하고 ${p.reward_description}` : '참여하기')}</button>
     ${p.legal_notice ? `<div style="font-size:10px;color:var(--dm-neutral-500);margin-top:8px;line-height:1.5">${escapeHtml(p.legal_notice)}</div>` : ''}
+    <div data-dm-result style="display:none"></div>
   </div>`;
 }
 
@@ -422,25 +432,32 @@ function renderClickRewards(p: any): string {
 
 function renderLuckyDraw(p: any): string {
   const fields = Array.isArray(p?.form_fields) ? p.form_fields : [];
-  const inputs = fields.map((f: any) => `<input placeholder="${f.name === 'name' ? '이름' : f.name === 'phone' ? '전화번호' : '이메일'}" style="padding:10px;border:1px solid #f59e0b;border-radius:6px;font-size:13px;background:#fff;margin-bottom:8px;display:block;width:100%"/>`).join('');
-  return `<div class="dm-section dm-lucky-draw" style="padding:var(--dm-sp-4);background:linear-gradient(135deg,#fef3c7,#fde68a);border:1px solid #f59e0b;border-radius:12px;margin:var(--dm-sp-3) 0">
+  const inputs = fields.map((f: any) => {
+    const t = f.name === 'phone' ? 'tel' : f.name === 'email' ? 'email' : 'text';
+    const ph = f.name === 'name' ? '이름' : f.name === 'phone' ? '전화번호' : '이메일';
+    return `<input type="${t}" data-field="${escapeHtml(f.name)}" placeholder="${ph}" style="padding:10px;border:1px solid #f59e0b;border-radius:6px;font-size:13px;background:#fff;margin-bottom:8px;display:block;width:100%"/>`;
+  }).join('');
+  return `<div class="dm-section dm-lucky-draw" data-dm-form style="padding:var(--dm-sp-4);background:linear-gradient(135deg,#fef3c7,#fde68a);border:1px solid #f59e0b;border-radius:12px;margin:var(--dm-sp-3) 0">
     <div style="font-size:28px;margin-bottom:8px">🎁</div>
     <div style="font-size:15px;font-weight:700;margin-bottom:8px">${escapeHtml(p.title || '[추첨 이벤트 제목]')}</div>
     ${p.description ? `<div style="font-size:13px;color:var(--dm-neutral-700);margin-bottom:12px;line-height:1.6">${escapeHtml(p.description)}</div>` : ''}
     ${inputs}
-    <label style="display:flex;align-items:flex-start;gap:6px;font-size:11px;color:var(--dm-neutral-700);margin-bottom:10px"><input type="checkbox" style="margin-top:2px"/><span>${escapeHtml(p.consent_text || '')}</span></label>
-    <button style="width:100%;height:44px;background:#d97706;color:#fff;border:none;border-radius:8px;font-size:14px;font-weight:700">응모하기</button>
+    <label style="display:flex;align-items:flex-start;gap:6px;font-size:11px;color:var(--dm-neutral-700);margin-bottom:10px"><input type="checkbox" data-consent style="margin-top:2px"/><span>${escapeHtml(p.consent_text || '')}</span></label>
+    <button data-dm-submit style="width:100%;height:44px;background:#d97706;color:#fff;border:none;border-radius:8px;font-size:14px;font-weight:700;cursor:pointer">응모하기</button>
     ${p.draw_at ? `<div style="font-size:11px;color:var(--dm-neutral-600);margin-top:8px;text-align:center">발표: ${escapeHtml(new Date(p.draw_at).toLocaleString('ko-KR'))}</div>` : ''}
+    <div data-dm-result style="display:none"></div>
   </div>`;
 }
 
 function renderRoulette(p: any): string {
-  return `<div class="dm-section dm-roulette" style="padding:var(--dm-sp-4);background:linear-gradient(135deg,#ede9fe,#ddd6fe);border:1px solid #7c3aed;border-radius:12px;margin:var(--dm-sp-3) 0;text-align:center">
+  const segs = Array.isArray(p?.segments) ? p.segments.map((s: any) => ({ id: String(s.id), label: String(s.label || '') })) : [];
+  return `<div class="dm-section dm-roulette" data-dm-roulette data-segments="${escapeHtml(JSON.stringify(segs))}" style="padding:var(--dm-sp-4);background:linear-gradient(135deg,#ede9fe,#ddd6fe);border:1px solid #7c3aed;border-radius:12px;margin:var(--dm-sp-3) 0;text-align:center">
     <div style="font-size:28px;margin-bottom:8px">🎡</div>
-    <div style="font-size:15px;font-weight:700;margin-bottom:8px">룰렛 이벤트</div>
-    <div style="width:200px;height:200px;border-radius:50%;background:conic-gradient(#a78bfa 0deg 45deg, #c4b5fd 45deg 90deg, #ddd6fe 90deg 135deg, #ede9fe 135deg 180deg, #a78bfa 180deg 225deg, #c4b5fd 225deg 270deg, #ddd6fe 270deg 315deg, #ede9fe 315deg 360deg);margin:12px auto;border:4px solid #fff"></div>
-    <button style="height:44px;padding:0 32px;background:#7c3aed;color:#fff;border:none;border-radius:8px;font-size:14px;font-weight:700">룰렛 돌리기</button>
+    <div style="font-size:15px;font-weight:700;margin-bottom:8px">${escapeHtml(p.title || '룰렛 이벤트')}</div>
+    <div data-dm-wheel style="width:200px;height:200px;border-radius:50%;background:conic-gradient(#a78bfa 0deg 45deg, #c4b5fd 45deg 90deg, #ddd6fe 90deg 135deg, #ede9fe 135deg 180deg, #a78bfa 180deg 225deg, #c4b5fd 225deg 270deg, #ddd6fe 270deg 315deg, #ede9fe 315deg 360deg);margin:12px auto;border:4px solid #fff"></div>
+    <button data-dm-spin style="height:44px;padding:0 32px;background:#7c3aed;color:#fff;border:none;border-radius:8px;font-size:14px;font-weight:700;cursor:pointer">룰렛 돌리기</button>
     ${p.one_spin_per_user ? `<div style="font-size:11px;color:var(--dm-neutral-600);margin-top:8px">1인 1회 한정</div>` : ''}
+    <div data-dm-result style="display:none"></div>
   </div>`;
 }
 
@@ -541,7 +558,7 @@ export function renderSection(section: Section, ctx: SectionRenderContext): stri
   const variant = section.style_variant || 'default';
   const inner = fn(section.props, ctx);
   if (!inner) return '';
-  return `<div class="dm-section-wrap" data-section-id="${escapeHtml(section.id)}" data-variant="${escapeHtml(variant)}">${inner}</div>`;
+  return `<div class="dm-section-wrap" data-section-id="${escapeHtml(section.id)}" data-section-type="${escapeHtml(section.type)}" data-variant="${escapeHtml(variant)}">${inner}</div>`;
 }
 
 /** 섹션 배열 전체를 세로 스크롤로 렌더링 */

@@ -92,6 +92,8 @@ import { startDirectSendWorker } from './utils/direct-send-worker';
 // ★ 2026-06-11: 취소 잔존 큐 안전망 — 취소됐는데 발송 큐에 남은 행 자동 삭제 (에이치피오 사고 재발 차단)
 import { startCancelledQueueSweeper } from './utils/cancelled-queue-sweeper';
 import { startEmailSendSweeper } from './utils/email-send-sweeper';
+// ★ 2026-06-14: DM 마감 추첨 워커 (1분 주기) — lucky_draw draw_at 도래 시 등급별 랜덤 추첨
+import { startDmDrawWorker } from './utils/dm/dm-draw-worker';
 // ★ 2026-06-10: CDP webhook 실패 재처리 + unified profile 자동 재계산
 import { startCdpWebhookRetryWorker } from './utils/cdp-webhook-retry-worker';
 import { startCdpProfileRecomputeWorker } from './utils/cdp-profile-recompute-worker';
@@ -404,6 +406,9 @@ app.listen(PORT, () => {
 
   // ★ 2026-06-13: 예약 Email 발송 + 정체 캠페인 복구 (1분 주기) — scheduled 도래 발송 + sending 30분+ 정체 failed
   startEmailSendSweeper();
+
+  // ★ 2026-06-14: DM 마감 추첨 (1분 주기) — lucky_draw draw_at 도래 시 응모자 풀 등급별 랜덤 추첨
+  startDmDrawWorker();
 });
 
 export default app;

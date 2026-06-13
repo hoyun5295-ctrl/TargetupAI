@@ -24,6 +24,16 @@ export default function HeaderEditor({ props, onUpdate }: EditorProps<HeaderProp
 
       {(props.variant === 'logo' || !props.variant) && (
         <>
+          <Field label="정렬">
+            <Select
+              value={props.align || 'center'}
+              onChange={(v) => onUpdate({ align: v as HeaderProps['align'] })}
+              options={[
+                { value: 'center', label: '가운데' },
+                { value: 'left', label: '왼쪽 (전화 우측)' },
+              ]}
+            />
+          </Field>
           <Field label="로고 이미지">
             <ImageUploader value={props.logo_url} onChange={(url) => onUpdate({ logo_url: url })} label="로고" />
           </Field>

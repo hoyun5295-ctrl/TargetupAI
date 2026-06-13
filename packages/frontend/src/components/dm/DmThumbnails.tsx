@@ -54,7 +54,7 @@ export function DmThumbnail({ types, accent, pageCount }: { types?: string[]; ac
 }
 
 // ── 빠른 시작 시나리오별 고유 미니 화면 (SVG) ─────────────────────
-type QuickStartKey = 'cart' | 'sale' | 'draw' | 'store' | 'survey' | 'welcome' | 'roulette';
+type QuickStartKey = 'cart' | 'sale' | 'draw' | 'store' | 'survey' | 'welcome' | 'roulette' | 'lookbook' | 'reviews' | 'flashsale' | 'poll' | 'vip';
 
 function ScenarioScreen({ scenarioKey }: { scenarioKey: QuickStartKey }) {
   const common = { width: 78, height: 150, viewBox: '0 0 78 150' } as const;
@@ -177,8 +177,18 @@ function ScenarioScreen({ scenarioKey }: { scenarioKey: QuickStartKey }) {
           <rect x="30" y="115" width="18" height="4" rx="2" fill="#fff" />
         </svg>
       );
-    default:
-      return null;
+    default: // 신규 시나리오 — 섹션 색블록 스택(헤더 + 비주얼 + 본문 + 버튼)
+      return (
+        <svg {...common} xmlns="http://www.w3.org/2000/svg">
+          <rect x="10" y="14" width="58" height="12" rx="3" fill="#a78bfa" />
+          <rect x="10" y="32" width="58" height="34" rx="4" fill="#ddd6fe" />
+          <rect x="10" y="72" width="40" height="5" rx="2.5" fill="#cbd5e1" />
+          <rect x="10" y="82" width="52" height="5" rx="2.5" fill="#e2e8f0" />
+          <rect x="10" y="92" width="46" height="5" rx="2.5" fill="#e2e8f0" />
+          <rect x="14" y="110" width="50" height="15" rx="7.5" fill="#8b5cf6" />
+          <rect x="30" y="115" width="18" height="4" rx="2" fill="#fff" />
+        </svg>
+      );
   }
 }
 

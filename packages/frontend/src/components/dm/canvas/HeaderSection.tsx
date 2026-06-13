@@ -89,22 +89,37 @@ export default function HeaderSection({ props, storeName = '', onEdit }: { props
   }
 
   // variant === 'logo'
+  const align = props.align || 'center';
+  const logoBrand = (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--dm-sp-2)' }}>
+      {props.logo_url && <img src={props.logo_url} alt={brand} style={{ height: 32, borderRadius: 'var(--dm-radius-sm)' }} />}
+      {(brand || editable) && (
+        <InlineEditable
+          style={{ fontSize: 'var(--dm-fs-h3)', fontWeight: 700, color: 'var(--dm-neutral-900)' }}
+          value={brand}
+          placeholder="브랜드명"
+          onChange={(v) => onEdit?.({ brand_name: v } as Partial<HeaderProps>)}
+          disabled={!editable}
+          maxLength={30}
+        />
+      )}
+    </div>
+  );
+  const phoneLink = props.phone ? (
+    <a href={`tel:${props.phone}`} style={{ fontSize: align === 'center' ? 'var(--dm-fs-tiny)' : 'var(--dm-fs-small)', color: 'var(--dm-neutral-500)', textDecoration: 'none' }}>{props.phone}</a>
+  ) : null;
+  if (align === 'center') {
+    return (
+      <div className="dm-header dm-header-logo" style={{ background: 'var(--dm-bg)', padding: 'var(--dm-sp-4) var(--dm-sp-5)', borderBottom: '1px solid var(--dm-neutral-200)', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 'var(--dm-sp-1)', textAlign: 'center' }}>
+        {logoBrand}
+        {phoneLink}
+      </div>
+    );
+  }
   return (
     <div className="dm-header dm-header-logo" style={{ background: 'var(--dm-bg)', padding: 'var(--dm-sp-4) var(--dm-sp-5)', borderBottom: '1px solid var(--dm-neutral-200)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--dm-sp-2)' }}>
-        {props.logo_url && <img src={props.logo_url} alt={brand} style={{ height: 32, borderRadius: 'var(--dm-radius-sm)' }} />}
-        {(brand || editable) && (
-          <InlineEditable
-            style={{ fontSize: 'var(--dm-fs-h3)', fontWeight: 700, color: 'var(--dm-neutral-900)' }}
-            value={brand}
-            placeholder="브랜드명"
-            onChange={(v) => onEdit?.({ brand_name: v } as Partial<HeaderProps>)}
-            disabled={!editable}
-            maxLength={30}
-          />
-        )}
-      </div>
-      {props.phone && <a href={`tel:${props.phone}`} style={{ fontSize: 'var(--dm-fs-small)', color: 'var(--dm-neutral-500)', textDecoration: 'none' }}>{props.phone}</a>}
+      {logoBrand}
+      {phoneLink}
     </div>
   );
 }

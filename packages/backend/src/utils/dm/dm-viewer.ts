@@ -8,7 +8,7 @@
  * 이미지: base64 인라인 (외부 CDN 의존 최소화).
  * 폰트: Pretendard CDN + 시스템 폰트 fallback 체인.
  */
-import { inlineImage, youtubeEmbedUrl } from './dm-viewer-utils';
+import { inlineImage, publicImageUrl, youtubeEmbedUrl } from './dm-viewer-utils';
 import { renderSections, COUNTDOWN_SCRIPT, escapeHtml } from './dm-section-renderer';
 import { renderDmTokensCss, renderDmBaseCss } from './dm-tokens';
 import { resolveSections } from './dm-variable-resolver';
@@ -97,7 +97,7 @@ function renderLegacySlidesHtml(dm: any, trackApiBase: string): string {
   const totalPages = pages.length;
 
   const slidesHtml = pages.sort((a: any, b: any) => (a.order || 0) - (b.order || 0)).map((p: any, i: number) => {
-    const imgSrc = p.imageUrl ? inlineImage(p.imageUrl) : '';
+    const imgSrc = p.imageUrl ? publicImageUrl(p.imageUrl) : '';
     const embedUrl = p.videoUrl ? youtubeEmbedUrl(p.videoUrl) : null;
     const layout = p.layout || 'full-image';
 
@@ -505,6 +505,105 @@ ${counterHtml}
 
   window.addEventListener('beforeunload', function(){ sendTrack(); });
   sendTrack();
+
+  // ── 인터랙션 제출 (B 2026-06-14) — 룰렛 즉시추첨 / 폼 응모 / 투표. native dialog 0 (섹션 내 안내). ──
+  var ANON_KEY = 'dm_anon_' + CODE;
+  var anonId = '';
+  try {
+    anonId = localStorage.getItem(ANON_KEY) || '';
+    if (!anonId) { anonId = 'a' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8); localStorage.setItem(ANON_KEY, anonId); }
+  } catch (e) {}
+
+  function submitInteraction(sectionId, sectionType, data) {
+    return fetch(TRACK_URL + '/' + CODE + '/event-response', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ section_id: sectionId, section_type: sectionType, data: data, anonymous_id: anonId, phone: PHONE })
+    }).then(function (r) { return r.json(); });
+  }
+  function wrapInfo(el) {
+    var w = el.closest ? el.closest('.dm-section-wrap') : null;
+    return w ? { id: w.getAttribute('data-section-id'), type: w.getAttribute('data-section-type') } : null;
+  }
+  function showMsg(box, text, ok) {
+    var r = box.querySelector('[data-dm-result]');
+    if (!r) return;
+    r.style.display = 'block';
+    r.style.marginTop = '10px';
+    r.style.fontSize = '13px';
+    r.style.fontWeight = '700';
+    r.style.textAlign = 'center';
+    r.style.color = ok ? '#059669' : '#dc2626';
+    r.textContent = text;
+  }
+
+  // 룰렛 — 회전 → 서버 당첨 세그먼트로 정지 → 결과
+  Array.prototype.forEach.call(document.querySelectorAll('[data-dm-roulette]'), function (box) {
+    var info = wrapInfo(box);
+    var btn = box.querySelector('[data-dm-spin]');
+    var wheel = box.querySelector('[data-dm-wheel]');
+    if (!info || !btn) return;
+    var segs = [];
+    try { segs = JSON.parse(box.getAttribute('data-segments') || '[]'); } catch (e) {}
+    btn.addEventListener('click', function () {
+      if (btn.disabled) return;
+      btn.disabled = true; btn.style.opacity = '0.6';
+      var ang = 0, spinning = true;
+      var iv = setInterval(function () { if (spinning && wheel) { ang += 40; wheel.style.transform = 'rotate(' + ang + 'deg)'; } }, 30);
+      submitInteraction(info.id, info.type, {}).then(function (res) {
+        spinning = false; clearInterval(iv);
+        var spin = res && res.result ? res.result : null;
+        var idx = 0;
+        if (spin && spin.segment_id) { for (var i = 0; i < segs.length; i++) { if (String(segs[i].id) === String(spin.segment_id)) { idx = i; break; } } }
+        var per = segs.length > 0 ? 360 / segs.length : 360;
+        var target = 360 * 4 + (360 - (idx * per + per / 2));
+        if (wheel) { wheel.style.transition = 'transform 2.4s cubic-bezier(0.16,1,0.3,1)'; wheel.style.transform = 'rotate(' + target + 'deg)'; }
+        setTimeout(function () {
+          if (spin && spin.won) showMsg(box, '🎉 ' + (spin.reward || spin.label || '') + ' 당첨!', true);
+          else if (res && res.already) showMsg(box, '이미 참여하셨습니다.', false);
+          else showMsg(box, '아쉽지만 다음 기회에!', false);
+        }, 2500);
+      }).catch(function () { spinning = false; clearInterval(iv); btn.disabled = false; btn.style.opacity = '1'; showMsg(box, '잠시 후 다시 시도해주세요.', false); });
+    });
+  });
+
+  // 폼 — 추첨 응모 / 이메일 수집 (동의·필수 검증 후 제출)
+  Array.prototype.forEach.call(document.querySelectorAll('[data-dm-form]'), function (box) {
+    var info = wrapInfo(box);
+    var btn = box.querySelector('[data-dm-submit]');
+    if (!info || !btn) return;
+    btn.addEventListener('click', function () {
+      if (btn.disabled) return;
+      var data = {};
+      var consentEl = box.querySelector('[data-consent]');
+      if (consentEl && !consentEl.checked) { showMsg(box, '개인정보 수집·이용에 동의해주세요.', false); return; }
+      if (consentEl) data.consent = true;
+      Array.prototype.forEach.call(box.querySelectorAll('[data-field]'), function (inp) { data[inp.getAttribute('data-field')] = inp.value; });
+      if (info.type === 'lucky_draw' && (!data.phone || !String(data.phone).trim())) { showMsg(box, '전화번호를 입력해주세요.', false); return; }
+      if (info.type === 'email_capture' && (!data.email || !String(data.email).trim())) { showMsg(box, '이메일을 입력해주세요.', false); return; }
+      btn.disabled = true; btn.style.opacity = '0.6';
+      submitInteraction(info.id, info.type, data).then(function (res) {
+        if (res && res.success) showMsg(box, res.already ? '이미 참여하셨습니다.' : '참여가 완료되었습니다. 감사합니다!', true);
+        else { btn.disabled = false; btn.style.opacity = '1'; showMsg(box, (res && res.error) || '잠시 후 다시 시도해주세요.', false); }
+      }).catch(function () { btn.disabled = false; btn.style.opacity = '1'; showMsg(box, '잠시 후 다시 시도해주세요.', false); });
+    });
+  });
+
+  // 투표 — 옵션 클릭 → 제출
+  Array.prototype.forEach.call(document.querySelectorAll('[data-dm-poll]'), function (box) {
+    var info = wrapInfo(box);
+    if (!info) return;
+    Array.prototype.forEach.call(box.querySelectorAll('[data-dm-poll-option]'), function (opt) {
+      opt.addEventListener('click', function () {
+        if (box.getAttribute('data-voted') === '1') { showMsg(box, '이미 투표하셨습니다.', true); return; }
+        box.setAttribute('data-voted', '1');
+        submitInteraction(info.id, info.type, { option_ids: [opt.getAttribute('data-option-id')] }).then(function (res) {
+          showMsg(box, res && res.already ? '이미 투표하셨습니다.' : '투표해주셔서 감사합니다!', true);
+          opt.style.background = '#ede9fe'; opt.style.borderColor = '#7c3aed';
+        }).catch(function () { box.removeAttribute('data-voted'); showMsg(box, '잠시 후 다시 시도해주세요.', false); });
+      });
+    });
+  });
 })();
 ${hasCountdown ? COUNTDOWN_SCRIPT : ''}
 </script>

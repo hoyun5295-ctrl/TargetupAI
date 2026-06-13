@@ -102,6 +102,8 @@ export const CREDIT_COST_MAP: Record<string, number> = {
   'dm-ai-generate': 3,
   // 모바일 DM 발행(확정) 30 — 단축URL 발행 최초 1회만(멱등키=dm-publish:dmId). test-send 자동발행은 미과금.
   'dm-builder': 30,
+  // 인터랙션 캠페인 발행(룰렛/추첨/투표/설문/이메일수집 등) 50 — 일반 발행보다 높게(F 안1 정액). 발행 최초 1회만(멱등키=dm-publish:dmId). 당첨 통보 발송은 기존 발송 크레딧 별도(발송은 발송대로). 베타 동안 하향 조정 가능(config가 진실).
+  'dm-interaction-publish': 50,
   // 인앱 생성(돌려보기) 3 — 자연어→완성 메시지. 호출마다 3. 게시는 'inapp-publish' 15 별도.
   'inapp-ai-generator': 3,
   // Email 생성(돌려보기) 3 — 자연어/시나리오→제목3안+본문 HTML. 호출마다 3. AI 캠페인 발송 확정은 'email-ai-publish' 30 별도.

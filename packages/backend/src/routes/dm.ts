@@ -54,6 +54,14 @@ import { applyQuickAction, type QuickActionType } from '../utils/dm/dm-quick-act
 import { recommendEventType } from '../utils/dm/dm-event-recommender';
 import { suggestNextSection } from '../utils/dm/dm-section-suggester';
 import { getPersonalizationVariables } from '../utils/dm/dm-personalization-engine';
+// ★ 2026-06-14 B 인터랙션 엔진 — 제출/추첨/조회/다운로드/사전지정/경품 CT
+import {
+  submitEventResponse, getResponses, getWinners, getResponseStats,
+  buildResponseExportRows, importPresetWinners, replacePrizesForSection,
+  syncPrizesFromSections, isInteractionCampaign,
+} from '../utils/dm/dm-interaction';
+import { parseWinnerRows, buildEventInsight } from '../utils/dm/dm-interaction-core';
+import * as XLSX from 'xlsx';
 
 // ────────────── D216+ 503 안전망 helper (db_alter_safety_net 영구 룰) ──────────────
 function isDbMigrationPendingError(err: any): boolean {
@@ -144,7 +152,7 @@ dmRouter.use(requirePlanFeature('mobile_dm'));
 // 이미지 업로드 (2MB, JPG/PNG/WebP)
 const dmImageUpload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 2 * 1024 * 1024, files: 5 },
+  limits: { fileSize: 5 * 1024 * 1024, files: 5 },
   fileFilter: (_req, file, cb) => {
     const ext = path.extname(file.originalname).toLowerCase();
     const mime = file.mimetype.toLowerCase();
@@ -163,7 +171,7 @@ dmRouter.post('/upload-image', (req: any, res: any) => {
   const upload = dmImageUpload.array('images', 5);
   upload(req, res, async (err: any) => {
     if (err) {
-      if (err.code === 'LIMIT_FILE_SIZE') return res.status(400).json({ error: '파일 크기는 2MB 이하만 가능합니다.' });
+      if (err.code === 'LIMIT_FILE_SIZE') return res.status(400).json({ error: '파일 크기는 5MB 이하만 가능합니다.' });
       return res.status(400).json({ error: err.message || '업로드 실패' });
     }
     const companyId = req.user?.companyId;
@@ -297,8 +305,10 @@ dmRouter.post('/:id/publish', async (req: any, res: any) => {
   try {
     const companyId = req.user?.companyId;
     if (!companyId) return res.status(403).json({ error: '회사 권한이 필요합니다.' });
-    // ★ 종량제: 발행(단축URL 확정) = 30, 최초 1회만(멱등키 dm-publish:dmId). test-send 자동발행(publishDm 직접 호출)은 라우트 미경유=미과금. 재발행은 멱등 0.
-    const pubCost = getCreditCost('dm-builder');  // 30
+    // ★ 종량제: 발행(단축URL 확정) 최초 1회만(멱등키 dm-publish:dmId). 인터랙션 캠페인=50(F 안1), 일반 DM=30. test-send 자동발행(publishDm 직접 호출)은 라우트 미경유=미과금. 재발행은 멱등 0.
+    const isInteraction = await isInteractionCampaign(companyId, req.params.id);
+    const costSource = isInteraction ? 'dm-interaction-publish' : 'dm-builder';
+    const pubCost = getCreditCost(costSource);
     const charged = await query(
       `SELECT 1 FROM ai_credit_transactions WHERE company_id = $1::uuid AND idempotency_key = $2 LIMIT 1`,
       [companyId, `dm-publish:${req.params.id}`]
@@ -307,9 +317,12 @@ dmRouter.post('/:id/publish', async (req: any, res: any) => {
     if (firstPublish) await checkCredit(companyId, pubCost);
     const result = await publishDm(req.params.id, companyId);
     if (!result) return res.status(404).json({ error: 'DM을 찾을 수 없습니다.' });
+    // ★ B 연계: lucky_draw/roulette 경품 설정 → dm_prizes 동기화 (실패해도 발행은 유지)
+    try { await syncPrizesFromSections(companyId, req.params.id); }
+    catch (e: any) { console.error('[DM발행] 경품 동기화 오류:', e?.message); }
     if (firstPublish) {
       await deductCreditSafe({
-        companyId, cost: pubCost, source: 'dm-builder', createdBy: req.user?.userId,
+        companyId, cost: pubCost, source: costSource, createdBy: req.user?.userId,
         idempotencyKey: `dm-publish:${req.params.id}`,
       });
     }
@@ -1261,49 +1274,175 @@ dmRouter.get('/top-campaigns', async (req: any, res: any) => {
   }
 });
 
-// POST /api/dm/v/:code/event-response — SDK + 자사몰 호출 (공개)
+// POST /api/dm/v/:code/event-response — 인터랙션 참여 제출(공개): 동의·식별·중복·룰렛 즉시 추첨
 dmPublicRouter.post('/:code/event-response', async (req: Request, res: Response) => {
   try {
     const { code } = req.params;
-    const { section_id, section_type, response_data, anonymous_id, customer_id } = req.body || {};
-
-    if (!section_id || !section_type) {
+    const body = req.body || {};
+    const sectionId = body.section_id;
+    const sectionType = body.section_type;
+    if (!sectionId || !sectionType) {
       return res.status(400).json({ success: false, error: 'section_id / section_type 필수' });
     }
-
-    const dmResult = await query(
-      `SELECT id, company_id FROM dm_pages WHERE short_code = $1`,
-      [code],
-    );
-    if (dmResult.rows.length === 0) {
-      return res.status(404).json({ success: false, error: 'DM 미발견' });
+    // phone = ?p= 쿼리 우선(발송 링크), 없으면 body.phone. customer_id는 클라 신뢰 X(서버 phone 매칭이 권위).
+    const phone = (req.query.p as string) || body.phone || null;
+    const result = await submitEventResponse({
+      code,
+      sectionId,
+      sectionType,
+      data: body.data ?? body.response_data ?? {},
+      anonymousId: body.anonymous_id || null,
+      phone,
+      ip: req.ip || null,
+      ua: (req.headers['user-agent'] as string) || null,
+    });
+    if (!result.ok) {
+      return res.status(result.status || 400).json({ success: false, error: result.error });
     }
-
-    const { id: campaignId, company_id: companyId } = dmResult.rows[0];
-
-    await query(
-      `INSERT INTO dm_event_responses
-        (company_id, campaign_id, section_id, section_type, customer_id, anonymous_id, response_data, ip_address, user_agent)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
-      [
-        companyId,
-        campaignId,
-        section_id,
-        section_type,
-        customer_id || null,
-        anonymous_id || null,
-        JSON.stringify(response_data || {}),
-        req.ip || null,
-        req.headers['user-agent'] || null,
-      ],
-    );
-
-    return res.json({ success: true });
+    return res.json({ success: true, already: result.already || false, result: result.result ?? null });
   } catch (err: any) {
     console.error('[DM event-response] 오류:', err.message);
     if (isDbMigrationPendingError(err)) {
-      return send503Migration(res, 'dm_event_responses CREATE');
+      return send503Migration(res, 'dm_prizes / dm_winners / dm_draw_runs CREATE');
     }
     return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// ════════════════════════════════════════════════════════════
+//  인터랙션 결과 — 회사 admin 조회·다운로드·사전지정·경품 (B / 2026-06-14)
+// ════════════════════════════════════════════════════════════
+
+const dmXlsxUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 5 * 1024 * 1024, files: 1 },
+});
+
+/** dm 소유 검증 (companyId 격리) */
+async function assertDmOwner(dmId: string, companyId: string): Promise<boolean> {
+  const r = await query(`SELECT 1 FROM dm_pages WHERE id = $1 AND company_id = $2`, [dmId, companyId]);
+  return r.rows.length > 0;
+}
+
+function handleInteractionError(res: any, err: any): void {
+  console.error('[DM interaction] 오류:', err.message);
+  if (isDbMigrationPendingError(err)) {
+    send503Migration(res, 'dm_prizes / dm_winners / dm_draw_runs CREATE');
+    return;
+  }
+  res.status(500).json({ error: err.message });
+}
+
+// GET /api/dm/:id/responses?page=&limit= — 응모자 명단
+dmRouter.get('/:id/responses', async (req: any, res: any) => {
+  try {
+    const companyId = req.user?.companyId;
+    if (!companyId) return res.status(403).json({ error: '회사 권한이 필요합니다.' });
+    if (!(await assertDmOwner(req.params.id, companyId))) return res.status(404).json({ error: 'DM 미발견' });
+    const page = parseInt(req.query.page as string, 10) || 1;
+    const limit = parseInt(req.query.limit as string, 10) || 50;
+    return res.json(await getResponses(companyId, req.params.id, page, limit));
+  } catch (err: any) {
+    return handleInteractionError(res, err);
+  }
+});
+
+// GET /api/dm/:id/winners — 당첨자 명단
+dmRouter.get('/:id/winners', async (req: any, res: any) => {
+  try {
+    const companyId = req.user?.companyId;
+    if (!companyId) return res.status(403).json({ error: '회사 권한이 필요합니다.' });
+    if (!(await assertDmOwner(req.params.id, companyId))) return res.status(404).json({ error: 'DM 미발견' });
+    return res.json(await getWinners(companyId, req.params.id));
+  } catch (err: any) {
+    return handleInteractionError(res, err);
+  }
+});
+
+// GET /api/dm/:id/event-stats — 응모·당첨·열람 집계 (열람 통계 /:id/stats와 별개)
+dmRouter.get('/:id/event-stats', async (req: any, res: any) => {
+  try {
+    const companyId = req.user?.companyId;
+    if (!companyId) return res.status(403).json({ error: '회사 권한이 필요합니다.' });
+    if (!(await assertDmOwner(req.params.id, companyId))) return res.status(404).json({ error: 'DM 미발견' });
+    return res.json(await getResponseStats(companyId, req.params.id));
+  } catch (err: any) {
+    return handleInteractionError(res, err);
+  }
+});
+
+// GET /api/dm/:id/event-insight — 결과 분석 (응모·당첨·열람 실측 기반 인사이트, 임의 상수 0)
+dmRouter.get('/:id/event-insight', async (req: any, res: any) => {
+  try {
+    const companyId = req.user?.companyId;
+    if (!companyId) return res.status(403).json({ error: '회사 권한이 필요합니다.' });
+    if (!(await assertDmOwner(req.params.id, companyId))) return res.status(404).json({ error: 'DM 미발견' });
+    const stats = await getResponseStats(companyId, req.params.id);
+    return res.json(buildEventInsight(stats));
+  } catch (err: any) {
+    return handleInteractionError(res, err);
+  }
+});
+
+// GET /api/dm/:id/responses/export — 응모자 xlsx 다운로드 (전체, 페이지 루프 — 무 silent 절단)
+dmRouter.get('/:id/responses/export', async (req: any, res: any) => {
+  try {
+    const companyId = req.user?.companyId;
+    if (!companyId) return res.status(403).json({ error: '회사 권한이 필요합니다.' });
+    if (!(await assertDmOwner(req.params.id, companyId))) return res.status(404).json({ error: 'DM 미발견' });
+    const out: any[] = [];
+    let page = 1;
+    for (;;) {
+      const chunk = await getResponses(companyId, req.params.id, page, 500);
+      out.push(...chunk.rows);
+      if (out.length >= chunk.total || chunk.rows.length === 0) break;
+      page++;
+    }
+    const winners = await getWinners(companyId, req.params.id);
+    const rows = buildResponseExportRows(out, winners);
+    const ws = XLSX.utils.json_to_sheet(rows);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, '응모자');
+    const buffer: Buffer = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="dm-responses-${req.params.id}.xlsx"`);
+    return res.send(buffer);
+  } catch (err: any) {
+    return handleInteractionError(res, err);
+  }
+});
+
+// POST /api/dm/:id/winners/import — 엑셀 사전 지정 당첨자 업로드
+dmRouter.post('/:id/winners/import', dmXlsxUpload.single('file'), async (req: any, res: any) => {
+  try {
+    const companyId = req.user?.companyId;
+    if (!companyId) return res.status(403).json({ error: '회사 권한이 필요합니다.' });
+    if (!(await assertDmOwner(req.params.id, companyId))) return res.status(404).json({ error: 'DM 미발견' });
+    if (!req.file) return res.status(400).json({ error: '엑셀 파일이 필요합니다.' });
+    const wb = XLSX.read(req.file.buffer, { type: 'buffer' });
+    const sheet = wb.Sheets[wb.SheetNames[0]];
+    const json = XLSX.utils.sheet_to_json(sheet) as any[];
+    const { winners, errors } = parseWinnerRows(json);
+    const sectionId = (req.body?.section_id as string) || null;
+    const { inserted, linked } = await importPresetWinners(companyId, req.params.id, sectionId, winners);
+    return res.json({ success: true, inserted, linked, parse_errors: errors });
+  } catch (err: any) {
+    return handleInteractionError(res, err);
+  }
+});
+
+// PUT /api/dm/:id/prizes — 경품 설정(A editor·발행 공용). body: { section_id, prizes:[{rank,name,total_count,win_method,roulette_segment_id?}] }
+dmRouter.put('/:id/prizes', async (req: any, res: any) => {
+  try {
+    const companyId = req.user?.companyId;
+    if (!companyId) return res.status(403).json({ error: '회사 권한이 필요합니다.' });
+    if (!(await assertDmOwner(req.params.id, companyId))) return res.status(404).json({ error: 'DM 미발견' });
+    const sectionId = req.body?.section_id;
+    if (!sectionId) return res.status(400).json({ error: 'section_id 필수' });
+    const prizes = Array.isArray(req.body?.prizes) ? req.body.prizes : [];
+    await replacePrizesForSection(companyId, req.params.id, sectionId, prizes);
+    return res.json({ success: true, count: prizes.length });
+  } catch (err: any) {
+    return handleInteractionError(res, err);
   }
 });

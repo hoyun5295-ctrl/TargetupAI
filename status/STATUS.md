@@ -107,12 +107,21 @@
 
 ---
 
-### 🔴 다음 세션 = 인비토AI 학습 데이터 완성(#3 이메일+전환) + 자체 모델 1단계 (Harold 명시 2026-06-13)
-> **목표(Harold)**: Claude/GPT API 의존을 떼고 **자체 학습 모델**로 간다. 지금 발송·성과·제안 데이터는 `ai_training_logs`·`operator_proposals`에 영구 적재 중(배포완료) — 아래 2개 구멍을 막아 "완전한" 학습셋을 만든 뒤, GPU(1,400만원 48GB 1대면 학습+서빙 충분, 나중 구매) 확보 시 바로 굽는다. 데이터는 안 사라지니 **쌓아두고 나중 학습 = 정석**.
-> **① #3 이메일 학습 적재 [먼저]**: `ai_training_logs`에 'EMAIL' messageType 추가 + 이메일 발송 지점(직접/AI/자동 전수 grep)에 `logCampaignTraining` 연결. 현재 이메일은 미적재(흘려보내는 중).
-> **② cdp_events 구매 이벤트 유입 [전환 데이터]**: cdp_events 전체 0건이라 클릭·구매 미유입 → "매출 전환"은 학습 불가(지금 성과 = 발송 성공/스팸까지). SDK 연동으로 purchase/order 유입 + `updateTrainingMetrics` 전환 반영. 별도 설계(큰 일).
-> **③ 자체 분류 모델 1단계 [GPU 불필요·CPU]**: 스팸 안전 판별 등 분류는 현재 서버 CPU로 학습·서빙 가능(데이터 최다 5,158). 학습셋 빌더 + held-out 평가 하베스트 + `callAIWithFallback`에 '우리 모델' 라우팅 경로 배선. 생성 모델은 데이터 더 쌓은 뒤 GPU 확보 후.
-> **진입**: CLAUDE.md + memory(`project_2026_0613_training_pipeline.md`·`ai_memory_engine`·`session_wrap_means_deployed`) + `status/lessons/LESSONS_BACKEND.md`(발송 경로 재작성이 fire-and-forget 적재를 떨굼) 정독 → #3부터. 발송 수정 = fire-and-forget 격리+source_ref 멱등(발송·돈 영향 0), 신규 컬럼/JOIN = information_schema 확인(db_column_verify), 순수 함수 TDD, 박-단어·모델명 0 자가 grep, 컨펌 후 구현.
+### 🟢 2026-06-14 — 모바일 DM 전면 재설계 B~G 7개 전부 구현 완료 (배포 대기 → Harold 일괄 배포)
+> **B 인터랙션 엔진**: 순수 추첨 코어(pickRouletteSegment/drawWinners/parseWinnerRows, ts-node TDD) + dm-interaction CT(제출·룰렛 즉시추첨·원자적 재고차감·조회·집계·xlsx 다운로드·엑셀 사전지정·경품 동기화) + dm-draw-worker(1분 cron 마감추첨, dm_draw_runs 원자적 claim) + 공개 제출 endpoint 확장(`/:code/event-response`: 동의·phone매칭·1인1회·룰렛 즉시결과) + 뷰어 인터랙션 JS(룰렛 회전·폼·투표) + admin endpoint(responses/winners/event-stats/event-insight/export/winners-import/prizes). **신규 3테이블(dm_prizes·dm_winners·dm_draw_runs)+부분UNIQUE Harold 실행 완료**(SCHEMA.md 기록).
+> **A 섹션 editor**: 신규 16섹션 editor 전부 + RepeatableList 공용 + 룰렛/추첨 경품 설정(확률 합계 검증) + SectionPropsEditor 27 case(빈 패널 해소). LuckyDrawProps.prizes·RouletteSegment.prize_count SSOT 양쪽. 발행 시 syncPrizesFromSections→dm_prizes(당첨자 있으면 재고 보존).
+> **C 이미지**: publicImageUrl(base64→공개경로 `/api/dm/v/images`, 뷰어 동일 라우터라 도달 보장+HTML 경량) + lazy-load + 2MB→5MB + 클라 canvas 리사이즈(ImageUploader, 대용량 사진 자동 축소) + MultiImageUploader(갤러리/슬라이드 일괄).
+> **D 빠른시작 12**: SCENARIO_MAP 7→12(갤러리룩북·리뷰모음·선착순특가·실시간투표·VIP초대) + QUICK_STARTS 12카드(고유 아이콘·그라데이션) + DmThumbnail 신규 default 색블록. 1클릭 = oneShotGenerate.
+> **E 디자인**: 헤더 정렬 옵션(좌/가운데, 기본 가운데) — props SSOT+뷰어 렌더러+캔버스 HeaderSection+editor 4곳 일관(캔버스↔뷰어 일치).
+> **F 크레딧(안1 확정)**: `dm-interaction-publish` 50(일반 발행 30보다 높게) — 발행 라우트가 인터랙션 캠페인 자동 분기(isInteractionCampaign). 당첨 통보 발송 = 기존 발송 크레딧(발송은 발송대로). 베타 하향은 config.
+> **G AI**: applyInteractionDefaults(인터랙션 시나리오 → 경품 구조 placeholder 자동완성, 구체 혜택 임의생성 X) + buildEventInsight 순수 결과분석(실데이터만·임의상수 0·div0 가드) + `/:id/event-insight` endpoint.
+> **검증**: backend tsc 0 · frontend tsc 0 · 순수 코어 19 GREEN · 박-단어/모델명/native dialog 0(자가 grep). **배포 = `tp-push` → backend `pm2 restart all`(ts-node) + frontend `build:safe`**(신규 SQL은 실행 완료, 추가 SQL 0).
+> **의도적 후속(돈/발송=실측 필요, AI 영역)**: ① 당첨 통보 자동발송 endpoint — 현재는 당첨자 xlsx 다운로드 → 기존 직접발송으로 통보(F 안1 "기존 발송 크레딧 재사용", notified_at 컬럼 준비됨) ② AI 자연어 경품 파싱 심화("에어팟 1명" 파싱) + AI 통보 문안 — 현재 결정적 구조+placeholder+카피 AI, 외부 AI raw 검증(feedback_external_api_response_verification)+실측 후 별도. 계획서 = `docs/superpowers/plans/2026-06-14-dm-interaction-engine-B.md`.
+
+### 🟢 2026-06-13(이번 세션) — 인비토AI 학습 데이터 + 모바일 DM 재설계 설계 (배포완료)
+> **인비토AI 학습**: #3 이메일 적재 완료(ai_training_logs 'EMAIL' + sendEmailCampaign 발송완료 직후 logCampaignTraining+updateTrainingMetrics, buildEmailTrainingMessage 순수 TDD 11) + ③ 스팸 분류 학습셋(spam_filter_test_results blocked 124 → buildSpamFilterExample, export-training-data 합류) + ceo 학습페이지 '스팸 분류 학습' 섹션(차단 124+문안 리스트+통신사 배지). ② cdp 전환 = purchase 0건이라 자사몰 연동 후 보류. 상세 = memory `project_2026_0613_training_pipeline`.
+> **모바일 DM 재설계**: 7개 설계서 작성(위 다음 세션 블록). 구현은 다음 세션.
+> **배포 교훈**: targetup-backend = ts-node → 코드 반영 = `pm2 restart all`만(build:safe 무관, dist 안 읽음). frontend만 build하고 backend pm2 restart 누락 = "빌드 정상인데 화면 안 바뀜" 반나절 삽질. 상세 = memory `feedback_push_and_deploy_commands`.
 
 ---
 

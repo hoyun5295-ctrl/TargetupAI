@@ -489,7 +489,7 @@ void SECTION_DEFAULTS;
 
 import { randomUUID } from 'crypto';
 
-/** 빠른 시작 7 시나리오 → 섹션 chain 매핑 */
+/** 빠른 시작 12 시나리오 → 섹션 chain 매핑 */
 const SCENARIO_MAP: Record<string, { sections: SectionType[]; toneHint: CampaignTone; objective: CampaignObjective }> = {
   '신상품 출시':   { sections: ['header', 'hero', 'product_carousel', 'cta', 'footer'], toneHint: 'premium',  objective: 'sale' },
   '시즌 세일':     { sections: ['header', 'countdown', 'coupon', 'cta', 'footer'],      toneHint: 'urgent',   objective: 'sale' },
@@ -498,6 +498,11 @@ const SCENARIO_MAP: Record<string, { sections: SectionType[]; toneHint: Campaign
   '설문 + 보상':   { sections: ['header', 'survey', 'instant_coupon', 'footer'],        toneHint: 'friendly', objective: 'retention' },
   '신규 환영':     { sections: ['header', 'hero', 'email_capture', 'cta', 'footer'],    toneHint: 'friendly', objective: 'awareness' },
   '룰렛 이벤트':   { sections: ['header', 'roulette', 'cta', 'footer'],                 toneHint: 'playful',  objective: 'awareness' },
+  '갤러리 룩북':   { sections: ['header', 'hero', 'gallery', 'product_carousel', 'cta', 'footer'], toneHint: 'premium',  objective: 'sale' },
+  '리뷰 모음':     { sections: ['header', 'hero', 'reviews', 'cta', 'footer'],          toneHint: 'friendly', objective: 'retention' },
+  '선착순 한정특가': { sections: ['header', 'countdown', 'limited_quantity', 'coupon', 'cta', 'footer'], toneHint: 'urgent', objective: 'sale' },
+  '실시간 투표':   { sections: ['header', 'hero', 'poll', 'cta', 'footer'],             toneHint: 'playful',  objective: 'awareness' },
+  'VIP 초대':      { sections: ['header', 'hero', 'promo_code', 'text_card', 'cta', 'store_info', 'footer'], toneHint: 'premium', objective: 'loyalty' },
 };
 
 export interface OneShotResult {
@@ -574,10 +579,35 @@ export async function oneShotGenerate(opts: {
       }
     }
 
+    applyInteractionDefaults(section);
     sections.push(section);
   }
 
   return { spec, sections, brandKit, scenario: opts.scenario };
+}
+
+/**
+ * 인터랙션 섹션 자동 구조화 — 경품/등급 틀을 placeholder로 채워 1클릭 캠페인을 바로 편집 가능 상태로.
+ * 구체 혜택(%/원/쿠폰/무료) 임의 생성 절대 금지 — 이름은 항상 [직접 작성해주세요]. 확률·인원 구조만 제안.
+ */
+function applyInteractionDefaults(section: Section): void {
+  const p = section.props as any;
+  if (section.type === 'lucky_draw') {
+    if (!Array.isArray(p.prizes) || p.prizes.length === 0) {
+      p.prizes = [{ rank: 1, name: '[직접 작성해주세요]', count: 1 }];
+    }
+  } else if (section.type === 'roulette') {
+    if (Array.isArray(p.segments) && p.segments.length >= 2) {
+      const n = p.segments.length;
+      const winners = Math.min(2, n - 1);
+      const loseProb = (1 - 0.05 * winners) / (n - winners);
+      p.segments = p.segments.map((s: any, i: number) =>
+        i < winners
+          ? { ...s, label: `${i + 1}등`, reward_description: '[직접 작성해주세요]', prize_count: 1, probability: 0.05 }
+          : { ...s, label: '꽝', reward_description: undefined, prize_count: 0, probability: loseProb },
+      );
+    }
+  }
 }
 
 /** AI 생성 카피 영역 → 섹션 props 매핑 (옛 11 + 신규 16 정합) */

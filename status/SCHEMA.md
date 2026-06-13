@@ -807,6 +807,57 @@
 - INDEX: (company_id, campaign_id, occurred_at DESC)
 - INDEX: (section_id, section_type)
 - INDEX: (customer_id) WHERE customer_id IS NOT NULL
+- UNIQUE: uniq_dm_response_per_user (campaign_id, section_id, COALESCE(customer_id::text, anonymous_id)) WHERE COALESCE(...) IS NOT NULL — ★ B 2026-06-14 1인1회 응모
+
+### dm_prizes (DM 인터랙션 경품/등급/재고) ★ B 2026-06-14 신설·실측
+> 룰렛/추첨 경품. win_method = random(마감추첨) | preset(엑셀지정) | roulette. roulette_segment_id로 룰렛 세그먼트 매핑.
+
+| 컬럼 | 타입 | 비고 |
+|------|------|------|
+| id | uuid PK | |
+| company_id | uuid FK | companies.id ON DELETE CASCADE |
+| campaign_id | uuid FK | dm_pages.id ON DELETE CASCADE |
+| section_id | uuid NOT NULL | |
+| rank | integer NOT NULL | |
+| name | text NOT NULL | |
+| total_count | integer NOT NULL | |
+| remaining | integer NOT NULL | 룰렛 실시간 차감 |
+| win_method | varchar(20) NOT NULL | |
+| roulette_segment_id | varchar(20) | |
+| reward_code_pool | jsonb | |
+| created_at | timestamptz | |
+- INDEX: idx_dm_prizes_campaign (campaign_id, section_id)
+
+### dm_winners (DM 당첨자) ★ B 2026-06-14 신설·실측
+| 컬럼 | 타입 | 비고 |
+|------|------|------|
+| id | uuid PK | |
+| company_id | uuid FK | companies.id ON DELETE CASCADE |
+| campaign_id | uuid FK | dm_pages.id ON DELETE CASCADE |
+| section_id | uuid | |
+| prize_id | uuid FK | dm_prizes.id ON DELETE SET NULL |
+| response_id | uuid FK | dm_event_responses.id ON DELETE SET NULL |
+| customer_id | uuid FK | customers.id ON DELETE SET NULL |
+| rank | integer | |
+| win_method | varchar(20) NOT NULL | random/preset/roulette |
+| winner_name / winner_phone / winner_email | text | |
+| is_member | boolean NOT NULL DEFAULT false | |
+| reward_code | text | |
+| notified_at | timestamptz | F/G 당첨 통보 발송 시각 |
+| drawn_at / created_at | timestamptz | |
+- INDEX: idx_dm_winners_campaign (campaign_id, rank)
+- UNIQUE: uniq_dm_winners_response (response_id) WHERE response_id IS NOT NULL
+
+### dm_draw_runs (DM 마감추첨 claim·시드 감사) ★ B 2026-06-14 신설·실측
+> 워커 원자적 claim(중복 추첨 차단) + 추첨 시드 감사.
+
+| 컬럼 | 타입 | 비고 |
+|------|------|------|
+| campaign_id | uuid PK | dm_pages.id ON DELETE CASCADE |
+| section_id | uuid | |
+| seed | text NOT NULL | |
+| entry_count / winner_count | integer NOT NULL DEFAULT 0 | |
+| drawn_at | timestamptz NOT NULL DEFAULT NOW() | |
 
 ### opt_outs (수신거부 — user_id 기준)
 | 컬럼 | 타입 |

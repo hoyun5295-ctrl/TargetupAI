@@ -62,6 +62,7 @@ export const SECTION_TYPES: readonly SectionType[] = [
 
 export type HeaderProps = {
   variant: 'logo' | 'banner' | 'countdown' | 'coupon';
+  align?: 'left' | 'center'; // logo형 정렬(기본 center)
   logo_url?: string;
   brand_name?: string;
   phone?: string;
@@ -190,9 +191,10 @@ export type EmailCaptureProps = { headline: string; description?: string; reward
 export type ClickRewardsProps = { reward_type: 'like' | 'share' | 'scroll'; target_count: number; reward_description: string; show_progress: boolean; };
 
 export type LuckyDrawFormField = { name: 'name' | 'phone' | 'email'; required: boolean; };
-export type LuckyDrawProps = { title: string; description?: string; form_fields: LuckyDrawFormField[]; draw_at: string; result_announce_url?: string; consent_text: string; };
+export type LuckyDrawPrize = { rank: number; name: string; count: number; };
+export type LuckyDrawProps = { title: string; description?: string; form_fields: LuckyDrawFormField[]; draw_at: string; result_announce_url?: string; consent_text: string; prizes?: LuckyDrawPrize[]; };
 
-export type RouletteSegment = { id: string; label: string; probability: number; reward_description?: string; };
+export type RouletteSegment = { id: string; label: string; probability: number; reward_description?: string; prize_count?: number; };
 export type RouletteProps = { segments: RouletteSegment[]; one_spin_per_user: boolean; spin_animation_ms?: number; };
 
 export type InstantCouponProps = { coupon_label: string; discount_description: string; expires_at?: string; conditions?: string; usage_instructions?: string; };
@@ -266,6 +268,7 @@ export const SECTION_DEFAULTS: { [K in SectionType]: SectionPropsMap[K] } = {
   header: {
     variant: 'logo',
     brand_name: '',
+    align: 'center',
   },
   hero: {
     headline: '',
