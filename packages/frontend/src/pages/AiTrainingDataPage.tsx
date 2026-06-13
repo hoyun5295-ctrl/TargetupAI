@@ -21,8 +21,8 @@ interface Overview {
   sources: { key: string; count: number }[];
   trend: { day: string; count: number }[];
   preference: { accepted: number; rejected: number };
-  spamFilter: { block: number; pass: number };
-  spamSamples: { message: string; carriers: string[] }[];
+  spamFilter?: { block: number; pass: number };
+  spamSamples?: { message: string; carriers: string[] }[];
   datasets: { generation: number; preference: number; spam: number };
 }
 
@@ -198,19 +198,19 @@ export default function AiTrainingDataPage() {
               <div className="flex items-center gap-2 mb-4"><ShieldAlert className="w-4 h-4 text-amber-300" /><h3 className="text-sm font-semibold">스팸 분류 학습</h3></div>
               <div className="flex gap-3 mb-4">
                 <div className="flex-1 p-3 bg-rose-500/10 border border-rose-400/20 rounded-xl text-center">
-                  <div className="text-xl font-bold text-rose-300">{data.spamFilter.block.toLocaleString()}</div>
+                  <div className="text-xl font-bold text-rose-300">{(data.spamFilter?.block ?? 0).toLocaleString()}</div>
                   <div className="text-[10px] text-white/50 mt-0.5">스팸 차단</div>
                 </div>
                 <div className="flex-1 p-3 bg-emerald-500/10 border border-emerald-400/20 rounded-xl text-center">
-                  <div className="text-xl font-bold text-emerald-300">{data.spamFilter.pass.toLocaleString()}</div>
+                  <div className="text-xl font-bold text-emerald-300">{(data.spamFilter?.pass ?? 0).toLocaleString()}</div>
                   <div className="text-[10px] text-white/50 mt-0.5">정상 통과</div>
                 </div>
               </div>
-              {data.spamSamples.length > 0 ? (
+              {(data.spamSamples?.length ?? 0) > 0 ? (
                 <>
                   <div className="text-[11px] text-white/50 mb-2">차단된 문안 — 어떤 문구가 스팸으로 처리됐는지</div>
                   <div className="space-y-1.5">
-                    {data.spamSamples.map((sp, i) => (
+                    {(data.spamSamples ?? []).map((sp, i) => (
                       <div key={i} className="flex items-start gap-2 p-2.5 bg-white/5 border border-white/10 rounded-lg">
                         <span className="text-xs text-white/80 flex-1 leading-relaxed break-words">{sp.message}</span>
                         <div className="flex gap-1 flex-shrink-0 flex-wrap justify-end max-w-[110px]">
