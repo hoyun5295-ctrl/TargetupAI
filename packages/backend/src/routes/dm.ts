@@ -16,7 +16,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { query } from '../config/database';
 import { authenticate } from '../middlewares/auth';
 import {
-  createDm, updateDm, deleteDm, getDmList, getDmDetail, getDmByCode,
+  createDm, updateDm, deleteDm, getDmList, getDmDetail, getDmByCode, cloneDm,
   publishDm, trackDmView, getDmStats,
   saveDmVersion, listDmVersions, restoreDmVersion, setApprovalStatus,
   extractFlatSectionsFromDm, extractPagesFromDm,
@@ -273,6 +273,21 @@ dmRouter.delete('/:id', async (req: any, res: any) => {
     return res.json({ success: true });
   } catch (err: any) {
     console.error('[DM삭제] 오류:', err.message);
+    return res.status(500).json({ error: '서버 오류' });
+  }
+});
+
+// POST /api/dm/:id/clone — 복제 (AI 호출 0 = 크레딧 차감 없음)
+dmRouter.post('/:id/clone', async (req: any, res: any) => {
+  try {
+    const companyId = req.user?.companyId;
+    const userId = req.user?.userId;
+    if (!companyId || !userId) return res.status(403).json({ error: '권한이 필요합니다.' });
+    const cloned = await cloneDm(req.params.id, companyId, userId);
+    if (!cloned) return res.status(404).json({ error: 'DM을 찾을 수 없습니다.' });
+    return res.json({ success: true, dm: cloned });
+  } catch (err: any) {
+    console.error('[DM복제] 오류:', err.message);
     return res.status(500).json({ error: '서버 오류' });
   }
 });
@@ -1144,6 +1159,7 @@ dmRouter.get('/overview', async (req: any, res: any) => {
     const companyId = req.user?.companyId;
     if (!companyId) return res.status(403).json({ error: '회사 권한이 필요합니다.' });
 
+    // dm_pages 집계 = 핵심(목록과 같은 테이블 — 항상 존재). 실패 시에만 전체 오류.
     const totals = await query(
       `SELECT
         COUNT(*) AS total_dm,
@@ -1153,24 +1169,37 @@ dmRouter.get('/overview', async (req: any, res: any) => {
       [companyId],
     );
 
-    const views30d = await query(
-      `SELECT
-        COUNT(*) AS total_views,
-        COUNT(DISTINCT phone) FILTER (WHERE phone IS NOT NULL) AS unique_viewers
-      FROM dm_views
-      WHERE company_id = $1 AND viewed_at >= NOW() - INTERVAL '30 days'`,
-      [companyId],
-    );
+    // dm_views / dm_event_responses = 부분 실패(테이블 미생성 등) 시 0으로 degrade.
+    //   한 테이블이 없어도 전체 endpoint를 500 내지 않고 dm_pages 집계는 살려 화면이 비지 않게 한다.
+    let totalViews = 0;
+    let uniqueViewers = 0;
+    let totalResponses = 0;
+    try {
+      const views30d = await query(
+        `SELECT
+          COUNT(*) AS total_views,
+          COUNT(DISTINCT phone) FILTER (WHERE phone IS NOT NULL) AS unique_viewers
+        FROM dm_views
+        WHERE company_id = $1 AND viewed_at >= NOW() - INTERVAL '30 days'`,
+        [companyId],
+      );
+      totalViews = Number(views30d.rows[0]?.total_views || 0);
+      uniqueViewers = Number(views30d.rows[0]?.unique_viewers || 0);
+    } catch (e: any) {
+      console.warn('[DM overview] dm_views 집계 skip:', e?.message);
+    }
+    try {
+      const responses30d = await query(
+        `SELECT COUNT(*) AS total_responses
+        FROM dm_event_responses
+        WHERE company_id = $1 AND occurred_at >= NOW() - INTERVAL '30 days'`,
+        [companyId],
+      );
+      totalResponses = Number(responses30d.rows[0]?.total_responses || 0);
+    } catch (e: any) {
+      console.warn('[DM overview] dm_event_responses 집계 skip:', e?.message);
+    }
 
-    const responses30d = await query(
-      `SELECT COUNT(*) AS total_responses
-      FROM dm_event_responses
-      WHERE company_id = $1 AND occurred_at >= NOW() - INTERVAL '30 days'`,
-      [companyId],
-    );
-
-    const totalViews = Number(views30d.rows[0]?.total_views || 0);
-    const totalResponses = Number(responses30d.rows[0]?.total_responses || 0);
     const avgCtr = totalViews > 0 ? (totalResponses / totalViews) * 100 : 0;
 
     return res.json({
@@ -1179,7 +1208,7 @@ dmRouter.get('/overview', async (req: any, res: any) => {
         total_dm: Number(totals.rows[0]?.total_dm || 0),
         published_dm: Number(totals.rows[0]?.published_dm || 0),
         total_views_30d: totalViews,
-        unique_viewers_30d: Number(views30d.rows[0]?.unique_viewers || 0),
+        unique_viewers_30d: uniqueViewers,
         total_responses_30d: totalResponses,
         avg_ctr_30d: Number(avgCtr.toFixed(2)),
       },
@@ -1187,7 +1216,7 @@ dmRouter.get('/overview', async (req: any, res: any) => {
   } catch (err: any) {
     console.error('[DM overview] 오류:', err.message);
     if (isDbMigrationPendingError(err)) {
-      return send503Migration(res, 'dm_event_responses CREATE');
+      return send503Migration(res, 'dm_pages ALTER');
     }
     return res.status(500).json({ success: false, error: err.message });
   }

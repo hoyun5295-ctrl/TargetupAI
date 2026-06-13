@@ -745,16 +745,6 @@ export default function EmailCampaignsPage() {
           </div>
         )}
 
-        {/* 안내 카드 — 영구 원칙 */}
-        <div className="bg-amber-500/10 border border-amber-400/30 rounded-lg p-3 text-xs text-amber-100 flex items-start gap-2">
-          <AlertCircle className="w-4 h-4 mt-0.5 shrink-0" />
-          <div>
-            <strong>영구 원칙:</strong> 광고성 캠페인 = "(광고)" prefix + 수신거부 링크 자동 부착 (정보통신망법).
-            수신자 0건 = 발송 차단 (Zero-Count). 발송 시점 = 즉시 confirm 모달 의무.
-            발신 도메인 = 회사 본인 SMTP (SPF/DKIM/DMARC 회사 admin 본인 책임).
-          </div>
-        </div>
-
         {/* 통계 요약 (캠페인 있는 경우) */}
         {campaigns.length > 0 && (
           <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">

@@ -35,6 +35,13 @@ api.interceptors.request.use((cfg) => {
   return cfg;
 });
 
+type DmSectionSummary = {
+  types: string[];
+  headline: string | null;
+  accent: string | null;
+  count: number;
+};
+
 type DmListItem = {
   id: string;
   title: string;
@@ -43,8 +50,58 @@ type DmListItem = {
   approval_status?: string;
   short_code?: string | null;
   view_count?: number;
+  page_count?: number;
+  section_summary?: DmSectionSummary;
   updated_at?: string;
 };
+
+// 빠른 시작 7 시나리오 — 목록(추천 카드)·갤러리 공용. thumbTypes = 폰목업 미리보기용 대표 섹션 구성
+const QUICK_STARTS: Array<{ icon: string; label: string; hint: string; gradient: string; border: string; hover: string; thumbTypes: string[] }> = [
+  { icon: '🛍️', label: '신상품 출시', hint: '상품 슬라이드 + 구매 유도',  gradient: 'linear-gradient(135deg, rgba(139, 92, 246, 0.25), rgba(168, 85, 247, 0.15))', border: 'rgba(168, 85, 247, 0.4)',  hover: 'rgba(168, 85, 247, 0.30)', thumbTypes: ['header', 'hero', 'product_carousel', 'cta'] },
+  { icon: '🏷️', label: '시즌 세일',  hint: '카운트다운 + 쿠폰 + CTA',     gradient: 'linear-gradient(135deg, rgba(244, 63, 94, 0.25), rgba(239, 68, 68, 0.15))',  border: 'rgba(244, 63, 94, 0.4)',  hover: 'rgba(244, 63, 94, 0.30)', thumbTypes: ['header', 'countdown', 'coupon', 'cta'] },
+  { icon: '🎁', label: '추첨 이벤트', hint: '응모 form + 자동 추첨',       gradient: 'linear-gradient(135deg, rgba(245, 158, 11, 0.25), rgba(249, 115, 22, 0.15))', border: 'rgba(245, 158, 11, 0.4)', hover: 'rgba(245, 158, 11, 0.30)', thumbTypes: ['header', 'hero', 'survey', 'cta'] },
+  { icon: '🗺️', label: '매장 안내',  hint: '지도 + 매장 위치',            gradient: 'linear-gradient(135deg, rgba(16, 185, 129, 0.25), rgba(20, 184, 166, 0.15))', border: 'rgba(16, 185, 129, 0.4)', hover: 'rgba(16, 185, 129, 0.30)', thumbTypes: ['header', 'hero', 'store_info', 'sns'] },
+  { icon: '📝', label: '설문 + 보상', hint: '설문 + 즉시 쿠폰 발급',       gradient: 'linear-gradient(135deg, rgba(14, 165, 233, 0.25), rgba(6, 182, 212, 0.15))',  border: 'rgba(14, 165, 233, 0.4)', hover: 'rgba(14, 165, 233, 0.30)', thumbTypes: ['header', 'survey', 'coupon', 'cta'] },
+  { icon: '✉️', label: '신규 환영',  hint: '이메일 수집 + 쿠폰',          gradient: 'linear-gradient(135deg, rgba(217, 70, 239, 0.25), rgba(236, 72, 153, 0.15))', border: 'rgba(217, 70, 239, 0.4)', hover: 'rgba(217, 70, 239, 0.30)', thumbTypes: ['header', 'hero', 'email_capture', 'coupon'] },
+  { icon: '🎡', label: '룰렛 이벤트', hint: '8개 칸 회전 + 자동 당첨',     gradient: 'linear-gradient(135deg, rgba(99, 102, 241, 0.25), rgba(139, 92, 246, 0.15))',  border: 'rgba(99, 102, 241, 0.4)', hover: 'rgba(99, 102, 241, 0.30)', thumbTypes: ['header', 'hero', 'roulette', 'cta'] },
+];
+
+// 섹션 타입 → 폰목업 블록 색·높이 (도식 미리보기)
+const SECTION_THUMB: Record<string, { color: string; h: number }> = {
+  header: { color: '#c4b5fd', h: 8 }, hero: { color: '#a855f7', h: 26 },
+  product_carousel: { color: '#60a5fa', h: 22 }, gallery: { color: '#60a5fa', h: 22 }, slideshow: { color: '#60a5fa', h: 22 },
+  video: { color: '#6366f1', h: 20 }, text_card: { color: '#cbd5e1', h: 16 },
+  coupon: { color: '#f59e0b', h: 12 }, promo_code: { color: '#f59e0b', h: 12 }, countdown: { color: '#f43f5e', h: 10 },
+  cta: { color: '#8b5cf6', h: 11 }, poll: { color: '#10b981', h: 18 }, survey: { color: '#10b981', h: 18 },
+  email_capture: { color: '#10b981', h: 16 }, lucky_draw: { color: '#22c55e', h: 20 }, roulette: { color: '#22c55e', h: 22 },
+  store_info: { color: '#14b8a6', h: 14 }, sns: { color: '#ec4899', h: 8 }, footer: { color: '#94a3b8', h: 6 },
+};
+
+// 폰목업 썸네일 — 섹션 타입을 색 블록 스택으로 도식화. types 없으면 legacy pageCount 만큼 generic 블록
+function DmThumbnail({ types, accent, pageCount }: { types?: string[]; accent?: string | null; pageCount?: number }) {
+  let blocks: Array<{ color: string; h: number }>;
+  if (types && types.length > 0) {
+    blocks = types.map((t) => {
+      const v = SECTION_THUMB[t] || { color: '#cbd5e1', h: 12 };
+      return (t === 'hero' || t === 'cta') && accent ? { color: accent, h: v.h } : v;
+    });
+  } else {
+    const n = Math.min(Math.max(pageCount || 1, 1), 4);
+    blocks = Array.from({ length: n }, (_, i) => ({ color: i === 0 ? (accent || '#a855f7') : '#cbd5e1', h: i === 0 ? 24 : 12 }));
+  }
+  return (
+    <div style={{ display: 'flex', justifyContent: 'center' }}>
+      <div style={{ width: 92, borderRadius: 14, border: '1px solid rgba(255,255,255,0.14)', background: '#f5f3ff', padding: 7, boxShadow: '0 4px 12px rgba(0,0,0,0.25)' }}>
+        <div style={{ width: 26, height: 4, borderRadius: 3, background: '#cbd5e1', margin: '0 auto 6px' }} />
+        <div style={{ height: 150, overflow: 'hidden', display: 'flex', flexDirection: 'column', gap: 3 }}>
+          {blocks.map((b, i) => (
+            <div key={i} style={{ height: b.h, borderRadius: 3, background: b.color, opacity: 0.92, flexShrink: 0 }} />
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
 
 export default function DmBuilderPage() {
   const navigate = useNavigate();
@@ -116,15 +173,19 @@ export default function DmBuilderPage() {
     if (mode === 'list') refreshList();
   }, [mode, refreshList]);
 
-  // ★ D216+ overview 5 metric 로드 (list 모드 진입 시)
+  // ★ 2026-06-13: overview 로드 — 실패/지연해도 화면이 비지 않게 시도 완료 플래그로 구분
+  const [overviewTried, setOverviewTried] = useState(false);
   useEffect(() => {
     if (mode !== 'list') return;
+    setOverviewTried(false);
     (async () => {
       try {
         const res = await api.get('/dm/overview');
         if (res.data?.success) setOverview(res.data.data);
       } catch {
-        // overview 영역 X = silent fallback (옛 영역 영구 정합)
+        // 실패 시 아래 렌더에서 목록 기반 폴백 값으로 표시 (빈 화면 차단)
+      } finally {
+        setOverviewTried(true);
       }
     })();
   }, [mode]);
@@ -151,7 +212,7 @@ export default function DmBuilderPage() {
   const handleAutoGenerate = useCallback(async (opts: { prompt?: string; scenario?: string }) => {
     if (generating) return;
     if (!opts.prompt && !opts.scenario) {
-      setToast({ type: 'error', message: '프롬프트 또는 시나리오 영역 필요' });
+      setToast({ type: 'error', message: '만들 내용을 한 줄로 입력하거나 빠른 시작을 골라주세요.' });
       return;
     }
     setGenerating(true);
@@ -289,6 +350,22 @@ export default function DmBuilderPage() {
         }
       },
     });
+  };
+
+  // ★ 2026-06-13: DM 복제 (AI 호출 0 = 크레딧 차감 없음)
+  const [cloningId, setCloningId] = useState<string | null>(null);
+  const handleClone = async (id: string) => {
+    if (cloningId) return;
+    setCloningId(id);
+    try {
+      await api.post(`/dm/${id}/clone`);
+      setToast({ type: 'success', message: '복제했어요. "사본"으로 추가됐어요.' });
+      await refreshList();
+    } catch (err: any) {
+      setToast({ type: 'error', message: err?.response?.data?.error || '복제 실패' });
+    } finally {
+      setCloningId(null);
+    }
   };
 
   const handleBackToList = () => {
@@ -449,6 +526,16 @@ export default function DmBuilderPage() {
   }
 
   // ── 목록 모드 ──
+  // overview 폴백 — 실패/지연 시에도 화면이 비지 않게 목록 길이로 전체 DM 수만 채움
+  const ov = overview ?? {
+    total_dm: list.length,
+    published_dm: 0,
+    total_views_30d: 0,
+    unique_viewers_30d: 0,
+    total_responses_30d: 0,
+    avg_ctr_30d: 0,
+  };
+  const metricsLoading = !overviewTried;
   return (
     <div style={{ minHeight: '100vh', background: 'linear-gradient(135deg,#020617,#0f172a,#020617)', fontFamily: 'var(--dm-font-primary)', color: '#fff' }}>
       <header style={{ background: 'rgba(2,6,23,0.8)', backdropFilter: 'blur(8px)', borderBottom: '1px solid rgba(255,255,255,0.1)', padding: '16px 32px', display: 'flex', alignItems: 'center', gap: 16 }}>
@@ -574,21 +661,13 @@ export default function DmBuilderPage() {
               빠른 시작 — 카드 클릭 시 AI가 자동으로 섹션 + 카피 생성 후 편집 모드 진입
             </div>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 10 }}>
-              {[
-                { icon: '🛍️', label: '신상품 출시', hint: '상품 슬라이드 + 구매 유도',  gradient: 'linear-gradient(135deg, rgba(139, 92, 246, 0.25), rgba(168, 85, 247, 0.15))', border: 'rgba(168, 85, 247, 0.4)',  hover: 'rgba(168, 85, 247, 0.30)' },
-                { icon: '🏷️', label: '시즌 세일',  hint: '카운트다운 + 쿠폰 + CTA',     gradient: 'linear-gradient(135deg, rgba(244, 63, 94, 0.25), rgba(239, 68, 68, 0.15))',  border: 'rgba(244, 63, 94, 0.4)',  hover: 'rgba(244, 63, 94, 0.30)' },
-                { icon: '🎁', label: '추첨 이벤트', hint: '응모 form + 자동 추첨',       gradient: 'linear-gradient(135deg, rgba(245, 158, 11, 0.25), rgba(249, 115, 22, 0.15))', border: 'rgba(245, 158, 11, 0.4)', hover: 'rgba(245, 158, 11, 0.30)' },
-                { icon: '🗺️', label: '매장 안내',  hint: '지도 + 매장 위치',            gradient: 'linear-gradient(135deg, rgba(16, 185, 129, 0.25), rgba(20, 184, 166, 0.15))', border: 'rgba(16, 185, 129, 0.4)', hover: 'rgba(16, 185, 129, 0.30)' },
-                { icon: '📝', label: '설문 + 보상', hint: '설문 + 즉시 쿠폰 발급',       gradient: 'linear-gradient(135deg, rgba(14, 165, 233, 0.25), rgba(6, 182, 212, 0.15))',  border: 'rgba(14, 165, 233, 0.4)', hover: 'rgba(14, 165, 233, 0.30)' },
-                { icon: '✉️', label: '신규 환영',  hint: '이메일 수집 + 쿠폰',          gradient: 'linear-gradient(135deg, rgba(217, 70, 239, 0.25), rgba(236, 72, 153, 0.15))', border: 'rgba(217, 70, 239, 0.4)', hover: 'rgba(217, 70, 239, 0.30)' },
-                { icon: '🎡', label: '룰렛 이벤트', hint: '8 영역 회전 + 자동 당첨',     gradient: 'linear-gradient(135deg, rgba(99, 102, 241, 0.25), rgba(139, 92, 246, 0.15))',  border: 'rgba(99, 102, 241, 0.4)', hover: 'rgba(99, 102, 241, 0.30)' },
-              ].map((s) => (
+              {QUICK_STARTS.map((s) => (
                 <button
                   key={s.label}
                   onClick={() => { void handleAutoGenerate({ scenario: s.label }); }}
                   disabled={generating}
                   style={{
-                    padding: '14px 10px',
+                    padding: '14px 10px 12px',
                     background: s.gradient,
                     border: `1px solid ${s.border}`,
                     borderRadius: 12,
@@ -611,7 +690,8 @@ export default function DmBuilderPage() {
                     e.currentTarget.style.borderColor = s.border;
                   }}
                 >
-                  <div style={{ fontSize: 26, marginBottom: 6 }}>{s.icon}</div>
+                  <div style={{ marginBottom: 8 }}><DmThumbnail types={s.thumbTypes} /></div>
+                  <div style={{ fontSize: 18, marginBottom: 2 }}>{s.icon}</div>
                   <div style={{ fontSize: 13, fontWeight: 700, color: '#fff', marginBottom: 4 }}>{s.label}</div>
                   <div style={{ fontSize: 10, color: 'rgba(255,255,255,0.6)', lineHeight: 1.4 }}>{s.hint}</div>
                 </button>
@@ -641,75 +721,73 @@ export default function DmBuilderPage() {
           </button>
         </div>
 
-        {/* ★ D216+ 5 metric 요약 (overview endpoint) */}
-        {overview && (
-          <div style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))',
-            gap: 10,
-            marginBottom: 20,
-          }}>
-            {[
-              { label: '전체 DM', value: overview.total_dm, accent: '#a855f7' },
-              { label: '발행', value: overview.published_dm, accent: '#10b981' },
-              { label: '30일 열람', value: overview.total_views_30d.toLocaleString(), accent: '#06b6d4' },
-              { label: '고유 시청자', value: overview.unique_viewers_30d.toLocaleString(), accent: '#f59e0b' },
-              { label: '평균 CTR', value: `${overview.avg_ctr_30d}%`, accent: '#ec4899' },
-            ].map((m) => (
-              <div key={m.label} style={{
-                background: 'rgba(255,255,255,0.04)',
-                border: '1px solid rgba(255,255,255,0.1)',
-                borderRadius: 12,
-                padding: 14,
-              }}>
-                <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.5)', marginBottom: 4 }}>{m.label}</div>
-                <div style={{ fontSize: 20, fontWeight: 800, color: m.accent }}>{m.value}</div>
-              </div>
-            ))}
-          </div>
-        )}
+        {/* 내 DM 현황 — 지표는 항상 표시 (로딩 중 스켈레톤, 실패해도 0으로) */}
+        <div style={{ fontSize: 13, fontWeight: 700, color: 'rgba(255,255,255,0.85)', margin: '4px 4px 10px' }}>내 DM 현황</div>
+        <div style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))',
+          gap: 10,
+          marginBottom: 20,
+        }}>
+          {[
+            { label: '전체 DM', value: metricsLoading ? '—' : ov.total_dm.toLocaleString(), accent: '#a855f7' },
+            { label: '발행', value: metricsLoading ? '—' : ov.published_dm.toLocaleString(), accent: '#10b981' },
+            { label: '30일 열람', value: metricsLoading ? '—' : ov.total_views_30d.toLocaleString(), accent: '#06b6d4' },
+            { label: '고유 시청자', value: metricsLoading ? '—' : ov.unique_viewers_30d.toLocaleString(), accent: '#f59e0b' },
+            { label: '평균 클릭률', value: metricsLoading ? '—' : `${ov.avg_ctr_30d}%`, accent: '#ec4899' },
+          ].map((m) => (
+            <div key={m.label} style={{
+              background: 'rgba(255,255,255,0.04)',
+              border: '1px solid rgba(255,255,255,0.1)',
+              borderRadius: 12,
+              padding: 14,
+            }}>
+              <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.5)', marginBottom: 4 }}>{m.label}</div>
+              <div style={{ fontSize: 20, fontWeight: 800, color: metricsLoading ? 'rgba(255,255,255,0.25)' : m.accent }}>{m.value}</div>
+            </div>
+          ))}
+        </div>
 
-        {/* ★ D216+ AI 자율 진단 카드 — design_quality_minimum_journey_level 영구 룰 정합 */}
-        {overview && (
-          <div style={{
-            background: 'linear-gradient(135deg, rgba(139, 92, 246, 0.15), rgba(168, 85, 247, 0.10), rgba(217, 70, 239, 0.15))',
-            border: '1px solid rgba(168, 85, 247, 0.3)',
-            borderRadius: 14,
-            padding: 18,
-            marginBottom: 20,
-          }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
-              <span style={{ fontSize: 18 }}>✨</span>
-              <span style={{ fontSize: 13, fontWeight: 700, color: '#fff' }}>AI 자율 진단</span>
-              <span style={{ fontSize: 10, padding: '2px 6px', background: 'rgba(168, 85, 247, 0.3)', color: '#e9d5ff', borderRadius: 10, fontWeight: 700 }}>실시간</span>
-            </div>
-            <div style={{ fontSize: 14, color: '#fff', lineHeight: 1.6, marginBottom: 6 }}>
-              {(() => {
-                if (overview.total_dm === 0) return '첫 DM 자동 생성 권장 — 위 빠른 시작 카드 1 클릭 시 AI 자동 흐름 진입';
-                if (overview.published_dm === 0) return `${overview.total_dm}개 DM 작성 중 — 발행 영역 진입 권장 (검수 + 발행 흐름)`;
-                if (overview.total_views_30d < 50) return `발행 영역 ${overview.published_dm}개 — 발송 데이터 누적 후 정확 진단 가능 영역`;
-                if (overview.avg_ctr_30d >= 5) return `CTR ${overview.avg_ctr_30d}% — 우수 영역 정합 / Top CTR DM 영역 패턴 재활용 권장`;
-                if (overview.avg_ctr_30d >= 2) return `CTR ${overview.avg_ctr_30d}% — 평균 영역 / 1-click 액션 (카피 다듬기) 활용 시 개선 가능`;
-                return `CTR ${overview.avg_ctr_30d}% — 개선 권장 / CTA 위치 + 카피 + 이미지 정합 검토 의무`;
-              })()}
-            </div>
-            <div style={{ fontSize: 10, color: 'rgba(255,255,255,0.4)', fontStyle: 'italic', marginTop: 8 }}>
-              Data source — dm_pages + dm_views (최근 30일) + dm_event_responses 통합 매트릭스
-            </div>
+        {/* AI 진단 카드 — 항상 표시 (자연 한국어) */}
+        <div style={{
+          background: 'linear-gradient(135deg, rgba(139, 92, 246, 0.15), rgba(168, 85, 247, 0.10), rgba(217, 70, 239, 0.15))',
+          border: '1px solid rgba(168, 85, 247, 0.3)',
+          borderRadius: 14,
+          padding: 18,
+          marginBottom: 20,
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+            <span style={{ fontSize: 18 }}>✨</span>
+            <span style={{ fontSize: 13, fontWeight: 700, color: '#fff' }}>AI 진단</span>
+            <span style={{ fontSize: 10, padding: '2px 6px', background: 'rgba(168, 85, 247, 0.3)', color: '#e9d5ff', borderRadius: 10, fontWeight: 700 }}>실시간</span>
           </div>
-        )}
+          <div style={{ fontSize: 14, color: '#fff', lineHeight: 1.6, marginBottom: 6 }}>
+            {(() => {
+              if (metricsLoading) return '현황을 불러오는 중이에요.';
+              if (ov.total_dm === 0) return '아직 만든 DM이 없어요. 위 빠른 시작 카드를 누르면 AI가 1분 만에 만들어 드려요.';
+              if (ov.published_dm === 0) return `DM ${ov.total_dm}개를 작성 중이에요. 검수 후 발행하면 고객에게 보낼 수 있어요.`;
+              if (ov.total_views_30d < 50) return `발행한 DM의 열람이 쌓이는 중이에요. 데이터가 더 모이면 정확히 분석해 드릴게요.`;
+              if (ov.avg_ctr_30d >= 5) return `평균 클릭률 ${ov.avg_ctr_30d}% — 아주 좋아요. 성과 좋은 DM의 구성을 다른 캠페인에도 활용해 보세요.`;
+              if (ov.avg_ctr_30d >= 2) return `평균 클릭률 ${ov.avg_ctr_30d}% — 무난해요. AI 카피 다듬기로 더 끌어올릴 수 있어요.`;
+              return `평균 클릭률 ${ov.avg_ctr_30d}% — 개선 여지가 있어요. CTA 위치와 카피, 이미지를 점검해 보세요.`;
+            })()}
+          </div>
+          <div style={{ fontSize: 10, color: 'rgba(255,255,255,0.4)', fontStyle: 'italic', marginTop: 8 }}>
+            집계 — 최근 30일 열람·이벤트 응답 데이터
+          </div>
+        </div>
 
-        {/* ★ D216+ 1-click 액션 3 카드 — color-coded (rose/emerald/amber) */}
-        {overview && overview.total_dm > 0 && (
+        {/* 1-click 액션 3 카드 — DM이 1개 이상일 때 (로딩 중엔 숨김) */}
+        {!metricsLoading && ov.total_dm > 0 && (
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 10, marginBottom: 20 }}>
             {[
-              { icon: '✍️', label: 'AI 카피 다듬기',   desc: '전체 섹션 카피 톤 정합화', gradient: 'linear-gradient(135deg, rgba(244, 63, 94, 0.2), rgba(239, 68, 68, 0.1))',  border: 'rgba(244, 63, 94, 0.4)',  action: 'ai_refine' },
-              { icon: '🎨', label: '디자인 정합화',    desc: '브랜드 킷 색상 자동 적용', gradient: 'linear-gradient(135deg, rgba(16, 185, 129, 0.2), rgba(20, 184, 166, 0.1))', border: 'rgba(16, 185, 129, 0.4)', action: 'design_align' },
-              { icon: '🔗', label: '변수 일관성 확보', desc: 'Liquid 변수 fallback 자동 추가', gradient: 'linear-gradient(135deg, rgba(245, 158, 11, 0.2), rgba(249, 115, 22, 0.1))', border: 'rgba(245, 158, 11, 0.4)', action: 'variable_consistency' },
+              { icon: '✍️', label: 'AI 카피 다듬기',   desc: '전체 섹션 카피 톤을 하나로', gradient: 'linear-gradient(135deg, rgba(244, 63, 94, 0.2), rgba(239, 68, 68, 0.1))',  border: 'rgba(244, 63, 94, 0.4)',  action: 'ai_refine' },
+              { icon: '🎨', label: '디자인 맞추기',    desc: '브랜드 색상 자동 적용',     gradient: 'linear-gradient(135deg, rgba(16, 185, 129, 0.2), rgba(20, 184, 166, 0.1))', border: 'rgba(16, 185, 129, 0.4)', action: 'design_align' },
+              { icon: '🔗', label: '변수 채우기',      desc: '빈 변수에 기본값 자동 보완', gradient: 'linear-gradient(135deg, rgba(245, 158, 11, 0.2), rgba(249, 115, 22, 0.1))', border: 'rgba(245, 158, 11, 0.4)', action: 'variable_consistency' },
             ].map((a) => (
               <button
                 key={a.action}
-                onClick={() => setToast({ type: 'info', message: '편집 모드 진입 후 활용 가능 — DM 선택 후 1-click 액션 영역 활용' })}
+                onClick={() => setToast({ type: 'info', message: 'DM 편집 화면에서 바로 쓸 수 있어요. 먼저 DM을 선택해 주세요.' })}
                 style={{
                   padding: 14,
                   background: a.gradient,
@@ -733,57 +811,68 @@ export default function DmBuilderPage() {
           </div>
         )}
 
-        {/* ★ D216+ 자세히 분석 토글 (Source caption 영구 룰 정합) */}
-        {overview && (
-          <div style={{ marginBottom: 20 }}>
-            <button
-              onClick={() => setDetailExpanded(!detailExpanded)}
-              style={{
-                background: 'transparent',
-                border: '1px solid rgba(255,255,255,0.1)',
-                color: 'rgba(255,255,255,0.7)',
-                padding: '8px 14px',
-                borderRadius: 8,
-                fontSize: 12,
-                cursor: 'pointer',
-                display: 'flex', alignItems: 'center', gap: 6,
-              }}
-            >
-              {detailExpanded ? '▲' : '▼'} 자세히 분석
-            </button>
-            {detailExpanded && (
-              <div style={{
-                marginTop: 12,
-                padding: 14,
-                background: 'rgba(255,255,255,0.03)',
-                border: '1px solid rgba(255,255,255,0.08)',
-                borderRadius: 10,
-              }}>
-                <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.7)', marginBottom: 8 }}>
-                  총 응답 (30일): <strong style={{ color: '#fff' }}>{overview.total_responses_30d.toLocaleString()}건</strong>
-                </div>
-                <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.4)', marginBottom: 8 }}>
-                  CTR = (이벤트 응답 / 열람) × 100. 응답 영역 = poll / survey / email_capture / lucky_draw 등 인터랙션 누적.
-                </div>
-                <div style={{ fontSize: 10, color: 'rgba(255,255,255,0.3)', fontStyle: 'italic' }}>
-                  Data source — dm_views (최근 30일) + dm_event_responses (CT-86~89 통합 매트릭스)
-                </div>
+        {/* 자세히 보기 토글 — 항상 표시 */}
+        <div style={{ marginBottom: 20 }}>
+          <button
+            onClick={() => setDetailExpanded(!detailExpanded)}
+            style={{
+              background: 'transparent',
+              border: '1px solid rgba(255,255,255,0.1)',
+              color: 'rgba(255,255,255,0.7)',
+              padding: '8px 14px',
+              borderRadius: 8,
+              fontSize: 12,
+              cursor: 'pointer',
+              display: 'flex', alignItems: 'center', gap: 6,
+            }}
+          >
+            {detailExpanded ? '▲' : '▼'} 자세히 보기
+          </button>
+          {detailExpanded && (
+            <div style={{
+              marginTop: 12,
+              padding: 14,
+              background: 'rgba(255,255,255,0.03)',
+              border: '1px solid rgba(255,255,255,0.08)',
+              borderRadius: 10,
+            }}>
+              <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.7)', marginBottom: 8 }}>
+                30일 이벤트 응답: <strong style={{ color: '#fff' }}>{ov.total_responses_30d.toLocaleString()}건</strong>
               </div>
-            )}
-          </div>
-        )}
+              <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.4)', marginBottom: 8 }}>
+                클릭률 = 이벤트 응답 ÷ 열람 × 100. 응답은 설문·응모·이메일 수집·추첨 등 고객 인터랙션을 합산해요.
+              </div>
+              <div style={{ fontSize: 10, color: 'rgba(255,255,255,0.3)', fontStyle: 'italic' }}>
+                집계 — 최근 30일 열람 + 이벤트 응답
+              </div>
+            </div>
+          )}
+        </div>
 
         {listLoading ? (
           <div style={{ textAlign: 'center', padding: 60, color: 'rgba(255,255,255,0.5)' }}>불러오는 중...</div>
         ) : list.length === 0 ? (
           <div style={{
-            textAlign: 'center', padding: '40px 20px',
-            color: 'rgba(255,255,255,0.4)', fontSize: 13,
+            textAlign: 'center', padding: '48px 20px',
             background: 'rgba(255,255,255,0.02)',
-            border: '1px dashed rgba(255,255,255,0.08)',
-            borderRadius: 12,
+            border: '1px dashed rgba(255,255,255,0.12)',
+            borderRadius: 14,
+            display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 14,
           }}>
-            아직 만든 DM이 없어요. 위 자연어 입력 / 빠른 시작 카드 / 자유롭게 DM 생성 영역 활용 시작.
+            <div style={{ width: 56, height: 56, borderRadius: '50%', background: 'rgba(168,85,247,0.18)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 28 }}>📱</div>
+            <div style={{ fontSize: 15, fontWeight: 700, color: '#fff' }}>아직 만든 DM이 없어요</div>
+            <div style={{ fontSize: 13, color: 'rgba(255,255,255,0.5)', lineHeight: 1.6 }}>위에서 한 줄만 입력하거나 빠른 시작 카드를 누르면<br />AI가 1분 만에 첫 DM을 만들어 드려요.</div>
+            <button
+              onClick={() => { if (!generating) void handleAutoGenerate({ scenario: QUICK_STARTS[0].label }); }}
+              disabled={generating}
+              style={{
+                marginTop: 4, padding: '10px 20px', borderRadius: 10, border: 'none',
+                background: 'linear-gradient(135deg, #a855f7, #d946ef)', color: '#fff',
+                fontSize: 13, fontWeight: 700, cursor: generating ? 'not-allowed' : 'pointer', opacity: generating ? 0.5 : 1,
+              }}
+            >
+              AI로 첫 DM 만들기
+            </button>
           </div>
         ) : (() => {
           // ★ D216+ 페이징 매트릭스 (Harold 명시 — 가로 3개 × 2열 = 6개)
@@ -802,17 +891,50 @@ export default function DmBuilderPage() {
                 <span>{startIdx}–{endIdx} 표시 중</span>
               </div>
 
-              {/* 카드 영역 — 데스크탑 3 column 정합 + 모바일 자동 반응형 */}
+              {/* 카드 영역 — 고정 트랙 + 가운데 정렬(카드 1~2개여도 중앙). 모바일 1열 자동 */}
               <div style={{
                 display: 'grid',
-                gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 280px), 1fr))',
+                gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 264px))',
+                justifyContent: 'center',
                 gap: 16,
-                maxWidth: 1100,
                 marginBottom: 20,
               }}>
                 {paginatedList.map((dm) => (
-                  <DmCard key={dm.id} dm={dm} onEdit={handleEdit} onDelete={handleDelete} />
+                  <DmCard
+                    key={dm.id}
+                    dm={dm}
+                    onEdit={handleEdit}
+                    onDelete={handleDelete}
+                    onClone={handleClone}
+                    cloning={cloningId === dm.id}
+                  />
                 ))}
+                {/* 희소 상태 — 1~2개면 빈칸을 다음 추천 DM ghost 카드로 (첫 페이지만) */}
+                {safePage === 1 && list.length > 0 && list.length < 3 && (() => {
+                  const used = new Set(list.map((d) => (d.title || '').replace(/ 사본$/, '')));
+                  const next = QUICK_STARTS.find((q) => !used.has(q.label)) || QUICK_STARTS[1];
+                  return (
+                    <button
+                      onClick={() => { if (!generating) void handleAutoGenerate({ scenario: next.label }); }}
+                      disabled={generating}
+                      style={{
+                        border: '1px dashed rgba(255,255,255,0.2)',
+                        borderRadius: 14,
+                        background: 'rgba(255,255,255,0.02)',
+                        cursor: generating ? 'not-allowed' : 'pointer',
+                        display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+                        gap: 10, padding: 16, minHeight: 240, textAlign: 'center',
+                        opacity: generating ? 0.5 : 1, transition: 'all 0.2s',
+                      }}
+                      onMouseEnter={(e) => { if (!generating) e.currentTarget.style.borderColor = 'rgba(168,85,247,0.5)'; }}
+                      onMouseLeave={(e) => { e.currentTarget.style.borderColor = 'rgba(255,255,255,0.2)'; }}
+                    >
+                      <div style={{ width: 44, height: 44, borderRadius: '50%', background: 'rgba(168,85,247,0.2)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 22 }}>{next.icon}</div>
+                      <div style={{ fontSize: 13, fontWeight: 700, color: '#fff' }}>다음 추천 — {next.label}</div>
+                      <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.55)', lineHeight: 1.5 }}>클릭하면 AI가 바로 만들어 드려요</div>
+                    </button>
+                  );
+                })()}
               </div>
 
               {/* 페이징 컨트롤 (totalPages > 1 영역만 표시) */}
@@ -992,14 +1114,21 @@ function EditorModals() {
 
 // EmptyList 영역 영구 폐기 (D216+ 정합 — 자연어 입력 + 빠른 시작 + 자유롭게 DM 생성 영역 흐름 정합)
 
-function DmCard({ dm, onEdit, onDelete }: { dm: DmListItem; onEdit: (id: string, mode?: string) => void; onDelete: (id: string) => void }) {
+function DmCard({ dm, onEdit, onDelete, onClone, cloning }: {
+  dm: DmListItem;
+  onEdit: (id: string, mode?: string) => void;
+  onDelete: (id: string) => void;
+  onClone: (id: string) => void;
+  cloning?: boolean;
+}) {
   const isLegacy = dm.layout_mode === 'slides';
-  // ★ D216+ 톤앤매너 정합 — 다크 톤 + 색상 매핑 (Harold 명시 2026-05-25)
+  const summary = dm.section_summary;
   const statusLabel = (() => {
     switch (dm.approval_status) {
       case 'published': return { label: '발행됨',   bg: 'rgba(16, 185, 129, 0.2)',  border: 'rgba(16, 185, 129, 0.4)',  text: '#6ee7b7' };
       case 'approved':  return { label: '승인됨',   bg: 'rgba(59, 130, 246, 0.2)',  border: 'rgba(59, 130, 246, 0.4)',  text: '#93c5fd' };
       case 'review':    return { label: '검수중',   bg: 'rgba(245, 158, 11, 0.2)',  border: 'rgba(245, 158, 11, 0.4)',  text: '#fcd34d' };
+      case 'rejected':  return { label: '반려됨',   bg: 'rgba(244, 63, 94, 0.18)',  border: 'rgba(244, 63, 94, 0.4)',   text: '#fda4af' };
       default:          return { label: '임시저장', bg: 'rgba(255,255,255,0.08)',   border: 'rgba(255,255,255,0.15)',   text: 'rgba(255,255,255,0.7)' };
     }
   })();
@@ -1010,10 +1139,10 @@ function DmCard({ dm, onEdit, onDelete }: { dm: DmListItem; onEdit: (id: string,
         background: 'rgba(255,255,255,0.04)',
         borderRadius: 14,
         border: '1px solid rgba(255,255,255,0.1)',
-        padding: 16,
+        padding: 14,
         display: 'flex',
         flexDirection: 'column',
-        gap: 8,
+        gap: 10,
         boxShadow: '0 1px 3px rgba(0,0,0,0.2)',
         cursor: 'pointer',
         transition: 'all 0.25s ease',
@@ -1032,6 +1161,11 @@ function DmCard({ dm, onEdit, onDelete }: { dm: DmListItem; onEdit: (id: string,
         e.currentTarget.style.transform = 'translateY(0)';
       }}
     >
+      {/* 폰목업 썸네일 */}
+      <div style={{ background: 'rgba(0,0,0,0.15)', borderRadius: 10, padding: '12px 0' }}>
+        <DmThumbnail types={summary?.types} accent={summary?.accent} pageCount={dm.page_count} />
+      </div>
+
       <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 8 }}>
         <div style={{ fontSize: 14, fontWeight: 700, color: '#fff', flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
           {dm.title || '(제목 없음)'}
@@ -1040,31 +1174,32 @@ function DmCard({ dm, onEdit, onDelete }: { dm: DmListItem; onEdit: (id: string,
           <span style={{ fontSize: 10, padding: '2px 6px', background: 'rgba(245, 158, 11, 0.2)', border: '1px solid rgba(245, 158, 11, 0.4)', color: '#fcd34d', borderRadius: 6, whiteSpace: 'nowrap', fontWeight: 700 }}>레거시</span>
         )}
       </div>
-      {dm.store_name && <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.5)' }}>{dm.store_name}</div>}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4 }}>
+      {(dm.store_name || summary?.headline) && (
+        <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.5)', marginTop: -4, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          {dm.store_name || summary?.headline}
+        </div>
+      )}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
         <span style={{ fontSize: 10, padding: '3px 8px', background: statusLabel.bg, border: `1px solid ${statusLabel.border}`, color: statusLabel.text, borderRadius: 6, fontWeight: 700 }}>
           {statusLabel.label}
         </span>
         {typeof dm.view_count === 'number' && dm.view_count > 0 && (
-          <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.4)' }}>조회 {dm.view_count.toLocaleString()}</span>
+          <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.4)' }}>열람 {dm.view_count.toLocaleString()}</span>
+        )}
+        {summary && summary.count > 0 && (
+          <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.4)' }}>섹션 {summary.count}개</span>
         )}
       </div>
       <div style={{ flex: 1 }} />
-      <div style={{ display: 'flex', gap: 6, marginTop: 4 }} onClick={(e) => e.stopPropagation()}>
+      <div style={{ display: 'flex', gap: 6 }} onClick={(e) => e.stopPropagation()}>
         <button
           onClick={() => onEdit(dm.id, dm.layout_mode)}
           style={{
-            flex: 1,
-            height: 32,
+            flex: 1, height: 32,
             background: 'linear-gradient(135deg, #8b5cf6, #a855f7)',
-            color: '#fff',
-            border: 'none',
-            borderRadius: 8,
-            fontSize: 12,
-            fontWeight: 700,
-            cursor: 'pointer',
-            transition: 'all 0.2s',
-            boxShadow: '0 1px 3px rgba(168, 85, 247, 0.3)',
+            color: '#fff', border: 'none', borderRadius: 8,
+            fontSize: 12, fontWeight: 700, cursor: 'pointer',
+            transition: 'all 0.2s', boxShadow: '0 1px 3px rgba(168, 85, 247, 0.3)',
           }}
           onMouseEnter={(e) => { e.currentTarget.style.boxShadow = '0 4px 12px rgba(168, 85, 247, 0.5)'; }}
           onMouseLeave={(e) => { e.currentTarget.style.boxShadow = '0 1px 3px rgba(168, 85, 247, 0.3)'; }}
@@ -1072,18 +1207,29 @@ function DmCard({ dm, onEdit, onDelete }: { dm: DmListItem; onEdit: (id: string,
           편집
         </button>
         <button
-          onClick={() => onDelete(dm.id)}
+          onClick={() => onClone(dm.id)}
+          disabled={cloning}
+          title="복제"
           style={{
-            height: 32,
-            padding: '0 12px',
-            background: 'rgba(244, 63, 94, 0.1)',
-            color: '#fda4af',
-            border: '1px solid rgba(244, 63, 94, 0.3)',
-            borderRadius: 8,
-            fontSize: 12,
-            fontWeight: 600,
-            cursor: 'pointer',
-            transition: 'all 0.2s',
+            height: 32, padding: '0 10px',
+            background: 'rgba(255,255,255,0.06)', color: 'rgba(255,255,255,0.8)',
+            border: '1px solid rgba(255,255,255,0.15)', borderRadius: 8,
+            fontSize: 12, fontWeight: 600, cursor: cloning ? 'wait' : 'pointer',
+            transition: 'all 0.2s', opacity: cloning ? 0.5 : 1,
+          }}
+          onMouseEnter={(e) => { if (!cloning) e.currentTarget.style.background = 'rgba(255,255,255,0.12)'; }}
+          onMouseLeave={(e) => { e.currentTarget.style.background = 'rgba(255,255,255,0.06)'; }}
+        >
+          {cloning ? '복제 중' : '복제'}
+        </button>
+        <button
+          onClick={() => onDelete(dm.id)}
+          title="삭제"
+          style={{
+            height: 32, padding: '0 10px',
+            background: 'rgba(244, 63, 94, 0.1)', color: '#fda4af',
+            border: '1px solid rgba(244, 63, 94, 0.3)', borderRadius: 8,
+            fontSize: 12, fontWeight: 600, cursor: 'pointer', transition: 'all 0.2s',
           }}
           onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(244, 63, 94, 0.2)'; e.currentTarget.style.borderColor = 'rgba(244, 63, 94, 0.5)'; }}
           onMouseLeave={(e) => { e.currentTarget.style.background = 'rgba(244, 63, 94, 0.1)'; e.currentTarget.style.borderColor = 'rgba(244, 63, 94, 0.3)'; }}

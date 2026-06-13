@@ -221,16 +221,103 @@ export async function deleteDm(id: string, companyId: string) {
   return (result.rowCount ?? 0) > 0;
 }
 
+/** 목록 카드 폰목업 썸네일용 경량 요약 (sections 원본은 응답에 싣지 않음) */
+export interface DmSectionSummary {
+  types: string[];        // visible 섹션 type (order순, 최대 6)
+  headline: string | null;
+  accent: string | null;  // brand_kit primary_color
+  count: number;          // 전체 섹션(또는 legacy 슬라이드) 수
+}
+
+const SECTION_SUMMARY_MAX_TYPES = 6;
+
+/**
+ * dm_pages 한 행(sections/pages/brand_kit) → 썸네일 요약. 순수(DB/AI 의존 0) — verify 스크립트 대상.
+ * sections(D125) 우선, 없으면 legacy pages 길이만 count.
+ */
+export function buildSectionSummary(row: { sections?: any; pages?: any; brand_kit?: any }): DmSectionSummary {
+  const bk = row.brand_kit && typeof row.brand_kit === 'object' ? row.brand_kit : null;
+  const accent = bk && bk.primary_color ? String(bk.primary_color) : null;
+
+  const sections = Array.isArray(row.sections) ? row.sections : null;
+  if (sections && sections.length > 0) {
+    const visible = sections
+      .filter((s: any) => s && s.type && s.visible !== false)
+      .sort((a: any, b: any) => (Number(a.order) || 0) - (Number(b.order) || 0));
+    const types = visible.slice(0, SECTION_SUMMARY_MAX_TYPES).map((s: any) => String(s.type));
+    let headline: string | null = null;
+    for (const s of visible) {
+      const p = (s && s.props) || {};
+      const cand = p.headline || p.brand_name || p.body || p.title || null;
+      if (cand && String(cand).trim()) { headline = String(cand).trim().slice(0, 60); break; }
+    }
+    return { types, headline, accent, count: visible.length };
+  }
+
+  const pages = Array.isArray(row.pages) ? row.pages : null;
+  return { types: [], headline: null, accent, count: pages ? pages.length : 0 };
+}
+
 export async function getDmList(companyId: string) {
+  // raw pages는 전송하지 않음 — 길이만 page_count로 SQL 집계(jsonb_array_length). sections/brand_kit만 요약 계산에 사용.
   const result = await query(
-    `SELECT id, title, store_name, status, short_code, view_count,
+    `SELECT id, title, store_name, status, approval_status, layout_mode,
+            short_code, view_count, sections, brand_kit,
             COALESCE(jsonb_array_length(pages), 0) as page_count,
             created_at, updated_at
      FROM dm_pages WHERE company_id = $1
      ORDER BY updated_at DESC`,
     [companyId]
   );
-  return result.rows;
+  // sections/brand_kit 원본은 요약으로 압축해 응답에서 제거(목록 payload 경량)
+  return result.rows.map((row: any) => {
+    const summary = buildSectionSummary(row);
+    // legacy(슬라이드) DM은 sections가 없어 summary.count=0 → SQL 집계한 page_count로 보정
+    if (summary.types.length === 0 && summary.count === 0) {
+      summary.count = Number(row.page_count) || 0;
+    }
+    return {
+      id: row.id,
+      title: row.title,
+      store_name: row.store_name,
+      status: row.status,
+      approval_status: row.approval_status,
+      layout_mode: row.layout_mode,
+      short_code: row.short_code,
+      view_count: row.view_count,
+      page_count: row.page_count,
+      section_summary: summary,
+      created_at: row.created_at,
+      updated_at: row.updated_at,
+    };
+  });
+}
+
+/**
+ * DM 복제 — 콘텐츠 컬럼 INSERT...SELECT 복사 + 상태 초기화(draft / 단축URL·조회수 reset). 회사 격리.
+ * AI 호출 0 = 크레딧 차감 없음.
+ */
+export async function cloneDm(id: string, companyId: string, userId: string) {
+  const result = await query(
+    `INSERT INTO dm_pages (
+       company_id, created_by, title, store_name,
+       header_template, footer_template, header_data, footer_data,
+       pages, settings, layout_mode, sections, brand_kit, template_id, ai_prompt,
+       event_type, personalization_strategy, quick_start_scenario,
+       status, approval_status, short_code, view_count
+     )
+     SELECT
+       company_id, $3, LEFT(COALESCE(NULLIF(title, ''), '제목 없음') || ' 사본', 200), store_name,
+       header_template, footer_template, header_data, footer_data,
+       pages, settings, layout_mode, sections, brand_kit, template_id, ai_prompt,
+       event_type, personalization_strategy, quick_start_scenario,
+       'draft', 'draft', NULL, 0
+     FROM dm_pages
+     WHERE id = $1 AND company_id = $2
+     RETURNING *`,
+    [id, companyId, userId]
+  );
+  return result.rows[0] || null;
 }
 
 export async function getDmDetail(id: string, companyId: string) {
