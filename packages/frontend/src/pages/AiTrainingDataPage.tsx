@@ -21,6 +21,7 @@ interface Overview {
   sources: { key: string; count: number }[];
   trend: { day: string; count: number }[];
   preference: { accepted: number; rejected: number };
+  spamFilter: { block: number; pass: number };
   datasets: { generation: number; preference: number; spam: number };
 }
 
@@ -176,17 +177,18 @@ export default function AiTrainingDataPage() {
                 <div className="flex items-center gap-2 mb-4"><FileJson className="w-4 h-4 text-amber-300" /><h3 className="text-sm font-semibold">export 데이터셋 준비도</h3></div>
                 <div className="grid grid-cols-3 gap-2">
                   {[
-                    { k: 'generation', label: '생성(입력→메시지)', v: data.datasets.generation, c: 'from-violet-400 to-fuchsia-500' },
-                    { k: 'preference', label: '선호(KTO)', v: data.datasets.preference, c: 'from-emerald-400 to-teal-500' },
-                    { k: 'spam', label: '스팸 분류', v: data.datasets.spam, c: 'from-amber-400 to-orange-500' },
+                    { k: 'generation', label: '생성(입력→메시지)', v: data.datasets.generation, c: 'from-violet-400 to-fuchsia-500', sub: '' },
+                    { k: 'preference', label: '선호(KTO)', v: data.datasets.preference, c: 'from-emerald-400 to-teal-500', sub: '' },
+                    { k: 'spam', label: '스팸 분류', v: data.datasets.spam, c: 'from-amber-400 to-orange-500', sub: `차단 ${(data.spamFilter?.block ?? 0).toLocaleString()} 포함` },
                   ].map((d) => (
                     <div key={d.k} className="p-3 bg-white/5 border border-white/10 rounded-xl text-center">
                       <div className={`text-lg font-bold bg-gradient-to-r ${d.c} bg-clip-text text-transparent`}>{d.v.toLocaleString()}</div>
                       <div className="text-[10px] text-white/50 mt-1 leading-snug">{d.label}</div>
+                      {d.sub && <div className="text-[10px] text-rose-300/80 mt-0.5 font-mono">{d.sub}</div>}
                     </div>
                   ))}
                 </div>
-                <div className="text-[10px] text-white/30 italic mt-3">Data source — export-training-data 스크립트가 뽑는 JSONL 분량</div>
+                <div className="text-[10px] text-white/30 italic mt-3">Data source — export-training-data JSONL (발송 학습 + 스팸필터 판정 문안)</div>
               </div>
             </div>
 

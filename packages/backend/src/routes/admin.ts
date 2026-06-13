@@ -2794,7 +2794,8 @@ router.get('/ai-training/overview', authenticate, requireSuperAdmin, async (req:
         COUNT(*) FILTER (WHERE sent_count IS NOT NULL)::int AS metrics_filled,
         COUNT(*) FILTER (WHERE send_at > NOW() - INTERVAL '7 days')::int AS last_7d,
         COUNT(*) FILTER (WHERE send_at > NOW() - INTERVAL '30 days')::int AS last_30d,
-        COUNT(*) FILTER (WHERE user_prompt IS NOT NULL AND user_prompt <> '')::int AS with_prompt
+        COUNT(*) FILTER (WHERE user_prompt IS NOT NULL AND user_prompt <> '')::int AS with_prompt,
+        COUNT(*) FILTER (WHERE message_features IS NOT NULL)::int AS with_features
       FROM ai_training_logs
     `);
     const channelR = await query(
@@ -2817,9 +2818,24 @@ router.get('/ai-training/overview', authenticate, requireSuperAdmin, async (req:
               COUNT(*) FILTER (WHERE status = 'rejected')::int AS rejected
        FROM operator_proposals`,
     );
+    // 스팸필터 테스트 — 통신사 판정 집계 (buildSpamFilterExample과 동일: test별 하나라도 blocked → block)
+    const spamFilterR = await query(
+      `SELECT COUNT(*) FILTER (WHERE has_blocked)::int AS block,
+              COUNT(*) FILTER (WHERE NOT has_blocked AND has_pass)::int AS pass
+       FROM (
+         SELECT t.id,
+                bool_or(r.result = 'blocked') AS has_blocked,
+                bool_or(r.result = 'pass') AS has_pass
+         FROM spam_filter_tests t
+         JOIN spam_filter_test_results r ON r.test_id = t.id
+         WHERE COALESCE(NULLIF(t.message_content_lms, ''), NULLIF(t.message_content_sms, '')) IS NOT NULL
+         GROUP BY t.id
+       ) x`,
+    );
 
     const s = summaryR.rows[0] || {};
     const pref = prefR.rows[0] || {};
+    const sf = spamFilterR.rows[0] || {};
     const target = 100000; // SCALING.md Phase 2 데이터 축적 목표
     const total = Number(s.total) || 0;
     return res.json({
@@ -2837,10 +2853,12 @@ router.get('/ai-training/overview', authenticate, requireSuperAdmin, async (req:
       sources: sourceR.rows.map((r: any) => ({ key: r.k, count: Number(r.cnt) || 0 })),
       trend: trendR.rows.map((r: any) => ({ day: r.day, count: Number(r.cnt) || 0 })),
       preference: { accepted: Number(pref.accepted) || 0, rejected: Number(pref.rejected) || 0 },
+      spamFilter: { block: Number(sf.block) || 0, pass: Number(sf.pass) || 0 },
       datasets: {
         generation: Number(s.with_prompt) || 0,
         preference: (Number(pref.accepted) || 0) + (Number(pref.rejected) || 0),
-        spam: total,
+        // 스팸 분류 = ai_training_logs(features 있는 발송) + 스팸필터 테스트(block/pass 판정 문안)
+        spam: (Number(s.with_features) || 0) + (Number(sf.block) || 0) + (Number(sf.pass) || 0),
       },
     });
   } catch (err: any) {
