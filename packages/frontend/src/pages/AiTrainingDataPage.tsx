@@ -8,7 +8,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
-  ArrowLeft, Database, RefreshCw, Loader2, TrendingUp, Layers, ThumbsUp, FileJson, Info,
+  ArrowLeft, Database, RefreshCw, Loader2, TrendingUp, Layers, ThumbsUp, FileJson, Info, ShieldAlert,
 } from 'lucide-react';
 import { useToast } from '../components/ToastProvider';
 
@@ -22,6 +22,7 @@ interface Overview {
   trend: { day: string; count: number }[];
   preference: { accepted: number; rejected: number };
   spamFilter: { block: number; pass: number };
+  spamSamples: { message: string; carriers: string[] }[];
   datasets: { generation: number; preference: number; spam: number };
 }
 
@@ -190,6 +191,41 @@ export default function AiTrainingDataPage() {
                 </div>
                 <div className="text-[10px] text-white/30 italic mt-3">Data source — export-training-data JSONL (발송 학습 + 스팸필터 판정 문안)</div>
               </div>
+            </div>
+
+            {/* 4b. 스팸 분류 학습 — 차단/통과 + 실제 차단된 문안 */}
+            <div className="p-5 bg-white/5 border border-white/10 rounded-2xl">
+              <div className="flex items-center gap-2 mb-4"><ShieldAlert className="w-4 h-4 text-amber-300" /><h3 className="text-sm font-semibold">스팸 분류 학습</h3></div>
+              <div className="flex gap-3 mb-4">
+                <div className="flex-1 p-3 bg-rose-500/10 border border-rose-400/20 rounded-xl text-center">
+                  <div className="text-xl font-bold text-rose-300">{data.spamFilter.block.toLocaleString()}</div>
+                  <div className="text-[10px] text-white/50 mt-0.5">스팸 차단</div>
+                </div>
+                <div className="flex-1 p-3 bg-emerald-500/10 border border-emerald-400/20 rounded-xl text-center">
+                  <div className="text-xl font-bold text-emerald-300">{data.spamFilter.pass.toLocaleString()}</div>
+                  <div className="text-[10px] text-white/50 mt-0.5">정상 통과</div>
+                </div>
+              </div>
+              {data.spamSamples.length > 0 ? (
+                <>
+                  <div className="text-[11px] text-white/50 mb-2">차단된 문안 — 어떤 문구가 스팸으로 처리됐는지</div>
+                  <div className="space-y-1.5">
+                    {data.spamSamples.map((sp, i) => (
+                      <div key={i} className="flex items-start gap-2 p-2.5 bg-white/5 border border-white/10 rounded-lg">
+                        <span className="text-xs text-white/80 flex-1 leading-relaxed break-words">{sp.message}</span>
+                        <div className="flex gap-1 flex-shrink-0 flex-wrap justify-end max-w-[110px]">
+                          {sp.carriers.map((c) => (
+                            <span key={c} className="text-[9px] bg-rose-500/20 text-rose-200 px-1.5 py-0.5 rounded font-mono">{c}</span>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </>
+              ) : (
+                <div className="text-center py-4 text-white/40 text-xs">차단된 문안이 아직 없습니다.</div>
+              )}
+              <div className="text-[10px] text-white/30 italic mt-3">Data source — spam_filter_test_results.result='blocked' 문안 (통신사 스팸 판정 실측)</div>
             </div>
 
             {/* 5. 일별 적재 추이 */}

@@ -2832,6 +2832,21 @@ router.get('/ai-training/overview', authenticate, requireSuperAdmin, async (req:
          GROUP BY t.id
        ) x`,
     );
+    // 차단된 문안 샘플 (어떤 문구가 스팸 처리됐는지 — 최근순 12건, 통신사 동봉)
+    const spamSamplesR = await query(
+      `SELECT msg, carriers FROM (
+         SELECT COALESCE(NULLIF(t.message_content_lms,''), NULLIF(t.message_content_sms,'')) AS msg,
+                array_agg(DISTINCT r.carrier) FILTER (WHERE r.result = 'blocked') AS carriers,
+                MAX(t.created_at) AS last_at
+         FROM spam_filter_tests t
+         JOIN spam_filter_test_results r ON r.test_id = t.id
+         WHERE COALESCE(NULLIF(t.message_content_lms,''), NULLIF(t.message_content_sms,'')) IS NOT NULL
+         GROUP BY t.id, msg
+         HAVING bool_or(r.result = 'blocked')
+       ) x
+       ORDER BY last_at DESC
+       LIMIT 12`,
+    );
 
     const s = summaryR.rows[0] || {};
     const pref = prefR.rows[0] || {};
@@ -2854,6 +2869,10 @@ router.get('/ai-training/overview', authenticate, requireSuperAdmin, async (req:
       trend: trendR.rows.map((r: any) => ({ day: r.day, count: Number(r.cnt) || 0 })),
       preference: { accepted: Number(pref.accepted) || 0, rejected: Number(pref.rejected) || 0 },
       spamFilter: { block: Number(sf.block) || 0, pass: Number(sf.pass) || 0 },
+      spamSamples: spamSamplesR.rows.map((r: any) => ({
+        message: String(r.msg || '').slice(0, 140),
+        carriers: Array.isArray(r.carriers) ? r.carriers.filter(Boolean) : [],
+      })),
       datasets: {
         generation: Number(s.with_prompt) || 0,
         preference: (Number(pref.accepted) || 0) + (Number(pref.rejected) || 0),
