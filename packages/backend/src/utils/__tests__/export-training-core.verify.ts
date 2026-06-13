@@ -8,6 +8,7 @@ import {
   buildGenerationExample,
   buildPreferenceExample,
   buildSpamExample,
+  buildSpamFilterExample,
   splitTrainVal,
 } from '../export-training-core';
 
@@ -46,6 +47,22 @@ ok('spam_blocked 0/없음 → pass', () => {
 });
 ok('features 없으면 null', () =>
   assert.strictEqual(buildSpamExample({ features: null, spamBlocked: 0 }), null));
+
+console.log('[export-training-core] buildSpamFilterExample — 스팸필터 판정(blocked 하나라도 → block)');
+ok('blocked 포함 → block', () =>
+  assert.strictEqual(buildSpamFilterExample({ features: { char_length: 40 }, results: ['blocked'] })!.label, 'block'));
+ok('전부 pass → pass', () =>
+  assert.strictEqual(buildSpamFilterExample({ features: { char_length: 40 }, results: ['pass', 'pass'] })!.label, 'pass'));
+ok('pass+blocked 혼재 → block (하나라도 차단)', () =>
+  assert.strictEqual(buildSpamFilterExample({ features: { char_length: 40 }, results: ['pass', 'blocked'] })!.label, 'block'));
+ok('pass+timeout → pass (pass 있음)', () =>
+  assert.strictEqual(buildSpamFilterExample({ features: { char_length: 40 }, results: ['pass', 'timeout'] })!.label, 'pass'));
+ok('timeout/failed/빈 배열 → null (판정 불가)', () => {
+  assert.strictEqual(buildSpamFilterExample({ features: { char_length: 40 }, results: ['timeout', 'failed'] }), null);
+  assert.strictEqual(buildSpamFilterExample({ features: { char_length: 40 }, results: [] }), null);
+});
+ok('features 없으면 null (blocked여도)', () =>
+  assert.strictEqual(buildSpamFilterExample({ features: null, results: ['blocked'] }), null));
 
 console.log('[export-training-core] splitTrainVal — 결정적 분리(난수 X)');
 ok('10건 valEvery 5 → train 8 / val 2 (인덱스 4·9)', () => {

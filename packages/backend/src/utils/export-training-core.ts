@@ -66,6 +66,22 @@ export function buildSpamExample(row: {
   return { input: row.features, label: (row.spamBlocked || 0) > 0 ? 'block' : 'pass' };
 }
 
+/**
+ * 스팸필터 테스트 → 분류 — 통신사 판정 중 하나라도 blocked면 block, 전부 pass면 pass.
+ * features 없거나 pass/blocked 판정이 하나도 없으면(timeout/failed/빈값만) 제외.
+ */
+export function buildSpamFilterExample(row: {
+  features: Record<string, unknown> | null;
+  results: string[];
+}): SpamExample | null {
+  if (!row.features) return null;
+  const results = row.results || [];
+  const hasBlocked = results.includes('blocked');
+  const hasPass = results.includes('pass');
+  if (!hasBlocked && !hasPass) return null;
+  return { input: row.features, label: hasBlocked ? 'block' : 'pass' };
+}
+
 /** 학습/검증 결정적 분리 — valEvery마다 1건을 검증셋으로(난수 X, 재현 가능). */
 export function splitTrainVal<T>(examples: T[], valEvery = 5): { train: T[]; val: T[] } {
   const train: T[] = [];

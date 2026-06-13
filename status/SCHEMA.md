@@ -1435,10 +1435,12 @@
 | source | varchar(20) DEFAULT 'manual' | 발원지: manual / auto_campaign |
 | variant_id | varchar(2) (nullable) | A/B 테스트 변형 ID (A/B) |
 | batch_id | uuid (nullable) | 배치 그룹화 ID (자동 테스트용) |
+| subject | text (nullable) | LMS 제목 (2026-06-13 information_schema 실측 확인) |
+| first_recipient | jsonb (nullable) | 첫 수신자 정보 (2026-06-13 information_schema 실측 확인) |
 | status | varchar(20) | active/completed |
-| started_at | timestamptz | 테스트 시작 |
 | completed_at | timestamptz (nullable) | 테스트 완료 |
 | created_at | timestamptz | |
+> ★ 2026-06-13 실측: `started_at` 컬럼은 실DB에 없음(문서 과다였음) — 제거. `subject`·`first_recipient`는 실재(문서 누락이었음).
 - INDEX: idx_spam_filter_tests_company (company_id, created_at DESC)
 - INDEX: idx_spam_filter_tests_status (status) WHERE status = 'active'
 - INDEX: idx_spam_filter_tests_queued (company_id, status, batch_id, variant_id) WHERE status = 'active' — 자동 대기열 조회 최적화
@@ -1451,13 +1453,10 @@
 | carrier | varchar(20) | 통신사 (SKT/KT/LGU) |
 | message_type | varchar(10) | SMS/LMS |
 | phone | varchar(20) | 수신 단말 번호 |
-| sms_table | varchar(50) | MySQL 발송 테이블명 |
-| sms_msgkey | varchar(100) | MySQL 메시지 키 |
-| message_hash | varchar(64) | 메시지 해시 (앱 매칭용) |
 | received | boolean DEFAULT false | 앱 수신 여부 |
 | received_at | timestamptz (nullable) | 앱 수신 시각 |
 | result | varchar(20) (nullable) | 판정: pass/blocked/failed/timeout (D43-7에서 received→pass 전환) |
-| created_at | timestamptz | |
+> ★ 2026-06-13 실측: `sms_table`·`sms_msgkey`·`message_hash`·`created_at` 컬럼은 실DB에 없음(문서 과다였음) — 제거. 실재 컬럼은 위 8개뿐.
 - INDEX: idx_spam_filter_results_test (test_id)
 - INDEX: idx_spam_filter_results_pending (test_id, received) WHERE received = false
 - **result 허용값:** pass(정상수신), blocked(스팸차단), failed(발송실패), timeout(시간초과), NULL(판정 대기)

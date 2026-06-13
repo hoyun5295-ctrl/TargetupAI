@@ -19,11 +19,13 @@ import {
   buildGenerationExample,
   buildPreferenceExample,
   buildSpamExample,
+  buildSpamFilterExample,
   splitTrainVal,
   type ChatExample,
   type KtoExample,
   type SpamExample,
 } from '../src/utils/export-training-core';
+import { computeMessageFeatures } from '../src/utils/training-logger';
 
 function notNull<T>(x: T | null): x is T {
   return x !== null;
@@ -48,6 +50,24 @@ async function main(): Promise<void> {
     .filter(notNull);
   const spam: SpamExample[] = logs.rows
     .map((r: any) => buildSpamExample({ features: r.message_features || null, spamBlocked: r.spam_blocked }))
+    .filter(notNull);
+
+  // 1b) 스팸필터 테스트 → 스팸 분류 (통신사 판정 blocked/pass 실측 문안).
+  //     ai_training_logs spam은 현재 전부 pass라 block label은 여기서만 온다.
+  const spamTests = await pool.query(
+    `SELECT t.id, t.message_content_lms, t.message_content_sms, array_agg(r.result) AS results
+       FROM spam_filter_tests t
+       JOIN spam_filter_test_results r ON r.test_id = t.id
+      GROUP BY t.id`,
+  );
+  const spamFilter: SpamExample[] = spamTests.rows
+    .map((r: any) => {
+      const message = String(r.message_content_lms || r.message_content_sms || '').trim();
+      if (!message) return null;
+      const features = computeMessageFeatures(message) as unknown as Record<string, unknown>;
+      const results = (r.results || []).filter((x: any) => x != null).map((x: any) => String(x));
+      return buildSpamFilterExample({ features, results });
+    })
     .filter(notNull);
 
   // 2) operator 제안 → 선호 KTO (proposal_json에서 메시지 방어적 추출, objective는 operator join)
@@ -83,7 +103,9 @@ async function main(): Promise<void> {
   console.log(`[export] 출력 → ${outDir}`);
   writeSet('generation', generation);
   writeSet('preference', preference);
-  writeSet('spam', spam);
+  const allSpam = [...spam, ...spamFilter];
+  console.log(`  spam 소스 — 발송로그 ${spam.length} / 스팸필터 ${spamFilter.length} (block ${spamFilter.filter((s) => s.label === 'block').length})`);
+  writeSet('spam', allSpam);
   console.log('[export] 완료');
   await pool.end();
 }

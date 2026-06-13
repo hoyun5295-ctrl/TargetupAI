@@ -20,6 +20,8 @@
 import { query } from '../config/database';
 import { sendEmail, isSmtpConfigured, getSmtpConfigPublic } from './company-smtp-client';
 import { applyTracking, UNSUB_URL_MARKER } from './email-tracking';
+import { logCampaignTraining, updateTrainingMetrics, getSourceRef } from './training-logger';
+import { buildEmailTrainingMessage } from './email-training-message';
 
 // ════════════════════════════════════════════════════════════════════
 // 타입
@@ -323,6 +325,26 @@ export async function sendEmailCampaign(input: SendCampaignInput): Promise<{ mes
        WHERE id = $1::uuid`,
       [campaign.id, totalAccepted]
     );
+
+    // 인비토AI 학습 적재 — 이메일 발송 단일 길목(즉시·예약 공통). fire-and-forget, source_ref(campaignId) 멱등, 발송·돈 영향 0.
+    //   finalMessage = 원본 제목+본문(광고 footer 합성 전). 마스킹은 logTrainingData가 별도. metrics = 발송 실측(시도/성공/실패).
+    void logCampaignTraining({
+      campaignId: campaign.id,
+      companyId: campaign.companyId,
+      messageType: 'EMAIL',
+      isAd: campaign.isAd,
+      targetCount: input.recipients.length,
+      finalMessage: buildEmailTrainingMessage(campaign.subject, campaign.textBody, campaign.htmlBody),
+      finalSource: campaign.aiGenerated ? 'selected_as_is' : 'manual',
+      sendAt: new Date(),
+    })
+      .then(() => updateTrainingMetrics({
+        sourceRef: getSourceRef(campaign.id),
+        sentCount: totalAccepted + totalRejected,
+        successCount: totalAccepted,
+        failCount: totalRejected,
+      }))
+      .catch(() => {});
 
     return { messageId: lastMessageId, sentCount: totalAccepted };
   } catch (err: any) {

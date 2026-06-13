@@ -401,6 +401,23 @@ else concat(concat(concat('{"sendercode":"',sender_code),'",'), replace(k_etc_js
 
 ---
 
+## AI 학습 적재 누락 — 발송 경로 재작성이 fire-and-forget 부수효과를 떨굼 (2026-06-13 추가)
+
+### 2026-06-13 — ai_training_logs 적재 급감 (logTrainingData 커버리지 구멍) + cdp_events 0건 정직성
+
+**현상**: 인비토AI 파인튜닝 데이터(`training-logger.ts` → `ai_training_logs`) 적재가 최근 7일 30건으로 급감. 5,158건/54사는 쌓였으나 사실상 멈춤.
+
+**근본**: `logTrainingData` 호출이 `campaigns.ts` 2곳(AI 발송·옛 동기 직접발송)뿐. D231(대량발송 worker화)·D233(자율발송 `createDirectSendCampaign` 공유)·여정 재설계 후 실제 발송이 비동기 `createDirectSendCampaign`→`direct-send-worker`·`journey-executor`로 옮겨갔는데 그 경로에 적재가 안 따라감. 알림톡(KAKAO)은 한 번도 안 잡힘(`message_type` KAKAO 0건이 증거).
+
+**보강**: 공통 헬퍼 `logCampaignTraining`(training-logger) 신설 → 공통 길목 `createDirectSendCampaign` 1곳(직접+자율 동시)+`journey-executor` 발송 지점에 fire-and-forget 연결. source_ref(campaignId) 멱등이라 중복 0, try-catch 격리라 발송·돈 영향 0. operator 제안 선호는 operator_proposals에 이미 있어 export에서 추출(새 적재 0).
+
+**교훈**:
+- **발송 로직을 새 길목(worker·공유 함수)으로 옮길 때, 그 경로에 붙어 있던 fire-and-forget 부수효과(학습 적재·통계 등)도 같이 옮겨야 한다.** await 안 하는 부수효과는 tsc·테스트가 못 잡아 조용히 멈춘다 — 옛 동기 경로만 남아 소량 적재가 이어지면 "0이 아니라서" 발견이 더 늦다.
+- 적재 의심 시 **데이터로 확정**(최근 7일 건수·채널 분포). 특정 채널(KAKAO 등)이 통째 0이면 그 경로 미연결의 증거.
+- 학습·집계가 cdp_events 같은 외부 적재원에 의존하면 **빈 테이블 가능성부터 실측**(cdp_events 전체 0건 → 가짜 0% 메모리 양산). 빈 테이블에 properties 키를 추측해 SQL 짜지 말 것(0번 원칙).
+
+---
+
 ## 자가 검증 매트릭스 (Backend 작업 시)
 
 - [ ] 발송 5경로 전수 점검 (AI/직접/타겟/스케줄/테스트)
