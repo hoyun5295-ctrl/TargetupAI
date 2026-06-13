@@ -177,7 +177,83 @@ function ScenarioScreen({ scenarioKey }: { scenarioKey: QuickStartKey }) {
           <rect x="30" y="115" width="18" height="4" rx="2" fill="#fff" />
         </svg>
       );
-    default: // 신규 시나리오 — 섹션 색블록 스택(헤더 + 비주얼 + 본문 + 버튼)
+    case 'lookbook': // 갤러리 룩북 — 2×2 화보 그리드 + 버튼
+      return (
+        <svg {...common} xmlns="http://www.w3.org/2000/svg">
+          <rect x="10" y="14" width="27" height="27" rx="4" fill="#f5d0fe" />
+          <circle cx="18" cy="23" r="3" fill="#e879f9" />
+          <path d="M12 40 L20 31 L26 37 L35 29 L36 41 L12 41 Z" fill="#d946ef" opacity="0.5" />
+          <rect x="41" y="14" width="27" height="27" rx="4" fill="#ede9fe" />
+          <path d="M43 40 L51 32 L57 38 L66 31 L66 41 L43 41 Z" fill="#a78bfa" opacity="0.6" />
+          <rect x="10" y="45" width="27" height="27" rx="4" fill="#fae8ff" />
+          <path d="M12 71 L20 63 L27 69 L35 61 L36 72 L12 72 Z" fill="#c084fc" opacity="0.55" />
+          <rect x="41" y="45" width="27" height="27" rx="4" fill="#f5d0fe" />
+          <circle cx="49" cy="54" r="3" fill="#e879f9" />
+          <rect x="10" y="80" width="34" height="5" rx="2.5" fill="#cbd5e1" />
+          <rect x="14" y="98" width="50" height="16" rx="8" fill="#d946ef" />
+          <rect x="30" y="104" width="18" height="4" rx="2" fill="#fff" />
+        </svg>
+      );
+    case 'reviews': // 리뷰 모음 — 큰 별점 + 후기 카드 + 버튼
+      return (
+        <svg {...common} xmlns="http://www.w3.org/2000/svg">
+          <path d="M39 12 l3.2 6.5 l7.2 1 l-5.2 5.1 l1.2 7.1 l-6.4 -3.4 l-6.4 3.4 l1.2 -7.1 l-5.2 -5.1 l7.2 -1 Z" fill="#f59e0b" />
+          <rect x="10" y="40" width="58" height="20" rx="4" fill="#fffbeb" />
+          <circle cx="18" cy="48" r="4" fill="#fcd34d" />
+          <g fill="#f59e0b"><circle cx="28" cy="46" r="1.3" /><circle cx="33" cy="46" r="1.3" /><circle cx="38" cy="46" r="1.3" /><circle cx="43" cy="46" r="1.3" /><circle cx="48" cy="46" r="1.3" /></g>
+          <rect x="28" y="52" width="32" height="3" rx="1.5" fill="#fde68a" />
+          <rect x="10" y="64" width="58" height="20" rx="4" fill="#fffbeb" />
+          <circle cx="18" cy="72" r="4" fill="#fcd34d" />
+          <g fill="#f59e0b"><circle cx="28" cy="70" r="1.3" /><circle cx="33" cy="70" r="1.3" /><circle cx="38" cy="70" r="1.3" /><circle cx="43" cy="70" r="1.3" /></g>
+          <rect x="28" y="76" width="26" height="3" rx="1.5" fill="#fde68a" />
+          <rect x="14" y="98" width="50" height="16" rx="8" fill="#f59e0b" />
+          <rect x="30" y="104" width="18" height="4" rx="2" fill="#fff" />
+        </svg>
+      );
+    case 'flashsale': // 선착순 한정특가 — 모래시계 + 잔여 수량 바 + 버튼
+      return (
+        <svg {...common} xmlns="http://www.w3.org/2000/svg">
+          <path d="M26 16 L52 16 L52 20 C52 30 41 33 41 39 C41 45 52 48 52 58 L52 62 L26 62 L26 58 C26 48 37 45 37 39 C37 33 26 30 26 20 Z" fill="none" stroke="#ef4444" strokeWidth="2.4" strokeLinejoin="round" />
+          <path d="M30 21 L48 21 L44 30 L34 30 Z" fill="#f97316" />
+          <path d="M39 42 L46 56 L32 56 Z" fill="#f97316" />
+          <rect x="10" y="74" width="58" height="8" rx="4" fill="#fee2e2" />
+          <rect x="10" y="74" width="22" height="8" rx="4" fill="#ef4444" />
+          <rect x="10" y="86" width="20" height="4" rx="2" fill="#fca5a5" />
+          <rect x="14" y="98" width="50" height="16" rx="8" fill="#ef4444" />
+          <rect x="30" y="104" width="18" height="4" rx="2" fill="#fff" />
+        </svg>
+      );
+    case 'poll': // 실시간 투표 — 막대그래프 결과 + 버튼
+      return (
+        <svg {...common} xmlns="http://www.w3.org/2000/svg">
+          <rect x="10" y="14" width="48" height="6" rx="3" fill="#cbd5e1" />
+          <rect x="10" y="28" width="58" height="9" rx="4.5" fill="#e0f2fe" />
+          <rect x="10" y="28" width="44" height="9" rx="4.5" fill="#06b6d4" />
+          <rect x="10" y="42" width="58" height="9" rx="4.5" fill="#e0f2fe" />
+          <rect x="10" y="42" width="30" height="9" rx="4.5" fill="#3b82f6" />
+          <rect x="10" y="56" width="58" height="9" rx="4.5" fill="#e0f2fe" />
+          <rect x="10" y="56" width="18" height="9" rx="4.5" fill="#0ea5e9" />
+          <rect x="10" y="70" width="58" height="9" rx="4.5" fill="#e0f2fe" />
+          <rect x="10" y="70" width="10" height="9" rx="4.5" fill="#22d3ee" />
+          <rect x="14" y="98" width="50" height="16" rx="8" fill="#06b6d4" />
+          <rect x="30" y="104" width="18" height="4" rx="2" fill="#fff" />
+        </svg>
+      );
+    case 'vip': // VIP 초대 — 왕관 + 프로모션 코드 + 버튼
+      return (
+        <svg {...common} xmlns="http://www.w3.org/2000/svg">
+          <path d="M22 40 L19 18 L30 30 L39 14 L48 30 L59 18 L56 40 Z" fill="#fbbf24" stroke="#f59e0b" strokeWidth="1.4" strokeLinejoin="round" />
+          <rect x="22" y="42" width="34" height="6" rx="2" fill="#f59e0b" />
+          <circle cx="39" cy="26" r="2.4" fill="#fff" />
+          <rect x="12" y="60" width="54" height="20" rx="5" fill="#312e81" stroke="#818cf8" strokeWidth="1.4" strokeDasharray="4 3" />
+          <rect x="20" y="68" width="30" height="5" rx="2.5" fill="#c7d2fe" />
+          <rect x="54" y="67" width="6" height="7" rx="1.5" fill="#fbbf24" />
+          <rect x="16" y="86" width="46" height="4" rx="2" fill="#e0e7ff" />
+          <rect x="14" y="98" width="50" height="16" rx="8" fill="#6366f1" />
+          <rect x="30" y="104" width="18" height="4" rx="2" fill="#fff" />
+        </svg>
+      );
+    default: // 미지정 키 안전망 — 섹션 색블록 스택
       return (
         <svg {...common} xmlns="http://www.w3.org/2000/svg">
           <rect x="10" y="14" width="58" height="12" rx="3" fill="#a78bfa" />
