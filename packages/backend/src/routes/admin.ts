@@ -27,6 +27,8 @@ const router = Router();
 router.get('/users', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
   try {
     // ★ D131 후속(2026-04-21): system_sync_xxx Sync Agent 가상 계정 목록 노출 제외
+    // ★ 2026-06-13 첫 로딩 속도: 행당 상관 서브쿼리(사용자 173명 × 2회 = 24만 행 customers 346회 탐침)
+    //   → 집계 1회 GROUP BY JOIN. 값 동일(상관 COUNT 0 ↔ 그룹 부재 COALESCE 0).
     const result = await query(`
       SELECT
         u.id, u.login_id, u.name, u.email, u.phone, u.department,
@@ -35,11 +37,15 @@ router.get('/users', authenticate, requireSuperAdmin, async (req: Request, res: 
         u.opt_out_080_number, u.opt_out_auto_sync,
         c.company_name,
         lg.group_name as line_group_name,
-        (SELECT COUNT(*) FROM unsubscribes WHERE user_id = u.id) as unsubscribe_count,
-        (SELECT COUNT(*) FROM customers WHERE uploaded_by = u.id AND is_active = true) as uploaded_customer_count
+        COALESCE(uns.cnt, 0) as unsubscribe_count,
+        COALESCE(cust.cnt, 0) as uploaded_customer_count
       FROM users u
       LEFT JOIN companies c ON u.company_id = c.id
       LEFT JOIN sms_line_groups lg ON u.line_group_id = lg.id
+      LEFT JOIN (SELECT user_id, COUNT(*) AS cnt FROM unsubscribes GROUP BY user_id) uns
+        ON uns.user_id = u.id
+      LEFT JOIN (SELECT uploaded_by, COUNT(*) AS cnt FROM customers WHERE is_active = true GROUP BY uploaded_by) cust
+        ON cust.uploaded_by = u.id
       WHERE COALESCE(u.is_system, false) = false
       ORDER BY u.created_at DESC
     `);

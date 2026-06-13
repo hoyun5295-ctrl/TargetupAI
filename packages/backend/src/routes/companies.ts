@@ -1346,12 +1346,16 @@ router.get('/', requireSuperAdmin, async (req: Request, res: Response) => {
     const total = parseInt(countResult.rows[0].count);
 
     params.push(Number(limit), offset);
-    // ★ D114 P9: total_customers 서브쿼리 추가 — 슈퍼관리자 고객사 목록에 고객 수 표시
+    // ★ D114 P9: total_customers — 슈퍼관리자 고객사 목록에 고객 수 표시
+    // ★ 2026-06-13 첫 로딩 속도: 행당 상관 서브쿼리(회사 76개 × 24만 행 customers 탐침)
+    //   → 집계 1회 GROUP BY JOIN. 값 동일(상관 COUNT 0 ↔ 그룹 부재 COALESCE 0).
     const result = await query(
       `SELECT c.*, p.plan_name, p.plan_code,
-              (SELECT COUNT(*) FROM customers WHERE company_id = c.id AND is_active = true) as total_customers
+              COALESCE(cust.cnt, 0) as total_customers
        FROM companies c
        LEFT JOIN plans p ON c.plan_id = p.id
+       LEFT JOIN (SELECT company_id, COUNT(*) AS cnt FROM customers WHERE is_active = true GROUP BY company_id) cust
+         ON cust.company_id = c.id
        ${whereClause}
        ORDER BY c.created_at DESC
        LIMIT $${paramIndex++} OFFSET $${paramIndex}`,

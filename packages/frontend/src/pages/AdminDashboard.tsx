@@ -1036,6 +1036,9 @@ const handleSendBillingEmail = async () => {
   }
 };
   const loadData = async () => {
+    // ★ 2026-06-13 첫 로딩 속도: 기존엔 7개 API를 직렬로 기다리는 동안 전체 화면이 "로딩 중..."에 막혀 있었음.
+    //   첫 화면(대시보드 탭)에 필요한 고객사+요금제만 기다려 즉시 표시하고,
+    //   나머지 5개는 병렬 백그라운드 — 각자 도착하는 대로 해당 탭 데이터가 채워진다(표시 값 동일).
     try {
       const [companiesRes, plansRes] = await Promise.all([
         companiesApi.list({ limit: 1000 }),
@@ -1043,24 +1046,19 @@ const handleSendBillingEmail = async () => {
       ]);
       setCompanies(companiesRes.data.companies);
       setPlans(plansRes.data.plans);
-      
-      // 사용자 목록 로드
-      await loadUsers();
-      // 예약 캠페인 로드
-      await loadScheduledCampaigns();
-      // 발신번호 로드
-      await loadCallbackNumbers();
-      // 요금제 로드
-      await loadPlans();
-      // 플랜 신청 로드
-      await loadPlanRequests();
-      // 충전 관리 로드 (배지 카운트용)
-      await loadChargeManagement(1);
     } catch (error) {
       console.error('데이터 로드 실패:', error);
     } finally {
       setLoading(false);
     }
+    void Promise.allSettled([
+      loadUsers(),              // 사용자 목록
+      loadScheduledCampaigns(), // 예약 캠페인
+      loadCallbackNumbers(),    // 발신번호
+      loadPlans(),              // 요금제 목록
+      loadPlanRequests(),       // 플랜 신청
+      loadChargeManagement(1),  // 충전 관리 (배지 카운트용)
+    ]);
   };
 
   const loadUsers = async () => {
