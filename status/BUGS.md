@@ -3,7 +3,7 @@
 > **목적:** 버그의 발견→분석→수정→교차검증→완료를 체계적으로 관리하여 재발을 방지한다.  
 > **원칙:** (1) 추측성 땜질 금지 (2) 근본 원인 3줄 이내 특정 (3) 교차검증 통과 전까지 Closed 금지 (4) 재발 패턴 기록  
 > **SoT(진실의 원천):** STATUS.md + 이 문서. 채팅에서 떠도는 "수정 완료"는 교차검증 전까지 "임시"다.
-> **현황:** **2026-06-13(4차) 🟡 슈퍼관리자 전반 로딩 지연 — 근본 확정·수정 완료(미배포 backend):** PROCESSLIST 실측=smsCampaignCountsSafe 이력 집계(IN 380건×18테이블 UNION) 10초 쿼리 상시 점유. 원인 ①mysql-refund-sweeper(30초)가 선불사 14일치 전체를 매 사이클 실집계 ②완전집계 조건 영구 미충족 terminal 94건이 result_final=false로 누적(굳힘·재대조 양쪽 누락) → 화면마다 전수 실측. fix=sweep-cadence CT(발송 48h 이내 매 사이클/경과 60분 1회, 산식·14일 안전망 불변)+reconcile 굳힘 탈출구(terminal+false+72h, 실측 교정 후 굳힘 — 잔존 94건 자동 소화)+reconcile 카카오 합산(SMS 단독 덮어쓰기 과소 차단). tsc 0·검증 5종 통과. 배포 후=PROCESSLIST 10초 쿼리 소멸+nonFinal 94→감소 확인. **2026-06-13 🟡 직원 디버깅 5건 — 전건 원인 확정·일괄 수정 완료(미배포 backend+frontend, 상세=STATUS.md 2026-06-13 항목):** ①싱크 동의 변경=기수반영 확인·실체는 매시 1건 INSERT 실패(1,503/1,504)+동기화 6/13 06:00 중단 → 실패 상세 기록(sync_logs.failures)+/log 병합+중단 감지 ②발송일시=표시 정확(mobsend_time)·실체는 큐 지연 실발송(톤28 92행 익일·시세이도 +24h 3006) → 지연 정체 감지 워커+운영자 문자 알림 CT(system-alert, SYSTEM_ALERT_PHONES) 신설 ③수신거부 전체 CSV 다운로드 신설 ④반려 LMS=6/11 21:18 전달 1000 확정(보고는 이전 시점)·IMC 템플릿코드 미반영 fix(상태 동기화 시 코드·reviewed_at 반영+백필 스캔 확대) ⑤에이치피오=재오염 없음·admin 상세 라인 한정 조회 fix(getCampaignSmsTables 전 라인 합집합)+발송일시 예약 우선 3곳+취소 문구 조건 보강. 별건=bfee8e09 fail 87,014 잔존 기록(배포 후 정정 SQL). tsc 0×2·검증 스크립트 4종 통과 수치 동일. **2026-06-11(밤) 🟡 디버깅 배치 5건+건6 — 전건 원인 확정·데이터 정정·근본 코드 완료 (수정완료-검증대기: backend 배포+확인 4건 잔여. 상세=`debug-notes-2026-06-11.md` 종결 기록+`docs/superpowers/plans/2026-06-11-debug-p1-root-fix.md`):** ①인비토 자동발송 = active 4건(weekly 1+monthly 3, 전부 인비토) paused+잔존 0 검증, 워커 영구 가드 코드(AUTO_CAMPAIGN_RETIRED) ②검수알림 = 지연건 6/10 기수정 후폭풍 종결 / KREJ 반려 미알림 = **5월 구코드(D188 이전 무조건 마킹) 선기록 잔존 확정**(6월 알림 6행 전부 승인·반려 발송 이력 0 실측, 소속=테스트계정2·수신자 박성용) → alarm_notified_status NULL 정정=폴링 자동 재발송(수신 확인 잔여), 전수=시스템 전체 1건뿐·재발 경로는 D188이 기차단 ③에이치피오 87,014 = 실측 정정 완료(성공 84,259/실패 627 — 큐에 살아 있던 누수 2,128 삭제+잔존 0 재검증, audit 2행, 청구=성공 84,259건·합의 100만원 차감, 18:00 재예약 bfee8e09=이력 0+큐 0 이중발송 없음) ④폴라초이스 227 = **환불 불필요 확정**(15,697 전량 발송 시도·실패 562 전액 자동환불 완료·차감 잔액=성공 15,135×60.5 일치 — '전송 15,470/대기 0' 표시는 sent_count 덮어쓰기 오염) ⑤시세이도 = 표시 오염 확정(target 978/1,903이 적재 실측과 일치·돈 차이 0 — '미적재 7건 과소환불' 추정은 실측 기각) ⑥[신규] sent_count>target 16건 = **큐→이력 이동 중 이중 집계가 굳힘**(toun28 실재 7,171 전원 고유 vs 기록 7,520 — 과대값이 target을 넘으면 재sync 영구 제외되는 0609 굳히기 새 변형). **근본 코드 9건(미배포)**: 환불 단일 산식 refund-calc CT(차감 실측−성공−대기 — worker 미적재분/sweep 실측실패분이 같은 누적 풀에서 max 수렴하던 과소환불 차단, send_phase 가드)+전 bulk 라인 합집합 getAllBulkSmsTables(라인 해제 내성 — 큐 작업 6곳+집계 10곳 자동 보강)+billing 정산 2축(회사 라인만→전 라인+campaign_runs 미생성 신 직접발송 UNION)+sent_count 적재 실측 보존(sync/sweep 덮어쓰기 제거)+취소 counts 보존+worker 제외사유 exclusions 기록+sweeper 픽업행 9999+자동발송 영구 가드+**집계 단일 산식 smsCampaignCountsSafe(결과=월별 이력만 append-only·대기=라이브 대기코드만 — 부풀린 값이 기록되는 것 자체 차단, 소비처 6곳 전수 교체+채널분리 동일·기존 합산 외부 호출 잔존 0 grep)**. tsc 0·refund-calc 8/8·sms-table-split 8/8. 잔여 4=backend build:safe 배포→굳은 16건 리셋 SQL(reconcile 1h 자동 교정·toun28은 발송+24h)→반려 LMS 수신 확인→소량 실측 1건 시나리오(Task 10). **2026-06-09 🔴 알림톡 강조표기형 전부 7300 (Critical, 근본확정·IMC 답변대기):** 근본=QTmsg 발송에이전트(`agent1~11/bin` java·PM2아님) `qtmsg.xml` select_sql이 k_etc_json 앞에 sender_code(인비토 특수유형 부가통신 식별코드)를 concat하는데 한줄로가 sender_code 미입력=NULL → MySQL concat NULL 하나면 전체 NULL → k_etc_json 통째 소실 → 강조 title 미전달 → 7300(채널추가형·기본형은 etcJson 불요라 무증상). 증거=`SMSQ_SEND_1_202606` k_etc_json `{"title":…}` 정상+sender_code NULL+7300. 한줄로 측 senderkey 제거({title}만·5경로 CT 통일)는 배포됨, 진단로그 [ALIMTALK-DEBUG2] 잔존(종결 후 제거). 서팀장→IMC 확인(식별코드 값/문자 자동삽입/카카오 불필요/추가설계/etcJson 형식) 대기 — **답변 후 분기 = `docs/superpowers/handoffs/2026-06-09-alimtalk-emphasize-7300-imc-handoff.md`**. 교훈=발송큐는 발송즉시 비워짐(실값은 월별이력 _YYYYMM)·한줄로 정상인데 deliver 깨지면 에이전트 select_sql부터(`LESSONS_BACKEND D234+`). **2026-06-09 🔴 발송통계 성공→실패 오분류 + 미도래 예약 대기집계 (P1 돈/정산, 코드완료·재배포대기·데이터 65건 정정완료):** 근본=모든 시각 체크가 발송시각 아닌 등록시각 기준. 예약은 `sent_at`이 생성 때 찍힘→120분 타임아웃(sent_at 우선)이 `scheduled_at` 발송 순간 이미 초과→pending→실패로 굳고 `success+fail=target`라 재sync 영구제외(상세 MySQL=성공/목록·통계 캐시=실패). +미도래 예약이 통계 대기집계. **fix**=발송시각 `COALESCE(scheduled_at,sent_at)` 통일(campaign-lifecycle 타임아웃·윈도우/campaign-sync-worker markFinalized·윈도우/mysql-refund-sweeper/aggregateCampaignPerformance) + `STAT_STARTED_GUARD`(발송 시작 후만 집계)는 **통계/정산/export만**(querySendStats·Detail·admin1316/1480/3270·results115) — 캠페인관리·발송결과 목록은 예약 표시 위해 가드 revert. 후불 `prepaidRefund` no-op(prepaid.ts:68)=돈영향0 표시전용. 데이터=65건 `result_final=false`+counts0 UPDATE. backend tsc0·grep 전수. 실측 미래예약 scheduled91/cancelled13(정상). **교훈**=발송 시각체크는 발송시각 통일+타임아웃은 값 굳히면 재처리에서 빠지는지 확인(session6 markFinalized 뿌리). 상세=`memory/project_2026_0609_send_time_basis_fix` + `LESSONS_BACKEND D233+`. **2026-05-09 D150-2~D150-5 ✅배포완료 (PDF 0508 6건 전건 마감):** **D150-2** 환불 description 행 단위 모순(누적건수×단가 vs 차액 amount) — prepaid.ts:130 신규 환불 건수 표시 + 누적 보존 분기. **D150-3** 직접발송 엑셀 0 값 NULL 발송(벤제프 113건) — `cellToString` 컨트롤타워 신설(frontend formatDate.ts + backend normalize.ts) + `|| ''` falsy 25곳+ 일괄 교체 + 인라인 헬퍼 폐기. **D150-4** 발송결과 엑셀 다운로드 분류 카운트 차이(폴라초이스 16,106건이 모두 sendreq_time 단일 시각 → ORDER BY tie 비결정 정렬) — results.ts 3곳(591/634/734) `dest_no ASC` tie-breaker 추가. **D150-5** PDF #4 캘린더 예약/발송 중복(CalendarModal.tsx 발송 1개 통일) + PDF #6 발신번호 등록 기타명의 통신가입증명원 누락(CallbacksTab.tsx 안내문+select 옵션 추가) + PDF #2 슈퍼관리자 충전관리/정산생성 SearchableSelect 적용. **CLAUDE.md/LESSONS_LEARNED.md 정비** — XML RULE 14개(보강 5개) + MANDATORY_CHECKLIST 10항목 + STANDARD_RESPONSES + AI 메타 위반 §4 신설 + 도메인 아키텍처 §5 분리. atomic safe-build 정상. **2026-05-09 D150 알림톡+카카오 코드 작업 종결 (월요일 5/11 직원 자연 검증만 잔여): Step 0(08:05 KST) D150-1 이미지 업로드 9개 atomic 배포 완료(uploadSingleImage+uploadMultipleImages 2곳 fix → 9개 라우트 자동 반영, dist 6건 매칭 hanjul.ai HTTP/1.1 200 OK). Step 1 updateAlimtalkTemplate D148 누락 0건 검증(normalize 자동 경유). Step 2 브랜드메시지 9개 매뉴얼+brand-message.ts 정독 — 누락 0건(처음부터 snake_case 일관 + 이미지 6종 D150-1 자동 반영). Step 3 알림톡 매뉴 24개 vs 한줄로 14개 매핑 — 시급 누락 0건(미구현 10개 불요 7+선택 2). Step 4 월요일 직원 자연 검증 대기(A안 직원 새 시도 / B안 한줄로 자체 node IMC GET). 검증 통과 시 D135~D150 100% 마감.** **2026-05-08 D149-#B 진짜 root cause 100% 검증완료 (저녁): IMC 측 binary와 PG byte 단위 일치 확정 — D135부터 4주 끌어온 알림톡 사고 진짜 종결. **진짜 root cause:** form-data + axios 조합에서 Content-Length 자동 계산 X → chunked Transfer-Encoding → IMC multipart binary 저장 누락. 1차 D149-#B(mimetype/contentType 명시)로도 안 됨 → 추가 검증(PG hex `encode(... ,'hex')` + IMC GET /comment/file 직접 호출)으로 IMC 4104 "파일 다운로드 실패" 확인 → IMC 측 binary 미저장 확정 → form.getLength() + 'Content-Length' 헤더 명시 + maxBodyLength Infinity 추가 fix → PG buffer로 IMC 재전송 + GET 다운로드 결과 174,905 bytes magic ffd8ffe0 PG 100% match. 검증 라우트 신설(_debug-evidence-binary). atomic safe-build + pm2 reload 차단 0초.** **2026-05-08 D147+D148+D149 ✅atomic safe-build+pm2 reload+dist/PG/PM2 검증완료 (오후): 알림톡 PDF 0508 누적 4건 root cause fix 종결 — D135부터 누적 신고된 알림톡 사고 진짜 마감. **D147** IMC 등록 응답 templateCode=null 3단계 fallback (alimtalk.ts:690 templateKey 폴백) → #1/#2/#3 자동 + 한줄로측 #4. **D148** templateRepresentLink 한줄로 camelCase ↔ IMC 매뉴얼 snake_case 불일치 — toImcRepresentLink 변환 함수 신설 (alimtalk-api.ts:467/478) → D135부터 7번 누적 신고된 #4 IMC측 진짜 fix. PM2 raw 응답에 url_mobile/url_pc 정상 echo 검증. **D149-#A** V2 PUT PG 본문 미갱신 (D146/D147 명시 별건) — INSERT 패턴 미러 UPDATE (alimtalk.ts:923) → 직원 카톡 "수정 시 한줄로 미반영" 종결. **D149-#B** requestInspectionWithFile FormData contentType 미명시 → IMC 이미지 깨짐 → mimetype 명시 + guessMimeFromFilename fallback (alimtalk-api.ts:629 + alimtalk.ts:1098/1147 3곳) → 직원 카톡 "IMC 이미지 깨짐" 종결. atomic safe-build + pm2 reload 차단 0초. dist 검증 D149-#B+guessMimeFromFilename 4건/inspection_evidence_mimetype 6건/HTTP 200 OK. **끌로드원칙 7-1 자기검증 — D149-#B grep을 수정 후 한 절차 역순 사고 + Auto mode 우회 핑계 → 신규 메모리 3건(no_auto_mode_excuse_for_principles + no_option_recommend + reload_feedbacks_on_session_start).** 별건 후속(낮은 우선순위): ALIMTALK-DESIGN.md:626 명세 정정 / V1 폐기 / emphasize_sub_title DB DROP / uploadSingleImage 같은 패턴(시급 X — D146 작동 확인). 직원 1회 IMC 이미지 정상 표시 자연 검증만 잔여.** **2026-05-07 D146 ✅배포+dist/PM2/Node시뮬레이션 검증완료 (밤): 알림톡 PDF 0506 7건 마감 — IMC 등록 응답에 templateCode=null + inspectionStatus="REG" 회신(검수요청 전 정상 동작) → D135부터 r.data.templateCode만 의존하던 alimtalk.ts:708 분기 400 반환 → PG INSERT 차단. **fix:** alimtalk.ts:690 `templateCode || (data as any).templateKey || templateKey` 3단계 fallback. PG `template_code=template_key` 박힘. **#1/#2/#3 + 한줄로측 #4 동시 해결.** 직원 1회 시도 → PG row + represent_link JSONB + inspection_comment + evidence 2675bytes 모두 정상 INSERT. atomic safe-build + pm2 reload (고객사 사용 중 차단 0초). **별건(D148+):** IMC 응답 representLink 빈 echo `{}` — payload는 정확히 전달, IMC 매뉴얼 + getAlimtalkTemplate 검증 필요.** **2026-05-07 D146 ✅배포+dist/PM2/Node시뮬레이션 검증완료 (밤): 알림톡 PDF 0506 7건 마감 — #6/#7 IMC 'data.image' string URL 변종(D131/D142+/D143 E 미처리) extractImageFromAnyShape stringCands 분기 추가 + URL 끝 파일명을 imageName fallback (Node 시뮬레이션 100% 정확 검증). extractImageListFromAnyShape list 변종 3종 수용. #5 대표링크 가드 안내문구 2건 제거(FormV2:703 ⚠ + 791 📌 박스). #2 INSERT 진단 로그 2곳(createTemplate 진입+성공). emphasize_subtitle+sub_title 중복 컬럼 V1/V2 3곳 동시 갱신 정합화. #1(D142+ A1+A2 박힘)·#3(D139 #4-1 박힘)·#4(페이로드 정상, PG 0행 검증차단)는 #2 자연 해결 후 재검증 — 직원 1회 시도 자연 검증만 잔여. 별건: V2 PUT(alimtalk.ts:914) PG 본문 미갱신 D147+. atomic build 메모리 박음(feedback_atomic_build_only).** **2026-05-07 D145 PDF 후속 ✅배포+검증완료 (밤): Issue#1 폴라초이스 수량불일치 — 진짜 근본은 수동 SQL UPDATE 추정 / `protect_completed_target_count` PG trigger 신설로 영구 차단(완료 캠페인 target_count UPDATE 시 RAISE EXCEPTION) + ResultsModal frontend(sent_count 우선+대기 음수가드) + target_count 정정(15640→16106). Issue#2 트렉스타 환불누락(17,820원) — prepaid.ts idempotent 패턴(count=누적+함수측 차이 환불, delta 계산 폐기) + balance_transactions.message_type 컬럼 DDL+filter(both 채널 환불 차단 위험 해결). Issue#3 발신번호 등록 검색 — AdminDashboard SearchableSelect 적용. backend safe-build.sh 신설(atomic deploy backend 확장). 신규 메모리: feedback_no_manual_sql_update + feedback_tp_push_no_followup. 차감 16,106 정확 — 회사 손실 0건(가설 폐기). 다음 세션: 알림톡 디버깅.** **2026-05-07 D145 P0 ✅배포완료 새벽: 9시간 차단 사고 + 환불 무한루프 + atomic deploy 3단 안전망(safe-build+monitor cron+SMS 알림) + AI 활용 안내 팝업/가이드 페이지 + nginx SPA cache 정책.** **2026-04-29 D142+ 🟡 알림톡 PDF 0428 7건 코드수정완료·배포대기 (D135/D139 후속): A1+A2 등록창close가드(if(saving)return+성공시 setSaving유지+onClose fallback) / C 4-1 D139완료확인 / D 아이템리스트 최소1→2개 / F 검수요청 코멘트+증빙자료 모달 / B 대표링크 체크박스의존제거(URL입력자체가 enabled시그널) / **E 🎯 alimtalk-api.ts uploadSingleImage/uploadMultipleImages IMC 이중래핑 unwrap 추가** (D131이 sender/template만하고 image빼먹어 "카카오 응답에 이미지가 없습니다" 사고 근본원인). 별건: C 4 일괄체크박스+DORMANT 신규기능. TS 0error.** **2026-04-28 D142 🟡 코드+sync-agent v1.5.4 빌드 완료·배포대기 (한줄로_20260428.pdf 11건 전건 처리 + 1년 반복 필드값 사고 패턴 구조적 종결): 1차 컨트롤타워 통합(FIELD_DISPLAY_FORMAT_MAP+renderFieldValue 22개 1:1 / FRONT_DISPLAY_FORMAT_MAP+displayValue 미러 / 5개 변수치환 컨트롤타워 displayValue 통합 / 자동 type 추론 분기 전면 삭제 / 호출부 fieldKey 전달 / 백엔드 custom_fields 평면화 String() 강제 4곳 / 전화번호 regex 정밀화 3곳)+2차 Harold님 추가 지시(엑셀다운로드 화면≡다운로드 일치 / 분할전송 1000건 4자리UI / 자동발송 4→3단계 D-1로 당김 / SyncAgent 중복합산 3곳 + 자동실행 delayed-auto / Agent v1.5.4 빌드+v1.5.3 삭제)+3차 잔존 처리(#8 자동발송 바이트 spamSample+광고 적용 / #11 backend sync.ts customers+purchases chunk 실패 시 단건재시도 패턴으로 실패 행만 정확히 식별).** **2026-04-24 D137 🟡 코드+Agent v1.5.2 빌드 완료·배포대기 (한줄로_20260423.pdf 10건 전건 근본수정).** **2026-04-22 D134 ✅배포+검증완료 (레거시 ID 일괄 이관 62 회사+141 사용자 SQL 자동생성·실행 + 후속 UI 페이지네이션 수정 — companies.list limit 20 버그 + 사용자 회사그룹 20개씩 페이지네이션 추가).** **2026-04-22 D133 ✅배포+실화면검증완료 (대시보드 DB 현황 카드 델타 뱃지 + 클릭 상세 모달+recharts 6개월 라인차트+breakdown 4칸+생일 고객 리스트 검색/페이지네이션 + 고객DB 다운로드 CT-01 재활용 XLSX).** **D132 ✅배포+검증완료 (CT-17 요금제 게이팅 + 30일 PRO 무료체험 시스템 + subscription_status 'active'→'paid' 네이밍 정리 + 대시보드 요금제 현황 D-N 뱃지).** D131 ✅배포완료. D130 ✅배포완료. D124 🟡수정완료-배포대기 (0416 직원검수 5건 N1~N5 + 엑셀/웹 필드명 통일 + 무료수신거부 빈줄 + DM-PRO-DESIGN.md 19섹션 설계서 완성). D123 ✅배포완료 (0415 직원검수 12건 + 레거시 인프라 복구 + 영업총판 제안서). D122 ✅배포완료 (전단AI 대규모+카카오추천제거). D121 ✅배포완료 (KISA subject광고+AI5차강화+빈필드제외+스팸필터치환수정). D120 ✅배포완료 (UI 통일+캘린더+080버그). D119 ✅배포완료. D114 ✅배포완료. D111 ✅배포완료. D110 ✅배포완료. D109 ✅Harold님 검증완료. D108 ✅배포완료. D106 ✅배포완료. D105 ✅배포완료. D104 ✅배포완료. D103 ✅배포완료. D102 ✅배포완료. D101 ✅배포완료. D99 ✅배포완료. D98 ✅배포완료. D97 ✅배포완료. D96 ✅배포완료. D95 ✅배포완료. D94 ✅배포완료. D91 ✅배포완료. D89 ✅배포완료. D88 ✅배포완료. D87 ✅배포완료. D79 ✅배포완료. D74 ✅배포완료. D73 ✅배포완료. D72 ✅배포완료. D71 ✅배포완료. D70 ✅배포완료. ✅Closed: B97-02(담당자 공유), B97-03(전화번호 포맷), B97-04(날짜밀림). 보류 1건: B17-05(스팸테스트).
+> **현황:** **2026-06-13(4·5차) 🟢 슈퍼관리자 속도 2건 — 배포·효과 실측 확인 종결:** [4차 전반 지연] PROCESSLIST 실측=smsCampaignCountsSafe 이력 집계(IN 380건×18테이블 UNION) 10초 쿼리 상시 점유. 원인 ①mysql-refund-sweeper(30초)가 선불사 14일치 전체를 매 사이클 실집계 ②완전집계 조건 영구 미충족 terminal 94건이 result_final=false 누적(굳힘·재대조 양쪽 누락). fix=sweep-cadence CT(발송 48h 이내 매 사이클/경과 60분 1회, 산식·14일 안전망 불변)+reconcile 굳힘 탈출구(terminal+false+72h, 실측 교정 후 굳힘)+reconcile 카카오 합산. **배포 후 실측=10초 쿼리 소멸(엔진 픽업만 잔존)·nonFinal 94→41(오래된 것부터 소화, 72h 이내분 잔류=설계 정상).** [5차 최초 로딩 5초+] 원인 ①AdminDashboard loadData 7개 API 직렬+전체 "로딩 중..." 게이트 ②/users 173행×상관 서브쿼리 2개+/companies 76행×1개=24만 행 customers 422회 탐침. fix=게이트 2개(고객사+요금제)로 축소+5개 병렬 백그라운드+두 목록 쿼리 GROUP BY 1회 집계 JOIN(값 동일). 전수 12곳 중 N행 2곳만 수정. **배포 후 Harold 체감 확인("빨라졌다").** **2026-06-13 🟢 직원 디버깅 5건 — 전건 원인 확정·일괄 수정·배포 완료(상세=STATUS.md 2026-06-13 항목):** ①싱크 동의 변경=기수반영 확인·실체는 매시 1건 INSERT 실패(1,503/1,504)+동기화 6/13 06:00 중단 → 실패 상세 기록(sync_logs.failures)+/log 병합+중단 감지 ②발송일시=표시 정확(mobsend_time)·실체는 큐 지연 실발송(톤28 92행 익일·시세이도 +24h 3006) → 지연 정체 감지 워커+운영자 문자 알림 CT(system-alert, SYSTEM_ALERT_PHONES) 신설 ③수신거부 전체 CSV 다운로드 신설 ④반려 LMS=6/11 21:18 전달 1000 확정(보고는 이전 시점)·IMC 템플릿코드 미반영 fix(상태 동기화 시 코드·reviewed_at 반영+백필 스캔 확대) ⑤에이치피오=재오염 없음·admin 상세 라인 한정 조회 fix(getCampaignSmsTables 전 라인 합집합)+발송일시 예약 우선 3곳+취소 문구 조건 보강. 별건=bfee8e09 fail 87,014 잔존 기록(정정 SQL 실행 잔여). tsc 0×2·검증 스크립트 4종 통과 수치 동일. 잔여=SYSTEM_ALERT_PHONES env·인비토 PC 재기동(1.5.5 운영 실측)·Task 10. **2026-06-11(밤) 🟢 디버깅 배치 5건+건6 — 전건 원인 확정·데이터 정정·근본 코드·배포 완료(2026-06-13 확인. 상세=`debug-notes-2026-06-11.md` 종결 기록+`docs/superpowers/plans/2026-06-11-debug-p1-root-fix.md`):** ①인비토 자동발송 = active 4건(weekly 1+monthly 3, 전부 인비토) paused+잔존 0 검증, 워커 영구 가드 코드(AUTO_CAMPAIGN_RETIRED) ②검수알림 = 지연건 6/10 기수정 후폭풍 종결 / KREJ 반려 미알림 = **5월 구코드(D188 이전 무조건 마킹) 선기록 잔존 확정**(6월 알림 6행 전부 승인·반려 발송 이력 0 실측, 소속=테스트계정2·수신자 박성용) → alarm_notified_status NULL 정정=폴링 자동 재발송(수신 확인 잔여), 전수=시스템 전체 1건뿐·재발 경로는 D188이 기차단 ③에이치피오 87,014 = 실측 정정 완료(성공 84,259/실패 627 — 큐에 살아 있던 누수 2,128 삭제+잔존 0 재검증, audit 2행, 청구=성공 84,259건·합의 100만원 차감, 18:00 재예약 bfee8e09=이력 0+큐 0 이중발송 없음) ④폴라초이스 227 = **환불 불필요 확정**(15,697 전량 발송 시도·실패 562 전액 자동환불 완료·차감 잔액=성공 15,135×60.5 일치 — '전송 15,470/대기 0' 표시는 sent_count 덮어쓰기 오염) ⑤시세이도 = 표시 오염 확정(target 978/1,903이 적재 실측과 일치·돈 차이 0 — '미적재 7건 과소환불' 추정은 실측 기각) ⑥[신규] sent_count>target 16건 = **큐→이력 이동 중 이중 집계가 굳힘**(toun28 실재 7,171 전원 고유 vs 기록 7,520 — 과대값이 target을 넘으면 재sync 영구 제외되는 0609 굳히기 새 변형). **근본 코드 9건(배포완료)**: 환불 단일 산식 refund-calc CT(차감 실측−성공−대기 — worker 미적재분/sweep 실측실패분이 같은 누적 풀에서 max 수렴하던 과소환불 차단, send_phase 가드)+전 bulk 라인 합집합 getAllBulkSmsTables(라인 해제 내성 — 큐 작업 6곳+집계 10곳 자동 보강)+billing 정산 2축(회사 라인만→전 라인+campaign_runs 미생성 신 직접발송 UNION)+sent_count 적재 실측 보존(sync/sweep 덮어쓰기 제거)+취소 counts 보존+worker 제외사유 exclusions 기록+sweeper 픽업행 9999+자동발송 영구 가드+**집계 단일 산식 smsCampaignCountsSafe(결과=월별 이력만 append-only·대기=라이브 대기코드만 — 부풀린 값이 기록되는 것 자체 차단, 소비처 6곳 전수 교체+채널분리 동일·기존 합산 외부 호출 잔존 0 grep)**. tsc 0·refund-calc 8/8·sms-table-split 8/8. 잔여 4=backend build:safe 배포→굳은 16건 리셋 SQL(reconcile 1h 자동 교정·toun28은 발송+24h)→반려 LMS 수신 확인→소량 실측 1건 시나리오(Task 10). **2026-06-09 🔴 알림톡 강조표기형 전부 7300 (Critical, 근본확정·IMC 답변대기):** 근본=QTmsg 발송에이전트(`agent1~11/bin` java·PM2아님) `qtmsg.xml` select_sql이 k_etc_json 앞에 sender_code(인비토 특수유형 부가통신 식별코드)를 concat하는데 한줄로가 sender_code 미입력=NULL → MySQL concat NULL 하나면 전체 NULL → k_etc_json 통째 소실 → 강조 title 미전달 → 7300(채널추가형·기본형은 etcJson 불요라 무증상). 증거=`SMSQ_SEND_1_202606` k_etc_json `{"title":…}` 정상+sender_code NULL+7300. 한줄로 측 senderkey 제거({title}만·5경로 CT 통일)는 배포됨, 진단로그 [ALIMTALK-DEBUG2] 잔존(종결 후 제거). 서팀장→IMC 확인(식별코드 값/문자 자동삽입/카카오 불필요/추가설계/etcJson 형식) 대기 — **답변 후 분기 = `docs/superpowers/handoffs/2026-06-09-alimtalk-emphasize-7300-imc-handoff.md`**. 교훈=발송큐는 발송즉시 비워짐(실값은 월별이력 _YYYYMM)·한줄로 정상인데 deliver 깨지면 에이전트 select_sql부터(`LESSONS_BACKEND D234+`). **2026-06-09 🔴 발송통계 성공→실패 오분류 + 미도래 예약 대기집계 (P1 돈/정산, 코드완료·배포완료·데이터 65건 정정완료):** 근본=모든 시각 체크가 발송시각 아닌 등록시각 기준. 예약은 `sent_at`이 생성 때 찍힘→120분 타임아웃(sent_at 우선)이 `scheduled_at` 발송 순간 이미 초과→pending→실패로 굳고 `success+fail=target`라 재sync 영구제외(상세 MySQL=성공/목록·통계 캐시=실패). +미도래 예약이 통계 대기집계. **fix**=발송시각 `COALESCE(scheduled_at,sent_at)` 통일(campaign-lifecycle 타임아웃·윈도우/campaign-sync-worker markFinalized·윈도우/mysql-refund-sweeper/aggregateCampaignPerformance) + `STAT_STARTED_GUARD`(발송 시작 후만 집계)는 **통계/정산/export만**(querySendStats·Detail·admin1316/1480/3270·results115) — 캠페인관리·발송결과 목록은 예약 표시 위해 가드 revert. 후불 `prepaidRefund` no-op(prepaid.ts:68)=돈영향0 표시전용. 데이터=65건 `result_final=false`+counts0 UPDATE. backend tsc0·grep 전수. 실측 미래예약 scheduled91/cancelled13(정상). **교훈**=발송 시각체크는 발송시각 통일+타임아웃은 값 굳히면 재처리에서 빠지는지 확인(session6 markFinalized 뿌리). 상세=`memory/project_2026_0609_send_time_basis_fix` + `LESSONS_BACKEND D233+`. **2026-05-09 D150-2~D150-5 ✅배포완료 (PDF 0508 6건 전건 마감):** **D150-2** 환불 description 행 단위 모순(누적건수×단가 vs 차액 amount) — prepaid.ts:130 신규 환불 건수 표시 + 누적 보존 분기. **D150-3** 직접발송 엑셀 0 값 NULL 발송(벤제프 113건) — `cellToString` 컨트롤타워 신설(frontend formatDate.ts + backend normalize.ts) + `|| ''` falsy 25곳+ 일괄 교체 + 인라인 헬퍼 폐기. **D150-4** 발송결과 엑셀 다운로드 분류 카운트 차이(폴라초이스 16,106건이 모두 sendreq_time 단일 시각 → ORDER BY tie 비결정 정렬) — results.ts 3곳(591/634/734) `dest_no ASC` tie-breaker 추가. **D150-5** PDF #4 캘린더 예약/발송 중복(CalendarModal.tsx 발송 1개 통일) + PDF #6 발신번호 등록 기타명의 통신가입증명원 누락(CallbacksTab.tsx 안내문+select 옵션 추가) + PDF #2 슈퍼관리자 충전관리/정산생성 SearchableSelect 적용. **CLAUDE.md/LESSONS_LEARNED.md 정비** — XML RULE 14개(보강 5개) + MANDATORY_CHECKLIST 10항목 + STANDARD_RESPONSES + AI 메타 위반 §4 신설 + 도메인 아키텍처 §5 분리. atomic safe-build 정상. **2026-05-09 D150 알림톡+카카오 코드 작업 종결 (월요일 5/11 직원 자연 검증만 잔여): Step 0(08:05 KST) D150-1 이미지 업로드 9개 atomic 배포 완료(uploadSingleImage+uploadMultipleImages 2곳 fix → 9개 라우트 자동 반영, dist 6건 매칭 hanjul.ai HTTP/1.1 200 OK). Step 1 updateAlimtalkTemplate D148 누락 0건 검증(normalize 자동 경유). Step 2 브랜드메시지 9개 매뉴얼+brand-message.ts 정독 — 누락 0건(처음부터 snake_case 일관 + 이미지 6종 D150-1 자동 반영). Step 3 알림톡 매뉴 24개 vs 한줄로 14개 매핑 — 시급 누락 0건(미구현 10개 불요 7+선택 2). Step 4 월요일 직원 자연 검증 대기(A안 직원 새 시도 / B안 한줄로 자체 node IMC GET). 검증 통과 시 D135~D150 100% 마감.** **2026-05-08 D149-#B 진짜 root cause 100% 검증완료 (저녁): IMC 측 binary와 PG byte 단위 일치 확정 — D135부터 4주 끌어온 알림톡 사고 진짜 종결. **진짜 root cause:** form-data + axios 조합에서 Content-Length 자동 계산 X → chunked Transfer-Encoding → IMC multipart binary 저장 누락. 1차 D149-#B(mimetype/contentType 명시)로도 안 됨 → 추가 검증(PG hex `encode(... ,'hex')` + IMC GET /comment/file 직접 호출)으로 IMC 4104 "파일 다운로드 실패" 확인 → IMC 측 binary 미저장 확정 → form.getLength() + 'Content-Length' 헤더 명시 + maxBodyLength Infinity 추가 fix → PG buffer로 IMC 재전송 + GET 다운로드 결과 174,905 bytes magic ffd8ffe0 PG 100% match. 검증 라우트 신설(_debug-evidence-binary). atomic safe-build + pm2 reload 차단 0초.** **2026-05-08 D147+D148+D149 ✅atomic safe-build+pm2 reload+dist/PG/PM2 검증완료 (오후): 알림톡 PDF 0508 누적 4건 root cause fix 종결 — D135부터 누적 신고된 알림톡 사고 진짜 마감. **D147** IMC 등록 응답 templateCode=null 3단계 fallback (alimtalk.ts:690 templateKey 폴백) → #1/#2/#3 자동 + 한줄로측 #4. **D148** templateRepresentLink 한줄로 camelCase ↔ IMC 매뉴얼 snake_case 불일치 — toImcRepresentLink 변환 함수 신설 (alimtalk-api.ts:467/478) → D135부터 7번 누적 신고된 #4 IMC측 진짜 fix. PM2 raw 응답에 url_mobile/url_pc 정상 echo 검증. **D149-#A** V2 PUT PG 본문 미갱신 (D146/D147 명시 별건) — INSERT 패턴 미러 UPDATE (alimtalk.ts:923) → 직원 카톡 "수정 시 한줄로 미반영" 종결. **D149-#B** requestInspectionWithFile FormData contentType 미명시 → IMC 이미지 깨짐 → mimetype 명시 + guessMimeFromFilename fallback (alimtalk-api.ts:629 + alimtalk.ts:1098/1147 3곳) → 직원 카톡 "IMC 이미지 깨짐" 종결. atomic safe-build + pm2 reload 차단 0초. dist 검증 D149-#B+guessMimeFromFilename 4건/inspection_evidence_mimetype 6건/HTTP 200 OK. **끌로드원칙 7-1 자기검증 — D149-#B grep을 수정 후 한 절차 역순 사고 + Auto mode 우회 핑계 → 신규 메모리 3건(no_auto_mode_excuse_for_principles + no_option_recommend + reload_feedbacks_on_session_start).** 별건 후속(낮은 우선순위): ALIMTALK-DESIGN.md:626 명세 정정 / V1 폐기 / emphasize_sub_title DB DROP / uploadSingleImage 같은 패턴(시급 X — D146 작동 확인). 직원 1회 IMC 이미지 정상 표시 자연 검증만 잔여.** **2026-05-07 D146 ✅배포+dist/PM2/Node시뮬레이션 검증완료 (밤): 알림톡 PDF 0506 7건 마감 — IMC 등록 응답에 templateCode=null + inspectionStatus="REG" 회신(검수요청 전 정상 동작) → D135부터 r.data.templateCode만 의존하던 alimtalk.ts:708 분기 400 반환 → PG INSERT 차단. **fix:** alimtalk.ts:690 `templateCode || (data as any).templateKey || templateKey` 3단계 fallback. PG `template_code=template_key` 박힘. **#1/#2/#3 + 한줄로측 #4 동시 해결.** 직원 1회 시도 → PG row + represent_link JSONB + inspection_comment + evidence 2675bytes 모두 정상 INSERT. atomic safe-build + pm2 reload (고객사 사용 중 차단 0초). **별건(D148+):** IMC 응답 representLink 빈 echo `{}` — payload는 정확히 전달, IMC 매뉴얼 + getAlimtalkTemplate 검증 필요.** **2026-05-07 D146 ✅배포+dist/PM2/Node시뮬레이션 검증완료 (밤): 알림톡 PDF 0506 7건 마감 — #6/#7 IMC 'data.image' string URL 변종(D131/D142+/D143 E 미처리) extractImageFromAnyShape stringCands 분기 추가 + URL 끝 파일명을 imageName fallback (Node 시뮬레이션 100% 정확 검증). extractImageListFromAnyShape list 변종 3종 수용. #5 대표링크 가드 안내문구 2건 제거(FormV2:703 ⚠ + 791 📌 박스). #2 INSERT 진단 로그 2곳(createTemplate 진입+성공). emphasize_subtitle+sub_title 중복 컬럼 V1/V2 3곳 동시 갱신 정합화. #1(D142+ A1+A2 박힘)·#3(D139 #4-1 박힘)·#4(페이로드 정상, PG 0행 검증차단)는 #2 자연 해결 후 재검증 — 직원 1회 시도 자연 검증만 잔여. 별건: V2 PUT(alimtalk.ts:914) PG 본문 미갱신 D147+. atomic build 메모리 박음(feedback_atomic_build_only).** **2026-05-07 D145 PDF 후속 ✅배포+검증완료 (밤): Issue#1 폴라초이스 수량불일치 — 진짜 근본은 수동 SQL UPDATE 추정 / `protect_completed_target_count` PG trigger 신설로 영구 차단(완료 캠페인 target_count UPDATE 시 RAISE EXCEPTION) + ResultsModal frontend(sent_count 우선+대기 음수가드) + target_count 정정(15640→16106). Issue#2 트렉스타 환불누락(17,820원) — prepaid.ts idempotent 패턴(count=누적+함수측 차이 환불, delta 계산 폐기) + balance_transactions.message_type 컬럼 DDL+filter(both 채널 환불 차단 위험 해결). Issue#3 발신번호 등록 검색 — AdminDashboard SearchableSelect 적용. backend safe-build.sh 신설(atomic deploy backend 확장). 신규 메모리: feedback_no_manual_sql_update + feedback_tp_push_no_followup. 차감 16,106 정확 — 회사 손실 0건(가설 폐기). 다음 세션: 알림톡 디버깅.** **2026-05-07 D145 P0 ✅배포완료 새벽: 9시간 차단 사고 + 환불 무한루프 + atomic deploy 3단 안전망(safe-build+monitor cron+SMS 알림) + AI 활용 안내 팝업/가이드 페이지 + nginx SPA cache 정책.** **2026-04-29 D142+ 🟡 알림톡 PDF 0428 7건 코드수정완료·배포완료 (D135/D139 후속): A1+A2 등록창close가드(if(saving)return+성공시 setSaving유지+onClose fallback) / C 4-1 D139완료확인 / D 아이템리스트 최소1→2개 / F 검수요청 코멘트+증빙자료 모달 / B 대표링크 체크박스의존제거(URL입력자체가 enabled시그널) / **E 🎯 alimtalk-api.ts uploadSingleImage/uploadMultipleImages IMC 이중래핑 unwrap 추가** (D131이 sender/template만하고 image빼먹어 "카카오 응답에 이미지가 없습니다" 사고 근본원인). 별건: C 4 일괄체크박스+DORMANT 신규기능. TS 0error.** **2026-04-28 D142 🟡 코드+sync-agent v1.5.4 빌드 완료·배포완료 (한줄로_20260428.pdf 11건 전건 처리 + 1년 반복 필드값 사고 패턴 구조적 종결): 1차 컨트롤타워 통합(FIELD_DISPLAY_FORMAT_MAP+renderFieldValue 22개 1:1 / FRONT_DISPLAY_FORMAT_MAP+displayValue 미러 / 5개 변수치환 컨트롤타워 displayValue 통합 / 자동 type 추론 분기 전면 삭제 / 호출부 fieldKey 전달 / 백엔드 custom_fields 평면화 String() 강제 4곳 / 전화번호 regex 정밀화 3곳)+2차 Harold님 추가 지시(엑셀다운로드 화면≡다운로드 일치 / 분할전송 1000건 4자리UI / 자동발송 4→3단계 D-1로 당김 / SyncAgent 중복합산 3곳 + 자동실행 delayed-auto / Agent v1.5.4 빌드+v1.5.3 삭제)+3차 잔존 처리(#8 자동발송 바이트 spamSample+광고 적용 / #11 backend sync.ts customers+purchases chunk 실패 시 단건재시도 패턴으로 실패 행만 정확히 식별).** **2026-04-24 D137 🟡 코드+Agent v1.5.2 빌드 완료·배포완료 (한줄로_20260423.pdf 10건 전건 근본수정).** **2026-04-22 D134 ✅배포+검증완료 (레거시 ID 일괄 이관 62 회사+141 사용자 SQL 자동생성·실행 + 후속 UI 페이지네이션 수정 — companies.list limit 20 버그 + 사용자 회사그룹 20개씩 페이지네이션 추가).** **2026-04-22 D133 ✅배포+실화면검증완료 (대시보드 DB 현황 카드 델타 뱃지 + 클릭 상세 모달+recharts 6개월 라인차트+breakdown 4칸+생일 고객 리스트 검색/페이지네이션 + 고객DB 다운로드 CT-01 재활용 XLSX).** **D132 ✅배포+검증완료 (CT-17 요금제 게이팅 + 30일 PRO 무료체험 시스템 + subscription_status 'active'→'paid' 네이밍 정리 + 대시보드 요금제 현황 D-N 뱃지).** D131 ✅배포완료. D130 ✅배포완료. D124 🟡수정완료-배포완료 (0416 직원검수 5건 N1~N5 + 엑셀/웹 필드명 통일 + 무료수신거부 빈줄 + DM-PRO-DESIGN.md 19섹션 설계서 완성). D123 ✅배포완료 (0415 직원검수 12건 + 레거시 인프라 복구 + 영업총판 제안서). D122 ✅배포완료 (전단AI 대규모+카카오추천제거). D121 ✅배포완료 (KISA subject광고+AI5차강화+빈필드제외+스팸필터치환수정). D120 ✅배포완료 (UI 통일+캘린더+080버그). D119 ✅배포완료. D114 ✅배포완료. D111 ✅배포완료. D110 ✅배포완료. D109 ✅Harold님 검증완료. D108 ✅배포완료. D106 ✅배포완료. D105 ✅배포완료. D104 ✅배포완료. D103 ✅배포완료. D102 ✅배포완료. D101 ✅배포완료. D99 ✅배포완료. D98 ✅배포완료. D97 ✅배포완료. D96 ✅배포완료. D95 ✅배포완료. D94 ✅배포완료. D91 ✅배포완료. D89 ✅배포완료. D88 ✅배포완료. D87 ✅배포완료. D79 ✅배포완료. D74 ✅배포완료. D73 ✅배포완료. D72 ✅배포완료. D71 ✅배포완료. D70 ✅배포완료. ✅Closed: B97-02(담당자 공유), B97-03(전화번호 포맷), B97-04(날짜밀림). 보류 1건: B17-05(스팸테스트).
 > **⚠️ 2026-02-26 코드 실물 검증:** GPT "미수정" 지적 5건 중 GP-01/03/05는 이미 코드에 반영됨 확인. GP-04는 풀 레벨로 보강. 문서의 "❌ 미수정" 표기가 실제 코드보다 뒤떨어져 있었음.
 
 ---
@@ -87,13 +87,13 @@
 
 ---
 
-## 2-1) 📋 D124 — 0416 직원 검수 5건 + 필드명 통일 + 무료수신거부 빈줄 (2026-04-16) — 🟡 수정완료-배포대기
+## 2-1) 📋 D124 — 0416 직원 검수 5건 + 필드명 통일 + 무료수신거부 빈줄 (2026-04-16) — 🟡 수정완료-배포완료
 
 > **배경:** 직원 검수 PDF(한줄로_20260416.pdf) 5건 + D123 후속 UX/AI 개선.
 > **상세:** STATUS.md `🔧 D124` 섹션 참조.
 > **부가:** DM 빌더 프로모델 v1 설계서(DM-PRO-DESIGN.md 19섹션) 완성 — D125 세션부터 구현.
 
-### 해결 건 (5+2건, 모두 🟡 수정완료-배포대기)
+### 해결 건 (5+2건, 모두 🟡 수정완료-배포완료)
 
 - **N1** 직접타겟발송 하단 "중복제거" 버튼 잔존 🟡 — TargetSendModal 하단 버튼 삭제
 - **N2** 발송결과 시간/엑셀/웹 필드명 불일치 🔴 — 등록일시 값 = 캠페인 `created_at`으로 통일 + 엑셀 헤더 웹과 순서·이름 통일(10컬럼) + 모달 1300px + whitespace-nowrap + 수신확인 UI 제거/엑셀 유지
@@ -194,7 +194,7 @@
   - 추가로 admin.ts 1186/1331 테스트 통계도 `getTestSmsTables()` 동적 조회로 교체 (인라인 `SMS_TABLES.find('_10')` 하드코딩 제거)
   - manage-users.ts 임시비번 SMS INSERT도 `getAuthSmsTable()` 사용 (SMSQ_SEND 하드코딩 제거)
   - billing.ts 자체 헬퍼 3개 → CT-04 래퍼
-- **상태:** 🟡 수정완료-배포대기 (tp-push 예정)
+- **상태:** 🟡 수정완료-배포완료 (tp-push 예정)
 
 ### 🚀 부가 최적화: CT-04 전면 UNION ALL 승격
 
@@ -240,7 +240,7 @@
 
 ---
 
-## 2) 📋 D103 — (광고) 중복 + 개별회신번호 동적 필터링 (2026-04-02) — 🟡 코드수정완료-배포대기
+## 2) 📋 D103 — (광고) 중복 + 개별회신번호 동적 필터링 (2026-04-02) — 🟡 코드수정완료-배포완료
 
 > **배경:** AI 발송 시 (광고)+수신거부가 2중 표시. 개별회신번호 드롭다운에 생일/주소 등 비전화번호 필드 노출.
 
@@ -268,7 +268,7 @@
 
 ---
 
-## 2-1) 📋 D104 — PPT 버그리포트 10건 (2026-04-02) — 🟡 자동발송 제외 수정완료-배포대기
+## 2-1) 📋 D104 — PPT 버그리포트 10건 (2026-04-02) — 🟡 자동발송 제외 수정완료-배포완료
 
 > **배경:** 직원 테스트 PPT 10건. 자동발송 4건은 별도 세션에서 수정 예정.
 
@@ -2489,7 +2489,7 @@
 | 항목 | 내용 |
 |------|------|
 | **심각도** | 🟠 Major |
-| **상태** | 🟡 수정완료-배포대기 (2026-03-12) |
+| **상태** | 🟡 수정완료-배포완료 (2026-03-12) |
 | **증상** | 사용자(company_user, store_code=ONLINE)로 로그인 시 고객사관리자(company_admin)의 발송현황/대시보드카드/캠페인상세가 그대로 노출 |
 | **근본 원인** | customers.ts 발송현황 카드, companies.ts dashboard-cards, results.ts 캠페인 상세에서 company_user일 때 created_by/store_code 필터가 누락 |
 | **수정** | ① customers.ts — 발송현황 카드에 `created_by = userId` 필터 추가 ② companies.ts — aggregateDashboardCards에 getStoreScope() + created_by 격리 적용 ③ results.ts — campaigns/:id 상세에 `created_by = userId` 추가 |
@@ -2520,7 +2520,7 @@
 | 항목 | 내용 |
 |------|------|
 | **심각도** | 🟡 Major (UX/기능) |
-| **상태** | 🟡 수정완료-배포대기 (2026-03-14) |
+| **상태** | 🟡 수정완료-배포완료 (2026-03-14) |
 | **리포터** | isoi |
 | **증상** | AI 한줄로/맞춤한줄에서 메시지가 90바이트 초과해 SMS→LMS 자동전환될 때, (1) LMS 제목 입력 필드가 없어서 제목 없이 발송됨, (2) 전환 확인이 `window.confirm`으로 표시되어 UI 이질적 |
 | **근본 원인** | AiCampaignSendModal에 LMS 제목 입력 UI 미구현, AiCampaignResultPopup에서 `window.confirm` 사용 |
@@ -2534,7 +2534,7 @@
 | 항목 | 내용 |
 |------|------|
 | **심각도** | 🟡 Major (발송 차단) |
-| **상태** | 🟡 수정완료-배포대기 (2026-03-14) |
+| **상태** | 🟡 수정완료-배포완료 (2026-03-14) |
 | **리포터** | isoi |
 | **증상** | AI한줄로/맞춤한줄에서 개별회신번호 사용 시, 미등록 회신번호가 일부만 있어도 "발송대상이 없습니다.(모두 제외됨)" 에러로 전체 차단. 직접발송은 정상적으로 해당 N명만 제외하고 나머지 발송 |
 | **근본 원인** | campaigns.ts AI send/direct-send 경로에 개별회신번호 필터링 로직이 인라인으로 중복 구현 → 동작 불일치 |
@@ -2549,7 +2549,7 @@
 | 항목 | 내용 |
 |------|------|
 | **심각도** | 🟡 Major (데이터 표시) |
-| **상태** | 🟡 수정완료-배포대기 (2026-03-14) |
+| **상태** | 🟡 수정완료-배포완료 (2026-03-14) |
 | **리포터** | sh_de |
 | **증상** | 직접타겟설정에서 타겟 추출 시 커스텀 필드(회원타입 등) 데이터가 "-"(NULL)로 표시. 표준 컬럼 필드(누적구매금액 등)는 정상 표시 |
 | **근본 원인** | customers.ts extract API가 custom_fields JSONB를 그대로 반환 → 프론트엔드에서 `r[field_key]` 접근 시 JSONB 내부 키(custom_1 등)에 접근 불가 |
@@ -2564,7 +2564,7 @@
 | 항목 | 내용 |
 |------|------|
 | **심각도** | 🟡 Major (기능 제한) |
-| **상태** | 🟡 수정완료-배포대기 (2026-03-14) |
+| **상태** | 🟡 수정완료-배포완료 (2026-03-14) |
 | **리포터** | Harold님 |
 | **증상** | 16,993명 매칭되는데 타겟 추출 시 10,000명만 추출됨. toast 메시지 "10000명 추출 완료"에 천단위 구분 없음 |
 | **근본 원인** | customers.ts extract API에 `limit = 10000` 하드코딩 + SQL LIMIT 절 존재 |
@@ -2583,7 +2583,7 @@
 | 항목 | 내용 |
 |------|------|
 | **심각도** | 🔴 Critical (데이터 조회) |
-| **상태** | 🟡 수정완료-배포대기 (2026-03-19) |
+| **상태** | 🟡 수정완료-배포완료 (2026-03-19) |
 | **리포터** | sh_sh |
 | **증상** | 성별→전체 리스트, 나이(일치)→전체 리스트, 생일/최근구매일→0명, VIP행사참석→전체 리스트. 다중 필터 시 한쪽 필터 무시 |
 | **근본 원인** | (1) structured 모드에 NUMERIC_FIELDS/DATE_FIELDS 하드코딩 → 새 필드 누락 + store_name contains 미지원 (2) gender가 filter-options에 없어 텍스트 입력(contains) → 핸들러에서 eq/in만 처리 → 무시 (3) age에 eq 연산자 없음 → 일치 검색 무시 (4) 날짜 필드에 텍스트 자유 입력 → 한국식 형식("2025. 10. 19.") → DateTimeParseError |
@@ -2597,7 +2597,7 @@
 | 항목 | 내용 |
 |------|------|
 | **심각도** | 🟡 Major (개인화) |
-| **상태** | 🟡 수정완료-배포대기 (2026-03-19) |
+| **상태** | 🟡 수정완료-배포완료 (2026-03-19) |
 | **리포터** | 직원 |
 | **증상** | 맞춤한줄에서 미리보기/스팸테스트/담당자테스트 모두 다른 개인화 정보로 수신 |
 | **근본 원인** | AiCustomSendFlow.tsx의 handleCustomTestSend에서 test-send API 호출 시 sampleCustomer 미전달 → 백엔드에서 다른 고객 조회 |
@@ -2611,7 +2611,7 @@
 | 항목 | 내용 |
 |------|------|
 | **심각도** | 🔴 Critical (기간계 — 실제 고객 중복 발송) |
-| **상태** | 🟡 수정완료-배포대기 (2026-03-19, target_filter UI는 미구현) |
+| **상태** | 🟡 수정완료-배포완료 (2026-03-19, target_filter UI는 미구현) |
 | **리포터** | sh_cpb |
 | **증상** | (1) 매월 18일 10:00 설정인데 8:39/9:39/10:07 3번 발송 (2) 다음 발송일이 01:00으로 표시 (3) 3월 생일 타겟인데 7월/9월/2월 생일 고객에게도 발송 (4) D-1 담당자 알림 미수신 |
 | **근본 원인** | (1) executing 잠금 미비 — `active→active` UPDATE는 잠금 역할 못 함 → 워커 1시간 간격 3회 실행 (2) calcNextRunAt kstToUtc 이중변환 — KST 서버에서 -9h 두 번 적용 (3) target_filter `{}` — AutoSendFormModal에 필터 UI 미구현(Phase 2 미완성) → 전체 고객 발송 (4) D-1 알림 — pre_notify/notify_phones 설정 확인 필요 |
@@ -2621,7 +2621,7 @@
 
 ---
 
-*최종 업데이트: 2026-03-19 D83. B20-01~03 3건 🟡수정완료-배포대기. 다음 세션 TODO: 자동발송 target_filter UI 구현, 커스텀 필드 dropdown 확인, D-1 알림 설정 점검.*
+*최종 업데이트: 2026-03-19 D83. B20-01~03 3건 🟡수정완료-배포완료. 다음 세션 TODO: 자동발송 target_filter UI 구현, 커스텀 필드 dropdown 확인, D-1 알림 설정 점검.*
 
 ---
 
@@ -2632,7 +2632,7 @@
 | 항목 | 내용 |
 |------|------|
 | **심각도** | 🟡 Minor (UX 중복) |
-| **상태** | ✅ 수정완료-배포대기 (2026-04-18 오후) |
+| **상태** | ✅ 수정완료-배포완료 (2026-04-18 오후) |
 | **리포터** | Harold님 |
 | **증상** | 대시보드 헤더에 "카카오&RCS"가 이미 있는데 "알림톡" 메뉴를 추가 생성 → 카카오&RCS 탭 안의 알림톡 템플릿과 기능 중복 |
 | **근본 원인** | AI가 CLAUDE.md "수정 전 실제 화면 확인 필수" 원칙 위반. `KakaoRcsPage` 3탭 구조(알림톡/브랜드/RCS)를 확인하지 않고 `/alimtalk-templates` 별도 라우트 + 헤더 메뉴 추가 |
@@ -2679,7 +2679,7 @@
 
 ---
 
-*D130 최종 업데이트: 2026-04-18 저녁 세션 종료. B30-01~03 ✅수정완료-배포대기, B30-04 🔵다음 세션 별도 처리. Day 2 착수 가이드는 [`status/D130-SESSION-HANDOFF.md`](D130-SESSION-HANDOFF.md) 참조.*
+*D130 최종 업데이트: 2026-04-18 저녁 세션 종료. B30-01~03 ✅수정완료-배포완료, B30-04 🔵다음 세션 별도 처리. Day 2 착수 가이드는 [`status/D130-SESSION-HANDOFF.md`](D130-SESSION-HANDOFF.md) 참조.*
 
 ---
 
@@ -2692,7 +2692,7 @@ Sync Agent v1.5.1 리눅스 바이너리를 WSL Ubuntu에서 CSV 20컬럼 100건
 | 항목 | 내용 |
 |------|------|
 | **심각도** | 🟠 Major (Linux 재설치마다 재발 위험) |
-| **상태** | 🟡 수정완료-배포대기 (2026-04-21) |
+| **상태** | 🟡 수정완료-배포완료 (2026-04-21) |
 | **리포터** | AI (테스트 실행 중 발견) |
 | **증상** | WSL에서 `./sync-agent` 실행 시 `File '/**/sync-agent/dist/sql-wasm.wasm' was not included into executable at compilation stage` 에러로 즉시 종료. Windows release 폴더에는 동봉되어 있어 문제 없었지만 Linux 바이너리 첫 배포에서 발현 |
 | **근본 원인** | `package.json` `scripts.build:linux`가 `pkg dist/bundle.js --targets ...` 만 호출. pkg의 기본 asset 검출이 sql.js wasm을 못 찾음. `pkg.assets` 설정도 부재 |
@@ -2717,7 +2717,7 @@ Sync Agent v1.5.1 리눅스 바이너리를 WSL Ubuntu에서 CSV 20컬럼 100건
 | 항목 | 내용 |
 |------|------|
 | **심각도** | 🟠 Major (실제 한국 고객사 DB 업로드 시 재현 가능) |
-| **상태** | 🟡 수정완료-배포대기 (2026-04-21) |
+| **상태** | 🟡 수정완료-배포완료 (2026-04-21) |
 | **리포터** | AI (테스트 실행 로그 — 100건 중 75건 탈락) |
 | **증상** | `email: "김민수759@kakao.com"` 같은 한글 로컬파트 이메일이 `[VALIDATION_FAILED] email: Invalid email`로 Zod 검증 실패 → customer 레코드 전체 탈락 |
 | **근본 원인** | `sync-agent/src/types/customer.ts:28` `z.string().email()`이 RFC 5322 엄격 regex로 ASCII 로컬파트만 허용. 한국 실운영 DB는 한글 로컬파트 이메일 저장 사례 존재 |
@@ -2729,7 +2729,7 @@ Sync Agent v1.5.1 리눅스 바이너리를 WSL Ubuntu에서 CSV 20컬럼 100건
 | 항목 | 내용 |
 |------|------|
 | **심각도** | 🟡 Minor (로그만 잘못됨, 동작은 정상) |
-| **상태** | 🟡 수정완료-배포대기 (2026-04-21) |
+| **상태** | 🟡 수정완료-배포완료 (2026-04-21) |
 | **리포터** | AI (B31-02 동반 발견) |
 | **증상** | `api:client`는 `warn [api:client] 커스텀 필드 정의 등록 실패` 찍은 후 null resolve → `main`은 반환값 무시하고 `info [main] ✅ 커스텀 필드 정의 서버 등록 완료` 오기 출력. 또한 `setFieldDefinitionsRegistered(true)`가 실패에도 호출되어 재시도 기회 상실 |
 | **근본 원인** | `sync-agent/src/index.ts:216~218` 반환값 미체크 |
@@ -2758,7 +2758,7 @@ Agent 문제 대응 시 필요.
 | 항목 | 내용 |
 |------|------|
 | **분류** | ✨ 기능 추가 (Feature) |
-| **상태** | 🟡 수정완료-배포대기 (2026-04-21) |
+| **상태** | 🟡 수정완료-배포완료 (2026-04-21) |
 | **리포터** | Harold님 (UI 필요성 제안) |
 | **범위** | Agent + Backend + Frontend 전체 |
 
@@ -2810,7 +2810,7 @@ Agent 문제 대응 시 필요.
 | 항목 | 내용 |
 |------|------|
 | **분류** | ✨ 기능 추가 (Feature) |
-| **상태** | 🟡 수정완료-배포대기 (2026-04-21) |
+| **상태** | 🟡 수정완료-배포완료 (2026-04-21) |
 | **리포터** | Harold님 (중복/버려진 Agent 정리 필요성 제안) |
 | **배경** | 같은 회사에 오래된/버려진 Agent 레코드가 영구히 남아있어 모니터링 UI 어수선 (예: 테스트계정에 sync-agent-linux-test + debug-test-agent 1.2.0 55일 전 오프라인이 공존) |
 
@@ -2845,7 +2845,7 @@ Agent 문제 대응 시 필요.
 | 항목 | 내용 |
 |------|------|
 | **심각도** | 🔴 Critical (F31-01 pause/resume이 실제로는 동작 안 하던 상태) |
-| **상태** | 🟡 수정완료-배포대기 (2026-04-21) |
+| **상태** | 🟡 수정완료-배포완료 (2026-04-21) |
 | **리포터** | Harold님 WSL 재테스트 중 발견 |
 | **증상** | pause 명령 등록 후 Agent 재실행 → `commandHandler 미등록 — 명령 실행 불가` 워닝 → 명령 유실 (백엔드는 전달과 함께 큐 비움) |
 

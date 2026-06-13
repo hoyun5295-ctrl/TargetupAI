@@ -107,17 +107,17 @@
 
 ---
 
-### 🟢 2026-06-13 — 직원 디버깅 5건 전건 원인 확정 + 일괄 수정 (미배포 — backend+frontend build:safe)
+### 🟢 2026-06-13 — 직원 디버깅 5건 전건 원인 확정 + 일괄 수정 (배포 완료 2026-06-13)
 > **검증 결과(전건 SQL·스크린샷 실측)**: ①싱크에이전트 동의 변경 = 이미 반영(sms_opt_in=true·동의 저장값 단일) — 실체는 매시 1건 INSERT 실패(1,504 중 1,503만 존재·기록 부재)+동기화 6/13 06:00 중단 ②발송일시 = 표시 정확(mobsend_time) — 실체는 큐 일부 행 지연 실발송(톤28 92행 익일 10:32~17:07 성공, 시세이도 +24h 3006, 시세이도3 +40분) ③수신거부 전체 다운로드 = 기능 신설 ④알림톡 = 반려 LMS 6/11 21:18 실발송·전달 1000 확정(보고는 그 이전 시점)·반려 템플릿 IMC 코드(B_IV_013_02_80287) 미반영 확정(코드 백필이 승인 한정 스캔) ⑤에이치피오 = 재오염 없음(정정값 유지·reconcile 6/12 10:00 재검증 동일) — 캡처는 정정 이전, 남은 실체는 admin 상세 라인 한정 조회. 별건 발견 = bfee8e09(취소·발송0) fail 87,014 잔존 기록.
-> **수정(미배포)**: [B+D] 시스템 크리티컬 문자 알림 CT `system-alert.ts`(SYSTEM_ALERT_PHONES env·쿨다운 6h·인증라인 LMS) + `system-monitor-worker.ts`(5분 — 발송 큐 지연 정체(60분 경과+12분 비감소 정체 판정·야간 강조) + 에이전트 중단(하트비트 60분/동기화 3×주기)) + 목록 "동기화 지연" 배지 [C] sync.ts agentId status='active' 필터 제거(per-batch failures 기록 누락 구멍)+`/log` 병합(동기화 1회=1행 유지)+실패 stdout+admin-sync failures 응답+상세 화면 실패 행 표시 [E] 상태 동기화 시 reviewed_at 기록+단건 GET 응답으로 템플릿코드 즉시 반영(syncSingleTemplateCode 재사용)+코드 백필 스캔을 검수중/반려까지 확대 [G] getCampaignSmsTables 전 라인 합집합 전환(admin 상세 0행 구멍·0610 예고 후속)+취소 문구는 발송 이력 없는 취소에만 [A] 발송일시 예약 우선 3곳(CampaignDetailModal 2·발송통계 상세 1) [F] 검수 알림 수신자 0명 시 미발송 안내 문구 [H] 수신거부 전체 CSV 다운로드(`GET /api/unsubscribes/export`+버튼, 격리 기준 동일, formatPhoneDisplay 신설로 앞 0 보존). tsc 0×2·refund-calc 8/8·sms-table-split 8/8·direct-send-spec 12·sms-channel-split 13.
+> **수정(배포 완료)**: [B+D] 시스템 크리티컬 문자 알림 CT `system-alert.ts`(SYSTEM_ALERT_PHONES env·쿨다운 6h·인증라인 LMS) + `system-monitor-worker.ts`(5분 — 발송 큐 지연 정체(60분 경과+12분 비감소 정체 판정·야간 강조) + 에이전트 중단(하트비트 60분/동기화 3×주기)) + 목록 "동기화 지연" 배지 [C] sync.ts agentId status='active' 필터 제거(per-batch failures 기록 누락 구멍)+`/log` 병합(동기화 1회=1행 유지)+실패 stdout+admin-sync failures 응답+상세 화면 실패 행 표시 [E] 상태 동기화 시 reviewed_at 기록+단건 GET 응답으로 템플릿코드 즉시 반영(syncSingleTemplateCode 재사용)+코드 백필 스캔을 검수중/반려까지 확대 [G] getCampaignSmsTables 전 라인 합집합 전환(admin 상세 0행 구멍·0610 예고 후속)+취소 문구는 발송 이력 없는 취소에만 [A] 발송일시 예약 우선 3곳(CampaignDetailModal 2·발송통계 상세 1) [F] 검수 알림 수신자 0명 시 미발송 안내 문구 [H] 수신거부 전체 CSV 다운로드(`GET /api/unsubscribes/export`+버튼, 격리 기준 동일, formatPhoneDisplay 신설로 앞 0 보존). tsc 0×2·refund-calc 8/8·sms-table-split 8/8·direct-send-spec 12·sms-channel-split 13.
 > **배포 후**: SYSTEM_ALERT_PHONES env 추가 → bfee8e09 counts 0 정정 SQL → 인비토 누락 1명 식별(첫 동기화 failures 자동) → Task 10 실측. 외부 = 서팀장(큐 지연 처리·3006 +24h 의미) / 인비토 PC 재기동 / 직원 응대 정정 2건(톤28 익일 실발송·박성용 반려 LMS 6/11 21:18 도착).
-> **[같은 날 2차 — 예약 상세 속도 + 행 상태 구분(미배포)]** 예약 [조회] 10초+(에이스하드웨어 47,846 실측) = 클릭 1회당 MySQL 전체 스캔 4회(헤더 집계·발송시각 보정·COUNT·행 SELECT) 구조. fix=①예약 캠페인은 헤더 집계·시각 보정·COUNT를 MySQL로 가지 않음(결과 없음 — PG sent_count 사용, 필터/검색 시만 COUNT) ②getCampaignSmsTables에 send_config.sentTables(0611 적재 기록) 우선 — 기록 있으면 그 테이블만(전 라인 합집합은 기록 없는 과거 건만) ③행 상태 3분류: 대기 코드+발송 요청 시각 미래 = **"발송 예약"(파란 칩)** / 시각 경과 = "결과 대기" / 성공·실패 — CT `getQueueRowStatus`(sms-result-map) 신설, admin 상세·사용자 상세·엑셀 3표면 동일 산출, 통신사 '-' 표시(미발송 행 "나간 거 아냐?" 불안 차단, Harold 지시). 부수 정리=상세·엑셀 카카오 UNION 분기 컬럼 위치를 SMS와 1:1 정렬(both 채널 잠재 불일치). tsc 0×2·회귀 4종 동일. 인덱스 실측=idx_app_etc1_status(app_etc1+status_code) 존재 — DDL 불요. **[3차 — 배포 후 잔여 10초 추가 확정(미배포)]** 잔여 병목=smsSelectAll/상세 UNION이 `SELECT * FROM (UNION ALL…) ORDER BY … LIMIT` 구조라 일치 행 전체(본문 mediumtext 포함)를 임시 테이블 실체화 후 정렬 — 인덱스 있어도 8만 행 페이지당 수 초. fix=CT `smsSelectPagedAll` 신설(테이블별 내부 ORDER BY+LIMIT(offset+limit) 선잘라내기 → 외부 병합은 테이블수×K행만, 결과 동일·깊은 페이지만 완만 저하) — admin sms-detail 교체 + results.ts 사용자 상세 3개 서브쿼리(SMS·카카오·fallback) 동일 적용. backend만 변경. tsc 0·회귀 4종 동일.
-> **[4차 — 슈퍼관리자 전반 로딩 지연 근본 fix(미배포)]** SHOW FULL PROCESSLIST 실측 = `smsCampaignCountsSafe` 이력 집계(IN 380건 × 9라인×2개월 18테이블 UNION) 10초 쿼리 상시 점유. 원인 2축 확정: ①mysql-refund-sweeper(30초)가 선불사 14일치 sending/completed 전체를 매 사이클 실집계(LIMIT·마커 없음) ②markFinalized 완전집계 조건(success+fail>=sent_count) 영구 미충족 terminal 캠페인 94건(completed 90+failed 4, 5/7~)이 굳힘·재대조 양쪽에서 누락 → 발송통계/발송결과가 매 로딩 전부 실측. fix=①CT `sweep-cadence.ts` 신설(발송 48h 이내=매 사이클/경과 휴면=60분 1회, 메모리 마커 — 후보 SELECT·환불 산식·14일 안전망 불변, 보정 도착만 최대 60분 지연) ②reconcile에 굳힘 탈출구 무리(terminal+result_final=false+발송 72h, 21일 하한 없음·사이클당 50건) — 실측값으로 counts 교정 후 굳힘(화면 숫자 연속, 잔존 94건 자동 소화·향후 72h 자동 졸업) ③reconcile 실측에 카카오 합산 추가(PG의 SMS+카카오 합산값을 SMS 단독으로 덮어 카카오 몫 깎이던 잠재 과소 동시 차단). backend 2파일+CT 1+검증 1. tsc 0·sweep-cadence 9/9·refund-calc 8/8·sms-table-split 8/8·direct-send-spec 12·sms-channel-split 13. 배포 후 검증=PROCESSLIST 10초 쿼리 소멸+nonFinal 분포 SQL 94→감소+화면 체감. **[4차 배포 후 실측]** PROCESSLIST 거대 집계 소멸(엔진 픽업 쿼리만 잔존)·nonFinal 94→41(oldest 5/7→6/1, 72h 이내분 잔류는 설계 정상)·load 3.3=평시 바닥값.
-> **[5차 — 슈퍼관리자 최초 로딩 5초+ "로딩 중..." 차단 fix(미배포)]** 원인 2축 실측: ①AdminDashboard loadData가 7개 API(고객사 1000·요금제·사용자·예약·발신번호·요금제목록·충전관리)를 직렬 await — 전부 끝나야 loading 게이트(2353) 해제 = 합산 대기 ②/api/admin/users(사용자 173명×상관 서브쿼리 2개)+/api/companies 목록(76개×1개)이 행마다 24만 행 customers 탐침(총 422회). fix=①loadData 게이트를 고객사+요금제 2개로 축소+나머지 5개 Promise.allSettled 병렬 백그라운드(각자 도착 즉시 채움, 표시 값 동일) ②두 목록 쿼리를 GROUP BY 1회 집계 LEFT JOIN으로 전환(값 동일 — 상관 COUNT 0 ↔ 그룹 부재 COALESCE 0, 타입 bigint 동일). 동일 패턴 전수 grep 12곳 = N행 2곳만 수정·단건 10곳 무해 유지. tsc 0×2. 배포=backend+frontend build:safe.
+> **[같은 날 2차 — 예약 상세 속도 + 행 상태 구분(배포 완료)]** 예약 [조회] 10초+(에이스하드웨어 47,846 실측) = 클릭 1회당 MySQL 전체 스캔 4회(헤더 집계·발송시각 보정·COUNT·행 SELECT) 구조. fix=①예약 캠페인은 헤더 집계·시각 보정·COUNT를 MySQL로 가지 않음(결과 없음 — PG sent_count 사용, 필터/검색 시만 COUNT) ②getCampaignSmsTables에 send_config.sentTables(0611 적재 기록) 우선 — 기록 있으면 그 테이블만(전 라인 합집합은 기록 없는 과거 건만) ③행 상태 3분류: 대기 코드+발송 요청 시각 미래 = **"발송 예약"(파란 칩)** / 시각 경과 = "결과 대기" / 성공·실패 — CT `getQueueRowStatus`(sms-result-map) 신설, admin 상세·사용자 상세·엑셀 3표면 동일 산출, 통신사 '-' 표시(미발송 행 "나간 거 아냐?" 불안 차단, Harold 지시). 부수 정리=상세·엑셀 카카오 UNION 분기 컬럼 위치를 SMS와 1:1 정렬(both 채널 잠재 불일치). tsc 0×2·회귀 4종 동일. 인덱스 실측=idx_app_etc1_status(app_etc1+status_code) 존재 — DDL 불요. **[3차 — 배포 후 잔여 10초 추가 확정(배포 완료)]** 잔여 병목=smsSelectAll/상세 UNION이 `SELECT * FROM (UNION ALL…) ORDER BY … LIMIT` 구조라 일치 행 전체(본문 mediumtext 포함)를 임시 테이블 실체화 후 정렬 — 인덱스 있어도 8만 행 페이지당 수 초. fix=CT `smsSelectPagedAll` 신설(테이블별 내부 ORDER BY+LIMIT(offset+limit) 선잘라내기 → 외부 병합은 테이블수×K행만, 결과 동일·깊은 페이지만 완만 저하) — admin sms-detail 교체 + results.ts 사용자 상세 3개 서브쿼리(SMS·카카오·fallback) 동일 적용. backend만 변경. tsc 0·회귀 4종 동일.
+> **[4차 — 슈퍼관리자 전반 로딩 지연 근본 fix(배포 완료·효과 실측 확인)]** SHOW FULL PROCESSLIST 실측 = `smsCampaignCountsSafe` 이력 집계(IN 380건 × 9라인×2개월 18테이블 UNION) 10초 쿼리 상시 점유. 원인 2축 확정: ①mysql-refund-sweeper(30초)가 선불사 14일치 sending/completed 전체를 매 사이클 실집계(LIMIT·마커 없음) ②markFinalized 완전집계 조건(success+fail>=sent_count) 영구 미충족 terminal 캠페인 94건(completed 90+failed 4, 5/7~)이 굳힘·재대조 양쪽에서 누락 → 발송통계/발송결과가 매 로딩 전부 실측. fix=①CT `sweep-cadence.ts` 신설(발송 48h 이내=매 사이클/경과 휴면=60분 1회, 메모리 마커 — 후보 SELECT·환불 산식·14일 안전망 불변, 보정 도착만 최대 60분 지연) ②reconcile에 굳힘 탈출구 무리(terminal+result_final=false+발송 72h, 21일 하한 없음·사이클당 50건) — 실측값으로 counts 교정 후 굳힘(화면 숫자 연속, 잔존 94건 자동 소화·향후 72h 자동 졸업) ③reconcile 실측에 카카오 합산 추가(PG의 SMS+카카오 합산값을 SMS 단독으로 덮어 카카오 몫 깎이던 잠재 과소 동시 차단). backend 2파일+CT 1+검증 1. tsc 0·sweep-cadence 9/9·refund-calc 8/8·sms-table-split 8/8·direct-send-spec 12·sms-channel-split 13. 배포 후 검증=PROCESSLIST 10초 쿼리 소멸+nonFinal 분포 SQL 94→감소+화면 체감. **[4차 배포 후 실측]** PROCESSLIST 거대 집계 소멸(엔진 픽업 쿼리만 잔존)·nonFinal 94→41(oldest 5/7→6/1, 72h 이내분 잔류는 설계 정상)·load 3.3=평시 바닥값.
+> **[5차 — 슈퍼관리자 최초 로딩 5초+ "로딩 중..." 차단 fix(배포 완료·체감 확인)]** 원인 2축 실측: ①AdminDashboard loadData가 7개 API(고객사 1000·요금제·사용자·예약·발신번호·요금제목록·충전관리)를 직렬 await — 전부 끝나야 loading 게이트(2353) 해제 = 합산 대기 ②/api/admin/users(사용자 173명×상관 서브쿼리 2개)+/api/companies 목록(76개×1개)이 행마다 24만 행 customers 탐침(총 422회). fix=①loadData 게이트를 고객사+요금제 2개로 축소+나머지 5개 Promise.allSettled 병렬 백그라운드(각자 도착 즉시 채움, 표시 값 동일) ②두 목록 쿼리를 GROUP BY 1회 집계 LEFT JOIN으로 전환(값 동일 — 상관 COUNT 0 ↔ 그룹 부재 COALESCE 0, 타입 bigint 동일). 동일 패턴 전수 grep 12곳 = N행 2곳만 수정·단건 10곳 무해 유지. tsc 0×2. **배포 완료 — Harold 체감 확인("빨라졌다") 2026-06-13.** 이로써 0613 속도 3건(예약 상세 10초+ / 슈퍼관리자 전반 지연 / 최초 로딩 5초+) 전부 종결.
 
 ---
 
-### 🟢 2026-06-11(밤) — 디버깅 배치 5건+건6 전건 원인 확정·근본 코드 완료 (미배포 — backend build:safe 1회)
+### 🟢 2026-06-11(밤) — 디버깅 배치 5건+건6 전건 원인 확정·근본 코드 완료 (배포 완료 — 2026-06-13 세션에서 확인)
 > P0 데이터 3건 종결(인비토 자동발송 active 4건 paused+잔존 0 / 에이치피오 성공 84,259 실측 정정+큐 누수 2,128 삭제+audit 2행, 청구=성공 84,259건 / 폴라초이스 환불 불필요 확정 — 15,697 전량 발송 시도·실패 562 전액 자동환불 완료) + P2 KREJ 반려 미알림=5월 구코드(D188 이전 무조건 마킹) 선기록 잔존 확정·정정(자동 재발송, 전수=시스템 1건뿐) + P3 전수(과거 미환불 0건) + 건6 신규=**큐→이력 이동 중 이중 집계가 굳힘**(sent_count>target 16건, toun28 실재 7,171 전원 고유 vs 기록 7,520).
 > **근본 코드(전부 backend)**: ①환불 단일 산식 refund-calc CT(차감 실측−성공−대기 — worker 미적재분/sweep 실측실패분이 같은 누적 풀에서 max 수렴하던 과소환불 차단, send_phase 가드) ②전 bulk 라인 합집합 getAllBulkSmsTables(라인 해제 내성 — 큐 작업 6곳+집계 10곳 자동 보강) ③billing 정산 2축(회사 라인만→전 라인 + campaign_runs 미생성 신 직접발송 UNION 포함) ④sent_count=적재 실측 보존(sync/sweep success+fail 덮어쓰기 제거) ⑤취소 시 counts 덮어쓰기 제거(실측 보존) ⑥worker 제외 사유 send_config.exclusions 기록 ⑦cancelled-queue-sweeper 픽업 행 9999+잔존 재카운트 ⑧자동발송 워커 영구 가드(AUTO_CAMPAIGN_RETIRED) ⑨**집계 단일 산식 smsCampaignCountsSafe — 결과=월별 이력만(append-only라 과대 불가)·대기=라이브 대기코드만 → 부풀린 값이 기록되는 것 자체 차단**(소비처 6곳 전수 교체+채널분리 동일 적용·기존 합산 함수 외부 호출 잔존 0 grep). tsc 0·refund-calc 8/8·sms-table-split 8/8.
 > **잔여 4(배포 후)**: backend build:safe+pm2 restart → 굳은 16건 리셋 SQL(reconcile 1h 자동 교정·toun28은 발송+24h) → 반려 LMS 수신 확인(박성용) → 소량 실측 1건 시나리오(설계서 Task 10). 설계서=`docs/superpowers/plans/2026-06-11-debug-p1-root-fix.md` · 건별 종결=`status/debug-notes-2026-06-11.md`.
@@ -140,8 +140,8 @@
 
 ---
 
-### 🟢 2026-06-11 — 인앱메시지 SDK 배선 T0~T6 구현 완료(미배포) + 고도몰 SDK 가이드 3차 보강(완성코드판)
-> **인앱 배선(코드 완료·미배포, 커밋 대기)**: 설계도 T0~T6 전 단계 TDD(신규 테스트 16) 구현. T0=운영 43컬럼 실측 ALTER 불요(SCHEMA.md 실측 기록). T1=auto-capture IIFE에 HanjulloInAppModule 생성+window.hjl.inapp 공개+identify 직후 init+늦은 로그인 재조회. T2=track(cart_add/cart_view/checkout_start) 인앱 트리거 브리지+cart-estimate.ts(price×quantity 세션 누적→cart_value). T3=/inapp/active 응답 customer 동봉(CT-79 확장: INAPP_BROWSER_VAR_WHITELIST phone 제외+extractUsedInAppVariables+getInAppCustomerForBrowser)+SDK fallback·캐시 보존. T4=lastInput(늦은 identify에도 최신 identity)+cart_value_min 클라 필터(캐시 hit 포함)+dwell_seconds+data-hjl-inapp-container+401/403 재시도 중단. seenMessageIds는 V2 Step 7 기존 소비 확인(작업 불요). T5=IIFE 재빌드 23,311B(인앱 마커 6종 포함)+v0.3.5 사본 덮어쓰기(해시 동일 — 가이드 기전달·설치 0곳이라 URL 유지 결정). 검증=sdk vitest 75/75·backend ts-node verify OK·tsc 양쪽 0·금지패턴 0. T7 실측 1건(center_modal 표시→impressions 기록→once_per_session→cart_add 트리거)은 배포 후. 발견(추가 과제)=inapp 자동 트리거가 scroll_percent/time_on_page_seconds 조건값 클라 비교 없음.
+### 🟢 2026-06-11 — 인앱메시지 SDK 배선 T0~T6 구현 완료(배포완료) + 고도몰 SDK 가이드 3차 보강(완성코드판)
+> **인앱 배선(코드 완료·배포완료)**: 설계도 T0~T6 전 단계 TDD(신규 테스트 16) 구현. T0=운영 43컬럼 실측 ALTER 불요(SCHEMA.md 실측 기록). T1=auto-capture IIFE에 HanjulloInAppModule 생성+window.hjl.inapp 공개+identify 직후 init+늦은 로그인 재조회. T2=track(cart_add/cart_view/checkout_start) 인앱 트리거 브리지+cart-estimate.ts(price×quantity 세션 누적→cart_value). T3=/inapp/active 응답 customer 동봉(CT-79 확장: INAPP_BROWSER_VAR_WHITELIST phone 제외+extractUsedInAppVariables+getInAppCustomerForBrowser)+SDK fallback·캐시 보존. T4=lastInput(늦은 identify에도 최신 identity)+cart_value_min 클라 필터(캐시 hit 포함)+dwell_seconds+data-hjl-inapp-container+401/403 재시도 중단. seenMessageIds는 V2 Step 7 기존 소비 확인(작업 불요). T5=IIFE 재빌드 23,311B(인앱 마커 6종 포함)+v0.3.5 사본 덮어쓰기(해시 동일 — 가이드 기전달·설치 0곳이라 URL 유지 결정). 검증=sdk vitest 75/75·backend ts-node verify OK·tsc 양쪽 0·금지패턴 0. T7 실측 1건(center_modal 표시→impressions 기록→once_per_session→cart_add 트리거)은 배포 후. 발견(추가 과제)=inapp 자동 트리거가 scroll_percent/time_on_page_seconds 조건값 클라 비교 없음.
 > **고도몰 가이드 3차 보강(`docs/고도몰_SDK_설치가이드.md`+docx 129단락)**: ①용어 한눈에 표 14항목(비전공자용, 영업 혼란 사건 — 발급 화면 5종 값 용도 불명 → "SDK 설치는 설치 스크립트 한 줄뿐" 표 신설) ②실변수 완성코드 — 회원식별 `{=gSess.memNo}/{=gSess.cellPhone}/{=gSess.memNm}`(이메일은 gSess 표준에 없음 명시)·장바구니 `{=goodsView['goodsNm']}`/`{=gd_isset(goodsView['goodsPrice'],0)}`+AJAX 성공 콜백 안내·구매 `{=orderInfo.orderNo}` ③PC·모바일 스킨 양쪽 설치 명시 ④트러블슈팅 6단계(허용도메인→스킨반영→한쪽누락→광고차단→키→연락) ⑤인앱 자동표시 절+CDN 내부항목 제거. 다른 페이블 리뷰 4지적 전부 반영.
 > **고도몰(기존)**: 업체 전달용 Word 2건 — `docs/고도몰_연동_가이드_업체전달용.docx` + `sync-agent/SyncAgent_설치매뉴얼_v1_5_4_개정_2026-06.docx`. 에이전트 동의 컬럼 미매핑 = 전원 동의(true) 등록(sync.ts:615) — SDK/웹훅(기본 false)과 반대.
 > **배포(인앱 배선분)**: backend+company-frontend 두 곳 build:safe (frontend 무변경). 설계도 D절 AI 백로그 5건+E절 크레딧 권고는 Harold 선별 대기.
@@ -151,13 +151,13 @@
 ### 🔴 2026-06-11 — 알림톡 강조표기형 7300 **최종 근본 확정 = 대표링크(ATTACHMENT.link) 미동봉** — 게이트웨이 매핑 추가 대기(서팀장)
 > **최종 근본(휴머스온 답변+실측 5회 확정)**: 79738만 `kakao_templates.represent_link` 등록(`{"urlPc","urlMobile"}` — 정상 발송 5개 템플릿은 전부 미등록, PG 실측)인데 **발송 요청에 link 미동봉 → 카카오 템플릿 불일치 거부**. 한줄로는 represent_link를 저장만 하고 발송 경로 소비 0건(grep). 옛 가설 2개 폐기 — ① sender_code concat(부차: 가드 수정 완료, 식별코드 301170011 엔진 자동삽입) ② imc_template_status R 차단(휴머스온 정의 **S=중지/A=정상/R=발송 전 대기, 첫 발송 시 자동 A** — R은 차단 사유 아님, CT-87 R 차단은 신규 템플릿 첫 발송 영구 차단 역효과라 정정 의무).
 > **운반 구간 실측(LINKTEST1~6, Harold 번호 2개)**: etcJson snake/camel link·btnJson link객체·btnJson 버튼형식(name 유/무) 전부 7300. 게이트웨이(인비토 자체, mmsr3/ngen) 로그 = **etcJson의 link가 게이트웨이까지 온전 도달** + 휴머스온 "IMC 접수에 ATTACHMENT 없음" → **막히는 지점 = 게이트웨이 엔진이 etcJson에서 title만 IMC로 옮기고 link 미전달**. 타업체 성공 사례는 전부 대표링크 없는 템플릿(etcJson title만 — 전달 모양 한줄로와 동일). deliver 전문 필드=title/btnJson/etcJson뿐(link 전용 자리 없음). btnJson 버튼형식은 button으로 변환됨(채널추가 1800 실증 — 버튼 통로 정상).
-> **해법(확정·진행 대기)**: ① 서팀장 — 게이트웨이 엔진에 etcJson 안 `link` 객체 → IMC 요청 최상위 `link`(urlMobile/urlPc) 매핑 추가. ② 한줄로 — 발송 4경로에서 대표링크 템플릿이면 etcJson에 `{"title":…,"link":{"urlMobile":…,"urlPc":…}}` 합성(공통 CT, buildAlimtalkEtcJson 확장) — ① 완료 통보 후 구현+실측 1건. ③ 어제 미배포분 정정 묶음 = CT-87 R 차단 해제(S/D만)+화면 "발송불가" 뱃지 문구+SCHEMA.md imc_template_status 주석 — Harold 동의 대기.
+> **해법(확정·진행 대기)**: ① 서팀장 — 게이트웨이 엔진에 etcJson 안 `link` 객체 → IMC 요청 최상위 `link`(urlMobile/urlPc) 매핑 추가. ② 한줄로 — 발송 4경로에서 대표링크 템플릿이면 etcJson에 `{"title":…,"link":{"urlMobile":…,"urlPc":…}}` 합성(공통 CT, buildAlimtalkEtcJson 확장) — ① 완료 통보 후 구현+실측 1건. ③ 어제 배포완료분 정정 묶음 = CT-87 R 차단 해제(S/D만)+화면 "발송불가" 뱃지 문구+SCHEMA.md imc_template_status 주석 — Harold 동의 대기.
 > **잔여**: 진단로그 `[ALIMTALK-DEBUG2]`(direct-send-processor) 제거 의무(종결 시). LINKTEST1~6 테스트 행 = SMSQ_SEND_1_202606 app_etc1 LIKE 'LINKTEST%' (정산 집계 시 제외 식별 가능). IMC v1 스펙 제약 = link 포함 시 버튼 최대 2개. 5월 79955 버튼 발송 url1_1 빈 값 92 건은 CT(convertButtonsToQTmsg) 도입 전 경로 — 현행 CT는 urlMobile 정상 처리.
 > 상세=`memory/project_2026_0609_alimtalk_emphasize_etcjson_diagnosis.md`(2026-06-11 갱신)+IMC v1 스펙=Developer Portal(link 최상위 camelCase·강조형 link 허용).
 
 ---
 
-### 🟢 2026-06-09 — 발송통계 성공→실패 오분류 + 미도래 예약 대기집계 정정 (코드 완료·미배포 / 데이터 65건 정정 완료, P1 돈/정산)
+### 🟢 2026-06-09 — 발송통계 성공→실패 오분류 + 미도래 예약 대기집계 정정 (코드 완료·배포완료 / 데이터 65건 정정 완료, P1 돈/정산)
 > **근본 원인(확정)**: 발송시각이 아니라 등록 시각(예약은 `sent_at`이 생성 때 찍힘) 기준으로 체크하던 것. ① 예약발송 120분 타임아웃이 `sent_at`(=등록) 기준이라, 실제 전송시각(`scheduled_at`)에 발송되는 순간 이미 "120분 초과" → 통신사 결과가 몇 초만 늦어도 pending→실패로 굳고, `success+fail=target`이라 재sync에서 영구 제외(상세는 MySQL 실시간이라 성공, 목록·통계는 캐시라 실패). ② 미도래 예약이 발송통계에 '대기'로 집계됨.
 > **원칙(Harold 명시)**: 모든 통계·sync·타임아웃·확정 = **발송시각 `COALESCE(scheduled_at, sent_at)`** 기준. 전송시각 미도래 예약은 발송 시작 전이라 통계 제외(그 전엔 취소 가능).
 > **수정(backend, ~25곳)**: 발송시각 base = `campaign-lifecycle`(AI·직접 타임아웃 + 예약 발송전 제외 가드 + 윈도우)·`campaign-sync-worker`(후보 윈도우·markFinalized)·`mysql-refund-sweeper`(윈도우)·`stats-aggregation` aggregateCampaignPerformance. 발송시작 가드 = `STAT_STARTED_GUARD` CT 신설(stats-aggregation) + 소비처 전수(querySendStats·querySendStatsDetail·admin 발송통계/상세/캠페인관리/발송결과/export·results 요약+목록2 인라인). 후불은 `prepaidRefund` no-op(prepaid.ts:68)이라 돈 영향 0(표시 전용). backend tsc 0 + grep 전수(옛 타임아웃 순서 0·가드 적용 확인).
@@ -167,23 +167,23 @@
 
 ---
 
-### 🟢 2026-06-09 — CDP 페이지 전면 모달화 Task1~9 완료 (미배포, frontend-only)
+### 🟢 2026-06-09 — CDP 페이지 전면 모달화 Task1~9 완료 (배포완료, frontend-only)
 > **CDP(자사몰 연동) 페이지 재설계 끝까지 구현. 단일 파일 `CdpSettingsPage.tsx` 재배치(신규 백엔드 0). frontend tsc 0 + 금지패턴 grep 0.**
 > - **Task1 게이팅(완료·기배포)**: `cdp_enabled` 판정 → `cdpLocked`(`plan_code==='FREE'`) = STARTER+ 전부 개방, FREE만 안내. 백엔드(plan-guard ai_cdp·cdp-auth isCdpEnabledForPlan) 이미 FREE만 차단.
 > - **Task2 매트릭스(완료·기배포)**: "지원 자사몰 매트릭스" 나열 제거 → "어떤 자사몰이든 연동" 안내.
-> - **Task3~8 모달화(완료·미배포·★Harold 화면 피드백 정정 반영)**: 메인 = 헤더 → 게이팅 → 연동 상태 카드 → **자사몰 선택 2열 그리드(가로 2분할: 카페24·네이버·고도몰·가비아 + 자체호스팅/그 외 full-width)** → 5 metric → 요약 칩(데이터 분석·AI진단 / 활성 고객, `hasCdpData`일 때만). **카드 클릭 = 그 업체 전용 연동 모달**(`connectProvider` state·카페24/네이버=OAuth, 고도몰/가비아/자체호스팅=webhook 공용 그룹 `webhookProviderOpen`). 모달 4종(createPortal·slate-900·ESC): 업체별 연동 / 데이터 분석·AI진단(open 시 자동 로드+영향요인+6차트+컴퓨팅) / 활성 고객. **정정 경위: 1차 구현이 "자사몰 연동하기 버튼 1개"로 카페24·네이버를 메인에서 빼 화면이 비어 보임 → Harold "단순화하라 했지 없애라 했나" → provider 카드 그리드 + 업체별 모달로 복원.** 제거=AI진단 큰 카드·자세히 토글 / 죽은 코드(providers·ProviderInfo·detailsExpanded·handleQuickAction·QuickActionCard·dataAvailabilityCards·/cdp/providers fetch). 모델명/native/박-단어 0.
+> - **Task3~8 모달화(완료·배포완료·★Harold 화면 피드백 정정 반영)**: 메인 = 헤더 → 게이팅 → 연동 상태 카드 → **자사몰 선택 2열 그리드(가로 2분할: 카페24·네이버·고도몰·가비아 + 자체호스팅/그 외 full-width)** → 5 metric → 요약 칩(데이터 분석·AI진단 / 활성 고객, `hasCdpData`일 때만). **카드 클릭 = 그 업체 전용 연동 모달**(`connectProvider` state·카페24/네이버=OAuth, 고도몰/가비아/자체호스팅=webhook 공용 그룹 `webhookProviderOpen`). 모달 4종(createPortal·slate-900·ESC): 업체별 연동 / 데이터 분석·AI진단(open 시 자동 로드+영향요인+6차트+컴퓨팅) / 활성 고객. **정정 경위: 1차 구현이 "자사몰 연동하기 버튼 1개"로 카페24·네이버를 메인에서 빼 화면이 비어 보임 → Harold "단순화하라 했지 없애라 했나" → provider 카드 그리드 + 업체별 모달로 복원.** 제거=AI진단 큰 카드·자세히 토글 / 죽은 코드(providers·ProviderInfo·detailsExpanded·handleQuickAction·QuickActionCard·dataAvailabilityCards·/cdp/providers fetch). 모델명/native/박-단어 0.
 > - **Task9 SDK 소스 재점검(완료·블로킹 이슈 0)**: cdp.ts·cdp-auth.ts·cafe24.ts·naver-commerce.ts 정독. 게이팅 전 유료 일치(isCdpEnabledForPlan=plan_code≠FREE 전 엔드포인트)·DB ALTER 503 안전망 ~15곳·회사 격리(SDK=key→company / admin=req.user.companyId, body 미신뢰)·webhook 서명검증+멱등(cdp_webhook_deliveries ON CONFLICT)+duplicate 마커·OAuth state CSRF+10분 TTL. 모델명 grep 2건=백엔드 코드 주석(룰 예외)=사용자 노출 0. (경미: cdp.ts 주석 "BUSINESS+" stale·webhook 실패 retry는 Phase2 cron 미구현 — 백엔드 무수정 유지.)
 > - **배포(frontend-only)**: `tp-push` → `git pull` → `packages/frontend npm run build:safe` (backend 무수정 → 빌드/restart 불요). **미결 1: 연동 안내 "고객센터" placeholder 실제 연락처 Harold 제공 시 교체.** 핸드오프=`docs/superpowers/handoffs/2026-06-09-cdp-redesign-handoff.md`(수정 설계 진실 원천).
 
 ---
 
-### 🟢 2026-06-08 — 발송일시 송출일 기준 통일(배포) + 풀분석 프리미엄 보고서 Plan1+2·레이아웃 완료·Plan3 설계(미배포)
-> **① 발송일시 버그(배포 완료): 슈퍼관리자 캠페인관리·발송결과 날짜 기준을 발송통계와 동일 `STAT_DATE_EXPR`(`COALESCE(scheduled_at,sent_at)` scheduled 우선)로 통일 — 예약발송(scheduled≠sent)이 통계 8건↔관리 9건 어긋나던 것 정정. ② 풀분석 = 성과리포트 내 기간종합 AI 분석 PDF(15만원/300크레딧). Plan1 백엔드+Plan2 프론트+레이아웃+Plan3 RFM 완료, 나머지 Plan3는 설계서로 다음 세션. 미배포(Plan1+2+3 한 번에).**
+### 🟢 2026-06-08 — 발송일시 송출일 기준 통일(배포) + 풀분석 프리미엄 보고서 Plan1+2·레이아웃 완료·Plan3 설계(배포완료)
+> **① 발송일시 버그(배포 완료): 슈퍼관리자 캠페인관리·발송결과 날짜 기준을 발송통계와 동일 `STAT_DATE_EXPR`(`COALESCE(scheduled_at,sent_at)` scheduled 우선)로 통일 — 예약발송(scheduled≠sent)이 통계 8건↔관리 9건 어긋나던 것 정정. ② 풀분석 = 성과리포트 내 기간종합 AI 분석 PDF(15만원/300크레딧). Plan1 백엔드+Plan2 프론트+레이아웃+Plan3 RFM 완료, 나머지 Plan3는 설계서로 다음 세션. 배포완료(Plan1+2+3 한 번에).**
 > - ①: 날짜 기준이 `sent` 우선이라 예약발송이 처리일(등록계열)로 잡혔음. admin.ts 798·1663, results.ts 118·248·393, AdminDashboard 발송일시 표시를 `scheduled` 우선으로 통일(=발송통계). 근본=직접발송 worker가 PDF처럼 `sent_at=NOW()`를 처리시점에 기록.
 > - 풀분석 Plan1: `full-analysis-steps/job/runner`+`performance-pdf-render`(추출)+`ai.ts` endpoint3(start/status/download). `full_analysis_jobs` 테이블 생성. 차감=PDF성공후 멱등·실패시0.
 > - Plan2: `PerformancePage` 풀분석버튼+설정/동의(CreditConfirmModal 재사용)/진행도모달 폴링. 레이아웃=AI진단 좌측 좁은카드(36%)+6카드 우측 grid 2단·벤치마크 칩 제거.
 > - Plan3 RFM: `rfm-segment.ts`(순수 분위수 TDD)+`segment-analysis.ts`(호출부 RFM+등급+LTV).
-> - **★ 풀분석 Plan 3 완료(T1~T9 구현·검증) — 미배포(Plan1+2+3 한 번에 배포 대기).** 신규 순수 CT 5(multidim-comparison·message-analysis·message-byte·forecast·action-plan, 전부 .verify TDD)+호출부 full-analysis-collect(campaigns/customers/companies SELECT·발송일 COALESCE(scheduled_at,sent_at)·단가 0/null→null 임의상수0)+PDF 10섹션(익스큐티브 서머리·세그먼트 심층 RFM/등급/LTV·다차원·메시지·예측·액션·부록)·벤치마크 전 영역 제거(PDF/러너/프론트 모달·state·fetch)·ai.ts report-pdf 인라인 200줄→공통 render(중복 제거). 검증=backend tsc0·frontend tsc0·순수 7+스모크 1 PASS·박단어/모델명/native 0. SCHEMA.md 3테이블 실측 보강. 풀분석 모달 3개(설정·진행·크레딧) `createPortal(document.body)` fix — 헤더 `backdrop-filter`가 자식 `fixed`의 containing block을 가둬 모달 상단이 잘리던 버그(조상 transform 0·backdrop-blur가 유일 원인). 상세=`memory/project_2026_0608_full_analysis_premium_report.md`.
+> - **★ 풀분석 Plan 3 완료(T1~T9 구현·검증) — 배포완료(Plan1+2+3 한 번에 배포 대기).** 신규 순수 CT 5(multidim-comparison·message-analysis·message-byte·forecast·action-plan, 전부 .verify TDD)+호출부 full-analysis-collect(campaigns/customers/companies SELECT·발송일 COALESCE(scheduled_at,sent_at)·단가 0/null→null 임의상수0)+PDF 10섹션(익스큐티브 서머리·세그먼트 심층 RFM/등급/LTV·다차원·메시지·예측·액션·부록)·벤치마크 전 영역 제거(PDF/러너/프론트 모달·state·fetch)·ai.ts report-pdf 인라인 200줄→공통 render(중복 제거). 검증=backend tsc0·frontend tsc0·순수 7+스모크 1 PASS·박단어/모델명/native 0. SCHEMA.md 3테이블 실측 보강. 풀분석 모달 3개(설정·진행·크레딧) `createPortal(document.body)` fix — 헤더 `backdrop-filter`가 자식 `fixed`의 containing block을 가둬 모달 상단이 잘리던 버그(조상 transform 0·backdrop-blur가 유일 원인). 상세=`memory/project_2026_0608_full_analysis_premium_report.md`.
 > - 검증: backend tsc0·frontend tsc0·순수 TDD(steps/rfm-segment) PASS·박-단어/모델명/native 0.
 
 ---
@@ -207,24 +207,24 @@
 
 ---
 
-### 🟢 2026-06-07 — 발송 버그 3건 수정 (버그2·3 완료 / 버그1 부분 · 전부 미배포)
-> **① 알림톡 버튼/강조 ② 발송내역 발송일 검색기준 ③ 대체발송 SMS/LMS 정산구분. 버그2·3 코드 완료, 버그1 버튼 5경로+직접발송 강조 완료·나머지 경로 강조 title+채널추가형 buttons=0 조사 남음. 전부 미배포. 다음 세션 = 리포트 .md로 이어서.**
+### 🟢 2026-06-07 — 발송 버그 3건 수정 (버그2·3 완료 / 버그1 부분 · 전부 배포완료)
+> **① 알림톡 버튼/강조 ② 발송내역 발송일 검색기준 ③ 대체발송 SMS/LMS 정산구분. 버그2·3 코드 완료, 버그1 버튼 5경로+직접발송 강조 완료·나머지 경로 강조 title+채널추가형 buttons=0 조사 남음. 전부 배포완료. 다음 세션 = 리포트 .md로 이어서.**
 > - 리포트(현 상태+남은 것+진입 명령어) = `docs/superpowers/handoffs/2026-06-07-send-bugs-report.md`.
 > - 검증: backend tsc OK · frontend tsc OK · TDD(alimtalk-button 9 · sms-channel-split 13).
 > - 버그2: 검색 COALESCE(sent_at,scheduled_at) created_at 제거(admin 4곳·results 3곳)+표시 sent_at(AdminDashboard 4078·results 466). 완료.
 > - 버그3: sms-result-map classifyMsgChannel substitute_lms/sms 세분화+export 2행+대체필터 L/S. 완료.
 > - 버그1: 신규 CT alimtalk-button(IMC linkType/linkMo+프론트 형식)+버튼 5경로(직접/staging/여정/자동)+직접발송 강조 title 변수치환 완료. **남은것=나머지 3경로(staging-processor/여정/자동) 강조 title 치환(공통CT 권장)+채널추가형 80149 btn_cnt 0 조사**. SQL=buttons 다수 존재(btn_cnt 1=발송코드 작동), 79738 강조표기(버튼없음=etcJson title 원인).
-> - 미배포 자율예측(6종·VIP numeric·재계산 버튼·worker 조건)도 별도 미배포.
+> - 배포완료 자율예측(6종·VIP numeric·재계산 버튼·worker 조건)도 별도 배포완료.
 
 ---
 
-### 🟢 2026-06-07 — 재검증(이상0) + C게이트 토글 + 크레딧 보강 + 자율예측 재설계 완료(미배포)
+### 🟢 2026-06-07 — 재검증(이상0) + C게이트 토글 + 크레딧 보강 + 자율예측 재설계 완료(배포완료)
 > **자동마케팅+여정 전수 재검증(결함 0) / C게이트 슈퍼관리자 토글 / 크레딧 멱등 보강 / 자율예측 재설계 완료(메인 3블록 발견세그먼트 주인공 + 전부 모달 + backend discoveredSegments 실데이터 근거 TDD). 다음 = 배포 + 운영검증.**
 > - **재검증**: 자동마케팅(A진입/B발송/C돈/D정확/E표시) + 여정(진입 안전필터·발송직전 isCustomerSendable·알림톡 승인3중·J1~J3·마커게이트·cdp커서·조건 fail-safe·변이 bandit_*) 전수 — 결함 0. send_type default 'ai' 확인(여정 표시 정상).
 > - **C게이트**: `autosend-policy` normalizeCdpAutoExecuteGate(+verify 19) / `admin.ts` PATCH `/companies/:id/cdp-auto-execute`(503 분기) / `AdminDashboard` editCompany 모달. companies 4컬럼 information_schema 실재 확인.
 > - **크레딧 보강**: `continuous-operator` reconcileStuckSending mark_sent 멱등 차감(키 proposalId).
 > - **자율예측 UI 1차**: PredictiveDashboardPage 안내2→1·인라인→모달·metric→큰카드6·자세히→모달·액션통합·cold start 흐림 + backend predictive-explainer 텍스트 정리. **Harold "어정쩡"(큰 카드만으론 부족)** → 2차 재설계.
-> - **자율예측 2차 재설계(미배포)**: 메인 3블록(헤더+안내 1줄+**AI 발견 세그먼트 3장 주인공**[N명+근거 한 줄+「근거 보기」「캠페인 만들기」]+작은 요약 바 5)+나머지 전부 모달(전체고객목록·분포정확도·고객상세). `predictive-segments-core.ts` 신규(순수·TDD 11 green) buildDiscoveredSegments(실측→근거 한 줄)·`predictive-suite` getCompanyPredictionSummary discoveredSegments(보조집계 1쿼리: 이탈 avg미활동일·구매 avg다음구매일·VIP 합산365LTV·신규컬럼0)+고객목록 high_ltv/ltv_365d_desc·`routes/ai` quick-action objective/error 자연 한국어. 큰카드6·미사용컴포넌트 제거·slate-950. backend+frontend tsc OK·grep 0(모델명/박단어/native/영역). 상세=`memory/project_2026_0607_predictive_redesign_brainstorm.md`.
+> - **자율예측 2차 재설계(배포완료)**: 메인 3블록(헤더+안내 1줄+**AI 발견 세그먼트 3장 주인공**[N명+근거 한 줄+「근거 보기」「캠페인 만들기」]+작은 요약 바 5)+나머지 전부 모달(전체고객목록·분포정확도·고객상세). `predictive-segments-core.ts` 신규(순수·TDD 11 green) buildDiscoveredSegments(실측→근거 한 줄)·`predictive-suite` getCompanyPredictionSummary discoveredSegments(보조집계 1쿼리: 이탈 avg미활동일·구매 avg다음구매일·VIP 합산365LTV·신규컬럼0)+고객목록 high_ltv/ltv_365d_desc·`routes/ai` quick-action objective/error 자연 한국어. 큰카드6·미사용컴포넌트 제거·slate-950. backend+frontend tsc OK·grep 0(모델명/박단어/native/영역). 상세=`memory/project_2026_0607_predictive_redesign_brainstorm.md`.
 > - **다음 = 배포(Harold 비번)+운영검증**. **미점검(별도)**: billing send_type='manual' 정산 / impactScore·churn 임의상수 실데이터 점검. 핸드오프=`docs/superpowers/handoffs/2026-06-07-ai-predictive-redesign-handoff.md`.
 
 ---
@@ -238,7 +238,7 @@
 ---
 
 ### 🟢 2026-06-05 세션8 — 자동마케팅 자율 발송 구현 완성 (배포 완료)
-> **세션7 점검의 CRITICAL(자동실행이 크레딧만 차감·실발송 코드 전무) 해소 + 자율 발송 전 구현. spec §6 질의 10건 Harold 확정 → §7 TDD 구현. backend·frontend tsc0 · 순수 38 assertion · 박/모델명/native dialog 0 · 미배포. ★다음 세션 = 자동마케팅 코드 전수 점검.**
+> **세션7 점검의 CRITICAL(자동실행이 크레딧만 차감·실발송 코드 전무) 해소 + 자율 발송 전 구현. spec §6 질의 10건 Harold 확정 → §7 TDD 구현. backend·frontend tsc0 · 순수 38 assertion · 박/모델명/native dialog 0 · 배포완료. ★다음 세션 = 자동마케팅 코드 전수 점검.**
 > - **신규 CT 5종(순수 TDD)**: season-context(월별 시즌+업종톤) / operator-recipients(buildSendableRecipientsSql, filterWhere 주입형 DB-free) / direct-send-spec(buildDirectSendCampaignParams 18컬럼 고정) / direct-send-core(countStagingFiltered 이동·createDirectSendCampaign) / autosend-policy(resolveAutoSendLeadMinutes·computeScheduledSendAt·decideSendOutcome).
 > - **흐름**: prep(schedule_time<=NOW)=계절 문안 생성→스팸 2회 재생성→통과 시 status='scheduled'+scheduled_send_at=now+lead+담당자 실문안/정지안내 → 발송 패스(scheduled_send_at<=NOW)=타겟 재추출(안전필터)→staging→createDirectSendCampaign(직접발송 공유)→크레딧 멱등(continuous-operator-send:proposalId)→status='sent'+campaign_id→완료통지. 스팸 끝내 실패→operator 'paused'+알림 / 0건·잔액→skip+알림 / 정지창(adminStopProposal 'scheduled' 허용).
 > - **안전필터 통일**: countFilteredCustomers·preview-recipients가 buildJourneySafetyFilter(is_opt_out·is_invalid·수신거부 회사+전화). 직접발송 commit→createDirectSendCampaign 위임(톤28 504 정정 동작 보존).
@@ -266,18 +266,18 @@
 ---
 
 ### 🟢 2026-06-05 세션5 — 직원 디버깅 3건 + 발송통계 캐시·라인그룹
-> **① 알림톡 대체발송 통계 분리(배포) ② 발송결과 채널통합조회 엑셀 다운로드+줄바꿈fix(배포) ③ hpio 발송통계 0=라인그룹 합집합(배포) ④ 발송통계 5곳 result_final 캐시 전환(미배포). 핸드오프 `docs/superpowers/handoffs/2026-06-05-session5-stats-cache-handoff.md` 정독 의무. ★여정 코드 절대 X.**
+> **① 알림톡 대체발송 통계 분리(배포) ② 발송결과 채널통합조회 엑셀 다운로드+줄바꿈fix(배포) ③ hpio 발송통계 0=라인그룹 합집합(배포) ④ 발송통계 5곳 result_final 캐시 전환(배포완료). 핸드오프 `docs/superpowers/handoffs/2026-06-05-session5-stats-cache-handoff.md` 정독 의무. ★여정 코드 절대 X.**
 > - **알림톡 대체발송 분리**: 통계 엑셀 알림톡 캠페인 "알림톡"(K)/"알림톡대체발송"(L·k_oriseq>0) 2행. sms-result-map classifyMsgChannel/tallySmsChannelCounts(순수 TDD) + aggregateSmsChannelSplitByCampaign + admin /stats/export.
 > - **발송결과 엑셀**: 프론트 ESM라 backend CSV(campaign-list-csv 순수 TDD) + results.ts /campaigns/export(필터 sendType/sender=login_id, :id보다 먼저 라우팅) + ResultsModal 버튼. 메시지 줄바꿈→공백 fix.
 > - **hpio 0**: 발송 company라인{7,8,9} vs 집계 user라인{1,2,3} 어긋남(user 개별 라인그룹 발송후 부여). mergeLineTables(순수)+getCompanySmsTablesWithLogs user+company 합집합. 발송 무영향.
-> - **발송통계 캐시**: 5곳(querySendStats·Detail·admin send·detail·export else) getCampaignResultCounts(result_final 캐시). 완료=PG캐시 MySQL skip, 진행중=실시간. result_final/sent_count/success_count/fail_count information_schema 확인. tsc0·grep0·미배포.
+> - **발송통계 캐시**: 5곳(querySendStats·Detail·admin send·detail·export else) getCampaignResultCounts(result_final 캐시). 완료=PG캐시 MySQL skip, 진행중=실시간. result_final/sent_count/success_count/fail_count information_schema 확인. tsc0·grep0·배포완료.
 > - **hoyun 500 폭발**: 6/4 여정 500 campaign status='sending'+result_final=false(syncCampaignResults app_etc1 매칭 0→status 미전환)→캐시없음→발송결과 조회 raw 폭발. 인덱스OK(6.7ms). **여정 코드 X(주인님 격분 — 묶음 이미 고침)**.
 > - **잔여**: ②캐시 배포검증 ③hoyun status sending→failed 정리(환불 실측 먼저) ④status 안전망(campaign-sync-worker). 여정 코드 0.
 
 ---
 
-### 🟢 2026-06-05 세션4 — 여정 엔진 Phase 9 완료 (미배포)
-> **Phase 9 전면 구현·검증 완료, 미배포(Harold 배포). 설계 `docs/superpowers/specs/2026-06-04-journey-phase9-design.md` · 계획 `docs/superpowers/plans/2026-06-04-journey-phase9.md`.**
+### 🟢 2026-06-05 세션4 — 여정 엔진 Phase 9 완료 (배포완료)
+> **Phase 9 전면 구현·검증 완료, 배포완료(Harold 배포). 설계 `docs/superpowers/specs/2026-06-04-journey-phase9-design.md` · 계획 `docs/superpowers/plans/2026-06-04-journey-phase9.md`.**
 > - **9-1 미리보기=실발송 통일**: 시뮬레이터 `matchTriggerCustomers`(cdp 30일/custom 전체 분기) 폐기 → 발송과 같은 `selectJourneyTargetCustomerIds` 재사용. 신규 `countJourneyTargetCustomers`(ID 추출 후 등급 집계, 상한 10만 capped)·`gradeBreakdownForIds`·`averageScoresForIds`. 미리보기 2 endpoint + 시뮬레이트 = 같은 함수.
 > - **실데이터 예측(임의 상수 제거)**: 잔존율 0.85·객단가 5만·0.15/0.05 폐기 → 객단가 `customers.avg_order_value`·전환/클릭 `cdp_customer_predictions`·비용 `companies.cost_per_*`(회사 실 단가). 없으면 "데이터 부족" 정직 표기. 조건 step 하류 발송=null(변동). `journey-simulator-core.ts`(순수 buildSegmentBreakdown+buildProjection).
 > - **시점 N일+시각**: `send-time-util` `relative_at_hour` 모드 신설(기존 3모드 불변). 편집 캔버스 발송 시점 시간→**일+시간 입력 + 발송 시각** 드롭다운. `journey-builder` 339행 target_hour_kst를 relative_at_hour도 저장(specific_hour 전용→확장). 타입 union 3곳 + AIGeneratedStep.
@@ -324,8 +324,8 @@
 ---
 
 ### 🟡 2026-06-03 세션 (미완) — 크레딧 UI 강화 + 여정 503 디버깅
-> **크레딧 UI(사전모달+사후토스트+토스트 다크톤 통일) 완료·미배포 + 여정503/native dialog 미완. 다음 세션 핸드오프 `docs/superpowers/handoffs/2026-06-03-credit-ui-journey503-handoff.md` 정독 의무.**
-> - **완료(tsc0·미배포)**: 크레딧 차감 2단계(DM 생성3·발행30 / 인앱 생성3·게시15 / 직접발송 다듬기 refine-direct 1 = refineDirectMessage callAIWithFallback 우회로 누락이었음) + 안내카드 9칸 + CreditConfirmModal 5곳 + 사후토스트 전역(request-context+app.ts 헤더+credit-interceptor) + 토스트 다크톤 통일(옛 Toast.tsx 제거·Dashboard shim) + D배지 6곳 제거 + "DB마이그레이션" 노출 5곳 친화 + 여정 종료/일시정지 모달 + pretest-validate catch 에러로그.
+> **크레딧 UI(사전모달+사후토스트+토스트 다크톤 통일) 완료·배포완료 + 여정503/native dialog 미완. 다음 세션 핸드오프 `docs/superpowers/handoffs/2026-06-03-credit-ui-journey503-handoff.md` 정독 의무.**
+> - **완료(tsc0·배포완료)**: 크레딧 차감 2단계(DM 생성3·발행30 / 인앱 생성3·게시15 / 직접발송 다듬기 refine-direct 1 = refineDirectMessage callAIWithFallback 우회로 누락이었음) + 안내카드 9칸 + CreditConfirmModal 5곳 + 사후토스트 전역(request-context+app.ts 헤더+credit-interceptor) + 토스트 다크톤 통일(옛 Toast.tsx 제거·Dashboard shim) + D배지 6곳 제거 + "DB마이그레이션" 노출 5곳 친화 + 여정 종료/일시정지 모달 + pretest-validate catch 에러로그.
 > - **미완(다음 세션)**: ①여정 활성화 503 — buildJourneyStats 6함수 중 variant 외 한 함수가 없는 컬럼 조회. backend 배포→여정 활성화→`pm2 logs grep pretest-validate`→정확 컬럼→information_schema 확인→ALTER. (journey_step_variants variant_label/arm 추가완료, snapshots/schedules/pause_logs는 이미존재 오진) ②JourneysPage native dialog 29곳(alert25+confirm4) 전수 교체.
 > - **교훈**: DB 컬럼 ALTER 전 information_schema 실제 확인→없는 것만 ADD 의무(이번 3번 틀려 Harold 격분). PM2 실제 에러 먼저. catch가 에러 삼키면 디버깅 불가.
 
@@ -340,7 +340,7 @@
 ---
 
 ### 🟢 2026-06-02 세션 — 여정 미리보기 타겟 연동 + 크레딧 재매핑 작업1 + 작업2~5 핸드오프
-> **이번 세션 = ① 여정 미리보기 타겟 연동(완료·tsc0) ② 크레딧 재설계 토론·확정 ③ 작업1(한줄입력 풀분석300→문안·분석5) 완료·검증 ④ 작업2~5 핸드오프 작성. 전부 미배포 — 통합 배포 예정.**
+> **이번 세션 = ① 여정 미리보기 타겟 연동(완료·tsc0) ② 크레딧 재설계 토론·확정 ③ 작업1(한줄입력 풀분석300→문안·분석5) 완료·검증 ④ 작업2~5 핸드오프 작성. 전부 배포완료 — 통합 배포 예정.**
 > - **여정 미리보기**: 항상 남다은(LTV1위) 고정 → 여정 trigger 기준 실제 고객 추출(`utils/journey-target-extractor.ts` 신규, 발송 SQL 1:1 이전 동작 보존). Liquid `{{}}` 치환값 하이라이트 누락 fix(highlightVars 토큰 재작성). 0명 안내. plan=`docs/superpowers/plans/2026-06-02-journey-preview-target-fix.md`.
 > - **크레딧 재매핑 확정(Harold 토론)**: 한줄입력(코드명 orchestrate=풀분석이나 실제는 일회성 타겟+문안) → **문안·분석 5** / **풀분석 300 = 성과 리포트(기간 성과분석)+PDF 보고서** / 여정 **돌려보기 3 + 저장 150**(재사용 자산) / 예측 자동 = 연동(`sync_agents`·`cdp_events.source='custom_sdk'`) 회사만 **매일 3** + 온오프(`companies.predictive_enabled` ALTER) / 여정 **수정 버튼** 신설. **작업당 크레딧 금액표·플랜 크레딧 실값(스타터300/베이직750/프로2400/비즈7800/엔터16500)은 불변, 매핑만 변경. ⚠️ SCHEMA.md `ai_credits_per_month` 옛값(스타터50)은 stale — plans row로만 확정.**
 > - **작업1 완료**: `CREDIT_COST_MAP`에 `ai-operator-propose:5` 신규(orchestrate 300 보존), propose가 creditOpts로 5 차감, credit.ts 라벨. backend·frontend tsc0 · verify ok.
@@ -402,7 +402,7 @@
 > - Phase 5 frontend: CreditGauge 공용 + PricingPage(게이지·작업당·요금제별 월크레딧·만원당) + 슈퍼관리자 크레딧 패널.
 > - DB: plans.ai_credits_per_month UPDATE(STARTER70/BASIC200/PRO1000/BUSINESS3500/ENTERPRISE7000/TRIAL1000/FREE0) + ai_credit_transactions.reason ALTER.
 >
-> **미배포 로컬(다음 세션 폴리시와 함께 배포):** Dashboard 맨 위 큰 카드 → 발송 현황 안 "AI 크레딧 잔여" 한 줄 / AdminDashboard 고객사 상세 "AI설정"→"크레딧 💳" 탭 전환.
+> **배포완료 로컬(다음 세션 폴리시와 함께 배포):** Dashboard 맨 위 큰 카드 → 발송 현황 안 "AI 크레딧 잔여" 한 줄 / AdminDashboard 고객사 상세 "AI설정"→"크레딧 💳" 탭 전환.
 >
 > **다음 세션 = UI 디자인 폴리시**(위 .md): AI Operator 우측상단 크레딧 + PricingPage 게이지 컴팩트화 + 요금제별 기능 종량제 재정리 + 슈퍼관리자 패널 현대화 + 전체 균형 → tsc + 자가 grep + tp-push → .md 삭제.
 >
@@ -456,8 +456,8 @@
 > 2. **AI Operator 본문 0 bytes 사고 정정 (핵심 BM)** — 근본: JSON 파싱 취약 + fallback 필드 미스매치. 3층 fix: `utils/ai-json.ts` 안전 파서 CT(ai.ts 5곳 교체) + fallback message_text 정정 + 임의 할인 placeholder + brand-voice-prompt JSON 강제. 배포 후 본문 정상 노출 확인됨.
 > 3. **3원칙 영구 룰** — MEMORY.md 0번 원칙 (자가진단 + 클로드 원칙 + 슈퍼파워즈). 상세 = memory/feedback_three_principles_default.md.
 >
-> **미배포 / 다음 세션 재설계 (4) — 성과 추정 산식:**
-> 4. AI Operator 예상 성과가 옛 하드코딩(전환 0.8% × 객단가 5만)으로 "VIP 1301명 매출 50만원" 비현실 → 이번 세션에 객단가 실측 + 구매력 모델로 여러 차례 정정했으나 **여전히 임의 상수(CVR 상한 10% / uplift 1.4 / window 3일) 잔존 = 하드코딩 룰 위반**. ROI 38,950% 등 포화. **로컬 코드만 변경, 미배포.** 다음 세션에 spec 기반 완전 재설계로 한 번에 구현+배포.
+> **배포완료 / 다음 세션 재설계 (4) — 성과 추정 산식:**
+> 4. AI Operator 예상 성과가 옛 하드코딩(전환 0.8% × 객단가 5만)으로 "VIP 1301명 매출 50만원" 비현실 → 이번 세션에 객단가 실측 + 구매력 모델로 여러 차례 정정했으나 **여전히 임의 상수(CVR 상한 10% / uplift 1.4 / window 3일) 잔존 = 하드코딩 룰 위반**. ROI 38,950% 등 포화. **로컬 코드만 변경, 배포완료.** 다음 세션에 spec 기반 완전 재설계로 한 번에 구현+배포.
 >    - 재설계 핵심(spec): 등급별 과거 실측(cdp_events.purchase + customers.grade + campaigns.target_filter) 우선 → 개인별 구매주기(created_at÷purchase_count 포아송) 보완 → 둘 다 부족 시 'insufficient_data' 안내. 임의 상수 0개. ltv_score 전부 0 = 사용 금지 확정.
 >    - 현재 estimator 로컬 파일(`utils/operator-performance-estimator.ts` + orchestrator 2곳 교체 + AiOperatorPage basis)은 spec 구현 시 전면 대체 예정. backend tsc 0 / 테스트 7/7 (단 산식 자체가 미완).
 >
@@ -479,7 +479,7 @@
 >
 > **핵심 사실**: dibambi(www.dibambi.com)·isae(isae.shop) 둘 다 Cafe24(고도몰 아님) — 첫 실측 Cafe24. 회원ID = 고도몰 `{=gSess.memNo}` / Cafe24 `CAPP_ASYNC_METHODS.AppCommon.getMemberInfo().member_id`. 인증 이원화 = 브라우저(public key+Origin) / 서버(secret).
 >
-> **다음 할일**: SDK Task 6(identify 플랫폼 감지 — Cafe24 CAPP_ASYNC_METHODS + 고도몰 data-attr, vitest + IIFE 재빌드) → Task 7 설치 가이드 → CDN 배포(인프라) → 도메인 등록 + 실측 → `/codex:review`. v0.3.5-a 잔여 = package.json 0.3.5 범프 + spec archive 이동. (별도 트랙 미배포 = 발송결과 속도 batch2 — stats-aggregation getCampaignResultCounts CT + admin.ts)
+> **다음 할일**: SDK Task 6(identify 플랫폼 감지 — Cafe24 CAPP_ASYNC_METHODS + 고도몰 data-attr, vitest + IIFE 재빌드) → Task 7 설치 가이드 → CDN 배포(인프라) → 도메인 등록 + 실측 → `/codex:review`. v0.3.5-a 잔여 = package.json 0.3.5 범프 + spec archive 이동. (별도 트랙 배포완료 = 발송결과 속도 batch2 — stats-aggregation getCampaignResultCounts CT + admin.ts)
 >
 > **★ 다음 세션 진입 명령어 (Harold 복붙)**:
 > ```
@@ -1882,7 +1882,7 @@ curl -X POST http://127.0.0.1:3000/api/internal/dist-alert \
 
 ---
 
-### 🟡 D144/D145 미배포 작업 보존 (참고)
+### 🟡 D144/D145 배포완료 작업 보존 (참고)
 
 > **상태:** 🔴 **오픈 둘째날 critical 사고 발생 후 복구.** 5/6 18:54 ~ 5/7 04:00 거래처 9시간 사이트 차단.
 >
@@ -1901,7 +1901,7 @@ curl -X POST http://127.0.0.1:3000/api/internal/dist-alert \
 - P6 — `campaign-lifecycle.ts:175-180, 305-310` sync-results 진입 조건 완화 (target_count 비교)
 - 폴라초이스 14df97e7 LMS 188건 × 25.85 = **4,859.80원 환불** (Harold님 직접 SQL 실행)
 
-#### 🟡 5/7 새벽 미배포 (코드 + 빌드 통과, 다음 배포 대기)
+#### 🟡 5/7 새벽 배포완료 (코드 + 빌드 통과, 다음 배포 대기)
 
 **Backend (6파일):** messageUtils.ts (cleanLeftoverVars CT 신설+2곳) / ai.ts (cleanLeftoverVars 2곳) / customers.ts (delete-all 권한 확장) / sms-templates.ts (filterExistingImagePaths fs.existsSync 검증+DB 정리) / admin.ts (status='sending' 자동 정리) / campaigns.ts (동일 패턴)
 
@@ -1945,7 +1945,7 @@ pm2 restart all
 
 > **상태:** ✅ 일부는 5/6 18:26 배포 완료, 나머지 + PDF 0506은 5/7 새벽 D145로 이관 (위 D145 섹션 참조).
 
-#### 📦 미배포 변경 파일 (Backend 6 + Frontend 2)
+#### 📦 배포완료 변경 파일 (Backend 6 + Frontend 2)
 
 | 영역 | 파일 | 작업 |
 |---|---|---|
@@ -1996,16 +1996,16 @@ tp-deploy-full
 
 **📄 0506 PDF 사용자 피드백 13건 분석 완료 → [`status/D144-PDF-0506-FIXES.md`](D144-PDF-0506-FIXES.md) 정독**
 
-| 그룹 | PDF 항목 | 우선순위 | 미배포 연관성 |
+| 그룹 | PDF 항목 | 우선순위 | 배포완료 연관성 |
 |---|---|---|---|
-| A — 미배포 + 검증 | P4 (발송완료 표시) / P7 (성공 대기 표시) | 🔴 긴급 | ✅ 후속2 status 정책 그대로 해결 |
+| A — 배포완료 + 검증 | P4 (발송완료 표시) / P7 (성공 대기 표시) | 🔴 긴급 | ✅ 후속2 status 정책 그대로 해결 |
 | B — 정산/환불 직결 | P8 (슈퍼관리자 기간 필터 sent_at 기준) / P6 (폴라초이스 환불 누락) | 🟠 높음 | ⚠️ 부분 연관 — 추가 작업 필요 |
 | C — 발송 정확성 | P2 (% 데이터 보존) / P1 (MMS 보관함 이미지) | 🟠 높음 | ❌ 별건 |
 | D — UX | P11 (사용자 추가 회사 검색) / P13 (발송통계 회사 검색) / P12 (발신번호 검색) / P9 (고객사 정렬) | 🟡 중간 | ❌ 별건 |
 | E — 신규 기능 | P5 (중간관리자 DB 전체삭제) + P10 (슈퍼관리자 DB 화면 단순화) / P3 (주소록 직접입력+다중선택) | 🟡 중간 | ❌ 별건 |
 
 **다음 세션 진행 옵션 (Harold님 결정):**
-- **Option 1 (권장):** D144 후속2 미배포 + 그룹 A/B 묶음 배포 (P4/P7 검증 + P8 기간필터 잔존 점검 + P6 환불 검증)
+- **Option 1 (권장):** D144 후속2 배포완료 + 그룹 A/B 묶음 배포 (P4/P7 검증 + P8 기간필터 잔존 점검 + P6 환불 검증)
 - Option 2: 그룹 A 먼저 빠르게 (D144 후속2만 우선 배포 후 안정화)
 - Option 3: 그룹 A/B/C 모두 한 번에 (시간 여유 있을 때)
 
@@ -3341,7 +3341,7 @@ tp-deploy-full
 
 ---
 
-### 🔧 D124 — 0416 직원 검수 5건 + 필드명 통일 + 무료수신거부 빈줄 (2026-04-16) — 🟡 수정완료-배포대기
+### 🔧 D124 — 0416 직원 검수 5건 + 필드명 통일 + 무료수신거부 빈줄 (2026-04-16) — 🟡 수정완료-배포완료
 
 > **배경:** 직원 검수 PDF(한줄로_20260416.pdf) 5건. D123 후속 수정 + 추가 UX/AI 개선.
 
@@ -3726,7 +3726,7 @@ WHERE scheduled_at IS NOT NULL AND scheduled_at < NOW() AND status='draft';
 
 ---
 
-### 🔧 D110 — 캠페인 결과조회 버그 + CT-04 전면 UNION ALL 최적화 (2026-04-08) — ✅ 코드수정완료, 배포대기
+### 🔧 D110 — 캠페인 결과조회 버그 + CT-04 전면 UNION ALL 최적화 (2026-04-08) — ✅ 코드수정완료, 배포완료
 
 > **배경:** 슈퍼관리자 "캠페인내역 조회" 모달에서 완료된 캠페인 상세 조회 시 0건으로 나오는 버그 발견. 근본 원인은 `admin.ts sms-detail` 라우트가 `FROM SMSQ_SEND` 단일 테이블에 하드코딩되어 있어 QTmsg Agent가 완료 처리 후 LOG 테이블(`SMSQ_SEND_X_YYYYMM`)로 이동시킨 데이터를 못 찾는 것. 단순 버그 수정 후 Harold님 지시로 **발송·결과 양쪽 경로 전체 성능 재검토 + CT-04 전면 UNION ALL 승격**까지 확장.
 

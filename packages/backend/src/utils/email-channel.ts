@@ -19,12 +19,18 @@
 
 import { query } from '../config/database';
 import { sendEmail, isSmtpConfigured, getSmtpConfigPublic } from './company-smtp-client';
+import { applyTracking, UNSUB_URL_MARKER } from './email-tracking';
 
 // ════════════════════════════════════════════════════════════════════
 // 타입
 // ════════════════════════════════════════════════════════════════════
 
 export type EmailCampaignStatus = 'draft' | 'scheduled' | 'sending' | 'completed' | 'failed';
+
+/** 예약 발송 대상 명세 — scheduled 캠페인의 발송 시점 수신자 해석 기준 (email-send-sweeper 소비) */
+export type EmailTargetSpec =
+  | { type: 'customers'; grades?: string[] }
+  | { type: 'list'; recipients: Array<{ email: string; name?: string }> };
 
 export interface EmailCampaign {
   id: string;
@@ -36,6 +42,8 @@ export interface EmailCampaign {
   fromName: string;
   fromEmail: string;
   isAd: boolean;
+  aiGenerated: boolean;
+  targetSpec: EmailTargetSpec | null;
   scheduledAt: Date | null;
   sentAt: Date | null;
   status: EmailCampaignStatus;
@@ -58,12 +66,15 @@ export interface CreateCampaignInput {
   fromName?: string;
   fromEmail?: string;
   isAd?: boolean;
+  aiGenerated?: boolean;
   scheduledAt?: Date;
 }
 
+export interface EmailRecipient { email: string; name?: string; substitutions?: Record<string, string> }
+
 export interface SendCampaignInput {
   campaignId: string;
-  recipients: Array<{ email: string; name?: string; substitutions?: Record<string, string> }>;
+  recipients: EmailRecipient[];
   immediate?: boolean;
 }
 
@@ -110,7 +121,15 @@ export async function createEmailCampaign(input: CreateCampaignInput): Promise<E
       input.scheduledAt ? 'scheduled' : 'draft',
     ]
   );
-  return mapRow(result.rows[0]);
+  const campaign = mapRow(result.rows[0]);
+
+  // ai_generated 마킹은 신규 컬럼(별도 ALTER) 참조 — 기존 INSERT 경로 무손상 위해 분리.
+  // 컬럼 미존재(ALTER 전) 시 throw → 호출 route의 503 분기가 처리 (db_alter_safety_net).
+  if (input.aiGenerated) {
+    await query(`UPDATE email_campaigns SET ai_generated = true WHERE id = $1::uuid`, [campaign.id]);
+    campaign.aiGenerated = true;
+  }
+  return campaign;
 }
 
 export async function listEmailCampaigns(companyId: string, limit: number = 50): Promise<EmailCampaign[]> {
@@ -215,13 +234,13 @@ export async function sendEmailCampaign(input: SendCampaignInput): Promise<{ mes
     [campaign.id]
   );
 
-  // 광고성 prefix + 무료거부 자동 합성
+  // 광고성 prefix + 무료거부 자동 합성 — 수신거부는 마커로 두고 발송 시 수신자별 개인 토큰 URL로 치환(applyTracking)
   let finalSubject = campaign.subject;
   let finalHtml = campaign.htmlBody;
   if (campaign.isAd) {
     if (!finalSubject.startsWith('(광고)')) finalSubject = `(광고) ${finalSubject}`;
     if (!finalHtml.includes('수신거부') && !finalHtml.includes('unsubscribe')) {
-      finalHtml += `\n\n<hr><p style="font-size:11px;color:#999;text-align:center">본 메일은 ${campaign.fromName}의 광고 정보입니다. 수신을 원하지 않으시면 <a href="https://app.hanjul.ai/unsubscribe">수신거부</a>를 눌러주세요.</p>`;
+      finalHtml += `\n\n<hr><p style="font-size:11px;color:#999;text-align:center">본 메일은 ${campaign.fromName}의 광고 정보입니다. 수신을 원하지 않으시면 <a href="${UNSUB_URL_MARKER}">수신거부</a>를 눌러주세요.</p>`;
     }
   }
 
@@ -246,6 +265,14 @@ export async function sendEmailCampaign(input: SendCampaignInput): Promise<{ mes
               personalizedSubject = personalizedSubject.replace(pattern, value);
             }
           }
+          if (recipient.name) {
+            // {{이름}} 기본 개인화 — substitutions에 이름이 따로 없을 때
+            personalizedHtml = personalizedHtml.replace(/\{\{\s*이름\s*\}\}/g, recipient.name);
+            personalizedSubject = personalizedSubject.replace(/\{\{\s*이름\s*\}\}/g, recipient.name);
+          }
+
+          // 오픈 픽셀 + 클릭 래핑 + 개인 토큰 수신거부 URL 치환 (수신자별)
+          personalizedHtml = applyTracking(personalizedHtml, campaign.id, recipient.email);
 
           const result = await sendEmail({
             companyId: campaign.companyId,
@@ -255,13 +282,32 @@ export async function sendEmailCampaign(input: SendCampaignInput): Promise<{ mes
             textBody: campaign.textBody || undefined,
           });
           lastMessageId = result.messageId || lastMessageId;
-          totalAccepted += result.accepted.length;
+          const acceptedN = result.accepted.length;
+          totalAccepted += acceptedN;
           totalRejected += result.rejected.length;
+          // 발송 성공 수신자 = delivered 이벤트 적재 (수신자별 이력/미오픈자 추출 토대). 실패해도 발송 흐름 유지.
+          if (acceptedN > 0) {
+            try {
+              await recordEmailEvent({
+                campaignId: campaign.id,
+                email: recipient.email,
+                eventType: 'delivered',
+                occurredAt: new Date(),
+              });
+            } catch (evErr: any) {
+              console.warn(`[Email] delivered 기록 실패 (${recipient.email}): ${evErr?.message}`);
+            }
+          }
         } catch (sendErr: any) {
           totalRejected += 1;
           console.warn(`[Email] 개별 발송 실패 (${recipient.email}): ${sendErr?.message}`);
         }
       }
+      // batch 완료마다 sent_count + updated_at 갱신 — 진행 폴링 + sweeper 정체 감지(살아있음 신호)
+      await query(
+        `UPDATE email_campaigns SET sent_count = $2, updated_at = NOW() WHERE id = $1::uuid`,
+        [campaign.id, totalAccepted]
+      );
       // batch 간 1초 sleep — 회사 SMTP rate-limit 차단
       if (i + BATCH_SIZE < input.recipients.length) {
         await new Promise((resolve) => setTimeout(resolve, 1000));
@@ -314,7 +360,8 @@ export async function recordEmailEvent(input: EmailEventInput): Promise<void> {
     [campaignId, email, eventType, url || null, reason || null, occurredAt]
   );
 
-  // 캠페인 통계 갱신
+  // 캠페인 통계 갱신 — 고유 수신자 1회만 카운트 (같은 사람 반복 오픈/클릭에 카운터 부풀림 차단 → 오픈율 100% 초과 방지).
+  //   delivered = 카운터 없음. open/click/unsubscribe/bounce = 해당 email 첫 이벤트일 때만 +1.
   const column = {
     open: 'open_count',
     click: 'click_count',
@@ -326,10 +373,18 @@ export async function recordEmailEvent(input: EmailEventInput): Promise<void> {
   }[eventType];
 
   if (column) {
-    await query(
-      `UPDATE email_campaigns SET ${column} = ${column} + 1, updated_at = NOW() WHERE id = $1::uuid`,
-      [campaignId]
+    // INSERT 직후 이 (campaign, email, event_type) 누적 건수 = 1 이면 첫 발생 → 카운터 증가.
+    const dupCheckTypes = eventType === 'spam_report' ? ['spam_report'] : eventType === 'dropped' ? ['dropped'] : [eventType];
+    const cntRes = await query(
+      `SELECT COUNT(*)::int AS n FROM email_events WHERE campaign_id = $1::uuid AND email = $2 AND event_type = ANY($3)`,
+      [campaignId, email, dupCheckTypes]
     );
+    if ((cntRes.rows[0]?.n || 0) <= 1) {
+      await query(
+        `UPDATE email_campaigns SET ${column} = ${column} + 1, updated_at = NOW() WHERE id = $1::uuid`,
+        [campaignId]
+      );
+    }
   }
 
   // ★ D210+ Phase 3 B-5 (Harold 명시 2026-05-23): bounce / spam / unsubscribe 자동 처리
@@ -369,10 +424,219 @@ export async function recordEmailEvent(input: EmailEventInput): Promise<void> {
 }
 
 // ════════════════════════════════════════════════════════════════════
+// 수신자 해석 — 고객DB(customers) 연동
+//   안전 필터(보수적): email 유효 + 수신거부/무효 신호 전부 제외.
+//   email_opt_in = false(이메일 바운스·수신거부) / is_opt_out = true(전체 마케팅 거부) / is_invalid = true(무효 연락처)
+// ════════════════════════════════════════════════════════════════════
+
+const RECIPIENT_SAFETY_WHERE = `
+  email IS NOT NULL AND email LIKE '%@%'
+  AND email_opt_in IS DISTINCT FROM false
+  AND is_opt_out IS DISTINCT FROM true
+  AND is_invalid IS DISTINCT FROM true`;
+
+/** 발송 대상 고객 해석 — 회사 격리 + 안전 필터 + 선택 등급. 발송 엔진/스위퍼가 소비. */
+export async function resolveCustomerRecipients(
+  companyId: string,
+  grades?: string[],
+): Promise<EmailRecipient[]> {
+  const params: any[] = [companyId];
+  let gradeClause = '';
+  if (grades && grades.length > 0) {
+    params.push(grades);
+    gradeClause = ` AND grade = ANY($${params.length})`;
+  }
+  const result = await query(
+    `SELECT DISTINCT ON (lower(email)) email, name
+     FROM customers
+     WHERE company_id = $1::uuid AND ${RECIPIENT_SAFETY_WHERE}${gradeClause}
+     ORDER BY lower(email)`,
+    params,
+  );
+  return result.rows.map((r: any) => ({
+    email: String(r.email).trim(),
+    name: r.name ? String(r.name) : undefined,
+  }));
+}
+
+/** 발송 전 미리보기 — 대상 인원 + 등급 분포 + 표본 (RecipientsModal 고객DB 탭). */
+export async function previewCustomerRecipients(
+  companyId: string,
+  grades?: string[],
+): Promise<{ total: number; gradeBreakdown: Array<{ grade: string; count: number }>; sample: string[] }> {
+  const params: any[] = [companyId];
+  let gradeClause = '';
+  if (grades && grades.length > 0) {
+    params.push(grades);
+    gradeClause = ` AND grade = ANY($${params.length})`;
+  }
+  const totalRes = await query(
+    `SELECT COUNT(DISTINCT lower(email))::int AS total
+     FROM customers WHERE company_id = $1::uuid AND ${RECIPIENT_SAFETY_WHERE}${gradeClause}`,
+    params,
+  );
+  const breakdownRes = await query(
+    `SELECT COALESCE(NULLIF(grade, ''), '미지정') AS grade, COUNT(DISTINCT lower(email))::int AS count
+     FROM customers WHERE company_id = $1::uuid AND ${RECIPIENT_SAFETY_WHERE}${gradeClause}
+     GROUP BY COALESCE(NULLIF(grade, ''), '미지정') ORDER BY count DESC`,
+    params,
+  );
+  const sampleRes = await query(
+    `SELECT DISTINCT ON (lower(email)) email
+     FROM customers WHERE company_id = $1::uuid AND ${RECIPIENT_SAFETY_WHERE}${gradeClause}
+     ORDER BY lower(email) LIMIT 5`,
+    params,
+  );
+  return {
+    total: totalRes.rows[0]?.total || 0,
+    gradeBreakdown: breakdownRes.rows.map((r: any) => ({ grade: r.grade, count: Number(r.count) || 0 })),
+    sample: sampleRes.rows.map((r: any) => String(r.email)),
+  };
+}
+
+/** 회사 전체 등급 목록 (고객DB 탭 등급 선택지) */
+export async function listCustomerGrades(companyId: string): Promise<Array<{ grade: string; count: number }>> {
+  const result = await query(
+    `SELECT COALESCE(NULLIF(grade, ''), '미지정') AS grade, COUNT(*)::int AS count
+     FROM customers WHERE company_id = $1::uuid AND ${RECIPIENT_SAFETY_WHERE}
+     GROUP BY COALESCE(NULLIF(grade, ''), '미지정') ORDER BY count DESC`,
+    [companyId],
+  );
+  return result.rows.map((r: any) => ({ grade: r.grade, count: Number(r.count) || 0 }));
+}
+
+// ════════════════════════════════════════════════════════════════════
+// 예약 발송 — target_spec 저장 (신규 ALTER 컬럼 — 503 분기 보호 대상)
+// ════════════════════════════════════════════════════════════════════
+
+/** 예약 발송 설정 — target_spec + scheduled_at 저장 + status='scheduled'. sweeper가 도래 시 발송. */
+export async function scheduleCampaign(
+  companyId: string,
+  campaignId: string,
+  targetSpec: EmailTargetSpec,
+  scheduledAt: Date,
+): Promise<EmailCampaign | null> {
+  const result = await query(
+    `UPDATE email_campaigns
+       SET target_spec = $3::jsonb, scheduled_at = $4, status = 'scheduled', updated_at = NOW()
+     WHERE id = $1::uuid AND company_id = $2::uuid
+     RETURNING *`,
+    [campaignId, companyId, JSON.stringify(targetSpec), scheduledAt],
+  );
+  return result.rows.length > 0 ? mapRow(result.rows[0]) : null;
+}
+
+// ════════════════════════════════════════════════════════════════════
+// 성과 집계 — 실측만 (추정치 0). email-ai insight / send-time / non-openers 소비.
+// ════════════════════════════════════════════════════════════════════
+
+/** 캠페인 실측 성과 — 고유 오픈/클릭 + 오픈 시간대(KST) 분포. */
+export async function getCampaignPerformanceStats(campaignId: string): Promise<{
+  sentCount: number;
+  uniqueOpeners: number;
+  uniqueClickers: number;
+  bounceCount: number;
+  unsubscribeCount: number;
+  openRatePct: number | null;
+  clickRatePct: number | null;
+  topOpenHours: Array<{ hour: number; cnt: number }>;
+}> {
+  const campRes = await query(
+    `SELECT sent_count, bounce_count, unsubscribe_count FROM email_campaigns WHERE id = $1::uuid`,
+    [campaignId],
+  );
+  const sentCount = Number(campRes.rows[0]?.sent_count) || 0;
+  const bounceCount = Number(campRes.rows[0]?.bounce_count) || 0;
+  const unsubscribeCount = Number(campRes.rows[0]?.unsubscribe_count) || 0;
+
+  const uniqRes = await query(
+    `SELECT
+       COUNT(DISTINCT email) FILTER (WHERE event_type = 'open')::int AS openers,
+       COUNT(DISTINCT email) FILTER (WHERE event_type = 'click')::int AS clickers
+     FROM email_events WHERE campaign_id = $1::uuid`,
+    [campaignId],
+  );
+  const uniqueOpeners = Number(uniqRes.rows[0]?.openers) || 0;
+  const uniqueClickers = Number(uniqRes.rows[0]?.clickers) || 0;
+
+  const hourRes = await query(
+    `SELECT EXTRACT(HOUR FROM occurred_at AT TIME ZONE 'Asia/Seoul')::int AS hour, COUNT(*)::int AS cnt
+     FROM email_events WHERE campaign_id = $1::uuid AND event_type = 'open'
+     GROUP BY 1 ORDER BY 2 DESC`,
+    [campaignId],
+  );
+
+  return {
+    sentCount,
+    uniqueOpeners,
+    uniqueClickers,
+    bounceCount,
+    unsubscribeCount,
+    openRatePct: sentCount > 0 ? Math.round((uniqueOpeners / sentCount) * 1000) / 10 : null,
+    clickRatePct: sentCount > 0 ? Math.round((uniqueClickers / sentCount) * 1000) / 10 : null,
+    topOpenHours: hourRes.rows.map((r: any) => ({ hour: Number(r.hour), cnt: Number(r.cnt) })),
+  };
+}
+
+/** 회사 전체 오픈 시간대 분포(최근 90일, KST) — 발송 시간 추천. */
+export async function getCompanyOpenHourDistribution(companyId: string): Promise<Array<{ hour: number; cnt: number }>> {
+  const result = await query(
+    `SELECT EXTRACT(HOUR FROM ev.occurred_at AT TIME ZONE 'Asia/Seoul')::int AS hour, COUNT(*)::int AS cnt
+     FROM email_events ev
+     JOIN email_campaigns c ON c.id = ev.campaign_id
+     WHERE c.company_id = $1::uuid AND ev.event_type = 'open'
+       AND ev.occurred_at >= NOW() - INTERVAL '90 days'
+     GROUP BY 1 ORDER BY 1`,
+    [companyId],
+  );
+  return result.rows.map((r: any) => ({ hour: Number(r.hour), cnt: Number(r.cnt) }));
+}
+
+/** 미오픈자 — delivered 있고 open 없는 수신 이메일 → customers phone 매칭 (SMS 크로스 채널). */
+export async function getCampaignNonOpeners(companyId: string, campaignId: string): Promise<{
+  matched: Array<{ phone: string; name: string | null }>;
+  unmatchedCount: number;
+  totalNonOpeners: number;
+}> {
+  const nonOpenRes = await query(
+    `SELECT DISTINCT d.email
+     FROM email_events d
+     WHERE d.campaign_id = $1::uuid AND d.event_type = 'delivered'
+       AND NOT EXISTS (
+         SELECT 1 FROM email_events o
+         WHERE o.campaign_id = $1::uuid AND o.event_type = 'open' AND lower(o.email) = lower(d.email)
+       )`,
+    [campaignId],
+  );
+  const emails = nonOpenRes.rows.map((r: any) => String(r.email));
+  const totalNonOpeners = emails.length;
+  if (emails.length === 0) return { matched: [], unmatchedCount: 0, totalNonOpeners: 0 };
+
+  const matchRes = await query(
+    `SELECT DISTINCT ON (lower(email)) phone, name
+     FROM customers
+     WHERE company_id = $1::uuid AND lower(email) = ANY($2)
+       AND phone IS NOT NULL AND phone <> ''
+       AND is_opt_out IS DISTINCT FROM true AND is_invalid IS DISTINCT FROM true
+     ORDER BY lower(email)`,
+    [companyId, emails.map((e) => e.toLowerCase())],
+  );
+  const matched = matchRes.rows.map((r: any) => ({ phone: String(r.phone), name: r.name ? String(r.name) : null }));
+  return { matched, unmatchedCount: Math.max(0, totalNonOpeners - matched.length), totalNonOpeners };
+}
+
+// ════════════════════════════════════════════════════════════════════
 // 헬퍼
 // ════════════════════════════════════════════════════════════════════
 
 function mapRow(row: any): EmailCampaign {
+  // ai_generated / target_spec = 신규 ALTER 컬럼. SELECT * 결과에 없으면(ALTER 전) undefined → 기본값.
+  let targetSpec: EmailTargetSpec | null = null;
+  if (row.target_spec) {
+    try {
+      targetSpec = typeof row.target_spec === 'string' ? JSON.parse(row.target_spec) : row.target_spec;
+    } catch { targetSpec = null; }
+  }
   return {
     id: row.id,
     companyId: row.company_id,
@@ -383,6 +647,8 @@ function mapRow(row: any): EmailCampaign {
     fromName: row.from_name,
     fromEmail: row.from_email,
     isAd: !!row.is_ad,
+    aiGenerated: !!row.ai_generated,
+    targetSpec,
     scheduledAt: row.scheduled_at ? new Date(row.scheduled_at) : null,
     sentAt: row.sent_at ? new Date(row.sent_at) : null,
     status: row.status,

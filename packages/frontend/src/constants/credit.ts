@@ -80,6 +80,9 @@ export const CREDIT_SOURCE_LABELS: Record<string, string> = {
   'predictive-daily': '예측 분석',
   'dm-ai-generate': '모바일 DM 생성', 'dm-builder': '모바일 DM 발행',
   'inapp-ai-generator': '인앱 생성', 'inapp-publish': '인앱 게시', 'inapp-quick-action': '인앱 다듬기',
+  'email-ai-generate': 'Email 생성', 'email-ai-publish': 'Email 발송', 'email-refine': 'Email 다듬기',
+  'email-precheck': 'Email 발송 전 진단', 'email-performance-insight': 'Email 성과 진단',
+  'email-send-time-recommend': 'Email 발송 시간 추천',
   'generate-messages': '문구 생성', 'generate-custom-messages': '문구 생성',
   'recommend-target': '타겟 추천', 'recommend-next-campaign': '캠페인 추천',
   'variant-generator': '문안 변형', 'performance-explainer': '성과 분석',
@@ -97,6 +100,7 @@ export const CREDIT_SOURCE_LABELS: Record<string, string> = {
 /** 사전 확인 모달 대상 — 큰 확정 차감 source→cost (백엔드 CREDIT_COST_MAP의 확정 차감과 1:1). */
 export const CONFIRM_CREDIT_COSTS: Record<string, number> = {
   'dm-builder': 30,           // DM 발행
+  'email-ai-publish': 30,     // Email AI 캠페인 발송 확정
   'inapp-publish': 15,        // 인앱 게시
   'journey-activate': 150,    // 여정 저장
   'continuous-operator': 200, // 자동 마케팅 저장

@@ -91,6 +91,7 @@ import { startScheduledCleanupWorker } from './utils/scheduled-cleanup-worker';
 import { startDirectSendWorker } from './utils/direct-send-worker';
 // ★ 2026-06-11: 취소 잔존 큐 안전망 — 취소됐는데 발송 큐에 남은 행 자동 삭제 (에이치피오 사고 재발 차단)
 import { startCancelledQueueSweeper } from './utils/cancelled-queue-sweeper';
+import { startEmailSendSweeper } from './utils/email-send-sweeper';
 // ★ 2026-06-10: CDP webhook 실패 재처리 + unified profile 자동 재계산
 import { startCdpWebhookRetryWorker } from './utils/cdp-webhook-retry-worker';
 import { startCdpProfileRecomputeWorker } from './utils/cdp-profile-recompute-worker';
@@ -400,6 +401,9 @@ app.listen(PORT, () => {
   // ★ 2026-06-13: 시스템 크리티컬 감지 (5분 주기) — 발송 큐 지연 정체 + 싱크에이전트 중단을
   //   운영자 문자(SYSTEM_ALERT_PHONES)로 직접 통지. 톤28 지연 실발송·인비토 동기화 중단 실측 후속.
   startSystemMonitorWorker();
+
+  // ★ 2026-06-13: 예약 Email 발송 + 정체 캠페인 복구 (1분 주기) — scheduled 도래 발송 + sending 30분+ 정체 failed
+  startEmailSendSweeper();
 });
 
 export default app;

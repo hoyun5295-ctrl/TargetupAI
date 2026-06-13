@@ -104,6 +104,10 @@ export const CREDIT_COST_MAP: Record<string, number> = {
   'dm-builder': 30,
   // 인앱 생성(돌려보기) 3 — 자연어→완성 메시지. 호출마다 3. 게시는 'inapp-publish' 15 별도.
   'inapp-ai-generator': 3,
+  // Email 생성(돌려보기) 3 — 자연어/시나리오→제목3안+본문 HTML. 호출마다 3. AI 캠페인 발송 확정은 'email-ai-publish' 30 별도.
+  'email-ai-generate': 3,
+  // Email AI 캠페인 발송 확정(ai_generated) 30 — 최초 발송 1회만(멱등키 email-ai-publish:campaignId). 수동 작성 캠페인 발송은 0.
+  'email-ai-publish': 30,
   // 인앱 게시(확정) 15 — status=active 저장 최초 1회만(멱등키=inapp-publish:messageId).
   'inapp-publish': 15,
   // 문안 생성·분석·추천 (5)
@@ -119,10 +123,18 @@ export const CREDIT_COST_MAP: Record<string, number> = {
   'cdp-fusion-explainer': 5,
   'voice-inbound': 5,
   'dm-event-recommender': 5,
+  // Email 발송 후 성과 진단 5 — 실측 오픈/클릭 기반 topInsight + 개선 제안. 이벤트 0건 시 호출 차단(차감 0).
+  'email-performance-insight': 5,
+  // Email 발송 시간 추천 5 — 자사 오픈 실측 분포. 표본 30건 미만 = insufficient_data(차감 0).
+  'email-send-time-recommend': 5,
   // 다듬기·진단·질문·매핑 (1) — 스팸필터는 크레딧 비대상(현금/후불 청구)
   'refine-direct': 1,
   'journey-ai-refine': 1,
   'journey-step-diagnosis': 1,
+  // Email 다듬기 1 — 제목·본문 부분 수정. 호출마다 1.
+  'email-refine': 1,
+  // Email 발송 전 진단 1 — 스팸 위험 분석(AI). 광고 표기 등 기계 체크는 코드(0크레딧).
+  'email-precheck': 1,
   'dm-quick-action-refine': 1,
   'dm-self-diagnosis': 1,
   'inapp-explainer': 1,

@@ -2157,12 +2157,17 @@ CREATE TABLE IF NOT EXISTS email_campaigns (
   click_count integer NOT NULL DEFAULT 0,
   bounce_count integer NOT NULL DEFAULT 0,
   unsubscribe_count integer NOT NULL DEFAULT 0,
+  ai_generated boolean NOT NULL DEFAULT false,  -- ★ 2026-06-13 추가 (ALTER 필요) — AI 생성 캠페인 발송 시 30크레딧 분기
+  target_spec jsonb,                            -- ★ 2026-06-13 추가 (ALTER 필요) — 예약 발송 대상 명세 {type:'customers',grades[]} | {type:'list',recipients[]}
   created_at timestamptz NOT NULL DEFAULT NOW(),
   updated_at timestamptz NOT NULL DEFAULT NOW()
 );
 CREATE INDEX IF NOT EXISTS idx_email_campaigns_company_created ON email_campaigns(company_id, created_at DESC);
+-- ALTER (운영 적용 SQL):
+--   ALTER TABLE email_campaigns ADD COLUMN IF NOT EXISTS ai_generated boolean NOT NULL DEFAULT false;
+--   ALTER TABLE email_campaigns ADD COLUMN IF NOT EXISTS target_spec jsonb;
 
--- 5. email_events — SendGrid Event Webhook 박은 영역 (open/click/bounce/unsubscribe)
+-- 5. email_events — 자체 트래킹 적재 (open/click/bounce/unsubscribe/delivered). 2026-06-13 자체 픽셀/링크 발신부 신설.
 CREATE TABLE IF NOT EXISTS email_events (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   campaign_id uuid NOT NULL REFERENCES email_campaigns(id) ON DELETE CASCADE,
@@ -2171,6 +2176,7 @@ CREATE TABLE IF NOT EXISTS email_events (
   url text,
   reason text,
   occurred_at timestamptz NOT NULL,
+  auto_processed boolean DEFAULT false,  -- ★ 실측 (운영 존재) — bounce/spam/unsubscribe 자동 처리 완료 표식
   created_at timestamptz NOT NULL DEFAULT NOW()
 );
 CREATE INDEX IF NOT EXISTS idx_email_events_campaign ON email_events(campaign_id, occurred_at DESC);
