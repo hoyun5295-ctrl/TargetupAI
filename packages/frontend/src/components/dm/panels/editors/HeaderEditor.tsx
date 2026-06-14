@@ -24,16 +24,6 @@ export default function HeaderEditor({ props, onUpdate }: EditorProps<HeaderProp
 
       {(props.variant === 'logo' || !props.variant) && (
         <>
-          <Field label="정렬">
-            <Select
-              value={props.align || 'center'}
-              onChange={(v) => onUpdate({ align: v as HeaderProps['align'] })}
-              options={[
-                { value: 'center', label: '가운데' },
-                { value: 'left', label: '왼쪽 (전화 우측)' },
-              ]}
-            />
-          </Field>
           <Field label="브랜드명 크기">
             <Select
               value={props.brand_size || 'md'}

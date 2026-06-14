@@ -50,13 +50,16 @@ export default function SectionRenderer({
     ? undefined
     : (patch) => onEditSection(section.id, patch);
 
+  // 공통 정렬(section.align)을 단일 소스로 — hero/header/text_card가 자체 props.align을 읽으므로 우선 주입(미설정 시 각 섹션 기본 유지 = 하위호환)
+  const withAlign = (p: any) => (section.align ? { ...p, align: section.align } : p);
+
   const inner = (() => {
     switch (section.type) {
-      case 'header':     return <HeaderSection props={section.props as any} storeName={storeName} onEdit={onEdit} />;
-      case 'hero':       return <HeroSection props={section.props as any} onEdit={onEdit} />;
+      case 'header':     return <HeaderSection props={withAlign(section.props)} storeName={storeName} onEdit={onEdit} />;
+      case 'hero':       return <HeroSection props={withAlign(section.props)} onEdit={onEdit} />;
       case 'coupon':     return <CouponSection props={section.props as any} onEdit={onEdit} />;
       case 'countdown':  return <CountdownSection props={section.props as any} onEdit={onEdit} />;
-      case 'text_card':  return <TextCardSection props={section.props as any} onEdit={onEdit} />;
+      case 'text_card':  return <TextCardSection props={withAlign(section.props)} onEdit={onEdit} />;
       case 'cta':        return <CtaSection props={section.props as any} onEdit={onEdit} />;
       case 'video':      return <VideoSection props={section.props as any} onEdit={onEdit} />;
       case 'store_info': return <StoreInfoSection props={section.props as any} onEdit={onEdit} />;

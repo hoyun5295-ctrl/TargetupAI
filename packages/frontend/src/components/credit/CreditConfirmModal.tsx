@@ -12,12 +12,13 @@ import { CONFIRM_CREDIT_COSTS, CREDIT_SOURCE_LABELS } from '../../constants/cred
 
 interface Props {
   open: boolean;
-  source: string;          // 'dm-builder' | 'inapp-publish' | 'journey-activate' | 'continuous-operator' | 'orchestrate'
+  source: string;          // 'dm-builder' | 'inapp-publish' | 'journey-activate' | 'continuous-operator' | 'orchestrate' | 'dm-ai-generate'
+  description?: string;     // 작업 맥락 1줄 (예: 빠른시작 시나리오 설명) — 있으면 차감 안내 위에 표시
   onConfirm: () => void;
   onCancel: () => void;
 }
 
-export default function CreditConfirmModal({ open, source, onConfirm, onCancel }: Props) {
+export default function CreditConfirmModal({ open, source, description, onConfirm, onCancel }: Props) {
   const cost = CONFIRM_CREDIT_COSTS[source] ?? 0;
   const label = CREDIT_SOURCE_LABELS[source] ?? 'AI 작업';
   const [balance, setBalance] = useState<number | null>(null);
@@ -82,6 +83,11 @@ export default function CreditConfirmModal({ open, source, onConfirm, onCancel }
           </button>
         </div>
 
+        {description && (
+          <div className="text-[12px] text-white/70 leading-relaxed mb-3 rounded-lg bg-white/5 border border-white/10 px-3 py-2">
+            {description}
+          </div>
+        )}
         <div className="text-[13px] text-white/80 leading-relaxed mb-4">
           <span className="font-semibold text-white">{label}</span> 사용으로{' '}
           <span className="font-semibold text-violet-300">{cost.toLocaleString()} 크레딧</span>이 차감됩니다.

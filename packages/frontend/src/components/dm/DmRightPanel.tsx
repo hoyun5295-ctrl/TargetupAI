@@ -83,7 +83,7 @@ export default function DmRightPanel() {
                 </LabelRow>
                 <LabelRow label="정렬">
                   <div style={{ display: 'flex', gap: 4 }}>
-                    {([['left', '좌'], ['center', '가운데'], ['right', '우']] as const).map(([a, lbl]) => (
+                    {([['left', '좌'], ['center', '중'], ['right', '우']] as const).map(([a, lbl]) => (
                       <button
                         key={a}
                         onClick={() => setSectionStyle(selected.id, { align: a })}
@@ -180,6 +180,7 @@ const alignBtnStyle: React.CSSProperties = {
   fontSize: 11,
   fontWeight: 600,
   cursor: 'pointer',
+  whiteSpace: 'nowrap',
 };
 
 const alignBtnActiveStyle: React.CSSProperties = {

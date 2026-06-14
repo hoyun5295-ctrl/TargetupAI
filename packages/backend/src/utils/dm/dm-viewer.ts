@@ -306,7 +306,7 @@ function parseBrandKit(raw: any): DmBrandKit | undefined {
   return undefined;
 }
 
-type SectionsLayoutMode = 'scroll' | 'scroll_snap' | 'slides';
+type SectionsLayoutMode = 'scroll' | 'slides';
 
 function renderPagesHtml(
   dm: any,
@@ -340,19 +340,6 @@ function renderPagesHtml(
 
   // 모드별 뷰어 CSS (페이지 단위 스냅/슬라이드, 페이지 내부는 세로 스크롤)
   const modeCss = (() => {
-    if (mode === 'scroll_snap') {
-      return `
-html,body{height:100%;margin:0;overflow:hidden}
-.dm-viewer{height:100%;overflow-y:auto;overflow-x:hidden;scroll-snap-type:y mandatory;-webkit-overflow-scrolling:touch;scrollbar-width:none}
-.dm-viewer::-webkit-scrollbar{display:none}
-.dm-page{min-height:100vh;scroll-snap-align:start;scroll-snap-stop:always;position:relative;overflow-y:auto;-webkit-overflow-scrolling:touch}
-.dm-page::-webkit-scrollbar{display:none}
-.dm-page-dots{position:fixed;right:10px;top:50%;transform:translateY(-50%);display:flex;flex-direction:column;gap:6px;z-index:50}
-.dm-page-dots .dot{width:6px;height:6px;border-radius:50%;background:rgba(0,0,0,0.25);transition:all 200ms;cursor:pointer}
-.dm-page-dots .dot.active{background:var(--dm-primary);height:20px;border-radius:3px}
-.dm-section-wrap{position:relative}
-`;
-    }
     if (mode === 'slides') {
       return `
 html,body{height:100%;margin:0;overflow:hidden;touch-action:pan-y}
@@ -615,15 +602,13 @@ ${hasCountdown ? COUNTDOWN_SCRIPT : ''}
 
 /**
  * DM layout_mode별 분기:
- *   - scroll      : 페이지를 세로로 이어붙인 긴 스크롤
- *   - scroll_snap : 페이지 단위 세로 스냅 (페이지 내부는 세로 스크롤)
- *   - slides      : 페이지 단위 가로 슬라이드 (페이지 내부는 세로 스크롤)
- *   - (legacy)    : dm.pages[]가 D119 slides 구조일 때 폴백
+ *   - scroll   : 페이지를 세로로 이어붙인 긴 스크롤 (scroll_snap 폐기분도 여기로 폴백 — 기존 데이터 보존)
+ *   - slides   : 페이지 단위 가로 슬라이드 (페이지 내부는 세로 스크롤)
+ *   - (legacy) : dm.pages[]가 D119 slides 구조일 때 폴백
  */
 function resolvePagesMode(dm: any, pages: DmPageGroup[]): SectionsLayoutMode | null {
   if (pages.length === 0) return null;
   const m = dm.layout_mode;
-  if (m === 'scroll_snap') return 'scroll_snap';
   if (m === 'slides') return 'slides';
   return 'scroll';
 }

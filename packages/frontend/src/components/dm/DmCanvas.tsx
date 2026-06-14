@@ -4,7 +4,7 @@
  * 페이지 계층 구조:
  *  - 에디터는 "현재 페이지"의 섹션만 렌더 (세로 스크롤)
  *  - 페이지 전환은 좌측 PageList에서 클릭
- *  - 레이아웃 모드(scroll/scroll_snap/slides)는 뷰어에서 페이지 간 전환 방식을 결정
+ *  - 레이아웃 모드(scroll/slides)는 뷰어에서 페이지 간 전환 방식을 결정
  *  - 에디터 상단에 현재 페이지 배지 + 페이지 네비게이션 힌트
  */
 import { useDmBuilderStore } from '../../stores/dmBuilderStore';
@@ -45,7 +45,6 @@ export default function DmCanvas({ onPromptClick }: DmCanvasProps) {
 
   const modeLabel: Record<string, string> = {
     scroll: '📜 긴 스크롤 (페이지 연결)',
-    scroll_snap: '📍 세로 페이지 스냅',
     slides: '🎴 좌우 슬라이드',
   };
 

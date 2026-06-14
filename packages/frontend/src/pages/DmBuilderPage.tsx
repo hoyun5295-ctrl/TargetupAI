@@ -114,6 +114,8 @@ export default function DmBuilderPage() {
   // ★ D216+ 목록 페이징 (Harold 명시 2026-05-25 — 가로 3개 × 2열 = 6개 영역)
   const DM_PAGE_SIZE = 6;
   const [currentPage, setCurrentPage] = useState(1);
+  // 빠른시작·자연어 생성 전 5크레딧 차감 확인 (Harold 명시 — 즉시 차감 X)
+  const [pendingGen, setPendingGen] = useState<{ prompt?: string; scenario?: string; desc: string } | null>(null);
 
   // ★ D216+ 키보드 단축키 활성 (편집 모드 한정)
   useDmKeyboardShortcuts({ enabled: mode === 'edit' });
@@ -195,8 +197,8 @@ export default function DmBuilderPage() {
 
     try {
       const titleHint = opts.scenario || opts.prompt?.slice(0, 30) || '신규 DM';
-      // 1. 신규 DM 영역 생성 (scroll 기본)
-      createNew({ title: titleHint, layoutMode: 'scroll' });
+      // 1. 신규 DM 생성 (모드는 AI 응답으로 applyAiGenerated에서 확정)
+      createNew({ title: titleHint });
       // 2. AI 통합 생성 호출 (one-shot)
       const res = await api.post('/dm/ai/one-shot-generate', {
         prompt: opts.prompt || '',
@@ -205,9 +207,9 @@ export default function DmBuilderPage() {
       if (!res.data?.success) {
         throw new Error(res.data?.error || 'AI 생성 실패');
       }
-      const { sections, brand_kit } = res.data.data || {};
-      // 3. 섹션 + brandKit 적용
-      applyAiGenerated(sections || [], brand_kit, opts.prompt || opts.scenario || '');
+      const { sections, brand_kit, pages, layout_mode } = res.data.data || {};
+      // 3. 섹션 + brandKit + 레이아웃 모드/페이지 적용 (slides면 여러 페이지)
+      applyAiGenerated(sections || [], brand_kit, opts.prompt || opts.scenario || '', { pages, layoutMode: layout_mode });
       // 4. 신규 dmId 저장
       await save({ silent: true });
       // 5. 6 단계 종결 표시
@@ -556,7 +558,7 @@ export default function DmBuilderPage() {
               onChange={(e) => setNaturalLanguage(e.target.value)}
               onKeyDown={(e) => {
                 if (e.key === 'Enter' && naturalLanguage.trim() && !generating) {
-                  void handleAutoGenerate({ prompt: naturalLanguage.trim() });
+                  setPendingGen({ prompt: naturalLanguage.trim(), desc: `"${naturalLanguage.trim()}" 내용으로 AI가 섹션과 카피를 자동 생성합니다.` });
                 }
               }}
               disabled={generating}
@@ -570,7 +572,7 @@ export default function DmBuilderPage() {
               }}
             />
             <button
-              onClick={() => { if (naturalLanguage.trim()) { void handleAutoGenerate({ prompt: naturalLanguage.trim() }); } }}
+              onClick={() => { if (naturalLanguage.trim() && !generating) { setPendingGen({ prompt: naturalLanguage.trim(), desc: `"${naturalLanguage.trim()}" 내용으로 AI가 섹션과 카피를 자동 생성합니다.` }); } }}
               disabled={!naturalLanguage.trim() || generating}
               style={{
                 height: 44, padding: '0 20px',
@@ -633,7 +635,7 @@ export default function DmBuilderPage() {
               {QUICK_STARTS.map((s) => (
                 <button
                   key={s.label}
-                  onClick={() => { void handleAutoGenerate({ scenario: s.label }); }}
+                  onClick={() => { if (!generating) setPendingGen({ scenario: s.label, desc: `${s.label} — ${s.hint}. AI가 어울리는 섹션과 카피를 자동 생성합니다.` }); }}
                   disabled={generating}
                   style={{
                     padding: '14px 10px 12px',
@@ -832,7 +834,7 @@ export default function DmBuilderPage() {
             <div style={{ fontSize: 15, fontWeight: 700, color: '#fff' }}>아직 만든 DM이 없어요</div>
             <div style={{ fontSize: 13, color: 'rgba(255,255,255,0.5)', lineHeight: 1.6 }}>위에서 한 줄만 입력하거나 빠른 시작 카드를 누르면<br />AI가 1분 만에 첫 DM을 만들어 드려요.</div>
             <button
-              onClick={() => { if (!generating) void handleAutoGenerate({ scenario: QUICK_STARTS[0].label }); }}
+              onClick={() => { if (!generating) setPendingGen({ scenario: QUICK_STARTS[0].label, desc: `${QUICK_STARTS[0].label} — ${QUICK_STARTS[0].hint}. AI가 어울리는 섹션과 카피를 자동 생성합니다.` }); }}
               disabled={generating}
               style={{
                 marginTop: 4, padding: '10px 20px', borderRadius: 10, border: 'none',
@@ -884,7 +886,7 @@ export default function DmBuilderPage() {
                   const next = QUICK_STARTS.find((q) => !used.has(q.label)) || QUICK_STARTS[1];
                   return (
                     <button
-                      onClick={() => { if (!generating) void handleAutoGenerate({ scenario: next.label }); }}
+                      onClick={() => { if (!generating) setPendingGen({ scenario: next.label, desc: `${next.label} — ${next.hint}. AI가 어울리는 섹션과 카피를 자동 생성합니다.` }); }}
                       disabled={generating}
                       style={{
                         border: '1px dashed rgba(255,255,255,0.2)',
@@ -976,6 +978,18 @@ export default function DmBuilderPage() {
       </main>
 
       <ConfirmModal state={confirm} onClose={() => setConfirm(null)} />
+
+      <CreditConfirmModal
+        open={!!pendingGen}
+        source="dm-ai-generate"
+        description={pendingGen?.desc}
+        onConfirm={() => {
+          const g = pendingGen;
+          setPendingGen(null);
+          if (g) void handleAutoGenerate({ prompt: g.prompt, scenario: g.scenario });
+        }}
+        onCancel={() => setPendingGen(null)}
+      />
 
       {toast && <Toast toast={toast} />}
     </div>

@@ -17,17 +17,6 @@ export default function TextCardEditor({ props, onUpdate }: EditorProps<TextCard
         <TextArea value={props.body} onChange={(v) => onUpdate({ body: v })} rows={5} placeholder="고객님을 위한 한 마디..." />
       </Field>
 
-      <Field label="정렬">
-        <Select
-          value={props.align || 'left'}
-          onChange={(v) => onUpdate({ align: v as TextCardProps['align'] })}
-          options={[
-            { value: 'left', label: '왼쪽' },
-            { value: 'center', label: '가운데' },
-          ]}
-        />
-      </Field>
-
       <Field label="이미지 (선택)">
         <ImageUploader value={props.image_url} onChange={(url) => onUpdate({ image_url: url })} />
       </Field>

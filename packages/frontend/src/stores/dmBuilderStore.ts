@@ -31,7 +31,7 @@ export type DmBrandKit = {
   sns?: { instagram?: string; youtube?: string; kakao?: string; naver?: string };
 };
 
-export type LayoutMode = 'scroll' | 'slides' | 'scroll_snap';
+export type LayoutMode = 'scroll' | 'slides';
 export type ApprovalStatus = 'draft' | 'review' | 'approved' | 'published';
 
 /** 페이지 계층 — 1 페이지에 여러 섹션을 조립 (D128 V4) */
@@ -148,7 +148,7 @@ export type DmBuilderState = {
   setOpenModal: (key: ModalKey) => void;
 
   // ── Actions: AI 적용 ──
-  applyAiGenerated: (sections: Section[], brandKit?: DmBrandKit, prompt?: string) => void;
+  applyAiGenerated: (sections: Section[], brandKit?: DmBrandKit, prompt?: string, opts?: { pages?: Section[][]; layoutMode?: LayoutMode }) => void;
 
   // ── Actions: Persistence ──
   loadDm: (id: string) => Promise<void>;
@@ -306,6 +306,36 @@ function normalizePagesFromDm(dm: any): DmPage[] {
   return [emptyPage()];
 }
 
+/**
+ * 섹션 배열을 레이아웃 모드별 페이지 그룹으로 분할 (편집 토글 재분할용).
+ * backend utils/dm/dm-page-split.ts와 동일 규칙 — 프런트/백 런타임 분리로 불가피한 경계 중복(한쪽 변경 시 양쪽 동기 의무).
+ */
+const SLIDE_INTRO_TYPES: SectionType[] = ['header', 'hero'];
+function splitSectionsForMode(sections: Section[], mode: LayoutMode): Section[][] {
+  if (mode !== 'slides' || sections.length === 0) return [sections];
+  const groups: Section[][] = [];
+  let i = 0;
+  const intro: Section[] = [];
+  while (i < sections.length && SLIDE_INTRO_TYPES.includes(sections[i].type)) {
+    intro.push(sections[i]);
+    i++;
+  }
+  if (intro.length) groups.push(intro);
+  const rest = sections.slice(i);
+  let footer: Section | null = null;
+  if (rest.length > 0 && rest[rest.length - 1].type === 'footer') {
+    footer = rest[rest.length - 1];
+    rest.pop();
+  }
+  for (const sec of rest) groups.push([sec]);
+  if (footer) {
+    if (groups.length > 0) groups[groups.length - 1].push(footer);
+    else groups.push([footer]);
+  }
+  if (groups.length === 0) groups.push(sections);
+  return groups;
+}
+
 // ────────────── 스토어 ──────────────
 
 export const useDmBuilderStore = create<DmBuilderState>((set, get) => ({
@@ -325,7 +355,22 @@ export const useDmBuilderStore = create<DmBuilderState>((set, get) => ({
     set((s) => markDirty({ brandKit: { ...s.brandKit, ...patch } }));
     scheduleAutosave(() => { if (get().dmId) void get().save({ silent: true }); });
   },
-  setLayoutMode: (layoutMode) => set(markDirty({ layoutMode })),
+  setLayoutMode: (layoutMode) => {
+    set((s) => {
+      if (layoutMode === s.layoutMode) return s;
+      const allSections = s.pages.flatMap((p) => p.sections);
+      // slides 전환: 아직 한 페이지면 자동 분할, 이미 여러 페이지로 편집했으면 사용자 구조 보존
+      if (layoutMode === 'slides') {
+        if (s.pages.length > 1) return markDirty({ layoutMode });
+        const pages = splitSectionsForMode(allSections, 'slides').map((secs) => ({ id: newPageId(), sections: normalizeOrder(secs) }));
+        return markDirty({ layoutMode, pages, currentPageIndex: 0, sections: pages[0]?.sections || [], selectedSectionId: null });
+      }
+      // scroll 전환: 전체 섹션을 한 페이지로 병합
+      const merged = { id: newPageId(), sections: normalizeOrder(allSections) };
+      return markDirty({ layoutMode, pages: [merged], currentPageIndex: 0, sections: merged.sections, selectedSectionId: null });
+    });
+    scheduleAutosave(() => { if (get().dmId) void get().save({ silent: true }); });
+  },
   setAiPrompt: (aiPrompt) => set(markDirty({ aiPrompt })),
 
   // ── Page CRUD (D128 V4) ──
@@ -606,14 +651,23 @@ export const useDmBuilderStore = create<DmBuilderState>((set, get) => ({
   setOpenModal: (openModal) => set({ openModal }),
 
   // ── AI 적용 (현재 페이지의 sections 교체) ──
-  applyAiGenerated: (sections, brandKit, prompt) => {
-    set((s) => markDirty({
-      ...updateCurrentPageSections(s, () => sections),
-      brandKit: brandKit ? { ...s.brandKit, ...brandKit } : s.brandKit,
-      aiPrompt: prompt !== undefined ? prompt : s.aiPrompt,
-      selectedSectionId: null,
-      validationResult: null,
-    }));
+  applyAiGenerated: (sections, brandKit, prompt, opts) => {
+    set((s) => {
+      const layoutMode = opts?.layoutMode || s.layoutMode;
+      // slides면 backend가 내려준 페이지 그룹(opts.pages)으로 여러 페이지, 아니면 전체 한 페이지
+      const groups = (opts?.pages && opts.pages.length > 0) ? opts.pages : [sections];
+      const pages = groups.map((secs) => ({ id: newPageId(), sections: normalizeOrder(secs) }));
+      return markDirty({
+        pages,
+        currentPageIndex: 0,
+        sections: pages[0]?.sections || [],
+        layoutMode,
+        brandKit: brandKit ? { ...s.brandKit, ...brandKit } : s.brandKit,
+        aiPrompt: prompt !== undefined ? prompt : s.aiPrompt,
+        selectedSectionId: null,
+        validationResult: null,
+      });
+    });
     scheduleAutosave(() => { if (get().dmId) void get().save({ silent: true }); });
   },
 

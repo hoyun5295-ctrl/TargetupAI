@@ -175,9 +175,8 @@ export default function DmTopBar({ onBack, onTestSendClick, onPublishClick }: Dm
 
 function LayoutModeToggle({ value, onChange }: { value: LayoutMode; onChange: (m: LayoutMode) => void }) {
   const MODES: Array<{ key: LayoutMode; icon: string; label: string; tooltip: string }> = [
-    { key: 'scroll',      icon: '📜', label: '스크롤', tooltip: '긴 세로 스크롤' },
-    { key: 'scroll_snap', icon: '📍', label: '스냅',   tooltip: '세로 페이지 스냅 (1섹션=1페이지)' },
-    { key: 'slides',      icon: '🎴', label: '슬라이드', tooltip: '좌우 스와이프 슬라이드' },
+    { key: 'scroll', icon: '📜', label: '스크롤',  tooltip: '긴 세로 스크롤' },
+    { key: 'slides', icon: '🎴', label: '슬라이드', tooltip: '좌우 스와이프 슬라이드' },
   ];
   return (
     <div

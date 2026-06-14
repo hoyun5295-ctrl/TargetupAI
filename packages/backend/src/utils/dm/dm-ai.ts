@@ -17,6 +17,7 @@ import {
   createSection,
 } from './dm-section-registry';
 import type { DmBrandKit } from './dm-tokens';
+import { decideLayoutMode, splitSectionsIntoPages, type DmLayoutMode } from './dm-page-split';
 
 // ────────────── 타입 ──────────────
 
@@ -245,6 +246,8 @@ const COPY_GEN_SYSTEM = `당신은 리테일 브랜드 모바일 DM 카피라이
 - 브랜드명을 카피 본문에 직접 삽입하지 않음 (브랜드 영역은 별도)
 - 과장 표현("반드시 성공", "무조건") 금지
 - 개인화 변수는 %고객명% 같은 형태 유지
+- 구체 혜택 수치(20%, 5만원, 1+1, 무료배송, 쿠폰 금액, 사은품, 당첨 인원, 남은 수량 등) 절대 생성 금지 — 회사가 직접 채울 자리이므로 비워 둔다
+- 모르는 사실(상품명·가격·일정·수량)을 지어내지 않는다 — 구조와 분위기만 카피로 표현
 - JSON 외 다른 텍스트 출력 금지`;
 
 export async function generateCopy(spec: CampaignSpec, section: Section, companyId?: string): Promise<CopyDraft> {
@@ -311,10 +314,38 @@ export async function generateCopy(spec: CampaignSpec, section: Section, company
       sectionHint = '유의사항 2~3줄 (법정 안내 톤)';
       schema = `{ "body": "유의사항 2~3줄 (줄바꿈 \\n)" }`;
       break;
+    // D216+ 신규 인터랙션·시각 섹션 — 제목/질문/안내 골격만 생성, 구체 혜택·숫자는 비워 둔다
+    case 'product_carousel':
+    case 'gallery':
+    case 'reviews':
+    case 'survey':
+      sectionHint = `${SECTION_META[section.type].label} 섹션의 제목 1개 (상품명·가격·할인·수량 등 구체 숫자 절대 포함 금지)`;
+      schema = `{ "headlines": [{ "style": "direct", "text": "14자 이내" }] }`;
+      break;
+    case 'poll':
+      sectionHint = '투표 질문 1개 (찬반/선호를 묻는 중립적 질문, 혜택 약속 금지)';
+      schema = `{ "headlines": [{ "style": "direct", "text": "질문 24자 이내" }] }`;
+      break;
+    case 'lucky_draw':
+      sectionHint = '추첨 이벤트 제목 + 참여 안내 1줄 (경품명·당첨 인원·혜택 숫자 절대 생성 금지)';
+      schema = `{ "headlines": [{ "style": "emotional", "text": "14자 이내" }], "body": "참여 안내 1줄" }`;
+      break;
+    case 'email_capture':
+      sectionHint = '이메일 수집 헤드라인 + 안내 1줄 (할인율·쿠폰·금액 등 구체 혜택 절대 생성 금지)';
+      schema = `{ "headlines": [{ "style": "direct", "text": "16자 이내" }], "body": "안내 1줄" }`;
+      break;
+    case 'limited_quantity':
+      sectionHint = '선착순 한정 섹션 제목 1개 (남은 수량·할인 숫자 절대 포함 금지)';
+      schema = `{ "headlines": [{ "style": "urgent", "text": "14자 이내" }] }`;
+      break;
+    case 'instant_coupon':
+      sectionHint = '즉시 쿠폰 섹션의 짧은 라벨 1개 (할인율·금액 등 구체 혜택 숫자 절대 생성 금지)';
+      schema = `{ "headlines": [{ "style": "direct", "text": "12자 이내" }] }`;
+      break;
     case 'header':
       return {}; // 헤더는 브랜드명/로고 위주라 AI 생성 제외
     default:
-      return {}; // video/store_info/sns는 AI 생성 대상 아님
+      return {}; // video/store_info/sns/slideshow 등은 AI 생성 대상 아님
   }
 
   const userMessage = `캠페인 스펙: ${specSummary}
@@ -510,6 +541,8 @@ export interface OneShotResult {
   sections: Section[];
   brandKit: Partial<DmBrandKit>;
   scenario?: string;
+  layoutMode: DmLayoutMode;
+  pages: Section[][];
 }
 
 /**
@@ -583,7 +616,10 @@ export async function oneShotGenerate(opts: {
     sections.push(section);
   }
 
-  return { spec, sections, brandKit, scenario: opts.scenario };
+  // 섹션 구성으로 레이아웃 모드 자동 결정 + 모드별 페이지 분할 (slides면 여러 장, scroll이면 한 장)
+  const layoutMode = decideLayoutMode(sections);
+  const pages = splitSectionsIntoPages(sections, layoutMode);
+  return { spec, sections, brandKit, scenario: opts.scenario, layoutMode, pages };
 }
 
 /**
@@ -606,6 +642,13 @@ function applyInteractionDefaults(section: Section): void {
           ? { ...s, label: `${i + 1}등`, reward_description: '[직접 작성해주세요]', prize_count: 1, probability: 0.05 }
           : { ...s, label: '꽝', reward_description: undefined, prize_count: 0, probability: loseProb },
       );
+    }
+  } else if (section.type === 'survey') {
+    // 설문 기본 1문항 골격 — 질문·선택지는 [직접 작성해주세요] (사실·혜택 생성 X)
+    if (!Array.isArray(p.questions) || p.questions.length === 0) {
+      p.questions = [
+        { id: '1', type: 'single', question: '[직접 작성해주세요]', options: ['[직접 작성해주세요]', '[직접 작성해주세요]'], required: false },
+      ];
     }
   }
 }

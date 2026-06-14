@@ -385,6 +385,8 @@ dmRouter.post('/ai/one-shot-generate', async (req: any, res: any) => {
       success: true,
       data: {
         sections: result.sections,
+        pages: result.pages,
+        layout_mode: result.layoutMode,
         brand_kit: result.brandKit,
         spec: result.spec,
         scenario: result.scenario,

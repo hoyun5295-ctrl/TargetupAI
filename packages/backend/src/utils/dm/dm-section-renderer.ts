@@ -558,7 +558,10 @@ export function renderSection(section: Section, ctx: SectionRenderContext): stri
   const fn = RENDERERS[section.type];
   if (!fn) return '';
   const variant = section.style_variant || 'default';
-  const inner = fn(section.props, ctx);
+  // 공통 정렬(section.align)을 단일 소스로 — header/hero/text_card가 자체 props.align을 읽으므로 우선 주입(미설정 시 각 섹션 기본 유지 = 하위호환)
+  const alignAware = section.type === 'header' || section.type === 'hero' || section.type === 'text_card';
+  const renderProps = (alignAware && section.align) ? { ...(section.props as any), align: section.align } : section.props;
+  const inner = fn(renderProps, ctx);
   if (!inner) return '';
   const al = section.align || 'center';
   const just = al === 'left' ? 'flex-start' : al === 'right' ? 'flex-end' : 'center';

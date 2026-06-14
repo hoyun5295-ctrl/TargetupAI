@@ -17,18 +17,6 @@ export default function HeroEditor({ props, onUpdate }: EditorProps<HeroProps>) 
         <TextArea value={props.sub_copy} onChange={(v) => onUpdate({ sub_copy: v })} placeholder="감성을 담은 한 줄 더" rows={2} />
       </Field>
 
-      <Field label="정렬">
-        <Select
-          value={props.align || 'center'}
-          onChange={(v) => onUpdate({ align: v as HeroProps['align'] })}
-          options={[
-            { value: 'left', label: '왼쪽' },
-            { value: 'center', label: '가운데' },
-            { value: 'right', label: '오른쪽' },
-          ]}
-        />
-      </Field>
-
       <Field label="높이">
         <Select
           value={props.height || 'md'}

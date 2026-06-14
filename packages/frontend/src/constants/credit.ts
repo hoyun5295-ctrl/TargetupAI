@@ -99,6 +99,7 @@ export const CREDIT_SOURCE_LABELS: Record<string, string> = {
 
 /** 사전 확인 모달 대상 — 큰 확정 차감 source→cost (백엔드 CREDIT_COST_MAP의 확정 차감과 1:1). */
 export const CONFIRM_CREDIT_COSTS: Record<string, number> = {
+  'dm-ai-generate': 5,        // 모바일 DM 생성 (AI 자동 생성 — 생성 전 확인, 범위 넓어 5)
   'dm-builder': 30,           // DM 발행
   'email-ai-publish': 30,     // Email AI 캠페인 발송 확정
   'inapp-publish': 15,        // 인앱 게시
