@@ -21,8 +21,17 @@ export default function CtaSection({ props, onEdit }: { props: CtaProps; onEdit?
   };
 
   return (
-    <div className="dm-section dm-cta-section" style={{ padding: 'var(--dm-sp-5)', textAlign: 'center' }}>
-      <div style={{ display: 'flex', flexDirection: flexDir, flexWrap, gap: 'var(--dm-sp-3)', justifyContent: 'var(--dm-section-justify, center)' }}>
+    <div className="dm-section dm-cta-section" style={{ padding: 'var(--dm-sp-5)' }}>
+      <div style={{
+        display: 'flex',
+        flexDirection: flexDir,
+        flexWrap,
+        gap: 'var(--dm-sp-3)',
+        // 가로 정렬: row=주축(justifyContent) / column(stack)=교차축(alignItems).
+        // column에서 justifyContent는 세로축이라 가로 정렬이 안 먹고, alignItems 기본 stretch가 버튼을 풀폭으로 늘려 정렬이 안 보였음.
+        justifyContent: layout === 'row' ? 'var(--dm-section-justify, center)' : undefined,
+        alignItems: layout === 'row' ? undefined : 'var(--dm-section-justify, center)',
+      }}>
         {buttons.map((b, i) => {
           const cls = b.style === 'secondary' ? 'dm-cta dm-cta-secondary'
                     : b.style === 'outline'   ? 'dm-cta dm-cta-outline'

@@ -189,9 +189,13 @@ function renderCta(props: CtaProps): string {
     return `<a href="${safeUrl(b.url)}" class="dm-cta ${styleClass}" target="_blank">${icon}${escapeHtml(b.label || '자세히 보기')}</a>`;
   }).join('');
 
-  const flex = layout === 'row' ? 'flex-direction:row;flex-wrap:wrap' : 'flex-direction:column';
+  // 가로 정렬: row=주축(justify-content) / column(stack)=교차축(align-items).
+  // column에서 justify-content는 세로축이라 무효 + align-items 기본 stretch가 버튼을 풀폭으로 늘려 정렬이 안 보였음.
+  const flex = layout === 'row'
+    ? 'flex-direction:row;flex-wrap:wrap;justify-content:var(--dm-section-justify,center)'
+    : 'flex-direction:column;align-items:var(--dm-section-justify,center)';
   return `<div class="dm-section dm-cta-section" data-section-type="cta" style="padding:var(--dm-sp-5)">
-    <div style="display:flex;${flex};gap:var(--dm-sp-3);justify-content:var(--dm-section-justify,center)">${btnHtml}</div>
+    <div style="display:flex;${flex};gap:var(--dm-sp-3)">${btnHtml}</div>
   </div>`;
 }
 
