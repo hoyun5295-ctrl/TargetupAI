@@ -190,7 +190,8 @@ dmRouter.post('/upload-image', (req: any, res: any) => {
       const filePath = path.join(companyDir, filename);
       fs.writeFileSync(filePath, file.buffer);
       results.push({
-        url: `/api/flyer/p/dm-images/${companyId}/${filename}`,
+        // ★ 2026-06-14 fix: 실제 서빙 경로(dmPublicRouter /api/dm/v/images)로 반환 — 기존 flyer 경로는 서빙 라우트 없어 캔버스/editor 이미지 전부 깨짐
+        url: `/api/dm/v/images/${companyId}/${filename}`,
         filename,
         size: file.size,
       });
@@ -207,7 +208,7 @@ dmRouter.delete('/delete-image', (req: any, res: any) => {
   const { url } = req.body;
   if (!url) return res.status(400).json({ error: 'url 필요' });
 
-  const m = url.match(/\/api\/dm\/images\/([^/]+)\/([^/]+)$/);
+  const m = url.match(/\/(?:api\/dm\/images|api\/dm\/v\/images|api\/flyer\/p\/dm-images)\/([^/]+)\/([^/]+)$/);
   if (!m || m[1] !== companyId) return res.status(403).json({ error: '접근 권한 없음' });
 
   const filePath = path.join(DM_IMAGE_DIR, m[1], m[2]);

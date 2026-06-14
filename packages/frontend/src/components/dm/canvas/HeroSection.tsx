@@ -2,6 +2,7 @@
  * HeroSection — 히어로 (풀 배너 + 메인 헤드라인 + 서브카피)
  */
 import type { HeroProps } from '../../../utils/dm-section-defaults';
+import { dmImageUrl } from '../../../utils/dm-image-url';
 import InlineEditable from './InlineEditable';
 import type { EditHandler } from './SectionRenderer';
 
@@ -21,7 +22,7 @@ export default function HeroSection({ props, onEdit }: { props: HeroProps; onEdi
     <div className="dm-section dm-hero" style={{ position: 'relative', minHeight: height, overflow: 'hidden', background: 'var(--dm-neutral-900)' }}>
       {props.image_url && (
         <img
-          src={props.image_url}
+          src={dmImageUrl(props.image_url)}
           alt={props.headline || ''}
           style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' }}
         />

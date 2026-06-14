@@ -138,6 +138,7 @@ export type DmBuilderState = {
   updateSectionProps: (id: string, patch: Partial<SectionProps>) => void;
   setSectionVisible: (id: string, visible: boolean) => void;
   setSectionVariant: (id: string, variant: string) => void;
+  setSectionStyle: (id: string, patch: { align?: 'left' | 'center' | 'right'; accent_color?: string }) => void;
   toggleSectionLock: (id: string) => void;
 
   // ── Actions: UI ──
@@ -581,6 +582,13 @@ export const useDmBuilderStore = create<DmBuilderState>((set, get) => ({
   setSectionVariant: (id, style_variant) => {
     set((s) => markDirty(updateCurrentPageSections(s, (list) =>
       list.map((sec) => sec.id === id ? { ...sec, style_variant } : sec),
+    )));
+    scheduleAutosave(() => { if (get().dmId) void get().save({ silent: true }); });
+  },
+
+  setSectionStyle: (id, patch) => {
+    set((s) => markDirty(updateCurrentPageSections(s, (list) =>
+      list.map((sec) => sec.id === id ? { ...sec, ...patch } : sec),
     )));
     scheduleAutosave(() => { if (get().dmId) void get().save({ silent: true }); });
   },

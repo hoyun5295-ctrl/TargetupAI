@@ -65,6 +65,8 @@ export const SECTION_TYPES: readonly SectionType[] = [
 export type HeaderProps = {
   variant: 'logo' | 'banner' | 'countdown' | 'coupon';
   align?: 'left' | 'center'; // logo형 정렬(기본 center)
+  brand_size?: 'sm' | 'md' | 'lg'; // 브랜드명 크기(기본 md)
+  logo_size?: 'sm' | 'md' | 'lg';  // 로고 크기(기본 md)
   logo_url?: string;
   brand_name?: string;
   phone?: string;
@@ -426,6 +428,8 @@ export type Section = {
   props: SectionProps;
   ai_locked?: boolean;
   variable_fallbacks?: VariableBinding[];
+  align?: 'left' | 'center' | 'right';  // 섹션 공통 정렬(전 섹션 일괄, 미설정=가운데)
+  accent_color?: string;                // 섹션 버튼/액센트 색 override(미설정=브랜드 색)
 };
 
 // ────────────── 기본값 ──────────────

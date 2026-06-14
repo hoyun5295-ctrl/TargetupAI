@@ -34,6 +34,28 @@ export default function HeaderEditor({ props, onUpdate }: EditorProps<HeaderProp
               ]}
             />
           </Field>
+          <Field label="브랜드명 크기">
+            <Select
+              value={props.brand_size || 'md'}
+              onChange={(v) => onUpdate({ brand_size: v as HeaderProps['brand_size'] })}
+              options={[
+                { value: 'sm', label: '작게' },
+                { value: 'md', label: '보통' },
+                { value: 'lg', label: '크게' },
+              ]}
+            />
+          </Field>
+          <Field label="로고 크기">
+            <Select
+              value={props.logo_size || 'md'}
+              onChange={(v) => onUpdate({ logo_size: v as HeaderProps['logo_size'] })}
+              options={[
+                { value: 'sm', label: '작게' },
+                { value: 'md', label: '보통' },
+                { value: 'lg', label: '크게' },
+              ]}
+            />
+          </Field>
           <Field label="로고 이미지">
             <ImageUploader value={props.logo_url} onChange={(url) => onUpdate({ logo_url: url })} label="로고" />
           </Field>

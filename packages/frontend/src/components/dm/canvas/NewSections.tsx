@@ -31,6 +31,7 @@ import type {
   MapStoreLocatorProps,
   ReviewsProps,
 } from '../../../utils/dm-section-defaults';
+import { dmImageUrl } from '../../../utils/dm-image-url';
 
 // ────────────── 공통 영역 ──────────────
 
@@ -69,7 +70,7 @@ export function ProductCarouselSection({ props }: { props: ProductCarouselProps 
           {products.map((p, i) => (
             <div key={p.id || i} style={{ minWidth: 140, maxWidth: 160 }}>
               {p.image_url ? (
-                <img src={p.image_url} alt={p.name} style={{ width: '100%', height: 140, objectFit: 'cover', borderRadius: 8 }} />
+                <img src={dmImageUrl(p.image_url)} alt={p.name} style={{ width: '100%', height: 140, objectFit: 'cover', borderRadius: 8 }} />
               ) : (
                 <div style={{ width: '100%', height: 140, background: 'var(--dm-neutral-100)', borderRadius: 8 }} />
               )}
@@ -101,7 +102,7 @@ export function GallerySection({ props }: { props: GalleryProps }) {
       ) : (
         <div style={{ display: 'grid', gridTemplateColumns: `repeat(${cols}, 1fr)`, gap: 6 }}>
           {images.map((img, i) => (
-            <img key={i} src={img.url} alt={img.caption || ''} style={{ width: '100%', aspectRatio: '1', objectFit: 'cover', borderRadius: 6 }} />
+            <img key={i} src={dmImageUrl(img.url)} alt={img.caption || ''} style={{ width: '100%', aspectRatio: '1', objectFit: 'cover', borderRadius: 6 }} />
           ))}
         </div>
       )}
@@ -120,7 +121,7 @@ export function SlideshowSection({ props }: { props: SlideshowProps }) {
       ) : (
         <>
           {cur?.image_url ? (
-            <img src={cur.image_url} alt={cur.caption || ''} style={{ width: '100%', aspectRatio: '16/9', objectFit: 'cover', borderRadius: 8 }} />
+            <img src={dmImageUrl(cur.image_url)} alt={cur.caption || ''} style={{ width: '100%', aspectRatio: '16/9', objectFit: 'cover', borderRadius: 8 }} />
           ) : (
             <div style={{ width: '100%', aspectRatio: '16/9', background: 'var(--dm-neutral-100)', borderRadius: 8 }} />
           )}

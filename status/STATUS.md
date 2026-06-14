@@ -107,7 +107,8 @@
 
 ---
 
-### 🟢 2026-06-14 — 모바일 DM 전면 재설계 B~G 7개 전부 구현 완료 (배포 대기 → Harold 일괄 배포)
+### 🟢 2026-06-14 — 모바일 DM 전면 재설계 (B~G 엔진/editor + 캔버스 편집 UX 보강, 배포 대기 → Harold 일괄 배포)
+> **★ 캔버스 편집 UX 보강(세션 후반 — Harold 지적, "tsc만 보고 완료 보고한 잘못")**: ① 이미지 업로드/표시 근본 fix — 업로드 반환 URL이 서빙 안 되는 `/api/flyer/p/dm-images`였음 → `/api/dm/v/images`로 변경 + 프런트 `dmImageUrl` 정규화 헬퍼를 캔버스 6곳·editor 썸네일에 적용(기존 깨짐도 복구). ② 전 섹션 정렬(좌/가운데/우) — `Section.align` 공통 필드 + 공통 패널 컨트롤 + 캔버스 SectionRenderer/뷰어 renderSection 래퍼가 `text-align`+`--dm-section-justify` 주입 + CTA 플렉스 정렬 변수화. ③ 섹션 버튼색 개별 — `Section.accent_color` → 그 섹션 한정 `--dm-primary` 덮어쓰기(브랜드색 버튼 자동 적용) + 공통 패널 색상 선택기. ④ 헤더 브랜드명/로고 크기(sm/md/lg) — HeaderProps brand_size·logo_size + renderHeader·HeaderSection·HeaderEditor. ⑤ 레이아웃 스크롤·슬라이드 — 토글(DmTopBar)·캔버스 페이지 네비·뷰어 3모드 렌더 작동 확인. backend/frontend tsc 0. **남은 것(다음 세션, Harold 합의): ⑥ AI 자동생성이 슬라이드 모드도 — 현 `layoutMode:'scroll'` 하드코딩 해제 + `applyAiGenerated` 섹션→페이지 분할 + "어지간한 건 거의 다" 채움(혜택 숫자만 placeholder) ⑦ 그 가치에 맞는 크레딧.**
 > **B 인터랙션 엔진**: 순수 추첨 코어(pickRouletteSegment/drawWinners/parseWinnerRows, ts-node TDD) + dm-interaction CT(제출·룰렛 즉시추첨·원자적 재고차감·조회·집계·xlsx 다운로드·엑셀 사전지정·경품 동기화) + dm-draw-worker(1분 cron 마감추첨, dm_draw_runs 원자적 claim) + 공개 제출 endpoint 확장(`/:code/event-response`: 동의·phone매칭·1인1회·룰렛 즉시결과) + 뷰어 인터랙션 JS(룰렛 회전·폼·투표) + admin endpoint(responses/winners/event-stats/event-insight/export/winners-import/prizes). **신규 3테이블(dm_prizes·dm_winners·dm_draw_runs)+부분UNIQUE Harold 실행 완료**(SCHEMA.md 기록).
 > **A 섹션 editor**: 신규 16섹션 editor 전부 + RepeatableList 공용 + 룰렛/추첨 경품 설정(확률 합계 검증) + SectionPropsEditor 27 case(빈 패널 해소). LuckyDrawProps.prizes·RouletteSegment.prize_count SSOT 양쪽. 발행 시 syncPrizesFromSections→dm_prizes(당첨자 있으면 재고 보존).
 > **C 이미지**: publicImageUrl(base64→공개경로 `/api/dm/v/images`, 뷰어 동일 라우터라 도달 보장+HTML 경량) + lazy-load + 2MB→5MB + 클라 canvas 리사이즈(ImageUploader, 대용량 사진 자동 축소) + MultiImageUploader(갤러리/슬라이드 일괄).

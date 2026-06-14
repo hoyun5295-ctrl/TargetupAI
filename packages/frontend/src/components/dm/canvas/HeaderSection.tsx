@@ -2,6 +2,7 @@
  * HeaderSection — 헤더 섹션 (4 variant: logo/banner/countdown/coupon)
  */
 import type { HeaderProps } from '../../../utils/dm-section-defaults';
+import { dmImageUrl } from '../../../utils/dm-image-url';
 import InlineEditable from './InlineEditable';
 import type { EditHandler } from './SectionRenderer';
 
@@ -14,7 +15,7 @@ export default function HeaderSection({ props, storeName = '', onEdit }: { props
     return (
       <div className="dm-header dm-header-banner">
         {props.banner_image_url && (
-          <img src={props.banner_image_url} alt={brand} style={{ width: '100%', display: 'block' }} />
+          <img src={dmImageUrl(props.banner_image_url)} alt={brand} style={{ width: '100%', display: 'block' }} />
         )}
       </div>
     );
@@ -90,12 +91,14 @@ export default function HeaderSection({ props, storeName = '', onEdit }: { props
 
   // variant === 'logo'
   const align = props.align || 'center';
+  const brandFs = props.brand_size === 'sm' ? 'var(--dm-fs-small)' : props.brand_size === 'lg' ? 'var(--dm-fs-h1)' : 'var(--dm-fs-h3)';
+  const logoH = props.logo_size === 'sm' ? 24 : props.logo_size === 'lg' ? 48 : 32;
   const logoBrand = (
     <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--dm-sp-2)' }}>
-      {props.logo_url && <img src={props.logo_url} alt={brand} style={{ height: 32, borderRadius: 'var(--dm-radius-sm)' }} />}
+      {props.logo_url && <img src={dmImageUrl(props.logo_url)} alt={brand} style={{ height: logoH, borderRadius: 'var(--dm-radius-sm)' }} />}
       {(brand || editable) && (
         <InlineEditable
-          style={{ fontSize: 'var(--dm-fs-h3)', fontWeight: 700, color: 'var(--dm-neutral-900)' }}
+          style={{ fontSize: brandFs, fontWeight: 700, color: 'var(--dm-neutral-900)' }}
           value={brand}
           placeholder="브랜드명"
           onChange={(v) => onEdit?.({ brand_name: v } as Partial<HeaderProps>)}

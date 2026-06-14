@@ -84,9 +84,11 @@ function renderHeader(props: HeaderProps, ctx: SectionRenderContext): string {
     default: {
       const logo = props.logo_url ? publicImageUrl(props.logo_url) : '';
       const align = props.align || 'center';
+      const brandFs = props.brand_size === 'sm' ? 'var(--dm-fs-small)' : props.brand_size === 'lg' ? 'var(--dm-fs-h1)' : 'var(--dm-fs-h3)';
+      const logoH = props.logo_size === 'sm' ? '24px' : props.logo_size === 'lg' ? '48px' : '32px';
       const logoBrand = `<div style="display:flex;align-items:center;gap:var(--dm-sp-2)">
-          ${logo ? `<img src="${escapeHtml(logo)}" alt="${brand}" style="height:32px;border-radius:var(--dm-radius-sm)">` : ''}
-          ${brand ? `<div style="font-size:var(--dm-fs-h3);font-weight:700;color:var(--dm-neutral-900)">${brand}</div>` : ''}
+          ${logo ? `<img src="${escapeHtml(logo)}" alt="${brand}" style="height:${logoH};border-radius:var(--dm-radius-sm)">` : ''}
+          ${brand ? `<div style="font-size:${brandFs};font-weight:700;color:var(--dm-neutral-900)">${brand}</div>` : ''}
         </div>`;
       if (align === 'center') {
         return `<div class="dm-header dm-header-logo" data-variant="${escapeHtml(variant)}" style="background:var(--dm-bg);padding:var(--dm-sp-4) var(--dm-sp-5);border-bottom:1px solid var(--dm-neutral-200);display:flex;flex-direction:column;align-items:center;gap:var(--dm-sp-1);text-align:center">
@@ -188,8 +190,8 @@ function renderCta(props: CtaProps): string {
   }).join('');
 
   const flex = layout === 'row' ? 'flex-direction:row;flex-wrap:wrap' : 'flex-direction:column';
-  return `<div class="dm-section dm-cta-section" data-section-type="cta" style="padding:var(--dm-sp-5);text-align:center">
-    <div style="display:flex;${flex};gap:var(--dm-sp-3);justify-content:center">${btnHtml}</div>
+  return `<div class="dm-section dm-cta-section" data-section-type="cta" style="padding:var(--dm-sp-5)">
+    <div style="display:flex;${flex};gap:var(--dm-sp-3);justify-content:var(--dm-section-justify,center)">${btnHtml}</div>
   </div>`;
 }
 
@@ -558,7 +560,10 @@ export function renderSection(section: Section, ctx: SectionRenderContext): stri
   const variant = section.style_variant || 'default';
   const inner = fn(section.props, ctx);
   if (!inner) return '';
-  return `<div class="dm-section-wrap" data-section-id="${escapeHtml(section.id)}" data-section-type="${escapeHtml(section.type)}" data-variant="${escapeHtml(variant)}">${inner}</div>`;
+  const al = section.align || 'center';
+  const just = al === 'left' ? 'flex-start' : al === 'right' ? 'flex-end' : 'center';
+  const wrapStyle = `text-align:${al};--dm-section-justify:${just}${section.accent_color ? `;--dm-primary:${escapeHtml(section.accent_color)}` : ''}`;
+  return `<div class="dm-section-wrap" data-section-id="${escapeHtml(section.id)}" data-section-type="${escapeHtml(section.type)}" data-variant="${escapeHtml(variant)}" style="${wrapStyle}">${inner}</div>`;
 }
 
 /** 섹션 배열 전체를 세로 스크롤로 렌더링 */

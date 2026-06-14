@@ -5,6 +5,7 @@
 import type { ChangeEvent, ReactNode } from 'react';
 import { useRef, useState } from 'react';
 import axios from 'axios';
+import { dmImageUrl } from '../../../utils/dm-image-url';
 
 const api = axios.create({ baseURL: '/api' });
 api.interceptors.request.use((cfg) => {
@@ -267,7 +268,7 @@ export function ImageUploader({
       <div style={{ display: 'flex', gap: 6, alignItems: 'stretch' }}>
         {value ? (
           <div style={{ position: 'relative', width: 60, height: 60, borderRadius: 6, overflow: 'hidden', border: '1px solid var(--dm-neutral-200)', flexShrink: 0 }}>
-            <img src={value} alt={label} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+            <img src={dmImageUrl(value)} alt={label} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
             <button
               onClick={() => onChange('')}
               style={{ position: 'absolute', top: 2, right: 2, width: 18, height: 18, borderRadius: 9, background: 'rgba(0,0,0,0.6)', color: '#fff', border: 'none', fontSize: 10, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}

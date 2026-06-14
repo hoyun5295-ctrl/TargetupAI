@@ -14,6 +14,7 @@ export default function DmRightPanel() {
   const setSectionVariant = useDmBuilderStore((s) => s.setSectionVariant);
   const setSectionVisible = useDmBuilderStore((s) => s.setSectionVisible);
   const toggleSectionLock = useDmBuilderStore((s) => s.toggleSectionLock);
+  const setSectionStyle = useDmBuilderStore((s) => s.setSectionStyle);
 
   const selected = useMemo(
     () => sections.find((s) => s.id === selectedSectionId) || null,
@@ -80,6 +81,37 @@ export default function DmRightPanel() {
                     ))}
                   </select>
                 </LabelRow>
+                <LabelRow label="정렬">
+                  <div style={{ display: 'flex', gap: 4 }}>
+                    {([['left', '좌'], ['center', '가운데'], ['right', '우']] as const).map(([a, lbl]) => (
+                      <button
+                        key={a}
+                        onClick={() => setSectionStyle(selected.id, { align: a })}
+                        style={{ ...alignBtnStyle, ...((selected.align || 'center') === a ? alignBtnActiveStyle : {}) }}
+                      >
+                        {lbl}
+                      </button>
+                    ))}
+                  </div>
+                </LabelRow>
+                <LabelRow label="버튼 색">
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <input
+                      type="color"
+                      value={selected.accent_color || '#4f46e5'}
+                      onChange={(e) => setSectionStyle(selected.id, { accent_color: e.target.value })}
+                      style={{ width: 30, height: 24, padding: 0, border: '1px solid var(--dm-neutral-200)', borderRadius: 4, cursor: 'pointer', background: 'transparent' }}
+                    />
+                    {selected.accent_color && (
+                      <button
+                        onClick={() => setSectionStyle(selected.id, { accent_color: undefined })}
+                        style={{ fontSize: 10, color: 'var(--dm-neutral-500)', background: 'none', border: 'none', cursor: 'pointer', textDecoration: 'underline' }}
+                      >
+                        브랜드색
+                      </button>
+                    )}
+                  </div>
+                </LabelRow>
               </section>
 
               {/* 타입별 필드 에디터 */}
@@ -136,6 +168,25 @@ function ToggleButton({ active, onClick, labelOn, labelOff }: { active: boolean;
     </button>
   );
 }
+
+const alignBtnStyle: React.CSSProperties = {
+  flex: 1,
+  height: 24,
+  padding: '0 8px',
+  borderRadius: 6,
+  border: '1px solid var(--dm-neutral-200)',
+  background: 'var(--dm-bg)',
+  color: 'var(--dm-neutral-700)',
+  fontSize: 11,
+  fontWeight: 600,
+  cursor: 'pointer',
+};
+
+const alignBtnActiveStyle: React.CSSProperties = {
+  background: 'var(--dm-primary)',
+  color: '#fff',
+  borderColor: 'var(--dm-primary)',
+};
 
 const selectStyle: React.CSSProperties = {
   height: 28,

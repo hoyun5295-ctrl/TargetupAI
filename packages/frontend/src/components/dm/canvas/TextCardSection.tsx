@@ -2,6 +2,7 @@
  * TextCardSection — 텍스트 카드 (태그 + 헤드라인 + 본문 + 이미지 조합)
  */
 import type { TextCardProps } from '../../../utils/dm-section-defaults';
+import { dmImageUrl } from '../../../utils/dm-image-url';
 import InlineEditable from './InlineEditable';
 import type { EditHandler } from './SectionRenderer';
 
@@ -19,7 +20,7 @@ export default function TextCardSection({ props, onEdit }: { props: TextCardProp
         {props.image_url && (
           <div style={{ flex: isHoriz ? '0 0 40%' : '0 0 auto', width: isHoriz ? undefined : '100%' }}>
             <img
-              src={props.image_url}
+              src={dmImageUrl(props.image_url)}
               alt={props.headline || ''}
               style={{ width: '100%', display: 'block', borderRadius: pos === 'top' ? 0 : 'var(--dm-radius-md)' }}
             />

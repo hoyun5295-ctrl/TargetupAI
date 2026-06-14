@@ -22,7 +22,7 @@ export default function CtaSection({ props, onEdit }: { props: CtaProps; onEdit?
 
   return (
     <div className="dm-section dm-cta-section" style={{ padding: 'var(--dm-sp-5)', textAlign: 'center' }}>
-      <div style={{ display: 'flex', flexDirection: flexDir, flexWrap, gap: 'var(--dm-sp-3)', justifyContent: 'center' }}>
+      <div style={{ display: 'flex', flexDirection: flexDir, flexWrap, gap: 'var(--dm-sp-3)', justifyContent: 'var(--dm-section-justify, center)' }}>
         {buttons.map((b, i) => {
           const cls = b.style === 'secondary' ? 'dm-cta dm-cta-secondary'
                     : b.style === 'outline'   ? 'dm-cta dm-cta-outline'

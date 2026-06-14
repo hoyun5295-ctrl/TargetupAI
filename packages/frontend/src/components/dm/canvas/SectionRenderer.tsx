@@ -4,6 +4,7 @@
  *
  * D126 V2: onEdit 콜백을 받아 인라인 편집 지원.
  */
+import type { CSSProperties } from 'react';
 import type { Section, SectionProps } from '../../../utils/dm-section-defaults';
 import SectionFrame from './SectionFrame';
 import HeaderSection from './HeaderSection';
@@ -86,7 +87,16 @@ export default function SectionRenderer({
     }
   })();
 
-  if (readOnly) return <>{inner}</>;
+  // 섹션 공통 정렬·액센트색 → 텍스트/버튼/플렉스가 참조하는 CSS 변수로 주입 (전 섹션 일괄)
+  const sAlign = section.align || 'center';
+  const styleVars = {
+    textAlign: sAlign,
+    ['--dm-section-justify']: sAlign === 'left' ? 'flex-start' : sAlign === 'right' ? 'flex-end' : 'center',
+    // 액센트색 = 이 섹션 한정으로 --dm-primary 덮어쓰기 → 브랜드색 쓰던 모든 버튼이 자동 적용
+    ...(section.accent_color ? { ['--dm-primary']: section.accent_color } : {}),
+  } as CSSProperties;
+
+  if (readOnly) return <div style={styleVars}>{inner}</div>;
 
   return (
     <SectionFrame
@@ -99,7 +109,7 @@ export default function SectionRenderer({
       onSelect={onSelect}
       onHover={onHover}
     >
-      {inner}
+      <div style={styleVars}>{inner}</div>
     </SectionFrame>
   );
 }
