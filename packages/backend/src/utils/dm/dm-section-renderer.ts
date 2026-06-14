@@ -127,7 +127,7 @@ function renderCoupon(props: CouponProps): string {
   const expire = props.expire_date ? formatKoreanDate(props.expire_date) : '';
 
   return `<div class="dm-section dm-coupon" data-section-type="coupon" style="padding:var(--dm-sp-6) var(--dm-sp-5);background:var(--dm-primary-light)">
-    <div style="background:var(--dm-bg);border:2px dashed var(--dm-primary);border-radius:var(--dm-radius-lg);padding:var(--dm-sp-6);text-align:center">
+    <div style="background:var(--dm-bg);border:2px dashed var(--dm-primary);border-radius:var(--dm-radius-lg);padding:var(--dm-sp-6)">
       <div class="dm-text-hero" style="color:var(--dm-primary);font-weight:900">${discountLabel}</div>
       ${code ? `<div style="margin-top:var(--dm-sp-3);background:var(--dm-primary);color:#fff;display:inline-block;padding:var(--dm-sp-2) var(--dm-sp-5);border-radius:var(--dm-radius-md);font-family:var(--dm-font-mono);font-size:var(--dm-fs-h3);font-weight:700;letter-spacing:2px">${code}</div>` : ''}
       ${expire ? `<div class="dm-text-small" style="margin-top:var(--dm-sp-3);color:var(--dm-neutral-500)">유효기간: ~ ${escapeHtml(expire)}</div>` : ''}
@@ -142,9 +142,9 @@ function renderCountdown(props: CountdownProps): string {
   const end = props.end_datetime || '';
   const urgency = escapeHtml(props.urgency_text || '마감까지');
 
-  return `<div class="dm-section dm-countdown" data-section-type="countdown" data-end="${escapeHtml(end)}" style="padding:var(--dm-sp-6) var(--dm-sp-5);background:var(--dm-neutral-900);color:#fff;text-align:center">
+  return `<div class="dm-section dm-countdown" data-section-type="countdown" data-end="${escapeHtml(end)}" style="padding:var(--dm-sp-6) var(--dm-sp-5);background:var(--dm-neutral-900);color:#fff">
     <div class="dm-text-h3" style="color:var(--dm-accent);font-weight:700;margin-bottom:var(--dm-sp-3)">${urgency}</div>
-    <div class="dm-countdown-display" style="display:flex;gap:var(--dm-sp-3);justify-content:center;flex-wrap:wrap">
+    <div class="dm-countdown-display" style="display:flex;gap:var(--dm-sp-3);justify-content:var(--dm-section-justify,center);flex-wrap:wrap">
       ${props.show_days    ? `<div class="cd-unit"><div class="cd-num" data-unit="d">00</div><div class="cd-lbl">일</div></div>` : ''}
       ${props.show_hours   ? `<div class="cd-unit"><div class="cd-num" data-unit="h">00</div><div class="cd-lbl">시간</div></div>` : ''}
       ${props.show_minutes ? `<div class="cd-unit"><div class="cd-num" data-unit="m">00</div><div class="cd-lbl">분</div></div>` : ''}
@@ -273,7 +273,7 @@ function renderSns(props: SnsProps): string {
 function renderPromoCode(props: PromoCodeProps): string {
   if (!props.code) return '';
 
-  return `<div class="dm-section dm-promo-code" data-section-type="promo_code" style="padding:var(--dm-sp-6) var(--dm-sp-5);background:linear-gradient(135deg,var(--dm-accent) 0%,var(--dm-primary) 100%);color:#fff;text-align:center">
+  return `<div class="dm-section dm-promo-code" data-section-type="promo_code" style="padding:var(--dm-sp-6) var(--dm-sp-5);background:linear-gradient(135deg,var(--dm-accent) 0%,var(--dm-primary) 100%);color:#fff">
     ${props.description ? `<div class="dm-text-h3" style="font-weight:600;margin-bottom:var(--dm-sp-3)">${escapeHtml(props.description)}</div>` : ''}
     <div style="background:rgba(255,255,255,0.95);color:var(--dm-primary);display:inline-block;padding:var(--dm-sp-3) var(--dm-sp-6);border-radius:var(--dm-radius-md);font-family:var(--dm-font-mono);font-size:var(--dm-fs-h2);font-weight:900;letter-spacing:3px;border:2px dashed rgba(255,255,255,0.5)">${escapeHtml(props.code)}</div>
     ${props.instructions ? `<div class="dm-text-small" style="margin-top:var(--dm-sp-3);opacity:0.9">${escapeHtml(props.instructions)}</div>` : ''}
@@ -286,7 +286,7 @@ function renderFooter(props: FooterProps, ctx: SectionRenderContext): string {
     ? `<a href="/api/unsubscribes/form" target="_blank" style="color:var(--dm-neutral-500);text-decoration:underline">수신거부</a>`
     : '';
 
-  return `<div class="dm-section dm-footer" data-section-type="footer" style="padding:var(--dm-sp-6) var(--dm-sp-5);background:var(--dm-neutral-100);border-top:1px solid var(--dm-neutral-200);text-align:center">
+  return `<div class="dm-section dm-footer" data-section-type="footer" style="padding:var(--dm-sp-6) var(--dm-sp-5);background:var(--dm-neutral-100);border-top:1px solid var(--dm-neutral-200)">
     ${props.notes ? `<div class="dm-text-small" style="color:var(--dm-neutral-600);margin-bottom:var(--dm-sp-3);white-space:pre-wrap">${escapeHtml(props.notes)}</div>` : ''}
     ${props.cs_phone ? `<div class="dm-text-small" style="color:var(--dm-neutral-700);margin-bottom:var(--dm-sp-1)"><strong>고객센터</strong> <a href="tel:${escapeHtml(props.cs_phone)}" style="color:var(--dm-primary)">${escapeHtml(props.cs_phone)}</a></div>` : ''}
     ${props.cs_hours ? `<div class="dm-text-tiny" style="color:var(--dm-neutral-500);margin-bottom:var(--dm-sp-2)">${escapeHtml(props.cs_hours)}</div>` : ''}
@@ -457,7 +457,7 @@ function renderLuckyDraw(p: any): string {
 
 function renderRoulette(p: any): string {
   const segs = Array.isArray(p?.segments) ? p.segments.map((s: any) => ({ id: String(s.id), label: String(s.label || '') })) : [];
-  return `<div class="dm-section dm-roulette" data-dm-roulette data-segments="${escapeHtml(JSON.stringify(segs))}" style="padding:var(--dm-sp-4);background:linear-gradient(135deg,#ede9fe,#ddd6fe);border:1px solid #7c3aed;border-radius:12px;margin:var(--dm-sp-3) 0;text-align:center">
+  return `<div class="dm-section dm-roulette" data-dm-roulette data-segments="${escapeHtml(JSON.stringify(segs))}" style="padding:var(--dm-sp-4);background:linear-gradient(135deg,#ede9fe,#ddd6fe);border:1px solid #7c3aed;border-radius:12px;margin:var(--dm-sp-3) 0">
     <div style="font-size:28px;margin-bottom:8px">🎡</div>
     <div style="font-size:15px;font-weight:700;margin-bottom:8px">${escapeHtml(p.title || '룰렛 이벤트')}</div>
     <div data-dm-wheel style="width:200px;height:200px;border-radius:50%;background:conic-gradient(#a78bfa 0deg 45deg, #c4b5fd 45deg 90deg, #ddd6fe 90deg 135deg, #ede9fe 135deg 180deg, #a78bfa 180deg 225deg, #c4b5fd 225deg 270deg, #ddd6fe 270deg 315deg, #ede9fe 315deg 360deg);margin:12px auto;border:4px solid #fff"></div>
@@ -468,7 +468,7 @@ function renderRoulette(p: any): string {
 }
 
 function renderInstantCoupon(p: any): string {
-  return `<div class="dm-section dm-instant-coupon" style="padding:var(--dm-sp-4);background:linear-gradient(135deg,#fee2e2,#fecaca);border:2px dashed #ef4444;border-radius:12px;margin:var(--dm-sp-3) 0;text-align:center">
+  return `<div class="dm-section dm-instant-coupon" style="padding:var(--dm-sp-4);background:linear-gradient(135deg,#fee2e2,#fecaca);border:2px dashed #ef4444;border-radius:12px;margin:var(--dm-sp-3) 0">
     <div style="font-size:28px;margin-bottom:8px">🎟️</div>
     <div style="font-size:15px;font-weight:700;color:#991b1b;margin-bottom:8px">${escapeHtml(p.coupon_label || '')}</div>
     <div style="font-size:13px;color:#7f1d1d;margin-bottom:12px">${escapeHtml(p.discount_description || '')}</div>

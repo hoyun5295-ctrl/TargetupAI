@@ -22,7 +22,7 @@ export default function CouponSection({ props, onEdit }: { props: CouponProps; o
 
   return (
     <div className="dm-section dm-coupon" style={{ padding: 'var(--dm-sp-6) var(--dm-sp-5)', background: 'var(--dm-primary-light)' }}>
-      <div style={{ background: 'var(--dm-bg)', border: '2px dashed var(--dm-primary)', borderRadius: 'var(--dm-radius-lg)', padding: 'var(--dm-sp-6)', textAlign: 'center' }}>
+      <div style={{ background: 'var(--dm-bg)', border: '2px dashed var(--dm-primary)', borderRadius: 'var(--dm-radius-lg)', padding: 'var(--dm-sp-6)' }}>
         <InlineEditable
           className="dm-text-hero"
           style={{ color: 'var(--dm-primary)', fontWeight: 900 }}

@@ -341,9 +341,9 @@ export function LuckyDrawSection({ props }: { props: LuckyDrawProps }) {
 export function RouletteSection({ props }: { props: RouletteProps }) {
   const segments = props?.segments || [];
   return (
-    <div className="dm-section dm-roulette" style={{ ...CARD_STYLE, background: 'linear-gradient(135deg,#ede9fe,#ddd6fe)', border: '1px solid #7c3aed', textAlign: 'center' }}>
+    <div className="dm-section dm-roulette" style={{ ...CARD_STYLE, background: 'linear-gradient(135deg,#ede9fe,#ddd6fe)', border: '1px solid #7c3aed' }}>
       <div style={{ fontSize: 28, marginBottom: 8 }}>🎡</div>
-      <div style={{ ...TITLE_STYLE, textAlign: 'center' }}>룰렛 이벤트</div>
+      <div style={TITLE_STYLE}>룰렛 이벤트</div>
       <div
         style={{
           width: 200, height: 200, borderRadius: '50%',
@@ -372,9 +372,9 @@ export function RouletteSection({ props }: { props: RouletteProps }) {
 
 export function InstantCouponSection({ props }: { props: InstantCouponProps }) {
   return (
-    <div className="dm-section dm-instant-coupon" style={{ ...CARD_STYLE, background: 'linear-gradient(135deg,#fee2e2,#fecaca)', border: '2px dashed #ef4444', textAlign: 'center' }}>
+    <div className="dm-section dm-instant-coupon" style={{ ...CARD_STYLE, background: 'linear-gradient(135deg,#fee2e2,#fecaca)', border: '2px dashed #ef4444' }}>
       <div style={{ fontSize: 28, marginBottom: 8 }}>🎟️</div>
-      <div style={{ ...TITLE_STYLE, textAlign: 'center', color: '#991b1b' }}>{props.coupon_label}</div>
+      <div style={{ ...TITLE_STYLE, color: '#991b1b' }}>{props.coupon_label}</div>
       <div style={{ fontSize: 13, color: '#7f1d1d', marginBottom: 12 }}>{props.discount_description}</div>
       {props.expires_at && (
         <div style={{ fontSize: 11, color: '#991b1b', marginBottom: 10, fontWeight: 600 }}>

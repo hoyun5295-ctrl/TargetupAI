@@ -37,7 +37,7 @@ export default function CountdownSection({ props, onEdit }: { props: CountdownPr
   ];
 
   return (
-    <div className="dm-section dm-countdown" style={{ padding: 'var(--dm-sp-6) var(--dm-sp-5)', background: 'var(--dm-neutral-900)', color: '#fff', textAlign: 'center' }}>
+    <div className="dm-section dm-countdown" style={{ padding: 'var(--dm-sp-6) var(--dm-sp-5)', background: 'var(--dm-neutral-900)', color: '#fff' }}>
       <InlineEditable
         className="dm-text-h3"
         style={{ color: 'var(--dm-accent)', fontWeight: 700, marginBottom: 'var(--dm-sp-3)' }}
@@ -47,7 +47,7 @@ export default function CountdownSection({ props, onEdit }: { props: CountdownPr
         disabled={!editable}
         maxLength={40}
       />
-      <div style={{ display: 'flex', gap: 'var(--dm-sp-3)', justifyContent: 'center', flexWrap: 'wrap' }}>
+      <div style={{ display: 'flex', gap: 'var(--dm-sp-3)', justifyContent: 'var(--dm-section-justify, center)', flexWrap: 'wrap' }}>
         {units.filter(u => u.show).map((u, i) => (
           <div key={i} style={{ background: 'rgba(255,255,255,0.1)', borderRadius: 'var(--dm-radius-md)', padding: 'var(--dm-sp-3) var(--dm-sp-4)', minWidth: 64 }}>
             <div style={{ fontSize: 'var(--dm-fs-h1)', fontWeight: 900, fontFamily: 'var(--dm-font-mono)' }}>{pad(u.val)}</div>

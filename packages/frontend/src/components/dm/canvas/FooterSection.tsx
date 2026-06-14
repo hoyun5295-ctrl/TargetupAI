@@ -10,7 +10,7 @@ export default function FooterSection({ props, onEdit }: { props: FooterProps; o
   const editable = !!onEdit;
 
   return (
-    <div className="dm-section dm-footer" style={{ padding: 'var(--dm-sp-6) var(--dm-sp-5)', background: 'var(--dm-neutral-100)', borderTop: '1px solid var(--dm-neutral-200)', textAlign: 'center' }}>
+    <div className="dm-section dm-footer" style={{ padding: 'var(--dm-sp-6) var(--dm-sp-5)', background: 'var(--dm-neutral-100)', borderTop: '1px solid var(--dm-neutral-200)' }}>
       {(props.notes || editable) && (
         <InlineEditable
           className="dm-text-small"

@@ -10,7 +10,7 @@ export default function PromoCodeSection({ props, onEdit }: { props: PromoCodePr
   if (!props.code && !editable) return null;
 
   return (
-    <div className="dm-section dm-promo-code" style={{ padding: 'var(--dm-sp-6) var(--dm-sp-5)', background: 'linear-gradient(135deg,var(--dm-accent) 0%,var(--dm-primary) 100%)', color: '#fff', textAlign: 'center' }}>
+    <div className="dm-section dm-promo-code" style={{ padding: 'var(--dm-sp-6) var(--dm-sp-5)', background: 'linear-gradient(135deg,var(--dm-accent) 0%,var(--dm-primary) 100%)', color: '#fff' }}>
       {(props.description || editable) && (
         <InlineEditable
           className="dm-text-h3"
