@@ -6,6 +6,36 @@
 
 ---
 
+## ★ 2026-06-15(이어서) 처리 결과 — 4건 수정·배포·확인 / 버그4 잔존
+
+- **버그 1 (발송일시) — 완료·배포·확인**: 상세 행·엑셀이 통신사 응답시각(`mobsend_time`)을 표시하던 것 → 발송요청 시각(`sendreq_time`). `ResultsModal.tsx`(사용자 상세)·`AdminDashboard.tsx`(슈퍼관리자 상세 `r.sendreqTime`)·`results.ts` CSV(`m.sendreq_time`). 목록 기준(`COALESCE(scheduled_at,sent_at)`)과 일치, 결과대기 빈칸 해소. **CSV 실측 = 전 행 06.11, 06.12 0건.**
+- **버그 2 (싱크 변경분) — 완료·배포·확인**: 핸드오프 가설(upsert UPDATE 절 sms_opt_in 제외)은 틀림 — upsert는 COALESCE로 이미 갱신함. 실제 근본 = `registerSyncUnsubscribes`(sync.ts)가 false를 unsubscribes에 INSERT만 하고 동의 전환(false→true) 시 제거하는 짝이 없어, 재동의 고객이 `sms_opt_in=true AND NOT EXISTS unsubscribes` 자격에서 계속 거부로 노출. fix = `reconcileSyncUnsubscribes`로 개명+양방향화(true 전환분의 `source='sync'` 제거, manual/upload/legacy 보존=정보통신망법). **실측 = 인비토 동기화 1회 후 sync 4건 자동 삭제. legacy 1건은 라벨영화장품(타 회사)이라 인비토 무관.**
+- **버그 3 (통계 전송≠성공+실패) — 완료·배포**: 전송(sent_count=적재 실측)과 성공/실패(MySQL 큐)가 다른 소스라 옛 캠페인(제외분이 fail 포함)에서 `성공+실패=대상 > 전송` 노출. fix = `reconcileSentCount` CT(`sms-table-split.ts`)=`max(적재 sent_count, 성공+실패+대기)`를 4표면(`getCampaignResultCounts`·results 요약/목록/상세) 통일 → 전송 ≥ 성공+실패 보장, 건5(전송 0) 회귀 없음. 정합 캠페인 no-op. **시세이도 6/9 전송 1613→1646(=성공1586+실패60).** 별개 root(범위 밖, 보고) = 대체발송 수신자 1명이 2행(카카오실패+LMS성공)으로 이중 집계.
+- **버그 5 (템플릿코드) — 완료·배포·확인**: 근본 = `kakao-template-sync.ts` 스캔 필터 `template_code LIKE 'Tmp%'`가 카카오 키 `Tmq`/`Tmo`(EX 부가정보형 등)를 제외(추출 어긋남 아님). fix = `'Tmp'`→`'Tm'` 3곳(배치 필터 + 단일 sync `imcCode.startsWith`·`oldCode.startsWith`). **실측 = 버튼3개 `Tmq7e6bseqjd6i7j8w3` → `B_XX_018_02_80943`.**
+- **버그 4 (대표링크 동봉) — 🔴 잔존(서팀장 답변 대기)**: `buildAlimtalkEtcJson`(현 `{title}`) 확장 + 5경로 동봉 설계 확정. `kakao_templates.represent_link` 저장 형식 = camelCase `{urlMobile,urlPc,schemeIos,schemeAndroid}`. **블로커 = 인비토 게이트웨이 엔진의 etcJson `link`→카카오 ATTACHMENT.link 매핑 배포 여부 + 정확한 키/형식.** 미배포 상태로 k_etc_json에 link 추가 시 etcJson 통째 누락→강조 title 소실→7300 재발 위험(0609 sendercode 구조). 답변 후 구현.
+
+### 부수 작업 (이번 세션, 배포)
+- **빌드 멈춤 fix**: frontend Vite가 "modules transformed" 직후 난독화 render에서 hang/OOM(`vite-plugin-javascript-obfuscator` splitStrings:5+base64 전체 번들). `vite.config.ts` 경량화(splitStrings/stringArrayCallsTransform/numbersToExpressions/체인 래퍼 off — hex 식별자·base64 stringArray·console 제거·compact 유지) + `safe-build.sh` `NODE_OPTIONS=--max-old-space-size=4096`. **빌드 16.52s 완주.**
+- **슈퍼관리자 상세 엑셀 다운로드 신규**: `utils/campaign-sms-export.ts` CT(CSV 스트리밍, 사용자 export와 컬럼·발송일시 기준 공유) + `admin.ts` `GET /campaigns/:id/sms-detail/export`(requireSuperAdmin) + `AdminDashboard.tsx` 상세 모달 버튼. (사용자 export 본체 리팩터는 BOM 리터럴 매칭 회피로 후속 정리.)
+
+> 검증: backend tsc 0 · frontend tsc 0 · reconcileSentCount 실데이터 5건 ALL_PASS · kakao 접두어 검증 · 박-단어/모델명/native dialog grep 0. 배포 = backend `build:safe`(dist+pm2 restart all) + frontend `build:safe`.
+
+### ★ 2026-06-15 휴머스온 IMC 공식 문서 정독 — 버그4 대표링크 형식 확정 (Harold 제공 3종)
+
+문서: 연동규약서 v20251031(IMC TCP/IP 프로토콜) / IMC-Agent 메뉴얼 v2.3.1(205p) / 결과코드 xlsx. (텍스트 추출 = `C:\Users\ceo\Downloads\_spec.txt`·`_manual.txt`, pdftoppm 부재로 pdfplumber 사용.)
+
+- **대표링크 = ATTACHMENT_JSON 최상위 `link` 객체** (attachment/supplement와 형제 — 메뉴얼 6.4.2.1 구조·6.4.2.2 필드정의·5.1.4 대표링크). "말풍선 클릭 시 이동, 모바일/PC/iOS/안드로이드 지원, 웹링크(WL)/앱링크(AL) 버튼과 동일 기준, 고정링크(전체변수 불가)". 키 = **snake_case**:
+  ```json
+  { "link": { "url_mobile": "...", "url_pc": "...", "scheme_ios": "...", "scheme_android": "..." } }
+  ```
+- 한줄로 `kakao_templates.represent_link`(camelCase `urlMobile/urlPc/schemeIos/schemeAndroid`) → 위 snake_case 매핑(camel→snake)만 하면 됨.
+- 앞선 두 추정 모두 부분 오류 정정: 핸드오프 `attachment_link`(래퍼명 틀림 → `link`) / LESSONS `{"link":{urlMobile,urlPc}}`(case 틀림·scheme 누락 → snake_case + scheme_ios/scheme_android 포함).
+- IMC-Agent DB는 `ATTACHMENT_JSON`(Text 4000) 한 컬럼에 attachment/supplement/link 전체 JSON 문자열을 넣음. 알림톡 발송요청(IMC_RS_AT_PUSH_REQ 202002)의 `ATTACHMENT` 옵션과 동일.
+- **★ QTmsg 매뉴얼 ver4.0 확인 — 경로 확정(한줄로 단독 불가)**: QTmsg(인비토 게이트웨이 Agent)가 정의하는 알림톡 필드 = `K_template_code`/`K_next_type`/`K_next_contents`/`K_button_json`(버튼 전용 — type 1배송조회·2웹링크·4봇키워드·5메시지전달, 최대 5) + `k_etc_json`(**senderkey·sendercode 평면 변수 전용**, p.196~206). **대표링크/link/ATTACHMENT 필드 없음**(매뉴얼의 link류는 친구톡 첨부이미지 `img_link`뿐, 알림톡 무관). → 한줄로는 QTmsg 경유라 IMC-Agent ATTACHMENT_JSON 직접 경로는 해당 없음. k_etc_json에 link를 넣어도 QTmsg가 안 읽고(senderkey/sendercode만) 0609처럼 etcJson 깨질 위험만 있음. **결론: 버그4는 한줄로 코드 단독 불가 — 서팀장(게이트웨이/커스텀 Agent)이 대표링크 필드 + IMC ATTACHMENT_JSON `link`(snake_case) 매핑을 추가해야 가능.** 추가되면 한줄로가 그 필드에 represent_link를 snake_case로 동봉. (0611 강조형 7300 미동봉 근본과 일치 — 보낼 필드 자체가 부재. QTmsg 추출 = `Downloads/_qtmsg.txt`.)
+- 부록: 결과코드 xlsx + 메뉴얼 6.2 에러코드표로 `utils/sms-result-map.ts STATUS_CODE_MAP`(특히 7xxx 카카오) 공식값 대조 가능 — 별건 개선 후보.
+
+---
+
 ## 버그 1 — 발송일시 "상세"가 리포트 수신시간으로 출력 (재발, P1)
 
 **현상**: 발송결과/캠페인 **목록**의 발송일시는 정상(예: 06.11 19:46)인데, **상세(행 단위)** 발송일시가 결과 늦게 온 건만 다음날(리포트 수신시간)로 찍힘. 결과대기 건은 빈칸.

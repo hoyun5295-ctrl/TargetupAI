@@ -904,7 +904,7 @@ async function executeAutoCampaign(ac: any): Promise<void> {
         return;
       }
       const gate = await query(
-        `SELECT t.status AS tstatus, t.buttons AS tbuttons, t.emphasize_title AS temphasize_title, p.approval_status, p.profile_key
+        `SELECT t.status AS tstatus, t.buttons AS tbuttons, t.emphasize_title AS temphasize_title, t.represent_link AS trepresent_link, p.approval_status, p.profile_key
            FROM kakao_templates t
            JOIN kakao_sender_profiles p ON p.id = t.profile_id
           WHERE t.id = $1 AND t.company_id = $2 LIMIT 1`,
@@ -936,6 +936,7 @@ async function executeAutoCampaign(ac: any): Promise<void> {
       // ★ 매뉴얼: senderkey 제거 — 알림톡은 k_template_code로 중계서버가 자동 처리(k_etc_json엔 title만)
       // ★ 버그1: k_etc_json = senderkey + 강조표기 title(#{변수} row별 치환) / k_button_json = 템플릿 buttons
       const emphasizeTitleRaw = gate.rows[0].temphasize_title || null;
+      const representLinkRaw = gate.rows[0].trepresent_link || null;
       const autoButtonJson = convertButtonsToQTmsg(gate.rows[0].tbuttons || []);
 
       const { insertAlimtalkQueue } = await import('./sms-queue');
@@ -980,6 +981,7 @@ async function executeAutoCampaign(ac: any): Promise<void> {
           // ★ 매뉴얼(qtmsg): 강조표기 title(#{변수} 본문과 동일 치환)만 → row별 k_etc_json (senderkey 제외 — 알림톡 템플릿코드 자동).
           etcJson: buildAlimtalkEtcJson({
             emphasizeTitle: emphasizeTitleRaw,
+            representLink: representLinkRaw,
             substitute: (raw) => {
               const { message: base } = prepareSendMessage(raw, customer, fieldMappings, { msgType: 'LMS', isAd: false, opt080Number: '', subject: '' });
               return fillAlimtalkVarMap(base, ac.alimtalk_variable_map || {}, customer);

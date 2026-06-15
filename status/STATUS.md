@@ -107,6 +107,16 @@
 
 ---
 
+### 🟢 2026-06-15(이어서) — 발송/싱크/알림톡 5건 중 4건 수정·배포·확인 + 빌드 멈춤 fix + 슈퍼관리자 상세 엑셀 (★배포완료 / 버그4만 잔존)
+> **버그 1·2·3·5 수정·배포** (핸드오프 `docs/superpowers/handoffs/2026-06-15-5-bug-fix-handoff.md` 처리결과 절):
+> ① 발송일시 — 상세·엑셀이 통신사 응답시각(`mobsend_time`)→발송요청시각(`sendreq_time`). ResultsModal·AdminDashboard·results.ts CSV. **CSV 실측 전 행 06.11(06.12 0건).**
+> ② 싱크 변경분 — `reconcileSyncUnsubscribes`(옛 registerSyncUnsubscribes) 양방향화: 동의 전환 시 `source='sync'` unsubscribes 제거(능동/legacy 보존). **실측 인비토 sync 4건 자동 삭제.** (가설 'upsert sms_opt_in 제외'는 틀렸고 upsert는 COALESCE로 이미 갱신.)
+> ③ 통계 전송≠성공+실패 — `reconcileSentCount` CT(`sms-table-split.ts`)=max(적재 sent_count, 성공+실패+대기) 4표면(getCampaignResultCounts·results 요약/목록/상세) 통일. **시세이도 6/9 1613→1646.** 정합 캠페인 no-op·건5 회귀 없음. 별개 root=대체발송 1명 2행 이중집계(범위 밖).
+> ⑤ 템플릿코드 — `kakao-template-sync.ts` 스캔 필터 `'Tmp'`→`'Tm'` 3곳(Tmq/Tmo 키 누락 차단). **실측 버튼3개 Tmq→`B_XX_018_02_80943`.**
+> **빌드 멈춤 fix(배포)**: frontend Vite 난독화(`vite-plugin-javascript-obfuscator` splitStrings:5+base64 전체번들) render hang/OOM → `vite.config.ts` 경량화(splitStrings·stringArrayCallsTransform·numbersToExpressions·체인래퍼 off, 보호 핵심 유지) + `safe-build.sh` NODE_OPTIONS=4096. **빌드 16.52s 완주.**
+> **신규(배포)**: 슈퍼관리자 캠페인 상세 엑셀 다운로드 — `utils/campaign-sms-export.ts` CT + admin.ts `GET /campaigns/:id/sms-detail/export`(requireSuperAdmin) + AdminDashboard 모달 버튼. backend·frontend tsc 0.
+> **🔴 잔존 = 버그 4 (대표링크 동봉) — ★전용 핸드오프 `docs/superpowers/handoffs/2026-06-15-bug4-alimtalk-represent-link-handoff.md`(다음 세션 진입점)**: 형식 확정(휴머스온 IMC 공식문서 — 대표링크 = ATTACHMENT 최상위 `link` 객체, snake_case `{url_mobile,url_pc,scheme_ios,scheme_android}`) + QTmsg 커스텀필드 = `k_etc_json` 확장 json변수 확정(senderkey/sendercode는 예시·Harold 지적). 남은 1가지 = 인비토 에이전트가 k_etc_json `link` 변수를 IMC ATTACHMENT.link로 넘기는지(`qtmsg.xml` 확인 또는 1건 실측). 통과면 buildAlimtalkEtcJson+5경로 구현, 미통과면 서팀장 매핑 추가. **강조형(title)은 0609 이후 정상 — 대표링크와 별개(혼동 금지).** 상세 메모리 `project_2026_0615_campaign_bito_5bugs`.
+
 ### 🟢 2026-06-15 — 캠페인관리·싱크 레거시빌드·Bito 게이트웨이 연동 + 발송/싱크/알림톡 5건 버그(다음세션 일괄수정)
 > **완료(배포)**: ① 캠페인관리 진입 당일 기본조회(`formatDate.ts kstTodayStr`) + 예약 캠페인 빠른순(`admin.ts /campaigns/scheduled` ORDER BY `scheduled_at ASC, id ASC`). ② 싱크 인비토(Server 2008 R2) node16 레거시 빌드(`build:exe-legacy`=vercel/pkg@5.8.1 → `sync-agent-legacy.exe`, 인비토 적용 대기). ③ Bito 게이트웨이 `SMSQ_SEND_13` 라인(테이블 LIKE 12·`sms_line_groups` 'bito'·`sms-queue.ts` BULK_ONLY 격리 완료 / env·비토 Agent 계정·배포 남음, 명세 `docs/bito-gateway-integration-spec.md`).
 > **다음 세션 = 5건 버그 일괄 수정** → `docs/superpowers/handoffs/2026-06-15-5-bug-fix-handoff.md` 정독 후 1건씩 grep→컨펌→수정: ①발송일시 상세=리포트시간 ②싱크 변경분 미반영 ③통계 대상=성공+실패≠전송 ④대표링크 `k_etc_json` 동봉(0611 7300 후속) ⑤템플릿코드 버튼3개=templateKey.

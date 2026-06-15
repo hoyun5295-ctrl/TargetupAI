@@ -33,7 +33,7 @@ import {
   insertAlimtalkQueue,
 } from './sms-queue';
 import { convertButtonsToQTmsg } from './alimtalk-button';
-import { buildAlimtalkEtcJson } from './alimtalk-emphasize';
+import { buildAlimtalkEtcJson, type RepresentLink } from './alimtalk-emphasize';
 import {
   listJourneyStepVariants,
   selectJourneyStepVariant,
@@ -471,7 +471,7 @@ async function processExecution(exec: ExecutionRow): Promise<StepOutcome> {
 
   let message: string;
   let subject: string;
-  let kakaoTemplateRow: { id: string; template_code: string; content: string; buttons: any[]; status: string; emphasize_title?: string | null; profile_key?: string | null } | null = null;
+  let kakaoTemplateRow: { id: string; template_code: string; content: string; buttons: any[]; status: string; emphasize_title?: string | null; represent_link?: RepresentLink | null; profile_key?: string | null } | null = null;
 
   if (isKakao) {
     // ★ D188 Phase 2-B-2 (2026-05-21): 알림톡 영역 — kakao_templates 조회 + alimtalk_variable_map 치환.
@@ -481,7 +481,7 @@ async function processExecution(exec: ExecutionRow): Promise<StepOutcome> {
       return 'failed';
     }
     const tplRes = await query(
-      `SELECT t.id, t.template_code, t.content, t.buttons, t.status, t.emphasize_title, p.profile_key
+      `SELECT t.id, t.template_code, t.content, t.buttons, t.status, t.emphasize_title, t.represent_link, p.profile_key
          FROM kakao_templates t
          LEFT JOIN kakao_sender_profiles p ON p.id = t.profile_id
         WHERE t.template_code = $1 AND t.company_id = $2::uuid LIMIT 1`,
@@ -739,6 +739,7 @@ async function processExecution(exec: ExecutionRow): Promise<StepOutcome> {
           // ★ 매뉴얼(qtmsg): 강조표기형 emphasize_title(본문과 동일 치환)만 → k_etc_json (senderkey 제외 — 알림톡 템플릿코드 자동). 직접/자동과 동일 형태.
           etcJson: buildAlimtalkEtcJson({
             emphasizeTitle: kakaoTemplateRow.emphasize_title,
+            representLink: kakaoTemplateRow.represent_link,
             substitute: (raw) => replaceAlimtalkVars(raw, customer as Record<string, any>, step.alimtalk_variable_map || {}),
           }),
           companyId: exec.company_id,

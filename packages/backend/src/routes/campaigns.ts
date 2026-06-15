@@ -1352,7 +1352,7 @@ router.post('/direct-send/commit', async (req: Request, res: Response) => {
     if (isAlimtalkSend) {
       if (!alimtalkTemplateCode) return res.status(400).json({ success: false, error: '알림톡 템플릿 코드가 필요합니다' });
       const gate = await query(
-        `SELECT t.id AS tid, t.status AS tstatus, t.content AS tcontent, t.buttons AS tbuttons, t.emphasize_title AS temphasize_title, p.approval_status, p.profile_key FROM kakao_templates t JOIN kakao_sender_profiles p ON p.id = t.profile_id WHERE t.company_id = $1 AND t.template_code = $2 LIMIT 1`,
+        `SELECT t.id AS tid, t.status AS tstatus, t.content AS tcontent, t.buttons AS tbuttons, t.emphasize_title AS temphasize_title, t.represent_link AS trepresent_link, p.approval_status, p.profile_key FROM kakao_templates t JOIN kakao_sender_profiles p ON p.id = t.profile_id WHERE t.company_id = $1 AND t.template_code = $2 LIMIT 1`,
         [companyId, alimtalkTemplateCode]
       );
       if (gate.rows.length === 0) return res.status(404).json({ success: false, error: '템플릿을 찾을 수 없습니다' });
@@ -1364,7 +1364,7 @@ router.post('/direct-send/commit', async (req: Request, res: Response) => {
       if (!commitTplGuard.sendable) return res.status(400).json({ success: false, error: commitTplGuard.reason, code: commitTplGuard.code });
       // ★ 매뉴얼(qtmsg): k_etc_json = 강조표기 title(raw)만 — senderkey 제외(알림톡은 템플릿코드로 중계서버 자동) / k_button_json = 템플릿 buttons(프론트 전송은 폴백)
       //   title은 #{변수} 포함 가능 — staging worker(direct-send-processor)가 수신자 row별로 치환해 재생성한다.
-      alimtalkEtcJson = buildAlimtalkEtcJson({ emphasizeTitle: g.temphasize_title }) ?? null;
+      alimtalkEtcJson = buildAlimtalkEtcJson({ emphasizeTitle: g.temphasize_title, representLink: g.trepresent_link }) ?? null;
       alimtalkButtonJsonResolved = convertButtonsToQTmsg(g.tbuttons) || alimtalkButtonJson || null;
       alimtalkTemplateUuid = g.tid || null;  // ★ #4-a: 검증 통과한 템플릿 id 보관 → INSERT 저장
       // ★ #3-2 (2026-06-01): 변수 미지정 발송 차단 (백엔드 이중 안전망 — 프론트 우회 대비)
@@ -1944,6 +1944,7 @@ router.post('/direct-send', async (req: Request, res: Response) => {
                 t.status AS tstatus,
                 t.buttons AS tbuttons,
                 t.emphasize_title AS temphasize_title,
+                t.represent_link AS trepresent_link,
                 p.id AS pid,
                 p.approval_status,
                 p.profile_key
@@ -2026,6 +2027,7 @@ router.post('/direct-send', async (req: Request, res: Response) => {
         // ★ 매뉴얼(qtmsg): 강조표기 title(#{변수} 본문과 동일 치환)만 → row별 k_etc_json (senderkey 제외 — 알림톡 템플릿코드 자동)
         const rowEtcJson = buildAlimtalkEtcJson({
           emphasizeTitle: gate.temphasize_title,
+          representLink: gate.trepresent_link,
           substitute: (raw) => {
             let t = replaceVariables(raw, dbAlimCustomer, directFieldMappings, {
               name: recipient.name, extra1: recipient.extra1, extra2: recipient.extra2,

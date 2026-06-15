@@ -189,10 +189,12 @@ export async function processSendChunk(p: SendChunkParams): Promise<SendChunkRes
 
     // ★ QTmsg 매뉴얼: 알림톡 강조 k_etc_json = {title}만 (senderkey는 k_template_code로 중계서버 자동). commit이 {title} 저장 → row별 #{변수} 치환 재생성.
     let alimEmphasizeTitleRaw: string | undefined;
+    let alimAttachmentLink: Record<string, string> | null = null;  // ★ commit이 저장한 대표링크(snake attachment_link) — 고정링크라 row별 재생성 시 그대로 보존.
     if (p.alimtalkEtcJson) {
       try {
-        const parsedEtc = JSON.parse(p.alimtalkEtcJson) as { title?: string };
+        const parsedEtc = JSON.parse(p.alimtalkEtcJson) as { title?: string; attachment_link?: Record<string, string> };
         alimEmphasizeTitleRaw = parsedEtc?.title;
+        if (parsedEtc?.attachment_link && Object.keys(parsedEtc.attachment_link).length > 0) alimAttachmentLink = parsedEtc.attachment_link;
       } catch { /* 형식 오류 → title 없음 취급 */ }
     }
     const alimtalkRows = recipients.map((recipient) => {
@@ -230,6 +232,7 @@ export async function processSendChunk(p: SendChunkParams): Promise<SendChunkRes
         // ★ QTmsg 매뉴얼: 알림톡 강조 k_etc_json = {title}만(senderkey 제외) — #{변수} 본문과 동일 치환.
         etcJson: buildAlimtalkEtcJson({
           emphasizeTitle: alimEmphasizeTitleRaw,
+          attachmentLink: alimAttachmentLink,
           substitute: (raw) => {
             const base = replaceVariables(raw, dbCustomer, p.directFieldMappings, toAddressBookFields(recipient), { skipNumberFormatting: true });
             return fillAlimtalkVarMap(base, p.alimtalkVariableMap, dbCustomer, recipient as Record<string, any>);
