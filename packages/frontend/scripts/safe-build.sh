@@ -52,7 +52,8 @@ echo "[atomic-build] TypeScript 체크 시작..."
 npx tsc
 
 echo "[atomic-build] Vite 빌드 시작 → dist-new"
-npx vite build --outDir dist-new
+# ★ 2026-06-15: 난독화 render 단계 메모리 헤드룸 — 제한 서버에서 heap-OOM hang 방지 (4GB)
+NODE_OPTIONS="--max-old-space-size=4096" npx vite build --outDir dist-new
 
 # 2. 빌드 성공 검증 — dist-new/index.html 존재 + 사이즈 > 0
 if [ ! -f "$DIST_NEW/index.html" ]; then

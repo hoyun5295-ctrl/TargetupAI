@@ -6468,7 +6468,33 @@ const handleApproveRequest = async (id: string) => {
                 onKeyDown={(e) => e.key === 'Enter' && smsDetailCampaign && loadSmsDetail(smsDetailCampaign.id, 1)} />
               <button onClick={() => smsDetailCampaign && loadSmsDetail(smsDetailCampaign.id, 1)}
                 className="px-3 py-1.5 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700">검색</button>
-              <span className="text-sm text-gray-500 ml-auto">총 {smsDetailTotal.toLocaleString()}건</span>
+              <div className="ml-auto flex items-center gap-3">
+                {/* ★ 2026-06-15: 슈퍼관리자 상세 엑셀 다운로드 (현재 상태 필터 그대로, 사용자 export와 동일 CT) */}
+                <button
+                  onClick={async () => {
+                    if (!smsDetailCampaign) return;
+                    const token = localStorage.getItem('token');
+                    const params = new URLSearchParams();
+                    if (smsDetailStatus) params.set('status', smsDetailStatus);
+                    try {
+                      const res = await fetch(`/api/admin/campaigns/${smsDetailCampaign.id}/sms-detail/export?${params.toString()}`, {
+                        headers: { Authorization: `Bearer ${token}` },
+                      });
+                      if (!res.ok) { const err = await res.json().catch(() => ({})); showAlert('오류', (err as any).error || '다운로드 실패', 'error'); return; }
+                      const blob = await res.blob();
+                      const url = URL.createObjectURL(blob);
+                      const a = document.createElement('a');
+                      a.href = url;
+                      a.download = `발송상세_${smsDetailCampaign.campaign_name || smsDetailCampaign.id}.csv`;
+                      a.click();
+                      URL.revokeObjectURL(url);
+                    } catch { showAlert('오류', '다운로드 중 오류가 발생했습니다.', 'error'); }
+                  }}
+                  className="px-3 py-1.5 bg-emerald-600 text-white rounded-lg text-sm hover:bg-emerald-700">
+                  엑셀 다운로드
+                </button>
+                <span className="text-sm text-gray-500">총 {smsDetailTotal.toLocaleString()}건</span>
+              </div>
             </div>
 
             {/* 테이블 */}

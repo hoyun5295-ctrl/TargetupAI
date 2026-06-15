@@ -4,6 +4,7 @@ import { Request, Response, Router } from 'express';
 import { mysqlQuery, query } from '../config/database';
 import { authenticate, requireSuperAdmin } from '../middlewares/auth';
 import { ALL_SMS_TABLES, invalidateLineGroupCache, getCampaignSmsTables, smsCountAll, smsSelectAll, smsSelectPagedAll, smsAggAll, getTestSmsTables, kakaoCountWhere, kakaoSelectWhere, kakaoBatchAggByGroup } from '../utils/sms-queue';
+import { streamCampaignSmsCsv } from '../utils/campaign-sms-export';
 import { DASHBOARD_CARD_POOL, validateCardIds, getRequiredFields, filterPoolByAvailableData, generateDynamicCards } from '../utils/dashboard-card-pool';
 import { detectEnabledFields } from '../utils/enabled-fields';
 import { SUCCESS_CODES_SQL, PENDING_CODES_SQL, getStatusLabel, getStatusType, getCarrierLabel, isSuccess, isPending, getSendTypeLabel, getCampaignChannelLabel, getQueueRowStatus } from '../utils/sms-result-map';
@@ -2021,6 +2022,31 @@ router.get('/campaigns/:id/sms-detail', authenticate, requireSuperAdmin, async (
   } catch (error) {
     console.error('SMS 상세 조회 실패:', error);
     res.status(500).json({ error: 'SMS 상세 조회 실패' });
+  }
+});
+
+// ★ 2026-06-15: 슈퍼관리자 캠페인 상세 발송내역 CSV 다운로드 (사용자 export와 동일 CT 공유 — campaign-sms-export.ts).
+//   사용자 export는 본인 회사 한정이라, 슈퍼관리자(타 회사 캠페인)용 별도 endpoint. 컬럼·발송일시 기준 100% 동일.
+router.get('/campaigns/:id/sms-detail/export', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const camp = await query(
+      `SELECT company_id, created_by, send_channel, created_at FROM campaigns WHERE id = $1`,
+      [id],
+    );
+    if (camp.rows.length === 0) return res.status(404).json({ error: '캠페인을 찾을 수 없습니다.' });
+    const c = camp.rows[0];
+    await streamCampaignSmsCsv(res, {
+      campaignId: id,
+      companyId: c.company_id,
+      userId: c.created_by,           // 라인그룹 해석 — 캠페인 작성자 기준 (회사 전 라인 합집합으로 내성)
+      sendChannel: c.send_channel || 'sms',
+      campaignCreatedAt: c.created_at,
+      exportStatus: (req.query.status as string) || '',   // 화면 필터(전체/성공/실패) 그대로
+    });
+  } catch (error) {
+    console.error('[admin sms-detail export] 실패:', error);
+    if (!res.headersSent) res.status(500).json({ error: 'SMS 상세 다운로드 실패' });
   }
 });
 // ===== 표준 필드 관리 API =====
