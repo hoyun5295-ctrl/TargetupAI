@@ -1000,7 +1000,8 @@ export default function ResultsModal({ onClose, token, customerDbEnabled, isSubs
                             />
                             {/* ★ D124: 등록일시 = 캠페인 created_at (한줄로에서 발송을 건 시간). 모든 행 동일 */}
                             <td className="px-3 py-2.5 text-center text-xs text-slate-500 whitespace-nowrap">{selectedCampaign.created_at ? formatDateTime(selectedCampaign.created_at) : '-'}</td>
-                            <td className="px-3 py-2.5 text-center text-xs text-slate-500 whitespace-nowrap">{formatDateTime(m.mobsend_time)}</td>
+                            {/* ★ 발송일시 = sendreq_time(발송요청/예약 시각, KST·D98) — 목록 COALESCE(scheduled_at,sent_at)와 동일 기준(D233+). mobsend_time(통신사 응답)은 지연 시 다음날·대기 시 빈칸이라 불일치 */}
+                            <td className="px-3 py-2.5 text-center text-xs text-slate-500 whitespace-nowrap">{formatDateTime(m.sendreq_time)}</td>
                             <td className="px-3 py-2.5 text-center whitespace-nowrap">
                               {/* ★ 2026-06-13: 발송 예약(미발송) 행은 파란 칩 — 결과 대기와 구분 */}
                               <span className={`inline-block px-2 py-0.5 rounded text-xs font-medium ${

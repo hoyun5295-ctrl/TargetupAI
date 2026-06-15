@@ -332,7 +332,9 @@ export async function startSetupWizard(
   app.get('/', (_req, res) => {
     res.type('html').send(SETUP_HTML);
   });
-  app.get('/{*splat}', (_req, res) => {
+  // ★ express 4·5 공용 catch-all(정규식). express 5 전용 '/{*splat}'는 express 4에서
+  //   미동작 → 메인(express5/node20)과 레거시(express4/node16) 빌드가 같은 소스로 SPA fallback.
+  app.get(/.*/, (_req, res) => {
     res.type('html').send(SETUP_HTML);
   });
 

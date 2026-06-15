@@ -35,3 +35,24 @@ export function mergeCampaignCounts(
   const total = Math.max(0, Number(log?.t || 0)) + lp;
   return { total, success, fail, pending };
 }
+
+/**
+ * 표시용 전송건수 정합 (순수) — 전송 = max(적재 실측 sent_count, 성공+실패+대기).
+ *
+ * ★ 2026-06-15 버그3 fix: 완료 캠페인 표시가 전송(sent_count=적재 실측)과 성공/실패(큐 결과)를
+ *   서로 다른 소스에서 읽어, 제외분(무효/수신거부)이 실패에 포함된 옛 캠페인에서 "성공+실패 > 전송"이
+ *   노출됐다(시세이도 6/9: 전송 1613 vs 성공+실패 1646). 옛 캠페인은 제외 건수 기록(send_config.exclusions)이
+ *   없어 실패에서 되빼기가 불가 → 전송을 성공+실패+대기 이상으로 올려 정합(대기 = 전송-성공-실패 ≥ 0).
+ *   적재값이 더 크면(결과 일부 미도착) 전송=적재 유지 → 건5(전송 0으로 보임) 회귀 방지.
+ *   정합 캠페인(에이스 6/12 등)은 no-op(전송=적재=성공+실패+대기). 목록·요약·상세·엑셀 동일 적용 의무.
+ */
+export function reconcileSentCount(
+  sentCount: number | null | undefined,
+  success: number,
+  fail: number,
+  pending: number,
+): number {
+  const loaded = Math.max(0, Number(sentCount) || 0);
+  const resultSum = Math.max(0, Number(success) || 0) + Math.max(0, Number(fail) || 0) + Math.max(0, Number(pending) || 0);
+  return Math.max(loaded, resultSum);
+}

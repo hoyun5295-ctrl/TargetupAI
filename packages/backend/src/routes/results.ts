@@ -14,6 +14,7 @@ import {
 import { STATUS_CODE_MAP, CARRIER_MAP, SUCCESS_CODES, PENDING_CODES, getStatusLabel, getStatusType, getCarrierLabel, isSuccess, getSendTypeLabel, getQueueRowStatus } from '../utils/sms-result-map';
 import { DEFAULT_COSTS, redis, CACHE_TTL } from '../config/defaults';
 import { buildDateRangeFilter, buildPeriodFilter, STAT_DATE_EXPR, STAT_STARTED_GUARD, aggregateSmsCountsByCampaign, aggregateSmsSendTimesByCampaign } from '../utils/stats-aggregation';
+import { reconcileSentCount } from '../utils/sms-table-split';
 import { CAMPAIGN_OPT080_SELECT_EXPR, CAMPAIGN_OPT080_LEFT_JOIN } from '../utils/unsubscribe-helper';
 import { buildCampaignListCsv, channelPlainLabel, CampaignCsvRow } from '../utils/campaign-list-csv';
 
@@ -148,17 +149,22 @@ router.get('/summary', async (req: Request, res: Response) => {
     for (const c of summaryMeta.rows) {
       totalTarget += Number(c.target_count || 0);
       if (c.result_final) {
-        // PG 캐시 — 6h 경과 완료 캠페인. sent_count = success+fail (워커 저장), pending 없음.
-        totalSent += Number(c.sent_count || 0);
-        totalSuccess += Number(c.success_count || 0);
-        totalFail += Number(c.fail_count || 0);
+        // ★ 2026-06-15 버그3: 전송 = max(적재 sent_count, 성공+실패) — 옛 캠페인 제외분이 실패에 포함된 불일치 정합 (완료라 대기=0)
+        const s = Number(c.success_count || 0);
+        const f = Number(c.fail_count || 0);
+        totalSent += reconcileSentCount(c.sent_count, s, f, 0);
+        totalSuccess += s;
+        totalFail += f;
         continue;
       }
       const sms = summarySmsMap.get(c.id) || { total_count: 0, success_count: 0, fail_count: 0 };
       const kakao = summaryKakaoMap.get(c.id) || { total: 0, success: 0, fail: 0, pending: 0 };
-      totalSent += Number(sms.total_count || 0) + kakao.total;
-      totalSuccess += Number(sms.success_count || 0) + kakao.success;
-      totalFail += Number(sms.fail_count || 0) + kakao.fail;
+      const s = Number(sms.success_count || 0) + kakao.success;
+      const f = Number(sms.fail_count || 0) + kakao.fail;
+      const tot = Number(sms.total_count || 0) + kakao.total;
+      totalSent += reconcileSentCount(c.sent_count, s, f, Math.max(0, tot - s - f));
+      totalSuccess += s;
+      totalFail += f;
     }
     const totalCampaigns = summaryMeta.rows.length;
 
@@ -311,7 +317,8 @@ router.get('/campaigns', async (req: Request, res: Response) => {
         // PG 캐시 — 6h 경과 완료 캠페인. 워커 확정값(SMS+카카오 합산). sent_at은 PG 값 사용.
         const fSuccess = Number(c.success_count || 0);
         const fFail = Number(c.fail_count || 0);
-        const fSent = Number(c.sent_count || 0);
+        // ★ 2026-06-15 버그3: 전송 = max(적재 sent_count, 성공+실패) 정합 (성공+실패>전송 불일치 차단, 완료라 대기=0)
+        const fSent = reconcileSentCount(c.sent_count, fSuccess, fFail, 0);
         return {
           ...c,
           sent_count: fSent,
@@ -323,9 +330,11 @@ router.get('/campaigns', async (req: Request, res: Response) => {
       }
       const sms = campListSmsMap.get(c.id) || { total_count: 0, success_count: 0, fail_count: 0 };
       const kakao = campListKakaoMap.get(c.id) || { total: 0, success: 0, fail: 0, pending: 0 };
-      const sent = Number(sms.total_count || 0) + kakao.total;
       const success = Number(sms.success_count || 0) + kakao.success;
       const fail = Number(sms.fail_count || 0) + kakao.fail;
+      const total = Number(sms.total_count || 0) + kakao.total;
+      // ★ 2026-06-15 버그3: 전송 = max(적재 sent_count, 성공+실패+대기) 단일 정의 (제외분·대체발송 모두 전송≥성공+실패 보장)
+      const sent = reconcileSentCount(c.sent_count, success, fail, Math.max(0, total - success - fail));
       return {
         ...c,
         sent_count: sent,
@@ -627,9 +636,12 @@ router.get('/campaigns/:id', async (req: Request, res: Response) => {
     const chartSentTimeMap = await aggregateSmsSendTimesByCampaign([campaign]);
     const chSms = chartSmsMap.get(campaign.id) || { total_count: 0, success_count: 0, fail_count: 0 };
     const chKakao = chartKakaoMap.get(campaign.id) || { total: 0, success: 0, fail: 0, pending: 0 };
+    // ★ 2026-06-15 버그3: 전송 = max(적재 sent_count(PG), 성공+실패+대기) — 상세도 목록·요약·엑셀과 동일 정의
+    const chOrigSent = Number(campaign.sent_count || 0);
     campaign.success_count = Number(chSms.success_count || 0) + chKakao.success;
     campaign.fail_count = Number(chSms.fail_count || 0) + chKakao.fail;
-    campaign.sent_count = Number(chSms.total_count || 0) + chKakao.total;
+    const chTotal = Number(chSms.total_count || 0) + chKakao.total;
+    campaign.sent_count = reconcileSentCount(chOrigSent, campaign.success_count, campaign.fail_count, Math.max(0, chTotal - campaign.success_count - campaign.fail_count));
     const chSentTime = chartSentTimeMap.get(campaign.id);
     if (chSentTime) campaign.sent_at = chSentTime;
 
@@ -1065,7 +1077,7 @@ router.get('/campaigns/:id/export', async (req: Request, res: Response) => {
           m.call_back,
           `"${(m.msg_contents || '').replace(/"/g, '""')}"`,
           formatCsvDateTime(campaignCreatedAt), // 등록일시 = 캠페인 created_at (모든 행 동일)
-          formatCsvDateTime(m.mobsend_time),    // 발송일시
+          formatCsvDateTime(m.sendreq_time),    // 발송일시 = 발송요청/예약 시각(KST·D98) — 목록·상세와 동일 기준(D233+)
           statusDisplay,
           m.status_code,
           carrierDisplay,

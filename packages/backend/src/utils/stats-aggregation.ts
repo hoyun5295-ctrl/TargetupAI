@@ -12,7 +12,7 @@ import { CAMPAIGN_OPT080_SELECT_EXPR, CAMPAIGN_OPT080_LEFT_JOIN } from './unsubs
 // ★ D144: PG sent_count 캐시 의존 제거 — MySQL 직접 카운트로 전환
 // ★ 2026-06-11: 카운트는 smsCampaignCountsSafe(이력=결과/라이브=대기 분리) — 이동 중 이중 카운트 차단
 import { getCompanySmsTablesWithLogs, smsCampaignCountsSafe, kakaoBatchAggByGroup } from './sms-queue';
-import { splitLiveAndLogTables } from './sms-table-split';
+import { splitLiveAndLogTables, reconcileSentCount } from './sms-table-split';
 import { SUCCESS_CODES_SQL, PENDING_CODES_SQL, tallySmsChannelCounts, SmsChannel, ChannelCount } from './sms-result-map';
 
 // ============================================================
@@ -445,7 +445,8 @@ export async function getCampaignResultCounts(
     if (c.result_final) {
       const success = Number(c.success_count || 0);
       const fail = Number(c.fail_count || 0);
-      const sent = Number(c.sent_count || 0) || success + fail;
+      // ★ 2026-06-15 버그3: 전송 = max(적재 sent_count, 성공+실패) — 옛 캠페인 제외분(무효/수신거부)이 실패에 포함돼 성공+실패>전송이던 불일치 정합 (완료라 대기=0)
+      const sent = reconcileSentCount(c.sent_count, success, fail, 0);
       out.set(c.id, { sent, success, fail });
     }
   }
@@ -458,11 +459,12 @@ export async function getCampaignResultCounts(
     for (const c of nonFinal) {
       const sms = smsMap.get(c.id) || { total_count: 0, success_count: 0, fail_count: 0 };
       const kakao = (kakaoMap.get(c.id) as any) || { total: 0, success: 0, fail: 0, pending: 0 };
-      out.set(c.id, {
-        sent: Number(sms.total_count || 0) + Number(kakao.total || 0),
-        success: Number(sms.success_count || 0) + Number(kakao.success || 0),
-        fail: Number(sms.fail_count || 0) + Number(kakao.fail || 0),
-      });
+      const success = Number(sms.success_count || 0) + Number(kakao.success || 0);
+      const fail = Number(sms.fail_count || 0) + Number(kakao.fail || 0);
+      const total = Number(sms.total_count || 0) + Number(kakao.total || 0);
+      // ★ 2026-06-15 버그3: 전송 = max(적재 sent_count, 성공+실패+대기) 단일 정의 (제외분·대체발송 모두 전송≥성공+실패 보장)
+      const sent = reconcileSentCount(c.sent_count, success, fail, Math.max(0, total - success - fail));
+      out.set(c.id, { sent, success, fail });
     }
   }
 

@@ -254,6 +254,15 @@ export function formatDateTimeShort(dateStr: string | null | undefined): string 
 }
 
 /**
+ * KST(Asia/Seoul) 기준 오늘 날짜 YYYY-MM-DD 문자열.
+ * date input value + 백엔드 buildDateRangeFilter(KST +09)와 같은 기준.
+ * toISOString().slice(0,10)은 UTC라 KST 자정~오전 9시 사이 전일로 어긋나므로 사용 금지.
+ */
+export function kstTodayStr(): string {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date());
+}
+
+/**
  * ★ D137: 파일명용 압축 타임스탬프 YYYYMMDDHHmmss (14자)
  * 이전 inline 정규식 패턴(toISOString에서 대시·콜론·T 문자 제거)이 Tailwind JIT에
  * arbitrary value 클래스로 오스캔되어 CSS 빌드 WARNING 발생 → 컨트롤타워화.

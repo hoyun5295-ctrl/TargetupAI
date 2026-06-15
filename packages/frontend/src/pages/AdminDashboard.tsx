@@ -2,7 +2,7 @@ import { useState, useEffect, Fragment } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { companiesApi, plansApi, billingApi } from '../api/client';
 import { useAuthStore } from '../stores/authStore';
-import { formatDateTime, formatDate, formatDateTimeShort, formatCampaignMessageForDisplay, getAlimtalkTemplateStatus } from '../utils/formatDate';
+import { formatDateTime, formatDate, formatDateTimeShort, formatCampaignMessageForDisplay, getAlimtalkTemplateStatus, kstTodayStr } from '../utils/formatDate';
 import SessionTimer from '../components/SessionTimer';
 import AlimtalkSendersSection from '../components/alimtalk/AlimtalkSendersSection'; // ★ D130
 import MessageDetailModal from '../components/MessageDetailModal'; // ★ D144 후속: 발송 상세 내역 모달의 메시지 셀 클릭 시 표시 + 복사
@@ -199,8 +199,8 @@ const [messageDetailContent, setMessageDetailContent] = useState<{ name: string;
   const [smsDetailMsgModal, setSmsDetailMsgModal] = useState<string | null>(null);
 
   // 전체 캠페인 날짜필터
-  const [allCampaignsStartDate, setAllCampaignsStartDate] = useState('');
-  const [allCampaignsEndDate, setAllCampaignsEndDate] = useState('');
+  const [allCampaignsStartDate, setAllCampaignsStartDate] = useState(kstTodayStr());
+  const [allCampaignsEndDate, setAllCampaignsEndDate] = useState(kstTodayStr());
 
   // 사용자 검색/필터
   const [userSearch, setUserSearch] = useState('');
@@ -6504,7 +6504,8 @@ const handleApproveRequest = async (id: string) => {
                         <td className="px-3 py-2 text-center text-xs text-gray-400">{(smsDetailPage - 1) * 50 + idx + 1}</td>
                         {/* ★ D124: 등록일시 = 캠페인 created_at (모든 행 동일) */}
                         <td className="px-3 py-2 text-center text-xs text-gray-500 whitespace-nowrap">{smsDetailCampaign?.created_at ? new Date(smsDetailCampaign.created_at).toLocaleString('ko-KR', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : '-'}</td>
-                        <td className="px-3 py-2 text-center text-xs text-gray-500 whitespace-nowrap">{r.mobsendTime ? new Date(r.mobsendTime).toLocaleString('ko-KR', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : '-'}</td>
+                        {/* ★ 발송일시 = sendreqTime(발송요청/예약 시각, KST) — 목록·통계와 동일 기준(D233+). mobsendTime(통신사 응답)은 지연 시 다음날·대기 시 빈칸이라 불일치 */}
+                        <td className="px-3 py-2 text-center text-xs text-gray-500 whitespace-nowrap">{r.sendreqTime ? new Date(r.sendreqTime).toLocaleString('ko-KR', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : '-'}</td>
                         <td className="px-3 py-2 text-center text-xs text-gray-600 whitespace-nowrap">{r.sendType || '-'}</td>
                         <td className="px-3 py-2 text-center text-gray-700 font-mono text-xs">{r.destNo}</td>
                         <td className="px-3 py-2 text-center text-gray-500 font-mono text-xs">{r.callBack}</td>

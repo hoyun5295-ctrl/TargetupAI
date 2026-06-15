@@ -19,10 +19,13 @@ for (const t of ALL_SMS_TABLES) {
     console.error(`[QTmsg] ⚠️ 잘못된 SMS 테이블명 감지: "${t}" — SQL Injection 위험. SMS_TABLES 환경변수를 확인하세요.`);
   }
 }
-const BULK_ONLY_TABLES = ALL_SMS_TABLES.filter(t => !['SMSQ_SEND_10', 'SMSQ_SEND_11'].includes(t));
+// 대량발송 풀 = 테스트(10)·인증(11)·비토 게이트웨이 테스트(13) 제외.
+// SMSQ_SEND_13은 비토 게이트웨이 전용(담당자 테스트) 라인 — 라인그룹 미지정 회사의 일반 발송이
+// 비토로 새지 않도록 bulk fallback에서 격리한다(검증 후 실업체 확대 시 정책 재검토).
+const BULK_ONLY_TABLES = ALL_SMS_TABLES.filter(t => !['SMSQ_SEND_10', 'SMSQ_SEND_11', 'SMSQ_SEND_13'].includes(t));
 let rrIndex = 0;
 console.log(`[QTmsg] ALL_SMS_TABLES: ${ALL_SMS_TABLES.join(', ')} (${ALL_SMS_TABLES.length}개 Agent)`);
-console.log(`[QTmsg] BULK_ONLY_TABLES: ${BULK_ONLY_TABLES.join(', ')} (테스트/인증 제외 ${BULK_ONLY_TABLES.length}개)`);
+console.log(`[QTmsg] BULK_ONLY_TABLES: ${BULK_ONLY_TABLES.join(', ')} (테스트/인증/비토 제외 ${BULK_ONLY_TABLES.length}개)`);
 
 // ===== 라인그룹 캐시 =====
 const lineGroupCache = new Map<string, { tables: string[], hasDedicatedGroup: boolean, expires: number }>();

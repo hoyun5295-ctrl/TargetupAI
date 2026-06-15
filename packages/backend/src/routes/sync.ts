@@ -208,15 +208,23 @@ async function getSyncConfigForAgent(companyId: string): Promise<{
 }
 
 /**
- * sms_opt_in=false 고객 → unsubscribes 3단 배정.
- * upload.ts admin 경로(:829-889) 패턴을 복제:
+ * sms_opt_in 양방향 동기화 — unsubscribes 자동 등록/해제 (싱크 경로 유일 진입점).
+ * ★ 2026-06-15 버그2 fix: 기존엔 false→등록만 하고 동의 전환(false→true) 해제가 없어
+ *   재동의 고객이 계속 거부로 노출됐다(인비토02 실측 = sms_opt_in=true인데 unsubscribes sync 4건 잔존).
+ *   발송/표시 자격 = `sms_opt_in=true AND NOT EXISTS unsubscribes`라 한 방향만 처리하면 비대칭 사고.
+ *   이제 한 사이클에서 등록(false)과 해제(true)를 모두 처리한다.
+ *
+ * [등록] sms_opt_in=false 고객 → unsubscribes 3단 배정 (upload.ts admin 경로 :829-889 패턴):
  *   1. 시스템 가상 user (is_system=true)에게 INSERT
  *   2. 회사의 admin user들에게 INSERT (관리 가시성)
  *   3. store_code 담당 company_user들에게 INSERT (브랜드별 필터링)
+ * [해제] sms_opt_in=true 고객 → source='sync' unsubscribes 제거 (등록의 짝).
+ *   ★ source='sync'(sms_opt_in 파생)만 삭제 — 능동 수신거부(manual/upload/legacy_migration)는 보존.
+ *   명시 opt-out 우선(정보통신망법): 고객이 직접 거부했거나 옛 이관 거부분은 동의 동기화로 덮지 않는다.
  *
  * ⚠️ 이 로직은 sync.ts 외부에서 복제 금지. 싱크 경로의 유일한 수신거부 진입점.
  */
-async function registerSyncUnsubscribes(companyId: string, companyName?: string): Promise<void> {
+async function reconcileSyncUnsubscribes(companyId: string, companyName?: string): Promise<void> {
   try {
     // 1. 시스템 user 조회 (없으면 즉시 생성 — 마이그레이션 누락 방어)
     let sysUserRes = await query(
@@ -287,8 +295,26 @@ async function registerSyncUnsubscribes(companyId: string, companyName?: string)
     if (r3Count > 0) {
       console.log(`[Sync] 수신거부 자동등록(company_user, CT-03): ${r3Count}건 (company: ${companyName})`);
     }
+
+    // ===== [해제] sms_opt_in=true 전환분 → source='sync' unsubscribes 제거 (등록의 짝) =====
+    // ★ 2026-06-15 버그2 fix: 거부→동의 재동의 고객이 옛 sync 수신거부 잔존으로 계속 거부로 노출되던 비대칭 차단.
+    //   source='sync'(sms_opt_in 파생)만 삭제 — manual/upload/legacy_migration(능동 opt-out)은 보존(정보통신망법).
+    //   EXISTS로 unsubscribes(작은 집합) 기준 스캔 → 동의 전환분만 정확히 해제. 변경 없으면 0건.
+    const reEnable = await query(
+      `DELETE FROM unsubscribes u
+       WHERE u.company_id = $1 AND u.source = 'sync'
+         AND EXISTS (
+           SELECT 1 FROM customers c
+           WHERE c.company_id = $1 AND c.phone = u.phone
+             AND c.sms_opt_in = true AND c.is_active = true
+         )`,
+      [companyId]
+    );
+    if (reEnable.rowCount && reEnable.rowCount > 0) {
+      console.log(`[Sync] 수신거부 자동해제(동의 전환): ${reEnable.rowCount}건 (company: ${companyName})`);
+    }
   } catch (unsubError) {
-    console.error('[Sync] 수신거부 자동등록 실패:', unsubError);
+    console.error('[Sync] 수신거부 동기화 실패:', unsubError);
   }
 }
 
@@ -786,8 +812,8 @@ router.post('/customers', async (req: SyncAuthRequest, res: Response) => {
       console.warn('[Sync customers] customer_field_definitions 안전망 실패 (sync 정상 완료):', (autoErr as any)?.message);
     }
 
-    // ===== sms_opt_in=false 고객 → unsubscribes 3단 배정 (system + admin + store_code user) =====
-    await registerSyncUnsubscribes(companyId, req.companyName);
+    // ===== sms_opt_in 양방향 동기화 — false→unsubscribes 등록 / true→source='sync' 해제 =====
+    await reconcileSyncUnsubscribes(companyId, req.companyName);
 
     // ===== Agent 설정 응답 (설정 폴링 제거 대체) =====
     const agentConfig = await getSyncConfigForAgent(companyId);

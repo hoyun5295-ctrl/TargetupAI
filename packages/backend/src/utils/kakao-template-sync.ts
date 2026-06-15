@@ -49,7 +49,7 @@ const IMC_MAX_PAGES = 100;  // 최대 10,000건 영역 (운영 영역 영구 안
  * 한줄로 안 옛 Tmp_xxx 영역 = 진정 카카오 templateCode 영역 영구 정정.
  *
  * 흐름:
- *   1. PG 안 APPROVED + template_code LIKE 'Tmp%' 영역 조회
+ *   1. PG 안 APPROVED + template_code LIKE 'Tm%' 영역 조회
  *   2. IMC 안 listAlimtalkTemplates 페이지네이션 영역 안 templateKey 영역 영구 매칭
  *   3. IMC 안 진정 templateCode 영역 = `kakao_templates.template_code` UPDATE
  *   4. 결과 상세 보고
@@ -76,7 +76,9 @@ export async function syncTemplateCodes(
   //   안전 통과(idempotent)라 확대해도 부작용 없음.
   const whereParts: string[] = [
     `status IN ('APPROVED', 'APPROVAL', 'REQUESTED', 'REVIEWING', 'REG', 'REQ', 'REV', 'KREQ', 'KREJ', 'REJECTED', 'HREJ')`,
-    `template_code LIKE 'Tmp%'`,
+    // ★ 2026-06-15 버그5: 'Tmp%'→'Tm%' — 카카오 templateKey는 Tmp/Tmo/Tmq 등 Tm+가변문자라
+    //   'Tmp'만 스캔하면 Tmq(버튼3개 부가정보형) 등 비-Tmp 키 템플릿이 백필에서 통째 제외됐다(진짜 코드=B_).
+    `template_code LIKE 'Tm%'`,
   ];
   const params: any[] = [];
   if (options.companyId) {
@@ -368,7 +370,7 @@ export async function syncSingleTemplateCode(
 ): Promise<{ updated: boolean; oldCode?: string; newCode?: string }> {
   const imcCode: string | null = imcResponseData?.templateCode || null;
   if (!imcCode) return { updated: false };
-  if (imcCode.startsWith('Tmp')) return { updated: false }; // IMC 안도 Tmp 영역 = 진정 카카오 코드 영구 X
+  if (imcCode.startsWith('Tm')) return { updated: false }; // ★ 버그5: IMC 응답도 Tm* 키(Tmp/Tmo/Tmq)면 진짜 카카오 코드 아님 — 저장 X (실코드=B_)
 
   const cur = await query(
     `SELECT template_code FROM kakao_templates WHERE id = $1::uuid LIMIT 1`,
@@ -377,7 +379,7 @@ export async function syncSingleTemplateCode(
   if (cur.rows.length === 0) return { updated: false };
   const oldCode: string = cur.rows[0].template_code;
   if (oldCode === imcCode) return { updated: false };
-  if (!oldCode.startsWith('Tmp')) return { updated: false }; // 옛 영역 = 이미 카카오 코드 영역 = skip
+  if (!oldCode.startsWith('Tm')) return { updated: false }; // ★ 버그5: 로컬 코드가 Tm* 키가 아니면 이미 실코드(B_) = skip (Tmq도 backfill 대상)
 
   try {
     await query(

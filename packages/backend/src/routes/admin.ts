@@ -887,7 +887,7 @@ router.get('/campaigns/scheduled', authenticate, requireSuperAdmin, async (req: 
       LEFT JOIN companies co ON c.company_id = co.id
       LEFT JOIN users u ON c.created_by = u.id
       ${where}
-      ORDER BY CASE WHEN c.status = 'scheduled' THEN 0 ELSE 1 END, c.created_at DESC
+      ORDER BY CASE WHEN c.status = 'scheduled' THEN 0 ELSE 1 END, c.scheduled_at ASC, c.id ASC
       LIMIT $${paramIdx} OFFSET $${paramIdx + 1}
     `, [...params, limit, offset]);
     
