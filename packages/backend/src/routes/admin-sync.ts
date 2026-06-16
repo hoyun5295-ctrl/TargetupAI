@@ -13,6 +13,8 @@ import { randomUUID } from 'crypto';
 import { authenticate, requireSuperAdmin } from '../middlewares/auth';
 import { query } from '../config/database';
 import { PLATFORMS, OS_TIERS, DB_OPTIONS, resolveAgentBuild, PlatformId } from '../utils/agent-build-tiers';
+import path from 'path';
+import fs from 'fs';
 
 const router = Router();
 
@@ -37,6 +39,28 @@ router.get('/build-tiers/resolve', authenticate, requireSuperAdmin, (req: Reques
     return;
   }
   res.json({ success: true, result: resolveAgentBuild(platform, osTier, db) });
+});
+
+// GET /api/admin/sync/build-tiers/download/:tier — 빌드 산출물 zip 다운로드
+// 산출물은 Windows 빌드 머신에서 만들어 서버에 업로드(기본 packages/backend/agent-builds/,
+// 또는 ENV AGENT_BUILDS_DIR). 서버는 sync-agent-<tier>.zip 만 서빙한다.
+router.get('/build-tiers/download/:tier', authenticate, requireSuperAdmin, (req: Request, res: Response) => {
+  const tier = req.params.tier;
+  if (!OS_TIERS.some((t) => t.buildTier === tier)) {
+    res.status(400).json({ success: false, error: '알 수 없는 빌드 티어입니다.' });
+    return;
+  }
+  const dir = process.env.AGENT_BUILDS_DIR || path.join(__dirname, '..', '..', 'agent-builds');
+  const file = path.join(dir, `sync-agent-${tier}.zip`);
+  if (!fs.existsSync(file)) {
+    res.status(404).json({
+      success: false,
+      code: 'AGENT_BUILD_NOT_UPLOADED',
+      error: `이 티어 산출물이 아직 서버에 없습니다. 빌드 후 sync-agent-${tier}.zip 을 서버 ${dir} 에 업로드하세요.`,
+    });
+    return;
+  }
+  res.download(file, `sync-agent-${tier}.zip`);
 });
 
 
