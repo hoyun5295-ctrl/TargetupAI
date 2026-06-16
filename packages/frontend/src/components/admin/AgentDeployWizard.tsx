@@ -109,6 +109,28 @@ export default function AgentDeployWizard() {
     }
   };
 
+  const downloadBuild = async (tier: string) => {
+    try {
+      const res = await fetch(`/api/admin/sync/build-tiers/download/${tier}`, { headers: authHeader() });
+      if (!res.ok) {
+        const data: { error?: string } = await res.json().catch(() => ({}));
+        toast.error(data.error || '다운로드에 실패했습니다.');
+        return;
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `sync-agent-${tier}.zip`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch {
+      toast.error('다운로드에 실패했습니다.');
+    }
+  };
+
   const back = () => {
     if (step === 4) { setResult(null); setStep(osTier && !osTier.supported ? 2 : 3); }
     else if (step === 3) setStep(2);
@@ -237,12 +259,12 @@ export default function AgentDeployWizard() {
               )}
 
               <div className="flex flex-wrap gap-3">
-                <a
-                  href={`/api/admin/sync/build-tiers/download/${result.buildTier}`}
+                <button
+                  onClick={() => result.buildTier && downloadBuild(result.buildTier)}
                   className="inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-violet-600 to-fuchsia-600 px-5 py-2.5 text-sm font-semibold text-white shadow transition-opacity hover:opacity-90"
                 >
                   <Download className="h-4 w-4" />이 버전 다운로드
-                </a>
+                </button>
                 <button
                   onClick={reset}
                   className="inline-flex items-center gap-2 rounded-xl border border-gray-200 px-5 py-2.5 text-sm text-gray-600 hover:bg-gray-50"
