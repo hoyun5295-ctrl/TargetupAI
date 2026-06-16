@@ -31,6 +31,17 @@ npm run build:tiers          # 5종 + 런타임 동봉 + release/build-manifest.
 ### 배포 — 슈퍼관리자 "싱크에이전트 배포" 위저드
 슈퍼관리자 → 시스템 → **싱크에이전트 배포**에서 플랫폼 → OS → DB를 고르면 내보낼 버전·설치 절차·DB 주의사항이 나온다. 서수란 팀장은 OS만 고르면 되고 node 버전은 시스템이 판단한다.
 
+### 다운로드 서빙 (서버 업로드 — 빌드마다 1회)
+산출물은 Windows 빌드 머신에서 만들어지고 운영 서버(리눅스)는 Windows 빌드를 못 만든다 → 빌드 후 zip을 서버에 올려야 위저드 "이 버전 다운로드"가 작동한다.
+1. `npm run build:tiers` → `sync-agent/dist-tiers/downloads/sync-agent-<tier>.zip` 5개 생성
+2. 그 zip 5개를 서버 `packages/backend/agent-builds/`(백엔드 startup에 자동 생성, 또는 ENV `AGENT_BUILDS_DIR`)에 업로드:
+   ```powershell
+   $files = (Get-ChildItem "C:\...\sync-agent\dist-tiers\downloads\*.zip").FullName
+   scp $files administrator@<서버>:/home/administrator/targetup-app/packages/backend/agent-builds/
+   ```
+   (WinSCP/FileZilla로 그 폴더에 드래그해도 됨)
+3. 다운로드 endpoint `/api/admin/sync/build-tiers/download/<tier>`가 그 zip을 서빙(없으면 "업로드 필요" 404 안내)
+
 ### Windows 구형(win-mid · win-legacy) 설치
 런타임 DLL이 폴더에 동봉돼 vc_redist 설치 · 인터넷 · 재부팅 불필요.
 1. `SyncAgent` 폴더를 대상 PC `C:\SyncAgent`에 통째로 복사

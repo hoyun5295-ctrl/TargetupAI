@@ -24,6 +24,10 @@ const router = Router();
 // 서수란 팀장이 OS를 평범한 말로 고르면 내보낼 빌드를 알려준다. 룰표는 CT 1곳만.
 // ----------------------------------------------------------------------------
 
+// 산출물 다운로드 폴더 — 빌드 머신에서 만든 zip을 여기로 업로드. 없으면 startup에 자동 생성.
+const AGENT_BUILDS_DIR = process.env.AGENT_BUILDS_DIR || path.join(__dirname, '..', '..', 'agent-builds');
+try { fs.mkdirSync(AGENT_BUILDS_DIR, { recursive: true }); } catch { /* 권한 등 — 다운로드 시점에 다시 판정 */ }
+
 // GET /api/admin/sync/build-tiers — 위저드 부트스트랩(플랫폼/OS/DB 목록)
 router.get('/build-tiers', authenticate, requireSuperAdmin, (_req: Request, res: Response) => {
   res.json({ success: true, platforms: PLATFORMS, osTiers: OS_TIERS, dbOptions: DB_OPTIONS });
@@ -50,13 +54,12 @@ router.get('/build-tiers/download/:tier', authenticate, requireSuperAdmin, (req:
     res.status(400).json({ success: false, error: '알 수 없는 빌드 티어입니다.' });
     return;
   }
-  const dir = process.env.AGENT_BUILDS_DIR || path.join(__dirname, '..', '..', 'agent-builds');
-  const file = path.join(dir, `sync-agent-${tier}.zip`);
+  const file = path.join(AGENT_BUILDS_DIR, `sync-agent-${tier}.zip`);
   if (!fs.existsSync(file)) {
     res.status(404).json({
       success: false,
       code: 'AGENT_BUILD_NOT_UPLOADED',
-      error: `이 티어 산출물이 아직 서버에 없습니다. 빌드 후 sync-agent-${tier}.zip 을 서버 ${dir} 에 업로드하세요.`,
+      error: `이 티어 산출물이 아직 서버에 없습니다. 빌드 후 sync-agent-${tier}.zip 을 서버 ${AGENT_BUILDS_DIR} 에 업로드하세요.`,
     });
     return;
   }
