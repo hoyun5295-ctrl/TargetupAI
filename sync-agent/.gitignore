@@ -14,6 +14,7 @@ installer/*.zip
 *.exe
 *.zip
 *.tar.gz
+dist-tiers/
 
 # 설치 마법사 Word 문서(배포 산출물)
 SyncAgent_*.docx

@@ -107,6 +107,14 @@
 
 ---
 
+### 🟢 2026-06-16 — 비토(Bito) 자체 게이트웨이 연동(Agent 설치·라인 bito) + 아난티 시연 DB (★배포완료)
+> **비토 게이트웨이 `SMSQ_SEND_13` 연동**: Bito Agent v1.0.5 설치(`~/bito-install` — repo 밖, `sudo bash install.sh`). MySQL은 **기존 `smsuser` 재사용**(신규 계정 만들지 않음 — `hanjul01`은 비토 발급 `agent_id`/`token`이지 MySQL 계정 아님). agent-config `state_policy=transition_column`(field_map `status=rsv1` · `result_code=status_code` 분리 → status_code엔 최종결과만, 진행상태는 rsv1), result_policy 6/1000/1800/7830/7831, `where_extra bill_id LIKE 'BITOTEST-%'`(테스트 격리). doctor **PASS 12**(DB `smsuser` 연결 OK) · Gateway WARN(`--skip-gateway`). 라인 코드: `sms-queue.ts` 발송/집계 3곳(`getCompanySmsTables`×2·`getAllCompanyUserLineTables`) + `AdminDashboard.tsx` 발송 라인 드롭다운 2곳(사용자·고객사) `group_type 'bulk'→IN('bulk','bito')` → 비토 배정 시 SMSQ_SEND_13 발송·집계·드롭다운 노출. `getAllBulkSmsTables`(전체 안전망)는 회사별 `getCompanySmsTables`로 충분해 의도적 제외. backend·frontend tsc 0.
+> **남은(다음 세션 진입점)**: ① 우리 서버 공인 IP `58.227.193.62`를 비토 Gateway(`139.150.81.213:9090`) 허용목록에 등록(자비스) → doctor Gateway PASS ② 고객사/사용자에 비토(13) 라인 배정(드롭다운) ③ `SMSQ_SEND_13`에 `BITOTEST-` bill_id 1건 발송 → Agent 픽업 → `status_code` 실측. 명세 `docs/bito-gateway-integration-spec.md` · 매뉴얼 `~/bito-install/README.install-linux.md`. 라인 확장(12개=3개씩 4그룹, SMSQ_SEND_12 흡수)은 1건 검증 후.
+> **아난티 시연 가상 DB**: 2만 건 xlsx(`C:\Users\ceo\Downloads\아난티_시연_고객DB_20000.xlsx`) — 실발송 회피용 가짜 `010-0XXX-XXXX`(중복 0), 18필드(회원등급 피라미드 Welcome~Diamond + 누적결제·방문·포인트 상관, 지점/객실/관심사). 생성기 `Downloads/gen_ananti_demo.py`(seed 고정).
+> **버그4(알림톡 대표링크) 2026-06-16 해결**: 변수명 `attachment_link`(link 아님)가 정답 — 상세는 아래 2026-06-15 항목 참조.
+
+---
+
 ### 🟢 2026-06-15(이어서) — 발송/싱크/알림톡 5건 전건 수정·배포·확인 + 빌드 멈춤 fix + 슈퍼관리자 상세 엑셀 (★배포완료, 버그4 2026-06-16 해결)
 > **버그 1·2·3·5 수정·배포** (핸드오프 `docs/superpowers/handoffs/2026-06-15-5-bug-fix-handoff.md` 처리결과 절):
 > ① 발송일시 — 상세·엑셀이 통신사 응답시각(`mobsend_time`)→발송요청시각(`sendreq_time`). ResultsModal·AdminDashboard·results.ts CSV. **CSV 실측 전 행 06.11(06.12 0건).**

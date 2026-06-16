@@ -8,6 +8,7 @@ import AlimtalkSendersSection from '../components/alimtalk/AlimtalkSendersSectio
 import MessageDetailModal from '../components/MessageDetailModal'; // ★ D144 후속: 발송 상세 내역 모달의 메시지 셀 클릭 시 표시 + 복사
 import SearchableSelect from '../components/SearchableSelect'; // ★ D144 P11+P13: 검색 가능 select (사용자 추가 소속회사 + 발송통계 회사 필터)
 import LoginBlocksManagement from '../components/admin/LoginBlocksManagement'; // ★ D145 P0 (2026-05-07): 로그인 차단 관리 (B안: IP+loginId 쌍)
+import AgentDeployWizard from '../components/admin/AgentDeployWizard'; // 싱크에이전트 OS별 배포 위저드
 import { COMPANY_NAME_EN, COMPANY_EMAIL } from '../constants/company';
 import { creditTxLabel } from '../constants/credit'; // 크레딧 사용 이력 작업명 라벨
 
@@ -65,7 +66,7 @@ export default function AdminDashboard() {
   const navigate = useNavigate();
   const { user, logout } = useAuthStore();
 
-  const [activeTab, setActiveTab] = useState<'companies' | 'users' | 'scheduled' | 'callbacks' | 'plans' | 'requests' | 'deposits' | 'credits' | 'allCampaigns' | 'stats' | 'billing' | 'syncAgents' | 'auditLogs' | 'lineGroups' | 'templates' | 'loginBlocks'>('companies');
+  const [activeTab, setActiveTab] = useState<'companies' | 'users' | 'scheduled' | 'callbacks' | 'plans' | 'requests' | 'deposits' | 'credits' | 'allCampaigns' | 'stats' | 'billing' | 'syncAgents' | 'auditLogs' | 'lineGroups' | 'templates' | 'loginBlocks' | 'agentDeploy'>('companies');
   // ★ 2026-06-11: 감사 로그 열람 권한 (AUDIT_LOG_VIEWER_IDS — 기본 ceo 전용) — 허용 계정에만 메뉴/탭 노출
   const [auditAccessAllowed, setAuditAccessAllowed] = useState(false);
   // ★ 2026-06-13: AI 학습 데이터 열람 권한 (AI_TRAINING_VIEWER_IDS — 기본 ceo 전용) — 허용 계정에만 진입 버튼 노출
@@ -2446,9 +2447,10 @@ const handleApproveRequest = async (id: string) => {
               },
               {
                 label: '시스템', color: 'gray',
-                tabs: ['syncAgents', 'auditLogs', 'loginBlocks'] as const,
+                tabs: ['syncAgents', 'agentDeploy', 'auditLogs', 'loginBlocks'] as const,
                 items: [
                   { key: 'syncAgents', label: 'Sync 모니터링' },
+                  { key: 'agentDeploy', label: '싱크에이전트 배포' },
                   // ★ 2026-06-11: 감사 로그 = 허용 계정(기본 ceo)에만 노출
                   ...(auditAccessAllowed ? [{ key: 'auditLogs', label: '감사 로그' }] : []),
                   // ★ 2026-06-13: AI 학습 데이터 = 허용 계정(기본 ceo)에만 노출 (별도 페이지 navigate)
@@ -7975,6 +7977,8 @@ const handleApproveRequest = async (id: string) => {
           )}
         </div>
       )}
+      {/* 싱크에이전트 OS별 배포 위저드 탭 */}
+      {activeTab === 'agentDeploy' && <AgentDeployWizard />}
       {/* Sync 모니터링 탭 */}
       {activeTab === 'syncAgents' && (
         <div className="bg-white rounded-lg shadow">

@@ -12,8 +12,32 @@ import { Router, Request, Response } from 'express';
 import { randomUUID } from 'crypto';
 import { authenticate, requireSuperAdmin } from '../middlewares/auth';
 import { query } from '../config/database';
+import { PLATFORMS, OS_TIERS, DB_OPTIONS, resolveAgentBuild, PlatformId } from '../utils/agent-build-tiers';
 
 const router = Router();
+
+
+// ----------------------------------------------------------------------------
+// 싱크에이전트 배포 위저드 — 빌드 티어 룰표 제공 (CT: utils/agent-build-tiers)
+// 서수란 팀장이 OS를 평범한 말로 고르면 내보낼 빌드를 알려준다. 룰표는 CT 1곳만.
+// ----------------------------------------------------------------------------
+
+// GET /api/admin/sync/build-tiers — 위저드 부트스트랩(플랫폼/OS/DB 목록)
+router.get('/build-tiers', authenticate, requireSuperAdmin, (_req: Request, res: Response) => {
+  res.json({ success: true, platforms: PLATFORMS, osTiers: OS_TIERS, dbOptions: DB_OPTIONS });
+});
+
+// GET /api/admin/sync/build-tiers/resolve?platform=&osTier=&db= — 내보낼 빌드 1건
+router.get('/build-tiers/resolve', authenticate, requireSuperAdmin, (req: Request, res: Response) => {
+  const platform = String(req.query.platform || '') as PlatformId;
+  const osTier = String(req.query.osTier || '');
+  const db = String(req.query.db || '');
+  if (platform !== 'windows' && platform !== 'linux') {
+    res.status(400).json({ success: false, error: 'platform 값이 올바르지 않습니다.' });
+    return;
+  }
+  res.json({ success: true, result: resolveAgentBuild(platform, osTier, db) });
+});
 
 
 // ----------------------------------------------------------------------------

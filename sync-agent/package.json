@@ -14,6 +14,12 @@
     "build:exe-legacy:restore": "npm ci",
     "build:linux": "npm run bundle && npm run prebundle:wasm && pkg dist/bundle.js --targets node20-linux-x64 --output release/sync-agent",
     "build:all": "npm run bundle && npm run prebundle:wasm && pkg dist/bundle.js --targets node20-win-x64 --output release/sync-agent.exe && pkg dist/bundle.js --targets node20-linux-x64 --output release/sync-agent",
+    "build:win-modern": "node scripts/build-tier.js win-modern",
+    "build:win-mid": "node scripts/build-tier.js win-mid",
+    "build:win-legacy": "node scripts/build-tier.js win-legacy",
+    "build:linux-modern": "node scripts/build-tier.js linux-modern",
+    "build:linux-legacy": "node scripts/build-tier.js linux-legacy",
+    "build:tiers": "node scripts/build-tiers.js",
     "lint": "eslint src/",
     "test": "vitest run",
     "test:watch": "vitest"

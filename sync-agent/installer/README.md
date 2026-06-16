@@ -1,5 +1,48 @@
 # Sync Agent Installer 빌드 가이드
 
+## OS별 티어 빌드 + 배포 (2026-06-16~)
+
+> 단일 빌드로는 구형 OS에서 안 돈다(node 버전이 OS 최소사양에 묶임 — 예: node16은 Server 2008 R2에서 로드 실패). OS 범위별로 5종을 나눠 빌드하고, 슈퍼관리자에서 OS만 고르면 내보낼 버전을 알려준다.
+
+### 지원 범위 (이 미만은 미지원)
+| 플랫폼 | 지원 바닥 |
+|---|---|
+| Windows | Server 2008 R2 SP1 / Windows 7 SP1 이상 |
+| Linux | CentOS 7 / RHEL 7 / Ubuntu 14.04 (glibc 2.17) 이상 |
+
+미만(Server 2008 non-R2 · 2003 / CentOS 6 이하)은 모던 DB 드라이버가 도는 node가 없어 미지원. 가능하면 같은 네트워크의 최신 PC에 설치해 그 DB를 LAN으로 읽어온다.
+
+### 빌드 (5종 한 번에)
+```bash
+npm run build:tiers          # 5종 + 런타임 동봉 + release/build-manifest.json
+# 개별: npm run build:win-legacy / build:win-mid / build:win-modern / build:linux-legacy / build:linux-modern
+```
+
+| 티어 | 대상 OS | node | 산출물 |
+|---|---|---|---|
+| win-modern | Win10/11 · 2016+ | 20 | `release/sync-agent-win-modern.exe` |
+| win-mid | Win8.1 · 2012 R2 | 16 | `dist-tiers/win-mid/SyncAgent/` (런타임 동봉) |
+| win-legacy | Win7 · 2008 R2 | 14 | `dist-tiers/win-legacy/SyncAgent/` (런타임 동봉) |
+| linux-modern | Ubuntu20.04+ · RHEL8+ | 20 | `release/sync-agent-linux-modern` |
+| linux-legacy | CentOS7 · Ubuntu16~18 | 16 | `release/sync-agent-linux-legacy` |
+
+> 아래 `build-installer.bat`(NSIS Setup.exe)는 node20(win-modern)만 담는다 — 구형 OS엔 위 티어 폴더를 쓴다.
+
+### 배포 — 슈퍼관리자 "싱크에이전트 배포" 위저드
+슈퍼관리자 → 시스템 → **싱크에이전트 배포**에서 플랫폼 → OS → DB를 고르면 내보낼 버전·설치 절차·DB 주의사항이 나온다. 서수란 팀장은 OS만 고르면 되고 node 버전은 시스템이 판단한다.
+
+### Windows 구형(win-mid · win-legacy) 설치
+런타임 DLL이 폴더에 동봉돼 vc_redist 설치 · 인터넷 · 재부팅 불필요.
+1. `SyncAgent` 폴더를 대상 PC `C:\SyncAgent`에 통째로 복사
+2. `INSTALL-run-as-admin.bat`을 관리자 권한으로 실행
+3. `sync-agent v…`가 뜨면 정상 → 서비스 자동 등록·시작
+4. 안 뜨면 같은 폴더의 `diagnose.txt`(EXIT_CODE)를 회신 — 에러창이 없어도 원인이 분류된다
+
+### DB 접근
+에이전트는 고객사 DB를 **읽기전용**으로만 읽는다 — 읽기전용 계정 권장. 구형 SQL Server(2008/2012)는 `encrypt=false` + TLS 1.0/1.1 허용 여부를 점검한다.
+
+---
+
 ## 사전 준비
 
 ### 1. NSIS 설치

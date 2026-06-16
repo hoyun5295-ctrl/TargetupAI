@@ -259,6 +259,7 @@ C:\Users\ceo\projects\targetup\  (로컬)
 | 대량발송(3) | bulk | SMSQ_SEND_7,8,9 | 고객사 C 전용 |
 | 테스트발송 | test | SMSQ_SEND_10 | 테스트 전용 (격리) |
 | 슈퍼관리자인증 | auth | SMSQ_SEND_11 | 2FA 인증번호 전용 |
+| 비토테스트(13) | bito | SMSQ_SEND_13 | 자체 게이트웨이(Bito) 연동 — Bito Agent(`~/bito-install`) polling. 발송/집계/드롭다운 `bulk+bito` 포함(2026-06-16). Gateway 139.150.81.213:9090, MySQL=smsuser, agent_id/token=비토 발급 |
 - **사용자별 라인그룹 배정 (D60, 2026-03-08):** users.line_group_id (nullable uuid FK → sms_line_groups.id). 발송 시 사용자 개별 라인그룹 우선 → null이면 회사 라인그룹 fallback. 슈퍼관리자 사용자 편집 모달에서 설정.
 - 고객사별 라인그룹 할당: 고객사 수정 → 기본정보 탭 → 발송 라인 드롭다운
 - 미할당 고객사는 ALL_SMS_TABLES 전체 라운드로빈 폴백
