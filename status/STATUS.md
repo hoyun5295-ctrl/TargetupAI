@@ -107,6 +107,18 @@
 
 ---
 
+### 🟢 2026-06-16 — 싱크에이전트 OS별 빌드 5티어 + 슈퍼관리자 배포 위저드 + 다운로드 엔드포인트 + 매뉴얼 갱신 (★배포완료)
+> **배경**: 인비토(Server 2008 R2) 원격 설치 2회 실패 — 단일 빌드(node **16.20.2**)가 구형 OS에서 에러창 없이 로드 실패(node16 공식 최소사양=Win8.1/Server2012R2). 런타임 DLL 동봉만으론 node 버전 벽 못 넘음 → OS 범위별 빌드 티어로 해결.
+> **지원 바닥(미만 명시적 비지원)**: Windows = Server 2008R2/Win7 SP1(node14), Linux = CentOS7/RHEL7/Ubuntu14.04 glibc2.17(node16).
+> **빌드 5종** (`sync-agent && npm run build:tiers`): win-modern(20)/win-mid(16)/win-legacy(14)/linux-modern(20)/linux-legacy(16). Windows 구형 2종은 `dist-tiers/<tier>/SyncAgent/`에 UCRT46+vcruntime3+wasm+자가진단 bat(`INSTALL-run-as-admin.bat`, EXIT_CODE→diagnose.txt) 동봉 = vc_redist 불필요. manifest=`release/build-manifest.json`. 스크립트=`scripts/build-tier.js`·`build-tiers.js`·`bundle-windows-runtime.js`. 5종 산출 + win-legacy/win-modern `--version` v1.5.5 실측.
+> **배포 위저드**: 슈퍼관리자→시스템→"싱크에이전트 배포"(`components/admin/AgentDeployWizard.tsx`, AdminDashboard 탭 `agentDeploy`). 단계별(플랫폼→OS→DB) — **서수란 팀장이 OS만 평범한 말로 고르면** 빌드·설치절차·DB주의 출력(node/glibc 비노출). 룰표 단일진실원 CT=`utils/agent-build-tiers.ts`(AI판단0), endpoint=`admin-sync.ts` build-tiers+resolve+download. 화이트톤(슈퍼관리자 톤 맞춤). 다운로드는 authenticate가 토큰 헤더 요구라 `<a href>` 불가 → **인증 fetch+blob** 저장.
+> **다운로드 서빙**: `/api/admin/sync/build-tiers/download/:tier` = 서버 `packages/backend/agent-builds/`(startup 자동생성, ENV `AGENT_BUILDS_DIR`)의 `sync-agent-<tier>.zip` 서빙. 빌드머신(Win)↔서버(Linux) 분리라 빌드 후 zip 5개(`dist-tiers/downloads/`)를 agent-builds/에 업로드 1회 필요(scp).
+> **매뉴얼**: `installer/README.md` + 고객 docx(`SyncAgent_설치매뉴얼_v1_5_5.docx`, 생성기 `build-manual.js`) — 지원범위·신규 §3.0 구형 폴더+bat 설치·위저드·v1.5.5 이력 반영 재생성. PDF는 Word 재export(LibreOffice 미설치).
+> **검증**: backend·frontend tsc 0 / 새너티 8/8 / native dialog·모델명·금지어 0. 설계·계획 `docs/superpowers/specs·plans/2026-06-16-sync-agent-build-tiers`. 상세 [[project_2026_0616_sync_agent_build_tiers]].
+> **운영 잔여(Harold)**: ① 프론트 배포(다운로드 fetch+blob) ② zip 5개 서버 agent-builds/ 업로드 ③ PDF Word 재export ④ 구형 OS 실측(Win7=2008R2 동일커널 6.1.7601 → EXIT_CODE=0 + 실DB동기화 1건 후 통과 티어만 위저드 노출).
+
+---
+
 ### 🟢 2026-06-16 — 비토(Bito) 자체 게이트웨이 연동(Agent 설치·라인 bito) + 아난티 시연 DB (★배포완료)
 > **비토 게이트웨이 `SMSQ_SEND_13` 연동**: Bito Agent v1.0.5 설치(`~/bito-install` — repo 밖, `sudo bash install.sh`). MySQL은 **기존 `smsuser` 재사용**(신규 계정 만들지 않음 — `hanjul01`은 비토 발급 `agent_id`/`token`이지 MySQL 계정 아님). agent-config `state_policy=transition_column`(field_map `status=rsv1` · `result_code=status_code` 분리 → status_code엔 최종결과만, 진행상태는 rsv1), result_policy 6/1000/1800/7830/7831, `where_extra bill_id LIKE 'BITOTEST-%'`(테스트 격리). doctor **PASS 12**(DB `smsuser` 연결 OK) · Gateway WARN(`--skip-gateway`). 라인 코드: `sms-queue.ts` 발송/집계 3곳(`getCompanySmsTables`×2·`getAllCompanyUserLineTables`) + `AdminDashboard.tsx` 발송 라인 드롭다운 2곳(사용자·고객사) `group_type 'bulk'→IN('bulk','bito')` → 비토 배정 시 SMSQ_SEND_13 발송·집계·드롭다운 노출. `getAllBulkSmsTables`(전체 안전망)는 회사별 `getCompanySmsTables`로 충분해 의도적 제외. backend·frontend tsc 0.
 > **남은(다음 세션 진입점)**: ① 우리 서버 공인 IP `58.227.193.62`를 비토 Gateway(`139.150.81.213:9090`) 허용목록에 등록(자비스) → doctor Gateway PASS ② 고객사/사용자에 비토(13) 라인 배정(드롭다운) ③ `SMSQ_SEND_13`에 `BITOTEST-` bill_id 1건 발송 → Agent 픽업 → `status_code` 실측. 명세 `docs/bito-gateway-integration-spec.md` · 매뉴얼 `~/bito-install/README.install-linux.md`. 라인 확장(12개=3개씩 4그룹, SMSQ_SEND_12 흡수)은 1건 검증 후.

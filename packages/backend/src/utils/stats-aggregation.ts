@@ -12,7 +12,7 @@ import { CAMPAIGN_OPT080_SELECT_EXPR, CAMPAIGN_OPT080_LEFT_JOIN } from './unsubs
 // ★ D144: PG sent_count 캐시 의존 제거 — MySQL 직접 카운트로 전환
 // ★ 2026-06-11: 카운트는 smsCampaignCountsSafe(이력=결과/라이브=대기 분리) — 이동 중 이중 카운트 차단
 import { getCompanySmsTablesWithLogs, smsCampaignCountsSafe, kakaoBatchAggByGroup } from './sms-queue';
-import { splitLiveAndLogTables, reconcileSentCount } from './sms-table-split';
+import { splitLiveAndLogTables, computeDisplayCounts, DisplayCounts } from './sms-table-split';
 import { SUCCESS_CODES_SQL, PENDING_CODES_SQL, tallySmsChannelCounts, SmsChannel, ChannelCount } from './sms-result-map';
 
 // ============================================================
@@ -210,10 +210,11 @@ export interface SendStatsRow {
   sent: number;
   success: number;
   fail: number;
+  pending: number;
 }
 
 export interface SendStatsResult {
-  summary: { total_sent: string; total_success: string; total_fail: string };
+  summary: { total_sent: string; total_success: string; total_fail: string; total_pending: string };
   rows: SendStatsRow[];
   total: number;
   page: number;
@@ -432,26 +433,22 @@ export async function aggregateSmsSendTimesByCampaign(
  *   반환 = Map<campaignId, { sent, success, fail }> — 이미 SMS+카카오 합산 완료값.
  *   ★ 호출부는 카카오를 따로 더하지 말 것 (final PG값이 이미 합산이라 이중 합산 위험).
  *   ★ 필요 필드: id, company_id, created_by, result_final, sent_count, success_count, fail_count.
- *   ★ pending은 sent - success - fail로 호출부 파생 (final은 sent=success+fail이라 0).
+ *   ★ 2026-06-17: 대기(pending)를 직접 반환 — frontend 자체 파생(sent-success-fail) 종결. 산식 = computeDisplayCounts 단일.
  */
 export async function getCampaignResultCounts(
   campaigns: Array<{ id: string; company_id: string; created_by: string | null; result_final?: boolean; sent_count?: number | null; success_count?: number | null; fail_count?: number | null }>
-): Promise<Map<string, { sent: number; success: number; fail: number }>> {
-  const out = new Map<string, { sent: number; success: number; fail: number }>();
+): Promise<Map<string, DisplayCounts>> {
+  const out = new Map<string, DisplayCounts>();
   if (campaigns.length === 0) return out;
 
-  // 완료 캠페인 = PG 캐시 (워커 확정 SMS+카카오 합산값, pending=0)
+  // 완료 캠페인 = PG 캐시 (워커 확정 SMS+카카오 합산값). 대기는 정의상 0.
   for (const c of campaigns) {
     if (c.result_final) {
-      const success = Number(c.success_count || 0);
-      const fail = Number(c.fail_count || 0);
-      // ★ 2026-06-15 버그3: 전송 = max(적재 sent_count, 성공+실패) — 옛 캠페인 제외분(무효/수신거부)이 실패에 포함돼 성공+실패>전송이던 불일치 정합 (완료라 대기=0)
-      const sent = reconcileSentCount(c.sent_count, success, fail, 0);
-      out.set(c.id, { sent, success, fail });
+      out.set(c.id, computeDisplayCounts(true, c.sent_count, Number(c.success_count || 0), Number(c.fail_count || 0), 0));
     }
   }
 
-  // 진행 중 캠페인만 MySQL 실시간 집계 (SMS + 카카오)
+  // 진행 중 캠페인만 MySQL 실시간 집계 (SMS + 카카오). 대기 = 실측(total - 성공 - 실패).
   const nonFinal = campaigns.filter((c) => !c.result_final);
   if (nonFinal.length > 0) {
     const smsMap = await aggregateSmsCountsByCampaign(nonFinal);
@@ -462,9 +459,7 @@ export async function getCampaignResultCounts(
       const success = Number(sms.success_count || 0) + Number(kakao.success || 0);
       const fail = Number(sms.fail_count || 0) + Number(kakao.fail || 0);
       const total = Number(sms.total_count || 0) + Number(kakao.total || 0);
-      // ★ 2026-06-15 버그3: 전송 = max(적재 sent_count, 성공+실패+대기) 단일 정의 (제외분·대체발송 모두 전송≥성공+실패 보장)
-      const sent = reconcileSentCount(c.sent_count, success, fail, Math.max(0, total - success - fail));
-      out.set(c.id, { sent, success, fail });
+      out.set(c.id, computeDisplayCounts(false, c.sent_count, success, fail, Math.max(0, total - success - fail)));
     }
   }
 
@@ -523,7 +518,7 @@ export async function querySendStats(options: SendStatsOptions): Promise<SendSta
   const campaigns = metaResult.rows;
   if (campaigns.length === 0) {
     return {
-      summary: { total_sent: '0', total_success: '0', total_fail: '0' },
+      summary: { total_sent: '0', total_success: '0', total_fail: '0', total_pending: '0' },
       rows: [],
       total: 0,
       page,
@@ -535,31 +530,35 @@ export async function querySendStats(options: SendStatsOptions): Promise<SendSta
   //    getCampaignResultCounts가 SMS+카카오 합산까지 끝낸 {sent,success,fail} 반환 (이중 합산 방지).
   const resultCountMap = await getCampaignResultCounts(campaigns);
 
-  // 3) JS에서 KST period 그룹핑 + 요약 합산
-  const byPeriod = new Map<string, { runs: Set<string>; sent: number; success: number; fail: number }>();
+  // 3) JS에서 KST period 그룹핑 + 요약 합산 (대기 = getCampaignResultCounts 진실 — frontend 파생 제거)
+  const byPeriod = new Map<string, { runs: Set<string>; sent: number; success: number; fail: number; pending: number }>();
   let totalSent = 0;
   let totalSuccess = 0;
   let totalFail = 0;
+  let totalPending = 0;
 
   for (const c of campaigns) {
-    const counts = resultCountMap.get(c.id) || { sent: 0, success: 0, fail: 0 };
+    const counts = resultCountMap.get(c.id) || { sent: 0, success: 0, fail: 0, pending: 0 };
 
     const sent = counts.sent;
     const success = counts.success;
     const fail = counts.fail;
+    const pending = counts.pending;
 
     totalSent += sent;
     totalSuccess += success;
     totalFail += fail;
+    totalPending += pending;
 
     if (!byPeriod.has(c.period)) {
-      byPeriod.set(c.period, { runs: new Set(), sent: 0, success: 0, fail: 0 });
+      byPeriod.set(c.period, { runs: new Set(), sent: 0, success: 0, fail: 0, pending: 0 });
     }
     const bucket = byPeriod.get(c.period)!;
     bucket.runs.add(c.id);
     bucket.sent += sent;
     bucket.success += success;
     bucket.fail += fail;
+    bucket.pending += pending;
   }
 
   const allRows = Array.from(byPeriod.entries())
@@ -569,6 +568,7 @@ export async function querySendStats(options: SendStatsOptions): Promise<SendSta
       sent: v.sent,
       success: v.success,
       fail: v.fail,
+      pending: v.pending,
     }))
     .sort((a, b) => b.period.localeCompare(a.period));
 
@@ -579,6 +579,7 @@ export async function querySendStats(options: SendStatsOptions): Promise<SendSta
       total_sent: String(totalSent),
       total_success: String(totalSuccess),
       total_fail: String(totalFail),
+      total_pending: String(totalPending),
     },
     rows: pagedRows,
     total: allRows.length,

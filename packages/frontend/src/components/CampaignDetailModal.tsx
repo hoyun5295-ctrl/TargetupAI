@@ -46,7 +46,7 @@ export default function CampaignDetailModal({
   const sent = sf ? (sf.sent || (sf.success + sf.fail) || 0) : 0;
   const success = sf?.success || 0;
   const fail = sf?.fail || 0;
-  const pending = Math.max(0, sent - success - fail);
+  const pending = sf?.pending != null ? Number(sf.pending) : Math.max(0, sent - success - fail);
   const denom = sent || (success + fail) || 1;
   const successRate = sf ? Math.round((success / denom) * 100) : 0;
   const clicks = sf?.clicks || 0;

@@ -56,3 +56,26 @@ export function reconcileSentCount(
   const resultSum = Math.max(0, Number(success) || 0) + Math.max(0, Number(fail) || 0) + Math.max(0, Number(pending) || 0);
   return Math.max(loaded, resultSum);
 }
+
+export interface DisplayCounts { sent: number; success: number; fail: number; pending: number }
+
+/**
+ * ★ 2026-06-17 카운트 표시 단일 산식 (순수) — 전송·성공·실패·대기를 한 곳에서 계산.
+ *   재발 차단: 표면(목록·상세·통계·CSV)마다 sent/대기를 따로 계산하던 분산을 종결한다.
+ *   - 완료(result_final): 대기는 정의상 0 (발송 6h 경과 확정). 전송 = reconcileSentCount(대기 0).
+ *   - 진행중: 대기 = 실측(MySQL status 100/104 + 카카오 대기). 전송 = reconcileSentCount(대기 포함).
+ *   소비처: getCampaignResultCounts(결과/통계/상세/CSV) — frontend 자체 파생 금지, 이 값을 그대로 표시.
+ */
+export function computeDisplayCounts(
+  resultFinal: boolean,
+  sentCount: number | null | undefined,
+  success: number,
+  fail: number,
+  livePending: number,
+): DisplayCounts {
+  const s = Math.max(0, Number(success) || 0);
+  const f = Math.max(0, Number(fail) || 0);
+  const pending = resultFinal ? 0 : Math.max(0, Number(livePending) || 0);
+  const sent = reconcileSentCount(sentCount, s, f, pending);
+  return { sent, success: s, fail: f, pending };
+}

@@ -367,6 +367,12 @@ POST /api/sync/purchases   ← 구매내역 벌크 INSERT (배치 최대 1000건
 2. git pull
 3. pm2 restart
 
+### 7-7. OS별 빌드 티어 + 배포 위저드 (2026-06-16)
+- 단일 빌드 폐기 → OS 범위별 **5티어** (`sync-agent && npm run build:tiers`): win-modern(node20)/win-mid(node16)/win-legacy(node14)/linux-modern(node20)/linux-legacy(node16). 지원 바닥 = Windows 2008R2/Win7 · Linux CentOS7(glibc2.17), 미만 비지원.
+- Windows 구형(win-mid·win-legacy) = `dist-tiers/<tier>/SyncAgent/`에 런타임(UCRT46+vcruntime3)+wasm+`INSTALL-run-as-admin.bat`(EXIT_CODE→diagnose.txt) 동봉 → vc_redist 불필요. (구형 OS는 NSIS Setup.exe 대신 이 폴더 통째 복사)
+- 슈퍼관리자 → 시스템 → "싱크에이전트 배포" 위저드(플랫폼→OS→DB) = 룰표 CT `packages/backend/src/utils/agent-build-tiers.ts`로 내보낼 빌드·설치절차 안내.
+- **다운로드 서빙**: `GET /api/admin/sync/build-tiers/download/:tier` → 서버 **`packages/backend/agent-builds/`**(백엔드 startup 자동생성, ENV `AGENT_BUILDS_DIR`)의 `sync-agent-<tier>.zip` 서빙. 빌드 머신(Windows)에서 만든 zip 5개(`sync-agent/dist-tiers/downloads/`)를 빌드 후 서버 agent-builds/에 업로드(scp) 1회 필요. 인증은 토큰 헤더(`<a href>` 다운로드 불가 → 프론트 fetch+blob).
+
 ---
 
 ## 8. 스팸필터 테스트 시스템

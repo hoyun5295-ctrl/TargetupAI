@@ -269,7 +269,9 @@ async function markFinalizedCampaigns(): Promise<void> {
  *
  *   동작: 발송시각 기준 21일 안 대상 캠페인을 MySQL 실집계(전 라인 합집합)로 재대조.
  *   - failed 무리: 발송 +10분 후부터 — MySQL에 발송 기록이 있으면 status='completed' 복원 + counts 교정
- *   - 확정(completed+result_final) 무리: 발송 +24시간에 1회 재검증 — 늦은 결과 반영
+ *   - 확정(completed+result_final) 무리: 발송 후 7일간 재검증 — 24h 후 도착하는 늦은 통신사 리포트 흡수.
+ *     ★ 2026-06-17: 윈도우 24h→7일 확대. 에이스하드웨어(6/13 발송) fail이 24h 후 리포트로 899→1565 늘었는데
+ *     옛 24h 윈도우가 닫혀 캐시에 666 누락 → 완료인데 전송≠성공+실패로 노출되던 근본 차단.
  *   멱등 마커 = result_synced_at (재대조 시 NOW()로 갱신 → 발송+24h를 넘기면 자연 종료, 신규 컬럼 0).
  *   돈 경로 무수정 — 환불은 sweeper(선불), 청구는 MySQL 직접 집계(후불)가 기존대로 담당.
  *
@@ -301,7 +303,7 @@ async function reconcileFinalizedCampaigns(): Promise<void> {
                )
                AND COALESCE(scheduled_at, sent_at) >= NOW() - INTERVAL '21 days'
                AND (result_synced_at IS NULL
-                    OR result_synced_at < COALESCE(scheduled_at, sent_at) + INTERVAL '24 hours')
+                    OR result_synced_at < COALESCE(scheduled_at, sent_at) + INTERVAL '7 days')
              )
           -- ★ 2026-06-13 굳힘 탈출구 — 완전집계 조건 영구 미충족 terminal 무리(발송 72h 경과).
           --   21일 하한 없음: 유한 무리(실측 94건)이고 1회 굳힘으로 영구 졸업이라 부하 무한 누적 없음.

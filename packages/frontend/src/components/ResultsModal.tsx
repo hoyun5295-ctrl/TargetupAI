@@ -484,7 +484,7 @@ export default function ResultsModal({ onClose, token, customerDbEnabled, isSubs
                           const sent = c.sent_count || c.target_count || 0;
                           const successCnt = c.success_count || 0;
                           const failCnt = c.fail_count || 0;
-                          const pendingCnt = Math.max(0, sent - successCnt - failCnt);
+                          const pendingCnt = c.pending_count != null ? Number(c.pending_count) : Math.max(0, sent - successCnt - failCnt);
                           const rate = sent > 0 ? Math.round((successCnt / sent) * 100) : 0;
                           const ch = channelChip(c);
                           return (

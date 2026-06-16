@@ -1383,28 +1383,29 @@ router.get('/stats/send', authenticate, requireSuperAdmin, async (req: Request, 
     const resultCountMap = await getCampaignResultCounts(metaCampaigns);
 
     // (period, company_id)별 그룹핑 + 전체 summary 합산
-    type Bucket = { period: string; company_id: any; company_name: any; line_group_name: any; runs: Set<string>; sent: number; success: number; fail: number };
+    type Bucket = { period: string; company_id: any; company_name: any; line_group_name: any; runs: Set<string>; sent: number; success: number; fail: number; pending: number };
     const byKey = new Map<string, Bucket>();
-    let totalSent = 0, totalSuccess = 0, totalFail = 0;
+    let totalSent = 0, totalSuccess = 0, totalFail = 0, totalPending = 0;
 
     for (const c of metaCampaigns) {
-      const counts = resultCountMap.get(c.id) || { sent: 0, success: 0, fail: 0 };
+      const counts = resultCountMap.get(c.id) || { sent: 0, success: 0, fail: 0, pending: 0 };
       const sent = counts.sent;
       const success = counts.success;
       const fail = counts.fail;
-      totalSent += sent; totalSuccess += success; totalFail += fail;
+      const pending = counts.pending;
+      totalSent += sent; totalSuccess += success; totalFail += fail; totalPending += pending;
 
       const key = `${c.period}|${c.company_id}`;
       if (!byKey.has(key)) {
         byKey.set(key, {
           period: c.period, company_id: c.company_id,
           company_name: c.company_name, line_group_name: c.line_group_name,
-          runs: new Set<string>(), sent: 0, success: 0, fail: 0,
+          runs: new Set<string>(), sent: 0, success: 0, fail: 0, pending: 0,
         });
       }
       const b = byKey.get(key)!;
       b.runs.add(c.id);
-      b.sent += sent; b.success += success; b.fail += fail;
+      b.sent += sent; b.success += success; b.fail += fail; b.pending += pending;
     }
 
     const allRows = Array.from(byKey.values())
@@ -1417,6 +1418,7 @@ router.get('/stats/send', authenticate, requireSuperAdmin, async (req: Request, 
         sent: v.sent,
         success: v.success,
         fail: v.fail,
+        pending: v.pending,
       }))
       .sort((a: any, b: any) => {
         const pa = a[groupAlias], pb = b[groupAlias];
@@ -1428,7 +1430,7 @@ router.get('/stats/send', authenticate, requireSuperAdmin, async (req: Request, 
     const total = allRows.length;
     const pagedRows = allRows.slice(offset, offset + limit);
     const summaryResult = {
-      rows: [{ total_sent: String(totalSent), total_success: String(totalSuccess), total_fail: String(totalFail) }],
+      rows: [{ total_sent: String(totalSent), total_success: String(totalSuccess), total_fail: String(totalFail), total_pending: String(totalPending) }],
     };
     const rowsResult = { rows: pagedRows };
 
@@ -1749,46 +1751,29 @@ router.get('/campaigns/all', authenticate, requireSuperAdmin, async (req: Reques
       LIMIT $${paramIdx} OFFSET $${paramIdx + 1}
     `, [...params, limit, offset]);
 
-    // ★ D228+ (2026-05-30) 속도: result_final=true는 PG 캐시(워커 확정값), 진행 중만 MySQL 집계 (results.ts 동일 패턴).
-    //   대형 캠페인(2만~3만건)이 페이지에 끼면 매 조회마다 11테이블 UNION 집계가 도는 병목 제거.
+    // ★ 2026-06-17: 카운트 단일 진입점(getCampaignResultCounts) — 전송·성공·실패·대기를 전 표면 공통 산식으로.
+    //   완료는 PG 캐시(대기 0), 진행 중만 MySQL 실측. result_final 캠페인 reconcile 누락(디버깅1 대기 666·디버깅2 전송 1613) 종결.
+    const adminResultMap = await getCampaignResultCounts(result.rows);
     const adminNonFinal = result.rows.filter((c: any) => !c.result_final);
-    const adminCampSmsMap = await aggregateSmsCountsByCampaign(adminNonFinal);
-    const adminCampKakaoMap = await kakaoBatchAggByGroup(adminNonFinal.map((c: any) => c.id));
     const adminCampSentTimeMap = await aggregateSmsSendTimesByCampaign(adminNonFinal);
 
-    // ★ D144 P4/P7 후속 (2026-05-07): 슈퍼관리자 캠페인 목록 조회 시 status='sending' 자동 정리
-    //   사용자가 Dashboard 안 들어가면 fire-and-forget sync-results가 안 돌아 'sending' 영구 잔존.
-    //   슈퍼관리자가 화면 보는 시점에 MySQL 결과 모두 도착(pending=0 + success/fail > 0)이면
-    //   PG status를 'completed'로 자동 정리 (응답에 즉시 반영 + 백그라운드 DB UPDATE).
+    // ★ D144 P4/P7 후속 (2026-05-07): status='sending' 자동 정리 — 결과 모두 도착(대기 0 + 성공/실패 > 0)이면 completed.
     const autoCompleteIds: string[] = [];
     const campaigns = result.rows.map((c: any) => {
-      if (c.result_final) {
-        // PG 캐시 — 6h 경과 완료 캠페인 (pending=0, sent_count=success+fail). MySQL 집계 skip.
-        return {
-          ...c,
-          total_sent: Number(c.sent_count || 0),
-          total_success: Number(c.success_count || 0),
-          total_fail: Number(c.fail_count || 0),
-        };
-      }
-      const sms = adminCampSmsMap.get(c.id) || { total_count: 0, success_count: 0, fail_count: 0, pending_count: 0 };
-      const kakao = adminCampKakaoMap.get(c.id) || { total: 0, success: 0, fail: 0, pending: 0 };
-      const totalSuccess = Number(sms.success_count || 0) + kakao.success;
-      const totalFail = Number(sms.fail_count || 0) + kakao.fail;
-      const totalPending = Number(sms.pending_count || 0) + kakao.pending;
-      // 자동 정리 대상: status='sending' + pending=0 + (success>0 or fail>0)
+      const cnt = adminResultMap.get(c.id) || { sent: 0, success: 0, fail: 0, pending: 0 };
       let effectiveStatus = c.status;
-      if (c.status === 'sending' && totalPending === 0 && (totalSuccess > 0 || totalFail > 0)) {
+      if (c.status === 'sending' && cnt.pending === 0 && (cnt.success > 0 || cnt.fail > 0)) {
         effectiveStatus = 'completed';
         autoCompleteIds.push(c.id);
       }
       return {
         ...c,
         status: effectiveStatus,
-        total_sent: Number(sms.total_count || 0) + kakao.total,
-        total_success: totalSuccess,
-        total_fail: totalFail,
-        sent_at: adminCampSentTimeMap.get(c.id) ?? c.sent_at,
+        total_sent: cnt.sent,
+        total_success: cnt.success,
+        total_fail: cnt.fail,
+        total_pending: cnt.pending,
+        sent_at: c.result_final ? c.sent_at : (adminCampSentTimeMap.get(c.id) ?? c.sent_at),
       };
     });
 
@@ -3590,8 +3575,8 @@ router.get('/stats/export', authenticate, requireSuperAdmin, async (req: Request
           addExportBucket(c, 'substitute_sms', '알림톡대체발송(SMS)', 0, sSms.total, sSms.success, sSms.fail, sSms.pending);
         }
       } else {
-        const counts = exportResultMap.get(c.id) || { sent: 0, success: 0, fail: 0 };
-        const pending = Math.max(0, counts.sent - counts.success - counts.fail);
+        const counts = exportResultMap.get(c.id) || { sent: 0, success: 0, fail: 0, pending: 0 };
+        const pending = counts.pending;
         const channelKey = `${c.message_type || ''}|${c.send_channel || ''}`;
         addExportBucket(c, channelKey, getCampaignChannelLabel(c.send_channel, c.message_type),
           Number(c.target_count || 0),

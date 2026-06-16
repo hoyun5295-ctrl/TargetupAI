@@ -4016,7 +4016,7 @@ const handleApproveRequest = async (id: string) => {
                     const sent = parseInt(c.total_sent) || 0;
                     const success = parseInt(c.total_success) || 0;
                     const fail = parseInt(c.total_fail) || 0;
-                    const pending = Math.max(0, sent - success - fail);
+                    const pending = c.total_pending != null ? (parseInt(c.total_pending) || 0) : Math.max(0, sent - success - fail);
                     return (
                     <tr key={c.id} className="hover:bg-gray-50">
                       <td className="px-3 py-3 text-gray-700">
@@ -4094,7 +4094,7 @@ const handleApproveRequest = async (id: string) => {
               const sent = Number(sendStats.summary.total_sent);
               const success = Number(sendStats.summary.total_success);
               const fail = Number(sendStats.summary.total_fail);
-              const pending = Math.max(0, sent - success - fail);
+              const pending = sendStats.summary.total_pending != null ? Number(sendStats.summary.total_pending) : Math.max(0, sent - success - fail);
               // D183 fix: 성공률 = 전송 대비 성공 비율 (대기 영역 포함 분모) — 사용자 관점 정합
               const rate = sent > 0 ? (success / sent * 100).toFixed(1) : '-';
               return (
@@ -4207,7 +4207,7 @@ const handleApproveRequest = async (id: string) => {
                       const sent = Number(row.sent);
                       const success = Number(row.success);
                       const fail = Number(row.fail);
-                      const pending = Math.max(0, sent - success - fail);
+                      const pending = row.pending != null ? Number(row.pending) : Math.max(0, sent - success - fail);
                       // D183 fix: 성공률 = 전송 대비 성공 비율 (대기 영역 포함 분모) — 사용자 관점 정합
                       const rate = sent > 0 ? (success / sent * 100).toFixed(1) : '-';
                       return (
