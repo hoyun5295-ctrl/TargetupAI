@@ -396,7 +396,8 @@ else concat(concat(concat('{"sendercode":"',sender_code),'",'), replace(k_etc_js
 - **IMC 템플릿 status 정의(휴머스온 공식): S=중지 / A=정상 / R=대기(발송 전 — 첫 발송 시 자동 A).** R은 차단 사유가 아니다. "발송해야 A가 되는데 발송을 막는" 차단 로직은 신규 템플릿 첫 발송을 영구 차단하는 역효과 — 상태값 의미는 공급사 공식 정의로만 확정하고 추정 차단 금지.
 - **다구간 체인(한줄로→에이전트→게이트웨이→IMC→카카오) 디버깅 = 구간별 운반 실측으로 막힌 지점을 좁힌다.** 형식 추측 반복(LINKTEST 5회) 대신 각 구간 로그(SMSQ 적재값 → 게이트웨이 deliver 전문 → IMC 접수 데이터)를 먼저 대조했으면 1회에 끝났다. "다른 업체는 된다" = 그 업체 발송의 실제 전문을 보는 게 최단 경로(타업체는 전부 대표링크 없는 템플릿이었음).
 - **차이 변수 확정은 대조군 SQL 1방** — 정상 5개 vs 실패 1개 템플릿의 represent_link/buttons 한 줄 비교로 원인 변수가 즉시 드러났다.
-- 게이트웨이(인비토 자체, mmsr3/ngen) deliver 전문 필드 = title/btnJson/etcJson뿐. btnJson=버튼 전용(매뉴얼 name1/type1/url1_1/url1_2 → IMC button 변환 실증), etcJson=평면 변수 봉투(title/senderkey/sendercode 실증). link는 엔진 매핑 추가(서팀장) 후 etcJson `{"link":{"urlMobile","urlPc"}}`로 운반 예정. IMC v1 스펙 = link 최상위 camelCase, link 포함 시 버튼 최대 2개.
+- 게이트웨이(인비토 자체, mmsr3/ngen) deliver 전문 필드 = title/btnJson/etcJson뿐. btnJson=버튼 전용, etcJson=평면 변수 봉투(title/senderkey/sendercode).
+- ★ 2026-06-16 해결 — 대표링크 변수명은 `attachment_link`(link 아님). `k_etc_json`에 `{"attachment_link":{"url_mobile","url_pc","scheme_ios","scheme_android"}}`(snake, 값 있는 키만) 넣으면 게이트웨이가 IMC ATTACHMENT.link로 변환 → 카카오 1800. **6/11 `link` 키 5회 7300의 원인 = 변수명 불일치**(형식 camel/snake도, 엔진 매핑 부재도, 서팀장 작업도 아니었음). 한줄로 단독 가능: `buildAlimtalkEtcJson`에 representLink 인자 + 발송 5경로(commit/즉시·auto·staging·journey)가 `kakao_templates.represent_link`(camelCase 저장값) 조회 → camel→snake 변환해 동봉. sender_code NULL이라 select_sql `&(k_etc_json)` 원본 통과(replace 함정 회피). 실측 79738→01052958517 status_code 1800 확정. 교훈 = "다른 업체는 되고 우리만 안 됨" = 우리 전문의 변수명/키 차이부터 게이트웨이(공급사)에 정확 스펙 요청(IMC 공식문서의 ATTACHMENT.link는 IMC 직접용 명칭, QTmsg 경유 시 커스텀 키 attachment_link).
 - 상세 = `memory/project_2026_0609_alimtalk_emphasize_etcjson_diagnosis.md` + STATUS.md 2026-06-11 항목.
 
 ---

@@ -1,6 +1,6 @@
 # 버그4 핸드오프 — 알림톡 대표링크(represent_link) 발송 동봉 (2026-06-15)
 
-> **상태: OPEN.** 형식·메커니즘은 이미 확정됨. 인비토 에이전트의 `link` 처리 여부 **1가지**만 확인하면 구현 들어감.
+> **상태: RESOLVED (2026-06-16).** 정답 변수명 = `attachment_link`(link 아님). k_etc_json에 `{"attachment_link":{url_mobile,url_pc,scheme_ios,scheme_android}}`(snake, 값 있는 키만) 동봉 → 카카오 status_code 1800 실측 확정(79738→01052958517). `buildAlimtalkEtcJson` representLink 인자 + 발송 5경로 represent_link 조회·동봉 구현·배포. ★ 아래 본문의 "link가 맞다 / 서팀장 매핑 필요" 서술은 틀린 추정 — 변수명을 `attachment_link`로 보면 끝(형식 camel/snake도, 엔진 매핑도 원인 아니었음).
 > **다음 세션 규칙: 아래 "1. 이미 확정" 그대로 받아들이고 STEP 1부터 시작. 재조사/추측 금지.** (형식·QTmsg 커스텀필드는 공식문서로 확정 끝났다.)
 > 상위 = `docs/superpowers/handoffs/2026-06-15-5-bug-fix-handoff.md`(발송/싱크/알림톡 5건 중 4건 완료·배포, 버그4만 잔존). 근원 = `status/lessons/LESSONS_BACKEND.md` 2026-06-11(강조형 7300 = 대표링크 미동봉) + D234+(0609 sendercode).
 
