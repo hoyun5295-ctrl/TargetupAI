@@ -62,7 +62,7 @@ export async function getCompanySmsTables(companyId: string, userId?: string): P
       SELECT lg.sms_tables
       FROM sms_line_groups lg
       JOIN users u ON u.line_group_id = lg.id
-      WHERE u.id = $1 AND lg.is_active = true AND lg.group_type = 'bulk'
+      WHERE u.id = $1 AND lg.is_active = true AND lg.group_type IN ('bulk', 'bito')
     `, [userId]);
 
     if (userResult.rows.length > 0 && userResult.rows[0].sms_tables?.length > 0) {
@@ -91,7 +91,7 @@ export async function getCompanySmsTables(companyId: string, userId?: string): P
     SELECT lg.sms_tables
     FROM sms_line_groups lg
     JOIN companies c ON c.line_group_id = lg.id
-    WHERE c.id = $1 AND lg.is_active = true AND lg.group_type = 'bulk'
+    WHERE c.id = $1 AND lg.is_active = true AND lg.group_type IN ('bulk', 'bito')
   `, [companyId]);
 
   const hasDedicatedGroup = result.rows.length > 0 && result.rows[0].sms_tables?.length > 0;
@@ -606,7 +606,7 @@ async function getAllCompanyUserLineTables(companyId: string): Promise<string[]>
     SELECT DISTINCT lg.sms_tables
     FROM users u
     JOIN sms_line_groups lg ON lg.id = u.line_group_id
-    WHERE u.company_id = $1 AND lg.is_active = true AND lg.group_type = 'bulk'
+    WHERE u.company_id = $1 AND lg.is_active = true AND lg.group_type IN ('bulk', 'bito')
   `, [companyId]);
 
   const tables: string[] = [];

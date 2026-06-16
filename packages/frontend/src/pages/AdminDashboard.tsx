@@ -4901,7 +4901,7 @@ const handleApproveRequest = async (id: string) => {
                   className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
                 >
                   <option value="">회사 기본 라인그룹 사용</option>
-                  {lineGroups.filter((lg: any) => lg.group_type === 'bulk' && lg.is_active).map((lg: any) => (
+                  {lineGroups.filter((lg: any) => (lg.group_type === 'bulk' || lg.group_type === 'bito') && lg.is_active).map((lg: any) => (
                     <option key={lg.id} value={lg.id}>{lg.group_name} ({lg.sms_tables?.length || 0}개 테이블)</option>
                   ))}
                 </select>
@@ -5298,7 +5298,7 @@ const handleApproveRequest = async (id: string) => {
                       onChange={(e) => setEditCompany({ ...editCompany, lineGroupId: e.target.value })}
                       className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none">
                       <option value="">미할당 (전체 라인 사용)</option>
-                      {lineGroups.filter((lg: any) => lg.group_type === 'bulk' && lg.is_active).map((lg: any) => (
+                      {lineGroups.filter((lg: any) => (lg.group_type === 'bulk' || lg.group_type === 'bito') && lg.is_active).map((lg: any) => (
                         <option key={lg.id} value={lg.id}>{lg.group_name} ({(lg.sms_tables || []).join(', ')})</option>
                       ))}
                     </select>
