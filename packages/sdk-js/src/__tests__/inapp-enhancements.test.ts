@@ -163,4 +163,20 @@ describe('HanjulloInAppModule 자동 기동 보강', () => {
       expect(body.dwell_seconds).toBe(2);
     });
   });
+
+  it('platform=app이면 active 요청에 channel=app을 포함한다 (앱 채널 메시지 수신)', async () => {
+    const m = new HanjulloInAppModule('hjl_test', '', ENDPOINT);
+    await m.init({ anonymousId: 'anon_app', platform: 'app', enableAutoTriggers: false });
+    const call = activeCalls()[0];
+    expect(call).toBeDefined();
+    expect(String(call[0])).toContain('channel=app');
+  });
+
+  it('platform 미지정(웹)이면 active 요청에 channel 파라미터가 없다 (서버 기본 web)', async () => {
+    const m = new HanjulloInAppModule('hjl_test', '', ENDPOINT);
+    await m.init({ anonymousId: 'anon_web', enableAutoTriggers: false });
+    const call = activeCalls()[0];
+    expect(call).toBeDefined();
+    expect(String(call[0])).not.toContain('channel=');
+  });
 });

@@ -90,6 +90,8 @@ export interface InAppInitInput {
   enableAutoTriggers?: boolean;
   /** 디버그 로깅 활성 (default false) */
   debug?: boolean;
+  /** ★ 2026-06-17 2단계 — 'web'(자사몰 팝업, 기본) / 'app'(웹뷰 앱 인앱). app이면 앱 채널 메시지를 받아 앱 형태로 렌더 */
+  platform?: 'web' | 'app';
 }
 
 // ════════════════════════════════════════════════════════════════════
@@ -170,9 +172,11 @@ export class HanjulloInAppModule {
     if (input.externalId) params.set('external_id', input.externalId);
     if (input.anonymousId) params.set('anonymous_id', input.anonymousId);
     if (seenIds) params.set('seen', seenIds);
+    // ★ 2026-06-17 2단계 — 앱(웹뷰)이면 채널=app 요청 (미전송 시 서버 기본 web)
+    if (input.platform === 'app') params.set('channel', 'app');
 
-    // 캐시 확인 (5분 TTL)
-    const cacheKey = `${trigger}|${input.externalId || ''}|${input.anonymousId || ''}`;
+    // 캐시 확인 (5분 TTL) — 채널별 분리 (web/app 다른 메시지)
+    const cacheKey = `${input.platform || 'web'}|${trigger}|${input.externalId || ''}|${input.anonymousId || ''}`;
     const cached = this.getCachedMessages(cacheKey);
     if (cached) {
       this.debugLog(input, `캐시 hit (${cacheKey})`);

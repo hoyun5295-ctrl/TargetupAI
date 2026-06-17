@@ -540,12 +540,14 @@ router.get('/inapp/active', requireCdpKeyOrBrowserOrigin, async (req: Request, r
     const seenRaw = req.query.seen ? String(req.query.seen) : '';
     const seenMessageIds = seenRaw ? seenRaw.split(',').filter(Boolean) : [];
 
+    const reqChannel = req.query.channel === 'app' ? 'app' : 'web';
     const messages = await getActiveMessagesForCustomerV2({
       companyId: cdpAuth.companyId,
       triggerEvent: trigger,
       externalId,
       anonymousId,
       seenMessageIds,
+      channel: reqChannel,
     });
 
     // T3 (2026-06-11) — 자동 기동 개인화: 메시지들이 실제 쓰는 변수만 customer로 동봉 (식별 회원 한정)
@@ -929,7 +931,9 @@ router.get('/inapp', async (req: Request, res: Response) => {
   try {
     const companyId = req.user?.companyId;
     if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
-    const messages = await listInAppMessages(companyId);
+    const channelRaw = req.query.channel ? String(req.query.channel) : undefined;
+    const channel = channelRaw === 'web' || channelRaw === 'app' ? channelRaw : undefined;
+    const messages = await listInAppMessages(companyId, channel);
     // 메시지별 통계 추가
     const withStats = await Promise.all(
       messages.map(async (m) => ({
@@ -950,7 +954,8 @@ router.get('/inapp/stats', async (req: Request, res: Response) => {
   try {
     const companyId = req.user?.companyId;
     if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
-    const stats = await getCompanyInAppStats(companyId);
+    const ch = req.query.channel === 'web' || req.query.channel === 'app' ? req.query.channel : undefined;
+    const stats = await getCompanyInAppStats(companyId, ch);
     return res.json({ success: true, stats });
   } catch (err: any) {
     console.error('[CDP /inapp/stats] 오류:', err);
@@ -1392,7 +1397,8 @@ router.get('/inapp/overview', async (req: Request, res: Response) => {
   const auth = await ensureInAppAdmin(req, res);
   if (!auth) return;
   try {
-    const overview = await buildInAppOverview(auth.companyId);
+    const ch = req.query.channel === 'web' || req.query.channel === 'app' ? req.query.channel : undefined;
+    const overview = await buildInAppOverview(auth.companyId, ch);
     return res.json({ success: true, overview });
   } catch (err: any) {
     console.error('[CDP /inapp/overview] 오류:', err);
@@ -1409,7 +1415,8 @@ router.get('/inapp/top-messages', async (req: Request, res: Response) => {
   if (!auth) return;
   try {
     const limit = Math.min(Math.max(parseInt(String(req.query.limit || '10'), 10) || 10, 1), 50);
-    const top = await buildTopMessages(auth.companyId, limit);
+    const ch = req.query.channel === 'web' || req.query.channel === 'app' ? req.query.channel : undefined;
+    const top = await buildTopMessages(auth.companyId, limit, ch);
     return res.json({ success: true, messages: top });
   } catch (err: any) {
     console.error('[CDP /inapp/top-messages] 오류:', err);

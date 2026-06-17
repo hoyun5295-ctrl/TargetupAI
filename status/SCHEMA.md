@@ -1799,7 +1799,7 @@ CAFE24_REDIRECT_URI=https://app.hanjul.ai/api/cafe24/oauth/callback
 | created_at | timestamptz | |
 - INDEX: company_id, created_at DESC
 
-### cdp_inapp_messages (In-app Message 정의) — D175-A 신규 + D215+ 확장 (★ 2026-06-11 운영 information_schema 실측 32컬럼)
+### cdp_inapp_messages (In-app Message 정의) — D175-A 신규 + D215+ 확장 (★ 2026-06-11 실측 32컬럼 + 2026-06-17 channel 1컬럼 = 33)
 
 | 컬럼 | 타입 | 비고 |
 |------|------|------|
@@ -1835,7 +1835,9 @@ CAFE24_REDIRECT_URI=https://app.hanjul.ai/api/cafe24/oauth/callback
 | allowed_weekdays | integer[] DEFAULT '{0,1,2,3,4,5,6}' | ★ 실측 |
 | locale_variants | jsonb DEFAULT '{}' | ★ 실측 |
 | animation | varchar DEFAULT 'fade' | ★ 실측 — fade/slide/bounce/pulse |
+| channel | varchar(10) NOT NULL DEFAULT 'web' | ★ 2026-06-17 — web/app 채널 분리 (웹 팝업 / 앱 인앱). SDK 서빙(/inapp/active)은 web만 노출 |
 - INDEX: company_id, status, start_at, end_at
+- INDEX: idx_inapp_channel(company_id, channel, status) ★ 2026-06-17
 
 ### cdp_inapp_impressions (In-app Message 표시/클릭 트래킹) — D175-A 신규 + D215+ 확장 (★ 2026-06-11 운영 information_schema 실측 11컬럼)
 

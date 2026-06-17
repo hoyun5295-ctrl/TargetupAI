@@ -43,6 +43,7 @@ export interface InAppMessage {
   startAt: Date | null;
   endAt: Date | null;
   status: InAppStatus;
+  channel: 'web' | 'app';
 }
 
 export interface CreateInAppMessageInput {
@@ -58,6 +59,7 @@ export interface CreateInAppMessageInput {
   startAt?: string | null;
   endAt?: string | null;
   status?: InAppStatus;
+  channel?: 'web' | 'app';
 }
 
 // ════════════════════════════════════════════════════════════════════
@@ -75,17 +77,19 @@ export async function createInAppMessage(
 
   const position = (validPositions.includes(input.position as InAppPosition) ? input.position : 'top_banner') as InAppPosition;
   const frequency = (validFrequencies.includes(input.displayFrequency as InAppFrequency) ? input.displayFrequency : 'once_per_session') as InAppFrequency;
+  // ★ 2026-06-17 채널 분리 — web(자사몰 팝업) / app(모바일 인앱). 미지정 시 web.
+  const channel: 'web' | 'app' = input.channel === 'app' ? 'app' : 'web';
 
   const result = await query(
     `INSERT INTO cdp_inapp_messages (
       id, company_id, created_by, title, body, action_url, action_label,
       position, background_color, text_color,
-      trigger_event, display_frequency, start_at, end_at, status,
+      trigger_event, display_frequency, start_at, end_at, status, channel,
       created_at, updated_at
     ) VALUES (
       gen_random_uuid(), $1::uuid, $2::uuid, $3, $4, $5, $6,
       $7, $8, $9,
-      $10, $11, $12, $13, $14,
+      $10, $11, $12, $13, $14, $15,
       NOW(), NOW()
     ) RETURNING *`,
     [
@@ -94,18 +98,19 @@ export async function createInAppMessage(
       position, input.backgroundColor || '#4f46e5', input.textColor || '#ffffff',
       input.triggerEvent || 'page_load', frequency,
       input.startAt || null, input.endAt || null,
-      input.status || 'active',
+      input.status || 'active', channel,
     ]
   );
   return mapRowToMessage(result.rows[0]);
 }
 
-export async function listInAppMessages(companyId: string): Promise<InAppMessage[]> {
+export async function listInAppMessages(companyId: string, channel?: 'web' | 'app'): Promise<InAppMessage[]> {
   const result = await query(
     `SELECT * FROM cdp_inapp_messages
      WHERE company_id = $1::uuid AND status != 'archived'
+       AND ($2::varchar IS NULL OR channel = $2)
      ORDER BY created_at DESC`,
-    [companyId]
+    [companyId, channel || null]
   );
   return result.rows.map(mapRowToMessage);
 }
@@ -165,6 +170,8 @@ export interface ActiveMessagesInput {
   anonymousId?: string;             // 비회원 식별
   /** 클라이언트가 전달한 표시 이력 (localStorage) — 서버 검증 보조 */
   seenMessageIds?: string[];
+  /** ★ 2026-06-17 2단계 — 'web'(자사몰 팝업, 기본) / 'app'(웹뷰 앱 인앱). 미지정 시 web 하위호환 */
+  channel?: 'web' | 'app';
 }
 
 export async function getActiveMessagesForCustomer(input: ActiveMessagesInput): Promise<InAppMessage[]> {
@@ -287,7 +294,7 @@ export async function getMessageStats(companyId: string, messageId: string): Pro
 
 // ★ D210+ Phase 3 B-4 (2026-05-23 Harold 명시): 회사 전체 메시지 통계 (CTR funnel 시각화)
 //   회사 admin Dashboard 메시지별 funnel 시각화 + 비교 표 일치
-export async function getCompanyInAppStats(companyId: string): Promise<Array<{
+export async function getCompanyInAppStats(companyId: string, channel?: 'web' | 'app'): Promise<Array<{
   messageId: string;
   title: string;
   status: string;
@@ -310,6 +317,7 @@ export async function getCompanyInAppStats(companyId: string): Promise<Array<{
      FROM cdp_inapp_messages m
      LEFT JOIN cdp_inapp_impressions i ON i.message_id = m.id AND i.company_id = m.company_id
      WHERE m.company_id = $1::uuid
+       AND ($2::varchar IS NULL OR m.channel = $2)
      GROUP BY m.id, m.title, m.status, m.created_at
      ORDER BY m.created_at DESC`,
     [companyId]
@@ -351,6 +359,7 @@ function mapRowToMessage(row: any): InAppMessage {
     startAt: row.start_at ? new Date(row.start_at) : null,
     endAt: row.end_at ? new Date(row.end_at) : null,
     status: row.status,
+    channel: row.channel === 'app' ? 'app' : 'web',
   };
 }
 
@@ -403,7 +412,7 @@ const FULL_COLUMNS = `id, title, body, action_url, action_label, position, backg
                       template, image_url, buttons, segment_conditions, trigger_conditions,
                       personalization_vars, parent_message_id, variant_weight,
                       auto_dismiss_seconds, max_displays_per_user,
-                      send_start_hour, send_end_hour, allowed_weekdays, locale_variants, animation`;
+                      send_start_hour, send_end_hour, allowed_weekdays, locale_variants, animation, channel`;
 
 /**
  * ★ D215+ V2 — SDK GET /inapp/active 호출 진입.
@@ -425,13 +434,14 @@ export async function getActiveMessagesForCustomerV2(input: ActiveMessagesInput)
      FROM cdp_inapp_messages
      WHERE company_id = $1::uuid
        AND status = 'active'
+       AND channel = $3
        AND parent_message_id IS NULL
        AND (trigger_event = $2 OR (trigger_conditions->>'event' = $2))
        AND (start_at IS NULL OR start_at <= NOW())
        AND (end_at IS NULL OR end_at >= NOW())
      ORDER BY created_at DESC
      LIMIT 20`,
-    [input.companyId, trigger]
+    [input.companyId, trigger, input.channel || 'web']
   );
   let candidates: any[] = candidateResult.rows;
 

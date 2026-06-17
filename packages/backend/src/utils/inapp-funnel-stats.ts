@@ -313,7 +313,8 @@ export async function buildDeviceBreakdown(
 
 export async function buildTopMessages(
   companyId: string,
-  limit: number = 10
+  limit: number = 10,
+  channel?: 'web' | 'app'
 ): Promise<TopMessageEntry[]> {
   if (!companyId) return [];
 
@@ -327,6 +328,7 @@ export async function buildTopMessages(
        AND i.occurred_at >= NOW() - INTERVAL '30 days'
      WHERE m.company_id = $1::uuid
        AND m.parent_message_id IS NULL
+       AND ($2::varchar IS NULL OR m.channel = $2)
      GROUP BY m.id, m.title, m.template, m.status, m.created_at
      HAVING COUNT(*) FILTER (WHERE i.event_type = 'impression') >= 10
      ORDER BY (
@@ -337,7 +339,7 @@ export async function buildTopMessages(
        END
      ) DESC
      LIMIT ${safeLimit}`,
-    [companyId]
+    [companyId, channel || null]
   );
 
   return r.rows.map((row: any, idx: number) => {
@@ -360,7 +362,7 @@ export async function buildTopMessages(
 // 회사 전체 요약 (5 metric + 이전 30일 격차)
 // ════════════════════════════════════════════════════════════════════
 
-export async function buildInAppOverview(companyId: string): Promise<InAppOverview> {
+export async function buildInAppOverview(companyId: string, channel?: 'web' | 'app'): Promise<InAppOverview> {
   if (!companyId) throw new Error('companyId 필수');
 
   // 메시지 수 (parent only)
@@ -368,8 +370,9 @@ export async function buildInAppOverview(companyId: string): Promise<InAppOvervi
     `SELECT COUNT(*)::int AS total,
             COUNT(*) FILTER (WHERE status = 'active')::int AS active
      FROM cdp_inapp_messages
-     WHERE company_id = $1::uuid AND parent_message_id IS NULL`,
-    [companyId]
+     WHERE company_id = $1::uuid AND parent_message_id IS NULL
+       AND ($2::varchar IS NULL OR channel = $2)`,
+    [companyId, channel || null]
   );
 
   // 현재 30일 통계
@@ -378,8 +381,9 @@ export async function buildInAppOverview(companyId: string): Promise<InAppOvervi
             COUNT(*) FILTER (WHERE event_type = 'click')::int AS clicks
      FROM cdp_inapp_impressions
      WHERE company_id = $1::uuid
-       AND occurred_at >= NOW() - INTERVAL '30 days'`,
-    [companyId]
+       AND occurred_at >= NOW() - INTERVAL '30 days'
+       AND ($2::varchar IS NULL OR message_id IN (SELECT id FROM cdp_inapp_messages WHERE company_id = $1::uuid AND channel = $2))`,
+    [companyId, channel || null]
   );
 
   // 이전 30일 (30~60일 전)
@@ -389,8 +393,9 @@ export async function buildInAppOverview(companyId: string): Promise<InAppOvervi
      FROM cdp_inapp_impressions
      WHERE company_id = $1::uuid
        AND occurred_at >= NOW() - INTERVAL '60 days'
-       AND occurred_at < NOW() - INTERVAL '30 days'`,
-    [companyId]
+       AND occurred_at < NOW() - INTERVAL '30 days'
+       AND ($2::varchar IS NULL OR message_id IN (SELECT id FROM cdp_inapp_messages WHERE company_id = $1::uuid AND channel = $2))`,
+    [companyId, channel || null]
   );
 
   // attribution (24h 윈도우)
@@ -409,8 +414,9 @@ export async function buildInAppOverview(companyId: string): Promise<InAppOvervi
        AND i.customer_id IS NOT NULL
        AND c.recent_purchase_date IS NOT NULL
        AND c.recent_purchase_date::timestamptz >= i.occurred_at
-       AND c.recent_purchase_date::timestamptz <= i.occurred_at + INTERVAL '24 hours'`,
-    [companyId]
+       AND c.recent_purchase_date::timestamptz <= i.occurred_at + INTERVAL '24 hours'
+       AND ($2::varchar IS NULL OR i.message_id IN (SELECT id FROM cdp_inapp_messages WHERE company_id = $1::uuid AND channel = $2))`,
+    [companyId, channel || null]
   );
 
   const totalMessages = Number(msgR.rows[0]?.total || 0);
