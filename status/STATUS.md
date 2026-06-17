@@ -107,6 +107,16 @@
 
 ---
 
+### 🟢 2026-06-17 — 직원 디버깅 2건(전송 대기 미처리·전송≠통계) + 시세이도 미발송 근본 (★배포완료)
+> **디버깅1 (에이스 6/13 캠페인관리 대기 666)**: 완료 캠페인(result_final) PG 캐시 fail이 실측보다 적게 굳어, 적재−(성공+실패) 차액 666이 frontend에서 "대기"로 둔갑(캡쳐02 상세 실패 1,565 = 캐시 899 + 666).
+> **디버깅2 (시세이도 6/9 전송 1613 ≠ 성공+실패 1646)**: 슈퍼관리자 캠페인관리(`admin.ts:1769`)가 result_final 분기에서 sent_count 직접 표시(reconcile 누락). results.ts(사용자)만 어제 고쳐 표면 불일치.
+> **fix — 카운트 단일 산식**: `computeDisplayCounts`(sms-table-split, 완료=적재−성공−실패·진행중=실측, 완료 0강제 X) 신설 → `getCampaignResultCounts` {sent,success,fail,pending} 반환 → admin 캠페인관리/통계(querySendStats)/results 요약·목록·CSV·차트/엑셀 통일 + frontend 자체파생(AdminDashboard 캠페인관리·통계·일별 / ResultsModal / CampaignDetailModal) 제거 + campaign-sync-worker 재대조 윈도우 24h→7일(늦은 통신사 리포트 흡수).
+> **시세이도 2건 미발송 근본**: QTmsg Agent가 `rsv1='3'`(서버전송요청완료, 매뉴얼 p.6) 마킹 후 중계서버 미수신(엔진 없음) = 전송 유실 + 재시도 없음. 적재·회신번호 검증 정상(미등록이면 status 9008인데 104). 신규 `expired-pending-sweeper`(1분, cancelled-queue-sweeper 미러) = `rsv1=3 + status 100/104 + mobsend_time NULL + 48h(매뉴얼 SMS·LMS 최장 2일) 초과` → `status 4000`(전송시간초과=실패) 자동 마킹(절대 안 나감 + 화면 실패) · **rsv1=1·2(정상 예약) 절대 보존** + `smsCampaignCountsSafe` lf(라이브 만료 fail 집계 → 대기 잔존 차단). 알림 방식 기각(957건=폭탄, Harold). 정상분 Agent→서버 유실 자체는 게이트웨이 Agent 영역.
+> **검증**: backend·frontend tsc 0 · 순수 `verify-display-counts` 12 PASS · 박-단어/모델명/native dialog grep 0. 설계서 `docs/superpowers/specs/2026-06-17-send-stats-count-unify-design.md`. 상세 [[project_2026_0617_send_count_pending_unify]].
+> **운영 확인(Harold/직원) 남음**: ① 시세이도 2건 status 104→4000 + 캠페인 success+fail=sent_count(대기 0) ② 에이스 캐시 교정(reconcile) ③ expired-sweeper 첫 사이클 957건 실패 마킹 로그.
+
+---
+
 ### 🟢 2026-06-16 — 싱크에이전트 OS별 빌드 5티어 + 슈퍼관리자 배포 위저드 + 다운로드 엔드포인트 + 매뉴얼 갱신 (★배포완료)
 > **배경**: 인비토(Server 2008 R2) 원격 설치 2회 실패 — 단일 빌드(node **16.20.2**)가 구형 OS에서 에러창 없이 로드 실패(node16 공식 최소사양=Win8.1/Server2012R2). 런타임 DLL 동봉만으론 node 버전 벽 못 넘음 → OS 범위별 빌드 티어로 해결.
 > **지원 바닥(미만 명시적 비지원)**: Windows = Server 2008R2/Win7 SP1(node14), Linux = CentOS7/RHEL7/Ubuntu14.04 glibc2.17(node16).

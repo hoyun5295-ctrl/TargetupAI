@@ -299,7 +299,10 @@ async function reconcileFinalizedCampaigns(): Promise<void> {
                  (status = 'failed'
                    AND COALESCE(scheduled_at, sent_at) < NOW() - INTERVAL '10 minutes')
               OR (status = 'completed' AND result_final = true
-                   AND COALESCE(scheduled_at, sent_at) < NOW() - INTERVAL '24 hours')
+                   AND COALESCE(scheduled_at, sent_at) < NOW() - INTERVAL '24 hours'
+                   -- ★ 2026-06-17: 캐시 불일치(성공+실패 < 적재)만 재대조. 정합 캠페인 1778건이 매 사이클
+                   --   BATCH 50을 점유해, 최근 불일치(에이스 6/13)가 send_base ASC에서 영원히 안 잡히던 폭증 차단.
+                   AND (COALESCE(success_count, 0) + COALESCE(fail_count, 0)) < sent_count)
                )
                AND COALESCE(scheduled_at, sent_at) >= NOW() - INTERVAL '21 days'
                AND (result_synced_at IS NULL
