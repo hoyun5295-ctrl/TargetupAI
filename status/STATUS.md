@@ -113,7 +113,7 @@
 > **fix — 카운트 단일 산식**: `computeDisplayCounts`(sms-table-split, 완료=적재−성공−실패·진행중=실측, 완료 0강제 X) 신설 → `getCampaignResultCounts` {sent,success,fail,pending} 반환 → admin 캠페인관리/통계(querySendStats)/results 요약·목록·CSV·차트/엑셀 통일 + frontend 자체파생(AdminDashboard 캠페인관리·통계·일별 / ResultsModal / CampaignDetailModal) 제거 + campaign-sync-worker 재대조 윈도우 24h→7일(늦은 통신사 리포트 흡수).
 > **시세이도 2건 미발송 근본**: QTmsg Agent가 `rsv1='3'`(서버전송요청완료, 매뉴얼 p.6) 마킹 후 중계서버 미수신(엔진 없음) = 전송 유실 + 재시도 없음. 적재·회신번호 검증 정상(미등록이면 status 9008인데 104). 신규 `expired-pending-sweeper`(1분, cancelled-queue-sweeper 미러) = `rsv1=3 + status 100/104 + mobsend_time NULL + 48h(매뉴얼 SMS·LMS 최장 2일) 초과` → `status 4000`(전송시간초과=실패) 자동 마킹(절대 안 나감 + 화면 실패) · **rsv1=1·2(정상 예약) 절대 보존** + `smsCampaignCountsSafe` lf(라이브 만료 fail 집계 → 대기 잔존 차단). 알림 방식 기각(957건=폭탄, Harold). 정상분 Agent→서버 유실 자체는 게이트웨이 Agent 영역.
 > **검증**: backend·frontend tsc 0 · 순수 `verify-display-counts` 12 PASS · 박-단어/모델명/native dialog grep 0. 설계서 `docs/superpowers/specs/2026-06-17-send-stats-count-unify-design.md`. 상세 [[project_2026_0617_send_count_pending_unify]].
-> **운영 확인(Harold/직원) 남음**: ① 시세이도 2건 status 104→4000 + 캠페인 success+fail=sent_count(대기 0) ② 에이스 캐시 교정(reconcile) ③ expired-sweeper 첫 사이클 957건 실패 마킹 로그.
+> **★ 배포 후 reconcile 폭증 재수정·해결 실측**: 에이스 666이 안 고쳐져 확인 → reconcile 윈도우를 24h→7일로 넓힌 게 대상을 1,779건으로 폭증시켰는데 실제 불일치는 1건(에이스)뿐. BATCH 50 + send_base ASC라 최근(6/13) 에이스가 영원히 차례 안 옴. fix=`reconcileFinalizedCampaigns` completed 분기에 불일치(`success+fail < sent_count`) 조건 추가 → 대상 1,779→1. 라인 커버는 `getCompanySmsTablesWithLogs`(회사 전 사용자라인+당월 이력)로 정상이었음(0610 수정). **reconcile 5분 주기(INTERVAL_MS)로 에이스 fail 899→1,565·대기 666→0·result_synced_at 갱신 실측 확인.** 시세이도 status 4000 확인. expired-sweeper 957건 첫 사이클 로그는 운영 잔여.
 
 ---
 

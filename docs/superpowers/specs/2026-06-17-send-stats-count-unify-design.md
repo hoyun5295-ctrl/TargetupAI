@@ -68,3 +68,10 @@
 ## 7. 범위 밖 (별건)
 
 - 취소(cancelled) 캠페인 `sent_count` 잔존 표시 (캡쳐03 취소행 sent_count=1234 vs MySQL 0) — 본 건과 무관, 후속
+
+## 8. 배포 후 운영 검증·후속 수정 (2026-06-17)
+
+- **시세이도 2건 미발송 근본** = QTmsg Agent가 `rsv1='3'`(서버전송요청완료, 매뉴얼 p.6) 마킹 후 중계서버 미수신 = 전송 유실(엔진에 없음). 신규 `expired-pending-sweeper`(1분)가 `rsv1=3 + status 100/104 + mobsend NULL + 48h(매뉴얼 SMS·LMS 최장 2일) 초과` → `status 4000`(전송시간초과=실패) 자동 마킹(절대 안 나감). `rsv1=1·2`(정상 예약) 절대 보존. `smsCampaignCountsSafe` liveAgg에 lf(라이브 만료 fail) 추가. → 실측 status 104→4000 확인.
+- **에이스 666 reconcile 폭증** = reconcile 재대조 윈도우를 24h→7일로 넓힌 게 대상을 1,779건으로 폭증시킴(실 불일치 1건). BATCH 50 + send_base ASC라 최근 에이스(6/13)가 차례 안 옴. fix = `reconcileFinalizedCampaigns` completed 분기에 불일치(`success_count + fail_count < sent_count`) 조건 추가 → 대상 1,779→1. → reconcile 5분 주기(INTERVAL_MS)로 에이스 fail 899→1,565·대기 666→0·result_synced_at 갱신 실측 해결.
+- 라인 커버: `getCompanySmsTablesWithLogs`는 회사 전 사용자 라인 + 당월 이력 포함(0610 수정)이라 정상 — 라인 누락 아님.
+- 교훈: reconcile 윈도우 확대는 대상 폭증을 부르므로 "캐시 불일치(success+fail<sent_count)" 한정이 정답. 시간 윈도우만 넓히면 BATCH·정렬에 막혀 최근 건이 영원히 안 잡힌다.

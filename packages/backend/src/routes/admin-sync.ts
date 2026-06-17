@@ -12,7 +12,7 @@ import { Router, Request, Response } from 'express';
 import { randomUUID } from 'crypto';
 import { authenticate, requireSuperAdmin } from '../middlewares/auth';
 import { query } from '../config/database';
-import { PLATFORMS, OS_TIERS, DB_OPTIONS, resolveAgentBuild, PlatformId } from '../utils/agent-build-tiers';
+import { PLATFORMS, OS_TIERS, DB_OPTIONS, VERIFIED_DBS_BY_TIER, resolveAgentBuild, PlatformId } from '../utils/agent-build-tiers';
 import path from 'path';
 import fs from 'fs';
 
@@ -30,7 +30,7 @@ try { fs.mkdirSync(AGENT_BUILDS_DIR, { recursive: true }); } catch { /* 권한 �
 
 // GET /api/admin/sync/build-tiers — 위저드 부트스트랩(플랫폼/OS/DB 목록)
 router.get('/build-tiers', authenticate, requireSuperAdmin, (_req: Request, res: Response) => {
-  res.json({ success: true, platforms: PLATFORMS, osTiers: OS_TIERS, dbOptions: DB_OPTIONS });
+  res.json({ success: true, platforms: PLATFORMS, osTiers: OS_TIERS, dbOptions: DB_OPTIONS, verifiedDbsByTier: VERIFIED_DBS_BY_TIER });
 });
 
 // GET /api/admin/sync/build-tiers/resolve?platform=&osTier=&db= — 내보낼 빌드 1건

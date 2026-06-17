@@ -32,6 +32,7 @@ export function createDbConnector(config: DbConnectionConfig): IDbConnector {
     case 'csv':
       return new ExcelCsvConnector(config);
 
+    // 향후 확장 자리: case 'odbc' — ODBC 범용 브리지(티베로/DB2 등). 실제 고객 발생 시 추가.
     default:
       throw new Error(`지원하지 않는 DB 타입: ${config.type}`);
   }

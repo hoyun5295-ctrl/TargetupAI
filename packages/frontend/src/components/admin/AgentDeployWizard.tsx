@@ -13,7 +13,7 @@ import { useToast } from '../ToastProvider';
 
 type PlatformId = 'windows' | 'linux';
 interface Platform { id: PlatformId; label: string; }
-interface OsTier { id: string; platform: PlatformId; label: string; supported: boolean; rangeMessage?: string; }
+interface OsTier { id: string; platform: PlatformId; label: string; supported: boolean; rangeMessage?: string; buildTier?: string | null; }
 interface DbOption { id: string; label: string; notes: string[]; }
 interface ResolveResult {
   supported: boolean;
@@ -58,7 +58,7 @@ function WizardCard({
 
 export default function AgentDeployWizard() {
   const toast = useToast();
-  const [boot, setBoot] = useState<{ platforms: Platform[]; osTiers: OsTier[]; dbOptions: DbOption[] } | null>(null);
+  const [boot, setBoot] = useState<{ platforms: Platform[]; osTiers: OsTier[]; dbOptions: DbOption[]; verifiedDbsByTier: Record<string, string[]> } | null>(null);
   const [step, setStep] = useState<1 | 2 | 3 | 4>(1);
   const [platform, setPlatform] = useState<PlatformId | null>(null);
   const [osTier, setOsTier] = useState<OsTier | null>(null);
@@ -70,7 +70,7 @@ export default function AgentDeployWizard() {
       try {
         const res = await fetch('/api/admin/sync/build-tiers', { headers: authHeader() });
         const data = await res.json();
-        if (data.success) setBoot({ platforms: data.platforms, osTiers: data.osTiers, dbOptions: data.dbOptions });
+        if (data.success) setBoot({ platforms: data.platforms, osTiers: data.osTiers, dbOptions: data.dbOptions, verifiedDbsByTier: data.verifiedDbsByTier || {} });
         else toast.error('빌드 티어 정보를 불러오지 못했습니다.');
       } catch {
         toast.error('빌드 티어 정보를 불러오지 못했습니다.');
@@ -208,14 +208,23 @@ export default function AgentDeployWizard() {
           </div>
         )}
 
-        {step === 3 && (
-          <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-            {(boot?.dbOptions || []).map((d) => (
-              <WizardCard key={d.id} icon={Database} title={d.label} onClick={() => pickDb(d)} />
-            ))}
-            {loading && <p className="col-span-full text-sm text-gray-400">빌드 결정 중…</p>}
-          </div>
-        )}
+        {step === 3 && (() => {
+          const verified = (osTier?.buildTier && boot?.verifiedDbsByTier[osTier.buildTier]) || [];
+          const dbs = (boot?.dbOptions || []).filter((d) => verified.includes(d.id));
+          return (
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+              {dbs.map((d) => (
+                <WizardCard key={d.id} icon={Database} title={d.label} onClick={() => pickDb(d)} />
+              ))}
+              {dbs.length === 0 && (
+                <p className="col-span-full text-sm text-amber-600">
+                  이 OS 버전에서 연결을 지원하는 DB가 아직 없습니다. 같은 네트워크의 최신 PC/서버에 에이전트를 설치해 DB를 읽어오세요.
+                </p>
+              )}
+              {loading && <p className="col-span-full text-sm text-gray-400">빌드 결정 중…</p>}
+            </div>
+          );
+        })()}
 
         {step === 4 && result && (
           result.supported ? (

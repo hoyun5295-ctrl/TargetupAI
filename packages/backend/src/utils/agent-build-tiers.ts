@@ -143,7 +143,39 @@ export const DB_OPTIONS: DbOption[] = [
     label: 'PostgreSQL',
     notes: ['pg 드라이버 사용', '읽기전용 계정 사용'],
   },
+  {
+    id: 'oracle',
+    label: 'Oracle',
+    notes: [
+      '읽기전용 계정 사용',
+      'Service Name 방식 연결 (host:port/service)',
+      '테이블·컬럼명이 대문자인 경우가 많음 (대문자로 입력)',
+    ],
+  },
+  {
+    id: 'excel',
+    label: 'Excel 파일 (.xlsx)',
+    notes: ['파일 경로 지정', '에이전트가 파일 변경을 감시'],
+  },
+  {
+    id: 'csv',
+    label: 'CSV 파일 (.csv)',
+    notes: ['파일 경로 지정', '구분자·인코딩 확인 (기본 , / utf-8)'],
+  },
 ];
+
+// 티어별 실연결 검증을 통과한 DB(위저드 db id) — 단일 진실원.
+// 빌드 스모크로만 갱신한다 (보이면 작동 불변식: 미검증 조합은 위저드·resolve에서 노출 금지).
+// 2026-06-17: oracledb 6.10 thin 모드가 pkg 단일 exe에서 node14/16/20 전부 로드됨을 스모크로 확인
+//   → 전 티어에 oracle 등재. (리눅스 2티어는 동일 순수 JS thin — build:tiers 산출 후 실 연결은 운영 실측.)
+const ALWAYS_DBS = ['mssql-old', 'mssql-modern', 'mysql', 'postgres', 'oracle', 'excel', 'csv'];
+export const VERIFIED_DBS_BY_TIER: Record<string, string[]> = {
+  'win-modern': ALWAYS_DBS,
+  'win-mid': ALWAYS_DBS,
+  'win-legacy': ALWAYS_DBS,
+  'linux-modern': ALWAYS_DBS,
+  'linux-legacy': ALWAYS_DBS,
+};
 
 /**
  * OS(플랫폼+버전)와 DB를 받아 내보낼 빌드와 설치 안내를 돌려준다.
@@ -168,6 +200,21 @@ export function resolveAgentBuild(
       dbNotes,
       installSummary: [],
       rangeMessage: tier?.rangeMessage ?? '지원 범위 밖이거나 알 수 없는 OS입니다.',
+    };
+  }
+
+  // ★ 보이면 작동 불변식: 이 티어에서 실연결 검증 안 된 DB는 차단 (fail-closed)
+  const verifiedDbs = VERIFIED_DBS_BY_TIER[tier.buildTier] || [];
+  if (dbId && !verifiedDbs.includes(dbId)) {
+    return {
+      supported: false,
+      buildTier: null,
+      node: null,
+      runtimeBundle: false,
+      packageFile: null,
+      dbNotes,
+      installSummary: [],
+      rangeMessage: `${tier.label}에서는 ${db?.label ?? dbId} 연결이 아직 지원되지 않습니다. 같은 네트워크의 최신 PC/서버에 에이전트를 설치해 이 DB를 읽어오세요.`,
     };
   }
 

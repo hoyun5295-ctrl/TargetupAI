@@ -3,6 +3,8 @@
  * Strategy 패턴: 모든 DB 커넥터가 이 인터페이스를 구현
  */
 
+// 향후 확장 자리: 'odbc' — 티베로/DB2/알티베이스 등 Node 전용 드라이버가 없는 DB는
+// node-odbc + 고객 PC ODBC 드라이버로 단일 커넥터를 추가한다 (실제 고객 발생 시).
 export type DbType = 'mssql' | 'mysql' | 'oracle' | 'postgres' | 'excel' | 'csv';
 
 export interface DbConnectionConfig {

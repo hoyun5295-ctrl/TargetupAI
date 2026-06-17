@@ -27,6 +27,9 @@
   "pkg": {
     "assets": [
       "dist/sql-wasm.wasm"
+    ],
+    "scripts": [
+      "node_modules/oracledb/**/*.js"
     ]
   },
   "dependencies": {
@@ -40,6 +43,7 @@
     "node-cron": "^3.0.3",
     "node-windows": "^1.0.0-beta.8",
     "nodemailer": "^8.0.1",
+    "oracledb": "^6.10.0",
     "papaparse": "^5.5.3",
     "pg": "^8.20.0",
     "sql.js": "^1.11.0",
