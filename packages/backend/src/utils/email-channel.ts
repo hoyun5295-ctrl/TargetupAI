@@ -54,6 +54,7 @@ export interface EmailCampaign {
   clickCount: number;
   bounceCount: number;
   unsubscribeCount: number;
+  sections: unknown[] | null; // 비주얼 빌더 Section[] (null = manual HTML)
   createdBy: string | null;
   createdAt: Date;
 }
@@ -69,6 +70,7 @@ export interface CreateCampaignInput {
   fromEmail?: string;
   isAd?: boolean;
   aiGenerated?: boolean;
+  sections?: unknown[] | null; // 비주얼 빌더 Section[] — 있으면 html_body는 렌더 산출물
   scheduledAt?: Date;
 }
 
@@ -131,6 +133,11 @@ export async function createEmailCampaign(input: CreateCampaignInput): Promise<E
     await query(`UPDATE email_campaigns SET ai_generated = true WHERE id = $1::uuid`, [campaign.id]);
     campaign.aiGenerated = true;
   }
+  // 비주얼 빌더 sections — jsonb 저장(컬럼 확인됨). 없으면 미저장(기존 raw HTML 흐름 보존).
+  if (Array.isArray(input.sections) && input.sections.length > 0) {
+    await query(`UPDATE email_campaigns SET sections = $1::jsonb WHERE id = $2::uuid`, [JSON.stringify(input.sections), campaign.id]);
+    campaign.sections = input.sections;
+  }
   return campaign;
 }
 
@@ -166,6 +173,7 @@ export async function updateEmailCampaign(
        from_email = COALESCE($8, from_email),
        is_ad = COALESCE($9, is_ad),
        scheduled_at = COALESCE($10, scheduled_at),
+       sections = COALESCE($11::jsonb, sections),
        updated_at = NOW()
      WHERE id = $1::uuid AND company_id = $2::uuid
      RETURNING *`,
@@ -180,6 +188,7 @@ export async function updateEmailCampaign(
       patch.fromEmail ?? null,
       patch.isAd === undefined ? null : patch.isAd,
       patch.scheduledAt ?? null,
+      Array.isArray(patch.sections) && patch.sections.length > 0 ? JSON.stringify(patch.sections) : null,
     ]
   );
   return result.rows.length > 0 ? mapRow(result.rows[0]) : null;
@@ -679,6 +688,7 @@ function mapRow(row: any): EmailCampaign {
     clickCount: row.click_count || 0,
     bounceCount: row.bounce_count || 0,
     unsubscribeCount: row.unsubscribe_count || 0,
+    sections: Array.isArray(row.sections) ? row.sections : (row.sections ?? null),
     createdBy: row.created_by,
     createdAt: new Date(row.created_at),
   };

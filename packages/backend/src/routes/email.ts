@@ -61,6 +61,7 @@ import {
 } from '../utils/email-tracking';
 import {
   generateEmailOneShot,
+  generateEmailSections,
   refineEmail,
   analyzeSpamRisk,
   runEmailCodeChecks,
@@ -72,6 +73,10 @@ import {
   EMAIL_SCENARIO_PRESETS,
   type EmailScenarioKey,
 } from '../utils/email-ai';
+// 비주얼 빌더: DM Section[] → 이메일 안전 HTML 렌더 + 회사 브랜드킷
+import { renderEmailSections, extractEmailText } from '../utils/email/email-section-renderer';
+import { getCompanyBrandKit } from '../utils/dm/dm-brand-kit';
+import type { Section } from '../utils/dm/dm-section-registry';
 import { checkCredit, deductCreditSafe, InsufficientCreditError } from '../utils/ai-credit';
 import { getCreditCost } from '../utils/ai-credit-calc';
 
@@ -423,21 +428,35 @@ router.post('/campaigns', async (req: Request, res: Response) => {
   const auth = await ensureEmailAdmin(req, res);
   if (!auth) return;
   try {
-    const { name, subject, html_body, text_body, from_name, from_email, is_ad, scheduled_at, ai_generated } = req.body;
-    if (!name || !subject || !html_body) {
-      return res.status(400).json({ success: false, error: 'name, subject, html_body는 필수입니다.' });
+    const { name, subject, html_body, text_body, from_name, from_email, is_ad, scheduled_at, ai_generated, sections } = req.body;
+    if (!name || !subject) {
+      return res.status(400).json({ success: false, error: 'name, subject는 필수입니다.' });
+    }
+    // 비주얼 빌더: sections 있으면 이메일 HTML 렌더 → html_body (없으면 클라이언트 html_body 직접 흐름 보존)
+    let finalHtml = html_body ? String(html_body) : '';
+    let finalText = text_body ? String(text_body) : undefined;
+    let finalSections: unknown[] | null = null;
+    if (Array.isArray(sections) && sections.length > 0) {
+      const brandKit = await getCompanyBrandKit(auth.companyId);
+      finalHtml = renderEmailSections(sections as Section[], { brandKit, publicBase: process.env.PUBLIC_BASE_URL });
+      finalText = extractEmailText(sections as Section[]);
+      finalSections = sections;
+    }
+    if (!finalHtml) {
+      return res.status(400).json({ success: false, error: 'html_body 또는 sections는 필수입니다.' });
     }
     const campaign = await createEmailCampaign({
       companyId: auth.companyId,
       createdBy: auth.userId,
       name: String(name),
       subject: String(subject),
-      htmlBody: String(html_body),
-      textBody: text_body ? String(text_body) : undefined,
+      htmlBody: finalHtml,
+      textBody: finalText,
       fromName: from_name ? String(from_name) : undefined,
       fromEmail: from_email ? String(from_email) : undefined,
       isAd: !!is_ad,
       aiGenerated: !!ai_generated,
+      sections: finalSections,
       scheduledAt: scheduled_at ? new Date(scheduled_at) : undefined,
     });
     return res.json({ success: true, campaign });
@@ -461,6 +480,15 @@ router.patch('/campaigns/:id', async (req: Request, res: Response) => {
     if (req.body.from_email !== undefined) patch.fromEmail = req.body.from_email ? String(req.body.from_email) : null;
     if (req.body.is_ad !== undefined) patch.isAd = !!req.body.is_ad;
     if (req.body.scheduled_at !== undefined) patch.scheduledAt = req.body.scheduled_at ? new Date(req.body.scheduled_at) : null;
+    // 비주얼 빌더: sections 수정 시 html_body·text_body 재렌더
+    if (Array.isArray(req.body.sections)) {
+      patch.sections = req.body.sections;
+      if (req.body.sections.length > 0) {
+        const brandKit = await getCompanyBrandKit(auth.companyId);
+        patch.htmlBody = renderEmailSections(req.body.sections as Section[], { brandKit, publicBase: process.env.PUBLIC_BASE_URL });
+        patch.textBody = extractEmailText(req.body.sections as Section[]);
+      }
+    }
 
     const updated = await updateEmailCampaign(auth.companyId, req.params.id, patch);
     if (!updated) return res.status(404).json({ success: false, error: '캠페인을 찾을 수 없습니다.' });
@@ -760,6 +788,52 @@ router.post('/ai/generate', async (req: Request, res: Response) => {
       return res.status(402).json({ success: false, error: err.message, code: 'INSUFFICIENT_CREDIT' });
     }
     return res.status(500).json({ success: false, error: err?.message || 'AI 생성 실패' });
+  }
+});
+
+// 비주얼 빌더 — AI가 이메일 블록 Section[]을 생성(이미지·혜택은 빈 자리). 크레딧 3.
+router.post('/ai/generate-sections', async (req: Request, res: Response) => {
+  const auth = await ensureEmailAdmin(req, res);
+  if (!auth) return;
+  try {
+    const prompt = req.body?.prompt ? String(req.body.prompt).trim() : '';
+    const scenario = req.body?.scenario ? String(req.body.scenario) as EmailScenarioKey : undefined;
+    const isAd = !!req.body?.is_ad;
+    if (!prompt && !scenario) {
+      return res.status(400).json({ success: false, error: '요청 내용 또는 시나리오를 입력해주세요.' });
+    }
+    if (prompt.length > 2000) {
+      return res.status(400).json({ success: false, error: '요청은 2000자 이내로 입력해주세요.' });
+    }
+    if (scenario && !EMAIL_SCENARIO_PRESETS[scenario]) {
+      return res.status(400).json({ success: false, error: '알 수 없는 시나리오입니다.' });
+    }
+    const cost = getCreditCost('email-ai-generate'); // 3
+    await checkCredit(auth.companyId, cost);
+    const result = await generateEmailSections({ companyId: auth.companyId, userId: auth.userId, prompt, scenario, isAd });
+    await deductCreditSafe({ companyId: auth.companyId, cost, source: 'email-ai-generate', createdBy: auth.userId });
+    return res.json({ success: true, data: result });
+  } catch (err: any) {
+    console.error('[Email /ai/generate-sections] 오류:', err);
+    if (err instanceof InsufficientCreditError) {
+      return res.status(402).json({ success: false, error: err.message, code: 'INSUFFICIENT_CREDIT' });
+    }
+    return res.status(500).json({ success: false, error: err?.message || 'AI 비주얼 생성 실패' });
+  }
+});
+
+// 비주얼 에디터 실시간 미리보기 — sections → 이메일 HTML (크레딧·저장 없음).
+router.post('/render-preview', async (req: Request, res: Response) => {
+  const auth = await ensureEmailAdmin(req, res);
+  if (!auth) return;
+  try {
+    const sections = Array.isArray(req.body?.sections) ? req.body.sections : [];
+    const brandKit = await getCompanyBrandKit(auth.companyId);
+    const html = renderEmailSections(sections as Section[], { brandKit, publicBase: process.env.PUBLIC_BASE_URL });
+    return res.json({ success: true, html });
+  } catch (err: any) {
+    console.error('[Email /render-preview] 오류:', err);
+    return res.status(500).json({ success: false, error: err?.message || '미리보기 렌더 실패' });
   }
 });
 

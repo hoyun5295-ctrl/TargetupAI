@@ -11,6 +11,9 @@ import CreditConfirmModal from '../components/credit/CreditConfirmModal';
 import { useToast } from '../components/ToastProvider';
 // ★ D225+ (2026-05-28 Harold 명시): Email 발송 이력 모달 신설
 import EmailEventsModal from '../components/email/EmailEventsModal';
+// 비주얼 빌더 에디터
+import EmailVisualEditor from '../components/email/EmailVisualEditor';
+import type { Section } from '../utils/dm-section-defaults';
 
 // ★ 2026-06-13: AI 빠른 시작 7 시나리오 (백엔드 EMAIL_SCENARIO_PRESETS key와 1:1)
 const EMAIL_QUICK_STARTS: Array<{ key: string; label: string; desc: string; icon: typeof Mail; grad: string }> = [
@@ -58,6 +61,7 @@ interface EmailCampaign {
   bounceCount: number;
   unsubscribeCount: number;
   createdAt: string;
+  sections?: Section[] | null; // 비주얼 빌더 Section[] (있으면 비주얼 에디터로 수정)
 }
 
 // 편집 모달 상태 — 캠페인 필드 + AI 생성 부가(제목 3안·프리헤더·AI 플래그)
@@ -186,6 +190,8 @@ export default function EmailCampaignsPage() {
   const [nonOpenerModal, setNonOpenerModal] = useState<{ campaign: EmailCampaign } | null>(null);
   // AI 캠페인 발송 확정 30크레딧 확인
   const [creditConfirm, setCreditConfirm] = useState<{ campaign: EmailCampaign; payload: any; desc: string } | null>(null);
+  // 비주얼 빌더 에디터 (sections 기반)
+  const [visualEditor, setVisualEditor] = useState<{ sections: Section[]; name?: string; subject?: string; isAd?: boolean; aiGenerated?: boolean; campaignId?: string } | null>(null);
 
   const token = () => localStorage.getItem('token');
   const authHeaders = () => ({ Authorization: `Bearer ${token()}`, 'Content-Type': 'application/json' });
@@ -587,6 +593,15 @@ export default function EmailCampaignsPage() {
               <span className="hidden sm:inline">새로고침</span>
             </button>
             <button
+              onClick={() => setVisualEditor({ sections: [], isAd: true, aiGenerated: false })}
+              disabled={!smtpConfigured}
+              className="text-xs bg-gradient-to-r from-violet-500/40 to-fuchsia-500/40 hover:from-violet-500/60 hover:to-fuchsia-500/60 disabled:opacity-40 disabled:cursor-not-allowed text-violet-50 px-3 py-2 rounded-lg flex items-center gap-1.5 font-medium transition-colors border border-violet-400/30"
+              title={smtpConfigured ? undefined : 'SMTP 설정 완료 후 활용 가능'}
+            >
+              <Sparkles className="w-3.5 h-3.5" />
+              비주얼로 만들기
+            </button>
+            <button
               onClick={() => setEditing({ ...EMPTY_CAMPAIGN_FORM, fromEmail: smtpConfig?.fromEmail || '', fromName: smtpConfig?.fromName || '한줄로AI' })}
               disabled={!smtpConfigured}
               className="text-xs bg-gradient-to-r from-blue-500/40 to-sky-500/40 hover:from-blue-500/60 hover:to-sky-500/60 disabled:opacity-40 disabled:cursor-not-allowed text-blue-50 px-3 py-2 rounded-lg flex items-center gap-1.5 font-medium transition-colors border border-blue-400/30"
@@ -844,7 +859,12 @@ export default function EmailCampaignsPage() {
                         </button>
                       </>
                     )}
-                    <button onClick={() => setEditing(c)} className="text-[11px] text-indigo-300 hover:bg-indigo-500/10 px-2.5 py-1 rounded flex items-center gap-1">
+                    <button
+                      onClick={() => (c.sections && c.sections.length
+                        ? setVisualEditor({ sections: c.sections as Section[], name: c.name, subject: c.subject, isAd: c.isAd, aiGenerated: c.aiGenerated, campaignId: c.id })
+                        : setEditing(c))}
+                      className="text-[11px] text-indigo-300 hover:bg-indigo-500/10 px-2.5 py-1 rounded flex items-center gap-1"
+                    >
                       <Edit2 className="w-3 h-3" /> 수정
                     </button>
                     <button onClick={() => handleDeleteCampaign(c)} className="text-[11px] text-rose-300 hover:bg-rose-500/10 px-2.5 py-1 rounded flex items-center gap-1">
@@ -971,6 +991,22 @@ export default function EmailCampaignsPage() {
             </div>
           </div>
         </div>
+      )}
+
+      {/* 비주얼 빌더 에디터 */}
+      {visualEditor && (
+        <EmailVisualEditor
+          initialSections={visualEditor.sections}
+          initialName={visualEditor.name}
+          initialSubject={visualEditor.subject}
+          initialIsAd={visualEditor.isAd}
+          aiGenerated={visualEditor.aiGenerated}
+          campaignId={visualEditor.campaignId}
+          authHeaders={authHeaders}
+          onClose={() => setVisualEditor(null)}
+          onSaved={() => { loadAll(); }}
+          onToast={showToast}
+        />
       )}
 
       {/* ConfirmModal */}

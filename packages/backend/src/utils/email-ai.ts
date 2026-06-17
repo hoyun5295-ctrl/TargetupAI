@@ -20,6 +20,9 @@
 import { callAIWithFallback } from '../services/ai';
 import { extractJsonFromAiText } from './ai-json';
 import { buildSystemPromptWithBrandVoice } from './brand-voice-prompt';
+// 비주얼 빌더: AI 블록 출력 → 검증된 email Section[]
+import { normalizeAiBlocksToSections } from './email/email-blocks';
+import type { Section } from './dm/dm-section-registry';
 
 // ════════════════════════════════════════════════════════════════════
 // 타입
@@ -271,6 +274,79 @@ export async function generateEmailOneShot(input: {
     preheader: String(parsed.preheader || '').trim().slice(0, 100),
     htmlBody,
     textBody: String(parsed.text_body || '').trim(),
+  };
+}
+
+export interface EmailSectionsGenResult {
+  name: string;
+  subjects: string[];
+  preheader: string;
+  sections: Section[];
+}
+
+const EMAIL_BLOCKS_SYSTEM = `당신은 한국어 이메일 마케팅 디자이너입니다. 회사 마케팅 담당자의 요청을 바탕으로 발송 가능한 비주얼 이메일의 블록 구성을 설계합니다.
+
+[사용 가능한 블록 — 아래 type만 사용]
+- header: { "variant": "logo", "brand_name": "회사명" }
+- hero: { "headline": "큰 제목", "sub_copy": "한 줄 부제", "align": "center", "height": "md" }
+- text_card: { "tag": "라벨", "headline": "소제목", "body": "본문 2~3문장", "align": "left", "image_position": "top" }
+- product_carousel: { "title": "추천 상품", "products": [{ "name": "상품명", "price": 0, "image_url": "" }] }
+- gallery: { "title": "갤러리", "images": [{ "url": "" }] }
+- coupon: { "discount_label": "혜택 제목", "discount_type": "percent", "coupon_code": "" }
+- cta: { "buttons": [{ "label": "버튼 글", "url": "", "style": "primary" }], "layout": "stack" }
+- store_info: { "address": "", "phone": "", "business_hours": "" }
+- footer: { "notes": "회사 안내 한 줄", "cs_phone": "", "legal_text": "" }
+
+[절대 규칙]
+- 위 type만 사용한다. 그 외 type 금지.
+- 모든 이미지(image_url, url)는 빈 문자열로 둔다 (회사가 직접 업로드).
+- 구체 혜택 수치(할인율, 금액, 쿠폰코드, 무료, 사은품)는 임의로 만들지 않는다. 혜택 자리는 "[혜택을 직접 입력해주세요]" 텍스트로 두고, coupon_code는 빈 문자열로 둔다.
+- 모든 버튼 url은 빈 문자열로 둔다.
+- 권장 순서: header → hero → 본문(text_card / product_carousel / gallery) → cta → footer.
+
+반드시 아래 JSON으로만 출력한다 (코드블록/설명 금지):
+{ "name": "캠페인 이름(30자 이내)", "subjects": ["제목1","제목2","제목3"], "preheader": "수신함 미리보기(50자 이내)", "blocks": [ { "type": "hero", "props": {} } ] }`;
+
+/** AI 비주얼 생성 — 요청 → 이메일 블록 Section[](이미지·혜택은 빈 자리). 크레딧 차감은 route에서 성공 후. */
+export async function generateEmailSections(input: {
+  companyId: string;
+  userId?: string;
+  prompt?: string;
+  scenario?: EmailScenarioKey;
+  isAd: boolean;
+}): Promise<EmailSectionsGenResult> {
+  const scenarioPreset = input.scenario ? EMAIL_SCENARIO_PRESETS[input.scenario] : null;
+  const parts: string[] = [];
+  if (scenarioPreset) parts.push(`[시나리오] ${scenarioPreset.label} — ${scenarioPreset.prompt}`);
+  if (input.prompt) parts.push(`[요청 내용] ${input.prompt}`);
+  parts.push(`[캠페인 성격] ${input.isAd ? '광고성 (표기는 발송 시 자동 부착 — 직접 넣지 말 것)' : '정보성'}`);
+
+  const system = await buildSystemPromptWithBrandVoice(input.companyId, EMAIL_BLOCKS_SYSTEM);
+  const text = await callAIWithFallback({
+    system,
+    userMessage: `${parts.join('\n')}\n\n위 요청으로 비주얼 이메일의 블록 구성을 JSON으로 설계하세요.`,
+    maxTokens: 4000,
+    temperature: 0.7,
+    model: 'opus',
+    companyId: input.companyId,
+    userId: input.userId,
+    source: 'email-ai-generate',
+    creditCost: 0,
+  });
+
+  const parsed = extractJsonFromAiText<{ name?: string; subjects?: string[]; preheader?: string; blocks?: unknown[] }>(text);
+  const sections = normalizeAiBlocksToSections(parsed.blocks);
+  if (sections.length === 0) {
+    throw new Error('AI 블록 생성 결과가 비어 있습니다. 다시 시도해주세요.');
+  }
+  const subjects = (Array.isArray(parsed.subjects) ? parsed.subjects : [])
+    .map((s) => String(s || '').trim()).filter(Boolean).slice(0, 3);
+  while (subjects.length > 0 && subjects.length < 3) subjects.push(subjects[0]);
+  return {
+    name: String(parsed.name || '').trim().slice(0, 60) || 'AI 비주얼 이메일',
+    subjects: subjects.length ? subjects : ['새 이메일'],
+    preheader: String(parsed.preheader || '').trim().slice(0, 100),
+    sections,
   };
 }
 
