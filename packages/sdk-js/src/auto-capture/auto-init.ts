@@ -11,10 +11,12 @@ export function autoInitFromScriptTag(): void {
   // 1) document.currentScript 우선 (스크립트 실행 시점)
   let apiKey: string | null = null;
   let inappContainer: string | null = null;
+  let platform: string | null = null;
   const current = document.currentScript as HTMLScriptElement | null;
   if (current && current.getAttribute) {
     apiKey = current.getAttribute('data-hjl-key');
     inappContainer = current.getAttribute('data-hjl-inapp-container');
+    platform = current.getAttribute('data-hjl-platform');
   }
 
   // 2) fallback — data-hjl-key 속성을 가진 script 태그 탐색 (async/defer 로드 시 currentScript=null)
@@ -25,6 +27,7 @@ export function autoInitFromScriptTag(): void {
       if (v) {
         apiKey = v;
         inappContainer = tags[i].getAttribute('data-hjl-inapp-container');
+        platform = tags[i].getAttribute('data-hjl-platform');
         break;
       }
     }
@@ -36,7 +39,11 @@ export function autoInitFromScriptTag(): void {
   if (!hjl || typeof hjl.init !== 'function') return;
 
   try {
-    hjl.init({ apiKey, ...(inappContainer ? { inappContainer } : {}) });
+    hjl.init({
+      apiKey,
+      ...(inappContainer ? { inappContainer } : {}),
+      ...(platform === 'app' ? { platform: 'app' as const } : {}),
+    });
   } catch (err) {
     // init 실패(키 포맷 오류 등)는 콘솔로만 — 호스트 페이지 동작 방해 X
     if (typeof console !== 'undefined') console.error('[Hanjullo] 자동 init 실패:', err);

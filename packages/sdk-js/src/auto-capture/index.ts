@@ -26,6 +26,8 @@ export interface AutoCaptureConfig {
   debug?: boolean;
   /** inline_card 템플릿 삽입 위치 선택자 — 스니펫 data-hjl-inapp-container 속성으로 전달 */
   inappContainer?: string;
+  /** ★ 2026-06-17 2단계 — 'app'이면 웹뷰 앱 인앱 모드(채널=app). 스니펫 data-hjl-platform 속성으로 전달. 미지정=web */
+  platform?: 'web' | 'app';
 }
 
 interface HjlGlobal {
@@ -61,6 +63,7 @@ function createHjlGlobal(): HjlGlobal {
         endpoint: config.endpoint || 'https://app.hanjul.ai/api/cdp',
         debug: !!config.debug,
         inappContainer: config.inappContainer,
+        platform: config.platform,
       };
 
       const heartbeat = new Heartbeat((stage) => {
@@ -93,6 +96,7 @@ function createHjlGlobal(): HjlGlobal {
         anonymousId: inappAnonId,
         debug: hjl._config!.debug,
         ...(hjl._config!.inappContainer ? { containerSelector: hjl._config!.inappContainer } : {}),
+        ...(hjl._config!.platform === 'app' ? { platform: 'app' as const } : {}),
       });
 
       const id = detectIdentify();

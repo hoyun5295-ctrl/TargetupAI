@@ -1424,12 +1424,22 @@ $signature = hash_hmac('sha256', $body, $webhook_secret);
             </div>
             {(() => {
               const snippet = `<script src="https://app.hanjul.ai/sdk/v0.3.5/hanjul.min.js" data-hjl-key="${usage.public_key}" async></script>`;
+              const appSnippet = `<script src="https://app.hanjul.ai/sdk/v0.3.5/hanjul.min.js" data-hjl-key="${usage.public_key}" data-hjl-platform="app" async></script>`;
               return (
                 <>
+                  <div className="text-xs font-medium text-white/70 mb-1.5">웹 자사몰 — &lt;head&gt;에 붙여넣기</div>
                   <pre className="bg-slate-950 border border-white/10 rounded-xl p-3 text-[11px] text-emerald-200 overflow-x-auto whitespace-pre-wrap break-all">{snippet}</pre>
                   <button
-                    onClick={() => copyText(snippet, '설치 스크립트')}
+                    onClick={() => copyText(snippet, '웹 설치 스크립트')}
                     className="mt-2 px-3 py-2 bg-violet-500/40 hover:bg-violet-500/60 text-white rounded-lg text-xs font-medium inline-flex items-center gap-1.5"
+                  >
+                    <Copy className="w-3.5 h-3.5" />복사
+                  </button>
+                  <div className="text-xs font-medium text-white/70 mb-1.5 mt-5">모바일 앱(웹뷰) — 앱 웹뷰 페이지에 붙여넣기 <span className="text-sky-300">(data-hjl-platform="app" 한 줄 추가)</span></div>
+                  <pre className="bg-slate-950 border border-white/10 rounded-xl p-3 text-[11px] text-sky-200 overflow-x-auto whitespace-pre-wrap break-all">{appSnippet}</pre>
+                  <button
+                    onClick={() => copyText(appSnippet, '앱 설치 스크립트')}
+                    className="mt-2 px-3 py-2 bg-sky-500/40 hover:bg-sky-500/60 text-white rounded-lg text-xs font-medium inline-flex items-center gap-1.5"
                   >
                     <Copy className="w-3.5 h-3.5" />복사
                   </button>

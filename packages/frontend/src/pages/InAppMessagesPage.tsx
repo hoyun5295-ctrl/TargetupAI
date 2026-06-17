@@ -635,7 +635,7 @@ export default function InAppMessagesPage() {
               </div>
               <h3 className="text-lg font-bold text-white">모바일 앱 인앱</h3>
               <p className="text-xs text-white/60 mt-1.5 leading-relaxed">모바일 앱 화면에 뜨는 인앱. 모달 · 전면 · 배너 · 토스트.</p>
-              <div className="text-[11px] text-amber-300/80 mt-3">앱 SDK 연동 후 표시 (준비 중)</div>
+              <div className="text-[11px] text-amber-300/80 mt-3">웹뷰 앱 지원 — 스니펫 한 줄 (순수 네이티브 앱은 추후)</div>
             </button>
           </div>
         </div>
