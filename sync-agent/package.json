@@ -20,6 +20,8 @@
     "build:linux-modern": "node scripts/build-tier.js linux-modern",
     "build:linux-legacy": "node scripts/build-tier.js linux-legacy",
     "build:tiers": "node scripts/build-tiers.js",
+    "upload:agents": "node scripts/upload-agents.js",
+    "build:tiers:deploy": "npm run build:tiers && npm run upload:agents",
     "lint": "eslint src/",
     "test": "vitest run",
     "test:watch": "vitest"
