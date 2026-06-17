@@ -49,6 +49,8 @@ import cdpRoutes from './routes/cdp';
 import cafe24Routes, { cafe24CallbackRouter } from './routes/cafe24';
 // ★ D178 (2026-05-19): 네이버 스마트스토어 (커머스 API) OAuth + Webhook
 import naverCommerceRoutes, { naverCommerceCallbackRouter } from './routes/naver-commerce';
+// ★ 2026-06-18: 고도몰(NHN커머스) BYO-키 폴링 커넥터
+import godoRoutes from './routes/godo';
 // ★ D178 (2026-05-19): 인바운드 AI 음성 응답 (Naver Clova STT/TTS + Opus 4.7)
 import voiceRoutes from './routes/voice';
 // ★ D180 (2026-05-19): Email 채널 (SendGrid Web API v3)
@@ -275,6 +277,8 @@ app.use('/api/cafe24', cafe24Routes);
 // ★ D178: 네이버 스마트스토어 OAuth callback (authenticate 우회) → naverCommerceRoutes보다 먼저 등록
 app.use('/api/naver-commerce', naverCommerceCallbackRouter);
 app.use('/api/naver-commerce', naverCommerceRoutes);
+// ★ 2026-06-18: 고도몰(NHN커머스) BYO-키 폴링 커넥터 (OAuth/Webhook 없음 — callback 라우터 불필요)
+app.use('/api/godo', godoRoutes);
 // ★ D178: 인바운드 AI 음성 응답 (통신사 webhook + 회사 admin 토글/이력)
 app.use('/api/voice', voiceRoutes);
 // ★ D180: Email 채널 (SendGrid Event Webhook + 회사 admin 캠페인 CRUD/발송)

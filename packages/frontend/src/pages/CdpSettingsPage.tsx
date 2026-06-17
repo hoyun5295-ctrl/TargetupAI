@@ -34,6 +34,7 @@ import {
   ArrowLeft, Database, Brain, Loader2, RefreshCw, Sparkles, Users, AlertTriangle,
   Activity, Info, Link2, Store, Server,
   KeyRound, Copy, Check, Unlink, MousePointerClick, AlertCircle, ShoppingCart, Code2, X,
+  Eye, EyeOff, ExternalLink,
 } from 'lucide-react';
 import { useAuthStore } from '../stores/authStore';
 import ConfirmModal, { type ConfirmState } from '../components/ConfirmModal';
@@ -84,6 +85,12 @@ interface NaverCommerceStatus {
   status?: string;
   token_expires_at?: string;
   scope?: string;
+}
+
+interface GodoStatus {
+  connected: boolean;
+  status?: string;
+  connectedAt?: string | null;
 }
 
 interface CustomWebhookInfo {
@@ -262,15 +269,22 @@ type ProviderKey = 'cafe24' | 'naver' | 'godo' | 'gabia' | 'custom';
 const PROVIDER_CARDS: Array<{ key: ProviderKey; name: string; desc: string; full?: boolean }> = [
   { key: 'cafe24', name: '카페24', desc: 'OAuth 자동 연동 — 코딩 없이 회원·주문 동기화' },
   { key: 'naver', name: '네이버 스마트스토어', desc: 'Commerce OAuth — 주문·회원 동기화' },
-  { key: 'godo', name: '고도몰', desc: 'webhook 방식 — Secret·SDK 설정으로 연동' },
+  { key: 'godo', name: '고도몰', desc: '쇼핑몰 인증키 입력 — 주문·고객 자동 동기화' },
   { key: 'gabia', name: '가비아', desc: 'webhook 방식 — Secret·SDK 설정으로 연동' },
   { key: 'custom', name: '자체 호스팅 / 그 외 자사몰', desc: '직접 개발했거나 목록에 없는 자사몰 — webhook 방식', full: true },
 ];
 
+// 고객 self-app에 등록하는 한줄로 고정 콜백 (백엔드 CAFE24_CALLBACK_REDIRECT / NAVER_CALLBACK_REDIRECT 기본값과 동일)
+const CAFE24_CALLBACK_URL = 'https://app.hanjul.ai/api/cafe24/oauth/callback';
+const NAVER_CALLBACK_URL = 'https://app.hanjul.ai/api/naver-commerce/oauth/callback';
+// 고객 self-app에 필요한 권한 (백엔드 DEFAULT_SCOPE와 동일)
+const CAFE24_REQUIRED_SCOPES = ['mall.read_customer', 'mall.read_order', 'mall.read_product', 'mall.read_application'];
+const NAVER_REQUIRED_SCOPES = ['commerce.product.read', 'commerce.order.read', 'commerce.customer.read'];
+
 const PROVIDER_META: Record<ProviderKey, { title: string; note: string }> = {
-  cafe24: { title: '카페24 연동', note: '카페24 mall_id로 OAuth 인증하면 회원·주문이 자동 동기화됩니다.' },
-  naver: { title: '네이버 스마트스토어 연동', note: '스마트스토어 store_id로 OAuth 인증하면 주문·회원이 동기화됩니다. (네이버 정책상 phone/email이 제한될 수 있어 매칭률이 낮을 수 있습니다.)' },
-  godo: { title: '고도몰 연동', note: '고도몰은 webhook 방식으로 연동합니다. 아래 Secret·도메인·SDK를 고도몰 관리자에 설정하세요.' },
+  cafe24: { title: '카페24 연동', note: '카페24 개발자센터에서 만든 자체앱의 Client ID·Secret을 입력하면, OAuth 인증 후 회원·주문이 자동 동기화됩니다.' },
+  naver: { title: '네이버 스마트스토어 연동', note: '네이버 커머스 API센터에서 만든 애플리케이션의 Client ID·Secret을 입력하면, OAuth 인증 후 주문·회원이 동기화됩니다. (네이버 정책상 phone/email이 제한될 수 있어 매칭률이 낮을 수 있습니다.)' },
+  godo: { title: '고도몰 연동', note: '고도몰 쇼핑몰 인증키(key)를 입력하면 주문·고객 데이터가 자동으로 동기화됩니다.' },
   gabia: { title: '가비아 연동', note: '가비아 쇼핑몰은 webhook 방식으로 연동합니다. 아래 Secret·도메인·SDK를 설정하세요.' },
   custom: { title: '자체 호스팅 / 그 외 자사몰 연동', note: '직접 개발했거나 목록에 없는 자사몰은 webhook 방식으로 연동합니다. 환경이 특수해 막히면 고객센터로 문의 주세요.' },
 };
@@ -308,6 +322,17 @@ export default function CdpSettingsPage() {
   const [naverStatus, setNaverStatus] = useState<NaverCommerceStatus | null>(null);
   const [naverStoreId, setNaverStoreId] = useState('');
   const [naverConnecting, setNaverConnecting] = useState(false);
+  // BYO self-app 자격 입력 (회사가 직접 발급한 Client ID/Secret)
+  const [cafe24ClientId, setCafe24ClientId] = useState('');
+  const [cafe24ClientSecret, setCafe24ClientSecret] = useState('');
+  const [showCafe24Secret, setShowCafe24Secret] = useState(false);
+  const [naverClientId, setNaverClientId] = useState('');
+  const [naverClientSecret, setNaverClientSecret] = useState('');
+  const [showNaverSecret, setShowNaverSecret] = useState(false);
+  const [godoStatus, setGodoStatus] = useState<GodoStatus | null>(null);
+  const [godoKey, setGodoKey] = useState('');
+  const [godoConnecting, setGodoConnecting] = useState(false);
+  const [showGodoKey, setShowGodoKey] = useState(false);
   const [customInfo, setCustomInfo] = useState<CustomWebhookInfo | null>(null);
   const [customIssuedSecret, setCustomIssuedSecret] = useState<CustomIssuedSecret | null>(null);
   const [customIssuing, setCustomIssuing] = useState(false);
@@ -320,7 +345,7 @@ export default function CdpSettingsPage() {
   const [activeModal, setActiveModal] = useState<CdpModalKey>(null);
   const [connectProvider, setConnectProvider] = useState<ProviderKey | null>(null);
   const closeModal = () => { setActiveModal(null); setConnectProvider(null); };
-  const webhookProviderOpen = connectProvider === 'custom' || connectProvider === 'godo' || connectProvider === 'gabia';
+  const webhookProviderOpen = connectProvider === 'custom' || connectProvider === 'gabia';
   const [confirm, setConfirm] = useState<ConfirmState | null>(null);
 
   const token = () => localStorage.getItem('token');
@@ -334,8 +359,9 @@ export default function CdpSettingsPage() {
     if (customInfo?.hasSecret) list.push('자체 호스팅');
     if (cafe24Status?.connected) list.push('카페24');
     if (naverStatus?.connected) list.push('네이버 스마트스토어');
+    if (godoStatus?.connected) list.push('고도몰');
     return list;
-  }, [customInfo?.hasSecret, cafe24Status?.connected, naverStatus?.connected]);
+  }, [customInfo?.hasSecret, cafe24Status?.connected, naverStatus?.connected, godoStatus?.connected]);
   const isConnected = connectedProviders.length > 0 || !!usage?.has_key;
   const hasCdpData = isConnected || (diagnostics?.events30d ?? 0) > 0;
 
@@ -406,7 +432,7 @@ export default function CdpSettingsPage() {
       const headers = { Authorization: `Bearer ${token()}` };
       const [
         usageRes, diagRes, funnelRes, timelineRes, activeRes, chDistRes,
-        cafe24Res, naverRes, customRes,
+        cafe24Res, naverRes, godoRes, customRes,
       ] = await Promise.all([
         fetch('/api/cdp/usage', { headers }),
         fetch('/api/cdp/diagnostics', { headers }),
@@ -416,6 +442,7 @@ export default function CdpSettingsPage() {
         fetch('/api/cdp/channel-distribution', { headers }),
         fetch('/api/cafe24/status', { headers }),
         fetch('/api/naver-commerce/status', { headers }),
+        fetch('/api/godo/status', { headers }),
         fetch('/api/cdp/custom/info', { headers }),
       ]);
       const usageData = await usageRes.json();
@@ -426,6 +453,7 @@ export default function CdpSettingsPage() {
       const chDistData = await chDistRes.json();
       const cafe24Data = await cafe24Res.json();
       const naverData = await naverRes.json();
+      const godoData = await godoRes.json();
       const customData = await customRes.json();
 
       if (usageData.success) setUsage(usageData);
@@ -439,6 +467,7 @@ export default function CdpSettingsPage() {
       }
       if (cafe24Data.success) setCafe24Status(cafe24Data);
       if (naverData.success) setNaverStatus(naverData);
+      if (godoData.success) setGodoStatus(godoData);
       if (customData.success) {
         setCustomInfo({
           hasSecret: customData.hasSecret,
@@ -518,16 +547,30 @@ export default function CdpSettingsPage() {
     finally { setIssuing(false); }
   };
 
-  // 카페24
+  // 카페24 — self-app 자격 저장(POST /byo-credentials) 후 OAuth 연결 (BYO)
   const handleCafe24Connect = async () => {
-    const trimmed = cafe24MallId.trim().toLowerCase();
-    if (!trimmed || !/^[a-z0-9_-]+$/i.test(trimmed)) {
+    const mallId = cafe24MallId.trim().toLowerCase();
+    const clientId = cafe24ClientId.trim();
+    const clientSecret = cafe24ClientSecret.trim();
+    if (!mallId || !/^[a-z0-9_-]+$/i.test(mallId)) {
       toast.error('카페24 mall_id 형식이 올바르지 않습니다 (예: hanjullo-test)');
+      return;
+    }
+    if (!clientId || !clientSecret) {
+      toast.error('자체앱 Client ID와 Client Secret을 모두 입력해주세요.');
       return;
     }
     setCafe24Connecting(true);
     try {
-      const res = await fetch(`/api/cafe24/oauth/authorize?mall_id=${encodeURIComponent(trimmed)}`, {
+      const saveRes = await fetch('/api/cafe24/byo-credentials', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token()}` },
+        body: JSON.stringify({ mall_id: mallId, client_id: clientId, client_secret: clientSecret }),
+      });
+      const saveData = await saveRes.json();
+      if (!saveData.success) { toast.error(saveData.error || '자체앱 자격 저장 실패'); return; }
+
+      const res = await fetch(`/api/cafe24/oauth/authorize?mall_id=${encodeURIComponent(mallId)}`, {
         headers: { Authorization: `Bearer ${token()}` },
       });
       const data = await res.json();
@@ -552,13 +595,27 @@ export default function CdpSettingsPage() {
     });
   };
 
-  // 네이버 스마트스토어
+  // 네이버 스마트스토어 — self-app 자격 저장(POST /byo-credentials) 후 OAuth 연결 (BYO)
   const handleNaverConnect = async () => {
-    const trimmed = naverStoreId.trim();
-    if (!trimmed) { toast.error('네이버 스마트스토어 store_id를 입력해주세요.'); return; }
+    const storeId = naverStoreId.trim();
+    const clientId = naverClientId.trim();
+    const clientSecret = naverClientSecret.trim();
+    if (!storeId) { toast.error('네이버 스마트스토어 store_id를 입력해주세요.'); return; }
+    if (!clientId || !clientSecret) {
+      toast.error('애플리케이션 Client ID와 Client Secret을 모두 입력해주세요.');
+      return;
+    }
     setNaverConnecting(true);
     try {
-      const res = await fetch(`/api/naver-commerce/oauth/authorize?store_id=${encodeURIComponent(trimmed)}`, {
+      const saveRes = await fetch('/api/naver-commerce/byo-credentials', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token()}` },
+        body: JSON.stringify({ store_id: storeId, client_id: clientId, client_secret: clientSecret }),
+      });
+      const saveData = await saveRes.json();
+      if (!saveData.success) { toast.error(saveData.error || '애플리케이션 자격 저장 실패'); return; }
+
+      const res = await fetch(`/api/naver-commerce/oauth/authorize?store_id=${encodeURIComponent(storeId)}`, {
         headers: { Authorization: `Bearer ${token()}` },
       });
       const data = await res.json();
@@ -578,6 +635,44 @@ export default function CdpSettingsPage() {
         const res = await fetch('/api/naver-commerce/disconnect', { method: 'DELETE', headers: { Authorization: `Bearer ${token()}` } });
         const data = await res.json();
         if (data.success) { await loadAll(); toast.success('네이버 스마트스토어 연동 해제 완료'); }
+        else { toast.error(data.error || '연동 해제 실패'); }
+      },
+    });
+  };
+
+  // 고도몰 — 쇼핑몰 인증키 저장 후 연결 확인 + 백필 시작 (BYO)
+  const handleGodoConnect = async () => {
+    const key = godoKey.trim();
+    if (!key) { toast.error('고도몰 쇼핑몰 인증키를 입력해주세요.'); return; }
+    setGodoConnecting(true);
+    try {
+      const saveRes = await fetch('/api/godo/credentials', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token()}` },
+        body: JSON.stringify({ key }),
+      });
+      const saveData = await saveRes.json();
+      if (!saveData.success) { toast.error(saveData.error || '인증키 저장 실패'); return; }
+
+      const res = await fetch('/api/godo/connect', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token()}` },
+      });
+      const data = await res.json();
+      if (data.success) { toast.success(data.message || '고도몰 연동을 시작했습니다.'); await loadAll(); }
+      else { toast.error(data.error || '고도몰 연동 실패'); }
+    } catch (e: any) { toast.error(e?.message || '고도몰 연동 처리 오류'); }
+    finally { setGodoConnecting(false); }
+  };
+  const handleGodoDisconnect = () => {
+    setConfirm({
+      mode: 'danger',
+      title: '고도몰 연동 해제',
+      description: '자사몰 → 한줄로 주문 동기화가 중단됩니다.',
+      onConfirm: async () => {
+        const res = await fetch('/api/godo/disconnect', { method: 'DELETE', headers: { Authorization: `Bearer ${token()}` } });
+        const data = await res.json();
+        if (data.success) { await loadAll(); toast.success('고도몰 연동 해제 완료'); }
         else { toast.error(data.error || '연동 해제 실패'); }
       },
     });
@@ -1247,21 +1342,76 @@ $signature = hash_hmac('sha256', $body, $webhook_secret);
                 )}
               </div>
             ) : (
-              <div className="space-y-3">
-                <div className="text-sm text-white/70">카페24 mall_id 입력 → OAuth 새 창 → 자동 회원/주문 sync.</div>
-                <div className="flex gap-2">
-                  <input
-                    type="text"
-                    value={cafe24MallId}
-                    onChange={(e) => setCafe24MallId(e.target.value)}
-                    placeholder="예: hanjullo-test"
-                    className="flex-1 px-3 py-2 bg-violet-900/40 border border-white/10 rounded-lg text-sm text-white placeholder-white/30 focus:outline-none focus:border-amber-400/50"
-                  />
-                  <button onClick={handleCafe24Connect} disabled={cafe24Connecting || !isAdmin || !cafe24MallId.trim()} className="px-4 py-2 bg-amber-500/30 hover:bg-amber-500/50 text-amber-100 text-sm font-medium rounded-lg disabled:opacity-40 flex items-center gap-2">
-                    <Link2 className="w-4 h-4" /> {cafe24Connecting ? '연동 중...' : '카페24 연동'}
-                  </button>
+              <div className="space-y-4">
+                {/* 안내 — 자체앱 만들기 4단계 */}
+                <div className="bg-violet-500/10 border border-violet-400/30 rounded-xl p-4 space-y-3">
+                  <div className="text-xs font-semibold text-violet-100">자체앱 연결 — 4단계</div>
+                  <GuideStep n={1}>
+                    <a href="https://developers.cafe24.com" target="_blank" rel="noreferrer" className="text-violet-200 underline inline-flex items-center gap-1">카페24 개발자센터<ExternalLink className="w-3 h-3" /></a>에서 "앱 만들기"(자체앱)를 생성합니다.
+                  </GuideStep>
+                  <GuideStep n={2}>
+                    앱의 <strong className="text-white/90">Redirect URI</strong>에 아래 주소를 그대로 등록합니다.
+                    <div className="flex items-center gap-2 bg-slate-950 border border-white/10 rounded-lg px-3 py-2 mt-1.5">
+                      <code className="flex-1 text-[11px] text-emerald-200 font-mono break-all">{CAFE24_CALLBACK_URL}</code>
+                      <button onClick={() => copyText(CAFE24_CALLBACK_URL, 'Redirect URI')} className="shrink-0 p-1.5 rounded-md bg-white/5 hover:bg-white/10 text-white/60" title="복사"><Copy className="w-3.5 h-3.5" /></button>
+                    </div>
+                  </GuideStep>
+                  <GuideStep n={3}>
+                    다음 권한(scope)을 모두 선택합니다.
+                    <div className="flex flex-wrap gap-1.5 mt-1.5">
+                      {CAFE24_REQUIRED_SCOPES.map((s) => <span key={s} className="text-[10px] font-mono bg-white/5 border border-white/10 text-white/60 px-2 py-0.5 rounded-full">{s}</span>)}
+                    </div>
+                  </GuideStep>
+                  <GuideStep n={4}>
+                    발급된 <strong className="text-white/90">Client ID·Secret</strong>을 아래에 입력합니다.
+                  </GuideStep>
                 </div>
-                <div className="text-xs text-white/40">★ admin URL <span className="font-mono">https://hanjullo-test.cafe24.com/admin</span> → mall_id = <span className="font-mono">hanjullo-test</span></div>
+
+                {/* 입력 — mall_id + Client ID + Secret */}
+                <div className="space-y-2.5">
+                  <div>
+                    <label className="block text-[11px] text-white/50 mb-1">mall_id</label>
+                    <input
+                      type="text"
+                      value={cafe24MallId}
+                      onChange={(e) => setCafe24MallId(e.target.value)}
+                      placeholder="예: hanjullo-test"
+                      className="w-full px-3 py-2 bg-violet-900/40 border border-white/10 rounded-lg text-sm text-white placeholder-white/30 focus:outline-none focus:border-amber-400/50"
+                    />
+                    <div className="text-[11px] text-white/40 mt-1">admin URL <span className="font-mono">https://hanjullo-test.cafe24.com/admin</span> → mall_id = <span className="font-mono">hanjullo-test</span></div>
+                  </div>
+                  <div>
+                    <label className="block text-[11px] text-white/50 mb-1">Client ID</label>
+                    <input
+                      type="text"
+                      value={cafe24ClientId}
+                      onChange={(e) => setCafe24ClientId(e.target.value)}
+                      placeholder="자체앱 Client ID"
+                      className="w-full px-3 py-2 bg-violet-900/40 border border-white/10 rounded-lg text-sm text-white placeholder-white/30 focus:outline-none focus:border-amber-400/50 font-mono"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] text-white/50 mb-1">Client Secret</label>
+                    <div className="relative">
+                      <input
+                        type={showCafe24Secret ? 'text' : 'password'}
+                        value={cafe24ClientSecret}
+                        onChange={(e) => setCafe24ClientSecret(e.target.value)}
+                        placeholder="자체앱 Client Secret"
+                        className="w-full px-3 py-2 pr-10 bg-violet-900/40 border border-white/10 rounded-lg text-sm text-white placeholder-white/30 focus:outline-none focus:border-amber-400/50 font-mono"
+                      />
+                      <button type="button" onClick={() => setShowCafe24Secret((v) => !v)} className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-white/40 hover:text-white/70" title={showCafe24Secret ? '숨기기' : '보기'}>
+                        {showCafe24Secret ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                <button onClick={handleCafe24Connect} disabled={cafe24Connecting || !isAdmin || !cafe24MallId.trim() || !cafe24ClientId.trim() || !cafe24ClientSecret.trim()} className="w-full px-4 py-2.5 bg-amber-500/30 hover:bg-amber-500/50 text-amber-100 text-sm font-medium rounded-lg disabled:opacity-40 flex items-center justify-center gap-2">
+                  {cafe24Connecting ? <><Loader2 className="w-4 h-4 animate-spin" /> 연결 준비 중...</> : <><Link2 className="w-4 h-4" /> 저장하고 카페24 연결</>}
+                </button>
+                {!isAdmin && <div className="text-[11px] text-white/50 text-center">연동은 회사 관리자만 가능합니다.</div>}
+                <div className="text-[10px] text-white/30 italic">Client Secret은 한줄로 서버에 안전 보관되며 화면에 다시 표시되지 않습니다.</div>
               </div>
             )}
           </div>
@@ -1292,23 +1442,136 @@ $signature = hash_hmac('sha256', $body, $webhook_secret);
                 )}
               </div>
             ) : (
-              <div className="space-y-3">
-                <div className="text-sm text-white/70">네이버 스마트스토어 store_id 입력 → OAuth → 주문 + 회원 sync.</div>
+              <div className="space-y-4">
                 <div className="text-xs text-amber-200/80 bg-amber-500/10 border border-amber-400/30 rounded p-2">
                   ★ 네이버 정책상 휴대폰·이메일 등 개인정보 제공이 제한될 수 있어, 기존 고객과의 매칭률이 낮을 수 있습니다.
                 </div>
-                <div className="flex gap-2">
-                  <input
-                    type="text"
-                    value={naverStoreId}
-                    onChange={(e) => setNaverStoreId(e.target.value)}
-                    placeholder="네이버 스마트스토어 store_id"
-                    className="flex-1 px-3 py-2 bg-violet-900/40 border border-white/10 rounded-lg text-sm text-white placeholder-white/30 focus:outline-none focus:border-emerald-400/50"
-                  />
-                  <button onClick={handleNaverConnect} disabled={naverConnecting || !isAdmin || !naverStoreId.trim()} className="px-4 py-2 bg-emerald-500/30 hover:bg-emerald-500/50 text-emerald-100 text-sm font-medium rounded-lg disabled:opacity-40 flex items-center gap-2">
-                    <Link2 className="w-4 h-4" /> {naverConnecting ? '연동 중...' : '네이버 연동'}
-                  </button>
+                {/* 안내 — 애플리케이션 등록 4단계 */}
+                <div className="bg-violet-500/10 border border-violet-400/30 rounded-xl p-4 space-y-3">
+                  <div className="text-xs font-semibold text-violet-100">애플리케이션 연결 — 4단계</div>
+                  <GuideStep n={1}>네이버 커머스 API센터에서 애플리케이션을 등록합니다.</GuideStep>
+                  <GuideStep n={2}>
+                    애플리케이션의 <strong className="text-white/90">Redirect URI</strong>(callback)에 아래 주소를 그대로 등록합니다.
+                    <div className="flex items-center gap-2 bg-slate-950 border border-white/10 rounded-lg px-3 py-2 mt-1.5">
+                      <code className="flex-1 text-[11px] text-emerald-200 font-mono break-all">{NAVER_CALLBACK_URL}</code>
+                      <button onClick={() => copyText(NAVER_CALLBACK_URL, 'Redirect URI')} className="shrink-0 p-1.5 rounded-md bg-white/5 hover:bg-white/10 text-white/60" title="복사"><Copy className="w-3.5 h-3.5" /></button>
+                    </div>
+                  </GuideStep>
+                  <GuideStep n={3}>
+                    다음 권한(scope)을 모두 선택합니다.
+                    <div className="flex flex-wrap gap-1.5 mt-1.5">
+                      {NAVER_REQUIRED_SCOPES.map((s) => <span key={s} className="text-[10px] font-mono bg-white/5 border border-white/10 text-white/60 px-2 py-0.5 rounded-full">{s}</span>)}
+                    </div>
+                  </GuideStep>
+                  <GuideStep n={4}>
+                    발급된 <strong className="text-white/90">Client ID·Secret(애플리케이션 ID·시크릿)</strong>을 아래에 입력합니다.
+                  </GuideStep>
                 </div>
+
+                {/* 입력 — store_id + Client ID + Secret */}
+                <div className="space-y-2.5">
+                  <div>
+                    <label className="block text-[11px] text-white/50 mb-1">store_id</label>
+                    <input
+                      type="text"
+                      value={naverStoreId}
+                      onChange={(e) => setNaverStoreId(e.target.value)}
+                      placeholder="네이버 스마트스토어 store_id"
+                      className="w-full px-3 py-2 bg-violet-900/40 border border-white/10 rounded-lg text-sm text-white placeholder-white/30 focus:outline-none focus:border-emerald-400/50"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] text-white/50 mb-1">Client ID</label>
+                    <input
+                      type="text"
+                      value={naverClientId}
+                      onChange={(e) => setNaverClientId(e.target.value)}
+                      placeholder="애플리케이션 Client ID"
+                      className="w-full px-3 py-2 bg-violet-900/40 border border-white/10 rounded-lg text-sm text-white placeholder-white/30 focus:outline-none focus:border-emerald-400/50 font-mono"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] text-white/50 mb-1">Client Secret</label>
+                    <div className="relative">
+                      <input
+                        type={showNaverSecret ? 'text' : 'password'}
+                        value={naverClientSecret}
+                        onChange={(e) => setNaverClientSecret(e.target.value)}
+                        placeholder="애플리케이션 Client Secret"
+                        className="w-full px-3 py-2 pr-10 bg-violet-900/40 border border-white/10 rounded-lg text-sm text-white placeholder-white/30 focus:outline-none focus:border-emerald-400/50 font-mono"
+                      />
+                      <button type="button" onClick={() => setShowNaverSecret((v) => !v)} className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-white/40 hover:text-white/70" title={showNaverSecret ? '숨기기' : '보기'}>
+                        {showNaverSecret ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                <button onClick={handleNaverConnect} disabled={naverConnecting || !isAdmin || !naverStoreId.trim() || !naverClientId.trim() || !naverClientSecret.trim()} className="w-full px-4 py-2.5 bg-emerald-500/30 hover:bg-emerald-500/50 text-emerald-100 text-sm font-medium rounded-lg disabled:opacity-40 flex items-center justify-center gap-2">
+                  {naverConnecting ? <><Loader2 className="w-4 h-4 animate-spin" /> 연결 준비 중...</> : <><Link2 className="w-4 h-4" /> 저장하고 네이버 연결</>}
+                </button>
+                {!isAdmin && <div className="text-[11px] text-white/50 text-center">연동은 회사 관리자만 가능합니다.</div>}
+                <div className="text-[10px] text-white/30 italic">Client Secret은 한줄로 서버에 안전 보관되며 화면에 다시 표시되지 않습니다.</div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* 고도몰 — BYO 쇼핑몰 인증키(key) */}
+        {connectProvider === 'godo' && (
+          <div id="section-godo" className="bg-white/5 border border-white/10 rounded-xl p-6">
+            <div className="flex items-center gap-2 mb-4">
+              <Server className="w-5 h-5 text-indigo-300" />
+              <h2 className="text-base font-bold text-white">고도몰 연동</h2>
+              <span className="text-xs bg-indigo-500/20 text-indigo-300 px-2 py-0.5 rounded-full font-medium">쇼핑몰 인증키</span>
+            </div>
+
+            {godoStatus?.connected ? (
+              <div className="space-y-3">
+                <div className="bg-emerald-500/10 border border-emerald-400/30 rounded-lg p-4 flex items-start gap-3">
+                  <Check className="w-5 h-5 text-emerald-300 mt-0.5 shrink-0" />
+                  <div className="flex-1">
+                    <div className="text-sm font-medium text-emerald-100">고도몰 연동됨</div>
+                    <div className="text-xs text-emerald-300 mt-1">
+                      status: {godoStatus.status} · 연결: {godoStatus.connectedAt ? new Date(godoStatus.connectedAt).toLocaleString('ko-KR') : '-'}
+                    </div>
+                  </div>
+                </div>
+                {isAdmin && (
+                  <button onClick={handleGodoDisconnect} className="px-4 py-2 bg-rose-500/15 border border-rose-400/40 hover:bg-rose-500/25 text-rose-200 text-sm font-medium rounded-lg flex items-center gap-2">
+                    <Unlink className="w-4 h-4" /> 연동 해제
+                  </button>
+                )}
+              </div>
+            ) : (
+              <div className="space-y-4">
+                <div className="bg-violet-500/10 border border-violet-400/30 rounded-xl p-4 space-y-3">
+                  <div className="text-xs font-semibold text-violet-100">쇼핑몰 인증키 연결 — 2단계</div>
+                  <GuideStep n={1}>고도몰 쇼핑몰 관리자에서 한줄로 API 사용을 신청하고 <strong className="text-white/90">쇼핑몰 인증키(key)</strong>를 발급받습니다.</GuideStep>
+                  <GuideStep n={2}>발급된 인증키를 아래에 입력하면, 최근 주문이 자동으로 들어옵니다.</GuideStep>
+                </div>
+
+                <div>
+                  <label className="block text-[11px] text-white/50 mb-1">쇼핑몰 인증키(key)</label>
+                  <div className="relative">
+                    <input
+                      type={showGodoKey ? 'text' : 'password'}
+                      value={godoKey}
+                      onChange={(e) => setGodoKey(e.target.value)}
+                      placeholder="고도몰에서 발급받은 인증키"
+                      className="w-full px-3 py-2 pr-10 bg-violet-900/40 border border-white/10 rounded-lg text-sm text-white placeholder-white/30 focus:outline-none focus:border-indigo-400/50 font-mono"
+                    />
+                    <button type="button" onClick={() => setShowGodoKey((v) => !v)} className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-white/40 hover:text-white/70" title={showGodoKey ? '숨기기' : '보기'}>
+                      {showGodoKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </button>
+                  </div>
+                </div>
+
+                <button onClick={handleGodoConnect} disabled={godoConnecting || !isAdmin || !godoKey.trim()} className="w-full px-4 py-2.5 bg-indigo-500/30 hover:bg-indigo-500/50 text-indigo-100 text-sm font-medium rounded-lg disabled:opacity-40 flex items-center justify-center gap-2">
+                  {godoConnecting ? <><Loader2 className="w-4 h-4 animate-spin" /> 연결 확인 중...</> : <><Link2 className="w-4 h-4" /> 저장하고 고도몰 연동</>}
+                </button>
+                {!isAdmin && <div className="text-[11px] text-white/50 text-center">연동은 회사 관리자만 가능합니다.</div>}
+                <div className="text-[10px] text-white/30 italic">인증키는 한줄로 서버에 안전 보관되며 화면에 다시 표시되지 않습니다.</div>
               </div>
             )}
           </div>
@@ -1575,6 +1838,15 @@ function CapBadge({ label, active }: { label: string; active: boolean }) {
     <span className={`px-2 py-0.5 rounded font-medium ${active ? 'bg-emerald-500/20 text-emerald-300' : 'bg-white/5 text-white/40'}`}>
       {label} {active ? '✓' : '·'}
     </span>
+  );
+}
+
+function GuideStep({ n, children }: { n: number; children: React.ReactNode }) {
+  return (
+    <div className="flex gap-2">
+      <span className="shrink-0 w-4 h-4 mt-0.5 rounded-full bg-violet-500/30 text-violet-100 text-[10px] flex items-center justify-center font-bold">{n}</span>
+      <div className="flex-1 text-xs text-white/70 leading-relaxed">{children}</div>
+    </div>
   );
 }
 

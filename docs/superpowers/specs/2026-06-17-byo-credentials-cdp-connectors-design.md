@@ -78,6 +78,26 @@
 2. **백필** — callback 토큰 저장 직후 회사 creds로 `cafe24ApiCall`/`naverCommerceApiCall` 호출해 회원·주문 1회 import → `identifyCustomer`/`syncOrder` CT. **cafe24·naver Admin API 엔드포인트·응답 키는 첫 실호출 raw로 확인 후 작성(D217 룰 — 추측 금지).** 페이지네이션·dedup·회사 creds 전달.
 3. **고도몰 커넥터**(partner_key 약 3일 후) — provider-registry 등록 + XML 파서 + `openhub.godo.co.kr` POST(body partner_key+key) + 회원/주문/상품 → CDP CT. IP 허용 등록, page/size, 429 주의. 스펙 = Downloads/godo_spec_extract.txt.
 
+## 진행 (2026-06-18 — Task ① 연동센터 UI 완료 · 미배포)
+- `CdpSettingsPage.tsx` 카페24·네이버 연결 모달의 "미연결" 분기를 BYO 입력 폼으로 확장. 안내 4단계(개발자센터 자체앱 생성 → 고정 Redirect URI 복사 등록 → scope 선택 → Client ID·Secret 입력) + mall_id/store_id + Client ID + Client Secret(보기 토글) 입력 + "저장하고 연결" 버튼 하나.
+- 흐름: `POST /api/cafe24|naver-commerce/byo-credentials {mall_id|store_id, client_id, client_secret}` → 성공 시 `GET /oauth/authorize?...` → authorize_url 새 창. 실패 시 서버 메시지 toast.
+- 고정 콜백 표기: 카페24 `https://app.hanjul.ai/api/cafe24/oauth/callback`, 네이버 `https://app.hanjul.ai/api/naver-commerce/oauth/callback`. scope 칩 = 백엔드 DEFAULT_SCOPE와 동일(추측 0).
+- 신규: `GuideStep` 헬퍼, callback/scope 상수, BYO 입력 state 6개, 아이콘 Eye/EyeOff/ExternalLink. PROVIDER_META note를 self-app 키 입력 흐름으로 갱신.
+- 검증: 프론트 tsc 0 · 자가 grep(모델명·native dialog·박-단어) 0건.
+- 남음: ②백필(실키 raw 확인 후 — 현재 보류) · ③고도몰(partner_key 약 3일 후).
+- 배포: 프론트 + 백엔드 df448eed 함께. 프론트·백엔드 각각 `npm run build:safe` → `pm2 restart all`. (df448eed 미배포 상태에서 프론트 단독 배포 시 byo-credentials 404.)
+
+## 진행 (2026-06-18 — Task ③ 고도몰 커넥터 코드 완료 · 미배포)
+- 발견: 고도몰 공식 API에 회원 조회 API 없음(상품·주문·게시판·공통코드뿐) → 고객 식별은 주문조회 응답(memId, 비회원=guest:{orderCellPhone}). 상품은 syncOrder의 주문 품목으로 함께 적재 → ③ v1 = 주문 백필 한 경로.
+- `utils/godo-parse.ts`(순수, DB-free): mapGodoOrderStatus(§7.1 코드맵), parseGodoOrderResponse(fast-xml-parser, order_data/orderGoodsData/orderInfoData isArray), mapGodoOrderToCdp(OrderInput + smsRaw). `godo-parse.verify.ts` TDD 21건 PASS.
+- `utils/godo-client.ts`(IO): fetchGodoOrderPage(POST partner_key+key+dateType=order+기간+size+lastOrder, 429/EXHAUSTED/RETURN code 분기), backfillGodoOrders(30일 윈도우 분할 + lastOrder 커서 순회 + consent→identify→syncOrder), verifyGodoConnection(1콜), save/get/status/disconnect(company_integrations.meta.godo_key — 카페24 BYO 동일 패턴).
+- `routes/godo.ts` + `app.ts`: POST /credentials·/connect(연결확인 후 백그라운드 백필)·GET /status·DELETE /disconnect, company_admin+plan 게이팅, GodoApiError→친화 503/400.
+- 연동센터 UI: godo를 webhookProviderOpen에서 분리 → 전용 키 입력 폼(2단계 안내 + key + 보기 토글 + 저장→연동, 카페24 BYO 톤).
+- 의존성: `fast-xml-parser`(backend) 추가 — 서버 npm install 필요.
+- 검증: backend tsc 0 · frontend tsc 0 · TDD 21건 · grep(모델명·native dialog·박단어) 0.
+- 남음: ②카페24·네이버 백필(D217 실키 raw 확인 후 — 키 대기). 고도몰 live = GODO_PARTNER_KEY(약 3일)+서버 IP NHN 허용(996)+server npm install 후 실측 1건.
+- 계획서: `docs/superpowers/plans/2026-06-18-godo-connector.md`.
+
 ## 배포 (Harold — 이번 세션, 백엔드만)
 - 역호환(env 경로 보존, 신규 endpoint는 UI 전까지 미호출). 카페24·네이버 현재 dormant라 영향 0.
 - `tp-push "BYO 자격 연동 토대 — cafe24·naver per-company creds + BYO 라우트 + 고도몰 스펙"` → 서버 backend `npm run build:safe` → `pm2 restart targetup-backend`.
