@@ -20,6 +20,8 @@ for (const t of TIERS) sh(`node scripts/build-tier.js ${t}`);
 for (const [tier, exe] of Object.entries(WIN_BUNDLE)) {
   sh(`node scripts/bundle-windows-runtime.js ${exe} dist-tiers/${tier}/SyncAgent`);
 }
+// win-modern도 폴더+bat 구조로 통일(런타임 DLL 불필요 → --no-runtime). 설치 안내(bat 실행)와 일치.
+sh(`node scripts/bundle-windows-runtime.js release/sync-agent-win-modern.exe dist-tiers/win-modern/SyncAgent --no-runtime`);
 
 // 다운로드용 zip (티어당 1개) — 서버 agent-builds/ 에 업로드하면 위저드 다운로드가 서빙
 const dlDir = path.join(ROOT, 'dist-tiers/downloads');
@@ -29,7 +31,7 @@ const zipOne = (srcRel, tier) => {
   const dest = path.join(dlDir, `sync-agent-${tier}.zip`);
   sh(`powershell -NoProfile -Command "Compress-Archive -Path '${src}' -DestinationPath '${dest}' -Force"`);
 };
-zipOne('release/sync-agent-win-modern.exe', 'win-modern');
+zipOne('dist-tiers/win-modern/SyncAgent', 'win-modern');
 zipOne('dist-tiers/win-mid/SyncAgent', 'win-mid');
 zipOne('dist-tiers/win-legacy/SyncAgent', 'win-legacy');
 zipOne('release/sync-agent-linux-modern', 'linux-modern');
@@ -44,7 +46,7 @@ const manifest = {
   builtAt: new Date().toISOString(),
   version: require('../package.json').version,
   tiers: {
-    'win-modern': { file: 'release/sync-agent-win-modern.exe', node: 20, sha: sha('release/sync-agent-win-modern.exe') },
+    'win-modern': { dir: 'dist-tiers/win-modern/SyncAgent', node: 20, runtimeBundle: false },
     'win-mid': { dir: 'dist-tiers/win-mid/SyncAgent', node: 16, runtimeBundle: true },
     'win-legacy': { dir: 'dist-tiers/win-legacy/SyncAgent', node: 14, runtimeBundle: true },
     'linux-modern': { file: 'release/sync-agent-linux-modern', node: 20, sha: sha('release/sync-agent-linux-modern') },

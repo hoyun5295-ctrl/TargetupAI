@@ -227,8 +227,8 @@ export function resolveAgentBuild(
           '읽기전용 DB 계정 정보로 설정',
         ]
       : [
-          '받은 tar.gz 를 대상 서버에 풀고 install.sh 실행',
-          'systemctl status 로 동작 확인',
+          '받은 zip 을 풀어 나온 실행 파일에 실행 권한 부여 (chmod +x sync-agent-…)',
+          '터미널에서 실행 → 화면에 sync-agent v… 가 뜨면 정상 (상시 실행은 systemd 등록 권장)',
           '읽기전용 DB 계정 정보로 설정',
         ];
 
