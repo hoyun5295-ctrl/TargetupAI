@@ -19,5 +19,5 @@
     "outDir": "./dist"
   },
   "include": ["src/**/*"],
-  "exclude": ["node_modules", "dist", "src/service-worker.ts"]
+  "exclude": ["node_modules", "dist", "src/service-worker.ts", "src/**/*.test.ts", "src/**/__tests__/**"]
 }
