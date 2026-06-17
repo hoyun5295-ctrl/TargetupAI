@@ -91,6 +91,8 @@ import { startScheduledCleanupWorker } from './utils/scheduled-cleanup-worker';
 import { startDirectSendWorker } from './utils/direct-send-worker';
 // ★ 2026-06-11: 취소 잔존 큐 안전망 — 취소됐는데 발송 큐에 남은 행 자동 삭제 (에이치피오 사고 재발 차단)
 import { startCancelledQueueSweeper } from './utils/cancelled-queue-sweeper';
+// ★ 2026-06-17: 만료 발송요청 안전망 — rsv1=3(서버전송요청완료) 2일+ 결과없음 미발송 발송 차단 (시세이도 늦은 발송 사고 차단)
+import { startExpiredPendingSweeper } from './utils/expired-pending-sweeper';
 import { startEmailSendSweeper } from './utils/email-send-sweeper';
 // ★ 2026-06-14: DM 마감 추첨 워커 (1분 주기) — lucky_draw draw_at 도래 시 등급별 랜덤 추첨
 import { startDmDrawWorker } from './utils/dm/dm-draw-worker';
@@ -393,6 +395,9 @@ app.listen(PORT, () => {
 
   // ★ 2026-06-11: 취소 잔존 큐 안전망 (1분 주기) — 취소 경로가 못 지운 발송 대기 행 자동 삭제
   startCancelledQueueSweeper();
+
+  // ★ 2026-06-17: 만료 발송요청 안전망 (1분 주기) — rsv1=3(서버전송요청완료) 2일+ 결과없음 미발송 발송 차단
+  startExpiredPendingSweeper();
 
   // ★ 2026-06-10: CDP webhook 실패 재처리 (5분 주기, 최대 3회) — 일시 오류 데이터 유실 차단
   startCdpWebhookRetryWorker();

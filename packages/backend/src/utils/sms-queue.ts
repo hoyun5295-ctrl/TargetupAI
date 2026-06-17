@@ -468,14 +468,21 @@ export async function smsCampaignCountsSafe(
     : new Map<string, Record<string, number>>();
   const liveAgg = live.length > 0
     ? await smsBatchAggByGroup(live, groupField, `
-        SUM(CASE WHEN status_code IN (${PEN}) THEN 1 ELSE 0 END) as lp`, ids)
+        SUM(CASE WHEN status_code IN (${PEN}) THEN 1 ELSE 0 END) as lp,
+        SUM(CASE WHEN status_code NOT IN (${SUC}, ${PEN}) AND mobsend_time IS NULL THEN 1 ELSE 0 END) as lf`, ids)
     : new Map<string, Record<string, number>>();
 
   for (const rawId of ids) {
     const id = String(rawId);
     const lg = logAgg.get(id) as { t?: number; s?: number; f?: number; p?: number } | undefined;
     const lv = liveAgg.get(id);
-    out.set(id, mergeCampaignCounts(lg, Number(lv?.lp || 0)));
+    const merged = mergeCampaignCounts(lg, Number(lv?.lp || 0));
+    // ★ 2026-06-17: 라이브 만료 실패(expired-pending-sweeper가 status 4000 마킹, mobsend NULL) fail 집계.
+    //   라이브에 결과코드(비성공·비대기) + mobsend NULL = 발송 유실 실패 마킹분 (정상 이동 중은 mobsend 있음). 대기 잔존 차단.
+    const lf = Number(lv?.lf || 0);
+    merged.fail += lf;
+    merged.total += lf;
+    out.set(id, merged);
   }
   return out;
 }

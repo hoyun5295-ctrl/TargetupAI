@@ -62,8 +62,9 @@ export interface DisplayCounts { sent: number; success: number; fail: number; pe
 /**
  * ★ 2026-06-17 카운트 표시 단일 산식 (순수) — 전송·성공·실패·대기를 한 곳에서 계산.
  *   재발 차단: 표면(목록·상세·통계·CSV)마다 sent/대기를 따로 계산하던 분산을 종결한다.
- *   - 완료(result_final): 대기는 정의상 0 (발송 6h 경과 확정). 전송 = reconcileSentCount(대기 0).
- *   - 진행중: 대기 = 실측(MySQL status 100/104 + 카카오 대기). 전송 = reconcileSentCount(대기 포함).
+ *   - 완료(result_final): 대기 = 적재 − 성공 − 실패 (status 104 결과 미수신·늦은 리포트 잔여). 캐시 정확 시 0.
+ *   - 진행중: 대기 = 실측(MySQL status 100/104 + 카카오 대기).
+ *   전송 = reconcileSentCount = max(적재, 성공+실패+대기).
  *   소비처: getCampaignResultCounts(결과/통계/상세/CSV) — frontend 자체 파생 금지, 이 값을 그대로 표시.
  */
 export function computeDisplayCounts(
@@ -75,7 +76,9 @@ export function computeDisplayCounts(
 ): DisplayCounts {
   const s = Math.max(0, Number(success) || 0);
   const f = Math.max(0, Number(fail) || 0);
-  const pending = resultFinal ? 0 : Math.max(0, Number(livePending) || 0);
-  const sent = reconcileSentCount(sentCount, s, f, pending);
+  const lp = resultFinal ? 0 : Math.max(0, Number(livePending) || 0);
+  const sent = reconcileSentCount(sentCount, s, f, lp);
+  // 대기: 진행중 = 실측 라이브 대기. 완료 = 적재 잔여(전송 − 성공 − 실패) — status 104 결과 미수신 또는 캐시 누락(worker가 정정).
+  const pending = resultFinal ? Math.max(0, sent - s - f) : lp;
   return { sent, success: s, fail: f, pending };
 }
