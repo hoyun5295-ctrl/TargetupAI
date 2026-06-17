@@ -32,6 +32,7 @@ import { identifyCustomer } from './cdp-identity';
 import { syncOrder } from './cdp-orders';
 import { trackEvent } from './cdp-events';
 import { buildWebhookIdempotencyKey } from './cdp-idempotency';
+import { resolveProviderOAuthCredentials, type ProviderOAuthCredentials } from './provider-credentials';
 
 const NAVER_COMMERCE_CLIENT_ID = process.env.NAVER_COMMERCE_CLIENT_ID || '';
 const NAVER_COMMERCE_CLIENT_SECRET = process.env.NAVER_COMMERCE_CLIENT_SECRET || '';
@@ -72,31 +73,47 @@ export interface NaverCommerceIntegration {
 // OAuth
 // ════════════════════════════════════════════════════════════════════
 
-export function buildNaverCommerceAuthorizeUrl(storeId: string, state: string, scope: string = DEFAULT_SCOPE): string {
-  if (!NAVER_COMMERCE_CLIENT_ID || !NAVER_COMMERCE_REDIRECT_URI) {
+/** env(한줄로 자체 앱) 네이버 커머스 자격 — 회사 자격 미입력 시 fallback. 셋 다 있어야 유효. */
+function envNaverCreds(): ProviderOAuthCredentials | null {
+  if (!NAVER_COMMERCE_CLIENT_ID || !NAVER_COMMERCE_CLIENT_SECRET || !NAVER_COMMERCE_REDIRECT_URI) return null;
+  return { clientId: NAVER_COMMERCE_CLIENT_ID, clientSecret: NAVER_COMMERCE_CLIENT_SECRET, redirectUri: NAVER_COMMERCE_REDIRECT_URI };
+}
+
+export function buildNaverCommerceAuthorizeUrl(
+  storeId: string,
+  state: string,
+  scope: string = DEFAULT_SCOPE,
+  creds?: ProviderOAuthCredentials,
+): string {
+  const c = creds ?? envNaverCreds();
+  if (!c) {
     throw new Error('NAVER_COMMERCE_CLIENT_ID / NAVER_COMMERCE_REDIRECT_URI 환경변수가 설정되지 않았습니다.');
   }
   const params = new URLSearchParams({
     response_type: 'code',
-    client_id: NAVER_COMMERCE_CLIENT_ID,
+    client_id: c.clientId,
     state,
-    redirect_uri: NAVER_COMMERCE_REDIRECT_URI,
+    redirect_uri: c.redirectUri,
     scope,
     store_id: storeId,
   });
   return `${NAVER_AUTHORIZE_URL}?${params.toString()}`;
 }
 
-export async function exchangeNaverCommerceCode(code: string): Promise<NaverCommerceTokenResponse> {
-  if (!NAVER_COMMERCE_CLIENT_ID || !NAVER_COMMERCE_CLIENT_SECRET || !NAVER_COMMERCE_REDIRECT_URI) {
+export async function exchangeNaverCommerceCode(
+  code: string,
+  creds?: ProviderOAuthCredentials,
+): Promise<NaverCommerceTokenResponse> {
+  const c = creds ?? envNaverCreds();
+  if (!c) {
     throw new Error('네이버 커머스 OAuth 환경변수가 설정되지 않았습니다.');
   }
   const body = new URLSearchParams({
     grant_type: 'authorization_code',
-    client_id: NAVER_COMMERCE_CLIENT_ID,
-    client_secret: NAVER_COMMERCE_CLIENT_SECRET,
+    client_id: c.clientId,
+    client_secret: c.clientSecret,
     code,
-    redirect_uri: NAVER_COMMERCE_REDIRECT_URI,
+    redirect_uri: c.redirectUri,
   });
   const res = await fetch(NAVER_TOKEN_URL, {
     method: 'POST',
@@ -110,14 +127,18 @@ export async function exchangeNaverCommerceCode(code: string): Promise<NaverComm
   return (await res.json()) as NaverCommerceTokenResponse;
 }
 
-export async function refreshNaverCommerceToken(refreshToken: string): Promise<NaverCommerceTokenResponse> {
-  if (!NAVER_COMMERCE_CLIENT_ID || !NAVER_COMMERCE_CLIENT_SECRET) {
+export async function refreshNaverCommerceToken(
+  refreshToken: string,
+  creds?: ProviderOAuthCredentials,
+): Promise<NaverCommerceTokenResponse> {
+  const c = creds ?? envNaverCreds();
+  if (!c) {
     throw new Error('네이버 커머스 OAuth 환경변수가 설정되지 않았습니다.');
   }
   const body = new URLSearchParams({
     grant_type: 'refresh_token',
-    client_id: NAVER_COMMERCE_CLIENT_ID,
-    client_secret: NAVER_COMMERCE_CLIENT_SECRET,
+    client_id: c.clientId,
+    client_secret: c.clientSecret,
     refresh_token: refreshToken,
   });
   const res = await fetch(NAVER_TOKEN_URL, {
@@ -234,14 +255,15 @@ export async function getNaverCommerceIntegrationByStoreId(storeId: string): Pro
 }
 
 export async function ensureFreshNaverCommerceToken(
-  integration: NaverCommerceIntegration
+  integration: NaverCommerceIntegration,
+  creds?: ProviderOAuthCredentials,
 ): Promise<NaverCommerceIntegration> {
   const now = Date.now();
   if (integration.tokenExpiresAt.getTime() > now + TOKEN_REFRESH_MARGIN_MS) {
     return integration;
   }
   try {
-    const refreshed = await refreshNaverCommerceToken(integration.refreshToken);
+    const refreshed = await refreshNaverCommerceToken(integration.refreshToken, creds);
     await saveNaverCommerceIntegration(integration.companyId, integration.storeId, refreshed);
     return {
       ...integration,
@@ -262,12 +284,51 @@ export async function ensureFreshNaverCommerceToken(
 // REST API
 // ════════════════════════════════════════════════════════════════════
 
+// ════════════════════════════════════════════════════════════════════
+// BYO(회사 self-app) 자격 저장 / 조회 — model B (고객이 자기 키 직접 입력)
+// ════════════════════════════════════════════════════════════════════
+
+const NAVER_CALLBACK_REDIRECT = process.env.NAVER_COMMERCE_REDIRECT_URI || 'https://app.hanjul.ai/api/naver-commerce/oauth/callback';
+
+/** 회사가 입력한 self-app 자격(client_id/secret)을 company_integrations.meta에 저장. OAuth 전(status='pending_oauth'). */
+export async function saveNaverCommerceByoCredentials(companyId: string, storeId: string, clientId: string, clientSecret: string): Promise<void> {
+  await query(
+    `INSERT INTO company_integrations (
+      id, company_id, provider, mall_id, access_token, refresh_token,
+      token_expires_at, scope, meta, webhook_secret, connected_at, status, created_at, updated_at
+    ) VALUES (
+      gen_random_uuid(), $1::uuid, 'naver_smart_store', $2, '', '',
+      NULL, '', $3::jsonb, NULL, NULL, 'pending_oauth', NOW(), NOW()
+    )
+    ON CONFLICT (company_id, provider, mall_id) DO UPDATE SET
+      meta = company_integrations.meta || EXCLUDED.meta,
+      updated_at = NOW()`,
+    [companyId, storeId, JSON.stringify({ app_client_id: clientId, app_client_secret: clientSecret })]
+  );
+}
+
+/** 저장된 회사 self-app 자격 반환(없으면 undefined → 호출부 env fallback). redirect_uri는 우리 콜백 고정. */
+export async function getNaverCommerceByoCredentials(companyId: string, storeId: string): Promise<ProviderOAuthCredentials | undefined> {
+  const r = await query(
+    `SELECT meta FROM company_integrations WHERE company_id = $1::uuid AND provider = 'naver_smart_store' AND mall_id = $2 LIMIT 1`,
+    [companyId, storeId]
+  );
+  if (r.rows.length === 0) return undefined;
+  const meta = (r.rows[0].meta || {}) as { app_client_id?: string; app_client_secret?: string };
+  const resolved = resolveProviderOAuthCredentials(
+    { app_client_id: meta.app_client_id, app_client_secret: meta.app_client_secret, app_redirect_uri: NAVER_CALLBACK_REDIRECT },
+    null,
+  );
+  return resolved.ok ? resolved.credentials : undefined;
+}
+
 export async function naverCommerceApiCall<T = unknown>(
   integration: NaverCommerceIntegration,
   path: string,
-  options: { method?: string; query?: Record<string, string | number | boolean | undefined>; body?: unknown } = {}
+  options: { method?: string; query?: Record<string, string | number | boolean | undefined>; body?: unknown } = {},
+  creds?: ProviderOAuthCredentials,
 ): Promise<T> {
-  const fresh = await ensureFreshNaverCommerceToken(integration);
+  const fresh = await ensureFreshNaverCommerceToken(integration, creds);
   const qs = options.query
     ? '?' + new URLSearchParams(
         Object.fromEntries(

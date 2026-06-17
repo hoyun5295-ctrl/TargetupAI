@@ -107,6 +107,31 @@
 
 ---
 
+### 🟢 2026-06-17 — SDK 강화: 자사몰 BYO 자격 연동 토대 (카페24·네이버 backend end-to-end, ★검증 완료·미배포)
+> **배경**: "자사몰(카페24·고도몰·네이버) 연동이 실제로 도냐"에서 출발. 조사 — 카페24 env 키 미설정(현재 dormant)·`cafe24ApiCall` 호출처 0(백필 없음)·토큰 갱신 0, 고도몰 전용 커넥터 없음(속빈 껍데기). 세일즈포스/브레이즈 = 공유앱+OAuth(출시·심사 전제). **Harold 결정 = 고객이 자기 self-app 키 직접 입력(BYO/model B), 우리 출시·심사 0.**
+> **구현(검증 tsc 0·verify pass·미배포)**: `provider-credentials.ts`(자격 resolver 5/5)·`provider-oauth-url.ts`(URL 빌더 11/11) 순수 신설 + `cafe24-client`·`naver-commerce-client` OAuth·갱신·apiCall 전부 `creds?`(회사별, 없으면 env) + `save/getByoCredentials`(meta 저장·resolver 조회) + `routes/cafe24`·`routes/naver-commerce` `POST /byo-credentials` + authorize/callback BYO 사용. 역호환(env 경로 보존, 신규 endpoint는 UI 전까지 미호출). 고도몰 스펙 PDF 확정·기록(`openhub.godo.co.kr`, partner_key+key body, XML, IP등록 — partner_key 약 3일 후).
+> **다음 세션(정확히)**: ① 연동센터 "내 인증정보 입력" 폼(`CdpSettingsPage` 모달 확장, 여정급 디자인) ② 백필(연결 즉시 회원·주문, Admin API 응답 raw 확인 후 — D217 룰) ③ 고도몰 커넥터(키 도착 후). 설계·진행·다음 할 일 = `docs/superpowers/specs/2026-06-17-byo-credentials-cdp-connectors-design.md`. 상세 [[project_2026_0617_byo_credentials_cdp_connectors]].
+> **배포(백엔드만, 역호환)**: `tp-push "..."` → 서버 backend `npm run build:safe` → `pm2 restart targetup-backend`.
+
+---
+
+### 🟢 2026-06-17 — 인앱 메시지 웹/앱 채널 분리 1·2단계 (★배포완료)
+> **배경**: "인앱 메시지" 메뉴가 실제로는 웹 자사몰 온사이트 팝업만 구현(`sdk-js` 브라우저 전용)·모바일 네이티브 SDK 0 = 이름/실체 불일치(Harold 직감 — "인앱인데 앱엔 어떻게?"). → 웹/앱 진입부터 분리, 각 채널에 맞는 확실한 형태만.
+> **1단계 (채널 분리 토대)**: `cdp_inapp_messages.channel` ALTER(web/app, 기존 web 자동분류) + `getActiveMessagesForCustomerV2 channel='web'`(웹 SDK가 앱 메시지 못 받게 차단 — 2단계서 param화) + 생성/목록/통계 channel(impression은 channel 없어 `message_id IN (채널 메시지)` 서브쿼리) + 프론트 진입 웹/앱 선택 화면(channel 가드)·헤더 뱃지·웹 4종(모달·슬라이드·토스트·플로팅)/앱 6종(+전면·배너) 형태(`CHANNEL_TEMPLATES`, 배제 형태 렌더러는 보존·선택지만 숨김)·앱 미리보기 배지.
+> **2단계 웹뷰**: 서버 active channel param(앱=app 수신) + `sdk-js inapp.ts` `platform:'app'`→`channel=app` + 앱 형태 렌더(기존 8 templates 재사용=추가 렌더 0) + 스니펫 `data-hjl-platform="app"` 자동 배선(`auto-capture/index.ts`의 `auto-init→hjl.init→inappBaseInput→inapp.init`) + CdpSettingsPage 웹/앱 스니펫 분리 안내. 웹뷰로 iOS·안드로이드 한 벌(JS=OS 무관), 순수 네이티브는 향후(REST 가이드/클라우드 빌드 GitHub Actions macOS 러너).
+> **빌드 fix**: `sdk-js/tsconfig.json` exclude에 `src/**/*.test.ts`·`__tests__` 추가(빌드가 test 포함→운영서버 vitest·rollup devDep 없어 TS2307 실패 차단). sdk-js 배포=서버 `npm install --include=dev`→`build:all`→`dist/iife/hanjul.min.js`를 company-frontend `public`·`dist`의 `sdk/v0.3.5/` cp.
+> **검증·배포**: backend·frontend·sdk-js tsc 0 · vitest 77 pass(앱 모드 `channel=app` 실측 2케이스 추가) · 박-단어/모델명/native dialog grep 0. **1·2단계 전부 배포완료**(진입 분기 화면 Harold 실측). 설계·계획 `docs/superpowers/{specs,plans}/2026-06-17-onsite-app-message-redesign*`. 상세 [[project_2026_0617_inapp_web_app_channel_split]].
+> **남은 것**: 운영 검증(실 자사몰·웹뷰 앱 — Harold/직원, 실 환경) + 순수 네이티브 앱(향후 수요 시).
+
+---
+
+### 🟢 2026-06-17 — 발신프로필 080 필드 교체 (상태/브랜드메시지/등록일) (★배포완료)
+> **신고(박성용 psy5868)**: 알림톡 발신프로필 관리(고객사)에서 대체발송 080·080 설정은 불필요 → IMC에서 받을 수 있는 상태(정상/휴면/차단)·브랜드메시지(사용/미사용)·등록일 필드 추가.
+> **fix**: 고객사 `AlimtalkManagementSection`에서 "대체발송 080" 컬럼·"080 설정" 버튼·`UnsubscribeSettingModal` 제거(슈퍼관리자·DB·IMC 연동은 보존) → 상태·브랜드메시지·등록일(카카오 채널 생성일 `createdAt`) 3컬럼. `kakao_sender_profiles` 4컬럼(`block_yn`/`dormant_yn`/`brand_message_yn`/`channel_created_at`) ALTER + `syncSenderStatusJob` 확장(IMC `block`/`dormant`/`brandMessage`/`createdAt` 저장 + 첫 응답 raw 로그 — 외부 API 응답 추측 금지). 상태 매핑=block_yn→차단/dormant_yn→휴면/그 외→정상(IMC status 실측 'A').
+> **검증·배포**: backend·frontend tsc 0 · 모델명/박-단어/native dialog grep 0. 배포완료.
+
+---
+
 ### 🟢 2026-06-17 — 직원 디버깅 2건(전송 대기 미처리·전송≠통계) + 시세이도 미발송 근본 (★배포완료)
 > **디버깅1 (에이스 6/13 캠페인관리 대기 666)**: 완료 캠페인(result_final) PG 캐시 fail이 실측보다 적게 굳어, 적재−(성공+실패) 차액 666이 frontend에서 "대기"로 둔갑(캡쳐02 상세 실패 1,565 = 캐시 899 + 666).
 > **디버깅2 (시세이도 6/9 전송 1613 ≠ 성공+실패 1646)**: 슈퍼관리자 캠페인관리(`admin.ts:1769`)가 result_final 분기에서 sent_count 직접 표시(reconcile 누락). results.ts(사용자)만 어제 고쳐 표면 불일치.

@@ -36,6 +36,8 @@ import { identifyCustomer } from './cdp-identity';
 import { syncOrder } from './cdp-orders';
 import { trackEvent } from './cdp-events';
 import { buildWebhookIdempotencyKey } from './cdp-idempotency';
+import { buildCafe24AuthorizeUrl as buildCafe24Url } from './provider-oauth-url';
+import { resolveProviderOAuthCredentials, type ProviderOAuthCredentials } from './provider-credentials';
 
 const CAFE24_CLIENT_ID = process.env.CAFE24_CLIENT_ID || '';
 const CAFE24_CLIENT_SECRET = process.env.CAFE24_CLIENT_SECRET || '';
@@ -83,41 +85,49 @@ export interface Cafe24Integration {
 // OAuth — authorize URL + code 교환
 // ════════════════════════════════════════════════════════════════════
 
+/** env(한줄로 자체 앱) 카페24 자격 — 회사 자격 미입력 시 fallback. 셋 다 있어야 유효. */
+function envCafe24Creds(): ProviderOAuthCredentials | null {
+  if (!CAFE24_CLIENT_ID || !CAFE24_CLIENT_SECRET || !CAFE24_REDIRECT_URI) return null;
+  return { clientId: CAFE24_CLIENT_ID, clientSecret: CAFE24_CLIENT_SECRET, redirectUri: CAFE24_REDIRECT_URI };
+}
+
 /**
  * 카페24 OAuth authorize URL 생성.
  * - mall_id는 사용자가 CdpSettingsPage에서 입력
  * - state는 CSRF 방지 + company_id 식별용 (서버 측 검증)
+ * - creds 미전달 시 env(한줄로 자체 앱) 자격 fallback. 회사 BYO 자격은 호출부가 전달.
  */
-export function buildCafe24AuthorizeUrl(mallId: string, state: string, scope: string = DEFAULT_SCOPE): string {
-  if (!CAFE24_CLIENT_ID || !CAFE24_REDIRECT_URI) {
+export function buildCafe24AuthorizeUrl(
+  mallId: string,
+  state: string,
+  scope: string = DEFAULT_SCOPE,
+  creds?: ProviderOAuthCredentials,
+): string {
+  const c = creds ?? envCafe24Creds();
+  if (!c) {
     throw new Error('CAFE24_CLIENT_ID / CAFE24_REDIRECT_URI 환경변수가 설정되지 않았습니다.');
   }
-  if (!/^[a-z0-9_-]+$/i.test(mallId)) {
-    throw new Error('카페24 mall_id 형식이 올바르지 않습니다.');
-  }
-  const params = new URLSearchParams({
-    response_type: 'code',
-    client_id: CAFE24_CLIENT_ID,
-    state,
-    redirect_uri: CAFE24_REDIRECT_URI,
-    scope,
-  });
-  return `https://${mallId}.cafe24api.com/api/v2/oauth/authorize?${params.toString()}`;
+  return buildCafe24Url(c, mallId, state, scope);
 }
 
 /**
  * authorize code → access_token + refresh_token 교환.
  */
-export async function exchangeCafe24Code(mallId: string, code: string): Promise<Cafe24TokenResponse> {
-  if (!CAFE24_CLIENT_ID || !CAFE24_CLIENT_SECRET || !CAFE24_REDIRECT_URI) {
+export async function exchangeCafe24Code(
+  mallId: string,
+  code: string,
+  creds?: ProviderOAuthCredentials,
+): Promise<Cafe24TokenResponse> {
+  const c = creds ?? envCafe24Creds();
+  if (!c) {
     throw new Error('카페24 OAuth 환경변수가 설정되지 않았습니다.');
   }
   const url = `https://${mallId}.cafe24api.com/api/v2/oauth/token`;
-  const basicAuth = Buffer.from(`${CAFE24_CLIENT_ID}:${CAFE24_CLIENT_SECRET}`).toString('base64');
+  const basicAuth = Buffer.from(`${c.clientId}:${c.clientSecret}`).toString('base64');
   const body = new URLSearchParams({
     grant_type: 'authorization_code',
     code,
-    redirect_uri: CAFE24_REDIRECT_URI,
+    redirect_uri: c.redirectUri,
   });
 
   const res = await fetch(url, {
@@ -140,12 +150,17 @@ export async function exchangeCafe24Code(mallId: string, code: string): Promise<
 /**
  * refresh_token으로 access_token 갱신.
  */
-export async function refreshCafe24Token(mallId: string, refreshToken: string): Promise<Cafe24TokenResponse> {
-  if (!CAFE24_CLIENT_ID || !CAFE24_CLIENT_SECRET) {
+export async function refreshCafe24Token(
+  mallId: string,
+  refreshToken: string,
+  creds?: ProviderOAuthCredentials,
+): Promise<Cafe24TokenResponse> {
+  const c = creds ?? envCafe24Creds();
+  if (!c) {
     throw new Error('카페24 OAuth 환경변수가 설정되지 않았습니다.');
   }
   const url = `https://${mallId}.cafe24api.com/api/v2/oauth/token`;
-  const basicAuth = Buffer.from(`${CAFE24_CLIENT_ID}:${CAFE24_CLIENT_SECRET}`).toString('base64');
+  const basicAuth = Buffer.from(`${c.clientId}:${c.clientSecret}`).toString('base64');
   const body = new URLSearchParams({
     grant_type: 'refresh_token',
     refresh_token: refreshToken,
@@ -273,11 +288,55 @@ export async function getCafe24IntegrationByMallId(mallId: string): Promise<Cafe
   };
 }
 
+// ════════════════════════════════════════════════════════════════════
+// BYO(회사 self-app) 자격 저장 / 조회 — model B (고객이 자기 키 직접 입력)
+// ════════════════════════════════════════════════════════════════════
+
+const CAFE24_CALLBACK_REDIRECT = process.env.CAFE24_REDIRECT_URI || 'https://app.hanjul.ai/api/cafe24/oauth/callback';
+
+/**
+ * 회사가 입력한 self-app 자격(client_id/secret)을 company_integrations.meta에 저장.
+ * OAuth 전이라 토큰 없음(status='pending_oauth'). 이후 callback이 토큰을 채우고 active로 전환.
+ */
+export async function saveCafe24ByoCredentials(companyId: string, mallId: string, clientId: string, clientSecret: string): Promise<void> {
+  await query(
+    `INSERT INTO company_integrations (
+      id, company_id, provider, mall_id, access_token, refresh_token,
+      token_expires_at, scope, meta, webhook_secret, connected_at, status, created_at, updated_at
+    ) VALUES (
+      gen_random_uuid(), $1::uuid, 'cafe24', $2, '', '',
+      NULL, '', $3::jsonb, NULL, NULL, 'pending_oauth', NOW(), NOW()
+    )
+    ON CONFLICT (company_id, provider, mall_id) DO UPDATE SET
+      meta = company_integrations.meta || EXCLUDED.meta,
+      updated_at = NOW()`,
+    [companyId, mallId, JSON.stringify({ app_client_id: clientId, app_client_secret: clientSecret })]
+  );
+}
+
+/**
+ * 저장된 회사 self-app 자격을 반환(없으면 undefined → 호출부가 env로 fallback).
+ * redirect_uri는 우리 콜백 고정(고객 self-app에 이 주소를 등록).
+ */
+export async function getCafe24ByoCredentials(companyId: string, mallId: string): Promise<ProviderOAuthCredentials | undefined> {
+  const r = await query(
+    `SELECT meta FROM company_integrations WHERE company_id = $1::uuid AND provider = 'cafe24' AND mall_id = $2 LIMIT 1`,
+    [companyId, mallId]
+  );
+  if (r.rows.length === 0) return undefined;
+  const meta = (r.rows[0].meta || {}) as { app_client_id?: string; app_client_secret?: string };
+  const resolved = resolveProviderOAuthCredentials(
+    { app_client_id: meta.app_client_id, app_client_secret: meta.app_client_secret, app_redirect_uri: CAFE24_CALLBACK_REDIRECT },
+    null,
+  );
+  return resolved.ok ? resolved.credentials : undefined;
+}
+
 /**
  * access_token이 만료 임박이면 자동 갱신.
  * - 만료 5분 전 + 만료 후 모두 갱신
  */
-export async function ensureFreshCafe24Token(integration: Cafe24Integration): Promise<Cafe24Integration> {
+export async function ensureFreshCafe24Token(integration: Cafe24Integration, creds?: ProviderOAuthCredentials): Promise<Cafe24Integration> {
   const now = Date.now();
   const expiresAt = integration.tokenExpiresAt.getTime();
   if (expiresAt > now + TOKEN_REFRESH_MARGIN_MS) {
@@ -285,7 +344,7 @@ export async function ensureFreshCafe24Token(integration: Cafe24Integration): Pr
   }
 
   try {
-    const refreshed = await refreshCafe24Token(integration.mallId, integration.refreshToken);
+    const refreshed = await refreshCafe24Token(integration.mallId, integration.refreshToken, creds);
     await saveCafe24Integration(integration.companyId, integration.mallId, refreshed);
     return {
       ...integration,
@@ -316,9 +375,10 @@ export async function ensureFreshCafe24Token(integration: Cafe24Integration): Pr
 export async function cafe24ApiCall<T = unknown>(
   integration: Cafe24Integration,
   path: string,
-  options: { method?: string; query?: Record<string, string | number | boolean | undefined>; body?: unknown } = {}
+  options: { method?: string; query?: Record<string, string | number | boolean | undefined>; body?: unknown } = {},
+  creds?: ProviderOAuthCredentials,
 ): Promise<T> {
-  const fresh = await ensureFreshCafe24Token(integration);
+  const fresh = await ensureFreshCafe24Token(integration, creds);
 
   const baseUrl = `https://${fresh.mallId}.cafe24api.com/api/v2/admin`;
   const qs = options.query

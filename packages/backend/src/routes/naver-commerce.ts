@@ -28,6 +28,8 @@ import {
   getNaverCommerceIntegrationByStoreId,
   verifyNaverCommerceWebhookSignature,
   naverSmartStoreAdapter,
+  saveNaverCommerceByoCredentials,
+  getNaverCommerceByoCredentials,
 } from '../utils/naver-commerce-client';
 import { isCdpEnabledForPlan } from '../utils/cdp-auth';
 
@@ -156,11 +158,37 @@ router.get('/oauth/authorize', async (req: Request, res: Response) => {
     );
 
     const state = Buffer.from(JSON.stringify({ company_id: companyId, nonce: csrfNonce, ts: Date.now() })).toString('base64url');
-    const authorizeUrl = buildNaverCommerceAuthorizeUrl(storeId, state);
+    const byoCreds = await getNaverCommerceByoCredentials(companyId, storeId);
+    const authorizeUrl = buildNaverCommerceAuthorizeUrl(storeId, state, undefined, byoCreds);
     return res.json({ success: true, authorize_url: authorizeUrl });
   } catch (err: any) {
     console.error('[NaverCommerce /oauth/authorize] 오류:', err);
     return res.status(500).json({ success: false, error: err?.message || 'authorize URL 생성 실패' });
+  }
+});
+
+router.post('/byo-credentials', async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    const userType = req.user?.userType;
+    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+    if (userType !== 'company_admin') return res.status(403).json({ success: false, error: '네이버 스마트스토어 연동은 회사 관리자만 가능합니다.' });
+
+    const storeId = String(req.body?.store_id || '').trim();
+    const clientId = String(req.body?.client_id || '').trim();
+    const clientSecret = String(req.body?.client_secret || '').trim();
+    if (!storeId) {
+      return res.status(400).json({ success: false, error: 'store_id는 필수입니다.' });
+    }
+    if (!clientId || !clientSecret) {
+      return res.status(400).json({ success: false, error: 'client_id / client_secret을 모두 입력해주세요.' });
+    }
+
+    await saveNaverCommerceByoCredentials(companyId, storeId, clientId, clientSecret);
+    return res.json({ success: true });
+  } catch (err: any) {
+    console.error('[NaverCommerce /byo-credentials] 오류:', err);
+    return res.status(500).json({ success: false, error: err?.message || 'self-app 자격 저장 실패' });
   }
 });
 
@@ -249,7 +277,8 @@ naverCommerceCallbackRouter.get('/oauth/callback', async (req: Request, res: Res
       return res.status(400).send(renderCallbackHtml('error', 'state에 store_id가 누락되었습니다.'));
     }
 
-    const tokenRes = await exchangeNaverCommerceCode(code);
+    const byoCreds = await getNaverCommerceByoCredentials(parsed.company_id, storeId);
+    const tokenRes = await exchangeNaverCommerceCode(code, byoCreds);
     await saveNaverCommerceIntegration(parsed.company_id, storeId, tokenRes);
 
     await query(

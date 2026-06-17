@@ -29,6 +29,8 @@ import {
   getCafe24IntegrationByMallId,
   verifyCafe24WebhookSignature,
   cafe24Adapter,
+  saveCafe24ByoCredentials,
+  getCafe24ByoCredentials,
 } from '../utils/cafe24-client';
 import { isCdpEnabledForPlan } from '../utils/cdp-auth';
 
@@ -179,7 +181,8 @@ router.get('/oauth/authorize', async (req: Request, res: Response) => {
     );
 
     const state = Buffer.from(JSON.stringify({ company_id: companyId, nonce: csrfNonce, ts: Date.now() })).toString('base64url');
-    const authorizeUrl = buildCafe24AuthorizeUrl(mallId, state);
+    const byoCreds = await getCafe24ByoCredentials(companyId, mallId);
+    const authorizeUrl = buildCafe24AuthorizeUrl(mallId, state, undefined, byoCreds);
     return res.json({ success: true, authorize_url: authorizeUrl });
   } catch (err: any) {
     console.error('[Cafe24 /oauth/authorize] 오류:', err);
@@ -199,6 +202,35 @@ router.get('/oauth/callback', (_req: Request, res: Response) => {
   // 이 경로는 callbackRouter (아래)가 먼저 매칭되어야 정합.
   // 만약 본 핸들러에 도달했다면 라우터 등록 순서 오류.
   return res.status(500).send('카페24 OAuth callback 라우터 등록 순서 오류 — 운영 점검 필요.');
+});
+
+/**
+ * POST /api/cafe24/byo-credentials
+ * → 고객이 입력한 self-app client_id/secret/mall_id 저장(OAuth 전). 이후 /oauth/authorize로 연결.
+ */
+router.post('/byo-credentials', async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    const userType = req.user?.userType;
+    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+    if (userType !== 'company_admin') return res.status(403).json({ success: false, error: '카페24 연동은 회사 관리자만 가능합니다.' });
+
+    const mallId = String(req.body?.mall_id || '').trim().toLowerCase();
+    const clientId = String(req.body?.client_id || '').trim();
+    const clientSecret = String(req.body?.client_secret || '').trim();
+    if (!mallId || !/^[a-z0-9_-]+$/i.test(mallId)) {
+      return res.status(400).json({ success: false, error: 'mall_id 형식이 올바르지 않습니다.' });
+    }
+    if (!clientId || !clientSecret) {
+      return res.status(400).json({ success: false, error: 'client_id / client_secret을 모두 입력해주세요.' });
+    }
+
+    await saveCafe24ByoCredentials(companyId, mallId, clientId, clientSecret);
+    return res.json({ success: true });
+  } catch (err: any) {
+    console.error('[Cafe24 /byo-credentials] 오류:', err);
+    return res.status(500).json({ success: false, error: err?.message || 'self-app 자격 저장 실패' });
+  }
 });
 
 /**
@@ -300,8 +332,9 @@ cafe24CallbackRouter.get('/oauth/callback', async (req: Request, res: Response) 
       return res.status(400).send(renderCafe24CallbackHtml('error', 'state에 mall_id가 누락되었습니다.'));
     }
 
-    // 토큰 교환
-    const tokenRes = await exchangeCafe24Code(mallId, code);
+    // 토큰 교환 — 회사 self-app 자격(없으면 env)으로
+    const byoCreds = await getCafe24ByoCredentials(parsed.company_id, mallId);
+    const tokenRes = await exchangeCafe24Code(mallId, code, byoCreds);
     await saveCafe24Integration(parsed.company_id, mallId, tokenRes);
 
     // state 정리
