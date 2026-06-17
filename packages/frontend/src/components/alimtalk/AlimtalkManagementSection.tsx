@@ -14,7 +14,6 @@ import { useEffect, useMemo, useState } from 'react';
 import AlimtalkTemplateFormV2, { type TemplateFormData } from './AlimtalkTemplateFormV2';
 import AlarmUserManager from './AlarmUserManager';
 import SenderRegistrationWizard from './SenderRegistrationWizard';
-import UnsubscribeSettingModal from './UnsubscribeSettingModal';
 import TemplateHistoryModal from './TemplateHistoryModal';
 import { formatTemplateType } from './alimtalk-types';
 import { useAuthStore } from '../../stores/authStore';
@@ -78,8 +77,11 @@ interface Profile {
   admin_phone_number: string | null;
   category_name_cache: string | null;
   status: string;
-  unsubscribe_phone: string | null;
-  unsubscribe_auth: string | null;
+  // ★ 2026-06-17: IMC 동기화 필드 (syncSenderStatusJob). 휴면/차단/브랜드메시지/채널 등록일.
+  block_yn: string | null;
+  dormant_yn: string | null;
+  brand_message_yn: string | null;
+  channel_created_at: string | null;
   approval_status: string | null;
   approval_requested_at: string | null;
   approved_at: string | null;
@@ -136,6 +138,20 @@ const SENDER_STATUS_LABELS: Record<string, { label: string; cls: string }> = {
   DELETED: { label: '삭제',     cls: 'bg-gray-200 text-gray-500' },
 };
 
+// ★ 2026-06-17: IMC 발신프로필 상태 한글 매핑 (status='A' + block_yn/dormant_yn 조합).
+//   휴면/차단은 IMC status만으론 구분 불가 → block/dormant boolean 우선 판정.
+function senderStatusBadge(p: Profile): { label: string; cls: string } {
+  const key =
+    p.status === 'D' || p.status === 'DELETED'
+      ? 'DELETED'
+      : p.block_yn === 'Y'
+        ? 'BLOCKED'
+        : p.dormant_yn === 'Y'
+          ? 'DORMANT'
+          : 'NORMAL';
+  return SENDER_STATUS_LABELS[key];
+}
+
 const APPROVAL_LABELS: Record<string, { label: string; cls: string }> = {
   PENDING_APPROVAL: { label: '슈퍼관리자 승인대기', cls: 'bg-amber-100 text-amber-700' },
   APPROVED:         { label: '승인 완료',           cls: 'bg-emerald-100 text-emerald-700' },
@@ -167,7 +183,6 @@ export default function AlimtalkManagementSection() {
   const [inspectionComment, setInspectionComment] = useState('');
   const [inspectionFile, setInspectionFile] = useState<File | null>(null);
   const [inspectionSubmitting, setInspectionSubmitting] = useState(false);
-  const [unsubTarget, setUnsubTarget] = useState<Profile | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const [confirm, setConfirm] = useState<ConfirmState | null>(null);
 
@@ -450,20 +465,20 @@ export default function AlimtalkManagementSection() {
                   <th className="text-left px-3 py-2">채널ID</th>
                   <th className="text-left px-3 py-2">카테고리</th>
                   <th className="text-center px-3 py-2">승인</th>
-                  {/* ★ D152-4 Harold님 지시 (2026-05-12): 직원 #5 "080이 왜 알림톡에 있냐" 혼란 해소.
-                        알림톡 자체는 정보성 메시지라 080 불요. 발송 실패 시 SMS/LMS 대체발송이 광고 LMS면 080 필요. */}
-                  <th className="text-center px-3 py-2" title="알림톡 발송 실패 시 SMS/LMS 대체발송이 광고성이면 표시되는 무료수신거부 번호">대체발송 080</th>
-                  <th className="text-right px-3 py-2">관리</th>
+                  <th className="text-center px-3 py-2">상태</th>
+                  <th className="text-center px-3 py-2">브랜드메시지</th>
+                  <th className="text-center px-3 py-2">등록일</th>
                 </tr>
               </thead>
               <tbody>
                 {profiles.map((p) => {
-                  // ★ D135+: "IMC 상태" 컬럼 삭제. 상위 사업자 승인 여부를 고객사가 볼 필요 없음.
-                  //   발신프로필 상태는 내부 polling(syncSenderStatusJob)으로만 추적하고 UI 미노출.
+                  // ★ 2026-06-17: 080 무료수신거부 컬럼 제거(고객사 화면). 대신 IMC 상태/브랜드메시지/등록일 노출.
+                  //   상태 = syncSenderStatusJob이 IMC status+block+dormant를 DB 동기화 → senderStatusBadge로 한글 매핑.
                   const ap = APPROVAL_LABELS[p.approval_status || 'PENDING_APPROVAL'] || {
                     label: p.approval_status || '-',
                     cls: 'bg-gray-100 text-gray-500',
                   };
+                  const sb = senderStatusBadge(p);
                   return (
                     <tr key={p.id} className="border-t border-gray-100">
                       <td className="px-3 py-2">
@@ -507,23 +522,23 @@ export default function AlimtalkManagementSection() {
                           {ap.label}
                         </span>
                       </td>
+                      {/* 상태 — IMC status + block + dormant */}
                       <td className="text-center px-3 py-2">
-                        {p.unsubscribe_phone ? (
-                          <span className="text-emerald-600">
-                            {p.unsubscribe_phone}
-                          </span>
+                        <span className={`inline-block px-2 py-0.5 rounded ${sb.cls}`}>
+                          {sb.label}
+                        </span>
+                      </td>
+                      {/* 브랜드메시지 사용 여부 */}
+                      <td className="text-center px-3 py-2">
+                        {p.brand_message_yn === 'Y' ? (
+                          <span className="text-emerald-600">사용</span>
                         ) : (
-                          <span className="text-gray-300">미설정</span>
+                          <span className="text-gray-300">미사용</span>
                         )}
                       </td>
-                      <td className="text-right px-3 py-2">
-                        <button
-                          type="button"
-                          onClick={() => setUnsubTarget(p)}
-                          className="px-2 py-0.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 rounded"
-                        >
-                          080 설정
-                        </button>
+                      {/* 등록일 — 카카오 채널 생성일 */}
+                      <td className="text-center px-3 py-2 text-gray-600">
+                        {p.channel_created_at ? p.channel_created_at.slice(0, 10) : '-'}
                       </td>
                     </tr>
                   );
@@ -1060,17 +1075,6 @@ export default function AlimtalkManagementSection() {
         />
       )}
 
-      {unsubTarget && (
-        <UnsubscribeSettingModal
-          profile={unsubTarget}
-          onClose={() => setUnsubTarget(null)}
-          onSuccess={() => {
-            setUnsubTarget(null);
-            setToast('080 설정 완료');
-            load();
-          }}
-        />
-      )}
 
       {toast && (
         <div

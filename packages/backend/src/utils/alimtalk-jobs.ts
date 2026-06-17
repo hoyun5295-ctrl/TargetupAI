@@ -597,25 +597,42 @@ export async function syncSenderStatusJob(): Promise<void> {
   if (rows.length === 0) return;
 
   let updated = 0;
+  let rawLogged = false;
   for (const row of rows) {
     try {
       const res = await imc.getSender(row.profile_key);
       if (res.code !== '0000' || !res.data) continue;
+      const d = res.data;
 
-      const latestStatus = res.data.status;
-      const latestUuid = res.data.uuid;
+      // ★ 2026-06-17: IMC 발신프로필 응답 raw 1회 로그 — block/dormant/brandMessage/createdAt
+      //   실제 필드·포맷을 직접 확인하기 위함 (외부 API 응답 추측 금지, D217+ 알림톡 18일 누락 사고 방지).
+      //   값·포맷 검증 종결 후 제거 가능.
+      if (!rawLogged) {
+        rawLogged = true;
+        log(
+          'senderStatusSync-raw',
+          `keys=[${Object.keys(d).join(',')}] status=${d.status} block=${d.block} dormant=${d.dormant} brandMessage=${d.brandMessage} createdAt=${d.createdAt}`,
+        );
+      }
 
-      const statusChanged = latestStatus && latestStatus !== row.status;
-      const uuidChanged = latestUuid && latestUuid !== row.yellow_id;
-      if (!statusChanged && !uuidChanged) continue;
+      // IMC status(A 등) + block/dormant boolean + brandMessage + 채널 생성일을 함께 저장.
+      //   휴면/차단은 status만으론 구분 불가 → block/dormant boolean 필수.
+      const blockYn = d.block === true ? 'Y' : 'N';
+      const dormantYn = d.dormant === true ? 'Y' : 'N';
+      const brandYn = d.brandMessage === true ? 'Y' : 'N';
+      const channelCreatedAt = d.createdAt || null;
 
       await query(
         `UPDATE kakao_sender_profiles
-            SET status     = COALESCE($1, status),
-                yellow_id  = COALESCE($2, yellow_id),
-                updated_at = now()
-          WHERE id = $3`,
-        [latestStatus || null, latestUuid || null, row.id],
+            SET status             = COALESCE($1, status),
+                yellow_id          = COALESCE($2, yellow_id),
+                block_yn           = $3,
+                dormant_yn         = $4,
+                brand_message_yn   = $5,
+                channel_created_at = COALESCE($6, channel_created_at),
+                updated_at         = now()
+          WHERE id = $7`,
+        [d.status || null, d.uuid || null, blockYn, dormantYn, brandYn, channelCreatedAt, row.id],
       );
       updated++;
     } catch (err) {

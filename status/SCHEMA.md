@@ -492,13 +492,17 @@
 | **category_name_cache** | varchar(255) | **D130: 표시명 캐시** |
 | **top_sender_yn** | char(1) DEFAULT 'N' | **D130: 최상위 발신 여부** |
 | **custom_sender_key** | varchar(40) | **D130: 고객사 지정 키** |
-| **status** | varchar(20) DEFAULT 'PENDING' | **D130: PENDING/NORMAL/BLOCKED/DELETED/DORMANT** |
+| **status** | varchar(20) DEFAULT 'PENDING' | **D130: PENDING/NORMAL/BLOCKED/DELETED/DORMANT. 2026-06-17 실측: IMC sync 후 'A'(정상) 저장 — 휴면/차단은 block_yn/dormant_yn으로 판정** |
 | **unsubscribe_phone** | varchar(15) | **D130: 080 무료수신거부 번호** |
 | **unsubscribe_auth** | varchar(10) | **D130: 080 인증번호** |
 | **marketing_agree_file_key** | varchar(100) | **D130: 광고동의 증적 파일 키** |
 | **brand_targeting_yn** | char(1) DEFAULT 'N' | **D130: 브랜드 M/N 타겟팅 사용 여부** |
 | **registered_at** | timestamptz | **D130: 등록 시각** |
 | **updated_at** | timestamptz DEFAULT now() | **D130: 최종 갱신** |
+| **block_yn** | char(1) DEFAULT 'N' | **2026-06-17: IMC 차단 여부 (syncSenderStatusJob 동기화)** |
+| **dormant_yn** | char(1) DEFAULT 'N' | **2026-06-17: IMC 휴면 여부** |
+| **brand_message_yn** | char(1) DEFAULT 'N' | **2026-06-17: IMC 브랜드메시지 사용 여부 (brand_targeting_yn과 별개)** |
+| **channel_created_at** | timestamptz | **2026-06-17: 카카오 채널 생성일 (IMC createdAt)** |
 
 인덱스: `idx_ksp_company_status(company_id, status)`, `idx_ksp_yellow_id(company_id, yellow_id) UNIQUE WHERE yellow_id IS NOT NULL`
 
