@@ -1280,6 +1280,11 @@ function EditModal({ editing, setEditing, availableVariables, onSave, fileInputR
               <h4 className="text-xs font-bold text-white/80 mb-2 flex items-center gap-1.5">
                 <ImageIcon className="w-3 h-3" /> 이미지 (선택)
               </h4>
+              {!['center_modal', 'slide_in', 'top_banner', 'bottom_banner', 'full_screen', 'inline_card'].includes(editing.template || '') ? (
+                <div className="text-[11px] text-white/50 bg-white/5 border border-white/10 rounded-lg px-3 py-2.5">
+                  토스트·플로팅 버튼 형태는 이미지를 지원하지 않습니다. 이미지를 쓰려면 중앙 모달이나 슬라이드 인을 선택해주세요.
+                </div>
+              ) : (
               <div className="flex gap-2 items-center">
                 {editing.image_url ? (
                   <div className="relative">
@@ -1309,6 +1314,7 @@ function EditModal({ editing, setEditing, availableVariables, onSave, fileInputR
                   onChange={(e) => { const f = e.target.files?.[0]; if (f) onImageUpload(f); }}
                 />
               </div>
+              )}
             </div>
 
             {/* 탭 내용: CTA 버튼 */}

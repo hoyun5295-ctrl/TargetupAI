@@ -26,13 +26,10 @@ export interface InAppMessagePreviewProps {
   textColor: string;
 }
 
-const PUBLIC_IMAGE_BASE = 'https://app.hanjul.ai';
-
-/** 상대경로(/uploads/...)를 절대 URL로 — SDK appendImage와 동일 규칙 */
+/** 미리보기는 관리자 화면 = 백엔드와 같은 도메인. 상대경로(/api/..., /uploads/...)를 그대로 둬 현재 origin으로 로드한다.
+ *  절대 도메인 하드코딩은 운영 도메인이 다를 때 미리보기만 404를 유발하므로 쓰지 않는다(썸네일은 상대경로라 정상). */
 function toAbsoluteImage(url?: string | null): string | undefined {
-  if (!url) return undefined;
-  if (/^(https?:)?\/\//i.test(url) || url.startsWith('data:')) return url;
-  return url.startsWith('/') ? PUBLIC_IMAGE_BASE + url : PUBLIC_IMAGE_BASE + '/' + url;
+  return url || undefined;
 }
 
 type Variant = 'banner' | 'modal' | 'slide' | 'toast' | 'inline' | 'full' | 'floating';

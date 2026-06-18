@@ -933,7 +933,13 @@ export class HanjulloInAppModule {
       });
       btnEl.addEventListener('click', () => {
         this.track(msg.id, 'click', input, btn.id);
-        if (btn.action_url) window.location.href = btn.action_url;
+        // 이동 전 모달 닫기 — SPA 라우팅·placeholder URL에서도 모달이 남지 않게
+        const el = document.querySelector(`[data-hanjullo-msg="${msg.id}"]`) as HTMLElement | null;
+        const wrap = el?.parentElement;
+        if (wrap && wrap !== document.body) wrap.remove();
+        else el?.remove();
+        const target = btn.action_url || '';
+        if (target && !target.startsWith('[')) window.location.href = target;
       });
       wrapper.appendChild(btnEl);
     });
