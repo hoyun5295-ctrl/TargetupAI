@@ -24,6 +24,7 @@ import fs from 'fs';
 import { v4 as uuidv4 } from 'uuid';
 import { authenticate } from '../middlewares/auth';
 import { requireCdpApiKey, requireCdpBrowserOrigin, requireCdpKeyOrBrowserOrigin, recordCdpApiCall, issueCdpKeyPair, isCdpEnabledForPlan } from '../utils/cdp-auth';
+import { isValidBundleId } from '../utils/cdp-app-id';
 import { identifyCustomer, parseConsentValue } from '../utils/cdp-identity';
 import { trackEvent, getRecentEvents, ingestBrowserEvents } from '../utils/cdp-events';
 import { syncOrder, bulkImport } from '../utils/cdp-orders';
@@ -903,6 +904,85 @@ router.delete('/allowed-origins', async (req: Request, res: Response) => {
       return res.status(503).json({ success: false, error: 'DB 마이그레이션 필요 — companies.cdp_allowed_origins ALTER 실행 요청', code: 'DB_MIGRATION_PENDING' });
     }
     console.error('[CDP /allowed-origins DELETE] 오류:', err);
+    return res.status(500).json({ success: false, error: '삭제 실패' });
+  }
+});
+
+// ═══════════════════════════════════════════════════════════
+// 네이티브 앱 등록 (cdp_allowed_app_ids) — allowed-origins의 앱 버전
+//   앱은 시크릿·Origin 없이 public key + 등록 번들ID로 인증(requireCdpAppId).
+// ═══════════════════════════════════════════════════════════
+
+// GET /api/cdp/allowed-app-ids — 네이티브 앱 키 인증 허용 번들ID 목록
+router.get('/allowed-app-ids', async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+    const r = await query(`SELECT cdp_allowed_app_ids FROM companies WHERE id = $1::uuid`, [companyId]);
+    return res.json({ success: true, appIds: r.rows[0]?.cdp_allowed_app_ids || [] });
+  } catch (err: any) {
+    const msg = err?.message || '';
+    if (msg.includes('column') && msg.includes('does not exist')) {
+      return res.status(503).json({ success: false, error: 'DB 마이그레이션 필요 — companies.cdp_allowed_app_ids ALTER 실행 요청', code: 'DB_MIGRATION_PENDING' });
+    }
+    console.error('[CDP /allowed-app-ids GET] 오류:', err);
+    return res.status(500).json({ success: false, error: '조회 실패' });
+  }
+});
+
+// POST /api/cdp/allowed-app-ids — 번들ID 추가 (회사 관리자) body { appId }
+router.post('/allowed-app-ids', async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+    if (req.user?.userType !== 'company_admin') {
+      return res.status(403).json({ success: false, error: '앱 등록은 회사 관리자만 가능합니다.' });
+    }
+    const appId = String(req.body?.appId || '').trim().toLowerCase();
+    if (!isValidBundleId(appId)) {
+      return res.status(400).json({ success: false, error: '번들ID 형식만 허용됩니다. (예: kr.poppon.app)' });
+    }
+    await query(
+      `UPDATE companies
+         SET cdp_allowed_app_ids = ARRAY(SELECT DISTINCT unnest(COALESCE(cdp_allowed_app_ids, '{}'::text[]) || $2::text[])),
+             updated_at = NOW()
+       WHERE id = $1::uuid`,
+      [companyId, [appId]],
+    );
+    const r = await query(`SELECT cdp_allowed_app_ids FROM companies WHERE id = $1::uuid`, [companyId]);
+    return res.json({ success: true, appIds: r.rows[0]?.cdp_allowed_app_ids || [] });
+  } catch (err: any) {
+    const msg = err?.message || '';
+    if (msg.includes('column') && msg.includes('does not exist')) {
+      return res.status(503).json({ success: false, error: 'DB 마이그레이션 필요 — companies.cdp_allowed_app_ids ALTER 실행 요청', code: 'DB_MIGRATION_PENDING' });
+    }
+    console.error('[CDP /allowed-app-ids POST] 오류:', err);
+    return res.status(500).json({ success: false, error: '등록 실패' });
+  }
+});
+
+// DELETE /api/cdp/allowed-app-ids — 번들ID 삭제 (회사 관리자) body { appId }
+router.delete('/allowed-app-ids', async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+    if (req.user?.userType !== 'company_admin') {
+      return res.status(403).json({ success: false, error: '앱 삭제는 회사 관리자만 가능합니다.' });
+    }
+    const appId = String(req.body?.appId || '').trim().toLowerCase();
+    await query(
+      `UPDATE companies SET cdp_allowed_app_ids = array_remove(COALESCE(cdp_allowed_app_ids, '{}'::text[]), $2), updated_at = NOW()
+       WHERE id = $1::uuid`,
+      [companyId, appId],
+    );
+    const r = await query(`SELECT cdp_allowed_app_ids FROM companies WHERE id = $1::uuid`, [companyId]);
+    return res.json({ success: true, appIds: r.rows[0]?.cdp_allowed_app_ids || [] });
+  } catch (err: any) {
+    const msg = err?.message || '';
+    if (msg.includes('column') && msg.includes('does not exist')) {
+      return res.status(503).json({ success: false, error: 'DB 마이그레이션 필요 — companies.cdp_allowed_app_ids ALTER 실행 요청', code: 'DB_MIGRATION_PENDING' });
+    }
+    console.error('[CDP /allowed-app-ids DELETE] 오류:', err);
     return res.status(500).json({ success: false, error: '삭제 실패' });
   }
 });

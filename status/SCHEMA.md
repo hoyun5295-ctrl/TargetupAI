@@ -329,6 +329,7 @@
 | cdp_auto_execute_max_cost_krw | integer | ★ 실측 |
 | cdp_auto_execute_max_risk | varchar | ★ 실측 |
 | cdp_allowed_origins | text[] | ★ 실측 (CDP CORS) |
+| cdp_allowed_app_ids | text[] | ★ 2026-06-18 실측 (CDP 네이티브 앱 키 인증 허용 번들ID — cdp_allowed_origins의 앱 버전) |
 | voice_inbound_enabled | boolean | ★ 실측 |
 | use_ai_orchestrator | boolean | ★ 실측 |
 | legacy_grandfathered | boolean | ★ 실측 |

@@ -107,6 +107,14 @@
 
 ---
 
+### 🟢 2026-06-18 — 인앱 메시지 전면 개선 (디자인·카피·편집3탭·이미지·도메인 ★배포완료 / 모달 표시 1건 미해결)
+> **범위**: 디자인 격상(이미지 4:3·뱃지·본문3줄) + AI 카피 짧게(제목18/본문40~70자) + 시나리오별 색·뱃지 + 편집 모달 3탭(내용/디자인/타겟·시점) + badge_text 컬럼 + 이미지 공개 서빙 endpoint(CORP cross-origin) + 편집 진입 전체 필드 복원(list raw 반환) + CTA 클릭 시 모달 닫기 + 캐시 once_per_session/day 재노출 차단 + 도메인 www/non-www 동일 취급(norm) + AI 빈도 기본 once_per_session.
+> **검증·배포**: backend·frontend·sdk-js tsc 0 · sdk vitest 88 · grep(모델명·native dialog) 0. 6차에 걸쳐 배포완료(Harold). ALTER `badge_text varchar(20)`.
+> **★미해결(다음 세션 1순위)**: 자사몰(poppon) 인앱 모달이 시크릿모드로도 안 뜸. 서버 active는 curl로 정상 반환 확인·www fix 배포 후에도 미해결 → 실제 브라우저 요청 Origin·자사몰이 부르는 SDK 파일 버전·active 호출 도달 여부를 PM2 로그(`grep 'inapp/active\|ORIGIN'`)로 확인이 다음 수.
+> 상세 [[project_2026_0618_inapp_design_copy_redesign]].
+
+---
+
 ### 🔵 다음 세션 (예정) — 팝폰(Poppon) SDK 검증용 코드 분석
 > **목표**: 한줄로 SDK(v0.3.6)를 한줄로가 자체 운영하는 팝폰(www.poppon.co.kr)에 연동·테스트할 수 있는지 판정 + 단계 설계. 자체 서비스라 SDK 전 흐름(수집·identify·인앱) 실측 최적 베드(고객사 의존 0).
 > **팝폰 현황(2026-06-18 사이트 확인)**: 딜·쿠폰 정보 중개 플랫폼(전자상거래 X — 직접 판매·장바구니·결제 없음, 구매는 외부 브랜드). 회원 로그인·마이페이지(`/me`) 있음. Next.js SPA(`/_next`, 동적 라우팅 `/d/[id]`·`/c/[category]`). gtag/dataLayer는 노출 HTML엔 안 보임(프로덕션 확인 필요).

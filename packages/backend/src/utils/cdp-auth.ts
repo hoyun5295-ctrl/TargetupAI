@@ -32,6 +32,7 @@ import bcrypt from 'bcryptjs';
 import { randomBytes, createHash } from 'crypto';
 import { query } from '../config/database';
 import { loadPlanContext } from './plan-guard';
+import { isAllowedAppId } from './cdp-app-id';
 
 // ═══════════════════════════════════════════════════════════
 // 인증/한도 캐시 (2026-06-10 — 호출당 bcrypt 비교 + 월 SUM 풀스캔 부하 완화)
@@ -318,6 +319,70 @@ export async function requireCdpBrowserOrigin(req: Request, res: Response, next:
   }
 }
 
+/**
+ * 네이티브 앱 인증 — public key + 등록 번들ID(X-Hanjullo-App-Id) 검증 (secret·Origin 미요구).
+ *   네이티브 앱(React Native 등)은 브라우저 Origin을 못 보내므로(RN fetch는 Origin 미전송 → 도메인 검증 불가),
+ *   등록 번들ID(companies.cdp_allowed_app_ids)가 보안 경계. 시크릿은 앱 바이너리 추출 위험이라 미요구.
+ *   cdp_allowed_origins(웹)의 앱 버전. plan·월 한도 게이팅은 브라우저 경로와 동일.
+ */
+export async function requireCdpAppId(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const cdpApiKey = (req.headers['x-hanjullo-key'] || req.headers['X-Hanjullo-Key']) as string | undefined;
+    if (!cdpApiKey || !cdpApiKey.startsWith('hjl_')) {
+      res.status(401).json({ success: false, error: 'X-Hanjullo-Key 누락 또는 포맷 오류입니다.', code: 'MISSING_KEY' });
+      return;
+    }
+    const appId = (req.headers['x-hanjullo-app-id'] || req.headers['X-Hanjullo-App-Id']) as string | undefined;
+
+    const result = await query(
+      `SELECT id, company_name, status, cdp_allowed_app_ids
+       FROM companies
+       WHERE cdp_api_key = $1`,
+      [cdpApiKey],
+    );
+    if (result.rows.length === 0) {
+      res.status(401).json({ success: false, error: 'CDP 인증에 실패했습니다.', code: 'INVALID_KEY' });
+      return;
+    }
+
+    const company = result.rows[0];
+    if (company.status !== 'active') {
+      res.status(403).json({ success: false, error: `회사 상태가 ${company.status} 입니다.`, code: 'COMPANY_INACTIVE' });
+      return;
+    }
+    if (!(await isCdpEnabledForPlan(company.id))) {
+      res.status(403).json({ success: false, error: '한줄로 CDP는 유료 요금제 가입 후 이용 가능합니다.', code: 'PLAN_FEATURE_LOCKED' });
+      return;
+    }
+    if (await isOverMonthlyCdpLimit(company.id)) {
+      res.status(429).json({ success: false, error: '이번 달 CDP API 호출 한도를 초과했습니다.', code: 'MONTHLY_LIMIT_EXCEEDED' });
+      return;
+    }
+
+    // 등록 번들ID 검증 — cdp_allowed_app_ids (웹 cdp_allowed_origins의 앱 버전)
+    if (!isAllowedAppId(company.cdp_allowed_app_ids, appId || '')) {
+      res.status(403).json({
+        success: false,
+        error: '등록되지 않은 앱입니다. 관리자 → 자사몰 연동에서 앱(번들ID)을 먼저 등록해주세요.',
+        code: 'APP_NOT_ALLOWED',
+      });
+      return;
+    }
+
+    req.cdpAuth = { companyId: company.id, companyName: company.company_name, source: 'sdk' };
+    next();
+  } catch (err: any) {
+    // db_alter_safety_net — cdp_allowed_app_ids 미마이그레이션 시 503
+    const msg = err?.message || '';
+    if (msg.includes('column') && msg.includes('does not exist')) {
+      res.status(503).json({ success: false, error: 'DB 마이그레이션 필요 — companies.cdp_allowed_app_ids ALTER 실행 요청', code: 'DB_MIGRATION_PENDING' });
+      return;
+    }
+    console.error('[CDP AppAuth] 인증 처리 실패:', err);
+    res.status(500).json({ success: false, error: 'CDP 앱 인증 처리 중 오류가 발생했습니다.' });
+  }
+}
+
 // ═══════════════════════════════════════════════════════════
 // 헬퍼 — 요금제 게이팅
 // ═══════════════════════════════════════════════════════════
@@ -382,6 +447,11 @@ export async function requireCdpKeyOrBrowserOrigin(req: Request, res: Response, 
   const hasSecret = !!(req.headers['x-hanjullo-secret'] || req.headers['X-Hanjullo-Secret']);
   if (hasSecret) {
     return requireCdpApiKey(req, res, next);
+  }
+  // 네이티브 앱(X-Hanjullo-App-Id 헤더) — 시크릿·Origin 없이 public key + 등록 번들ID 검증
+  const hasAppId = !!(req.headers['x-hanjullo-app-id'] || req.headers['X-Hanjullo-App-Id']);
+  if (hasAppId) {
+    return requireCdpAppId(req, res, next);
   }
   return requireCdpBrowserOrigin(req, res, next);
 }

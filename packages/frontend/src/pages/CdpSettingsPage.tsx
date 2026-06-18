@@ -313,6 +313,8 @@ export default function CdpSettingsPage() {
   const [installStatus, setInstallStatus] = useState<InstallStatus | null>(null);
   const [allowedOrigins, setAllowedOrigins] = useState<string[]>([]);
   const [newOrigin, setNewOrigin] = useState('');
+  const [allowedAppIds, setAllowedAppIds] = useState<string[]>([]);
+  const [newAppId, setNewAppId] = useState('');
   const [issuedSecret, setIssuedSecret] = useState<IssueKeyResponse | null>(null);
   const [issuing, setIssuing] = useState(false);
   const [copyStatus, setCopyStatus] = useState<'idle' | 'key' | 'secret'>('idle');
@@ -398,6 +400,17 @@ export default function CdpSettingsPage() {
     })();
   }, []);
 
+  // 네이티브 앱 등록 로드 (앱 SDK 키 인증 allowlist)
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await fetch('/api/cdp/allowed-app-ids', { headers: { Authorization: `Bearer ${token()}` } });
+        const data = await res.json();
+        if (data.success) setAllowedAppIds(data.appIds || []);
+      } catch { /* 무시 */ }
+    })();
+  }, []);
+
   const addOrigin = async () => {
     const o = newOrigin.trim();
     if (!o) return;
@@ -424,6 +437,34 @@ export default function CdpSettingsPage() {
       if (data.success) { setAllowedOrigins(data.origins || []); toast.success('도메인이 삭제되었습니다.'); }
       else toast.error(data.error || '도메인 삭제 실패');
     } catch { toast.error('도메인 삭제 네트워크 오류'); }
+  };
+
+  const addAppId = async () => {
+    const id = newAppId.trim().toLowerCase();
+    if (!id) return;
+    try {
+      const res = await fetch('/api/cdp/allowed-app-ids', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token()}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ appId: id }),
+      });
+      const data = await res.json();
+      if (data.success) { setAllowedAppIds(data.appIds || []); setNewAppId(''); toast.success('앱이 등록되었습니다.'); }
+      else toast.error(data.error || '앱 등록 실패');
+    } catch { toast.error('앱 등록 네트워크 오류'); }
+  };
+
+  const removeAppId = async (id: string) => {
+    try {
+      const res = await fetch('/api/cdp/allowed-app-ids', {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${token()}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ appId: id }),
+      });
+      const data = await res.json();
+      if (data.success) { setAllowedAppIds(data.appIds || []); toast.success('앱이 삭제되었습니다.'); }
+      else toast.error(data.error || '앱 삭제 실패');
+    } catch { toast.error('앱 삭제 네트워크 오류'); }
   };
 
   const loadAll = useCallback(async () => {
@@ -1771,6 +1812,50 @@ client.newCall(req).execute()`}</pre>
               <div className="text-xs text-white/40">등록된 도메인이 없습니다. 자사몰 도메인을 추가해주세요.</div>
             )}
             <div className="text-[10px] text-white/30 italic mt-2">Data source — companies.cdp_allowed_origins</div>
+          </div>
+        )}
+
+        {/* 12-0b. 네이티브 앱 등록 (cdp_allowed_app_ids) — 앱 SDK 키 인증 허용 번들ID */}
+        {webhookProviderOpen && (
+          <div className="bg-white/5 border border-white/10 rounded-2xl p-6">
+            <div className="flex items-center gap-2 mb-3">
+              <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-violet-500 to-fuchsia-600 flex items-center justify-center">
+                <Code2 className="w-5 h-5 text-white" />
+              </div>
+              <div>
+                <h2 className="text-base font-bold text-white">앱(네이티브) 등록</h2>
+                <div className="text-xs text-white/50">iOS·안드로이드 앱에 인앱 메시지를 띄우려면 앱 번들ID(패키지명)를 등록하세요. 앱은 퍼블릭키 + 등록 번들ID로 인증하며 시크릿은 앱에 넣지 않습니다. (예: kr.poppon.app)</div>
+              </div>
+            </div>
+            {isAdmin ? (
+              <div className="flex gap-2 mb-3 flex-wrap">
+                <input
+                  value={newAppId}
+                  onChange={(e) => setNewAppId(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Enter') addAppId(); }}
+                  placeholder="kr.poppon.app"
+                  className="flex-1 min-w-[200px] bg-slate-950 border border-white/10 rounded-lg px-3 py-2 text-sm text-white placeholder-white/30 focus:outline-none focus:border-violet-400"
+                />
+                <button onClick={addAppId} className="px-4 py-2 bg-violet-500/40 hover:bg-violet-500/60 text-white rounded-lg text-sm font-medium">추가</button>
+              </div>
+            ) : (
+              <div className="text-xs text-white/40 mb-3">앱 등록은 회사 관리자만 가능합니다.</div>
+            )}
+            {allowedAppIds.length > 0 ? (
+              <div className="space-y-1.5">
+                {allowedAppIds.map((id) => (
+                  <div key={id} className="flex items-center justify-between bg-white/5 border border-white/10 rounded-lg px-3 py-2">
+                    <span className="text-sm text-white/80 font-mono break-all">{id}</span>
+                    {isAdmin && (
+                      <button onClick={() => removeAppId(id)} className="text-rose-300 hover:text-rose-200 text-xs shrink-0 ml-2">삭제</button>
+                    )}
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="text-xs text-white/40">등록된 앱이 없습니다. 앱 번들ID를 추가해주세요.</div>
+            )}
+            <div className="text-[10px] text-white/30 italic mt-2">Data source — companies.cdp_allowed_app_ids</div>
           </div>
         )}
 
