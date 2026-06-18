@@ -348,7 +348,8 @@ export default function CdpSettingsPage() {
   type CdpModalKey = null | 'analytics' | 'customers';
   const [activeModal, setActiveModal] = useState<CdpModalKey>(null);
   const [connectProvider, setConnectProvider] = useState<ProviderKey | null>(null);
-  const closeModal = () => { setActiveModal(null); setConnectProvider(null); };
+  const [customTab, setCustomTab] = useState<'connect' | 'web' | 'app' | 'verify'>('connect');
+  const closeModal = () => { setActiveModal(null); setConnectProvider(null); setCustomTab('connect'); };
   const webhookProviderOpen = connectProvider === 'custom' || connectProvider === 'gabia';
   const [confirm, setConfirm] = useState<ConfirmState | null>(null);
 
@@ -1251,8 +1252,23 @@ export default function CdpSettingsPage() {
                 {PROVIDER_META[connectProvider].note}
               </div>
             )}
-        {/* 자체 호스팅 / 고도몰 / 가비아 — webhook 방식 */}
+        {/* webhook 자사몰 — 탭 (연결 / 웹 / 앱 / 검증) */}
         {webhookProviderOpen && (
+          <div className="flex gap-1 bg-white/5 border border-white/10 rounded-xl p-1">
+            {([['connect', '연결'], ['web', '웹'], ['app', '앱'], ['verify', '검증']] as const).map(([key, label]) => (
+              <button
+                key={key}
+                onClick={() => setCustomTab(key)}
+                className={`flex-1 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${customTab === key ? 'bg-violet-500/40 text-white' : 'text-white/60 hover:bg-white/5'}`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        )}
+
+        {/* 자체 호스팅 / 고도몰 / 가비아 — webhook 방식 (연결 탭) */}
+        {webhookProviderOpen && customTab === 'connect' && (
           <div id="section-custom" className="bg-white/5 border border-white/10 rounded-xl p-6">
             <div className="flex items-center gap-2 mb-1">
               <Server className="w-5 h-5 text-indigo-300" />
@@ -1315,8 +1331,8 @@ export default function CdpSettingsPage() {
           </div>
         )}
 
-        {/* 자체 호스팅 webhook 개발자 안내 — 이벤트 계약 + 서명 예제 (secret 발급 후 표시) */}
-        {webhookProviderOpen && customInfo?.hasSecret && (
+        {/* 자체 호스팅 webhook 개발자 안내 — 이벤트 계약 + 서명 예제 (검증 탭) */}
+        {webhookProviderOpen && customInfo?.hasSecret && customTab === 'verify' && (
           <div className="bg-white/5 border border-white/10 rounded-xl p-6">
             <div className="flex items-center gap-2 mb-3">
               <Code2 className="w-5 h-5 text-indigo-300" />
@@ -1378,8 +1394,8 @@ signature = hmac.new(WEBHOOK_SECRET.encode(), body.encode(), hashlib.sha256).hex
           </div>
         )}
 
-        {/* 연결 검증 — 최근 webhook 수신 확인 */}
-        {webhookProviderOpen && customInfo?.hasSecret && (
+        {/* 연결 검증 — 최근 webhook 수신 확인 (검증 탭) */}
+        {webhookProviderOpen && customInfo?.hasSecret && customTab === 'verify' && (
           <div className="bg-white/5 border border-white/10 rounded-xl p-6">
             <div className="flex items-center justify-between gap-2 mb-3">
               <div className="flex items-center gap-2">
@@ -1413,8 +1429,8 @@ signature = hmac.new(WEBHOOK_SECRET.encode(), body.encode(), hashlib.sha256).hex
           </div>
         )}
 
-        {/* 네이티브 앱(REST 직접 호출) 안내 */}
-        {webhookProviderOpen && customInfo?.hasSecret && (
+        {/* 네이티브 앱(REST 직접 호출) 안내 (앱 탭) */}
+        {webhookProviderOpen && customInfo?.hasSecret && customTab === 'app' && (
           <div className="bg-white/5 border border-white/10 rounded-xl p-6">
             <div className="flex items-center gap-2 mb-3">
               <Code2 className="w-5 h-5 text-cyan-300" />
@@ -1723,7 +1739,7 @@ client.newCall(req).execute()`}</pre>
         {/* 12. CDP 키 발급 + 사용량 — SDK 설치(public key)와 서버 API 공용
             2026-06-10 정정: webhook secret 발급 후에도 표시 (이전에는 숨겨져 public key를 발급할 수 없어
             SDK 스니펫·설치검증까지 막히던 흐름 결함) */}
-        {webhookProviderOpen && usage && (
+        {webhookProviderOpen && usage && customTab === 'connect' && (
           <div className="bg-white/5 border border-white/10 rounded-xl p-6">
             <div className="flex items-center gap-2 mb-4">
               <KeyRound className="w-5 h-5 text-indigo-300" />
@@ -1771,8 +1787,8 @@ client.newCall(req).execute()`}</pre>
           </div>
         )}
 
-        {/* 12-0. 수집 허용 도메인 등록 (브라우저 SDK Origin allowlist) */}
-        {webhookProviderOpen && (
+        {/* 12-0. 수집 허용 도메인 등록 (웹 탭) */}
+        {webhookProviderOpen && customTab === 'web' && (
           <div className="bg-white/5 border border-white/10 rounded-2xl p-6">
             <div className="flex items-center gap-2 mb-3">
               <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-violet-500 to-fuchsia-600 flex items-center justify-center">
@@ -1815,8 +1831,8 @@ client.newCall(req).execute()`}</pre>
           </div>
         )}
 
-        {/* 12-0b. 네이티브 앱 등록 (cdp_allowed_app_ids) — 앱 SDK 키 인증 허용 번들ID */}
-        {webhookProviderOpen && (
+        {/* 12-0b. 네이티브 앱 등록 (cdp_allowed_app_ids) — 앱 SDK 키 인증 허용 번들ID (앱 탭) */}
+        {webhookProviderOpen && customTab === 'app' && (
           <div className="bg-white/5 border border-white/10 rounded-2xl p-6">
             <div className="flex items-center gap-2 mb-3">
               <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-violet-500 to-fuchsia-600 flex items-center justify-center">
@@ -1859,8 +1875,8 @@ client.newCall(req).execute()`}</pre>
           </div>
         )}
 
-        {/* 12-1. SDK 설치 스크립트 스니펫 (public key 자동 주입 — v0.3.7) */}
-        {webhookProviderOpen && usage?.public_key && (
+        {/* 12-1. SDK 설치 스크립트 스니펫 (웹 탭) */}
+        {webhookProviderOpen && usage?.public_key && customTab === 'web' && (
           <div className="bg-white/5 border border-white/10 rounded-2xl p-6">
             <div className="flex items-center gap-2 mb-3">
               <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-violet-500 to-fuchsia-600 flex items-center justify-center">
@@ -1899,8 +1915,8 @@ client.newCall(req).execute()`}</pre>
           </div>
         )}
 
-        {/* 12-2. 설치 검증 — 첫 이벤트 진단 (v0.3.7, 서버 관측 신호) */}
-        {webhookProviderOpen && usage?.public_key && installStatus && (() => {
+        {/* 12-2. 설치 검증 — 첫 이벤트 진단 (웹 탭) */}
+        {webhookProviderOpen && usage?.public_key && installStatus && customTab === 'web' && (() => {
           const issued = installStatus.keyIssuedAt ? new Date(installStatus.keyIssuedAt).getTime() : null;
           const mins = issued ? Math.floor((Date.now() - issued) / 60000) : 0;
           const received = !!installStatus.firstEventAt;
