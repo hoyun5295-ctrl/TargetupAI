@@ -15,6 +15,7 @@
  */
 
 import { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { X, AlertTriangle, Info, AlertCircle, Check } from 'lucide-react';
 
 export type ConfirmMode = 'default' | 'info' | 'warning' | 'danger';
@@ -104,9 +105,9 @@ export default function ConfirmModal({ state, onClose }: Props) {
     }
   };
 
-  return (
+  return createPortal(
     <div
-      className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 p-4"
+      className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-[140] p-4"
       onClick={onClose}
     >
       <div
@@ -160,6 +161,7 @@ export default function ConfirmModal({ state, onClose }: Props) {
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }

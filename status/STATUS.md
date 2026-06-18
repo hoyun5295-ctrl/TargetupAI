@@ -107,13 +107,22 @@
 
 ---
 
-### 🟢 2026-06-18 — 자체 자사몰 + 앱 데이터 수집 고도화 (Track A·B·C ★코드완료·미배포)
+### 🔵 다음 세션 (예정) — 팝폰(Poppon) SDK 검증용 코드 분석
+> **목표**: 한줄로 SDK(v0.3.6)를 한줄로가 자체 운영하는 팝폰(www.poppon.co.kr)에 연동·테스트할 수 있는지 판정 + 단계 설계. 자체 서비스라 SDK 전 흐름(수집·identify·인앱) 실측 최적 베드(고객사 의존 0).
+> **팝폰 현황(2026-06-18 사이트 확인)**: 딜·쿠폰 정보 중개 플랫폼(전자상거래 X — 직접 판매·장바구니·결제 없음, 구매는 외부 브랜드). 회원 로그인·마이페이지(`/me`) 있음. Next.js SPA(`/_next`, 동적 라우팅 `/d/[id]`·`/c/[category]`). gtag/dataLayer는 노출 HTML엔 안 보임(프로덕션 확인 필요).
+> **로컬 코드**: `C:\Users\ceo\projects\poppon-workspace` (별개 프로젝트 — 이번 세션 미정독, 컨텍스트 절약 위해 다음 세션에서).
+> **할 일**: poppon-workspace 정독 → ① 스택·라우팅·로그인 흐름 ② SDK(v0.3.6) 삽입 지점(Next.js `<head>`·`data-hjl-key`) ③ identify 배선(로그인 시 externalId) ④ 추적할 행동(딜 조회=product_view/click·쿠폰 클릭=custom) ⑤ 인앱 메시지 테스트 가능 여부 ⑥ 연동 테스트 가능 여부 판정 + 단계. Harold 계정 실연동 전제. brainstorming→설계→동의→구현.
+> 상세 [[project_2026_0618_selfhosted_mall_app_collection]].
+
+---
+
+### 🟢 2026-06-18 — 자체 자사몰 + 앱 데이터 수집 고도화 (Track A·B·C ★배포완료 2026-06-18)
 > **배경**: 어제 인앱 웹/앱 채널 분리 + 웹뷰 앱 지원 배포완료. 빠진 퍼즐 = 이커머스 행동 자동수집 — 장바구니·구매 트리거 인앱이 작동하려면 필수(트리거 표준 = cart_add/cart_view/checkout_start).
 > **Track A (SDK 이커머스 자동수집)**: sdk-js `auto-capture/ecommerce.ts` 신설 — GA4 dataLayer 후킹 매핑(view_item→product_view·add_to_cart→cart_add·purchase 등) + `window.hjl.ecommerce.*` 헬퍼 → `hjl.track` 위임 → 적재(/ingest 'track' 경로, 백엔드 0) + 인앱 트리거(T2 브리지) 자동. 웹+웹뷰앱 공용(platform 재사용). vitest 11 신규(sdk-js 전체 88)+tsc 0. SDK v0.3.5→**v0.3.6**(캐시 버스팅).
 > **Track B (서버 턴키+검증)**: 자체 호스팅 모달에 Python 스니펫 추가(Node·PHP·Python HMAC) + "최근 수신 확인"(GET `/api/cdp/custom/deliveries` — `cdp_webhook_deliveries` 기존 컬럼만, 신규 0). backend·frontend tsc 0.
 > **Track C (네이티브 REST 가이드)**: 순수 네이티브 앱 = 공개키로 `/api/cdp/ingest`·`/inapp/active` 직접 호출(secret 앱에 X, 회원/주문은 고객사 서버) + curl·Swift·Kotlin 예시. backend 0.
 > **검증**: sdk-js 88 vitest + tsc 0, backend tsc 0, frontend tsc 0 + grep(모델명·native dialog·박단어) 0. 설계 = `docs/superpowers/specs/2026-06-18-selfhosted-mall-app-collection-design.md`, 계획 = `plans/2026-06-18-selfhosted-mall-app-collection.md`.
-> **배포**: SDK v0.3.6 재빌드+서빙(public/sdk/v0.3.6 + dist/sdk/v0.3.6, 캐시 버스팅) + backend `pm2 restart all` + frontend `build:safe`. **퍼스트몰(가비아) 커넥터 = 서수란팀장 가비아 API 수령 후 별도**(빌드가이드 PDF엔 API 스펙 없음 — 운영자 매뉴얼).
+> **★ 배포완료 (2026-06-18 Harold)**: SDK v0.3.6 빌드(rollup)·서빙(v0.3.6 + 기존 v0.3.5에도 cp) + backend·frontend 재시작(targetup-backend·hanjuldm-api 둘 다 online) + frontend atomic swap 성공. **퍼스트몰(가비아) 커넥터 = 서수란팀장 가비아 API 수령 후 별도**(빌드가이드 PDF엔 API 스펙 없음 — 운영자 매뉴얼).
 > 상세 [[project_2026_0618_selfhosted_mall_app_collection]].
 
 ---
