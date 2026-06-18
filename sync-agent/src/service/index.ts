@@ -1,30 +1,38 @@
 /**
  * 서비스 관리 모듈 (Windows + Linux)
  *
- * Windows: sc.exe로 Windows 서비스 등록/해제
- * Linux: systemd unit 파일 생성 + systemctl로 서비스 등록/해제
+ * Windows: 작업 스케줄러(schtasks)로 부팅 자동시작 작업 등록/해제
+ *   ★ 2026-06-18: Windows 서비스(sc create) → 작업 스케줄러로 교체 (1053 근본 해소).
+ *     Node pkg 단일 exe는 SCM 핸드셰이크(SetServiceStatus)를 못 해, sc 서비스로 등록하면
+ *     시작 시 STATE RUNNING 보고를 못 함 → SCM 타임아웃 → 1053 (어느 Windows에서도 동일).
+ *     WinSW=.NET 의존, NSSM=외부 바이너리 동봉 필요 → 둘 다 "모든 환경 보장" 불가.
+ *     작업 스케줄러는 모든 Windows(2008 R2~11) 내장 + .NET/외부 바이너리/SCM 0 → 1053 자체가 없음.
+ *   콘솔 출력은 ASCII 태그 + 한글 (2008 R2 cp949 콘솔 mojibake 차단: 이모지/박스문자 제거 — 4-B).
+ * Linux: systemd unit (Type=simple) — 종전 그대로 (1053과 무관, 정상 동작).
  *
  * CLI:
- *   sync-agent --install-service    → 서비스 설치
- *   sync-agent --uninstall-service  → 서비스 제거
- *   sync-agent --service-status     → 서비스 상태 확인
+ *   sync-agent --install-service    → 등록 (Windows=작업 스케줄러 / Linux=systemd)
+ *   sync-agent --uninstall-service  → 제거
+ *   sync-agent --service-status     → 상태 확인
  *
- * Windows 서비스명: SyncAgent
- * Linux 서비스명: sync-agent
+ * Windows 작업명: SyncAgent  /  Linux 서비스명: sync-agent
  */
 
 import { execSync } from 'node:child_process';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 
 // ─── 공통 설정 ──────────────────────────────────────────
 
 const isWindows = process.platform === 'win32';
 
-const WIN_SERVICE_NAME = 'SyncAgent';
-const WIN_SERVICE_DISPLAY = 'Sync Agent';
+const WIN_TASK_NAME = 'SyncAgent';
+const WIN_TASK_DISPLAY = 'Sync Agent';
 const LINUX_SERVICE_NAME = 'sync-agent';
 const SERVICE_DESCRIPTION = '한줄로(Target-UP) 데이터 동기화 에이전트 — 고객사 POS/ERP DB에서 한줄로 서버로 고객·구매 데이터를 자동 동기화합니다.';
+// 작업 스케줄러 XML은 schtasks가 파싱(콘솔 출력 아님)하나, 구형 OS 파서 안전을 위해 작업 설명은 ASCII 고정.
+const WIN_TASK_DESCRIPTION = 'Hanjullo (Target-UP) data sync agent. Auto-starts at boot as SYSTEM.';
 
 // ─── 공통 유틸 ──────────────────────────────────────────
 
@@ -45,7 +53,7 @@ function runCommand(cmd: string): { success: boolean; output: string } {
 }
 
 // ═══════════════════════════════════════════════════════════
-// Windows 서비스 (sc.exe)
+// Windows 작업 스케줄러 (schtasks)
 // ═══════════════════════════════════════════════════════════
 
 function isWindowsAdmin(): boolean {
@@ -57,16 +65,90 @@ function isWindowsAdmin(): boolean {
   }
 }
 
+// 작업 스케줄러 XML(1.2):
+//   - 부팅 트리거 + 2분 지연 (D142: 부팅 직후 네트워크/DB 미준비 상태 회피)
+//   - SYSTEM 계정(S-1-5-18, 로케일 무관) + 최고 권한
+//   - 실패 시 1분 후 재시작(최대 3회), 실행시간 무제한(PT0S — 기본 72시간 종료 함정 차단)
+//   - 액션: sync-agent.exe --service (main.ts가 마법사 대신 에이전트 루프 실행)
+function buildWindowsTaskXml(exePath: string): string {
+  const workDir = path.dirname(exePath);
+  const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  return `<?xml version="1.0" encoding="UTF-16"?>
+<Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
+  <RegistrationInfo>
+    <Description>${WIN_TASK_DESCRIPTION}</Description>
+    <URI>\\${WIN_TASK_NAME}</URI>
+  </RegistrationInfo>
+  <Triggers>
+    <BootTrigger>
+      <Enabled>true</Enabled>
+      <Delay>PT2M</Delay>
+    </BootTrigger>
+  </Triggers>
+  <Principals>
+    <Principal id="Author">
+      <UserId>S-1-5-18</UserId>
+      <RunLevel>HighestAvailable</RunLevel>
+    </Principal>
+  </Principals>
+  <Settings>
+    <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>
+    <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>
+    <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>
+    <AllowHardTerminate>true</AllowHardTerminate>
+    <StartWhenAvailable>true</StartWhenAvailable>
+    <RunOnlyIfNetworkAvailable>false</RunOnlyIfNetworkAvailable>
+    <IdleSettings>
+      <StopOnIdleEnd>false</StopOnIdleEnd>
+      <RestartOnIdle>false</RestartOnIdle>
+    </IdleSettings>
+    <AllowStartOnDemand>true</AllowStartOnDemand>
+    <Enabled>true</Enabled>
+    <Hidden>false</Hidden>
+    <RunOnlyIfIdle>false</RunOnlyIfIdle>
+    <WakeToRun>false</WakeToRun>
+    <ExecutionTimeLimit>PT0S</ExecutionTimeLimit>
+    <Priority>7</Priority>
+    <RestartOnFailure>
+      <Interval>PT1M</Interval>
+      <Count>3</Count>
+    </RestartOnFailure>
+  </Settings>
+  <Actions Context="Author">
+    <Exec>
+      <Command>${esc(exePath)}</Command>
+      <Arguments>--service</Arguments>
+      <WorkingDirectory>${esc(workDir)}</WorkingDirectory>
+    </Exec>
+  </Actions>
+</Task>`;
+}
+
+// 효과 검증용 — 실제 에이전트 프로세스 기동 여부 (로케일 무관: tasklist 이미지명)
+function isAgentProcessRunning(): boolean {
+  const exeName = path.basename(getExePath());
+  const r = runCommand(`tasklist /FI "IMAGENAME eq ${exeName}" /NH`);
+  return r.success && r.output.toLowerCase().includes(exeName.toLowerCase());
+}
+
+// 레거시 정리 — 과거 sc 서비스(1053으로 죽던 구버전) + 기존 동일명 작업 모두 제거 (idempotent)
+function cleanupWindowsLeftovers(): void {
+  runCommand(`sc stop ${WIN_TASK_NAME}`);
+  runCommand(`sc delete ${WIN_TASK_NAME}`);
+  runCommand(`schtasks /End /TN "${WIN_TASK_NAME}"`);
+  runCommand(`schtasks /Delete /TN "${WIN_TASK_NAME}" /F`);
+}
+
 function installServiceWindows(): void {
   console.log('');
-  console.log('╔══════════════════════════════════════════╗');
-  console.log('║   Sync Agent — Windows 서비스 설치        ║');
-  console.log('╚══════════════════════════════════════════╝');
+  console.log('==================================================');
+  console.log('  Sync Agent - Windows 작업 등록 (작업 스케줄러)');
+  console.log('==================================================');
   console.log('');
 
   if (!isWindowsAdmin()) {
-    console.error('❌ 관리자 권한이 필요합니다.');
-    console.error('   PowerShell을 "관리자 권한으로 실행" 후 다시 시도하세요.');
+    console.error('[ERROR] 관리자 권한이 필요합니다.');
+    console.error('        cmd/PowerShell 을 관리자 권한으로 실행 후 다시 시도하세요.');
     console.error('');
     process.exit(1);
   }
@@ -74,49 +156,40 @@ function installServiceWindows(): void {
   const exePath = getExePath();
   console.log(`exe 경로: ${exePath}`);
 
-  // 기존 서비스 확인
-  const statusResult = runCommand(`sc query ${WIN_SERVICE_NAME}`);
-  if (statusResult.success) {
-    console.log('⚠️  기존 서비스가 이미 존재합니다.');
-    console.log('   먼저 --uninstall-service로 제거 후 다시 설치하세요.');
-    console.log('');
-    process.exit(1);
-  }
+  // 1) 레거시 + 기존 작업 정리 — 실패했던 설치 흔적이 있어도 깨끗이 재등록
+  cleanupWindowsLeftovers();
 
-  // ★ D142 (2026-04-28) PDF 0428 #10: 재부팅 시 자동실행 안 되던 사고.
-  //   원인 분석: `start= auto`는 부팅 즉시 시작 → 네트워크(Tcpip/Dnscache)나 DB 미준비 상태에서 시작 시도 → 실패.
-  //   해결: `start= delayed-auto` (Delayed Automatic Start) — 부팅 후 ~2분 지연. 시스템 안정화 후 시작.
-  //   추가 안전망: 실패 시 자동 재시작(아래 sc failure)으로 임시 실패도 자동 복구.
-  const createResult = runCommand(
-    `sc create ${WIN_SERVICE_NAME} ` +
-    `binPath= "${exePath}" ` +
-    `DisplayName= "${WIN_SERVICE_DISPLAY}" ` +
-    `start= delayed-auto`,
-  );
+  // 2) XML 작성 (UTF-16LE + BOM = 작업 스케줄러 표준 포맷)
+  const xmlPath = path.join(os.tmpdir(), `syncagent-task-${process.pid}.xml`);
+  fs.writeFileSync(xmlPath, '﻿' + buildWindowsTaskXml(exePath), { encoding: 'utf16le' });
+
+  // 3) 작업 생성
+  const createResult = runCommand(`schtasks /Create /TN "${WIN_TASK_NAME}" /XML "${xmlPath}" /F`);
+  try { fs.unlinkSync(xmlPath); } catch { /* noop */ }
   if (!createResult.success) {
-    console.error('❌ 서비스 생성 실패:', createResult.output);
+    console.error('[ERROR] 작업 생성 실패:', createResult.output);
     process.exit(1);
   }
-  console.log('✅ 서비스 생성 완료 (Delayed Auto Start — 부팅 후 시스템 안정화 후 시작)');
+  console.log('[OK] 작업 등록 완료 (부팅 시 SYSTEM 권한 자동 시작, 2분 지연, 실패 시 자동 재시작)');
 
-  // 설명 추가
-  runCommand(`sc description ${WIN_SERVICE_NAME} "${SERVICE_DESCRIPTION}"`);
+  // 4) 즉시 시작
+  const startResult = runCommand(`schtasks /Run /TN "${WIN_TASK_NAME}"`);
+  if (!startResult.success) {
+    console.log(`[WARN] 즉시 시작 실패 - 수동 시작: schtasks /Run /TN ${WIN_TASK_NAME}`);
+  }
 
-  // 실패 시 자동 재시작
-  runCommand(
-    `sc failure ${WIN_SERVICE_NAME} ` +
-    `reset= 86400 ` +
-    `actions= restart/60000/restart/60000/restart/300000`,
-  );
-  console.log('✅ 자동 재시작 설정 완료 (실패 시 60초 후 재시작)');
-
-  // 서비스 시작
-  const startResult = runCommand(`sc start ${WIN_SERVICE_NAME}`);
-  if (startResult.success) {
-    console.log('✅ 서비스 시작 완료');
+  // 5) 효과 검증 — 실제 프로세스가 떴는지 확인한 뒤에만 성공 표시 (6원칙 #2)
+  let running = false;
+  for (let i = 0; i < 10; i++) {
+    if (isAgentProcessRunning()) { running = true; break; }
+    try { execSync('timeout /t 1 /nobreak >nul', { stdio: 'ignore' }); } catch { /* noop */ }
+  }
+  if (running) {
+    console.log('[OK] 에이전트 실행 확인 (프로세스 기동됨)');
   } else {
-    console.log('⚠️  서비스 시작 실패 — 수동으로 시작해주세요:');
-    console.log(`   sc start ${WIN_SERVICE_NAME}`);
+    console.log('[INFO] 에이전트 프로세스가 아직 확인되지 않습니다.');
+    console.log('       설정이 없으면 먼저 설정하세요: sync-agent.exe --setup');
+    console.log('       (설정 완료 후 자동 시작되며, 재부팅 시에도 자동 시작됩니다)');
   }
 
   printWindowsInfo(exePath);
@@ -124,105 +197,69 @@ function installServiceWindows(): void {
 
 function uninstallServiceWindows(): void {
   console.log('');
-  console.log('╔══════════════════════════════════════════╗');
-  console.log('║   Sync Agent — Windows 서비스 제거        ║');
-  console.log('╚══════════════════════════════════════════╝');
+  console.log('==================================================');
+  console.log('  Sync Agent - Windows 작업 제거');
+  console.log('==================================================');
   console.log('');
 
   if (!isWindowsAdmin()) {
-    console.error('❌ 관리자 권한이 필요합니다.');
-    console.error('   PowerShell을 "관리자 권한으로 실행" 후 다시 시도하세요.');
+    console.error('[ERROR] 관리자 권한이 필요합니다.');
+    console.error('        cmd/PowerShell 을 관리자 권한으로 실행 후 다시 시도하세요.');
     console.error('');
     process.exit(1);
   }
 
-  const statusResult = runCommand(`sc query ${WIN_SERVICE_NAME}`);
-  if (!statusResult.success) {
-    console.log('ℹ️  서비스가 설치되어 있지 않습니다.');
-    console.log('');
-    return;
-  }
+  // 작업 + 레거시 sc 서비스 모두 제거 (idempotent)
+  runCommand(`schtasks /End /TN "${WIN_TASK_NAME}"`);
+  const delTask = runCommand(`schtasks /Delete /TN "${WIN_TASK_NAME}" /F`);
+  runCommand(`sc stop ${WIN_TASK_NAME}`);
+  runCommand(`sc delete ${WIN_TASK_NAME}`);
 
-  // 실행 중이면 중지
-  if (statusResult.output.includes('RUNNING')) {
-    console.log('서비스 중지 중...');
-    runCommand(`sc stop ${WIN_SERVICE_NAME}`);
-    for (let i = 0; i < 10; i++) {
-      const check = runCommand(`sc query ${WIN_SERVICE_NAME}`);
-      if (check.output.includes('STOPPED')) break;
-      execSync('timeout /t 1 /nobreak >nul', { stdio: 'ignore' });
-    }
-    console.log('✅ 서비스 중지 완료');
-  }
-
-  const deleteResult = runCommand(`sc delete ${WIN_SERVICE_NAME}`);
-  if (deleteResult.success) {
-    console.log('✅ 서비스 제거 완료');
+  if (delTask.success) {
+    console.log('[OK] 작업 제거 완료');
   } else {
-    console.error('❌ 서비스 제거 실패:', deleteResult.output);
+    console.log('[INFO] 제거할 작업이 없거나 이미 제거되었습니다.');
   }
   console.log('');
 }
 
 function serviceStatusWindows(): void {
   console.log('');
-  const result = runCommand(`sc query ${WIN_SERVICE_NAME}`);
-
-  if (!result.success) {
-    console.log(`ℹ️  서비스 "${WIN_SERVICE_DISPLAY}" 가 설치되어 있지 않습니다.`);
-    console.log('   설치: sync-agent --install-service');
+  const exists = runCommand(`schtasks /Query /TN "${WIN_TASK_NAME}"`);
+  if (!exists.success) {
+    console.log(`[INFO] 작업 "${WIN_TASK_DISPLAY}" 가 등록되어 있지 않습니다.`);
+    console.log('       등록: sync-agent.exe --install-service');
     console.log('');
     return;
   }
 
-  let state = 'UNKNOWN';
-  const stateMatch = result.output.match(/STATE\s+:\s+\d+\s+(\w+)/);
-  if (stateMatch) state = stateMatch[1];
-
-  const stateEmoji: Record<string, string> = {
-    RUNNING: '🟢 실행 중',
-    STOPPED: '🔴 중지됨',
-    START_PENDING: '🟡 시작 중...',
-    STOP_PENDING: '🟡 중지 중...',
-    PAUSED: '🟡 일시정지',
-  };
-
-  console.log(`서비스: ${WIN_SERVICE_DISPLAY} (${WIN_SERVICE_NAME})`);
-  console.log(`상태: ${stateEmoji[state] || state}`);
-
-  const pidMatch = result.output.match(/PID\s+:\s+(\d+)/);
-  if (pidMatch && pidMatch[1] !== '0') console.log(`PID: ${pidMatch[1]}`);
-
-  printWindowsCommands(state);
+  const running = isAgentProcessRunning();
+  console.log(`작업: ${WIN_TASK_DISPLAY} (${WIN_TASK_NAME})`);
+  console.log(`상태: ${running ? '[RUNNING] 실행 중' : '[STOPPED] 중지됨'}`);
+  console.log('');
+  console.log('명령:');
+  if (running) {
+    console.log(`  중지: schtasks /End /TN ${WIN_TASK_NAME}`);
+  } else {
+    console.log(`  시작: schtasks /Run /TN ${WIN_TASK_NAME}`);
+  }
+  console.log('  제거: sync-agent.exe --uninstall-service');
+  console.log('');
 }
 
 function printWindowsInfo(exePath: string): void {
   console.log('');
-  console.log('📋 서비스 정보:');
-  console.log(`   이름: ${WIN_SERVICE_NAME}`);
-  console.log(`   표시: ${WIN_SERVICE_DISPLAY}`);
-  console.log(`   실행: ${exePath}`);
-  console.log('   시작: 자동 (PC 부팅 시 자동 실행)');
-  console.log('   복구: 실패 시 60초 후 자동 재시작');
+  console.log('작업 정보:');
+  console.log(`  이름: ${WIN_TASK_NAME}`);
+  console.log(`  실행: ${exePath} --service`);
+  console.log('  시작: 부팅 시 자동 (SYSTEM 권한, 2분 지연)');
+  console.log('  복구: 실패 시 1분 후 자동 재시작 (최대 3회)');
   console.log('');
-  console.log('💡 관리 명령:');
-  console.log('   상태 확인: sync-agent --service-status');
-  console.log(`   서비스 중지: sc stop ${WIN_SERVICE_NAME}`);
-  console.log(`   서비스 시작: sc start ${WIN_SERVICE_NAME}`);
-  console.log('   서비스 제거: sync-agent --uninstall-service');
-  console.log('');
-}
-
-function printWindowsCommands(state: string): void {
-  console.log('');
-  console.log('💡 명령:');
-  if (state === 'RUNNING') {
-    console.log(`   중지: sc stop ${WIN_SERVICE_NAME}`);
-    console.log(`   재시작: sc stop ${WIN_SERVICE_NAME} && sc start ${WIN_SERVICE_NAME}`);
-  } else if (state === 'STOPPED') {
-    console.log(`   시작: sc start ${WIN_SERVICE_NAME}`);
-  }
-  console.log('   제거: sync-agent --uninstall-service');
+  console.log('관리 명령:');
+  console.log('  상태 확인: sync-agent.exe --service-status');
+  console.log(`  중지: schtasks /End /TN ${WIN_TASK_NAME}`);
+  console.log(`  시작: schtasks /Run /TN ${WIN_TASK_NAME}`);
+  console.log('  제거: sync-agent.exe --uninstall-service');
   console.log('');
 }
 

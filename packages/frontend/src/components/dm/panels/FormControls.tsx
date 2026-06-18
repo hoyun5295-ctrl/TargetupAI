@@ -227,8 +227,8 @@ async function resizeForUpload(file: File, maxDim = 1080, quality = 0.85): Promi
 
 const blobExt = (b: Blob): string => (b.type === 'image/png' ? 'png' : b.type === 'image/webp' ? 'webp' : 'jpg');
 
-/** 단일 파일 리사이즈 후 업로드 → url */
-async function uploadOne(file: File): Promise<string> {
+/** 단일 파일 리사이즈 후 업로드 → url (DmBuilderPage 완성 이미지 업로드에서도 재사용) */
+export async function uploadOne(file: File): Promise<string> {
   const blob = await resizeForUpload(file);
   const fd = new FormData();
   fd.append('images', blob, `image.${blobExt(blob)}`);

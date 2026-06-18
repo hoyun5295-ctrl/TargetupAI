@@ -187,12 +187,13 @@ export class UpdateManager {
     const isService = process.argv.includes('--service') ||
                       process.env.RUNNING_AS_SERVICE === 'true';
 
+    // 2026-06-18: Windows 서비스 → 작업 스케줄러로 교체됨에 따라 net stop/start → schtasks
     const stopCmd = isService
-      ? 'net stop SyncAgent >nul 2>&1'
+      ? 'schtasks /End /TN SyncAgent >nul 2>&1'
       : `taskkill /PID ${process.pid} /F >nul 2>&1`;
 
     const startCmd = isService
-      ? 'net start SyncAgent'
+      ? 'schtasks /Run /TN SyncAgent'
       : `start "" "${currentExePath}"`;
 
     const batContent = `@echo off

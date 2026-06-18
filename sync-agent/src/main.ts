@@ -7,20 +7,17 @@
  *   --setup-cli          → 설치 마법사 강제 CLI (터미널)
  *   --edit-config        → 설정 편집 (대화형 CLI)
  *   --show-config        → 현재 설정 조회 (민감정보 마스킹)
- *   --install-service    → 서비스 설치 (Windows sc.exe / Linux systemd)
+ *   --install-service    → 서비스 설치 (Windows 작업 스케줄러 / Linux systemd)
  *   --uninstall-service  → 서비스 제거
  *   --service-status     → 서비스 상태 확인
- *   설정 파일 없음        → 설치 마법사 자동 실행
+ *   --service            → 서비스/작업 모드로 Agent 실행 (작업 스케줄러/ systemd 가 부여)
+ *   설정 파일 없음        → 설치 마법사 자동 실행 (단, 서비스 모드면 마법사 대신 종료)
  *   설정 파일 있음        → Agent 실행
  *
- * 변경사항 (2026-02-14):
- *   - CLI 설치 마법사 추가 (리눅스 헤드리스 대응)
- *   - --setup 시 OS 자동 감지: Windows → 웹 UI, Linux → CLI
- *   - --setup-web / --setup-cli 로 명시적 선택 가능
- *
- * 변경사항 (2026-02-25):
- *   - --edit-config: 설정 편집 CLI 추가 (BUG-010 대응)
- *   - --show-config: 현재 설정 조회 (민감정보 마스킹)
+ * 변경사항 (2026-02-14): CLI 설치 마법사 추가 / --setup OS 자동 감지
+ * 변경사항 (2026-02-25): --edit-config / --show-config 추가
+ * 변경사항 (2026-06-18): 콘솔 출력 ASCII화(2008 R2 cp949 mojibake 차단) +
+ *   서비스 모드(--service / RUNNING_AS_SERVICE)에서 설정 없으면 마법사 대신 즉시 종료.
  */
 
 import dotenv from 'dotenv';
@@ -70,12 +67,12 @@ else if (args.includes('--edit-config')) {
 // ─── 설치 마법사 (명시적 선택) ──────────────────────────
 
 else if (args.includes('--setup-web')) {
-  console.log('🔧 설치 마법사 (웹 UI) 모드로 실행합니다...');
+  console.log('[SETUP] 설치 마법사 (웹 UI) 모드로 실행합니다...');
   import('./setup/server').then(({ startSetupWizard }) => {
     startSetupWizard({ autoLaunchAgent: true });
   });
 } else if (args.includes('--setup-cli')) {
-  console.log('🔧 설치 마법사 (CLI) 모드로 실행합니다...');
+  console.log('[SETUP] 설치 마법사 (CLI) 모드로 실행합니다...');
   import('./setup/cli').then(({ startSetupCli }) => {
     startSetupCli({ autoLaunchAgent: true });
   });
@@ -87,12 +84,12 @@ else if (args.includes('--setup')) {
   const isWindows = process.platform === 'win32';
 
   if (isWindows) {
-    console.log('🔧 설치 마법사 (웹 UI) 모드로 실행합니다...');
+    console.log('[SETUP] 설치 마법사 (웹 UI) 모드로 실행합니다...');
     import('./setup/server').then(({ startSetupWizard }) => {
       startSetupWizard({ autoLaunchAgent: true });
     });
   } else {
-    console.log('🔧 설치 마법사 (CLI) 모드로 실행합니다...');
+    console.log('[SETUP] 설치 마법사 (CLI) 모드로 실행합니다...');
     import('./setup/cli').then(({ startSetupCli }) => {
       startSetupCli({ autoLaunchAgent: true });
     });
@@ -106,12 +103,22 @@ else {
     const { exists, source } = hasConfigFile();
 
     if (!exists) {
+      // ★ 서비스/작업 모드(--service 또는 RUNNING_AS_SERVICE)에서 설정이 없으면
+      //   설치 마법사(웹 서버)를 띄우지 않고 즉시 정상 종료한다.
+      //   (작업 스케줄러/ systemd 가 마법사를 무한히 띄우는 것을 차단 — 운영자가 --setup 으로 설정)
+      const isServiceMode =
+        args.includes('--service') || process.env.RUNNING_AS_SERVICE === 'true';
+      if (isServiceMode) {
+        console.log('[INFO] 설정 파일이 없습니다. 설정 후 자동 시작됩니다: sync-agent.exe --setup');
+        process.exit(0);
+      }
+
       // 설정 없음 → OS에 맞는 마법사 자동 실행
       console.log('');
-      console.log('╔══════════════════════════════════════════════════╗');
-      console.log('║  ⚠️  설정 파일을 찾을 수 없습니다.                ║');
-      console.log('║  설치 마법사를 자동으로 시작합니다...              ║');
-      console.log('╚══════════════════════════════════════════════════╝');
+      console.log('==================================================');
+      console.log('  [!] 설정 파일을 찾을 수 없습니다.');
+      console.log('  설치 마법사를 자동으로 시작합니다...');
+      console.log('==================================================');
       console.log('');
 
       const isWindows = process.platform === 'win32';
@@ -132,7 +139,7 @@ else {
         encrypted: '암호화 설정 (config.enc)',
         json: '설정 파일 (config.json)',
       };
-      console.log(`📋 설정 소스: ${sourceLabel[source] || source}`);
+      console.log(`[설정 소스] ${sourceLabel[source] || source}`);
       import('./index');
     }
   });

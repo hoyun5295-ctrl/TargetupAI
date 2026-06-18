@@ -493,7 +493,7 @@ export async function startEditConfig(
           console.log('  ✅ 설정이 암호화 저장되었습니다 (AES-256-GCM)');
           console.log('');
           console.log('  💡 변경사항을 적용하려면 Agent를 재시작하세요:');
-          console.log('     Windows: net stop SyncAgent && net start SyncAgent');
+          console.log('     Windows: schtasks /End /TN SyncAgent && schtasks /Run /TN SyncAgent');
           console.log('     Linux:   sudo systemctl restart sync-agent');
           console.log('');
         } catch (error) {

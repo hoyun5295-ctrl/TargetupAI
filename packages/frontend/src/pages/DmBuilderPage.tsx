@@ -6,12 +6,14 @@
  *
  * 레거시(slides 모드) DM은 편집 불가 안내 + 새 에디터로 전환 버튼(15단계 구현 후 활성).
  */
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { DmThumbnail, QuickStartThumbnail } from '../components/dm/DmThumbnails';
 import axios from 'axios';
 import { attachCreditInterceptor } from '../lib/credit-interceptor';
 import { useDmBuilderStore } from '../stores/dmBuilderStore';
+import { createSection } from '../utils/dm-section-defaults';
+import { uploadOne } from '../components/dm/panels/FormControls';
 import { useDmKeyboardShortcuts } from '../hooks/useDmKeyboardShortcuts';
 import ConfirmModal, { type ConfirmState } from '../components/ConfirmModal';
 import CreditConfirmModal from '../components/credit/CreditConfirmModal';
@@ -170,6 +172,10 @@ export default function DmBuilderPage() {
   // ★ D216+ marketing_user_ux_priority 영구 룰 정합 — LayoutModePickerModal 영구 폐기
   //   "자유롭게 DM 생성" 클릭 = 즉시 scroll default + 편집 모드 진입 (마케팅 담당자 영역 옵션 차이 모름 영역 = 혼란 영역 영구 차단)
   //   layoutMode 변경 영역 = 편집 모드 안 DmTopBar 토글 영역 활용 정합
+  // ★ 2026-06-19: 완성 이미지(디자인 시안) 업로드 → slideshow 섹션 자동 생성 진입
+  const completedImagesInputRef = useRef<HTMLInputElement>(null);
+  const [uploadingImages, setUploadingImages] = useState(false);
+
   const handleCreateNew = () => {
     setLegacyDmError(null);
     createNew({ layoutMode: 'scroll' });
@@ -230,6 +236,41 @@ export default function DmBuilderPage() {
       setNaturalLanguage('');
     }
   }, [generating, createNew, applyAiGenerated, save, setToast]);
+
+  // ★ 2026-06-19: 완성 이미지 업로드 → 슬라이드 DM 자동 생성 (외주 완성 시안 대응 — 신규 섹션 타입 불요, slideshow 재사용)
+  const handleCompletedImagesSelected = useCallback(async (files: FileList | null) => {
+    if (!files || files.length === 0) return;
+    if (uploadingImages || generating) return;
+    setUploadingImages(true);
+    setLegacyDmError(null);
+    try {
+      const arr = Array.from(files);
+      const urls: string[] = [];
+      let failed = 0;
+      for (const f of arr) {
+        try { urls.push(await uploadOne(f)); } catch { failed += 1; }
+      }
+      if (urls.length === 0) {
+        setToast({ type: 'error', message: '이미지 업로드에 실패했습니다. 다시 시도해주세요.' });
+        return;
+      }
+      // 완성 이미지 N장 → 자동 슬라이드쇼(slideshow) 섹션 1개로 구성 후 편집 모드 진입
+      const slideshow = createSection('slideshow', 0, { slides: urls.map((u) => ({ image_url: u })) });
+      createNew({ title: '완성 이미지 DM' });
+      applyAiGenerated([slideshow], undefined, '완성 이미지 업로드', { layoutMode: 'scroll' });
+      await save({ silent: true });
+      setMode('edit');
+      setToast({
+        type: 'success',
+        message: `완성 이미지 ${urls.length}장으로 슬라이드 DM을 만들었어요${failed ? ` (${failed}장 실패)` : ''}. 편집에서 스크롤(갤러리)로 바꾸거나 순서를 조정할 수 있어요.`,
+      });
+    } catch (err: any) {
+      setToast({ type: 'error', message: err?.response?.data?.error || err?.message || '이미지 DM 생성 실패' });
+    } finally {
+      setUploadingImages(false);
+      if (completedImagesInputRef.current) completedImagesInputRef.current.value = '';
+    }
+  }, [uploadingImages, generating, createNew, applyAiGenerated, save, setToast]);
 
   // ★ D216+ 편집 모드 안 1-click floating action 영역 (자동 생성 직후 만족 강화)
   const handleFloatingAction = useCallback(async (action: 'ai_refine' | 'design_align' | 'variable_consistency') => {
@@ -689,6 +730,35 @@ export default function DmBuilderPage() {
           >
             <span style={{ fontSize: 16 }}>📄</span>
             <span>빈 캔버스에서 자유롭게 DM 생성 (직접 섹션 추가)</span>
+          </button>
+
+          {/* ★ 2026-06-19: 완성 이미지(디자인 시안) 업로드 → 슬라이드 DM 자동 생성 (외주 완성본 대응) */}
+          <input
+            ref={completedImagesInputRef}
+            type="file"
+            accept="image/*"
+            multiple
+            style={{ display: 'none' }}
+            onChange={(e) => handleCompletedImagesSelected(e.target.files)}
+          />
+          <button
+            onClick={() => completedImagesInputRef.current?.click()}
+            disabled={generating || uploadingImages}
+            style={{
+              width: '100%',
+              marginTop: 10,
+              padding: '14px 20px',
+              background: 'rgba(255,255,255,0.04)',
+              border: '1px dashed rgba(255,255,255,0.2)',
+              borderRadius: 10,
+              cursor: (generating || uploadingImages) ? 'not-allowed' : 'pointer',
+              color: '#fff', fontSize: 13, fontWeight: 600,
+              display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+              opacity: (generating || uploadingImages) ? 0.5 : 1,
+            }}
+          >
+            <span style={{ fontSize: 16 }}>🖼️</span>
+            <span>{uploadingImages ? '이미지 업로드 중...' : '완성 이미지 업로드 (디자인 시안 여러 장 → 슬라이드 DM)'}</span>
           </button>
         </div>
 

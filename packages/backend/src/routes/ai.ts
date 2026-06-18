@@ -1730,11 +1730,9 @@ router.post('/operator/continuous', async (req: Request, res: Response) => {
   try {
     const companyId = req.user?.companyId;
     const userId = req.user?.userId;
-    const userType = req.user?.userType;
     if (!companyId || !userId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
-    if (userType !== 'company_admin') {
-      return res.status(403).json({ success: false, error: 'Continuous Operator 신설은 회사 관리자만 가능합니다.' });
-    }
+    // 2026-06-19 (Harold 명시): 자동 마케팅 생성은 일반 사용자(company_user)도 가능 — 회사 관리자 전용 게이트 제거.
+    //   operator는 회사 스코프이며, 발송·돈 안전망(opt-out/광고080/예산/스팸)은 발송 시점에 그대로 적용된다.
 
     const planCtx = await loadPlanContext(companyId);
     if (!planCtx) return res.status(404).json({ success: false, error: '회사 정보를 찾을 수 없습니다.' });
@@ -1776,11 +1774,8 @@ router.get('/operator/continuous', async (req: Request, res: Response) => {
 router.put('/operator/continuous/:id', async (req: Request, res: Response) => {
   try {
     const companyId = req.user?.companyId;
-    const userType = req.user?.userType;
     if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
-    if (userType !== 'company_admin') {
-      return res.status(403).json({ success: false, error: '수정은 회사 관리자만 가능합니다.' });
-    }
+    // 2026-06-19 (Harold 명시): 일반 사용자도 본인 회사의 자동 마케팅을 수정 가능 (operator는 회사 스코프).
     const {
       name, objective, schedule, schedule_time, status,
       budget_monthly, budget_daily, budget_alert_threshold,
@@ -1816,11 +1811,8 @@ router.put('/operator/continuous/:id', async (req: Request, res: Response) => {
 router.delete('/operator/continuous/:id', async (req: Request, res: Response) => {
   try {
     const companyId = req.user?.companyId;
-    const userType = req.user?.userType;
     if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
-    if (userType !== 'company_admin') {
-      return res.status(403).json({ success: false, error: '삭제는 회사 관리자만 가능합니다.' });
-    }
+    // 2026-06-19 (Harold 명시): 일반 사용자도 본인 회사의 자동 마케팅을 삭제(보관) 가능 (operator는 회사 스코프).
     const ok = await archiveOperator(companyId, req.params.id);
     if (!ok) return res.status(404).json({ success: false, error: 'Operator를 찾을 수 없습니다.' });
     return res.json({ success: true });

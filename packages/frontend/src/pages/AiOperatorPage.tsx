@@ -20,6 +20,7 @@ import {
   Target,
   Wand2,
   X,
+  Pencil,
 } from 'lucide-react';
 import AiRefineModal from '../components/AiRefineModal';
 import AiOperatorWalkthroughModal from '../components/AiOperatorWalkthroughModal';
@@ -271,6 +272,7 @@ export default function AiOperatorPage() {
   const [selectedVariantIdx, setSelectedVariantIdx] = useState(0);
   const [showRefineModal, setShowRefineModal] = useState(false);
   const [refinedOverrides, setRefinedOverrides] = useState<Record<number, string>>({});
+  const [editingBody, setEditingBody] = useState(false); // ★ 2026-06-19: 생성 문안 직접 편집(타이핑) 모드
   const [copiedAt, setCopiedAt] = useState<number | null>(null);
   // ★ D166: 승인 → 발송 흐름 (preview-recipients + /direct-send 2-step)
   const [sending, setSending] = useState(false);
@@ -396,6 +398,7 @@ export default function AiOperatorPage() {
     setSendResult(null);
     setSendError(null);
     setRefinedOverrides({});
+    setEditingBody(false);
     setSelectedVariantIdx(0);
     // ★ D210+ Phase 2-fix5 (Harold 명시 2026-05-23): 새 입력 진입 시 옛 sample-customer 영역 초기화
     setSampleCustomer(null);
@@ -956,16 +959,34 @@ export default function AiOperatorPage() {
                           </div>
                         )}
 
-                        {/* 본문 박스 */}
+                        {/* 본문 박스 — 보기(pre) / 직접 편집(textarea) 토글 */}
                         <div className="relative p-4 rounded-xl bg-indigo-950/60 border border-white/10 mb-3">
-                          <pre className="whitespace-pre-wrap break-words text-sm text-white/85 leading-relaxed font-sans">
-                            {activeBody
-                              ? (showMergedPreview && sampleCustomer
-                                  ? mergeAndHighlightVars(activeBody, sampleCustomer, 'dark', sampleCustomerFields || undefined)
-                                  : highlightVars(activeBody, 'dark'))
-                              : '메시지 본문이 비어있습니다.'}
-                          </pre>
-                          {overrideText && (
+                          {editingBody ? (
+                            <>
+                              <textarea
+                                value={rawActiveBody}
+                                onChange={(e) => setRefinedOverrides((prev) => ({ ...prev, [safeIdx]: e.target.value }))}
+                                rows={6}
+                                autoFocus
+                                placeholder="문안을 직접 입력하세요"
+                                className="w-full bg-transparent text-sm text-white/90 leading-relaxed font-sans resize-y outline-none placeholder-white/30"
+                              />
+                              {isAd && (
+                                <p className="mt-2 text-[10px] text-white/35 italic">
+                                  (광고)·무료거부 {formattedReject || rawReject}는 발송 시 자동으로 붙습니다 — 본문만 입력하세요.
+                                </p>
+                              )}
+                            </>
+                          ) : (
+                            <pre className="whitespace-pre-wrap break-words text-sm text-white/85 leading-relaxed font-sans">
+                              {activeBody
+                                ? (showMergedPreview && sampleCustomer
+                                    ? mergeAndHighlightVars(activeBody, sampleCustomer, 'dark', sampleCustomerFields || undefined)
+                                    : highlightVars(activeBody, 'dark'))
+                                : '메시지 본문이 비어있습니다.'}
+                            </pre>
+                          )}
+                          {overrideText && !editingBody && (
                             <button
                               type="button"
                               onClick={() => setRefinedOverrides((prev) => {
@@ -983,6 +1004,18 @@ export default function AiOperatorPage() {
 
                         {/* 메시지 액션 */}
                         <div className="flex gap-2 flex-wrap">
+                          <button
+                            type="button"
+                            onClick={() => setEditingBody((v) => !v)}
+                            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border transition-all ${
+                              editingBody
+                                ? 'bg-emerald-500/25 text-emerald-100 border-emerald-400/40 hover:bg-emerald-500/35'
+                                : 'bg-white/5 text-white/70 border-white/10 hover:bg-white/10 hover:text-white'
+                            }`}
+                          >
+                            {editingBody ? <Check className="w-3.5 h-3.5" /> : <Pencil className="w-3.5 h-3.5" />}
+                            {editingBody ? '편집 완료' : '직접 편집'}
+                          </button>
                           <button
                             type="button"
                             onClick={() => setShowRefineModal(true)}
