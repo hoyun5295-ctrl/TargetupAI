@@ -1093,8 +1093,32 @@ function EditModal({ editing, setEditing, availableVariables, onSave, fileInputR
     return () => clearTimeout(timer);
   }, [editing.segment_conditions]);
 
+  // web 채널은 4종(모달/슬라이드/토스트/플로팅)만 — 옛 배너 등 4종 밖 형태로 저장된 메시지를 열면 모달로 자동 정규화
+  useEffect(() => {
+    const WEB_OK = ['center_modal', 'slide_in', 'toast', 'floating_button'];
+    if (editing.channel !== 'app' && editing.template && !WEB_OK.includes(editing.template)) {
+      setEditing({ ...editing, template: 'center_modal' });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editing.id]);
+
   const updateField = (key: keyof MessageRow, value: any) => {
     setEditing({ ...editing, [key]: value });
+  };
+
+  // 고급 디자인 프리셋 — 클릭 시 배경(그라데이션)·글자색 일괄 적용. SDK/미리보기가 background를 그대로 렌더.
+  const DESIGN_PRESETS: { key: string; label: string; background: string; textColor: string }[] = [
+    { key: 'violet_hero', label: '바이올렛', background: 'linear-gradient(135deg, #7c3aed 0%, #db2777 100%)', textColor: '#ffffff' },
+    { key: 'midnight', label: '미드나잇', background: 'linear-gradient(135deg, #0f172a 0%, #312e81 100%)', textColor: '#ffffff' },
+    { key: 'sunset', label: '선셋', background: 'linear-gradient(135deg, #fb7185 0%, #f97316 100%)', textColor: '#ffffff' },
+    { key: 'ocean', label: '오션', background: 'linear-gradient(135deg, #0ea5e9 0%, #6366f1 100%)', textColor: '#ffffff' },
+    { key: 'forest', label: '포레스트', background: 'linear-gradient(135deg, #059669 0%, #0d9488 100%)', textColor: '#ffffff' },
+    { key: 'gold_lux', label: '골드 럭스', background: 'linear-gradient(135deg, #1c1917 0%, #44403c 100%)', textColor: '#fcd34d' },
+    { key: 'candy', label: '캔디', background: 'linear-gradient(135deg, #a855f7 0%, #ec4899 50%, #fb923c 100%)', textColor: '#ffffff' },
+    { key: 'clean', label: '클린', background: '#ffffff', textColor: '#0f172a' },
+  ];
+  const applyPreset = (p: { background: string; textColor: string }) => {
+    setEditing({ ...editing, background_color: p.background, text_color: p.textColor });
   };
 
   const previewSample: Record<string, Record<string, any>> = {
@@ -1165,7 +1189,7 @@ function EditModal({ editing, setEditing, availableVariables, onSave, fileInputR
             {/* 영역 1: 제목 + 본문 */}
             <div>
               <h4 className="text-xs font-bold text-white/80 mb-2 flex items-center gap-1.5">
-                <Edit2 className="w-3 h-3" /> 1. 제목 + 본문
+                <Edit2 className="w-3 h-3" /> 내용
               </h4>
               <input
                 type="text"
@@ -1187,7 +1211,7 @@ function EditModal({ editing, setEditing, availableVariables, onSave, fileInputR
             {/* 영역 2: Template 선택 */}
             <div>
               <h4 className="text-xs font-bold text-white/80 mb-2 flex items-center gap-1.5">
-                <Layers className="w-3 h-3" /> 2. 표시 형태 ({(editing.channel === 'app' ? CHANNEL_TEMPLATES.app : CHANNEL_TEMPLATES.web).length}종)
+                <Layers className="w-3 h-3" /> 표시 형태 ({(editing.channel === 'app' ? CHANNEL_TEMPLATES.app : CHANNEL_TEMPLATES.web).length}종)
               </h4>
               <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
                 {(editing.channel === 'app' ? CHANNEL_TEMPLATES.app : CHANNEL_TEMPLATES.web).map((tpl) => (
@@ -1206,10 +1230,34 @@ function EditModal({ editing, setEditing, availableVariables, onSave, fileInputR
               </div>
             </div>
 
+            {/* 디자인 — 고급 프리셋 갤러리 */}
+            <div>
+              <h4 className="text-xs font-bold text-white/80 mb-2 flex items-center gap-1.5">
+                <Wand2 className="w-3 h-3 text-fuchsia-300" /> 디자인 (클릭해서 골라보세요)
+              </h4>
+              <div className="grid grid-cols-4 gap-2">
+                {DESIGN_PRESETS.map((p) => {
+                  const active = editing.background_color === p.background;
+                  return (
+                    <button
+                      key={p.key}
+                      type="button"
+                      onClick={() => applyPreset(p)}
+                      className={`relative h-14 rounded-xl border overflow-hidden transition-all ${active ? 'border-fuchsia-400 ring-2 ring-fuchsia-400/50' : 'border-white/10 hover:border-white/40 hover:scale-[1.03]'}`}
+                      style={{ background: p.background }}
+                      title={p.label}
+                    >
+                      <span className="absolute inset-x-0 bottom-0 text-[9px] font-bold py-0.5 bg-black/35 backdrop-blur-sm" style={{ color: p.textColor }}>{p.label}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
             {/* 영역 3: 이미지 업로드 */}
             <div>
               <h4 className="text-xs font-bold text-white/80 mb-2 flex items-center gap-1.5">
-                <ImageIcon className="w-3 h-3" /> 3. 이미지 (선택)
+                <ImageIcon className="w-3 h-3" /> 이미지 (선택)
               </h4>
               <div className="flex gap-2 items-center">
                 {editing.image_url ? (
@@ -1245,7 +1293,7 @@ function EditModal({ editing, setEditing, availableVariables, onSave, fileInputR
             {/* 영역 4: 다중 CTA (최대 3) */}
             <div>
               <h4 className="text-xs font-bold text-white/80 mb-2 flex items-center gap-1.5">
-                <MousePointer className="w-3 h-3" /> 4. CTA 버튼 (최대 3개)
+                <MousePointer className="w-3 h-3" /> CTA 버튼 (최대 3개)
               </h4>
               <div className="space-y-2">
                 {(editing.buttons || []).map((btn, idx) => (
@@ -1315,7 +1363,7 @@ function EditModal({ editing, setEditing, availableVariables, onSave, fileInputR
             {/* 영역 5: 세그먼트 조건 + 매칭 수 */}
             <div>
               <h4 className="text-xs font-bold text-white/80 mb-2 flex items-center gap-1.5">
-                <Target className="w-3 h-3" /> 5. 세그먼트 조건
+                <Target className="w-3 h-3" /> 타겟 세그먼트
               </h4>
               <div className="bg-violet-900/50 border border-white/10 rounded-lg p-3 space-y-2">
                 <div className="grid grid-cols-2 gap-2">
@@ -1355,10 +1403,20 @@ function EditModal({ editing, setEditing, availableVariables, onSave, fileInputR
               </div>
             </div>
 
-            {/* 영역 6: Liquid 변수 드롭다운 */}
+            {/* 고급 설정 — 핵심 외 항목 접기 (개인화·트리거·시간·색상) */}
+            <button
+              onClick={() => setShowAdvanced(!showAdvanced)}
+              className="w-full flex items-center justify-between text-xs font-bold text-white/80 hover:bg-white/[0.07] px-3.5 py-2.5 rounded-xl border border-white/10 bg-white/5 transition-colors"
+            >
+              <span className="flex items-center gap-1.5"><Wand2 className="w-3.5 h-3.5 text-violet-300" /> 고급 설정 · 개인화 · 트리거 · 시간 · 색상</span>
+              {showAdvanced ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+            </button>
+            {showAdvanced && (
+            <div className="space-y-5">
+            {/* 개인화 변수 */}
             <div>
               <h4 className="text-xs font-bold text-white/80 mb-2 flex items-center gap-1.5">
-                <Wand2 className="w-3 h-3" /> 6. 개인화 변수 (본문 안 활용)
+                <Wand2 className="w-3 h-3" /> 개인화 변수 (본문 안 활용)
               </h4>
               <div className="bg-violet-900/50 border border-white/10 rounded-lg p-3 grid grid-cols-2 md:grid-cols-3 gap-1.5">
                 {availableVariables.slice(0, 9).map((v) => (
@@ -1378,10 +1436,10 @@ function EditModal({ editing, setEditing, availableVariables, onSave, fileInputR
               </div>
             </div>
 
-            {/* 영역 7: 트리거 복합 조건 */}
+            {/* 트리거 조건 */}
             <div>
               <h4 className="text-xs font-bold text-white/80 mb-2 flex items-center gap-1.5">
-                <Activity className="w-3 h-3" /> 7. 트리거 조건
+                <Activity className="w-3 h-3" /> 트리거 조건
               </h4>
               <div className="grid grid-cols-2 gap-2">
                 <select
@@ -1414,17 +1472,11 @@ function EditModal({ editing, setEditing, availableVariables, onSave, fileInputR
               </div>
             </div>
 
-            {/* 영역 8: 시간대 + 요일 + 자동 닫힘 */}
-            <button
-              onClick={() => setShowAdvanced(!showAdvanced)}
-              className="w-full flex items-center justify-between text-xs font-bold text-white/80 hover:bg-white/5 px-2 py-1.5 rounded"
-            >
-              <span className="flex items-center gap-1.5">
-                <Clock className="w-3 h-3" /> 8. 시간대 / 요일 / 한도 (고급)
-              </span>
-              {showAdvanced ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
-            </button>
-            {showAdvanced && (
+            {/* 시간대 / 요일 / 한도 */}
+            <div>
+              <h4 className="text-xs font-bold text-white/80 mb-2 flex items-center gap-1.5">
+                <Clock className="w-3 h-3" /> 시간대 / 요일 / 한도
+              </h4>
               <div className="space-y-3 pl-4 border-l-2 border-white/10">
                 <div className="grid grid-cols-2 gap-2">
                   <div>
@@ -1511,12 +1563,12 @@ function EditModal({ editing, setEditing, availableVariables, onSave, fileInputR
                   </select>
                 </div>
               </div>
-            )}
+            </div>
 
-            {/* 영역 9: 색상 + 상태 */}
+            {/* 색상 + 상태 */}
             <div>
               <h4 className="text-xs font-bold text-white/80 mb-2 flex items-center gap-1.5">
-                <Layers className="w-3 h-3" /> 9. 색상 + 상태
+                <Layers className="w-3 h-3" /> 색상 + 상태
               </h4>
               <div className="grid grid-cols-3 gap-2">
                 <div>
@@ -1550,12 +1602,14 @@ function EditModal({ editing, setEditing, availableVariables, onSave, fileInputR
                 </div>
               </div>
             </div>
+            </div>
+            )}
           </div>
 
-          {/* 우측 — 실시간 미리보기 (영역 10) */}
+          {/* 우측 — 실시간 미리보기 */}
           <div className="bg-slate-950/40 p-6 space-y-3 sticky top-[76px] h-fit max-h-[80vh] overflow-y-auto">
             <h4 className="text-xs font-bold text-white/80 mb-1 flex items-center gap-1.5">
-              <Eye className="w-3 h-3" /> 10. 실시간 미리보기
+              <Eye className="w-3 h-3" /> 실시간 미리보기
             </h4>
             {editing.channel === 'app' && (
               <div className="bg-amber-500/10 border border-amber-400/30 rounded-lg px-3 py-2 text-[11px] text-amber-200 flex items-start gap-1.5">

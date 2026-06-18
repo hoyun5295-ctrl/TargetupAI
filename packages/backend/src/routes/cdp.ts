@@ -550,6 +550,15 @@ router.get('/inapp/active', requireCdpKeyOrBrowserOrigin, async (req: Request, r
       channel: reqChannel,
     });
 
+    // web 채널은 모달/슬라이드/토스트/플로팅 4종만 — 그 밖 형태(옛 배너 등)는 모달로 보정. 기존 메시지 포함, DB 무변경.
+    if (reqChannel === 'web') {
+      const WEB_OK = new Set(['center_modal', 'slide_in', 'toast', 'floating_button']);
+      for (const m of messages as any[]) {
+        const t = m.template || m.position;
+        if (t && !WEB_OK.has(t)) m.template = 'center_modal';
+      }
+    }
+
     // T3 (2026-06-11) — 자동 기동 개인화: 메시지들이 실제 쓰는 변수만 customer로 동봉 (식별 회원 한정)
     let customer: Record<string, any> | null = null;
     if (externalId && messages.length > 0) {
