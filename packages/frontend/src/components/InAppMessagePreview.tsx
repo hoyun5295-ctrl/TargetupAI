@@ -128,7 +128,7 @@ function Overlay({ variant, ...rest }: { variant: Variant } & Omit<InAppMessageP
     return (
       <div style={{ position: 'absolute', inset: 0, background: 'rgba(15,15,20,0.5)', backdropFilter: 'blur(3px)', WebkitBackdropFilter: 'blur(3px)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 18 } as CSSProperties}>
         <div style={{ ...cardBase, position: 'relative', maxWidth: 280, width: '100%', borderRadius: 20, overflow: 'hidden', boxShadow: '0 24px 60px rgba(0,0,0,0.45)' }}>
-          {heroImg && <img src={heroImg} alt="" onError={hideOnError} style={{ width: '100%', aspectRatio: '4 / 3', objectFit: 'cover', display: 'block' }} />}
+          {heroImg && <img src={heroImg} alt="" onError={hideOnError} style={{ width: '100%', maxHeight: 210, objectFit: 'cover', display: 'block' }} />}
           <div style={{ padding: 20 }}>
             <CardInner {...rest} imageUrl={null} variant="modal" textColor={textColor} />
           </div>

@@ -531,6 +531,27 @@ router.post('/push/unsubscribe', requireCdpKeyOrBrowserOrigin, async (req: Reque
 
 // GET /api/cdp/inapp/active — SDK가 페이지 로드 시 호출, 현재 사용자에게 표시할 메시지 반환
 // ★ D215+ V2 (2026-05-25) — 시간대 + 세그먼트 + variant 통합 검증 (CT-78 + CT-80 + CT-82)
+// 인앱 이미지 저장 경로 (공개 서빙 + 인증 업로드 양쪽에서 참조)
+const INAPP_IMAGE_BASE = process.env.INAPP_IMAGE_PATH || path.resolve('./uploads/inapp');
+const INAPP_IMAGE_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+// GET /api/cdp/inapp/image/:companyId/:filename — 인앱 이미지 공개 서빙 (자사몰 방문자 img 직접 GET, 인증 X)
+//   ★ /uploads 정적 서빙이 없어 저장 URL이 404로 깨지던 문제 차단. mms-images.ts GET 서빙 패턴.
+router.get('/inapp/image/:companyId/:filename', (req: any, res: any) => {
+  const { companyId, filename } = req.params;
+  if (!INAPP_IMAGE_UUID.test(companyId)) return res.status(400).json({ success: false, error: '잘못된 요청' });
+  if (filename.includes('..') || filename.includes('/') || filename.includes('\\')) {
+    return res.status(400).json({ success: false, error: '잘못된 파일명' });
+  }
+  const filePath = path.join(INAPP_IMAGE_BASE, companyId, filename);
+  if (!fs.existsSync(filePath)) return res.status(404).json({ success: false, error: '이미지를 찾을 수 없습니다.' });
+  const ext = path.extname(filename).toLowerCase();
+  const mime = ext === '.png' ? 'image/png' : ext === '.gif' ? 'image/gif' : ext === '.webp' ? 'image/webp' : 'image/jpeg';
+  res.setHeader('Content-Type', mime);
+  res.setHeader('Cache-Control', 'public, max-age=86400');
+  res.sendFile(path.resolve(filePath));
+});
+
 router.get('/inapp/active', requireCdpKeyOrBrowserOrigin, async (req: Request, res: Response) => {
   const cdpAuth = req.cdpAuth!;
   try {
@@ -1061,8 +1082,7 @@ router.delete('/inapp/:id', async (req: Request, res: Response) => {
 //   모든 endpoint = 회사 admin 권한 + BUSINESS+ 게이팅 + DB ALTER 503 안전망
 // ════════════════════════════════════════════════════════════════════
 
-// 인앱 이미지 업로드 multer setup
-const INAPP_IMAGE_BASE = process.env.INAPP_IMAGE_PATH || path.resolve('./uploads/inapp');
+// 인앱 이미지 업로드 multer setup (INAPP_IMAGE_BASE = 상단 공개 서빙 영역에 정의)
 const inappImageUpload = multer({
   storage: multer.memoryStorage(),
   limits: {
@@ -1368,7 +1388,7 @@ router.post('/inapp/upload-image', (req: any, res: any) => {
       const filename = `${uuidv4()}${ext}`;
       const filepath = path.join(companyDir, filename);
       fs.writeFileSync(filepath, file.buffer);
-      const publicUrl = `/uploads/inapp/${auth.companyId}/${filename}`;
+      const publicUrl = `/api/cdp/inapp/image/${auth.companyId}/${filename}`;
       return res.json({ success: true, url: publicUrl, filename, size: file.size });
     } catch (e: any) {
       console.error('[CDP /inapp/upload-image] 오류:', e);

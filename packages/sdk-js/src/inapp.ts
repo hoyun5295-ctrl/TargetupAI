@@ -578,7 +578,7 @@ export class HanjulloInAppModule {
       hero.alt = '';
       hero.loading = 'lazy';
       hero.referrerPolicy = 'no-referrer';
-      Object.assign(hero.style, { width: '100%', aspectRatio: '4 / 3', objectFit: 'cover', display: 'block' });
+      Object.assign(hero.style, { width: '100%', maxHeight: '300px', objectFit: 'cover', display: 'block' });
       hero.onerror = () => { hero.style.display = 'none'; };
       root.appendChild(hero);
     }

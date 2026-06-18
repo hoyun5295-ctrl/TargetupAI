@@ -129,7 +129,7 @@ export async function createInAppMessage(
   return mapRowToMessage(result.rows[0]);
 }
 
-export async function listInAppMessages(companyId: string, channel?: 'web' | 'app'): Promise<InAppMessage[]> {
+export async function listInAppMessages(companyId: string, channel?: 'web' | 'app'): Promise<Record<string, any>[]> {
   const result = await query(
     `SELECT * FROM cdp_inapp_messages
      WHERE company_id = $1::uuid AND status != 'archived'
@@ -137,7 +137,10 @@ export async function listInAppMessages(companyId: string, channel?: 'web' | 'ap
      ORDER BY created_at DESC`,
     [companyId, channel || null]
   );
-  return result.rows.map(mapRowToMessage);
+  // 편집 화면이 전체 필드(buttons·badge_text·image_url·segment_conditions·시간설정)를 그대로 받도록
+  // raw row(snake_case = 프론트 MessageRow 일치) 반환. mapRowToMessage는 기본 필드만 줘서
+  // 수정 진입 시 신규 필드가 통째로 비던 문제(저장 시 덮어쓰기)를 차단한다.
+  return result.rows;
 }
 
 export async function updateInAppMessage(

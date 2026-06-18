@@ -1774,7 +1774,7 @@ client.newCall(req).execute()`}</pre>
           </div>
         )}
 
-        {/* 12-1. SDK 설치 스크립트 스니펫 (public key 자동 주입 — v0.3.6) */}
+        {/* 12-1. SDK 설치 스크립트 스니펫 (public key 자동 주입 — v0.3.7) */}
         {webhookProviderOpen && usage?.public_key && (
           <div className="bg-white/5 border border-white/10 rounded-2xl p-6">
             <div className="flex items-center gap-2 mb-3">
@@ -1787,8 +1787,8 @@ client.newCall(req).execute()`}</pre>
               </div>
             </div>
             {(() => {
-              const snippet = `<script src="https://app.hanjul.ai/sdk/v0.3.6/hanjul.min.js" data-hjl-key="${usage.public_key}" async></script>`;
-              const appSnippet = `<script src="https://app.hanjul.ai/sdk/v0.3.6/hanjul.min.js" data-hjl-key="${usage.public_key}" data-hjl-platform="app" async></script>`;
+              const snippet = `<script src="https://app.hanjul.ai/sdk/v0.3.7/hanjul.min.js" data-hjl-key="${usage.public_key}" async></script>`;
+              const appSnippet = `<script src="https://app.hanjul.ai/sdk/v0.3.7/hanjul.min.js" data-hjl-key="${usage.public_key}" data-hjl-platform="app" async></script>`;
               return (
                 <>
                   <div className="text-xs font-medium text-white/70 mb-1.5">웹 자사몰 — &lt;head&gt;에 붙여넣기</div>
@@ -1810,11 +1810,11 @@ client.newCall(req).execute()`}</pre>
                 </>
               );
             })()}
-            <div className="text-[10px] text-white/30 italic mt-2">Data source — app.hanjul.ai/sdk/v0.3.6</div>
+            <div className="text-[10px] text-white/30 italic mt-2">Data source — app.hanjul.ai/sdk/v0.3.7</div>
           </div>
         )}
 
-        {/* 12-2. 설치 검증 — 첫 이벤트 진단 (v0.3.6, 서버 관측 신호) */}
+        {/* 12-2. 설치 검증 — 첫 이벤트 진단 (v0.3.7, 서버 관측 신호) */}
         {webhookProviderOpen && usage?.public_key && installStatus && (() => {
           const issued = installStatus.keyIssuedAt ? new Date(installStatus.keyIssuedAt).getTime() : null;
           const mins = issued ? Math.floor((Date.now() - issued) / 60000) : 0;
