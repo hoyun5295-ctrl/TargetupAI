@@ -107,11 +107,22 @@
 
 ---
 
-### 🟢 2026-06-17 — SDK 강화: 자사몰 BYO 자격 연동 토대 (카페24·네이버 backend end-to-end, ★검증 완료·미배포)
+### 🟢 2026-06-18 — 자체 자사몰 + 앱 데이터 수집 고도화 (Track A·B·C ★코드완료·미배포)
+> **배경**: 어제 인앱 웹/앱 채널 분리 + 웹뷰 앱 지원 배포완료. 빠진 퍼즐 = 이커머스 행동 자동수집 — 장바구니·구매 트리거 인앱이 작동하려면 필수(트리거 표준 = cart_add/cart_view/checkout_start).
+> **Track A (SDK 이커머스 자동수집)**: sdk-js `auto-capture/ecommerce.ts` 신설 — GA4 dataLayer 후킹 매핑(view_item→product_view·add_to_cart→cart_add·purchase 등) + `window.hjl.ecommerce.*` 헬퍼 → `hjl.track` 위임 → 적재(/ingest 'track' 경로, 백엔드 0) + 인앱 트리거(T2 브리지) 자동. 웹+웹뷰앱 공용(platform 재사용). vitest 11 신규(sdk-js 전체 88)+tsc 0. SDK v0.3.5→**v0.3.6**(캐시 버스팅).
+> **Track B (서버 턴키+검증)**: 자체 호스팅 모달에 Python 스니펫 추가(Node·PHP·Python HMAC) + "최근 수신 확인"(GET `/api/cdp/custom/deliveries` — `cdp_webhook_deliveries` 기존 컬럼만, 신규 0). backend·frontend tsc 0.
+> **Track C (네이티브 REST 가이드)**: 순수 네이티브 앱 = 공개키로 `/api/cdp/ingest`·`/inapp/active` 직접 호출(secret 앱에 X, 회원/주문은 고객사 서버) + curl·Swift·Kotlin 예시. backend 0.
+> **검증**: sdk-js 88 vitest + tsc 0, backend tsc 0, frontend tsc 0 + grep(모델명·native dialog·박단어) 0. 설계 = `docs/superpowers/specs/2026-06-18-selfhosted-mall-app-collection-design.md`, 계획 = `plans/2026-06-18-selfhosted-mall-app-collection.md`.
+> **배포**: SDK v0.3.6 재빌드+서빙(public/sdk/v0.3.6 + dist/sdk/v0.3.6, 캐시 버스팅) + backend `pm2 restart all` + frontend `build:safe`. **퍼스트몰(가비아) 커넥터 = 서수란팀장 가비아 API 수령 후 별도**(빌드가이드 PDF엔 API 스펙 없음 — 운영자 매뉴얼).
+> 상세 [[project_2026_0618_selfhosted_mall_app_collection]].
+
+---
+
+### 🟢 2026-06-17~18 — SDK 강화: 자사몰 BYO 자격 연동 (카페24·네이버 BYO 폼 + 고도몰 커넥터, ★배포완료 2026-06-18)
 > **배경**: "자사몰(카페24·고도몰·네이버) 연동이 실제로 도냐"에서 출발. 조사 — 카페24 env 키 미설정(현재 dormant)·`cafe24ApiCall` 호출처 0(백필 없음)·토큰 갱신 0, 고도몰 전용 커넥터 없음(속빈 껍데기). 세일즈포스/브레이즈 = 공유앱+OAuth(출시·심사 전제). **Harold 결정 = 고객이 자기 self-app 키 직접 입력(BYO/model B), 우리 출시·심사 0.**
 > **구현(검증 tsc 0·verify pass·미배포)**: `provider-credentials.ts`(자격 resolver 5/5)·`provider-oauth-url.ts`(URL 빌더 11/11) 순수 신설 + `cafe24-client`·`naver-commerce-client` OAuth·갱신·apiCall 전부 `creds?`(회사별, 없으면 env) + `save/getByoCredentials`(meta 저장·resolver 조회) + `routes/cafe24`·`routes/naver-commerce` `POST /byo-credentials` + authorize/callback BYO 사용. 역호환(env 경로 보존, 신규 endpoint는 UI 전까지 미호출). 고도몰 스펙 PDF 확정·기록(`openhub.godo.co.kr`, partner_key+key body, XML, IP등록 — partner_key 약 3일 후).
 > **2026-06-18 진행**: ① 연동센터 UI 완료(`CdpSettingsPage` 카페24·네이버 모달에 BYO 안내 4단계 + Client ID/Secret 입력 폼 + 저장→authorize, 프론트 tsc 0·grep 0·미배포). 남음 ② 백필(Admin API raw 확인 후 — D217, 실키 대기) ③ 고도몰 커넥터 코드 완료(godo-parse 순수+TDD 21건·godo-client IO·routes/godo·연동센터 godo 키 폼·fast-xml-parser dep, backend/frontend tsc 0·grep 0). 남음 = ② 카페24·네이버 백필(D217 실키 raw 확인 후 — 키 대기). 고도몰 live = 서버 npm install + `GODO_PARTNER_KEY`(약 3일) + 서버 IP NHN 허용 등록(996) 후 실측. 배포 = 프론트 + 백엔드(df448eed + 고도몰) 함께. 설계·진행 = `docs/superpowers/specs/2026-06-17-byo-credentials-cdp-connectors-design.md` + `plans/2026-06-18-godo-connector.md`. 상세 [[project_2026_0617_byo_credentials_cdp_connectors]].
-> **배포(백엔드만, 역호환)**: `tp-push "..."` → 서버 backend `npm run build:safe` → `pm2 restart targetup-backend`.
+> **★ 2026-06-18 배포완료** (Harold): 카페24·네이버 BYO 폼 + 고도몰 커넥터 + web-push repo 정식 선언 라이브. 남은 = ② 카페24·네이버 백필(D217 실키 대기) · 고도몰 live(`GODO_PARTNER_KEY` 약 3일·서버 IP NHN 허용 등록·실측 1건). **다음 = 가비아·자체 자사몰 고도화 (진행 중).**
 
 ---
 

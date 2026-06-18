@@ -1502,6 +1502,34 @@ router.delete('/custom/revoke', async (req: Request, res: Response) => {
   }
 });
 
+// GET /api/cdp/custom/deliveries — 최근 webhook 수신 로그 (연결 검증 — CdpSettingsPage "최근 수신 확인")
+router.get('/custom/deliveries', async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+    const limit = Math.min(50, Math.max(1, parseInt(String(req.query.limit || '20'), 10) || 20));
+    const r = await query(
+      `SELECT webhook_event, status, error_message, created_at, processed_at
+       FROM cdp_webhook_deliveries
+       WHERE company_id = $1::uuid AND source = 'custom'
+       ORDER BY created_at DESC
+       LIMIT $2`,
+      [companyId, limit]
+    );
+    const deliveries = r.rows.map((row: any) => ({
+      event: row.webhook_event,
+      status: row.status,
+      errorMessage: row.error_message || null,
+      receivedAt: row.created_at ? new Date(row.created_at).toISOString() : null,
+      processedAt: row.processed_at ? new Date(row.processed_at).toISOString() : null,
+    }));
+    return res.json({ success: true, deliveries, total: deliveries.length });
+  } catch (err: any) {
+    console.error('[CDP /custom/deliveries] 오류:', err);
+    return res.status(500).json({ success: false, error: err?.message || '수신 로그 조회 실패' });
+  }
+});
+
 // POST /api/cdp/issue-key — public/secret key 발급 (raw secret 1회만 응답)
 router.post('/issue-key', async (req: Request, res: Response) => {
   try {

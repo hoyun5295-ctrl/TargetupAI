@@ -70,7 +70,7 @@ export class Transport {
       'Content-Type': 'application/json',
       'X-Hanjullo-Key': this.apiKey,
       'X-Hanjullo-Schema-Version': SCHEMA_VERSION,
-      'X-Hanjullo-SDK-Version': '0.3.5-a',
+      'X-Hanjullo-SDK-Version': '0.3.6-a',
     };
 
     for (let attempt = 0; attempt <= this.retries; attempt++) {

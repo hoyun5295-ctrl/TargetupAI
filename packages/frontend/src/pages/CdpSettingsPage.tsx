@@ -337,6 +337,8 @@ export default function CdpSettingsPage() {
   const [customIssuedSecret, setCustomIssuedSecret] = useState<CustomIssuedSecret | null>(null);
   const [customIssuing, setCustomIssuing] = useState(false);
   const [copyStatusCustom, setCopyStatusCustom] = useState<'idle' | 'secret' | 'url' | 'companyId'>('idle');
+  const [customDeliveries, setCustomDeliveries] = useState<Array<{ event: string; status: string; errorMessage: string | null; receivedAt: string | null }> | null>(null);
+  const [loadingDeliveries, setLoadingDeliveries] = useState(false);
 
   // UI 영역
   const [loading, setLoading] = useState(true);
@@ -723,6 +725,20 @@ export default function CdpSettingsPage() {
   };
 
   // 복사
+  // 자체 호스팅 — 최근 webhook 수신 로그 (연결 검증)
+  const handleLoadDeliveries = async () => {
+    setLoadingDeliveries(true);
+    try {
+      const res = await fetch('/api/cdp/custom/deliveries?limit=20', { headers: { Authorization: `Bearer ${token()}` } });
+      const data = await res.json();
+      if (data.success) {
+        setCustomDeliveries(data.deliveries || []);
+        if ((data.deliveries || []).length === 0) toast.info('아직 수신된 webhook이 없습니다. 자사몰에서 테스트 이벤트를 보내보세요.');
+      } else { toast.error(data.error || '수신 로그 조회 실패'); }
+    } catch (e: any) { toast.error(e?.message || '수신 로그 조회 오류'); }
+    finally { setLoadingDeliveries(false); }
+  };
+
   const copyText = async (text: string, label: string) => {
     try {
       await navigator.clipboard.writeText(text);
@@ -1299,7 +1315,13 @@ const signature = require('crypto')
 // PHP
 $body = json_encode(['event' => $event, 'resource' => $resource]);
 $signature = hash_hmac('sha256', $body, $webhook_secret);
-// $body를 그대로 전송하세요`}</pre>
+// $body를 그대로 전송하세요
+
+# Python
+import json, hmac, hashlib
+body = json.dumps({"event": event, "resource": resource})
+signature = hmac.new(WEBHOOK_SECRET.encode(), body.encode(), hashlib.sha256).hexdigest()
+# body 변수를 그대로 전송하세요`}</pre>
               </div>
               <div>
                 <div className="font-semibold text-white/90 mb-1">4. 응답 규칙</div>
@@ -1312,6 +1334,85 @@ $signature = hash_hmac('sha256', $body, $webhook_secret);
               </div>
             </div>
             <div className="text-[10px] text-white/30 italic mt-3">Data source — POST /api/cdp/webhook/custom 계약</div>
+          </div>
+        )}
+
+        {/* 연결 검증 — 최근 webhook 수신 확인 */}
+        {webhookProviderOpen && customInfo?.hasSecret && (
+          <div className="bg-white/5 border border-white/10 rounded-xl p-6">
+            <div className="flex items-center justify-between gap-2 mb-3">
+              <div className="flex items-center gap-2">
+                <Activity className="w-5 h-5 text-emerald-300" />
+                <h2 className="text-base font-bold text-white">연결 검증 — 최근 수신</h2>
+              </div>
+              <button onClick={handleLoadDeliveries} disabled={loadingDeliveries} className="px-3.5 py-2 rounded-lg bg-emerald-500/20 border border-emerald-400/30 hover:bg-emerald-500/30 text-emerald-100 text-[12px] font-medium disabled:opacity-40 flex items-center gap-1.5">
+                {loadingDeliveries ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />} 최근 수신 확인
+              </button>
+            </div>
+            <div className="text-xs text-white/50 mb-3">자사몰에서 webhook을 보낸 뒤 눌러 도착·처리 결과를 확인하세요.</div>
+            {customDeliveries === null ? (
+              <div className="text-xs text-white/40">"최근 수신 확인"을 눌러 도착한 이벤트를 조회합니다.</div>
+            ) : customDeliveries.length === 0 ? (
+              <div className="text-xs text-amber-200/80 bg-amber-500/10 border border-amber-400/30 rounded p-3">아직 수신된 webhook이 없습니다. 자사몰 서버에서 테스트 이벤트를 보내보세요 (401이면 secret·서명 문자열 점검).</div>
+            ) : (
+              <div className="space-y-1.5">
+                {customDeliveries.map((d, i) => (
+                  <div key={i} className="flex items-center gap-2 text-xs bg-slate-950 border border-white/10 rounded-lg px-3 py-2">
+                    <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${d.status === 'processed' ? 'bg-emerald-500/20 text-emerald-300' : d.status === 'duplicate' ? 'bg-white/10 text-white/50' : d.status === 'failed' ? 'bg-rose-500/20 text-rose-300' : 'bg-amber-500/20 text-amber-300'}`}>{d.status}</span>
+                    <span className="font-mono text-white/80">{d.event}</span>
+                    <span className="ml-auto text-white/40">{d.receivedAt ? new Date(d.receivedAt).toLocaleString('ko-KR') : '-'}</span>
+                  </div>
+                ))}
+                {customDeliveries.some((d) => d.errorMessage) && (
+                  <div className="text-[10px] text-rose-300/80 mt-1">failed 항목은 처리 오류 — 이벤트·resource 필드 점검</div>
+                )}
+              </div>
+            )}
+            <div className="text-[10px] text-white/30 italic mt-3">Data source — GET /api/cdp/custom/deliveries</div>
+          </div>
+        )}
+
+        {/* 네이티브 앱(REST 직접 호출) 안내 */}
+        {webhookProviderOpen && customInfo?.hasSecret && (
+          <div className="bg-white/5 border border-white/10 rounded-xl p-6">
+            <div className="flex items-center gap-2 mb-3">
+              <Code2 className="w-5 h-5 text-cyan-300" />
+              <h2 className="text-base font-bold text-white">네이티브 앱 (REST 직접 호출)</h2>
+            </div>
+            <div className="text-xs text-white/60 leading-relaxed mb-3">
+              웹뷰가 아닌 순수 네이티브 앱(iOS/Android)은 공개키(<span className="font-mono">hjl_</span>)로 이벤트·인앱을 직접 호출합니다. <strong className="text-white/90">secret(<span className="font-mono">sk_</span>)은 앱에 넣지 마세요</strong> — 회원/주문 적재는 고객사 서버에서 호출합니다(브라우저와 동일 원칙).
+            </div>
+            <div className="space-y-3 text-xs text-white/70">
+              <div>
+                <div className="font-semibold text-white/90 mb-1">이벤트 수집 (공개키)</div>
+                <pre className="bg-slate-950 border border-white/10 rounded-xl p-3 text-[11px] text-cyan-200 overflow-x-auto whitespace-pre">{`curl -X POST https://app.hanjul.ai/api/cdp/ingest \\
+  -H "Content-Type: application/json" -H "X-Hanjullo-Key: hjl_..." \\
+  -d '{"schema_version":"v1","anonymous_id":"DEVICE_UUID","events":[
+        {"type":"track","event":"cart_add","properties":{"product_id":"P1","price":19000}}]}'`}</pre>
+              </div>
+              <div>
+                <div className="font-semibold text-white/90 mb-1">인앱 메시지 조회 (공개키, 앱 채널)</div>
+                <pre className="bg-slate-950 border border-white/10 rounded-xl p-3 text-[11px] text-cyan-200 overflow-x-auto whitespace-pre">{`GET https://app.hanjul.ai/api/cdp/inapp/active?channel=app&anonymous_id=DEVICE_UUID
+Header: X-Hanjullo-Key: hjl_...`}</pre>
+              </div>
+              <div>
+                <div className="font-semibold text-white/90 mb-1">Swift / Kotlin</div>
+                <pre className="bg-slate-950 border border-white/10 rounded-xl p-3 text-[11px] text-cyan-200 overflow-x-auto whitespace-pre">{`// Swift (URLSession)
+var req = URLRequest(url: URL(string: "https://app.hanjul.ai/api/cdp/ingest")!)
+req.httpMethod = "POST"
+req.setValue("hjl_...", forHTTPHeaderField: "X-Hanjullo-Key")
+req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+req.httpBody = bodyData   // {"schema_version":"v1","anonymous_id":..,"events":[..]}
+URLSession.shared.dataTask(with: req).resume()
+
+// Kotlin (OkHttp)
+val req = Request.Builder().url("https://app.hanjul.ai/api/cdp/ingest")
+  .addHeader("X-Hanjullo-Key", "hjl_...")
+  .post(bodyJson.toRequestBody("application/json".toMediaType())).build()
+client.newCall(req).execute()`}</pre>
+              </div>
+            </div>
+            <div className="text-[10px] text-white/30 italic mt-3">Data source — /api/cdp/ingest · /api/cdp/inapp/active (공개키)</div>
           </div>
         )}
 
@@ -1673,7 +1774,7 @@ $signature = hash_hmac('sha256', $body, $webhook_secret);
           </div>
         )}
 
-        {/* 12-1. SDK 설치 스크립트 스니펫 (public key 자동 주입 — v0.3.5-b) */}
+        {/* 12-1. SDK 설치 스크립트 스니펫 (public key 자동 주입 — v0.3.6) */}
         {webhookProviderOpen && usage?.public_key && (
           <div className="bg-white/5 border border-white/10 rounded-2xl p-6">
             <div className="flex items-center gap-2 mb-3">
@@ -1682,12 +1783,12 @@ $signature = hash_hmac('sha256', $body, $webhook_secret);
               </div>
               <div>
                 <h2 className="text-base font-bold text-white">SDK 설치 스크립트</h2>
-                <div className="text-xs text-white/50">자사몰 &lt;head&gt;에 붙여넣으면 고객 행동 수집이 시작됩니다.</div>
+                <div className="text-xs text-white/50">자사몰 &lt;head&gt;에 붙여넣으면 고객 행동 수집이 시작됩니다. (페이지뷰·클릭 + GA4 dataLayer 이커머스 자동 수집)</div>
               </div>
             </div>
             {(() => {
-              const snippet = `<script src="https://app.hanjul.ai/sdk/v0.3.5/hanjul.min.js" data-hjl-key="${usage.public_key}" async></script>`;
-              const appSnippet = `<script src="https://app.hanjul.ai/sdk/v0.3.5/hanjul.min.js" data-hjl-key="${usage.public_key}" data-hjl-platform="app" async></script>`;
+              const snippet = `<script src="https://app.hanjul.ai/sdk/v0.3.6/hanjul.min.js" data-hjl-key="${usage.public_key}" async></script>`;
+              const appSnippet = `<script src="https://app.hanjul.ai/sdk/v0.3.6/hanjul.min.js" data-hjl-key="${usage.public_key}" data-hjl-platform="app" async></script>`;
               return (
                 <>
                   <div className="text-xs font-medium text-white/70 mb-1.5">웹 자사몰 — &lt;head&gt;에 붙여넣기</div>
@@ -1709,11 +1810,11 @@ $signature = hash_hmac('sha256', $body, $webhook_secret);
                 </>
               );
             })()}
-            <div className="text-[10px] text-white/30 italic mt-2">Data source — app.hanjul.ai/sdk/v0.3.5</div>
+            <div className="text-[10px] text-white/30 italic mt-2">Data source — app.hanjul.ai/sdk/v0.3.6</div>
           </div>
         )}
 
-        {/* 12-2. 설치 검증 — 첫 이벤트 진단 (v0.3.5-b, 서버 관측 신호) */}
+        {/* 12-2. 설치 검증 — 첫 이벤트 진단 (v0.3.6, 서버 관측 신호) */}
         {webhookProviderOpen && usage?.public_key && installStatus && (() => {
           const issued = installStatus.keyIssuedAt ? new Date(installStatus.keyIssuedAt).getTime() : null;
           const mins = issued ? Math.floor((Date.now() - issued) / 60000) : 0;

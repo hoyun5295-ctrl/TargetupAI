@@ -1,7 +1,7 @@
 /**
- * @hanjullo/sdk v0.3.5-a — Auto-Capture IIFE 진입점
+ * @hanjullo/sdk v0.3.6-a — Auto-Capture IIFE 진입점
  *
- * 설치: <script src="https://app.hanjul.ai/sdk/v0.3.5/hanjul.min.js" data-hjl-key="hjl_..." async></script>
+ * 설치: <script src="https://app.hanjul.ai/sdk/v0.3.6/hanjul.min.js" data-hjl-key="hjl_..." async></script>
  * 유료 요금제 이용 가능 (백엔드 검증 — 무료 플랜만 차단).
  *
  * 매뉴얼: https://hanjul.ai/docs/sdk/v0.3.5
@@ -17,6 +17,7 @@ import { Heartbeat } from './heartbeat';
 import { Transport } from './transport';
 import { getAnonymousId } from './storage';
 import { readCartEstimate, updateCartEstimate } from './cart-estimate';
+import { setupEcommerceTracking, type EcommerceHelpers } from './ecommerce';
 import { HanjulloInAppModule } from '../inapp';
 
 export interface AutoCaptureConfig {
@@ -36,6 +37,8 @@ interface HjlGlobal {
   identify: (externalId: string, traits?: Record<string, unknown>) => void;
   /** 인앱 메시지 모듈 — init() 시 자동 기동. 고급 사용(수동 trigger 등)용 공개 API */
   inapp: HanjulloInAppModule | null;
+  /** ★ 2026-06-18 — 이커머스 명시 헬퍼(window.hjl.ecommerce.addToCart 등). init() 시 GA4 dataLayer 자동수집 동반 */
+  ecommerce: EcommerceHelpers | null;
   _config: AutoCaptureConfig | null;
   _version: string;
   _heartbeat: Heartbeat | null;
@@ -44,7 +47,7 @@ interface HjlGlobal {
 
 const INAPP_BRIDGE_SET = new Set<string>(INAPP_BRIDGE_EVENT_NAMES);
 
-const VERSION = '0.3.5-a';
+const VERSION = '0.3.6-a';
 
 function createHjlGlobal(): HjlGlobal {
   let firstEventSent = false;
@@ -150,6 +153,10 @@ function createHjlGlobal(): HjlGlobal {
           trust_level: 'observed',
         });
       });
+
+      // ★ 2026-06-18 — 이커머스 자동수집(GA4 dataLayer) + 명시 헬퍼. hjl.track 위임 → 적재 + 인앱 트리거(T2 브리지) 자동
+      const eco = setupEcommerceTracking((eventName, properties) => hjl.track(eventName, properties));
+      hjl.ecommerce = eco.ecommerce;
     },
 
     track(eventName: string, properties?: Record<string, unknown>) {
@@ -196,6 +203,7 @@ function createHjlGlobal(): HjlGlobal {
     },
 
     inapp: null,
+    ecommerce: null,
     _config: null,
     _version: VERSION,
     _heartbeat: null,
