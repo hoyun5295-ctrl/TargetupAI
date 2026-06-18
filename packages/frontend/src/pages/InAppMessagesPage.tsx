@@ -7,6 +7,7 @@ import {
   TrendingUp, Upload, UserPlus, Users, Wand2, X,
 } from 'lucide-react';
 import ConfirmModal, { ConfirmState } from '../components/ConfirmModal';
+import { InAppMessagePreview } from '../components/InAppMessagePreview';
 import CreditConfirmModal from '../components/credit/CreditConfirmModal';
 import { useToast } from '../components/ToastProvider';
 
@@ -1132,11 +1133,19 @@ function EditModal({ editing, setEditing, availableVariables, onSave, fileInputR
 
   return (
     <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50" onClick={() => setEditing(null)}>
-      <div className="bg-violet-900/40 border border-white/10 rounded-2xl shadow-2xl w-full max-w-5xl max-h-[95vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+      <div className="bg-gradient-to-br from-slate-900 via-violet-950 to-slate-900 border border-white/10 rounded-2xl shadow-2xl w-full max-w-5xl max-h-[95vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
         {/* 헤더 */}
-        <div className="sticky top-0 bg-violet-900/40 border-b border-white/10 px-6 py-4 flex items-center justify-between">
-          <h3 className="text-lg font-bold text-white">{editing.id ? '메시지 수정' : '신규 메시지'}</h3>
-          <button onClick={() => setEditing(null)} className="text-white/50 hover:text-white p-1.5 rounded hover:bg-white/10">
+        <div className="sticky top-0 z-10 bg-slate-900/80 backdrop-blur-sm border-b border-white/10 px-6 py-4 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-violet-500 to-fuchsia-500 flex items-center justify-center shadow-lg shadow-violet-500/25">
+              <Layers className="w-5 h-5 text-white" />
+            </div>
+            <div>
+              <h3 className="text-lg font-bold text-white leading-tight">{editing.id ? '메시지 수정' : '신규 메시지'}</h3>
+              <p className="text-[11px] text-white/50">자사몰에 뜨는 인앱 — 실시간 미리보기로 확인하며 편집</p>
+            </div>
+          </div>
+          <button onClick={() => setEditing(null)} className="text-white/50 hover:text-white p-1.5 rounded-lg hover:bg-white/10 transition-colors">
             <X className="w-5 h-5" />
           </button>
         </div>
@@ -1544,7 +1553,7 @@ function EditModal({ editing, setEditing, availableVariables, onSave, fileInputR
           </div>
 
           {/* 우측 — 실시간 미리보기 (영역 10) */}
-          <div className="bg-violet-900/50 p-6 space-y-3 sticky top-[60px] h-fit max-h-[80vh] overflow-y-auto">
+          <div className="bg-slate-950/40 p-6 space-y-3 sticky top-[76px] h-fit max-h-[80vh] overflow-y-auto">
             <h4 className="text-xs font-bold text-white/80 mb-1 flex items-center gap-1.5">
               <Eye className="w-3 h-3" /> 10. 실시간 미리보기
             </h4>
@@ -1573,35 +1582,15 @@ function EditModal({ editing, setEditing, availableVariables, onSave, fileInputR
               샘플: {sampleCustomer.name} · {sampleCustomer.grade} · {sampleCustomer.points?.toLocaleString()}P
             </div>
 
-            <div
-              className="rounded-lg p-3 mt-3"
-              style={{ background: editing.background_color || '#4f46e5', color: editing.text_color || '#ffffff' }}
-            >
-              {editing.image_url && (
-                <img src={editing.image_url} alt="" className="w-full h-24 object-cover rounded mb-2" />
-              )}
-              <div className="font-bold text-sm mb-1">{renderedTitle || '제목 미리보기'}</div>
-              <div className="text-xs opacity-90 whitespace-pre-wrap line-clamp-6">{renderedBody || '본문 미리보기'}</div>
-              {(editing.buttons || []).length > 0 && (
-                <div className="mt-2 flex flex-wrap gap-1.5">
-                  {(editing.buttons || []).slice(0, 3).map((btn, idx) => (
-                    <button
-                      key={idx}
-                      type="button"
-                      className="px-3 py-1 rounded text-[11px] font-medium"
-                      style={{
-                        background: btn.style === 'tertiary' ? 'transparent' : 'rgba(255,255,255,0.2)',
-                        border: btn.style === 'tertiary' ? '1px solid rgba(255,255,255,0.3)' : 'none',
-                        color: 'inherit',
-                      }}
-                    >
-                      {replaceVars(btn.label, sampleCustomer)}
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-            <div className="text-[10px] text-white/30 italic">Template: {TEMPLATE_LABELS[(editing.template || 'top_banner') as Template]}</div>
+            <InAppMessagePreview
+              template={(editing.template || 'top_banner') as string}
+              title={renderedTitle}
+              body={renderedBody}
+              imageUrl={editing.image_url}
+              buttons={(editing.buttons || []).map((b) => ({ ...b, label: replaceVars(b.label, sampleCustomer) }))}
+              backgroundColor={editing.background_color || '#4f46e5'}
+              textColor={editing.text_color || '#ffffff'}
+            />
           </div>
         </div>
 

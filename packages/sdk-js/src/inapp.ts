@@ -505,15 +505,16 @@ export class HanjulloInAppModule {
       [template === 'top_banner' ? 'top' : 'bottom']: '0',
       left: '0',
       right: '0',
-      padding: '12px 16px',
+      padding: '14px 20px',
       display: 'flex',
       alignItems: 'center',
-      gap: '12px',
+      gap: '14px',
       background: msg.backgroundColor,
       color: msg.textColor,
-      boxShadow: template === 'top_banner' ? '0 2px 8px rgba(0,0,0,0.1)' : '0 -2px 8px rgba(0,0,0,0.1)',
+      boxShadow: template === 'top_banner' ? '0 6px 24px rgba(0,0,0,0.16)' : '0 -6px 24px rgba(0,0,0,0.16)',
       zIndex: '2147483647',
-      fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+      fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif',
+      boxSizing: 'border-box',
     });
     this.applyAnimation(root, animation, template);
 
@@ -539,33 +540,52 @@ export class HanjulloInAppModule {
     Object.assign(backdrop.style, {
       position: 'fixed',
       inset: '0',
-      background: 'rgba(0,0,0,0.5)',
+      background: 'rgba(15,15,20,0.55)',
+      backdropFilter: 'blur(4px)',
       zIndex: '2147483646',
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'center',
       padding: '16px',
     });
+    (backdrop.style as any).webkitBackdropFilter = 'blur(4px)';
 
     const root = document.createElement('div');
     root.setAttribute('data-hanjullo-msg', msg.id);
     Object.assign(root.style, {
-      maxWidth: '420px',
+      maxWidth: '400px',
       width: '100%',
       background: msg.backgroundColor,
       color: msg.textColor,
-      borderRadius: '12px',
-      padding: '24px',
-      boxShadow: '0 20px 50px rgba(0,0,0,0.3)',
+      borderRadius: '22px',
+      overflow: 'hidden',
+      boxShadow: '0 30px 80px rgba(0,0,0,0.45)',
+      position: 'relative',
       zIndex: '2147483647',
-      fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+      fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif',
+      boxSizing: 'border-box',
     });
     this.applyAnimation(root, animation, 'modal');
 
-    if (imageUrl) this.appendImage(root, imageUrl, 0, '100%', '180px');
-    this.appendTextBlock(root, title, body, 'modal');
-    this.appendButtons(root, msg, buttons, input);
-    this.appendCloseButton(root, msg, input, () => document.body.removeChild(backdrop));
+    // 이미지 = 모달 상단 full-bleed (좌우 여백 없이 꽉 채움)
+    if (imageUrl) {
+      const hero = document.createElement('img');
+      hero.src = this.toAbsoluteImageUrl(imageUrl);
+      hero.alt = '';
+      hero.loading = 'lazy';
+      hero.referrerPolicy = 'no-referrer';
+      Object.assign(hero.style, { width: '100%', height: '190px', objectFit: 'cover', display: 'block' });
+      hero.onerror = () => { hero.style.display = 'none'; };
+      root.appendChild(hero);
+    }
+    // 콘텐츠 영역 (제목·본문·CTA) — 이미지와 분리된 패딩 블록
+    const content = document.createElement('div');
+    content.style.padding = '26px';
+    this.appendTextBlock(content, title, body, 'modal');
+    this.appendButtons(content, msg, buttons, input, 'stack');
+    root.appendChild(content);
+    // 닫기 = 우상단 (이미지 위에도 보이게)
+    this.appendCloseButton(root, msg, input, () => document.body.removeChild(backdrop), 'absolute-top-right');
 
     backdrop.appendChild(root);
     document.body.appendChild(backdrop);
@@ -622,14 +642,15 @@ export class HanjulloInAppModule {
       position: 'fixed',
       right: '20px',
       bottom: '20px',
-      maxWidth: '320px',
+      maxWidth: '340px',
       background: msg.backgroundColor,
       color: msg.textColor,
-      borderRadius: '12px',
-      padding: '16px',
-      boxShadow: '0 10px 30px rgba(0,0,0,0.25)',
+      borderRadius: '18px',
+      padding: '20px',
+      boxShadow: '0 16px 40px rgba(0,0,0,0.28)',
       zIndex: '2147483647',
-      fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+      fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif',
+      boxSizing: 'border-box',
     });
     this.applyAnimation(root, animation, 'slide-right');
 
@@ -662,11 +683,12 @@ export class HanjulloInAppModule {
     Object.assign(root.style, {
       background: msg.backgroundColor,
       color: msg.textColor,
-      borderRadius: '12px',
-      padding: '20px',
+      borderRadius: '16px',
+      padding: '22px',
       margin: '16px 0',
-      boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
-      fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+      boxShadow: '0 6px 20px rgba(0,0,0,0.12)',
+      fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif',
+      boxSizing: 'border-box',
     });
 
     if (imageUrl) this.appendImage(root, imageUrl, 0, '100%', '160px');
@@ -763,44 +785,71 @@ export class HanjulloInAppModule {
   // 공통 헬퍼 — 이미지 / 텍스트 / 버튼 / 닫기 / 애니메이션 / 자동 닫힘
   // ════════════════════════════════════════════════════════════════
 
+  /** 상대경로 이미지(/uploads/...)를 SDK endpoint 도메인 기준 절대 URL로 — 자사몰 도메인 404 방지 */
+  private toAbsoluteImageUrl(url: string): string {
+    if (!url || /^(https?:)?\/\//i.test(url) || url.startsWith('data:')) return url;
+    try {
+      const origin = new URL(this.endpoint).origin;
+      return url.startsWith('/') ? origin + url : origin + '/' + url;
+    } catch {
+      return url;
+    }
+  }
+
   private appendImage(parent: HTMLElement, imageUrl: string, sizePx: number, width?: string, height?: string): void {
     const img = document.createElement('img');
-    img.src = imageUrl;
+    img.src = this.toAbsoluteImageUrl(imageUrl);
     img.loading = 'lazy';
     img.alt = '';
+    img.referrerPolicy = 'no-referrer';
     if (sizePx > 0) {
       img.style.width = `${sizePx}px`;
       img.style.height = `${sizePx}px`;
       img.style.objectFit = 'cover';
-      img.style.borderRadius = '8px';
+      img.style.borderRadius = '12px';
       img.style.flexShrink = '0';
     } else {
       img.style.width = width || '100%';
-      img.style.height = height || 'auto';
+      img.style.height = height || '160px';
       img.style.objectFit = 'cover';
-      img.style.borderRadius = '8px';
-      img.style.marginBottom = '12px';
+      img.style.borderRadius = '14px';
+      img.style.marginBottom = '14px';
+      img.style.boxShadow = '0 4px 16px rgba(0,0,0,0.12)';
     }
+    // 깨진/누락 이미지 = 영역 자체 숨김 (깨진 아이콘·빈 박스 방지)
+    img.onerror = () => { img.style.display = 'none'; };
     parent.appendChild(img);
   }
 
   private appendTextBlock(parent: HTMLElement, title: string, body: string, variant: 'banner' | 'modal' | 'full' | 'slide' | 'inline'): void {
+    // variant별 본문 최대 줄 수 — 장문이 들어와도 레이아웃이 무너지지 않게 말줄임 (full만 무제한)
+    const clampMap: Record<string, number> = { banner: 2, slide: 3, inline: 4, modal: 4, full: 0 };
+    const clamp = clampMap[variant] ?? 3;
+
     const text = document.createElement('div');
     text.style.flex = variant === 'banner' ? '1' : 'initial';
     text.style.minWidth = '0';
-    text.style.marginBottom = variant === 'banner' ? '0' : '16px';
+    text.style.marginBottom = variant === 'banner' ? '0' : '18px';
 
     const titleEl = document.createElement('div');
     titleEl.style.fontWeight = '700';
-    titleEl.style.fontSize = variant === 'full' ? '20px' : '15px';
-    titleEl.style.marginBottom = '4px';
+    titleEl.style.fontSize = variant === 'full' ? '22px' : variant === 'banner' ? '15px' : '17px';
+    titleEl.style.letterSpacing = '-0.01em';
+    titleEl.style.marginBottom = '6px';
+    titleEl.style.lineHeight = '1.35';
     titleEl.textContent = title;
 
     const bodyEl = document.createElement('div');
-    bodyEl.style.fontSize = variant === 'full' ? '15px' : '13px';
-    bodyEl.style.opacity = '0.9';
+    bodyEl.style.fontSize = variant === 'full' ? '15px' : '13.5px';
+    bodyEl.style.opacity = '0.82';
     bodyEl.style.whiteSpace = 'pre-wrap';
-    bodyEl.style.lineHeight = '1.5';
+    bodyEl.style.lineHeight = '1.55';
+    if (clamp > 0) {
+      bodyEl.style.display = '-webkit-box';
+      (bodyEl.style as any).webkitLineClamp = String(clamp);
+      (bodyEl.style as any).webkitBoxOrient = 'vertical';
+      bodyEl.style.overflow = 'hidden';
+    }
     bodyEl.textContent = body;
 
     text.appendChild(titleEl);
@@ -808,13 +857,15 @@ export class HanjulloInAppModule {
     parent.appendChild(text);
   }
 
-  private appendButtons(parent: HTMLElement, msg: InAppMessageSdk, buttons: InAppButton[], input: InAppInitInput): void {
+  private appendButtons(parent: HTMLElement, msg: InAppMessageSdk, buttons: InAppButton[], input: InAppInitInput, layout: 'inline' | 'stack' = 'inline'): void {
     if (!buttons || buttons.length === 0) return;
 
     const isInlineButton = parent.style.display === 'flex' && parent.style.flexDirection !== 'column';
+    const stack = layout === 'stack';
     const wrapper = document.createElement('div');
     Object.assign(wrapper.style, {
       display: 'flex',
+      flexDirection: stack ? 'column' : 'row',
       gap: '8px',
       marginTop: isInlineButton ? '0' : '12px',
       flexWrap: 'wrap',
@@ -823,17 +874,34 @@ export class HanjulloInAppModule {
     buttons.slice(0, 3).forEach((btn) => {
       const btnEl = document.createElement('button');
       btnEl.textContent = this.replaceVariables(btn.label, input.customer || {});
+      const isPrimary = btn.style === 'primary';
+      const isTertiary = btn.style === 'tertiary';
       Object.assign(btnEl.style, {
-        background: btn.background_color || 'rgba(255,255,255,0.2)',
+        background: btn.background_color || (isPrimary ? '#4f46e5' : 'rgba(255,255,255,0.16)'),
         color: btn.text_color || msg.textColor,
-        border: btn.style === 'tertiary' ? '1px solid rgba(255,255,255,0.3)' : 'none',
-        padding: '8px 16px',
-        borderRadius: '8px',
-        fontSize: '13px',
-        fontWeight: btn.style === 'primary' ? '600' : '500',
+        border: isTertiary ? '1px solid rgba(255,255,255,0.35)' : 'none',
+        padding: '10px 20px',
+        borderRadius: '10px',
+        fontSize: '13.5px',
+        fontWeight: isPrimary ? '700' : '600',
+        letterSpacing: '-0.01em',
         cursor: 'pointer',
         whiteSpace: 'nowrap',
-        opacity: btn.style === 'tertiary' ? '0.85' : '1',
+        opacity: isTertiary ? '0.9' : '1',
+        width: stack ? '100%' : 'auto',
+        textAlign: 'center',
+        boxShadow: isPrimary ? '0 4px 14px rgba(0,0,0,0.18)' : 'none',
+        transition: 'transform 0.15s ease, box-shadow 0.15s ease, opacity 0.15s ease',
+      });
+      btnEl.addEventListener('mouseenter', () => {
+        btnEl.style.transform = 'translateY(-1px)';
+        if (isPrimary) btnEl.style.boxShadow = '0 6px 20px rgba(0,0,0,0.26)';
+        else btnEl.style.opacity = '1';
+      });
+      btnEl.addEventListener('mouseleave', () => {
+        btnEl.style.transform = 'none';
+        if (isPrimary) btnEl.style.boxShadow = '0 4px 14px rgba(0,0,0,0.18)';
+        else btnEl.style.opacity = isTertiary ? '0.9' : '1';
       });
       btnEl.addEventListener('click', () => {
         this.track(msg.id, 'click', input, btn.id);
@@ -857,13 +925,21 @@ export class HanjulloInAppModule {
     close.setAttribute('aria-label', '닫기');
 
     const baseStyle: Record<string, string> = {
-      background: 'transparent',
+      background: 'rgba(127,127,127,0.14)',
       border: 'none',
       color: 'inherit',
-      fontSize: '16px',
+      fontSize: '13px',
+      lineHeight: '1',
       cursor: 'pointer',
-      padding: '4px 8px',
-      opacity: '0.7',
+      width: '28px',
+      height: '28px',
+      borderRadius: '50%',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      flexShrink: '0',
+      opacity: '0.6',
+      transition: 'opacity 0.15s ease, background 0.15s ease',
     };
 
     if (layout === 'absolute-top-right') {
@@ -876,6 +952,14 @@ export class HanjulloInAppModule {
     }
 
     Object.assign(close.style, baseStyle);
+    close.addEventListener('mouseenter', () => {
+      close.style.opacity = '1';
+      close.style.background = 'rgba(127,127,127,0.26)';
+    });
+    close.addEventListener('mouseleave', () => {
+      close.style.opacity = '0.6';
+      close.style.background = 'rgba(127,127,127,0.14)';
+    });
     close.addEventListener('click', () => {
       this.track(msg.id, 'dismiss', input);
       try { onClose(); } catch {}

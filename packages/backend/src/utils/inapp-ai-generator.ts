@@ -136,7 +136,7 @@ interface QuickStartSeed {
 const QUICK_START_SEEDS: Record<QuickStartScenario, QuickStartSeed> = {
   cart_recovery: {
     objective: '장바구니에 상품을 24시간 이상 두고 결제하지 않은 회원에게 부드러운 회복 안내',
-    defaultTemplate: 'bottom_banner',
+    defaultTemplate: 'slide_in',
     defaultTrigger: 'cart_view',
   },
   new_welcome: {
@@ -151,7 +151,7 @@ const QUICK_START_SEEDS: Record<QuickStartScenario, QuickStartSeed> = {
   },
   new_product: {
     objective: '신상품 출시 첫 주 동안 전체 회원에게 부드러운 알림',
-    defaultTemplate: 'top_banner',
+    defaultTemplate: 'center_modal',
     defaultTrigger: 'page_load',
   },
   vip_appreciation: {
@@ -161,7 +161,7 @@ const QUICK_START_SEEDS: Record<QuickStartScenario, QuickStartSeed> = {
   },
   checkout_abandon: {
     objective: '결제 페이지에서 30초 이상 머무르며 결제 X 회원에게 부드러운 진행 안내',
-    defaultTemplate: 'bottom_banner',
+    defaultTemplate: 'center_modal',
     defaultTrigger: 'time_on_page',
   },
   repeat_purchase: {
@@ -180,12 +180,12 @@ export interface QuickStartCardInfo {
 
 export function listQuickStartCards(): QuickStartCardInfo[] {
   return [
-    { scenario: 'cart_recovery',     label: '장바구니 회복',     hint: '24h 이상 결제 X 회원 부드러운 안내', defaultTemplate: 'bottom_banner' },
+    { scenario: 'cart_recovery',     label: '장바구니 회복',     hint: '24h 이상 결제 X 회원 부드러운 안내', defaultTemplate: 'slide_in' },
     { scenario: 'new_welcome',       label: '신규 가입 환영',    hint: '첫 방문 환영 + 자사몰 안내',         defaultTemplate: 'center_modal' },
     { scenario: 'dormant_recovery',  label: '휴면 회수',         hint: '60일+ 미접속 안부 인사',              defaultTemplate: 'center_modal' },
-    { scenario: 'new_product',       label: '신상품 출시',       hint: '첫 주 전체 회원 알림',                defaultTemplate: 'top_banner' },
+    { scenario: 'new_product',       label: '신상품 출시',       hint: '첫 주 전체 회원 알림',                defaultTemplate: 'center_modal' },
     { scenario: 'vip_appreciation',  label: 'VIP 감사',          hint: 'VIP 등급 진심 감사 인사',             defaultTemplate: 'slide_in' },
-    { scenario: 'checkout_abandon',  label: '결제 이탈 방지',    hint: '결제 페이지 30초+ 머무름 안내',       defaultTemplate: 'bottom_banner' },
+    { scenario: 'checkout_abandon',  label: '결제 이탈 방지',    hint: '결제 페이지 30초+ 머무름 안내',       defaultTemplate: 'center_modal' },
     { scenario: 'repeat_purchase',   label: '재구매 유도',       hint: '직전 구매 14일 후 회복',              defaultTemplate: 'center_modal' },
   ];
 }
@@ -281,7 +281,7 @@ export async function generateInAppMessagePackage(
 
   // templateHint 우선 — 빠른 시작 SEED 사용
   let effectiveObjective = input.objective || '';
-  let suggestedTemplate: InAppTemplate = 'top_banner';
+  let suggestedTemplate: InAppTemplate = 'center_modal';
   let suggestedTrigger: TriggerConditions['event'] = 'page_load';
 
   if (input.templateHint && QUICK_START_SEEDS[input.templateHint]) {
@@ -494,7 +494,7 @@ buttons 배열 (최대 3개):
     title: String(parsed.title || '').slice(0, 100),
     body: String(parsed.body || ''),
     template: validateTemplate(parsed.template) || suggestedTemplate,
-    image_url: parsed.image_url || null,
+    image_url: null, // AI 이미지 환각 차단 — 존재하지 않는 URL 생성 방지(D152 AI 창작 금지 정합). 이미지는 회사 admin 직접 업로드만.
     buttons: Array.isArray(parsed.buttons) ? parsed.buttons.slice(0, 3).map((b: any, idx: number) => ({
       id: String(b.id || `btn_${idx}`),
       label: String(b.label || '').slice(0, 30),
