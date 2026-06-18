@@ -46,6 +46,7 @@ interface MessageRow {
   template?: Template;
   position?: Template;
   image_url?: string | null;
+  badge_text?: string | null;
   buttons?: InAppButton[];
   background_color?: string;
   text_color?: string;
@@ -347,6 +348,7 @@ export default function InAppMessagesPage() {
         body: pkg.message.body,
         template: pkg.message.template,
         image_url: pkg.message.image_url,
+        badge_text: pkg.message.badge_text,
         buttons: pkg.message.buttons || [],
         background_color: pkg.message.background_color,
         text_color: pkg.message.text_color,
@@ -1063,7 +1065,7 @@ function EditModal({ editing, setEditing, availableVariables, onSave, fileInputR
   const [segmentCount, setSegmentCount] = useState<number | null>(null);
   const [segmentDesc, setSegmentDesc] = useState<string>('');
   const [previewCustomer, setPreviewCustomer] = useState<'VIP' | '일반' | '신규'>('일반');
-  const [showAdvanced, setShowAdvanced] = useState(false);
+  const [activeTab, setActiveTab] = useState<'content' | 'design' | 'target'>('content');
 
   const token = () => localStorage.getItem('token');
   const authHeaders = () => ({ Authorization: `Bearer ${token()}`, 'Content-Type': 'application/json' });
@@ -1175,9 +1177,20 @@ function EditModal({ editing, setEditing, availableVariables, onSave, fileInputR
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-[1fr,400px] gap-0">
-          {/* 좌측 — 편집 영역 10개 */}
+          {/* 좌측 — 3탭 (내용 / 디자인 / 타겟·시점) */}
           <div className="p-6 space-y-5 border-r border-white/5">
-            {hasPlaceholder && (
+            <div className="flex gap-1.5">
+              {([['content', '내용', Edit2], ['design', '디자인', Wand2], ['target', '타겟·시점', Target]] as const).map(([key, label, Icon]) => (
+                <button
+                  key={key}
+                  onClick={() => setActiveTab(key)}
+                  className={`flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold rounded-lg transition-colors ${activeTab === key ? 'bg-violet-500/30 border border-violet-400/50 text-white' : 'bg-white/5 border border-white/10 text-white/50 hover:text-white/80'}`}
+                >
+                  <Icon className="w-3.5 h-3.5" /> {label}
+                </button>
+              ))}
+            </div>
+            {hasPlaceholder && activeTab === 'content' && (
               <div className="bg-amber-500/10 border border-amber-400/30 rounded-lg p-3 flex items-start gap-2">
                 <AlertCircle className="w-4 h-4 text-amber-300 mt-0.5 shrink-0" />
                 <div className="text-xs text-amber-100">
@@ -1186,8 +1199,8 @@ function EditModal({ editing, setEditing, availableVariables, onSave, fileInputR
               </div>
             )}
 
-            {/* 영역 1: 제목 + 본문 */}
-            <div>
+            {/* 탭 내용: 제목 · 본문 · 뱃지 */}
+            <div className={activeTab === 'content' ? '' : 'hidden'}>
               <h4 className="text-xs font-bold text-white/80 mb-2 flex items-center gap-1.5">
                 <Edit2 className="w-3 h-3" /> 내용
               </h4>
@@ -1202,14 +1215,22 @@ function EditModal({ editing, setEditing, availableVariables, onSave, fileInputR
               <textarea
                 value={editing.body || ''}
                 onChange={(e) => updateField('body', e.target.value)}
-                placeholder="본문 200~400자 풍성하게. 혜택 부분은 [혜택 안내 — 직접 작성해주세요] placeholder 사용"
-                className="w-full px-3 py-2 bg-violet-900/50 border border-white/10 rounded-lg text-sm text-white placeholder-white/30 resize-y h-32 focus:outline-none focus:border-violet-400/50"
-                maxLength={500}
+                placeholder="짧고 강렬하게 한두 문장. 혜택 부분은 [혜택 안내 — 직접 작성해주세요] placeholder 사용"
+                className="w-full px-3 py-2 mb-2 bg-violet-900/50 border border-white/10 rounded-lg text-sm text-white placeholder-white/30 resize-y h-24 focus:outline-none focus:border-violet-400/50"
+                maxLength={300}
+              />
+              <input
+                type="text"
+                value={editing.badge_text || ''}
+                onChange={(e) => updateField('badge_text', e.target.value)}
+                placeholder="뱃지 (선택, 8자 안 — NEW · VIP · 오랜만이에요)"
+                className="w-full px-3 py-2 bg-violet-900/50 border border-white/10 rounded-lg text-sm text-white placeholder-white/30 focus:outline-none focus:border-violet-400/50"
+                maxLength={20}
               />
             </div>
 
-            {/* 영역 2: Template 선택 */}
-            <div>
+            {/* 탭 디자인: 표시 형태 */}
+            <div className={activeTab === 'design' ? '' : 'hidden'}>
               <h4 className="text-xs font-bold text-white/80 mb-2 flex items-center gap-1.5">
                 <Layers className="w-3 h-3" /> 표시 형태 ({(editing.channel === 'app' ? CHANNEL_TEMPLATES.app : CHANNEL_TEMPLATES.web).length}종)
               </h4>
@@ -1230,8 +1251,8 @@ function EditModal({ editing, setEditing, availableVariables, onSave, fileInputR
               </div>
             </div>
 
-            {/* 디자인 — 고급 프리셋 갤러리 */}
-            <div>
+            {/* 탭 디자인: 프리셋 갤러리 */}
+            <div className={activeTab === 'design' ? '' : 'hidden'}>
               <h4 className="text-xs font-bold text-white/80 mb-2 flex items-center gap-1.5">
                 <Wand2 className="w-3 h-3 text-fuchsia-300" /> 디자인 (클릭해서 골라보세요)
               </h4>
@@ -1254,8 +1275,8 @@ function EditModal({ editing, setEditing, availableVariables, onSave, fileInputR
               </div>
             </div>
 
-            {/* 영역 3: 이미지 업로드 */}
-            <div>
+            {/* 탭 디자인: 이미지 업로드 */}
+            <div className={activeTab === 'design' ? '' : 'hidden'}>
               <h4 className="text-xs font-bold text-white/80 mb-2 flex items-center gap-1.5">
                 <ImageIcon className="w-3 h-3" /> 이미지 (선택)
               </h4>
@@ -1290,8 +1311,8 @@ function EditModal({ editing, setEditing, availableVariables, onSave, fileInputR
               </div>
             </div>
 
-            {/* 영역 4: 다중 CTA (최대 3) */}
-            <div>
+            {/* 탭 내용: CTA 버튼 */}
+            <div className={activeTab === 'content' ? '' : 'hidden'}>
               <h4 className="text-xs font-bold text-white/80 mb-2 flex items-center gap-1.5">
                 <MousePointer className="w-3 h-3" /> CTA 버튼 (최대 3개)
               </h4>
@@ -1360,8 +1381,8 @@ function EditModal({ editing, setEditing, availableVariables, onSave, fileInputR
               </div>
             </div>
 
-            {/* 영역 5: 세그먼트 조건 + 매칭 수 */}
-            <div>
+            {/* 탭 타겟·시점: 세그먼트 */}
+            <div className={activeTab === 'target' ? '' : 'hidden'}>
               <h4 className="text-xs font-bold text-white/80 mb-2 flex items-center gap-1.5">
                 <Target className="w-3 h-3" /> 타겟 세그먼트
               </h4>
@@ -1403,16 +1424,8 @@ function EditModal({ editing, setEditing, availableVariables, onSave, fileInputR
               </div>
             </div>
 
-            {/* 고급 설정 — 핵심 외 항목 접기 (개인화·트리거·시간·색상) */}
-            <button
-              onClick={() => setShowAdvanced(!showAdvanced)}
-              className="w-full flex items-center justify-between text-xs font-bold text-white/80 hover:bg-white/[0.07] px-3.5 py-2.5 rounded-xl border border-white/10 bg-white/5 transition-colors"
-            >
-              <span className="flex items-center gap-1.5"><Wand2 className="w-3.5 h-3.5 text-violet-300" /> 고급 설정 · 개인화 · 트리거 · 시간 · 색상</span>
-              {showAdvanced ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
-            </button>
-            {showAdvanced && (
-            <div className="space-y-5">
+            {/* 탭 타겟·시점: 개인화 · 트리거 · 시간 · 색상 */}
+            <div className={activeTab === 'target' ? 'space-y-5' : 'hidden'}>
             {/* 개인화 변수 */}
             <div>
               <h4 className="text-xs font-bold text-white/80 mb-2 flex items-center gap-1.5">
@@ -1603,7 +1616,6 @@ function EditModal({ editing, setEditing, availableVariables, onSave, fileInputR
               </div>
             </div>
             </div>
-            )}
           </div>
 
           {/* 우측 — 실시간 미리보기 */}
@@ -1641,6 +1653,7 @@ function EditModal({ editing, setEditing, availableVariables, onSave, fileInputR
               title={renderedTitle}
               body={renderedBody}
               imageUrl={editing.image_url}
+              badge={editing.badge_text}
               buttons={(editing.buttons || []).map((b) => ({ ...b, label: replaceVars(b.label, sampleCustomer) }))}
               backgroundColor={editing.background_color || '#4f46e5'}
               textColor={editing.text_color || '#ffffff'}

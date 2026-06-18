@@ -1001,6 +1001,10 @@ router.post('/inapp', async (req: Request, res: Response) => {
     if (err instanceof InsufficientCreditError) {
       return res.status(402).json({ success: false, error: err.message, code: 'INSUFFICIENT_CREDIT' });
     }
+    const msg = err?.message || '';
+    if (msg.includes('column') && msg.includes('does not exist')) {
+      return res.status(503).json({ success: false, error: 'DB 마이그레이션 필요 — 운영자에게 cdp_inapp_messages ALTER(badge_text) 실행 요청', code: 'DB_MIGRATION_PENDING' });
+    }
     console.error('[CDP /inapp POST] 오류:', err);
     return res.status(500).json({ success: false, error: err?.message || '생성 실패' });
   }
@@ -1025,6 +1029,10 @@ router.put('/inapp/:id', async (req: Request, res: Response) => {
     }
     return res.json({ success: true, message });
   } catch (err: any) {
+    const msg = err?.message || '';
+    if (msg.includes('column') && msg.includes('does not exist')) {
+      return res.status(503).json({ success: false, error: 'DB 마이그레이션 필요 — 운영자에게 cdp_inapp_messages ALTER(badge_text) 실행 요청', code: 'DB_MIGRATION_PENDING' });
+    }
     console.error('[CDP /inapp PUT] 오류:', err);
     return res.status(500).json({ success: false, error: err?.message || '수정 실패' });
   }

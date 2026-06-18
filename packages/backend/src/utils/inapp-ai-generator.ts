@@ -86,6 +86,7 @@ export interface TriggerConditions {
 export interface GeneratedInAppMessage {
   title: string;
   body: string;
+  badge_text: string | null;
   template: InAppTemplate;
   image_url: string | null;
   buttons: InAppButton[];
@@ -169,6 +170,17 @@ const QUICK_START_SEEDS: Record<QuickStartScenario, QuickStartSeed> = {
     defaultTemplate: 'center_modal',
     defaultTrigger: 'page_load',
   },
+};
+
+// 시나리오별 뱃지 + 추천 프리셋 색 (편집에서 8종 자유 변경 가능). 자연어 추론 시 AI가 직접 생성.
+const SCENARIO_STYLE: Record<QuickStartScenario, { badge: string; background: string; textColor: string }> = {
+  cart_recovery:    { badge: '장바구니',     background: 'linear-gradient(135deg, #fb7185 0%, #f97316 100%)', textColor: '#ffffff' },
+  new_welcome:      { badge: 'WELCOME',      background: 'linear-gradient(135deg, #059669 0%, #0d9488 100%)', textColor: '#ffffff' },
+  dormant_recovery: { badge: '오랜만이에요', background: 'linear-gradient(135deg, #0f172a 0%, #312e81 100%)', textColor: '#ffffff' },
+  new_product:      { badge: 'NEW',          background: 'linear-gradient(135deg, #a855f7 0%, #ec4899 50%, #fb923c 100%)', textColor: '#ffffff' },
+  vip_appreciation: { badge: 'VIP',          background: 'linear-gradient(135deg, #1c1917 0%, #44403c 100%)', textColor: '#fcd34d' },
+  checkout_abandon: { badge: '거의 다 왔어요', background: 'linear-gradient(135deg, #fb7185 0%, #f97316 100%)', textColor: '#ffffff' },
+  repeat_purchase:  { badge: '다시 만나요',   background: 'linear-gradient(135deg, #0ea5e9 0%, #6366f1 100%)', textColor: '#ffffff' },
 };
 
 export interface QuickStartCardInfo {
@@ -322,7 +334,7 @@ ${memoryContext}
 2. AI 메시지 = 메시지 흐름 / 구조 / 인사 / 시즌 감성 텍스트만 작성
    ✓ 안부 / 공감 도입 / 시즌 묘사 / 가치 제안 / CTA 안내 / 진심 마무리 = 적극 작성
    ✓ %고객명% / {{ customer.name }} / {{ customer.grade }} 변수 활용 권장
-   ✗ 단순 "안녕하세요" 수준 X — 풍성한 본문 의무 (200~400자)
+   ✓ 짧고 강렬하게 — 제목 18자 안, 본문 1~2문장(40~70자). 한 호흡에 읽히게, 군더더기 X
 
 3. 브랜드 격조 의무:
    ✗ "단골" / "사장님이 직접" / "초특가" / "역대급" / "미친" / "대박" 단어 사용 X
@@ -427,8 +439,9 @@ buttons 배열 (최대 3개):
 
 \`\`\`json
 {
-  "title": "메시지 제목 (20자 안, 변수 X)",
-  "body": "메시지 본문 (200~400자 권장 — 인사 + 시즌 감성 + 가치 제안 + 진심 마무리, 변수/Liquid 적극 활용)",
+  "title": "메시지 제목 (18자 안, 변수 X)",
+  "body": "메시지 본문 (40~70자, 1~2문장 — 짧고 강렬, 변수/Liquid 활용 가능)",
+  "badge_text": "짧은 라벨 8자 안 (NEW · VIP · 오랜만이에요 — 구체 혜택·수치 X)",
   "template": "top_banner | bottom_banner | center_modal | full_screen | slide_in | inline_card | toast | floating_button",
   "image_url": null,
   "buttons": [
@@ -464,8 +477,9 @@ buttons 배열 (최대 3개):
 
 영구 룰 준수 의무:
 - 구체 혜택 (% / 원 / 무료 / 쿠폰 / 할인) 절대 임의 작성 X — \`[혜택 안내 — 직접 작성해주세요]\` placeholder만 사용
-- 본문 200~400자 풍성하게 작성 (인사 + 시즌 감성 + 가치 제안 + 진심 마무리)
-- 제목 20자 안 + 변수 / Liquid 사용 X (단순 텍스트만)
+- 본문 40~70자 짧고 강렬하게 (한두 문장, 군더더기 X)
+- 제목 18자 안 + 변수 / Liquid 사용 X (단순 텍스트만)
+- badge_text 8자 안 짧은 라벨 (혜택·수치 X)
 - segment_conditions / trigger_conditions / personalization_vars 자연어 목표에 정확한 매핑
 
 응답은 위 응답 JSON 형식 그대로.`;
@@ -490,9 +504,11 @@ buttons 배열 (최대 3개):
   }
 
   // 응답 검증 + 안전 default
+  const scenarioStyle = input.templateHint ? SCENARIO_STYLE[input.templateHint] : null;
   const message: GeneratedInAppMessage = {
     title: String(parsed.title || '').slice(0, 100),
     body: String(parsed.body || ''),
+    badge_text: (String(parsed.badge_text || '').slice(0, 20) || scenarioStyle?.badge || null),
     template: validateTemplate(parsed.template) || suggestedTemplate,
     image_url: null, // AI 이미지 환각 차단 — 존재하지 않는 URL 생성 방지(D152 AI 창작 금지 정합). 이미지는 회사 admin 직접 업로드만.
     buttons: Array.isArray(parsed.buttons) ? parsed.buttons.slice(0, 3).map((b: any, idx: number) => ({
@@ -503,8 +519,8 @@ buttons 배열 (최대 3개):
       background_color: String(b.background_color || '#4f46e5'),
       text_color: String(b.text_color || '#ffffff'),
     })) : [],
-    background_color: String(parsed.background_color || '#4f46e5'),
-    text_color: String(parsed.text_color || '#ffffff'),
+    background_color: String(parsed.background_color || scenarioStyle?.background || '#4f46e5'),
+    text_color: String(parsed.text_color || scenarioStyle?.textColor || '#ffffff'),
     segment_conditions: parsed.segment_conditions || {},
     trigger_conditions: parsed.trigger_conditions || { event: 'page_load' },
     personalization_vars: Array.isArray(parsed.personalization_vars) ? parsed.personalization_vars : [],

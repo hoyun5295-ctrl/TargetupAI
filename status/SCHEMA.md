@@ -1836,6 +1836,7 @@ CAFE24_REDIRECT_URI=https://app.hanjul.ai/api/cafe24/oauth/callback
 | locale_variants | jsonb DEFAULT '{}' | ★ 실측 |
 | animation | varchar DEFAULT 'fade' | ★ 실측 — fade/slide/bounce/pulse |
 | channel | varchar(10) NOT NULL DEFAULT 'web' | ★ 2026-06-17 — web/app 채널 분리 (웹 팝업 / 앱 인앱). SDK 서빙(/inapp/active)은 web만 노출 |
+| badge_text | varchar(20) | ★ 2026-06-18 실측 — 모달 상단 뱃지 라벨 (NEW·VIP·오랜만이에요 등, nullable). AI 생성 시 시나리오별 자동 |
 - INDEX: company_id, status, start_at, end_at
 - INDEX: idx_inapp_channel(company_id, channel, status) ★ 2026-06-17
 

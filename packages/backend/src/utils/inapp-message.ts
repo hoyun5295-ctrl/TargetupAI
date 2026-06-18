@@ -63,6 +63,7 @@ export interface CreateInAppMessageInput {
   // ★ 누락 시 이미지·CTA·표시형태·세그먼트가 저장 안 됨 (handleSave가 보내는 snake 키 매칭)
   template?: string;
   image_url?: string | null;
+  badge_text?: string | null;
   buttons?: any[];
   segment_conditions?: any;
   trigger_conditions?: any;
@@ -100,7 +101,7 @@ export async function createInAppMessage(
       trigger_event, display_frequency, start_at, end_at, status, channel,
       template, image_url, buttons, segment_conditions, trigger_conditions,
       personalization_vars, auto_dismiss_seconds, max_displays_per_user,
-      send_start_hour, send_end_hour, allowed_weekdays, animation,
+      send_start_hour, send_end_hour, allowed_weekdays, animation, badge_text,
       created_at, updated_at
     ) VALUES (
       gen_random_uuid(), $1::uuid, $2::uuid, $3, $4, $5, $6,
@@ -108,7 +109,7 @@ export async function createInAppMessage(
       $10, $11, $12, $13, $14, $15,
       $16, $17, $18::jsonb, $19::jsonb, $20::jsonb,
       $21::jsonb, $22, $23,
-      $24, $25, $26, $27,
+      $24, $25, $26, $27, $28,
       NOW(), NOW()
     ) RETURNING *`,
     [
@@ -122,6 +123,7 @@ export async function createInAppMessage(
       JSON.stringify(input.buttons || []), JSON.stringify(input.segment_conditions || {}), JSON.stringify(input.trigger_conditions || {}),
       JSON.stringify(input.personalization_vars || []), input.auto_dismiss_seconds ?? null, input.max_displays_per_user ?? null,
       input.send_start_hour ?? null, input.send_end_hour ?? null, input.allowed_weekdays || [0, 1, 2, 3, 4, 5, 6], input.animation || 'fade',
+      input.badge_text ?? null,
     ]
   );
   return mapRowToMessage(result.rows[0]);
@@ -169,6 +171,7 @@ export async function updateInAppMessage(
       send_end_hour = $24,
       allowed_weekdays = COALESCE($25, allowed_weekdays),
       animation = COALESCE($26, animation),
+      badge_text = COALESCE($27, badge_text),
       updated_at = NOW()
      WHERE id = $1::uuid AND company_id = $2::uuid
      RETURNING *`,
@@ -186,6 +189,7 @@ export async function updateInAppMessage(
       input.auto_dismiss_seconds ?? null, input.max_displays_per_user ?? null,
       input.send_start_hour ?? null, input.send_end_hour ?? null,
       input.allowed_weekdays ?? null, input.animation ?? null,
+      input.badge_text ?? null,
     ]
   );
   return result.rows.length > 0 ? mapRowToMessage(result.rows[0]) : null;
@@ -412,6 +416,7 @@ function mapRowToMessage(row: any): InAppMessage {
 export interface InAppMessageDetail extends InAppMessage {
   template: string;
   imageUrl: string | null;
+  badgeText: string | null;
   buttons: any[];
   segmentConditions: any;
   triggerConditions: any;
@@ -432,6 +437,7 @@ function mapRowToMessageDetail(row: any): InAppMessageDetail {
     ...mapRowToMessage(row),
     template: row.template || row.position || 'top_banner',
     imageUrl: row.image_url || null,
+    badgeText: row.badge_text || null,
     buttons: Array.isArray(row.buttons) ? row.buttons : [],
     segmentConditions: row.segment_conditions || {},
     triggerConditions: row.trigger_conditions || { event: row.trigger_event || 'page_load' },
@@ -450,7 +456,7 @@ function mapRowToMessageDetail(row: any): InAppMessageDetail {
 
 const FULL_COLUMNS = `id, title, body, action_url, action_label, position, background_color, text_color,
                       trigger_event, display_frequency, start_at, end_at, status,
-                      template, image_url, buttons, segment_conditions, trigger_conditions,
+                      template, image_url, badge_text, buttons, segment_conditions, trigger_conditions,
                       personalization_vars, parent_message_id, variant_weight,
                       auto_dismiss_seconds, max_displays_per_user,
                       send_start_hour, send_end_hour, allowed_weekdays, locale_variants, animation, channel`;

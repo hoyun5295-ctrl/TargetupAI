@@ -20,6 +20,7 @@ export interface InAppMessagePreviewProps {
   title: string;
   body: string;
   imageUrl?: string | null;
+  badge?: string | null;
   buttons?: PreviewButton[];
   backgroundColor: string;
   textColor: string;
@@ -48,11 +49,11 @@ function hideOnError(e: React.SyntheticEvent<HTMLImageElement>) {
 }
 
 /** 인앱 카드 내부 (이미지+제목+본문+CTA) — SDK 렌더 톤 일치 */
-function CardInner({ title, body, imageUrl, buttons, textColor, variant }: {
-  title: string; body: string; imageUrl?: string | null; buttons?: PreviewButton[]; textColor: string; variant: Variant;
+function CardInner({ title, body, imageUrl, badge, buttons, textColor, variant }: {
+  title: string; body: string; imageUrl?: string | null; badge?: string | null; buttons?: PreviewButton[]; textColor: string; variant: Variant;
 }) {
   const img = toAbsoluteImage(imageUrl);
-  const clampMap: Record<Variant, number> = { banner: 2, slide: 4, inline: 5, modal: 8, full: 10, toast: 2, floating: 1 };
+  const clampMap: Record<Variant, number> = { banner: 2, slide: 4, inline: 5, modal: 3, full: 10, toast: 2, floating: 1 };
   const clamp = clampMap[variant];
   const isBanner = variant === 'banner';
   const bigTitle = variant === 'full' ? 19 : (isBanner || variant === 'toast') ? 13.5 : 15.5;
@@ -66,6 +67,11 @@ function CardInner({ title, body, imageUrl, buttons, textColor, variant }: {
         <img src={img} alt="" onError={hideOnError} style={{ width: '100%', height: variant === 'modal' || variant === 'full' ? 128 : 100, objectFit: 'cover', borderRadius: 13, marginBottom: 13, boxShadow: '0 4px 16px rgba(0,0,0,0.14)' }} />
       )}
       <div style={{ flex: isBanner ? 1 : undefined, minWidth: 0 }}>
+        {badge && !isBanner && variant !== 'toast' && variant !== 'floating' && (
+          <div style={{ display: 'inline-block', background: 'rgba(255,255,255,0.2)', color: textColor, fontSize: 10.5, fontWeight: 700, letterSpacing: '0.03em', padding: '3px 9px', borderRadius: 999, marginBottom: 8 }}>
+            {badge}
+          </div>
+        )}
         <div style={{ fontWeight: 700, fontSize: bigTitle, letterSpacing: '-0.01em', lineHeight: 1.35, marginBottom: 5 }}>
           {title || '제목 미리보기'}
         </div>
@@ -122,7 +128,7 @@ function Overlay({ variant, ...rest }: { variant: Variant } & Omit<InAppMessageP
     return (
       <div style={{ position: 'absolute', inset: 0, background: 'rgba(15,15,20,0.5)', backdropFilter: 'blur(3px)', WebkitBackdropFilter: 'blur(3px)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 18 } as CSSProperties}>
         <div style={{ ...cardBase, position: 'relative', maxWidth: 280, width: '100%', borderRadius: 20, overflow: 'hidden', boxShadow: '0 24px 60px rgba(0,0,0,0.45)' }}>
-          {heroImg && <img src={heroImg} alt="" onError={hideOnError} style={{ width: '100%', height: 118, objectFit: 'cover', display: 'block' }} />}
+          {heroImg && <img src={heroImg} alt="" onError={hideOnError} style={{ width: '100%', aspectRatio: '4 / 3', objectFit: 'cover', display: 'block' }} />}
           <div style={{ padding: 20 }}>
             <CardInner {...rest} imageUrl={null} variant="modal" textColor={textColor} />
           </div>

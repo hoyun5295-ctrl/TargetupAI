@@ -57,6 +57,8 @@ export interface InAppMessageSdk {
   position?: string;  // 옛 backward compat
   imageUrl?: string | null;
   image_url?: string | null;
+  badgeText?: string | null;
+  badge_text?: string | null;
   buttons?: InAppButton[];
   actionUrl?: string | null;  // 옛 backward compat
   actionLabel?: string;
@@ -436,6 +438,7 @@ export class HanjulloInAppModule {
     const animation = msg.animation || 'fade';
     const autoDismissSec = msg.autoDismissSeconds ?? msg.auto_dismiss_seconds;
     const imageUrl = msg.imageUrl ?? msg.image_url;
+    const badge = (msg.badgeText ?? msg.badge_text) || '';
     const buttons = Array.isArray(msg.buttons) && msg.buttons.length > 0
       ? msg.buttons
       : msg.actionUrl
@@ -456,16 +459,16 @@ export class HanjulloInAppModule {
         this.renderBanner(msg, template, renderedTitle, renderedBody, imageUrl, buttons, animation, autoDismissSec, input);
         break;
       case 'center_modal':
-        this.renderCenterModal(msg, renderedTitle, renderedBody, imageUrl, buttons, animation, autoDismissSec, input);
+        this.renderCenterModal(msg, renderedTitle, renderedBody, imageUrl, badge, buttons, animation, autoDismissSec, input);
         break;
       case 'full_screen':
-        this.renderFullScreen(msg, renderedTitle, renderedBody, imageUrl, buttons, animation, autoDismissSec, input);
+        this.renderFullScreen(msg, renderedTitle, renderedBody, imageUrl, badge, buttons, animation, autoDismissSec, input);
         break;
       case 'slide_in':
-        this.renderSlideIn(msg, renderedTitle, renderedBody, imageUrl, buttons, animation, autoDismissSec, input);
+        this.renderSlideIn(msg, renderedTitle, renderedBody, imageUrl, badge, buttons, animation, autoDismissSec, input);
         break;
       case 'inline_card':
-        this.renderInlineCard(msg, renderedTitle, renderedBody, imageUrl, buttons, input);
+        this.renderInlineCard(msg, renderedTitle, renderedBody, imageUrl, badge, buttons, input);
         break;
       case 'toast':
         this.renderToast(msg, renderedTitle, renderedBody, animation, autoDismissSec || 3, input);
@@ -533,6 +536,7 @@ export class HanjulloInAppModule {
 
   private renderCenterModal(
     msg: InAppMessageSdk, title: string, body: string, imageUrl: string | null | undefined,
+    badge: string,
     buttons: InAppButton[], animation: string, autoDismissSec: number | null | undefined,
     input: InAppInitInput,
   ): void {
@@ -574,13 +578,14 @@ export class HanjulloInAppModule {
       hero.alt = '';
       hero.loading = 'lazy';
       hero.referrerPolicy = 'no-referrer';
-      Object.assign(hero.style, { width: '100%', height: '190px', objectFit: 'cover', display: 'block' });
+      Object.assign(hero.style, { width: '100%', aspectRatio: '4 / 3', objectFit: 'cover', display: 'block' });
       hero.onerror = () => { hero.style.display = 'none'; };
       root.appendChild(hero);
     }
-    // 콘텐츠 영역 (제목·본문·CTA) — 이미지와 분리된 패딩 블록
+    // 콘텐츠 영역 (뱃지·제목·본문·CTA) — 이미지 유무에 따라 상단 여백 조정
     const content = document.createElement('div');
-    content.style.padding = '26px';
+    content.style.padding = imageUrl ? '22px 24px 24px' : '30px 24px 26px';
+    if (badge) this.appendBadge(content, badge, msg.textColor);
     this.appendTextBlock(content, title, body, 'modal');
     this.appendButtons(content, msg, buttons, input, 'stack');
     root.appendChild(content);
@@ -598,6 +603,7 @@ export class HanjulloInAppModule {
 
   private renderFullScreen(
     msg: InAppMessageSdk, title: string, body: string, imageUrl: string | null | undefined,
+    badge: string,
     buttons: InAppButton[], animation: string, autoDismissSec: number | null | undefined,
     input: InAppInitInput,
   ): void {
@@ -619,6 +625,7 @@ export class HanjulloInAppModule {
     this.applyAnimation(root, animation, 'full');
 
     if (imageUrl) this.appendImage(root, imageUrl, 0, '100%', '240px');
+    if (badge) this.appendBadge(root, badge, msg.textColor);
     this.appendTextBlock(root, title, body, 'full');
     this.appendButtons(root, msg, buttons, input);
     this.appendCloseButton(root, msg, input, () => document.body.removeChild(root), 'absolute-top-right');
@@ -633,6 +640,7 @@ export class HanjulloInAppModule {
 
   private renderSlideIn(
     msg: InAppMessageSdk, title: string, body: string, imageUrl: string | null | undefined,
+    badge: string,
     buttons: InAppButton[], animation: string, autoDismissSec: number | null | undefined,
     input: InAppInitInput,
   ): void {
@@ -655,6 +663,7 @@ export class HanjulloInAppModule {
     this.applyAnimation(root, animation, 'slide-right');
 
     if (imageUrl) this.appendImage(root, imageUrl, 0, '100%', '120px');
+    if (badge) this.appendBadge(root, badge, msg.textColor);
     this.appendTextBlock(root, title, body, 'slide');
     this.appendButtons(root, msg, buttons, input);
     this.appendCloseButton(root, msg, input, () => document.body.removeChild(root), 'absolute-top-right');
@@ -669,6 +678,7 @@ export class HanjulloInAppModule {
 
   private renderInlineCard(
     msg: InAppMessageSdk, title: string, body: string, imageUrl: string | null | undefined,
+    badge: string,
     buttons: InAppButton[], input: InAppInitInput,
   ): void {
     const containerSelector = input.containerSelector || 'body';
@@ -692,6 +702,7 @@ export class HanjulloInAppModule {
     });
 
     if (imageUrl) this.appendImage(root, imageUrl, 0, '100%', '160px');
+    if (badge) this.appendBadge(root, badge, msg.textColor);
     this.appendTextBlock(root, title, body, 'inline');
     this.appendButtons(root, msg, buttons, input);
 
@@ -796,6 +807,23 @@ export class HanjulloInAppModule {
     }
   }
 
+  private appendBadge(parent: HTMLElement, text: string, textColor: string): void {
+    const badge = document.createElement('div');
+    badge.textContent = text;
+    Object.assign(badge.style, {
+      display: 'inline-block',
+      background: 'rgba(255,255,255,0.2)',
+      color: textColor,
+      fontSize: '11px',
+      fontWeight: '700',
+      letterSpacing: '0.03em',
+      padding: '4px 11px',
+      borderRadius: '999px',
+      marginBottom: '12px',
+    });
+    parent.appendChild(badge);
+  }
+
   private appendImage(parent: HTMLElement, imageUrl: string, sizePx: number, width?: string, height?: string): void {
     const img = document.createElement('img');
     img.src = this.toAbsoluteImageUrl(imageUrl);
@@ -823,7 +851,7 @@ export class HanjulloInAppModule {
 
   private appendTextBlock(parent: HTMLElement, title: string, body: string, variant: 'banner' | 'modal' | 'full' | 'slide' | 'inline'): void {
     // variant별 본문 최대 줄 수 — 장문이 들어와도 레이아웃이 무너지지 않게 말줄임 (full만 무제한)
-    const clampMap: Record<string, number> = { banner: 2, slide: 4, inline: 5, modal: 8, full: 0 };
+    const clampMap: Record<string, number> = { banner: 2, slide: 4, inline: 5, modal: 3, full: 0 };
     const clamp = clampMap[variant] ?? 3;
 
     const text = document.createElement('div');
