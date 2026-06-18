@@ -1019,7 +1019,7 @@ export default function InAppMessagesPage() {
           editing={editing}
           setEditing={setEditing}
           availableVariables={availableVariables}
-          onSave={() => (editing?.status === 'active' ? setConfirmPublish(true) : handleSave())}
+          onSave={() => (!editing?.id && editing?.status === 'active' ? setConfirmPublish(true) : handleSave())}
           fileInputRef={fileInputRef}
           onImageUpload={handleImageUpload}
         />
