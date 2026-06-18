@@ -1262,7 +1262,7 @@ function EditModal({ editing, setEditing, availableVariables, onSave, fileInputR
               <div className="flex gap-2 items-center">
                 {editing.image_url ? (
                   <div className="relative">
-                    <img src={editing.image_url} alt="" className="w-20 h-20 object-cover rounded-lg" />
+                    <img src={editing.image_url} alt="" onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }} className="w-20 h-20 object-cover rounded-lg bg-white/5" />
                     <button
                       onClick={() => updateField('image_url', null)}
                       className="absolute -top-2 -right-2 bg-rose-500 hover:bg-rose-600 text-white rounded-full w-5 h-5 flex items-center justify-center text-xs"
