@@ -186,8 +186,9 @@ export class HanjulloInAppModule {
       const seenSession = this.getSeenSession();
       cached.messages.forEach((msg) => {
         if (!this.canDisplayMessage(msg)) return;
-        // once_per_session — 같은 세션에 이미 본 메시지는 캐시 hit에서도 재표시 안 함(페이지 이동마다 재노출 차단)
+        // 캐시 hit에서도 빈도 캡 적용 — once_per_session(세션)·once_per_day(24h) 본 메시지는 재노출 안 함(페이지 이동마다 재노출 차단)
         if (msg.displayFrequency === 'once_per_session' && seenSession.includes(msg.id)) return;
+        if (msg.displayFrequency === 'once_per_day' && this.seenToday(msg.id)) return;
         if (!this.passesTriggerConditions(msg, trigger, input)) return;
         this.renderMessage(msg, cachedInput);
       });
@@ -1118,6 +1119,18 @@ export class HanjulloInAppModule {
       }
     } catch {
       // 조용히 실패
+    }
+  }
+
+  /** once_per_day — 최근 24h 안에 본 메시지인지 (캐시 hit 재노출 차단용) */
+  private seenToday(messageId: string): boolean {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY_SEEN);
+      const map = raw ? JSON.parse(raw) : {};
+      const last = map[messageId];
+      return typeof last === 'number' && Date.now() - last < 24 * 60 * 60 * 1000;
+    } catch {
+      return false;
     }
   }
 

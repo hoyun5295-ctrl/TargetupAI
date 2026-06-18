@@ -549,6 +549,8 @@ router.get('/inapp/image/:companyId/:filename', (req: any, res: any) => {
   const mime = ext === '.png' ? 'image/png' : ext === '.gif' ? 'image/gif' : ext === '.webp' ? 'image/webp' : 'image/jpeg';
   res.setHeader('Content-Type', mime);
   res.setHeader('Cache-Control', 'public, max-age=86400');
+  // 자사몰(타 도메인)의 <img>로 로드 — helmet 기본 Cross-Origin-Resource-Policy: same-origin이 cross-origin 이미지를 막으므로 명시 허용
+  res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
   res.sendFile(path.resolve(filePath));
 });
 
