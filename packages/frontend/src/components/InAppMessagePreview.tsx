@@ -52,7 +52,7 @@ function CardInner({ title, body, imageUrl, buttons, textColor, variant }: {
   title: string; body: string; imageUrl?: string | null; buttons?: PreviewButton[]; textColor: string; variant: Variant;
 }) {
   const img = toAbsoluteImage(imageUrl);
-  const clampMap: Record<Variant, number> = { banner: 2, slide: 3, inline: 4, modal: 4, full: 8, toast: 2, floating: 1 };
+  const clampMap: Record<Variant, number> = { banner: 2, slide: 4, inline: 5, modal: 8, full: 10, toast: 2, floating: 1 };
   const clamp = clampMap[variant];
   const isBanner = variant === 'banner';
   const bigTitle = variant === 'full' ? 19 : (isBanner || variant === 'toast') ? 13.5 : 15.5;

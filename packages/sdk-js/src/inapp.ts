@@ -823,7 +823,7 @@ export class HanjulloInAppModule {
 
   private appendTextBlock(parent: HTMLElement, title: string, body: string, variant: 'banner' | 'modal' | 'full' | 'slide' | 'inline'): void {
     // variant별 본문 최대 줄 수 — 장문이 들어와도 레이아웃이 무너지지 않게 말줄임 (full만 무제한)
-    const clampMap: Record<string, number> = { banner: 2, slide: 3, inline: 4, modal: 4, full: 0 };
+    const clampMap: Record<string, number> = { banner: 2, slide: 4, inline: 5, modal: 8, full: 0 };
     const clamp = clampMap[variant] ?? 3;
 
     const text = document.createElement('div');

@@ -60,6 +60,19 @@ export interface CreateInAppMessageInput {
   endAt?: string | null;
   status?: InAppStatus;
   channel?: 'web' | 'app';
+  // ★ 누락 시 이미지·CTA·표시형태·세그먼트가 저장 안 됨 (handleSave가 보내는 snake 키 매칭)
+  template?: string;
+  image_url?: string | null;
+  buttons?: any[];
+  segment_conditions?: any;
+  trigger_conditions?: any;
+  personalization_vars?: any[];
+  auto_dismiss_seconds?: number | null;
+  max_displays_per_user?: number | null;
+  send_start_hour?: number | null;
+  send_end_hour?: number | null;
+  allowed_weekdays?: number[];
+  animation?: string;
 }
 
 // ════════════════════════════════════════════════════════════════════
@@ -85,11 +98,17 @@ export async function createInAppMessage(
       id, company_id, created_by, title, body, action_url, action_label,
       position, background_color, text_color,
       trigger_event, display_frequency, start_at, end_at, status, channel,
+      template, image_url, buttons, segment_conditions, trigger_conditions,
+      personalization_vars, auto_dismiss_seconds, max_displays_per_user,
+      send_start_hour, send_end_hour, allowed_weekdays, animation,
       created_at, updated_at
     ) VALUES (
       gen_random_uuid(), $1::uuid, $2::uuid, $3, $4, $5, $6,
       $7, $8, $9,
       $10, $11, $12, $13, $14, $15,
+      $16, $17, $18::jsonb, $19::jsonb, $20::jsonb,
+      $21::jsonb, $22, $23,
+      $24, $25, $26, $27,
       NOW(), NOW()
     ) RETURNING *`,
     [
@@ -99,6 +118,10 @@ export async function createInAppMessage(
       input.triggerEvent || 'page_load', frequency,
       input.startAt || null, input.endAt || null,
       input.status || 'active', channel,
+      input.template || position, input.image_url || null,
+      JSON.stringify(input.buttons || []), JSON.stringify(input.segment_conditions || {}), JSON.stringify(input.trigger_conditions || {}),
+      JSON.stringify(input.personalization_vars || []), input.auto_dismiss_seconds ?? null, input.max_displays_per_user ?? null,
+      input.send_start_hour ?? null, input.send_end_hour ?? null, input.allowed_weekdays || [0, 1, 2, 3, 4, 5, 6], input.animation || 'fade',
     ]
   );
   return mapRowToMessage(result.rows[0]);
@@ -134,6 +157,18 @@ export async function updateInAppMessage(
       start_at = COALESCE($12, start_at),
       end_at = COALESCE($13, end_at),
       status = COALESCE($14, status),
+      template = COALESCE($15, template),
+      image_url = $16,
+      buttons = COALESCE($17::jsonb, buttons),
+      segment_conditions = COALESCE($18::jsonb, segment_conditions),
+      trigger_conditions = COALESCE($19::jsonb, trigger_conditions),
+      personalization_vars = COALESCE($20::jsonb, personalization_vars),
+      auto_dismiss_seconds = $21,
+      max_displays_per_user = $22,
+      send_start_hour = $23,
+      send_end_hour = $24,
+      allowed_weekdays = COALESCE($25, allowed_weekdays),
+      animation = COALESCE($26, animation),
       updated_at = NOW()
      WHERE id = $1::uuid AND company_id = $2::uuid
      RETURNING *`,
@@ -145,6 +180,12 @@ export async function updateInAppMessage(
       input.triggerEvent ?? null, input.displayFrequency ?? null,
       input.startAt ?? null, input.endAt ?? null,
       input.status ?? null,
+      input.template ?? null, input.image_url ?? null,
+      input.buttons ? JSON.stringify(input.buttons) : null, input.segment_conditions ? JSON.stringify(input.segment_conditions) : null,
+      input.trigger_conditions ? JSON.stringify(input.trigger_conditions) : null, input.personalization_vars ? JSON.stringify(input.personalization_vars) : null,
+      input.auto_dismiss_seconds ?? null, input.max_displays_per_user ?? null,
+      input.send_start_hour ?? null, input.send_end_hour ?? null,
+      input.allowed_weekdays ?? null, input.animation ?? null,
     ]
   );
   return result.rows.length > 0 ? mapRowToMessage(result.rows[0]) : null;
