@@ -457,7 +457,7 @@ buttons 배열 (최대 3개):
     "event": "page_load"
   },
   "personalization_vars": ["customer.name"],
-  "display_frequency": "once_per_day",
+  "display_frequency": "once_per_session",
   "auto_dismiss_seconds": null,
   "max_displays_per_user": 3,
   "send_start_hour": 9,
