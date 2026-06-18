@@ -183,8 +183,11 @@ export class HanjulloInAppModule {
     if (cached) {
       this.debugLog(input, `캐시 hit (${cacheKey})`);
       const cachedInput = this.withServerCustomer(input, cached.customer);
+      const seenSession = this.getSeenSession();
       cached.messages.forEach((msg) => {
         if (!this.canDisplayMessage(msg)) return;
+        // once_per_session — 같은 세션에 이미 본 메시지는 캐시 hit에서도 재표시 안 함(페이지 이동마다 재노출 차단)
+        if (msg.displayFrequency === 'once_per_session' && seenSession.includes(msg.id)) return;
         if (!this.passesTriggerConditions(msg, trigger, input)) return;
         this.renderMessage(msg, cachedInput);
       });
