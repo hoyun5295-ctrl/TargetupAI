@@ -37,6 +37,7 @@ import { validateDm } from '../utils/dm/dm-validate';
 import { getCompanyBrandKit, updateCompanyBrandKit, DEFAULT_BRAND_KIT } from '../utils/dm/dm-brand-kit';
 import { listTemplates, getTemplate, instantiateTemplate } from '../utils/dm/dm-template-registry';
 import { insertTestSmsQueue } from '../utils/sms-queue';
+import { getUserTestContacts } from '../utils/test-contact-helper';
 import { sanitizeSmsText } from '../utils/auto-notify-message';
 import { convertLegacyToSections } from '../utils/dm/dm-legacy-converter';
 import { previewBrandExtract } from '../utils/dm/dm-brand-kit';
@@ -556,12 +557,17 @@ dmRouter.post('/:id/convert-to-scroll', async (req: any, res: any) => {
 dmRouter.post('/:id/test-send', async (req: any, res: any) => {
   try {
     const companyId = req.user?.companyId;
-    const userId = req.user?.id;
+    const userId = req.user?.userId;
     if (!companyId) return res.status(403).json({ error: '회사 권한이 필요합니다.' });
 
-    const phones: string[] = Array.isArray(req.body?.manager_phones) ? req.body.manager_phones : [];
+    // 담당자 번호: frontend가 body로 보내면 그것, 없으면 회사 담당자(test_contacts) CT-11 자동 조회 (campaigns/test-send와 동일 — 사용자별 격리)
+    let phones: string[] = Array.isArray(req.body?.manager_phones) ? req.body.manager_phones : [];
+    if (phones.length === 0 && userId) {
+      const contacts = await getUserTestContacts(companyId, userId);
+      phones = contacts.map((c) => c.phone);
+    }
     const cleanPhones = phones.map((p) => String(p).replace(/[^0-9]/g, '')).filter((p) => p.length >= 10 && p.length <= 11);
-    if (cleanPhones.length === 0) return res.status(400).json({ error: '담당자 번호가 비어있거나 유효하지 않아요.' });
+    if (cleanPhones.length === 0) return res.status(400).json({ error: '등록된 담당자 번호가 없어요. 설정 > 담당자 번호에서 추가해주세요.' });
     if (cleanPhones.length > 5) return res.status(400).json({ error: '테스트 발송은 최대 5명까지예요.' });
 
     const sampleKey: SampleCustomerKey = (req.body?.sample_key || 'vip') as SampleCustomerKey;
@@ -637,7 +643,7 @@ dmRouter.get('/:id/versions', async (req: any, res: any) => {
 dmRouter.post('/:id/versions', async (req: any, res: any) => {
   try {
     const companyId = req.user?.companyId;
-    const userId = req.user?.id;
+    const userId = req.user?.userId;
     if (!companyId) return res.status(403).json({ error: '회사 권한이 필요합니다.' });
     const dm = await getDmDetail(req.params.id, companyId);
     if (!dm) return res.status(404).json({ error: 'DM을 찾을 수 없어요.' });
@@ -1179,7 +1185,7 @@ dmRouter.get('/overview', async (req: any, res: any) => {
     const totals = await query(
       `SELECT
         COUNT(*) AS total_dm,
-        COUNT(*) FILTER (WHERE approval_status = 'published') AS published_dm
+        COUNT(*) FILTER (WHERE status = 'published') AS published_dm
       FROM dm_pages
       WHERE company_id = $1`,
       [companyId],

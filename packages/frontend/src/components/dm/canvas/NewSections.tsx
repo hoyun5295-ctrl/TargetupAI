@@ -93,16 +93,21 @@ export function ProductCarouselSection({ props }: { props: ProductCarouselProps 
 
 export function GallerySection({ props }: { props: GalleryProps }) {
   const images = props?.images || [];
-  const cols = props?.layout === 'grid_3x3' ? 3 : props?.layout === 'list_1xN' ? 1 : 2;
+  const isList = props?.layout === 'list_1xN';
+  const cols = props?.layout === 'grid_3x3' ? 3 : isList ? 1 : 2;
+  // list_1xN(세로 1열) = 완성 이미지/디자인 시안 대응: 원본 비율 풀폭(크롭 X). grid류는 1:1 cover 유지.
+  const imgStyle: React.CSSProperties = isList
+    ? { width: '100%', height: 'auto', display: 'block', borderRadius: 6 }
+    : { width: '100%', aspectRatio: '1', objectFit: 'cover', borderRadius: 6 };
   return (
     <div className="dm-section dm-gallery" style={CARD_STYLE}>
       {props.title && <div style={TITLE_STYLE}>{props.title}</div>}
       {images.length === 0 ? (
         <div style={PLACEHOLDER_STYLE}>[이미지를 추가해주세요]</div>
       ) : (
-        <div style={{ display: 'grid', gridTemplateColumns: `repeat(${cols}, 1fr)`, gap: 6 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: `repeat(${cols}, 1fr)`, gap: isList ? 10 : 6 }}>
           {images.map((img, i) => (
-            <img key={i} src={dmImageUrl(img.url)} alt={img.caption || ''} style={{ width: '100%', aspectRatio: '1', objectFit: 'cover', borderRadius: 6 }} />
+            <img key={i} src={dmImageUrl(img.url)} alt={img.caption || ''} style={imgStyle} />
           ))}
         </div>
       )}

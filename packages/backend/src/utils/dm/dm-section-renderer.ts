@@ -355,11 +355,16 @@ function renderGallery(p: any): string {
   if (images.length === 0) {
     return `<div class="dm-section dm-gallery" style="padding:var(--dm-sp-4);text-align:center;color:var(--dm-neutral-400);font-style:italic">[이미지를 추가해주세요]</div>`;
   }
-  const cols = p?.layout === 'grid_3x3' ? 3 : p?.layout === 'list_1xN' ? 1 : 2;
-  const items = images.map((img: any) => `<img src="${escapeHtml(publicImageUrl(img.url))}" loading="lazy" alt="${escapeHtml(img.caption || '')}" style="width:100%;aspect-ratio:1;object-fit:cover;border-radius:6px"/>`).join('');
+  const isList = p?.layout === 'list_1xN';
+  const cols = p?.layout === 'grid_3x3' ? 3 : isList ? 1 : 2;
+  // list_1xN(세로 1열) = 완성 이미지/디자인 시안: 원본 비율 풀폭(크롭 X). grid류는 1:1 cover 유지.
+  const imgStyle = isList
+    ? 'width:100%;height:auto;display:block;border-radius:6px'
+    : 'width:100%;aspect-ratio:1;object-fit:cover;border-radius:6px';
+  const items = images.map((img: any) => `<img src="${escapeHtml(publicImageUrl(img.url))}" loading="lazy" alt="${escapeHtml(img.caption || '')}" style="${imgStyle}"/>`).join('');
   return `<div class="dm-section dm-gallery" style="padding:var(--dm-sp-4)">
     ${p.title ? `<div style="font-size:15px;font-weight:700;margin-bottom:8px">${escapeHtml(p.title)}</div>` : ''}
-    <div style="display:grid;grid-template-columns:repeat(${cols},1fr);gap:6px">${items}</div>
+    <div style="display:grid;grid-template-columns:repeat(${cols},1fr);gap:${isList ? 10 : 6}px">${items}</div>
   </div>`;
 }
 

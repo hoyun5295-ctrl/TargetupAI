@@ -196,15 +196,16 @@ export class UpdateManager {
       ? 'schtasks /Run /TN SyncAgent'
       : `start "" "${currentExePath}"`;
 
+    // 콘솔 bat는 전부 ASCII (2008 R2 cp949 콘솔에서 한글 bat는 명령 파싱이 깨져 실행 실패 — 2026-06-19 실측 확인)
     const batContent = `@echo off
 chcp 65001 >nul
-echo [Sync Agent Updater] 업데이트 시작: ${this.currentVersion} → ${newVersion}
+echo [Sync Agent Updater] Update start: ${this.currentVersion} to ${newVersion}
 
-REM 1. 현재 프로세스 종료
-echo 프로세스 종료 대기 중 (PID: ${process.pid})...
+REM 1. stop current process
+echo Waiting for process to stop (PID: ${process.pid})...
 ${stopCmd}
 
-REM 종료 대기 (최대 30초)
+REM wait up to 30s
 set /a count=0
 :waitloop
 tasklist /FI "PID eq ${process.pid}" 2>nul | find "${process.pid}" >nul
@@ -212,40 +213,40 @@ if errorlevel 1 goto :continue
 timeout /t 1 /nobreak >nul
 set /a count+=1
 if %count% geq 30 (
-  echo [ERROR] 프로세스 종료 타임아웃 — 업데이트 취소
+  echo [ERROR] Process stop timeout - update canceled
   exit /b 1
 )
 goto :waitloop
 
 :continue
-echo 프로세스 종료 확인
+echo Process stopped
 
-REM 2. 현재 exe 백업
+REM 2. backup current exe
 if exist "${backupExePath}" del /f "${backupExePath}"
-echo 백업: ${currentExeName} → ${currentExeName}.old
+echo Backup: ${currentExeName} to ${currentExeName}.old
 rename "${currentExePath}" "${currentExeName}.old"
 
-REM 3. 새 exe 적용
-echo 새 버전 적용 중...
+REM 3. apply new exe
+echo Applying new version...
 copy /y "${newBinPath}" "${currentExePath}" >nul
 if errorlevel 1 (
-  echo [ERROR] 복사 실패 — 롤백 진행
+  echo [ERROR] Copy failed - rolling back
   rename "${backupExePath}" "${currentExeName}"
   exit /b 1
 )
-echo 새 버전 적용 완료
+echo New version applied
 
-REM 4. Agent 재시작
-echo Agent 재시작 중...
+REM 4. restart agent
+echo Restarting agent...
 ${startCmd}
 
-REM 5. 정리 (5초 후)
+REM 5. cleanup (after 5s)
 timeout /t 5 /nobreak >nul
 if exist "${backupExePath}" del /f "${backupExePath}"
 if exist "${newBinPath}" del /f "${newBinPath}"
 
-echo [Sync Agent Updater] 업데이트 완료: v${newVersion}
-REM bat 자기 삭제
+echo [Sync Agent Updater] Update complete: v${newVersion}
+REM self-delete
 (goto) 2>nul & del "%~f0"
 `;
 

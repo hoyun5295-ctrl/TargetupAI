@@ -20,6 +20,12 @@
 
 ## 사고 이력
 
+### 2026-06-19 (싱크에이전트 INSTALL bat 한글 → 2008R2 cp949 파싱 깨짐 = 설치 실행 실패)
+- **사례**: 싱크에이전트 1053 수정 때 INSTALL bat에 한글 안내문(`chcp 65001` 동반)을 추가 → 2008R2(cp949 콘솔)에서 bat 명령들이 깨져 "X은(는) 명령 아님" 연발 + diagnose.txt 생성 실패 = 설치 자체가 실행 불가.
+- **Root cause**: cmd.exe는 배치파일을 현재 콘솔 코드페이지로 파싱한다. UTF-8 한글이 든 bat는 cp949 콘솔에서 명령 파싱이 깨진다(`chcp 65001`이 있어도). cp949 콘솔 실측 — 한글 bat = 명령 깨짐 / ASCII bat = 정상.
+- **대책**: **배포되는 .bat는 ASCII 영문 전용.** 화면에 보여줄 한글은 bat가 아니라 데이터 파일(diagnose.txt)에 두고 `chcp 65001` + `type`으로. diagnose.txt에 실리는 exe 콘솔 출력도 영문 권장.
+- **교훈**: **콘솔/설치 검증은 실제 cp949 콘솔에서.** Win11 기본 UTF-8 콘솔 통과는 2008R2 보장이 아니다(1차 검증을 Win11에서만 해서 못 잡음). 구형 OS 대상 산출물은 그 OS의 코드페이지 조건에서 검증.
+
 ### D184-fix (vite.config.ts import vs package.json devDependencies 불일치 — 2달+ 누적)
 - **사례**: 운영 서버 company-frontend `npm run build:safe` 실패 — `ERR_MODULE_NOT_FOUND: Cannot find package 'vite-plugin-javascript-obfuscator'`.
 - **Root cause**: `1ca6ee8 코드난독화` commit (2026-03-08) 영역 `packages/company-frontend/vite.config.ts` import 추가 + `package.json` devDependencies 등록 누락. 2달+ 누적 (운영 빌드 영역에서 처음 발현 — 로컬 node_modules cache).

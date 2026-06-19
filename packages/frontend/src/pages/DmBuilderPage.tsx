@@ -254,15 +254,16 @@ export default function DmBuilderPage() {
         setToast({ type: 'error', message: '이미지 업로드에 실패했습니다. 다시 시도해주세요.' });
         return;
       }
-      // 완성 이미지 N장 → 자동 슬라이드쇼(slideshow) 섹션 1개로 구성 후 편집 모드 진입
-      const slideshow = createSection('slideshow', 0, { slides: urls.map((u) => ({ image_url: u })) });
+      // 완성 이미지 N장 → 갤러리(세로 1열·원본 비율 풀폭) 섹션 1개로 구성 후 편집 모드 진입
+      // slideshow는 16:9 크롭 + 발송 시 첫 장만 렌더되어 완성 시안에 부적합 → gallery list_1xN은 전 이미지를 원본 비율로 세로 나열
+      const gallery = createSection('gallery', 0, { images: urls.map((u) => ({ url: u })), layout: 'list_1xN' });
       createNew({ title: '완성 이미지 DM' });
-      applyAiGenerated([slideshow], undefined, '완성 이미지 업로드', { layoutMode: 'scroll' });
+      applyAiGenerated([gallery], undefined, '완성 이미지 업로드', { layoutMode: 'scroll' });
       await save({ silent: true });
       setMode('edit');
       setToast({
         type: 'success',
-        message: `완성 이미지 ${urls.length}장으로 슬라이드 DM을 만들었어요${failed ? ` (${failed}장 실패)` : ''}. 편집에서 스크롤(갤러리)로 바꾸거나 순서를 조정할 수 있어요.`,
+        message: `완성 이미지 ${urls.length}장으로 이미지 DM을 만들었어요${failed ? ` (${failed}장 실패)` : ''}. 편집에서 순서·캡션을 조정할 수 있어요.`,
       });
     } catch (err: any) {
       setToast({ type: 'error', message: err?.response?.data?.error || err?.message || '이미지 DM 생성 실패' });
@@ -1071,6 +1072,7 @@ function TopBarWithBack({ onBack, onPublishDone }: { onBack: () => void; onPubli
   const dmId = useDmBuilderStore((s) => s.dmId);
   const setToast = useDmBuilderStore((s) => s.setToast);
   const [confirmPublish, setConfirmPublish] = useState(false);
+  const [publishedUrl, setPublishedUrl] = useState<string | null>(null);
 
   const handleTestSend = async () => {
     if (!dmId) {
@@ -1089,7 +1091,13 @@ function TopBarWithBack({ onBack, onPublishDone }: { onBack: () => void; onPubli
     await saveStore();
     if (dmId) {
       try {
-        await api.post(`/dm/${dmId}/publish`);
+        const res = await api.post(`/dm/${dmId}/publish`);
+        const url = res?.data?.short_url || '';
+        if (url) {
+          // 발행 완료 → 단축 URL 확인·복사 모달. 목록 이동은 모달 확인 시.
+          setPublishedUrl(url);
+          return;
+        }
         setToast({ type: 'success', message: '발행했어요.' });
       } catch (err: any) {
         setToast({ type: 'error', message: err?.response?.data?.error || '발행 실패' });
@@ -1112,6 +1120,26 @@ function TopBarWithBack({ onBack, onPublishDone }: { onBack: () => void; onPubli
         onConfirm={() => { setConfirmPublish(false); handlePublish(); }}
         onCancel={() => setConfirmPublish(false)}
       />
+      <ModalBase
+        open={!!publishedUrl}
+        onClose={() => { setPublishedUrl(null); onPublishDone(); }}
+        title="발행 완료"
+        subtitle="아래 단축 URL을 복사해 고객에게 발송하세요."
+        size="sm"
+        footer={<ModalButton variant="primary" onClick={() => { setPublishedUrl(null); onPublishDone(); }}>확인</ModalButton>}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: '#f3f4f6', border: '1px solid #e5e7eb', borderRadius: 10, padding: '10px 12px' }}>
+          <span style={{ flex: 1, fontSize: 13, fontWeight: 600, color: '#4f46e5', wordBreak: 'break-all', userSelect: 'all' }}>{publishedUrl}</span>
+          <ModalButton
+            variant="secondary"
+            onClick={async () => {
+              if (!publishedUrl) return;
+              try { await navigator.clipboard.writeText(publishedUrl); setToast({ type: 'success', message: '링크를 복사했어요.' }); }
+              catch { setToast({ type: 'error', message: '복사 실패 — 링크를 길게 눌러 복사해주세요.' }); }
+            }}
+          >복사</ModalButton>
+        </div>
+      </ModalBase>
     </>
   );
 }

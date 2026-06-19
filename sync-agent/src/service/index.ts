@@ -142,19 +142,19 @@ function cleanupWindowsLeftovers(): void {
 function installServiceWindows(): void {
   console.log('');
   console.log('==================================================');
-  console.log('  Sync Agent - Windows 작업 등록 (작업 스케줄러)');
+  console.log('  Sync Agent - Windows Task Scheduler registration');
   console.log('==================================================');
   console.log('');
 
   if (!isWindowsAdmin()) {
-    console.error('[ERROR] 관리자 권한이 필요합니다.');
-    console.error('        cmd/PowerShell 을 관리자 권한으로 실행 후 다시 시도하세요.');
+    console.error('[ERROR] Administrator privileges required.');
+    console.error('        Run cmd/PowerShell as Administrator and retry.');
     console.error('');
     process.exit(1);
   }
 
   const exePath = getExePath();
-  console.log(`exe 경로: ${exePath}`);
+  console.log(`exe path: ${exePath}`);
 
   // 1) 레거시 + 기존 작업 정리 — 실패했던 설치 흔적이 있어도 깨끗이 재등록
   cleanupWindowsLeftovers();
@@ -167,15 +167,15 @@ function installServiceWindows(): void {
   const createResult = runCommand(`schtasks /Create /TN "${WIN_TASK_NAME}" /XML "${xmlPath}" /F`);
   try { fs.unlinkSync(xmlPath); } catch { /* noop */ }
   if (!createResult.success) {
-    console.error('[ERROR] 작업 생성 실패:', createResult.output);
+    console.error('[ERROR] Task creation failed:', createResult.output);
     process.exit(1);
   }
-  console.log('[OK] 작업 등록 완료 (부팅 시 SYSTEM 권한 자동 시작, 2분 지연, 실패 시 자동 재시작)');
+  console.log('[OK] Task registered (auto-start at boot as SYSTEM, 2-min delay, auto-restart on failure)');
 
   // 4) 즉시 시작
   const startResult = runCommand(`schtasks /Run /TN "${WIN_TASK_NAME}"`);
   if (!startResult.success) {
-    console.log(`[WARN] 즉시 시작 실패 - 수동 시작: schtasks /Run /TN ${WIN_TASK_NAME}`);
+    console.log(`[WARN] Immediate start failed - run manually: schtasks /Run /TN ${WIN_TASK_NAME}`);
   }
 
   // 5) 효과 검증 — 실제 프로세스가 떴는지 확인한 뒤에만 성공 표시 (6원칙 #2)
@@ -185,11 +185,11 @@ function installServiceWindows(): void {
     try { execSync('timeout /t 1 /nobreak >nul', { stdio: 'ignore' }); } catch { /* noop */ }
   }
   if (running) {
-    console.log('[OK] 에이전트 실행 확인 (프로세스 기동됨)');
+    console.log('[OK] Agent running (process started)');
   } else {
-    console.log('[INFO] 에이전트 프로세스가 아직 확인되지 않습니다.');
-    console.log('       설정이 없으면 먼저 설정하세요: sync-agent.exe --setup');
-    console.log('       (설정 완료 후 자동 시작되며, 재부팅 시에도 자동 시작됩니다)');
+    console.log('[INFO] Agent process not detected yet.');
+    console.log('       If not configured yet, run: sync-agent.exe --setup');
+    console.log('       (starts automatically after setup, and on every boot)');
   }
 
   printWindowsInfo(exePath);
@@ -198,13 +198,13 @@ function installServiceWindows(): void {
 function uninstallServiceWindows(): void {
   console.log('');
   console.log('==================================================');
-  console.log('  Sync Agent - Windows 작업 제거');
+  console.log('  Sync Agent - Windows Task removal');
   console.log('==================================================');
   console.log('');
 
   if (!isWindowsAdmin()) {
-    console.error('[ERROR] 관리자 권한이 필요합니다.');
-    console.error('        cmd/PowerShell 을 관리자 권한으로 실행 후 다시 시도하세요.');
+    console.error('[ERROR] Administrator privileges required.');
+    console.error('        Run cmd/PowerShell as Administrator and retry.');
     console.error('');
     process.exit(1);
   }
@@ -216,9 +216,9 @@ function uninstallServiceWindows(): void {
   runCommand(`sc delete ${WIN_TASK_NAME}`);
 
   if (delTask.success) {
-    console.log('[OK] 작업 제거 완료');
+    console.log('[OK] Task removed');
   } else {
-    console.log('[INFO] 제거할 작업이 없거나 이미 제거되었습니다.');
+    console.log('[INFO] No task to remove (already removed).');
   }
   console.log('');
 }
@@ -227,39 +227,39 @@ function serviceStatusWindows(): void {
   console.log('');
   const exists = runCommand(`schtasks /Query /TN "${WIN_TASK_NAME}"`);
   if (!exists.success) {
-    console.log(`[INFO] 작업 "${WIN_TASK_DISPLAY}" 가 등록되어 있지 않습니다.`);
-    console.log('       등록: sync-agent.exe --install-service');
+    console.log(`[INFO] Task "${WIN_TASK_DISPLAY}" is not registered.`);
+    console.log('       Register: sync-agent.exe --install-service');
     console.log('');
     return;
   }
 
   const running = isAgentProcessRunning();
-  console.log(`작업: ${WIN_TASK_DISPLAY} (${WIN_TASK_NAME})`);
-  console.log(`상태: ${running ? '[RUNNING] 실행 중' : '[STOPPED] 중지됨'}`);
+  console.log(`Task: ${WIN_TASK_DISPLAY} (${WIN_TASK_NAME})`);
+  console.log(`Status: ${running ? '[RUNNING]' : '[STOPPED]'}`);
   console.log('');
-  console.log('명령:');
+  console.log('Commands:');
   if (running) {
-    console.log(`  중지: schtasks /End /TN ${WIN_TASK_NAME}`);
+    console.log(`  Stop: schtasks /End /TN ${WIN_TASK_NAME}`);
   } else {
-    console.log(`  시작: schtasks /Run /TN ${WIN_TASK_NAME}`);
+    console.log(`  Start: schtasks /Run /TN ${WIN_TASK_NAME}`);
   }
-  console.log('  제거: sync-agent.exe --uninstall-service');
+  console.log('  Remove: sync-agent.exe --uninstall-service');
   console.log('');
 }
 
 function printWindowsInfo(exePath: string): void {
   console.log('');
-  console.log('작업 정보:');
-  console.log(`  이름: ${WIN_TASK_NAME}`);
-  console.log(`  실행: ${exePath} --service`);
-  console.log('  시작: 부팅 시 자동 (SYSTEM 권한, 2분 지연)');
-  console.log('  복구: 실패 시 1분 후 자동 재시작 (최대 3회)');
+  console.log('Task info:');
+  console.log(`  Name: ${WIN_TASK_NAME}`);
+  console.log(`  Run: ${exePath} --service`);
+  console.log('  Start: automatic at boot (SYSTEM, 2-min delay)');
+  console.log('  Recovery: auto-restart after 1 min on failure (up to 3x)');
   console.log('');
-  console.log('관리 명령:');
-  console.log('  상태 확인: sync-agent.exe --service-status');
-  console.log(`  중지: schtasks /End /TN ${WIN_TASK_NAME}`);
-  console.log(`  시작: schtasks /Run /TN ${WIN_TASK_NAME}`);
-  console.log('  제거: sync-agent.exe --uninstall-service');
+  console.log('Manage:');
+  console.log('  Status: sync-agent.exe --service-status');
+  console.log(`  Stop: schtasks /End /TN ${WIN_TASK_NAME}`);
+  console.log(`  Start: schtasks /Run /TN ${WIN_TASK_NAME}`);
+  console.log('  Remove: sync-agent.exe --uninstall-service');
   console.log('');
 }
 

@@ -398,6 +398,8 @@ const [emailSending, setEmailSending] = useState(false);
   const [templateFilter, setTemplateFilter] = useState<'all' | 'pending' | 'approved' | 'rejected'>('all');
   const [templateSubTab, setTemplateSubTab] = useState<'alimtalk' | 'rcs'>('alimtalk');
   const [showManualTemplateForm, setShowManualTemplateForm] = useState(false);
+  const [templateSearch, setTemplateSearch] = useState('');
+  const [templateDetail, setTemplateDetail] = useState<any | null>(null);
   const [manualForm, setManualForm] = useState({ companyId: '', templateCode: '', templateName: '', category: '', messageType: 'BA', content: '' });
   // ★ D130: 레거시 adminProfiles/showProfileForm/profileForm/profileSaving 제거 — AlimtalkSendersSection이 자체 관리
 
@@ -4276,9 +4278,9 @@ const handleApproveRequest = async (id: string) => {
             </button>
           </div>
 
-          {/* 서브탭 + 필터 */}
-          <div className="px-6 py-3 border-b flex items-center justify-between">
-            <div className="flex gap-2">
+          {/* 서브탭 + 검색 + 필터 */}
+          <div className="px-6 py-3 border-b flex items-center justify-between gap-3">
+            <div className="flex gap-2 flex-shrink-0">
               <button onClick={() => setTemplateSubTab('alimtalk')}
                 className={`px-3 py-1.5 rounded-full text-xs font-medium transition ${templateSubTab === 'alimtalk' ? 'bg-amber-600 text-white' : 'bg-gray-100 text-gray-600'}`}>
                 알림톡
@@ -4288,7 +4290,14 @@ const handleApproveRequest = async (id: string) => {
                 RCS
               </button>
             </div>
-            <div className="flex gap-1">
+            <input
+              type="text"
+              value={templateSearch}
+              onChange={(e) => setTemplateSearch(e.target.value)}
+              placeholder="고객사·템플릿명·템플릿코드 검색"
+              className="flex-1 min-w-0 max-w-sm px-3 py-1.5 border rounded-lg text-sm"
+            />
+            <div className="flex gap-1 flex-shrink-0">
               {(['all', 'pending', 'approved', 'rejected'] as const).map(f => (
                 <button key={f} onClick={() => setTemplateFilter(f)}
                   className={`px-2.5 py-1 rounded text-xs transition ${templateFilter === f ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'}`}>
@@ -4319,6 +4328,8 @@ const handleApproveRequest = async (id: string) => {
                   </thead>
                   <tbody className="divide-y divide-gray-100">
                     {adminTemplates.filter((t: any) => {
+                      const q = templateSearch.trim().toLowerCase();
+                      if (q && !`${t.company_name || ''} ${t.template_name || ''} ${t.template_code || ''}`.toLowerCase().includes(q)) return false;
                       if (templateFilter === 'all') return true;
                       const lb = getAlimtalkTemplateStatus(t.status).label;
                       return templateFilter === 'pending' ? lb === '검수중' : templateFilter === 'approved' ? lb === '승인' : lb === '반려';
@@ -4327,7 +4338,14 @@ const handleApproveRequest = async (id: string) => {
                         <td className="px-4 py-3 text-gray-900 font-medium">{t.company_name || '-'}</td>
                         <td className="px-4 py-3">
                           <div className="text-gray-900">{t.template_name}</div>
-                          {t.template_code && <div className="text-xs text-gray-400">{t.template_code}</div>}
+                          {t.template_code && (
+                            <div
+                              className="text-xs text-gray-400 hover:text-blue-600 cursor-pointer inline-block"
+                              style={{ userSelect: 'text' }}
+                              title="클릭하면 복사"
+                              onClick={() => { navigator.clipboard.writeText(t.template_code); showAlert('복사 완료', '템플릿코드를 복사했습니다.', 'success'); }}
+                            >{t.template_code}</div>
+                          )}
                         </td>
                         <td className="px-4 py-3 text-gray-600">{t.category || '-'}</td>
                         <td className="px-4 py-3 text-center">
@@ -4346,14 +4364,18 @@ const handleApproveRequest = async (id: string) => {
                         </td>
                         <td className="px-4 py-3 text-gray-500 text-xs">{t.requested_at ? new Date(t.requested_at).toLocaleDateString('ko-KR') : '-'}</td>
                         <td className="px-4 py-3 text-center">
-                          {getAlimtalkTemplateStatus(t.status).label === '검수중' && (
-                            <div className="flex gap-1 justify-center">
-                              <button onClick={() => handleTemplateApprove('kakao', t.id)}
-                                className="text-xs px-2 py-1 bg-green-50 text-green-700 rounded hover:bg-green-100">승인</button>
-                              <button onClick={() => handleTemplateReject('kakao', t.id)}
-                                className="text-xs px-2 py-1 bg-red-50 text-red-700 rounded hover:bg-red-100">반려</button>
-                            </div>
-                          )}
+                          <div className="flex gap-1 justify-center items-center">
+                            <button onClick={() => setTemplateDetail(t)}
+                              className="text-xs px-2 py-1 bg-blue-50 text-blue-700 rounded hover:bg-blue-100">상세</button>
+                            {getAlimtalkTemplateStatus(t.status).label === '검수중' && (
+                              <>
+                                <button onClick={() => handleTemplateApprove('kakao', t.id)}
+                                  className="text-xs px-2 py-1 bg-green-50 text-green-700 rounded hover:bg-green-100">승인</button>
+                                <button onClick={() => handleTemplateReject('kakao', t.id)}
+                                  className="text-xs px-2 py-1 bg-red-50 text-red-700 rounded hover:bg-red-100">반려</button>
+                              </>
+                            )}
+                          </div>
                         </td>
                       </tr>
                     ))}
@@ -4381,6 +4403,8 @@ const handleApproveRequest = async (id: string) => {
                   </thead>
                   <tbody className="divide-y divide-gray-100">
                     {adminRcsTemplates.filter((t: any) => {
+                      const q = templateSearch.trim().toLowerCase();
+                      if (q && !`${t.company_name || ''} ${t.template_name || ''} ${t.template_code || ''}`.toLowerCase().includes(q)) return false;
                       if (templateFilter === 'all') return true;
                       const lb = getAlimtalkTemplateStatus(t.status).label;
                       return templateFilter === 'pending' ? lb === '검수중' : templateFilter === 'approved' ? lb === '승인' : lb === '반려';
@@ -4395,14 +4419,18 @@ const handleApproveRequest = async (id: string) => {
                           </span>
                         </td>
                         <td className="px-4 py-3 text-center">
-                          {getAlimtalkTemplateStatus(t.status).label === '검수중' && (
-                            <div className="flex gap-1 justify-center">
-                              <button onClick={() => handleTemplateApprove('rcs', t.id)}
-                                className="text-xs px-2 py-1 bg-green-50 text-green-700 rounded hover:bg-green-100">승인</button>
-                              <button onClick={() => handleTemplateReject('rcs', t.id)}
-                                className="text-xs px-2 py-1 bg-red-50 text-red-700 rounded hover:bg-red-100">반려</button>
-                            </div>
-                          )}
+                          <div className="flex gap-1 justify-center items-center">
+                            <button onClick={() => setTemplateDetail(t)}
+                              className="text-xs px-2 py-1 bg-blue-50 text-blue-700 rounded hover:bg-blue-100">상세</button>
+                            {getAlimtalkTemplateStatus(t.status).label === '검수중' && (
+                              <>
+                                <button onClick={() => handleTemplateApprove('rcs', t.id)}
+                                  className="text-xs px-2 py-1 bg-green-50 text-green-700 rounded hover:bg-green-100">승인</button>
+                                <button onClick={() => handleTemplateReject('rcs', t.id)}
+                                  className="text-xs px-2 py-1 bg-red-50 text-red-700 rounded hover:bg-red-100">반려</button>
+                              </>
+                            )}
+                          </div>
                         </td>
                       </tr>
                     ))}
@@ -4416,6 +4444,44 @@ const handleApproveRequest = async (id: string) => {
       )}
 
       {/* ★ D130: 레거시 발신 프로필 등록 모달(Sender Key 수동 입력) 제거됨 — AlimtalkSendersSection의 SenderRegistrationWizard로 대체 */}
+
+      {/* 템플릿 상세 모달 — 고객사 업로드 템플릿 정보 확인 (발송/승인 내용·반려 사유) */}
+      {templateDetail && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-50" onClick={() => setTemplateDetail(null)}>
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-hidden flex flex-col" onClick={(e) => e.stopPropagation()}>
+            <div className="px-6 py-4 border-b bg-gradient-to-r from-blue-50 to-white flex justify-between items-center flex-shrink-0">
+              <div>
+                <h3 className="text-lg font-bold">템플릿 상세</h3>
+                <p className="text-xs text-gray-500">{templateDetail.company_name || '-'} · {getAlimtalkTemplateStatus(templateDetail.status).label}</p>
+              </div>
+              <button onClick={() => setTemplateDetail(null)} className="text-gray-400 hover:text-gray-600 text-xl">&times;</button>
+            </div>
+            <div className="p-6 overflow-auto space-y-4 text-sm" style={{ userSelect: 'text' }}>
+              <div className="grid grid-cols-2 gap-3">
+                <div><div className="text-xs text-gray-400 mb-0.5">템플릿명</div><div className="text-gray-800">{templateDetail.template_name || '-'}</div></div>
+                <div><div className="text-xs text-gray-400 mb-0.5">템플릿코드</div><div className="text-gray-800 font-mono">{templateDetail.template_code || '-'}</div></div>
+                <div><div className="text-xs text-gray-400 mb-0.5">카테고리</div><div className="text-gray-800">{templateDetail.category || '-'}</div></div>
+                <div><div className="text-xs text-gray-400 mb-0.5">유형</div><div className="text-gray-800">{templateDetail.message_type || '-'}</div></div>
+                <div><div className="text-xs text-gray-400 mb-0.5">발신프로필</div><div className="text-gray-800">{templateDetail.profile_name || '-'}</div></div>
+                <div><div className="text-xs text-gray-400 mb-0.5">요청일</div><div className="text-gray-800">{(templateDetail.requested_at || templateDetail.created_at) ? new Date(templateDetail.requested_at || templateDetail.created_at).toLocaleString('ko-KR') : '-'}</div></div>
+              </div>
+              <div>
+                <div className="text-xs text-gray-400 mb-1">템플릿 내용</div>
+                <div className="bg-gray-50 border rounded-lg p-3 whitespace-pre-wrap break-words text-gray-800">{templateDetail.content || '-'}</div>
+              </div>
+              {templateDetail.reject_reason && (
+                <div>
+                  <div className="text-xs text-gray-400 mb-1">반려 사유</div>
+                  <div className="bg-red-50 border border-red-100 rounded-lg p-3 whitespace-pre-wrap break-words text-red-700">{templateDetail.reject_reason}</div>
+                </div>
+              )}
+            </div>
+            <div className="px-6 py-3 border-t bg-gray-50 flex justify-end flex-shrink-0">
+              <button onClick={() => setTemplateDetail(null)} className="px-4 py-2 bg-gray-100 hover:bg-gray-200 rounded-lg text-sm font-medium">닫기</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* 수동 등록 모달 */}
       {showManualTemplateForm && (
@@ -6535,8 +6601,8 @@ const handleApproveRequest = async (id: string) => {
                         {/* ★ 발송일시 = sendreqTime(발송요청/예약 시각, KST) — 목록·통계와 동일 기준(D233+). mobsendTime(통신사 응답)은 지연 시 다음날·대기 시 빈칸이라 불일치 */}
                         <td className="px-3 py-2 text-center text-xs text-gray-500 whitespace-nowrap">{r.sendreqTime ? new Date(r.sendreqTime).toLocaleString('ko-KR', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : '-'}</td>
                         <td className="px-3 py-2 text-center text-xs text-gray-600 whitespace-nowrap">{r.sendType || '-'}</td>
-                        <td className="px-3 py-2 text-center text-gray-700 font-mono text-xs">{r.destNo}</td>
-                        <td className="px-3 py-2 text-center text-gray-500 font-mono text-xs">{r.callBack}</td>
+                        <td className="px-3 py-2 text-center text-gray-700 font-mono text-xs hover:text-blue-600 cursor-pointer" style={{ userSelect: 'text' }} title="클릭하면 복사" onClick={() => { if (r.destNo) { navigator.clipboard.writeText(String(r.destNo)); showAlert('복사 완료', '수신번호를 복사했습니다.', 'success'); } }}>{r.destNo}</td>
+                        <td className="px-3 py-2 text-center text-gray-500 font-mono text-xs hover:text-blue-600 cursor-pointer" style={{ userSelect: 'text' }} title="클릭하면 복사" onClick={() => { if (r.callBack) { navigator.clipboard.writeText(String(r.callBack)); showAlert('복사 완료', '회신번호를 복사했습니다.', 'success'); } }}>{r.callBack}</td>
                         <td className="px-3 py-2 text-gray-700 text-xs max-w-xs">
                           <div
                             className="truncate cursor-pointer hover:text-blue-600 hover:underline"
