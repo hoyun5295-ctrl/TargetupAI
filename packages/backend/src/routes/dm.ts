@@ -788,7 +788,7 @@ dmRouter.post('/from-template', async (req: any, res: any) => {
     const companyKit = await getCompanyBrandKit(companyId);
     const instance = instantiateTemplate(t, { title, storeName: store_name, brandKit: companyKit });
 
-    const created = await createDm(companyId, req.user?.id, {
+    const created = await createDm(companyId, req.user?.userId, {
       title: instance.title,
       store_name: instance.store_name,
       layout_mode: 'scroll',
@@ -904,7 +904,7 @@ dmRouter.post('/ab-tests', async (req: any, res: any) => {
     if (!body.name || !body.variant_a_page_id || !body.variant_b_page_id) {
       return res.status(400).json({ error: 'name / variant_a_page_id / variant_b_page_id 필수' });
     }
-    const test = await createAbTest(companyId, req.user?.id || null, {
+    const test = await createAbTest(companyId, req.user?.userId || null, {
       name: body.name,
       description: body.description,
       variant_a_page_id: body.variant_a_page_id,
