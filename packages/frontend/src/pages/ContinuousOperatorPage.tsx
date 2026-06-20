@@ -71,6 +71,8 @@ interface ContinuousOperator {
   objective: string;
   schedule: Schedule;
   scheduleTime: string;
+  scheduleDayOfWeek?: number | null;   // 0(일)~6(토) — weekly 전용
+  scheduleDayOfMonth?: number | null;  // 1~31 — monthly 전용
   status: OperatorStatus;
   lastRunAt: string | null;
   nextRunAt: string | null;
@@ -315,6 +317,8 @@ export default function ContinuousOperatorPage() {
           objective: editing.objective,
           schedule: editing.schedule || 'daily',
           schedule_time: editing.scheduleTime || '09:00',
+          schedule_day_of_week: editing.schedule === 'weekly' ? (editing.scheduleDayOfWeek ?? 1) : null,
+          schedule_day_of_month: editing.schedule === 'monthly' ? (editing.scheduleDayOfMonth ?? 1) : null,
           status: editing.status,
           // ★ D212+ 5번 (2026-05-23 Harold 명시): 비용 제어 영역 전달
           budget_monthly: editing.budgetMonthly,
@@ -1250,6 +1254,39 @@ export default function ContinuousOperatorPage() {
                   />
                 </div>
               </div>
+              {editing.schedule === 'weekly' && (
+                <div>
+                  <label className="text-xs font-medium text-white/70 block mb-1.5">발송 요일</label>
+                  <select
+                    value={editing.scheduleDayOfWeek ?? 1}
+                    onChange={(e) => setEditing({ ...editing, scheduleDayOfWeek: Number(e.target.value) })}
+                    className="w-full px-3 py-2 bg-violet-900/50 border border-white/10 rounded-lg text-sm text-white focus:outline-none focus:border-indigo-400/50 transition-colors"
+                  >
+                    <option value={0}>일요일</option>
+                    <option value={1}>월요일</option>
+                    <option value={2}>화요일</option>
+                    <option value={3}>수요일</option>
+                    <option value={4}>목요일</option>
+                    <option value={5}>금요일</option>
+                    <option value={6}>토요일</option>
+                  </select>
+                </div>
+              )}
+              {editing.schedule === 'monthly' && (
+                <div>
+                  <label className="text-xs font-medium text-white/70 block mb-1.5">발송 날짜 (매월)</label>
+                  <select
+                    value={editing.scheduleDayOfMonth ?? 1}
+                    onChange={(e) => setEditing({ ...editing, scheduleDayOfMonth: Number(e.target.value) })}
+                    className="w-full px-3 py-2 bg-violet-900/50 border border-white/10 rounded-lg text-sm text-white focus:outline-none focus:border-indigo-400/50 transition-colors"
+                  >
+                    {Array.from({ length: 31 }, (_, i) => i + 1).map((d) => (
+                      <option key={d} value={d}>{d}일</option>
+                    ))}
+                  </select>
+                  <div className="text-[10px] text-white/40 mt-1">해당 날짜가 없는 달(예: 31일)은 그 달 말일에 발송됩니다.</div>
+                </div>
+              )}
               {editing.id && (
                 <div>
                   <label className="text-xs font-medium text-white/70 block mb-1.5">상태</label>

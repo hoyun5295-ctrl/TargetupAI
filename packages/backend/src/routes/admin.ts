@@ -155,6 +155,10 @@ router.put('/users/:id', authenticate, requireSuperAdmin, async (req: Request, r
 
     // ★ 2026-06-11 감사 로그 — 변경된 필드만 before/after 기록 (라인그룹 지정/해제 책임 추적)
     const d = diffFields(before, result.rows[0], ['name', 'email', 'user_type', 'status', 'store_codes', 'line_group_id', 'opt_out_080_number']);
+    // ★ 사용자 라인그룹 변경 시 캐시 즉시 무효화 — 변경 직후 옛 라인으로 적재(stale)되는 것 차단
+    if (d.changed.includes('line_group_id')) {
+      invalidateLineGroupCache();
+    }
     if (d.changed.length > 0) {
       await recordAuditLog({
         actorUserId: req.user?.userId,
@@ -494,8 +498,10 @@ router.put('/companies/:id', authenticate, requireSuperAdmin, async (req: Reques
       return res.status(404).json({ error: '회사를 찾을 수 없습니다.' });
     }
 
-    // ★ 2026-06-11 감사 로그 — 회사 라인그룹 변경 추적
+    // ★ 회사 라인그룹 변경 시 캐시 즉시 무효화 — 변경 직후 옛 라인으로 적재(stale)되는 것 차단
+    //   (라인그룹 CRUD는 invalidate가 있었으나 회사 라인 '할당' 변경 경로는 누락되어 있었음)
     if (lineGroupId && prevCompanyLineGroupId !== lineGroupId) {
+      invalidateLineGroupCache();
       await recordAuditLog({
         actorUserId: req.user?.userId,
         action: 'company_line_group_change',

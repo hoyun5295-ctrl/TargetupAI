@@ -65,6 +65,8 @@ export interface CreateOperatorInput {
   objective: string;
   schedule?: OperatorSchedule;
   scheduleTime?: string;  // HH:mm KST, default 09:00
+  scheduleDayOfWeek?: number | null;   // 0(일)~6(토) — weekly 전용 (미지정 시 생성일 요일)
+  scheduleDayOfMonth?: number | null;  // 1~31 — monthly 전용 (말일 초과 시 그 달 말일로 클램프)
 }
 
 export interface ContinuousOperator {
@@ -75,6 +77,8 @@ export interface ContinuousOperator {
   objective: string;
   schedule: OperatorSchedule;
   scheduleTime: string;
+  scheduleDayOfWeek: number | null;   // 0(일)~6(토) — weekly 전용
+  scheduleDayOfMonth: number | null;  // 1~31 — monthly 전용
   status: OperatorStatus;
   lastRunAt: Date | null;
   nextRunAt: Date | null;
@@ -134,7 +138,9 @@ export async function createOperator(input: CreateOperatorInput): Promise<Contin
   }
   const schedule: OperatorSchedule = ['daily', 'weekly', 'monthly'].includes(input.schedule || '') ? input.schedule! : 'daily';
   const scheduleTime = input.scheduleTime || '09:00';
-  const nextRunAt = computeNextRun(schedule, scheduleTime);
+  const scheduleDayOfWeek = (schedule === 'weekly' && input.scheduleDayOfWeek != null) ? input.scheduleDayOfWeek : null;
+  const scheduleDayOfMonth = (schedule === 'monthly' && input.scheduleDayOfMonth != null) ? input.scheduleDayOfMonth : null;
+  const nextRunAt = computeNextRun(schedule, scheduleTime, scheduleDayOfWeek, scheduleDayOfMonth);
 
   // ★ 2026-06-02 종량제: 자동마케팅 저장(활성화) = 200 1회. 사전 잔액 확인(선불 부족 차단) → INSERT → 성공 후 차감(멱등키 operatorId).
   const saveCost = getCreditCost('continuous-operator');
@@ -142,14 +148,14 @@ export async function createOperator(input: CreateOperatorInput): Promise<Contin
   const result = await query(
     `INSERT INTO continuous_operators (
       id, company_id, created_by, name, objective,
-      schedule, schedule_time, status, next_run_at,
+      schedule, schedule_time, schedule_day_of_week, schedule_day_of_month, status, next_run_at,
       created_at, updated_at
     ) VALUES (
       gen_random_uuid(), $1::uuid, $2::uuid, $3, $4,
-      $5, $6, 'active', $7,
+      $5, $6, $8, $9, 'active', $7,
       NOW(), NOW()
     ) RETURNING *`,
-    [input.companyId, input.createdBy, input.name, input.objective.trim(), schedule, scheduleTime, nextRunAt]
+    [input.companyId, input.createdBy, input.name, input.objective.trim(), schedule, scheduleTime, nextRunAt, scheduleDayOfWeek, scheduleDayOfMonth]
   );
   const operator = mapRowToOperator(result.rows[0]);
   await deductCreditSafe({
@@ -194,6 +200,8 @@ export async function updateOperator(
     objective?: string;
     schedule?: OperatorSchedule;
     scheduleTime?: string;
+    scheduleDayOfWeek?: number | null;
+    scheduleDayOfMonth?: number | null;
     status?: OperatorStatus;
     // ★ D212+ 5번 (2026-05-23 Harold 명시): 비용 제어 강화 patch
     budgetMonthly?: number | null;
@@ -211,17 +219,21 @@ export async function updateOperator(
     maxSpamRetries?: number;
   }
 ): Promise<ContinuousOperator | null> {
-  // schedule/scheduleTime 변경 시 next_run_at 재계산
+  // schedule/scheduleTime/요일/날짜 변경 시 next_run_at 재계산
   let nextRunAt: Date | null = null;
-  if (patch.schedule || patch.scheduleTime) {
+  let nextDow: number | null = null;
+  let nextDom: number | null = null;
+  if (patch.schedule || patch.scheduleTime || patch.scheduleDayOfWeek !== undefined || patch.scheduleDayOfMonth !== undefined) {
     const current = await query(
-      `SELECT schedule, schedule_time FROM continuous_operators WHERE id = $1::uuid AND company_id = $2::uuid`,
+      `SELECT schedule, schedule_time, schedule_day_of_week, schedule_day_of_month FROM continuous_operators WHERE id = $1::uuid AND company_id = $2::uuid`,
       [operatorId, companyId]
     );
     if (current.rows.length === 0) return null;
     const sched = (patch.schedule || current.rows[0].schedule) as OperatorSchedule;
     const time = patch.scheduleTime || current.rows[0].schedule_time;
-    nextRunAt = computeNextRun(sched, time);
+    nextDow = sched === 'weekly' ? (patch.scheduleDayOfWeek !== undefined ? patch.scheduleDayOfWeek : current.rows[0].schedule_day_of_week) : null;
+    nextDom = sched === 'monthly' ? (patch.scheduleDayOfMonth !== undefined ? patch.scheduleDayOfMonth : current.rows[0].schedule_day_of_month) : null;
+    nextRunAt = computeNextRun(sched, time, nextDow, nextDom);
   }
 
   const result = await query(
@@ -244,6 +256,8 @@ export async function updateOperator(
       spam_score_threshold = COALESCE($18, spam_score_threshold),
       max_spam_retries = COALESCE($19, max_spam_retries),
       auto_send_lead_minutes = COALESCE($20, auto_send_lead_minutes),
+      schedule_day_of_week = COALESCE($21, schedule_day_of_week),
+      schedule_day_of_month = COALESCE($22, schedule_day_of_month),
       updated_at = NOW()
      WHERE id = $1::uuid AND company_id = $2::uuid
      RETURNING *`,
@@ -267,6 +281,8 @@ export async function updateOperator(
       patch.spamScoreThreshold ?? null,
       patch.maxSpamRetries ?? null,
       patch.autoSendLeadMinutes ?? null,
+      nextDow,
+      nextDom,
     ]
   );
   return result.rows.length > 0 ? mapRowToOperator(result.rows[0]) : null;
@@ -705,7 +721,18 @@ async function updateOperatorAfterRun(
   proposalIncrement: number,
   autoExecuted: boolean = false
 ): Promise<void> {
-  const nextRunAt = computeNextRun(schedule, scheduleTime);
+  // 지정 요일/날짜 반영 — 컬럼 미존재(ALTER 전) 환경에서도 안전하게 fallback
+  let dow: number | null = null;
+  let dom: number | null = null;
+  try {
+    const dayRes = await query(
+      `SELECT schedule_day_of_week, schedule_day_of_month FROM continuous_operators WHERE id = $1::uuid`,
+      [operatorId]
+    );
+    dow = dayRes.rows[0]?.schedule_day_of_week ?? null;
+    dom = dayRes.rows[0]?.schedule_day_of_month ?? null;
+  } catch { /* 컬럼 미존재 시 기존 동작 유지 */ }
+  const nextRunAt = computeNextRun(schedule, scheduleTime, dow, dom);
   await query(
     `UPDATE continuous_operators SET
        last_run_at = NOW(),
@@ -1167,7 +1194,12 @@ async function sendAutoSendPrepNotice(
   await query(`UPDATE operator_proposals SET admin_notified_at = NOW() WHERE id = $1::uuid`, [proposalId]);
 }
 
-function computeNextRun(schedule: OperatorSchedule, scheduleTime: string): Date {
+function computeNextRun(
+  schedule: OperatorSchedule,
+  scheduleTime: string,
+  dayOfWeek: number | null = null,
+  dayOfMonth: number | null = null,
+): Date {
   // KST 기준 schedule_time(HH:mm)에 다음 실행
   const [hStr, mStr] = scheduleTime.split(':');
   const h = parseInt(hStr) || 9;
@@ -1178,8 +1210,26 @@ function computeNextRun(schedule: OperatorSchedule, scheduleTime: string): Date 
   const kstNow = new Date(now.getTime() + 9 * 60 * 60 * 1000); // UTC → KST
   const target = new Date(kstNow);
   target.setUTCHours(h, m, 0, 0);
-  if (target.getTime() <= kstNow.getTime()) {
-    // 오늘 시간이 지났으면 다음 사이클
+
+  if (schedule === 'weekly' && dayOfWeek != null) {
+    // 지정 요일(0=일~6=토)로 — 같은 요일이고 시간이 지났으면 다음 주
+    let diff = (dayOfWeek - target.getUTCDay() + 7) % 7;
+    if (diff === 0 && target.getTime() <= kstNow.getTime()) diff = 7;
+    target.setUTCDate(target.getUTCDate() + diff);
+  } else if (schedule === 'monthly' && dayOfMonth != null) {
+    // 지정 날짜로 — 말일 초과 시 그 달 말일로 클램프, 이번 달 지났으면 다음 달
+    const clampToMonth = (t: Date) => {
+      const last = new Date(Date.UTC(t.getUTCFullYear(), t.getUTCMonth() + 1, 0)).getUTCDate();
+      t.setUTCDate(Math.min(dayOfMonth, last));
+    };
+    target.setUTCDate(1);
+    clampToMonth(target);
+    if (target.getTime() <= kstNow.getTime()) {
+      target.setUTCMonth(target.getUTCMonth() + 1, 1);
+      clampToMonth(target);
+    }
+  } else if (target.getTime() <= kstNow.getTime()) {
+    // 요일/날짜 미지정 — 기존 fallback(현재 요일/날짜 유지)
     if (schedule === 'daily') target.setUTCDate(target.getUTCDate() + 1);
     else if (schedule === 'weekly') target.setUTCDate(target.getUTCDate() + 7);
     else if (schedule === 'monthly') target.setUTCMonth(target.getUTCMonth() + 1);
@@ -1197,6 +1247,8 @@ function mapRowToOperator(row: any): ContinuousOperator {
     objective: row.objective,
     schedule: row.schedule,
     scheduleTime: row.schedule_time,
+    scheduleDayOfWeek: row.schedule_day_of_week ?? null,
+    scheduleDayOfMonth: row.schedule_day_of_month ?? null,
     status: row.status,
     lastRunAt: row.last_run_at ? new Date(row.last_run_at) : null,
     nextRunAt: row.next_run_at ? new Date(row.next_run_at) : null,

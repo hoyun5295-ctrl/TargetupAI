@@ -131,7 +131,7 @@ router.post('/parse', authenticate, upload.single('file'), async (req: Request, 
     const sheetName = workbook.SheetNames[0];
     const worksheet = workbook.Sheets[sheetName];
     
-    const data = XLSX.utils.sheet_to_json(worksheet, { header: 1 }) as any[][];
+    const data = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: null }) as any[][];
     
     if (data.length === 0) {
       return res.status(400).json({ error: '파일이 비어있습니다.' });
@@ -390,7 +390,7 @@ router.post('/validate-mapping', authenticate, async (req: Request, res: Respons
       sheetStubs: false,
     });
     const sheet = workbook.Sheets[workbook.SheetNames[0]];
-    const data = XLSX.utils.sheet_to_json(sheet, { header: 1 }) as any[][];
+    const data = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: null }) as any[][];
     if (data.length === 0) {
       return res.status(400).json({ error: '파일이 비어있습니다.' });
     }
@@ -470,7 +470,7 @@ router.post('/save', authenticate, blockIfSyncActive, async (req: Request, res: 
       // 메타 만료 시 파일에서 빠르게 확인
       const workbook = XLSX.readFile(filePath, { type: 'file', cellFormula: false, cellHTML: false, cellStyles: false, cellDates: true, raw: false, sheetStubs: false });
       const sheet = workbook.Sheets[workbook.SheetNames[0]];
-      const data = XLSX.utils.sheet_to_json(sheet, { header: 1 }) as any[][];
+      const data = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: null }) as any[][];
       totalRows = Math.max(0, data.length - 1);
     }
 
@@ -560,7 +560,7 @@ async function processUploadInBackground(
     });
     const sheetName = workbook.SheetNames[0];
     const worksheet = workbook.Sheets[sheetName];
-    const data = XLSX.utils.sheet_to_json(worksheet, { header: 1 }) as any[][];
+    const data = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: null }) as any[][];
 
     // ★ D141 B1: dedupeHeaders 헬퍼 — 클라이언트 mapping의 unique header 키와 정확히 일치해야 매핑 적용
     //   누락 시: 동일 헤더 컬럼이 있는 엑셀 업로드 → 백그라운드 처리에서 raw header 사용 → mapping[rawHeader] 미스 → 매핑 미적용 → 데이터 손실 사고

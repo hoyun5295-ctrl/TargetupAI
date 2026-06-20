@@ -1740,7 +1740,7 @@ router.post('/operator/continuous', async (req: Request, res: Response) => {
       return res.status(403).json({ success: false, error: '본 기능은 엔터프라이즈 베타 운영 중입니다.', code: 'BETA_GATE' });
     }
 
-    const { name, objective, schedule, schedule_time } = req.body;
+    const { name, objective, schedule, schedule_time, schedule_day_of_week, schedule_day_of_month } = req.body;
     const operator = await createOperator({
       companyId,
       createdBy: userId,
@@ -1748,11 +1748,17 @@ router.post('/operator/continuous', async (req: Request, res: Response) => {
       objective: String(objective || ''),
       schedule,
       scheduleTime: schedule_time,
+      scheduleDayOfWeek: schedule_day_of_week != null ? Number(schedule_day_of_week) : null,
+      scheduleDayOfMonth: schedule_day_of_month != null ? Number(schedule_day_of_month) : null,
     });
     return res.json({ success: true, operator });
   } catch (err: any) {
     if (err instanceof InsufficientCreditError) {
       return res.status(402).json({ success: false, error: '자동 마케팅 시작에 필요한 크레딧이 부족합니다. 크레딧을 충전해 주세요.', code: 'INSUFFICIENT_CREDIT' });
+    }
+    const msg = err?.message || '';
+    if (msg.includes('column') && msg.includes('does not exist')) {
+      return res.status(503).json({ success: false, error: '요일/날짜 지정 기능은 DB 마이그레이션이 필요합니다. 운영자에게 continuous_operators 컬럼 추가를 요청해주세요.', code: 'DB_MIGRATION_PENDING' });
     }
     console.error('[Operator continuous POST] 오류:', err);
     return res.status(500).json({ success: false, error: err?.message || 'Continuous Operator 신설 실패' });
@@ -1778,6 +1784,7 @@ router.put('/operator/continuous/:id', async (req: Request, res: Response) => {
     // 2026-06-19 (Harold 명시): 일반 사용자도 본인 회사의 자동 마케팅을 수정 가능 (operator는 회사 스코프).
     const {
       name, objective, schedule, schedule_time, status,
+      schedule_day_of_week, schedule_day_of_month,
       budget_monthly, budget_daily, budget_alert_threshold,
       // ★ D212+ 정책 (2026-05-23 Harold 명시)
       delivery_policy, verification_required_days,
@@ -1786,6 +1793,8 @@ router.put('/operator/continuous/:id', async (req: Request, res: Response) => {
     } = req.body;
     const operator = await updateOperator(companyId, req.params.id, {
       name, objective, schedule, scheduleTime: schedule_time, status,
+      scheduleDayOfWeek: schedule_day_of_week === undefined ? undefined : (schedule_day_of_week === null ? null : Number(schedule_day_of_week)),
+      scheduleDayOfMonth: schedule_day_of_month === undefined ? undefined : (schedule_day_of_month === null ? null : Number(schedule_day_of_month)),
       budgetMonthly: budget_monthly === undefined ? undefined : (budget_monthly === null ? null : Number(budget_monthly)),
       budgetDaily: budget_daily === undefined ? undefined : (budget_daily === null ? null : Number(budget_daily)),
       budgetAlertThreshold: budget_alert_threshold !== undefined ? Number(budget_alert_threshold) : undefined,
@@ -1803,6 +1812,10 @@ router.put('/operator/continuous/:id', async (req: Request, res: Response) => {
     if (!operator) return res.status(404).json({ success: false, error: 'Operator를 찾을 수 없습니다.' });
     return res.json({ success: true, operator });
   } catch (err: any) {
+    const msg = err?.message || '';
+    if (msg.includes('column') && msg.includes('does not exist')) {
+      return res.status(503).json({ success: false, error: '요일/날짜 지정 기능은 DB 마이그레이션이 필요합니다. 운영자에게 continuous_operators 컬럼 추가를 요청해주세요.', code: 'DB_MIGRATION_PENDING' });
+    }
     console.error('[Operator continuous PUT] 오류:', err);
     return res.status(500).json({ success: false, error: err?.message || '수정 실패' });
   }

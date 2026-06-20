@@ -1971,7 +1971,9 @@ cd /home/administrator/targetup-app/packages/backend && npm install web-push @ty
 | name | varchar(100) | 사용자가 박은 Operator 이름 ("VIP 재구매 영구 운영" 등) |
 | objective | text | 자연어 한 줄 ("VIP 재구매 유도 + 매출 30% 증대") |
 | schedule | varchar(20) DEFAULT 'daily' | daily / weekly / monthly |
-| schedule_time | varchar(10) DEFAULT '09:00' | KST 박을 시각 |
+| schedule_time | varchar(10) DEFAULT '09:00' | KST 발송 시각 |
+| schedule_day_of_week | smallint | 0(일)~6(토) — weekly 전용 (G 2026-06-20 ALTER 실측) |
+| schedule_day_of_month | smallint | 1~31 — monthly 전용 (말일 초과 시 그 달 말일 클램프, G 2026-06-20 ALTER 실측) |
 | status | varchar(20) DEFAULT 'active' | active / paused / archived |
 | last_run_at | timestamptz | 마지막 제안서 생성 시각 |
 | next_run_at | timestamptz | 다음 제안서 생성 예약 시각 |
