@@ -9,6 +9,7 @@ import { isValidSmsTable } from './sms-table-validator';
 import { query } from '../config/database';
 import { SUCCESS_CODES, PENDING_CODES } from './sms-result-map';
 import { splitLiveAndLogTables, mergeCampaignCounts, type CampaignAggCounts } from './sms-table-split';
+import { splitLinesByMsgType } from './sms-line-split';
 
 export type { CampaignAggCounts } from './sms-table-split';
 
@@ -1123,12 +1124,19 @@ export async function bulkInsertSmsQueue(
 ): Promise<number> {
   if (rows.length === 0) return 0;
 
-  // 1단계: 테이블별 배치 분배 (라운드로빈)
+  // ★ 2026-06-20: MMS/문자 라인 분리. 같은 라인에서 무거운 MMS가 문자를 막지 않도록
+  //   회사 라인 안에서 MMS('M')와 문자('L'/'S')를 서로 겹치지 않는 라인으로 가른다.
+  //   회사 라인 "안"에서만 분리하므로 메시지는 여전히 회사 라인 집합 안 → 집계·취소·정산 무영향.
+  const hasMms = rows.some((r) => r[3] === 'M');
+  const hasText = rows.some((r) => r[3] !== 'M');
+  const { mmsLines, textLines } = splitLinesByMsgType(tables, hasMms, hasText);
+
+  // 1단계: 테이블별 배치 분배 (라운드로빈 — msg_type별 풀에서)
   const tableBatches: Record<string, any[][]> = {};
   for (const t of tables) tableBatches[t] = [[]];
 
   for (const row of rows) {
-    const table = getNextSmsTable(tables);
+    const table = getNextSmsTable(row[3] === 'M' ? mmsLines : textLines);
     const currentBatch = tableBatches[table];
     const lastBatch = currentBatch[currentBatch.length - 1];
     if (lastBatch.length >= BATCH_SIZES.smsSend) {
