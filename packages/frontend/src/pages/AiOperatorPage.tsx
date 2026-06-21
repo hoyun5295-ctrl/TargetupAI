@@ -113,6 +113,7 @@ interface ProposalResponse {
     countVerified?: boolean;                    // ★ D168
     agentDurations?: Record<string, number>;    // ★ D170
     generatedAt: string;
+    aiSynthesis?: string;                        // AI 자율 결정 경로 최종 종합 분석(있을 때만)
   };
 }
 
@@ -1385,6 +1386,14 @@ export default function AiOperatorPage() {
             {sendError && (
               <div className="mt-3 p-3 rounded-lg bg-rose-500/10 border border-rose-400/30 text-rose-200 text-sm">
                 <span className="font-semibold">발송 오류 · </span>{sendError}
+              </div>
+            )}
+
+            {/* AI 종합 분석 (AI 자율 결정 경로에서만 채워짐) */}
+            {proposal.meta?.aiSynthesis && (
+              <div className="mt-6 p-4 rounded-xl bg-gradient-to-br from-violet-500/10 to-fuchsia-500/5 border border-violet-400/20">
+                <p className="text-[10px] font-semibold tracking-[0.22em] text-violet-300/70 uppercase mb-1.5">AI 종합 분석</p>
+                <p className="text-sm text-white/80 leading-relaxed whitespace-pre-line">{proposal.meta.aiSynthesis}</p>
               </div>
             )}
 

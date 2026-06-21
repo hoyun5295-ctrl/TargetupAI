@@ -18,6 +18,8 @@ import {
 } from './dm-section-registry';
 import type { DmBrandKit } from './dm-tokens';
 import { decideLayoutMode, splitSectionsIntoPages, type DmLayoutMode } from './dm-page-split';
+import { normalizeVisualConcept, applyVisualDirection, type VisualConcept } from './dm-visual-direction';
+import { normalizeSectionChain } from './dm-section-layout';
 
 // ────────────── 타입 ──────────────
 
@@ -590,9 +592,19 @@ export async function oneShotGenerate(opts: {
     tone: spec.tone || scenarioMeta?.toneHint || 'friendly',
   };
 
-  // 2. sections chain 영역 결정 (scenario 강제 > spec.recommended_sections)
-  const sectionTypes: SectionType[] = scenarioMeta?.sections
-    || (Array.isArray(spec.recommended_sections) ? spec.recommended_sections as SectionType[] : ['header', 'hero', 'cta', 'footer']);
+  // 2. sections chain 결정 — 빠른 시작 시나리오는 고정, 자유 프롬프트는 AI 설계 + 안전 정규화(Phase 3).
+  let sectionTypes: SectionType[];
+  if (scenarioMeta?.sections) {
+    sectionTypes = scenarioMeta.sections;
+  } else if (prompt) {
+    const aiChain = await designSectionLayout(spec, opts.companyId);
+    sectionTypes = normalizeSectionChain(aiChain, spec.objective);
+  } else {
+    sectionTypes = normalizeSectionChain(
+      Array.isArray(spec.recommended_sections) ? (spec.recommended_sections as SectionType[]) : [],
+      spec.objective,
+    );
+  }
 
   // 3. 섹션 영역 생성 + 카피 자동 매핑
   const sections: Section[] = [];
@@ -616,10 +628,13 @@ export async function oneShotGenerate(opts: {
     sections.push(section);
   }
 
+  // ★ AI 비주얼 디렉터 — 캠페인별 색·무드·강조 컨셉을 설계해 섹션에 입힘(사진 없어도 완성형).
+  const concept = await designVisualConcept(spec, undefined, opts.companyId);
+  const directed = applyVisualDirection(sections, concept);
   // 섹션 구성으로 레이아웃 모드 자동 결정 + 모드별 페이지 분할 (slides면 여러 장, scroll이면 한 장)
-  const layoutMode = decideLayoutMode(sections);
-  const pages = splitSectionsIntoPages(sections, layoutMode);
-  return { spec, sections, brandKit, scenario: opts.scenario, layoutMode, pages };
+  const layoutMode = decideLayoutMode(directed);
+  const pages = splitSectionsIntoPages(directed, layoutMode);
+  return { spec, sections: directed, brandKit, scenario: opts.scenario, layoutMode, pages };
 }
 
 /**
@@ -723,4 +738,80 @@ function mergeCopyIntoProps(currentProps: Record<string, unknown>, type: Section
       break;
   }
   return next;
+}
+
+// ────────────── AI 비주얼 디렉터 (Phase 1) ──────────────
+
+const VISUAL_DIRECTOR_SYSTEM = `당신은 모바일 DM 아트 디렉터입니다.
+브랜드·목적·업종·톤을 보고 이 캠페인의 비주얼 컨셉(색 팔레트·무드·강조)을 설계합니다.
+제약:
+- 색은 HEX 6자리. 브랜드 색이 주어지면 그와 조화롭게, 없으면 업종 무드에 맞게.
+- 디자인 디렉션만. 상품명·가격·할인율·혜택 문구 등 사실은 만들지 않는다.
+- JSON만 출력:
+{ "palette": { "primary":"#xxxxxx","accent":"#xxxxxx","surface":"#xxxxxx","on_surface":"#xxxxxx" },
+  "mood":"한두 단어","hero_treatment":"gradient|color_block|image","emphasis_sections":["hero"],"type_scale":"bold|editorial|minimal" }`;
+
+/**
+ * AI 비주얼 디렉터 — 캠페인별 색·무드·강조 컨셉을 설계. 색·무드만 만든다(혜택/사실 생성 X — 영구 룰).
+ * 실패해도 업종 기본 팔레트로 안전 degrade(발송·생성 차단 X).
+ */
+export async function designVisualConcept(spec: CampaignSpec, brandKit?: DmBrandKit, companyId?: string): Promise<VisualConcept> {
+  try {
+    const userMessage = `브랜드: ${spec.brand.name || '(미정)'} / 목적: ${spec.objective} / 업종: ${spec.industry} / 톤: ${spec.tone}` +
+      (brandKit?.primary_color ? ` / 브랜드색: ${brandKit.primary_color}` : '');
+    const text = await callAIWithFallback({
+      system: VISUAL_DIRECTOR_SYSTEM,
+      userMessage,
+      maxTokens: 400,
+      temperature: 0.7,
+      model: 'opus',
+      companyId,
+      source: 'dm-visual', // ★ D227+ 종량제: 묶음 안에선 0(과차감 방지)
+    });
+    return normalizeVisualConcept(extractJson(text) as any, spec.industry || 'general');
+  } catch (e: any) {
+    console.warn('[designVisualConcept] fallback:', e?.message);
+    return normalizeVisualConcept({}, spec.industry || 'general');
+  }
+}
+
+// ────────────── AI 섹션 디자이너 (Phase 3) — 자유 프롬프트 섹션 chain 다양화 ──────────────
+
+const SECTION_LAYOUT_SYSTEM = `당신은 모바일 DM 정보구조 설계자입니다.
+브랜드·목적·업종·캠페인 맥락을 보고 어떤 섹션을 어떤 순서로 배치할지 설계합니다.
+사용 가능한 섹션 타입(이 중에서만 선택):
+header, hero, coupon, countdown, text_card, cta, video, store_info, sns, promo_code, footer,
+product_carousel, gallery, slideshow, tab_cards, poll, survey, email_capture, click_rewards,
+lucky_draw, roulette, instant_coupon, limited_quantity, youtube_embed, instagram_embed, map_store_locator, reviews
+제약:
+- 목적에 맞는 섹션을 5~8개. 같은 목적이라도 캠페인 맥락에 따라 다르게 구성.
+- header로 시작, footer로 끝. cta는 1개 이상.
+- 섹션 "구성"만 설계한다. 카피·혜택·상품·숫자는 만들지 않는다.
+- JSON 배열만 출력: ["header","hero","coupon","cta","footer"]`;
+
+/**
+ * AI 섹션 디자이너 — 자유 프롬프트일 때 섹션 chain(타입 순서)을 콘텐츠 기반으로 설계.
+ * 반환값은 normalizeSectionChain으로 안전 정규화해 사용(유효성·순서·maxCount 가드).
+ * 실패 시 빈 배열 → 정규화가 최소 chain 보장(degrade).
+ */
+export async function designSectionLayout(spec: CampaignSpec, companyId?: string): Promise<SectionType[]> {
+  try {
+    const userMessage = `목적: ${spec.objective} / 업종: ${spec.industry} / 톤: ${spec.tone}`
+      + (spec.brand.name ? ` / 브랜드: ${spec.brand.name}` : '')
+      + (spec.benefit?.type ? ` / 혜택유형: ${spec.benefit.type}` : '')
+      + (spec.urgency?.label ? ` / 긴급성 있음` : '');
+    const text = await callAIWithFallback({
+      system: SECTION_LAYOUT_SYSTEM,
+      userMessage,
+      maxTokens: 300,
+      temperature: 0.8,
+      model: 'opus',
+      companyId,
+      source: 'dm-layout', // ★ D227+ 종량제: 묶음 안에선 0(과차감 방지)
+    });
+    return extractJsonArray<string>(text) as SectionType[];
+  } catch (e: any) {
+    console.warn('[designSectionLayout] fallback:', e?.message);
+    return [];
+  }
 }

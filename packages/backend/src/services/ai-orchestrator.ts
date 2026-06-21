@@ -1,15 +1,16 @@
 /**
  * AI Operator — Multi-Agent Orchestrator (D170+, 2026-05-19)
  *
- * Harold 명시 모델 정합 (절대 분리):
- *   - 모든 AI 호출 = Claude Opus 4.7 (model: 'opus' 박음)
- *   - 백업 fallback = GPT 5.5 (callAIWithFallback이 자동 분기)
- *   - 기존 한줄로AI 흐름(Sonnet 4.6 + gpt-5.4-mini)은 영향 0건
+ * Harold 명시 모델 분리 (절대 준수):
+ *   - 대부분의 AI 호출 = Claude Opus (Target / Compliance / Insight / Orchestrator, model: 'opus')
+ *   - 단, Message Sub-agent = Sonnet (D209+ 품질·비용 균형, model: 'sonnet')
+ *   - 백업 fallback = GPT (callAIWithFallback이 자동 분기)
+ *   - 기존 한줄로AI 흐름(Sonnet + gpt-mini)은 영향 0건
  *
  * Braze급 SaaS Step 0 — Sub-agent 협업 구조:
  *   1. Target Sub-agent  : 자연어 → 고객군 + filters (recommendTarget + model:'opus')
  *   2. Verify Sub-agent  : AI 추정 count → DB 실제 count (countFilteredCustomers, AI 호출 X)
- *   3. Message Sub-agent : 채널별 A/B/C 문안 (generateMessages + model:'opus')
+ *   3. Message Sub-agent : 채널별 A/B/C 문안 (generateMessages + model:'sonnet')
  *   4. Compliance Sub-agent: 스팸/금칙어/정책 검수 (callAIWithFallback + model:'opus')
  *   5. Cost-ROI Sub-agent: 단순 산술 (회사별 단가 × count + 성과 추정, AI 호출 X)
  *
@@ -36,6 +37,8 @@ import {
 } from './ai';
 // ★ D227+ 성과 추정 실데이터 전환 — calculateCostROI(하드코딩) 대체
 import { estimatePerformance } from '../utils/operator-performance-estimator';
+// 문안 생성 objective 합성(seasonHint 결합) 공통 헬퍼 — orchestrate / orchestrateWithAI 일관
+import { buildMessageObjective } from '../utils/season-context';
 // ★ D227+ AI 성과 분석가 sub-agent — 통계 결과 위에 진단·전략·리스크 자연어 (숫자 생성 X)
 import { extractJsonFromAiText } from '../utils/ai-json';
 import {
@@ -143,6 +146,8 @@ export interface OrchestratorResult {
     usedAIDecision?: boolean;
     // ★ D171-D: AI가 어떤 tool을 어떤 입력으로 호출했는지 추적 (배포 후 운영 분석용)
     aiDecisionTrace?: Array<{ iteration: number; tool: string; inputSummary: string; durationMs: number }>;
+    // Orchestrator AI 경로 최종 통합 분석(자연어 한 단락). 순차 경로엔 없음(옵셔널).
+    aiSynthesis?: string;
   };
 }
 
@@ -200,7 +205,7 @@ ${memoryContext}`;
 }
 
 // ============================================================
-// Sub-agent: Compliance (Haiku 4.5, 스팸 + 카카오 정책 검수)
+// Sub-agent: Compliance (Opus — 스팸 + 카카오 정책 검수)
 // ============================================================
 
 export async function checkCompliance(
@@ -249,8 +254,8 @@ passed=true 이면 warnings/suggestions 빈 배열 가능. 사소한 issue는 me
       userMessage,
       maxTokens: 512,
       temperature: 0.1,
-      // ★ D170+ (Harold 명시 2026-05-19): Compliance도 Opus 4.7로 격상.
-      //   Haiku 4.5는 빠른 비용 절감 가치이나 한국 정책 검수 품질에서 Opus가 정합. 비용은 ENT 전용이라 한정.
+      // ★ D170+ (Harold 명시 2026-05-19): Compliance = Opus 사용.
+      //   더 가벼운 모델보다 한국 정책 검수 품질이 우선이라 Opus 채택. 비용은 ENT 전용이라 한정.
       model: 'opus',
       companyId,
       source: 'compliance-check', // ★ D227+ 종량제: orchestrate 묶음 sub — 차감 0(집계만)
@@ -353,7 +358,7 @@ async function _orchestrateImpl(ctx: AgentContext): Promise<OrchestratorResult> 
   const companyDataProfile = await getCompanyDataProfile(ctx.companyId);
 
   const messagesResult = await generateMessages(
-    ctx.seasonHint ? `${ctx.objective}\n\n${ctx.seasonHint}` : ctx.objective,
+    buildMessageObjective(ctx.objective, ctx.seasonHint),
     {
       total_count: estimatedCount,
       avg_purchase_count: parseFloat(ctx.customerStats.avg_purchase_count) || 0,
@@ -398,7 +403,7 @@ async function _orchestrateImpl(ctx: AgentContext): Promise<OrchestratorResult> 
     };
   });
 
-  // ============ 4. Compliance Sub-agent (Haiku 4.5) ============
+  // ============ 4. Compliance Sub-agent (Opus) ============
   const complianceStart = Date.now();
   const primaryBody = normalizedMessages[0]?.body || '';
   const compliance = await checkCompliance(
@@ -588,6 +593,8 @@ async function _orchestrateWithAIImpl(ctx: AgentContext): Promise<OrchestratorRe
   let normalizedMessages: OrchestratorResult['messages'] = [];
   let messagesResult: any = null;
   let compliance: ComplianceResult = { passed: false, riskLevel: 'high', warnings: ['Compliance 미실행'], suggestions: [] };
+  // ★ Orchestrator AI 최종 통합 분석(end_turn 텍스트) — 결과 meta.aiSynthesis로 전달(토큰 낭비 방지)
+  let aiSynthesis = '';
 
   // Tool 실제 호출 (tool name → 해당 sub-agent 함수)
   const callTool = async (toolName: string): Promise<any> => {
@@ -647,7 +654,7 @@ async function _orchestrateWithAIImpl(ctx: AgentContext): Promise<OrchestratorRe
         const companyDataProfile = await getCompanyDataProfile(ctx.companyId);
 
         messagesResult = await generateMessages(
-          ctx.objective,
+          buildMessageObjective(ctx.objective, ctx.seasonHint),
           {
             total_count: estimatedCount,
             avg_purchase_count: parseFloat(ctx.customerStats.avg_purchase_count) || 0,
@@ -784,6 +791,7 @@ ${memoryContext}
       if (response.stop_reason !== 'tool_use') {
         const textBlock = response.content.find((b: any) => b.type === 'text');
         const finalText = textBlock && textBlock.type === 'text' ? (textBlock as any).text : '';
+        aiSynthesis = (finalText || '').trim();
         console.log(`[OrchestratorAI] iter ${iter} 종료 (stop_reason=${response.stop_reason}) — ${finalText.slice(0, 100)}`);
         stoppedNormally = true;
         break;
@@ -928,6 +936,7 @@ ${memoryContext}
       agentDurations: durations,
       usedAIDecision: true,
       aiDecisionTrace: trace,
+      aiSynthesis: aiSynthesis || undefined,
     },
   };
 }

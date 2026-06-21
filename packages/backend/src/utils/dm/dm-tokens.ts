@@ -255,6 +255,14 @@ button { font-family: inherit; cursor: pointer; border: 0; background: transpare
 @media (max-width: 320px) {
   :root { --dm-fs-hero: 24px; --dm-fs-h1: 20px; }
 }
+
+/* 빈 이미지/콘텐츠 자리 — 휑한 빈칸 대신 옅은 점선 박스로 정제 */
+.dm-mood-slot {
+  background: var(--dm-neutral-50);
+  border: 1px dashed var(--dm-neutral-300);
+  border-radius: var(--dm-radius-lg);
+  color: var(--dm-neutral-400);
+}
 `.trim();
 }
 

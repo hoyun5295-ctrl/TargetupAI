@@ -32,28 +32,33 @@ import type {
   ReviewsProps,
 } from '../../../utils/dm-section-defaults';
 import { dmImageUrl } from '../../../utils/dm-image-url';
+import { DmIcon, DmEventCard, DM_CTA_STYLE } from './dm-primitives';
 
 // ────────────── 공통 영역 ──────────────
 
 const CARD_STYLE: React.CSSProperties = {
   background: 'var(--dm-bg)',
   border: '1px solid var(--dm-neutral-200)',
-  borderRadius: 12,
+  borderRadius: 'var(--dm-radius-lg)',
   padding: 'var(--dm-sp-4)',
   margin: 'var(--dm-sp-3) 0',
 };
 
 const TITLE_STYLE: React.CSSProperties = {
-  fontSize: 15,
+  fontSize: 'var(--dm-fs-h3)',
   fontWeight: 700,
   color: 'var(--dm-neutral-900)',
-  marginBottom: 8,
+  marginBottom: 'var(--dm-sp-2)',
 };
 
 const PLACEHOLDER_STYLE: React.CSSProperties = {
   color: 'var(--dm-neutral-400)',
-  fontStyle: 'italic',
-  fontSize: 13,
+  fontSize: 'var(--dm-fs-small)',
+  background: 'var(--dm-neutral-50)',
+  border: '1px dashed var(--dm-neutral-300)',
+  borderRadius: 'var(--dm-radius-lg)',
+  padding: 'var(--dm-sp-6)',
+  textAlign: 'center',
 };
 
 // ────────────── 카테고리 A. 시각 카드형 ──────────────
@@ -74,12 +79,12 @@ export function ProductCarouselSection({ props }: { props: ProductCarouselProps 
               ) : (
                 <div style={{ width: '100%', height: 140, background: 'var(--dm-neutral-100)', borderRadius: 8 }} />
               )}
-              <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--dm-neutral-900)', marginTop: 6 }}>{p.name}</div>
+              <div style={{ fontSize: 'var(--dm-fs-small)', fontWeight: 600, color: 'var(--dm-neutral-900)', marginTop: 6 }}>{p.name}</div>
               <div style={{ display: 'flex', gap: 6, alignItems: 'baseline', marginTop: 2 }}>
                 {p.discount_rate ? (
-                  <span style={{ fontSize: 11, color: '#dc2626', fontWeight: 700 }}>{p.discount_rate}%</span>
+                  <span style={{ fontSize: 'var(--dm-fs-tiny)', color: 'var(--dm-error)', fontWeight: 700 }}>{p.discount_rate}%</span>
                 ) : null}
-                <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--dm-neutral-900)' }}>
+                <span style={{ fontSize: 'var(--dm-fs-small)', fontWeight: 700, color: 'var(--dm-neutral-900)' }}>
                   {(p.discount_price || p.price).toLocaleString('ko-KR')}원
                 </span>
               </div>
@@ -225,7 +230,7 @@ export function SurveySection({ props }: { props: SurveyProps }) {
             <div key={q.id}>
               <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--dm-neutral-900)', marginBottom: 6 }}>
                 {q.question}
-                {q.required && <span style={{ color: '#dc2626' }}> *</span>}
+                {q.required && <span style={{ color: 'var(--dm-error)' }}> *</span>}
               </div>
               {q.type === 'text' ? (
                 <input style={{ width: '100%', padding: 8, border: '1px solid var(--dm-neutral-200)', borderRadius: 6, fontSize: 13 }} placeholder="답변" />
@@ -284,23 +289,23 @@ export function EmailCaptureSection({ props }: { props: EmailCaptureProps }) {
 }
 
 export function ClickRewardsSection({ props }: { props: ClickRewardsProps }) {
-  const iconMap: Record<string, string> = { like: '❤️', share: '🔁', scroll: '📜' };
+  const iconMap: Record<string, 'heart' | 'star'> = { like: 'heart', share: 'star', scroll: 'star' };
   return (
     <div className="dm-section dm-click-rewards" style={CARD_STYLE}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
-        <div style={{ fontSize: 28 }}>{iconMap[props.reward_type] || '⭐'}</div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--dm-sp-3)', marginBottom: 'var(--dm-sp-2)' }}>
+        <div style={{ color: 'var(--dm-accent)' }}><DmIcon name={iconMap[props.reward_type] || 'star'} size={28} /></div>
         <div style={{ flex: 1 }}>
-          <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--dm-neutral-900)' }}>{props.reward_description}</div>
+          <div style={{ fontSize: 'var(--dm-fs-small)', fontWeight: 600, color: 'var(--dm-neutral-900)' }}>{props.reward_description}</div>
           {props.show_progress && (
-            <div style={{ fontSize: 11, color: 'var(--dm-neutral-500)', marginTop: 2 }}>
+            <div style={{ fontSize: 'var(--dm-fs-tiny)', color: 'var(--dm-neutral-500)', marginTop: 2 }}>
               목표 {props.target_count}회
             </div>
           )}
         </div>
       </div>
       {props.show_progress && (
-        <div style={{ width: '100%', height: 6, background: 'var(--dm-neutral-200)', borderRadius: 3, overflow: 'hidden' }}>
-          <div style={{ width: '0%', height: '100%', background: 'var(--dm-primary)' }} />
+        <div style={{ width: '100%', height: 6, background: 'var(--dm-neutral-200)', borderRadius: 'var(--dm-radius-full)', overflow: 'hidden' }}>
+          <div style={{ width: '0%', height: '100%', background: 'var(--dm-accent)' }} />
         </div>
       )}
     </div>
@@ -311,34 +316,33 @@ export function ClickRewardsSection({ props }: { props: ClickRewardsProps }) {
 
 export function LuckyDrawSection({ props }: { props: LuckyDrawProps }) {
   return (
-    <div className="dm-section dm-lucky-draw" style={{ ...CARD_STYLE, background: 'linear-gradient(135deg,#fef3c7,#fde68a)', border: '1px solid #f59e0b' }}>
-      <div style={{ fontSize: 28, marginBottom: 8 }}>🎁</div>
-      <div style={TITLE_STYLE}>{props.title || '[추첨 이벤트 제목을 작성해주세요]'}</div>
-      {props.description && (
-        <div style={{ fontSize: 13, color: 'var(--dm-neutral-700)', marginBottom: 12, lineHeight: 1.6 }}>{props.description}</div>
-      )}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 12 }}>
-        {(props.form_fields || []).map((f) => (
-          <input
-            key={f.name}
-            placeholder={f.name === 'name' ? '이름' : f.name === 'phone' ? '전화번호' : '이메일'}
-            style={{ padding: 10, border: '1px solid #f59e0b', borderRadius: 6, fontSize: 13, background: '#fff' }}
-            required={f.required}
-          />
-        ))}
-      </div>
-      <label style={{ display: 'flex', alignItems: 'flex-start', gap: 6, fontSize: 11, color: 'var(--dm-neutral-700)', marginBottom: 10 }}>
-        <input type="checkbox" style={{ marginTop: 2 }} />
-        <span>{props.consent_text}</span>
-      </label>
-      <button style={{ width: '100%', height: 44, background: '#d97706', color: '#fff', border: 'none', borderRadius: 8, fontSize: 14, fontWeight: 700, cursor: 'pointer' }}>
-        응모하기
-      </button>
-      {props.draw_at && (
-        <div style={{ fontSize: 11, color: 'var(--dm-neutral-600)', marginTop: 8, textAlign: 'center' }}>
-          발표: {new Date(props.draw_at).toLocaleString('ko-KR')}
+    <div className="dm-section dm-lucky-draw">
+      <DmEventCard accentVar="--dm-accent" icon="gift">
+        <div style={TITLE_STYLE}>{props.title || '[추첨 이벤트 제목을 작성해주세요]'}</div>
+        {props.description && (
+          <div style={{ fontSize: 'var(--dm-fs-small)', color: 'var(--dm-neutral-700)', marginBottom: 'var(--dm-sp-3)', lineHeight: 1.6 }}>{props.description}</div>
+        )}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--dm-sp-2)', marginBottom: 'var(--dm-sp-3)' }}>
+          {(props.form_fields || []).map((f) => (
+            <input
+              key={f.name}
+              placeholder={f.name === 'name' ? '이름' : f.name === 'phone' ? '전화번호' : '이메일'}
+              style={{ padding: 12, border: '1px solid var(--dm-neutral-300)', borderRadius: 'var(--dm-radius-md)', fontSize: 'var(--dm-fs-small)', background: 'var(--dm-bg)' }}
+              required={f.required}
+            />
+          ))}
         </div>
-      )}
+        <label style={{ display: 'flex', alignItems: 'flex-start', gap: 6, fontSize: 'var(--dm-fs-tiny)', color: 'var(--dm-neutral-600)', marginBottom: 'var(--dm-sp-3)' }}>
+          <input type="checkbox" style={{ marginTop: 2 }} />
+          <span>{props.consent_text}</span>
+        </label>
+        <button style={{ ...DM_CTA_STYLE, width: '100%' }}>응모하기</button>
+        {props.draw_at && (
+          <div style={{ fontSize: 'var(--dm-fs-tiny)', color: 'var(--dm-neutral-500)', marginTop: 'var(--dm-sp-2)', textAlign: 'center' }}>
+            발표: {new Date(props.draw_at).toLocaleString('ko-KR')}
+          </div>
+        )}
+      </DmEventCard>
     </div>
   );
 }
@@ -346,55 +350,54 @@ export function LuckyDrawSection({ props }: { props: LuckyDrawProps }) {
 export function RouletteSection({ props }: { props: RouletteProps }) {
   const segments = props?.segments || [];
   return (
-    <div className="dm-section dm-roulette" style={{ ...CARD_STYLE, background: 'linear-gradient(135deg,#ede9fe,#ddd6fe)', border: '1px solid #7c3aed' }}>
-      <div style={{ fontSize: 28, marginBottom: 8 }}>🎡</div>
-      <div style={TITLE_STYLE}>룰렛 이벤트</div>
-      <div
-        style={{
-          width: 200, height: 200, borderRadius: '50%',
-          background: 'conic-gradient(#a78bfa 0deg 45deg, #c4b5fd 45deg 90deg, #ddd6fe 90deg 135deg, #ede9fe 135deg 180deg, #a78bfa 180deg 225deg, #c4b5fd 225deg 270deg, #ddd6fe 270deg 315deg, #ede9fe 315deg 360deg)',
-          margin: '12px auto',
-          border: '4px solid #fff',
-          boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
-        }}
-      />
-      <button style={{ height: 44, padding: '0 32px', background: '#7c3aed', color: '#fff', border: 'none', borderRadius: 8, fontSize: 14, fontWeight: 700, cursor: 'pointer' }}>
-        룰렛 돌리기
-      </button>
-      {props.one_spin_per_user && (
-        <div style={{ fontSize: 11, color: 'var(--dm-neutral-600)', marginTop: 8 }}>1인 1회 한정</div>
-      )}
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, justifyContent: 'center', marginTop: 12 }}>
-        {segments.map((s) => (
-          <span key={s.id} style={{ fontSize: 11, padding: '4px 8px', background: '#fff', border: '1px solid #c4b5fd', borderRadius: 12, color: '#5b21b6' }}>
-            {s.label}
-          </span>
-        ))}
-      </div>
+    <div className="dm-section dm-roulette">
+      <DmEventCard accentVar="--dm-primary" icon="wheel">
+        <div style={TITLE_STYLE}>룰렛 이벤트</div>
+        <div
+          style={{
+            width: 200, height: 200, borderRadius: '50%',
+            background: 'conic-gradient(var(--dm-primary) 0deg 45deg, var(--dm-primary-light) 45deg 90deg, var(--dm-accent) 90deg 135deg, var(--dm-neutral-100) 135deg 180deg, var(--dm-primary) 180deg 225deg, var(--dm-primary-light) 225deg 270deg, var(--dm-accent) 270deg 315deg, var(--dm-neutral-100) 315deg 360deg)',
+            margin: '12px auto',
+            border: '4px solid var(--dm-bg)',
+            boxShadow: 'var(--dm-shadow-md)',
+          }}
+        />
+        <button style={DM_CTA_STYLE}>룰렛 돌리기</button>
+        {props.one_spin_per_user && (
+          <div style={{ fontSize: 'var(--dm-fs-tiny)', color: 'var(--dm-neutral-500)', marginTop: 'var(--dm-sp-2)' }}>1인 1회 한정</div>
+        )}
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, justifyContent: 'center', marginTop: 'var(--dm-sp-3)' }}>
+          {segments.map((s) => (
+            <span key={s.id} style={{ fontSize: 'var(--dm-fs-tiny)', padding: '4px 8px', background: 'var(--dm-bg)', border: '1px solid var(--dm-neutral-200)', borderRadius: 'var(--dm-radius-full)', color: 'var(--dm-neutral-700)' }}>
+              {s.label}
+            </span>
+          ))}
+        </div>
+      </DmEventCard>
     </div>
   );
 }
 
 export function InstantCouponSection({ props }: { props: InstantCouponProps }) {
   return (
-    <div className="dm-section dm-instant-coupon" style={{ ...CARD_STYLE, background: 'linear-gradient(135deg,#fee2e2,#fecaca)', border: '2px dashed #ef4444' }}>
-      <div style={{ fontSize: 28, marginBottom: 8 }}>🎟️</div>
-      <div style={{ ...TITLE_STYLE, color: '#991b1b' }}>{props.coupon_label}</div>
-      <div style={{ fontSize: 13, color: '#7f1d1d', marginBottom: 12 }}>{props.discount_description}</div>
-      {props.expires_at && (
-        <div style={{ fontSize: 11, color: '#991b1b', marginBottom: 10, fontWeight: 600 }}>
-          만료: {new Date(props.expires_at).toLocaleString('ko-KR')}
-        </div>
-      )}
-      <button style={{ height: 44, padding: '0 32px', background: '#dc2626', color: '#fff', border: 'none', borderRadius: 8, fontSize: 14, fontWeight: 700, cursor: 'pointer' }}>
-        쿠폰 받기
-      </button>
-      {props.conditions && (
-        <div style={{ fontSize: 10, color: 'var(--dm-neutral-600)', marginTop: 8, fontStyle: 'italic' }}>{props.conditions}</div>
-      )}
-      {props.usage_instructions && (
-        <div style={{ fontSize: 10, color: 'var(--dm-neutral-500)', marginTop: 6 }}>{props.usage_instructions}</div>
-      )}
+    <div className="dm-section dm-instant-coupon">
+      <div style={{ padding: 'var(--dm-sp-6) var(--dm-sp-5)', background: 'var(--dm-primary-light)', border: '2px dashed var(--dm-primary)', borderRadius: 'var(--dm-radius-xl)', margin: 'var(--dm-sp-3) 0' }}>
+        <div style={{ color: 'var(--dm-primary)', marginBottom: 'var(--dm-sp-3)' }}><DmIcon name="ticket" size={26} /></div>
+        <div style={{ ...TITLE_STYLE, color: 'var(--dm-primary)' }}>{props.coupon_label}</div>
+        <div style={{ fontSize: 'var(--dm-fs-small)', color: 'var(--dm-neutral-700)', marginBottom: 'var(--dm-sp-3)' }}>{props.discount_description}</div>
+        {props.expires_at && (
+          <div style={{ fontSize: 'var(--dm-fs-tiny)', color: 'var(--dm-primary)', marginBottom: 'var(--dm-sp-3)', fontWeight: 600 }}>
+            만료: {new Date(props.expires_at).toLocaleString('ko-KR')}
+          </div>
+        )}
+        <button style={DM_CTA_STYLE}>쿠폰 받기</button>
+        {props.conditions && (
+          <div style={{ fontSize: 'var(--dm-fs-tiny)', color: 'var(--dm-neutral-500)', marginTop: 'var(--dm-sp-2)' }}>{props.conditions}</div>
+        )}
+        {props.usage_instructions && (
+          <div style={{ fontSize: 'var(--dm-fs-tiny)', color: 'var(--dm-neutral-500)', marginTop: 4 }}>{props.usage_instructions}</div>
+        )}
+      </div>
     </div>
   );
 }
@@ -403,24 +406,23 @@ export function LimitedQuantitySection({ props }: { props: LimitedQuantityProps 
   const remaining = props.current_remaining ?? props.total_quantity;
   const percent = props.total_quantity > 0 ? (remaining / props.total_quantity) * 100 : 0;
   return (
-    <div className="dm-section dm-limited-quantity" style={{ ...CARD_STYLE, background: 'linear-gradient(135deg,#fef3c7,#fde68a)', border: '1px solid #d97706' }}>
-      <div style={{ fontSize: 28, marginBottom: 8 }}>⏳</div>
-      <div style={TITLE_STYLE}>{props.title || '[선착순 이벤트 제목을 작성해주세요]'}</div>
-      {props.description && (
-        <div style={{ fontSize: 13, color: 'var(--dm-neutral-700)', marginBottom: 12, lineHeight: 1.6 }}>{props.description}</div>
-      )}
-      <div style={{ marginBottom: 12 }}>
-        <div style={{ fontSize: 12, color: '#92400e', marginBottom: 6, display: 'flex', justifyContent: 'space-between' }}>
-          <span>남은 수량</span>
-          <span style={{ fontWeight: 700 }}>{remaining} / {props.total_quantity}</span>
+    <div className="dm-section dm-limited-quantity">
+      <DmEventCard accentVar="--dm-accent" icon="clock">
+        <div style={TITLE_STYLE}>{props.title || '[선착순 이벤트 제목을 작성해주세요]'}</div>
+        {props.description && (
+          <div style={{ fontSize: 'var(--dm-fs-small)', color: 'var(--dm-neutral-700)', marginBottom: 'var(--dm-sp-3)', lineHeight: 1.6 }}>{props.description}</div>
+        )}
+        <div style={{ marginBottom: 'var(--dm-sp-3)' }}>
+          <div style={{ fontSize: 'var(--dm-fs-tiny)', color: 'var(--dm-neutral-600)', marginBottom: 6, display: 'flex', justifyContent: 'space-between' }}>
+            <span>남은 수량</span>
+            <span style={{ fontWeight: 700 }}>{remaining} / {props.total_quantity}</span>
+          </div>
+          <div style={{ width: '100%', height: 8, background: 'var(--dm-neutral-200)', borderRadius: 'var(--dm-radius-full)', overflow: 'hidden' }}>
+            <div style={{ width: `${percent}%`, height: '100%', background: 'var(--dm-accent)', transition: 'width 0.3s' }} />
+          </div>
         </div>
-        <div style={{ width: '100%', height: 8, background: '#fff', borderRadius: 4, overflow: 'hidden' }}>
-          <div style={{ width: `${percent}%`, height: '100%', background: '#d97706', transition: 'width 0.3s' }} />
-        </div>
-      </div>
-      <button style={{ width: '100%', height: 44, background: '#d97706', color: '#fff', border: 'none', borderRadius: 8, fontSize: 14, fontWeight: 700, cursor: 'pointer' }}>
-        선착순 참여하기
-      </button>
+        <button style={{ ...DM_CTA_STYLE, width: '100%' }}>선착순 참여하기</button>
+      </DmEventCard>
     </div>
   );
 }
@@ -465,16 +467,17 @@ export function InstagramEmbedSection({ props }: { props: InstagramEmbedProps })
           rel="noopener noreferrer"
           style={{
             display: 'block',
-            padding: 20,
-            background: 'linear-gradient(135deg,#fdf2f8,#fce7f3)',
-            border: '1px solid #ec4899',
-            borderRadius: 8,
+            padding: 'var(--dm-sp-5)',
+            background: 'var(--dm-neutral-50)',
+            border: '1px solid var(--dm-neutral-200)',
+            borderRadius: 'var(--dm-radius-md)',
             textAlign: 'center',
             textDecoration: 'none',
+            boxShadow: 'var(--dm-shadow-sm)',
           }}
         >
-          <div style={{ fontSize: 28, marginBottom: 6 }}>📷</div>
-          <div style={{ fontSize: 13, fontWeight: 600, color: '#831843' }}>Instagram 게시물 보기</div>
+          <div style={{ color: 'var(--dm-accent)', display: 'flex', justifyContent: 'center', marginBottom: 6 }}><DmIcon name="image" size={26} /></div>
+          <div style={{ fontSize: 'var(--dm-fs-small)', fontWeight: 600, color: 'var(--dm-neutral-800)' }}>Instagram 게시물 보기</div>
         </a>
       ) : (
         <div style={PLACEHOLDER_STYLE}>[Instagram URL을 입력해주세요]</div>
@@ -487,34 +490,35 @@ export function MapStoreLocatorSection({ props }: { props: MapStoreLocatorProps 
   const stores = props?.stores || [];
   return (
     <div className="dm-section dm-map-store-locator" style={CARD_STYLE}>
-      <div style={TITLE_STYLE}>매장 찾기</div>
+      <div style={{ ...TITLE_STYLE, display: 'flex', alignItems: 'center', gap: 6 }}>
+        <span style={{ color: 'var(--dm-primary)' }}><DmIcon name="map" size={18} /></span>매장 찾기
+      </div>
       <div style={{
         width: '100%',
         height: 200,
         background: 'var(--dm-neutral-100)',
-        borderRadius: 8,
+        borderRadius: 'var(--dm-radius-md)',
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
-        color: 'var(--dm-neutral-500)',
-        fontSize: 13,
-        marginBottom: 12,
+        color: 'var(--dm-neutral-400)',
+        marginBottom: 'var(--dm-sp-3)',
       }}>
-        🗺️ 지도 영역 (실 발송 시 지도 임베드)
+        <DmIcon name="map" size={32} />
       </div>
       {stores.length === 0 ? (
         <div style={PLACEHOLDER_STYLE}>[매장 정보를 추가해주세요]</div>
       ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--dm-sp-2)' }}>
           {stores.map((s) => (
-            <div key={s.id} style={{ padding: 10, background: 'var(--dm-neutral-50)', borderRadius: 6 }}>
-              <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--dm-neutral-900)' }}>{s.name}</div>
-              <div style={{ fontSize: 11, color: 'var(--dm-neutral-600)', marginTop: 2 }}>{s.address}</div>
+            <div key={s.id} style={{ padding: 'var(--dm-sp-3)', background: 'var(--dm-neutral-50)', borderRadius: 'var(--dm-radius-md)' }}>
+              <div style={{ fontSize: 'var(--dm-fs-small)', fontWeight: 600, color: 'var(--dm-neutral-900)' }}>{s.name}</div>
+              <div style={{ fontSize: 'var(--dm-fs-tiny)', color: 'var(--dm-neutral-600)', marginTop: 2 }}>{s.address}</div>
               {s.phone && (
-                <div style={{ fontSize: 11, color: 'var(--dm-primary)', marginTop: 4 }}>📞 {s.phone}</div>
+                <div style={{ fontSize: 'var(--dm-fs-tiny)', color: 'var(--dm-primary)', marginTop: 4 }}>전화 {s.phone}</div>
               )}
               {s.hours && (
-                <div style={{ fontSize: 11, color: 'var(--dm-neutral-500)', marginTop: 2 }}>⏰ {s.hours}</div>
+                <div style={{ fontSize: 'var(--dm-fs-tiny)', color: 'var(--dm-neutral-500)', marginTop: 2 }}>영업 {s.hours}</div>
               )}
             </div>
           ))}
@@ -533,25 +537,25 @@ export function ReviewsSection({ props }: { props: ReviewsProps }) {
     <div className="dm-section dm-reviews" style={CARD_STYLE}>
       {props.title && <div style={TITLE_STYLE}>{props.title}</div>}
       {props.show_average_rating !== false && reviews.length > 0 && (
-        <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 12 }}>
-          <span style={{ fontSize: 24, fontWeight: 700, color: 'var(--dm-neutral-900)' }}>{avg}</span>
-          <span style={{ color: '#f59e0b' }}>★★★★★</span>
-          <span style={{ fontSize: 11, color: 'var(--dm-neutral-500)' }}>({reviews.length}건)</span>
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 'var(--dm-sp-3)' }}>
+          <span style={{ fontSize: 'var(--dm-fs-h1)', fontWeight: 700, color: 'var(--dm-neutral-900)' }}>{avg}</span>
+          <span style={{ color: 'var(--dm-accent)' }}>★★★★★</span>
+          <span style={{ fontSize: 'var(--dm-fs-tiny)', color: 'var(--dm-neutral-500)' }}>({reviews.length}건)</span>
         </div>
       )}
       {reviews.length === 0 ? (
         <div style={PLACEHOLDER_STYLE}>[리뷰를 추가해주세요]</div>
       ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--dm-sp-2)' }}>
           {reviews.slice(0, 3).map((r, i) => (
-            <div key={i} style={{ padding: 10, background: 'var(--dm-neutral-50)', borderRadius: 6 }}>
+            <div key={i} style={{ padding: 'var(--dm-sp-3)', background: 'var(--dm-neutral-50)', borderRadius: 'var(--dm-radius-md)' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
-                <span style={{ color: '#f59e0b', fontSize: 13 }}>{'★'.repeat(r.rating)}{'☆'.repeat(5 - r.rating)}</span>
-                <span style={{ fontSize: 11, color: 'var(--dm-neutral-500)' }}>{r.author}</span>
+                <span style={{ color: 'var(--dm-accent)', fontSize: 'var(--dm-fs-small)', letterSpacing: 1 }}>{'★'.repeat(r.rating)}{'☆'.repeat(5 - r.rating)}</span>
+                <span style={{ fontSize: 'var(--dm-fs-tiny)', color: 'var(--dm-neutral-500)' }}>{r.author}</span>
               </div>
-              <div style={{ fontSize: 12, color: 'var(--dm-neutral-800)', lineHeight: 1.5 }}>{r.body}</div>
+              <div style={{ fontSize: 'var(--dm-fs-small)', color: 'var(--dm-neutral-800)', lineHeight: 1.5 }}>{r.body}</div>
               {r.date && (
-                <div style={{ fontSize: 10, color: 'var(--dm-neutral-400)', marginTop: 4 }}>{r.date}</div>
+                <div style={{ fontSize: 'var(--dm-fs-tiny)', color: 'var(--dm-neutral-400)', marginTop: 4 }}>{r.date}</div>
               )}
             </div>
           ))}

@@ -4,7 +4,7 @@
  * (DB import 0 — 연결 불필요. 순수 로직만 검증.)
  */
 import assert from 'node:assert';
-import { SEASON_BY_MONTH, getSeasonContext, buildSeasonPromptBlock } from '../season-context';
+import { SEASON_BY_MONTH, getSeasonContext, buildSeasonPromptBlock, buildMessageObjective } from '../season-context';
 
 let passed = 0;
 function ok(name: string, fn: () => void) { fn(); passed++; console.log(`  ok - ${name}`); }
@@ -49,5 +49,20 @@ ok('objective 불변 안내 포함(목표 바꾸지 말라)', () => {
   const b = buildSeasonPromptBlock(5, '병원');
   assert.ok(b.includes('목표') && b.includes('바꾸지'));
 });
+
+console.log('[season-context] buildMessageObjective (objective+seasonHint 합성 — orchestrate/orchestrateWithAI 공통)');
+ok('seasonHint 있으면 objective 뒤 빈 줄 + 힌트', () => {
+  const r = buildMessageObjective('재구매 유도', '5월 가정의달 톤으로');
+  assert.strictEqual(r, '재구매 유도\n\n5월 가정의달 톤으로');
+});
+ok('seasonHint 없으면 objective 그대로', () =>
+  assert.strictEqual(buildMessageObjective('재구매 유도'), '재구매 유도'));
+ok('seasonHint 빈 문자열/공백/null이면 합성 안 함(objective 그대로)', () => {
+  assert.strictEqual(buildMessageObjective('목표', ''), '목표');
+  assert.strictEqual(buildMessageObjective('목표', '   '), '목표');
+  assert.strictEqual(buildMessageObjective('목표', null), '목표');
+});
+ok('objective 양끝 공백 제거', () =>
+  assert.strictEqual(buildMessageObjective('  목표  ', '힌트'), '목표\n\n힌트'));
 
 console.log(`\n${passed} assertions passed`);

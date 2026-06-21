@@ -19,6 +19,7 @@
 import type { Section, SectionType, HeaderProps, HeroProps, CouponProps, CountdownProps, TextCardProps, CtaProps, VideoProps, StoreInfoProps, SnsProps, PromoCodeProps, FooterProps } from './dm-section-registry';
 import type { DmBrandKit } from './dm-tokens';
 import { publicImageUrl, youtubeEmbedUrl } from './dm-viewer-utils';
+import { dmIcon, dmEventCard } from './dm-render-primitives';
 
 // ────────────── 렌더 컨텍스트 ──────────────
 
@@ -110,11 +111,15 @@ function renderHero(props: HeroProps): string {
   const align = props.align || 'center';
   const textAlign = align === 'left' ? 'flex-start' : align === 'right' ? 'flex-end' : 'center';
   const gradient = props.overlay_gradient !== false ? 'linear-gradient(180deg,rgba(0,0,0,0) 40%,rgba(0,0,0,0.5) 100%)' : 'transparent';
+  // ★ Phase 1: 이미지 없으면 AI 무드 배경(그라데이션)으로 — 휑한 검정 대신 완성형. mood_text로 가독 색.
+  const moodBg = (props as any).mood_background as string | undefined;
+  const baseBg = img ? 'var(--dm-neutral-900)' : (moodBg || 'var(--dm-neutral-900)');
+  const textColor = (!img && moodBg) ? ((props as any).mood_text || '#fff') : '#fff';
 
-  return `<div class="dm-section dm-hero" data-section-type="hero" style="position:relative;min-height:${heightPx};overflow:hidden;background:var(--dm-neutral-900)">
+  return `<div class="dm-section dm-hero" data-section-type="hero" style="position:relative;min-height:${heightPx};overflow:hidden;background:${baseBg}">
     ${img ? `<img src="${escapeHtml(img)}" alt="${escapeHtml(props.headline || '')}" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover">` : ''}
-    <div style="position:absolute;inset:0;background:${gradient}"></div>
-    <div style="position:relative;min-height:${heightPx};display:flex;flex-direction:column;justify-content:flex-end;align-items:${textAlign};padding:var(--dm-sp-8) var(--dm-sp-5);color:#fff;text-align:${align}">
+    ${img ? `<div style="position:absolute;inset:0;background:${gradient}"></div>` : ''}
+    <div style="position:relative;min-height:${heightPx};display:flex;flex-direction:column;justify-content:flex-end;align-items:${textAlign};padding:var(--dm-sp-8) var(--dm-sp-5);color:${textColor};text-align:${align}">
       ${props.headline ? `<div class="dm-text-hero" style="font-weight:800">${escapeHtml(props.headline)}</div>` : ''}
       ${props.sub_copy ? `<div class="dm-text-body" style="margin-top:var(--dm-sp-3);opacity:0.9">${escapeHtml(props.sub_copy)}</div>` : ''}
     </div>
@@ -336,16 +341,16 @@ const RENDERERS: { [K in SectionType]: (props: any, ctx: SectionRenderContext) =
 function renderProductCarousel(p: any): string {
   const products = Array.isArray(p?.products) ? p.products : [];
   if (products.length === 0) {
-    return `<div class="dm-section dm-product-carousel" style="padding:var(--dm-sp-4);text-align:center;color:var(--dm-neutral-400);font-style:italic">[상품을 추가해주세요]</div>`;
+    return `<div class="dm-section dm-product-carousel dm-mood-slot" style="padding:var(--dm-sp-6);text-align:center;color:var(--dm-neutral-400)">[상품을 추가해주세요]</div>`;
   }
   const items = products.map((it: any) => `
     <div style="min-width:140px;max-width:160px">
-      ${it.image_url ? `<img src="${escapeHtml(publicImageUrl(it.image_url))}" loading="lazy" alt="${escapeHtml(it.name || '')}" style="width:100%;height:140px;object-fit:cover;border-radius:8px"/>` : `<div style="width:100%;height:140px;background:var(--dm-neutral-100);border-radius:8px"></div>`}
-      <div style="font-size:12px;font-weight:600;margin-top:6px">${escapeHtml(it.name || '')}</div>
-      <div style="font-size:13px;font-weight:700;margin-top:2px">${Number(it.discount_price || it.price || 0).toLocaleString('ko-KR')}원</div>
+      ${it.image_url ? `<img src="${escapeHtml(publicImageUrl(it.image_url))}" loading="lazy" alt="${escapeHtml(it.name || '')}" style="width:100%;height:140px;object-fit:cover;border-radius:var(--dm-radius-md)"/>` : `<div style="width:100%;height:140px;background:var(--dm-neutral-100);border-radius:var(--dm-radius-md)"></div>`}
+      <div style="font-size:var(--dm-fs-small);font-weight:600;margin-top:6px">${escapeHtml(it.name || '')}</div>
+      <div style="font-size:var(--dm-fs-small);font-weight:700;margin-top:2px">${Number(it.discount_price || it.price || 0).toLocaleString('ko-KR')}원</div>
     </div>`).join('');
   return `<div class="dm-section dm-product-carousel" style="padding:var(--dm-sp-4)">
-    ${p.title ? `<div style="font-size:15px;font-weight:700;margin-bottom:8px">${escapeHtml(p.title)}</div>` : ''}
+    ${p.title ? `<div style="font-size:var(--dm-fs-h3);font-weight:700;margin-bottom:var(--dm-sp-3)">${escapeHtml(p.title)}</div>` : ''}
     <div style="display:flex;gap:12px;overflow-x:auto;padding-bottom:8px">${items}</div>
   </div>`;
 }
@@ -353,17 +358,17 @@ function renderProductCarousel(p: any): string {
 function renderGallery(p: any): string {
   const images = Array.isArray(p?.images) ? p.images : [];
   if (images.length === 0) {
-    return `<div class="dm-section dm-gallery" style="padding:var(--dm-sp-4);text-align:center;color:var(--dm-neutral-400);font-style:italic">[이미지를 추가해주세요]</div>`;
+    return `<div class="dm-section dm-gallery dm-mood-slot" style="padding:var(--dm-sp-6);text-align:center;color:var(--dm-neutral-400)">[이미지를 추가해주세요]</div>`;
   }
   const isList = p?.layout === 'list_1xN';
   const cols = p?.layout === 'grid_3x3' ? 3 : isList ? 1 : 2;
   // list_1xN(세로 1열) = 완성 이미지/디자인 시안: 원본 비율 풀폭(크롭 X). grid류는 1:1 cover 유지.
   const imgStyle = isList
-    ? 'width:100%;height:auto;display:block;border-radius:6px'
-    : 'width:100%;aspect-ratio:1;object-fit:cover;border-radius:6px';
+    ? 'width:100%;height:auto;display:block;border-radius:var(--dm-radius-md)'
+    : 'width:100%;aspect-ratio:1;object-fit:cover;border-radius:var(--dm-radius-md)';
   const items = images.map((img: any) => `<img src="${escapeHtml(publicImageUrl(img.url))}" loading="lazy" alt="${escapeHtml(img.caption || '')}" style="${imgStyle}"/>`).join('');
   return `<div class="dm-section dm-gallery" style="padding:var(--dm-sp-4)">
-    ${p.title ? `<div style="font-size:15px;font-weight:700;margin-bottom:8px">${escapeHtml(p.title)}</div>` : ''}
+    ${p.title ? `<div style="font-size:var(--dm-fs-h3);font-weight:700;margin-bottom:var(--dm-sp-3)">${escapeHtml(p.title)}</div>` : ''}
     <div style="display:grid;grid-template-columns:repeat(${cols},1fr);gap:${isList ? 10 : 6}px">${items}</div>
   </div>`;
 }
@@ -371,12 +376,12 @@ function renderGallery(p: any): string {
 function renderSlideshow(p: any): string {
   const slides = Array.isArray(p?.slides) ? p.slides : [];
   if (slides.length === 0) {
-    return `<div class="dm-section dm-slideshow" style="padding:var(--dm-sp-4);text-align:center;color:var(--dm-neutral-400);font-style:italic">[슬라이드를 추가해주세요]</div>`;
+    return `<div class="dm-section dm-slideshow dm-mood-slot" style="padding:var(--dm-sp-6);text-align:center;color:var(--dm-neutral-400)">[슬라이드를 추가해주세요]</div>`;
   }
   const first = slides[0];
   return `<div class="dm-section dm-slideshow" style="padding:var(--dm-sp-4)">
-    <img src="${escapeHtml(publicImageUrl(first.image_url || ''))}" loading="lazy" alt="${escapeHtml(first.caption || '')}" style="width:100%;aspect-ratio:16/9;object-fit:cover;border-radius:8px"/>
-    ${first.caption ? `<div style="font-size:13px;margin-top:8px">${escapeHtml(first.caption)}</div>` : ''}
+    <img src="${escapeHtml(publicImageUrl(first.image_url || ''))}" loading="lazy" alt="${escapeHtml(first.caption || '')}" style="width:100%;aspect-ratio:16/9;object-fit:cover;border-radius:var(--dm-radius-md)"/>
+    ${first.caption ? `<div style="font-size:var(--dm-fs-small);margin-top:var(--dm-sp-2)">${escapeHtml(first.caption)}</div>` : ''}
   </div>`;
 }
 
@@ -385,22 +390,22 @@ function renderTabCards(p: any): string {
   if (tabs.length === 0) return '';
   const first = tabs[0];
   return `<div class="dm-section dm-tab-cards" style="padding:var(--dm-sp-4)">
-    <div style="display:flex;gap:4px;border-bottom:1px solid var(--dm-neutral-200);margin-bottom:12px">
-      ${tabs.map((t: any, i: number) => `<span style="padding:8px 12px;border-bottom:2px solid ${i === 0 ? 'var(--dm-primary)' : 'transparent'};color:${i === 0 ? 'var(--dm-primary)' : 'var(--dm-neutral-600)'};font-size:13px;font-weight:600">${escapeHtml(t.label || '')}</span>`).join('')}
+    <div style="display:flex;gap:4px;border-bottom:1px solid var(--dm-neutral-200);margin-bottom:var(--dm-sp-3)">
+      ${tabs.map((t: any, i: number) => `<span style="padding:8px 12px;border-bottom:2px solid ${i === 0 ? 'var(--dm-primary)' : 'transparent'};color:${i === 0 ? 'var(--dm-primary)' : 'var(--dm-neutral-600)'};font-size:var(--dm-fs-small);font-weight:600">${escapeHtml(t.label || '')}</span>`).join('')}
     </div>
-    <div style="font-size:13px;line-height:1.6">${escapeHtml(first.content || '')}</div>
+    <div style="font-size:var(--dm-fs-small);line-height:1.6">${escapeHtml(first.content || '')}</div>
   </div>`;
 }
 
 function renderPoll(p: any): string {
   const options = Array.isArray(p?.options) ? p.options : [];
-  const items = options.map((o: any, i: number) => `<div data-dm-poll-option data-option-id="${escapeHtml(o.id || String(i))}" style="padding:10px 14px;background:var(--dm-neutral-50);border:1px solid var(--dm-neutral-200);border-radius:8px;font-size:13px;margin-bottom:8px;cursor:pointer">${escapeHtml(o.label || '')}</div>`).join('');
-  return `<div class="dm-section dm-poll" data-dm-poll style="padding:var(--dm-sp-4)">
-    <div style="font-size:15px;font-weight:700;margin-bottom:8px">${escapeHtml(p.question || '[질문을 작성해주세요]')}</div>
+  const items = options.map((o: any, i: number) => `<div data-dm-poll-option data-option-id="${escapeHtml(o.id || String(i))}" style="padding:12px 14px;background:var(--dm-bg);border:1px solid var(--dm-neutral-200);border-radius:var(--dm-radius-md);font-size:var(--dm-fs-small);margin-bottom:var(--dm-sp-2);cursor:pointer">${escapeHtml(o.label || '')}</div>`).join('');
+  const body = `
+    <div style="font-size:var(--dm-fs-h3);font-weight:700;margin-bottom:var(--dm-sp-3)">${escapeHtml(p.question || '[질문을 작성해주세요]')}</div>
     ${items}
-    ${p.one_vote_per_user ? `<div style="font-size:11px;color:var(--dm-neutral-500);margin-top:8px">1인 1회 투표</div>` : ''}
-    <div data-dm-result style="display:none"></div>
-  </div>`;
+    ${p.one_vote_per_user ? `<div style="font-size:var(--dm-fs-tiny);color:var(--dm-neutral-500);margin-top:var(--dm-sp-2)">1인 1회 투표</div>` : ''}
+    <div data-dm-result style="display:none"></div>`;
+  return `<div class="dm-section dm-poll" data-dm-poll>${dmEventCard({ accentVar: '--dm-primary', icon: 'poll', body })}</div>`;
 }
 
 function renderSurvey(p: any): string {
@@ -408,37 +413,37 @@ function renderSurvey(p: any): string {
   if (questions.length === 0) {
     return `<div class="dm-section dm-survey" style="padding:var(--dm-sp-4);text-align:center;color:var(--dm-neutral-400);font-style:italic">[설문 질문을 추가해주세요]</div>`;
   }
-  const items = questions.map((q: any) => `<div style="margin-bottom:12px"><div style="font-size:13px;font-weight:600;margin-bottom:6px">${escapeHtml(q.question || '')}${q.required ? ' <span style="color:#dc2626">*</span>' : ''}</div></div>`).join('');
-  return `<div class="dm-section dm-survey" style="padding:var(--dm-sp-4)">
-    ${p.title ? `<div style="font-size:15px;font-weight:700;margin-bottom:8px">${escapeHtml(p.title)}</div>` : ''}
+  const items = questions.map((q: any) => `<div style="margin-bottom:var(--dm-sp-3)"><div style="font-size:var(--dm-fs-small);font-weight:600;margin-bottom:6px">${escapeHtml(q.question || '')}${q.required ? ' <span style="color:var(--dm-error)">*</span>' : ''}</div></div>`).join('');
+  const body = `
+    ${p.title ? `<div style="font-size:var(--dm-fs-h3);font-weight:700;margin-bottom:var(--dm-sp-3)">${escapeHtml(p.title)}</div>` : ''}
     ${items}
-    ${p.completion_reward_text ? `<div style="font-size:12px;color:var(--dm-primary);margin-top:12px;font-weight:600">${escapeHtml(p.completion_reward_text)}</div>` : ''}
-  </div>`;
+    ${p.completion_reward_text ? `<div style="font-size:var(--dm-fs-small);color:var(--dm-primary);margin-top:var(--dm-sp-3);font-weight:600">${escapeHtml(p.completion_reward_text)}</div>` : ''}`;
+  return `<div class="dm-section dm-survey">${dmEventCard({ accentVar: '--dm-primary', icon: 'survey', body })}</div>`;
 }
 
 function renderEmailCapture(p: any): string {
-  return `<div class="dm-section dm-email-capture" data-dm-form style="padding:var(--dm-sp-4)">
-    <div style="font-size:15px;font-weight:700;margin-bottom:8px">${escapeHtml(p.headline || '[헤드라인을 작성해주세요]')}</div>
-    ${p.description ? `<div style="font-size:13px;color:var(--dm-neutral-700);margin-bottom:12px;line-height:1.6">${escapeHtml(p.description)}</div>` : ''}
-    <input type="email" data-field="email" placeholder="이메일 주소" style="width:100%;padding:10px;border:1px solid var(--dm-neutral-200);border-radius:6px;font-size:13px;margin-bottom:10px"/>
-    <label style="display:flex;align-items:flex-start;gap:6px;font-size:12px;color:var(--dm-neutral-700);margin-bottom:10px"><input type="checkbox" ${p.consent_required ? 'data-consent' : ''} style="margin-top:2px"/><span>${escapeHtml(p.consent_text || '')}</span></label>
-    <button data-dm-submit style="width:100%;height:40px;background:var(--dm-primary);color:#fff;border:none;border-radius:6px;font-size:13px;font-weight:700;cursor:pointer">${escapeHtml(p.reward_description ? `참여하고 ${p.reward_description}` : '참여하기')}</button>
-    ${p.legal_notice ? `<div style="font-size:10px;color:var(--dm-neutral-500);margin-top:8px;line-height:1.5">${escapeHtml(p.legal_notice)}</div>` : ''}
-    <div data-dm-result style="display:none"></div>
-  </div>`;
+  const body = `
+    <div style="font-size:var(--dm-fs-h3);font-weight:700;margin-bottom:var(--dm-sp-2)">${escapeHtml(p.headline || '[헤드라인을 작성해주세요]')}</div>
+    ${p.description ? `<div style="font-size:var(--dm-fs-small);color:var(--dm-neutral-700);margin-bottom:var(--dm-sp-3);line-height:1.6">${escapeHtml(p.description)}</div>` : ''}
+    <input type="email" data-field="email" placeholder="이메일 주소" style="width:100%;padding:12px;border:1px solid var(--dm-neutral-300);border-radius:var(--dm-radius-md);font-size:var(--dm-fs-small);margin-bottom:var(--dm-sp-2)"/>
+    <label style="display:flex;align-items:flex-start;gap:6px;font-size:var(--dm-fs-tiny);color:var(--dm-neutral-600);margin-bottom:var(--dm-sp-3)"><input type="checkbox" ${p.consent_required ? 'data-consent' : ''} style="margin-top:2px"/><span>${escapeHtml(p.consent_text || '')}</span></label>
+    <button data-dm-submit class="dm-cta dm-cta-primary" style="width:100%">${escapeHtml(p.reward_description ? `참여하고 ${p.reward_description}` : '참여하기')}</button>
+    ${p.legal_notice ? `<div style="font-size:var(--dm-fs-tiny);color:var(--dm-neutral-500);margin-top:var(--dm-sp-2);line-height:1.5">${escapeHtml(p.legal_notice)}</div>` : ''}
+    <div data-dm-result style="display:none"></div>`;
+  return `<div class="dm-section dm-email-capture" data-dm-form>${dmEventCard({ accentVar: '--dm-primary', icon: 'mail', body })}</div>`;
 }
 
 function renderClickRewards(p: any): string {
-  const iconMap: Record<string, string> = { like: '❤️', share: '🔁', scroll: '📜' };
-  return `<div class="dm-section dm-click-rewards" style="padding:var(--dm-sp-4)">
-    <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
-      <div style="font-size:28px">${iconMap[p.reward_type] || '⭐'}</div>
+  const iconMap: Record<string, 'heart' | 'star'> = { like: 'heart', share: 'star', scroll: 'star' };
+  const body = `
+    <div style="display:flex;align-items:center;gap:var(--dm-sp-3)">
+      <div style="color:var(--dm-accent)">${dmIcon(iconMap[p.reward_type] || 'star', 28)}</div>
       <div style="flex:1">
-        <div style="font-size:13px;font-weight:600">${escapeHtml(p.reward_description || '')}</div>
-        ${p.show_progress ? `<div style="font-size:11px;color:var(--dm-neutral-500);margin-top:2px">목표 ${p.target_count || 0}회</div>` : ''}
+        <div style="font-size:var(--dm-fs-small);font-weight:600">${escapeHtml(p.reward_description || '')}</div>
+        ${p.show_progress ? `<div style="font-size:var(--dm-fs-tiny);color:var(--dm-neutral-500);margin-top:2px">목표 ${p.target_count || 0}회</div>` : ''}
       </div>
-    </div>
-  </div>`;
+    </div>`;
+  return `<div class="dm-section dm-click-rewards">${dmEventCard({ accentVar: '--dm-accent', body })}</div>`;
 }
 
 function renderLuckyDraw(p: any): string {
@@ -446,82 +451,78 @@ function renderLuckyDraw(p: any): string {
   const inputs = fields.map((f: any) => {
     const t = f.name === 'phone' ? 'tel' : f.name === 'email' ? 'email' : 'text';
     const ph = f.name === 'name' ? '이름' : f.name === 'phone' ? '전화번호' : '이메일';
-    return `<input type="${t}" data-field="${escapeHtml(f.name)}" placeholder="${ph}" style="padding:10px;border:1px solid #f59e0b;border-radius:6px;font-size:13px;background:#fff;margin-bottom:8px;display:block;width:100%"/>`;
+    return `<input type="${t}" data-field="${escapeHtml(f.name)}" placeholder="${ph}" style="padding:12px;border:1px solid var(--dm-neutral-300);border-radius:var(--dm-radius-md);font-size:var(--dm-fs-small);background:var(--dm-bg);margin-bottom:var(--dm-sp-2);display:block;width:100%"/>`;
   }).join('');
-  return `<div class="dm-section dm-lucky-draw" data-dm-form style="padding:var(--dm-sp-4);background:linear-gradient(135deg,#fef3c7,#fde68a);border:1px solid #f59e0b;border-radius:12px;margin:var(--dm-sp-3) 0">
-    <div style="font-size:28px;margin-bottom:8px">🎁</div>
-    <div style="font-size:15px;font-weight:700;margin-bottom:8px">${escapeHtml(p.title || '[추첨 이벤트 제목]')}</div>
-    ${p.description ? `<div style="font-size:13px;color:var(--dm-neutral-700);margin-bottom:12px;line-height:1.6">${escapeHtml(p.description)}</div>` : ''}
+  const body = `
+    <div style="font-size:var(--dm-fs-h3);font-weight:700;margin-bottom:var(--dm-sp-2)">${escapeHtml(p.title || '[추첨 이벤트 제목]')}</div>
+    ${p.description ? `<div style="font-size:var(--dm-fs-small);color:var(--dm-neutral-700);margin-bottom:var(--dm-sp-3);line-height:1.6">${escapeHtml(p.description)}</div>` : ''}
     ${inputs}
-    <label style="display:flex;align-items:flex-start;gap:6px;font-size:11px;color:var(--dm-neutral-700);margin-bottom:10px"><input type="checkbox" data-consent style="margin-top:2px"/><span>${escapeHtml(p.consent_text || '')}</span></label>
-    <button data-dm-submit style="width:100%;height:44px;background:#d97706;color:#fff;border:none;border-radius:8px;font-size:14px;font-weight:700;cursor:pointer">응모하기</button>
-    ${p.draw_at ? `<div style="font-size:11px;color:var(--dm-neutral-600);margin-top:8px;text-align:center">발표: ${escapeHtml(new Date(p.draw_at).toLocaleString('ko-KR'))}</div>` : ''}
-    <div data-dm-result style="display:none"></div>
-  </div>`;
+    <label style="display:flex;align-items:flex-start;gap:6px;font-size:var(--dm-fs-tiny);color:var(--dm-neutral-600);margin-bottom:var(--dm-sp-3)"><input type="checkbox" data-consent style="margin-top:2px"/><span>${escapeHtml(p.consent_text || '')}</span></label>
+    <button data-dm-submit class="dm-cta dm-cta-primary" style="width:100%">응모하기</button>
+    ${p.draw_at ? `<div style="font-size:var(--dm-fs-tiny);color:var(--dm-neutral-500);margin-top:var(--dm-sp-2);text-align:center">발표: ${escapeHtml(new Date(p.draw_at).toLocaleString('ko-KR'))}</div>` : ''}
+    <div data-dm-result style="display:none"></div>`;
+  return `<div class="dm-section dm-lucky-draw" data-dm-form>${dmEventCard({ accentVar: '--dm-accent', icon: 'gift', body })}</div>`;
 }
 
 function renderRoulette(p: any): string {
   const segs = Array.isArray(p?.segments) ? p.segments.map((s: any) => ({ id: String(s.id), label: String(s.label || '') })) : [];
-  return `<div class="dm-section dm-roulette" data-dm-roulette data-segments="${escapeHtml(JSON.stringify(segs))}" style="padding:var(--dm-sp-4);background:linear-gradient(135deg,#ede9fe,#ddd6fe);border:1px solid #7c3aed;border-radius:12px;margin:var(--dm-sp-3) 0">
-    <div style="font-size:28px;margin-bottom:8px">🎡</div>
-    <div style="font-size:15px;font-weight:700;margin-bottom:8px">${escapeHtml(p.title || '룰렛 이벤트')}</div>
-    <div data-dm-wheel style="width:200px;height:200px;border-radius:50%;background:conic-gradient(#a78bfa 0deg 45deg, #c4b5fd 45deg 90deg, #ddd6fe 90deg 135deg, #ede9fe 135deg 180deg, #a78bfa 180deg 225deg, #c4b5fd 225deg 270deg, #ddd6fe 270deg 315deg, #ede9fe 315deg 360deg);margin:12px auto;border:4px solid #fff"></div>
-    <button data-dm-spin style="height:44px;padding:0 32px;background:#7c3aed;color:#fff;border:none;border-radius:8px;font-size:14px;font-weight:700;cursor:pointer">룰렛 돌리기</button>
-    ${p.one_spin_per_user ? `<div style="font-size:11px;color:var(--dm-neutral-600);margin-top:8px">1인 1회 한정</div>` : ''}
-    <div data-dm-result style="display:none"></div>
-  </div>`;
+  const body = `
+    <div style="font-size:var(--dm-fs-h3);font-weight:700;margin-bottom:var(--dm-sp-3)">${escapeHtml(p.title || '룰렛 이벤트')}</div>
+    <div data-dm-wheel style="width:200px;height:200px;border-radius:var(--dm-radius-full);background:conic-gradient(var(--dm-primary) 0deg 45deg,var(--dm-primary-light) 45deg 90deg,var(--dm-accent) 90deg 135deg,var(--dm-neutral-100) 135deg 180deg,var(--dm-primary) 180deg 225deg,var(--dm-primary-light) 225deg 270deg,var(--dm-accent) 270deg 315deg,var(--dm-neutral-100) 315deg 360deg);margin:var(--dm-sp-3) auto;border:4px solid var(--dm-bg);box-shadow:var(--dm-shadow-md)"></div>
+    <button data-dm-spin class="dm-cta dm-cta-primary">룰렛 돌리기</button>
+    ${p.one_spin_per_user ? `<div style="font-size:var(--dm-fs-tiny);color:var(--dm-neutral-500);margin-top:var(--dm-sp-2)">1인 1회 한정</div>` : ''}
+    <div data-dm-result style="display:none"></div>`;
+  return `<div class="dm-section dm-roulette" data-dm-roulette data-segments="${escapeHtml(JSON.stringify(segs))}">${dmEventCard({ accentVar: '--dm-primary', icon: 'wheel', body })}</div>`;
 }
 
 function renderInstantCoupon(p: any): string {
-  return `<div class="dm-section dm-instant-coupon" style="padding:var(--dm-sp-4);background:linear-gradient(135deg,#fee2e2,#fecaca);border:2px dashed #ef4444;border-radius:12px;margin:var(--dm-sp-3) 0">
-    <div style="font-size:28px;margin-bottom:8px">🎟️</div>
-    <div style="font-size:15px;font-weight:700;color:#991b1b;margin-bottom:8px">${escapeHtml(p.coupon_label || '')}</div>
-    <div style="font-size:13px;color:#7f1d1d;margin-bottom:12px">${escapeHtml(p.discount_description || '')}</div>
-    ${p.expires_at ? `<div style="font-size:11px;color:#991b1b;margin-bottom:10px;font-weight:600">만료: ${escapeHtml(new Date(p.expires_at).toLocaleString('ko-KR'))}</div>` : ''}
-    <button style="height:44px;padding:0 32px;background:#dc2626;color:#fff;border:none;border-radius:8px;font-size:14px;font-weight:700">쿠폰 받기</button>
-    ${p.conditions ? `<div style="font-size:10px;color:var(--dm-neutral-600);margin-top:8px;font-style:italic">${escapeHtml(p.conditions)}</div>` : ''}
-    ${p.usage_instructions ? `<div style="font-size:10px;color:var(--dm-neutral-500);margin-top:6px">${escapeHtml(p.usage_instructions)}</div>` : ''}
-  </div>`;
+  const body = `
+    <div style="font-size:var(--dm-fs-h3);font-weight:700;color:var(--dm-primary);margin-bottom:var(--dm-sp-2)">${escapeHtml(p.coupon_label || '')}</div>
+    <div style="font-size:var(--dm-fs-small);color:var(--dm-neutral-700);margin-bottom:var(--dm-sp-3)">${escapeHtml(p.discount_description || '')}</div>
+    ${p.expires_at ? `<div style="font-size:var(--dm-fs-tiny);color:var(--dm-primary);margin-bottom:var(--dm-sp-3);font-weight:600">만료: ${escapeHtml(new Date(p.expires_at).toLocaleString('ko-KR'))}</div>` : ''}
+    <button class="dm-cta dm-cta-primary">쿠폰 받기</button>
+    ${p.conditions ? `<div style="font-size:var(--dm-fs-tiny);color:var(--dm-neutral-500);margin-top:var(--dm-sp-2)">${escapeHtml(p.conditions)}</div>` : ''}
+    ${p.usage_instructions ? `<div style="font-size:var(--dm-fs-tiny);color:var(--dm-neutral-500);margin-top:4px">${escapeHtml(p.usage_instructions)}</div>` : ''}`;
+  return `<div class="dm-section dm-instant-coupon"><div style="padding:var(--dm-sp-6) var(--dm-sp-5);background:var(--dm-primary-light);border:2px dashed var(--dm-primary);border-radius:var(--dm-radius-xl);margin:var(--dm-sp-3) 0"><div style="color:var(--dm-primary);margin-bottom:var(--dm-sp-3)">${dmIcon('ticket', 26)}</div>${body}</div></div>`;
 }
 
 function renderLimitedQuantity(p: any): string {
   const remaining = p.current_remaining ?? p.total_quantity ?? 0;
   const total = p.total_quantity || 1;
-  const percent = (remaining / total) * 100;
-  return `<div class="dm-section dm-limited-quantity" style="padding:var(--dm-sp-4);background:linear-gradient(135deg,#fef3c7,#fde68a);border:1px solid #d97706;border-radius:12px;margin:var(--dm-sp-3) 0">
-    <div style="font-size:28px;margin-bottom:8px">⏳</div>
-    <div style="font-size:15px;font-weight:700;margin-bottom:8px">${escapeHtml(p.title || '[선착순 이벤트 제목]')}</div>
-    ${p.description ? `<div style="font-size:13px;color:var(--dm-neutral-700);margin-bottom:12px;line-height:1.6">${escapeHtml(p.description)}</div>` : ''}
-    <div style="margin-bottom:12px">
-      <div style="font-size:12px;color:#92400e;margin-bottom:6px;display:flex;justify-content:space-between"><span>남은 수량</span><span style="font-weight:700">${remaining} / ${total}</span></div>
-      <div style="width:100%;height:8px;background:#fff;border-radius:4px;overflow:hidden"><div style="width:${percent}%;height:100%;background:#d97706"></div></div>
+  const percent = Math.max(0, Math.min(100, (remaining / total) * 100));
+  const body = `
+    <div style="font-size:var(--dm-fs-h3);font-weight:700;margin-bottom:var(--dm-sp-2)">${escapeHtml(p.title || '[선착순 이벤트 제목]')}</div>
+    ${p.description ? `<div style="font-size:var(--dm-fs-small);color:var(--dm-neutral-700);margin-bottom:var(--dm-sp-3);line-height:1.6">${escapeHtml(p.description)}</div>` : ''}
+    <div style="margin-bottom:var(--dm-sp-3)">
+      <div style="font-size:var(--dm-fs-tiny);color:var(--dm-neutral-600);margin-bottom:6px;display:flex;justify-content:space-between"><span>남은 수량</span><span style="font-weight:700">${remaining} / ${total}</span></div>
+      <div style="width:100%;height:8px;background:var(--dm-neutral-200);border-radius:var(--dm-radius-full);overflow:hidden"><div style="width:${percent}%;height:100%;background:var(--dm-accent)"></div></div>
     </div>
-    <button style="width:100%;height:44px;background:#d97706;color:#fff;border:none;border-radius:8px;font-size:14px;font-weight:700">선착순 참여하기</button>
-  </div>`;
+    <button class="dm-cta dm-cta-primary" style="width:100%">선착순 참여하기</button>`;
+  return `<div class="dm-section dm-limited-quantity">${dmEventCard({ accentVar: '--dm-accent', icon: 'clock', body })}</div>`;
 }
 
 function renderYoutubeEmbed(p: any): string {
   if (!p.video_url) {
-    return `<div class="dm-section dm-youtube-embed" style="padding:var(--dm-sp-4);text-align:center;color:var(--dm-neutral-400);font-style:italic">[YouTube URL을 입력해주세요]</div>`;
+    return `<div class="dm-section dm-youtube-embed dm-mood-slot" style="padding:var(--dm-sp-6);text-align:center;color:var(--dm-neutral-400)">[YouTube URL을 입력해주세요]</div>`;
   }
   const match = String(p.video_url).match(/(?:youtu\.be\/|v=|embed\/)([A-Za-z0-9_-]{11})/);
   const videoId = match ? match[1] : null;
-  if (!videoId) return `<div class="dm-section dm-youtube-embed" style="padding:var(--dm-sp-4)">잘못된 YouTube URL</div>`;
+  if (!videoId) return `<div class="dm-section dm-youtube-embed" style="padding:var(--dm-sp-4);color:var(--dm-neutral-500)">잘못된 YouTube URL</div>`;
   return `<div class="dm-section dm-youtube-embed" style="padding:var(--dm-sp-4)">
     <div style="position:relative;padding-bottom:56.25%;height:0">
-      <iframe src="https://www.youtube.com/embed/${escapeHtml(videoId)}${p.auto_play ? '?autoplay=1&mute=1' : ''}" style="position:absolute;top:0;left:0;width:100%;height:100%;border:none;border-radius:8px" allow="autoplay; encrypted-media" allowfullscreen></iframe>
+      <iframe src="https://www.youtube.com/embed/${escapeHtml(videoId)}${p.auto_play ? '?autoplay=1&mute=1' : ''}" style="position:absolute;top:0;left:0;width:100%;height:100%;border:none;border-radius:var(--dm-radius-md)" allow="autoplay; encrypted-media" allowfullscreen></iframe>
     </div>
   </div>`;
 }
 
 function renderInstagramEmbed(p: any): string {
   if (!p.post_url) {
-    return `<div class="dm-section dm-instagram-embed" style="padding:var(--dm-sp-4);text-align:center;color:var(--dm-neutral-400);font-style:italic">[Instagram URL을 입력해주세요]</div>`;
+    return `<div class="dm-section dm-instagram-embed dm-mood-slot" style="padding:var(--dm-sp-6);text-align:center;color:var(--dm-neutral-400)">[Instagram URL을 입력해주세요]</div>`;
   }
   return `<div class="dm-section dm-instagram-embed" style="padding:var(--dm-sp-4)">
-    <a href="${escapeHtml(p.post_url)}" target="_blank" rel="noopener noreferrer" style="display:block;padding:20px;background:linear-gradient(135deg,#fdf2f8,#fce7f3);border:1px solid #ec4899;border-radius:8px;text-align:center;text-decoration:none">
-      <div style="font-size:28px;margin-bottom:6px">📷</div>
-      <div style="font-size:13px;font-weight:600;color:#831843">Instagram 게시물 보기</div>
+    <a href="${escapeHtml(p.post_url)}" target="_blank" rel="noopener noreferrer" style="display:block;padding:var(--dm-sp-5);background:var(--dm-neutral-50);border:1px solid var(--dm-neutral-200);border-radius:var(--dm-radius-md);text-align:center;text-decoration:none;box-shadow:var(--dm-shadow-sm)">
+      <div style="color:var(--dm-accent);display:flex;justify-content:center;margin-bottom:6px">${dmIcon('image', 26)}</div>
+      <div style="font-size:var(--dm-fs-small);font-weight:600;color:var(--dm-neutral-800)">Instagram 게시물 보기</div>
     </a>
   </div>`;
 }
@@ -529,16 +530,16 @@ function renderInstagramEmbed(p: any): string {
 function renderMapStoreLocator(p: any): string {
   const stores = Array.isArray(p?.stores) ? p.stores : [];
   const items = stores.map((s: any) => `
-    <div style="padding:10px;background:var(--dm-neutral-50);border-radius:6px;margin-bottom:8px">
-      <div style="font-size:13px;font-weight:600">${escapeHtml(s.name || '')}</div>
-      <div style="font-size:11px;color:var(--dm-neutral-600);margin-top:2px">${escapeHtml(s.address || '')}</div>
-      ${s.phone ? `<div style="font-size:11px;color:var(--dm-primary);margin-top:4px">📞 ${escapeHtml(s.phone)}</div>` : ''}
-      ${s.hours ? `<div style="font-size:11px;color:var(--dm-neutral-500);margin-top:2px">⏰ ${escapeHtml(s.hours)}</div>` : ''}
+    <div style="padding:var(--dm-sp-3);background:var(--dm-neutral-50);border-radius:var(--dm-radius-md);margin-bottom:var(--dm-sp-2)">
+      <div style="font-size:var(--dm-fs-small);font-weight:600">${escapeHtml(s.name || '')}</div>
+      <div style="font-size:var(--dm-fs-tiny);color:var(--dm-neutral-600);margin-top:2px">${escapeHtml(s.address || '')}</div>
+      ${s.phone ? `<div style="font-size:var(--dm-fs-tiny);color:var(--dm-primary);margin-top:4px">전화 ${escapeHtml(s.phone)}</div>` : ''}
+      ${s.hours ? `<div style="font-size:var(--dm-fs-tiny);color:var(--dm-neutral-500);margin-top:2px">영업 ${escapeHtml(s.hours)}</div>` : ''}
     </div>`).join('');
   return `<div class="dm-section dm-map-store-locator" style="padding:var(--dm-sp-4)">
-    <div style="font-size:15px;font-weight:700;margin-bottom:8px">매장 찾기</div>
-    <div style="width:100%;height:200px;background:var(--dm-neutral-100);border-radius:8px;display:flex;align-items:center;justify-content:center;color:var(--dm-neutral-500);font-size:13px;margin-bottom:12px">🗺️ 지도 영역</div>
-    ${items || `<div style="text-align:center;color:var(--dm-neutral-400);font-style:italic">[매장 정보를 추가해주세요]</div>`}
+    <div style="display:flex;align-items:center;gap:6px;font-size:var(--dm-fs-h3);font-weight:700;margin-bottom:var(--dm-sp-3)"><span style="color:var(--dm-primary)">${dmIcon('map', 18)}</span>매장 찾기</div>
+    <div style="width:100%;height:200px;background:var(--dm-neutral-100);border-radius:var(--dm-radius-md);display:flex;align-items:center;justify-content:center;color:var(--dm-neutral-400);margin-bottom:var(--dm-sp-3)">${dmIcon('map', 32)}</div>
+    ${items || `<div class="dm-mood-slot" style="text-align:center;color:var(--dm-neutral-400);padding:var(--dm-sp-4)">[매장 정보를 추가해주세요]</div>`}
   </div>`;
 }
 
@@ -546,18 +547,18 @@ function renderReviews(p: any): string {
   const reviews = Array.isArray(p?.reviews) ? p.reviews : [];
   const avg = reviews.length > 0 ? (reviews.reduce((sum: number, r: any) => sum + (r.rating || 0), 0) / reviews.length).toFixed(1) : '0.0';
   const items = reviews.slice(0, 3).map((r: any) => `
-    <div style="padding:10px;background:var(--dm-neutral-50);border-radius:6px;margin-bottom:10px">
+    <div style="padding:var(--dm-sp-3);background:var(--dm-neutral-50);border-radius:var(--dm-radius-md);margin-bottom:var(--dm-sp-2)">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
-        <span style="color:#f59e0b;font-size:13px">${'★'.repeat(r.rating || 0)}${'☆'.repeat(5 - (r.rating || 0))}</span>
-        <span style="font-size:11px;color:var(--dm-neutral-500)">${escapeHtml(r.author || '')}</span>
+        <span style="color:var(--dm-accent);font-size:var(--dm-fs-small);letter-spacing:1px">${'★'.repeat(r.rating || 0)}${'☆'.repeat(5 - (r.rating || 0))}</span>
+        <span style="font-size:var(--dm-fs-tiny);color:var(--dm-neutral-500)">${escapeHtml(r.author || '')}</span>
       </div>
-      <div style="font-size:12px;line-height:1.5">${escapeHtml(r.body || '')}</div>
-      ${r.date ? `<div style="font-size:10px;color:var(--dm-neutral-400);margin-top:4px">${escapeHtml(r.date)}</div>` : ''}
+      <div style="font-size:var(--dm-fs-small);line-height:1.5">${escapeHtml(r.body || '')}</div>
+      ${r.date ? `<div style="font-size:var(--dm-fs-tiny);color:var(--dm-neutral-400);margin-top:4px">${escapeHtml(r.date)}</div>` : ''}
     </div>`).join('');
   return `<div class="dm-section dm-reviews" style="padding:var(--dm-sp-4)">
-    ${p.title ? `<div style="font-size:15px;font-weight:700;margin-bottom:8px">${escapeHtml(p.title)}</div>` : ''}
-    ${reviews.length > 0 && p.show_average_rating !== false ? `<div style="display:flex;align-items:baseline;gap:8px;margin-bottom:12px"><span style="font-size:24px;font-weight:700">${avg}</span><span style="color:#f59e0b">★★★★★</span><span style="font-size:11px;color:var(--dm-neutral-500)">(${reviews.length}건)</span></div>` : ''}
-    ${items || `<div style="text-align:center;color:var(--dm-neutral-400);font-style:italic">[리뷰를 추가해주세요]</div>`}
+    ${p.title ? `<div style="display:flex;align-items:center;gap:6px;font-size:var(--dm-fs-h3);font-weight:700;margin-bottom:var(--dm-sp-3)"><span style="color:var(--dm-accent)">${dmIcon('star', 18)}</span>${escapeHtml(p.title)}</div>` : ''}
+    ${reviews.length > 0 && p.show_average_rating !== false ? `<div style="display:flex;align-items:baseline;gap:8px;margin-bottom:var(--dm-sp-3)"><span style="font-size:var(--dm-fs-h1);font-weight:700">${avg}</span><span style="color:var(--dm-accent)">★★★★★</span><span style="font-size:var(--dm-fs-tiny);color:var(--dm-neutral-500)">(${reviews.length}건)</span></div>` : ''}
+    ${items || `<div class="dm-mood-slot" style="text-align:center;color:var(--dm-neutral-400);padding:var(--dm-sp-6)">[리뷰를 추가해주세요]</div>`}
   </div>`;
 }
 

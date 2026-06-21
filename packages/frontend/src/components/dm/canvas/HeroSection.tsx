@@ -17,9 +17,14 @@ export default function HeroSection({ props, onEdit }: { props: HeroProps; onEdi
     ? 'linear-gradient(180deg,rgba(0,0,0,0) 40%,rgba(0,0,0,0.5) 100%)'
     : 'transparent';
   const editable = !!onEdit;
+  // ★ Phase 1: 이미지 없으면 AI 무드 배경(그라데이션)으로 — 휑한 검정 대신 완성형. mood_text로 가독 색.
+  const moodBg = (props as unknown as { mood_background?: string }).mood_background;
+  const moodText = (props as unknown as { mood_text?: string }).mood_text;
+  const baseBg = props.image_url ? 'var(--dm-neutral-900)' : (moodBg || 'var(--dm-neutral-900)');
+  const textColor = (!props.image_url && moodBg) ? (moodText || '#fff') : '#fff';
 
   return (
-    <div className="dm-section dm-hero" style={{ position: 'relative', minHeight: height, overflow: 'hidden', background: 'var(--dm-neutral-900)' }}>
+    <div className="dm-section dm-hero" style={{ position: 'relative', minHeight: height, overflow: 'hidden', background: baseBg }}>
       {props.image_url && (
         <img
           src={dmImageUrl(props.image_url)}
@@ -27,7 +32,7 @@ export default function HeroSection({ props, onEdit }: { props: HeroProps; onEdi
           style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' }}
         />
       )}
-      <div style={{ position: 'absolute', inset: 0, background: gradient }} />
+      {props.image_url && <div style={{ position: 'absolute', inset: 0, background: gradient }} />}
       <div
         style={{
           position: 'relative',
@@ -37,7 +42,7 @@ export default function HeroSection({ props, onEdit }: { props: HeroProps; onEdi
           justifyContent: 'flex-end',
           alignItems: justifyContent,
           padding: 'var(--dm-sp-8) var(--dm-sp-5)',
-          color: '#fff',
+          color: textColor,
           textAlign,
         }}
       >

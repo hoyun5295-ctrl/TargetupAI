@@ -43,3 +43,14 @@ export function buildSeasonPromptBlock(month: number, businessType: string | nul
     `- 단, 목표 자체는 바꾸지 마세요. 계절은 인사·소재로만 얹습니다.`,
   ].join('\n');
 }
+
+/**
+ * 메시지 생성 sub-agent에 넘길 objective 합성 — orchestrate / orchestrateWithAI 공통.
+ * seasonHint가 있으면 빈 줄로 이어 붙이고, 없으면 objective 그대로 둔다.
+ * objective·타겟·차감은 불변 — 계절 힌트는 문안 생성 입력에만 얹는 용도.
+ */
+export function buildMessageObjective(objective: string, seasonHint?: string | null): string {
+  const obj = (objective || '').trim();
+  const hint = (seasonHint || '').trim();
+  return hint ? `${obj}\n\n${hint}` : obj;
+}
