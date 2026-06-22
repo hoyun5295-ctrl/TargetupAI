@@ -4469,6 +4469,45 @@ const handleApproveRequest = async (id: string) => {
                 <div className="text-xs text-gray-400 mb-1">템플릿 내용</div>
                 <div className="bg-gray-50 border rounded-lg p-3 whitespace-pre-wrap break-words text-gray-800">{templateDetail.content || '-'}</div>
               </div>
+              {/* ★ 2026-06-22: 강조 표기 + 버튼 + 부가정보 — 검수/문의 응대 시 등록 내용 확인 (처리메모 요청) */}
+              {templateDetail.emphasize_type && templateDetail.emphasize_type !== 'NONE' && (
+                <div>
+                  <div className="text-xs text-gray-400 mb-1">강조 표기 ({templateDetail.emphasize_type})</div>
+                  <div className="bg-amber-50 border border-amber-100 rounded-lg p-3 whitespace-pre-wrap break-words text-gray-800">{templateDetail.emphasize_title || '-'}</div>
+                </div>
+              )}
+              {(() => {
+                const raw = (templateDetail as any).buttons;
+                let btns: any[] = [];
+                if (Array.isArray(raw)) btns = raw;
+                else if (typeof raw === 'string' && raw.trim()) { try { const p = JSON.parse(raw); if (Array.isArray(p)) btns = p; } catch { /* 파싱 실패 무시 */ } }
+                if (btns.length === 0) return null;
+                return (
+                  <div>
+                    <div className="text-xs text-gray-400 mb-1">버튼 ({btns.length})</div>
+                    <div className="space-y-1">
+                      {btns.map((b: any, i: number) => {
+                        const nm = b?.name || b?.buttonName || b?.title || `버튼 ${i + 1}`;
+                        const tp = b?.linkType || b?.type || b?.linkTypeCode || '';
+                        const url = b?.linkMo || b?.urlMobile || b?.url || b?.linkPc || b?.urlPc || '';
+                        return (
+                          <div key={i} className="bg-gray-50 border rounded px-3 py-1.5 text-xs text-gray-800">
+                            <span className="font-medium">{nm}</span>
+                            {tp ? <span className="text-gray-400"> · {tp}</span> : null}
+                            {url ? <span className="text-gray-400 break-all"> · {url}</span> : null}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              })()}
+              {templateDetail.extra_content && (
+                <div>
+                  <div className="text-xs text-gray-400 mb-1">부가 정보</div>
+                  <div className="bg-gray-50 border rounded-lg p-3 whitespace-pre-wrap break-words text-gray-800">{templateDetail.extra_content}</div>
+                </div>
+              )}
               {templateDetail.reject_reason && (
                 <div>
                   <div className="text-xs text-gray-400 mb-1">반려 사유</div>

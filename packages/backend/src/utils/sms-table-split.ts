@@ -82,3 +82,35 @@ export function computeDisplayCounts(
   const pending = resultFinal ? Math.max(0, sent - s - f) : lp;
   return { sent, success: s, fail: f, pending };
 }
+
+/** 결과 캐시 확정(result_final) 최소 경과 시간 — 발송 후 통신사 응답 여유(D182 99%ile 120분의 3배). */
+export const FINALIZE_MIN_AGE_MS = 6 * 60 * 60 * 1000;
+
+export interface FinalizeCheckInput {
+  status: string;
+  /** COALESCE(scheduled_at, sent_at)의 epoch ms. 없으면 0. */
+  sendBaseMs: number;
+  nowMs: number;
+  successCount: number | null | undefined;
+  failCount: number | null | undefined;
+  sentCount: number | null | undefined;
+  targetCount: number | null | undefined;
+}
+
+/**
+ * ★ 2026-06-22 결과 캐시 확정 판정 (순수) — result_final 조기 확정 차단.
+ *   배경: 옛 게이트가 `(성공+실패) >= sent_count`였는데, sent_count가 과소 기록되면(마트스마트 3095 vs 실제 3180)
+ *   아직 미해결 행이 남아도 일찍 충족돼 확정 → 요약(캐시) < 상세(라이브) 불일치가 그 창에 노출.
+ *   정정: 완결 기준 = 의도한 발송 수(target)와 적재(sent) 중 큰 값. 성공+실패가 그 값에 도달해야만 확정.
+ *   미해결 행은 통신사 늦은 리포트 또는 48h expired-pending-sweeper(→4000 fail)로 결국 채워져 자연 확정.
+ *   영구 미달 캠페인은 reconcileFinalizedCampaigns의 72h 굳힘 fallback이 별도로 마감(무한 라이브 방지).
+ */
+export function shouldFinalizeCampaign(i: FinalizeCheckInput): boolean {
+  if (i.status !== 'completed' && i.status !== 'failed') return false;
+  if (!i.sendBaseMs || i.sendBaseMs <= 0) return false;
+  if (i.nowMs - i.sendBaseMs < FINALIZE_MIN_AGE_MS) return false;
+  const resolved = Math.max(0, Number(i.successCount) || 0) + Math.max(0, Number(i.failCount) || 0);
+  const benchmark = Math.max(Math.max(0, Number(i.targetCount) || 0), Math.max(0, Number(i.sentCount) || 0));
+  if (benchmark <= 0) return false;
+  return resolved >= benchmark;
+}

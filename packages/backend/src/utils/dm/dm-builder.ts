@@ -6,6 +6,7 @@
  */
 import crypto from 'crypto';
 import { query } from '../../config/database';
+import { normalizeDmShortCode } from './dm-code';
 
 // ────────────────── 타입 ──────────────────
 
@@ -329,9 +330,10 @@ export async function getDmDetail(id: string, companyId: string) {
 }
 
 export async function getDmByCode(code: string) {
+  // ★ 2026-06-22: 공개 URL이 dm-{short_code} 형식이라 선두 "dm-" 제거 후 조회 (저장 short_code는 접두사 없음).
   const result = await query(
     `SELECT * FROM dm_pages WHERE short_code = $1 AND status = 'published'`,
-    [code]
+    [normalizeDmShortCode(code)]
   );
   return result.rows[0] || null;
 }

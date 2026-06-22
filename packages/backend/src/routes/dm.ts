@@ -330,7 +330,9 @@ dmRouter.post('/:id/publish', async (req: any, res: any) => {
     }
     return res.json({
       short_code: result.short_code,
-      short_url: `https://hanjul-flyer.kr/dm-${result.short_code}`,
+      // ★ 2026-06-22: hanjul-flyer.kr는 한줄전단 제품 도메인 — 한줄로 DM은 거기서 "전단지를 찾을 수 없"으로 404.
+      //   동작하는 한줄로 viewer(테스트발송 링크와 동일 베이스 /api/dm/v)로 발행. getDmByCode가 dm- 접두사 제거해 조회.
+      short_url: `${process.env.HANJUL_BASE_URL || 'https://hanjul.ai'}/api/dm/v/dm-${result.short_code}`,
     });
   } catch (err: any) {
     if (err instanceof InsufficientCreditError) {
@@ -592,12 +594,16 @@ dmRouter.post('/:id/test-send', async (req: any, res: any) => {
     const testId = `dm-test-${req.params.id}-${Date.now()}`;
     const subject = `[DM 테스트] ${dm.title || ''}`.slice(0, 40);
 
+    // ★ 2026-06-22: 빈 callBack은 발신번호가 없어 실제 발송이 안 됨(테스트 "보냈어요"인데 문자 안옴) → 회사 기본 발신번호 조회(campaigns 테스트발송과 동일 경로).
+    const cbRow = await query(`SELECT phone FROM callback_numbers WHERE company_id = $1 AND is_default = true LIMIT 1`, [companyId]);
+    const testCallback = cbRow.rows[0]?.phone || '';
+
     const results: Array<{ phone: string; ok: boolean; error?: string }> = [];
     for (const phone of cleanPhones) {
       try {
         await insertTestSmsQueue(
           phone,
-          '',          // callBack — 회사 기본 발신번호 사용 (선택적; 빈 문자열이면 Agent가 처리)
+          testCallback,  // 회사 기본 발신번호 (campaigns 테스트발송과 동일; 없으면 Agent fallback)
           body,
           'L',         // LMS (본문 + URL 길이 고려)
           testId,

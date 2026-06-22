@@ -21,6 +21,7 @@ import { query } from '../config/database';
 import { syncCampaignResults } from './campaign-lifecycle';
 // ★ 2026-06-11: 카운트는 smsCampaignCountsSafe(이력=결과/라이브=대기 분리) — 이동 중 이중 카운트 차단
 import { getAuthSmsTable, bulkInsertSmsQueue, getCompanySmsTablesWithLogs, smsCampaignCountsSafe, kakaoBatchAggByGroup } from './sms-queue';
+import { shouldFinalizeCampaign } from './sms-table-split';
 
 const INTERVAL_MS = 5 * 60 * 1000; // 5분
 const BOOT_DELAY_MS = 60 * 1000;   // 서버 startup 안정화 후 첫 실행
@@ -242,19 +243,39 @@ async function notifyJourneyResultsToManagers(): Promise<void> {
  *     미완성(LIVE→LOG 이동 중 등)이 과소 확정돼 발송결과가 실제보다 적게 굳던 문제 차단.
  */
 async function markFinalizedCampaigns(): Promise<void> {
-  const r = await query(`
-    UPDATE campaigns
-       SET result_final = true,
-           result_synced_at = NOW()
+  // 후보: terminal + 미확정 + 발송 6h 경과. 확정 판정은 순수 shouldFinalizeCampaign(성공+실패 ≥ target/적재).
+  //   ★ 2026-06-22: 옛 게이트 (성공+실패)>=sent_count는 sent_count 과소 기록(마트스마트 3095 vs 실제 3180) 시
+  //   미해결 행이 남아도 조기 확정 → 요약(캐시) < 상세(라이브) 불일치 노출. target 완결 기준으로 교체.
+  const cand = await query(`
+    SELECT id, status, success_count, fail_count, sent_count, target_count,
+           EXTRACT(EPOCH FROM COALESCE(scheduled_at, sent_at)) * 1000 AS send_base_ms
+      FROM campaigns
      WHERE result_final = false
        AND status IN ('completed', 'failed')
        AND sent_at IS NOT NULL
        AND COALESCE(scheduled_at, sent_at) < NOW() - INTERVAL '6 hours'
        AND sent_count > 0
-       AND (COALESCE(success_count, 0) + COALESCE(fail_count, 0)) >= sent_count
   `);
+  const nowMs = Date.now();
+  const ids = cand.rows
+    .filter((c: any) => shouldFinalizeCampaign({
+      status: c.status,
+      sendBaseMs: Number(c.send_base_ms) || 0,
+      nowMs,
+      successCount: c.success_count,
+      failCount: c.fail_count,
+      sentCount: c.sent_count,
+      targetCount: c.target_count,
+    }))
+    .map((c: any) => c.id);
+  if (ids.length === 0) return;
+  const r = await query(
+    `UPDATE campaigns SET result_final = true, result_synced_at = NOW()
+      WHERE id = ANY($1::uuid[]) AND result_final = false`,
+    [ids],
+  );
   if (r.rowCount && r.rowCount > 0) {
-    log(`result_final 확정 ${r.rowCount}건 (발송 6h 경과 완료 캠페인 → PG 캐시 전환)`);
+    log(`result_final 확정 ${r.rowCount}건 (발송 6h 경과 + 성공+실패 ≥ target/적재 완결분 → PG 캐시 전환)`);
   }
 }
 

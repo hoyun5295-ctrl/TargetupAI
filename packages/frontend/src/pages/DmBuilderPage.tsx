@@ -174,6 +174,7 @@ export default function DmBuilderPage() {
   //   layoutMode 변경 영역 = 편집 모드 안 DmTopBar 토글 영역 활용 정합
   // ★ 2026-06-19: 완성 이미지(디자인 시안) 업로드 → slideshow 섹션 자동 생성 진입
   const completedImagesInputRef = useRef<HTMLInputElement>(null);
+  const uploadModeRef = useRef<'slides' | 'scroll'>('scroll'); // 완성 이미지 업로드: 좌우 슬라이드 / 세로 스크롤 선택
   const [uploadingImages, setUploadingImages] = useState(false);
 
   const handleCreateNew = () => {
@@ -238,7 +239,7 @@ export default function DmBuilderPage() {
   }, [generating, createNew, applyAiGenerated, save, setToast]);
 
   // ★ 2026-06-19: 완성 이미지 업로드 → 슬라이드 DM 자동 생성 (외주 완성 시안 대응 — 신규 섹션 타입 불요, slideshow 재사용)
-  const handleCompletedImagesSelected = useCallback(async (files: FileList | null) => {
+  const handleCompletedImagesSelected = useCallback(async (files: FileList | null, mode: 'slides' | 'scroll' = 'scroll') => {
     if (!files || files.length === 0) return;
     if (uploadingImages || generating) return;
     setUploadingImages(true);
@@ -254,11 +255,16 @@ export default function DmBuilderPage() {
         setToast({ type: 'error', message: '이미지 업로드에 실패했습니다. 다시 시도해주세요.' });
         return;
       }
-      // 완성 이미지 N장 → 갤러리(세로 1열·원본 비율 풀폭) 섹션 1개로 구성 후 편집 모드 진입
-      // slideshow는 16:9 크롭 + 발송 시 첫 장만 렌더되어 완성 시안에 부적합 → gallery list_1xN은 전 이미지를 원본 비율로 세로 나열
-      const gallery = createSection('gallery', 0, { images: urls.map((u) => ({ url: u })), layout: 'list_1xN' });
+      // 완성 이미지 N장 → 좌우 슬라이드(이미지당 1페이지 스와이프) 또는 세로 스크롤(1열 갤러리). 사용자 선택(mode).
+      // ★ 슬라이드쇼 섹션은 16:9 크롭 + 발송 시 첫 장만 렌더 버그 → 페이지 스와이프(layoutMode 'slides')로 원본 비율·전 장 렌더.
       createNew({ title: '완성 이미지 DM' });
-      applyAiGenerated([gallery], undefined, '완성 이미지 업로드', { layoutMode: 'scroll' });
+      if (mode === 'slides') {
+        const pages = urls.map((u) => [createSection('gallery', 0, { images: [{ url: u }], layout: 'list_1xN' })]);
+        applyAiGenerated(pages[0], undefined, '완성 이미지 업로드', { pages, layoutMode: 'slides' });
+      } else {
+        const gallery = createSection('gallery', 0, { images: urls.map((u) => ({ url: u })), layout: 'list_1xN' });
+        applyAiGenerated([gallery], undefined, '완성 이미지 업로드', { layoutMode: 'scroll' });
+      }
       await save({ silent: true });
       setMode('edit');
       setToast({
@@ -740,27 +746,34 @@ export default function DmBuilderPage() {
             accept="image/*"
             multiple
             style={{ display: 'none' }}
-            onChange={(e) => handleCompletedImagesSelected(e.target.files)}
+            onChange={(e) => handleCompletedImagesSelected(e.target.files, uploadModeRef.current)}
           />
-          <button
-            onClick={() => completedImagesInputRef.current?.click()}
-            disabled={generating || uploadingImages}
-            style={{
-              width: '100%',
-              marginTop: 10,
-              padding: '14px 20px',
-              background: 'rgba(255,255,255,0.04)',
-              border: '1px dashed rgba(255,255,255,0.2)',
-              borderRadius: 10,
-              cursor: (generating || uploadingImages) ? 'not-allowed' : 'pointer',
-              color: '#fff', fontSize: 13, fontWeight: 600,
-              display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
-              opacity: (generating || uploadingImages) ? 0.5 : 1,
-            }}
-          >
-            <span style={{ fontSize: 16 }}>🖼️</span>
-            <span>{uploadingImages ? '이미지 업로드 중...' : '완성 이미지 업로드 (디자인 시안 여러 장 → 슬라이드 DM)'}</span>
-          </button>
+          <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
+            {([
+              { mode: 'slides' as const, label: '완성 이미지 → 좌우 슬라이드' },
+              { mode: 'scroll' as const, label: '완성 이미지 → 세로 스크롤' },
+            ]).map((opt) => (
+              <button
+                key={opt.mode}
+                onClick={() => { uploadModeRef.current = opt.mode; completedImagesInputRef.current?.click(); }}
+                disabled={generating || uploadingImages}
+                style={{
+                  flex: 1,
+                  padding: '14px 16px',
+                  background: 'rgba(255,255,255,0.04)',
+                  border: '1px dashed rgba(255,255,255,0.2)',
+                  borderRadius: 10,
+                  cursor: (generating || uploadingImages) ? 'not-allowed' : 'pointer',
+                  color: '#fff', fontSize: 13, fontWeight: 600,
+                  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+                  opacity: (generating || uploadingImages) ? 0.5 : 1,
+                }}
+              >
+                <span style={{ fontSize: 16 }}>🖼️</span>
+                <span>{uploadingImages ? '업로드 중...' : opt.label}</span>
+              </button>
+            ))}
+          </div>
         </div>
 
         {/* 내 DM 현황 — 지표는 항상 표시 (로딩 중 스켈레톤, 실패해도 0으로) */}
