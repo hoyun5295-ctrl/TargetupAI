@@ -68,6 +68,9 @@ export async function selectJourneyTargetCustomerIds(
       return selectCdpEvent(companyId, 'purchase', filters, limit);
     case 'cdp.reservation_created':
       return selectCdpEvent(companyId, 'reservation_created', filters, limit);
+    // ★ 2026-06-22: 배송 시작 = 자사몰 custom 이벤트(cdp_events.event_name='custom_order_shipped'). 라이브는 watcher가 커서 경로 호출, 여기는 미리보기·카운트 추정.
+    case 'custom_order_shipped':
+      return selectCdpEvent(companyId, 'custom_order_shipped', filters, limit);
 
     // 3. 휴면 (customers.recent_purchase_date < NOW - N일)
     case 'customer.dormant': {
@@ -278,6 +281,33 @@ export async function selectCdpEventRowsForCursor(
     params,
   );
   return r.rows.map((x: any) => ({ customerId: x.customer_id, occurredAt: x.occurred_at, properties: x.properties ?? null }));
+}
+
+// ★ 2026-06-22: 장바구니(cart_abandon)는 커서가 아니라 enqueueCandidates 경로라 진입 시점 properties를 따로 모은다.
+//   cart_abandon 추출의 abandoned CTE와 동일 창·동일 최신 cart_add(DISTINCT ON occurred_at DESC)의 properties →
+//   알림톡 #{상품명} 등 채움(journey-executor가 entry_event_properties로 customer에 병합).
+export async function selectCartAbandonProperties(
+  companyId: string,
+  customerIds: string[],
+  abandonHours: number,
+): Promise<Record<string, Record<string, any>>> {
+  if (customerIds.length === 0) return {};
+  const r = await query(
+    `SELECT DISTINCT ON (e.customer_id) e.customer_id, e.properties
+       FROM cdp_events e
+      WHERE e.company_id = $1::uuid
+        AND e.event_name = 'cart_add'
+        AND e.customer_id = ANY($2::uuid[])
+        AND e.occurred_at >= NOW() - (($3::int + 24) || ' hours')::interval
+        AND e.occurred_at <= NOW() - ($3 || ' hours')::interval
+      ORDER BY e.customer_id, e.occurred_at DESC`,
+    [companyId, customerIds, String(abandonHours)],
+  );
+  const map: Record<string, Record<string, any>> = {};
+  for (const x of r.rows as any[]) {
+    if (x.properties && typeof x.properties === 'object') map[x.customer_id] = x.properties;
+  }
+  return map;
 }
 
 // ════════════════════════════════════════════════════════════════════

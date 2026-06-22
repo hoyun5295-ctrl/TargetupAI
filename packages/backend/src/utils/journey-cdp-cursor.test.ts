@@ -1,5 +1,5 @@
 import { describe, test, expect } from 'vitest';
-import { planCdpCursorBatch } from './journey-cdp-cursor';
+import { planCdpCursorBatch, buildEntryPropsArray, resolveCdpCursorEventName } from './journey-cdp-cursor';
 
 const winEnd = new Date('2026-06-22T10:00:00Z');
 
@@ -35,5 +35,41 @@ describe('planCdpCursorBatch — properties 보존 (ids/cursor 로직 불변)', 
     expect(r.truncated).toBe(true);
     expect(r.newCursor).toEqual(new Date('2026-06-22T02:00:00Z'));
     expect(r.propertiesByCustomer).toEqual({ c1: { order_no: 'A1' }, c2: { order_no: 'B1' } });
+  });
+});
+
+describe('buildEntryPropsArray — 진입 properties를 customerId 순서에 정렬 (enqueue INSERT용)', () => {
+  test('id 순서대로 정렬 — 있으면 JSON 문자열, 없으면 null', () => {
+    const arr = buildEntryPropsArray(['c1', 'c2', 'c3'], {
+      c1: { product_name: '원피스' },
+      c3: { product_name: '코트' },
+    });
+    expect(arr).toEqual([JSON.stringify({ product_name: '원피스' }), null, JSON.stringify({ product_name: '코트' })]);
+  });
+
+  test('propsByCustomer 미전달(타 트리거) — 전부 null (기존 동작 불변)', () => {
+    const arr = buildEntryPropsArray(['c1', 'c2']);
+    expect(arr).toEqual([null, null]);
+  });
+
+  test('빈 객체 properties는 null 취급 (빈 봉투 동봉 회피)', () => {
+    const arr = buildEntryPropsArray(['c1'], { c1: {} });
+    expect(arr).toEqual([null]);
+  });
+});
+
+describe('resolveCdpCursorEventName — 커서 경로 트리거 판정 (단일 출처)', () => {
+  test('구매·예약·배송(custom_order_shipped)은 커서 경로 — cdp_events.event_name 반환', () => {
+    expect(resolveCdpCursorEventName('cdp.purchase')).toBe('purchase');
+    expect(resolveCdpCursorEventName('cdp.reservation_created')).toBe('reservation_created');
+    expect(resolveCdpCursorEventName('custom_order_shipped')).toBe('custom_order_shipped');
+  });
+
+  test('그 외 트리거는 커서 경로 아님 — null (enqueueCandidates 경로)', () => {
+    expect(resolveCdpCursorEventName('cdp.cart_abandon')).toBeNull();
+    expect(resolveCdpCursorEventName('customer.created')).toBeNull();
+    expect(resolveCdpCursorEventName('customer.dormant')).toBeNull();
+    expect(resolveCdpCursorEventName('custom')).toBeNull();
+    expect(resolveCdpCursorEventName('')).toBeNull();
   });
 });

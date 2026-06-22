@@ -420,6 +420,8 @@ export default function JourneysPage() {
   const [alimtalkSenders, setAlimtalkSenders] = useState<AlimtalkSenderProfile[]>([]);
   const [alimtalkTemplates, setAlimtalkTemplates] = useState<AlimtalkTemplate[]>([]);
   const [customerFields, setCustomerFields] = useState<Array<{ key: string; label: string }>>([]);
+  // 자사몰(CDP) 연동 활성 여부 — 배송 등 custom 이벤트 트리거 잠금 해제용. install-status 기준(키 발급 or 이벤트 수신).
+  const [hasMallIntegration, setHasMallIntegration] = useState(false);
   const [reviewBudget, setReviewBudget] = useState('');
   const [reviewThreshold, setReviewThreshold] = useState('');
 
@@ -470,7 +472,8 @@ export default function JourneysPage() {
       fetch('/api/alimtalk/senders', { headers: { Authorization: `Bearer ${t}` } }).catch(() => null),
       fetch('/api/companies/kakao-templates?status=APPROVED', { headers: { Authorization: `Bearer ${t}` } }).catch(() => null),
       fetch('/api/customers/enabled-fields', { headers: { Authorization: `Bearer ${t}` } }).catch(() => null),
-    ]).then(async ([sndRes, tplRes, fldRes]) => {
+      fetch('/api/cdp/install-status', { headers: { Authorization: `Bearer ${t}` } }).catch(() => null),
+    ]).then(async ([sndRes, tplRes, fldRes, cdpRes]) => {
       if (sndRes?.ok) {
         const data = await sndRes.json();
         setAlimtalkSenders(data.profiles || []);
@@ -486,6 +489,11 @@ export default function JourneysPage() {
           label: f.display_name || f.field_label || f.field_key,
         }));
         setCustomerFields(fields);
+      }
+      if (cdpRes?.ok) {
+        const data = await cdpRes.json();
+        // 키 발급됐거나 이벤트가 들어온 적 있으면 자사몰 연동 활성 → 배송 트리거 잠금 해제
+        setHasMallIntegration(!!data.keyIssuedAt || (data.total || 0) > 0);
       }
     });
   }, []);
@@ -1144,6 +1152,7 @@ export default function JourneysPage() {
                 senders={alimtalkSenders}
                 templates={alimtalkTemplates}
                 customerFieldOptions={customerFields}
+                hasMallIntegration={hasMallIntegration}
                 onBuild={handleInfoAlertBuild}
                 onBack={() => setPurpose('marketing')}
               />

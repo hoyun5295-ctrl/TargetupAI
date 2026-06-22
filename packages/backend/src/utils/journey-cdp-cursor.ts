@@ -44,3 +44,33 @@ export function planCdpCursorBatch(rows: CdpEventRow[], chunk: number, windowEnd
   const newCursor = truncated && usable.length > 0 ? usable[usable.length - 1].occurredAt : windowEnd;
   return { ids, propertiesByCustomer, newCursor, truncated };
 }
+
+/**
+ * 진입 properties를 customerId 순서에 정렬한 jsonb[] 파라미터 배열로 변환 (enqueueCandidates의 unnest 두 배열 정렬용).
+ *   - propsByCustomer에 있고 비어있지 않으면 JSON.stringify, 없거나 빈 객체면 null.
+ *   - props 미전달(cdp 커서 외 트리거) 시 전부 null → entry_event_properties NULL(기존 동작 불변).
+ */
+export function buildEntryPropsArray(
+  customerIds: string[],
+  propsByCustomer?: Record<string, Record<string, any>>,
+): (string | null)[] {
+  return customerIds.map((id) => {
+    const p = propsByCustomer?.[id];
+    if (p && typeof p === 'object' && Object.keys(p).length > 0) return JSON.stringify(p);
+    return null;
+  });
+}
+
+/**
+ * 커서 경로(이벤트 스트림 + 누락 0 + 정확히 1회 + properties 동봉)를 타는 trigger 판정 — 단일 출처.
+ *   반환값 = cdp_events.event_name(매칭용), null이면 enqueueCandidates(상태 재평가) 경로.
+ *   구매·예약·배송(custom_order_shipped)은 1회성 이벤트라 커서 경로 → 진입 이벤트 properties를 알림톡 변수로 채운다.
+ */
+export function resolveCdpCursorEventName(triggerEvent: string): string | null {
+  switch (triggerEvent) {
+    case 'cdp.purchase': return 'purchase';
+    case 'cdp.reservation_created': return 'reservation_created';
+    case 'custom_order_shipped': return 'custom_order_shipped';
+    default: return null;
+  }
+}

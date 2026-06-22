@@ -26,8 +26,8 @@
 
 import { query, pool } from '../config/database';
 // 추출 조건 = journey-target-extractor 공유 컨트롤타워 (발송·미리보기 동일 기준 단일 진입점)
-import { selectJourneyTargetCustomerIds, selectCdpEventRowsForCursor, JOURNEY_COUNT_CAP } from './journey-target-extractor';
-import { planCdpCursorBatch } from './journey-cdp-cursor';
+import { selectJourneyTargetCustomerIds, selectCdpEventRowsForCursor, selectCartAbandonProperties, JOURNEY_COUNT_CAP } from './journey-target-extractor';
+import { planCdpCursorBatch, buildEntryPropsArray, resolveCdpCursorEventName } from './journey-cdp-cursor';
 import { calculateNextRunAt } from './send-time-util';
 
 // ════════════════════════════════════════════════════════════════════
@@ -125,10 +125,10 @@ export function startJourneyTriggerWatcher(): void {
 // ════════════════════════════════════════════════════════════════════
 
 async function processJourneyTrigger(j: ActiveJourney): Promise<{ matched: number; enqueued: number; skipped: number }> {
-  // ★ Phase 3: cdp 구매·예약은 이벤트 커서 경로(누락 0 + 정확히 1회). 그 외는 공유 컨트롤타워 추출.
-  if (j.trigger_event === 'cdp.purchase' || j.trigger_event === 'cdp.reservation_created') {
-    const eventName = j.trigger_event === 'cdp.purchase' ? 'purchase' : 'reservation_created';
-    return processCdpCursorJourney(j, eventName);
+  // ★ Phase 3: 구매·예약·배송(custom_order_shipped)은 이벤트 커서 경로(누락 0 + 정확히 1회 + properties 동봉). 그 외는 공유 컨트롤타워 추출.
+  const cursorEvent = resolveCdpCursorEventName(j.trigger_event);
+  if (cursorEvent) {
+    return processCdpCursorJourney(j, cursorEvent);
   }
   // 추출 = journey-target-extractor 공유 컨트롤타워. journeyId + 재진입 정보 전달.
   //   휴면·생일·포인트는 진입 안티조인으로 회차마다 다음 분이 들어와 501번째+ 누락이 없다.
@@ -150,6 +150,12 @@ async function processJourneyTrigger(j: ActiveJourney): Promise<{ matched: numbe
     );
     console.warn(`[JourneyTrigger] 대량 차단 — journey=${j.id} 신규 후보 > 상한 ${cap} → 정지`);
     return { matched: ids.length, enqueued: 0, skipped: ids.length };
+  }
+  // ★ 2026-06-22: 장바구니는 진입 시점 cart_add properties를 entry_event_properties로 실어 알림톡 #{상품명}을 채운다.
+  if (j.trigger_event === 'cdp.cart_abandon') {
+    const abandonHours = Number((j.trigger_filters || {}).abandon_hours || 24);
+    const propsByCustomer = await selectCartAbandonProperties(j.company_id, ids, abandonHours);
+    return enqueueCandidates(j, ids, propsByCustomer);
   }
   return enqueueCandidates(j, ids);
 }
@@ -228,7 +234,7 @@ async function processCdpCursorJourney(j: ActiveJourney, eventName: string): Pro
 // enqueue 처리 (cooldown 검증 + journey_executions INSERT)
 // ════════════════════════════════════════════════════════════════════
 
-async function enqueueCandidates(j: ActiveJourney, customerIds: string[]): Promise<{ matched: number; enqueued: number; skipped: number }> {
+async function enqueueCandidates(j: ActiveJourney, customerIds: string[], propsByCustomer?: Record<string, Record<string, any>>): Promise<{ matched: number; enqueued: number; skipped: number }> {
   const matched = customerIds.length;
   if (matched === 0) return { matched: 0, enqueued: 0, skipped: 0 };
 
@@ -248,20 +254,23 @@ async function enqueueCandidates(j: ActiveJourney, customerIds: string[]): Promi
   //   중복·cooldown은 추출 단계 안티조인(원장·재진입·execution)이 이미 제외. 아래 NOT EXISTS는 추가 안전망 —
   //   재진입 가능 = active만 / 재진입 불가 = 어떤 execution이라도 있으면 제외(checkCooldown과 동일 기준).
   const reentryGuard = j.allow_reentry ? `AND je.status = 'active'` : ``;
+  // ★ 2026-06-22: 진입 properties(장바구니 cart_add 등)를 id 순서에 정렬해 entry_event_properties로 동봉.
+  //   props 미전달(타 트리거) 시 전부 null → entry_event_properties NULL(기존 동작 불변).
+  const entryProps = buildEntryPropsArray(customerIds, propsByCustomer);
   let enqueued = 0;
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
     const insRes = await client.query(
-      `INSERT INTO journey_executions (id, journey_id, customer_id, current_step_order, status, entered_at, next_run_at, created_at)
-       SELECT gen_random_uuid(), $1::uuid, cid, 0, 'active', NOW(), $3, NOW()
-         FROM unnest($2::uuid[]) AS cid
+      `INSERT INTO journey_executions (id, journey_id, customer_id, current_step_order, status, entered_at, next_run_at, created_at, entry_event_properties)
+       SELECT gen_random_uuid(), $1::uuid, t.cid, 0, 'active', NOW(), $3, NOW(), t.props
+         FROM unnest($2::uuid[], $4::jsonb[]) AS t(cid, props)
         WHERE NOT EXISTS (
           SELECT 1 FROM journey_executions je
-           WHERE je.journey_id = $1::uuid AND je.customer_id = cid ${reentryGuard}
+           WHERE je.journey_id = $1::uuid AND je.customer_id = t.cid ${reentryGuard}
         )
        RETURNING customer_id`,
-      [j.id, customerIds, nextRunAt]
+      [j.id, customerIds, nextRunAt, entryProps]
     );
     enqueued = insRes.rows.length;
 

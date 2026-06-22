@@ -107,6 +107,16 @@
 
 ---
 
+### 🟡 2026-06-22 — 싱크에이전트 2008R2+Oracle 대응 + 위저드 전수조사 (★코드·빌드 완료 / 미배포)
+> **발단**: 인비토(Windows Server 2008 R2 SP1 + Oracle 11g) 싱크에이전트 설치 원격 3회 실패(exe 실행조차 안 됨, `0xC0000139` STATUS_ENTRYPOINT_NOT_FOUND).
+> **근본 2겹**: ① 빌드 티어 설계가 "node14=2008R2 최저선" **틀린 전제**(공식 node14 바닥=Win8.1, node14+ EOL Windows 차단) → 고객엔 node20 빌드가 나가 죽음. 2008R2 도는 마지막 Node=**node12**. ② 고객 DB=Oracle 11g → thin(oracledb 6.0+/node14.6+ + DB12.1+) 불가 = **thick 필수**.
+> **수정**: `win-legacy` 티어 node14→**node12**(build-tier.js·build-tiers.js·agent-build-tiers.ts) + oracledb 5.x thick(napi 1바이너리 pkg assets 동봉) + mssql9/nodemailer6. 커넥터 페이지네이션 전수 — Oracle `OFFSET/FETCH`(12c+)→**ROWNUM**(11g), **MSSQL도 같은 버그** `OFFSET/FETCH`(2012+)→**ROW_NUMBER**(2008). Oracle thick=ORACLE_HOME 있으면 전 티어 확장(11g 지원). 위저드 전수조사 — win-mid가 Server 2012(비R2, node16 미지원) 거짓표기 → win-legacy(node12)로 이동·라벨/주석 정정. 엑셀/CSV 소스 제거(DB 커넥터 아님). ai.ts 2에러(여정 작업 것) 빌드 unblock. 빌드 파일 티어별 deps 세분화.
+> **검증**: Docker로 Oracle 11g·MySQL·PG 실측 통과(연결·스키마·증분·한글·페이지네이션 + 11g/MSSQL 버그 발견·수정·재검증). MSSQL은 SQL Server 이미지 MCR 막혀 코드·문서 검증(검증 SQL 제공). `build:tiers` 5티어 완료 + UCRT 동봉(win-mid/legacy 49 DLL) + zip 5 + manifest(win-legacy node12). sync-agent·backend tsc 0. **프론트 빌드 불요**(위저드 데이터기반, 엑셀/CSV 하드코딩 0 — backend DB_OPTIONS만 수정).
+> **배포(Harold)**: ① invito = `dist-tiers/win-legacy/SyncAgent`(node12 exe+UCRT49+INSTALL bat) 전달 ② 5 zip scp → 서버 `packages/backend/agent-builds/` ③ backend(agent-build-tiers·ai.ts)는 여정 Phase 3 정리 후 일괄(diff 섞임 주의). **DB 마이그레이션 SQL 없음.**
+> 상세 [[project_2026_0622_sync_agent_2008r2_oracle]] · 진단 `SYNC-AGENT-TROUBLESHOOTING.md` § 2-5.
+
+---
+
 ### 🟢 2026-06-21 — AI Operator P1 + 모바일DM 퀄리티 Phase 1+3 (★배포완료 2026-06-21)
 > **AI Operator P1**(`ai-orchestrator.ts`): A1 orchestrateWithAI가 seasonHint를 메시지 생성에 누락하던 결함 fix(`buildMessageObjective` 공통 헬퍼로 orchestrate와 통일) · A2 Orchestrator AI 통합분석(finalText)을 버리던 것 → `meta.aiSynthesis` 반환 + frontend "AI 종합 분석" 카드 · A3 모델 주석 stale 5곳 정정(Compliance Haiku→Opus·Message opus→sonnet). cdp 취소/환불 매출 차감 = 실재 확인(syncOrder reverse + revenue_reversed 마커, fix 불요) · journey-executor 1216줄 정독(견고, 숨은 결함 없음). 담당자 알림톡은 카카오 승인 후 전환 보류(현 무과금 LMS 유지, L1160 seam). TDD season verify 13.
 > **모바일DM Phase 1+3** ("AI가 만들어준다" 체감): 신규 16섹션 렌더 토큰 격상(backend `dm-section-renderer` + frontend `NewSections`, 하드코딩 색·이모지 → 디자인 토큰·단색 SVG 아이콘, 공통 프리미티브 `dm-render-primitives`/`dm-primitives` 신설) + AI 비주얼 디렉터(`dm-visual-direction` 순수 + `dm-ai.designVisualConcept` opus, 캠페인별 색·무드·강조 + 이미지 없는 hero=브랜드/업종색 그라데이션 무드 배경) + AI 섹션 chain 다양화(`dm-section-layout` 정규화 가드 + `dm-ai.designSectionLayout` opus, 자유 프롬프트만·빠른시작 12 시나리오 고정). **Phase 2(상품 자동연결) 폐기 = 자체 업로드 권장**(약속 미이행 리스크).
