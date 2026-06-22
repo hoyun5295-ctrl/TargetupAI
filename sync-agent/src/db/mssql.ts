@@ -136,14 +136,16 @@ export class MssqlConnector implements IDbConnector {
         .input('limit', sql.Int, limit)
         .input('offset', sql.Int, offset)
         .query(`
-          SELECT * FROM [${safeTable}]
-          WHERE [${safeColumn}] > @since
-          ORDER BY [${safeColumn}] ASC
-          OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY
+          -- SQL Server 2008~최신 공통 (OFFSET/FETCH는 2012+ 전용 → 2008에서 실패).
+          SELECT * FROM (
+            SELECT *, ROW_NUMBER() OVER (ORDER BY [${safeColumn}] ASC) AS rn_
+            FROM [${safeTable}]
+            WHERE [${safeColumn}] > @since
+          ) t WHERE rn_ > @offset AND rn_ <= @offset + @limit
         `);
 
       logger.debug(`증분 조회: ${result.recordset.length}건`, { tableName, since, offset });
-      return result.recordset;
+      return result.recordset.map((r: any) => { delete r.rn_; return r; });
     } catch (err: any) {
       // ★ D151-5 (2026-05-11): SQL Server raw 에러 → 사용자 친화 메시지 변환
       //   timestamp/테이블 누락 시 mssql 패키지가 EREQUEST raw 에러를 그대로 throw하여
@@ -183,13 +185,15 @@ export class MssqlConnector implements IDbConnector {
       .input('limit', sql.Int, limit)
       .input('offset', sql.Int, offset)
       .query(`
-        SELECT * FROM [${safeTable}]
-        ORDER BY (SELECT NULL)
-        OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY
+        -- SQL Server 2008~최신 공통 (OFFSET/FETCH는 2012+ 전용 → 2008에서 실패).
+        SELECT * FROM (
+          SELECT *, ROW_NUMBER() OVER (ORDER BY (SELECT NULL)) AS rn_
+          FROM [${safeTable}]
+        ) t WHERE rn_ > @offset AND rn_ <= @offset + @limit
       `);
 
     logger.debug(`전체 조회: ${result.recordset.length}건`, { tableName, offset });
-    return result.recordset;
+    return result.recordset.map((r: any) => { delete r.rn_; return r; });
   }
 
   async getRowCount(tableName: string): Promise<number> {

@@ -16,6 +16,7 @@ import { reverseDisplayValue, FIELD_DISPLAY_MAP, renderFieldValue } from './stan
 import { cellToString } from './normalize';
 import { query } from '../config/database';
 import { renderLiquid, detectLiquidSyntax, flattenCustomerForLiquid } from './liquid-templating';
+import { applyVarFallback } from './var-fallback';
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // 0-A) 날짜 포맷팅 헬퍼 — 순수 YYYY-MM-DD는 new Date() 없이 직접 파싱
@@ -205,6 +206,8 @@ export function replaceVariables(
     skipLiquid?: boolean;
     // ★ D201 (2026-05-22) Phase B-3 Connected Content: 외부 데이터 (날씨/재고/가격/신상품) Liquid context 통합
     externalContext?: Record<string, any>;
+    // ★ 2026-06-22: 변수 대체값 (빈 값 시 적용, 키=변수명). 미전달 시 기존 동작 — 직접발송 불변.
+    fieldDefaults?: Record<string, string>;
   }
 ): string {
   if (!template) return '';
@@ -298,7 +301,9 @@ export function replaceVariables(
     // ★ D142: 단일 진입점 — mapping.column이 fieldKey.
     //   22개 고정(name/phone/gender/age/birth_date/email/address/region/...) → FIELD_DISPLAY_FORMAT_MAP
     //   custom_1~15 + 미지정 키 → String(value) 원본 (자동 보존)
-    const displayValue = renderFieldValue(rawValue, mapping.column);
+    const rendered = renderFieldValue(rawValue, mapping.column);
+    // ★ 2026-06-22: 빈 값이면 대체값 적용 (fieldDefaults 미전달 시 원래 값 — 직접발송 불변)
+    const displayValue = applyVarFallback(rendered, varName, options?.fieldDefaults);
 
     // 전역 치환 (동일 변수가 여러 번 나올 수 있음)
     result = result.split(pattern).join(displayValue);

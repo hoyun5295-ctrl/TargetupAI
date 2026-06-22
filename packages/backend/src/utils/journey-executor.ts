@@ -34,6 +34,8 @@ import {
 } from './sms-queue';
 import { convertButtonsToQTmsg } from './alimtalk-button';
 import { buildAlimtalkEtcJson, type RepresentLink } from './alimtalk-emphasize';
+import { fillAlimtalkVarMap } from './alimtalk-vars';
+import { buildDefaultFallbacks } from './var-fallback';
 import {
   listJourneyStepVariants,
   selectJourneyStepVariant,
@@ -70,6 +72,7 @@ interface ExecutionRow {
   next_run_at: Date | null;
   entered_at: Date;
   total_cost: number;
+  entry_event_properties: Record<string, any> | null;
   // journey 컬럼
   journey_status: string;
   budget_monthly: number | null;
@@ -148,6 +151,7 @@ export async function runJourneyExecutor(): Promise<{ processed: number; sent: n
          e.id AS execution_id,
          e.journey_id, e.customer_id,
          e.current_step_order, e.status, e.next_run_at, e.entered_at, e.total_cost,
+         e.entry_event_properties,
          j.company_id, j.status AS journey_status,
          j.budget_monthly, j.threshold_cost_per_step, j.threshold_recipients_per_step,
          j.stats_total_completed, j.stats_total_cost, j.created_by,
@@ -370,6 +374,9 @@ async function processExecution(exec: ExecutionRow): Promise<StepOutcome> {
     return 'skipped_no_customer';
   }
   const customer = custRes.rows[0] as CustomerRow;
+  // ★ 2026-06-22: 진입 이벤트 데이터(주문번호·상품명 등)를 알림톡 변수에 채우기 위해 customer에 병합 (customer 우선 — 프로필 신뢰)
+  const eventProps = (exec.entry_event_properties && typeof exec.entry_event_properties === 'object') ? exec.entry_event_properties : {};
+  const customerWithEvent = { ...eventProps, ...(customer as Record<string, any>) };
 
   // ★ Fix #1 (2026-06-05): 발송 직전 안전필터 재적용 — 추출 기준과 동일(is_active·sms_opt_in·is_opt_out·is_invalid).
   //   진입과 발송 사이(다단계는 며칠)에 고객이 비활성/수신거부/무효로 바뀌어도 발송 직전 한 번 더 막는다.
@@ -511,10 +518,12 @@ async function processExecution(exec: ExecutionRow): Promise<StepOutcome> {
       }
     }
     // 알림톡 본문 = template.content + alimtalk_variable_map 치환 (@@필드키@@ → customer[필드키] / 그 외 = 직접 입력값 그대로)
-    message = replaceAlimtalkVars(
+    message = fillAlimtalkVarMap(
       String(kakaoTemplateRow!.content || ''),
-      customer as Record<string, any>,
-      step.alimtalk_variable_map || {}
+      step.alimtalk_variable_map || {},
+      customerWithEvent,
+      undefined,
+      buildDefaultFallbacks(step.alimtalk_variable_map || {}),
     );
     // 알림톡 자체는 subject 무관, LMS 대체(L/B) 발송 시점만 alimtalk_next_subject 사용 (insertAlimtalkQueue title_str 영역)
     subject = step.alimtalk_next_subject || '';
@@ -733,14 +742,14 @@ async function processExecution(exec: ExecutionRow): Promise<StepOutcome> {
           nextType: (step.alimtalk_next_type as 'N' | 'S' | 'L' | 'A' | 'B' | undefined) || 'L',
           // ★ 알림톡 실패 대체문구(k_next_contents)도 본문(472)과 동일 변수 치환 — raw 발송 시 #{변수} 노출 차단.
           nextContents: step.alimtalk_next_contents
-            ? replaceAlimtalkVars(step.alimtalk_next_contents, customer as Record<string, any>, step.alimtalk_variable_map || {})
+            ? fillAlimtalkVarMap(step.alimtalk_next_contents, step.alimtalk_variable_map || {}, customerWithEvent, undefined, buildDefaultFallbacks(step.alimtalk_variable_map || {}))
             : undefined,
           buttonJson: buttonJson || undefined,
           // ★ 매뉴얼(qtmsg): 강조표기형 emphasize_title(본문과 동일 치환)만 → k_etc_json (senderkey 제외 — 알림톡 템플릿코드 자동). 직접/자동과 동일 형태.
           etcJson: buildAlimtalkEtcJson({
             emphasizeTitle: kakaoTemplateRow.emphasize_title,
             representLink: kakaoTemplateRow.represent_link,
-            substitute: (raw) => replaceAlimtalkVars(raw, customer as Record<string, any>, step.alimtalk_variable_map || {}),
+            substitute: (raw) => fillAlimtalkVarMap(raw, step.alimtalk_variable_map || {}, customerWithEvent, undefined, buildDefaultFallbacks(step.alimtalk_variable_map || {})),
           }),
           companyId: exec.company_id,
         }],
@@ -1171,37 +1180,8 @@ async function evaluateJourneyStepClickedCondition(
 // ★ D188 Phase 2-B-2 (2026-05-21): 알림톡 변수 치환 + 버튼 JSON 변환 + MMS 파일명 추출 헬퍼 3종.
 // ════════════════════════════════════════════════════════════════════
 
-/**
- * 알림톡 본문 #{변수} 치환.
- * varMap entry 값이 '@@필드키@@' 형식이면 customer[필드키]로 치환, 그 외는 직접 값 사용.
- * customer.custom_fields JSONB fallback.
- */
-function replaceAlimtalkVars(
-  content: string,
-  customer: Record<string, any>,
-  varMap: Record<string, string>
-): string {
-  if (!content) return '';
-  let out = content;
-  Object.entries(varMap || {}).forEach(([k, v]) => {
-    const escapedKey = k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    let replacement: string;
-    if (typeof v === 'string' && v.startsWith('@@') && v.endsWith('@@')) {
-      const fieldKey = v.slice(2, -2);
-      let cv: any = null;
-      if (fieldKey in customer) {
-        cv = customer[fieldKey];
-      } else if (customer.custom_fields && typeof customer.custom_fields === 'object' && fieldKey in customer.custom_fields) {
-        cv = customer.custom_fields[fieldKey];
-      }
-      replacement = cv != null && String(cv).trim() !== '' ? String(cv) : '';
-    } else {
-      replacement = v || '';
-    }
-    out = out.replace(new RegExp(escapedKey, 'g'), replacement);
-  });
-  return out;
-}
+// 알림톡 본문 #{변수} 치환은 alimtalk-vars.fillAlimtalkVarMap으로 통일 (2026-06-22).
+// 여정 경로는 buildDefaultFallbacks(표준 대체값)를 동반해 호출한다. (기존 replaceAlimtalkVars 정의 제거)
 
 /**
  * MMS 이미지 서버 경로 → 파일명만 추출 (sms-queue file_name1~3 정합).

@@ -2350,7 +2350,8 @@ CREATE TABLE IF NOT EXISTS journey_executions (
   next_run_at timestamptz,
   completed_at timestamptz,
   total_cost numeric(15,2) NOT NULL DEFAULT 0,
-  created_at timestamptz NOT NULL DEFAULT NOW()
+  created_at timestamptz NOT NULL DEFAULT NOW(),
+  entry_event_properties jsonb  -- ★ 2026-06-22 실측: 진입 이벤트 데이터(주문번호·상품명 등) — 알림톡 정보알림 변수 치환용 (Harold ALTER 실행)
 );
 
 -- 4. journey_step_logs — 각 step 실행 이력

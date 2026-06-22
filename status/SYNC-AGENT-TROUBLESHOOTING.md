@@ -143,6 +143,31 @@ ALTER TABLE sync_releases ADD COLUMN IF NOT EXISTS checksum VARCHAR(255);
 
 ---
 
+### 2-5. 2026-06-22 인비토 2008 R2 + Oracle — node14 빌드 전제 오류(원격 3회 실패) 근본 해결
+
+**증상**: Windows Server 2008 R2 SP1(6.1.7601)에 설치 → exe가 실행조차 안 됨. `EXIT_CODE=-1073741511`(= `0xC0000139` STATUS_ENTRYPOINT_NOT_FOUND). 관리자 권한·경로 변경 무관. 고객사 개발자 원격 3회 모두 실패.
+
+**근본 원인 (두 겹)**:
+1. 빌드 티어 설계(2026-06-16)가 "node14 = 2008 R2 최저선"이라는 **틀린 전제** 위에 섰다. 공식 확인(BUILDING.md): node14의 Windows 바닥은 **8.1 / 2012 R2**이고, node14+는 수명 끝난 Windows에서 실행을 막는다(nodejs/node PR #31954). 2008 R2가 도는 마지막 Node는 **node12**(13.6.0까지 테스트). 고객사엔 기본 빌드(node20)가 나가 `0xC0000139`로 죽었다.
+2. 고객 DB = Oracle 11g. node12에서 Oracle은 **thick 전용**(thin은 oracledb 6.0+/node14.6+ 필요, 게다가 thin은 DB 12.1+만 지원). 11g엔 thick 필수.
+
+**해결**:
+- `win-legacy` 티어 node14 → **node12**(`build-tier.js`/`build-tiers.js`/`agent-build-tiers.ts`). oracledb는 **5.x thick**(napi 바이너리 1개가 node12~20 공통, pkg `assets`에 `.node` 동봉). mssql9·nodemailer6로 node12 호환.
+- 에이전트 Oracle 조회의 `OFFSET … FETCH`(12c+ 전용)는 11g에서 `ORA-00933` → **ROWNUM 방식**(11g+12c 공통)으로 교체(`oracle.ts` fetchAll·fetchIncremental).
+- thick 클라이언트는 PATH 의존이라 Windows 서비스에서 `DPI-1047` 위험 → `ORACLE_HOME` 있으면 `initOracleClient({libDir})` 명시(`oracle.ts`).
+- 위저드 "원본 DB" 목록에서 엑셀/CSV 제거(싱크에이전트는 DB 커넥터 — 파일만 있으면 앱 직접 업로드).
+
+**검증 (Docker로 고객 환경 재현)**: `gvenzl/oracle-xe:11-slim`(11g) + node12 컨테이너 + thick → 연결·테이블·컬럼·증분·한글·페이지네이션 정상, 11g `OFFSET/FETCH` 깨짐·`ROWNUM` 정상 실측. node12 Windows exe 빌드 + 단일 exe 안에서 oracledb 네이티브 로드 확인.
+
+**교훈**:
+- "node X = OS Y 지원"은 공식 BUILDING.md / 지원 표로 확정(추측 금지). node14는 2008 R2 미지원이다.
+- 구형 OS 고객은 그 OS·DB를 **Docker로 재현해, 보내기 전에 우리 쪽에서 실측**한다(고객 장비를 시험대로 쓰지 않는다). Oracle 11g·MSSQL 등은 컨테이너로 띄울 수 있다.
+- 단일 exe + 네이티브 드라이버(oracledb)는 napi 바이너리를 pkg `assets`로 동봉하면 로드된다.
+
+**build:tiers 경고는 무해 (빌드 실패 아님)**: `Cannot resolve 'mod'`(어느 의존성의 런타임 변수 동적 require), `open`·`xdg-open`·`default-browser`·`is-wsl` bytecode 실패, `@azure/*`·`tedious` bytecode 실패, `import.meta` parse 실패 — 전부 경고일 뿐 `완료:`가 찍히면 그 티어 성공. `open`(브라우저 여는 유틸)은 mssql의 Azure 인증 경로로 딸려온 미사용 의존성이라 에이전트가 안 부른다(에이전트 src grep 0건). 빌드 성공 판정 = 5티어 `완료:` + `동봉 완료`(win-mid/legacy 각 UCRT DLL 49개) + `다운로드 zip 생성`(5개) + `manifest 생성`이 다 뜨면 정상. 경고를 지우려고 작동하는 빌드 설정(esbuild external·pkg config)을 건드리지 말 것 — `open` 잘못 제외 시 mssql 깨질 위험, 실익은 출력 청소뿐.
+
+---
+
 ## § 3. 진단 체크리스트 (문제 발생 시 순서대로 실행)
 
 ### STEP 1. 슈퍼관리자 UI에서 상태 확인

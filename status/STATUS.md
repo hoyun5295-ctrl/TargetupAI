@@ -107,6 +107,15 @@
 
 ---
 
+### 🟢 2026-06-21 — AI Operator P1 + 모바일DM 퀄리티 Phase 1+3 (★배포완료 2026-06-21)
+> **AI Operator P1**(`ai-orchestrator.ts`): A1 orchestrateWithAI가 seasonHint를 메시지 생성에 누락하던 결함 fix(`buildMessageObjective` 공통 헬퍼로 orchestrate와 통일) · A2 Orchestrator AI 통합분석(finalText)을 버리던 것 → `meta.aiSynthesis` 반환 + frontend "AI 종합 분석" 카드 · A3 모델 주석 stale 5곳 정정(Compliance Haiku→Opus·Message opus→sonnet). cdp 취소/환불 매출 차감 = 실재 확인(syncOrder reverse + revenue_reversed 마커, fix 불요) · journey-executor 1216줄 정독(견고, 숨은 결함 없음). 담당자 알림톡은 카카오 승인 후 전환 보류(현 무과금 LMS 유지, L1160 seam). TDD season verify 13.
+> **모바일DM Phase 1+3** ("AI가 만들어준다" 체감): 신규 16섹션 렌더 토큰 격상(backend `dm-section-renderer` + frontend `NewSections`, 하드코딩 색·이모지 → 디자인 토큰·단색 SVG 아이콘, 공통 프리미티브 `dm-render-primitives`/`dm-primitives` 신설) + AI 비주얼 디렉터(`dm-visual-direction` 순수 + `dm-ai.designVisualConcept` opus, 캠페인별 색·무드·강조 + 이미지 없는 hero=브랜드/업종색 그라데이션 무드 배경) + AI 섹션 chain 다양화(`dm-section-layout` 정규화 가드 + `dm-ai.designSectionLayout` opus, 자유 프롬프트만·빠른시작 12 시나리오 고정). **Phase 2(상품 자동연결) 폐기 = 자체 업로드 권장**(약속 미이행 리스크).
+> **검증**: verify(render-primitives 5·visual-direction 9·section-layout 8·season 13) + backend/frontend tsc 0 + 신규16 hex·이모지 0 + 박-단어·모델명·native dialog 0. AI 임의혜택 생성 X 전 경로 유지.
+> **배포완료(2026-06-21)**: tp-push 1회 → git pull + pm2 restart all(backend ts-node, build:safe 금지) + frontend build:safe. 운영 검증(실제 생성 1건)은 Harold/직원.
+> 상세 [[project_2026_0621_ai_operator_p1_done]] · [[project_2026_0621_dm_quality_phase1]]. 설계 = docs/superpowers/specs·plans/2026-06-2{0,1}-*.
+
+---
+
 ### 🟢 2026-06-18 — 인앱 메시지 전면 개선 (디자인·카피·편집3탭·이미지·도메인 ★배포완료 / 모달 표시 1건 미해결)
 > **범위**: 디자인 격상(이미지 4:3·뱃지·본문3줄) + AI 카피 짧게(제목18/본문40~70자) + 시나리오별 색·뱃지 + 편집 모달 3탭(내용/디자인/타겟·시점) + badge_text 컬럼 + 이미지 공개 서빙 endpoint(CORP cross-origin) + 편집 진입 전체 필드 복원(list raw 반환) + CTA 클릭 시 모달 닫기 + 캐시 once_per_session/day 재노출 차단 + 도메인 www/non-www 동일 취급(norm) + AI 빈도 기본 once_per_session.
 > **검증·배포**: backend·frontend·sdk-js tsc 0 · sdk vitest 88 · grep(모델명·native dialog) 0. 6차에 걸쳐 배포완료(Harold). ALTER `badge_text varchar(20)`.

@@ -48,7 +48,7 @@ const manifest = {
   tiers: {
     'win-modern': { dir: 'dist-tiers/win-modern/SyncAgent', node: 20, runtimeBundle: false },
     'win-mid': { dir: 'dist-tiers/win-mid/SyncAgent', node: 16, runtimeBundle: true },
-    'win-legacy': { dir: 'dist-tiers/win-legacy/SyncAgent', node: 14, runtimeBundle: true },
+    'win-legacy': { dir: 'dist-tiers/win-legacy/SyncAgent', node: 12, runtimeBundle: true },
     'linux-modern': { file: 'release/sync-agent-linux-modern', node: 20, sha: sha('release/sync-agent-linux-modern') },
     'linux-legacy': { file: 'release/sync-agent-linux-legacy', node: 16, sha: sha('release/sync-agent-linux-legacy') },
   },

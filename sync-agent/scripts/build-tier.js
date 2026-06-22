@@ -8,12 +8,17 @@ const path = require('path');
 const ROOT = path.resolve(__dirname, '..');
 const sh = (cmd) => execSync(cmd, { cwd: ROOT, stdio: 'inherit' });
 
+// 티어 정의 — OS 바닥 / node / pkg 타깃 / 구형 런타임 동봉(legacy) / 레거시 의존성 핀(deps).
+//   node 바닥: node20=Win10·2016·glibc2.28 / node16=Win8.1·2012R2·glibc2.17 / node12=Win7·2008R2·2012(비R2).
+//   deps = 메인(express5/mssql11/oracledb6 thin)을 그 node가 받는 버전으로 내린 핀(modern=null=메인 그대로).
+//     node12: oracledb 5.x thick(thin은 6.0+/node14.6+ 불가, 11g도 thick 필요) + mssql9 + nodemailer6.
+//     node16: mssql10(node14+) — oracledb는 메인 6.x thin 유지(node14.6+ OK).
 const TIERS = {
-  'win-modern':   { node: 'node20', pkg: 'node20-win-x64',   out: 'release/sync-agent-win-modern.exe',   legacy: false },
-  'win-mid':      { node: 'node16', pkg: 'node16-win-x64',   out: 'release/sync-agent-win-mid.exe',       legacy: true },
-  'win-legacy':   { node: 'node14', pkg: 'node14-win-x64',   out: 'release/sync-agent-win-legacy.exe',    legacy: true },
-  'linux-modern': { node: 'node20', pkg: 'node20-linux-x64', out: 'release/sync-agent-linux-modern',      legacy: false },
-  'linux-legacy': { node: 'node16', pkg: 'node16-linux-x64', out: 'release/sync-agent-linux-legacy',      legacy: true },
+  'win-modern':   { node: 'node20', pkg: 'node20-win-x64',   out: 'release/sync-agent-win-modern.exe',   legacy: false, deps: null },
+  'win-mid':      { node: 'node16', pkg: 'node16-win-x64',   out: 'release/sync-agent-win-mid.exe',       legacy: true,  deps: 'express@4.22.2 mssql@10.0.4' },
+  'win-legacy':   { node: 'node12', pkg: 'node12-win-x64',   out: 'release/sync-agent-win-legacy.exe',    legacy: true,  deps: 'express@4.22.2 mssql@9.3.2 oracledb@5.5.0 nodemailer@6.9.16' },
+  'linux-modern': { node: 'node20', pkg: 'node20-linux-x64', out: 'release/sync-agent-linux-modern',      legacy: false, deps: null },
+  'linux-legacy': { node: 'node16', pkg: 'node16-linux-x64', out: 'release/sync-agent-linux-legacy',      legacy: true,  deps: 'express@4.22.2 mssql@10.0.4' },
 };
 
 const tierId = process.argv[2];
@@ -25,8 +30,8 @@ if (!t) {
 
 console.log(`\n=== build tier ${tierId} (${t.node}) ===`);
 try {
-  // 레거시 티어: 구형 node에 맞는 의존성으로 임시 다운(express4/mssql10), 빌드 후 원복
-  if (t.legacy) sh('npm i express@4.22.2 mssql@10.0.4 --no-save');
+  // 레거시 티어: 그 node가 받는 의존성 핀(t.deps)으로 임시 다운, 빌드 후 npm ci로 원복(메인 node20 무손).
+  if (t.legacy && t.deps) sh(`npm i ${t.deps} --no-save`);
   sh(`node esbuild.config.js --target=${t.node}`);
   sh('npm run prebundle:wasm');
   // modern = @yao-pkg/pkg, legacy = vercel/pkg@5.8.1 (node16/14 prelude 버그 우회)

@@ -28,7 +28,8 @@
   },
   "pkg": {
     "assets": [
-      "dist/sql-wasm.wasm"
+      "dist/sql-wasm.wasm",
+      "node_modules/oracledb/build/Release/*.node"
     ],
     "scripts": [
       "node_modules/oracledb/**/*.js"

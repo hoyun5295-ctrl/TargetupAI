@@ -14,10 +14,12 @@
 export interface CdpEventRow {
   customerId: string;
   occurredAt: Date;
+  properties?: Record<string, any> | null;
 }
 
 export interface CdpCursorBatch {
   ids: string[];
+  propertiesByCustomer: Record<string, Record<string, any>>;  // customerId → 첫 등장 이벤트 properties (알림톡 변수 치환용)
   newCursor: Date;
   truncated: boolean;
 }
@@ -28,13 +30,17 @@ export function planCdpCursorBatch(rows: CdpEventRow[], chunk: number, windowEnd
 
   const seen = new Set<string>();
   const ids: string[] = [];
+  const propertiesByCustomer: Record<string, Record<string, any>> = {};
   for (const r of usable) {
     if (!seen.has(r.customerId)) {
       seen.add(r.customerId);
       ids.push(r.customerId);
+      if (r.properties && typeof r.properties === 'object') {
+        propertiesByCustomer[r.customerId] = r.properties;
+      }
     }
   }
 
   const newCursor = truncated && usable.length > 0 ? usable[usable.length - 1].occurredAt : windowEnd;
-  return { ids, newCursor, truncated };
+  return { ids, propertiesByCustomer, newCursor, truncated };
 }

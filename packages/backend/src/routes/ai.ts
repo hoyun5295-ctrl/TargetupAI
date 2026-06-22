@@ -4,6 +4,9 @@ import { authenticate } from '../middlewares/auth';
 import { checkAPIStatus, extractVarCatalog, filterVarCatalogByData, generateCustomMessages, generateMessages, parseBriefing, recommendTarget, countFilteredCustomers, recommendNextCampaign, refineDirectMessage } from '../services/ai';
 import { buildGenderFilter, buildGradeFilter, buildRegionFilter, getGenderVariants, getRegionVariants } from '../utils/normalize';
 import { FIELD_MAP, FIELD_DISPLAY_MAP, reverseDisplayValue } from '../utils/standard-field-map';
+import { replaceVariables } from '../utils/messageUtils';
+import { STANDARD_FIELD_FALLBACKS } from '../utils/var-fallback';
+import { selectJourneyTargetCustomerIds } from '../utils/journey-target-extractor';
 import { isValidCustomFieldKey } from '../utils/safe-field-name';
 import { getStoreScope } from '../utils/store-scope';
 import { buildFilterWhereClauseCompat } from '../utils/customer-filter';
@@ -96,7 +99,7 @@ import { validateJourneyForActivation } from '../utils/journey-pretest-validator
 import { getPauseLogs } from '../utils/journey-pause-handler';
 // ★ D187-fix3 (2026-05-21): Journey AI Generator — One-shot 자연어 + 시즌 + 회사 메모리
 import { generateJourneyPackage, refineStepMessage } from '../utils/journey-ai-generator';
-import { selectJourneyTargetCustomerIds, buildJourneyPreviewSamples, countJourneyTargetCustomers } from '../utils/journey-target-extractor';
+import { buildJourneyPreviewSamples, countJourneyTargetCustomers } from '../utils/journey-target-extractor';
 // ★ D210+ Phase 2-fix1 (Harold 명시 2026-05-23): CT-58 — 회사 customer DB 실측 프로필 조회.
 //   /operator/data-profile endpoint = 마케팅 담당자 검토 UI 안내 카드 data source.
 import { getCompanyDataProfile } from '../utils/company-data-profile';
@@ -2484,6 +2487,71 @@ router.get('/operator/journeys/:id', async (req: Request, res: Response) => {
 });
 
 // POST /api/ai/operator/journeys/:id/activate — 활성화
+// ★ 2026-06-22 Phase 6 (가): 실발송 미리보기 — 발송 함수(replaceVariables)로 회사 대표 고객 치환 = 미리보기 = 실발송 100% 일치
+router.post('/operator/journeys/preview-message', async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+    const { journeyId, message, subject } = req.body as { journeyId?: string; message?: string; subject?: string };
+    if (!message) return res.json({ success: true, previewMessage: '', previewSubject: '', hasSample: false, sampleName: null });
+
+    const companyRow = await query('SELECT customer_schema FROM companies WHERE id = $1::uuid', [companyId]);
+    const { fieldMappings } = extractVarCatalog(companyRow.rows[0]?.customer_schema);
+
+    // ★ 추출된 발송 대상(여정 타겟 세그먼트) 중 상위 고객 1명으로 치환 = 실발송 미리보기 (회사 전체 아무나 X)
+    let sampleRaw: Record<string, any> | null = null;
+    if (journeyId) {
+      const jrow = await query('SELECT trigger_event, trigger_filters FROM journeys WHERE id = $1::uuid AND company_id = $2::uuid', [journeyId, companyId]);
+      const j = jrow.rows[0];
+      if (j?.trigger_event) {
+        try {
+          const ids = await selectJourneyTargetCustomerIds(companyId, j.trigger_event, j.trigger_filters || {}, 50);
+          if (ids.length > 0) {
+            const cr = await query(
+              `SELECT name, gender, age, grade, points, email, address,
+                      recent_purchase_store, registered_store, registration_type,
+                      store_phone, store_name, store_code, region,
+                      recent_purchase_amount, total_purchase_amount, purchase_count,
+                      birth_date, recent_purchase_date, custom_fields
+               FROM customers
+               WHERE company_id = $1::uuid AND id = ANY($2::uuid[])
+               ORDER BY recent_purchase_amount DESC NULLS LAST, total_purchase_amount DESC NULLS LAST LIMIT 1`,
+              [companyId, ids]
+            );
+            if (cr.rows[0]) {
+              const sr: Record<string, any> = { ...cr.rows[0] };
+              for (const fk of Object.keys(FIELD_DISPLAY_MAP)) {
+                if (sr[fk] != null) sr[fk] = reverseDisplayValue(fk, sr[fk]);
+              }
+              sampleRaw = sr;
+            }
+          }
+        } catch { /* 타겟 추출 실패 시 sampleRaw null → hasSample false (미리보기는 변수명/대체값으로) */ }
+      }
+    }
+
+    // 표준 대체값 (Phase 1) — 빈 변수 시 발송과 동일하게 채워 줄 누락 방지
+    const fieldDefaults: Record<string, string> = {};
+    for (const [varName, m] of Object.entries(fieldMappings)) {
+      const fb = STANDARD_FIELD_FALLBACKS[(m as { column: string }).column];
+      if (fb) fieldDefaults[varName] = fb;
+    }
+
+    const previewMessage = replaceVariables(message, sampleRaw, fieldMappings, undefined, { fieldDefaults });
+    const previewSubject = subject ? replaceVariables(subject, sampleRaw, fieldMappings, undefined, { fieldDefaults }) : '';
+
+    return res.json({
+      success: true,
+      previewMessage,
+      previewSubject,
+      sampleName: sampleRaw?.name ? String(sampleRaw.name) : null,
+      hasSample: !!sampleRaw,
+    });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err?.message || '미리보기 생성 실패' });
+  }
+});
+
 router.post('/operator/journeys/:id/activate', async (req: Request, res: Response) => {
   try {
     const companyId = req.user?.companyId;

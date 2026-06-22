@@ -26,6 +26,7 @@ import JourneyPauseLogsModal from '../components/journey/JourneyPauseLogsModal';
 import JourneyMessageEditModal from '../components/journey/JourneyMessageEditModal';
 import JourneyStepNotifyToggle from '../components/journey/JourneyStepNotifyToggle';
 import AlimtalkChannelPanel, { type AlimtalkSenderProfile, type AlimtalkTemplate, type AlimtalkChannelState } from '../components/alimtalk/AlimtalkChannelPanel';
+import InfoAlertJourneyBuilder, { type InfoAlertBuildResult } from '../components/journey/InfoAlertJourneyBuilder';
 import { detectLiquidSyntax, renderLiquid, flattenCustomerForLiquid, SAMPLE_CUSTOMERS } from '../utils/liquid-templating';
 // ★ D210+ Phase 2-fix6 (Harold 명시 2026-05-23): 변수 하이라이트 + 머지 미리보기 컨트롤타워.
 import { highlightVars, mergeAndHighlightVars, mergeVarsPlain } from '../utils/highlightVars';
@@ -314,6 +315,17 @@ function buildPreview(message: string, isAd: boolean, channel: ChannelType, opt0
   return `${adPrefix}${message}${rejectText}`;
 }
 
+// ★ 2026-06-22: 스텝 타임라인 지연 표시 — 이전 스텝 후 대기 시간을 사람이 읽기 쉽게
+function formatStepDelay(s: AIGeneratedStep): string {
+  if (s.delayMode === 'next_business_day') return '다음 평일 09시';
+  if (s.delayMode === 'specific_hour') return `${s.targetHourKst ?? 9}시`;
+  const h = s.delayHours ?? 0;
+  if (h === 0) return '바로';
+  if (h < 24) return `${h}시간`;
+  if (h % 24 === 0) return `${h / 24}일`;
+  return `${Math.floor(h / 24)}일 ${h % 24}시간`;
+}
+
 function getByteLength(s: string): number {
   let bytes = 0;
   for (let i = 0; i < s.length; i++) bytes += s.charCodeAt(i) > 127 ? 2 : 1;
@@ -398,6 +410,7 @@ export default function JourneysPage() {
   const [sampleCustomerFields, setSampleCustomerFields] = useState<Record<string, any> | null>(null);
   // ★ D210+ Phase 2-fix10 (Harold 명시 2026-05-23): 옛 showMergedPreview state 폐기 — 토글 영역 X, 위/아래 영역 명확 분리.
   const [aiPkg, setAiPkg] = useState<AIJourneyPackage | null>(null);
+  const [purpose, setPurpose] = useState<'marketing' | 'info-alert'>('marketing');
   const [reviewName, setReviewName] = useState('');
   const [reviewCallback, setReviewCallback] = useState('');
   const [reviewUseStorePhone, setReviewUseStorePhone] = useState(false);
@@ -859,6 +872,41 @@ export default function JourneysPage() {
   };
 
   // ════════ 저장 + 활성화 ════════
+  // ★ 2026-06-22: 정보 알림 빌더 결과 → aiPkg(kakao step)로 조립 → 기존 review 흐름 재사용
+  const handleInfoAlertBuild = (result: InfoAlertBuildResult) => {
+    const pkg: AIJourneyPackage = {
+      name: result.name,
+      templateCode: result.templateCode,
+      triggerEvent: result.triggerEvent,
+      triggerFilters: {},
+      steps: [{
+        stepOrder: 1,
+        stepType: 'message',
+        delayHours: 0,
+        channel: 'kakao',
+        messageTemplate: result.step.messageTemplate,
+        subject: '',
+        isAd: false,
+        stepIntent: '정보 알림',
+        alimtalkProfileId: result.step.alimtalkProfileId,
+        alimtalkTemplateCode: result.step.alimtalkTemplateCode,
+        alimtalkVariableMap: result.step.alimtalkVariableMap,
+        alimtalkNextType: result.step.alimtalkNextType,
+        alimtalkNextContents: result.step.alimtalkNextContents,
+        alimtalkNextSubject: result.step.alimtalkNextSubject,
+      }],
+      allowReentry: true,
+      reentryCooldownDays: 0,
+      callbackNumberHint: null,
+      budgetMonthlyHint: null,
+      thresholdCostHint: null,
+      reasoning: '정보 알림 — 거래 이벤트 트리거 + 카카오 승인 템플릿',
+    };
+    setAiPkg(pkg);
+    setPurpose('marketing');
+    setView('review');
+  };
+
   const handleSaveDraft = async () => {
     if (!aiPkg) return;
     if (!reviewCallback) { toast.warning('회신번호를 선택해주세요.'); return; }
@@ -1073,6 +1121,34 @@ export default function JourneysPage() {
             ════════════════════════════════════════ */}
         {view === 'main' && (
           <>
+            {/* ★ 2026-06-22: 목적 선택 — 마케팅 여정(광고성 문자) vs 정보 알림(알림톡 거래통지) */}
+            <div className="grid grid-cols-2 gap-2 mb-4 md:mb-6">
+              <button
+                onClick={() => setPurpose('marketing')}
+                className={`p-4 rounded-xl border text-left transition-colors ${purpose === 'marketing' ? 'bg-fuchsia-500/15 border-fuchsia-400/50' : 'bg-white/5 border-white/10 hover:bg-white/10'}`}
+              >
+                <div className="text-sm font-semibold">마케팅 여정</div>
+                <div className="text-[11px] text-white/50 mt-0.5">광고성 · 문자/LMS · AI가 카피 자동 생성</div>
+              </button>
+              <button
+                onClick={() => setPurpose('info-alert')}
+                className={`p-4 rounded-xl border text-left transition-colors ${purpose === 'info-alert' ? 'bg-teal-500/15 border-teal-400/50' : 'bg-white/5 border-white/10 hover:bg-white/10'}`}
+              >
+                <div className="text-sm font-semibold">정보 알림</div>
+                <div className="text-[11px] text-white/50 mt-0.5">정보성 · 알림톡 · 거래 발생 시 승인 템플릿 발송</div>
+              </button>
+            </div>
+
+            {purpose === 'info-alert' ? (
+              <InfoAlertJourneyBuilder
+                senders={alimtalkSenders}
+                templates={alimtalkTemplates}
+                customerFieldOptions={customerFields}
+                onBuild={handleInfoAlertBuild}
+                onBack={() => setPurpose('marketing')}
+              />
+            ) : (
+            <>
             {/* 자연어 입력 */}
             <div className="bg-gradient-to-br from-fuchsia-500/10 via-purple-500/10 to-indigo-500/10 border border-fuchsia-500/30 rounded-xl p-4 md:p-6 mb-4 md:mb-6">
               <div className="flex items-center gap-2 mb-3">
@@ -1126,6 +1202,8 @@ export default function JourneysPage() {
                 })}
               </div>
             </div>
+            </>
+            )}
 
             {/* ★ D211+ Phase 3 (2026-05-23 Harold 명시): 여정 목록 + status 필터 토글 (보관함 영역 분리) */}
             <div>
@@ -1838,8 +1916,8 @@ export default function JourneysPage() {
               </div>
             </div>
 
-            {/* Step 시계열 — 가로 3분할 카드 (4개+는 다음 줄 자동 줄바꿈) */}
-            <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-4 items-start">
+            {/* ★ 2026-06-22: Step 세로 타임라인 — 흐름(1→2→3)이 위→아래로 보이게 (가로 3분할 어지러움 해소) */}
+            <div className="flex flex-col gap-3 max-w-3xl mx-auto">
               {aiPkg.steps.map((s, idx) => {
                 const bytes = getByteLength(s.messageTemplate);
                 const maxBytes = s.channel === 'sms' ? 90 : 2000;
@@ -1860,6 +1938,7 @@ export default function JourneysPage() {
                     <div className={`flex items-center gap-2 px-3 py-2 mb-1 rounded-lg border-l-4 ${s.stepType === 'wait' ? 'border-sky-400 bg-sky-500/10' : s.stepType === 'condition' ? 'border-emerald-400 bg-emerald-500/10' : 'border-fuchsia-400 bg-fuchsia-500/10'}`}>
                       <div className={`shrink-0 w-7 h-7 rounded-full flex items-center justify-center text-xs font-semibold ${stepTypeColor}`}>{s.stepOrder}</div>
                       <div className="text-sm font-semibold text-white/90 flex-1 min-w-0 truncate">{s.stepIntent || `Step ${s.stepOrder}`}</div>
+                      {idx > 0 && <span className="shrink-0 text-[10px] text-white/40">이전 후 {formatStepDelay(s)}</span>}
                     </div>
 
                     {/* ★ D188 Phase 2-B-1: wait step UI — 시간 대기만 명시 */}

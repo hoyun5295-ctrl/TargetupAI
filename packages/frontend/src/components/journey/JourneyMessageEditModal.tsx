@@ -66,6 +66,7 @@ export default function JourneyMessageEditModal({
   const [initial, setInitial] = useState<Record<string, { messageTemplate: string; subject: string }>>({});
   const [error, setError] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<'edit' | 'preview'>('edit');
+  const [previewResults, setPreviewResults] = useState<Record<string, { message: string; subject: string; hasSample: boolean; sampleName: string | null }>>({});
 
   useEffect(() => { void load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, []);
 
@@ -74,6 +75,28 @@ export default function JourneyMessageEditModal({
     window.addEventListener('keydown', onEsc);
     return () => window.removeEventListener('keydown', onEsc);
   }, [onClose, saving]);
+
+  // ★ 2026-06-22 Phase 6 (가): preview 진입 시 실발송 미리보기 fetch — backend replaceVariables(발송 함수) = 실발송 100% 일치
+  useEffect(() => {
+    if (viewMode !== 'preview' || steps.length === 0) return;
+    let cancelled = false;
+    (async () => {
+      const results: Record<string, { message: string; subject: string; hasSample: boolean; sampleName: string | null }> = {};
+      await Promise.all(steps.map(async (s) => {
+        try {
+          const res = await fetch('/api/ai/operator/journeys/preview-message', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+            body: JSON.stringify({ journeyId, message: s.messageTemplate, subject: s.subject }),
+          });
+          const data = await res.json();
+          if (data.success) results[s.id] = { message: data.previewMessage || '', subject: data.previewSubject || '', hasSample: !!data.hasSample, sampleName: data.sampleName ?? null };
+        } catch { /* fallback: 아래 렌더가 mergeVarsPlain 샘플 치환으로 대체 */ }
+      }));
+      if (!cancelled) setPreviewResults(results);
+    })();
+    return () => { cancelled = true; };
+  }, [viewMode, steps, token]);
 
   const load = async () => {
     setLoading(true);
@@ -284,7 +307,7 @@ export default function JourneyMessageEditModal({
                           ) : (
                             <div className="w-full px-3 py-2 rounded-lg bg-slate-950/60 border border-white/10 text-sm text-white whitespace-pre-wrap break-words min-h-[38px]">
                               {s.subject
-                                ? (() => { const t = mergeVarsPlain(s.subject, SAMPLE_KO, SAMPLE); return (s.isAd && !t.startsWith('(광고)')) ? '(광고) ' + t : t; })()
+                                ? (() => { const t = previewResults[s.id]?.subject ?? mergeVarsPlain(s.subject, SAMPLE_KO, SAMPLE); return (s.isAd && !t.startsWith('(광고)')) ? '(광고) ' + t : t; })()
                                 : <span className="text-white/30">(제목 없음)</span>}
                             </div>
                           )}
@@ -309,7 +332,7 @@ export default function JourneyMessageEditModal({
                         ) : (
                           <div className="flex-1 min-h-0 overflow-y-auto w-full px-3 py-2 rounded-lg bg-slate-950/60 border border-white/10 text-sm text-white whitespace-pre-wrap break-words leading-relaxed">
                             {s.messageTemplate
-                              ? mergeVarsPlain(s.messageTemplate, SAMPLE_KO, SAMPLE)
+                              ? (previewResults[s.id]?.message ?? mergeVarsPlain(s.messageTemplate, SAMPLE_KO, SAMPLE))
                               : <span className="text-white/30">(본문 없음)</span>}
                           </div>
                         )}

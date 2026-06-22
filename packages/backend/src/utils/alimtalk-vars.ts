@@ -5,6 +5,8 @@
  * 프론트 validateAlimtalkVariables(utils/alimtalkVars)가 1차 게이트(수신자 데이터까지 검증),
  * 본 함수는 API 직접 호출 대비 백엔드 net — 미지정 변수만 확인(수신자 데이터 검증은 프론트 담당).
  */
+import { applyVarFallback } from './var-fallback';
+
 /** 템플릿 본문에서 #{...} 변수 추출 (중복 제거). */
 export function extractAlimtalkVariables(content: string | null | undefined): string[] {
   if (!content) return [];
@@ -40,6 +42,7 @@ export function fillAlimtalkVarMap(
   variableMap: Record<string, string> | null | undefined,
   primary: Record<string, any> | null,
   secondary?: Record<string, any> | null,
+  fallbacks?: Record<string, string> | null,
 ): string {
   if (!content) return '';
   const resolveField = (fieldKey: string): string => {
@@ -61,7 +64,8 @@ export function fillAlimtalkVarMap(
   for (const [rawKey, rawVal] of Object.entries(variableMap || {})) {
     const escapedKey = rawKey.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     const v = typeof rawVal === 'string' ? rawVal : String(rawVal ?? '');
-    const replacement = (v.startsWith('@@') && v.endsWith('@@')) ? resolveField(v.slice(2, -2)) : (v || '');
+    const base = (v.startsWith('@@') && v.endsWith('@@')) ? resolveField(v.slice(2, -2)) : (v || '');
+    const replacement = applyVarFallback(base, rawKey, fallbacks);
     out = out.replace(new RegExp(escapedKey, 'g'), replacement);
   }
   return out;

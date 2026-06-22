@@ -18,7 +18,7 @@ export interface OsTier {
   platform: PlatformId;
   label: string; // 서수란 팀장용 평범한 말 (node/glibc 같은 기술용어 노출 X)
   buildTier: string | null;
-  node: 14 | 16 | 20 | null;
+  node: 12 | 14 | 16 | 20 | null;
   supported: boolean;
   runtimeBundle: boolean; // Windows 구형 = UCRT app-local 동봉
   rangeMessage?: string; // 미지원 안내
@@ -33,7 +33,7 @@ export interface DbOption {
 export interface ResolveResult {
   supported: boolean;
   buildTier: string | null;
-  node: 14 | 16 | 20 | null;
+  node: 12 | 14 | 16 | 20 | null;
   runtimeBundle: boolean;
   packageFile: string | null; // manifest의 산출물 키(= buildTier id)
   dbNotes: string[];
@@ -60,7 +60,7 @@ export const OS_TIERS: OsTier[] = [
   {
     id: 'win-2012',
     platform: 'windows',
-    label: 'Windows 8.1 · Server 2012 / 2012 R2',
+    label: 'Windows 8.1 · Server 2012 R2',
     buildTier: 'win-mid',
     node: 16,
     supported: true,
@@ -69,9 +69,9 @@ export const OS_TIERS: OsTier[] = [
   {
     id: 'win-2008r2',
     platform: 'windows',
-    label: 'Windows 7 · Server 2008 R2',
+    label: 'Windows 7 · Server 2008 R2 · Server 2012(R2 아님)',
     buildTier: 'win-legacy',
-    node: 14,
+    node: 12, // node14는 2008R2 미지원(공식 바닥 Win8.1) → 2008R2 실제 바닥은 node12
     supported: true,
     runtimeBundle: true,
   },
@@ -99,7 +99,7 @@ export const OS_TIERS: OsTier[] = [
   {
     id: 'linux-legacy',
     platform: 'linux',
-    label: 'CentOS 7 · RHEL 7 · Ubuntu 16~18',
+    label: 'CentOS 7 · RHEL 7 · Ubuntu 14.04~18.04',
     buildTier: 'linux-legacy',
     node: 16,
     supported: true,
@@ -152,23 +152,16 @@ export const DB_OPTIONS: DbOption[] = [
       '테이블·컬럼명이 대문자인 경우가 많음 (대문자로 입력)',
     ],
   },
-  {
-    id: 'excel',
-    label: 'Excel 파일 (.xlsx)',
-    notes: ['파일 경로 지정', '에이전트가 파일 변경을 감시'],
-  },
-  {
-    id: 'csv',
-    label: 'CSV 파일 (.csv)',
-    notes: ['파일 경로 지정', '구분자·인코딩 확인 (기본 , / utf-8)'],
-  },
+  // 엑셀/CSV 파일은 싱크에이전트(DB 커넥터) 소스 아님 — 파일만 있는 회사는 앱 직접 업로드로 처리.
+  // (2026-06-22 Harold 지시로 위저드 소스 목록에서 제거)
 ];
 
 // 티어별 실연결 검증을 통과한 DB(위저드 db id) — 단일 진실원.
 // 빌드 스모크로만 갱신한다 (보이면 작동 불변식: 미검증 조합은 위저드·resolve에서 노출 금지).
-// 2026-06-17: oracledb 6.10 thin 모드가 pkg 단일 exe에서 node14/16/20 전부 로드됨을 스모크로 확인
-//   → 전 티어에 oracle 등재. (리눅스 2티어는 동일 순수 JS thin — build:tiers 산출 후 실 연결은 운영 실측.)
-const ALWAYS_DBS = ['mssql-old', 'mssql-modern', 'mysql', 'postgres', 'oracle', 'excel', 'csv'];
+// 2026-06-22 실측: Oracle 11g(node12 thick)·MySQL·PostgreSQL = 실DB 연결 검증 통과.
+//   MSSQL = ROW_NUMBER 페이지네이션으로 SQL Server 2008+ 호환(SQL Server 이미지 미확보 — 코드·문서 검증).
+//   Oracle thick은 ORACLE_HOME 있으면 전 티어 자동 적용(11g 지원) / 원격 12c+는 thin.
+const ALWAYS_DBS = ['mssql-old', 'mssql-modern', 'mysql', 'postgres', 'oracle'];
 export const VERIFIED_DBS_BY_TIER: Record<string, string[]> = {
   'win-modern': ALWAYS_DBS,
   'win-mid': ALWAYS_DBS,

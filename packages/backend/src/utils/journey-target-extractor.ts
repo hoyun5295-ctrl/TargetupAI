@@ -260,12 +260,12 @@ export async function selectCdpEventRowsForCursor(
   cursorStart: Date | string,
   windowEnd: Date | string,
   chunkLimit: number,
-): Promise<{ customerId: string; occurredAt: Date }[]> {
+): Promise<{ customerId: string; occurredAt: Date; properties: Record<string, any> | null }[]> {
   const params: any[] = [companyId, eventName, cursorStart, windowEnd];
   const cond = applyCustomerConditions(filters.customer_conditions || [], filters.logic || 'AND', params);
   params.push(String(chunkLimit));
   const r = await query(
-    `SELECT e.customer_id, e.occurred_at FROM cdp_events e
+    `SELECT e.customer_id, e.occurred_at, e.properties FROM cdp_events e
      INNER JOIN customers c ON c.id = e.customer_id AND c.company_id = $1::uuid
      WHERE e.company_id = $1::uuid
        AND e.event_name = $2
@@ -277,7 +277,7 @@ export async function selectCdpEventRowsForCursor(
      LIMIT $${params.length}::int`,
     params,
   );
-  return r.rows.map((x: any) => ({ customerId: x.customer_id, occurredAt: x.occurred_at }));
+  return r.rows.map((x: any) => ({ customerId: x.customer_id, occurredAt: x.occurred_at, properties: x.properties ?? null }));
 }
 
 // ════════════════════════════════════════════════════════════════════

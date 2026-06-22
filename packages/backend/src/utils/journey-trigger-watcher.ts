@@ -58,10 +58,10 @@ interface FirstStepRow {
 const INSERT_EXECUTION_SQL =
   `INSERT INTO journey_executions (
      id, journey_id, customer_id, current_step_order, status,
-     entered_at, next_run_at, created_at
+     entered_at, next_run_at, created_at, entry_event_properties
    ) VALUES (
      gen_random_uuid(), $1::uuid, $2::uuid, 0, 'active',
-     NOW(), $3, NOW()
+     NOW(), $3, NOW(), $4::jsonb
    )`;
 
 // ════════════════════════════════════════════════════════════════════
@@ -202,7 +202,8 @@ async function processCdpCursorJourney(j: ActiveJourney, eventName: string): Pro
       const allowed = await checkCooldown(j, customerId);
       if (!allowed) { skipped++; continue; }
       const nextRunAt = calculateNextRunAt(firstStep.delay_mode, Number(firstStep.delay_hours || 0), firstStep.target_hour_kst);
-      await client.query(INSERT_EXECUTION_SQL, [j.id, customerId, nextRunAt]);
+      const evProps = batch.propertiesByCustomer[customerId];
+      await client.query(INSERT_EXECUTION_SQL, [j.id, customerId, nextRunAt, evProps ? JSON.stringify(evProps) : null]);
       enqueued++;
     }
     await client.query(`UPDATE journeys SET last_event_cursor = $2 WHERE id = $1::uuid`, [j.id, newCursor]);

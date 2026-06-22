@@ -43,7 +43,22 @@ export class OracleConnector implements IDbConnector {
         );
       }
 
-      // thin 모드 설정 (Oracle Instant Client 불필요, oracledb 6.x+)
+      // 드라이버 모드 — Oracle Client가 같은 PC에 있으면(ORACLE_HOME) thick으로 명시 지정.
+      //  · oracledb 5.x (node12 티어) = 항상 thick → 11g 지원
+      //  · oracledb 6.x (node14+ 티어) = 기본 thin(DB 12.1+만). ORACLE_HOME 있으면 thick 전환 → 11g도 지원
+      //  · ORACLE_HOME 없으면(원격 12c+) thin 그대로 (Oracle Client 불필요)
+      // Windows 서비스 PATH 누락 시 DPI-1047 조용한 실패도 함께 차단.
+      if (process.env.ORACLE_HOME) {
+        try {
+          const isWin = process.platform === 'win32';
+          const libDir = require('path').join(process.env.ORACLE_HOME, isWin ? 'bin' : 'lib');
+          this.oracledb.initOracleClient({ libDir });
+          logger.info('Oracle thick 클라이언트 경로 지정', { libDir });
+        } catch (err) {
+          logger.warn('initOracleClient 스킵(이미 초기화 또는 PATH 사용)', { err });
+        }
+      }
+
       this.oracledb.outFormat = this.oracledb.OUT_FORMAT_OBJECT;
       this.oracledb.autoCommit = true;
       this.oracledb.fetchAsString = [this.oracledb.CLOB];
@@ -181,12 +196,16 @@ export class OracleConnector implements IDbConnector {
 
       // Oracle은 OFFSET/FETCH 구문 (12c+) 또는 ROWNUM 사용
       // 12c+ 기준으로 작성 (대부분 최신 Oracle 사용)
-      const sql = `SELECT * FROM "${safeTable}"
-                   WHERE "${safeColumn}" > TO_TIMESTAMP(:since, 'YYYY-MM-DD"T"HH24:MI:SS.FF3"Z"')
-                   ORDER BY "${safeColumn}" ASC
-                   OFFSET :offset ROWS FETCH NEXT :limit ROWS ONLY`;
+      // Oracle 11g~12c+ 공통 페이지네이션 (OFFSET/FETCH는 12c+ 전용 → 11g에서 ORA-00933).
+      const sql = `SELECT * FROM (
+                     SELECT inner_.*, ROWNUM AS rnum_ FROM (
+                       SELECT * FROM "${safeTable}"
+                       WHERE "${safeColumn}" > TO_TIMESTAMP(:since, 'YYYY-MM-DD"T"HH24:MI:SS.FF3"Z"')
+                       ORDER BY "${safeColumn}" ASC
+                     ) inner_ WHERE ROWNUM <= :maxRow
+                   ) WHERE rnum_ > :minRow`;
 
-      const result = await conn.execute(sql, { since, offset, limit }, {
+      const result = await conn.execute(sql, { since, maxRow: offset + limit, minRow: offset }, {
         outFormat: this.oracledb.OUT_FORMAT_OBJECT,
       });
 
@@ -208,11 +227,14 @@ export class OracleConnector implements IDbConnector {
     try {
       const safeTable = this.sanitizeIdentifier(tableName);
 
-      const sql = `SELECT * FROM "${safeTable}"
-                   ORDER BY ROWID
-                   OFFSET :offset ROWS FETCH NEXT :limit ROWS ONLY`;
+      // Oracle 11g~12c+ 공통 페이지네이션 (OFFSET/FETCH는 12c+ 전용 → 11g에서 ORA-00933).
+      const sql = `SELECT * FROM (
+                     SELECT inner_.*, ROWNUM AS rnum_ FROM (
+                       SELECT * FROM "${safeTable}" ORDER BY ROWID
+                     ) inner_ WHERE ROWNUM <= :maxRow
+                   ) WHERE rnum_ > :minRow`;
 
-      const result = await conn.execute(sql, { offset, limit }, {
+      const result = await conn.execute(sql, { maxRow: offset + limit, minRow: offset }, {
         outFormat: this.oracledb.OUT_FORMAT_OBJECT,
       });
 
@@ -286,6 +308,7 @@ export class OracleConnector implements IDbConnector {
     return rows.map((row) => {
       const normalized: RawRow = {};
       for (const [key, value] of Object.entries(row)) {
+        if (key === 'RNUM_') continue; // 11g 페이지네이션 헬퍼 컬럼 제외
         if (value instanceof Date) {
           normalized[key] = value.toISOString();
         } else {
