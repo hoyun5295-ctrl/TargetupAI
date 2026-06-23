@@ -9,7 +9,7 @@ import { normalizeByFieldKey, normalizeRegion, normalizeDate, normalizeCustomFie
 import { CATEGORY_LABELS, FIELD_MAP, getColumnFields, getCustomFields, getFieldByKey, upsertCustomFieldDefinitions } from '../utils/standard-field-map';
 import { validateUploadMapping } from '../utils/upload-mapping-validator';
 import { createCustomerUpsertBuilder } from '../utils/customer-upsert';
-import { dropEmptyColumns } from '../utils/excel-columns';
+import { dropEmptyColumns, dropEmptyHeaderColumns, isFirstRowHeaderRow } from '../utils/excel-columns';
 import { registerBulkCompanyUserUnsubscribes } from '../utils/unsubscribe-helper';
 
 // ★ D79: 날짜 정규화는 컨트롤타워(normalize.ts)의 normalizeDate() 사용
@@ -132,18 +132,17 @@ router.post('/parse', authenticate, upload.single('file'), async (req: Request, 
     const sheetName = workbook.SheetNames[0];
     const worksheet = workbook.Sheets[sheetName];
     
-    const data = dropEmptyColumns(XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: null }) as any[][]);
-    
+    let data = dropEmptyColumns(XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: null }) as any[][]);
+
     if (data.length === 0) {
       return res.status(400).json({ error: '파일이 비어있습니다.' });
     }
 
-    // 첫 행이 헤더인지 판별
+    // 첫 행이 헤더인지 판별 (CT — 3경로 동일 판정)
+    const isFirstRowHeader = isFirstRowHeaderRow(data[0]);
+    // ★ 2026-06-23: 헤더 있는 파일은 헤더 빈 잡열(컬럼5·7 — E열 SMS수신여부 등) 매핑에서 제외
+    if (isFirstRowHeader) data = dropEmptyHeaderColumns(data);
     const firstRow = data[0];
-    const isFirstRowHeader = firstRow.some((cell: any) => {
-      const str = String(cell || '').trim();
-      return str && isNaN(Number(str.replace(/-/g, '')));
-    });
 
     // ★ D141 B1: 동일 헤더 자동 디덱싱 (dedupeHeaders 헬퍼)
     let headers: string[];
@@ -391,10 +390,12 @@ router.post('/validate-mapping', authenticate, async (req: Request, res: Respons
       sheetStubs: false,
     });
     const sheet = workbook.Sheets[workbook.SheetNames[0]];
-    const data = dropEmptyColumns(XLSX.utils.sheet_to_json(sheet, { header: 1, defval: null }) as any[][]);
+    let data = dropEmptyColumns(XLSX.utils.sheet_to_json(sheet, { header: 1, defval: null }) as any[][]);
     if (data.length === 0) {
       return res.status(400).json({ error: '파일이 비어있습니다.' });
     }
+    // ★ 2026-06-23: /parse와 동일 — 헤더 있는 파일은 헤더 빈 잡열 제외(매핑 키 일치)
+    if (isFirstRowHeaderRow(data[0] as any[])) data = dropEmptyHeaderColumns(data);
     // ★ D141 B1: dedupeHeaders 헬퍼 — /parse와 동일 결과 보장
     //   클라이언트가 보낸 mapping의 unique header 키와 백엔드 sampleData의 키가 일치해야
     //   매핑 검증 결과(타입 감지 등)가 정확.
@@ -561,7 +562,9 @@ async function processUploadInBackground(
     });
     const sheetName = workbook.SheetNames[0];
     const worksheet = workbook.Sheets[sheetName];
-    const data = dropEmptyColumns(XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: null }) as any[][]);
+    let data = dropEmptyColumns(XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: null }) as any[][]);
+    // ★ 2026-06-23: /parse·/validate-mapping과 동일 — 헤더 있는 파일은 헤더 빈 잡열 제외(매핑 키 일치·데이터 손실 0)
+    if (isFirstRowHeaderRow(data[0] as any[])) data = dropEmptyHeaderColumns(data);
 
     // ★ D141 B1: dedupeHeaders 헬퍼 — 클라이언트 mapping의 unique header 키와 정확히 일치해야 매핑 적용
     //   누락 시: 동일 헤더 컬럼이 있는 엑셀 업로드 → 백그라운드 처리에서 raw header 사용 → mapping[rawHeader] 미스 → 매핑 미적용 → 데이터 손실 사고

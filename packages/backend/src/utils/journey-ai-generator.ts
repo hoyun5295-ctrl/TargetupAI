@@ -18,6 +18,8 @@ import { callAIWithFallback } from '../services/ai';
 import { buildMemoryPromptContext } from './company-memory';
 // ★ D225+ (2026-05-28 Harold 명시): Brand Voice Learning — 회사별 LMS 대표 문안 5건 + 가이드라인 자동 주입.
 import { buildSystemPromptWithBrandVoice } from './brand-voice-prompt';
+// ★ 2026-06-23: 비카카오 여정 광고 표기 강제 정책 — AI 정보성 오판으로 (광고) 누락 차단.
+import { resolveJourneyAdFlag } from './journey-ad-policy';
 import { query } from '../config/database';
 import { sanitizeForSms } from './message-sanitizer';
 // ★ D210+ Phase 2 (Harold 명시 2026-05-23): CT-58 — 회사 customer DB 실측 프로필 동적 주입.
@@ -536,7 +538,7 @@ VIP 회원님만을 위해 준비한 이번 봄 특별 안내,
       channel,
       messageTemplate: messageSan.sanitized,
       subject: subjectSan.sanitized,
-      isAd: s.isAd !== false,
+      isAd: resolveJourneyAdFlag(channel, s.isAd),
       stepIntent: String(s.stepIntent || '').slice(0, 100),
     };
   });

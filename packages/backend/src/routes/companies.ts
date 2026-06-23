@@ -6,6 +6,7 @@ import { authenticate, requireSuperAdmin, requireUuidId } from '../middlewares/a
 import { getCardDef, isDynamicCardId, parseDynamicCardId, type ParsedDynamicCardId } from '../utils/dashboard-card-pool';
 import { getStoreScope } from '../utils/store-scope';
 import { getOpt080Number } from '../utils/messageUtils';
+import { normalizeOpt080Input } from '../utils/normalize';
 import { grantBasicTrial, isTrialApplyOpen } from '../utils/basic-trial';
 
 const router = Router();
@@ -125,6 +126,18 @@ router.put('/settings', authenticate, async (req: Request, res: Response) => {
       target_strategy, cross_category_allowed, excluded_segments ? JSON.stringify(excluded_segments) : null,
       approval_required, companyId
     ]);
+
+    // ★ 2026-06-23: 회사 설정 080 필드는 GET이 getOpt080Number(user 우선)로 표시한다(이 파일 GET:43).
+    //   user에 080 오버라이드가 있으면 companies만 갱신해선 화면 값이 안 바뀜 = 삭제·수정 불가 사고(psy5868 0807196700, auto_sync).
+    //   표시 소스와 일치하도록 현재 user의 opt_out_080_number도 함께 갱신/삭제(빈값/공백=삭제).
+    //   기존 오버라이드(비어있지 않은 값)가 있는 user만 갱신 — 없던 user엔 신규 생성 X(회사 기본값 fallback 흐름 보존).
+    if (userId && reject_number !== undefined) {
+      await query(
+        `UPDATE users SET opt_out_080_number = $1
+           WHERE id = $2 AND COALESCE(opt_out_080_number, '') <> ''`,
+        [normalizeOpt080Input(reject_number), userId]
+      );
+    }
 
     res.json({ message: '설정이 저장되었습니다' });
   } catch (error) {

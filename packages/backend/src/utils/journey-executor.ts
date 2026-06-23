@@ -46,6 +46,7 @@ import {
   prepareFieldMappings,
   getOpt080Number,
 } from './messageUtils';
+import { resolveJourneyAdFlag } from './journey-ad-policy';
 import { prepaidDeduct } from './prepaid';
 import { logCampaignTraining } from './training-logger';
 import { normalizePhone } from './normalize-phone';
@@ -473,8 +474,10 @@ async function processExecution(exec: ExecutionRow): Promise<StepOutcome> {
     console.warn('[JourneyExecutor] cart context skip:', err?.message);
   }
 
-  // 광고 표기 — step.is_ad (DB default true) → buildAdMessage가 (광고)+080+KISA 제목 자동 합성 (알림톡 영역 무관 = 정보성 메시지)
-  const isAd = step.is_ad !== false;
+  // 광고 표기 — ★ 2026-06-23: 비카카오(SMS/LMS/MMS) 여정은 알림톡이 아니므로 무조건 광고성 → isAd 강제 true
+  //   (AI가 isAd=false로 내렸거나 과거 is_ad=false로 저장된 여정도 발송 직전 교정. 정보통신망법 광고 표기 의무).
+  //   카카오(알림톡)만 정보성 허용. buildAdMessage가 (광고)+무료수신거부(080) 자동 합성.
+  const isAd = resolveJourneyAdFlag(step.channel, step.is_ad);
 
   let message: string;
   let subject: string;

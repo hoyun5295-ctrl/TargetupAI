@@ -323,7 +323,11 @@ export default function DmBuilderPage() {
 
   const handleEdit = async (id: string, itemLayoutMode?: string) => {
     setLegacyDmError(null);
-    if (itemLayoutMode === 'slides') {
+    // ★ 2026-06-23: layout_mode='slides'는 새 섹션형 슬라이드(가로 스와이프)와 기존 D119 이미지 슬라이드 양쪽에 쓰인다.
+    //   섹션 콘텐츠가 있으면 새 에디터에서 바로 편집 — 콘텐츠 없는 진짜 레거시(D119)만 변환 안내.
+    const editItem = list.find((d) => d.id === id);
+    const isTrueLegacy = itemLayoutMode === 'slides' && ((editItem?.section_summary?.types?.length ?? 0) === 0);
+    if (isTrueLegacy) {
       // ★ D216+ ConfirmModal (옛 native confirm 영구 폐기)
       setConfirm({
         mode: 'warning',
@@ -1215,7 +1219,8 @@ function DmCard({ dm, onEdit, onDelete, onClone, cloning }: {
   onClone: (id: string) => void;
   cloning?: boolean;
 }) {
-  const isLegacy = dm.layout_mode === 'slides';
+  // ★ 2026-06-23: 섹션 콘텐츠가 있으면 새 섹션형 슬라이드(편집 가능) — 콘텐츠 없는 진짜 D119만 레거시 뱃지.
+  const isLegacy = dm.layout_mode === 'slides' && ((dm.section_summary?.types?.length ?? 0) === 0);
   const summary = dm.section_summary;
   const statusLabel = (() => {
     switch (dm.approval_status) {

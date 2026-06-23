@@ -14,6 +14,7 @@ import { renderDmTokensCss, renderDmBaseCss } from './dm-tokens';
 import { resolveSections } from './dm-variable-resolver';
 import type { Section } from './dm-section-registry';
 import type { DmBrandKit } from './dm-tokens';
+import { expandSlidePagesForSwipe } from './dm-slides-expand';
 
 export { inlineImage, youtubeEmbedUrl };
 
@@ -617,7 +618,9 @@ export function renderDmViewerHtml(dm: any, trackApiBase: string): string {
   const pages = parsePages(dm);
   const mode = resolvePagesMode(dm, pages);
   if (mode === null) return renderLegacySlidesHtml(dm, trackApiBase);
-  return renderPagesHtml(dm, trackApiBase, undefined, mode);
+  // ★ 2026-06-23: 슬라이드 모드 — 갤러리/슬라이드쇼 이미지 N장을 각 1페이지로 펼쳐 가로 스와이프
+  const renderPages = mode === 'slides' ? (expandSlidePagesForSwipe(pages as any) as DmPageGroup[]) : pages;
+  return renderPagesHtml(dm, trackApiBase, renderPages, mode);
 }
 
 /**
@@ -630,9 +633,11 @@ export async function renderDmViewerHtmlWithCustomer(
   customer: Record<string, any> | null,
   companyId: string,
 ): Promise<string> {
-  const pages = parsePages(dm);
-  const mode = resolvePagesMode(dm, pages);
+  const parsed = parsePages(dm);
+  const mode = resolvePagesMode(dm, parsed);
   if (mode === null) return renderLegacySlidesHtml(dm, trackApiBase);
+  // ★ 2026-06-23: 슬라이드 모드 — 이미지 N장을 각 1페이지로 펼친 뒤 변수 치환·렌더
+  const pages = mode === 'slides' ? (expandSlidePagesForSwipe(parsed as any) as DmPageGroup[]) : parsed;
   const resolvedPages: DmPageGroup[] = [];
   for (const p of pages) {
     const resolvedSecs = await resolveSections(p.sections, customer, companyId);

@@ -284,6 +284,17 @@ export function formatPhoneDisplay(value: any): string {
  * - 휴대폰: 010, 011~019
  * - 하이픈 포함 형태로 반환
  */
+/**
+ * ★ 2026-06-23: 080 수신거부번호 입력 정규화.
+ *   빈 문자열·공백만·null/undefined = 삭제 의도 → null 반환. 그 외 trim한 값 반환.
+ *   회사 설정 저장 시 user 오버라이드(users.opt_out_080_number) 삭제가 반영되도록 사용.
+ */
+export function normalizeOpt080Input(raw: any): string | null {
+  if (raw == null) return null;
+  const s = String(raw).trim();
+  return s === '' ? null : s;
+}
+
 export function normalizeStorePhone(value: any): string | null {
   if (value == null || value === '') return null;
   let v = String(value).trim();
