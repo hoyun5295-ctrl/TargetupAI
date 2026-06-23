@@ -12,7 +12,8 @@ import { getStoreScope } from '../utils/store-scope';
 import { buildFilterWhereClauseCompat } from '../utils/customer-filter';
 import { buildSendableRecipientsSql } from '../utils/operator-recipients';
 import { aggregateCampaignPerformance } from '../utils/stats-aggregation';
-import { formatDateValue, getOpt080Number } from '../utils/messageUtils';
+import { formatDateValue, getOpt080Number, buildAdMessage, buildAdSubject } from '../utils/messageUtils';
+import { resolveJourneyAdFlag } from '../utils/journey-ad-policy';
 import { loadPlanContext, canUseFeature, requirePlanFeature, isBetaAccessAllowed, isAiOperatorAllowed } from '../utils/plan-guard';
 import { getCompanyCosts } from '../config/defaults';
 // ★ D209+ (Harold 명시 2026-05-22) Phase D 비용 안전 매트릭스 — 회사별 월 한도 + cache 통계
@@ -2492,7 +2493,7 @@ router.post('/operator/journeys/preview-message', async (req: Request, res: Resp
   try {
     const companyId = req.user?.companyId;
     if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
-    const { journeyId, message, subject } = req.body as { journeyId?: string; message?: string; subject?: string };
+    const { journeyId, message, subject, isAd, channel } = req.body as { journeyId?: string; message?: string; subject?: string; isAd?: boolean; channel?: string };
     if (!message) return res.json({ success: true, previewMessage: '', previewSubject: '', hasSample: false, sampleName: null });
 
     const companyRow = await query('SELECT customer_schema FROM companies WHERE id = $1::uuid', [companyId]);
@@ -2537,8 +2538,20 @@ router.post('/operator/journeys/preview-message', async (req: Request, res: Resp
       if (fb) fieldDefaults[varName] = fb;
     }
 
-    const previewMessage = replaceVariables(message, sampleRaw, fieldMappings, undefined, { fieldDefaults });
-    const previewSubject = subject ? replaceVariables(subject, sampleRaw, fieldMappings, undefined, { fieldDefaults }) : '';
+    let previewMessage = replaceVariables(message, sampleRaw, fieldMappings, undefined, { fieldDefaults });
+    let previewSubject = subject ? replaceVariables(subject, sampleRaw, fieldMappings, undefined, { fieldDefaults }) : '';
+
+    // ★ 2026-06-23: 미리보기 = 실발송 100% 일치 — 발송과 동일하게 (광고)+무료수신거부 본문 합성.
+    //   비카카오 여정은 무조건 광고(resolveJourneyAdFlag) → buildAdMessage가 발송(journey-executor)과 동일 합성.
+    //   카카오(알림톡)는 정보성이라 합성하지 않음. 이전엔 변수 치환만 해 본문에 (광고)가 빠져 보이던 문제.
+    const previewChannel = String(channel || 'lms').toLowerCase();
+    if (previewChannel !== 'kakao') {
+      const previewMsgType = previewChannel === 'lms' ? 'LMS' : previewChannel === 'mms' ? 'MMS' : 'SMS';
+      const previewAdFlag = resolveJourneyAdFlag(channel, isAd);
+      const previewOpt080 = await getOpt080Number(req.user?.userId || null, companyId);
+      previewMessage = buildAdMessage(previewMessage, previewMsgType, previewAdFlag, previewOpt080);
+      previewSubject = buildAdSubject(previewSubject, previewMsgType, previewAdFlag);
+    }
 
     return res.json({
       success: true,

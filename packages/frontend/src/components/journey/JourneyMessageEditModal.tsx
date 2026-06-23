@@ -87,7 +87,7 @@ export default function JourneyMessageEditModal({
           const res = await fetch('/api/ai/operator/journeys/preview-message', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-            body: JSON.stringify({ journeyId, message: s.messageTemplate, subject: s.subject }),
+            body: JSON.stringify({ journeyId, message: s.messageTemplate, subject: s.subject, isAd: s.isAd, channel: s.channel }),
           });
           const data = await res.json();
           if (data.success) results[s.id] = { message: data.previewMessage || '', subject: data.previewSubject || '', hasSample: !!data.hasSample, sampleName: data.sampleName ?? null };
