@@ -23,35 +23,55 @@ for (const [tier, exe] of Object.entries(WIN_BUNDLE)) {
 // win-modern도 폴더+bat 구조로 통일(런타임 DLL 불필요 → --no-runtime). 설치 안내(bat 실행)와 일치.
 sh(`node scripts/bundle-windows-runtime.js release/sync-agent-win-modern.exe dist-tiers/win-modern/SyncAgent --no-runtime`);
 
-// 다운로드용 zip (티어당 1개) — 서버 agent-builds/ 에 업로드하면 위저드 다운로드가 서빙
+// 다운로드용 zip — packageKey(`<buildTier>-<driver>`)당 1개. 같은 티어 exe(4종 드라이버 동봉)를
+// 드라이버별 이름으로 zip(엔드포인트가 packageKey로 서빙). Oracle thick(10g/11g/12c)은 Instant Client
+// 동봉이 필요한데(외부 확보) 디스크에 없으므로 지금은 base만 + manifest blocker. IC 확보 시 oracle zip에 폴더 추가.
+const DRIVERS = ['oracle', 'mssql', 'mysql', 'pg'];
+const TIER_SRC = {
+  'win-modern': 'dist-tiers/win-modern/SyncAgent',
+  'win-mid': 'dist-tiers/win-mid/SyncAgent',
+  'win-legacy': 'dist-tiers/win-legacy/SyncAgent',
+  'linux-modern': 'release/sync-agent-linux-modern',
+  'linux-legacy': 'release/sync-agent-linux-legacy',
+};
+const TIER_NODE = { 'win-modern': 20, 'win-mid': 16, 'win-legacy': 12, 'linux-modern': 20, 'linux-legacy': 16 };
+const TIER_BUNDLE = { 'win-modern': false, 'win-mid': true, 'win-legacy': true, 'linux-modern': false, 'linux-legacy': false };
+
 const dlDir = path.join(ROOT, 'dist-tiers/downloads');
 fs.mkdirSync(dlDir, { recursive: true });
-const zipOne = (srcRel, tier) => {
+const zipTo = (srcRel, packageKey) => {
   const src = path.join(ROOT, srcRel);
-  const dest = path.join(dlDir, `sync-agent-${tier}.zip`);
+  const dest = path.join(dlDir, `sync-agent-${packageKey}.zip`);
   sh(`powershell -NoProfile -Command "Compress-Archive -Path '${src}' -DestinationPath '${dest}' -Force"`);
 };
-zipOne('dist-tiers/win-modern/SyncAgent', 'win-modern');
-zipOne('dist-tiers/win-mid/SyncAgent', 'win-mid');
-zipOne('dist-tiers/win-legacy/SyncAgent', 'win-legacy');
-zipOne('release/sync-agent-linux-modern', 'linux-modern');
-zipOne('release/sync-agent-linux-legacy', 'linux-legacy');
-console.log(`다운로드 zip 생성: ${dlDir} (sync-agent-<tier>.zip 5개)`);
 
-// manifest: 티어 -> 파일/폴더 · node · sha(단일파일만) · 빌드시각
-const sha = (rel) =>
-  crypto.createHash('sha256').update(fs.readFileSync(path.join(ROOT, rel))).digest('hex').slice(0, 16);
+const packages = {};
+let zipCount = 0;
+for (const [tier, src] of Object.entries(TIER_SRC)) {
+  for (const driver of DRIVERS) {
+    const packageKey = `${tier}-${driver}`;
+    zipTo(src, packageKey);
+    zipCount++;
+    packages[packageKey] = {
+      buildTier: tier,
+      driver,
+      node: TIER_NODE[tier],
+      runtimeBundle: TIER_BUNDLE[tier],
+      // 실연결 스모크 통과 시 백엔드 VERIFIED_COMBOS(osTierId__dbId)에 등록 → 위저드 verified 노출.
+      state: 'candidate',
+      blockers:
+        driver === 'oracle'
+          ? ['thick(10g/11g/12c)는 Oracle Instant Client 동봉 필요 — 외부 확보 후 이 zip에 IC 폴더 추가']
+          : [],
+    };
+  }
+}
+console.log(`다운로드 zip 생성: ${dlDir} (sync-agent-<buildTier>-<driver>.zip ${zipCount}개)`);
 
 const manifest = {
   builtAt: new Date().toISOString(),
   version: require('../package.json').version,
-  tiers: {
-    'win-modern': { dir: 'dist-tiers/win-modern/SyncAgent', node: 20, runtimeBundle: false },
-    'win-mid': { dir: 'dist-tiers/win-mid/SyncAgent', node: 16, runtimeBundle: true },
-    'win-legacy': { dir: 'dist-tiers/win-legacy/SyncAgent', node: 12, runtimeBundle: true },
-    'linux-modern': { file: 'release/sync-agent-linux-modern', node: 20, sha: sha('release/sync-agent-linux-modern') },
-    'linux-legacy': { file: 'release/sync-agent-linux-legacy', node: 16, sha: sha('release/sync-agent-linux-legacy') },
-  },
+  packages,
 };
 fs.writeFileSync(path.join(ROOT, 'release/build-manifest.json'), JSON.stringify(manifest, null, 2));
-console.log('\nmanifest 생성: release/build-manifest.json');
+console.log('\nmanifest 생성: release/build-manifest.json (packageKey별 state/blocker)');

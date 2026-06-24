@@ -14,13 +14,21 @@ import { useToast } from '../ToastProvider';
 type PlatformId = 'windows' | 'linux';
 interface Platform { id: PlatformId; label: string; }
 interface OsTier { id: string; platform: PlatformId; label: string; supported: boolean; rangeMessage?: string; buildTier?: string | null; }
-interface DbOption { id: string; label: string; notes: string[]; }
+interface DbOption { id: string; driver: string; label: string; notes: string[]; }
+type BuildState = 'blocked' | 'candidate' | 'verified';
 interface ResolveResult {
   supported: boolean;
+  state: BuildState;
   buildTier: string | null;
-  runtimeBundle: boolean;
+  driver: string | null;
+  packageKey: string | null;
   packageFile: string | null;
+  node: number | null;
+  runtimeBundle: boolean;
+  mode: 'thick' | 'thin' | 'na';
+  nativeClient: string | null;
   dbNotes: string[];
+  connectionProfile: string;
   installSummary: string[];
   rangeMessage?: string;
 }
@@ -58,7 +66,7 @@ function WizardCard({
 
 export default function AgentDeployWizard() {
   const toast = useToast();
-  const [boot, setBoot] = useState<{ platforms: Platform[]; osTiers: OsTier[]; dbOptions: DbOption[]; verifiedDbsByTier: Record<string, string[]> } | null>(null);
+  const [boot, setBoot] = useState<{ platforms: Platform[]; osTiers: OsTier[]; dbOptions: DbOption[]; verifiedCombos: string[] } | null>(null);
   const [step, setStep] = useState<1 | 2 | 3 | 4>(1);
   const [platform, setPlatform] = useState<PlatformId | null>(null);
   const [osTier, setOsTier] = useState<OsTier | null>(null);
@@ -70,7 +78,7 @@ export default function AgentDeployWizard() {
       try {
         const res = await fetch('/api/admin/sync/build-tiers', { headers: authHeader() });
         const data = await res.json();
-        if (data.success) setBoot({ platforms: data.platforms, osTiers: data.osTiers, dbOptions: data.dbOptions, verifiedDbsByTier: data.verifiedDbsByTier || {} });
+        if (data.success) setBoot({ platforms: data.platforms, osTiers: data.osTiers, dbOptions: data.dbOptions, verifiedCombos: data.verifiedCombos || [] });
         else toast.error('빌드 티어 정보를 불러오지 못했습니다.');
       } catch {
         toast.error('빌드 티어 정보를 불러오지 못했습니다.');
@@ -86,7 +94,7 @@ export default function AgentDeployWizard() {
   const pickOsTier = (t: OsTier) => {
     setOsTier(t);
     if (!t.supported) {
-      setResult({ supported: false, buildTier: null, runtimeBundle: false, packageFile: null, dbNotes: [], installSummary: [], rangeMessage: t.rangeMessage });
+      setResult({ supported: false, state: 'blocked', buildTier: null, driver: null, packageKey: null, packageFile: null, node: null, runtimeBundle: false, mode: 'na', nativeClient: null, dbNotes: [], connectionProfile: '', installSummary: [], rangeMessage: t.rangeMessage });
       setStep(4);
     } else {
       setStep(3);
@@ -109,9 +117,9 @@ export default function AgentDeployWizard() {
     }
   };
 
-  const downloadBuild = async (tier: string) => {
+  const downloadBuild = async (packageKey: string) => {
     try {
-      const res = await fetch(`/api/admin/sync/build-tiers/download/${tier}`, { headers: authHeader() });
+      const res = await fetch(`/api/admin/sync/build-tiers/download/${packageKey}`, { headers: authHeader() });
       if (!res.ok) {
         const data: { error?: string } = await res.json().catch(() => ({}));
         toast.error(data.error || '다운로드에 실패했습니다.');
@@ -121,7 +129,7 @@ export default function AgentDeployWizard() {
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `sync-agent-${tier}.zip`;
+      a.download = `sync-agent-${packageKey}.zip`;
       document.body.appendChild(a);
       a.click();
       a.remove();
@@ -208,23 +216,14 @@ export default function AgentDeployWizard() {
           </div>
         )}
 
-        {step === 3 && (() => {
-          const verified = (osTier?.buildTier && boot?.verifiedDbsByTier[osTier.buildTier]) || [];
-          const dbs = (boot?.dbOptions || []).filter((d) => verified.includes(d.id));
-          return (
-            <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-              {dbs.map((d) => (
-                <WizardCard key={d.id} icon={Database} title={d.label} onClick={() => pickDb(d)} />
-              ))}
-              {dbs.length === 0 && (
-                <p className="col-span-full text-sm text-amber-600">
-                  이 OS 버전에서 연결을 지원하는 DB가 아직 없습니다. 같은 네트워크의 최신 PC/서버에 에이전트를 설치해 DB를 읽어오세요.
-                </p>
-              )}
-              {loading && <p className="col-span-full text-sm text-gray-400">빌드 결정 중…</p>}
-            </div>
-          );
-        })()}
+        {step === 3 && (
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+            {(boot?.dbOptions || []).map((d) => (
+              <WizardCard key={d.id} icon={Database} title={d.label} onClick={() => pickDb(d)} />
+            ))}
+            {loading && <p className="col-span-full text-sm text-gray-400">빌드 결정 중…</p>}
+          </div>
+        )}
 
         {step === 4 && result && (
           result.supported ? (
@@ -237,6 +236,11 @@ export default function AgentDeployWizard() {
                 <p className="mt-2 text-lg font-bold text-gray-900">{osTier?.label} 전용</p>
                 {result.runtimeBundle && (
                   <p className="mt-1 text-xs text-emerald-600">필요한 런타임이 폴더에 모두 들어 있어 추가 설치 없이 실행됩니다.</p>
+                )}
+                {result.state === 'verified' ? (
+                  <p className="mt-1 text-xs font-semibold text-emerald-600">실연결 검증 완료된 버전입니다.</p>
+                ) : (
+                  <p className="mt-1 text-xs text-amber-600">검증 전(베타) — 직원 테스트용입니다. 실연결 확인 후 정식 버전으로 표기됩니다.</p>
                 )}
               </div>
 
@@ -269,7 +273,7 @@ export default function AgentDeployWizard() {
 
               <div className="flex flex-wrap gap-3">
                 <button
-                  onClick={() => result.buildTier && downloadBuild(result.buildTier)}
+                  onClick={() => result.packageKey && downloadBuild(result.packageKey)}
                   className="inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-violet-600 to-fuchsia-600 px-5 py-2.5 text-sm font-semibold text-white shadow transition-opacity hover:opacity-90"
                 >
                   <Download className="h-4 w-4" />이 버전 다운로드

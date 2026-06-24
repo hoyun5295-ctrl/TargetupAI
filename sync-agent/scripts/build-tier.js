@@ -17,10 +17,10 @@ const sh = (cmd) => execSync(cmd, { cwd: ROOT, stdio: 'inherit' });
 //     node16: mssql10(node14+) — oracledb는 메인 6.x thin 유지(node14.6+ OK).
 const TIERS = {
   'win-modern':   { node: 'node20', pkg: 'node20-win-x64',   out: 'release/sync-agent-win-modern.exe',   legacy: false, deps: null },
-  'win-mid':      { node: 'node16', pkg: 'node16-win-x64',   out: 'release/sync-agent-win-mid.exe',       legacy: true,  deps: 'express@4.22.2 mssql@10.0.4' },
-  'win-legacy':   { node: 'node12', pkg: 'node12-win-x64',   out: 'release/sync-agent-win-legacy.exe',    legacy: true,  deps: 'express@4.22.2 mssql@8.1.4 mysql2@3.2.0 pg@8.7.3 oracledb@5.5.0 nodemailer@6.9.16' },
+  'win-mid':      { node: 'node16', pkg: 'node16-win-x64',   out: 'release/sync-agent-win-mid.exe',       legacy: true,  deps: 'express@4.22.2 mssql@10.0.4 tedious@16.7.1' },
+  'win-legacy':   { node: 'node12', pkg: 'node12-win-x64',   out: 'release/sync-agent-win-legacy.exe',    legacy: true,  deps: 'express@4.22.2 mssql@8.1.4 tedious@14.7.0 mysql2@3.2.0 lru-cache@7.18.3 pg@8.7.3 oracledb@5.5.0 nodemailer@6.9.16' },
   'linux-modern': { node: 'node20', pkg: 'node20-linux-x64', out: 'release/sync-agent-linux-modern',      legacy: false, deps: null },
-  'linux-legacy': { node: 'node16', pkg: 'node16-linux-x64', out: 'release/sync-agent-linux-legacy',      legacy: true,  deps: 'express@4.22.2 mssql@10.0.4' },
+  'linux-legacy': { node: 'node16', pkg: 'node16-linux-x64', out: 'release/sync-agent-linux-legacy',      legacy: true,  deps: 'express@4.22.2 mssql@10.0.4 tedious@16.7.1' },
 };
 
 const tierId = process.argv[2];
@@ -36,6 +36,18 @@ try {
   if (t.legacy && t.deps) sh(`npm i ${t.deps} --no-save`);
   sh(`node esbuild.config.js --target=${t.node}`);
   sh('npm run prebundle:wasm');
+  // ★ node12 안전 가드(GPT 제안) — 드라이버는 esbuild external이라 bundle.js가 아니라
+  //   node_modules에서 raw로 pkg에 동봉된다. node12가 못 파싱하는 ??/?./#private이 그 raw에 있으면
+  //   --setup이 SyntaxError로 죽는다(원래 사고 클래스). 핀이 미래에 위험 버전으로 바뀌면 빌드 실패로 차단.
+  if (tierId === 'win-legacy') {
+    const guard = [
+      'node_modules/tedious/lib/**/*.js',
+      'node_modules/mysql2/lib/**/*.js',
+      'node_modules/lru-cache/index.js',
+      'node_modules/pg/lib/**/*.js',
+    ].map((g) => `"${g}"`).join(' ');
+    sh(`npx -y es-check es2019 ${guard}`);
+  }
   // modern = @yao-pkg/pkg, legacy = vercel/pkg@5.8.1 (node16/14 prelude 버그 우회)
   const pkgCmd = t.legacy ? 'npx -y pkg@5.8.1' : 'npx -y @yao-pkg/pkg';
   sh(`${pkgCmd} dist/bundle.js --targets ${t.pkg} --output ${t.out}`);

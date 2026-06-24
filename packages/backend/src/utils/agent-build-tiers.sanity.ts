@@ -11,33 +11,40 @@ function check(cond: boolean, label: string): void {
   pass++;
 }
 
-const a = resolveAgentBuild('windows', 'win-2008r2', 'mssql-old');
+// 2008R2 × Oracle 11g → win-legacy-oracle, node12, thick, 동봉, candidate(스모크 전).
+const a = resolveAgentBuild('windows', 'win-2008r2', 'oracle-11g');
 check(
-  a.supported && a.buildTier === 'win-legacy' && a.node === 14 && a.runtimeBundle === true,
-  '2008R2 -> win-legacy node14 + 동봉',
+  a.supported && a.buildTier === 'win-legacy' && a.node === 12 && a.packageKey === 'win-legacy-oracle',
+  '2008R2 × Oracle 11g → win-legacy-oracle node12',
 );
-check(a.dbNotes.join(' ').includes('encrypt=false'), '구형 SQL Server 주의사항 포함');
+check(a.driver === 'oracle' && a.mode === 'thick' && a.runtimeBundle === true, 'Oracle 11g node12 = thick + 동봉');
+check(a.state === 'candidate', '스모크 전이라 candidate(미노출)');
+check(!!a.nativeClient && a.nativeClient.includes('Instant Client'), 'thick = Instant Client 명시');
 
-const b = resolveAgentBuild('windows', 'win-modern', 'mssql-modern');
-check(
-  b.buildTier === 'win-modern' && b.node === 20 && b.runtimeBundle === false,
-  '모던 -> win-modern node20 + 동봉없음',
-);
+// 2008R2 × SQL Server 2008 → win-legacy-mssql, 구형 SQL 주의사항.
+const b = resolveAgentBuild('windows', 'win-2008r2', 'mssql-2008');
+check(b.supported && b.packageKey === 'win-legacy-mssql' && b.mode === 'na', '2008R2 × SQL2008 → win-legacy-mssql');
+check(b.dbNotes.join(' ').includes('encrypt=false'), '구형 SQL Server 주의사항 포함');
 
-const c = resolveAgentBuild('linux', 'linux-legacy', 'postgres');
-check(c.buildTier === 'linux-legacy' && c.node === 16, 'CentOS7 -> linux-legacy node16');
+// ★ win-modern × SQL Server 2008 = blocked (OpenSSL3 vs 옛 TLS).
+const c = resolveAgentBuild('windows', 'win-modern', 'mssql-2008');
+check(!c.supported && c.state === 'blocked' && !!c.rangeMessage && c.rangeMessage.includes('불가'), 'win-modern × SQL2008 = blocked');
 
-const d = resolveAgentBuild('windows', 'win-ancient', 'mssql-old');
-check(
-  !d.supported && d.buildTier === null && !!d.rangeMessage && d.rangeMessage.includes('지원 범위 밖'),
-  '바닥 미만 -> 미지원 + 안내',
-);
+// win-modern × Oracle 19c → thin(클라이언트 불필요).
+const d = resolveAgentBuild('windows', 'win-modern', 'oracle-19c');
+check(d.supported && d.packageKey === 'win-modern-oracle' && d.mode === 'thin' && d.nativeClient === null, 'win-modern × Oracle 19c = thin');
+
+// CentOS7 × PostgreSQL → linux-legacy-pg node16.
+const e = resolveAgentBuild('linux', 'linux-legacy', 'postgres');
+check(e.buildTier === 'linux-legacy' && e.node === 16 && e.packageKey === 'linux-legacy-pg', 'CentOS7 × postgres → linux-legacy-pg node16');
+
+// 바닥 미만 → 미지원 + 안내.
+const f = resolveAgentBuild('windows', 'win-ancient', 'mssql-2008');
+check(!f.supported && f.state === 'blocked' && !!f.rangeMessage && f.rangeMessage.includes('지원 범위 밖'), '바닥 미만 → 미지원 + 안내');
 
 check(PLATFORMS.length === 2, 'PLATFORMS 2개');
-check(
-  OS_TIERS.some((t) => /2008 R2|Windows 7/.test(t.label)),
-  'OS 라벨이 평범한 말',
-);
-check(DB_OPTIONS.length >= 3, 'DB 옵션 3개 이상');
+check(OS_TIERS.some((t) => /2008 R2|Windows 7/.test(t.label)), 'OS 라벨이 평범한 말');
+check(DB_OPTIONS.length >= 6, 'DB 옵션 6개 이상(버전 인지)');
+check(DB_OPTIONS.every((o) => ['oracle', 'mssql', 'mysql', 'pg'].includes(o.driver)), '모든 DB 옵션에 driver 매핑');
 
 console.log(`OK — agent-build-tiers sanity ${pass}/${pass} 통과`);

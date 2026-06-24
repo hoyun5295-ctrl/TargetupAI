@@ -12,7 +12,7 @@ import { Router, Request, Response } from 'express';
 import { randomUUID } from 'crypto';
 import { authenticate, requireSuperAdmin } from '../middlewares/auth';
 import { query } from '../config/database';
-import { PLATFORMS, OS_TIERS, DB_OPTIONS, VERIFIED_DBS_BY_TIER, resolveAgentBuild, PlatformId } from '../utils/agent-build-tiers';
+import { PLATFORMS, OS_TIERS, DB_OPTIONS, VERIFIED_COMBOS, resolveAgentBuild, PlatformId } from '../utils/agent-build-tiers';
 import path from 'path';
 import fs from 'fs';
 
@@ -29,8 +29,9 @@ const AGENT_BUILDS_DIR = process.env.AGENT_BUILDS_DIR || path.join(__dirname, '.
 try { fs.mkdirSync(AGENT_BUILDS_DIR, { recursive: true }); } catch { /* 권한 등 — 다운로드 시점에 다시 판정 */ }
 
 // GET /api/admin/sync/build-tiers — 위저드 부트스트랩(플랫폼/OS/DB 목록)
+//   verifiedCombos = 실연결 스모크 통과 조합(`<osTierId>__<dbId>`) — verified 배지 판단용.
 router.get('/build-tiers', authenticate, requireSuperAdmin, (_req: Request, res: Response) => {
-  res.json({ success: true, platforms: PLATFORMS, osTiers: OS_TIERS, dbOptions: DB_OPTIONS, verifiedDbsByTier: VERIFIED_DBS_BY_TIER });
+  res.json({ success: true, platforms: PLATFORMS, osTiers: OS_TIERS, dbOptions: DB_OPTIONS, verifiedCombos: Array.from(VERIFIED_COMBOS) });
 });
 
 // GET /api/admin/sync/build-tiers/resolve?platform=&osTier=&db= — 내보낼 빌드 1건
@@ -45,25 +46,30 @@ router.get('/build-tiers/resolve', authenticate, requireSuperAdmin, (req: Reques
   res.json({ success: true, result: resolveAgentBuild(platform, osTier, db) });
 });
 
-// GET /api/admin/sync/build-tiers/download/:tier — 빌드 산출물 zip 다운로드
-// 산출물은 Windows 빌드 머신에서 만들어 서버에 업로드(기본 packages/backend/agent-builds/,
-// 또는 ENV AGENT_BUILDS_DIR). 서버는 sync-agent-<tier>.zip 만 서빙한다.
-router.get('/build-tiers/download/:tier', authenticate, requireSuperAdmin, (req: Request, res: Response) => {
-  const tier = req.params.tier;
-  if (!OS_TIERS.some((t) => t.buildTier === tier)) {
-    res.status(400).json({ success: false, error: '알 수 없는 빌드 티어입니다.' });
+// GET /api/admin/sync/build-tiers/download/:packageKey — 빌드 산출물 zip 다운로드
+// packageKey = `<buildTier>-<driver>` (예: win-legacy-oracle). 산출물은 빌드 머신에서 만들어
+// 서버에 업로드(기본 packages/backend/agent-builds/, 또는 ENV AGENT_BUILDS_DIR).
+// 서버는 sync-agent-<packageKey>.zip 만 서빙한다.
+const BUILD_DRIVERS = ['oracle', 'mssql', 'mysql', 'pg'] as const;
+const VALID_PACKAGE_KEYS = new Set<string>(
+  OS_TIERS.flatMap((t) => (t.buildTier ? BUILD_DRIVERS.map((d) => `${t.buildTier}-${d}`) : [])),
+);
+router.get('/build-tiers/download/:packageKey', authenticate, requireSuperAdmin, (req: Request, res: Response) => {
+  const packageKey = req.params.packageKey;
+  if (!VALID_PACKAGE_KEYS.has(packageKey)) {
+    res.status(400).json({ success: false, error: '알 수 없는 빌드 패키지입니다.' });
     return;
   }
-  const file = path.join(AGENT_BUILDS_DIR, `sync-agent-${tier}.zip`);
+  const file = path.join(AGENT_BUILDS_DIR, `sync-agent-${packageKey}.zip`);
   if (!fs.existsSync(file)) {
     res.status(404).json({
       success: false,
       code: 'AGENT_BUILD_NOT_UPLOADED',
-      error: `이 티어 산출물이 아직 서버에 없습니다. 빌드 후 sync-agent-${tier}.zip 을 서버 ${AGENT_BUILDS_DIR} 에 업로드하세요.`,
+      error: `이 패키지 산출물이 아직 서버에 없습니다. 빌드 후 sync-agent-${packageKey}.zip 을 서버 ${AGENT_BUILDS_DIR} 에 업로드하세요.`,
     });
     return;
   }
-  res.download(file, `sync-agent-${tier}.zip`);
+  res.download(file, `sync-agent-${packageKey}.zip`);
 });
 
 
