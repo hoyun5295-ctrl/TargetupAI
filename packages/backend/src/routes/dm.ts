@@ -591,7 +591,12 @@ dmRouter.post('/:id/test-send', async (req: any, res: any) => {
       `[DM 테스트 발송]\n${dm.title || '(제목 없음)'}\n\n미리보기: ${url}\n\n- 샘플: ${sampleLabel}\n- 발송 시각: ${new Date().toLocaleString('ko-KR')}`
     );
 
-    const testId = `dm-test-${req.params.id}-${Date.now()}`;
+    // ★ 2026-06-24: app_etc1은 SMSQ_SEND_10에서 varchar(50). 옛 `dm-test-${UUID}-${Date.now()}`(58자)가
+    //   넘쳐 INSERT가 'Data too long'으로 던져지고 아래 per-phone catch에 삼켜져, 화면엔 "요청을 보냈어요"인데
+    //   큐 0건(미발송)이던 버그. 캠페인 테스트(campaigns.ts:350)와 동일하게 'test'로 통일 — 50자 안에 들어가고
+    //   테스트 내역·정산·통계(app_etc1='test' AND app_etc2=회사ID 조회)에도 자동 포함된다.
+    //   어느 DM인지는 본문(`[DM 테스트 발송]\n제목\n미리보기:URL`)에 이미 있어 식별 손실 없음.
+    const testId = 'test';
     const subject = `[DM 테스트] ${dm.title || ''}`.slice(0, 40);
 
     // ★ 2026-06-22: 빈 callBack은 발신번호가 없어 실제 발송이 안 됨(테스트 "보냈어요"인데 문자 안옴) → 회사 기본 발신번호 조회(campaigns 테스트발송과 동일 경로).
@@ -616,10 +621,25 @@ dmRouter.post('/:id/test-send', async (req: any, res: any) => {
       }
     }
 
+    const sentCount = results.filter((r) => r.ok).length;
+    const failedCount = results.filter((r) => !r.ok).length;
+    // ★ 2026-06-24: 전건 적재 실패면 200으로 거짓 성공을 주지 않는다(효과 검증 후 성공 표시 — 0611 6원칙).
+    //   옛 코드는 per-phone INSERT 오류를 results에 담고도 항상 ok:true/200을 반환해 화면이
+    //   "요청을 보냈어요"라고 거짓말했다(이번 버그의 표면 증상). 적재 0건이면 실패 사유를 그대로 노출.
+    if (sentCount === 0) {
+      const firstErr = results.find((r) => !r.ok)?.error;
+      return res.status(500).json({
+        ok: false,
+        sent: 0,
+        failed: failedCount,
+        error: firstErr ? `테스트 발송 적재 실패: ${firstErr}` : '테스트 발송에 실패했어요.',
+        results,
+      });
+    }
     return res.json({
       ok: true,
-      sent: results.filter((r) => r.ok).length,
-      failed: results.filter((r) => !r.ok).length,
+      sent: sentCount,
+      failed: failedCount,
       preview_url: url,
       results,
     });
