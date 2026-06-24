@@ -35,28 +35,55 @@ export class OracleConnector implements IDbConnector {
 
     try {
       // 동적 import (미설치 시 친절한 에러)
+      //  ★ 2026-06-24: pkg@5.8.1(node12)은 네이티브 .node를 exe 스냅샷에 못 싣는다(pkg.assets 무시 —
+      //    sql.js도 같은 이유로 exe 옆 sidecar로 동봉 중). oracledb 모듈도 exe 옆 외부 실폴더로 동봉하고
+      //    거기서 로드한다. 외부 실폴더면 oracledb의 __dirname이 실경로라 옆의 build/Release/oracledb-*.node를
+      //    dlopen으로 정상 로드 → 스냅샷 NJS-045 회피. 없으면 기존 require('oracledb') 폴백(개발/비-pkg).
       try {
-        this.oracledb = require('oracledb');
-      } catch {
-        throw new Error(
-          'oracledb 패키지가 설치되지 않았습니다. npm install oracledb 실행 필요',
-        );
+        const pathMod = require('path');
+        const fsMod = require('fs');
+        const exeDir = pathMod.dirname(process.execPath || process.argv[0] || process.cwd());
+        const externalOracledb = pathMod.join(exeDir, 'oracledb');
+        if (fsMod.existsSync(pathMod.join(externalOracledb, 'package.json'))) {
+          this.oracledb = require(externalOracledb);
+          logger.info('외부 동봉 oracledb 모듈 로드', { externalOracledb });
+        } else {
+          this.oracledb = require('oracledb');
+        }
+      } catch (reqErr) {
+        const m = reqErr instanceof Error ? reqErr.message : String(reqErr);
+        throw new Error(`oracledb 네이티브 로드 실패: ${m}`);
       }
 
-      // 드라이버 모드 — Oracle Client가 같은 PC에 있으면(ORACLE_HOME) thick으로 명시 지정.
-      //  · oracledb 5.x (node12 티어) = 항상 thick → 11g 지원
-      //  · oracledb 6.x (node14+ 티어) = 기본 thin(DB 12.1+만). ORACLE_HOME 있으면 thick 전환 → 11g도 지원
-      //  · ORACLE_HOME 없으면(원격 12c+) thin 그대로 (Oracle Client 불필요)
-      // Windows 서비스 PATH 누락 시 DPI-1047 조용한 실패도 함께 차단.
-      if (process.env.ORACLE_HOME) {
-        try {
-          const isWin = process.platform === 'win32';
-          const libDir = require('path').join(process.env.ORACLE_HOME, isWin ? 'bin' : 'lib');
+      // 드라이버 모드 — Oracle Client 라이브러리가 있으면 thick(11g/10g 지원), 없으면 thin(DB 12.1+만).
+      //  ★ 2026-06-24: 고객 박스에 11.2+ 클라가 없어도(예: 10g만 설치) 연결되도록, 실행 파일 옆
+      //    `oracle-client/` 폴더(동봉한 11.2 클라 = full home 서브셋)를 1순위로 감지해 thick으로 잡는다.
+      //    없으면 ORACLE_HOME(고객 PC에 클라가 있는 경우)로 폴백.
+      //    · node12 oracledb 5.x = 항상 thick → 동봉 클라 필수 / node14+ 6.x = 동봉 있으면 thick, 없으면 thin.
+      //    full home 서브셋이라 데이터 파일(NLS 등)을 찾도록 ORACLE_HOME을 그 폴더로 함께 지정한다.
+      try {
+        const pathMod = require('path');
+        const fsMod = require('fs');
+        const isWin = process.platform === 'win32';
+        const exeDir = pathMod.dirname(process.execPath || process.argv[0] || process.cwd());
+        const bundled = pathMod.join(exeDir, 'oracle-client');
+        const bundledLib = pathMod.join(bundled, isWin ? 'bin' : 'lib');
+        let libDir: string | null = null;
+        if (fsMod.existsSync(bundledLib)) {
+          libDir = bundledLib;
+          process.env.ORACLE_HOME = bundled;
+          logger.info('동봉 Oracle Client 감지', { bundled });
+        } else if (process.env.ORACLE_HOME) {
+          libDir = pathMod.join(process.env.ORACLE_HOME, isWin ? 'bin' : 'lib');
+        }
+        if (libDir) {
           this.oracledb.initOracleClient({ libDir });
           logger.info('Oracle thick 클라이언트 경로 지정', { libDir });
-        } catch (err) {
-          logger.warn('initOracleClient 스킵(이미 초기화 또는 PATH 사용)', { err });
         }
+      } catch (err) {
+        logger.warn('initOracleClient 결과', {
+          error: err instanceof Error ? err.message : String(err),
+        });
       }
 
       this.oracledb.outFormat = this.oracledb.OUT_FORMAT_OBJECT;
@@ -96,7 +123,10 @@ export class OracleConnector implements IDbConnector {
         database: this.config.database,
       });
     } catch (error) {
-      logger.error('Oracle 연결 실패', { error });
+      logger.error('Oracle 연결 실패', {
+        error: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined,
+      });
       throw error;
     }
   }
@@ -121,7 +151,9 @@ export class OracleConnector implements IDbConnector {
       await conn.close();
       return result.rows?.length > 0;
     } catch (error) {
-      logger.error('Oracle 연결 테스트 실패', { error });
+      logger.error('Oracle 연결 테스트 실패', {
+        error: error instanceof Error ? error.message : String(error),
+      });
       return false;
     }
   }

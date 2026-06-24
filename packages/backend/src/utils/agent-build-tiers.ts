@@ -208,7 +208,11 @@ export const DB_OPTIONS: DbOption[] = [
 
 // 실연결 스모크 통과 조합(`<osTierId>__<dbId>`) — 단일 진실원.
 // 비어 있으면 전부 candidate("검증 전") — fail-closed. VM/DB 스모크 통과분만 추가한다.
-export const VERIFIED_COMBOS = new Set<string>([]);
+export const VERIFIED_COMBOS = new Set<string>([
+  // 2026-06-24 VM(2008R2 RTM 6.1.7600) + Oracle 10g(10.2.0.4) 실연결 스모크 통과.
+  //   외부 동봉 oracledb 5.5.0 + Instant Client 11.2 thick로 연결 → CUSTOMERS/PURCHASES 테이블 조회 확인.
+  'win-2008r2__oracle-10g',
+]);
 
 /** dbId → driver (DB_OPTIONS의 driver 필드가 진실, 헬퍼는 fallback). */
 export function driverOfDb(dbId: string): DriverId | null {

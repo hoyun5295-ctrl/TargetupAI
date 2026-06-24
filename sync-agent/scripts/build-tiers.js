@@ -45,6 +45,18 @@ const zipTo = (srcRel, packageKey) => {
   sh(`powershell -NoProfile -Command "Compress-Archive -Path '${src}' -DestinationPath '${dest}' -Force"`);
 };
 
+// ★ win-legacy SyncAgent에 외부 oracledb 모듈 동봉(build-tier.js가 5.5.0 설치 중 스테이징한 분).
+//   pkg@5.8.1이 .node를 exe 스냅샷에 못 실어 NJS-045 → exe 옆 실폴더에서 로드하도록 함(oracle.ts가 감지).
+const stagedOra = path.join(ROOT, 'release/staged-modules/win-legacy/oracledb');
+const wlOra = path.join(ROOT, 'dist-tiers/win-legacy/SyncAgent/oracledb');
+if (fs.existsSync(stagedOra)) {
+  fs.rmSync(wlOra, { recursive: true, force: true });
+  fs.cpSync(stagedOra, wlOra, { recursive: true });
+  console.log('win-legacy SyncAgent에 oracledb 외부 모듈 동봉:', wlOra);
+} else {
+  console.warn('경고: staged oracledb 없음 — win-legacy oracle 연결 불가(스테이징 누락). build-tier.js win-legacy 확인.');
+}
+
 const packages = {};
 let zipCount = 0;
 for (const [tier, src] of Object.entries(TIER_SRC)) {
