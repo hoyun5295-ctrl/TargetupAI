@@ -305,14 +305,20 @@ const STATUS_BADGE: Record<JourneyStatus, { label: string; cls: string }> = {
   ended:  { label: '종료',     cls: 'bg-slate-700/50 text-white/60 border border-white/15' },
 };
 
+// ★ 2026-06-25: (광고) 접두사 / 무료거부 문구를 단일 출처로 — 발송 미리보기와 원본 편집이 같은 합성을 보이게.
+//   원본 편집에는 읽기 전용으로만 표시하고 저장 본문(messageTemplate)에는 넣지 않는다(발송 시 1회만 합성 = 이중 부착 차단).
+function adPrefixFor(channel: ChannelType): string {
+  return (channel === 'lms' || channel === 'mms') ? '(광고) ' : '(광고)';
+}
+function adRejectFor(channel: ChannelType, opt080: string): string {
+  const isLms = channel === 'lms' || channel === 'mms';
+  if (opt080) return isLms ? `무료수신거부 ${opt080}` : `무료거부${opt080.replace(/-/g, '')}`;
+  return isLms ? '무료수신거부' : '무료거부';
+}
+
 function buildPreview(message: string, isAd: boolean, channel: ChannelType, opt080: string): string {
   if (!isAd || !message) return message;
-  const isLms = channel === 'lms' || channel === 'mms';
-  const adPrefix = isLms ? '(광고) ' : '(광고)';
-  const rejectText = opt080
-    ? (isLms ? `\n무료수신거부 ${opt080}` : `\n무료거부${opt080.replace(/-/g, '')}`)
-    : (isLms ? '\n무료수신거부' : '\n무료거부');
-  return `${adPrefix}${message}${rejectText}`;
+  return `${adPrefixFor(channel)}${message}\n${adRejectFor(channel, opt080)}`;
 }
 
 // ★ 2026-06-22: 스텝 타임라인 지연 표시 — 이전 스텝 후 대기 시간을 사람이 읽기 쉽게
@@ -2354,13 +2360,18 @@ export default function JourneysPage() {
                         {(s.channel === 'lms' || s.channel === 'mms') && (
                           <div>
                             <label className="block text-[11px] text-white/50 mb-1">제목 <span className="text-rose-400">*</span> <span className="text-white/30">(LMS/MMS 필수, 최대 40자)</span></label>
-                            <input
-                              value={s.subject}
-                              onChange={(e) => updateStep(idx, { subject: e.target.value })}
-                              placeholder="한 줄 제목 (호기심 유발 / 본문 핵심 요약)"
-                              maxLength={40}
-                              className={`w-full px-3 py-2 bg-slate-900 border rounded text-sm focus:outline-none focus:border-fuchsia-400 ${(!s.subject || !s.subject.trim()) ? 'border-rose-500/50' : 'border-white/10'}`}
-                            />
+                            <div className="flex items-stretch gap-1">
+                              {s.isAd && (
+                                <span className="px-2.5 flex items-center shrink-0 bg-slate-950/60 border border-amber-400/20 rounded text-sm text-amber-300/70 select-none" title="발송 시 자동으로 앞에 붙습니다 (직접 입력하지 마세요)">(광고)</span>
+                              )}
+                              <input
+                                value={s.subject}
+                                onChange={(e) => updateStep(idx, { subject: e.target.value })}
+                                placeholder="한 줄 제목 (호기심 유발 / 본문 핵심 요약)"
+                                maxLength={40}
+                                className={`flex-1 min-w-0 px-3 py-2 bg-slate-900 border rounded text-sm focus:outline-none focus:border-fuchsia-400 ${(!s.subject || !s.subject.trim()) ? 'border-rose-500/50' : 'border-white/10'}`}
+                              />
+                            </div>
                             <div className="text-[10px] text-white/40 mt-0.5">{getByteLength(s.subject)} bytes · 통신사 권장 ~ 40바이트 안</div>
                           </div>
                         )}
@@ -2402,7 +2413,19 @@ export default function JourneysPage() {
                             {sampleCustomer ? mergeVarsPlain(preview, sampleCustomer, sampleCustomerFields || undefined) : preview}
                           </div>
                         ) : (
-                          <textarea value={s.messageTemplate} onChange={(e) => updateStep(idx, { messageTemplate: e.target.value })} rows={7} placeholder="본문을 입력하세요" className="w-full px-3 py-2 bg-slate-900 border border-fuchsia-400/50 rounded text-sm font-mono focus:outline-none resize-y leading-relaxed" />
+                          <div className="space-y-1">
+                            {s.isAd && (
+                              <div className="px-3 py-1.5 bg-slate-950/50 border border-amber-400/20 rounded text-[11px] text-amber-300/70 select-none">
+                                {adPrefixFor(s.channel).trim()} <span className="text-white/40">— 발송 시 자동 추가 (본문에 직접 쓰지 마세요)</span>
+                              </div>
+                            )}
+                            <textarea value={s.messageTemplate} onChange={(e) => updateStep(idx, { messageTemplate: e.target.value })} rows={7} placeholder="본문을 입력하세요" className="w-full px-3 py-2 bg-slate-900 border border-fuchsia-400/50 rounded text-sm font-mono focus:outline-none resize-y leading-relaxed" />
+                            {s.isAd && (
+                              <div className="px-3 py-1.5 bg-slate-950/50 border border-amber-400/20 rounded text-[11px] text-amber-300/70 select-none whitespace-pre-wrap">
+                                {adRejectFor(s.channel, opt080Number)} <span className="text-white/40">— 발송 시 자동 추가</span>
+                              </div>
+                            )}
+                          </div>
                         )}
 
                         <div className="flex flex-wrap items-center gap-x-3 text-[11px] text-white/40">

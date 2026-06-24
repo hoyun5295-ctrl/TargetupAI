@@ -51,6 +51,7 @@ interface CampaignRow {
   message_type: string;
   success_count: number | null;
   fail_count: number | null;
+  sent_count: number | null;
   send_phase: string | null;
   send_base: Date | string | null;
 }
@@ -100,7 +101,7 @@ async function runOnce(): Promise<void> {
     // === 1. 후보 캠페인 SELECT (PG fail_count 무관) ===
     const candidates = await query(`
       SELECT c.id, c.company_id, c.created_by, c.message_type,
-             c.success_count, c.fail_count, c.send_phase,
+             c.success_count, c.fail_count, c.sent_count, c.send_phase,
              COALESCE(c.scheduled_at, c.sent_at, c.created_at) AS send_base
       FROM campaigns c
       JOIN companies co ON co.id = c.company_id
@@ -171,7 +172,6 @@ async function runOnce(): Promise<void> {
 
         const mysqlSuccess = Number(smsAgg?.success || 0) + kakaoAgg.success;
         const mysqlFail = Number(smsAgg?.fail || 0) + kakaoAgg.fail;
-        const mysqlPending = Number(smsAgg?.pending || 0) + kakaoAgg.pending;
 
         // === 4-1. PG count 동시 갱신 (화면 보조) — 결과가 하나라도 있을 때만 ===
         // target_count는 절대 건드리지 않음 (protect_completed_target_count trigger 호환)
@@ -210,13 +210,16 @@ async function runOnce(): Promise<void> {
               [camp.company_id, camp.id, camp.message_type]
             );
             const deductedCount = Math.round(Number(dedRes.rows[0].total) / unit);
-            const refundDue = calcRefundDue({ deductedCount, mysqlSuccess, mysqlPending });
+            const sentCount = Number(camp.sent_count || 0);
+            const notLoaded = sentCount > 0 ? Math.max(0, deductedCount - sentCount) : 0;
+            // ★ 2026-06-25: 정당 환불 = 실패 + 미적재 (성공 의존 폐기 — 이동 중 과소집계 초과 환불 차단)
+            const refundDue = calcRefundDue({ deductedCount, sentCount, mysqlFail });
             if (refundDue > 0) {
               const r = await prepaidRefund(camp.company_id, refundDue, camp.message_type, camp.id, '발송 실패 환불 (sweep)');
               if (r.refunded > 0) {
                 refundCount++;
                 totalRefundAmount += r.refunded;
-                log(`✓ campaign=${camp.id} ${camp.message_type} 정당환불 ${refundDue}건 (차감 ${deductedCount} − 성공 ${mysqlSuccess} − 대기 ${mysqlPending}) 차액 ${r.refunded}원`);
+                log(`✓ campaign=${camp.id} ${camp.message_type} 정당환불 ${refundDue}건 (실패 ${mysqlFail} + 미적재 ${notLoaded} / 차감 ${deductedCount} 적재 ${sentCount}) 차액 ${r.refunded}원`);
               }
             }
           }
