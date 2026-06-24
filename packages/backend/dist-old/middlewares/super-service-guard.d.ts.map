@@ -1,0 +1,1 @@
+{"version":3,"file":"super-service-guard.d.ts","sourceRoot":"","sources":["../../src/middlewares/super-service-guard.ts"],"names":[],"mappings":"AAAA;;;;;;;;GAQG;AAEH,OAAO,EAAE,OAAO,EAAE,QAAQ,EAAE,YAAY,EAAE,MAAM,SAAS,CAAC;AAE1D,MAAM,MAAM,WAAW,GAAG,UAAU,GAAG,OAAO,CAAC;AAE/C;;;;;;GAMG;AACH,wBAAgB,cAAc,CAAC,QAAQ,EAAE,WAAW,IAC1C,KAAK,OAAO,EAAE,KAAK,QAAQ,EAAE,MAAM,YAAY,oDAmBxD"}

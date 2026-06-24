@@ -1,0 +1,1642 @@
+"use strict";
+/**
+ * /api/alimtalk/* — 휴머스온 IMC 연동 라우트
+ *
+ * ALIMTALK-DESIGN.md §5-5 기준. 총 33개 엔드포인트.
+ *
+ * 기존 `/api/companies/kakao-profiles`, `/api/companies/kakao-templates` 라우트는
+ * 로컬 DB CRUD 호환용으로 유지. 본 라우트는 IMC 직접 연동 전용.
+ *
+ * 권한 정책:
+ *   - 발신프로필 CRUD         → super_admin
+ *   - 카테고리 동기화         → super_admin
+ *   - 카테고리 조회           → 로그인 사용자 전원
+ *   - 템플릿/알림수신자/이미지 → company_admin 또는 super_admin
+ *   - 웹훅                    → 공개 (HMAC + IP 화이트리스트)
+ */
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
+Object.defineProperty(exports, "__esModule", { value: true });
+const express_1 = require("express");
+const multer_1 = __importDefault(require("multer"));
+const auth_1 = require("../middlewares/auth");
+const database_1 = require("../config/database");
+const imc = __importStar(require("../utils/alimtalk-api"));
+const alimtalk_api_1 = require("../utils/alimtalk-api");
+const alimtalk_webhook_handler_1 = require("../utils/alimtalk-webhook-handler");
+const alimtalk_result_map_1 = require("../utils/alimtalk-result-map");
+const alimtalk_jobs_1 = require("../utils/alimtalk-jobs");
+const router = (0, express_1.Router)();
+// 메모리 스토리지 multer — 파일은 IMC로 즉시 스트림
+const upload = (0, multer_1.default)({
+    storage: multer_1.default.memoryStorage(),
+    limits: { fileSize: 5 * 1024 * 1024 }, // 5MB 기본 (ALIMTALK-DESIGN.md §3-7 규격 참조)
+});
+// ════════════════════════════════════════════════════════════
+// 공통 유틸
+// ════════════════════════════════════════════════════════════
+function handleImcError(res, err) {
+    if (err instanceof alimtalk_api_1.ImcApiError) {
+        const mapped = (0, alimtalk_result_map_1.resolveImcCode)(err.code);
+        const statusHttp = mapped.kind === 'user_error' || mapped.kind === 'inspect' ? 400
+            : mapped.kind === 'retryable' ? 503
+                : 500;
+        // D131: IMC 에러 진단 — 실제 응답 body + httpStatus를 서버 로그에 찍어 원인 추적.
+        // 기존에는 ImcApiError일 때 console 출력이 없어 pm2 로그로 원인 파악 불가.
+        try {
+            const bodyPreview = err.responseBody !== undefined
+                ? JSON.stringify(err.responseBody).slice(0, 2000)
+                : 'n/a';
+            console.error(`[alimtalk][IMC ${err.code}] ${err.message} http=${err.httpStatus} kind=${mapped.kind} body=${bodyPreview}`);
+        }
+        catch {
+            console.error(`[alimtalk][IMC ${err.code}] ${err.message} http=${err.httpStatus}`);
+        }
+        return res.status(statusHttp).json({
+            success: false,
+            code: err.code,
+            error: mapped.userMessage || err.message,
+            kind: mapped.kind,
+        });
+    }
+    console.error('[alimtalk] 처리 실패', err);
+    return res.status(500).json({
+        success: false,
+        error: err?.message || '알 수 없는 오류',
+    });
+}
+function requireCompany(req, res) {
+    const companyId = req.user?.companyId;
+    if (!companyId) {
+        res.status(401).json({ success: false, error: '인증 필요' });
+        return null;
+    }
+    return companyId;
+}
+// ════════════════════════════════════════════════════════════
+// 1) 공개: POST /webhook — 휴머스온 리포트 수신
+// ════════════════════════════════════════════════════════════
+// raw body parser가 HMAC 검증용으로 필요.
+router.post('/webhook', (0, express_1.raw)({ type: '*/*', limit: '10mb' }), async (req, res) => {
+    try {
+        const clientIp = (req.ip || req.socket?.remoteAddress || '').trim();
+        if (!(0, alimtalk_webhook_handler_1.isAllowedWebhookIp)(clientIp)) {
+            console.warn('[alimtalk-webhook] IP 거부', clientIp);
+            return res.status(403).json({ code: '403', message: 'FORBIDDEN_IP' });
+        }
+        const headerSig = req.headers['x-imc-signature'] ||
+            req.headers['x-signature'] ||
+            req.headers['x-humuson-signature'];
+        const rawBuf = req.body instanceof Buffer ? req.body : Buffer.from('');
+        const rawStr = rawBuf.toString('utf8');
+        const secret = process.env.IMC_WEBHOOK_HMAC_SECRET;
+        // HMAC은 secret 설정된 경우에만 강제 (Phase 0 미수령 시 통과)
+        if (secret) {
+            const ok = (0, alimtalk_webhook_handler_1.verifyWebhookSignature)(rawStr, headerSig, secret);
+            if (!ok) {
+                console.warn('[alimtalk-webhook] HMAC 불일치', clientIp);
+                return res.status(401).json({ code: '401', message: 'INVALID_SIGNATURE' });
+            }
+        }
+        const payload = JSON.parse(rawStr);
+        const result = await (0, alimtalk_webhook_handler_1.processKakaoWebhook)(payload);
+        return res.json({ code: '0000', message: 'OK', ...result });
+    }
+    catch (err) {
+        console.error('[alimtalk-webhook] 예외', err);
+        return res.status(400).json({
+            code: '400',
+            message: err?.message || 'BAD_REQUEST',
+        });
+    }
+});
+// ════════════════════════════════════════════════════════════
+// 2) 이하 모든 경로 인증 필요
+// ════════════════════════════════════════════════════════════
+router.use(auth_1.authenticate);
+// ──────────────────────────────────────────────────────────
+// 발신프로필 (Sender) — 11개, 슈퍼관리자 전용
+// ──────────────────────────────────────────────────────────
+// 인증번호 요청 — 고객사 관리자 OK (IMC가 카톡 인증으로 본인확인 보장)
+router.post('/senders/token', auth_1.requireCompanyAdmin, async (req, res) => {
+    try {
+        const { yellowId, phoneNumber } = req.body || {};
+        if (!yellowId || !phoneNumber) {
+            return res
+                .status(400)
+                .json({ success: false, error: 'yellowId와 phoneNumber는 필수입니다' });
+        }
+        const r = await imc.requestSenderToken({ yellowId, phoneNumber });
+        res.json({ success: r.code === '0000', imc: r });
+    }
+    catch (err) {
+        return handleImcError(res, err);
+    }
+});
+// 발신프로필 등록 — 고객사 관리자 OK
+// IMC 카톡 인증이 이미 본인확인 처리하므로, 고객사가 자체 등록 가능.
+// targetCompanyId는 슈퍼관리자만 지정 가능 (다른 회사 귀속). 고객사는 본인 회사 자동 귀속.
+router.post('/senders', auth_1.requireCompanyAdmin, async (req, res) => {
+    try {
+        const { token, yellowId, phoneNumber, categoryCode, topSenderKeyYn, companyId: targetCompanyIdInBody, profileName, } = req.body || {};
+        // D131: customSenderKey 파라미터 폐지. 휴머스온 IMC가 senderKey를 API로 자동 발급.
+        if (!token || !yellowId || !phoneNumber || !categoryCode) {
+            return res.status(400).json({
+                success: false,
+                error: 'token/yellowId/phoneNumber/categoryCode는 필수입니다',
+            });
+        }
+        // 슈퍼관리자만 다른 회사 귀속 가능. 일반 고객사는 본인 회사 고정.
+        const isSuperAdmin = req.user?.userType === 'super_admin';
+        const targetCompanyId = isSuperAdmin
+            ? targetCompanyIdInBody || req.user?.companyId
+            : req.user?.companyId;
+        if (!targetCompanyId) {
+            return res.status(400).json({ success: false, error: 'companyId 필요' });
+        }
+        // D131: 동일 회사 내 동일 yellow_id 발신프로필 중복 등록 방지 (Harold님 지시).
+        //       IMC 측에서 동일 채널로 재등록 시도해도 key가 바뀌어 DB에 row만 늘어나는 문제 방지.
+        const dup = await (0, database_1.query)(`SELECT id, profile_key, approval_status, status
+           FROM kakao_sender_profiles
+          WHERE company_id = $1 AND yellow_id = $2
+          LIMIT 1`, [targetCompanyId, yellowId]);
+        if (dup.rows.length > 0) {
+            return res.status(409).json({
+                success: false,
+                error: `이미 등록된 발신프로필입니다 (${yellowId}). 기존 프로필을 사용하거나 삭제 후 재등록 하세요.`,
+                existingProfileId: dup.rows[0].id,
+            });
+        }
+        const r = await imc.createSender({
+            token,
+            yellowId,
+            phoneNumber,
+            categoryCode,
+            topSenderKeyYn,
+        });
+        if (r.code !== '0000' || !r.data?.senderKey) {
+            return res.status(400).json({ success: false, code: r.code, error: r.message });
+        }
+        // 카테고리 이름 캐시
+        let categoryNameCache = null;
+        try {
+            const cat = await imc.getSenderCategory(categoryCode);
+            if (cat.code === '0000' && cat.data)
+                categoryNameCache = cat.data.name;
+        }
+        catch {
+            /* 카테고리 조회 실패 무시 */
+        }
+        // 슈퍼관리자가 직접 등록한 경우 즉시 APPROVED, 고객사 등록은 PENDING_APPROVAL.
+        const approvalStatus = isSuperAdmin ? 'APPROVED' : 'PENDING_APPROVAL';
+        const ins = await (0, database_1.query)(`INSERT INTO kakao_sender_profiles
+           (company_id, profile_key, profile_name, is_active,
+            yellow_id, admin_phone_number, category_code, category_name_cache,
+            top_sender_yn, custom_sender_key, status,
+            approval_status, approval_requested_at,
+            approved_at, approved_by,
+            registered_at, updated_at)
+         VALUES ($1,$2,$3,true,$4,$5,$6,$7,$8,$9,$10,
+                 $11, now(),
+                 $12, $13,
+                 now(), now())
+         RETURNING *`, [
+            targetCompanyId,
+            r.data.senderKey,
+            profileName || yellowId,
+            yellowId,
+            phoneNumber,
+            categoryCode,
+            categoryNameCache,
+            topSenderKeyYn || 'N',
+            null, // D131: custom_sender_key 폐지 — IMC가 자동 발급
+            r.data.status || 'NORMAL',
+            approvalStatus,
+            isSuperAdmin ? new Date() : null,
+            isSuperAdmin ? req.user?.userId || null : null,
+        ]);
+        res.status(201).json({ success: true, profile: ins.rows[0], imc: r });
+    }
+    catch (err) {
+        return handleImcError(res, err);
+    }
+});
+// ── 승인/반려 (슈퍼관리자 전용) ─────────────────────
+router.put('/senders/:id/approve', auth_1.requireSuperAdmin, async (req, res) => {
+    try {
+        const r = await (0, database_1.query)(`UPDATE kakao_sender_profiles
+            SET approval_status = 'APPROVED',
+                approved_at = now(),
+                approved_by = $1,
+                reject_reason = NULL,
+                updated_at = now()
+          WHERE id = $2
+          RETURNING *`, [req.user?.userId || null, req.params.id]);
+        if (r.rows.length === 0) {
+            return res.status(404).json({ success: false, error: '발신프로필 없음' });
+        }
+        res.json({ success: true, profile: r.rows[0] });
+    }
+    catch (err) {
+        return handleImcError(res, err);
+    }
+});
+router.put('/senders/:id/reject', auth_1.requireSuperAdmin, async (req, res) => {
+    try {
+        const { rejectReason } = req.body || {};
+        if (!rejectReason || String(rejectReason).trim().length < 3) {
+            return res.status(400).json({
+                success: false,
+                error: '반려 사유(3자 이상)를 입력하세요',
+            });
+        }
+        const r = await (0, database_1.query)(`UPDATE kakao_sender_profiles
+            SET approval_status = 'REJECTED',
+                reject_reason = $1,
+                approved_at = NULL,
+                approved_by = NULL,
+                updated_at = now()
+          WHERE id = $2
+          RETURNING *`, [String(rejectReason).slice(0, 500), req.params.id]);
+        if (r.rows.length === 0) {
+            return res.status(404).json({ success: false, error: '발신프로필 없음' });
+        }
+        res.json({ success: true, profile: r.rows[0] });
+    }
+    catch (err) {
+        return handleImcError(res, err);
+    }
+});
+router.get('/senders', async (req, res) => {
+    try {
+        const userType = req.user?.userType;
+        let rows;
+        if (userType === 'super_admin') {
+            // 전체 목록 + 회사명 조인
+            const r = await (0, database_1.query)(`SELECT p.*, c.company_name
+           FROM kakao_sender_profiles p
+           LEFT JOIN companies c ON c.id = p.company_id
+          ORDER BY p.created_at DESC`);
+            rows = r.rows;
+        }
+        else {
+            const companyId = requireCompany(req, res);
+            if (!companyId)
+                return;
+            const r = await (0, database_1.query)(`SELECT p.* FROM kakao_sender_profiles p
+          WHERE p.company_id = $1
+          ORDER BY p.created_at DESC`, [companyId]);
+            rows = r.rows;
+        }
+        res.json({ success: true, profiles: rows });
+    }
+    catch (err) {
+        return handleImcError(res, err);
+    }
+});
+router.get('/senders/:id', async (req, res) => {
+    try {
+        const r = await (0, database_1.query)(`SELECT * FROM kakao_sender_profiles WHERE id = $1`, [req.params.id]);
+        if (r.rows.length === 0) {
+            return res.status(404).json({ success: false, error: '발신프로필 없음' });
+        }
+        res.json({ success: true, profile: r.rows[0] });
+    }
+    catch (err) {
+        return handleImcError(res, err);
+    }
+});
+router.put('/senders/:id/unsubscribe', auth_1.requireSuperAdmin, async (req, res) => {
+    try {
+        const { unsubscribePhoneNumber, unsubscribeAuthNumber } = req.body || {};
+        if (!unsubscribePhoneNumber || !unsubscribeAuthNumber) {
+            return res.status(400).json({
+                success: false,
+                error: '080번호와 인증번호가 필요합니다',
+            });
+        }
+        const row = await (0, database_1.query)(`SELECT profile_key FROM kakao_sender_profiles WHERE id = $1`, [req.params.id]);
+        if (row.rows.length === 0 || !row.rows[0].profile_key) {
+            return res.status(404).json({ success: false, error: '발신프로필 없음' });
+        }
+        const r = await imc.updateSenderUnsubscribe(row.rows[0].profile_key, {
+            unsubscribePhoneNumber,
+            unsubscribeAuthNumber,
+        });
+        await (0, database_1.query)(`UPDATE kakao_sender_profiles
+            SET unsubscribe_phone = $1,
+                unsubscribe_auth  = $2,
+                updated_at        = now()
+          WHERE id = $3`, [unsubscribePhoneNumber, unsubscribeAuthNumber, req.params.id]);
+        res.json({ success: r.code === '0000', imc: r });
+    }
+    catch (err) {
+        return handleImcError(res, err);
+    }
+});
+router.put('/senders/:id/custom-key', auth_1.requireSuperAdmin, async (req, res) => {
+    try {
+        const { customSenderKey } = req.body || {};
+        if (!customSenderKey) {
+            return res
+                .status(400)
+                .json({ success: false, error: 'customSenderKey는 필수입니다' });
+        }
+        const row = await (0, database_1.query)(`SELECT profile_key FROM kakao_sender_profiles WHERE id = $1`, [req.params.id]);
+        if (row.rows.length === 0 || !row.rows[0].profile_key) {
+            return res.status(404).json({ success: false, error: '발신프로필 없음' });
+        }
+        const r = await imc.updateCustomSenderKey(row.rows[0].profile_key, customSenderKey);
+        await (0, database_1.query)(`UPDATE kakao_sender_profiles
+            SET custom_sender_key = $1, updated_at = now()
+          WHERE id = $2`, [customSenderKey, req.params.id]);
+        res.json({ success: r.code === '0000', imc: r });
+    }
+    catch (err) {
+        return handleImcError(res, err);
+    }
+});
+router.put('/senders/:id/release', auth_1.requireSuperAdmin, async (req, res) => {
+    try {
+        const row = await (0, database_1.query)(`SELECT profile_key FROM kakao_sender_profiles WHERE id = $1`, [req.params.id]);
+        if (row.rows.length === 0 || !row.rows[0].profile_key) {
+            return res.status(404).json({ success: false, error: '발신프로필 없음' });
+        }
+        const r = await imc.releaseSenderDormant(row.rows[0].profile_key);
+        await (0, database_1.query)(`UPDATE kakao_sender_profiles SET status='NORMAL', updated_at=now() WHERE id=$1`, [req.params.id]);
+        res.json({ success: r.code === '0000', imc: r });
+    }
+    catch (err) {
+        return handleImcError(res, err);
+    }
+});
+router.post('/senders/:id/brand-targeting', auth_1.requireSuperAdmin, async (req, res) => {
+    try {
+        const row = await (0, database_1.query)(`SELECT profile_key FROM kakao_sender_profiles WHERE id = $1`, [req.params.id]);
+        if (row.rows.length === 0 || !row.rows[0].profile_key) {
+            return res.status(404).json({ success: false, error: '발신프로필 없음' });
+        }
+        const r = await imc.applyBrandTargeting(row.rows[0].profile_key, req.body || {});
+        if (r.code === '0000') {
+            await (0, database_1.query)(`UPDATE kakao_sender_profiles SET brand_targeting_yn='Y', updated_at=now() WHERE id=$1`, [req.params.id]);
+        }
+        // ★ D140 #C (0425): IMC raw 메시지 사용자 노출 방지 (D139 IMC 단어 정책)
+        return sendImcManagedResponse(res, r, { fallback: '브랜드메시지 타겟팅 신청에 실패했습니다' });
+    }
+    catch (err) {
+        return handleImcError(res, err);
+    }
+});
+router.get('/senders/:id/brand-targeting-check', async (req, res) => {
+    try {
+        const row = await (0, database_1.query)(`SELECT profile_key FROM kakao_sender_profiles WHERE id = $1`, [req.params.id]);
+        if (row.rows.length === 0 || !row.rows[0].profile_key) {
+            return res.status(404).json({ success: false, error: '발신프로필 없음' });
+        }
+        const r = await imc.checkBrandTargeting(row.rows[0].profile_key);
+        // ★ D140 #C (0425): 매뉴얼 정합 응답 + IMC raw 메시지 사용자 노출 방지
+        return sendImcManagedResponse(res, r, { fallback: '타겟팅 가능 여부 확인에 실패했습니다' });
+    }
+    catch (err) {
+        return handleImcError(res, err);
+    }
+});
+// ──────────────────────────────────────────────────────────
+// 카테고리 (3개)
+// ──────────────────────────────────────────────────────────
+router.get('/categories/sender', async (_req, res) => {
+    try {
+        const r = await (0, database_1.query)(`SELECT category_code, parent_code, level, name
+         FROM kakao_sender_categories
+        WHERE active_yn = 'Y'
+        ORDER BY level ASC, category_code ASC`);
+        res.json({ success: true, categories: r.rows });
+    }
+    catch (err) {
+        return handleImcError(res, err);
+    }
+});
+router.get('/categories/template', async (_req, res) => {
+    try {
+        const r = await (0, database_1.query)(`SELECT category_code, name, group_name, inclusion, exclusion
+         FROM kakao_template_categories
+        WHERE active_yn = 'Y'
+        ORDER BY group_name NULLS LAST, category_code ASC`);
+        res.json({ success: true, categories: r.rows });
+    }
+    catch (err) {
+        return handleImcError(res, err);
+    }
+});
+router.post('/categories/sync', auth_1.requireSuperAdmin, async (_req, res) => {
+    try {
+        await (0, alimtalk_jobs_1.syncCategoriesJob)();
+        res.json({ success: true, message: '카테고리 동기화 요청 완료' });
+    }
+    catch (err) {
+        return handleImcError(res, err);
+    }
+});
+// ──────────────────────────────────────────────────────────
+// 알림톡 템플릿 (고객사) — 13개
+// ──────────────────────────────────────────────────────────
+router.get('/templates', async (req, res) => {
+    try {
+        const companyId = requireCompany(req, res);
+        if (!companyId)
+            return;
+        const { status, profileId } = req.query;
+        const where = ['t.company_id = $1'];
+        const params = [companyId];
+        if (status) {
+            params.push(status);
+            where.push(`t.status = $${params.length}`);
+        }
+        if (profileId) {
+            params.push(profileId);
+            where.push(`t.profile_id = $${params.length}`);
+        }
+        // 소유자 필터: company_user는 본인 등록 템플릿만 (D130 §2-2)
+        if (req.user?.userType === 'company_user') {
+            params.push(req.user.userId);
+            where.push(`t.created_by = $${params.length}`);
+        }
+        const r = await (0, database_1.query)(`SELECT t.*, p.profile_key, p.profile_name,
+              u.name AS created_by_name, u.login_id AS created_by_login_id
+         FROM kakao_templates t
+         LEFT JOIN kakao_sender_profiles p ON p.id = t.profile_id
+         LEFT JOIN users u ON u.id = t.created_by
+        WHERE ${where.join(' AND ')}
+        ORDER BY t.updated_at DESC NULLS LAST, t.created_at DESC`, params);
+        // ★ D143 F (2026-04-30) PDF 0430 알림톡 #3: BYTEA(증빙자료 data)는 목록 응답에서 제외.
+        //   클라이언트로 base64 변환되어 전송되면 페이로드 폭증 + 보안 노출 위험. 파일명만 전달하여 UI 표시.
+        const rows = r.rows.map((row) => {
+            const { inspection_evidence_data, ...rest } = row;
+            void inspection_evidence_data;
+            return rest;
+        });
+        res.json({ success: true, templates: rows });
+    }
+    catch (err) {
+        return handleImcError(res, err);
+    }
+});
+// 템플릿 등록: 고객사관리자(admin)만 허용 (Harold님 지시 2026-04-21)
+//   기존 D130 §2-2 "모든 로그인 사용자 허용" 정책 폐기.
+//   사유: 발신프로필과 동일한 관리 단위로 통일 (/senders/token, /senders = requireCompanyAdmin).
+//   기존에 company_user가 등록한 템플릿은 소유자 체크(requireTemplateAccess)로 조회/수정/삭제만 가능.
+router.post('/templates', auth_1.requireCompanyAdmin, async (req, res) => {
+    try {
+        const companyId = requireCompany(req, res);
+        if (!companyId)
+            return;
+        const userId = req.user?.userId;
+        if (!userId) {
+            return res.status(401).json({ success: false, error: '인증 필요' });
+        }
+        const { profileId, ...body } = req.body || {};
+        if (!profileId) {
+            return res.status(400).json({ success: false, error: 'profileId는 필수입니다' });
+        }
+        // 승인된 발신프로필만 사용 허용 (D130 §2-1)
+        const prof = await (0, database_1.query)(`SELECT profile_key, approval_status FROM kakao_sender_profiles
+          WHERE id = $1 AND company_id = $2`, [profileId, companyId]);
+        if (prof.rows.length === 0 || !prof.rows[0].profile_key) {
+            return res.status(404).json({ success: false, error: '발신프로필 없음' });
+        }
+        if (prof.rows[0].approval_status !== 'APPROVED') {
+            return res.status(400).json({
+                success: false,
+                error: '승인 완료된 발신프로필만 사용할 수 있습니다',
+            });
+        }
+        const senderKey = prof.rows[0].profile_key;
+        // D131: IMC 실제 제한은 templateKey **최대 20자** (공식 문서 오표기 128자 → 휴머스온 확인됨 2026-04-21).
+        //       과거 생성 규칙(`TPL_${companyId12}_${timestamp}` = 29자)이 IMC 6005 유발.
+        //       `T{base36 timestamp(~9)}{base36 random(10)}` = 20자 고정, 충돌 가능성 사실상 0.
+        const rawKey = typeof body.templateKey === 'string' ? body.templateKey.trim() : '';
+        if (rawKey && rawKey.length > 20) {
+            return res.status(400).json({
+                success: false,
+                error: 'templateKey는 최대 20자까지 허용됩니다 (IMC 제한)',
+            });
+        }
+        const templateKey = rawKey ||
+            `T${Date.now().toString(36)}${Math.random().toString(36).slice(2, 12)}`.slice(0, 20);
+        // ─────────────────────────────────────────
+        // 1) IMC 등록
+        //    D135+ (B3 복구): IMC는 성공했는데 DB INSERT 실패로 한줄로 DB에만 없는 상태
+        //    → 재등록 시 IMC가 4014 반환 → listAlimtalkTemplates로 templateCode 복구 후 DB INSERT
+        // ─────────────────────────────────────────
+        let r = await imc.createAlimtalkTemplate(senderKey, {
+            ...body,
+            templateKey,
+        });
+        let templateCode = r.data?.templateCode || null;
+        // B3 복구 경로: 4014 템플릿키 중복 → IMC에서 기존 템플릿 조회
+        if (r.code === '4014' && !templateCode) {
+            try {
+                const lst = await imc.listAlimtalkTemplates({ page: 0, count: 100 });
+                const items = lst.data?.list ||
+                    lst.data?.data?.list ||
+                    [];
+                const found = items.find((t) => t.templateKey === templateKey);
+                if (found?.templateCode) {
+                    templateCode = found.templateCode;
+                    r = { code: '0000', message: 'OK (B3 복구: 기존 IMC 템플릿 연결)', data: found };
+                    console.log(`[alimtalk][B3 복구] templateKey=${templateKey} → templateCode=${templateCode}`);
+                }
+            }
+            catch (lookupErr) {
+                console.error('[alimtalk][B3 복구 실패]', lookupErr?.message || lookupErr);
+            }
+        }
+        if (r.code !== '0000' || !templateCode) {
+            return res.status(400).json({
+                success: false,
+                code: r.code,
+                error: r.message || '등록 실패',
+            });
+        }
+        // ─────────────────────────────────────────
+        // 2) DB INSERT — status는 DRAFT로 시작. B9 자동 검수요청 성공 시 REQUESTED로 승격.
+        //    (기존에는 'REQUESTED'로 하드코딩 → 실제 IMC는 '등록' 상태라 불일치 — D135+ 교정)
+        //
+        // ★ D139 #1+#3 (0425): PG INSERT 실패 시 IMC 등록 롤백.
+        //    기존엔 IMC 등록 성공 + PG INSERT 실패 시 IMC에는 templateKey가 남아 있어
+        //    사용자 재시도 마다 IMC 4014(templateKey 중복) 응답 → "재클릭 시 IMC 중복 등록" 인식 유발.
+        //    + DB에는 영원히 안 들어가서 관리 화면 빈 상태 유지(#3).
+        //    아래 try/catch로 실패 시 IMC deleteAlimtalkTemplate으로 롤백 + 명확한 error 메시지 노출.
+        // ─────────────────────────────────────────
+        let ins;
+        try {
+            ins = await (0, database_1.query)(`INSERT INTO kakao_templates
+           (company_id, profile_id, template_code, template_key, template_name,
+            content, buttons, variables, status,
+            category, message_type, emphasize_type, emphasize_title, emphasize_subtitle,
+            image_name, extra_content, ad_content, security_flag, quick_replies,
+            template_header, item_highlight, item_list, item_summary, represent_link,
+            preview_message, alarm_phone_numbers, service_mode, custom_template_code,
+            created_by, created_at, updated_at, last_synced_at)
+         VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8::text[],'DRAFT',
+                 $9,$10,$11,$12,$13,$14,$15,$16,$17,$18::jsonb,
+                 $19,$20::jsonb,$21::jsonb,$22::jsonb,$23::jsonb,
+                 $24,$25,$26,$27,$28,now(),now(),now())
+         RETURNING *`, [
+                companyId,
+                profileId,
+                templateCode,
+                templateKey,
+                body.manageName,
+                body.templateContent,
+                JSON.stringify(body.buttonList || []),
+                body.variables || [],
+                body.categoryCode,
+                body.templateMessageType,
+                body.templateEmphasizeType,
+                body.templateTitle || null,
+                body.templateSubtitle || null,
+                body.templateImageName || null,
+                body.templateExtra || null,
+                body.adContent || null,
+                body.securityFlag || false,
+                JSON.stringify(body.quickReplyList || []),
+                body.templateHeader || null,
+                body.templateItemHighlight
+                    ? JSON.stringify(body.templateItemHighlight)
+                    : null,
+                body.templateItem?.list ? JSON.stringify(body.templateItem.list) : null,
+                body.templateItem?.summary
+                    ? JSON.stringify(body.templateItem.summary)
+                    : null,
+                body.templateRepresentLink
+                    ? JSON.stringify(body.templateRepresentLink)
+                    : null,
+                body.templatePreviewMessage || null,
+                body.alarmPhoneNumber || null,
+                body.serviceMode || 'PRD',
+                body.customTemplateCode || null,
+                userId,
+            ]);
+        }
+        catch (insertErr) {
+            // ★ D139 #1+#3: PG INSERT 실패 시 IMC 등록 롤백
+            const errDetail = insertErr?.message || insertErr?.detail || '알 수 없는 DB 오류';
+            console.error(`[alimtalk][DB INSERT 실패] templateCode=${templateCode} templateKey=${templateKey} → IMC 롤백 시도. detail=${errDetail}`);
+            try {
+                await imc.deleteAlimtalkTemplate(senderKey, templateCode);
+                console.log(`[alimtalk][롤백] IMC 템플릿 삭제 완료: ${templateCode}`);
+            }
+            catch (rollbackErr) {
+                console.error(`[alimtalk][롤백 실패] ${templateCode}: ${rollbackErr?.message || rollbackErr}`);
+            }
+            return res.status(500).json({
+                success: false,
+                error: `DB 저장에 실패했습니다 (${errDetail}). IMC 등록은 자동 롤백되었습니다. 다시 시도해주세요.`,
+                dbError: errDetail,
+            });
+        }
+        // ─────────────────────────────────────────
+        // ★ D139 #4 (0425): 등록과 검수요청 분리 — 자동 검수요청 제거.
+        //    이전(D135 B9)엔 등록 성공 직후 자동 검수요청 호출 → 휴머스온 스펙·직원 요청과 부합 안 함.
+        //    이제 status='DRAFT' 유지. 검수요청은 별도 엔드포인트 POST /templates/:code/inspect (기존 존재) 호출.
+        //    프론트는 목록에서 '검수요청' 액션 버튼으로 명시 호출 (D139 #4-1).
+        // ─────────────────────────────────────────
+        res.status(201).json({
+            success: true,
+            template: ins.rows[0],
+            imc: r,
+        });
+    }
+    catch (err) {
+        return handleImcError(res, err);
+    }
+});
+async function resolveTemplateContext(companyId, templateCode, user) {
+    const r = await (0, database_1.query)(`SELECT t.id, t.created_by, p.profile_key
+       FROM kakao_templates t
+       JOIN kakao_sender_profiles p ON p.id = t.profile_id
+      WHERE t.template_code = $1 AND t.company_id = $2`, [templateCode, companyId]);
+    if (r.rows.length === 0)
+        return null;
+    const row = r.rows[0];
+    if (user?.userType === 'company_user' && row.created_by !== user.userId) {
+        return 'forbidden';
+    }
+    return { senderKey: row.profile_key, id: row.id, createdBy: row.created_by };
+}
+// 컨트롤타워: 템플릿 접근 체크 + companyId 확보 + 404/403 응답 일원화 (D130)
+// 호출부에서 companyId 추출 + resolveTemplateContext 2단계 반복을 단일 호출로 통합
+async function requireTemplateAccess(req, res) {
+    const companyId = requireCompany(req, res);
+    if (!companyId)
+        return null;
+    const ctx = await resolveTemplateContext(companyId, req.params.templateCode, req.user);
+    if (ctx === null) {
+        res.status(404).json({ success: false, error: '템플릿 없음' });
+        return null;
+    }
+    if (ctx === 'forbidden') {
+        res.status(403).json({
+            success: false,
+            error: '본인이 등록한 템플릿만 접근할 수 있습니다',
+        });
+        return null;
+    }
+    return { companyId, ...ctx };
+}
+router.get('/templates/:templateCode', async (req, res) => {
+    try {
+        const ctx = await requireTemplateAccess(req, res);
+        if (!ctx)
+            return;
+        // IMC 최신 상태 동기화
+        try {
+            const r = await imc.getAlimtalkTemplate(ctx.senderKey, req.params.templateCode);
+            if (r.code === '0000' && r.data) {
+                await (0, database_1.query)(`UPDATE kakao_templates
+              SET status = $1, last_synced_at = now()
+            WHERE id = $2`, [r.data.status || 'UNKNOWN', ctx.id]);
+            }
+        }
+        catch {
+            /* IMC 실패 시 DB 값으로 폴백 */
+        }
+        const row = await (0, database_1.query)(`SELECT t.*, p.profile_key, p.profile_name,
+              u.name AS created_by_name, u.login_id AS created_by_login_id
+         FROM kakao_templates t
+         LEFT JOIN kakao_sender_profiles p ON p.id = t.profile_id
+         LEFT JOIN users u ON u.id = t.created_by
+        WHERE t.id = $1`, [ctx.id]);
+        res.json({ success: true, template: row.rows[0] });
+    }
+    catch (err) {
+        return handleImcError(res, err);
+    }
+});
+// 템플릿 수정: 본인 소유 + company_admin/super_admin (D130 §2-2, requireTemplateAccess 내 체크)
+router.put('/templates/:templateCode', async (req, res) => {
+    try {
+        const ctx = await requireTemplateAccess(req, res);
+        if (!ctx)
+            return;
+        const r = await imc.updateAlimtalkTemplate(ctx.senderKey, req.params.templateCode, req.body || {});
+        await (0, database_1.query)(`UPDATE kakao_templates SET updated_at=now(), last_synced_at=now() WHERE id=$1`, [ctx.id]);
+        res.json({ success: r.code === '0000', imc: r });
+    }
+    catch (err) {
+        return handleImcError(res, err);
+    }
+});
+router.delete('/templates/:templateCode', async (req, res) => {
+    try {
+        const ctx = await requireTemplateAccess(req, res);
+        if (!ctx)
+            return;
+        const r = await imc.deleteAlimtalkTemplate(ctx.senderKey, req.params.templateCode);
+        await (0, database_1.query)(`UPDATE kakao_templates SET status='DELETED', updated_at=now() WHERE id=$1`, [ctx.id]);
+        res.json({ success: r.code === '0000', imc: r });
+    }
+    catch (err) {
+        return handleImcError(res, err);
+    }
+});
+/**
+ * ★ D143 F (2026-04-30) PDF 0430 알림톡 #3: 등록/수정 폼 하단 코멘트+증빙자료 별도 저장.
+ *
+ *  직원 요청: "템플릿 등록 제일 하단에 '코멘트' 입력 칸, '코멘트 증빙자료' 추가 해야 합니다."
+ *
+ *  설계:
+ *    - 템플릿 등록 자체는 application/json (POST /templates).
+ *    - 코멘트+증빙자료는 multipart/form-data로 본 라우트에 별도 호출 (frontend handleSave가 등록 직후 자동 호출).
+ *    - DB 컬럼: inspection_comment TEXT, inspection_evidence_filename/_mimetype/_data BYTEA
+ *    - 검수요청(POST /inspect) 시점에 DB 값을 자동으로 IMC에 전달 → 직원 입장에서 "등록 폼 하단" 한 번 입력으로 종결.
+ *
+ *  DB 마이그레이션 (Harold님 직접 실행):
+ *    ALTER TABLE kakao_templates
+ *      ADD COLUMN IF NOT EXISTS inspection_comment TEXT,
+ *      ADD COLUMN IF NOT EXISTS inspection_evidence_filename TEXT,
+ *      ADD COLUMN IF NOT EXISTS inspection_evidence_mimetype TEXT,
+ *      ADD COLUMN IF NOT EXISTS inspection_evidence_data BYTEA;
+ */
+router.post('/templates/:templateCode/inspection-meta', auth_1.requireCompanyAdmin, upload.single('evidenceFile'), async (req, res) => {
+    try {
+        const ctx = await requireTemplateAccess(req, res);
+        if (!ctx)
+            return;
+        const file = req.file;
+        const decodedFile = file ? decodeOriginalName(file) : undefined;
+        const comment = (req.body?.comment ?? '').toString();
+        if (decodedFile) {
+            await (0, database_1.query)(`UPDATE kakao_templates
+              SET inspection_comment = $1,
+                  inspection_evidence_filename = $2,
+                  inspection_evidence_mimetype = $3,
+                  inspection_evidence_data = $4,
+                  updated_at = now()
+            WHERE id = $5`, [comment, decodedFile.originalname, decodedFile.mimetype, decodedFile.buffer, ctx.id]);
+        }
+        else {
+            // 파일 미첨부 시 기존 evidence는 유지하고 코멘트만 갱신
+            await (0, database_1.query)(`UPDATE kakao_templates
+              SET inspection_comment = $1,
+                  updated_at = now()
+            WHERE id = $2`, [comment, ctx.id]);
+        }
+        res.json({
+            success: true,
+            inspection_comment: comment,
+            inspection_evidence_filename: decodedFile?.originalname || null,
+        });
+    }
+    catch (err) {
+        return handleImcError(res, err);
+    }
+});
+router.post('/templates/:templateCode/inspect', async (req, res) => {
+    try {
+        const ctx = await requireTemplateAccess(req, res);
+        if (!ctx)
+            return;
+        // ★ D143 F (2026-04-30) PDF 0430 #3: 등록 폼에서 저장한 코멘트+증빙자료를 자동으로 IMC에 전달.
+        //   body.comment가 명시되면 우선 사용 (재검수 모달에서 추가 입력 가능).
+        //   evidence가 DB에 있으면 IMC requestInspectionWithFile, 없으면 requestInspection.
+        const meta = await (0, database_1.query)(`SELECT inspection_comment,
+                inspection_evidence_filename,
+                inspection_evidence_data
+           FROM kakao_templates WHERE id = $1`, [ctx.id]);
+        const row = meta.rows[0] || {};
+        const finalComment = req.body?.comment || row.inspection_comment || '';
+        const evidenceBuffer = row.inspection_evidence_data && Buffer.isBuffer(row.inspection_evidence_data)
+            ? row.inspection_evidence_data
+            : null;
+        const evidenceFilename = row.inspection_evidence_filename || 'evidence';
+        let r;
+        if (evidenceBuffer) {
+            r = await imc.requestInspectionWithFile(ctx.senderKey, req.params.templateCode, finalComment, evidenceBuffer, evidenceFilename);
+        }
+        else {
+            r = await imc.requestInspection(ctx.senderKey, req.params.templateCode, finalComment || undefined);
+        }
+        await (0, database_1.query)(`UPDATE kakao_templates
+            SET status='REQUESTED', requested_at=now(), updated_at=now()
+          WHERE id=$1`, [ctx.id]);
+        res.json({ success: r.code === '0000', imc: r });
+    }
+    catch (err) {
+        return handleImcError(res, err);
+    }
+});
+router.post('/templates/:templateCode/inspect-with-file', upload.single('file'), async (req, res) => {
+    try {
+        const ctx = await requireTemplateAccess(req, res);
+        if (!ctx)
+            return;
+        const file = req.file;
+        // ★ D143 F (2026-04-30): 파일이 직접 첨부되지 않아도 DB의 inspection_evidence_data로 폴백.
+        //   기존엔 첨부 필수였지만, 등록 폼 하단에서 이미 저장된 증빙자료를 검수요청 모달에서 재사용 가능.
+        let buffer;
+        let filename;
+        if (file) {
+            buffer = file.buffer;
+            filename = file.originalname;
+        }
+        else {
+            const meta = await (0, database_1.query)(`SELECT inspection_evidence_filename, inspection_evidence_data
+             FROM kakao_templates WHERE id = $1`, [ctx.id]);
+            const row = meta.rows[0] || {};
+            if (row.inspection_evidence_data && Buffer.isBuffer(row.inspection_evidence_data)) {
+                buffer = row.inspection_evidence_data;
+                filename = row.inspection_evidence_filename || 'evidence';
+            }
+        }
+        if (!buffer || !filename) {
+            return res.status(400).json({ success: false, error: '첨부파일이 필요합니다' });
+        }
+        const r = await imc.requestInspectionWithFile(ctx.senderKey, req.params.templateCode, req.body?.comment || '', buffer, filename);
+        await (0, database_1.query)(`UPDATE kakao_templates
+            SET status='REQUESTED', requested_at=now(), updated_at=now()
+          WHERE id=$1`, [ctx.id]);
+        res.json({ success: r.code === '0000', imc: r });
+    }
+    catch (err) {
+        return handleImcError(res, err);
+    }
+});
+router.put('/templates/:templateCode/cancel-inspect', async (req, res) => {
+    try {
+        const ctx = await requireTemplateAccess(req, res);
+        if (!ctx)
+            return;
+        const r = await imc.cancelInspection(ctx.senderKey, req.params.templateCode);
+        await (0, database_1.query)(`UPDATE kakao_templates SET status='DRAFT', updated_at=now() WHERE id=$1`, [ctx.id]);
+        res.json({ success: r.code === '0000', imc: r });
+    }
+    catch (err) {
+        return handleImcError(res, err);
+    }
+});
+router.put('/templates/:templateCode/release', async (req, res) => {
+    try {
+        const ctx = await requireTemplateAccess(req, res);
+        if (!ctx)
+            return;
+        const r = await imc.releaseTemplateDormant(ctx.senderKey, req.params.templateCode);
+        await (0, database_1.query)(`UPDATE kakao_templates SET status='APPROVED', updated_at=now() WHERE id=$1`, [ctx.id]);
+        res.json({ success: r.code === '0000', imc: r });
+    }
+    catch (err) {
+        return handleImcError(res, err);
+    }
+});
+router.patch('/templates/:templateCode/custom-code', async (req, res) => {
+    try {
+        const { customTemplateCode } = req.body || {};
+        if (!customTemplateCode) {
+            return res.status(400).json({
+                success: false,
+                error: 'customTemplateCode는 필수입니다',
+            });
+        }
+        const ctx = await requireTemplateAccess(req, res);
+        if (!ctx)
+            return;
+        const r = await imc.updateCustomCode(ctx.senderKey, req.params.templateCode, customTemplateCode);
+        await (0, database_1.query)(`UPDATE kakao_templates SET custom_template_code=$1, updated_at=now() WHERE id=$2`, [customTemplateCode, ctx.id]);
+        res.json({ success: r.code === '0000', imc: r });
+    }
+    catch (err) {
+        return handleImcError(res, err);
+    }
+});
+router.patch('/templates/:templateCode/exposure', async (req, res) => {
+    try {
+        const { exposureYn } = req.body || {};
+        if (exposureYn !== 'Y' && exposureYn !== 'N') {
+            return res.status(400).json({ success: false, error: 'exposureYn는 Y/N' });
+        }
+        const ctx = await requireTemplateAccess(req, res);
+        if (!ctx)
+            return;
+        const r = await imc.updateExposure(ctx.senderKey, req.params.templateCode, exposureYn);
+        res.json({ success: r.code === '0000', imc: r });
+    }
+    catch (err) {
+        return handleImcError(res, err);
+    }
+});
+router.patch('/templates/:templateCode/service-mode', async (req, res) => {
+    try {
+        const { serviceMode } = req.body || {};
+        if (serviceMode !== 'PRD' && serviceMode !== 'STG') {
+            return res.status(400).json({ success: false, error: 'serviceMode는 PRD/STG' });
+        }
+        const ctx = await requireTemplateAccess(req, res);
+        if (!ctx)
+            return;
+        const r = await imc.updateServiceMode(ctx.senderKey, req.params.templateCode, serviceMode);
+        await (0, database_1.query)(`UPDATE kakao_templates SET service_mode=$1, updated_at=now() WHERE id=$2`, [serviceMode, ctx.id]);
+        res.json({ success: r.code === '0000', imc: r });
+    }
+    catch (err) {
+        return handleImcError(res, err);
+    }
+});
+// ──────────────────────────────────────────────────────────
+// 브랜드메시지 템플릿 — 5개
+// ──────────────────────────────────────────────────────────
+router.get('/brand-templates', async (req, res) => {
+    try {
+        const companyId = requireCompany(req, res);
+        if (!companyId)
+            return;
+        const r = await (0, database_1.query)(`SELECT b.*, p.profile_key, p.profile_name
+         FROM brand_message_templates b
+         LEFT JOIN kakao_sender_profiles p ON p.id = b.profile_id
+        WHERE b.company_id = $1 AND b.status = 'ACTIVE'
+        ORDER BY b.updated_at DESC`, [companyId]);
+        res.json({ success: true, templates: r.rows });
+    }
+    catch (err) {
+        return handleImcError(res, err);
+    }
+});
+router.post('/brand-templates', auth_1.requireCompanyAdmin, async (req, res) => {
+    try {
+        const companyId = requireCompany(req, res);
+        if (!companyId)
+            return;
+        const { profileId, ...body } = req.body || {};
+        const prof = await (0, database_1.query)(`SELECT profile_key FROM kakao_sender_profiles
+          WHERE id = $1 AND company_id = $2`, [profileId, companyId]);
+        if (prof.rows.length === 0 || !prof.rows[0].profile_key) {
+            return res.status(404).json({ success: false, error: '발신프로필 없음' });
+        }
+        const templateKey = body.templateKey ||
+            `BRT_${companyId.replace(/-/g, '').slice(0, 12)}_${Date.now()}`;
+        const r = await imc.createBrandTemplate(prof.rows[0].profile_key, {
+            ...body,
+            templateKey,
+        });
+        if (r.code !== '0000') {
+            // ★ D140 #C (0425): IMC raw 메시지 정제 후 반환
+            return res.status(400).json({
+                success: false,
+                code: r.code,
+                error: sanitizeImcMessageForUser(r.message, r.code, '브랜드메시지 템플릿 등록에 실패했습니다'),
+                imc: r,
+            });
+        }
+        const ins = await (0, database_1.query)(`INSERT INTO brand_message_templates
+           (company_id, profile_id, template_key, custom_template_code,
+            manage_name, chat_bubble_type, adult_yn,
+            header, content, additional_content,
+            attachment, carousel, buttons, coupon, variables,
+            status, created_at, updated_at)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11::jsonb,$12::jsonb,
+                 $13::jsonb,$14::jsonb,$15::text[],'ACTIVE',now(),now())
+         RETURNING *`, [
+            companyId,
+            profileId,
+            templateKey,
+            body.customTemplateCode || null,
+            body.manageName,
+            body.chatBubbleType,
+            body.adult || 'N',
+            body.header || null,
+            body.content || null,
+            body.additionalContent || null,
+            body.attachment ? JSON.stringify(body.attachment) : null,
+            body.carousel ? JSON.stringify(body.carousel) : null,
+            JSON.stringify(body.buttons || []),
+            body.coupon ? JSON.stringify(body.coupon) : null,
+            body.variables || [],
+        ]);
+        res.status(201).json({ success: true, template: ins.rows[0], imc: r });
+    }
+    catch (err) {
+        return handleImcError(res, err);
+    }
+});
+router.get('/brand-templates/:templateKey', async (req, res) => {
+    try {
+        const companyId = requireCompany(req, res);
+        if (!companyId)
+            return;
+        const r = await (0, database_1.query)(`SELECT b.*, p.profile_key FROM brand_message_templates b
+         LEFT JOIN kakao_sender_profiles p ON p.id = b.profile_id
+        WHERE b.template_key = $1 AND b.company_id = $2`, [req.params.templateKey, companyId]);
+        if (r.rows.length === 0) {
+            return res.status(404).json({ success: false, error: '템플릿 없음' });
+        }
+        res.json({ success: true, template: r.rows[0] });
+    }
+    catch (err) {
+        return handleImcError(res, err);
+    }
+});
+router.put('/brand-templates/:templateKey', auth_1.requireCompanyAdmin, async (req, res) => {
+    try {
+        const companyId = requireCompany(req, res);
+        if (!companyId)
+            return;
+        const r = await (0, database_1.query)(`SELECT b.id, p.profile_key FROM brand_message_templates b
+           JOIN kakao_sender_profiles p ON p.id = b.profile_id
+          WHERE b.template_key = $1 AND b.company_id = $2`, [req.params.templateKey, companyId]);
+        if (r.rows.length === 0) {
+            return res.status(404).json({ success: false, error: '템플릿 없음' });
+        }
+        const imcRes = await imc.updateBrandBasicTemplate(r.rows[0].profile_key, {
+            templateKey: req.params.templateKey,
+            ...(req.body || {}),
+        });
+        if (imcRes.code === '0000') {
+            await (0, database_1.query)(`UPDATE brand_message_templates SET updated_at=now() WHERE id=$1`, [r.rows[0].id]);
+        }
+        // ★ D140 #C (0425): IMC raw 메시지 사용자 노출 방지
+        return sendImcManagedResponse(res, imcRes, { fallback: '브랜드메시지 템플릿 수정에 실패했습니다' });
+    }
+    catch (err) {
+        return handleImcError(res, err);
+    }
+});
+router.delete('/brand-templates/:templateKey', auth_1.requireCompanyAdmin, async (req, res) => {
+    try {
+        const companyId = requireCompany(req, res);
+        if (!companyId)
+            return;
+        const r = await (0, database_1.query)(`SELECT b.id, p.profile_key FROM brand_message_templates b
+           JOIN kakao_sender_profiles p ON p.id = b.profile_id
+          WHERE b.template_key = $1 AND b.company_id = $2`, [req.params.templateKey, companyId]);
+        if (r.rows.length === 0) {
+            return res.status(404).json({ success: false, error: '템플릿 없음' });
+        }
+        const imcRes = await imc.deleteBrandTemplate(r.rows[0].profile_key, req.params.templateKey);
+        if (imcRes.code === '0000') {
+            await (0, database_1.query)(`UPDATE brand_message_templates
+              SET status='DELETED', deleted_at=now(), updated_at=now()
+            WHERE id=$1`, [r.rows[0].id]);
+        }
+        // ★ D140 #C (0425): IMC raw 메시지 사용자 노출 방지
+        return sendImcManagedResponse(res, imcRes, { fallback: '브랜드메시지 템플릿 삭제에 실패했습니다' });
+    }
+    catch (err) {
+        return handleImcError(res, err);
+    }
+});
+// ──────────────────────────────────────────────────────────
+// 이미지 업로드 — 9개
+// ──────────────────────────────────────────────────────────
+async function persistImage(req, uploadType, r, file) {
+    // ★ D143 E (2026-04-30): 어떤 래핑이든 imageUrl/imageName 추출 (extractImageFromAnyShape 재사용).
+    //   D131/D142+의 부분 unwrap이 새 응답 구조에서 깨지면 DB INSERT가 silent skip되어 있던 문제 차단.
+    const { imageUrl, imageName } = extractImageFromAnyShape(r);
+    if (!imageName || !imageUrl) {
+        console.warn(`[alimtalk][persistImage] skip — imageName/Url 추출 실패. uploadType=${uploadType} raw=${JSON.stringify(r).slice(0, 400)}`);
+        return;
+    }
+    await (0, database_1.query)(`INSERT INTO kakao_image_uploads
+       (company_id, user_id, upload_type, image_name, image_url,
+        original_filename, file_size, created_at)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,now())`, [
+        req.user?.companyId || null,
+        req.user?.userId || null,
+        uploadType,
+        imageName,
+        imageUrl,
+        file?.originalname || null,
+        file?.size || null,
+    ]);
+}
+/**
+ * ★ D139 #7+#6-1 (0425): 이미지 업로드 응답 통합 헬퍼.
+ *   기존 9개 라우트가 `res.json({ success: r.code === '0000', imc: r })`만 반환 →
+ *   IMC가 HTTP 200 + body code≠'0000' (예: 4000 BAD_REQUEST)으로 거부 시 axios catch 미진입,
+ *   `error` 필드 없이 응답 → 프론트 KakaoChannelImageUpload는 `'업로드 실패 (200)'` fallback 표시 →
+ *   직원이 "오류코드 200"으로 오해 + 실제 거부 사유(사이즈 초과/형식 불일치 등) 노출 안 됨.
+ *   본 헬퍼는 실패 시 메시지를 사용자 친화적으로 정제 후 `error` 필드로 노출.
+ *
+ * ★ D139 추가 (0425): 사용자 노출 텍스트에 'IMC'/영문 ExceptionName/깨진 한글 파일명 금지 정책 반영.
+ *   sanitizeImageErrorForUser()로 한글 메시지만 추출하여 노출.
+ */
+/**
+ * 카카오(IMC) 이미지 업로드 에러 메시지를 사용자 친화적으로 정제.
+ *
+ * 입력 예: `InvalidImageShapeException(가로:세로 비율은 2:1여야 합니다, ë틀ɑì틀´.jpg)`
+ * 출력 예: `이미지 가로:세로 비율은 2:1이어야 합니다`
+ *
+ * 처리:
+ *  - 영문 ExceptionName/ErrorName 제거
+ *  - 괄호 안 첫 번째 콤마까지를 메시지로 추출 (그 뒤는 파일명 등 부가 정보 → 제거)
+ *  - 'IMC'/'humuson' 등 라우터 명칭 제거
+ *  - 메시지 못 추출 시 "이미지 업로드에 실패했습니다" + 코드 fallback
+ */
+function sanitizeImcMessageForUser(rawMsg, code, fallback = '요청 처리에 실패했습니다') {
+    const msg = (rawMsg || '').trim();
+    if (!msg)
+        return code ? `${fallback} (코드 ${code})` : fallback;
+    // 1) 영문 ExceptionName/ErrorName(...) 패턴 → 괄호 안 첫 콤마 이전만 추출
+    const m = msg.match(/^[A-Za-z][A-Za-z0-9_]*(?:Exception|Error|Failure)\s*\((.+)\)\s*$/);
+    let inner = m ? m[1] : msg;
+    // 괄호 안에 콤마가 있으면 첫 콤마까지만 (이후는 파일명/부가정보)
+    const commaIdx = inner.indexOf(',');
+    if (commaIdx > 0)
+        inner = inner.slice(0, commaIdx);
+    // 2) 라우터 명칭 제거 (사용자 노출 금지 정책)
+    inner = inner.replace(/\bIMC\b/gi, '').replace(/humuson/gi, '').trim();
+    // 3) 잔여 정리
+    inner = inner.replace(/\s{2,}/g, ' ').trim();
+    return inner || (code ? `${fallback} (코드 ${code})` : fallback);
+}
+// 이미지 업로드 전용 폴백 메시지 (기존 호출 호환)
+function sanitizeImageErrorForUser(rawMsg, code) {
+    return sanitizeImcMessageForUser(rawMsg, code, '이미지 업로드에 실패했습니다');
+}
+/**
+ * ★ D140 (0425): 브랜드메시지/알림톡 관리 API 응답 통합 헬퍼.
+ *   IMC 응답을 받아 success 시 그대로 + extra, 실패 시 정제된 사용자 친화적 error 필드로 응답.
+ *   기존 `res.json({ success: r.code === '0000', imc: r })` 패턴이 14곳 라우트에 분산 →
+ *   IMC raw 메시지가 사용자에게 노출되는 문제(D139 IMC 단어 노출 사고와 동일 패턴) 해결.
+ */
+function sendImcManagedResponse(res, r, opts = {}) {
+    const ok = r?.code === '0000';
+    if (ok) {
+        return res.json({ success: true, ...(opts.extra || {}), imc: r });
+    }
+    const fallback = opts.fallback || '요청 처리에 실패했습니다';
+    console.warn(`[alimtalk][imc-managed 실패] code=${r?.code || 'N/A'} rawMsg=${r?.message || 'N/A'}`);
+    return res.status(opts.statusOnFail || 400).json({
+        success: false,
+        code: r?.code,
+        error: sanitizeImcMessageForUser(r?.message, r?.code, fallback),
+        imc: r,
+    });
+}
+/**
+ * ★ D143 E (2026-04-30) PDF 0430 알림톡 #1-2/#2: "규격 맞춰서 넣어도 카카오 응답에 이미지가 없습니다" 근본 종결.
+ *
+ *  D131이 sender/template unwrap만 처리, D142+가 image 이중래핑(`data.data.data.imageUrl`)까지 처리했지만,
+ *  IMC가 또 다른 응답 구조(예: `data.imageUrl`/`data.list[0].imageUrl`/wrapper 변종)를 반환하면 frontend의
+ *  `data.imc?.data?.imageUrl` 깊은 경로 접근이 또 깨짐 → "카카오 응답에 이미지가 없습니다" 재발.
+ *
+ *  해결: backend가 어떤 래핑이든 imageUrl/imageName을 추출해 응답 최상단에 평탄화.
+ *        frontend는 `data.imageUrl`/`data.imageName`만 신뢰 → 미래의 새 래핑 케이스에도 자동 견고.
+ *
+ *  단일 이미지: `{ success, imageUrl, imageName, imc }`
+ *  다중 이미지: `{ success, list: [{imageUrl,imageName}], imc }`
+ */
+function extractImageFromAnyShape(r) {
+    if (!r)
+        return {};
+    // 단일 이미지 추출 — 가능한 모든 위치 시도 (1중/2중/3중 래핑)
+    const cands = [
+        r?.data,
+        r?.data?.data,
+        r?.data?.data?.data,
+        r?.data?.image,
+        r,
+    ];
+    for (const c of cands) {
+        if (c && typeof c === 'object' && (c.imageUrl || c.imageName)) {
+            return { imageUrl: c.imageUrl, imageName: c.imageName };
+        }
+    }
+    return {};
+}
+function extractImageListFromAnyShape(r) {
+    if (!r)
+        return [];
+    const cands = [
+        r?.data?.list,
+        r?.data?.data?.list,
+        r?.data?.images,
+        r?.data?.data?.images,
+        Array.isArray(r?.data) ? r.data : null,
+    ];
+    for (const c of cands) {
+        if (Array.isArray(c) && c.length > 0) {
+            return c
+                .map((it) => ({ imageUrl: it?.imageUrl, imageName: it?.imageName }))
+                .filter((it) => it.imageUrl && it.imageName);
+        }
+    }
+    return [];
+}
+function sendImageUploadResponse(res, r) {
+    const ok = r?.code === '0000';
+    if (ok) {
+        // ★ D143 E (2026-04-30): 평탄화 — 어떤 래핑이든 최상단 imageUrl/imageName 보장.
+        const { imageUrl, imageName } = extractImageFromAnyShape(r);
+        if (!imageUrl || !imageName) {
+            // 응답 자체가 비정상(IMC가 0000 코드 + 빈 데이터) — 운영 진단 로그 + 사용자 명확 안내
+            console.error(`[alimtalk][image-upload 비정상응답] code=0000인데 imageUrl/Name 추출 불가. raw=${JSON.stringify(r).slice(0, 800)}`);
+            return res.status(502).json({
+                success: false,
+                code: '0000',
+                error: '이미지 업로드는 처리됐으나 응답에서 이미지 정보를 추출하지 못했습니다. 다시 시도해주세요.',
+                imc: r,
+            });
+        }
+        return res.json({ success: true, imageUrl, imageName, imc: r });
+    }
+    // 운영 진단용 로그는 실제 IMC 코드/메시지 그대로 (사용자에게는 안 보임)
+    console.warn(`[alimtalk][image-upload 실패] code=${r?.code || 'N/A'} rawMsg=${r?.message || 'N/A'}`);
+    // 사용자 응답은 정제된 한글 메시지만
+    const userMsg = sanitizeImageErrorForUser(r?.message, r?.code);
+    return res.status(400).json({
+        success: false,
+        code: r?.code,
+        error: userMsg,
+        imc: r,
+    });
+}
+/**
+ * ★ D143 E (2026-04-30): 다중 이미지 업로드 응답 평탄화 (brand wide-list/carousel-feed/carousel-commerce).
+ *  단일과 동일하게 list를 응답 최상단에 평탄화하여 frontend가 깊은 경로 의존하지 않도록.
+ */
+function sendImageUploadMultiResponse(res, r) {
+    const ok = r?.code === '0000';
+    if (ok) {
+        const list = extractImageListFromAnyShape(r);
+        if (list.length === 0) {
+            console.error(`[alimtalk][image-upload(multi) 비정상응답] code=0000인데 list 추출 불가. raw=${JSON.stringify(r).slice(0, 800)}`);
+            return res.status(502).json({
+                success: false,
+                code: '0000',
+                error: '이미지 업로드는 처리됐으나 응답에서 이미지 목록을 추출하지 못했습니다. 다시 시도해주세요.',
+                imc: r,
+            });
+        }
+        return res.json({ success: true, list, imc: r });
+    }
+    console.warn(`[alimtalk][image-upload(multi) 실패] code=${r?.code || 'N/A'} rawMsg=${r?.message || 'N/A'}`);
+    const userMsg = sanitizeImageErrorForUser(r?.message, r?.code);
+    return res.status(400).json({
+        success: false,
+        code: r?.code,
+        error: userMsg,
+        imc: r,
+    });
+}
+/**
+ * ★ D139 (0425): multer가 multipart/form-data의 filename을 latin1로 디코딩 →
+ *   한글 파일명 깨짐 (`행사이미지.jpg` → `ë틀ɑì틀´ë²틀(틀틀틀´.jpg`).
+ *   이를 utf-8로 재해석해 정상 한글로 복원. 9개 업로드 라우트 + persistImage(DB INSERT) 자동 정상화.
+ */
+function decodeOriginalName(file) {
+    if (file && typeof file.originalname === 'string') {
+        try {
+            file.originalname = Buffer.from(file.originalname, 'latin1').toString('utf8');
+        }
+        catch {
+            /* noop — 원본 유지 */
+        }
+    }
+    return file;
+}
+function requireFile(req, res) {
+    const file = req.file;
+    if (!file) {
+        res.status(400).json({ success: false, error: '파일이 필요합니다' });
+        return null;
+    }
+    return decodeOriginalName(file);
+}
+function requireFiles(req, res) {
+    const files = req.files;
+    if (!files || !Array.isArray(files) || files.length === 0) {
+        res.status(400).json({ success: false, error: '파일이 필요합니다' });
+        return null;
+    }
+    return files.map(decodeOriginalName);
+}
+// (1) 알림톡 기본 이미지
+router.post('/images/alimtalk/template', auth_1.requireCompanyAdmin, upload.single('image'), async (req, res) => {
+    try {
+        const file = requireFile(req, res);
+        if (!file)
+            return;
+        const r = await imc.uploadAlimtalkTemplateImage(file.buffer, file.originalname);
+        await persistImage(req, 'alimtalk_template', r, file);
+        return sendImageUploadResponse(res, r);
+    }
+    catch (err) {
+        return handleImcError(res, err);
+    }
+});
+// (2) 알림톡 하이라이트 이미지
+router.post('/images/alimtalk/highlight', auth_1.requireCompanyAdmin, upload.single('image'), async (req, res) => {
+    try {
+        const file = requireFile(req, res);
+        if (!file)
+            return;
+        const r = await imc.uploadAlimtalkHighlightImage(file.buffer, file.originalname);
+        await persistImage(req, 'alimtalk_highlight', r, file);
+        return sendImageUploadResponse(res, r);
+    }
+    catch (err) {
+        return handleImcError(res, err);
+    }
+});
+// (3) 브랜드 기본 이미지
+router.post('/images/brand/default', auth_1.requireCompanyAdmin, upload.single('image'), async (req, res) => {
+    try {
+        const file = requireFile(req, res);
+        if (!file)
+            return;
+        const r = await imc.uploadBrandDefaultImage(file.buffer, file.originalname);
+        await persistImage(req, 'brand_default', r, file);
+        return sendImageUploadResponse(res, r);
+    }
+    catch (err) {
+        return handleImcError(res, err);
+    }
+});
+// (4) 브랜드 와이드
+router.post('/images/brand/wide', auth_1.requireCompanyAdmin, upload.single('image'), async (req, res) => {
+    try {
+        const file = requireFile(req, res);
+        if (!file)
+            return;
+        const r = await imc.uploadBrandWideImage(file.buffer, file.originalname);
+        await persistImage(req, 'brand_wide', r, file);
+        return sendImageUploadResponse(res, r);
+    }
+    catch (err) {
+        return handleImcError(res, err);
+    }
+});
+// (5) 브랜드 와이드 리스트 첫 이미지
+router.post('/images/brand/wide-list/first', auth_1.requireCompanyAdmin, upload.single('image'), async (req, res) => {
+    try {
+        const file = requireFile(req, res);
+        if (!file)
+            return;
+        const r = await imc.uploadBrandWideListFirstImage(file.buffer, file.originalname);
+        await persistImage(req, 'brand_wide_list_first', r, file);
+        return sendImageUploadResponse(res, r);
+    }
+    catch (err) {
+        return handleImcError(res, err);
+    }
+});
+// (6) 브랜드 와이드 리스트 (최대 3장)
+// ★ D143 E (2026-04-30): 다중 이미지도 sendImageUploadMultiResponse로 평탄화 + extractImageListFromAnyShape로 어떤 래핑이든 list 추출
+router.post('/images/brand/wide-list', auth_1.requireCompanyAdmin, upload.array('images', 3), async (req, res) => {
+    try {
+        const files = requireFiles(req, res);
+        if (!files)
+            return;
+        const r = await imc.uploadBrandWideListImages(files.map((f) => ({ buffer: f.buffer, name: f.originalname })));
+        if (r.code === '0000') {
+            const list = extractImageListFromAnyShape(r);
+            for (let i = 0; i < list.length && i < files.length; i++) {
+                await persistImage(req, 'brand_wide_list', { code: '0000', message: 'OK', data: list[i] }, files[i]);
+            }
+        }
+        return sendImageUploadMultiResponse(res, r);
+    }
+    catch (err) {
+        return handleImcError(res, err);
+    }
+});
+// (7) 브랜드 캐러셀 피드 (최대 10장)
+router.post('/images/brand/carousel-feed', auth_1.requireCompanyAdmin, upload.array('images', 10), async (req, res) => {
+    try {
+        const files = requireFiles(req, res);
+        if (!files)
+            return;
+        const r = await imc.uploadBrandCarouselFeedImages(files.map((f) => ({ buffer: f.buffer, name: f.originalname })));
+        if (r.code === '0000') {
+            const list = extractImageListFromAnyShape(r);
+            for (let i = 0; i < list.length && i < files.length; i++) {
+                await persistImage(req, 'brand_carousel_feed', { code: '0000', message: 'OK', data: list[i] }, files[i]);
+            }
+        }
+        return sendImageUploadMultiResponse(res, r);
+    }
+    catch (err) {
+        return handleImcError(res, err);
+    }
+});
+// (8) 브랜드 캐러셀 커머스 (최대 11장)
+router.post('/images/brand/carousel-commerce', auth_1.requireCompanyAdmin, upload.array('images', 11), async (req, res) => {
+    try {
+        const files = requireFiles(req, res);
+        if (!files)
+            return;
+        const r = await imc.uploadBrandCarouselCommerceImages(files.map((f) => ({ buffer: f.buffer, name: f.originalname })));
+        if (r.code === '0000') {
+            const list = extractImageListFromAnyShape(r);
+            for (let i = 0; i < list.length && i < files.length; i++) {
+                await persistImage(req, 'brand_carousel_commerce', { code: '0000', message: 'OK', data: list[i] }, files[i]);
+            }
+        }
+        return sendImageUploadMultiResponse(res, r);
+    }
+    catch (err) {
+        return handleImcError(res, err);
+    }
+});
+// (9) 마케팅 동의 증적자료
+router.post('/images/marketing-agree/:senderId', auth_1.requireSuperAdmin, upload.single('image'), async (req, res) => {
+    try {
+        const file = requireFile(req, res);
+        if (!file)
+            return;
+        const row = await (0, database_1.query)(`SELECT profile_key FROM kakao_sender_profiles WHERE id = $1`, [req.params.senderId]);
+        if (row.rows.length === 0 || !row.rows[0].profile_key) {
+            return res.status(404).json({ success: false, error: '발신프로필 없음' });
+        }
+        const r = await imc.uploadMarketingAgreeFile(row.rows[0].profile_key, file.buffer, file.originalname);
+        // ★ D143 E (2026-04-30): IMC 래핑 변종에도 imageName 견고하게 추출
+        const { imageName: marketingImgName } = extractImageFromAnyShape(r);
+        await (0, database_1.query)(`UPDATE kakao_sender_profiles
+            SET marketing_agree_file_key = $1, updated_at = now()
+          WHERE id = $2`, [marketingImgName || null, req.params.senderId]);
+        await persistImage(req, 'marketing_agree', r, file);
+        return sendImageUploadResponse(res, r);
+    }
+    catch (err) {
+        return handleImcError(res, err);
+    }
+});
+// ──────────────────────────────────────────────────────────
+// 검수 알림 수신자 (Alarm Users) — 4개
+// ──────────────────────────────────────────────────────────
+router.get('/alarm-users', auth_1.requireCompanyAdmin, async (req, res) => {
+    try {
+        const companyId = requireCompany(req, res);
+        if (!companyId)
+            return;
+        // DB 1차 조회 + IMC 싱크는 추후
+        const r = await (0, database_1.query)(`SELECT * FROM kakao_alarm_users
+          WHERE company_id = $1
+          ORDER BY created_at DESC`, [companyId]);
+        res.json({ success: true, users: r.rows });
+    }
+    catch (err) {
+        return handleImcError(res, err);
+    }
+});
+router.post('/alarm-users', auth_1.requireCompanyAdmin, async (req, res) => {
+    try {
+        const companyId = requireCompany(req, res);
+        if (!companyId)
+            return;
+        const { name, phoneNumber, activeYn } = req.body || {};
+        if (!phoneNumber) {
+            return res.status(400).json({ success: false, error: 'phoneNumber 필수' });
+        }
+        if (!name || !String(name).trim()) {
+            return res.status(400).json({ success: false, error: '수신자 이름은 필수입니다' });
+        }
+        // 회사당 3명 제한 (한줄로 자체 정책)
+        const cnt = await (0, database_1.query)(`SELECT COUNT(*)::int AS c FROM kakao_alarm_users
+          WHERE company_id = $1 AND COALESCE(active_yn,'Y') = 'Y'`, [companyId]);
+        if ((cnt.rows[0]?.c ?? 0) >= 3 && (activeYn || 'Y') === 'Y') {
+            return res.status(400).json({
+                success: false,
+                error: '활성 알림 수신자는 최대 3명까지 등록 가능합니다',
+            });
+        }
+        // ★ D135+: IMC createAlarmUser 호출 제거 (4032 AUTH 이슈).
+        //   검수 결과 알림은 한줄로가 직접 `syncPendingTemplatesJob`에서 SMS로 발송.
+        //   imc_alarm_user_id는 내부 식별자로만 유지 (향후 IMC 전환 대비).
+        const alarmUserKey = `${companyId.replace(/-/g, '').slice(0, 12)}_${phoneNumber}`;
+        const ins = await (0, database_1.query)(`INSERT INTO kakao_alarm_users
+           (company_id, name, phone_number, active_yn, imc_alarm_user_id)
+         VALUES ($1,$2,$3,$4,$5)
+         ON CONFLICT (company_id, phone_number) DO UPDATE SET
+           name = EXCLUDED.name,
+           active_yn = EXCLUDED.active_yn,
+           imc_alarm_user_id = EXCLUDED.imc_alarm_user_id,
+           updated_at = now()
+         RETURNING *`, [companyId, name || null, phoneNumber, activeYn || 'Y', alarmUserKey]);
+        res.status(201).json({ success: true, user: ins.rows[0] });
+    }
+    catch (err) {
+        return handleImcError(res, err);
+    }
+});
+router.put('/alarm-users/:id', auth_1.requireCompanyAdmin, async (req, res) => {
+    try {
+        const companyId = requireCompany(req, res);
+        if (!companyId)
+            return;
+        const row = await (0, database_1.query)(`SELECT id FROM kakao_alarm_users
+          WHERE id = $1 AND company_id = $2`, [req.params.id, companyId]);
+        if (row.rows.length === 0) {
+            return res.status(404).json({ success: false, error: '수신자 없음' });
+        }
+        // ★ D135+: IMC updateAlarmUser 호출 제거. DB UPDATE만.
+        const { name, phoneNumber, activeYn } = req.body || {};
+        // 활성 전환 시 3명 제한 재검증 (본인 제외)
+        if (activeYn === 'Y') {
+            const cnt = await (0, database_1.query)(`SELECT COUNT(*)::int AS c FROM kakao_alarm_users
+            WHERE company_id = $1 AND COALESCE(active_yn,'Y') = 'Y' AND id <> $2`, [companyId, req.params.id]);
+            if ((cnt.rows[0]?.c ?? 0) >= 3) {
+                return res.status(400).json({
+                    success: false,
+                    error: '활성 알림 수신자는 최대 3명까지 등록 가능합니다',
+                });
+            }
+        }
+        const upd = await (0, database_1.query)(`UPDATE kakao_alarm_users
+            SET name = COALESCE($1,name),
+                phone_number = COALESCE($2,phone_number),
+                active_yn = COALESCE($3,active_yn),
+                updated_at = now()
+          WHERE id = $4
+          RETURNING *`, [name, phoneNumber, activeYn, req.params.id]);
+        res.json({ success: true, user: upd.rows[0] });
+    }
+    catch (err) {
+        return handleImcError(res, err);
+    }
+});
+router.delete('/alarm-users/:id', auth_1.requireCompanyAdmin, async (req, res) => {
+    try {
+        const companyId = requireCompany(req, res);
+        if (!companyId)
+            return;
+        const row = await (0, database_1.query)(`SELECT id FROM kakao_alarm_users
+          WHERE id = $1 AND company_id = $2`, [req.params.id, companyId]);
+        if (row.rows.length === 0) {
+            return res.status(404).json({ success: false, error: '수신자 없음' });
+        }
+        // ★ D135+: IMC deleteAlarmUser 호출 제거. DB DELETE만.
+        await (0, database_1.query)(`DELETE FROM kakao_alarm_users WHERE id = $1`, [req.params.id]);
+        res.json({ success: true });
+    }
+    catch (err) {
+        return handleImcError(res, err);
+    }
+});
+// ──────────────────────────────────────────────────────────
+// 운영 진단 — 슈퍼관리자
+// ──────────────────────────────────────────────────────────
+router.get('/webhook-events', auth_1.requireSuperAdmin, async (req, res) => {
+    try {
+        const limit = Math.max(1, Math.min(200, Number(req.query.limit) || 50));
+        const rows = await (0, alimtalk_webhook_handler_1.getRecentWebhookEvents)(limit);
+        res.json({ success: true, events: rows });
+    }
+    catch (err) {
+        return handleImcError(res, err);
+    }
+});
+router.post('/jobs/sync-pending-templates', auth_1.requireSuperAdmin, async (_req, res) => {
+    try {
+        await (0, alimtalk_jobs_1.syncPendingTemplatesJob)();
+        res.json({ success: true });
+    }
+    catch (err) {
+        return handleImcError(res, err);
+    }
+});
+router.post('/jobs/sync-sender-status', auth_1.requireSuperAdmin, async (_req, res) => {
+    try {
+        await (0, alimtalk_jobs_1.syncSenderStatusJob)();
+        res.json({ success: true });
+    }
+    catch (err) {
+        return handleImcError(res, err);
+    }
+});
+exports.default = router;
+//# sourceMappingURL=alimtalk.js.map

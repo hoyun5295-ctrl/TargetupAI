@@ -1,0 +1,1737 @@
+"use strict";
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
+Object.defineProperty(exports, "__esModule", { value: true });
+const crypto_1 = __importDefault(require("crypto"));
+const express_1 = require("express");
+const nodemailer_1 = __importDefault(require("nodemailer"));
+const database_1 = require("../config/database");
+const auth_1 = require("../middlewares/auth");
+const dashboard_card_pool_1 = require("../utils/dashboard-card-pool");
+const store_scope_1 = require("../utils/store-scope");
+const messageUtils_1 = require("../utils/messageUtils");
+const router = (0, express_1.Router)();
+// 모든 라우트에 인증 필요
+router.use(auth_1.authenticate);
+// ⚠️ /settings 라우트를 /:id 보다 먼저 정의해야 함!
+// 회사 설정 조회
+router.get('/settings', auth_1.authenticate, async (req, res) => {
+    try {
+        const companyId = req.user?.companyId;
+        const userId = req.user?.userId;
+        const result = await (0, database_1.query)(`
+      SELECT
+        company_name, brand_name, business_type, reject_number, manager_phone,
+        monthly_budget, cost_per_sms, cost_per_lms, cost_per_mms, cost_per_kakao,
+        send_start_hour, send_end_hour, daily_limit_per_customer,
+        holiday_send_allowed, duplicate_prevention_days,
+        target_strategy, cross_category_allowed, excluded_segments,
+        approval_required, use_db_sync
+      FROM companies WHERE id = $1
+    `, [companyId]);
+        // v1.5.0: 싱크 사용 중 여부 (프론트 SyncActiveBlockModal 표시용)
+        // companies.use_db_sync=true AND active Agent 하나 이상 있으면 true
+        const syncActive = await (0, database_1.query)(`SELECT 1 FROM sync_agents WHERE company_id = $1 AND status = 'active' LIMIT 1`, [companyId]);
+        const syncBlockActive = !!result.rows[0]?.use_db_sync && syncActive.rows.length > 0;
+        const row = result.rows[0] || {};
+        // ★ D102: getOpt080Number 컨트롤타워 사용 (인라인 조회 제거)
+        const userOpt080 = await (0, messageUtils_1.getOpt080Number)(userId || null, companyId);
+        if (userOpt080)
+            row.reject_number = userOpt080;
+        // ★ D97: manager_contacts는 test_contacts 테이블로 완전 이관
+        // settings 응답에서 제거 — 프론트는 /api/test-contacts API로만 담당자 관리
+        delete row.manager_contacts;
+        // manager_phone: JSON 문자열이면 파싱, 단일 번호면 배열로 변환
+        if (row.manager_phone) {
+            try {
+                row.manager_phones = JSON.parse(row.manager_phone);
+            }
+            catch {
+                // 기존 단일 번호 → 배열로 변환
+                row.manager_phones = row.manager_phone ? [row.manager_phone] : [];
+            }
+        }
+        else {
+            row.manager_phones = [];
+        }
+        // 카카오 발신 프로필 목록도 함께 제공
+        const kakaoProfilesResult = await (0, database_1.query)(`SELECT id, profile_key, profile_name, is_active FROM kakao_sender_profiles WHERE company_id = $1 AND is_active = true ORDER BY created_at ASC`, [companyId]);
+        row.kakao_profiles = kakaoProfilesResult.rows;
+        // v1.5.0: 싱크 차단 모달 판정 플래그
+        row.sync_block_active = syncBlockActive;
+        res.json(row);
+    }
+    catch (error) {
+        console.error('설정 조회 에러:', error);
+        res.status(500).json({ error: '설정 조회 실패' });
+    }
+});
+// 회사 설정 수정
+router.put('/settings', auth_1.authenticate, async (req, res) => {
+    try {
+        const companyId = req.user?.companyId;
+        const userId = req.user?.userId;
+        const { brand_name, business_type, reject_number, manager_phones, monthly_budget, cost_per_sms, cost_per_lms, cost_per_mms, cost_per_kakao, send_start_hour, send_end_hour, daily_limit_per_customer, holiday_send_allowed, duplicate_prevention_days, target_strategy, cross_category_allowed, excluded_segments, approval_required } = req.body;
+        // ★ D97: manager_contacts는 test_contacts 테이블로 완전 이관
+        // PUT /settings에서 manager_contacts 저장 로직 완전 제거
+        // 담당자 추가/삭제는 /api/test-contacts API에서만 처리
+        // manager_phones 배열 → JSON 문자열로 저장 (하위 호환)
+        const managerPhoneJson = manager_phones ? JSON.stringify(manager_phones) : null;
+        await (0, database_1.query)(`
+      UPDATE companies SET
+        brand_name = COALESCE($1, brand_name),
+        business_type = COALESCE($2, business_type),
+        reject_number = COALESCE($3, reject_number),
+        opt_out_080_number = COALESCE($3, opt_out_080_number),
+        manager_phone = COALESCE($4, manager_phone),
+        monthly_budget = COALESCE($5, monthly_budget),
+        cost_per_sms = COALESCE($6, cost_per_sms),
+        cost_per_lms = COALESCE($7, cost_per_lms),
+        cost_per_mms = COALESCE($8, cost_per_mms),
+        cost_per_kakao = COALESCE($9, cost_per_kakao),
+        send_start_hour = COALESCE($10, send_start_hour),
+        send_end_hour = COALESCE($11, send_end_hour),
+        daily_limit_per_customer = COALESCE($12, daily_limit_per_customer),
+        holiday_send_allowed = COALESCE($13, holiday_send_allowed),
+        duplicate_prevention_days = COALESCE($14, duplicate_prevention_days),
+        target_strategy = COALESCE($15, target_strategy),
+        cross_category_allowed = COALESCE($16, cross_category_allowed),
+        excluded_segments = COALESCE($17, excluded_segments),
+        approval_required = COALESCE($18, approval_required),
+        updated_at = NOW()
+      WHERE id = $19
+    `, [
+            brand_name, business_type, reject_number, managerPhoneJson,
+            monthly_budget, cost_per_sms, cost_per_lms, cost_per_mms, cost_per_kakao,
+            send_start_hour, send_end_hour, daily_limit_per_customer,
+            holiday_send_allowed, duplicate_prevention_days,
+            target_strategy, cross_category_allowed, excluded_segments ? JSON.stringify(excluded_segments) : null,
+            approval_required, companyId
+        ]);
+        res.json({ message: '설정이 저장되었습니다' });
+    }
+    catch (error) {
+        console.error('설정 수정 에러:', error);
+        res.status(500).json({ error: '설정 저장 실패' });
+    }
+});
+// GET /api/companies/my-plan - 현재 회사 플랜 정보
+router.get('/my-plan', async (req, res) => {
+    try {
+        const companyId = req.user?.companyId;
+        if (!companyId) {
+            return res.status(401).json({ error: '인증 필요' });
+        }
+        const result = await (0, database_1.query)(`
+      SELECT 
+        c.company_name,
+        c.plan_id,
+        p.plan_name,
+        p.plan_code,
+        p.monthly_price,
+        p.max_customers,
+        p.ai_analysis_level,
+        p.customer_db_enabled,
+        p.spam_filter_enabled,
+        p.ai_messaging_enabled,
+        p.auto_spam_test_enabled,
+        p.ai_premium_enabled,
+        c.subscription_status,
+        c.created_at,
+        c.trial_expires_at,
+        (c.trial_expires_at IS NOT NULL AND c.trial_expires_at < NOW()) AS is_trial_expired,
+        (SELECT COUNT(*) FROM customers WHERE company_id = c.id) as current_customers
+      FROM companies c
+      LEFT JOIN plans p ON c.plan_id = p.id
+      WHERE c.id = $1
+    `, [companyId]);
+        if (result.rows.length === 0) {
+            return res.status(404).json({ error: '회사 정보를 찾을 수 없습니다.' });
+        }
+        res.json(result.rows[0]);
+    }
+    catch (error) {
+        console.error('플랜 조회 실패:', error);
+        res.status(500).json({ error: '플랜 조회 실패' });
+    }
+});
+// POST /api/companies/plan-request - 플랜 변경 신청
+router.post('/plan-request', async (req, res) => {
+    try {
+        const companyId = req.user?.companyId;
+        const userId = req.user?.userId;
+        if (!companyId) {
+            return res.status(401).json({ error: '인증 필요' });
+        }
+        const { requestedPlanId, message } = req.body;
+        if (!requestedPlanId) {
+            return res.status(400).json({ error: '요청할 플랜을 선택해주세요.' });
+        }
+        // 중복 신청 방지: 이미 pending 상태인 신청이 있는지 확인
+        const pendingCheck = await (0, database_1.query)(`SELECT id FROM plan_requests WHERE company_id = $1 AND status = 'pending' LIMIT 1`, [companyId]);
+        if (pendingCheck.rows.length > 0) {
+            return res.status(409).json({ error: '이미 처리 대기 중인 요금제 신청이 있습니다.', code: 'DUPLICATE_PENDING' });
+        }
+        // plan_requests 테이블에 저장
+        await (0, database_1.query)(`
+      INSERT INTO plan_requests (company_id, user_id, requested_plan_id, message, status)
+      VALUES ($1, $2, $3, $4, 'pending')
+    `, [companyId, userId, requestedPlanId, message || null]);
+        res.json({ message: '플랜 변경 신청이 접수되었습니다.' });
+    }
+    catch (error) {
+        console.error('플랜 신청 실패:', error);
+        res.status(500).json({ error: '플랜 신청 실패' });
+    }
+});
+// GET /api/companies/plan-request/status - 현재 신청 상태 조회 (pending + 미확인 결과)
+router.get('/plan-request/status', async (req, res) => {
+    try {
+        const companyId = req.user?.companyId;
+        if (!companyId) {
+            return res.status(401).json({ error: '인증 필요' });
+        }
+        // pending 신청 확인
+        const pendingResult = await (0, database_1.query)(`SELECT pr.id, pr.status, p.plan_name as requested_plan_name
+       FROM plan_requests pr
+       LEFT JOIN plans p ON pr.requested_plan_id = p.id
+       WHERE pr.company_id = $1 AND pr.status = 'pending'
+       ORDER BY pr.created_at DESC LIMIT 1`, [companyId]);
+        // 미확인 처리 결과 (approved/rejected 중 user_confirmed = false)
+        const unconfirmedResult = await (0, database_1.query)(`SELECT pr.id, pr.status, pr.admin_note, p.plan_name as requested_plan_name, pr.processed_at
+       FROM plan_requests pr
+       LEFT JOIN plans p ON pr.requested_plan_id = p.id
+       WHERE pr.company_id = $1 AND pr.status IN ('approved', 'rejected') AND pr.user_confirmed = false
+       ORDER BY pr.processed_at DESC LIMIT 1`, [companyId]);
+        res.json({
+            pending: pendingResult.rows[0] || null,
+            unconfirmed: unconfirmedResult.rows[0] || null,
+        });
+    }
+    catch (error) {
+        console.error('플랜 신청 상태 조회 실패:', error);
+        res.status(500).json({ error: '플랜 신청 상태 조회 실패' });
+    }
+});
+// PUT /api/companies/plan-request/:id/confirm - 사용자 결과 확인 처리
+router.put('/plan-request/:id/confirm', async (req, res) => {
+    try {
+        const companyId = req.user?.companyId;
+        const { id } = req.params;
+        if (!companyId) {
+            return res.status(401).json({ error: '인증 필요' });
+        }
+        await (0, database_1.query)(`UPDATE plan_requests SET user_confirmed = true WHERE id = $1 AND company_id = $2`, [id, companyId]);
+        res.json({ message: '확인 처리되었습니다.' });
+    }
+    catch (error) {
+        console.error('플랜 결과 확인 실패:', error);
+        res.status(500).json({ error: '플랜 결과 확인 실패' });
+    }
+});
+// D87: 자사 사용자 목록 조회 (발신번호 배정용)
+router.get('/company-users', async (req, res) => {
+    try {
+        const companyId = req.user?.companyId;
+        if (!companyId) {
+            return res.status(401).json({ success: false, error: '인증 필요' });
+        }
+        // ★ D131 후속: 사용자 목록에서 system_sync 가상 계정 제외
+        const result = await (0, database_1.query)(`SELECT id, name, email, user_type, store_codes
+       FROM users
+       WHERE company_id = $1 AND is_active = true AND COALESCE(is_system, false) = false
+       ORDER BY user_type ASC, name ASC`, [companyId]);
+        res.json({ success: true, users: result.rows });
+    }
+    catch (error) {
+        console.error('사용자 목록 조회 실패:', error);
+        res.status(500).json({ success: false, error: '조회 실패' });
+    }
+});
+// 회신번호 목록 조회
+// D87: assignment_scope 기반 사용자별 배정 필터링 추가
+router.get('/callback-numbers', async (req, res) => {
+    try {
+        const companyId = req.user?.companyId;
+        const userId = req.user?.userId;
+        const userType = req.user?.userType;
+        if (!companyId) {
+            return res.status(401).json({ success: false, error: '인증 필요' });
+        }
+        // D87: assignment_scope 기반 필터링 (하위호환: 컬럼 미존재 시 기존 동작 유지)
+        let hasAssignmentScope = true;
+        try {
+            await (0, database_1.query)(`SELECT assignment_scope FROM callback_numbers LIMIT 0`);
+        }
+        catch {
+            hasAssignmentScope = false;
+        }
+        let sql;
+        const params = [companyId];
+        if (hasAssignmentScope) {
+            // D87: assignment_scope 필터링
+            // - admin/company_admin: 전체 번호 조회 (assignment_scope 무관) — 관리 가시성 보장
+            // - company_user: 'all' + 본인 배정된 'assigned' 번호만
+            if (userType === 'super_admin' || userType === 'admin' || userType === 'company_admin') {
+                sql = `
+          SELECT cn.id, cn.phone, cn.label, cn.is_default, cn.store_code, cn.store_name, cn.created_at, cn.assignment_scope
+          FROM callback_numbers cn
+          WHERE cn.company_id = $1
+        `;
+            }
+            else {
+                sql = `
+          SELECT cn.id, cn.phone, cn.label, cn.is_default, cn.store_code, cn.store_name, cn.created_at, cn.assignment_scope
+          FROM callback_numbers cn
+          WHERE cn.company_id = $1
+            AND (
+              cn.assignment_scope = 'all'
+              OR EXISTS (
+                SELECT 1 FROM callback_number_assignments cna
+                WHERE cna.callback_number_id = cn.id AND cna.user_id = $2
+              )
+            )
+        `;
+                params.push(userId);
+            }
+        }
+        else {
+            // 하위호환: assignment_scope 컬럼 없으면 기존 쿼리
+            sql = `SELECT id, phone, label, is_default, store_code, store_name, created_at FROM callback_numbers WHERE company_id = $1`;
+        }
+        // 일반 사용자(브랜드담당자)는 본인 store_codes에 해당하는 회신번호만
+        if (userType !== 'admin') {
+            const userResult = await (0, database_1.query)('SELECT store_codes FROM users WHERE id = $1', [userId]);
+            const storeCodes = userResult.rows[0]?.store_codes;
+            if (storeCodes && storeCodes.length > 0) {
+                const paramIdx = params.length + 1;
+                sql += ` AND (${hasAssignmentScope ? 'cn.' : ''}store_code = ANY($${paramIdx}) OR ${hasAssignmentScope ? 'cn.' : ''}store_code IS NULL OR ${hasAssignmentScope ? 'cn.' : ''}is_default = true)`;
+                params.push(storeCodes);
+            }
+        }
+        sql += ` ORDER BY ${hasAssignmentScope ? 'cn.' : ''}is_default DESC, ${hasAssignmentScope ? 'cn.' : ''}store_code ASC, ${hasAssignmentScope ? 'cn.' : ''}created_at ASC`;
+        const result = await (0, database_1.query)(sql, params);
+        res.json({ success: true, numbers: result.rows });
+    }
+    catch (error) {
+        console.error('회신번호 조회 실패:', error);
+        res.status(500).json({ success: false, error: '조회 실패' });
+    }
+});
+/**
+ * ★ D136 (2026-04-22 PDF #8): 동적 카드 집계 헬퍼
+ *
+ * cardId: `dyn_{fieldKey}_{aggType}`
+ *   - fieldKey는 파라미터 바인딩($2)으로 주입 (SQL 인젝션 방어)
+ *   - customer_field_definitions.field_label을 라벨로 우선 사용, 없으면 fieldKey 원문
+ *
+ * 지원 aggType:
+ *   - dist      : 상위 10 분포 (distribution)
+ *   - sum       : 숫자 합계 (sum)
+ *   - recent30d : 최근 30일 내 date 값 보유 수 (count, 정규식 캐스팅 방어)
+ *   - has       : 값 보유 수 (count)
+ *   - rate      : 값 보유 비율 % (rate)
+ *
+ * 실패 시 null 반환 → 호출부가 skip하여 대시보드 전체 실패로 전파되지 않음.
+ */
+async function aggregateDynamicCard(companyId, cardId, parsed, storeFilter) {
+    const { fieldKey, aggType } = parsed;
+    // 라벨 조회 — customer_field_definitions.field_label 우선, 없으면 fieldKey 원문
+    let label = fieldKey;
+    try {
+        const labelRes = await (0, database_1.query)(`SELECT field_label FROM customer_field_definitions WHERE company_id = $1 AND field_key = $2 LIMIT 1`, [companyId, fieldKey]);
+        if (labelRes.rows[0]?.field_label)
+            label = labelRes.rows[0].field_label;
+    }
+    catch { /* 라벨 조회 실패 시 fieldKey 원문 사용 */ }
+    const baseWhere = `company_id = $1${storeFilter}`;
+    const nullSafe = `AND custom_fields->>$2 IS NOT NULL AND custom_fields->>$2 != ''`;
+    const commonFalse = { delta: null, deltaPercent: null, hasTrend: false };
+    try {
+        switch (aggType) {
+            case 'dist': {
+                const r = await (0, database_1.query)(`SELECT custom_fields->>$2 AS label, COUNT(*)::int AS count
+             FROM customers
+            WHERE ${baseWhere} ${nullSafe}
+            GROUP BY custom_fields->>$2
+            ORDER BY count DESC, label
+            LIMIT 10`, [companyId, fieldKey]);
+                const distribution = r.rows.map((row) => ({ label: row.label, count: parseInt(row.count) }));
+                return {
+                    cardId, label: `${label}별 분포`, type: 'distribution',
+                    icon: 'BarChart3', value: distribution, hasData: distribution.length > 0,
+                    ...commonFalse,
+                };
+            }
+            case 'sum': {
+                // 숫자 외 문자 제거 후 numeric 캐스팅 (콤마/공백 허용)
+                const r = await (0, database_1.query)(`SELECT
+             COALESCE(SUM(NULLIF(REGEXP_REPLACE(custom_fields->>$2, '[^0-9.-]', '', 'g'), '')::numeric), 0) AS total,
+             COUNT(*) FILTER (WHERE custom_fields->>$2 IS NOT NULL AND custom_fields->>$2 != '') AS cnt
+             FROM customers WHERE ${baseWhere}`, [companyId, fieldKey]);
+                const total = parseFloat(r.rows[0]?.total ?? 0);
+                const cnt = parseInt(r.rows[0]?.cnt ?? 0);
+                return {
+                    cardId, label: `${label} 합계`, type: 'sum',
+                    icon: 'CreditCard', value: total, hasData: cnt > 0,
+                    ...commonFalse,
+                };
+            }
+            case 'recent30d': {
+                // 정규식으로 YYYY-MM-DD 형식만 캐스팅 — 잘못된 값은 자동 제외 (에러 방지)
+                const r = await (0, database_1.query)(`SELECT COUNT(*) FILTER (
+             WHERE custom_fields->>$2 ~ '^\\d{4}-\\d{2}-\\d{2}'
+               AND (custom_fields->>$2)::date >= (NOW() - INTERVAL '30 days')::date
+           )::int AS cnt
+             FROM customers WHERE ${baseWhere}`, [companyId, fieldKey]);
+                return {
+                    cardId, label: `${label} 최근 30일`, type: 'count',
+                    icon: 'Calendar', value: parseInt(r.rows[0]?.cnt ?? 0), hasData: true,
+                    ...commonFalse,
+                };
+            }
+            case 'has': {
+                const r = await (0, database_1.query)(`SELECT COUNT(*) FILTER (WHERE custom_fields->>$2 IS NOT NULL AND custom_fields->>$2 != '')::int AS cnt
+             FROM customers WHERE ${baseWhere}`, [companyId, fieldKey]);
+                return {
+                    cardId, label: `${label} 보유 수`, type: 'count',
+                    icon: 'Users', value: parseInt(r.rows[0]?.cnt ?? 0), hasData: true,
+                    ...commonFalse,
+                };
+            }
+            case 'rate': {
+                const r = await (0, database_1.query)(`SELECT
+             COUNT(*) FILTER (WHERE custom_fields->>$2 IS NOT NULL AND custom_fields->>$2 != '')::int AS has_cnt,
+             COUNT(*)::int AS total
+             FROM customers WHERE ${baseWhere}`, [companyId, fieldKey]);
+                const hasCnt = parseInt(r.rows[0]?.has_cnt ?? 0);
+                const total = parseInt(r.rows[0]?.total ?? 0);
+                const rate = total > 0 ? Math.round((hasCnt / total) * 1000) / 10 : 0;
+                return {
+                    cardId, label: `${label} 비율`, type: 'rate',
+                    icon: 'Percent', value: rate, hasData: total > 0,
+                    ...commonFalse,
+                };
+            }
+        }
+    }
+    catch (err) {
+        console.warn(`[aggregateDynamicCard] ${cardId} 집계 실패:`, err?.message);
+        return null;
+    }
+    return null;
+}
+/**
+ * 대시보드 카드 집계 함수
+ * 설정된 카드만 효율적으로 집계 (단일 customers 쿼리 + 필요한 외부 테이블만)
+ */
+async function aggregateDashboardCards(companyId, cardIds, userId, userType) {
+    const results = [];
+    // ★ 사용자 격리: 고객 데이터는 store_code 기준, 발송 데이터는 created_by 기준
+    let customerStoreFilter = '';
+    const isCompanyUser = userType === 'company_user' && userId;
+    if (isCompanyUser) {
+        const scope = await (0, store_scope_1.getStoreScope)(companyId, userId);
+        if (scope.type === 'blocked') {
+            return cardIds.map(id => {
+                const def = (0, dashboard_card_pool_1.getCardDef)(id);
+                return { cardId: id, label: def?.label ?? id, type: def?.type ?? 'count', icon: def?.icon ?? 'HelpCircle', value: 0, hasData: false };
+            });
+        }
+        if (scope.type === 'filtered') {
+            customerStoreFilter = ` AND id IN (SELECT customer_id FROM customer_stores WHERE company_id = '${companyId}' AND store_code = ANY(ARRAY[${scope.storeCodes.map(s => `'${s}'`).join(',')}]::text[]))`;
+        }
+    }
+    // ── 1단계: customers 통합 집계 (데이터 존재 여부 포함) ──
+    // ★ D132 Phase A: 30일 전 동일 시점 카운트 동시 집계 (델타 뱃지용)
+    //   방식: created_at <= NOW() - INTERVAL '30 days' 필터로 30일 전 상태 근사
+    //   ※ 업데이트/삭제된 고객은 반영 안 됨 — 추세 표시 목적이라 허용
+    const month = (new Date().getMonth() + 1).toString().padStart(2, '0');
+    const baseResult = await (0, database_1.query)(`
+    SELECT
+      COUNT(*)::int                                                                          as total_customers,
+      COUNT(*) FILTER (WHERE created_at <= NOW() - INTERVAL '30 days')::int                  as total_customers_30d,
+      COUNT(*) FILTER (WHERE gender = 'M')::int                                              as gender_male,
+      COUNT(*) FILTER (WHERE gender = 'M' AND created_at <= NOW() - INTERVAL '30 days')::int as gender_male_30d,
+      COUNT(*) FILTER (WHERE gender = 'F')::int                                              as gender_female,
+      COUNT(*) FILTER (WHERE gender = 'F' AND created_at <= NOW() - INTERVAL '30 days')::int as gender_female_30d,
+      COUNT(*) FILTER (WHERE gender IS NOT NULL)::int                                        as has_gender_data,
+      COUNT(*) FILTER (WHERE birth_month_day LIKE $2)::int                                   as birthday_this_month,
+      COUNT(*) FILTER (WHERE birth_month_day IS NOT NULL)::int                               as has_birthday_data,
+      COUNT(*) FILTER (WHERE email IS NOT NULL)::int                                         as email_has,
+      COUNT(*) FILTER (WHERE email IS NOT NULL AND created_at <= NOW() - INTERVAL '30 days')::int as email_has_30d,
+      COUNT(*) FILTER (WHERE sms_opt_in = true)::int                                         as opt_in_count,
+      COUNT(*) FILTER (WHERE sms_opt_in = true AND created_at <= NOW() - INTERVAL '30 days')::int as opt_in_count_30d,
+      COUNT(*) FILTER (WHERE sms_opt_in IS NOT NULL)::int                                    as has_opt_in_data,
+      COUNT(*) FILTER (WHERE created_at >= date_trunc('month', NOW()))::int                  as new_this_month,
+      COUNT(*) FILTER (WHERE created_at >= date_trunc('month', NOW() - INTERVAL '1 month') AND created_at < date_trunc('month', NOW()))::int as new_last_month,
+      COALESCE(SUM(total_purchase_amount), 0)::numeric                                       as total_purchase_sum,
+      COALESCE(SUM(total_purchase_amount) FILTER (WHERE created_at <= NOW() - INTERVAL '30 days'), 0)::numeric as total_purchase_sum_30d,
+      COUNT(*) FILTER (WHERE total_purchase_amount IS NOT NULL AND total_purchase_amount > 0)::int as has_purchase_data,
+      COUNT(*) FILTER (WHERE recent_purchase_date >= (NOW() - INTERVAL '30 days')::date)::int     as recent_30d_purchase,
+      COUNT(*) FILTER (WHERE recent_purchase_date >= (NOW() - INTERVAL '60 days')::date AND recent_purchase_date < (NOW() - INTERVAL '30 days')::date)::int as recent_30d_purchase_prev,
+      COUNT(*) FILTER (WHERE recent_purchase_date IS NOT NULL)::int                               as has_recent_purchase_data,
+      COUNT(*) FILTER (WHERE recent_purchase_date IS NOT NULL AND recent_purchase_date < (NOW() - INTERVAL '90 days')::date)::int as inactive_90d,
+      COUNT(*) FILTER (WHERE recent_purchase_date IS NOT NULL AND recent_purchase_date < (NOW() - INTERVAL '120 days')::date)::int as inactive_90d_prev,
+      COUNT(*) FILTER (WHERE age IS NOT NULL)::int                                           as has_age_data,
+      COUNT(*) FILTER (WHERE grade IS NOT NULL)::int                                         as has_grade_data,
+      COUNT(*) FILTER (WHERE region IS NOT NULL)::int                                        as has_region_data,
+      COUNT(*) FILTER (WHERE registered_store IS NOT NULL OR recent_purchase_store IS NOT NULL)::int as has_store_data
+    FROM customers
+    WHERE company_id = $1${customerStoreFilter}
+  `, [companyId, `${month}-%`]);
+    const base = baseResult.rows[0];
+    const totalCustomers = parseInt(base.total_customers);
+    // ★ 델타 계산 헬퍼 — 30일 전 값 대비 절대 증감 + %
+    //   hasData=false거나 30일 전 값 0이면서 현재값 0이면 델타 생략
+    const baseline30dIso = new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10);
+    const calcDelta = (current, prev, hasData) => {
+        if (!hasData)
+            return { delta: null, deltaPercent: null, hasTrend: false };
+        // 30일 전 기준 데이터가 아예 없던 신규 회사는 hasTrend=false
+        if (prev === 0 && current === 0)
+            return { delta: null, deltaPercent: null, hasTrend: false };
+        const delta = current - prev;
+        const deltaPercent = prev === 0 ? null : Math.round((delta / prev) * 1000) / 10;
+        return { delta, deltaPercent, hasTrend: true };
+    };
+    // ── 2단계: 각 카드별 결과 조립 ──
+    for (const cardId of cardIds) {
+        // ★ D136 (2026-04-22 PDF #8): 동적 카드(dyn_{fieldKey}_{aggType}) 분기 집계
+        //   고객사가 업로드한 커스텀 필드(custom_1~15 또는 임의 JSONB 키) 기반 카드.
+        //   fieldKey는 파라미터 바인딩($2)으로 주입 → SQL 인젝션 방어.
+        if ((0, dashboard_card_pool_1.isDynamicCardId)(cardId)) {
+            const parsed = (0, dashboard_card_pool_1.parseDynamicCardId)(cardId);
+            if (!parsed)
+                continue;
+            const dynResult = await aggregateDynamicCard(companyId, cardId, parsed, customerStoreFilter);
+            if (dynResult)
+                results.push(dynResult);
+            continue;
+        }
+        const def = (0, dashboard_card_pool_1.getCardDef)(cardId);
+        if (!def)
+            continue;
+        let value = 0;
+        let hasData = true;
+        switch (cardId) {
+            // ── 단순 집계 (customers 통합 쿼리 결과 사용) ──
+            case 'total_customers':
+                value = totalCustomers;
+                hasData = totalCustomers > 0;
+                break;
+            case 'gender_male':
+                value = parseInt(base.gender_male);
+                hasData = parseInt(base.has_gender_data) > 0;
+                break;
+            case 'gender_female':
+                value = parseInt(base.gender_female);
+                hasData = parseInt(base.has_gender_data) > 0;
+                break;
+            case 'birthday_this_month':
+                value = parseInt(base.birthday_this_month);
+                hasData = parseInt(base.has_birthday_data) > 0;
+                break;
+            case 'email_rate': {
+                const emailHas = parseInt(base.email_has);
+                value = totalCustomers > 0 ? Math.round((emailHas / totalCustomers) * 100) : 0;
+                hasData = totalCustomers > 0;
+                break;
+            }
+            case 'opt_in_count':
+                value = parseInt(base.opt_in_count);
+                hasData = parseInt(base.has_opt_in_data) > 0;
+                break;
+            case 'new_this_month':
+                value = parseInt(base.new_this_month);
+                hasData = totalCustomers > 0;
+                break;
+            case 'total_purchase_sum':
+                value = parseFloat(base.total_purchase_sum);
+                hasData = parseInt(base.has_purchase_data) > 0;
+                break;
+            case 'recent_30d_purchase':
+                value = parseInt(base.recent_30d_purchase);
+                hasData = parseInt(base.has_recent_purchase_data) > 0;
+                break;
+            case 'inactive_90d':
+                value = parseInt(base.inactive_90d);
+                hasData = parseInt(base.has_recent_purchase_data) > 0;
+                break;
+            // ── 분포형 카드 (데이터 존재 시에만 별도 쿼리) ──
+            case 'age_distribution': {
+                if (parseInt(base.has_age_data) === 0) {
+                    value = [];
+                    hasData = false;
+                    break;
+                }
+                const ageResult = await (0, database_1.query)(`
+          SELECT
+            CASE
+              WHEN age < 20 THEN '10대 이하'
+              WHEN age < 30 THEN '20대'
+              WHEN age < 40 THEN '30대'
+              WHEN age < 50 THEN '40대'
+              WHEN age < 60 THEN '50대'
+              ELSE '60대 이상'
+            END as label,
+            COUNT(*)::int as count
+          FROM customers
+          WHERE company_id = $1 AND age IS NOT NULL${customerStoreFilter}
+          GROUP BY 1
+          ORDER BY MIN(age)
+        `, [companyId]);
+                value = ageResult.rows;
+                hasData = true;
+                break;
+            }
+            case 'grade_distribution': {
+                if (parseInt(base.has_grade_data) === 0) {
+                    value = [];
+                    hasData = false;
+                    break;
+                }
+                const gradeResult = await (0, database_1.query)(`
+          SELECT grade as label, COUNT(*)::int as count
+          FROM customers
+          WHERE company_id = $1 AND grade IS NOT NULL${customerStoreFilter}
+          GROUP BY grade
+          ORDER BY count DESC
+        `, [companyId]);
+                value = gradeResult.rows;
+                hasData = true;
+                break;
+            }
+            case 'region_top': {
+                if (parseInt(base.has_region_data) === 0) {
+                    value = [];
+                    hasData = false;
+                    break;
+                }
+                const regionResult = await (0, database_1.query)(`
+          SELECT region as label, COUNT(*)::int as count
+          FROM customers
+          WHERE company_id = $1 AND region IS NOT NULL${customerStoreFilter}
+          GROUP BY region
+          ORDER BY count DESC
+          LIMIT 5
+        `, [companyId]);
+                value = regionResult.rows;
+                hasData = true;
+                break;
+            }
+            case 'store_distribution': {
+                if (parseInt(base.has_store_data) === 0) {
+                    value = [];
+                    hasData = false;
+                    break;
+                }
+                // ★ B17-16: store_name → COALESCE(registered_store, recent_purchase_store) 실제 컬럼 참조
+                const storeResult = await (0, database_1.query)(`
+          SELECT COALESCE(registered_store, recent_purchase_store) as label, COUNT(*)::int as count
+          FROM customers
+          WHERE company_id = $1 AND (registered_store IS NOT NULL OR recent_purchase_store IS NOT NULL)${customerStoreFilter}
+          GROUP BY COALESCE(registered_store, recent_purchase_store)
+          ORDER BY count DESC
+          LIMIT 10
+        `, [companyId]);
+                value = storeResult.rows;
+                hasData = true;
+                break;
+            }
+            // ── 외부 테이블 카드 ──
+            case 'opt_out_count': {
+                const optOutResult = await (0, database_1.query)(`SELECT COUNT(DISTINCT phone)::int as count FROM unsubscribes WHERE company_id = $1`, [companyId]);
+                value = parseInt(optOutResult.rows[0]?.count ?? 0);
+                hasData = totalCustomers > 0;
+                break;
+            }
+            case 'active_campaigns': {
+                const campCreatedByFilter = isCompanyUser ? ` AND created_by = '${userId}'` : '';
+                const campResult = await (0, database_1.query)(`SELECT COUNT(*)::int as count FROM campaigns WHERE company_id = $1 AND status IN ('sending', 'scheduled')${campCreatedByFilter}`, [companyId]);
+                value = parseInt(campResult.rows[0]?.count ?? 0);
+                hasData = true;
+                break;
+            }
+            case 'monthly_spend': {
+                // ★ D98: created_by 직접 필터링 (서브쿼리 대신 — 테스트발송 더미 UUID 문제 해결)
+                const spendCreatedByFilter = isCompanyUser ? ` AND created_by = $2` : '';
+                const spendParams = isCompanyUser ? [companyId, userId] : [companyId];
+                const spendResult = await (0, database_1.query)(`SELECT COALESCE(SUM(amount), 0)::numeric as total
+           FROM balance_transactions
+           WHERE company_id = $1 AND type = 'deduct' AND created_at >= date_trunc('month', NOW())${spendCreatedByFilter}`, spendParams);
+                value = parseFloat(spendResult.rows[0]?.total ?? 0);
+                hasData = true;
+                break;
+            }
+        }
+        // ★ D132 Phase A: cardId별 30일 전 값 매핑 (delta 뱃지 계산용)
+        //   count 타입 + 외부 테이블 카드만. distribution/rate/sum은 Phase B에서 확장
+        let prev30d = null;
+        switch (cardId) {
+            case 'total_customers':
+                prev30d = parseInt(base.total_customers_30d);
+                break;
+            case 'gender_male':
+                prev30d = parseInt(base.gender_male_30d);
+                break;
+            case 'gender_female':
+                prev30d = parseInt(base.gender_female_30d);
+                break;
+            case 'opt_in_count':
+                prev30d = parseInt(base.opt_in_count_30d);
+                break;
+            case 'new_this_month':
+                prev30d = parseInt(base.new_last_month);
+                break;
+            case 'recent_30d_purchase':
+                prev30d = parseInt(base.recent_30d_purchase_prev);
+                break;
+            case 'inactive_90d':
+                prev30d = parseInt(base.inactive_90d_prev);
+                break;
+            // email_rate / total_purchase_sum / distribution / 외부테이블(opt_out_count/active_campaigns/monthly_spend): Phase B에서 확장
+        }
+        const currentNum = typeof value === 'number' ? value : 0;
+        const trendInfo = prev30d !== null
+            ? calcDelta(currentNum, prev30d, hasData)
+            : { delta: null, deltaPercent: null, hasTrend: false };
+        results.push({
+            cardId: def.cardId,
+            label: def.label,
+            type: def.type,
+            icon: def.icon,
+            value,
+            hasData,
+            delta: trendInfo.delta,
+            deltaPercent: trendInfo.deltaPercent,
+            deltaBaseline: trendInfo.hasTrend ? baseline30dIso : undefined,
+            hasTrend: trendInfo.hasTrend,
+        });
+    }
+    return results;
+}
+// GET /api/companies/dashboard-cards — 고객사별 대시보드 카드 데이터
+router.get('/dashboard-cards', async (req, res) => {
+    try {
+        const companyId = req.user?.companyId;
+        const userId = req.user?.userId;
+        const userType = req.user?.userType;
+        if (!companyId) {
+            return res.status(401).json({ error: '인증 필요' });
+        }
+        // company_settings에서 카드 설정 조회
+        const settingsResult = await (0, database_1.query)(`SELECT setting_key, setting_value
+       FROM company_settings
+       WHERE company_id = $1 AND setting_key IN ('dashboard_cards', 'dashboard_card_count')`, [companyId]);
+        const settings = {};
+        for (const row of settingsResult.rows) {
+            settings[row.setting_key] = row.setting_value;
+        }
+        const cardCount = parseInt(settings.dashboard_card_count || '0');
+        let cardIds = [];
+        try {
+            cardIds = settings.dashboard_cards ? JSON.parse(settings.dashboard_cards) : [];
+        }
+        catch {
+            cardIds = [];
+        }
+        // 카드 미설정 시
+        if (cardIds.length === 0) {
+            return res.json({
+                configured: false,
+                cardCount: 0,
+                cards: [],
+            });
+        }
+        // DB에 고객 데이터 존재 여부 확인 (전체 블러 처리용)
+        const customerCheck = await (0, database_1.query)('SELECT COUNT(*)::int as count FROM customers WHERE company_id = $1 LIMIT 1', [companyId]);
+        const hasCustomers = parseInt(customerCheck.rows[0].count) > 0;
+        if (!hasCustomers) {
+            // DB 미업로드 → 프론트에서 전체 블러 + CTA 표시
+            return res.json({
+                configured: true,
+                cardCount,
+                hasCustomerData: false,
+                cards: cardIds.map(id => {
+                    const def = (0, dashboard_card_pool_1.getCardDef)(id);
+                    return {
+                        cardId: id,
+                        label: def?.label ?? id,
+                        type: def?.type ?? 'count',
+                        icon: def?.icon ?? 'HelpCircle',
+                        value: 0,
+                        hasData: false,
+                    };
+                }),
+            });
+        }
+        // 집계 실행 — 사용자 격리 정보 전달
+        const cards = await aggregateDashboardCards(companyId, cardIds, userId, userType);
+        res.json({
+            configured: true,
+            cardCount,
+            hasCustomerData: true,
+            cards,
+        });
+    }
+    catch (error) {
+        console.error('대시보드 카드 조회 실패:', error);
+        res.status(500).json({ error: '대시보드 카드 조회 실패' });
+    }
+});
+// ===== D132 Phase B: 대시보드 카드 상세 API =====
+// GET /api/companies/dashboard-cards/:cardId/detail
+//   카드 타입별 상세 데이터 (trend 6개월 / breakdown 성별·연령·등급 / topList 생일 카드)
+//   CT-02 store-scope 재활용 + DASHBOARD_CARD_POOL의 cardId 검증
+router.get('/dashboard-cards/:cardId/detail', async (req, res) => {
+    try {
+        const companyId = req.user?.companyId;
+        const userId = req.user?.userId;
+        const userType = req.user?.userType;
+        if (!companyId)
+            return res.status(401).json({ error: '인증 필요' });
+        const cardId = req.params.cardId;
+        const def = (0, dashboard_card_pool_1.getCardDef)(cardId);
+        if (!def)
+            return res.status(404).json({ error: '존재하지 않는 카드입니다.' });
+        const q = req.query.q || '';
+        const page = Math.max(0, parseInt(req.query.page || '0'));
+        const limit = Math.min(100, parseInt(req.query.limit || '20'));
+        // 브랜드 격리 (CT-02)
+        let customerStoreFilter = '';
+        const isCompanyUser = userType === 'company_user' && userId;
+        if (isCompanyUser) {
+            const scope = await (0, store_scope_1.getStoreScope)(companyId, userId);
+            if (scope.type === 'blocked') {
+                return res.json({ cardId, label: def.label, type: def.type, blocked: true });
+            }
+            if (scope.type === 'filtered') {
+                customerStoreFilter = ` AND id IN (SELECT customer_id FROM customer_stores WHERE company_id = '${companyId}' AND store_code = ANY(ARRAY[${scope.storeCodes.map(s => `'${s}'`).join(',')}]::text[]))`;
+            }
+        }
+        const month = (new Date().getMonth() + 1).toString().padStart(2, '0');
+        // 카드별 WHERE 조건 (customers 테이블)
+        const CARD_WHERE_MAP = {
+            total_customers: '',
+            gender_male: ` AND gender = 'M'`,
+            gender_female: ` AND gender = 'F'`,
+            birthday_this_month: ` AND birth_month_day LIKE '${month}-%'`,
+            opt_in_count: ` AND sms_opt_in = true`,
+            new_this_month: ` AND created_at >= date_trunc('month', NOW())`,
+            recent_30d_purchase: ` AND recent_purchase_date >= (NOW() - INTERVAL '30 days')::date`,
+            inactive_90d: ` AND recent_purchase_date IS NOT NULL AND recent_purchase_date < (NOW() - INTERVAL '90 days')::date`,
+        };
+        const cardWhere = CARD_WHERE_MAP[cardId] ?? '';
+        const baseWhere = `WHERE company_id = $1 AND is_active = true${cardWhere}${customerStoreFilter}`;
+        // 응답 구조
+        const response = {
+            cardId,
+            label: def.label,
+            type: def.type,
+            icon: def.icon,
+        };
+        // ── 1. trend: 6개월 누적 월별 추이 (count 카드에만) ──
+        const TREND_CARD_IDS = ['total_customers', 'gender_male', 'gender_female', 'opt_in_count', 'new_this_month', 'recent_30d_purchase', 'inactive_90d'];
+        if (TREND_CARD_IDS.includes(cardId)) {
+            // 각 월 말 기준 "카드 조건에 해당하는 고객 수" 누적
+            //   ※ new_this_month는 해당 월의 신규 수 (다른 카드와 다름)
+            let trendSql;
+            if (cardId === 'new_this_month') {
+                // 해당 월 범위에 created_at이 포함된 수
+                trendSql = `
+          SELECT to_char(gs, 'YYYY-MM') as month,
+            (SELECT COUNT(*) FROM customers
+               WHERE company_id = $1 AND is_active = true${customerStoreFilter}
+                 AND created_at >= gs AND created_at < gs + INTERVAL '1 month') as value
+          FROM generate_series(
+            date_trunc('month', NOW() - INTERVAL '5 months'),
+            date_trunc('month', NOW()),
+            '1 month'
+          ) gs
+          ORDER BY gs
+        `;
+            }
+            else if (cardId === 'recent_30d_purchase') {
+                // 각 월 말 기준 "최근 30일 구매" 카운트
+                trendSql = `
+          SELECT to_char(gs, 'YYYY-MM') as month,
+            (SELECT COUNT(*) FROM customers
+               WHERE company_id = $1 AND is_active = true${customerStoreFilter}
+                 AND recent_purchase_date >= (gs + INTERVAL '1 month' - INTERVAL '30 days')::date
+                 AND recent_purchase_date < (gs + INTERVAL '1 month')::date) as value
+          FROM generate_series(
+            date_trunc('month', NOW() - INTERVAL '5 months'),
+            date_trunc('month', NOW()),
+            '1 month'
+          ) gs
+          ORDER BY gs
+        `;
+            }
+            else if (cardId === 'inactive_90d') {
+                trendSql = `
+          SELECT to_char(gs, 'YYYY-MM') as month,
+            (SELECT COUNT(*) FROM customers
+               WHERE company_id = $1 AND is_active = true${customerStoreFilter}
+                 AND recent_purchase_date IS NOT NULL
+                 AND recent_purchase_date < ((gs + INTERVAL '1 month') - INTERVAL '90 days')::date) as value
+          FROM generate_series(
+            date_trunc('month', NOW() - INTERVAL '5 months'),
+            date_trunc('month', NOW()),
+            '1 month'
+          ) gs
+          ORDER BY gs
+        `;
+            }
+            else {
+                // total/male/female/opt_in: 월 말 기준 누적 (created_at < 월말)
+                const condForTrend = cardId === 'gender_male' ? ` AND gender = 'M'` : cardId === 'gender_female' ? ` AND gender = 'F'` : cardId === 'opt_in_count' ? ` AND sms_opt_in = true` : '';
+                trendSql = `
+          SELECT to_char(gs, 'YYYY-MM') as month,
+            (SELECT COUNT(*) FROM customers
+               WHERE company_id = $1 AND is_active = true${customerStoreFilter}${condForTrend}
+                 AND created_at < gs + INTERVAL '1 month') as value
+          FROM generate_series(
+            date_trunc('month', NOW() - INTERVAL '5 months'),
+            date_trunc('month', NOW()),
+            '1 month'
+          ) gs
+          ORDER BY gs
+        `;
+            }
+            const trendRes = await (0, database_1.query)(trendSql, [companyId]);
+            response.trend = trendRes.rows.map((r) => ({ month: r.month, value: parseInt(r.value) || 0 }));
+        }
+        // ── 2. breakdown: 성별/연령/등급 분포 (count 카드에만) ──
+        const BREAKDOWN_CARD_IDS = ['total_customers', 'gender_male', 'gender_female', 'birthday_this_month', 'opt_in_count', 'new_this_month', 'recent_30d_purchase', 'inactive_90d'];
+        if (BREAKDOWN_CARD_IDS.includes(cardId)) {
+            const [genderRes, ageRes, gradeRes, regionRes] = await Promise.all([
+                (0, database_1.query)(`SELECT COALESCE(gender, '미상') as label, COUNT(*)::int as count FROM customers ${baseWhere} GROUP BY gender ORDER BY count DESC`, [companyId]),
+                (0, database_1.query)(`
+          SELECT
+            CASE
+              WHEN age IS NULL THEN '미상'
+              WHEN age < 20 THEN '10대 이하'
+              WHEN age < 30 THEN '20대'
+              WHEN age < 40 THEN '30대'
+              WHEN age < 50 THEN '40대'
+              WHEN age < 60 THEN '50대'
+              ELSE '60대 이상'
+            END as label,
+            COUNT(*)::int as count
+          FROM customers ${baseWhere}
+          GROUP BY 1
+          ORDER BY MIN(COALESCE(age, 999))
+        `, [companyId]),
+                (0, database_1.query)(`SELECT COALESCE(grade, '미상') as label, COUNT(*)::int as count FROM customers ${baseWhere} GROUP BY grade ORDER BY count DESC LIMIT 8`, [companyId]),
+                (0, database_1.query)(`SELECT COALESCE(region, '미상') as label, COUNT(*)::int as count FROM customers ${baseWhere} GROUP BY region ORDER BY count DESC LIMIT 6`, [companyId]),
+            ]);
+            // gender enum 역변환
+            const mapGenderLabel = (raw) => (raw === 'M' ? '남성' : raw === 'F' ? '여성' : raw);
+            response.breakdown = {
+                byGender: genderRes.rows.map((r) => ({ label: mapGenderLabel(r.label), count: parseInt(r.count) })),
+                byAge: ageRes.rows.map((r) => ({ label: r.label, count: parseInt(r.count) })),
+                byGrade: gradeRes.rows.map((r) => ({ label: r.label, count: parseInt(r.count) })),
+                byRegion: regionRes.rows.map((r) => ({ label: r.label, count: parseInt(r.count) })),
+            };
+        }
+        // ── 3. topList: 생일 카드 전용 고객 리스트 (검색 + 페이지네이션) ──
+        if (cardId === 'birthday_this_month') {
+            let topWhere = baseWhere;
+            const topParams = [companyId];
+            let topParamIdx = 2;
+            if (q) {
+                topWhere += ` AND (name ILIKE $${topParamIdx} OR phone ILIKE $${topParamIdx})`;
+                topParams.push(`%${q}%`);
+                topParamIdx++;
+            }
+            const countRes = await (0, database_1.query)(`SELECT COUNT(*)::int as total FROM customers ${topWhere}`, topParams);
+            const total = parseInt(countRes.rows[0]?.total || 0);
+            topParams.push(limit, page * limit);
+            const listRes = await (0, database_1.query)(`
+        SELECT id, name, phone, gender, grade, birth_month_day,
+               TO_CHAR(recent_purchase_date, 'YYYY-MM-DD') as recent_purchase_date,
+               total_purchase_amount
+          FROM customers ${topWhere}
+         ORDER BY birth_month_day ASC NULLS LAST, name ASC
+         LIMIT $${topParamIdx} OFFSET $${topParamIdx + 1}
+      `, topParams);
+            response.topList = {
+                items: listRes.rows.map((r) => ({
+                    id: r.id,
+                    name: r.name,
+                    phone: r.phone,
+                    gender: r.gender === 'M' ? '남성' : r.gender === 'F' ? '여성' : r.gender || '',
+                    grade: r.grade || '',
+                    birth_month_day: r.birth_month_day || '',
+                    recent_purchase_date: r.recent_purchase_date || '',
+                    total_purchase_amount: r.total_purchase_amount != null ? Number(r.total_purchase_amount) : 0,
+                })),
+                total,
+                page,
+                limit,
+            };
+        }
+        // ── 4. distribution 카드 전체 확장 리스트 ──
+        const DISTRIBUTION_EXPAND = {
+            age_distribution: `
+        SELECT
+          CASE
+            WHEN age < 20 THEN '10대 이하'
+            WHEN age < 30 THEN '20대'
+            WHEN age < 40 THEN '30대'
+            WHEN age < 50 THEN '40대'
+            WHEN age < 60 THEN '50대'
+            ELSE '60대 이상'
+          END as label, COUNT(*)::int as count
+        FROM customers WHERE company_id = $1 AND is_active = true AND age IS NOT NULL${customerStoreFilter}
+        GROUP BY 1 ORDER BY MIN(age)
+      `,
+            grade_distribution: `
+        SELECT grade as label, COUNT(*)::int as count
+        FROM customers WHERE company_id = $1 AND is_active = true AND grade IS NOT NULL${customerStoreFilter}
+        GROUP BY grade ORDER BY count DESC
+      `,
+            region_top: `
+        SELECT region as label, COUNT(*)::int as count
+        FROM customers WHERE company_id = $1 AND is_active = true AND region IS NOT NULL${customerStoreFilter}
+        GROUP BY region ORDER BY count DESC LIMIT 20
+      `,
+            store_distribution: `
+        SELECT COALESCE(registered_store, recent_purchase_store) as label, COUNT(*)::int as count
+        FROM customers WHERE company_id = $1 AND is_active = true
+          AND (registered_store IS NOT NULL OR recent_purchase_store IS NOT NULL)${customerStoreFilter}
+        GROUP BY COALESCE(registered_store, recent_purchase_store) ORDER BY count DESC LIMIT 30
+      `,
+        };
+        if (DISTRIBUTION_EXPAND[cardId]) {
+            const distRes = await (0, database_1.query)(DISTRIBUTION_EXPAND[cardId], [companyId]);
+            response.fullDistribution = distRes.rows.map((r) => ({ label: r.label, count: parseInt(r.count) }));
+        }
+        res.json(response);
+    }
+    catch (error) {
+        console.error('카드 상세 조회 실패:', error);
+        res.status(500).json({ error: '카드 상세 조회 실패' });
+    }
+});
+// GET /api/companies - 고객사 목록
+router.get('/', auth_1.requireSuperAdmin, async (req, res) => {
+    try {
+        const { status, search, page = 1, limit = 20 } = req.query;
+        const offset = (Number(page) - 1) * Number(limit);
+        let whereClause = 'WHERE 1=1';
+        const params = [];
+        let paramIndex = 1;
+        if (status) {
+            whereClause += ` AND c.status = $${paramIndex++}`;
+            params.push(status);
+        }
+        if (search) {
+            whereClause += ` AND (c.company_name ILIKE $${paramIndex} OR c.company_code ILIKE $${paramIndex})`;
+            params.push(`%${search}%`);
+            paramIndex++;
+        }
+        const countResult = await (0, database_1.query)(`SELECT COUNT(*) FROM companies c ${whereClause}`, params);
+        const total = parseInt(countResult.rows[0].count);
+        params.push(Number(limit), offset);
+        // ★ D114 P9: total_customers 서브쿼리 추가 — 슈퍼관리자 고객사 목록에 고객 수 표시
+        const result = await (0, database_1.query)(`SELECT c.*, p.plan_name, p.plan_code,
+              (SELECT COUNT(*) FROM customers WHERE company_id = c.id AND is_active = true) as total_customers
+       FROM companies c
+       LEFT JOIN plans p ON c.plan_id = p.id
+       ${whereClause}
+       ORDER BY c.created_at DESC
+       LIMIT $${paramIndex++} OFFSET $${paramIndex}`, params);
+        return res.json({
+            companies: result.rows,
+            pagination: {
+                total,
+                page: Number(page),
+                limit: Number(limit),
+                totalPages: Math.ceil(total / Number(limit)),
+            },
+        });
+    }
+    catch (error) {
+        console.error('고객사 목록 조회 에러:', error);
+        return res.status(500).json({ error: '서버 오류가 발생했습니다.' });
+    }
+});
+// GET /api/companies/:id - 고객사 상세
+router.get('/:id', auth_1.requireSuperAdmin, async (req, res) => {
+    try {
+        const { id } = req.params;
+        const result = await (0, database_1.query)(`SELECT c.*, p.plan_name, p.plan_code, p.max_customers
+       FROM companies c
+       LEFT JOIN plans p ON c.plan_id = p.id
+       WHERE c.id = $1`, [id]);
+        if (result.rows.length === 0) {
+            return res.status(404).json({ error: '고객사를 찾을 수 없습니다.' });
+        }
+        return res.json({ company: result.rows[0] });
+    }
+    catch (error) {
+        console.error('고객사 상세 조회 에러:', error);
+        return res.status(500).json({ error: '서버 오류가 발생했습니다.' });
+    }
+});
+// POST /api/companies - 고객사 생성
+router.post('/', auth_1.requireSuperAdmin, async (req, res) => {
+    try {
+        const { companyCode, companyName, businessNumber, ceoName, contactName, contactEmail, contactPhone, address, planId, dataInputMethod = 'file', } = req.body;
+        const apiKey = `tk_${crypto_1.default.randomBytes(24).toString('hex')}`;
+        const apiSecret = crypto_1.default.randomBytes(32).toString('hex');
+        const dbName = `targetup_${companyCode.toLowerCase()}`;
+        const result = await (0, database_1.query)(`INSERT INTO companies (
+        name, company_code, company_name, business_number, ceo_name,
+        contact_name, contact_email, contact_phone, address,
+        plan_id, data_input_method, api_key, api_secret, db_name,
+        created_by
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+      RETURNING *`, [
+            companyName, companyCode, companyName, businessNumber, ceoName,
+            contactName, contactEmail, contactPhone, address,
+            planId, dataInputMethod, apiKey, apiSecret, dbName,
+            req.user?.userId
+        ]);
+        const newCompanyId = result.rows[0].id;
+        // ===== SyncAgent v1.5.0: 시스템 가상 user + customer_code 시퀀스 자동 생성 =====
+        // 설계서 §9-3 — 트리거 대신 애플리케이션 로직 선택(추천 B안).
+        try {
+            await (0, database_1.query)(`INSERT INTO users (id, company_id, login_id, user_type, name, is_active, is_system, password_hash, status)
+         VALUES (gen_random_uuid(), $1, 'system_sync_' || $1::text, 'system', '싱크에이전트 (시스템)', true, true, '', 'active')
+         ON CONFLICT DO NOTHING`, [newCompanyId]);
+        }
+        catch (sysErr) {
+            console.error('[Company Create] 시스템 user 생성 실패:', sysErr);
+        }
+        try {
+            await (0, database_1.query)(`INSERT INTO customer_code_sequences (company_id, last_number)
+         VALUES ($1, 0)
+         ON CONFLICT (company_id) DO NOTHING`, [newCompanyId]);
+        }
+        catch (seqErr) {
+            console.error('[Company Create] customer_code_sequences 초기화 실패:', seqErr);
+        }
+        return res.status(201).json({
+            message: '고객사가 생성되었습니다.',
+            company: result.rows[0],
+        });
+    }
+    catch (error) {
+        console.error('고객사 생성 에러:', error);
+        if (error.code === '23505') {
+            return res.status(400).json({ error: '이미 존재하는 고객사 코드입니다.' });
+        }
+        return res.status(500).json({ error: '서버 오류가 발생했습니다.' });
+    }
+});
+// ============================================================
+// ★ CT-17: 30일 PRO 무료체험 부여/취소 (슈퍼관리자 전용)
+//   - grant-trial : 회사에 30일 동안 PRO 기능 개방
+//   - revoke-trial: 즉시 취소 (FREE 강등)
+//   - 만료 자동 강등: utils/trial-downgrade-worker.ts (Cron 매일 04:00 KST)
+// ============================================================
+/**
+ * POST /api/companies/:id/grant-trial
+ * body: { days?: number = 30 }
+ */
+router.post('/:id/grant-trial', auth_1.requireSuperAdmin, async (req, res) => {
+    try {
+        const { id } = req.params;
+        const days = Math.max(1, Math.min(Number(req.body?.days) || 30, 365));
+        // 회사 존재 확인
+        const companyRes = await (0, database_1.query)(`SELECT c.id, p.plan_code
+         FROM companies c
+         LEFT JOIN plans p ON c.plan_id = p.id
+        WHERE c.id = $1`, [id]);
+        if (companyRes.rows.length === 0) {
+            return res.status(404).json({ error: '고객사를 찾을 수 없습니다.' });
+        }
+        // TRIAL plan id 조회 (무료체험 전용 plan — PRO와 동일 기능)
+        const trialRes = await (0, database_1.query)(`SELECT id FROM plans WHERE plan_code = 'TRIAL' AND is_active = true LIMIT 1`);
+        if (trialRes.rows.length === 0) {
+            return res.status(500).json({ error: '무료체험(TRIAL) 요금제가 존재하지 않습니다. 슈퍼관리자에게 문의하세요.' });
+        }
+        const trialPlanId = trialRes.rows[0].id;
+        // ★ RETURNING에 plan_code 포함 — AdminDashboard 가 응답값으로 planCode 표시
+        const updated = await (0, database_1.query)(`UPDATE companies c
+          SET plan_id             = $1,
+              subscription_status = 'trial',
+              trial_expires_at    = NOW() + ($2::int || ' days')::interval,
+              updated_at          = NOW()
+        WHERE c.id = $3
+      RETURNING c.id, c.plan_id, c.subscription_status, c.trial_expires_at,
+                (SELECT plan_code FROM plans WHERE id = $1) AS plan_code`, [trialPlanId, days, id]);
+        return res.json({
+            success: true,
+            message: `${days}일 PRO 무료체험이 부여되었습니다.`,
+            company: updated.rows[0],
+        });
+    }
+    catch (err) {
+        console.error('grant-trial 실패:', err);
+        return res.status(500).json({ error: '체험 부여 실패' });
+    }
+});
+/**
+ * POST /api/companies/:id/revoke-trial
+ *   - 활성 체험 즉시 종료 → plan_id=FREE + subscription_status='trial_expired'
+ *   - 정식 구독(subscription_status='paid')은 대상 아님
+ *   - 조건: plan_code='TRIAL' 인 경우만 (subscription_status 값에 무관 — 'active'/'trial' 둘 다 허용)
+ *     ※ 과거 subscription_status='trial' 조건만으로는 admin.ts가 'active'로 덮어쓴 케이스에서 취소 불가했음.
+ */
+router.post('/:id/revoke-trial', auth_1.requireSuperAdmin, async (req, res) => {
+    try {
+        const { id } = req.params;
+        const freeRes = await (0, database_1.query)(`SELECT id FROM plans WHERE plan_code = 'FREE' LIMIT 1`);
+        if (freeRes.rows.length === 0) {
+            return res.status(500).json({ error: 'FREE 요금제가 존재하지 않습니다.' });
+        }
+        const freePlanId = freeRes.rows[0].id;
+        const updated = await (0, database_1.query)(`UPDATE companies c
+          SET plan_id             = $1,
+              subscription_status = 'trial_expired',
+              updated_at          = NOW()
+         FROM plans p
+        WHERE c.id = $2
+          AND c.plan_id = p.id
+          AND p.plan_code = 'TRIAL'
+      RETURNING c.id, c.plan_id, c.subscription_status, c.trial_expires_at,
+                (SELECT plan_code FROM plans WHERE id = $1) AS plan_code`, [freePlanId, id]);
+        if (updated.rows.length === 0) {
+            return res.status(400).json({ error: '취소할 활성 체험이 없습니다.' });
+        }
+        return res.json({
+            success: true,
+            message: '무료체험이 취소되고 미가입(FREE) 상태로 전환되었습니다.',
+            company: updated.rows[0],
+        });
+    }
+    catch (err) {
+        console.error('revoke-trial 실패:', err);
+        return res.status(500).json({ error: '체험 취소 실패' });
+    }
+});
+// PUT /api/companies/:id - 고객사 수정 (전체 설정 포함)
+router.put('/:id', auth_1.requireSuperAdmin, async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { companyName, businessNumber, ceoName, contactName, contactEmail, contactPhone, address, planId, status, dataInputMethod, rejectNumber, 
+        // 발송정책
+        sendHourStart, sendHourEnd, dailyLimit, holidaySend, duplicateDays, 
+        // 단가
+        costPerSms, costPerLms, costPerMms, costPerKakao, 
+        // AI설정
+        targetStrategy, crossCategoryAllowed, excludedSegments, approvalRequired, 
+        // 분류코드
+        storeCodeList, } = req.body;
+        const result = await (0, database_1.query)(`UPDATE companies SET
+        company_name = COALESCE($1, company_name),
+        name = COALESCE($1, name),
+        business_number = COALESCE($2, business_number),
+        ceo_name = COALESCE($3, ceo_name),
+        contact_name = COALESCE($4, contact_name),
+        contact_email = COALESCE($5, contact_email),
+        contact_phone = COALESCE($6, contact_phone),
+        address = COALESCE($7, address),
+        plan_id = COALESCE($8, plan_id),
+        status = COALESCE($9, status),
+        data_input_method = COALESCE($10, data_input_method),
+        reject_number = COALESCE($11, reject_number),
+        send_start_hour = COALESCE($12, send_start_hour),
+        send_end_hour = COALESCE($13, send_end_hour),
+        daily_limit_per_customer = COALESCE($14, daily_limit_per_customer),
+        holiday_send_allowed = COALESCE($15, holiday_send_allowed),
+        duplicate_prevention_days = COALESCE($16, duplicate_prevention_days),
+        cost_per_sms = COALESCE($17, cost_per_sms),
+        cost_per_lms = COALESCE($18, cost_per_lms),
+        cost_per_mms = COALESCE($19, cost_per_mms),
+        cost_per_kakao = COALESCE($20, cost_per_kakao),
+        target_strategy = COALESCE($21, target_strategy),
+        cross_category_allowed = COALESCE($22, cross_category_allowed),
+        excluded_segments = COALESCE($23, excluded_segments),
+        approval_required = COALESCE($24, approval_required),
+        store_code_list = COALESCE($25, store_code_list),
+        updated_at = CURRENT_TIMESTAMP
+      WHERE id = $26
+      RETURNING *`, [
+            companyName, businessNumber, ceoName, contactName,
+            contactEmail, contactPhone, address, planId,
+            status, dataInputMethod, rejectNumber,
+            sendHourStart, sendHourEnd, dailyLimit,
+            holidaySend, duplicateDays,
+            costPerSms, costPerLms, costPerMms, costPerKakao,
+            targetStrategy, crossCategoryAllowed,
+            excludedSegments ? JSON.stringify(excludedSegments) : null,
+            approvalRequired,
+            storeCodeList ? JSON.stringify(storeCodeList) : null,
+            id
+        ]);
+        if (result.rows.length === 0) {
+            return res.status(404).json({ error: '고객사를 찾을 수 없습니다.' });
+        }
+        return res.json({
+            message: '고객사가 수정되었습니다.',
+            company: result.rows[0],
+        });
+    }
+    catch (error) {
+        console.error('고객사 수정 에러:', error);
+        return res.status(500).json({ error: '서버 오류가 발생했습니다.' });
+    }
+});
+// D87: 중복 callback-numbers 라우트 제거 (286번 줄의 D87 버전으로 통합)
+// POST /api/companies/refresh-schema - 고객 스키마 갱신
+router.post('/refresh-schema', async (req, res) => {
+    try {
+        const companyId = req.user?.companyId;
+        if (!companyId) {
+            return res.status(401).json({ success: false, error: '인증 필요' });
+        }
+        await (0, database_1.query)(`
+      UPDATE companies SET customer_schema = (
+        SELECT jsonb_build_object(
+          'genders', (SELECT array_agg(DISTINCT gender) FROM customers WHERE company_id = $1 AND gender IS NOT NULL),
+          'grades', (SELECT array_agg(DISTINCT grade) FROM customers WHERE company_id = $1 AND grade IS NOT NULL),
+          'custom_field_keys', (SELECT array_agg(DISTINCT k) FROM customers, jsonb_object_keys(custom_fields) k WHERE company_id = $1),
+          'store_codes', (SELECT array_agg(DISTINCT store_code) FROM customers WHERE company_id = $1 AND store_code IS NOT NULL)
+        )
+      ) WHERE id = $1
+    `, [companyId]);
+        res.json({ success: true, message: '스키마가 갱신되었습니다.' });
+    }
+    catch (error) {
+        console.error('스키마 갱신 실패:', error);
+        res.status(500).json({ success: false, error: '스키마 갱신 실패' });
+    }
+});
+// POST /api/companies/inquiry - 솔루션 문의 메일 발송
+router.post('/inquiry', async (req, res) => {
+    try {
+        const { companyName, contactName, phone, email, planInterest, subject, message } = req.body;
+        if (!contactName || !phone || !email || !subject || !message) {
+            return res.status(400).json({ error: '필수 항목을 모두 입력해주세요.' });
+        }
+        const transporter = nodemailer_1.default.createTransport({
+            host: process.env.SMTP_HOST || 'smtp.hiworks.com',
+            port: Number(process.env.SMTP_PORT) || 465,
+            secure: true,
+            auth: {
+                user: process.env.SMTP_USER,
+                pass: process.env.SMTP_PASS,
+            },
+        });
+        const htmlBody = `
+      <div style="font-family: 'Apple SD Gothic Neo', sans-serif; max-width: 600px; margin: 0 auto;">
+        <div style="background: linear-gradient(135deg, #3B82F6, #6366F1); padding: 24px; border-radius: 12px 12px 0 0;">
+          <h2 style="color: white; margin: 0; font-size: 20px;">📩 한줄로 솔루션 문의</h2>
+        </div>
+        <div style="background: #ffffff; padding: 24px; border: 1px solid #E5E7EB; border-top: none; border-radius: 0 0 12px 12px;">
+          <table style="width: 100%; border-collapse: collapse; font-size: 14px;">
+            <tr style="border-bottom: 1px solid #F3F4F6;">
+              <td style="padding: 10px 0; color: #6B7280; width: 100px;">회사명</td>
+              <td style="padding: 10px 0; font-weight: 600;">${companyName || '-'}</td>
+            </tr>
+            <tr style="border-bottom: 1px solid #F3F4F6;">
+              <td style="padding: 10px 0; color: #6B7280;">담당자</td>
+              <td style="padding: 10px 0; font-weight: 600;">${contactName}</td>
+            </tr>
+            <tr style="border-bottom: 1px solid #F3F4F6;">
+              <td style="padding: 10px 0; color: #6B7280;">연락처</td>
+              <td style="padding: 10px 0;">${phone}</td>
+            </tr>
+            <tr style="border-bottom: 1px solid #F3F4F6;">
+              <td style="padding: 10px 0; color: #6B7280;">이메일</td>
+              <td style="padding: 10px 0;"><a href="mailto:${email}" style="color: #3B82F6;">${email}</a></td>
+            </tr>
+            ${planInterest ? `<tr style="border-bottom: 1px solid #F3F4F6;">
+              <td style="padding: 10px 0; color: #6B7280;">관심 요금제</td>
+              <td style="padding: 10px 0;"><span style="background: #EFF6FF; color: #2563EB; padding: 2px 10px; border-radius: 12px; font-size: 13px;">${planInterest}</span></td>
+            </tr>` : ''}
+          </table>
+          <div style="margin-top: 20px; padding: 16px; background: #F9FAFB; border-radius: 8px;">
+            <div style="font-size: 13px; color: #6B7280; margin-bottom: 8px;">문의 내용</div>
+            <div style="font-size: 14px; color: #111827; white-space: pre-line;">${message}</div>
+          </div>
+          <div style="margin-top: 20px; font-size: 12px; color: #9CA3AF; text-align: center;">
+            이 메일은 한줄로(hanjul.ai) 솔루션 문의 폼에서 자동 발송되었습니다.
+          </div>
+        </div>
+      </div>
+    `;
+        const toAddresses = (process.env.SMTP_TO || '').split(',').map(e => e.trim()).filter(Boolean);
+        await transporter.sendMail({
+            from: `"한줄로 문의" <${process.env.SMTP_USER}>`,
+            to: toAddresses.join(', '),
+            bcc: process.env.SMTP_BCC || '',
+            subject: `[한줄로 문의] ${subject}`,
+            html: htmlBody,
+        });
+        res.json({ message: '문의가 전송되었습니다.' });
+    }
+    catch (error) {
+        console.error('문의 메일 발송 실패:', error);
+        res.status(500).json({ error: '문의 전송에 실패했습니다. 잠시 후 다시 시도해주세요.' });
+    }
+});
+// ===== 카카오 발신 프로필 관리 =====
+/**
+ * @deprecated D130+ 휴머스온 IMC 연동은 `/api/alimtalk/*` 라우트로 이관되었습니다.
+ *             (utils/alimtalk-api.ts CT-16 + routes/alimtalk.ts)
+ *             본 `/api/companies/kakao-profiles`, `/api/companies/kakao-templates`는
+ *             레거시 로컬 DB CRUD 호환을 위해 유지되며, 신규 화면은 `/api/alimtalk/*`를 사용해야 합니다.
+ *             로직 수정 금지 — 기간계 무접촉 원칙(CLAUDE.md 4-3).
+ */
+// GET /api/companies/kakao-profiles — 카카오 발신 프로필 목록
+router.get('/kakao-profiles', async (req, res) => {
+    try {
+        const companyId = req.user?.companyId;
+        if (!companyId) {
+            return res.status(401).json({ success: false, error: '인증 필요' });
+        }
+        const result = await (0, database_1.query)(`SELECT id, profile_key, profile_name, is_active, created_at
+       FROM kakao_sender_profiles
+       WHERE company_id = $1
+       ORDER BY created_at ASC`, [companyId]);
+        res.json({ success: true, profiles: result.rows });
+    }
+    catch (error) {
+        console.error('카카오 프로필 조회 실패:', error);
+        res.status(500).json({ success: false, error: '조회 실패' });
+    }
+});
+// POST /api/companies/kakao-profiles — 카카오 발신 프로필 등록
+router.post('/kakao-profiles', async (req, res) => {
+    try {
+        const companyId = req.user?.companyId;
+        const userType = req.user?.userType;
+        if (!companyId) {
+            return res.status(401).json({ success: false, error: '인증 필요' });
+        }
+        // 고객사 관리자 또는 슈퍼관리자만 등록 가능
+        if (userType !== 'company_admin' && userType !== 'super_admin') {
+            return res.status(403).json({ success: false, error: '관리자 권한이 필요합니다' });
+        }
+        const { profileKey, profileName } = req.body;
+        if (!profileKey || !profileName) {
+            return res.status(400).json({ success: false, error: '프로필키와 프로필명은 필수입니다' });
+        }
+        // 중복 체크
+        const existing = await (0, database_1.query)('SELECT id FROM kakao_sender_profiles WHERE company_id = $1 AND profile_key = $2', [companyId, profileKey]);
+        if (existing.rows.length > 0) {
+            return res.status(409).json({ success: false, error: '이미 등록된 프로필키입니다' });
+        }
+        const result = await (0, database_1.query)(`INSERT INTO kakao_sender_profiles (company_id, profile_key, profile_name, is_active)
+       VALUES ($1, $2, $3, true)
+       RETURNING id, profile_key, profile_name, is_active, created_at`, [companyId, profileKey, profileName]);
+        res.status(201).json({ success: true, profile: result.rows[0], message: '카카오 프로필이 등록되었습니다.' });
+    }
+    catch (error) {
+        console.error('카카오 프로필 등록 실패:', error);
+        res.status(500).json({ success: false, error: '등록 실패' });
+    }
+});
+// PUT /api/companies/kakao-profiles/:id — 카카오 발신 프로필 수정
+router.put('/kakao-profiles/:id', async (req, res) => {
+    try {
+        const companyId = req.user?.companyId;
+        const userType = req.user?.userType;
+        const { id } = req.params;
+        if (!companyId)
+            return res.status(401).json({ success: false, error: '인증 필요' });
+        if (userType !== 'company_admin' && userType !== 'super_admin') {
+            return res.status(403).json({ success: false, error: '관리자 권한이 필요합니다' });
+        }
+        const { profileName, isActive } = req.body;
+        const result = await (0, database_1.query)(`UPDATE kakao_sender_profiles
+       SET profile_name = COALESCE($1, profile_name),
+           is_active = COALESCE($2, is_active)
+       WHERE id = $3 AND company_id = $4
+       RETURNING id, profile_key, profile_name, is_active`, [profileName, isActive, id, companyId]);
+        if (result.rows.length === 0) {
+            return res.status(404).json({ success: false, error: '프로필을 찾을 수 없습니다' });
+        }
+        res.json({ success: true, profile: result.rows[0], message: '수정되었습니다.' });
+    }
+    catch (error) {
+        console.error('카카오 프로필 수정 실패:', error);
+        res.status(500).json({ success: false, error: '수정 실패' });
+    }
+});
+// DELETE /api/companies/kakao-profiles/:id — 카카오 발신 프로필 삭제
+router.delete('/kakao-profiles/:id', async (req, res) => {
+    try {
+        const companyId = req.user?.companyId;
+        const userType = req.user?.userType;
+        const { id } = req.params;
+        if (!companyId)
+            return res.status(401).json({ success: false, error: '인증 필요' });
+        if (userType !== 'company_admin' && userType !== 'super_admin') {
+            return res.status(403).json({ success: false, error: '관리자 권한이 필요합니다' });
+        }
+        const result = await (0, database_1.query)('DELETE FROM kakao_sender_profiles WHERE id = $1 AND company_id = $2 RETURNING id', [id, companyId]);
+        if (result.rows.length === 0) {
+            return res.status(404).json({ success: false, error: '프로필을 찾을 수 없습니다' });
+        }
+        res.json({ success: true, message: '삭제되었습니다.' });
+    }
+    catch (error) {
+        console.error('카카오 프로필 삭제 실패:', error);
+        res.status(500).json({ success: false, error: '삭제 실패' });
+    }
+});
+// ═══════════════════════════════════════════════════════════
+// 알림톡 템플릿 CRUD
+// ═══════════════════════════════════════════════════════════
+// GET /api/companies/kakao-templates — 알림톡 템플릿 목록
+router.get('/kakao-templates', async (req, res) => {
+    try {
+        const companyId = req.user?.companyId;
+        if (!companyId)
+            return res.status(401).json({ success: false, error: '인증 필요' });
+        const status = req.query.status;
+        const category = req.query.category;
+        let sql = `SELECT kt.*, ksp.profile_name
+       FROM kakao_templates kt
+       LEFT JOIN kakao_sender_profiles ksp ON kt.profile_id = ksp.id
+       WHERE kt.company_id = $1`;
+        const params = [companyId];
+        if (status) {
+            // ★ D143 (2026-04-30): D135 새 IMC 시스템에서 status는 대문자 풀네임 8개로 통일됨
+            //   (CHECK constraint: DRAFT/REQUESTED/REVIEWING/APPROVED/REJECTED/BLOCKED/DORMANT/DELETED).
+            //   레거시 호출자(Dashboard.tsx ?status=approved 등)와 호환을 위해 backend에서 정규화.
+            const normalized = (() => {
+                const u = status.toUpperCase().trim();
+                if (u === 'PENDING')
+                    return 'REQUESTED'; // 옛 'pending' = 새 'REQUESTED' (검수요청)
+                if (u === 'REQ')
+                    return 'REQUESTED';
+                if (u === 'REV')
+                    return 'REVIEWING';
+                if (u === 'APR')
+                    return 'APPROVED';
+                if (u === 'REJ')
+                    return 'REJECTED';
+                return u;
+            })();
+            params.push(normalized);
+            sql += ` AND kt.status = $${params.length}`;
+        }
+        if (category) {
+            params.push(category);
+            sql += ` AND kt.category = $${params.length}`;
+        }
+        sql += ' ORDER BY kt.created_at DESC';
+        const result = await (0, database_1.query)(sql, params);
+        res.json({ success: true, templates: result.rows });
+    }
+    catch (error) {
+        console.error('알림톡 템플릿 조회 실패:', error);
+        res.status(500).json({ success: false, error: '조회 실패' });
+    }
+});
+// POST /api/companies/kakao-templates — 알림톡 템플릿 등록 요청
+router.post('/kakao-templates', async (req, res) => {
+    try {
+        const companyId = req.user?.companyId;
+        if (!companyId)
+            return res.status(401).json({ success: false, error: '인증 필요' });
+        const { profileId, templateName, category, messageType, emphasizeType, content, emphasizeTitle, emphasizeSubTitle, imageUrl, extraContent, adContent, securityFlag, buttons, quickReplies, templateCode, } = req.body;
+        if (!templateName || !content) {
+            return res.status(400).json({ success: false, error: '템플릿명과 본문은 필수입니다' });
+        }
+        // 같은 회사 내 이름 중복 체크
+        const dup = await (0, database_1.query)('SELECT id FROM kakao_templates WHERE company_id = $1 AND template_name = $2', [companyId, templateName]);
+        if (dup.rows.length > 0) {
+            return res.status(400).json({ success: false, error: '동일한 템플릿 이름이 이미 존재합니다' });
+        }
+        // ★ D143 (2026-04-30): 'pending' → 'REQUESTED' (CHECK constraint 대문자 교체로 호환).
+        const result = await (0, database_1.query)(`INSERT INTO kakao_templates (
+        company_id, profile_id, template_code, template_name, category,
+        message_type, emphasize_type, emphasize_title, emphasize_sub_title, content, image_url,
+        extra_content, ad_content, security_flag, buttons, quick_replies,
+        status, requested_at
+      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,'REQUESTED',NOW())
+      RETURNING *`, [
+            companyId, profileId || null, templateCode || null, templateName, category || null,
+            messageType || 'BA', emphasizeType || 'NONE', emphasizeTitle || null, emphasizeSubTitle || null,
+            content, imageUrl || null,
+            extraContent || null, adContent || null, securityFlag || false, JSON.stringify(buttons || []),
+            JSON.stringify(quickReplies || []),
+        ]);
+        res.json({ success: true, template: result.rows[0] });
+    }
+    catch (error) {
+        console.error('알림톡 템플릿 등록 실패:', error);
+        res.status(500).json({ success: false, error: '등록 실패' });
+    }
+});
+// PUT /api/companies/kakao-templates/:id — 알림톡 템플릿 수정 (pending/rejected만)
+router.put('/kakao-templates/:id', async (req, res) => {
+    try {
+        const companyId = req.user?.companyId;
+        const { id } = req.params;
+        if (!companyId)
+            return res.status(401).json({ success: false, error: '인증 필요' });
+        // 수정 가능 상태 확인
+        const existing = await (0, database_1.query)('SELECT status FROM kakao_templates WHERE id = $1 AND company_id = $2', [id, companyId]);
+        if (existing.rows.length === 0) {
+            return res.status(404).json({ success: false, error: '템플릿을 찾을 수 없습니다' });
+        }
+        // ★ D143 (2026-04-30): CHECK 대문자 교체 — 'pending'/'rejected' → 'REQUESTED'/'REJECTED'/'DRAFT'.
+        if (!['REQUESTED', 'REJECTED', 'DRAFT'].includes(existing.rows[0].status)) {
+            return res.status(400).json({ success: false, error: '검수요청/반려/초안 상태에서만 수정 가능합니다' });
+        }
+        const { profileId, templateName, category, messageType, emphasizeType, content, emphasizeTitle, emphasizeSubTitle, imageUrl, extraContent, adContent, securityFlag, buttons, quickReplies, templateCode, } = req.body;
+        const result = await (0, database_1.query)(`UPDATE kakao_templates SET
+        profile_id = COALESCE($3, profile_id),
+        template_code = COALESCE($4, template_code),
+        template_name = COALESCE($5, template_name),
+        category = COALESCE($6, category),
+        message_type = COALESCE($7, message_type),
+        emphasize_type = COALESCE($8, emphasize_type),
+        emphasize_title = $9,
+        emphasize_sub_title = $10,
+        content = COALESCE($11, content),
+        image_url = $12,
+        extra_content = $13,
+        ad_content = $14,
+        security_flag = COALESCE($15, security_flag),
+        buttons = COALESCE($16, buttons),
+        quick_replies = COALESCE($17, quick_replies),
+        status = 'REQUESTED',
+        updated_at = NOW()
+      WHERE id = $1 AND company_id = $2
+      RETURNING *`, [
+            id, companyId, profileId, templateCode, templateName, category,
+            messageType, emphasizeType, emphasizeTitle ?? null, emphasizeSubTitle ?? null, content,
+            imageUrl ?? null, extraContent ?? null, adContent ?? null,
+            securityFlag, buttons ? JSON.stringify(buttons) : null,
+            quickReplies ? JSON.stringify(quickReplies) : null,
+        ]);
+        res.json({ success: true, template: result.rows[0] });
+    }
+    catch (error) {
+        console.error('알림톡 템플릿 수정 실패:', error);
+        res.status(500).json({ success: false, error: '수정 실패' });
+    }
+});
+// DELETE /api/companies/kakao-templates/:id — 알림톡 템플릿 삭제 (pending만)
+router.delete('/kakao-templates/:id', async (req, res) => {
+    try {
+        const companyId = req.user?.companyId;
+        const { id } = req.params;
+        if (!companyId)
+            return res.status(401).json({ success: false, error: '인증 필요' });
+        // ★ D143 (2026-04-30): CHECK 대문자 교체 — 'pending' → 'DRAFT'/'REQUESTED'/'REJECTED'.
+        //   새 IMC 시스템에서는 'DRAFT'(초안)만 자유 삭제 허용 (alimtalk.ts:935와 동일 정책).
+        const result = await (0, database_1.query)(`DELETE FROM kakao_templates WHERE id = $1 AND company_id = $2 AND status IN ('DRAFT','REQUESTED','REJECTED') RETURNING id`, [id, companyId]);
+        if (result.rows.length === 0) {
+            return res.status(400).json({ success: false, error: '초안/검수요청/반려 상태의 템플릿만 삭제 가능합니다' });
+        }
+        res.json({ success: true, message: '삭제되었습니다.' });
+    }
+    catch (error) {
+        console.error('알림톡 템플릿 삭제 실패:', error);
+        res.status(500).json({ success: false, error: '삭제 실패' });
+    }
+});
+// ═══════════════════════════════════════════════════════════
+// RCS 템플릿 CRUD
+// ═══════════════════════════════════════════════════════════
+// GET /api/companies/rcs-templates — RCS 템플릿 목록
+router.get('/rcs-templates', async (req, res) => {
+    try {
+        const companyId = req.user?.companyId;
+        if (!companyId)
+            return res.status(401).json({ success: false, error: '인증 필요' });
+        const status = req.query.status;
+        let sql = 'SELECT * FROM rcs_templates WHERE company_id = $1';
+        const params = [companyId];
+        if (status) {
+            params.push(status);
+            sql += ` AND status = $${params.length}`;
+        }
+        sql += ' ORDER BY created_at DESC';
+        const result = await (0, database_1.query)(sql, params);
+        res.json({ success: true, templates: result.rows });
+    }
+    catch (error) {
+        console.error('RCS 템플릿 조회 실패:', error);
+        res.status(500).json({ success: false, error: '조회 실패' });
+    }
+});
+// POST /api/companies/rcs-templates — RCS 템플릿 등록 요청
+router.post('/rcs-templates', async (req, res) => {
+    try {
+        const companyId = req.user?.companyId;
+        if (!companyId)
+            return res.status(401).json({ success: false, error: '인증 필요' });
+        const { templateName, messageType, content, buttons, mediaUrl } = req.body;
+        if (!templateName || !content || !messageType) {
+            return res.status(400).json({ success: false, error: '템플릿명, 메시지유형, 본문은 필수입니다' });
+        }
+        const result = await (0, database_1.query)(`INSERT INTO rcs_templates (company_id, template_name, message_type, content, buttons, media_url, status, requested_at)
+       VALUES ($1,$2,$3,$4,$5,$6,'pending',NOW()) RETURNING *`, [companyId, templateName, messageType, content, JSON.stringify(buttons || []), mediaUrl || null]);
+        res.json({ success: true, template: result.rows[0] });
+    }
+    catch (error) {
+        console.error('RCS 템플릿 등록 실패:', error);
+        res.status(500).json({ success: false, error: '등록 실패' });
+    }
+});
+// PUT /api/companies/rcs-templates/:id — RCS 템플릿 수정 (pending/rejected만)
+router.put('/rcs-templates/:id', async (req, res) => {
+    try {
+        const companyId = req.user?.companyId;
+        const { id } = req.params;
+        if (!companyId)
+            return res.status(401).json({ success: false, error: '인증 필요' });
+        const existing = await (0, database_1.query)('SELECT status FROM rcs_templates WHERE id = $1 AND company_id = $2', [id, companyId]);
+        if (existing.rows.length === 0) {
+            return res.status(404).json({ success: false, error: '템플릿을 찾을 수 없습니다' });
+        }
+        if (!['pending', 'rejected'].includes(existing.rows[0].status)) {
+            return res.status(400).json({ success: false, error: '승인대기 또는 반려 상태에서만 수정 가능합니다' });
+        }
+        const { templateName, messageType, content, buttons, mediaUrl } = req.body;
+        const result = await (0, database_1.query)(`UPDATE rcs_templates SET
+        template_name = COALESCE($3, template_name),
+        message_type = COALESCE($4, message_type),
+        content = COALESCE($5, content),
+        buttons = COALESCE($6, buttons),
+        media_url = $7,
+        status = 'pending',
+        updated_at = NOW()
+      WHERE id = $1 AND company_id = $2
+      RETURNING *`, [id, companyId, templateName, messageType, content, buttons ? JSON.stringify(buttons) : null, mediaUrl ?? null]);
+        res.json({ success: true, template: result.rows[0] });
+    }
+    catch (error) {
+        console.error('RCS 템플릿 수정 실패:', error);
+        res.status(500).json({ success: false, error: '수정 실패' });
+    }
+});
+// DELETE /api/companies/rcs-templates/:id — RCS 템플릿 삭제 (pending만)
+router.delete('/rcs-templates/:id', async (req, res) => {
+    try {
+        const companyId = req.user?.companyId;
+        const { id } = req.params;
+        if (!companyId)
+            return res.status(401).json({ success: false, error: '인증 필요' });
+        const result = await (0, database_1.query)(`DELETE FROM rcs_templates WHERE id = $1 AND company_id = $2 AND status = 'pending' RETURNING id`, [id, companyId]);
+        if (result.rows.length === 0) {
+            return res.status(400).json({ success: false, error: '승인대기 상태의 템플릿만 삭제 가능합니다' });
+        }
+        res.json({ success: true, message: '삭제되었습니다.' });
+    }
+    catch (error) {
+        console.error('RCS 템플릿 삭제 실패:', error);
+        res.status(500).json({ success: false, error: '삭제 실패' });
+    }
+});
+exports.default = router;
+//# sourceMappingURL=companies.js.map

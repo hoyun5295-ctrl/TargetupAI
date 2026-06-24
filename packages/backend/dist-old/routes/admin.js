@@ -1,0 +1,2590 @@
+"use strict";
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
+Object.defineProperty(exports, "__esModule", { value: true });
+const bcryptjs_1 = __importDefault(require("bcryptjs"));
+const crypto_1 = __importDefault(require("crypto"));
+const express_1 = require("express");
+const database_1 = require("../config/database");
+const auth_1 = require("../middlewares/auth");
+const sms_queue_1 = require("../utils/sms-queue");
+const dashboard_card_pool_1 = require("../utils/dashboard-card-pool");
+const enabled_fields_1 = require("../utils/enabled-fields");
+const sms_result_map_1 = require("../utils/sms-result-map");
+const defaults_1 = require("../config/defaults");
+const sms_table_validator_1 = require("../utils/sms-table-validator");
+const unsubscribe_helper_1 = require("../utils/unsubscribe-helper");
+const stats_aggregation_1 = require("../utils/stats-aggregation");
+const normalize_phone_1 = require("../utils/normalize-phone");
+const router = (0, express_1.Router)();
+// ===== 사용자 관리 API =====
+// 전체 사용자 목록 조회
+router.get('/users', auth_1.authenticate, auth_1.requireSuperAdmin, async (req, res) => {
+    try {
+        // ★ D131 후속(2026-04-21): system_sync_xxx Sync Agent 가상 계정 목록 노출 제외
+        const result = await (0, database_1.query)(`
+      SELECT
+        u.id, u.login_id, u.name, u.email, u.phone, u.department,
+        u.user_type, u.status, u.company_id, u.last_login_at, u.created_at,
+        u.store_codes, u.line_group_id,
+        u.opt_out_080_number, u.opt_out_auto_sync,
+        c.company_name,
+        lg.group_name as line_group_name,
+        (SELECT COUNT(*) FROM unsubscribes WHERE user_id = u.id) as unsubscribe_count,
+        (SELECT COUNT(*) FROM customers WHERE uploaded_by = u.id AND is_active = true) as uploaded_customer_count
+      FROM users u
+      LEFT JOIN companies c ON u.company_id = c.id
+      LEFT JOIN sms_line_groups lg ON u.line_group_id = lg.id
+      WHERE COALESCE(u.is_system, false) = false
+      ORDER BY u.created_at DESC
+    `);
+        res.json({ users: result.rows });
+    }
+    catch (error) {
+        console.error('사용자 목록 조회 실패:', error);
+        res.status(500).json({ error: '사용자 목록 조회 실패' });
+    }
+});
+// 사용자 추가 (계정 발급)
+router.post('/users', auth_1.authenticate, auth_1.requireSuperAdmin, async (req, res) => {
+    const { companyId, loginId, password, name, email, phone, department, userType, storeCodes } = req.body;
+    if (!companyId || !loginId || !password || !name) {
+        return res.status(400).json({ error: '필수 항목을 입력해주세요.' });
+    }
+    try {
+        // 중복 체크
+        const existing = await (0, database_1.query)('SELECT id FROM users WHERE login_id = $1', [loginId]);
+        if (existing.rows.length > 0) {
+            return res.status(400).json({ error: '이미 사용중인 로그인 ID입니다.' });
+        }
+        // max_users 상한 체크
+        const companyResult = await (0, database_1.query)('SELECT max_users FROM companies WHERE id = $1', [companyId]);
+        if (companyResult.rows.length > 0 && companyResult.rows[0].max_users) {
+            // ★ D131 후속: max_users 상한 체크에서 system 가상 계정 제외
+            const userCountResult = await (0, database_1.query)('SELECT COUNT(*) FROM users WHERE company_id = $1 AND is_active = true AND COALESCE(is_system, false) = false', [companyId]);
+            const currentUsers = parseInt(userCountResult.rows[0].count);
+            if (currentUsers >= companyResult.rows[0].max_users) {
+                return res.status(403).json({
+                    error: `최대 사용자 수(${companyResult.rows[0].max_users}명)를 초과할 수 없습니다.`,
+                    code: 'MAX_USERS_REACHED'
+                });
+            }
+        }
+        // 비밀번호 해시
+        const passwordHash = await bcryptjs_1.default.hash(password, 10);
+        const result = await (0, database_1.query)(`
+      INSERT INTO users (company_id, login_id, password_hash, name, email, phone, department, user_type, status, must_change_password, store_codes)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'active', true, $9)
+      RETURNING id, login_id, name, email, user_type, status, created_at, store_codes
+    `, [companyId, loginId, passwordHash, name, email || null, phone || null, department || null, userType || 'user', storeCodes || null]);
+        res.status(201).json({ user: result.rows[0], message: '사용자가 생성되었습니다.' });
+    }
+    catch (error) {
+        console.error('사용자 생성 실패:', error);
+        res.status(500).json({ error: '사용자 생성 실패' });
+    }
+});
+// 사용자 수정
+router.put('/users/:id', auth_1.authenticate, auth_1.requireSuperAdmin, async (req, res) => {
+    const { id } = req.params;
+    const { name, email, phone, department, userType, status, storeCodes, lineGroupId, optOut080Number, optOutAutoSync } = req.body;
+    try {
+        const result = await (0, database_1.query)(`
+      UPDATE users
+      SET name = COALESCE($1, name),
+          email = COALESCE($2, email),
+          phone = COALESCE($3, phone),
+          department = COALESCE($4, department),
+          user_type = COALESCE($5, user_type),
+          status = COALESCE($6, status),
+          store_codes = $7,
+          line_group_id = $8,
+          opt_out_080_number = $9,
+          opt_out_auto_sync = COALESCE($10, opt_out_auto_sync),
+          updated_at = NOW()
+      WHERE id = $11
+      RETURNING id, login_id, name, email, user_type, status, store_codes, line_group_id, opt_out_080_number, opt_out_auto_sync
+    `, [name, email, phone, department, userType, status, storeCodes || null, lineGroupId || null, optOut080Number || null, optOutAutoSync, id]);
+        if (result.rows.length === 0) {
+            return res.status(404).json({ error: '사용자를 찾을 수 없습니다.' });
+        }
+        res.json({ user: result.rows[0], message: '수정되었습니다.' });
+    }
+    catch (error) {
+        console.error('사용자 수정 실패:', error);
+        res.status(500).json({ error: '사용자 수정 실패' });
+    }
+});
+// ================================================================
+// 슈퍼관리자 — 사용자별 수신거부 관리 (CT-03 컨트롤타워 활용)
+// ================================================================
+// 사용자별 수신거부 목록 조회
+router.get('/users/:id/unsubscribes', auth_1.authenticate, auth_1.requireSuperAdmin, async (req, res) => {
+    try {
+        const { id } = req.params;
+        const page = parseInt(req.query.page) || 1;
+        const limit = parseInt(req.query.limit) || 50;
+        const search = req.query.search || '';
+        const result = await (0, unsubscribe_helper_1.getUserUnsubscribes)(id, { page, limit, search });
+        res.json(result);
+    }
+    catch (error) {
+        console.error('수신거부 목록 조회 실패:', error);
+        res.status(500).json({ error: '수신거부 목록 조회 실패' });
+    }
+});
+// 사용자별 수신거부 일괄삭제
+router.delete('/users/:id/unsubscribes', auth_1.authenticate, auth_1.requireSuperAdmin, async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { phones } = req.body || {};
+        const deletedCount = await (0, unsubscribe_helper_1.deleteUserUnsubscribes)(id, phones);
+        res.json({ deletedCount, message: `${deletedCount}건 삭제되었습니다.` });
+    }
+    catch (error) {
+        console.error('수신거부 삭제 실패:', error);
+        res.status(500).json({ error: '수신거부 삭제 실패' });
+    }
+});
+// 사용자별 수신거부 CSV 다운로드
+router.get('/users/:id/unsubscribes/export', auth_1.authenticate, auth_1.requireSuperAdmin, async (req, res) => {
+    try {
+        const { id } = req.params;
+        const data = await (0, unsubscribe_helper_1.exportUserUnsubscribes)(id);
+        // CSV 생성
+        const header = '전화번호,출처,등록일시\n';
+        const sourceLabel = { '080_ars': '080 ARS', manual: '직접입력', upload: '파일업로드', sync: 'Sync연동', api: '080자동', db_upload: 'DB업로드' };
+        const rows = data.map(r => `${r.phone},${sourceLabel[r.source] || r.source},${new Date(r.created_at).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' })}`).join('\n');
+        res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+        res.setHeader('Content-Disposition', `attachment; filename=unsubscribes_${id}_${new Date().toISOString().slice(0, 10)}.csv`);
+        res.send('\uFEFF' + header + rows); // BOM for Excel
+    }
+    catch (error) {
+        console.error('수신거부 다운로드 실패:', error);
+        res.status(500).json({ error: '수신거부 다운로드 실패' });
+    }
+});
+// ================================================================
+// 사용자별 업로드 고객 DB 삭제
+// uploaded_by = userId 인 고객만 삭제 (연관 데이터 포함)
+// ================================================================
+router.delete('/users/:id/customers', auth_1.authenticate, auth_1.requireSuperAdmin, async (req, res) => {
+    try {
+        const { id } = req.params;
+        const adminUserId = req.user?.userId;
+        // 사용자 확인
+        const userResult = await (0, database_1.query)('SELECT u.id, u.name, u.company_id, c.company_name FROM users u JOIN companies c ON c.id = u.company_id WHERE u.id = $1', [id]);
+        if (userResult.rows.length === 0) {
+            return res.status(404).json({ error: '사용자를 찾을 수 없습니다.' });
+        }
+        const user = userResult.rows[0];
+        // 삭제 대상 건수 확인
+        const countResult = await (0, database_1.query)('SELECT COUNT(*) FROM customers WHERE uploaded_by = $1 AND is_active = true', [id]);
+        const totalCount = parseInt(countResult.rows[0].count);
+        if (totalCount === 0) {
+            return res.status(400).json({ error: '이 사용자가 업로드한 고객 데이터가 없습니다.' });
+        }
+        // 연관 데이터 삭제
+        const purchaseResult = await (0, database_1.query)('DELETE FROM purchases WHERE customer_id IN (SELECT id FROM customers WHERE uploaded_by = $1)', [id]);
+        await (0, database_1.query)('DELETE FROM consents WHERE customer_id IN (SELECT id FROM customers WHERE uploaded_by = $1)', [id]);
+        // 고객 삭제
+        const deleteResult = await (0, database_1.query)('DELETE FROM customers WHERE uploaded_by = $1', [id]);
+        // 감사 로그
+        await (0, database_1.query)(`INSERT INTO audit_logs (user_id, action, target_type, target_id, details, ip_address, user_agent)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)`, [
+            adminUserId,
+            'customer_delete_by_user',
+            'user',
+            id,
+            JSON.stringify({
+                delete_type: 'by_uploaded_user',
+                target_user_name: user.name,
+                company_name: user.company_name,
+                deleted_customers: deleteResult.rowCount,
+                deleted_purchases: purchaseResult.rowCount
+            }),
+            req.ip,
+            req.headers['user-agent'] || ''
+        ]);
+        console.log(`[관리자] 사용자별 고객 삭제: ${user.name} (${user.company_name}) → ${deleteResult.rowCount}명`);
+        res.json({
+            success: true,
+            message: `${deleteResult.rowCount}명의 고객 데이터가 삭제되었습니다.`,
+            deletedCount: deleteResult.rowCount,
+            deletedPurchases: purchaseResult.rowCount
+        });
+    }
+    catch (error) {
+        console.error('사용자별 고객 삭제 실패:', error);
+        res.status(500).json({ error: '삭제 실패' });
+    }
+});
+// 사용자 삭제
+router.delete('/users/:id', auth_1.authenticate, auth_1.requireSuperAdmin, async (req, res) => {
+    const { id } = req.params;
+    try {
+        const result = await (0, database_1.query)('DELETE FROM users WHERE id = $1 RETURNING id, login_id', [id]);
+        if (result.rows.length === 0) {
+            return res.status(404).json({ error: '사용자를 찾을 수 없습니다.' });
+        }
+        res.json({ message: '삭제되었습니다.' });
+    }
+    catch (error) {
+        console.error('사용자 삭제 실패:', error);
+        res.status(500).json({ error: '사용자 삭제 실패' });
+    }
+});
+// 비밀번호 초기화
+router.post('/users/:id/reset-password', auth_1.authenticate, auth_1.requireSuperAdmin, async (req, res) => {
+    const { id } = req.params;
+    try {
+        // 사용자 정보 조회 (phone 포함)
+        const userResult = await (0, database_1.query)('SELECT id, login_id, name, phone FROM users WHERE id = $1', [id]);
+        if (userResult.rows.length === 0) {
+            return res.status(404).json({ error: '사용자를 찾을 수 없습니다.' });
+        }
+        const user = userResult.rows[0];
+        // ★ 보안: 암호학적 안전 난수로 임시 비밀번호 생성
+        const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789';
+        let tempPassword = '';
+        for (let i = 0; i < 8; i++) {
+            tempPassword += chars.charAt(crypto_1.default.randomInt(chars.length));
+        }
+        const passwordHash = await bcryptjs_1.default.hash(tempPassword, 10);
+        await (0, database_1.query)(`
+      UPDATE users 
+      SET password_hash = $1, must_change_password = true, updated_at = NOW()
+      WHERE id = $2
+    `, [passwordHash, id]);
+        // SMS 발송 (휴대폰 번호가 있는 경우)
+        let smsSent = false;
+        if (user.phone) {
+            try {
+                const phone = user.phone.replace(/-/g, '');
+                const message = `[Target-UP] 임시 비밀번호: ${tempPassword}\n최초 로그인 시 비밀번호 변경이 필요합니다.`;
+                await (0, database_1.mysqlQuery)(`INSERT INTO ${sms_queue_1.ALL_SMS_TABLES[0]} (dest_no, call_back, msg_contents, msg_type, sendreq_time, status_code, rsv1) VALUES (?, ?, ?, 'S', NOW(), 100, '1')`, [phone, process.env.SYSTEM_SMS_CALLBACK || (() => { throw new Error('SYSTEM_SMS_CALLBACK 환경변수가 설정되지 않았습니다'); })(), message]);
+                smsSent = true;
+            }
+            catch (smsError) {
+                console.error('SMS 발송 실패:', smsError);
+            }
+        }
+        res.json({
+            tempPassword,
+            message: '비밀번호가 초기화되었습니다.',
+            user: { id: user.id, login_id: user.login_id, name: user.name },
+            smsSent,
+            phone: user.phone ? user.phone.replace(/(\d{3})(\d{4})(\d{4})/, '$1-****-$3') : null
+        });
+    }
+    catch (error) {
+        console.error('비밀번호 초기화 실패:', error);
+        res.status(500).json({ error: '비밀번호 초기화 실패' });
+    }
+});
+// ===== 회사 상세 수정 API =====
+// 회사 상세 조회
+router.get('/companies/:id', auth_1.authenticate, auth_1.requireSuperAdmin, async (req, res) => {
+    const { id } = req.params;
+    try {
+        const result = await (0, database_1.query)(`
+      SELECT c.*, p.plan_name,
+        (SELECT COUNT(*) FROM customers WHERE company_id = c.id) as total_customers,
+        (SELECT COUNT(*) FROM users WHERE company_id = c.id AND COALESCE(is_system, false) = false) as total_users
+      FROM companies c
+      LEFT JOIN plans p ON c.plan_id = p.id
+      WHERE c.id = $1
+    `, [id]);
+        if (result.rows.length === 0) {
+            return res.status(404).json({ error: '회사를 찾을 수 없습니다.' });
+        }
+        res.json({ company: result.rows[0] });
+    }
+    catch (error) {
+        console.error('회사 조회 실패:', error);
+        res.status(500).json({ error: '회사 조회 실패' });
+    }
+});
+// 회사 수정
+router.put('/companies/:id', auth_1.authenticate, auth_1.requireSuperAdmin, async (req, res) => {
+    const { id } = req.params;
+    const { companyName, contactName, contactEmail, contactPhone, status, planId, rejectNumber, brandName, sendHourStart, sendHourEnd, dailyLimit, holidaySend, duplicateDays, costPerSms, costPerLms, costPerMms, costPerKakao, storeCodeList, businessNumber, ceoName, businessType, businessItem, address, allowCallbackSelfRegister, maxUsers, sessionTimeoutMinutes, approvalRequired, targetStrategy, lineGroupId, kakaoEnabled, subscriptionStatus } = req.body;
+    try {
+        // ★ CT-17: planId 변경 시 TRIAL plan이면 'trial' 유지, 그 외 유료 플랜이면 'paid'(정식 구독).
+        //   (과거 버그 ①: planId 있으면 무조건 'active'로 덮어써서 grant-trial 직후 재저장 시 체험 상태 파괴)
+        //   (네이밍 정리 ②: 'active'는 companies.status(운영 활성)와 네이밍 충돌 → 구독 상태는 'paid'로 통일)
+        let finalSubscriptionStatus = subscriptionStatus || null;
+        if (planId) {
+            const planCodeRes = await (0, database_1.query)(`SELECT plan_code FROM plans WHERE id = $1`, [planId]);
+            const isTrialPlan = planCodeRes.rows[0]?.plan_code === 'TRIAL';
+            finalSubscriptionStatus = isTrialPlan ? 'trial' : 'paid';
+        }
+        const result = await (0, database_1.query)(`
+      UPDATE companies
+      SET company_name = COALESCE($1, company_name),
+          contact_name = COALESCE($2, contact_name),
+          contact_email = COALESCE($3, contact_email),
+          contact_phone = COALESCE($4, contact_phone),
+          status = COALESCE($5, status),
+          plan_id = COALESCE($6, plan_id),
+          subscription_status = CASE WHEN $6 IS NOT NULL THEN $31::varchar ELSE COALESCE($31, subscription_status) END,
+          reject_number = COALESCE($7, reject_number),
+          brand_name = COALESCE($8, brand_name),
+          send_start_hour = COALESCE($9, send_start_hour),
+          send_end_hour = COALESCE($10, send_end_hour),
+          daily_limit_per_customer = COALESCE($11, daily_limit_per_customer),
+          holiday_send_allowed = COALESCE($12, holiday_send_allowed),
+          duplicate_prevention_days = COALESCE($13, duplicate_prevention_days),
+          cost_per_sms = COALESCE($14, cost_per_sms),
+          cost_per_lms = COALESCE($15, cost_per_lms),
+          cost_per_mms = COALESCE($16, cost_per_mms),
+          cost_per_kakao = COALESCE($17, cost_per_kakao),
+          store_code_list = COALESCE($18, store_code_list),
+          business_number = COALESCE($19, business_number),
+          ceo_name = COALESCE($20, ceo_name),
+          business_type = COALESCE($21, business_type),
+          business_item = COALESCE($22, business_item),
+          address = COALESCE($23, address),
+          allow_callback_self_register = COALESCE($24, allow_callback_self_register),
+          max_users = COALESCE($25, max_users),
+          session_timeout_minutes = COALESCE($26, session_timeout_minutes),
+          approval_required = COALESCE($27, approval_required),
+          target_strategy = COALESCE($28, target_strategy),
+          line_group_id = COALESCE($29, line_group_id),
+          kakao_enabled = COALESCE($30, kakao_enabled),
+          -- subscription_status는 위 plan_id CASE문에서 처리
+          updated_at = NOW()
+      WHERE id = $32
+      RETURNING *
+    `, [companyName, contactName, contactEmail, contactPhone, status, planId, rejectNumber, brandName, sendHourStart, sendHourEnd, dailyLimit, holidaySend, duplicateDays, costPerSms, costPerLms, costPerMms, costPerKakao, storeCodeList ? JSON.stringify(storeCodeList) : null, businessNumber, ceoName, businessType, businessItem, address, allowCallbackSelfRegister !== undefined ? allowCallbackSelfRegister : null, maxUsers || null, sessionTimeoutMinutes || null, approvalRequired !== undefined ? approvalRequired : null, targetStrategy || null, lineGroupId || null, kakaoEnabled !== undefined ? kakaoEnabled : null, finalSubscriptionStatus, id]);
+        if (result.rows.length === 0) {
+            return res.status(404).json({ error: '회사를 찾을 수 없습니다.' });
+        }
+        res.json({ company: result.rows[0], message: '수정되었습니다.' });
+    }
+    catch (error) {
+        console.error('회사 수정 실패:', error);
+        res.status(500).json({ error: '회사 수정 실패' });
+    }
+});
+// 회사 비활성화 (soft delete)
+router.delete('/companies/:id', auth_1.authenticate, auth_1.requireSuperAdmin, async (req, res) => {
+    const { id } = req.params;
+    try {
+        // 활성 캠페인이 있는지 확인
+        const activeCampaigns = await (0, database_1.query)("SELECT COUNT(*) FROM campaigns WHERE company_id = $1 AND status IN ('scheduled', 'sending')", [id]);
+        if (parseInt(activeCampaigns.rows[0].count) > 0) {
+            return res.status(400).json({ error: '진행 중이거나 예약된 캠페인이 있어 해지할 수 없습니다.' });
+        }
+        const result = await (0, database_1.query)(`
+      UPDATE companies 
+      SET status = 'terminated', updated_at = NOW()
+      WHERE id = $1
+      RETURNING id, company_name
+    `, [id]);
+        if (result.rows.length === 0) {
+            return res.status(404).json({ error: '회사를 찾을 수 없습니다.' });
+        }
+        // 해당 회사 사용자도 비활성화
+        await (0, database_1.query)("UPDATE users SET status = 'dormant', updated_at = NOW() WHERE company_id = $1", [id]);
+        res.json({ message: `${result.rows[0].company_name}이(가) 해지되었습니다.` });
+    }
+    catch (error) {
+        console.error('회사 해지 실패:', error);
+        res.status(500).json({ error: '회사 해지 실패' });
+    }
+});
+// ===== 대시보드 카드 설정 API (D41) =====
+// company_settings UPSERT 헬퍼 (UNIQUE 제약 없이도 안전)
+async function upsertCompanySetting(companyId, settingKey, settingValue, settingType = 'string', description = '') {
+    const existing = await (0, database_1.query)('SELECT id FROM company_settings WHERE company_id = $1 AND setting_key = $2', [companyId, settingKey]);
+    if (existing.rows.length > 0) {
+        await (0, database_1.query)('UPDATE company_settings SET setting_value = $1, updated_at = NOW() WHERE company_id = $2 AND setting_key = $3', [settingValue, companyId, settingKey]);
+    }
+    else {
+        await (0, database_1.query)('INSERT INTO company_settings (company_id, setting_key, setting_value, setting_type, description) VALUES ($1, $2, $3, $4, $5)', [companyId, settingKey, settingValue, settingType, description]);
+    }
+}
+// GET /api/admin/companies/:id/dashboard-cards — 고객사 카드 설정 조회
+router.get('/companies/:id/dashboard-cards', auth_1.authenticate, auth_1.requireSuperAdmin, async (req, res) => {
+    try {
+        const { id } = req.params;
+        // 회사 존재 확인
+        const companyCheck = await (0, database_1.query)('SELECT id, company_name FROM companies WHERE id = $1', [id]);
+        if (companyCheck.rows.length === 0) {
+            return res.status(404).json({ error: '회사를 찾을 수 없습니다.' });
+        }
+        // 현재 설정 조회
+        const settingsResult = await (0, database_1.query)(`SELECT setting_key, setting_value
+       FROM company_settings
+       WHERE company_id = $1 AND setting_key IN ('dashboard_cards', 'dashboard_card_count')`, [id]);
+        const settings = {};
+        for (const row of settingsResult.rows) {
+            settings[row.setting_key] = row.setting_value;
+        }
+        let selectedCards = [];
+        try {
+            selectedCards = settings.dashboard_cards ? JSON.parse(settings.dashboard_cards) : [];
+        }
+        catch {
+            selectedCards = [];
+        }
+        // ★ 고객사 데이터 유무 동적 체크 (직접 컬럼 + 커스텀 필드 JSONB 양쪽)
+        // enabled-fields API와 동일한 방식으로 체크
+        const availableColumns = new Set();
+        // 1. 직접 컬럼 데이터 유무 — EXISTS 서브쿼리
+        const requiredFields = (0, dashboard_card_pool_1.getRequiredFields)();
+        if (requiredFields.length > 0) {
+            const existsClauses = requiredFields.map((field, i) => {
+                if (['total_purchase_amount'].includes(field)) {
+                    return `EXISTS(SELECT 1 FROM customers WHERE company_id = $1 AND ${field} IS NOT NULL AND ${field} > 0) as has_${i}`;
+                }
+                return `EXISTS(SELECT 1 FROM customers WHERE company_id = $1 AND ${field} IS NOT NULL AND ${field}::text != '') as has_${i}`;
+            });
+            const checkResult = await (0, database_1.query)(`SELECT ${existsClauses.join(', ')}`, [id]);
+            if (checkResult.rows.length > 0) {
+                const row = checkResult.rows[0];
+                requiredFields.forEach((field, i) => {
+                    if (row[`has_${i}`])
+                        availableColumns.add(field);
+                });
+            }
+        }
+        // 2. 커스텀 필드 — custom_fields JSONB에 데이터 있는 키의 라벨 조회
+        let customFieldLabels = [];
+        try {
+            const customResult = await (0, database_1.query)(`
+        SELECT DISTINCT cfd.field_label
+        FROM customer_field_definitions cfd
+        WHERE cfd.company_id = $1
+          AND cfd.field_key LIKE 'custom_%'
+          AND EXISTS (
+            SELECT 1 FROM customers c
+            WHERE c.company_id = $1
+              AND c.custom_fields->>cfd.field_key IS NOT NULL
+              AND c.custom_fields->>cfd.field_key != ''
+            LIMIT 1
+          )
+      `, [id]);
+            customFieldLabels = customResult.rows.map((r) => (r.field_label || '').toLowerCase());
+        }
+        catch { /* custom_fields 없으면 무시 */ }
+        // 3. 직접 컬럼 OR 커스텀 필드 라벨 매칭으로 카드 풀 필터링
+        const filteredPool = (0, dashboard_card_pool_1.filterPoolByAvailableData)(availableColumns, customFieldLabels);
+        // ★ D136 (2026-04-22 PDF #8): 고객사 업로드 커스텀 필드 기반 동적 카드 자동 생성
+        //   CT-18 detectEnabledFields로 해당 회사의 실제 활성 필드 탐지 →
+        //   커스텀 필드(is_custom=true)마다 data_type 기반 동적 카드 생성 → 풀에 merge.
+        //   예: 고객사가 "시리얼" 업로드 → `dyn_custom_1_dist` "시리얼별 분포" 자동 노출.
+        let dynamicCards = [];
+        try {
+            const { fields } = await (0, enabled_fields_1.detectEnabledFields)({
+                companyId: id,
+                scopeWhere: 'company_id = $1 AND is_active = true',
+                scopeParams: [id],
+            });
+            dynamicCards = (0, dashboard_card_pool_1.generateDynamicCards)(fields);
+        }
+        catch (detectErr) {
+            console.warn('[admin/dashboard-cards] 동적 카드 생성 실패 (고정 풀만 노출):', detectErr?.message);
+        }
+        const fullPool = [...filteredPool, ...dynamicCards];
+        // 기존 selectedCards 중 풀에 없는 카드 제거 (고정+동적 합쳐서 검증)
+        const fullPoolIds = new Set(fullPool.map(c => c.cardId));
+        const validSelectedCards = selectedCards.filter(cid => fullPoolIds.has(cid));
+        res.json({
+            companyName: companyCheck.rows[0].company_name,
+            pool: fullPool,
+            selectedCards: validSelectedCards,
+            cardCount: validSelectedCards.length,
+        });
+    }
+    catch (error) {
+        console.error('대시보드 카드 설정 조회 실패:', error);
+        res.status(500).json({ error: '대시보드 카드 설정 조회 실패' });
+    }
+});
+// PUT /api/admin/companies/:id/dashboard-cards — 카드 설정 저장
+router.put('/companies/:id/dashboard-cards', auth_1.authenticate, auth_1.requireSuperAdmin, async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { cards, cardCount } = req.body;
+        // 입력 검증
+        if (!Array.isArray(cards)) {
+            return res.status(400).json({ error: 'cards는 배열이어야 합니다.' });
+        }
+        // cardCount는 더 이상 4/8 제한 없음 — 프론트에서 6개씩 페이징 표시
+        // 하위호환: cardCount가 전달되면 cards.length로 자동 설정
+        const effectiveCardCount = cards.length;
+        // ★ D136 (2026-04-22 PDF #8): 동적 카드 추가로 상한은 고정 풀 17개를 초과할 수 있음 →
+        //   단순 상한 17 → 실용 상한 50으로 완화 (고정 17 + 커스텀 15 여유 + 버퍼).
+        //   실제 풀에 없는 cardId는 validateCardIds에서 걸러짐 → 과잉 상한 방지.
+        // ★ 빈 배열 허용 — 0개 선택 시 고객사 대시보드에 DB현황 미표시
+        const MAX_DASHBOARD_CARDS = 50;
+        if (cards.length > MAX_DASHBOARD_CARDS) {
+            return res.status(400).json({ error: `카드는 최대 ${MAX_DASHBOARD_CARDS}개까지 선택 가능합니다.` });
+        }
+        // 카드 ID 유효성
+        const validation = (0, dashboard_card_pool_1.validateCardIds)(cards);
+        if (!validation.valid) {
+            return res.status(400).json({ error: `유효하지 않은 카드 ID: ${validation.invalid.join(', ')}` });
+        }
+        // 중복 검사
+        if (new Set(cards).size !== cards.length) {
+            return res.status(400).json({ error: '중복된 카드가 있습니다.' });
+        }
+        // 회사 존재 확인
+        const companyCheck = await (0, database_1.query)('SELECT id FROM companies WHERE id = $1', [id]);
+        if (companyCheck.rows.length === 0) {
+            return res.status(404).json({ error: '회사를 찾을 수 없습니다.' });
+        }
+        // UPSERT
+        await upsertCompanySetting(id, 'dashboard_cards', JSON.stringify(cards), 'json', '대시보드 표시 카드 목록');
+        await upsertCompanySetting(id, 'dashboard_card_count', effectiveCardCount.toString(), 'string', '대시보드 카드 수');
+        res.json({
+            message: '대시보드 카드 설정이 저장되었습니다.',
+            cards,
+            cardCount: effectiveCardCount,
+        });
+    }
+    catch (error) {
+        console.error('대시보드 카드 설정 저장 실패:', error);
+        res.status(500).json({ error: '대시보드 카드 설정 저장 실패' });
+    }
+});
+// ===== 예약 캠페인 관리 API =====
+// 예약된 캠페인 목록 조회 (전체 고객사)
+router.get('/campaigns/scheduled', auth_1.authenticate, auth_1.requireSuperAdmin, async (req, res) => {
+    try {
+        const page = parseInt(req.query.page) || 1;
+        const limit = parseInt(req.query.limit) || 20;
+        const offset = (page - 1) * limit;
+        const search = req.query.search || '';
+        const companyId = req.query.companyId || '';
+        const status = req.query.status || ''; // scheduled / cancelled / '' (all)
+        const startDate = req.query.startDate || '';
+        const endDate = req.query.endDate || '';
+        const loginId = req.query.loginId || ''; // 사용자 계정 검색
+        let where = `WHERE c.status IN ('scheduled', 'cancelled')`;
+        const params = [];
+        let paramIdx = 1;
+        if (status) {
+            where += ` AND c.status = $${paramIdx}`;
+            params.push(status);
+            paramIdx++;
+        }
+        if (companyId) {
+            where += ` AND c.company_id = $${paramIdx}`;
+            params.push(companyId);
+            paramIdx++;
+        }
+        if (startDate) {
+            where += ` AND COALESCE(c.sent_at, c.scheduled_at, c.created_at) >= $${paramIdx}::date`;
+            params.push(startDate);
+            paramIdx++;
+        }
+        if (endDate) {
+            where += ` AND COALESCE(c.sent_at, c.scheduled_at, c.created_at) < ($${paramIdx}::date + INTERVAL '1 day')`;
+            params.push(endDate);
+            paramIdx++;
+        }
+        if (search) {
+            where += ` AND (c.campaign_name ILIKE $${paramIdx} OR co.company_name ILIKE $${paramIdx})`;
+            params.push(`%${search}%`);
+            paramIdx++;
+        }
+        if (loginId) {
+            where += ` AND u.login_id ILIKE $${paramIdx}`;
+            params.push(`%${loginId}%`);
+            paramIdx++;
+        }
+        const countResult = await (0, database_1.query)(`SELECT COUNT(*) FROM campaigns c LEFT JOIN companies co ON c.company_id = co.id LEFT JOIN users u ON c.created_by = u.id ${where}`, params);
+        const total = parseInt(countResult.rows[0].count);
+        const result = await (0, database_1.query)(`
+      SELECT 
+        c.id, c.campaign_name, c.status, c.scheduled_at, c.target_count,
+        c.created_at, c.cancelled_by, c.cancelled_by_type, c.cancel_reason, c.cancelled_at,
+        c.message_type, c.send_type, c.send_channel,
+        co.company_name, co.company_code,
+        u.name as created_by_name, u.login_id as created_by_login
+      FROM campaigns c
+      LEFT JOIN companies co ON c.company_id = co.id
+      LEFT JOIN users u ON c.created_by = u.id
+      ${where}
+      ORDER BY CASE WHEN c.status = 'scheduled' THEN 0 ELSE 1 END, c.created_at DESC
+      LIMIT $${paramIdx} OFFSET $${paramIdx + 1}
+    `, [...params, limit, offset]);
+        res.json({ campaigns: result.rows, total, page, totalPages: Math.ceil(total / limit) });
+    }
+    catch (error) {
+        console.error('예약 캠페인 조회 실패:', error);
+        res.status(500).json({ error: '예약 캠페인 조회 실패' });
+    }
+});
+// 슈퍼관리자 예약 취소
+router.post('/campaigns/:id/cancel', auth_1.authenticate, auth_1.requireSuperAdmin, async (req, res) => {
+    const { id } = req.params;
+    const { reason } = req.body;
+    const adminId = req.user?.userId;
+    if (!reason || reason.trim() === '') {
+        return res.status(400).json({ error: '취소 사유를 입력해주세요.' });
+    }
+    try {
+        // 예약 상태인지 확인
+        const check = await (0, database_1.query)('SELECT status, scheduled_at FROM campaigns WHERE id = $1', [id]);
+        if (check.rows.length === 0) {
+            return res.status(404).json({ error: '캠페인을 찾을 수 없습니다.' });
+        }
+        if (check.rows[0].status !== 'scheduled') {
+            return res.status(400).json({ error: '예약 상태인 캠페인만 취소할 수 있습니다.' });
+        }
+        // 취소 처리
+        const result = await (0, database_1.query)(`
+      UPDATE campaigns 
+      SET status = 'cancelled',
+          cancelled_by = $1,
+          cancelled_by_type = 'super_admin',
+          cancel_reason = $2,
+          cancelled_at = NOW(),
+          updated_at = NOW()
+      WHERE id = $3
+      RETURNING id, campaign_name
+    `, [adminId, reason.trim(), id]);
+        res.json({
+            message: '예약이 취소되었습니다.',
+            campaign: result.rows[0]
+        });
+    }
+    catch (error) {
+        console.error('예약 취소 실패:', error);
+        res.status(500).json({ error: '예약 취소 실패' });
+    }
+});
+// ===== 발신번호 관리 API =====
+// 발신번호 목록 조회
+router.get('/callback-numbers', auth_1.authenticate, auth_1.requireSuperAdmin, async (req, res) => {
+    try {
+        const result = await (0, database_1.query)(`
+      SELECT 
+        cn.id, cn.phone, cn.label, cn.is_default, cn.created_at,
+        c.company_name, c.company_code, c.id as company_id
+      FROM callback_numbers cn
+      LEFT JOIN companies c ON cn.company_id = c.id
+      ORDER BY c.company_name, cn.is_default DESC, cn.created_at DESC
+    `);
+        res.json({ callbackNumbers: result.rows });
+    }
+    catch (error) {
+        console.error('발신번호 조회 실패:', error);
+        res.status(500).json({ error: '발신번호 조회 실패' });
+    }
+});
+// 발신번호 등록
+router.post('/callback-numbers', auth_1.authenticate, auth_1.requireSuperAdmin, async (req, res) => {
+    const { companyId, phone, label, isDefault } = req.body;
+    if (!companyId || !phone) {
+        return res.status(400).json({ error: '회사와 발신번호는 필수입니다.' });
+    }
+    // ★ D142+ (2026-04-29) 0429 PDF B5 — phone 정규화 + 중복 등록 사전 차단
+    //   기존: 사용자 입력 그대로 INSERT → '02-3145-2186' / '0231452186' 같은 형식 차이로 중복 등록 가능
+    //   변경: normalizePhone으로 통일 저장 + 사전 SELECT로 중복 체크 + DB UNIQUE 제약(별도 마이그레이션)
+    const normalizedPhone = (0, normalize_phone_1.normalizePhone)(phone);
+    if (normalizedPhone.length < 8 || normalizedPhone.length > 11) {
+        return res.status(400).json({ error: '유효하지 않은 발신번호 형식입니다.' });
+    }
+    try {
+        // 사전 중복 체크 (정규화된 phone 기준 — 형식 차이로 인한 우회 차단)
+        const dupCheck = await (0, database_1.query)(`SELECT id FROM callback_numbers WHERE company_id = $1 AND regexp_replace(phone, '\\D', '', 'g') = $2`, [companyId, normalizedPhone]);
+        if (dupCheck.rows.length > 0) {
+            return res.status(409).json({
+                error: '이미 등록된 발신번호입니다. 같은 고객사에 동일한 번호를 중복 등록할 수 없습니다.',
+                code: 'DUPLICATE_CALLBACK_NUMBER',
+            });
+        }
+        // 대표번호로 설정 시 기존 대표번호 해제
+        if (isDefault) {
+            await (0, database_1.query)('UPDATE callback_numbers SET is_default = false WHERE company_id = $1', [companyId]);
+        }
+        // ★ D142+ B5: INSERT는 사용자 입력 phone 그대로 저장 (UI 표시 형식 유지 — '02-3145-2186')
+        //   중복 차단은 위 사전 체크(정규화 비교) + DB functional UNIQUE index가 책임
+        const result = await (0, database_1.query)(`
+      INSERT INTO callback_numbers (company_id, phone, label, is_default)
+      VALUES ($1, $2, $3, $4)
+      RETURNING id, phone, label, is_default
+    `, [companyId, phone, label || null, isDefault || false]);
+        res.json({
+            message: '발신번호가 등록되었습니다.',
+            callbackNumber: result.rows[0]
+        });
+    }
+    catch (error) {
+        // PostgreSQL UNIQUE 제약 위반(에러코드 23505) 안내 — DB 레벨 중복 차단
+        if (error?.code === '23505') {
+            return res.status(409).json({
+                error: '이미 등록된 발신번호입니다. 같은 고객사에 동일한 번호를 중복 등록할 수 없습니다.',
+                code: 'DUPLICATE_CALLBACK_NUMBER',
+            });
+        }
+        console.error('발신번호 등록 실패:', error);
+        res.status(500).json({ error: '발신번호 등록 실패' });
+    }
+});
+// 발신번호 수정
+router.put('/callback-numbers/:id', auth_1.authenticate, auth_1.requireSuperAdmin, async (req, res) => {
+    const { id } = req.params;
+    const { phone, label } = req.body;
+    try {
+        const result = await (0, database_1.query)(`
+      UPDATE callback_numbers 
+      SET phone = COALESCE($1, phone),
+          label = COALESCE($2, label)
+      WHERE id = $3
+      RETURNING id, phone, label, is_default
+    `, [phone, label, id]);
+        if (result.rows.length === 0) {
+            return res.status(404).json({ error: '발신번호를 찾을 수 없습니다.' });
+        }
+        res.json({ message: '수정되었습니다.', callbackNumber: result.rows[0] });
+    }
+    catch (error) {
+        console.error('발신번호 수정 실패:', error);
+        res.status(500).json({ error: '발신번호 수정 실패' });
+    }
+});
+// 발신번호 삭제
+router.delete('/callback-numbers/:id', auth_1.authenticate, auth_1.requireSuperAdmin, async (req, res) => {
+    const { id } = req.params;
+    try {
+        const result = await (0, database_1.query)('DELETE FROM callback_numbers WHERE id = $1 RETURNING phone', [id]);
+        if (result.rows.length === 0) {
+            return res.status(404).json({ error: '발신번호를 찾을 수 없습니다.' });
+        }
+        res.json({ message: '삭제되었습니다.' });
+    }
+    catch (error) {
+        console.error('발신번호 삭제 실패:', error);
+        res.status(500).json({ error: '발신번호 삭제 실패' });
+    }
+});
+// 대표번호 설정
+router.put('/callback-numbers/:id/default', auth_1.authenticate, auth_1.requireSuperAdmin, async (req, res) => {
+    const { id } = req.params;
+    try {
+        const check = await (0, database_1.query)('SELECT company_id FROM callback_numbers WHERE id = $1', [id]);
+        if (check.rows.length === 0) {
+            return res.status(404).json({ error: '발신번호를 찾을 수 없습니다.' });
+        }
+        const companyId = check.rows[0].company_id;
+        await (0, database_1.query)('UPDATE callback_numbers SET is_default = false WHERE company_id = $1', [companyId]);
+        await (0, database_1.query)('UPDATE callback_numbers SET is_default = true WHERE id = $1', [id]);
+        res.json({ message: '대표번호로 설정되었습니다.' });
+    }
+    catch (error) {
+        console.error('대표번호 설정 실패:', error);
+        res.status(500).json({ error: '대표번호 설정 실패' });
+    }
+});
+// ===== 요금제 관리 API =====
+// 요금제 목록 조회
+router.get('/plans', auth_1.authenticate, auth_1.requireSuperAdmin, async (req, res) => {
+    try {
+        const result = await (0, database_1.query)(`
+      SELECT p.*, 
+        (SELECT COUNT(*) FROM companies WHERE plan_id = p.id) as company_count
+      FROM plans p
+      ORDER BY p.monthly_price ASC
+    `);
+        res.json({ plans: result.rows });
+    }
+    catch (error) {
+        console.error('요금제 조회 실패:', error);
+        res.status(500).json({ error: '요금제 조회 실패' });
+    }
+});
+// 요금제 추가
+router.post('/plans', auth_1.authenticate, auth_1.requireSuperAdmin, async (req, res) => {
+    const { planCode, planName, maxCustomers, monthlyPrice } = req.body;
+    if (!planCode || !planName || maxCustomers === undefined || monthlyPrice === undefined) {
+        return res.status(400).json({ error: '모든 항목을 입력해주세요.' });
+    }
+    try {
+        const result = await (0, database_1.query)(`
+      INSERT INTO plans (plan_code, plan_name, max_customers, monthly_price)
+      VALUES ($1, $2, $3, $4)
+      RETURNING *
+    `, [planCode, planName, maxCustomers, monthlyPrice]);
+        res.json({
+            message: '요금제가 등록되었습니다.',
+            plan: result.rows[0]
+        });
+    }
+    catch (error) {
+        if (error.code === '23505') {
+            return res.status(400).json({ error: '이미 존재하는 요금제 코드입니다.' });
+        }
+        console.error('요금제 등록 실패:', error);
+        res.status(500).json({ error: '요금제 등록 실패' });
+    }
+});
+// 요금제 수정
+router.put('/plans/:id', auth_1.authenticate, auth_1.requireSuperAdmin, async (req, res) => {
+    const { id } = req.params;
+    const { planName, maxCustomers, monthlyPrice, isActive } = req.body;
+    try {
+        const result = await (0, database_1.query)(`
+      UPDATE plans 
+      SET plan_name = COALESCE($1, plan_name),
+          max_customers = COALESCE($2, max_customers),
+          monthly_price = COALESCE($3, monthly_price),
+          is_active = COALESCE($4, is_active)
+      WHERE id = $5
+      RETURNING *
+    `, [planName, maxCustomers, monthlyPrice, isActive, id]);
+        if (result.rows.length === 0) {
+            return res.status(404).json({ error: '요금제를 찾을 수 없습니다.' });
+        }
+        res.json({ message: '수정되었습니다.', plan: result.rows[0] });
+    }
+    catch (error) {
+        console.error('요금제 수정 실패:', error);
+        res.status(500).json({ error: '요금제 수정 실패' });
+    }
+});
+// 요금제 삭제
+router.delete('/plans/:id', auth_1.authenticate, auth_1.requireSuperAdmin, async (req, res) => {
+    const { id } = req.params;
+    try {
+        // 사용 중인 회사가 있는지 확인
+        const checkResult = await (0, database_1.query)('SELECT COUNT(*) FROM companies WHERE plan_id = $1', [id]);
+        if (parseInt(checkResult.rows[0].count) > 0) {
+            return res.status(400).json({ error: '이 요금제를 사용 중인 회사가 있어 삭제할 수 없습니다.' });
+        }
+        const result = await (0, database_1.query)('DELETE FROM plans WHERE id = $1 RETURNING plan_name', [id]);
+        if (result.rows.length === 0) {
+            return res.status(404).json({ error: '요금제를 찾을 수 없습니다.' });
+        }
+        res.json({ message: '삭제되었습니다.' });
+    }
+    catch (error) {
+        console.error('요금제 삭제 실패:', error);
+        res.status(500).json({ error: '요금제 삭제 실패' });
+    }
+});
+// ===== 플랜 변경 신청 관리 API =====
+// 플랜 신청 목록 조회
+router.get('/plan-requests', auth_1.authenticate, auth_1.requireSuperAdmin, async (req, res) => {
+    try {
+        const result = await (0, database_1.query)(`
+      SELECT 
+        pr.*,
+        c.company_name, c.company_code,
+        p_current.plan_name as current_plan_name,
+        p_requested.plan_name as requested_plan_name,
+        p_requested.monthly_price as requested_plan_price,
+        u.name as user_name, u.login_id as user_login_id,
+        admin.name as processed_by_name
+      FROM plan_requests pr
+      LEFT JOIN companies c ON pr.company_id = c.id
+      LEFT JOIN plans p_current ON c.plan_id = p_current.id
+      LEFT JOIN plans p_requested ON pr.requested_plan_id = p_requested.id
+      LEFT JOIN users u ON pr.user_id = u.id
+      LEFT JOIN users admin ON pr.processed_by = admin.id
+      ORDER BY 
+        CASE WHEN pr.status = 'pending' THEN 0 ELSE 1 END,
+        pr.created_at DESC
+    `);
+        res.json({ requests: result.rows });
+    }
+    catch (error) {
+        console.error('플랜 신청 조회 실패:', error);
+        res.status(500).json({ error: '플랜 신청 조회 실패' });
+    }
+});
+// 플랜 신청 승인
+router.put('/plan-requests/:id/approve', auth_1.authenticate, auth_1.requireSuperAdmin, async (req, res) => {
+    const { id } = req.params;
+    const { adminNote } = req.body;
+    const adminId = req.user?.userId;
+    try {
+        // 신청 정보 조회
+        const requestResult = await (0, database_1.query)('SELECT company_id, requested_plan_id, status FROM plan_requests WHERE id = $1', [id]);
+        if (requestResult.rows.length === 0) {
+            return res.status(404).json({ error: '신청을 찾을 수 없습니다.' });
+        }
+        const request = requestResult.rows[0];
+        if (request.status !== 'pending') {
+            return res.status(400).json({ error: '이미 처리된 신청입니다.' });
+        }
+        // ★ CT-17: 요금제 승인 시 TRIAL plan이면 'trial' 유지, 그 외는 'paid'(정식 구독).
+        //   (과거: 무조건 'active'로 덮어써서 ① 체험 상태 파괴 ② companies.status='active'와 네이밍 충돌)
+        const approvedPlanRes = await (0, database_1.query)(`SELECT plan_code FROM plans WHERE id = $1`, [request.requested_plan_id]);
+        const approvedIsTrial = approvedPlanRes.rows[0]?.plan_code === 'TRIAL';
+        const approvedStatus = approvedIsTrial ? 'trial' : 'paid';
+        await (0, database_1.query)(`UPDATE companies SET plan_id = $1, subscription_status = $2, updated_at = NOW() WHERE id = $3`, [request.requested_plan_id, approvedStatus, request.company_id]);
+        // 신청 상태 변경
+        const result = await (0, database_1.query)(`
+      UPDATE plan_requests 
+      SET status = 'approved',
+          admin_note = $1,
+          processed_by = $2,
+          processed_at = NOW()
+      WHERE id = $3
+      RETURNING *
+    `, [adminNote || null, adminId, id]);
+        res.json({
+            message: '승인되었습니다. 회사 플랜이 변경되었습니다.',
+            request: result.rows[0]
+        });
+    }
+    catch (error) {
+        console.error('플랜 신청 승인 실패:', error);
+        res.status(500).json({ error: '플랜 신청 승인 실패' });
+    }
+});
+// 플랜 신청 거절
+router.put('/plan-requests/:id/reject', auth_1.authenticate, auth_1.requireSuperAdmin, async (req, res) => {
+    const { id } = req.params;
+    const { adminNote } = req.body;
+    const adminId = req.user?.userId;
+    if (!adminNote || adminNote.trim() === '') {
+        return res.status(400).json({ error: '거절 사유를 입력해주세요.' });
+    }
+    try {
+        const checkResult = await (0, database_1.query)('SELECT status FROM plan_requests WHERE id = $1', [id]);
+        if (checkResult.rows.length === 0) {
+            return res.status(404).json({ error: '신청을 찾을 수 없습니다.' });
+        }
+        if (checkResult.rows[0].status !== 'pending') {
+            return res.status(400).json({ error: '이미 처리된 신청입니다.' });
+        }
+        const result = await (0, database_1.query)(`
+      UPDATE plan_requests 
+      SET status = 'rejected',
+          admin_note = $1,
+          processed_by = $2,
+          processed_at = NOW()
+      WHERE id = $3
+      RETURNING *
+    `, [adminNote.trim(), adminId, id]);
+        res.json({
+            message: '거절되었습니다.',
+            request: result.rows[0]
+        });
+    }
+    catch (error) {
+        console.error('플랜 신청 거절 실패:', error);
+        res.status(500).json({ error: '플랜 신청 거절 실패' });
+    }
+});
+// ===== 발송 통계 API =====
+// 전체 발송 통계 (요약 + 페이징된 일별/월별)
+router.get('/stats/send', auth_1.authenticate, auth_1.requireSuperAdmin, async (req, res) => {
+    try {
+        const view = req.query.view || 'daily';
+        let startDate = req.query.startDate || '';
+        let endDate = req.query.endDate || '';
+        // 월별 조회 시 날짜를 월 단위로 자동 확장
+        if (view === 'monthly') {
+            if (startDate)
+                startDate = startDate.substring(0, 7) + '-01';
+            if (endDate) {
+                const d = new Date(endDate);
+                d.setMonth(d.getMonth() + 1, 0);
+                endDate = d.toISOString().split('T')[0];
+            }
+        }
+        const companyId = req.query.companyId || '';
+        const page = parseInt(req.query.page) || 1;
+        const limit = parseInt(req.query.limit) || 10;
+        const offset = (page - 1) * limit;
+        // ★ D104: 날짜 필터 컨트롤타워 사용
+        const dr = (0, stats_aggregation_1.buildDateRangeFilter)('c.sent_at', startDate, endDate, 1);
+        let dateWhere = dr.sql;
+        const baseParams = [...dr.params];
+        let paramIdx = dr.nextIndex;
+        let companyWhere = '';
+        if (companyId) {
+            companyWhere = ` AND c.company_id = $${paramIdx}`;
+            baseParams.push(companyId);
+            paramIdx++;
+        }
+        // ★ D144: PG sent_count/success_count/fail_count 캐시 의존 제거.
+        //   PG에서 캠페인 메타만 SELECT → MySQL 큐 + 카카오에서 직접 카운트 → JS에서 (period, company)별 그룹핑 + summary.
+        //   응답 키(summary/rows) 형태는 그대로 유지하여 frontend 변경 0.
+        const groupCol = view === 'monthly'
+            ? `TO_CHAR(c.sent_at AT TIME ZONE 'Asia/Seoul', 'YYYY-MM')`
+            : `TO_CHAR(c.sent_at AT TIME ZONE 'Asia/Seoul', 'YYYY-MM-DD')`;
+        const groupAlias = view === 'monthly' ? 'month' : 'date';
+        const metaResult = await (0, database_1.query)(`
+      SELECT
+        c.id, c.company_id, c.created_by, c.message_type,
+        ${groupCol} as period,
+        co.company_name,
+        lg.group_name as line_group_name
+      FROM campaigns c
+      JOIN companies co ON c.company_id = co.id
+      LEFT JOIN sms_line_groups lg ON co.line_group_id = lg.id
+      WHERE c.sent_at IS NOT NULL
+        AND c.status NOT IN ('cancelled', 'draft') ${dateWhere} ${companyWhere}
+    `, baseParams);
+        const metaCampaigns = metaResult.rows;
+        const smsCountMap = await (0, stats_aggregation_1.aggregateSmsCountsByCampaign)(metaCampaigns);
+        const kakaoCountMap = await (0, sms_queue_1.kakaoBatchAggByGroup)(metaCampaigns.map((c) => c.id));
+        const byKey = new Map();
+        let totalSent = 0, totalSuccess = 0, totalFail = 0;
+        for (const c of metaCampaigns) {
+            const sms = smsCountMap.get(c.id) || { total_count: 0, success_count: 0, fail_count: 0 };
+            const kakao = kakaoCountMap.get(c.id) || { total: 0, success: 0, fail: 0, pending: 0 };
+            const sent = Number(sms.total_count || 0) + kakao.total;
+            const success = Number(sms.success_count || 0) + kakao.success;
+            const fail = Number(sms.fail_count || 0) + kakao.fail;
+            totalSent += sent;
+            totalSuccess += success;
+            totalFail += fail;
+            const key = `${c.period}|${c.company_id}`;
+            if (!byKey.has(key)) {
+                byKey.set(key, {
+                    period: c.period, company_id: c.company_id,
+                    company_name: c.company_name, line_group_name: c.line_group_name,
+                    runs: new Set(), sent: 0, success: 0, fail: 0,
+                });
+            }
+            const b = byKey.get(key);
+            b.runs.add(c.id);
+            b.sent += sent;
+            b.success += success;
+            b.fail += fail;
+        }
+        const allRows = Array.from(byKey.values())
+            .map((v) => ({
+            [groupAlias]: v.period,
+            company_id: v.company_id,
+            company_name: v.company_name,
+            line_group_name: v.line_group_name,
+            runs: v.runs.size,
+            sent: v.sent,
+            success: v.success,
+            fail: v.fail,
+        }))
+            .sort((a, b) => {
+            const pa = a[groupAlias], pb = b[groupAlias];
+            if (pa < pb)
+                return 1;
+            if (pa > pb)
+                return -1;
+            return String(a.company_name || '').localeCompare(String(b.company_name || ''));
+        });
+        const total = allRows.length;
+        const pagedRows = allRows.slice(offset, offset + limit);
+        const summaryResult = {
+            rows: [{ total_sent: String(totalSent), total_success: String(totalSuccess), total_fail: String(totalFail) }],
+        };
+        const rowsResult = { rows: pagedRows };
+        // ===== 테스트 발송 통계 (담당자 + 스팸필터) =====
+        let testSummary = { total: 0, success: 0, fail: 0, pending: 0, sms: 0, lms: 0, cost: 0 };
+        const targetCompanyId = companyId || null;
+        if (targetCompanyId) {
+            try {
+                // 1) 담당자 테스트 (MySQL) — CT-04 컨트롤타워: 테스트 라인 테이블 동적 조회
+                const testTables = await (0, sms_queue_1.getTestSmsTables)();
+                let mysqlDateWhere = '';
+                const mysqlParams = [targetCompanyId];
+                if (startDate) {
+                    mysqlDateWhere += ` AND msg_instm >= ?`;
+                    mysqlParams.push(startDate);
+                }
+                if (endDate) {
+                    mysqlDateWhere += ` AND msg_instm < DATE_ADD(?, INTERVAL 1 DAY)`;
+                    mysqlParams.push(endDate);
+                }
+                const testAgg = await (0, sms_queue_1.smsAggAll)(testTables, `COUNT(*) as total,
+           SUM(CASE WHEN status_code IN (${sms_result_map_1.SUCCESS_CODES_SQL}) THEN 1 ELSE 0 END) as success,
+           SUM(CASE WHEN status_code NOT IN (${sms_result_map_1.SUCCESS_CODES_SQL},${sms_result_map_1.PENDING_CODES_SQL}) THEN 1 ELSE 0 END) as fail,
+           SUM(CASE WHEN status_code IN (${sms_result_map_1.PENDING_CODES_SQL}) THEN 1 ELSE 0 END) as pending,
+           SUM(CASE WHEN msg_type = 'S' THEN 1 ELSE 0 END) as sms,
+           SUM(CASE WHEN msg_type = 'L' THEN 1 ELSE 0 END) as lms`, `app_etc1 = 'test' AND app_etc2 = ? ${mysqlDateWhere}`, mysqlParams);
+                testSummary.total += Number(testAgg.total) || 0;
+                testSummary.success += Number(testAgg.success) || 0;
+                testSummary.fail += Number(testAgg.fail) || 0;
+                testSummary.pending += Number(testAgg.pending) || 0;
+                testSummary.sms += Number(testAgg.sms) || 0;
+                testSummary.lms += Number(testAgg.lms) || 0;
+                // 2) 스팸필터 테스트 (PostgreSQL)
+                const sfDr = (0, stats_aggregation_1.buildDateRangeFilter)('t.created_at', startDate, endDate, 2);
+                const sfDateWhere = sfDr.sql;
+                const sfParams = [targetCompanyId, ...sfDr.params];
+                const sfIdx = sfDr.nextIndex;
+                const sfAgg = await (0, database_1.query)(`
+          SELECT COUNT(*) as total,
+            SUM(CASE WHEN r.message_type = 'SMS' THEN 1 ELSE 0 END) as sms,
+            SUM(CASE WHEN r.message_type = 'LMS' THEN 1 ELSE 0 END) as lms,
+            SUM(CASE WHEN r.result IS NOT NULL THEN 1 ELSE 0 END) as completed,
+            SUM(CASE WHEN r.result IS NULL AND t.status IN ('active','pending') THEN 1 ELSE 0 END) as pending
+          FROM spam_filter_test_results r
+          JOIN spam_filter_tests t ON r.test_id = t.id
+          WHERE t.company_id = $1 ${sfDateWhere}
+        `, sfParams);
+                const sf = sfAgg.rows[0];
+                testSummary.total += Number(sf.total) || 0;
+                testSummary.success += Number(sf.completed) || 0;
+                testSummary.pending += Number(sf.pending) || 0;
+                testSummary.sms += Number(sf.sms) || 0;
+                testSummary.lms += Number(sf.lms) || 0;
+                // 비용 계산
+                const costRes = await (0, database_1.query)('SELECT cost_per_sms, cost_per_lms FROM companies WHERE id = $1', [targetCompanyId]);
+                const cSms = Number(costRes.rows[0]?.cost_per_sms) || defaults_1.DEFAULT_COSTS.sms;
+                const cLms = Number(costRes.rows[0]?.cost_per_lms) || defaults_1.DEFAULT_COSTS.lms;
+                testSummary.cost = Math.round((testSummary.sms * cSms + testSummary.lms * cLms) * 10) / 10;
+            }
+            catch (err) {
+                console.error('테스트 통계 조회 실패:', err);
+            }
+        }
+        res.json({
+            summary: summaryResult.rows[0],
+            testSummary,
+            rows: rowsResult.rows,
+            total,
+            page,
+            totalPages: Math.ceil(total / limit)
+        });
+    }
+    catch (error) {
+        console.error('발송 통계 조회 실패:', error);
+        res.status(500).json({ error: '발송 통계 조회 실패' });
+    }
+});
+// 발송 통계 상세 (사용자별 분해)
+router.get('/stats/send/detail', auth_1.authenticate, auth_1.requireSuperAdmin, async (req, res) => {
+    try {
+        const view = req.query.view || 'daily';
+        const dateVal = req.query.date || '';
+        const companyId = req.query.companyId || '';
+        if (!dateVal || !companyId) {
+            return res.status(400).json({ error: '날짜와 고객사 ID가 필요합니다.' });
+        }
+        const groupCol = view === 'monthly'
+            ? `TO_CHAR(c.sent_at AT TIME ZONE 'Asia/Seoul', 'YYYY-MM')`
+            : `TO_CHAR(c.sent_at AT TIME ZONE 'Asia/Seoul', 'YYYY-MM-DD')`;
+        // ★ D144: PG sent_count/success_count/fail_count 캐시 의존 제거.
+        //   PG에서 캠페인+사용자+opt080 메타만 SELECT → MySQL 큐 + 카카오 직접 카운트 → JS 집계.
+        //   응답 키(userStats/campaigns) 형태는 그대로 유지하여 frontend 변경 0.
+        const metaResult = await (0, database_1.query)(`
+      SELECT
+        c.id, c.company_id, c.created_by, c.campaign_name, c.send_type, c.message_content,
+        c.message_type, c.is_ad, c.callback_number, c.target_count, c.created_at, c.sent_at,
+        ${unsubscribe_helper_1.CAMPAIGN_OPT080_SELECT_EXPR},
+        u.id as user_id, u.name as user_name, u.login_id, u.department, u.store_codes
+      FROM campaigns c
+      LEFT JOIN users u ON c.created_by = u.id
+      ${unsubscribe_helper_1.CAMPAIGN_OPT080_LEFT_JOIN}
+      WHERE c.sent_at IS NOT NULL
+        AND c.status NOT IN ('cancelled', 'draft')
+        AND ${groupCol} = $1
+        AND c.company_id = $2
+      ORDER BY c.sent_at DESC
+    `, [dateVal, companyId]);
+        const detailMetaRows = metaResult.rows;
+        const detailSmsMap = await (0, stats_aggregation_1.aggregateSmsCountsByCampaign)(detailMetaRows);
+        const detailKakaoMap = await (0, sms_queue_1.kakaoBatchAggByGroup)(detailMetaRows.map((c) => c.id));
+        const detailSentTimeMap = await (0, stats_aggregation_1.aggregateSmsSendTimesByCampaign)(detailMetaRows);
+        const byUser = new Map();
+        const campaignRows = [];
+        for (const c of detailMetaRows) {
+            const sms = detailSmsMap.get(c.id) || { total_count: 0, success_count: 0, fail_count: 0 };
+            const kakao = detailKakaoMap.get(c.id) || { total: 0, success: 0, fail: 0, pending: 0 };
+            const sent = Number(sms.total_count || 0) + kakao.total;
+            const success = Number(sms.success_count || 0) + kakao.success;
+            const fail = Number(sms.fail_count || 0) + kakao.fail;
+            const uKey = c.user_id || 'null';
+            if (!byUser.has(uKey)) {
+                byUser.set(uKey, {
+                    user_id: c.user_id, user_name: c.user_name, login_id: c.login_id,
+                    department: c.department, store_codes: c.store_codes,
+                    runs: new Set(), sent: 0, success: 0, fail: 0,
+                });
+            }
+            const u = byUser.get(uKey);
+            u.runs.add(c.id);
+            u.sent += sent;
+            u.success += success;
+            u.fail += fail;
+            campaignRows.push({
+                campaign_id: c.id,
+                campaign_name: c.campaign_name,
+                send_type: c.send_type,
+                message_content: c.message_content,
+                message_type: c.message_type,
+                is_ad: c.is_ad,
+                callback_number: c.callback_number,
+                opt_out_080_number: c.opt_out_080_number ?? null,
+                user_name: c.user_name,
+                login_id: c.login_id,
+                run_id: c.id,
+                run_number: 1,
+                sent_count: sent,
+                success_count: success,
+                fail_count: fail,
+                target_count: c.target_count,
+                created_at: c.created_at,
+                sent_at: detailSentTimeMap.get(c.id) ?? c.sent_at,
+            });
+        }
+        const result = {
+            rows: Array.from(byUser.values())
+                .map((u) => ({
+                user_id: u.user_id,
+                user_name: u.user_name,
+                login_id: u.login_id,
+                department: u.department,
+                store_codes: u.store_codes,
+                runs: u.runs.size,
+                sent: u.sent,
+                success: u.success,
+                fail: u.fail,
+            }))
+                .sort((a, b) => b.sent - a.sent),
+        };
+        const campaignsResult = { rows: campaignRows };
+        // ===== 테스트 발송 상세 (담당자 + 스팸필터) =====
+        let testDetail = [];
+        try {
+            // 1) 담당자 테스트 (MySQL) — CT-04 컨트롤타워
+            const testTables2 = await (0, sms_queue_1.getTestSmsTables)();
+            let mysqlDateWhere2 = '';
+            const mysqlParams2 = [companyId];
+            if (view === 'monthly') {
+                mysqlDateWhere2 = ` AND DATE_FORMAT(msg_instm, '%Y-%m') = ?`;
+            }
+            else {
+                mysqlDateWhere2 = ` AND DATE_FORMAT(msg_instm, '%Y-%m-%d') = ?`;
+            }
+            mysqlParams2.push(dateVal);
+            const testRows2All = await (0, sms_queue_1.smsSelectAll)(testTables2, `dest_no as phone, msg_type, status_code, msg_instm as sent_at, bill_id as sender_id`, `app_etc1 = 'test' AND app_etc2 = ? ${mysqlDateWhere2}`, mysqlParams2, `ORDER BY msg_instm DESC LIMIT 50`);
+            testRows2All.sort((a, b) => new Date(b.sent_at).getTime() - new Date(a.sent_at).getTime());
+            const testRows2 = testRows2All.slice(0, 50);
+            testDetail = testRows2.map(r => ({
+                phone: r.phone,
+                msgType: r.msg_type === 'S' ? 'SMS' : 'LMS',
+                status: (0, sms_result_map_1.isSuccess)(r.status_code) ? 'success' : (0, sms_result_map_1.isPending)(r.status_code) ? 'pending' : 'fail',
+                sentAt: r.sent_at,
+                testType: 'manager',
+            }));
+            // 2) 스팸필터 테스트 (PostgreSQL)
+            let sfDateCond = '';
+            if (view === 'monthly') {
+                sfDateCond = `AND TO_CHAR(t.created_at AT TIME ZONE 'Asia/Seoul', 'YYYY-MM') = $2`;
+            }
+            else {
+                sfDateCond = `AND TO_CHAR(t.created_at AT TIME ZONE 'Asia/Seoul', 'YYYY-MM-DD') = $2`;
+            }
+            const sfDetail = await (0, database_1.query)(`
+        SELECT r.phone, r.carrier, r.message_type, r.result,
+               t.created_at as sent_at
+        FROM spam_filter_test_results r
+        JOIN spam_filter_tests t ON r.test_id = t.id
+        WHERE t.company_id = $1 ${sfDateCond}
+        ORDER BY t.created_at DESC LIMIT 50
+      `, [companyId, dateVal]);
+            sfDetail.rows.forEach((r) => {
+                testDetail.push({
+                    phone: r.phone,
+                    msgType: r.message_type || 'SMS',
+                    status: r.result ? 'success' : 'pending',
+                    result: r.result || 'pending',
+                    carrier: r.carrier,
+                    sentAt: r.sent_at,
+                    testType: 'spam_filter',
+                });
+            });
+        }
+        catch (err) {
+            console.error('테스트 상세 조회 실패:', err);
+        }
+        res.json({
+            userStats: result.rows,
+            campaigns: campaignsResult.rows,
+            testDetail,
+        });
+    }
+    catch (error) {
+        console.error('발송 통계 상세 조회 실패:', error);
+        res.status(500).json({ error: '발송 통계 상세 조회 실패' });
+    }
+});
+// ===== 전체 캠페인 관리 API =====
+// 전체 캠페인 목록 (모든 회사 통합)
+router.get('/campaigns/all', auth_1.authenticate, auth_1.requireSuperAdmin, async (req, res) => {
+    try {
+        const page = parseInt(req.query.page) || 1;
+        const limit = parseInt(req.query.limit) || 10;
+        const search = req.query.search || '';
+        const status = req.query.status || '';
+        const companyId = req.query.companyId || '';
+        const startDate = req.query.startDate || '';
+        const endDate = req.query.endDate || '';
+        const offset = (page - 1) * limit;
+        let where = 'WHERE 1=1';
+        const params = [];
+        let paramIdx = 1;
+        if (search) {
+            where += ` AND (c.campaign_name ILIKE $${paramIdx} OR co.company_name ILIKE $${paramIdx} OR u.login_id ILIKE $${paramIdx})`;
+            params.push(`%${search}%`);
+            paramIdx++;
+        }
+        if (status) {
+            where += ` AND c.status = $${paramIdx}`;
+            params.push(status);
+            paramIdx++;
+        }
+        if (companyId) {
+            where += ` AND c.company_id = $${paramIdx}`;
+            params.push(companyId);
+            paramIdx++;
+        }
+        if (startDate) {
+            where += ` AND COALESCE(c.sent_at, c.scheduled_at, c.created_at) >= $${paramIdx}::date`;
+            params.push(startDate);
+            paramIdx++;
+        }
+        if (endDate) {
+            where += ` AND COALESCE(c.sent_at, c.scheduled_at, c.created_at) < ($${paramIdx}::date + INTERVAL '1 day')`;
+            params.push(endDate);
+            paramIdx++;
+        }
+        const countResult = await (0, database_1.query)(`SELECT COUNT(*) FROM campaigns c LEFT JOIN companies co ON c.company_id = co.id LEFT JOIN users u ON c.created_by = u.id ${where}`, params);
+        const total = parseInt(countResult.rows[0].count);
+        // ★ D144: PG campaign_runs sent_count/success_count/fail_count subquery 제거.
+        //   PG는 캠페인+회사+사용자 메타만 SELECT → MySQL 큐 + 카카오 직접 카운트 → JS 매핑.
+        //   target_count/sent_at은 last_run 메타라 그대로 subquery 유지 (캐시 아님).
+        const result = await (0, database_1.query)(`
+      SELECT
+        c.id, c.campaign_name as name, c.status, c.send_type as campaign_type, c.created_at,
+        c.company_id, c.created_by, c.message_type, c.send_channel, c.scheduled_at, c.sent_at,
+        co.company_name, co.company_code,
+        u.name as created_by_name, u.login_id as created_by_login,
+        (SELECT cr.target_count FROM campaign_runs cr WHERE cr.campaign_id = c.id ORDER BY cr.run_number DESC LIMIT 1) as last_target_count,
+        (SELECT cr.sent_at FROM campaign_runs cr WHERE cr.campaign_id = c.id ORDER BY cr.run_number DESC LIMIT 1) as last_sent_at
+      FROM campaigns c
+      LEFT JOIN companies co ON c.company_id = co.id
+      LEFT JOIN users u ON c.created_by = u.id
+      ${where}
+      ORDER BY c.created_at DESC
+      LIMIT $${paramIdx} OFFSET $${paramIdx + 1}
+    `, [...params, limit, offset]);
+        const adminCampSmsMap = await (0, stats_aggregation_1.aggregateSmsCountsByCampaign)(result.rows);
+        const adminCampKakaoMap = await (0, sms_queue_1.kakaoBatchAggByGroup)(result.rows.map((c) => c.id));
+        const adminCampSentTimeMap = await (0, stats_aggregation_1.aggregateSmsSendTimesByCampaign)(result.rows);
+        const campaigns = result.rows.map((c) => {
+            const sms = adminCampSmsMap.get(c.id) || { total_count: 0, success_count: 0, fail_count: 0 };
+            const kakao = adminCampKakaoMap.get(c.id) || { total: 0, success: 0, fail: 0, pending: 0 };
+            return {
+                ...c,
+                total_sent: Number(sms.total_count || 0) + kakao.total,
+                total_success: Number(sms.success_count || 0) + kakao.success,
+                total_fail: Number(sms.fail_count || 0) + kakao.fail,
+                sent_at: adminCampSentTimeMap.get(c.id) ?? c.sent_at,
+            };
+        });
+        res.json({
+            campaigns,
+            total,
+            page,
+            totalPages: Math.ceil(total / limit)
+        });
+    }
+    catch (error) {
+        console.error('전체 캠페인 조회 실패:', error);
+        res.status(500).json({ error: '전체 캠페인 조회 실패' });
+    }
+});
+// ===== SMS/카카오 발송 상세 조회 (MySQL) =====
+router.get('/campaigns/:id/sms-detail', auth_1.authenticate, auth_1.requireSuperAdmin, async (req, res) => {
+    try {
+        const { id } = req.params;
+        const page = parseInt(req.query.page) || 1;
+        const limit = parseInt(req.query.limit) || 50;
+        const offset = (page - 1) * limit;
+        const statusFilter = req.query.status || ''; // success / fail / pending / ''
+        const searchType = req.query.searchType || ''; // dest_no / call_back
+        const searchValue = req.query.searchValue || '';
+        const channelFilter = req.query.channel || ''; // sms / kakao / '' (all)
+        // 캠페인 기본 정보 (PostgreSQL)
+        // ★ D144: PG c.success_count/fail_count 캐시 의존 제거 → 헤더 카운트는 MySQL 직접 집계로 대체
+        const campResult = await (0, database_1.query)(`
+      SELECT c.id, c.company_id, c.created_by, c.created_at,
+             c.campaign_name, c.message_type, c.send_type, c.status, c.scheduled_at, c.sent_at, c.target_count,
+             c.send_channel,
+             co.company_name, co.company_code,
+             u.name as created_by_name, u.login_id as created_by_login
+      FROM campaigns c
+      LEFT JOIN companies co ON c.company_id = co.id
+      LEFT JOIN users u ON c.created_by = u.id
+      WHERE c.id = $1
+    `, [id]);
+        if (campResult.rows.length === 0) {
+            return res.status(404).json({ error: '캠페인을 찾을 수 없습니다.' });
+        }
+        const campaign = campResult.rows[0];
+        {
+            const headerSmsMap = await (0, stats_aggregation_1.aggregateSmsCountsByCampaign)([campaign]);
+            const headerKakaoMap = await (0, sms_queue_1.kakaoBatchAggByGroup)([campaign.id]);
+            const headerSentTimeMap = await (0, stats_aggregation_1.aggregateSmsSendTimesByCampaign)([campaign]);
+            const hSms = headerSmsMap.get(campaign.id) || { total_count: 0, success_count: 0, fail_count: 0 };
+            const hKakao = headerKakaoMap.get(campaign.id) || { total: 0, success: 0, fail: 0, pending: 0 };
+            campaign.success_count = Number(hSms.success_count || 0) + hKakao.success;
+            campaign.fail_count = Number(hSms.fail_count || 0) + hKakao.fail;
+            campaign.sent_count = Number(hSms.total_count || 0) + hKakao.total;
+            const hSentTime = headerSentTimeMap.get(campaign.id);
+            if (hSentTime)
+                campaign.sent_at = hSentTime;
+        }
+        const sendChannel = campaign.send_channel || 'sms';
+        const showSms = (!channelFilter || channelFilter === 'sms') && (sendChannel === 'sms' || sendChannel === 'both');
+        const showKakao = (!channelFilter || channelFilter === 'kakao') && (sendChannel === 'kakao' || sendChannel === 'both');
+        let allDetail = [];
+        let totalSms = 0;
+        let totalKakao = 0;
+        // ===== SMS 내역 조회 =====
+        if (showSms) {
+            // CT-04: 캠페인 단일 조회 최적화 —
+            // 해당 회사 라인그룹 LIVE 테이블(1~2개) + 발송월 LOG 테이블(1개)만 조회
+            // 고객사/테이블 수 증가와 무관하게 O(2~3) 유지
+            const refDate = new Date(campaign.sent_at || campaign.scheduled_at || campaign.created_at);
+            const smsTables = await (0, sms_queue_1.getCampaignSmsTables)(campaign.company_id, refDate, campaign.created_by);
+            let mysqlWhere = `app_etc1 = ?`;
+            const mysqlParams = [id];
+            if (statusFilter === 'success') {
+                mysqlWhere += ` AND status_code IN (${sms_result_map_1.SUCCESS_CODES_SQL})`;
+            }
+            else if (statusFilter === 'fail') {
+                mysqlWhere += ` AND status_code NOT IN (${sms_result_map_1.SUCCESS_CODES_SQL},${sms_result_map_1.PENDING_CODES_SQL})`;
+            }
+            else if (statusFilter === 'pending') {
+                mysqlWhere += ` AND status_code IN (${sms_result_map_1.PENDING_CODES_SQL})`;
+            }
+            if (searchValue && searchType === 'dest_no') {
+                mysqlWhere += ` AND dest_no LIKE ?`;
+                mysqlParams.push(`%${searchValue.replace(/-/g, '')}%`);
+            }
+            else if (searchValue && searchType === 'call_back') {
+                mysqlWhere += ` AND call_back LIKE ?`;
+                mysqlParams.push(`%${searchValue.replace(/-/g, '')}%`);
+            }
+            totalSms = await (0, sms_queue_1.smsCountAll)(smsTables, mysqlWhere, mysqlParams);
+            // 전체 테이블에서 수집 후 seqno DESC 정렬 + 인메모리 페이지네이션
+            // ★ D124: 수신확인(repmsg_recvtm) 전경로 제거 — 등록/발송 2컬럼 통일
+            //   sendreq_time: 우리 앱 NOW() → KST (DATE_ADD 불필요)
+            //   mobsend_time: QTmsg Agent → UTC → DATE_ADD(+9h) 필요
+            const allRows = await (0, sms_queue_1.smsSelectAll)(smsTables, `seqno, dest_no, call_back, msg_contents, msg_type, status_code, mob_company,
+         sendreq_time,
+         DATE_ADD(mobsend_time, INTERVAL 9 HOUR) AS mobsend_time`, mysqlWhere, mysqlParams);
+            allRows.sort((a, b) => Number(b.seqno) - Number(a.seqno));
+            const rows = allRows.slice(Number(offset), Number(offset) + Number(limit));
+            rows.forEach(r => {
+                allDetail.push({
+                    seqno: r.seqno,
+                    destNo: r.dest_no,
+                    callBack: r.call_back,
+                    msgContents: r.msg_contents,
+                    msgType: r.msg_type === 'S' ? 'SMS' : r.msg_type === 'L' ? 'LMS' : r.msg_type === 'M' ? 'MMS' : r.msg_type,
+                    statusCode: r.status_code,
+                    statusText: (0, sms_result_map_1.getStatusLabel)(r.status_code),
+                    statusType: (0, sms_result_map_1.getStatusType)(r.status_code),
+                    carrier: (0, sms_result_map_1.getCarrierLabel)(r.mob_company),
+                    sendreqTime: r.sendreq_time,
+                    mobsendTime: r.mobsend_time,
+                    channel: 'sms',
+                });
+            });
+        }
+        // ===== 카카오 내역 조회 =====
+        if (showKakao) {
+            // CT-04: 카카오 조회도 컨트롤타워 사용 (IMC_BM_FREE_BIZ_MSG 단일 테이블)
+            let kakaoWhere = `REQUEST_UID = ?`;
+            const kakaoParams = [id];
+            if (statusFilter === 'success') {
+                kakaoWhere += ` AND REPORT_CODE = '0000'`;
+            }
+            else if (statusFilter === 'fail') {
+                kakaoWhere += ` AND REPORT_CODE != '0000' AND STATUS IN ('3','4')`;
+            }
+            else if (statusFilter === 'pending') {
+                kakaoWhere += ` AND STATUS IN ('1','2')`;
+            }
+            if (searchValue && searchType === 'dest_no') {
+                kakaoWhere += ` AND PHONE_NUMBER LIKE ?`;
+                kakaoParams.push(`%${searchValue.replace(/-/g, '')}%`);
+            }
+            totalKakao = await (0, sms_queue_1.kakaoCountWhere)(kakaoWhere, kakaoParams);
+            const kakaoRows = await (0, sms_queue_1.kakaoSelectWhere)(`ID, PHONE_NUMBER, MESSAGE, CHAT_BUBBLE_TYPE, STATUS, REPORT_CODE, REPORT_DATE,
+         REQUEST_DATE, RESPONSE_DATE, RESEND_MT_TYPE, RESEND_REPORT_CODE`, kakaoWhere, kakaoParams, `ORDER BY ID DESC LIMIT ${Number(limit)} OFFSET ${Number(offset)}`);
+            const kakaoStatusMap = {
+                '0000': '카카오성공', '': '대기',
+            };
+            kakaoRows.forEach(r => {
+                allDetail.push({
+                    seqno: r.ID,
+                    destNo: r.PHONE_NUMBER,
+                    callBack: '-',
+                    msgContents: r.MESSAGE,
+                    msgType: `카카오(${r.CHAT_BUBBLE_TYPE || 'TEXT'})`,
+                    statusCode: r.REPORT_CODE === '0000' ? 1800 : (r.STATUS <= '2' ? 100 : 9999),
+                    statusText: kakaoStatusMap[r.REPORT_CODE] || `카카오:${r.REPORT_CODE || '처리중'}`,
+                    statusType: r.REPORT_CODE === '0000' ? 'success' : (r.STATUS <= '2' ? 'pending' : 'fail'),
+                    carrier: '카카오',
+                    sendreqTime: r.REQUEST_DATE,
+                    mobsendTime: r.RESPONSE_DATE,
+                    recvTime: r.REPORT_DATE,
+                    channel: 'kakao',
+                    kakaoReportCode: r.REPORT_CODE,
+                    resendType: r.RESEND_MT_TYPE,
+                    resendReportCode: r.RESEND_REPORT_CODE,
+                });
+            });
+        }
+        const total = totalSms + totalKakao;
+        res.json({ campaign, detail: allDetail, total, totalSms, totalKakao, page, totalPages: Math.ceil(total / limit) });
+    }
+    catch (error) {
+        console.error('SMS 상세 조회 실패:', error);
+        res.status(500).json({ error: 'SMS 상세 조회 실패' });
+    }
+});
+// ===== 표준 필드 관리 API =====
+// 표준 필드 목록 조회
+router.get('/standard-fields', auth_1.authenticate, auth_1.requireSuperAdmin, async (req, res) => {
+    try {
+        const result = await (0, database_1.query)('SELECT id, field_key, display_name, category, data_type, description, sort_order FROM standard_fields WHERE is_active = true ORDER BY sort_order');
+        res.json({ fields: result.rows });
+    }
+    catch (error) {
+        console.error('표준 필드 조회 실패:', error);
+        res.status(500).json({ error: '표준 필드 조회 실패' });
+    }
+});
+// 회사별 활성 필드 조회
+router.get('/companies/:id/fields', auth_1.authenticate, auth_1.requireSuperAdmin, async (req, res) => {
+    const { id } = req.params;
+    try {
+        const result = await (0, database_1.query)('SELECT enabled_fields FROM companies WHERE id = $1', [id]);
+        if (result.rows.length === 0) {
+            return res.status(404).json({ error: '회사를 찾을 수 없습니다.' });
+        }
+        res.json({ enabledFields: result.rows[0].enabled_fields || [] });
+    }
+    catch (error) {
+        console.error('회사 필드 조회 실패:', error);
+        res.status(500).json({ error: '회사 필드 조회 실패' });
+    }
+});
+// 회사별 필드 데이터 유무 체크
+router.get('/companies/:id/field-data-check', auth_1.authenticate, auth_1.requireSuperAdmin, async (req, res) => {
+    const { id } = req.params;
+    try {
+        // field_key → 실제 DB 컬럼 매핑
+        const FIELD_COLUMN_MAP = {
+            name: 'name', phone: 'phone', gender: 'gender',
+            birth_date: 'birth_date', age_group: 'age', region: 'region',
+            address: 'address', email: 'email', grade: 'grade',
+            total_purchase_amount: 'total_purchase_amount',
+            purchase_count: 'purchase_count',
+            last_purchase_date: 'recent_purchase_date',
+            points: 'points', store_code: 'store_code', store_name: 'store_name',
+            opt_in_sms: 'sms_opt_in',
+        };
+        // 활성 필드 목록
+        const fieldsResult = await (0, database_1.query)('SELECT field_key FROM standard_fields WHERE is_active = true');
+        const fieldKeys = fieldsResult.rows.map((r) => r.field_key);
+        // 한 번의 쿼리로 모든 필드 데이터 유무 체크
+        const selectParts = fieldKeys.map(key => {
+            const col = FIELD_COLUMN_MAP[key];
+            if (col) {
+                return `COUNT(CASE WHEN ${col} IS NOT NULL AND ${col}::text != '' THEN 1 END) as "${key}"`;
+            }
+            else {
+                return `COUNT(CASE WHEN custom_fields->>'${key}' IS NOT NULL AND custom_fields->>'${key}' != '' THEN 1 END) as "${key}"`;
+            }
+        });
+        const sql = `SELECT ${selectParts.join(', ')} FROM customers_unified WHERE company_id = $1`;
+        const result = await (0, database_1.query)(sql, [id]);
+        const dataCheck = {};
+        for (const key of fieldKeys) {
+            const count = parseInt(result.rows[0]?.[key]) || 0;
+            dataCheck[key] = { hasData: count > 0, count };
+        }
+        res.json({ dataCheck });
+    }
+    catch (error) {
+        console.error('필드 데이터 체크 실패:', error);
+        res.status(500).json({ error: '필드 데이터 체크 실패' });
+    }
+});
+// 회사별 활성 필드 저장
+router.put('/companies/:id/fields', auth_1.authenticate, auth_1.requireSuperAdmin, async (req, res) => {
+    const { id } = req.params;
+    const { enabledFields } = req.body;
+    try {
+        const result = await (0, database_1.query)('UPDATE companies SET enabled_fields = $1, updated_at = NOW() WHERE id = $2 RETURNING id', [JSON.stringify(enabledFields || []), id]);
+        if (result.rows.length === 0) {
+            return res.status(404).json({ error: '회사를 찾을 수 없습니다.' });
+        }
+        res.json({ message: '필터항목이 저장되었습니다.', enabledFields });
+    }
+    catch (error) {
+        console.error('필터항목 저장 실패:', error);
+        res.status(500).json({ error: '필터항목 저장 실패' });
+    }
+});
+// ===== 정산서 이메일 발송 =====
+router.post('/billing/:id/send-email', auth_1.authenticate, auth_1.requireSuperAdmin, async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { to, subject, body_html } = req.body;
+        const adminId = req.user?.id || req.adminUser?.id;
+        if (!to || !subject) {
+            return res.status(400).json({ error: '수신자 이메일과 제목은 필수입니다' });
+        }
+        // 1) billing 조회 + 상태 체크
+        const billingResult = await (0, database_1.query)('SELECT * FROM billings WHERE id = $1', [id]);
+        if (billingResult.rows.length === 0) {
+            return res.status(404).json({ error: '정산 데이터를 찾을 수 없습니다' });
+        }
+        const billing = billingResult.rows[0];
+        if (billing.status === 'draft') {
+            return res.status(400).json({ error: '초안 상태에서는 발송할 수 없습니다. 확정 후 발송해주세요.' });
+        }
+        // 2) PDF 생성 (기존 PDF 생성 로직 재활용)
+        //    ※ 기존 billing PDF 생성 함수를 여기서 호출하여 Buffer로 받기
+        //    예: const pdfBuffer = await generateBillingPdf(id);
+        //    현재는 stub이므로 PDF 생성까지만 확인
+        // 3) 이메일 발송 (현재 stub)
+        const { sendBillingEmail } = require('../services/emailService');
+        const emailResult = await sendBillingEmail({
+            to,
+            subject,
+            bodyHtml: body_html,
+            pdfBuffer: null, // TODO: 실제 PDF buffer 연결
+            pdfFilename: `정산서_${billing.company_name || 'billing'}_${billing.billing_year}_${billing.billing_month}.pdf`,
+        });
+        // 4) 발송 이력 기록
+        if (emailResult.success) {
+            await (0, database_1.query)('UPDATE billings SET emailed_at = NOW(), emailed_to = $1, emailed_by = $2 WHERE id = $3', [to, adminId, id]);
+        }
+        res.json({
+            success: emailResult.success,
+            message: emailResult.message,
+            emailed_at: new Date().toISOString(),
+            emailed_to: to,
+        });
+    }
+    catch (error) {
+        console.error('정산서 이메일 발송 오류:', error);
+        res.status(500).json({ error: error.message || '이메일 발송 실패' });
+    }
+});
+// ===== 선불 잔액 관리 API =====
+// billing_type 변경 (후불 ↔ 선불)
+router.patch('/companies/:id/billing-type', auth_1.authenticate, auth_1.requireSuperAdmin, async (req, res) => {
+    const { id } = req.params;
+    const { billingType } = req.body;
+    if (!billingType || !['prepaid', 'postpaid'].includes(billingType)) {
+        return res.status(400).json({ error: '올바른 요금제 유형을 선택해주세요. (prepaid 또는 postpaid)' });
+    }
+    try {
+        // 진행 중인 캠페인 확인
+        const activeCampaigns = await (0, database_1.query)("SELECT COUNT(*) FROM campaigns WHERE company_id = $1 AND status IN ('scheduled', 'sending')", [id]);
+        if (parseInt(activeCampaigns.rows[0].count) > 0) {
+            return res.status(400).json({ error: '진행 중이거나 예약된 캠페인이 있어 요금제 유형을 변경할 수 없습니다.' });
+        }
+        const result = await (0, database_1.query)('UPDATE companies SET billing_type = $1, updated_at = NOW() WHERE id = $2 RETURNING id, company_name, billing_type, balance', [billingType, id]);
+        if (result.rows.length === 0) {
+            return res.status(404).json({ error: '회사를 찾을 수 없습니다.' });
+        }
+        const c = result.rows[0];
+        console.log(`[요금제변경] ${c.company_name} → ${billingType} (잔액: ${c.balance}원)`);
+        res.json({
+            message: `요금제 유형이 ${billingType === 'prepaid' ? '선불' : '후불'}로 변경되었습니다.`,
+            company: { id: c.id, companyName: c.company_name, billingType: c.billing_type, balance: Number(c.balance) }
+        });
+    }
+    catch (error) {
+        console.error('요금제 유형 변경 실패:', error);
+        res.status(500).json({ error: '요금제 유형 변경 실패' });
+    }
+});
+// 수동 잔액 조정 (충전 또는 차감)
+router.post('/companies/:id/balance-adjust', auth_1.authenticate, auth_1.requireSuperAdmin, async (req, res) => {
+    const { id } = req.params;
+    const { type, amount, reason } = req.body;
+    const adminId = req.user?.userId;
+    if (!type || !['charge', 'deduct'].includes(type)) {
+        return res.status(400).json({ error: '올바른 유형을 선택해주세요. (charge 또는 deduct)' });
+    }
+    if (!amount || amount <= 0) {
+        return res.status(400).json({ error: '금액은 0보다 커야 합니다.' });
+    }
+    if (!reason || reason.trim() === '') {
+        return res.status(400).json({ error: '사유를 입력해주세요.' });
+    }
+    try {
+        const txType = type === 'charge' ? 'admin_charge' : 'admin_deduct';
+        if (type === 'deduct') {
+            // 차감: 잔액 부족 체크 (atomic)
+            const result = await (0, database_1.query)('UPDATE companies SET balance = balance - $1, updated_at = NOW() WHERE id = $2 AND balance >= $1 RETURNING balance, company_name', [amount, id]);
+            if (result.rows.length === 0) {
+                const co = await (0, database_1.query)('SELECT balance, company_name FROM companies WHERE id = $1', [id]);
+                if (co.rows.length === 0)
+                    return res.status(404).json({ error: '회사를 찾을 수 없습니다.' });
+                return res.status(400).json({ error: `잔액이 부족합니다. 현재 잔액: ${Number(co.rows[0].balance).toLocaleString()}원` });
+            }
+            await (0, database_1.query)(`INSERT INTO balance_transactions (company_id, type, amount, balance_before, balance_after, description, admin_id, payment_method)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, 'admin')`, [id, txType, amount, Number(result.rows[0].balance) + amount, result.rows[0].balance, reason.trim(), adminId]);
+            console.log(`[관리자차감] ${result.rows[0].company_name}: -${amount}원 → 잔액 ${result.rows[0].balance}원 (사유: ${reason})`);
+            res.json({
+                message: `${amount.toLocaleString()}원이 차감되었습니다.`,
+                balance: Number(result.rows[0].balance),
+                transactionType: txType
+            });
+        }
+        else {
+            // 충전
+            const result = await (0, database_1.query)('UPDATE companies SET balance = balance + $1, updated_at = NOW() WHERE id = $2 RETURNING balance, company_name', [amount, id]);
+            if (result.rows.length === 0) {
+                return res.status(404).json({ error: '회사를 찾을 수 없습니다.' });
+            }
+            await (0, database_1.query)(`INSERT INTO balance_transactions (company_id, type, amount, balance_before, balance_after, description, admin_id, payment_method)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, 'admin')`, [id, txType, amount, Number(result.rows[0].balance) - amount, result.rows[0].balance, reason.trim(), adminId]);
+            console.log(`[관리자충전] ${result.rows[0].company_name}: +${amount}원 → 잔액 ${result.rows[0].balance}원 (사유: ${reason})`);
+            res.json({
+                message: `${amount.toLocaleString()}원이 충전되었습니다.`,
+                balance: Number(result.rows[0].balance),
+                transactionType: txType
+            });
+        }
+    }
+    catch (error) {
+        console.error('잔액 조정 실패:', error);
+        res.status(500).json({ error: '잔액 조정 실패' });
+    }
+});
+// 회사별 잔액 이력 조회 (슈퍼관리자용)
+router.get('/companies/:id/balance-transactions', auth_1.authenticate, auth_1.requireSuperAdmin, async (req, res) => {
+    const { id } = req.params;
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 20;
+    const offset = (page - 1) * limit;
+    try {
+        // 회사 잔액 정보
+        const companyResult = await (0, database_1.query)('SELECT company_name, billing_type, balance FROM companies WHERE id = $1', [id]);
+        if (companyResult.rows.length === 0) {
+            return res.status(404).json({ error: '회사를 찾을 수 없습니다.' });
+        }
+        // 총 건수
+        const countResult = await (0, database_1.query)('SELECT COUNT(*) FROM balance_transactions WHERE company_id = $1', [id]);
+        const total = parseInt(countResult.rows[0].count);
+        // 이력 조회
+        const result = await (0, database_1.query)(`SELECT bt.id, bt.type, bt.amount, bt.balance_after, bt.description, bt.reference_type, bt.reference_id, bt.admin_id, bt.created_at,
+              sa.name as admin_name
+       FROM balance_transactions bt
+       LEFT JOIN super_admins sa ON bt.admin_id = sa.id
+       WHERE bt.company_id = $1
+       ORDER BY bt.created_at DESC
+       LIMIT $2 OFFSET $3`, [id, limit, offset]);
+        const c = companyResult.rows[0];
+        res.json({
+            company: { companyName: c.company_name, billingType: c.billing_type, balance: Number(c.balance) },
+            transactions: result.rows,
+            total,
+            page,
+            totalPages: Math.ceil(total / limit),
+        });
+    }
+    catch (error) {
+        console.error('잔액 이력 조회 실패:', error);
+        res.status(500).json({ error: '잔액 이력 조회 실패' });
+    }
+});
+// ===== 충전 요청 관리 API =====
+// 충전 요청 목록 조회 (필터 + 페이지네이션)
+router.get('/deposit-requests', auth_1.authenticate, auth_1.requireSuperAdmin, async (req, res) => {
+    try {
+        const page = parseInt(req.query.page) || 1;
+        const limit = parseInt(req.query.limit) || 10;
+        const offset = (page - 1) * limit;
+        const status = req.query.status; // pending, confirmed, rejected
+        const paymentMethod = req.query.paymentMethod; // deposit, card, virtual_account
+        let where = 'WHERE 1=1';
+        const params = [];
+        let paramIdx = 1;
+        if (status && status !== 'all') {
+            where += ` AND dr.status = $${paramIdx++}`;
+            params.push(status);
+        }
+        if (paymentMethod && paymentMethod !== 'all') {
+            where += ` AND COALESCE(dr.payment_method, 'deposit') = $${paramIdx++}`;
+            params.push(paymentMethod);
+        }
+        const countResult = await (0, database_1.query)(`SELECT COUNT(*) FROM deposit_requests dr ${where}`, params);
+        const total = parseInt(countResult.rows[0].count);
+        const result = await (0, database_1.query)(`SELECT dr.id, dr.company_id, dr.amount, dr.depositor_name, dr.status,
+              COALESCE(dr.payment_method, 'deposit') as payment_method,
+              dr.admin_note, dr.confirmed_by, dr.confirmed_at, dr.created_at,
+              c.company_name, c.billing_type, c.balance,
+              sa.name as confirmed_by_name
+       FROM deposit_requests dr
+       JOIN companies c ON dr.company_id = c.id
+       LEFT JOIN super_admins sa ON dr.confirmed_by = sa.id
+       ${where}
+       ORDER BY CASE WHEN dr.status = 'pending' THEN 0 ELSE 1 END, dr.created_at DESC
+       LIMIT $${paramIdx++} OFFSET $${paramIdx}`, [...params, limit, offset]);
+        res.json({
+            requests: result.rows,
+            total,
+            page,
+            totalPages: Math.ceil(total / limit),
+        });
+    }
+    catch (error) {
+        console.error('충전 요청 목록 조회 실패:', error);
+        res.status(500).json({ error: '충전 요청 목록 조회 실패' });
+    }
+});
+// 충전 요청 승인 (잔액 자동 충전)
+router.put('/deposit-requests/:id/approve', auth_1.authenticate, auth_1.requireSuperAdmin, async (req, res) => {
+    const { id } = req.params;
+    const adminId = req.user?.userId;
+    const { adminNote } = req.body;
+    try {
+        // 요청 조회
+        const reqResult = await (0, database_1.query)(`SELECT dr.*, c.company_name, c.billing_type, c.balance
+       FROM deposit_requests dr
+       JOIN companies c ON dr.company_id = c.id
+       WHERE dr.id = $1`, [id]);
+        if (reqResult.rows.length === 0) {
+            return res.status(404).json({ error: '충전 요청을 찾을 수 없습니다.' });
+        }
+        const depositReq = reqResult.rows[0];
+        if (depositReq.status !== 'pending') {
+            return res.status(400).json({ error: '이미 처리된 요청입니다.' });
+        }
+        if (depositReq.billing_type !== 'prepaid') {
+            return res.status(400).json({ error: '선불 고객사가 아닙니다.' });
+        }
+        // 1. 잔액 충전
+        const balanceResult = await (0, database_1.query)('UPDATE companies SET balance = balance + $1, updated_at = NOW() WHERE id = $2 RETURNING balance', [depositReq.amount, depositReq.company_id]);
+        // 2. balance_transactions 기록
+        const newBalance = Number(balanceResult.rows[0].balance);
+        await (0, database_1.query)(`INSERT INTO balance_transactions (company_id, type, amount, balance_before, balance_after, description, reference_type, reference_id, admin_id, payment_method)
+       VALUES ($1, 'deposit_charge', $2, $3, $4, $5, 'deposit_request', $6, $7, 'bank_transfer')`, [
+            depositReq.company_id,
+            depositReq.amount,
+            newBalance - Number(depositReq.amount),
+            newBalance,
+            `무통장입금 승인 (입금자: ${depositReq.depositor_name})`,
+            id,
+            adminId
+        ]);
+        // 3. deposit_requests 상태 변경
+        await (0, database_1.query)(`UPDATE deposit_requests SET status = 'confirmed', confirmed_by = $1, confirmed_at = NOW(), admin_note = $2 WHERE id = $3`, [adminId, adminNote || null, id]);
+        console.log(`[입금승인] ${depositReq.company_name}: +${Number(depositReq.amount).toLocaleString()}원 → 잔액 ${newBalance.toLocaleString()}원 (입금자: ${depositReq.depositor_name})`);
+        res.json({
+            message: `${Number(depositReq.amount).toLocaleString()}원이 충전되었습니다.`,
+            balance: newBalance,
+        });
+    }
+    catch (error) {
+        console.error('충전 요청 승인 실패:', error);
+        res.status(500).json({ error: '충전 요청 승인 실패' });
+    }
+});
+// 충전 요청 거절
+router.put('/deposit-requests/:id/reject', auth_1.authenticate, auth_1.requireSuperAdmin, async (req, res) => {
+    const { id } = req.params;
+    const adminId = req.user?.userId;
+    const { adminNote } = req.body;
+    try {
+        const reqResult = await (0, database_1.query)('SELECT status, amount, depositor_name FROM deposit_requests WHERE id = $1', [id]);
+        if (reqResult.rows.length === 0) {
+            return res.status(404).json({ error: '충전 요청을 찾을 수 없습니다.' });
+        }
+        if (reqResult.rows[0].status !== 'pending') {
+            return res.status(400).json({ error: '이미 처리된 요청입니다.' });
+        }
+        await (0, database_1.query)(`UPDATE deposit_requests SET status = 'rejected', confirmed_by = $1, confirmed_at = NOW(), admin_note = $2 WHERE id = $3`, [adminId, adminNote || '거절', id]);
+        console.log(`[입금거절] 요청 ${id}: ${Number(reqResult.rows[0].amount).toLocaleString()}원 (입금자: ${reqResult.rows[0].depositor_name})`);
+        res.json({ message: '충전 요청이 거절되었습니다.' });
+    }
+    catch (error) {
+        console.error('충전 요청 거절 실패:', error);
+        res.status(500).json({ error: '충전 요청 거절 실패' });
+    }
+});
+// 전체 선불 고객사 잔액 현황
+router.get('/balance-overview', auth_1.authenticate, auth_1.requireSuperAdmin, async (req, res) => {
+    try {
+        const result = await (0, database_1.query)(`
+      SELECT c.id, c.company_name, c.billing_type, c.balance,
+        c.cost_per_sms, c.cost_per_lms,
+        (SELECT COUNT(*) FROM balance_transactions WHERE company_id = c.id AND created_at >= NOW() - INTERVAL '30 days') as recent_tx_count,
+        (SELECT SUM(amount) FROM balance_transactions WHERE company_id = c.id AND type = 'deduct' AND created_at >= NOW() - INTERVAL '30 days') as monthly_usage
+      FROM companies c
+      WHERE c.billing_type = 'prepaid' AND c.status = 'active'
+      ORDER BY c.balance ASC
+    `);
+        res.json({ companies: result.rows });
+    }
+    catch (error) {
+        console.error('잔액 현황 조회 실패:', error);
+        res.status(500).json({ error: '잔액 현황 조회 실패' });
+    }
+});
+// ===== 충전 관리 통합 API =====
+router.get('/charge-management', auth_1.authenticate, auth_1.requireSuperAdmin, async (req, res) => {
+    try {
+        const page = parseInt(req.query.page) || 1;
+        const limit = parseInt(req.query.limit) || 15;
+        const offset = (page - 1) * limit;
+        const companyId = req.query.companyId;
+        const type = req.query.type;
+        const paymentMethod = req.query.paymentMethod;
+        const startDate = req.query.startDate;
+        const endDate = req.query.endDate;
+        // 1. Pending deposit requests (항상 조회)
+        const pendingResult = await (0, database_1.query)(`SELECT dr.id, dr.company_id, dr.amount, dr.depositor_name, dr.status,
+              COALESCE(dr.payment_method, 'deposit') as payment_method,
+              dr.created_at, c.company_name, c.balance
+       FROM deposit_requests dr
+       JOIN companies c ON dr.company_id = c.id
+       WHERE dr.status = 'pending'
+       ORDER BY dr.created_at DESC`);
+        // 2. Balance transactions 필터
+        let where = 'WHERE 1=1';
+        const params = [];
+        let paramIdx = 1;
+        if (companyId && companyId !== 'all') {
+            where += ` AND bt.company_id = $${paramIdx++}`;
+            params.push(companyId);
+        }
+        if (type && type !== 'all') {
+            if (type === 'charge') {
+                where += ` AND bt.type IN ('admin_charge', 'charge', 'deposit_charge')`;
+            }
+            else if (type === 'deduct') {
+                where += ` AND bt.type IN ('admin_deduct', 'deduct')`;
+            }
+            else if (type === 'refund') {
+                where += ` AND bt.type = 'refund'`;
+            }
+        }
+        if (paymentMethod && paymentMethod !== 'all') {
+            where += ` AND COALESCE(bt.payment_method, 'system') = $${paramIdx++}`;
+            params.push(paymentMethod);
+        }
+        if (startDate) {
+            where += ` AND bt.created_at >= $${paramIdx++}::date`;
+            params.push(startDate);
+        }
+        if (endDate) {
+            where += ` AND bt.created_at < ($${paramIdx++}::date + INTERVAL '1 day')`;
+            params.push(endDate);
+        }
+        const countResult = await (0, database_1.query)(`SELECT COUNT(*) FROM balance_transactions bt ${where}`, params);
+        const total = parseInt(countResult.rows[0].count);
+        const txResult = await (0, database_1.query)(`SELECT bt.id, bt.company_id, bt.type, bt.amount, bt.balance_after, bt.description,
+              bt.reference_type, bt.reference_id, bt.admin_id,
+              COALESCE(bt.payment_method, 'system') as payment_method,
+              bt.created_at,
+              c.company_name,
+              sa.name as admin_name
+       FROM balance_transactions bt
+       JOIN companies c ON bt.company_id = c.id
+       LEFT JOIN super_admins sa ON bt.admin_id = sa.id
+       ${where}
+       ORDER BY bt.created_at DESC
+       LIMIT $${paramIdx++} OFFSET $${paramIdx}`, [...params, limit, offset]);
+        res.json({
+            pendingRequests: pendingResult.rows,
+            transactions: txResult.rows,
+            total,
+            page,
+            totalPages: Math.ceil(total / limit),
+        });
+    }
+    catch (error) {
+        console.error('충전 관리 조회 실패:', error);
+        res.status(500).json({ error: '충전 관리 조회 실패' });
+    }
+});
+// ===== 감사 로그 조회 API =====
+router.get('/audit-logs', auth_1.authenticate, auth_1.requireSuperAdmin, async (req, res) => {
+    try {
+        const { page = 1, limit = 25, action, companyId, fromDate, toDate, userId } = req.query;
+        const offset = (Number(page) - 1) * Number(limit);
+        let whereClause = 'WHERE 1=1';
+        const params = [];
+        let paramIndex = 1;
+        // 액션 필터
+        if (action && action !== 'all') {
+            whereClause += ` AND al.action LIKE $${paramIndex++}`;
+            params.push(`%${action}%`);
+        }
+        // 고객사 필터 (user의 company_id로)
+        if (companyId && companyId !== 'all') {
+            whereClause += ` AND (u.company_id = $${paramIndex} OR al.details->>'companyId' = $${paramIndex})`;
+            params.push(companyId);
+            paramIndex++;
+        }
+        // 사용자 필터
+        if (userId && userId !== 'all') {
+            whereClause += ` AND al.user_id = $${paramIndex++}::uuid`;
+            params.push(userId);
+        }
+        // 날짜 필터
+        if (fromDate) {
+            whereClause += ` AND al.created_at >= $${paramIndex++}::date`;
+            params.push(String(fromDate));
+        }
+        if (toDate) {
+            whereClause += ` AND al.created_at < ($${paramIndex++}::date + interval '1 day')`;
+            params.push(String(toDate));
+        }
+        // 총 건수
+        const countResult = await (0, database_1.query)(`SELECT COUNT(*) FROM audit_logs al LEFT JOIN users u ON al.user_id = u.id ${whereClause}`, params);
+        const total = parseInt(countResult.rows[0].count);
+        // 데이터 조회
+        params.push(Number(limit), offset);
+        const result = await (0, database_1.query)(`SELECT 
+        al.id, al.user_id, al.action, al.target_type, al.target_id,
+        al.details, al.ip_address, al.user_agent, al.created_at,
+        COALESCE(u.login_id, sa.login_id, '시스템') as login_id,
+        COALESCE(u.name, sa.name, '시스템') as user_name,
+        u.company_id,
+        c.company_name
+       FROM audit_logs al
+       LEFT JOIN users u ON al.user_id = u.id
+       LEFT JOIN super_admins sa ON al.user_id = sa.id
+       LEFT JOIN companies c ON u.company_id = c.id
+       ${whereClause}
+       ORDER BY al.created_at DESC
+       LIMIT $${paramIndex++} OFFSET $${paramIndex}`, params);
+        // 액션 유형 목록 (필터용)
+        const actionsResult = await (0, database_1.query)(`SELECT DISTINCT action FROM audit_logs ORDER BY action`);
+        res.json({
+            logs: result.rows,
+            total,
+            page: Number(page),
+            totalPages: Math.ceil(total / Number(limit)),
+            actions: actionsResult.rows.map((r) => r.action),
+        });
+    }
+    catch (error) {
+        console.error('감사 로그 조회 실패:', error);
+        res.status(500).json({ error: '감사 로그 조회 실패' });
+    }
+});
+// ===== 발송 라인그룹 관리 API =====
+// GET /api/admin/line-groups - 라인그룹 목록
+router.get('/line-groups', auth_1.authenticate, auth_1.requireSuperAdmin, async (req, res) => {
+    try {
+        const result = await (0, database_1.query)(`
+      SELECT lg.*,
+        (SELECT COUNT(*) FROM companies c WHERE c.line_group_id = lg.id) as company_count
+      FROM sms_line_groups lg
+      ORDER BY lg.sort_order, lg.created_at
+    `);
+        res.json({ lineGroups: result.rows });
+    }
+    catch (error) {
+        console.error('라인그룹 목록 조회 실패:', error);
+        res.status(500).json({ error: '조회 실패' });
+    }
+});
+// POST /api/admin/line-groups - 라인그룹 생성
+router.post('/line-groups', auth_1.authenticate, auth_1.requireSuperAdmin, async (req, res) => {
+    try {
+        const { groupName, groupType, smsTables, sortOrder } = req.body;
+        if (!groupName || !groupType || !smsTables || smsTables.length === 0) {
+            return res.status(400).json({ error: '필수 필드를 입력해주세요.' });
+        }
+        // ★ P0-Q1: SQL Injection 방지 — 테이블명 화이트리스트 검증
+        try {
+            (0, sms_table_validator_1.validateSmsTables)(smsTables);
+        }
+        catch (err) {
+            return res.status(400).json({ error: `잘못된 테이블명: ${err instanceof Error ? err.message : String(err)}` });
+        }
+        const result = await (0, database_1.query)(`
+      INSERT INTO sms_line_groups (group_name, group_type, sms_tables, sort_order)
+      VALUES ($1, $2, $3, $4)
+      RETURNING *
+    `, [groupName, groupType, smsTables, sortOrder || 0]);
+        (0, sms_queue_1.invalidateLineGroupCache)();
+        res.json({ lineGroup: result.rows[0], message: '라인그룹이 생성되었습니다.' });
+    }
+    catch (error) {
+        console.error('라인그룹 생성 실패:', error);
+        res.status(500).json({ error: '생성 실패' });
+    }
+});
+// PUT /api/admin/line-groups/:id - 라인그룹 수정
+router.put('/line-groups/:id', auth_1.authenticate, auth_1.requireSuperAdmin, async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { groupName, groupType, smsTables, sortOrder, isActive } = req.body;
+        // ★ P0-Q1: SQL Injection 방지 — 테이블명 화이트리스트 검증
+        if (smsTables) {
+            try {
+                (0, sms_table_validator_1.validateSmsTables)(smsTables);
+            }
+            catch (err) {
+                return res.status(400).json({ error: `잘못된 테이블명: ${err instanceof Error ? err.message : String(err)}` });
+            }
+        }
+        const result = await (0, database_1.query)(`
+      UPDATE sms_line_groups
+      SET group_name = COALESCE($1, group_name),
+          group_type = COALESCE($2, group_type),
+          sms_tables = COALESCE($3, sms_tables),
+          sort_order = COALESCE($4, sort_order),
+          is_active = COALESCE($5, is_active),
+          updated_at = NOW()
+      WHERE id = $6
+      RETURNING *
+    `, [groupName || null, groupType || null, smsTables || null, sortOrder !== undefined ? sortOrder : null, isActive !== undefined ? isActive : null, id]);
+        if (result.rows.length === 0) {
+            return res.status(404).json({ error: '라인그룹을 찾을 수 없습니다.' });
+        }
+        (0, sms_queue_1.invalidateLineGroupCache)();
+        res.json({ lineGroup: result.rows[0], message: '수정되었습니다.' });
+    }
+    catch (error) {
+        console.error('라인그룹 수정 실패:', error);
+        res.status(500).json({ error: '수정 실패' });
+    }
+});
+// DELETE /api/admin/line-groups/:id - 라인그룹 삭제
+router.delete('/line-groups/:id', auth_1.authenticate, auth_1.requireSuperAdmin, async (req, res) => {
+    try {
+        const { id } = req.params;
+        // 할당된 회사 있는지 확인
+        const assigned = await (0, database_1.query)('SELECT COUNT(*) FROM companies WHERE line_group_id = $1', [id]);
+        if (parseInt(assigned.rows[0].count) > 0) {
+            return res.status(400).json({ error: '할당된 고객사가 있어 삭제할 수 없습니다. 먼저 고객사 라인그룹을 변경해주세요.' });
+        }
+        await (0, database_1.query)('DELETE FROM sms_line_groups WHERE id = $1', [id]);
+        (0, sms_queue_1.invalidateLineGroupCache)();
+        res.json({ message: '삭제되었습니다.' });
+    }
+    catch (error) {
+        console.error('라인그룹 삭제 실패:', error);
+        res.status(500).json({ error: '삭제 실패' });
+    }
+});
+// ===== SyncAgent API Key 관리 =====
+// SyncAgent 키 조회
+router.get('/companies/:id/sync-keys', auth_1.authenticate, auth_1.requireSuperAdmin, async (req, res) => {
+    const { id } = req.params;
+    try {
+        const result = await (0, database_1.query)('SELECT api_key, api_secret, use_db_sync FROM companies WHERE id = $1', [id]);
+        if (result.rows.length === 0) {
+            return res.status(404).json({ error: '회사를 찾을 수 없습니다.' });
+        }
+        res.json({ syncKeys: result.rows[0] });
+    }
+    catch (error) {
+        console.error('SyncAgent 키 조회 실패:', error);
+        res.status(500).json({ error: 'SyncAgent 키 조회 실패' });
+    }
+});
+// SyncAgent 키 재발급
+router.post('/companies/:id/sync-keys/regenerate', auth_1.authenticate, auth_1.requireSuperAdmin, async (req, res) => {
+    const { id } = req.params;
+    try {
+        const exists = await (0, database_1.query)('SELECT id FROM companies WHERE id = $1', [id]);
+        if (exists.rows.length === 0) {
+            return res.status(404).json({ error: '회사를 찾을 수 없습니다.' });
+        }
+        const newApiKey = `tk_${crypto_1.default.randomBytes(24).toString('hex')}`;
+        const newApiSecret = crypto_1.default.randomBytes(32).toString('hex');
+        const result = await (0, database_1.query)(`UPDATE companies
+       SET api_key = $1, api_secret = $2, updated_at = NOW()
+       WHERE id = $3
+       RETURNING api_key, api_secret, use_db_sync`, [newApiKey, newApiSecret, id]);
+        res.json({ syncKeys: result.rows[0], message: 'API Key가 재발급되었습니다. 기존 키는 즉시 무효화됩니다.' });
+    }
+    catch (error) {
+        console.error('SyncAgent 키 재발급 실패:', error);
+        res.status(500).json({ error: 'SyncAgent 키 재발급 실패' });
+    }
+});
+// SyncAgent use_db_sync 토글
+router.put('/companies/:id/sync-keys', auth_1.authenticate, auth_1.requireSuperAdmin, async (req, res) => {
+    const { id } = req.params;
+    const { useDbSync } = req.body;
+    if (typeof useDbSync !== 'boolean') {
+        return res.status(400).json({ error: 'useDbSync는 boolean 값이어야 합니다.' });
+    }
+    try {
+        const result = await (0, database_1.query)(`UPDATE companies
+       SET use_db_sync = $1, updated_at = NOW()
+       WHERE id = $2
+       RETURNING api_key, api_secret, use_db_sync`, [useDbSync, id]);
+        if (result.rows.length === 0) {
+            return res.status(404).json({ error: '회사를 찾을 수 없습니다.' });
+        }
+        res.json({ syncKeys: result.rows[0], message: useDbSync ? 'SyncAgent가 활성화되었습니다.' : 'SyncAgent가 비활성화되었습니다.' });
+    }
+    catch (error) {
+        console.error('SyncAgent 설정 변경 실패:', error);
+        res.status(500).json({ error: 'SyncAgent 설정 변경 실패' });
+    }
+});
+// ═══════════════════════════════════════════════════════════
+// 슈퍼관리자 — 알림톡/RCS 템플릿 관리
+// ═══════════════════════════════════════════════════════════
+// GET /api/admin/kakao-profiles — 전체 고객사 발신 프로필 목록
+router.get('/kakao-profiles', auth_1.authenticate, auth_1.requireSuperAdmin, async (req, res) => {
+    try {
+        const companyId = req.query.company_id;
+        let sql = `SELECT ksp.*, c.company_name
+       FROM kakao_sender_profiles ksp
+       LEFT JOIN companies c ON ksp.company_id = c.id
+       WHERE 1=1`;
+        const params = [];
+        if (companyId) {
+            params.push(companyId);
+            sql += ` AND ksp.company_id = $${params.length}`;
+        }
+        sql += ' ORDER BY ksp.created_at DESC';
+        const result = await (0, database_1.query)(sql, params);
+        res.json({ success: true, profiles: result.rows });
+    }
+    catch (error) {
+        console.error('[Admin] 발신 프로필 목록 조회 실패:', error);
+        res.status(500).json({ success: false, error: '조회 실패' });
+    }
+});
+// POST /api/admin/kakao-profiles — 슈퍼관리자가 고객사 발신 프로필 등록
+router.post('/kakao-profiles', auth_1.authenticate, auth_1.requireSuperAdmin, async (req, res) => {
+    try {
+        const { companyId, profileName, profileKey } = req.body;
+        if (!companyId || !profileName || !profileKey) {
+            return res.status(400).json({ success: false, error: '고객사, 프로필명, 프로필키는 필수입니다' });
+        }
+        const result = await (0, database_1.query)(`INSERT INTO kakao_sender_profiles (company_id, profile_name, profile_key)
+       VALUES ($1, $2, $3) RETURNING *`, [companyId, profileName, profileKey]);
+        res.json({ success: true, profile: result.rows[0] });
+    }
+    catch (error) {
+        console.error('[Admin] 발신 프로필 등록 실패:', error);
+        res.status(500).json({ success: false, error: '등록 실패' });
+    }
+});
+// DELETE /api/admin/kakao-profiles/:id — 슈퍼관리자가 발신 프로필 삭제
+router.delete('/kakao-profiles/:id', auth_1.authenticate, auth_1.requireSuperAdmin, async (req, res) => {
+    try {
+        const { id } = req.params;
+        await (0, database_1.query)('DELETE FROM kakao_sender_profiles WHERE id = $1', [id]);
+        res.json({ success: true });
+    }
+    catch (error) {
+        console.error('[Admin] 발신 프로필 삭제 실패:', error);
+        res.status(500).json({ success: false, error: '삭제 실패' });
+    }
+});
+// GET /api/admin/kakao-templates — 전체 고객사 알림톡 템플릿 목록
+router.get('/kakao-templates', auth_1.authenticate, auth_1.requireSuperAdmin, async (req, res) => {
+    try {
+        const status = req.query.status;
+        const companyId = req.query.company_id;
+        let sql = `SELECT kt.*, c.company_name, ksp.profile_name
+       FROM kakao_templates kt
+       LEFT JOIN companies c ON kt.company_id = c.id
+       LEFT JOIN kakao_sender_profiles ksp ON kt.profile_id = ksp.id
+       WHERE 1=1`;
+        const params = [];
+        if (status) {
+            params.push(status);
+            sql += ` AND kt.status = $${params.length}`;
+        }
+        if (companyId) {
+            params.push(companyId);
+            sql += ` AND kt.company_id = $${params.length}`;
+        }
+        sql += ' ORDER BY kt.created_at DESC';
+        const result = await (0, database_1.query)(sql, params);
+        res.json({ success: true, templates: result.rows });
+    }
+    catch (error) {
+        console.error('[Admin] 알림톡 템플릿 조회 실패:', error);
+        res.status(500).json({ success: false, error: '조회 실패' });
+    }
+});
+// PUT /api/admin/kakao-templates/:id/approve — 알림톡 템플릿 승인
+router.put('/kakao-templates/:id/approve', auth_1.authenticate, auth_1.requireSuperAdmin, async (req, res) => {
+    try {
+        const { id } = req.params;
+        const adminId = req.user?.id;
+        const { templateCode } = req.body;
+        // ★ D143 (2026-04-30): kakao_templates_status_check CHECK 대문자 풀네임 8개로 교체됨.
+        //   기존 소문자('approved'/'pending'/'rejected')는 위반 → 대문자 + 'REQUESTED'(옛 'pending') 매핑.
+        //   본 라우트는 frontend 미사용(dead) — 슈퍼관리자가 IMC 통한 새 워크플로우(/api/alimtalk/templates)에서 처리.
+        //   안전 차원에서 새 CHECK 호환되게 상수만 갱신 (라우트 폐기는 별건).
+        const result = await (0, database_1.query)(`UPDATE kakao_templates SET
+        status = 'APPROVED',
+        template_code = COALESCE($2, template_code),
+        approved_at = NOW(),
+        reviewed_at = NOW(),
+        reviewed_by = $3,
+        updated_at = NOW()
+      WHERE id = $1 AND status = 'REQUESTED'
+      RETURNING *`, [id, templateCode || null, adminId]);
+        if (result.rows.length === 0) {
+            return res.status(400).json({ success: false, error: '검수요청 상태의 템플릿만 승인 가능합니다' });
+        }
+        res.json({ success: true, template: result.rows[0] });
+    }
+    catch (error) {
+        console.error('[Admin] 알림톡 템플릿 승인 실패:', error);
+        res.status(500).json({ success: false, error: '승인 실패' });
+    }
+});
+// PUT /api/admin/kakao-templates/:id/reject — 알림톡 템플릿 반려
+router.put('/kakao-templates/:id/reject', auth_1.authenticate, auth_1.requireSuperAdmin, async (req, res) => {
+    try {
+        const { id } = req.params;
+        const adminId = req.user?.id;
+        const { rejectReason } = req.body;
+        if (!rejectReason) {
+            return res.status(400).json({ success: false, error: '반려 사유는 필수입니다' });
+        }
+        // ★ D143 (2026-04-30): 'rejected'/'pending' → 'REJECTED'/'REQUESTED' 대문자 풀네임으로 교체 (CHECK 호환).
+        const result = await (0, database_1.query)(`UPDATE kakao_templates SET
+        status = 'REJECTED',
+        reject_reason = $2,
+        reviewed_at = NOW(),
+        reviewed_by = $3,
+        updated_at = NOW()
+      WHERE id = $1 AND status = 'REQUESTED'
+      RETURNING *`, [id, rejectReason, adminId]);
+        if (result.rows.length === 0) {
+            return res.status(400).json({ success: false, error: '검수요청 상태의 템플릿만 반려 가능합니다' });
+        }
+        res.json({ success: true, template: result.rows[0] });
+    }
+    catch (error) {
+        console.error('[Admin] 알림톡 템플릿 반려 실패:', error);
+        res.status(500).json({ success: false, error: '반려 실패' });
+    }
+});
+// POST /api/admin/kakao-templates/manual — 기존 템플릿 수동 등록 (승인 상태로 직접 저장)
+router.post('/kakao-templates/manual', auth_1.authenticate, auth_1.requireSuperAdmin, async (req, res) => {
+    try {
+        const adminId = req.user?.id;
+        const { companyId, profileId, templateCode, templateName, category, messageType, emphasizeType, emphasizeTitle, content, imageUrl, extraContent, adContent, securityFlag, buttons, quickReplies, } = req.body;
+        if (!companyId || !templateName || !content) {
+            return res.status(400).json({ success: false, error: '고객사, 템플릿명, 본문은 필수입니다' });
+        }
+        const result = await (0, database_1.query)(`INSERT INTO kakao_templates (
+        company_id, profile_id, template_code, template_name, category,
+        message_type, emphasize_type, emphasize_title, content, image_url,
+        extra_content, ad_content, security_flag, buttons, quick_replies,
+        status, approved_at, reviewed_at, reviewed_by, requested_at
+      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,'approved',NOW(),NOW(),$16,NOW())
+      RETURNING *`, [
+            companyId, profileId || null, templateCode || null, templateName, category || null,
+            messageType || 'BA', emphasizeType || 'NONE', emphasizeTitle || null, content, imageUrl || null,
+            extraContent || null, adContent || null, securityFlag || false,
+            JSON.stringify(buttons || []), JSON.stringify(quickReplies || []), adminId,
+        ]);
+        res.json({ success: true, template: result.rows[0] });
+    }
+    catch (error) {
+        console.error('[Admin] 알림톡 템플릿 수동 등록 실패:', error);
+        res.status(500).json({ success: false, error: '등록 실패' });
+    }
+});
+// GET /api/admin/rcs-templates — 전체 고객사 RCS 템플릿 목록
+router.get('/rcs-templates', auth_1.authenticate, auth_1.requireSuperAdmin, async (req, res) => {
+    try {
+        const status = req.query.status;
+        const companyId = req.query.company_id;
+        let sql = `SELECT rt.*, c.company_name
+       FROM rcs_templates rt
+       LEFT JOIN companies c ON rt.company_id = c.id
+       WHERE 1=1`;
+        const params = [];
+        if (status) {
+            params.push(status);
+            sql += ` AND rt.status = $${params.length}`;
+        }
+        if (companyId) {
+            params.push(companyId);
+            sql += ` AND rt.company_id = $${params.length}`;
+        }
+        sql += ' ORDER BY rt.created_at DESC';
+        const result = await (0, database_1.query)(sql, params);
+        res.json({ success: true, templates: result.rows });
+    }
+    catch (error) {
+        console.error('[Admin] RCS 템플릿 조회 실패:', error);
+        res.status(500).json({ success: false, error: '조회 실패' });
+    }
+});
+// PUT /api/admin/rcs-templates/:id/approve — RCS 템플릿 승인
+router.put('/rcs-templates/:id/approve', auth_1.authenticate, auth_1.requireSuperAdmin, async (req, res) => {
+    try {
+        const { id } = req.params;
+        const adminId = req.user?.id;
+        const result = await (0, database_1.query)(`UPDATE rcs_templates SET
+        status = 'approved', approved_at = NOW(), reviewed_at = NOW(),
+        reviewed_by = $2, updated_at = NOW()
+      WHERE id = $1 AND status = 'pending'
+      RETURNING *`, [id, adminId]);
+        if (result.rows.length === 0) {
+            return res.status(400).json({ success: false, error: '승인대기 상태의 템플릿만 승인 가능합니다' });
+        }
+        res.json({ success: true, template: result.rows[0] });
+    }
+    catch (error) {
+        console.error('[Admin] RCS 템플릿 승인 실패:', error);
+        res.status(500).json({ success: false, error: '승인 실패' });
+    }
+});
+// PUT /api/admin/rcs-templates/:id/reject — RCS 템플릿 반려
+router.put('/rcs-templates/:id/reject', auth_1.authenticate, auth_1.requireSuperAdmin, async (req, res) => {
+    try {
+        const { id } = req.params;
+        const adminId = req.user?.id;
+        const { rejectReason } = req.body;
+        if (!rejectReason) {
+            return res.status(400).json({ success: false, error: '반려 사유는 필수입니다' });
+        }
+        const result = await (0, database_1.query)(`UPDATE rcs_templates SET
+        status = 'rejected', reject_reason = $2, reviewed_at = NOW(),
+        reviewed_by = $3, updated_at = NOW()
+      WHERE id = $1 AND status = 'pending'
+      RETURNING *`, [id, rejectReason, adminId]);
+        if (result.rows.length === 0) {
+            return res.status(400).json({ success: false, error: '승인대기 상태의 템플릿만 반려 가능합니다' });
+        }
+        res.json({ success: true, template: result.rows[0] });
+    }
+    catch (error) {
+        console.error('[Admin] RCS 템플릿 반려 실패:', error);
+        res.status(500).json({ success: false, error: '반려 실패' });
+    }
+});
+// ============================================================
+// ★ D114 P10: 발송통계 엑셀(CSV) 다운로드
+// 필요 데이터: 발송날짜 / 발송계정(사용자) / 문자타입별 총건수·성공·실패·대기
+// 계정별 사용 내역 필수 (거래내역서 발행용)
+// ============================================================
+router.get('/stats/export', auth_1.authenticate, auth_1.requireSuperAdmin, async (req, res) => {
+    try {
+        const { startDate, endDate, companyId } = req.query;
+        if (!startDate || !endDate) {
+            return res.status(400).json({ error: '시작일과 종료일을 입력해주세요.' });
+        }
+        let whereClause = `WHERE c.sent_at >= ($1 || ' 00:00:00+09')::timestamptz
+                          AND c.sent_at < ($2 || ' 00:00:00+09')::timestamptz + INTERVAL '1 day'`;
+        const params = [startDate, endDate];
+        let paramIdx = 3;
+        if (companyId) {
+            whereClause += ` AND c.company_id = $${paramIdx++}`;
+            params.push(companyId);
+        }
+        // ★ D144: PG sent_count/success_count/fail_count 캐시 의존 제거.
+        //   PG는 캠페인 메타 + 회사+사용자만 SELECT → MySQL 큐 + 카카오 직접 카운트 → JS에서 6-key 그룹핑.
+        const exportMetaResult = await (0, database_1.query)(`SELECT
+        c.id, c.company_id, c.created_by, c.target_count, c.message_type, c.send_type,
+        TO_CHAR(c.sent_at AT TIME ZONE 'Asia/Seoul', 'YYYY-MM-DD') as send_date,
+        co.company_name,
+        co.company_code,
+        u.login_id,
+        u.name as user_name
+      FROM campaigns c
+      JOIN companies co ON c.company_id = co.id
+      LEFT JOIN users u ON c.created_by = u.id
+      ${whereClause}
+        AND c.status NOT IN ('draft', 'cancelled')`, params);
+        const exportSmsMap = await (0, stats_aggregation_1.aggregateSmsCountsByCampaign)(exportMetaResult.rows);
+        const exportKakaoMap = await (0, sms_queue_1.kakaoBatchAggByGroup)(exportMetaResult.rows.map((c) => c.id));
+        const exportByKey = new Map();
+        for (const c of exportMetaResult.rows) {
+            const sms = exportSmsMap.get(c.id) || { total_count: 0, success_count: 0, fail_count: 0, pending_count: 0 };
+            const kakao = exportKakaoMap.get(c.id) || { total: 0, success: 0, fail: 0, pending: 0 };
+            const sent = Number(sms.total_count || 0) + kakao.total;
+            const success = Number(sms.success_count || 0) + kakao.success;
+            const fail = Number(sms.fail_count || 0) + kakao.fail;
+            const pending = Number(sms.pending_count || 0) + kakao.pending;
+            const key = `${c.send_date}|${c.company_id}|${c.created_by || ''}|${c.message_type || ''}|${c.send_type || ''}`;
+            if (!exportByKey.has(key)) {
+                exportByKey.set(key, {
+                    send_date: c.send_date,
+                    company_name: c.company_name,
+                    company_code: c.company_code,
+                    login_id: c.login_id,
+                    user_name: c.user_name,
+                    message_type: c.message_type,
+                    send_type: c.send_type,
+                    campaign_count: 0, total_target: 0,
+                    total_sent: 0, total_success: 0, total_fail: 0, total_pending: 0,
+                });
+            }
+            const b = exportByKey.get(key);
+            b.campaign_count++;
+            b.total_target += Number(c.target_count || 0);
+            b.total_sent += sent;
+            b.total_success += success;
+            b.total_fail += fail;
+            b.total_pending += pending;
+        }
+        const exportRows = Array.from(exportByKey.values()).sort((a, b) => {
+            if (a.send_date !== b.send_date)
+                return a.send_date < b.send_date ? 1 : -1;
+            const cn = String(a.company_name || '').localeCompare(String(b.company_name || ''));
+            if (cn !== 0)
+                return cn;
+            const lg = String(a.login_id || '').localeCompare(String(b.login_id || ''));
+            if (lg !== 0)
+                return lg;
+            return String(a.message_type || '').localeCompare(String(b.message_type || ''));
+        });
+        const result = { rows: exportRows };
+        // CSV 생성 — 쉼표/큰따옴표 포함 값은 이스케이핑
+        const BOM = '\uFEFF';
+        const csvEscape = (v) => {
+            const s = String(v ?? '');
+            return s.includes(',') || s.includes('"') || s.includes('\n') ? `"${s.replace(/"/g, '""')}"` : s;
+        };
+        const headers = ['발송일', '회사코드', '회사명', '계정ID', '사용자명', '문자타입', '발송유형', '캠페인수', '대상건수', '전송건수', '성공', '실패', '대기'];
+        const rows = result.rows.map((r) => [
+            r.send_date,
+            csvEscape(r.company_code || ''),
+            csvEscape(r.company_name),
+            csvEscape(r.login_id || '-'),
+            csvEscape(r.user_name || '-'),
+            r.message_type,
+            r.send_type === 'auto' ? '자동' : r.send_type === 'direct' ? '직접' : 'AI',
+            r.campaign_count,
+            r.total_target,
+            r.total_sent,
+            r.total_success,
+            r.total_fail,
+            Math.max(0, Number(r.total_pending) || 0),
+        ].join(','));
+        const csv = BOM + headers.join(',') + '\n' + rows.join('\n');
+        const filename = `발송통계_${startDate}_${endDate}.csv`;
+        res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+        res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(filename)}"`);
+        res.send(csv);
+    }
+    catch (error) {
+        console.error('[Admin] 발송통계 엑셀 다운로드 실패:', error);
+        res.status(500).json({ error: '다운로드에 실패했습니다.' });
+    }
+});
+exports.default = router;
+//# sourceMappingURL=admin.js.map

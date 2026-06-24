@@ -1,0 +1,184 @@
+"use strict";
+/**
+ * utils/dashboard-card-pool.ts
+ * ============================
+ * 대시보드 동적 카드 풀 정의 (D41)
+ *
+ * FIELD_MAP 필수 17개 기반 카드 17종.
+ * 슈퍼관리자가 고객사별로 원하는 만큼 선택 (프론트에서 6개씩 페이징 표시).
+ *
+ * ★ 동적 필터링: 직접 컬럼 + 커스텀 필드(JSONB) 양쪽 데이터 유무를 체크하여
+ *   해당 고객사에 실제 데이터가 있는 카드만 풀에 표시.
+ *   - requiresField: 직접 컬럼명
+ *   - customLabelPatterns: 커스텀 필드 라벨 매칭 패턴 (부분일치)
+ *
+ * 이 파일은 companies.ts + admin.ts에서 import.
+ */
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.DYNAMIC_CARD_PREFIX = exports.VALID_CARD_IDS = exports.DASHBOARD_CARD_POOL = void 0;
+exports.getCardDef = getCardDef;
+exports.isDynamicCardId = isDynamicCardId;
+exports.parseDynamicCardId = parseDynamicCardId;
+exports.generateDynamicCards = generateDynamicCards;
+exports.validateCardIds = validateCardIds;
+exports.getRequiredFields = getRequiredFields;
+exports.filterPoolByAvailableData = filterPoolByAvailableData;
+// ─── 카드 풀 — 17종 ───
+exports.DASHBOARD_CARD_POOL = [
+    { cardId: 'total_customers', label: '전체 고객 수', type: 'count', icon: 'Users', emoji: '👥', description: '전체 등록 고객 수' },
+    { cardId: 'gender_male', label: '남성 수', type: 'count', icon: 'User', emoji: '👨', description: '성별이 남성인 고객 수', requiresField: 'gender', customLabelPatterns: ['성별', 'gender', 'sex'] },
+    { cardId: 'gender_female', label: '여성 수', type: 'count', icon: 'User', emoji: '👩', description: '성별이 여성인 고객 수', requiresField: 'gender', customLabelPatterns: ['성별', 'gender', 'sex'] },
+    { cardId: 'birthday_this_month', label: '이번달 생일 고객', type: 'count', icon: 'Cake', emoji: '🎂', description: '이번 달 생일인 고객 수', requiresField: 'birth_date', customLabelPatterns: ['생년월일', '생일', '출생', 'birthday', 'birth'] },
+    { cardId: 'age_distribution', label: '연령대별 분포', type: 'distribution', icon: 'BarChart3', emoji: '📊', description: '연령대별 고객 분포', requiresField: 'birth_date', customLabelPatterns: ['생년월일', '생일', '출생', 'birthday', 'birth', '나이', '연령'] },
+    { cardId: 'grade_distribution', label: '등급별 고객 수', type: 'distribution', icon: 'Award', emoji: '🏆', description: '고객 등급별 분포', requiresField: 'grade', customLabelPatterns: ['등급', 'grade', 'vip', '회원등급', '멤버십'] },
+    { cardId: 'region_top', label: '지역별 TOP', type: 'distribution', icon: 'MapPin', emoji: '📍', description: '지역별 고객 수 상위', requiresField: 'region', customLabelPatterns: ['지역', 'region', '시도', '도시'] },
+    { cardId: 'store_distribution', label: '매장별 고객 수', type: 'distribution', icon: 'Store', emoji: '🏪', description: '매장별 고객 분포', requiresField: 'store_code', customLabelPatterns: ['매장', 'store', '지점', '점포', '브랜드'] },
+    { cardId: 'email_rate', label: '이메일 보유율', type: 'rate', icon: 'Mail', emoji: '📧', description: '이메일 주소 보유 비율 (%)', requiresField: 'email', customLabelPatterns: ['이메일', 'email', 'e-mail'] },
+    { cardId: 'total_purchase_sum', label: '총 구매금액', type: 'sum', icon: 'CreditCard', emoji: '💰', description: '전체 고객 누적 구매금액 합계', requiresField: 'total_purchase_amount', customLabelPatterns: ['구매금액', '총구매', '누적구매', '총금액', 'purchase_amount'] },
+    { cardId: 'recent_30d_purchase', label: '30일 내 구매', type: 'count', icon: 'ShoppingCart', emoji: '🛒', description: '최근 30일 내 구매 이력이 있는 고객 수', requiresField: 'recent_purchase_date', customLabelPatterns: ['최근구매', '구매일', '마지막구매', 'purchase_date', '최종구매'] },
+    { cardId: 'inactive_90d', label: '90일+ 미구매', type: 'count', icon: 'UserX', emoji: '⚠️', description: '최근 90일간 구매 이력이 없는 고객 수', requiresField: 'recent_purchase_date', customLabelPatterns: ['최근구매', '구매일', '마지막구매', 'purchase_date', '최종구매'] },
+    { cardId: 'new_this_month', label: '신규고객 (이번달)', type: 'count', icon: 'UserPlus', emoji: '🆕', description: '이번 달 신규 등록된 고객 수' },
+    { cardId: 'opt_out_count', label: '수신거부 수', type: 'count', icon: 'BellOff', emoji: '🔕', description: '수신거부 등록 건수' },
+    { cardId: 'opt_in_count', label: '수신동의 수', type: 'count', icon: 'Bell', emoji: '🔔', description: 'SMS 수신동의 고객 수' },
+    { cardId: 'active_campaigns', label: '진행 캠페인 수', type: 'count', icon: 'Send', emoji: '📤', description: '현재 진행 중인 캠페인 수' },
+    { cardId: 'monthly_spend', label: '이번달 사용금액', type: 'sum', icon: 'CreditCard', emoji: '💳', description: '이번 달 발송 사용 금액' },
+];
+// ─── 헬퍼 ───
+/** 유효한 cardId Set */
+exports.VALID_CARD_IDS = new Set(exports.DASHBOARD_CARD_POOL.map(c => c.cardId));
+/** cardId로 카드 정의 조회 */
+function getCardDef(cardId) {
+    return exports.DASHBOARD_CARD_POOL.find(c => c.cardId === cardId);
+}
+// ═══════════════════════════════════════════════════════════════════════════
+// ★ D136 (2026-04-22 PDF #8): 동적 카드 — 고객사 업로드 커스텀 필드 기반 자동 생성
+// ═══════════════════════════════════════════════════════════════════════════
+// 배경:
+//   suran/인비토 등 고객사가 업로드한 실제 컬럼(시리얼/사이즈/평균주문금액 등)에 대한 카드가
+//   고정 풀 17개에 포함돼 있지 않음 → "7개만 보인다" 이슈.
+// 해결:
+//   CT-18 detectEnabledFields의 커스텀 필드(is_custom=true)마다 data_type 기반 동적 카드 자동 생성.
+//   cardId 접두사 `dyn_`로 고정 풀과 구분. 파싱은 `dyn_{fieldKey}_{aggType}` 패턴.
+exports.DYNAMIC_CARD_PREFIX = 'dyn_';
+const DYNAMIC_AGG_TYPES = ['dist', 'sum', 'has', 'recent30d', 'rate'];
+function isDynamicCardId(cardId) {
+    return cardId.startsWith(exports.DYNAMIC_CARD_PREFIX);
+}
+/**
+ * `dyn_{fieldKey}_{aggType}` 파싱. 실패 시 null.
+ * aggType이 suffix에 위치하므로 뒤에서 매칭 (fieldKey에 `_` 포함 가능성 대비).
+ */
+function parseDynamicCardId(cardId) {
+    if (!isDynamicCardId(cardId))
+        return null;
+    const rest = cardId.slice(exports.DYNAMIC_CARD_PREFIX.length);
+    for (const at of DYNAMIC_AGG_TYPES) {
+        const suffix = `_${at}`;
+        if (rest.endsWith(suffix)) {
+            const fieldKey = rest.slice(0, -suffix.length);
+            if (!fieldKey)
+                return null;
+            return { fieldKey, aggType: at };
+        }
+    }
+    return null;
+}
+/**
+ * 커스텀 필드 배열에서 동적 카드 목록 생성
+ * - is_custom=true인 필드만 대상 (직접 컬럼은 고정 풀로 커버됨)
+ * - data_type에 따라 자연스러운 집계 카드 1개씩 생성
+ *
+ * @param fields CT-18 detectEnabledFields의 fields 배열
+ */
+function generateDynamicCards(fields) {
+    const cards = [];
+    for (const f of fields) {
+        if (!f.is_custom)
+            continue;
+        const base = { fieldKey: f.field_key, label: f.field_label };
+        switch (f.data_type) {
+            case 'string':
+                cards.push({
+                    cardId: `${exports.DYNAMIC_CARD_PREFIX}${base.fieldKey}_dist`,
+                    label: `${base.label}별 분포`,
+                    type: 'distribution',
+                    icon: 'BarChart3',
+                    emoji: '📊',
+                    description: `${base.label}별 고객 분포 (상위 10)`,
+                });
+                break;
+            case 'number':
+                cards.push({
+                    cardId: `${exports.DYNAMIC_CARD_PREFIX}${base.fieldKey}_sum`,
+                    label: `${base.label} 합계`,
+                    type: 'sum',
+                    icon: 'CreditCard',
+                    emoji: '💰',
+                    description: `전체 고객의 ${base.label} 합계`,
+                });
+                break;
+            case 'date':
+                cards.push({
+                    cardId: `${exports.DYNAMIC_CARD_PREFIX}${base.fieldKey}_recent30d`,
+                    label: `${base.label} 최근 30일`,
+                    type: 'count',
+                    icon: 'Calendar',
+                    emoji: '📅',
+                    description: `최근 30일 내 ${base.label} 값이 있는 고객 수`,
+                });
+                break;
+            case 'boolean':
+                cards.push({
+                    cardId: `${exports.DYNAMIC_CARD_PREFIX}${base.fieldKey}_rate`,
+                    label: `${base.label} 비율`,
+                    type: 'rate',
+                    icon: 'Percent',
+                    emoji: '📈',
+                    description: `${base.label} 값이 있는 고객 비율 (%)`,
+                });
+                break;
+        }
+    }
+    return cards;
+}
+/** 카드 ID 배열 유효성 검증 */
+function validateCardIds(cardIds) {
+    const invalid = cardIds.filter(id => {
+        if (isDynamicCardId(id)) {
+            // 동적 카드: 패턴 유효성만 검증 (실제 field 유효성은 집계 시점에 graceful 처리)
+            return parseDynamicCardId(id) == null;
+        }
+        return !exports.VALID_CARD_IDS.has(id);
+    });
+    return { valid: invalid.length === 0, invalid };
+}
+/** 의존 필드가 있는 카드들의 직접 컬럼 목록 (중복 제거) */
+function getRequiredFields() {
+    const fields = new Set();
+    for (const card of exports.DASHBOARD_CARD_POOL) {
+        if (card.requiresField)
+            fields.add(card.requiresField);
+    }
+    return Array.from(fields);
+}
+/**
+ * 데이터 존재 필드 기반으로 카드 풀 필터링
+ * @param availableColumns - 직접 컬럼 중 데이터가 있는 필드 Set
+ * @param customFieldLabels - 커스텀 필드 중 데이터가 있는 라벨 목록 (소문자)
+ */
+function filterPoolByAvailableData(availableColumns, customFieldLabels) {
+    return exports.DASHBOARD_CARD_POOL.filter(card => {
+        // requiresField 없으면 항상 표시
+        if (!card.requiresField)
+            return true;
+        // 1. 직접 컬럼에 데이터가 있으면 OK
+        if (availableColumns.has(card.requiresField))
+            return true;
+        // 2. 커스텀 필드 라벨 매칭 — 부분일치
+        if (card.customLabelPatterns && customFieldLabels.length > 0) {
+            return card.customLabelPatterns.some(pattern => customFieldLabels.some(label => label.includes(pattern.toLowerCase())));
+        }
+        return false;
+    });
+}
+//# sourceMappingURL=dashboard-card-pool.js.map
