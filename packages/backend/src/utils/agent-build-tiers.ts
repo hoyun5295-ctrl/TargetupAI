@@ -338,7 +338,9 @@ export function resolveAgentBuild(
       ? [
           '받은 폴더를 대상 PC의 C:\\ 바로 아래에 복사 (예: C:\\SyncAgent)',
           ...(mode === 'thick'
-            ? [`Oracle Instant Client 폴더를 함께 받아 ORACLE_HOME으로 지정 (${nativeClient})`]
+            ? node === 12
+              ? ['Oracle 연결용 클라이언트(Instant Client)가 폴더에 함께 들어 있어 추가 설치 없이 연결됩니다']
+              : [`Oracle Instant Client 폴더를 함께 받아 ORACLE_HOME으로 지정 (${nativeClient})`]
             : []),
           'INSTALL-run-as-admin.bat 을 관리자 권한으로 실행',
           '화면에 sync-agent v… 가 뜨면 정상 (안 뜨면 diagnose.txt 회신)',

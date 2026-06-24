@@ -347,11 +347,11 @@ export const SETUP_HTML = `<!DOCTYPE html>
     <h2>4. 컬럼 매핑</h2>
     <p class="subtitle">DB 컬럼을 한줄로 필드에 매핑하세요</p>
 
-    <!-- v1.5.0: AI 자동 매핑 (Claude Opus 4.7) — 설계서 §11-1 Step 4 -->
+    <!-- v1.5.0: AI 자동 매핑 — 설계서 §11-1 Step 4 -->
     <div style="background:#f7fafc; border:1px solid #e2e8f0; border-radius:8px; padding:12px 16px; margin-bottom:16px; display:flex; align-items:center; gap:12px;">
       <span style="font-size:20px;">🤖</span>
       <div style="flex:1;">
-        <strong style="color:#2d3748;">AI 자동 매핑 (Claude Opus 4.7)</strong>
+        <strong style="color:#2d3748;">AI 자동 매핑</strong>
         <div style="color:#718096; font-size:12px; margin-top:2px;">
           고객사 DB 컬럼을 표준 필드에 자동 매핑합니다. 회사당 월 10회 호출 가능.
         </div>
@@ -796,7 +796,7 @@ export const SETUP_HTML = `<!DOCTYPE html>
     const status = $('aiMappingStatus');
     status.style.display = '';
     status.className = 'status info show';
-    status.textContent = '🤖 AI 매핑 호출 중... (Claude Opus 4.7 → Sonnet 폴백 체인)';
+    status.textContent = '🤖 AI 매핑 호출 중...';
 
     const btn = $('btnAiMapping');
     const prevLabel = btn.innerHTML;
@@ -848,9 +848,7 @@ export const SETUP_HTML = `<!DOCTYPE html>
       }
 
       const d = custRes.data;
-      const modelLabel = d.fallbackUsed
-        ? '로컬 폴백 (' + (d.fallbackReason || 'AI 호출 실패') + ')'
-        : (d.modelUsed || 'claude-opus-4-7');
+      const modelLabel = d.fallbackUsed ? '로컬 매핑' : 'AI 자동 매핑';
       const cacheBadge = d.cacheHit ? ' · 캐시적중' : '';
       status.className = 'status success show';
       status.textContent = '✅ AI 매핑 완료 — 고객: ' + Object.keys(d.mapping || {}).length + '개'

@@ -419,7 +419,7 @@ async function askTimestampColumn(columns: string[], label: string): Promise<str
 // ─── Step 4: 컬럼 매핑 ──────────────────────────────────
 
 interface ColumnMappingStepContext {
-  /** v1.5.0: AI 매핑용 서버 URL (serverUrl + credentials 전달 시 Opus 4.7 호출) */
+  /** v1.5.0: AI 매핑용 서버 URL (serverUrl + credentials 전달 시 AI 자동 매핑 호출) */
   serverUrl?: string;
   apiKey?: string;
   apiSecret?: string;
@@ -439,17 +439,17 @@ async function stepColumnMapping(
 }> {
   printStep(4, 5, '컬럼 매핑');
 
-  // v1.5.0: AI 자동 매핑 선택 (Opus 4.7)
+  // v1.5.0: AI 자동 매핑 선택
   const canUseAi = !!(ctx.serverUrl && ctx.apiKey && ctx.apiSecret && ctx.dbType);
   let useAi = false;
   if (canUseAi) {
-    useAi = await askConfirm('🤖 AI 자동 매핑 (Claude Opus 4.7)을 사용하시겠습니까?', true);
+    useAi = await askConfirm('🤖 AI 자동 매핑을 사용하시겠습니까?', true);
   }
 
   let customerResult: { mapping: Record<string, string>; unmapped: string[] };
   let aiLabelsFromApi: Record<string, string> = {};
   if (useAi && canUseAi) {
-    console.log('  🤖 Claude Opus 4.7 호출 중... (1회당 ~$0.075, 월 10회 쿼터)');
+    console.log('  🤖 AI 자동 매핑 호출 중... (월 10회 쿼터)');
     try {
       const { suggestMappingWithAI } = await import('../mapping');
       const ai = await suggestMappingWithAI({

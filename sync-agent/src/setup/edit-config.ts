@@ -276,7 +276,7 @@ async function editSync(config: AgentConfig): Promise<AgentConfig> {
 
 async function editMapping(config: AgentConfig): Promise<AgentConfig> {
   const target = await askSelect('어느 매핑을 수정할까요?', [
-    { name: '🤖 AI 자동 매핑 재실행 (Claude Opus 4.7, 월 10회)', value: 'aiRemap' },
+    { name: '🤖 AI 자동 매핑 재실행 (월 10회)', value: 'aiRemap' },
     { name: '고객 매핑', value: 'customers' },
     { name: '구매 매핑', value: 'purchases' },
     { name: '커스텀 필드 라벨', value: 'customLabels' },

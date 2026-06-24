@@ -174,7 +174,7 @@ export async function startSetupWizard(
     }
   });
 
-  // ─── API: AI 자동 매핑 (v1.5.0 — Claude Opus 4.7) ───────
+  // ─── API: AI 자동 매핑 (v1.5.0) ───────
   // 사용자가 입력한 서버 접속정보(apiKey/apiSecret)로 서버 /api/sync/ai-mapping 호출.
   // 실패 시 로컬 autoSuggestMapping 폴백.
   app.post('/api/setup/ai-mapping', async (req, res) => {

@@ -27,6 +27,15 @@ function stageOracledb() {
   const ok = fs.existsSync(path.join(rel, 'oracledb-5.5.0-win32-x64.node'));
   if (!ok) throw new Error('스테이징 실패: oracledb-5.5.0-win32-x64.node 없음 — 5.5.0 설치 확인 필요');
   console.log('oracledb 외부 모듈 스테이징 완료:', stage);
+
+  // ★ sql.js wasm(node12 호환 1.8.0)도 스테이징. dist/sql-wasm.wasm은 prebundle:wasm이 방금 핀한
+  //   sql.js@1.8.0에서 복사한 것(node12 OK 실측). 공유 release/sql-wasm.wasm·dist는 마지막 tier(1.13.0)로
+  //   덮어써져 섞이므로, win-legacy 전용으로 따로 떠둬 build-tiers.js가 SyncAgent에 덮어쓴다.
+  const wasmSrc = path.join(ROOT, 'dist/sql-wasm.wasm');
+  const wasmStage = path.join(ROOT, 'release/staged-modules/win-legacy/sql-wasm.wasm');
+  if (!fs.existsSync(wasmSrc)) throw new Error('스테이징 실패: dist/sql-wasm.wasm 없음 — prebundle:wasm 확인');
+  fs.copyFileSync(wasmSrc, wasmStage);
+  console.log('sql.js wasm(node12 호환) 스테이징 완료:', wasmStage, fs.statSync(wasmStage).size, 'bytes');
 }
 
 // 티어 정의 — OS 바닥 / node / pkg 타깃 / 구형 런타임 동봉(legacy) / 레거시 의존성 핀(deps).
@@ -39,7 +48,7 @@ function stageOracledb() {
 const TIERS = {
   'win-modern':   { node: 'node20', pkg: 'node20-win-x64',   out: 'release/sync-agent-win-modern.exe',   legacy: false, deps: null },
   'win-mid':      { node: 'node16', pkg: 'node16-win-x64',   out: 'release/sync-agent-win-mid.exe',       legacy: true,  deps: 'express@4.22.2 mssql@10.0.4 tedious@16.7.1' },
-  'win-legacy':   { node: 'node12', pkg: 'node12-win-x64',   out: 'release/sync-agent-win-legacy.exe',    legacy: true,  deps: 'express@4.22.2 mssql@8.1.4 tedious@14.7.0 mysql2@3.2.0 lru-cache@7.18.3 pg@8.7.3 oracledb@5.5.0 nodemailer@6.9.16' },
+  'win-legacy':   { node: 'node12', pkg: 'node12-win-x64',   out: 'release/sync-agent-win-legacy.exe',    legacy: true,  deps: 'express@4.22.2 mssql@8.1.4 tedious@14.7.0 mysql2@3.2.0 lru-cache@7.18.3 pg@8.7.3 oracledb@5.5.0 nodemailer@6.9.16 sql.js@1.8.0' },
   'linux-modern': { node: 'node20', pkg: 'node20-linux-x64', out: 'release/sync-agent-linux-modern',      legacy: false, deps: null },
   'linux-legacy': { node: 'node16', pkg: 'node16-linux-x64', out: 'release/sync-agent-linux-legacy',      legacy: true,  deps: 'express@4.22.2 mssql@10.0.4 tedious@16.7.1' },
 };

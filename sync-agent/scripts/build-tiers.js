@@ -27,6 +27,8 @@ sh(`node scripts/bundle-windows-runtime.js release/sync-agent-win-modern.exe dis
 // 드라이버별 이름으로 zip(엔드포인트가 packageKey로 서빙). Oracle thick(10g/11g/12c)은 Instant Client
 // 동봉이 필요한데(외부 확보) 디스크에 없으므로 지금은 base만 + manifest blocker. IC 확보 시 oracle zip에 폴더 추가.
 const DRIVERS = ['oracle', 'mssql', 'mysql', 'pg'];
+// win-legacy oracle(thick) 전용 Instant Client 11.2 스테이징(호스트 추출본, 약 290M). 없으면 동봉 skip(candidate 유지).
+const IC_STAGE = 'C:/Users/ceo/oracle-client-11.2-stage';
 const TIER_SRC = {
   'win-modern': 'dist-tiers/win-modern/SyncAgent',
   'win-mid': 'dist-tiers/win-mid/SyncAgent',
@@ -57,12 +59,36 @@ if (fs.existsSync(stagedOra)) {
   console.warn('경고: staged oracledb 없음 — win-legacy oracle 연결 불가(스테이징 누락). build-tier.js win-legacy 확인.');
 }
 
+// ★ win-legacy sql-wasm.wasm을 node12 호환(1.8.0)으로 교체 — bundle-windows-runtime이 깐 공유 1.13.0 위에 덮어씀.
+//   1.13.0 wasm은 node12에서 'wasm function signature contains illegal type'로 QueueManager.init 사망.
+const stagedWasm = path.join(ROOT, 'release/staged-modules/win-legacy/sql-wasm.wasm');
+const wlWasm = path.join(ROOT, 'dist-tiers/win-legacy/SyncAgent/sql-wasm.wasm');
+if (fs.existsSync(stagedWasm)) {
+  fs.copyFileSync(stagedWasm, wlWasm);
+  console.log('win-legacy SyncAgent sql-wasm.wasm = node12 호환 동봉:', fs.statSync(wlWasm).size, 'bytes');
+} else {
+  console.warn('경고: staged sql-wasm.wasm 없음 — win-legacy wasm node12 비호환 위험. build-tier.js win-legacy 확인.');
+}
+
 const packages = {};
 let zipCount = 0;
 for (const [tier, src] of Object.entries(TIER_SRC)) {
   for (const driver of DRIVERS) {
     const packageKey = `${tier}-${driver}`;
+    // win-legacy oracle = thick → Instant Client 동봉(290M). 다른 tier/driver는 thin 또는 비-oracle이라 불필요.
+    const needIC = tier === 'win-legacy' && driver === 'oracle';
+    const icDest = path.join(ROOT, src, 'oracle-client');
+    if (needIC) {
+      if (fs.existsSync(IC_STAGE)) {
+        fs.rmSync(icDest, { recursive: true, force: true });
+        fs.cpSync(IC_STAGE, icDest, { recursive: true });
+        console.log('win-legacy oracle zip에 Instant Client 동봉:', IC_STAGE);
+      } else {
+        console.warn('경고: IC_STAGE 없음 (' + IC_STAGE + ') — win-legacy oracle zip에 클라 미동봉(고객 thick 연결 불가).');
+      }
+    }
     zipTo(src, packageKey);
+    if (needIC && fs.existsSync(icDest)) fs.rmSync(icDest, { recursive: true, force: true }); // 다른 driver zip 전 제거
     zipCount++;
     packages[packageKey] = {
       buildTier: tier,

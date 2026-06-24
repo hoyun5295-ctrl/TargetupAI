@@ -22,7 +22,7 @@ npm run build:tiers          # 5종 + 런타임 동봉 + release/build-manifest.
 |---|---|---|---|
 | win-modern | Win10/11 · 2016+ | 20 | `release/sync-agent-win-modern.exe` |
 | win-mid | Win8.1 · 2012 R2 | 16 | `dist-tiers/win-mid/SyncAgent/` (런타임 동봉) |
-| win-legacy | Win7 · 2008 R2 | 14 | `dist-tiers/win-legacy/SyncAgent/` (런타임 동봉) |
+| win-legacy | Win7 · 2008 R2 · 2012 비R2 | 12 | `dist-tiers/win-legacy/SyncAgent/` (런타임 동봉, oracle은 IC+oracledb5.5+sql.js1.8 동봉) |
 | linux-modern | Ubuntu20.04+ · RHEL8+ | 20 | `release/sync-agent-linux-modern` |
 | linux-legacy | CentOS7 · Ubuntu16~18 | 16 | `release/sync-agent-linux-legacy` |
 
