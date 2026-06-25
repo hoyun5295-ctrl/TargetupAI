@@ -115,7 +115,6 @@ function SortableRow({ section, onRequestRemove }: { section: Section; onRequest
         {...attributes}
         {...listeners}
         onClick={(e) => e.stopPropagation()}
-        onPointerDown={(e) => e.stopPropagation()}
         title="드래그하여 순서 변경"
         aria-label="드래그 핸들"
         role="button"

@@ -107,7 +107,12 @@
 
 ---
 
-### 🟢 2026-06-25 — 운영 디버깅 5건 + CDP(자사몰 연동) 심층감사 → 보강 설계서 (★디버깅 배포완료 / CDP 다음세션)
+### 🟢 2026-06-25 (세션2) — CDP 갭보강 A~E + 모바일DM 아트디렉션 P1 + CustomerDataGate 디버깅3 (★전부 배포완료)
+> **CDP 갭보강 A~E (배포완료)**: 순수함수 TDD. A1 phone 자동갱신(타고객 점유만 skip)+A4 email≠phone 충돌 플래그(`cdp_identity_review` 테이블 생성완료)·B provider connectMethod/available 단일출처+고도몰/가비아 어댑터+register-providers(gap7)·C bulkImport truncation경고/occurred_at 미래클램프/버스트rate limit·D 여정트리거 분류(이벤트성 커서밖 0건=문서만)·E 문서. 상세 [[project_2026_0625_cdp_gap_hardening]].
+> **모바일DM 아트디렉션 엔진 P1 (배포완료)**: 근본=섹션마다 구도1개 고정+디렉터 색만. 섹션 구도(treatment hero5/coupon3/text_card3/cta3)+DM 아트디렉션(타입스케일·여백) 깨움. `dm-art-direction.ts`순수·렌더러 디스패처(classic byte불변 골든)·AI 디렉터 treatment출력(혜택0)·프론트 구도픽커. treatment는 Section데이터 영속(컬럼불요). P2이연=캔버스 픽셀미러·AD 뷰어영속. 상세 [[project_2026_0625_dm_art_direction_p1]].
+> **CustomerDataGate 디버깅3 (배포완료)**: ① 게이트가 DM 모달 뒤 깔림=모달 z-index 척도 불일치 → **확인/차단 인터럽트 모달 통일티어 z-[2000]**(게이트·ConfirmModal·CreditConfirmModal, DM ModalBase 1000 위·시스템 9997 아래. VersionHistory/AbTest 안 ConfirmModal도 동시해결). ② 게이트 '올리러가기' `/manage`(관리자전용·비admin차단)→`/dashboard?upload=1`+Dashboard 자동 업로드모달. ③ 업로드해도 '고객없음'=`clearCompanyDataProfileCache` 호출0건→1h캐시 이전0 잔존 → 업로드/삭제 길목 무효화배선+TTL 1h→5분. 상세 [[project_2026_0625_customer_data_gate_fixes]].
+
+### 🟢 2026-06-25 — 운영 디버깅 5건 + CDP(자사몰 연동) 심층감사 → 보강 설계서 (★디버깅 배포완료 / CDP 구현완료)
 > **디버깅(배포완료)**:
 > ① **선불 sweep 초과환불**(심각·돈): 환불 산식 `차감−성공−대기`→**`실패+미적재(차감−적재)`** 교체(refund-calc·mysql-refund-sweeper, 성공 의존 폐기 = 발송 직후 이동 중 과소집계 초과환불 차단). 과거 초과 **129,670.8원/25건**(폴라초이스코리아·쇼메·베이컨·콤비타코리아 등)은 **서팀장 수동회수**(표 전달).
 > ② **여정 원본편집 광고표기 표시**(JourneysPage — (광고)+무료수신거부 읽기전용, value는 raw=이중부착X).

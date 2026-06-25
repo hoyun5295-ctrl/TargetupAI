@@ -12,10 +12,17 @@
 - **모바일 반응형 default** — `@media (max-width: 767px)` 매트릭스 항상 박을 것 (D186)
 - **대량 처리 사용자 안내** — 5초+ 작업 영역 = 로딩 오버레이 + close 차단 + disabled 의무 (D185)
 - **CSS pointer-events-none + select-none wrapper 광범위 X** — 자식 textarea/scroll/copy 차단 사고 (D188)
+- **모달 z-index 티어 통일** (2026-06-25) — 앱 모달 z-[55]~[140] / DM `ModalBase` 1000(outlier) / **확인·차단 인터럽트 모달 = z-[2000]**(ConfirmModal·CreditConfirmModal·CustomerDataGate) / 시스템 9997~99999. 인터럽트 모달이 자신을 띄운 모달보다 z-index 낮으면 뒤로 깔림 — 새 확인/차단 모달은 z-[2000] 의무.
 
 ---
 
 ## 사고 이력
+
+### 2026-06-25 — 게이트/확인 모달이 다른 모달 뒤에 깔림 (z-index 척도 불일치)
+- **현상**: 모바일DM "AI 초안 생성"(고객 0명) 무반응처럼 보임. 실제론 CustomerDataGate(z-[150])가 DM `ModalBase`(zIndex:1000) 뒤에 렌더돼 안 보임.
+- **근본**: 앱 모달은 z-[55]~[140] 척도인데 **DM `ModalBase`만 zIndex:1000 outlier**. z-[140] 이하 공용 인터럽트 모달(ConfirmModal 140·CreditConfirmModal 120·게이트 150)이 DM 모달 안에서 뜨면 다 깔림. 전수 grep으로 `VersionHistoryModal`·`AbTestModal` 안의 ConfirmModal도 동일하게 깔리던 잠재버그 확인.
+- **fix**: "확인/차단 인터럽트 모달 통일티어 z-[2000]"(DM 1000 위·시스템 9997 아래)로 게이트·ConfirmModal·CreditConfirmModal 일괄 상향. AiPromptModal은 게이트 뜰 때 트리거 모달도 닫음.
+- **교훈**: 모달 z-index는 **앱 전역 티어 체계**로 잡아라(콘텐츠/인터럽트/시스템). 한 컴포넌트만 다른 척도(1000)를 쓰면 그 위에서 뜨는 공용 모달이 전부 깔린다. 새 확인/차단 모달 = z-[2000]. 한 곳 고치고 끝내지 말고 "다른 모달 안에서 모달 띄우는 곳" 전수 grep.
 
 ### 2026-06-05 세션6 — 알림톡 변수매칭 필드 미노출 (미리보기가 매핑된 컬럼만 표시)
 - **현상**: 주소록/엑셀 불러오면 수신자 미리보기에 phone만·변수매칭 드롭다운에 필드 0 (직원 psy5868 신고).
