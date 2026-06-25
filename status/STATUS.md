@@ -107,6 +107,17 @@
 
 ---
 
+### 🟢 2026-06-25 — 운영 디버깅 5건 + CDP(자사몰 연동) 심층감사 → 보강 설계서 (★디버깅 배포완료 / CDP 다음세션)
+> **디버깅(배포완료)**:
+> ① **선불 sweep 초과환불**(심각·돈): 환불 산식 `차감−성공−대기`→**`실패+미적재(차감−적재)`** 교체(refund-calc·mysql-refund-sweeper, 성공 의존 폐기 = 발송 직후 이동 중 과소집계 초과환불 차단). 과거 초과 **129,670.8원/25건**(폴라초이스코리아·쇼메·베이컨·콤비타코리아 등)은 **서팀장 수동회수**(표 전달).
+> ② **여정 원본편집 광고표기 표시**(JourneysPage — (광고)+무료수신거부 읽기전용, value는 raw=이중부착X).
+> ③ **고객DB 0명 시 AI 문안생성 전 안내**(`CustomerDataGate` 공용모듈 — 배너+다크모달, 5진입점: AiOperator·여정·인앱·이메일·DmBuilder).
+> ④ **싱크에이전트 중단 알림 종일스팸 fix** — 쿨다운이 프로세스메모리라 재시작마다 초기화 → **PG `system_alert_state` 영속화**(하루 2번). 테이블 CREATE 완료.
+> ⑤ **모바일DM 테스트발송 "MMS 이미지필수" 실패** — `toQtmsgType`이 풀네임만 받아 'L'→'M'(MMS) 변환 → dm.ts `'L'`→`'LMS'` + 순수모듈 `qtmsg-type.ts` 하드닝(단축코드 수용·안전default).
+> **CDP(다음세션)**: 자사몰 연동 전경로(인증·식별·이벤트·주문·환불·멱등·webhook·여정커서·provider·프론트·SDK) 심층감사 — 뼈대 견고, 보강 갭 8 + 문서 드리프트 1. 설계서 `docs/superpowers/specs/2026-06-25-cdp-gap-hardening-design.md`(5 phase A~E: 발송정확도→provider단일화→하드닝→여정변수→문서). 다음세션 phase 순 구현.
+
+---
+
 ### 🟡 2026-06-22 — 싱크에이전트 2008R2+Oracle 대응 + 위저드 전수조사 (★코드·빌드 완료 / 미배포)
 > **발단**: 인비토(Windows Server 2008 R2 SP1 + Oracle 11g) 싱크에이전트 설치 원격 3회 실패(exe 실행조차 안 됨, `0xC0000139` STATUS_ENTRYPOINT_NOT_FOUND).
 > **근본 2겹**: ① 빌드 티어 설계가 "node14=2008R2 최저선" **틀린 전제**(공식 node14 바닥=Win8.1, node14+ EOL Windows 차단) → 고객엔 node20 빌드가 나가 죽음. 2008R2 도는 마지막 Node=**node12**. ② 고객 DB=Oracle 11g → thin(oracledb 6.0+/node14.6+ + DB12.1+) 불가 = **thick 필수**.

@@ -7,12 +7,10 @@
  *   - routes/provider.ts가 본 인터페이스만 의존 → 새 자사몰 추가 시 routes 변경 0건
  *   - cafe24-client.ts (CT-23) 등 자사몰별 client는 IProviderAdapter 구현체
  *
- * 📋 등록된 Provider
- *   - 'cafe24': 한국 1위 (구현 완료, CT-23)
- *   - 'makeshop': 한국 2위 (skeleton, Phase 2 박을 영역)
- *   - 'shopify': 글로벌 1위 (skeleton, Phase 2)
- *   - 'imweb': 한국 SMB (skeleton, Phase 2)
- *   - 'sixshop': 한국 D2C (skeleton, Phase 2)
+ * 📋 등록된 Provider (등록 출처 = app.ts registerAllProviders() / utils/register-providers.ts 단일 출처. 2026-06-25 갱신)
+ *   - 'cafe24'(oauth) / 'naver_smart_store'(oauth) / 'custom'(webhook) / 'godo'(polling) / 'gabia'(webhook) = 사용 가능(available)
+ *   - 'shopify' / 'makeshop' / 'imweb' / 'sixshop' / 'woocommerce' = skeleton(available:false → coming_soon, Phase 2)
+ *   - 어댑터가 connectMethod/available을 직접 선언 → listProvidersForUI가 추론 없이 그대로 노출(D189 추론 폐기)
  *
  * ⛔ 영구 원칙
  *   - 자체구축 자사몰은 본 Adapter 불요 — SDK + CDP API 직접 호출 (이미 박힘)
@@ -67,6 +65,10 @@ export interface IProviderAdapter {
   readonly displayName: string;
   /** Provider 능력 매트릭스 */
   readonly capabilities: ProviderCapabilities;
+  /** UI 연결 방식 — 카드 클릭 모달 분기에 사용 (oauth=카페24/네이버, polling=고도몰, webhook=가비아/자체호스팅) */
+  readonly connectMethod: 'oauth' | 'webhook' | 'polling' | 'none';
+  /** 실제 연동 가능 여부(추론 폐기 — 어댑터가 직접 선언). false면 'coming_soon' */
+  readonly available: boolean;
 
   /**
    * OAuth authorize URL 생성 (사용자가 새 창에서 동의).
@@ -134,23 +136,34 @@ export function listProviders(): IProviderAdapter[] {
   return Array.from(registry.values());
 }
 
-export function listProvidersForUI(): Array<{
+export type ProviderUIEntry = {
   provider: string;
   displayName: string;
   capabilities: ProviderCapabilities;
+  connectMethod: 'oauth' | 'webhook' | 'polling' | 'none';
+  available: boolean;
   status: 'available' | 'coming_soon';
-}> {
-  return listProviders().map((p) => ({
+};
+
+/**
+ * 순수 — 어댑터 배열 → UI 엔트리. available 직접 사용(D189 capabilities 추론 폐기 — 폴링형 고도몰을 표현 못 하던 한계 해소).
+ * 테스트 가능(DB import 0).
+ */
+export function buildProvidersForUI(
+  adapters: Array<Pick<IProviderAdapter, 'provider' | 'displayName' | 'capabilities' | 'connectMethod' | 'available'>>,
+): ProviderUIEntry[] {
+  return adapters.map((p) => ({
     provider: p.provider,
     displayName: p.displayName,
     capabilities: p.capabilities,
-    // ★ D189-fix3 (2026-05-22): 자체 호스팅 자사몰 (OAuth X + Webhook + 서명 검증) 정합 영역 추가.
-    //   기존 oauth 매트릭스만 = 자체 호스팅 (webhook secret 기반) 'coming_soon' 잘못 표시 사고.
-    //   정정: OAuth 또는 (Webhook + 서명 검증) 매트릭스 정합 시 'available'.
-    status: (p.capabilities.oauth || (p.capabilities.webhook && p.capabilities.webhookSignatureVerification))
-      ? 'available'
-      : 'coming_soon',
+    connectMethod: p.connectMethod,
+    available: p.available,
+    status: p.available ? 'available' : 'coming_soon',
   }));
+}
+
+export function listProvidersForUI(): ProviderUIEntry[] {
+  return buildProvidersForUI(listProviders());
 }
 
 // ════════════════════════════════════════════════════════════════════
@@ -170,6 +183,8 @@ export class SkeletonProviderAdapter implements IProviderAdapter {
     webhookSignatureVerification: false,
     adminApi: false,
   };
+  readonly connectMethod = 'none' as const;
+  readonly available = false;
 
   buildAuthorizeUrl(): string {
     throw new Error(`${this.displayName} 연동은 Phase 2에서 지원 예정입니다. 현재는 CDP API + SDK로 직접 호출 가능합니다.`);

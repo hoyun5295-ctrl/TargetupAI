@@ -278,17 +278,19 @@ interface IProviderAdapter {
 }
 ```
 
-### 8-2. 자사몰 wrapper 매트릭스
+### 8-2. 자사몰 wrapper 매트릭스 (2026-06-25 갱신 — 실제 registry 정합)
 
-| Provider | 상태 | 박힘 위치 | 진입 friction |
-|---------|:-:|----------|---|
-| **cafe24** | ✓ 사용 가능 | `utils/cafe24-client.ts` cafe24Adapter | OAuth 1회 (코딩 0건) |
-| Shopify | ⏸ 곧 출시 | skeleton 박힘 (Phase 2) | (SDK direct 호출 가능) |
-| 메이크샵 | ⏸ 곧 출시 | skeleton (Phase 2) | (SDK direct 호출 가능) |
-| imweb | ⏸ 곧 출시 | skeleton (Phase 2) | (SDK direct 호출 가능) |
-| 식스샵 | ⏸ 곧 출시 | skeleton (Phase 2) | (SDK direct 호출 가능) |
-| WooCommerce | ⏸ 곧 출시 | skeleton (Phase 2) | (SDK direct 호출 가능) |
-| **자체구축** (Next.js/Node/Django/PHP) | ✓ 즉시 가능 | wrapper 불요 | SDK 또는 raw API 직접 호출 |
+등록 출처: `app.ts` 부팅 시 `registerAllProviders()`(`utils/register-providers.ts` 단일 출처). `listProvidersForUI()`는 어댑터의 `available` 값을 직접 사용(추론 폐기) + `connectMethod`로 프론트 카드 클릭 모달 분기.
+
+| Provider | 상태 | 연결 방식(connectMethod) | 등록 위치 |
+|---------|:-:|---|----------|
+| **cafe24** | ✓ 사용 가능 | oauth | `utils/cafe24-client.ts` cafe24Adapter |
+| **네이버 스마트스토어** | ✓ 사용 가능 | oauth | `utils/naver-commerce-client.ts` naverSmartStoreAdapter |
+| **고도몰** | ✓ 사용 가능 | polling(쇼핑몰 인증키) | `utils/godo-adapter.ts` (실연동 `routes/godo.ts` + `godo-client.ts`) |
+| **자체 호스팅** | ✓ 사용 가능 | webhook + 서명검증 | `utils/custom-self-hosted-adapter.ts` |
+| **가비아** | ✓ 사용 가능 | webhook(자체 호스팅 위임) | `utils/gabia-adapter.ts` |
+| Shopify / 메이크샵 / imweb / 식스샵 / WooCommerce | ⏸ 곧 출시 | none | skeleton (Phase 2, `available:false` → coming_soon) |
+| **자체구축** (Next.js/Node/Django/PHP) | ✓ 즉시 가능 | — | wrapper 불요 — SDK 또는 raw API 직접 호출 |
 
 ### 8-3. 카페24 통합 (D172-B 박힘)
 
@@ -296,6 +298,18 @@ interface IProviderAdapter {
 - Webhook 수신: `POST /api/cafe24/webhook` (HMAC-SHA256 서명 검증 + idempotency_key 중복 차단)
 - 표준 이벤트: `customer.created/updated` → identifyCustomer / `order.created/updated` → syncOrder / `order.cancelled/refunded` → custom_order_cancelled 이벤트
 - access_token TTL 2h / refresh_token TTL 14d / 5분 마진 자동 갱신
+
+### 8-5. 여정 진입 이벤트 변수 한계 (2026-06-25 — gap 1 분류 결과)
+
+여정 트리거는 진입 이벤트 properties를 알림톡·문자 변수로 동봉할 수 있는지에 따라 둘로 나뉜다(`utils/journey-cdp-cursor.ts` `classifyJourneyTrigger`).
+
+- **이벤트성 (진입 이벤트 변수 동봉 가능)**
+  - 커서 경로: 구매(`cdp.purchase`)·예약(`cdp.reservation_created`)·배송(`custom_order_shipped`) — 진입 `cdp_event` properties를 변수로 채움(누락 0 + 정확히 1회).
+  - 별도 동봉: 장바구니(`cdp.cart_abandon`) — `cart_add` properties를 동봉(이후 결제 없음 파생 상태).
+- **상태성 (진입 이벤트 변수 없음 — 고객 컬럼 변수만 사용)**
+  - 신규(`customer.created`)·휴면(`customer.dormant`)·생일(`customer.birthday_approaching`)·포인트(`customer.points_expiring`)·자유 세그먼트(`custom`): 진입 시점의 단일 이벤트가 없어 이벤트 변수가 원천적으로 없다(설계상 정상). 고객 마스터 컬럼·custom_fields 변수로 치환.
+
+분류 결과 이벤트성 트리거는 모두 커서/별도 경로로 이미 처리되어, 추가 라우팅 변경은 없다. 새 이벤트성 트리거 추가 시 `classifyJourneyTrigger`가 `event_cursor`면 `resolveCdpCursorEventName`도 함께 추가(verify 가드 `journey-trigger-class.verify.ts`가 강제).
 
 ---
 

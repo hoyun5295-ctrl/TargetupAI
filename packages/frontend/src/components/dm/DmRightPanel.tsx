@@ -7,6 +7,17 @@ import { useDmBuilderStore } from '../../stores/dmBuilderStore';
 import { SECTION_META } from '../../utils/dm-section-defaults';
 import SectionPropsEditor from './panels/SectionPropsEditor';
 
+// ★ 2026-06-25 (P1) 섹션 구도(treatment) 픽커 — 백엔드 dm-art-direction.TREATMENTS 미러(우선 4섹션).
+const TREATMENT_OPTIONS: Record<string, { value: string; label: string }[]> = {
+  hero: [
+    { value: 'classic', label: '기본' }, { value: 'full_bleed', label: '풀블리드' },
+    { value: 'split', label: '분할' }, { value: 'typographic', label: '타이포' }, { value: 'editorial_overlap', label: '오버랩' },
+  ],
+  coupon: [{ value: 'classic', label: '기본' }, { value: 'ticket', label: '티켓' }, { value: 'spotlight', label: '스포트라이트' }],
+  text_card: [{ value: 'classic', label: '기본' }, { value: 'lead', label: '리드' }, { value: 'framed', label: '프레임' }],
+  cta: [{ value: 'classic', label: '기본' }, { value: 'bar', label: '바' }, { value: 'ghost', label: '고스트' }],
+};
+
 export default function DmRightPanel() {
   const sections = useDmBuilderStore((s) => s.sections);
   const selectedSectionId = useDmBuilderStore((s) => s.selectedSectionId);
@@ -81,6 +92,24 @@ export default function DmRightPanel() {
                     ))}
                   </select>
                 </LabelRow>
+                {TREATMENT_OPTIONS[selected.type] && (
+                  <LabelRow label="구도">
+                    <select
+                      value={selected.treatment || 'classic'}
+                      onChange={(e) => setSectionStyle(selected.id, { treatment: e.target.value })}
+                      style={selectStyle}
+                    >
+                      {TREATMENT_OPTIONS[selected.type].map((o) => (
+                        <option key={o.value} value={o.value}>{o.label}</option>
+                      ))}
+                    </select>
+                  </LabelRow>
+                )}
+                {TREATMENT_OPTIONS[selected.type] && selected.treatment && selected.treatment !== 'classic' && (
+                  <div style={{ fontSize: 10, color: 'var(--dm-neutral-500)', marginTop: -4, marginBottom: 8, lineHeight: 1.4 }}>
+                    선택한 구도는 발행물에 적용됩니다.
+                  </div>
+                )}
                 <LabelRow label="정렬">
                   <div style={{ display: 'flex', gap: 4 }}>
                     {([['left', '좌'], ['center', '중'], ['right', '우']] as const).map(([a, lbl]) => (

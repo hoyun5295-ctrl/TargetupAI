@@ -51,6 +51,8 @@ export const customSelfHostedAdapter: IProviderAdapter = {
   provider: 'custom',
   displayName: '자체 호스팅 자사몰',
   capabilities: customCapabilities,
+  connectMethod: 'webhook',
+  available: true,
 
   buildAuthorizeUrl(): string {
     throw new Error('자체 호스팅 자사몰은 OAuth 흐름이 없습니다. 한줄로 관리자 → 자사몰 연동(CDP)에서 webhook_secret을 발급받아 저장해주세요.');

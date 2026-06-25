@@ -29,6 +29,8 @@
 
 import { query, pool } from '../config/database';
 import { ensureAnonymousLink, identifyCustomer } from './cdp-identity';
+// ★ 2026-06-25 (gap 5): 자사몰 전송 시각 미래 클램프(커서·통계 왜곡 차단)
+import { clampOccurredAt } from './cdp-occurred-at';
 import { maskPII } from './pii-masking';
 import { isOverMonthlyCdpLimit, recordCdpApiCall } from './cdp-auth';
 // ★ D214+ (2026-05-24) Unified Customer Profile 정합
@@ -174,11 +176,8 @@ export async function trackEvent(
     throw new Error('externalId 또는 anonymousId 중 하나는 필수입니다.');
   }
 
-  // 이벤트 INSERT
-  const occurredAt = input.occurredAt ? new Date(input.occurredAt) : new Date();
-  if (isNaN(occurredAt.getTime())) {
-    throw new Error('occurredAt 형식이 올바르지 않습니다 (ISO datetime 사용).');
-  }
+  // 이벤트 INSERT — occurred_at은 미래 클램프(파싱 실패/미전달 → now, 과거는 그대로)
+  const occurredAt = clampOccurredAt(input.occurredAt, new Date());
 
   const result = await query(
     `INSERT INTO cdp_events (
@@ -410,8 +409,8 @@ export async function ingestBrowserEvents(
   batch: BrowserIngestBatch
 ): Promise<BrowserIngestResult> {
   const anonymousId = batch.anonymousId || null;
-  const parsedSentAt = batch.sentAt ? new Date(batch.sentAt) : new Date();
-  const occurred = isNaN(parsedSentAt.getTime()) ? new Date() : parsedSentAt;
+  // occurred_at은 미래 클램프(파싱 실패/미전달 → now, 과거는 그대로)
+  const occurred = clampOccurredAt(batch.sentAt, new Date());
 
   // ── 0. 월간 호출 한도 게이팅 (요금제별) — 다른 endpoint와 동일 안전장치 ──
   if (await isOverMonthlyCdpLimit(companyId)) {

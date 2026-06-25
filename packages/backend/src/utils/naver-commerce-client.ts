@@ -429,6 +429,8 @@ export const naverSmartStoreAdapter: IProviderAdapter = {
   provider: 'naver_smart_store',
   displayName: '네이버 스마트스토어',
   capabilities: naverCapabilities,
+  connectMethod: 'oauth',
+  available: true,
 
   buildAuthorizeUrl(storeId, state, scope) {
     return buildNaverCommerceAuthorizeUrl(storeId, state, scope);

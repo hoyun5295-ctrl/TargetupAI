@@ -106,8 +106,10 @@ export default function ConfirmModal({ state, onClose }: Props) {
   };
 
   return createPortal(
+    // ★ 2026-06-25: 확인/차단 모달 통일 티어 z-[2000] — DM ModalBase(1000) 위, 시스템 모달(9997+) 아래.
+    //   (확인창은 자신을 띄운 모달보다 항상 위에 떠야 함. 기존 z-[140]은 DM 모달 뒤로 깔리던 결함.)
     <div
-      className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-[140] p-4"
+      className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-[2000] p-4"
       onClick={onClose}
     >
       <div

@@ -78,7 +78,7 @@ export function CustomerDataRequiredBanner({ className = '' }: { className?: str
       </div>
       <button
         type="button"
-        onClick={() => navigate('/manage')}
+        onClick={() => navigate('/dashboard?upload=1')}
         className="shrink-0 self-center inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-amber-100 text-[12px] font-semibold transition-colors"
       >
         올리러 가기 <ArrowRight className="w-3.5 h-3.5" />
@@ -104,7 +104,7 @@ export function CustomerDataRequiredModal({ open, onClose }: { open: boolean; on
 
   return createPortal(
     <div
-      className="fixed inset-0 z-[150] flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm"
+      className="fixed inset-0 z-[2000] flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm"
       onClick={onClose}
     >
       <div
@@ -141,7 +141,7 @@ export function CustomerDataRequiredModal({ open, onClose }: { open: boolean; on
           {/* 직접 업로드 — 바로 실행 */}
           <button
             type="button"
-            onClick={() => { onClose(); navigate('/manage'); }}
+            onClick={() => { onClose(); navigate('/dashboard?upload=1'); }}
             className="group w-full text-left rounded-xl border border-emerald-400/25 bg-emerald-500/5 hover:bg-emerald-500/10 p-4 transition-colors"
           >
             <div className="flex items-center gap-3">
@@ -186,7 +186,7 @@ export function CustomerDataRequiredModal({ open, onClose }: { open: boolean; on
             닫기
           </button>
           <button
-            onClick={() => { onClose(); navigate('/manage'); }}
+            onClick={() => { onClose(); navigate('/dashboard?upload=1'); }}
             className="flex-1 px-4 py-2 rounded-lg bg-gradient-to-r from-violet-500 to-fuchsia-500 hover:from-violet-600 hover:to-fuchsia-600 text-white text-sm font-semibold shadow-lg shadow-violet-500/30 transition-colors inline-flex items-center justify-center gap-2"
           >
             <Upload className="w-4 h-4" /> 고객 데이터 올리러 가기

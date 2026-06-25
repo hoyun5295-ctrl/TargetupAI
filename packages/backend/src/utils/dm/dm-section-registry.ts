@@ -424,7 +424,8 @@ export type Section = {
   type: SectionType;
   order: number;
   visible: boolean;
-  style_variant?: string;       // 'beauty-elegant' | 'fashion-editorial' | ...
+  style_variant?: string;       // 'beauty-elegant' | 'fashion-editorial' | ... (색/톤 변형)
+  treatment?: string;           // 섹션 구도 변형(아트디렉션). 미설정=classic(현행). 허용값=dm-art-direction.TREATMENTS
   props: SectionProps;
   ai_locked?: boolean;
   variable_fallbacks?: VariableBinding[];

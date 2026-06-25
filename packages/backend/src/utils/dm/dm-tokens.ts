@@ -163,8 +163,11 @@ export function renderDmTokensCss(brandKit?: DmBrandKit): string {
   --dm-font-primary: ${fontPri};
   --dm-font-serif: ${DM_TYPOGRAPHY.fontFamily.serif};
   --dm-font-mono: ${DM_TYPOGRAPHY.fontFamily.mono};
+  --dm-font-display: ${fontPri};
 
   --dm-fs-hero: ${DM_TYPOGRAPHY.scale.hero.size};
+  --dm-fw-hero: ${DM_TYPOGRAPHY.scale.hero.weight};
+  --dm-ls-hero: ${DM_TYPOGRAPHY.scale.hero.letterSpacing};
   --dm-fs-h1: ${DM_TYPOGRAPHY.scale.h1.size};
   --dm-fs-h2: ${DM_TYPOGRAPHY.scale.h2.size};
   --dm-fs-h3: ${DM_TYPOGRAPHY.scale.h3.size};
@@ -183,6 +186,7 @@ export function renderDmTokensCss(brandKit?: DmBrandKit): string {
   --dm-sp-0: 0; --dm-sp-1: 4px; --dm-sp-2: 8px; --dm-sp-3: 12px;
   --dm-sp-4: 16px; --dm-sp-5: 20px; --dm-sp-6: 24px; --dm-sp-8: 32px;
   --dm-sp-10: 40px; --dm-sp-12: 48px; --dm-sp-16: 64px; --dm-sp-20: 80px;
+  --dm-section-pad-scale: 1;
 
   --dm-radius-none: 0; --dm-radius-sm: 4px; --dm-radius-md: 8px;
   --dm-radius-lg: 12px; --dm-radius-xl: 16px; --dm-radius-2xl: 24px;

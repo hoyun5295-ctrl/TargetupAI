@@ -38,10 +38,10 @@ import { recomputeProfileBatch } from '../utils/unified-customer-profile';
 // ★ D189 #4 (2026-05-22): Journey Step A/B/Bandit 트래킹 — SDK 호출용 endpoint
 import { recordJourneyStepVariantReward } from '../utils/bandit-optimizer';
 import { listProvidersForUI } from '../utils/provider-registry';
-// ★ D173 (2026-05-19): cafe24Adapter import 부수 효과로 cafe24 provider 등록
-import '../utils/cafe24-client';
-// ★ D178 (2026-05-19): naverSmartStoreAdapter import 부수 효과로 네이버 스마트스토어 provider 등록
-import '../utils/naver-commerce-client';
+// ★ 2026-06-25 (gap 6): 회사별 버스트 rate limit — write 경로 폭주 1차 방어
+import { cdpBurstLimit } from '../utils/cdp-burst-limit';
+// ★ 2026-06-25 (gap 7): provider 등록은 app.ts registerAllProviders() 단일 출처로 이전
+//   (기존 cafe24-client / naver-commerce-client side-effect import 제거 — 로드 순서 취약성 차단)
 // ★ D178 (2026-05-19): 자체 호스팅 자사몰 Adapter (Harold 명시 — 카페24보다 자체 호스팅 위주)
 import {
   customSelfHostedAdapter,
@@ -95,6 +95,9 @@ import { getCreditCost } from '../utils/ai-credit-calc';
 
 const router = Router();
 
+// ★ 2026-06-25 (gap 6): CDP write 버스트 한도 — 회사당 50req/10초(보수적). bulk-import는 제외(월 한도+1000건 캡).
+const cdpWriteBurst = cdpBurstLimit(50, 10_000);
+
 // ════════════════════════════════════════════════════════════════════
 // 외부 API (X-Hanjullo-Key + X-Hanjullo-Secret 인증)
 // ════════════════════════════════════════════════════════════════════
@@ -104,7 +107,7 @@ const router = Router();
 // §12 #5 — schema_version 'v1' 의무 + 7 분류 PII masking 자동 (이중 안전망)
 // ════════════════════════════════════════════════════════════════════
 
-router.post('/ingest', requireCdpBrowserOrigin, async (req: Request, res: Response) => {
+router.post('/ingest', requireCdpBrowserOrigin, cdpWriteBurst, async (req: Request, res: Response) => {
   try {
     const { schema_version, anonymous_id, session_id, sent_at, events } = req.body || {};
 
@@ -192,7 +195,7 @@ router.post('/ingest', requireCdpBrowserOrigin, async (req: Request, res: Respon
 });
 
 // POST /api/cdp/identify — 회원 식별 / upsert
-router.post('/identify', requireCdpApiKey, async (req: Request, res: Response) => {
+router.post('/identify', requireCdpApiKey, cdpWriteBurst, async (req: Request, res: Response) => {
   const cdpAuth = req.cdpAuth!;
   try {
     const { external_id, email, phone, name, birth_date, gender, grade, address, custom_fields, sms_opt_in, marketing_consent } = req.body;
@@ -232,7 +235,7 @@ router.post('/identify', requireCdpApiKey, async (req: Request, res: Response) =
 });
 
 // POST /api/cdp/event — 행동 이벤트
-router.post('/event', requireCdpApiKey, async (req: Request, res: Response) => {
+router.post('/event', requireCdpApiKey, cdpWriteBurst, async (req: Request, res: Response) => {
   const cdpAuth = req.cdpAuth!;
   try {
     const { event_name, external_id, anonymous_id, properties, occurred_at } = req.body;
@@ -266,7 +269,7 @@ router.post('/event', requireCdpApiKey, async (req: Request, res: Response) => {
 });
 
 // POST /api/cdp/order — 주문 sync + RFM 갱신
-router.post('/order', requireCdpApiKey, async (req: Request, res: Response) => {
+router.post('/order', requireCdpApiKey, cdpWriteBurst, async (req: Request, res: Response) => {
   const cdpAuth = req.cdpAuth!;
   try {
     const { order_id, external_id, email, phone, name, status, total_amount, item_count, items, ordered_at, currency } = req.body;

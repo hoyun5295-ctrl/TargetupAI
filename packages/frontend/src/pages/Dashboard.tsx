@@ -1,6 +1,6 @@
 ﻿import { AlertTriangle, Award, BarChart3, Bell, BellOff, Cake, Calendar, ChevronLeft, ChevronRight, Clock, CreditCard, DollarSign, HelpCircle, Lightbulb, Mail, MapPin, Percent, Rocket, Send, ShoppingCart, Sparkles, Store, TrendingDown, TrendingUp, User, UserPlus, Users, UserX } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useToast } from '../components/ToastProvider';
 import { aiApi, campaignsApi, customersApi } from '../api/client';
 import AddressBookModal from '../components/AddressBookModal';
@@ -145,6 +145,8 @@ interface DashboardCardsResponse {
 
 export default function Dashboard() {
   const navigate = useNavigate();
+  // ★ 2026-06-25: CustomerDataGate "올리러 가기" 진입(/dashboard?upload=1) → 고객 DB 업로드 모달 자동 오픈
+  const [searchParams, setSearchParams] = useSearchParams();
   const { user, logout } = useAuthStore();
 
   // 기능 제한 체크 헬퍼
@@ -1032,6 +1034,16 @@ export default function Dashboard() {
     }
     setShowFileUpload(true);
   };
+
+  // ★ 2026-06-25: ?upload=1 진입(게이트 "올리러 가기" 동선) 시 고객 DB 업로드 모달 자동 오픈 + 파라미터 제거(새로고침 재오픈 방지)
+  useEffect(() => {
+    if (searchParams.get('upload') === '1') {
+      openFileUpload();
+      searchParams.delete('upload');
+      setSearchParams(searchParams, { replace: true });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams]);
 
   // 업로드 저장 시작 → 프로그레스 모달 표시 + 폴링
   const handleUploadSaveStart = (savedFileId: string, totalRows: number) => {

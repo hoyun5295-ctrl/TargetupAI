@@ -223,6 +223,12 @@ export interface BulkImportResult {
   customersFailed: number;
   ordersImported: number;
   ordersFailed: number;
+  // ★ 2026-06-25 (gap 8): silent drop 폐기 — 1,000건 초과분을 경고로 노출
+  customersTruncated: boolean;
+  ordersTruncated: boolean;
+  droppedCustomers: number;
+  droppedOrders: number;
+  warning?: string;
   failures: Array<{ type: 'customer' | 'order'; externalId?: string; orderId?: string; error: string }>;
 }
 
@@ -239,14 +245,22 @@ export async function bulkImport(
   input: BulkImportInput
 ): Promise<BulkImportResult> {
   if (!input.source) throw new Error('source는 필수입니다.');
-  const customerList = (input.customers || []).slice(0, BULK_IMPORT_MAX_ROWS);
-  const orderList = (input.orders || []).slice(0, BULK_IMPORT_MAX_ROWS);
+  const customersInput = input.customers || [];
+  const ordersInput = input.orders || [];
+  const customerList = customersInput.slice(0, BULK_IMPORT_MAX_ROWS);
+  const orderList = ordersInput.slice(0, BULK_IMPORT_MAX_ROWS);
+  const droppedCustomers = Math.max(0, customersInput.length - customerList.length);
+  const droppedOrders = Math.max(0, ordersInput.length - orderList.length);
 
   const result: BulkImportResult = {
     customersImported: 0,
     customersFailed: 0,
     ordersImported: 0,
     ordersFailed: 0,
+    customersTruncated: droppedCustomers > 0,
+    ordersTruncated: droppedOrders > 0,
+    droppedCustomers,
+    droppedOrders,
     failures: [],
   };
 
@@ -268,6 +282,11 @@ export async function bulkImport(
       result.ordersFailed++;
       result.failures.push({ type: 'order', orderId: o.orderId, externalId: o.externalId, error: err?.message || 'unknown' });
     }
+  }
+
+  if (droppedCustomers > 0 || droppedOrders > 0) {
+    result.warning = `요청 1건당 최대 ${BULK_IMPORT_MAX_ROWS}건까지만 처리됩니다. 초과분(고객 ${droppedCustomers}건 / 주문 ${droppedOrders}건)은 처리되지 않았습니다. 페이지네이션으로 나눠 호출해주세요.`;
+    console.log(`[CDP bulkImport] truncation — droppedCustomers=${droppedCustomers} droppedOrders=${droppedOrders} (company=${companyId})`);
   }
 
   return result;

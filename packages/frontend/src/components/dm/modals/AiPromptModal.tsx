@@ -58,7 +58,8 @@ export default function AiPromptModal({ open, onClose }: { open: boolean; onClos
   };
 
   const handleGenerate = async () => {
-    if (customerGate.isEmpty) { setShowDataGate(true); return; }
+    // 고객 0명 = 게이트로 안내 + 프롬프트 모달은 닫아 게이트만 보이게(뒤에 깔림 방지).
+    if (customerGate.isEmpty) { setShowDataGate(true); onClose(); return; }
     if (!prompt.trim()) {
       setError('프롬프트를 입력해주세요.');
       return;

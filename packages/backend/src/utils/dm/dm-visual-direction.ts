@@ -8,6 +8,8 @@
  */
 import { DM_COLOR_TOKENS, getContrastRatio } from './dm-tokens';
 import type { Section } from './dm-section-registry';
+// ★ 2026-06-25 (P1) 섹션 구도(treatment) 동봉 — AI 추천 우선, 없으면 typeScale 기반 기본.
+import { selectTreatment } from './dm-art-direction';
 
 export type VisualConcept = {
   palette: { primary: string; accent: string; surface: string; on_surface: string };
@@ -15,6 +17,8 @@ export type VisualConcept = {
   hero_treatment: 'gradient' | 'color_block' | 'image';
   emphasis_sections: string[];
   type_scale: 'bold' | 'editorial' | 'minimal';
+  // ★ 2026-06-25 (P1) 섹션 타입별 구도 추천(AI). selectTreatment가 렌더 시 per-type 검증(미허용=classic).
+  treatments?: Record<string, string>;
 };
 
 const HEX6 = /^#([0-9a-fA-F]{6})$/;
@@ -55,12 +59,19 @@ export function normalizeVisualConcept(raw: (Partial<VisualConcept> & { palette?
   const typeScale = (['bold', 'editorial', 'minimal'] as const).includes(raw?.type_scale as any)
     ? (raw!.type_scale as VisualConcept['type_scale'])
     : 'bold';
+  const treatments: Record<string, string> = {};
+  if (raw?.treatments && typeof raw.treatments === 'object' && !Array.isArray(raw.treatments)) {
+    for (const [k, v] of Object.entries(raw.treatments as Record<string, unknown>)) {
+      if (typeof v === 'string' && v.length <= 30) treatments[k] = v; // selectTreatment가 per-type 최종 검증
+    }
+  }
   return {
     palette: { primary, accent, surface, on_surface },
     mood: typeof raw?.mood === 'string' ? raw!.mood!.slice(0, 40) : '',
     hero_treatment: treatment,
     emphasis_sections: Array.isArray(raw?.emphasis_sections) ? raw!.emphasis_sections!.map(String).slice(0, 6) : [],
     type_scale: typeScale,
+    ...(Object.keys(treatments).length ? { treatments } : {}),
   };
 }
 
@@ -73,10 +84,16 @@ export function buildMoodBackground(palette: VisualConcept['palette'], _mood: st
  * 컨셉을 섹션에 적용 — 색·무드만. 텍스트(혜택) props는 절대 불변.
  * 이미지 없는 hero에는 무드 배경을 주입해 휑함을 없앤다(이미지 있으면 원본 우선).
  */
-export function applyVisualDirection(sections: Section[], concept: VisualConcept): Section[] {
+export function applyVisualDirection(
+  sections: Section[],
+  concept: VisualConcept,
+  treatmentBySectionId?: Record<string, string>,
+): Section[] {
   return sections.map((s) => {
-    const next: any = { ...s, accent_color: s.accent_color || concept.palette.accent };
     const hasImage = !!(s.props as any)?.image_url;
+    // ★ 2026-06-25 (P1) 섹션 구도 동봉 — AI 추천(treatmentBySectionId) 우선, 없으면 typeScale 기반 기본(미허용/미설정=classic).
+    const treatment = selectTreatment(s.type, treatmentBySectionId?.[s.id], { typeScale: concept.type_scale, hasImage });
+    const next: any = { ...s, accent_color: s.accent_color || concept.palette.accent, treatment };
     if (s.type === 'hero' && !hasImage && concept.hero_treatment !== 'image') {
       next.props = {
         ...(s.props as any),

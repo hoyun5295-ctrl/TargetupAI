@@ -58,8 +58,9 @@ export default function CreditConfirmModal({ open, source, description, onConfir
   const after = balance != null ? balance - cost : null;
 
   return (
+    // ★ 2026-06-25: 확인/차단 모달 통일 티어 z-[2000] — DM ModalBase(1000) 위, 시스템 모달(9997+) 아래.
     <div
-      className="fixed inset-0 z-[120] flex items-center justify-center bg-black/60 backdrop-blur-sm px-4"
+      className="fixed inset-0 z-[2000] flex items-center justify-center bg-black/60 backdrop-blur-sm px-4"
       onClick={onCancel}
     >
       <div

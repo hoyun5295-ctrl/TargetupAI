@@ -20,6 +20,8 @@ import type { Section, SectionType, HeaderProps, HeroProps, CouponProps, Countdo
 import type { DmBrandKit } from './dm-tokens';
 import { publicImageUrl, youtubeEmbedUrl } from './dm-viewer-utils';
 import { dmIcon, dmEventCard } from './dm-render-primitives';
+// ★ 2026-06-25 (P1) 아트디렉션 — 섹션 구도(treatment) 선택. 미설정/미허용=classic(현행 동일).
+import { selectTreatment, type ArtDirection } from './dm-art-direction';
 
 // ────────────── 렌더 컨텍스트 ──────────────
 
@@ -29,6 +31,8 @@ export type SectionRenderContext = {
   trackApiBase?: string;
   shortCode?: string;
   isPreview?: boolean;
+  // ★ 2026-06-25 (P1) DM 단위 아트디렉션(타입스케일 등). treatment 기본값 추론에 사용(미전달=현행).
+  artDirection?: ArtDirection;
 };
 
 // ────────────── 보안: HTML 이스케이프 ──────────────
@@ -105,7 +109,18 @@ function renderHeader(props: HeaderProps, ctx: SectionRenderContext): string {
   }
 }
 
-function renderHero(props: HeroProps): string {
+// ★ 2026-06-25 (P1) hero treatment 디스패처. 미설정/미허용=classic(현행 본문 그대로 — 골든 보존).
+function renderHero(props: HeroProps, treatment?: string): string {
+  switch (treatment) {
+    case 'typographic': return renderHeroTypographic(props);
+    case 'full_bleed': return renderHeroFullBleed(props);
+    case 'split': return renderHeroSplit(props);
+    case 'editorial_overlap': return renderHeroOverlap(props);
+    default: return renderHeroClassic(props);
+  }
+}
+
+function renderHeroClassic(props: HeroProps): string {
   const img = props.image_url ? publicImageUrl(props.image_url) : '';
   const heightPx = { sm: '200px', md: '320px', lg: '480px', full: '100vh' }[props.height || 'md'];
   const align = props.align || 'center';
@@ -126,7 +141,80 @@ function renderHero(props: HeroProps): string {
   </div>`;
 }
 
-function renderCoupon(props: CouponProps): string {
+// 타이포: 이미지 없이 대형 헤드라인 + 규칙선 + 여백(아트디렉션 타입스케일/밀도 변수 인라인 참조).
+function renderHeroTypographic(props: HeroProps): string {
+  const head = escapeHtml(props.headline || '');
+  const sub = escapeHtml(props.sub_copy || '');
+  return `<div class="dm-section dm-hero" data-section-type="hero" style="background:var(--dm-bg);padding:calc(var(--dm-sp-12) * var(--dm-section-pad-scale)) var(--dm-sp-5);display:flex;flex-direction:column;gap:var(--dm-sp-4)">
+    ${head ? `<div style="font-size:var(--dm-fs-hero);font-weight:var(--dm-fw-hero);letter-spacing:var(--dm-ls-hero);line-height:1.12;font-family:var(--dm-font-display);color:var(--dm-neutral-900)">${head}</div>` : ''}
+    <div style="height:2px;width:48px;background:var(--dm-primary)"></div>
+    ${sub ? `<div style="font-size:var(--dm-fs-body);color:var(--dm-neutral-600)">${sub}</div>` : ''}
+  </div>`;
+}
+
+// 풀블리드: 이미지 꽉 차게 + 중앙 오버레이 대형 헤드라인.
+function renderHeroFullBleed(props: HeroProps): string {
+  const img = props.image_url ? publicImageUrl(props.image_url) : '';
+  const heightPx = { sm: '240px', md: '380px', lg: '520px', full: '100vh' }[props.height || 'md'];
+  const moodBg = (props as any).mood_background as string | undefined;
+  const baseBg = img ? 'var(--dm-neutral-900)' : (moodBg || 'var(--dm-neutral-900)');
+  const head = escapeHtml(props.headline || '');
+  const sub = escapeHtml(props.sub_copy || '');
+  return `<div class="dm-section dm-hero" data-section-type="hero" style="position:relative;min-height:${heightPx};overflow:hidden;background:${baseBg}">
+    ${img ? `<img src="${escapeHtml(img)}" alt="${head}" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover">` : ''}
+    ${img ? `<div style="position:absolute;inset:0;background:rgba(0,0,0,0.32)"></div>` : ''}
+    <div style="position:relative;min-height:${heightPx};display:flex;flex-direction:column;justify-content:center;align-items:center;text-align:center;padding:var(--dm-sp-6) var(--dm-sp-5);color:#fff">
+      ${head ? `<div style="font-size:var(--dm-fs-hero);font-weight:var(--dm-fw-hero);letter-spacing:var(--dm-ls-hero);line-height:1.1;font-family:var(--dm-font-display)">${head}</div>` : ''}
+      ${sub ? `<div style="margin-top:var(--dm-sp-3);font-size:var(--dm-fs-body);opacity:0.92">${sub}</div>` : ''}
+    </div>
+  </div>`;
+}
+
+// 분할: 상단 컬러 타입 블록 + 하단 이미지.
+function renderHeroSplit(props: HeroProps): string {
+  const img = props.image_url ? publicImageUrl(props.image_url) : '';
+  const head = escapeHtml(props.headline || '');
+  const sub = escapeHtml(props.sub_copy || '');
+  return `<div class="dm-section dm-hero" data-section-type="hero" style="background:var(--dm-bg)">
+    <div style="background:var(--dm-primary);color:#fff;padding:calc(var(--dm-sp-8) * var(--dm-section-pad-scale)) var(--dm-sp-5)">
+      ${head ? `<div style="font-size:var(--dm-fs-hero);font-weight:var(--dm-fw-hero);letter-spacing:var(--dm-ls-hero);line-height:1.12;font-family:var(--dm-font-display)">${head}</div>` : ''}
+      ${sub ? `<div style="margin-top:var(--dm-sp-2);font-size:var(--dm-fs-body);opacity:0.9">${sub}</div>` : ''}
+    </div>
+    ${img ? `<img src="${escapeHtml(img)}" alt="${head}" style="width:100%;display:block;object-fit:cover">` : `<div class="dm-mood-slot" style="height:200px;display:flex;align-items:center;justify-content:center">이미지를 추가해주세요</div>`}
+  </div>`;
+}
+
+// 에디토리얼 오버랩: 이미지 위에 헤드라인 카드가 겹침.
+function renderHeroOverlap(props: HeroProps): string {
+  const img = props.image_url ? publicImageUrl(props.image_url) : '';
+  const head = escapeHtml(props.headline || '');
+  const sub = escapeHtml(props.sub_copy || '');
+  return `<div class="dm-section dm-hero" data-section-type="hero" style="background:var(--dm-bg);padding-bottom:var(--dm-sp-5)">
+    ${img ? `<img src="${escapeHtml(img)}" alt="${head}" style="width:100%;display:block;height:280px;object-fit:cover">` : `<div class="dm-mood-slot" style="height:240px"></div>`}
+    <div style="margin:-32px var(--dm-sp-5) 0;position:relative;background:var(--dm-bg);border:1px solid var(--dm-neutral-200);border-radius:var(--dm-radius-xl);box-shadow:var(--dm-shadow-lg);padding:var(--dm-sp-6)">
+      ${head ? `<div style="font-size:var(--dm-fs-h1);font-weight:var(--dm-fw-hero);letter-spacing:var(--dm-ls-hero);line-height:1.2;font-family:var(--dm-font-display);color:var(--dm-neutral-900)">${head}</div>` : ''}
+      ${sub ? `<div style="margin-top:var(--dm-sp-2);font-size:var(--dm-fs-body);color:var(--dm-neutral-600)">${sub}</div>` : ''}
+    </div>
+  </div>`;
+}
+
+// ★ 2026-06-25 (P1) coupon treatment 디스패처. 미설정/미허용=classic(현행).
+function renderCoupon(props: CouponProps, treatment?: string): string {
+  switch (treatment) {
+    case 'ticket': return renderCouponTicket(props);
+    case 'spotlight': return renderCouponSpotlight(props);
+    default: return renderCouponClassic(props);
+  }
+}
+
+function couponMeta(props: CouponProps): string {
+  const expire = props.expire_date ? formatKoreanDate(props.expire_date) : '';
+  return `${expire ? `<div class="dm-text-small" style="margin-top:var(--dm-sp-3);color:var(--dm-neutral-500)">유효기간: ~ ${escapeHtml(expire)}</div>` : ''}
+      ${props.min_purchase ? `<div class="dm-text-small" style="margin-top:var(--dm-sp-1);color:var(--dm-neutral-500)">${Number(props.min_purchase).toLocaleString('ko-KR')}원 이상 구매 시</div>` : ''}
+      ${props.usage_condition ? `<div class="dm-text-tiny" style="margin-top:var(--dm-sp-2);color:var(--dm-neutral-500)">${escapeHtml(props.usage_condition)}</div>` : ''}`;
+}
+
+function renderCouponClassic(props: CouponProps): string {
   const discountLabel = escapeHtml(props.discount_label || '');
   const code = props.coupon_code ? escapeHtml(props.coupon_code) : '';
   const expire = props.expire_date ? formatKoreanDate(props.expire_date) : '';
@@ -140,6 +228,33 @@ function renderCoupon(props: CouponProps): string {
       ${props.usage_condition ? `<div class="dm-text-tiny" style="margin-top:var(--dm-sp-2);color:var(--dm-neutral-500)">${escapeHtml(props.usage_condition)}</div>` : ''}
       ${props.cta_url ? `<div style="margin-top:var(--dm-sp-4)"><a href="${safeUrl(props.cta_url)}" class="dm-cta dm-cta-primary" target="_blank">쿠폰 사용하기</a></div>` : ''}
     </div>
+  </div>`;
+}
+
+// 티켓: 좌우 노치(원형 컷)로 입장권 느낌 + 점선 분리.
+function renderCouponTicket(props: CouponProps): string {
+  const discountLabel = escapeHtml(props.discount_label || '');
+  const code = props.coupon_code ? escapeHtml(props.coupon_code) : '';
+  const notch = 'radial-gradient(circle at 0 50%, transparent 10px, var(--dm-bg) 11px) left/51% 100% no-repeat, radial-gradient(circle at 100% 50%, transparent 10px, var(--dm-bg) 11px) right/51% 100% no-repeat';
+  return `<div class="dm-section dm-coupon" data-section-type="coupon" style="padding:calc(var(--dm-sp-6) * var(--dm-section-pad-scale)) var(--dm-sp-5);background:var(--dm-primary-light)">
+    <div style="background:${notch};box-shadow:var(--dm-shadow-md);border-radius:var(--dm-radius-lg);padding:var(--dm-sp-6) var(--dm-sp-8);text-align:center">
+      <div style="font-size:var(--dm-fs-hero);font-weight:900;color:var(--dm-primary);font-family:var(--dm-font-display)">${discountLabel}</div>
+      ${code ? `<div style="margin-top:var(--dm-sp-4);border-top:1px dashed var(--dm-neutral-300);padding-top:var(--dm-sp-4);font-family:var(--dm-font-mono);font-size:var(--dm-fs-h2);font-weight:700;letter-spacing:3px;color:var(--dm-neutral-900)">${code}</div>` : ''}
+      ${couponMeta(props)}
+      ${props.cta_url ? `<div style="margin-top:var(--dm-sp-4)"><a href="${safeUrl(props.cta_url)}" class="dm-cta dm-cta-primary" target="_blank">쿠폰 사용하기</a></div>` : ''}
+    </div>
+  </div>`;
+}
+
+// 스포트라이트: 코드 자체를 대형으로 강조(어두운 배경 + 모노 대문자).
+function renderCouponSpotlight(props: CouponProps): string {
+  const discountLabel = escapeHtml(props.discount_label || '');
+  const code = props.coupon_code ? escapeHtml(props.coupon_code) : '';
+  return `<div class="dm-section dm-coupon" data-section-type="coupon" style="padding:calc(var(--dm-sp-8) * var(--dm-section-pad-scale)) var(--dm-sp-5);background:var(--dm-neutral-900);color:#fff;text-align:center">
+    ${discountLabel ? `<div style="font-size:var(--dm-fs-h3);font-weight:700;color:var(--dm-accent);letter-spacing:1px">${discountLabel}</div>` : ''}
+    ${code ? `<div style="margin-top:var(--dm-sp-3);font-family:var(--dm-font-mono);font-size:var(--dm-fs-hero);font-weight:900;letter-spacing:4px">${code}</div>` : ''}
+    <div style="margin-top:var(--dm-sp-2);color:var(--dm-neutral-400)">${couponMeta(props)}</div>
+    ${props.cta_url ? `<div style="margin-top:var(--dm-sp-5)"><a href="${safeUrl(props.cta_url)}" class="dm-cta dm-cta-primary" target="_blank">쿠폰 사용하기</a></div>` : ''}
   </div>`;
 }
 
@@ -158,7 +273,16 @@ function renderCountdown(props: CountdownProps): string {
   </div>`;
 }
 
-function renderTextCard(props: TextCardProps): string {
+// ★ 2026-06-25 (P1) text_card treatment 디스패처. 미설정/미허용=classic(현행).
+function renderTextCard(props: TextCardProps, treatment?: string): string {
+  switch (treatment) {
+    case 'lead': return renderTextCardLead(props);
+    case 'framed': return renderTextCardFramed(props);
+    default: return renderTextCardClassic(props);
+  }
+}
+
+function renderTextCardClassic(props: TextCardProps): string {
   const img = props.image_url ? publicImageUrl(props.image_url) : '';
   const pos = props.image_position || 'top';
   const align = props.align || 'left';
@@ -183,7 +307,16 @@ function renderTextCard(props: TextCardProps): string {
   </div>`;
 }
 
-function renderCta(props: CtaProps): string {
+// ★ 2026-06-25 (P1) cta treatment 디스패처. 미설정/미허용=classic(현행).
+function renderCta(props: CtaProps, treatment?: string): string {
+  switch (treatment) {
+    case 'bar': return renderCtaBar(props);
+    case 'ghost': return renderCtaGhost(props);
+    default: return renderCtaClassic(props);
+  }
+}
+
+function renderCtaClassic(props: CtaProps): string {
   const layout = props.layout || 'stack';
   const buttons = Array.isArray(props.buttons) ? props.buttons : [];
   if (buttons.length === 0) return '';
@@ -201,6 +334,64 @@ function renderCta(props: CtaProps): string {
     : 'flex-direction:column;align-items:var(--dm-section-justify,center)';
   return `<div class="dm-section dm-cta-section" data-section-type="cta" style="padding:var(--dm-sp-5)">
     <div style="display:flex;${flex};gap:var(--dm-sp-3)">${btnHtml}</div>
+  </div>`;
+}
+
+// 리드: 대형 헤드라인 + 규칙선 + 본문(에디토리얼, 이미지 비중 낮춤).
+function renderTextCardLead(props: TextCardProps): string {
+  const tag = props.tag ? escapeHtml(props.tag) : '';
+  const head = props.headline ? escapeHtml(props.headline) : '';
+  const body = props.body ? escapeHtml(props.body) : '';
+  const align = props.align || 'left';
+  return `<div class="dm-section dm-text-card" data-section-type="text_card" style="background:var(--dm-bg);padding:calc(var(--dm-sp-8) * var(--dm-section-pad-scale)) var(--dm-sp-5);text-align:${align}">
+    ${tag ? `<div style="font-size:var(--dm-fs-tiny);font-weight:700;letter-spacing:2px;color:var(--dm-primary);margin-bottom:var(--dm-sp-3)">${tag}</div>` : ''}
+    ${head ? `<div style="font-size:var(--dm-fs-h1);font-weight:var(--dm-fw-hero);letter-spacing:var(--dm-ls-hero);line-height:1.25;font-family:var(--dm-font-display);color:var(--dm-neutral-900)">${head}</div>` : ''}
+    <div style="height:2px;width:40px;background:var(--dm-primary);margin:var(--dm-sp-4) ${align === 'center' ? 'auto' : '0'}"></div>
+    ${body ? `<div style="font-size:var(--dm-fs-body);line-height:1.7;color:var(--dm-neutral-700);white-space:pre-wrap">${body}</div>` : ''}
+  </div>`;
+}
+
+// 프레임: 좌측 악센트 + 테두리 카드.
+function renderTextCardFramed(props: TextCardProps): string {
+  const tag = props.tag ? escapeHtml(props.tag) : '';
+  const head = props.headline ? escapeHtml(props.headline) : '';
+  const body = props.body ? escapeHtml(props.body) : '';
+  const img = props.image_url ? publicImageUrl(props.image_url) : '';
+  const align = props.align || 'left';
+  return `<div class="dm-section dm-text-card" data-section-type="text_card" style="background:var(--dm-bg);padding:var(--dm-sp-5)">
+    <div style="border:1px solid var(--dm-neutral-200);border-left:4px solid var(--dm-primary);border-radius:var(--dm-radius-lg);overflow:hidden;text-align:${align}">
+      ${img ? `<img src="${escapeHtml(img)}" alt="${head}" style="width:100%;display:block">` : ''}
+      <div style="padding:var(--dm-sp-5)">
+        ${tag ? `<div style="display:inline-block;background:var(--dm-primary-light);color:var(--dm-primary);padding:var(--dm-sp-1) var(--dm-sp-2);border-radius:var(--dm-radius-sm);font-size:var(--dm-fs-tiny);font-weight:700;margin-bottom:var(--dm-sp-2)">${tag}</div>` : ''}
+        ${head ? `<div style="font-size:var(--dm-fs-h2);font-weight:700;color:var(--dm-neutral-900);margin-bottom:var(--dm-sp-2);font-family:var(--dm-font-display)">${head}</div>` : ''}
+        ${body ? `<div style="font-size:var(--dm-fs-body);line-height:1.65;color:var(--dm-neutral-700);white-space:pre-wrap">${body}</div>` : ''}
+      </div>
+    </div>
+  </div>`;
+}
+
+// 바: 풀폭 악센트 바 + 화살표(첫 버튼 강조).
+function renderCtaBar(props: CtaProps): string {
+  const buttons = Array.isArray(props.buttons) ? props.buttons : [];
+  if (buttons.length === 0) return '';
+  const b = buttons[0];
+  const more = buttons.slice(1);
+  const moreHtml = more.map((x) => `<a href="${safeUrl(x.url)}" class="dm-cta dm-cta-secondary" target="_blank">${escapeHtml(x.label || '자세히 보기')}</a>`).join('');
+  return `<div class="dm-section dm-cta-section" data-section-type="cta" style="padding:0">
+    <a href="${safeUrl(b.url)}" target="_blank" style="display:flex;align-items:center;justify-content:space-between;gap:var(--dm-sp-3);background:var(--dm-primary);color:#fff;padding:var(--dm-sp-5);font-size:var(--dm-fs-h3);font-weight:700">
+      <span>${escapeHtml(b.label || '자세히 보기')}</span><span aria-hidden="true">→</span>
+    </a>
+    ${moreHtml ? `<div style="display:flex;flex-direction:column;gap:var(--dm-sp-2);padding:var(--dm-sp-4) var(--dm-sp-5)">${moreHtml}</div>` : ''}
+  </div>`;
+}
+
+// 고스트: 아웃라인 대형 라벨.
+function renderCtaGhost(props: CtaProps): string {
+  const buttons = Array.isArray(props.buttons) ? props.buttons : [];
+  if (buttons.length === 0) return '';
+  const btnHtml = buttons.map((b) => `<a href="${safeUrl(b.url)}" target="_blank" style="display:block;text-align:center;border:2px solid var(--dm-primary);color:var(--dm-primary);border-radius:var(--dm-radius-lg);padding:var(--dm-sp-4);font-size:var(--dm-fs-body);font-weight:700;letter-spacing:0.5px">${escapeHtml(b.label || '자세히 보기')}</a>`).join('');
+  return `<div class="dm-section dm-cta-section" data-section-type="cta" style="padding:calc(var(--dm-sp-6) * var(--dm-section-pad-scale)) var(--dm-sp-5)">
+    <div style="display:flex;flex-direction:column;gap:var(--dm-sp-3)">${btnHtml}</div>
   </div>`;
 }
 
@@ -304,14 +495,14 @@ function renderFooter(props: FooterProps, ctx: SectionRenderContext): string {
 
 // ────────────── 디스패처 ──────────────
 
-const RENDERERS: { [K in SectionType]: (props: any, ctx: SectionRenderContext) => string } = {
-  // 옛 11
+const RENDERERS: { [K in SectionType]: (props: any, ctx: SectionRenderContext, treatment?: string) => string } = {
+  // 기존 11
   header:     renderHeader,
-  hero:       (p) => renderHero(p),
-  coupon:     (p) => renderCoupon(p),
+  hero:       (p, _c, t) => renderHero(p, t),
+  coupon:     (p, _c, t) => renderCoupon(p, t),
   countdown:  (p) => renderCountdown(p),
-  text_card:  (p) => renderTextCard(p),
-  cta:        (p) => renderCta(p),
+  text_card:  (p, _c, t) => renderTextCard(p, t),
+  cta:        (p, _c, t) => renderCta(p, t),
   video:      (p) => renderVideo(p),
   store_info: (p) => renderStoreInfo(p),
   sns:        (p) => renderSns(p),
@@ -568,15 +759,19 @@ export function renderSection(section: Section, ctx: SectionRenderContext): stri
   const fn = RENDERERS[section.type];
   if (!fn) return '';
   const variant = section.style_variant || 'default';
+  // ★ 2026-06-25 (P1) 섹션 구도(treatment) 선택. 미설정/미허용=classic(현행). classic이면 data-treatment 미부착(byte 불변).
+  const hasImage = !!(section.props as any)?.image_url;
+  const treatment = selectTreatment(section.type, section.treatment, { typeScale: ctx.artDirection?.typeScale, hasImage });
   // 공통 정렬(section.align)을 단일 소스로 — header/hero/text_card가 자체 props.align을 읽으므로 우선 주입(미설정 시 각 섹션 기본 유지 = 하위호환)
   const alignAware = section.type === 'header' || section.type === 'hero' || section.type === 'text_card';
   const renderProps = (alignAware && section.align) ? { ...(section.props as any), align: section.align } : section.props;
-  const inner = fn(renderProps, ctx);
+  const inner = fn(renderProps, ctx, treatment);
   if (!inner) return '';
   const al = section.align || 'center';
   const just = al === 'left' ? 'flex-start' : al === 'right' ? 'flex-end' : 'center';
+  const treatmentAttr = treatment && treatment !== 'classic' ? ` data-treatment="${escapeHtml(treatment)}"` : '';
   const wrapStyle = `text-align:${al};--dm-section-justify:${just}${section.accent_color ? `;--dm-primary:${escapeHtml(section.accent_color)}` : ''}`;
-  return `<div class="dm-section-wrap" data-section-id="${escapeHtml(section.id)}" data-section-type="${escapeHtml(section.type)}" data-variant="${escapeHtml(variant)}" style="${wrapStyle}">${inner}</div>`;
+  return `<div class="dm-section-wrap" data-section-id="${escapeHtml(section.id)}" data-section-type="${escapeHtml(section.type)}" data-variant="${escapeHtml(variant)}"${treatmentAttr} style="${wrapStyle}">${inner}</div>`;
 }
 
 /** 섹션 배열 전체를 세로 스크롤로 렌더링 */

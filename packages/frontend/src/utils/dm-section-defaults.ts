@@ -259,6 +259,8 @@ export type Section = {
   order: number;
   visible: boolean;
   style_variant?: string;
+  /** 섹션 구도 변형(아트디렉션). 미설정=classic(기본). 허용값은 백엔드 dm-art-direction.TREATMENTS */
+  treatment?: string;
   props: SectionProps;
   ai_locked?: boolean;
   variable_fallbacks?: VariableBinding[];

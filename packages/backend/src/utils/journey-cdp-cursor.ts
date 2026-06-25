@@ -74,3 +74,25 @@ export function resolveCdpCursorEventName(triggerEvent: string): string | null {
     default: return null;
   }
 }
+
+export type JourneyTriggerClass = 'event_cursor' | 'event_special' | 'state';
+
+/**
+ * 여정 트리거 이벤트성/상태성 분류 — 단일 출처 (2026-06-25 gap 1).
+ *   - event_cursor: 진입 cdp_event + 치환 가치 properties 보유 → 커서 경로(누락 0·정확히 1회·properties 동봉).
+ *   - event_special: cart_abandon — 이벤트 기반이나 "이후 결제 없음" 파생 상태라 별도 properties 동봉(trigger-watcher).
+ *   - state: 휴면/생일/포인트/신규/자유 세그먼트 — 진입 이벤트 없음(properties 원천 부재, 설계상 정상).
+ * 새 이벤트성 트리거 추가 시 event_cursor면 resolveCdpCursorEventName도 함께 추가(verify 가드가 강제).
+ */
+export function classifyJourneyTrigger(triggerEvent: string): JourneyTriggerClass {
+  switch (triggerEvent) {
+    case 'cdp.purchase':
+    case 'cdp.reservation_created':
+    case 'custom_order_shipped':
+      return 'event_cursor';
+    case 'cdp.cart_abandon':
+      return 'event_special';
+    default:
+      return 'state';
+  }
+}

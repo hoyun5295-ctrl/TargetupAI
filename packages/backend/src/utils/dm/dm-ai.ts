@@ -628,9 +628,17 @@ export async function oneShotGenerate(opts: {
     sections.push(section);
   }
 
-  // ★ AI 비주얼 디렉터 — 캠페인별 색·무드·강조 컨셉을 설계해 섹션에 입힘(사진 없어도 완성형).
+  // ★ AI 비주얼 디렉터 — 캠페인별 색·무드·강조 + 섹션 구도(treatment)를 설계해 섹션에 입힘(사진 없어도 완성형).
   const concept = await designVisualConcept(spec, undefined, opts.companyId);
-  const directed = applyVisualDirection(sections, concept);
+  // 디렉터의 섹션 타입별 treatment 추천 → 섹션 id 맵(없으면 applyVisualDirection이 typeScale 기반 기본 적용).
+  const treatmentById: Record<string, string> = {};
+  if (concept.treatments) {
+    for (const s of sections) {
+      const t = concept.treatments[s.type];
+      if (t) treatmentById[s.id] = t;
+    }
+  }
+  const directed = applyVisualDirection(sections, concept, treatmentById);
   // 섹션 구성으로 레이아웃 모드 자동 결정 + 모드별 페이지 분할 (slides면 여러 장, scroll이면 한 장)
   const layoutMode = decideLayoutMode(directed);
   const pages = splitSectionsIntoPages(directed, layoutMode);
@@ -743,13 +751,20 @@ function mergeCopyIntoProps(currentProps: Record<string, unknown>, type: Section
 // ────────────── AI 비주얼 디렉터 (Phase 1) ──────────────
 
 const VISUAL_DIRECTOR_SYSTEM = `당신은 모바일 DM 아트 디렉터입니다.
-브랜드·목적·업종·톤을 보고 이 캠페인의 비주얼 컨셉(색 팔레트·무드·강조)을 설계합니다.
+브랜드·목적·업종·톤을 보고 이 캠페인의 비주얼 컨셉(색 팔레트·무드·강조 + 섹션 구도)을 설계합니다.
 제약:
 - 색은 HEX 6자리. 브랜드 색이 주어지면 그와 조화롭게, 없으면 업종 무드에 맞게.
-- 디자인 디렉션만. 상품명·가격·할인율·혜택 문구 등 사실은 만들지 않는다.
+- treatments는 섹션 "구도(레이아웃)"만 고른다. 각 섹션 타입은 아래 목록에서만 선택:
+  hero: classic|full_bleed|split|typographic|editorial_overlap
+  coupon: classic|ticket|spotlight
+  text_card: classic|lead|framed
+  cta: classic|bar|ghost
+  (캠페인 톤·맥락에 맞게 다양하게. 고급/에디토리얼이면 typographic·split·lead·ticket 등을 적극 활용.)
+- 디자인 디렉션만. 상품명·가격·할인율·쿠폰·무료·혜택 문구 등 사실/카피는 절대 만들지 않는다.
 - JSON만 출력:
 { "palette": { "primary":"#xxxxxx","accent":"#xxxxxx","surface":"#xxxxxx","on_surface":"#xxxxxx" },
-  "mood":"한두 단어","hero_treatment":"gradient|color_block|image","emphasis_sections":["hero"],"type_scale":"bold|editorial|minimal" }`;
+  "mood":"한두 단어","hero_treatment":"gradient|color_block|image","emphasis_sections":["hero"],"type_scale":"bold|editorial|minimal",
+  "treatments":{ "hero":"...","coupon":"...","text_card":"...","cta":"..." } }`;
 
 /**
  * AI 비주얼 디렉터 — 캠페인별 색·무드·강조 컨셉을 설계. 색·무드만 만든다(혜택/사실 생성 X — 영구 룰).

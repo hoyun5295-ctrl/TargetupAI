@@ -44,9 +44,12 @@
   --dm-font-primary: "Pretendard Variable", Pretendard, -apple-system, BlinkMacSystemFont, system-ui, Roboto, "Helvetica Neue", "Segoe UI", "Apple SD Gothic Neo", "Noto Sans KR", sans-serif;
   --dm-font-serif:   "Noto Serif KR", serif;
   --dm-font-mono:    "JetBrains Mono", Menlo, Consolas, monospace;
+  --dm-font-display: "Pretendard Variable", Pretendard, -apple-system, BlinkMacSystemFont, system-ui, "Apple SD Gothic Neo", "Noto Sans KR", sans-serif;
 
   /* Scale */
   --dm-fs-hero:  32px;
+  --dm-fw-hero:  800;
+  --dm-ls-hero:  -0.02em;
   --dm-fs-h1:    24px;
   --dm-fs-h2:    20px;
   --dm-fs-h3:    18px;
@@ -75,6 +78,7 @@
   --dm-sp-12: 48px;
   --dm-sp-16: 64px;
   --dm-sp-20: 80px;
+  --dm-section-pad-scale: 1;
 
   /* Radius */
   --dm-radius-none: 0;

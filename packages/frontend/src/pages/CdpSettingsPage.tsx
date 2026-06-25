@@ -289,6 +289,26 @@ const PROVIDER_META: Record<ProviderKey, { title: string; note: string }> = {
   custom: { title: '자체 호스팅 / 그 외 자사몰 연동', note: '직접 개발했거나 목록에 없는 자사몰은 webhook 방식으로 연동합니다. 환경이 특수해 막히면 고객센터로 문의 주세요.' },
 };
 
+// ★ 2026-06-25 (gap 3): GET /api/cdp/providers 응답 — 백엔드 registry 단일 출처
+type ProviderApiEntry = {
+  provider: string;
+  displayName: string;
+  connectMethod: 'oauth' | 'webhook' | 'polling' | 'none';
+  available: boolean;
+  status: 'available' | 'coming_soon';
+};
+// 백엔드 provider 식별자 → 프론트 ProviderKey(전용 모달 보유분). 네이버는 식별자가 naver_smart_store라 매핑.
+const BACKEND_ID_TO_KEY: Record<string, ProviderKey> = {
+  cafe24: 'cafe24',
+  naver_smart_store: 'naver',
+  godo: 'godo',
+  gabia: 'gabia',
+  custom: 'custom',
+};
+
+// 카드 렌더 단일 모델 — 백엔드 로드 성공 시 available/스켈레톤을 반영, 실패 시 하드코딩 5종 폴백(빈 화면 방지).
+type RenderProviderCard = { key: string; name: string; desc: string; full?: boolean; available: boolean; modalKey: ProviderKey | null };
+
 // ════════════════════════════════════════════════════════════════════
 // 메인 컴포넌트
 // ════════════════════════════════════════════════════════════════════
@@ -348,10 +368,38 @@ export default function CdpSettingsPage() {
   type CdpModalKey = null | 'analytics' | 'customers';
   const [activeModal, setActiveModal] = useState<CdpModalKey>(null);
   const [connectProvider, setConnectProvider] = useState<ProviderKey | null>(null);
+  // ★ 2026-06-25 (gap 3): 백엔드 provider 목록(동적). null = 미로드(폴백).
+  const [providerList, setProviderList] = useState<ProviderApiEntry[] | null>(null);
   const [customTab, setCustomTab] = useState<'connect' | 'web' | 'app' | 'verify'>('connect');
   const closeModal = () => { setActiveModal(null); setConnectProvider(null); setCustomTab('connect'); };
   const webhookProviderOpen = connectProvider === 'custom' || connectProvider === 'gabia';
   const [confirm, setConfirm] = useState<ConfirmState | null>(null);
+
+  // ★ 2026-06-25 (gap 3): 렌더 카드 = 백엔드 registry 단일 출처. 로드 성공 시 available/스켈레톤 반영, 실패 시 하드코딩 5종 폴백.
+  const providerCards = useMemo<RenderProviderCard[]>(() => {
+    const core: RenderProviderCard[] = PROVIDER_CARDS.map((p) => ({
+      key: p.key, name: p.name, desc: p.desc, full: p.full, available: true, modalKey: p.key,
+    }));
+    if (!providerList) return core;
+    // 백엔드 available 반영 (전용 모달 보유 5종)
+    const byKey = new Map<string, ProviderApiEntry>();
+    for (const e of providerList) byKey.set(BACKEND_ID_TO_KEY[e.provider] ?? e.provider, e);
+    const merged = core.map((c) => {
+      const e = byKey.get(c.key);
+      return e ? { ...c, available: e.status === 'available' } : c;
+    });
+    // 전용 모달 없는 항목(스켈레톤 5종) = coming_soon 비활성 카드로 노출
+    const extras: RenderProviderCard[] = providerList
+      .filter((e) => !BACKEND_ID_TO_KEY[e.provider])
+      .map((e) => ({
+        key: e.provider,
+        name: e.displayName,
+        desc: '곧 출시 예정 — 현재는 자체 호스팅(webhook) 방식으로 연동할 수 있습니다.',
+        available: e.status === 'available',
+        modalKey: null,
+      }));
+    return [...merged, ...extras];
+  }, [providerList]);
 
   const token = () => localStorage.getItem('token');
   const isAdmin = user?.userType === 'company_admin';
@@ -476,7 +524,7 @@ export default function CdpSettingsPage() {
       const headers = { Authorization: `Bearer ${token()}` };
       const [
         usageRes, diagRes, funnelRes, timelineRes, activeRes, chDistRes,
-        cafe24Res, naverRes, godoRes, customRes,
+        cafe24Res, naverRes, godoRes, customRes, providersRes,
       ] = await Promise.all([
         fetch('/api/cdp/usage', { headers }),
         fetch('/api/cdp/diagnostics', { headers }),
@@ -488,6 +536,7 @@ export default function CdpSettingsPage() {
         fetch('/api/naver-commerce/status', { headers }),
         fetch('/api/godo/status', { headers }),
         fetch('/api/cdp/custom/info', { headers }),
+        fetch('/api/cdp/providers', { headers }),
       ]);
       const usageData = await usageRes.json();
       const diagData = await diagRes.json();
@@ -499,6 +548,7 @@ export default function CdpSettingsPage() {
       const naverData = await naverRes.json();
       const godoData = await godoRes.json();
       const customData = await customRes.json();
+      const providersData = await providersRes.json();
 
       if (usageData.success) setUsage(usageData);
       if (diagData.success) setDiagnostics(diagData.diagnostics);
@@ -519,6 +569,9 @@ export default function CdpSettingsPage() {
           issuedAt: customData.issuedAt,
           companyId: customData.companyId,
         });
+      }
+      if (providersData.success && Array.isArray(providersData.providers)) {
+        setProviderList(providersData.providers);
       }
     } catch (e: any) {
       setError(e?.message || '네트워크 오류');
@@ -908,17 +961,22 @@ export default function CdpSettingsPage() {
         {/* 자사몰 선택 그리드 (가로 2열) — 카드 클릭 시 해당 업체 전용 연동 모달 */}
         {!cdpLocked && (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            {PROVIDER_CARDS.map((p) => {
-              const connected = p.key === 'cafe24' ? !!cafe24Status?.connected
-                : p.key === 'naver' ? !!naverStatus?.connected
-                : !!customInfo?.hasSecret;
-              const Icon = p.key === 'cafe24' ? Store : p.key === 'naver' ? ShoppingCart : p.key === 'custom' ? Database : Server;
-              const accent = p.key === 'cafe24' ? 'text-amber-300' : p.key === 'naver' ? 'text-emerald-300' : p.key === 'custom' ? 'text-violet-300' : 'text-indigo-300';
+            {providerCards.map((p) => {
+              const connected = p.modalKey === 'cafe24' ? !!cafe24Status?.connected
+                : p.modalKey === 'naver' ? !!naverStatus?.connected
+                : p.modalKey === 'godo' ? !!godoStatus?.connected
+                : (p.modalKey === 'custom' || p.modalKey === 'gabia') ? !!customInfo?.hasSecret
+                : false;
+              const Icon = p.modalKey === 'cafe24' ? Store : p.modalKey === 'naver' ? ShoppingCart : p.modalKey === 'custom' ? Database : Server;
+              const accent = p.modalKey === 'cafe24' ? 'text-amber-300' : p.modalKey === 'naver' ? 'text-emerald-300' : p.modalKey === 'custom' ? 'text-violet-300' : 'text-indigo-300';
+              const clickable = p.available && p.modalKey !== null;
               return (
                 <button
                   key={p.key}
-                  onClick={() => setConnectProvider(p.key)}
-                  className={`text-left p-4 rounded-xl border bg-white/5 border-white/10 hover:bg-white/10 hover:border-violet-400/40 transition-colors flex items-start gap-3 ${p.full ? 'md:col-span-2' : ''}`}
+                  type="button"
+                  disabled={!clickable}
+                  onClick={clickable ? () => setConnectProvider(p.modalKey as ProviderKey) : undefined}
+                  className={`text-left p-4 rounded-xl border bg-white/5 border-white/10 flex items-start gap-3 transition-colors ${p.full ? 'md:col-span-2' : ''} ${clickable ? 'hover:bg-white/10 hover:border-violet-400/40 cursor-pointer' : 'opacity-60 cursor-default'}`}
                 >
                   <div className="w-10 h-10 rounded-lg bg-white/10 flex items-center justify-center flex-shrink-0">
                     <Icon className={`w-5 h-5 ${accent}`} />
@@ -926,13 +984,15 @@ export default function CdpSettingsPage() {
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 flex-wrap">
                       <span className="text-sm font-semibold text-white">{p.name}</span>
-                      {connected
-                        ? <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-300 font-medium">연동됨</span>
-                        : <span className="text-[10px] px-1.5 py-0.5 rounded bg-white/10 text-white/50 font-medium">연동하기</span>}
+                      {!p.available
+                        ? <span className="text-[10px] px-1.5 py-0.5 rounded bg-white/10 text-white/40 font-medium">곧 출시</span>
+                        : connected
+                          ? <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-300 font-medium">연동됨</span>
+                          : <span className="text-[10px] px-1.5 py-0.5 rounded bg-white/10 text-white/50 font-medium">연동하기</span>}
                     </div>
                     <div className="text-[11px] text-white/55 leading-relaxed mt-0.5">{p.desc}</div>
                   </div>
-                  <Link2 className="w-4 h-4 text-white/30 flex-shrink-0 mt-1" />
+                  {clickable && <Link2 className="w-4 h-4 text-white/30 flex-shrink-0 mt-1" />}
                 </button>
               );
             })}

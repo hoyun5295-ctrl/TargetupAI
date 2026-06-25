@@ -24,6 +24,10 @@ import { query } from '../config/database';
 import { normalizePhone } from './normalize';
 // ★ D214+ (2026-05-24) Unified Customer Profile 정합 — link 변경 시 active_sources 재계산 fire-and-forget
 import { recomputeProfile } from './unified-customer-profile';
+// ★ 2026-06-25 (A1·A4) phone 자동 갱신 + identity 충돌 판정 순수 함수 + 검수 플래그 recorder
+import { decidePhoneUpdate } from './cdp-phone-sync';
+import { detectIdentityConflict } from './cdp-identity-conflict';
+import { recordIdentityReview } from './cdp-identity-review';
 
 // ═══════════════════════════════════════════════════════════
 // 타입
@@ -106,7 +110,7 @@ export async function identifyCustomer(
     const linkRow = existingLink.rows[0];
     if (linkRow.customer_id) {
       // 기존 연결 완료 link → last_seen 갱신 + customer 컬럼 변경 사항만 update
-      await syncCustomerFields(linkRow.customer_id, input, normalizedPhone, email);
+      await syncCustomerFields(companyId, linkRow.customer_id, input, normalizedPhone, email);
       await query(
         `UPDATE cdp_identity_links
          SET external_email = COALESCE($2, external_email),
@@ -210,7 +214,7 @@ export async function identifyCustomer(
     if (!wasCreated) wasMerged = true;
   } else {
     // 매칭된 기존 customer에 필드 sync
-    await syncCustomerFields(customerId, input, normalizedPhone, email);
+    await syncCustomerFields(companyId, customerId, input, normalizedPhone, email);
   }
 
   // ★ link INSERT (모든 경로 공통)
@@ -308,7 +312,20 @@ export async function ensureAnonymousLink(
 // 헬퍼 — customer 필드 sync (기존 customer에 자사몰 신규 정보 박음)
 // ═══════════════════════════════════════════════════════════
 
+/** 같은 회사에서 normalizedPhone을 보유한 활성 고객 id 1건(없으면 null). A1/A4 phone 충돌 판정 공용. */
+async function findPhoneHolderId(companyId: string, normalizedPhone: string | null): Promise<string | null> {
+  if (!normalizedPhone) return null;
+  const r = await query(
+    `SELECT id FROM customers
+     WHERE company_id = $1::uuid AND phone = $2 AND is_active = true
+     ORDER BY created_at ASC LIMIT 1`,
+    [companyId, normalizedPhone]
+  );
+  return r.rows.length > 0 ? r.rows[0].id : null;
+}
+
 async function syncCustomerFields(
+  companyId: string,
   customerId: string,
   input: IdentifyInput,
   normalizedPhone: string | null,
@@ -340,6 +357,28 @@ async function syncCustomerFields(
       input.smsOptIn ?? null,
     ]
   );
-  // phone 변경은 UNIQUE 제약 충돌 위험 — 호출부에서 별도 확인 필요. 여기서는 skip.
-  void normalizedPhone;
+
+  // ★ A1·A4 (2026-06-25): phone 자동 갱신 + 충돌(타 고객 점유 / email-phone 불일치) 검수 플래그.
+  //   - 번호 변경 회원이 이전 번호로 남아 발송 실패하던 문제(A1) 해소: 점유자 없으면 자동 갱신.
+  //   - 그 번호를 같은 회사 다른 활성 고객이 보유하면(A4 email매칭 ≠ phone보유자 포함) 자동변경 금지 + 플래그.
+  if (normalizedPhone) {
+    const cur = await query(`SELECT phone FROM customers WHERE id = $1::uuid`, [customerId]);
+    const currentPhone: string | null = cur.rows[0]?.phone ?? null;
+    if (normalizedPhone !== currentPhone) {
+      const holderId = await findPhoneHolderId(companyId, normalizedPhone);
+      const decision = decidePhoneUpdate({ currentPhone, incomingPhone: normalizedPhone, conflictHolderId: holderId, selfId: customerId });
+      if (decision === 'update') {
+        await query(`UPDATE customers SET phone = $2, updated_at = NOW() WHERE id = $1::uuid`, [customerId, normalizedPhone]);
+      } else if (decision === 'skip_conflict') {
+        const conflict = detectIdentityConflict({ chosenCustomerId: customerId, phoneHolderId: holderId });
+        console.warn(`[CDP Identity] phone 충돌 — customer=${customerId} 점유자=${holderId} (자동변경 skip + 검수 플래그)`);
+        await recordIdentityReview({
+          companyId,
+          customerId,
+          kind: conflict.kind ?? 'phone_conflict',
+          detail: { reason: 'phone_holder_conflict', incomingPhone: normalizedPhone, currentPhone, conflictHolderId: holderId, email },
+        });
+      }
+    }
+  }
 }

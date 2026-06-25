@@ -11,6 +11,8 @@
 import { inlineImage, publicImageUrl, youtubeEmbedUrl } from './dm-viewer-utils';
 import { renderSections, COUNTDOWN_SCRIPT, escapeHtml } from './dm-section-renderer';
 import { renderDmTokensCss, renderDmBaseCss } from './dm-tokens';
+// ★ 2026-06-25 (P1) 아트디렉션 — 뷰어 :root 변수 주입 + 섹션 ctx 동봉(신규 treatment에만 영향, classic 불변).
+import { normalizeArtDirection, artDirectionToCssVars } from './dm-art-direction';
 import { resolveSections } from './dm-variable-resolver';
 import type { Section } from './dm-section-registry';
 import type { DmBrandKit } from './dm-tokens';
@@ -325,6 +327,9 @@ function renderPagesHtml(
   const hasCountdown = allSections.some((s) => s.type === 'countdown');
   const totalPages = pages.length;
 
+  // ★ 2026-06-25 (P1) 중립 기본 아트디렉션(typeScale=bold). tone/AI 기반·영속화는 후속(Task 7).
+  //   classic 섹션은 이 변수를 소비하지 않으므로 레거시 출력 불변. 신규 treatment만 일관 토큰 사용.
+  const artDirection = normalizeArtDirection(null, '');
   const pagesHtml = pages.map((page, i) => {
     const secHtml = renderSections(page.sections, {
       brandKit,
@@ -332,6 +337,7 @@ function renderPagesHtml(
       trackApiBase,
       shortCode,
       isPreview: !!resolvedPages,
+      artDirection,
     });
     return `<section class="dm-page" data-page-idx="${i}" data-page-id="${escapeHtml(page.id)}">${secHtml}</section>`;
   }).join('');
@@ -382,6 +388,7 @@ html,body{height:100%;margin:0;overflow:hidden;touch-action:pan-y}
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/static/pretendard.css" onerror="this.remove()">
 <style>
 ${tokensCss}
+${artDirectionToCssVars(artDirection)}
 ${baseCss}
 .cd-unit{background:rgba(255,255,255,0.1);border-radius:var(--dm-radius-md);padding:var(--dm-sp-3) var(--dm-sp-4);min-width:64px}
 .cd-num{font-size:var(--dm-fs-h1);font-weight:900;font-family:var(--dm-font-mono);color:#fff}

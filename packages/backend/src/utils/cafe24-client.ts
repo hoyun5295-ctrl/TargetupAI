@@ -493,6 +493,8 @@ export const cafe24Adapter: IProviderAdapter = {
   provider: 'cafe24',
   displayName: '카페24',
   capabilities: cafe24Capabilities,
+  connectMethod: 'oauth',
+  available: true,
 
   buildAuthorizeUrl(mallId: string, state: string, scope?: string): string {
     return buildCafe24AuthorizeUrl(mallId, state, scope);

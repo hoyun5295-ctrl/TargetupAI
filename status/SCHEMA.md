@@ -1667,6 +1667,21 @@
 - INDEX: customer_id, occurred_at DESC WHERE customer_id IS NOT NULL
 - INDEX: company_id, created_at DESC (이벤트 로그 조회용)
 
+### cdp_identity_review (identity 충돌 검수 큐) — 2026-06-25 신규 (gap 2·4)
+
+자동 phone 변경/병합 위험 시 변경하지 않고 플래그만 적재(운영 검수 후 수동 병합). recorder `utils/cdp-identity-review.ts`가 적재, 테이블 미생성 시 안전 skip.
+
+| 컬럼 | 타입 | 비고 |
+|------|------|------|
+| id | uuid PK DEFAULT gen_random_uuid() | |
+| company_id | uuid NOT NULL | (FK 미부여 — 경량) |
+| customer_id | uuid NOT NULL | email로 선택된 고객(충돌 시 그대로 진행) |
+| kind | varchar(40) NOT NULL | 'phone_conflict' / 'merge_candidate' |
+| detail | jsonb NOT NULL DEFAULT '{}' | reason·incomingPhone·conflictHolderId 등 |
+| resolved | boolean NOT NULL DEFAULT false | 운영 검수 처리 여부 |
+| created_at | timestamptz NOT NULL DEFAULT NOW() | |
+- INDEX: idx_cdp_identity_review_company_unresolved (company_id, resolved, created_at DESC)
+
 ### cdp_webhook_deliveries (Webhook 신뢰성 추적) — D172 신규
 
 | 컬럼 | 타입 | 비고 |

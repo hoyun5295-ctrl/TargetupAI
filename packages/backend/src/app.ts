@@ -51,6 +51,8 @@ import cafe24Routes, { cafe24CallbackRouter } from './routes/cafe24';
 import naverCommerceRoutes, { naverCommerceCallbackRouter } from './routes/naver-commerce';
 // ★ 2026-06-18: 고도몰(NHN커머스) BYO-키 폴링 커넥터
 import godoRoutes from './routes/godo';
+// ★ 2026-06-25 (gap 7): CDP Provider 등록 단일 출처 — routes import 부수효과 의존 제거
+import { registerAllProviders } from './utils/register-providers';
 // ★ D178 (2026-05-19): 인바운드 AI 음성 응답 (Naver Clova STT/TTS + Opus 4.7)
 import voiceRoutes from './routes/voice';
 // ★ D180 (2026-05-19): Email 채널 (SendGrid Web API v3)
@@ -327,6 +329,9 @@ app.listen(PORT, () => {
   console.log(`🚀  http://localhost:${PORT}`);
   console.log('🚀 ================================');
   console.log('');
+
+  // ★ 2026-06-25 (gap 7): CDP Provider registry 부팅 등록 (cafe24·naver·custom·godo·gabia + 스켈레톤 5종)
+  registerAllProviders();
 
   // ★ D106: 로그 테이블 자동 생성 (당월+다음달 — 202604 미생성 사고 재발 방지)
   ensureMonthlyLogTables().catch(err => console.error('[QTmsg] 로그 테이블 자동 생성 실패:', err));
