@@ -610,7 +610,7 @@ dmRouter.post('/:id/test-send', async (req: any, res: any) => {
           phone,
           testCallback,  // 회사 기본 발신번호 (campaigns 테스트발송과 동일; 없으면 Agent fallback)
           body,
-          'L',         // LMS (본문 + URL 길이 고려)
+          'LMS',       // LMS (본문 + URL 링크) — ★ toQtmsgType는 풀네임을 받음. 옛 'L'은 MMS로 떨궈져 "이미지 필수" 실패.
           testId,
           subject,
           { companyId, billId: userId },

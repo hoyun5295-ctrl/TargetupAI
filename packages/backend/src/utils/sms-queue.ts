@@ -10,6 +10,7 @@ import { query } from '../config/database';
 import { SUCCESS_CODES, PENDING_CODES } from './sms-result-map';
 import { splitLiveAndLogTables, mergeCampaignCounts, type CampaignAggCounts } from './sms-table-split';
 import { splitLinesByMsgType } from './sms-line-split';
+import { toQtmsgType } from './qtmsg-type';
 
 export type { CampaignAggCounts } from './sms-table-split';
 
@@ -43,11 +44,9 @@ export const toKoreaTimeStr = (date: Date) => {
  * campaigns.ts 3곳, auto-campaign-worker 1곳, spam-test-queue 2곳, spam-filter 2곳에서
  * 인라인으로 반복되던 변환 로직을 한 곳으로 통합.
  */
-export function toQtmsgType(msgType: string): string {
-  if (msgType === 'SMS') return 'S';
-  if (msgType === 'LMS') return 'L';
-  return 'M';
-}
+// ★ 2026-06-25: 변환 로직은 순수 모듈 qtmsg-type.ts로 분리(테스트 + 안전 default 'L').
+//   기존 `import { toQtmsgType } from './sms-queue'` 호출부 호환 위해 재export.
+export { toQtmsgType };
 
 // ===== 라인그룹 테이블 조회 =====
 
