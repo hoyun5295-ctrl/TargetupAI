@@ -3,6 +3,8 @@ import * as XLSX from 'xlsx';
 import { query, mysqlQuery } from '../config/database';
 import { authenticate } from '../middlewares/auth';
 import { buildGenderFilter, buildGradeFilter, buildRegionFilter, getGenderVariants } from '../utils/normalize';
+// ★ 2026-06-25: 고객 전체 삭제 시 데이터 프로필 캐시 무효화(게이트 즉시 반영)
+import { clearCompanyDataProfileCache } from '../utils/company-data-profile';
 import { FIELD_MAP, getFieldByKey, getColumnFields, CATEGORY_LABELS, FIELD_DISPLAY_MAP, reverseDisplayValue, renderFieldValue } from '../utils/standard-field-map';
 import { DEFAULT_COSTS, redis, CACHE_TTL } from '../config/defaults';
 import { isValidCustomFieldKey } from '../utils/safe-field-name';
@@ -1541,6 +1543,9 @@ router.post('/delete-all', blockIfSyncActive, async (req: Request, res: Response
 
     // 고객 전체 삭제
     const deleteResult = await query('DELETE FROM customers WHERE company_id = $1', [deleteCompanyId]);
+
+    // ★ 2026-06-25: 고객 0건이 됐으므로 데이터 프로필 캐시 무효화 → 게이트 즉시 재표시
+    clearCompanyDataProfileCache(deleteCompanyId);
 
     // 감사 로그
     await query(

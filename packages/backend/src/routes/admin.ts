@@ -5,6 +5,8 @@ import { mysqlQuery, query } from '../config/database';
 import { authenticate, requireSuperAdmin } from '../middlewares/auth';
 import { ALL_SMS_TABLES, invalidateLineGroupCache, getCampaignSmsTables, smsCountAll, smsSelectAll, smsSelectPagedAll, smsAggAll, getTestSmsTables, kakaoCountWhere, kakaoSelectWhere, kakaoBatchAggByGroup } from '../utils/sms-queue';
 import { streamCampaignSmsCsv } from '../utils/campaign-sms-export';
+// ★ 2026-06-25: 업로더별 고객 삭제 시 해당 회사 데이터 프로필 캐시 무효화(게이트 즉시 반영)
+import { clearCompanyDataProfileCache } from '../utils/company-data-profile';
 import { DASHBOARD_CARD_POOL, validateCardIds, getRequiredFields, filterPoolByAvailableData, generateDynamicCards } from '../utils/dashboard-card-pool';
 import { detectEnabledFields } from '../utils/enabled-fields';
 import { SUCCESS_CODES_SQL, PENDING_CODES_SQL, getStatusLabel, getStatusType, getCarrierLabel, isSuccess, isPending, getSendTypeLabel, getCampaignChannelLabel, getQueueRowStatus } from '../utils/sms-result-map';
@@ -276,6 +278,9 @@ router.delete('/users/:id/customers', authenticate, requireSuperAdmin, async (re
       'DELETE FROM customers WHERE uploaded_by = $1',
       [id]
     );
+
+    // ★ 2026-06-25: 고객 수 변동 → 해당 회사 데이터 프로필 캐시 무효화(게이트 즉시 반영)
+    if (user.company_id) clearCompanyDataProfileCache(user.company_id);
 
     // 감사 로그
     await query(

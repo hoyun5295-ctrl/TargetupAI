@@ -96,7 +96,9 @@ const CONDITIONAL_THRESHOLD = 30; // 30~70% = 분기 변수, 미만 = 차단
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 const cache = new Map<string, { profile: CompanyDataProfile; expiresAt: number }>();
-const CACHE_TTL_MS = 60 * 60 * 1000; // 1시간
+// ★ 2026-06-25: 1시간 → 5분 단축. clearCompanyDataProfileCache 미호출/다중 pm2 프로세스로 캐시 무효화가
+//   안 닿아도 staleness 상한을 5분으로 제한(업로드 직후 "고객 없음" 오표시가 최대 1시간 가던 결함 안전망).
+const CACHE_TTL_MS = 5 * 60 * 1000; // 5분
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // 핵심 분석 함수

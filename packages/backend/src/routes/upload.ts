@@ -9,6 +9,8 @@ import { normalizeByFieldKey, normalizeRegion, normalizeDate, normalizeCustomFie
 import { CATEGORY_LABELS, FIELD_MAP, getColumnFields, getCustomFields, getFieldByKey, upsertCustomFieldDefinitions } from '../utils/standard-field-map';
 import { validateUploadMapping } from '../utils/upload-mapping-validator';
 import { createCustomerUpsertBuilder } from '../utils/customer-upsert';
+// ★ 2026-06-25: 고객 업로드 완료 시 회사 데이터 프로필 캐시 무효화(게이트 "고객 없음" 오표시 차단)
+import { clearCompanyDataProfileCache } from '../utils/company-data-profile';
 import { dropEmptyColumns, dropEmptyHeaderColumns, isFirstRowHeaderRow } from '../utils/excel-columns';
 import { registerBulkCompanyUserUnsubscribes } from '../utils/unsubscribe-helper';
 
@@ -803,6 +805,9 @@ async function processUploadInBackground(
       completedAt,
       message: `총 ${totalRows.toLocaleString()}건 중 신규 ${insertCount.toLocaleString()}건, 업데이트 ${duplicateCount.toLocaleString()}건${errorCount > 0 ? `, 오류 ${errorCount.toLocaleString()}건` : ''}`
     }), 'EX', CACHE_TTL.uploadProgress);
+
+    // ★ 2026-06-25: 고객 수/필드 채워짐이 바뀌었으므로 데이터 프로필 캐시 무효화 → 게이트·AI 프롬프트 즉시 반영
+    if (companyId) clearCompanyDataProfileCache(companyId);
 
     console.log(`[업로드 완료] fileId=${fileId}, 신규=${insertCount}, 업데이트=${duplicateCount}, 오류=${errorCount}`);
 
