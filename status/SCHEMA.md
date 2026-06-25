@@ -1215,6 +1215,12 @@
 | created_at | timestamptz |
 | updated_at | timestamptz |
 
+### system_alert_state (시스템 알림 쿨다운 영속 — 2026-06-25 실측 생성)
+| 컬럼 | 타입 |
+|------|------|
+| dedup_key | text PK — 예: agent-down:<agentId> / sync-stalled:<agentId> / queue-delay:<campaignId> |
+| last_sent_at | timestamptz NOT NULL DEFAULT now() |
+
 ### sync_logs (동기화 로그)
 | 컬럼 | 타입 |
 |------|------|

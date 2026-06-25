@@ -10,7 +10,8 @@
  *     미설정 시 발송하지 않고 로그만 남긴다 (기간계 안정성 우선 — throw 금지).
  *   - 발송 경로 = 검수 알림과 동일: getAuthSmsTable() 인증 라인 + bulkInsertSmsQueue LMS.
  *   - 같은 dedupKey는 쿨다운(기본 6시간) 안에 1회만 발송 — 주기 워커의 반복 발송 차단.
- *     (쿨다운은 프로세스 메모리 기준 — pm2 재시작 시 초기화되어 재알림될 수 있다. 의도된 동작.)
+ *     (★ 2026-06-25: 쿨다운 상태를 PG system_alert_state에 영속화 — pm2 재시작에도 유지.
+ *      DB 오류 시에만 프로세스 메모리 Map으로 폴백. 이전엔 메모리만이라 재시작마다 재알림 = 종일 스팸.)
  *   - 본문은 EUC-KR 안전 문자만 — sanitizeSmsText 통과 (auto-notify-message CT 재사용).
  *   - 운영자 대상 장애 통지라 야간에도 발송한다 (광고 아님).
  *
@@ -20,6 +21,8 @@
 
 import { getAuthSmsTable, bulkInsertSmsQueue } from './sms-queue';
 import { sanitizeSmsText } from './auto-notify-message';
+import { query } from '../config/database';
+import { isAlertOnCooldown } from './system-alert-cooldown';
 
 const DEFAULT_COOLDOWN_MS = 6 * 60 * 60 * 1000; // 6시간
 
@@ -28,6 +31,31 @@ const cooldownMap = new Map<string, number>();
 
 function log(...args: any[]) {
   console.log('[system-alert]', ...args);
+}
+
+// ★ 2026-06-25: 쿨다운 상태 PG 영속화 — pm2 재시작에도 12시간 쿨다운(하루 2번) 유지.
+//   DB 오류(테이블 미생성 등) 시 dbOk=false로 알려 호출부가 메모리 Map으로 폴백한다.
+async function readLastSentAt(dedupKey: string): Promise<{ lastSentAtMs: number | null; dbOk: boolean }> {
+  try {
+    const r = await query('SELECT last_sent_at FROM system_alert_state WHERE dedup_key = $1', [dedupKey]);
+    if (r.rows.length === 0) return { lastSentAtMs: null, dbOk: true };
+    return { lastSentAtMs: new Date(r.rows[0].last_sent_at).getTime(), dbOk: true };
+  } catch (err: any) {
+    console.error('[system-alert] 쿨다운 조회 실패(메모리 폴백):', err?.message || err);
+    return { lastSentAtMs: null, dbOk: false };
+  }
+}
+
+async function markSentNow(dedupKey: string): Promise<void> {
+  try {
+    await query(
+      `INSERT INTO system_alert_state (dedup_key, last_sent_at) VALUES ($1, now())
+       ON CONFLICT (dedup_key) DO UPDATE SET last_sent_at = now()`,
+      [dedupKey],
+    );
+  } catch (err: any) {
+    console.error('[system-alert] 쿨다운 기록 실패:', err?.message || err);
+  }
 }
 
 /** .env SYSTEM_ALERT_PHONES 파싱 — 유효한 휴대폰 번호만 반환 */
@@ -64,9 +92,14 @@ export async function sendSystemAlert(params: SystemAlertParams): Promise<number
     }
 
     const now = Date.now();
-    const expires = cooldownMap.get(params.dedupKey);
-    if (expires && expires > now) {
-      return 0; // 쿨다운 중 — 조용히 생략
+    const cooldownMs = params.cooldownMs ?? DEFAULT_COOLDOWN_MS;
+    // 쿨다운 판단 — PG 영속 우선, DB 오류 시 메모리 Map 폴백 (pm2 재시작에도 쿨다운 유지)
+    const { lastSentAtMs, dbOk } = await readLastSentAt(params.dedupKey);
+    if (dbOk) {
+      if (isAlertOnCooldown(lastSentAtMs, cooldownMs, now)) return 0;
+    } else {
+      const expires = cooldownMap.get(params.dedupKey);
+      if (expires && expires > now) return 0; // 쿨다운 중 — 조용히 생략
     }
 
     const body = [
@@ -92,7 +125,8 @@ export async function sendSystemAlert(params: SystemAlertParams): Promise<number
     ]);
 
     await bulkInsertSmsQueue([authTable], rows, true);
-    cooldownMap.set(params.dedupKey, now + (params.cooldownMs ?? DEFAULT_COOLDOWN_MS));
+    await markSentNow(params.dedupKey);                 // PG 영속 (재시작에도 유지)
+    cooldownMap.set(params.dedupKey, now + cooldownMs); // 메모리 보조 (DB 폴백 시 사용)
     log(`발송 ${rows.length}명 — ${params.dedupKey}: ${params.message.slice(0, 80)}`);
     return rows.length;
   } catch (err: any) {
