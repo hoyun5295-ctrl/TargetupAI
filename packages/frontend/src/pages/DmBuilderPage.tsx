@@ -22,6 +22,8 @@ import DmLeftPanel from '../components/dm/DmLeftPanel';
 import DmCanvas from '../components/dm/DmCanvas';
 import DmRightPanel from '../components/dm/DmRightPanel';
 import AiPromptModal from '../components/dm/modals/AiPromptModal';
+// 고객 데이터 없으면 AI 문안 생성 전 안내 (공용 게이트)
+import { useCustomerDataGate, CustomerDataRequiredBanner, CustomerDataRequiredModal } from '../components/CustomerDataGate';
 import AiImproveModal from '../components/dm/modals/AiImproveModal';
 import ValidationModal from '../components/dm/modals/ValidationModal';
 import VersionHistoryModal from '../components/dm/modals/VersionHistoryModal';
@@ -76,6 +78,8 @@ const QUICK_STARTS: Array<{ key: 'cart' | 'sale' | 'draw' | 'store' | 'survey' |
 
 export default function DmBuilderPage() {
   const navigate = useNavigate();
+  const customerGate = useCustomerDataGate(localStorage.getItem('token'));
+  const [showDataGate, setShowDataGate] = useState(false);
   const [mode, setMode] = useState<'list' | 'edit'>('list');
   const [list, setList] = useState<DmListItem[]>([]);
   const [listLoading, setListLoading] = useState(false);
@@ -188,6 +192,7 @@ export default function DmBuilderPage() {
   const save = useDmBuilderStore((s) => s.save);
 
   const handleAutoGenerate = useCallback(async (opts: { prompt?: string; scenario?: string }) => {
+    if (customerGate.isEmpty) { setShowDataGate(true); return; }
     if (generating) return;
     if (!opts.prompt && !opts.scenario) {
       setToast({ type: 'error', message: '만들 내용을 한 줄로 입력하거나 빠른 시작을 골라주세요.' });
@@ -236,7 +241,7 @@ export default function DmBuilderPage() {
       setGenerationStep(-1);
       setNaturalLanguage('');
     }
-  }, [generating, createNew, applyAiGenerated, save, setToast]);
+  }, [generating, createNew, applyAiGenerated, save, setToast, customerGate.isEmpty]);
 
   // ★ 2026-06-19: 완성 이미지 업로드 → 슬라이드 DM 자동 생성 (외주 완성 시안 대응 — 신규 섹션 타입 불요, slideshow 재사용)
   const handleCompletedImagesSelected = useCallback(async (files: FileList | null, mode: 'slides' | 'scroll' = 'scroll') => {
@@ -603,6 +608,7 @@ export default function DmBuilderPage() {
             <span style={{ fontSize: 14, fontWeight: 700, color: '#fff' }}>자연어 한 줄로 DM 자동 생성</span>
             <span style={{ fontSize: 10, padding: '2px 6px', background: 'rgba(217,70,239,0.3)', color: '#f5d0fe', borderRadius: 10, fontWeight: 700 }}>BETA</span>
           </div>
+          {customerGate.isEmpty && <CustomerDataRequiredBanner className="mb-3" />}
           <div style={{ display: 'flex', gap: 8 }}>
             <input
               type="text"
@@ -1066,6 +1072,9 @@ export default function DmBuilderPage() {
       </main>
 
       <ConfirmModal state={confirm} onClose={() => setConfirm(null)} />
+
+      {/* 고객 데이터 없음 — 생성 차단 안내 */}
+      <CustomerDataRequiredModal open={showDataGate} onClose={() => setShowDataGate(false)} />
 
       <CreditConfirmModal
         open={!!pendingGen}

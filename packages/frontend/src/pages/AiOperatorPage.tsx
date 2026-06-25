@@ -33,6 +33,8 @@ import { useAuthStore } from '../stores/authStore';
 // ★ D210+ (Harold 명시 2026-05-23): SUB_MODULE_CARDS constants/ 모듈 추출 — Walkthrough STEP 6 공통 사용 정합.
 import { SUB_MODULE_CARDS } from '../constants/ai-operator-modules';
 import ConfirmModal, { type ConfirmState } from '../components/ConfirmModal';
+// 고객 데이터 없으면 AI 문안 생성 전 안내 (공용 게이트)
+import { useCustomerDataGate, CustomerDataRequiredBanner, CustomerDataRequiredModal } from '../components/CustomerDataGate';
 
 // ============================================================
 // 타입 정의
@@ -240,6 +242,8 @@ function ResultCard({ accent, icon: Icon, label, headline, subtitle, description
 
 export default function AiOperatorPage() {
   const navigate = useNavigate();
+  const customerGate = useCustomerDataGate(localStorage.getItem('token'));
+  const [showDataGate, setShowDataGate] = useState(false);
   const { user } = useAuthStore();
   const companyName = (user as any)?.company?.name || '';
   // 종량제: AI 크레딧 잔여 (헤더 칩 — creditEnabled일 때만 표시)
@@ -325,6 +329,7 @@ export default function AiOperatorPage() {
   //   본 영역 = 옛 useEffect 폐기 정합 (handleSubmit 안 fetch 정합).
 
   const handleSubmit = async () => {
+    if (customerGate.isEmpty) { setShowDataGate(true); return; }
     if (objective.trim().length < 5) {
       setError('마케팅 목표를 한 줄로 입력해주세요 (5자 이상).');
       return;
@@ -631,6 +636,9 @@ export default function AiOperatorPage() {
         />
       )}
 
+      {/* 고객 데이터 없음 — 생성 차단 안내 */}
+      <CustomerDataRequiredModal open={showDataGate} onClose={() => setShowDataGate(false)} />
+
       {/* 메인 본문 */}
       <main className="relative max-w-5xl mx-auto px-6 py-10 md:py-14">
         {/* ============= Hero + 입력창 (항상 표시 — 결과 모드에서도 상단 유지) ============= */}
@@ -651,6 +659,7 @@ export default function AiOperatorPage() {
           </div>
         )}
 
+        {customerGate.isEmpty && !proposal && <CustomerDataRequiredBanner className="mb-4 max-w-3xl mx-auto" />}
         {/* 입력 영역 (항상 노출 — 결과 모드에서는 축소된 형태로) */}
         <div className={`mb-${proposal ? '10' : '6'} ${proposal ? 'mt-2' : ''}`}>
           <div className="relative group">

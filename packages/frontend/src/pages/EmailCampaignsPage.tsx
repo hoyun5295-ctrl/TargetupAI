@@ -7,6 +7,8 @@ import {
   Trash2, TrendingUp, Users, Wand2, X, Zap,
 } from 'lucide-react';
 import ConfirmModal, { ConfirmState } from '../components/ConfirmModal';
+// 고객 데이터 없으면 AI 문안 생성 전 안내 (공용 게이트)
+import { useCustomerDataGate, CustomerDataRequiredBanner, CustomerDataRequiredModal } from '../components/CustomerDataGate';
 import CreditConfirmModal from '../components/credit/CreditConfirmModal';
 import { useToast } from '../components/ToastProvider';
 // ★ D225+ (2026-05-28 Harold 명시): Email 발송 이력 모달 신설
@@ -147,6 +149,8 @@ const EMPTY_CAMPAIGN_FORM: Partial<EmailCampaign> = {
 
 export default function EmailCampaignsPage() {
   const navigate = useNavigate();
+  const customerGate = useCustomerDataGate(localStorage.getItem('token'));
+  const [showDataGate, setShowDataGate] = useState(false);
   const toast = useToast();
   const showToast = (message: string, type: 'success' | 'error' | 'info' | 'warning' = 'info') => {
     toast[type](message);
@@ -432,6 +436,7 @@ export default function EmailCampaignsPage() {
 
   // ──────────────── AI 원샷 생성 (1클릭 = AI 자동 흐름 + 편집 모드 진입) ────────────────
   const handleAiGenerate = async (opts: { scenario?: string; prompt?: string }) => {
+    if (customerGate.isEmpty) { setShowDataGate(true); return; }
     if (genStep !== null) return; // 중복 방지
     if (!opts.scenario && !opts.prompt?.trim()) {
       showToast('만들고 싶은 이메일을 한 줄로 입력하거나 빠른 시작을 골라주세요.', 'warning');
@@ -706,6 +711,7 @@ export default function EmailCampaignsPage() {
         {/* ★ 2026-06-13: AI 원샷 생성 — 자연어 입력 + 빠른 시작 7 카드 (SMTP 완료 시) */}
         {smtpConfigured && (
           <div className="bg-gradient-to-br from-fuchsia-600/20 via-purple-600/15 to-indigo-600/20 border border-fuchsia-400/30 rounded-2xl p-5">
+            {customerGate.isEmpty && <CustomerDataRequiredBanner className="mb-4" />}
             <div className="flex items-center gap-2 mb-3">
               <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-fuchsia-500 to-purple-500 flex items-center justify-center shadow-lg shadow-fuchsia-500/20">
                 <Sparkles className="w-5 h-5 text-white" />
@@ -1011,6 +1017,8 @@ export default function EmailCampaignsPage() {
 
       {/* ConfirmModal */}
       <ConfirmModal state={confirmState} onClose={() => setConfirmState(null)} />
+      {/* 고객 데이터 없음 — 생성 차단 안내 */}
+      <CustomerDataRequiredModal open={showDataGate} onClose={() => setShowDataGate(false)} />
     </div>
   );
 }

@@ -13,6 +13,8 @@ import axios from 'axios';
 import type { Section } from '../../../utils/dm-section-defaults';
 import { useDmBuilderStore } from '../../../stores/dmBuilderStore';
 import ModalBase, { ModalButton } from './ModalBase';
+// 고객 데이터 없으면 AI 문안 생성 전 차단 안내 (공용 게이트 — 모달만, 다크 오버레이)
+import { useCustomerDataGate, CustomerDataRequiredModal } from '../../CustomerDataGate';
 
 const api = axios.create({ baseURL: '/api' });
 api.interceptors.request.use((cfg) => {
@@ -39,6 +41,8 @@ export default function AiPromptModal({ open, onClose }: { open: boolean; onClos
   const [spec, setSpec] = useState<any | null>(null);
   const [sections, setSections] = useState<Section[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const customerGate = useCustomerDataGate(localStorage.getItem('token'));
+  const [showDataGate, setShowDataGate] = useState(false);
 
   const reset = () => {
     setPrompt('');
@@ -54,6 +58,7 @@ export default function AiPromptModal({ open, onClose }: { open: boolean; onClos
   };
 
   const handleGenerate = async () => {
+    if (customerGate.isEmpty) { setShowDataGate(true); return; }
     if (!prompt.trim()) {
       setError('프롬프트를 입력해주세요.');
       return;
@@ -113,6 +118,7 @@ export default function AiPromptModal({ open, onClose }: { open: boolean; onClos
   );
 
   return (
+    <>
     <ModalBase
       open={open}
       onClose={handleClose}
@@ -189,6 +195,8 @@ export default function AiPromptModal({ open, onClose }: { open: boolean; onClos
         <PreviewPanel spec={spec} sections={sections} />
       )}
     </ModalBase>
+    <CustomerDataRequiredModal open={showDataGate} onClose={() => setShowDataGate(false)} />
+    </>
   );
 }
 

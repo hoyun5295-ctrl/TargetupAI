@@ -7,6 +7,8 @@ import {
   TrendingUp, Upload, UserPlus, Users, Wand2, X,
 } from 'lucide-react';
 import ConfirmModal, { ConfirmState } from '../components/ConfirmModal';
+// 고객 데이터 없으면 AI 문안 생성 전 안내 (공용 게이트)
+import { useCustomerDataGate, CustomerDataRequiredBanner, CustomerDataRequiredModal } from '../components/CustomerDataGate';
 import { InAppMessagePreview } from '../components/InAppMessagePreview';
 import CreditConfirmModal from '../components/credit/CreditConfirmModal';
 import { useToast } from '../components/ToastProvider';
@@ -183,6 +185,8 @@ const EMPTY_FORM: Partial<MessageRow> = {
 
 export default function InAppMessagesPage() {
   const navigate = useNavigate();
+  const customerGate = useCustomerDataGate(localStorage.getItem('token'));
+  const [showDataGate, setShowDataGate] = useState(false);
   const toast = useToast();
   // ToastProvider show(type, message) 시그니처 호환 helper
   const showToast = (message: string, opts: { type: 'success' | 'error' | 'info' | 'warning' }) => {
@@ -310,6 +314,7 @@ export default function InAppMessagesPage() {
   // ────────────────────────────────────────────────────────────────
 
   const handleAIGenerate = async (objective: string, templateHint?: QuickStartScenario) => {
+    if (customerGate.isEmpty) { setShowDataGate(true); return; }
     if (!objective.trim() && !templateHint) {
       showToast('자연어 목표 또는 빠른 시작 카드 선택 필수', { type: 'warning' });
       return;
@@ -765,6 +770,7 @@ export default function InAppMessagesPage() {
           ))}
         </div>
 
+        {customerGate.isEmpty && <CustomerDataRequiredBanner className="mb-4" />}
         {/* ▼ 영역 5: 자연어 입력 + 빠른 시작 7 카드 */}
         <div className="bg-gradient-to-br from-fuchsia-500/10 via-purple-500/8 to-indigo-500/10 border border-fuchsia-400/30 rounded-xl p-5">
           <div className="flex items-center gap-2 mb-3">
@@ -1044,6 +1050,8 @@ export default function InAppMessagesPage() {
 
       {/* ConfirmModal */}
       <ConfirmModal state={confirmState} onClose={() => setConfirmState(null)} />
+      {/* 고객 데이터 없음 — 생성 차단 안내 */}
+      <CustomerDataRequiredModal open={showDataGate} onClose={() => setShowDataGate(false)} />
     </div>
   );
 }

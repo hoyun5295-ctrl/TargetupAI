@@ -24,6 +24,8 @@ import JourneyActivationConfirmModal from '../components/journey/JourneyActivati
 import JourneyPauseLogsModal from '../components/journey/JourneyPauseLogsModal';
 // 저장 여정 문안(본문·제목) 수정 — 초안·일시정지만(구조·일정 변경은 새 여정)
 import JourneyMessageEditModal from '../components/journey/JourneyMessageEditModal';
+// 고객 데이터 없으면 AI 문안 생성 전 안내 (공용 게이트)
+import { useCustomerDataGate, CustomerDataRequiredBanner, CustomerDataRequiredModal } from '../components/CustomerDataGate';
 import JourneyStepNotifyToggle from '../components/journey/JourneyStepNotifyToggle';
 import AlimtalkChannelPanel, { type AlimtalkSenderProfile, type AlimtalkTemplate, type AlimtalkChannelState } from '../components/alimtalk/AlimtalkChannelPanel';
 import InfoAlertJourneyBuilder, { type InfoAlertBuildResult } from '../components/journey/InfoAlertJourneyBuilder';
@@ -440,6 +442,8 @@ export default function JourneysPage() {
   const [previewSamples, setPreviewSamples] = useState<PreviewSample[]>([]);
 
   const token = () => localStorage.getItem('token');
+  const customerGate = useCustomerDataGate(token());
+  const [showDataGate, setShowDataGate] = useState(false);
 
   const loadAll = async () => {
     setLoading(true);
@@ -708,6 +712,7 @@ export default function JourneysPage() {
 
   // ════════ One-shot AI 생성 ════════
   const handleAIGenerate = async (templateHint?: TemplateCode) => {
+    if (customerGate.isEmpty) { setShowDataGate(true); return; }
     if (!templateHint && objective.trim().length < 3) {
       toast.warning('여정 목표를 자연어로 입력하거나 빠른 시작 카드를 선택해주세요.');
       return;
@@ -1164,6 +1169,7 @@ export default function JourneysPage() {
               />
             ) : (
             <>
+            {customerGate.isEmpty && <CustomerDataRequiredBanner className="mb-4 md:mb-6" />}
             {/* 자연어 입력 */}
             <div className="bg-gradient-to-br from-fuchsia-500/10 via-purple-500/10 to-indigo-500/10 border border-fuchsia-500/30 rounded-xl p-4 md:p-6 mb-4 md:mb-6">
               <div className="flex items-center gap-2 mb-3">
@@ -2535,6 +2541,9 @@ export default function JourneysPage() {
           </div>
         )}
       </div>
+
+      {/* 고객 데이터 없음 — 생성 차단 안내 */}
+      <CustomerDataRequiredModal open={showDataGate} onClose={() => setShowDataGate(false)} />
 
       {/* AI 다듬기 modal */}
       {refining && (
