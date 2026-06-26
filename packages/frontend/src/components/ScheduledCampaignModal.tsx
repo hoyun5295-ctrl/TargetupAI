@@ -140,6 +140,13 @@ export default function ScheduledCampaignModal({
                           📞 회신번호: {selectedScheduled.callback_number}
                         </div>
                       )}
+                      {/* ★ 2026-06-26 라프레리 신고: 발송 문안 표시 (캠페인명만 보이고 문안 안 보이던 문제) */}
+                      {selectedScheduled.message_content && (
+                        <div className="mt-2 text-xs text-gray-700 whitespace-pre-wrap bg-white border border-gray-200 rounded p-2 max-h-40 overflow-auto leading-relaxed">
+                          <div className="text-[11px] text-gray-400 mb-1">문안</div>
+                          {selectedScheduled.message_content}
+                        </div>
+                      )}
                       {/* ★ B7: 공용 컴포넌트 MmsImagePreview 사용 */}
                       {(() => {
                         let mmsImages = selectedScheduled.mms_image_paths;

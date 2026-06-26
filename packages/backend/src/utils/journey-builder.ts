@@ -94,14 +94,18 @@ export interface CreateJourneyInput {
   reentryCooldownDays?: number | null;
 }
 
-const PLACEHOLDER_MARKERS = ['[', ']'];
+// ★ 2026-06-26 라프레리 신고 fix: 옛 ['[', ']'].every()는 대괄호가 있기만 하면 무조건 차단 →
+//   "[송파가락점]" 같은 정상 텍스트까지 막아 활성화가 안 됐다(사용자가 대괄호까지 지워야 시작 가능).
+//   실제 미편집 placeholder([... 직접/작성해/수정해/입력해 ...] / [URL ...])만 차단하도록 교정.
+//   email-ai.ts hasUneditedPlaceholder 패턴과 동일 철학.
+const PLACEHOLDER_PATTERN = /\[[^\[\]\n]{0,80}(직접|작성해|수정해|입력해|URL)[^\[\]\n]{0,80}\]/;
 
 // 여정 step 최대 지연(시간) = 365일. 생성·AI생성·편집 전 경로 공통(상한 불일치 정정 #9).
 const MAX_STEP_DELAY_HOURS = 8760;
 
 export function hasUneditedPlaceholder(message: string | null | undefined): boolean {
   if (!message) return true;
-  return PLACEHOLDER_MARKERS.every((m) => message.includes(m));
+  return PLACEHOLDER_PATTERN.test(message);
 }
 
 export interface CompanyContext {

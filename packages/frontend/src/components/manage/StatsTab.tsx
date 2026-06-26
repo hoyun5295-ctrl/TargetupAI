@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { manageStatsApi, manageUsersApi } from '../../api/client';
 import { useLegacyToast } from '../ToastProvider';
-import { formatDateTime } from '../../utils/formatDate';
+import { formatDateTime, formatCampaignMessageForDisplay } from '../../utils/formatDate';
 
 export default function StatsTab() {
   const [view, setView] = useState<'daily' | 'monthly'>('daily');
@@ -21,6 +21,8 @@ export default function StatsTab() {
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailInfo, setDetailInfo] = useState<{ date: string } | null>(null);
   const [testDetailPage, setTestDetailPage] = useState(1);
+  // ★ 2026-06-26 라프레리 신고: 캠페인별 발송 문안 전체 보기
+  const [msgDetail, setMsgDetail] = useState<{ name: string; content: string } | null>(null);
 
   const perPage = 10;
 
@@ -298,6 +300,7 @@ export default function StatsTab() {
                           <th className="px-3 py-2 text-right font-medium text-gray-600">발송</th>
                           <th className="px-3 py-2 text-right font-medium text-gray-600">성공</th>
                           <th className="px-3 py-2 text-right font-medium text-gray-600">실패</th>
+                          <th className="px-3 py-2 text-left font-medium text-gray-600">메시지내용</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y">
@@ -313,6 +316,18 @@ export default function StatsTab() {
                             <td className="px-3 py-2 text-right">{formatNum(c.sent_count)}</td>
                             <td className="px-3 py-2 text-right text-green-600">{formatNum(c.success_count)}</td>
                             <td className="px-3 py-2 text-right text-red-600">{formatNum(c.fail_count)}</td>
+                            <td className="px-3 py-2 text-left max-w-[220px]">
+                              {c.message_content ? (() => {
+                                const full = formatCampaignMessageForDisplay(c);
+                                return (
+                                  <span className="block truncate text-xs text-gray-600 cursor-pointer hover:text-blue-600"
+                                    title="클릭하여 전체 메시지 보기"
+                                    onClick={() => setMsgDetail({ name: c.campaign_name, content: full })}>
+                                    {full.slice(0, 40)}{full.length > 40 ? '…' : ''}
+                                  </span>
+                                );
+                              })() : <span className="text-gray-300">-</span>}
+                            </td>
                           </tr>
                         ))}
                       </tbody>
@@ -389,6 +404,19 @@ export default function StatsTab() {
                 )}
               </div>
             ) : null}
+          </div>
+        </div>
+      )}
+
+      {/* 메시지내용 전체 보기 모달 */}
+      {msgDetail && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40" onClick={() => setMsgDetail(null)}>
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg mx-4 max-h-[80vh] overflow-auto" onClick={(e) => e.stopPropagation()}>
+            <div className="px-5 py-4 border-b flex justify-between items-center sticky top-0 bg-white">
+              <h4 className="text-sm font-bold text-gray-900 truncate pr-2">{msgDetail.name}</h4>
+              <button onClick={() => setMsgDetail(null)} className="text-gray-400 hover:text-gray-600 text-lg leading-none">✕</button>
+            </div>
+            <div className="p-5 whitespace-pre-wrap text-sm text-gray-700 font-mono leading-relaxed">{msgDetail.content}</div>
           </div>
         </div>
       )}

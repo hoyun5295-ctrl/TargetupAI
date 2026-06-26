@@ -453,7 +453,10 @@ export function applyCustomerConditions(
   params: any[],
 ): string | null {
   if (!conditions || conditions.length === 0) return null;
-  const allowedFields = ['grade', 'region', 'age', 'purchase_count', 'total_purchase_amount', 'sms_opt_in'];
+  // ★ 2026-06-26: store_name(매장명)/store_code(매장코드) 추가 — 여정 자연어 타겟에서
+  //   "매장명이 송파가락점인 회원" 같은 매장 세그먼트가 무시되고 전체 발송되던 #1 fix.
+  //   customers.store_name varchar(100) / store_code varchar(50) (SCHEMA.md 검증).
+  const allowedFields = ['grade', 'region', 'age', 'purchase_count', 'total_purchase_amount', 'sms_opt_in', 'store_name', 'store_code'];
   const allowedOps = ['==', '!=', '>=', '<=', '>', '<', 'in', 'not_in', 'is_null', 'not_null'];
   const clauses: string[] = [];
 

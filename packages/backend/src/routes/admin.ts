@@ -13,7 +13,7 @@ import { SUCCESS_CODES_SQL, PENDING_CODES_SQL, getStatusLabel, getStatusType, ge
 import { DEFAULT_COSTS } from '../config/defaults';
 import { validateSmsTables } from '../utils/sms-table-validator';
 // ★ D145 P0: 예약 캠페인 자동 정리 (모든 발송 관련 라우트 정합성)
-import { cleanupScheduledCampaigns } from '../utils/campaign-lifecycle';
+import { cleanupScheduledCampaigns, cancelCampaign } from '../utils/campaign-lifecycle';
 import { getUserUnsubscribes, deleteUserUnsubscribes, exportUserUnsubscribes, CAMPAIGN_OPT080_SELECT_EXPR, CAMPAIGN_OPT080_LEFT_JOIN } from '../utils/unsubscribe-helper';
 import { buildDateRangeFilter, aggregateSmsCountsByCampaign, aggregateSmsChannelSplitByCampaign, aggregateSmsSendTimesByCampaign, getCampaignResultCounts, STAT_DATE_EXPR, STAT_STARTED_GUARD } from '../utils/stats-aggregation';
 import { normalizePhone } from '../utils/normalize-phone';
@@ -921,33 +921,38 @@ router.post('/campaigns/:id/cancel', authenticate, requireSuperAdmin, async (req
   }
   
   try {
-    // 예약 상태인지 확인
-    const check = await query('SELECT status, scheduled_at FROM campaigns WHERE id = $1', [id]);
-    
+    // 캠페인 + 회사 확인 (슈퍼관리자는 cross-company라 company_id를 직접 조회)
+    const check = await query('SELECT company_id, status, campaign_name FROM campaigns WHERE id = $1', [id]);
+
     if (check.rows.length === 0) {
       return res.status(404).json({ error: '캠페인을 찾을 수 없습니다.' });
     }
-    
+
     if (check.rows[0].status !== 'scheduled') {
       return res.status(400).json({ error: '예약 상태인 캠페인만 취소할 수 있습니다.' });
     }
-    
-    // 취소 처리
-    const result = await query(`
-      UPDATE campaigns 
-      SET status = 'cancelled',
-          cancelled_by = $1,
-          cancelled_by_type = 'super_admin',
-          cancel_reason = $2,
-          cancelled_at = NOW(),
-          updated_at = NOW()
-      WHERE id = $3
-      RETURNING id, campaign_name
-    `, [adminId, reason.trim(), id]);
-    
-    res.json({ 
+
+    // ★ 2026-06-26: 슈퍼관리자 긴급취소도 사용자 취소와 동일 CT(cancelCampaign) 사용.
+    //   기존엔 PG status만 'cancelled'로 바꾸고 MySQL 발송 큐를 즉시 안 지워, 발송 직전 취소 시
+    //   안전망 워커(1분 주기)가 못 돌면 그대로 실발송될 수 있었다(0611 에이치피오 패턴).
+    //   cancelCampaign = 큐 즉시 DELETE + 잔존0 검증 후에만 'cancelled' 확정 + 선불 환불.
+    //   skipTimeCheck=true: 발송 직전 긴급취소도 큐를 비워 실발송을 막는다.
+    const result = await cancelCampaign(id, check.rows[0].company_id, {
+      reason: reason.trim(),
+      cancelledBy: adminId,
+      cancelledByType: 'super_admin',
+      skipTimeCheck: true,
+    });
+
+    if (!result.success) {
+      return res.status(400).json({ error: result.error || '예약 취소에 실패했습니다.' });
+    }
+
+    res.json({
       message: '예약이 취소되었습니다.',
-      campaign: result.rows[0]
+      campaign: { id, campaign_name: check.rows[0].campaign_name },
+      cancelledCount: result.cancelledCount,
+      refundedAmount: result.refundedAmount,
     });
   } catch (error) {
     console.error('예약 취소 실패:', error);

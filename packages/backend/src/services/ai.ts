@@ -364,7 +364,7 @@ function parsePersonalizationDirective(
 // ============================================================
 
 // 한국 시간 기준 현재 월 달력 생성
-function getKoreanCalendar(): string {
+export function getKoreanCalendar(): string {
   const now = new Date();
   const koreaTime = new Date(now.toLocaleString('en-US', { timeZone: 'Asia/Seoul' }));
   const year = koreaTime.getFullYear();
@@ -2643,6 +2643,17 @@ function stripRejectNumberPatterns(text: string): string {
   return out.replace(/\n{3,}/g, '\n\n').trim();
 }
 
+// ★ 2026-06-26 라프레리 신고 fix: 원본 메시지 하단의 무료수신거부 080 footer를 그대로 추출.
+//   다듬기 후처리가 stripRejectNumberPatterns로 080을 떼고 ensureAdPrefix로 (광고)만 복원해
+//   하단 080이 사라지던 문제 → 원본 footer를 각 안에 재부착하기 위해 추출(기재된 그대로 보존).
+function extractOriginalRejectFooter(text: string): string {
+  const m =
+    text.match(/무료\s?수신\s?거부[\s:·]*0?80[-\s]?\d{3,4}[-\s]?\d{4}\s*$/) ||
+    text.match(/무료거부\s?\d{4,}\s*$/) ||
+    text.match(/수신\s?거부[\s:·]*0?80[-\s]?\d{3,4}[-\s]?\d{4}\s*$/);
+  return m ? `\n\n${m[0].trim()}` : '';
+}
+
 function ensureAdPrefix(text: string, hasAd: boolean): string {
   const hasInText = /\(\s*광고\s*\)/.test(text);
   if (hasAd) {
@@ -2718,7 +2729,11 @@ function validateAndNormalizeRefinedCandidates(
   const originalVars = extractVariables(originalMessage);
   const hasAd = /\(\s*광고\s*\)/.test(originalMessage);
   const out: RefineCandidate[] = [];
-  void rejectNumber; // 미사용 — stripRejectNumberPatterns는 일반 패턴으로 검출. 향후 회사별 reject_number 정확 매칭 시 활용.
+  // ★ 2026-06-26 라프레리 신고 fix: 다듬은 안 하단에 무료수신거부 080이 누락되던 문제.
+  //   원본 footer를 그대로 추출(없으면 회사 rejectNumber 폴백)해 각 안 하단에 재부착.
+  const origRejectFooter = extractOriginalRejectFooter(originalMessage);
+  const rejectFooterToRestore = origRejectFooter
+    || ((hasAd && rejectNumber) ? `\n\n무료수신거부 ${rejectNumber}` : '');
   // ★ D152+ Harold님 PM2 진단: dropout 단계별 카운트 — 어느 필터에서 제외되는지 정확히 파악
   // ★ D224+ (2026-05-27) 남지현 신고 fix: notEnriched 분기 영구 폐기 — similar/infoLoss 분기로 중복 cover + 105% 임계값 영구 catch 사고 차단.
   const dropCounts = { tooShort: 0, tooLong: 0, infoLoss: 0, similar: 0 };
@@ -2744,6 +2759,11 @@ function validateAndNormalizeRefinedCandidates(
     const candVars = extractVariables(text);
     const missing = originalVars.filter((v) => !candVars.includes(v));
     text = appendMissingVariables(text, missing);
+
+    // (a-3) ★ 무료수신거부 080 footer 재부착 — 원본에 있었으면 하단에 다시 붙인다(누락 fix)
+    if (rejectFooterToRestore && !/무료\s?수신\s?거부|무료거부|수신\s?거부/.test(text)) {
+      text = text.replace(/\n+$/, '') + rejectFooterToRestore;
+    }
 
     text = text.trim();
     const bytes = computeKsxBytes(text);

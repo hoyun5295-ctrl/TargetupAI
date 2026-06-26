@@ -594,7 +594,10 @@ export const useDmBuilderStore = create<DmBuilderState>((set, get) => ({
       const next = list.slice();
       const [moved] = next.splice(fromIdx, 1);
       next.splice(toIdx, 0, moved);
-      return next;
+      // splice로 만든 새 배열 순서를 order 필드에 즉시 반영한다.
+      // 이렇게 하지 않으면 updateCurrentPageSections 안의 normalizeOrder가
+      // 옛 order 기준으로 재정렬해 이동을 그대로 되돌린다.
+      return next.map((sec, i) => ({ ...sec, order: i }));
     })));
     scheduleAutosave(() => { if (get().dmId) void get().save({ silent: true }); });
   },

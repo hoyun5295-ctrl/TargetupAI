@@ -14,7 +14,7 @@
  *   - (광고)+080+KISA 제목 = 시스템 자동 합성 (직접 작성 X)
  */
 
-import { callAIWithFallback } from '../services/ai';
+import { callAIWithFallback, getKoreanCalendar } from '../services/ai';
 import { buildMemoryPromptContext } from './company-memory';
 // ★ D225+ (2026-05-28 Harold 명시): Brand Voice Learning — 회사별 LMS 대표 문안 5건 + 가이드라인 자동 주입.
 import { buildSystemPromptWithBrandVoice } from './brand-voice-prompt';
@@ -191,6 +191,9 @@ export async function generateJourneyPackage(input: JourneyAIGenerateInput): Pro
 - 시즌 키워드: ${season.keywords.join(', ')}
 - 이 시즌의 자연스러운 단어/감성/이벤트를 메시지에 녹여내세요.
 
+${getKoreanCalendar()}
+⚠️ 날짜에 요일을 표기할 때(예: "7월 30일(목)") 반드시 위 달력의 요일을 그대로 사용하세요. 직접 요일을 계산하지 마세요. 위 달력에 없는 월의 날짜는 요일을 괄호로 표기하지 마세요 (날짜만 표기).
+
 ${memoryContext}
 
 [설계 원칙]
@@ -203,7 +206,18 @@ ${memoryContext}
    - cdp.reservation_created — 예약 follow-up
    - custom (위 외 자유 — 정기 발송 / 신상품 알림 / VIP 감사 등)
 
-2. step 개수: 2~5개 (목표 + 시계열에 맞춰 자동 결정)
+1-2. ★ 타겟 세그먼트 추출 (매우 중요 — 절대 누락 금지)
+   사용자가 "어떤 고객에게" 보낼지 조건을 말하면(예: "매장명이 송파가락점인 회원", "VIP 등급만", "서울 지역", "3회 이상 구매") 반드시 triggerFilters.customer_conditions 배열로 담는다.
+   - 형식: { "field": "허용필드", "op": "==|!=|>=|<=|>|<|in|not_in", "value": 값 }
+   - 허용 field (이 목록 외 절대 사용 금지): store_name(매장명), store_code(매장코드), grade(등급), region(지역), age(나이), purchase_count(구매횟수), total_purchase_amount(총구매액), sms_opt_in(수신동의)
+   - 여러 조건이면 logic을 "AND" 또는 "OR"로 명시.
+   - 예: "매장명이 송파가락점인 회원에게" -> "customer_conditions": [{ "field": "store_name", "op": "==", "value": "송파가락점" }], "logic": "AND"
+   ✗ 사용자가 세그먼트를 말했는데 customer_conditions를 비우면 전체 고객에게 발송되는 중대한 사고다 — 명시된 조건은 반드시 담는다.
+   ✓ 세그먼트 조건이 없으면(전체 대상) customer_conditions는 빈 배열로 둔다.
+
+2. step 개수: 기본 2~5개 (목표 + 시계열에 맞춰 자동 결정).
+   ★ 단발성 발송 의무 룰: 사용자가 한 번만 보내려는 의도를 명시하면(예: "한번만", "1회만", "한 번", "딱 한 번", "한 차례") 반드시 step 1개만 생성한다. 시계열 시리즈로 늘리지 말 것 — 사용자가 지정한 발송 횟수를 절대 무시하지 않는다.
+   ★ 단발성·단순 일률 발송의 본문은 Liquid 문법({{ }} / {% %})을 쓰지 말고 %고객명% 같은 단순 변수만 사용한다 (마케팅 담당자가 직접 편집하기 쉽도록). 등급별/조건 분기 등 고급 1:1 개인화를 명시한 경우에만 Liquid를 사용한다.
 3. delay_hours: 0(즉시) / 24(1일) / 72(3일) / 168(7일) / 336(14일) / 720(30일) 자연 단위
 4. channel: 'lms' default (광고 표기 + 무료거부 자동 합성 시 90바이트 SMS 한계 초과)
 5. isAd: 마케팅성은 true default (정보 안내성만 false)
@@ -466,7 +480,7 @@ VIP 회원님만을 위해 준비한 이번 봄 특별 안내,
   "name": "여정 이름 (한국어, 30자 안)",
   "templateCode": "onboarding|repeat|dormant|cart|birthday|reservation|custom",
   "triggerEvent": "customer.created 등",
-  "triggerFilters": { "recent_hours": 24 },
+  "triggerFilters": { "recent_hours": 24, "customer_conditions": [], "logic": "AND" },
   "steps": [
     {
       "stepOrder": 1,

@@ -2416,7 +2416,8 @@ export default function JourneysPage() {
                                 <span className="text-white/85">{s.isAd ? (s.subject.startsWith('(광고)') ? s.subject : `(광고) ${s.subject}`) : s.subject}</span>
                               </div>
                             )}
-                            {sampleCustomer ? mergeVarsPlain(preview, sampleCustomer, sampleCustomerFields || undefined) : preview}
+                            {/* ★ 2026-06-26 라프레리 신고 fix: Liquid({{ }}) 미렌더로 원문 노출 → renderLiquid 먼저 적용 후 %변수% 머지 */}
+                            {sampleCustomer ? mergeVarsPlain(renderLiquid(preview, { customer: flattenCustomerForLiquid(sampleCustomerFields || {}) }).rendered, sampleCustomer, sampleCustomerFields || undefined) : preview}
                           </div>
                         ) : (
                           <div className="space-y-1">
