@@ -412,13 +412,50 @@ export default function StatsTab() {
 
       {/* 메시지내용 전체 보기 모달 */}
       {msgDetail && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40" onClick={() => setMsgDetail(null)}>
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg mx-4 max-h-[80vh] overflow-auto" onClick={(e) => e.stopPropagation()}>
-            <div className="px-5 py-4 border-b flex justify-between items-center sticky top-0 bg-white">
-              <h4 className="text-sm font-bold text-gray-900 truncate pr-2">{msgDetail.name}</h4>
-              <button onClick={() => setMsgDetail(null)} className="text-gray-400 hover:text-gray-600 text-lg leading-none">✕</button>
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 animate-[fadeIn_0.15s_ease-out]" onClick={() => setMsgDetail(null)}>
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-xl max-h-[82vh] flex flex-col overflow-hidden animate-[zoomIn_0.2s_ease-out]" onClick={(e) => e.stopPropagation()}>
+            {/* 헤더 */}
+            <div className="px-5 py-4 bg-gradient-to-r from-blue-50 to-indigo-50 border-b border-gray-100 flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <div className="flex items-center gap-1.5 text-[11px] font-semibold text-indigo-500 uppercase tracking-wide">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-3.5 h-3.5"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" /></svg>
+                  메시지 내용
+                </div>
+                <h4 className="text-sm font-bold text-gray-900 truncate mt-0.5">{msgDetail.name}</h4>
+              </div>
+              <button onClick={() => setMsgDetail(null)} className="shrink-0 w-7 h-7 flex items-center justify-center rounded-full text-gray-400 hover:text-gray-700 hover:bg-white/70 transition-colors text-lg leading-none">✕</button>
             </div>
-            <div className="p-5 whitespace-pre-wrap text-sm text-gray-700 font-mono leading-relaxed">{msgDetail.content}</div>
+            {/* 본문 */}
+            <div className="p-5 overflow-auto">
+              <div className="rounded-xl border border-gray-200 bg-gray-50 p-4 text-sm text-gray-800 leading-relaxed whitespace-pre-wrap break-words select-text">{msgDetail.content}</div>
+            </div>
+            {/* 푸터 — 글자 수 + 복사 */}
+            <div className="px-5 py-3 border-t border-gray-100 bg-white flex items-center justify-between gap-3">
+              <span className="text-[11px] text-gray-400">{msgDetail.content.length}자</span>
+              <div className="flex items-center gap-2">
+                <button onClick={() => setMsgDetail(null)} className="px-3 py-1.5 text-xs font-medium text-gray-500 hover:text-gray-700 rounded-lg hover:bg-gray-100 transition-colors">닫기</button>
+                <button
+                  onClick={async () => {
+                    const text = msgDetail.content;
+                    try {
+                      await navigator.clipboard.writeText(text);
+                      setToast({ msg: '메시지를 복사했습니다', type: 'success' });
+                    } catch {
+                      const ta = document.createElement('textarea');
+                      ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
+                      document.body.appendChild(ta); ta.select();
+                      try { document.execCommand('copy'); setToast({ msg: '메시지를 복사했습니다', type: 'success' }); }
+                      catch { setToast({ msg: '복사 실패 — 본문을 직접 선택해 복사해주세요', type: 'error' }); }
+                      document.body.removeChild(ta);
+                    }
+                  }}
+                  className="px-3.5 py-1.5 text-xs font-semibold text-white bg-indigo-500 hover:bg-indigo-600 rounded-lg shadow-sm transition-colors inline-flex items-center gap-1.5"
+                >
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-3.5 h-3.5"><rect x="9" y="9" width="13" height="13" rx="2" /><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" /></svg>
+                  복사
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       )}
