@@ -185,19 +185,26 @@ export default function UsersTab() {
 
   const statusBadge = (status: string) => {
     const colors: Record<string, string> = {
-      active: 'bg-green-100 text-green-700',
-      inactive: 'bg-gray-100 text-gray-600',
-      suspended: 'bg-red-100 text-red-700',
+      active: 'bg-emerald-100 text-emerald-700',
+      inactive: 'bg-slate-100 text-slate-600',
+      suspended: 'bg-rose-100 text-rose-700',
     };
+    const dot: Record<string, string> = { active: 'bg-emerald-500', inactive: 'bg-slate-400', suspended: 'bg-rose-500' };
     const labels: Record<string, string> = { active: '활성', inactive: '비활성', suspended: '정지' };
     return (
-      <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${colors[status] || 'bg-gray-100 text-gray-600'}`}>
+      <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-xs font-medium ${colors[status] || 'bg-slate-100 text-slate-600'}`}>
+        <span className={`w-1.5 h-1.5 rounded-full ${dot[status] || 'bg-slate-400'}`} />
         {labels[status] || status}
       </span>
     );
   };
 
-  if (loading) return <div className="p-8 text-center text-gray-500">로딩 중...</div>;
+  if (loading) return (
+    <div className="bg-white rounded-2xl border border-slate-200 shadow-sm flex flex-col items-center justify-center gap-3 py-16 text-slate-400">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-6 h-6 animate-spin"><path d="M21 12a9 9 0 1 1-6.219-8.56" /></svg>
+      <span className="text-sm">불러오는 중…</span>
+    </div>
+  );
 
   return (
     <>
@@ -209,76 +216,88 @@ export default function UsersTab() {
         onConfirm={modal.onConfirm}
       />
 
-      <div className="bg-white rounded-lg shadow">
+      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
         {/* 헤더 */}
-        <div className="px-6 py-4 border-b flex justify-between items-center">
-          <h2 className="text-lg font-semibold">사용자 관리</h2>
-          <button onClick={openAdd} className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition">
-            + 사용자 추가
+        <div className="px-6 py-5 border-b border-slate-100 flex justify-between items-center gap-3">
+          <div className="flex items-center gap-3">
+            <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-indigo-50 text-indigo-600">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-5 h-5"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2" /><circle cx="12" cy="7" r="4" /></svg>
+            </span>
+            <div>
+              <h2 className="text-lg font-bold text-slate-900 tracking-tight">사용자 관리</h2>
+              <p className="text-xs text-slate-400 mt-0.5">계정 추가·권한·분류 코드 관리</p>
+            </div>
+          </div>
+          <button onClick={openAdd} className="inline-flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 text-white px-4 py-2 rounded-lg text-sm font-semibold shadow-sm shadow-indigo-600/20 transition">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4"><path d="M12 5v14" /><path d="M5 12h14" /></svg>
+            사용자 추가
           </button>
         </div>
 
         {/* 검색 */}
-        <div className="px-6 py-3 bg-gray-50 border-b flex items-center gap-4">
-          <input
-            type="text" value={search} onChange={(e) => { setSearch(e.target.value); setPage(1); }}
-            placeholder="🔍 아이디, 이름, 부서로 검색..."
-            className="flex-1 max-w-xs px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none"
-          />
-          <span className="text-sm text-gray-500">총 {filteredUsers.length}명</span>
+        <div className="px-6 py-4 border-b border-slate-100 flex items-center gap-4">
+          <div className="relative flex-1 max-w-xs">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none"><circle cx="11" cy="11" r="8" /><path d="m21 21-4.3-4.3" /></svg>
+            <input
+              type="text" value={search} onChange={(e) => { setSearch(e.target.value); setPage(1); }}
+              placeholder="아이디, 이름, 부서로 검색"
+              className="w-full pl-9 pr-3 py-2 border border-slate-200 rounded-lg text-sm text-slate-700 placeholder-slate-400 focus:border-indigo-400 focus:ring-4 focus:ring-indigo-500/10 outline-none transition"
+            />
+          </div>
+          <span className="text-sm text-slate-400">총 <span className="font-semibold text-slate-700 tabular-nums">{filteredUsers.length}</span>명</span>
         </div>
 
         {/* 테이블 */}
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
-            <thead className="bg-gray-50 border-b">
-              <tr>
-                <th className="px-4 py-3 text-left font-medium text-gray-600">아이디</th>
-                <th className="px-4 py-3 text-left font-medium text-gray-600">이름</th>
-                <th className="px-4 py-3 text-left font-medium text-gray-600">부서</th>
-                <th className="px-4 py-3 text-left font-medium text-gray-600">분류코드</th>
-                <th className="px-4 py-3 text-left font-medium text-gray-600">연락처</th>
-                <th className="px-4 py-3 text-left font-medium text-gray-600">상태</th>
-                <th className="px-4 py-3 text-left font-medium text-gray-600">최근 로그인</th>
-                <th className="px-4 py-3 text-center font-medium text-gray-600">관리</th>
+            <thead>
+              <tr className="border-b border-slate-100">
+                <th className="px-6 py-3 text-left text-[11px] font-semibold uppercase tracking-wider text-slate-400">아이디</th>
+                <th className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wider text-slate-400">이름</th>
+                <th className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wider text-slate-400">부서</th>
+                <th className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wider text-slate-400">분류코드</th>
+                <th className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wider text-slate-400">연락처</th>
+                <th className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wider text-slate-400">상태</th>
+                <th className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wider text-slate-400">최근 로그인</th>
+                <th className="px-6 py-3 text-right text-[11px] font-semibold uppercase tracking-wider text-slate-400">관리</th>
               </tr>
             </thead>
-            <tbody className="divide-y">
+            <tbody className="divide-y divide-slate-50">
               {pagedUsers.length === 0 ? (
-                <tr><td colSpan={8} className="px-4 py-12 text-center text-gray-500">
+                <tr><td colSpan={8} className="px-4 py-16 text-center text-sm text-slate-400">
                   {users.length === 0 ? '등록된 사용자가 없습니다.' : '검색 결과가 없습니다.'}
                 </td></tr>
               ) : pagedUsers.map(u => (
-                <tr key={u.id} className="hover:bg-gray-50">
-                  <td className="px-4 py-3 font-mono text-sm">{u.login_id}</td>
-                  <td className="px-4 py-3 font-medium">{u.name}</td>
-                  <td className="px-4 py-3 text-gray-600">{u.department || '-'}</td>
-                  <td className="px-4 py-3">
+                <tr key={u.id} className="hover:bg-slate-50/70 transition">
+                  <td className="px-6 py-3.5 font-mono text-xs text-slate-600">{u.login_id}</td>
+                  <td className="px-4 py-3.5 font-semibold text-slate-700">{u.name}</td>
+                  <td className="px-4 py-3.5 text-slate-500">{u.department || '-'}</td>
+                  <td className="px-4 py-3.5">
                     {u.store_codes ? (
                       <div className="flex flex-wrap gap-1">
                         {parseStoreCodes(u.store_codes).map(code => (
-                          <span key={code} className="px-1.5 py-0.5 bg-blue-50 text-blue-700 text-xs rounded-md font-medium">
+                          <span key={code} className="px-2 py-0.5 bg-indigo-50 text-indigo-600 text-xs rounded-md font-medium ring-1 ring-indigo-100">
                             {code}
                           </span>
                         ))}
                       </div>
                     ) : (
-                      <span className="text-xs text-gray-400">전체</span>
+                      <span className="text-xs text-slate-400">전체</span>
                     )}
                   </td>
-                  <td className="px-4 py-3 text-gray-600">{u.phone || u.email || '-'}</td>
-                  <td className="px-4 py-3">{statusBadge(u.status)}</td>
-                  <td className="px-4 py-3 text-gray-500 text-xs">
+                  <td className="px-4 py-3.5 text-slate-500">{u.phone || u.email || '-'}</td>
+                  <td className="px-4 py-3.5">{statusBadge(u.status)}</td>
+                  <td className="px-4 py-3.5 text-slate-400 text-xs tabular-nums">
                   {formatDateTime(u.last_login_at)}
                   </td>
-                  <td className="px-4 py-3 text-center">
-                    <div className="flex justify-center gap-1">
+                  <td className="px-6 py-3.5">
+                    <div className="flex justify-end gap-1.5">
                       <button onClick={() => openEdit(u)}
-                        className="px-2 py-1 text-xs bg-blue-50 text-blue-600 hover:bg-blue-100 rounded transition">수정</button>
+                        className="px-2.5 py-1 text-xs font-medium bg-slate-50 text-slate-600 hover:bg-indigo-50 hover:text-indigo-600 rounded-lg transition">수정</button>
                       <button onClick={() => handleResetPassword(u)}
-                        className="px-2 py-1 text-xs bg-amber-50 text-amber-600 hover:bg-amber-100 rounded transition">비번초기화</button>
+                        className="px-2.5 py-1 text-xs font-medium bg-slate-50 text-slate-600 hover:bg-amber-50 hover:text-amber-600 rounded-lg transition">비번 초기화</button>
                       <button onClick={() => handleDelete(u)}
-                        className="px-2 py-1 text-xs bg-red-50 text-red-600 hover:bg-red-100 rounded transition">삭제</button>
+                        className="px-2.5 py-1 text-xs font-medium bg-slate-50 text-slate-600 hover:bg-rose-50 hover:text-rose-600 rounded-lg transition">삭제</button>
                     </div>
                   </td>
                 </tr>
@@ -289,27 +308,27 @@ export default function UsersTab() {
 
         {/* 페이징 */}
         {totalPages > 1 && (
-          <div className="px-6 py-3 border-t flex items-center justify-between">
-            <span className="text-sm text-gray-500">
-              {startIdx}~{endIdx} / {filteredUsers.length}명
+          <div className="px-6 py-4 border-t border-slate-100 flex items-center justify-between">
+            <span className="text-xs text-slate-400 tabular-nums">
+              {startIdx}–{endIdx} / 전체 {filteredUsers.length}명
             </span>
             <div className="flex items-center gap-1">
               <button onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1}
-                className="px-3 py-1.5 text-sm rounded-lg border bg-white hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed transition">
+                className="px-3 py-1.5 text-sm rounded-lg border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed transition">
                 이전
               </button>
               {getPageNumbers().map((p, i) =>
                 p === '...' ? (
-                  <span key={`dots-${i}`} className="px-2 text-gray-400">…</span>
+                  <span key={`dots-${i}`} className="px-2 text-slate-300">…</span>
                 ) : (
                   <button key={p} onClick={() => setPage(p as number)}
-                    className={`px-3 py-1.5 text-sm rounded-lg transition ${p === page ? 'bg-blue-600 text-white' : 'bg-white border text-gray-600 hover:bg-gray-50'}`}>
+                    className={`min-w-[2.25rem] px-3 py-1.5 text-sm font-medium rounded-lg transition tabular-nums ${p === page ? 'bg-indigo-600 text-white shadow-sm shadow-indigo-600/20' : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-50'}`}>
                     {p}
                   </button>
                 )
               )}
               <button onClick={() => setPage(p => Math.min(totalPages, p + 1))} disabled={page === totalPages}
-                className="px-3 py-1.5 text-sm rounded-lg border bg-white hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed transition">
+                className="px-3 py-1.5 text-sm rounded-lg border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed transition">
                 다음
               </button>
             </div>
@@ -321,52 +340,60 @@ export default function UsersTab() {
       {showModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 animate-[fadeIn_0.15s_ease-out]">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md mx-4 max-h-[85vh] overflow-hidden animate-[zoomIn_0.2s_ease-out]">
-            <div className="px-6 pt-6 pb-4 bg-gradient-to-r from-blue-50 to-indigo-50">
-              <h3 className="text-lg font-bold text-gray-900">
-                {editing ? '✏️ 사용자 수정' : '👤 사용자 추가'}
-              </h3>
+            <div className="px-6 py-5 bg-gradient-to-r from-indigo-50 via-white to-white border-b border-slate-100 flex items-center gap-3">
+              <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-indigo-600 text-white shadow-sm shadow-indigo-600/20">
+                {editing ? (
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-5 h-5"><path d="M12 20h9" /><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z" /></svg>
+                ) : (
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-5 h-5"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M19 8v6" /><path d="M22 11h-6" /></svg>
+                )}
+              </span>
+              <div>
+                <p className="text-[11px] font-semibold uppercase tracking-wide text-indigo-500">{editing ? '계정 수정' : '계정 추가'}</p>
+                <h3 className="text-lg font-bold text-slate-900 tracking-tight">{editing ? '사용자 수정' : '새 사용자'}</h3>
+              </div>
             </div>
             <div className="px-6 py-4 space-y-3 overflow-y-auto max-h-[60vh]">
               {!editing && (
                 <>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">아이디 *</label>
+                    <label className="block text-xs font-semibold text-slate-600 mb-1.5">아이디 *</label>
                     <input value={form.loginId} onChange={(e) => setForm(f => ({ ...f, loginId: e.target.value }))}
-                      className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
+                      className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm text-slate-700 focus:border-indigo-400 focus:ring-4 focus:ring-indigo-500/10 outline-none transition" />
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">비밀번호 *</label>
+                    <label className="block text-xs font-semibold text-slate-600 mb-1.5">비밀번호 *</label>
                     <input type="password" value={form.password} onChange={(e) => setForm(f => ({ ...f, password: e.target.value }))}
-                      className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
+                      className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm text-slate-700 focus:border-indigo-400 focus:ring-4 focus:ring-indigo-500/10 outline-none transition" />
                   </div>
                 </>
               )}
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">이름 *</label>
+                <label className="block text-xs font-semibold text-slate-600 mb-1.5">이름 *</label>
                 <input value={form.name} onChange={(e) => setForm(f => ({ ...f, name: e.target.value }))}
-                  className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
+                  className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm text-slate-700 focus:border-indigo-400 focus:ring-4 focus:ring-indigo-500/10 outline-none transition" />
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">이메일</label>
+                  <label className="block text-xs font-semibold text-slate-600 mb-1.5">이메일</label>
                   <input value={form.email} onChange={(e) => setForm(f => ({ ...f, email: e.target.value }))}
-                    className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
+                    className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm text-slate-700 focus:border-indigo-400 focus:ring-4 focus:ring-indigo-500/10 outline-none transition" />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">연락처</label>
+                  <label className="block text-xs font-semibold text-slate-600 mb-1.5">연락처</label>
                   <input value={form.phone} onChange={(e) => setForm(f => ({ ...f, phone: e.target.value }))}
-                    className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
+                    className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm text-slate-700 focus:border-indigo-400 focus:ring-4 focus:ring-indigo-500/10 outline-none transition" />
                 </div>
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">부서</label>
+                <label className="block text-xs font-semibold text-slate-600 mb-1.5">부서</label>
                 <input value={form.department} onChange={(e) => setForm(f => ({ ...f, department: e.target.value }))}
-                  className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
+                  className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm text-slate-700 focus:border-indigo-400 focus:ring-4 focus:ring-indigo-500/10 outline-none transition" />
               </div>
 
               {/* 담당 분류 코드 — 태그 버튼 선택 */}
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">담당 분류 코드</label>
+                <label className="block text-xs font-semibold text-slate-600 mb-1.5">담당 분류 코드</label>
                 {storeCodeList.length === 0 ? (
                   <p className="text-xs text-gray-400 py-2">분류 코드가 등록되지 않았습니다 (전체 접근)</p>
                 ) : (
@@ -379,10 +406,10 @@ export default function UsersTab() {
                             key={code}
                             type="button"
                             onClick={() => toggleStoreCode(code)}
-                            className={`px-3 py-1.5 rounded-full text-sm font-medium border transition-all ${
+                            className={`px-3 py-1.5 rounded-lg text-sm font-medium border transition-all ${
                               isChecked
-                                ? 'bg-blue-100 text-blue-800 border-blue-300 shadow-sm'
-                                : 'bg-gray-50 text-gray-600 border-gray-200 hover:bg-gray-100'
+                                ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm shadow-indigo-600/20'
+                                : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
                             }`}
                           >
                             {code}
@@ -390,10 +417,10 @@ export default function UsersTab() {
                         );
                       })}
                     </div>
-                    <p className="text-xs text-gray-500 mt-2">
+                    <p className="text-xs text-slate-400 mt-2">
                       비워두면 전체 고객 조회 가능
                       {form.storeCodes.length > 0 && (
-                        <span className="ml-2 text-blue-600 font-medium">
+                        <span className="ml-2 text-indigo-600 font-medium">
                           선택: {form.storeCodes.join(', ')}
                         </span>
                       )}
@@ -402,12 +429,12 @@ export default function UsersTab() {
                 )}
               </div>
             </div>
-            <div className="px-6 pb-6 flex gap-3">
+            <div className="px-6 py-4 flex gap-3 border-t border-slate-100">
               <button onClick={() => setShowModal(false)}
-                className="flex-1 py-2.5 rounded-lg text-sm font-medium border border-gray-300 text-gray-700 hover:bg-gray-50 transition">취소</button>
+                className="flex-1 py-2.5 rounded-lg text-sm font-semibold border border-slate-200 text-slate-600 hover:bg-slate-50 transition">취소</button>
               <button onClick={handleSave}
-                className="flex-1 py-2.5 rounded-lg text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 transition">
-                {editing ? '수정' : '추가'}
+                className="flex-1 py-2.5 rounded-lg text-sm font-semibold text-white bg-indigo-600 hover:bg-indigo-700 shadow-sm shadow-indigo-600/20 transition">
+                {editing ? '수정 저장' : '추가'}
               </button>
             </div>
           </div>

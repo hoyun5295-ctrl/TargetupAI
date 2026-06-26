@@ -393,14 +393,19 @@ export default function CallbacksTab() {
 
   const statusLabel = (status: string) => {
     switch (status) {
-      case 'pending': return { text: '승인 대기', color: 'bg-yellow-100 text-yellow-700' };
-      case 'approved': return { text: '승인 완료', color: 'bg-green-100 text-green-700' };
-      case 'rejected': return { text: '반려', color: 'bg-red-100 text-red-700' };
-      default: return { text: status, color: 'bg-gray-100 text-gray-700' };
+      case 'pending': return { text: '승인 대기', color: 'bg-amber-100 text-amber-700' };
+      case 'approved': return { text: '승인 완료', color: 'bg-emerald-100 text-emerald-700' };
+      case 'rejected': return { text: '반려', color: 'bg-rose-100 text-rose-700' };
+      default: return { text: status, color: 'bg-slate-100 text-slate-600' };
     }
   };
 
-  if (loading) return <div className="p-8 text-center text-gray-500">로딩 중...</div>;
+  if (loading) return (
+    <div className="bg-white rounded-2xl border border-slate-200 shadow-sm flex flex-col items-center justify-center gap-3 py-16 text-slate-400">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-6 h-6 animate-spin"><path d="M21 12a9 9 0 1 1-6.219-8.56" /></svg>
+      <span className="text-sm">불러오는 중…</span>
+    </div>
+  );
 
   return (
     <>
@@ -412,61 +417,61 @@ export default function CallbacksTab() {
       {/* 서브탭 */}
       <div className="flex gap-2 mb-4">
         <button onClick={() => setSubTab('numbers')}
-          className={`px-5 py-2.5 rounded-lg text-sm font-medium transition ${subTab === 'numbers' ? 'bg-blue-600 text-white shadow' : 'bg-white text-gray-600 border border-gray-300 hover:bg-gray-50'}`}>
+          className={`px-5 py-2.5 rounded-lg text-sm font-medium transition ${subTab === 'numbers' ? 'bg-indigo-600 text-white shadow-sm shadow-indigo-600/20' : 'bg-white text-slate-600 border border-slate-200 hover:bg-gray-50'}`}>
           등록 발신번호
         </button>
         <button onClick={() => setSubTab('register')}
-          className={`px-5 py-2.5 rounded-lg text-sm font-medium transition ${subTab === 'register' ? 'bg-blue-600 text-white shadow' : 'bg-white text-gray-600 border border-gray-300 hover:bg-gray-50'}`}>
+          className={`px-5 py-2.5 rounded-lg text-sm font-medium transition ${subTab === 'register' ? 'bg-indigo-600 text-white shadow-sm shadow-indigo-600/20' : 'bg-white text-slate-600 border border-slate-200 hover:bg-gray-50'}`}>
           발신번호 등록 신청
         </button>
       </div>
 
       {/* === 등록 발신번호 탭 === */}
       {subTab === 'numbers' && (
-        <div className="bg-white rounded-lg shadow">
+        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm">
           <div className="px-6 py-4 border-b flex justify-between items-center">
             <h2 className="text-lg font-semibold">등록 발신번호</h2>
             {allowSelfRegister && (
               <button onClick={() => setShowAdd(true)}
-                className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition">+ 발신번호 등록</button>
+                className="bg-indigo-600 hover:bg-indigo-700 shadow-sm shadow-indigo-600/20 text-white px-4 py-2 rounded-lg text-sm font-medium transition">+ 발신번호 등록</button>
             )}
           </div>
 
-          <div className="px-6 py-3 bg-gray-50 border-b flex items-center gap-4">
+          <div className="px-6 py-3 bg-slate-50 border-b flex items-center gap-4">
             <input type="text" value={search} onChange={(e) => { setSearch(e.target.value); setPage(1); }}
               placeholder="발신번호, 라벨, 매장 검색..."
-              className="flex-1 max-w-xs px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
-            <span className="text-sm text-gray-500">총 {filtered.length}건</span>
+              className="flex-1 max-w-xs px-3 py-2 border border-slate-200 rounded-lg text-sm text-slate-700 focus:border-indigo-400 focus:ring-4 focus:ring-indigo-500/10 outline-none transition" />
+            <span className="text-sm text-slate-500">총 {filtered.length}건</span>
           </div>
 
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
-              <thead className="bg-gray-50 border-b">
+              <thead className="border-b border-slate-100">
                 <tr>
-                  <th className="px-4 py-3 text-left font-medium text-gray-600">발신번호</th>
-                  <th className="px-4 py-3 text-left font-medium text-gray-600">라벨</th>
-                  <th className="px-4 py-3 text-left font-medium text-gray-600">매장</th>
-                  <th className="px-4 py-3 text-center font-medium text-gray-600">대표</th>
-                  <th className="px-4 py-3 text-center font-medium text-gray-600">사용 범위</th>
-                  <th className="px-4 py-3 text-left font-medium text-gray-600">등록일</th>
-                  <th className="px-4 py-3 text-center font-medium text-gray-600">관리</th>
+                  <th className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wider text-slate-400">발신번호</th>
+                  <th className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wider text-slate-400">라벨</th>
+                  <th className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wider text-slate-400">매장</th>
+                  <th className="px-4 py-3 text-center text-[11px] font-semibold uppercase tracking-wider text-slate-400">대표</th>
+                  <th className="px-4 py-3 text-center text-[11px] font-semibold uppercase tracking-wider text-slate-400">사용 범위</th>
+                  <th className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wider text-slate-400">등록일</th>
+                  <th className="px-4 py-3 text-center text-[11px] font-semibold uppercase tracking-wider text-slate-400">관리</th>
                 </tr>
               </thead>
-              <tbody className="divide-y">
+              <tbody className="divide-y divide-slate-50">
                 {paged.length === 0 ? (
-                  <tr><td colSpan={7} className="px-4 py-12 text-center text-gray-500">
+                  <tr><td colSpan={7} className="px-4 py-12 text-center text-slate-500">
                     {numbers.length === 0 ? '등록된 발신번호가 없습니다.' : '검색 결과가 없습니다.'}
                   </td></tr>
                 ) : paged.map(n => (
-                  <tr key={n.id} className="hover:bg-gray-50">
+                  <tr key={n.id} className="hover:bg-slate-50/70 transition">
                     <td className="px-4 py-3 font-mono font-medium">{n.phone}</td>
-                    <td className="px-4 py-3 text-gray-700">{n.label || '-'}</td>
-                    <td className="px-4 py-3 text-gray-600">{n.store_name || '-'}</td>
+                    <td className="px-4 py-3 text-slate-700">{n.label || '-'}</td>
+                    <td className="px-4 py-3 text-slate-600">{n.store_name || '-'}</td>
                     <td className="px-4 py-3 text-center">
                       {n.is_default ? (
-                        <span className="px-2 py-0.5 bg-blue-100 text-blue-700 text-xs font-bold rounded-full">대표</span>
+                        <span className="px-2 py-0.5 bg-indigo-100 text-indigo-600 text-xs font-bold rounded-md">대표</span>
                       ) : (
-                        <button onClick={() => handleSetDefault(n)} className="text-xs text-gray-400 hover:text-blue-600 transition">설정</button>
+                        <button onClick={() => handleSetDefault(n)} className="text-xs text-slate-400 hover:text-blue-600 transition">설정</button>
                       )}
                     </td>
                     <td className="px-4 py-3 text-center">
@@ -482,7 +487,7 @@ export default function CallbacksTab() {
                             n.assignment_scope === 'assigned' ? 'translate-x-4.5' : 'translate-x-0.5'
                           }`} />
                         </button>
-                        <span className="text-xs text-gray-500 whitespace-nowrap">
+                        <span className="text-xs text-slate-500 whitespace-nowrap">
                           {n.assignment_scope === 'assigned' ? '지정' : '전체'}
                         </span>
                         {n.assignment_scope === 'assigned' && (
@@ -493,12 +498,12 @@ export default function CallbacksTab() {
                         )}
                       </div>
                     </td>
-                    <td className="px-4 py-3 text-gray-500 text-xs">{formatDate(n.created_at)}</td>
+                    <td className="px-4 py-3 text-slate-500 text-xs">{formatDate(n.created_at)}</td>
                     <td className="px-4 py-3 text-center">
                       {allowSelfRegister ? (
                         <button onClick={() => handleDelete(n)} className="px-2 py-1 text-xs bg-red-50 text-red-600 hover:bg-red-100 rounded transition">삭제</button>
                       ) : (
-                        <span className="text-xs text-gray-300">—</span>
+                        <span className="text-xs text-slate-300">—</span>
                       )}
                     </td>
                   </tr>
@@ -509,14 +514,14 @@ export default function CallbacksTab() {
 
           {totalPages > 1 && (
             <div className="px-6 py-3 border-t flex items-center justify-between">
-              <span className="text-sm text-gray-500">{startIdx}~{endIdx} / {filtered.length}건</span>
+              <span className="text-sm text-slate-500">{startIdx}~{endIdx} / {filtered.length}건</span>
               <div className="flex items-center gap-1">
                 <button onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1}
                   className="px-3 py-1.5 text-sm rounded-lg border bg-white hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed transition">이전</button>
                 {getPageNumbers().map((p, i) =>
-                  p === '...' ? <span key={`d-${i}`} className="px-2 text-gray-400">…</span> : (
+                  p === '...' ? <span key={`d-${i}`} className="px-2 text-slate-400">…</span> : (
                     <button key={p} onClick={() => setPage(p as number)}
-                      className={`px-3 py-1.5 text-sm rounded-lg transition ${p === page ? 'bg-blue-600 text-white' : 'bg-white border text-gray-600 hover:bg-gray-50'}`}>{p}</button>
+                      className={`px-3 py-1.5 text-sm rounded-lg transition ${p === page ? 'bg-indigo-600 text-white shadow-sm shadow-indigo-600/20' : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-50'}`}>{p}</button>
                   )
                 )}
                 <button onClick={() => setPage(p => Math.min(totalPages, p + 1))} disabled={page === totalPages}
@@ -532,12 +537,12 @@ export default function CallbacksTab() {
         <div className="space-y-4">
 
           {/* ========== 1차: 담당자 등록 + 위임장 ========== */}
-          <div className="bg-white rounded-lg shadow p-6">
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6">
             <div className="flex items-center gap-3 mb-3">
               <span className="flex items-center justify-center w-7 h-7 rounded-full bg-indigo-600 text-white text-sm font-bold">1</span>
               <h3 className="text-base font-semibold">담당자 등록 및 위임장 제출</h3>
             </div>
-            <p className="text-sm text-gray-500 mb-4">
+            <p className="text-sm text-slate-500 mb-4">
               발신번호 등록을 위해 먼저 담당자 정보와 위임장을 제출해주세요. 관리자 승인 후 발신번호 등록이 가능합니다.
             </p>
 
@@ -562,10 +567,10 @@ export default function CallbacksTab() {
                       mgr.status === 'rejected' ? 'bg-red-50 border-red-200' :
                       'bg-yellow-50 border-yellow-200'
                     }`}>
-                      <span className="flex-1 text-sm text-gray-800">
+                      <span className="flex-1 text-sm text-slate-800">
                         <span className="font-medium">{mgr.manager_name}</span>
-                        <span className="ml-2 text-gray-500">{formatPhone(mgr.manager_phone)}</span>
-                        {mgr.manager_email && <span className="ml-2 text-xs text-gray-400">{mgr.manager_email}</span>}
+                        <span className="ml-2 text-slate-500">{formatPhone(mgr.manager_phone)}</span>
+                        {mgr.manager_email && <span className="ml-2 text-xs text-slate-400">{mgr.manager_email}</span>}
                       </span>
                       <span className={`px-2 py-0.5 text-xs font-medium rounded-full ${st.color}`}>{st.text}</span>
                       {mgr.status === 'rejected' && mgr.reject_reason && (
@@ -583,17 +588,17 @@ export default function CallbacksTab() {
             <div className="space-y-3">
               <div className="flex items-end gap-2">
                 <div className="w-24">
-                  <label className="block text-xs font-medium text-gray-700 mb-1">이름 *</label>
+                  <label className="block text-xs font-medium text-slate-700 mb-1">이름 *</label>
                   <input type="text" value={newMgrName} onChange={(e) => setNewMgrName(e.target.value)}
                     className="w-full px-3 py-2 border rounded-lg text-sm" placeholder="홍길동" />
                 </div>
                 <div className="flex-1">
-                  <label className="block text-xs font-medium text-gray-700 mb-1">전화번호 *</label>
+                  <label className="block text-xs font-medium text-slate-700 mb-1">전화번호 *</label>
                   <input type="text" value={newMgrPhone} onChange={(e) => setNewMgrPhone(e.target.value.replace(/[^\d-]/g, ''))}
                     className="w-full px-3 py-2 border rounded-lg text-sm" placeholder="01012345678" />
                 </div>
                 <div className="flex-1">
-                  <label className="block text-xs font-medium text-gray-700 mb-1">이메일</label>
+                  <label className="block text-xs font-medium text-slate-700 mb-1">이메일</label>
                   <input type="email" value={newMgrEmail} onChange={(e) => setNewMgrEmail(e.target.value)}
                     className="w-full px-3 py-2 border rounded-lg text-sm" placeholder="email@example.com" />
                 </div>
@@ -601,11 +606,11 @@ export default function CallbacksTab() {
 
               {/* 위임장 첨부 */}
               <div>
-                <label className="block text-xs font-medium text-gray-700 mb-1">위임장 첨부 *</label>
+                <label className="block text-xs font-medium text-slate-700 mb-1">위임장 첨부 *</label>
                 <div className="flex items-center gap-3">
                   <button onClick={() => mgrFileInputRef.current?.click()}
-                    className="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 text-sm font-medium border border-gray-300">파일 선택</button>
-                  <span className="text-sm text-gray-500">
+                    className="px-4 py-2 bg-slate-100 text-slate-700 rounded-lg hover:bg-slate-200 text-sm font-medium border border-slate-200">파일 선택</button>
+                  <span className="text-sm text-slate-500">
                     {mgrAuthFile ? mgrAuthFile.name : 'PDF, JPG, PNG (최대 10MB)'}
                   </span>
                   {mgrAuthFile && (
@@ -626,7 +631,7 @@ export default function CallbacksTab() {
           </div>
 
           {/* ========== 2차: 발신번호 등록 신청 ========== */}
-          <div className={`bg-white rounded-lg shadow p-6 ${!hasApproved ? 'opacity-60' : ''}`}>
+          <div className={`bg-white rounded-2xl border border-slate-200 shadow-sm p-6 ${!hasApproved ? 'opacity-60' : ''}`}>
             <div className="flex items-center gap-3 mb-3">
               <span className={`flex items-center justify-center w-7 h-7 rounded-full text-white text-sm font-bold ${hasApproved ? 'bg-indigo-600' : 'bg-gray-400'}`}>2</span>
               <h3 className="text-base font-semibold">발신번호 등록 신청</h3>
@@ -640,39 +645,39 @@ export default function CallbacksTab() {
               </div>
             ) : (
               <>
-                <p className="text-sm text-gray-500 mb-4">번호 유형에 맞는 서류를 첨부하여 발신번호 등록을 신청합니다. 관리자 확인 후 승인 시 자동 등록됩니다.</p>
+                <p className="text-sm text-slate-500 mb-4">번호 유형에 맞는 서류를 첨부하여 발신번호 등록을 신청합니다. 관리자 확인 후 승인 시 자동 등록됩니다.</p>
 
                 {/* 번호 유형 선택 */}
                 <div className="mb-4">
-                  <label className="block text-sm font-medium text-gray-700 mb-2">번호 유형 *</label>
+                  <label className="block text-sm font-medium text-slate-700 mb-2">번호 유형 *</label>
                   <div className="flex gap-3">
                     <label className={`flex-1 cursor-pointer border-2 rounded-lg p-3 transition ${
-                      regNumberType === 'company' ? 'border-indigo-500 bg-indigo-50' : 'border-gray-200 hover:border-gray-300'
+                      regNumberType === 'company' ? 'border-indigo-500 bg-indigo-50' : 'border-slate-200 hover:border-slate-200'
                     }`}>
                       <input type="radio" name="numberType" value="company" checked={regNumberType === 'company'}
                         onChange={() => { setRegNumberType('company'); setRegFiles([]); setRegDocTypes([]); }}
                         className="sr-only" />
                       <span className="text-sm font-medium text-gray-900">회사명의 발신번호</span>
-                      <p className="text-xs text-gray-500 mt-0.5">회사(법인) 명의로 개통된 번호</p>
+                      <p className="text-xs text-slate-500 mt-0.5">회사(법인) 명의로 개통된 번호</p>
                     </label>
                     <label className={`flex-1 cursor-pointer border-2 rounded-lg p-3 transition ${
-                      regNumberType === 'other' ? 'border-indigo-500 bg-indigo-50' : 'border-gray-200 hover:border-gray-300'
+                      regNumberType === 'other' ? 'border-indigo-500 bg-indigo-50' : 'border-slate-200 hover:border-slate-200'
                     }`}>
                       <input type="radio" name="numberType" value="other" checked={regNumberType === 'other'}
                         onChange={() => { setRegNumberType('other'); setRegFiles([]); setRegDocTypes([]); }}
                         className="sr-only" />
                       <span className="text-sm font-medium text-gray-900">기타명의 발신번호</span>
-                      <p className="text-xs text-gray-500 mt-0.5">직원 개인, 대리점, 지사 등 타 명의 번호</p>
+                      <p className="text-xs text-slate-500 mt-0.5">직원 개인, 대리점, 지사 등 타 명의 번호</p>
                     </label>
                   </div>
                 </div>
 
                 {/* 번호 유형별 안내 + 양식 다운로드 */}
-                <div className={`rounded-lg p-3 mb-4 border ${regNumberType === 'company' ? 'bg-gray-50 border-gray-200' : 'bg-orange-50 border-orange-200'}`}>
+                <div className={`rounded-lg p-3 mb-4 border ${regNumberType === 'company' ? 'bg-slate-50 border-slate-200' : 'bg-orange-50 border-orange-200'}`}>
                   {regNumberType === 'company' ? (
                     <div>
-                      <p className="text-sm font-medium text-gray-800">필요 서류: 통신가입증명원</p>
-                      <p className="text-xs text-gray-500 mt-1">회사(법인) 명의로 개통된 번호의 통신가입증명원을 첨부해주세요.</p>
+                      <p className="text-sm font-medium text-slate-800">필요 서류: 통신가입증명원</p>
+                      <p className="text-xs text-slate-500 mt-1">회사(법인) 명의로 개통된 번호의 통신가입증명원을 첨부해주세요.</p>
                     </div>
                   ) : (
                     <div>
@@ -699,51 +704,51 @@ export default function CallbacksTab() {
 
                 <div className="grid grid-cols-2 gap-4 mb-4">
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">발신번호 *</label>
+                    <label className="block text-sm font-medium text-slate-700 mb-1">발신번호 *</label>
                     <input type="text" value={regPhone} onChange={(e) => setRegPhone(e.target.value.replace(/[^\d-]/g, ''))}
                       className="w-full px-3 py-2 border rounded-lg" placeholder="02-1234-5678" />
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">라벨 (별칭)</label>
+                    <label className="block text-sm font-medium text-slate-700 mb-1">라벨 (별칭)</label>
                     <input type="text" value={regLabel} onChange={(e) => setRegLabel(e.target.value)}
                       className="w-full px-3 py-2 border rounded-lg" placeholder="예: 강남점 대표번호" />
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">매장코드</label>
+                    <label className="block text-sm font-medium text-slate-700 mb-1">매장코드</label>
                     <input type="text" value={regStoreCode} onChange={(e) => setRegStoreCode(e.target.value)}
                       className="w-full px-3 py-2 border rounded-lg" placeholder="매장코드 (선택)" />
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">매장명</label>
+                    <label className="block text-sm font-medium text-slate-700 mb-1">매장명</label>
                     <input type="text" value={regStoreName} onChange={(e) => setRegStoreName(e.target.value)}
                       className="w-full px-3 py-2 border rounded-lg" placeholder="매장명 (선택)" />
                   </div>
                 </div>
 
                 <div className="mb-4">
-                  <label className="block text-sm font-medium text-gray-700 mb-1">신청 메모</label>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">신청 메모</label>
                   <textarea value={regNote} onChange={(e) => setRegNote(e.target.value)}
                     className="w-full px-3 py-2 border rounded-lg text-sm" rows={2} placeholder="특이사항이 있으면 기입해주세요" />
                 </div>
 
                 {/* 파일 첨부 */}
                 <div className="mb-4">
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                  <label className="block text-sm font-medium text-slate-700 mb-2">
                     서류 첨부 * {regNumberType === 'company'
                       ? '(통신가입증명원)'
                       : '(발신번호 사용 동의서 + 재직증명서 또는 거래관계증명파일 + 통신가입증명원)'}
                   </label>
                   <div className="flex items-center gap-3">
                     <button onClick={() => fileInputRef.current?.click()}
-                      className="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 text-sm font-medium border border-gray-300">파일 선택</button>
-                    <span className="text-sm text-gray-500">{regFiles.length > 0 ? `${regFiles.length}개 파일 선택됨` : 'PDF, JPG, PNG (최대 10MB)'}</span>
+                      className="px-4 py-2 bg-slate-100 text-slate-700 rounded-lg hover:bg-slate-200 text-sm font-medium border border-slate-200">파일 선택</button>
+                    <span className="text-sm text-slate-500">{regFiles.length > 0 ? `${regFiles.length}개 파일 선택됨` : 'PDF, JPG, PNG (최대 10MB)'}</span>
                     <input ref={fileInputRef} type="file" accept=".pdf,.jpg,.jpeg,.png,.gif,.bmp,.webp,.docx" multiple onChange={handleFileSelect} className="hidden" />
                   </div>
                   {regFiles.length > 0 && (
                     <div className="mt-2 space-y-1">
                       {regFiles.map((file, idx) => (
-                        <div key={idx} className="flex items-center gap-3 bg-gray-50 border rounded-lg px-3 py-2">
-                          <span className="flex-1 text-sm text-gray-700 truncate">{file.name}</span>
+                        <div key={idx} className="flex items-center gap-3 bg-slate-50 border rounded-lg px-3 py-2">
+                          <span className="flex-1 text-sm text-slate-700 truncate">{file.name}</span>
                           <select value={regDocTypes[idx] || 'telecom_cert'} onChange={(e) => { const t = [...regDocTypes]; t[idx] = e.target.value; setRegDocTypes(t); }}
                             className="text-xs border rounded px-2 py-1">
                             {regNumberType === 'company' ? (
@@ -758,7 +763,7 @@ export default function CallbacksTab() {
                               </>
                             )}
                           </select>
-                          <span className="text-xs text-gray-400">{(file.size / 1024).toFixed(0)}KB</span>
+                          <span className="text-xs text-slate-400">{(file.size / 1024).toFixed(0)}KB</span>
                           <button onClick={() => handleRemoveFile(idx)} className="text-red-500 hover:text-red-700 text-sm">X</button>
                         </div>
                       ))}
@@ -776,37 +781,37 @@ export default function CallbacksTab() {
 
           {/* 신청 이력 */}
           {myRegistrations.length > 0 && (
-            <div className="bg-white rounded-lg shadow p-6">
+            <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6">
               <h3 className="text-base font-semibold mb-3">신청 이력</h3>
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
-                  <thead className="bg-gray-50 border-b">
+                  <thead className="border-b border-slate-100">
                     <tr>
-                      <th className="px-4 py-2.5 text-left font-medium text-gray-600">발신번호</th>
-                      <th className="px-4 py-2.5 text-left font-medium text-gray-600">유형</th>
-                      <th className="px-4 py-2.5 text-left font-medium text-gray-600">라벨</th>
-                      <th className="px-4 py-2.5 text-left font-medium text-gray-600">매장</th>
-                      <th className="px-4 py-2.5 text-center font-medium text-gray-600">상태</th>
-                      <th className="px-4 py-2.5 text-left font-medium text-gray-600">신청일</th>
-                      <th className="px-4 py-2.5 text-left font-medium text-gray-600">사유</th>
+                      <th className="px-4 py-2.5 text-left text-[11px] font-semibold uppercase tracking-wider text-slate-400">발신번호</th>
+                      <th className="px-4 py-2.5 text-left text-[11px] font-semibold uppercase tracking-wider text-slate-400">유형</th>
+                      <th className="px-4 py-2.5 text-left text-[11px] font-semibold uppercase tracking-wider text-slate-400">라벨</th>
+                      <th className="px-4 py-2.5 text-left text-[11px] font-semibold uppercase tracking-wider text-slate-400">매장</th>
+                      <th className="px-4 py-2.5 text-center text-[11px] font-semibold uppercase tracking-wider text-slate-400">상태</th>
+                      <th className="px-4 py-2.5 text-left text-[11px] font-semibold uppercase tracking-wider text-slate-400">신청일</th>
+                      <th className="px-4 py-2.5 text-left text-[11px] font-semibold uppercase tracking-wider text-slate-400">사유</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y">
+                  <tbody className="divide-y divide-slate-50">
                     {myRegistrations.map(reg => {
                       const st = statusLabel(reg.status);
                       return (
-                        <tr key={reg.id} className="hover:bg-gray-50">
+                        <tr key={reg.id} className="hover:bg-slate-50/70 transition">
                           <td className="px-4 py-2.5 font-mono">{reg.phone}</td>
-                          <td className="px-4 py-2.5 text-gray-600 text-xs">
+                          <td className="px-4 py-2.5 text-slate-600 text-xs">
                             {reg.number_type === 'other' ? '기타명의' : '회사명의'}
                           </td>
-                          <td className="px-4 py-2.5 text-gray-700">{reg.label || '-'}</td>
-                          <td className="px-4 py-2.5 text-gray-600">{reg.store_name || '-'}</td>
+                          <td className="px-4 py-2.5 text-slate-700">{reg.label || '-'}</td>
+                          <td className="px-4 py-2.5 text-slate-600">{reg.store_name || '-'}</td>
                           <td className="px-4 py-2.5 text-center">
                             <span className={`px-2 py-0.5 text-xs font-medium rounded-full ${st.color}`}>{st.text}</span>
                           </td>
-                          <td className="px-4 py-2.5 text-gray-500 text-xs">{new Date(reg.created_at).toLocaleDateString('ko-KR')}</td>
-                          <td className="px-4 py-2.5 text-gray-500 text-xs">{reg.reject_reason || '-'}</td>
+                          <td className="px-4 py-2.5 text-slate-500 text-xs">{new Date(reg.created_at).toLocaleDateString('ko-KR')}</td>
+                          <td className="px-4 py-2.5 text-slate-500 text-xs">{reg.reject_reason || '-'}</td>
                         </tr>
                       );
                     })}
@@ -822,21 +827,21 @@ export default function CallbacksTab() {
       {assignModal.show && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 animate-[fadeIn_0.15s_ease-out]">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md mx-4 animate-[zoomIn_0.2s_ease-out] max-h-[80vh] flex flex-col">
-            <div className="px-6 pt-6 pb-4 bg-gradient-to-r from-indigo-50 to-blue-50 rounded-t-2xl">
-              <h3 className="text-lg font-bold text-gray-900">사용자 배정</h3>
-              <p className="text-sm text-gray-600 mt-1">
+            <div className="px-6 pt-6 pb-4 bg-gradient-to-r from-indigo-50 via-white to-white border-b border-slate-100 rounded-t-2xl">
+              <h3 className="text-lg font-bold text-slate-900 tracking-tight">사용자 배정</h3>
+              <p className="text-sm text-slate-600 mt-1">
                 {assignModal.phone} {assignModal.label ? `(${assignModal.label})` : ''}
               </p>
             </div>
 
             <div className="flex-1 overflow-y-auto px-6 py-4">
               {assignLoading ? (
-                <div className="py-8 text-center text-gray-500">로딩 중...</div>
+                <div className="py-8 text-center text-slate-500">로딩 중...</div>
               ) : companyUsers.length === 0 ? (
-                <div className="py-8 text-center text-gray-500">등록된 사용자가 없습니다.</div>
+                <div className="py-8 text-center text-slate-500">등록된 사용자가 없습니다.</div>
               ) : (
                 <div className="space-y-2">
-                  <p className="text-xs text-gray-500 mb-2">이 발신번호를 사용할 수 있는 사용자를 선택하세요.</p>
+                  <p className="text-xs text-slate-500 mb-2">이 발신번호를 사용할 수 있는 사용자를 선택하세요.</p>
                   <input
                     type="text"
                     value={assignSearch}
@@ -853,22 +858,22 @@ export default function CallbacksTab() {
                     .map(user => (
                     <label key={user.id}
                       className={`flex items-center gap-3 px-3 py-2.5 rounded-lg border cursor-pointer transition ${
-                        assignedUserIds.includes(user.id) ? 'border-indigo-300 bg-indigo-50' : 'border-gray-200 hover:bg-gray-50'
+                        assignedUserIds.includes(user.id) ? 'border-indigo-300 bg-indigo-50' : 'border-slate-200 hover:bg-gray-50'
                       }`}>
                       <input type="checkbox"
                         checked={assignedUserIds.includes(user.id)}
                         onChange={() => handleAssignToggle(user.id)}
-                        className="w-4 h-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500" />
+                        className="w-4 h-4 rounded border-slate-200 text-indigo-600 focus:ring-indigo-500" />
                       <div className="flex-1 min-w-0">
                         <div className="text-sm font-medium text-gray-900">{user.name}</div>
-                        <div className="text-xs text-gray-500 truncate">{user.email}</div>
+                        <div className="text-xs text-slate-500 truncate">{user.email}</div>
                       </div>
                       {user.store_codes && user.store_codes.length > 0 && (
-                        <span className="text-xs text-gray-400 bg-gray-100 px-2 py-0.5 rounded-full">
+                        <span className="text-xs text-slate-400 bg-gray-100 px-2 py-0.5 rounded-full">
                           {user.store_codes.length}개 매장
                         </span>
                       )}
-                      <span className="text-xs text-gray-400">
+                      <span className="text-xs text-slate-400">
                         {user.user_type === 'admin' ? '관리자' : '담당자'}
                       </span>
                     </label>
@@ -878,7 +883,7 @@ export default function CallbacksTab() {
             </div>
 
             <div className="px-6 pb-6 pt-4 border-t flex items-center justify-between">
-              <span className="text-xs text-gray-500">
+              <span className="text-xs text-slate-500">
                 {assignedUserIds.length}명 선택됨
               </span>
               <div className="flex gap-3">
@@ -893,7 +898,7 @@ export default function CallbacksTab() {
                   setAssignModal({ show: false, callbackId: '', phone: '', label: '' });
                   setAssignSearch('');
                 }}
-                  className="px-4 py-2.5 rounded-lg text-sm font-medium border border-gray-300 text-gray-700 hover:bg-gray-50 transition">취소</button>
+                  className="px-4 py-2.5 rounded-lg text-sm font-semibold border border-slate-200 text-slate-600 hover:bg-slate-50 transition">취소</button>
                 <button onClick={handleSaveAssignments} disabled={assignSaving}
                   className="px-5 py-2.5 rounded-lg text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 transition">
                   {assignSaving ? '저장 중...' : '저장'}
@@ -908,43 +913,43 @@ export default function CallbacksTab() {
       {showAdd && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 animate-[fadeIn_0.15s_ease-out]">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm mx-4 animate-[zoomIn_0.2s_ease-out]">
-            <div className="px-6 pt-6 pb-4 bg-gradient-to-r from-blue-50 to-indigo-50">
-              <h3 className="text-lg font-bold text-gray-900">발신번호 등록</h3>
+            <div className="px-6 pt-6 pb-4 bg-gradient-to-r from-indigo-50 via-white to-white border-b border-slate-100">
+              <h3 className="text-lg font-bold text-slate-900 tracking-tight">발신번호 등록</h3>
             </div>
             <div className="px-6 py-4 space-y-3">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">발신번호 *</label>
+                <label className="block text-sm font-medium text-slate-700 mb-1">발신번호 *</label>
                 <input value={addForm.phone} onChange={(e) => setAddForm(f => ({ ...f, phone: e.target.value }))} placeholder="02-1234-5678"
-                  className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
+                  className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm text-slate-700 focus:border-indigo-400 focus:ring-4 focus:ring-indigo-500/10 outline-none transition" />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">라벨</label>
+                <label className="block text-sm font-medium text-slate-700 mb-1">라벨</label>
                 <input value={addForm.label} onChange={(e) => setAddForm(f => ({ ...f, label: e.target.value }))} placeholder="예: BLOOM 강남점"
-                  className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
+                  className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm text-slate-700 focus:border-indigo-400 focus:ring-4 focus:ring-indigo-500/10 outline-none transition" />
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">매장코드</label>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">매장코드</label>
                   <input value={addForm.storeCode} onChange={(e) => setAddForm(f => ({ ...f, storeCode: e.target.value }))}
-                    className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
+                    className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm text-slate-700 focus:border-indigo-400 focus:ring-4 focus:ring-indigo-500/10 outline-none transition" />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">매장명</label>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">매장명</label>
                   <input value={addForm.storeName} onChange={(e) => setAddForm(f => ({ ...f, storeName: e.target.value }))}
-                    className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
+                    className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm text-slate-700 focus:border-indigo-400 focus:ring-4 focus:ring-indigo-500/10 outline-none transition" />
                 </div>
               </div>
               <label className="flex items-center gap-2 cursor-pointer">
                 <input type="checkbox" checked={addForm.isDefault} onChange={(e) => setAddForm(f => ({ ...f, isDefault: e.target.checked }))}
-                  className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500" />
-                <span className="text-sm text-gray-700">대표번호로 설정</span>
+                  className="w-4 h-4 rounded border-slate-200 text-indigo-600 focus:ring-indigo-500" />
+                <span className="text-sm text-slate-700">대표번호로 설정</span>
               </label>
             </div>
             <div className="px-6 pb-6 flex gap-3">
               <button onClick={() => setShowAdd(false)}
-                className="flex-1 py-2.5 rounded-lg text-sm font-medium border border-gray-300 text-gray-700 hover:bg-gray-50 transition">취소</button>
+                className="flex-1 py-2.5 rounded-lg text-sm font-semibold border border-slate-200 text-slate-600 hover:bg-slate-50 transition">취소</button>
               <button onClick={handleAdd}
-                className="flex-1 py-2.5 rounded-lg text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 transition">등록</button>
+                className="flex-1 py-2.5 rounded-lg text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 shadow-sm shadow-indigo-600/20 transition">등록</button>
             </div>
           </div>
         </div>

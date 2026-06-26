@@ -201,13 +201,16 @@ export default function CustomersTab() {
   return (
     <div className="space-y-4">
       {/* 상단 바 */}
-      <div className="bg-white rounded-xl shadow-sm p-4">
+      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-4">
         <div className="flex items-center justify-between gap-3 flex-wrap">
           <div className="flex items-center gap-3">
-            <h2 className="text-lg font-bold text-gray-800">👥 고객 DB 관리</h2>
-            <span className="px-2.5 py-1 bg-blue-50 text-blue-700 rounded-full text-xs font-medium">
-              총 {pagination.total.toLocaleString()}명
+            <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-indigo-50 text-indigo-600">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-5 h-5"><path d="M17 21v-2a4 4 0 0 0-3-3.87" /><path d="M9 21v-2a4 4 0 0 0-4-4H4" /><circle cx="9" cy="7" r="4" /><path d="M16 3.13a4 4 0 0 1 0 7.75" /></svg>
             </span>
+            <div>
+              <h2 className="text-lg font-bold text-slate-900 tracking-tight">고객 DB 관리</h2>
+              <p className="text-xs text-slate-400 mt-0.5">총 <span className="font-semibold text-slate-600 tabular-nums">{pagination.total.toLocaleString()}</span>명</p>
+            </div>
           </div>
           <div className="flex items-center gap-2">
             {/* ★ 사용자별 필터 (2명 이상일 때만 표시) */}
@@ -215,7 +218,7 @@ export default function CustomersTab() {
               <select
                 value={filterUserId}
                 onChange={(e) => setFilterUserId(e.target.value)}
-                className="px-3 py-2 border rounded-lg text-sm bg-white focus:ring-2 focus:ring-blue-500 outline-none"
+                className="px-3 py-2 border border-slate-200 rounded-lg text-sm text-slate-700 bg-white focus:border-indigo-400 focus:ring-4 focus:ring-indigo-500/10 outline-none transition"
               >
                 <option value="">전체 사용자</option>
                 {users.map(u => (
@@ -234,14 +237,14 @@ export default function CustomersTab() {
                 onChange={(e) => setSearch(e.target.value)}
                 onKeyDown={handleKeyDown}
                 placeholder="이름 또는 전화번호 검색"
-                className="pl-9 pr-3 py-2 border rounded-lg text-sm w-56 focus:ring-2 focus:ring-blue-500 outline-none"
+                className="pl-9 pr-3 py-2 border border-slate-200 rounded-lg text-sm text-slate-700 w-56 focus:border-indigo-400 focus:ring-4 focus:ring-indigo-500/10 outline-none transition"
               />
-              <svg className="absolute left-3 top-2.5 w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <svg className="absolute left-3 top-2.5 w-4 h-4 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
               </svg>
             </div>
             <button onClick={handleSearch}
-              className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition">
+              className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-semibold hover:bg-indigo-700 shadow-sm shadow-indigo-600/20 transition">
               조회
             </button>
 
@@ -285,8 +288,8 @@ export default function CustomersTab() {
                   </svg>
                 </div>
                 <div className="flex-1">
-                  <h3 className="text-lg font-bold text-gray-900">고객 DB 전체 삭제</h3>
-                  <p className="text-sm text-gray-600 mt-1">
+                  <h3 className="text-lg font-bold text-slate-900 tracking-tight">고객 DB 전체 삭제</h3>
+                  <p className="text-sm text-slate-600 mt-1">
                     등록된 모든 고객 데이터({pagination.total.toLocaleString()}명), 구매내역, 수신거부, 필드 정의가 <strong className="text-red-600">영구 삭제</strong>됩니다. 복구 불가능합니다.
                   </p>
                 </div>
@@ -300,7 +303,7 @@ export default function CustomersTab() {
                 onChange={(e) => { setDeleteAllConfirmInput(e.target.value); setDeleteAllResult(null); }}
                 placeholder="회사명을 정확히 입력하세요"
                 disabled={deletingAll}
-                className="w-full px-3 py-2 border-2 border-gray-300 rounded-lg text-sm focus:border-red-500 focus:ring-2 focus:ring-red-100 outline-none disabled:bg-gray-50"
+                className="w-full px-3 py-2 border-2 border-slate-200 rounded-lg text-sm focus:border-rose-500 focus:ring-4 focus:ring-rose-500/10 outline-none disabled:bg-slate-50"
                 onKeyDown={(e) => { if (e.key === 'Enter' && !deletingAll) handleDeleteAll(); }}
                 autoFocus
               />
@@ -310,11 +313,11 @@ export default function CustomersTab() {
                 </div>
               )}
             </div>
-            <div className="px-6 py-4 bg-gray-50 border-t flex justify-end gap-2 rounded-b-xl">
+            <div className="px-6 py-4 bg-slate-50 border-t border-slate-100 flex justify-end gap-2 rounded-b-xl">
               <button
                 onClick={() => { setShowDeleteAllModal(false); setDeleteAllConfirmInput(''); setDeleteAllResult(null); }}
                 disabled={deletingAll}
-                className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50"
+                className="px-4 py-2 text-sm font-semibold text-slate-600 bg-white border border-slate-200 rounded-lg hover:bg-slate-50 disabled:opacity-50"
               >
                 취소
               </button>
@@ -336,74 +339,74 @@ export default function CustomersTab() {
       )}
 
       {/* 테이블 */}
-      <div className="bg-white rounded-xl shadow-sm overflow-hidden">
+      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
-            <thead className="bg-gray-50 border-b">
+            <thead className="border-b border-slate-100">
               <tr>
                 <th className="px-4 py-3 text-center w-10">
                   <input type="checkbox"
                     checked={customers.length > 0 && selectedIds.size === customers.length}
                     onChange={toggleSelectAll}
-                    className="rounded border-gray-300 text-blue-600 focus:ring-blue-500" />
+                    className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500" />
                 </th>
-                <th className="px-4 py-3 text-left font-medium text-gray-600">이름</th>
-                <th className="px-4 py-3 text-left font-medium text-gray-600">전화번호</th>
-                <th className="px-4 py-3 text-center font-medium text-gray-600">성별</th>
-                <th className="px-4 py-3 text-center font-medium text-gray-600">등급</th>
-                <th className="px-4 py-3 text-left font-medium text-gray-600">지역</th>
-                <th className="px-4 py-3 text-left font-medium text-gray-600">매장</th>
-                <th className="px-4 py-3 text-center font-medium text-gray-600">수신동의</th>
-                <th className="px-4 py-3 text-right font-medium text-gray-600">총구매액</th>
-                <th className="px-4 py-3 text-center font-medium text-gray-600">최근구매</th>
-                <th className="px-4 py-3 text-center font-medium text-gray-600">등록일</th>
-                <th className="px-4 py-3 text-center font-medium text-gray-600 w-16">삭제</th>
+                <th className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wider text-slate-400">이름</th>
+                <th className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wider text-slate-400">전화번호</th>
+                <th className="px-4 py-3 text-center text-[11px] font-semibold uppercase tracking-wider text-slate-400">성별</th>
+                <th className="px-4 py-3 text-center text-[11px] font-semibold uppercase tracking-wider text-slate-400">등급</th>
+                <th className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wider text-slate-400">지역</th>
+                <th className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wider text-slate-400">매장</th>
+                <th className="px-4 py-3 text-center text-[11px] font-semibold uppercase tracking-wider text-slate-400">수신동의</th>
+                <th className="px-4 py-3 text-right text-[11px] font-semibold uppercase tracking-wider text-slate-400">총구매액</th>
+                <th className="px-4 py-3 text-center text-[11px] font-semibold uppercase tracking-wider text-slate-400">최근구매</th>
+                <th className="px-4 py-3 text-center text-[11px] font-semibold uppercase tracking-wider text-slate-400">등록일</th>
+                <th className="px-4 py-3 text-center text-[11px] font-semibold uppercase tracking-wider text-slate-400 w-16">삭제</th>
               </tr>
             </thead>
-            <tbody className="divide-y">
+            <tbody className="divide-y divide-slate-50">
               {loading ? (
-                <tr><td colSpan={12} className="text-center py-12 text-gray-400">불러오는 중...</td></tr>
+                <tr><td colSpan={12} className="text-center py-12 text-slate-400">불러오는 중...</td></tr>
               ) : customers.length === 0 ? (
-                <tr><td colSpan={12} className="text-center py-12 text-gray-400">고객 데이터가 없습니다</td></tr>
+                <tr><td colSpan={12} className="text-center py-12 text-slate-400">고객 데이터가 없습니다</td></tr>
               ) : customers.map((c) => (
-                <tr key={c.id} className={`hover:bg-gray-50 transition ${selectedIds.has(c.id) ? 'bg-blue-50/50' : ''}`}>
+                <tr key={c.id} className={`hover:bg-slate-50/70 transition ${selectedIds.has(c.id) ? 'bg-indigo-50/60' : ''}`}>
                   <td className="px-4 py-3 text-center">
                     <input type="checkbox"
                       checked={selectedIds.has(c.id)}
                       onChange={() => toggleSelect(c.id)}
-                      className="rounded border-gray-300 text-blue-600 focus:ring-blue-500" />
+                      className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500" />
                   </td>
-                  <td className="px-4 py-3 text-left font-medium text-gray-800">{c.name || '-'}</td>
-                  <td className="px-4 py-3 text-left text-gray-600">{c.phone || '-'}</td>
+                  <td className="px-4 py-3 text-left font-medium text-slate-800">{c.name || '-'}</td>
+                  <td className="px-4 py-3 text-left text-slate-600">{c.phone || '-'}</td>
                   <td className="px-4 py-3 text-center">{formatGender(c.gender)}</td>
                   <td className="px-4 py-3 text-center">
                     {c.grade ? (
-                      <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${
+                      <span className={`px-2 py-0.5 rounded-md text-xs font-medium ${
                         c.grade.toUpperCase() === 'VIP' ? 'bg-amber-100 text-amber-700' :
                         c.grade.toUpperCase() === 'GOLD' ? 'bg-yellow-100 text-yellow-700' :
-                        'bg-gray-100 text-gray-600'
+                        'bg-slate-100 text-slate-600'
                       }`}>{c.grade}</span>
                     ) : '-'}
                   </td>
-                  <td className="px-4 py-3 text-left text-gray-600">{c.region || '-'}</td>
-                  <td className="px-4 py-3 text-left text-gray-600 text-xs">{c.store_name || c.store_code || '-'}</td>
+                  <td className="px-4 py-3 text-left text-slate-600">{c.region || '-'}</td>
+                  <td className="px-4 py-3 text-left text-slate-600 text-xs">{c.store_name || c.store_code || '-'}</td>
                   <td className="px-4 py-3 text-center">
                     {c.sms_opt_in ? (
-                      <span className="text-green-600 font-medium">✓</span>
+                      <span className="text-emerald-600 font-semibold">✓</span>
                     ) : (
-                      <span className="text-red-400">✗</span>
+                      <span className="text-rose-400">✗</span>
                     )}
                   </td>
-                  <td className="px-4 py-3 text-right text-gray-600">{formatAmount(c.total_purchase_amount)}</td>
-                  <td className="px-4 py-3 text-center text-gray-500 text-xs">
+                  <td className="px-4 py-3 text-right text-slate-600">{formatAmount(c.total_purchase_amount)}</td>
+                  <td className="px-4 py-3 text-center text-slate-500 text-xs">
                     {c.recent_purchase_date ? formatDateTime(c.recent_purchase_date) : '-'}
                   </td>
-                  <td className="px-4 py-3 text-center text-gray-500 text-xs">
+                  <td className="px-4 py-3 text-center text-slate-500 text-xs">
                     {c.created_at ? formatDateTime(c.created_at) : '-'}
                   </td>
                   <td className="px-4 py-3 text-center">
                     <button onClick={() => confirmDeleteOne(c)}
-                      className="p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition"
+                      className="p-1.5 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition"
                       title="삭제">
                       <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
@@ -418,21 +421,21 @@ export default function CustomersTab() {
 
         {/* 페이지네이션 */}
         {pagination.totalPages > 1 && (
-          <div className="flex items-center justify-between px-4 py-3 border-t bg-gray-50">
-            <div className="text-sm text-gray-500">
-              {((pagination.page - 1) * pagination.limit) + 1}~{Math.min(pagination.page * pagination.limit, pagination.total)}
-              <span className="text-gray-400"> / {pagination.total.toLocaleString()}명</span>
+          <div className="flex items-center justify-between px-6 py-4 border-t border-slate-100">
+            <div className="text-xs text-slate-400 tabular-nums">
+              {((pagination.page - 1) * pagination.limit) + 1}–{Math.min(pagination.page * pagination.limit, pagination.total)}
+              <span className="text-slate-300"> / 전체 {pagination.total.toLocaleString()}명</span>
             </div>
             <div className="flex gap-1">
               <button onClick={() => loadCustomers(1)} disabled={pagination.page === 1}
-                className="px-3 py-1.5 text-sm border rounded-lg disabled:opacity-30 hover:bg-white transition">«</button>
+                className="px-3 py-1.5 text-sm border border-slate-200 rounded-lg text-slate-600 disabled:opacity-30 hover:bg-slate-50 transition">«</button>
               <button onClick={() => loadCustomers(pagination.page - 1)} disabled={pagination.page === 1}
-                className="px-3 py-1.5 text-sm border rounded-lg disabled:opacity-30 hover:bg-white transition">‹</button>
-              <span className="px-3 py-1.5 text-sm font-medium text-blue-600">{pagination.page} / {pagination.totalPages}</span>
+                className="px-3 py-1.5 text-sm border border-slate-200 rounded-lg text-slate-600 disabled:opacity-30 hover:bg-slate-50 transition">‹</button>
+              <span className="px-3 py-1.5 text-sm font-semibold text-indigo-600 tabular-nums">{pagination.page} / {pagination.totalPages}</span>
               <button onClick={() => loadCustomers(pagination.page + 1)} disabled={pagination.page === pagination.totalPages}
-                className="px-3 py-1.5 text-sm border rounded-lg disabled:opacity-30 hover:bg-white transition">›</button>
+                className="px-3 py-1.5 text-sm border border-slate-200 rounded-lg text-slate-600 disabled:opacity-30 hover:bg-slate-50 transition">›</button>
               <button onClick={() => loadCustomers(pagination.totalPages)} disabled={pagination.page === pagination.totalPages}
-                className="px-3 py-1.5 text-sm border rounded-lg disabled:opacity-30 hover:bg-white transition">»</button>
+                className="px-3 py-1.5 text-sm border border-slate-200 rounded-lg text-slate-600 disabled:opacity-30 hover:bg-slate-50 transition">»</button>
             </div>
           </div>
         )}
@@ -448,10 +451,10 @@ export default function CustomersTab() {
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z" />
                 </svg>
               </div>
-              <h3 className="text-lg font-bold text-gray-900 text-center mb-2">
+              <h3 className="text-lg font-bold text-slate-900 tracking-tight text-center mb-2">
                 {deleteTarget.type === 'individual' ? '고객 삭제' : '선택 삭제'}
               </h3>
-              <p className="text-sm text-gray-500 text-center mb-1">
+              <p className="text-sm text-slate-500 text-center mb-1">
                 {deleteTarget.type === 'individual'
                   ? `"${deleteTarget.customer?.name || deleteTarget.customer?.phone}" 고객을 삭제합니다.`
                   : `선택한 ${deleteTarget.count}명의 고객을 삭제합니다.`
@@ -462,13 +465,13 @@ export default function CustomersTab() {
                 <br />관련 구매내역도 함께 삭제됩니다.
               </p>
             </div>
-            <div className="flex border-t">
+            <div className="flex border-t border-slate-100">
               <button onClick={() => { setShowDeleteModal(false); setDeleteTarget(null); }}
-                className="flex-1 py-3 text-sm font-medium text-gray-600 hover:bg-gray-50 rounded-bl-2xl transition">
+                className="flex-1 py-3 text-sm font-semibold text-slate-600 hover:bg-slate-50 rounded-bl-2xl transition">
                 취소
               </button>
               <button onClick={executeDelete} disabled={deleteLoading}
-                className="flex-1 py-3 text-sm font-bold text-white bg-red-500 hover:bg-red-600 rounded-br-2xl transition disabled:opacity-50">
+                className="flex-1 py-3 text-sm font-bold text-white bg-rose-500 hover:bg-rose-600 rounded-br-2xl transition disabled:opacity-50">
                 {deleteLoading ? '삭제 중...' : '삭제'}
               </button>
             </div>
@@ -480,7 +483,7 @@ export default function CustomersTab() {
       {toast && (
         <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 animate-in slide-in-from-bottom fade-in duration-300">
           <div className={`px-5 py-3 rounded-xl shadow-lg text-sm font-medium text-white ${
-            toast.type === 'success' ? 'bg-green-600' : 'bg-red-600'
+            toast.type === 'success' ? 'bg-emerald-600' : 'bg-rose-600'
           }`}>
             {toast.msg}
           </div>
