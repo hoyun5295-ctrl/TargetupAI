@@ -19,7 +19,7 @@
 import { Request, Response, Router } from 'express';
 import { resolveShortUrl } from '../utils/short-url';
 import { trackEvent } from '../utils/cdp-events';
-import { recordJourneyStepVariantReward } from '../utils/bandit-optimizer';
+import { recordVariantClickConversion } from '../utils/bandit-optimizer';
 import { detectKoreanEcommerce, isMobileUserAgent } from '../utils/korean-ecommerce-domains';
 import { identifyCustomer } from '../utils/cdp-identity';
 import { query } from '../config/database';
@@ -97,9 +97,10 @@ router.get('/c/:hash', async (req: Request, res: Response) => {
       console.warn('[short-url] click_count 갱신 실패:', err?.message);
     });
 
-    // 3. ★ D190 #1: Bandit reward 자동 누적 (variant_id 존재 시)
+    // 3. ★ D190 #1 / Phase2 A: Bandit 클릭 보상 자동 누적 (variant_id 존재 시).
+    //    종류 무관 라우터 — 여정/자동마케팅 변이 중 매칭되는 테이블에 click_count +1.
     if (resolved.variantId) {
-      void recordJourneyStepVariantReward(resolved.variantId, 0, 1, 0).catch((err) => {
+      void recordVariantClickConversion(resolved.variantId, 1, 0).catch((err) => {
         console.warn('[short-url] Bandit reward 누적 실패:', err?.message);
       });
     }

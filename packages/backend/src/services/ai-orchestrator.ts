@@ -72,6 +72,9 @@ export interface AgentContext {
   companyInfo: Record<string, any>;
   customerStats: Record<string, any>;
   seasonHint?: string;   // 계절 문안 힌트 — 메시지 생성에만 주입(objective·타겟 불변). 자동마케팅에서 사용.
+  // ★ 2026-06-26: 자동마케팅 채널 고정(#1) + 관리자 입력 혜택(#4) — 옵셔널, 미설정 시 기존 동작(AI 추천 채널·placeholder 유지).
+  forcedChannel?: string;          // 'sms'|'lms'|'mms' — 설정 시 AI 추천 대신 이 채널로 문안·검수·발송 일관
+  benefitContent?: string | null;  // 관리자 직접 입력 혜택 — 생성 문안의 [혜택 ...] placeholder 치환
 }
 
 export interface ComplianceResult {
@@ -326,6 +329,12 @@ async function _orchestrateImpl(ctx: AgentContext): Promise<OrchestratorResult> 
   );
   mark('target', targetStart);
 
+  // ★ 2026-06-26: 자동마케팅이 폼에서 채널을 고정하면 AI 추천 대신 그 채널로 통일 (#1).
+  //   recommended_channel 1곳만 덮으면 하류(문안 생성·검수·비용·표시)가 전부 자동 일관 — 제안·테스트·발송 채널 일치.
+  if (ctx.forcedChannel && ['sms', 'lms', 'mms'].includes(ctx.forcedChannel.toLowerCase())) {
+    targetResult.recommended_channel = ctx.forcedChannel.toUpperCase();
+  }
+
   let estimatedCount = Math.max(0, targetResult.estimated_count || 0);
 
   // ============ 2. Target Verification (D168 — Tool Use SQL Loop 정신) ============
@@ -402,6 +411,15 @@ async function _orchestrateImpl(ctx: AgentContext): Promise<OrchestratorResult> 
       score: v.score,
     };
   });
+
+  // ★ 2026-06-26: 관리자가 입력한 혜택이 있으면 생성 문안의 [혜택 ...] placeholder를 그 값으로 치환 (#4).
+  //   AI는 혜택을 지어내지 않는다(미입력 시 placeholder 유지가 기본 → 승인 단계 차단). 관리자 작성값만 들어간다 — 거짓광고/정보통신망법 정합.
+  if (ctx.benefitContent && ctx.benefitContent.trim()) {
+    const benefit = ctx.benefitContent.trim();
+    for (const m of normalizedMessages) {
+      m.body = m.body.replace(/\[혜택[^\]]*\]/g, benefit);
+    }
+  }
 
   // ============ 4. Compliance Sub-agent (Opus) ============
   const complianceStart = Date.now();

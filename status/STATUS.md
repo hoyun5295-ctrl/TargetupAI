@@ -107,6 +107,15 @@
 
 ---
 
+### 🟡 2026-06-26 — 운영 디버깅 다수 + 자동마케팅 Phase 1 (★전부 미배포 / 다음 세션 끝에 한 번에 배포)
+> **배포 상태**: Harold 명시 = 다음 세션에서 자동마케팅 Phase 2~3까지 다 끝내고 **한 번에 배포**. 아래 전부 미배포(드래그/3항목/취소 fix=커밋됨·미배포, 자동마케팅 Phase 1=working tree).
+> **모바일DM 드래그 순서변경**: ① onPointerDown stopPropagation이 dnd-kit listeners.onPointerDown 덮어 드래그 미시작 → 제거. ② reorderSections가 splice 후 order 미부여 → normalizeOrder가 옛 order로 되돌림 → splice 후 order=index 재부여. (SectionList.tsx·dmBuilderStore.ts)
+> **디버깅 3항목**: item1 발송통계(manage/StatsTab)·예약캠페인에 문안 표시(백엔드 이미 message_content 반환, 프론트 표시만 누락). item2 AI 다듬기 하단 080 누락=validateAndNormalizeRefinedCandidates가 stripRejectNumberPatterns로 떼고 재부착 안 함 → 원본 footer 추출 재부착(services/ai.ts). item3 여정 5건(매장세그먼트 customer_conditions+store_name/store_code·1회→step1·Liquid 미리보기 렌더·대괄호 placeholder 패턴·요일 getKoreanCalendar 주입).
+> **아난티 긴급취소 검증 + 슈퍼관리자 취소 fix**: 아난티 취소는 sweeper(1분)가 막아 안전. 단 슈퍼관리자 취소(admin.ts)가 PG status만 바꾸고 MySQL 큐 즉시 삭제 안 함(0611 패턴) → cancelCampaign CT(큐 DELETE+잔존0 검증+환불, skipTimeCheck) 호출로 교체 → 긴급취소도 즉시 큐 비움.
+> **자동마케팅 Phase 1** (working tree): 6개 보고 이슈 처리. #1 채널(폼 선택+orchestrate recommended_channel override) #3 담당자 연락처(생성 경로 배선 — POST/createOperator가 드롭하던 것) #4 혜택(폼 입력+`[혜택]` placeholder 치환, AI 임의 X) #5 시각(폴 5분→1분) #2 버그아님(안전필터 정당 제외) #6 현행유지. continuous_operators 신규 컬럼 channel·benefit_content(ALTER) + 중복4 DROP. **다음 세션 = Phase 2~3 발전 4기능(D예산가드·A성과학습·B시각최적화·C다단계).** 인계 `docs/superpowers/handoffs/2026-06-26-auto-marketing-upgrade-handoff.md` · 설계 `docs/superpowers/specs/2026-06-26-auto-marketing-upgrade-design.md`. 상세 [[project_2026_0626_auto_marketing_phase1]].
+
+---
+
 ### 🟢 2026-06-25 (세션2) — CDP 갭보강 A~E + 모바일DM 아트디렉션 P1 + CustomerDataGate 디버깅3 (★전부 배포완료)
 > **CDP 갭보강 A~E (배포완료)**: 순수함수 TDD. A1 phone 자동갱신(타고객 점유만 skip)+A4 email≠phone 충돌 플래그(`cdp_identity_review` 테이블 생성완료)·B provider connectMethod/available 단일출처+고도몰/가비아 어댑터+register-providers(gap7)·C bulkImport truncation경고/occurred_at 미래클램프/버스트rate limit·D 여정트리거 분류(이벤트성 커서밖 0건=문서만)·E 문서. 상세 [[project_2026_0625_cdp_gap_hardening]].
 > **모바일DM 아트디렉션 엔진 P1 (배포완료)**: 근본=섹션마다 구도1개 고정+디렉터 색만. 섹션 구도(treatment hero5/coupon3/text_card3/cta3)+DM 아트디렉션(타입스케일·여백) 깨움. `dm-art-direction.ts`순수·렌더러 디스패처(classic byte불변 골든)·AI 디렉터 treatment출력(혜택0)·프론트 구도픽커. treatment는 Section데이터 영속(컬럼불요). P2이연=캔버스 픽셀미러·AD 뷰어영속. 상세 [[project_2026_0625_dm_art_direction_p1]].

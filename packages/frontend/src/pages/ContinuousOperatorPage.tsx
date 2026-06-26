@@ -98,6 +98,13 @@ interface ContinuousOperator {
   spamScoreThreshold?: number;
   maxSpamRetries?: number;
   autoSendLeadMinutes?: number | null;
+  // ★ 2026-06-26: 발송 채널 + 관리자 입력 혜택
+  channel?: 'sms' | 'lms' | 'mms';
+  benefitContent?: string | null;
+  // ★ Phase3 C (2026-06-26): 다단계 시퀀스 (1차 → N일 후 미반응자 리마인드)
+  sequenceEnabled?: boolean;
+  sequenceDelayDays?: number | null;
+  sequenceReminderContent?: string | null;
 }
 
 // ★ D212+ 1+2+3번 (2026-05-23 Harold 명시): AI 학습 영역 요약 응답
@@ -334,6 +341,13 @@ export default function ContinuousOperatorPage() {
           auto_send_lead_minutes: editing.autoSendLeadMinutes ?? 120,
           spam_score_threshold: editing.spamScoreThreshold ?? 30,
           max_spam_retries: editing.maxSpamRetries ?? 3,
+          // ★ 2026-06-26: 발송 채널(#1) + 관리자 입력 혜택(#4)
+          channel: editing.channel || 'lms',
+          benefit_content: editing.benefitContent ?? null,
+          // ★ Phase3 C: 다단계 시퀀스 (1차 → N일 후 미반응자 리마인드)
+          sequence_enabled: editing.sequenceEnabled === true,
+          sequence_delay_days: editing.sequenceEnabled ? (editing.sequenceDelayDays ?? 3) : null,
+          sequence_reminder_content: editing.sequenceEnabled ? (editing.sequenceReminderContent ?? null) : null,
         }),
       });
       const data = await res.json();
@@ -1230,6 +1244,72 @@ export default function ContinuousOperatorPage() {
                   maxLength={500}
                 />
                 <div className="text-[10px] text-white/40 mt-1">AI가 이해할 수 있도록 구체적으로 작성해주세요 (대상 + 목적 + 시점)</div>
+              </div>
+              {/* ★ 2026-06-26: 혜택 내용 (#4 — 관리자 직접 입력, AI 임의 생성 X) */}
+              <div>
+                <label className="text-xs font-medium text-white/70 block mb-1.5">혜택 내용 (선택 — 직접 입력)</label>
+                <input
+                  type="text"
+                  value={editing.benefitContent || ''}
+                  onChange={(e) => setEditing({ ...editing, benefitContent: e.target.value })}
+                  className="w-full px-3 py-2 bg-violet-900/50 border border-white/10 rounded-lg text-sm text-white placeholder-white/30 focus:outline-none focus:border-indigo-400/50 transition-colors"
+                  placeholder="예: 마스크팩 30% 할인 쿠폰 (유효기간 발급일+3일)"
+                  maxLength={200}
+                />
+                <div className="text-[10px] text-white/40 mt-1">입력하면 생성 문안의 [혜택 내용을 입력해주세요] 자리에 그대로 들어갑니다. 비워두면 담당자가 제안 단계에서 작성합니다. (AI가 혜택을 임의로 만들지 않습니다)</div>
+              </div>
+              {/* ★ 2026-06-26: 발송 채널 (#1 — 폼 선택, 제안·테스트·발송 일관) */}
+              <div>
+                <label className="text-xs font-medium text-white/70 block mb-1.5">발송 채널</label>
+                <div className="flex gap-2">
+                  {(['sms', 'lms', 'mms'] as const).map((ch) => (
+                    <button
+                      key={ch}
+                      type="button"
+                      onClick={() => setEditing({ ...editing, channel: ch })}
+                      className={`flex-1 py-2 text-xs font-medium rounded-lg border transition-colors ${(editing.channel || 'lms') === ch ? 'bg-indigo-500/40 border-indigo-400/60 text-indigo-50' : 'bg-violet-900/40 border-white/10 text-white/60 hover:text-white/90'}`}
+                    >
+                      {ch.toUpperCase()}
+                    </button>
+                  ))}
+                </div>
+                <div className="text-[10px] text-white/40 mt-1">제안·문안 테스트·실제 발송이 모두 이 채널로 통일됩니다.</div>
+              </div>
+              {/* ★ Phase3 C: 다단계 시퀀스 — 1차 발송 후 N일 미반응자 리마인드 (관리자 직접 입력 문안) */}
+              <div className="rounded-lg border border-white/10 bg-violet-900/30 p-3">
+                <label className="flex items-center justify-between cursor-pointer">
+                  <span className="text-xs font-medium text-white/80">다단계 시퀀스 — 미반응자 리마인드</span>
+                  <button
+                    type="button"
+                    onClick={() => setEditing({ ...editing, sequenceEnabled: !editing.sequenceEnabled })}
+                    className={`relative w-10 h-5 rounded-full transition-colors ${editing.sequenceEnabled ? 'bg-indigo-500' : 'bg-white/15'}`}
+                  >
+                    <span className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white transition-transform ${editing.sequenceEnabled ? 'translate-x-5' : ''}`} />
+                  </button>
+                </label>
+                <div className="text-[10px] text-white/40 mt-1">1차 발송 후 N일 동안 클릭하지 않은 고객에게만 리마인드를 자동 발송합니다.</div>
+                {editing.sequenceEnabled && (
+                  <div className="mt-3 space-y-2">
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs text-white/70">리마인드 대기</span>
+                      <input
+                        type="number" min={1} max={30}
+                        value={editing.sequenceDelayDays ?? 3}
+                        onChange={(e) => setEditing({ ...editing, sequenceDelayDays: e.target.value === '' ? null : Number(e.target.value) })}
+                        className="w-16 px-2 py-1.5 bg-violet-900/50 border border-white/10 rounded-lg text-sm text-white text-center focus:outline-none focus:border-indigo-400/50"
+                      />
+                      <span className="text-xs text-white/70">일 후</span>
+                    </div>
+                    <textarea
+                      value={editing.sequenceReminderContent || ''}
+                      onChange={(e) => setEditing({ ...editing, sequenceReminderContent: e.target.value })}
+                      className="w-full px-3 py-2 bg-violet-900/50 border border-white/10 rounded-lg text-sm text-white placeholder-white/30 resize-none h-20 focus:outline-none focus:border-indigo-400/50 transition-colors"
+                      placeholder="리마인드 문안을 직접 작성해주세요 (예: 아직 확인 못 하셨나요? 준비한 혜택이 곧 마감됩니다)"
+                      maxLength={2000}
+                    />
+                    <div className="text-[10px] text-white/40">리마인드 문안은 담당자가 직접 작성합니다 (AI가 임의로 만들지 않습니다). 발송 전 담당자에게 예약 알림이 전송됩니다.</div>
+                  </div>
+                )}
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>

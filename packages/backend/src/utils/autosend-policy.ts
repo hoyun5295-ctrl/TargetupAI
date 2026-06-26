@@ -54,6 +54,46 @@ export function decideStuckSendingRecovery(
 }
 
 /**
+ * 자율 발송 직전 예산 가드(순수). Phase2 D — 제안 생성 시점 차단과 별개로 발송 직전 1회 더 재검증.
+ *  - 제안 생성 → lead(기본 120분) 대기 사이 같은 오퍼레이터의 다른 발송이 예산을 소진했을 수 있어, 발송 직전 재확인.
+ *  - 예산(budgetMonthly/Daily) = 관리자 입력 컬럼, spent = 당월/당일 로그 SUM(누적 컬럼 X — 여정 J2), pendingCost = 그 제안 cost_estimate. 임의 상수 0.
+ *  - 판정 = `spent + pending > 한도` → 이번 발송이 한도를 넘기면 over. 정확히 한도에 닿으면(==) 허용.
+ *  - 예산 null = 무제한(가드 없음). month 우선 검사.
+ */
+export interface BudgetGuardInput {
+  budgetMonthly: number | null;
+  budgetDaily: number | null;
+  spentMonth: number;
+  spentToday: number;
+  pendingCost: number;
+}
+export interface BudgetGuardResult {
+  over: boolean;
+  scope: 'month' | 'day' | null;
+  reason: string;
+}
+export function decideBudgetGuard(input: BudgetGuardInput): BudgetGuardResult {
+  const pending = Math.max(0, Math.floor(Number(input.pendingCost)) || 0);
+  const spentMonth = Math.max(0, Math.floor(Number(input.spentMonth)) || 0);
+  const spentToday = Math.max(0, Math.floor(Number(input.spentToday)) || 0);
+  if (input.budgetMonthly != null && spentMonth + pending > input.budgetMonthly) {
+    return {
+      over: true,
+      scope: 'month',
+      reason: `월 예산 초과 — 발송 보류 (사용 ${spentMonth.toLocaleString()}원 + 이번 ${pending.toLocaleString()}원 > 한도 ${input.budgetMonthly.toLocaleString()}원)`,
+    };
+  }
+  if (input.budgetDaily != null && spentToday + pending > input.budgetDaily) {
+    return {
+      over: true,
+      scope: 'day',
+      reason: `일 한도 초과 — 발송 보류 (오늘 ${spentToday.toLocaleString()}원 + 이번 ${pending.toLocaleString()}원 > 한도 ${input.budgetDaily.toLocaleString()}원)`,
+    };
+  }
+  return { over: false, scope: null, reason: '' };
+}
+
+/**
  * 슈퍼관리자 자율발송 게이트 입력 정규화(순수). companies.cdp_auto_execute_* 4컬럼 UPDATE 직전 적용.
  *  - enabled: boolean true만 ON(문자열/숫자 → false).
  *  - maxRecipients: 1건 미만·과대 운영자 오타 방지 [1, 1,000,000], 미설정 1000.

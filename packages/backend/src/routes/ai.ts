@@ -1744,7 +1744,12 @@ router.post('/operator/continuous', async (req: Request, res: Response) => {
       return res.status(403).json({ success: false, error: '본 기능은 엔터프라이즈 베타 운영 중입니다.', code: 'BETA_GATE' });
     }
 
-    const { name, objective, schedule, schedule_time, schedule_day_of_week, schedule_day_of_month } = req.body;
+    const {
+      name, objective, schedule, schedule_time, schedule_day_of_week, schedule_day_of_month,
+      channel, benefit_content, admin_phone_numbers, backup_admin_phone, admin_alert_channel,
+      auto_send_lead_minutes, budget_monthly, budget_daily, budget_alert_threshold, delivery_policy,
+      sequence_enabled, sequence_delay_days, sequence_reminder_content,
+    } = req.body;
     const operator = await createOperator({
       companyId,
       createdBy: userId,
@@ -1754,6 +1759,21 @@ router.post('/operator/continuous', async (req: Request, res: Response) => {
       scheduleTime: schedule_time,
       scheduleDayOfWeek: schedule_day_of_week != null ? Number(schedule_day_of_week) : null,
       scheduleDayOfMonth: schedule_day_of_month != null ? Number(schedule_day_of_month) : null,
+      // ★ 2026-06-26: 생성 시에도 채널·혜택·담당자·예산 저장 (#1 채널 / #3 담당자·2h알림 / #4 혜택 fix)
+      channel,
+      benefitContent: typeof benefit_content === 'string' ? benefit_content : null,
+      adminPhoneNumbers: Array.isArray(admin_phone_numbers) ? admin_phone_numbers.filter((p: any) => typeof p === 'string' && p.trim()) : undefined,
+      backupAdminPhone: backup_admin_phone === undefined ? undefined : (backup_admin_phone === null ? null : String(backup_admin_phone)),
+      adminAlertChannel: ['sms', 'kakao', 'email'].includes(admin_alert_channel) ? admin_alert_channel : undefined,
+      autoSendLeadMinutes: auto_send_lead_minutes != null ? Number(auto_send_lead_minutes) : null,
+      budgetMonthly: budget_monthly === undefined ? undefined : (budget_monthly === null ? null : Number(budget_monthly)),
+      budgetDaily: budget_daily === undefined ? undefined : (budget_daily === null ? null : Number(budget_daily)),
+      budgetAlertThreshold: budget_alert_threshold !== undefined ? Number(budget_alert_threshold) : undefined,
+      deliveryPolicy: ['daily', 'weekly', 'monthly'].includes(delivery_policy) ? delivery_policy : undefined,
+      // ★ Phase3 C: 다단계 시퀀스 (1차 → N일 후 미반응자 리마인드)
+      sequenceEnabled: sequence_enabled === true,
+      sequenceDelayDays: sequence_delay_days != null ? Number(sequence_delay_days) : null,
+      sequenceReminderContent: typeof sequence_reminder_content === 'string' ? sequence_reminder_content : null,
     });
     return res.json({ success: true, operator });
   } catch (err: any) {
@@ -1794,6 +1814,8 @@ router.put('/operator/continuous/:id', async (req: Request, res: Response) => {
       delivery_policy, verification_required_days,
       admin_phone_numbers, backup_admin_phone, admin_alert_channel,
       opt_out_minutes, auto_send_lead_minutes, spam_score_threshold, max_spam_retries,
+      channel, benefit_content,
+      sequence_enabled, sequence_delay_days, sequence_reminder_content,
     } = req.body;
     const operator = await updateOperator(companyId, req.params.id, {
       name, objective, schedule, scheduleTime: schedule_time, status,
@@ -1812,6 +1834,13 @@ router.put('/operator/continuous/:id', async (req: Request, res: Response) => {
       autoSendLeadMinutes: auto_send_lead_minutes !== undefined ? Number(auto_send_lead_minutes) : undefined,
       spamScoreThreshold: spam_score_threshold !== undefined ? Number(spam_score_threshold) : undefined,
       maxSpamRetries: max_spam_retries !== undefined ? Number(max_spam_retries) : undefined,
+      // ★ 2026-06-26: 발송 채널 + 관리자 입력 혜택
+      channel: ['sms', 'lms', 'mms'].includes(channel) ? channel : undefined,
+      benefitContent: typeof benefit_content === 'string' ? benefit_content : undefined,
+      // ★ Phase3 C: 다단계 시퀀스
+      sequenceEnabled: sequence_enabled === undefined ? undefined : (sequence_enabled === true),
+      sequenceDelayDays: sequence_delay_days === undefined ? undefined : (sequence_delay_days === null ? null : Number(sequence_delay_days)),
+      sequenceReminderContent: sequence_reminder_content === undefined ? undefined : (typeof sequence_reminder_content === 'string' ? sequence_reminder_content : null),
     });
     if (!operator) return res.status(404).json({ success: false, error: 'Operator를 찾을 수 없습니다.' });
     return res.json({ success: true, operator });

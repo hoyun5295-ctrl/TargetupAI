@@ -6,7 +6,7 @@
  * delay_mode 3종: relative / specific_hour / next_business_day + 야간가드(09시 KST).
  */
 import assert from 'node:assert';
-import { calculateNextRunAt } from '../send-time-util';
+import { calculateNextRunAt, pickBestSendHour, computeOptimalSendAt } from '../send-time-util';
 
 let passed = 0;
 function ok(name: string, fn: () => void) { fn(); passed++; console.log(`  ok - ${name}`); }
@@ -45,6 +45,33 @@ ok('1일(24h) 후 15시 → 6/5 15시 KST(6/5 06:00Z)', () =>
   assert.strictEqual(calculateNextRunAt('relative_at_hour', 24, 15, noonKst).toISOString(), '2026-06-05T06:00:00.000Z'));
 ok('target null이면 relative로 폴백(+2h)', () =>
   assert.strictEqual(calculateNextRunAt('relative_at_hour', 2, null, noonKst).toISOString(), '2026-06-04T04:00:00.000Z'));
+
+console.log('[operator-send-time] pickBestSendHour — 회사 클릭 시각 피크 (실데이터, insufficient_data 폴백)');
+ok('표본 < 최소 → hour null (insufficient)', () => {
+  const r = pickBestSendHour([{ hour: 10, count: 5 }], 20, 8, 21);
+  assert.strictEqual(r.hour, null);
+  assert.ok(r.reason.includes('insufficient'));
+});
+ok('충분 + 발송가능 시간대 피크 → 그 시각', () => {
+  const r = pickBestSendHour([{ hour: 10, count: 30 }, { hour: 15, count: 50 }], 20, 8, 21);
+  assert.strictEqual(r.hour, 15);
+});
+ok('피크가 시간대 밖(새벽 3시)이면 시간대 내 최선 선택', () => {
+  const r = pickBestSendHour([{ hour: 3, count: 100 }, { hour: 10, count: 25 }], 20, 8, 21);
+  assert.strictEqual(r.hour, 10);
+});
+ok('클릭이 전부 시간대 밖 → null (현행 일정 유지)', () => {
+  const r = pickBestSendHour([{ hour: 2, count: 40 }, { hour: 23, count: 40 }], 20, 8, 21);
+  assert.strictEqual(r.hour, null);
+});
+
+console.log('[operator-send-time] computeOptimalSendAt — lead(정지 창) 보존 + 피크 시각 정렬');
+ok('bestHour null → now+lead 그대로 (현행 폴백)', () =>
+  assert.strictEqual(computeOptimalSendAt(noonKst, 120, null, 8, 21).toISOString(), '2026-06-04T04:00:00.000Z'));
+ok('bestHour 15시(아직 안 지남) → 오늘 15시 KST(06:00Z)', () =>
+  assert.strictEqual(computeOptimalSendAt(noonKst, 120, 15, 8, 21).toISOString(), '2026-06-04T06:00:00.000Z'));
+ok('bestHour 10시(earliest 13시 이후라 지남) → 내일 10시 KST(6/5 01:00Z)', () =>
+  assert.strictEqual(computeOptimalSendAt(noonKst, 120, 10, 8, 21).toISOString(), '2026-06-05T01:00:00.000Z'));
 
 console.log(`\n${passed} assertions passed`);
 process.exit(0);  // send-time-util → config/defaults 측 비동기 핸들(Redis 재시도) 정리용 — 검증 완료 후 즉시 종료

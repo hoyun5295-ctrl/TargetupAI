@@ -44,4 +44,21 @@ ok('LIMIT 포함', () => {
   assert.ok(/LIMIT\s+\d+/.test(sql));
 });
 
+console.log('[operator-recipients] excludeClickedSince — 다단계 시퀀스 미반응자(미클릭) 제외');
+ok('미지정(null/undefined) → message_click 안티조인 없음(기존 동작 불변)', () => {
+  const a = buildSendableRecipientsSql('', [], ['CID'], '');
+  const b = buildSendableRecipientsSql('', [], ['CID'], '', null);
+  assert.ok(!/message_click/.test(a.sql));
+  assert.ok(!/message_click/.test(b.sql));
+  assert.deepStrictEqual(b.params, ['CID']);
+});
+ok('지정 시 → cdp_events message_click NOT EXISTS + occurred_at >= 마지막 param', () => {
+  const since = new Date('2026-06-26T00:00:00Z');
+  const { sql, params } = buildSendableRecipientsSql('AND c.grade = $2', ['VIP'], ['CID'], '', since);
+  assert.ok(/NOT\s+EXISTS[\s\S]*cdp_events\s+ce[\s\S]*message_click/.test(sql), 'message_click 안티조인');
+  assert.ok(/ce\.customer_id\s*=\s*c\.id/.test(sql), 'customer 매칭');
+  assert.ok(/ce\.occurred_at\s*>=\s*\$3/.test(sql), 'since param $3');
+  assert.deepStrictEqual(params, ['CID', 'VIP', since]);
+});
+
 console.log(`\n${passed} assertions passed`);

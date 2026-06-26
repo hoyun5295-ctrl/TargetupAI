@@ -2004,8 +2004,27 @@ cd /home/administrator/targetup-app/packages/backend && npm install web-push @ty
 | total_auto_executed | integer DEFAULT 0 | 자동 실행 수 (ENT 옵션) |
 | created_at | timestamptz | |
 | updated_at | timestamptz | |
+| budget_monthly | integer | 월 예산(원) — Phase2 D 가드 (2026-06-26 실측) |
+| budget_daily | integer | 일 한도(원) — Phase2 D 가드 (2026-06-26 실측) |
+| budget_alert_threshold | integer DEFAULT 80 | 예산 임계 알림 % (2026-06-26 실측) |
+| delivery_policy | varchar DEFAULT 'daily' | (2026-06-26 실측) |
+| verification_required_days | integer DEFAULT 7 | (2026-06-26 실측) |
+| verification_passed_days | integer DEFAULT 0 | (2026-06-26 실측) |
+| admin_phone_numbers | text[] DEFAULT '{}' | 담당자 알림 연락처 (2026-06-26 실측) |
+| backup_admin_phone | varchar | 백업 담당자 연락처 (2026-06-26 실측) |
+| admin_alert_channel | varchar DEFAULT 'sms' | 담당자 알림 채널 (2026-06-26 실측) |
+| opt_out_minutes | integer DEFAULT 5 | (2026-06-26 실측) |
+| spam_score_threshold | integer DEFAULT 30 | (2026-06-26 실측) |
+| max_spam_retries | integer DEFAULT 3 | (2026-06-26 실측) |
+| auto_send_lead_minutes | integer | 자율 발송 lead(분) — 담당자 N분 전 알림 (2026-06-26 실측) |
+| channel | varchar(10) DEFAULT 'lms' | 발송 채널 sms/lms/mms (2026-06-26 ALTER 실측) |
+| benefit_content | text | 관리자 직접 입력 혜택 — AI 임의 생성 금지 (2026-06-26 ALTER 실측) |
+| sequence_enabled | boolean DEFAULT false | Phase3 C 다단계 시퀀스 on/off (2026-06-26 ALTER 실측) |
+| sequence_delay_days | integer | 1차 후 리마인드 대기일 1~30 (2026-06-26 ALTER 실측) |
+| sequence_reminder_content | text | 관리자 직접 입력 리마인드 문안 — AI 임의 생성 금지 (2026-06-26 ALTER 실측) |
 - INDEX: company_id, status WHERE status='active'
 - INDEX: status, next_run_at WHERE status='active' (worker 호출용)
+- 2026-06-26 information_schema 덤프 = 위 33컬럼 전부 존재 확정. 중복 4컬럼(notify_phones/backup_phones/notify_channel/lead_minutes)은 DROP 완료(데이터 0). 재질의 금지.
 
 ### operator_proposals (AI 매일 제안서) — D176 신규
 

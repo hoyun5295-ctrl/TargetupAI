@@ -27,6 +27,8 @@
 
 import { query } from '../config/database';
 import { applyVariableDefaults } from './journey-builder';
+// ★ Phase2 A (2026-06-26): α/β는 실측 count에서 도출(단일 진실) — bandit-arm 순수 모듈.
+import { deriveBanditArm } from './bandit-arm';
 
 // ════════════════════════════════════════════════════════════════════
 // 타입
@@ -232,34 +234,33 @@ export async function listAccumulatedVariantsByOperator(operatorId: string, limi
 }
 
 /**
- * 발송 결과 박은 후 reward 누적 — α/β 갱신.
- * - click 박힘: α += 1
- * - click 박지 X: β += 1
- * - conversion 박힘: 추가 reward (변환 가중치 박음)
+ * ★ Phase2 A (2026-06-26): 발송/클릭/전환 실측만 누적. α/β는 read 시 deriveBanditArm로 도출(단일 진실).
+ *   기존 가드 `if (sent<=0) return`은 클릭/전환(sent=0) 호출을 통째로 떨궈 학습을 정지시켰다 → 제거.
+ *   발송 = sent_count, 클릭 = click_count, 전환 = conversion_count. arm_alpha/arm_beta 컬럼은 미사용(vestigial).
  */
 export interface RecordRewardInput {
   variantId: string;
-  sent: number;          // 본 발송 박음 count
-  clicked: number;       // click 누적
-  converted: number;     // conversion 누적
+  sent: number;          // 이번 발송 수
+  clicked: number;       // 클릭 누적
+  converted: number;     // 전환 누적
 }
 
 export async function recordVariantReward(input: RecordRewardInput): Promise<void> {
-  const { variantId, sent, clicked, converted } = input;
-  if (sent <= 0) return;
-  const notClicked = Math.max(sent - clicked, 0);
-  // reward_total은 click 1점 + conversion 3점 가중 박음
+  const { variantId } = input;
+  const sent = Math.max(0, Math.floor(Number(input.sent)) || 0);
+  const clicked = Math.max(0, Math.floor(Number(input.clicked)) || 0);
+  const converted = Math.max(0, Math.floor(Number(input.converted)) || 0);
+  if (sent === 0 && clicked === 0 && converted === 0) return;
+  // reward_total = 클릭 1 + 전환 3 가중 (UI 표시 전용 — Bandit α/β는 count에서 도출, 이 값 미사용).
   const rewardIncrement = clicked + converted * 3;
   await query(
     `UPDATE operator_proposal_variants SET
        sent_count = sent_count + $2,
        click_count = click_count + $3,
        conversion_count = conversion_count + $4,
-       arm_alpha = arm_alpha + $3,
-       arm_beta = arm_beta + $5,
-       reward_total = reward_total + $6
+       reward_total = reward_total + $5
      WHERE id = $1::uuid`,
-    [variantId, sent, clicked, converted, notClicked, rewardIncrement]
+    [variantId, sent, clicked, converted, rewardIncrement]
   );
 }
 
@@ -313,16 +314,20 @@ export async function recommendVariantForProposal(
 // ════════════════════════════════════════════════════════════════════
 
 function mapRow(r: any): ProposalVariant {
+  const sentCount = r.sent_count || 0;
+  const clickCount = r.click_count || 0;
+  // ★ Phase2 A: α/β는 실측 count에서 도출(단일 진실). arm_alpha/arm_beta 컬럼은 미사용.
+  const arm = deriveBanditArm(sentCount, clickCount);
   return {
     id: r.id,
     proposalId: r.proposal_id,
     variantIndex: r.variant_index,
     messageBody: r.message_body,
     byteCount: r.byte_count || 0,
-    armAlpha: parseFloat(r.arm_alpha) || 1.0,
-    armBeta: parseFloat(r.arm_beta) || 1.0,
-    sentCount: r.sent_count || 0,
-    clickCount: r.click_count || 0,
+    armAlpha: arm.alpha,
+    armBeta: arm.beta,
+    sentCount,
+    clickCount,
     conversionCount: r.conversion_count || 0,
     rewardTotal: parseFloat(r.reward_total) || 0,
     createdAt: new Date(r.created_at),
@@ -375,22 +380,28 @@ export async function listJourneyStepVariants(stepId: string): Promise<JourneySt
      ORDER BY variant_id ASC`,
     [stepId]
   );
-  return r.rows.map((row: any) => ({
-    id: row.id,
-    stepId: row.step_id,
-    variantId: row.variant_id,
-    messageTemplate: row.message_template,
-    subject: row.subject,
-    channel: row.channel,
-    alimtalkTemplateCode: row.alimtalk_template_code,
-    alimtalkVariableMap: row.alimtalk_variable_map,
-    trafficWeight: parseFloat(row.traffic_weight) || 0.5,
-    banditAlpha: parseFloat(row.bandit_alpha) || 1.0,
-    banditBeta: parseFloat(row.bandit_beta) || 1.0,
-    sentCount: row.sent_count || 0,
-    clickCount: row.click_count || 0,
-    conversionCount: row.conversion_count || 0,
-  }));
+  return r.rows.map((row: any) => {
+    const sentCount = row.sent_count || 0;
+    const clickCount = row.click_count || 0;
+    // ★ Phase2 A: α/β는 실측 count에서 도출(단일 진실). bandit_alpha/bandit_beta 컬럼은 미사용.
+    const arm = deriveBanditArm(sentCount, clickCount);
+    return {
+      id: row.id,
+      stepId: row.step_id,
+      variantId: row.variant_id,
+      messageTemplate: row.message_template,
+      subject: row.subject,
+      channel: row.channel,
+      alimtalkTemplateCode: row.alimtalk_template_code,
+      alimtalkVariableMap: row.alimtalk_variable_map,
+      trafficWeight: parseFloat(row.traffic_weight) || 0.5,
+      banditAlpha: arm.alpha,
+      banditBeta: arm.beta,
+      sentCount,
+      clickCount,
+      conversionCount: row.conversion_count || 0,
+    };
+  });
 }
 
 /**
@@ -436,7 +447,9 @@ export function selectJourneyStepVariant(variants: JourneyStepVariant[]): Journe
 }
 
 /**
- * journey_step_variants 발송 reward 누적 — α/β 갱신.
+ * ★ Phase2 A (2026-06-26): journey_step_variants 발송/클릭/전환 실측만 누적.
+ *   α/β는 read 시 deriveBanditArm로 도출(단일 진실). 기존 가드 `if (sent<=0) return`은 클릭/전환(sent=0)
+ *   호출(short-url:클릭 +1, cdp:전환)을 통째로 떨궈 학습을 정지시켰다 → 제거. bandit_alpha/bandit_beta 미사용.
  */
 export async function recordJourneyStepVariantReward(
   variantId: string,
@@ -444,18 +457,49 @@ export async function recordJourneyStepVariantReward(
   clicked: number,
   converted: number
 ): Promise<void> {
-  if (sent <= 0) return;
-  const notClicked = Math.max(sent - clicked, 0);
+  const s = Math.max(0, Math.floor(Number(sent)) || 0);
+  const c = Math.max(0, Math.floor(Number(clicked)) || 0);
+  const v = Math.max(0, Math.floor(Number(converted)) || 0);
+  if (s === 0 && c === 0 && v === 0) return;
   await query(
     `UPDATE journey_step_variants SET
        sent_count = sent_count + $2,
        click_count = click_count + $3,
        conversion_count = conversion_count + $4,
-       bandit_alpha = bandit_alpha + $3,
-       bandit_beta = bandit_beta + $5,
        updated_at = NOW()
      WHERE id = $1::uuid`,
-    [variantId, sent, clicked, converted, notClicked]
+    [variantId, s, c, v]
+  );
+}
+
+/**
+ * ★ Phase2 A (2026-06-26): 단축 URL 클릭/전환을 변이 종류에 맞는 테이블로 라우팅.
+ *   변이 id(uuid)는 전역 유일 → journey_step_variants / operator_proposal_variants 중 매칭되는 곳만 누적.
+ *   여정·자동마케팅 short URL이 같은 클릭 경로(short-url.ts)를 공유하므로 종류 컬럼 없이 안전 분기.
+ *   click_count/conversion_count만 누적 — α/β는 read 시 deriveBanditArm로 도출(단일 진실).
+ */
+export async function recordVariantClickConversion(
+  variantId: string,
+  clicked: number,
+  converted: number,
+): Promise<void> {
+  const c = Math.max(0, Math.floor(Number(clicked)) || 0);
+  const v = Math.max(0, Math.floor(Number(converted)) || 0);
+  if (c === 0 && v === 0) return;
+  // 여정 변이 우선 시도 (현재 클릭 대부분 여정). 매칭 0건이면 자동마케팅 변이로.
+  const j = await query(
+    `UPDATE journey_step_variants
+       SET click_count = click_count + $2, conversion_count = conversion_count + $3, updated_at = NOW()
+     WHERE id = $1::uuid RETURNING id`,
+    [variantId, c, v],
+  );
+  if (j.rows.length > 0) return;
+  await query(
+    `UPDATE operator_proposal_variants
+       SET click_count = click_count + $2, conversion_count = conversion_count + $3,
+           reward_total = reward_total + $4
+     WHERE id = $1::uuid`,
+    [variantId, c, v, c + v * 3],
   );
 }
 

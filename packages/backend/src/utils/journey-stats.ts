@@ -13,6 +13,8 @@
  */
 
 import { query } from '../config/database';
+// ★ Phase2 A (2026-06-26): 사후확률 α/β는 실측 count(sent/click)에서 도출 — bandit-arm 단일 진실.
+import { deriveBanditArm } from './bandit-arm';
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // 외부 노출 인터페이스
@@ -413,9 +415,8 @@ async function getJourneyWeekdayStats(journeyId: string): Promise<JourneyWeekday
 
 async function getJourneyVariantStats(journeyId: string): Promise<JourneyVariantStat[]> {
   const r = await query(
-    // ★ 2026-06-06 J3 정정: journey_step_variants의 쓰기·선택 경로는 bandit_alpha/bandit_beta/variant_id를 쓴다.
-    //   옛 코드는 한 번도 갱신되지 않는 arm_alpha/arm_beta/variant_label(503 정정 때 추가만)을 읽어 사후확률이 0.5 고정이었다.
-    //   map이 쓰는 출력명(arm_alpha/arm_beta/variant_label/variant_id)에 실제 컬럼을 별칭으로 맞춰 map은 그대로 둔다.
+    // ★ Phase2 A (2026-06-26): α/β·사후확률은 실측 count(sent_count/click_count)에서 deriveBanditArm로 도출.
+    //   기존 bandit_alpha/bandit_beta 컬럼 직접 읽기 폐기 — 컬럼은 더 이상 갱신 안 되며 과거값은 drift 상태.
     `SELECT
        v.step_id,
        v.id AS variant_id,
@@ -423,10 +424,7 @@ async function getJourneyVariantStats(journeyId: string): Promise<JourneyVariant
        v.traffic_weight,
        v.sent_count,
        v.click_count,
-       v.conversion_count,
-       v.bandit_alpha AS arm_alpha,
-       v.bandit_beta AS arm_beta,
-       CASE WHEN (v.bandit_alpha + v.bandit_beta) > 0 THEN v.bandit_alpha / (v.bandit_alpha + v.bandit_beta) ELSE 0.5 END AS posterior_mean
+       v.conversion_count
      FROM journey_step_variants v
      INNER JOIN journey_steps s ON s.id = v.step_id
      WHERE s.journey_id = $1::uuid
@@ -434,18 +432,23 @@ async function getJourneyVariantStats(journeyId: string): Promise<JourneyVariant
     [journeyId]
   );
 
-  return r.rows.map((row: any) => ({
-    stepId: row.step_id,
-    variantId: row.variant_id,
-    variantLabel: row.variant_label,
-    trafficWeight: Number(row.traffic_weight) || 0,
-    sentCount: Number(row.sent_count) || 0,
-    clickCount: Number(row.click_count) || 0,
-    conversionCount: Number(row.conversion_count) || 0,
-    posteriorMean: Number(row.posterior_mean) || 0,
-    posteriorAlpha: Number(row.arm_alpha) || 1,
-    posteriorBeta: Number(row.arm_beta) || 1,
-  }));
+  return r.rows.map((row: any) => {
+    const sentCount = Number(row.sent_count) || 0;
+    const clickCount = Number(row.click_count) || 0;
+    const arm = deriveBanditArm(sentCount, clickCount);
+    return {
+      stepId: row.step_id,
+      variantId: row.variant_id,
+      variantLabel: row.variant_label,
+      trafficWeight: Number(row.traffic_weight) || 0,
+      sentCount,
+      clickCount,
+      conversionCount: Number(row.conversion_count) || 0,
+      posteriorMean: arm.alpha / (arm.alpha + arm.beta),
+      posteriorAlpha: arm.alpha,
+      posteriorBeta: arm.beta,
+    };
+  });
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
