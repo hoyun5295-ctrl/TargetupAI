@@ -95,72 +95,98 @@ export default function StatsTab() {
   return (
     <>
 
-      <div className="bg-white rounded-lg shadow">
-        <div className="px-6 py-4 border-b">
-          <h2 className="text-lg font-semibold">발송 통계</h2>
+      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+        {/* 헤더 */}
+        <div className="px-6 py-5 border-b border-slate-100 flex items-center gap-3">
+          <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-indigo-50 text-indigo-600">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-5 h-5"><path d="M3 3v18h18" /><path d="M18 17V9" /><path d="M13 17V5" /><path d="M8 17v-3" /></svg>
+          </span>
+          <div>
+            <h2 className="text-lg font-bold text-slate-900 tracking-tight">발송 통계</h2>
+            <p className="text-xs text-slate-400 mt-0.5">기간·사용자별 발송 실적과 상세 내역</p>
+          </div>
         </div>
 
         {/* 필터 */}
-        <div className="px-6 py-3 bg-gray-50 border-b flex flex-wrap items-center gap-4">
-          <div className="flex items-center gap-2">
-            <button onClick={() => setView('daily')}
-              className={`px-3 py-1.5 rounded-lg text-sm font-medium transition ${view === 'daily' ? 'bg-blue-600 text-white' : 'bg-white border text-gray-600 hover:bg-gray-50'}`}>
-              일별
-            </button>
-            <button onClick={() => setView('monthly')}
-              className={`px-3 py-1.5 rounded-lg text-sm font-medium transition ${view === 'monthly' ? 'bg-blue-600 text-white' : 'bg-white border text-gray-600 hover:bg-gray-50'}`}>
-              월별
-            </button>
+        <div className="px-6 py-4 border-b border-slate-100 flex flex-wrap items-center gap-3">
+          <div className="inline-flex rounded-xl bg-slate-100 p-1">
+            {(['daily', 'monthly'] as const).map((v) => (
+              <button key={v} onClick={() => setView(v)}
+                className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-all ${view === v ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
+                {v === 'daily' ? '일별' : '월별'}
+              </button>
+            ))}
           </div>
           <div className="flex items-center gap-2">
             <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)}
-              className="px-3 py-1.5 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
-            <span className="text-gray-400">~</span>
+              className="px-3 py-2 border border-slate-200 rounded-lg text-sm text-slate-700 focus:border-indigo-400 focus:ring-4 focus:ring-indigo-500/10 outline-none transition" />
+            <span className="text-slate-300">~</span>
             <input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)}
-              className="px-3 py-1.5 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
+              className="px-3 py-2 border border-slate-200 rounded-lg text-sm text-slate-700 focus:border-indigo-400 focus:ring-4 focus:ring-indigo-500/10 outline-none transition" />
           </div>
           {users.length > 1 && (
             <select value={filterUserId} onChange={(e) => setFilterUserId(e.target.value)}
-              className="px-3 py-1.5 border rounded-lg text-sm bg-white focus:ring-2 focus:ring-blue-500 outline-none">
-              <option value="">👤 전체 사용자</option>
+              className="px-3 py-2 border border-slate-200 rounded-lg text-sm text-slate-700 bg-white focus:border-indigo-400 focus:ring-4 focus:ring-indigo-500/10 outline-none transition">
+              <option value="">전체 사용자</option>
               {users.map(u => (
                 <option key={u.id} value={u.id}>{u.name || u.login_id}</option>
               ))}
             </select>
           )}
           <button onClick={() => loadStats(1)}
-            className="px-4 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-medium transition">
+            className="ml-auto inline-flex items-center gap-1.5 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 text-white rounded-lg text-sm font-semibold shadow-sm shadow-indigo-600/20 transition">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4"><circle cx="11" cy="11" r="8" /><path d="m21 21-4.3-4.3" /></svg>
             조회
           </button>
         </div>
 
         {/* 요약 카드 — 실발송 3개 + 테스트 1개 (비용 포함) */}
         {stats?.summary && (
-          <div className="px-6 py-4 grid grid-cols-4 gap-4 border-b">
-            <div className="bg-blue-50 rounded-xl p-4 text-center">
-              <p className="text-xs text-gray-500 mb-1">총 발송</p>
-              <p className="text-xl font-bold text-blue-700">{formatNum(stats.summary.total_sent)}</p>
+          <div className="px-6 py-5 grid grid-cols-2 md:grid-cols-4 gap-3 border-b border-slate-100">
+            {/* 총 발송 */}
+            <div className="group rounded-2xl border border-slate-200 bg-white p-4 transition hover:shadow-md hover:border-slate-300">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-medium text-slate-500">총 발송</span>
+                <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-sky-50 text-sky-600 transition group-hover:scale-110">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4"><path d="m22 2-7 20-4-9-9-4Z" /><path d="M22 2 11 13" /></svg>
+                </span>
+              </div>
+              <p className="mt-2.5 text-3xl font-bold tracking-tight text-slate-900 tabular-nums">{formatNum(stats.summary.total_sent)}</p>
             </div>
-            <div className="bg-green-50 rounded-xl p-4 text-center">
-              <p className="text-xs text-gray-500 mb-1">성공</p>
-              <p className="text-xl font-bold text-green-700">{formatNum(stats.summary.total_success)}</p>
+            {/* 성공 */}
+            <div className="group rounded-2xl border border-slate-200 bg-white p-4 transition hover:shadow-md hover:border-slate-300">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-medium text-slate-500">성공</span>
+                <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-emerald-50 text-emerald-600 transition group-hover:scale-110">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" /><path d="m9 11 3 3L22 4" /></svg>
+                </span>
+              </div>
+              <p className="mt-2.5 text-3xl font-bold tracking-tight text-emerald-600 tabular-nums">{formatNum(stats.summary.total_success)}</p>
             </div>
-            <div className="bg-red-50 rounded-xl p-4 text-center">
-              <p className="text-xs text-gray-500 mb-1">실패</p>
-              <p className="text-xl font-bold text-red-700">{formatNum(stats.summary.total_fail)}</p>
+            {/* 실패 */}
+            <div className="group rounded-2xl border border-slate-200 bg-white p-4 transition hover:shadow-md hover:border-slate-300">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-medium text-slate-500">실패</span>
+                <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-rose-50 text-rose-500 transition group-hover:scale-110">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4"><circle cx="12" cy="12" r="10" /><path d="m15 9-6 6" /><path d="m9 9 6 6" /></svg>
+                </span>
+              </div>
+              <p className={`mt-2.5 text-3xl font-bold tracking-tight tabular-nums ${Number(stats.summary.total_fail) > 0 ? 'text-rose-500' : 'text-slate-300'}`}>{formatNum(stats.summary.total_fail)}</p>
             </div>
-            <div className="bg-amber-50 rounded-xl p-4 text-center border border-amber-100">
-              <p className="text-xs text-gray-500 mb-1">🧪 테스트</p>
-              <p className="text-xl font-bold text-amber-700">{formatNum(testSummary?.total || 0)}</p>
+            {/* 테스트 */}
+            <div className="group rounded-2xl border border-amber-200/70 bg-amber-50/40 p-4 transition hover:shadow-md hover:border-amber-300">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-medium text-slate-500">테스트 발송</span>
+                <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-amber-100 text-amber-600 transition group-hover:scale-110">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4"><path d="M14.5 2v17.5c0 1.4-1.1 2.5-2.5 2.5s-2.5-1.1-2.5-2.5V2" /><path d="M8.5 2h7" /><path d="M9.5 16h5" /></svg>
+                </span>
+              </div>
+              <p className="mt-2.5 text-3xl font-bold tracking-tight text-amber-600 tabular-nums">{formatNum(testSummary?.total || 0)}</p>
               {testSummary && testSummary.total > 0 && (
-                <>
-                  <p className="text-[10px] text-gray-400 mt-0.5">
-                    SMS {testSummary.sms} · LMS {testSummary.lms}
-                  </p>
-                  <p className="text-xs font-bold text-amber-600 mt-0.5">
-                    {(testSummary.cost || 0).toLocaleString()}원
-                  </p>
-                </>
+                <div className="mt-1 flex items-center gap-2 text-[11px]">
+                  <span className="text-slate-400">SMS {testSummary.sms} · LMS {testSummary.lms}</span>
+                  <span className="font-semibold text-amber-600">{(testSummary.cost || 0).toLocaleString()}원</span>
+                </div>
               )}
             </div>
           </div>
@@ -169,34 +195,40 @@ export default function StatsTab() {
         {/* 테이블 */}
         <div className="overflow-x-auto">
           {loading ? (
-            <div className="p-8 text-center text-gray-500">로딩 중...</div>
+            <div className="flex flex-col items-center justify-center gap-3 py-16 text-slate-400">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-6 h-6 animate-spin"><path d="M21 12a9 9 0 1 1-6.219-8.56" /></svg>
+              <span className="text-sm">불러오는 중…</span>
+            </div>
           ) : (
             <table className="w-full text-sm">
-              <thead className="bg-gray-50 border-b">
-                <tr>
-                  <th className="px-4 py-3 text-left font-medium text-gray-600">{view === 'monthly' ? '월' : '날짜'}</th>
-                  <th className="px-4 py-3 text-right font-medium text-gray-600">발송 횟수</th>
-                  <th className="px-4 py-3 text-right font-medium text-gray-600">발송</th>
-                  <th className="px-4 py-3 text-right font-medium text-gray-600">성공</th>
-                  <th className="px-4 py-3 text-right font-medium text-gray-600">실패</th>
-                  <th className="px-4 py-3 text-center font-medium text-gray-600">상세</th>
+              <thead>
+                <tr className="border-b border-slate-100">
+                  <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-400">{view === 'monthly' ? '월' : '날짜'}</th>
+                  <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wider text-slate-400">발송 횟수</th>
+                  <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wider text-slate-400">발송</th>
+                  <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wider text-slate-400">성공</th>
+                  <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wider text-slate-400">실패</th>
+                  <th className="px-6 py-3 text-center text-xs font-semibold uppercase tracking-wider text-slate-400">상세</th>
                 </tr>
               </thead>
-              <tbody className="divide-y">
+              <tbody className="divide-y divide-slate-50">
                 {rows.length === 0 ? (
-                  <tr><td colSpan={6} className="px-4 py-8 text-center text-gray-500">데이터가 없습니다.</td></tr>
+                  <tr><td colSpan={6} className="px-4 py-16 text-center text-sm text-slate-400">표시할 발송 내역이 없습니다.</td></tr>
                 ) : rows.map((r: any, i: number) => {
                   const dateKey = r.period || r.date || r.month;
                   return (
-                    <tr key={i} className="hover:bg-gray-50">
-                      <td className="px-4 py-3 font-medium">{dateKey}</td>
-                      <td className="px-4 py-3 text-right">{formatNum(r.runs)}</td>
-                      <td className="px-4 py-3 text-right">{formatNum(r.sent)}</td>
-                      <td className="px-4 py-3 text-right text-green-600 font-medium">{formatNum(r.success)}</td>
-                      <td className="px-4 py-3 text-right text-red-600">{formatNum(r.fail)}</td>
-                      <td className="px-4 py-3 text-center">
+                    <tr key={i} className="group transition hover:bg-slate-50/70">
+                      <td className="px-6 py-3.5 font-semibold text-slate-700">{dateKey}</td>
+                      <td className="px-4 py-3.5 text-right text-slate-500 tabular-nums">{formatNum(r.runs)}</td>
+                      <td className="px-4 py-3.5 text-right text-slate-700 font-medium tabular-nums">{formatNum(r.sent)}</td>
+                      <td className="px-4 py-3.5 text-right text-emerald-600 font-semibold tabular-nums">{formatNum(r.success)}</td>
+                      <td className={`px-4 py-3.5 text-right font-medium tabular-nums ${Number(r.fail) > 0 ? 'text-rose-500' : 'text-slate-300'}`}>{formatNum(r.fail)}</td>
+                      <td className="px-6 py-3.5 text-center">
                         <button onClick={() => loadDetail(dateKey)}
-                          className="text-xs text-blue-600 hover:text-blue-800 font-medium">보기</button>
+                          className="inline-flex items-center gap-1 rounded-lg px-2.5 py-1 text-xs font-semibold text-indigo-600 hover:bg-indigo-50 transition">
+                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-3.5 h-3.5"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z" /><circle cx="12" cy="12" r="3" /></svg>
+                          보기
+                        </button>
                       </td>
                     </tr>
                   );
@@ -208,27 +240,27 @@ export default function StatsTab() {
 
         {/* 페이징 */}
         {totalPages > 1 && (
-          <div className="px-6 py-3 border-t flex items-center justify-between">
-            <span className="text-sm text-gray-500">
-              {startIdx}~{endIdx} / {totalCount}건
+          <div className="px-6 py-4 border-t border-slate-100 flex items-center justify-between">
+            <span className="text-xs text-slate-400 tabular-nums">
+              {startIdx}–{endIdx} / 전체 {totalCount}건
             </span>
             <div className="flex items-center gap-1">
               <button onClick={() => loadStats(Math.max(1, page - 1))} disabled={page === 1}
-                className="px-3 py-1.5 text-sm rounded-lg border bg-white hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed transition">
+                className="px-3 py-1.5 text-sm rounded-lg border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed transition">
                 이전
               </button>
               {getPageNumbers().map((p, i) =>
                 p === '...' ? (
-                  <span key={`dots-${i}`} className="px-2 text-gray-400">…</span>
+                  <span key={`dots-${i}`} className="px-2 text-slate-300">…</span>
                 ) : (
                   <button key={p} onClick={() => loadStats(p as number)}
-                    className={`px-3 py-1.5 text-sm rounded-lg transition ${p === page ? 'bg-blue-600 text-white' : 'bg-white border text-gray-600 hover:bg-gray-50'}`}>
+                    className={`min-w-[2.25rem] px-3 py-1.5 text-sm font-medium rounded-lg transition tabular-nums ${p === page ? 'bg-indigo-600 text-white shadow-sm shadow-indigo-600/20' : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-50'}`}>
                     {p}
                   </button>
                 )
               )}
               <button onClick={() => loadStats(Math.min(totalPages, page + 1))} disabled={page === totalPages}
-                className="px-3 py-1.5 text-sm rounded-lg border bg-white hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed transition">
+                className="px-3 py-1.5 text-sm rounded-lg border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed transition">
                 다음
               </button>
             </div>
@@ -242,92 +274,116 @@ export default function StatsTab() {
           onClick={() => { setDetailInfo(null); setDetail(null); }}>
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-5xl mx-4 max-h-[85vh] overflow-auto animate-[zoomIn_0.2s_ease-out]"
             onClick={(e) => e.stopPropagation()}>
-            <div className="px-6 pt-6 pb-4 bg-gradient-to-r from-blue-50 to-indigo-50 border-b sticky top-0 z-10">
-              <div className="flex justify-between items-center">
-                <h3 className="text-lg font-bold text-gray-900">📊 {detailInfo.date} 상세</h3>
+            <div className="px-6 py-5 bg-gradient-to-r from-indigo-50 via-white to-white border-b border-slate-100 sticky top-0 z-10">
+              <div className="flex justify-between items-center gap-3">
+                <div className="flex items-center gap-3">
+                  <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-indigo-600 text-white shadow-sm shadow-indigo-600/20">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-5 h-5"><path d="M3 3v18h18" /><path d="M18 17V9" /><path d="M13 17V5" /><path d="M8 17v-3" /></svg>
+                  </span>
+                  <div>
+                    <p className="text-[11px] font-semibold uppercase tracking-wide text-indigo-500">발송 상세</p>
+                    <h3 className="text-lg font-bold text-slate-900 tracking-tight">{detailInfo.date}</h3>
+                  </div>
+                </div>
                 <button onClick={() => { setDetailInfo(null); setDetail(null); }}
-                  className="text-gray-400 hover:text-gray-600 text-xl">✕</button>
+                  className="shrink-0 w-8 h-8 flex items-center justify-center rounded-full text-slate-400 hover:text-slate-700 hover:bg-white transition text-xl leading-none">✕</button>
               </div>
             </div>
 
             {detailLoading ? (
-              <div className="p-8 text-center text-gray-500">로딩 중...</div>
+              <div className="flex flex-col items-center justify-center gap-3 py-16 text-slate-400">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-6 h-6 animate-spin"><path d="M21 12a9 9 0 1 1-6.219-8.56" /></svg>
+                <span className="text-sm">불러오는 중…</span>
+              </div>
             ) : detail ? (
               <div className="p-6 space-y-6">
                 {/* 사용자별 통계 (비용 포함) */}
                 {detail.userStats?.length > 0 && (
                   <div>
-                    <h4 className="text-sm font-semibold text-gray-700 mb-2">👤 사용자별</h4>
+                    <h4 className="flex items-center gap-2 text-sm font-bold text-slate-800 mb-2.5">
+                      <span className="flex h-5 w-5 items-center justify-center rounded-md bg-violet-100 text-violet-600">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-3 h-3"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2" /><circle cx="12" cy="7" r="4" /></svg>
+                      </span>
+                      사용자별
+                    </h4>
+                    <div className="rounded-xl border border-slate-200 overflow-hidden">
                     <table className="w-full text-sm">
-                      <thead className="bg-gray-50">
-                        <tr>
-                          <th className="px-3 py-2 text-left font-medium text-gray-600">이름</th>
-                          <th className="px-3 py-2 text-left font-medium text-gray-600">부서</th>
-                          <th className="px-3 py-2 text-right font-medium text-gray-600">발송</th>
-                          <th className="px-3 py-2 text-right font-medium text-gray-600">성공</th>
-                          <th className="px-3 py-2 text-right font-medium text-gray-600">실패</th>
-                          <th className="px-3 py-2 text-right font-medium text-gray-600">비용</th>
+                      <thead className="bg-slate-50">
+                        <tr className="border-b border-slate-100">
+                          <th className="px-4 py-2.5 text-left text-[11px] font-semibold uppercase tracking-wider text-slate-400">이름</th>
+                          <th className="px-4 py-2.5 text-left text-[11px] font-semibold uppercase tracking-wider text-slate-400">부서</th>
+                          <th className="px-4 py-2.5 text-right text-[11px] font-semibold uppercase tracking-wider text-slate-400">발송</th>
+                          <th className="px-4 py-2.5 text-right text-[11px] font-semibold uppercase tracking-wider text-slate-400">성공</th>
+                          <th className="px-4 py-2.5 text-right text-[11px] font-semibold uppercase tracking-wider text-slate-400">실패</th>
+                          <th className="px-4 py-2.5 text-right text-[11px] font-semibold uppercase tracking-wider text-slate-400">비용</th>
                         </tr>
                       </thead>
-                      <tbody className="divide-y">
+                      <tbody className="divide-y divide-slate-50">
                         {detail.userStats.map((u: any, i: number) => (
-                          <tr key={i} className="hover:bg-gray-50">
-                            <td className="px-3 py-2 font-medium">{u.user_name || '미지정'}</td>
-                            <td className="px-3 py-2 text-gray-600">{u.department || '-'}</td>
-                            <td className="px-3 py-2 text-right">{formatNum(u.sent)}</td>
-                            <td className="px-3 py-2 text-right text-green-600">{formatNum(u.success)}</td>
-                            <td className="px-3 py-2 text-right text-red-600">{formatNum(u.fail)}</td>
-                            <td className="px-3 py-2 text-right text-amber-600 font-medium">
+                          <tr key={i} className="hover:bg-slate-50/70 transition">
+                            <td className="px-4 py-2.5 font-semibold text-slate-700">{u.user_name || '미지정'}</td>
+                            <td className="px-4 py-2.5 text-slate-500">{u.department || '-'}</td>
+                            <td className="px-4 py-2.5 text-right text-slate-600 tabular-nums">{formatNum(u.sent)}</td>
+                            <td className="px-4 py-2.5 text-right text-emerald-600 font-medium tabular-nums">{formatNum(u.success)}</td>
+                            <td className="px-4 py-2.5 text-right text-rose-500 tabular-nums">{formatNum(u.fail)}</td>
+                            <td className="px-4 py-2.5 text-right text-amber-600 font-semibold tabular-nums">
                               {(u.cost || 0).toLocaleString()}원
                             </td>
                           </tr>
                         ))}
                       </tbody>
                     </table>
+                    </div>
                   </div>
                 )}
 
                 {/* 캠페인 상세 */}
                 {detail.campaigns?.length > 0 && (
                   <div>
-                    <h4 className="text-sm font-semibold text-gray-700 mb-2">📋 캠페인별</h4>
-                    <div className="overflow-x-auto">
+                    <h4 className="flex items-center gap-2 text-sm font-bold text-slate-800 mb-2.5">
+                      <span className="flex h-5 w-5 items-center justify-center rounded-md bg-indigo-100 text-indigo-600">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-3 h-3"><rect x="3" y="4" width="18" height="16" rx="2" /><path d="M3 9h18" /></svg>
+                      </span>
+                      캠페인별
+                    </h4>
+                    <div className="rounded-xl border border-slate-200 overflow-x-auto">
                     <table className="w-full text-sm whitespace-nowrap">
-                      <thead className="bg-gray-50">
-                        <tr>
-                          <th className="px-3 py-2 text-left font-medium text-gray-600">캠페인</th>
-                          <th className="px-3 py-2 text-left font-medium text-gray-600">유형</th>
-                          <th className="px-3 py-2 text-left font-medium text-gray-600">담당자</th>
-                          <th className="px-3 py-2 text-right font-medium text-gray-600">발송</th>
-                          <th className="px-3 py-2 text-right font-medium text-gray-600">성공</th>
-                          <th className="px-3 py-2 text-right font-medium text-gray-600">실패</th>
-                          <th className="px-3 py-2 text-left font-medium text-gray-600">메시지내용</th>
+                      <thead className="bg-slate-50">
+                        <tr className="border-b border-slate-100">
+                          <th className="px-4 py-2.5 text-left text-[11px] font-semibold uppercase tracking-wider text-slate-400">캠페인</th>
+                          <th className="px-4 py-2.5 text-left text-[11px] font-semibold uppercase tracking-wider text-slate-400">유형</th>
+                          <th className="px-4 py-2.5 text-left text-[11px] font-semibold uppercase tracking-wider text-slate-400">담당자</th>
+                          <th className="px-4 py-2.5 text-right text-[11px] font-semibold uppercase tracking-wider text-slate-400">발송</th>
+                          <th className="px-4 py-2.5 text-right text-[11px] font-semibold uppercase tracking-wider text-slate-400">성공</th>
+                          <th className="px-4 py-2.5 text-right text-[11px] font-semibold uppercase tracking-wider text-slate-400">실패</th>
+                          <th className="px-4 py-2.5 text-left text-[11px] font-semibold uppercase tracking-wider text-slate-400">메시지내용</th>
                         </tr>
                       </thead>
-                      <tbody className="divide-y">
+                      <tbody className="divide-y divide-slate-50">
                         {detail.campaigns.map((c: any, i: number) => (
-                          <tr key={i} className="hover:bg-gray-50">
-                            <td className="px-3 py-2 font-medium max-w-[280px] truncate">{c.campaign_name}</td>
-                            <td className="px-3 py-2">
-                              <span className={`px-1.5 py-0.5 rounded text-xs ${c.send_type === 'ai' ? 'bg-purple-100 text-purple-700' : 'bg-gray-100 text-gray-600'}`}>
+                          <tr key={i} className="hover:bg-slate-50/70 transition">
+                            <td className="px-4 py-2.5 font-semibold text-slate-700 max-w-[280px] truncate">{c.campaign_name}</td>
+                            <td className="px-4 py-2.5">
+                              <span className={`px-2 py-0.5 rounded-md text-xs font-medium ${c.send_type === 'ai' ? 'bg-violet-100 text-violet-700' : 'bg-slate-100 text-slate-600'}`}>
                                 {c.send_type === 'ai' ? 'AI' : '수동'}
                               </span>
                             </td>
-                            <td className="px-3 py-2 text-gray-600">{c.user_name || '-'}</td>
-                            <td className="px-3 py-2 text-right">{formatNum(c.sent_count)}</td>
-                            <td className="px-3 py-2 text-right text-green-600">{formatNum(c.success_count)}</td>
-                            <td className="px-3 py-2 text-right text-red-600">{formatNum(c.fail_count)}</td>
-                            <td className="px-3 py-2 text-left max-w-[420px]">
+                            <td className="px-4 py-2.5 text-slate-500">{c.user_name || '-'}</td>
+                            <td className="px-4 py-2.5 text-right text-slate-600 tabular-nums">{formatNum(c.sent_count)}</td>
+                            <td className="px-4 py-2.5 text-right text-emerald-600 font-medium tabular-nums">{formatNum(c.success_count)}</td>
+                            <td className="px-4 py-2.5 text-right text-rose-500 tabular-nums">{formatNum(c.fail_count)}</td>
+                            <td className="px-4 py-2.5 text-left max-w-[420px]">
                               {c.message_content ? (() => {
                                 const full = formatCampaignMessageForDisplay(c);
                                 return (
-                                  <span className="block truncate text-xs text-gray-600 cursor-pointer hover:text-blue-600"
+                                  <span className="group/msg inline-flex items-center gap-1 max-w-full truncate text-xs text-slate-500 cursor-pointer hover:text-indigo-600 transition"
                                     title="클릭하여 전체 메시지 보기"
                                     onClick={() => setMsgDetail({ name: c.campaign_name, content: full })}>
-                                    {full.slice(0, 60)}{full.length > 60 ? '…' : ''}
+                                    <span className="truncate">{full.slice(0, 60)}{full.length > 60 ? '…' : ''}</span>
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-3 h-3 shrink-0 opacity-0 group-hover/msg:opacity-100 transition"><path d="M15 3h6v6" /><path d="M10 14 21 3" /><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" /></svg>
                                   </span>
                                 );
-                              })() : <span className="text-gray-300">-</span>}
+                              })() : <span className="text-slate-300">-</span>}
                             </td>
                           </tr>
                         ))}
@@ -340,55 +396,61 @@ export default function StatsTab() {
                 {/* 테스트 발송 내역 (담당자 + 스팸필터 통합) */}
                 {detail.testDetail?.length > 0 && (
                   <div>
-                    <h4 className="text-sm font-semibold text-gray-700 mb-2">🧪 테스트 발송 ({detail.testDetail.length}건)</h4>
+                    <h4 className="flex items-center gap-2 text-sm font-bold text-slate-800 mb-2.5">
+                      <span className="flex h-5 w-5 items-center justify-center rounded-md bg-amber-100 text-amber-600">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-3 h-3"><path d="M14.5 2v17.5c0 1.4-1.1 2.5-2.5 2.5s-2.5-1.1-2.5-2.5V2" /><path d="M8.5 2h7" /><path d="M9.5 16h5" /></svg>
+                      </span>
+                      테스트 발송 <span className="text-slate-400 font-medium">({detail.testDetail.length}건)</span>
+                    </h4>
+                    <div className="rounded-xl border border-slate-200 overflow-hidden">
                     <table className="w-full text-sm">
-                      <thead className="bg-amber-50">
-                        <tr>
-                          <th className="px-3 py-2 text-left font-medium text-gray-600">구분</th>
-                          <th className="px-3 py-2 text-left font-medium text-gray-600">수신번호</th>
-                          <th className="px-3 py-2 text-left font-medium text-gray-600">유형</th>
-                          <th className="px-3 py-2 text-left font-medium text-gray-600">상태</th>
-                          <th className="px-3 py-2 text-left font-medium text-gray-600">발송시간</th>
+                      <thead className="bg-slate-50">
+                        <tr className="border-b border-slate-100">
+                          <th className="px-4 py-2.5 text-left text-[11px] font-semibold uppercase tracking-wider text-slate-400">구분</th>
+                          <th className="px-4 py-2.5 text-left text-[11px] font-semibold uppercase tracking-wider text-slate-400">수신번호</th>
+                          <th className="px-4 py-2.5 text-left text-[11px] font-semibold uppercase tracking-wider text-slate-400">유형</th>
+                          <th className="px-4 py-2.5 text-left text-[11px] font-semibold uppercase tracking-wider text-slate-400">상태</th>
+                          <th className="px-4 py-2.5 text-left text-[11px] font-semibold uppercase tracking-wider text-slate-400">발송시간</th>
                         </tr>
                       </thead>
-                      <tbody className="divide-y">
+                      <tbody className="divide-y divide-slate-50">
                         {detail.testDetail
                           .slice((testDetailPage - 1) * 10, testDetailPage * 10)
                           .map((t: any, i: number) => (
-                          <tr key={i} className="hover:bg-gray-50">
-                            <td className="px-3 py-2">
-                              <span className={`px-1.5 py-0.5 rounded text-xs font-medium ${
+                          <tr key={i} className="hover:bg-slate-50/70 transition">
+                            <td className="px-4 py-2.5">
+                              <span className={`px-2 py-0.5 rounded-md text-xs font-medium ${
                                 t.testType === 'spam_filter' ? 'bg-violet-100 text-violet-700' : 'bg-orange-100 text-orange-700'
                               }`}>
                                 {t.testType === 'spam_filter' ? '스팸필터' : '담당자'}
                               </span>
                             </td>
-                            <td className="px-3 py-2 font-mono text-xs">{t.phone}</td>
-                            <td className="px-3 py-2">
-                              <span className="px-1.5 py-0.5 bg-amber-100 text-amber-700 text-xs rounded">
+                            <td className="px-4 py-2.5 font-mono text-xs text-slate-600">{t.phone}</td>
+                            <td className="px-4 py-2.5">
+                              <span className="px-2 py-0.5 bg-amber-100 text-amber-700 text-xs font-medium rounded-md">
                                 {t.msgType}
                               </span>
                             </td>
-                            <td className="px-3 py-2">
+                            <td className="px-4 py-2.5">
                               {t.testType === 'spam_filter' ? (
-                                <span className={`px-1.5 py-0.5 rounded text-xs ${
-                                  t.result === 'pass' ? 'bg-green-100 text-green-700' :
-                                  t.result === 'blocked' ? 'bg-red-100 text-red-700' :
-                                  'bg-gray-100 text-gray-600'
+                                <span className={`px-2 py-0.5 rounded-md text-xs font-medium ${
+                                  t.result === 'pass' ? 'bg-emerald-100 text-emerald-700' :
+                                  t.result === 'blocked' ? 'bg-rose-100 text-rose-700' :
+                                  'bg-slate-100 text-slate-600'
                                 }`}>
                                   {t.result === 'pass' ? '정상' : t.result === 'blocked' ? '차단' : '대기'}
                                 </span>
                               ) : (
-                                <span className={`px-1.5 py-0.5 rounded text-xs ${
-                                  t.status === 'success' ? 'bg-green-100 text-green-700' :
-                                  t.status === 'pending' ? 'bg-gray-100 text-gray-600' :
-                                  'bg-red-100 text-red-700'
+                                <span className={`px-2 py-0.5 rounded-md text-xs font-medium ${
+                                  t.status === 'success' ? 'bg-emerald-100 text-emerald-700' :
+                                  t.status === 'pending' ? 'bg-slate-100 text-slate-600' :
+                                  'bg-rose-100 text-rose-700'
                                 }`}>
                                   {t.status === 'success' ? '성공' : t.status === 'pending' ? '대기' : '실패'}
                                 </span>
                               )}
                             </td>
-                            <td className="px-3 py-2 text-gray-500 text-xs">
+                            <td className="px-4 py-2.5 text-slate-400 text-xs tabular-nums">
                               {formatDateTime(t.sentAt)}
                             </td>
                           </tr>
@@ -396,12 +458,13 @@ export default function StatsTab() {
                       </tbody>
                     </table>
                     {detail.testDetail.length > 10 && (
-                      <div className="flex justify-center items-center gap-2 py-3 border-t bg-gray-50">
-                        <button onClick={() => setTestDetailPage(p => Math.max(1, p - 1))} disabled={testDetailPage === 1} className="px-3 py-1 text-sm rounded-md border bg-white hover:bg-gray-50 disabled:opacity-40">이전</button>
-                        <span className="text-sm text-gray-500">{testDetailPage} / {Math.ceil(detail.testDetail.length / 10)}</span>
-                        <button onClick={() => setTestDetailPage(p => Math.min(Math.ceil(detail.testDetail.length / 10), p + 1))} disabled={testDetailPage >= Math.ceil(detail.testDetail.length / 10)} className="px-3 py-1 text-sm rounded-md border bg-white hover:bg-gray-50 disabled:opacity-40">다음</button>
+                      <div className="flex justify-center items-center gap-3 py-3 border-t border-slate-100 bg-slate-50/50">
+                        <button onClick={() => setTestDetailPage(p => Math.max(1, p - 1))} disabled={testDetailPage === 1} className="px-3 py-1 text-xs font-medium rounded-lg border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 disabled:opacity-40 transition">이전</button>
+                        <span className="text-xs text-slate-400 tabular-nums">{testDetailPage} / {Math.ceil(detail.testDetail.length / 10)}</span>
+                        <button onClick={() => setTestDetailPage(p => Math.min(Math.ceil(detail.testDetail.length / 10), p + 1))} disabled={testDetailPage >= Math.ceil(detail.testDetail.length / 10)} className="px-3 py-1 text-xs font-medium rounded-lg border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 disabled:opacity-40 transition">다음</button>
                       </div>
                     )}
+                    </div>
                   </div>
                 )}
               </div>
