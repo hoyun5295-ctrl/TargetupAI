@@ -231,7 +231,7 @@ export default function StatsTab() {
       {detailInfo && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 animate-[fadeIn_0.15s_ease-out]"
           onClick={() => { setDetailInfo(null); setDetail(null); }}>
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl mx-4 max-h-[80vh] overflow-auto animate-[zoomIn_0.2s_ease-out]"
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-5xl mx-4 max-h-[85vh] overflow-auto animate-[zoomIn_0.2s_ease-out]"
             onClick={(e) => e.stopPropagation()}>
             <div className="px-6 pt-6 pb-4 bg-gradient-to-r from-blue-50 to-indigo-50 border-b sticky top-0 z-10">
               <div className="flex justify-between items-center">
@@ -282,7 +282,8 @@ export default function StatsTab() {
                 {detail.campaigns?.length > 0 && (
                   <div>
                     <h4 className="text-sm font-semibold text-gray-700 mb-2">📋 캠페인별</h4>
-                    <table className="w-full text-sm">
+                    <div className="overflow-x-auto">
+                    <table className="w-full text-sm whitespace-nowrap">
                       <thead className="bg-gray-50">
                         <tr>
                           <th className="px-3 py-2 text-left font-medium text-gray-600">캠페인</th>
@@ -296,7 +297,7 @@ export default function StatsTab() {
                       <tbody className="divide-y">
                         {detail.campaigns.map((c: any, i: number) => (
                           <tr key={i} className="hover:bg-gray-50">
-                            <td className="px-3 py-2 font-medium max-w-[200px] truncate">{c.campaign_name}</td>
+                            <td className="px-3 py-2 font-medium max-w-[280px] truncate">{c.campaign_name}</td>
                             <td className="px-3 py-2">
                               <span className={`px-1.5 py-0.5 rounded text-xs ${c.send_type === 'ai' ? 'bg-purple-100 text-purple-700' : 'bg-gray-100 text-gray-600'}`}>
                                 {c.send_type === 'ai' ? 'AI' : '수동'}
@@ -310,6 +311,7 @@ export default function StatsTab() {
                         ))}
                       </tbody>
                     </table>
+                    </div>
                   </div>
                 )}
 
