@@ -41,6 +41,12 @@ interface BrandGuideline {
   emoji_whitelist: string[];
   extracted_at: string;
   admin_edited: boolean;
+  // ★ 브랜드 키트 (회사 admin 직접 등록 — 문안 생성 시 조합). 전부 optional.
+  signature_locked?: string;
+  signature_mode?: 'append' | 'ai_blend';
+  slogans?: string[];
+  required_words?: string[];
+  banned_words?: string[];
 }
 
 interface BrandVoiceResponse {
@@ -451,6 +457,18 @@ export default function BrandVoiceCard({ apiBase, token, onToast, onConfirm }: B
                   onChange={(v) => setGuideline({ ...guideline, cta_patterns: v })} fullWidth />
                 <GuidelineArrayField label="이모지 화이트리스트" values={guideline.emoji_whitelist} editing={editingGuideline}
                   onChange={(v) => setGuideline({ ...guideline, emoji_whitelist: v })} fullWidth />
+                {/* ★ 브랜드 키트 — 문안 생성 시 조합되는 회사 고정 자산 */}
+                <GuidelineField label="고정 시그니처 (문안 끝에 조합)" value={guideline.signature_locked || ''} editing={editingGuideline}
+                  onChange={(v) => setGuideline({ ...guideline, signature_locked: v })} fullWidth />
+                <GuidelineField label="시그니처 방식" value={guideline.signature_mode === 'ai_blend' ? '톤에 녹임' : '끝에 부착'} editing={editingGuideline}
+                  onChange={(v) => setGuideline({ ...guideline, signature_mode: v === '톤에 녹임' ? 'ai_blend' : 'append' })}
+                  select={['끝에 부착', '톤에 녹임']} />
+                <GuidelineArrayField label="슬로건 (문맥 맞을 때 활용)" values={guideline.slogans || []} editing={editingGuideline}
+                  onChange={(v) => setGuideline({ ...guideline, slogans: v })} fullWidth />
+                <GuidelineArrayField label="필수 표현 (가능하면 포함)" values={guideline.required_words || []} editing={editingGuideline}
+                  onChange={(v) => setGuideline({ ...guideline, required_words: v })} fullWidth />
+                <GuidelineArrayField label="금지 단어 (절대 사용 안 함)" values={guideline.banned_words || []} editing={editingGuideline}
+                  onChange={(v) => setGuideline({ ...guideline, banned_words: v })} fullWidth />
               </div>
 
               {editingGuideline && (

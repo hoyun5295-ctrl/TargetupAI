@@ -352,12 +352,13 @@ export async function logCampaignTraining(input: {
   sendAt?: Date;
 }): Promise<void> {
   try {
-    const info = await pool.query('SELECT name, brand_tone FROM companies WHERE id = $1', [input.companyId]);
+    const info = await pool.query('SELECT name, brand_tone, industry_code FROM companies WHERE id = $1', [input.companyId]);
     await logTrainingData({
       campaignRunId: input.campaignId,
       companyId: input.companyId,
       companyName: info.rows[0]?.name,
       brandTone: info.rows[0]?.brand_tone,
+      industryCode: info.rows[0]?.industry_code || undefined,
       userPrompt: input.userPrompt,
       targetCount: input.targetCount,
       messageType: input.messageType,
@@ -408,4 +409,12 @@ export async function updateTrainingMetrics(params: TrainingMetricsParams): Prom
 // ============================================================
 export function getSourceRef(campaignRunId: string): string {
   return hmacHash(campaignRunId);
+}
+
+// ============================================================
+// 8) company_id → tenant_ref 변환 (RAG 검색기·업종 backfill에서 재사용)
+//    tenant_ref = hmacHash(company_id) — 적재 시와 동일 비밀키로 계산해야 매칭됨.
+// ============================================================
+export function getTenantRef(companyId: string): string {
+  return hmacHash(companyId);
 }

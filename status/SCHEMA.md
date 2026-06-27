@@ -1821,7 +1821,7 @@ CAFE24_REDIRECT_URI=https://app.hanjul.ai/api/cafe24/oauth/callback
 | created_at | timestamptz | |
 - INDEX: company_id, created_at DESC
 
-### cdp_inapp_messages (In-app Message 정의) — D175-A 신규 + D215+ 확장 (★ 2026-06-11 실측 32컬럼 + 2026-06-17 channel 1컬럼 = 33)
+### cdp_inapp_messages (In-app Message 정의) — D175-A 신규 + D215+ 확장 (★ 2026-06-11 실측 32컬럼 + 2026-06-17 channel 1컬럼 + 2026-06-27 블록 3컬럼 = 36)
 
 | 컬럼 | 타입 | 비고 |
 |------|------|------|
@@ -1859,6 +1859,9 @@ CAFE24_REDIRECT_URI=https://app.hanjul.ai/api/cafe24/oauth/callback
 | animation | varchar DEFAULT 'fade' | ★ 실측 — fade/slide/bounce/pulse |
 | channel | varchar(10) NOT NULL DEFAULT 'web' | ★ 2026-06-17 — web/app 채널 분리 (웹 팝업 / 앱 인앱). SDK 서빙(/inapp/active)은 web만 노출 |
 | badge_text | varchar(20) | ★ 2026-06-18 실측 — 모달 상단 뱃지 라벨 (NEW·VIP·오랜만이에요 등, nullable). AI 생성 시 시나리오별 자동 |
+| content_blocks | jsonb DEFAULT '[]' | ★ 2026-06-27 실측 — 블록 조립 배열(13 블록: media·eyebrow·headline·body·bullets·benefit·countdown·rating·product·divider·spacer·cta_group·footer). 비면 레거시 단색 렌더(외형 변화 0) |
+| theme | varchar(30) DEFAULT 'auto' | ★ 2026-06-27 실측 — 큐레이션 테마(auto/light/dark/brand/vibrant/minimal) |
+| accent_color | varchar(20) | ★ 2026-06-27 실측 — 강조색 hex(NULL=테마 기본). background_color는 레거시 전용 보존 |
 - INDEX: company_id, status, start_at, end_at
 - INDEX: idx_inapp_channel(company_id, channel, status) ★ 2026-06-17
 

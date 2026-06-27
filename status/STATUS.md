@@ -107,6 +107,17 @@
 
 ---
 
+### 🟢 2026-06-27 — 인앱 메시지 렌더 격상(블록+테마+모션) + 인앱 콘솔 슬레이트 리디자인 + 제안서 보강 (★코드 배포완료 / PPT는 산출물 전달)
+> **인앱 블록 시스템(D230+, 배포완료)**: 쇼핑객이 보는 인앱을 단색 텍스트 → 블록 조립 + 큐레이션 테마 + 모션으로 격상(브레이즈급). `cdp_inapp_messages`에 **content_blocks jsonb · theme varchar(30) · accent_color varchar(20)** 3컬럼 ALTER(Harold 적용). content_blocks 비면 레거시 단색 렌더 그대로(운영 6,000사+ 외형 변화 0) — 신규·전환만 블록.
+> · SDK: `inapp-theme.ts`(resolveTheme + 테마 5종 light/dark/brand/vibrant/minimal + auto, 대비 보정) · `inapp-blocks.ts`(13 블록 렌더러 + 템플릿별 허용 필터 + 순차 등장 + is_ad 자동 광고표기) · `inapp.ts`(renderMessage 블록/레거시 분기 · makeContainer 8형태 · spring/celebrate + prefers-reduced-motion · 컨페티 · 레거시 render 7종 보존). 테스트 `inapp-blocks.test.ts` 25.
+> · 백엔드: `inapp-message.ts`(FULL_COLUMNS·INSERT·UPDATE 3컬럼 + sanitizeContentBlocks/normalizeTheme/blocksHaveUneditedPlaceholder 공용 검증 · BENEFIT_PLACEHOLDER) · `inapp-ai-generator.ts`(블록 출력 + 시스템 프롬프트 카탈로그 + forceBlockSafety[benefit placeholder 강제·image url 제거] + synthesizeBlocks 폴백) · `cdp.ts`(benefit placeholder 잔존 400 차단) · `inapp-personalization.ts`(블록 텍스트 변수 스캔). 테스트 `inapp-blocks-validation.test.ts` 12.
+> · 프론트: `inapp/blockTheme.ts`(테마 미러) · `inapp/BlockPreview.tsx`(parity) · `InAppMessagePreview.tsx`(블록 렌더 + 글자 크기 스케일 + 디바이스 프레임 확대 + 모달 maxHeight 스크롤) · `InAppMessagesPage.tsx`(블록 컴포저 13종 + 테마 피커·강조색 + 레거시 전환 + 이미지 업로드→media 블록 자동 + 헤드라인/본문 글자 크기 + 메인 단순화[데이터부족·AI진단·1-click 카드 → "AI 개선" 한 카드 통합, 자세히 분석 → 모달, 메시지 만들기 히어로 최상단, violet→slate 톤 전환]).
+> · 룰 정합: AI 임의 혜택 0(benefit placeholder 강제 + 저장 차단) · 모델명 UI 0 · native dialog 0 · is_ad → 광고 자동.
+> · 검증: backend tsc 0 · 프론트 tsc 0 · SDK 빌드 0(esm/cjs/types + iife) · vitest SDK 113(레거시 회귀 9 포함) · 백엔드 90. 설계서 `docs/superpowers/specs/2026-06-27-inapp-message-elevation-design.md`. 상세 [[project_2026_0627_inapp_block_elevation]].
+> **제안서(PPT) 보강(산출물 전달, repo 외 Downloads)**: 리디자인 덱(15장) 갭분석 → 디자인 브리프 + 추가수정 지시 .md, PRODUCT IN ACTION 콘솔 목업 4 SVG, RESULTS 카드 filler 4 SVG, PRICING 교체 내용(요금제별 기능 동일·차이는 관리DB·월크레딧·인프라 / 스타터 15만~엔터프라이즈 550만 5티어 + 작업당 크레딧표).
+
+---
+
 ### 🟢 2026-06-26 — 자동마케팅 Phase 1~3 + 운영 디버깅 + 고객사 관리자 페이지 모던 리디자인 (★전부 배포완료)
 > **배포완료**(세션 종료 일괄, [[session_wrap_means_deployed]]). DB ALTER/DROP Harold 직접 적용 완료. 운영 실측(다단계 리마인드 N일 후·Bandit 학습·UI 렌더)은 직원 몫.
 > **앞 디버깅(배포완료)**: 모바일DM 드래그 순서변경(onPointerDown stopPropagation 제거 + splice 후 order 재부여) · 발송통계/예약 문안 표시 · AI 다듬기 080 재부착 · 여정 5건 · 슈퍼관리자 긴급취소 cancelCampaign 배선(큐 DELETE+잔존0+환불).

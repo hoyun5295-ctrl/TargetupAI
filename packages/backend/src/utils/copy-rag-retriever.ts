@@ -1,0 +1,148 @@
+/**
+ * copy-rag-retriever.ts — 문안 두뇌 ① 성과 문안 검색기 (RAG)
+ *
+ * 생성 직전, 그 회사·채널·광고여부에 맞고 성과(클릭률) 좋은 과거 문안을 ai_training_logs에서 꺼낸다.
+ *   - 회사 우선: tenant_ref = hmacHash(company_id) 매칭 (자기 자산 — 원문 활용).
+ *   - 업종 폴백: 회사 표본이 minCompany 미만일 때만 같은 industry_code 비식별 문안으로 보강(타사 — 패턴만).
+ *   - 정직 폴백: 둘 다 부족하면 빈 결과 → 조립기가 RAG 없이 기존 방식으로 생성(가짜 예시 0).
+ *   - 성과 라벨(success_count) 없으면 최신순으로 자동 적응(임의 상수 0).
+ *
+ * 모든 ai_training_logs 컬럼은 information_schema 덤프(2026-06-27)로 존재 확인됨.
+ */
+
+import pool from '../config/database';
+import { getTenantRef } from './training-logger';
+
+export interface TrainingRow {
+  final_message: string;
+  message_features: Record<string, unknown> | null;
+  sent_count: number | null;
+  success_count: number | null;
+  created_at: string;
+}
+
+export interface CopyExample {
+  text: string;
+  source: 'company' | 'industry';
+  features: Record<string, unknown> | null;
+  successRate: number | null;
+}
+
+export interface RetrieveInput {
+  companyId: string;
+  industryCode: string | null;
+  channels: string[];   // 우선 채널 배열 (예: ['EMAIL'] 또는 ['SMS','LMS','MMS'])
+  isAd: boolean;
+  limit?: number;
+}
+
+export interface RetrieveResult {
+  examples: CopyExample[];
+  companyCount: number;
+  industryCount: number;
+}
+
+// 회사 표본이 이 미만이면 업종 폴백으로 보강
+export const MIN_COMPANY_SAMPLE = 5;
+// 회사+업종 합계가 이 미만이면 정직 폴백(빈 결과)
+export const MIN_TOTAL_SAMPLE = 3;
+// 프롬프트에 넣을 기본 예시 수
+export const DEFAULT_LIMIT = 8;
+// DB에서 후보로 가져올 행 수 (앱에서 성과 정렬 후 limit만 사용)
+const FETCH_CANDIDATES = 60;
+
+interface RankedRow {
+  ex: CopyExample;
+  createdAt: string;
+}
+
+function toRanked(row: TrainingRow, source: 'company' | 'industry'): RankedRow {
+  const sent = row.sent_count;
+  const successRate = sent && sent > 0 ? (row.success_count || 0) / sent : null;
+  return {
+    ex: { text: row.final_message, source, features: row.message_features, successRate },
+    createdAt: row.created_at || '',
+  };
+}
+
+// 성과 높은 순(있는 것 우선), 동률·무성과는 최신순
+function sortRanked(rows: RankedRow[]): RankedRow[] {
+  return rows.sort((a, b) => {
+    const ar = a.ex.successRate;
+    const br = b.ex.successRate;
+    if (ar === null && br === null) return b.createdAt.localeCompare(a.createdAt);
+    if (ar === null) return 1;
+    if (br === null) return -1;
+    if (br !== ar) return br - ar;
+    return b.createdAt.localeCompare(a.createdAt);
+  });
+}
+
+/** 순수 정렬·폴백·dedup — 회사 우선, 부족 시 업종 보강 */
+export function rankExamples(
+  company: TrainingRow[],
+  industry: TrainingRow[],
+  limit: number,
+  minCompany: number,
+): CopyExample[] {
+  const co = sortRanked(company.map((r) => toRanked(r, 'company')));
+  let pool: RankedRow[] = co;
+  if (company.length < minCompany) {
+    const ind = sortRanked(industry.map((r) => toRanked(r, 'industry')));
+    pool = [...co, ...ind]; // 회사 우선, 업종은 뒤에 보강
+  }
+
+  const seen = new Set<string>();
+  const out: CopyExample[] = [];
+  for (const r of pool) {
+    const key = (r.ex.text || '').replace(/\s+/g, ' ').trim();
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    out.push(r.ex);
+    if (out.length >= limit) break;
+  }
+  return out;
+}
+
+const SELECT_COLS = 'final_message, message_features, sent_count, success_count, created_at';
+
+/** DB 검색 — 회사 1차 + (부족 시) 업종 2차 → rankExamples */
+export async function retrieveCopyExamples(input: RetrieveInput): Promise<RetrieveResult> {
+  const { companyId, industryCode, channels, isAd } = input;
+  const limit = input.limit ?? DEFAULT_LIMIT;
+  const tenantRef = getTenantRef(companyId);
+
+  const companyRes = await pool.query(
+    `SELECT ${SELECT_COLS}
+     FROM ai_training_logs
+     WHERE tenant_ref = $1 AND message_type = ANY($2::text[]) AND is_ad = $3
+       AND final_message IS NOT NULL AND length(final_message) >= 10
+     ORDER BY created_at DESC
+     LIMIT $4`,
+    [tenantRef, channels, isAd, FETCH_CANDIDATES],
+  );
+
+  let industryRows: TrainingRow[] = [];
+  if (companyRes.rows.length < MIN_COMPANY_SAMPLE && industryCode) {
+    const industryRes = await pool.query(
+      `SELECT ${SELECT_COLS}
+       FROM ai_training_logs
+       WHERE industry_code = $1 AND tenant_ref <> $2 AND message_type = ANY($3::text[]) AND is_ad = $4
+         AND final_message IS NOT NULL AND length(final_message) >= 10
+       ORDER BY created_at DESC
+       LIMIT $5`,
+      [industryCode, tenantRef, channels, isAd, FETCH_CANDIDATES],
+    );
+    industryRows = industryRes.rows as TrainingRow[];
+  }
+
+  const companyRows = companyRes.rows as TrainingRow[];
+  const examples = rankExamples(companyRows, industryRows, limit, MIN_COMPANY_SAMPLE);
+
+  // 정직 폴백: 회사+업종 합계가 최소 표본 미만이면 빈 결과(가짜 예시 금지)
+  if (companyRows.length + industryRows.length < MIN_TOTAL_SAMPLE) {
+    return { examples: [], companyCount: companyRows.length, industryCount: industryRows.length };
+  }
+
+  return { examples, companyCount: companyRows.length, industryCount: industryRows.length };
+}

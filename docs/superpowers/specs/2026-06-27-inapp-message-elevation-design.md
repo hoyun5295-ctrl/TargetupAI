@@ -252,3 +252,4 @@ renderMessage(msg, input):
 | 날짜 | 변경 | 담당 |
 |---|---|---|
 | 2026-06-27 | 인앱메시지 렌더 격상 설계서 신설(블록+테마+모션, 레거시 보존) | 비토 + Harold |
+| 2026-06-27 | 구현 완료 · 배포완료 — DB 3컬럼 ALTER + SDK(inapp-theme/inapp-blocks/inapp.ts)·백엔드·프론트(블록 컴포저/테마 피커/메인 슬레이트 단순화). backend·프론트 tsc 0 · SDK 빌드 0 · vitest 113/90. 상세 [[project_2026_0627_inapp_block_elevation]] | 비토 |

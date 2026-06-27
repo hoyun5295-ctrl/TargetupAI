@@ -39,6 +39,12 @@ export interface BrandGuideline {
   emoji_whitelist: string[];
   extracted_at: string;
   admin_edited: boolean;
+  // ★ 브랜드 키트 (문안 두뇌 — 회사 admin 명시 자산, 자동 추출이 덮지 않음). 전부 optional.
+  signature_locked?: string;            // 문안 끝에 항상 조합할 고정 시그니처/맺음말
+  signature_mode?: 'append' | 'ai_blend'; // append=끝에 부착 / ai_blend=톤에 녹임 (기본 append)
+  slogans?: string[];                   // 슬로건/태그라인 (문맥 맞을 때만 활용)
+  required_words?: string[];            // 가능하면 포함할 표현
+  banned_words?: string[];              // 절대 사용 금지 단어 (출력 가드 연동)
 }
 
 export interface RepresentativeMessage {

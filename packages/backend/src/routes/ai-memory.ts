@@ -321,6 +321,26 @@ interface BrandGuidelineValue {
   emoji_whitelist: string[];
   extracted_at: string;
   admin_edited: boolean;
+  // ★ 브랜드 키트 (admin 명시 자산 — AI 추출이 덮지 않고 보존). 전부 optional.
+  signature_locked?: string;
+  signature_mode?: 'append' | 'ai_blend';
+  slogans?: string[];
+  required_words?: string[];
+  banned_words?: string[];
+}
+
+/** 입력에서 브랜드 키트 필드만 정제 (update-guideline용) */
+function sanitizeBrandKit(input: any): Pick<BrandGuidelineValue,
+  'signature_locked' | 'signature_mode' | 'slogans' | 'required_words' | 'banned_words'> {
+  const arr = (v: any, max: number): string[] => Array.isArray(v)
+    ? v.map((s: any) => String(s || '').trim()).filter(Boolean).slice(0, max) : [];
+  return {
+    signature_locked: String(input?.signature_locked || '').trim().slice(0, 200) || undefined,
+    signature_mode: input?.signature_mode === 'ai_blend' ? 'ai_blend' : 'append',
+    slogans: arr(input?.slogans, 10),
+    required_words: arr(input?.required_words, 20),
+    banned_words: arr(input?.banned_words, 50),
+  };
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -635,6 +655,17 @@ JSON 단 1건만 출력. 다른 설명/주석/마크다운 코드블록 없음. 
 
     const prevGuideline = await fetchBrandGuideline(companyId);
 
+    // ★ 브랜드 키트(admin 명시 자산)는 AI 재추출이 덮지 않음 — 기존 값 보존
+    if (prevGuideline && guideline) {
+      // fetchBrandGuideline은 memory_value를 통째 파싱하므로 키트 값이 런타임에 포함됨(타입만 좁음)
+      const prevKit = prevGuideline as unknown as Partial<BrandGuidelineValue>;
+      guideline.signature_locked = prevKit.signature_locked;
+      guideline.signature_mode = prevKit.signature_mode;
+      guideline.slogans = prevKit.slogans;
+      guideline.required_words = prevKit.required_words;
+      guideline.banned_words = prevKit.banned_words;
+    }
+
     await query(
       `INSERT INTO ai_company_memory (
         id, company_id, memory_type, memory_key, memory_value,
@@ -739,6 +770,8 @@ router.post('/brand-voice/update-guideline', async (req: Request, res: Response)
         : [],
       extracted_at: new Date().toISOString(),
       admin_edited: true,
+      // ★ 브랜드 키트 (admin 직접 입력 — 시그니처 조합·금지어 등)
+      ...sanitizeBrandKit(input),
     };
 
     const prevGuideline = await fetchBrandGuideline(companyId);

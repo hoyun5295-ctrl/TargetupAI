@@ -23,6 +23,9 @@ import { buildSystemPromptWithBrandVoice } from './brand-voice-prompt';
 // 비주얼 빌더: AI 블록 출력 → 검증된 email Section[]
 import { normalizeAiBlocksToSections } from './email/email-blocks';
 import type { Section } from './dm/dm-section-registry';
+// 문안 두뇌: 성과 RAG + 시의성 + 브랜드 키트 주입 + 타사 표현 복제 가드
+import { composeCopyBrain } from './copy-prompt-composer';
+import { checkCopyLeak } from './copy-similarity-guard';
 
 // ════════════════════════════════════════════════════════════════════
 // 타입
@@ -241,19 +244,44 @@ export async function generateEmailOneShot(input: {
   if (input.prompt) parts.push(`[요청 내용] ${input.prompt}`);
   parts.push(`[캠페인 성격] ${input.isAd ? '광고성 (표기는 발송 시 자동 부착 — 직접 넣지 말 것)' : '정보성'}`);
 
-  const system = await buildSystemPromptWithBrandVoice(input.companyId, EMAIL_GEN_SYSTEM);
-  const text = await callAIWithFallback({
-    system,
-    userMessage: `${parts.join('\n')}\n\n위 요청으로 이메일 1통을 JSON으로 완성하세요.`,
-    maxTokens: 4000,
-    temperature: 0.7,
-    model: 'opus',
+  const userMessage = `${parts.join('\n')}\n\n위 요청으로 이메일 1통을 JSON으로 완성하세요.`;
+  const baseSystem = await buildSystemPromptWithBrandVoice(input.companyId, EMAIL_GEN_SYSTEM);
+  // 이메일 학습 표본이 부족하면 LMS/MMS/SMS 회사 문안 톤을 교차 참조 (채널 우선순위 배열)
+  const brain = await composeCopyBrain({
     companyId: input.companyId,
-    userId: input.userId,
-    source: 'email-ai-generate',
-    creditCost: 0, // 차감은 route에서 성공 후 1회 (실패 시 차감 0)
+    channels: ['EMAIL', 'LMS', 'MMS', 'SMS'],
+    isAd: input.isAd,
   });
 
+  const genOnce = async (system: string): Promise<EmailGenResult> => parseEmailGenResult(
+    await callAIWithFallback({
+      system,
+      userMessage,
+      maxTokens: 4000,
+      temperature: 0.7,
+      model: 'opus',
+      companyId: input.companyId,
+      userId: input.userId,
+      source: 'email-ai-generate',
+      creditCost: 0, // 차감은 route에서 성공 후 1회 (실패 시 차감 0)
+    }),
+  );
+
+  let result = await genOnce(baseSystem + brain.promptSuffix);
+
+  // 복제 가드: 타사(업종) 예시 표현이 그대로 누출되면 예시 없이 1회 재생성
+  const industryTexts = brain.examples.filter((e) => e.source === 'industry').map((e) => e.text);
+  if (industryTexts.length > 0) {
+    const probe = `${result.textBody} ${result.subjects.join(' ')}`;
+    if (checkCopyLeak(probe, industryTexts).leaked) {
+      result = await genOnce(baseSystem);
+    }
+  }
+  return result;
+}
+
+/** AI 응답(JSON) → EmailGenResult 파싱 (제목 3안 보정 + 빈 결과 차단) */
+function parseEmailGenResult(text: string): EmailGenResult {
   const parsed = extractJsonFromAiText<{
     name?: string; subjects?: string[]; preheader?: string; html_body?: string; text_body?: string;
   }>(text);
@@ -321,9 +349,14 @@ export async function generateEmailSections(input: {
   if (input.prompt) parts.push(`[요청 내용] ${input.prompt}`);
   parts.push(`[캠페인 성격] ${input.isAd ? '광고성 (표기는 발송 시 자동 부착 — 직접 넣지 말 것)' : '정보성'}`);
 
-  const system = await buildSystemPromptWithBrandVoice(input.companyId, EMAIL_BLOCKS_SYSTEM);
+  const baseSystem = await buildSystemPromptWithBrandVoice(input.companyId, EMAIL_BLOCKS_SYSTEM);
+  const brain = await composeCopyBrain({
+    companyId: input.companyId,
+    channels: ['EMAIL', 'LMS', 'MMS', 'SMS'],
+    isAd: input.isAd,
+  });
   const text = await callAIWithFallback({
-    system,
+    system: baseSystem + brain.promptSuffix,
     userMessage: `${parts.join('\n')}\n\n위 요청으로 비주얼 이메일의 블록 구성을 JSON으로 설계하세요.`,
     maxTokens: 4000,
     temperature: 0.7,

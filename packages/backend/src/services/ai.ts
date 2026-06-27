@@ -12,6 +12,7 @@ import { cleanLeftoverVars } from '../utils/messageUtils';
 import { CompanyDataProfile, formatProfileForAiPrompt } from '../utils/company-data-profile';
 // ★ D225+ (2026-05-28 Harold 명시): Brand Voice Learning — 회사별 LMS 대표 문안 5건 + 자동 가이드라인 자동 주입.
 import { buildSystemPromptWithBrandVoice } from '../utils/brand-voice-prompt';
+import { composeCopyBrain } from '../utils/copy-prompt-composer';
 // ★ D227+ AI 응답 JSON 안전 추출 (코드펜스 없이 설명문 혼입 방어 — 본문 0 bytes 사고 정정)
 import { extractJsonFromAiText } from '../utils/ai-json';
 // ★ D227+ 종량제: 작업당 크레딧 단가 맵 (순수 함수, DB 의존 0)
@@ -1167,7 +1168,21 @@ ${usePersonalization ? `- 사용할 개인화 변수: ${personalizationTags}
 - ⚠️ 위 "사용 가능한 개인화 변수" 목록에 있는 것만 사용! 다른 변수 생성 금지!` : '- 개인화 변수 없이 일반 문안으로 작성\n- %...% 형태의 변수를 사용하지 마세요.'}`;
 
   // ★ D225+ Brand Voice Learning — 회사별 가이드라인 자동 주입 (회사 등록 미존재 시 옛 BRAND_SYSTEM_PROMPT 그대로)
-  const enrichedSystemPrompt = await buildSystemPromptWithBrandVoice(extraContext?.companyId, BRAND_SYSTEM_PROMPT);
+  const baseEnriched = await buildSystemPromptWithBrandVoice(extraContext?.companyId, BRAND_SYSTEM_PROMPT);
+  // 문안 두뇌: 캠페인 문자(SMS/LMS/MMS) 성과 RAG + 시의성 + 브랜드 키트 주입 (companyId 있을 때만)
+  let enrichedSystemPrompt = baseEnriched;
+  if (extraContext?.companyId) {
+    try {
+      const brain = await composeCopyBrain({
+        companyId: extraContext.companyId,
+        channels: ['SMS', 'LMS', 'MMS'],
+        isAd: extraContext?.isAd ?? true,
+      });
+      enrichedSystemPrompt = baseEnriched + brain.promptSuffix;
+    } catch (err) {
+      console.warn('[copy-brain] generateMessages 주입 실패 — 기본 프롬프트로 진행:', (err as Error)?.message);
+    }
+  }
 
   try {
     const text = await callAIWithFallback({
