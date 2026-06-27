@@ -139,9 +139,9 @@ function Overlay({ variant, themeTokens, ...rest }: { variant: Variant; themeTok
     const heroImg = usingBlocks ? undefined : toAbsoluteImage(rest.imageUrl);
     return (
       <div style={{ position: 'absolute', inset: 0, background: 'rgba(15,15,20,0.5)', backdropFilter: 'blur(3px)', WebkitBackdropFilter: 'blur(3px)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 18 } as CSSProperties}>
-        <div style={{ ...cardBase, position: 'relative', maxWidth: 280, width: '100%', borderRadius: r(20), overflow: 'hidden', boxShadow: '0 24px 60px rgba(0,0,0,0.45)' }}>
-          {heroImg && <img src={heroImg} alt="" onError={hideOnError} style={{ width: '100%', maxHeight: 130, objectFit: 'cover', display: 'block' }} />}
-          <div style={{ padding: 20 }}>
+        <div style={{ ...cardBase, position: 'relative', maxWidth: 290, width: '100%', maxHeight: '92%', display: 'flex', flexDirection: 'column', borderRadius: r(20), overflow: 'hidden', boxShadow: '0 24px 60px rgba(0,0,0,0.45)' }}>
+          {heroImg && <img src={heroImg} alt="" onError={hideOnError} style={{ width: '100%', maxHeight: 130, objectFit: 'cover', display: 'block', flexShrink: 0 }} />}
+          <div style={{ padding: 20, overflowY: 'auto' }}>
             {usingBlocks ? inner : <CardInner {...rest} imageUrl={null} variant="modal" textColor={textColor} />}
           </div>
         </div>
@@ -149,10 +149,10 @@ function Overlay({ variant, themeTokens, ...rest }: { variant: Variant; themeTok
     );
   }
   if (variant === 'full') {
-    return <div style={{ ...cardBase, inset: 0, display: 'flex', flexDirection: 'column', justifyContent: 'center', padding: 24 }}>{inner}</div>;
+    return <div style={{ ...cardBase, inset: 0, display: 'flex', flexDirection: 'column', justifyContent: 'center', padding: 24, overflowY: 'auto' }}>{inner}</div>;
   }
   if (variant === 'slide') {
-    return <div style={{ ...cardBase, right: 16, bottom: 16, maxWidth: 232, borderRadius: r(16), padding: 16, boxShadow: '0 16px 40px rgba(0,0,0,0.3)' }}>{inner}</div>;
+    return <div style={{ ...cardBase, right: 16, bottom: 16, maxWidth: 232, maxHeight: '88%', overflowY: 'auto', borderRadius: r(16), padding: 16, boxShadow: '0 16px 40px rgba(0,0,0,0.3)' }}>{inner}</div>;
   }
   if (variant === 'toast') {
     return <div style={{ ...cardBase, top: 16, right: 16, maxWidth: 230, borderRadius: r(12), padding: '11px 13px', boxShadow: '0 8px 22px rgba(0,0,0,0.25)' }}>{inner}</div>;
@@ -241,7 +241,7 @@ export function InAppMessagePreview(props: InAppMessagePreviewProps) {
             )}
           </div>
           {/* 콘텐츠 (더미 사이트 + 인앱 오버레이) */}
-          <div style={{ position: 'relative', height: isMobile ? 384 : 300, overflow: 'hidden' }}>
+          <div style={{ position: 'relative', height: isMobile ? 480 : 440, overflow: 'hidden' }}>
             <DummySite />
             <Overlay variant={variant} themeTokens={themeTokens} {...props} />
           </div>
