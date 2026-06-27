@@ -7,6 +7,8 @@
 
 import { useState, type CSSProperties } from 'react';
 import { Monitor, Smartphone } from 'lucide-react';
+import { resolveTheme, type InAppTheme } from './inapp/blockTheme';
+import { BlockPreview } from './inapp/BlockPreview';
 
 export interface PreviewButton {
   label: string;
@@ -24,6 +26,12 @@ export interface InAppMessagePreviewProps {
   buttons?: PreviewButton[];
   backgroundColor: string;
   textColor: string;
+  // ★ D230+ 블록 + 테마 — 있으면 블록 렌더(parity), 없으면 기존 title/body 렌더
+  blocks?: any[] | null;
+  theme?: string | null;
+  accentColor?: string | null;
+  isAd?: boolean;
+  replaceVars?: (t: string) => string;
 }
 
 /** 미리보기는 관리자 화면 = 백엔드와 같은 도메인. 상대경로(/api/..., /uploads/...)를 그대로 둬 현재 origin으로 로드한다.
@@ -106,28 +114,35 @@ function CardInner({ title, body, imageUrl, badge, buttons, textColor, variant }
   );
 }
 
-/** template별 위치 + 카드 모양 오버레이 */
-function Overlay({ variant, ...rest }: { variant: Variant } & Omit<InAppMessagePreviewProps, 'template'>) {
-  const { backgroundColor, textColor } = rest;
-  const inner = <CardInner {...rest} variant={variant} textColor={textColor} />;
+/** template별 위치 + 카드 모양 오버레이 (블록 있으면 테마 토큰으로 BlockPreview) */
+function Overlay({ variant, themeTokens, ...rest }: { variant: Variant; themeTokens?: InAppTheme | null } & Omit<InAppMessagePreviewProps, 'template'>) {
+  const { backgroundColor, textColor, blocks, replaceVars, isAd } = rest;
+  const usingBlocks = !!(themeTokens && blocks && blocks.length > 0);
+  const cardBg = usingBlocks ? themeTokens!.surface : (backgroundColor || '#4f46e5');
+  const inner = usingBlocks
+    ? <BlockPreview blocks={blocks!} theme={themeTokens!} replaceVars={replaceVars} isAd={isAd} />
+    : <CardInner {...rest} variant={variant} textColor={textColor} />;
+
   const cardBase: CSSProperties = {
-    background: backgroundColor || '#4f46e5',
+    background: cardBg,
     position: 'absolute',
     fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
     boxSizing: 'border-box',
+    ...(usingBlocks ? { color: themeTokens!.textPrimary, border: `1px solid ${themeTokens!.border}` } : {}),
   };
+  const r = (def: number) => (usingBlocks ? themeTokens!.radius : def);
 
   if (variant === 'banner') {
     return <div style={{ ...cardBase, top: 0, left: 0, right: 0, padding: '13px 16px', boxShadow: '0 6px 22px rgba(0,0,0,0.18)' }}>{inner}</div>;
   }
   if (variant === 'modal') {
-    const heroImg = toAbsoluteImage(rest.imageUrl);
+    const heroImg = usingBlocks ? undefined : toAbsoluteImage(rest.imageUrl);
     return (
       <div style={{ position: 'absolute', inset: 0, background: 'rgba(15,15,20,0.5)', backdropFilter: 'blur(3px)', WebkitBackdropFilter: 'blur(3px)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 18 } as CSSProperties}>
-        <div style={{ ...cardBase, position: 'relative', maxWidth: 280, width: '100%', borderRadius: 20, overflow: 'hidden', boxShadow: '0 24px 60px rgba(0,0,0,0.45)' }}>
+        <div style={{ ...cardBase, position: 'relative', maxWidth: 280, width: '100%', borderRadius: r(20), overflow: 'hidden', boxShadow: '0 24px 60px rgba(0,0,0,0.45)' }}>
           {heroImg && <img src={heroImg} alt="" onError={hideOnError} style={{ width: '100%', maxHeight: 130, objectFit: 'cover', display: 'block' }} />}
           <div style={{ padding: 20 }}>
-            <CardInner {...rest} imageUrl={null} variant="modal" textColor={textColor} />
+            {usingBlocks ? inner : <CardInner {...rest} imageUrl={null} variant="modal" textColor={textColor} />}
           </div>
         </div>
       </div>
@@ -137,19 +152,25 @@ function Overlay({ variant, ...rest }: { variant: Variant } & Omit<InAppMessageP
     return <div style={{ ...cardBase, inset: 0, display: 'flex', flexDirection: 'column', justifyContent: 'center', padding: 24 }}>{inner}</div>;
   }
   if (variant === 'slide') {
-    return <div style={{ ...cardBase, right: 16, bottom: 16, maxWidth: 232, borderRadius: 16, padding: 16, boxShadow: '0 16px 40px rgba(0,0,0,0.3)' }}>{inner}</div>;
+    return <div style={{ ...cardBase, right: 16, bottom: 16, maxWidth: 232, borderRadius: r(16), padding: 16, boxShadow: '0 16px 40px rgba(0,0,0,0.3)' }}>{inner}</div>;
   }
   if (variant === 'toast') {
-    return <div style={{ ...cardBase, top: 16, right: 16, maxWidth: 230, borderRadius: 12, padding: '11px 13px', boxShadow: '0 8px 22px rgba(0,0,0,0.25)' }}>{inner}</div>;
+    return <div style={{ ...cardBase, top: 16, right: 16, maxWidth: 230, borderRadius: r(12), padding: '11px 13px', boxShadow: '0 8px 22px rgba(0,0,0,0.25)' }}>{inner}</div>;
   }
   if (variant === 'floating') {
-    const label = rest.buttons?.[0]?.label || rest.title || '문의하기';
-    return <div style={{ ...cardBase, right: 16, bottom: 16, borderRadius: 999, padding: '12px 20px', fontWeight: 700, fontSize: 13, color: textColor, boxShadow: '0 8px 22px rgba(0,0,0,0.3)' }}>{label}</div>;
+    let label = rest.buttons?.[0]?.label || rest.title || '문의하기';
+    if (usingBlocks) {
+      const cg = (blocks || []).find((b: any) => b?.type === 'cta_group');
+      const f = cg?.buttons?.[0];
+      label = (f?.label) || rest.title || '문의하기';
+    }
+    if (replaceVars) label = replaceVars(label);
+    return <div style={{ ...cardBase, right: 16, bottom: 16, borderRadius: 999, padding: '12px 20px', fontWeight: 700, fontSize: 13, color: usingBlocks ? themeTokens!.accentText : textColor, background: usingBlocks ? themeTokens!.accent : cardBg, border: 'none', boxShadow: '0 8px 22px rgba(0,0,0,0.3)' }}>{label}</div>;
   }
   // inline_card — 본문 흐름 안
   return (
     <div style={{ position: 'absolute', top: 64, left: 14, right: 14 }}>
-      <div style={{ ...cardBase, position: 'relative', borderRadius: 15, padding: 18, boxShadow: '0 6px 20px rgba(0,0,0,0.12)' }}>{inner}</div>
+      <div style={{ ...cardBase, position: 'relative', borderRadius: r(15), padding: 18, boxShadow: '0 6px 20px rgba(0,0,0,0.12)' }}>{inner}</div>
     </div>
   );
 }
@@ -177,6 +198,8 @@ export function InAppMessagePreview(props: InAppMessagePreviewProps) {
   const [device, setDevice] = useState<'desktop' | 'mobile'>('desktop');
   const variant = VARIANT_MAP[props.template] || 'banner';
   const isMobile = device === 'mobile';
+  const useBlocks = Array.isArray(props.blocks) && props.blocks.length > 0;
+  const themeTokens = useBlocks ? resolveTheme(props.theme, props.accentColor) : null;
 
   return (
     <div>
@@ -220,7 +243,7 @@ export function InAppMessagePreview(props: InAppMessagePreviewProps) {
           {/* 콘텐츠 (더미 사이트 + 인앱 오버레이) */}
           <div style={{ position: 'relative', height: isMobile ? 384 : 300, overflow: 'hidden' }}>
             <DummySite />
-            <Overlay variant={variant} {...props} />
+            <Overlay variant={variant} themeTokens={themeTokens} {...props} />
           </div>
         </div>
       </div>

@@ -12,6 +12,7 @@ import { useCustomerDataGate, CustomerDataRequiredBanner, CustomerDataRequiredMo
 import { InAppMessagePreview } from '../components/InAppMessagePreview';
 import CreditConfirmModal from '../components/credit/CreditConfirmModal';
 import { useToast } from '../components/ToastProvider';
+import { THEME_OPTIONS } from '../components/inapp/blockTheme';
 
 // ════════════════════════════════════════════════════════════════════
 // ★ D215+ (2026-05-25) 인앱 메시지 압도적 강화 — Journey Builder급 12 화면 영역
@@ -28,7 +29,7 @@ type Template = 'top_banner' | 'bottom_banner' | 'center_modal' | 'full_screen' 
 type Frequency = 'once_per_session' | 'once_per_day' | 'always';
 type Status = 'active' | 'paused' | 'archived';
 type TriggerEvent = 'page_load' | 'cart_add' | 'cart_view' | 'checkout_start' | 'scroll' | 'time_on_page' | 'exit_intent' | 'cart_value';
-type Animation = 'fade' | 'slide' | 'bounce' | 'pulse';
+type Animation = 'fade' | 'slide' | 'bounce' | 'pulse' | 'spring' | 'celebrate';
 type QuickStartScenario = 'cart_recovery' | 'new_welcome' | 'dormant_recovery' | 'new_product' | 'vip_appreciation' | 'checkout_abandon' | 'repeat_purchase';
 type SortMode = 'ctr_desc' | 'impressions_desc' | 'created_desc';
 
@@ -65,6 +66,10 @@ interface MessageRow {
   animation?: Animation;
   parent_message_id?: string | null;
   variant_weight?: number;
+  // ★ D230+ 블록 + 테마
+  content_blocks?: any[] | null;
+  theme?: string | null;
+  accent_color?: string | null;
   status: Status;
   channel?: 'web' | 'app';
   startAt?: string | null;
@@ -368,6 +373,10 @@ export default function InAppMessagesPage() {
         send_end_hour: pkg.message.send_end_hour,
         allowed_weekdays: pkg.message.allowed_weekdays,
         animation: pkg.message.animation,
+        // ★ D230+ 블록 + 테마
+        content_blocks: pkg.message.content_blocks || [],
+        theme: pkg.message.theme || 'auto',
+        accent_color: pkg.message.accent_color || null,
         status: 'active',
         channel: channel || 'web',
       });
@@ -438,30 +447,48 @@ export default function InAppMessagesPage() {
   // ────────────────────────────────────────────────────────────────
 
   const handleSave = async () => {
-    if (!editing?.title?.trim() || !editing?.body?.trim()) {
-      showToast('제목과 본문은 필수입니다.', { type: 'warning' });
+    const blocks = Array.isArray(editing?.content_blocks) ? editing!.content_blocks! : [];
+    const hasBlocks = blocks.length > 0;
+    const blockText = (type: string) => {
+      const b = blocks.find((x: any) => x?.type === type);
+      return b ? String(b.text || '').trim() : '';
+    };
+    // 블록 메시지는 블록이 제목/본문의 기준 (DB title/body = headline/body 블록과 동일 텍스트 — 접근성·폴백)
+    const effectiveTitle = hasBlocks ? (blockText('headline') || (editing?.title?.trim() || '')) : (editing?.title?.trim() || '');
+    const effectiveBody = hasBlocks ? (blockText('body') || blockText('headline') || (editing?.body?.trim() || '')) : (editing?.body?.trim() || '');
+    if (!effectiveTitle) {
+      showToast(hasBlocks ? '헤드라인 블록 또는 제목을 입력해주세요.' : '제목은 필수입니다.', { type: 'warning' });
       return;
     }
-    // 혜택 placeholder 검증 (AI 임의 혜택 영구 룰)
-    if ((editing.body || '').includes('[혜택 안내') || (editing.body || '').includes('[직접 작성')) {
+    if (!effectiveBody) {
+      showToast(hasBlocks ? '본문 블록 또는 본문을 입력해주세요.' : '본문은 필수입니다.', { type: 'warning' });
+      return;
+    }
+    // 혜택 placeholder 검증 (본문 + 블록 — AI 임의 혜택 영구 룰)
+    const hasPh = (s: string) => s.includes('[혜택 안내') || s.includes('[직접 작성') || s.includes('직접 작성해주세요');
+    const benefitBad = blocks.some((b: any) => b?.type === 'benefit' && (!String(b.text || '').trim() || hasPh(String(b.text || ''))));
+    const textBad = ['headline', 'body', 'eyebrow', 'footer'].some((tp) => hasPh(blockText(tp)));
+    if (hasPh(editing?.body || '') || benefitBad || textBad) {
       showToast('혜택 안내 placeholder를 회사 정책에 맞게 직접 작성 후 저장해주세요.', { type: 'warning' });
       return;
     }
     try {
-      const isUpdate = !!editing.id;
-      const url = isUpdate ? `/api/cdp/inapp/${editing.id}` : '/api/cdp/inapp';
+      const isUpdate = !!editing!.id;
+      const url = isUpdate ? `/api/cdp/inapp/${editing!.id}` : '/api/cdp/inapp';
       const method = isUpdate ? 'PUT' : 'POST';
       const res = await fetch(url, {
         method,
         headers: authHeaders(),
         body: JSON.stringify({
           ...editing,
+          title: effectiveTitle,
+          body: effectiveBody,
           // 기존 컬럼 호환 (position = template)
-          position: editing.template || editing.position,
-          backgroundColor: editing.background_color,
-          textColor: editing.text_color,
-          triggerEvent: editing.trigger_event,
-          displayFrequency: editing.display_frequency,
+          position: editing!.template || editing!.position,
+          backgroundColor: editing!.background_color,
+          textColor: editing!.text_color,
+          triggerEvent: editing!.trigger_event,
+          displayFrequency: editing!.display_frequency,
         }),
       });
       const data = await res.json();
@@ -1163,7 +1190,11 @@ function EditModal({ editing, setEditing, availableVariables, onSave, fileInputR
   const sampleCustomer = previewSample[previewCustomer];
   const renderedTitle = replaceVars(editing.title || '', sampleCustomer);
   const renderedBody = replaceVars(editing.body || '', sampleCustomer);
-  const hasPlaceholder = (editing.body || '').includes('[혜택') || (editing.body || '').includes('[직접');
+  // ★ D230+ 블록
+  const blocks = Array.isArray(editing.content_blocks) ? editing.content_blocks : [];
+  const hasBlocks = blocks.length > 0;
+  const blockHasPlaceholder = blocks.some((b: any) => b?.type === 'benefit' && (!String(b.text || '').trim() || String(b.text || '').includes('[혜택') || String(b.text || '').includes('[직접')));
+  const hasPlaceholder = (editing.body || '').includes('[혜택') || (editing.body || '').includes('[직접') || blockHasPlaceholder;
 
   return (
     <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50" onClick={() => setEditing(null)}>
@@ -1212,29 +1243,49 @@ function EditModal({ editing, setEditing, availableVariables, onSave, fileInputR
               <h4 className="text-xs font-bold text-white/80 mb-2 flex items-center gap-1.5">
                 <Edit2 className="w-3 h-3" /> 내용
               </h4>
-              <input
-                type="text"
-                value={editing.title || ''}
-                onChange={(e) => updateField('title', e.target.value)}
-                placeholder="메시지 제목 (20자 안, 변수 X)"
-                className="w-full px-3 py-2 mb-2 bg-violet-900/50 border border-white/10 rounded-lg text-sm text-white placeholder-white/30 focus:outline-none focus:border-violet-400/50"
-                maxLength={100}
-              />
-              <textarea
-                value={editing.body || ''}
-                onChange={(e) => updateField('body', e.target.value)}
-                placeholder="짧고 강렬하게 한두 문장. 혜택 부분은 [혜택 안내 — 직접 작성해주세요] placeholder 사용"
-                className="w-full px-3 py-2 mb-2 bg-violet-900/50 border border-white/10 rounded-lg text-sm text-white placeholder-white/30 resize-y h-24 focus:outline-none focus:border-violet-400/50"
-                maxLength={300}
-              />
-              <input
-                type="text"
-                value={editing.badge_text || ''}
-                onChange={(e) => updateField('badge_text', e.target.value)}
-                placeholder="뱃지 (선택, 8자 안 — NEW · VIP · 오랜만이에요)"
-                className="w-full px-3 py-2 bg-violet-900/50 border border-white/10 rounded-lg text-sm text-white placeholder-white/30 focus:outline-none focus:border-violet-400/50"
-                maxLength={20}
-              />
+              {!hasBlocks && (
+                <input
+                  type="text"
+                  value={editing.title || ''}
+                  onChange={(e) => updateField('title', e.target.value)}
+                  placeholder="메시지 제목 (20자 안, 변수 X)"
+                  className="w-full px-3 py-2 mb-2 bg-violet-900/50 border border-white/10 rounded-lg text-sm text-white placeholder-white/30 focus:outline-none focus:border-violet-400/50"
+                  maxLength={100}
+                />
+              )}
+              {hasBlocks ? (
+                <div className="mt-3">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-[11px] font-bold text-white/70 flex items-center gap-1.5"><Layers className="w-3 h-3" /> 블록 구성</span>
+                    <button onClick={() => updateField('content_blocks', [])} className="text-[10px] text-white/40 hover:text-white/70">단순 폼으로</button>
+                  </div>
+                  <BlockComposer blocks={blocks} onChange={(b) => updateField('content_blocks', b)} />
+                </div>
+              ) : (
+                <>
+                  <textarea
+                    value={editing.body || ''}
+                    onChange={(e) => updateField('body', e.target.value)}
+                    placeholder="짧고 강렬하게 한두 문장. 혜택 부분은 [혜택 안내 — 직접 작성해주세요] placeholder 사용"
+                    className="w-full px-3 py-2 mb-2 bg-violet-900/50 border border-white/10 rounded-lg text-sm text-white placeholder-white/30 resize-y h-24 focus:outline-none focus:border-violet-400/50"
+                    maxLength={300}
+                  />
+                  <input
+                    type="text"
+                    value={editing.badge_text || ''}
+                    onChange={(e) => updateField('badge_text', e.target.value)}
+                    placeholder="뱃지 (선택, 8자 안 — NEW · VIP · 오랜만이에요)"
+                    className="w-full px-3 py-2 mb-2 bg-violet-900/50 border border-white/10 rounded-lg text-sm text-white placeholder-white/30 focus:outline-none focus:border-violet-400/50"
+                    maxLength={20}
+                  />
+                  <button
+                    onClick={() => { const c = convertToBlocks(editing); setEditing({ ...editing, ...c }); }}
+                    className="w-full text-xs text-violet-100 bg-gradient-to-r from-violet-500/30 to-fuchsia-500/30 hover:from-violet-500/50 hover:to-fuchsia-500/50 border border-violet-400/30 rounded-lg py-2 flex items-center justify-center gap-1.5 transition-colors"
+                  >
+                    <Wand2 className="w-3.5 h-3.5" /> 블록 에디터로 전환 (모던 메시지 — 권장)
+                  </button>
+                </>
+              )}
             </div>
 
             {/* 탭 디자인: 표시 형태 */}
@@ -1259,8 +1310,36 @@ function EditModal({ editing, setEditing, availableVariables, onSave, fileInputR
               </div>
             </div>
 
-            {/* 탭 디자인: 프리셋 갤러리 */}
-            <div className={activeTab === 'design' ? '' : 'hidden'}>
+            {/* 탭 디자인: 테마 + 강조색 (블록 모드) */}
+            <div className={activeTab === 'design' && hasBlocks ? '' : 'hidden'}>
+              <h4 className="text-xs font-bold text-white/80 mb-2 flex items-center gap-1.5">
+                <Wand2 className="w-3 h-3 text-fuchsia-300" /> 테마
+              </h4>
+              <div className="grid grid-cols-3 gap-2 mb-3">
+                {THEME_OPTIONS.map((t) => (
+                  <button
+                    key={t.key}
+                    onClick={() => updateField('theme', t.key)}
+                    className={`text-xs px-2 py-2 rounded-lg border transition-colors ${(editing.theme || 'auto') === t.key ? 'bg-violet-500/30 border-violet-400/60 text-white' : 'bg-violet-900/50 border-white/10 text-white/70 hover:bg-white/5'}`}
+                  >
+                    {t.label}
+                  </button>
+                ))}
+              </div>
+              <div className="flex items-center gap-2">
+                <label className="text-[11px] text-white/60">강조색</label>
+                <input
+                  type="color"
+                  value={editing.accent_color || '#6d5cf0'}
+                  onChange={(e) => updateField('accent_color', e.target.value)}
+                  className="h-9 w-16 bg-violet-900/50 border border-white/10 rounded cursor-pointer"
+                />
+                <span className="text-[10px] text-white/40">면은 테마가, 강조만 회사색</span>
+              </div>
+            </div>
+
+            {/* 탭 디자인: 프리셋 갤러리 (레거시 단색 — 블록 없을 때만) */}
+            <div className={activeTab === 'design' && !hasBlocks ? '' : 'hidden'}>
               <h4 className="text-xs font-bold text-white/80 mb-2 flex items-center gap-1.5">
                 <Wand2 className="w-3 h-3 text-fuchsia-300" /> 디자인 (클릭해서 골라보세요)
               </h4>
@@ -1325,8 +1404,8 @@ function EditModal({ editing, setEditing, availableVariables, onSave, fileInputR
               )}
             </div>
 
-            {/* 탭 내용: CTA 버튼 */}
-            <div className={activeTab === 'content' ? '' : 'hidden'}>
+            {/* 탭 내용: CTA 버튼 (블록 모드는 cta_group 블록 사용 — 레거시만) */}
+            <div className={activeTab === 'content' && !hasBlocks ? '' : 'hidden'}>
               <h4 className="text-xs font-bold text-white/80 mb-2 flex items-center gap-1.5">
                 <MousePointer className="w-3 h-3" /> CTA 버튼 (최대 3개)
               </h4>
@@ -1583,39 +1662,45 @@ function EditModal({ editing, setEditing, availableVariables, onSave, fileInputR
                     onChange={(e) => updateField('animation', e.target.value as Animation)}
                     className="w-full px-2 py-1.5 bg-violet-900/50 border border-white/10 rounded text-xs text-white"
                   >
-                    <option value="fade">Fade (default)</option>
-                    <option value="slide">Slide</option>
-                    <option value="bounce">Bounce</option>
-                    <option value="pulse">Pulse</option>
+                    <option value="fade">기본 (Fade)</option>
+                    <option value="slide">슬라이드</option>
+                    <option value="bounce">바운스</option>
+                    <option value="pulse">펄스</option>
+                    <option value="spring">스프링 (부드러운 등장)</option>
+                    <option value="celebrate">축하 효과</option>
                   </select>
                 </div>
               </div>
             </div>
 
-            {/* 색상 + 상태 */}
+            {/* 색상 + 상태 (블록 모드는 테마가 색 결정 → 상태만) */}
             <div>
               <h4 className="text-xs font-bold text-white/80 mb-2 flex items-center gap-1.5">
-                <Layers className="w-3 h-3" /> 색상 + 상태
+                <Layers className="w-3 h-3" /> {hasBlocks ? '상태' : '색상 + 상태'}
               </h4>
-              <div className="grid grid-cols-3 gap-2">
-                <div>
-                  <label className="text-[10px] text-white/50 block mb-1">배경색</label>
-                  <input
-                    type="color"
-                    value={editing.background_color || '#4f46e5'}
-                    onChange={(e) => updateField('background_color', e.target.value)}
-                    className="w-full h-9 bg-violet-900/50 border border-white/10 rounded cursor-pointer"
-                  />
-                </div>
-                <div>
-                  <label className="text-[10px] text-white/50 block mb-1">글자색</label>
-                  <input
-                    type="color"
-                    value={editing.text_color || '#ffffff'}
-                    onChange={(e) => updateField('text_color', e.target.value)}
-                    className="w-full h-9 bg-violet-900/50 border border-white/10 rounded cursor-pointer"
-                  />
-                </div>
+              <div className={`grid ${hasBlocks ? 'grid-cols-1' : 'grid-cols-3'} gap-2`}>
+                {!hasBlocks && (
+                  <div>
+                    <label className="text-[10px] text-white/50 block mb-1">배경색</label>
+                    <input
+                      type="color"
+                      value={editing.background_color || '#4f46e5'}
+                      onChange={(e) => updateField('background_color', e.target.value)}
+                      className="w-full h-9 bg-violet-900/50 border border-white/10 rounded cursor-pointer"
+                    />
+                  </div>
+                )}
+                {!hasBlocks && (
+                  <div>
+                    <label className="text-[10px] text-white/50 block mb-1">글자색</label>
+                    <input
+                      type="color"
+                      value={editing.text_color || '#ffffff'}
+                      onChange={(e) => updateField('text_color', e.target.value)}
+                      className="w-full h-9 bg-violet-900/50 border border-white/10 rounded cursor-pointer"
+                    />
+                  </div>
+                )}
                 <div>
                   <label className="text-[10px] text-white/50 block mb-1">상태</label>
                   <select
@@ -1628,6 +1713,7 @@ function EditModal({ editing, setEditing, availableVariables, onSave, fileInputR
                   </select>
                 </div>
               </div>
+              {hasBlocks && <div className="text-[10px] text-white/40 mt-1.5">색상은 디자인 탭의 테마·강조색으로 정해집니다.</div>}
             </div>
             </div>
           </div>
@@ -1671,6 +1757,10 @@ function EditModal({ editing, setEditing, availableVariables, onSave, fileInputR
               buttons={(editing.buttons || []).map((b) => ({ ...b, label: replaceVars(b.label, sampleCustomer) }))}
               backgroundColor={editing.background_color || '#4f46e5'}
               textColor={editing.text_color || '#ffffff'}
+              blocks={hasBlocks ? blocks : undefined}
+              theme={editing.theme}
+              accentColor={editing.accent_color}
+              replaceVars={(t) => replaceVars(t, sampleCustomer)}
             />
           </div>
         </div>
@@ -1831,4 +1921,240 @@ function DrillDownModal({ loading, stats, explain, onClose }: DrillDownProps) {
       </div>
     </div>
   );
+}
+
+// ════════════════════════════════════════════════════════════════════
+// ★ D230+ 블록 컴포저 (content_blocks 편집 — slate 톤)
+// ════════════════════════════════════════════════════════════════════
+
+const ICON_KEYS = ['gift', 'bell', 'heart', 'star', 'tag', 'sparkle', 'cart', 'user', 'check', 'clock'];
+const ILLUS_KEYS = ['welcome', 'celebrate', 'empty_cart', 'gift', 'bell', 'heart'];
+
+const BLOCK_ADD_MENU: { type: string; label: string }[] = [
+  { type: 'eyebrow', label: '라벨' },
+  { type: 'headline', label: '헤드라인' },
+  { type: 'body', label: '본문' },
+  { type: 'bullets', label: '체크 리스트' },
+  { type: 'benefit', label: '혜택(티켓)' },
+  { type: 'rating', label: '별점' },
+  { type: 'product', label: '상품 카드' },
+  { type: 'media', label: '미디어' },
+  { type: 'countdown', label: '카운트다운' },
+  { type: 'cta_group', label: '버튼(CTA)' },
+  { type: 'divider', label: '구분선' },
+  { type: 'spacer', label: '여백' },
+  { type: 'footer', label: '잔글씨/광고' },
+];
+
+const BLOCK_LABELS: Record<string, string> = Object.fromEntries(BLOCK_ADD_MENU.map((b) => [b.type, b.label]));
+
+function newBlock(type: string): any {
+  switch (type) {
+    case 'eyebrow': return { type, text: '', tone: 'accent' };
+    case 'headline': return { type, text: '', size: 'lg' };
+    case 'body': return { type, text: '' };
+    case 'bullets': return { type, items: [{ icon: 'check', text: '' }] };
+    case 'benefit': return { type, text: '[혜택 안내 — 직접 작성해주세요]' };
+    case 'rating': return { type, value: 4.5, count: 0, label: '후기' };
+    case 'product': return { type, name: '', meta: '' };
+    case 'media': return { type, variant: 'icon', icon: 'gift' };
+    case 'countdown': return { type, ends_at: '', label: '마감까지' };
+    case 'cta_group': return { type, layout: 'stack', buttons: [{ id: 'btn_primary', label: '자세히 보기', action_url: '[URL — 회사 admin 수정]', style: 'primary' }] };
+    case 'divider': return { type };
+    case 'spacer': return { type, size: 'md' };
+    case 'footer': return { type, text: '' };
+    default: return { type };
+  }
+}
+
+/** 레거시(제목/본문/이미지/버튼/배경) → 블록 + 테마 1:1 변환 */
+export function convertToBlocks(m: Partial<MessageRow>): { content_blocks: any[]; theme: string; accent_color: string } {
+  const blocks: any[] = [];
+  if (m.badge_text && String(m.badge_text).trim()) blocks.push({ type: 'eyebrow', text: String(m.badge_text).trim(), tone: 'accent' });
+  if (m.image_url) blocks.push({ type: 'media', variant: 'image', url: m.image_url, aspect: '16:9' });
+  if (m.title && m.title.trim()) blocks.push({ type: 'headline', text: m.title.trim(), size: 'lg' });
+  if (m.body && m.body.trim()) blocks.push({ type: 'body', text: m.body.trim() });
+  if ((m.buttons || []).length > 0) {
+    blocks.push({
+      type: 'cta_group', layout: 'stack',
+      buttons: (m.buttons || []).map((b, i) => ({
+        id: b.id || `btn_${i}`, label: b.label, action_url: b.action_url,
+        style: b.style === 'tertiary' ? 'tertiary' : b.style === 'secondary' ? 'secondary' : 'primary',
+      })),
+    });
+  }
+  if (blocks.length === 0) { blocks.push({ type: 'headline', text: '', size: 'lg' }); blocks.push({ type: 'body', text: '' }); }
+  const bg = String(m.background_color || '');
+  const isHex = /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(bg);
+  return { content_blocks: blocks, theme: isHex ? 'vibrant' : 'brand', accent_color: isHex ? bg : '#6d5cf0' };
+}
+
+const COMPOSER_INPUT = 'w-full px-2 py-1.5 bg-slate-900/60 border border-white/10 rounded text-xs text-white placeholder-white/30 focus:outline-none focus:border-violet-400/40';
+
+function BlockComposer({ blocks, onChange }: { blocks: any[]; onChange: (b: any[]) => void }) {
+  const [showAdd, setShowAdd] = useState(false);
+  const update = (i: number, patch: any) => onChange(blocks.map((b, idx) => (idx === i ? { ...b, ...patch } : b)));
+  const remove = (i: number) => onChange(blocks.filter((_, idx) => idx !== i));
+  const move = (i: number, dir: -1 | 1) => {
+    const j = i + dir;
+    if (j < 0 || j >= blocks.length) return;
+    const next = [...blocks];
+    [next[i], next[j]] = [next[j], next[i]];
+    onChange(next);
+  };
+  const add = (type: string) => { onChange([...blocks, newBlock(type)]); setShowAdd(false); };
+
+  return (
+    <div className="space-y-2">
+      {blocks.map((b, i) => (
+        <div key={i} className="bg-slate-800/50 border border-white/10 rounded-xl p-3">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-[11px] font-bold text-violet-200 bg-violet-500/15 px-2 py-0.5 rounded-full">{BLOCK_LABELS[b.type] || b.type}</span>
+            <div className="flex items-center gap-0.5">
+              <button onClick={() => move(i, -1)} disabled={i === 0} className="p-1 text-white/40 hover:text-white disabled:opacity-20" aria-label="위로"><ChevronUp className="w-3.5 h-3.5" /></button>
+              <button onClick={() => move(i, 1)} disabled={i === blocks.length - 1} className="p-1 text-white/40 hover:text-white disabled:opacity-20" aria-label="아래로"><ChevronDown className="w-3.5 h-3.5" /></button>
+              <button onClick={() => remove(i)} className="p-1 text-rose-300/70 hover:text-rose-300" aria-label="삭제"><Trash2 className="w-3.5 h-3.5" /></button>
+            </div>
+          </div>
+          <BlockEditor block={b} onChange={(patch) => update(i, patch)} />
+        </div>
+      ))}
+
+      <div className="relative">
+        <button onClick={() => setShowAdd((v) => !v)} className="w-full text-xs text-violet-200 bg-violet-500/10 hover:bg-violet-500/20 border border-dashed border-violet-400/30 rounded-lg py-2 flex items-center justify-center gap-1.5">
+          <Plus className="w-3.5 h-3.5" /> 블록 추가
+        </button>
+        {showAdd && (
+          <div className="mt-2 grid grid-cols-3 gap-1.5 bg-slate-900/80 border border-white/10 rounded-lg p-2">
+            {BLOCK_ADD_MENU.map((m) => (
+              <button key={m.type} onClick={() => add(m.type)} className="text-[11px] text-white/80 bg-white/5 hover:bg-violet-500/20 border border-white/10 rounded px-2 py-1.5">
+                {m.label}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function BlockEditor({ block, onChange }: { block: any; onChange: (patch: any) => void }) {
+  const b = block;
+  switch (b.type) {
+    case 'eyebrow':
+    case 'footer':
+      return <input type="text" value={b.text || ''} onChange={(e) => onChange({ text: e.target.value })} placeholder={b.type === 'footer' ? '잔글씨 / (광고) 표기' : '짧은 라벨 (NEW · 오랜만이에요)'} className={COMPOSER_INPUT} />;
+    case 'headline':
+      return (
+        <div className="grid grid-cols-[1fr,72px] gap-2">
+          <input type="text" value={b.text || ''} onChange={(e) => onChange({ text: e.target.value })} placeholder="헤드라인 (변수 X)" className={COMPOSER_INPUT} />
+          <select value={b.size || 'lg'} onChange={(e) => onChange({ size: e.target.value })} className={COMPOSER_INPUT}>
+            <option value="lg">보통</option>
+            <option value="xl">크게</option>
+          </select>
+        </div>
+      );
+    case 'body':
+      return <textarea value={b.text || ''} onChange={(e) => onChange({ text: e.target.value })} placeholder="본문 (변수/Liquid 활용 가능)" className={`${COMPOSER_INPUT} resize-y h-16`} />;
+    case 'benefit':
+      return (
+        <div>
+          <textarea value={b.text || ''} onChange={(e) => onChange({ text: e.target.value })} placeholder="[혜택 안내 — 직접 작성해주세요]" className={`${COMPOSER_INPUT} resize-y h-14`} />
+          <div className="text-[10px] text-amber-200/70 mt-1">혜택은 회사 정책에 맞게 직접 작성하세요. placeholder 그대로면 저장이 막힙니다.</div>
+        </div>
+      );
+    case 'bullets':
+      return (
+        <div className="space-y-1.5">
+          {(b.items || []).map((it: any, j: number) => (
+            <div key={j} className="grid grid-cols-[72px,1fr,32px] gap-1.5 items-center">
+              <select value={it.icon || 'check'} onChange={(e) => { const items = [...(b.items || [])]; items[j] = { ...items[j], icon: e.target.value }; onChange({ items }); }} className={COMPOSER_INPUT}>
+                {ICON_KEYS.map((k) => <option key={k} value={k}>{k}</option>)}
+              </select>
+              <input type="text" value={it.text || ''} onChange={(e) => { const items = [...(b.items || [])]; items[j] = { ...items[j], text: e.target.value }; onChange({ items }); }} placeholder="항목 텍스트" className={COMPOSER_INPUT} />
+              <button onClick={() => onChange({ items: (b.items || []).filter((_: any, x: number) => x !== j) })} className="text-rose-300/70 hover:text-rose-300 p-1" aria-label="항목 삭제"><Trash2 className="w-3.5 h-3.5" /></button>
+            </div>
+          ))}
+          {(b.items || []).length < 4 && (
+            <button onClick={() => onChange({ items: [...(b.items || []), { icon: 'check', text: '' }] })} className="text-[11px] text-violet-300 hover:bg-violet-500/10 px-2 py-1 rounded flex items-center gap-1"><Plus className="w-3 h-3" /> 항목 추가</button>
+          )}
+        </div>
+      );
+    case 'rating':
+      return (
+        <div className="grid grid-cols-3 gap-2">
+          <label className="text-[10px] text-white/50">별점<input type="number" min={0} max={5} step={0.1} value={b.value ?? ''} onChange={(e) => onChange({ value: e.target.value === '' ? 0 : Number(e.target.value) })} className={COMPOSER_INPUT} /></label>
+          <label className="text-[10px] text-white/50">후기 수<input type="number" min={0} value={b.count ?? ''} onChange={(e) => onChange({ count: e.target.value === '' ? 0 : Number(e.target.value) })} className={COMPOSER_INPUT} /></label>
+          <label className="text-[10px] text-white/50">라벨<input type="text" value={b.label || ''} onChange={(e) => onChange({ label: e.target.value })} className={COMPOSER_INPUT} /></label>
+        </div>
+      );
+    case 'product':
+      return (
+        <div className="space-y-1.5">
+          <input type="text" value={b.name || ''} onChange={(e) => onChange({ name: e.target.value })} placeholder="상품명" className={COMPOSER_INPUT} />
+          <input type="text" value={b.meta || ''} onChange={(e) => onChange({ meta: e.target.value })} placeholder="간단 설명 (가격 자리)" className={COMPOSER_INPUT} />
+        </div>
+      );
+    case 'media':
+      return (
+        <div className="space-y-1.5">
+          <select value={b.variant || 'icon'} onChange={(e) => onChange({ variant: e.target.value })} className={COMPOSER_INPUT}>
+            <option value="icon">아이콘</option>
+            <option value="illustration">일러스트</option>
+            <option value="image">이미지(URL)</option>
+          </select>
+          {b.variant === 'image' ? (
+            <input type="text" value={b.url || ''} onChange={(e) => onChange({ url: e.target.value })} placeholder="이미지 URL (회사 admin 업로드 경로)" className={COMPOSER_INPUT} />
+          ) : (
+            <select value={b.icon || (b.variant === 'illustration' ? 'welcome' : 'gift')} onChange={(e) => onChange({ icon: e.target.value })} className={COMPOSER_INPUT}>
+              {(b.variant === 'illustration' ? ILLUS_KEYS : ICON_KEYS).map((k) => <option key={k} value={k}>{k}</option>)}
+            </select>
+          )}
+        </div>
+      );
+    case 'countdown':
+      return (
+        <div className="grid grid-cols-2 gap-2">
+          <label className="text-[10px] text-white/50">마감 시각<input type="datetime-local" value={b.ends_at ? String(b.ends_at).slice(0, 16) : ''} onChange={(e) => onChange({ ends_at: e.target.value ? new Date(e.target.value).toISOString() : '' })} className={COMPOSER_INPUT} /></label>
+          <label className="text-[10px] text-white/50">라벨<input type="text" value={b.label || ''} onChange={(e) => onChange({ label: e.target.value })} className={COMPOSER_INPUT} /></label>
+        </div>
+      );
+    case 'spacer':
+      return (
+        <select value={b.size || 'md'} onChange={(e) => onChange({ size: e.target.value })} className={COMPOSER_INPUT}>
+          <option value="sm">좁게</option>
+          <option value="md">보통</option>
+          <option value="lg">넓게</option>
+        </select>
+      );
+    case 'divider':
+      return <div className="text-[10px] text-white/40">구분선 (옵션 없음)</div>;
+    case 'cta_group':
+      return (
+        <div className="space-y-1.5">
+          <select value={b.layout || 'stack'} onChange={(e) => onChange({ layout: e.target.value })} className={COMPOSER_INPUT}>
+            <option value="stack">세로 정렬</option>
+            <option value="inline">가로 정렬</option>
+          </select>
+          {(b.buttons || []).map((btn: any, j: number) => (
+            <div key={j} className="grid grid-cols-[1fr,1fr,72px,28px] gap-1.5 items-center">
+              <input type="text" value={btn.label || ''} onChange={(e) => { const buttons = [...(b.buttons || [])]; buttons[j] = { ...buttons[j], label: e.target.value }; onChange({ buttons }); }} placeholder="라벨" className={COMPOSER_INPUT} />
+              <input type="text" value={btn.action_url || ''} onChange={(e) => { const buttons = [...(b.buttons || [])]; buttons[j] = { ...buttons[j], action_url: e.target.value }; onChange({ buttons }); }} placeholder="이동 URL" className={COMPOSER_INPUT} />
+              <select value={btn.style || 'primary'} onChange={(e) => { const buttons = [...(b.buttons || [])]; buttons[j] = { ...buttons[j], style: e.target.value }; onChange({ buttons }); }} className={COMPOSER_INPUT}>
+                <option value="primary">강조</option>
+                <option value="secondary">보통</option>
+                <option value="tertiary">외곽선</option>
+                <option value="ghost">텍스트</option>
+              </select>
+              <button onClick={() => onChange({ buttons: (b.buttons || []).filter((_: any, x: number) => x !== j) })} className="text-rose-300/70 hover:text-rose-300 p-1" aria-label="버튼 삭제"><Trash2 className="w-3.5 h-3.5" /></button>
+            </div>
+          ))}
+          {(b.buttons || []).length < 3 && (
+            <button onClick={() => onChange({ buttons: [...(b.buttons || []), { id: `btn_${(b.buttons || []).length}`, label: '버튼', action_url: '[URL — 회사 admin 수정]', style: 'secondary' }] })} className="text-[11px] text-violet-300 hover:bg-violet-500/10 px-2 py-1 rounded flex items-center gap-1"><Plus className="w-3 h-3" /> 버튼 추가</button>
+          )}
+        </div>
+      );
+    default:
+      return null;
+  }
 }

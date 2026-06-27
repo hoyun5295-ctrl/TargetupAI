@@ -26,6 +26,8 @@ import { callAIWithFallback } from '../services/ai';
 import { buildMemoryPromptContext } from './company-memory';
 import { getCompanyDataProfile, formatProfileForAiPrompt } from './company-data-profile';
 import { query } from '../config/database';
+// ★ D230+ 블록 — CT-27 공용 검증/정규화 (인라인 중복 금지)
+import { sanitizeContentBlocks, normalizeTheme, BENEFIT_PLACEHOLDER } from './inapp-message';
 
 // ════════════════════════════════════════════════════════════════════
 // 타입
@@ -101,8 +103,12 @@ export interface GeneratedInAppMessage {
   send_start_hour: number | null;
   send_end_hour: number | null;
   allowed_weekdays: number[];
-  animation: 'fade' | 'slide' | 'bounce' | 'pulse';
+  animation: 'fade' | 'slide' | 'bounce' | 'pulse' | 'spring' | 'celebrate';
   is_ad: boolean;
+  // ★ D230+ — 블록 조립 + 테마 (쇼핑객이 보는 메시지 격상)
+  content_blocks: any[];
+  theme: string;
+  accent_color: string | null;
 }
 
 export interface SubAgentStep {
@@ -281,6 +287,59 @@ function validateTemplate(t: any): InAppTemplate | null {
 }
 
 // ════════════════════════════════════════════════════════════════════
+// ★ D230+ 블록 — accent 기본값 + 안전 처리 + 평면→블록 합성
+// ════════════════════════════════════════════════════════════════════
+
+const SCENARIO_ACCENT: Record<QuickStartScenario, string> = {
+  cart_recovery: '#f97316',
+  new_welcome: '#10b981',
+  dormant_recovery: '#6366f1',
+  new_product: '#a855f7',
+  vip_appreciation: '#d4a017',
+  checkout_abandon: '#f43f5e',
+  repeat_purchase: '#0ea5e9',
+};
+
+function isAccentHex(c: any): boolean {
+  return typeof c === 'string' && /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(c.trim());
+}
+
+/**
+ * 블록 안전 처리 — AI 환각/임의 혜택 차단:
+ * - benefit.text = 고정 placeholder (AI는 구체 혜택 절대 작성 X — 회사 admin 직접)
+ * - media(image)·product.image url 제거 (이미지 AI 생성 금지, 회사 admin 업로드만)
+ */
+function forceBlockSafety(b: any): any {
+  if (!b || typeof b !== 'object') return b;
+  const out = { ...b };
+  if (out.type === 'benefit') out.text = BENEFIT_PLACEHOLDER;
+  if (out.type === 'media' && (out.variant === 'image' || (!out.variant && out.url))) delete out.url;
+  if (out.type === 'product') delete out.image;
+  return out;
+}
+
+/** AI가 블록을 안 주면 평면 필드(뱃지/제목/본문/CTA)에서 기본 블록 합성 */
+function synthesizeBlocks(flat: { badge?: string | null; title: string; body: string; buttons: any[] }): any[] {
+  const blocks: any[] = [];
+  if (flat.badge && String(flat.badge).trim()) blocks.push({ type: 'eyebrow', text: String(flat.badge).trim(), tone: 'accent' });
+  if (flat.title && flat.title.trim()) blocks.push({ type: 'headline', text: flat.title.trim(), size: 'lg' });
+  if (flat.body && flat.body.trim()) blocks.push({ type: 'body', text: flat.body.trim() });
+  if (Array.isArray(flat.buttons) && flat.buttons.length > 0) {
+    blocks.push({
+      type: 'cta_group',
+      layout: 'stack',
+      buttons: flat.buttons.slice(0, 3).map((b: any, i: number) => ({
+        id: String(b.id || `btn_${i}`),
+        label: String(b.label || '자세히 보기'),
+        action_url: b.action_url ?? null,
+        style: ['primary', 'secondary', 'tertiary', 'ghost'].includes(b.style) ? b.style : (i === 0 ? 'primary' : 'secondary'),
+      })),
+    });
+  }
+  return blocks;
+}
+
+// ════════════════════════════════════════════════════════════════════
 // 핵심 — 자연어 한 줄 → 완전 인앱 메시지 패키지
 // ════════════════════════════════════════════════════════════════════
 
@@ -428,6 +487,42 @@ buttons 배열 (최대 3개):
   - inline_card = fade
   - toast = bounce
   - floating_button = pulse
+- 환영 / 축하 / 감사 메시지 = spring(부드러운 스케일) 또는 celebrate(가벼운 축하 효과)도 가능
+
+[★ 블록 조립 — content_blocks 배열 (쇼핑객이 보는 메시지 격상)]
+
+메시지 본문을 블록 배열로 구성합니다. 순서 = 화면 위→아래. 각 블록 = { "type": "...", ...속성 }.
+
+사용 가능한 블록:
+- eyebrow   { "text": "작은 라벨 (NEW · 오랜만이에요)", "tone": "accent" }
+- headline  { "text": "헤드라인 (변수 X)", "size": "lg" | "xl" }
+- body      { "text": "본문 (변수 / Liquid 활용 가능)" }
+- bullets   { "items": [ { "icon": "check", "text": "장점 한 줄" } ] }   (2~4개)
+- benefit   { "text": "[혜택 안내 — 직접 작성해주세요]" }   ← 반드시 이 placeholder 그대로. 구체 혜택 작성 절대 X
+- rating    { "value": 4.6, "count": 128, "label": "후기" }
+- product   { "name": "상품명", "meta": "간단 설명" }   ← image url 작성 X
+- media     { "variant": "icon", "icon": "gift" }  또는  { "variant": "illustration", "icon": "welcome" }
+            ← image url은 AI가 작성 X (회사 admin 직접 업로드). 아이콘 키: gift·bell·heart·star·tag·sparkle·cart·user·check·clock / 일러스트 키: welcome·celebrate·empty_cart·gift·bell·heart
+- divider   { }   구분선
+- spacer    { "size": "sm" | "md" | "lg" }   여백
+- cta_group { "layout": "stack" | "inline", "buttons": [ { "id":"btn_primary", "label":"자세히 보기", "action_url":"[URL — 회사 admin 수정]", "style":"primary" } ] }
+            ← 버튼 1~3. style: primary(강조) · secondary · tertiary · ghost(텍스트형)
+- footer    { "text": "잔글씨 안내" }   (is_ad=true면 (광고) 자동 표기)
+
+작성 규칙:
+- 블록 5~8개 안으로 간결하게. headline + body는 필수. 시나리오에 맞춰 eyebrow / benefit / cta_group / rating / media를 조합.
+- benefit 블록은 혜택을 직접 쓰지 말고 placeholder 그대로 (회사 정책 모름 — 거짓 광고 방지).
+- headline 안 변수 X / body · bullets · product 안 변수 O.
+- buttons.action_url 모르면 "[URL — 회사 admin 수정]".
+- title / body 평면 필드도 그대로 출력(headline / body 블록과 같은 텍스트 — 접근성·폴백용).
+
+[테마 (theme + accent_color)]
+
+theme = 면(배경) 큐레이션. 다음 중 하나:
+- auto(자사몰 라이트/다크 자동) · light(밝은 면) · dark(어두운 면) · brand(중립 면 + 회사색 강조) · vibrant(회사색으로 면 채움 — 환영·축하·감사 같은 강한 인상) · minimal(절제된 밝은 면)
+
+accent_color = 회사 강조색 hex (예: "#4f46e5"). 면은 테마가, 강조만 회사색.
+- 환영 / 감사 / 축하 = vibrant + 따뜻한 accent 권장. 정보 / 안내 = light · brand 권장.
 
 [is_ad 광고 표기]
 
@@ -463,9 +558,17 @@ buttons 배열 (최대 3개):
   "send_start_hour": 9,
   "send_end_hour": 22,
   "allowed_weekdays": [0,1,2,3,4,5,6],
-  "animation": "fade",
+  "animation": "spring",
   "is_ad": false,
-  "reasoning": "본 인앱 메시지 선택 이유 + template/트리거/세그먼트 결정 근거 (한국어 3~5 문장)"
+  "theme": "vibrant",
+  "accent_color": "#6d5cf0",
+  "content_blocks": [
+    { "type": "eyebrow", "text": "오랜만이에요", "tone": "accent" },
+    { "type": "headline", "text": "다시 만나 반가워요", "size": "lg" },
+    { "type": "body", "text": "{{ customer.name }}님, 그동안 새 소식이 많았어요." },
+    { "type": "cta_group", "layout": "stack", "buttons": [ { "id": "btn_primary", "label": "둘러보기", "action_url": "[URL — 회사 admin 수정]", "style": "primary" } ] }
+  ],
+  "reasoning": "본 인앱 메시지 선택 이유 + template / 트리거 / 세그먼트 / 블록 구성 / 테마 결정 근거 (한국어 3~5 문장)"
 }
 \`\`\`
 
@@ -481,6 +584,8 @@ buttons 배열 (최대 3개):
 - 제목 18자 안 + 변수 / Liquid 사용 X (단순 텍스트만)
 - badge_text 8자 안 짧은 라벨 (혜택·수치 X)
 - segment_conditions / trigger_conditions / personalization_vars 자연어 목표에 정확한 매핑
+- content_blocks 배열로 본문 구성 (eyebrow / headline / body 기본 + 시나리오에 맞는 블록 조합, 5~8개 안). benefit 블록은 placeholder 그대로, 이미지 url은 비움
+- theme + accent_color 선택 (환영·감사·축하 = vibrant 권장, 정보·안내 = light·brand)
 
 응답은 위 응답 JSON 형식 그대로.`;
 
@@ -505,20 +610,34 @@ buttons 배열 (최대 3개):
 
   // 응답 검증 + 안전 default
   const scenarioStyle = input.templateHint ? SCENARIO_STYLE[input.templateHint] : null;
+  const title = String(parsed.title || '').slice(0, 100);
+  const body = String(parsed.body || '');
+  const badge_text = (String(parsed.badge_text || '').slice(0, 20) || scenarioStyle?.badge || null);
+  const buttons = Array.isArray(parsed.buttons) ? parsed.buttons.slice(0, 3).map((b: any, idx: number) => ({
+    id: String(b.id || `btn_${idx}`),
+    label: String(b.label || '').slice(0, 30),
+    action_url: b.action_url || null,
+    style: (['primary', 'secondary', 'tertiary', 'ghost'].includes(b.style) ? b.style : 'primary') as InAppButton['style'],
+    background_color: String(b.background_color || '#4f46e5'),
+    text_color: String(b.text_color || '#ffffff'),
+  })) : [];
+
+  // ★ D230+ 블록 — AI 블록 우선(안전 처리: benefit placeholder 강제 + image url 제거), 없으면 평면에서 합성
+  let content_blocks = sanitizeContentBlocks(parsed.content_blocks).map(forceBlockSafety);
+  if (content_blocks.length === 0) {
+    content_blocks = synthesizeBlocks({ badge: badge_text, title, body, buttons });
+  }
+  const theme = normalizeTheme(parsed.theme);
+  const scenarioAccent = input.templateHint ? SCENARIO_ACCENT[input.templateHint] : null;
+  const accent_color = isAccentHex(parsed.accent_color) ? String(parsed.accent_color).trim() : (scenarioAccent || null);
+
   const message: GeneratedInAppMessage = {
-    title: String(parsed.title || '').slice(0, 100),
-    body: String(parsed.body || ''),
-    badge_text: (String(parsed.badge_text || '').slice(0, 20) || scenarioStyle?.badge || null),
+    title,
+    body,
+    badge_text,
     template: validateTemplate(parsed.template) || suggestedTemplate,
     image_url: null, // AI 이미지 환각 차단 — 존재하지 않는 URL 생성 방지(D152 AI 창작 금지 정합). 이미지는 회사 admin 직접 업로드만.
-    buttons: Array.isArray(parsed.buttons) ? parsed.buttons.slice(0, 3).map((b: any, idx: number) => ({
-      id: String(b.id || `btn_${idx}`),
-      label: String(b.label || '').slice(0, 30),
-      action_url: b.action_url || null,
-      style: ['primary', 'secondary', 'tertiary'].includes(b.style) ? b.style : 'primary',
-      background_color: String(b.background_color || '#4f46e5'),
-      text_color: String(b.text_color || '#ffffff'),
-    })) : [],
+    buttons,
     background_color: String(parsed.background_color || scenarioStyle?.background || '#4f46e5'),
     text_color: String(parsed.text_color || scenarioStyle?.textColor || '#ffffff'),
     segment_conditions: parsed.segment_conditions || {},
@@ -532,8 +651,11 @@ buttons 배열 (최대 3개):
     send_start_hour: parsed.send_start_hour ?? null,
     send_end_hour: parsed.send_end_hour ?? null,
     allowed_weekdays: Array.isArray(parsed.allowed_weekdays) ? parsed.allowed_weekdays : [0, 1, 2, 3, 4, 5, 6],
-    animation: ['fade', 'slide', 'bounce', 'pulse'].includes(parsed.animation) ? parsed.animation : 'fade',
+    animation: ['fade', 'slide', 'bounce', 'pulse', 'spring', 'celebrate'].includes(parsed.animation) ? parsed.animation : 'fade',
     is_ad: Boolean(parsed.is_ad),
+    content_blocks,
+    theme,
+    accent_color,
   };
 
   // 6 sub-agent 진행 — Frontend 시각 효과용 응답 (5~10초 시뮬레이션)

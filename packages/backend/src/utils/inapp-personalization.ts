@@ -328,6 +328,8 @@ interface UsedVarsMessageLike {
   body?: string | null;
   buttons?: Array<{ label?: string | null }> | null;
   personalizationVars?: string[] | null;
+  // ★ D230+ — 블록 메시지: 블록 텍스트도 변수 스캔 대상 (서버 동봉 customer가 블록 변수도 채우도록)
+  contentBlocks?: any[] | null;
 }
 
 /**
@@ -351,6 +353,20 @@ export function extractUsedInAppVariables(messages: UsedVarsMessageLike[]): stri
     }
   };
 
+  // 블록 안 텍스트 필드 스캔 (eyebrow/headline/body/benefit/footer + bullets.items[].text + product.name/meta + cta_group.buttons[].label)
+  const scanBlocks = (blocks: any[] | null | undefined) => {
+    if (!Array.isArray(blocks)) return;
+    for (const b of blocks) {
+      if (!b || typeof b !== 'object') continue;
+      scanText(b.text);
+      scanText(b.name);
+      scanText(b.meta);
+      scanText(b.label);
+      if (Array.isArray(b.items)) b.items.forEach((it: any) => scanText(it?.text));
+      if (Array.isArray(b.buttons)) b.buttons.forEach((bt: any) => scanText(bt?.label));
+    }
+  };
+
   for (const msg of messages || []) {
     (msg.personalizationVars || []).forEach((v) => {
       if (whitelist.has(v)) used.add(v);
@@ -358,6 +374,7 @@ export function extractUsedInAppVariables(messages: UsedVarsMessageLike[]): stri
     scanText(msg.title);
     scanText(msg.body);
     (msg.buttons || []).forEach((b) => scanText(b?.label));
+    scanBlocks(msg.contentBlocks);
   }
 
   return Array.from(used);

@@ -34,6 +34,9 @@ export * from './types';
 export { HanjulloPushModule } from './push';
 export { HanjulloInAppModule } from './inapp';
 export { HanjulloJourneyVariantsModule } from './journey-variants';
+// ★ D230+ 2026-06-27 — In-app 블록 조립 + 테마 (content_blocks 렌더)
+export { resolveTheme, type InAppTheme, type ThemeKey } from './inapp-theme';
+export { renderBlocks, isBlockAllowed, ALL_BLOCK_TYPES, type ContentBlock, type BlockType, type BlockRenderContext } from './inapp-blocks';
 
 const DEFAULT_ENDPOINT = 'https://app.hanjul.ai/api/cdp';
 const DEFAULT_SOURCE = 'custom_sdk';

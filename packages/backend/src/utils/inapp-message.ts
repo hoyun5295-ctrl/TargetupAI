@@ -74,7 +74,63 @@ export interface CreateInAppMessageInput {
   send_end_hour?: number | null;
   allowed_weekdays?: number[];
   animation?: string;
+  // ★ D230+ 2026-06-27 — 블록 조립 + 테마. content_blocks 비면 레거시 단색 렌더.
+  content_blocks?: any[] | null;
+  theme?: string | null;
+  accent_color?: string | null;
 }
+
+// ════════════════════════════════════════════════════════════════════
+// ★ D230+ 블록 검증/정규화 (CT-77 AI 생성기 + 저장 라우트 공용 — 인라인 중복 금지)
+// ════════════════════════════════════════════════════════════════════
+
+export const INAPP_BLOCK_TYPES = [
+  'media', 'eyebrow', 'headline', 'body', 'bullets', 'benefit',
+  'countdown', 'rating', 'product', 'divider', 'spacer', 'cta_group', 'footer',
+] as const;
+
+export const INAPP_THEME_KEYS = ['auto', 'light', 'dark', 'brand', 'vibrant', 'minimal'] as const;
+
+export const BENEFIT_PLACEHOLDER = '[혜택 안내 — 직접 작성해주세요]';
+
+/** 알 수 없는 type 블록 제거 + 최대 30개. (jsonb 저장 전 정규화) */
+export function sanitizeContentBlocks(blocks: any): any[] {
+  if (!Array.isArray(blocks)) return [];
+  const allow = new Set<string>(INAPP_BLOCK_TYPES as readonly string[]);
+  return blocks
+    .filter((b) => b && typeof b === 'object' && typeof b.type === 'string' && allow.has(b.type))
+    .slice(0, 30);
+}
+
+/** theme 키 화이트리스트 (아니면 auto) */
+export function normalizeTheme(theme: any): string {
+  return (INAPP_THEME_KEYS as readonly string[]).includes(String(theme)) ? String(theme) : 'auto';
+}
+
+function textHasPlaceholder(t: any): boolean {
+  const s = String(t || '');
+  return s.includes('[혜택') || s.includes('[직접 작성') || s.includes('직접 작성해주세요');
+}
+
+/**
+ * 블록 안 미편집 혜택 placeholder 잔존 여부 — 저장 차단용 (AI 임의 혜택 영구 룰).
+ * benefit 블록은 빈 텍스트도 차단(렌더 시 기본 placeholder가 노출되므로).
+ */
+export function blocksHaveUneditedPlaceholder(blocks: any[]): boolean {
+  if (!Array.isArray(blocks)) return false;
+  for (const b of blocks) {
+    if (!b || typeof b !== 'object') continue;
+    if (b.type === 'benefit') {
+      if (textHasPlaceholder(b.text) || !String(b.text || '').trim()) return true;
+    }
+    if (['headline', 'body', 'eyebrow', 'footer'].includes(b.type) && textHasPlaceholder(b.text)) return true;
+    if (b.type === 'bullets' && Array.isArray(b.items) && b.items.some((it: any) => textHasPlaceholder(it?.text))) return true;
+  }
+  return false;
+}
+
+/** 에러 메시지 접두 — 라우트가 400 + BENEFIT_PLACEHOLDER_UNEDITED 코드로 매핑 */
+export const BENEFIT_PLACEHOLDER_ERROR = 'BENEFIT_PLACEHOLDER_UNEDITED';
 
 // ════════════════════════════════════════════════════════════════════
 // 회사 admin — CRUD
@@ -94,6 +150,12 @@ export async function createInAppMessage(
   // ★ 2026-06-17 채널 분리 — web(자사몰 팝업) / app(모바일 인앱). 미지정 시 web.
   const channel: 'web' | 'app' = input.channel === 'app' ? 'app' : 'web';
 
+  // ★ D230+ 블록 — 정규화 + 혜택 placeholder 미편집 차단 (AI 임의 혜택 영구 룰)
+  const contentBlocks = sanitizeContentBlocks(input.content_blocks);
+  if (blocksHaveUneditedPlaceholder(contentBlocks)) {
+    throw new Error(`${BENEFIT_PLACEHOLDER_ERROR}: 혜택 안내를 회사 정책에 맞게 직접 작성한 뒤 저장해주세요.`);
+  }
+
   const result = await query(
     `INSERT INTO cdp_inapp_messages (
       id, company_id, created_by, title, body, action_url, action_label,
@@ -102,6 +164,7 @@ export async function createInAppMessage(
       template, image_url, buttons, segment_conditions, trigger_conditions,
       personalization_vars, auto_dismiss_seconds, max_displays_per_user,
       send_start_hour, send_end_hour, allowed_weekdays, animation, badge_text,
+      content_blocks, theme, accent_color,
       created_at, updated_at
     ) VALUES (
       gen_random_uuid(), $1::uuid, $2::uuid, $3, $4, $5, $6,
@@ -110,6 +173,7 @@ export async function createInAppMessage(
       $16, $17, $18::jsonb, $19::jsonb, $20::jsonb,
       $21::jsonb, $22, $23,
       $24, $25, $26, $27, $28,
+      $29::jsonb, $30, $31,
       NOW(), NOW()
     ) RETURNING *`,
     [
@@ -124,6 +188,7 @@ export async function createInAppMessage(
       JSON.stringify(input.personalization_vars || []), input.auto_dismiss_seconds ?? null, input.max_displays_per_user ?? null,
       input.send_start_hour ?? null, input.send_end_hour ?? null, input.allowed_weekdays || [0, 1, 2, 3, 4, 5, 6], input.animation || 'fade',
       input.badge_text ?? null,
+      JSON.stringify(contentBlocks), normalizeTheme(input.theme), input.accent_color ?? null,
     ]
   );
   return mapRowToMessage(result.rows[0]);
@@ -148,6 +213,15 @@ export async function updateInAppMessage(
   messageId: string,
   input: Partial<CreateInAppMessageInput>
 ): Promise<InAppMessage | null> {
+  // ★ D230+ 블록 — 제공된 경우만 정규화 + 혜택 placeholder 차단
+  let blocksParam: string | null = null;
+  if (input.content_blocks !== undefined) {
+    const blocks = sanitizeContentBlocks(input.content_blocks);
+    if (blocksHaveUneditedPlaceholder(blocks)) {
+      throw new Error(`${BENEFIT_PLACEHOLDER_ERROR}: 혜택 안내를 회사 정책에 맞게 직접 작성한 뒤 저장해주세요.`);
+    }
+    blocksParam = JSON.stringify(blocks);
+  }
   const result = await query(
     `UPDATE cdp_inapp_messages SET
       title = COALESCE($3, title),
@@ -175,6 +249,9 @@ export async function updateInAppMessage(
       allowed_weekdays = COALESCE($25, allowed_weekdays),
       animation = COALESCE($26, animation),
       badge_text = COALESCE($27, badge_text),
+      content_blocks = COALESCE($28::jsonb, content_blocks),
+      theme = COALESCE($29, theme),
+      accent_color = COALESCE($30, accent_color),
       updated_at = NOW()
      WHERE id = $1::uuid AND company_id = $2::uuid
      RETURNING *`,
@@ -193,6 +270,7 @@ export async function updateInAppMessage(
       input.send_start_hour ?? null, input.send_end_hour ?? null,
       input.allowed_weekdays ?? null, input.animation ?? null,
       input.badge_text ?? null,
+      blocksParam, input.theme ? normalizeTheme(input.theme) : null, input.accent_color ?? null,
     ]
   );
   return result.rows.length > 0 ? mapRowToMessage(result.rows[0]) : null;
@@ -433,6 +511,10 @@ export interface InAppMessageDetail extends InAppMessage {
   allowedWeekdays: number[];
   localeVariants: any;
   animation: string;
+  // ★ D230+ 2026-06-27 — 블록 + 테마
+  contentBlocks: any[];
+  theme: string;
+  accentColor: string | null;
 }
 
 function mapRowToMessageDetail(row: any): InAppMessageDetail {
@@ -454,6 +536,9 @@ function mapRowToMessageDetail(row: any): InAppMessageDetail {
     allowedWeekdays: Array.isArray(row.allowed_weekdays) ? row.allowed_weekdays.map((d: any) => Number(d)) : [0, 1, 2, 3, 4, 5, 6],
     localeVariants: row.locale_variants || {},
     animation: row.animation || 'fade',
+    contentBlocks: Array.isArray(row.content_blocks) ? row.content_blocks : [],
+    theme: row.theme || 'auto',
+    accentColor: row.accent_color || null,
   };
 }
 
@@ -462,7 +547,8 @@ const FULL_COLUMNS = `id, title, body, action_url, action_label, position, backg
                       template, image_url, badge_text, buttons, segment_conditions, trigger_conditions,
                       personalization_vars, parent_message_id, variant_weight,
                       auto_dismiss_seconds, max_displays_per_user,
-                      send_start_hour, send_end_hour, allowed_weekdays, locale_variants, animation, channel`;
+                      send_start_hour, send_end_hour, allowed_weekdays, locale_variants, animation, channel,
+                      content_blocks, theme, accent_color`;
 
 /**
  * ★ D215+ V2 — SDK GET /inapp/active 호출 진입.

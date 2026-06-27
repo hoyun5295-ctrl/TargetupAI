@@ -1108,6 +1108,9 @@ router.post('/inapp', async (req: Request, res: Response) => {
       return res.status(402).json({ success: false, error: err.message, code: 'INSUFFICIENT_CREDIT' });
     }
     const msg = err?.message || '';
+    if (msg.startsWith('BENEFIT_PLACEHOLDER_UNEDITED')) {
+      return res.status(400).json({ success: false, error: msg.replace(/^BENEFIT_PLACEHOLDER_UNEDITED:\s*/, ''), code: 'BENEFIT_PLACEHOLDER_UNEDITED' });
+    }
     if (msg.includes('column') && msg.includes('does not exist')) {
       return res.status(503).json({ success: false, error: 'DB 마이그레이션 필요 — 운영자에게 cdp_inapp_messages ALTER(badge_text) 실행 요청', code: 'DB_MIGRATION_PENDING' });
     }
@@ -1136,6 +1139,9 @@ router.put('/inapp/:id', async (req: Request, res: Response) => {
     return res.json({ success: true, message });
   } catch (err: any) {
     const msg = err?.message || '';
+    if (msg.startsWith('BENEFIT_PLACEHOLDER_UNEDITED')) {
+      return res.status(400).json({ success: false, error: msg.replace(/^BENEFIT_PLACEHOLDER_UNEDITED:\s*/, ''), code: 'BENEFIT_PLACEHOLDER_UNEDITED' });
+    }
     if (msg.includes('column') && msg.includes('does not exist')) {
       return res.status(503).json({ success: false, error: 'DB 마이그레이션 필요 — 운영자에게 cdp_inapp_messages ALTER(badge_text) 실행 요청', code: 'DB_MIGRATION_PENDING' });
     }

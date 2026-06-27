@@ -19,6 +19,11 @@
  * - 지수 backoff retry (3회) + offline fallback
  */
 
+import { resolveTheme, withAlpha, type InAppTheme } from './inapp-theme';
+import { renderBlocks, type ContentBlock, type BlockRenderContext } from './inapp-blocks';
+
+const INAPP_FONT_STACK = '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif';
+
 // ════════════════════════════════════════════════════════════════════
 // 타입
 // ════════════════════════════════════════════════════════════════════
@@ -37,7 +42,7 @@ export interface InAppButton {
   id: string;
   label: string;
   action_url: string | null;
-  style: 'primary' | 'secondary' | 'tertiary';
+  style: 'primary' | 'secondary' | 'tertiary' | 'ghost';
   background_color: string;
   text_color: string;
 }
@@ -72,9 +77,17 @@ export interface InAppMessageSdk {
   auto_dismiss_seconds?: number | null;
   maxDisplaysPerUser?: number | null;
   max_displays_per_user?: number | null;
-  animation?: 'fade' | 'slide' | 'bounce' | 'pulse';
+  animation?: 'fade' | 'slide' | 'bounce' | 'pulse' | 'spring' | 'celebrate';
   parentMessageId?: string | null;
   parent_message_id?: string | null;
+  // ★ D230+ 2026-06-27 — 블록 조립 + 테마. content_blocks 있으면 블록 렌더, 없으면 레거시 단색 렌더.
+  contentBlocks?: ContentBlock[] | null;
+  content_blocks?: ContentBlock[] | string | null;
+  theme?: string | null;
+  accentColor?: string | null;
+  accent_color?: string | null;
+  isAd?: boolean;
+  is_ad?: boolean;
 }
 
 export interface InAppInitInput {
@@ -433,12 +446,49 @@ export class HanjulloInAppModule {
 
   private renderMessage(msg: InAppMessageSdk, input: InAppInitInput): void {
     this.renderTimes.set(msg.id, Date.now());
+
+    // 이전 호환 — position 컬럼 fallback
+    const template: InAppTemplate = (msg.template || (msg.position as InAppTemplate) || 'top_banner');
+
+    // ★ D230+ — content_blocks 있으면 블록 렌더(테마+모션), 없으면 레거시 단색 렌더(외형 변화 0)
+    const blocks = this.parseBlocks(msg);
+    if (blocks.length > 0) {
+      try {
+        this.renderBlockMessage(msg, template, blocks, input);
+      } catch (err) {
+        // 블록 렌더 실패 = 레거시로 안전 폴백 (자사몰 안 깨짐)
+        this.debugLog(input, '블록 렌더 실패 — 레거시 폴백', err);
+        this.renderLegacy(msg, template, input);
+      }
+    } else {
+      this.renderLegacy(msg, template, input);
+    }
+
+    // impression 트래킹 + 표시 이력 + 카운트 증가
+    this.track(msg.id, 'impression', input);
+    this.markSeen(msg);
+    this.incrementDisplayCount(msg.id);
+
+    // Sticky bucketing 저장
+    const parentId = msg.parentMessageId ?? msg.parent_message_id;
+    if (parentId) this.setStickyVariantId(parentId, msg.id);
+  }
+
+  /** content_blocks 파싱 — 배열 + {type:string} 인 블록만. 실패 시 [] (레거시 폴백) */
+  private parseBlocks(msg: InAppMessageSdk): ContentBlock[] {
+    let raw: any = msg.contentBlocks ?? msg.content_blocks;
+    if (typeof raw === 'string') {
+      try { raw = JSON.parse(raw); } catch { return []; }
+    }
+    if (!Array.isArray(raw)) return [];
+    return raw.filter((b: any) => b && typeof b === 'object' && typeof b.type === 'string');
+  }
+
+  /** 레거시 단색 렌더 — content_blocks 없는 메시지 (외형 변화 0, 기존 8 template 분기 그대로) */
+  private renderLegacy(msg: InAppMessageSdk, template: InAppTemplate, input: InAppInitInput): void {
     const customer = input.customer || {};
     const renderedTitle = this.replaceVariables(msg.title || '', customer);
     const renderedBody = this.replaceVariables(msg.body || '', customer);
-
-    // 옛 backward compat — position 컬럼 fallback
-    const template: InAppTemplate = (msg.template || (msg.position as InAppTemplate) || 'top_banner');
     const animation = msg.animation || 'fade';
     const autoDismissSec = msg.autoDismissSeconds ?? msg.auto_dismiss_seconds;
     const imageUrl = msg.imageUrl ?? msg.image_url;
@@ -456,7 +506,6 @@ export class HanjulloInAppModule {
           }]
         : [];
 
-    // 렌더링 분기 — 8 templates
     switch (template) {
       case 'top_banner':
       case 'bottom_banner':
@@ -483,15 +532,6 @@ export class HanjulloInAppModule {
       default:
         this.renderBanner(msg, 'top_banner', renderedTitle, renderedBody, imageUrl, buttons, animation, autoDismissSec, input);
     }
-
-    // impression 트래킹 + 표시 이력 + 카운트 증가
-    this.track(msg.id, 'impression', input);
-    this.markSeen(msg);
-    this.incrementDisplayCount(msg.id);
-
-    // Sticky bucketing 저장
-    const parentId = msg.parentMessageId ?? msg.parent_message_id;
-    if (parentId) this.setStickyVariantId(parentId, msg.id);
   }
 
   // ────────────────────────────────────────────────────────────────
@@ -797,6 +837,252 @@ export class HanjulloInAppModule {
   }
 
   // ════════════════════════════════════════════════════════════════
+  // ★ D230+ 블록 렌더 (content_blocks → 테마 컨테이너 + 블록 + 모션)
+  // ════════════════════════════════════════════════════════════════
+
+  private renderBlockMessage(msg: InAppMessageSdk, template: InAppTemplate, blocks: ContentBlock[], input: InAppInitInput): void {
+    const customer = input.customer || {};
+    const reduced = this.prefersReducedMotion();
+    const theme = resolveTheme(msg.theme, msg.accentColor ?? msg.accent_color, { prefersDark: this.prefersDark() });
+    const animation = msg.animation || 'fade';
+    let autoDismissSec = msg.autoDismissSeconds ?? msg.auto_dismiss_seconds;
+    const isAd = !!(msg.is_ad ?? msg.isAd);
+
+    // floating_button = 알약 1개 (블록 중 첫 CTA 라벨)
+    if (template === 'floating_button') {
+      this.renderBlockFloating(msg, blocks, theme, input);
+      return;
+    }
+
+    const c = this.makeContainer(msg, template, theme, input);
+    if (!c.mounted) return;
+
+    const ctx: BlockRenderContext = {
+      theme,
+      template,
+      replaceVars: (t) => this.replaceVariables(t, customer),
+      absoluteImageUrl: (u) => this.toAbsoluteImageUrl(u),
+      onButtonClick: (buttonId, actionUrl) => {
+        this.track(msg.id, 'click', input, buttonId);
+        c.remove();
+        if (actionUrl && !actionUrl.startsWith('[')) window.location.href = actionUrl;
+      },
+      reducedMotion: reduced,
+      isAd,
+    };
+
+    renderBlocks(c.contentRoot, blocks, ctx);
+
+    if (c.showClose) {
+      this.appendCloseButton(c.closeTarget, msg, input, c.remove, c.closeLayout);
+    }
+
+    this.applyAnimation(c.animationTarget, animation, c.motionContext);
+    if (animation === 'celebrate' && !reduced) this.celebrate(c.animationTarget);
+
+    // toast는 기본 자동 닫힘(4초). 그 외는 명시된 경우만.
+    if (template === 'toast' && (autoDismissSec === null || autoDismissSec === undefined)) autoDismissSec = 4;
+    if (autoDismissSec && autoDismissSec > 0) this.setupAutoDismiss(c.dismissTarget, autoDismissSec);
+  }
+
+  /** 템플릿별 컨테이너(위치·면·모서리·그림자)를 테마 토큰으로 생성 + DOM 마운트. blocks는 contentRoot에. */
+  private makeContainer(msg: InAppMessageSdk, template: InAppTemplate, theme: InAppTheme, input: InAppInitInput) {
+    const card = document.createElement('div');
+    card.setAttribute('data-hanjullo-msg', msg.id);
+    const baseCard: Record<string, string> = {
+      background: theme.surface,
+      color: theme.textPrimary,
+      fontFamily: INAPP_FONT_STACK,
+      boxSizing: 'border-box',
+    };
+    const content = document.createElement('div');
+    Object.assign(content.style, { display: 'flex', flexDirection: 'column', gap: '12px', minWidth: '0' });
+
+    const escClose = (removeFn: () => void) => {
+      const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') removeFn(); };
+      document.addEventListener('keydown', onKey);
+      return () => document.removeEventListener('keydown', onKey);
+    };
+
+    // ── center_modal
+    if (template === 'center_modal') {
+      const backdrop = document.createElement('div');
+      Object.assign(backdrop.style, {
+        position: 'fixed', inset: '0', background: 'rgba(15,15,20,0.55)', backdropFilter: 'blur(4px)',
+        zIndex: '2147483646', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px',
+      });
+      (backdrop.style as any).webkitBackdropFilter = 'blur(4px)';
+      Object.assign(card.style, baseCard, {
+        maxWidth: '400px', width: '100%', borderRadius: `${theme.radius}px`, overflow: 'hidden',
+        boxShadow: theme.shadow, position: 'relative', border: `1px solid ${theme.border}`,
+      });
+      Object.assign(content.style, { padding: '26px 24px 24px' });
+      card.appendChild(content);
+      backdrop.appendChild(card);
+      document.body.appendChild(backdrop);
+      let off = () => {};
+      const remove = () => { off(); try { document.body.removeChild(backdrop); } catch {} };
+      off = escClose(remove);
+      return { contentRoot: content, animationTarget: card, dismissTarget: backdrop, closeTarget: card, remove, showClose: true, closeLayout: 'absolute-top-right' as const, motionContext: 'modal', mounted: true };
+    }
+
+    // ── full_screen
+    if (template === 'full_screen') {
+      Object.assign(card.style, baseCard, {
+        position: 'fixed', inset: '0', display: 'flex', flexDirection: 'column',
+        alignItems: 'center', justifyContent: 'center', padding: '24px',
+      });
+      Object.assign(content.style, { maxWidth: '460px', width: '100%' });
+      card.appendChild(content);
+      document.body.appendChild(card);
+      let off = () => {};
+      const remove = () => { off(); try { document.body.removeChild(card); } catch {} };
+      off = escClose(remove);
+      return { contentRoot: content, animationTarget: card, dismissTarget: card, closeTarget: card, remove, showClose: true, closeLayout: 'absolute-top-right' as const, motionContext: 'full', mounted: true };
+    }
+
+    // ── slide_in
+    if (template === 'slide_in') {
+      Object.assign(card.style, baseCard, {
+        position: 'fixed', right: '20px', bottom: '20px', maxWidth: '340px', width: 'calc(100vw - 40px)',
+        borderRadius: `${theme.radius}px`, padding: '20px', boxShadow: theme.shadow,
+        border: `1px solid ${theme.border}`,
+      });
+      card.appendChild(content);
+      document.body.appendChild(card);
+      const remove = () => { try { document.body.removeChild(card); } catch {} };
+      return { contentRoot: content, animationTarget: card, dismissTarget: card, closeTarget: card, remove, showClose: true, closeLayout: 'absolute-top-right' as const, motionContext: 'slide-right', mounted: true };
+    }
+
+    // ── toast
+    if (template === 'toast') {
+      Object.assign(card.style, baseCard, {
+        position: 'fixed', top: '20px', right: '20px', maxWidth: '320px', width: 'calc(100vw - 40px)',
+        borderRadius: '14px', padding: '13px 15px', boxShadow: theme.shadow, border: `1px solid ${theme.border}`,
+      });
+      Object.assign(content.style, { gap: '6px' });
+      card.appendChild(content);
+      document.body.appendChild(card);
+      const remove = () => { try { document.body.removeChild(card); } catch {} };
+      return { contentRoot: content, animationTarget: card, dismissTarget: card, closeTarget: card, remove, showClose: false, closeLayout: 'inline' as const, motionContext: 'toast', mounted: true };
+    }
+
+    // ── inline_card
+    if (template === 'inline_card') {
+      const selector = input.containerSelector || 'body';
+      const container = document.querySelector(selector);
+      if (!container) {
+        this.debugLog(input, `inline_card containerSelector 미발견 (${selector})`);
+        return { contentRoot: content, animationTarget: card, dismissTarget: card, closeTarget: card, remove: () => {}, showClose: false, closeLayout: 'inline' as const, motionContext: 'fade', mounted: false };
+      }
+      Object.assign(card.style, baseCard, {
+        borderRadius: `${theme.radius}px`, padding: '22px', margin: '16px 0',
+        boxShadow: theme.shadow, border: `1px solid ${theme.border}`,
+      });
+      card.appendChild(content);
+      container.appendChild(card);
+      const remove = () => { try { card.parentNode?.removeChild(card); } catch {} };
+      return { contentRoot: content, animationTarget: card, dismissTarget: card, closeTarget: card, remove, showClose: false, closeLayout: 'inline' as const, motionContext: 'fade', mounted: true };
+    }
+
+    // ── top_banner / bottom_banner (+ 알 수 없는 템플릿 fallback)
+    const isBottom = template === 'bottom_banner';
+    Object.assign(card.style, baseCard, {
+      position: 'fixed', left: '0', right: '0', [isBottom ? 'bottom' : 'top']: '0',
+      padding: '14px 20px', display: 'flex', alignItems: 'center', gap: '14px',
+      boxShadow: isBottom ? '0 -6px 24px rgba(0,0,0,0.16)' : '0 6px 24px rgba(0,0,0,0.16)',
+      [isBottom ? 'borderTop' : 'borderBottom']: `1px solid ${theme.border}`,
+    });
+    Object.assign(content.style, { flex: '1' });
+    card.appendChild(content);
+    document.body.appendChild(card);
+    const removeBanner = () => { try { document.body.removeChild(card); } catch {} };
+    return { contentRoot: content, animationTarget: card, dismissTarget: card, closeTarget: card, remove: removeBanner, showClose: true, closeLayout: 'inline' as const, motionContext: isBottom ? 'bottom_banner' : 'top_banner', mounted: true };
+  }
+
+  /** floating_button + 블록 — 블록 중 첫 CTA(또는 헤드라인) 라벨로 알약 버튼 */
+  private renderBlockFloating(msg: InAppMessageSdk, blocks: ContentBlock[], theme: InAppTheme, input: InAppInitInput): void {
+    let label = '';
+    let actionUrl: string | null = null;
+    let btnId = 'btn_primary';
+    for (const b of blocks) {
+      if (b.type === 'cta_group' && Array.isArray(b.buttons) && b.buttons.length > 0) {
+        const f = b.buttons[0];
+        label = String(f.label || '');
+        actionUrl = f.action_url ?? null;
+        btnId = String(f.id || 'btn_primary');
+        break;
+      }
+    }
+    if (!label) {
+      const h = blocks.find((b) => b.type === 'headline');
+      label = h ? String(h.text || '') : '';
+    }
+    if (!label) return;
+
+    const root = document.createElement('button');
+    root.setAttribute('data-hanjullo-msg', msg.id);
+    Object.assign(root.style, {
+      position: 'fixed', right: '20px', bottom: '20px',
+      background: theme.accent, color: theme.accentText, border: 'none', borderRadius: '999px',
+      padding: '14px 22px', boxShadow: `0 8px 24px ${withAlpha(theme.accent, 0.4)}`,
+      zIndex: '2147483647', fontSize: '14px', fontWeight: '700', cursor: 'pointer', fontFamily: INAPP_FONT_STACK,
+    });
+    root.textContent = this.replaceVariables(label, input.customer || {});
+    root.addEventListener('click', () => {
+      this.track(msg.id, 'click', input, btnId);
+      if (actionUrl && !actionUrl.startsWith('[')) window.location.href = actionUrl;
+    });
+    this.applyAnimation(root, msg.animation || 'pulse', 'toast');
+    document.body.appendChild(root);
+  }
+
+  /** celebrate 애니메이션 — 가벼운 DOM 입자 컨페티 (~12개, 1회, 캔버스 없이) */
+  private celebrate(originEl: HTMLElement): void {
+    try {
+      if (typeof document === 'undefined') return;
+      const colors = ['#f97316', '#a855f7', '#22c55e', '#0ea5e9', '#f43f5e', '#fbbf24'];
+      const rect = originEl.getBoundingClientRect();
+      const cx = rect.left + rect.width / 2;
+      const cy = rect.top + Math.min(rect.height * 0.3, 120);
+      for (let i = 0; i < 12; i++) {
+        const p = document.createElement('div');
+        const size = 6 + Math.random() * 5;
+        Object.assign(p.style, {
+          position: 'fixed', left: `${cx}px`, top: `${cy}px`, width: `${size}px`, height: `${size}px`,
+          background: colors[i % colors.length], borderRadius: Math.random() > 0.5 ? '50%' : '2px',
+          zIndex: '2147483647', pointerEvents: 'none', opacity: '1',
+          transition: 'transform 0.7s cubic-bezier(0.2,0.6,0.3,1), opacity 0.7s ease',
+        });
+        document.body.appendChild(p);
+        const angle = Math.PI * (0.25 + Math.random() * 0.5) * (i % 2 ? 1 : -1) - Math.PI / 2;
+        const dist = 60 + Math.random() * 90;
+        const dx = Math.cos(angle) * dist;
+        const dy = Math.sin(angle) * dist + 50;
+        requestAnimationFrame(() => requestAnimationFrame(() => {
+          p.style.transform = `translate(${dx}px, ${dy}px) rotate(${Math.floor(Math.random() * 360)}deg)`;
+          p.style.opacity = '0';
+        }));
+        setTimeout(() => { try { p.remove(); } catch {} }, 820);
+      }
+    } catch {
+      // 조용히 실패
+    }
+  }
+
+  private prefersDark(): boolean {
+    try {
+      return typeof window !== 'undefined' && !!window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+    } catch { return false; }
+  }
+
+  private prefersReducedMotion(): boolean {
+    try {
+      return typeof window !== 'undefined' && !!window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    } catch { return false; }
+  }
+
+  // ════════════════════════════════════════════════════════════════
   // 공통 헬퍼 — 이미지 / 텍스트 / 버튼 / 닫기 / 애니메이션 / 자동 닫힘
   // ════════════════════════════════════════════════════════════════
 
@@ -1006,14 +1292,23 @@ export class HanjulloInAppModule {
   }
 
   private applyAnimation(el: HTMLElement, animation: string, context: string): void {
+    // prefers-reduced-motion: reduce — 모션 끄고 즉시 표시 (접근성 §13)
+    if (this.prefersReducedMotion()) {
+      el.style.opacity = '1';
+      el.style.transform = 'none';
+      return;
+    }
+
     // CSS transition + 초기 transform 적용 후 다음 frame에 정상 상태로
     const startStates: Record<string, string> = {
       'fade': 'opacity: 0;',
+      'fade-up': 'opacity: 0; transform: translateY(12px);',
       'slide-top': 'transform: translateY(-100%);',
       'slide-bottom': 'transform: translateY(100%);',
       'slide-right': 'transform: translateX(100%);',
       'bounce': 'transform: scale(0.7); opacity: 0;',
       'pulse': 'transform: scale(0.95);',
+      'spring': 'transform: scale(0.92); opacity: 0;',
     };
 
     let startKey = 'fade';
@@ -1025,10 +1320,17 @@ export class HanjulloInAppModule {
       startKey = 'bounce';
     } else if (animation === 'pulse') {
       startKey = 'pulse';
+    } else if (animation === 'spring') {
+      startKey = 'spring';
+    } else if (animation === 'celebrate') {
+      startKey = 'fade-up';
     }
 
     const startCss = startStates[startKey] || startStates.fade;
-    el.style.cssText += `; ${startCss} transition: opacity 0.3s ease, transform 0.3s ease;`;
+    const transition = startKey === 'spring'
+      ? 'transform 0.45s cubic-bezier(0.34,1.56,0.64,1), opacity 0.3s ease'
+      : 'opacity 0.3s ease, transform 0.3s ease';
+    el.style.cssText += `; ${startCss} transition: ${transition};`;
 
     requestAnimationFrame(() => {
       requestAnimationFrame(() => {
