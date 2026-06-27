@@ -766,80 +766,12 @@ export default function InAppMessagesPage() {
           </div>
         )}
 
-        {/* ▼ 영역 2: 데이터 부족 안내 카드 (조건부) */}
-        {dataShortage.length > 0 && (
-          <div className="bg-amber-500/10 border border-amber-400/30 rounded-xl p-4">
-            <div className="flex items-center gap-2 mb-2">
-              <AlertCircle className="w-4 h-4 text-amber-300" />
-              <h3 className="text-sm font-bold text-amber-100">데이터 부족 진단</h3>
-            </div>
-            <ul className="space-y-1 text-xs text-amber-200/80">
-              {dataShortage.map((issue, idx) => (
-                <li key={idx} className="flex items-start gap-2">
-                  <span className="text-amber-300 mt-0.5">·</span>
-                  <span>{issue}</span>
-                </li>
-              ))}
-            </ul>
-          </div>
-        )}
-
-        {/* ▼ 영역 3: AI 자율 진단 카드 */}
-        <div className="bg-gradient-to-br from-violet-500/15 via-purple-500/10 to-fuchsia-500/15 border border-violet-400/30 rounded-xl p-5">
-          <div className="flex items-start justify-between gap-4 flex-wrap">
-            <div className="flex items-center gap-3 flex-1 min-w-[200px]">
-              <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-violet-500/40 to-fuchsia-500/40 flex items-center justify-center flex-shrink-0">
-                <Sparkles className="w-5 h-5 text-violet-200" />
-              </div>
-              <div className="flex-1 min-w-0">
-                <h3 className="text-sm font-bold text-white">AI 자율 진단</h3>
-                <p className="text-xs text-white/60 mt-0.5">{topInsight || '회사 메시지 성과를 AI가 자동 분석 — 영향 요인 + 개선 추천 도출'}</p>
-              </div>
-            </div>
-            <button
-              onClick={handleDiagnose}
-              disabled={diagnosing || messages.length === 0}
-              className="text-xs bg-violet-500/30 hover:bg-violet-500/50 disabled:opacity-40 disabled:cursor-not-allowed text-violet-100 px-4 py-2 rounded-lg flex items-center gap-1.5 font-medium transition-colors"
-            >
-              {diagnosing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
-              {diagnosing ? '진단 중...' : 'AI 진단 시작'}
-            </button>
-          </div>
-          <div className="text-[10px] text-white/30 italic mt-3">Data source — 회사 누적 30일 평균 + 본 메시지 통계</div>
-        </div>
-
-        {/* ▼ 영역 4: 1-click 액션 3 카드 */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-          {[
-            { type: 'ai_refine' as const, icon: Wand2, title: 'AI 본문 다듬기', desc: '감성/실용/캐주얼 3안 자동 생성 → A/B 시작', gradient: 'from-violet-500/20 to-purple-500/20', border: 'border-violet-400/30', iconBg: 'from-violet-500/40 to-purple-500/40', iconColor: 'text-violet-200' },
-            { type: 'time_optimize' as const, icon: Clock, title: '시간대 최적화', desc: 'best CTR 시간대 자동 적용 (안전 시간대 한정)', gradient: 'from-emerald-500/20 to-teal-500/20', border: 'border-emerald-400/30', iconBg: 'from-emerald-500/40 to-teal-500/40', iconColor: 'text-emerald-200' },
-            { type: 'segment_refine' as const, icon: Target, title: '세그먼트 정밀화', desc: 'LTV 상위 30% + 30일 활성 사용자 자동 한정', gradient: 'from-amber-500/20 to-orange-500/20', border: 'border-amber-400/30', iconBg: 'from-amber-500/40 to-orange-500/40', iconColor: 'text-amber-200' },
-          ].map((action) => (
-            <button
-              key={action.type}
-              onClick={() => handleQuickAction(action.type)}
-              disabled={messages.length === 0}
-              className={`bg-gradient-to-br ${action.gradient} border ${action.border} rounded-xl p-4 text-left hover:scale-[1.02] transition-transform disabled:opacity-40 disabled:cursor-not-allowed`}
-            >
-              <div className="flex items-start gap-3">
-                <div className={`w-9 h-9 rounded-lg bg-gradient-to-br ${action.iconBg} flex items-center justify-center flex-shrink-0`}>
-                  <action.icon className={`w-4 h-4 ${action.iconColor}`} />
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="text-sm font-bold text-white">{action.title}</div>
-                  <div className="text-xs text-white/60 mt-1">{action.desc}</div>
-                </div>
-              </div>
-            </button>
-          ))}
-        </div>
-
         {customerGate.isEmpty && <CustomerDataRequiredBanner className="mb-4" />}
-        {/* ▼ 영역 5: 자연어 입력 + 빠른 시작 7 카드 */}
-        <div className="bg-gradient-to-br from-fuchsia-500/10 via-purple-500/8 to-indigo-500/10 border border-fuchsia-400/30 rounded-xl p-5">
+        {/* ▼ HERO: 메시지 만들기 (자연어 입력 + 빠른 시작) */}
+        <div className="bg-gradient-to-br from-violet-500/12 via-fuchsia-500/8 to-indigo-500/12 border border-violet-400/25 rounded-2xl p-5">
           <div className="flex items-center gap-2 mb-3">
             <Sparkles className="w-4 h-4 text-fuchsia-300" />
-            <h3 className="text-sm font-bold text-white">자연어 한 줄로 메시지 자동 생성</h3>
+            <h3 className="text-sm font-bold text-white">메시지 만들기<span className="text-white/40 font-normal"> — 한 줄이면 AI가 제목·본문·트리거·세그먼트까지</span></h3>
           </div>
           <div className="flex gap-2 mb-4 flex-wrap">
             <input
@@ -941,41 +873,49 @@ export default function InAppMessagesPage() {
           <div className="text-[10px] text-white/30 italic">Data source — {overview.dataSource}</div>
         )}
 
-        {/* ▼ 영역 8: 자세히 분석 토글 (6 차트) */}
-        <div className="bg-white/5 border border-white/10 rounded-xl">
-          <button
-            onClick={() => setShowDetails(!showDetails)}
-            className="w-full px-5 py-3 flex items-center justify-between text-sm font-medium text-white/80 hover:bg-white/5 transition-colors"
-          >
-            <span className="flex items-center gap-2">
-              <BarChart3 className="w-4 h-4" />
-              자세히 분석 (Top 메시지 + Explainability)
-            </span>
-            {showDetails ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
-          </button>
-          {showDetails && (
-            <div className="px-5 pb-5 space-y-4 border-t border-white/10 pt-4">
-              {/* Top 메시지 */}
-              <div>
-                <h4 className="text-xs font-bold text-white/80 mb-2">Top CTR 메시지 (30일)</h4>
-                {topMessages.length === 0 ? (
-                  <div className="text-xs text-white/40 py-4 text-center">데이터 누적 부족</div>
-                ) : (
-                  <div className="space-y-1.5">
-                    {topMessages.map((m) => (
-                      <div key={m.messageId} className="flex items-center gap-3 text-xs bg-white/5 rounded px-3 py-2">
-                        <span className="text-white/40 font-mono w-6">{m.rank}.</span>
-                        <span className="flex-1 text-white/80 truncate">{m.title}</span>
-                        <span className="text-emerald-300 font-bold">{(m.ctr * 100).toFixed(2)}%</span>
-                        <span className="text-white/40">{m.impressions.toLocaleString()}건</span>
-                      </div>
-                    ))}
-                  </div>
-                )}
-                <div className="text-[10px] text-white/30 italic mt-2">Data source — 회사 30일 누적 impression ≥ 10건 메시지</div>
-              </div>
+        {/* ▼ AI 개선 — 진단 + 1-click 통합 (한 카드) */}
+        <div className="bg-white/5 border border-white/10 rounded-2xl p-5">
+          <div className="flex items-start gap-3 flex-wrap">
+            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-violet-500/40 to-fuchsia-500/40 flex items-center justify-center flex-shrink-0">
+              <Lightbulb className="w-5 h-5 text-violet-200" />
             </div>
-          )}
+            <div className="flex-1 min-w-[200px]">
+              <h3 className="text-sm font-bold text-white">AI 개선</h3>
+              <p className="text-xs text-white/60 mt-0.5">{topInsight || (dataShortage.length > 0 ? dataShortage[0] : '성과를 분석해 개선점을 제안합니다. 아래 버튼으로 바로 적용하세요.')}</p>
+            </div>
+            <button
+              onClick={handleDiagnose}
+              disabled={diagnosing || messages.length === 0}
+              className="text-xs bg-violet-500/25 hover:bg-violet-500/40 disabled:opacity-40 disabled:cursor-not-allowed text-violet-100 px-3.5 py-2 rounded-lg flex items-center gap-1.5 font-medium transition-colors"
+            >
+              {diagnosing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
+              {diagnosing ? '진단 중...' : 'AI 진단'}
+            </button>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-2 mt-4">
+            {[
+              { type: 'ai_refine' as const, icon: Wand2, title: '본문 다듬기', desc: '감성·실용·캐주얼 3안', iconBg: 'from-violet-500/40 to-purple-500/40', iconColor: 'text-violet-200' },
+              { type: 'time_optimize' as const, icon: Clock, title: '시간대 최적화', desc: 'best CTR 시간 적용', iconBg: 'from-emerald-500/40 to-teal-500/40', iconColor: 'text-emerald-200' },
+              { type: 'segment_refine' as const, icon: Target, title: '세그먼트 정밀화', desc: 'LTV 상위 + 활성', iconBg: 'from-amber-500/40 to-orange-500/40', iconColor: 'text-amber-200' },
+            ].map((action) => (
+              <button
+                key={action.type}
+                onClick={() => handleQuickAction(action.type)}
+                disabled={messages.length === 0}
+                className="bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl p-3 text-left transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                <div className="flex items-center gap-2.5">
+                  <div className={`w-8 h-8 rounded-lg bg-gradient-to-br ${action.iconBg} flex items-center justify-center flex-shrink-0`}>
+                    <action.icon className={`w-4 h-4 ${action.iconColor}`} />
+                  </div>
+                  <div className="min-w-0">
+                    <div className="text-xs font-bold text-white">{action.title}</div>
+                    <div className="text-[10px] text-white/50 truncate">{action.desc}</div>
+                  </div>
+                </div>
+              </button>
+            ))}
+          </div>
         </div>
 
         {/* ▼ 영역 10: 메시지 목록 (filter + sort + 카드) */}
@@ -983,6 +923,9 @@ export default function InAppMessagesPage() {
           <div className="flex items-center gap-2 flex-wrap mb-4">
             <h3 className="text-sm font-bold text-white">메시지 목록 ({filteredMessages.length}건)</h3>
             <div className="ml-auto flex gap-2 flex-wrap">
+              <button onClick={() => setShowDetails(true)} className="text-xs text-white/70 hover:bg-white/10 border border-white/10 px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-colors">
+                <BarChart3 className="w-3.5 h-3.5" /> 자세히 분석
+              </button>
               <select
                 value={statusFilter}
                 onChange={(e) => setStatusFilter(e.target.value as Status | 'all')}
@@ -1117,6 +1060,35 @@ export default function InAppMessagesPage() {
       <ConfirmModal state={confirmState} onClose={() => setConfirmState(null)} />
       {/* 고객 데이터 없음 — 생성 차단 안내 */}
       <CustomerDataRequiredModal open={showDataGate} onClose={() => setShowDataGate(false)} />
+
+      {/* 자세히 분석 모달 (Top CTR 메시지) */}
+      {showDetails && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-[60]" onClick={() => setShowDetails(false)}>
+          <div className="bg-slate-900 border border-white/10 rounded-2xl shadow-2xl w-full max-w-2xl max-h-[85vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+            <div className="sticky top-0 bg-slate-900/90 backdrop-blur-sm border-b border-white/10 px-5 py-4 flex items-center justify-between">
+              <h3 className="text-sm font-bold text-white flex items-center gap-2"><BarChart3 className="w-4 h-4 text-cyan-300" /> 자세히 분석 — Top CTR 메시지</h3>
+              <button onClick={() => setShowDetails(false)} className="text-white/50 hover:text-white p-1.5 rounded-lg hover:bg-white/10"><X className="w-5 h-5" /></button>
+            </div>
+            <div className="p-5">
+              {topMessages.length === 0 ? (
+                <div className="text-xs text-white/40 py-8 text-center">데이터 누적 부족 — impression 10건 이상 쌓이면 표시됩니다.</div>
+              ) : (
+                <div className="space-y-1.5">
+                  {topMessages.map((m) => (
+                    <div key={m.messageId} className="flex items-center gap-3 text-xs bg-white/5 rounded px-3 py-2.5">
+                      <span className="text-white/40 font-mono w-6">{m.rank}.</span>
+                      <span className="flex-1 text-white/80 truncate">{m.title}</span>
+                      <span className="text-emerald-300 font-bold">{(m.ctr * 100).toFixed(2)}%</span>
+                      <span className="text-white/40">{m.impressions.toLocaleString()}건</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+              <div className="text-[10px] text-white/30 italic mt-3">Data source — 회사 30일 누적 impression ≥ 10건 메시지</div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -1169,7 +1141,7 @@ function EditModal({ editing, setEditing, availableVariables, onSave, fileInputR
     return () => clearTimeout(timer);
   }, [editing.segment_conditions]);
 
-  // web 채널은 4종(모달/슬라이드/토스트/플로팅)만 — 옛 배너 등 4종 밖 형태로 저장된 메시지를 열면 모달로 자동 정규화
+  // web 채널은 4종(모달/슬라이드/토스트/플로팅)만 — 이전 배너 등 4종 밖 형태로 저장된 메시지를 열면 모달로 자동 정규화
   useEffect(() => {
     const WEB_OK = ['center_modal', 'slide_in', 'toast', 'floating_button'];
     if (editing.channel !== 'app' && editing.template && !WEB_OK.includes(editing.template)) {
@@ -1237,7 +1209,7 @@ function EditModal({ editing, setEditing, availableVariables, onSave, fileInputR
 
   return (
     <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50" onClick={() => setEditing(null)}>
-      <div className="bg-gradient-to-br from-slate-900 via-slate-900 to-slate-950 border border-white/10 rounded-2xl shadow-2xl w-full max-w-5xl max-h-[95vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+      <div className="bg-gradient-to-br from-slate-900 via-slate-900 to-slate-950 border border-white/10 rounded-2xl shadow-2xl w-full max-w-6xl max-h-[95vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
         {/* 헤더 */}
         <div className="sticky top-0 z-10 bg-slate-900/80 backdrop-blur-sm border-b border-white/10 px-6 py-4 flex items-center justify-between">
           <div className="flex items-center gap-3">
@@ -1254,7 +1226,7 @@ function EditModal({ editing, setEditing, availableVariables, onSave, fileInputR
           </button>
         </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-[1fr,400px] gap-0">
+        <div className="grid grid-cols-1 lg:grid-cols-[1fr,480px] gap-0">
           {/* 좌측 — 3탭 (내용 / 디자인 / 타겟·시점) */}
           <div className="p-6 space-y-5 border-r border-white/5">
             <div className="flex gap-1.5">
@@ -2091,13 +2063,26 @@ function BlockEditor({ block, onChange, uploadImage }: { block: any; onChange: (
         <div className="grid grid-cols-[1fr,72px] gap-2">
           <input type="text" value={b.text || ''} onChange={(e) => onChange({ text: e.target.value })} placeholder="헤드라인 (변수 X)" className={COMPOSER_INPUT} />
           <select value={b.size || 'lg'} onChange={(e) => onChange({ size: e.target.value })} className={COMPOSER_INPUT}>
+            <option value="sm">작게</option>
             <option value="lg">보통</option>
             <option value="xl">크게</option>
           </select>
         </div>
       );
     case 'body':
-      return <textarea value={b.text || ''} onChange={(e) => onChange({ text: e.target.value })} placeholder="본문 (변수/Liquid 활용 가능)" className={`${COMPOSER_INPUT} resize-y h-16`} />;
+      return (
+        <div className="space-y-1.5">
+          <textarea value={b.text || ''} onChange={(e) => onChange({ text: e.target.value })} placeholder="본문 (변수/Liquid 활용 가능)" className={`${COMPOSER_INPUT} resize-y h-16`} />
+          <div className="flex items-center gap-2">
+            <span className="text-[10px] text-white/40">글자 크기</span>
+            <select value={b.size || 'md'} onChange={(e) => onChange({ size: e.target.value })} className={`${COMPOSER_INPUT} w-auto`}>
+              <option value="sm">작게</option>
+              <option value="md">보통</option>
+              <option value="lg">크게</option>
+            </select>
+          </div>
+        </div>
+      );
     case 'benefit':
       return (
         <div>

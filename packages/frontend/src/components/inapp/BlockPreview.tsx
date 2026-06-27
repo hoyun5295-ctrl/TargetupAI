@@ -54,13 +54,14 @@ function renderBlock(b: any, i: number, ctx: Ctx): JSX.Element | null {
     case 'headline': {
       const text = t(b.text).trim();
       if (!text) return null;
-      const xl = b.size === 'xl';
-      return <div key={i} style={{ fontWeight: 600, fontSize: xl ? 22 : 18, letterSpacing: xl ? '-0.01em' : '-0.005em', lineHeight: 1.3, color: theme.textPrimary }}>{text}</div>;
+      const hs: Record<string, number> = { sm: 16, md: 18, lg: 18, xl: 22 };
+      return <div key={i} style={{ fontWeight: 600, fontSize: hs[String(b.size)] || 18, letterSpacing: b.size === 'xl' ? '-0.01em' : '-0.005em', lineHeight: 1.3, color: theme.textPrimary }}>{text}</div>;
     }
     case 'body': {
       const text = t(b.text);
       if (!text.trim()) return null;
-      return <div key={i} style={{ fontSize: 13.5, lineHeight: 1.55, color: theme.textSecondary, whiteSpace: 'pre-wrap' }}>{text}</div>;
+      const bs: Record<string, number> = { sm: 12.5, md: 13.5, lg: 15.5 };
+      return <div key={i} style={{ fontSize: bs[String(b.size)] || 13.5, lineHeight: 1.55, color: theme.textSecondary, whiteSpace: 'pre-wrap' }}>{text}</div>;
     }
     case 'bullets': {
       const items = Array.isArray(b.items) ? b.items.filter((it: any) => String(it?.text || '').trim()) : [];

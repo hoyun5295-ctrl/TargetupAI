@@ -139,7 +139,7 @@ function Overlay({ variant, themeTokens, ...rest }: { variant: Variant; themeTok
     const heroImg = usingBlocks ? undefined : toAbsoluteImage(rest.imageUrl);
     return (
       <div style={{ position: 'absolute', inset: 0, background: 'rgba(15,15,20,0.5)', backdropFilter: 'blur(3px)', WebkitBackdropFilter: 'blur(3px)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 18 } as CSSProperties}>
-        <div style={{ ...cardBase, position: 'relative', maxWidth: 290, width: '100%', maxHeight: '92%', display: 'flex', flexDirection: 'column', borderRadius: r(20), overflow: 'hidden', boxShadow: '0 24px 60px rgba(0,0,0,0.45)' }}>
+        <div style={{ ...cardBase, position: 'relative', maxWidth: 330, width: '100%', maxHeight: '92%', display: 'flex', flexDirection: 'column', borderRadius: r(20), overflow: 'hidden', boxShadow: '0 24px 60px rgba(0,0,0,0.45)' }}>
           {heroImg && <img src={heroImg} alt="" onError={hideOnError} style={{ width: '100%', maxHeight: 130, objectFit: 'cover', display: 'block', flexShrink: 0 }} />}
           <div style={{ padding: 20, overflowY: 'auto' }}>
             {usingBlocks ? inner : <CardInner {...rest} imageUrl={null} variant="modal" textColor={textColor} />}
@@ -221,7 +221,7 @@ export function InAppMessagePreview(props: InAppMessagePreviewProps) {
       </div>
 
       {/* 디바이스 프레임 */}
-      <div className="mx-auto" style={{ width: isMobile ? 250 : '100%', maxWidth: isMobile ? 250 : 380, transition: 'width 0.2s ease' }}>
+      <div className="mx-auto" style={{ width: isMobile ? 300 : '100%', maxWidth: isMobile ? 300 : 440, transition: 'width 0.2s ease' }}>
         <div style={{ borderRadius: isMobile ? 26 : 14, overflow: 'hidden', boxShadow: '0 14px 44px rgba(0,0,0,0.42)', border: '1px solid rgba(255,255,255,0.12)' }}>
           {/* 상단 바 */}
           <div style={{ height: 30, background: '#26262e', display: 'flex', alignItems: 'center', padding: '0 12px', gap: 6 }}>
@@ -241,7 +241,7 @@ export function InAppMessagePreview(props: InAppMessagePreviewProps) {
             )}
           </div>
           {/* 콘텐츠 (더미 사이트 + 인앱 오버레이) */}
-          <div style={{ position: 'relative', height: isMobile ? 480 : 440, overflow: 'hidden' }}>
+          <div style={{ position: 'relative', height: isMobile ? 580 : 540, overflow: 'hidden' }}>
             <DummySite />
             <Overlay variant={variant} themeTokens={themeTokens} {...props} />
           </div>

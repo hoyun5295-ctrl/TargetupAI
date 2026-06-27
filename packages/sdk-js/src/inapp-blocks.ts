@@ -226,14 +226,16 @@ function renderEyebrow(b: ContentBlock, ctx: BlockRenderContext): HTMLElement | 
   return chip;
 }
 
+const HEADLINE_SIZES: Record<string, string> = { sm: '16px', md: '18px', lg: '18px', xl: '22px' };
+const BODY_SIZES: Record<string, string> = { sm: '12.5px', md: '13.5px', lg: '15.5px' };
+
 function renderHeadline(b: ContentBlock, ctx: BlockRenderContext): HTMLElement | null {
   const text = ctx.replaceVars(String(b.text || '')).trim();
   if (!text) return null;
-  const xl = b.size === 'xl';
   return el('div', {
     fontWeight: '600',
-    fontSize: xl ? '22px' : '18px',
-    letterSpacing: xl ? '-0.01em' : '-0.005em',
+    fontSize: HEADLINE_SIZES[String(b.size)] || '18px',
+    letterSpacing: b.size === 'xl' ? '-0.01em' : '-0.005em',
     lineHeight: '1.3',
     color: ctx.theme.textPrimary,
   }, text);
@@ -243,7 +245,7 @@ function renderBody(b: ContentBlock, ctx: BlockRenderContext): HTMLElement | nul
   const text = ctx.replaceVars(String(b.text || ''));
   if (!text.trim()) return null;
   return el('div', {
-    fontSize: '13.5px', fontWeight: '400', lineHeight: '1.55',
+    fontSize: BODY_SIZES[String(b.size)] || '13.5px', fontWeight: '400', lineHeight: '1.55',
     color: ctx.theme.textSecondary, whiteSpace: 'pre-wrap',
   }, text);
 }
