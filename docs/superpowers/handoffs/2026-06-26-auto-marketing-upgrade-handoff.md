@@ -1,7 +1,7 @@
 # 자동마케팅(Continuous Operator) 업그레이드 — 다음 세션 인계
 
-작성: 2026-06-26 (세션 종료) · 다음 세션 진입용
-배포: **아직 안 됨.** Harold 명시 = 다음 세션에서 Phase 2~3까지 다 끝내고 **한 번에** 배포. (이번 세션 모든 작업 미배포.)
+작성: 2026-06-26 · 갱신 2026-06-26 세션 종료
+배포: **완료** (Harold 세션 마무리 = 배포완료 인정). Phase 1~3 + 앞 디버깅 + 고객사 관리자 페이지 모던 리디자인 일괄 배포. DB(중복 4컬럼 DROP + channel/benefit/sequence ALTER) 적용 완료. 운영 실측은 직원 몫(§5 시나리오).
 
 ---
 
@@ -45,7 +45,7 @@ ALTER TABLE continuous_operators
 ### Phase 1 남은 선택 항목(필수 아님)
 - #2 UI 명확화: 제안 카드에 "발송가능 N / 조건매칭 M (수신거부·무효 K 제외)" 2값 표시. countFilteredCustomers가 `unsubscribeCount` 반환하나, 매칭(안전필터 전) 카운트는 별도 1쿼리 필요. 폴리시로 남김.
 
-## 4. Phase 2~3 — 구현 완료 (2026-06-26 세션 / 미배포)
+## 4. Phase 2~3 — 구현 완료 (2026-06-26 세션 / 배포완료)
 no_parallel_tasks대로 한 건씩. 전부 tsc 0 + 단위 테스트 통과. 발송·돈 종단 검증은 배포 후 실측(직원, 6원칙 ⑤).
 
 ### Phase 2 D — 예산 가드 (완료)
@@ -70,9 +70,9 @@ no_parallel_tasks대로 한 건씩. 전부 tsc 0 + 단위 테스트 통과. 발�
 프론트: pages/ContinuousOperatorPage.tsx
 DB(이번 세션 Harold 적용 완료): 중복 4컬럼 DROP + channel/benefit ALTER + sequence 3컬럼 ALTER.
 
-## 5. 배포 (다음 세션 끝에 한 번에)
-- 이번 세션 전체(앞서 커밋된 드래그/3항목/취소 fix + 자동마케팅 Phase 1~3) 묶어 배포.
-- 자동마케팅: 백엔드 `pm2 restart all`(ts-node) + 프론트 `build:safe`. DB는 이미 적용 완료(DROP + channel/benefit + sequence ALTER).
+## 5. 배포 — 완료 (2026-06-26 세션 종료)
+- 이번 세션 전체(앞서 커밋된 드래그/3항목/취소 fix + 자동마케팅 Phase 1~3 + 고객사 관리자 페이지 모던 리디자인) 배포 완료.
+- 자동마케팅: 백엔드 `pm2 restart all`(ts-node) + 프론트 `build:safe`. DB 적용 완료(DROP + channel/benefit + sequence ALTER).
 - 검증: 백엔드 tsc 0 · 프론트 tsc 0 · vitest 78/78 · verify (autosend 28 / operator-recipients 9 / send-time 16). 금지 패턴(박-단어/모델명/native dialog) 0건.
 - 배포 후 실측(직원, 6원칙 ⑤):
   1. 자동마케팅 1건 채널=SMS + 혜택 입력 + 시퀀스 ON(대기 1일·리마인드 문안 입력)으로 생성 → 제안 문안 SMS형식 + 혜택 반영 + 담당자 알림 수신.

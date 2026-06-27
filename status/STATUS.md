@@ -107,12 +107,11 @@
 
 ---
 
-### 🟡 2026-06-26 — 운영 디버깅 다수 + 자동마케팅 Phase 1 (★전부 미배포 / 다음 세션 끝에 한 번에 배포)
-> **배포 상태**: Harold 명시 = 다음 세션에서 자동마케팅 Phase 2~3까지 다 끝내고 **한 번에 배포**. 아래 전부 미배포(드래그/3항목/취소 fix=커밋됨·미배포, 자동마케팅 Phase 1=working tree).
-> **모바일DM 드래그 순서변경**: ① onPointerDown stopPropagation이 dnd-kit listeners.onPointerDown 덮어 드래그 미시작 → 제거. ② reorderSections가 splice 후 order 미부여 → normalizeOrder가 옛 order로 되돌림 → splice 후 order=index 재부여. (SectionList.tsx·dmBuilderStore.ts)
-> **디버깅 3항목**: item1 발송통계(manage/StatsTab)·예약캠페인에 문안 표시(백엔드 이미 message_content 반환, 프론트 표시만 누락). item2 AI 다듬기 하단 080 누락=validateAndNormalizeRefinedCandidates가 stripRejectNumberPatterns로 떼고 재부착 안 함 → 원본 footer 추출 재부착(services/ai.ts). item3 여정 5건(매장세그먼트 customer_conditions+store_name/store_code·1회→step1·Liquid 미리보기 렌더·대괄호 placeholder 패턴·요일 getKoreanCalendar 주입).
-> **아난티 긴급취소 검증 + 슈퍼관리자 취소 fix**: 아난티 취소는 sweeper(1분)가 막아 안전. 단 슈퍼관리자 취소(admin.ts)가 PG status만 바꾸고 MySQL 큐 즉시 삭제 안 함(0611 패턴) → cancelCampaign CT(큐 DELETE+잔존0 검증+환불, skipTimeCheck) 호출로 교체 → 긴급취소도 즉시 큐 비움.
-> **자동마케팅 Phase 1** (working tree): 6개 보고 이슈 처리. #1 채널(폼 선택+orchestrate recommended_channel override) #3 담당자 연락처(생성 경로 배선 — POST/createOperator가 드롭하던 것) #4 혜택(폼 입력+`[혜택]` placeholder 치환, AI 임의 X) #5 시각(폴 5분→1분) #2 버그아님(안전필터 정당 제외) #6 현행유지. continuous_operators 신규 컬럼 channel·benefit_content(ALTER) + 중복4 DROP. **다음 세션 = Phase 2~3 발전 4기능(D예산가드·A성과학습·B시각최적화·C다단계).** 인계 `docs/superpowers/handoffs/2026-06-26-auto-marketing-upgrade-handoff.md` · 설계 `docs/superpowers/specs/2026-06-26-auto-marketing-upgrade-design.md`. 상세 [[project_2026_0626_auto_marketing_phase1]].
+### 🟢 2026-06-26 — 자동마케팅 Phase 1~3 + 운영 디버깅 + 고객사 관리자 페이지 모던 리디자인 (★전부 배포완료)
+> **배포완료**(세션 종료 일괄, [[session_wrap_means_deployed]]). DB ALTER/DROP Harold 직접 적용 완료. 운영 실측(다단계 리마인드 N일 후·Bandit 학습·UI 렌더)은 직원 몫.
+> **앞 디버깅(배포완료)**: 모바일DM 드래그 순서변경(onPointerDown stopPropagation 제거 + splice 후 order 재부여) · 발송통계/예약 문안 표시 · AI 다듬기 080 재부착 · 여정 5건 · 슈퍼관리자 긴급취소 cancelCampaign 배선(큐 DELETE+잔존0+환불).
+> **자동마케팅 Phase 1~3(배포완료)**: P1 6이슈(#1채널·#3담당자·#4혜택·#5폴1분, #2버그아님·#6현행). P2 D예산가드(decideBudgetGuard 자율발송직전 당월로그SUM) · A성과학습(보상 `if(sent<=0)return` 가드가 클릭/전환 떨궈 학습정지였음→α/β 실측count서 도출 deriveBanditArm·여정A/B 정상화·자율발송 Bandit변이+본문URL단축추적). P3 B시각최적화(cdp message_click KST피크·insufficient_data폴백) · C다단계시퀀스(여정자동생성 대신 dispatchProposalSend 재사용·N일후 미클릭자 excludeClickedSince anti-join·sequence 3컬럼ALTER). tsc0·vitest78·verify28/9/16. 상세 [[project_2026_0626_auto_marketing_phase1]].
+> **고객사 관리자 페이지 모던 리디자인(배포완료)**: ManagePage 전체+5탭(사용자·발신번호·예약·발송통계·고객DB) 화이트 유지+슬레이트/인디고 통일. 카드 rounded-2xl·테이블 대문자 슬레이트 헤더+행호버·아이콘 배지·상태 점배지·tabular-nums·모바일반응형. StatsTab 상세모달 폭확대+메시지 복사팝업. frontend tsc0. 상세 [[project_2026_0626_admin_ui_modernization]].
 
 ---
 

@@ -474,6 +474,20 @@ export default function JourneysPage() {
   // ★ D211+ Phase 3 (2026-05-23 Harold 명시): statusFilter 변경 시 자동 재조회
   useEffect(() => { loadAll(); }, [statusFilter]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // 자동마케팅 승격 — 검증된 목표를 여정으로 가져와 프리필 (sessionStorage 핸드오프)
+  useEffect(() => {
+    const raw = sessionStorage.getItem('journeyObjectivePrefill');
+    if (!raw) return;
+    try {
+      const p = JSON.parse(raw);
+      sessionStorage.removeItem('journeyObjectivePrefill');
+      if (p.objective) setObjective(String(p.objective));
+      toast.info('자동마케팅에서 검증된 목표를 가져왔습니다. 생성하면 상시 여정이 됩니다.' + (p.message ? ' 검증된 문안은 검토 단계에서 붙여 넣을 수 있습니다.' : ''));
+    } catch {
+      sessionStorage.removeItem('journeyObjectivePrefill');
+    }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
   // ★ D189 #2 (2026-05-22): 알림톡 발신프로필 + 템플릿 + 활성 필드 fetch (review view 알림톡 step UI용)
   useEffect(() => {
     const t = token();
