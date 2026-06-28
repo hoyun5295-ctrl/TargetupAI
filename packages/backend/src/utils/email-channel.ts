@@ -22,6 +22,10 @@ import { sendEmail, isSmtpConfigured, getSmtpConfigPublic } from './company-smtp
 import { applyTracking, UNSUB_URL_MARKER } from './email-tracking';
 import { logCampaignTraining, updateTrainingMetrics, getSourceRef } from './training-logger';
 import { buildEmailTrainingMessage } from './email-training-message';
+import { renderEmailSections } from './email/email-section-renderer';
+import { resolveEmailSectionsForCustomer, renderEmailText } from './email/email-personalization';
+import { getCompanyBrandKit } from './dm/dm-brand-kit';
+import type { Section } from './dm/dm-section-registry';
 
 // ════════════════════════════════════════════════════════════════════
 // 타입
@@ -74,7 +78,7 @@ export interface CreateCampaignInput {
   scheduledAt?: Date;
 }
 
-export interface EmailRecipient { email: string; name?: string; substitutions?: Record<string, string> }
+export interface EmailRecipient { email: string; name?: string; substitutions?: Record<string, string>; customer?: Record<string, any> }
 
 export interface SendCampaignInput {
   campaignId: string;
@@ -245,13 +249,19 @@ export async function sendEmailCampaign(input: SendCampaignInput): Promise<{ mes
     [campaign.id]
   );
 
+  // 섹션 캠페인이면 수신자별로 Section[]을 렌더(변수 치환 + 조건부 표시). 섹션 없으면 기존 html_body 경로(무회귀).
+  const campaignSections = Array.isArray(campaign.sections) ? (campaign.sections as Section[]) : [];
+  const hasSections = campaignSections.length > 0;
+  const brandKit = hasSections ? await getCompanyBrandKit(campaign.companyId) : null;
+  const adFooter = `\n\n<hr><p style="font-size:11px;color:#999;text-align:center">본 메일은 ${campaign.fromName}의 광고 정보입니다. 수신을 원하지 않으시면 <a href="${UNSUB_URL_MARKER}">수신거부</a>를 눌러주세요.</p>`;
+
   // 광고성 prefix + 무료거부 자동 합성 — 수신거부는 마커로 두고 발송 시 수신자별 개인 토큰 URL로 치환(applyTracking)
   let finalSubject = campaign.subject;
   let finalHtml = campaign.htmlBody;
   if (campaign.isAd) {
     if (!finalSubject.startsWith('(광고)')) finalSubject = `(광고) ${finalSubject}`;
     if (!finalHtml.includes('수신거부') && !finalHtml.includes('unsubscribe')) {
-      finalHtml += `\n\n<hr><p style="font-size:11px;color:#999;text-align:center">본 메일은 ${campaign.fromName}의 광고 정보입니다. 수신을 원하지 않으시면 <a href="${UNSUB_URL_MARKER}">수신거부</a>를 눌러주세요.</p>`;
+      finalHtml += adFooter;
     }
   }
 
@@ -266,9 +276,21 @@ export async function sendEmailCampaign(input: SendCampaignInput): Promise<{ mes
       const batch = input.recipients.slice(i, i + BATCH_SIZE);
       for (const recipient of batch) {
         try {
-          // 개인화 변수 치환 (substitutions {{변수}} 패턴)
-          let personalizedHtml = finalHtml;
-          let personalizedSubject = finalSubject;
+          // 섹션 캠페인 = 수신자별 개인화 렌더(변수+조건부). 섹션 없으면 기존 html_body 경로(무회귀).
+          let personalizedHtml: string;
+          let personalizedSubject: string;
+          if (hasSections) {
+            const cust = recipient.customer || { name: recipient.name || '고객' };
+            const resolved = resolveEmailSectionsForCustomer(campaignSections, cust);
+            let body = renderEmailSections(resolved, { brandKit, publicBase: process.env.PUBLIC_BASE_URL });
+            if (campaign.isAd && !body.includes('수신거부') && !body.includes('unsubscribe')) body += adFooter;
+            personalizedHtml = body;
+            personalizedSubject = renderEmailText(finalSubject, cust);
+          } else {
+            personalizedHtml = finalHtml;
+            personalizedSubject = finalSubject;
+          }
+          // 개인화 변수 치환 (substitutions {{변수}} 패턴 — 수동 HTML backward compat)
           if (recipient.substitutions) {
             for (const [key, value] of Object.entries(recipient.substitutions)) {
               const pattern = new RegExp(`\\{\\{\\s*${key}\\s*\\}\\}`, 'g');
@@ -478,7 +500,7 @@ export async function resolveCustomerRecipients(
     gradeClause = ` AND grade = ANY($${params.length})`;
   }
   const result = await query(
-    `SELECT DISTINCT ON (lower(email)) email, name
+    `SELECT DISTINCT ON (lower(email)) email, name, grade, points, region, recent_purchase_store, total_purchase_amount, purchase_count
      FROM customers
      WHERE company_id = $1::uuid AND ${RECIPIENT_SAFETY_WHERE}${gradeClause}
      ORDER BY lower(email)`,
@@ -487,6 +509,16 @@ export async function resolveCustomerRecipients(
   return result.rows.map((r: any) => ({
     email: String(r.email).trim(),
     name: r.name ? String(r.name) : undefined,
+    // 개인화(변수+조건부)용 화이트리스트 고객 필드 — buildPreviewCustomers와 동일한 검증된 컬럼 집합
+    customer: {
+      name: r.name || '고객',
+      grade: r.grade || '',
+      points: Number(r.points || 0),
+      region: r.region || '',
+      recent_purchase_store: r.recent_purchase_store || '',
+      total_purchase_amount: Number(r.total_purchase_amount || 0),
+      purchase_count: Number(r.purchase_count || 0),
+    },
   }));
 }
 

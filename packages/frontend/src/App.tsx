@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback, createContext, useContext } from 'react';
-import { BrowserRouter, Routes, Route, Navigate, useNavigate } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate, useNavigate, useLocation } from 'react-router-dom';
 import { useAuthStore } from './stores/authStore';
 import { useSessionGuard } from './hooks/useSessionGuard';
 import { useSessionTimeout } from './hooks/useSessionTimeout';
@@ -171,6 +171,16 @@ function SessionTimeoutGuard({ children }: { children: React.ReactNode }) {
   );
 }
 
+// ★ 2026-06-28 (Harold 명시): 메뉴 진입 시 이전 페이지 스크롤이 남아 중간에서 시작하는 문제 차단.
+//   라우트(pathname) 변경마다 즉시 최상단으로 복원. 전역 단일 처리 — 페이지별 인라인 금지.
+function ScrollToTop() {
+  const { pathname } = useLocation();
+  useEffect(() => {
+    window.scrollTo(0, 0);
+  }, [pathname]);
+  return null;
+}
+
 function App() {
   const { loadFromStorage, isAuthenticated, user } = useAuthStore();
   const [isLoading, setIsLoading] = useState(true);
@@ -186,6 +196,8 @@ function App() {
 
   return (
     <BrowserRouter>
+      {/* ★ 2026-06-28: 라우트 진입 시 최상단 스크롤 복원 (전역) */}
+      <ScrollToTop />
       {/* ★ D212+ (2026-05-23 Harold 명시): Toast 알림 영역 — native alert() 영구 폐기 정합 */}
       <ToastProvider>
       {/* 세션 감시 (로그인 상태일 때만 활성) */}

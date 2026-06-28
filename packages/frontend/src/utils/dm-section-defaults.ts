@@ -268,6 +268,12 @@ export type Section = {
   align?: 'left' | 'center' | 'right';
   /** 섹션 버튼/액센트 색 override — 미설정 시 브랜드 색 */
   accent_color?: string;
+  /** 개인화 조건부 표시 — 충족 안 하는 수신자에겐 이 섹션 제외(미설정=항상 표시). 이메일 발송 시 평가 */
+  display_condition?: {
+    field: string;
+    op: 'eq' | 'ne' | 'gt' | 'gte' | 'lt' | 'lte' | 'contains';
+    value: string;
+  };
 };
 
 // ────────────── 기본값 ──────────────

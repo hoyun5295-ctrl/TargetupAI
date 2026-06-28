@@ -107,6 +107,13 @@
 
 ---
 
+### 🟢 2026-06-28 — 문안 두뇌(7천건 RAG) 배포완료 + AI 학습/브랜드보이스 화면 밀도 개선 + 다음 설계서 2건
+> **문안 두뇌(★배포+backfill 완료)**: 7천건 `ai_training_logs` RAG(`composeCopyBrain` 회사 우선 + 업종 비식별 폴백 + 성과 정렬) + 시의성(`copy-context` 요일·계절·공휴일·시즌) + 브랜드 키트(시그니처 조합·금지어) + 복제가드(타사 시그니처 3단 차단). 이메일·캠페인 SMS 생성에 배선. 회사명→업종 매핑 backfill 6,353건. 신규 `copy-context/copy-similarity-guard/copy-rag-retriever/copy-prompt-composer/industry-codes`. backend tsc0·vitest119·frontend tsc0. 설계 `docs/superpowers/specs/2026-06-27-copy-brain-rag-brand-kit-design.md`.
+> **디자인 밀도(★배포)**: AiMemoryPage violet→slate + 여백/도넛 데이터적응(5건 미만 숨김), BrandVoiceCard 가이드라인 14항목 2열 + 입력칸 축소 + **폰 미리보기 모달**(저장 문안→휴대폰 아이콘→폰 프레임 모달+수정/닫기). 디자인 철학 = 심플 이즈 베스트(입력→저장→폰모달→수정, 가로 긴 버튼 X, 데이터 적응) — `feedback_design_modal_first_simplicity` 메모리.
+> **다음 세션 설계서 2건(구현 대기)**: `docs/superpowers/specs/2026-06-28-inapp-entry-redesign-design.md`(인앱 진입 화면 — 빠른시작 채널무관 + 컴팩트 카드 + 최근목록 + 폰 미리보기 모달) + `2026-06-28-email-marketing-braze-level-design.md`(이메일 마케팅 브레이즈급 — brainstorming 우선순위 확정 후 구현). + 잔여: AiMemoryPage 1열→2단 그리드.
+
+---
+
 ### 🟢 2026-06-27 — 인앱 메시지 렌더 격상(블록+테마+모션) + 인앱 콘솔 슬레이트 리디자인 + 제안서 보강 (★코드 배포완료 / PPT는 산출물 전달)
 > **인앱 블록 시스템(D230+, 배포완료)**: 쇼핑객이 보는 인앱을 단색 텍스트 → 블록 조립 + 큐레이션 테마 + 모션으로 격상(브레이즈급). `cdp_inapp_messages`에 **content_blocks jsonb · theme varchar(30) · accent_color varchar(20)** 3컬럼 ALTER(Harold 적용). content_blocks 비면 레거시 단색 렌더 그대로(운영 6,000사+ 외형 변화 0) — 신규·전환만 블록.
 > · SDK: `inapp-theme.ts`(resolveTheme + 테마 5종 light/dark/brand/vibrant/minimal + auto, 대비 보정) · `inapp-blocks.ts`(13 블록 렌더러 + 템플릿별 허용 필터 + 순차 등장 + is_ad 자동 광고표기) · `inapp.ts`(renderMessage 블록/레거시 분기 · makeContainer 8형태 · spring/celebrate + prefers-reduced-motion · 컨페티 · 레거시 render 7종 보존). 테스트 `inapp-blocks.test.ts` 25.

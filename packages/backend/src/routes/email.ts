@@ -75,6 +75,8 @@ import {
 } from '../utils/email-ai';
 // 비주얼 빌더: DM Section[] → 이메일 안전 HTML 렌더 + 회사 브랜드킷
 import { renderEmailSections, extractEmailText } from '../utils/email/email-section-renderer';
+import { resolveEmailSectionsForCustomer } from '../utils/email/email-personalization';
+import { buildPreviewCustomers } from '../utils/inapp-personalization';
 import { getCompanyBrandKit } from '../utils/dm/dm-brand-kit';
 import type { Section } from '../utils/dm/dm-section-registry';
 import { checkCredit, deductCreditSafe, InsufficientCreditError } from '../utils/ai-credit';
@@ -829,11 +831,29 @@ router.post('/render-preview', async (req: Request, res: Response) => {
   try {
     const sections = Array.isArray(req.body?.sections) ? req.body.sections : [];
     const brandKit = await getCompanyBrandKit(auth.companyId);
-    const html = renderEmailSections(sections as Section[], { brandKit, publicBase: process.env.PUBLIC_BASE_URL });
+    // 샘플 고객 동봉 시 수신자별 개인화(변수 치환 + 조건부 표시) 후 렌더 — 미리보기 전용(발송·저장 무관).
+    const sampleCustomer = req.body?.sampleCustomer && typeof req.body.sampleCustomer === 'object' ? req.body.sampleCustomer : null;
+    const renderSections = sampleCustomer
+      ? resolveEmailSectionsForCustomer(sections as Section[], sampleCustomer)
+      : (sections as Section[]);
+    const html = renderEmailSections(renderSections, { brandKit, publicBase: process.env.PUBLIC_BASE_URL });
     return res.json({ success: true, html });
   } catch (err: any) {
     console.error('[Email /render-preview] 오류:', err);
     return res.status(500).json({ success: false, error: err?.message || '미리보기 렌더 실패' });
+  }
+});
+
+// 미리보기용 샘플 고객 3건(VIP/일반/신규) — 개인화 미리보기 토글. 회사 격리(inapp CT 재사용).
+router.get('/preview-customers', async (req: Request, res: Response) => {
+  const auth = await ensureEmailAdmin(req, res);
+  if (!auth) return;
+  try {
+    const customers = await buildPreviewCustomers(auth.companyId);
+    return res.json({ success: true, customers });
+  } catch (err: any) {
+    console.error('[Email /preview-customers] 오류:', err);
+    return res.status(500).json({ success: false, error: err?.message || '샘플 고객 조회 실패' });
   }
 });
 

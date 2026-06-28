@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   AlertCircle, AlertTriangle, ArrowLeft, Cake, Check, ChevronDown, ChevronUp, Clock,
-  Crown, Edit2, Eye, EyeOff, Loader2, Lock, Mail, Moon, Newspaper, Package, PenLine, Plus,
+  Crown, Edit2, Eye, EyeOff, LayoutTemplate, Loader2, Lock, Mail, Moon, Newspaper, Package, PenLine, Plus,
   RefreshCw, Repeat, Send, Server, Settings, ShieldCheck, ShoppingCart, Smartphone, Sparkles,
   Trash2, TrendingUp, Users, Wand2, X, Zap,
 } from 'lucide-react';
@@ -15,6 +15,7 @@ import { useToast } from '../components/ToastProvider';
 import EmailEventsModal from '../components/email/EmailEventsModal';
 // 비주얼 빌더 에디터
 import EmailVisualEditor from '../components/email/EmailVisualEditor';
+import EmailTemplateGalleryModal from '../components/email/EmailTemplateGalleryModal';
 import type { Section } from '../utils/dm-section-defaults';
 
 // ★ 2026-06-13: AI 빠른 시작 7 시나리오 (백엔드 EMAIL_SCENARIO_PRESETS key와 1:1)
@@ -196,6 +197,8 @@ export default function EmailCampaignsPage() {
   const [creditConfirm, setCreditConfirm] = useState<{ campaign: EmailCampaign; payload: any; desc: string } | null>(null);
   // 비주얼 빌더 에디터 (sections 기반)
   const [visualEditor, setVisualEditor] = useState<{ sections: Section[]; name?: string; subject?: string; isAd?: boolean; aiGenerated?: boolean; campaignId?: string } | null>(null);
+  // 템플릿 갤러리 모달 (즉시·무료 골격)
+  const [showGallery, setShowGallery] = useState(false);
 
   const token = () => localStorage.getItem('token');
   const authHeaders = () => ({ Authorization: `Bearer ${token()}`, 'Content-Type': 'application/json' });
@@ -598,6 +601,15 @@ export default function EmailCampaignsPage() {
               <span className="hidden sm:inline">새로고침</span>
             </button>
             <button
+              onClick={() => setShowGallery(true)}
+              disabled={!smtpConfigured}
+              className="text-xs bg-gradient-to-r from-emerald-500/40 to-teal-500/40 hover:from-emerald-500/60 hover:to-teal-500/60 disabled:opacity-40 disabled:cursor-not-allowed text-emerald-50 px-3 py-2 rounded-lg flex items-center gap-1.5 font-medium transition-colors border border-emerald-400/30"
+              title={smtpConfigured ? undefined : 'SMTP 설정 완료 후 활용 가능'}
+            >
+              <LayoutTemplate className="w-3.5 h-3.5" />
+              템플릿에서 시작
+            </button>
+            <button
               onClick={() => setVisualEditor({ sections: [], isAd: true, aiGenerated: false })}
               disabled={!smtpConfigured}
               className="text-xs bg-gradient-to-r from-violet-500/40 to-fuchsia-500/40 hover:from-violet-500/60 hover:to-fuchsia-500/60 disabled:opacity-40 disabled:cursor-not-allowed text-violet-50 px-3 py-2 rounded-lg flex items-center gap-1.5 font-medium transition-colors border border-violet-400/30"
@@ -997,6 +1009,14 @@ export default function EmailCampaignsPage() {
             </div>
           </div>
         </div>
+      )}
+
+      {/* 템플릿 갤러리 — 1클릭 무료 골격 → 비주얼 에디터 */}
+      {showGallery && (
+        <EmailTemplateGalleryModal
+          onPick={(sections, label) => setVisualEditor({ sections, name: label, subject: label, isAd: true, aiGenerated: false })}
+          onClose={() => setShowGallery(false)}
+        />
       )}
 
       {/* 비주얼 빌더 에디터 */}

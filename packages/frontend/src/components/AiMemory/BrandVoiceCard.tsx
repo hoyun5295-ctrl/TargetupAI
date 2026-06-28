@@ -82,6 +82,7 @@ export default function BrandVoiceCard({ apiBase, token, onToast, onConfirm }: B
   const [registered, setRegistered] = useState(false);
   const [expanded, setExpanded] = useState(false);
   const [editingGuideline, setEditingGuideline] = useState(false);
+  const [showGuidelineModal, setShowGuidelineModal] = useState(false);
 
   // ════════════════════════════════════════════════════════════════════
   // 초기 로드
@@ -431,24 +432,53 @@ export default function BrandVoiceCard({ apiBase, token, onToast, onConfirm }: B
             </div>
           </div>
 
-          {/* 가이드라인 표시 영역 */}
+          {/* 가이드라인 — 요약 카드 + 전체 보기·정정 모달 (길게 나열 대신 모달) */}
           {guideline && (
-            <div className="rounded-xl bg-gradient-to-br from-violet-950/60 to-fuchsia-950/40 border border-violet-500/30 p-5">
-              <div className="flex items-center justify-between mb-3">
-                <h4 className="text-sm font-semibold text-white flex items-center gap-2">
-                  <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-                  Brand Voice 가이드라인 (9 항목)
+            <div className="rounded-xl bg-gradient-to-br from-violet-950/60 to-fuchsia-950/40 border border-violet-500/30 p-4">
+              <div className="flex items-center justify-between gap-3 flex-wrap">
+                <div className="flex items-center gap-2 min-w-0">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                  <h4 className="text-sm font-semibold text-white">Brand Voice 가이드라인</h4>
                   {guideline.admin_edited && (
                     <span className="px-1.5 py-0.5 text-[10px] rounded bg-emerald-500/20 text-emerald-200 border border-emerald-500/40">직접 정정됨</span>
                   )}
-                </h4>
+                </div>
                 <button
-                  onClick={() => setEditingGuideline(!editingGuideline)}
-                  className="text-xs text-violet-200 hover:text-white transition-colors"
+                  onClick={() => { setEditingGuideline(false); setShowGuidelineModal(true); }}
+                  className="text-xs text-violet-100 bg-violet-500/20 hover:bg-violet-500/30 border border-violet-400/30 px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-colors"
                 >
-                  {editingGuideline ? '정정 취소' : '직접 정정'}
+                  <Pencil className="w-3 h-3" /> 전체 보기·정정
                 </button>
               </div>
+              <div className="mt-3 grid grid-cols-2 md:grid-cols-4 gap-2">
+                <SummaryChip label="톤" value={guideline.tone_signature || '—'} />
+                <SummaryChip label="평균 길이" value={`${guideline.avg_length_chars}자`} />
+                <SummaryChip label="빈출 표현" value={`${(guideline.frequent_expressions || []).length}건`} />
+                <SummaryChip label="CTA 패턴" value={`${(guideline.cta_patterns || []).length}건`} />
+              </div>
+
+              {showGuidelineModal && (
+                <div className="fixed inset-0 z-[2000] flex items-center justify-center bg-black/70 backdrop-blur-sm p-3 md:p-4" onClick={() => setShowGuidelineModal(false)}>
+                  <div className="bg-slate-900 border border-white/10 rounded-2xl shadow-2xl w-full max-w-2xl max-h-[88vh] flex flex-col overflow-hidden" onClick={(e) => e.stopPropagation()}>
+                    <div className="flex items-center justify-between px-5 py-3 border-b border-white/10">
+                      <h4 className="text-sm font-semibold text-white flex items-center gap-2">
+                        <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                        Brand Voice 가이드라인
+                        {guideline.admin_edited && (
+                          <span className="px-1.5 py-0.5 text-[10px] rounded bg-emerald-500/20 text-emerald-200 border border-emerald-500/40">직접 정정됨</span>
+                        )}
+                      </h4>
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => setEditingGuideline(!editingGuideline)}
+                          className="text-xs text-violet-200 hover:text-white transition-colors"
+                        >
+                          {editingGuideline ? '정정 취소' : '직접 정정'}
+                        </button>
+                        <button onClick={() => setShowGuidelineModal(false)} className="text-white/50 hover:text-white p-1 rounded hover:bg-white/10" aria-label="닫기"><X className="w-4 h-4" /></button>
+                      </div>
+                    </div>
+                    <div className="flex-1 overflow-y-auto p-5">
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
                 <GuidelineField label="톤 시그니처" value={guideline.tone_signature} editing={editingGuideline}
@@ -501,6 +531,10 @@ export default function BrandVoiceCard({ apiBase, token, onToast, onConfirm }: B
               {guidelineUpdatedAt && (
                 <div className="mt-3 text-[10px] text-white/40 italic">
                   Data source — 회사 대표 문안 {messages.length}건 + AI 자동 추출 · 마지막 갱신: {new Date(guidelineUpdatedAt).toLocaleString('ko-KR')}
+                </div>
+              )}
+                    </div>
+                  </div>
                 </div>
               )}
             </div>
@@ -559,6 +593,15 @@ export default function BrandVoiceCard({ apiBase, token, onToast, onConfirm }: B
 // ════════════════════════════════════════════════════════════════════
 // 헬퍼 컴포넌트
 // ════════════════════════════════════════════════════════════════════
+
+function SummaryChip({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-lg bg-white/5 border border-white/10 px-2.5 py-2 min-w-0">
+      <div className="text-[10px] text-white/40">{label}</div>
+      <div className="text-xs font-semibold text-white truncate mt-0.5">{value}</div>
+    </div>
+  );
+}
 
 function GuidelineField({
   label, value, editing, onChange, select,

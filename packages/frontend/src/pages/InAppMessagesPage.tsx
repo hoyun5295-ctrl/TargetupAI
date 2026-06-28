@@ -210,6 +210,10 @@ export default function InAppMessagesPage() {
   const [confirmState, setConfirmState] = useState<ConfirmState | null>(null);
   // ★ 2026-06-17 채널 분리 — 진입 시 웹/앱 선택 (null = 채널 선택 화면)
   const [channel, setChannel] = useState<'web' | 'app' | null>(null);
+  // ★ 2026-06-28 진입 화면 재설계 — 채널 무관 최근 인앱 + 빠른 시작 채널 선택 모달 + 폰 미리보기 모달
+  const [recentMessages, setRecentMessages] = useState<MessageRow[]>([]);
+  const [scenarioPick, setScenarioPick] = useState<QuickStartScenario | null>(null);
+  const [previewMsg, setPreviewMsg] = useState<MessageRow | null>(null);
 
   // AI 생성 진행 상태
   const [aiGenerating, setAiGenerating] = useState(false);
@@ -279,6 +283,20 @@ export default function InAppMessagesPage() {
 
   useEffect(() => { if (channel) loadAll(); }, [channel]);
 
+  // 진입 화면용 — 채널 무관 최근 인앱 목록 (GET /inapp = channel 없으면 전체). 데이터 적응(없으면 섹션 숨김).
+  useEffect(() => {
+    if (channel) return;
+    let alive = true;
+    (async () => {
+      try {
+        const res = await fetch('/api/cdp/inapp', { headers: authHeaders() });
+        const data = await res.json();
+        if (alive && data.success) setRecentMessages((data.messages || []).slice(0, 6));
+      } catch { /* 진입 화면 최근 목록 실패는 조용히 무시 */ }
+    })();
+    return () => { alive = false; };
+  }, [channel]);
+
   // ────────────────────────────────────────────────────────────────
   // AI 자율 진단
   // ────────────────────────────────────────────────────────────────
@@ -318,7 +336,7 @@ export default function InAppMessagesPage() {
   // AI 자동 생성 (자연어 + 빠른 시작)
   // ────────────────────────────────────────────────────────────────
 
-  const handleAIGenerate = async (objective: string, templateHint?: QuickStartScenario) => {
+  const handleAIGenerate = async (objective: string, templateHint?: QuickStartScenario, channelOverride?: 'web' | 'app') => {
     if (customerGate.isEmpty) { setShowDataGate(true); return; }
     if (!objective.trim() && !templateHint) {
       showToast('자연어 목표 또는 빠른 시작 카드 선택 필수', { type: 'warning' });
@@ -378,7 +396,7 @@ export default function InAppMessagesPage() {
         theme: pkg.message.theme || 'auto',
         accent_color: pkg.message.accent_color || null,
         status: 'active',
-        channel: channel || 'web',
+        channel: channelOverride || channel || 'web',
       });
       setAiProgressStep(5);
       setTimeout(() => {
@@ -675,42 +693,174 @@ export default function InAppMessagesPage() {
                 <h1 className="text-xl md:text-2xl font-semibold text-white">인앱 메시지</h1>
                 <span className="text-[10px] bg-gradient-to-r from-amber-400 to-orange-500 text-white px-2 py-0.5 rounded-full font-bold tracking-wide">BETA</span>
               </div>
-              <p className="text-xs md:text-sm text-white/50 mt-0.5">먼저 메시지를 띄울 곳을 선택하세요 — 웹 자사몰 / 모바일 앱</p>
+              <p className="text-xs md:text-sm text-white/50 mt-0.5">시나리오를 고르면 AI가 제목·본문·트리거까지 자동 — 웹·앱 어디든</p>
             </div>
           </div>
         </div>
-        <div className="max-w-4xl mx-auto px-4 md:px-6 py-10">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-            <button
-              onClick={() => setChannel('web')}
-              className="group text-left bg-gradient-to-br from-violet-500/15 via-purple-500/10 to-fuchsia-500/15 border border-violet-400/30 hover:border-violet-300/60 rounded-2xl p-6 transition-all hover:scale-[1.02]"
-            >
-              <div className="flex items-center justify-between mb-4">
-                <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-violet-500/40 to-fuchsia-500/40 flex items-center justify-center">
-                  <Globe className="w-6 h-6 text-violet-100" />
-                </div>
-                <ArrowLeft className="w-5 h-5 text-white/30 rotate-180 group-hover:text-white/60 transition-colors" />
-              </div>
-              <h3 className="text-lg font-bold text-white">웹 자사몰 팝업</h3>
-              <p className="text-xs text-white/60 mt-1.5 leading-relaxed">고객사 웹사이트에 뜨는 팝업. 모달 · 슬라이드 · 토스트 · 플로팅 버튼.</p>
-              <div className="text-[11px] text-emerald-300/80 mt-3">즉시 사용 가능</div>
-            </button>
-            <button
-              onClick={() => setChannel('app')}
-              className="group text-left bg-gradient-to-br from-sky-500/15 via-blue-500/10 to-indigo-500/15 border border-sky-400/30 hover:border-sky-300/60 rounded-2xl p-6 transition-all hover:scale-[1.02]"
-            >
-              <div className="flex items-center justify-between mb-4">
-                <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-sky-500/40 to-indigo-500/40 flex items-center justify-center">
-                  <Smartphone className="w-6 h-6 text-sky-100" />
-                </div>
-                <ArrowLeft className="w-5 h-5 text-white/30 rotate-180 group-hover:text-white/60 transition-colors" />
-              </div>
-              <h3 className="text-lg font-bold text-white">모바일 앱 인앱</h3>
-              <p className="text-xs text-white/60 mt-1.5 leading-relaxed">모바일 앱 화면에 뜨는 인앱. 모달 · 전면 · 배너 · 토스트.</p>
-              <div className="text-[11px] text-amber-300/80 mt-3">웹뷰 앱 지원 — 스니펫 한 줄 (순수 네이티브 앱은 추후)</div>
-            </button>
+        <div className="max-w-5xl mx-auto px-4 md:px-6 py-6 md:py-8 space-y-7">
+          {customerGate.isEmpty && <CustomerDataRequiredBanner />}
+
+          {/* 1) 빠른 시작 (채널 무관) — 클릭 한 번 = 채널 선택 → AI 자동 생성 → 편집 (1흐름) */}
+          <div>
+            <div className="flex items-center gap-2 mb-3">
+              <Sparkles className="w-4 h-4 text-fuchsia-300" />
+              <h2 className="text-sm font-bold text-white">빠른 시작<span className="text-white/40 font-normal"> — 시나리오만 고르면 AI가 제목·본문·트리거까지</span></h2>
+            </div>
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+              {(Object.keys(SCENARIO_VISUAL) as QuickStartScenario[]).map((sc) => {
+                const v = SCENARIO_VISUAL[sc];
+                const Icon = v.icon;
+                return (
+                  <button
+                    key={sc}
+                    onClick={() => { if (customerGate.isEmpty) { setShowDataGate(true); return; } setScenarioPick(sc); }}
+                    className="group text-left bg-white/5 hover:bg-white/10 border border-white/10 hover:border-white/25 rounded-2xl p-4 transition-all"
+                  >
+                    <div className={`w-10 h-10 rounded-xl bg-gradient-to-br ${v.gradient} flex items-center justify-center mb-3 shadow-md`}>
+                      <Icon className="w-5 h-5 text-white" />
+                    </div>
+                    <div className="text-sm font-bold text-white">{v.label}</div>
+                    <div className="text-[11px] text-white/50 mt-0.5 leading-tight">{v.hint}</div>
+                  </button>
+                );
+              })}
+            </div>
           </div>
+
+          {/* 2) 직접 만들기 — 채널 컴팩트 2카드 + 미니 미리보기 썸네일 */}
+          <div>
+            <div className="flex items-center gap-2 mb-3">
+              <Layers className="w-4 h-4 text-violet-300" />
+              <h2 className="text-sm font-bold text-white">직접 만들기<span className="text-white/40 font-normal"> — 띄울 곳을 고르면 빈 편집기로</span></h2>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <button onClick={() => setChannel('web')} className="group flex items-center gap-4 bg-gradient-to-br from-violet-500/12 to-fuchsia-500/12 border border-violet-400/25 hover:border-violet-300/55 rounded-2xl p-4 transition-all text-left">
+                <div className="w-16 h-12 rounded-md bg-slate-800/80 border border-white/10 relative shrink-0 overflow-hidden">
+                  <div className="h-2.5 bg-white/10 flex items-center gap-0.5 px-1.5"><span className="w-1 h-1 rounded-full bg-white/30" /><span className="w-1 h-1 rounded-full bg-white/30" /></div>
+                  <div className="absolute inset-x-2.5 bottom-1.5 top-4 rounded bg-violet-400/30 border border-violet-300/40" />
+                </div>
+                <div className="min-w-0">
+                  <div className="text-sm font-bold text-white flex items-center gap-1.5"><Globe className="w-3.5 h-3.5 text-violet-200" />웹 자사몰 팝업</div>
+                  <div className="text-[11px] text-white/55 mt-0.5 leading-tight">모달 · 슬라이드 · 토스트 · 플로팅</div>
+                  <div className="text-[10px] text-emerald-300/80 mt-1">즉시 사용 가능</div>
+                </div>
+              </button>
+              <button onClick={() => setChannel('app')} className="group flex items-center gap-4 bg-gradient-to-br from-sky-500/12 to-indigo-500/12 border border-sky-400/25 hover:border-sky-300/55 rounded-2xl p-4 transition-all text-left">
+                <div className="w-9 h-12 rounded-lg bg-slate-800/80 border border-white/10 relative shrink-0 overflow-hidden mx-[14px]">
+                  <div className="absolute inset-x-1 top-1.5 h-3.5 rounded-sm bg-sky-400/30 border border-sky-300/40" />
+                  <div className="absolute inset-x-1.5 bottom-1 h-1 rounded-full bg-white/15" />
+                </div>
+                <div className="min-w-0">
+                  <div className="text-sm font-bold text-white flex items-center gap-1.5"><Smartphone className="w-3.5 h-3.5 text-sky-200" />모바일 앱 인앱</div>
+                  <div className="text-[11px] text-white/55 mt-0.5 leading-tight">모달 · 전면 · 배너 · 토스트</div>
+                  <div className="text-[10px] text-amber-300/80 mt-1">웹뷰 앱 지원 (네이티브는 추후)</div>
+                </div>
+              </button>
+            </div>
+          </div>
+
+          {/* 3) 최근 인앱 메시지 — 데이터 있을 때만 (없으면 섹션 숨김) */}
+          {recentMessages.length > 0 && (
+            <div>
+              <div className="flex items-center gap-2 mb-3">
+                <Clock className="w-4 h-4 text-cyan-300" />
+                <h2 className="text-sm font-bold text-white">최근 인앱 메시지<span className="text-white/40 font-normal"> — 눌러서 미리보기·편집</span></h2>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                {recentMessages.map((m) => (
+                  <button key={m.id} onClick={() => setPreviewMsg(m)} className="text-left bg-white/5 hover:bg-white/10 border border-white/10 hover:border-white/25 rounded-xl p-3 transition-all">
+                    <div className="flex items-center gap-1.5 mb-1">
+                      <span className={`text-[9px] px-1.5 py-0.5 rounded-full font-medium ${m.channel === 'app' ? 'bg-sky-500/20 text-sky-300' : 'bg-violet-500/20 text-violet-300'}`}>{m.channel === 'app' ? '앱' : '웹'}</span>
+                      <span className={`text-[9px] px-1.5 py-0.5 rounded-full font-medium ${m.status === 'active' ? 'bg-emerald-500/20 text-emerald-300' : 'bg-white/10 text-white/50'}`}>{m.status === 'active' ? '활성' : m.status === 'paused' ? '일시중지' : m.status}</span>
+                    </div>
+                    <div className="text-sm font-bold text-white truncate">{m.title || '(제목 없음)'}</div>
+                    <div className="text-[11px] text-white/50 mt-0.5 line-clamp-2 leading-tight">{m.body}</div>
+                    {m.stats && (
+                      <div className="mt-2 flex gap-2 text-[10px] text-white/45 border-t border-white/5 pt-1.5">
+                        <span>표시 {m.stats.impressions.toLocaleString()}</span>
+                        <span>클릭 {m.stats.clicks.toLocaleString()}</span>
+                      </div>
+                    )}
+                  </button>
+                ))}
+              </div>
+              <div className="text-[10px] text-white/30 italic mt-2">Data source — cdp_inapp_messages (회사 격리)</div>
+            </div>
+          )}
         </div>
+
+        {/* 채널 선택 모달 — 빠른 시작 클릭 시 웹/앱 선택 → AI 자동 생성 */}
+        {scenarioPick && (
+          <div className="fixed inset-0 z-[2000] flex items-center justify-center bg-black/70 backdrop-blur-sm px-4" onClick={() => setScenarioPick(null)}>
+            <div className="w-full max-w-md bg-slate-900 border border-white/10 rounded-2xl shadow-2xl p-6" onClick={(e) => e.stopPropagation()}>
+              <div className="flex items-center justify-between mb-1">
+                <h3 className="text-base font-bold text-white">어디에 띄울까요?</h3>
+                <button onClick={() => setScenarioPick(null)} className="text-white/50 hover:text-white p-1 rounded hover:bg-white/10" aria-label="닫기"><X className="w-4 h-4" /></button>
+              </div>
+              <p className="text-xs text-white/50 mb-4">{SCENARIO_VISUAL[scenarioPick].label} — 채널을 고르면 AI가 바로 만들어요</p>
+              <div className="grid grid-cols-2 gap-3">
+                <button
+                  onClick={() => { const sc = scenarioPick; setScenarioPick(null); setChannel('web'); if (sc) handleAIGenerate('', sc, 'web'); }}
+                  className="flex flex-col items-center gap-2 bg-violet-500/15 hover:bg-violet-500/25 border border-violet-400/30 rounded-xl p-4 transition-colors"
+                >
+                  <Globe className="w-6 h-6 text-violet-200" />
+                  <span className="text-sm font-bold text-white">웹 자사몰</span>
+                  <span className="text-[10px] text-white/50">팝업·슬라이드·토스트</span>
+                </button>
+                <button
+                  onClick={() => { const sc = scenarioPick; setScenarioPick(null); setChannel('app'); if (sc) handleAIGenerate('', sc, 'app'); }}
+                  className="flex flex-col items-center gap-2 bg-sky-500/15 hover:bg-sky-500/25 border border-sky-400/30 rounded-xl p-4 transition-colors"
+                >
+                  <Smartphone className="w-6 h-6 text-sky-200" />
+                  <span className="text-sm font-bold text-white">모바일 앱</span>
+                  <span className="text-[10px] text-white/50">전면·배너·토스트</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* 최근 인앱 폰 미리보기 모달 */}
+        {previewMsg && (
+          <div className="fixed inset-0 z-[2000] flex items-center justify-center bg-black/70 backdrop-blur-sm px-4 py-8 overflow-y-auto" onClick={() => setPreviewMsg(null)}>
+            <div className="w-full max-w-sm bg-slate-900 border border-white/10 rounded-2xl shadow-2xl p-5" onClick={(e) => e.stopPropagation()}>
+              <div className="flex items-center justify-between mb-3">
+                <div className="flex items-center gap-2 min-w-0">
+                  <span className={`text-[9px] px-1.5 py-0.5 rounded-full font-medium ${previewMsg.channel === 'app' ? 'bg-sky-500/20 text-sky-300' : 'bg-violet-500/20 text-violet-300'}`}>{previewMsg.channel === 'app' ? '앱' : '웹'}</span>
+                  <h3 className="text-sm font-bold text-white truncate">{previewMsg.title || '(제목 없음)'}</h3>
+                </div>
+                <button onClick={() => setPreviewMsg(null)} className="text-white/50 hover:text-white p-1 rounded hover:bg-white/10 shrink-0" aria-label="닫기"><X className="w-4 h-4" /></button>
+              </div>
+              <div className="rounded-2xl border border-white/10 bg-slate-950/60 p-3">
+                <InAppMessagePreview
+                  template={(previewMsg.template || previewMsg.position || 'center_modal') as string}
+                  title={previewMsg.title}
+                  body={previewMsg.body}
+                  imageUrl={previewMsg.image_url}
+                  badge={previewMsg.badge_text}
+                  buttons={previewMsg.buttons || []}
+                  backgroundColor={previewMsg.background_color || '#4f46e5'}
+                  textColor={previewMsg.text_color || '#ffffff'}
+                  blocks={previewMsg.content_blocks && previewMsg.content_blocks.length ? previewMsg.content_blocks : undefined}
+                  theme={previewMsg.theme}
+                  accentColor={previewMsg.accent_color}
+                />
+              </div>
+              <div className="flex gap-2 mt-4">
+                <button
+                  onClick={() => { const msg = previewMsg; const ch: 'web' | 'app' = msg.channel === 'app' ? 'app' : 'web'; setPreviewMsg(null); setChannel(ch); setEditing(msg); }}
+                  className="flex-1 inline-flex items-center justify-center gap-1.5 rounded-lg bg-gradient-to-r from-violet-600 to-fuchsia-600 px-4 py-2 text-sm font-semibold text-white hover:opacity-90"
+                >
+                  <Edit2 className="w-4 h-4" />수정
+                </button>
+                <button onClick={() => setPreviewMsg(null)} className="px-4 py-2 rounded-lg border border-white/15 text-sm text-white/70 hover:bg-white/5">닫기</button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* 고객 데이터 없음 — 생성 차단 안내 (진입 화면 공용) */}
+        <CustomerDataRequiredModal open={showDataGate} onClose={() => setShowDataGate(false)} />
       </div>
     );
   }
