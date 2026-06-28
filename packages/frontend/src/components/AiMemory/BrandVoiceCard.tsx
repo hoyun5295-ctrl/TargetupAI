@@ -76,7 +76,8 @@ export default function BrandVoiceCard({ apiBase, token, onToast, onConfirm }: B
   const [saving, setSaving] = useState(false);
   const [extracting, setExtracting] = useState(false);
   const [messages, setMessages] = useState<RepresentativeMessage[]>([emptyMessage(1)]);
-  const [previewMsg, setPreviewMsg] = useState<RepresentativeMessage | null>(null);
+  // 대표 문안 편집 = 휴대폰 모달. index null = 신규, 숫자 = 저장본 수정.
+  const [editor, setEditor] = useState<{ index: number | null; draft: RepresentativeMessage } | null>(null);
   const [guideline, setGuideline] = useState<BrandGuideline | null>(null);
   const [guidelineUpdatedAt, setGuidelineUpdatedAt] = useState<string | null>(null);
   const [registered, setRegistered] = useState(false);
@@ -123,14 +124,6 @@ export default function BrandVoiceCard({ apiBase, token, onToast, onConfirm }: B
   // 5 대표 문안 등록/정정
   // ════════════════════════════════════════════════════════════════════
 
-  function addMessage() {
-    if (messages.length >= 5) {
-      onToast('대표 문안은 최대 5건까지 등록 가능합니다.', 'info');
-      return;
-    }
-    setMessages([...messages, emptyMessage(messages.length + 1)]);
-  }
-
   function removeMessage(index: number) {
     if (messages.length <= 1) {
       onToast('최소 1건은 유지해야 합니다.', 'info');
@@ -140,14 +133,40 @@ export default function BrandVoiceCard({ apiBase, token, onToast, onConfirm }: B
     setMessages(next);
   }
 
-  function updateMessage(index: number, patch: Partial<RepresentativeMessage>) {
-    const next = [...messages];
-    next[index] = { ...next[index], ...patch };
-    setMessages(next);
+  // 실제 저장된(본문 있는) 대표 문안만 — 버튼 목록·저장 기준
+  const savedList = () => messages.filter((m) => m.text.trim().length > 0);
+
+  function openNewEditor() {
+    if (savedList().length >= 5) { onToast('대표 문안은 최대 5건까지 등록 가능합니다.', 'info'); return; }
+    setEditor({ index: null, draft: emptyMessage(savedList().length + 1) });
+  }
+  function openEditEditor(i: number) {
+    const list = savedList();
+    if (!list[i]) return;
+    setEditor({ index: i, draft: { ...list[i] } });
+  }
+  function updateDraft(patch: Partial<RepresentativeMessage>) {
+    setEditor((e) => (e ? { ...e, draft: { ...e.draft, ...patch } } : e));
+  }
+  async function saveFromEditor() {
+    if (!editor) return;
+    if (editor.draft.text.trim().length < 10) { onToast('본문을 10자 이상 입력해주세요.', 'error'); return; }
+    const list = savedList();
+    const next = (editor.index === null ? [...list, editor.draft] : list.map((m, i) => (i === editor.index ? editor.draft : m)))
+      .slice(0, 5)
+      .map((m, i) => ({ ...m, priority: i + 1 }));
+    await saveMessages(next);
+    setEditor(null);
+  }
+  function deleteFromEditor() {
+    if (!editor) return;
+    if (editor.draft.id) { deleteMessage(editor.draft); setEditor(null); }
+    else setEditor(null);
   }
 
-  async function saveMessages() {
-    const validMessages = messages.filter((m) => m.text.trim().length >= 10);
+  async function saveMessages(override?: RepresentativeMessage[]) {
+    const source = override ?? messages;
+    const validMessages = source.filter((m) => m.text.trim().length >= 10);
     if (validMessages.length < 1) {
       onToast('대표 문안 1건 이상 입력해주세요 (본문 10자 이상).', 'error');
       return;
@@ -314,102 +333,50 @@ export default function BrandVoiceCard({ apiBase, token, onToast, onConfirm }: B
       {/* 본문 (펼친 상태) */}
       {expanded && (
         <div className="p-6 space-y-6">
-          {/* 5 대표 문안 입력 영역 */}
+          {/* 대표 문안 — 버튼화 + 휴대폰 모달 (인라인 나열 X) */}
           <div>
             <div className="flex items-center justify-between mb-3">
               <h4 className="text-sm font-semibold text-white flex items-center gap-2">
                 <FileText className="w-4 h-4 text-violet-300" />
-                LMS/MMS 대표 문안 ({messages.length}/5)
+                LMS/MMS 대표 문안 ({savedList().length}/5)
               </h4>
               <button
-                onClick={addMessage}
-                disabled={messages.length >= 5}
-                className="px-2 py-1 text-xs text-violet-200 hover:text-white rounded border border-violet-500/40 hover:bg-violet-500/20 flex items-center gap-1 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                onClick={openNewEditor}
+                disabled={savedList().length >= 5}
+                className="px-2.5 py-1 text-xs text-violet-200 hover:text-white rounded border border-violet-500/40 hover:bg-violet-500/20 flex items-center gap-1 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
               >
                 <Plus className="w-3 h-3" />
-                추가
+                신규 등록
               </button>
             </div>
 
-            <div className="space-y-3">
-              {messages.map((m, i) => (
-                <div key={i} className="rounded-xl bg-slate-950/60 border border-white/5 p-4">
-                  <div className="flex items-center justify-between mb-2">
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs font-mono text-violet-300">#{m.priority}</span>
-                      <select
-                        value={m.channel}
-                        onChange={(e) => updateMessage(i, { channel: e.target.value as 'LMS' | 'MMS' })}
-                        className="px-2 py-0.5 text-xs bg-slate-900 border border-white/10 rounded text-white focus:border-violet-500 focus:outline-none"
-                      >
-                        <option value="LMS">LMS</option>
-                        <option value="MMS">MMS (이미지 첨부)</option>
-                      </select>
+            {savedList().length === 0 ? (
+              <button
+                onClick={openNewEditor}
+                className="w-full rounded-xl bg-slate-950/40 border border-dashed border-white/10 hover:border-violet-400/40 hover:bg-violet-500/5 p-5 text-center text-xs text-white/40 transition-colors"
+              >
+                아직 등록된 대표 문안이 없습니다. <span className="text-violet-300">신규 등록</span>을 눌러 회사 실제 발송 문안을 넣어주세요.
+              </button>
+            ) : (
+              <div className="flex flex-wrap gap-2">
+                {savedList().map((m, i) => (
+                  <button
+                    key={m.id || i}
+                    onClick={() => openEditEditor(i)}
+                    className="group text-left rounded-xl bg-slate-950/60 border border-white/10 hover:border-violet-400/40 hover:bg-violet-500/10 px-3 py-2 w-[calc(50%-0.25rem)] md:w-[220px] transition-colors"
+                  >
+                    <div className="flex items-center gap-1.5 mb-1">
+                      <span className="text-[10px] font-mono text-violet-300">#{m.priority}</span>
+                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-violet-500/20 text-violet-200 border border-violet-400/20">{m.channel}</span>
+                      {m.imageUrl && <Image className="w-3 h-3 text-violet-300" />}
                     </div>
-                    <div className="flex items-center gap-2">
-                      {m.text.trim().length >= 10 && (
-                        <button
-                          onClick={() => setPreviewMsg(m)}
-                          className="text-violet-300/70 hover:text-violet-300 transition-colors"
-                          title="휴대폰 미리보기"
-                        >
-                          <Smartphone className="w-3.5 h-3.5" />
-                        </button>
-                      )}
-                      <button
-                        onClick={() => deleteMessage(m)}
-                        className="text-rose-400/60 hover:text-rose-400 transition-colors"
-                        title="삭제"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
-                  </div>
-
-                  <input
-                    type="text"
-                    value={m.subject}
-                    onChange={(e) => updateMessage(i, { subject: e.target.value })}
-                    placeholder="제목 (옵션 — LMS/MMS 한정)"
-                    className="w-full px-3 py-1.5 text-xs mb-2 bg-slate-900 border border-white/10 rounded text-white placeholder-white/30 focus:border-violet-500 focus:outline-none"
-                  />
-
-                  <textarea
-                    value={m.text}
-                    onChange={(e) => updateMessage(i, { text: e.target.value })}
-                    placeholder="본문 입력 (10자 이상, 2000자 이내) — 회사 실제 발송 문안을 그대로 입력해주세요."
-                    rows={3}
-                    className="w-full px-3 py-2 text-xs bg-slate-900 border border-white/10 rounded text-white placeholder-white/30 focus:border-violet-500 focus:outline-none resize-none"
-                  />
-
-                  {m.channel === 'MMS' && (
-                    <input
-                      type="text"
-                      value={m.imageUrl || ''}
-                      onChange={(e) => updateMessage(i, { imageUrl: e.target.value || null })}
-                      placeholder="이미지 URL (옵션)"
-                      className="w-full px-3 py-1.5 text-xs mt-2 bg-slate-900 border border-white/10 rounded text-white placeholder-white/30 focus:border-violet-500 focus:outline-none"
-                    />
-                  )}
-
-                  <div className="mt-2 flex items-center justify-between text-[10px] text-white/40">
-                    <span>{m.text.length}자 / 2000자</span>
-                    {m.imageUrl && <span className="flex items-center gap-1 text-violet-300"><Image className="w-3 h-3" />이미지 첨부</span>}
-                  </div>
-                </div>
-              ))}
-            </div>
+                    <div className="text-xs text-white/80 leading-snug line-clamp-2">{m.text || '(본문 없음)'}</div>
+                  </button>
+                ))}
+              </div>
+            )}
 
             <div className="mt-4 flex items-center gap-2 flex-wrap">
-              <button
-                onClick={saveMessages}
-                disabled={saving}
-                className="px-4 py-2 text-xs bg-violet-600 hover:bg-violet-500 text-white rounded-lg flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed transition-colors font-semibold"
-              >
-                {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
-                대표 문안 저장
-              </button>
-
               <button
                 onClick={extractGuideline}
                 disabled={extracting || !registered}
@@ -543,45 +510,96 @@ export default function BrandVoiceCard({ apiBase, token, onToast, onConfirm }: B
       )}
     </div>
 
-    {previewMsg && (
-      <div
-        className="fixed inset-0 z-[2000] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
-        onClick={() => setPreviewMsg(null)}
-      >
-        <div className="relative w-full max-w-sm" onClick={(e) => e.stopPropagation()}>
-          <div className="rounded-[2.5rem] border-4 border-slate-700 bg-slate-950 p-3 shadow-2xl">
-            <div className="rounded-[2rem] bg-slate-900 overflow-hidden">
-              <div className="px-4 py-2 text-center text-[11px] text-white/40 border-b border-white/5">
-                {previewMsg.channel} 미리보기
+    {editor && (
+      <div className="fixed inset-0 z-[2000] flex items-center justify-center bg-black/70 backdrop-blur-sm p-3 md:p-4" onClick={() => setEditor(null)}>
+        <div className="bg-slate-900 border border-white/10 rounded-2xl shadow-2xl w-full max-w-3xl max-h-[92vh] flex flex-col overflow-hidden" onClick={(e) => e.stopPropagation()}>
+          <div className="flex items-center justify-between px-5 py-3 border-b border-white/10">
+            <h4 className="text-sm font-semibold text-white flex items-center gap-2">
+              <Smartphone className="w-4 h-4 text-violet-300" />
+              {editor.index === null ? '신규 대표 문안' : `대표 문안 #${editor.draft.priority} 수정`}
+            </h4>
+            <button onClick={() => setEditor(null)} className="text-white/50 hover:text-white p-1.5 rounded hover:bg-white/10" aria-label="닫기"><X className="w-5 h-5" /></button>
+          </div>
+
+          <div className="flex-1 overflow-y-auto p-5 flex flex-col md:flex-row gap-5">
+            {/* 입력 */}
+            <div className="flex-1 space-y-3">
+              <div>
+                <label className="block text-[10px] text-white/50 mb-1 uppercase tracking-wide">채널</label>
+                <select
+                  value={editor.draft.channel}
+                  onChange={(e) => updateDraft({ channel: e.target.value as 'LMS' | 'MMS' })}
+                  className="w-full px-3 py-1.5 text-xs bg-slate-950 border border-white/10 rounded-lg text-white focus:border-violet-500 focus:outline-none"
+                >
+                  <option value="LMS">LMS</option>
+                  <option value="MMS">MMS (이미지 첨부)</option>
+                </select>
               </div>
-              <div className="p-4 min-h-[280px]">
-                {previewMsg.subject && (
-                  <div className="text-xs font-semibold text-white/70 mb-1.5">{previewMsg.subject}</div>
-                )}
-                <div className="rounded-2xl rounded-tl-sm bg-violet-600/90 text-white text-sm px-4 py-3 whitespace-pre-wrap leading-relaxed max-w-[88%]">
-                  {previewMsg.text || '(본문 없음)'}
+              <div>
+                <label className="block text-[10px] text-white/50 mb-1 uppercase tracking-wide">제목 (옵션)</label>
+                <input
+                  type="text"
+                  value={editor.draft.subject}
+                  onChange={(e) => updateDraft({ subject: e.target.value })}
+                  placeholder="제목 — LMS/MMS 한정"
+                  className="w-full px-3 py-2 text-xs bg-slate-950 border border-white/10 rounded-lg text-white placeholder-white/30 focus:border-violet-500 focus:outline-none"
+                />
+              </div>
+              <div>
+                <label className="block text-[10px] text-white/50 mb-1 uppercase tracking-wide">본문 (10자 이상, 2000자 이내)</label>
+                <textarea
+                  value={editor.draft.text}
+                  onChange={(e) => updateDraft({ text: e.target.value })}
+                  placeholder="회사 실제 발송 문안을 그대로 입력해주세요."
+                  rows={7}
+                  maxLength={2000}
+                  className="w-full px-3 py-2 text-xs bg-slate-950 border border-white/10 rounded-lg text-white placeholder-white/30 focus:border-violet-500 focus:outline-none resize-none"
+                />
+                <div className="text-[10px] text-white/40 mt-1 text-right">{editor.draft.text.length}자 / 2000자</div>
+              </div>
+              {editor.draft.channel === 'MMS' && (
+                <div>
+                  <label className="block text-[10px] text-white/50 mb-1 uppercase tracking-wide">이미지 URL (옵션)</label>
+                  <input
+                    type="text"
+                    value={editor.draft.imageUrl || ''}
+                    onChange={(e) => updateDraft({ imageUrl: e.target.value || null })}
+                    placeholder="https://..."
+                    className="w-full px-3 py-2 text-xs bg-slate-950 border border-white/10 rounded-lg text-white placeholder-white/30 focus:border-violet-500 focus:outline-none"
+                  />
                 </div>
-                {previewMsg.imageUrl && (
-                  <img src={previewMsg.imageUrl} alt="첨부 이미지" className="mt-2 rounded-xl max-w-[88%] border border-white/10" />
-                )}
+              )}
+            </div>
+
+            {/* 휴대폰 미리보기 */}
+            <div className="md:w-[260px] shrink-0 flex justify-center">
+              <div className="w-full max-w-[240px] rounded-[2.5rem] border-4 border-slate-700 bg-slate-950 p-3 shadow-2xl">
+                <div className="rounded-[2rem] bg-slate-900 overflow-hidden">
+                  <div className="px-4 py-2 text-center text-[11px] text-white/40 border-b border-white/5">{editor.draft.channel} 미리보기</div>
+                  <div className="p-4 min-h-[240px]">
+                    {editor.draft.subject && <div className="text-xs font-semibold text-white/70 mb-1.5">{editor.draft.subject}</div>}
+                    <div className="rounded-2xl rounded-tl-sm bg-violet-600/90 text-white text-sm px-4 py-3 whitespace-pre-wrap leading-relaxed">{editor.draft.text || '(본문 없음)'}</div>
+                    {editor.draft.imageUrl && <img src={editor.draft.imageUrl} alt="첨부 이미지" className="mt-2 rounded-xl max-w-full border border-white/10" />}
+                  </div>
+                </div>
               </div>
             </div>
           </div>
-          <div className="flex gap-2 mt-4 justify-center">
-            <button
-              onClick={() => setPreviewMsg(null)}
-              className="px-4 py-2 text-sm bg-violet-600 hover:bg-violet-500 text-white rounded-lg flex items-center gap-1.5 font-semibold transition-colors"
-            >
-              <Pencil className="w-3.5 h-3.5" />
-              수정하기
-            </button>
-            <button
-              onClick={() => setPreviewMsg(null)}
-              className="px-4 py-2 text-sm text-white/70 border border-white/15 rounded-lg hover:bg-white/10 flex items-center gap-1.5 transition-colors"
-            >
-              <X className="w-3.5 h-3.5" />
-              닫기
-            </button>
+
+          <div className="flex items-center justify-between gap-2 px-5 py-3 border-t border-white/10">
+            <div>
+              {editor.draft.id && (
+                <button onClick={deleteFromEditor} className="px-3 py-2 text-xs text-rose-300 hover:bg-rose-500/10 rounded-lg flex items-center gap-1.5 transition-colors">
+                  <Trash2 className="w-3.5 h-3.5" /> 삭제
+                </button>
+              )}
+            </div>
+            <div className="flex gap-2">
+              <button onClick={() => setEditor(null)} className="px-4 py-2 text-sm text-white/70 border border-white/15 rounded-lg hover:bg-white/10 transition-colors">닫기</button>
+              <button onClick={saveFromEditor} disabled={saving} className="px-5 py-2 text-sm bg-violet-600 hover:bg-violet-500 text-white rounded-lg flex items-center gap-1.5 font-semibold disabled:opacity-50 transition-colors">
+                {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />} 저장
+              </button>
+            </div>
           </div>
         </div>
       </div>

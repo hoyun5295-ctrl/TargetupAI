@@ -44,16 +44,32 @@ function emailImg(src: string | undefined, publicBase?: string): string {
 
 // ────────────── 블록 렌더러 (대표 패턴 — 나머지는 동일 방식으로 확장) ──────────────
 
+// 이메일용 히어로 높이(전체화면 vh는 이메일 불가 → 큰 고정 px). td height 속성 + style로 클라이언트 호환.
+const HERO_HEIGHT_PX: Record<string, number> = { sm: 200, md: 320, lg: 480, full: 600 };
+
 function renderHero(p: HeroProps, b: EmailBrand, ctx: EmailRenderCtx): string {
   const img = emailImg(p.image_url, ctx.publicBase);
   const align = p.align || 'center';
-  const imgTag = img
-    ? `<img src="${esc(img)}" alt="${esc(p.headline)}" width="600" style="width:100%;max-width:600px;display:block;border:0">`
-    : '';
-  const sub = p.sub_copy
+  const minH = HERO_HEIGHT_PX[(p.height as string) || 'md'] || 320;
+
+  if (img) {
+    // 배경 이미지 + (옵션) 하단 그라데이션 오버레이 + 하단 정렬 텍스트. 아웃룩은 배경이미지 미지원 → bg색 폴백.
+    const overlay = p.overlay_gradient !== false
+      ? 'linear-gradient(180deg,rgba(0,0,0,0) 35%,rgba(0,0,0,0.55) 100%)'
+      : 'rgba(0,0,0,0)';
+    const headline = `<div style="font-size:${b.type.hero.size};line-height:${b.type.hero.lineHeight};font-weight:${b.type.hero.weight};letter-spacing:${b.type.hero.letterSpacing};color:#ffffff;margin:0">${esc(p.headline)}</div>`;
+    const sub = p.sub_copy
+      ? `<div style="font-size:${b.type.body.size};line-height:${b.type.body.lineHeight};color:rgba(255,255,255,0.92);margin-top:${b.sp[3]}">${esc(p.sub_copy)}</div>`
+      : '';
+    return `<tr><td style="padding:0"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:${b.text};background-image:url('${esc(img)}');background-position:center center;background-size:cover;background-repeat:no-repeat"><tr><td height="${minH}" valign="bottom" style="height:${minH}px;background:${overlay};padding:${b.sp[8]} ${b.sp[6]};text-align:${align}">${headline}${sub}</td></tr></table></td></tr>`;
+  }
+
+  // 이미지 없음 — 높이만 적용(텍스트 세로 가운데). 단색/투명 배경.
+  const headlineD = `<div style="font-size:${b.type.hero.size};line-height:${b.type.hero.lineHeight};font-weight:${b.type.hero.weight};letter-spacing:${b.type.hero.letterSpacing};color:${b.text};margin:0">${esc(p.headline)}</div>`;
+  const subD = p.sub_copy
     ? `<div style="font-size:${b.type.body.size};line-height:${b.type.body.lineHeight};color:${b.textMuted};margin-top:${b.sp[3]}">${esc(p.sub_copy)}</div>`
     : '';
-  return `<tr><td style="padding:0">${imgTag}<table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr><td style="padding:${b.sp[8]} ${b.sp[6]};text-align:${align}"><div style="font-size:${b.type.hero.size};line-height:${b.type.hero.lineHeight};font-weight:${b.type.hero.weight};letter-spacing:${b.type.hero.letterSpacing};color:${b.text};margin:0">${esc(p.headline)}</div>${sub}</td></tr></table></td></tr>`;
+  return `<tr><td height="${minH}" valign="middle" style="height:${minH}px;padding:${b.sp[8]} ${b.sp[6]};text-align:${align}">${headlineD}${subD}</td></tr>`;
 }
 
 function renderHeader(p: HeaderProps, b: EmailBrand, ctx: EmailRenderCtx): string {

@@ -4,7 +4,7 @@
 // 렌더는 백엔드 단일 진실원(POST /api/email/render-preview). 다크 + violet 톤.
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import {
-  ArrowDown, ArrowUp, Copy, Eye, GripVertical, Loader2, Plus, Save, Sparkles, Trash2, Wand2, X,
+  ArrowDown, ArrowUp, Copy, Eye, GripVertical, Loader2, Monitor, Plus, Save, Sparkles, Trash2, Wand2, X,
 } from 'lucide-react';
 import {
   DndContext, closestCenter, KeyboardSensor, PointerSensor, useSensor, useSensors, type DragEndEvent,
@@ -68,6 +68,7 @@ export default function EmailVisualEditor({
   const [aiPrompt, setAiPrompt] = useState('');
   const [aiBusy, setAiBusy] = useState(false);
   const [improving, setImproving] = useState(false);
+  const [pcPreviewOpen, setPcPreviewOpen] = useState(false);
   // 개인화 미리보기 — 샘플 고객(VIP/일반/신규) 토글
   const [previewSample, setPreviewSample] = useState<'none' | 'VIP' | '일반' | '신규'>('none');
   const [sampleCustomers, setSampleCustomers] = useState<Array<{ label: string; customer: Record<string, any> }>>([]);
@@ -313,6 +314,9 @@ export default function EmailVisualEditor({
           <label className="flex items-center gap-1.5 text-[11px] text-white/60 cursor-pointer shrink-0">
             <input type="checkbox" checked={isAd} onChange={(e) => setIsAd(e.target.checked)} className="rounded" />광고성
           </label>
+          <button onClick={() => setPcPreviewOpen(true)} className="inline-flex items-center gap-1.5 rounded-lg border border-white/15 bg-white/5 px-3 py-2 text-sm font-semibold text-white/80 hover:bg-white/10 shrink-0" title="PC(데스크탑) 폭으로 크게 미리보기">
+            <Monitor className="w-4 h-4" /><span className="hidden md:inline">PC 미리보기</span>
+          </button>
           <button onClick={handleImprove} disabled={improving || sections.length === 0} className="inline-flex items-center gap-1.5 rounded-lg border border-fuchsia-400/40 bg-fuchsia-500/15 px-3 py-2 text-sm font-semibold text-fuchsia-100 hover:bg-fuchsia-500/25 disabled:opacity-40 shrink-0" title="AI가 블록 카피를 매끄럽게 다듬어요 (1 크레딧 · 사실·혜택 보존)">
             {improving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Wand2 className="w-4 h-4" />}<span className="hidden md:inline">AI로 개선</span>
           </button>
@@ -475,6 +479,21 @@ export default function EmailVisualEditor({
           </div>
         </div>
       </div>
+
+      {/* PC(데스크탑) 폭 전체화면 미리보기 — 실제 발송 HTML */}
+      {pcPreviewOpen && (
+        <div className="fixed inset-0 z-[130] bg-slate-950/90 backdrop-blur-sm flex flex-col" onClick={() => setPcPreviewOpen(false)}>
+          <div className="flex items-center justify-between px-4 py-3 border-b border-white/10 shrink-0" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center gap-2 text-sm text-white/80"><Monitor className="w-4 h-4" /> PC 미리보기 — 데스크탑 폭 (실제 발송 HTML)</div>
+            <button onClick={() => setPcPreviewOpen(false)} className="text-white/60 hover:text-white p-1.5 rounded hover:bg-white/10" aria-label="닫기"><X className="w-5 h-5" /></button>
+          </div>
+          <div className="flex-1 overflow-auto p-4 md:p-8 flex justify-center" onClick={(e) => e.stopPropagation()}>
+            <div className="w-full max-w-[680px] bg-white rounded-lg shadow-2xl overflow-hidden">
+              <iframe title="PC 미리보기" srcDoc={previewHtml} className="w-full border-0" style={{ height: '82vh' }} />
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
