@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
-  AlertCircle, AlertTriangle, ArrowLeft, Cake, Check, ChevronDown, ChevronUp, Clock,
+  AlertCircle, AlertTriangle, ArrowLeft, BarChart3, Cake, Check, ChevronDown, ChevronUp, Clock,
   Crown, Edit2, Eye, EyeOff, LayoutTemplate, Loader2, Lock, Mail, Moon, Newspaper, Package, PenLine, Plus,
   RefreshCw, Repeat, Send, Server, Settings, ShieldCheck, ShoppingCart, Smartphone, Sparkles,
   Trash2, TrendingUp, Users, Wand2, X, Zap,
@@ -16,7 +16,9 @@ import EmailEventsModal from '../components/email/EmailEventsModal';
 // 비주얼 빌더 에디터
 import EmailVisualEditor from '../components/email/EmailVisualEditor';
 import EmailTemplateGalleryModal from '../components/email/EmailTemplateGalleryModal';
+import EmailAnalyticsModal from '../components/email/EmailAnalyticsModal';
 import type { Section } from '../utils/dm-section-defaults';
+import type { EmailCampaign, CampaignStatus } from '../components/email/email-campaign-types';
 
 // ★ 2026-06-13: AI 빠른 시작 7 시나리오 (백엔드 EMAIL_SCENARIO_PRESETS key와 1:1)
 const EMAIL_QUICK_STARTS: Array<{ key: string; label: string; desc: string; icon: typeof Mail; grad: string }> = [
@@ -43,29 +45,7 @@ const EMAIL_GEN_STEPS = ['요청 의도 분석', '브랜드 톤 반영', '제목
 //   - 모바일 반응형 default
 // ════════════════════════════════════════════════════════════════════
 
-type CampaignStatus = 'draft' | 'scheduled' | 'sending' | 'completed' | 'failed';
-
-interface EmailCampaign {
-  id: string;
-  name: string;
-  subject: string;
-  htmlBody: string;
-  textBody: string | null;
-  fromName: string;
-  fromEmail: string;
-  isAd: boolean;
-  aiGenerated?: boolean;
-  scheduledAt: string | null;
-  sentAt: string | null;
-  status: CampaignStatus;
-  sentCount: number;
-  openCount: number;
-  clickCount: number;
-  bounceCount: number;
-  unsubscribeCount: number;
-  createdAt: string;
-  sections?: Section[] | null; // 비주얼 빌더 Section[] (있으면 비주얼 에디터로 수정)
-}
+// EmailCampaign / CampaignStatus = ../components/email/email-campaign-types (분석 모달과 공유)
 
 // 편집 모달 상태 — 캠페인 필드 + AI 생성 부가(제목 3안·프리헤더·AI 플래그)
 interface EditingCampaign extends Partial<EmailCampaign> {
@@ -171,9 +151,10 @@ export default function EmailCampaignsPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [presetKey, setPresetKey] = useState<string>('gmail');
 
-  // 테스트 발송 영역
+  // 테스트 발송 영역 (작은 모달로 접음 — 가로 큰 카드 제거)
   const [testEmail, setTestEmail] = useState('');
   const [testSending, setTestSending] = useState(false);
+  const [testModalOpen, setTestModalOpen] = useState(false);
 
   // 캠페인 신설/수정 모달
   const [editing, setEditing] = useState<EditingCampaign | null>(null);
@@ -199,6 +180,8 @@ export default function EmailCampaignsPage() {
   const [visualEditor, setVisualEditor] = useState<{ sections: Section[]; name?: string; subject?: string; isAd?: boolean; aiGenerated?: boolean; campaignId?: string } | null>(null);
   // 템플릿 갤러리 모달 (즉시·무료 골격)
   const [showGallery, setShowGallery] = useState(false);
+  // 성과 분석 대시보드 모달
+  const [showAnalytics, setShowAnalytics] = useState(false);
 
   const token = () => localStorage.getItem('token');
   const authHeaders = () => ({ Authorization: `Bearer ${token()}`, 'Content-Type': 'application/json' });
@@ -595,7 +578,36 @@ export default function EmailCampaignsPage() {
             </div>
             <p className="text-xs md:text-sm text-white/50 mt-0.5">회사 SMTP 직접 등록 → 본인 도메인 발신 + 광고 자동 합성 + 오픈/클릭 트래킹</p>
           </div>
-          <div className="ml-auto flex items-center gap-2">
+          <div className="ml-auto flex items-center gap-2 flex-wrap justify-end">
+            {smtpConfigured && smtpConfig?.isConfigured && (
+              <>
+                <button
+                  onClick={() => setSmtpFormOpen(true)}
+                  className="text-xs flex items-center gap-1.5 px-2.5 py-2 rounded-lg bg-emerald-500/15 border border-emerald-400/25 text-emerald-100 hover:bg-emerald-500/25 transition-colors"
+                  title="SMTP 설정 — 수정 / 영구 제거"
+                >
+                  <ShieldCheck className="w-3.5 h-3.5 text-emerald-300" />
+                  <span className="font-medium">발송 가능</span>
+                  <span className="hidden lg:inline text-emerald-200/50 font-mono">{smtpConfig.host}</span>
+                </button>
+                <button
+                  onClick={() => setTestModalOpen(true)}
+                  className="text-xs text-cyan-200 hover:bg-cyan-500/15 px-3 py-2 rounded-lg flex items-center gap-1.5 transition-colors border border-cyan-400/20"
+                >
+                  <Send className="w-3.5 h-3.5" />
+                  <span className="hidden sm:inline">테스트 발송</span>
+                </button>
+              </>
+            )}
+            {campaigns.length > 0 && (
+              <button
+                onClick={() => setShowAnalytics(true)}
+                className="text-xs bg-gradient-to-r from-indigo-500/40 to-violet-500/40 hover:from-indigo-500/60 hover:to-violet-500/60 text-indigo-50 px-3 py-2 rounded-lg flex items-center gap-1.5 font-medium transition-colors border border-indigo-400/30"
+              >
+                <BarChart3 className="w-3.5 h-3.5" />
+                분석
+              </button>
+            )}
             <button onClick={loadAll} className="text-xs text-white/70 hover:bg-white/10 px-3 py-2 rounded-lg flex items-center gap-1.5 transition-colors" aria-label="새로고침">
               <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
               <span className="hidden sm:inline">새로고침</span>
@@ -662,63 +674,7 @@ export default function EmailCampaignsPage() {
           </div>
         )}
 
-        {/* SMTP 설정 완료 안내 + 펼침 토글 */}
-        {smtpConfigured && smtpConfig?.isConfigured && (
-          <div className="bg-emerald-500/10 border border-emerald-400/30 rounded-xl p-4">
-            <div className="flex items-start gap-3 flex-wrap">
-              <ShieldCheck className="w-5 h-5 text-emerald-300 mt-0.5 shrink-0" />
-              <div className="flex-1 min-w-[240px]">
-                <h3 className="text-sm font-bold text-emerald-100">SMTP 설정 완료 — 발송 가능 상태</h3>
-                <div className="text-xs text-emerald-200/80 mt-1">
-                  <span className="font-mono">{smtpConfig.host}:{smtpConfig.port}</span> · 발신 <span className="font-mono">{smtpConfig.fromEmail}</span>
-                  {smtpConfig.fromName && <span> ({smtpConfig.fromName})</span>}
-                  · {smtpConfig.secure ? 'SSL/TLS' : 'STARTTLS'}
-                </div>
-              </div>
-              <div className="flex gap-2">
-                <button
-                  onClick={() => setSmtpFormOpen(true)}
-                  className="text-xs text-cyan-300 hover:bg-cyan-500/10 px-3 py-1.5 rounded flex items-center gap-1"
-                >
-                  <Edit2 className="w-3 h-3" /> 수정
-                </button>
-                <button
-                  onClick={handleClearSmtp}
-                  className="text-xs text-rose-300 hover:bg-rose-500/10 px-3 py-1.5 rounded flex items-center gap-1"
-                >
-                  <Trash2 className="w-3 h-3" /> 영구 제거
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* 테스트 발송 영역 (SMTP 설정 완료 시 표시) */}
-        {smtpConfigured && (
-          <div className="bg-white/5 border border-white/10 rounded-xl p-4">
-            <h3 className="text-sm font-bold text-white mb-2 flex items-center gap-2">
-              <Send className="w-4 h-4 text-cyan-300" /> 테스트 발송
-            </h3>
-            <p className="text-xs text-white/50 mb-3">회사 admin 본인 이메일에 테스트 발송 → SMTP 설정 정상 동작 확인</p>
-            <div className="flex gap-2 flex-wrap">
-              <input
-                type="email"
-                value={testEmail}
-                onChange={(e) => setTestEmail(e.target.value)}
-                placeholder="테스트 수신 이메일 (예: admin@example.com)"
-                className="flex-1 min-w-[200px] px-3 py-2 bg-violet-900/50 border border-white/10 rounded-lg text-sm text-white placeholder-white/30 focus:outline-none focus:border-cyan-400/50"
-              />
-              <button
-                onClick={handleTestSend}
-                disabled={testSending || !testEmail.trim()}
-                className="px-4 py-2 bg-cyan-500/30 hover:bg-cyan-500/50 disabled:opacity-40 disabled:cursor-not-allowed text-cyan-100 text-sm font-medium rounded-lg flex items-center gap-1.5"
-              >
-                {testSending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
-                {testSending ? '발송 중...' : '테스트 발송'}
-              </button>
-            </div>
-          </div>
-        )}
+        {/* SMTP 상태·테스트 발송은 헤더의 칩·작은 모달로 이동 — 가로 큰 배너/카드 제거 */}
 
         {/* ★ 2026-06-13: AI 원샷 생성 — 자연어 입력 + 빠른 시작 7 카드 (SMTP 완료 시) */}
         {smtpConfigured && (
@@ -924,8 +880,40 @@ export default function EmailCampaignsPage() {
           saving={smtpFormSaving}
           onSave={handleSaveSmtp}
           onClose={() => setSmtpFormOpen(false)}
+          onClear={smtpConfig?.isConfigured ? () => { setSmtpFormOpen(false); handleClearSmtp(); } : undefined}
           isUpdate={smtpConfig?.isConfigured || false}
         />
+      )}
+
+      {/* 테스트 발송 — 작은 모달 (가로 큰 카드 대체) */}
+      {testModalOpen && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => !testSending && setTestModalOpen(false)}>
+          <div className="bg-slate-900 border border-white/10 rounded-2xl shadow-2xl w-full max-w-md" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between px-5 py-3 border-b border-white/10">
+              <h3 className="text-sm font-bold text-white flex items-center gap-2"><Send className="w-4 h-4 text-cyan-300" /> 테스트 발송</h3>
+              <button onClick={() => setTestModalOpen(false)} disabled={testSending} className="text-white/50 hover:text-white p-1.5 rounded hover:bg-white/10 disabled:opacity-40" aria-label="닫기"><X className="w-5 h-5" /></button>
+            </div>
+            <div className="p-5 space-y-3">
+              <p className="text-xs text-white/50">회사 admin 본인 이메일에 테스트 발송 → SMTP 설정 정상 동작 확인 (스팸 폴더도 확인)</p>
+              <input
+                type="email"
+                value={testEmail}
+                onChange={(e) => setTestEmail(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter' && !testSending && testEmail.trim()) handleTestSend(); }}
+                placeholder="테스트 수신 이메일 (예: admin@example.com)"
+                className="w-full px-3 py-2 bg-violet-950/50 border border-white/10 rounded-lg text-sm text-white placeholder-white/30 focus:outline-none focus:border-cyan-400/50"
+              />
+              <button
+                onClick={handleTestSend}
+                disabled={testSending || !testEmail.trim()}
+                className="w-full px-4 py-2 bg-cyan-500/30 hover:bg-cyan-500/50 disabled:opacity-40 disabled:cursor-not-allowed text-cyan-100 text-sm font-medium rounded-lg flex items-center justify-center gap-1.5"
+              >
+                {testSending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+                {testSending ? '발송 중...' : '테스트 발송'}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* 캠페인 신설/수정 모달 */}
@@ -1016,6 +1004,19 @@ export default function EmailCampaignsPage() {
         <EmailTemplateGalleryModal
           onPick={(sections, label) => setVisualEditor({ sections, name: label, subject: label, isAd: true, aiGenerated: false })}
           onClose={() => setShowGallery(false)}
+          authHeaders={authHeaders}
+        />
+      )}
+
+      {/* 성과 분석 대시보드 — 1클릭 액션은 기존 진단/미오픈 모달 재사용 */}
+      {showAnalytics && (
+        <EmailAnalyticsModal
+          campaigns={campaigns}
+          authHeaders={authHeaders}
+          onClose={() => setShowAnalytics(false)}
+          onOpenInsight={(c) => { setShowAnalytics(false); setInsightModal({ campaign: c }); }}
+          onOpenNonOpener={(c) => { setShowAnalytics(false); setNonOpenerModal({ campaign: c }); }}
+          onToast={showToast}
         />
       )}
 
@@ -1057,10 +1058,11 @@ interface SmtpFormModalProps {
   saving: boolean;
   onSave: () => void;
   onClose: () => void;
+  onClear?: () => void;
   isUpdate: boolean;
 }
 
-function SmtpFormModal({ form, setForm, presetKey, setPresetKey, showPassword, setShowPassword, saving, onSave, onClose, isUpdate }: SmtpFormModalProps) {
+function SmtpFormModal({ form, setForm, presetKey, setPresetKey, showPassword, setShowPassword, saving, onSave, onClose, onClear, isUpdate }: SmtpFormModalProps) {
   const currentPreset = SMTP_PRESETS.find((p) => p.key === presetKey);
   return (
     <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50" onClick={onClose}>
@@ -1206,16 +1208,25 @@ function SmtpFormModal({ form, setForm, presetKey, setPresetKey, showPassword, s
           </div>
         </div>
 
-        <div className="sticky bottom-0 bg-violet-900/40 border-t border-white/10 px-6 py-3 flex justify-end gap-2">
-          <button onClick={onClose} className="px-4 py-2 text-sm text-white/70 hover:bg-white/5 rounded-lg">취소</button>
-          <button
-            onClick={onSave}
-            disabled={saving}
-            className="px-5 py-2 bg-gradient-to-r from-blue-500 to-sky-500 hover:from-blue-600 hover:to-sky-600 disabled:opacity-40 text-white text-sm font-bold rounded-lg flex items-center gap-2"
-          >
-            {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
-            {saving ? '저장 중...' : isUpdate ? '수정 저장' : 'SMTP 등록'}
-          </button>
+        <div className="sticky bottom-0 bg-violet-900/40 border-t border-white/10 px-6 py-3 flex items-center justify-between gap-2">
+          <div>
+            {isUpdate && onClear && (
+              <button onClick={onClear} className="px-3 py-2 text-xs text-rose-300 hover:bg-rose-500/10 rounded-lg flex items-center gap-1.5">
+                <Trash2 className="w-3.5 h-3.5" /> 영구 제거
+              </button>
+            )}
+          </div>
+          <div className="flex gap-2">
+            <button onClick={onClose} className="px-4 py-2 text-sm text-white/70 hover:bg-white/5 rounded-lg">취소</button>
+            <button
+              onClick={onSave}
+              disabled={saving}
+              className="px-5 py-2 bg-gradient-to-r from-blue-500 to-sky-500 hover:from-blue-600 hover:to-sky-600 disabled:opacity-40 text-white text-sm font-bold rounded-lg flex items-center gap-2"
+            >
+              {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
+              {saving ? '저장 중...' : isUpdate ? '수정 저장' : 'SMTP 등록'}
+            </button>
+          </div>
         </div>
       </div>
     </div>
@@ -1241,20 +1252,23 @@ function CampaignFormModal({ editing, setEditing, saving, onSave, authHeaders, o
   const [refining, setRefining] = useState(false);
   const subjects = editing.subjects || [];
 
-  const handleRefine = async () => {
-    if (!refineInstruction.trim()) { onToast('어떻게 다듬을지 입력해주세요.', 'warning'); return; }
+  // 1클릭 자동 다듬기 기본 지시 — 사실·혜택 보존(임의 혜택 생성 0)
+  const ONE_CLICK_REFINE = '문장을 더 매끄럽고 자연스럽게 다듬어주세요. 상품·혜택·금액·할인율·날짜·숫자·링크 등 사실은 절대 바꾸지 말고, 원본에 없는 정보는 추가하지 마세요.';
+  const handleRefine = async (instructionOverride?: string) => {
+    const instruction = (instructionOverride ?? refineInstruction).trim();
+    if (!instruction) { onToast('어떻게 다듬을지 입력해주세요.', 'warning'); return; }
     if (!editing.subject?.trim() || !editing.htmlBody?.trim()) { onToast('제목과 본문이 필요합니다.', 'warning'); return; }
     setRefining(true);
     try {
       const res = await fetch('/api/email/ai/refine', {
         method: 'POST', headers: authHeaders(),
-        body: JSON.stringify({ subject: editing.subject, html_body: editing.htmlBody, instruction: refineInstruction.trim() }),
+        body: JSON.stringify({ subject: editing.subject, html_body: editing.htmlBody, instruction }),
       });
       const data = await res.json();
       if (data?.code === 'INSUFFICIENT_CREDIT') { onToast('크레딧이 부족합니다. 충전 후 이용해주세요.', 'warning'); return; }
       if (data.success && data.data) {
         setEditing({ ...editing, subject: data.data.subject, htmlBody: data.data.htmlBody });
-        setRefineInstruction('');
+        if (!instructionOverride) setRefineInstruction('');
         onToast('AI가 다듬었습니다. (1 크레딧)', 'success');
       } else {
         onToast(data.error || 'AI 다듬기 실패', 'error');
@@ -1359,8 +1373,19 @@ function CampaignFormModal({ editing, setEditing, saving, onSave, authHeaders, o
           </div>
           {/* AI 다듬기 (1 크레딧) */}
           <div className="bg-fuchsia-500/10 border border-fuchsia-400/25 rounded-lg p-3">
-            <div className="flex items-center gap-1.5 mb-2 text-[11px] text-fuchsia-200 font-semibold">
-              <Wand2 className="w-3.5 h-3.5" /> AI 다듬기 (1 크레딧)
+            <div className="flex items-center justify-between gap-2 mb-2">
+              <div className="flex items-center gap-1.5 text-[11px] text-fuchsia-200 font-semibold">
+                <Wand2 className="w-3.5 h-3.5" /> AI 다듬기 (1 크레딧)
+              </div>
+              <button
+                onClick={() => handleRefine(ONE_CLICK_REFINE)}
+                disabled={refining || !editing.subject?.trim() || !editing.htmlBody?.trim()}
+                className="px-2.5 py-1 bg-gradient-to-r from-fuchsia-500/50 to-purple-500/50 hover:from-fuchsia-500/70 hover:to-purple-500/70 disabled:opacity-40 text-white text-[11px] font-semibold rounded-lg flex items-center gap-1 whitespace-nowrap"
+                title="지시 입력 없이 AI가 전체 문장을 매끄럽게 다듬어요 (사실·혜택 보존)"
+              >
+                {refining ? <Loader2 className="w-3 h-3 animate-spin" /> : <Sparkles className="w-3 h-3" />}
+                한 번에 다듬기
+              </button>
             </div>
             <div className="flex flex-col md:flex-row gap-2">
               <input
@@ -1373,7 +1398,7 @@ function CampaignFormModal({ editing, setEditing, saving, onSave, authHeaders, o
                 className="flex-1 px-3 py-2 bg-violet-950/50 border border-white/10 rounded-lg text-xs text-white placeholder-white/30 focus:outline-none focus:border-fuchsia-400/50 disabled:opacity-50"
               />
               <button
-                onClick={handleRefine}
+                onClick={() => handleRefine()}
                 disabled={refining || !refineInstruction.trim()}
                 className="px-3 py-2 bg-fuchsia-500/40 hover:bg-fuchsia-500/60 disabled:opacity-40 text-white text-xs font-semibold rounded-lg flex items-center justify-center gap-1.5 whitespace-nowrap"
               >

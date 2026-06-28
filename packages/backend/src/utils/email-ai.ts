@@ -23,6 +23,8 @@ import { buildSystemPromptWithBrandVoice } from './brand-voice-prompt';
 // 비주얼 빌더: AI 블록 출력 → 검증된 email Section[]
 import { normalizeAiBlocksToSections } from './email/email-blocks';
 import type { Section } from './dm/dm-section-registry';
+// 비주얼 에디터 "AI로 개선" 순수 코어(텍스트 수집·안전 검증·반영)
+import { collectRefinableTexts, applyRefinedTexts } from './email/email-section-refine';
 // 문안 두뇌: 성과 RAG + 시의성 + 브랜드 키트 주입 + 타사 표현 복제 가드
 import { composeCopyBrain } from './copy-prompt-composer';
 import { checkCopyLeak } from './copy-similarity-guard';
@@ -418,6 +420,54 @@ ${EMAIL_HTML_RULES}
   return { subject, htmlBody };
 }
 
+const EMAIL_SECTION_REFINE_SYSTEM = `당신은 한국어 이메일 마케팅 카피 에디터입니다. 이메일 블록의 텍스트 조각들을 더 매끄럽고 설득력 있게 다듬습니다.
+규칙:
+- 입력은 텍스트 조각 배열입니다. 같은 개수·같은 순서의 배열로, 다듬은 텍스트만 출력합니다.
+- 의미와 사실(상품/혜택/금액/할인율/날짜/숫자/링크/연락처)은 절대 바꾸지 않습니다. 원본에 없는 정보나 혜택을 새로 만들지 않습니다.
+- {{ ... }} 형태의 변수 토큰은 글자 그대로 보존합니다(삭제·수정 금지).
+- [직접 작성해주세요] 같은 자리표시자는 그대로 둡니다.
+- (광고) 표기나 수신거부 문구를 새로 넣지 않습니다(시스템이 자동 처리).
+- 빈 텍스트는 빈 문자열로 둡니다.
+반드시 아래 JSON 스키마로만 출력합니다 (코드블록/설명 금지):
+{ "texts": ["다듬은 텍스트 1", "다듬은 텍스트 2"] }`;
+
+/**
+ * 비주얼 에디터 "AI로 개선" — 블록의 마케팅 카피 텍스트만 다듬어 Section[] 반환.
+ * 사실·혜택·법적 필드는 수집 대상이 아니고, 변수/자리표시자 손실분은 원본 유지(안전 코어).
+ * 다듬을 텍스트가 없으면 changed=false(호출부가 차감하지 않음).
+ */
+export async function refineEmailSections(input: {
+  companyId: string;
+  userId?: string;
+  sections: Section[];
+  instruction?: string;
+}): Promise<{ sections: Section[]; changed: boolean }> {
+  const { slots, texts } = collectRefinableTexts(input.sections);
+  if (texts.length === 0) return { sections: input.sections, changed: false };
+
+  const system = await buildSystemPromptWithBrandVoice(input.companyId, EMAIL_SECTION_REFINE_SYSTEM);
+  const userInstruction = (input.instruction || '전체 카피를 더 매끄럽고 자연스럽게 다듬어주세요.').trim();
+  const text = await callAIWithFallback({
+    system,
+    userMessage: `[다듬기 지시]\n${userInstruction}\n\n[텍스트 조각 ${texts.length}개 — 같은 순서·같은 개수로 다듬어 JSON 출력]\n${JSON.stringify(texts)}`,
+    maxTokens: 3000,
+    temperature: 0.5,
+    model: 'opus',
+    companyId: input.companyId,
+    userId: input.userId,
+    source: 'email-refine',
+    creditCost: 0,
+  });
+
+  const parsed = extractJsonFromAiText<{ texts?: unknown }>(text);
+  const refined = Array.isArray(parsed?.texts) ? (parsed.texts as unknown[]).map((t) => String(t ?? '')) : null;
+  if (!refined || refined.length !== texts.length) {
+    throw new Error('AI 다듬기 결과를 해석하지 못했습니다. 다시 시도해주세요.');
+  }
+  const sections = applyRefinedTexts(input.sections, slots, refined);
+  return { sections, changed: true };
+}
+
 export async function analyzeSpamRisk(input: {
   companyId: string;
   userId?: string;
@@ -489,6 +539,56 @@ export async function buildPerformanceInsight(input: {
     suggestions: (parsed.suggestions || [])
       .map((s) => ({ title: String(s?.title || '').trim(), description: String(s?.description || '').trim() }))
       .filter((s) => s.title)
+      .slice(0, 3),
+  };
+}
+
+/**
+ * 계정 전체(최근 N일) 성과 종합 진단 — 분석 대시보드 "AI 진단 받기".
+ * 집계 실측만 근거. 임의 혜택·추정 금지(buildPerformanceInsight와 동일 원칙).
+ */
+export async function buildEmailAccountInsight(input: {
+  companyId: string;
+  userId?: string;
+  days: number;
+  stats: {
+    campaignCount: number;
+    sentCount: number;
+    openRatePct: number;
+    clickRatePct: number;
+    bounceRatePct: number;
+    unsubRatePct: number;
+    prevOpenRatePct: number | null;
+    prevClickRatePct: number | null;
+    best: { name: string; openRatePct: number } | null;
+    worst: { name: string; openRatePct: number } | null;
+  };
+}): Promise<EmailInsightResult> {
+  const s = input.stats;
+  const text = await callAIWithFallback({
+    system: `당신은 한국어 이메일 마케팅 성과 분석가입니다. 회사 계정 전체의 실측 수치만 근거로 진단합니다.
+[절대 금지] 실측에 없는 수치 추정/창작, 업계 평균 단정, 모델명·시스템명 노출, 구체 혜택(%/원/쿠폰) 임의 생성.
+반드시 아래 JSON 스키마로만 출력합니다 (코드블록/설명 금지):
+{ "top_insight": "가장 중요한 발견 1~2문장", "suggestions": [{ "title": "제안 제목", "description": "구체 실행 방법 1~2문장" }] }
+- suggestions 1~3건. 다음 캠페인에서 실행 가능한 것만.`,
+    userMessage: `[기간] 최근 ${input.days}일\n[실측 집계]\n- 캠페인 수: ${s.campaignCount}건\n- 총 발송: ${s.sentCount}건\n- 오픈율: ${s.openRatePct}%${s.prevOpenRatePct != null ? ` (이전 동기간 ${s.prevOpenRatePct}%)` : ''}\n- 클릭율: ${s.clickRatePct}%${s.prevClickRatePct != null ? ` (이전 동기간 ${s.prevClickRatePct}%)` : ''}\n- 반송율: ${s.bounceRatePct}%\n- 수신거부율: ${s.unsubRatePct}%\n- 성과 상위: ${s.best ? `${s.best.name} (오픈율 ${s.best.openRatePct}%)` : '표본 없음'}\n- 성과 하위: ${s.worst ? `${s.worst.name} (오픈율 ${s.worst.openRatePct}%)` : '표본 없음'}\n\n실측만 근거로 JSON 진단을 출력하세요.`,
+    maxTokens: 1500,
+    temperature: 0.3,
+    model: 'opus',
+    companyId: input.companyId,
+    userId: input.userId,
+    source: 'email-performance-insight',
+    creditCost: 0,
+  });
+
+  const parsed = extractJsonFromAiText<{ top_insight?: string; suggestions?: Array<{ title?: string; description?: string }> }>(text);
+  const topInsight = String(parsed.top_insight || '').trim();
+  if (!topInsight) throw new Error('AI 진단 결과가 비어 있습니다. 다시 시도해주세요.');
+  return {
+    topInsight,
+    suggestions: (parsed.suggestions || [])
+      .map((s2) => ({ title: String(s2?.title || '').trim(), description: String(s2?.description || '').trim() }))
+      .filter((s2) => s2.title)
       .slice(0, 3),
   };
 }

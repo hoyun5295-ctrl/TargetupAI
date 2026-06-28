@@ -107,6 +107,15 @@
 
 ---
 
+### 🟢 2026-06-28(이어서) — 인앱 진입 재설계 + 이메일 브레이즈급 Phase 1 + AiMemory 모달화 + 버그 2건 (★배포완료)
+> **버그 2(배포완료)**: SegmentsPage 뒤로가기 `/dashboard`→`/ai-operator`(AI Operator 계열 15개 전수 점검, 이 한 곳만 오류) + App.tsx 전역 `ScrollToTop`(라우트 진입 시 최상단 복원, 전 메뉴 일괄).
+> **인앱 진입 재설계(배포완료)**: `InAppMessagesPage` !channel 화면 = 빠른 시작 7카드(채널 무관→채널 선택 모달→AI 자동 1흐름) + 컴팩트 채널 2카드(미니 썸네일) + 최근 인앱(`GET /inapp` 채널 없이=전체, 데이터 적응)→폰 미리보기 모달. 설계 `specs/2026-06-28-inapp-entry-redesign-design.md`.
+> **이메일 브레이즈급 Phase 1(배포완료)**: A 에디터 드래그(@dnd-kit)·복제 / B 템플릿 갤러리(프리셋 6, 1클릭 무료) / C 개인화(`Section.display_condition` jsonb·ALTER 0 + 신규 CT `email/email-personalization`[Liquid 재사용·verify 9/9] + render-preview sampleCustomer + `/preview-customers` + 에디터 변수칩·조건부·VIP/일반/신규 미리보기) / C5 발송 수신자별 렌더(섹션 없으면 무회귀, 즉시·예약 단일 길목). **★발송·돈 = 실측 1건(주인님 테스트발송 `{{ customer.name }}`+조건부 확인) 후 실고객 대량 발송.** 설계 `specs/2026-06-28-email-braze-phase1-design.md` + 계획 `plans/2026-06-28-email-braze-phase1.md`. 상세 [[project_2026_0628_email_braze_inapp_redesign]].
+> **AiMemoryPage(배포완료)**: `BrandVoiceCard` 9+항목 펼침 → 요약 카드 + "전체 보기·정정" 모달. 신규 룰 [[feedback_braze_win_formula]](편리함+AI 풍부) + AI Operator 전 메뉴 버튼+모달화([[feedback_design_modal_first_simplicity]]). MEMORY.md 144KB→21KB 압축.
+> **★다음 세션 = 이메일 마케팅 마무리** → `docs/superpowers/handoffs/2026-06-28-email-marketing-finish-handoff.md` 정독. 남은 = ① C5 실측 1건(주인님) ② Phase 1 폴리시(1클릭 AI 개선·템플릿 AI 추천 배선·변수 커서 삽입) ③ Phase 2(분석 대시보드/AB/세그먼트 우선순위 확정).
+
+---
+
 ### 🟢 2026-06-28 — 문안 두뇌(7천건 RAG) 배포완료 + AI 학습/브랜드보이스 화면 밀도 개선 + 다음 설계서 2건
 > **문안 두뇌(★배포+backfill 완료)**: 7천건 `ai_training_logs` RAG(`composeCopyBrain` 회사 우선 + 업종 비식별 폴백 + 성과 정렬) + 시의성(`copy-context` 요일·계절·공휴일·시즌) + 브랜드 키트(시그니처 조합·금지어) + 복제가드(타사 시그니처 3단 차단). 이메일·캠페인 SMS 생성에 배선. 회사명→업종 매핑 backfill 6,353건. 신규 `copy-context/copy-similarity-guard/copy-rag-retriever/copy-prompt-composer/industry-codes`. backend tsc0·vitest119·frontend tsc0. 설계 `docs/superpowers/specs/2026-06-27-copy-brain-rag-brand-kit-design.md`.
 > **디자인 밀도(★배포)**: AiMemoryPage violet→slate + 여백/도넛 데이터적응(5건 미만 숨김), BrandVoiceCard 가이드라인 14항목 2열 + 입력칸 축소 + **폰 미리보기 모달**(저장 문안→휴대폰 아이콘→폰 프레임 모달+수정/닫기). 디자인 철학 = 심플 이즈 베스트(입력→저장→폰모달→수정, 가로 긴 버튼 X, 데이터 적응) — `feedback_design_modal_first_simplicity` 메모리.

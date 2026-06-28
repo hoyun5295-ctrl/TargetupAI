@@ -63,9 +63,11 @@ import {
   generateEmailOneShot,
   generateEmailSections,
   refineEmail,
+  refineEmailSections,
   analyzeSpamRisk,
   runEmailCodeChecks,
   buildPerformanceInsight,
+  buildEmailAccountInsight,
   recommendSendTime,
   binOpenHours,
   hasUneditedPlaceholder,
@@ -76,8 +78,10 @@ import {
 // 비주얼 빌더: DM Section[] → 이메일 안전 HTML 렌더 + 회사 브랜드킷
 import { renderEmailSections, extractEmailText } from '../utils/email/email-section-renderer';
 import { resolveEmailSectionsForCustomer } from '../utils/email/email-personalization';
+import { rate, relativeDelta, pointDelta } from '../utils/email/email-analytics-calc';
 import { buildPreviewCustomers } from '../utils/inapp-personalization';
 import { getCompanyBrandKit } from '../utils/dm/dm-brand-kit';
+import { industryLabel } from '../utils/industry-codes';
 import type { Section } from '../utils/dm/dm-section-registry';
 import { checkCredit, deductCreditSafe, InsufficientCreditError } from '../utils/ai-credit';
 import { getCreditCost } from '../utils/ai-credit-calc';
@@ -857,6 +861,185 @@ router.get('/preview-customers', async (req: Request, res: Response) => {
   }
 });
 
+// 템플릿 추천용 회사 업종 신호(companies.industry_code — 기존 컬럼). 미설정/실패 시 null → 갤러리는 전체만 노출(추측 추천 0).
+router.get('/brand-signal', async (req: Request, res: Response) => {
+  const auth = await ensureEmailAdmin(req, res);
+  if (!auth) return;
+  try {
+    const r = await query('SELECT industry_code FROM companies WHERE id = $1', [auth.companyId]);
+    const code = r.rows[0]?.industry_code || null;
+    return res.json({ success: true, industry_code: code, industry_label: code ? industryLabel(code) : null });
+  } catch (err: any) {
+    console.error('[Email /brand-signal] 오류:', err);
+    return res.json({ success: true, industry_code: null, industry_label: null });
+  }
+});
+
+// 분석 대시보드 — 계정 성과 집계(읽기 전용·무과금·회사 격리). 신규 컬럼 0(전부 기존 컬럼).
+router.get('/analytics', async (req: Request, res: Response) => {
+  const auth = await ensureEmailAdmin(req, res);
+  if (!auth) return;
+  try {
+    const daysRaw = parseInt(String(req.query.days || '30'), 10);
+    const days = [7, 30, 90].includes(daysRaw) ? daysRaw : 30;
+
+    // 현재/이전 동기간 캠페인 집계 (sent_at 기준)
+    const sumRes = await query(
+      `SELECT
+         CASE WHEN sent_at >= NOW() - make_interval(days => $2) THEN 'current' ELSE 'previous' END AS bucket,
+         COUNT(*)::int AS campaigns,
+         COALESCE(SUM(sent_count),0)::int AS sent,
+         COALESCE(SUM(open_count),0)::int AS opens,
+         COALESCE(SUM(click_count),0)::int AS clicks,
+         COALESCE(SUM(bounce_count),0)::int AS bounces,
+         COALESCE(SUM(unsubscribe_count),0)::int AS unsubs
+       FROM email_campaigns
+       WHERE company_id = $1 AND sent_at IS NOT NULL
+         AND sent_at >= NOW() - make_interval(days => $2 * 2)
+       GROUP BY bucket`,
+      [auth.companyId, days],
+    );
+
+    // 일자별 오픈/클릭 (events, KST)
+    const evRes = await query(
+      `SELECT (e.occurred_at AT TIME ZONE 'Asia/Seoul')::date AS d,
+              COUNT(*) FILTER (WHERE e.event_type = 'open')::int AS opens,
+              COUNT(*) FILTER (WHERE e.event_type = 'click')::int AS clicks
+         FROM email_events e
+         JOIN email_campaigns c ON c.id = e.campaign_id
+        WHERE c.company_id = $1 AND e.occurred_at >= NOW() - make_interval(days => $2)
+        GROUP BY d ORDER BY d`,
+      [auth.companyId, days],
+    );
+    // 일자별 발송 (campaigns.sent_at, KST)
+    const sentRes = await query(
+      `SELECT (sent_at AT TIME ZONE 'Asia/Seoul')::date AS d, COALESCE(SUM(sent_count),0)::int AS sent
+         FROM email_campaigns
+        WHERE company_id = $1 AND sent_at IS NOT NULL AND sent_at >= NOW() - make_interval(days => $2)
+        GROUP BY d ORDER BY d`,
+      [auth.companyId, days],
+    );
+
+    const normDate = (d: any): string => (typeof d === 'string' ? d.slice(0, 10) : new Date(d).toISOString().slice(0, 10));
+    const trendMap = new Map<string, { date: string; sent: number; open: number; click: number }>();
+    for (const r of sentRes.rows) {
+      const d = normDate(r.d);
+      trendMap.set(d, { date: d, sent: Number(r.sent) || 0, open: 0, click: 0 });
+    }
+    for (const r of evRes.rows) {
+      const d = normDate(r.d);
+      const cur = trendMap.get(d) || { date: d, sent: 0, open: 0, click: 0 };
+      cur.open = Number(r.opens) || 0;
+      cur.click = Number(r.clicks) || 0;
+      trendMap.set(d, cur);
+    }
+    const trend = Array.from(trendMap.values()).sort((a, b) => (a.date < b.date ? -1 : 1));
+
+    const find = (b: string): any =>
+      sumRes.rows.find((r: any) => r.bucket === b) || { campaigns: 0, sent: 0, opens: 0, clicks: 0, bounces: 0, unsubs: 0 };
+    const mk = (x: any) => {
+      const sent = Number(x.sent) || 0;
+      return {
+        campaigns: Number(x.campaigns) || 0,
+        sent,
+        open: Number(x.opens) || 0,
+        click: Number(x.clicks) || 0,
+        bounce: Number(x.bounces) || 0,
+        unsub: Number(x.unsubs) || 0,
+        openRate: rate(Number(x.opens) || 0, sent),
+        clickRate: rate(Number(x.clicks) || 0, sent),
+        bounceRate: rate(Number(x.bounces) || 0, sent),
+        unsubRate: rate(Number(x.unsubs) || 0, sent),
+      };
+    };
+    const current = mk(find('current'));
+    const previous = mk(find('previous'));
+    const deltas = {
+      sent: relativeDelta(current.sent, previous.sent),
+      openRate: pointDelta(current.openRate, previous.openRate),
+      clickRate: pointDelta(current.clickRate, previous.clickRate),
+      bounceRate: pointDelta(current.bounceRate, previous.bounceRate),
+      unsubRate: pointDelta(current.unsubRate, previous.unsubRate),
+    };
+    return res.json({ success: true, days, summary: { current, previous, deltas }, trend });
+  } catch (err: any) {
+    console.error('[Email /analytics] 오류:', err);
+    if (handleDbMigrationError(err, res, 'email_campaigns')) return;
+    return res.status(500).json({ success: false, error: err?.message || '분석 조회 실패' });
+  }
+});
+
+// 분석 대시보드 — AI 종합 진단(on-demand 5크레딧). 집계 실측만 근거·임의 혜택 0. 발송 데이터 0이면 무과금.
+router.post('/ai/account-insight', async (req: Request, res: Response) => {
+  const auth = await ensureEmailAdmin(req, res);
+  if (!auth) return;
+  try {
+    const daysRaw = parseInt(String(req.body?.days || '30'), 10);
+    const days = [7, 30, 90].includes(daysRaw) ? daysRaw : 30;
+
+    const sumRes = await query(
+      `SELECT COUNT(*)::int AS campaigns, COALESCE(SUM(sent_count),0)::int AS sent,
+              COALESCE(SUM(open_count),0)::int AS opens, COALESCE(SUM(click_count),0)::int AS clicks,
+              COALESCE(SUM(bounce_count),0)::int AS bounces, COALESCE(SUM(unsubscribe_count),0)::int AS unsubs
+         FROM email_campaigns
+        WHERE company_id = $1 AND sent_at IS NOT NULL AND sent_at >= NOW() - make_interval(days => $2)`,
+      [auth.companyId, days],
+    );
+    const s = sumRes.rows[0] || {};
+    const sent = Number(s.sent) || 0;
+    if (sent <= 0) {
+      return res.json({ success: true, insufficientData: true, message: `최근 ${days}일 발송 데이터가 없어 진단할 수 없습니다.` });
+    }
+
+    const prevRes = await query(
+      `SELECT COALESCE(SUM(sent_count),0)::int AS sent, COALESCE(SUM(open_count),0)::int AS opens, COALESCE(SUM(click_count),0)::int AS clicks
+         FROM email_campaigns
+        WHERE company_id = $1 AND sent_at IS NOT NULL
+          AND sent_at >= NOW() - make_interval(days => $2 * 2) AND sent_at < NOW() - make_interval(days => $2)`,
+      [auth.companyId, days],
+    );
+    const p = prevRes.rows[0] || {};
+    const prevSent = Number(p.sent) || 0;
+
+    const bwRes = await query(
+      `SELECT name, sent_count, open_count
+         FROM email_campaigns
+        WHERE company_id = $1 AND sent_at IS NOT NULL AND sent_at >= NOW() - make_interval(days => $2) AND sent_count > 0`,
+      [auth.companyId, days],
+    );
+    const ranked = bwRes.rows
+      .map((r: any) => ({ name: String(r.name), openRatePct: rate(Number(r.open_count) || 0, Number(r.sent_count) || 0) }))
+      .sort((a, b) => b.openRatePct - a.openRatePct);
+
+    const cost = getCreditCost('email-performance-insight'); // 5
+    await checkCredit(auth.companyId, cost);
+    const insight = await buildEmailAccountInsight({
+      companyId: auth.companyId, userId: auth.userId, days,
+      stats: {
+        campaignCount: Number(s.campaigns) || 0,
+        sentCount: sent,
+        openRatePct: rate(Number(s.opens) || 0, sent),
+        clickRatePct: rate(Number(s.clicks) || 0, sent),
+        bounceRatePct: rate(Number(s.bounces) || 0, sent),
+        unsubRatePct: rate(Number(s.unsubs) || 0, sent),
+        prevOpenRatePct: prevSent > 0 ? rate(Number(p.opens) || 0, prevSent) : null,
+        prevClickRatePct: prevSent > 0 ? rate(Number(p.clicks) || 0, prevSent) : null,
+        best: ranked.length ? ranked[0] : null,
+        worst: ranked.length ? ranked[ranked.length - 1] : null,
+      },
+    });
+    await deductCreditSafe({ companyId: auth.companyId, cost, source: 'email-performance-insight', createdBy: auth.userId });
+    return res.json({ success: true, insight });
+  } catch (err: any) {
+    console.error('[Email /ai/account-insight] 오류:', err);
+    if (err instanceof InsufficientCreditError) {
+      return res.status(402).json({ success: false, error: err.message, code: 'INSUFFICIENT_CREDIT' });
+    }
+    if (handleDbMigrationError(err, res, 'email_campaigns')) return;
+    return res.status(500).json({ success: false, error: err?.message || 'AI 진단 실패' });
+  }
+});
+
 router.post('/ai/refine', async (req: Request, res: Response) => {
   const auth = await ensureEmailAdmin(req, res);
   if (!auth) return;
@@ -878,6 +1061,32 @@ router.post('/ai/refine', async (req: Request, res: Response) => {
       return res.status(402).json({ success: false, error: err.message, code: 'INSUFFICIENT_CREDIT' });
     }
     return res.status(500).json({ success: false, error: err?.message || 'AI 다듬기 실패' });
+  }
+});
+
+// 비주얼 에디터 "AI로 개선" — 블록 카피만 다듬어 Section[] 반환(사실·혜택·변수 보존). 다듬을 텍스트 0이면 무차감.
+router.post('/ai/refine-sections', async (req: Request, res: Response) => {
+  const auth = await ensureEmailAdmin(req, res);
+  if (!auth) return;
+  try {
+    const sections = Array.isArray(req.body?.sections) ? (req.body.sections as Section[]) : null;
+    const instruction = req.body?.instruction ? String(req.body.instruction) : undefined;
+    if (!sections || sections.length === 0) {
+      return res.status(400).json({ success: false, error: '다듬을 블록이 없습니다.' });
+    }
+    const cost = getCreditCost('email-refine'); // 1
+    await checkCredit(auth.companyId, cost);
+    const result = await refineEmailSections({ companyId: auth.companyId, userId: auth.userId, sections, instruction });
+    if (result.changed) {
+      await deductCreditSafe({ companyId: auth.companyId, cost, source: 'email-refine', createdBy: auth.userId });
+    }
+    return res.json({ success: true, data: { sections: result.sections }, changed: result.changed });
+  } catch (err: any) {
+    console.error('[Email /ai/refine-sections] 오류:', err);
+    if (err instanceof InsufficientCreditError) {
+      return res.status(402).json({ success: false, error: err.message, code: 'INSUFFICIENT_CREDIT' });
+    }
+    return res.status(500).json({ success: false, error: err?.message || 'AI 개선 실패' });
   }
 });
 

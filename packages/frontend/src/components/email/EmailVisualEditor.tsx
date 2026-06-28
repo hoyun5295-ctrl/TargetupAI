@@ -67,11 +67,47 @@ export default function EmailVisualEditor({
   const [saving, setSaving] = useState(false);
   const [aiPrompt, setAiPrompt] = useState('');
   const [aiBusy, setAiBusy] = useState(false);
+  const [improving, setImproving] = useState(false);
   // 개인화 미리보기 — 샘플 고객(VIP/일반/신규) 토글
   const [previewSample, setPreviewSample] = useState<'none' | 'VIP' | '일반' | '신규'>('none');
   const [sampleCustomers, setSampleCustomers] = useState<Array<{ label: string; customer: Record<string, any> }>>([]);
 
   const selected = useMemo(() => sections.find((s) => s.id === selectedId) || null, [sections, selectedId]);
+
+  // 변수 칩 삽입용 — 마지막으로 포커스된 입력칸 추적(공용 SectionPropsEditor 무수정).
+  const lastFocusedField = useRef<HTMLInputElement | HTMLTextAreaElement | null>(null);
+  const trackFieldFocus = (e: React.FocusEvent) => {
+    const t = e.target as HTMLElement;
+    if (t instanceof HTMLTextAreaElement) lastFocusedField.current = t;
+    else if (t instanceof HTMLInputElement && ['text', 'email', 'url', 'search', ''].includes(t.type)) lastFocusedField.current = t;
+  };
+
+  // 변수 토큰을 커서 위치에 삽입(React onChange 발화 — 네이티브 setter + input 이벤트). 입력칸 없으면 클립보드 폴백.
+  const insertVarToken = (token: string, label: string) => {
+    const active = document.activeElement;
+    let el: HTMLInputElement | HTMLTextAreaElement | null = null;
+    if (active instanceof HTMLInputElement || active instanceof HTMLTextAreaElement) el = active;
+    else if (lastFocusedField.current && document.contains(lastFocusedField.current)) el = lastFocusedField.current;
+    if (!el) {
+      if (navigator.clipboard) {
+        navigator.clipboard.writeText(token).then(
+          () => onToast(`${label} 변수 복사됨 — 입력칸에 붙여넣으세요`, 'info'),
+          () => onToast('직접 입력해주세요: ' + token, 'warning'),
+        );
+      } else onToast('직접 입력해주세요: ' + token, 'info');
+      return;
+    }
+    const target = el;
+    const proto = target instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+    const setter = Object.getOwnPropertyDescriptor(proto, 'value')?.set;
+    const start = target.selectionStart ?? target.value.length;
+    const end = target.selectionEnd ?? target.value.length;
+    const next = target.value.slice(0, start) + token + target.value.slice(end);
+    if (setter) setter.call(target, next); else target.value = next;
+    target.dispatchEvent(new Event('input', { bubbles: true }));
+    const caret = start + token.length;
+    requestAnimationFrame(() => { try { target.focus(); target.setSelectionRange(caret, caret); } catch { /* 일부 input type은 캐럿 설정 미지원 */ } });
+  };
 
   // ── 실시간 미리보기 (debounce 500ms, 백엔드 렌더러 단일 진실원) ──
   const debounce = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -211,6 +247,30 @@ export default function EmailVisualEditor({
     }
   };
 
+  // ── 1클릭 AI 개선 (블록 카피만 다듬기, 1크레딧 — 사실·혜택·변수 보존) ──
+  const handleImprove = async () => {
+    if (improving) return;
+    if (sections.length === 0) { onToast('먼저 블록을 추가하거나 AI로 만들어주세요.', 'warning'); return; }
+    setImproving(true);
+    try {
+      const res = await fetch('/api/email/ai/refine-sections', {
+        method: 'POST', headers: authHeaders(), body: JSON.stringify({ sections }),
+      });
+      const data = await res.json();
+      if (data?.code === 'INSUFFICIENT_CREDIT') { onToast('크레딧이 부족합니다. 충전 후 이용해주세요.', 'warning'); return; }
+      if (data.success && Array.isArray(data.data?.sections)) {
+        setSections(normalizeOrder(data.data.sections));
+        onToast(data.changed === false ? '다듬을 텍스트가 없어요.' : 'AI가 카피를 다듬었어요. (1 크레딧)', data.changed === false ? 'info' : 'success');
+      } else {
+        onToast(data.error || 'AI 개선 실패', 'error');
+      }
+    } catch (e: any) {
+      onToast(e?.message || 'AI 개선 중 오류', 'error');
+    } finally {
+      setImproving(false);
+    }
+  };
+
   // ── 저장 (sections → 백엔드가 html_body 렌더) ──
   const handleSave = async () => {
     if (!name.trim() || !subject.trim()) { onToast('이름과 제목을 입력해주세요.', 'warning'); return; }
@@ -253,6 +313,9 @@ export default function EmailVisualEditor({
           <label className="flex items-center gap-1.5 text-[11px] text-white/60 cursor-pointer shrink-0">
             <input type="checkbox" checked={isAd} onChange={(e) => setIsAd(e.target.checked)} className="rounded" />광고성
           </label>
+          <button onClick={handleImprove} disabled={improving || sections.length === 0} className="inline-flex items-center gap-1.5 rounded-lg border border-fuchsia-400/40 bg-fuchsia-500/15 px-3 py-2 text-sm font-semibold text-fuchsia-100 hover:bg-fuchsia-500/25 disabled:opacity-40 shrink-0" title="AI가 블록 카피를 매끄럽게 다듬어요 (1 크레딧 · 사실·혜택 보존)">
+            {improving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Wand2 className="w-4 h-4" />}<span className="hidden md:inline">AI로 개선</span>
+          </button>
           <button onClick={handleSave} disabled={saving} className="inline-flex items-center gap-1.5 rounded-lg bg-gradient-to-r from-violet-600 to-fuchsia-600 px-4 py-2 text-sm font-semibold text-white hover:opacity-90 disabled:opacity-50 shrink-0">
             {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}저장
           </button>
@@ -320,7 +383,7 @@ export default function EmailVisualEditor({
                   <span className="text-base">{SECTION_META[selected.type]?.icon}</span>
                   <span className="text-sm font-semibold text-white">{SECTION_META[selected.type]?.label} 편집</span>
                 </div>
-                <div className="text-white">
+                <div className="text-white" onFocus={trackFieldFocus}>
                   <SectionPropsEditor section={selected} onUpdate={updateSelected} />
                 </div>
 
@@ -328,22 +391,14 @@ export default function EmailVisualEditor({
                 <div className="mt-4 pt-4 border-t border-white/10 space-y-3">
                   <div className="text-[11px] font-semibold text-white/60">개인화</div>
                   <div>
-                    <div className="text-[10px] text-white/40 mb-1.5">변수 클릭 = 복사. 텍스트에 붙여넣으면 발송 시 수신자 정보로 자동 치환됩니다.</div>
+                    <div className="text-[10px] text-white/40 mb-1.5">입력칸을 클릭한 뒤 변수를 누르면 커서 위치에 삽입됩니다. 발송 시 수신자 정보로 자동 치환돼요.</div>
                     <div className="flex flex-wrap gap-1">
                       {EMAIL_VARS.map((v) => (
                         <button
                           key={v.token}
                           type="button"
-                          onClick={() => {
-                            if (navigator.clipboard) {
-                              navigator.clipboard.writeText(v.token).then(
-                                () => onToast(`${v.label} 변수 복사됨 — 원하는 곳에 붙여넣으세요`, 'info'),
-                                () => onToast('직접 입력해주세요: ' + v.token, 'warning'),
-                              );
-                            } else {
-                              onToast('직접 입력해주세요: ' + v.token, 'info');
-                            }
-                          }}
+                          onMouseDown={(e) => e.preventDefault()}
+                          onClick={() => insertVarToken(v.token, v.label)}
                           className="text-[10px] px-2 py-1 rounded-full bg-white/5 border border-white/10 text-white/70 hover:bg-violet-500/20 hover:border-violet-400/40"
                         >
                           {v.label}

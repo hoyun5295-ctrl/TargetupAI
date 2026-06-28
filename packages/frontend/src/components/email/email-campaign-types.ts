@@ -1,0 +1,26 @@
+// 이메일 캠페인 공유 타입 — 페이지와 분석 모달이 함께 쓴다(컴포넌트↔페이지 순환 import 회피).
+import type { Section } from '../../utils/dm-section-defaults';
+
+export type CampaignStatus = 'draft' | 'scheduled' | 'sending' | 'completed' | 'failed';
+
+export interface EmailCampaign {
+  id: string;
+  name: string;
+  subject: string;
+  htmlBody: string;
+  textBody: string | null;
+  fromName: string;
+  fromEmail: string;
+  isAd: boolean;
+  aiGenerated?: boolean;
+  scheduledAt: string | null;
+  sentAt: string | null;
+  status: CampaignStatus;
+  sentCount: number;
+  openCount: number;
+  clickCount: number;
+  bounceCount: number;
+  unsubscribeCount: number;
+  createdAt: string;
+  sections?: Section[] | null; // 비주얼 빌더 Section[] (있으면 비주얼 에디터로 수정)
+}
