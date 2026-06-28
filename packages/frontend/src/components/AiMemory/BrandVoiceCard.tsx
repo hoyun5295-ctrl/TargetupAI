@@ -14,6 +14,7 @@
  */
 
 import { useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 import {
   Sparkles, Plus, Trash2, Save, RefreshCw, ChevronDown, ChevronUp,
   Image, FileText, Loader2, CheckCircle2, AlertCircle, Smartphone, X, Pencil,
@@ -424,7 +425,7 @@ export default function BrandVoiceCard({ apiBase, token, onToast, onConfirm }: B
                 <SummaryChip label="CTA 패턴" value={`${(guideline.cta_patterns || []).length}건`} />
               </div>
 
-              {showGuidelineModal && (
+              {showGuidelineModal && createPortal(
                 <div className="fixed inset-0 z-[2000] flex items-center justify-center bg-black/70 backdrop-blur-sm p-3 md:p-4" onClick={() => setShowGuidelineModal(false)}>
                   <div className="bg-slate-900 border border-white/10 rounded-2xl shadow-2xl w-full max-w-2xl max-h-[88vh] flex flex-col overflow-hidden" onClick={(e) => e.stopPropagation()}>
                     <div className="flex items-center justify-between px-5 py-3 border-b border-white/10">
@@ -503,7 +504,7 @@ export default function BrandVoiceCard({ apiBase, token, onToast, onConfirm }: B
                     </div>
                   </div>
                 </div>
-              )}
+              , document.body)}
             </div>
           )}
         </div>
