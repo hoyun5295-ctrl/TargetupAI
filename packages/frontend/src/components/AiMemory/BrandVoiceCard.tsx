@@ -512,7 +512,7 @@ export default function BrandVoiceCard({ apiBase, token, onToast, onConfirm }: B
 
     {editor && (
       <div className="fixed inset-0 z-[2000] flex items-center justify-center bg-black/70 backdrop-blur-sm p-3 md:p-4" onClick={() => setEditor(null)}>
-        <div className="bg-slate-900 border border-white/10 rounded-2xl shadow-2xl w-full max-w-3xl max-h-[92vh] flex flex-col overflow-hidden" onClick={(e) => e.stopPropagation()}>
+        <div className="bg-slate-900 border border-white/10 rounded-2xl shadow-2xl w-full max-w-5xl max-h-[95vh] flex flex-col overflow-hidden" onClick={(e) => e.stopPropagation()}>
           <div className="flex items-center justify-between px-5 py-3 border-b border-white/10">
             <h4 className="text-sm font-semibold text-white flex items-center gap-2">
               <Smartphone className="w-4 h-4 text-violet-300" />
@@ -521,9 +521,9 @@ export default function BrandVoiceCard({ apiBase, token, onToast, onConfirm }: B
             <button onClick={() => setEditor(null)} className="text-white/50 hover:text-white p-1.5 rounded hover:bg-white/10" aria-label="닫기"><X className="w-5 h-5" /></button>
           </div>
 
-          <div className="flex-1 overflow-y-auto p-5 flex flex-col md:flex-row gap-5">
+          <div className="flex-1 overflow-y-auto p-5 md:p-6 flex flex-col md:flex-row gap-6 items-start">
             {/* 입력 */}
-            <div className="flex-1 space-y-3">
+            <div className="flex-1 w-full space-y-3">
               <div>
                 <label className="block text-[10px] text-white/50 mb-1 uppercase tracking-wide">채널</label>
                 <select
@@ -551,7 +551,7 @@ export default function BrandVoiceCard({ apiBase, token, onToast, onConfirm }: B
                   value={editor.draft.text}
                   onChange={(e) => updateDraft({ text: e.target.value })}
                   placeholder="회사 실제 발송 문안을 그대로 입력해주세요."
-                  rows={7}
+                  rows={11}
                   maxLength={2000}
                   className="w-full px-3 py-2 text-xs bg-slate-950 border border-white/10 rounded-lg text-white placeholder-white/30 focus:border-violet-500 focus:outline-none resize-none"
                 />
@@ -571,15 +571,15 @@ export default function BrandVoiceCard({ apiBase, token, onToast, onConfirm }: B
               )}
             </div>
 
-            {/* 휴대폰 미리보기 */}
-            <div className="md:w-[260px] shrink-0 flex justify-center">
-              <div className="w-full max-w-[240px] rounded-[2.5rem] border-4 border-slate-700 bg-slate-950 p-3 shadow-2xl">
-                <div className="rounded-[2rem] bg-slate-900 overflow-hidden">
-                  <div className="px-4 py-2 text-center text-[11px] text-white/40 border-b border-white/5">{editor.draft.channel} 미리보기</div>
-                  <div className="p-4 min-h-[240px]">
-                    {editor.draft.subject && <div className="text-xs font-semibold text-white/70 mb-1.5">{editor.draft.subject}</div>}
-                    <div className="rounded-2xl rounded-tl-sm bg-violet-600/90 text-white text-sm px-4 py-3 whitespace-pre-wrap leading-relaxed">{editor.draft.text || '(본문 없음)'}</div>
-                    {editor.draft.imageUrl && <img src={editor.draft.imageUrl} alt="첨부 이미지" className="mt-2 rounded-xl max-w-full border border-white/10" />}
+            {/* 휴대폰 미리보기 — 크게 + 데스크탑 sticky(입력 스크롤해도 따라옴) */}
+            <div className="w-full md:w-[360px] shrink-0 flex justify-center md:sticky md:top-0 md:self-start">
+              <div className="w-full max-w-[330px] rounded-[2.75rem] border-4 border-slate-700 bg-slate-950 p-3 shadow-2xl">
+                <div className="rounded-[2.25rem] bg-slate-900 overflow-hidden">
+                  <div className="px-4 py-2.5 text-center text-xs text-white/40 border-b border-white/5">{editor.draft.channel} 미리보기</div>
+                  <div className="p-5 min-h-[460px]">
+                    {editor.draft.subject && <div className="text-sm font-semibold text-white/70 mb-2">{editor.draft.subject}</div>}
+                    <div className="rounded-2xl rounded-tl-sm bg-violet-600/90 text-white text-[15px] px-4 py-3 whitespace-pre-wrap leading-relaxed">{editor.draft.text || '(본문 없음)'}</div>
+                    {editor.draft.imageUrl && <img src={editor.draft.imageUrl} alt="첨부 이미지" className="mt-2.5 rounded-xl max-w-full border border-white/10" />}
                   </div>
                 </div>
               </div>
