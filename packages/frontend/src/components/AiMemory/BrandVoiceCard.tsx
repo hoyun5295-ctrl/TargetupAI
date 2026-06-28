@@ -16,7 +16,7 @@
 import { useEffect, useState } from 'react';
 import {
   Sparkles, Plus, Trash2, Save, RefreshCw, ChevronDown, ChevronUp,
-  Image, FileText, Loader2, CheckCircle2, AlertCircle,
+  Image, FileText, Loader2, CheckCircle2, AlertCircle, Smartphone, X, Pencil,
 } from 'lucide-react';
 
 interface RepresentativeMessage {
@@ -76,6 +76,7 @@ export default function BrandVoiceCard({ apiBase, token, onToast, onConfirm }: B
   const [saving, setSaving] = useState(false);
   const [extracting, setExtracting] = useState(false);
   const [messages, setMessages] = useState<RepresentativeMessage[]>([emptyMessage(1)]);
+  const [previewMsg, setPreviewMsg] = useState<RepresentativeMessage | null>(null);
   const [guideline, setGuideline] = useState<BrandGuideline | null>(null);
   const [guidelineUpdatedAt, setGuidelineUpdatedAt] = useState<string | null>(null);
   const [registered, setRegistered] = useState(false);
@@ -265,6 +266,7 @@ export default function BrandVoiceCard({ apiBase, token, onToast, onConfirm }: B
   }
 
   return (
+    <>
     <div className="rounded-2xl border border-violet-500/30 bg-gradient-to-br from-slate-900/80 via-violet-950/40 to-slate-900/80 backdrop-blur-md shadow-2xl overflow-hidden">
       {/* 헤더 */}
       <div className="px-6 py-5 border-b border-violet-500/20 flex items-center justify-between flex-wrap gap-3">
@@ -343,12 +345,24 @@ export default function BrandVoiceCard({ apiBase, token, onToast, onConfirm }: B
                         <option value="MMS">MMS (이미지 첨부)</option>
                       </select>
                     </div>
-                    <button
-                      onClick={() => deleteMessage(m)}
-                      className="text-rose-400/60 hover:text-rose-400 transition-colors"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
+                    <div className="flex items-center gap-2">
+                      {m.text.trim().length >= 10 && (
+                        <button
+                          onClick={() => setPreviewMsg(m)}
+                          className="text-violet-300/70 hover:text-violet-300 transition-colors"
+                          title="휴대폰 미리보기"
+                        >
+                          <Smartphone className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+                      <button
+                        onClick={() => deleteMessage(m)}
+                        className="text-rose-400/60 hover:text-rose-400 transition-colors"
+                        title="삭제"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
                   </div>
 
                   <input
@@ -363,7 +377,7 @@ export default function BrandVoiceCard({ apiBase, token, onToast, onConfirm }: B
                     value={m.text}
                     onChange={(e) => updateMessage(i, { text: e.target.value })}
                     placeholder="본문 입력 (10자 이상, 2000자 이내) — 회사 실제 발송 문안을 그대로 입력해주세요."
-                    rows={4}
+                    rows={3}
                     className="w-full px-3 py-2 text-xs bg-slate-900 border border-white/10 rounded text-white placeholder-white/30 focus:border-violet-500 focus:outline-none resize-none"
                   />
 
@@ -494,6 +508,51 @@ export default function BrandVoiceCard({ apiBase, token, onToast, onConfirm }: B
         </div>
       )}
     </div>
+
+    {previewMsg && (
+      <div
+        className="fixed inset-0 z-[2000] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
+        onClick={() => setPreviewMsg(null)}
+      >
+        <div className="relative w-full max-w-sm" onClick={(e) => e.stopPropagation()}>
+          <div className="rounded-[2.5rem] border-4 border-slate-700 bg-slate-950 p-3 shadow-2xl">
+            <div className="rounded-[2rem] bg-slate-900 overflow-hidden">
+              <div className="px-4 py-2 text-center text-[11px] text-white/40 border-b border-white/5">
+                {previewMsg.channel} 미리보기
+              </div>
+              <div className="p-4 min-h-[280px]">
+                {previewMsg.subject && (
+                  <div className="text-xs font-semibold text-white/70 mb-1.5">{previewMsg.subject}</div>
+                )}
+                <div className="rounded-2xl rounded-tl-sm bg-violet-600/90 text-white text-sm px-4 py-3 whitespace-pre-wrap leading-relaxed max-w-[88%]">
+                  {previewMsg.text || '(본문 없음)'}
+                </div>
+                {previewMsg.imageUrl && (
+                  <img src={previewMsg.imageUrl} alt="첨부 이미지" className="mt-2 rounded-xl max-w-[88%] border border-white/10" />
+                )}
+              </div>
+            </div>
+          </div>
+          <div className="flex gap-2 mt-4 justify-center">
+            <button
+              onClick={() => setPreviewMsg(null)}
+              className="px-4 py-2 text-sm bg-violet-600 hover:bg-violet-500 text-white rounded-lg flex items-center gap-1.5 font-semibold transition-colors"
+            >
+              <Pencil className="w-3.5 h-3.5" />
+              수정하기
+            </button>
+            <button
+              onClick={() => setPreviewMsg(null)}
+              className="px-4 py-2 text-sm text-white/70 border border-white/15 rounded-lg hover:bg-white/10 flex items-center gap-1.5 transition-colors"
+            >
+              <X className="w-3.5 h-3.5" />
+              닫기
+            </button>
+          </div>
+        </div>
+      </div>
+    )}
+    </>
   );
 }
 
@@ -502,7 +561,7 @@ export default function BrandVoiceCard({ apiBase, token, onToast, onConfirm }: B
 // ════════════════════════════════════════════════════════════════════
 
 function GuidelineField({
-  label, value, editing, onChange, select, fullWidth,
+  label, value, editing, onChange, select,
 }: {
   label: string;
   value: string;
@@ -512,7 +571,7 @@ function GuidelineField({
   fullWidth?: boolean;
 }) {
   return (
-    <div className={fullWidth ? 'md:col-span-2' : ''}>
+    <div>
       <label className="block text-[10px] text-white/50 mb-1 uppercase tracking-wide">{label}</label>
       {editing && onChange ? (
         select ? (
@@ -541,7 +600,7 @@ function GuidelineField({
 }
 
 function GuidelineArrayField({
-  label, values, editing, onChange, fullWidth,
+  label, values, editing, onChange,
 }: {
   label: string;
   values: string[];
@@ -551,7 +610,7 @@ function GuidelineArrayField({
 }) {
   const joined = values.join(' / ');
   return (
-    <div className={fullWidth ? 'md:col-span-2' : ''}>
+    <div>
       <label className="block text-[10px] text-white/50 mb-1 uppercase tracking-wide">{label} ({values.length})</label>
       {editing ? (
         <input

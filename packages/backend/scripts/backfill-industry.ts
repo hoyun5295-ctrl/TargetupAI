@@ -81,7 +81,9 @@ async function main(): Promise<void> {
   await pool.end();
 }
 
-main().catch((e) => {
-  console.error('[backfill-industry] 실패:', e);
-  process.exit(1);
-});
+main()
+  .then(() => process.exit(0)) // MySQL 등 다른 연결이 열려 있어도 작업 완료 후 즉시 종료(hang 방지)
+  .catch((e) => {
+    console.error('[backfill-industry] 실패:', e);
+    process.exit(1);
+  });

@@ -600,7 +600,7 @@ export default function AiMemoryPage() {
         </div>
       </div>
 
-      <div className="max-w-7xl mx-auto px-4 md:px-6 py-6 space-y-6">
+      <div className="max-w-7xl mx-auto px-4 md:px-6 py-5 space-y-3">
         {/* ───────── DB 마이그레이션 안내 ───────── */}
         {migrationPending && (
           <div className="p-4 bg-amber-500/10 border border-amber-400/30 rounded-xl flex items-start gap-3">
@@ -631,7 +631,7 @@ export default function AiMemoryPage() {
         />
 
         {/* ───────── 2. AI 자율 진단 카드 ───────── */}
-        <div className="p-5 bg-gradient-to-br from-violet-500/20 via-fuchsia-500/15 to-pink-500/20 border border-violet-400/30 rounded-2xl">
+        <div className="p-4 bg-gradient-to-br from-violet-500/20 via-fuchsia-500/15 to-pink-500/20 border border-violet-400/30 rounded-2xl">
           <div className="flex items-start gap-3">
             <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-violet-400 to-fuchsia-500 flex items-center justify-center flex-shrink-0 shadow-lg shadow-violet-500/30">
               <Sparkles className="w-6 h-6 text-white" />
@@ -723,7 +723,7 @@ export default function AiMemoryPage() {
                   key={card.id}
                   onClick={() => handleQuickStart(card)}
                   disabled={naturalLoading && !!card.query}
-                  className="p-3 bg-white/5 border border-white/10 hover:bg-white/[0.08] hover:border-white/20 rounded-xl text-left transition-all group disabled:opacity-50"
+                  className="p-2.5 bg-white/5 border border-white/10 hover:bg-white/[0.08] hover:border-white/20 rounded-lg text-left transition-all group disabled:opacity-50"
                 >
                   <div className={`w-9 h-9 rounded-lg bg-gradient-to-br ${card.gradient} flex items-center justify-center mb-2 shadow-md group-hover:scale-110 transition-transform`}>
                     <Icon className="w-4 h-4 text-white" />
@@ -806,11 +806,9 @@ export default function AiMemoryPage() {
             <div className="flex justify-center py-12">
               <Loader2 className="w-5 h-5 animate-spin text-white/40" />
             </div>
-          ) : !overview || overview.total_memories === 0 ? (
-            <div className="text-center py-10 text-white/40 text-sm">
-              아직 학습 데이터가 없습니다.
-              <br />
-              <span className="text-xs">캠페인 클릭 실측·고객 등급·Brand Voice 가이드라인이 쌓이면 5개 학습이 자동 누적됩니다.</span>
+          ) : !overview || overview.total_memories < 5 ? (
+            <div className="text-center py-6 text-white/40 text-sm">
+              학습 {overview?.total_memories || 0}건 — 5건 이상 쌓이면 분포 차트가 표시됩니다.
             </div>
           ) : (
             <div className="grid md:grid-cols-2 gap-6 items-center">
