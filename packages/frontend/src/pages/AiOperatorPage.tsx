@@ -26,7 +26,7 @@ import AiRefineModal from '../components/AiRefineModal';
 import AiOperatorWalkthroughModal from '../components/AiOperatorWalkthroughModal';
 import CreditHistoryModal from '../components/credit/CreditHistoryModal';
 // ★ D210+ Phase 2-fix1 (Harold 명시 2026-05-23): 회사 데이터 활용 매트릭스 안내 카드 (3축 100% 보완).
-import CompanyDataProfileCard from '../components/CompanyDataProfileCard';
+import AiProposalSummaryModal from '../components/AiProposalSummaryModal';
 // ★ D210+ Phase 2-fix4 (Harold 명시 2026-05-23): 변수 하이라이트 + 머지 결과 미리보기 컨트롤타워.
 import { highlightVars, mergeAndHighlightVars } from '../utils/highlightVars';
 import { useAuthStore } from '../stores/authStore';
@@ -59,7 +59,7 @@ interface ComplianceBlock {
   suggestions: string[];
 }
 
-interface ProposalResponse {
+export interface ProposalResponse {
   success: boolean;
   target: {
     count: number;
@@ -305,6 +305,12 @@ export default function AiOperatorPage() {
   // ★ D210+ Phase 2-fix9 (Harold 명시 2026-05-23): Liquid 렌더링 영역 (field 키 매트릭스) — renderLiquid 호출 시 customer.X 매칭.
   const [sampleCustomerFields, setSampleCustomerFields] = useState<Record<string, any> | null>(null);
   const [showMergedPreview, setShowMergedPreview] = useState(false);
+  // ★ 2026-06-29: AI 꾸미기 — 활용 가능 컬럼(data-profile 안전 변수) 다중 선택 + 재작성
+  const [dataProfileVars, setDataProfileVars] = useState<Array<{ token: string; label: string }>>([]);
+  const [selectedVars, setSelectedVars] = useState<Set<string>>(new Set());
+  const [decorating, setDecorating] = useState(false);
+  // ★ 2026-06-29: AI 제안 요약 모달 (장황한 분석 섹션 통합 — 탭 분리)
+  const [showSummary, setShowSummary] = useState(false);
 
   // textarea 자동 높이 조절
   useEffect(() => {
@@ -323,6 +329,25 @@ export default function AiOperatorPage() {
     }, 1500);
     return () => clearTimeout(timer);
   }, [loading, progressStep]);
+
+  // ★ 2026-06-29: 활용 가능 컬럼 — data-profile 안전 변수 fetch (AI 꾸미기 다중 선택용)
+  useEffect(() => {
+    const token = localStorage.getItem('token');
+    if (!token) return;
+    fetch('/api/ai/operator/data-profile', { headers: { Authorization: `Bearer ${token}` } })
+      .then((r) => r.json())
+      .then((d) => {
+        if (d?.success && Array.isArray(d.safeFields)) {
+          setDataProfileVars(
+            d.safeFields.map((f: any) => ({
+              token: String(f.percentVar || f.label || '').trim(),
+              label: String(f.label || f.percentVar || '').trim(),
+            })).filter((v: { token: string }) => v.token),
+          );
+        }
+      })
+      .catch(() => {});
+  }, []);
 
   // ★ D210+ Phase 2-fix5 (Harold 명시 2026-05-23): 옛 mount 시 fetch 제거.
   //   사고 = 회사 전체 고객 안 1건 fetch (filter X). 정정 = handleSubmit 안 proposal.target.filters 매칭 영역 안 1건 fetch.
@@ -410,7 +435,39 @@ export default function AiOperatorPage() {
     setSampleCustomer(null);
     setSampleCustomerFields(null);
     setShowMergedPreview(false);
+    setSelectedVars(new Set());
     textareaRef.current?.focus();
+  };
+
+  // ★ 2026-06-29: AI 꾸미기 — 선택한 컬럼(%변수%)으로 현재 활성 메시지를 AI가 재작성 → 본문 오버라이드
+  const handleDecorate = async () => {
+    if (!proposal) return;
+    if (selectedVars.size === 0) { setError('녹여 넣을 컬럼을 1개 이상 선택해주세요.'); return; }
+    const idx = Math.min(selectedVariantIdx, (proposal.messages?.length || 1) - 1);
+    const currentBody = refinedOverrides[idx] || proposal.messages?.[idx]?.body || '';
+    if (!currentBody.trim()) return;
+    const ch = (proposal.channel?.recommended || '').toLowerCase();
+    const channel = ch.includes('mms') ? 'mms' : ch.includes('sms') ? 'sms' : 'lms';
+    setDecorating(true);
+    setError(null);
+    try {
+      const token = localStorage.getItem('token');
+      const res = await fetch('/api/ai/operator/decorate-message', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ message: currentBody, selectedVars: Array.from(selectedVars), channel, isAd: !!proposal.channel?.isAd }),
+      });
+      const data = await res.json();
+      if (data.success && data.message) {
+        setRefinedOverrides((prev) => ({ ...prev, [idx]: data.message }));
+      } else {
+        setError(data.error || 'AI 꾸미기에 실패했습니다. 다시 시도해주세요.');
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'AI 꾸미기 중 오류가 발생했습니다.');
+    } finally {
+      setDecorating(false);
+    }
   };
 
   // 실제 발송 실행 — /direct-send 호출 + 결과 반영 (검증/확인 통과 후 진입)
@@ -1084,7 +1141,6 @@ export default function AiOperatorPage() {
                     index={3}
                     accent="cyan"
                     icon={Clock}
-                    className="sm:col-span-2"
                     label="발송 시점"
                     headline={
                       sendMode === 'immediate'
@@ -1171,7 +1227,6 @@ export default function AiOperatorPage() {
                     index={4}
                     accent="violet"
                     icon={DollarSign}
-                    className="sm:col-span-2"
                     label="예상 비용"
                     headline={`${proposal.cost.estimated.toLocaleString()}원`}
                     subtitle={`${activeChannel} ${proposal.target.count.toLocaleString()}건`}
@@ -1194,180 +1249,65 @@ export default function AiOperatorPage() {
                     }
                   />
 
-                  </div>
-                  {/* ============= ★ D210+ Phase 2-fix1 (Harold 명시 2026-05-23): 회사 데이터 활용 매트릭스 안내 (전체 폭 — lg:col-span-5) ============= */}
-                  <CompanyDataProfileCard className="lg:col-span-5" />
-
-                  {/* ============= 예상 성과 (데이터 기반 3계층 — 등급 실측/구매주기/데이터부족, 임의 추정치 미사용) ============= */}
-                  <ResultCard
-                    index={5}
-                    accent="fuchsia"
-                    icon={LineChart}
-                    label="예상 성과"
-                    headline={
-                      proposal.performance.basis?.level === 'insufficient_data'
-                        ? '데이터 더 필요'
-                        : `+${proposal.performance.expectedRevenue.toLocaleString()}원`
-                    }
-                    subtitle={proposal.performance.basis?.label || '회사 실데이터 기반 추정'}
-                    truncateHeadline={false}
-                    className="lg:col-span-5"
-                    extra={
-                      proposal.performance.basis?.level === 'insufficient_data' ? (
-                        /* 데이터 부족 — 가짜 숫자 대신 정직한 안내 (수치 미표시) */
-                        <div className="mt-3 rounded-xl border border-amber-400/30 bg-amber-500/5 p-4">
-                          <p className="text-amber-200 text-xs font-semibold mb-1.5">정확한 예측을 위해 고객 데이터가 필요합니다</p>
-                          <p className="text-white/60 text-[11px] leading-relaxed">
-                            고객의 구매횟수·구매일·등급 데이터를 넣으면 등급별 정밀 예측이 활성화됩니다. (가짜 수치 대신 정직하게 비워둡니다)
-                          </p>
-                          {proposal.performance.basis?.notes && proposal.performance.basis.notes.length > 0 && (
-                            <ul className="mt-2 space-y-1">
-                              {proposal.performance.basis.notes.map((n, i) => (
-                                <li key={i} className="text-[10px] text-white/45 flex items-start gap-1"><span className="text-amber-300">·</span> {n}</li>
-                              ))}
-                            </ul>
-                          )}
-                        </div>
-                      ) : (
-                        <div className="mt-3 space-y-3">
-                          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                            {/* 예상 전환 */}
-                            <div className="p-3 rounded-xl bg-white/5 border border-white/10">
-                              <div className="flex items-center justify-between mb-1.5">
-                                <span className="text-[10px] font-semibold tracking-wider uppercase text-fuchsia-200">예상 전환</span>
-                                <span className="text-xs font-mono font-bold text-white">{proposal.performance.expectedConversions.toLocaleString()}명</span>
-                              </div>
-                              <div className="h-1.5 bg-white/10 rounded-full overflow-hidden">
-                                <div
-                                  className="h-full bg-gradient-to-r from-amber-400 to-rose-400 rounded-full transition-all duration-700"
-                                  style={{ width: `${Math.min(100, proposal.performance.conversionRate * 100 * 5)}%` }}
-                                />
-                              </div>
-                              <p className="text-[10px] text-white/40 mt-1">
-                                전환율 {(proposal.performance.conversionRate * 100).toFixed(1)}%
-                                {proposal.performance.basis?.eventWindowDays ? ` · 행사 ${proposal.performance.basis.eventWindowDays}일` : ''}
-                              </p>
-                            </div>
-
-                            {/* 예상 매출 */}
-                            <div className="p-3 rounded-xl bg-white/5 border border-white/10">
-                              <div className="flex items-center justify-between mb-1.5">
-                                <span className="text-[10px] font-semibold tracking-wider uppercase text-fuchsia-200">예상 매출</span>
-                              </div>
-                              <p className="text-base font-extrabold text-emerald-400">{proposal.performance.expectedRevenue.toLocaleString()}원</p>
-                              <p className="text-[10px] text-white/40 mt-1">발송비 {proposal.cost.estimated.toLocaleString()}원</p>
-                            </div>
-
-                            {/* 투자 대비 (절대 배수 — 수만% ROI 표기 폐기) */}
-                            <div className="p-3 rounded-xl bg-gradient-to-br from-fuchsia-500/10 to-pink-500/10 border border-fuchsia-400/30">
-                              <div className="flex items-center justify-between mb-1.5">
-                                <span className="text-[10px] font-semibold tracking-wider uppercase text-fuchsia-200">투자 대비</span>
-                                <span className="text-sm font-mono font-bold text-white">
-                                  {proposal.cost.estimated > 0 && proposal.performance.expectedRevenue > 0
-                                    ? `${(proposal.performance.expectedRevenue / proposal.cost.estimated).toFixed(1)}배`
-                                    : '—'}
-                                </span>
-                              </div>
-                              <p className="text-[10px] text-white/55 mt-2 leading-relaxed">
-                                매출 {proposal.performance.expectedRevenue.toLocaleString()}원<br />
-                                ÷ 발송비 {proposal.cost.estimated.toLocaleString()}원
-                              </p>
-                            </div>
-                          </div>
-
-                          {/* 등급별 분해 (여러 등급 타겟일 때) */}
-                          {proposal.performance.basis?.gradeBreakdown && proposal.performance.basis.gradeBreakdown.length > 0 && (
-                            <div className="p-3 rounded-xl bg-white/5 border border-white/10">
-                              <p className="text-[10px] font-semibold tracking-wider uppercase text-fuchsia-200 mb-2">등급별 예상</p>
-                              <div className="space-y-1">
-                                {proposal.performance.basis.gradeBreakdown.map((b, i) => (
-                                  <div key={i} className="flex items-center justify-between gap-2 text-[11px]">
-                                    <span className="text-white/70 truncate flex-1">{b.grade}</span>
-                                    <span className="text-white/40 shrink-0">{b.count.toLocaleString()}명</span>
-                                    <span className="text-fuchsia-200 shrink-0 w-12 text-right">{(b.conversionRate * 100).toFixed(1)}%</span>
-                                    <span className="text-emerald-400/80 shrink-0 w-24 text-right">{b.expectedRevenue.toLocaleString()}원</span>
-                                  </div>
-                                ))}
-                              </div>
-                            </div>
-                          )}
-
-                          {/* 근거 notes */}
-                          {proposal.performance.basis?.notes && proposal.performance.basis.notes.length > 0 && (
-                            <ul className="space-y-1">
-                              {proposal.performance.basis.notes.map((n, i) => (
-                                <li key={i} className="text-[10px] text-white/45 flex items-start gap-1"><span className="text-fuchsia-300">·</span> {n}</li>
-                              ))}
-                            </ul>
-                          )}
-
-                          {/* Source caption */}
-                          <p className="text-[10px] text-white/30 italic">Data source — 회사 실데이터 (등급 구매주기·발송 실측·CDP), 임의 추정치 미사용</p>
-                        </div>
-                      )
-                    }
-                  />
-
-                  {/* ============= AI 분석가 진단 (통계 위에 해석·전략·리스크 — 숫자는 실데이터 그대로) ============= */}
-                  {proposal.performance.insight && (proposal.performance.insight.diagnosis || proposal.performance.insight.insights.length > 0) && (
-                    <div className="lg:col-span-5 rounded-2xl border border-violet-400/30 bg-gradient-to-br from-violet-600/15 to-fuchsia-600/10 p-5">
-                      <div className="flex items-center gap-2 mb-3">
-                        <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-violet-500 to-fuchsia-500 flex items-center justify-center shrink-0">
-                          <Sparkles className="w-5 h-5 text-white" />
+                  {/* ★ 2026-06-29: 활용 가능 컬럼 다중 선택 + AI 꾸미기 (우측 전체폭) */}
+                  <div className="sm:col-span-2 p-5 rounded-2xl bg-white/[0.04] backdrop-blur-xl border border-violet-400/20 shadow-lg">
+                    <div className="flex items-center justify-between gap-2 mb-2 flex-wrap">
+                      <div className="flex items-center gap-2">
+                        <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-violet-400 to-fuchsia-500 flex items-center justify-center shrink-0">
+                          <Wand2 className="w-4 h-4 text-white" />
                         </div>
                         <div>
-                          <h3 className="text-sm font-bold text-white">AI 분석가 진단</h3>
-                          <p className="text-[10px] text-white/40">통계 위에 AI가 해석·전략·리스크를 제시합니다 (수치는 실데이터 기반)</p>
+                          <p className="text-sm font-bold text-white">활용 가능 컬럼</p>
+                          <p className="text-[10px] text-white/45">넣고 싶은 데이터를 골라 AI가 메시지에 자연스럽게 녹입니다{selectedVars.size > 0 ? ` · ${selectedVars.size}개 선택` : ''}</p>
                         </div>
                       </div>
-
-                      {proposal.performance.insight.diagnosis && (
-                        <p className="text-sm text-white/90 leading-relaxed mb-3 font-medium">{proposal.performance.insight.diagnosis}</p>
-                      )}
-
-                      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                        {proposal.performance.insight.insights.length > 0 && (
-                          <div className="rounded-xl bg-white/5 border border-white/10 p-3">
-                            <p className="text-[10px] font-semibold uppercase tracking-wider text-violet-200 mb-2">인사이트</p>
-                            <ul className="space-y-1.5">
-                              {proposal.performance.insight.insights.map((s, i) => (
-                                <li key={i} className="text-[11px] text-white/70 leading-relaxed flex gap-1"><span className="text-violet-400 shrink-0">·</span> {s}</li>
-                              ))}
-                            </ul>
-                          </div>
-                        )}
-                        {proposal.performance.insight.strategy.length > 0 && (
-                          <div className="rounded-xl bg-white/5 border border-white/10 p-3">
-                            <p className="text-[10px] font-semibold uppercase tracking-wider text-emerald-200 mb-2">다음 액션</p>
-                            <ul className="space-y-1.5">
-                              {proposal.performance.insight.strategy.map((s, i) => (
-                                <li key={i} className="text-[11px] text-white/70 leading-relaxed flex gap-1"><span className="text-emerald-400 shrink-0">→</span> {s}</li>
-                              ))}
-                            </ul>
-                          </div>
-                        )}
-                        {proposal.performance.insight.risks.length > 0 && (
-                          <div className="rounded-xl bg-amber-500/5 border border-amber-400/20 p-3">
-                            <p className="text-[10px] font-semibold uppercase tracking-wider text-amber-200 mb-2">주의</p>
-                            <ul className="space-y-1.5">
-                              {proposal.performance.insight.risks.map((s, i) => (
-                                <li key={i} className="text-[11px] text-white/70 leading-relaxed flex gap-1"><span className="text-amber-400 shrink-0">!</span> {s}</li>
-                              ))}
-                            </ul>
-                          </div>
-                        )}
-                      </div>
-
-                      <p className="text-[10px] text-white/30 italic mt-3">
-                        {proposal.performance.insight.generated
-                          ? 'AI 분석 — 통계 수치를 해석한 결과이며, 수치 자체는 회사 실데이터 기반입니다'
-                          : '고객 데이터를 연동하면 AI가 실데이터로 분석합니다'}
-                      </p>
+                      <button
+                        type="button"
+                        onClick={handleDecorate}
+                        disabled={decorating || selectedVars.size === 0}
+                        className="px-3.5 py-1.5 rounded-lg text-xs font-semibold bg-gradient-to-r from-violet-500 to-fuchsia-500 text-white hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1.5 transition-all"
+                      >
+                        {decorating ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
+                        AI 꾸미기
+                      </button>
                     </div>
-                  )}
+                    {dataProfileVars.length === 0 ? (
+                      <p className="text-[11px] text-white/40 mt-1">고객 데이터가 있어야 개인화 컬럼이 표시됩니다.</p>
+                    ) : (
+                      <div className="flex flex-wrap gap-1.5 mt-1">
+                        {dataProfileVars.map((v) => {
+                          const on = selectedVars.has(v.token);
+                          return (
+                            <button
+                              key={v.token}
+                              type="button"
+                              onClick={() => setSelectedVars((prev) => { const n = new Set(prev); if (n.has(v.token)) n.delete(v.token); else n.add(v.token); return n; })}
+                              className={`px-2.5 py-1 rounded-full text-[11px] font-medium border transition-all ${on ? 'bg-violet-500/30 text-violet-100 border-violet-400/50' : 'bg-white/5 text-white/55 border-white/10 hover:bg-white/10 hover:text-white/80'}`}
+                            >
+                              %{v.label}%
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+
+                  </div>
+                  {/* ★ 2026-06-29: 회사 데이터 프로필 + 예상 성과 + AI 진단 = AI 제안 요약 모달(탭)로 이동 — 메인 간소화 */}
                 </div>
               );
             })()}
+
+            {/* ★ 2026-06-29: AI 제안 요약 — 장황한 분석(예상·진단·종합·추천·데이터)을 모달 탭으로 */}
+            <div className="flex justify-end mb-2">
+              <button
+                type="button"
+                onClick={() => setShowSummary(true)}
+                className="px-4 py-2 rounded-lg text-xs font-medium bg-white/5 text-white/80 border border-white/10 hover:bg-white/10 hover:text-white flex items-center gap-1.5 transition-all"
+              >
+                <Sparkles className="w-3.5 h-3.5 text-violet-300" /> AI 제안 요약
+              </button>
+            </div>
 
             {/* ★ D166: 승인 발송 활성화 — preview-recipients + /direct-send 2-step */}
             <div className="flex flex-col sm:flex-row gap-3">
@@ -1398,20 +1338,9 @@ export default function AiOperatorPage() {
               </div>
             )}
 
-            {/* AI 종합 분석 (AI 자율 결정 경로에서만 채워짐) */}
-            {proposal.meta?.aiSynthesis && (
-              <div className="mt-6 p-4 rounded-xl bg-gradient-to-br from-violet-500/10 to-fuchsia-500/5 border border-violet-400/20">
-                <p className="text-[10px] font-semibold tracking-[0.22em] text-violet-300/70 uppercase mb-1.5">AI 종합 분석</p>
-                <p className="text-sm text-white/80 leading-relaxed whitespace-pre-line">{proposal.meta.aiSynthesis}</p>
-              </div>
-            )}
-
-            {/* 메시지 추천 이유 (작게) */}
-            {proposal.recommendationReason && (
-              <div className="mt-6 p-4 rounded-xl bg-white/[0.03] border border-white/10">
-                <p className="text-[10px] font-semibold tracking-[0.22em] text-white/40 uppercase mb-1.5">AI Recommendation Reason</p>
-                <p className="text-sm text-white/70 leading-relaxed">{proposal.recommendationReason}</p>
-              </div>
+            {/* ★ 2026-06-29: AI 종합 분석 + 추천 이유 = AI 제안 요약 모달(탭)로 이동 */}
+            {showSummary && proposal && (
+              <AiProposalSummaryModal proposal={proposal} onClose={() => setShowSummary(false)} />
             )}
           </div>
         )}
