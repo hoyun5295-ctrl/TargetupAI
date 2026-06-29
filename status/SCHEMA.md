@@ -1662,6 +1662,12 @@
 | source | varchar(30) | 'cafe24' / 'shopify' / 'custom_sdk' / 'webhook' |
 | occurred_at | timestamptz | 자사몰 발생 시각 (자사몰이 박음, 미박힘 시 created_at) |
 | created_at | timestamptz | |
+| anonymous_id | varchar | ★ 2026-06-29 실측 (비회원 추적 ID) |
+| session_id | varchar | ★ 2026-06-29 실측 |
+| trust_level | varchar | ★ 2026-06-29 실측 (이벤트 신뢰 등급) |
+| schema_version | varchar | ★ 2026-06-29 실측 |
+| sent_at | timestamptz | ★ 2026-06-29 실측 (자사몰 전송 시각) |
+| received_at | timestamptz | ★ 2026-06-29 실측 (한줄로 수신 시각) |
 - INDEX: company_id, occurred_at DESC
 - INDEX: company_id, event_name, occurred_at DESC
 - INDEX: customer_id, occurred_at DESC WHERE customer_id IS NOT NULL
@@ -2417,6 +2423,12 @@ CREATE INDEX IF NOT EXISTS idx_journey_executions_customer ON journey_executions
 CREATE INDEX IF NOT EXISTS idx_journey_executions_journey_status ON journey_executions(journey_id, status, entered_at DESC);
 CREATE INDEX IF NOT EXISTS idx_journey_step_logs_execution ON journey_step_logs(execution_id, sent_at DESC);
 ```
+
+### ★ 2026-06-29 information_schema 실측 대조 (Harold 제공 — 재질의 금지, 이 기록 신뢰)
+운영 PG `information_schema`로 `customers` · `cdp_events` · `journeys` · `journey_executions` 4개 테이블 실측 대조 완료.
+- `customers` · `cdp_events`(위 6컬럼 보강 반영) = 문서와 일치.
+- `journeys` baseline DDL 외 실측 추가 컬럼(정본): `callback_number`(varchar) · `callback_mode`(text) · `auto_reentry_enabled`(boolean) · `archived_at`(timestamptz) · `pretest_notify_step_defaults`(jsonb) · `entry_baseline_at`(timestamptz) · `last_event_cursor`(timestamptz) · `last_pretest_passed_at`(timestamptz)
+- `journey_executions` baseline DDL 외 실측 추가 컬럼(정본): `error_log`(jsonb) · `last_error_at`(timestamptz) · `error_count`(integer) · `result_notified_at`(timestamptz)
 
 ### 여정 엔진 재설계 신규 (2026-06-04 세션2 — Harold 실행: `docs/superpowers/plans/2026-06-04-journey-redesign.sql`)
 

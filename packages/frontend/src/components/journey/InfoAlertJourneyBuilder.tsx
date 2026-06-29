@@ -64,11 +64,13 @@ interface Props {
   customerFieldOptions: { key: string; label: string }[];
   /** 자사몰(CDP) 연동 활성 여부 — 배송 등 custom 이벤트 트리거 잠금 해제용 (미연동 시 false). */
   hasMallIntegration?: boolean;
+  /** 모달 안에 임베드 — 모달 헤더가 제목/닫기를 제공하므로 자체 헤더(뒤로+제목)를 숨긴다. */
+  embedded?: boolean;
   onBuild: (result: InfoAlertBuildResult) => void;
   onBack: () => void;
 }
 
-export default function InfoAlertJourneyBuilder({ senders, templates, customerFieldOptions, hasMallIntegration = false, onBuild, onBack }: Props) {
+export default function InfoAlertJourneyBuilder({ senders, templates, customerFieldOptions, hasMallIntegration = false, embedded = false, onBuild, onBack }: Props) {
   const [txKey, setTxKey] = useState<TxKey>('purchase');
   const [alimtalk, setAlimtalk] = useState<AlimtalkChannelState>(EMPTY_STATE);
 
@@ -96,6 +98,7 @@ export default function InfoAlertJourneyBuilder({ senders, templates, customerFi
 
   return (
     <div className="space-y-4">
+      {!embedded && (
       <div className="flex items-center gap-3">
         <button onClick={onBack} className="p-2 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10" aria-label="뒤로">
           <ArrowLeft className="w-4 h-4 text-white/70" />
@@ -108,6 +111,7 @@ export default function InfoAlertJourneyBuilder({ senders, templates, customerFi
           <p className="text-xs text-white/50">거래가 일어나면 카카오 승인 템플릿으로 알림톡을 자동 발송합니다 (광고 아님)</p>
         </div>
       </div>
+      )}
 
       <div>
         <h3 className="text-sm font-semibold text-white/80 mb-2">언제 보낼까요</h3>

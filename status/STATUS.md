@@ -107,6 +107,16 @@
 
 ---
 
+### 🟢 2026-06-28(이어서2) — 이메일 마케팅 마무리 + Phase 2-A 분석 대시보드 + 후속 UX (★배포완료)
+> **화면 단순화(Harold 신규 영구 룰 — 가로 큰 배너 배제)**: EmailCampaignsPage SMTP 완료 배너·테스트 발송 큰 카드 제거 → 헤더 한 줄 상태 칩 + 작은 테스트 발송 모달, "영구 제거"는 SMTP 모달 안. [[feedback_design_modal_first_simplicity]] 기록.
+> **Phase 1 폴리시**: ① 1클릭 AI 개선(HTML 모달 "한 번에 다듬기" + 비주얼 에디터 "AI로 개선" + 신규 `POST /ai/refine-sections` — 순수 코어 `email-section-refine`[마케팅 카피만·사실/혜택/변수 보존·무변경시 무차감]·TDD7) ② 템플릿 AI 추천 배선(`GET /brand-signal`=companies.industry_code → 갤러리 상단 추천) ③ 변수 커서 삽입(클립보드→입력칸 커서, SectionPropsEditor 무수정).
+> **Phase 2-A 분석 대시보드(읽기 전용)**: 헤더 "분석" → `EmailAnalyticsModal`(요약 5지표+이전 동기간 대비 · AI 종합 진단 on-demand 5크레딧 · 일자별 추이 · 캠페인 비교+1클릭 액션). 백엔드 `GET /analytics`(make_interval·KST) + `POST /ai/account-insight` + `buildEmailAccountInsight` + 순수 `email-analytics-calc`(TDD5). 신규 컬럼 0. EmailCampaign 공유 타입 추출. 설계 `docs/superpowers/specs/2026-06-28-email-analytics-dashboard-design.md`.
+> **후속 UX**: ① 이메일 PC 미리보기 버튼(데스크탑 폭 전체화면 모달) ② 히어로 높이 버그 근본 fix(`renderHero`가 height/overlay_gradient 무시 → 배경이미지+오버레이+높이 적용, 전체화면=600px, 아웃룩은 배경이미지 미지원 폴백) ③ AI 메모리 대표문안 모달화(인라인 나열→버튼화+휴대폰 편집 모달, 모달/미리보기 크게+sticky) + 가이드라인 "전체 보기·정정" 모달이 카드 backdrop-blur에 짤리던 버그 → `createPortal(body)` 해결.
+> **검증·배포**: backend tsc0 · frontend tsc0 · vitest 12(refine7+calc5) · 자가 grep(모델명/native dialog/박-단어) 0. DB 마이그레이션 0. **배포완료(2026-06-28).** 상세 [[project_2026_0628_email_marketing_finish]].
+> **★다음 세션**: C5 발송·돈 실측 1건(주인님 — 변수·조건부·히어로 높이 테스트발송 확인 후 실고객 대량) · Phase 2-B(A/B·세그먼트 = 발송 경로 6원칙 승인+실측 게이트).
+
+---
+
 ### 🟢 2026-06-28(이어서) — 인앱 진입 재설계 + 이메일 브레이즈급 Phase 1 + AiMemory 모달화 + 버그 2건 (★배포완료)
 > **버그 2(배포완료)**: SegmentsPage 뒤로가기 `/dashboard`→`/ai-operator`(AI Operator 계열 15개 전수 점검, 이 한 곳만 오류) + App.tsx 전역 `ScrollToTop`(라우트 진입 시 최상단 복원, 전 메뉴 일괄).
 > **인앱 진입 재설계(배포완료)**: `InAppMessagesPage` !channel 화면 = 빠른 시작 7카드(채널 무관→채널 선택 모달→AI 자동 1흐름) + 컴팩트 채널 2카드(미니 썸네일) + 최근 인앱(`GET /inapp` 채널 없이=전체, 데이터 적응)→폰 미리보기 모달. 설계 `specs/2026-06-28-inapp-entry-redesign-design.md`.

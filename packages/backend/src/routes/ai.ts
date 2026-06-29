@@ -122,6 +122,8 @@ import { diagnoseCompanyHealth } from '../utils/ai-self-diagnosis';
 import { diagnoseJourneySteps, recommendNextJourneyStep } from '../utils/journey-step-diagnosis';
 // ★ D211+ Phase A (2026-05-23 Harold 명시): CT-60/CT-61 시뮬레이션 + variant 자동 생성 + 실시간 위치
 import { simulateJourney } from '../utils/journey-simulator';
+// ★ 2026-06-29: "오늘의 여정 기회" — 회사 실데이터로 여정 빈 지점 산출 (랜딩 1클릭 생성)
+import { buildJourneyOpportunities } from '../utils/journey-opportunities';
 import { normalizeJourneyOptions } from '../utils/journey-options-validator';
 import { generateVariantsFromMessage } from '../utils/variant-generator';
 import { getJourneyLiveSnapshot } from '../utils/journey-stats';
@@ -2434,6 +2436,31 @@ router.get('/operator/journeys', async (req: Request, res: Response) => {
   } catch (err: any) {
     console.error('[Journeys list] 오류:', err);
     return res.status(500).json({ success: false, error: err?.message || '여정 조회 실패' });
+  }
+});
+
+// GET /api/ai/operator/journeys-opportunities — "오늘의 여정 기회" (회사 실데이터 집계, AI 호출 없음)
+router.get('/operator/journeys-opportunities', async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+    const planCtx = await loadPlanContext(companyId);
+    if (!planCtx) return res.status(404).json({ success: false, error: '회사 정보를 찾을 수 없습니다.' });
+    if (!isAiOperatorAllowed(planCtx, req.user)) {
+      return res.status(403).json({ success: false, error: 'AI Operator 진입 권한이 없습니다.', code: 'AI_OPERATOR_GATED' });
+    }
+
+    const opportunities = await buildJourneyOpportunities(companyId);
+    return res.json({ success: true, opportunities });
+  } catch (err: any) {
+    // DB 마이그레이션 미실행(신규 CDP 컬럼 부재) 케이스 — 503 + 친화 안내 (db_alter_safety_net)
+    const msg = err?.message || '';
+    if (msg.includes('column') && msg.includes('does not exist')) {
+      return res.status(503).json({ success: false, error: '데이터 준비 중입니다. 잠시 후 다시 시도해주세요.', code: 'DB_MIGRATION_PENDING' });
+    }
+    console.error('[Journeys opportunities] 오류:', err);
+    // 기회 카드는 보조 기능 — 실패해도 빈 배열로 페이지 정상 동작
+    return res.json({ success: true, opportunities: [] });
   }
 });
 

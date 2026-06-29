@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
 import {
   ArrowLeft, ChevronDown, ChevronUp, Loader2, Pause, Play, Plus, Power, RefreshCw, Sparkles,
   ShoppingCart, Cake, Calendar as CalendarIcon, UserPlus, Repeat, Moon, MessageSquare,
   Clock, DollarSign, Users, Phone, Wand2, X, AlertCircle, Send, Trash2, Edit2, Save, Beaker, Code,
-  BarChart3,
+  BarChart3, Megaphone, Bell,
   // ★ D210+ Phase 2-fix6 (Harold 명시 2026-05-23): 6 sub-agent 진행 카드 + 토글 영역 아이콘
   Workflow, Brain, LayoutGrid, CheckCircle2,
   // ★ D210+ Phase 3 (2026-05-23 Harold 명시): 자동 재진입 토글 + funnel 시각화 + 다중 미리보기 아이콘
@@ -204,6 +205,16 @@ interface CallbackOption {
   is_default: boolean;
 }
 
+// ★ 2026-06-29: "오늘의 여정 기회" — 회사 실데이터로 산출한 비어 있는 여정 (랜딩 1클릭 생성)
+interface JourneyOpportunity {
+  type: 'cart_recovery' | 'onboarding' | 'dormant';
+  templateCode: TemplateCode;
+  title: string;
+  description: string;
+  count: number;
+  suggestedObjective: string;
+}
+
 // ★ D188 Phase 2-B-1 (2026-05-21): step_type 3종 확장 — message/wait/condition.
 type StepType = 'message' | 'wait' | 'condition';
 
@@ -376,6 +387,8 @@ export default function JourneysPage() {
   const toast = useToast();
   const [view, setView] = useState<'main' | 'review'>('main');
   const [journeys, setJourneys] = useState<JourneyRow[]>([]);
+  // ★ 2026-06-29: "오늘의 여정 기회" 카드 (실데이터 집계)
+  const [opportunities, setOpportunities] = useState<JourneyOpportunity[]>([]);
   const [callbackOptions, setCallbackOptions] = useState<CallbackOption[]>([]);
   const [opt080Number, setOpt080Number] = useState('');
   const [loading, setLoading] = useState(true);
@@ -435,6 +448,8 @@ export default function JourneysPage() {
 
   // step 수정
   const [previewSteps, setPreviewSteps] = useState<Set<number>>(new Set());
+  // ★ 2026-06-29: 검토 화면 난잡함 제거 — step 편집을 인라인에서 모달로(요약 카드 + 편집 모달). 편집 중 step idx.
+  const [editingStepIdx, setEditingStepIdx] = useState<number | null>(null);
   const [refining, setRefining] = useState<{ stepIdx: number; candidates: RefineCandidate[] } | null>(null);
   const [refineLoading, setRefineLoading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -451,12 +466,15 @@ export default function JourneysPage() {
     try {
       // ★ D211+ Phase 3 (2026-05-23 Harold 명시): statusFilter 영역 backend 전달 — archived 영역 분리
       const statusParam = statusFilter === 'all' ? 'all' : statusFilter;
-      const [jr, cr] = await Promise.all([
+      const [jr, cr, opr] = await Promise.all([
         fetch(`/api/ai/operator/journeys?status=${statusParam}`, { headers: { Authorization: `Bearer ${token()}` } }),
         fetch('/api/ai/operator/journeys-callback-numbers', { headers: { Authorization: `Bearer ${token()}` } }),
+        fetch('/api/ai/operator/journeys-opportunities', { headers: { Authorization: `Bearer ${token()}` } }),
       ]);
       const jd = await jr.json();
       const cd = await cr.json();
+      const od = await opr.json().catch(() => ({ success: false }));
+      if (od?.success) setOpportunities(Array.isArray(od.opportunities) ? od.opportunities : []);
       if (jd.success) setJourneys(jd.journeys || []);
       else if (jd.code === 'AI_OPERATOR_GATED') setError('AI Operator 진입 권한이 없습니다. 관리자에게 문의해주세요.');
       else setError(jd.error || '여정 조회 실패');
@@ -725,9 +743,10 @@ export default function JourneysPage() {
   };
 
   // ════════ One-shot AI 생성 ════════
-  const handleAIGenerate = async (templateHint?: TemplateCode) => {
+  const handleAIGenerate = async (templateHint?: TemplateCode, objectiveOverride?: string) => {
     if (customerGate.isEmpty) { setShowDataGate(true); return; }
-    if (!templateHint && objective.trim().length < 3) {
+    const effectiveObjective = (objectiveOverride ?? objective).trim();
+    if (!templateHint && effectiveObjective.length < 3) {
       toast.warning('여정 목표를 자연어로 입력하거나 빠른 시작 카드를 선택해주세요.');
       return;
     }
@@ -739,7 +758,7 @@ export default function JourneysPage() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token()}` },
         body: JSON.stringify({
-          objective: templateHint ? undefined : objective.trim(),
+          objective: templateHint ? undefined : effectiveObjective,
           templateHint,
         }),
       });
@@ -820,6 +839,7 @@ export default function JourneysPage() {
       description: '현재 생성된 여정을 폐기하고 다시 생성하시겠습니까? 수정한 내용은 사라집니다.',
       confirmLabel: '다시 생성',
       onConfirm: () => {
+        setEditingStepIdx(null);
         void handleAIGenerate(aiPkg.templateCode === 'custom' && objective ? undefined : aiPkg.templateCode);
       },
     });
@@ -844,6 +864,7 @@ export default function JourneysPage() {
       onConfirm: () => {
         const newSteps = aiPkg.steps.filter((_, i) => i !== idx).map((s, i) => ({ ...s, stepOrder: i + 1 }));
         setAiPkg({ ...aiPkg, steps: newSteps });
+        setEditingStepIdx(null);
       },
     });
   };
@@ -1154,69 +1175,103 @@ export default function JourneysPage() {
             ════════════════════════════════════════ */}
         {view === 'main' && (
           <>
-            {/* ★ 2026-06-22: 목적 선택 — 마케팅 여정(광고성 문자) vs 정보 알림(알림톡 거래통지) */}
-            <div className="grid grid-cols-2 gap-2 mb-4 md:mb-6">
-              <button
-                onClick={() => setPurpose('marketing')}
-                className={`p-4 rounded-xl border text-left transition-colors ${purpose === 'marketing' ? 'bg-fuchsia-500/15 border-fuchsia-400/50' : 'bg-white/5 border-white/10 hover:bg-white/10'}`}
-              >
-                <div className="text-sm font-semibold">마케팅 여정</div>
-                <div className="text-[11px] text-white/50 mt-0.5">광고성 · 문자/LMS · AI가 카피 자동 생성</div>
-              </button>
-              <button
-                onClick={() => setPurpose('info-alert')}
-                className={`p-4 rounded-xl border text-left transition-colors ${purpose === 'info-alert' ? 'bg-teal-500/15 border-teal-400/50' : 'bg-white/5 border-white/10 hover:bg-white/10'}`}
-              >
-                <div className="text-sm font-semibold">정보 알림</div>
-                <div className="text-[11px] text-white/50 mt-0.5">정보성 · 알림톡 · 거래 발생 시 승인 템플릿 발송</div>
-              </button>
-            </div>
-
-            {purpose === 'info-alert' ? (
-              <InfoAlertJourneyBuilder
-                senders={alimtalkSenders}
-                templates={alimtalkTemplates}
-                customerFieldOptions={customerFields}
-                hasMallIntegration={hasMallIntegration}
-                onBuild={handleInfoAlertBuild}
-                onBack={() => setPurpose('marketing')}
-              />
-            ) : (
-            <>
-            {customerGate.isEmpty && <CustomerDataRequiredBanner className="mb-4 md:mb-6" />}
-            {/* 자연어 입력 */}
-            <div className="bg-gradient-to-br from-fuchsia-500/10 via-purple-500/10 to-indigo-500/10 border border-fuchsia-500/30 rounded-xl p-4 md:p-6 mb-4 md:mb-6">
-              <div className="flex items-center gap-2 mb-3">
-                <Sparkles className="w-5 h-5 text-fuchsia-300" />
-                <h2 className="text-base md:text-lg font-semibold">자연어 한 줄로 여정 만들기</h2>
+            {/* ★ 2026-06-29: 오늘의 여정 기회 — 회사 데이터에서 찾은 비어 있는 여정 (1클릭 생성) */}
+            {opportunities.length > 0 && (
+              <div className="mb-4 md:mb-5 bg-gradient-to-br from-violet-500/15 via-fuchsia-500/10 to-indigo-500/15 border border-violet-400/30 rounded-2xl p-4 md:p-5">
+                <div className="flex items-center gap-2 mb-3 flex-wrap">
+                  <Sparkles className="w-5 h-5 text-violet-300" />
+                  <h2 className="text-base md:text-lg font-semibold">오늘의 여정 기회</h2>
+                  <span className="text-[11px] text-white/50">회사 데이터에서 찾은 비어 있는 여정 — 한 번에 만들기</span>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                  {opportunities.map((op) => {
+                    const v = TEMPLATE_VISUAL[op.templateCode] || TEMPLATE_VISUAL.custom;
+                    const OpIcon = v.icon;
+                    return (
+                      <div key={op.type} className="bg-white/5 border border-white/10 rounded-xl p-4 flex flex-col">
+                        <div className="flex items-center gap-2 mb-2">
+                          <div className={`w-9 h-9 rounded-lg bg-gradient-to-br ${v.gradient} flex items-center justify-center shrink-0`}>
+                            <OpIcon className="w-4 h-4 text-white" />
+                          </div>
+                          <div className="min-w-0">
+                            <div className="text-sm font-semibold truncate">{op.title}</div>
+                            <div className="text-[11px] text-white/55">{op.count.toLocaleString()}명</div>
+                          </div>
+                        </div>
+                        <p className="text-xs text-white/65 leading-relaxed flex-1 mb-3">{op.description}</p>
+                        <button
+                          onClick={() => handleAIGenerate(undefined, op.suggestedObjective)}
+                          disabled={generating}
+                          className="px-3 py-2 rounded-lg bg-gradient-to-r from-violet-500 to-fuchsia-500 text-xs font-medium hover:opacity-90 disabled:opacity-50 flex items-center justify-center gap-1.5"
+                        >
+                          <Sparkles className="w-3.5 h-3.5" /> 1클릭 생성
+                        </button>
+                        <div className="text-[10px] text-white/30 italic mt-2">Data source — customers · journeys 실시간 집계</div>
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
-              <p className="text-xs md:text-sm text-white/60 mb-3">
-                AI가 시즌 + 회사 톤 + 학습 메모리를 종합해 완전한 여정을 자동 설계합니다. 검토 후 혜택 부분만 수정하시면 됩니다.
-              </p>
-              <div className="flex flex-col md:flex-row gap-2">
-                <input
+            )}
+
+            {customerGate.isEmpty && <CustomerDataRequiredBanner className="mb-4 md:mb-5" />}
+
+            {/* 히어로 — 좌: 자연어 입력(크게) / 우: 마케팅·정보 알림 진입 버튼 (좌우 배치 → 우측 빈칸 제거 + 세로 압축) */}
+            <div className="grid grid-cols-1 lg:grid-cols-[1.7fr_1fr] gap-3 mb-5 md:mb-6">
+              <div className="bg-gradient-to-br from-fuchsia-500/10 via-purple-500/10 to-indigo-500/10 border border-fuchsia-500/30 rounded-2xl p-4 md:p-5 flex flex-col">
+                <div className="flex items-center gap-2 mb-2">
+                  <Sparkles className="w-5 h-5 text-fuchsia-300" />
+                  <h2 className="text-base md:text-lg font-semibold">자연어 한 줄로 여정 만들기</h2>
+                </div>
+                <p className="text-xs md:text-sm text-white/60 mb-3">
+                  AI가 시즌 + 회사 톤 + 학습 메모리를 종합해 완전한 여정을 자동 설계합니다. 검토 후 혜택 부분만 수정하시면 됩니다.
+                </p>
+                <textarea
                   value={objective}
                   onChange={(e) => setObjective(e.target.value)}
                   placeholder="예: 신규 가입자 환영 7일 시리즈 / VIP 고객 분기 감사 / 휴면 30일 회수 / 신상품 출시 3단계 안내"
-                  className="flex-1 px-4 py-3 bg-slate-900 border border-white/10 rounded-lg text-sm focus:outline-none focus:border-fuchsia-400"
-                  onKeyDown={(e) => { if (e.key === 'Enter' && !generating) handleAIGenerate(); }}
+                  rows={3}
+                  className="flex-1 w-full px-4 py-3 bg-slate-900 border border-white/10 rounded-xl text-sm resize-none leading-relaxed placeholder-white/30 focus:outline-none focus:border-fuchsia-400"
+                  onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey && !generating) { e.preventDefault(); handleAIGenerate(); } }}
                   disabled={generating}
                 />
+                <div className="flex justify-end mt-3">
+                  <button
+                    onClick={() => handleAIGenerate()}
+                    disabled={generating || objective.trim().length < 3}
+                    className="px-6 py-2.5 bg-gradient-to-r from-fuchsia-500 to-purple-500 rounded-xl text-sm font-medium hover:opacity-90 disabled:opacity-50 flex items-center justify-center gap-2"
+                  >
+                    {generating ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+                    AI 생성
+                  </button>
+                </div>
+              </div>
+
+              {/* 우: 두 진입 버튼 (데스크탑 위아래 / 모바일 좌우) */}
+              <div className="grid grid-cols-2 lg:grid-cols-1 gap-3">
                 <button
-                  onClick={() => handleAIGenerate()}
-                  disabled={generating || objective.trim().length < 3}
-                  className="px-5 py-3 bg-gradient-to-r from-fuchsia-500 to-purple-500 rounded-lg text-sm font-medium hover:opacity-90 disabled:opacity-50 flex items-center justify-center gap-2"
+                  onClick={() => setPurpose('marketing')}
+                  className="rounded-2xl border border-fuchsia-400/50 bg-fuchsia-500/15 hover:bg-fuchsia-500/20 p-4 text-left transition-colors flex flex-col justify-center min-h-[88px]"
                 >
-                  {generating ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
-                  AI 생성
+                  <Megaphone className="w-6 h-6 text-fuchsia-300 mb-2" />
+                  <div className="text-sm font-semibold">마케팅 여정</div>
+                  <div className="text-[11px] text-white/55 mt-0.5">광고성 · 문자/LMS · AI 카피 자동</div>
+                </button>
+                <button
+                  onClick={() => setPurpose('info-alert')}
+                  className="rounded-2xl border border-white/10 bg-white/5 hover:bg-white/10 p-4 text-left transition-colors flex flex-col justify-center min-h-[88px]"
+                >
+                  <Bell className="w-6 h-6 text-teal-300 mb-2" />
+                  <div className="text-sm font-semibold">정보 알림</div>
+                  <div className="text-[11px] text-white/55 mt-0.5">알림톡 · 거래 발생 시 승인 템플릿</div>
                 </button>
               </div>
             </div>
 
-            {/* 빠른 시작 카드 */}
-            <div className="mb-4 md:mb-6">
-              <h3 className="text-sm font-semibold text-white/80 mb-2">또는 빠른 시작</h3>
-              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-7 gap-2">
+            {/* 빠른 시작 — 중앙정렬 칩 */}
+            <div className="mb-5 md:mb-6">
+              <div className="text-center text-xs font-semibold text-white/70 mb-2.5">또는 빠른 시작</div>
+              <div className="flex flex-wrap justify-center gap-2">
                 {(Object.keys(TEMPLATE_VISUAL) as TemplateCode[]).map((code) => {
                   const v = TEMPLATE_VISUAL[code];
                   const Icon = v.icon;
@@ -1225,20 +1280,18 @@ export default function JourneysPage() {
                       key={code}
                       onClick={() => handleAIGenerate(code)}
                       disabled={generating}
-                      className="p-3 bg-white/5 border border-white/10 rounded-lg hover:bg-white/10 hover:border-white/20 transition-colors disabled:opacity-50 text-left"
+                      title={v.hint}
+                      className="flex items-center gap-2 pl-2 pr-4 py-2 bg-white/5 border border-white/10 rounded-full hover:bg-white/10 hover:border-white/20 transition-colors disabled:opacity-50"
                     >
-                      <div className={`w-7 h-7 rounded-md bg-gradient-to-br ${v.gradient} flex items-center justify-center mb-2`}>
-                        <Icon className="w-4 h-4 text-white" />
-                      </div>
-                      <div className="text-xs font-medium">{v.label}</div>
-                      <div className="text-[10px] text-white/40 mt-0.5">{v.hint}</div>
+                      <span className={`w-6 h-6 rounded-full bg-gradient-to-br ${v.gradient} flex items-center justify-center shrink-0`}>
+                        <Icon className="w-3.5 h-3.5 text-white" />
+                      </span>
+                      <span className="text-xs font-medium">{v.label}</span>
                     </button>
                   );
                 })}
               </div>
             </div>
-            </>
-            )}
 
             {/* ★ D211+ Phase 3 (2026-05-23 Harold 명시): 여정 목록 + status 필터 토글 (보관함 영역 분리) */}
             <div>
@@ -1968,13 +2021,47 @@ export default function JourneysPage() {
                   s.stepType === 'condition' ? 'bg-emerald-500/20 text-emerald-300' :
                   'bg-fuchsia-500/20 text-fuchsia-300';
                 return (
-                  <div key={idx} className="bg-white/[0.04] border border-white/15 rounded-2xl p-4 space-y-3 shadow-lg shadow-black/20">
-                    {/* 제목바 — step 순번 + 의도 (3분할 카드 상단, 유형색 좌측 바) */}
-                    <div className={`flex items-center gap-2 px-3 py-2 mb-1 rounded-lg border-l-4 ${s.stepType === 'wait' ? 'border-sky-400 bg-sky-500/10' : s.stepType === 'condition' ? 'border-emerald-400 bg-emerald-500/10' : 'border-fuchsia-400 bg-fuchsia-500/10'}`}>
-                      <div className={`shrink-0 w-7 h-7 rounded-full flex items-center justify-center text-xs font-semibold ${stepTypeColor}`}>{s.stepOrder}</div>
-                      <div className="text-sm font-semibold text-white/90 flex-1 min-w-0 truncate">{s.stepIntent || `Step ${s.stepOrder}`}</div>
-                      {idx > 0 && <span className="shrink-0 text-[10px] text-white/40">이전 후 {formatStepDelay(s)}</span>}
+                  <div key={idx} className={`bg-white/[0.04] border rounded-2xl p-3 shadow-lg shadow-black/20 ${s.stepType === 'wait' ? 'border-sky-400/30' : s.stepType === 'condition' ? 'border-emerald-400/30' : 'border-fuchsia-400/25'}`}>
+                    {/* ★ 2026-06-29: step 요약 카드 — 클릭 편집 모달화 (인라인 편집기 난잡함 제거) */}
+                    <div className="flex items-center gap-3">
+                      <div className={`shrink-0 w-8 h-8 rounded-full flex items-center justify-center text-xs font-semibold ${stepTypeColor}`}>{s.stepOrder}</div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="text-sm font-semibold text-white/90 truncate">{s.stepIntent || `Step ${s.stepOrder}`}</span>
+                          <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${stepTypeColor}`}>{s.stepType === 'wait' ? '대기' : s.stepType === 'condition' ? '조건' : '메시지'}</span>
+                          {s.stepType === 'message' && <span className="text-[10px] uppercase tracking-wide text-white/45">{s.channel}</span>}
+                        </div>
+                        <div className="text-[11px] text-white/45 mt-0.5 truncate">
+                          {idx === 0 ? '트리거 후' : '직전 후'} {formatStepDelay(s)}
+                          {s.stepType === 'message' && s.messageTemplate.trim() ? ` · ${s.messageTemplate.replace(/\s+/g, ' ').trim().slice(0, 36)}` : ''}
+                          {s.stepType === 'condition' ? ' · 조건 만족 시 다음 단계' : ''}
+                          {s.stepType === 'wait' ? ' · 대기 후 다음 단계' : ''}
+                        </div>
+                      </div>
+                      <button onClick={() => setEditingStepIdx(idx)} className="shrink-0 px-3 py-1.5 rounded-lg bg-violet-500/20 hover:bg-violet-500/30 text-violet-200 text-xs font-medium flex items-center gap-1">
+                        <Edit2 className="w-3.5 h-3.5" /> 편집
+                      </button>
+                      <button onClick={() => deleteStep(idx)} className="shrink-0 p-1.5 bg-rose-500/15 hover:bg-rose-500/30 text-rose-300 rounded-lg" title="이 단계 삭제">
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
                     </div>
+
+                    {editingStepIdx === idx && createPortal(
+                      <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-[45] p-4" onClick={() => setEditingStepIdx(null)}>
+                        <div className="bg-slate-900 border border-white/10 rounded-2xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-hidden flex flex-col" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
+                          <div className="flex items-center justify-between p-5 border-b border-white/10 bg-gradient-to-r from-fuchsia-500/10 via-violet-500/10 to-purple-500/10">
+                            <div className="flex items-center gap-3">
+                              <div className={`w-9 h-9 rounded-xl flex items-center justify-center text-sm font-semibold ${stepTypeColor}`}>{s.stepOrder}</div>
+                              <div>
+                                <h3 className="text-base font-semibold text-white">Step {s.stepOrder} 편집</h3>
+                                <p className="text-[11px] text-white/50 mt-0.5 truncate max-w-[220px]">{s.stepIntent || '단계 상세 편집'}</p>
+                              </div>
+                            </div>
+                            <button onClick={() => setEditingStepIdx(null)} className="p-1.5 hover:bg-white/10 rounded-lg transition-colors" aria-label="닫기">
+                              <X className="w-4 h-4 text-white/50" />
+                            </button>
+                          </div>
+                          <div className="flex-1 overflow-y-auto p-5 space-y-3">
 
                     {/* ★ D188 Phase 2-B-1: wait step UI — 시간 대기만 명시 */}
                     {/* ★ D188 Phase 2-B-1 + D210+ Phase 3 (2026-05-23 Harold 명시): wait step UI — delay_mode 3 영역
@@ -2532,6 +2619,14 @@ export default function JourneysPage() {
                         </button>
                       </div>
                     </div>
+                          </div>
+                          <div className="flex items-center justify-end gap-2 p-4 border-t border-white/10 bg-slate-950/50">
+                            <button onClick={() => setEditingStepIdx(null)} className="px-5 py-2 rounded-lg bg-gradient-to-r from-fuchsia-500 to-purple-500 text-sm font-medium hover:opacity-90">완료</button>
+                          </div>
+                        </div>
+                      </div>,
+                      document.body,
+                    )}
                   </div>
                 );
               })}
@@ -2711,6 +2806,40 @@ export default function JourneysPage() {
           onClose={() => setEditMessageModal(null)}
           onSaved={() => { void loadAll(); }}
         />
+      )}
+
+      {/* 정보 알림 — 버튼 클릭 모달화 (거래 통지 알림톡 빌더). 인라인 페이지 교체 폐기 → 닫으면 메인 그대로 */}
+      {view === 'main' && purpose === 'info-alert' && createPortal(
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 p-4" onClick={() => setPurpose('marketing')}>
+          <div className="bg-slate-900 border border-white/10 rounded-2xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-hidden flex flex-col" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
+            <div className="flex items-center justify-between p-5 border-b border-white/10 bg-gradient-to-r from-teal-500/10 via-emerald-500/10 to-teal-500/10">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-teal-400 to-emerald-500 flex items-center justify-center">
+                  <Bell className="w-5 h-5 text-white" />
+                </div>
+                <div>
+                  <h3 className="text-base font-semibold text-white">정보 알림 만들기</h3>
+                  <p className="text-[11px] text-white/50 mt-0.5">거래가 일어나면 카카오 승인 템플릿으로 알림톡 자동 발송 (광고 아님)</p>
+                </div>
+              </div>
+              <button onClick={() => setPurpose('marketing')} className="p-1.5 hover:bg-white/10 rounded-lg transition-colors" aria-label="닫기">
+                <X className="w-4 h-4 text-white/50" />
+              </button>
+            </div>
+            <div className="flex-1 overflow-y-auto p-5">
+              <InfoAlertJourneyBuilder
+                embedded
+                senders={alimtalkSenders}
+                templates={alimtalkTemplates}
+                customerFieldOptions={customerFields}
+                hasMallIntegration={hasMallIntegration}
+                onBuild={handleInfoAlertBuild}
+                onBack={() => setPurpose('marketing')}
+              />
+            </div>
+          </div>
+        </div>,
+        document.body,
       )}
     </div>
   );
