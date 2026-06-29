@@ -5,3 +5,12 @@
 *, *::before, *::after {
   font-family: 'Pretendard', -apple-system, BlinkMacSystemFont, system-ui, Roboto, sans-serif !important;
 }
+
+/* 네이티브 select 드롭다운 가독성 — 다크 테마 select(text-white)의 옵션이 OS 흰 배경에서
+   흰 글씨로 안 보이는 문제 전역 차단 (2026-06-29 자동 마케팅 생성 선택 박스 신고).
+   닫힌 select 표시는 컴포넌트 className 그대로, 열린 드롭다운 옵션만 어두운 글씨로 고정. */
+select option,
+select optgroup {
+  color: #1e293b;            /* slate-800 — 흰 드롭다운에서 항상 가독 */
+  background-color: #ffffff;
+}
