@@ -140,3 +140,81 @@ export async function prepaidRefund(
 
   return { refunded: refundAmount };
 }
+
+/**
+ * 선불 초과 환불 되돌림 — 누적 환불이 정당 한도(차감 − 성공 − 대기)를 넘은 초과분만 회수(차감).
+ * ★ 2026-06-29 신설 — sweep/부분실패 등 어떤 경로의 환불이든 정당 한도를 넘으면 자동 보정.
+ *   배경: sent_count 과소 기록·과거 ratchet 고착으로 누적 환불이 (차감−성공)을 넘은 초과 환불 51,722원 실측.
+ *   prepaidRefund는 한 방향(올림)만이라 한 번 부풀면 영구히 굳음 → 양방향 수렴을 위해 reverse 신설.
+ *
+ * @param maxLegitRefundCount 정당 환불 상한 건수 = 차감 − 성공 − 대기 (MySQL 실측, 호출측 계산)
+ *
+ * 호출 전제(호출측 settle 가드 의무): 적재·정산 끝난 캠페인(대기 0 + 경과 + 집계 유효)에서만. 발송 중 호출 금지.
+ *
+ * idempotent: 이미 한도에 맞춰졌으면 0. 같은 maxLegitRefundCount 반복 호출 시 추가 차감 0.
+ * 안전:
+ *   - net 환불 = SUM(refund) − SUM(모든 '환불 reverse' admin_deduct) → 타임아웃 reverse와 이중 차감 X
+ *   - '타임아웃 실패 환불' row가 있는 캠페인은 기존 타임아웃 reverse가 소유 → skip (이중 차감 차단)
+ *   - 트랜잭션(BEGIN/COMMIT/ROLLBACK) 잔액 차감 + INSERT 원자성
+ */
+export async function prepaidReverseOverRefund(
+  companyId: string, maxLegitRefundCount: number, messageType: string, campaignId: string
+): Promise<{ reversed: number }> {
+  const co = await query(
+    'SELECT billing_type, cost_per_sms, cost_per_lms, cost_per_mms, cost_per_kakao FROM companies WHERE id = $1',
+    [companyId]
+  );
+  if (co.rows.length === 0 || co.rows[0].billing_type !== 'prepaid') return { reversed: 0 };
+
+  const c = co.rows[0];
+  const unitPrice = messageType === 'SMS' ? Number(c.cost_per_sms || 0)
+    : messageType === 'LMS' ? Number(c.cost_per_lms || 0)
+    : messageType === 'MMS' ? Number(c.cost_per_mms || 0)
+    : messageType === 'KAKAO' ? Number(c.cost_per_kakao || 0) : 0;
+  if (unitPrice <= 0) return { reversed: 0 };
+
+  // 누적 환불 / 이미 되돌린 분 / 타임아웃 환불 존재 여부 — 한 번에 집계
+  //   message_type=NULL 옛 row 호환 (prepaidRefund와 동일 필터)
+  const agg = await query(
+    `SELECT
+       COALESCE(SUM(amount) FILTER (WHERE type = 'refund'), 0) AS refunded,
+       COALESCE(SUM(-amount) FILTER (WHERE type = 'admin_deduct' AND description LIKE '%환불 reverse%'), 0) AS reversed,
+       COALESCE(SUM(CASE WHEN type = 'refund' AND description LIKE '%타임아웃 실패 환불%' THEN 1 ELSE 0 END), 0) AS timeout_refunds
+     FROM balance_transactions
+     WHERE company_id = $1 AND reference_type = 'campaign' AND reference_id = $2
+       AND (message_type = $3 OR message_type IS NULL)`,
+    [companyId, campaignId, messageType]
+  );
+  // 타임아웃 환불이 있는 캠페인은 기존 타임아웃 reverse가 소유 — 이중 차감 차단
+  if (Number(agg.rows[0].timeout_refunds) > 0) return { reversed: 0 };
+
+  const refunded = Number(agg.rows[0].refunded);
+  const alreadyReversed = Number(agg.rows[0].reversed); // 양수
+  const netRefunded = Math.round((refunded - alreadyReversed) * 100) / 100;
+
+  const maxLegit = Math.round(unitPrice * Math.max(0, Math.floor(maxLegitRefundCount)) * 100) / 100;
+  const excess = Math.round((netRefunded - maxLegit) * 100) / 100;
+  if (excess <= 0) return { reversed: 0 }; // 정당 한도 이내 → 되돌릴 것 없음 (idempotency)
+
+  await query('BEGIN');
+  try {
+    const bal = await query(
+      'UPDATE companies SET balance = balance - $1, updated_at = NOW() WHERE id = $2 RETURNING balance',
+      [excess, companyId]
+    );
+    if (bal.rows.length === 0) throw new Error(`company_id=${companyId} 잔액 갱신 실패`);
+    const newBalance = Number(bal.rows[0].balance);
+    await query(
+      `INSERT INTO balance_transactions (company_id, type, amount, balance_after, description, reference_type, reference_id, payment_method, message_type)
+       VALUES ($1, 'admin_deduct', $2, $3, $4, 'campaign', $5, 'system', $6)`,
+      [companyId, -excess, newBalance, `초과 환불 reverse (정당 한도 ${Math.max(0, Math.floor(maxLegitRefundCount))}건 초과분 자동 회수, ${messageType})`, campaignId, messageType]
+    );
+    await query('COMMIT');
+    console.log(`[초과환불reverse] company=${companyId} ${messageType} campaign=${campaignId} ${excess}원 회수 → 잔액 ${newBalance}원`);
+    return { reversed: excess };
+  } catch (e: any) {
+    await query('ROLLBACK');
+    console.error('[초과환불reverse] 롤백:', e?.message || e);
+    return { reversed: 0 };
+  }
+}

@@ -25,7 +25,7 @@
 import { query } from '../config/database';
 // ★ 2026-06-11: 카운트는 smsCampaignCountsSafe(이력=결과/라이브=대기 분리) — 이동 중 이중 카운트 차단
 import { getCompanySmsTablesWithLogs, smsCampaignCountsSafe, kakaoBatchAggByGroup, type CampaignAggCounts } from './sms-queue';
-import { prepaidRefund } from './prepaid';
+import { prepaidRefund, prepaidReverseOverRefund } from './prepaid';
 // ★ 2026-06-11: 환불 누적 단일 산식 — 정당 환불 = 차감 실측 − 성공 − 대기 (미적재분 과소 환불 근본 fix)
 import { calcRefundDue } from './refund-calc';
 // ★ D182 (2026-05-19): 캠페인 종료 시 회사별 학습 메모리 자동 누적
@@ -163,6 +163,8 @@ async function runOnce(): Promise<void> {
     let pgUpdateCount = 0;
     let refundCount = 0;
     let totalRefundAmount = 0;
+    let reverseOverCount = 0;
+    let totalReverseOverAmount = 0;
     const unitCache = new Map<string, number>();
 
     for (const camp of activeRows) {
@@ -172,6 +174,7 @@ async function runOnce(): Promise<void> {
 
         const mysqlSuccess = Number(smsAgg?.success || 0) + kakaoAgg.success;
         const mysqlFail = Number(smsAgg?.fail || 0) + kakaoAgg.fail;
+        const mysqlPending = Number(smsAgg?.pending || 0) + kakaoAgg.pending;
 
         // === 4-1. PG count 동시 갱신 (화면 보조) — 결과가 하나라도 있을 때만 ===
         // target_count는 절대 건드리지 않음 (protect_completed_target_count trigger 호환)
@@ -211,15 +214,32 @@ async function runOnce(): Promise<void> {
             );
             const deductedCount = Math.round(Number(dedRes.rows[0].total) / unit);
             const sentCount = Number(camp.sent_count || 0);
-            const notLoaded = sentCount > 0 ? Math.max(0, deductedCount - sentCount) : 0;
-            // ★ 2026-06-25: 정당 환불 = 실패 + 미적재 (성공 의존 폐기 — 이동 중 과소집계 초과 환불 차단)
-            const refundDue = calcRefundDue({ deductedCount, sentCount, mysqlFail });
+            // ★ 2026-06-29: 미적재 = 차감 − max(적재기록, 성공+실패+대기). sent_count 과소 기록 초과환불 fix.
+            const processed = Math.max(sentCount, mysqlSuccess + mysqlFail + mysqlPending);
+            const notLoaded = processed > 0 ? Math.max(0, deductedCount - processed) : 0;
+            const refundDue = calcRefundDue({ deductedCount, sentCount, mysqlSuccess, mysqlFail, mysqlPending });
             if (refundDue > 0) {
               const r = await prepaidRefund(camp.company_id, refundDue, camp.message_type, camp.id, '발송 실패 환불 (sweep)');
               if (r.refunded > 0) {
                 refundCount++;
                 totalRefundAmount += r.refunded;
-                log(`✓ campaign=${camp.id} ${camp.message_type} 정당환불 ${refundDue}건 (실패 ${mysqlFail} + 미적재 ${notLoaded} / 차감 ${deductedCount} 적재 ${sentCount}) 차액 ${r.refunded}원`);
+                log(`✓ campaign=${camp.id} ${camp.message_type} 정당환불 ${refundDue}건 (실패 ${mysqlFail} + 미적재 ${notLoaded} / 차감 ${deductedCount} 처리 ${processed}) 차액 ${r.refunded}원`);
+              }
+            }
+
+            // === 4-3. ★ 2026-06-29: 초과 환불 자동 회수 (양방향 수렴) ===
+            //   누적 환불이 정당 한도(차감 − 성공 − 대기)를 넘었으면 초과분만 reverse 차감.
+            //   sent_count 과소·과거 ratchet 고착분을 코드로 자동 회수하고, 미래 어떤 변수가 튀어도 스스로 보정.
+            //   settle 가드 — 정산 끝난 캠페인에서만: 대기 0(발송 중 아님) + 집계 유효(0/0 agg 실패 제외) + 30분 경과.
+            //   (정당 한도 = MySQL 실측 성공으로만 계산 → 성공은 이력 append-only라 과대 불가 = 과다 회수 0)
+            const ageMs = camp.send_base ? (Date.now() - new Date(camp.send_base).getTime()) : 0;
+            if (mysqlPending === 0 && (mysqlSuccess + mysqlFail) > 0 && ageMs > 30 * 60 * 1000) {
+              const maxLegitRefund = Math.max(0, deductedCount - mysqlSuccess - mysqlPending);
+              const rev = await prepaidReverseOverRefund(camp.company_id, maxLegitRefund, camp.message_type, camp.id);
+              if (rev.reversed > 0) {
+                reverseOverCount++;
+                totalReverseOverAmount += rev.reversed;
+                log(`✓ campaign=${camp.id} ${camp.message_type} 초과환불 회수 ${rev.reversed}원 (정당한도 ${maxLegitRefund}건 = 차감 ${deductedCount} − 성공 ${mysqlSuccess})`);
               }
             }
           }
@@ -247,8 +267,8 @@ async function runOnce(): Promise<void> {
     }
 
     const elapsedMs = Date.now() - startedAt;
-    if (pgUpdateCount > 0 || refundCount > 0 || reverseRes.reversed > 0 || learningRes.learned > 0) {
-      log(`사이클 완료 — 후보 ${candidates.rows.length}(실집계 ${activeRows.length}/휴면 ${candidates.rows.length - activeRows.length}) / PG 갱신 ${pgUpdateCount} / 환불 ${refundCount}건 ${totalRefundAmount}원 / reverse ${reverseRes.reversed}건 ${reverseRes.totalAmount}원 / 학습 ${learningRes.learned}건 / ${elapsedMs}ms`);
+    if (pgUpdateCount > 0 || refundCount > 0 || reverseOverCount > 0 || reverseRes.reversed > 0 || learningRes.learned > 0) {
+      log(`사이클 완료 — 후보 ${candidates.rows.length}(실집계 ${activeRows.length}/휴면 ${candidates.rows.length - activeRows.length}) / PG 갱신 ${pgUpdateCount} / 환불 ${refundCount}건 ${totalRefundAmount}원 / 초과회수 ${reverseOverCount}건 ${totalReverseOverAmount}원 / 타임아웃reverse ${reverseRes.reversed}건 ${reverseRes.totalAmount}원 / 학습 ${learningRes.learned}건 / ${elapsedMs}ms`);
     }
   } catch (err: any) {
     log('전체 오류:', err?.message || err);

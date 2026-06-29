@@ -1,35 +1,40 @@
 /**
  * refund-calc.ts — 환불 누적의 단일 정의 컨트롤타워 (순수 함수, DB import 0)
  *
- * ★ 2026-06-25: "정당 환불 = 실패(실측) + 미적재(차감 − 적재)".
+ * ★ 2026-06-29: "정당 환불 = 실패(실측) + 미적재(차감 − 실제 처리수)".
+ *   미적재 기준을 sent_count → max(sent_count, 성공+실패+대기)로 교체.
  *
- * 배경 — 초과 환불 구조의 근본 fix:
- * 직전 산식 "차감 − 성공 − 대기"는 성공 카운트에 의존했다. 발송 직후 QTmsg 에이전트가
- * 라이브 큐 → 이력 테이블로 행을 옮기는(복사 후 삭제) 순간, 그 행이 양쪽 어디에도 안 잡혀
- * 성공이 실제보다 작게 보이고 → 환불대상이 일시적으로 부풀었다. prepaidRefund는 누적 목표가
- * 올라갈 때만 차액을 환불하고(되돌림 없음) 다음 사이클에 성공이 회복돼도 깎지 않아, 그 일시
- * 과대가 영구 초과 환불로 굳었다 (2026-06-14 베이컨 외 25건 / 약 129,670원, sweep 경로).
+ * 배경 — sent_count 과소 기록 초과 환불 근본 fix:
+ * 직전(2026-06-25) 산식은 미적재 = 차감 − sent_count였다. 그런데 워커가 기록한 sent_count가 실제
+ * 처리수(성공+실패)보다 작게 남는 캠페인이 있었다 (폴라초이스 6/28: 성공14790+실패610=15400=차감인데
+ * sent_count는 15271). 그 차이 129건을 "안 보낸 것"으로 오인해 환불 → prepaidRefund ratchet(되돌림 없음)이
+ * 영구 초과로 굳혔다 (라무르·폴라초이스 외, 2026-06-29 실측 51,722원). 초과량 = (성공+실패) − sent_count.
  *
- * 새 산식은 성공 의존을 없앤다:
- *   - 실패(mysqlFail): 실패코드로 실제 돌아온 것만. 이력은 append-only, 이동 중 fail은 mobsend
- *     있어 라이브 lf에서 제외 → 부풀지 않음. 대기는 실패가 아니므로 환불 대상 아님(실패되면 다음
- *     사이클에 mysqlFail 증가로 자동 반영).
- *   - 미적재(deducted − sentCount): 차감했는데 큐에 안 올라간 것. 둘 다 안정값이라 이동 중 영향 0.
+ * 새 산식 — 실제 큐에 올라간 수를 MySQL 실측으로 본다:
+ *   처리수 = max(sent_count, 성공 + 실패 + 대기)   // 둘 중 큰 값 = 확실히 큐에 올라간 수
+ *   미적재 = max(0, 차감 − 처리수)
+ * 성공/실패는 이력(append-only)이라 과대 집계가 구조적으로 불가능하고(sms-table-split), 대기는 라이브
+ * 큐에서만 센다. sent_count를 하한으로 둬 라이브→이력 이동 중 MySQL 일시 과소집계에도 미적재가 부풀지
+ * 않는다(2026-06-25 race 방어 유지). 둘 다 작게 잡혀도 reverse 안전망(mysql-refund-sweeper)이 정산 후 보정.
  *
- * 미적재를 더하는 이유: prepaidRefund가 캠페인 단위 누적으로 묶여, 실패만 보내면 direct-send-worker의
- * 미적재 환불과 max로 수렴해 두 몫의 합이 아니라 큰 값만 남는다(2026-06-11 과소 환불 사고). 둘의 합을
- * 누적값으로 넘겨야 정확하다. 정산 끝난 상태에선 실패 + 미적재 = 차감 − 성공이라 결과 동일하고,
- * 다른 건 발송 직후 일시 구간뿐(거기서만 부풀지 않음).
- *
- * sentCount가 0/미상이면 미적재는 0으로 본다(전량 미적재는 direct-send-worker가 적재 시점에 환불).
- * sentCount를 차감보다 작게 잘못 기록한 경우의 과대 환불을 막는 보수적 선택.
+ * 처리수가 0/미상이면 미적재 0(전량 미적재는 direct-send-worker가 적재 시점에 환불).
  * 호출 전제: 적재가 끝난 캠페인(send_phase='sent' 또는 동기 적재 경로)에서만 사용.
  */
-export function calcRefundDue(p: { deductedCount: number; sentCount: number; mysqlFail: number }): number {
+export function calcRefundDue(p: {
+  deductedCount: number;
+  sentCount: number;
+  mysqlSuccess: number;
+  mysqlFail: number;
+  mysqlPending: number;
+}): number {
   const deducted = Math.max(0, Math.floor(p.deductedCount));
   const sent = Math.max(0, Math.floor(p.sentCount));
+  const success = Math.max(0, Math.floor(p.mysqlSuccess));
   const fail = Math.max(0, Math.floor(p.mysqlFail));
-  const notLoaded = sent > 0 ? Math.max(0, deducted - sent) : 0;
+  const pending = Math.max(0, Math.floor(p.mysqlPending));
+  // 실제 큐에 올라간(처리된) 수 = max(워커 기록 적재, MySQL 실측 성공+실패+대기)
+  const processed = Math.max(sent, success + fail + pending);
+  const notLoaded = processed > 0 ? Math.max(0, deducted - processed) : 0;
   // 상한 — 누적 환불이 차감 총액을 넘지 않도록 (prepaidRefund에도 한도 가드 있으나 산식 자체로도 보장)
   return Math.min(deducted, fail + notLoaded);
 }
