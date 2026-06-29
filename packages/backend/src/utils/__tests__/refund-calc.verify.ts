@@ -9,7 +9,7 @@
  *   실제 큐 처리수(성공+실패+대기)를 하한 max로 반영해 가짜 미적재를 차단한다.
  */
 import assert from 'node:assert';
-import { calcRefundDue } from '../refund-calc';
+import { calcRefundDue, refundInvariantGap } from '../refund-calc';
 
 let passed = 0;
 const ok = (n: string, f: () => void) => { f(); passed++; console.log(`  ok - ${n}`); };
@@ -55,4 +55,24 @@ ok('소수 혼입 방어: 정수 내림 (차감 10.9 적재 8.0 성공 5.1 실�
 ok('음수 혼입 방어: 음수 입력은 0', () =>
   assert.strictEqual(calcRefundDue({ deductedCount: -5, sentCount: -1, mysqlSuccess: -2, mysqlFail: -3, mysqlPending: -1 }), 0));
 
-console.log(`\n[refund-calc] ${passed}/13 passed`);
+console.log('\n[refund-calc] refundInvariantGap — 차감 = 성공 + 순환불 (발송사 머니 불변식)');
+
+ok('정상(엔에스비): 차감 2699 = 성공 2618 + 순환불 81 → gap 0', () =>
+  assert.strictEqual(refundInvariantGap({ deductedCount: 2699, successCount: 2618, netRefundedCount: 81 }), 0));
+
+ok('정상(초과환불 회수 후 폴라초이스): 차감 15400 = 성공 14790 + 순환불 610 → gap 0', () =>
+  assert.strictEqual(refundInvariantGap({ deductedCount: 15400, successCount: 14790, netRefundedCount: 610 }), 0));
+
+ok('미환불 의심(고객 손해): 차감 1000 vs 성공 900 + 순환불 50 → gap +50', () =>
+  assert.strictEqual(refundInvariantGap({ deductedCount: 1000, successCount: 900, netRefundedCount: 50 }), 50));
+
+ok('초과환불 잔존: 차감 1000 vs 성공 900 + 순환불 130 → gap -30', () =>
+  assert.strictEqual(refundInvariantGap({ deductedCount: 1000, successCount: 900, netRefundedCount: 130 }), -30));
+
+ok('진짜 미적재 환불 포함도 정상: 차감 1000 = 성공 900 + 순환불(실패50+미적재50) 100 → gap 0', () =>
+  assert.strictEqual(refundInvariantGap({ deductedCount: 1000, successCount: 900, netRefundedCount: 100 }), 0));
+
+ok('음수/소수 방어: 정수 내림 + 음수 0', () =>
+  assert.strictEqual(refundInvariantGap({ deductedCount: 10.9, successCount: 8.2, netRefundedCount: -1 }), 2));
+
+console.log(`\n[refund-calc] ${passed}/19 passed`);

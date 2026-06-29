@@ -159,19 +159,19 @@ export async function prepaidRefund(
  */
 export async function prepaidReverseOverRefund(
   companyId: string, maxLegitRefundCount: number, messageType: string, campaignId: string
-): Promise<{ reversed: number }> {
+): Promise<{ reversed: number; netRefundedAmt: number; skipped: boolean }> {
   const co = await query(
     'SELECT billing_type, cost_per_sms, cost_per_lms, cost_per_mms, cost_per_kakao FROM companies WHERE id = $1',
     [companyId]
   );
-  if (co.rows.length === 0 || co.rows[0].billing_type !== 'prepaid') return { reversed: 0 };
+  if (co.rows.length === 0 || co.rows[0].billing_type !== 'prepaid') return { reversed: 0, netRefundedAmt: 0, skipped: true };
 
   const c = co.rows[0];
   const unitPrice = messageType === 'SMS' ? Number(c.cost_per_sms || 0)
     : messageType === 'LMS' ? Number(c.cost_per_lms || 0)
     : messageType === 'MMS' ? Number(c.cost_per_mms || 0)
     : messageType === 'KAKAO' ? Number(c.cost_per_kakao || 0) : 0;
-  if (unitPrice <= 0) return { reversed: 0 };
+  if (unitPrice <= 0) return { reversed: 0, netRefundedAmt: 0, skipped: true };
 
   // 누적 환불 / 이미 되돌린 분 / 타임아웃 환불 존재 여부 — 한 번에 집계
   //   message_type=NULL 옛 row 호환 (prepaidRefund와 동일 필터)
@@ -185,16 +185,16 @@ export async function prepaidReverseOverRefund(
        AND (message_type = $3 OR message_type IS NULL)`,
     [companyId, campaignId, messageType]
   );
-  // 타임아웃 환불이 있는 캠페인은 기존 타임아웃 reverse가 소유 — 이중 차감 차단
-  if (Number(agg.rows[0].timeout_refunds) > 0) return { reversed: 0 };
-
   const refunded = Number(agg.rows[0].refunded);
   const alreadyReversed = Number(agg.rows[0].reversed); // 양수
   const netRefunded = Math.round((refunded - alreadyReversed) * 100) / 100;
 
+  // 타임아웃 환불이 있는 캠페인은 기존 타임아웃 reverse가 소유 — 이중 차감 차단 + 불변식 검증도 위임(skipped)
+  if (Number(agg.rows[0].timeout_refunds) > 0) return { reversed: 0, netRefundedAmt: netRefunded, skipped: true };
+
   const maxLegit = Math.round(unitPrice * Math.max(0, Math.floor(maxLegitRefundCount)) * 100) / 100;
   const excess = Math.round((netRefunded - maxLegit) * 100) / 100;
-  if (excess <= 0) return { reversed: 0 }; // 정당 한도 이내 → 되돌릴 것 없음 (idempotency)
+  if (excess <= 0) return { reversed: 0, netRefundedAmt: netRefunded, skipped: false }; // 정당 한도 이내 (idempotency)
 
   await query('BEGIN');
   try {
@@ -211,10 +211,10 @@ export async function prepaidReverseOverRefund(
     );
     await query('COMMIT');
     console.log(`[초과환불reverse] company=${companyId} ${messageType} campaign=${campaignId} ${excess}원 회수 → 잔액 ${newBalance}원`);
-    return { reversed: excess };
+    return { reversed: excess, netRefundedAmt: Math.round((netRefunded - excess) * 100) / 100, skipped: false };
   } catch (e: any) {
     await query('ROLLBACK');
     console.error('[초과환불reverse] 롤백:', e?.message || e);
-    return { reversed: 0 };
+    return { reversed: 0, netRefundedAmt: netRefunded, skipped: false };
   }
 }

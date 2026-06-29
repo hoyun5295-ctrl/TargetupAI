@@ -38,3 +38,19 @@ export function calcRefundDue(p: {
   // 상한 — 누적 환불이 차감 총액을 넘지 않도록 (prepaidRefund에도 한도 가드 있으나 산식 자체로도 보장)
   return Math.min(deducted, fail + notLoaded);
 }
+
+/**
+ * 환불 머니 불변식 — 정산 끝난 캠페인의 근본 식: 차감 == 성공 + 순환불(환불 − 회수).
+ * ★ 2026-06-29: 차감한 모든 건은 성공으로 전달됐거나 환불됐어야 한다(발송사 근간).
+ *   반환 gap = 차감 − (성공 + 순환불).
+ *   - gap > 0 = 차감했는데 성공도 환불도 아닌 건 = 미환불(고객이 안 받은 문자값 떼임) → 경보.
+ *   - gap < 0 = 초과 환불 잔존(reverse가 못 따라잡음) → 경보.
+ *   - |gap| 작으면(반올림 여유) 정상. 호출측이 임계값으로 노이즈 차단.
+ * 순수 함수(DB import 0). 호출 전제: 정산 끝난 캠페인(대기 0) + MySQL 집계 유효(성공+실패>0).
+ */
+export function refundInvariantGap(p: { deductedCount: number; successCount: number; netRefundedCount: number }): number {
+  const deducted = Math.max(0, Math.floor(p.deductedCount));
+  const success = Math.max(0, Math.floor(p.successCount));
+  const netRefunded = Math.max(0, Math.floor(p.netRefundedCount));
+  return deducted - (success + netRefunded);
+}

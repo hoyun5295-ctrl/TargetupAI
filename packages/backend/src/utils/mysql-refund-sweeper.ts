@@ -27,7 +27,10 @@ import { query } from '../config/database';
 import { getCompanySmsTablesWithLogs, smsCampaignCountsSafe, kakaoBatchAggByGroup, type CampaignAggCounts } from './sms-queue';
 import { prepaidRefund, prepaidReverseOverRefund } from './prepaid';
 // ★ 2026-06-11: 환불 누적 단일 산식 — 정당 환불 = 차감 실측 − 성공 − 대기 (미적재분 과소 환불 근본 fix)
-import { calcRefundDue } from './refund-calc';
+// ★ 2026-06-29: refundInvariantGap — 차감 = 성공 + 순환불 머니 불변식 감시
+import { calcRefundDue, refundInvariantGap } from './refund-calc';
+// ★ 2026-06-29: 머니 불변식 위반 시 운영자 LMS 경보 (쿨다운·미설정 시 무발송)
+import { sendSystemAlert } from './system-alert';
 // ★ D182 (2026-05-19): 캠페인 종료 시 회사별 학습 메모리 자동 누적
 import { recordCampaignLearning } from './company-memory';
 // ★ 2026-06-13: 차등 주기 — 발송 48h 이내 매 사이클 / 경과(휴면) 60분 1회 (PROCESSLIST 10초 쿼리 상시 점유 fix)
@@ -35,6 +38,8 @@ import { isSweepDue } from './sweep-cadence';
 
 const INTERVAL_MS = 30 * 1000;     // 30초 — Harold님 명시 (D153 5/13): 레거시 실시간 환불 패턴 정합 + 후불 8.5/선불 1.5 부하 보수 마진 (1.5초/사이클 / 5% 점유 / 후불 업체는 billing_type filter로 쿼리 자체 X)
 const BOOT_DELAY_MS = 90 * 1000;   // campaign-sync-worker(60초)와 시작 시점 차이 둠
+// ★ 2026-06-29: 머니 불변식(차감 = 성공 + 순환불) 위반 경보 임계 — 반올림 노이즈(±1) 차단용 2건 이상
+const INVARIANT_ALERT_THRESHOLD = 2;
 
 let _timer: NodeJS.Timeout | null = null;
 let _boot: NodeJS.Timeout | null = null;
@@ -165,6 +170,7 @@ async function runOnce(): Promise<void> {
     let totalRefundAmount = 0;
     let reverseOverCount = 0;
     let totalReverseOverAmount = 0;
+    let invariantAlertCount = 0;
     const unitCache = new Map<string, number>();
 
     for (const camp of activeRows) {
@@ -184,15 +190,19 @@ async function runOnce(): Promise<void> {
         if (mysqlSuccess > 0 || mysqlFail > 0) {
           const pgSuccess = Number(camp.success_count || 0);
           const pgFail = Number(camp.fail_count || 0);
-          if (pgSuccess !== mysqlSuccess || pgFail !== mysqlFail) {
+          const pgSent = Number(camp.sent_count || 0);
+          // ★ 2026-06-29: 실제 적재수 = 큐에 들어간 전체(성공+실패+대기). sent_count가 이보다 작게
+          //   기록된 것(폴라초이스 15271 vs 15400)을 GREATEST로 진실에 맞춤 — 올림만, 이동 찰나에도 안 내려감.
+          const loaded = mysqlSuccess + mysqlFail + mysqlPending;
+          if (pgSuccess !== mysqlSuccess || pgFail !== mysqlFail || pgSent < loaded) {
             await query(
               `UPDATE campaigns
                  SET success_count = $1,
                      fail_count = $2,
-                     sent_count = COALESCE(NULLIF(sent_count, 0), $1::int + $2::int),
+                     sent_count = GREATEST(COALESCE(sent_count, 0), $4::int),
                      updated_at = NOW()
                WHERE id = $3 AND status IN ('sending', 'completed')`,
-              [mysqlSuccess, mysqlFail, camp.id]
+              [mysqlSuccess, mysqlFail, camp.id, loaded]
             );
             pgUpdateCount++;
           }
@@ -241,6 +251,24 @@ async function runOnce(): Promise<void> {
                 totalReverseOverAmount += rev.reversed;
                 log(`✓ campaign=${camp.id} ${camp.message_type} 초과환불 회수 ${rev.reversed}원 (정당한도 ${maxLegitRefund}건 = 차감 ${deductedCount} − 성공 ${mysqlSuccess})`);
               }
+
+              // === 4-4. ★ 2026-06-29: 머니 불변식 감시 — 차감 = 성공 + 순환불(환불−회수). 깨지면 즉시 경보 ===
+              //   "발송사는 한 건도 안 잃는다"를 코드로 보장. gap>0=미환불(고객 손해)·gap<0=초과환불 잔존.
+              //   reverse가 소유한 캠페인(타임아웃 등 skipped)은 제외. 반올림 노이즈는 임계값으로 차단.
+              //   순환불은 reverse가 같은 집계로 돌려준 값 재사용(추가 쿼리 0).
+              if (!rev.skipped) {
+                const netRefundedCnt = Math.round(rev.netRefundedAmt / unit);
+                const gapCnt = refundInvariantGap({ deductedCount, successCount: mysqlSuccess, netRefundedCount: netRefundedCnt });
+                if (Math.abs(gapCnt) >= INVARIANT_ALERT_THRESHOLD) {
+                  invariantAlertCount++;
+                  const dir = gapCnt > 0 ? '미환불 의심(고객 손해)' : '초과환불 잔존';
+                  log(`[불변식위반] campaign=${camp.id} ${camp.message_type} 차감 ${deductedCount} ≠ 성공 ${mysqlSuccess} + 순환불 ${netRefundedCnt} (차이 ${gapCnt}건, ${dir})`);
+                  await sendSystemAlert({
+                    dedupKey: `refund-invariant:${camp.id}`,
+                    message: `환불 불변식 위반 — ${camp.message_type} 캠페인: 차감 ${deductedCount}건 ≠ 성공 ${mysqlSuccess} + 순환불 ${netRefundedCnt} (차이 ${gapCnt}건, ${dir}). campaign=${camp.id}`,
+                  });
+                }
+              }
             }
           }
         }
@@ -267,8 +295,8 @@ async function runOnce(): Promise<void> {
     }
 
     const elapsedMs = Date.now() - startedAt;
-    if (pgUpdateCount > 0 || refundCount > 0 || reverseOverCount > 0 || reverseRes.reversed > 0 || learningRes.learned > 0) {
-      log(`사이클 완료 — 후보 ${candidates.rows.length}(실집계 ${activeRows.length}/휴면 ${candidates.rows.length - activeRows.length}) / PG 갱신 ${pgUpdateCount} / 환불 ${refundCount}건 ${totalRefundAmount}원 / 초과회수 ${reverseOverCount}건 ${totalReverseOverAmount}원 / 타임아웃reverse ${reverseRes.reversed}건 ${reverseRes.totalAmount}원 / 학습 ${learningRes.learned}건 / ${elapsedMs}ms`);
+    if (pgUpdateCount > 0 || refundCount > 0 || reverseOverCount > 0 || invariantAlertCount > 0 || reverseRes.reversed > 0 || learningRes.learned > 0) {
+      log(`사이클 완료 — 후보 ${candidates.rows.length}(실집계 ${activeRows.length}/휴면 ${candidates.rows.length - activeRows.length}) / PG 갱신 ${pgUpdateCount} / 환불 ${refundCount}건 ${totalRefundAmount}원 / 초과회수 ${reverseOverCount}건 ${totalReverseOverAmount}원 / 불변식경보 ${invariantAlertCount}건 / 타임아웃reverse ${reverseRes.reversed}건 ${reverseRes.totalAmount}원 / 학습 ${learningRes.learned}건 / ${elapsedMs}ms`);
     }
   } catch (err: any) {
     log('전체 오류:', err?.message || err);
