@@ -18,6 +18,56 @@ interface Props {
   onClose: () => void;
 }
 
+// ★ 2026-06-29: 경량 마크다운 렌더 — AI 종합 분석(## 헤더 · | 표 | · **볼드**)이 raw 텍스트로 깨지던 것 정정.
+function renderInline(text: string): (JSX.Element | string)[] {
+  return text.split(/(\*\*[^*]+\*\*)/g).map((p, i) =>
+    p.startsWith('**') && p.endsWith('**')
+      ? <strong key={i} className="text-white font-semibold">{p.slice(2, -2)}</strong>
+      : p,
+  );
+}
+
+function renderMarkdownLite(md: string): JSX.Element {
+  const lines = (md || '').split('\n');
+  const out: JSX.Element[] = [];
+  let i = 0;
+  let key = 0;
+  while (i < lines.length) {
+    const trimmed = lines[i].trim();
+    if (!trimmed) { i++; continue; }
+    // 표 블록
+    if (trimmed.startsWith('|')) {
+      const tableLines: string[] = [];
+      while (i < lines.length && lines[i].trim().startsWith('|')) { tableLines.push(lines[i].trim()); i++; }
+      const rows = tableLines
+        .filter((l) => !/^[|\s:-]+$/.test(l))
+        .map((l) => l.replace(/^\|/, '').replace(/\|$/, '').split('|').map((c) => c.trim()));
+      if (rows.length > 0) {
+        const [header, ...body] = rows;
+        out.push(
+          <table key={key++} className="w-full text-xs border-collapse my-2">
+            <thead>
+              <tr>{header.map((h, hi) => <th key={hi} className="text-left font-semibold text-white/85 border-b border-white/15 py-1.5 px-2">{renderInline(h)}</th>)}</tr>
+            </thead>
+            <tbody>
+              {body.map((r, ri) => (
+                <tr key={ri}>{r.map((c, ci) => <td key={ci} className="text-white/75 border-b border-white/5 py-1.5 px-2 align-top">{renderInline(c)}</td>)}</tr>
+              ))}
+            </tbody>
+          </table>,
+        );
+      }
+      continue;
+    }
+    if (trimmed.startsWith('## ')) { out.push(<h5 key={key++} className="text-sm font-bold text-white mt-3 mb-1.5">{renderInline(trimmed.slice(3))}</h5>); i++; continue; }
+    if (trimmed.startsWith('# ')) { out.push(<h4 key={key++} className="text-base font-bold text-white mt-3 mb-1.5">{renderInline(trimmed.slice(2))}</h4>); i++; continue; }
+    if (trimmed.startsWith('- ') || trimmed.startsWith('* ')) { out.push(<p key={key++} className="text-sm text-white/80 leading-relaxed pl-3 mb-1">· {renderInline(trimmed.slice(2))}</p>); i++; continue; }
+    out.push(<p key={key++} className="text-sm text-white/80 leading-relaxed mb-1.5">{renderInline(trimmed)}</p>);
+    i++;
+  }
+  return <div>{out}</div>;
+}
+
 type TabKey = 'forecast' | 'synthesis' | 'reason' | 'data';
 
 export default function AiProposalSummaryModal({ proposal, onClose }: Props) {
@@ -176,7 +226,7 @@ export default function AiProposalSummaryModal({ proposal, onClose }: Props) {
           {tab === 'synthesis' && proposal.meta?.aiSynthesis && (
             <div className="p-4 rounded-xl bg-gradient-to-br from-violet-500/10 to-fuchsia-500/5 border border-violet-400/20">
               <p className="text-[10px] font-semibold tracking-[0.22em] text-violet-300/70 uppercase mb-1.5">AI 종합 분석</p>
-              <p className="text-sm text-white/80 leading-relaxed whitespace-pre-line">{proposal.meta.aiSynthesis}</p>
+              {renderMarkdownLite(proposal.meta.aiSynthesis)}
             </div>
           )}
 

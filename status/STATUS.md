@@ -107,6 +107,20 @@
 
 ---
 
+### 🟢 2026-06-29 — 여정 자동화 재설계 + 오늘의 여정 기회(분석 엔진) + 대화형 수정 + AI Operator 소개 PPT 뷰어 + 제안화면 강화 (★배포완료)
+> **여정 자동화 재설계(Phase 1·2)**: 메인 상단 좌우 히어로(왼쪽 큰 자연어 입력 + 오른쪽 마케팅/정보알림 2버튼 → 우측 빈칸 제거·세로 압축) · 정보 알림 인라인→모달화(`createPortal`) · 빠른 시작 중앙정렬 칩 · 검토 화면 각 step 한 줄 요약 카드 + `편집` 클릭 모달(인라인 편집기 난잡함 제거, 저장 payload 무변경). `JourneysPage.tsx` + `InfoAlertJourneyBuilder`(embedded). 설계 `specs/2026-06-29-journey-redesign-design.md`.
+> **오늘의 여정 기회(Phase 3 — 실데이터 분석 엔진)**: `journey-opportunities.ts` 전면 재작성 — 고정 3종 폐기, 6신호(장바구니/신규/휴면/생일/재구매주기/찜)를 단일 스캔 FILTER로 집계 · 휴면·재구매 임계 = 회사 구매분포 `PERCENTILE_CONT`로 도출(하드코딩 X) · 매출 규모 실측 우선순위 + `우선` 배지 · 의미 있는 것만 가변 개수 + 3개 초과 페이징 + 중앙정렬. `GET /operator/journeys-opportunities` + 프론트 카드.
+> **대화형 여정 수정**: `journey-ai-editor.ts`(message/wait/condition/알림톡 step 보존, 혜택 임의생성 금지) + `POST /operator/journeys-ai-edit`. 검토 화면 "대화형 수정" 입력(예: "2단계 하루 늦추고 VIP만").
+> **AI Operator 소개 = 리디자인 PPT 뷰어**: PowerPoint COM 자동화로 17슬라이드를 1920×1080 PNG 원본 렌더 → `public/about-ai-operator/slide-1~17.png` + `about-ai-operator.html`(좌우/키보드/스와이프/점 네비/전체화면, 다크 톤). 헤더 `AI Operator 소개` 링크 그대로.
+> **AI Operator 제안화면 강화(5)**: ① 발송시점+예상비용 2칸 한 줄 ② 활용 가능 컬럼(data-profile 안전변수) 다중 선택 ③ AI 꾸미기(`operator-message-decorator.ts` + `POST /operator/decorate-message` — 선택 컬럼 %변수% 자연스럽게 녹임, 원본외 정보·혜택 금지·EUC-KR sanitize) ④ 치환+하이라이트 토글(기존 원본/적용 재사용) ⑤ AI 제안 요약 버튼→모달 탭(예상·진단/종합/추천/활용데이터, `AiProposalSummaryModal`) — 메인 장황함 제거.
+> **정보알림 모달 가독성 fix**: portal 모달 `text-white` 상속 끊김으로 글자 어둡던 것 → info-alert·step 편집 모달 컨테이너 `text-white` 추가 + 빌더 카드 대비 강화.
+> **SCHEMA.md 실측 기록**: customers·cdp_events·journeys·journey_executions를 운영 PG `information_schema` 실측 대조 후 보강(cdp_events 6컬럼 + journeys 8 + journey_executions 4). 이 4테이블은 SCHEMA.md 신뢰 → 재질의 X.
+> **후속 정정(같은 세션)**: ① 제안 요약 종합 분석 탭 마크다운 표 raw 깨짐 → 경량 마크다운 렌더(표/헤더/볼드, `AiProposalSummaryModal`) ② 치환 토글 미표시 **근본 버그 fix** — `/operator/sample-customer`가 `triggerEvent`만 읽어 AiOperatorPage의 `{filters}`엔 항상 `sampleCustomer:null` 반환 → 원본/적용 토글이 한 번도 안 떴음. filters 경로 분기 추가(`buildFilterWhereClauseCompat` + 상위 LTV/구매액 1명, `mapSampleCustomerRow` 헬퍼 추출) ③ AI 제안 요약 버튼 단독 부유 → 발송 CTA 줄로 통합.
+> **검증·배포**: frontend tsc0 · backend tsc0 · 자가 grep(모델명/native dialog/박-단어) 0. **배포완료(2026-06-29).** 상세 [[project_2026_0629_ai_operator_journey_overhaul]].
+> **★다음 세션 이연**: ① 여정 "켜기 전 30일 성과 예측"(내가 구현할 기능) ② 여정 Phase 2-B(AB·세그먼트=발송 6원칙 게이트) ③ AI Operator C5 발송·돈 실측 1건(주인님).
+
+---
+
 ### 🟢 2026-06-28(이어서2) — 이메일 마케팅 마무리 + Phase 2-A 분석 대시보드 + 후속 UX (★배포완료)
 > **화면 단순화(Harold 신규 영구 룰 — 가로 큰 배너 배제)**: EmailCampaignsPage SMTP 완료 배너·테스트 발송 큰 카드 제거 → 헤더 한 줄 상태 칩 + 작은 테스트 발송 모달, "영구 제거"는 SMTP 모달 안. [[feedback_design_modal_first_simplicity]] 기록.
 > **Phase 1 폴리시**: ① 1클릭 AI 개선(HTML 모달 "한 번에 다듬기" + 비주얼 에디터 "AI로 개선" + 신규 `POST /ai/refine-sections` — 순수 코어 `email-section-refine`[마케팅 카피만·사실/혜택/변수 보존·무변경시 무차감]·TDD7) ② 템플릿 AI 추천 배선(`GET /brand-signal`=companies.industry_code → 갤러리 상단 추천) ③ 변수 커서 삽입(클립보드→입력칸 커서, SectionPropsEditor 무수정).

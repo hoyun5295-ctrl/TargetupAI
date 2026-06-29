@@ -1298,17 +1298,6 @@ export default function AiOperatorPage() {
               );
             })()}
 
-            {/* ★ 2026-06-29: AI 제안 요약 — 장황한 분석(예상·진단·종합·추천·데이터)을 모달 탭으로 */}
-            <div className="flex justify-end mb-2">
-              <button
-                type="button"
-                onClick={() => setShowSummary(true)}
-                className="px-4 py-2 rounded-lg text-xs font-medium bg-white/5 text-white/80 border border-white/10 hover:bg-white/10 hover:text-white flex items-center gap-1.5 transition-all"
-              >
-                <Sparkles className="w-3.5 h-3.5 text-violet-300" /> AI 제안 요약
-              </button>
-            </div>
-
             {/* ★ D166: 승인 발송 활성화 — preview-recipients + /direct-send 2-step */}
             <div className="flex flex-col sm:flex-row gap-3">
               <button
@@ -1319,6 +1308,15 @@ export default function AiOperatorPage() {
               >
                 {sending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
                 {sending ? '발송 처리 중...' : '승인 후 발송 시작'}
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowSummary(true)}
+                disabled={sending}
+                className="px-5 py-3.5 rounded-xl bg-white/10 text-white font-medium border border-white/20 hover:bg-white/15 disabled:opacity-40 disabled:cursor-not-allowed transition-all flex items-center justify-center gap-2"
+              >
+                <Sparkles className="w-4 h-4 text-violet-300" />
+                AI 제안 요약
               </button>
               <button
                 type="button"

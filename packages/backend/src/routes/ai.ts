@@ -994,6 +994,48 @@ router.get('/operator/data-profile', async (req: Request, res: Response) => {
 //   옛 fix4 사고 = 전체 customer 안 상위 1건 (filters X) → 정정 = proposal.target.filters 매칭 영역 안 상위.
 //   응답 = displayName 키 매트릭스 ({ "고객명": "김민수", "등급": "VIP", ... }) — mergeAndHighlightVars 영역 정합.
 // ============================================================
+// ★ 2026-06-29: sample-customer row → 표시명/Liquid 필드 매핑 (여정 trigger·AI Operator filters 두 경로 공용 — 인라인 중복 제거)
+function mapSampleCustomerRow(row: any): { sampleCustomer: Record<string, string | number | null>; sampleCustomerFields: Record<string, any> } {
+  const sampleCustomer: Record<string, string | number | null> = {
+    '고객명':       row.name || null,
+    '등급':         row.grade || null,
+    '성별':         row.gender || null,
+    '나이':         row.age || null,
+    '생일':         row.birth_date ? new Date(row.birth_date).toLocaleDateString('ko-KR') : null,
+    '이메일':       row.email || null,
+    '지역':         row.region || null,
+    '주소':         row.address || null,
+    '등록매장':     row.store_name || null,
+    '가입매장':     row.registered_store || null,
+    '포인트':       row.points != null ? Number(row.points).toLocaleString() : null,
+    '최근구매일':   row.recent_purchase_date ? new Date(row.recent_purchase_date).toLocaleDateString('ko-KR') : null,
+    '최근구매액':   row.recent_purchase_amount != null ? Number(row.recent_purchase_amount).toLocaleString() : null,
+    '최근구매매장': row.recent_purchase_store || null,
+    '누적구매액':   row.total_purchase_amount != null ? Number(row.total_purchase_amount).toLocaleString() : null,
+    '구매횟수':     row.purchase_count != null ? Number(row.purchase_count).toLocaleString() : null,
+    '평균주문액':   row.avg_order_value != null ? Number(row.avg_order_value).toLocaleString() : null,
+    'LTV점수':      row.ltv_score != null ? Number(row.ltv_score).toLocaleString() : null,
+    '결혼기념일':   row.wedding_anniversary ? new Date(row.wedding_anniversary).toLocaleDateString('ko-KR') : null,
+  };
+  const sampleCustomerFields: Record<string, any> = {
+    name: row.name || null, grade: row.grade || null, gender: row.gender || null, age: row.age || null,
+    birth_date: row.birth_date || null, email: row.email || null, region: row.region || null, address: row.address || null,
+    store_name: row.store_name || null, registered_store: row.registered_store || null,
+    points: row.points != null ? Number(row.points) : null,
+    recent_purchase_date: row.recent_purchase_date || null,
+    recent_purchase_amount: row.recent_purchase_amount != null ? Number(row.recent_purchase_amount) : null,
+    recent_purchase_store: row.recent_purchase_store || null,
+    total_purchase_amount: row.total_purchase_amount != null ? Number(row.total_purchase_amount) : null,
+    purchase_count: row.purchase_count != null ? Number(row.purchase_count) : null,
+    avg_order_value: row.avg_order_value != null ? Number(row.avg_order_value) : null,
+    ltv_score: row.ltv_score != null ? Number(row.ltv_score) : null,
+    wedding_anniversary: row.wedding_anniversary || null,
+    // Predictive 점수 = 중립 0.5 fallback (실제 발송 시 cdp_customer_predictions 정합)
+    churn_risk: 0.5, purchase_likelihood: 0.5, click_score: 0.5,
+  };
+  return { sampleCustomer, sampleCustomerFields };
+}
+
 router.post('/operator/sample-customer', async (req: Request, res: Response) => {
   try {
     const companyId = req.user?.companyId;
@@ -1003,7 +1045,44 @@ router.post('/operator/sample-customer', async (req: Request, res: Response) => 
       return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
     }
 
-    const { triggerEvent, triggerFilters } = req.body || {};
+    const { triggerEvent, triggerFilters, filters } = req.body || {};
+
+    // ★ 2026-06-29 fix: AI Operator 제안 경로 — filters(고객 필드 조건)로 상위 고객 1명 추출 (triggerEvent 없을 때).
+    //   기존 버그: AiOperatorPage가 { filters }를 보내는데 엔드포인트는 triggerEvent만 읽어 항상 sampleCustomer=null → 원본/적용 치환 토글이 한 번도 안 떴음.
+    if ((!triggerEvent || typeof triggerEvent !== 'string') && filters && typeof filters === 'object' && !Array.isArray(filters)) {
+      let fStoreFilter = '';
+      const fBaseParams: any[] = [companyId];
+      if (userType === 'company_user' && userId) {
+        const scope = await getStoreScope(companyId, userId);
+        if (scope.type === 'filtered') {
+          fStoreFilter = ' AND id IN (SELECT customer_id FROM customer_stores WHERE company_id = $1 AND store_code = ANY($2::text[]))';
+          fBaseParams.push(scope.storeCodes);
+        } else if (scope.type === 'blocked') {
+          return res.json({ success: true, sampleCustomer: null });
+        }
+      }
+      // CT-01 customer-filter (unqualified 컬럼 · leading AND · companyId=$1 전제) — preview-recipients와 동일.
+      const { sql: filterWhere, params: filterParams } = buildFilterWhereClauseCompat(filters, fBaseParams.length + 1);
+      const fParams = [...fBaseParams, ...filterParams];
+      const fSql = `
+        SELECT name, grade, gender, age, birth_date, email, region, address,
+               store_name, registered_store, points, recent_purchase_date, recent_purchase_amount,
+               recent_purchase_store, total_purchase_amount, purchase_count, avg_order_value,
+               ltv_score, wedding_anniversary
+        FROM customers
+        WHERE company_id = $1::uuid AND is_active = true AND sms_opt_in = true
+          ${fStoreFilter}
+          ${filterWhere}
+        ORDER BY COALESCE(ltv_score, 0) DESC, COALESCE(total_purchase_amount, 0) DESC
+        LIMIT 1
+      `;
+      const fr = await query(fSql, fParams);
+      const frow = fr.rows[0] || null;
+      if (!frow) return res.json({ success: true, sampleCustomer: null });
+      const fmapped = mapSampleCustomerRow(frow);
+      return res.json({ success: true, sampleCustomer: fmapped.sampleCustomer, sampleCustomerFields: fmapped.sampleCustomerFields });
+    }
+
     if (!triggerEvent || typeof triggerEvent !== 'string') {
       return res.json({ success: true, sampleCustomer: null });
     }
@@ -1048,58 +1127,8 @@ router.post('/operator/sample-customer', async (req: Request, res: Response) => 
     if (!row) {
       return res.json({ success: true, sampleCustomer: null });
     }
-    // ANALYZED_FIELDS (CT-58) percentVar 매트릭스 정합 — mergeAndHighlightVars 영역 key 정합.
-    const sampleCustomer: Record<string, string | number | null> = {
-      '고객명':       row.name || null,
-      '등급':         row.grade || null,
-      '성별':         row.gender || null,
-      '나이':         row.age || null,
-      '생일':         row.birth_date ? new Date(row.birth_date).toLocaleDateString('ko-KR') : null,
-      '이메일':       row.email || null,
-      '지역':         row.region || null,
-      '주소':         row.address || null,
-      '등록매장':     row.store_name || null,
-      '가입매장':     row.registered_store || null,
-      '포인트':       row.points != null ? Number(row.points).toLocaleString() : null,
-      '최근구매일':   row.recent_purchase_date ? new Date(row.recent_purchase_date).toLocaleDateString('ko-KR') : null,
-      '최근구매액':   row.recent_purchase_amount != null ? Number(row.recent_purchase_amount).toLocaleString() : null,
-      '최근구매매장': row.recent_purchase_store || null,
-      '누적구매액':   row.total_purchase_amount != null ? Number(row.total_purchase_amount).toLocaleString() : null,
-      '구매횟수':     row.purchase_count != null ? Number(row.purchase_count).toLocaleString() : null,
-      '평균주문액':   row.avg_order_value != null ? Number(row.avg_order_value).toLocaleString() : null,
-      'LTV점수':      row.ltv_score != null ? Number(row.ltv_score).toLocaleString() : null,
-      '결혼기념일':   row.wedding_anniversary ? new Date(row.wedding_anniversary).toLocaleDateString('ko-KR') : null,
-    };
-    // ★ D210+ Phase 2-fix9 (Harold 명시 2026-05-23): Liquid 렌더링 영역 (field 키 매트릭스) — renderLiquid 호출 시 customer.X 매칭.
-    //   본질 = {% if customer.churn_risk > 0.6 %} 등 Liquid 태그 영역 = 미리보기 영역에서도 사용자별 분기 렌더링 의무.
-    //   사고 차단 = mergeAndHighlightVars 영역 안 Liquid 태그 그대로 표시 사고 영역 차단.
-    //   Predictive 영역 = 0.5 중립 fallback (옛 cdp_customer_predictions 영역 미참조 시).
-    const sampleCustomerFields: Record<string, any> = {
-      name: row.name || null,
-      grade: row.grade || null,
-      gender: row.gender || null,
-      age: row.age || null,
-      birth_date: row.birth_date || null,
-      email: row.email || null,
-      region: row.region || null,
-      address: row.address || null,
-      store_name: row.store_name || null,
-      registered_store: row.registered_store || null,
-      points: row.points != null ? Number(row.points) : null,
-      recent_purchase_date: row.recent_purchase_date || null,
-      recent_purchase_amount: row.recent_purchase_amount != null ? Number(row.recent_purchase_amount) : null,
-      recent_purchase_store: row.recent_purchase_store || null,
-      total_purchase_amount: row.total_purchase_amount != null ? Number(row.total_purchase_amount) : null,
-      purchase_count: row.purchase_count != null ? Number(row.purchase_count) : null,
-      avg_order_value: row.avg_order_value != null ? Number(row.avg_order_value) : null,
-      ltv_score: row.ltv_score != null ? Number(row.ltv_score) : null,
-      wedding_anniversary: row.wedding_anniversary || null,
-      // Predictive 점수 = 중립 0.5 fallback (실제 발송 시 cdp_customer_predictions 영역 정합)
-      churn_risk: 0.5,
-      purchase_likelihood: 0.5,
-      click_score: 0.5,
-    };
-    return res.json({ success: true, sampleCustomer, sampleCustomerFields });
+    const mapped = mapSampleCustomerRow(row);
+    return res.json({ success: true, sampleCustomer: mapped.sampleCustomer, sampleCustomerFields: mapped.sampleCustomerFields });
   } catch (err: any) {
     console.error('[AI Operator /sample-customer] 오류:', err);
     return res.status(500).json({ success: false, error: '샘플 고객 조회 실패' });
