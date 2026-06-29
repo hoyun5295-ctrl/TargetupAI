@@ -5,7 +5,7 @@ import {
   ArrowLeft, ChevronDown, ChevronUp, Loader2, Pause, Play, Plus, Power, RefreshCw, Sparkles,
   ShoppingCart, Cake, Calendar as CalendarIcon, UserPlus, Repeat, Moon, MessageSquare,
   Clock, DollarSign, Users, Phone, Wand2, X, AlertCircle, Send, Trash2, Edit2, Save, Beaker, Code,
-  BarChart3, Megaphone, Bell,
+  BarChart3, Megaphone, Bell, ChevronLeft, ChevronRight,
   // ★ D210+ Phase 2-fix6 (Harold 명시 2026-05-23): 6 sub-agent 진행 카드 + 토글 영역 아이콘
   Workflow, Brain, LayoutGrid, CheckCircle2,
   // ★ D210+ Phase 3 (2026-05-23 Harold 명시): 자동 재진입 토글 + funnel 시각화 + 다중 미리보기 아이콘
@@ -205,13 +205,15 @@ interface CallbackOption {
   is_default: boolean;
 }
 
-// ★ 2026-06-29: "오늘의 여정 기회" — 회사 실데이터로 산출한 비어 있는 여정 (랜딩 1클릭 생성)
+// ★ 2026-06-29: "오늘의 여정 기회" — 회사 실데이터 분석으로 산출 (가변 개수 + 매출 규모 우선순위)
 interface JourneyOpportunity {
-  type: 'cart_recovery' | 'onboarding' | 'dormant';
+  type: string;
   templateCode: TemplateCode;
   title: string;
   description: string;
   count: number;
+  valueAtStake?: number;
+  priority?: 'high' | 'medium';
   suggestedObjective: string;
 }
 
@@ -387,8 +389,9 @@ export default function JourneysPage() {
   const toast = useToast();
   const [view, setView] = useState<'main' | 'review'>('main');
   const [journeys, setJourneys] = useState<JourneyRow[]>([]);
-  // ★ 2026-06-29: "오늘의 여정 기회" 카드 (실데이터 집계)
+  // ★ 2026-06-29: "오늘의 여정 기회" 카드 (실데이터 집계) + 페이징
   const [opportunities, setOpportunities] = useState<JourneyOpportunity[]>([]);
+  const [oppPage, setOppPage] = useState(0);
   const [callbackOptions, setCallbackOptions] = useState<CallbackOption[]>([]);
   const [opt080Number, setOpt080Number] = useState('');
   const [loading, setLoading] = useState(true);
@@ -450,6 +453,9 @@ export default function JourneysPage() {
   const [previewSteps, setPreviewSteps] = useState<Set<number>>(new Set());
   // ★ 2026-06-29: 검토 화면 난잡함 제거 — step 편집을 인라인에서 모달로(요약 카드 + 편집 모달). 편집 중 step idx.
   const [editingStepIdx, setEditingStepIdx] = useState<number | null>(null);
+  // ★ 2026-06-29: 대화형 여정 수정 — 자연어로 초안 패키지 수정
+  const [editInstruction, setEditInstruction] = useState('');
+  const [editingPackage, setEditingPackage] = useState(false);
   const [refining, setRefining] = useState<{ stepIdx: number; candidates: RefineCandidate[] } | null>(null);
   const [refineLoading, setRefineLoading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -845,6 +851,35 @@ export default function JourneysPage() {
     });
   };
 
+  // ★ 2026-06-29: 대화형 여정 수정 — 자연어 한 줄로 초안 패키지를 AI가 고침 (저장·발송 무관, 초안 편집만)
+  const handleConversationalEdit = async () => {
+    if (!aiPkg) return;
+    const instruction = editInstruction.trim();
+    if (instruction.length < 2) { toast.warning('수정 요청을 입력해주세요. 예: 2단계 하루 늦추고 VIP만 보내줘'); return; }
+    setEditingPackage(true);
+    try {
+      const res = await fetch('/api/ai/operator/journeys-ai-edit', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token()}` },
+        body: JSON.stringify({ package: aiPkg, instruction }),
+      });
+      const data = await res.json();
+      if (data.success && data.package) {
+        setAiPkg(data.package);
+        setEditingStepIdx(null);
+        setPreviewSteps(new Set());
+        setEditInstruction('');
+        toast.success(data.package.reasoning ? `수정 완료 — ${data.package.reasoning}` : '여정을 수정했습니다.');
+      } else {
+        toast.error(data.error || 'AI 수정 실패. 요청을 더 명확히 작성해주세요.');
+      }
+    } catch (e: any) {
+      toast.error(e?.message || '수정 중 오류');
+    } finally {
+      setEditingPackage(false);
+    }
+  };
+
   // ════════ step 수정 ════════
   const updateStep = (idx: number, patch: Partial<AIGeneratedStep>) => {
     if (!aiPkg) return;
@@ -1175,44 +1210,72 @@ export default function JourneysPage() {
             ════════════════════════════════════════ */}
         {view === 'main' && (
           <>
-            {/* ★ 2026-06-29: 오늘의 여정 기회 — 회사 데이터에서 찾은 비어 있는 여정 (1클릭 생성) */}
-            {opportunities.length > 0 && (
-              <div className="mb-4 md:mb-5 bg-gradient-to-br from-violet-500/15 via-fuchsia-500/10 to-indigo-500/15 border border-violet-400/30 rounded-2xl p-4 md:p-5">
-                <div className="flex items-center gap-2 mb-3 flex-wrap">
-                  <Sparkles className="w-5 h-5 text-violet-300" />
-                  <h2 className="text-base md:text-lg font-semibold">오늘의 여정 기회</h2>
-                  <span className="text-[11px] text-white/50">회사 데이터에서 찾은 비어 있는 여정 — 한 번에 만들기</span>
-                </div>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                  {opportunities.map((op) => {
-                    const v = TEMPLATE_VISUAL[op.templateCode] || TEMPLATE_VISUAL.custom;
-                    const OpIcon = v.icon;
-                    return (
-                      <div key={op.type} className="bg-white/5 border border-white/10 rounded-xl p-4 flex flex-col">
-                        <div className="flex items-center gap-2 mb-2">
-                          <div className={`w-9 h-9 rounded-lg bg-gradient-to-br ${v.gradient} flex items-center justify-center shrink-0`}>
-                            <OpIcon className="w-4 h-4 text-white" />
-                          </div>
-                          <div className="min-w-0">
-                            <div className="text-sm font-semibold truncate">{op.title}</div>
-                            <div className="text-[11px] text-white/55">{op.count.toLocaleString()}명</div>
-                          </div>
-                        </div>
-                        <p className="text-xs text-white/65 leading-relaxed flex-1 mb-3">{op.description}</p>
-                        <button
-                          onClick={() => handleAIGenerate(undefined, op.suggestedObjective)}
-                          disabled={generating}
-                          className="px-3 py-2 rounded-lg bg-gradient-to-r from-violet-500 to-fuchsia-500 text-xs font-medium hover:opacity-90 disabled:opacity-50 flex items-center justify-center gap-1.5"
-                        >
-                          <Sparkles className="w-3.5 h-3.5" /> 1클릭 생성
-                        </button>
-                        <div className="text-[10px] text-white/30 italic mt-2">Data source — customers · journeys 실시간 집계</div>
+            {/* ★ 2026-06-29: 오늘의 여정 기회 — 회사 데이터에서 찾은 비어 있는 여정 (1클릭 생성) + 3개 초과 시 페이징 */}
+            {opportunities.length > 0 && (() => {
+              const perPage = 3;
+              const totalPages = Math.ceil(opportunities.length / perPage);
+              const page = Math.min(oppPage, totalPages - 1);
+              const pageItems = opportunities.slice(page * perPage, page * perPage + perPage);
+              return (
+                <div className="mb-4 md:mb-5 bg-white/[0.04] border border-white/10 rounded-2xl p-4 md:p-5">
+                  <div className="flex items-center justify-between gap-2 mb-3 flex-wrap">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-violet-400 to-fuchsia-500 flex items-center justify-center shrink-0">
+                        <Sparkles className="w-4 h-4 text-white" />
                       </div>
-                    );
-                  })}
+                      <h2 className="text-base md:text-lg font-semibold">오늘의 여정 기회</h2>
+                      <span className="text-[11px] text-white/45">회사 데이터에서 찾은 비어 있는 여정</span>
+                    </div>
+                    {totalPages > 1 && (
+                      <div className="flex items-center gap-1.5">
+                        <button onClick={() => setOppPage(Math.max(0, page - 1))} disabled={page === 0} className="p-1.5 rounded-lg bg-white/5 hover:bg-white/10 disabled:opacity-30 disabled:cursor-not-allowed" aria-label="이전">
+                          <ChevronLeft className="w-4 h-4" />
+                        </button>
+                        <span className="text-[11px] text-white/55 tabular-nums min-w-[34px] text-center">{page + 1} / {totalPages}</span>
+                        <button onClick={() => setOppPage(Math.min(totalPages - 1, page + 1))} disabled={page >= totalPages - 1} className="p-1.5 rounded-lg bg-white/5 hover:bg-white/10 disabled:opacity-30 disabled:cursor-not-allowed" aria-label="다음">
+                          <ChevronRight className="w-4 h-4" />
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                  <div className="flex flex-col md:flex-row flex-wrap justify-center gap-3">
+                    {pageItems.map((op) => {
+                      const v = TEMPLATE_VISUAL[op.templateCode] || TEMPLATE_VISUAL.custom;
+                      const OpIcon = v.icon;
+                      return (
+                        <div key={op.type} className="flex-1 md:min-w-[240px] md:max-w-[420px] bg-slate-900/50 border border-white/10 rounded-xl p-4 flex flex-col">
+                          <div className="flex items-center gap-3 mb-2.5">
+                            <div className={`w-10 h-10 rounded-xl bg-gradient-to-br ${v.gradient} flex items-center justify-center shrink-0`}>
+                              <OpIcon className="w-5 h-5 text-white" />
+                            </div>
+                            <div className="min-w-0">
+                              <div className="flex items-center gap-1.5">
+                                <div className="text-sm font-semibold text-white truncate">{op.title}</div>
+                                {op.priority === 'high' && (
+                                  <span className="shrink-0 px-1.5 py-0.5 rounded text-[9px] font-semibold bg-amber-500/20 text-amber-200 border border-amber-400/30">우선</span>
+                                )}
+                              </div>
+                              <div className="text-lg font-bold text-white leading-tight">
+                                {op.count.toLocaleString()}<span className="text-xs font-medium text-white/55 ml-0.5">명</span>
+                              </div>
+                            </div>
+                          </div>
+                          <p className="text-xs text-white/70 leading-relaxed flex-1 mb-3">{op.description}</p>
+                          <button
+                            onClick={() => handleAIGenerate(undefined, op.suggestedObjective)}
+                            disabled={generating}
+                            className="px-3 py-2 rounded-lg bg-gradient-to-r from-violet-500 to-fuchsia-500 text-xs font-semibold hover:opacity-90 disabled:opacity-50 flex items-center justify-center gap-1.5"
+                          >
+                            <Sparkles className="w-3.5 h-3.5" /> 1클릭 생성
+                          </button>
+                          <div className="text-[10px] text-white/30 italic mt-2">Data source — customers · journeys 실시간 집계</div>
+                        </div>
+                      );
+                    })}
+                  </div>
                 </div>
-              </div>
-            )}
+              );
+            })()}
 
             {customerGate.isEmpty && <CustomerDataRequiredBanner className="mb-4 md:mb-5" />}
 
@@ -1957,6 +2020,33 @@ export default function JourneysPage() {
               </div>
             </div>
 
+            {/* ★ 2026-06-29: 대화형 수정 — 말로 고치기 (클릭 편집 대신 자연어 한 줄) */}
+            <div className="bg-gradient-to-br from-violet-500/10 to-fuchsia-500/10 border border-violet-400/30 rounded-xl p-3">
+              <div className="flex items-center gap-2 mb-2 flex-wrap">
+                <Wand2 className="w-4 h-4 text-violet-300" />
+                <span className="text-sm font-semibold">대화형 수정</span>
+                <span className="text-[11px] text-white/45">말로 고치세요 — 예: "2단계 하루 늦추고 VIP만 보내줘"</span>
+              </div>
+              <div className="flex flex-col md:flex-row gap-2">
+                <input
+                  value={editInstruction}
+                  onChange={(e) => setEditInstruction(e.target.value)}
+                  placeholder="예: 첫 단계를 알림톡으로 / 마지막에 3일 뒤 리마인드 추가 / 전체 톤 더 캐주얼하게"
+                  className="flex-1 px-3 py-2 bg-slate-900 border border-white/10 rounded-lg text-sm placeholder-white/30 focus:outline-none focus:border-violet-400"
+                  onKeyDown={(e) => { if (e.key === 'Enter' && !editingPackage) handleConversationalEdit(); }}
+                  disabled={editingPackage}
+                />
+                <button
+                  onClick={handleConversationalEdit}
+                  disabled={editingPackage || editInstruction.trim().length < 2}
+                  className="px-4 py-2 bg-gradient-to-r from-violet-500 to-fuchsia-500 rounded-lg text-sm font-medium hover:opacity-90 disabled:opacity-50 flex items-center justify-center gap-2"
+                >
+                  {editingPackage ? <Loader2 className="w-4 h-4 animate-spin" /> : <Wand2 className="w-4 h-4" />}
+                  수정 적용
+                </button>
+              </div>
+            </div>
+
             {sampleCustomer && (
               <div className="bg-emerald-500/10 border border-emerald-400/30 rounded-lg p-3 text-xs text-emerald-100 flex items-start gap-2">
                 <Sparkles className="w-3.5 h-3.5 mt-0.5 shrink-0 text-emerald-300" />
@@ -2048,7 +2138,7 @@ export default function JourneysPage() {
 
                     {editingStepIdx === idx && createPortal(
                       <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-[45] p-4" onClick={() => setEditingStepIdx(null)}>
-                        <div className="bg-slate-900 border border-white/10 rounded-2xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-hidden flex flex-col" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
+                        <div className="bg-slate-900 border border-white/10 rounded-2xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-hidden flex flex-col text-white" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
                           <div className="flex items-center justify-between p-5 border-b border-white/10 bg-gradient-to-r from-fuchsia-500/10 via-violet-500/10 to-purple-500/10">
                             <div className="flex items-center gap-3">
                               <div className={`w-9 h-9 rounded-xl flex items-center justify-center text-sm font-semibold ${stepTypeColor}`}>{s.stepOrder}</div>
@@ -2811,7 +2901,7 @@ export default function JourneysPage() {
       {/* 정보 알림 — 버튼 클릭 모달화 (거래 통지 알림톡 빌더). 인라인 페이지 교체 폐기 → 닫으면 메인 그대로 */}
       {view === 'main' && purpose === 'info-alert' && createPortal(
         <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 p-4" onClick={() => setPurpose('marketing')}>
-          <div className="bg-slate-900 border border-white/10 rounded-2xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-hidden flex flex-col" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
+          <div className="bg-slate-900 border border-white/10 rounded-2xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-hidden flex flex-col text-white" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
             <div className="flex items-center justify-between p-5 border-b border-white/10 bg-gradient-to-r from-teal-500/10 via-emerald-500/10 to-teal-500/10">
               <div className="flex items-center gap-3">
                 <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-teal-400 to-emerald-500 flex items-center justify-center">

@@ -114,7 +114,7 @@ export default function InfoAlertJourneyBuilder({ senders, templates, customerFi
       )}
 
       <div>
-        <h3 className="text-sm font-semibold text-white/80 mb-2">언제 보낼까요</h3>
+        <h3 className="text-sm font-semibold text-white/90 mb-2">언제 보낼까요</h3>
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
           {TX_EVENTS.map((t) => {
             const Icon = t.icon;
@@ -125,13 +125,13 @@ export default function InfoAlertJourneyBuilder({ senders, templates, customerFi
                 key={t.key}
                 onClick={() => { if (!locked) setTxKey(t.key); }}
                 disabled={locked}
-                className={`p-3 rounded-lg border text-left transition-colors ${active ? 'bg-teal-500/15 border-teal-400/50' : 'bg-white/5 border-white/10 hover:bg-white/10'} ${locked ? 'opacity-40 cursor-not-allowed' : ''}`}
+                className={`p-3 rounded-xl border text-left transition-colors ${active ? 'bg-teal-500/20 border-teal-400/60' : 'bg-white/[0.07] border-white/15 hover:bg-white/[0.12]'} ${locked ? 'opacity-40 cursor-not-allowed' : ''}`}
               >
-                <div className={`w-7 h-7 rounded-md bg-gradient-to-br ${t.gradient} flex items-center justify-center mb-2`}>
+                <div className={`w-8 h-8 rounded-lg bg-gradient-to-br ${t.gradient} flex items-center justify-center mb-2`}>
                   <Icon className="w-4 h-4 text-white" />
                 </div>
-                <div className="text-xs font-medium">{t.label}</div>
-                <div className="text-[10px] text-white/40 mt-0.5">{locked ? '자사몰 연동 시 사용 가능' : t.desc}</div>
+                <div className="text-sm font-semibold text-white">{t.label}</div>
+                <div className="text-[11px] text-white/60 mt-0.5">{locked ? '자사몰 연동 시 사용 가능' : t.desc}</div>
               </button>
             );
           })}
@@ -139,7 +139,7 @@ export default function InfoAlertJourneyBuilder({ senders, templates, customerFi
       </div>
 
       <div>
-        <h3 className="text-sm font-semibold text-white/80 mb-2">어떤 알림톡을 보낼까요</h3>
+        <h3 className="text-sm font-semibold text-white/90 mb-2">어떤 알림톡을 보낼까요</h3>
         {senders.length === 0 ? (
           <div className="p-3 bg-rose-500/10 border border-rose-500/30 rounded text-xs text-rose-200">
             승인된 발신프로필이 없습니다. 알림톡 발송 메뉴에서 발신프로필을 먼저 등록해주세요.

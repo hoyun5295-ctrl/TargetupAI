@@ -100,6 +100,8 @@ import { validateJourneyForActivation } from '../utils/journey-pretest-validator
 import { getPauseLogs } from '../utils/journey-pause-handler';
 // ★ D187-fix3 (2026-05-21): Journey AI Generator — One-shot 자연어 + 시즌 + 회사 메모리
 import { generateJourneyPackage, refineStepMessage } from '../utils/journey-ai-generator';
+// ★ 2026-06-29: 대화형 여정 수정 — 초안 패키지에 자연어 수정 반영
+import { editJourneyPackage } from '../utils/journey-ai-editor';
 import { buildJourneyPreviewSamples, countJourneyTargetCustomers } from '../utils/journey-target-extractor';
 // ★ D210+ Phase 2-fix1 (Harold 명시 2026-05-23): CT-58 — 회사 customer DB 실측 프로필 조회.
 //   /operator/data-profile endpoint = 마케팅 담당자 검토 UI 안내 카드 data source.
@@ -3117,6 +3119,31 @@ router.post('/operator/journeys-ai-generate', async (req: Request, res: Response
   } catch (err: any) {
     console.error('[Journeys AI generate] 오류:', err);
     return res.status(500).json({ success: false, error: err?.message || 'AI 생성 실패' });
+  }
+});
+
+// POST /api/ai/operator/journeys-ai-edit — 대화형 여정 수정 (초안 패키지에 자연어 수정 반영)
+router.post('/operator/journeys-ai-edit', async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+    const planCtx = await loadPlanContext(companyId);
+    if (!planCtx) return res.status(404).json({ success: false, error: '회사 정보를 찾을 수 없습니다.' });
+    if (!isAiOperatorAllowed(planCtx, req.user)) {
+      return res.status(403).json({ success: false, error: 'AI Operator 진입 권한이 없습니다.', code: 'AI_OPERATOR_GATED' });
+    }
+    const { package: currentPackage, instruction } = req.body || {};
+    if (!currentPackage || !Array.isArray(currentPackage.steps)) {
+      return res.status(400).json({ success: false, error: '수정할 여정 패키지가 없습니다.' });
+    }
+    if (!instruction || String(instruction).trim().length < 2) {
+      return res.status(400).json({ success: false, error: '수정 요청 문구를 입력해주세요.' });
+    }
+    const pkg = await editJourneyPackage({ companyId, currentPackage, instruction: String(instruction) });
+    return res.json({ success: true, package: pkg });
+  } catch (err: any) {
+    console.error('[Journeys AI edit] 오류:', err);
+    return res.status(500).json({ success: false, error: err?.message || 'AI 수정 실패' });
   }
 });
 
