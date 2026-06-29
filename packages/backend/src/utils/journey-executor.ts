@@ -48,6 +48,8 @@ import {
 } from './messageUtils';
 import { resolveJourneyAdFlag } from './journey-ad-policy';
 import { prepaidDeduct } from './prepaid';
+import { deductCreditSafe } from './ai-credit';
+import { getCreditCost, kstDateTag } from './ai-credit-calc';
 import { logCampaignTraining } from './training-logger';
 import { normalizePhone } from './normalize-phone';
 import { getCompanyCosts } from '../config/defaults';
@@ -839,6 +841,17 @@ async function processExecution(exec: ExecutionRow): Promise<StepOutcome> {
     console.warn(`[JourneyExecutor] execution=${exec.execution_id} 발송 후 차감 실패(잔액 동시 소진) — 1건 부담 + 여정 정지`);
     await pauseJourney(exec.journey_id, deduct.error || '잔액 부족(발송 후)');
   }
+
+  // ★ v2 운영 과금 (크레딧 모델 v2 2026-06-30) — 발송비(prepaidDeduct, 위)와 별개인 AI 운영 크레딧.
+  //   멱등키 = 여정:KST날짜 → 같은 여정 그날 첫 발송 1건만 10 차감(동일 여정 하루 1회 상한 · 고객수만큼 안 불어남).
+  //   journey-operation = 운영 source(P4) → 잔액 0이어도 −1개월 grant 상한까지 음수 허용. deductCreditSafe는 throw 0 = 발송 절대 안 막음.
+  await deductCreditSafe({
+    companyId: exec.company_id,
+    cost: getCreditCost('journey-operation'),
+    source: 'journey-operation',
+    idempotencyKey: `journey-operation:${exec.journey_id}:${kstDateTag(new Date())}`,
+    createdBy: exec.created_by || null,
+  });
 
   // ★ D218+ (2026-05-26) 시점 3: 발송 직후 status 재확인 — MySQL 큐 INSERT 도중 paused 동시 발화 사고 기록 안전망.
   //   본 시점 = MySQL 큐 INSERT 종결 후 = SMS 발송 영구 진행 영역. 정지 효과 X = log + execution_status_at_pause 추적.

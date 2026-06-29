@@ -2527,6 +2527,40 @@ router.get('/credit-transactions-all', authenticate, requireSuperAdmin, async (r
   }
 });
 
+// GET /credit-risk-companies — 크레딧 위험 회사 (소진 임박·0·마이너스·상한 근접). 해지방어·업셀 레이더 (크레딧 모델 v2 2026-06-30).
+//   잔액(기본+구매) ≤ 월 grant 20%인 회사만. 마이너스 = 운영 과금(여정·자동마케팅 실행) 음수 누적분. 상한 = −1개월 grant.
+router.get('/credit-risk-companies', authenticate, requireSuperAdmin, async (_req: Request, res: Response) => {
+  try {
+    const r = await query(
+      `SELECT c.id, c.company_name,
+              c.ai_credits_base_remaining AS base,
+              COALESCE(c.ai_credits_purchased, 0) AS purchased,
+              p.ai_credits_per_month AS plan_credits,
+              p.plan_name
+         FROM companies c
+         JOIN plans p ON c.plan_id = p.id
+        WHERE p.ai_credits_per_month IS NOT NULL AND p.ai_credits_per_month > 0
+          AND (c.ai_credits_base_remaining + COALESCE(c.ai_credits_purchased, 0)) <= p.ai_credits_per_month * 0.2
+        ORDER BY (c.ai_credits_base_remaining + COALESCE(c.ai_credits_purchased, 0)) ASC
+        LIMIT 200`
+    );
+    const companies = r.rows.map((row: any) => {
+      const base = Number(row.base) || 0;
+      const purchased = Number(row.purchased) || 0;
+      const planCredits = Number(row.plan_credits) || 0;
+      const total = base + purchased;
+      // 위험 등급: 마이너스(운영 과금 음수 누적) > 소진(0) > 소진 임박(80%+ 사용)
+      const risk: 'negative' | 'depleted' | 'low' = total < 0 ? 'negative' : total === 0 ? 'depleted' : 'low';
+      const nearCap = planCredits > 0 && base <= -(planCredits * 0.8);  // −1개월 grant 상한 80% 근접
+      return { id: row.id, companyName: row.company_name, planName: row.plan_name, base, purchased, total, planCredits, risk, nearCap };
+    });
+    res.json({ companies });
+  } catch (err: any) {
+    console.error('크레딧 위험 회사 조회 실패:', err);
+    res.status(500).json({ error: '크레딧 위험 회사 조회 실패' });
+  }
+});
+
 // ===== 충전 요청 관리 API =====
 
 // 충전 요청 목록 조회 (필터 + 페이지네이션)

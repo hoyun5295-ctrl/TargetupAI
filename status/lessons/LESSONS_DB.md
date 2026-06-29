@@ -17,6 +17,17 @@
 
 ## 사고 이력
 
+### 2026-06-29 — 선불 sweep 초과환불 재발 + 발송 근간 보강 (돈) ★ 신규
+- **현상**: 6/25 산식 fix 이후에도 폴라초이스·라무르 초과환불 재발. 실측 51,722원/29건.
+- **진단 함정**: 환불 진단 기준을 `실패 + (차감 − sent_count)`로 잡으면 버그 산식과 동일 → over 0으로 가려짐. **올바른 회계 기준 = `차감 − 성공`**(과금했는데 전달 안 된 전부). over = `환불 + 성공 − 차감`.
+- **근본**: `calcRefundDue`의 미적재 = `차감 − sent_count`인데, 워커 기록 sent_count가 실제 처리수(성공+실패)보다 작게 남는 캠페인이 있음(폴라초이스 성공14790+실패610=15400=차감인데 sent_count 15271). 그 차이를 가짜 미적재로 환불 → prepaidRefund ratchet(올림만)이 영구 고착.
+- **fix (양방향 수렴)**: ① 미적재 = `차감 − max(sent_count, 성공+실패+대기)` (refund-calc.ts) — MySQL 실측 처리수가 sent_count 과소를 덮음, max 하한이라 이동 중 race도 방어. ② reverse 안전망 `prepaidReverseOverRefund` (prepaid.ts) — 정산 캠페인(대기0·30분경과)에서 누적환불 > 정당한도(차감−성공)면 초과분 트랜잭션·idempotent 회수, 타임아웃 환불 캠페인은 skip(이중차감 차단). 14일 윈도우 자동 회수(46,569원 실회수).
+- **발송 근간 보강**: ① sent_count = `GREATEST(sent_count, 성공+실패+대기)`로 실적재수 정정. ② 머니 불변식 `차감 = 성공 + 순환불(환불−회수)` 감시 — 정산 캠페인에서 깨지면 `sendSystemAlert`(쿨다운6h·미설정 시 PM2 로그만). gap>0=미환불(고객 손해)·gap<0=초과 잔존. **측정: 정산 1,480건 전부 불변식 성립 + 진짜 미적재 0** → 적재 신뢰성 OK라 적재 파이프라인 대공사 불필요.
+- **교훈**:
+  - 환불 회계 진단 기준은 항상 `차감 − 성공`. sent_count(워커 기록)는 진실 아님 — 미적재 단독 산정에 쓰면 과소 기록이 가짜 환불.
+  - prepaidRefund는 한 방향(올림). 어떤 일시 변수가 튀어도 ratchet이 영구 고착 → 돈 영역은 reverse 양방향 수렴이 근본(D182 reverse 원칙 재확인). 입력 변수 하나씩 막으면 다음 변수에서 재발.
+  - 위험한 코드(적재) 대공사 전 실측부터 — 진짜 미적재율을 SQL로 재서 0이면 대공사 불필요(데이터 없이 발송 근간 안 건드림).
+
 ### D214+ — customer-upsert.ts COALESCE 사고 (RFM GREATEST 강제 의무) ★ 신규
 - **사례**: 옛 `customer-upsert.ts` ON CONFLICT UPDATE = recent_purchase_date / purchase_count / last_purchase_date = COALESCE 단순 덮어쓰기. 자사몰 (cdp-orders.ts) GREATEST 영역과 충돌.
 - **시나리오**: 자사몰 5/24 매출 → cdp-orders → recent_purchase_date = 5/24 → 30분 후 싱크에이전트 POS 옛 5/23 sync → COALESCE(5/23, 5/24) = **5/23** = 5/24 사라짐 사고.

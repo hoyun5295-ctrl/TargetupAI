@@ -1,5 +1,5 @@
 import { Sparkles, Zap } from 'lucide-react';
-import { CREDIT_TASK_COSTS } from '../../constants/credit';
+import { CREDIT_TASK_COSTS, dailyDbAnalysisCredits } from '../../constants/credit';
 
 /**
  * CreditSummaryBar — 요금제 페이지 상단 요약 카드 (반반 구성).
@@ -36,7 +36,7 @@ export default function CreditSummaryBar({
   const gaugeMax = Math.max(planCredits, total, 1);
   const basePct = Math.max(0, Math.min(100, (Math.max(0, baseRemaining) / gaugeMax) * 100));
   const purchasedPct = Math.max(0, Math.min(100 - basePct, (purchased / gaugeMax) * 100));
-  const remaining = Math.max(0, maxCustomers - currentCustomers);
+  const dailyAnalysis = dailyDbAnalysisCredits(currentCustomers);
 
   return (
     <div className="relative overflow-hidden rounded-2xl border border-violet-100 bg-white shadow-sm">
@@ -47,20 +47,15 @@ export default function CreditSummaryBar({
           <div className="text-base font-medium text-slate-500">현재 이용 중인 플랜</div>
           <div className="mt-1 text-2xl font-bold text-violet-600">{planName}</div>
           <div className="mt-5 flex items-end justify-between gap-2">
-            <span className="text-base font-medium text-slate-500">고객 DB 사용량</span>
-            <span className="text-base font-semibold tabular-nums text-slate-900">
-              {fmt(currentCustomers)} <span className="font-normal text-slate-400">/ {fmt(maxCustomers)}명</span>
-            </span>
+            <span className="text-base font-medium text-slate-500">고객 DB</span>
+            <span className="text-base font-semibold tabular-nums text-slate-900">{fmt(currentCustomers)}명</span>
           </div>
-          <div className="mt-2 h-2.5 w-full overflow-hidden rounded-full bg-slate-100">
-            <div
-              className={`h-full transition-all ${usagePercent >= 90 ? 'bg-rose-500' : usagePercent >= 70 ? 'bg-amber-500' : 'bg-violet-500'}`}
-              style={{ width: `${Math.min(100, usagePercent)}%` }}
-            />
-          </div>
-          <div className="mt-1.5 flex justify-between text-xs text-slate-400">
-            <span>{usagePercent.toFixed(1)}% 사용 중</span>
-            <span>{fmt(remaining)}명 여유</span>
+          <div className="mt-3 rounded-xl border border-violet-100 bg-violet-50/50 px-3.5 py-2.5">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-sm text-slate-600">AI 자율 분석 (이탈위험·기회 고객)</span>
+              <b className="text-sm font-bold tabular-nums text-violet-700">매일 {dailyAnalysis}크레딧</b>
+            </div>
+            <div className="mt-1 text-[11px] leading-snug text-slate-400">싱크에이전트·SDK 연동 시 DB 규모 기준 자동 차감 · 미연동은 0</div>
           </div>
         </div>
 

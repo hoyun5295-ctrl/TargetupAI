@@ -22,7 +22,7 @@ import { getCacheStats } from '../utils/ai-cache';
 import { orchestrate, orchestrateWithAI } from '../services/ai-orchestrator';
 // ★ 크레딧 종량제 — 여정 저장(활성화) 등 endpoint 직접 차감용 (callAIWithFallback 경유 외)
 import { checkCredit, deductCreditSafe, InsufficientCreditError } from '../utils/ai-credit';
-import { getCreditCost, kstDateTag } from '../utils/ai-credit-calc';
+import { getCreditCost, kstDateTag, dailyDbAnalysisCredits } from '../utils/ai-credit-calc';
 // ★ D174 (2026-05-19): Step 1 Next Action Advisor — Opus 4.7
 import { buildPerformanceSnapshot, recommendNextAction, buildPerformanceSnapshotV2, type PerformancePeriod } from '../utils/next-action-advisor';
 import { explainPerformance } from '../utils/performance-explainer';
@@ -3716,7 +3716,9 @@ router.post('/operator/predictive/recompute', async (req: Request, res: Response
       return res.status(403).json({ success: false, error: 'AI Operator 진입 권한이 없습니다.', code: 'AI_OPERATOR_GATED' });
     }
     const result = await computeCompanyPredictionsBatch(companyId);
-    const cost = getCreditCost('predictive-daily');
+    // DB 규모 기준 일일 분석 차감 (v2). 워커와 같은 멱등키(회사+날짜) → 오늘 이미 차감됐으면 no-op.
+    const cntRes = await query(`SELECT COUNT(*)::int AS n FROM customers WHERE company_id = $1::uuid`, [companyId]);
+    const cost = dailyDbAnalysisCredits(Number(cntRes.rows[0]?.n) || 0);
     await deductCreditSafe({
       companyId,
       cost,

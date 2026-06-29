@@ -69,7 +69,6 @@ export async function decorateOperatorMessage(input: DecorateMessageInput): Prom
     model: 'sonnet',
     companyId: input.companyId,
     source: 'ai-operator-decorate',
-    creditCost: 1,
     userId: input.userId,
   });
 

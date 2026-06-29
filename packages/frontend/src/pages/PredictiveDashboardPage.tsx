@@ -495,20 +495,16 @@ export default function PredictiveDashboardPage() {
             onClick={handleRecompute}
             disabled={recomputing}
             className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 text-xs text-white/80 disabled:opacity-50 transition-colors"
-            title="회사 전체 고객을 지금 다시 계산합니다 (하루 1회 3크레딧)"
+            title="회사 전체 고객을 지금 다시 계산합니다 (하루 1회 · DB 규모 기준 차감)"
           >
             {recomputing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
             <span className="hidden sm:inline">{recomputing ? '계산 중' : '지금 재계산'}</span>
           </button>
-          {!settingsMigrationPending && predictiveEnabled !== null && (
+          {/* 연동(싱크에이전트·SDK) 회사는 매일 1회 자동 분석 — on/off 토글 폐지(크레딧 모델 v2). 차감은 DB 규모 기준. */}
+          {!settingsMigrationPending && (
             <div className="flex flex-col items-end gap-1 shrink-0">
-              <button onClick={togglePredictive} disabled={settingsSaving} className="flex items-center gap-2 disabled:opacity-50" title="매일 자동 예측 ON/OFF">
-                <span className="text-xs text-white/70 hidden sm:inline">매일 자동 예측</span>
-                <span className={`relative w-10 h-5 rounded-full transition-colors ${predictiveEnabled ? 'bg-violet-500' : 'bg-white/20'}`}>
-                  <span className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white transition-transform ${predictiveEnabled ? 'translate-x-5' : ''}`} />
-                </span>
-              </button>
-              <span className="text-[10px] text-white/40">{predictiveEnabled ? '매일 자동 갱신 · 3크레딧' : '꺼짐 · 갱신 0'}</span>
+              <span className="text-xs text-white/70">매일 1회 자동 분석</span>
+              <span className="text-[10px] text-white/40">연동 시 DB 규모 기준 자동 차감 · 미연동 0</span>
             </div>
           )}
           {settingsMigrationPending && (
@@ -559,7 +555,7 @@ export default function PredictiveDashboardPage() {
               ))}
             </div>
           )}
-          <div className="text-[10px] text-white/30 italic mt-2">Data source — cdp_customer_predictions (1시간 주기 자동 갱신)</div>
+          <div className="text-[10px] text-white/30 italic mt-2">Data source — cdp_customer_predictions (매일 1회 자동 분석)</div>
         </div>
 
         {/* 블록4: 작은 요약 바 — 한 줄, 각 클릭 → 모달 */}
@@ -574,7 +570,7 @@ export default function PredictiveDashboardPage() {
         {/* 컴퓨팅 시점 */}
         {summary.lastComputedAt && (
           <div className="mt-4 text-center text-[11px] text-white/40">
-            마지막 계산: {new Date(summary.lastComputedAt).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' })} · 1시간 주기 자동 갱신 · 회사 전체 기준
+            마지막 계산: {new Date(summary.lastComputedAt).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' })} · 매일 1회 자동 분석 · 회사 전체 기준
           </div>
         )}
       </div>

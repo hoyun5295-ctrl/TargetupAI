@@ -4,7 +4,7 @@
  * Phase B-2 Predictive Suite — 매일 KST 오전 9시 cron worker
  *
  * 역할:
- *  - 연동 회사(싱크에이전트/SDK) 대상 매일 1회 customer 예측 점수 자동 갱신 + 매일 3크레딧(회사+날짜 멱등)
+ *  - 연동 회사(싱크에이전트/SDK) 대상 매일 1회 customer 예측 점수 자동 갱신 + DB 규모별 일일 차감(회사+날짜 멱등)
  *  - 회사 전체 customer 1 SQL UPSERT (D210+ Phase 3)
  *  - 신규 customer 등록 시 event-driven 즉시 계산 (별도 진입점 = triggerCustomerPredictionUpdate)
  *  - 모델 자동 진화 (데이터 누적 시 정확도 자동 향상)
@@ -23,7 +23,7 @@
 import { query } from '../config/database';
 import { computeCompanyPredictionsBatch } from './predictive-suite';
 import { checkCredit, deductCreditSafe, InsufficientCreditError } from './ai-credit';
-import { getCreditCost, kstDateTag, kstHour } from './ai-credit-calc';
+import { dailyDbAnalysisCredits, kstDateTag, kstHour } from './ai-credit-calc';
 
 // 30분마다 깨어 KST 오전 9시대에 하루 1회만 실행(차감은 회사+날짜 멱등으로 추가 보장).
 const WORKER_INTERVAL_MS = 30 * 60 * 1000;
@@ -38,7 +38,7 @@ export function startPredictiveWorker(): void {
     console.log('[PredictiveWorker] worker 진입 중 — skip');
     return;
   }
-  console.log('[PredictiveWorker] worker 시작 — 매일 KST 오전 9시 연동 회사 예측 점수 갱신 (매일 3크레딧 · 회사+날짜 멱등)');
+  console.log('[PredictiveWorker] worker 시작 — 매일 KST 오전 9시 연동 회사 예측 점수 갱신 (DB 규모별 일일 차감 · 회사+날짜 멱등)');
 
   // 진입 직후 1회 점검 (9시대가 아니면 가드가 즉시 거른다)
   void runPredictiveBatch();
@@ -76,25 +76,23 @@ async function runPredictiveBatch(): Promise<void> {
   let totalCold = 0;
   let companiesProcessed = 0;
   let creditSkipped = 0;
-  const cost = getCreditCost('predictive-daily');  // 3
 
   try {
-    // 대상 = 연동 회사(싱크/SDK) OR 예측 토글 명시 ON + 고객 보유 회사. 예측 OFF(predictive_enabled=false)는 제외.
-    //   ★ 2026-06-07: 비연동이라도 운영자가 "매일 자동 예측"을 명시 ON하고 고객이 있으면 매일 갱신(토글 의미 정합).
-    //   default(미설정 NULL)는 연동 회사만 — 명시 ON 아닌 전체 회사 매일 차감 폭주 방지.
+    // 대상 = 연동 회사(싱크에이전트/SDK) — 항상 매일 분석 (크레딧 모델 v2: "연동=항상", on/off 토글 폐지).
+    //   분석 차감액은 회사별 DB 규모(고객 수)로 산정 → 루프 안에서 계산.
     const companyRes = await query(
       `SELECT DISTINCT c.id
          FROM companies c
-        WHERE COALESCE(c.predictive_enabled, true) = true
-          AND (
-            EXISTS (SELECT 1 FROM sync_agents sa WHERE sa.company_id = c.id)
-            OR EXISTS (SELECT 1 FROM cdp_events ce WHERE ce.company_id = c.id AND ce.source = 'custom_sdk')
-            OR (c.predictive_enabled IS TRUE AND EXISTS (SELECT 1 FROM customers cu WHERE cu.company_id = c.id))
-          )
+        WHERE EXISTS (SELECT 1 FROM sync_agents sa WHERE sa.company_id = c.id)
+           OR EXISTS (SELECT 1 FROM cdp_events ce WHERE ce.company_id = c.id AND ce.source = 'custom_sdk')
         ORDER BY c.id`
     );
 
     for (const row of companyRes.rows) {
+      // DB 규모 기준 일일 분석 차감액 (연동 회사 매일 1회, v2). 고객 수 0 = 차감 0 → skip.
+      const cntRes = await query(`SELECT COUNT(*)::int AS n FROM customers WHERE company_id = $1::uuid`, [row.id]);
+      const cost = dailyDbAnalysisCredits(Number(cntRes.rows[0]?.n) || 0);
+      if (cost <= 0) continue;
       // 크레딧 사전 차단 — 부족하면 이 회사 예측 skip(무과금 예측 방지). 미설정 회사는 통과(차감도 자동 skip).
       try {
         await checkCredit(row.id, cost);

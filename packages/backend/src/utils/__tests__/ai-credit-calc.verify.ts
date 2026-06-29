@@ -14,6 +14,8 @@ import {
   kstDateTag,
   kstHour,
   getCreditCost,
+  dailyDbAnalysisCredits,
+  isOperationSource,
 } from '../ai-credit-calc';
 
 let passed = 0;
@@ -76,14 +78,18 @@ console.log('[ai-credit-calc] getCreditCost (source → 크레딧)');
 ok('풀분석 orchestrate = 300', () => assert.strictEqual(getCreditCost('orchestrate'), 300));
 ok('여정 생성(돌려보기) journey-ai-generate = 3', () => assert.strictEqual(getCreditCost('journey-ai-generate'), 3));
 ok('여정 생성(돌려보기) journey-builder-custom = 3', () => assert.strictEqual(getCreditCost('journey-builder-custom'), 3));
-ok('여정 저장(활성화) journey-activate = 150', () => assert.strictEqual(getCreditCost('journey-activate'), 150));
+ok('여정 활성화 journey-activate = 200', () => assert.strictEqual(getCreditCost('journey-activate'), 200));
 ok('자동마케팅 저장(활성화) continuous-operator = 200', () => assert.strictEqual(getCreditCost('continuous-operator'), 200));
-ok('자동마케팅 발송 문안 continuous-operator-send = 3', () => assert.strictEqual(getCreditCost('continuous-operator-send'), 3));
+ok('자동마케팅 발송 continuous-operator-send = 10', () => assert.strictEqual(getCreditCost('continuous-operator-send'), 10));
 ok('예측 predictive-daily = 3', () => assert.strictEqual(getCreditCost('predictive-daily'), 3));
-ok('모바일DM 생성(돌려보기) dm-ai-generate = 3', () => assert.strictEqual(getCreditCost('dm-ai-generate'), 3));
-ok('모바일DM 발행(확정) dm-builder = 30', () => assert.strictEqual(getCreditCost('dm-builder'), 30));
+ok('모바일DM 생성(돌려보기) dm-ai-generate = 5', () => assert.strictEqual(getCreditCost('dm-ai-generate'), 5));
+ok('모바일DM 발행 dm-builder = 100', () => assert.strictEqual(getCreditCost('dm-builder'), 100));
 ok('인앱 생성(돌려보기) inapp-ai-generator = 3', () => assert.strictEqual(getCreditCost('inapp-ai-generator'), 3));
-ok('인앱 게시(확정) inapp-publish = 15', () => assert.strictEqual(getCreditCost('inapp-publish'), 15));
+ok('인앱 게시 inapp-publish = 100', () => assert.strictEqual(getCreditCost('inapp-publish'), 100));
+ok('이메일 발행 email-ai-publish = 50', () => assert.strictEqual(getCreditCost('email-ai-publish'), 50));
+ok('인터랙션 발행 dm-interaction-publish = 120', () => assert.strictEqual(getCreditCost('dm-interaction-publish'), 120));
+ok('꾸미기 ai-operator-decorate = 3', () => assert.strictEqual(getCreditCost('ai-operator-decorate'), 3));
+ok('여정 운영 journey-operation = 10', () => assert.strictEqual(getCreditCost('journey-operation'), 10));
 ok('인앱 빠른액션(다듬기) inapp-quick-action = 1', () => assert.strictEqual(getCreditCost('inapp-quick-action'), 1));
 ok('문안·분석 generate-messages = 5', () => assert.strictEqual(getCreditCost('generate-messages'), 5));
 ok('직접발송 다듬기 refine-direct = 1', () => assert.strictEqual(getCreditCost('refine-direct'), 1));
@@ -94,5 +100,23 @@ ok('source 없음(null/undefined) = 0', () => {
   assert.strictEqual(getCreditCost(null), 0);
   assert.strictEqual(getCreditCost(undefined), 0);
 });
+
+console.log('[ai-credit-calc] dailyDbAnalysisCredits (DB 규모 일일 분석)');
+ok('10만 = 3', () => assert.strictEqual(dailyDbAnalysisCredits(100000), 3));
+ok('≤10만(2만) = 3', () => assert.strictEqual(dailyDbAnalysisCredits(20000), 3));
+ok('20만 = 5 (4.5 반올림)', () => assert.strictEqual(dailyDbAnalysisCredits(200000), 5));
+ok('30만 = 6', () => assert.strictEqual(dailyDbAnalysisCredits(300000), 6));
+ok('80만 = 14 (13.5 반올림)', () => assert.strictEqual(dailyDbAnalysisCredits(800000), 14));
+ok('100만 = 17 (16.5 반올림)', () => assert.strictEqual(dailyDbAnalysisCredits(1000000), 17));
+ok('300만 = 47 (46.5 반올림)', () => assert.strictEqual(dailyDbAnalysisCredits(3000000), 47));
+ok('0명 = 0', () => assert.strictEqual(dailyDbAnalysisCredits(0), 0));
+ok('블록 경계 10만+1 = 5', () => assert.strictEqual(dailyDbAnalysisCredits(100001), 5));
+
+console.log('[ai-credit-calc] isOperationSource (마이너스 허용군)');
+ok('journey-operation = true', () => assert.strictEqual(isOperationSource('journey-operation'), true));
+ok('continuous-operator-send = true', () => assert.strictEqual(isOperationSource('continuous-operator-send'), true));
+ok('predictive-daily = false', () => assert.strictEqual(isOperationSource('predictive-daily'), false));
+ok('dm-builder = false', () => assert.strictEqual(isOperationSource('dm-builder'), false));
+ok('null = false', () => assert.strictEqual(isOperationSource(null), false));
 
 console.log(`\n${passed} assertions passed`);

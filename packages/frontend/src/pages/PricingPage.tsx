@@ -3,10 +3,10 @@ import { useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../stores/authStore';
 import { formatDate } from '../utils/formatDate';
 import { COMPANY_PHONE, COMPANY_PHONE_TEL } from '../constants/company';
-import { Sparkles, Users, Server, Cpu, Check } from 'lucide-react';
+import { Sparkles, Users, Server, Cpu } from 'lucide-react';
 import CreditSummaryBar from '../components/credit/CreditSummaryBar';
 import CreditRechargeModal from '../components/credit/CreditRechargeModal';
-import { PLAN_INFRA, creditConversions, planBonusPct, COMMON_SERVICE_LINE } from '../constants/credit';
+import { PLAN_INFRA, planBonusPct } from '../constants/credit';
 import { useToast } from '../components/ToastProvider';
 
 interface Plan {
@@ -432,7 +432,6 @@ export default function PricingPage() {
             // 종량제 크레딧 시각화 (전부 실제 plan 데이터 — 임의 상수 없음)
             const credits = Number(plan.ai_credits_per_month) || 0;
             const creditPct = Math.max(4, Math.round((credits / maxCredits) * 100));
-            const conv = creditConversions(credits);
             const bonusPct = planBonusPct(Number(plan.monthly_price) || 0, credits);
             const infra = PLAN_INFRA[plan.plan_code] || { label: '고성능 공유 서버', benefit: '당사 IDC 고성능 서버를 멀티테넌트로 사용', premium: false };
             const InfraIcon = infraIcon(plan.plan_code);
@@ -481,11 +480,7 @@ export default function PricingPage() {
                 </div>
 
                 <div className="p-4 flex-1 flex flex-col">
-                  <div className="text-xs text-gray-500 mb-3">
-                    관리 가능 DB <span className="font-semibold text-gray-900">{plan.plan_code === 'ENTERPRISE' ? '제한없음' : `${formatNumber(plan.max_customers)}명`}</span>
-                  </div>
-
-                  {/* 월 AI 크레딧 — 히어로 + 크레딧 환산(능력 기반) */}
+                  {/* 월 AI 크레딧 — 히어로 */}
                   {credits > 0 ? (
                     <div className="rounded-xl border border-violet-100 bg-violet-50/40 p-3 mb-3">
                       <div className="flex items-center justify-between">
@@ -500,9 +495,6 @@ export default function PricingPage() {
                       </div>
                       <div className="mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-violet-100">
                         <div className="h-full rounded-full bg-gradient-to-r from-violet-500 to-fuchsia-500" style={{ width: `${creditPct}%` }} />
-                      </div>
-                      <div className="mt-2 text-[11px] leading-relaxed text-slate-500">
-                        <span className="text-slate-400">이 크레딧으로</span> 풀분석 <b className="text-slate-700">{formatNumber(conv.fullAnalysis)}</b>회 · DM <b className="text-slate-700">{formatNumber(conv.dm)}</b>건 · 문안 <b className="text-slate-700">{formatNumber(conv.copy)}</b>건
                       </div>
                     </div>
                   ) : (
@@ -523,12 +515,6 @@ export default function PricingPage() {
                     <div className="mt-1 text-[10px] leading-snug text-slate-400">{infra.benefit}</div>
                   </div>
 
-                  {/* 공통 — 스타터부터 전 기능 동일 */}
-                  <div className="flex items-start gap-1.5 text-[11px] text-slate-500">
-                    <Check className="mt-0.5 h-3.5 w-3.5 flex-shrink-0 text-emerald-500" />
-                    <span>{COMMON_SERVICE_LINE}</span>
-                  </div>
-
                   <div className="mt-auto pt-4">
                     {isCurrentPlan ? (
                       <button
@@ -543,13 +529,6 @@ export default function PricingPage() {
                         className="w-full py-2 px-4 bg-yellow-50 text-yellow-600 border border-yellow-200 rounded-lg cursor-not-allowed text-sm"
                       >
                         신청 대기 중
-                      </button>
-                    ) : plan.max_customers < Number(companyInfo?.current_customers || 0) ? (
-                      <button
-                        disabled
-                        className="w-full py-2 px-4 bg-gray-100 text-gray-400 rounded-lg cursor-not-allowed text-sm"
-                      >
-                        현재 DB 초과
                       </button>
                     ) : isUpgrade ? (
                       <button

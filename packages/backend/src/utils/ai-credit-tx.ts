@@ -14,6 +14,7 @@ import {
   splitDeduction,
   buildIdempotencyKey,
   kstMonthTag,
+  isOperationSource,
 } from './ai-credit-calc';
 
 export class InsufficientCreditError extends Error {
@@ -80,21 +81,26 @@ export async function applyResetIfNeeded(client: any, companyId: string, row: an
 
   const planCredits = Number(row.plan_credits) || 0;
   const purchased = Number(row.purchased) || 0;
+  // ★ v2 음수 상계 — 지난달 운영 과금(여정·자동마케팅 실행)으로 base가 음수면 이번달 grant에서 그만큼 차감(덮어쓰기 X).
+  //   양수 잔액은 이월 안 함(기존 동작 유지 = 미사용분 소멸). carriedBase = grant + min(0, 지난 base).
+  const prevBase = Number(row.base) || 0;
+  const carriedBase = planCredits + Math.min(0, prevBase);
   await client.query(
     `UPDATE companies
         SET ai_credits_base_remaining = $2,
             ai_credits_reset_at = NOW()
       WHERE id = $1::uuid`,
-    [companyId, planCredits]
+    [companyId, carriedBase]
   );
+  // amount = 월 grant(gross), balance_base_after = 상계 후 실제 base(carriedBase). 둘의 차 = 지난달 음수 상계분.
   await client.query(
     `INSERT INTO ai_credit_transactions
        (company_id, type, amount, bucket, source, idempotency_key, balance_base_after, balance_purchased_after)
-     VALUES ($1::uuid, 'reset', $2, 'base', 'monthly-reset', $3, $2, $4)
+     VALUES ($1::uuid, 'reset', $2, 'base', 'monthly-reset', $3, $4, $5)
      ON CONFLICT (idempotency_key) DO NOTHING`,
-    [companyId, planCredits, `reset:${companyId}:${kstMonthTag(now)}`, purchased]
+    [companyId, planCredits, `reset:${companyId}:${kstMonthTag(now)}`, carriedBase, purchased]
   );
-  return { ...row, base: planCredits, reset_at: now.toISOString() };
+  return { ...row, base: carriedBase, reset_at: now.toISOString() };
 }
 
 /**
@@ -136,8 +142,12 @@ export async function _deductWithClient(client: any, opts: DeductOpts, now: Date
   const row = await applyResetIfNeeded(client, opts.companyId, locked, now);
   const base = Number(row.base) || 0;
   const purchased = Number(row.purchased) || 0;
-  // ★ D227+ 후불 추가 사용: billing_type='postpaid'면 잔액을 한도까지 음수 허용(월말 청구). 선불은 0 → 0에서 차단.
-  const overageAllowed = String(row.billing_type) === 'postpaid' ? Math.max(0, Number(row.overage_limit) || 0) : 0;
+  // ★ v2 운영 과금(여정·자동마케팅 실행) = 활성 자산이라 마이너스 허용(−1개월 grant 상한). 다음달 grant에서 상계(applyResetIfNeeded).
+  //   그 외(분석·생성·발행) = 후불(postpaid)이면 overage_limit까지, 선불은 0에서 차단(기존 동작).
+  const planCredits = Number(row.plan_credits) || 0;
+  const overageAllowed = isOperationSource(opts.source)
+    ? planCredits
+    : (String(row.billing_type) === 'postpaid' ? Math.max(0, Number(row.overage_limit) || 0) : 0);
   const { fromBase, fromPurchased, shortfall } = splitDeduction(base, purchased, opts.cost);
   if ((base + purchased) - opts.cost < -overageAllowed) {
     await client.query('ROLLBACK');

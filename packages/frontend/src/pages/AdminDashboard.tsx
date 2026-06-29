@@ -292,6 +292,7 @@ const [messageDetailContent, setMessageDetailContent] = useState<{ name: string;
   const [depositTarget, setDepositTarget] = useState<any>(null);
   const [depositAdminNote, setDepositAdminNote] = useState('');
   const [creditRequests, setCreditRequests] = useState<any[]>([]); // AI 크레딧 충전 요청 (후불 승인 대기)
+  const [creditRiskCompanies, setCreditRiskCompanies] = useState<any[]>([]); // 크레딧 위험 회사 (소진·마이너스 — v2)
   // 크레딧 사용 이력 (전체 회사 — 크레딧 관리 탭)
   const [creditTxAll, setCreditTxAll] = useState<any[]>([]);
   const [creditTxPage, setCreditTxPage] = useState(1);
@@ -440,7 +441,7 @@ const [emailSending, setEmailSending] = useState(false);
 useEffect(() => { if (activeTab === 'billing') { loadBillings(); loadInvoices(); } }, [activeTab]);
 useEffect(() => { if (activeTab === 'billing') loadBillings(); }, [filterYear]);
 useEffect(() => { if (activeTab === 'deposits') loadChargeManagement(1); }, [activeTab, chargeTxCompanyFilter, chargeTxTypeFilter, chargeTxMethodFilter, chargeTxStartDate, chargeTxEndDate]);
-useEffect(() => { if (activeTab === 'deposits' || activeTab === 'credits') loadCreditRequests(); if (activeTab === 'credits') loadAllCreditTx(1); }, [activeTab]);
+useEffect(() => { if (activeTab === 'deposits' || activeTab === 'credits') loadCreditRequests(); if (activeTab === 'credits') { loadAllCreditTx(1); loadCreditRisk(); } }, [activeTab]);
 useEffect(() => { loadCreditRequests(); }, []);  // 크레딧 관리 알람 badge 상시 표시용 mount 로드
 useEffect(() => { if (activeTab === 'stats') loadSendStats(1); }, [activeTab]);
 useEffect(() => { if (activeTab === 'syncAgents') loadSyncAgents(); }, [activeTab]);
@@ -1445,6 +1446,14 @@ const handleSendBillingEmail = async () => {
       const res = await fetch('/api/admin/credit-requests?status=pending', { headers: { Authorization: `Bearer ${token}` } });
       if (res.ok) { const d = await res.json(); setCreditRequests(d.requests || []); }
     } catch (e) { console.error('크레딧 충전 요청 로드 실패:', e); }
+  };
+
+  const loadCreditRisk = async () => {
+    try {
+      const token = localStorage.getItem('token');
+      const res = await fetch('/api/admin/credit-risk-companies', { headers: { Authorization: `Bearer ${token}` } });
+      if (res.ok) { const d = await res.json(); setCreditRiskCompanies(d.companies || []); }
+    } catch (e) { console.error('크레딧 위험 회사 로드 실패:', e); }
   };
 
   const handleApproveCreditRequest = (cr: any) => {
@@ -3674,6 +3683,40 @@ const handleApproveRequest = async (id: string) => {
                       </div>
                     </div>
                   ))}
+                </div>
+              )}
+            </div>
+
+            {/* 크레딧 위험 회사 — 소진·마이너스·상한 근접 (해지방어·업셀 레이더, v2) */}
+            <div className="bg-rose-50 border border-rose-200 rounded-lg p-4">
+              <div className="flex items-center justify-between mb-3 flex-wrap gap-1">
+                <h3 className="font-semibold text-rose-800">크레딧 위험 회사 {creditRiskCompanies.length}건</h3>
+                <span className="text-[11px] text-rose-500">소진 임박·0·마이너스 — 업셀/해지방어 대상</span>
+              </div>
+              {creditRiskCompanies.length === 0 ? (
+                <p className="text-sm text-rose-600/80">위험 회사가 없습니다.</p>
+              ) : (
+                <div className="space-y-2">
+                  {creditRiskCompanies.map((co) => {
+                    const badge = co.risk === 'negative'
+                      ? { t: co.nearCap ? '마이너스 · 상한 근접' : '마이너스', c: 'bg-rose-600 text-white' }
+                      : co.risk === 'depleted'
+                        ? { t: '소진(0)', c: 'bg-rose-200 text-rose-800' }
+                        : { t: '소진 임박', c: 'bg-amber-200 text-amber-800' };
+                    return (
+                      <div key={co.id} className="flex items-center justify-between bg-white rounded-lg px-4 py-2.5 border border-rose-100 flex-wrap gap-2">
+                        <div className="flex items-center gap-3 flex-wrap">
+                          <span className={`px-2 py-0.5 rounded text-xs font-medium ${badge.c}`}>{badge.t}</span>
+                          <span className="font-medium text-gray-900">{co.companyName}</span>
+                          <span className="text-xs text-gray-400">{co.planName}</span>
+                        </div>
+                        <div className="flex items-center gap-4 text-sm flex-shrink-0">
+                          <span className={`font-bold tabular-nums ${co.total < 0 ? 'text-rose-600' : 'text-gray-700'}`}>잔액 {Number(co.total).toLocaleString()}</span>
+                          <span className="text-xs text-gray-400">월 {Number(co.planCredits).toLocaleString()}</span>
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
               )}
             </div>

@@ -1,4 +1,4 @@
-import { Sparkles, Route, Smartphone, Layers, PenLine, Wand2, Repeat, Play, Send, type LucideIcon } from 'lucide-react';
+import { Sparkles, Route, Smartphone, Layers, PenLine, Wand2, Repeat, Play, Send, Mail, type LucideIcon } from 'lucide-react';
 
 /**
  * 종량제 크레딧 공용 상수 (D229+ UI 폴리시).
@@ -14,19 +14,21 @@ export interface CreditTaskCost {
 }
 
 /**
- * 작업당 AI 크레딧 단가 — 백엔드 CREDIT_COST_MAP 기준 (가치 기반 재설계, 1크레딧 = 500원).
- *  풀분석 300 · 여정 생성 3·설계 150 · 자동마케팅 200·발송 3 · DM 생성 3·발행 30 · 인앱 생성 3·게시 15 · 문안·분석 5 · 다듬기·질문 1.
+ * 작업당 AI 크레딧 단가 — 백엔드 CREDIT_COST_MAP 기준 (가치 기반 v2 2026-06-30, 1크레딧 = 500원).
+ *  풀분석 300 · 자동마케팅 200·발송 10 · 여정 활성화 200·운영 10 · DM 발행 100 · 인앱 게시 100 · 이메일 발행 50 · 인터랙션 발행 120 · 문안·분석 5 · 꾸미기 3 · 생성·돌려보기 3 · 다듬기·질문 1.
  *  스팸필터 테스트는 비대상(0, 미표기).
  */
 export const CREDIT_TASK_COSTS: CreditTaskCost[] = [
   { key: 'full', label: '풀분석', cost: 300, icon: Sparkles },
   { key: 'auto', label: '자동 마케팅', cost: 200, icon: Repeat },
-  { key: 'journey', label: '여정 설계', cost: 150, icon: Route },
-  { key: 'dm', label: 'DM 발행', cost: 30, icon: Smartphone },
-  { key: 'inapp', label: '인앱 게시', cost: 15, icon: Layers },
+  { key: 'journey', label: '여정 활성화', cost: 200, icon: Route },
+  { key: 'dm', label: 'DM 발행', cost: 100, icon: Smartphone },
+  { key: 'inapp', label: '인앱 게시', cost: 100, icon: Layers },
+  { key: 'email', label: '이메일 발행', cost: 50, icon: Mail },
+  { key: 'operation', label: '여정·운영 발송', cost: 10, icon: Send },
   { key: 'copy', label: '문안·분석', cost: 5, icon: PenLine },
+  { key: 'decorate', label: '꾸미기', cost: 3, icon: Wand2 },
   { key: 'generate', label: '생성·돌려보기', cost: 3, icon: Play },
-  { key: 'send', label: '자동 발송', cost: 3, icon: Send },
   { key: 'refine', label: '다듬기·질문', cost: 1, icon: Wand2 },
 ];
 
@@ -41,6 +43,17 @@ export function creditConversions(credits: number) {
     dm: Math.floor(c / 30),
     copy: Math.floor(c / 5),
   };
+}
+
+/**
+ * DB 규모 일일 분석 차감 (연동 회사 매일 1회) — 백엔드 ai-credit-calc.ts dailyDbAnalysisCredits와 1:1.
+ *  매일 = round(3 + (ceil(고객수/10만)−1)×1.5). 0명 = 0. 예: 10만 3 / 20만 5 / 100만 17 / 300만 47.
+ */
+export function dailyDbAnalysisCredits(customerCount: number): number {
+  const n = Math.max(0, Math.floor(Number(customerCount) || 0));
+  if (n === 0) return 0;
+  const blocks = Math.ceil(n / 100000);
+  return Math.round(3 + (blocks - 1) * 1.5);
 }
 
 export interface PlanInfra {
@@ -73,9 +86,9 @@ export const COMMON_SERVICE_LINE = '스타터부터 AI 전 기능 · 전 채널 
  */
 export const CREDIT_SOURCE_LABELS: Record<string, string> = {
   orchestrate: '풀분석', orchestrateWithAI: '풀분석',
-  'ai-operator-propose': '문안·분석',
+  'ai-operator-propose': '문안·분석', 'ai-operator-decorate': '꾸미기',
   'journey-ai-generate': '여정 생성', 'journey-builder-custom': '여정 생성',
-  'journey-activate': '여정 설계',
+  'journey-activate': '여정 활성화', 'journey-operation': '여정 운영',
   'continuous-operator': '자동 마케팅', 'continuous-operator-send': '자동 마케팅 발송',
   'predictive-daily': '예측 분석',
   'dm-ai-generate': '모바일 DM 생성', 'dm-builder': '모바일 DM 발행',
@@ -99,13 +112,14 @@ export const CREDIT_SOURCE_LABELS: Record<string, string> = {
 
 /** 사전 확인 모달 대상 — 큰 확정 차감 source→cost (백엔드 CREDIT_COST_MAP의 확정 차감과 1:1). */
 export const CONFIRM_CREDIT_COSTS: Record<string, number> = {
-  'dm-ai-generate': 5,        // 모바일 DM 생성 (AI 자동 생성 — 생성 전 확인, 범위 넓어 5)
-  'dm-builder': 30,           // DM 발행
-  'email-ai-publish': 30,     // Email AI 캠페인 발송 확정
-  'inapp-publish': 15,        // 인앱 게시
-  'journey-activate': 150,    // 여정 저장
-  'continuous-operator': 200, // 자동 마케팅 저장
-  'orchestrate': 300,         // 풀분석
+  'dm-ai-generate': 5,           // 모바일 DM 생성 (AI 자동 생성 — 생성 전 확인, 범위 넓어 5)
+  'dm-builder': 100,             // DM 발행
+  'dm-interaction-publish': 120, // 인터랙션 발행 (룰렛·추첨·설문)
+  'email-ai-publish': 50,        // Email AI 캠페인 발송 확정 (선심가)
+  'inapp-publish': 100,          // 인앱 게시
+  'journey-activate': 200,       // 여정 활성화
+  'continuous-operator': 200,    // 자동 마케팅 저장
+  'orchestrate': 300,            // 풀분석
 };
 
 /** ai_credit_transactions.type → 한글. deduct는 source 라벨 우선. */

@@ -205,6 +205,54 @@ async function ok(name: string, fn: () => Promise<void>) {
     assert.ok(insert && insert.params && insert.params[9] === 0, 'overage_credits = 0');
   });
 
+  console.log('[ai-credit-tx] v2 운영 source — 마이너스 허용(−1개월 grant 상한)');
+  await ok('journey-operation base0 plan300 cost10 → baseAfter=-10 (음수 허용)', async () => {
+    const client = makeMockClient({ row: { base: 0, purchased: 0, cap: null, reset_at: SAME_MONTH_RESET, plan_credits: 300, billing_type: 'prepaid', overage_limit: 0 } });
+    const r = await _deductWithClient(client, { companyId: 'c1', cost: 10, source: 'journey-operation', aiCallLogId: 'op1' }, NOW);
+    assert.strictEqual(r.deducted, true);
+    assert.strictEqual(r.baseAfter, -10);
+  });
+  await ok('journey-operation base-295 plan300 cost10 → -305 < -300 throw', async () => {
+    const client = makeMockClient({ row: { base: -295, purchased: 0, cap: null, reset_at: SAME_MONTH_RESET, plan_credits: 300, billing_type: 'prepaid', overage_limit: 0 } });
+    let threw: any = null;
+    try {
+      await _deductWithClient(client, { companyId: 'c1', cost: 10, source: 'journey-operation', aiCallLogId: 'op2' }, NOW);
+    } catch (e) { threw = e; }
+    assert.ok(threw instanceof InsufficientCreditError, '−1개월 grant 상한 초과 throw');
+  });
+  await ok('continuous-operator-send도 운영군 — base0 plan300 cost10 → -10', async () => {
+    const client = makeMockClient({ row: { base: 0, purchased: 0, cap: null, reset_at: SAME_MONTH_RESET, plan_credits: 300, billing_type: 'prepaid', overage_limit: 0 } });
+    const r = await _deductWithClient(client, { companyId: 'c1', cost: 10, source: 'continuous-operator-send', aiCallLogId: 'op3' }, NOW);
+    assert.strictEqual(r.baseAfter, -10);
+  });
+  await ok('비운영 source(dm-builder) 선불 base0 → 음수 불가 throw', async () => {
+    const client = makeMockClient({ row: { base: 0, purchased: 0, cap: null, reset_at: SAME_MONTH_RESET, plan_credits: 300, billing_type: 'prepaid', overage_limit: 0 } });
+    let threw: any = null;
+    try {
+      await _deductWithClient(client, { companyId: 'c1', cost: 10, source: 'dm-builder', aiCallLogId: 'op4' }, NOW);
+    } catch (e) { threw = e; }
+    assert.ok(threw instanceof InsufficientCreditError, '비운영 source는 0에서 차단');
+  });
+
+  console.log('[ai-credit-tx] v2 리셋 음수 상계 — 지난달 음수면 이번달 grant에서 차감');
+  await ok('base-150 지난달 plan300 → 리셋 carriedBase=150, cost10 후 baseAfter=140', async () => {
+    const client = makeMockClient({ row: { base: -150, purchased: 0, cap: null, reset_at: '2026-05-01T00:00:00Z', plan_credits: 300 } });
+    const r = await _deductWithClient(client, { companyId: 'c1', cost: 10, source: 'orchestrate', aiCallLogId: 'rc1' }, NOW);
+    assert.strictEqual(r.deducted, true);
+    assert.strictEqual(r.baseAfter, 140);  // 300 + min(0,-150)=150 리셋 → 10 차감 → 140 (상계 동작)
+  });
+  await ok('리셋 INSERT — amount=grant(300), balance_base_after=carriedBase(150)', async () => {
+    const client = makeMockClient({ row: { base: -150, purchased: 0, cap: null, reset_at: '2026-05-01T00:00:00Z', plan_credits: 300 } });
+    await _deductWithClient(client, { companyId: 'c1', cost: 10, source: 'orchestrate', aiCallLogId: 'rc2' }, NOW);
+    const resetInsert = client.calls.find((c) => /INSERT INTO ai_credit_transactions/.test(c.sql) && /monthly-reset/.test(c.sql));
+    assert.ok(resetInsert && resetInsert.params && resetInsert.params[1] === 300 && resetInsert.params[3] === 150, 'reset: amount=300, base_after=150');
+  });
+  await ok('양수 잔액은 이월 안 함 — base200 지난달 plan300 → 리셋 base=300(상계 없음)', async () => {
+    const client = makeMockClient({ row: { base: 200, purchased: 0, cap: null, reset_at: '2026-05-01T00:00:00Z', plan_credits: 300 } });
+    const r = await _deductWithClient(client, { companyId: 'c1', cost: 10, source: 'orchestrate', aiCallLogId: 'rc3' }, NOW);
+    assert.strictEqual(r.baseAfter, 290);  // 300 + min(0,200)=300 → 10 차감 → 290 (양수 잔액 소멸=기존 동작)
+  });
+
   console.log(`\n${passed} assertions passed`);
 })().catch((e) => {
   console.error('FAILED:', e);

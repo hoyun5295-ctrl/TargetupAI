@@ -35,10 +35,9 @@ router.post('/test', authenticate, async (req: Request, res: Response) => {
       return res.status(400).json({ error: '테스트할 메시지를 입력해주세요.' });
     }
 
-    // ★ D53: 요금제 게이팅 — spam_filter_enabled 체크
-    // ★ D78: auto_spam_test_enabled 조회 추가 (프로 이상 무료)
+    // ★ D53: 요금제 게이팅 — spam_filter_enabled 체크 (스타터+ 이용 가능)
     const planCheck = await query(
-      `SELECT p.spam_filter_enabled, p.auto_spam_test_enabled FROM companies c
+      `SELECT p.spam_filter_enabled FROM companies c
        LEFT JOIN plans p ON c.plan_id = p.id
        WHERE c.id = $1`,
       [companyId]
@@ -49,7 +48,6 @@ router.post('/test', authenticate, async (req: Request, res: Response) => {
         code: 'PLAN_FEATURE_LOCKED'
       });
     }
-    const isAutoSpamFree = planCheck.rows[0]?.auto_spam_test_enabled === true;
 
     // 1) stale 테스트 자동 정리 (타임아웃 초과 active → completed/timeout 처리)
     const staleTests = await query(
@@ -162,9 +160,9 @@ router.post('/test', authenticate, async (req: Request, res: Response) => {
     const testId = testResult.rows[0].id;
 
     // ★ 선불 잔액 차감 (테스트폰 × 메시지타입 = 실제 발송 건수)
-    // ★ D78: 프로 이상 (auto_spam_test_enabled) → 스팸필터 테스트 무료
+    // ★ 크레딧 모델 v2 (2026-06-30): "프로 이상 스팸필터 테스트 무료" 전면 폐지 — 전 플랜 항상 과금(현금/후불).
     let spamDeductAmount = 0;
-    if (!isAutoSpamFree) {
+    {
       const spamDeduct = await prepaidDeduct(companyId, spamSendCount, spamDeductType, testId, userId);
       if (!spamDeduct.ok) {
         // 차감 실패 시 테스트 레코드 cancelled 처리

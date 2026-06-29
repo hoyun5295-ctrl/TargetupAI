@@ -18,6 +18,12 @@
 
 ## 사고 이력
 
+### 2026-06-29 — 다크 모달 select 옵션 흰글씨 (네이티브 드롭다운 가독)
+- **현상**: 자동 마케팅 생성 모달에서 select 박스 옵션이 마우스 오버 시에만 보임(흰 바탕에 흰 글씨).
+- **근본**: 다크 테마 select에 `text-white` 적용 → 옵션이 상속받아 OS 기본 흰 배경 드롭다운에서 흰글씨. 앱 전역에 옵션 색 지정한 select 0건이라 모든 다크 select 잠재.
+- **fix**: `index.css` 전역 1곳 `select option, select optgroup { color:#1e293b; background:#fff }`. 개별 컴포넌트 땜질 대신 단일 전역(no_inline_duplication). 닫힌 select는 그대로, 열린 드롭다운만 가독.
+- **교훈**: 네이티브 select/option은 OS가 렌더 — 다크 테마 `text-white`가 옵션까지 상속돼 흰글씨 됨. 전역 `select option` 규칙 1줄로 부류 전체 차단. 새 다크 select마다 옵션 색 따로 안 박아도 됨.
+
 ### 2026-06-25 — 게이트/확인 모달이 다른 모달 뒤에 깔림 (z-index 척도 불일치)
 - **현상**: 모바일DM "AI 초안 생성"(고객 0명) 무반응처럼 보임. 실제론 CustomerDataGate(z-[150])가 DM `ModalBase`(zIndex:1000) 뒤에 렌더돼 안 보임.
 - **근본**: 앱 모달은 z-[55]~[140] 척도인데 **DM `ModalBase`만 zIndex:1000 outlier**. z-[140] 이하 공용 인터럽트 모달(ConfirmModal 140·CreditConfirmModal 120·게이트 150)이 DM 모달 안에서 뜨면 다 깔림. 전수 grep으로 `VersionHistoryModal`·`AbTestModal` 안의 ConfirmModal도 동일하게 깔리던 잠재버그 확인.
