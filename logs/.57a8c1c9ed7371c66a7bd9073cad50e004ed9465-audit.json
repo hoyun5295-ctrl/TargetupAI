@@ -1,0 +1,15 @@
+{
+    "keep": {
+        "days": true,
+        "amount": 30
+    },
+    "auditLog": "C:\\Users\\ceo\\projects\\targetup\\logs\\.57a8c1c9ed7371c66a7bd9073cad50e004ed9465-audit.json",
+    "files": [
+        {
+            "date": 1782800885970,
+            "name": "C:\\Users\\ceo\\projects\\targetup\\logs\\sync-2026-06-30.log",
+            "hash": "2440511e110b49635a813fe12fe6d01824729b9292ade38e1228e151183b33b7"
+        }
+    ],
+    "hashType": "sha256"
+}

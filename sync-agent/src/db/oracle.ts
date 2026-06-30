@@ -162,14 +162,16 @@ export class OracleConnector implements IDbConnector {
     this.ensureConnected();
     const conn = await this.pool.getConnection();
     try {
-      // 소유 테이블 + 시노님(synonym) 모두 노출한다.
+      // 소유 테이블 + 뷰 + 시노님(synonym) 모두 노출한다.
       //   읽기전용 계정은 본인 소유 테이블이 0개이고, 타 스키마(예: ISUSER2)의 테이블을
-      //   시노님으로만 가리키는 경우가 많다(예: CRM_VIEW_USER.고객 → ISUSER2.고객).
+      //   시노님 또는 뷰로만 노출하는 경우가 많다(예: CRM_VIEW_USER.고객 → ISUSER2.고객).
       //   user_tables만 보면 0개 감지되어 선택 자체가 불가했다(2026-06-30 isae 원격 설치 실측).
-      //   데이터 조회(fetch*)는 `FROM "시노님"`을 오라클이 자동 해석하므로 이름만 노출하면 된다.
+      //   데이터 조회(fetch*)는 `FROM "이름"`을 오라클이 시노님/뷰로 자동 해석하므로 이름만 노출하면 된다.
       const result = await conn.execute(
         `SELECT name FROM (
            SELECT table_name AS name FROM user_tables
+           UNION
+           SELECT view_name AS name FROM user_views
            UNION
            SELECT synonym_name AS name FROM user_synonyms
          ) ORDER BY name`,

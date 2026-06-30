@@ -28,15 +28,21 @@ function makeConnector(execImpl: (sql: string, binds?: any) => any) {
 }
 
 describe('OracleConnector 시노님 지원', () => {
-  it('getTables — 소유 테이블 0 + 시노님만 있어도 시노님 목록을 반환한다', async () => {
+  it('getTables — 소유 테이블 + 뷰 + 시노님을 모두 합쳐 노출한다', async () => {
+    let capturedSql = '';
     const connector = makeConnector((sql) => {
-      if (/user_tables/i.test(sql) && /user_synonyms/i.test(sql)) {
+      if (/user_synonyms/i.test(sql) && /user_tables/i.test(sql)) {
+        capturedSql = sql;
         return { rows: [{ NAME: '고객' }, { NAME: '고객구매이력' }] };
       }
       return { rows: [] };
     });
     const tables = await connector.getTables();
     expect(tables).toEqual(['고객', '고객구매이력']);
+    // 세 출처 모두 UNION에 포함되어야 한다(소유 테이블 0인 읽기전용 계정 대응).
+    expect(capturedSql).toMatch(/user_tables/i);
+    expect(capturedSql).toMatch(/user_views/i);
+    expect(capturedSql).toMatch(/user_synonyms/i);
   });
 
   it('getColumns — 시노님이면 실제 소유자/테이블로 all_tab_columns에서 조회한다', async () => {
