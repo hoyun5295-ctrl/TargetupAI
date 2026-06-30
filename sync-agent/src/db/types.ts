@@ -107,3 +107,13 @@ export interface ColumnInfo {
   maxLength?: number;
   isPrimaryKey?: boolean;
 }
+
+/**
+ * 단일 컬럼 PK 이름 반환 (복합 PK·PK 없음이면 null).
+ * ★ 2026-06-30: OFFSET 페이지네이션 안정 정렬 키 선택용 — 무정렬 OFFSET의
+ *   깊은 구간 행 건너뜀/중복(이새식 결함과 동류)을 차단한다.
+ */
+export function singleColumnPk(columns: ColumnInfo[]): string | null {
+  const pks = columns.filter((c) => c.isPrimaryKey);
+  return pks.length === 1 ? pks[0].name : null;
+}

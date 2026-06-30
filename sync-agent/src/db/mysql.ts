@@ -10,6 +10,7 @@
 
 import mysql from 'mysql2/promise';
 import type { IDbConnector, DbConnectionConfig, RawRow, ColumnInfo } from './types';
+import { singleColumnPk } from './types';
 import { getLogger } from '../logger';
 
 const logger = getLogger('db:mysql');
@@ -274,10 +275,13 @@ export class MysqlConnector implements IDbConnector {
       .toLocaleString('sv-SE', { timeZone: 'Asia/Seoul' })
       .replace('T', ' ');
 
+    // ★ 2026-06-30: 동일 타임스탬프가 배치 경계에 몰리면 OFFSET이 건너뜀/중복 → 단일 PK 타이브레이커로 결정적 순서.
+    const pk = await this.resolvePk(tableName);
+    const tieBreak = pk ? `, \`${this.sanitizeIdentifier(pk)}\` ASC` : '';
     const [rows] = await this.pool!.query(
       `SELECT * FROM \`${safeTable}\`
        WHERE \`${safeColumn}\` > ?
-       ORDER BY \`${safeColumn}\` ASC
+       ORDER BY \`${safeColumn}\` ASC${tieBreak}
        LIMIT ? OFFSET ?`,
       [sinceLocal, limit, offset],
     );
@@ -287,12 +291,33 @@ export class MysqlConnector implements IDbConnector {
     return this.fixRowEncoding(result);
   }
 
+  /** 단일 PK 캐시 — 전체 동기화 안정 정렬 키 (매 배치 메타 조회 방지). */
+  private pkCache = new Map<string, string | null>();
+
+  private async resolvePk(tableName: string): Promise<string | null> {
+    const cached = this.pkCache.get(tableName);
+    if (cached !== undefined) return cached;
+    let pk: string | null = null;
+    try {
+      pk = singleColumnPk(await this.getColumns(tableName));
+    } catch {
+      pk = null;
+    }
+    this.pkCache.set(tableName, pk);
+    return pk;
+  }
+
   async fetchAll(tableName: string, limit: number, offset: number): Promise<RawRow[]> {
     this.ensureConnected();
     const safeTable = this.sanitizeIdentifier(tableName);
 
+    // ★ 2026-06-30: OFFSET 페이지네이션은 안정 정렬이 없으면 깊은 구간에서 행 건너뜀/중복.
+    //   단일 PK 기준 ORDER BY로 결정적 순서 보장(없으면 정렬 생략 — 엔진 완전성 가드가 누락 감지).
+    const pk = await this.resolvePk(tableName);
+    const orderBy = pk ? `ORDER BY \`${this.sanitizeIdentifier(pk)}\` ASC` : '';
+
     const [rows] = await this.pool!.query(
-      `SELECT * FROM \`${safeTable}\` LIMIT ? OFFSET ?`,
+      `SELECT * FROM \`${safeTable}\` ${orderBy} LIMIT ? OFFSET ?`,
       [limit, offset],
     );
 

@@ -5,6 +5,7 @@
 
 import sql from 'mssql';
 import type { IDbConnector, DbConnectionConfig, RawRow, ColumnInfo } from './types';
+import { singleColumnPk } from './types';
 import { getLogger } from '../logger';
 
 const logger = getLogger('db:mssql');
@@ -129,6 +130,9 @@ export class MssqlConnector implements IDbConnector {
     // 테이블명/컬럼명은 화이트리스트 검증 후 사용
     const safeTable = this.sanitizeIdentifier(tableName);
     const safeColumn = this.sanitizeIdentifier(timestampColumn);
+    // ★ 2026-06-30: 동일 타임스탬프가 배치 경계에 몰리면 건너뜀/중복 → 단일 PK 타이브레이커로 결정적 순서.
+    const pk = await this.resolvePk(tableName);
+    const tieBreak = pk ? `, [${this.sanitizeIdentifier(pk)}] ASC` : '';
 
     try {
       const result = await this.pool!.request()
@@ -138,7 +142,7 @@ export class MssqlConnector implements IDbConnector {
         .query(`
           -- SQL Server 2008~최신 공통 (OFFSET/FETCH는 2012+ 전용 → 2008에서 실패).
           SELECT * FROM (
-            SELECT *, ROW_NUMBER() OVER (ORDER BY [${safeColumn}] ASC) AS rn_
+            SELECT *, ROW_NUMBER() OVER (ORDER BY [${safeColumn}] ASC${tieBreak}) AS rn_
             FROM [${safeTable}]
             WHERE [${safeColumn}] > @since
           ) t WHERE rn_ > @offset AND rn_ <= @offset + @limit
@@ -173,6 +177,22 @@ export class MssqlConnector implements IDbConnector {
     }
   }
 
+  /** 단일 PK 캐시 — 전체 동기화 안정 정렬 키 (매 배치 메타 조회 방지). */
+  private pkCache = new Map<string, string | null>();
+
+  private async resolvePk(tableName: string): Promise<string | null> {
+    const cached = this.pkCache.get(tableName);
+    if (cached !== undefined) return cached;
+    let pk: string | null = null;
+    try {
+      pk = singleColumnPk(await this.getColumns(tableName));
+    } catch {
+      pk = null;
+    }
+    this.pkCache.set(tableName, pk);
+    return pk;
+  }
+
   async fetchAll(
     tableName: string,
     limit: number,
@@ -181,13 +201,21 @@ export class MssqlConnector implements IDbConnector {
     this.ensureConnected();
     const safeTable = this.sanitizeIdentifier(tableName);
 
+    // ★ 2026-06-30: ROW_NUMBER OVER (ORDER BY (SELECT NULL))은 임의 순번 → 깊은 OFFSET에서
+    //   행 건너뜀/중복. 단일 PK 기준 ORDER BY로 결정적 순서 보장(없으면 기존 임의 순번 유지 —
+    //   엔진 완전성 가드가 누락을 감지). 2008 호환 위해 ROW_NUMBER 유지.
+    const pk = await this.resolvePk(tableName);
+    const orderClause = pk
+      ? `ORDER BY [${this.sanitizeIdentifier(pk)}] ASC`
+      : 'ORDER BY (SELECT NULL)';
+
     const result = await this.pool!.request()
       .input('limit', sql.Int, limit)
       .input('offset', sql.Int, offset)
       .query(`
         -- SQL Server 2008~최신 공통 (OFFSET/FETCH는 2012+ 전용 → 2008에서 실패).
         SELECT * FROM (
-          SELECT *, ROW_NUMBER() OVER (ORDER BY (SELECT NULL)) AS rn_
+          SELECT *, ROW_NUMBER() OVER (${orderClause}) AS rn_
           FROM [${safeTable}]
         ) t WHERE rn_ > @offset AND rn_ <= @offset + @limit
       `);

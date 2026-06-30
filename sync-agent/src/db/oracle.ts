@@ -274,7 +274,7 @@ export class OracleConnector implements IDbConnector {
                      SELECT inner_.*, ROWNUM AS rnum_ FROM (
                        SELECT * FROM "${safeTable}"
                        WHERE "${safeColumn}" > TO_TIMESTAMP(:since, 'YYYY-MM-DD"T"HH24:MI:SS.FF3"Z"')
-                       ORDER BY "${safeColumn}" ASC
+                       ORDER BY "${safeColumn}" ASC, ROWID ASC
                      ) inner_ WHERE ROWNUM <= :maxRow
                    ) WHERE rnum_ > :minRow`;
 

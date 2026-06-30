@@ -28,6 +28,7 @@
 import { query } from '../config/database';
 import { orchestrate } from '../services/ai-orchestrator';
 import { getCompanyCosts } from '../config/defaults';
+import { shouldSkipProposalGeneration } from './operator-proposal-dedup';
 // ★ D177 (2026-05-19): Self-Optimizing Bandit — message variants 생성 + Thompson Sampling
 import { insertProposalVariants, recommendVariantForProposal, recordVariantReward } from './bandit-optimizer';
 // ★ D212+ 정책 (2026-05-23 Harold 명시): CT-64 영역 통합 — 검증 영역 + 담당자 학습
@@ -426,6 +427,22 @@ export async function generateProposalForOperator(operatorId: string): Promise<O
     return null;
   }
 
+  // ★ 2026-06-30: operator당 미처리 추천 1건 원칙 — 이미 발송 예약된 추천(scheduled, 리마인드 제외)이
+  //   있으면 이중 예약 방지로 신규 생성 skip. 다단계 시퀀스 리마인드(meta.is_reminder=true)는 별개 발송이라 제외.
+  const openProps = await query(
+    `SELECT status, COALESCE(proposal_json->'meta'->>'is_reminder', 'false') = 'true' AS is_reminder
+       FROM operator_proposals
+      WHERE operator_id = $1::uuid AND status IN ('pending', 'admin_review', 'scheduled')`,
+    [operator.id],
+  );
+  if (shouldSkipProposalGeneration(
+    openProps.rows.map((r: any) => ({ status: r.status, isReminder: r.is_reminder === true })),
+  )) {
+    console.log(`[ContinuousOperator] ${operator.name} 이미 발송 예약된 추천 존재 → 신규 생성 skip (이중 예약 방지)`);
+    await updateOperatorAfterRun(operator.id, operator.schedule, operator.scheduleTime, 0);
+    return null;
+  }
+
   // 2. 회사 컨텍스트 + 자동 실행 옵션 조회
   const ctxRes = await query(
     `SELECT c.company_name, c.business_type, c.brand_name, c.brand_slogan,
@@ -594,6 +611,15 @@ export async function generateProposalForOperator(operatorId: string): Promise<O
       autoExecuteReason,
       autoExecuteEligible ? scheduledSendAt : null,
     ]
+  );
+
+  // ★ 2026-06-30: operator당 미처리 추천 1건 원칙 — 방금 만든 것 외 직전 미처리(pending/admin_review)는
+  //   만료시켜 "오늘의 추천" 중복 누적을 차단(테스트계정2 = 한 operator에 제안 다수 쌓임 정정).
+  //   'scheduled'(자율발송·리마인드)는 발송 확정분이라 건드리지 않음. operator_proposals엔 updated_at 컬럼 없음 → status만 set.
+  await query(
+    `UPDATE operator_proposals SET status = 'expired'
+      WHERE operator_id = $1::uuid AND status IN ('pending', 'admin_review') AND id <> $2::uuid`,
+    [operator.id, proposalRes.rows[0].id],
   );
 
   // 8. D177 Self-Optimizing — message variants 생성 (Bandit 학습 기반)

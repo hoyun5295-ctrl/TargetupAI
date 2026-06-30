@@ -167,7 +167,7 @@ export class PostgresConnector implements IDbConnector {
     const result = await this.pool.query(
       `SELECT * FROM "${safeTable}"
        WHERE "${safeColumn}" > $1
-       ORDER BY "${safeColumn}" ASC
+       ORDER BY "${safeColumn}" ASC, ctid ASC
        LIMIT $2 OFFSET $3`,
       [since, limit, offset],
     );
