@@ -138,10 +138,12 @@ export async function callAIWithFallback(params: {
     const cacheCreated = usage?.cache_creation_input_tokens || 0;
     const thinkingTag = params.thinking ? ' · Thinking' : '';
     const modelTag = params.model && params.model !== 'sonnet' ? ` · ${params.model.toUpperCase()}` : '';
+    // 실제 적용 모델 가시화 — 배포 후 PM2 로그에서 Sonnet 5 적용 확인용 (response.model = Anthropic이 실제 사용한 모델)
+    const actualModel = (response as any).model || modelName;
     if (cacheRead > 0 || cacheCreated > 0) {
-      console.log(`[AI] Claude 호출 성공${modelTag} (Cache · read ${cacheRead}, created ${cacheCreated}, in ${usage?.input_tokens || 0}, out ${usage?.output_tokens || 0}${thinkingTag})`);
+      console.log(`[AI] Claude 호출 성공 · ${actualModel}${modelTag} (Cache · read ${cacheRead}, created ${cacheCreated}, in ${usage?.input_tokens || 0}, out ${usage?.output_tokens || 0}${thinkingTag})`);
     } else {
-      console.log(`[AI] Claude 호출 성공${modelTag}${thinkingTag}`);
+      console.log(`[AI] Claude 호출 성공 · ${actualModel}${modelTag}${thinkingTag}`);
     }
 
     // ★ D209+ Phase D: 정상 응답 시점 cache 저장 + 통계 INSERT (companyId 박힘 영역만)
