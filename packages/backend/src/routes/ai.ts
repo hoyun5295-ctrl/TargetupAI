@@ -98,6 +98,8 @@ import {
 // ★ D218+ (2026-05-26): 활성화 검증 + 정지 이력 조회
 import { validateJourneyForActivation } from '../utils/journey-pretest-validator';
 import { getPauseLogs } from '../utils/journey-pause-handler';
+// ★ 2026-06-30 여정 일반화 — one_shot 활성 시점 단발 dispatch.
+import { dispatchOneShotJourney } from '../utils/journey-anchor-scheduler';
 // ★ D187-fix3 (2026-05-21): Journey AI Generator — One-shot 자연어 + 시즌 + 회사 메모리
 import { generateJourneyPackage, refineStepMessage } from '../utils/journey-ai-generator';
 // ★ 2026-06-29: 대화형 여정 수정 — 초안 패키지에 자연어 수정 반영
@@ -2522,6 +2524,15 @@ router.post('/operator/journeys', async (req: Request, res: Response) => {
       budgetMonthly,
       allowReentry,
       reentryCooldownDays,
+      // ★ 2026-06-30 여정 일반화 — 시작 방식(start_kind) + 트리거/대상 + 날짜축/one_shot.
+      startKind,
+      triggerEvent,
+      triggerFilters,
+      anchorDate,
+      anchorRecurrence,
+      anchorRecurrenceDay,
+      anchorHourKst,
+      oneShotScheduledAt,
     } = req.body || {};
 
     if (!templateCode || !JOURNEY_TEMPLATES[templateCode as JourneyTemplateCode]) {
@@ -2546,11 +2557,24 @@ router.post('/operator/journeys', async (req: Request, res: Response) => {
       budgetMonthly: budgetMonthly ?? null,
       allowReentry,
       reentryCooldownDays,
+      startKind,
+      triggerEvent,
+      triggerFilters,
+      anchorDate,
+      anchorRecurrence,
+      anchorRecurrenceDay,
+      anchorHourKst,
+      oneShotScheduledAt,
     });
 
     const detail = await getJourneyDetail(companyId, journeyId);
     return res.status(201).json({ success: true, journeyId, detail });
   } catch (err: any) {
+    // ★ db_alter_safety_net — start_kind/anchor_* 등 신규 컬럼 미마이그레이션 시 503 + 운영자 안내(500 노출 X).
+    const cm = err?.message || '';
+    if (cm.includes('column') && cm.includes('does not exist')) {
+      return res.status(503).json({ success: false, error: 'DB 마이그레이션 필요 — 운영자에게 journeys/journey_steps 여정 일반화 ALTER 실행 요청 의무', code: 'DB_MIGRATION_PENDING' });
+    }
     console.error('[Journeys create] 오류:', err);
     return res.status(500).json({ success: false, error: err?.message || '여정 생성 실패' });
   }
@@ -2670,7 +2694,7 @@ router.post('/operator/journeys/:id/activate', async (req: Request, res: Respons
     let stRow;
     try {
       stRow = await query(
-        `SELECT status, last_pretest_passed_at FROM journeys WHERE id = $1::uuid AND company_id = $2::uuid`,
+        `SELECT status, last_pretest_passed_at, start_kind FROM journeys WHERE id = $1::uuid AND company_id = $2::uuid`,
         [req.params.id, companyId]
       );
     } catch (colErr: any) {
@@ -2692,6 +2716,17 @@ router.post('/operator/journeys/:id/activate', async (req: Request, res: Respons
 
     const result = await activateJourney(companyId, req.params.id, userId);
     if (!result.ok) return res.status(400).json({ success: false, error: result.reason || '활성화 실패' });
+
+    // ★ 2026-06-30 여정 일반화 — one_shot은 최초 활성 시 대상군에 1회 단발 발송 enqueue(즉시/예약).
+    //   firstActivation 1회만(멱등: dispatchOneShotJourney가 execution 존재 시 skip). 발송·돈 영향 격리(try-catch).
+    if (firstActivation && String(stRow.rows[0].start_kind) === 'one_shot') {
+      try {
+        const dr = await dispatchOneShotJourney(companyId, req.params.id);
+        console.log(`[Journeys activate] one_shot dispatch journey=${req.params.id} enqueued=${dr.enqueued} reason=${dr.reason || ''}`);
+      } catch (dispErr: any) {
+        console.error('[Journeys activate] one_shot dispatch 실패:', dispErr?.message);
+      }
+    }
 
     if (firstActivation) {
       await deductCreditSafe({

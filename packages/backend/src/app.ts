@@ -81,6 +81,7 @@ import { startContinuousOperatorScheduler } from './utils/continuous-operator';
 // ★ D187 (2026-05-20): Journey Builder Lite — 5분 주기 due execution 처리 + 5분 주기 trigger 매칭
 import { startJourneyExecutor } from './utils/journey-executor';
 import { startJourneyTriggerWatcher } from './utils/journey-trigger-watcher';
+import { startJourneyAnchorScheduler } from './utils/journey-anchor-scheduler';
 // ★ D197 (2026-05-22) Phase B-2: Predictive Suite — 1시간 주기 cron + 회사 customer 예측 점수 자동 갱신
 import { startPredictiveWorker } from './utils/predictive-worker';
 // ★ D210+ Phase 3 (2026-05-23 Harold 명시): 자동 재진입 worker — 6시간 주기 + 회사 admin 명시 활성 정합 (default OFF)
@@ -377,6 +378,8 @@ app.listen(PORT, () => {
   //   AI_OPERATOR_ALLOWED_USERS=hoyun 게이팅 (routes/ai.ts 영역)
   startJourneyExecutor();
   startJourneyTriggerWatcher();
+  // ★ 2026-06-30 여정 일반화 — 날짜축 여정(date_anchor) 스케줄러: 지정일 D-N 묶음 발송 + D-0 후 정지/반복.
+  startJourneyAnchorScheduler();
 
   // ★ D217+ (2026-05-26 Harold 명시 진단 정정): 카카오 templateCode 동기화 (30분 주기)
   //   옛 D147 영역 = 검수 통과 후 IMC 안 진정 카카오 templateCode 영역 = 한줄로 안 동기화 누락 사고 정정

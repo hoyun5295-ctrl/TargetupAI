@@ -218,6 +218,40 @@ export async function selectJourneyTargetCustomerIds(
   }
 }
 
+/**
+ * ★ 2026-06-30 여정 일반화 — date_anchor/one_shot 대상(audience) 추출.
+ *   안전필터 항상 + (옵션) points_min + (옵션) customer_conditions. execution 안티조인 없음
+ *   (날짜축은 step·날짜 단위 발송이라 journey_anchor_dispatch가 멱등을 담당 — execution dedup이 D-3 대상을 빼면 안 됨).
+ *   no_target_auto_relax: 0건이면 빈 배열(자동완화 없음). 회사 격리 company_id 필수.
+ */
+export async function selectAnchorAudienceIds(
+  companyId: string,
+  triggerFilters: Record<string, any>,
+  limit: number,
+): Promise<string[]> {
+  const f = triggerFilters || {};
+  const params: any[] = [companyId];
+  let pointsClause = '';
+  const pmin = Number(f.points_min);
+  if (Number.isFinite(pmin) && pmin > 0) {
+    params.push(String(Math.floor(pmin)));
+    pointsClause = `AND c.points IS NOT NULL AND c.points >= $${params.length}::int`;
+  }
+  const cond = applyCustomerConditions(f.customer_conditions || [], f.logic || 'AND', params);
+  params.push(String(limit));
+  const r = await query(
+    `SELECT id AS customer_id FROM customers c
+     WHERE c.company_id = $1::uuid
+       AND ${buildJourneySafetyFilter('c')}
+       ${pointsClause}
+       ${cond ? ` AND ${cond}` : ''}
+     ORDER BY c.id
+     LIMIT $${params.length}::int`,
+    params,
+  );
+  return r.rows.map((x: any) => x.customer_id);
+}
+
 // ★ Phase 3: 이벤트 커서 — cursorStart+windowEnd 주어지면(라이브) 그 창의 이벤트 전수,
 //   없으면(미리보기) 최근 7일 추정. 라이브는 trigger-watcher가 커서/윈도우를 넘기고 처리 후 커서 전진.
 export async function selectCdpEvent(

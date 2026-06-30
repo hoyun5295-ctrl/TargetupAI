@@ -12,6 +12,8 @@ import {
   RotateCcw, Activity, MousePointerClick, Filter as FilterIcon, TrendingUp, AlertTriangle, Eye,
   // ★ D211+ Phase 3 (2026-05-23 Harold 명시): 보관함 + 영구 삭제 아이콘
   Archive, ArchiveRestore,
+  // ★ 2026-06-30 여정 일반화 SP-B: 날짜축 여정 아이콘
+  CalendarClock,
 } from 'lucide-react';
 import JourneyVariantsEditor from '../components/journey/JourneyVariantsEditor';
 import JourneyMmsUploader from '../components/journey/JourneyMmsUploader';
@@ -30,6 +32,7 @@ import { useCustomerDataGate, CustomerDataRequiredBanner, CustomerDataRequiredMo
 import JourneyStepNotifyToggle from '../components/journey/JourneyStepNotifyToggle';
 import AlimtalkChannelPanel, { type AlimtalkSenderProfile, type AlimtalkTemplate, type AlimtalkChannelState } from '../components/alimtalk/AlimtalkChannelPanel';
 import InfoAlertJourneyBuilder, { type InfoAlertBuildResult } from '../components/journey/InfoAlertJourneyBuilder';
+import DateAnchorJourneyBuilder, { type DateAnchorBuildResult } from '../components/journey/DateAnchorJourneyBuilder';
 import { detectLiquidSyntax, renderLiquid, flattenCustomerForLiquid, SAMPLE_CUSTOMERS } from '../utils/liquid-templating';
 // ★ D210+ Phase 2-fix6 (Harold 명시 2026-05-23): 변수 하이라이트 + 머지 미리보기 컨트롤타워.
 import { highlightVars, mergeAndHighlightVars, mergeVarsPlain } from '../utils/highlightVars';
@@ -279,6 +282,8 @@ interface AIGeneratedStep {
   alimtalkNextSubject?: string;
   // ★ D188 Phase 2-B-2 (2026-05-21): MMS (channel='mms') 영역.
   mmsImagePaths?: string[];
+  // ★ 2026-06-30 여정 일반화 — date_anchor 스텝 D-N(앵커 N일 전, 0=당일).
+  anchorOffsetDays?: number;
 }
 
 interface AIJourneyPackage {
@@ -293,6 +298,13 @@ interface AIJourneyPackage {
   budgetMonthlyHint: number | null;
   thresholdCostHint: number | null;
   reasoning: string;
+  // ★ 2026-06-30 여정 일반화 — 시작 방식(start_kind) + 날짜축/one_shot. 미설정(기존 마케팅 여정)이면 저장 시 미전송 = 옛 동작 그대로.
+  startKind?: 'event' | 'standing' | 'date_anchor' | 'one_shot';
+  anchorDate?: string | null;
+  anchorRecurrence?: string | null;
+  anchorRecurrenceDay?: number | null;
+  anchorHourKst?: number | null;
+  oneShotScheduledAt?: string | null;
 }
 
 interface RefineCandidate {
@@ -434,7 +446,7 @@ export default function JourneysPage() {
   const [sampleCustomerFields, setSampleCustomerFields] = useState<Record<string, any> | null>(null);
   // ★ D210+ Phase 2-fix10 (Harold 명시 2026-05-23): 옛 showMergedPreview state 폐기 — 토글 영역 X, 위/아래 영역 명확 분리.
   const [aiPkg, setAiPkg] = useState<AIJourneyPackage | null>(null);
-  const [purpose, setPurpose] = useState<'marketing' | 'info-alert'>('marketing');
+  const [purpose, setPurpose] = useState<'marketing' | 'info-alert' | 'date-anchor'>('marketing');
   const [reviewName, setReviewName] = useState('');
   const [reviewCallback, setReviewCallback] = useState('');
   const [reviewUseStorePhone, setReviewUseStorePhone] = useState(false);
@@ -963,11 +975,16 @@ export default function JourneysPage() {
   // ════════ 저장 + 활성화 ════════
   // ★ 2026-06-22: 정보 알림 빌더 결과 → aiPkg(kakao step)로 조립 → 기존 review 흐름 재사용
   const handleInfoAlertBuild = (result: InfoAlertBuildResult) => {
+    const reasonByKind: Record<string, string> = {
+      event: '정보 알림 — 거래 이벤트 발생 시 카카오 승인 템플릿 발송',
+      one_shot: '정보 알림 — 대상군에 카카오 승인 템플릿 1회 발송',
+      standing: '정보 알림 — 조건 충족 고객에게 카카오 승인 템플릿 상시 발송',
+    };
     const pkg: AIJourneyPackage = {
       name: result.name,
       templateCode: result.templateCode,
       triggerEvent: result.triggerEvent,
-      triggerFilters: {},
+      triggerFilters: result.triggerFilters || {},
       steps: [{
         stepOrder: 1,
         stepType: 'message',
@@ -984,12 +1001,49 @@ export default function JourneysPage() {
         alimtalkNextContents: result.step.alimtalkNextContents,
         alimtalkNextSubject: result.step.alimtalkNextSubject,
       }],
-      allowReentry: true,
+      allowReentry: result.startKind === 'event' || result.startKind === 'standing',
       reentryCooldownDays: 0,
       callbackNumberHint: null,
       budgetMonthlyHint: null,
       thresholdCostHint: null,
-      reasoning: '정보 알림 — 거래 이벤트 트리거 + 카카오 승인 템플릿',
+      reasoning: reasonByKind[result.startKind] || '정보 알림 — 카카오 승인 템플릿',
+      startKind: result.startKind,
+      oneShotScheduledAt: result.oneShotScheduledAt,
+    };
+    setAiPkg(pkg);
+    setPurpose('marketing');
+    setView('review');
+  };
+
+  // ★ 2026-06-30 여정 일반화 SP-B — 날짜축 빌더 결과 → AIJourneyPackage(date_anchor) 조립 → 검토 흐름 재사용.
+  const handleDateAnchorBuild = (result: DateAnchorBuildResult) => {
+    const pkg: AIJourneyPackage = {
+      name: result.name,
+      templateCode: 'custom',
+      triggerEvent: 'custom',
+      triggerFilters: result.triggerFilters || {},
+      steps: result.steps.map((s, i): AIGeneratedStep => ({
+        stepOrder: i + 1,
+        stepType: 'message',
+        delayHours: 0,
+        channel: s.channel,
+        messageTemplate: s.messageTemplate,
+        subject: s.subject,
+        isAd: true,
+        stepIntent: `D-${s.anchorOffsetDays}`,
+        anchorOffsetDays: s.anchorOffsetDays,
+      })),
+      allowReentry: false,
+      reentryCooldownDays: null,
+      callbackNumberHint: null,
+      budgetMonthlyHint: null,
+      thresholdCostHint: null,
+      reasoning: '날짜축 여정 — 기준 날짜 기준 D-N 단계 발송',
+      startKind: 'date_anchor',
+      anchorDate: result.anchorDate,
+      anchorRecurrence: result.anchorRecurrence,
+      anchorRecurrenceDay: result.anchorRecurrenceDay,
+      anchorHourKst: result.anchorHourKst,
     };
     setAiPkg(pkg);
     setPurpose('marketing');
@@ -1050,6 +1104,18 @@ export default function JourneysPage() {
         allowReentry: aiPkg.allowReentry,
         reentryCooldownDays: aiPkg.reentryCooldownDays,
       };
+      // ★ 2026-06-30 여정 일반화 — 시작 방식이 설정된 신규 흐름(SP-A 알림톡 / SP-B 날짜축)만 트리거·앵커 오버라이드 전송.
+      //   미설정(기존 마케팅 여정)이면 미전송 = 백엔드가 템플릿 기본 트리거 사용(옛 동작 byte 불변).
+      if (aiPkg.startKind) {
+        body.startKind = aiPkg.startKind;
+        body.triggerEvent = aiPkg.triggerEvent;
+        body.triggerFilters = aiPkg.triggerFilters || {};
+        body.anchorDate = aiPkg.anchorDate ?? null;
+        body.anchorRecurrence = aiPkg.anchorRecurrence ?? null;
+        body.anchorRecurrenceDay = aiPkg.anchorRecurrenceDay ?? null;
+        body.anchorHourKst = aiPkg.anchorHourKst ?? null;
+        body.oneShotScheduledAt = aiPkg.oneShotScheduledAt ?? null;
+      }
       const res = await fetch('/api/ai/operator/journeys', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token()}` },
@@ -1327,6 +1393,14 @@ export default function JourneysPage() {
                   <Bell className="w-6 h-6 text-teal-300 mb-2" />
                   <div className="text-sm font-semibold">정보 알림</div>
                   <div className="text-[11px] text-white/55 mt-0.5">알림톡 · 거래 발생 시 승인 템플릿</div>
+                </button>
+                <button
+                  onClick={() => setPurpose('date-anchor')}
+                  className="rounded-2xl border border-indigo-400/40 bg-indigo-500/10 hover:bg-indigo-500/15 p-4 text-left transition-colors flex flex-col justify-center min-h-[88px]"
+                >
+                  <CalendarClock className="w-6 h-6 text-indigo-300 mb-2" />
+                  <div className="text-sm font-semibold">날짜축 여정</div>
+                  <div className="text-[11px] text-white/55 mt-0.5">지정일 기준 D-7·D-3·D-1·D-0 단계 발송</div>
                 </button>
               </div>
             </div>
@@ -2924,6 +2998,36 @@ export default function JourneysPage() {
                 customerFieldOptions={customerFields}
                 hasMallIntegration={hasMallIntegration}
                 onBuild={handleInfoAlertBuild}
+                onBack={() => setPurpose('marketing')}
+              />
+            </div>
+          </div>
+        </div>,
+        document.body,
+      )}
+
+      {/* 날짜축 여정 — 지정일 D-N 빌더 모달 (2026-06-30 여정 일반화 SP-B) */}
+      {view === 'main' && purpose === 'date-anchor' && createPortal(
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 p-4" onClick={() => setPurpose('marketing')}>
+          <div className="bg-slate-900 border border-white/10 rounded-2xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-hidden flex flex-col text-white" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
+            <div className="flex items-center justify-between p-5 border-b border-white/10 bg-gradient-to-r from-indigo-500/10 via-violet-500/10 to-indigo-500/10">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-indigo-400 to-violet-500 flex items-center justify-center">
+                  <CalendarClock className="w-5 h-5 text-white" />
+                </div>
+                <div>
+                  <h3 className="text-base font-semibold text-white">날짜축 여정 만들기</h3>
+                  <p className="text-[11px] text-white/50 mt-0.5">기준 날짜(예: 포인트 소멸일) 기준 D-N 단계 발송 · D-0 후 정지/반복</p>
+                </div>
+              </div>
+              <button onClick={() => setPurpose('marketing')} className="p-1.5 hover:bg-white/10 rounded-lg transition-colors" aria-label="닫기">
+                <X className="w-4 h-4 text-white/50" />
+              </button>
+            </div>
+            <div className="flex-1 overflow-y-auto p-5">
+              <DateAnchorJourneyBuilder
+                embedded
+                onBuild={handleDateAnchorBuild}
                 onBack={() => setPurpose('marketing')}
               />
             </div>

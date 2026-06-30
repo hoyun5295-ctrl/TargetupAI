@@ -188,3 +188,81 @@ export function computeOptimalSendAt(
   if (utcTarget < earliest.getTime()) utcTarget = Date.UTC(y, m, d + 1, targetHour - 9, 0, 0);
   return shiftToSendableHour(new Date(utcTarget), sendStartHour, sendEndHour);
 }
+
+// ════════════════════════════════════════════════════════════════════
+// ★ 날짜축 여정(date_anchor) — 절대 날짜 기준 타이밍·반복 (2026-06-30 여정 일반화).
+//   순수(now 주입). anchorDate는 KST 달력 날짜(PG date = 자정)로 해석 — UTC 컴포넌트로 산출.
+// ════════════════════════════════════════════════════════════════════
+
+/**
+ * 앵커 스텝 발송 시각 = (anchorDate − offsetDays일)의 hourKst시 KST + 야간가드(shiftToSendableHour).
+ *   "지정일 D-N HH시" 절대 모드. now는 비교용이 아니라 야간가드 폴백용(스케줄러가 날짜 일치로 발송일을 거른다).
+ *   예: anchor=2026-06-30, offset=7, hour=10 → 2026-06-23 10:00 KST.
+ */
+export function computeAnchorStepRunAt(
+  anchorDate: Date,
+  offsetDays: number,
+  hourKst: number,
+): Date {
+  const hour = Math.max(0, Math.min(23, Math.floor(Number(hourKst))));
+  const safeHour = Number.isFinite(hour) ? hour : 9;
+  const off = Math.max(0, Math.floor(Number(offsetDays) || 0));
+  const y = anchorDate.getUTCFullYear();
+  const m = anchorDate.getUTCMonth();
+  const d = anchorDate.getUTCDate();
+  // KST safeHour시 = UTC (safeHour-9)시. Date.UTC가 달 경계(day 음수/초과)를 자동 정규화.
+  const utcMs = Date.UTC(y, m, d - off, safeHour - 9, 0, 0);
+  return shiftToSendableHour(new Date(utcMs));
+}
+
+/**
+ * 반복 규칙으로 다음 앵커 날짜 산출(현재 앵커 기준).
+ *   - 'none'         → null (반복 없음, D-0 후 정지).
+ *   - 'monthly_day'  → 다음 달 N일(recurrenceDay; 그 달 말일로 클램프).
+ *   - 'monthly_last' → 다음 달 말일.
+ *   - 'yearly'       → 내년 같은 월·일.
+ *   반환 = UTC 자정 Date(= KST 달력 날짜). 미지원 규칙 → null.
+ */
+export function computeNextAnchor(
+  recurrence: string,
+  recurrenceDay: number | null,
+  current: Date,
+): Date | null {
+  const y = current.getUTCFullYear();
+  const m = current.getUTCMonth();
+  const d = current.getUTCDate();
+  if (recurrence === 'monthly_day') {
+    const lastDayNext = new Date(Date.UTC(y, m + 2, 0)).getUTCDate(); // 다음 달 말일
+    const reqDay = Math.floor(Number(recurrenceDay));
+    const day = Math.max(1, Math.min(lastDayNext, Number.isFinite(reqDay) ? reqDay : d));
+    return new Date(Date.UTC(y, m + 1, day));
+  }
+  if (recurrence === 'monthly_last') {
+    return new Date(Date.UTC(y, m + 2, 0)); // 다음 달 말일 = 다다음 달 0일
+  }
+  if (recurrence === 'yearly') {
+    return new Date(Date.UTC(y + 1, m, d));
+  }
+  return null;
+}
+
+/**
+ * 사이클 완료 판정 — 마지막 step(최소 offset = D-0) 발송일이 오늘(KST) 지났는가.
+ *   true면 라이프사이클 처리(none=정지 / recurrence=다음 앵커 갱신).
+ *   minOffsetDays = 그 여정 step들의 최소 anchor_offset_days(보통 0). anchorDate는 KST 달력 날짜.
+ */
+export function isAnchorCycleComplete(
+  minOffsetDays: number,
+  anchorDate: Date,
+  now: Date = new Date(),
+): boolean {
+  const off = Math.max(0, Math.floor(Number(minOffsetDays) || 0));
+  const lastSendMidnightUtc = Date.UTC(
+    anchorDate.getUTCFullYear(),
+    anchorDate.getUTCMonth(),
+    anchorDate.getUTCDate() - off,
+  );
+  const kstNow = new Date(now.getTime() + 9 * 60 * 60 * 1000);
+  const todayKstMidnightUtc = Date.UTC(kstNow.getUTCFullYear(), kstNow.getUTCMonth(), kstNow.getUTCDate());
+  return todayKstMidnightUtc > lastSendMidnightUtc;
+}

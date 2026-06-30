@@ -79,12 +79,15 @@ export async function runJourneyTriggerWatcher(): Promise<{ matched: number; enq
   const summary = { matched: 0, enqueued: 0, skipped: 0 };
 
   try {
+    // ★ 2026-06-30 여정 일반화 — event/standing만 5분 cron 진입. date_anchor=anchor-scheduler, one_shot=활성 시 dispatch가 처리(여기 제외).
+    //   start_kind default 'event'라 기존 8 트리거(event)+custom(standing) 경로는 byte 불변.
     const activeRes = await query(
       `SELECT id, company_id, template_code, trigger_event, trigger_filters,
               allow_reentry, reentry_cooldown_days, stats_total_entered,
               threshold_recipients_per_step, last_event_cursor
        FROM journeys
        WHERE status = 'active'
+         AND COALESCE(start_kind, 'event') IN ('event', 'standing')
        ORDER BY created_at ASC`
     );
 

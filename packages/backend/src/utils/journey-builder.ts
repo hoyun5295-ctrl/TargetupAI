@@ -21,6 +21,13 @@ import { buildMemoryPromptContext } from './company-memory';
 import { seedBaselineForJourney } from './journey-entry-ledger';
 import { formatStepTiming, formatConditionChip } from './journey-step-format';
 import { journeyListWhere, executionStatusFilter } from './journey-list-filter';
+import { StartKind, normalizeStartKind, classifyStartKind } from './journey-start-kind';
+
+// 앵커 반복 규칙 화이트리스트 — 설계 잠금(4종). 미지원 값은 'none'으로.
+const ANCHOR_RECURRENCES = ['none', 'monthly_day', 'monthly_last', 'yearly'];
+function normalizeAnchorRecurrence(x: any): string {
+  return ANCHOR_RECURRENCES.includes(String(x)) ? String(x) : 'none';
+}
 
 // ════════════════════════════════════════════════════════════════════
 // 타입
@@ -64,6 +71,8 @@ export interface JourneyStepDefinition {
   alimtalkNextSubject?: string;                       // L/B 시 LMS 대체 제목
   // ★ D188 Phase 2-B-2 (2026-05-21): MMS (channel='mms') 영역 — 이미지 서버 경로 배열.
   mmsImagePaths?: string[];
+  // ★ 2026-06-30 여정 일반화: date_anchor 스텝 offset(앵커 N일 전, 0=당일). date_anchor 외에는 미사용.
+  anchorOffsetDays?: number;
 }
 
 export interface JourneyTemplate {
@@ -92,6 +101,15 @@ export interface CreateJourneyInput {
   budgetMonthly?: number | null;
   allowReentry?: boolean;
   reentryCooldownDays?: number | null;
+  // ★ 2026-06-30 여정 일반화 — 시작 방식(start_kind) 1급화 + 날짜축/one_shot 필드.
+  startKind?: StartKind;                 // 미지정 시 classifyStartKind(triggerEvent)로 도출
+  triggerEvent?: string;                 // 미지정 시 tmpl.triggerEvent (event=거래이벤트 / standing·one_shot·date_anchor='custom')
+  triggerFilters?: Record<string, unknown>; // 대상 조건(audience) — 미지정 시 tmpl.triggerFilters
+  anchorDate?: string | null;            // 'YYYY-MM-DD' (date_anchor 전용)
+  anchorRecurrence?: string | null;      // 'none'|'monthly_day'|'monthly_last'|'yearly'
+  anchorRecurrenceDay?: number | null;   // monthly_day일 때 N일
+  anchorHourKst?: number | null;         // 기본 발송 시각(0~23), step별 targetHourKst override 가능
+  oneShotScheduledAt?: string | null;    // one_shot 예약 시각(ISO). null = 즉시.
 }
 
 // ★ 2026-06-26 라프레리 신고 fix: 옛 ['[', ']'].every()는 대괄호가 있기만 하면 무조건 차단 →
@@ -272,6 +290,7 @@ export async function createJourneyFromTemplate(input: CreateJourneyInput): Prom
         alimtalkNextContents: s.alimtalkNextContents,
         alimtalkNextSubject: s.alimtalkNextSubject,
         mmsImagePaths: s.mmsImagePaths,
+        anchorOffsetDays: s.anchorOffsetDays != null ? Math.max(0, Math.floor(Number(s.anchorOffsetDays))) : undefined,
       };
     });
   } else if (input.templateCode === 'custom' && input.customObjective) {
@@ -287,26 +306,42 @@ export async function createJourneyFromTemplate(input: CreateJourneyInput): Prom
   const allowReentry = input.allowReentry !== undefined ? input.allowReentry : tmpl.allowReentry;
   const reentryCooldownDays = input.reentryCooldownDays !== undefined ? input.reentryCooldownDays : tmpl.reentryCooldownDays;
 
+  // ★ 2026-06-30 여정 일반화 — 트리거/대상 오버라이드(미지정 시 템플릿 기본) + start_kind 도출 + 앵커 값.
+  //   event = 거래 이벤트 트리거 / standing·one_shot·date_anchor = 'custom'(대상 조건 audience). 회귀: 미지정이면 옛 동작 그대로.
+  const resolvedTriggerEvent = input.triggerEvent || tmpl.triggerEvent;
+  const resolvedTriggerFilters = input.triggerFilters !== undefined ? input.triggerFilters : tmpl.triggerFilters;
+  const startKind: StartKind = normalizeStartKind(
+    input.startKind || classifyStartKind(resolvedTriggerEvent, { expiryMode: (resolvedTriggerFilters as any)?.expiry_mode }),
+  );
+  const isAnchor = startKind === 'date_anchor';
+  const anchorDateVal = isAnchor ? (input.anchorDate || null) : null;
+  const anchorRecurrenceVal = isAnchor ? normalizeAnchorRecurrence(input.anchorRecurrence) : 'none';
+  const anchorRecurrenceDayVal = isAnchor && input.anchorRecurrenceDay != null ? Math.max(1, Math.min(31, Math.floor(Number(input.anchorRecurrenceDay)))) : null;
+  const anchorHourKstVal = isAnchor && input.anchorHourKst != null ? Math.max(0, Math.min(23, Math.floor(Number(input.anchorHourKst)))) : null;
+  const oneShotScheduledAtVal = startKind === 'one_shot' ? (input.oneShotScheduledAt || null) : null;
+
   const journeyRes = await query(
     `INSERT INTO journeys (
       id, company_id, name, template_code, trigger_event, trigger_filters,
       status, budget_monthly, allow_reentry, reentry_cooldown_days,
       threshold_recipients_per_step, threshold_cost_per_step, threshold_risk_level,
       callback_number, callback_mode,
+      start_kind, anchor_date, anchor_recurrence, anchor_recurrence_day, anchor_hour_kst, one_shot_scheduled_at,
       created_by, created_at, updated_at
     ) VALUES (
       gen_random_uuid(), $1::uuid, $2, $3, $4, $5::jsonb,
       'draft', $6, $7, $8,
       $9, $10, $11,
       $12, $13,
+      $15, $16::date, $17, $18, $19, $20::timestamptz,
       $14::uuid, NOW(), NOW()
     ) RETURNING id`,
     [
       input.companyId,
       journeyName.slice(0, 100),
       tmpl.templateCode,
-      tmpl.triggerEvent,
-      JSON.stringify(tmpl.triggerFilters),
+      resolvedTriggerEvent,
+      JSON.stringify(resolvedTriggerFilters || {}),
       input.budgetMonthly ?? null,
       allowReentry,
       reentryCooldownDays,
@@ -316,6 +351,12 @@ export async function createJourneyFromTemplate(input: CreateJourneyInput): Prom
       input.callbackNumber.trim().slice(0, 20),
       input.callbackMode === 'store' ? 'store' : 'fixed',
       input.createdBy,
+      startKind,
+      anchorDateVal,
+      anchorRecurrenceVal,
+      anchorRecurrenceDayVal,
+      anchorHourKstVal,
+      oneShotScheduledAtVal,
     ]
   );
 
@@ -329,12 +370,12 @@ export async function createJourneyFromTemplate(input: CreateJourneyInput): Prom
         id, journey_id, step_order, step_type, delay_hours, channel, message_template, subject, is_ad, condition_jsonb,
         alimtalk_profile_id, alimtalk_template_code, alimtalk_variable_map,
         alimtalk_next_type, alimtalk_next_contents, alimtalk_next_subject,
-        mms_image_paths, delay_mode, target_hour_kst, created_at
+        mms_image_paths, delay_mode, target_hour_kst, anchor_offset_days, created_at
       ) VALUES (
         gen_random_uuid(), $1::uuid, $2, $3, $4, $5, $6, $7, $8, $9::jsonb,
         $10::uuid, $11, $12::jsonb,
         $13, $14, $15,
-        $16::text[], $17, $18, NOW()
+        $16::text[], $17, $18, $19, NOW()
       )`,
       [
         journeyId,
@@ -355,6 +396,7 @@ export async function createJourneyFromTemplate(input: CreateJourneyInput): Prom
         Array.isArray(step.mmsImagePaths) && step.mmsImagePaths.length > 0 ? step.mmsImagePaths : null,
         step.delayMode || 'relative',
         (step.delayMode === 'specific_hour' || step.delayMode === 'relative_at_hour') && typeof step.targetHourKst === 'number' ? step.targetHourKst : null,
+        step.anchorOffsetDays != null ? step.anchorOffsetDays : null,
       ]
     );
   }
@@ -529,7 +571,7 @@ export async function activateJourney(companyId: string, journeyId: string, user
   // ★ D188 Phase 2-B-1 (2026-05-21): step_type별 다른 검증 분기 — message/wait/condition.
   // ★ D194 (2026-05-22): Liquid 문법 사전 검증 + subject 빈 영역 검증 추가 (직원 테스트 발송 사고 0건 영구 안전망)
   const detail = await query(
-    `SELECT j.callback_number, j.status,
+    `SELECT j.callback_number, j.status, j.start_kind, j.anchor_date,
             (SELECT json_agg(json_build_object(
               'order', step_order,
               'type', step_type,
@@ -539,7 +581,8 @@ export async function activateJourney(companyId: string, journeyId: string, user
               'delay', delay_hours,
               'condition', condition_jsonb,
               'delayMode', delay_mode,
-              'targetHourKst', target_hour_kst
+              'targetHourKst', target_hour_kst,
+              'anchorOffset', anchor_offset_days
             ) ORDER BY step_order) FROM journey_steps WHERE journey_id = j.id) AS steps
      FROM journeys j
      WHERE j.id = $1::uuid AND j.company_id = $2::uuid`,
@@ -556,6 +599,26 @@ export async function activateJourney(companyId: string, journeyId: string, user
   const steps = Array.isArray(row.steps) ? row.steps : [];
   if (steps.length === 0) {
     return { ok: false, reason: 'step이 없는 여정은 활성화할 수 없습니다.' };
+  }
+
+  // ★ 2026-06-30 여정 일반화 — date_anchor/one_shot 시작 방식 검증.
+  const startKind = normalizeStartKind(row.start_kind);
+  if (startKind === 'date_anchor') {
+    if (!row.anchor_date) {
+      return { ok: false, reason: '날짜축 여정은 기준 날짜(anchor_date)가 필요합니다. 빌더에서 기준 날짜를 지정해주세요.' };
+    }
+    const msgSteps = steps.filter((s: any) => String(s.type || 'message') === 'message');
+    for (const s of msgSteps) {
+      if (s.anchorOffset == null || Number.isNaN(Number(s.anchorOffset)) || Number(s.anchorOffset) < 0) {
+        return { ok: false, reason: `날짜축 step ${s.order}에 D-N(anchor_offset_days)이 비어있습니다. 며칠 전에 보낼지 지정해주세요.` };
+      }
+    }
+  }
+  if (startKind === 'one_shot') {
+    const msgSteps = steps.filter((s: any) => String(s.type || 'message') === 'message');
+    if (msgSteps.length !== 1) {
+      return { ok: false, reason: '1회 발송(one_shot) 여정은 발송 step이 정확히 1개여야 합니다.' };
+    }
   }
   for (const s of steps) {
     const stepType = String(s.type || 'message');

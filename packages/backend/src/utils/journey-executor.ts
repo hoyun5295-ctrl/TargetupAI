@@ -60,6 +60,7 @@ import { calculateNextRunAt } from './send-time-util';
 import { getOrCreateStepCampaign, bumpStepCampaignCount } from './journey-step-campaign';
 import { evaluateCustomerFieldCondition, type ConditionOutcome } from './journey-condition';
 import { isCustomerSendable } from './journey-safety-filter';
+import { isSingleStepKind, normalizeStartKind } from './journey-start-kind';
 
 // ════════════════════════════════════════════════════════════════════
 // 타입
@@ -86,6 +87,8 @@ interface ExecutionRow {
   created_by: string | null;
   journey_callback_number: string | null;
   callback_mode: string | null;
+  // ★ 2026-06-30 여정 일반화 — date_anchor/one_shot은 단발(1 step 후 완료, 상대 advance 안 함).
+  start_kind: string | null;
 }
 
 interface StepRow {
@@ -159,7 +162,7 @@ export async function runJourneyExecutor(): Promise<{ processed: number; sent: n
          j.budget_monthly, j.threshold_cost_per_step, j.threshold_recipients_per_step,
          j.stats_total_completed, j.stats_total_cost, j.created_by,
          j.callback_number AS journey_callback_number,
-         j.callback_mode
+         j.callback_mode, j.start_kind
        FROM journey_executions e
        JOIN journeys j ON e.journey_id = j.id
        WHERE e.status = 'active'
@@ -922,6 +925,41 @@ function computeNextSendWindow(now: Date = new Date()): Date {
 // ════════════════════════════════════════════════════════════════════
 
 async function advanceOrComplete(exec: ExecutionRow, currentStep: StepRow, addedCost: number): Promise<void> {
+  // ★ 2026-06-30 여정 일반화 — date_anchor/one_shot은 단발 execution: 이 step 발송 후 상대 advance 없이 완료.
+  //   date_anchor 다음 step은 anchor-scheduler가 별도 날짜에 새 단발 execution을 만든다(상대 시각 오염 차단).
+  //   one_shot은 1회 발송이라 완료. event/standing(기존)은 아래 상대 advance 그대로 — start_kind null/event면 분기 안 탐(byte 불변).
+  if (isSingleStepKind(exec.start_kind)) {
+    await query(
+      `UPDATE journey_executions SET
+         status = 'completed', completed_at = NOW(),
+         current_step_order = $2, total_cost = total_cost + $3
+       WHERE id = $1::uuid AND status = 'active'`,
+      [exec.execution_id, currentStep.step_order, addedCost]
+    );
+    await query(
+      `UPDATE journeys SET
+         stats_total_completed = stats_total_completed + 1,
+         stats_total_cost = stats_total_cost + $2,
+         updated_at = NOW()
+       WHERE id = $1::uuid`,
+      [exec.journey_id, addedCost]
+    );
+    // one_shot: 남은 active execution 0이면 여정 종료(ended). date_anchor는 사이클 진행 중 → anchor-scheduler가 관리.
+    if (normalizeStartKind(exec.start_kind) === 'one_shot') {
+      const remain = await query(
+        `SELECT 1 FROM journey_executions WHERE journey_id = $1::uuid AND status = 'active' LIMIT 1`,
+        [exec.journey_id]
+      );
+      if (remain.rows.length === 0) {
+        await query(
+          `UPDATE journeys SET status = 'ended', updated_at = NOW() WHERE id = $1::uuid AND status = 'active'`,
+          [exec.journey_id]
+        );
+      }
+    }
+    return;
+  }
+
   // 다음 step 조회
   // ★ D210+ Phase 3 (2026-05-23 Harold 명시): delay_mode + target_hour_kst 컬럼 SELECT 추가
   const nextRes = await query(

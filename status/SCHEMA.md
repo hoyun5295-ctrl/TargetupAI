@@ -2430,6 +2430,12 @@ CREATE INDEX IF NOT EXISTS idx_journey_step_logs_execution ON journey_step_logs(
 - `journeys` baseline DDL 외 실측 추가 컬럼(정본): `callback_number`(varchar) · `callback_mode`(text) · `auto_reentry_enabled`(boolean) · `archived_at`(timestamptz) · `pretest_notify_step_defaults`(jsonb) · `entry_baseline_at`(timestamptz) · `last_event_cursor`(timestamptz) · `last_pretest_passed_at`(timestamptz)
 - `journey_executions` baseline DDL 외 실측 추가 컬럼(정본): `error_log`(jsonb) · `last_error_at`(timestamptz) · `error_count`(integer) · `result_notified_at`(timestamptz)
 
+### ★ 2026-06-30 information_schema 실측 — journey_steps 전체 21컬럼 (Harold 제공, 재질의 금지)
+운영 PG 실측. baseline DDL(9컬럼) 외 ALTER 누적 정본 — `journey_steps` 현재 컬럼:
+1 id(uuid) · 2 journey_id(uuid) · 3 step_order(int) · 4 step_type(varchar) · 5 delay_hours(int d0) · 6 channel(varchar) · 7 message_template(text) · 8 condition_jsonb(jsonb) · 9 created_at(timestamptz) · 10 is_ad(bool d true) · 11 subject(varchar) · 12 alimtalk_profile_id(uuid) · 13 alimtalk_template_code(varchar) · 14 alimtalk_variable_map(jsonb) · 15 alimtalk_next_type(varchar) · 16 alimtalk_next_contents(text) · 17 alimtalk_next_subject(varchar) · 18 mms_image_paths(ARRAY) · 19 delay_mode(varchar d 'relative') · 20 target_hour_kst(int) · 21 notify_manager_on_pretest(bool)
+- 여정 일반화 ALTER **적용 완료(2026-06-30, Harold 실행)**: `journey_steps.anchor_offset_days`(int) — date_anchor D-N offset. journeys 측 = `start_kind`(varchar20 NOT NULL default 'event')·`anchor_date`(date)·`anchor_recurrence`(varchar20 NOT NULL default 'none')·`anchor_recurrence_day`(int)·`anchor_hour_kst`(int)·`one_shot_scheduled_at`(timestamptz). + 신규 테이블 `journey_anchor_dispatch`(journey_id·step_id·customer_id·send_date·campaign_id·created_at, PK(journey_id,step_id,customer_id,send_date)) — date_anchor 단발 발송 멱등. + idx_journeys_start_kind_status.
+- 운영 `customer.points_expiring` 여정 = **0건**(2026-06-30). 운영 여정 row 자체 0(아직 여정 사용 업체 없음) → start_kind 마이그레이션 backfill 불요 · points_expiring 흡수 마이그레이션 불요(코드 일반화만). 단 코드 경로 회귀 차단(9트리거·발송·통계)은 유지.
+
 ### 여정 엔진 재설계 신규 (2026-06-04 세션2 — Harold 실행: `docs/superpowers/plans/2026-06-04-journey-redesign.sql`)
 
 > 미적용 — Harold 직접 PG 실행 후 갱신.
