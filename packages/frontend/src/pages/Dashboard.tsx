@@ -15,6 +15,7 @@ import AiSendTypeModal from '../components/AiSendTypeModal';
 import AnalysisModal from '../components/AnalysisModal';
 import BalanceModals from '../components/BalanceModals';
 import CreditHistoryModal from '../components/credit/CreditHistoryModal';
+import { dailyDbAnalysisCredits } from '../constants/credit';
 import CalendarModal from '../components/CalendarModal';
 import DeltaBadge from '../components/dashboard/DeltaBadge';
 import CardDetailModal from '../components/dashboard/CardDetailModal';
@@ -2413,51 +2414,35 @@ const campaignData = {
                     <span className="px-2 py-0.5 bg-red-100 text-red-600 text-[11px] font-bold rounded-full whitespace-nowrap">체험 만료</span>
                   )}
                 </div>
-                {planInfo?.plan_code !== 'FREE' && planInfo?.max_customers && (
-                  <div className="mt-1">
-                    <div className="flex items-center justify-between mb-1">
-                    <span className="text-xs text-gray-400">
-                        {Number(planInfo.current_customers || 0).toLocaleString()} / {Number(planInfo.max_customers).toLocaleString()}명
-                      </span>
-                      <span className="text-xs text-gray-400">
-                        {Math.round(((planInfo.current_customers || 0) / planInfo.max_customers) * 100)}%
-                      </span>
-                    </div>
-                    <div className="w-full h-2 bg-gray-200 rounded-full overflow-hidden">
-                      <div
-                        className={`h-full rounded-full transition-all ${
-                          ((planInfo.current_customers || 0) / planInfo.max_customers) >= 0.95
-                            ? 'bg-red-500'
-                            : ((planInfo.current_customers || 0) / planInfo.max_customers) >= 0.8
-                              ? 'bg-orange-400'
-                              : 'bg-green-500'
-                        }`}
-                        style={{ width: `${Math.min(100, ((planInfo.current_customers || 0) / planInfo.max_customers) * 100)}%` }}
-                      />
-                    </div>
-                  </div>
-                )}
-                {planInfo?.plan_code !== 'FREE' && !planInfo?.max_customers && (
-                  <div className="text-xs text-gray-400">정상 이용 중</div>
-                )}
-                {/* AI 크레딧 잔여 — 클릭 시 이력 모달 (카드 navigate와 분리) */}
-                {creditInfo?.creditEnabled && (creditInfo.planCredits > 0 || creditInfo.purchased > 0) && (
+                {/* AI 크레딧 — 카드 중심(크게). 클릭 시 이력 모달 (카드 navigate와 분리). DB 사용량 바는 v2에서 폐지(상한 없음). */}
+                {creditInfo?.creditEnabled && (creditInfo.planCredits > 0 || creditInfo.purchased > 0) ? (
                   <button
                     onClick={(e) => { e.stopPropagation(); setShowCreditHistory(true); }}
-                    className="mt-3 flex w-full items-center justify-between border-t border-gray-100 pt-3 group"
+                    className="mt-3 w-full rounded-xl border border-violet-100 bg-gradient-to-br from-violet-50 to-fuchsia-50/40 p-3.5 text-left transition-all hover:border-violet-200 hover:shadow-sm group"
                   >
-                    <span className="flex items-center gap-1.5">
+                    <div className="flex items-center gap-1.5">
                       <span className="flex h-5 w-5 items-center justify-center rounded-md bg-gradient-to-br from-violet-500 to-fuchsia-500">
                         <Sparkles className="h-3 w-3 text-white" />
                       </span>
-                      <span className="text-xs text-gray-400 group-hover:text-violet-600 transition-colors">AI 크레딧 잔여</span>
-                    </span>
-                    <span className="flex items-baseline gap-1">
-                      <span className="text-base font-bold text-violet-700">{Number(creditInfo.total || 0).toLocaleString()}</span>
-                      <span className="text-xs text-gray-400">크레딧</span>
-                    </span>
+                      <span className="text-xs font-medium text-violet-700">AI 크레딧 잔여</span>
+                      <span className="ml-auto text-[11px] text-violet-400 group-hover:text-violet-600 transition-colors">사용 이력 →</span>
+                    </div>
+                    <div className="mt-1.5 flex items-end gap-1">
+                      <span className="text-3xl font-bold tabular-nums text-violet-700">{Number(creditInfo.total || 0).toLocaleString()}</span>
+                      <span className="mb-1 text-xs text-slate-400">크레딧</span>
+                    </div>
+                    {planInfo?.plan_code !== 'FREE' && (
+                      <div className="mt-2 flex items-center justify-between border-t border-violet-100/70 pt-2 text-[11px] text-slate-400">
+                        <span>고객 DB {Number(planInfo?.current_customers || 0).toLocaleString()}명</span>
+                        {dailyDbAnalysisCredits(Number(planInfo?.current_customers || 0)) > 0 && (
+                          <span>연동 시 매일 분석 <b className="text-violet-600">{dailyDbAnalysisCredits(Number(planInfo?.current_customers || 0))}크레딧</b></span>
+                        )}
+                      </div>
+                    )}
                   </button>
-                )}
+                ) : planInfo?.plan_code !== 'FREE' ? (
+                  <div className="mt-3 text-xs text-gray-400">정상 이용 중</div>
+                ) : null}
               </div>
               {showCreditHistory && (
                 <CreditHistoryModal
