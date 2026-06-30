@@ -319,6 +319,45 @@ export class OracleConnector implements IDbConnector {
     }
   }
 
+  /**
+   * 전체 데이터 조회 (키셋 — ROWID 기준).
+   * ★ 2026-06-30: 깊은 OFFSET 재스캔(이새 조기종료 원인)을 제거. afterKey(직전 마지막 ROWID)
+   *   이후 행을 ROWID 순으로 limit개. 11g 호환(OFFSET/FETCH는 12c+)을 위해 ROWNUM 사용.
+   *   CHARTOROWID(NULL)은 NULL을 반환하므로 afterKey=null 분기가 안전하다.
+   */
+  async fetchAllKeyset(
+    tableName: string,
+    limit: number,
+    afterKey: string | null,
+  ): Promise<{ rows: RawRow[]; lastKey: string | null }> {
+    this.ensureConnected();
+    const conn = await this.pool.getConnection();
+    try {
+      const safeTable = this.sanitizeIdentifier(tableName);
+      const sql = `SELECT * FROM (
+                     SELECT t.*, ROWIDTOCHAR(t.ROWID) AS rid_
+                     FROM "${safeTable}" t
+                     WHERE (:afterKey IS NULL OR t.ROWID > CHARTOROWID(:afterKey))
+                     ORDER BY t.ROWID
+                   ) WHERE ROWNUM <= :lim`;
+      const result = await conn.execute(
+        sql,
+        { afterKey: afterKey ?? null, lim: limit },
+        { outFormat: this.oracledb.OUT_FORMAT_OBJECT },
+      );
+      const raw = (result.rows || []) as Array<Record<string, unknown>>;
+      const lastRaw = raw[raw.length - 1];
+      const lastKey = lastRaw
+        ? (String((lastRaw.RID_ ?? lastRaw.rid_) ?? '') || null)
+        : null;
+      const rows = this.normalizeRows(raw);
+      logger.debug(`키셋 전체 조회: ${rows.length}건`, { tableName, afterKey });
+      return { rows, lastKey };
+    } finally {
+      await conn.close();
+    }
+  }
+
   async getRowCount(tableName: string): Promise<number> {
     this.ensureConnected();
     const conn = await this.pool.getConnection();

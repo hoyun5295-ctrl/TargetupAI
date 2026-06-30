@@ -67,13 +67,26 @@ export interface IDbConnector {
   ): Promise<RawRow[]>;
 
   /**
-   * 전체 데이터 조회 (페이지네이션)
+   * 전체 데이터 조회 (OFFSET 페이지네이션)
    */
   fetchAll(
     tableName: string,
     limit: number,
     offset: number,
   ): Promise<RawRow[]>;
+
+  /**
+   * 전체 데이터 조회 (키셋 페이지네이션 — 안정 키 기준).
+   * ★ 2026-06-30: 깊은 OFFSET 재스캔이 없어 대용량/라이브 테이블에서도 중간 짧은·빈
+   *   페이지로 인한 조기 종료가 없다(이새에프앤씨 full 조기종료 사고 근본 정정).
+   *   afterKey=null이면 처음부터. 반환 lastKey를 다음 호출 afterKey로 넘긴다.
+   *   미구현 어댑터는 엔진이 자동으로 OFFSET 경로로 폴백한다(optional).
+   */
+  fetchAllKeyset?(
+    tableName: string,
+    limit: number,
+    afterKey: string | null,
+  ): Promise<{ rows: RawRow[]; lastKey: string | null }>;
 
   /**
    * 테이블 전체 레코드 수 조회

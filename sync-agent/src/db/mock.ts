@@ -141,6 +141,19 @@ export class MockDbConnector implements IDbConnector {
     return paged;
   }
 
+  async fetchAllKeyset(
+    tableName: string,
+    limit: number,
+    afterKey: string | null,
+  ): Promise<{ rows: RawRow[]; lastKey: string | null }> {
+    const data = this.getDataForTable(tableName);
+    const start = afterKey == null ? 0 : Number(afterKey) + 1;
+    const slice = data.slice(start, start + limit);
+    const lastKey = slice.length > 0 ? String(start + slice.length - 1) : null;
+    logger.info(`🧪 Mock 키셋 조회: ${slice.length}건`, { tableName, afterKey });
+    return { rows: slice, lastKey };
+  }
+
   async getRowCount(tableName: string): Promise<number> {
     return this.getDataForTable(tableName).length;
   }

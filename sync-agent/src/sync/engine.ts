@@ -12,7 +12,7 @@
  *   - getTimestampForTarget() 헬퍼로 타겟별 timestamp 컬럼 결정
  */
 
-import type { IDbConnector } from '../db/types';
+import type { IDbConnector, RawRow } from '../db/types';
 import type { ApiClient } from '../api/client';
 import type { QueueManager } from '../queue';
 import type { AlertManager } from '../alert';
@@ -224,6 +224,8 @@ export class SyncEngine {
         offset,
       );
 
+      // ★ 2026-06-30: full과 동일 — "짧은 페이지면 끝" 단정 제거. 빈 페이지에서만 종료한다.
+      //   깊은 OFFSET 구간에서 짧은 페이지가 오면 변경분을 일부만 받고 끊기던 조기 종료를 차단.
       if (rows.length === 0) break;
 
       // 파이프라인 실행
@@ -234,9 +236,6 @@ export class SyncEngine {
       errors.push(...result.errors);
 
       offset += rows.length;
-
-      // 조회된 건수가 배치 크기보다 작으면 더 이상 없음
-      if (rows.length < this.config.batchSize) break;
     }
 
     // 상태 업데이트
@@ -293,30 +292,78 @@ export class SyncEngine {
     let totalCount = 0;
     let successCount = 0;
     let failCount = 0;
-    let offset = 0;
     let batchIndex = 0;
+    let fetchedRows = 0;
 
-    while (true) {
-      const rows = await this.db.fetchAll(
-        tableName,
-        this.config.batchSize,
-        offset,
-      );
-
-      if (rows.length === 0) break;
-
+    const processFullBatch = async (rows: RawRow[]): Promise<void> => {
       batchIndex++;
       logger.info(`배치 ${batchIndex}/${totalBatches} 처리 중 (${rows.length}건)`);
-
       const result = await this.processBatch(target, rows, 'full', batchIndex, totalBatches);
       totalCount += result.total;
       successCount += result.success;
       failCount += result.fail;
       errors.push(...result.errors);
+      fetchedRows += rows.length;
+    };
 
-      offset += rows.length;
+    // ★ 2026-06-30 (이새에프앤씨 full 조기종료 근본 정정):
+    //   원천 13만(계획 35배치)인데 full이 25배치(~10만)에서 끊긴 사고 = 깊은 OFFSET 구간에서
+    //   fetchAll이 뒤에 데이터가 더 있는데도 짧은/빈 페이지를 돌려줘 "짧으면 끝" 단정으로 조기 종료.
+    //   (1) 안정 키(키셋) 우선 — 깊은 OFFSET 재스캔이 없어 구조적으로 조기 종료가 없다.
+    //   (2) 키셋 미구현/실패 시 OFFSET 폴백을 getRowCount(총건수)까지 구동(짧은 페이지로 안 끊김).
+    //   (3) 완전성 가드 — 받은 수 < 총건수면 명확 경고(조용한 누락 차단).
+    let keysetDone = false;
+    const fetchKeyset = this.db.fetchAllKeyset?.bind(this.db);
+    if (fetchKeyset) {
+      try {
+        let afterKey: string | null = null;
+        while (true) {
+          const { rows, lastKey } = await fetchKeyset(tableName, this.config.batchSize, afterKey);
+          if (rows.length === 0) break;
+          await processFullBatch(rows);
+          // 키셋은 짧은 페이지가 곧 끝(키 이후 행 없음) — OFFSET과 달리 신뢰 가능.
+          if (rows.length < this.config.batchSize || lastKey == null) break;
+          afterKey = lastKey;
+        }
+        keysetDone = true;
+      } catch (keysetErr) {
+        logger.warn('키셋 전체 조회 실패 → OFFSET 폴백', {
+          error: keysetErr instanceof Error ? keysetErr.message : String(keysetErr),
+        });
+      }
+    }
 
-      if (rows.length < this.config.batchSize) break;
+    if (!keysetDone) {
+      // OFFSET 폴백 — 처음부터 다시(UPSERT라 중복 무해). 키셋 부분처리분 카운트 리셋.
+      totalCount = 0;
+      successCount = 0;
+      failCount = 0;
+      batchIndex = 0;
+      fetchedRows = 0;
+      errors.length = 0;
+      let offset = 0;
+      let emptyRetries = 0;
+      const MAX_EMPTY_RETRIES = 3;
+      while (totalRows === 0 || offset < totalRows) {
+        const rows = await this.db.fetchAll(tableName, this.config.batchSize, offset);
+        if (rows.length === 0) {
+          // 총건수 모를 때(0)는 빈 페이지가 곧 끝. 알 때는 일시 오류 가능 → 제한 재시도.
+          if (totalRows === 0 || ++emptyRetries > MAX_EMPTY_RETRIES) break;
+          continue;
+        }
+        emptyRetries = 0;
+        await processFullBatch(rows);
+        offset += rows.length;
+      }
+    }
+
+    // 완전성 가드 — 받은 수 < 원천 총건수면 명확 경고(조용한 누락 차단).
+    if (totalRows > 0 && fetchedRows < totalRows) {
+      logger.warn(
+        `전체 동기화 미완료 감지: ${fetchedRows}/${totalRows}건 수신 ` +
+        `(${totalRows - fetchedRows}건 누락) — 다음 동기화 주기에서 보강 필요.`,
+        { target, tableName },
+      );
     }
 
     // 상태 업데이트
