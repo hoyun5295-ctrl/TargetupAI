@@ -9,7 +9,7 @@
  */
 
 import pool from '../config/database';
-import type { CopyExample } from './copy-rag-retriever';
+import type { CopyExample, IndustryFeatureSummary } from './copy-rag-retriever';
 import { retrieveCopyExamples } from './copy-rag-retriever';
 import { buildTemporalContext, buildIndustryEvents, renderContextForPrompt } from './copy-context';
 import { getBrandGuideline } from './brand-voice-prompt';
@@ -44,16 +44,18 @@ async function resolveCompanyIndustry(companyId: string): Promise<string | null>
 export interface ComposeResult {
   promptSuffix: string;
   examples: CopyExample[];
+  bannedWords: string[]; // ★ ② 출력 금지어 가드용 (브랜드 키트 banned_words)
 }
 
 /** 순수 합성 — 예시·맥락·키트 → 프롬프트 suffix 문자열 (전부 비면 '') */
 export function buildCopyBrainPrompt(opts: {
   examples: CopyExample[];
+  industryFeatures?: IndustryFeatureSummary | null;
   contextLine: string;
   kit: BrandKit;
   channel: string;
 }): string {
-  const { examples, contextLine, kit } = opts;
+  const { examples, industryFeatures, contextLine, kit } = opts;
   const parts: string[] = [];
 
   if (contextLine && contextLine.trim()) {
@@ -61,18 +63,21 @@ export function buildCopyBrainPrompt(opts: {
   }
 
   const company = examples.filter((e) => e.source === 'company');
-  const industry = examples.filter((e) => e.source === 'industry');
 
   if (company.length > 0) {
     const list = company.map((e, i) => `${i + 1}. ${e.text}`).join('\n');
     parts.push(`## 우리 회사에서 반응이 좋았던 문안 (톤·구조 참고용 — 본문을 그대로 베끼지 말 것)\n${list}`);
   }
 
-  if (industry.length > 0) {
-    const list = industry.map((e, i) => `${i + 1}. ${e.text}`).join('\n');
+  // ★ A6 (2026-06-30): 같은 업종은 원문이 아니라 구조·통계만 (타사 시그니처 누출 0)
+  if (industryFeatures && industryFeatures.sampleCount > 0) {
+    const f = industryFeatures;
     parts.push(
-      `## 같은 업종에서 잘 먹힌 문안의 패턴 (구조·길이·흐름만 참고)\n${list}\n` +
-      '⚠️ 위 타사 예시의 고유 표현·문구·슬로건을 그대로 복제하지 마세요. 우리 브랜드 보이스로 완전히 새로 작성하세요.',
+      `## 같은 업종 ${f.sampleCount}건의 구조 통계 (참고만 — 타사 문장·표현은 주어지지 않습니다)\n` +
+      `- 평균 길이: 약 ${f.avgLengthChars}자\n` +
+      `- 평균 문장 수: 약 ${f.avgSentenceCount}개\n` +
+      `- 행동 유도(CTA) 포함 비율: ${Math.round(f.hasCtaRatio * 100)}%\n` +
+      '위는 같은 업종이 통하는 길이·구조의 통계일 뿐입니다. 이 통계를 참고하되 문안은 우리 브랜드 보이스로 완전히 새로 작성하세요.',
     );
   }
 
@@ -109,28 +114,13 @@ export async function composeCopyBrain(input: ComposeInput): Promise<ComposeResu
   const now = input.now || new Date();
   const industryCode = await resolveCompanyIndustry(input.companyId);
 
-  let examples: CopyExample[] = [];
-  try {
-    const res = await retrieveCopyExamples({
-      companyId: input.companyId,
-      industryCode,
-      channels: input.channels,
-      isAd: input.isAd,
-    });
-    examples = res.examples;
-  } catch (err) {
-    console.warn('[copy-brain] 성과 문안 검색 실패 — 예시 없이 진행:', (err as Error)?.message);
-  }
-
-  const contextLine = renderContextForPrompt({
-    temporal: buildTemporalContext(now),
-    industryEvents: buildIndustryEvents(industryCode, now),
-  });
-
+  // ★ A6: 브랜드 키트 + 등록 여부 먼저 (등록 회사면 업종 폴백 OFF — 자기것만)
   let kit: BrandKit = {};
+  let brandVoiceRegistered = false;
   try {
     const g = await getBrandGuideline(input.companyId);
     if (g) {
+      brandVoiceRegistered = true;
       kit = {
         signatureLocked: g.signature_locked,
         signatureMode: g.signature_mode,
@@ -143,7 +133,28 @@ export async function composeCopyBrain(input: ComposeInput): Promise<ComposeResu
     console.warn('[copy-brain] 브랜드 키트 조회 실패 — 키트 없이 진행:', (err as Error)?.message);
   }
 
+  let examples: CopyExample[] = [];
+  let industryFeatures: IndustryFeatureSummary | null = null;
+  try {
+    const res = await retrieveCopyExamples({
+      companyId: input.companyId,
+      industryCode,
+      channels: input.channels,
+      isAd: input.isAd,
+      brandVoiceRegistered,
+    });
+    examples = res.examples;
+    industryFeatures = res.industryFeatures;
+  } catch (err) {
+    console.warn('[copy-brain] 성과 문안 검색 실패 — 예시 없이 진행:', (err as Error)?.message);
+  }
+
+  const contextLine = renderContextForPrompt({
+    temporal: buildTemporalContext(now),
+    industryEvents: buildIndustryEvents(industryCode, now),
+  });
+
   const channel = input.channels[0] || 'EMAIL';
-  const promptSuffix = buildCopyBrainPrompt({ examples, contextLine, kit, channel });
-  return { promptSuffix, examples };
+  const promptSuffix = buildCopyBrainPrompt({ examples, industryFeatures, contextLine, kit, channel });
+  return { promptSuffix, examples, bannedWords: kit.bannedWords || [] };
 }

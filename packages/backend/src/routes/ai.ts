@@ -103,7 +103,7 @@ import { generateJourneyPackage, refineStepMessage } from '../utils/journey-ai-g
 // ★ 2026-06-29: 대화형 여정 수정 — 초안 패키지에 자연어 수정 반영
 import { editJourneyPackage } from '../utils/journey-ai-editor';
 // ★ 2026-06-29: AI 꾸미기 — 추천 메시지에 선택 컬럼(%변수%) 자연스럽게 녹임
-import { decorateOperatorMessage } from '../utils/operator-message-decorator';
+import { decorateOperatorMessages } from '../utils/operator-message-decorator';
 import { buildJourneyPreviewSamples, countJourneyTargetCustomers } from '../utils/journey-target-extractor';
 // ★ D210+ Phase 2-fix1 (Harold 명시 2026-05-23): CT-58 — 회사 customer DB 실측 프로필 조회.
 //   /operator/data-profile endpoint = 마케팅 담당자 검토 UI 안내 카드 data source.
@@ -3189,22 +3189,26 @@ router.post('/operator/decorate-message', async (req: Request, res: Response) =>
     if (!isAiOperatorAllowed(planCtx, req.user)) {
       return res.status(403).json({ success: false, error: 'AI Operator 진입 권한이 없습니다.', code: 'AI_OPERATOR_GATED' });
     }
-    const { message, selectedVars, channel, isAd } = req.body || {};
-    if (!message || typeof message !== 'string' || message.trim().length < 5) {
+    const { message, messages, selectedVars, channel, isAd } = req.body || {};
+    const list: string[] = Array.isArray(messages)
+      ? messages.map((m: any) => String(m || ''))
+      : (message ? [String(message)] : []);
+    if (list.length === 0 || list.some((m) => m.trim().length < 5)) {
       return res.status(400).json({ success: false, error: '꾸밀 메시지가 너무 짧습니다.' });
     }
     if (!Array.isArray(selectedVars) || selectedVars.length === 0) {
       return res.status(400).json({ success: false, error: '활용할 컬럼을 1개 이상 선택해주세요.' });
     }
-    const decorated = await decorateOperatorMessage({
+    // 꾸미기 1회(여러 변형 일괄) = 단일 AI 호출 = 3크레딧(액션 단위, 변형당 차감 X)
+    const decoratedList = await decorateOperatorMessages({
       companyId,
-      message: String(message),
+      messages: list,
       selectedVars: selectedVars.map((v: any) => String(v)),
       channel: ['sms', 'lms', 'mms'].includes(channel) ? channel : 'lms',
       isAd: !!isAd,
       userId: userId || undefined,
     });
-    return res.json({ success: true, message: decorated });
+    return res.json({ success: true, messages: decoratedList, message: decoratedList[0] });
   } catch (err: any) {
     console.error('[Operator decorate] 오류:', err);
     return res.status(500).json({ success: false, error: err?.message || 'AI 꾸미기 실패' });

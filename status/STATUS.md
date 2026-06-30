@@ -107,6 +107,13 @@
 
 ---
 
+### 🟢 2026-06-30 — 크레딧 모델 v2 (코드완료·검증) + 메인 대시보드 카드 + 문안 퀄리티/브랜드보이스 설계서
+> **크레딧 모델 v2 (코드완료·검증완료 · 배포 Harold 진행)**: 단가 재조정(꾸미기 1→3·DM 30→100·인앱 15→100·이메일 30→50·인터랙션 50→120·여정활성화 150→200·운영 10) + DB 규모 일일분석 공식 `round(3+(10만블록−1)×1.5)`(predictive-worker·수동재계산 회사별 차감, "매일 자동 예측" 토글 폐지) + 여정 운영과금(`journey-operation` 발송성공 직후 멱등 `journeyId:날짜` = 하루 1회 상한) + 음수 허용(운영 source만 −1개월 grant 상한)·리셋 음수상계 + 요금제/메인/예측 화면(DB캡 표시 폐지·크레딧 중심) + 슈퍼관리자 "크레딧 위험 회사" 패널 + 스팸필터 100만원+ 무료 폐지. ALTER 0(기존 컬럼 재사용). BE/FE tsc0 + verify 55(ai-credit-calc)/23(ai-credit-tx). 스펙 `specs/2026-06-30-credit-model-v2-design.md` · 계획 `plans/2026-06-30-credit-model-v2-engine.md`. 상세 [[project_2026_0630_credit_model_v2]].
+> **문안 퀄리티 강화 + 브랜드보이스 점검 = 설계서만(구현 다음 세션)**: 감사 — 학습(`ai_training_logs` 전 발송 적재+성과+성과순 RAG) 가동 중 / 생성은 단발·혜택강조 0 / **브랜드보이스 고장 = `brand-voice-prompt.ts:174` 가이드라인 AND 대표문안 둘 다 있어야 작동(무증상 OFF, 운영 PG 3사 중 1사만 작동 확인)**. 설계 확정: 두 갈래(혜택입력=강조극대 / 미입력=계절·시의성 풍성) · 회사 격리 게이트(등록=자기것만 10문안 / 미등록=같은업종 `message_features` 구조·통계만 = 시그니처 누출 0) · 꾸미기 컬럼 체크 정합(사용 자동체크 + 토글 무조건 반영/제거 + 3개 변형 전부) · AND 완화+OFF 가시화 · 멀티패스·앵글·채널분리. 설계서 `specs/2026-06-30-copy-quality-brand-voice-design.md` 1개로 잠금. [[feedback_copy_quality_priority]].
+> **다음 세션 = 문안 전용 구현**: 위 설계서대로. 구현 1단계 = ① AI Operator propose가 generateMessages 경로 타는지 ② `copy-similarity-guard` 출력 적용 확인.
+
+---
+
 ### 🟢 2026-06-29 — 여정 자동화 재설계 + 오늘의 여정 기회(분석 엔진) + 대화형 수정 + AI Operator 소개 PPT 뷰어 + 제안화면 강화 (★배포완료)
 > **여정 자동화 재설계(Phase 1·2)**: 메인 상단 좌우 히어로(왼쪽 큰 자연어 입력 + 오른쪽 마케팅/정보알림 2버튼 → 우측 빈칸 제거·세로 압축) · 정보 알림 인라인→모달화(`createPortal`) · 빠른 시작 중앙정렬 칩 · 검토 화면 각 step 한 줄 요약 카드 + `편집` 클릭 모달(인라인 편집기 난잡함 제거, 저장 payload 무변경). `JourneysPage.tsx` + `InfoAlertJourneyBuilder`(embedded). 설계 `specs/2026-06-29-journey-redesign-design.md`.
 > **오늘의 여정 기회(Phase 3 — 실데이터 분석 엔진)**: `journey-opportunities.ts` 전면 재작성 — 고정 3종 폐기, 6신호(장바구니/신규/휴면/생일/재구매주기/찜)를 단일 스캔 FILTER로 집계 · 휴면·재구매 임계 = 회사 구매분포 `PERCENTILE_CONT`로 도출(하드코딩 X) · 매출 규모 실측 우선순위 + `우선` 배지 · 의미 있는 것만 가변 개수 + 3개 초과 페이징 + 중앙정렬. `GET /operator/journeys-opportunities` + 프론트 카드.

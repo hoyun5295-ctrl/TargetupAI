@@ -13,6 +13,8 @@ import { CompanyDataProfile, formatProfileForAiPrompt } from '../utils/company-d
 // ★ D225+ (2026-05-28 Harold 명시): Brand Voice Learning — 회사별 LMS 대표 문안 5건 + 자동 가이드라인 자동 주입.
 import { buildSystemPromptWithBrandVoice } from '../utils/brand-voice-prompt';
 import { composeCopyBrain } from '../utils/copy-prompt-composer';
+import { detectBenefits, buildBenefitEmphasis } from '../utils/copy-benefit-detector';
+import { findBannedWords } from '../utils/copy-similarity-guard';
 // ★ D227+ AI 응답 JSON 안전 추출 (코드펜스 없이 설명문 혼입 방어 — 본문 0 bytes 사고 정정)
 import { extractJsonFromAiText } from '../utils/ai-json';
 // ★ D227+ 종량제: 작업당 크레딧 단가 맵 (순수 함수, DB 의존 0)
@@ -1074,6 +1076,10 @@ export async function generateMessages(
   // ★ "개인화 필수:" 파싱 — AI에는 프로모션 내용만 전달, 개인화 지시는 분리
   const personalizationDirective = parsePersonalizationDirective(prompt, availableVars);
   const cleanPrompt = personalizationDirective?.cleanPrompt || prompt;
+
+  // ★ A1/A4 (2026-06-30): 입력 혜택 감지 → 채널별 강조 / 미입력 시 시의성 풍성 (혜택 날조 0)
+  const benefitDetect = detectBenefits(cleanPrompt);
+  const benefitEmphasis = buildBenefitEmphasis(benefitDetect.tokens, channel);
   
   // 개인화 태그 생성 (카탈로그 기반 동적 생성)
   const personalizationTags = personalizationVars.map(v => `%${v}%`).join(', ');
@@ -1147,7 +1153,9 @@ ${companyProfilePrompt}
 
 ## 요청사항
 ${channel} 채널에 최적화된 3가지 문안(A/B/C)을 생성해주세요.
+- A/B/C는 서로 다른 각도로 작성하세요: A=핵심 제안 직설, B=감성·공감 또는 스토리, C=긴급·한정(마감/수량) 또는 실용 정보. (없는 혜택·없는 마감일을 지어내지 말 것 — 각도만 다르게)
 - 브랜드명은 "[${brandName}]" 형태로 정확히 사용
+${benefitEmphasis}
 ${brandSlogan ? `- 브랜드 슬로건 "${brandSlogan}"의 느낌을 반영` : ''}
 - 톤앤매너: ${brandTone}
 - 🚫 (광고), 무료거부, 무료수신거부, 080번호 절대 포함 금지! 순수 본문만 작성!
@@ -1155,7 +1163,13 @@ ${brandSlogan ? `- 브랜드 슬로건 "${brandSlogan}"의 느낌을 반영` : '
 - 🚫 사용자가 지정하지 않은 날짜/기간/가격 날조 금지! 기간 미지정 시 날짜를 넣지 마세요!
 ${smsByteInstruction}
 ${kakaoInstruction}
-${channel === 'LMS' ? '- LMS는 한 줄 최대 17자 이내로 짧게, 줄바꿈으로 가독성 좋게 작성 (이모지 금지!)\n- ⚠️ subject(제목)에는 %변수% 절대 사용 금지! 고정 텍스트만!' : ''}
+${channel === 'LMS' || channel === 'MMS' ? '- LMS/MMS는 줄바꿈·문단으로 가독성 좋게, 후크→본문→CTA 구조로 풍성하게 작성 (한 줄 최대 17자 내외, 이모지 금지!)\n- ⚠️ subject(제목)에는 %변수% 절대 사용 금지! 고정 텍스트만!' : ''}
+${channel === 'SMS' ? '- SMS는 길이가 아니라 밀도입니다. 한정된 바이트 안에 후크+혜택+CTA를 압축하세요.' : ''}
+
+## 작성 절차 (반드시 따르되, 과정은 출력하지 말 것)
+1) 먼저 A/B/C 초안을 머릿속으로 작성한다.
+2) 각 초안을 스스로 점검한다: 후크가 첫 줄에서 시선을 끄는가 / (혜택이 있다면) 혜택이 주인공인가 / 회사 브랜드보이스와 톤이 맞는가 / 채널 한도(SMS는 밀도)를 지키는가 / 없는 사실·혜택을 지어내지 않았는가.
+3) 점검에서 약한 부분을 고친 최종 3개만 지정된 JSON 형식으로 출력한다. (점검 과정·설명은 절대 출력하지 말 것)
 
 ## 개인화 설정 (⚠️ 중요!)
 - 개인화 사용: ${usePersonalization ? '예' : '아니오'}
@@ -1171,6 +1185,7 @@ ${usePersonalization ? `- 사용할 개인화 변수: ${personalizationTags}
   const baseEnriched = await buildSystemPromptWithBrandVoice(extraContext?.companyId, BRAND_SYSTEM_PROMPT);
   // 문안 두뇌: 캠페인 문자(SMS/LMS/MMS) 성과 RAG + 시의성 + 브랜드 키트 주입 (companyId 있을 때만)
   let enrichedSystemPrompt = baseEnriched;
+  let bannedWords: string[] = [];
   if (extraContext?.companyId) {
     try {
       const brain = await composeCopyBrain({
@@ -1179,6 +1194,7 @@ ${usePersonalization ? `- 사용할 개인화 변수: ${personalizationTags}
         isAd: extraContext?.isAd ?? true,
       });
       enrichedSystemPrompt = baseEnriched + brain.promptSuffix;
+      bannedWords = brain.bannedWords;
     } catch (err) {
       console.warn('[copy-brain] generateMessages 주입 실패 — 기본 프롬프트로 진행:', (err as Error)?.message);
     }
@@ -1223,6 +1239,17 @@ ${usePersonalization ? `- 사용할 개인화 변수: ${personalizationTags}
         msgField = msgField.trim();
         (variant as any).message_text = msgField;
         
+        // ★ ② 출력 금지어 가드 (2026-06-30) — 브랜드 키트 banned_words 제거
+        if (bannedWords.length > 0) {
+          const hit = findBannedWords(msgField, bannedWords);
+          if (hit.length > 0) {
+            for (const w of hit) msgField = msgField.split(w).join('');
+            msgField = msgField.replace(/  +/g, ' ').trim();
+            (variant as any).message_text = msgField;
+            console.log(`[copy-guard] 금지어 제거: ${hit.join(', ')}`);
+          }
+        }
+
         // ★ D28: 제목에서 %변수% 강제 제거 (AI가 프롬프트 무시 시 안전장치)
         if ((variant as any).subject) {
           (variant as any).subject = cleanLeftoverVars((variant as any).subject as string).replace(/  +/g, ' ').trim();

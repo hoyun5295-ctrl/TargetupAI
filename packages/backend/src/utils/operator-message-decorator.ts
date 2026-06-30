@@ -14,6 +14,7 @@
 
 import { callAIWithFallback } from '../services/ai';
 import { sanitizeForSms } from './message-sanitizer';
+import { extractJsonFromAiText } from './ai-json';
 
 export interface DecorateMessageInput {
   companyId: string;
@@ -43,7 +44,7 @@ export async function decorateOperatorMessage(input: DecorateMessageInput): Prom
     '',
     '규칙:',
     '- 반드시 다음 변수만 사용한다(다른 변수를 새로 만들지 말 것): ' + varTokens,
-    '- 변수는 ' + '"%변수%"' + ' 형태 그대로 쓴다. 모든 변수를 억지로 넣지 말고, 문맥상 자연스러운 곳에만 녹인다.',
+    '- 변수는 ' + '"%변수%"' + ' 형태 그대로 쓴다. 위 변수는 모두 본문에 반드시 포함하고(누락 금지, 자연스러운 위치에 녹임), 목록에 없는 %변수%는 본문에서 제거한다.',
     '- 원문의 의도·톤·핵심 메시지는 유지한다. 원문에 없는 사실/정보를 새로 만들지 않는다.',
     '- 구체 혜택(%·원·쿠폰·무료·할인·적립·사은품·무료배송)은 절대 임의로 쓰지 않는다. 원문에 있던 혜택 표현만 유지한다.',
     '- (광고) 접두사·무료수신거부 번호·제목은 시스템이 자동 합성하므로 본문에 직접 쓰지 않는다.',
@@ -75,4 +76,70 @@ export async function decorateOperatorMessage(input: DecorateMessageInput): Prom
   const cleaned = String(text || '').trim();
   if (!cleaned) throw new Error('AI 꾸미기 결과가 비어 있습니다. 다시 시도해주세요.');
   return sanitizeForSms(cleaned.slice(0, 2000)).sanitized;
+}
+
+/**
+ * 여러 변형(생성된 3개 문안)에 동일 컬럼 체크집합을 한 번의 AI 호출로 일괄 적용.
+ *   - 꾸미기 1회(3개 처리) = 1 호출 = 3크레딧(액션 단위, 변형당 차감 X — source 'ai-operator-decorate' 단일 호출).
+ *   - 체크된 변수는 각 문안에 모두 포함, 목록에 없는 변수는 제거(A7 정확 집합).
+ *   - 파싱 실패·개수 불일치 시 해당 인덱스는 원문 유지(발송 영향 0).
+ */
+export async function decorateOperatorMessages(
+  input: Omit<DecorateMessageInput, 'message'> & { messages: string[] },
+): Promise<string[]> {
+  const vars = (input.selectedVars || [])
+    .filter((v) => typeof v === 'string' && v.trim())
+    .map((v) => v.trim().replace(/%/g, ''));
+  if (vars.length === 0) throw new Error('활용할 컬럼을 1개 이상 선택해주세요.');
+
+  const msgs = (input.messages || []).map((m) => String(m || '').trim()).filter((m) => m.length >= 5);
+  if (msgs.length === 0) throw new Error('꾸밀 메시지가 너무 짧습니다.');
+
+  const channel = (['sms', 'lms', 'mms'] as const).includes(input.channel as any) ? input.channel : 'lms';
+  const maxBytes = channel === 'sms' ? 90 : 2000;
+  const varTokens = vars.map((v) => '%' + v + '%').join(', ');
+
+  const system = [
+    '당신은 한줄로의 메시지 개인화 편집기입니다. 여러 마케팅 문구 각각을 자연스럽게 다시 써서, 지정된 개인화 변수를 문맥에 녹여 넣습니다.',
+    '',
+    '규칙:',
+    '- 반드시 다음 변수만 사용한다(다른 변수를 새로 만들지 말 것): ' + varTokens,
+    '- 위 변수는 각 문안에 모두 반드시 포함한다(누락 금지, 자연스러운 위치에 녹임). 목록에 없는 %변수%는 본문에서 제거한다.',
+    '- 변수는 ' + '"%변수%"' + ' 형태 그대로 쓴다.',
+    '- 원문의 의도·톤·핵심 메시지는 유지한다. 원문에 없는 사실/정보를 새로 만들지 않는다.',
+    '- 구체 혜택(%·원·쿠폰·무료·할인·적립·사은품·무료배송)은 절대 임의로 쓰지 않는다. 원문에 있던 혜택 표현만 유지한다.',
+    '- (광고) 접두사·무료수신거부 번호·제목은 시스템이 자동 합성하므로 본문에 직접 쓰지 않는다.',
+    '- ' + channel.toUpperCase() + ' 분량(약 ' + maxBytes + ' bytes 이내)을 각 문안마다 지킨다.',
+    '- 이모지와 통신사 미지원 특수문자는 쓰지 않는다.',
+    '- 응답은 설명 없이 JSON 문자열 배열만 출력한다. 예: ["문안1", "문안2"] (입력과 같은 순서·개수).',
+  ].join('\n');
+
+  const userMessage = [
+    '다음 ' + msgs.length + '개 문안 각각에 위 변수를 녹여 재작성하세요. 입력과 같은 순서·개수의 JSON 문자열 배열로만 출력하세요.',
+    '',
+    ...msgs.map((m, i) => '[' + (i + 1) + ']\n' + m),
+  ].join('\n');
+
+  const text = await callAIWithFallback({
+    system,
+    userMessage,
+    maxTokens: 2000,
+    temperature: 0.5,
+    model: 'sonnet',
+    companyId: input.companyId,
+    source: 'ai-operator-decorate',
+    userId: input.userId,
+  });
+
+  let arr: unknown = null;
+  try {
+    arr = extractJsonFromAiText(String(text || ''));
+  } catch {
+    arr = null;
+  }
+  return msgs.map((orig, i) => {
+    const cand = Array.isArray(arr) ? arr[i] : undefined;
+    const decorated = typeof cand === 'string' && cand.trim().length >= 5 ? cand.trim() : orig;
+    return sanitizeForSms(decorated.slice(0, 2000)).sanitized;
+  });
 }

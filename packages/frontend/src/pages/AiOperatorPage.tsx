@@ -388,6 +388,18 @@ export default function AiOperatorPage() {
         setProposal(data as ProposalResponse);
         setLoading(false);
 
+        // ★ A7 (2026-06-30): 생성된 문안에 쓰인 %변수% 자동 체크 (활용 컬럼 칩)
+        try {
+          const validTokens = new Set(dataProfileVars.map((v) => v.token));
+          const used = new Set<string>();
+          for (const m of ((data as ProposalResponse).messages || [])) {
+            for (const mt of Array.from(String(m.body || '').matchAll(/%[^%]+%/g))) {
+              if (validTokens.has(mt[0])) used.add(mt[0]);
+            }
+          }
+          if (used.size > 0) setSelectedVars((prev) => new Set([...prev, ...used]));
+        } catch { /* 자동 체크 실패 무시 */ }
+
         // ★ D210+ Phase 2-fix5 (Harold 명시 2026-05-23): 추출 타겟 안 상위 1건 고객 fetch (filters body 영역).
         //   본질 = proposal.target.filters 매칭 안 LTV/누적구매 상위 1건 → 원본/적용 토글 머지 정확.
         const filters = (data as ProposalResponse).target?.filters || {};
@@ -439,13 +451,13 @@ export default function AiOperatorPage() {
     textareaRef.current?.focus();
   };
 
-  // ★ 2026-06-29: AI 꾸미기 — 선택한 컬럼(%변수%)으로 현재 활성 메시지를 AI가 재작성 → 본문 오버라이드
+  // ★ 2026-06-30 (A7): AI 꾸미기 — 체크된 컬럼(%변수%)을 생성된 변형 전부에 일괄 적용 → 본문 오버라이드
   const handleDecorate = async () => {
     if (!proposal) return;
     if (selectedVars.size === 0) { setError('녹여 넣을 컬럼을 1개 이상 선택해주세요.'); return; }
-    const idx = Math.min(selectedVariantIdx, (proposal.messages?.length || 1) - 1);
-    const currentBody = refinedOverrides[idx] || proposal.messages?.[idx]?.body || '';
-    if (!currentBody.trim()) return;
+    const variants = proposal.messages || [];
+    if (variants.length === 0) return;
+    const bodies = variants.map((m, i) => refinedOverrides[i] || m.body || '');
     const ch = (proposal.channel?.recommended || '').toLowerCase();
     const channel = ch.includes('mms') ? 'mms' : ch.includes('sms') ? 'sms' : 'lms';
     setDecorating(true);
@@ -455,11 +467,15 @@ export default function AiOperatorPage() {
       const res = await fetch('/api/ai/operator/decorate-message', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ message: currentBody, selectedVars: Array.from(selectedVars), channel, isAd: !!proposal.channel?.isAd }),
+        body: JSON.stringify({ messages: bodies, selectedVars: Array.from(selectedVars), channel, isAd: !!proposal.channel?.isAd }),
       });
       const data = await res.json();
-      if (data.success && data.message) {
-        setRefinedOverrides((prev) => ({ ...prev, [idx]: data.message }));
+      if (data.success && Array.isArray(data.messages)) {
+        setRefinedOverrides((prev) => {
+          const next = { ...prev };
+          (data.messages as string[]).forEach((msg, i) => { if (typeof msg === 'string' && msg.trim()) next[i] = msg; });
+          return next;
+        });
       } else {
         setError(data.error || 'AI 꾸미기에 실패했습니다. 다시 시도해주세요.');
       }

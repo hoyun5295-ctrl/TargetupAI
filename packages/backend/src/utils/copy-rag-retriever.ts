@@ -34,12 +34,14 @@ export interface RetrieveInput {
   channels: string[];   // 우선 채널 배열 (예: ['EMAIL'] 또는 ['SMS','LMS','MMS'])
   isAd: boolean;
   limit?: number;
+  brandVoiceRegistered?: boolean; // ★ A6: 등록 회사면 업종 폴백 OFF(자기것만)
 }
 
 export interface RetrieveResult {
   examples: CopyExample[];
   companyCount: number;
   industryCount: number;
+  industryFeatures: IndustryFeatureSummary | null; // ★ A6: 업종 구조·통계(원문 X)
 }
 
 // 회사 표본이 이 미만이면 업종 폴백으로 보강
@@ -84,10 +86,12 @@ export function rankExamples(
   industry: TrainingRow[],
   limit: number,
   minCompany: number,
+  brandVoiceRegistered = false,
 ): CopyExample[] {
   const co = sortRanked(company.map((r) => toRanked(r, 'company')));
   let pool: RankedRow[] = co;
-  if (company.length < minCompany) {
+  // ★ A6 (2026-06-30): 브랜드보이스 등록 회사 = 업종 폴백 OFF(자기것만). 미등록 + 회사 부족 시에만 업종 보강.
+  if (!brandVoiceRegistered && company.length < minCompany) {
     const ind = sortRanked(industry.map((r) => toRanked(r, 'industry')));
     pool = [...co, ...ind]; // 회사 우선, 업종은 뒤에 보강
   }
@@ -102,6 +106,34 @@ export function rankExamples(
     if (out.length >= limit) break;
   }
   return out;
+}
+
+export interface IndustryFeatureSummary {
+  sampleCount: number;
+  avgLengthChars: number;
+  avgSentenceCount: number;
+  hasCtaRatio: number; // CTA 힌트를 포함한 표본 비율 0~1
+}
+
+const CTA_HINTS = ['지금', '바로', '확인', '방문', '오세요', '받아', '신청', '예약', '클릭'];
+
+/** 업종 표본의 구조·통계만 요약 (원문 문장·고유표현 일절 미포함 — 시그니처 누출 0) */
+export function summarizeIndustryFeatures(rows: TrainingRow[]): IndustryFeatureSummary {
+  const n = rows.length;
+  if (n === 0) return { sampleCount: 0, avgLengthChars: 0, avgSentenceCount: 0, hasCtaRatio: 0 };
+  let lenSum = 0, sentSum = 0, ctaCount = 0;
+  for (const r of rows) {
+    const t = String(r.final_message || '');
+    lenSum += t.length;
+    sentSum += t.split(/[.!?。\n]/).filter((s) => s.trim().length > 0).length || 1;
+    if (CTA_HINTS.some((h) => t.includes(h))) ctaCount++;
+  }
+  return {
+    sampleCount: n,
+    avgLengthChars: Math.round(lenSum / n),
+    avgSentenceCount: Math.round((sentSum / n) * 10) / 10,
+    hasCtaRatio: Math.round((ctaCount / n) * 100) / 100,
+  };
 }
 
 const SELECT_COLS = 'final_message, message_features, sent_count, success_count, created_at';
@@ -123,7 +155,7 @@ export async function retrieveCopyExamples(input: RetrieveInput): Promise<Retrie
   );
 
   let industryRows: TrainingRow[] = [];
-  if (companyRes.rows.length < MIN_COMPANY_SAMPLE && industryCode) {
+  if (!input.brandVoiceRegistered && companyRes.rows.length < MIN_COMPANY_SAMPLE && industryCode) {
     const industryRes = await pool.query(
       `SELECT ${SELECT_COLS}
        FROM ai_training_logs
@@ -137,12 +169,13 @@ export async function retrieveCopyExamples(input: RetrieveInput): Promise<Retrie
   }
 
   const companyRows = companyRes.rows as TrainingRow[];
-  const examples = rankExamples(companyRows, industryRows, limit, MIN_COMPANY_SAMPLE);
+  const examples = rankExamples(companyRows, industryRows, limit, MIN_COMPANY_SAMPLE, !!input.brandVoiceRegistered);
+  const industryFeatures = industryRows.length > 0 ? summarizeIndustryFeatures(industryRows) : null;
 
   // 정직 폴백: 회사+업종 합계가 최소 표본 미만이면 빈 결과(가짜 예시 금지)
   if (companyRows.length + industryRows.length < MIN_TOTAL_SAMPLE) {
-    return { examples: [], companyCount: companyRows.length, industryCount: industryRows.length };
+    return { examples: [], companyCount: companyRows.length, industryCount: industryRows.length, industryFeatures };
   }
 
-  return { examples, companyCount: companyRows.length, industryCount: industryRows.length };
+  return { examples, companyCount: companyRows.length, industryCount: industryRows.length, industryFeatures };
 }

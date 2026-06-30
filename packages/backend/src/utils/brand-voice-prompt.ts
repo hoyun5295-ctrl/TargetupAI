@@ -84,7 +84,7 @@ async function loadFromDb(companyId: string): Promise<BrandVoiceCacheEntry> {
       `SELECT memory_value FROM ai_company_memory
        WHERE company_id = $1::uuid AND memory_type = 'representative_message'
        ORDER BY memory_key ASC
-       LIMIT 5`,
+       LIMIT 10`,
       [companyId],
     ),
   ]);
@@ -171,7 +171,8 @@ export async function buildSystemPromptWithBrandVoice(
     return basePrompt;
   }
 
-  if (!data.guideline || data.messages.length === 0) {
+  // ★ A6/B2-1 (2026-06-30): AND 완화 — 가이드라인만 있어도 톤 적용. 대표문안은 있으면 few-shot 보강, 없으면 생략.
+  if (!data.guideline) {
     return basePrompt;
   }
 
@@ -182,10 +183,13 @@ export async function buildSystemPromptWithBrandVoice(
     ? g.emoji_whitelist.join(' / ')
     : '(이모지 사용 없음)';
 
-  const fewShotSection = data.messages.map((m, i) => {
-    const meta = m.message_subject ? ` · 제목: ${m.message_subject}` : '';
-    return `### 예시 ${i + 1} (채널: ${m.channel}${meta})\n${m.message_text}`;
-  }).join('\n\n');
+  const hasFewShot = data.messages.length > 0;
+  const fewShotSection = hasFewShot
+    ? data.messages.map((m, i) => {
+        const meta = m.message_subject ? ` · 제목: ${m.message_subject}` : '';
+        return `### 예시 ${i + 1} (채널: ${m.channel}${meta})\n${m.message_text}`;
+      }).join('\n\n')
+    : '';
 
   const brandVoiceSection = `
 
@@ -208,12 +212,12 @@ export async function buildSystemPromptWithBrandVoice(
 SMS 90바이트 - (광고) 6바이트 - 무료수신거부080XXXXXXXX 18바이트 = 66바이트 = 33글자 한도입니다.
 LMS 톤 학습 결과 기반으로 핵심 CTA 1건 + 빈출 표현 1건 우선 + 시그니처 생략 형식으로 자동 압축하세요.
 
-## In-Context Learning — 회사 대표 문안 Few-shot 예시
+${hasFewShot ? `## In-Context Learning — 회사 대표 문안 Few-shot 예시
 
 아래 ${data.messages.length}건은 본 회사의 실제 마케팅 문안입니다. AI 생성 문안은 본 톤/문체/구조를 자연스럽게 정합하세요. 단, 본문 내용 자체를 복사하지 말고 톤만 학습하세요.
 
 ${fewShotSection}
-
+` : ''}
 ## 우선순위 충돌 시 처리
 
 본 Brand Voice 가이드라인과 옛 시스템 프롬프트(사실 보존 base) 충돌 시 = 사실 보존을 우선합니다 (회사 admin 작성 사실 정확성 > 톤 일치).

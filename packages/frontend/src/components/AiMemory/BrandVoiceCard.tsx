@@ -138,7 +138,7 @@ export default function BrandVoiceCard({ apiBase, token, onToast, onConfirm }: B
   const savedList = () => messages.filter((m) => m.text.trim().length > 0);
 
   function openNewEditor() {
-    if (savedList().length >= 5) { onToast('대표 문안은 최대 5건까지 등록 가능합니다.', 'info'); return; }
+    if (savedList().length >= 10) { onToast('대표 문안은 최대 10건까지 등록 가능합니다.', 'info'); return; }
     setEditor({ index: null, draft: emptyMessage(savedList().length + 1) });
   }
   function openEditEditor(i: number) {
@@ -154,7 +154,7 @@ export default function BrandVoiceCard({ apiBase, token, onToast, onConfirm }: B
     if (editor.draft.text.trim().length < 10) { onToast('본문을 10자 이상 입력해주세요.', 'error'); return; }
     const list = savedList();
     const next = (editor.index === null ? [...list, editor.draft] : list.map((m, i) => (i === editor.index ? editor.draft : m)))
-      .slice(0, 5)
+      .slice(0, 10)
       .map((m, i) => ({ ...m, priority: i + 1 }));
     await saveMessages(next);
     setEditor(null);
@@ -301,11 +301,11 @@ export default function BrandVoiceCard({ apiBase, token, onToast, onConfirm }: B
               <span className="px-1.5 py-0.5 text-[10px] rounded bg-violet-500/20 text-violet-200 border border-violet-500/40 font-semibold">NEW</span>
             </div>
             <p className="text-xs text-violet-200/70 mt-0.5">
-              {registered
-                ? guideline
-                  ? `${messages.length}건 학습 완료 — AI 문안 = 회사 톤 100% 일치 적용 중`
-                  : `${messages.length}건 저장 완료 — 가이드라인 추출 대기`
-                : 'LMS/MMS 대표 문안 1~5건 등록 시 = 다음 발송부터 회사 아이덴티티 100% 일치'}
+              {guideline
+                ? `${messages.length}건 학습 완료 — AI 문안이 회사 톤으로 자동 적용 중`
+                : registered
+                  ? `${messages.length}건 저장 완료 — 가이드라인 추출을 눌러야 회사 톤이 적용됩니다`
+                  : 'LMS/MMS 대표 문안 1~10건 등록 시 = 다음 발송부터 회사 아이덴티티 적용'}
             </p>
           </div>
         </div>
@@ -317,15 +317,15 @@ export default function BrandVoiceCard({ apiBase, token, onToast, onConfirm }: B
         </button>
       </div>
 
-      {/* 미등록 안내 (접힌 상태 + 미등록) */}
-      {!expanded && !registered && (
-        <div className="px-6 py-4 bg-violet-500/10 border-t border-violet-500/20">
+      {/* 미적용 안내 (접힌 상태 + 가이드라인 없음 = 브랜드보이스 미적용) */}
+      {!expanded && !guideline && (
+        <div className="px-6 py-4 bg-amber-500/10 border-t border-amber-400/20">
           <div className="flex items-start gap-3 text-sm">
             <AlertCircle className="w-4 h-4 text-amber-400 flex-shrink-0 mt-0.5" />
             <div className="text-violet-100">
-              <strong className="text-amber-200">미등록 상태</strong> — AI 문안 = 일반 한국어 톤 출력 (회사 아이덴티티 X).
+              <strong className="text-amber-200">브랜드보이스 미적용</strong> — AI 문안이 일반 한국어 톤으로 생성됩니다.
               <br />
-              <span className="text-violet-200/70">대표 문안 등록 시 = AI 다듬기/자동 생성 시 회사 톤 자동 적용.</span>
+              <span className="text-violet-200/70">{registered ? '가이드라인 추출을 누르면' : '대표 문안을 등록하고 가이드라인을 추출하면'} 다음 발송부터 회사 톤으로 자동 작성됩니다.</span>
             </div>
           </div>
         </div>
@@ -339,11 +339,11 @@ export default function BrandVoiceCard({ apiBase, token, onToast, onConfirm }: B
             <div className="flex items-center justify-between mb-3">
               <h4 className="text-sm font-semibold text-white flex items-center gap-2">
                 <FileText className="w-4 h-4 text-violet-300" />
-                LMS/MMS 대표 문안 ({savedList().length}/5)
+                LMS/MMS 대표 문안 ({savedList().length}/10)
               </h4>
               <button
                 onClick={openNewEditor}
-                disabled={savedList().length >= 5}
+                disabled={savedList().length >= 10}
                 className="px-2.5 py-1 text-xs text-violet-200 hover:text-white rounded border border-violet-500/40 hover:bg-violet-500/20 flex items-center gap-1 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
               >
                 <Plus className="w-3 h-3" />

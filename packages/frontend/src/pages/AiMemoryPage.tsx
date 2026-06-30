@@ -612,7 +612,7 @@ export default function AiMemoryPage() {
           </div>
         )}
 
-        {/* ───────── ★ D225+ Brand Voice Learning — 회사별 LMS 대표 문안 5건 + AI 자동 가이드라인 ───────── */}
+        {/* ───────── ★ D225+ Brand Voice Learning — 회사별 LMS 대표 문안 최대 10건 + AI 자동 가이드라인 ───────── */}
         <BrandVoiceCard
           apiBase=""
           token={token() || ''}

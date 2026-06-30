@@ -429,8 +429,8 @@ router.post('/brand-voice/save-messages', async (req: Request, res: Response) =>
     }
 
     const messages = Array.isArray(req.body?.messages) ? req.body.messages : [];
-    if (messages.length < 1 || messages.length > 5) {
-      return res.status(400).json({ success: false, error: '대표 문안은 1~5건 등록 가능합니다.' });
+    if (messages.length < 1 || messages.length > 10) {
+      return res.status(400).json({ success: false, error: '대표 문안은 1~10건 등록 가능합니다.' });
     }
 
     const normalized: Array<{ priority: number; value: RepresentativeMessageValue }> = [];
