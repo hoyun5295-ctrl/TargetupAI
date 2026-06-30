@@ -349,6 +349,22 @@ export default function AiOperatorPage() {
       .catch(() => {});
   }, []);
 
+  // ★ 2026-06-30 (A7 정정): 변형 클릭마다 그 변형이 실제 쓴 %변수%만 자동 체크 (변형마다 다른 컬럼 정확 반영)
+  useEffect(() => {
+    if (!proposal) return;
+    const variants = proposal.messages || [];
+    if (variants.length === 0) return;
+    const idx = Math.min(selectedVariantIdx, variants.length - 1);
+    const body = refinedOverrides[idx] || variants[idx]?.body || '';
+    const validTokens = new Set(dataProfileVars.map((v) => v.token));
+    const used = new Set<string>();
+    // 본문 %고객명% → 칩 토큰은 % 없는 bare('고객명')라 캡처그룹으로 비교
+    for (const mt of Array.from(String(body).matchAll(/%([^%]+)%/g))) {
+      if (validTokens.has(mt[1])) used.add(mt[1]);
+    }
+    setSelectedVars(used);
+  }, [selectedVariantIdx, proposal, dataProfileVars, refinedOverrides]);
+
   // ★ D210+ Phase 2-fix5 (Harold 명시 2026-05-23): 옛 mount 시 fetch 제거.
   //   사고 = 회사 전체 고객 안 1건 fetch (filter X). 정정 = handleSubmit 안 proposal.target.filters 매칭 영역 안 1건 fetch.
   //   본 영역 = 옛 useEffect 폐기 정합 (handleSubmit 안 fetch 정합).
@@ -387,18 +403,6 @@ export default function AiOperatorPage() {
       setTimeout(() => {
         setProposal(data as ProposalResponse);
         setLoading(false);
-
-        // ★ A7 (2026-06-30): 생성된 문안에 쓰인 %변수% 자동 체크 (활용 컬럼 칩)
-        try {
-          const validTokens = new Set(dataProfileVars.map((v) => v.token));
-          const used = new Set<string>();
-          for (const m of ((data as ProposalResponse).messages || [])) {
-            for (const mt of Array.from(String(m.body || '').matchAll(/%[^%]+%/g))) {
-              if (validTokens.has(mt[0])) used.add(mt[0]);
-            }
-          }
-          if (used.size > 0) setSelectedVars((prev) => new Set([...prev, ...used]));
-        } catch { /* 자동 체크 실패 무시 */ }
 
         // ★ D210+ Phase 2-fix5 (Harold 명시 2026-05-23): 추출 타겟 안 상위 1건 고객 fetch (filters body 영역).
         //   본질 = proposal.target.filters 매칭 안 LTV/누적구매 상위 1건 → 원본/적용 토글 머지 정확.

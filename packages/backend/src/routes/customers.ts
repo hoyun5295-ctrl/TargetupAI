@@ -760,7 +760,7 @@ router.get('/stats', async (req: Request, res: Response) => {
 
     // 채널별 집계 (성공 건수 기준으로 비용 계산)
     let smsSent = 0, lmsSent = 0, mmsSent = 0, kakaoSent = 0;
-    let totalSent = 0, totalSuccess = 0;
+    let totalSent = 0, totalSuccess = 0, totalFail = 0;
 
     for (const c of monthlyMetaResult.rows) {
       const sms = monthlySmsMap.get(c.id) || { total_count: 0, success_count: 0, fail_count: 0 };
@@ -769,6 +769,7 @@ router.get('/stats', async (req: Request, res: Response) => {
       const success = Number(sms.success_count || 0) + kakao.success;
       totalSent += sent;
       totalSuccess += success;
+      totalFail += Number(sms.fail_count || 0) + kakao.fail;
 
       switch (c.message_type) {
         case 'SMS': smsSent += success; break;
@@ -852,6 +853,8 @@ router.get('/stats', async (req: Request, res: Response) => {
       stats: {
         ...result.rows[0],
         monthly_sent: totalSuccess,
+        monthly_total: totalSent,
+        monthly_fail: totalFail,
         success_rate: successRate,
         monthly_budget: parseFloat(company.monthly_budget || '0'),
         monthly_cost: Math.round(monthlyCost),

@@ -68,6 +68,8 @@ interface Stats {
   vip_count: string;
   unsubscribe_count: string;
   monthly_sent: number;
+  monthly_total: number;
+  monthly_fail: number;
   success_rate: string;
   monthly_budget: number;
   monthly_cost: number;
@@ -2463,19 +2465,43 @@ const campaignData = {
                     <button onClick={() => setShowBalanceModal(true)} className="text-xs font-medium text-gray-400 hover:text-green-700 transition-colors">잔액 현황 <span className="text-[10px]">→</span></button>
                   )}
                 </div>
-                <div className="grid grid-cols-3 gap-2">
-                  <div className="text-center p-2 bg-gray-50 rounded-lg">
-                    <div className="text-lg font-bold text-gray-800">{(stats?.monthly_sent || 0).toLocaleString()}</div>
-                    <div className="text-xs text-gray-400 mt-1">성공건수</div>
+                {/* 발송 실적 — 전송/성공/실패/성공률 */}
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                  <div className="text-center p-2.5 bg-gray-50 rounded-lg">
+                    <div className="text-lg font-bold text-gray-800">{(stats?.monthly_total || 0).toLocaleString()}</div>
+                    <div className="text-[11px] text-gray-400 mt-0.5">전송건수</div>
                   </div>
-                  <div className="text-center p-2 bg-gray-50 rounded-lg">
-                    <div className="text-lg font-bold text-gray-800">{stats?.success_rate || '0'}%</div>
-                    <div className="text-xs text-gray-400 mt-1">평균성공률</div>
+                  <div className="text-center p-2.5 bg-emerald-50/70 rounded-lg">
+                    <div className="text-lg font-bold text-emerald-600">{(stats?.monthly_sent || 0).toLocaleString()}</div>
+                    <div className="text-[11px] text-gray-400 mt-0.5">성공건수</div>
                   </div>
-                  <div className="text-center p-2 bg-gray-50 rounded-lg">
-                    <div className="text-lg font-bold text-gray-800">{(stats?.monthly_cost || 0).toLocaleString()}<span className="text-xs font-normal text-gray-400">원</span></div>
-                    <div className="text-xs text-gray-400 mt-1">총 사용금액</div>
+                  <div className="text-center p-2.5 bg-rose-50/60 rounded-lg">
+                    <div className="text-lg font-bold text-rose-500">{(stats?.monthly_fail || 0).toLocaleString()}</div>
+                    <div className="text-[11px] text-gray-400 mt-0.5">실패건수</div>
                   </div>
+                  <div className="text-center p-2.5 bg-gray-50 rounded-lg">
+                    <div className="text-lg font-bold text-gray-800">{stats?.success_rate || '0'}<span className="text-xs font-normal text-gray-400">%</span></div>
+                    <div className="text-[11px] text-gray-400 mt-0.5">성공률</div>
+                  </div>
+                </div>
+                {/* 채널별 발송 수량 */}
+                <div className="grid grid-cols-4 gap-2 mt-2">
+                  {[
+                    { label: 'SMS', value: stats?.sms_sent },
+                    { label: 'LMS', value: stats?.lms_sent },
+                    { label: 'MMS', value: stats?.mms_sent },
+                    { label: '카카오', value: stats?.kakao_sent },
+                  ].map((ch) => (
+                    <div key={ch.label} className="flex flex-col items-center justify-center p-2 bg-white border border-gray-100 rounded-lg">
+                      <div className="text-[10px] font-medium text-gray-400">{ch.label}</div>
+                      <div className="text-sm font-bold text-gray-700 mt-0.5 tabular-nums">{(ch.value || 0).toLocaleString()}</div>
+                    </div>
+                  ))}
+                </div>
+                {/* 총 사용금액 */}
+                <div className="mt-2 flex items-center justify-between rounded-lg border border-gray-100 bg-gradient-to-r from-gray-50 to-gray-50/40 px-3.5 py-2.5">
+                  <span className="text-xs font-medium text-gray-500">총 사용금액</span>
+                  <span className="text-lg font-bold text-gray-800 tabular-nums">{(stats?.monthly_cost || 0).toLocaleString()}<span className="text-xs font-normal text-gray-400">원</span></span>
                 </div>
               </div>
             </div>
