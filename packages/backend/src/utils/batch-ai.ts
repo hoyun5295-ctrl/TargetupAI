@@ -25,7 +25,7 @@
 
 import Anthropic from '@anthropic-ai/sdk';
 import { query } from '../config/database';
-import { AI_MODELS, isAdaptiveOnlyModel } from '../config/defaults';
+import { AI_MODELS, isAdaptiveOnlyModel, resolveMaxTokens } from '../config/defaults';
 
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || '';
 
@@ -102,7 +102,7 @@ export async function submitBatch(input: {
     custom_id: r.customId.slice(0, 64),
     params: {
       model: modelId,
-      max_tokens: r.maxTokens || 1024,
+      max_tokens: resolveMaxTokens(r.maxTokens || 1024, modelId),
       ...batchThinking,
       system: r.system,
       messages: [{ role: 'user' as const, content: r.userMessage }],

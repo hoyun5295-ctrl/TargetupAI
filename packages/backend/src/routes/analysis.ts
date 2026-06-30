@@ -4,7 +4,7 @@ import * as fs from 'fs';
 import OpenAI from 'openai';
 import * as path from 'path';
 import { query } from '../config/database';
-import { AI_MODELS, AI_MAX_TOKENS, TIMEOUTS, getCompanyCosts, isAdaptiveOnlyModel } from '../config/defaults';
+import { AI_MODELS, AI_MAX_TOKENS, TIMEOUTS, getCompanyCosts, isAdaptiveOnlyModel, resolveMaxTokens } from '../config/defaults';
 import { authenticate } from '../middlewares/auth';
 
 const router = Router();
@@ -300,7 +300,7 @@ async function callClaude(userMessage: string, maxRetries = 2): Promise<Analysis
       const analysisGuard: any = isAdaptiveOnlyModel(AI_MODELS.claude) ? { thinking: { type: 'disabled' } } : { temperature: 0.3 };
       const response = await anthropic.messages.create({
         model: AI_MODELS.claude,
-        max_tokens: AI_MAX_TOKENS.analysis,
+        max_tokens: resolveMaxTokens(AI_MAX_TOKENS.analysis, AI_MODELS.claude),
         ...analysisGuard,
         system: ANALYSIS_SYSTEM_PROMPT,
         messages: [{ role: 'user', content: userMessage }],

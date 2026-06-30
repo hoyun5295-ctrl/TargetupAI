@@ -3,7 +3,7 @@ import OpenAI from 'openai';
 import { FIELD_MAP, getFieldByKey, getColumnFields, applyFieldAliases } from '../utils/standard-field-map';
 import { query } from '../config/database';
 import { currentUserId } from '../utils/request-context';
-import { AI_MODELS, AI_MAX_TOKENS, TIMEOUTS, isAdaptiveOnlyModel } from '../config/defaults';
+import { AI_MODELS, AI_MAX_TOKENS, TIMEOUTS, isAdaptiveOnlyModel, resolveMaxTokens } from '../config/defaults';
 import { buildFilterWhereClauseCompat } from '../utils/customer-filter';
 import { buildJourneySafetyFilter } from '../utils/journey-safety-filter';
 import { cleanLeftoverVars } from '../utils/messageUtils';
@@ -100,7 +100,8 @@ export async function callAIWithFallback(params: {
 
     const requestParams: any = {
       model: modelName,
-      max_tokens: params.maxTokens,
+      // Sonnet 5 새 토크나이저(~30% 토큰↑) 대응 — 문안 잘림 차단 여유(legacy 모델은 base 그대로)
+      max_tokens: resolveMaxTokens(params.maxTokens, modelName),
       system: [
         {
           type: 'text' as const,
@@ -3061,7 +3062,7 @@ export async function refineDirectMessage(
       const refineThinking: any = isAdaptiveOnlyModel(AI_MODELS.claude) ? { thinking: { type: 'disabled' } } : {};
       const response = await anthropic.messages.create({
         model: AI_MODELS.claude,
-        max_tokens: AI_MAX_TOKENS.refineMessage,
+        max_tokens: resolveMaxTokens(AI_MAX_TOKENS.refineMessage, AI_MODELS.claude),
         ...refineThinking,
         system: systemPrompt,
         messages: [

@@ -24,7 +24,7 @@
 
 import Anthropic from '@anthropic-ai/sdk';
 import { query } from '../config/database';
-import { AI_MODELS, isAdaptiveOnlyModel } from '../config/defaults';
+import { AI_MODELS, isAdaptiveOnlyModel, resolveMaxTokens } from '../config/defaults';
 import { listMemories as listCompanyMemories } from './company-memory';
 
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || '';
@@ -194,7 +194,7 @@ export async function callAIWithCitations(input: {
   const citationThinking: any = isAdaptiveOnlyModel(modelId) ? { thinking: { type: 'disabled' } } : {};
   const response = await (anthropic.messages as any).create({
     model: modelId,
-    max_tokens: input.maxTokens || 2000,
+    max_tokens: resolveMaxTokens(input.maxTokens || 2000, modelId),
     ...citationThinking,
     system: input.system,
     messages: [

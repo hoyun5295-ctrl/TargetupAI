@@ -49,6 +49,18 @@ export function isAdaptiveOnlyModel(modelName: string): boolean {
   return /sonnet-5|opus-4-7|opus-4-8/.test(m);
 }
 
+/**
+ * Sonnet 5 새 토크나이저 대응 — 같은 한국어 문안이 Sonnet 4.6보다 ~30% 더 많은 토큰을 차지하므로,
+ * 옛 max_tokens 한도에 맞춰 들어가던 문안이 그대로 잘릴 수 있다. adaptive-only(Sonnet 5) 모델은
+ * 출력 한도를 1.5배(상한 16000 = 비스트리밍 HTTP 타임아웃 안전 한계)로 확장해 잘림을 원천 차단.
+ * cap은 상한일 뿐 — 모델이 더 길게 쓰게 만들지 않음(정상 출력은 그대로, 잘림만 방지하는 무비용 여유).
+ * 수학적 보장: 옛 한도 C에 들어가던 X토큰(X≤C) → Sonnet 5에서 ~1.3X ≤ 1.3C < 1.5C → 항상 수용.
+ */
+export function resolveMaxTokens(baseMaxTokens: number, modelName: string): number {
+  if (!isAdaptiveOnlyModel(modelName)) return baseMaxTokens;
+  return Math.min(Math.ceil(baseMaxTokens * 1.5), 16000);
+}
+
 // ============================================================
 // 서비스 기본 단가 (원) — 고객사 DB 미설정 시 폴백
 // ============================================================
