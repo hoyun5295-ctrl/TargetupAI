@@ -24,7 +24,7 @@
 
 import Anthropic from '@anthropic-ai/sdk';
 import { query } from '../config/database';
-import { AI_MODELS } from '../config/defaults';
+import { AI_MODELS, isAdaptiveOnlyModel } from '../config/defaults';
 import { listMemories as listCompanyMemories } from './company-memory';
 
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || '';
@@ -190,9 +190,12 @@ export async function callAIWithCitations(input: {
     citations: { enabled: true },
   }));
 
+  // Sonnet 5는 thinking 생략 시 adaptive 자동 ON → max_tokens 잠식·citations 누락 방지
+  const citationThinking: any = isAdaptiveOnlyModel(modelId) ? { thinking: { type: 'disabled' } } : {};
   const response = await (anthropic.messages as any).create({
     model: modelId,
     max_tokens: input.maxTokens || 2000,
+    ...citationThinking,
     system: input.system,
     messages: [
       {

@@ -3,7 +3,7 @@ import OpenAI from 'openai';
 import { FIELD_MAP, getFieldByKey, getColumnFields, applyFieldAliases } from '../utils/standard-field-map';
 import { query } from '../config/database';
 import { currentUserId } from '../utils/request-context';
-import { AI_MODELS, AI_MAX_TOKENS, TIMEOUTS } from '../config/defaults';
+import { AI_MODELS, AI_MAX_TOKENS, TIMEOUTS, isAdaptiveOnlyModel } from '../config/defaults';
 import { buildFilterWhereClauseCompat } from '../utils/customer-filter';
 import { buildJourneySafetyFilter } from '../utils/journey-safety-filter';
 import { cleanLeftoverVars } from '../utils/messageUtils';
@@ -93,12 +93,11 @@ export async function callAIWithFallback(params: {
   // 1차: Claude (모델 선택: sonnet/opus)
   try {
     const modelName = params.model === 'opus' ? AI_MODELS.opus : AI_MODELS.claude;
-    const isOpus = params.model === 'opus';
+    // ★ 2026-07-01: 실제 모델 문자열 기준 API 표면 분기 (model 파라미터가 아님 — env로 모델이 바뀌어도 안전).
+    //   adaptive-only(Sonnet 5·Opus 4.7/4.8): temperature 보내면 400, thinking은 adaptive/disabled만.
+    //   legacy(Sonnet 4.6·Haiku): temperature 허용 + thinking enabled+budget.
+    const adaptiveOnly = isAdaptiveOnlyModel(modelName);
 
-    // ★ D170+ (Opus 4.7 Breaking Changes 정합):
-    //   - Opus 4.7은 temperature/top_p/top_k 박으면 400 error (sampling 파라미터 제거)
-    //   - Opus 4.7은 thinking.type='enabled' 박으면 400 error (adaptive만 지원)
-    //   - 따라서 Opus 호출 시 temperature 박지 않음, thinking은 adaptive 형식
     const requestParams: any = {
       model: modelName,
       max_tokens: params.maxTokens,
@@ -112,21 +111,18 @@ export async function callAIWithFallback(params: {
       messages: [{ role: 'user', content: params.userMessage }],
     };
 
-    // temperature — Opus 4.7은 박으면 400, Sonnet/Haiku는 정합
-    if (!isOpus) {
+    // temperature — adaptive-only 모델(Sonnet 5·Opus 4.7/4.8)은 보내면 400
+    if (!adaptiveOnly) {
       requestParams.temperature = params.thinking ? 1 : params.temperature;
     }
 
-    // thinking — Opus 4.7은 adaptive only, Sonnet은 enabled+budget_tokens
+    // thinking — adaptive-only: 요청 시 adaptive / 미요청 시 disabled(생략 시 자동 ON 방지). legacy: enabled+budget.
     if (params.thinking) {
-      if (isOpus) {
-        requestParams.thinking = { type: 'adaptive' };
-      } else {
-        requestParams.thinking = {
-          type: 'enabled',
-          budget_tokens: params.thinkingBudget || 5000,
-        };
-      }
+      requestParams.thinking = adaptiveOnly
+        ? { type: 'adaptive' }
+        : { type: 'enabled', budget_tokens: params.thinkingBudget || 5000 };
+    } else if (adaptiveOnly) {
+      requestParams.thinking = { type: 'disabled' };
     }
 
     const response = await anthropic.messages.create(requestParams);
@@ -3061,9 +3057,12 @@ export async function refineDirectMessage(
   // Claude 우선
   if (process.env.ANTHROPIC_API_KEY) {
     try {
+      // Sonnet 5는 thinking 생략 시 adaptive 자동 ON → max_tokens 잠식·다듬기 잘림 방지
+      const refineThinking: any = isAdaptiveOnlyModel(AI_MODELS.claude) ? { thinking: { type: 'disabled' } } : {};
       const response = await anthropic.messages.create({
         model: AI_MODELS.claude,
         max_tokens: AI_MAX_TOKENS.refineMessage,
+        ...refineThinking,
         system: systemPrompt,
         messages: [
           // ★ D152-5 정정2 (2026-05-12 Harold님 명시): "편안하게 풍성하게, 읽고 싶고 행사가 궁금하게."

@@ -25,7 +25,7 @@
 
 import Anthropic from '@anthropic-ai/sdk';
 import { query } from '../config/database';
-import { AI_MODELS } from '../config/defaults';
+import { AI_MODELS, isAdaptiveOnlyModel } from '../config/defaults';
 
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || '';
 
@@ -95,12 +95,15 @@ export async function submitBatch(input: {
   const modelKey = input.model || 'opus';
   const modelId = modelKey === 'opus' ? AI_MODELS.opus : AI_MODELS.claude;
 
-  // Anthropic Batch API 박음 — custom_id 박은 영역 박음
+  // Anthropic Batch API — custom_id 단위 요청 구성
+  // Sonnet 5는 thinking 생략 시 adaptive 자동 ON → max_tokens 잠식 방지
+  const batchThinking: any = isAdaptiveOnlyModel(modelId) ? { thinking: { type: 'disabled' } } : {};
   const requests = input.requests.map((r) => ({
     custom_id: r.customId.slice(0, 64),
     params: {
       model: modelId,
       max_tokens: r.maxTokens || 1024,
+      ...batchThinking,
       system: r.system,
       messages: [{ role: 'user' as const, content: r.userMessage }],
     },

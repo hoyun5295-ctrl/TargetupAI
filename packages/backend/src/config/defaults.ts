@@ -19,27 +19,35 @@ redis.on('error', (err) => console.error('[Redis] 연결 에러:', err.message))
 // AI 모델명 (환경변수로 모델 업그레이드 시 .env만 수정)
 // ============================================================
 export const AI_MODELS = {
-  // ★ D170+ (2026-05-19) Harold 명시 — 모델 영역 절대 분리. 혼용 시 한줄로 운영 영향 사고.
-  //
-  //   ┌─────────────────────┬──────────────────┬──────────────────┐
-  //   │ 영역                │ Claude 모델       │ GPT fallback     │
-  //   ├─────────────────────┼──────────────────┼──────────────────┤
-  //   │ 기존 한줄로AI 전체  │ Sonnet 4.6        │ gpt-5.4-mini     │
-  //   │ (refine/generate/   │ (절대 변경 X)     │ (절대 변경 X)    │
-  //   │  recommend-target)  │                  │                  │
-  //   ├─────────────────────┼──────────────────┼──────────────────┤
-  //   │ AI Operator 신메뉴  │ Opus 4.7          │ gpt-5.5          │
-  //   │ (D163+ Multi-Agent) │ (Target/Message/  │                  │
-  //   │                     │  Compliance)      │                  │
-  //   └─────────────────────┴──────────────────┴──────────────────┘
-  //
-  //   callAIWithFallback에서 params.model === 'opus'일 때만 AI Operator 영역.
-  //   기본 호출(model 미박힘)은 자동으로 기존 한줄로AI 흐름.
-  claude: process.env.CLAUDE_MODEL || 'claude-sonnet-4-6',               // ★ 기존 한줄로AI — Harold 명시 절대 유지 (검증)
-  opus: process.env.CLAUDE_OPUS_MODEL || 'claude-opus-4-7',              // ★ AI Operator 전용 (valid 확정 — 4-7 정합, 400 사고는 temperature 박은 게 원인)
-  gpt: process.env.GPT_MODEL || 'gpt-5.4-mini',                          // ★ 기존 한줄로AI fallback — Harold 명시 절대 유지
-  gptOperator: process.env.GPT_OPERATOR_MODEL || 'gpt-5.5',              // ★ AI Operator 신메뉴 fallback
+  // ★ 2026-07-01 (Harold 명시): 문안 생성 전체 + AI Operator 전부 = Claude Sonnet 5 통합 업그레이드.
+  //   - 비용: Sonnet 5 $3/$15(도입가 $2/$10) < Opus 4.7 $5/$25 (~40% 절감)
+  //   - 품질: 신세대(Claude 5) — 코딩·에이전트 Opus급 근접
+  //   - claude(기존 한줄로AI 문안) + opus(AI Operator) 둘 다 Sonnet 5로 통일.
+  //     model 파라미터('sonnet'/'opus')는 이제 GPT fallback 분기(gpt-5.4-mini vs gpt-5.5)에만 의미 유지.
+  //   - ★ Sonnet 5 API 표면: temperature/top_p/top_k 보내면 400, thinking은 adaptive/disabled만 허용.
+  //     thinking 생략 시 adaptive 자동 ON → max_tokens 잠식·문안 잘림. Anthropic 직접 호출부는
+  //     isAdaptiveOnlyModel()로 분기(temperature 미전송 + thinking 미요청 시 {type:'disabled'} 명시).
+  //   - 필드 매핑(ai-mapping.ts)은 별도 env CLAUDE_MAPPING_MODEL — 본 업그레이드 범위 밖.
+  //   ※ 서버 .env에 CLAUDE_MODEL / CLAUDE_OPUS_MODEL 이 설정돼 있으면 그 값이 우선 → 함께 변경 필요.
+  claude: process.env.CLAUDE_MODEL || 'claude-sonnet-5',                  // 기존 한줄로AI 문안 — Sonnet 5
+  opus: process.env.CLAUDE_OPUS_MODEL || 'claude-sonnet-5',               // AI Operator — Sonnet 5
+  gpt: process.env.GPT_MODEL || 'gpt-5.4-mini',                          // 기존 한줄로AI fallback — Harold 명시 절대 유지
+  gptOperator: process.env.GPT_OPERATOR_MODEL || 'gpt-5.5',              // AI Operator fallback
 };
+
+/**
+ * adaptive-only 모델 판정 — sampling 파라미터(temperature/top_p/top_k)를 보내면 400 +
+ * thinking은 adaptive/disabled만 허용하는 모델군. 대상: Sonnet 5 · Opus 4.7 · Opus 4.8.
+ * (Sonnet 4.6 / Haiku 4.5 = false — temperature·enabled+budget thinking 허용)
+ *
+ * Anthropic 직접 호출부 분기 규칙: 반환값이 true면
+ *   ① temperature/top_p/top_k 미전송
+ *   ② thinking 미요청 시 {type:'disabled'} 명시 (Sonnet 5는 생략 시 adaptive 자동 ON → max_tokens 잠식·문안 잘림 방지)
+ */
+export function isAdaptiveOnlyModel(modelName: string): boolean {
+  const m = (modelName || '').toLowerCase();
+  return /sonnet-5|opus-4-7|opus-4-8/.test(m);
+}
 
 // ============================================================
 // 서비스 기본 단가 (원) — 고객사 DB 미설정 시 폴백
