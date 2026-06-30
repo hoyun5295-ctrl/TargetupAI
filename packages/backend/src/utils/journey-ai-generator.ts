@@ -22,6 +22,8 @@ import { buildSystemPromptWithBrandVoice } from './brand-voice-prompt';
 import { resolveJourneyAdFlag } from './journey-ad-policy';
 import { query } from '../config/database';
 import { sanitizeForSms } from './message-sanitizer';
+// ★ 2026-06-30: AI가 본문에 박은 (광고)/무료수신거부 제거 — body는 순수 본문, (광고)+080은 발송 시 buildAdMessage 자동 합성.
+import { stripAdParts } from './messageUtils';
 // ★ D210+ Phase 2 (Harold 명시 2026-05-23): CT-58 — 회사 customer DB 실측 프로필 동적 주입.
 //   본질 = AI가 어설픈 변수 임의 작성 차단 (Harold 명시: "개인화 어설프게 실수로 들어가는게 더 안좋다").
 import { getCompanyDataProfile, formatProfileForAiPrompt } from './company-data-profile';
@@ -752,8 +754,9 @@ ${memoryContext}
 
   let parsed: any = {};
   try { parsed = JSON.parse(extractJSON(text)); } catch { parsed = {}; }
-  const subj = sanitizeForSms(String(parsed.subject || '').slice(0, 80)).sanitized.slice(0, 40);
-  const msg = sanitizeForSms(String(parsed.message || '').slice(0, 4000)).sanitized;
+  // ★ AI가 본문/제목에 박은 (광고)·무료수신거부 제거 → 순수 본문만(발송 시 buildAdMessage가 (광고)+080 자동 합성, 빌더 표시도 일관).
+  const subj = stripAdParts(sanitizeForSms(String(parsed.subject || '').slice(0, 80)).sanitized).slice(0, 40);
+  const msg = stripAdParts(sanitizeForSms(String(parsed.message || '').slice(0, 4000)).sanitized);
   return { subject: subj, message: msg };
 }
 

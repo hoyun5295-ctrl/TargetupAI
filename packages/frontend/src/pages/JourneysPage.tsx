@@ -3093,6 +3093,7 @@ export default function JourneysPage() {
               <DateAnchorJourneyBuilder
                 embedded
                 dataProfileVars={dataProfileVars}
+                opt080Number={opt080Number}
                 onBuild={handleDateAnchorBuild}
                 onBack={() => setPurpose('marketing')}
                 onGeneratePlan={handleAnchorGeneratePlan}
