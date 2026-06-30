@@ -689,6 +689,75 @@ ${memoryContext}
 }
 
 // ════════════════════════════════════════════════════════════════════
+// ★ 2026-06-30 여정 일반화 SP-B — 날짜축 스텝 LMS 문안 1건 생성 (제목+본문).
+//   회사 admin이 자연어 목표 + D-N(offset)만 주면 안내문은 풍성, 구체 혜택은 placeholder로 1건 생성.
+//   source 'journey-ai-refine' → callAIWithFallback가 1크레딧 자동 차감(문안생성 1건 = 1크레딧).
+//   feedback_ai_no_arbitrary_benefit: % / 원 / 쿠폰 등 임의 혜택 생성 금지 → [혜택 안내 — 직접 수정해주세요] placeholder.
+// ════════════════════════════════════════════════════════════════════
+export async function generateAnchorStepMessage(input: {
+  companyId: string;
+  objective: string;
+  offsetDays: number;
+}): Promise<{ subject: string; message: string }> {
+  const ctx = await loadCompanyContext(input.companyId);
+  const memoryContext = await buildMemoryPromptContext(input.companyId, 20).catch(() => '');
+  const season = getSeasonContext();
+  const offset = Math.max(0, Math.floor(Number(input.offsetDays) || 0));
+  const timing = offset === 0 ? '기준일 당일(D-0, 마지막 안내)' : `기준일 ${offset}일 전(D-${offset})`;
+
+  let system = `당신은 한국 마케팅 LMS 문안 작성 전문가입니다.
+회사가 지정한 기준 날짜(예: 포인트 소멸일·만료일·행사일)를 기준으로 ${timing}에 발송할 LMS 문안 1건(제목+본문)을 작성합니다.
+
+[회사 컨텍스트]
+- 회사명: ${ctx.companyName}
+- 브랜드명: ${ctx.brandName || '(미설정)'}
+- 톤앤매너: ${ctx.brandTone || '친근함'}
+- 업종: ${ctx.businessType || '(미설정)'}
+
+[시즌 컨텍스트]
+- 현재 ${season.month}월 (${season.season}) · 키워드: ${season.keywords.join(', ')}
+
+${memoryContext}
+
+[발송 시점] ${timing} — D-0에 가까울수록 남은 기간 긴박감을 자연스럽게 높이세요.
+
+[작성 원칙]
+✓ %고객명% 변수로 시작 (예: "%고객명%님, ...")
+✓ 안내문 / 인사 / 감성 텍스트 / 시즌감 / 긴박감(D-N) = 풍성하게 직접 작성
+✓ 제목 = 본문 요약 한 줄 (40자 안, LMS 필수)
+✗ 구체 혜택(% / 원 / 무료 / 쿠폰 / 사은품 / 적립 / 할인 / 무료배송) 임의 생성 절대 금지 → 정확히 \`[혜택 안내 — 직접 수정해주세요]\` placeholder 1개 사용
+✗ 상품명 / 일시 / 숫자 / 연락처 임의 작성 X (모르면 placeholder)
+✗ URL = \`[URL 입력]\` placeholder 또는 실제 http(s):// URL
+✗ (광고) 표기 / 무료수신거부 080 직접 작성 X (시스템 자동 합성)
+✗ 날씨 단순 단어 직접 작성 X
+✗ 뻔한 표현 금지: "특별한 혜택" / "다양한 혜택" / "소중한 고객님" / 느낌표 폭탄 / 과장 형용사
+✓ 최대 2000바이트(LMS) 안
+
+[출력 JSON — 다른 텍스트 금지]
+{ "subject": "제목 한 줄", "message": "본문" }`;
+
+  system = await buildSystemPromptWithBrandVoice(input.companyId, system);
+
+  const userMessage = `여정 목표(회사 입력): ${String(input.objective || '').trim() || '(미입력)'}\n\n위 목표와 발송 시점(${timing})에 맞춰 LMS 제목+본문 1건을 JSON으로 응답하세요. 구체 혜택은 placeholder로 두세요.`;
+
+  const text = await callAIWithFallback({
+    system,
+    userMessage,
+    maxTokens: 2000,
+    temperature: 0.6,
+    model: 'sonnet',
+    companyId: input.companyId,
+    source: 'journey-ai-refine',
+  });
+
+  let parsed: any = {};
+  try { parsed = JSON.parse(extractJSON(text)); } catch { parsed = {}; }
+  const subj = sanitizeForSms(String(parsed.subject || '').slice(0, 80)).sanitized.slice(0, 40);
+  const msg = sanitizeForSms(String(parsed.message || '').slice(0, 4000)).sanitized;
+  return { subject: subj, message: msg };
+}
+
+// ════════════════════════════════════════════════════════════════════
 // 스팸필터 회피 재생성 — 걸린 step 문안을 1회 재작성 (Phase 6B)
 //   source 'journey-ai-refine' → callAIWithFallback가 1크레딧 자동 차감.
 //   혜택/숫자/약속/placeholder/Liquid는 그대로 보존 (거짓 혜택 생성 금지).

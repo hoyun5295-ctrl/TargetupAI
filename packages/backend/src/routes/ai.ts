@@ -101,7 +101,7 @@ import { getPauseLogs } from '../utils/journey-pause-handler';
 // ★ 2026-06-30 여정 일반화 — one_shot 활성 시점 단발 dispatch.
 import { dispatchOneShotJourney } from '../utils/journey-anchor-scheduler';
 // ★ D187-fix3 (2026-05-21): Journey AI Generator — One-shot 자연어 + 시즌 + 회사 메모리
-import { generateJourneyPackage, refineStepMessage } from '../utils/journey-ai-generator';
+import { generateJourneyPackage, refineStepMessage, generateAnchorStepMessage } from '../utils/journey-ai-generator';
 // ★ 2026-06-29: 대화형 여정 수정 — 초안 패키지에 자연어 수정 반영
 import { editJourneyPackage } from '../utils/journey-ai-editor';
 // ★ 2026-06-29: AI 꾸미기 — 추천 메시지에 선택 컬럼(%변수%) 자연스럽게 녹임
@@ -3156,6 +3156,33 @@ router.post('/operator/journeys-refine-step', async (req: Request, res: Response
   } catch (err: any) {
     console.error('[Journeys refine step] 오류:', err);
     return res.status(500).json({ success: false, error: err?.message || 'AI 다듬기 실패' });
+  }
+});
+
+// ★ 2026-06-30 여정 일반화 SP-B — 날짜축 스텝 LMS 문안 1건 AI 생성 (제목+본문). 1건 = 1크레딧(source 'journey-ai-refine' 자동 차감).
+//   회사 자연어 목표 + D-N(offset)만으로 안내문 풍성·구체 혜택은 placeholder로 생성(임의 혜택 0).
+router.post('/operator/journeys/anchor-generate-message', async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+    const planCtx = await loadPlanContext(companyId);
+    if (!planCtx) return res.status(404).json({ success: false, error: '회사 정보를 찾을 수 없습니다.' });
+    if (!isAiOperatorAllowed(planCtx, req.user)) {
+      return res.status(403).json({ success: false, error: 'AI Operator 진입 권한이 없습니다.', code: 'AI_OPERATOR_GATED' });
+    }
+    const { objective, offsetDays } = req.body || {};
+    const off = Math.max(0, Math.min(365, Math.floor(Number(offsetDays) || 0)));
+    const result = await generateAnchorStepMessage({ companyId, objective: String(objective || ''), offsetDays: off });
+    if (!result.message || result.message.trim().length < 5) {
+      return res.status(502).json({ success: false, error: 'AI 문안 생성에 실패했습니다. 잠시 후 다시 시도해주세요.' });
+    }
+    return res.json({ success: true, subject: result.subject, message: result.message });
+  } catch (err: any) {
+    if (err instanceof InsufficientCreditError) {
+      return res.status(402).json({ success: false, error: '문안 생성에 필요한 크레딧이 부족합니다. 크레딧을 충전해 주세요.', code: 'INSUFFICIENT_CREDIT' });
+    }
+    console.error('[Journeys anchor generate] 오류:', err);
+    return res.status(500).json({ success: false, error: err?.message || 'AI 문안 생성 실패' });
   }
 });
 

@@ -1,14 +1,15 @@
 /**
- * 날짜축 여정 빌더 — 지정일 D-N (2026-06-30 여정 일반화 SP-B)
+ * 날짜축 여정 빌더 — 지정일 D-N + AI 문안 생성 (2026-06-30 여정 일반화 SP-B)
  *
- * 회사가 지정한 기준 날짜(예: 포인트 소멸일)를 기준으로 D-7/D-3/D-1/D-0 멀티스텝을 보낸다.
- * 흐름: ① 기준 날짜 + 반복 + 시각 → ② D-N 스텝(며칠 전 + 제목/본문) → ③ 대상 조건 → 검토.
- *   D-0 발송 후: 반복 없음 = 자동 정지(새 날짜 지정 시 재가동) / 반복 = 다음 앵커로 자동 갱신.
- *   스텝 채널 = LMS(광고 표기 자동). 발송 6원칙·정보통신망법 정합.
+ * 회사가 지정한 기준 날짜(예: 포인트 소멸일)를 기준으로 D-N 멀티스텝을 보낸다.
+ * AI 주도: 자연어 목표 한 줄 → 각 단계 [AI 문안생성](1크레딧)으로 안내문 자동 작성(구체 혜택은 placeholder).
+ * 흐름: ① 기준 날짜 + 반복 + 시각 → ② 자유 단계(며칠 전 + AI 문안생성) → ③ 대상 조건(자유) → 검토.
+ *   D-0 발송 후: 반복 없음 = 자동 정지(새 날짜 지정 시 재가동) / 반복 = 다음 앵커 자동 갱신.
+ *   스텝 채널 = LMS((광고) 표기·무료수신거부 자동). 활성화 시 전체 문안 스팸필터 테스트.
  */
 
 import { useState } from 'react';
-import { CalendarClock, ArrowLeft, Plus, X, Repeat } from 'lucide-react';
+import { CalendarClock, ArrowLeft, Plus, X, Repeat, Sparkles, Loader2, Wand2 } from 'lucide-react';
 
 export interface DateAnchorStep {
   anchorOffsetDays: number;
@@ -19,8 +20,8 @@ export interface DateAnchorAudienceCondition { field: string; op: string; value:
 
 export interface DateAnchorBuildResult {
   name: string;
-  anchorDate: string;            // 'YYYY-MM-DD'
-  anchorRecurrence: string;      // 'none'|'monthly_day'|'monthly_last'|'yearly'
+  anchorDate: string;
+  anchorRecurrence: string;
   anchorRecurrenceDay: number | null;
   anchorHourKst: number;
   triggerFilters: Record<string, any>;
@@ -34,39 +35,36 @@ const RECURRENCES = [
   { key: 'yearly', label: '매년', desc: '매년 같은 날 반복' },
 ];
 
+// 대상 조건 — applyCustomerConditions 허용 필드(백엔드 정합). 포인트는 한 옵션일 뿐, 한정 아님.
 const COND_FIELDS = [
   { key: 'grade', label: '등급' }, { key: 'region', label: '지역' },
   { key: 'store_name', label: '매장명' }, { key: 'store_code', label: '매장코드' },
-  { key: 'age', label: '나이' }, { key: 'purchase_count', label: '구매횟수' }, { key: 'total_purchase_amount', label: '누적구매액' },
+  { key: 'age', label: '나이' }, { key: 'purchase_count', label: '구매횟수' },
+  { key: 'total_purchase_amount', label: '누적구매액' }, { key: 'points', label: '포인트' },
 ];
 const COND_OPS = [
   { key: '==', label: '같음' }, { key: '!=', label: '다름' }, { key: '>=', label: '이상' }, { key: '<=', label: '이하' }, { key: '>', label: '초과' }, { key: '<', label: '미만' },
 ];
 
-function defaultMessage(offset: number): string {
-  if (offset === 0) return '%고객명%님, 오늘까지예요.\n\n[소멸 전 사용 안내 또는 회사가 제공할 혜택을 직접 작성해주세요]\n\n자세히 → [URL 입력]';
-  return `%고객명%님, ${offset}일 남았어요.\n\n[사용 안내 또는 회사가 제공할 혜택을 직접 작성해주세요]\n\n자세히 → [URL 입력]`;
-}
-function makeStep(offset: number): DateAnchorStep {
-  return { anchorOffsetDays: offset, subject: offset === 0 ? '오늘까지 안내' : `D-${offset} 안내`, messageTemplate: defaultMessage(offset) };
-}
-
 interface Props {
   embedded?: boolean;
   onBuild: (result: DateAnchorBuildResult) => void;
   onBack: () => void;
+  /** AI 문안생성 — 1건 1크레딧. 부모(JourneysPage)가 endpoint 호출 + 크레딧/토스트 처리. 실패 시 null. */
+  onGenerateMessage: (objective: string, offsetDays: number) => Promise<{ subject: string; message: string } | null>;
 }
 
-export default function DateAnchorJourneyBuilder({ embedded = false, onBuild, onBack }: Props) {
+export default function DateAnchorJourneyBuilder({ embedded = false, onBuild, onBack, onGenerateMessage }: Props) {
+  const [objective, setObjective] = useState('');
   const [anchorDate, setAnchorDate] = useState('');
   const [recurrence, setRecurrence] = useState('none');
   const [recurrenceDay, setRecurrenceDay] = useState('1');
   const [hourKst, setHourKst] = useState('10');
-  const [steps, setSteps] = useState<DateAnchorStep[]>([makeStep(7), makeStep(3), makeStep(1), makeStep(0)]);
-  const [pointsMin, setPointsMin] = useState('');
+  const [steps, setSteps] = useState<DateAnchorStep[]>([{ anchorOffsetDays: 7, subject: '', messageTemplate: '' }]);
   const [conditions, setConditions] = useState<DateAnchorAudienceCondition[]>([]);
+  const [genIdx, setGenIdx] = useState<number | null>(null);
 
-  const addStep = () => setSteps((s) => [...s, makeStep(0)]);
+  const addStep = () => setSteps((s) => [...s, { anchorOffsetDays: 0, subject: '', messageTemplate: '' }]);
   const updateStep = (i: number, patch: Partial<DateAnchorStep>) => setSteps((s) => s.map((x, idx) => (idx === i ? { ...x, ...patch } : x)));
   const removeStep = (i: number) => setSteps((s) => s.filter((_, idx) => idx !== i));
 
@@ -74,22 +72,30 @@ export default function DateAnchorJourneyBuilder({ embedded = false, onBuild, on
   const updateCondition = (i: number, patch: Partial<DateAnchorAudienceCondition>) => setConditions((c) => c.map((x, idx) => (idx === i ? { ...x, ...patch } : x)));
   const removeCondition = (i: number) => setConditions((c) => c.filter((_, idx) => idx !== i));
 
+  const handleGenerate = async (i: number) => {
+    if (!objective.trim() || genIdx !== null) return;
+    setGenIdx(i);
+    try {
+      const r = await onGenerateMessage(objective.trim(), steps[i].anchorOffsetDays);
+      if (r && r.message) updateStep(i, { subject: r.subject || steps[i].subject, messageTemplate: r.message });
+    } finally {
+      setGenIdx(null);
+    }
+  };
+
   const canBuild = Boolean(anchorDate) && steps.length > 0 && steps.every((s) => s.messageTemplate.trim().length >= 10 && s.subject.trim());
 
   const handleBuild = () => {
     if (!canBuild) return;
     const triggerFilters: Record<string, any> = {};
-    const pm = Number(pointsMin);
-    if (Number.isFinite(pm) && pm > 0) triggerFilters.points_min = Math.floor(pm);
     const validConds = conditions.filter((c) => c.field && c.op && String(c.value).trim() !== '');
     if (validConds.length > 0) {
       triggerFilters.customer_conditions = validConds.map((c) => ({ field: c.field, op: c.op, value: c.value }));
       triggerFilters.logic = 'AND';
     }
-    // offset 큰 것부터(먼저 보냄) step_order 정렬은 부모가 처리. 여기선 입력 순서 유지하되 백엔드 정합 위해 offset desc 정렬.
-    const sorted = [...steps].sort((a, b) => b.anchorOffsetDays - a.anchorOffsetDays);
+    const sorted = [...steps].sort((a, b) => b.anchorOffsetDays - a.anchorOffsetDays); // 먼저 보내는 것(큰 offset) 먼저
     onBuild({
-      name: '날짜축 여정',
+      name: objective.trim() ? objective.trim().slice(0, 40) : '날짜축 여정',
       anchorDate,
       anchorRecurrence: recurrence,
       anchorRecurrenceDay: recurrence === 'monthly_day' ? Math.max(1, Math.min(31, Number(recurrenceDay) || 1)) : null,
@@ -116,10 +122,25 @@ export default function DateAnchorJourneyBuilder({ embedded = false, onBuild, on
           </div>
           <div>
             <h2 className="text-base md:text-lg font-semibold">날짜축 여정 만들기</h2>
-            <p className="text-xs text-white/50">기준 날짜(예: 포인트 소멸일) 기준 D-N 단계 발송</p>
+            <p className="text-xs text-white/50">기준 날짜 기준 D-N 단계 발송 · AI가 문안을 만들어드려요</p>
           </div>
         </div>
       )}
+
+      {/* 자연어 목표 — AI 문안생성의 맥락 */}
+      <div className="bg-gradient-to-br from-fuchsia-500/10 via-purple-500/10 to-indigo-500/10 border border-fuchsia-500/30 rounded-2xl p-4">
+        <div className="flex items-center gap-2 mb-2">
+          <Sparkles className="w-4 h-4 text-fuchsia-300" />
+          <span className="text-sm font-semibold">무엇을 알릴까요</span>
+        </div>
+        <input
+          value={objective}
+          onChange={(e) => setObjective(e.target.value)}
+          placeholder="예: 포인트 소멸 임박 고객에게 소멸 전 사용 독려 / 멤버십 갱신일 안내 / 행사 시작일 안내"
+          className="w-full bg-slate-900 border border-white/10 rounded-xl px-3 py-2.5 text-sm placeholder-white/30 focus:outline-none focus:border-fuchsia-400"
+        />
+        <p className="text-[11px] text-white/45 mt-1.5">이 목표를 바탕으로 각 단계의 [AI 문안생성]이 안내문을 만들어드립니다. 구체 혜택(%·원·쿠폰)은 직접 채워주세요.</p>
+      </div>
 
       {/* ① 기준 날짜 + 반복 + 시각 */}
       <div className="space-y-3">
@@ -159,42 +180,47 @@ export default function DateAnchorJourneyBuilder({ embedded = false, onBuild, on
         </div>
       </div>
 
-      {/* ② D-N 스텝 */}
+      {/* ② 자유 단계 + AI 문안생성 */}
       <div>
         <h3 className="text-sm font-semibold text-white/90 mb-2"><span className="text-indigo-300">②</span> 단계 구성 (며칠 전에 보낼지)</h3>
         <div className="space-y-2">
           {steps.map((s, i) => (
             <div key={i} className="p-3 rounded-xl bg-white/[0.05] border border-white/10 space-y-2">
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
                 <span className="text-[11px] text-white/50">기준일</span>
                 <input type="number" min={0} max={365} value={s.anchorOffsetDays} onChange={(e) => updateStep(i, { anchorOffsetDays: Math.max(0, Math.floor(Number(e.target.value) || 0)) })} className="w-16 bg-white/[0.06] border border-white/15 rounded px-2 py-1.5 text-xs text-white text-center" />
                 <span className="text-[11px] text-white/50">일 전{s.anchorOffsetDays === 0 ? ' (당일)' : ''}</span>
-                <span className="ml-auto text-[11px] text-indigo-300 font-mono">D-{s.anchorOffsetDays}</span>
+                <span className="text-[11px] text-indigo-300 font-mono">D-{s.anchorOffsetDays}</span>
+                <button
+                  onClick={() => handleGenerate(i)}
+                  disabled={!objective.trim() || genIdx !== null}
+                  title={!objective.trim() ? '먼저 위에 목표를 입력해주세요' : 'AI 문안생성 (1크레딧)'}
+                  className="ml-auto inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-gradient-to-r from-fuchsia-500/80 to-purple-500/80 text-[11px] font-medium hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  {genIdx === i ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Wand2 className="w-3.5 h-3.5" />}
+                  AI 문안생성
+                </button>
                 {steps.length > 1 && (
                   <button onClick={() => removeStep(i)} className="p-1 rounded bg-white/5 hover:bg-rose-500/20 border border-white/10" aria-label="단계 삭제">
                     <X className="w-3.5 h-3.5 text-white/60" />
                   </button>
                 )}
               </div>
-              <input value={s.subject} onChange={(e) => updateStep(i, { subject: e.target.value.slice(0, 40) })} placeholder="제목 (LMS 필수)" className="w-full bg-white/[0.06] border border-white/15 rounded px-2 py-1.5 text-xs text-white" />
-              <textarea value={s.messageTemplate} onChange={(e) => updateStep(i, { messageTemplate: e.target.value.slice(0, 2000) })} rows={3} placeholder="본문 — %고객명% 변수 사용 가능, [...] 자리는 직접 작성" className="w-full bg-white/[0.06] border border-white/15 rounded px-2 py-1.5 text-xs text-white resize-y" />
+              <input value={s.subject} onChange={(e) => updateStep(i, { subject: e.target.value.slice(0, 40) })} placeholder="제목 (LMS 필수) — AI 문안생성 또는 직접 입력" className="w-full bg-white/[0.06] border border-white/15 rounded px-2 py-1.5 text-xs text-white" />
+              <textarea value={s.messageTemplate} onChange={(e) => updateStep(i, { messageTemplate: e.target.value.slice(0, 2000) })} rows={3} placeholder="본문 — [AI 문안생성]을 누르면 자동 작성됩니다. 구체 혜택은 직접 채워주세요." className="w-full bg-white/[0.06] border border-white/15 rounded px-2 py-1.5 text-xs text-white resize-y" />
             </div>
           ))}
           <button onClick={addStep} className="inline-flex items-center gap-1 text-xs text-indigo-300 hover:text-indigo-200">
             <Plus className="w-3.5 h-3.5" /> 단계 추가
           </button>
         </div>
-        <p className="text-[10px] text-white/40 italic mt-1.5">LMS로 발송되며 (광고) 표기·무료수신거부가 자동 부착됩니다.</p>
+        <p className="text-[10px] text-white/40 italic mt-1.5">LMS로 발송되며 (광고) 표기·무료수신거부가 자동 부착됩니다. 활성화 시 전체 문안 스팸필터 테스트를 거칩니다.</p>
       </div>
 
-      {/* ③ 대상 */}
+      {/* ③ 대상 — 포인트 한정 아님, 자유 조건 */}
       <div>
         <h3 className="text-sm font-semibold text-white/90 mb-2"><span className="text-indigo-300">③</span> 누구에게 보낼까요</h3>
-        <div className="flex items-center gap-2 mb-2">
-          <span className="text-[11px] text-white/50">포인트</span>
-          <input type="number" min={0} value={pointsMin} onChange={(e) => setPointsMin(e.target.value)} placeholder="0" className="w-24 bg-white/[0.06] border border-white/15 rounded px-2 py-1.5 text-xs text-white" />
-          <span className="text-[11px] text-white/50">점 이상 (선택)</span>
-        </div>
+        <p className="text-[11px] text-white/50 mb-2">조건을 만족하는 고객에게 발송합니다. 조건이 없으면 전체 활성 고객이 대상입니다. (등급·지역·매장·포인트 등 자유롭게)</p>
         <div className="space-y-2">
           {conditions.map((c, i) => (
             <div key={i} className="flex items-center gap-1.5">

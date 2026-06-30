@@ -1050,6 +1050,24 @@ export default function JourneysPage() {
     setView('review');
   };
 
+  // ★ 2026-06-30 여정 일반화 SP-B — 날짜축 단계 [AI 문안생성] (1건 1크레딧). 백엔드가 안내문 생성·혜택은 placeholder.
+  const handleAnchorGenerateMessage = async (objective: string, offsetDays: number): Promise<{ subject: string; message: string } | null> => {
+    try {
+      const res = await fetch('/api/ai/operator/journeys/anchor-generate-message', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token()}` },
+        body: JSON.stringify({ objective, offsetDays }),
+      });
+      const data = await res.json();
+      if (data.success) return { subject: data.subject || '', message: data.message || '' };
+      toast.error(data.error || 'AI 문안 생성 실패');
+      return null;
+    } catch (e: any) {
+      toast.error(e?.message || 'AI 문안 생성 중 오류');
+      return null;
+    }
+  };
+
   const handleSaveDraft = async () => {
     if (!aiPkg) return;
     if (!reviewCallback) { toast.warning('회신번호를 선택해주세요.'); return; }
@@ -3029,6 +3047,7 @@ export default function JourneysPage() {
                 embedded
                 onBuild={handleDateAnchorBuild}
                 onBack={() => setPurpose('marketing')}
+                onGenerateMessage={handleAnchorGenerateMessage}
               />
             </div>
           </div>

@@ -490,7 +490,8 @@ export function applyCustomerConditions(
   // ★ 2026-06-26: store_name(매장명)/store_code(매장코드) 추가 — 여정 자연어 타겟에서
   //   "매장명이 송파가락점인 회원" 같은 매장 세그먼트가 무시되고 전체 발송되던 #1 fix.
   //   customers.store_name varchar(100) / store_code varchar(50) (SCHEMA.md 검증).
-  const allowedFields = ['grade', 'region', 'age', 'purchase_count', 'total_purchase_amount', 'sms_opt_in', 'store_name', 'store_code'];
+  // ★ 2026-06-30 여정 일반화 — points 추가(날짜축/대상 조건에서 포인트를 일반 조건으로). customers.points numeric(SCHEMA 검증). 추가만 = 기존 경로 회귀 0.
+  const allowedFields = ['grade', 'region', 'age', 'purchase_count', 'total_purchase_amount', 'sms_opt_in', 'store_name', 'store_code', 'points'];
   const allowedOps = ['==', '!=', '>=', '<=', '>', '<', 'in', 'not_in', 'is_null', 'not_null'];
   const clauses: string[] = [];
 
