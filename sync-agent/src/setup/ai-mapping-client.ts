@@ -60,7 +60,7 @@ export async function requestAiMapping(
       const err = (response.data as any).error;
       throw new Error(typeof err === 'string' ? err : err?.message || 'AI 매핑 응답 실패');
     }
-    logger.info(`AI 매핑 완료: ${request.columns.length}개 컬럼, 모델=${response.data.data.modelUsed}`);
+    logger.info(`AI 매핑 완료: ${request.columns.length}개 컬럼`);
     return response.data.data;
   } catch (error: any) {
     if (error?.response?.status === 429) {

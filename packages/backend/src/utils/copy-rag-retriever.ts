@@ -61,9 +61,13 @@ interface RankedRow {
 function toRanked(row: TrainingRow, source: 'company' | 'industry'): RankedRow {
   const sent = row.sent_count;
   const successRate = sent && sent > 0 ? (row.success_count || 0) / sent : null;
+  // ★ 2026-06-30 정정: PG created_at은 런타임 Date 객체(타입은 string이나 실제 Date) →
+  //   sortRanked가 문자열 메서드 .localeCompare를 호출하다 "is not a function" throw → RAG 성과 문안
+  //   검색 전체 degrade(0630 문안 두뇌 미작동). ISO 문자열로 강제(문자열 비교 = 시간순). null/문자열도 안전.
+  const ca = row.created_at as unknown;
   return {
     ex: { text: row.final_message, source, features: row.message_features, successRate },
-    createdAt: row.created_at || '',
+    createdAt: ca instanceof Date ? ca.toISOString() : String(ca || ''),
   };
 }
 

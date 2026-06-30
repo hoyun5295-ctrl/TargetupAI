@@ -308,7 +308,7 @@ async function editMapping(config: AgentConfig): Promise<AgentConfig> {
       });
       const tag = ai.fallbackUsed
         ? `로컬 폴백 (${ai.fallbackReason || ''})`
-        : `${ai.modelUsed}${ai.cacheHit ? ' · 캐시적중' : ''}`;
+        : `AI 모델${ai.cacheHit ? ' · 캐시적중' : ''}`;
       console.log(`  ✅ AI 재매핑 완료 — ${Object.keys(ai.mapping).length}개 컬럼 / ${tag}`);
       const nextMapping = {
         ...config.mapping,

@@ -23,6 +23,7 @@ import * as readline from 'node:readline';
 import { createDbConnector } from '../db';
 import type { DbConnectionConfig } from '../db/types';
 import { autoSuggestMapping, assignCustomFieldSlots } from '../mapping/templates';
+import { COMPOSITE_FIELDS } from '../mapping';
 import {
   saveConfigEncrypted,
   saveConfigJson,
@@ -467,7 +468,7 @@ async function stepColumnMapping(
       aiLabelsFromApi = ai.customFieldLabels;
       const tag = ai.fallbackUsed
         ? `로컬 폴백 (${ai.fallbackReason || 'AI 호출 실패'})`
-        : `${ai.modelUsed}${ai.cacheHit ? ' · 캐시적중' : ''}`;
+        : `AI 모델${ai.cacheHit ? ' · 캐시적중' : ''}`;
       console.log(`  ✅ AI 매핑 완료 — ${tag}`);
     } catch (e: any) {
       console.log(`  ⚠  AI 매핑 호출 실패 → 로컬 규칙 기반 매핑으로 대체 (${e?.message || e})`);
@@ -555,7 +556,7 @@ async function stepColumnMapping(
         sourceColumns: purchaseColumns,
       });
       purchaseResult = { mapping: ai.mapping, unmapped: ai.unmappedColumns };
-      const tag = ai.fallbackUsed ? `로컬 폴백` : ai.modelUsed;
+      const tag = ai.fallbackUsed ? `로컬 폴백` : 'AI 모델';
       console.log(`  ✅ 구매 AI 매핑 완료 — ${tag}`);
     } catch (e: any) {
       console.log(`  ⚠  구매 AI 매핑 실패 → 로컬 폴백 (${e?.message || e})`);
@@ -622,17 +623,21 @@ async function editMapping(
     const selectedCol = columns[num - 1];
 
     // 사용 가능한 필드 목록
+    //   복합 필드(phone 등)는 이미 다른 컬럼에 쓰였어도 후보로 남긴다 —
+    //   쪼개진 전화번호(핸드폰1·2·3)를 모두 phone에 지정해 mapRow가 이어붙이도록.
     const usedFields = new Set(Object.values(mapping));
     const availableFields = standardFields.filter(
-      (f) => !usedFields.has(f) || mapping[selectedCol] === f
+      (f) => COMPOSITE_FIELDS.has(f) || !usedFields.has(f) || mapping[selectedCol] === f
     );
 
     const fieldChoices = [
       { name: '🚫 매핑 제거 (custom_fields로)', value: '__remove__' },
-      ...availableFields.map((f) => ({
-        name: mapping[selectedCol] === f ? `${f} (현재)` : f,
-        value: f,
-      })),
+      ...availableFields.map((f) => {
+        const count = Object.values(mapping).filter((v) => v === f).length;
+        const isComposite = COMPOSITE_FIELDS.has(f) && count > 0 && mapping[selectedCol] !== f;
+        const suffix = mapping[selectedCol] === f ? ' (현재)' : isComposite ? ` (이어붙이기 +${count})` : '';
+        return { name: `${f}${suffix}`, value: f };
+      }),
     ];
 
     const selectedField = await askSelect(

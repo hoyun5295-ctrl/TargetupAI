@@ -21,29 +21,65 @@ export type ColumnMapping = Record<string, string>; // { "CUST_HP": "phone" }
 const CUSTOM_SLOT_RE = /^custom_(\d+)$/;
 
 /**
+ * 복합 매핑 허용 필드 — 여러 소스 컬럼을 이어붙여 하나로 만든다.
+ *   레거시 DB가 한 값을 여러 칸에 쪼개 저장하는 경우 대응(2026-06-30 isae 실측:
+ *   휴대폰이 핸드폰1='010' / 핸드폰2='1234' / 핸드폰3='5678' 3칸으로 분리).
+ *   여기 없는 필드는 editMapping에서 중복 매핑이 차단되어 1:1만 가능하다.
+ */
+export const COMPOSITE_FIELDS = new Set(['phone', 'customer_phone', 'address']);
+
+/** 전화번호류 복합 — 구분자 없이 숫자만 잇는다(010+1234+5678). 그 외(주소 등)는 공백으로 잇는다. */
+const PHONE_COMPOSITE_FIELDS = new Set(['phone', 'customer_phone']);
+
+/** 소스 컬럼명을 끝자리 숫자 기준으로 자연 정렬(핸드폰1 < 핸드폰2 < 핸드폰3). */
+function naturalCompare(a: string, b: string): number {
+  const ma = a.match(/^(.*?)(\d+)$/);
+  const mb = b.match(/^(.*?)(\d+)$/);
+  if (ma && mb && ma[1] === mb[1]) return parseInt(ma[2], 10) - parseInt(mb[2], 10);
+  return a < b ? -1 : a > b ? 1 : 0;
+}
+
+/**
  * 소스 DB 컬럼을 표준 필드로 매핑합니다.
  * custom_1~custom_15로 매핑된 필드는 custom_fields JSONB 객체로 모아집니다.
+ * 같은 표준 필드에 소스 컬럼이 2개 이상 매핑되면(쪼개진 전화번호 등) 끝자리 숫자 순으로 이어붙입니다.
  */
 export function mapRow(row: RawRow, mapping: ColumnMapping): Record<string, unknown> {
   const mapped: Record<string, unknown> = {};
   const customFields: Record<string, unknown> = {};
 
-  for (const [sourceCol, value] of Object.entries(row)) {
-    const targetField = mapping[sourceCol];
+  // target 필드별로 소스 컬럼을 모은다(row에 실재하는 컬럼만 — 기존 동작 유지).
+  const sourcesByTarget = new Map<string, string[]>();
+  for (const [sourceCol, targetField] of Object.entries(mapping)) {
+    if (!targetField) continue; // 매핑 없는 컬럼 무시
+    if (!Object.prototype.hasOwnProperty.call(row, sourceCol)) continue;
+    const list = sourcesByTarget.get(targetField);
+    if (list) list.push(sourceCol);
+    else sourcesByTarget.set(targetField, [sourceCol]);
+  }
 
-    if (!targetField) {
-      // 매핑 자체가 없는 컬럼 → 무시 (v1.4.0: custom 슬롯 미배정 컬럼)
-      continue;
-    }
+  for (const [targetField, sourceCols] of sourcesByTarget) {
+    const isCustom = CUSTOM_SLOT_RE.test(targetField);
 
-    const customMatch = targetField.match(CUSTOM_SLOT_RE);
-    if (customMatch) {
-      // custom_N 슬롯 → custom_fields JSONB에 수집
-      customFields[targetField] = value;
+    let value: unknown;
+    if (sourceCols.length === 1 || isCustom) {
+      // 단일 매핑(또는 custom 슬롯 — 1:1이라 복합 없음). 기존 동작 그대로.
+      value = row[sourceCols[0]];
     } else {
-      // 표준 필드 매핑
-      mapped[targetField] = value;
+      // 복합 필드: 끝자리 숫자 순으로 값을 이어붙인다(빈/널 조각은 건너뜀).
+      //   전화번호류는 구분자 없이(숫자), 주소 등은 공백으로 잇는다.
+      const sep = PHONE_COMPOSITE_FIELDS.has(targetField) ? '' : ' ';
+      const joined = [...sourceCols]
+        .sort(naturalCompare)
+        .map((c) => row[c])
+        .filter((v) => v !== null && v !== undefined && String(v).trim() !== '')
+        .map((v) => String(v).trim())
+        .join(sep);
+      value = joined === '' ? null : joined;
     }
+
+    if (isCustom) customFields[targetField] = value;
+    else mapped[targetField] = value;
   }
 
   // 커스텀 필드가 있으면 JSONB 객체로 추가
@@ -126,7 +162,7 @@ export async function suggestMappingWithAI(
     // custom_N 자동 배정 (AI가 이미 custom_N을 지정한 경우 그 순서 유지 + 나머지 매핑 안 된 것 이어서 배정)
     const { mapping, customFieldLabels, overflowColumns } = assignCustomFieldSlots(aiMapping, unmapped);
 
-    logger.info(`AI 매핑 완료: 모델=${aiResult.modelUsed}, 매핑=${Object.keys(mapping).length}/${sourceColumns.length}, cacheHit=${aiResult.cacheHit}`);
+    logger.info(`AI 매핑 완료: 매핑=${Object.keys(mapping).length}/${sourceColumns.length}, cacheHit=${aiResult.cacheHit}`);
 
     return {
       mapping,

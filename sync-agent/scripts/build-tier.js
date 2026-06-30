@@ -38,6 +38,36 @@ function stageOracledb() {
   console.log('sql.js wasm(node12 호환) 스테이징 완료:', wasmStage, fs.statSync(wasmStage).size, 'bytes');
 }
 
+// ★ 2026-06-30: 모델명 사용자 노출 차단 게이트 — isae 원격 설치 중 claude-opus-4-7 화면 노출 재발 방지.
+//   src에 모델명 리터럴(claude-opus/sonnet/haiku) 또는 modelUsed를 화면 출력(템플릿 ${}/문자열 +)에
+//   끼우는 코드가 있으면 빌드를 즉시 중단한다. 주석은 예외. (상세 = src/setup/model-name-exposure.guard.test.ts)
+function modelNameGate() {
+  const SRC = path.join(ROOT, 'src');
+  const MODEL_LITERAL = /claude-(opus|sonnet|haiku)/i;
+  const MODEL_IN_TEMPLATE = /\$\{[^}]*\bmodelUsed\b[^}]*\}/;
+  const MODEL_IN_CONCAT = /['"`]\s*\+\s*[\w.]*\bmodelUsed\b|\bmodelUsed\b\s*\+\s*['"`]/;
+  const violations = [];
+  const walk = (dir) => {
+    for (const name of fs.readdirSync(dir)) {
+      const p = path.join(dir, name);
+      if (fs.statSync(p).isDirectory()) walk(p);
+      else if (name.endsWith('.ts') && !name.endsWith('.test.ts')) {
+        fs.readFileSync(p, 'utf8').split('\n').forEach((line, i) => {
+          const t = line.trim();
+          if (t.startsWith('//') || t.startsWith('*') || t.startsWith('/*')) return; // 주석 예외
+          if (MODEL_LITERAL.test(line)) violations.push(`${p}:${i + 1} 모델명 리터럴`);
+          if (MODEL_IN_TEMPLATE.test(line) || MODEL_IN_CONCAT.test(line)) violations.push(`${p}:${i + 1} modelUsed 화면 출력`);
+        });
+      }
+    }
+  };
+  walk(SRC);
+  if (violations.length) {
+    throw new Error('모델명 사용자 노출 차단 — 빌드 중단:\n' + violations.join('\n'));
+  }
+  console.log('모델명 노출 게이트 통과 (0건)');
+}
+
 // 티어 정의 — OS 바닥 / node / pkg 타깃 / 구형 런타임 동봉(legacy) / 레거시 의존성 핀(deps).
 //   node 바닥: node20=Win10·2016·glibc2.28 / node16=Win8.1·2012R2·glibc2.17 / node12=Win7·2008R2·2012(비R2).
 //   deps = 메인(express5/mssql11/oracledb6 thin)을 그 node가 받는 버전으로 내린 핀(modern=null=메인 그대로).
@@ -61,6 +91,7 @@ if (!t) {
 }
 
 console.log(`\n=== build tier ${tierId} (${t.node}) ===`);
+modelNameGate(); // 모델명 노출 차단 (위반 시 빌드 즉시 중단)
 try {
   // 레거시 티어: 그 node가 받는 의존성 핀(t.deps)으로 임시 다운, 빌드 후 npm ci로 원복(메인 node20 무손).
   if (t.legacy && t.deps) sh(`npm i ${t.deps} --no-save`);

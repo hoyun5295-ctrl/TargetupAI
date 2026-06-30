@@ -212,7 +212,7 @@ export async function startSetupWizard(
         customFieldLabels: result.customFieldLabels,
         overflowColumns: result.overflowColumns,
         unmappedColumns: result.unmappedColumns,
-        modelUsed: result.modelUsed,
+        modelUsed: 'AI 모델',
         fallbackUsed: result.fallbackUsed,
         fallbackReason: result.fallbackReason,
         cacheHit: result.cacheHit,
