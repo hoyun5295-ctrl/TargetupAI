@@ -19,18 +19,20 @@ redis.on('error', (err) => console.error('[Redis] 연결 에러:', err.message))
 // AI 모델명 (환경변수로 모델 업그레이드 시 .env만 수정)
 // ============================================================
 export const AI_MODELS = {
-  // ★ 2026-07-01 (Harold 명시): 문안 생성 전체 + AI Operator 전부 = Claude Sonnet 5 통합 업그레이드.
-  //   - 비용: Sonnet 5 $3/$15(도입가 $2/$10) < Opus 4.7 $5/$25 (~40% 절감)
-  //   - 품질: 신세대(Claude 5) — 코딩·에이전트 Opus급 근접
-  //   - claude(기존 한줄로AI 문안) + opus(AI Operator) 둘 다 Sonnet 5로 통일.
-  //     model 파라미터('sonnet'/'opus')는 이제 GPT fallback 분기(gpt-5.4-mini vs gpt-5.5)에만 의미 유지.
-  //   - ★ Sonnet 5 API 표면: temperature/top_p/top_k 보내면 400, thinking은 adaptive/disabled만 허용.
-  //     thinking 생략 시 adaptive 자동 ON → max_tokens 잠식·문안 잘림. Anthropic 직접 호출부는
-  //     isAdaptiveOnlyModel()로 분기(temperature 미전송 + thinking 미요청 시 {type:'disabled'} 명시).
-  //   - 필드 매핑(ai-mapping.ts)은 별도 env CLAUDE_MAPPING_MODEL — 본 업그레이드 범위 밖.
-  //   ※ 서버 .env에 CLAUDE_MODEL / CLAUDE_OPUS_MODEL 이 설정돼 있으면 그 값이 우선 → 함께 변경 필요.
-  claude: process.env.CLAUDE_MODEL || 'claude-sonnet-5',                  // 기존 한줄로AI 문안 — Sonnet 5
-  opus: process.env.CLAUDE_OPUS_MODEL || 'claude-sonnet-5',               // AI Operator — Sonnet 5
+  // ★ 2026-07-01 (Harold 명시): 문안=Sonnet 5(대량·비용), 오퍼레이터 정밀=Opus 4.8(검수·타겟).
+  //   - 문안 생성 전체(generate/refine/email/dm/inapp, model 미지정/'sonnet') = Sonnet 5
+  //     → $3/$15(도입가 $2/$10), 신세대 품질, 대량 발생이라 비용 절감 큼.
+  //   - AI Operator(target/compliance/message/orchestrator, model:'opus') = Opus 4.8
+  //     → 정밀 검수·타겟은 본문 한 줄까지 꼼꼼히 읽는 정확도가 핵심이라 최신 Opus 유지.
+  //       (Sonnet 5 thinking-off 검수 오탐 = 무료거부 있는데 누락으로 잡음 → Opus 4.8로 정정.
+  //        오퍼레이터는 저빈도라 단가 영향 작음.)
+  //   - ★ 두 모델 모두 adaptive-only 표면: temperature/top_p/top_k 보내면 400, thinking은 adaptive/disabled만.
+  //     Sonnet 5는 thinking 생략 시 adaptive 자동 ON → max_tokens 잠식·문안 잘림. Anthropic 직접 호출부는
+  //     isAdaptiveOnlyModel()로 분기(temperature 미전송 + thinking 미요청 시 {type:'disabled'}) + resolveMaxTokens 여유.
+  //   - 필드 매핑(ai-mapping.ts)은 별도 env CLAUDE_MAPPING_MODEL — 범위 밖.
+  //   ※ 서버 .env에 CLAUDE_MODEL / CLAUDE_OPUS_MODEL 설정 시 그 값 우선 → 함께 변경 필요.
+  claude: process.env.CLAUDE_MODEL || 'claude-sonnet-5',                  // 문안 생성 — Sonnet 5
+  opus: process.env.CLAUDE_OPUS_MODEL || 'claude-opus-4-8',               // AI Operator 정밀(검수·타겟) — Opus 4.8
   gpt: process.env.GPT_MODEL || 'gpt-5.4-mini',                          // 기존 한줄로AI fallback — Harold 명시 절대 유지
   gptOperator: process.env.GPT_OPERATOR_MODEL || 'gpt-5.5',              // AI Operator fallback
 };
