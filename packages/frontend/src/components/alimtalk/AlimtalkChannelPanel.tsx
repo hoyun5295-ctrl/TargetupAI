@@ -254,7 +254,7 @@ export default function AlimtalkChannelPanel({
   };
 
   return (
-    <div className="border-2 border-blue-200 rounded-2xl overflow-hidden bg-white shadow-sm">
+    <div className="border-2 border-blue-200 rounded-2xl overflow-hidden bg-white shadow-sm text-gray-900">
       <div className="p-4 space-y-4">
         {/* 헤더 */}
         <div className="flex items-center gap-2">

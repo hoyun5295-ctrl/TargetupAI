@@ -420,6 +420,26 @@ else concat(concat(concat('{"sendercode":"',sender_code),'",'), replace(k_etc_js
 
 ---
 
+## AI 응답 JSON raw 제어문자 파싱 사고 (2026-06-30 추가)
+
+### 2026-06-30 — AI Operator 문안 fallback 회귀 (응답 JSON raw 줄바꿈)
+
+**현상**: AI Operator 메인 propose에서 혜택(20%·쿠폰명)·개인화(고객명) 무시 + `[혜택 내용을 입력해주세요]` 골격 노출. 같은 프롬프트도 될 때/안 될 때 갈림(비결정).
+
+**근본**: 문안 풍성화 후 AI가 여러 줄 LMS 본문을 응답 JSON에 escape 안 된 raw 줄바꿈(0x0A)으로 담음 → `extractJsonFromAiText`의 `JSON.parse`가 "Bad control character in string literal"로 throw → catch → `getFallbackVariants` 비상 골격. AI가 줄바꿈을 escape로 낼지 raw로 낼지 비결정이라 간헐. 브랜드보이스 few-shot(회사 실제 여러 줄 문안 예시)이 다줄 출력을 유도해 등록 회사일수록 더 자주 터짐.
+
+**진단**: 같은 propose의 타겟·컴플라이언스 sub-agent는 정상, 메시지 sub-agent만 fallback → generateMessages 전용 요소가 범인. 운영 PM2 로그 `SyntaxError: Bad control character ... position ~220` 확정(추측 0). 로컬 verify로 동일 에러 재현(RED→GREEN).
+
+**보강**: `ai-json.ts`(컨트롤타워) `escapeControlCharsInJsonStrings`(문자열 경계 추적, 내부 0x00~0x1F만 escape, 구조부 공백 보존) + `JSON.parse` 실패 시 1회 재파싱. 모든 AI 호출부(문안·여정·이메일·인앱) 동시 수혜. 별건 `copy-rag-retriever` createdAt(PG Date인데 `.localeCompare` 호출 → RAG 전체 degrade) ISO 문자열 강제.
+
+**교훈**:
+- **AI 응답 JSON엔 escape 안 된 raw 제어문자(줄바꿈·탭)가 섞이는 게 상수다.** `JSON.parse` 직호출 금지 — `extractJsonFromAiText`가 문자열 내부 제어문자를 escape 후 파싱하게(컨트롤타워 1곳).
+- **PG timestamptz는 런타임 Date 객체**(TS 타입이 string이어도). 문자열 메서드(`.localeCompare` 등) 호출 전 변환 필수.
+- **공유 흐름에서 한 sub-agent만 실패하면 그 sub-agent 전용 요소가 범인** — 전역(키·모델·잔액) 배제 후 좁힌다.
+- 간헐 버그도 운영 로그(`console.error`)로 정확 예외 1줄을 확보한 뒤 고친다(추측 fix 금지). 증상이 비슷해도 별개 신고(예: 브랜드보이스)를 같은 원인이라 단정 X — 회사·증상 확인 후 판단.
+
+---
+
 ## 자가 검증 매트릭스 (Backend 작업 시)
 
 - [ ] 발송 5경로 전수 점검 (AI/직접/타겟/스케줄/테스트)
