@@ -456,6 +456,8 @@ export default function JourneysPage() {
   const [alimtalkSenders, setAlimtalkSenders] = useState<AlimtalkSenderProfile[]>([]);
   const [alimtalkTemplates, setAlimtalkTemplates] = useState<AlimtalkTemplate[]>([]);
   const [customerFields, setCustomerFields] = useState<Array<{ key: string; label: string }>>([]);
+  // ★ 2026-06-30 여정 일반화 SP-B — AI 꾸미기 활용 컬럼(data-profile 안전 %변수% 토큰). 날짜축 스텝 편집 모달용.
+  const [dataProfileVars, setDataProfileVars] = useState<Array<{ token: string; label: string }>>([]);
   // 자사몰(CDP) 연동 활성 여부 — 배송 등 custom 이벤트 트리거 잠금 해제용. install-status 기준(키 발급 or 이벤트 수신).
   const [hasMallIntegration, setHasMallIntegration] = useState(false);
   const [reviewBudget, setReviewBudget] = useState('');
@@ -533,7 +535,16 @@ export default function JourneysPage() {
       fetch('/api/companies/kakao-templates?status=APPROVED', { headers: { Authorization: `Bearer ${t}` } }).catch(() => null),
       fetch('/api/customers/enabled-fields', { headers: { Authorization: `Bearer ${t}` } }).catch(() => null),
       fetch('/api/cdp/install-status', { headers: { Authorization: `Bearer ${t}` } }).catch(() => null),
-    ]).then(async ([sndRes, tplRes, fldRes, cdpRes]) => {
+      fetch('/api/ai/operator/data-profile', { headers: { Authorization: `Bearer ${t}` } }).catch(() => null),
+    ]).then(async ([sndRes, tplRes, fldRes, cdpRes, dpRes]) => {
+      if (dpRes?.ok) {
+        const data = await dpRes.json();
+        const vars = (data.fields || []).map((f: any) => ({
+          token: String(f.percentVar || f.label || '').trim(),
+          label: String(f.label || f.percentVar || '').trim(),
+        })).filter((v: { token: string }) => v.token);
+        setDataProfileVars(vars);
+      }
       if (sndRes?.ok) {
         const data = await sndRes.json();
         setAlimtalkSenders(data.profiles || []);
@@ -1050,20 +1061,56 @@ export default function JourneysPage() {
     setView('review');
   };
 
-  // ★ 2026-06-30 여정 일반화 SP-B — 날짜축 단계 [AI 문안생성] (1건 1크레딧). 백엔드가 안내문 생성·혜택은 placeholder.
-  const handleAnchorGenerateMessage = async (objective: string, offsetDays: number): Promise<{ subject: string; message: string } | null> => {
+  // ★ 2026-06-30 여정 일반화 SP-B — 날짜축 자동 생성: 자연어 목표 → D-N 스텝 일괄 생성.
+  const handleAnchorGeneratePlan = async (objective: string): Promise<{ offsetDays: number; subject: string; message: string }[] | null> => {
     try {
-      const res = await fetch('/api/ai/operator/journeys/anchor-generate-message', {
+      const res = await fetch('/api/ai/operator/journeys/anchor-generate-plan', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token()}` },
-        body: JSON.stringify({ objective, offsetDays }),
+        body: JSON.stringify({ objective }),
       });
       const data = await res.json();
-      if (data.success) return { subject: data.subject || '', message: data.message || '' };
-      toast.error(data.error || 'AI 문안 생성 실패');
+      if (data.success) return Array.isArray(data.steps) ? data.steps : [];
+      toast.error(data.error || 'AI 자동 생성 실패');
       return null;
     } catch (e: any) {
-      toast.error(e?.message || 'AI 문안 생성 중 오류');
+      toast.error(e?.message || 'AI 자동 생성 중 오류');
+      return null;
+    }
+  };
+
+  // ★ 날짜축 스텝 편집 모달 — AI 다듬기(3 톤 후보). 기존 journeys-refine-step 재사용.
+  const handleAnchorRefine = async (message: string): Promise<{ message: string; tone: string }[] | null> => {
+    try {
+      const res = await fetch('/api/ai/operator/journeys-refine-step', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token()}` },
+        body: JSON.stringify({ message, channel: 'lms', isAd: true, stepIntent: '날짜축 안내' }),
+      });
+      const data = await res.json();
+      if (data.success) return Array.isArray(data.candidates) ? data.candidates : [];
+      toast.error(data.error || 'AI 다듬기 실패');
+      return null;
+    } catch (e: any) {
+      toast.error(e?.message || '다듬기 중 오류');
+      return null;
+    }
+  };
+
+  // ★ 날짜축 스텝 편집 모달 — AI 꾸미기(선택 컬럼 %변수% 녹임). 기존 decorate-message 재사용.
+  const handleAnchorDecorate = async (message: string, selectedVars: string[]): Promise<string | null> => {
+    try {
+      const res = await fetch('/api/ai/operator/decorate-message', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token()}` },
+        body: JSON.stringify({ message, selectedVars, channel: 'lms', isAd: true }),
+      });
+      const data = await res.json();
+      if (data.success) return String(data.message || '');
+      toast.error(data.error || 'AI 꾸미기 실패');
+      return null;
+    } catch (e: any) {
+      toast.error(e?.message || '꾸미기 중 오류');
       return null;
     }
   };
@@ -3045,9 +3092,12 @@ export default function JourneysPage() {
             <div className="flex-1 overflow-y-auto p-5">
               <DateAnchorJourneyBuilder
                 embedded
+                dataProfileVars={dataProfileVars}
                 onBuild={handleDateAnchorBuild}
                 onBack={() => setPurpose('marketing')}
-                onGenerateMessage={handleAnchorGenerateMessage}
+                onGeneratePlan={handleAnchorGeneratePlan}
+                onRefine={handleAnchorRefine}
+                onDecorate={handleAnchorDecorate}
               />
             </div>
           </div>

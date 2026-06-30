@@ -758,6 +758,43 @@ ${memoryContext}
 }
 
 // ════════════════════════════════════════════════════════════════════
+// ★ 2026-06-30 여정 일반화 SP-B — 자연어 목표에서 D-N 오프셋 파싱(순수, DB import 0).
+//   "7일전 3일전 당일" → [7,3,0](큰 것부터=먼저 보냄). 아무것도 없으면 기본 [7,3,1,0]. 최대 8스텝.
+// ════════════════════════════════════════════════════════════════════
+export function parseAnchorOffsets(objective: string): number[] {
+  const text = String(objective || '');
+  const set = new Set<number>();
+  const re = /(\d{1,3})\s*일\s*전/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(text)) !== null) {
+    const n = Math.max(0, Math.min(365, parseInt(m[1], 10)));
+    if (Number.isFinite(n)) set.add(n);
+  }
+  if (/당일|당\s*일|오늘|그\s*날|D-?0/i.test(text)) set.add(0);
+  let arr = Array.from(set).sort((a, b) => b - a);
+  if (arr.length === 0) arr = [7, 3, 1, 0];
+  return arr.slice(0, 8);
+}
+
+// ════════════════════════════════════════════════════════════════════
+// ★ 2026-06-30 여정 일반화 SP-B — 자연어 목표 → 날짜축 여정 자동 생성(스텝 일괄).
+//   오프셋은 정규식 파싱(결정적), 각 스텝 문안은 generateAnchorStepMessage(1건 1크레딧)로 생성.
+//   "7일전 3일전 당일" → D-7/D-3/D-0 3스텝 문안 자동 작성(구체 혜택은 placeholder).
+// ════════════════════════════════════════════════════════════════════
+export async function generateAnchorJourneyPlan(input: {
+  companyId: string;
+  objective: string;
+}): Promise<{ steps: { offsetDays: number; subject: string; message: string }[] }> {
+  const offsets = parseAnchorOffsets(input.objective);
+  const steps: { offsetDays: number; subject: string; message: string }[] = [];
+  for (const off of offsets) {
+    const m = await generateAnchorStepMessage({ companyId: input.companyId, objective: input.objective, offsetDays: off });
+    steps.push({ offsetDays: off, subject: m.subject, message: m.message });
+  }
+  return { steps };
+}
+
+// ════════════════════════════════════════════════════════════════════
 // 스팸필터 회피 재생성 — 걸린 step 문안을 1회 재작성 (Phase 6B)
 //   source 'journey-ai-refine' → callAIWithFallback가 1크레딧 자동 차감.
 //   혜택/숫자/약속/placeholder/Liquid는 그대로 보존 (거짓 혜택 생성 금지).
