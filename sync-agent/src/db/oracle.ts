@@ -162,10 +162,19 @@ export class OracleConnector implements IDbConnector {
     this.ensureConnected();
     const conn = await this.pool.getConnection();
     try {
+      // 소유 테이블 + 시노님(synonym) 모두 노출한다.
+      //   읽기전용 계정은 본인 소유 테이블이 0개이고, 타 스키마(예: ISUSER2)의 테이블을
+      //   시노님으로만 가리키는 경우가 많다(예: CRM_VIEW_USER.고객 → ISUSER2.고객).
+      //   user_tables만 보면 0개 감지되어 선택 자체가 불가했다(2026-06-30 isae 원격 설치 실측).
+      //   데이터 조회(fetch*)는 `FROM "시노님"`을 오라클이 자동 해석하므로 이름만 노출하면 된다.
       const result = await conn.execute(
-        `SELECT table_name FROM user_tables ORDER BY table_name`,
+        `SELECT name FROM (
+           SELECT table_name AS name FROM user_tables
+           UNION
+           SELECT synonym_name AS name FROM user_synonyms
+         ) ORDER BY name`,
       );
-      return (result.rows || []).map((row: any) => row.TABLE_NAME);
+      return (result.rows || []).map((row: any) => row.NAME);
     } finally {
       await conn.close();
     }
@@ -175,28 +184,58 @@ export class OracleConnector implements IDbConnector {
     this.ensureConnected();
     const conn = await this.pool.getConnection();
     try {
-      const result = await conn.execute(
-        `SELECT
-           column_name,
-           data_type,
-           nullable,
-           data_length,
-           data_precision,
-           data_scale
-         FROM user_tab_columns
-         WHERE table_name = :tableName
-         ORDER BY column_id`,
-        { tableName: tableName.toUpperCase() },
+      // 선택한 이름이 시노님이면 실제 소유자/테이블로 해석해 all_* 메타에서 조회한다.
+      //   user_tab_columns는 본인 소유 테이블만 보여 시노님 컬럼이 0개가 되기 때문이다.
+      //   시노님이 아니면(직접 소유 테이블) 기존처럼 user_* 메타를 그대로 사용한다(동작 비악화).
+      const synResult = await conn.execute(
+        `SELECT table_owner, table_name FROM user_synonyms WHERE synonym_name = :name`,
+        { name: tableName },
       );
+      const synRow = (synResult.rows || [])[0] as any;
+      const isSynonym = !!(synRow && synRow.TABLE_OWNER && synRow.TABLE_NAME);
+
+      let colSql: string;
+      let pkSql: string;
+      let binds: Record<string, any>;
+      if (isSynonym) {
+        binds = { owner: synRow.TABLE_OWNER, tbl: synRow.TABLE_NAME };
+        colSql = `SELECT
+                    column_name,
+                    data_type,
+                    nullable,
+                    data_length,
+                    data_precision,
+                    data_scale
+                  FROM all_tab_columns
+                  WHERE owner = :owner AND table_name = :tbl
+                  ORDER BY column_id`;
+        pkSql = `SELECT cols.column_name
+                 FROM all_constraints cons
+                 JOIN all_cons_columns cols
+                   ON cons.constraint_name = cols.constraint_name AND cons.owner = cols.owner
+                 WHERE cons.owner = :owner AND cons.table_name = :tbl AND cons.constraint_type = 'P'`;
+      } else {
+        binds = { tbl: tableName.toUpperCase() };
+        colSql = `SELECT
+                    column_name,
+                    data_type,
+                    nullable,
+                    data_length,
+                    data_precision,
+                    data_scale
+                  FROM user_tab_columns
+                  WHERE table_name = :tbl
+                  ORDER BY column_id`;
+        pkSql = `SELECT cols.column_name
+                 FROM user_constraints cons
+                 JOIN user_cons_columns cols ON cons.constraint_name = cols.constraint_name
+                 WHERE cons.table_name = :tbl AND cons.constraint_type = 'P'`;
+      }
+
+      const result = await conn.execute(colSql, binds);
 
       // PK 정보 조회
-      const pkResult = await conn.execute(
-        `SELECT cols.column_name
-         FROM user_constraints cons
-         JOIN user_cons_columns cols ON cons.constraint_name = cols.constraint_name
-         WHERE cons.table_name = :tableName AND cons.constraint_type = 'P'`,
-        { tableName: tableName.toUpperCase() },
-      );
+      const pkResult = await conn.execute(pkSql, binds);
       const pkColumns = new Set(
         (pkResult.rows || []).map((r: any) => r.COLUMN_NAME),
       );

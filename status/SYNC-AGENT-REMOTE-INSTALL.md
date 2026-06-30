@@ -43,6 +43,7 @@
 - **NJS-077 (Oracle Client library has already been initialized)**: 무해 경고(`initOracleClient`가 2회 호출). 연결은 정상이니 무시. (1회 가드는 잔여.)
 - **ORA-xxxx**: DB단 문제(계정/리스너/서비스명). `sqlplus 계정/비번@//host:port/서비스명`으로 같은 정보 접속 테스트해 격리.
 - 연결 문자열은 **서비스명 방식**(host:port/service). SID 아님.
+- **0개 테이블 감지됨 (읽기전용/시노님 계정)**: 접속 계정이 본인 소유 테이블 0 + 시노님으로만 타 스키마(예: ISUSER2)를 가리키는 읽기전용 계정(예: `CRM_VIEW_USER`)이면, 보강 이전 빌드는 `user_tables`만 봐서 0개로 막힌다. → 2026-06-30 보강: `getTables`가 `user_tables`+`user_synonyms`를 함께 노출하고, `getColumns`는 시노님이면 `user_synonyms`로 실제 소유자.테이블을 해석해 `all_tab_columns`/`all_constraints`에서 조회한다(데이터 조회는 `FROM "시노님"`을 오라클이 자동 해석해 원래부터 동작). 새 exe로 교체하면 읽기전용 계정 그대로 설치 가능 — **소유 계정 비번 받을 필요 없음**. 진단: `SELECT table_owner, COUNT(*) FROM user_synonyms GROUP BY table_owner;` (isae = 11개 전부 ISUSER2).
 
 ### 4-2. 로컬 큐 / wasm
 - **wasm function signature contains illegal type (QueueManager.init)**: sql.js wasm이 node12 엔진과 비호환. win-legacy zip의 `SyncAgent\sql-wasm.wasm` 크기가 **613426 bytes(=1.8.0)** 여야 함(659806=1.13.0이면 잘못된 것). (이미 fix. 안 떠야 정상.)
