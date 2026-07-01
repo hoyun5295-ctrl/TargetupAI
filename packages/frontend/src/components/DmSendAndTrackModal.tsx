@@ -82,21 +82,17 @@ export default function DmSendAndTrackModal({ dmId, dmTitle, show, onClose }: Pr
     if (!prompt.trim()) { toast.warning('생성할 문안의 프롬프트를 입력해주세요.'); return; }
     setGenerating(true);
     try {
-      const res = await fetch('/api/ai/generate-message', {
+      const res = await fetch(`/api/dm/${dmId}/generate-copy`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token()}` },
-        body: JSON.stringify({ prompt: prompt.trim(), channel: 'lms', isAd, usePersonalization: true }),
+        body: JSON.stringify({ prompt: prompt.trim() }),
       });
       const data = await res.json();
-      if (!res.ok) { toast.error(data?.error || '문안 생성에 실패했습니다.'); return; }
-      const first = Array.isArray(data.messages)
-        ? (typeof data.messages[0] === 'string' ? data.messages[0] : (data.messages[0]?.message || data.messages[0]?.content || ''))
-        : (data.message || '');
-      let text = String(first || '').trim();
+      if (!res.ok || !data.success) { toast.error(data?.error || '문안 생성에 실패했습니다.'); return; }
+      const text = String(data.message || '').trim();
       if (!text) { toast.error('생성된 문안이 비어 있습니다. 다시 시도해주세요.'); return; }
-      if (!text.includes('%DM링크%')) text = `${text}\n%DM링크%`;
       setMessageText(text);
-      toast.success('문안을 생성했습니다. 핸드폰 미리보기에서 확인하세요.');
+      toast.success('문안을 생성했습니다. (3크레딧) 핸드폰 미리보기에서 확인하세요.');
     } catch (e: any) {
       toast.error(e?.message || '문안 생성 중 오류가 발생했습니다.');
     } finally {
@@ -187,7 +183,7 @@ export default function DmSendAndTrackModal({ dmId, dmTitle, show, onClose }: Pr
 
   return (
     <div className="fixed inset-0 z-[1100] flex items-center justify-center p-3 bg-black/60 backdrop-blur-sm">
-      <div className="w-full max-w-[860px] max-h-[94vh] overflow-hidden flex flex-col bg-slate-900 border border-white/10 rounded-2xl shadow-2xl">
+      <div className="w-full max-w-[1120px] max-h-[95vh] overflow-hidden flex flex-col bg-slate-900 border border-white/10 rounded-2xl shadow-2xl">
         <div className="px-5 py-4 border-b border-white/10 bg-slate-950/80 flex items-center justify-between">
           <div className="flex items-center gap-2.5">
             <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-indigo-500 to-violet-500 flex items-center justify-center flex-shrink-0"><Send className="w-4 h-4 text-white" /></div>
@@ -279,10 +275,10 @@ export default function DmSendAndTrackModal({ dmId, dmTitle, show, onClose }: Pr
               {/* 오른쪽 — 핸드폰 미리보기 */}
               <div className="flex flex-col items-center">
                 <p className="text-[11px] text-white/50 mb-2 flex items-center gap-1.5"><Smartphone className="w-3.5 h-3.5" /> 핸드폰 미리보기</p>
-                <div className="w-full max-w-[280px] rounded-[28px] border-4 border-slate-700 bg-slate-950 p-3 shadow-2xl">
-                  <div className="h-5 flex items-center justify-center"><div className="w-16 h-1.5 rounded-full bg-slate-700" /></div>
-                  <div className="mt-2 min-h-[320px] bg-slate-800/50 rounded-xl p-3">
-                    <div className="max-w-[90%] bg-white text-slate-900 rounded-2xl rounded-tl-sm px-3 py-2 text-[13px] leading-relaxed whitespace-pre-wrap break-words shadow">
+                <div className="w-full max-w-[380px] rounded-[34px] border-4 border-slate-700 bg-slate-950 p-4 shadow-2xl">
+                  <div className="h-6 flex items-center justify-center"><div className="w-20 h-1.5 rounded-full bg-slate-700" /></div>
+                  <div className="mt-2 min-h-[500px] bg-slate-800/50 rounded-2xl p-4">
+                    <div className="max-w-[92%] bg-white text-slate-900 rounded-2xl rounded-tl-sm px-3.5 py-2.5 text-[14px] leading-relaxed whitespace-pre-wrap break-words shadow">
                       {previewText || <span className="text-slate-400">문안을 작성하면 여기에 미리보기가 나타납니다.</span>}
                     </div>
                   </div>

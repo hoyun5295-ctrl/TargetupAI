@@ -38,6 +38,8 @@ import { buildChannelEligibilityWhere } from '../utils/channel-eligibility';
 import { createDirectSendCampaign, countStagingFiltered } from '../utils/direct-send-core';
 import { DirectSendError } from '../utils/direct-send-spec';
 import { getOpt080Number } from '../utils/messageUtils';
+import { callAIWithFallback } from '../services/ai';
+import { buildSystemPromptWithBrandVoice } from '../utils/brand-voice-prompt';
 import { getAvailableVariables } from '../utils/dm/dm-variable-resolver';
 import { validateDm } from '../utils/dm/dm-validate';
 import { getCompanyBrandKit, updateCompanyBrandKit, DEFAULT_BRAND_KIT } from '../utils/dm/dm-brand-kit';
@@ -723,6 +725,47 @@ dmRouter.get('/:id/recipients-tracking', async (req: any, res: any) => {
     }
     console.error('[DM 발송 추적] 오류:', err?.message);
     return res.status(500).json({ error: err?.message || '추적 조회 실패' });
+  }
+});
+
+// POST /api/dm/:id/generate-copy — DM 발송용 문안 1개 생성 (브랜드보이스 주입, %DM링크% 포함) — P4 편집기
+//   경량 단일 생성(캠페인 다변형 generate-message와 별개). 종량제 3크레딧(callAIWithFallback creditCost).
+dmRouter.post('/:id/generate-copy', async (req: any, res: any) => {
+  try {
+    const companyId = req.user?.companyId;
+    const userId = req.user?.userId;
+    if (!companyId) return res.status(403).json({ error: '회사 권한이 필요합니다.' });
+    const { prompt } = req.body as { prompt?: string };
+    if (!prompt?.trim()) return res.status(400).json({ error: '생성할 문안의 요청을 입력해주세요.' });
+
+    const baseSystem = `당신은 한줄로 SMS/LMS 마케팅 카피라이터입니다. 아래 조건으로 LMS 문자 본문 1개만 작성합니다.
+- 반드시 %DM링크% 를 문안 안 자연스러운 위치에 1회 포함(수신자별 개인화 링크가 여기 들어갑니다).
+- 구체 혜택(%/원/쿠폰/무료/할인/사은품/적립) 임의 생성 절대 금지 — 회사가 직접 넣습니다.
+- 유니코드 이모지 금지(SMS 호환). 80~250자.
+- 개인화는 %고객명% 등 명시된 변수만 사용.
+출력 = 문안 본문 텍스트만(설명·따옴표·번호 매기기 없이).`;
+    const system = await buildSystemPromptWithBrandVoice(companyId, baseSystem);
+
+    const text = await callAIWithFallback({
+      system,
+      userMessage: `요청: ${prompt.trim()}\n\n위 요청에 맞는 LMS 문안 1개를 작성하세요. %DM링크% 를 포함하세요.`,
+      model: 'sonnet',
+      maxTokens: 800,
+      temperature: 0.7,
+      companyId,
+      source: 'dm-copy-generate',
+      creditCost: 3,
+      userId,
+    });
+
+    let msg = String(text || '').trim().replace(/^```[a-zA-Z]*\n?/,'').replace(/```$/,'').trim();
+    if (!msg) return res.status(500).json({ error: '문안 생성 결과가 비어 있습니다. 다시 시도해주세요.' });
+    if (!msg.includes('%DM링크%')) msg = `${msg}\n%DM링크%`;
+    return res.json({ success: true, message: msg });
+  } catch (err: any) {
+    if (err instanceof InsufficientCreditError) return res.status(402).json({ error: '크레딧이 부족합니다. 충전 후 이용해주세요.', code: 'INSUFFICIENT_CREDIT' });
+    console.error('[DM 문안 생성] 오류:', err?.message);
+    return res.status(500).json({ error: err?.message || '문안 생성 실패' });
   }
 });
 

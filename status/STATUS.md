@@ -107,6 +107,15 @@
 
 ---
 
+### 🟢 2026-07-01 (이어서) — 비-문자 개인화+타겟추출 전체(이메일·인앱·DM) + DM 수신자별 토큰 발송/추적/편집기 + 발행 주소복사 (★전부 배포완료)
+> **공용(P1)**: 순수 CT `channel-eligibility.ts`(채널별 발송 자격 WHERE 미러)+test7 · CT-97 `convertNaturalLanguageToFilter` 코어 분리 · `POST /api/targets/extract`(matchCount+channelEligibleCount+samples·0건 no-relax·503 안전망) · 공용 `TargetExtractModal`(channel prop).
+> **이메일(P2)**: RecipientsModal [AI 정밀 타겟] 탭 → filter 발송(target type='filter' · `resolveCustomerRecipientsByFilter` 즉시·예약 sweeper). ★email 발송 자격=`RECIPIENT_SAFETY_WHERE`(email_opt_in IS DISTINCT FROM false·is_active 미적용).
+> **인앱(P3)**: `cdp_inapp_messages.audience_filter jsonb`(ALTER) + `customerMatchesFilter`+serve 가드평가(기존 6천사 메시지 NULL=미영향) + `PUT /cdp/inapp/:id/audience-filter` + InAppMessagesPage 타겟 탭 [표시 대상 추출]. 인앱 개인화 흐름 점검=이미 작동(SDK identify externalId+phone/email→CT-20 identifyCustomer→cdp_identity_links→getInAppCustomerForBrowser 동봉→SDK 치환).
+> **DM(P4)**: `dm_recipient_tokens`(CREATE) + `dm-recipient-token`(issue/lookup/bulk 난수·30일) + 뷰어 `?r=token` 개인화(실패=공용 fallback·PII0) + `POST /dm/:id/send-to-target`(createDirectSendCampaign 재사용·안전망 보존 · 토큰링크 staging extra1→%기타1% · %DM링크% 매핑 · 예약 · countStagingFiltered 정확과금) + `GET /dm/:id/recipients-tracking`(열람/완독) + `DmSendAndTrackModal` 단일 편집기(2모드 AI생성/직접+핸드폰미리보기+꾸미기[decorate-message]/다듬기[AiRefineModal]/스팸테스트[SpamFilterTestModal]+예약시각+변수칩) + DmBuilderPage 발행모달 [타겟 고객에게 발송].
+> **DM 발행 주소복사**: 발행 카드 [발행 주소 복사](멱등발행=0과금 short_url 재사용) + 이미 발행 시 편집모드 발행 크레딧 모달 skip(재발행 멱등=이중과금 원래 없음·오해 차단).
+> **마이그레이션(Harold 적용완료)**: `cdp_inapp_messages.audience_filter` · `dm_recipient_tokens`. **검증**: backend/frontend tsc 0 · channel-eligibility vitest 7 · 모델명/native dialog/박-단어 0. 상세 [[project_2026_0701_nonsms_personalization_target_extraction]].
+> **다음 세션 = predictive-daily 크레딧**: 설계서 `docs/superpowers/specs/2026-07-01-predictive-daily-credit-diagnosis-pricing-table-design.md`. 매일 9시 차감 로직 이미 구현(predictive-worker) → 진단(미배포/미연동/worker)부터 + 요금제 DB 수량별 차감표.
+
 ### 🟢 2026-07-01 — AI 모델 전환: 문안=Sonnet 5 / 오퍼레이터 정밀=Opus 4.8 + 검수 thinking·오탐차단 + 브랜드보이스 톤 강화 (★전부 배포완료·로그검증)
 > **모델 분리 (Harold 명시)**: 문안 생성 전체(generate/refine/email/dm/inapp, model 'sonnet') = **Claude Sonnet 5**(도입가 $2/$10, 대량 비용↓). AI Operator 정밀(target/compliance/orchestrator, model 'opus') = **Claude Opus 4.8**(검수·타겟 정확도 핵심·저빈도). 오퍼레이터 message sub-agent는 본래 model 'sonnet'이라 문안은 Sonnet 5. `config/defaults.ts AI_MODELS` 진실(claude=sonnet-5·opus=opus-4-8). model 파라미터는 이제 Claude 분기 아닌 GPT fallback 분기(gpt-5.4-mini vs gpt-5.5)에만 의미. 서버 .env CLAUDE_MODEL/CLAUDE_OPUS_MODEL 미설정 확인(코드 default 적용).
 > **게이팅 신설 (defaults.ts)**: `isAdaptiveOnlyModel(model)`=/sonnet-5|opus-4-7|opus-4-8/ → Anthropic 직접 호출 6곳(ai.ts 중앙·refine / ai-orchestrator / analysis / batch-ai / citations) ① temperature/top_p/top_k 미전송(보내면 400) ② thinking 미요청 시 {type:'disabled'}(Sonnet 5 생략 시 adaptive 자동 ON → max_tokens 잠식·문안 잘림 차단). `resolveMaxTokens(base,model)`=adaptiveOnly면 ×1.5(상한 16000) — 새 토크나이저 ~30% 토큰↑ 문안 잘림 차단. ai-mapping.ts(CSV 필드매핑)만 범위 밖(자체 env, Opus 4.7).
