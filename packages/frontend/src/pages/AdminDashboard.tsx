@@ -387,6 +387,10 @@ const [emailSending, setEmailSending] = useState(false);
   const [syncMapCustomers, setSyncMapCustomers] = useState<Array<{ src: string; target: string; label: string }>>([]);
   const [syncMapPurchases, setSyncMapPurchases] = useState<Array<{ src: string; target: string; label: string }>>([]);
   const [syncMapSaving, setSyncMapSaving] = useState(false);
+  // ★ 2026-07-01: 자동 업데이트 릴리즈 등록 (박스 무선 교체 트리거)
+  const [showSyncReleaseModal, setShowSyncReleaseModal] = useState(false);
+  const [syncReleaseForm, setSyncReleaseForm] = useState({ version: '', checksum: '', force_update: true });
+  const [syncReleaseSaving, setSyncReleaseSaving] = useState(false);
 
   // ===== 감사 로그 =====
   const [auditLogs, setAuditLogs] = useState<any[]>([]);
@@ -835,6 +839,36 @@ const handleSyncMappingSave = async () => {
     showAlert('오류', e.message || '매핑 전송 실패', 'error');
   } finally {
     setSyncMapSaving(false);
+  }
+};
+
+// ★ 2026-07-01: 자동 업데이트 릴리즈 등록 — 서버 exe 업로드 후 sync_releases 등록 → 박스 매시간 자동 수령
+const handleSyncReleaseSubmit = async () => {
+  const version = syncReleaseForm.version.trim();
+  if (!/^\d+\.\d+\.\d+$/.test(version)) {
+    showAlert('입력 오류', '버전은 x.y.z 형식이어야 합니다 (예: 1.5.7).', 'error');
+    return;
+  }
+  setSyncReleaseSaving(true);
+  try {
+    const token = localStorage.getItem('token');
+    const res = await fetch('/api/admin/sync/releases', {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        version,
+        checksum: syncReleaseForm.checksum.trim() || undefined,
+        force_update: syncReleaseForm.force_update,
+      }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || '릴리즈 등록 실패');
+    setShowSyncReleaseModal(false);
+    showAlert('성공', `${version} 릴리즈가 등록됐습니다. 각 Agent가 다음 정각(매시간) 버전 확인 때 자동으로 받아 교체합니다.`, 'success');
+  } catch (e: any) {
+    showAlert('오류', e.message || '릴리즈 등록 실패', 'error');
+  } finally {
+    setSyncReleaseSaving(false);
   }
 };
 
@@ -8309,13 +8343,22 @@ const handleApproveRequest = async (id: string) => {
         <div className="bg-white rounded-2xl border border-gray-200/70 shadow-sm">
           <div className="px-6 py-4 border-b flex justify-between items-center">
             <h2 className="text-lg font-semibold">Sync Agent 모니터링</h2>
-            <button
-              onClick={loadSyncAgents}
-              className="text-sm text-blue-600 hover:text-blue-800 font-medium flex items-center gap-1"
-            >
-              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
-              새로고침
-            </button>
+            <div className="flex items-center gap-3">
+              <button
+                onClick={() => { setSyncReleaseForm({ version: '', checksum: '', force_update: true }); setShowSyncReleaseModal(true); }}
+                className="text-sm text-violet-600 hover:text-violet-800 font-medium flex items-center gap-1"
+              >
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16V4m0 0L3 8m4-4l4 4m6 0v12m0 0l4-4m-4 4l-4-4" /></svg>
+                버전 배포
+              </button>
+              <button
+                onClick={loadSyncAgents}
+                className="text-sm text-blue-600 hover:text-blue-800 font-medium flex items-center gap-1"
+              >
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
+                새로고침
+              </button>
+            </div>
           </div>
 
           {syncAgentsLoading ? (
@@ -8928,6 +8971,65 @@ const handleApproveRequest = async (id: string) => {
                 disabled={syncMapSaving}
                 className="flex-1 px-4 py-3 text-violet-600 font-medium hover:bg-violet-50 transition-colors disabled:opacity-50"
               >{syncMapSaving ? '전송 중...' : '매핑 저장 및 전송'}</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ★ 2026-07-01: 자동 업데이트 릴리즈 등록 모달 */}
+      {showSyncReleaseModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-[460px] overflow-hidden animate-in fade-in zoom-in">
+            <div className="p-5 border-b bg-gradient-to-r from-violet-50 to-indigo-50">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 bg-violet-100 rounded-full flex items-center justify-center">
+                  <svg className="w-5 h-5 text-violet-600" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16V4m0 0L3 8m4-4l4 4m6 0v12m0 0l4-4m-4 4l-4-4" /></svg>
+                </div>
+                <div>
+                  <h3 className="text-lg font-bold text-gray-800">Agent 버전 배포</h3>
+                  <p className="text-xs text-gray-500">서버 exe 업로드 후 등록 → 각 Agent가 매시간 자동 수령·교체</p>
+                </div>
+              </div>
+            </div>
+            <div className="p-5 space-y-4">
+              <div>
+                <label className="text-xs text-gray-500 font-medium mb-1.5 block">버전 (x.y.z)</label>
+                <input
+                  value={syncReleaseForm.version}
+                  onChange={(e) => setSyncReleaseForm({ ...syncReleaseForm, version: e.target.value })}
+                  placeholder="1.5.7"
+                  className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-violet-500 outline-none"
+                />
+              </div>
+              <div>
+                <label className="text-xs text-gray-500 font-medium mb-1.5 block">체크섬 (SHA-256, 선택)</label>
+                <input
+                  value={syncReleaseForm.checksum}
+                  onChange={(e) => setSyncReleaseForm({ ...syncReleaseForm, checksum: e.target.value })}
+                  placeholder="서버 sha256sum 결과 (무결성 검증용)"
+                  className="w-full px-3 py-2 border rounded-lg text-sm font-mono focus:ring-2 focus:ring-violet-500 outline-none"
+                />
+              </div>
+              <label className="flex items-center gap-2 text-sm text-gray-700">
+                <input type="checkbox" checked={syncReleaseForm.force_update} onChange={(e) => setSyncReleaseForm({ ...syncReleaseForm, force_update: e.target.checked })} className="text-violet-600" />
+                강제 업데이트 (감지 즉시 교체)
+              </label>
+              <div className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg p-3 space-y-1">
+                <div>• 먼저 <code className="bg-amber-100 px-1 rounded">sync-agent-{'{버전}'}.exe</code>를 서버 <code className="bg-amber-100 px-1 rounded">agent-releases/</code>에 업로드하세요.</div>
+                <div>• 등록하면 각 Agent가 다음 정각(매시간) 버전 확인 때 자동으로 받아 교체합니다(박스 원격 불필요).</div>
+              </div>
+            </div>
+            <div className="flex border-t">
+              <button
+                onClick={() => setShowSyncReleaseModal(false)}
+                disabled={syncReleaseSaving}
+                className="flex-1 px-4 py-3 text-gray-700 font-medium hover:bg-gray-50 transition-colors border-r disabled:opacity-50"
+              >취소</button>
+              <button
+                onClick={handleSyncReleaseSubmit}
+                disabled={syncReleaseSaving}
+                className="flex-1 px-4 py-3 text-violet-600 font-medium hover:bg-violet-50 transition-colors disabled:opacity-50"
+              >{syncReleaseSaving ? '등록 중...' : '릴리즈 등록'}</button>
             </div>
           </div>
         </div>

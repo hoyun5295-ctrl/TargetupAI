@@ -3,6 +3,8 @@
 // 하드코딩 금지. standard-field-map.ts가 유일한 기준.
 
 import { Request, Response, Router } from 'express';
+import fs from 'fs';
+import path from 'path';
 import { query } from '../config/database';
 import { TIMEOUTS, RATE_LIMITS, BATCH_SIZES } from '../config/defaults';
 import { normalizePhone, normalizeRegion, normalizeDate, normalizeCustomFieldValue } from '../utils/normalize';
@@ -18,6 +20,11 @@ import { createCustomerUpsertBuilder } from '../utils/customer-upsert';
 import { registerBulkCompanyUserUnsubscribes } from '../utils/unsubscribe-helper';
 
 const router = Router();
+
+// ★ 2026-07-01: 자동 업데이트 exe 릴리즈 디렉토리.
+//   서버에 exe 업로드(박스 아님) → 에이전트가 GET /api/sync/download/:version 로 수신.
+const AGENT_RELEASES_DIR = process.env.AGENT_RELEASES_DIR || path.join(__dirname, '..', '..', 'agent-releases');
+try { fs.mkdirSync(AGENT_RELEASES_DIR, { recursive: true }); } catch { /* 권한 등 — 다운로드 시점 재판정 */ }
 
 // ============================================
 // Rate Limit & 동시 동기화 제한 (인메모리)
@@ -1265,30 +1272,37 @@ router.get('/version', async (req: SyncAuthRequest, res: Response) => {
     );
 
     // 릴리스가 없으면 업데이트 없음 응답
+    // ★ 2026-07-01: 에이전트 checkVersion은 응답의 data.data(camelCase)를 파싱한다.
+    //   (기존 최상위 snake_case → 에이전트가 항상 null 판정 → 자동 업데이트가 한 번도 동작 안 하던 버그)
     if (result.rows.length === 0) {
       return res.json({
         success: true,
-        latest_version: currentVersion,
-        current_version: currentVersion,
-        update_available: false
+        data: {
+          latestVersion: currentVersion,
+          currentVersion: currentVersion,
+          updateAvailable: false,
+        },
       });
     }
 
     const latest = result.rows[0];
     const updateAvailable = compareSemver(latest.version, currentVersion) > 0;
 
+    // ★ 2026-07-01: data.data(camelCase) 정합 — 에이전트 VersionResponse/updater가 참조하는 필드명.
     return res.json({
       success: true,
-      latest_version: latest.version,
-      current_version: currentVersion,
-      update_available: updateAvailable,
-      ...(updateAvailable && {
-        force_update: latest.force_update,
-        download_url: latest.download_url,
-        checksum: latest.checksum,
-        release_notes: latest.release_notes,
-        released_at: latest.released_at
-      })
+      data: {
+        latestVersion: latest.version,
+        currentVersion: currentVersion,
+        updateAvailable,
+        ...(updateAvailable && {
+          forceUpdate: latest.force_update,
+          // download_url 미지정 시 서버 서빙 라우트 기본 경로 (에이전트 baseURL 기준 상대경로)
+          downloadUrl: latest.download_url || `/api/sync/download/${latest.version}`,
+          checksum: latest.checksum,
+          releaseNotes: latest.release_notes,
+        }),
+      },
     });
   } catch (error) {
     console.error('[Sync Version Error]', error);
@@ -1297,6 +1311,24 @@ router.get('/version', async (req: SyncAuthRequest, res: Response) => {
       error: 'Failed to check version'
     });
   }
+});
+
+// ★ 2026-07-01: GET /api/sync/download/:version — 자동 업데이트 exe 서빙.
+//   전역 syncAuth(x-sync-apikey/secret 헤더) 적용됨. 경로 traversal 방어 후 릴리즈 디렉토리에서 스트림.
+//   에이전트 downloadVersion(url)이 이 라우트로 exe를 받아 bat 교체 → schtasks 재시작.
+router.get('/download/:version', async (req: SyncAuthRequest, res: Response) => {
+  const version = String(req.params.version || '').replace(/[^0-9A-Za-z._-]/g, '');
+  if (!version) {
+    return res.status(400).json({ success: false, error: 'version이 필요합니다.' });
+  }
+  const file = path.join(AGENT_RELEASES_DIR, `sync-agent-${version}.exe`);
+  if (!fs.existsSync(file)) {
+    return res.status(404).json({
+      success: false,
+      error: `릴리즈 exe를 찾을 수 없습니다: sync-agent-${version}.exe (서버 ${AGENT_RELEASES_DIR} 에 업로드 필요)`,
+    });
+  }
+  return res.download(file, `sync-agent-${version}.exe`);
 });
 
 

@@ -436,6 +436,35 @@ router.post('/agents/:agentId/command', authenticate, requireSuperAdmin, async (
 
 
 // ----------------------------------------------------------------------------
+// POST /api/admin/sync/releases — 자동 업데이트 릴리즈 등록 (박스 무선 교체 트리거)
+// ★ 2026-07-01: sync_releases에 새 버전 등록 → 박스가 매시간 GET /version에서 감지 → 자동 다운로드/교체.
+//   exe는 서버 agent-releases/sync-agent-<version>.exe 에 업로드돼 있어야 함 (GET /api/sync/download).
+//   컬럼 실측(information_schema): version(NOT NULL)·download_url·checksum·release_notes·force_update·is_active.
+// ----------------------------------------------------------------------------
+router.post('/releases', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
+  try {
+    const { version, checksum, force_update, release_notes } = req.body;
+    if (!version || typeof version !== 'string' || !/^\d+\.\d+\.\d+$/.test(version)) {
+      return res.status(400).json({ success: false, error: 'version은 x.y.z 형식이어야 합니다.' });
+    }
+    // 최신 1건만 active — GET /version이 is_active=true 최신을 조회하므로 기존 활성 해제
+    await query(`UPDATE sync_releases SET is_active = false WHERE is_active = true`);
+    // download_url = 서버 서빙 라우트(에이전트 baseURL 기준 상대경로). released_at/created_at은 default now().
+    const { rows } = await query(
+      `INSERT INTO sync_releases (version, download_url, checksum, release_notes, force_update, is_active)
+       VALUES ($1, $2, $3, $4, $5, true)
+       RETURNING id, version, download_url, force_update, is_active, released_at`,
+      [version, `/api/sync/download/${version}`, checksum || null, release_notes || null, force_update ?? true]
+    );
+    res.json({ success: true, release: rows[0] });
+  } catch (error) {
+    console.error('Sync 릴리즈 등록 실패:', error);
+    res.status(500).json({ success: false, error: 'Sync 릴리즈 등록 실패' });
+  }
+});
+
+
+// ----------------------------------------------------------------------------
 // DELETE /api/admin/sync/agents/:agentId — Agent 레코드 삭제
 // ★ D131 후속(2026-04-21): 버려진/중복 Agent 정리용
 //   활성(online) Agent는 기본 차단 → force=true 쿼리로 강제 삭제 가능.
