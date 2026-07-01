@@ -17,8 +17,10 @@ import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import {
   Sparkles, Plus, Trash2, Save, RefreshCw, ChevronDown, ChevronUp,
-  Image, FileText, Loader2, CheckCircle2, AlertCircle, Smartphone, X, Pencil,
+  Image, FileText, Loader2, CheckCircle2, AlertCircle, Smartphone, X, Pencil, Link2,
 } from 'lucide-react';
+// ★ 2026-07-02 브랜드 링크 — 관리 모드 (문안 편집기 칩과 같은 데이터)
+import BrandLinkChips from '../BrandLinkChips';
 
 interface RepresentativeMessage {
   id?: string;
@@ -48,6 +50,15 @@ interface BrandGuideline {
   slogans?: string[];
   required_words?: string[];
   banned_words?: string[];
+  // ★ 2026-07-02 형태 명세 — 재추출 시 자동 갱신. length_range·link_habit = 코드 계산(읽기 전용).
+  hook_types?: string[];
+  body_structure?: string[];
+  sentence_ending_style?: '해요체' | '합쇼체' | '혼합';
+  sentence_ending_examples?: string[];
+  customer_address?: string;
+  symbol_style?: string;
+  length_range?: { min_chars: number; max_chars: number };
+  link_habit?: { uses_url: boolean; position: 'body_end' | 'mid' | 'none'; avg_urls_per_message: number };
 }
 
 interface BrandVoiceResponse {
@@ -469,6 +480,26 @@ export default function BrandVoiceCard({ apiBase, token, onToast, onConfirm }: B
                   onChange={(v) => setGuideline({ ...guideline, cta_patterns: v })} fullWidth />
                 <GuidelineArrayField label="이모지 화이트리스트" values={guideline.emoji_whitelist} editing={editingGuideline}
                   onChange={(v) => setGuideline({ ...guideline, emoji_whitelist: v })} fullWidth />
+                {/* ★ 2026-07-02 형태 명세 — 후크/구조/종결어미/호칭/기호 + 코드 계산(길이 범위·링크 습관, 읽기 전용) */}
+                <GuidelineArrayField label="후크 유형 (첫 줄)" values={guideline.hook_types || []} editing={editingGuideline}
+                  onChange={(v) => setGuideline({ ...guideline, hook_types: v })} fullWidth />
+                <GuidelineArrayField label="본문 구조 순서" values={guideline.body_structure || []} editing={editingGuideline}
+                  onChange={(v) => setGuideline({ ...guideline, body_structure: v })} fullWidth />
+                <GuidelineField label="종결어미 스타일" value={guideline.sentence_ending_style || ''} editing={editingGuideline}
+                  onChange={(v) => setGuideline({ ...guideline, sentence_ending_style: (v === '해요체' || v === '합쇼체' || v === '혼합') ? v : undefined })}
+                  select={['해요체', '합쇼체', '혼합']} />
+                <GuidelineArrayField label="대표 종결어미" values={guideline.sentence_ending_examples || []} editing={editingGuideline}
+                  onChange={(v) => setGuideline({ ...guideline, sentence_ending_examples: v })} />
+                <GuidelineField label="고객 호칭" value={guideline.customer_address || ''} editing={editingGuideline}
+                  onChange={(v) => setGuideline({ ...guideline, customer_address: v })} />
+                <GuidelineField label="기호·구분선 스타일" value={guideline.symbol_style || ''} editing={editingGuideline}
+                  onChange={(v) => setGuideline({ ...guideline, symbol_style: v })} />
+                <GuidelineField label="본문 길이 범위 (자동 계산)" editing={false}
+                  value={guideline.length_range ? `${guideline.length_range.min_chars}~${guideline.length_range.max_chars}자` : ''} />
+                <GuidelineField label="링크 습관 (자동 계산)" editing={false}
+                  value={guideline.link_habit?.uses_url
+                    ? `있음 — ${guideline.link_habit.position === 'body_end' ? '본문 끝' : '본문 중간'} · 문안당 ${guideline.link_habit.avg_urls_per_message}개`
+                    : guideline.link_habit ? '없음' : ''} />
                 {/* ★ 브랜드 키트 — 문안 생성 시 조합되는 회사 고정 자산 */}
                 <GuidelineField label="고정 시그니처 (문안 끝에 조합)" value={guideline.signature_locked || ''} editing={editingGuideline}
                   onChange={(v) => setGuideline({ ...guideline, signature_locked: v })} fullWidth />
@@ -507,6 +538,18 @@ export default function BrandVoiceCard({ apiBase, token, onToast, onConfirm }: B
               , document.body)}
             </div>
           )}
+
+          {/* ★ 2026-07-02 브랜드 링크 — 회사 URL 라이브러리 관리 (문안 편집기 칩 + AI 자동 배치와 같은 데이터) */}
+          <div>
+            <h4 className="text-sm font-semibold text-white flex items-center gap-2 mb-2">
+              <Link2 className="w-4 h-4 text-violet-300" />
+              브랜드 링크
+            </h4>
+            <p className="text-[11px] text-violet-200/60 mb-2">
+              공식몰·이벤트관 등 회사 URL을 등록하면 문안 편집기에서 칩 클릭 한 번으로 삽입되고, AI가 문안을 만들 때도 등록된 링크만 자동 배치됩니다.
+            </p>
+            <BrandLinkChips tone="dark" onToast={onToast} />
+          </div>
         </div>
       )}
     </div>

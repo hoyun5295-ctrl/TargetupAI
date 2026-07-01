@@ -10,6 +10,7 @@ import { prepaidDeduct } from './prepaid';
 import { triggerDirectSendWorker } from './direct-send-worker';
 import { CAMPAIGN_INSERT_SQL, buildDirectSendCampaignParams, DirectSendError, type DirectSendSpec } from './direct-send-spec';
 import { logCampaignTraining } from './training-logger';
+import { hasUneditedLinkPlaceholder, LINK_PLACEHOLDER } from './brand-link-core';
 
 // ★ 대량 발송 (2026-06-04 톤28 504 정정): 모달 카운트 + commit 차감 공용 헬퍼 — 실제 삭제 없이 COUNT만.
 //   중복 = phone당 1건 유지(total - distinct), 수신거부 = distinct phone 중 user_id+phone 매칭.
@@ -56,6 +57,16 @@ export async function createDirectSendCampaign(
   ctx: { companyId: string; userId: string },
   training?: { finalSource?: 'manual' | 'selected_as_is' | 'edited'; userPrompt?: string; aiMessages?: string[] },
 ): Promise<{ campaignId: string; accepted: number }> {
+  // ★ 2026-07-02 링크 placeholder 발송 가드 — [링크를 입력해주세요]/{{LINK: 잔존 시 실발송 차단.
+  //   직접발송 commit + 자율발송 + DM 공통 길목 (혜택 placeholder 차단과 동일 철학 — 미완성 문안 고객 발송 0).
+  if (hasUneditedLinkPlaceholder(spec.message || '')) {
+    throw new DirectSendError(
+      'LINK_PLACEHOLDER_UNEDITED',
+      `문안에 링크 자리(${LINK_PLACEHOLDER})가 비어 있습니다. 링크 삽입으로 URL을 넣거나 해당 줄을 지운 뒤 발송해주세요.`,
+      400,
+    );
+  }
+
   const campaignResult = await query(CAMPAIGN_INSERT_SQL, buildDirectSendCampaignParams(spec, ctx));
   const campaignId = campaignResult.rows[0].id;
 

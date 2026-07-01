@@ -3,6 +3,7 @@ import { useRef, useState } from 'react';
 import type { FieldMeta } from './DirectTargetFilterModal';
 import { formatPreviewValue, formatByType, buildAdMessageFront, replaceVarsByFieldMeta, FRONT_FIELD_DISPLAY_MAP, reverseDisplayValueFront } from '../utils/formatDate';
 import { insertAtCursor } from '../utils/textInsert';
+import BrandLinkChips from './BrandLinkChips';
 import MmsImagePreview from './shared/MmsImagePreview';
 import AlimtalkChannelPanel, {
   type AlimtalkChannelState,
@@ -572,6 +573,18 @@ export default function TargetSendModal({
                     ))}
                   </select>
                 </div>
+              </div>
+
+              {/* ★ 2026-07-02 브랜드 링크 — 칩 클릭 = 커서 위치 URL 삽입 (insertAtCursor CT 재사용) */}
+              <div className="px-3 py-1.5 border-t bg-gray-50">
+                <BrandLinkChips
+                  tone="light"
+                  onToast={(message, type) => setToast({ show: true, type: type === 'error' ? 'error' : 'success', message })}
+                  onInsert={(u) => {
+                    const ok = insertAtCursor(smsTextareaRef.current, u, setTargetMessage);
+                    if (!ok) setTargetMessage(targetMessage + u);
+                  }}
+                />
               </div>
 
               {/* MMS 이미지 업로드 영역 — B16-05: MMS 탭에서만 표시 (SMS/LMS 전환 시 잔존 방지) */}

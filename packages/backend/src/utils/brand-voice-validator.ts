@@ -14,6 +14,8 @@
  *   필수 1 — 빈출 표현 1건 이상 포함 (frequent_expressions 영역 안 1건+ 출현)
  *   필수 2 — 광고 표기 "(광고)" 위치 일치 (front / back)
  *   필수 3 — 이모지 화이트리스트 정합 (허용 외 이모지 출현 X)
+ *   필수 4 — 종결어미 스타일 일치 (2026-07-02 형태 명세 — sentence_ending_style 있을 때만, SMS 제외)
+ *   필수 5 — 본문 길이 범위 ±20% 슬랙 (2026-07-02 — length_range 있고 channel LMS/MMS일 때만)
  *   선택 — 길이 평균 ±30% 이내 (벗어남 = 경고만, 미달 분기 X)
  *
  * 영구 원칙 정합
@@ -32,16 +34,24 @@ export interface ValidationResult {
 // 한글 + 영문 + 숫자 외 이모지/특수문자 추출 정규식 (NFC 정규화 후)
 const EMOJI_PATTERN = /[\u{1F300}-\u{1F9FF}\u{2600}-\u{27BF}\u{2700}-\u{27BF}\u{FE0F}\u{200D}★♥▶◆◇■□●○☆♡▷◀▶♣♠♦♪♬✓✔✕✖]/gu;
 
+// 종결어미 카운트 — 한글 음절이 조합형이라 어미는 음절 단위로 판정.
+// 해요체 = "...요" 종결 (단, 하세요/해보세요 등 '세요'는 합쇼체 문안에도 흔해 제외)
+const HAEYO_ENDING_RE = /(?<!세)요(?=[\s.!?~,)"']|$)/g;
+// 합쇼체 = "...니다/니까/십시오" 종결
+const HAPSHO_ENDING_RE = /(니다|니까|십시오)(?=[\s.!?~,)"']|$)/g;
+
 /**
  * AI 생성 문안 자가 검증.
  *
  * @param generated AI 생성 문안 (LMS/MMS 본문)
  * @param guideline 회사 brand voice 가이드라인
+ * @param opts.channel 채널 (SMS는 압축 우선이라 종결어미·길이 범위 검증 제외)
  * @returns 검증 결과 (valid + issues + warnings)
  */
 export function validateBrandVoiceCompliance(
   generated: string,
   guideline: BrandGuideline,
+  opts?: { channel?: string },
 ): ValidationResult {
   const issues: string[] = [];
   const warnings: string[] = [];
@@ -79,9 +89,11 @@ export function validateBrandVoiceCompliance(
   }
 
   // ─────────────────────────────────────────────────────────────
-  // 필수 3: 이모지 화이트리스트 정합
+  // 필수 3: 이모지 화이트리스트 정합 — 카카오 제외 (이모지 허용 채널, 화이트리스트는 LMS 학습값)
   // ─────────────────────────────────────────────────────────────
-  const usedEmojis = generated.match(EMOJI_PATTERN) || [];
+  const channelUpper = String(opts?.channel || '').toUpperCase();
+  const isKakao = channelUpper === 'KAKAO' || channelUpper === '카카오';
+  const usedEmojis = isKakao ? [] : (generated.match(EMOJI_PATTERN) || []);
   if (usedEmojis.length > 0) {
     const uniqueUsed = Array.from(new Set(usedEmojis));
     const invalid = uniqueUsed.filter((e) => !guideline.emoji_whitelist.includes(e));
@@ -90,6 +102,38 @@ export function validateBrandVoiceCompliance(
         ? guideline.emoji_whitelist.join(' / ')
         : '(이모지 사용 금지)';
       issues.push(`허용되지 않은 이모지 사용: ${invalid.join(' / ')} — 활용 가능: ${allowedStr}`);
+    }
+  }
+
+  // ─────────────────────────────────────────────────────────────
+  // 필수 4 (2026-07-02): 종결어미 스타일 일치 — SMS 제외 (압축 우선)
+  // ─────────────────────────────────────────────────────────────
+  const channel = channelUpper;
+  const skipFormChecks = channel === 'SMS';
+  if (!skipFormChecks && (guideline.sentence_ending_style === '합쇼체' || guideline.sentence_ending_style === '해요체')) {
+    const haeyoCount = (generated.match(HAEYO_ENDING_RE) || []).length;
+    const hapshoCount = (generated.match(HAPSHO_ENDING_RE) || []).length;
+    if (guideline.sentence_ending_style === '합쇼체' && haeyoCount > hapshoCount && haeyoCount >= 2) {
+      issues.push(`종결어미 스타일 = 합쇼체(~습니다) 의무 — 현재 해요체(~요) 위주 (해요체 ${haeyoCount} / 합쇼체 ${hapshoCount})`);
+    } else if (guideline.sentence_ending_style === '해요체' && hapshoCount > haeyoCount && hapshoCount >= 2) {
+      issues.push(`종결어미 스타일 = 해요체(~요) 의무 — 현재 합쇼체(~습니다) 위주 (합쇼체 ${hapshoCount} / 해요체 ${haeyoCount})`);
+    }
+  }
+
+  // ─────────────────────────────────────────────────────────────
+  // 필수 5 (2026-07-02): 본문 길이 범위 — length_range + LMS/MMS 채널일 때만 (±20% 슬랙)
+  // ─────────────────────────────────────────────────────────────
+  const range = guideline.length_range;
+  if (
+    (channel === 'LMS' || channel === 'MMS') &&
+    range && range.min_chars > 0 && range.max_chars >= range.min_chars
+  ) {
+    const len = generated.length;
+    const minAllowed = Math.floor(range.min_chars * 0.8);
+    const maxAllowed = Math.ceil(range.max_chars * 1.2);
+    if (len < minAllowed || len > maxAllowed) {
+      const dir = len < minAllowed ? '미달' : '초과';
+      issues.push(`본문 길이 범위 ${range.min_chars}~${range.max_chars}자 ${dir} (현재 ${len}자) — 범위 안으로 작성`);
     }
   }
 

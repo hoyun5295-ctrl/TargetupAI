@@ -41,6 +41,7 @@ import {
   resolveRecipientCallback,
 } from '../utils/formatDate';
 import { insertAtCursorPos } from '../utils/textInsert';
+import BrandLinkChips from './BrandLinkChips';
 import MmsImagePreview from './shared/MmsImagePreview';
 import AiRefineModal from './AiRefineModal';
 import AiRefineLockedModal from './AiRefineLockedModal';
@@ -896,6 +897,21 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
                     </>
                   );
                 })()}
+
+                {/* ★ 2026-07-02 브랜드 링크 — 칩 클릭 = 커서 위치 URL 삽입 (textInsert CT 재사용) */}
+                <BrandLinkChips
+                  tone="light"
+                  onToast={(message, type) => setToast({ show: true, type: type === 'error' ? 'error' : 'success', message })}
+                  onInsert={(u) => {
+                    insertAtCursorPos(
+                      directCursorPosRef.current,
+                      u,
+                      setDirectMessage,
+                      directTextareaRef.current,
+                      directCursorPosRef,
+                    );
+                  }}
+                />
 
                 {/* 보조 액션 3등분 (미리보기 / 스팸필터테스트 / AI 다듬기 — D152+ PDF 0511 funnel fix) */}
                 <div className="grid grid-cols-3 gap-2">

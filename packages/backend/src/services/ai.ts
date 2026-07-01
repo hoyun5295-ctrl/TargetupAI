@@ -11,7 +11,10 @@ import { cleanLeftoverVars } from '../utils/messageUtils';
 //   AI 시스템 프롬프트 안 동적 주입 → 어설픈 개인화 사고 차단.
 import { CompanyDataProfile, formatProfileForAiPrompt } from '../utils/company-data-profile';
 // ★ D225+ (2026-05-28 Harold 명시): Brand Voice Learning — 회사별 LMS 대표 문안 5건 + 자동 가이드라인 자동 주입.
-import { buildSystemPromptWithBrandVoice } from '../utils/brand-voice-prompt';
+import { buildSystemPromptWithBrandVoice, getBrandGuideline, getBrandLinks } from '../utils/brand-voice-prompt';
+// ★ 2026-07-02 브랜드 링크 토큰 치환 ({{LINK:라벨}} → 등록 URL) + 브랜드보이스 형태 검증(CT-100) 배선
+import { applyBrandLinkTokens, type BrandLink } from '../utils/brand-link-core';
+import { validateBrandVoiceCompliance, buildRetryHintFromIssues } from '../utils/brand-voice-validator';
 import { composeCopyBrain } from '../utils/copy-prompt-composer';
 import { detectBenefits, buildBenefitEmphasis } from '../utils/copy-benefit-detector';
 import { findBannedWords } from '../utils/copy-similarity-guard';
@@ -1182,7 +1185,8 @@ ${usePersonalization ? `- 사용할 개인화 변수: ${personalizationTags}
 - ⚠️ 위 "사용 가능한 개인화 변수" 목록에 있는 것만 사용! 다른 변수 생성 금지!` : '- 개인화 변수 없이 일반 문안으로 작성\n- %...% 형태의 변수를 사용하지 마세요.'}`;
 
   // ★ D225+ Brand Voice Learning — 회사별 가이드라인 자동 주입 (회사 등록 미존재 시 옛 BRAND_SYSTEM_PROMPT 그대로)
-  const baseEnriched = await buildSystemPromptWithBrandVoice(extraContext?.companyId, BRAND_SYSTEM_PROMPT);
+  // ★ 2026-07-02 brandLinks: true — 문자 생성 경로 한정 브랜드 링크 토큰 규칙 포함 (여정/이메일/DM 기본 OFF)
+  const baseEnriched = await buildSystemPromptWithBrandVoice(extraContext?.companyId, BRAND_SYSTEM_PROMPT, { brandLinks: true });
   // 문안 두뇌: 캠페인 문자(SMS/LMS/MMS) 성과 RAG + 시의성 + 브랜드 키트 주입 (companyId 있을 때만)
   let enrichedSystemPrompt = baseEnriched;
   let bannedWords: string[] = [];
@@ -1200,20 +1204,33 @@ ${usePersonalization ? `- 사용할 개인화 변수: ${personalizationTags}
     }
   }
 
+  // ★ 2026-07-02 브랜드 링크 — 토큰 치환용 등록 링크 (조회 실패 시 빈 배열 = 토큰은 placeholder가 되고 발송 가드가 차단)
+  let brandLinks: BrandLink[] = [];
+  if (extraContext?.companyId) {
+    try {
+      brandLinks = await getBrandLinks(extraContext.companyId);
+    } catch {
+      brandLinks = [];
+    }
+  }
+
   try {
+    // ★ 2026-07-02 생성 1회 실행 — CT-100 검증 미달 시 재생성에서 재사용 (재생성 = creditCost 0, 추가 차감 없음)
+    const runGenerateOnce = async (retryHint: string): Promise<AIRecommendResult> => {
     const text = await callAIWithFallback({
       system: enrichedSystemPrompt,
-      userMessage,
+      userMessage: retryHint ? `${userMessage}${retryHint}` : userMessage,
       maxTokens: 2048,
       temperature: 0.7,
       model: extraContext?.model, // ★ D170+: AI Operator는 'opus' 전달 (1M ctx + 회사 history 활용 본문 품질 최상)
       companyId: extraContext?.companyId,
       source: 'generate-messages', // ★ D227+ 종량제: 문안 생성 2크레딧 (orchestrate 묶음 안에선 자동 0)
+      ...(retryHint ? { creditCost: 0 } : {}),
     });
 
     // ★ D227+ 안전 파싱 — 코드펜스 없이 설명문 혼입돼도 JSON 추출 (CT ai-json). 본문 0 bytes 사고 정정.
     const result = extractJsonFromAiText(text) as AIRecommendResult;
-    
+
     // ★ 생성된 메시지에서 잘못된 변수 검증 + 자동 제거 (안전장치)
     if (result.variants) {
       for (const variant of result.variants) {
@@ -1270,6 +1287,16 @@ ${usePersonalization ? `- 사용할 개인화 변수: ${personalizationTags}
           cleaned = cleaned.replace(/  +/g, ' ').replace(/\n /g, '\n').trim();
           (variant as any).message_text = cleaned;
         }
+
+        // ★ 2026-07-02 브랜드 링크 토큰 치환 — sanitize 마지막 단계 (URL이 변수 검증·기호 제거에 노출되지 않게 최후 적용).
+        //   미등록 라벨 = [링크를 입력해주세요] placeholder → 발송 전 가드(LINK_PLACEHOLDER_UNEDITED)가 차단.
+        const linkApplied = applyBrandLinkTokens(String((variant as any).message_text || ''), brandLinks);
+        if (linkApplied.replacedCount > 0 || linkApplied.unresolvedCount > 0) {
+          (variant as any).message_text = linkApplied.text;
+          if (linkApplied.unresolvedCount > 0) {
+            console.log(`[brand-link] 미등록 라벨 토큰 ${linkApplied.unresolvedCount}건 → placeholder 전환 (발송 시 편집 유도)`);
+          }
+        }
       }
 
       // ★ #9: SMS 바이트 초과 시 경고 로그 + 프론트 표시용 byte_count/byte_warning 추가
@@ -1285,6 +1312,36 @@ ${usePersonalization ? `- 사용할 개인화 변수: ${personalizationTags}
             console.warn(`[AI SMS 바이트 초과] ${variant.variant_id}: 총 ${totalBytes}bytes (본문 ${msgBytes}bytes)`);
           }
         }
+      }
+    }
+
+    return result;
+    };
+
+    let result = await runGenerateOnce('');
+
+    // ★ 2026-07-02 CT-100 배선 — 브랜드보이스 기계 검증(빈출 표현·(광고) 위치·이모지·종결어미·길이 범위).
+    //   미달 시 재생성 1회 한정(추가 차감 0) — nginx 60초 응답 한도(D231) 안에서 안전.
+    //   검증 단계 오류는 1차 결과 그대로 진행 (fail-safe — 생성·발송 영향 0).
+    if (extraContext?.companyId) {
+      try {
+        const guideline = await getBrandGuideline(extraContext.companyId);
+        if (guideline && Array.isArray(result.variants) && result.variants.length > 0) {
+          const allIssues = new Set<string>();
+          for (const variant of result.variants) {
+            const check = validateBrandVoiceCompliance(String((variant as any).message_text || ''), guideline, { channel });
+            check.issues.forEach((i) => allIssues.add(i));
+          }
+          if (allIssues.size > 0) {
+            console.log(`[brand-voice] 검증 미달 ${allIssues.size}건 — 재생성 1회 진행: ${Array.from(allIssues).join(' | ')}`);
+            const retried = await runGenerateOnce(buildRetryHintFromIssues(Array.from(allIssues)));
+            if (retried && Array.isArray(retried.variants) && retried.variants.length > 0) {
+              result = retried;
+            }
+          }
+        }
+      } catch (bvErr) {
+        console.log('[brand-voice] 검증 단계 오류 — 1차 결과 그대로 진행:', (bvErr as Error)?.message);
       }
     }
 
@@ -2180,7 +2237,18 @@ ${channel} 채널에 최적화된 3가지 맞춤 문안(A/B/C)을 생성해주�
 }`;
 
   // ★ D225+ Brand Voice Learning — 회사별 가이드라인 자동 주입 (회사 등록 미존재 시 옛 흐름 그대로)
-  const systemPrompt = await buildSystemPromptWithBrandVoice(companyId, baseSystemPrompt);
+  // ★ 2026-07-02 brandLinks: true — 문자 생성 경로 브랜드 링크 토큰 규칙 포함
+  const systemPrompt = await buildSystemPromptWithBrandVoice(companyId, baseSystemPrompt, { brandLinks: true });
+
+  // ★ 2026-07-02 브랜드 링크 — 토큰 치환용 (조회 실패 = 빈 배열, placeholder 가드가 안전망)
+  let customBrandLinks: BrandLink[] = [];
+  if (companyId) {
+    try {
+      customBrandLinks = await getBrandLinks(companyId);
+    } catch {
+      customBrandLinks = [];
+    }
+  }
 
   if (!process.env.ANTHROPIC_API_KEY) {
     return {
@@ -2246,6 +2314,15 @@ ${channel} 채널에 최적화된 3가지 맞춤 문안(A/B/C)을 생성해주�
           // 이중 공백 정리
           cleaned = cleaned.replace(/  +/g, ' ').replace(/\n /g, '\n').trim();
           variant.message_text = cleaned;
+        }
+
+        // ★ 2026-07-02 브랜드 링크 토큰 치환 — sanitize 마지막 단계 (generateMessages와 동일 규칙)
+        const linkApplied = applyBrandLinkTokens(String(variant.message_text || ''), customBrandLinks);
+        if (linkApplied.replacedCount > 0 || linkApplied.unresolvedCount > 0) {
+          variant.message_text = linkApplied.text;
+          if (linkApplied.unresolvedCount > 0) {
+            console.log(`[brand-link] 맞춤 문안 미등록 라벨 토큰 ${linkApplied.unresolvedCount}건 → placeholder 전환`);
+          }
         }
       }
 

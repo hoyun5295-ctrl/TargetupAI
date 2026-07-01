@@ -16,6 +16,8 @@ import { authenticate } from '../middlewares/auth';
 import { callAIWithFallback } from '../services/ai';
 import { buildMemoryPromptContext, listMemories, MemoryType } from '../utils/company-memory';
 import { fetchBrandGuideline, recordToneEvolution } from '../utils/brand-tone-evolution';
+import { scanLinkHabit, type LinkHabit } from '../utils/brand-link-core';
+import { extractJsonFromAiText } from '../utils/ai-json';
 
 const router = Router();
 router.use(authenticate);
@@ -327,6 +329,31 @@ interface BrandGuidelineValue {
   slogans?: string[];
   required_words?: string[];
   banned_words?: string[];
+  // ★ 2026-07-02 형태 명세 — CT-99 BrandGuideline과 동일 구조 (주입·검증이 소비)
+  hook_types?: string[];
+  body_structure?: string[];
+  sentence_ending_style?: '해요체' | '합쇼체' | '혼합';
+  sentence_ending_examples?: string[];
+  customer_address?: string;
+  symbol_style?: string;
+  length_range?: { min_chars: number; max_chars: number };
+  link_habit?: LinkHabit;
+}
+
+/** 입력/AI 응답에서 형태 명세 필드만 안전 정제 (extract·update 공용) */
+function sanitizeFormSpec(input: any): Pick<BrandGuidelineValue,
+  'hook_types' | 'body_structure' | 'sentence_ending_style' | 'sentence_ending_examples' | 'customer_address' | 'symbol_style'> {
+  const arr = (v: any, max: number): string[] => Array.isArray(v)
+    ? v.map((s: any) => String(s || '').trim()).filter(Boolean).slice(0, max) : [];
+  const endingStyle = input?.sentence_ending_style;
+  return {
+    hook_types: arr(input?.hook_types, 2),
+    body_structure: arr(input?.body_structure, 7),
+    sentence_ending_style: endingStyle === '해요체' || endingStyle === '합쇼체' || endingStyle === '혼합' ? endingStyle : undefined,
+    sentence_ending_examples: arr(input?.sentence_ending_examples, 3),
+    customer_address: String(input?.customer_address || '').trim().slice(0, 50) || undefined,
+    symbol_style: String(input?.symbol_style || '').trim().slice(0, 200) || undefined,
+  };
 }
 
 /** 입력에서 브랜드 키트 필드만 정제 (update-guideline용) */
@@ -564,7 +591,7 @@ router.post('/brand-voice/extract-guideline', async (req: Request, res: Response
 
 분석 대상 = 동일 회사의 대표 LMS/MMS 문안 ${parsedMessages.length}건. 본 문안 = 회사 brand voice 자체.
 
-## 추출 의무 9 항목 (JSON 응답 형식)
+## 추출 의무 14 항목 (JSON 응답 형식)
 
 \`\`\`json
 {
@@ -577,7 +604,13 @@ router.post('/brand-voice/extract-guideline', async (req: Request, res: Response
   "cta_patterns": ["CTA 패턴 1", "CTA 패턴 2", "CTA 패턴 3"],
   "signature": "회사 시그니처 (있을 시, 없으면 빈 문자열)",
   "reject_position": "front 또는 back",
-  "emoji_whitelist": ["★", "♥", "▶"]
+  "emoji_whitelist": ["★", "♥", "▶"],
+  "hook_types": ["질문형", "영문 슬로건"],
+  "body_structure": ["(광고)+브랜드", "후크", "본문", "혜택/조건", "기간", "CTA"],
+  "sentence_ending_style": "해요체 | 합쇼체 | 혼합 중 1 선택",
+  "sentence_ending_examples": ["~해보세요", "~습니다"],
+  "customer_address": "고객님",
+  "symbol_style": "CTA 끝에 > 부착"
 }
 \`\`\`
 
@@ -592,6 +625,11 @@ router.post('/brand-voice/extract-guideline', async (req: Request, res: Response
 7. signature — 회사 슬로건 또는 영문 시그니처. 없으면 빈 문자열.
 8. reject_position — "무료수신거부 080..." 위치가 본문 앞이면 front, 뒤면 back.
 9. emoji_whitelist — 실제 활용된 이모지/특수문자 배열 (★ ♥ ▶ 등). 활용 없으면 빈 배열.
+10. hook_types — (광고) 표기 다음 첫 문장의 후크 유형을 빈도순 1~2건: "질문형" / "선언형" / "영문 슬로건" / "혜택 직접형" 중 선택.
+11. body_structure — 문안들의 공통 구조를 등장 순서대로 3~7개 블록으로 (예: "(광고)+브랜드", "후크", "본문", "혜택/조건", "기간", "CTA", "수신거부"). 실제 문안에 있는 블록만.
+12. sentence_ending_style — 본문 종결어미가 해요체(~요) / 합쇼체(~습니다) / 혼합 중 무엇인지 + sentence_ending_examples에 대표 어미 2~3건.
+13. customer_address — 고객 호칭 (예: "고객님", "회원님", "실버 등급 고객님"). 없으면 빈 문자열.
+14. symbol_style — 기호·구분선 사용 패턴 한 줄 서술 (예: "CTA 끝에 > 부착, 【】로 혜택 강조"). 없으면 빈 문자열.
 
 ## 응답 형식
 
@@ -617,33 +655,40 @@ JSON 단 1건만 출력. 다른 설명/주석/마크다운 코드블록 없음. 
     }
 
     let guideline: BrandGuidelineValue | null = null;
-    const jsonMatch = rawResponse.match(/\{[\s\S]*\}/);
-    if (jsonMatch) {
-      try {
-        const parsed = JSON.parse(jsonMatch[0]);
-        guideline = {
-          tone_signature: String(parsed.tone_signature || '정보/실용'),
-          avg_length_chars: Number(parsed.avg_length_chars) || 0,
-          avg_length_bytes: Number(parsed.avg_length_bytes) || 0,
-          frequent_expressions: Array.isArray(parsed.frequent_expressions)
-            ? parsed.frequent_expressions.map((s: any) => String(s)).slice(0, 5)
-            : [],
-          ad_prefix_position: parsed.ad_prefix_position === 'back' ? 'back' : 'front',
-          greeting_pattern: String(parsed.greeting_pattern || ''),
-          cta_patterns: Array.isArray(parsed.cta_patterns)
-            ? parsed.cta_patterns.map((s: any) => String(s)).slice(0, 5)
-            : [],
-          signature: String(parsed.signature || ''),
-          reject_position: parsed.reject_position === 'front' ? 'front' : 'back',
-          emoji_whitelist: Array.isArray(parsed.emoji_whitelist)
-            ? parsed.emoji_whitelist.map((s: any) => String(s)).slice(0, 20)
-            : [],
-          extracted_at: new Date().toISOString(),
-          admin_edited: false,
-        };
-      } catch (parseErr) {
-        console.error('[Brand Voice extract] JSON parse 실패:', parseErr, rawResponse.slice(0, 500));
-      }
+    try {
+      // ★ 2026-07-02 robust 파싱(CT ai-json) — AI 응답 raw 제어문자 대비 (0630 fallback 회귀 교훈)
+      const parsed: any = extractJsonFromAiText(rawResponse);
+      // ★ 코드 결정 항목 — AI 추정이 아니라 실제 대표 문안에서 직접 계산 (오탐 0)
+      const bodyTexts = parsedMessages.map((m) => m.message_text);
+      const lengths = bodyTexts.map((t) => t.length);
+      guideline = {
+        tone_signature: String(parsed.tone_signature || '정보/실용'),
+        avg_length_chars: Number(parsed.avg_length_chars) || 0,
+        avg_length_bytes: Number(parsed.avg_length_bytes) || 0,
+        frequent_expressions: Array.isArray(parsed.frequent_expressions)
+          ? parsed.frequent_expressions.map((s: any) => String(s)).slice(0, 5)
+          : [],
+        ad_prefix_position: parsed.ad_prefix_position === 'back' ? 'back' : 'front',
+        greeting_pattern: String(parsed.greeting_pattern || ''),
+        cta_patterns: Array.isArray(parsed.cta_patterns)
+          ? parsed.cta_patterns.map((s: any) => String(s)).slice(0, 5)
+          : [],
+        signature: String(parsed.signature || ''),
+        reject_position: parsed.reject_position === 'front' ? 'front' : 'back',
+        emoji_whitelist: Array.isArray(parsed.emoji_whitelist)
+          ? parsed.emoji_whitelist.map((s: any) => String(s)).slice(0, 20)
+          : [],
+        extracted_at: new Date().toISOString(),
+        admin_edited: false,
+        // ★ 2026-07-02 형태 명세 — AI 추출 6항목(sanitize) + 코드 계산 2항목(길이 범위·링크 습관)
+        ...sanitizeFormSpec(parsed),
+        length_range: lengths.length > 0
+          ? { min_chars: Math.min(...lengths), max_chars: Math.max(...lengths) }
+          : undefined,
+        link_habit: scanLinkHabit(bodyTexts),
+      };
+    } catch (parseErr) {
+      console.error('[Brand Voice extract] JSON parse 실패:', parseErr, rawResponse.slice(0, 500));
     }
 
     if (!guideline) {
@@ -772,6 +817,21 @@ router.post('/brand-voice/update-guideline', async (req: Request, res: Response)
       admin_edited: true,
       // ★ 브랜드 키트 (admin 직접 입력 — 시그니처 조합·금지어 등)
       ...sanitizeBrandKit(input),
+      // ★ 2026-07-02 형태 명세 — admin 직접 정정 지원 (length_range·link_habit은 코드 계산값 보존)
+      ...sanitizeFormSpec(input),
+      length_range: input?.length_range
+        && Number(input.length_range.min_chars) > 0
+        && Number(input.length_range.max_chars) >= Number(input.length_range.min_chars)
+        ? { min_chars: Number(input.length_range.min_chars), max_chars: Number(input.length_range.max_chars) }
+        : undefined,
+      link_habit: input?.link_habit && typeof input.link_habit.uses_url === 'boolean'
+        ? {
+            uses_url: input.link_habit.uses_url === true,
+            position: input.link_habit.position === 'body_end' || input.link_habit.position === 'mid'
+              ? input.link_habit.position : 'none',
+            avg_urls_per_message: Number(input.link_habit.avg_urls_per_message) || 0,
+          }
+        : undefined,
     };
 
     const prevGuideline = await fetchBrandGuideline(companyId);
@@ -803,6 +863,143 @@ router.post('/brand-voice/update-guideline', async (req: Request, res: Response)
   } catch (err: any) {
     console.error('[Brand Voice update-guideline] 오류:', err);
     return res.status(500).json({ success: false, error: err?.message || '정정 실패' });
+  }
+});
+
+// ════════════════════════════════════════════════════════════════════
+// ★ 2026-07-02 브랜드 링크 — 회사 URL 라이브러리 (라벨 + URL)
+//
+//   실제 URL은 고객사 소유 — AI는 {{LINK:라벨}} 토큰만 출력하고 시스템이 치환.
+//   저장 = ai_company_memory memory_type='brand_link' (memory_key = 라벨, ALTER 0).
+//   문안 생성 화면 칩 삽입용이라 회사 소속 사용자 전체 사용 가능 (admin 한정 X).
+//
+//   1. GET    /api/ai-memory/brand-links       — 목록
+//   2. POST   /api/ai-memory/brand-links       — 등록/갱신 (라벨 동일 시 URL 갱신)
+//   3. DELETE /api/ai-memory/brand-links/:id   — 삭제
+// ════════════════════════════════════════════════════════════════════
+
+const BRAND_LINK_MAX = 20;
+
+router.get('/brand-links', async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    if (!companyId) {
+      return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+    }
+    const r = await query(
+      `SELECT id, memory_key, memory_value, created_at
+       FROM ai_company_memory
+       WHERE company_id = $1::uuid AND memory_type = 'brand_link'
+       ORDER BY created_at ASC
+       LIMIT ${BRAND_LINK_MAX}`,
+      [companyId],
+    );
+    const links = r.rows.map((row: any) => {
+      let value: any = null;
+      try {
+        value = typeof row.memory_value === 'string' ? JSON.parse(row.memory_value) : row.memory_value;
+      } catch {
+        value = null;
+      }
+      return {
+        id: row.id,
+        label: String(value?.label || row.memory_key || ''),
+        url: String(value?.url || ''),
+        createdAt: row.created_at,
+      };
+    }).filter((l: any) => l.url);
+    return res.json({ success: true, links });
+  } catch (err: any) {
+    console.error('[Brand Links GET] 오류:', err);
+    return res.status(500).json({ success: false, error: err?.message || '조회 실패' });
+  }
+});
+
+router.post('/brand-links', async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    if (!companyId) {
+      return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+    }
+
+    // 라벨에 중괄호/개행이 들어가면 {{LINK:라벨}} 토큰이 성립하지 않으므로 제거
+    const label = String(req.body?.label || '').replace(/[{}\r\n]/g, '').trim().slice(0, 40);
+    const url = String(req.body?.url || '').trim();
+    if (!label) {
+      return res.status(400).json({ success: false, error: '링크 이름(라벨)을 입력해주세요. 예: 공식몰, 쿠폰함' });
+    }
+    if (!/^https?:\/\/\S+\.\S+/.test(url) || url.length > 500) {
+      return res.status(400).json({ success: false, error: '올바른 URL을 입력해주세요. (http:// 또는 https:// 로 시작, 500자 이내)' });
+    }
+
+    // 상한 확인 — 동일 라벨 갱신은 허용
+    const countRes = await query(
+      `SELECT COUNT(*)::int AS total,
+              COUNT(*) FILTER (WHERE memory_key = $2)::int AS same_label
+       FROM ai_company_memory
+       WHERE company_id = $1::uuid AND memory_type = 'brand_link'`,
+      [companyId, label],
+    );
+    const total = Number(countRes.rows[0]?.total) || 0;
+    const sameLabel = Number(countRes.rows[0]?.same_label) || 0;
+    if (total >= BRAND_LINK_MAX && sameLabel === 0) {
+      return res.status(400).json({ success: false, error: `브랜드 링크는 최대 ${BRAND_LINK_MAX}건까지 등록 가능합니다.` });
+    }
+
+    const inserted = await query(
+      `INSERT INTO ai_company_memory (
+        id, company_id, memory_type, memory_key, memory_value,
+        importance, source, metadata, last_accessed_at, created_at, updated_at
+      ) VALUES (
+        gen_random_uuid(), $1::uuid, 'brand_link', $2, $3,
+        7, 'admin_input', '{}'::jsonb, NOW(), NOW(), NOW()
+      )
+      ON CONFLICT (company_id, memory_type, memory_key) DO UPDATE SET
+        memory_value = EXCLUDED.memory_value,
+        updated_at = NOW(),
+        last_accessed_at = NOW()
+      RETURNING id`,
+      [companyId, label, JSON.stringify({ label, url })],
+    );
+
+    const { invalidateBrandVoiceCache } = await import('../utils/brand-voice-prompt');
+    invalidateBrandVoiceCache(companyId);
+
+    return res.json({ success: true, id: inserted.rows[0]?.id, label, url, updated: sameLabel > 0 });
+  } catch (err: any) {
+    console.error('[Brand Links POST] 오류:', err);
+    return res.status(500).json({ success: false, error: err?.message || '저장 실패' });
+  }
+});
+
+router.delete('/brand-links/:id', async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    if (!companyId) {
+      return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+    }
+    const linkId = String(req.params.id || '').trim();
+    if (!linkId) {
+      return res.status(400).json({ success: false, error: 'link id가 필요합니다.' });
+    }
+
+    const result = await query(
+      `DELETE FROM ai_company_memory
+       WHERE id = $1::uuid AND company_id = $2::uuid AND memory_type = 'brand_link'
+       RETURNING id`,
+      [linkId, companyId],
+    );
+    if (result.rows.length === 0) {
+      return res.status(404).json({ success: false, error: '브랜드 링크를 찾을 수 없습니다.' });
+    }
+
+    const { invalidateBrandVoiceCache } = await import('../utils/brand-voice-prompt');
+    invalidateBrandVoiceCache(companyId);
+
+    return res.json({ success: true });
+  } catch (err: any) {
+    console.error('[Brand Links DELETE] 오류:', err);
+    return res.status(500).json({ success: false, error: err?.message || '삭제 실패' });
   }
 });
 

@@ -17,6 +17,12 @@
 
 ## 사고 이력
 
+### 2026-07-01 — 시스템 sync user INSERT 42P08 (동일 $1을 uuid 컬럼 + ::text 이중 사용) ★ 신규
+- **현상**: `reconcileSyncUnsubscribes`(sync.ts) error.log "inconsistent types deduced for parameter $1, text versus uuid" 42P08 반복. `companies.ts` 회사생성 시스템 user INSERT도 동일(2곳).
+- **근본**: `VALUES (..., $1 /*company_id uuid*/, 'system_sync_' || $1::text, ...)` — 같은 `$1`을 uuid 컬럼과 `::text`에 써서 PG가 $1 타입을 uuid·text 양쪽으로 추론 → 42P08(D162 계열, prepared statement 타입 추론).
+- **fix**: `$1::uuid`(company_id) + 별도 `$2::text`(login_id 접미사) params 2개. 반복 INSERT 2곳은 `utils/system-sync-user.ts` CT(`ensureSystemSyncUser`)로 통합(controltower_first). 결과 데이터·downstream 동일, 42P08만 제거.
+- **교훈**: 한 파라미터를 서로 다른 타입 문맥(uuid 컬럼 / `::text`)에 재사용하면 42P08 → 명시 cast + 문맥별 별도 param. **런타임 에러가 42P08(≠42703)이면 컬럼은 존재하는 것**(is_system 있음 — SCHEMA.md users 미기재라 갱신 대상). 비치명(수신거부 실차단은 admin·company_user 등록이 담당, 시스템 user 등록만 skip이었음)이나 로그 오염 + 시스템 user 미생성.
+
 ### 2026-06-29 — 선불 sweep 초과환불 재발 + 발송 근간 보강 (돈) ★ 신규
 - **현상**: 6/25 산식 fix 이후에도 폴라초이스·라무르 초과환불 재발. 실측 51,722원/29건.
 - **진단 함정**: 환불 진단 기준을 `실패 + (차감 − sent_count)`로 잡으면 버그 산식과 동일 → over 0으로 가려짐. **올바른 회계 기준 = `차감 − 성공`**(과금했는데 전달 안 된 전부). over = `환불 + 성공 − 차감`.

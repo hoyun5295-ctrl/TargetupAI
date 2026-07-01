@@ -658,6 +658,10 @@ dmRouter.post('/:id/send-to-target', async (req: any, res: any) => {
       if (e instanceof DirectSendError && e.code === 'INSUFFICIENT_BALANCE') {
         return res.status(402).json({ error: '잔액이 부족합니다.', code: 'INSUFFICIENT_BALANCE' });
       }
+      // ★ 2026-07-02 그 외 DirectSendError(링크 placeholder 가드 등) = 정의된 상태코드 + 사용자 친화 메시지
+      if (e instanceof DirectSendError) {
+        return res.status(e.httpStatus || 400).json({ error: e.message, code: e.code, ...(e.extra || {}) });
+      }
       throw e;
     }
 

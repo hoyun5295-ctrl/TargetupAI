@@ -21,6 +21,7 @@
  */
 
 import { query } from '../config/database';
+import { buildBrandLinkPromptSection, type BrandLink, type LinkHabit } from './brand-link-core';
 
 // ════════════════════════════════════════════════════════════════════
 // 타입
@@ -45,6 +46,15 @@ export interface BrandGuideline {
   slogans?: string[];                   // 슬로건/태그라인 (문맥 맞을 때만 활용)
   required_words?: string[];            // 가능하면 포함할 표현
   banned_words?: string[];              // 절대 사용 금지 단어 (출력 가드 연동)
+  // ★ 2026-07-02 형태 명세 (대표 문안에서 추출한 구조 정보 — 없으면 섹션 생략 = 기존 회사 영향 0)
+  hook_types?: string[];                // 첫 후크 유형 빈도순 최대 2 (질문형/선언형/영문 슬로건/혜택 직접형)
+  body_structure?: string[];            // 본문 구조 순서 (예: ["(광고)+브랜드", "후크", "본문", "기간/조건", "CTA"])
+  sentence_ending_style?: '해요체' | '합쇼체' | '혼합';
+  sentence_ending_examples?: string[];  // 대표 종결어미 2~3 (예: "~해보세요", "~습니다")
+  customer_address?: string;            // 고객 호칭 (예: "고객님", "실버 등급 고객님")
+  symbol_style?: string;                // 기호·구분선 사용 패턴 서술 (예: "CTA 끝에 > 부착")
+  length_range?: { min_chars: number; max_chars: number }; // 본문 길이 범위
+  link_habit?: LinkHabit;               // 링크 습관 (코드 정규식 스캔 — brand-link-core)
 }
 
 export interface RepresentativeMessage {
@@ -58,6 +68,7 @@ export interface RepresentativeMessage {
 interface BrandVoiceCacheEntry {
   guideline: BrandGuideline | null;
   messages: RepresentativeMessage[];
+  links: BrandLink[];
   expiresAt: number;
 }
 
@@ -73,7 +84,7 @@ function getCacheKey(companyId: string): string {
 }
 
 async function loadFromDb(companyId: string): Promise<BrandVoiceCacheEntry> {
-  const [guidelineRes, messagesRes] = await Promise.all([
+  const [guidelineRes, messagesRes, linksRes] = await Promise.all([
     query(
       `SELECT memory_value FROM ai_company_memory
        WHERE company_id = $1::uuid AND memory_type = 'brand_guideline'
@@ -85,6 +96,14 @@ async function loadFromDb(companyId: string): Promise<BrandVoiceCacheEntry> {
        WHERE company_id = $1::uuid AND memory_type = 'representative_message'
        ORDER BY memory_key ASC
        LIMIT 10`,
+      [companyId],
+    ),
+    // ★ 2026-07-02 브랜드 링크 — 회사 등록 URL (memory_key = 라벨). 같은 테이블 재사용, ALTER 0.
+    query(
+      `SELECT id, memory_key, memory_value FROM ai_company_memory
+       WHERE company_id = $1::uuid AND memory_type = 'brand_link'
+       ORDER BY created_at ASC
+       LIMIT 20`,
       [companyId],
     ),
   ]);
@@ -119,9 +138,27 @@ async function loadFromDb(companyId: string): Promise<BrandVoiceCacheEntry> {
   }
   messages.sort((a, b) => a.manual_priority - b.manual_priority);
 
+  const links: BrandLink[] = [];
+  for (const row of linksRes.rows) {
+    try {
+      const raw = row.memory_value;
+      const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
+      if (parsed && typeof parsed.url === 'string' && parsed.url.trim()) {
+        links.push({
+          id: row.id,
+          label: String(parsed.label || row.memory_key || '').trim(),
+          url: parsed.url.trim(),
+        });
+      }
+    } catch {
+      // skip
+    }
+  }
+
   return {
     guideline,
     messages,
+    links,
     expiresAt: Date.now() + CACHE_TTL_MS,
   };
 }
@@ -146,6 +183,12 @@ export async function getBrandGuideline(companyId: string): Promise<BrandGuideli
   return data.guideline;
 }
 
+/** 회사 브랜드 링크 (5분 TTL 캐시 공유 — CRUD 시 invalidateBrandVoiceCache 호출 의무) */
+export async function getBrandLinks(companyId: string): Promise<BrandLink[]> {
+  const data = await getBrandVoiceData(companyId);
+  return data.links;
+}
+
 // ════════════════════════════════════════════════════════════════════
 // 시스템 프롬프트 통합 — 6 호출 위치 공통 진입점
 // ════════════════════════════════════════════════════════════════════
@@ -155,11 +198,13 @@ export async function getBrandGuideline(companyId: string): Promise<BrandGuideli
  *
  * @param companyId 회사 UUID
  * @param basePrompt 옛 시스템 프롬프트 (사실 보존 base — 절대 변경 X)
+ * @param opts.brandLinks true = 브랜드 링크 규칙 섹션 포함 (문자 생성 경로 한정 — 여정/이메일/DM 기본 OFF)
  * @returns enriched prompt — 본 가이드라인 미존재 시 basePrompt 그대로 반환
  */
 export async function buildSystemPromptWithBrandVoice(
   companyId: string | undefined,
   basePrompt: string,
+  opts?: { brandLinks?: boolean },
 ): Promise<string> {
   if (!companyId) return basePrompt;
 
@@ -171,9 +216,14 @@ export async function buildSystemPromptWithBrandVoice(
     return basePrompt;
   }
 
+  // ★ 2026-07-02 브랜드 링크 규칙 — 문자 생성 경로(opts.brandLinks)에서만. 가이드라인 유무와 독립.
+  const linkSection = opts?.brandLinks
+    ? buildBrandLinkPromptSection(data.links, data.guideline?.link_habit || null)
+    : '';
+
   // ★ A6/B2-1 (2026-06-30): AND 완화 — 가이드라인만 있어도 톤 적용. 대표문안은 있으면 few-shot 보강, 없으면 생략.
   if (!data.guideline) {
-    return basePrompt;
+    return linkSection ? `${basePrompt}${linkSection}` : basePrompt;
   }
 
   const g = data.guideline;
@@ -191,6 +241,40 @@ export async function buildSystemPromptWithBrandVoice(
       }).join('\n\n')
     : '';
 
+  // ★ 2026-07-02 형태 준수 규칙 — 형태 명세 필드가 있을 때만 생성 (없으면 생략 = 기존 회사 영향 0).
+  //   few-shot(참고)과 달리 "규칙"으로 격상 — AI가 자기 기본 스타일로 되돌아가는 것을 차단.
+  const formSpecLines: string[] = [];
+  if (Array.isArray(g.hook_types) && g.hook_types.length > 0) {
+    formSpecLines.push(`- 첫 줄 후크 유형: ${g.hook_types.join(' 또는 ')} — 본문을 이 유형의 후크로 시작하세요.`);
+  }
+  if (Array.isArray(g.body_structure) && g.body_structure.length > 0) {
+    formSpecLines.push(`- 본문 구조 순서: ${g.body_structure.join(' → ')} — 이 순서 그대로 구성하세요.`);
+  }
+  if (g.sentence_ending_style) {
+    const endingEx = Array.isArray(g.sentence_ending_examples) && g.sentence_ending_examples.length > 0
+      ? ` (대표 어미: ${g.sentence_ending_examples.join(' / ')})`
+      : '';
+    formSpecLines.push(`- 문장 종결어미: ${g.sentence_ending_style}${endingEx} — 다른 어체로 바꾸지 마세요.`);
+  }
+  if (g.customer_address) {
+    formSpecLines.push(`- 고객 호칭: "${g.customer_address}" 그대로 사용하세요.`);
+  }
+  if (g.symbol_style) {
+    formSpecLines.push(`- 기호·구분선 스타일: ${g.symbol_style}`);
+  }
+  if (g.length_range && g.length_range.min_chars > 0 && g.length_range.max_chars >= g.length_range.min_chars) {
+    formSpecLines.push(`- 본문 길이: ${g.length_range.min_chars}~${g.length_range.max_chars}자 범위로 작성하세요 (LMS/MMS 기준 — SMS는 압축 규칙 우선).`);
+  }
+  const formSpecSection = formSpecLines.length > 0
+    ? `
+## 형태 준수 규칙 (참고가 아니라 규칙 — 반드시 준수)
+
+이 회사 대표 문안들에서 추출한 문안 형태입니다. 톤뿐 아니라 아래 형태 자체를 규칙으로 지키세요.
+
+${formSpecLines.join('\n')}
+`
+    : '';
+
   const brandVoiceSection = `
 
 ## 회사 Brand Voice 가이드라인 (반드시 일치 의무)
@@ -206,7 +290,7 @@ export async function buildSystemPromptWithBrandVoice(
 - 시그니처 (메시지 마지막 부분): ${g.signature || '(시그니처 없음)'}
 - 무료수신거부 080 위치: ${rejectPositionKr}
 - 활용 가능 이모지/특수문자: ${emojiListStr} (다른 이모지 절대 금지)
-
+${formSpecSection}
 ## SMS 자동 생성 시 압축 처리 의무
 
 SMS 90바이트 - (광고) 6바이트 - 무료수신거부080XXXXXXXX 18바이트 = 66바이트 = 33글자 한도입니다.
@@ -228,5 +312,5 @@ ${fewShotSection}
 위 회사 대표 문안은 톤 학습용 예시일 뿐입니다. 절대 예시 문안처럼 본문 텍스트만 단독 출력하지 마세요.
 최종 응답은 반드시 앞에서 지정한 JSON 형식(코드펜스 없이 순수 JSON 객체) 그대로여야 합니다. 본문은 JSON 안 해당 필드 값으로만 작성하세요.`;
 
-  return `${basePrompt}${brandVoiceSection}`;
+  return `${basePrompt}${brandVoiceSection}${linkSection}`;
 }

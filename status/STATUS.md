@@ -107,6 +107,11 @@
 
 ---
 
+### 🟢 2026-07-01 (이어서 3) — 서버 상태 점검 후 코드 수정: 42P08(시스템 sync user INSERT 타입충돌) + PG 부팅 연결 재시도 + CORS 안내 (★배포·검증완료)
+> **42P08**: sync.ts·companies.ts 시스템 user INSERT가 `$1`을 company_id(uuid) + `'system_sync_'||$1::text`(text) 이중 사용 → PG 타입추론 충돌. fix = `utils/system-sync-user.ts` CT `ensureSystemSyncUser`(`$1::uuid` + `$2::text`)로 통합(2곳 인라인 제거, controltower_first). 비치명(수신거부 실차단은 admin·company_user 등록이 담당, 시스템 user 등록만 skip이었음)·기간계 영향0.
+> **PG 부팅**: config/database.ts 부팅 `SELECT 1` 확인 1회→5회 재시도(2초 간격). 부팅 순간 경합 타임아웃 오탐 실패로그 제거, pool·query·발송 로직 무변경. 검증=21:38 재시작 "[PostgreSQL] 연결 재시도 1/5" 후 붙음(bare 실패표시 사라짐).
+> **CORS**: app.ts 정상(.env CORS_ORIGIN 읽음). 서버 .env에 운영 도메인(hanjul.ai·app.hanjul.ai·sys.hanjullo.com) 추가 시 경고 소멸(코드 아님). 상세 [[project_2026_0701_server_health_fixes]].
+
 ### 🟢 2026-07-01 (이어서 2) — 예측 일일차감 eligibility 요금제기반 재정의 + 슈퍼관리자 화이트 모던화 + 이메일 placeholder 발송 UX (★전부 배포·검증완료)
 > **예측 일일차감(돈)**: eligibility = plan-guard `ACTIVE_PAID_PLAN_WHERE`(plan_code≠FREE + subscription_status expired/suspended 아님, TRIAL 포함) + EXISTS customers. predictive_enabled 토글 폐지(무시). `runPredictiveBatchNow`(시간가드 없이 멱등) 분리 → 매일 9시 스케줄 + 슈퍼관리자 수동 트리거 `POST /api/admin/predictive/run-now`(크레딧 탭 버튼) 공유. 멱등키 predictive-daily:회사:YYYYMMDD. PricingPage 하단 DB규모별 차감표(dailyDbAnalysisCredits). 현재 대상 5개사(BASIC 3·ENT 2).
 > **슈퍼관리자 모던화**: bg-slate-50 + sticky 헤더 + 카드 rounded-2xl 토큰 일괄 통일(화이트 유지, 다크 미도입). 드롭다운 클릭토글+onBlur 경합 제거 → menuRef 바깥클릭·ESC(단일 클릭 고정). 요금제 관리 max_customers 컬럼·입력 제거(state 보존=payload 회귀0). 크레딧 탭 3개 가로 패널 → 3칸 타일+클릭 모달. 미사용 기능 정리=다음.

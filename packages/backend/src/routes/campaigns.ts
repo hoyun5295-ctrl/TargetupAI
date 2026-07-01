@@ -40,6 +40,7 @@ import { validateScheduledAt } from '../utils/campaign-validation';
 import { calcSplitSendTime } from '../utils/send-time-util';
 import { countStagingFiltered, createDirectSendCampaign } from '../utils/direct-send-core';
 import { DirectSendError } from '../utils/direct-send-spec';
+import { hasUneditedLinkPlaceholder, LINK_PLACEHOLDER } from '../utils/brand-link-core';
 
 // ★ toKoreaTimeStr → utils/sms-queue.ts로 이동 (import 사용)
 
@@ -449,6 +450,14 @@ router.post('/', async (req: Request, res: Response) => {
 
     if (!campaignName || !messageType || !messageContent) {
       return res.status(400).json({ error: '필수 항목을 입력하세요.' });
+    }
+
+    // ★ 2026-07-02 링크 placeholder 발송 가드 — 미완성 링크 자리 잔존 시 실발송 차단 (AI 캠페인/타겟 발송 경로)
+    if (hasUneditedLinkPlaceholder(String(messageContent || ''))) {
+      return res.status(400).json({
+        error: `문안에 링크 자리(${LINK_PLACEHOLDER})가 비어 있습니다. 링크 삽입으로 URL을 넣거나 해당 줄을 지운 뒤 발송해주세요.`,
+        code: 'LINK_PLACEHOLDER_UNEDITED',
+      });
     }
 
     // ★ D143 (2026-05-04, 정식 오픈 D-Day 1일 전) — D142+ 자동 승격 정책 폐지
@@ -1403,6 +1412,10 @@ router.post('/direct-send/commit', async (req: Request, res: Response) => {
     } catch (e: any) {
       if (e instanceof DirectSendError && e.code === 'INSUFFICIENT_BALANCE') {
         return res.status(402).json({ success: false, error: e.message, ...(e.extra || {}) });
+      }
+      // ★ 2026-07-02 그 외 DirectSendError(링크 placeholder 가드 등) = 정의된 상태코드 + 사용자 친화 메시지
+      if (e instanceof DirectSendError) {
+        return res.status(e.httpStatus || 400).json({ success: false, error: e.message, code: e.code, ...(e.extra || {}) });
       }
       throw e;
     }
