@@ -6,7 +6,7 @@ import { COMPANY_PHONE, COMPANY_PHONE_TEL } from '../constants/company';
 import { Sparkles, Users, Server, Cpu } from 'lucide-react';
 import CreditSummaryBar from '../components/credit/CreditSummaryBar';
 import CreditRechargeModal from '../components/credit/CreditRechargeModal';
-import { PLAN_INFRA, planBonusPct } from '../constants/credit';
+import { PLAN_INFRA, planBonusPct, dailyDbAnalysisCredits } from '../constants/credit';
 import { useToast } from '../components/ToastProvider';
 
 interface Plan {
@@ -554,6 +554,48 @@ export default function PricingPage() {
               </div>
             );
           })}
+        </div>
+
+        {/* DB 규모별 매일 분석 차감 안내 — 요금제 이용 중 고객 DB 보유 시 매일 오전 9시 자동 분석·차감 (공식 dailyDbAnalysisCredits 단일 소스) */}
+        <div className="mt-8 bg-white rounded-xl border border-gray-200 p-6">
+          <h3 className="text-lg font-semibold text-gray-900">DB 규모별 매일 분석 차감</h3>
+          <p className="text-sm text-gray-500 mt-1">
+            요금제 이용 중 고객 DB가 있으면 매일 오전 9시에 DB 규모 기준으로 AI 분석이 실행되고 크레딧이 자동 차감됩니다.
+          </p>
+          <div className="mt-4 overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-left text-gray-500 border-b border-gray-200">
+                  <th className="py-2 pr-4 font-medium">고객 DB</th>
+                  <th className="py-2 px-4 font-medium text-right">일일 차감</th>
+                  <th className="py-2 pl-4 font-medium text-right">월 환산 (×30일)</th>
+                </tr>
+              </thead>
+              <tbody>
+                {[
+                  { label: '10만 이하', n: 100000 },
+                  { label: '20만', n: 200000 },
+                  { label: '30만', n: 300000 },
+                  { label: '50만', n: 500000 },
+                  { label: '100만', n: 1000000 },
+                  { label: '200만', n: 2000000 },
+                  { label: '300만', n: 3000000 },
+                ].map((r) => {
+                  const daily = dailyDbAnalysisCredits(r.n);
+                  return (
+                    <tr key={r.n} className="border-b border-gray-100 last:border-0">
+                      <td className="py-2 pr-4 text-gray-800">{r.label}</td>
+                      <td className="py-2 px-4 text-right font-semibold text-gray-900 tabular-nums">{daily} 크레딧</td>
+                      <td className="py-2 pl-4 text-right text-gray-600 tabular-nums">{(daily * 30).toLocaleString()} 크레딧</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+          <p className="text-[11px] text-gray-400 mt-3">
+            고객 DB가 없으면 차감되지 않습니다. 실제 차감은 보유 고객 수 기준으로 자동 계산됩니다.
+          </p>
         </div>
 
         <div className="mt-8 bg-gradient-to-r from-gray-800 to-gray-900 rounded-xl p-6 text-white">

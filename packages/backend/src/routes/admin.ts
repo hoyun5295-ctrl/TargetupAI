@@ -21,6 +21,8 @@ import { normalizeCdpAutoExecuteGate } from '../utils/autosend-policy';
 import { grantBasicTrial } from '../utils/basic-trial';
 // ★ 2026-06-11: 감사 로그 CT — 라인그룹 지정/해제 책임 추적 (에이치피오 예약취소 사고 후속)
 import { recordAuditLog, isAuditLogViewer, isAiTrainingViewer, diffFields } from '../utils/audit-log';
+// ★ 2026-07-01: 예측 일괄 분석·차감 수동 트리거 (9시 대기 없이 검증·복구·시연)
+import { runPredictiveBatchNow } from '../utils/predictive-worker';
 
 const router = Router();
 
@@ -2558,6 +2560,19 @@ router.get('/credit-risk-companies', authenticate, requireSuperAdmin, async (_re
   } catch (err: any) {
     console.error('크레딧 위험 회사 조회 실패:', err);
     res.status(500).json({ error: '크레딧 위험 회사 조회 실패' });
+  }
+});
+
+// POST /predictive/run-now — 예측 일괄 분석·차감 수동 실행 (9시 대기 없이 검증·복구·시연).
+//   대상 = 요금제 가입 회사(FREE 제외·구독 만료/정지 제외) + 고객 보유. predictive-worker와 동일 eligibility.
+//   멱등키(회사+날짜) 유지 → 같은 날 재실행해도 중복 차감 0. 이미 진행 중이면 ran:false.
+router.post('/predictive/run-now', authenticate, requireSuperAdmin, async (_req: Request, res: Response) => {
+  try {
+    const result = await runPredictiveBatchNow();
+    res.json({ success: true, ...result });
+  } catch (err: any) {
+    console.error('예측 수동 실행 실패:', err?.message);
+    res.status(500).json({ success: false, error: '예측 수동 실행 실패' });
   }
 });
 

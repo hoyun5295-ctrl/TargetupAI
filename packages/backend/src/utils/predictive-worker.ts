@@ -24,6 +24,7 @@ import { query } from '../config/database';
 import { computeCompanyPredictionsBatch } from './predictive-suite';
 import { checkCredit, deductCreditSafe, InsufficientCreditError } from './ai-credit';
 import { dailyDbAnalysisCredits, kstDateTag, kstHour } from './ai-credit-calc';
+import { ACTIVE_PAID_PLAN_WHERE } from './plan-guard';
 
 // 30분마다 깨어 KST 오전 9시대에 하루 1회만 실행(차감은 회사+날짜 멱등으로 추가 보장).
 const WORKER_INTERVAL_MS = 30 * 60 * 1000;
@@ -56,21 +57,29 @@ export function stopPredictiveWorker(): void {
   }
 }
 
-async function runPredictiveBatch(): Promise<void> {
+/**
+ * 예측 일괄 실행 코어 — 시간 가드 없이 즉시 1회 실행(멱등키 회사+날짜 유지 = 같은 날 중복 차감 0).
+ *  스케줄(runPredictiveBatch, 매일 KST 9시)과 슈퍼관리자 수동 트리거(POST /admin/predictive/run-now)가 공유.
+ *  대상 = 요금제 가입 회사(ACTIVE_PAID_PLAN_WHERE = FREE 제외·구독 만료/정지 제외) + 고객 DB 보유.
+ *    ★ 크레딧 모델 v2(2026-07-01 Harold 확정): "요금제 쓰는 회사는 데이터 올라가 있으면 매일 분석·차감".
+ *      predictive_enabled 토글 폐지(무시) — 연동 여부와 무관하게 요금제·고객 보유만으로 대상 판정.
+ *    분석 차감액 = 회사별 고객 수 기준 dailyDbAnalysisCredits. 고객 0 = 차감 0 → skip. 크레딧 부족 = 예측 skip(무과금).
+ */
+export async function runPredictiveBatchNow(): Promise<{
+  ran: boolean;
+  companiesProcessed: number;
+  totalUpdated: number;
+  creditSkipped: number;
+  elapsedMs: number;
+}> {
   if (workerRunning) {
     console.log('[PredictiveWorker] batch 진행 중 — skip');
-    return;
+    return { ran: false, companiesProcessed: 0, totalUpdated: 0, creditSkipped: 0, elapsedMs: 0 };
   }
-
-  // KST 오전 9시대 + 하루 1회만 (30분 주기·서버 재시작 중복 진입 차단)
-  const now = new Date();
-  if (kstHour(now) !== PREDICTIVE_RUN_HOUR_KST) return;
-  const todayKst = kstDateTag(now);
-  if (lastBatchDateKst === todayKst) return;
-  lastBatchDateKst = todayKst;
 
   workerRunning = true;
   const startedAt = Date.now();
+  const todayKst = kstDateTag(new Date());
   let totalUpdated = 0;
   let totalTrained = 0;
   let totalCold = 0;
@@ -78,18 +87,19 @@ async function runPredictiveBatch(): Promise<void> {
   let creditSkipped = 0;
 
   try {
-    // 대상 = 연동 회사(싱크에이전트/SDK) — 항상 매일 분석 (크레딧 모델 v2: "연동=항상", on/off 토글 폐지).
+    // 대상 = 요금제 가입 회사 전체(FREE 제외·구독 만료/정지 제외) + 고객 DB 보유. predictive_enabled 토글 무시.
     //   분석 차감액은 회사별 DB 규모(고객 수)로 산정 → 루프 안에서 계산.
     const companyRes = await query(
       `SELECT DISTINCT c.id
          FROM companies c
-        WHERE EXISTS (SELECT 1 FROM sync_agents sa WHERE sa.company_id = c.id)
-           OR EXISTS (SELECT 1 FROM cdp_events ce WHERE ce.company_id = c.id AND ce.source = 'custom_sdk')
+         JOIN plans p ON c.plan_id = p.id
+        WHERE ${ACTIVE_PAID_PLAN_WHERE}
+          AND EXISTS (SELECT 1 FROM customers cu WHERE cu.company_id = c.id)
         ORDER BY c.id`
     );
 
     for (const row of companyRes.rows) {
-      // DB 규모 기준 일일 분석 차감액 (연동 회사 매일 1회, v2). 고객 수 0 = 차감 0 → skip.
+      // DB 규모 기준 일일 분석 차감액 (요금제 가입 회사 매일 1회, v2). 고객 수 0 = 차감 0 → skip.
       const cntRes = await query(`SELECT COUNT(*)::int AS n FROM customers WHERE company_id = $1::uuid`, [row.id]);
       const cost = dailyDbAnalysisCredits(Number(cntRes.rows[0]?.n) || 0);
       if (cost <= 0) continue;
@@ -130,11 +140,26 @@ async function runPredictiveBatch(): Promise<void> {
 
     const elapsedMs = Date.now() - startedAt;
     console.log(`[PredictiveWorker] 매일 batch 완료 — 회사 ${companiesProcessed}개 / customer ${totalUpdated}명 갱신 (trained ${totalTrained} / cold ${totalCold} / 크레딧부족 skip ${creditSkipped}) / ${(elapsedMs / 1000).toFixed(1)}s`);
+    return { ran: true, companiesProcessed, totalUpdated, creditSkipped, elapsedMs };
   } catch (err: any) {
     console.error('[PredictiveWorker] batch 진입 오류:', err?.message);
+    return { ran: true, companiesProcessed, totalUpdated, creditSkipped, elapsedMs: Date.now() - startedAt };
   } finally {
     workerRunning = false;
   }
+}
+
+/**
+ * 스케줄 진입점 — 30분 주기로 깨어 KST 오전 9시대 하루 1회만 runPredictiveBatchNow 실행.
+ *  가드(시간·하루 1회)는 여기, 실제 처리·멱등 차감은 runPredictiveBatchNow가 담당.
+ */
+async function runPredictiveBatch(): Promise<void> {
+  const now = new Date();
+  if (kstHour(now) !== PREDICTIVE_RUN_HOUR_KST) return;
+  const todayKst = kstDateTag(now);
+  if (lastBatchDateKst === todayKst) return;
+  lastBatchDateKst = todayKst;
+  await runPredictiveBatchNow();
 }
 
 /**

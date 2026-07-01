@@ -123,6 +123,16 @@ export const PLAN_STATUS_SELECT_EXPR = `
   c.ai_operator_trial_started_at, c.ai_operator_trial_until
 `.trim();
 
+/**
+ * 요금제 가입(유료) + 구독 정상 회사 판정 SQL 조각 — 일일 DB 분석·과금 같은 배치 대상 선별용.
+ *   `FROM companies c JOIN plans p ON c.plan_id = p.id` 형태의 WHERE에서 사용.
+ *   기준 = 미가입(FREE) 제외 + 구독 만료/정지 제외 (isUnsubscribed·isSubscriptionBlocked와 동일 기준, 단일 소스).
+ *   TRIAL(무료체험) 포함 — plan_code 기준 FREE만 제외한다(TRIAL 제외를 원하면 조건 한 줄만 추가).
+ *   subscription_status NULL(미설정)은 정상으로 취급(COALESCE '').
+ */
+export const ACTIVE_PAID_PLAN_WHERE =
+  `p.plan_code <> 'FREE' AND COALESCE(c.subscription_status, '') NOT IN ('expired', 'suspended')`;
+
 // ═══════════════════════════════════════════════════════════
 // 통합 조회 — loadPlanContext
 // ═══════════════════════════════════════════════════════════

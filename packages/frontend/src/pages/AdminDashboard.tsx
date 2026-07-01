@@ -293,6 +293,7 @@ const [messageDetailContent, setMessageDetailContent] = useState<{ name: string;
   const [depositAdminNote, setDepositAdminNote] = useState('');
   const [creditRequests, setCreditRequests] = useState<any[]>([]); // AI 크레딧 충전 요청 (후불 승인 대기)
   const [creditRiskCompanies, setCreditRiskCompanies] = useState<any[]>([]); // 크레딧 위험 회사 (소진·마이너스 — v2)
+  const [predictiveRunning, setPredictiveRunning] = useState(false); // 예측 일괄 수동 실행 진행 상태
   // 크레딧 사용 이력 (전체 회사 — 크레딧 관리 탭)
   const [creditTxAll, setCreditTxAll] = useState<any[]>([]);
   const [creditTxPage, setCreditTxPage] = useState(1);
@@ -1454,6 +1455,37 @@ const handleSendBillingEmail = async () => {
       const res = await fetch('/api/admin/credit-risk-companies', { headers: { Authorization: `Bearer ${token}` } });
       if (res.ok) { const d = await res.json(); setCreditRiskCompanies(d.companies || []); }
     } catch (e) { console.error('크레딧 위험 회사 로드 실패:', e); }
+  };
+
+  // 예측 일괄 분석·차감 수동 실행 (9시 대기 없이 검증·복구·시연). 멱등키로 같은 날 중복 차감 0.
+  const handleRunPredictiveNow = () => {
+    showConfirm(
+      '예측 일괄 실행',
+      '요금제 가입 회사(고객 DB 보유) 전체에 지금 즉시 DB 규모별 예측 분석·크레딧 차감을 1회 실행합니다.\n오늘 이미 차감된 회사는 중복 차감되지 않습니다. 진행하시겠습니까?',
+      async () => {
+        setPredictiveRunning(true);
+        try {
+          const token = localStorage.getItem('token');
+          const res = await fetch('/api/admin/predictive/run-now', { method: 'POST', headers: { Authorization: `Bearer ${token}` } });
+          const d = await res.json();
+          if (res.ok && d.success) {
+            if (d.ran === false) {
+              showAlert('진행 중', '예측 배치가 이미 실행 중입니다. 잠시 후 다시 시도해 주세요.', 'info');
+            } else {
+              showAlert('예측 실행 완료', `회사 ${d.companiesProcessed}개 분석 · 고객 ${Number(d.totalUpdated).toLocaleString()}명 갱신 (크레딧 부족 skip ${d.creditSkipped}).`, 'success');
+              loadCreditRisk();
+              loadAllCreditTx(1);
+            }
+          } else {
+            showAlert('오류', d.error || '예측 수동 실행 실패', 'error');
+          }
+        } catch {
+          showAlert('오류', '예측 수동 실행 실패', 'error');
+        } finally {
+          setPredictiveRunning(false);
+        }
+      }
+    );
   };
 
   const handleApproveCreditRequest = (cr: any) => {
@@ -3719,6 +3751,23 @@ const handleApproveRequest = async (id: string) => {
                   })}
                 </div>
               )}
+            </div>
+
+            {/* 예측 일괄 분석·차감 수동 실행 — 9시 대기 없이 검증·복구·시연 */}
+            <div className="bg-indigo-50 border border-indigo-200 rounded-lg p-4">
+              <div className="flex items-center justify-between flex-wrap gap-3">
+                <div>
+                  <h3 className="font-semibold text-indigo-800">예측 일괄 분석·차감 실행</h3>
+                  <p className="text-[11px] text-indigo-500 mt-0.5">요금제 가입 회사(고객 DB 보유) 전체를 지금 즉시 분석·차감합니다. 매일 오전 9시 자동 실행과 동일하며, 오늘 이미 차감된 회사는 중복되지 않습니다.</p>
+                </div>
+                <button
+                  onClick={handleRunPredictiveNow}
+                  disabled={predictiveRunning}
+                  className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700 transition-colors disabled:opacity-40 disabled:cursor-not-allowed flex-shrink-0"
+                >
+                  {predictiveRunning ? '실행 중…' : '지금 실행'}
+                </button>
+              </div>
             </div>
 
             {/* 크레딧 사용 이력 — 전체 회사 */}
