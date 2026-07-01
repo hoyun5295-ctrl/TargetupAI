@@ -397,6 +397,19 @@ export default function DmBuilderPage() {
     }
   };
 
+  // 발행 주소 복사 — 이미 발행된 DM은 발행 멱등(추가 과금 0)이라 그대로 short_url 재사용. 편집 재발행 불필요.
+  const handleCopyUrl = async (id: string) => {
+    try {
+      const res = await api.post(`/dm/${id}/publish`);
+      const url = res?.data?.short_url || '';
+      if (!url) { setToast({ type: 'error', message: '발행 주소를 찾지 못했어요. 편집에서 발행 후 다시 시도해주세요.' }); return; }
+      await navigator.clipboard.writeText(url);
+      setToast({ type: 'success', message: '발행 주소를 복사했어요. (이미 발행 — 추가 과금 없음)' });
+    } catch (err: any) {
+      setToast({ type: 'error', message: err?.response?.data?.error || '주소 복사 실패' });
+    }
+  };
+
   const handleBackToList = () => {
     reset();
     setMode('list');
@@ -972,6 +985,7 @@ export default function DmBuilderPage() {
                     onEdit={handleEdit}
                     onDelete={handleDelete}
                     onClone={handleClone}
+                    onCopyUrl={handleCopyUrl}
                     cloning={cloningId === dm.id}
                   />
                 ))}
@@ -1098,6 +1112,7 @@ function TopBarWithBack({ onBack, onPublishDone }: { onBack: () => void; onPubli
   const saveStore = useDmBuilderStore((s) => s.save);
   const dmId = useDmBuilderStore((s) => s.dmId);
   const setToast = useDmBuilderStore((s) => s.setToast);
+  const approvalStatus = useDmBuilderStore((s) => s.approvalStatus);
   const [confirmPublish, setConfirmPublish] = useState(false);
   const [publishedUrl, setPublishedUrl] = useState<string | null>(null);
   const [sendModalOpen, setSendModalOpen] = useState(false);
@@ -1140,7 +1155,7 @@ function TopBarWithBack({ onBack, onPublishDone }: { onBack: () => void; onPubli
       <DmTopBar
         onBack={onBack}
         onTestSendClick={handleTestSend}
-        onPublishClick={() => setConfirmPublish(true)}
+        onPublishClick={() => { if (approvalStatus === 'published') { handlePublish(); } else { setConfirmPublish(true); } }}
       />
       <CreditConfirmModal
         open={confirmPublish}
@@ -1229,11 +1244,12 @@ function EditorModals() {
 
 // EmptyList 영역 영구 폐기 (D216+ 정합 — 자연어 입력 + 빠른 시작 + 자유롭게 DM 생성 영역 흐름 정합)
 
-function DmCard({ dm, onEdit, onDelete, onClone, cloning }: {
+function DmCard({ dm, onEdit, onDelete, onClone, onCopyUrl, cloning }: {
   dm: DmListItem;
   onEdit: (id: string, mode?: string) => void;
   onDelete: (id: string) => void;
   onClone: (id: string) => void;
+  onCopyUrl: (id: string) => void;
   cloning?: boolean;
 }) {
   // ★ 2026-06-23: 섹션 콘텐츠가 있으면 새 섹션형 슬라이드(편집 가능) — 콘텐츠 없는 진짜 D119만 레거시 뱃지.
@@ -1307,6 +1323,17 @@ function DmCard({ dm, onEdit, onDelete, onClone, cloning }: {
         )}
       </div>
       <div style={{ flex: 1 }} />
+      {dm.short_code && (
+        <button
+          onClick={(e) => { e.stopPropagation(); onCopyUrl(dm.id); }}
+          title="발행 주소 복사 (추가 과금 없음)"
+          style={{ height: 32, width: '100%', background: 'rgba(16,185,129,0.12)', color: '#6ee7b7', border: '1px solid rgba(16,185,129,0.35)', borderRadius: 8, fontSize: 12, fontWeight: 700, cursor: 'pointer', transition: 'all 0.2s' }}
+          onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(16,185,129,0.2)'; }}
+          onMouseLeave={(e) => { e.currentTarget.style.background = 'rgba(16,185,129,0.12)'; }}
+        >
+          발행 주소 복사
+        </button>
+      )}
       <div style={{ display: 'flex', gap: 6 }} onClick={(e) => e.stopPropagation()}>
         <button
           onClick={() => onEdit(dm.id, dm.layout_mode)}
