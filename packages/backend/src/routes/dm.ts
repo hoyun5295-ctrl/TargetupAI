@@ -531,15 +531,23 @@ dmRouter.post('/:id/send-to-target', async (req: any, res: any) => {
     const userId = req.user?.userId || companyId;
     if (!companyId) return res.status(403).json({ error: '회사 권한이 필요합니다.' });
 
-    const { filter, messageText, isAd } = req.body as {
+    const { filter, messageText, isAd, scheduledAt } = req.body as {
       filter?: Record<string, { operator: string; value: any }>;
       messageText?: string;
       isAd?: boolean;
+      scheduledAt?: string | null;
     };
     if (!filter || typeof filter !== 'object' || Object.keys(filter).length === 0) {
       return res.status(400).json({ error: '발송 대상 조건이 필요합니다.' });
     }
     if (!messageText?.trim()) return res.status(400).json({ error: '문자 본문을 입력해주세요.' });
+    const scheduled = !!scheduledAt;
+    if (scheduled) {
+      const when = new Date(scheduledAt as string);
+      if (isNaN(when.getTime()) || when.getTime() < Date.now() + 60 * 1000) {
+        return res.status(400).json({ error: '예약 시각은 현재보다 1분 이상 이후여야 합니다.' });
+      }
+    }
 
     const dm = await getDmDetail(req.params.id, companyId);
     if (!dm) return res.status(404).json({ error: 'DM을 찾을 수 없습니다.' });
@@ -615,8 +623,11 @@ dmRouter.post('/:id/send-to-target', async (req: any, res: any) => {
       return res.status(400).json({ error: '수신 가능한 대상이 0명입니다(수신거부 제외 후).', code: 'ZERO_MATCH' });
     }
 
-    // 본문 = 사용자 문구 + 수신자별 링크(%기타1%)
-    const finalMessage = `${messageText.trim()}\n%기타1%`;
+    // 본문 = 사용자 문구 + 수신자별 링크. %DM링크% 위치에 링크(없으면 끝에 첨부). 수신자별 = %기타1%.
+    const bodyText = messageText.trim();
+    const finalMessage = bodyText.includes('%DM링크%')
+      ? bodyText.split('%DM링크%').join('%기타1%')
+      : `${bodyText}\n%기타1%`;
 
     let campaignId: string;
     try {
@@ -631,6 +642,8 @@ dmRouter.post('/:id/send-to-target', async (req: any, res: any) => {
           sendChannel: 'sms',
           adEnabled: isAd === true,
           total: sendCount,
+          scheduled,
+          scheduledAt: scheduled ? (scheduledAt as string) : null,
           dedupEnabled: true,
           unsubFilterEnabled: true,
         },
