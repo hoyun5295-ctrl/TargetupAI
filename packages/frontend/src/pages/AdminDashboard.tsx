@@ -1,4 +1,4 @@
-import { useState, useEffect, Fragment } from 'react';
+import { useState, useEffect, useRef, Fragment } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { companiesApi, plansApi, billingApi } from '../api/client';
 import { useAuthStore } from '../stores/authStore';
@@ -72,6 +72,21 @@ export default function AdminDashboard() {
   // ★ 2026-06-13: AI 학습 데이터 열람 권한 (AI_TRAINING_VIEWER_IDS — 기본 ceo 전용) — 허용 계정에만 진입 버튼 노출
   const [aiTrainingAllowed, setAiTrainingAllowed] = useState(false);
   const [openMenu, setOpenMenu] = useState<string | null>(null);
+  const menuRef = useRef<HTMLDivElement | null>(null);
+  // 드롭다운: 단일 클릭 열림 고정 + 바깥 클릭·ESC 닫힘 (두 번 클릭 경합 제거)
+  useEffect(() => {
+    if (!openMenu) return;
+    const onDocMouseDown = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) setOpenMenu(null);
+    };
+    const onKeyDown = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpenMenu(null); };
+    document.addEventListener('mousedown', onDocMouseDown);
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', onDocMouseDown);
+      document.removeEventListener('keydown', onKeyDown);
+    };
+  }, [openMenu]);
   const [companies, setCompanies] = useState<Company[]>([]);
   const [plans, setPlans] = useState<Plan[]>([]);
   const [users, setUsers] = useState<User[]>([]);
@@ -2402,19 +2417,19 @@ const handleApproveRequest = async (id: string) => {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-gray-100 flex items-center justify-center">
+      <div className="min-h-screen bg-slate-50 flex items-center justify-center">
         <div className="text-gray-500">로딩 중...</div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-gray-100">
+    <div className="min-h-screen bg-slate-50">
       {/* 헤더 */}
-      <header className="bg-white shadow">
-        <div className="max-w-7xl mx-auto px-4 py-4 flex justify-between items-center">
+      <header className="bg-white/90 backdrop-blur-sm border-b border-gray-200 sticky top-0 z-40">
+        <div className="max-w-7xl mx-auto px-4 py-3.5 flex justify-between items-center">
         <div className="flex items-center gap-4">
-            <h1 className="text-xl font-bold text-gray-800 cursor-pointer hover:text-blue-600 transition" onClick={() => window.location.reload()}>시스템 관리</h1>
+            <h1 className="text-lg font-bold tracking-tight text-gray-900 cursor-pointer hover:text-blue-600 transition-colors" onClick={() => window.location.reload()}>시스템 관리</h1>
             {/* ★ D152: ServiceSwitcher 제거 — hanjulDM 분리, admin.hanjuldm.kr 별도 도메인 */}
           </div>
           <div className="flex items-center gap-4">
@@ -2433,30 +2448,30 @@ const handleApproveRequest = async (id: string) => {
       {/* 메인 */}
       <main className="max-w-7xl mx-auto px-4 py-8">
         {/* 통계 카드 */}
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
-          <div className="bg-white rounded-lg shadow p-6">
-            <div className="text-sm text-gray-500">전체 고객사</div>
-            <div className="text-3xl font-bold text-gray-800">{companies.length}</div>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-4 mb-8">
+          <div className="bg-white rounded-2xl border border-gray-200/70 shadow-sm p-5 hover:shadow-md transition-shadow">
+            <div className="text-xs font-medium text-gray-500">전체 고객사</div>
+            <div className="text-3xl font-bold tracking-tight text-gray-900 mt-1 tabular-nums">{companies.length}</div>
           </div>
-          <div className="bg-white rounded-lg shadow p-6">
-            <div className="text-sm text-gray-500">활성 고객사</div>
-            <div className="text-3xl font-bold text-green-600">
+          <div className="bg-white rounded-2xl border border-gray-200/70 shadow-sm p-5 hover:shadow-md transition-shadow">
+            <div className="text-xs font-medium text-gray-500">활성 고객사</div>
+            <div className="text-3xl font-bold tracking-tight text-emerald-600 mt-1 tabular-nums">
               {companies.filter(c => c.status === 'active').length}
             </div>
           </div>
-          <div className="bg-white rounded-lg shadow p-6">
-            <div className="text-sm text-gray-500">전체 사용자</div>
-            <div className="text-3xl font-bold text-blue-600">{users.length}</div>
+          <div className="bg-white rounded-2xl border border-gray-200/70 shadow-sm p-5 hover:shadow-md transition-shadow">
+            <div className="text-xs font-medium text-gray-500">전체 사용자</div>
+            <div className="text-3xl font-bold tracking-tight text-blue-600 mt-1 tabular-nums">{users.length}</div>
           </div>
-          <div className="bg-white rounded-lg shadow p-6">
-            <div className="text-sm text-gray-500">요금제</div>
-            <div className="text-3xl font-bold text-purple-600">{plans.length}개</div>
+          <div className="bg-white rounded-2xl border border-gray-200/70 shadow-sm p-5 hover:shadow-md transition-shadow">
+            <div className="text-xs font-medium text-gray-500">요금제</div>
+            <div className="text-3xl font-bold tracking-tight text-violet-600 mt-1 tabular-nums">{plans.length}<span className="text-lg text-gray-400 font-semibold">개</span></div>
           </div>
         </div>
 
         {/* 드롭다운 그룹 메뉴 */}
-        <div className="bg-white rounded-lg shadow mb-6">
-          <div className="border-b px-4 py-2 flex items-center gap-1">
+        <div ref={menuRef} className="bg-white rounded-2xl border border-gray-200/70 shadow-sm mb-6">
+          <div className="px-3 py-2 flex items-center gap-1 flex-wrap">
             {[
               {
                 label: '고객 관리', color: 'blue',
@@ -2516,7 +2531,6 @@ const handleApproveRequest = async (id: string) => {
                 <div key={group.label} className="relative">
                   <button
                     onClick={() => setOpenMenu(isOpen ? null : group.label)}
-                    onBlur={() => setTimeout(() => setOpenMenu(null), 150)}
                     className={`px-4 py-2.5 text-sm font-medium rounded-lg transition-all flex items-center gap-1.5 ${
                       isGroupActive ? `${c.active} ${c.bg}` : `text-gray-500 ${c.hover} hover:bg-gray-50`
                     }`}
@@ -2560,7 +2574,7 @@ const handleApproveRequest = async (id: string) => {
         <style>{`@keyframes fadeIn { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: translateY(0); } }`}</style>
         {/* 고객사 관리 탭 */}
         {activeTab === 'companies' && (
-          <div className="bg-white rounded-lg shadow">
+          <div className="bg-white rounded-2xl border border-gray-200/70 shadow-sm">
             <div className="px-6 py-4 border-b flex justify-between items-center">
               <h2 className="text-lg font-semibold">고객사 목록</h2>
               <button
@@ -2685,7 +2699,7 @@ const handleApproveRequest = async (id: string) => {
 
         {/* 사용자 관리 탭 */}
         {activeTab === 'users' && (
-          <div className="bg-white rounded-lg shadow">
+          <div className="bg-white rounded-2xl border border-gray-200/70 shadow-sm">
             <div className="px-6 py-4 border-b flex justify-between items-center">
               <h2 className="text-lg font-semibold">사용자 목록</h2>
               <button
@@ -2899,7 +2913,7 @@ const handleApproveRequest = async (id: string) => {
 
         {/* 예약 관리 탭 */}
         {activeTab === 'scheduled' && (
-          <div className="bg-white rounded-lg shadow">
+          <div className="bg-white rounded-2xl border border-gray-200/70 shadow-sm">
             <div className="px-6 py-4 border-b">
               <h2 className="text-lg font-semibold">예약 캠페인 관리</h2>
             </div>
@@ -3026,7 +3040,7 @@ const handleApproveRequest = async (id: string) => {
 
         {/* 발신번호 관리 탭 */}
         {activeTab === 'callbacks' && (
-          <div className="bg-white rounded-lg shadow">
+          <div className="bg-white rounded-2xl border border-gray-200/70 shadow-sm">
             {/* 서브탭 */}
             <div className="border-b flex">
               <button
@@ -3463,7 +3477,7 @@ const handleApproveRequest = async (id: string) => {
 
         {/* 요금제 관리 탭 */}
         {activeTab === 'plans' && (
-          <div className="bg-white rounded-lg shadow">
+          <div className="bg-white rounded-2xl border border-gray-200/70 shadow-sm">
             <div className="px-6 py-4 border-b flex justify-between items-center">
               <h2 className="text-lg font-semibold">요금제 관리</h2>
               <button
@@ -3480,7 +3494,6 @@ const handleApproveRequest = async (id: string) => {
                   <tr>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 whitespace-nowrap">코드</th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 whitespace-nowrap">요금제명</th>
-                    <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 whitespace-nowrap">최대 고객수</th>
                     <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 whitespace-nowrap">월 요금</th>
                     <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 whitespace-nowrap">사용 회사</th>
                     <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 whitespace-nowrap">상태</th>
@@ -3490,7 +3503,7 @@ const handleApproveRequest = async (id: string) => {
                 <tbody className="divide-y divide-gray-200">
                   {planList.length === 0 ? (
                     <tr>
-                      <td colSpan={7} className="px-6 py-12 text-center text-gray-500">
+                      <td colSpan={6} className="px-6 py-12 text-center text-gray-500">
                         등록된 요금제가 없습니다.
                       </td>
                     </tr>
@@ -3501,9 +3514,6 @@ const handleApproveRequest = async (id: string) => {
                       <tr key={plan.id} className="hover:bg-gray-50">
                         <td className="px-4 py-3 font-medium text-gray-900 whitespace-nowrap">{plan.plan_code}</td>
                         <td className="px-4 py-3 text-gray-900">{plan.plan_name}</td>
-                        <td className="px-4 py-3 text-center text-gray-600 whitespace-nowrap">
-                          {plan.max_customers.toLocaleString()}명
-                        </td>
                         <td className="px-4 py-3 text-center text-gray-900 whitespace-nowrap font-medium">
                           {Number(plan.monthly_price).toLocaleString()}원
                         </td>
@@ -3562,7 +3572,7 @@ const handleApproveRequest = async (id: string) => {
 
         {/* 플랜 신청 관리 탭 */}
         {activeTab === 'requests' && (
-          <div className="bg-white rounded-lg shadow">
+          <div className="bg-white rounded-2xl border border-gray-200/70 shadow-sm">
             <div className="px-6 py-4 border-b">
               <h2 className="text-lg font-semibold">플랜 변경 신청 목록</h2>
             </div>
@@ -3771,7 +3781,7 @@ const handleApproveRequest = async (id: string) => {
             </div>
 
             {/* 크레딧 사용 이력 — 전체 회사 */}
-            <div className="bg-white rounded-lg shadow">
+            <div className="bg-white rounded-2xl border border-gray-200/70 shadow-sm">
               <div className="px-6 py-4 border-b flex flex-wrap justify-between items-center gap-3">
                 <h2 className="text-lg font-semibold">크레딧 사용 이력</h2>
                 <div className="flex items-center gap-2">
@@ -3871,7 +3881,7 @@ const handleApproveRequest = async (id: string) => {
             )}
 
             {/* 전체 잔액 변동 이력 */}
-            <div className="bg-white rounded-lg shadow">
+            <div className="bg-white rounded-2xl border border-gray-200/70 shadow-sm">
               <div className="px-6 py-4 border-b">
                 <div className="flex flex-wrap justify-between items-center gap-3 mb-3">
                   <h2 className="text-lg font-semibold">💰 잔액 변동 이력</h2>
@@ -4053,7 +4063,7 @@ const handleApproveRequest = async (id: string) => {
 
         {/* 전체 캠페인 탭 */}
         {activeTab === 'allCampaigns' && (
-          <div className="bg-white rounded-lg shadow">
+          <div className="bg-white rounded-2xl border border-gray-200/70 shadow-sm">
             <div className="px-6 py-4 border-b">
               <div className="flex flex-wrap gap-3 items-center">
                 <select value={allCampaignsCompany} onChange={(e) => setAllCampaignsCompany(e.target.value)}
@@ -4192,7 +4202,7 @@ const handleApproveRequest = async (id: string) => {
               // D183 fix: 성공률 = 전송 대비 성공 비율 (대기 영역 포함 분모) — 사용자 관점 정합
               const rate = sent > 0 ? (success / sent * 100).toFixed(1) : '-';
               return (
-                <div className="bg-white rounded-lg shadow px-6 py-3 flex items-center gap-8 text-sm">
+                <div className="bg-white rounded-2xl border border-gray-200/70 shadow-sm px-6 py-3 flex items-center gap-8 text-sm">
                   <span className="text-gray-500">조회 기간 합계</span>
                   <span className="font-semibold text-blue-600">전송 {sent.toLocaleString()}</span>
                   <span className="font-semibold text-green-600">성공 {success.toLocaleString()}</span>
@@ -4204,7 +4214,7 @@ const handleApproveRequest = async (id: string) => {
             })()}
            
             {/* 필터 영역 */}
-            <div className="bg-white rounded-lg shadow px-6 py-4 flex flex-wrap gap-3 items-center">
+            <div className="bg-white rounded-2xl border border-gray-200/70 shadow-sm px-6 py-4 flex flex-wrap gap-3 items-center">
               <div className="flex bg-gray-100 rounded-lg p-1">
                 {([['daily', '일별'], ['monthly', '월별']] as const).map(([key, label]) => (
                   <button
@@ -4279,7 +4289,7 @@ const handleApproveRequest = async (id: string) => {
             </div>
 
             {/* 테이블 */}
-            <div className="bg-white rounded-lg shadow">
+            <div className="bg-white rounded-2xl border border-gray-200/70 shadow-sm">
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead className="bg-gray-50">
@@ -4358,7 +4368,7 @@ const handleApproveRequest = async (id: string) => {
         <AlimtalkSendersSection />
 
         {/* 템플릿 관리 */}
-        <div className="bg-white rounded-lg shadow">
+        <div className="bg-white rounded-2xl border border-gray-200/70 shadow-sm">
           <div className="px-6 py-4 border-b flex justify-between items-center">
             <div>
               <h2 className="text-lg font-semibold">💬 템플릿 관리</h2>
@@ -4714,7 +4724,7 @@ const handleApproveRequest = async (id: string) => {
       {/* 고객사 추가 모달 */}
       {showCompanyModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-lg shadow-xl w-full max-w-md">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md">
             <div className="px-6 py-4 border-b">
               <h3 className="text-lg font-semibold">새 고객사 추가</h3>
             </div>
@@ -4850,7 +4860,7 @@ const handleApproveRequest = async (id: string) => {
       {/* 사용자 추가 모달 */}
       {showUserModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-lg shadow-xl w-full max-w-md max-h-[90vh] overflow-y-auto">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md max-h-[90vh] overflow-y-auto">
             <div className="px-6 py-4 border-b">
               <h3 className="text-lg font-semibold">새 사용자 추가</h3>
             </div>
@@ -5300,7 +5310,7 @@ const handleApproveRequest = async (id: string) => {
       {/* 고객사 수정 모달 */}
       {showEditCompanyModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-          <div className={`bg-white rounded-lg shadow-xl w-full ${editCompanyTab === 'customers' || editCompanyTab === 'cards' ? 'max-w-4xl' : 'max-w-2xl'} max-h-[90vh] flex flex-col transition-all`}>
+          <div className={`bg-white rounded-2xl shadow-2xl w-full ${editCompanyTab === 'customers' || editCompanyTab === 'cards' ? 'max-w-4xl' : 'max-w-2xl'} max-h-[90vh] flex flex-col transition-all`}>
             <div className="px-6 py-4 border-b">
               <h3 className="text-lg font-semibold">고객사 상세 설정</h3>
               <p className="text-xs text-gray-500 mt-1">{editCompany.companyName}</p>
@@ -7117,17 +7127,6 @@ const handleApproveRequest = async (id: string) => {
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">최대 고객수 *</label>
-                <input
-                  type="number"
-                  value={newPlan.maxCustomers}
-                  onChange={(e) => setNewPlan({ ...newPlan, maxCustomers: Number(e.target.value) })}
-                  className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-green-500 outline-none"
-                  min="0"
-                  required
-                />
-              </div>
-              <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">월 요금 (원) *</label>
                 <input
                   type="number"
@@ -7185,17 +7184,6 @@ const handleApproveRequest = async (id: string) => {
                   value={editingPlan.plan_name}
                   onChange={(e) => setEditingPlan({ ...editingPlan, plan_name: e.target.value })}
                   className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
-                  required
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">최대 고객수 *</label>
-                <input
-                  type="number"
-                  value={editingPlan.max_customers}
-                  onChange={(e) => setEditingPlan({ ...editingPlan, max_customers: Number(e.target.value) })}
-                  className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
-                  min="0"
                   required
                 />
               </div>
@@ -7589,7 +7577,7 @@ const handleApproveRequest = async (id: string) => {
         </div>
       )}
       {activeTab === 'billing' && (
-        <div className="bg-white rounded-lg shadow">
+        <div className="bg-white rounded-2xl border border-gray-200/70 shadow-sm">
           {/* 빌링 토스트 */}
           {billingToast && (
             <div className={`fixed top-6 right-6 z-[70] px-5 py-3 rounded-xl shadow-lg text-white text-sm font-medium transition-all ${
@@ -8178,7 +8166,7 @@ const handleApproveRequest = async (id: string) => {
       {activeTab === 'agentDeploy' && <AgentDeployWizard />}
       {/* Sync 모니터링 탭 */}
       {activeTab === 'syncAgents' && (
-        <div className="bg-white rounded-lg shadow">
+        <div className="bg-white rounded-2xl border border-gray-200/70 shadow-sm">
           <div className="px-6 py-4 border-b flex justify-between items-center">
             <h2 className="text-lg font-semibold">Sync Agent 모니터링</h2>
             <button
@@ -8295,7 +8283,7 @@ const handleApproveRequest = async (id: string) => {
 
       {/* 감사 로그 탭 */}
       {activeTab === 'auditLogs' && auditAccessAllowed && (
-        <div className="bg-white rounded-lg shadow">
+        <div className="bg-white rounded-2xl border border-gray-200/70 shadow-sm">
           <div className="px-6 py-4 border-b">
             <h2 className="text-lg font-semibold">📋 감사 로그</h2>
             <p className="text-xs text-gray-500 mt-1">로그인, 삭제, 설정 변경 등 주요 활동 기록</p>
