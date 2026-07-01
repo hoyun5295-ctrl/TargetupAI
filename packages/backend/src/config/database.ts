@@ -16,12 +16,23 @@ export const pool = new Pool({
   connectionTimeoutMillis: Number(process.env.DB_POOL_CONNECTION_TIMEOUT) || 5000,
 });
 
-// PostgreSQL 연결 확인
-pool.query("SELECT 1").then(() => {
-  console.log('✅ PostgreSQL 연결됨');
-}).catch(err => {
-  console.error('❌ PostgreSQL 연결 실패:', err.message);
-});
+// PostgreSQL 연결 확인 — 부팅 순간 연결 경합으로 첫 시도가 타임아웃할 수 있어, 몇 회 재시도 후에만 실패로 기록(부팅 오탐 ❌ 방지). 앱은 그 사이 지연연결로 정상 동작.
+void (async () => {
+  for (let attempt = 1; attempt <= 5; attempt++) {
+    try {
+      await pool.query('SELECT 1');
+      console.log('✅ PostgreSQL 연결됨');
+      return;
+    } catch (err: any) {
+      if (attempt === 5) {
+        console.error(`❌ PostgreSQL 연결 실패 (${attempt}회 재시도 후):`, err?.message);
+        return;
+      }
+      console.warn(`[PostgreSQL] 연결 재시도 ${attempt}/5 — ${err?.message}`);
+      await new Promise((r) => setTimeout(r, 2000));
+    }
+  }
+})();
 
 pool.on('error', (err) => {
   console.error('❌ PostgreSQL 에러:', err);
