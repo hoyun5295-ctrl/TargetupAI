@@ -6,6 +6,7 @@ import { Request, Response, Router } from 'express';
 import fs from 'fs';
 import path from 'path';
 import { query } from '../config/database';
+import { ensureSystemSyncUser } from '../utils/system-sync-user';
 import { TIMEOUTS, RATE_LIMITS, BATCH_SIZES } from '../config/defaults';
 import { normalizePhone, normalizeRegion, normalizeDate, normalizeCustomFieldValue } from '../utils/normalize';
 import {
@@ -234,36 +235,12 @@ async function getSyncConfigForAgent(companyId: string): Promise<{
  */
 async function reconcileSyncUnsubscribes(companyId: string, companyName?: string): Promise<void> {
   try {
-    // 1. 시스템 user 조회 (없으면 즉시 생성 — 마이그레이션 누락 방어)
-    let sysUserRes = await query(
-      `SELECT id FROM users WHERE company_id = $1 AND is_system = true LIMIT 1`,
-      [companyId]
-    );
-    let systemUserId: string | null = sysUserRes.rows[0]?.id || null;
-    if (!systemUserId) {
-      try {
-        const created = await query(
-          `INSERT INTO users (id, company_id, login_id, user_type, name, is_active, is_system, password_hash, status)
-           VALUES (gen_random_uuid(), $1, 'system_sync_' || $1::text, 'system', '싱크에이전트 (시스템)', true, true, '', 'active')
-           ON CONFLICT DO NOTHING
-           RETURNING id`,
-          [companyId]
-        );
-        systemUserId = created.rows[0]?.id || null;
-        if (!systemUserId) {
-          // 경합으로 이미 생성된 경우 재조회
-          const re = await query(
-            `SELECT id FROM users WHERE company_id = $1 AND is_system = true LIMIT 1`,
-            [companyId]
-          );
-          systemUserId = re.rows[0]?.id || null;
-        }
-        if (systemUserId) {
-          console.log(`[Sync] 시스템 user 자동 생성/조회 (company: ${companyName}, userId: ${systemUserId})`);
-        }
-      } catch (sysErr) {
-        console.error('[Sync] 시스템 user 생성 실패 (is_system 컬럼 미적용 가능성):', sysErr);
-      }
+    // 1. 시스템 user 조회/생성 — CT (42P08 타입 고정: $1::uuid + $2::text)
+    let systemUserId: string | null = null;
+    try {
+      systemUserId = await ensureSystemSyncUser(companyId);
+    } catch (sysErr) {
+      console.error('[Sync] 시스템 user 조회/생성 실패:', sysErr);
     }
 
     // 2. 시스템 user에게 INSERT (source='sync')

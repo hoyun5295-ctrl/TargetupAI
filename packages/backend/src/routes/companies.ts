@@ -2,6 +2,7 @@ import crypto from 'crypto';
 import { Request, Response, Router } from 'express';
 import nodemailer from 'nodemailer';
 import { query } from '../config/database';
+import { ensureSystemSyncUser } from '../utils/system-sync-user';
 import { authenticate, requireSuperAdmin, requireUuidId } from '../middlewares/auth';
 import { getCardDef, isDynamicCardId, parseDynamicCardId, type ParsedDynamicCardId } from '../utils/dashboard-card-pool';
 import { getStoreScope } from '../utils/store-scope';
@@ -1461,12 +1462,7 @@ router.post('/', requireSuperAdmin, async (req: Request, res: Response) => {
     // ===== SyncAgent v1.5.0: 시스템 가상 user + customer_code 시퀀스 자동 생성 =====
     // 설계서 §9-3 — 트리거 대신 애플리케이션 로직 선택(추천 B안).
     try {
-      await query(
-        `INSERT INTO users (id, company_id, login_id, user_type, name, is_active, is_system, password_hash, status)
-         VALUES (gen_random_uuid(), $1, 'system_sync_' || $1::text, 'system', '싱크에이전트 (시스템)', true, true, '', 'active')
-         ON CONFLICT DO NOTHING`,
-        [newCompanyId]
-      );
+      await ensureSystemSyncUser(newCompanyId);
     } catch (sysErr) {
       console.error('[Company Create] 시스템 user 생성 실패:', sysErr);
     }

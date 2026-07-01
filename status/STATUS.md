@@ -107,6 +107,11 @@
 
 ---
 
+### 🟢 2026-07-01 (이어서 2) — 예측 일일차감 eligibility 요금제기반 재정의 + 슈퍼관리자 화이트 모던화 + 이메일 placeholder 발송 UX (★전부 배포·검증완료)
+> **예측 일일차감(돈)**: eligibility = plan-guard `ACTIVE_PAID_PLAN_WHERE`(plan_code≠FREE + subscription_status expired/suspended 아님, TRIAL 포함) + EXISTS customers. predictive_enabled 토글 폐지(무시). `runPredictiveBatchNow`(시간가드 없이 멱등) 분리 → 매일 9시 스케줄 + 슈퍼관리자 수동 트리거 `POST /api/admin/predictive/run-now`(크레딧 탭 버튼) 공유. 멱등키 predictive-daily:회사:YYYYMMDD. PricingPage 하단 DB규모별 차감표(dailyDbAnalysisCredits). 현재 대상 5개사(BASIC 3·ENT 2).
+> **슈퍼관리자 모던화**: bg-slate-50 + sticky 헤더 + 카드 rounded-2xl 토큰 일괄 통일(화이트 유지, 다크 미도입). 드롭다운 클릭토글+onBlur 경합 제거 → menuRef 바깥클릭·ESC(단일 클릭 고정). 요금제 관리 max_customers 컬럼·입력 제거(state 보존=payload 회귀0). 크레딧 탭 3개 가로 패널 → 3칸 타일+클릭 모달. 미사용 기능 정리=다음.
+> **이메일 placeholder UX(발송)**: `[혜택을 직접 입력해주세요]` 실존 시 발송 차단(가드 정상, 오탐 아님). email-ai.ts `findUneditedPlaceholder`(위치·샘플) → 차단 메시지에 자리+텍스트 표기. email-channel.ts mapRow `hasPlaceholder` → 초안 카드 "직접 입력 필요" 배지 + 발송 클릭 시 편집기 유도. stuck sending은 email-send-sweeper 30분 복구로 기처리. 상세 [[project_2026_0701_predictive_eligibility_superadmin_email]].
+
 ### 🟢 2026-07-01 (이어서) — 비-문자 개인화+타겟추출 전체(이메일·인앱·DM) + DM 수신자별 토큰 발송/추적/편집기 + 발행 주소복사 (★전부 배포완료)
 > **공용(P1)**: 순수 CT `channel-eligibility.ts`(채널별 발송 자격 WHERE 미러)+test7 · CT-97 `convertNaturalLanguageToFilter` 코어 분리 · `POST /api/targets/extract`(matchCount+channelEligibleCount+samples·0건 no-relax·503 안전망) · 공용 `TargetExtractModal`(channel prop).
 > **이메일(P2)**: RecipientsModal [AI 정밀 타겟] 탭 → filter 발송(target type='filter' · `resolveCustomerRecipientsByFilter` 즉시·예약 sweeper). ★email 발송 자격=`RECIPIENT_SAFETY_WHERE`(email_opt_in IS DISTINCT FROM false·is_active 미적용).
