@@ -443,18 +443,28 @@ router.post('/agents/:agentId/command', authenticate, requireSuperAdmin, async (
 // ----------------------------------------------------------------------------
 router.post('/releases', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
   try {
-    const { version, checksum, force_update, release_notes } = req.body;
+    const { version, checksum, force_update, release_notes, tier } = req.body;
     if (!version || typeof version !== 'string' || !/^\d+\.\d+\.\d+$/.test(version)) {
       return res.status(400).json({ success: false, error: 'version은 x.y.z 형식이어야 합니다.' });
     }
-    // 최신 1건만 active — GET /version이 is_active=true 최신을 조회하므로 기존 활성 해제
-    await query(`UPDATE sync_releases SET is_active = false WHERE is_active = true`);
+    // tier 검증 — buildTier 5종만 허용(비우면 전역, 하위호환). 잘못된 티어 = 오배포 위험이라 차단.
+    const VALID_TIERS = ['win-legacy', 'win-mid', 'win-modern', 'linux-legacy', 'linux-modern'];
+    if (tier && !VALID_TIERS.includes(tier)) {
+      return res.status(400).json({ success: false, error: `tier는 ${VALID_TIERS.join(' | ')} 중 하나이거나 비워야 합니다.` });
+    }
+    // ★ 2026-07-01: 같은 티어의 기존 활성만 해제 (다른 티어 릴리스는 유지 — 티어별 독립).
+    //   GET /version이 티어 매칭으로 조회하므로, 티어마다 활성 릴리스가 따로 존재해야 한다.
+    if (tier) {
+      await query(`UPDATE sync_releases SET is_active = false WHERE is_active = true AND tier = $1`, [tier]);
+    } else {
+      await query(`UPDATE sync_releases SET is_active = false WHERE is_active = true AND tier IS NULL`);
+    }
     // download_url = 서버 서빙 라우트(에이전트 baseURL 기준 상대경로). released_at/created_at은 default now().
     const { rows } = await query(
-      `INSERT INTO sync_releases (version, download_url, checksum, release_notes, force_update, is_active)
-       VALUES ($1, $2, $3, $4, $5, true)
-       RETURNING id, version, download_url, force_update, is_active, released_at`,
-      [version, `/api/sync/download/${version}`, checksum || null, release_notes || null, force_update ?? true]
+      `INSERT INTO sync_releases (version, download_url, checksum, release_notes, force_update, is_active, tier)
+       VALUES ($1, $2, $3, $4, $5, true, $6)
+       RETURNING id, version, tier, download_url, force_update, is_active, released_at`,
+      [version, `/api/sync/download/${version}`, checksum || null, release_notes || null, force_update ?? true, tier || null]
     );
     res.json({ success: true, release: rows[0] });
   } catch (error) {

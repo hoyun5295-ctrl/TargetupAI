@@ -220,6 +220,35 @@ export function driverOfDb(dbId: string): DriverId | null {
 }
 
 /**
+ * ★ 2026-07-01: Agent가 보고한 os_info(`os.platform()+' '+os.release()`, 예: "win32 6.1.7601")로
+ *   buildTier를 판별한다. 자동 업데이트 티어 매칭용 — sync_releases.tier와 대조해 각 에이전트가
+ *   자기 티어 exe만 받게 한다(다른 티어 exe 오배포 = 실행 실패 사고 차단).
+ *   판별 불가/미지원 OS는 null → 자동 업데이트 대상에서 제외(fail-closed 안전).
+ */
+export function resolveBuildTierFromOsInfo(osInfo: string | null | undefined): string | null {
+  const s = (osInfo || '').toLowerCase().trim();
+  if (!s) return null;
+  // Windows: "win32 6.1.7601" (platform + release)
+  if (s.startsWith('win32') || s.includes('windows')) {
+    const m = s.match(/(\d+)\.(\d+)/);
+    if (!m) return null;
+    const major = parseInt(m[1], 10);
+    const minor = parseInt(m[2], 10);
+    if (major >= 10) return 'win-modern';               // 10/11 · Server 2016+
+    if (major === 6 && minor >= 2) return 'win-mid';    // 8/8.1 · Server 2012 R2
+    if (major === 6 && minor <= 1) return 'win-legacy'; // 7 · Server 2008 R2 (isae)
+    return null;                                         // 6.0 이하 = 미지원
+  }
+  // Linux: "linux 5.4.0-..." (kernel). glibc 세분 불가 → kernel major로 보수 판별.
+  if (s.startsWith('linux')) {
+    const m = s.match(/(\d+)\.(\d+)/);
+    const major = m ? parseInt(m[1], 10) : 0;
+    return major >= 5 ? 'linux-modern' : 'linux-legacy';
+  }
+  return null;
+}
+
+/**
  * Oracle 연결 모드 + Instant Client + 프로파일 산출.
  * - node12 티어: oracledb 5.x = 항상 thick(thin 미지원) → IC 필수.
  * - node16/20 티어: oracledb 6.x = 12.1+ thin / 10g·11g는 thick + IC.

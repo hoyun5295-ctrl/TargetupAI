@@ -18,6 +18,7 @@ import {
 import { callAiMapping, AiMappingQuotaExceeded, AiMappingUnavailable, SupportedDbType, MappingTarget } from '../utils/ai-mapping';
 import { createCustomerUpsertBuilder } from '../utils/customer-upsert';
 import { registerBulkCompanyUserUnsubscribes } from '../utils/unsubscribe-helper';
+import { resolveBuildTierFromOsInfo } from '../utils/agent-build-tiers';
 
 const router = Router();
 
@@ -1254,21 +1255,26 @@ router.get('/version', async (req: SyncAuthRequest, res: Response) => {
       });
     }
 
-    // Agent의 agent_version 업데이트
+    // Agent의 agent_version 업데이트 + os_info로 buildTier 판별 (자동 업데이트 티어 매칭용)
+    let agentTier: string | null = null;
     if (agentId) {
-      await query(
-        'UPDATE sync_agents SET agent_version = $1, updated_at = NOW() WHERE id = $2 AND company_id = $3',
+      const upd = await query(
+        'UPDATE sync_agents SET agent_version = $1, updated_at = NOW() WHERE id = $2 AND company_id = $3 RETURNING os_info',
         [currentVersion, agentId, companyId]
       );
+      if (upd.rows.length) agentTier = resolveBuildTierFromOsInfo(upd.rows[0].os_info);
     }
 
-    // 최신 활성 릴리스 조회
+    // ★ 2026-07-01: 티어 매칭 릴리스만 조회 — 에이전트 티어(agentTier)와 일치하거나 tier=NULL(전역)만.
+    //   다른 OS 티어 에이전트가 남의 티어 exe를 받아 실행 실패하는 오배포 차단(fail-closed).
+    //   정확 티어 매칭을 전역(NULL)보다 우선.
     const result = await query(
-      `SELECT version, download_url, checksum, release_notes, force_update, released_at
+      `SELECT version, download_url, checksum, release_notes, force_update, released_at, tier
        FROM sync_releases
-       WHERE is_active = true
-       ORDER BY released_at DESC
-       LIMIT 1`
+       WHERE is_active = true AND (tier = $1 OR tier IS NULL)
+       ORDER BY (CASE WHEN tier = $1 THEN 0 ELSE 1 END), released_at DESC
+       LIMIT 1`,
+      [agentTier]
     );
 
     // 릴리스가 없으면 업데이트 없음 응답
@@ -1305,6 +1311,20 @@ router.get('/version', async (req: SyncAuthRequest, res: Response) => {
       },
     });
   } catch (error) {
+    // ★ 2026-07-01 db_alter_safety_net: tier 컬럼 ALTER 미실행 시 — 500 대신 "업데이트 없음"(안전).
+    //   에이전트는 이 응답을 무시하고 계속 동작, 운영자가 ALTER 하면 즉시 정상화.
+    const msg = (error as any)?.message || '';
+    if (msg.includes('column') && msg.includes('does not exist')) {
+      console.warn('[Sync Version] sync_releases.tier 컬럼 미실행 — ALTER 필요. 임시로 업데이트 없음 응답.');
+      return res.json({
+        success: true,
+        data: {
+          latestVersion: (req.query.current_version as string) || '',
+          currentVersion: (req.query.current_version as string) || '',
+          updateAvailable: false,
+        },
+      });
+    }
     console.error('[Sync Version Error]', error);
     return res.status(500).json({
       success: false,
