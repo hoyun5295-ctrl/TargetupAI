@@ -417,7 +417,22 @@ export default function EmailCampaignsPage() {
     });
   };
 
+  // 편집기 열기 — 비주얼 섹션 있으면 비주얼 에디터, 아니면 HTML 폼 (수정 버튼·placeholder 안내 공용)
+  const openEditor = (c: EmailCampaign) => {
+    if (c.sections && c.sections.length) {
+      setVisualEditor({ sections: c.sections as Section[], name: c.name, subject: c.subject, isAd: c.isAd, aiGenerated: c.aiGenerated, campaignId: c.id });
+    } else {
+      setEditing(c);
+    }
+  };
+
   const openRecipientsModal = (c: EmailCampaign) => {
+    // 미입력 자리([…직접 입력…]) 잔존 = 발송 차단 (AI 임의 혜택 룰). 편집기로 유도해 채우게 한다.
+    if (c.hasPlaceholder) {
+      showToast('직접 입력이 필요한 자리가 남아 있습니다. 편집에서 채운 뒤 발송해주세요.', 'error');
+      openEditor(c);
+      return;
+    }
     setRecipientsModal({ campaign: c });
   };
 
@@ -780,6 +795,7 @@ export default function EmailCampaignsPage() {
                       <span className="text-base font-bold text-white">{c.name}</span>
                       <StatusBadge status={c.status} />
                       {c.isAd && <span className="text-[10px] bg-amber-500/20 text-amber-300 px-1.5 py-0.5 rounded-full font-medium">광고성</span>}
+                      {c.status === 'draft' && c.hasPlaceholder && <span className="text-[10px] bg-orange-500/25 text-orange-200 px-1.5 py-0.5 rounded-full font-medium">직접 입력 필요</span>}
                     </div>
                     <div className="text-xs text-white/70 mb-2">제목: {c.subject}</div>
                     <div className="flex flex-wrap gap-2 text-[11px] text-white/50">
@@ -835,9 +851,7 @@ export default function EmailCampaignsPage() {
                       </>
                     )}
                     <button
-                      onClick={() => (c.sections && c.sections.length
-                        ? setVisualEditor({ sections: c.sections as Section[], name: c.name, subject: c.subject, isAd: c.isAd, aiGenerated: c.aiGenerated, campaignId: c.id })
-                        : setEditing(c))}
+                      onClick={() => openEditor(c)}
                       className="text-[11px] text-indigo-300 hover:bg-indigo-500/10 px-2.5 py-1 rounded flex items-center gap-1"
                     >
                       <Edit2 className="w-3 h-3" /> 수정

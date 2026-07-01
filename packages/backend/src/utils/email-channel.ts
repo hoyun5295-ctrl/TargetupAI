@@ -26,6 +26,7 @@ import { renderEmailSections } from './email/email-section-renderer';
 import { resolveEmailSectionsForCustomer, renderEmailText } from './email/email-personalization';
 import { getCompanyBrandKit } from './dm/dm-brand-kit';
 import { buildCustomerFilter } from './customer-filter';
+import { hasUneditedPlaceholder } from './email-ai';
 import type { Section } from './dm/dm-section-registry';
 
 // ════════════════════════════════════════════════════════════════════
@@ -47,6 +48,7 @@ export interface EmailCampaign {
   subject: string;
   htmlBody: string;
   textBody: string | null;
+  hasPlaceholder: boolean;  // AI 미입력 자리([…직접/입력해/작성해…]) 잔존 여부 — 목록 배지·발송 전 인지
   fromName: string;
   fromEmail: string;
   isAd: boolean;
@@ -739,6 +741,7 @@ function mapRow(row: any): EmailCampaign {
     subject: row.subject,
     htmlBody: row.html_body,
     textBody: row.text_body,
+    hasPlaceholder: hasUneditedPlaceholder(row.subject, row.html_body, row.text_body),
     fromName: row.from_name,
     fromEmail: row.from_email,
     isAd: !!row.is_ad,

@@ -71,7 +71,7 @@ import {
   buildEmailAccountInsight,
   recommendSendTime,
   binOpenHours,
-  hasUneditedPlaceholder,
+  findUneditedPlaceholder,
   SEND_TIME_MIN_SAMPLE,
   EMAIL_SCENARIO_PRESETS,
   type EmailScenarioKey,
@@ -533,11 +533,12 @@ router.post('/campaigns/:id/send', async (req: Request, res: Response) => {
       return res.status(409).json({ success: false, error: '이미 발송이 진행 중입니다.' });
     }
 
-    // placeholder 잔존(미입력 자리) = 발송 차단 (AI 임의 혜택 영구 룰)
-    if (hasUneditedPlaceholder(campaign.subject, campaign.htmlBody, campaign.textBody)) {
+    // placeholder 잔존(미입력 자리) = 발송 차단 (AI 임의 혜택 영구 룰). 위치·샘플을 함께 안내해 즉시 수정 가능하게.
+    const ph = findUneditedPlaceholder(campaign.subject, campaign.htmlBody, campaign.textBody);
+    if (ph) {
       return res.status(400).json({
         success: false,
-        error: '직접 입력이 필요한 자리가 남아 있습니다. 모든 [직접 입력] 항목을 채운 후 발송해주세요.',
+        error: `${ph.where}에 직접 입력이 필요한 자리 "${ph.sample}"가 남아 있습니다. 편집에서 그 자리를 채운 뒤 발송해주세요.`,
         code: 'UNEDITED_PLACEHOLDER',
       });
     }

@@ -9,6 +9,7 @@ export interface EmailCampaign {
   subject: string;
   htmlBody: string;
   textBody: string | null;
+  hasPlaceholder?: boolean;  // 백엔드 계산 — AI 미입력 자리([…직접/입력해/작성해…]) 잔존 여부 (발송 전 인지 배지)
   fromName: string;
   fromEmail: string;
   isAd: boolean;

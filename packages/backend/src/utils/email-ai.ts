@@ -104,6 +104,25 @@ export function hasUneditedPlaceholder(...texts: Array<string | null | undefined
   return texts.some((t) => !!t && PLACEHOLDER_PATTERN.test(t));
 }
 
+/** placeholder 위치·샘플 검출 — 발송 차단 메시지·목록 배지 공용(같은 PLACEHOLDER_PATTERN 단일 소스). 없으면 null. */
+export function findUneditedPlaceholder(
+  subject?: string | null,
+  htmlBody?: string | null,
+  textBody?: string | null,
+): { where: '제목' | '본문' | '텍스트'; sample: string } | null {
+  const fields: Array<['제목' | '본문' | '텍스트', string | null | undefined]> = [
+    ['제목', subject],
+    ['본문', htmlBody],
+    ['텍스트', textBody],
+  ];
+  for (const [where, t] of fields) {
+    if (!t) continue;
+    const m = t.match(PLACEHOLDER_PATTERN);
+    if (m) return { where, sample: m[0] };
+  }
+  return null;
+}
+
 /** 제목 길이 점검 — 모바일 수신함 잘림 기준 40자 */
 export const SUBJECT_MOBILE_LIMIT = 40;
 
