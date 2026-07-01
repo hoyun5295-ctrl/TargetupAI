@@ -1,7 +1,112 @@
 # isae(이새에프앤씨) 싱크에이전트 설치 — 2026-06-30 작업기록 + 내일 마무리 지시서
 
-> 이 문서 하나로 내일 작업을 빈틈없이 끝내기 위한 인수인계 문서. **내일 작업 전 처음부터 끝까지 정독.**
+> 이 문서 하나로 내일 작업을 빈틈없이 끝내기 위한 인수인계 문서. **작업 전 처음부터 끝까지 정독.**
 > 같이 볼 것: `status/SYNC-AGENT-REMOTE-INSTALL.md` (win-legacy×Oracle 원격설치 일반 가이드)
+
+---
+
+## ★ 최종 마무리 — 원격 1회 완결 (2026-07-01 갱신, 이 섹션만 보면 됨)
+
+### ★★ Harold 확정 방침 (2026-07-01 밤 명시 — 이대로만 진행)
+**구매 full sync가 다 들어올 때까지 기다린다(중간에 절대 멈추지 않음) → 구매 완료 후 전체 데이터 삭제 → 처음부터 재동기화 → custom 검증.**
+- 현재(2026-07-01): 고객 0 / 구매 1,103,233 — 구매 full sync 도는 중(계속 증가). 고객은 이미 비워진 상태.
+- **구매 완료 판단** = 아래 건수 SQL을 몇 분 간격으로 재실행 → 구매수 증가가 멈추면(두 번 연속 같은 값) full sync 완료.
+- 완료 확인 전까지 taskkill·삭제·재설정 전부 금지(도는 중 건드리면 또 racing). **완료 후에만** 삭제 SQL 실행.
+- 삭제·재동기화 명령은 Harold님이 직접 내림. 아래 2)~3) 순서를 그때 그대로 사용.
+
+**구매 완료 판단 SQL (몇 분 간격 재실행):**
+```sql
+SELECT COUNT(*) FROM purchases WHERE company_id='682956b7-37a3-46b5-9868-b63011bda47b';
+```
+(두 번 연속 같은 값 = full sync 끝. 그 후에만 아래 2) 전체삭제로 진행.)
+
+### 현재 상태 (2026-07-01 저녁 — 오늘 여기서 멈춤)
+- **고객 표준 필드 정상** — 전화번호·이름·등급·마일리지·성별·생일·주소·매장·수신동의. **문자 마케팅은 지금 됨.** (완전한 고객 수 ≈ 13.7만. 예전 99,838은 6/30 이전 조기종료 미완치.)
+- **custom 15개 = 아직 안 맞음.** custom_5에 매장코드("SP12"), 대부분 null. 원인 후보 2개: ① 에이전트 config의 custom 매핑이 틀어짐, ② upsert 병합(existing||new) + 옛 customer_field_definitions 잔존으로 옛값이 섞임. **다음 세션 첫 작업 = `--show-config`로 실제 매핑부터 확인.**
+- **구매 = 재적재 중/불안정.** fan-out은 **오경보**였음(2.58M이 실제일 수 있음 — 서버 숫자로는 판단 불가). 삭제·재적재 여러 번 반복돼 full sync 도는 중.
+- **일시정지 명령은 진행 중 full sync를 못 멈춤**(cron만 정지). 즉시 멈추려면 박스 `taskkill`. 오늘 racing(도는 중 삭제)으로 계속 꼬임.
+- **새 exe(라벨편집기 fix + 모델명 가림) = 빌드됨.** 박스 교체 여부 확인 필요.
+
+### custom은 원격 없이는 못 고침 (확정)
+에이전트가 어느 소스 컬럼을 custom 슬롯에 넣을지는 **박스의 암호화 config(config.enc)에만** 존재. 서버 SQL·재동기화·전체동기화 전부 소용없음. **오직 박스 `--edit-config`(또는 `--setup-cli`)로만** 바꿈. = 원격 필수.
+
+### 다음 세션 원격 1회 순서 (custom + 구매 한 번에, racing 없이)
+
+> ★ 오늘 실패 원인 = 에이전트 안 멈추고 서버에서 지워 계속 부딪힘. **반드시 에이전트부터 정지하고 시작.**
+
+**0) 에이전트 즉시 정지 (racing 원천 차단):**
+```
+schtasks /End /TN SyncAgent
+taskkill /F /IM sync-agent.exe
+```
+(일시정지 명령은 진행 중 sync 못 멈추니 반드시 taskkill.)
+
+**0-1) 현재 custom 매핑 확인:**
+```
+cd /d C:\SyncAgent
+sync-agent.exe --show-config
+```
+→ custom_5 등이 어느 소스 컬럼인지 봄. **15개(신규등록일자→custom_5 등)가 맞으면 매핑 OK** → 문제는 병합/필드정의라 아래 2) 전체삭제만으로 해결. **매장코드 등 엉뚱하면 매핑 틀어진 것** → 1) 재설정.
+
+**0-2) 새 exe 확인:** 라벨fix 든 exe인지. 아니면 로컬 `cd sync-agent && npm run build:win-legacy` → exe 교체(마지막 빌드).
+
+**1) custom 매핑 재설정 — `--setup-cli` 재실행 권장** (현재 꼬였으니 처음부터가 깨끗. 라벨은 컬럼명 자동):
+```
+cd /d C:\SyncAgent
+sync-agent.exe --setup-cli
+```
+- Step2 DB: CRM_VIEW_USER (host 125.141.198.22 / port 1521 / service ISDB)
+- Step3 테이블: 고객 = `고객`(timestamp 최종수정일시) / 구매 = `고객구매이력_연동`(timestamp 판매일자)
+- Step4 고객 매핑 — **표준 8 + custom 15만** 남기고 나머지 삭제:
+  - 표준: 성명→name / 매장코드→store_code / 핸드폰1·2·3→phone / 생년월일→birth_date / 마일리지→points / 문자수신→sms_opt_in / 가입매장→registered_store / 가입구분→registration_type
+  - custom 15: 고객상태 · 고객번호 · 등록일자 · 마일리지사용액 · 마일리지발생액 · 신규등록일자 · 신규마일리지 · 추가마일리지 · 소멸마일리지 · 인증여부 · 인증매장 · CI · 카카오인증매장 · 최종접속일자 · 이관이력
+  - 라벨 단계: 기본값이 컬럼명이라 Enter로 통과 = 필드명 자동
+- Step4 구매 매핑: `고객전화`→customer_phone / `판매일자`→purchase_date / `확정가`→total_amount / `판매수량`→quantity
+- 저장
+
+**2) 서버에서 전체 삭제 (에이전트 정지 상태에서! 앱의 고객 전체삭제 순서 그대로 = FK 안 걸림 + 옛 필드정의·병합 잔존 제거):**
+```sql
+DELETE FROM purchases WHERE company_id='682956b7-37a3-46b5-9868-b63011bda47b';
+DELETE FROM consents WHERE customer_id IN (SELECT id FROM customers WHERE company_id='682956b7-37a3-46b5-9868-b63011bda47b');
+DELETE FROM unsubscribes WHERE company_id='682956b7-37a3-46b5-9868-b63011bda47b';
+DELETE FROM customer_field_definitions WHERE company_id='682956b7-37a3-46b5-9868-b63011bda47b';
+DELETE FROM customer_stores WHERE company_id='682956b7-37a3-46b5-9868-b63011bda47b';
+UPDATE companies SET customer_schema = '{}'::jsonb WHERE id='682956b7-37a3-46b5-9868-b63011bda47b';
+DELETE FROM customers WHERE company_id='682956b7-37a3-46b5-9868-b63011bda47b';
+```
+(purchases → customers 순서 준수. customer_field_definitions·customer_schema까지 지워야 병합/충돌 잔존 0.)
+
+**3) 에이전트 시작 → 전체 재동기화** (`schtasks /Run /TN SyncAgent`, 또는 `--setup-cli` 저장 시 자동). **고객 full 1회 → 구매 full 1회 → 끝**(루프 아님). 끝까지 대기(로그 created_at 멈출 때까지), 도중에 삭제 금지.
+
+**4) 검증 (서버 PG):**
+```sql
+-- custom 제대로 들어왔나 (custom_1=등록일자값 등, custom_5에 매장코드 아님)
+SELECT phone, custom_fields FROM customers WHERE company_id='682956b7-37a3-46b5-9868-b63011bda47b' ORDER BY updated_at DESC LIMIT 3;
+-- 고객·구매 최종 건수
+SELECT (SELECT COUNT(*) FROM customers WHERE company_id='682956b7-37a3-46b5-9868-b63011bda47b') AS 고객,
+       (SELECT COUNT(*) FROM purchases  WHERE company_id='682956b7-37a3-46b5-9868-b63011bda47b') AS 구매;
+```
+
+### 구매 fan-out — 해결(fan-out 아님, 2026-07-01 소스 대조 확정)
+외주 실측: 원본 `고객구매이력` **2,258,517** / JOIN 뷰 `고객구매이력_연동` **1,858,898** / `고객` **137,351**.
+**뷰(185만) < 원본(225만) = fan-out 아님(배수 없음).** fan-out이면 뷰가 원본보다 많아야 하는데 반대다. JOIN이 `고객번호` INNER JOIN이라 고객 테이블에 매칭 안 되는 고객번호(탈퇴·삭제 등)의 구매 **399,619건**이 제외돼 오히려 줄어든 것. 전화번호를 못 붙이는 구매라 한줄로에선 어차피 미사용 = 제외 정상.
+**재동기화 완료 목표치: 고객 ≈ 137,351 / 구매 ≈ 1,858,898(뷰 기준).** (삭제 전 구매 1,103,233은 이전 적재가 절반에서 멈춘 값 — full로 다시 받으면 185만까지 참.)
+- 스칼라 서브쿼리 교체는 불필요(현 INNER JOIN 뷰가 배수 없이 정상). 참고용 대안만 남김:
+```sql
+-- (미사용) 만약 훗날 고객번호 중복으로 배수가 생기면 이 형태로 교체
+CREATE OR REPLACE VIEW ISUSER2.고객구매이력_연동 AS
+SELECT p.*, (SELECT MAX(c.핸드폰1||c.핸드폰2||c.핸드폰3) FROM ISUSER2.고객 c WHERE c.고객번호=p.고객번호) AS 고객전화
+FROM ISUSER2.고객구매이력 p;
+```
+
+### 교훈 (반복 금지)
+- **일시정지 명령은 진행 중 full sync 못 멈춤(cron만 정지)** → 즉시 멈추려면 박스 `taskkill`. 반드시 정지 후 삭제.
+- **도는 중 DELETE = racing = 계속 꼬임.** 에이전트 정지(taskkill) 확인 후에만 서버 삭제.
+- **custom 매핑은 config(박스)에만** → 서버·재동기화로 못 고침. 실제 매핑은 `--show-config`로 확인.
+- **upsert가 custom_fields 병합(existing||new)** + 옛 customer_field_definitions 잔존 → 옛값 섞임. 완전 초기화는 앱 전체삭제 순서(field_definitions·customer_schema 포함).
+- purchases는 upsert 키 없음(순수 INSERT) = 재적재 전 반드시 DELETE.
+- **fan-out은 서버 숫자(총/유니크)로 판단 불가**(date-only + purchase custom_fields 미저장). 서버 INSERT는 custom_fields 저장 안 함 = 구매 custom_3 등 null. 소스 원본 대조만 확정.
+- JOIN 뷰 줄 때 조인키 유니크 전제 검증 필수(고객번호 중복 시 fan-out).
 
 ---
 

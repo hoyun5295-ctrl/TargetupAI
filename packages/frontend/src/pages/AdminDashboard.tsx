@@ -382,6 +382,11 @@ const [emailSending, setEmailSending] = useState(false);
   const [syncDeleting, setSyncDeleting] = useState(false);
   // ★ D131 후속(2026-04-21): 'pause' | 'resume' 추가 — 원격 동기화 제어
   const [syncCommandType, setSyncCommandType] = useState<'full_sync' | 'restart' | 'pause' | 'resume'>('full_sync');
+  // ★ 2026-07-01: 원격 컬럼 매핑 편집(update_config) — 재설치 없이 슈퍼관리자에서 매핑 갱신
+  const [showSyncMappingModal, setShowSyncMappingModal] = useState(false);
+  const [syncMapCustomers, setSyncMapCustomers] = useState<Array<{ src: string; target: string; label: string }>>([]);
+  const [syncMapPurchases, setSyncMapPurchases] = useState<Array<{ src: string; target: string; label: string }>>([]);
+  const [syncMapSaving, setSyncMapSaving] = useState(false);
 
   // ===== 감사 로그 =====
   const [auditLogs, setAuditLogs] = useState<any[]>([]);
@@ -762,6 +767,74 @@ const handleSyncCommand = async () => {
     loadSyncAgents();
   } catch (e) {
     showAlert('오류', '명령 전송 실패', 'error');
+  }
+};
+
+// ★ 2026-07-01: 원격 컬럼 매핑 편집(update_config) — 소스컬럼 → 표준/custom 슬롯
+const SYNC_CUSTOM_SLOTS = Array.from({ length: 15 }, (_, i) => `custom_${i + 1}`);
+const SYNC_CUSTOMER_TARGET_FIELDS = [
+  'phone', 'name', 'gender', 'birth_date', 'email', 'address', 'region', 'grade',
+  'store_phone', 'points', 'store_code', 'store_name', 'registered_store',
+  'registered_store_number', 'registration_type', 'callback', 'sms_opt_in',
+  'recent_purchase_date', 'recent_purchase_amount', 'recent_purchase_store',
+  'total_purchase_amount', 'purchase_count', ...SYNC_CUSTOM_SLOTS,
+];
+const SYNC_PURCHASE_TARGET_FIELDS = [
+  'customer_phone', 'purchase_date', 'total_amount', 'quantity',
+  'store_code', 'store_name', 'product_code', 'product_name', 'unit_price', ...SYNC_CUSTOM_SLOTS,
+];
+
+const openSyncMappingModal = (agent: any) => {
+  setSyncSelectedAgent(agent);
+  setSyncMapCustomers([{ src: '', target: '', label: '' }]);
+  setSyncMapPurchases([{ src: '', target: '', label: '' }]);
+  setShowSyncMappingModal(true);
+};
+
+const handleSyncMappingSave = async () => {
+  if (!syncSelectedAgent) return;
+  const customers: Record<string, string> = {};
+  const customFieldLabels: Record<string, string> = {};
+  for (const r of syncMapCustomers) {
+    const src = r.src.trim();
+    const target = r.target.trim();
+    if (!src || !target) continue;
+    customers[src] = target;
+    if (/^custom_\d+$/.test(target) && r.label.trim()) customFieldLabels[target] = r.label.trim();
+  }
+  const purchases: Record<string, string> = {};
+  for (const r of syncMapPurchases) {
+    const src = r.src.trim();
+    const target = r.target.trim();
+    if (!src || !target) continue;
+    purchases[src] = target;
+  }
+  if (Object.keys(customers).length === 0 && Object.keys(purchases).length === 0) {
+    showAlert('입력 오류', '매핑을 한 개 이상 입력해주세요.', 'error');
+    return;
+  }
+  const mapping: any = {};
+  if (Object.keys(customers).length) mapping.customers = customers;
+  if (Object.keys(purchases).length) mapping.purchases = purchases;
+  if (Object.keys(customFieldLabels).length) mapping.customFieldLabels = customFieldLabels;
+
+  setSyncMapSaving(true);
+  try {
+    const token = localStorage.getItem('token');
+    const res = await fetch(`/api/admin/sync/agents/${syncSelectedAgent.id}/command`, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ type: 'update_config', mapping }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || '매핑 전송 실패');
+    setShowSyncMappingModal(false);
+    showAlert('성공', '매핑이 전송되었습니다. Agent가 다음 heartbeat(최대 60분)에 매핑을 갱신하고 바뀐 대상만 전체 재동기화합니다.', 'success');
+    loadSyncAgents();
+  } catch (e: any) {
+    showAlert('오류', e.message || '매핑 전송 실패', 'error');
+  } finally {
+    setSyncMapSaving(false);
   }
 };
 
@@ -8322,6 +8395,13 @@ const handleApproveRequest = async (id: string) => {
                           >
                             명령
                           </button>
+                          {/* ★ 2026-07-01: 매핑 — 원격 컬럼 매핑 편집(재설치 없이) */}
+                          <button
+                            onClick={() => openSyncMappingModal(agent)}
+                            className="text-violet-600 hover:text-violet-800 text-xs font-medium px-2 py-1 rounded hover:bg-violet-50"
+                          >
+                            매핑
+                          </button>
                           {/* ★ D131 후속(2026-04-21): 삭제 버튼 — 버려진/중복 Agent 정리 */}
                           <button
                             onClick={() => {
@@ -8724,6 +8804,130 @@ const handleApproveRequest = async (id: string) => {
               >
                 {syncDeleting ? '삭제 중...' : '삭제'}
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ★ 2026-07-01: 원격 컬럼 매핑 편집 모달 (update_config) */}
+      {showSyncMappingModal && syncSelectedAgent && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-[680px] max-h-[90vh] overflow-hidden flex flex-col animate-in fade-in zoom-in">
+            <div className="p-5 border-b bg-gradient-to-r from-violet-50 to-fuchsia-50">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 bg-violet-100 rounded-full flex items-center justify-center">
+                  <svg className="w-5 h-5 text-violet-600" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h7" /></svg>
+                </div>
+                <div>
+                  <h3 className="text-lg font-bold text-gray-800">컬럼 매핑 편집</h3>
+                  <p className="text-xs text-gray-500">{syncSelectedAgent.company_name} · {syncSelectedAgent.agent_name}</p>
+                </div>
+              </div>
+            </div>
+
+            <div className="p-5 space-y-5 overflow-y-auto">
+              {/* 고객 매핑 */}
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <label className="text-sm font-semibold text-gray-700">고객 매핑</label>
+                  <button
+                    onClick={() => setSyncMapCustomers([...syncMapCustomers, { src: '', target: '', label: '' }])}
+                    className="text-xs text-violet-600 hover:text-violet-800 font-medium"
+                  >+ 행 추가</button>
+                </div>
+                <div className="space-y-2">
+                  {syncMapCustomers.map((row, i) => (
+                    <div key={i} className="flex items-center gap-2">
+                      <input
+                        placeholder="소스 컬럼 (예: 신규등록일자)"
+                        value={row.src}
+                        onChange={(e) => { const n = [...syncMapCustomers]; n[i] = { ...n[i], src: e.target.value }; setSyncMapCustomers(n); }}
+                        className="flex-1 px-2 py-1.5 border rounded-lg text-xs focus:ring-2 focus:ring-violet-500 outline-none"
+                      />
+                      <span className="text-gray-400 text-xs">→</span>
+                      <select
+                        value={row.target}
+                        onChange={(e) => { const n = [...syncMapCustomers]; n[i] = { ...n[i], target: e.target.value }; setSyncMapCustomers(n); }}
+                        className="w-36 px-2 py-1.5 border rounded-lg text-xs bg-white focus:ring-2 focus:ring-violet-500 outline-none"
+                      >
+                        <option value="">타겟 선택</option>
+                        {SYNC_CUSTOMER_TARGET_FIELDS.map((f) => <option key={f} value={f}>{f}</option>)}
+                      </select>
+                      {/^custom_\d+$/.test(row.target) && (
+                        <input
+                          placeholder="라벨 (예: 등록일자)"
+                          value={row.label}
+                          onChange={(e) => { const n = [...syncMapCustomers]; n[i] = { ...n[i], label: e.target.value }; setSyncMapCustomers(n); }}
+                          className="w-28 px-2 py-1.5 border rounded-lg text-xs focus:ring-2 focus:ring-violet-500 outline-none"
+                        />
+                      )}
+                      <button
+                        onClick={() => setSyncMapCustomers(syncMapCustomers.filter((_, j) => j !== i))}
+                        className="text-red-400 hover:text-red-600 text-sm px-1"
+                        title="행 삭제"
+                      >✕</button>
+                    </div>
+                  ))}
+                  {syncMapCustomers.length === 0 && <p className="text-xs text-gray-400">행 추가로 매핑을 입력하세요.</p>}
+                </div>
+              </div>
+
+              {/* 구매 매핑 */}
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <label className="text-sm font-semibold text-gray-700">구매 매핑</label>
+                  <button
+                    onClick={() => setSyncMapPurchases([...syncMapPurchases, { src: '', target: '', label: '' }])}
+                    className="text-xs text-violet-600 hover:text-violet-800 font-medium"
+                  >+ 행 추가</button>
+                </div>
+                <div className="space-y-2">
+                  {syncMapPurchases.map((row, i) => (
+                    <div key={i} className="flex items-center gap-2">
+                      <input
+                        placeholder="소스 컬럼 (예: 고객전화)"
+                        value={row.src}
+                        onChange={(e) => { const n = [...syncMapPurchases]; n[i] = { ...n[i], src: e.target.value }; setSyncMapPurchases(n); }}
+                        className="flex-1 px-2 py-1.5 border rounded-lg text-xs focus:ring-2 focus:ring-violet-500 outline-none"
+                      />
+                      <span className="text-gray-400 text-xs">→</span>
+                      <select
+                        value={row.target}
+                        onChange={(e) => { const n = [...syncMapPurchases]; n[i] = { ...n[i], target: e.target.value }; setSyncMapPurchases(n); }}
+                        className="w-36 px-2 py-1.5 border rounded-lg text-xs bg-white focus:ring-2 focus:ring-violet-500 outline-none"
+                      >
+                        <option value="">타겟 선택</option>
+                        {SYNC_PURCHASE_TARGET_FIELDS.map((f) => <option key={f} value={f}>{f}</option>)}
+                      </select>
+                      <button
+                        onClick={() => setSyncMapPurchases(syncMapPurchases.filter((_, j) => j !== i))}
+                        className="text-red-400 hover:text-red-600 text-sm px-1"
+                        title="행 삭제"
+                      >✕</button>
+                    </div>
+                  ))}
+                  {syncMapPurchases.length === 0 && <p className="text-xs text-gray-400">구매 매핑이 없으면 비워두세요.</p>}
+                </div>
+              </div>
+
+              <div className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg p-3 space-y-1">
+                <div>• 소스 컬럼명은 실제 DB 컬럼명과 정확히 일치해야 합니다.</div>
+                <div>• 저장 시 Agent가 다음 heartbeat(최대 60분)에 매핑을 갱신하고 <b>바뀐 대상만</b> 전체 재동기화합니다.</div>
+                <div>• custom 슬롯은 라벨이 화면 표시명이 됩니다(비우면 슬롯명 표시).</div>
+              </div>
+            </div>
+
+            <div className="flex border-t">
+              <button
+                onClick={() => setShowSyncMappingModal(false)}
+                disabled={syncMapSaving}
+                className="flex-1 px-4 py-3 text-gray-700 font-medium hover:bg-gray-50 transition-colors border-r disabled:opacity-50"
+              >취소</button>
+              <button
+                onClick={handleSyncMappingSave}
+                disabled={syncMapSaving}
+                className="flex-1 px-4 py-3 text-violet-600 font-medium hover:bg-violet-50 transition-colors disabled:opacity-50"
+              >{syncMapSaving ? '전송 중...' : '매핑 저장 및 전송'}</button>
             </div>
           </div>
         </div>

@@ -75,6 +75,25 @@ export class SyncEngine {
   }
 
   /**
+   * 런타임 매핑 교체 (원격 update_config 명령용 — 2026-07-01).
+   * config.enc 영구 저장은 호출부(scheduler)가 담당하고, 여기서는 실행 중 engine이
+   * 참조하는 매핑만 즉시 교체한다 → 재시작 없이 다음 배치부터 새 매핑 적용.
+   * 부분 갱신: 넘긴 것만 교체하고 나머지는 유지(구매만/고객만 갱신 안전).
+   */
+  updateMapping(m: { customers?: ColumnMapping; purchases?: ColumnMapping }): void {
+    if (m.customers) this.config.customerMapping = m.customers;
+    if (m.purchases) this.config.purchaseMapping = m.purchases;
+  }
+
+  /** 현재 런타임 매핑 조회 (검증/로깅용). */
+  getMapping(): { customers: ColumnMapping; purchases: ColumnMapping } {
+    return {
+      customers: this.config.customerMapping,
+      purchases: this.config.purchaseMapping,
+    };
+  }
+
+  /**
    * 타겟(customers/purchases)에 맞는 timestamp 컬럼 반환
    * 개별 지정이 있으면 개별값, 없으면 공통 timestampColumn 폴백
    */

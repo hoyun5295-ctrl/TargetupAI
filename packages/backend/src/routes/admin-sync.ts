@@ -341,16 +341,29 @@ router.put('/agents/:agentId/config', authenticate, requireSuperAdmin, async (re
 router.post('/agents/:agentId/command', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
   try {
     const { agentId } = req.params;
-    const { type } = req.body;
+    const { type, mapping } = req.body;
 
     // ★ D131 후속(2026-04-21): pause/resume 추가 — 원격 동기화 중단/재개 지원
     //   pause: Agent 스케줄러 stop (heartbeat 유지), resume: 재개
-    const ALLOWED_COMMAND_TYPES = ['full_sync', 'restart', 'pause', 'resume'] as const;
+    // ★ 2026-07-01: update_config 추가 — 슈퍼관리자에서 컬럼 매핑을 원격 갱신(재설치 없이)
+    const ALLOWED_COMMAND_TYPES = ['full_sync', 'restart', 'pause', 'resume', 'update_config'] as const;
     if (!type || !ALLOWED_COMMAND_TYPES.includes(type)) {
       return res.status(400).json({
         success: false,
         error: `type은 ${ALLOWED_COMMAND_TYPES.join(' | ')} 중 하나여야 합니다.`
       });
+    }
+
+    // ★ 2026-07-01: update_config는 매핑 payload 필수. 빈 명령으로 불필요한 full_sync 유발 차단.
+    if (type === 'update_config') {
+      const hasMapping = mapping && typeof mapping === 'object' &&
+        (mapping.customers || mapping.purchases || mapping.customFieldLabels);
+      if (!hasMapping) {
+        return res.status(400).json({
+          success: false,
+          error: 'update_config에는 customers/purchases/customFieldLabels 중 하나 이상의 mapping이 필요합니다.'
+        });
+      }
     }
 
     // Agent 존재 확인 + 현재 config 조회
@@ -368,12 +381,18 @@ router.post('/agents/:agentId/command', authenticate, requireSuperAdmin, async (
 
     // 새 명령 추가
     const commandId = randomUUID();
-    const newCommand = {
+    const newCommand: Record<string, unknown> = {
       id: commandId,
       type,
-      params: {},
       created_at: new Date().toISOString()
     };
+    // ★ 2026-07-01: update_config는 매핑을 payload로 전달 (에이전트가 cmd.payload로 수신).
+    //   그 외 명령은 기존대로 빈 params 유지(하위호환).
+    if (type === 'update_config') {
+      newCommand.payload = { mapping };
+    } else {
+      newCommand.params = {};
+    }
 
     commands.push(newCommand);
 

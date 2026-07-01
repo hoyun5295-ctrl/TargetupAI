@@ -121,7 +121,23 @@ export interface AgentCommand {
   //   pause: 스케줄러 stop (heartbeat 유지), resume: 재개, restart: 프로세스 종료 후 서비스 재시작
   type: 'full_sync' | 'restart' | 'update_config' | 'pause' | 'resume';
   payload?: unknown;
+  // ★ 2026-07-01: 서버(admin-sync)가 명령을 `params` 필드로 저장한 하위호환 — 에이전트는 payload ?? params 수용
+  params?: unknown;
   issuedAt?: string;
+}
+
+// ★ 2026-07-01: update_config 명령 payload — 슈퍼관리자에서 매핑을 원격 갱신(원격 재설치 없이).
+//   에이전트는 mapping을 로컬 config.enc에 저장 + 런타임 반영 + 바뀐 타겟 full_sync.
+export interface UpdateConfigPayload {
+  mapping?: {
+    /** 소스컬럼 → 표준/custom 필드 (예: { "신규등록일자": "custom_5" }) */
+    customers?: Record<string, string>;
+    purchases?: Record<string, string>;
+    /** custom 슬롯 라벨 (예: { "custom_1": "등록일자" }) — 서버 필드정의 재등록용 */
+    customFieldLabels?: Record<string, string>;
+  };
+  syncIntervalCustomers?: number;
+  syncIntervalPurchases?: number;
 }
 
 // ─── POST /api/sync/register ────────────────────────────

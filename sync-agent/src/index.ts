@@ -29,7 +29,7 @@
 
 import dotenv from 'dotenv';
 import os from 'node:os';
-import { loadConfig, type AgentConfig, type ConfigSource } from './config';
+import { loadConfig, updateConfigEncrypted, type AgentConfig, type ConfigSource } from './config';
 import { initLogger, getLogger } from './logger';
 import { createDbConnector, createMockDbConnector, type IDbConnector } from './db';
 import { ApiClient } from './api/client';
@@ -348,6 +348,42 @@ async function main(): Promise<void> {
         scheduler.applyRemoteConfig(remoteConfig);
       });
     }
+
+    // ★ 2026-07-01: 원격 update_config 매핑 갱신 → config.enc 영구 저장 + 필드정의 재등록.
+    //   engine 런타임 교체는 scheduler가 담당, 여기서는 영속화(재시작해도 유지)와 라벨 재등록만.
+    scheduler.setMappingUpdateHandler(async (mapping) => {
+      try {
+        updateConfigEncrypted((current) => ({
+          ...current,
+          mapping: {
+            customers: mapping.customers ?? current.mapping.customers,
+            purchases: mapping.purchases ?? current.mapping.purchases,
+            customFieldLabels: mapping.customFieldLabels ?? current.mapping.customFieldLabels,
+          },
+        }));
+        log.info('원격 매핑 갱신 — config.enc 영구 저장 완료');
+      } catch (error) {
+        log.error('원격 매핑 config.enc 저장 실패', {
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+      // custom 라벨 변경 시 서버 필드정의 재등록 (화면 표시명 반영)
+      if (mapping.customFieldLabels && apiClient) {
+        try {
+          const definitions = Object.entries(mapping.customFieldLabels).map(([key, label]) => ({
+            field_key: key,
+            field_label: label,
+            field_type: 'string' as const,
+          }));
+          await apiClient.registerFieldDefinitions({ definitions });
+          log.info(`원격 매핑 — 필드정의 재등록 ${definitions.length}건`);
+        } catch (error) {
+          log.warn('원격 매핑 필드정의 재등록 실패', {
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+      }
+    });
 
     // ★ D131 후속(2026-04-21): heartbeat 응답의 commands도 scheduler로 연결.
     //   싱크 요청 0건이면 응답 자체가 없어 명령 수신 못 하는 문제 해결.

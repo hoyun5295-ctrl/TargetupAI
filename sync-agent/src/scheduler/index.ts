@@ -22,7 +22,7 @@ import type { QueueManager } from '../queue';
 import type { ApiClient } from '../api/client';
 import type { SyncStateManager } from '../sync/state';
 import { getLogger } from '../logger';
-import type { AgentCommand } from '../types/api';
+import type { AgentCommand, UpdateConfigPayload } from '../types/api';
 
 const logger = getLogger('scheduler');
 
@@ -46,6 +46,12 @@ export class Scheduler {
   //   true면 customer/purchase/queue cron 작업의 실행 분기에서 즉시 skip.
   //   heartbeat는 계속 돌아서 서버에 살아있음 신호 유지.
   private paused = false;
+
+  // ★ 2026-07-01: update_config 매핑 갱신 시 config.enc 영구 저장 + 필드정의 재등록 콜백.
+  //   파일 I/O·API를 scheduler가 직접 몰라도 되게 분리 — index.ts에서 연결.
+  private mappingUpdateHandler:
+    | ((mapping: NonNullable<UpdateConfigPayload['mapping']>) => Promise<void> | void)
+    | null = null;
 
   /** 동시 실행 방지 플래그 */
   private customerSyncing = false;
@@ -175,6 +181,13 @@ export class Scheduler {
 
   private lastAppliedVersion: string | null = null;
 
+  // ★ 2026-07-01: index.ts에서 config.enc 저장 + 필드정의 재등록 핸들러 연결
+  setMappingUpdateHandler(
+    handler: (mapping: NonNullable<UpdateConfigPayload['mapping']>) => Promise<void> | void,
+  ): void {
+    this.mappingUpdateHandler = handler;
+  }
+
   applyRemoteConfig(remoteConfig: {
     syncIntervalCustomers?: number;
     syncIntervalPurchases?: number;
@@ -262,6 +275,28 @@ export class Scheduler {
             logger.info('▶️  원격 명령: 동기화 재개');
             this.resume();
             break;
+
+          // ★ 2026-07-01: 원격 매핑 갱신 — 슈퍼관리자에서 매핑 변경 시 재설치 없이 즉시 반영
+          case 'update_config': {
+            const payload = ((cmd.payload ?? cmd.params) ?? {}) as UpdateConfigPayload;
+            const mapping = payload.mapping;
+            if (mapping && (mapping.customers || mapping.purchases || mapping.customFieldLabels)) {
+              logger.info('🔧 원격 명령: 매핑 갱신(update_config)');
+              // 1) 런타임 매핑 즉시 교체 (재시작 없이 다음 배치부터 적용)
+              this.engine.updateMapping({ customers: mapping.customers, purchases: mapping.purchases });
+              // 2) config.enc 영구 저장 + 필드정의 재등록 (index.ts 콜백)
+              if (this.mappingUpdateHandler) {
+                await this.mappingUpdateHandler(mapping);
+              }
+              // 3) 바뀐 타겟만 전체 재적재 (구매 수백만건 불필요 재적재 방지)
+              if (mapping.customers) await this.engine.runFull('customers');
+              if (mapping.purchases) await this.engine.runFull('purchases');
+              logger.info('✅ 원격 명령: 매핑 갱신 + 전체 동기화 완료');
+            } else {
+              logger.warn('update_config 명령에 mapping이 없어 무시');
+            }
+            break;
+          }
 
           default:
             logger.warn(`알 수 없는 원격 명령: ${cmd.type}`);
