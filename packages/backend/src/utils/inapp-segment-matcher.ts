@@ -15,6 +15,7 @@
  */
 
 import { query } from '../config/database';
+import { buildCustomerFilter } from './customer-filter';
 import type { SegmentConditions } from './inapp-ai-generator';
 
 // ════════════════════════════════════════════════════════════════════
@@ -224,6 +225,27 @@ export async function customerMatchesSegment(
 
   const sql = `SELECT 1 FROM customers c WHERE ${allWhere} LIMIT 1`;
   const r = await query(sql, allParams);
+  return r.rows.length > 0;
+}
+
+/**
+ * 단일 customer가 CT-01 structured filter(타겟 추출 결과)에 매칭되는지 — SDK active 시점.
+ * segment_conditions와 별개 축 — 인앱 표시 대상을 "단 1 오차 없는" 타겟으로 지정할 때.
+ */
+export async function customerMatchesFilter(
+  companyId: string,
+  customerId: string,
+  filter: Record<string, { operator: string; value: any }>,
+): Promise<boolean> {
+  if (!companyId || !customerId || !filter || Object.keys(filter).length === 0) return false;
+  const { sql: filterSql, params } = buildCustomerFilter(filter, {
+    tableAlias: 'c',
+    startParamIndex: 3,
+    storeCodeMode: 'skip',
+    inputFormat: 'structured',
+  });
+  const sql = `SELECT 1 FROM customers c WHERE c.company_id = $1::uuid AND c.id = $2::uuid AND c.is_active = true${filterSql} LIMIT 1`;
+  const r = await query(sql, [companyId, customerId, ...params]);
   return r.rows.length > 0;
 }
 

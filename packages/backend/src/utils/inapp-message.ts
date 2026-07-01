@@ -16,7 +16,7 @@
 
 import { query } from '../config/database';
 // ★ D215+ (2026-05-25) 통합 영역 — CT-78 (segment) + CT-80 (variant) + CT-82 (trigger window)
-import { customerMatchesSegment, isEmptySegment } from './inapp-segment-matcher';
+import { customerMatchesSegment, customerMatchesFilter, isEmptySegment } from './inapp-segment-matcher';
 import { selectVariantForCustomer } from './inapp-variant-optimizer';
 import { isTimeWindowValid } from './inapp-trigger-engine';
 
@@ -515,6 +515,7 @@ export interface InAppMessageDetail extends InAppMessage {
   contentBlocks: any[];
   theme: string;
   accentColor: string | null;
+  audienceFilter?: Record<string, any> | null;
 }
 
 function mapRowToMessageDetail(row: any): InAppMessageDetail {
@@ -539,7 +540,26 @@ function mapRowToMessageDetail(row: any): InAppMessageDetail {
     contentBlocks: Array.isArray(row.content_blocks) ? row.content_blocks : [],
     theme: row.theme || 'auto',
     accentColor: row.accent_color || null,
+    audienceFilter: row.audience_filter || null,
   };
+}
+
+/**
+ * 타겟 추출(/api/targets/extract) filter를 인앱 메시지 표시 대상으로 저장.
+ * 복잡한 create/update 파라미터와 분리 — 전용 UPDATE (안전). filter=null이면 해제.
+ */
+export async function setInAppAudienceFilter(
+  companyId: string,
+  messageId: string,
+  filter: Record<string, { operator: string; value: any }> | null,
+): Promise<boolean> {
+  const r = await query(
+    `UPDATE cdp_inapp_messages
+        SET audience_filter = $3::jsonb, updated_at = NOW()
+      WHERE id = $1::uuid AND company_id = $2::uuid`,
+    [messageId, companyId, filter ? JSON.stringify(filter) : null],
+  );
+  return (r.rowCount || 0) > 0;
 }
 
 const FULL_COLUMNS = `id, title, body, action_url, action_label, position, background_color, text_color,
@@ -548,7 +568,7 @@ const FULL_COLUMNS = `id, title, body, action_url, action_label, position, backg
                       personalization_vars, parent_message_id, variant_weight,
                       auto_dismiss_seconds, max_displays_per_user,
                       send_start_hour, send_end_hour, allowed_weekdays, locale_variants, animation, channel,
-                      content_blocks, theme, accent_color`;
+                      content_blocks, theme, accent_color, audience_filter`;
 
 /**
  * ★ D215+ V2 — SDK GET /inapp/active 호출 진입.
@@ -612,6 +632,14 @@ export async function getActiveMessagesForCustomerV2(input: ActiveMessagesInput)
       if (!customerId) continue;  // 세그먼트 조건 있는데 customer 미식별 = 매칭 불가
       const segMatch = await customerMatchesSegment(input.companyId, customerId, segmentConds).catch(() => false);
       if (!segMatch) continue;
+    }
+
+    // 타겟 추출 filter(CT-01)로 지정한 표시 대상 — 있으면 함께 평가 (없으면=기존 메시지=미영향)
+    const audienceFilter = cand.audience_filter;
+    if (audienceFilter && typeof audienceFilter === 'object' && Object.keys(audienceFilter).length > 0) {
+      if (!customerId) continue;
+      const filterMatch = await customerMatchesFilter(input.companyId, customerId, audienceFilter).catch(() => false);
+      if (!filterMatch) continue;
     }
 
     passed.push(cand);

@@ -17,6 +17,7 @@ import { uploadOne } from '../components/dm/panels/FormControls';
 import { useDmKeyboardShortcuts } from '../hooks/useDmKeyboardShortcuts';
 import ConfirmModal, { type ConfirmState } from '../components/ConfirmModal';
 import CreditConfirmModal from '../components/credit/CreditConfirmModal';
+import DmSendAndTrackModal from '../components/DmSendAndTrackModal';
 import DmTopBar from '../components/dm/DmTopBar';
 import DmLeftPanel from '../components/dm/DmLeftPanel';
 import DmCanvas from '../components/dm/DmCanvas';
@@ -1099,6 +1100,7 @@ function TopBarWithBack({ onBack, onPublishDone }: { onBack: () => void; onPubli
   const setToast = useDmBuilderStore((s) => s.setToast);
   const [confirmPublish, setConfirmPublish] = useState(false);
   const [publishedUrl, setPublishedUrl] = useState<string | null>(null);
+  const [sendModalOpen, setSendModalOpen] = useState(false);
 
   const handleTestSend = async () => {
     if (!dmId) {
@@ -1152,7 +1154,12 @@ function TopBarWithBack({ onBack, onPublishDone }: { onBack: () => void; onPubli
         title="발행 완료"
         subtitle="아래 단축 URL을 복사해 고객에게 발송하세요."
         size="sm"
-        footer={<ModalButton variant="primary" onClick={() => { setPublishedUrl(null); onPublishDone(); }}>확인</ModalButton>}
+        footer={
+          <>
+            <ModalButton variant="secondary" onClick={() => { setPublishedUrl(null); onPublishDone(); }}>확인</ModalButton>
+            <ModalButton variant="primary" onClick={() => { setPublishedUrl(null); setSendModalOpen(true); }}>타겟 고객에게 발송</ModalButton>
+          </>
+        }
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: '#f3f4f6', border: '1px solid #e5e7eb', borderRadius: 10, padding: '10px 12px' }}>
           <span style={{ flex: 1, fontSize: 13, fontWeight: 600, color: '#4f46e5', wordBreak: 'break-all', userSelect: 'all' }}>{publishedUrl}</span>
@@ -1166,6 +1173,7 @@ function TopBarWithBack({ onBack, onPublishDone }: { onBack: () => void; onPubli
           >복사</ModalButton>
         </div>
       </ModalBase>
+      <DmSendAndTrackModal dmId={dmId || ''} show={sendModalOpen} onClose={() => setSendModalOpen(false)} />
     </>
   );
 }

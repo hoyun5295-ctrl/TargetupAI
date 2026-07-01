@@ -32,6 +32,12 @@ import { getCreditCost } from '../utils/ai-credit-calc';
 import { runInCreditBundle } from '../utils/ai-credit-context';
 import type { Section } from '../utils/dm/dm-section-registry';
 import { selectSampleCustomers, selectSampleCustomerByKey, type SampleCustomerKey } from '../utils/dm/dm-sample-customer';
+import { lookupDmRecipientToken, issueDmRecipientTokensBulk } from '../utils/dm/dm-recipient-token';
+import { buildCustomerFilter } from '../utils/customer-filter';
+import { buildChannelEligibilityWhere } from '../utils/channel-eligibility';
+import { createDirectSendCampaign, countStagingFiltered } from '../utils/direct-send-core';
+import { DirectSendError } from '../utils/direct-send-spec';
+import { getOpt080Number } from '../utils/messageUtils';
 import { getAvailableVariables } from '../utils/dm/dm-variable-resolver';
 import { validateDm } from '../utils/dm/dm-validate';
 import { getCompanyBrandKit, updateCompanyBrandKit, DEFAULT_BRAND_KIT } from '../utils/dm/dm-brand-kit';
@@ -106,6 +112,29 @@ dmPublicRouter.get('/:code', async (req: Request, res: Response) => {
     const ip = req.ip || req.socket?.remoteAddress || null;
     const ua = req.headers['user-agent'] || null;
     trackDmView(dm.id, dm.company_id, phone, 1, pages.length, 0, ip, ua).catch(() => {});
+
+    // ?r=<token> 수신자별 개인화 (토큰 없음/만료/미마이그레이션 = 공용 fallback, PII 노출 0)
+    const rToken = (req.query.r as string) || null;
+    if (rToken) {
+      try {
+        const lookup = await lookupDmRecipientToken(rToken);
+        if (lookup && lookup.dmId === dm.id && lookup.companyId === dm.company_id) {
+          const custR = await query(
+            `SELECT * FROM customers WHERE id = $1::uuid AND company_id = $2::uuid LIMIT 1`,
+            [lookup.customerId, dm.company_id],
+          );
+          if (custR.rows.length > 0) {
+            // 수신자별 추적 — 토큰의 고객 phone으로 열람 기록(추적 페이지가 수신자별 액션 집계)
+            trackDmView(dm.id, dm.company_id, custR.rows[0].phone || null, 1, pages.length, 0, ip, ua).catch(() => {});
+            const personalizedHtml = await renderDmViewerHtmlWithCustomer(dm, '/api/dm/v', custR.rows[0], dm.company_id);
+            res.setHeader('Content-Type', 'text/html; charset=utf-8');
+            return res.send(personalizedHtml);
+          }
+        }
+      } catch {
+        // 토큰 조회 실패(예: 테이블 미마이그레이션) = 공용 렌더로 안전 폴백
+      }
+    }
 
     const html = renderDmViewerHtml(dm, '/api/dm/v');
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
@@ -490,6 +519,197 @@ dmRouter.get('/sample-customers', async (req: any, res: any) => {
   } catch (err: any) {
     console.error('[DM 샘플고객] 오류:', err.message);
     return res.status(500).json({ error: err.message || '샘플 로드 실패' });
+  }
+});
+
+// POST /api/dm/:id/send-to-target — 타겟 추출 대상에게 수신자별 개인화 DM 링크 문자 발송 (P4)
+//   직접발송 파이프라인(createDirectSendCampaign) 재사용 = 크레딧·수신거부/무효·(광고)/080·취소 스위퍼 안전망 보존.
+//   수신자별 고유 링크(?r=<token>) = staging extra1 → 템플릿 %기타1% 치환(direct-send-worker).
+dmRouter.post('/:id/send-to-target', async (req: any, res: any) => {
+  try {
+    const companyId = req.user?.companyId;
+    const userId = req.user?.userId || companyId;
+    if (!companyId) return res.status(403).json({ error: '회사 권한이 필요합니다.' });
+
+    const { filter, messageText, isAd } = req.body as {
+      filter?: Record<string, { operator: string; value: any }>;
+      messageText?: string;
+      isAd?: boolean;
+    };
+    if (!filter || typeof filter !== 'object' || Object.keys(filter).length === 0) {
+      return res.status(400).json({ error: '발송 대상 조건이 필요합니다.' });
+    }
+    if (!messageText?.trim()) return res.status(400).json({ error: '문자 본문을 입력해주세요.' });
+
+    const dm = await getDmDetail(req.params.id, companyId);
+    if (!dm) return res.status(404).json({ error: 'DM을 찾을 수 없습니다.' });
+
+    // 발행(short_code) 보장
+    let shortCode = dm.short_code;
+    if (!shortCode) {
+      const pub = await publishDm(req.params.id, companyId);
+      shortCode = pub.short_code;
+    }
+    if (!shortCode) return res.status(500).json({ error: 'DM 발행에 실패했습니다.' });
+
+    // 광고 가드 — 광고성이면 무료수신거부(080) 필수 (정보통신망법)
+    if (isAd) {
+      const opt080 = await getOpt080Number(userId || null, companyId);
+      if (!opt080) return res.status(400).json({ error: '광고성 발송은 무료수신거부(080) 번호 등록이 필요합니다.', code: 'NO_OPT080' });
+    }
+
+    // 발신번호 (회사 기본 등록 번호)
+    const cbRes = await query(
+      `SELECT REPLACE(phone, '-', '') AS phone FROM callback_numbers WHERE company_id = $1 AND is_default = true LIMIT 1`,
+      [companyId],
+    );
+    const callback = cbRes.rows[0]?.phone || null;
+    if (!callback) return res.status(400).json({ error: '등록된 발신번호가 없습니다. 발신번호 등록 후 발송해주세요.', code: 'NO_CALLBACK' });
+
+    // 발송 대상 resolve — DM 채널 자격(전화 유효·수신거부/무효 아님·활성) + filter. phone 중복 제거.
+    const { sql: filterSql, params: filterParams } = buildCustomerFilter(filter, {
+      tableAlias: 'c', startParamIndex: 2, storeCodeMode: 'skip', inputFormat: 'structured',
+    });
+    const dmWhere = buildChannelEligibilityWhere('dm', 'c');
+    const recRes = await query(
+      `SELECT DISTINCT ON (c.phone) c.id, c.phone, c.name
+         FROM customers c
+        WHERE c.company_id = $1::uuid AND (${dmWhere})${filterSql}
+        ORDER BY c.phone, c.id`,
+      [companyId, ...filterParams],
+    );
+    const recipients = recRes.rows;
+    if (recipients.length === 0) return res.status(400).json({ error: '발송 대상이 0명입니다. 조건을 조정해주세요.', code: 'ZERO_MATCH' });
+
+    // 수신자별 토큰 발급(벌크) + 링크 구성
+    let tokenPairs: Array<{ customerId: string; token: string }>;
+    try {
+      tokenPairs = await issueDmRecipientTokensBulk(dm.id, companyId, recipients.map((r: any) => String(r.id)), 30);
+    } catch (e: any) {
+      const msg = e?.message || '';
+      if (msg.includes('relation') && msg.includes('does not exist')) {
+        return res.status(503).json({ error: 'DB 마이그레이션 필요 — 운영자에게 dm_recipient_tokens 테이블 생성 요청', code: 'DB_MIGRATION_PENDING' });
+      }
+      throw e;
+    }
+    const tokenByCust: Record<string, string> = {};
+    for (const p of tokenPairs) tokenByCust[p.customerId] = p.token;
+    const baseUrl = process.env.HANJUL_BASE_URL || 'https://hanjul.ai';
+
+    // staging 적재 — phone + name(%고객명%) + extra1(수신자별 DM 링크 %기타1%)
+    const stagingId = uuidv4();
+    const phones = recipients.map((r: any) => String(r.phone || '').replace(/\D/g, ''));
+    const names = recipients.map((r: any) => (r.name ?? null));
+    const links = recipients.map((r: any) => `${baseUrl}/api/dm/v/dm-${shortCode}?r=${tokenByCust[String(r.id)] || ''}`);
+    await query(
+      `INSERT INTO campaign_send_staging (staging_id, company_id, phone, name, extra1)
+       SELECT $1::uuid, $2::uuid, u.phone, u.name, u.extra1
+         FROM UNNEST($3::text[], $4::text[], $5::text[]) AS u(phone, name, extra1)`,
+      [stagingId, companyId, phones, names, links],
+    );
+
+    // 정제 후 실제 발송 수(중복·수신거부 제외) — 커밋과 동일 기준으로 과금 정확
+    const { sendCount } = await countStagingFiltered(stagingId, companyId, userId, true, true);
+    if (sendCount === 0) {
+      await query(`DELETE FROM campaign_send_staging WHERE staging_id = $1`, [stagingId]);
+      return res.status(400).json({ error: '수신 가능한 대상이 0명입니다(수신거부 제외 후).', code: 'ZERO_MATCH' });
+    }
+
+    // 본문 = 사용자 문구 + 수신자별 링크(%기타1%)
+    const finalMessage = `${messageText.trim()}\n%기타1%`;
+
+    let campaignId: string;
+    try {
+      const result = await createDirectSendCampaign(
+        {
+          stagingId,
+          campaignName: `DM 발송 · ${dm.title || ''} · ${new Date().toLocaleDateString('ko-KR')}`,
+          msgType: 'LMS',
+          message: finalMessage,
+          subject: (dm.title || 'DM').slice(0, 40),
+          callback,
+          sendChannel: 'sms',
+          adEnabled: isAd === true,
+          total: sendCount,
+          dedupEnabled: true,
+          unsubFilterEnabled: true,
+        },
+        { companyId, userId },
+        { finalSource: 'manual' },
+      );
+      campaignId = result.campaignId;
+    } catch (e: any) {
+      await query(`DELETE FROM campaign_send_staging WHERE staging_id = $1`, [stagingId]).catch(() => {});
+      if (e instanceof DirectSendError && e.code === 'INSUFFICIENT_BALANCE') {
+        return res.status(402).json({ error: '잔액이 부족합니다.', code: 'INSUFFICIENT_BALANCE' });
+      }
+      throw e;
+    }
+
+    return res.json({ success: true, campaignId, sent: sendCount });
+  } catch (err: any) {
+    console.error('[DM 타겟 발송] 오류:', err?.message);
+    return res.status(500).json({ error: err?.message || 'DM 발송 실패' });
+  }
+});
+
+// GET /api/dm/:id/recipients-tracking — DM 타겟 발송 수신자별 열람/액션 현황 (P4 추적)
+//   dm_recipient_tokens(발송 대상) × dm_views(열람, phone 매칭) → 누가 열었고 어디까지 봤는지.
+dmRouter.get('/:id/recipients-tracking', async (req: any, res: any) => {
+  try {
+    const companyId = req.user?.companyId;
+    if (!companyId) return res.status(403).json({ error: '회사 권한이 필요합니다.' });
+
+    const r = await query(
+      `SELECT DISTINCT ON (t.customer_id)
+              t.customer_id, c.name, c.phone, t.created_at AS sent_at,
+              v.page_reached, v.total_pages, v.duration_seconds, v.viewed_at, v.last_active_at
+         FROM dm_recipient_tokens t
+         JOIN customers c ON c.id = t.customer_id AND c.company_id = t.company_id
+         LEFT JOIN LATERAL (
+           SELECT page_reached, total_pages, duration_seconds, viewed_at, last_active_at
+             FROM dm_views dv
+            WHERE dv.dm_id = t.dm_id AND dv.phone = c.phone
+            ORDER BY dv.viewed_at DESC LIMIT 1
+         ) v ON true
+        WHERE t.dm_id = $1::uuid AND t.company_id = $2::uuid
+        ORDER BY t.customer_id, t.created_at DESC
+        LIMIT 1000`,
+      [req.params.id, companyId],
+    );
+
+    const recipients = r.rows.map((row: any) => {
+      const viewed = !!row.viewed_at;
+      const totalPages = Number(row.total_pages || 0);
+      const pageReached = Number(row.page_reached || 0);
+      return {
+        customerId: row.customer_id,
+        name: row.name || null,
+        phone: row.phone || null,
+        sentAt: row.sent_at,
+        viewed,
+        pageReached,
+        totalPages,
+        completed: viewed && totalPages > 0 && pageReached >= totalPages,
+        durationSeconds: Number(row.duration_seconds || 0),
+        lastActiveAt: row.last_active_at || null,
+      };
+    });
+
+    const summary = {
+      sent: recipients.length,
+      viewed: recipients.filter((x) => x.viewed).length,
+      completed: recipients.filter((x) => x.completed).length,
+    };
+
+    return res.json({ success: true, summary, recipients });
+  } catch (err: any) {
+    const msg = err?.message || '';
+    if (msg.includes('relation') && msg.includes('does not exist')) {
+      return res.status(503).json({ error: 'DB 마이그레이션 필요 — dm_recipient_tokens 테이블 생성 요청', code: 'DB_MIGRATION_PENDING' });
+    }
+    console.error('[DM 발송 추적] 오류:', err?.message);
+    return res.status(500).json({ error: err?.message || '추적 조회 실패' });
   }
 });
 

@@ -14,6 +14,7 @@ import { query } from '../config/database';
 import {
   sendEmailCampaign,
   resolveCustomerRecipients,
+  resolveCustomerRecipientsByFilter,
   type EmailTargetSpec,
   type EmailRecipient,
 } from './email-channel';
@@ -38,6 +39,9 @@ async function resolveRecipients(companyId: string, spec: EmailTargetSpec | null
   }
   if (spec.type === 'customers') {
     return resolveCustomerRecipients(companyId, spec.grades);
+  }
+  if (spec.type === 'filter') {
+    return resolveCustomerRecipientsByFilter(companyId, spec.filter);
   }
   return [];
 }

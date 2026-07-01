@@ -166,15 +166,18 @@ function extractJSON(text: string): string {
 // ════════════════════════════════════════════════════════════════════
 
 /**
- * 자연어 → CT-01 structured filter 변환 + preview.
+ * 자연어 → CT-01 structured filter 변환 (AI 호출 + 파싱 + 호환 검증).
+ * 매칭 수/0건 판정은 하지 않는다 — 호출측이 채널·문맥에 맞는 카운트를 따로 한다.
+ * (generateSegmentFromNaturalLanguage = 이 함수 + 문자 발송 기준 previewMatching + 0건 차단.
+ *  타겟 추출 엔드포인트 = 이 함수 + 채널 자격 카운트.)
  *
  * @throws SegmentGenerationError code='AI_RESPONSE_INVALID' AI 응답 JSON 파싱 실패
+ * @throws SegmentGenerationError code='EMPTY_FILTER' AI가 조건을 추출하지 못함
  * @throws SegmentGenerationError code='FILTER_VALIDATION_FAILED' CT-01 호환 검증 실패
- * @throws SegmentGenerationError code='ZERO_MATCH' 0건 매칭 (자동 완화 X — D171 영구 룰)
  */
-export async function generateSegmentFromNaturalLanguage(
+export async function convertNaturalLanguageToFilter(
   input: GenerateSegmentInput,
-): Promise<GenerateSegmentResult> {
+): Promise<{ filter: GenerateSegmentResult['filter']; explanation: string }> {
   const { companyId, naturalLanguage } = input;
   const customFieldKeys = input.customFieldKeys || [];
 
@@ -182,7 +185,7 @@ export async function generateSegmentFromNaturalLanguage(
     throw new SegmentGenerationError('EMPTY_INPUT', '자연어 입력이 비어있습니다.');
   }
 
-  // 1. AI 호출 (Opus 4.7)
+  // 1. AI 호출
   const system = buildSystemPrompt(customFieldKeys);
   const userMessage = `사용자 입력: ${naturalLanguage.trim()}\n\n위 입력을 structured filter JSON으로 변환해주세요.`;
 
@@ -236,10 +239,25 @@ export async function generateSegmentFromNaturalLanguage(
     );
   }
 
-  // 4. 매칭 수 + 샘플 5건 (CT-01 buildCustomerFilter + COUNT + LIMIT)
-  const { matchCount, samples } = await previewMatching(companyId, filter);
+  return { filter, explanation };
+}
 
-  // 5. 0건 결과 = 자동 완화 X (D171 영구 룰)
+/**
+ * 자연어 → CT-01 structured filter 변환 + 문자 발송 기준 preview.
+ *
+ * @throws SegmentGenerationError code='AI_RESPONSE_INVALID' AI 응답 JSON 파싱 실패
+ * @throws SegmentGenerationError code='FILTER_VALIDATION_FAILED' CT-01 호환 검증 실패
+ * @throws SegmentGenerationError code='ZERO_MATCH' 0건 매칭 (자동 완화 X — D171 영구 룰)
+ */
+export async function generateSegmentFromNaturalLanguage(
+  input: GenerateSegmentInput,
+): Promise<GenerateSegmentResult> {
+  const { filter, explanation } = await convertNaturalLanguageToFilter(input);
+
+  // 매칭 수 + 샘플 5건 (CT-01 buildCustomerFilter + COUNT + LIMIT, 문자 발송 가능 기준)
+  const { matchCount, samples } = await previewMatching(input.companyId, filter);
+
+  // 0건 결과 = 자동 완화 X (D171 영구 룰)
   if (matchCount === 0) {
     throw new SegmentGenerationError(
       'ZERO_MATCH',

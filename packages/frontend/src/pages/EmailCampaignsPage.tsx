@@ -17,6 +17,7 @@ import EmailEventsModal from '../components/email/EmailEventsModal';
 import EmailVisualEditor from '../components/email/EmailVisualEditor';
 import EmailTemplateGalleryModal from '../components/email/EmailTemplateGalleryModal';
 import EmailAnalyticsModal from '../components/email/EmailAnalyticsModal';
+import TargetExtractModal, { type ExtractedTarget } from '../components/TargetExtractModal';
 import type { Section } from '../utils/dm-section-defaults';
 import type { EmailCampaign, CampaignStatus } from '../components/email/email-campaign-types';
 
@@ -1489,9 +1490,12 @@ interface PrecheckResult {
 }
 
 function RecipientsModal({ campaign, authHeaders, onProceed, onClose, onToast }: RecipientsModalProps) {
-  const [tab, setTab] = useState<'customers' | 'direct'>('customers');
+  const [tab, setTab] = useState<'customers' | 'direct' | 'ai'>('customers');
   const [mode, setMode] = useState<'immediate' | 'scheduled'>('immediate');
   const [scheduledAt, setScheduledAt] = useState('');
+  // AI 정밀 타겟 — 타겟 추출로 확정한 filter를 발송 대상으로 held
+  const [extractOpen, setExtractOpen] = useState(false);
+  const [extracted, setExtracted] = useState<ExtractedTarget | null>(null);
 
   // 고객DB 탭
   const [grades, setGrades] = useState<Array<{ grade: string; count: number }>>([]);
@@ -1536,7 +1540,7 @@ function RecipientsModal({ campaign, authHeaders, onProceed, onClose, onToast }:
     return () => { alive = false; };
   }, [tab, selectedGrades]);
 
-  const total = tab === 'customers' ? (preview?.total || 0) : directCount;
+  const total = tab === 'customers' ? (preview?.total || 0) : tab === 'ai' ? (extracted?.channelEligibleCount || 0) : directCount;
 
   const handlePrecheck = async () => {
     setPrechecking(true);
@@ -1569,6 +1573,9 @@ function RecipientsModal({ campaign, authHeaders, onProceed, onClose, onToast }:
     if (mode === 'scheduled') payload.scheduled_at = new Date(scheduledAt).toISOString();
     if (tab === 'customers') {
       payload.target = { type: 'customers', grades: selectedGrades.length > 0 ? selectedGrades : undefined };
+    } else if (tab === 'ai') {
+      if (!extracted) { onToast('먼저 타겟을 추출해주세요.', 'warning'); return; }
+      payload.target = { type: 'filter', filter: extracted.filter };
     } else {
       payload.recipients = recipientsText.split(/[,\n;]+/).map((e) => ({ email: e.trim() })).filter((r) => r.email.includes('@'));
     }
@@ -1580,6 +1587,7 @@ function RecipientsModal({ campaign, authHeaders, onProceed, onClose, onToast }:
   const statusIcon = (s: string) => s === 'pass' ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : s === 'warn' ? <AlertTriangle className="w-3.5 h-3.5 text-amber-400" /> : <AlertCircle className="w-3.5 h-3.5 text-rose-400" />;
 
   return (
+    <>
     <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50" onClick={onClose}>
       <div className="bg-violet-900/40 border border-white/10 rounded-2xl shadow-2xl w-full max-w-xl max-h-[95vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
         <div className="sticky top-0 bg-violet-900/40 border-b border-white/10 px-6 py-4 flex items-center justify-between z-10">
@@ -1603,6 +1611,9 @@ function RecipientsModal({ campaign, authHeaders, onProceed, onClose, onToast }:
             </button>
             <button onClick={() => setTab('direct')} className={`flex-1 py-2 rounded-md text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors ${tab === 'direct' ? 'bg-blue-500/40 text-white' : 'text-white/50 hover:text-white'}`}>
               <PenLine className="w-3.5 h-3.5" /> 직접 입력
+            </button>
+            <button onClick={() => setTab('ai')} className={`flex-1 py-2 rounded-md text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors ${tab === 'ai' ? 'bg-blue-500/40 text-white' : 'text-white/50 hover:text-white'}`}>
+              <Sparkles className="w-3.5 h-3.5" /> AI 정밀 타겟
             </button>
           </div>
 
@@ -1628,6 +1639,24 @@ function RecipientsModal({ campaign, authHeaders, onProceed, onClose, onToast }:
                   {previewLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : `${total.toLocaleString()}명`}
                 </span>
               </div>
+            </div>
+          ) : tab === 'ai' ? (
+            <div className="space-y-3">
+              <div className="text-[11px] text-white/50">자연어로 조건을 입력하면 이메일 보낼 대상을 정확히 추출합니다. 조건에 맞고 이메일 수신 가능한 고객만 발송됩니다.</div>
+              {extracted ? (
+                <div className="bg-emerald-500/10 border border-emerald-400/25 rounded-lg p-3 space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs text-white/70">추출된 타겟 (이메일 발송 가능)</span>
+                    <span className="text-lg font-bold text-emerald-300">{extracted.channelEligibleCount.toLocaleString()}명</span>
+                  </div>
+                  {extracted.explanation && <p className="text-[11px] text-white/50">{extracted.explanation}</p>}
+                  <button onClick={() => setExtractOpen(true)} className="text-[11px] text-fuchsia-300 hover:text-fuchsia-200">조건 다시 추출</button>
+                </div>
+              ) : (
+                <button onClick={() => setExtractOpen(true)} className="w-full py-3 rounded-lg text-sm font-semibold text-white bg-gradient-to-r from-violet-500 to-fuchsia-500 hover:from-violet-600 hover:to-fuchsia-600 flex items-center justify-center gap-2">
+                  <Sparkles className="w-4 h-4" /> AI 타겟 추출
+                </button>
+              )}
             </div>
           ) : (
             <div className="space-y-2">
@@ -1706,6 +1735,13 @@ function RecipientsModal({ campaign, authHeaders, onProceed, onClose, onToast }:
         </div>
       </div>
     </div>
+    <TargetExtractModal
+      show={extractOpen}
+      channel="email"
+      onClose={() => setExtractOpen(false)}
+      onApply={(t) => { setExtracted(t); setExtractOpen(false); }}
+    />
+    </>
   );
 }
 

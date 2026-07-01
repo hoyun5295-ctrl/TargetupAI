@@ -39,6 +39,7 @@ import {
   sendEmailCampaign,
   recordEmailEvent,
   resolveCustomerRecipients,
+  resolveCustomerRecipientsByFilter,
   previewCustomerRecipients,
   listCustomerGrades,
   scheduleCampaign,
@@ -560,6 +561,10 @@ router.post('/campaigns/:id/send', async (req: Request, res: Response) => {
       const grades = Array.isArray(target.grades) ? target.grades.map((g: any) => String(g)) : undefined;
       targetSpec = { type: 'customers', grades };
       resolved = await resolveCustomerRecipients(auth.companyId, grades);
+    } else if (target && target.type === 'filter' && target.filter && typeof target.filter === 'object' && Object.keys(target.filter).length > 0) {
+      // 타겟 추출(/api/targets/extract)로 확정한 filter → 이메일 발송 대상 결합
+      targetSpec = { type: 'filter', filter: target.filter };
+      resolved = await resolveCustomerRecipientsByFilter(auth.companyId, target.filter);
     } else {
       return res.status(400).json({ success: false, error: '발송 대상을 지정해주세요 (recipients 또는 target).' });
     }

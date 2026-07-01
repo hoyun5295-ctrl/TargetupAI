@@ -12,6 +12,7 @@ import { useCustomerDataGate, CustomerDataRequiredBanner, CustomerDataRequiredMo
 import { InAppMessagePreview } from '../components/InAppMessagePreview';
 import CreditConfirmModal from '../components/credit/CreditConfirmModal';
 import { useToast } from '../components/ToastProvider';
+import TargetExtractModal from '../components/TargetExtractModal';
 import { THEME_OPTIONS } from '../components/inapp/blockTheme';
 
 // ════════════════════════════════════════════════════════════════════
@@ -56,6 +57,7 @@ interface MessageRow {
   trigger_event?: string;
   trigger_conditions?: any;
   segment_conditions?: any;
+  audience_filter?: Record<string, any> | null;
   personalization_vars?: string[];
   display_frequency?: Frequency;
   auto_dismiss_seconds?: number | null;
@@ -512,6 +514,14 @@ export default function InAppMessagesPage() {
       const data = await res.json();
       if (handle503(data)) return;
       if (data.success) {
+        // 타겟 추출 표시 대상(audience_filter) persist — 저장으로 확정된 message id 사용 (신규/수정 공통)
+        const savedId = editing!.id || data.message?.id;
+        if (savedId && editing!.audience_filter !== undefined) {
+          await fetch(`/api/cdp/inapp/${savedId}/audience-filter`, {
+            method: 'PUT', headers: authHeaders(),
+            body: JSON.stringify({ filter: editing!.audience_filter || null }),
+          }).catch(() => {});
+        }
         showToast(isUpdate ? '메시지 수정 완료' : '메시지 생성 완료', { type: 'success' });
         setEditing(null);
         await loadAll();
@@ -1260,6 +1270,7 @@ interface EditModalProps {
 function EditModal({ editing, setEditing, availableVariables, onSave, fileInputRef, onImageUpload, uploadImage }: EditModalProps) {
   const [segmentCount, setSegmentCount] = useState<number | null>(null);
   const [segmentDesc, setSegmentDesc] = useState<string>('');
+  const [extractOpen, setExtractOpen] = useState(false);
   const [previewCustomer, setPreviewCustomer] = useState<'VIP' | '일반' | '신규'>('일반');
   const [activeTab, setActiveTab] = useState<'content' | 'design' | 'target'>('content');
 
@@ -1680,6 +1691,35 @@ function EditModal({ editing, setEditing, availableVariables, onSave, fileInputR
                 </div>
               </div>
             </div>
+
+            {/* AI 정밀 타겟 (표시 대상) — 자연어 추출 filter를 표시 대상으로 (단 1 오차 없는 타겟) */}
+            <div className={activeTab === 'target' ? 'mt-3' : 'hidden'}>
+              <h4 className="text-xs font-bold text-white/80 mb-2 flex items-center gap-1.5">
+                <Sparkles className="w-3 h-3" /> AI 정밀 타겟 (표시 대상)
+              </h4>
+              <div className="bg-slate-900/60 border border-white/10 rounded-lg p-3 space-y-2">
+                {editing.audience_filter && Object.keys(editing.audience_filter).length > 0 ? (
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-[11px] text-emerald-300">정밀 타겟 지정됨 — 이 조건에 맞는 회원에게만 표시</span>
+                    <div className="flex items-center gap-1.5">
+                      <button onClick={() => setExtractOpen(true)} className="text-[11px] text-fuchsia-300 hover:text-fuchsia-200">다시 추출</button>
+                      <button onClick={() => updateField('audience_filter', null)} className="text-[11px] text-white/40 hover:text-white/70">해제</button>
+                    </div>
+                  </div>
+                ) : (
+                  <button onClick={() => setExtractOpen(true)} className="w-full py-2 rounded-lg text-xs font-semibold text-white bg-gradient-to-r from-violet-500 to-fuchsia-500 hover:from-violet-600 hover:to-fuchsia-600 flex items-center justify-center gap-1.5">
+                    <Sparkles className="w-3.5 h-3.5" /> 자연어로 표시 대상 추출
+                  </button>
+                )}
+                <p className="text-[10px] text-white/30">세그먼트와 함께 적용됩니다. 표시는 저장 후 반영됩니다.</p>
+              </div>
+            </div>
+            <TargetExtractModal
+              show={extractOpen}
+              channel="inapp"
+              onClose={() => setExtractOpen(false)}
+              onApply={(t) => { updateField('audience_filter', t.filter); setExtractOpen(false); }}
+            />
 
             {/* 탭 타겟·시점: 개인화 · 트리거 · 시간 · 색상 */}
             <div className={activeTab === 'target' ? 'space-y-5' : 'hidden'}>

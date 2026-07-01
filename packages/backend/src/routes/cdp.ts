@@ -69,6 +69,7 @@ import {
   trackImpression,
   getMessageStats,
   getCompanyInAppStats,
+  setInAppAudienceFilter,
 } from '../utils/inapp-message';
 // ★ D215+ (2026-05-25) 인앱 메시지 압도적 강화 CT-77~84
 import { generateInAppMessagePackage, listQuickStartCards } from '../utils/inapp-ai-generator';
@@ -1147,6 +1148,30 @@ router.put('/inapp/:id', async (req: Request, res: Response) => {
     }
     console.error('[CDP /inapp PUT] 오류:', err);
     return res.status(500).json({ success: false, error: err?.message || '수정 실패' });
+  }
+});
+
+// 타겟 추출 filter를 인앱 메시지 표시 대상으로 저장 (P3 — 비-문자 타겟추출)
+router.put('/inapp/:id/audience-filter', async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    const userType = req.user?.userType;
+    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+    if (userType !== 'company_admin') {
+      return res.status(403).json({ success: false, error: '수정은 회사 관리자만 가능합니다.' });
+    }
+    const raw = req.body?.filter;
+    const filter = raw && typeof raw === 'object' && Object.keys(raw).length > 0 ? raw : null;
+    const ok = await setInAppAudienceFilter(companyId, req.params.id, filter);
+    if (!ok) return res.status(404).json({ success: false, error: '메시지를 찾을 수 없습니다.' });
+    return res.json({ success: true });
+  } catch (err: any) {
+    const msg = err?.message || '';
+    if (msg.includes('column') && msg.includes('does not exist')) {
+      return res.status(503).json({ success: false, error: 'DB 마이그레이션 필요 — 운영자에게 cdp_inapp_messages ALTER(audience_filter) 실행 요청', code: 'DB_MIGRATION_PENDING' });
+    }
+    console.error('[CDP /inapp audience-filter] 오류:', err);
+    return res.status(500).json({ success: false, error: err?.message || '저장 실패' });
   }
 });
 

@@ -25,6 +25,7 @@ import { buildEmailTrainingMessage } from './email-training-message';
 import { renderEmailSections } from './email/email-section-renderer';
 import { resolveEmailSectionsForCustomer, renderEmailText } from './email/email-personalization';
 import { getCompanyBrandKit } from './dm/dm-brand-kit';
+import { buildCustomerFilter } from './customer-filter';
 import type { Section } from './dm/dm-section-registry';
 
 // ════════════════════════════════════════════════════════════════════
@@ -36,7 +37,8 @@ export type EmailCampaignStatus = 'draft' | 'scheduled' | 'sending' | 'completed
 /** 예약 발송 대상 명세 — scheduled 캠페인의 발송 시점 수신자 해석 기준 (email-send-sweeper 소비) */
 export type EmailTargetSpec =
   | { type: 'customers'; grades?: string[] }
-  | { type: 'list'; recipients: Array<{ email: string; name?: string }> };
+  | { type: 'list'; recipients: Array<{ email: string; name?: string }> }
+  | { type: 'filter'; filter: Record<string, { operator: string; value: any }> };
 
 export interface EmailCampaign {
   id: string;
@@ -488,6 +490,24 @@ const RECIPIENT_SAFETY_WHERE = `
   AND is_opt_out IS DISTINCT FROM true
   AND is_invalid IS DISTINCT FROM true`;
 
+/** customers row → EmailRecipient(+개인화 customer). 등급/필터 해석 공용 매핑. */
+function mapEmailRecipientRow(r: any): EmailRecipient {
+  return {
+    email: String(r.email).trim(),
+    name: r.name ? String(r.name) : undefined,
+    // 개인화(변수+조건부)용 화이트리스트 고객 필드 — buildPreviewCustomers와 동일한 검증된 컬럼 집합
+    customer: {
+      name: r.name || '고객',
+      grade: r.grade || '',
+      points: Number(r.points || 0),
+      region: r.region || '',
+      recent_purchase_store: r.recent_purchase_store || '',
+      total_purchase_amount: Number(r.total_purchase_amount || 0),
+      purchase_count: Number(r.purchase_count || 0),
+    },
+  };
+}
+
 /** 발송 대상 고객 해석 — 회사 격리 + 안전 필터 + 선택 등급. 발송 엔진/스위퍼가 소비. */
 export async function resolveCustomerRecipients(
   companyId: string,
@@ -506,20 +526,32 @@ export async function resolveCustomerRecipients(
      ORDER BY lower(email)`,
     params,
   );
-  return result.rows.map((r: any) => ({
-    email: String(r.email).trim(),
-    name: r.name ? String(r.name) : undefined,
-    // 개인화(변수+조건부)용 화이트리스트 고객 필드 — buildPreviewCustomers와 동일한 검증된 컬럼 집합
-    customer: {
-      name: r.name || '고객',
-      grade: r.grade || '',
-      points: Number(r.points || 0),
-      region: r.region || '',
-      recent_purchase_store: r.recent_purchase_store || '',
-      total_purchase_amount: Number(r.total_purchase_amount || 0),
-      purchase_count: Number(r.purchase_count || 0),
-    },
-  }));
+  return result.rows.map(mapEmailRecipientRow);
+}
+
+/**
+ * 발송 대상 고객 해석 — 회사 격리 + 안전 필터 + CT-01 structured filter.
+ * 타겟 추출(/api/targets/extract)로 확정한 filter를 이메일 발송 대상으로 결합.
+ * 안전 필터(RECIPIENT_SAFETY_WHERE)는 등급 경로와 동일 — 추출 미리보기 인원수와 실발송 일치.
+ */
+export async function resolveCustomerRecipientsByFilter(
+  companyId: string,
+  filter: Record<string, { operator: string; value: any }>,
+): Promise<EmailRecipient[]> {
+  const { sql: filterSql, params: filterParams } = buildCustomerFilter(filter, {
+    tableAlias: 'c',
+    startParamIndex: 2,
+    storeCodeMode: 'skip',
+    inputFormat: 'structured',
+  });
+  const result = await query(
+    `SELECT DISTINCT ON (lower(c.email)) c.email, c.name, c.grade, c.points, c.region, c.recent_purchase_store, c.total_purchase_amount, c.purchase_count
+     FROM customers c
+     WHERE c.company_id = $1::uuid AND ${RECIPIENT_SAFETY_WHERE}${filterSql}
+     ORDER BY lower(c.email)`,
+    [companyId, ...filterParams],
+  );
+  return result.rows.map(mapEmailRecipientRow);
 }
 
 /** 발송 전 미리보기 — 대상 인원 + 등급 분포 + 표본 (RecipientsModal 고객DB 탭). */
