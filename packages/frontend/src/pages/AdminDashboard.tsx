@@ -309,6 +309,7 @@ const [messageDetailContent, setMessageDetailContent] = useState<{ name: string;
   const [creditRequests, setCreditRequests] = useState<any[]>([]); // AI 크레딧 충전 요청 (후불 승인 대기)
   const [creditRiskCompanies, setCreditRiskCompanies] = useState<any[]>([]); // 크레딧 위험 회사 (소진·마이너스 — v2)
   const [predictiveRunning, setPredictiveRunning] = useState(false); // 예측 일괄 수동 실행 진행 상태
+  const [creditPanel, setCreditPanel] = useState<'requests' | 'risk' | 'predictive' | null>(null); // 크레딧 탭 타일 → 모달
   // 크레딧 사용 이력 (전체 회사 — 크레딧 관리 탭)
   const [creditTxAll, setCreditTxAll] = useState<any[]>([]);
   const [creditTxPage, setCreditTxPage] = useState(1);
@@ -3703,82 +3704,148 @@ const handleApproveRequest = async (id: string) => {
         {/* 크레딧 관리 탭 — AI 크레딧 충전 요청(후불 승인) + 전체 회사 사용 이력 */}
         {activeTab === 'credits' && (
           <div className="space-y-4">
-            {/* 크레딧 충전/관리 — 후불 충전 요청 승인·거절 */}
-            <div className="bg-violet-50 border border-violet-200 rounded-lg p-4">
-              <h3 className="font-semibold text-violet-800 mb-3">크레딧 충전 요청 {creditRequests.length}건 (후불)</h3>
-              {creditRequests.length === 0 ? (
-                <p className="text-sm text-violet-600/80">대기 중인 크레딧 충전 요청이 없습니다.</p>
-              ) : (
-                <div className="space-y-2">
-                  {creditRequests.map((cr) => (
-                    <div key={cr.id} className="flex items-center justify-between bg-white rounded-lg px-4 py-3 border border-violet-100 flex-wrap gap-2">
-                      <div className="flex items-center gap-4 flex-wrap">
-                        <span className="px-2 py-0.5 rounded text-xs font-medium bg-violet-100 text-violet-800">크레딧 충전</span>
-                        <span className="font-medium text-gray-900">{cr.company_name}</span>
-                        <span className="font-bold text-lg text-violet-700">{Number(cr.credits).toLocaleString()} 크레딧</span>
-                        <span className="text-sm text-gray-500">월말 청구 {Number(cr.total_amount).toLocaleString()}원</span>
-                        <span className="text-xs text-gray-400">{formatDateTime(cr.created_at)}</span>
+            {/* 크레딧 요약 타일 3칸 — 클릭 시 모달 상세 (가로 여백 축소) */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <button
+                onClick={() => setCreditPanel('requests')}
+                className="text-left bg-white rounded-2xl border border-gray-200/70 shadow-sm p-5 hover:shadow-md hover:border-violet-200 transition-all"
+              >
+                <div className="flex items-center justify-between">
+                  <span className="text-sm font-semibold text-gray-700">크레딧 충전 요청</span>
+                  {creditRequests.length > 0 && <span className="w-2 h-2 rounded-full bg-violet-500"></span>}
+                </div>
+                <div className="mt-2 text-3xl font-bold tracking-tight text-violet-700 tabular-nums">
+                  {creditRequests.length}<span className="text-base text-gray-400 font-semibold">건</span>
+                </div>
+                <div className="text-[11px] text-gray-400 mt-1">후불 승인 대기 · 클릭해 상세</div>
+              </button>
+
+              <button
+                onClick={() => setCreditPanel('risk')}
+                className="text-left bg-white rounded-2xl border border-gray-200/70 shadow-sm p-5 hover:shadow-md hover:border-rose-200 transition-all"
+              >
+                <div className="flex items-center justify-between">
+                  <span className="text-sm font-semibold text-gray-700">크레딧 위험 회사</span>
+                  {creditRiskCompanies.length > 0 && <span className="w-2 h-2 rounded-full bg-rose-500"></span>}
+                </div>
+                <div className="mt-2 text-3xl font-bold tracking-tight text-rose-600 tabular-nums">
+                  {creditRiskCompanies.length}<span className="text-base text-gray-400 font-semibold">건</span>
+                </div>
+                <div className="text-[11px] text-gray-400 mt-1">소진·마이너스 · 업셀/해지방어</div>
+              </button>
+
+              <button
+                onClick={() => setCreditPanel('predictive')}
+                className="text-left bg-white rounded-2xl border border-gray-200/70 shadow-sm p-5 hover:shadow-md hover:border-indigo-200 transition-all"
+              >
+                <div className="flex items-center justify-between">
+                  <span className="text-sm font-semibold text-gray-700">예측 일괄 분석·차감</span>
+                  <svg className="w-4 h-4 text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" /></svg>
+                </div>
+                <div className="mt-2 text-lg font-bold tracking-tight text-indigo-700">매일 오전 9시 자동</div>
+                <div className="text-[11px] text-gray-400 mt-1">클릭해 지금 실행</div>
+              </button>
+            </div>
+
+            {/* 크레딧 충전 요청 모달 */}
+            {creditPanel === 'requests' && (
+              <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50" onClick={() => setCreditPanel(null)}>
+                <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[85vh] flex flex-col overflow-hidden" onClick={(e) => e.stopPropagation()}>
+                  <div className="px-6 py-4 border-b flex items-center justify-between">
+                    <h3 className="text-lg font-semibold text-gray-900">크레딧 충전 요청 {creditRequests.length}건 <span className="text-sm font-normal text-gray-400">(후불)</span></h3>
+                    <button onClick={() => setCreditPanel(null)} className="text-gray-400 hover:text-gray-600 p-1 rounded-lg hover:bg-gray-100"><svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg></button>
+                  </div>
+                  <div className="p-5 overflow-y-auto">
+                    {creditRequests.length === 0 ? (
+                      <p className="text-sm text-gray-500 py-10 text-center">대기 중인 크레딧 충전 요청이 없습니다.</p>
+                    ) : (
+                      <div className="space-y-2">
+                        {creditRequests.map((cr) => (
+                          <div key={cr.id} className="flex items-center justify-between bg-gray-50 rounded-xl px-4 py-3 border border-gray-100 flex-wrap gap-2">
+                            <div className="flex items-center gap-4 flex-wrap">
+                              <span className="px-2 py-0.5 rounded text-xs font-medium bg-violet-100 text-violet-800">크레딧 충전</span>
+                              <span className="font-medium text-gray-900">{cr.company_name}</span>
+                              <span className="font-bold text-lg text-violet-700">{Number(cr.credits).toLocaleString()} 크레딧</span>
+                              <span className="text-sm text-gray-500">월말 청구 {Number(cr.total_amount).toLocaleString()}원</span>
+                              <span className="text-xs text-gray-400">{formatDateTime(cr.created_at)}</span>
+                            </div>
+                            <div className="flex gap-2 flex-shrink-0">
+                              <button onClick={() => handleApproveCreditRequest(cr)} className="px-4 py-1.5 bg-violet-600 text-white rounded-lg text-sm font-medium hover:bg-violet-700 transition-colors">승인</button>
+                              <button onClick={() => handleRejectCreditRequest(cr)} className="px-4 py-1.5 bg-red-500 text-white rounded-lg text-sm font-medium hover:bg-red-600 transition-colors">거절</button>
+                            </div>
+                          </div>
+                        ))}
                       </div>
-                      <div className="flex gap-2 flex-shrink-0">
-                        <button onClick={() => handleApproveCreditRequest(cr)} className="px-4 py-1.5 bg-violet-600 text-white rounded-lg text-sm font-medium hover:bg-violet-700 transition-colors">승인</button>
-                        <button onClick={() => handleRejectCreditRequest(cr)} className="px-4 py-1.5 bg-red-500 text-white rounded-lg text-sm font-medium hover:bg-red-600 transition-colors">거절</button>
-                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* 크레딧 위험 회사 모달 */}
+            {creditPanel === 'risk' && (
+              <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50" onClick={() => setCreditPanel(null)}>
+                <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[85vh] flex flex-col overflow-hidden" onClick={(e) => e.stopPropagation()}>
+                  <div className="px-6 py-4 border-b flex items-center justify-between">
+                    <div>
+                      <h3 className="text-lg font-semibold text-gray-900">크레딧 위험 회사 {creditRiskCompanies.length}건</h3>
+                      <span className="text-[11px] text-gray-400">소진 임박·0·마이너스 — 업셀/해지방어 대상</span>
                     </div>
-                  ))}
-                </div>
-              )}
-            </div>
-
-            {/* 크레딧 위험 회사 — 소진·마이너스·상한 근접 (해지방어·업셀 레이더, v2) */}
-            <div className="bg-rose-50 border border-rose-200 rounded-lg p-4">
-              <div className="flex items-center justify-between mb-3 flex-wrap gap-1">
-                <h3 className="font-semibold text-rose-800">크레딧 위험 회사 {creditRiskCompanies.length}건</h3>
-                <span className="text-[11px] text-rose-500">소진 임박·0·마이너스 — 업셀/해지방어 대상</span>
-              </div>
-              {creditRiskCompanies.length === 0 ? (
-                <p className="text-sm text-rose-600/80">위험 회사가 없습니다.</p>
-              ) : (
-                <div className="space-y-2">
-                  {creditRiskCompanies.map((co) => {
-                    const badge = co.risk === 'negative'
-                      ? { t: co.nearCap ? '마이너스 · 상한 근접' : '마이너스', c: 'bg-rose-600 text-white' }
-                      : co.risk === 'depleted'
-                        ? { t: '소진(0)', c: 'bg-rose-200 text-rose-800' }
-                        : { t: '소진 임박', c: 'bg-amber-200 text-amber-800' };
-                    return (
-                      <div key={co.id} className="flex items-center justify-between bg-white rounded-lg px-4 py-2.5 border border-rose-100 flex-wrap gap-2">
-                        <div className="flex items-center gap-3 flex-wrap">
-                          <span className={`px-2 py-0.5 rounded text-xs font-medium ${badge.c}`}>{badge.t}</span>
-                          <span className="font-medium text-gray-900">{co.companyName}</span>
-                          <span className="text-xs text-gray-400">{co.planName}</span>
-                        </div>
-                        <div className="flex items-center gap-4 text-sm flex-shrink-0">
-                          <span className={`font-bold tabular-nums ${co.total < 0 ? 'text-rose-600' : 'text-gray-700'}`}>잔액 {Number(co.total).toLocaleString()}</span>
-                          <span className="text-xs text-gray-400">월 {Number(co.planCredits).toLocaleString()}</span>
-                        </div>
+                    <button onClick={() => setCreditPanel(null)} className="text-gray-400 hover:text-gray-600 p-1 rounded-lg hover:bg-gray-100"><svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg></button>
+                  </div>
+                  <div className="p-5 overflow-y-auto">
+                    {creditRiskCompanies.length === 0 ? (
+                      <p className="text-sm text-gray-500 py-10 text-center">위험 회사가 없습니다.</p>
+                    ) : (
+                      <div className="space-y-2">
+                        {creditRiskCompanies.map((co) => {
+                          const badge = co.risk === 'negative'
+                            ? { t: co.nearCap ? '마이너스 · 상한 근접' : '마이너스', c: 'bg-rose-600 text-white' }
+                            : co.risk === 'depleted'
+                              ? { t: '소진(0)', c: 'bg-rose-200 text-rose-800' }
+                              : { t: '소진 임박', c: 'bg-amber-200 text-amber-800' };
+                          return (
+                            <div key={co.id} className="flex items-center justify-between bg-gray-50 rounded-xl px-4 py-2.5 border border-gray-100 flex-wrap gap-2">
+                              <div className="flex items-center gap-3 flex-wrap">
+                                <span className={`px-2 py-0.5 rounded text-xs font-medium ${badge.c}`}>{badge.t}</span>
+                                <span className="font-medium text-gray-900">{co.companyName}</span>
+                                <span className="text-xs text-gray-400">{co.planName}</span>
+                              </div>
+                              <div className="flex items-center gap-4 text-sm flex-shrink-0">
+                                <span className={`font-bold tabular-nums ${co.total < 0 ? 'text-rose-600' : 'text-gray-700'}`}>잔액 {Number(co.total).toLocaleString()}</span>
+                                <span className="text-xs text-gray-400">월 {Number(co.planCredits).toLocaleString()}</span>
+                              </div>
+                            </div>
+                          );
+                        })}
                       </div>
-                    );
-                  })}
+                    )}
+                  </div>
                 </div>
-              )}
-            </div>
-
-            {/* 예측 일괄 분석·차감 수동 실행 — 9시 대기 없이 검증·복구·시연 */}
-            <div className="bg-indigo-50 border border-indigo-200 rounded-lg p-4">
-              <div className="flex items-center justify-between flex-wrap gap-3">
-                <div>
-                  <h3 className="font-semibold text-indigo-800">예측 일괄 분석·차감 실행</h3>
-                  <p className="text-[11px] text-indigo-500 mt-0.5">요금제 가입 회사(고객 DB 보유) 전체를 지금 즉시 분석·차감합니다. 매일 오전 9시 자동 실행과 동일하며, 오늘 이미 차감된 회사는 중복되지 않습니다.</p>
-                </div>
-                <button
-                  onClick={handleRunPredictiveNow}
-                  disabled={predictiveRunning}
-                  className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700 transition-colors disabled:opacity-40 disabled:cursor-not-allowed flex-shrink-0"
-                >
-                  {predictiveRunning ? '실행 중…' : '지금 실행'}
-                </button>
               </div>
-            </div>
+            )}
+
+            {/* 예측 일괄 분석·차감 실행 모달 */}
+            {creditPanel === 'predictive' && (
+              <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50" onClick={() => setCreditPanel(null)}>
+                <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden" onClick={(e) => e.stopPropagation()}>
+                  <div className="px-6 py-4 border-b flex items-center justify-between">
+                    <h3 className="text-lg font-semibold text-gray-900">예측 일괄 분석·차감 실행</h3>
+                    <button onClick={() => setCreditPanel(null)} className="text-gray-400 hover:text-gray-600 p-1 rounded-lg hover:bg-gray-100"><svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg></button>
+                  </div>
+                  <div className="p-6">
+                    <p className="text-sm text-gray-600 leading-relaxed">요금제 가입 회사(고객 DB 보유) 전체를 지금 즉시 분석·차감합니다. 매일 오전 9시 자동 실행과 동일하며, 오늘 이미 차감된 회사는 중복되지 않습니다.</p>
+                    <button
+                      onClick={() => { setCreditPanel(null); handleRunPredictiveNow(); }}
+                      disabled={predictiveRunning}
+                      className="mt-5 w-full px-4 py-2.5 bg-indigo-600 text-white rounded-xl text-sm font-medium hover:bg-indigo-700 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                    >
+                      {predictiveRunning ? '실행 중…' : '지금 실행'}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
 
             {/* 크레딧 사용 이력 — 전체 회사 */}
             <div className="bg-white rounded-2xl border border-gray-200/70 shadow-sm">

@@ -326,30 +326,34 @@ async function editMapping(config: AgentConfig): Promise<AgentConfig> {
   }
 
   // ── 커스텀 필드 라벨 편집 ──
+  //   ★ 2026-07-01: 매핑에 실제 쓰인 custom 슬롯 전부를 라벨링 대상으로 삼는다.
+  //     (기존: customFieldLabels에 이미 있는 항목만 수정 가능 → 새로 추가한 custom 슬롯에
+  //      라벨을 못 달던 문제. isae 고객 custom 15개 라벨 지정 불가로 발견 2026-07-01.)
+  //     기본값 = 현재 라벨 또는 소스 컬럼명이라, Enter만 눌러도 컬럼명으로 라벨이 붙는다.
   if (target === 'customLabels') {
     const labels = { ...(config.mapping.customFieldLabels || {}) };
-    const entries = Object.entries(labels);
 
-    if (entries.length === 0) {
-      console.log('  ⚠  커스텀 필드 라벨이 없습니다.');
-      const addNew = await askConfirm('새 라벨을 추가하시겠습니까?', false);
-      if (addNew) {
-        for (let i = 1; i <= 15; i++) {
-          const slot = `custom_${i}`;
-          const label = await ask(`${slot} 라벨 (빈칸=스킵)`);
-          if (label) labels[slot] = label;
-        }
+    // 고객·구매 매핑에서 custom_N 슬롯과 소스 컬럼(라벨 기본값) 수집
+    const slotSource = new Map<string, string>();
+    for (const map of [config.mapping.customers, config.mapping.purchases]) {
+      for (const [src, dst] of Object.entries(map || {})) {
+        if (/^custom_\d+$/.test(dst) && !slotSource.has(dst)) slotSource.set(dst, src);
       }
+    }
+    const slots = [...slotSource.keys()].sort(
+      (a, b) => parseInt(a.slice(7), 10) - parseInt(b.slice(7), 10),
+    );
+
+    if (slots.length === 0) {
+      console.log('  ⚠  매핑된 custom 슬롯이 없습니다.');
     } else {
       console.log('');
-      console.log('  현재 커스텀 필드 라벨:');
-      entries.forEach(([slot, label], i) => {
-        console.log(`    ${i + 1}) ${slot} → ${label}`);
-      });
-
-      for (const [slot, currentLabel] of entries) {
-        const newLabel = await ask(`${slot} 라벨`, currentLabel);
-        labels[slot] = newLabel;
+      console.log('  custom 슬롯 라벨 지정 (Enter = 현재값/컬럼명 유지):');
+      for (const slot of slots) {
+        const src = slotSource.get(slot)!;
+        const def = labels[slot] || src; // 현재 라벨 또는 소스 컬럼명
+        const newLabel = await ask(`${slot} (${src}) 라벨`, def);
+        if (newLabel) labels[slot] = newLabel;
       }
     }
 
