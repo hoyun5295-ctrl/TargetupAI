@@ -179,8 +179,8 @@ export default function EmailCampaignsPage() {
   const [creditConfirm, setCreditConfirm] = useState<{ campaign: EmailCampaign; payload: any; desc: string } | null>(null);
   // 비주얼 빌더 에디터 (sections 기반)
   const [visualEditor, setVisualEditor] = useState<{ sections: Section[]; name?: string; subject?: string; isAd?: boolean; aiGenerated?: boolean; campaignId?: string; completed?: boolean } | null>(null);
-  // ★ 2026-07-02 캠페인 목록 페이징 — 2열 그리드 × 5행 = 페이지당 10건
-  const CAMPAIGN_PAGE_SIZE = 10;
+  // ★ 2026-07-02 캠페인 목록 페이징 — 2열 × 2줄 = 페이지당 4카드 (Harold 확정)
+  const CAMPAIGN_PAGE_SIZE = 4;
   const [campaignPage, setCampaignPage] = useState(1);
   // 템플릿 갤러리 모달 (즉시·무료 골격)
   const [showGallery, setShowGallery] = useState(false);
