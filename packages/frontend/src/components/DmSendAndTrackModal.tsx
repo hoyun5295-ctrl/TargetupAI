@@ -66,10 +66,7 @@ interface Props {
 
 // 편집기 변수 칩 (본문 삽입). %DM링크% = 수신자별 개인화 링크(발송 시 자동 치환).
 const VAR_CHIPS = ['%DM링크%', '%고객명%', '%등급%', '%지역%'];
-const SAMPLE_VALUES: Record<string, string> = {
-  '%고객명%': '김민수', '%등급%': 'VIP', '%지역%': '서울',
-  '%DM링크%': 'https://hanjul.ai/dm(개인화)',
-};
+// ★ 2026-07-02(3) Harold 지시 — 미리보기 변수값은 하드코딩 대신 "전 단계에서 추출된 타겟"의 첫 샘플 실데이터로 치환
 
 export default function DmSendAndTrackModal({ dmId, dmTitle, show, onClose }: Props) {
   const toast = useToast();
@@ -104,10 +101,19 @@ export default function DmSendAndTrackModal({ dmId, dmTitle, show, onClose }: Pr
 
   const insertVar = (v: string) => setMessageText((prev) => (prev ? `${prev} ${v}` : v));
 
+  // 미리보기 치환값 = 추출 타겟 첫 샘플(실데이터). 타겟 미추출 시 중립 기본값.
+  const sample = target?.samples?.[0];
+  const sampleValues: Record<string, string> = {
+    '%고객명%': (sample?.name || '').trim() || '고객',
+    '%등급%': String(sample?.grade || '').trim() || '일반',
+    '%지역%': (sample?.region || '').trim() || '-',
+    '%DM링크%': 'https://hanjul.ai/dm(개인화)',
+  };
+
   const previewText = (() => {
     let out = messageText || '';
-    for (const [k, val] of Object.entries(SAMPLE_VALUES)) out = out.split(k).join(val);
-    if (!messageText.includes('%DM링크%') && messageText.trim()) out = `${out}\n${SAMPLE_VALUES['%DM링크%']}`;
+    for (const [k, val] of Object.entries(sampleValues)) out = out.split(k).join(val);
+    if (!messageText.includes('%DM링크%') && messageText.trim()) out = `${out}\n${sampleValues['%DM링크%']}`;
     return out;
   })();
 

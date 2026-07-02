@@ -34,6 +34,7 @@ import type { Section } from '../utils/dm/dm-section-registry';
 import { selectSampleCustomers, selectSampleCustomerByKey, type SampleCustomerKey } from '../utils/dm/dm-sample-customer';
 import { lookupDmRecipientToken, issueDmRecipientTokensBulk } from '../utils/dm/dm-recipient-token';
 import { computeDmProgressPct, isDmCompleted, sumSectionClicks } from '../utils/dm/dm-tracking';
+import { extractJsonFromAiText } from '../utils/ai-json';
 import { buildCustomerFilter } from '../utils/customer-filter';
 import { buildChannelEligibilityWhere } from '../utils/channel-eligibility';
 import { createDirectSendCampaign, countStagingFiltered } from '../utils/direct-send-core';
@@ -783,6 +784,7 @@ dmRouter.get('/:id/recipients-tracking', async (req: any, res: any) => {
 
 // POST /api/dm/:id/generate-copy — DM 발송용 문안 1개 생성 (브랜드보이스 주입, %DM링크% 포함) — P4 편집기
 //   경량 단일 생성(캠페인 다변형 generate-message와 별개). 종량제 3크레딧(callAIWithFallback creditCost).
+//   ★ 2026-07-02(3) Harold 지시 — 문안은 "DM 편집 내용"에 근거해 생성(섹션 요약 주입) + JSON 응답 방어 파싱.
 dmRouter.post('/:id/generate-copy', async (req: any, res: any) => {
   try {
     const companyId = req.user?.companyId;
@@ -791,17 +793,46 @@ dmRouter.post('/:id/generate-copy', async (req: any, res: any) => {
     const { prompt } = req.body as { prompt?: string };
     if (!prompt?.trim()) return res.status(400).json({ error: '생성할 문안의 요청을 입력해주세요.' });
 
+    // DM 편집 내용 요약 — 문자는 이 DM 페이지를 알리는 것이므로 실제 편집된 내용이 문안의 근거
+    const dm = await getDmDetail(req.params.id, companyId);
+    if (!dm) return res.status(404).json({ error: 'DM을 찾을 수 없습니다.' });
+    const dmLines: string[] = [];
+    if (dm.title) dmLines.push(`DM 제목: ${dm.title}`);
+    if (dm.store_name) dmLines.push(`브랜드/매장: ${dm.store_name}`);
+    for (const s of extractFlatSectionsFromDm(dm).slice(0, 24)) {
+      const p: any = s?.props || {};
+      switch (s?.type) {
+        case 'hero': if (p.headline) dmLines.push(`히어로: ${p.headline}${p.sub_copy ? ` / ${p.sub_copy}` : ''}`); break;
+        case 'text_card': if (p.headline || p.body) dmLines.push(`텍스트: ${p.headline || ''} ${String(p.body || '').slice(0, 100)}`.trim()); break;
+        case 'coupon': if (p.discount_label) dmLines.push(`쿠폰: ${p.discount_label}${p.coupon_code ? ` (코드 ${p.coupon_code})` : ''}`); break;
+        case 'instant_coupon': if (p.coupon_label) dmLines.push(`즉시쿠폰: ${p.coupon_label} ${p.discount_description || ''}`.trim()); break;
+        case 'product_carousel': {
+          const names = (Array.isArray(p.products) ? p.products : []).map((x: any) => x?.name).filter(Boolean).slice(0, 5).join(', ');
+          if (names) dmLines.push(`상품: ${names}`);
+          break;
+        }
+        case 'countdown': if (p.urgency_text) dmLines.push(`마감 안내: ${p.urgency_text}`); break;
+        case 'limited_quantity': if (p.title) dmLines.push(`선착순: ${p.title}`); break;
+        case 'lucky_draw': if (p.title) dmLines.push(`응모 이벤트: ${p.title}`); break;
+        case 'roulette': if (p.title) dmLines.push(`룰렛 이벤트: ${p.title}`); break;
+        case 'cta': { const b = (Array.isArray(p.buttons) ? p.buttons : [])[0]; if (b?.label) dmLines.push(`행동 유도: ${b.label}`); break; }
+      }
+    }
+    const dmSummary = dmLines.length
+      ? `\n\n[DM 페이지 편집 내용 — 이 문자는 아래 DM을 알리는 문자입니다. 문안은 반드시 이 내용에 근거해 작성]\n${dmLines.join('\n')}`
+      : '';
+
     const baseSystem = `당신은 한줄로 SMS/LMS 마케팅 카피라이터입니다. 아래 조건으로 LMS 문자 본문 1개만 작성합니다.
 - 반드시 %DM링크% 를 문안 안 자연스러운 위치에 1회 포함(수신자별 개인화 링크가 여기 들어갑니다).
-- 구체 혜택(%/원/쿠폰/무료/할인/사은품/적립) 임의 생성 절대 금지 — 회사가 직접 넣습니다.
-- 유니코드 이모지 금지(SMS 호환). 80~250자.
+- 혜택·쿠폰·이벤트는 [DM 페이지 편집 내용]에 실제 적힌 표현만 그대로 인용 — 거기 없는 혜택(%/원/쿠폰/무료/할인/사은품/적립) 임의 창작 절대 금지.
+- 유니코드 이모지 금지(SMS 호환). 80~250자. 줄바꿈은 실제 줄바꿈 문자로.
 - 개인화는 %고객명% 등 명시된 변수만 사용.
-출력 = 문안 본문 텍스트만(설명·따옴표·번호 매기기 없이).`;
+[출력 형식 — 절대 준수] 문자 본문 텍스트만 그대로 출력. JSON·코드블록·따옴표·"channel"·"body" 같은 형식 절대 금지.${dmSummary}`;
     const system = await buildSystemPromptWithBrandVoice(companyId, baseSystem);
 
     const text = await callAIWithFallback({
       system,
-      userMessage: `요청: ${prompt.trim()}\n\n위 요청에 맞는 LMS 문안 1개를 작성하세요. %DM링크% 를 포함하세요.`,
+      userMessage: `요청: ${prompt.trim()}\n\n위 요청과 [DM 페이지 편집 내용]에 맞는 LMS 문안 1개를 본문 텍스트로만 작성하세요. %DM링크% 를 포함하세요.`,
       model: 'sonnet',
       maxTokens: 800,
       temperature: 0.7,
@@ -811,7 +842,17 @@ dmRouter.post('/:id/generate-copy', async (req: any, res: any) => {
       userId,
     });
 
-    let msg = String(text || '').trim().replace(/^```[a-zA-Z]*\n?/,'').replace(/```$/,'').trim();
+    let msg = String(text || '').trim().replace(/^```[a-zA-Z]*\n?/, '').replace(/```$/, '').trim();
+    // ★ 방어 파싱 — AI가 형식을 어기고 {"channel","body"} JSON으로 답하면 body만 추출 (JSON 원문 노출 차단)
+    if (msg.startsWith('{')) {
+      try {
+        const parsed: any = extractJsonFromAiText(msg);
+        const body = parsed?.body ?? parsed?.message ?? parsed?.text;
+        if (typeof body === 'string' && body.trim()) msg = body.trim();
+      } catch { /* JSON 아님 = 텍스트 그대로 */ }
+    }
+    // 리터럴 \n(백슬래시+n)로 온 줄바꿈을 실제 줄바꿈으로 정규화
+    msg = msg.replace(/\\n/g, '\n').trim();
     if (!msg) return res.status(500).json({ error: '문안 생성 결과가 비어 있습니다. 다시 시도해주세요.' });
     if (!msg.includes('%DM링크%')) msg = `${msg}\n%DM링크%`;
     return res.json({ success: true, message: msg });

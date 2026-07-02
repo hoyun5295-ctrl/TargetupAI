@@ -71,8 +71,9 @@ router.post('/extract', requirePlanFeature('ai_messaging'), async (req: Request,
     // 3. 전체 매칭 + 채널 자격 + 샘플 (채널 자격자 기준 5건)
     const matchSql = `SELECT COUNT(*)::int AS cnt FROM customers c WHERE c.company_id = $1::uuid${filterSql}`;
     const eligSql = `SELECT COUNT(*)::int AS cnt FROM customers c WHERE c.company_id = $1::uuid AND (${channelWhere})${filterSql}`;
+    // ★ 2026-07-02(3) grade 동봉 — 발송 모달 미리보기가 하드코딩 샘플 대신 실제 추출 타겟으로 치환 (SCHEMA.md:418 실측)
     const sampleSql = `
-      SELECT c.id, c.phone, c.name, c.gender, c.region, c.last_purchase_date, c.total_purchase_amount
+      SELECT c.id, c.phone, c.name, c.gender, c.grade, c.region, c.last_purchase_date, c.total_purchase_amount
         FROM customers c
        WHERE c.company_id = $1::uuid AND (${channelWhere})${filterSql}
        ORDER BY c.id ASC
@@ -101,6 +102,7 @@ router.post('/extract', requirePlanFeature('ai_messaging'), async (req: Request,
       phone: r.phone,
       name: r.name,
       gender: r.gender,
+      grade: r.grade,
       region: r.region,
       last_purchase_date: r.last_purchase_date,
       total_purchase_amount: r.total_purchase_amount != null ? Number(r.total_purchase_amount) : null,

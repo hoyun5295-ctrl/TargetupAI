@@ -27,6 +27,8 @@ export interface ExtractedTarget {
     phone: string;
     name: string | null;
     gender: string | null;
+    /** ★ 2026-07-02(3) 발송 모달 미리보기 실데이터 치환용 */
+    grade?: string | null;
     region: string | null;
     last_purchase_date: string | null;
     total_purchase_amount: number | null;
