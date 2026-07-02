@@ -1380,7 +1380,8 @@ router.get('/inapp/preview/:id', async (req: Request, res: Response) => {
       success: true,
       message: row,
       previews: renderedPreviews,
-      availableVariables: listAvailableVariables(),
+      // ★ 2026-07-02 회사 실데이터 필드만 노출 (CT-58 필터)
+      availableVariables: await listAvailableVariables(auth.companyId),
     });
   } catch (err: any) {
     console.error('[CDP /inapp/preview] 오류:', err);
@@ -1535,7 +1536,8 @@ router.get('/inapp/available-variables', async (req: Request, res: Response) => 
   const auth = await ensureInAppAdmin(req, res);
   if (!auth) return;
   try {
-    const variables = listAvailableVariables();
+    // ★ 2026-07-02 회사 실데이터 필드만 노출 (CT-58 필터)
+    const variables = await listAvailableVariables(auth.companyId);
     return res.json({ success: true, variables });
   } catch (err: any) {
     console.error('[CDP /inapp/available-variables] 오류:', err);

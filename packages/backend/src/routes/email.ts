@@ -46,6 +46,7 @@ import {
   getCampaignPerformanceStats,
   getCompanyOpenHourDistribution,
   getCampaignNonOpeners,
+  listEmailPersonalizationVars,
   type EmailRecipient,
   type EmailTargetSpec,
 } from '../utils/email-channel';
@@ -403,12 +404,54 @@ router.post('/smtp-test', async (req: Request, res: Response) => {
 // 캠페인 CRUD
 // ─────────────────────────────────────────────────────────────────────
 
+// ★ 2026-07-02 캠페인 완성 여부 — 크레딧 거래 멱등키 존재로 판정 (DB ALTER 0).
+//   신 키 email-campaign-complete:ID + 구 키 email-ai-publish:ID(과거 발송 확정 시 50 납부분) 모두 인정 = 이중과금 0.
+async function isEmailCampaignCompleted(companyId: string, campaignId: string): Promise<boolean> {
+  const r = await query(
+    `SELECT 1 FROM ai_credit_transactions
+     WHERE company_id = $1::uuid AND idempotency_key = ANY($2)
+     LIMIT 1`,
+    [companyId, [`email-campaign-complete:${campaignId}`, `email-ai-publish:${campaignId}`]],
+  );
+  return r.rows.length > 0;
+}
+
+// ★ 2026-07-02 개인화 변수 목록 — 하드코딩 금지(Harold 지시). CT-58 실측 프로필에서 데이터 있는(70%+) 필드만.
+router.get('/personalization-vars', async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+    const vars = await listEmailPersonalizationVars(companyId);
+    return res.json({ success: true, vars });
+  } catch (err: any) {
+    console.error('[Email personalization-vars] 오류:', err);
+    return res.status(500).json({ success: false, error: err?.message || '조회 실패' });
+  }
+});
+
 router.get('/campaigns', async (req: Request, res: Response) => {
   try {
     const companyId = req.user?.companyId;
     if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
     const limit = Math.min(parseInt(String(req.query.limit || '50')) || 50, 200);
     const campaigns = await listEmailCampaigns(companyId, limit);
+    // ★ 2026-07-02 완성 여부 플래그 — 프론트 발송/PC 미리보기 잠금 판단용 (신·구 멱등키 인정)
+    try {
+      const keysRes = await query(
+        `SELECT idempotency_key FROM ai_credit_transactions
+         WHERE company_id = $1::uuid
+           AND (idempotency_key LIKE 'email-campaign-complete:%' OR idempotency_key LIKE 'email-ai-publish:%')`,
+        [companyId],
+      );
+      const paidIds = new Set<string>(
+        keysRes.rows.map((r: any) => String(r.idempotency_key || '').split(':')[1]).filter(Boolean),
+      );
+      for (const c of campaigns as any[]) {
+        c.completed = paidIds.has(String(c.id));
+      }
+    } catch (flagErr: any) {
+      console.log('[Email campaigns GET] completed 플래그 계산 오류 — 플래그 없이 반환:', flagErr?.message);
+    }
     return res.json({ success: true, campaigns });
   } catch (err: any) {
     console.error('[Email /campaigns GET] 오류:', err);
@@ -428,6 +471,37 @@ router.get('/campaigns/:id', async (req: Request, res: Response) => {
     console.error('[Email /campaigns/:id] 오류:', err);
     if (handleDbMigrationError(err, res, 'email_campaigns')) return;
     return res.status(500).json({ success: false, error: err?.message || '조회 실패' });
+  }
+});
+
+// ★ 2026-07-02 캠페인 완성 (Harold 확정 크레딧 모델)
+//   완성 = 50크레딧 캠페인당 1회(멱등) — AI/수동/템플릿 불문. 완성 후 수정·재저장·발송·이력 전부 추가 차감 0.
+//   임시저장(draft)은 무료·무제한이되 발송/PC 미리보기가 잠기고, 이 endpoint가 해금한다. 환불 없음.
+router.post('/campaigns/:id/complete', async (req: Request, res: Response) => {
+  const auth = await ensureEmailAdmin(req, res);
+  if (!auth) return;
+  try {
+    const campaign = await getEmailCampaign(auth.companyId, req.params.id);
+    if (!campaign) return res.status(404).json({ success: false, error: '캠페인을 찾을 수 없습니다.' });
+
+    if (await isEmailCampaignCompleted(auth.companyId, campaign.id)) {
+      return res.json({ success: true, completed: true, alreadyCompleted: true });
+    }
+
+    const cost = getCreditCost('email-campaign-complete'); // 50
+    await checkCredit(auth.companyId, cost);
+    await deductCreditSafe({
+      companyId: auth.companyId, cost, source: 'email-campaign-complete',
+      createdBy: auth.userId, idempotencyKey: `email-campaign-complete:${campaign.id}`,
+    });
+    return res.json({ success: true, completed: true, alreadyCompleted: false, cost });
+  } catch (err: any) {
+    console.error('[Email /campaigns/:id/complete] 오류:', err);
+    if (err instanceof InsufficientCreditError) {
+      return res.status(402).json({ success: false, error: err.message, code: 'INSUFFICIENT_CREDIT' });
+    }
+    if (handleDbMigrationError(err, res, 'email_campaigns')) return;
+    return res.status(500).json({ success: false, error: err?.message || '완성 처리 실패' });
   }
 });
 
@@ -575,16 +649,14 @@ router.post('/campaigns/:id/send', async (req: Request, res: Response) => {
       return res.status(400).json({ success: false, error: '발송 대상이 0건입니다. 조건을 조정해주세요.', code: 'ZERO_COUNT' });
     }
 
-    // AI 생성 캠페인 발송 확정 = 30 크레딧 (최초 1회만, 멱등키 campaignId)
-    const aiPublishCost = getCreditCost('email-ai-publish'); // 30
-    let firstAiPublish = false;
-    if (campaign.aiGenerated && aiPublishCost > 0) {
-      const already = await query(
-        `SELECT 1 FROM ai_credit_transactions WHERE company_id = $1::uuid AND idempotency_key = $2 LIMIT 1`,
-        [auth.companyId, `email-ai-publish:${campaign.id}`],
-      );
-      firstAiPublish = already.rows.length === 0;
-      if (firstAiPublish) await checkCredit(auth.companyId, aiPublishCost);
+    // ★ 2026-07-02 Harold 확정 — 발송 시 크레딧 차감 제거(발송 = 무료, 고객 SMTP).
+    //   대신 완성(50크레딧, /complete) 안 된 캠페인은 발송 차단. 예약 취소/삭제 크레딧 소멸 구멍도 구조상 소멸.
+    if (!(await isEmailCampaignCompleted(auth.companyId, campaign.id))) {
+      return res.status(400).json({
+        success: false,
+        error: '완성 저장(50크레딧) 후 발송할 수 있습니다. 편집기에서 [완성 저장]을 눌러주세요.',
+        code: 'CAMPAIGN_NOT_COMPLETED',
+      });
     }
 
     // 예약 발송 — target_spec 저장 + status='scheduled'. sweeper가 도래 시 발송.
@@ -594,12 +666,6 @@ router.post('/campaigns/:id/send', async (req: Request, res: Response) => {
         return res.status(400).json({ success: false, error: '예약 시각은 현재보다 1분 이상 이후여야 합니다.' });
       }
       const updated = await scheduleCampaign(auth.companyId, campaign.id, targetSpec, when);
-      if (firstAiPublish) {
-        await deductCreditSafe({
-          companyId: auth.companyId, cost: aiPublishCost, source: 'email-ai-publish',
-          createdBy: auth.userId, idempotencyKey: `email-ai-publish:${campaign.id}`,
-        });
-      }
       return res.json({ success: true, scheduled: true, total: resolved.length, scheduledAt: updated?.scheduledAt });
     }
 
@@ -608,12 +674,6 @@ router.post('/campaigns/:id/send', async (req: Request, res: Response) => {
       `UPDATE email_campaigns SET status = 'sending', updated_at = NOW() WHERE id = $1::uuid AND company_id = $2::uuid`,
       [campaign.id, auth.companyId],
     );
-    if (firstAiPublish) {
-      await deductCreditSafe({
-        companyId: auth.companyId, cost: aiPublishCost, source: 'email-ai-publish',
-        createdBy: auth.userId, idempotencyKey: `email-ai-publish:${campaign.id}`,
-      });
-    }
     setImmediate(() => {
       sendEmailCampaign({ campaignId: campaign.id, recipients: resolved, immediate: true })
         .catch((e: any) => console.error(`[Email /send] 백그라운드 발송 실패 (campaign ${campaign.id}):`, e?.message));

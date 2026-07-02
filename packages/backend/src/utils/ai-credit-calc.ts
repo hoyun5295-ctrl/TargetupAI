@@ -110,9 +110,12 @@ export const CREDIT_COST_MAP: Record<string, number> = {
   'dm-interaction-publish': 120,
   // 인앱 생성(돌려보기) 3 — 자연어→완성 메시지. 호출마다 3. 게시는 'inapp-publish' 15 별도.
   'inapp-ai-generator': 3,
-  // Email 생성(돌려보기) 3 — 자연어/시나리오→제목3안+본문 HTML. 호출마다 3. AI 캠페인 발송 확정은 'email-ai-publish' 30 별도.
+  // Email 생성(돌려보기) 3 — 자연어/시나리오→제목3안+본문 HTML. 호출마다 3. 캠페인 완성은 'email-campaign-complete' 50 별도.
   'email-ai-generate': 3,
-  // Email AI 캠페인 발송 확정(ai_generated) 30 — 최초 발송 1회만(멱등키 email-ai-publish:campaignId). 수동 작성 캠페인 발송은 0.
+  // ★ 2026-07-02 Harold 확정 — Email 캠페인 완성 50: AI/수동/템플릿 불문 "완성 저장" 시 1회(멱등키 email-campaign-complete:campaignId).
+  //   임시저장 무료(발송·PC 미리보기 잠금) / 발송·수신/오픈/클릭 이력 = 무료(고객 SMTP) / 환불 없음.
+  'email-campaign-complete': 50,
+  // (구) Email AI 캠페인 발송 확정 — 2026-07-02부터 미사용(완성 요금으로 대체). 과거 거래 멱등키 인정용으로 키만 유지.
   'email-ai-publish': 50,
   // 인앱 게시(확정) 15 — status=active 저장 최초 1회만(멱등키=inapp-publish:messageId).
   'inapp-publish': 100,

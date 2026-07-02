@@ -14,6 +14,8 @@ import {
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import SectionPropsEditor from '../dm/panels/SectionPropsEditor';
+// ★ 2026-07-02 완성(50크레딧) 사전 고지 — 환불 없는 돈이라 확인 모달 의무
+import ConfirmModal, { type ConfirmState } from '../ConfirmModal';
 import {
   createSection, normalizeOrder, SECTION_META, type Section,
 } from '../../utils/dm-section-defaults';
@@ -25,18 +27,19 @@ const EMAIL_BLOCK_TYPES: SectionType[] = [
   'coupon', 'promo_code', 'cta', 'store_info', 'sns', 'reviews', 'footer',
 ];
 
-// 개인화 변수(Liquid 토큰) — 발송 시 수신자 데이터로 치환. inapp listAvailableVariables 미러(연락처 식별정보 제외).
-const EMAIL_VARS: Array<{ token: string; label: string }> = [
-  { token: '{{ customer.name }}', label: '회원명' },
-  { token: '{{ customer.grade }}', label: '등급' },
-  { token: '{{ customer.points }}', label: '포인트' },
-  { token: '{{ customer.region }}', label: '지역' },
-  { token: '{{ customer.recent_purchase_store }}', label: '최근 매장' },
-  { token: '{{ customer.total_purchase_amount }}', label: 'LTV' },
-  { token: '{{ customer.purchase_count }}', label: '구매 횟수' },
+// 개인화 변수(Liquid 토큰) — ★ 2026-07-02 Harold 지시: 하드코딩이 아니라 회사 실데이터 필드만 노출.
+//   실제 목록은 GET /api/email/personalization-vars (CT-58 실측 프로필 — 데이터 70%+ 채워진 필드)에서 로드.
+//   아래는 조회 실패 시에만 쓰는 fallback (편집 중단 0).
+interface EmailVar { field: string; token: string; label: string }
+const DEFAULT_EMAIL_VARS: EmailVar[] = [
+  { field: 'name', token: '{{ customer.name }}', label: '회원명' },
+  { field: 'grade', token: '{{ customer.grade }}', label: '등급' },
+  { field: 'points', token: '{{ customer.points }}', label: '포인트' },
+  { field: 'region', token: '{{ customer.region }}', label: '지역' },
+  { field: 'recent_purchase_store', token: '{{ customer.recent_purchase_store }}', label: '최근 매장' },
+  { field: 'total_purchase_amount', token: '{{ customer.total_purchase_amount }}', label: 'LTV' },
+  { field: 'purchase_count', token: '{{ customer.purchase_count }}', label: '구매 횟수' },
 ];
-const CONDITION_FIELDS = ['grade', 'points', 'region', 'purchase_count', 'total_purchase_amount'];
-const FIELD_LABELS: Record<string, string> = { grade: '등급', points: '포인트', region: '지역', purchase_count: '구매 횟수', total_purchase_amount: 'LTV' };
 
 export interface EmailVisualEditorProps {
   initialSections: Section[];
@@ -45,6 +48,8 @@ export interface EmailVisualEditorProps {
   initialIsAd?: boolean;
   aiGenerated?: boolean;
   campaignId?: string;
+  /** ★ 2026-07-02 완성(50크레딧 납부) 여부 — true면 발송·PC 미리보기 해금 + 저장 무료 */
+  completed?: boolean;
   authHeaders: () => Record<string, string>;
   onClose: () => void;
   onSaved: () => void;
@@ -53,7 +58,7 @@ export interface EmailVisualEditorProps {
 
 export default function EmailVisualEditor({
   initialSections, initialName, initialSubject, initialIsAd, aiGenerated,
-  campaignId, authHeaders, onClose, onSaved, onToast,
+  campaignId, completed, authHeaders, onClose, onSaved, onToast,
 }: EmailVisualEditorProps) {
   const [sections, setSections] = useState<Section[]>(() => normalizeOrder(initialSections || []));
   const [selectedId, setSelectedId] = useState<string | null>(initialSections?.[0]?.id || null);
@@ -72,6 +77,21 @@ export default function EmailVisualEditor({
   // 개인화 미리보기 — 샘플 고객(VIP/일반/신규) 토글
   const [previewSample, setPreviewSample] = useState<'none' | 'VIP' | '일반' | '신규'>('none');
   const [sampleCustomers, setSampleCustomers] = useState<Array<{ label: string; customer: Record<string, any> }>>([]);
+  // ★ 2026-07-02 개인화 변수 — 회사 실데이터 필드(CT-58)만 노출. 조회 실패 시 fallback.
+  const [emailVars, setEmailVars] = useState<EmailVar[]>(DEFAULT_EMAIL_VARS);
+  // ★ 2026-07-02 완성(50크레딧) 상태 — 미완성 = 발송·PC 미리보기 잠금 (임시저장은 무료·무제한)
+  const [completedState, setCompletedState] = useState(!!completed);
+  const [confirmState, setConfirmState] = useState<ConfirmState | null>(null);
+
+  useEffect(() => {
+    fetch('/api/email/personalization-vars', { headers: authHeaders() })
+      .then((r) => r.json())
+      .then((d) => {
+        if (d?.success && Array.isArray(d.vars) && d.vars.length > 0) setEmailVars(d.vars);
+      })
+      .catch(() => { /* fallback 목록 유지 */ });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const selected = useMemo(() => sections.find((s) => s.id === selectedId) || null, [sections, selectedId]);
 
@@ -273,24 +293,71 @@ export default function EmailVisualEditor({
   };
 
   // ── 저장 (sections → 백엔드가 html_body 렌더) ──
+  //   ★ 2026-07-02 Harold 확정 크레딧 모델: 임시저장 = 무료·무제한(발송·PC 미리보기 잠금) /
+  //   완성 저장 = 50크레딧 1회(확인 모달 고지 후) → 발송·PC 미리보기 해금. 발송 자체는 무료(고객 SMTP).
+  const persistCampaign = async (): Promise<string | null> => {
+    if (!name.trim() || !subject.trim()) { onToast('이름과 제목을 입력해주세요.', 'warning'); return null; }
+    if (sections.length === 0) { onToast('블록을 1개 이상 추가해주세요.', 'warning'); return null; }
+    const isUpdate = !!campaignId;
+    const url = isUpdate ? `/api/email/campaigns/${campaignId}` : '/api/email/campaigns';
+    const body: any = { name: name.trim(), subject: subject.trim(), is_ad: isAd, sections };
+    if (!isUpdate && aiGenerated) body.ai_generated = true;
+    const res = await fetch(url, { method: isUpdate ? 'PATCH' : 'POST', headers: authHeaders(), body: JSON.stringify(body) });
+    const data = await res.json();
+    if (!data.success) { onToast(data.error || '저장 실패', 'error'); return null; }
+    return String(campaignId || data.campaign?.id || '') || null;
+  };
+
   const handleSave = async () => {
-    if (!name.trim() || !subject.trim()) { onToast('이름과 제목을 입력해주세요.', 'warning'); return; }
-    if (sections.length === 0) { onToast('블록을 1개 이상 추가해주세요.', 'warning'); return; }
     setSaving(true);
     try {
-      const isUpdate = !!campaignId;
-      const url = isUpdate ? `/api/email/campaigns/${campaignId}` : '/api/email/campaigns';
-      const body: any = { name: name.trim(), subject: subject.trim(), is_ad: isAd, sections };
-      if (!isUpdate && aiGenerated) body.ai_generated = true;
-      const res = await fetch(url, { method: isUpdate ? 'PATCH' : 'POST', headers: authHeaders(), body: JSON.stringify(body) });
-      const data = await res.json();
-      if (data.success) { onToast(isUpdate ? '저장 완료' : '캠페인 생성 완료', 'success'); onSaved(); onClose(); }
-      else onToast(data.error || '저장 실패', 'error');
+      const savedId = await persistCampaign();
+      if (savedId) {
+        onToast(
+          completedState
+            ? '저장 완료'
+            : '임시저장 완료 — 발송·PC 미리보기는 완성 저장(50크레딧) 후 열립니다.',
+          'success',
+        );
+        onSaved();
+        onClose();
+      }
     } catch (e: any) {
       onToast(e?.message || '저장 중 오류', 'error');
     } finally {
       setSaving(false);
     }
+  };
+
+  const handleComplete = () => {
+    if (!name.trim() || !subject.trim()) { onToast('이름과 제목을 입력해주세요.', 'warning'); return; }
+    if (sections.length === 0) { onToast('블록을 1개 이상 추가해주세요.', 'warning'); return; }
+    setConfirmState({
+      mode: 'warning',
+      title: '캠페인 완성 — 50크레딧',
+      description: '완성 저장 시 50크레딧이 차감됩니다 (캠페인당 1회 · 환불 없음).\n이후 이 캠페인의 수정·재저장·발송·수신/오픈/클릭 이력 관리는 추가 차감 없이 무제한입니다.',
+      confirmLabel: '50크레딧 차감하고 완성',
+      cancelLabel: '취소',
+      onConfirm: async () => {
+        setSaving(true);
+        try {
+          const savedId = await persistCampaign();
+          if (!savedId) return;
+          const res = await fetch(`/api/email/campaigns/${savedId}/complete`, { method: 'POST', headers: authHeaders() });
+          const data = await res.json();
+          if (data?.code === 'INSUFFICIENT_CREDIT') { onToast('크레딧이 부족합니다. 충전 후 완성해주세요.', 'warning'); return; }
+          if (!data.success) { onToast(data.error || '완성 처리 실패', 'error'); return; }
+          setCompletedState(true);
+          onToast('캠페인 완성 — 이제 발송과 PC 미리보기를 사용할 수 있습니다.', 'success');
+          onSaved();
+          onClose();
+        } catch (e: any) {
+          onToast(e?.message || '완성 처리 중 오류', 'error');
+        } finally {
+          setSaving(false);
+        }
+      },
+    });
   };
 
   const ordered = useMemo(() => sections.slice().sort((a, b) => a.order - b.order), [sections]);
@@ -314,15 +381,34 @@ export default function EmailVisualEditor({
           <label className="flex items-center gap-1.5 text-[11px] text-white/60 cursor-pointer shrink-0">
             <input type="checkbox" checked={isAd} onChange={(e) => setIsAd(e.target.checked)} className="rounded" />광고성
           </label>
-          <button onClick={() => setPcPreviewOpen(true)} className="inline-flex items-center gap-1.5 rounded-lg border border-white/15 bg-white/5 px-3 py-2 text-sm font-semibold text-white/80 hover:bg-white/10 shrink-0" title="PC(데스크탑) 폭으로 크게 미리보기">
+          <button
+            onClick={() => {
+              // ★ 2026-07-02 임시저장 상태 = 실발송 HTML 획득 경로 잠금 (완성 50크레딧 후 해금)
+              if (!completedState) { onToast('PC 미리보기는 완성 저장(50크레딧) 후 사용할 수 있습니다.', 'info'); return; }
+              setPcPreviewOpen(true);
+            }}
+            className={`inline-flex items-center gap-1.5 rounded-lg border border-white/15 bg-white/5 px-3 py-2 text-sm font-semibold shrink-0 ${completedState ? 'text-white/80 hover:bg-white/10' : 'text-white/35 cursor-not-allowed'}`}
+            title={completedState ? 'PC(데스크탑) 폭으로 크게 미리보기' : '완성 저장(50크레딧) 후 사용 가능'}
+          >
             <Monitor className="w-4 h-4" /><span className="hidden md:inline">PC 미리보기</span>
           </button>
           <button onClick={handleImprove} disabled={improving || sections.length === 0} className="inline-flex items-center gap-1.5 rounded-lg border border-fuchsia-400/40 bg-fuchsia-500/15 px-3 py-2 text-sm font-semibold text-fuchsia-100 hover:bg-fuchsia-500/25 disabled:opacity-40 shrink-0" title="AI가 블록 카피를 매끄럽게 다듬어요 (1 크레딧 · 사실·혜택 보존)">
             {improving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Wand2 className="w-4 h-4" />}<span className="hidden md:inline">AI로 개선</span>
           </button>
-          <button onClick={handleSave} disabled={saving} className="inline-flex items-center gap-1.5 rounded-lg bg-gradient-to-r from-violet-600 to-fuchsia-600 px-4 py-2 text-sm font-semibold text-white hover:opacity-90 disabled:opacity-50 shrink-0">
-            {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}저장
-          </button>
+          {completedState ? (
+            <button onClick={handleSave} disabled={saving} className="inline-flex items-center gap-1.5 rounded-lg bg-gradient-to-r from-violet-600 to-fuchsia-600 px-4 py-2 text-sm font-semibold text-white hover:opacity-90 disabled:opacity-50 shrink-0">
+              {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}저장
+            </button>
+          ) : (
+            <>
+              <button onClick={handleSave} disabled={saving} className="inline-flex items-center gap-1.5 rounded-lg border border-white/15 bg-white/5 px-3 py-2 text-sm font-semibold text-white/80 hover:bg-white/10 disabled:opacity-50 shrink-0" title="무료 — 발송·PC 미리보기는 잠긴 상태로 보관됩니다">
+                {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}<span className="hidden md:inline">임시저장</span>
+              </button>
+              <button onClick={handleComplete} disabled={saving} className="inline-flex items-center gap-1.5 rounded-lg bg-gradient-to-r from-violet-600 to-fuchsia-600 px-4 py-2 text-sm font-semibold text-white hover:opacity-90 disabled:opacity-50 shrink-0" title="50크레딧 1회 — 이후 수정·발송·이력 무제한 무료">
+                <Save className="w-4 h-4" />완성 저장 · 50
+              </button>
+            </>
+          )}
           <button onClick={onClose} className="text-white/50 hover:text-white p-1.5 rounded hover:bg-white/10 shrink-0" aria-label="닫기"><X className="w-5 h-5" /></button>
         </div>
 
@@ -397,7 +483,7 @@ export default function EmailVisualEditor({
                   <div>
                     <div className="text-[10px] text-white/40 mb-1.5">입력칸을 클릭한 뒤 변수를 누르면 커서 위치에 삽입됩니다. 발송 시 수신자 정보로 자동 치환돼요.</div>
                     <div className="flex flex-wrap gap-1">
-                      {EMAIL_VARS.map((v) => (
+                      {emailVars.map((v) => (
                         <button
                           key={v.token}
                           type="button"
@@ -427,7 +513,8 @@ export default function EmailVisualEditor({
                           onChange={(e) => updateSelectedSection({ display_condition: { ...selected.display_condition!, field: e.target.value } })}
                           className="text-[11px] bg-slate-950/60 border border-white/10 rounded px-1.5 py-1 text-white"
                         >
-                          {CONDITION_FIELDS.map((f) => <option key={f} value={f}>{FIELD_LABELS[f] || f}</option>)}
+                          {/* ★ 2026-07-02 조건 필드 = 회사 실데이터 변수 목록과 동일 소스 (이름은 조건 대상에서 제외) */}
+                          {emailVars.filter((v) => v.field !== 'name').map((v) => <option key={v.field} value={v.field}>{v.label}</option>)}
                         </select>
                         <select
                           value={selected.display_condition.op}
@@ -494,6 +581,9 @@ export default function EmailVisualEditor({
           </div>
         </div>
       )}
+
+      {/* ★ 2026-07-02 완성(50크레딧) 사전 고지 확인 모달 */}
+      <ConfirmModal state={confirmState} onClose={() => setConfirmState(null)} />
     </div>
   );
 }

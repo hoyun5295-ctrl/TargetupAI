@@ -27,6 +27,8 @@ import { resolveEmailSectionsForCustomer, renderEmailText } from './email/email-
 import { getCompanyBrandKit } from './dm/dm-brand-kit';
 import { buildCustomerFilter } from './customer-filter';
 import { hasUneditedPlaceholder } from './email-ai';
+// ★ 2026-07-02 개인화 변수 동적화 — CT-58 회사 실측 프로필(채워진 필드만 노출)
+import { getCompanyDataProfile } from './company-data-profile';
 import type { Section } from './dm/dm-section-registry';
 
 // ════════════════════════════════════════════════════════════════════
@@ -492,21 +494,49 @@ const RECIPIENT_SAFETY_WHERE = `
   AND is_opt_out IS DISTINCT FROM true
   AND is_invalid IS DISTINCT FROM true`;
 
+// ★ 2026-07-02 개인화 변수 동적화 (Harold 지시 — 하드코딩 금지, 회사 실데이터 필드만)
+//   수신자 SELECT·개인화 customer 객체·에디터 칩이 전부 이 목록 하나를 공유한다.
+//   전부 CT-58(company-data-profile)이 운영에서 실측 COUNT하는 customers 표준 컬럼.
+//   날짜형(생일·최근 구매일·결혼기념일)은 Date 객체가 영문 그대로 찍히는 문제로 이메일 치환에서 제외, email 자신도 제외.
+const RECIPIENT_PERSONALIZATION_COLS = [
+  'name', 'grade', 'gender', 'age', 'region', 'address', 'store_name', 'registered_store',
+  'points', 'recent_purchase_amount', 'recent_purchase_store',
+  'total_purchase_amount', 'purchase_count', 'avg_order_value', 'ltv_score',
+] as const;
+const RECIPIENT_NUMERIC_COLS = new Set([
+  'age', 'points', 'recent_purchase_amount', 'total_purchase_amount', 'purchase_count', 'avg_order_value', 'ltv_score',
+]);
+const RECIPIENT_SELECT_COLS = RECIPIENT_PERSONALIZATION_COLS.join(', ');
+
+export interface EmailPersonalizationVar {
+  field: string;
+  token: string;   // {{ customer.X }}
+  label: string;
+}
+
+/**
+ * 회사 실측 기반 개인화 변수 목록 — 에디터 칩/조건부 표시 필드용.
+ * CT-58 safeFields(70%+ 채워짐)만 노출 = 빈 값 치환으로 문장이 깨지는 수신자 최소화.
+ */
+export async function listEmailPersonalizationVars(companyId: string): Promise<EmailPersonalizationVar[]> {
+  const profile = await getCompanyDataProfile(companyId);
+  const allowed = new Set<string>(RECIPIENT_PERSONALIZATION_COLS);
+  return profile.safeFields
+    .filter((f) => allowed.has(f.field))
+    .map((f) => ({ field: f.field, token: `{{ ${f.liquidVar} }}`, label: f.label }));
+}
+
 /** customers row → EmailRecipient(+개인화 customer). 등급/필터 해석 공용 매핑. */
 function mapEmailRecipientRow(r: any): EmailRecipient {
+  const customer: Record<string, any> = {};
+  for (const col of RECIPIENT_PERSONALIZATION_COLS) {
+    customer[col] = RECIPIENT_NUMERIC_COLS.has(col) ? Number(r[col] || 0) : (r[col] || '');
+  }
+  customer.name = r.name || '고객';
   return {
     email: String(r.email).trim(),
     name: r.name ? String(r.name) : undefined,
-    // 개인화(변수+조건부)용 화이트리스트 고객 필드 — buildPreviewCustomers와 동일한 검증된 컬럼 집합
-    customer: {
-      name: r.name || '고객',
-      grade: r.grade || '',
-      points: Number(r.points || 0),
-      region: r.region || '',
-      recent_purchase_store: r.recent_purchase_store || '',
-      total_purchase_amount: Number(r.total_purchase_amount || 0),
-      purchase_count: Number(r.purchase_count || 0),
-    },
+    customer,
   };
 }
 
@@ -522,7 +552,7 @@ export async function resolveCustomerRecipients(
     gradeClause = ` AND grade = ANY($${params.length})`;
   }
   const result = await query(
-    `SELECT DISTINCT ON (lower(email)) email, name, grade, points, region, recent_purchase_store, total_purchase_amount, purchase_count
+    `SELECT DISTINCT ON (lower(email)) email, ${RECIPIENT_SELECT_COLS}
      FROM customers
      WHERE company_id = $1::uuid AND ${RECIPIENT_SAFETY_WHERE}${gradeClause}
      ORDER BY lower(email)`,
@@ -547,7 +577,7 @@ export async function resolveCustomerRecipientsByFilter(
     inputFormat: 'structured',
   });
   const result = await query(
-    `SELECT DISTINCT ON (lower(c.email)) c.email, c.name, c.grade, c.points, c.region, c.recent_purchase_store, c.total_purchase_amount, c.purchase_count
+    `SELECT DISTINCT ON (lower(c.email)) c.email, ${RECIPIENT_PERSONALIZATION_COLS.map((c) => `c.${c}`).join(', ')}
      FROM customers c
      WHERE c.company_id = $1::uuid AND ${RECIPIENT_SAFETY_WHERE}${filterSql}
      ORDER BY lower(c.email)`,

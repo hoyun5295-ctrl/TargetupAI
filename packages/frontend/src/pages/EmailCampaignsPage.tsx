@@ -178,7 +178,7 @@ export default function EmailCampaignsPage() {
   // AI 캠페인 발송 확정 30크레딧 확인
   const [creditConfirm, setCreditConfirm] = useState<{ campaign: EmailCampaign; payload: any; desc: string } | null>(null);
   // 비주얼 빌더 에디터 (sections 기반)
-  const [visualEditor, setVisualEditor] = useState<{ sections: Section[]; name?: string; subject?: string; isAd?: boolean; aiGenerated?: boolean; campaignId?: string } | null>(null);
+  const [visualEditor, setVisualEditor] = useState<{ sections: Section[]; name?: string; subject?: string; isAd?: boolean; aiGenerated?: boolean; campaignId?: string; completed?: boolean } | null>(null);
   // 템플릿 갤러리 모달 (즉시·무료 골격)
   const [showGallery, setShowGallery] = useState(false);
   // 성과 분석 대시보드 모달
@@ -375,7 +375,7 @@ export default function EmailCampaignsPage() {
       if (editing.textBody) body.text_body = editing.textBody;
       if (editing.fromName) body.from_name = editing.fromName;
       if (editing.fromEmail) body.from_email = editing.fromEmail;
-      if (!isUpdate && editing.aiGenerated) body.ai_generated = true; // AI 생성 캠페인 마킹 (발송 시 30크레딧 분기)
+      if (!isUpdate && editing.aiGenerated) body.ai_generated = true; // AI 생성 캠페인 마킹 (표시·통계용 — 과금은 완성 50크레딧으로 일원화)
 
       const res = await fetch(url, { method, headers: authHeaders(), body: JSON.stringify(body) });
       const data = await res.json();
@@ -420,7 +420,7 @@ export default function EmailCampaignsPage() {
   // 편집기 열기 — 비주얼 섹션 있으면 비주얼 에디터, 아니면 HTML 폼 (수정 버튼·placeholder 안내 공용)
   const openEditor = (c: EmailCampaign) => {
     if (c.sections && c.sections.length) {
-      setVisualEditor({ sections: c.sections as Section[], name: c.name, subject: c.subject, isAd: c.isAd, aiGenerated: c.aiGenerated, campaignId: c.id });
+      setVisualEditor({ sections: c.sections as Section[], name: c.name, subject: c.subject, isAd: c.isAd, aiGenerated: c.aiGenerated, campaignId: c.id, completed: c.completed });
     } else {
       setEditing(c);
     }
@@ -533,13 +533,15 @@ export default function EmailCampaignsPage() {
     }
   };
 
-  // RecipientsModal → 발송 확정. AI 캠페인이면 30크레딧 확인 모달, 아니면 일반 확인 모달.
+  // RecipientsModal → 발송 확정.
+  // ★ 2026-07-02 Harold 확정 크레딧 모델: 발송 = 무료(고객 SMTP). 단 미완성 캠페인은
+  //   완성(50크레딧, 캠페인당 1회) 확인 모달 → /complete → 발송으로 이어간다 (1클릭 흐름).
   const handleProceedSend = (campaign: EmailCampaign, payload: any, total: number) => {
     setRecipientsModal(null);
     const sched = payload.mode === 'scheduled';
     const desc = `${total.toLocaleString()}명에게 ${sched ? '예약' : '즉시'} 발송합니다.${campaign.isAd ? ' (광고성 — "(광고)" + 수신거부 링크 자동 부착)' : ''} 발신 = ${campaign.fromEmail}`;
-    if (campaign.aiGenerated) {
-      // AI 생성 캠페인 = 발송 확정 시 30크레딧 (최초 1회). CreditConfirmModal 의무.
+    if (!campaign.completed) {
+      // 미완성 = 완성 50크레딧 고지 후 완성+발송 연속 처리
       setCreditConfirm({ campaign, payload, desc });
     } else {
       setConfirmState({
@@ -549,6 +551,20 @@ export default function EmailCampaignsPage() {
         confirmLabel: sched ? '예약' : '발송',
         onConfirm: () => doSend(campaign, payload),
       });
+    }
+  };
+
+  // ★ 2026-07-02 완성(50크레딧) 처리 후 발송 — 멱등이라 중복 차감 0
+  const completeAndSend = async (campaign: EmailCampaign, payload: any) => {
+    try {
+      const res = await fetch(`/api/email/campaigns/${campaign.id}/complete`, { method: 'POST', headers: authHeaders() });
+      const data = await res.json();
+      if (data?.code === 'INSUFFICIENT_CREDIT') { showToast('크레딧이 부족합니다. 충전 후 발송해주세요.', 'warning'); return; }
+      if (!data.success) { showToast(data.error || '완성 처리 실패', 'error'); return; }
+      setCampaigns((prev) => prev.map((c) => (c.id === campaign.id ? { ...c, completed: true } : c)));
+      await doSend({ ...campaign, completed: true }, payload);
+    } catch (e: any) {
+      showToast(e?.message || '완성 처리 중 오류', 'error');
     }
   };
 
@@ -787,79 +803,76 @@ export default function EmailCampaignsPage() {
           </div>
         ) : (
           <div className="space-y-2">
+            {/* ★ 2026-07-02 Harold 지시 — 우측 세로 액션 컬럼 제거(가로 낭비), 하단 압축 버튼 행으로 재구성 */}
             {campaigns.map((c) => (
               <div key={c.id} className="bg-white/5 border border-white/10 rounded-xl p-4 hover:bg-white/10 transition-colors">
-                <div className="flex items-start justify-between gap-4 flex-wrap">
-                  <div className="flex-1 min-w-[200px]">
-                    <div className="flex items-center gap-2 mb-1 flex-wrap">
-                      <span className="text-base font-bold text-white">{c.name}</span>
-                      <StatusBadge status={c.status} />
-                      {c.isAd && <span className="text-[10px] bg-amber-500/20 text-amber-300 px-1.5 py-0.5 rounded-full font-medium">광고성</span>}
-                      {c.status === 'draft' && c.hasPlaceholder && <span className="text-[10px] bg-orange-500/25 text-orange-200 px-1.5 py-0.5 rounded-full font-medium">직접 입력 필요</span>}
-                    </div>
-                    <div className="text-xs text-white/70 mb-2">제목: {c.subject}</div>
-                    <div className="flex flex-wrap gap-2 text-[11px] text-white/50">
-                      <span>발송 <strong className="text-indigo-300">{c.sentCount.toLocaleString()}</strong></span>
-                      <span>·</span>
-                      <span>오픈 <strong className="text-emerald-300">{c.openCount.toLocaleString()}</strong> ({c.sentCount > 0 ? ((c.openCount / c.sentCount) * 100).toFixed(1) : 0}%)</span>
-                      <span>·</span>
-                      <span>클릭 <strong className="text-cyan-300">{c.clickCount.toLocaleString()}</strong> ({c.sentCount > 0 ? ((c.clickCount / c.sentCount) * 100).toFixed(1) : 0}%)</span>
-                      <span>·</span>
-                      <span>반송 <strong className="text-rose-300">{c.bounceCount.toLocaleString()}</strong></span>
-                      <span>·</span>
-                      <span>수신거부 <strong className="text-white/50">{c.unsubscribeCount.toLocaleString()}</strong></span>
-                    </div>
-                    {c.sentAt && (
-                      <div className="text-[10px] text-white/40 mt-1">발송 일자: {new Date(c.sentAt).toLocaleString('ko-KR')}</div>
-                    )}
-                  </div>
-                  <div className="flex flex-col gap-1.5 shrink-0">
-                    {(c.status === 'draft' || c.status === 'failed') && (
-                      <button
-                        onClick={() => openRecipientsModal(c)}
-                        disabled={sendingId === c.id || !smtpConfigured}
-                        className="text-[11px] bg-blue-500/30 hover:bg-blue-500/50 disabled:opacity-40 text-blue-100 px-2.5 py-1 rounded flex items-center gap-1"
-                      >
-                        <Send className="w-3 h-3" />
-                        {sendingId === c.id ? '발송 중...' : '발송'}
-                      </button>
-                    )}
-                    {/* ★ D225+ (2026-05-28): 발송 이력 보기 — sentCount > 0 영역 시 활성 */}
-                    {c.sentCount > 0 && (
-                      <button
-                        onClick={() => setEventsModal({ id: c.id, name: c.name })}
-                        className="text-[11px] text-emerald-300 hover:bg-emerald-500/10 px-2.5 py-1 rounded flex items-center gap-1"
-                      >
-                        <Eye className="w-3 h-3" /> 이력
-                      </button>
-                    )}
-                    {/* ★ 2026-06-13: 완료 캠페인 — AI 성과 진단 + 미오픈자 SMS */}
-                    {c.status === 'completed' && c.sentCount > 0 && (
-                      <>
-                        <button
-                          onClick={() => setInsightModal({ campaign: c })}
-                          className="text-[11px] text-fuchsia-300 hover:bg-fuchsia-500/10 px-2.5 py-1 rounded flex items-center gap-1"
-                        >
-                          <Sparkles className="w-3 h-3" /> AI 진단
-                        </button>
-                        <button
-                          onClick={() => setNonOpenerModal({ campaign: c })}
-                          className="text-[11px] text-cyan-300 hover:bg-cyan-500/10 px-2.5 py-1 rounded flex items-center gap-1"
-                        >
-                          <Smartphone className="w-3 h-3" /> 미오픈 SMS
-                        </button>
-                      </>
-                    )}
+                <div className="flex items-center gap-2 mb-1 flex-wrap">
+                  <span className="text-base font-bold text-white">{c.name}</span>
+                  <StatusBadge status={c.status} />
+                  {c.isAd && <span className="text-[10px] bg-amber-500/20 text-amber-300 px-1.5 py-0.5 rounded-full font-medium">광고성</span>}
+                  {c.status === 'draft' && !c.completed && <span className="text-[10px] bg-white/10 text-white/50 px-1.5 py-0.5 rounded-full font-medium" title="완성 저장(50크레딧) 후 발송·PC 미리보기가 열립니다">완성 전</span>}
+                  {c.status === 'draft' && c.hasPlaceholder && <span className="text-[10px] bg-orange-500/25 text-orange-200 px-1.5 py-0.5 rounded-full font-medium">직접 입력 필요</span>}
+                </div>
+                <div className="text-xs text-white/70 mb-2">제목: {c.subject}</div>
+                <div className="flex flex-wrap gap-2 text-[11px] text-white/50">
+                  <span>발송 <strong className="text-indigo-300">{c.sentCount.toLocaleString()}</strong></span>
+                  <span>·</span>
+                  <span>오픈 <strong className="text-emerald-300">{c.openCount.toLocaleString()}</strong> ({c.sentCount > 0 ? ((c.openCount / c.sentCount) * 100).toFixed(1) : 0}%)</span>
+                  <span>·</span>
+                  <span>클릭 <strong className="text-cyan-300">{c.clickCount.toLocaleString()}</strong> ({c.sentCount > 0 ? ((c.clickCount / c.sentCount) * 100).toFixed(1) : 0}%)</span>
+                  <span>·</span>
+                  <span>반송 <strong className="text-rose-300">{c.bounceCount.toLocaleString()}</strong></span>
+                  <span>·</span>
+                  <span>수신거부 <strong className="text-white/50">{c.unsubscribeCount.toLocaleString()}</strong></span>
+                  {c.sentAt && <><span>·</span><span>발송 일자 {new Date(c.sentAt).toLocaleString('ko-KR')}</span></>}
+                </div>
+                <div className="mt-3 pt-2.5 border-t border-white/10 flex flex-wrap items-center gap-1.5">
+                  {(c.status === 'draft' || c.status === 'failed') && (
                     <button
-                      onClick={() => openEditor(c)}
-                      className="text-[11px] text-indigo-300 hover:bg-indigo-500/10 px-2.5 py-1 rounded flex items-center gap-1"
+                      onClick={() => openRecipientsModal(c)}
+                      disabled={sendingId === c.id || !smtpConfigured}
+                      className="inline-flex items-center gap-1 text-[11px] font-semibold bg-blue-500/30 hover:bg-blue-500/50 disabled:opacity-40 text-blue-100 border border-blue-400/30 px-2.5 py-1.5 rounded-lg"
                     >
-                      <Edit2 className="w-3 h-3" /> 수정
+                      <Send className="w-3 h-3" />
+                      {sendingId === c.id ? '발송 중...' : '발송'}
                     </button>
-                    <button onClick={() => handleDeleteCampaign(c)} className="text-[11px] text-rose-300 hover:bg-rose-500/10 px-2.5 py-1 rounded flex items-center gap-1">
-                      <Trash2 className="w-3 h-3" /> 삭제
+                  )}
+                  {c.sentCount > 0 && (
+                    <button
+                      onClick={() => setEventsModal({ id: c.id, name: c.name })}
+                      className="inline-flex items-center gap-1 text-[11px] text-emerald-300 border border-emerald-400/20 hover:bg-emerald-500/10 px-2.5 py-1.5 rounded-lg"
+                    >
+                      <Eye className="w-3 h-3" /> 이력
                     </button>
-                  </div>
+                  )}
+                  {c.status === 'completed' && c.sentCount > 0 && (
+                    <>
+                      <button
+                        onClick={() => setInsightModal({ campaign: c })}
+                        className="inline-flex items-center gap-1 text-[11px] text-fuchsia-300 border border-fuchsia-400/20 hover:bg-fuchsia-500/10 px-2.5 py-1.5 rounded-lg"
+                      >
+                        <Sparkles className="w-3 h-3" /> AI 진단
+                      </button>
+                      <button
+                        onClick={() => setNonOpenerModal({ campaign: c })}
+                        className="inline-flex items-center gap-1 text-[11px] text-cyan-300 border border-cyan-400/20 hover:bg-cyan-500/10 px-2.5 py-1.5 rounded-lg"
+                      >
+                        <Smartphone className="w-3 h-3" /> 미오픈 SMS
+                      </button>
+                    </>
+                  )}
+                  <button
+                    onClick={() => openEditor(c)}
+                    className="inline-flex items-center gap-1 text-[11px] text-indigo-300 border border-indigo-400/20 hover:bg-indigo-500/10 px-2.5 py-1.5 rounded-lg"
+                  >
+                    <Edit2 className="w-3 h-3" /> 수정
+                  </button>
+                  <button
+                    onClick={() => handleDeleteCampaign(c)}
+                    className="inline-flex items-center gap-1 text-[11px] text-rose-300 border border-rose-400/20 hover:bg-rose-500/10 px-2.5 py-1.5 rounded-lg"
+                  >
+                    <Trash2 className="w-3 h-3" /> 삭제
+                  </button>
                 </div>
               </div>
             ))}
@@ -975,11 +988,11 @@ export default function EmailCampaignsPage() {
         />
       )}
 
-      {/* AI 캠페인 발송 확정 30크레딧 확인 */}
+      {/* ★ 2026-07-02 캠페인 완성 50크레딧 확인 — 확인 시 완성(멱등) 후 발송 연속 처리 */}
       <CreditConfirmModal
         open={!!creditConfirm}
-        source="email-ai-publish"
-        onConfirm={() => { if (creditConfirm) { const cc = creditConfirm; setCreditConfirm(null); doSend(cc.campaign, cc.payload); } }}
+        source="email-campaign-complete"
+        onConfirm={() => { if (creditConfirm) { const cc = creditConfirm; setCreditConfirm(null); completeAndSend(cc.campaign, cc.payload); } }}
         onCancel={() => setCreditConfirm(null)}
       />
 
@@ -1044,6 +1057,7 @@ export default function EmailCampaignsPage() {
           initialIsAd={visualEditor.isAd}
           aiGenerated={visualEditor.aiGenerated}
           campaignId={visualEditor.campaignId}
+          completed={visualEditor.completed}
           authHeaders={authHeaders}
           onClose={() => setVisualEditor(null)}
           onSaved={() => { loadAll(); }}

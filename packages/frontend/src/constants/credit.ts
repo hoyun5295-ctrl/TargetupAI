@@ -93,7 +93,7 @@ export const CREDIT_SOURCE_LABELS: Record<string, string> = {
   'predictive-daily': '예측 분석',
   'dm-ai-generate': '모바일 DM 생성', 'dm-builder': '모바일 DM 발행',
   'inapp-ai-generator': '인앱 생성', 'inapp-publish': '인앱 게시', 'inapp-quick-action': '인앱 다듬기',
-  'email-ai-generate': 'Email 생성', 'email-ai-publish': 'Email 발송', 'email-refine': 'Email 다듬기',
+  'email-ai-generate': 'Email 생성', 'email-campaign-complete': 'Email 캠페인 완성', 'email-ai-publish': 'Email 발송 확정(구)', 'email-refine': 'Email 다듬기',
   'email-precheck': 'Email 발송 전 진단', 'email-performance-insight': 'Email 성과 진단',
   'email-send-time-recommend': 'Email 발송 시간 추천',
   'generate-messages': '문구 생성', 'generate-custom-messages': '문구 생성',
@@ -115,7 +115,8 @@ export const CONFIRM_CREDIT_COSTS: Record<string, number> = {
   'dm-ai-generate': 5,           // 모바일 DM 생성 (AI 자동 생성 — 생성 전 확인, 범위 넓어 5)
   'dm-builder': 100,             // DM 발행
   'dm-interaction-publish': 120, // 인터랙션 발행 (룰렛·추첨·설문)
-  'email-ai-publish': 50,        // Email AI 캠페인 발송 확정 (선심가)
+  'email-campaign-complete': 50, // ★ 2026-07-02 Email 캠페인 완성 (AI/수동/템플릿 불문 1회 — 발송·이력 무료)
+  'email-ai-publish': 50,        // (구) Email AI 캠페인 발송 확정 — 2026-07-02부터 미사용(완성 요금 대체)
   'inapp-publish': 100,          // 인앱 게시
   'journey-activate': 200,       // 여정 활성화
   'continuous-operator': 200,    // 자동 마케팅 저장

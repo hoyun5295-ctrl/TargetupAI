@@ -425,8 +425,30 @@ export async function getInAppCustomerForBrowser(
 // Frontend UI 드롭다운용 — 사용 가능 변수 매핑
 // ════════════════════════════════════════════════════════════════════
 
-export function listAvailableVariables(): AvailableVariable[] {
-  return [
+// 변수 → 근원 customers 컬럼 (CT-58 실측 프로필로 노출 필터링용). 파생 변수는 근원 컬럼 기준.
+// cart_count(cart_add_count_30d)는 CT-58 분석 대상 밖이라 항상 노출.
+const VAR_BASE_COLUMN: Record<string, string> = {
+  '{{ customer.name }}': 'name',
+  '{{ customer.grade }}': 'grade',
+  '{{ customer.points }}': 'points',
+  '{{ customer.region }}': 'region',
+  '{{ customer.recent_product }}': 'recent_purchase_store',
+  '{{ customer.last_purchase_days_ago }}': 'recent_purchase_date',
+  '{{ customer.purchase_count }}': 'purchase_count',
+  '{{ customer.total_purchase_amount }}': 'total_purchase_amount',
+  '%고객명%': 'name',
+  '%등급%': 'grade',
+  '%포인트%': 'points',
+};
+
+/**
+ * 사용 가능 변수 목록.
+ * ★ 2026-07-02 Harold 지시 — 하드코딩 노출 금지: companyId 전달 시 CT-58 실측 프로필로
+ *   데이터가 사실상 없는(채워짐 30% 미만 = blocked) 필드를 숨긴다. (인앱 렌더는 빈 값 fallback이
+ *   있어 30~70% conditional은 유지 — 이메일 칩의 safe 70%+ 기준보다 완화.)
+ */
+export async function listAvailableVariables(companyId?: string): Promise<AvailableVariable[]> {
+  const all: AvailableVariable[] = [
     { key: '{{ customer.name }}',                     label: '회원명',              hint: '회원의 실제 이름 (없으면 "고객")',   sampleValue: '김민수' },
     { key: '{{ customer.grade }}',                    label: '등급',                hint: 'VIP / 일반 / 신규 등',                sampleValue: 'VIP' },
     { key: '{{ customer.points }}',                   label: '적립 포인트',         hint: '현재 적립금 (숫자)',                  sampleValue: '12000' },
@@ -441,4 +463,17 @@ export function listAvailableVariables(): AvailableVariable[] {
     { key: '%등급%',                                  label: '등급 (옛 패턴)',      hint: '옛 %변수% 패턴 — Liquid 권장',       sampleValue: 'VIP' },
     { key: '%포인트%',                                label: '포인트 (옛 패턴)',    hint: '옛 %변수% 패턴 — Liquid 권장',       sampleValue: '12000' },
   ];
+  if (!companyId) return all;
+  try {
+    const { getCompanyDataProfile } = await import('./company-data-profile');
+    const profile = await getCompanyDataProfile(companyId);
+    const blocked = new Set(profile.blockedFields.map((f) => f.field));
+    return all.filter((v) => {
+      const base = VAR_BASE_COLUMN[v.key];
+      return !base || !blocked.has(base);
+    });
+  } catch (err: any) {
+    console.log('[inapp-personalization] 변수 필터 프로필 조회 오류 — 전체 목록 반환:', err?.message);
+    return all;
+  }
 }
