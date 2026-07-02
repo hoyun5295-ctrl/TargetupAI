@@ -3,7 +3,8 @@
  *
  * 용도: 문안 생성/편집 화면에서 회사 등록 URL을 칩 클릭 한 번으로 커서 위치에 삽입.
  *   - 실제 URL은 고객사 소유 — 한 번 등록하면 모든 문안 편집기에서 재사용.
- *   - AI 자동 배치({{LINK:라벨}} 토큰 치환)와 같은 데이터(ai_company_memory brand_link)를 공유.
+ *   - 등록 = URL만 입력 (이름은 서버가 도메인 기준 자동 부여 — 2026-07-02 Harold 지시로 이름 칸 제거).
+ *   - AI 자동 배치({{LINK:이름}} 토큰 치환)와 같은 데이터(ai_company_memory brand_link)를 공유.
  *   - onInsert 미전달 = 관리 모드(AI 학습 메모리 페이지 — 목록/추가/삭제만).
  *
  * 삽입 방식은 호스트가 결정: onInsert(url)에 textInsert CT(insertAtCursor 등)를 연결한다.
@@ -33,7 +34,6 @@ export default function BrandLinkChips({ onInsert, tone = 'light', onToast, clas
   const [loading, setLoading] = useState(true);
   const [adding, setAdding] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [label, setLabel] = useState('');
   const [url, setUrl] = useState('');
   const [error, setError] = useState('');
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
@@ -68,12 +68,7 @@ export default function BrandLinkChips({ onInsert, tone = 'light', onToast, clas
   }
 
   async function saveLink() {
-    const trimmedLabel = label.trim();
     const trimmedUrl = url.trim();
-    if (!trimmedLabel) {
-      setError('링크 이름을 입력해주세요. 예: 공식몰, 쿠폰함');
-      return;
-    }
     if (!/^https?:\/\/\S+\.\S+/.test(trimmedUrl)) {
       setError('올바른 URL을 입력해주세요. (http:// 또는 https:// 로 시작)');
       return;
@@ -85,15 +80,14 @@ export default function BrandLinkChips({ onInsert, tone = 'light', onToast, clas
       const res = await fetch(API_BASE, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ label: trimmedLabel, url: trimmedUrl }),
+        body: JSON.stringify({ url: trimmedUrl }),
       });
       const data = await res.json();
       if (!data.success) throw new Error(data.error || '저장 실패');
-      setLabel('');
       setUrl('');
       setAdding(false);
       await loadLinks();
-      notify(`브랜드 링크 "${trimmedLabel}" 저장 완료 — 모든 문안 편집기에서 재사용됩니다.`, 'success');
+      notify('브랜드 링크 저장 완료 — 모든 문안 편집기에서 재사용됩니다.', 'success');
     } catch (err: any) {
       setError(err?.message || '저장 실패');
     } finally {
@@ -197,43 +191,35 @@ export default function BrandLinkChips({ onInsert, tone = 'light', onToast, clas
       )}
 
       {adding && (
-        <div className="mt-2 flex flex-col md:flex-row gap-1.5 md:items-center">
-          <input
-            type="text"
-            value={label}
-            onChange={(e) => setLabel(e.target.value)}
-            placeholder="이름 (예: 공식몰)"
-            maxLength={40}
-            className={`w-full md:w-32 px-2 py-1.5 text-[11px] rounded-lg border focus:outline-none ${inputCls}`}
-          />
+        <div className="mt-2 flex items-center gap-1.5 w-full min-w-0">
           <input
             type="text"
             value={url}
             onChange={(e) => setUrl(e.target.value)}
             onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); saveLink(); } }}
+            autoFocus
             placeholder="https://..."
             maxLength={500}
-            className={`flex-1 px-2 py-1.5 text-[11px] rounded-lg border focus:outline-none ${inputCls}`}
+            className={`flex-1 min-w-0 px-2 py-1.5 text-[11px] rounded-lg border focus:outline-none ${inputCls}`}
           />
-          <div className="flex gap-1.5 shrink-0">
-            <button
-              type="button"
-              onClick={saveLink}
-              disabled={saving}
-              className="flex items-center gap-1 px-2.5 py-1.5 text-[11px] font-semibold rounded-lg bg-violet-600 hover:bg-violet-500 text-white disabled:opacity-50 transition-colors"
-            >
-              {saving ? <Loader2 className="w-3 h-3 animate-spin" /> : <Plus className="w-3 h-3" />} 추가
-            </button>
-            <button
-              type="button"
-              onClick={() => { setAdding(false); setError(''); }}
-              className={`flex items-center gap-1 px-2 py-1.5 text-[11px] rounded-lg border transition-colors ${
-                dark ? 'border-white/15 text-white/60 hover:bg-white/10' : 'border-slate-200 text-slate-500 hover:bg-slate-100'
-              }`}
-            >
-              <X className="w-3 h-3" /> 취소
-            </button>
-          </div>
+          <button
+            type="button"
+            onClick={saveLink}
+            disabled={saving}
+            className="shrink-0 flex items-center gap-1 px-2.5 py-1.5 text-[11px] font-semibold rounded-lg bg-violet-600 hover:bg-violet-500 text-white disabled:opacity-50 transition-colors"
+          >
+            {saving ? <Loader2 className="w-3 h-3 animate-spin" /> : <Plus className="w-3 h-3" />} 추가
+          </button>
+          <button
+            type="button"
+            onClick={() => { setAdding(false); setError(''); }}
+            className={`shrink-0 flex items-center justify-center p-1.5 rounded-lg border transition-colors ${
+              dark ? 'border-white/15 text-white/60 hover:bg-white/10' : 'border-slate-200 text-slate-500 hover:bg-slate-100'
+            }`}
+            aria-label="취소"
+          >
+            <X className="w-3 h-3" />
+          </button>
         </div>
       )}
 

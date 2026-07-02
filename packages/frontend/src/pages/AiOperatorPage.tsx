@@ -29,9 +29,8 @@ import CreditHistoryModal from '../components/credit/CreditHistoryModal';
 import AiProposalSummaryModal from '../components/AiProposalSummaryModal';
 // ★ D210+ Phase 2-fix4 (Harold 명시 2026-05-23): 변수 하이라이트 + 머지 결과 미리보기 컨트롤타워.
 import { highlightVars, mergeAndHighlightVars } from '../utils/highlightVars';
-// ★ 2026-07-02 브랜드 링크 — 칩 클릭 = 커서 위치 URL 삽입 (textInsert CT + 공용 칩 컴포넌트)
-import { insertAtCursor } from '../utils/textInsert';
-import BrandLinkChips from '../components/BrandLinkChips';
+// ★ 2026-07-02 문안 전용 편집기 모달 — 변수·브랜드 링크·회사 표현·특수문자 커서 삽입 + 미리보기
+import MessageEditorModal from '../components/MessageEditorModal';
 import { useAuthStore } from '../stores/authStore';
 // ★ D210+ (Harold 명시 2026-05-23): SUB_MODULE_CARDS constants/ 모듈 추출 — Walkthrough STEP 6 공통 사용 정합.
 import { SUB_MODULE_CARDS } from '../constants/ai-operator-modules';
@@ -280,8 +279,6 @@ export default function AiOperatorPage() {
   const [selectedVariantIdx, setSelectedVariantIdx] = useState(0);
   const [showRefineModal, setShowRefineModal] = useState(false);
   const [refinedOverrides, setRefinedOverrides] = useState<Record<number, string>>({});
-  // ★ 2026-07-02 브랜드 링크 커서 삽입용 — 직접 편집 textarea ref
-  const editBodyTextareaRef = useRef<HTMLTextAreaElement>(null);
   const [editingBody, setEditingBody] = useState(false); // ★ 2026-06-19: 생성 문안 직접 편집(타이핑) 모드
   const [copiedAt, setCopiedAt] = useState<number | null>(null);
   // ★ D166: 승인 → 발송 흐름 (preview-recipients + /direct-send 2-step)
@@ -1051,44 +1048,15 @@ export default function AiOperatorPage() {
                           </div>
                         )}
 
-                        {/* 본문 박스 — 보기(pre) / 직접 편집(textarea) 토글 */}
+                        {/* 본문 박스 — 보기(pre). 직접 편집 = 전용 편집기 모달(MessageEditorModal) */}
                         <div className="relative p-4 rounded-xl bg-indigo-950/60 border border-white/10 mb-3">
-                          {editingBody ? (
-                            <>
-                              <textarea
-                                ref={editBodyTextareaRef}
-                                value={rawActiveBody}
-                                onChange={(e) => setRefinedOverrides((prev) => ({ ...prev, [safeIdx]: e.target.value }))}
-                                rows={6}
-                                autoFocus
-                                placeholder="문안을 직접 입력하세요"
-                                className="w-full bg-transparent text-sm text-white/90 leading-relaxed font-sans resize-y outline-none placeholder-white/30"
-                              />
-                              {isAd && (
-                                <p className="mt-2 text-[10px] text-white/35 italic">
-                                  (광고)·무료거부 {formattedReject || rawReject}는 발송 시 자동으로 붙습니다 — 본문만 입력하세요.
-                                </p>
-                              )}
-                              {/* ★ 2026-07-02 브랜드 링크 — 칩 클릭 = 커서 위치 URL 삽입 */}
-                              <BrandLinkChips
-                                tone="dark"
-                                className="mt-2"
-                                onInsert={(u) => {
-                                  const setBody = (v: string) => setRefinedOverrides((prev) => ({ ...prev, [safeIdx]: v }));
-                                  const ok = insertAtCursor(editBodyTextareaRef.current, u, setBody);
-                                  if (!ok) setBody(`${rawActiveBody}${u}`);
-                                }}
-                              />
-                            </>
-                          ) : (
-                            <pre className="whitespace-pre-wrap break-words text-sm text-white/85 leading-relaxed font-sans">
-                              {activeBody
-                                ? (showMergedPreview && sampleCustomer
-                                    ? mergeAndHighlightVars(activeBody, sampleCustomer, 'dark', sampleCustomerFields || undefined)
-                                    : highlightVars(activeBody, 'dark'))
-                                : '메시지 본문이 비어있습니다.'}
-                            </pre>
-                          )}
+                          <pre className="whitespace-pre-wrap break-words text-sm text-white/85 leading-relaxed font-sans">
+                            {activeBody
+                              ? (showMergedPreview && sampleCustomer
+                                  ? mergeAndHighlightVars(activeBody, sampleCustomer, 'dark', sampleCustomerFields || undefined)
+                                  : highlightVars(activeBody, 'dark'))
+                              : '메시지 본문이 비어있습니다.'}
+                          </pre>
                           {overrideText && !editingBody && (
                             <button
                               type="button"
@@ -1109,15 +1077,11 @@ export default function AiOperatorPage() {
                         <div className="flex gap-2 flex-wrap">
                           <button
                             type="button"
-                            onClick={() => setEditingBody((v) => !v)}
-                            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border transition-all ${
-                              editingBody
-                                ? 'bg-emerald-500/25 text-emerald-100 border-emerald-400/40 hover:bg-emerald-500/35'
-                                : 'bg-white/5 text-white/70 border-white/10 hover:bg-white/10 hover:text-white'
-                            }`}
+                            onClick={() => setEditingBody(true)}
+                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border bg-white/5 text-white/70 border-white/10 hover:bg-white/10 hover:text-white transition-all"
                           >
-                            {editingBody ? <Check className="w-3.5 h-3.5" /> : <Pencil className="w-3.5 h-3.5" />}
-                            {editingBody ? '편집 완료' : '직접 편집'}
+                            <Pencil className="w-3.5 h-3.5" />
+                            직접 편집
                           </button>
                           <button
                             type="button"
@@ -1143,6 +1107,24 @@ export default function AiOperatorPage() {
                             {copiedAt ? '복사 완료' : '본문 복사'}
                           </button>
                         </div>
+
+                        {/* ★ 2026-07-02 문안 전용 편집기 모달 — 큰 본문 + 우측 삽입 도구(변수·회사 표현·브랜드 링크·특수문자) */}
+                        <MessageEditorModal
+                          open={editingBody}
+                          initialText={rawActiveBody}
+                          originalText={baseBody}
+                          channel={activeChannel}
+                          isAd={isAd}
+                          rejectNumber={formattedReject || rawReject}
+                          variables={dataProfileVars}
+                          sampleCustomer={sampleCustomer}
+                          sampleCustomerFields={sampleCustomerFields}
+                          onApply={(text) => {
+                            setRefinedOverrides((prev) => ({ ...prev, [safeIdx]: text }));
+                            setEditingBody(false);
+                          }}
+                          onClose={() => setEditingBody(false)}
+                        />
                       </div>
                     }
                   />

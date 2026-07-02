@@ -880,6 +880,20 @@ router.post('/brand-voice/update-guideline', async (req: Request, res: Response)
 
 const BRAND_LINK_MAX = 20;
 
+/** URL에서 라벨 자동 부여 — 도메인(+경로). 이름 입력 없이 URL만 등록 (2026-07-02 Harold 지시). */
+function deriveBrandLinkLabel(url: string): string {
+  try {
+    const u = new URL(url);
+    const host = u.hostname.replace(/^www\./, '');
+    const path = u.pathname && u.pathname !== '/' ? u.pathname.replace(/\/+$/, '') : '';
+    const base = `${host}${path}`.replace(/[{}\r\n]/g, '').trim();
+    return (base || '링크').slice(0, 40);
+  } catch {
+    const base = url.replace(/^https?:\/\//i, '').replace(/[{}\r\n]/g, '').trim();
+    return (base || '링크').slice(0, 40);
+  }
+}
+
 router.get('/brand-links', async (req: Request, res: Response) => {
   try {
     const companyId = req.user?.companyId;
@@ -922,27 +936,50 @@ router.post('/brand-links', async (req: Request, res: Response) => {
       return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
     }
 
-    // 라벨에 중괄호/개행이 들어가면 {{LINK:라벨}} 토큰이 성립하지 않으므로 제거
-    const label = String(req.body?.label || '').replace(/[{}\r\n]/g, '').trim().slice(0, 40);
     const url = String(req.body?.url || '').trim();
-    if (!label) {
-      return res.status(400).json({ success: false, error: '링크 이름(라벨)을 입력해주세요. 예: 공식몰, 쿠폰함' });
-    }
     if (!/^https?:\/\/\S+\.\S+/.test(url) || url.length > 500) {
       return res.status(400).json({ success: false, error: '올바른 URL을 입력해주세요. (http:// 또는 https:// 로 시작, 500자 이내)' });
     }
 
-    // 상한 확인 — 동일 라벨 갱신은 허용
+    // 라벨 = 입력값(옵션) 또는 URL에서 자동 부여. 중괄호/개행 제거({{LINK:라벨}} 토큰 성립 보장).
+    const explicitLabel = String(req.body?.label || '').replace(/[{}\r\n]/g, '').trim().slice(0, 40);
+    const baseLabel = explicitLabel || deriveBrandLinkLabel(url);
+
+    // 라벨 충돌 처리 — 같은 라벨 + 같은 URL = 그대로 갱신(멱등), 같은 라벨 + 다른 URL = 접미사로 분리
+    // (UNIQUE(company_id, memory_type, memory_key) upsert가 다른 링크를 덮어쓰는 사고 차단)
+    let label = baseLabel;
+    let sameLabelSameUrl = false;
+    for (let suffix = 2; suffix <= 9; suffix++) {
+      const ex = await query(
+        `SELECT memory_value FROM ai_company_memory
+         WHERE company_id = $1::uuid AND memory_type = 'brand_link' AND memory_key = $2
+         LIMIT 1`,
+        [companyId, label],
+      );
+      if (ex.rows.length === 0) break;
+      let exUrl = '';
+      try {
+        const v = typeof ex.rows[0].memory_value === 'string' ? JSON.parse(ex.rows[0].memory_value) : ex.rows[0].memory_value;
+        exUrl = String(v?.url || '');
+      } catch {
+        exUrl = '';
+      }
+      if (exUrl === url) {
+        sameLabelSameUrl = true;
+        break;
+      }
+      label = `${baseLabel.slice(0, 37)}-${suffix}`;
+    }
+
+    // 상한 확인 — 기존 행 갱신(같은 라벨·같은 URL)은 허용
     const countRes = await query(
-      `SELECT COUNT(*)::int AS total,
-              COUNT(*) FILTER (WHERE memory_key = $2)::int AS same_label
+      `SELECT COUNT(*)::int AS total
        FROM ai_company_memory
        WHERE company_id = $1::uuid AND memory_type = 'brand_link'`,
-      [companyId, label],
+      [companyId],
     );
     const total = Number(countRes.rows[0]?.total) || 0;
-    const sameLabel = Number(countRes.rows[0]?.same_label) || 0;
-    if (total >= BRAND_LINK_MAX && sameLabel === 0) {
+    if (total >= BRAND_LINK_MAX && !sameLabelSameUrl) {
       return res.status(400).json({ success: false, error: `브랜드 링크는 최대 ${BRAND_LINK_MAX}건까지 등록 가능합니다.` });
     }
 
@@ -965,7 +1002,7 @@ router.post('/brand-links', async (req: Request, res: Response) => {
     const { invalidateBrandVoiceCache } = await import('../utils/brand-voice-prompt');
     invalidateBrandVoiceCache(companyId);
 
-    return res.json({ success: true, id: inserted.rows[0]?.id, label, url, updated: sameLabel > 0 });
+    return res.json({ success: true, id: inserted.rows[0]?.id, label, url, updated: sameLabelSameUrl });
   } catch (err: any) {
     console.error('[Brand Links POST] 오류:', err);
     return res.status(500).json({ success: false, error: err?.message || '저장 실패' });

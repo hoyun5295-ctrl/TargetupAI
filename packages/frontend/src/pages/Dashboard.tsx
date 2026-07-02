@@ -53,6 +53,8 @@ import UploadResultModal from '../components/UploadResultModal';
 import { useAuthStore } from '../stores/authStore';
 import { formatDate, formatPreviewValue, formatByType, calculateSmsBytes, truncateToSmsBytes, DIRECT_VAR_MAP, DIRECT_VAR_TO_FIELD, DIRECT_FIELD_LABELS, DIRECT_MAPPING_FIELDS, replaceDirectVars, formatPhoneNumber, mmsServerPathToUrl, resolveRecipientCallback, buildAdMessageFront, validateMmsBeforeSend, getMaxByteMessage, cellToString } from '../utils/formatDate';
 import { insertAtCursorOrAppend } from '../utils/textInsert';
+// ★ 2026-07-02 특수문자 세트 컨트롤타워 (MessageEditorModal과 공유 — 목록 변경은 utils/smsSafeChars.ts 1곳)
+import { SMS_SAFE_CHARS } from '../utils/smsSafeChars';
 import { getMmsImagePath, getMmsImageDisplayName, toMmsImagePaths, type MmsImageItem } from '../utils/mmsImage';
 import DirectSendPanel from '../components/DirectSendPanel';
 import AlimtalkSendModal from '../components/AlimtalkSendModal';
@@ -3668,8 +3670,8 @@ const campaignData = {
             </div>
             <div className="p-4">
               <div className="grid grid-cols-8 gap-1.5">
-                {/* SMS/LMS 호환 특수문자만 (EUC-KR 인코딩 지원 확인 완료) */}
-                {['★','☆','♥','♡','◆','◇','■','□','▲','△','▶','◀','●','○','◎','♤','♠','♧','♣','♪','♬','♩','☎','♨','※','☞','↑','↓','←','→','▷','◁','▽','①','②','③','④','⑤','⑥','⑦','⑧','㈜','㈔','℡','㉿','㎝','㎏','㎡','㎎'].map((char, i) => (
+                {/* SMS/LMS 호환 특수문자만 (EUC-KR 인코딩 지원 확인 완료) — 세트 = utils/smsSafeChars.ts CT */}
+                {SMS_SAFE_CHARS.map((char, i) => (
                   <button
                     key={i}
                     onClick={() => {
