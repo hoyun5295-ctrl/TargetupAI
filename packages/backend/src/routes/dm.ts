@@ -35,12 +35,14 @@ import { selectSampleCustomers, selectSampleCustomerByKey, type SampleCustomerKe
 import { lookupDmRecipientToken, issueDmRecipientTokensBulk } from '../utils/dm/dm-recipient-token';
 import { computeDmProgressPct, isDmCompleted, sumSectionClicks } from '../utils/dm/dm-tracking';
 import { extractJsonFromAiText } from '../utils/ai-json';
+// ★ CT-08 개별회신번호 — 고객 등록매장 번호(store_phone) 발송 + 미등록 번호 제외(직접발송과 동일 안전망)
+import { filterByIndividualCallback, buildCallbackErrorResponse, buildCallbackConfirmResponse } from '../utils/callback-filter';
 import { buildCustomerFilter } from '../utils/customer-filter';
 import { buildChannelEligibilityWhere } from '../utils/channel-eligibility';
 import { createDirectSendCampaign, countStagingFiltered } from '../utils/direct-send-core';
 import { DirectSendError } from '../utils/direct-send-spec';
 import { getOpt080Number } from '../utils/messageUtils';
-import { callAIWithFallback } from '../services/ai';
+import { callAIWithFallback, getSeasonContext } from '../services/ai';
 import { buildSystemPromptWithBrandVoice } from '../utils/brand-voice-prompt';
 import { getAvailableVariables } from '../utils/dm/dm-variable-resolver';
 import { validateDm } from '../utils/dm/dm-validate';
@@ -567,7 +569,7 @@ dmRouter.post('/:id/send-to-target', async (req: any, res: any) => {
     const userId = req.user?.userId || companyId;
     if (!companyId) return res.status(403).json({ error: '회사 권한이 필요합니다.' });
 
-    const { filter, messageText, isAd, scheduledAt, allCustomers, callback: callbackReq } = req.body as {
+    const { filter, messageText, isAd, scheduledAt, allCustomers, callback: callbackReq, useIndividualCallback, confirmCallbackExclusion } = req.body as {
       filter?: Record<string, { operator: string; value: any }>;
       messageText?: string;
       isAd?: boolean;
@@ -575,6 +577,10 @@ dmRouter.post('/:id/send-to-target', async (req: any, res: any) => {
       allCustomers?: boolean;
       /** ★ 2026-07-02(3) 발신번호 선택 — 회사 등록 번호만 허용, 미전달 = 기본 번호 */
       callback?: string;
+      /** ★ 2026-07-02(3) 고객별 등록매장 번호(store_phone)로 개별 회신 — CT-08 필터(미등록 번호 제외) 적용 */
+      useIndividualCallback?: boolean;
+      /** 미등록/미보유 제외 안내 확인 후 재호출 플래그 */
+      confirmCallbackExclusion?: boolean;
     };
     // ★ 2026-07-02(3) 전체 고객 발송 지원 — 타겟 추출 "전체 고객"(isAll) 확정분은 빈 filter 허용(= 조건 없음 = 전체 + DM 자격)
     if (!allCustomers && (!filter || typeof filter !== 'object' || Object.keys(filter).length === 0)) {
@@ -607,9 +613,10 @@ dmRouter.post('/:id/send-to-target', async (req: any, res: any) => {
       if (!opt080) return res.status(400).json({ error: '광고성 발송은 무료수신거부(080) 번호 등록이 필요합니다.', code: 'NO_OPT080' });
     }
 
-    // 발신번호 — 선택값(회사 등록 번호인지 검증) 우선, 미전달 시 기본 등록 번호
+    // 발신번호 — 선택값(회사 등록 번호인지 검증) 우선, 미전달 시 기본 등록 번호.
+    // 개별 회신(useIndividualCallback) 모드는 고객별 번호가 우선이라 기본 번호가 없어도 통과(폴백용으로만 사용).
     let callback: string | null = null;
-    const wantedCb = callbackReq ? String(callbackReq).replace(/\D/g, '') : '';
+    const wantedCb = !useIndividualCallback && callbackReq ? String(callbackReq).replace(/\D/g, '') : '';
     if (wantedCb) {
       const cbSel = await query(
         `SELECT REPLACE(phone, '-', '') AS phone FROM callback_numbers WHERE company_id = $1 AND REPLACE(phone, '-', '') = $2 LIMIT 1`,
@@ -624,7 +631,7 @@ dmRouter.post('/:id/send-to-target', async (req: any, res: any) => {
       );
       callback = cbRes.rows[0]?.phone || null;
     }
-    if (!callback) return res.status(400).json({ error: '등록된 발신번호가 없습니다. 발신번호 등록 후 발송해주세요.', code: 'NO_CALLBACK' });
+    if (!callback && !useIndividualCallback) return res.status(400).json({ error: '등록된 발신번호가 없습니다. 발신번호 등록 후 발송해주세요.', code: 'NO_CALLBACK' });
 
     // 발송 대상 resolve — DM 채널 자격(전화 유효·수신거부/무효 아님·활성) + filter. phone 중복 제거.
     //   전체 고객(allCustomers)이면 filter 조건 없이 DM 자격만 적용.
@@ -633,14 +640,27 @@ dmRouter.post('/:id/send-to-target', async (req: any, res: any) => {
     });
     const dmWhere = buildChannelEligibilityWhere('dm', 'c');
     const recRes = await query(
-      `SELECT DISTINCT ON (c.phone) c.id, c.phone, c.name
+      `SELECT DISTINCT ON (c.phone) c.id, c.phone, c.name, c.store_phone
          FROM customers c
         WHERE c.company_id = $1::uuid AND (${dmWhere})${filterSql}
         ORDER BY c.phone, c.id`,
       [companyId, ...filterParams],
     );
-    const recipients = recRes.rows;
+    let recipients = recRes.rows;
     if (recipients.length === 0) return res.status(400).json({ error: '발송 대상이 0명입니다. 조건을 조정해주세요.', code: 'ZERO_MATCH' });
+
+    // ★ 2026-07-02(3) 고객별 등록매장 번호(개별 회신) — CT-08: store_phone→callback 세팅 + 미보유/미등록 번호 제외
+    if (useIndividualCallback) {
+      const cbResult = await filterByIndividualCallback(recipients, companyId, userId || undefined);
+      if (cbResult.filtered.length === 0) {
+        return res.status(400).json(buildCallbackErrorResponse(cbResult.callbackMissingCount, cbResult.callbackUnregisteredCount));
+      }
+      // 제외 대상이 있으면 사용자 확인 후 재호출 (직접발송과 동일 UX)
+      if (cbResult.callbackSkippedCount > 0 && !confirmCallbackExclusion) {
+        return res.json(buildCallbackConfirmResponse(cbResult, cbResult.filtered.length));
+      }
+      recipients = cbResult.filtered;
+    }
 
     // 수신자별 토큰 발급(벌크) + 링크 구성
     let tokenPairs: Array<{ customerId: string; token: string }>;
@@ -657,16 +677,17 @@ dmRouter.post('/:id/send-to-target', async (req: any, res: any) => {
     for (const p of tokenPairs) tokenByCust[p.customerId] = p.token;
     const baseUrl = process.env.HANJUL_BASE_URL || 'https://hanjul.ai';
 
-    // staging 적재 — phone + name(%고객명%) + extra1(수신자별 DM 링크 %기타1%)
+    // staging 적재 — phone + name(%고객명%) + extra1(수신자별 DM 링크 %기타1%) + callback(개별 회신 시 수신자별 매장번호)
     const stagingId = uuidv4();
     const phones = recipients.map((r: any) => String(r.phone || '').replace(/\D/g, ''));
     const names = recipients.map((r: any) => (r.name ?? null));
     const links = recipients.map((r: any) => `${baseUrl}/api/dm/v/dm-${shortCode}?r=${tokenByCust[String(r.id)] || ''}`);
+    const cbs = recipients.map((r: any) => (useIndividualCallback && r.callback ? String(r.callback).replace(/\D/g, '') : null));
     await query(
-      `INSERT INTO campaign_send_staging (staging_id, company_id, phone, name, extra1)
-       SELECT $1::uuid, $2::uuid, u.phone, u.name, u.extra1
-         FROM UNNEST($3::text[], $4::text[], $5::text[]) AS u(phone, name, extra1)`,
-      [stagingId, companyId, phones, names, links],
+      `INSERT INTO campaign_send_staging (staging_id, company_id, phone, name, extra1, callback)
+       SELECT $1::uuid, $2::uuid, u.phone, u.name, u.extra1, u.callback
+         FROM UNNEST($3::text[], $4::text[], $5::text[], $6::text[]) AS u(phone, name, extra1, callback)`,
+      [stagingId, companyId, phones, names, links, cbs],
     );
 
     // 정제 후 실제 발송 수(중복·수신거부 제외) — 커밋과 동일 기준으로 과금 정확
@@ -691,7 +712,8 @@ dmRouter.post('/:id/send-to-target', async (req: any, res: any) => {
           msgType: 'LMS',
           message: finalMessage,
           subject: (dm.title || 'DM').slice(0, 40),
-          callback,
+          callback: callback || '',
+          useIndividualCallback: !!useIndividualCallback,
           sendChannel: 'sms',
           adEnabled: isAd === true,
           total: sendCount,
@@ -735,7 +757,8 @@ dmRouter.get('/:id/recipients-tracking', async (req: any, res: any) => {
       `SELECT DISTINCT ON (t.customer_id)
               t.customer_id, c.name, c.phone, t.created_at AS sent_at,
               v.page_reached, v.total_pages, v.duration_seconds, v.max_scroll_pct,
-              v.section_interactions, v.viewed_at, v.last_active_at
+              v.section_interactions, v.viewed_at, v.last_active_at,
+              EXISTS (SELECT 1 FROM dm_event_responses er WHERE er.campaign_id = t.dm_id AND er.customer_id = t.customer_id) AS responded
          FROM dm_recipient_tokens t
          JOIN customers c ON c.id = t.customer_id AND c.company_id = t.company_id
          LEFT JOIN LATERAL (
@@ -770,18 +793,21 @@ dmRouter.get('/:id/recipients-tracking', async (req: any, res: any) => {
         progressPct,
         completed: viewed && isDmCompleted(pageReached, totalPages, maxScrollPct),
         clicks: sumSectionClicks(row.section_interactions),
+        // ★ 2026-07-02(3) 고객 액션(응모/투표/쿠폰 수령/설문 등 dm_event_responses) 여부
+        responded: !!row.responded,
         durationSeconds: Number(row.duration_seconds || 0),
         lastActiveAt: row.last_active_at || null,
       };
     });
 
-    // 깔때기 요약: 발송 → 열람 → 50% 도달 → 완독 → 클릭
+    // 깔때기 요약: 발송 → 열람 → 50% 도달 → 완독 → 클릭 → 응모(액션)
     const summary = {
       sent: recipients.length,
       viewed: recipients.filter((x) => x.viewed).length,
       reached50: recipients.filter((x) => x.viewed && x.progressPct >= 50).length,
       completed: recipients.filter((x) => x.completed).length,
       clicked: recipients.filter((x) => x.clicks > 0).length,
+      responded: recipients.filter((x) => x.responded).length,
     };
 
     return res.json({ success: true, summary, recipients });
@@ -836,9 +862,13 @@ dmRouter.post('/:id/generate-copy', async (req: any, res: any) => {
       ? `\n\n[DM 페이지 편집 내용 — 이 문자는 아래 DM을 알리는 문자입니다. 문안은 반드시 이 내용에 근거해 작성]\n${dmLines.join('\n')}`
       : '';
 
+    // ★ 2026-07-02(3) 계절·시기 감성 주입 — DM 내용 + 시즌감으로 풍성한 카피 (구체 사실 창작은 여전히 금지)
+    const { monthLabel, seasonHint } = getSeasonContext();
     const baseSystem = `당신은 한줄로 SMS/LMS 마케팅 카피라이터입니다. 아래 조건으로 LMS 문자 본문 1개만 작성합니다.
 - 반드시 %DM링크% 를 문안 안 자연스러운 위치에 1회 포함(수신자별 개인화 링크가 여기 들어갑니다).
 - 혜택·쿠폰·이벤트는 [DM 페이지 편집 내용]에 실제 적힌 표현만 그대로 인용 — 거기 없는 혜택(%/원/쿠폰/무료/할인/사은품/적립) 임의 창작 절대 금지.
+- 지금은 ${monthLabel}(${seasonHint}) — 계절감과 시기 감성을 가벼운 수식·인사로 자연스럽게 녹여 카피를 풍성하게. 단 시즌 묘사는 일반적 사실만, 통계·행사 등 구체 사실 지어내기 금지.
+- 밋밋한 나열 대신 감성 후크(첫 줄) + 핵심 내용 + 행동 유도 흐름으로.
 - 유니코드 이모지 금지(SMS 호환). 80~250자. 줄바꿈은 실제 줄바꿈 문자로.
 - 개인화는 %고객명% 등 명시된 변수만 사용.
 [출력 형식 — 절대 준수] 문자 본문 텍스트만 그대로 출력. JSON·코드블록·따옴표·"channel"·"body" 같은 형식 절대 금지.${dmSummary}`;

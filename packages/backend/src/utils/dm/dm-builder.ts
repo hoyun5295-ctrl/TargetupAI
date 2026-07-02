@@ -266,15 +266,34 @@ export function buildSectionSummary(row: { sections?: any; pages?: any; brand_ki
 
 export async function getDmList(companyId: string) {
   // raw pages는 전송하지 않음 — 길이만 page_count로 SQL 집계(jsonb_array_length). sections/brand_kit만 요약 계산에 사용.
-  const result = await query(
-    `SELECT id, title, store_name, status, approval_status, layout_mode,
-            short_code, view_count, sections, brand_kit,
-            COALESCE(jsonb_array_length(pages), 0) as page_count,
-            created_at, updated_at
-     FROM dm_pages WHERE company_id = $1
-     ORDER BY updated_at DESC`,
-    [companyId]
-  );
+  // ★ 2026-07-02(3) has_send_history = 타겟 발송 이력 여부(dm_recipient_tokens EXISTS) — 카드 [발송 추적] 노출 판단.
+  //   토큰 테이블 미마이그레이션(구 환경)이어도 목록이 죽지 않게 폴백.
+  let result;
+  try {
+    result = await query(
+      `SELECT id, title, store_name, status, approval_status, layout_mode,
+              short_code, view_count, sections, brand_kit,
+              COALESCE(jsonb_array_length(pages), 0) as page_count,
+              EXISTS (SELECT 1 FROM dm_recipient_tokens t WHERE t.dm_id = dm_pages.id) AS has_send_history,
+              created_at, updated_at
+       FROM dm_pages WHERE company_id = $1
+       ORDER BY updated_at DESC`,
+      [companyId]
+    );
+  } catch (e: any) {
+    const msg = e?.message || '';
+    if (!(msg.includes('relation') && msg.includes('does not exist'))) throw e;
+    result = await query(
+      `SELECT id, title, store_name, status, approval_status, layout_mode,
+              short_code, view_count, sections, brand_kit,
+              COALESCE(jsonb_array_length(pages), 0) as page_count,
+              false AS has_send_history,
+              created_at, updated_at
+       FROM dm_pages WHERE company_id = $1
+       ORDER BY updated_at DESC`,
+      [companyId]
+    );
+  }
   // sections/brand_kit 원본은 요약으로 압축해 응답에서 제거(목록 payload 경량)
   return result.rows.map((row: any) => {
     const summary = buildSectionSummary(row);
@@ -292,6 +311,7 @@ export async function getDmList(companyId: string) {
       short_code: row.short_code,
       view_count: row.view_count,
       page_count: row.page_count,
+      has_send_history: !!row.has_send_history,
       section_summary: summary,
       created_at: row.created_at,
       updated_at: row.updated_at,

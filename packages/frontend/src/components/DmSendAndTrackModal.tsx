@@ -13,6 +13,10 @@ import { useToast } from './ToastProvider';
 import TargetExtractModal, { type ExtractedTarget } from './TargetExtractModal';
 import AiRefineModal from './AiRefineModal';
 import SpamFilterTestModal from './SpamFilterTestModal';
+import ConfirmModal, { type ConfirmState } from './ConfirmModal';
+
+/** 발신번호 select 특수값 — 고객별 등록매장 번호(개별 회신) */
+const INDIVIDUAL_CB = '__individual__';
 
 interface TrackRecipient {
   customerId: string;
@@ -25,6 +29,8 @@ interface TrackRecipient {
   progressPct: number;
   completed: boolean;
   clicks: number;
+  /** ★ 2026-07-02(3) 고객 액션(응모/투표/쿠폰 수령/설문) 여부 — dm_event_responses */
+  responded: boolean;
   durationSeconds: number;
   lastActiveAt: string | null;
 }
@@ -35,6 +41,7 @@ interface TrackSummary {
   reached50: number;
   completed: number;
   clicked: number;
+  responded: number;
 }
 
 /** 체류 초 → "1분 24초" 표시 */
@@ -62,13 +69,15 @@ interface Props {
   dmTitle?: string;
   show: boolean;
   onClose: () => void;
+  /** ★ 2026-07-02(3) DM 카드 [발송 추적] 진입 — 'track'이면 추적 탭으로 바로 열고 자동 로드 */
+  initialView?: 'compose' | 'track';
 }
 
 // 편집기 변수 칩 (본문 삽입). %DM링크% = 수신자별 개인화 링크(발송 시 자동 치환).
 const VAR_CHIPS = ['%DM링크%', '%고객명%', '%등급%', '%지역%'];
 // ★ 2026-07-02(3) Harold 지시 — 미리보기 변수값은 하드코딩 대신 "전 단계에서 추출된 타겟"의 첫 샘플 실데이터로 치환
 
-export default function DmSendAndTrackModal({ dmId, dmTitle, show, onClose }: Props) {
+export default function DmSendAndTrackModal({ dmId, dmTitle, show, onClose, initialView }: Props) {
   const toast = useToast();
   const [view, setView] = useState<'compose' | 'track'>('compose');
   const [extractOpen, setExtractOpen] = useState(false);
@@ -117,6 +126,33 @@ export default function DmSendAndTrackModal({ dmId, dmTitle, show, onClose }: Pr
   const [loadingTrack, setLoadingTrack] = useState(false);
   // ★ 2026-07-02(3) 미리보기 샘플 전환 — 추출된 수신자별 개인화 결과를 눈으로 확인
   const [sampleIdx, setSampleIdx] = useState(0);
+  // ★ 2026-07-02(3) 개별 회신(미등록/미보유 제외) 확인 모달
+  const [confirmState, setConfirmState] = useState<ConfirmState | null>(null);
+  const isIndividualCb = callback === INDIVIDUAL_CB;
+  const defaultRegisteredCb = callbackList.find((c) => c.isDefault)?.phone || callbackList[0]?.phone || '';
+
+  const loadTracking = async () => {
+    setView('track');
+    setLoadingTrack(true);
+    try {
+      const res = await fetch(`/api/dm/${dmId}/recipients-tracking`, { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } });
+      const data = await res.json();
+      if (res.ok && data.success) setTracking({ summary: data.summary, recipients: data.recipients });
+      else toast.error(data?.error || '추적 조회에 실패했습니다.');
+    } catch (e: any) {
+      toast.error(e?.message || '추적 조회 중 오류가 발생했습니다.');
+    } finally {
+      setLoadingTrack(false);
+    }
+  };
+
+  // 카드 [발송 추적] 진입 = 추적 탭 직행 + 자동 로드
+  useEffect(() => {
+    if (!show) return;
+    if (initialView === 'track') { void loadTracking(); }
+    else { setView('compose'); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [show, initialView]);
 
   if (!show) return null;
   const token = () => localStorage.getItem('token');
@@ -126,19 +162,25 @@ export default function DmSendAndTrackModal({ dmId, dmTitle, show, onClose }: Pr
   // 미리보기 치환값 = 추출 타겟 샘플(실데이터, ‹ › 로 수신자별 확인). 타겟 미추출 시 중립 기본값.
   const samples = target?.samples || [];
   const sample = samples[Math.min(sampleIdx, Math.max(0, samples.length - 1))];
-  const sampleValues: Record<string, string> = {
-    '%고객명%': (sample?.name || '').trim() || '고객',
-    '%등급%': String(sample?.grade || '').trim() || '일반',
-    '%지역%': (sample?.region || '').trim() || '-',
-    '%DM링크%': 'https://hanjul.ai/dm(개인화)',
+
+  // 샘플 고객 기준 변수 치환 — 미리보기·스팸테스트 공용 (검증 본문 = 실발송 본문 원칙)
+  const substituteVars = (text: string, s: typeof sample | undefined, linkText: string) => {
+    const vals: Record<string, string> = {
+      '%고객명%': (s?.name || '').trim() || '고객',
+      '%등급%': String(s?.grade || '').trim() || '일반',
+      '%지역%': (s?.region || '').trim() || '-',
+      '%DM링크%': linkText,
+    };
+    let out = text || '';
+    for (const [k, val] of Object.entries(vals)) out = out.split(k).join(val);
+    if (!text.includes('%DM링크%') && text.trim()) out = `${out}\n${linkText}`;
+    return out;
   };
 
-  const previewText = (() => {
-    let out = messageText || '';
-    for (const [k, val] of Object.entries(sampleValues)) out = out.split(k).join(val);
-    if (!messageText.includes('%DM링크%') && messageText.trim()) out = `${out}\n${sampleValues['%DM링크%']}`;
-    return out;
-  })();
+  const previewText = substituteVars(messageText, sample, 'https://hanjul.ai/dm(개인화)');
+  // ★ 2026-07-02(3) 스팸테스트 본문 = 첫 샘플 고객 치환본 (원본 변수 그대로 들어가던 결함 수정).
+  //   링크는 실발송 개인화 링크와 같은 길이 구조의 자리값 — 바이트·스팸 판정 정확도 유지.
+  const spamTestMessage = substituteVars(messageText, samples[0], 'https://hanjul.ai/api/dm/v/dm-XXXXXXX?r=XXXXXXXXXXXXXXXXXXXXXXXX');
 
   // ★ 2026-07-02(3) 프롬프트 = 선택 — 비워두면 편집된 DM 내용만으로 자동 생성 (백엔드가 DM 섹션 요약 주입)
   const handleGenerate = async () => {
@@ -183,7 +225,8 @@ export default function DmSendAndTrackModal({ dmId, dmTitle, show, onClose }: Pr
 
   const openSpamTest = () => {
     if (!messageText.trim()) { toast.warning('먼저 문안을 작성해주세요.'); return; }
-    if (!callback) { toast.error('등록된 발신번호가 없습니다. 발신번호 등록 후 이용해주세요.'); return; }
+    // 개별 회신 모드는 스팸테스트에 기본 등록번호 사용 (테스트폰 발송용 대표 번호)
+    if (!(isIndividualCb ? defaultRegisteredCb : callback)) { toast.error('등록된 발신번호가 없습니다. 발신번호 등록 후 이용해주세요.'); return; }
     setSpamOpen(true);
   };
 
@@ -196,7 +239,7 @@ export default function DmSendAndTrackModal({ dmId, dmTitle, show, onClose }: Pr
     setScheduleMode('ai');
   };
 
-  const handleSend = async () => {
+  const handleSend = async (confirmExclusion = false) => {
     if (!target || target.channelEligibleCount === 0) { toast.warning('먼저 타겟을 추출해주세요.'); return; }
     if (!messageText.trim()) { toast.warning('문자 본문을 작성해주세요.'); return; }
     if (!callback) { toast.warning('발신번호를 선택해주세요. (발신번호 관리에서 등록)'); return; }
@@ -207,9 +250,31 @@ export default function DmSendAndTrackModal({ dmId, dmTitle, show, onClose }: Pr
       const res = await fetch(`/api/dm/${dmId}/send-to-target`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token()}` },
-        body: JSON.stringify({ filter: target.filter, allCustomers: !!target.isAll, messageText: messageText.trim(), isAd, callback, scheduledAt: scheduledAtVal ? new Date(scheduledAtVal).toISOString() : null }),
+        body: JSON.stringify({
+          filter: target.filter,
+          allCustomers: !!target.isAll,
+          messageText: messageText.trim(),
+          isAd,
+          // 개별 회신 = 고객별 등록매장 번호(store_phone) — 미등록 번호 고객은 백엔드 CT-08이 제외(확인 후 발송)
+          callback: isIndividualCb ? undefined : callback,
+          useIndividualCallback: isIndividualCb,
+          confirmCallbackExclusion: confirmExclusion,
+          scheduledAt: scheduledAtVal ? new Date(scheduledAtVal).toISOString() : null,
+        }),
       });
       const data = await res.json();
+      // 개별 회신 — 회신번호 미보유/미등록 고객 제외 확인 (직접발송과 동일 UX)
+      if (res.ok && data?.callbackConfirmRequired) {
+        const detail = (data.unregisteredDetails || []).slice(0, 5).map((d: any) => `${d.phone}(${d.excludedCount}명)`).join(', ');
+        setConfirmState({
+          mode: 'warning',
+          title: '회신번호 없는 고객 제외',
+          description: `${data.message}${detail ? `\n미등록 번호: ${detail}${(data.unregisteredDetails || []).length > 5 ? ' 외' : ''}` : ''}\n미등록 매장번호는 발신번호 관리에 등록하면 발송할 수 있습니다.`,
+          confirmLabel: '제외하고 발송',
+          onConfirm: () => { void handleSend(true); },
+        });
+        return;
+      }
       if (!res.ok || !data.success) { toast.error(data?.error || '발송에 실패했습니다.'); return; }
       setSentCount(data.sent);
       toast.success(scheduledAtVal ? `${Number(data.sent).toLocaleString()}명 예약 완료.` : `${Number(data.sent).toLocaleString()}명에게 발송했습니다.`);
@@ -217,21 +282,6 @@ export default function DmSendAndTrackModal({ dmId, dmTitle, show, onClose }: Pr
       toast.error(e?.message || '발송 중 오류가 발생했습니다.');
     } finally {
       setSending(false);
-    }
-  };
-
-  const loadTracking = async () => {
-    setView('track');
-    setLoadingTrack(true);
-    try {
-      const res = await fetch(`/api/dm/${dmId}/recipients-tracking`, { headers: { Authorization: `Bearer ${token()}` } });
-      const data = await res.json();
-      if (res.ok && data.success) setTracking({ summary: data.summary, recipients: data.recipients });
-      else toast.error(data?.error || '추적 조회에 실패했습니다.');
-    } catch (e: any) {
-      toast.error(e?.message || '추적 조회 중 오류가 발생했습니다.');
-    } finally {
-      setLoadingTrack(false);
     }
   };
 
@@ -364,13 +414,14 @@ export default function DmSendAndTrackModal({ dmId, dmTitle, show, onClose }: Pr
                     <RefreshCw className="w-3.5 h-3.5" /> 새로고침
                   </button>
                 </div>
-                <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
+                <div className="grid grid-cols-2 md:grid-cols-6 gap-2">
                   {[
                     { l: '발송', v: tracking.summary.sent, c: 'text-white' },
                     { l: '열람', v: tracking.summary.viewed, c: 'text-cyan-300' },
                     { l: '50% 도달', v: tracking.summary.reached50 ?? 0, c: 'text-violet-300' },
                     { l: '완독', v: tracking.summary.completed, c: 'text-emerald-300' },
                     { l: '클릭', v: tracking.summary.clicked ?? 0, c: 'text-amber-300' },
+                    { l: '응모·액션', v: tracking.summary.responded ?? 0, c: 'text-fuchsia-300' },
                   ].map((m) => (
                     <div key={m.l} className="rounded-xl border border-white/10 bg-white/5 p-3 text-center">
                       <p className="text-[10px] text-white/40">{m.l}</p>
@@ -395,6 +446,7 @@ export default function DmSendAndTrackModal({ dmId, dmTitle, show, onClose }: Pr
                           </span>
                           <span className="text-white/50 w-16 text-right">{formatDur(r.durationSeconds)}</span>
                           <span className={`w-12 text-right ${r.clicks > 0 ? 'text-amber-300 font-semibold' : 'text-white/30'}`}>{r.clicks > 0 ? `클릭 ${r.clicks}` : '-'}</span>
+                          {r.responded && <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-fuchsia-500/20 text-fuchsia-200 border border-fuchsia-400/30 font-semibold">응모</span>}
                           <span className="text-white/30 w-16 text-right hidden md:inline">{formatAgo(r.lastActiveAt)}</span>
                           <span className={`w-12 text-right font-medium ${r.completed ? 'text-emerald-300' : 'text-cyan-300'}`}>{r.completed ? '완독' : '열람'}</span>
                         </>
@@ -425,6 +477,7 @@ export default function DmSendAndTrackModal({ dmId, dmTitle, show, onClose }: Pr
                 {callbackList.length === 0
                   ? <option value="">등록된 번호 없음</option>
                   : callbackList.map((cb) => <option key={cb.phone} value={cb.phone}>{cb.phone}{cb.isDefault ? ' (기본)' : ''}</option>)}
+                <option value={INDIVIDUAL_CB}>고객별 매장번호 (개별 회신)</option>
               </select>
             </div>
             {/* 발송 시각 — 즉시 / 직접 예약 / AI 추천 */}
@@ -439,7 +492,7 @@ export default function DmSendAndTrackModal({ dmId, dmTitle, show, onClose }: Pr
             </div>
             <div className="ml-auto flex items-center gap-2">
               <button onClick={onClose} className="px-4 py-2 rounded-lg text-xs text-white/70 hover:bg-white/5">닫기</button>
-              <button onClick={handleSend} disabled={!target || target.channelEligibleCount === 0 || !messageText.trim() || sending} className="px-5 py-2 rounded-lg text-sm font-semibold text-white bg-gradient-to-r from-indigo-500 to-violet-500 hover:from-indigo-600 hover:to-violet-600 disabled:opacity-30 disabled:cursor-not-allowed flex items-center gap-1.5">
+              <button onClick={() => handleSend()} disabled={!target || target.channelEligibleCount === 0 || !messageText.trim() || sending} className="px-5 py-2 rounded-lg text-sm font-semibold text-white bg-gradient-to-r from-indigo-500 to-violet-500 hover:from-indigo-600 hover:to-violet-600 disabled:opacity-30 disabled:cursor-not-allowed flex items-center gap-1.5">
                 {sending ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
                 {sending ? '처리 중...' : scheduleMode === 'immediate' ? (target ? `${target.channelEligibleCount.toLocaleString()}명 발송` : '발송') : '예약 발송'}
               </button>
@@ -450,8 +503,9 @@ export default function DmSendAndTrackModal({ dmId, dmTitle, show, onClose }: Pr
         <TargetExtractModal show={extractOpen} channel="dm" onClose={() => setExtractOpen(false)} onApply={(t) => { setTarget(t); setSampleIdx(0); setExtractOpen(false); }} />
         <AiRefineModal isOpen={refineOpen} originalMessage={messageText} onClose={() => setRefineOpen(false)} onApply={(text) => { setMessageText(text); setRefineOpen(false); }} />
         {spamOpen && (
-          <SpamFilterTestModal onClose={() => setSpamOpen(false)} messageContentLms={messageText} callbackNumber={callback} messageType="LMS" subject={dmTitle} isAd={isAd} />
+          <SpamFilterTestModal onClose={() => setSpamOpen(false)} messageContentLms={spamTestMessage} callbackNumber={isIndividualCb ? defaultRegisteredCb : callback} messageType="LMS" subject={dmTitle} isAd={isAd} />
         )}
+        <ConfirmModal state={confirmState} onClose={() => setConfirmState(null)} />
       </div>
     </div>
   );

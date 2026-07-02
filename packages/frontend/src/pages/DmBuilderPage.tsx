@@ -57,6 +57,8 @@ type DmListItem = {
   short_code?: string | null;
   view_count?: number;
   page_count?: number;
+  /** ★ 2026-07-02(3) 타겟 발송 이력 여부 — 카드 [발송 추적] 노출 */
+  has_send_history?: boolean;
   section_summary?: DmSectionSummary;
   updated_at?: string;
 };
@@ -396,6 +398,9 @@ export default function DmBuilderPage() {
       setCloningId(null);
     }
   };
+
+  // ★ 2026-07-02(3) 발송 이력 카드 → 발송 추적 모달(track 직행) — 수신자별 열람·깊이·클릭·응모
+  const [trackTarget, setTrackTarget] = useState<{ id: string; title?: string } | null>(null);
 
   // 발행 주소 복사 — 이미 발행된 DM은 발행 멱등(추가 과금 0)이라 그대로 short_url 재사용. 편집 재발행 불필요.
   const handleCopyUrl = async (id: string) => {
@@ -986,6 +991,7 @@ export default function DmBuilderPage() {
                     onDelete={handleDelete}
                     onClone={handleClone}
                     onCopyUrl={handleCopyUrl}
+                    onTrack={(id, title) => setTrackTarget({ id, title })}
                     cloning={cloningId === dm.id}
                   />
                 ))}
@@ -1102,6 +1108,11 @@ export default function DmBuilderPage() {
         }}
         onCancel={() => setPendingGen(null)}
       />
+
+      {/* ★ 2026-07-02(3) 카드 [발송 추적] — 추적 탭 직행 */}
+      {trackTarget && (
+        <DmSendAndTrackModal dmId={trackTarget.id} dmTitle={trackTarget.title} show initialView="track" onClose={() => setTrackTarget(null)} />
+      )}
 
       {toast && <Toast toast={toast} />}
     </div>
@@ -1249,12 +1260,14 @@ function EditorModals() {
 
 // EmptyList 영역 영구 폐기 (D216+ 정합 — 자연어 입력 + 빠른 시작 + 자유롭게 DM 생성 영역 흐름 정합)
 
-function DmCard({ dm, onEdit, onDelete, onClone, onCopyUrl, cloning }: {
+function DmCard({ dm, onEdit, onDelete, onClone, onCopyUrl, onTrack, cloning }: {
   dm: DmListItem;
   onEdit: (id: string, mode?: string) => void;
   onDelete: (id: string) => void;
   onClone: (id: string) => void;
   onCopyUrl: (id: string) => void;
+  /** ★ 2026-07-02(3) 발송 이력 카드 → 발송 추적(열람·깊이·클릭·응모) 바로 진입 */
+  onTrack?: (id: string, title?: string) => void;
   cloning?: boolean;
 }) {
   // ★ 2026-06-23: 섹션 콘텐츠가 있으면 새 섹션형 슬라이드(편집 가능) — 콘텐츠 없는 진짜 D119만 레거시 뱃지.
@@ -1337,6 +1350,17 @@ function DmCard({ dm, onEdit, onDelete, onClone, onCopyUrl, cloning }: {
           onMouseLeave={(e) => { e.currentTarget.style.background = 'rgba(16,185,129,0.12)'; }}
         >
           발행 주소 복사
+        </button>
+      )}
+      {dm.has_send_history && onTrack && (
+        <button
+          onClick={(e) => { e.stopPropagation(); onTrack(dm.id, dm.title); }}
+          title="발송 추적 — 수신자별 열람·깊이·클릭·응모 현황"
+          style={{ height: 32, width: '100%', background: 'rgba(139,92,246,0.12)', color: '#c4b5fd', border: '1px solid rgba(139,92,246,0.35)', borderRadius: 8, fontSize: 12, fontWeight: 700, cursor: 'pointer', transition: 'all 0.2s' }}
+          onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(139,92,246,0.2)'; }}
+          onMouseLeave={(e) => { e.currentTarget.style.background = 'rgba(139,92,246,0.12)'; }}
+        >
+          발송 추적
         </button>
       )}
       <div style={{ display: 'flex', gap: 6 }} onClick={(e) => e.stopPropagation()}>

@@ -2643,7 +2643,7 @@ const TONE_GUIDE: Record<RefineTone, ToneSpec> = {
 // ★ D152+ 시즌 자동 컨텍스트 — 현재 날짜 기반 자연스러운 시즌감 반영용.
 //   원본에 시즌 정보 없어도 AI가 가벼운 시즌 묘사로 카피 풍성하게.
 //   ⚠️ 시즌 묘사는 일반적 사실(5월=봄/감사의 달)만, 구체적 사실(매출/통계) 지어내기 X.
-function getSeasonContext(): { monthLabel: string; seasonHint: string } {
+export function getSeasonContext(): { monthLabel: string; seasonHint: string } {
   const now = new Date();
   const m = now.getMonth() + 1;
   const monthLabel = `${m}월`;
