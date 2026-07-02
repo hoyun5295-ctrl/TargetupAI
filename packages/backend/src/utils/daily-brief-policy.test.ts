@@ -49,6 +49,46 @@ describe('sanitizeBriefRecommendations — 추천 검증·실데이터 귀속', 
   });
 });
 
+describe('sanitizeBriefRecommendations — 5차 확장 (정착 제안 · 채널 제안)', () => {
+  it("opportunityType 'journey_promotion'은 신호 미매칭이어도 보존한다 (여정 굳히기 제안)", () => {
+    const recs = sanitizeBriefRecommendations(
+      [{ title: 'VIP 재구매 여정 정착', objective: 'VIP 재구매 유도를 여정으로 정착', reason: '발송 120건 중 클릭 18건', opportunityType: 'journey_promotion' }],
+      OPPS,
+    );
+    expect(recs[0].opportunityType).toBe('journey_promotion');
+    expect(recs[0].targetCount).toBeNull();
+  });
+
+  it("recommendedChannel은 sms/email/dm 화이트리스트만, 그 외는 null", () => {
+    const recs = sanitizeBriefRecommendations(
+      [
+        { title: 'a', objective: '이메일 재구매 유도', reason: 'r', recommendedChannel: 'email' },
+        { title: 'b', objective: '문자 재구매 유도', reason: 'r', recommendedChannel: 'kakao' },
+      ],
+      [],
+    );
+    expect(recs[0].recommendedChannel).toBe('email');
+    expect(recs[1].recommendedChannel).toBeNull();
+  });
+});
+
+describe('buildDailyBriefUserMessage — 5차 확장 입력', () => {
+  it('어제 성과와 정착 후보가 들어가면 본문에 포함된다', () => {
+    const um = buildDailyBriefUserMessage({
+      memoryBlock: '',
+      opportunities: OPPS as any,
+      activeOperators: [],
+      pendingProposals: 0,
+      yesterdayRecap: { campaigns: 2, sent: 1743, success: 1740, clicked: 190 },
+      promotionCandidates: [{ name: 'VIP 재구매', objective: 'VIP 재구매 유도', sent: 120, clicks: 18 }],
+    });
+    expect(um).toContain('1,743');
+    expect(um).toContain('VIP 재구매');
+    expect(um).toContain('120');
+    expect(um).toContain('18');
+  });
+});
+
 describe('extractJsonObject — AI 응답 JSON 안전 파싱', () => {
   it('json 코드펜스와 평문 JSON 모두 파싱한다', () => {
     expect(extractJsonObject('```json\n{"a":1}\n```')?.a).toBe(1);

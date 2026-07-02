@@ -16,10 +16,11 @@ import { query } from '../config/database';
 import { callAIWithFallback } from '../services/ai';
 import { buildCompanyMemoryContext } from '../services/ai-orchestrator';
 import { buildJourneyOpportunities } from './journey-opportunities';
+import { kstYesterdayRange } from './autosend-policy';
 import {
   sanitizeBriefRecommendations, extractJsonObject,
   buildDailyBriefSystemPrompt, buildDailyBriefUserMessage,
-  BriefRecommendation, BriefSignalOpportunity,
+  BriefRecommendation, BriefSignalOpportunity, YesterdayRecapSummary, PromotionCandidate,
 } from './daily-brief-policy';
 
 export interface DailyBriefResult {
@@ -30,7 +31,8 @@ export interface DailyBriefResult {
 
 export async function generateCompanyDailyBrief(companyId: string): Promise<DailyBriefResult> {
   // 1. 신호 수집 — 전부 실데이터·읽기 전용. 개별 실패는 빈 값으로 격리(브리핑이 발송·예측에 영향 0).
-  const [opps, memoryBlock, opsRes, pendRes] = await Promise.all([
+  const { start: yStart, end: yEnd } = kstYesterdayRange();
+  const [opps, memoryBlock, opsRes, pendRes, recapRes, promoRes] = await Promise.all([
     buildJourneyOpportunities(companyId).catch((e: any) => {
       console.warn('[DailyBrief] 신호 수집 경고:', e?.message);
       return [] as Awaited<ReturnType<typeof buildJourneyOpportunities>>;
@@ -46,6 +48,32 @@ export async function generateCompanyDailyBrief(companyId: string): Promise<Dail
         WHERE company_id = $1::uuid AND status IN ('pending', 'admin_review')`,
       [companyId],
     ).catch(() => ({ rows: [{ n: 0 }] as any[] })),
+    // ★ 5차: 어제 자동마케팅 발송 성과 실측(회고 문자와 동일 축) — 발송·성공 = campaigns, 클릭 = 변이 실측 누적
+    query(
+      `SELECT COUNT(*)::int AS campaigns,
+              COALESCE(SUM(c.sent_count), 0)::int AS sent,
+              COALESCE(SUM(c.success_count), 0)::int AS success,
+              COALESCE(SUM((SELECT SUM(v.click_count) FROM operator_proposal_variants v WHERE v.proposal_id = p.id)), 0)::int AS clicked
+         FROM operator_proposals p
+         JOIN campaigns c ON c.id = p.campaign_id
+        WHERE p.company_id = $1::uuid AND p.status = 'sent' AND p.campaign_id IS NOT NULL
+          AND p.auto_sent_at >= $2 AND p.auto_sent_at < $3`,
+      [companyId, yStart.toISOString(), yEnd.toISOString()],
+    ).catch(() => ({ rows: [] as any[] })),
+    // ★ 5차: 여정 정착 후보 — 발송·클릭 실측 누적(변이 테이블). 30/5 = 통계 최소 표본 가드(데이터 충분성 — 사업 지표 아님)
+    query(
+      `SELECT o.name, o.objective,
+              COALESCE(SUM(v.sent_count), 0)::int AS sent,
+              COALESCE(SUM(v.click_count), 0)::int AS clicks
+         FROM continuous_operators o
+         JOIN operator_proposals p ON p.operator_id = o.id
+         JOIN operator_proposal_variants v ON v.proposal_id = p.id
+        WHERE o.company_id = $1::uuid AND o.status = 'active'
+        GROUP BY o.id, o.name, o.objective
+       HAVING COALESCE(SUM(v.sent_count), 0) >= 30 AND COALESCE(SUM(v.click_count), 0) >= 5
+        LIMIT 5`,
+      [companyId],
+    ).catch(() => ({ rows: [] as any[] })),
   ]);
 
   const opportunities: BriefSignalOpportunity[] = (opps as any[]).map((o) => ({
@@ -57,16 +85,24 @@ export async function generateCompanyDailyBrief(companyId: string): Promise<Dail
   }));
   const activeOperators = (opsRes.rows as any[]).map((r) => ({ name: String(r.name), objective: String(r.objective) }));
   const pendingProposals = Number((pendRes.rows as any[])[0]?.n) || 0;
+  const recapRow = (recapRes.rows as any[])[0];
+  const yesterdayRecap: YesterdayRecapSummary | null = recapRow
+    ? { campaigns: Number(recapRow.campaigns) || 0, sent: Number(recapRow.sent) || 0, success: Number(recapRow.success) || 0, clicked: Number(recapRow.clicked) || 0 }
+    : null;
+  const promotionCandidates: PromotionCandidate[] = (promoRes.rows as any[]).map((r) => ({
+    name: String(r.name), objective: String(r.objective), sent: Number(r.sent) || 0, clicks: Number(r.clicks) || 0,
+  }));
 
   // 2. AI 종합 판단 — 신호 0건이면 호출하지 않는다(억지 추천·불필요 원가 차단).
   let headline = '';
   let recommendations: BriefRecommendation[] = [];
   let aiCalled = false;
-  if (opportunities.length > 0 && process.env.ANTHROPIC_API_KEY) {
+  // 신호 또는 정착 후보가 있어야 AI 호출 (억지 추천·불필요 원가 차단)
+  if ((opportunities.length > 0 || promotionCandidates.length > 0) && process.env.ANTHROPIC_API_KEY) {
     try {
       const text = await callAIWithFallback({
         system: buildDailyBriefSystemPrompt(),
-        userMessage: buildDailyBriefUserMessage({ memoryBlock, opportunities, activeOperators, pendingProposals }),
+        userMessage: buildDailyBriefUserMessage({ memoryBlock, opportunities, activeOperators, pendingProposals, yesterdayRecap, promotionCandidates }),
         maxTokens: 1600,
         temperature: 0.4,
         model: 'opus',
@@ -97,7 +133,7 @@ export async function generateCompanyDailyBrief(companyId: string): Promise<Dail
         companyId,
         headline,
         JSON.stringify(recommendations),
-        JSON.stringify({ opportunities, activeOperators, pendingProposals }),
+        JSON.stringify({ opportunities, activeOperators, pendingProposals, yesterdayRecap, promotionCandidates }),
       ],
     );
     return { saved: true, recommendationCount: recommendations.length, aiCalled };

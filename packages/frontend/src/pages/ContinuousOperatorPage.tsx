@@ -234,13 +234,28 @@ export default function ContinuousOperatorPage() {
     setPendingConfig({ ...SMART_DEFAULTS, name: goal.slice(0, 40), objective: goal, copyStyle });
   };
 
-  // 시나리오 선택: 세부설정 모달 prefill (가동 전 한 번 확인).
+  // 시나리오 선택: 세부설정 모달 prefill (가동 전 한 번 확인). 월간형(생일·VIP 데이)은 주기까지 프리필.
   const handleScenarioSelect = (s: ScenarioPick) => {
-    setEditing({ ...SMART_DEFAULTS, name: s.name, objective: s.objective });
+    setEditing({
+      ...SMART_DEFAULTS,
+      name: s.name,
+      objective: s.objective,
+      ...(s.schedule ? { schedule: s.schedule } : {}),
+      ...(s.scheduleDayOfMonth != null ? { scheduleDayOfMonth: s.scheduleDayOfMonth } : {}),
+    });
   };
 
   // 오늘의 브리핑 추천 → 한 클릭 시작: 크레딧 확인 → 생성 + 즉시 초안 (전체 AI 체인은 이 순간에만).
+  // ★ 5차: 정착 제안(journey_promotion) = 여정 승격다리 재사용 / 채널 제안(email·dm) = 해당 채널 화면 안내.
   const handleBriefStart = (rec: DailyBriefRecommendation) => {
+    if (rec.opportunityType === 'journey_promotion') {
+      sessionStorage.setItem('journeyObjectivePrefill', JSON.stringify({ objective: rec.objective, message: '' }));
+      toast.info('성과가 검증된 목표를 여정으로 가져갑니다 — 생성·활성화는 여정에서 진행됩니다.');
+      navigate('/ai-journeys');
+      return;
+    }
+    if (rec.recommendedChannel === 'email') { navigate('/email-campaigns'); return; }
+    if (rec.recommendedChannel === 'dm') { navigate('/dm-builder'); return; }
     if (!rec.objective) return;
     setPendingConfig({ ...SMART_DEFAULTS, name: rec.title.slice(0, 40), objective: rec.objective });
   };

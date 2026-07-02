@@ -33,6 +33,8 @@ import PushCampaignsPage from './pages/PushCampaignsPage';
 import InAppMessagesPage from './pages/InAppMessagesPage';
 // ★ D176 (2026-05-19): Continuous Agentic Operator (사용자 동의 흐름)
 import ContinuousOperatorPage from './pages/ContinuousOperatorPage';
+// ★ 2026-07-02 4차: 마케팅 캘린더 — 1년 시즌 캠페인 AI 설계
+import MarketingCalendarPage from './pages/MarketingCalendarPage';
 // ★ D178 (2026-05-19): 인바운드 AI 음성 응답 (Naver Clova STT/TTS)
 import VoiceInboundPage from './pages/VoiceInboundPage';
 // ★ D180 (2026-05-19): Email 채널 (SendGrid)
@@ -351,6 +353,15 @@ function App() {
           element={
             <PrivateRoute allowedTypes={['company_admin', 'company_user']}>
               <ContinuousOperatorPage />
+            </PrivateRoute>
+          }
+        />
+        {/* ★ 2026-07-02 4차: 마케팅 캘린더 — 1년 시즌 캠페인 AI 설계 → 자동마케팅 등록 */}
+        <Route
+          path="/marketing-calendar"
+          element={
+            <PrivateRoute allowedTypes={['company_admin', 'company_user']}>
+              <MarketingCalendarPage />
             </PrivateRoute>
           }
         />

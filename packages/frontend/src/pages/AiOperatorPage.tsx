@@ -1559,8 +1559,26 @@ interface CompanyHealthDiagnosis {
   recommendations: AutoRecommendation[];
 }
 
+// ★ 2026-07-02 1차 개편: 일일 브리핑(company_daily_briefs)이 있으면 그것이 추천의 단일 소스 —
+//   룰 기반 추천은 브리핑이 아직 없는 회사의 폴백. 자동마케팅 현황 요약 동반.
+interface DiagnosisBrief {
+  brief_date: string;
+  headline: string | null;
+  recommendations: Array<{
+    title: string;
+    objective: string;
+    reason: string;
+    targetCount: number | null;
+    opportunityType?: string | null;
+    recommendedChannel?: 'sms' | 'email' | 'dm' | null;
+  }>;
+}
+
 function AiSelfDiagnosisCards({ onApply }: { onApply: (objective: string) => void }) {
+  const navigate = useNavigate();
   const [diagnosis, setDiagnosis] = useState<CompanyHealthDiagnosis | null>(null);
+  const [brief, setBrief] = useState<DiagnosisBrief | null>(null);
+  const [autoMarketing, setAutoMarketing] = useState<{ active: number; pendingProposals: number }>({ active: 0, pendingProposals: 0 });
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -1571,9 +1589,13 @@ function AiSelfDiagnosisCards({ onApply }: { onApply: (objective: string) => voi
           headers: { Authorization: `Bearer ${token}` },
         });
         const d = await r.json();
-        if (d.success) setDiagnosis(d.diagnosis);
+        if (d.success) {
+          setDiagnosis(d.diagnosis);
+          setBrief(d.brief || null);
+          if (d.autoMarketing) setAutoMarketing(d.autoMarketing);
+        }
       } catch {
-        // skip - 추천 없으면 빈 영역
+        // skip - 추천 없으면 빈 자리
       } finally {
         setLoading(false);
       }
@@ -1581,13 +1603,29 @@ function AiSelfDiagnosisCards({ onApply }: { onApply: (objective: string) => voi
     load();
   }, []);
 
-  if (loading || !diagnosis || diagnosis.recommendations.length === 0) return null;
+  const briefRecs = Array.isArray(brief?.recommendations) ? brief!.recommendations : [];
+  const useBrief = briefRecs.length > 0;
+
+  if (loading || !diagnosis) return null;
+  if (!useBrief && diagnosis.recommendations.length === 0 && diagnosis.topConcerns.length === 0) return null;
 
   // ★ D216+ 사고 영구 정정 (Harold 명시 2026-05-25):
   //   옛 사고 = sessionStorage 키 불일치 (하이픈 vs 언더스코어) + DOM .value 직접 조작 = React state 동기화 X 영역
   //   정정 = props onApply 영역 직접 호출 매트릭스 정합 (상위 setObjective 영역 직접 호출)
   const handleOneClick = (objective: string) => {
     onApply(objective);
+  };
+
+  // ★ 5차: 브리핑 추천 분기 — 정착 제안 = 여정 승격다리 / 채널 제안 = 해당 채널 화면 / 기본 = 자연어 prefill
+  const handleBriefRec = (rec: DiagnosisBrief['recommendations'][number]) => {
+    if (rec.opportunityType === 'journey_promotion') {
+      sessionStorage.setItem('journeyObjectivePrefill', JSON.stringify({ objective: rec.objective, message: '' }));
+      navigate('/ai-journeys');
+      return;
+    }
+    if (rec.recommendedChannel === 'email') { navigate('/email-campaigns'); return; }
+    if (rec.recommendedChannel === 'dm') { navigate('/dm-builder'); return; }
+    onApply(rec.objective);
   };
 
   // ★ D209+ (Harold 명시 2026-05-22): 우선순위 카드 색감 명확 구분 + border-2 + shadow 강화.
@@ -1619,7 +1657,7 @@ function AiSelfDiagnosisCards({ onApply }: { onApply: (objective: string) => voi
 
       {diagnosis.topConcerns.length > 0 && (
         <div className="mb-4 p-3 bg-white/5 border border-white/10 rounded-lg">
-          <div className="text-[10px] text-white/40 mb-1.5">AI 진단 우선 영역</div>
+          <div className="text-[10px] text-white/40 mb-1.5">AI 진단 우선 항목</div>
           <ul className="text-xs text-white/80 space-y-1">
             {diagnosis.topConcerns.map((c, i) => (
               <li key={i} className="flex items-start gap-1.5">
@@ -1631,30 +1669,80 @@ function AiSelfDiagnosisCards({ onApply }: { onApply: (objective: string) => voi
         </div>
       )}
 
-      {/* ★ D209+ (Harold 명시 2026-05-22): 좌우 분할 좌측 영역 = 세로 1열 매트릭스 정합 + border-2 + rounded-2xl visual 강화. */}
+      {/* ★ 2026-07-02 1차: 일일 브리핑 = 추천의 단일 소스 (있으면 룰 기반 추천 대체) */}
+      {useBrief && brief?.headline && (
+        <div className="mb-3 p-3 bg-white/5 border border-violet-400/25 rounded-lg">
+          <div className="text-[10px] text-violet-300/70 mb-1">오늘의 브리핑</div>
+          <div className="text-xs text-white/85 leading-relaxed">{brief.headline}</div>
+        </div>
+      )}
+
       <div className="grid grid-cols-1 gap-3">
-        {diagnosis.recommendations.map((rec) => (
-          <div
-            key={rec.id}
-            className={`p-4 bg-gradient-to-br ${priorityColor[rec.priority]} border-2 rounded-2xl`}
-          >
-            <div className="flex items-center gap-1.5 mb-2">
-              <span className="px-1.5 py-0.5 bg-white/10 rounded text-[9px] font-medium text-white/70">우선순위 {rec.priority}</span>
-              {rec.targetCount > 0 && (
-                <span className="text-[10px] text-white/50">{rec.targetCount.toLocaleString()}명</span>
-              )}
-            </div>
-            <h4 className="text-sm font-semibold text-white mb-1.5">{rec.title}</h4>
-            <p className="text-[11px] text-white/70 leading-relaxed mb-2">{rec.reason}</p>
-            <p className="text-[10px] text-white/40 mb-3">{rec.expectedImpact}</p>
-            <button
-              onClick={() => handleOneClick(rec.oneClickObjective)}
-              className="w-full px-3 py-1.5 bg-white/10 hover:bg-white/20 text-white text-xs font-medium rounded transition-colors flex items-center justify-center gap-1"
-            >
-              원클릭 진행 →
-            </button>
-          </div>
-        ))}
+        {useBrief
+          ? briefRecs.map((rec, i) => (
+              <div
+                key={`brief-${i}`}
+                className={`p-4 bg-gradient-to-br ${priorityColor[(Math.min(i, 2) + 1) as 1 | 2 | 3]} border-2 rounded-2xl`}
+              >
+                <div className="flex items-center gap-1.5 mb-2 flex-wrap">
+                  <span className="px-1.5 py-0.5 bg-white/10 rounded text-[9px] font-medium text-white/70">우선순위 {i + 1}</span>
+                  {rec.targetCount != null && rec.targetCount > 0 && (
+                    <span className="text-[10px] text-white/50">{rec.targetCount.toLocaleString()}명</span>
+                  )}
+                  {rec.opportunityType === 'journey_promotion' && <span className="text-[9px] px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-300 font-medium">성과 검증</span>}
+                  {rec.recommendedChannel === 'email' && <span className="text-[9px] px-1.5 py-0.5 rounded bg-cyan-500/20 text-cyan-300 font-medium">이메일 추천</span>}
+                  {rec.recommendedChannel === 'dm' && <span className="text-[9px] px-1.5 py-0.5 rounded bg-cyan-500/20 text-cyan-300 font-medium">모바일 DM 추천</span>}
+                </div>
+                <h4 className="text-sm font-semibold text-white mb-1.5">{rec.title}</h4>
+                <p className="text-[11px] text-white/70 leading-relaxed mb-3">{rec.reason}</p>
+                <button
+                  onClick={() => handleBriefRec(rec)}
+                  className="w-full px-3 py-1.5 bg-white/10 hover:bg-white/20 text-white text-xs font-medium rounded transition-colors flex items-center justify-center gap-1"
+                >
+                  {rec.opportunityType === 'journey_promotion' ? '여정으로 굳히기 →' : rec.recommendedChannel === 'email' ? '이메일에서 진행 →' : rec.recommendedChannel === 'dm' ? '모바일 DM에서 진행 →' : '원클릭 진행 →'}
+                </button>
+              </div>
+            ))
+          : diagnosis.recommendations.map((rec) => (
+              <div
+                key={rec.id}
+                className={`p-4 bg-gradient-to-br ${priorityColor[rec.priority]} border-2 rounded-2xl`}
+              >
+                <div className="flex items-center gap-1.5 mb-2">
+                  <span className="px-1.5 py-0.5 bg-white/10 rounded text-[9px] font-medium text-white/70">우선순위 {rec.priority}</span>
+                  {rec.targetCount > 0 && (
+                    <span className="text-[10px] text-white/50">{rec.targetCount.toLocaleString()}명</span>
+                  )}
+                </div>
+                <h4 className="text-sm font-semibold text-white mb-1.5">{rec.title}</h4>
+                <p className="text-[11px] text-white/70 leading-relaxed mb-2">{rec.reason}</p>
+                <p className="text-[10px] text-white/40 mb-3">{rec.expectedImpact}</p>
+                <button
+                  onClick={() => handleOneClick(rec.oneClickObjective)}
+                  className="w-full px-3 py-1.5 bg-white/10 hover:bg-white/20 text-white text-xs font-medium rounded transition-colors flex items-center justify-center gap-1"
+                >
+                  원클릭 진행 →
+                </button>
+              </div>
+            ))}
+      </div>
+
+      {/* ★ 2026-07-02 1차: 자동마케팅 현황 요약 — 승인 대기가 있으면 바로 가게 */}
+      <button
+        onClick={() => navigate('/continuous-operator')}
+        className="mt-4 w-full flex items-center justify-between px-4 py-3 bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl transition-colors"
+      >
+        <span className="text-xs text-white/70">
+          실행 중인 자동마케팅 <span className="text-white font-semibold">{autoMarketing.active}</span>개
+          {autoMarketing.pendingProposals > 0 && (
+            <span className="ml-2 px-1.5 py-0.5 bg-amber-500/20 text-amber-300 rounded text-[10px] font-medium">승인 대기 {autoMarketing.pendingProposals}건</span>
+          )}
+        </span>
+        <span className="text-xs text-violet-300">관리 →</span>
+      </button>
+
+      <div className="mt-3 text-[10px] text-white/30 italic">
+        Data source — {useBrief ? '매일 오전 일일 분석 (고객 DB 실측 신호 · 누적 학습)' : '회사 실측 신호 (일일 분석 누적 전 기본 추천)'}
       </div>
     </div>
   );

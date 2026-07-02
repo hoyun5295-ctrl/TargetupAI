@@ -133,6 +133,14 @@ export async function runPredictiveBatchNow(): Promise<{
           createdBy: adminRes.rows[0]?.id || null,
           idempotencyKey: `predictive-daily:${row.id}:${todayKst}`,
         });
+        // ★ 2026-07-02 2차: 어제 자동마케팅 발송분 성과 회고 문자 — 브리핑보다 먼저(같은 사이클, 추가 차감 0).
+        try {
+          const { sendOperatorDailyRecaps } = await import('./operator-daily-recap');
+          const recap = await sendOperatorDailyRecaps(row.id);
+          if (recap.notified > 0) console.log(`[PredictiveWorker] 성과 회고 문자 company=${row.id} ${recap.notified}건`);
+        } catch (recapErr: any) {
+          console.warn('[PredictiveWorker] 성과 회고 skip:', row.id, recapErr?.message);
+        }
         // ★ 2026-07-02 3단계 (Harold 확정): 같은 일일 분석 차감 1회에 "오늘의 추천" 브리핑 동반 생성(추가 차감 0).
         //   실패는 예측·발송에 영향 0 — 격리 후 다음 날 사이클이 재시도.
         try {

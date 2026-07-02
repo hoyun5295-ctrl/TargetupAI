@@ -1470,7 +1470,8 @@ export function startContinuousOperatorScheduler(): void {
  * ★ D227+ 종량제: AI 오퍼레이션 담당자 알림 — 무과금(회사 발송비 차감 X, 인증 라인 사용 = 우리 서비스 부담).
  * 현재 = 문자(LMS). 알림톡 템플릿 등록 후 = 1순위 알림톡 → 2순위 문자 fallback으로 교체 예정(아래 TODO seam).
  */
-async function notifyOperatorAdmins(
+// ★ 2026-07-02 2차: 성과 회고(operator-daily-recap)와 공유 — export (담당자 안내 발송 단일 경로 유지)
+export async function notifyOperatorAdmins(
   operator: { adminPhoneNumbers: string[]; backupAdminPhone: string | null; companyId: string },
   title: string,
   body: string,

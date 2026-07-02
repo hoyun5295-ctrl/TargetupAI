@@ -11,6 +11,7 @@
 import {
   Activity,
   Brain,
+  CalendarDays,
   LineChart,
   Mail,
   MessageSquare,
@@ -44,4 +45,6 @@ export const SUB_MODULE_CARDS: SubModuleCard[] = [
   { icon: Brain,        gradient: 'from-emerald-400 to-teal-500',   label: 'AI 메모리',      description: '회사별 누적 학습 정확도↑',       path: '/ai-memory' },
   { icon: Target,       gradient: 'from-teal-400 to-cyan-500',      label: '세그먼트',       description: '자연어로 고객 그룹 추출',        path: '/segments' },
   { icon: Activity,     gradient: 'from-blue-400 to-sky-500',       label: 'AI 사용량',      description: '월 한도 + 일별 통계 진단',       path: '/ai-usage' },
+  // ★ 2026-07-02 4차 (Harold 확정): 빈 타일 = 마케팅 캘린더 — 1년 시즌 캠페인 AI 설계 → 자동마케팅 등록
+  { icon: CalendarDays, gradient: 'from-orange-400 to-rose-500',    label: '마케팅 캘린더',  description: '1년 시즌 캠페인 AI 설계',        path: '/marketing-calendar' },
 ];

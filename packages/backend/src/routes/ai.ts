@@ -1,7 +1,7 @@
 import { Request, Response, Router } from 'express';
 import { query } from '../config/database';
 import { authenticate } from '../middlewares/auth';
-import { checkAPIStatus, extractVarCatalog, filterVarCatalogByData, generateCustomMessages, generateMessages, parseBriefing, recommendTarget, countFilteredCustomers, recommendNextCampaign, refineDirectMessage } from '../services/ai';
+import { checkAPIStatus, extractVarCatalog, filterVarCatalogByData, generateCustomMessages, generateMessages, parseBriefing, recommendTarget, countFilteredCustomers, recommendNextCampaign, refineDirectMessage, callAIWithFallback } from '../services/ai';
 import { buildGenderFilter, buildGradeFilter, buildRegionFilter, getGenderVariants, getRegionVariants } from '../utils/normalize';
 import { FIELD_MAP, FIELD_DISPLAY_MAP, reverseDisplayValue } from '../utils/standard-field-map';
 import { replaceVariables } from '../utils/messageUtils';
@@ -1742,6 +1742,26 @@ router.get('/operator/performance/attribution', async (req: Request, res: Respon
   }
 });
 
+// 7-1) GET /operator/performance/automarketing-roi — ★ 2026-07-02 3차: 자동마케팅 매출 귀속(ROI)
+router.get('/operator/performance/automarketing-roi', async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+    const planCtx = await loadPlanContext(companyId);
+    if (!planCtx) return res.status(404).json({ success: false, error: '회사 정보를 찾을 수 없습니다.' });
+    if (!isAiOperatorAllowed(planCtx, req.user)) {
+      return res.status(403).json({ success: false, error: '본 기능은 엔터프라이즈 베타 운영 중입니다.', code: 'BETA_GATE' });
+    }
+    const days = Math.max(7, Math.min(90, parseInt(String(req.query.days || '30'), 10) || 30));
+    const { buildAutoMarketingRoi } = await import('../utils/automarketing-roi');
+    const roi = await buildAutoMarketingRoi(companyId, days);
+    return res.json({ success: true, roi });
+  } catch (err: any) {
+    console.error('[Performance] automarketing-roi 오류:', err);
+    return res.status(500).json({ success: false, error: err?.message || 'ROI 조회 실패' });
+  }
+});
+
 // 8) GET /operator/performance/data-availability
 router.get('/operator/performance/data-availability', async (req: Request, res: Response) => {
   try {
@@ -1839,6 +1859,55 @@ router.get('/operator/continuous', async (req: Request, res: Response) => {
   } catch (err: any) {
     console.error('[Operator continuous GET] 오류:', err);
     return res.status(500).json({ success: false, error: err?.message || '조회 실패' });
+  }
+});
+
+// ★ 2026-07-02 4차: 마케팅 캘린더 — 1년치 시즌 캠페인 AI 설계 (등록은 기존 POST /operator/continuous 재사용 = 등록당 과금).
+//   설계 생성 자체는 무과금(creditCost 0) — 과금 창구는 등록(자동마케팅 저장 200) 유지.
+router.post('/operator/marketing-calendar/generate', async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+    const planCtx = await loadPlanContext(companyId);
+    if (!planCtx) return res.status(404).json({ success: false, error: '회사 정보를 찾을 수 없습니다.' });
+    if (!isAiOperatorAllowed(planCtx, req.user)) {
+      return res.status(403).json({ success: false, error: '본 기능은 엔터프라이즈 베타 운영 중입니다.', code: 'BETA_GATE' });
+    }
+    const [infoRes, cntRes] = await Promise.all([
+      query(`SELECT business_type, brand_name, brand_tone FROM companies WHERE id = $1::uuid`, [companyId]),
+      query(`SELECT COUNT(*)::int AS n FROM customers WHERE company_id = $1::uuid AND is_active = true`, [companyId]),
+    ]);
+    const info = infoRes.rows[0] || {};
+    const { buildCalendarSystemPrompt, buildCalendarUserMessage, sanitizeCalendarEntries } = await import('../utils/marketing-calendar-policy');
+    const { extractJsonObject } = await import('../utils/daily-brief-policy');
+    const kstMonth = new Date(Date.now() + 9 * 60 * 60 * 1000).getUTCMonth() + 1;
+    const text = await callAIWithFallback({
+      system: buildCalendarSystemPrompt(),
+      userMessage: buildCalendarUserMessage({
+        businessType: info.business_type || null,
+        brandName: info.brand_name || null,
+        brandTone: info.brand_tone || null,
+        customerCount: Number(cntRes.rows[0]?.n) || 0,
+        currentMonth: kstMonth,
+      }),
+      maxTokens: 2400,
+      temperature: 0.5,
+      model: 'opus',
+      companyId,
+      source: 'marketing-calendar',
+      creditCost: 0,
+    });
+    const entries = sanitizeCalendarEntries(extractJsonObject(text)?.entries);
+    if (entries.length === 0) {
+      return res.status(502).json({ success: false, error: '캘린더 설계 생성에 실패했습니다. 잠시 후 다시 시도해주세요.' });
+    }
+    return res.json({ success: true, entries });
+  } catch (err: any) {
+    if (err instanceof InsufficientCreditError) {
+      return res.status(402).json({ success: false, error: 'AI 크레딧이 부족합니다.', code: 'INSUFFICIENT_CREDIT' });
+    }
+    console.error('[MarketingCalendar] 생성 오류:', err);
+    return res.status(500).json({ success: false, error: err?.message || '캘린더 설계 실패' });
   }
 });
 
@@ -3604,7 +3673,31 @@ router.get('/operator/self-diagnosis', async (req: Request, res: Response) => {
       return res.status(403).json({ success: false, error: 'AI Operator 진입 권한이 없습니다.', code: 'AI_OPERATOR_GATED' });
     }
     const diagnosis = await diagnoseCompanyHealth(companyId);
-    return res.json({ success: true, diagnosis });
+    // ★ 2026-07-02 1차(좌측 진단 패널 개편): 일일 브리핑 + 자동마케팅 현황을 같은 응답에 동봉 — 추가 fetch 0.
+    //   브리핑이 있으면 화면이 룰 기반 추천 대신 브리핑(실데이터·학습 반영)을 단일 소스로 쓴다.
+    let brief: any = null;
+    try {
+      const br = await query(
+        `SELECT brief_date, headline, recommendations FROM company_daily_briefs
+          WHERE company_id = $1::uuid ORDER BY brief_date DESC LIMIT 1`,
+        [companyId],
+      );
+      brief = br.rows[0] || null;
+    } catch (e: any) {
+      // 테이블 미생성(마이그레이션 전) = 브리핑 없음으로 처리 — 진단 응답은 정상 유지.
+      if (!(e?.message || '').includes('does not exist')) console.warn('[SelfDiagnosis] 브리핑 조회 경고:', e?.message);
+    }
+    let autoMarketing = { active: 0, pendingProposals: 0 };
+    try {
+      const [a, p] = await Promise.all([
+        query(`SELECT COUNT(*)::int AS n FROM continuous_operators WHERE company_id = $1::uuid AND status = 'active'`, [companyId]),
+        query(`SELECT COUNT(*)::int AS n FROM operator_proposals WHERE company_id = $1::uuid AND status IN ('pending', 'admin_review')`, [companyId]),
+      ]);
+      autoMarketing = { active: Number(a.rows[0]?.n) || 0, pendingProposals: Number(p.rows[0]?.n) || 0 };
+    } catch (e: any) {
+      console.warn('[SelfDiagnosis] 자동마케팅 현황 조회 경고:', e?.message);
+    }
+    return res.json({ success: true, diagnosis, brief, autoMarketing });
   } catch (err: any) {
     console.error('[SelfDiagnosis] 오류:', err);
     return res.status(500).json({ success: false, error: err?.message || '자율 진단 조회 실패' });

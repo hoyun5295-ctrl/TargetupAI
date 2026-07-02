@@ -228,6 +228,45 @@ export function buildAutoSendPrepInfoBody(input: PrepNoticeInput): string {
 }
 
 /**
+ * 어제(KST) 하루 구간 — 성과 회고(2차) 대상 선별용. UTC Date 쌍 + 라벨 반환(순수, now 주입).
+ */
+export function kstYesterdayRange(now: Date = new Date()): { start: Date; end: Date; dateLabel: string } {
+  const kstNow = new Date(now.getTime() + 9 * 60 * 60 * 1000);
+  const todayKstMidnightUtcMs = Date.UTC(kstNow.getUTCFullYear(), kstNow.getUTCMonth(), kstNow.getUTCDate(), -9, 0, 0);
+  const start = new Date(todayKstMidnightUtcMs - 24 * 60 * 60 * 1000);
+  const end = new Date(todayKstMidnightUtcMs);
+  const startKst = new Date(start.getTime() + 9 * 60 * 60 * 1000);
+  return { start, end, dateLabel: `${startKst.getUTCMonth() + 1}월 ${startKst.getUTCDate()}일` };
+}
+
+/**
+ * 성과 회고 문자(2차 — Harold 확정) — 발송 다음날 아침 담당자에게 어제 결과 보고.
+ *  클릭은 실측이 있을 때만 표기(단축 URL 미사용 발송은 미측정과 0을 구분할 수 없어 생략 — 정직).
+ */
+export interface DailyRecapInput {
+  operatorName: string;
+  dateLabel: string;      // '7월 1일'
+  sentCount: number;
+  successCount: number;
+  clickedCount: number;
+}
+
+export function buildDailyRecapBody(input: DailyRecapInput): string {
+  const sent = Math.max(0, Math.floor(Number(input.sentCount)) || 0);
+  const success = Math.max(0, Math.floor(Number(input.successCount)) || 0);
+  const clicked = Math.max(0, Math.floor(Number(input.clickedCount)) || 0);
+  const lines = [
+    `어제(${input.dateLabel}) '${input.operatorName}' 발송 결과입니다.`,
+    `- 발송 ${sent.toLocaleString()}명 · 성공 ${success.toLocaleString()}명`,
+  ];
+  if (clicked > 0 && sent > 0) {
+    lines.push(`- 클릭 ${clicked.toLocaleString()}명 (${((clicked / sent) * 100).toFixed(1)}%)`);
+  }
+  lines.push('이 결과를 학습해 다음 추천에 반영합니다.');
+  return lines.join('\n');
+}
+
+/**
  * 담당자 안내 문자 머리말 — Harold 2026-07-02 지시: 모든 담당자 안내 문자는
  * "[한줄로 AI 자동마케팅 안내문자]"로 시작해 한줄로 발신임을 분명히 한다. 중복 부착 방지.
  */

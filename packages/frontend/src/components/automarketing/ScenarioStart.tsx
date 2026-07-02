@@ -1,12 +1,16 @@
-// 시나리오로 시작 — 검증된 목표·세그먼트형 시나리오 선택 (2026-06-27)
-// 여정 경계: 개인 이벤트형(생일·장바구니 등)은 여정 몫 → 여기엔 두지 않는다.
+// 시나리오로 시작 — 검증된 목표·세그먼트형 시나리오 선택 (2026-06-27 · 2026-07-02 5차 확장)
+// 여정 경계: 개인 이벤트 당일 대응(가입 직후·장바구니)은 여정 몫. 회사가 정한 날짜에 일괄 발송하는
+// 월간 축(그 달 생일자·VIP 지정일)은 자동마케팅 몫 — Harold 2026-07-02 스펙.
 // 카드는 설명이 들어가니 좌측 정렬.
-import { LucideIcon, Crown, Moon, UserPlus, TrendingUp, Sun, Package, Lock } from 'lucide-react';
+import { LucideIcon, Crown, Moon, UserPlus, TrendingUp, Sun, Package, Lock, Cake, Coins, Star } from 'lucide-react';
 
 export interface ScenarioPick {
   key: string;
   name: string;
   objective: string;
+  // ★ 2026-07-02 5차: 월간형 시나리오(생일·VIP 데이)는 주기 프리필 동반
+  schedule?: 'daily' | 'weekly' | 'monthly';
+  scheduleDayOfMonth?: number;
 }
 
 const SCENARIOS: Array<ScenarioPick & { icon: LucideIcon; desc: string }> = [
@@ -16,6 +20,10 @@ const SCENARIOS: Array<ScenarioPick & { icon: LucideIcon; desc: string }> = [
   { key: 'tier_up', icon: TrendingUp, name: '등급 상승 유도', desc: 'VIP 근접 고객에게 한 걸음 더 제안', objective: 'VIP 승급에 근접한 일반 고객의 추가 구매 유도' },
   { key: 'seasonal', icon: Sun, name: '계절 프로모션', desc: '이번 시즌에 맞춰 전체 활성 고객 안내', objective: '이번 시즌에 맞춰 전체 활성 고객에게 시즌 프로모션 안내' },
   { key: 'inventory', icon: Package, name: '재고 소진', desc: '재고가 남은 상품의 구매 유도', objective: '재고 소진이 필요한 상품에 관심을 보인 고객의 구매 유도' },
+  // ★ 2026-07-02 5차 확장 (Harold 스펙): 생일·포인트·VIP 지정일
+  { key: 'birthday_monthly', icon: Cake, name: '생일 축하 (매월)', desc: '매월 정한 날, 그 달 생일 고객에게 축하 인사', objective: '이번 달 생일인 고객에게 생일 축하 인사', schedule: 'monthly', scheduleDayOfMonth: 1 },
+  { key: 'points_use', icon: Coins, name: '포인트 사용 유도', desc: '포인트 보유 고객에게 사용 안내', objective: '포인트를 보유한 고객에게 포인트 사용을 유도' },
+  { key: 'vip_day', icon: Star, name: 'VIP 데이 (매월)', desc: '매월 정한 날, VIP에게 감사 안내', objective: 'VIP 등급 고객에게 이번 달 VIP 감사 안내', schedule: 'monthly', scheduleDayOfMonth: 1 },
 ];
 
 export default function ScenarioStart({ onSelect }: { onSelect: (s: ScenarioPick) => void }) {
@@ -30,7 +38,7 @@ export default function ScenarioStart({ onSelect }: { onSelect: (s: ScenarioPick
           return (
             <button
               key={s.key}
-              onClick={() => onSelect({ key: s.key, name: s.name, objective: s.objective })}
+              onClick={() => onSelect({ key: s.key, name: s.name, objective: s.objective, schedule: s.schedule, scheduleDayOfMonth: s.scheduleDayOfMonth })}
               className="text-left bg-white/5 hover:bg-white/10 border border-white/10 hover:border-indigo-400/30 rounded-xl p-4 min-h-[118px] transition-colors"
             >
               <div className="w-9 h-9 rounded-xl bg-indigo-500/15 text-indigo-300 flex items-center justify-center">

@@ -228,6 +228,11 @@ export default function PerformancePage() {
   const [explanation, setExplanation] = useState<PerformanceExplanation | null>(null);
   const [cohort, setCohort] = useState<CohortResult | null>(null);
   const [attribution, setAttribution] = useState<AttributionResult | null>(null);
+  // ★ 2026-07-02 3차: 자동마케팅 매출 귀속(ROI) — 지출 대비 귀속 매출 실측
+  const [amRoi, setAmRoi] = useState<{
+    analysisPeriodDays: number; campaigns: number; totalSent: number; spendKrw: number;
+    purchases7d: number; revenue7dKrw: number; hasCdpData: boolean; source: string;
+  } | null>(null);
   const [loading, setLoading] = useState(true);
   const toast = useToast();
   const [error, setError] = useState<string | null>(null);
@@ -351,12 +356,13 @@ export default function PerformancePage() {
     try {
       const headers = { Authorization: `Bearer ${token()}` };
       const days = periodToDays(period);
-      const [snapRes, availRes, cohortRes, attrRes, insightRes] = await Promise.all([
+      const [snapRes, availRes, cohortRes, attrRes, insightRes, amRoiRes] = await Promise.all([
         fetch(`/api/ai/operator/performance/snapshot-v2?period=${period}`, { headers }),
         fetch('/api/ai/operator/performance/data-availability', { headers }),
         fetch('/api/ai/operator/performance/cohort?months=12', { headers }),
         fetch(`/api/ai/operator/performance/attribution?days=${days}`, { headers }),
         fetch('/api/insight/daily', { headers }),
+        fetch(`/api/ai/operator/performance/automarketing-roi?days=${days}`, { headers }),
       ]);
       const snapData = await snapRes.json();
       const availData = await availRes.json();
@@ -384,6 +390,11 @@ export default function PerformancePage() {
       if (availData.success) setAvailability(availData.availability);
       if (cohortData.success) setCohort(cohortData.cohort);
       if (attrData.success) setAttribution(attrData.attribution);
+      // ROI는 부가 카드 — 실패 시 조용히 숨김
+      try {
+        const amRoiData = await amRoiRes.json();
+        if (amRoiData.success) setAmRoi(amRoiData.roi || null);
+      } catch { setAmRoi(null); }
     } catch (e: any) {
       setError(e?.message || '네트워크 오류');
     } finally {
@@ -784,6 +795,44 @@ export default function PerformancePage() {
             <div className="text-[11px] text-white/40">
               이 기간 캠페인 {formatNum(snapshot.totalCampaigns.current)}건 · 총 발송 {formatNum(snapshot.totalSent.current)}건 · 신규 고객 {formatNum(snapshot.newCustomers.current)}명 · 직전 {period} 대비 비교
             </div>
+
+            {/* ════ 자동마케팅 ROI (2026-07-02 3차) — 지출 대비 귀속 매출 실측 ════ */}
+            {amRoi && amRoi.campaigns > 0 && (
+              <div className="bg-gradient-to-br from-emerald-500/10 to-slate-900 border border-emerald-400/25 rounded-2xl p-4">
+                <div className="flex items-center justify-between flex-wrap gap-2">
+                  <div className="text-xs font-semibold text-white/70">자동마케팅 ROI — 최근 {amRoi.analysisPeriodDays}일</div>
+                  {amRoi.hasCdpData && amRoi.spendKrw > 0 && amRoi.revenue7dKrw > 0 && (
+                    <span className="text-[11px] px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 font-semibold">
+                      지출 대비 {(amRoi.revenue7dKrw / amRoi.spendKrw).toFixed(1)}배
+                    </span>
+                  )}
+                </div>
+                <div className="mt-3 grid grid-cols-2 md:grid-cols-4 gap-2">
+                  <div className="bg-white/5 rounded-lg px-3 py-2.5">
+                    <div className="text-[10px] text-white/40">발송 캠페인</div>
+                    <div className="text-lg font-bold text-white mt-0.5">{formatNum(amRoi.campaigns)}건</div>
+                  </div>
+                  <div className="bg-white/5 rounded-lg px-3 py-2.5">
+                    <div className="text-[10px] text-white/40">지출 (메시지 비용)</div>
+                    <div className="text-lg font-bold text-white mt-0.5">₩{formatNum(amRoi.spendKrw)}</div>
+                  </div>
+                  <div className="bg-white/5 rounded-lg px-3 py-2.5">
+                    <div className="text-[10px] text-white/40">발송 후 7일 구매</div>
+                    <div className="text-lg font-bold text-emerald-300 mt-0.5">{amRoi.hasCdpData ? `${formatNum(amRoi.purchases7d)}건` : '—'}</div>
+                  </div>
+                  <div className="bg-white/5 rounded-lg px-3 py-2.5">
+                    <div className="text-[10px] text-white/40">귀속 매출 (7일)</div>
+                    <div className="text-lg font-bold text-emerald-300 mt-0.5">{amRoi.hasCdpData ? `₩${formatNum(amRoi.revenue7dKrw)}` : '연동 필요'}</div>
+                  </div>
+                </div>
+                <div className="mt-2 text-[10px] text-white/30 italic">Data source — {amRoi.source}</div>
+                {!amRoi.hasCdpData && (
+                  <button onClick={() => navigate('/cdp-settings')} className="mt-2 px-2.5 py-1 bg-white/10 hover:bg-white/20 rounded text-[11px] text-white/80 font-medium transition-colors">
+                    자사몰 연동하고 매출 귀속 보기 →
+                  </button>
+                )}
+              </div>
+            )}
 
             {/* ════ AI 자율 진단(좌) + 요약 아이콘 카드(우) 동일 높이 2단 ════ */}
             <div className="flex flex-col lg:flex-row gap-3 lg:items-stretch">

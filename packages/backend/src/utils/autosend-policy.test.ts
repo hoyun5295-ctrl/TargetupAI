@@ -134,6 +134,43 @@ describe('normalizeCopyStyle / buildCopyStylePromptBlock — 문안 스타일 4�
   });
 });
 
+describe('kstYesterdayRange — 어제(KST) 하루 구간 (성과 회고 2차)', () => {
+  it('KST 자정 기준 어제 00:00 ~ 오늘 00:00 (UTC 값으로) 반환', async () => {
+    const { kstYesterdayRange } = await import('./autosend-policy');
+    // now = 2026-07-02 21:00 KST (12:00Z) → 어제 = 7/1 00:00 KST(6/30 15:00Z) ~ 7/2 00:00 KST(7/1 15:00Z)
+    const r = kstYesterdayRange(new Date('2026-07-02T12:00:00Z'));
+    expect(r.start.toISOString()).toBe('2026-06-30T15:00:00.000Z');
+    expect(r.end.toISOString()).toBe('2026-07-01T15:00:00.000Z');
+    expect(r.dateLabel).toBe('7월 1일');
+  });
+});
+
+describe('buildDailyRecapBody — 성과 회고 문자 (2차)', () => {
+  it('발송·성공·클릭(있을 때)·학습 반영 안내를 담는다', async () => {
+    const { buildDailyRecapBody } = await import('./autosend-policy');
+    const body = buildDailyRecapBody({
+      operatorName: '휴면 고객 회복', dateLabel: '7월 1일',
+      sentCount: 1543, successCount: 1540, clickedCount: 172,
+    });
+    expect(body).toContain('7월 1일');
+    expect(body).toContain('휴면 고객 회복');
+    expect(body).toContain('1,543명');
+    expect(body).toContain('1,540명');
+    expect(body).toContain('172명');
+    expect(body).toContain('11.1%'); // 172/1543
+    expect(body).toContain('학습');
+  });
+
+  it('클릭 0이면 클릭 줄을 표기하지 않는다 (미측정과 0 구분 불가 — 정직)', async () => {
+    const { buildDailyRecapBody } = await import('./autosend-policy');
+    const body = buildDailyRecapBody({
+      operatorName: 'VIP 재구매', dateLabel: '7월 1일',
+      sentCount: 200, successCount: 199, clickedCount: 0,
+    });
+    expect(body).not.toContain('클릭');
+  });
+});
+
 describe('wrapOperatorNoticeBody — 담당자 안내 문자 머리말 (Harold 2026-07-02 지시)', () => {
   it('본문이 [한줄로 AI 자동마케팅 안내문자]로 시작한다', async () => {
     const { wrapOperatorNoticeBody } = await import('./autosend-policy');
