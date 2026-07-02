@@ -627,26 +627,8 @@ export default function EmailCampaignsPage() {
               <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
               <span className="hidden sm:inline">새로고침</span>
             </button>
-            <button
-              onClick={() => setShowGallery(true)}
-              disabled={!smtpConfigured}
-              className="text-xs bg-gradient-to-r from-emerald-500/40 to-teal-500/40 hover:from-emerald-500/60 hover:to-teal-500/60 disabled:opacity-40 disabled:cursor-not-allowed text-emerald-50 px-3 py-2 rounded-lg flex items-center gap-1.5 font-medium transition-colors border border-emerald-400/30"
-              title={smtpConfigured ? undefined : 'SMTP 설정 완료 후 활용 가능'}
-            >
-              <LayoutTemplate className="w-3.5 h-3.5" />
-              템플릿에서 시작
-            </button>
-            <button
-              onClick={() => setVisualEditor({ sections: [], isAd: true, aiGenerated: false })}
-              disabled={!smtpConfigured}
-              className="text-xs bg-gradient-to-r from-violet-500/40 to-fuchsia-500/40 hover:from-violet-500/60 hover:to-fuchsia-500/60 disabled:opacity-40 disabled:cursor-not-allowed text-violet-50 px-3 py-2 rounded-lg flex items-center gap-1.5 font-medium transition-colors border border-violet-400/30"
-              title={smtpConfigured ? undefined : 'SMTP 설정 완료 후 활용 가능'}
-            >
-              <Sparkles className="w-3.5 h-3.5" />
-              비주얼로 만들기
-            </button>
-            {/* ★ 2026-07-02(3) [신규 캠페인](레거시 HTML 폼) 진입 제거 — 시작 방식 = 템플릿/비주얼 2개로 통일.
-                레거시 폼은 기존 HTML 전용 캠페인 수정(openEditor 폴백)에만 유지 */}
+            {/* ★ 2026-07-02(3) 시작 버튼(템플릿/비주얼)은 아래 AI 카드 안 시작 허브로 이동 — 헤더 정리.
+                [신규 캠페인](레거시 HTML 폼) 진입 제거 — 레거시 폼은 기존 HTML 전용 캠페인 수정(openEditor 폴백)에만 유지 */}
           </div>
         </div>
       </div>
@@ -720,8 +702,37 @@ export default function EmailCampaignsPage() {
               <input type="checkbox" checked={aiAsAd} onChange={(e) => setAiAsAd(e.target.checked)} disabled={genStep !== null} className="rounded" />
               광고성 이메일로 만들기 (발송 시 "(광고)" + 수신거부 링크 자동 부착)
             </label>
+            {/* ★ 2026-07-02(3) 시작 허브 — 헤더에 몰려 있던 [템플릿에서 시작]/[비주얼로 만들기]를 카드로 이동 (빠른 시작 자리) */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-3">
+              <button
+                onClick={() => setShowGallery(true)}
+                disabled={genStep !== null}
+                className="group flex items-center gap-3 bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-400/25 hover:border-emerald-400/50 rounded-xl p-3.5 text-left transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-emerald-500 to-teal-500 flex items-center justify-center shadow-md shrink-0">
+                  <LayoutTemplate className="w-4 h-4 text-white" />
+                </div>
+                <div>
+                  <div className="text-xs font-bold text-white">템플릿에서 시작</div>
+                  <div className="text-[10px] text-white/45 mt-0.5">완성된 골격을 한 번에 — 크레딧 0, 바로 편집</div>
+                </div>
+              </button>
+              <button
+                onClick={() => setVisualEditor({ sections: [], isAd: true, aiGenerated: false })}
+                disabled={genStep !== null}
+                className="group flex items-center gap-3 bg-violet-500/10 hover:bg-violet-500/20 border border-violet-400/25 hover:border-violet-400/50 rounded-xl p-3.5 text-left transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-violet-500 to-fuchsia-500 flex items-center justify-center shadow-md shrink-0">
+                  <Sparkles className="w-4 h-4 text-white" />
+                </div>
+                <div>
+                  <div className="text-xs font-bold text-white">비주얼로 만들기</div>
+                  <div className="text-[10px] text-white/45 mt-0.5">빈 캔버스에서 블록 직접 조립</div>
+                </div>
+              </button>
+            </div>
             <div className="text-[10px] text-white/30 italic mt-3">
-              Data source — 회사 Brand Voice 학습 결과 자동 반영 · 구체 혜택은 직접 입력 · 완성된 골격은 [템플릿에서 시작]
+              Data source — 회사 Brand Voice 학습 결과 자동 반영 · 구체 혜택은 직접 입력
             </div>
           </div>
         )}
