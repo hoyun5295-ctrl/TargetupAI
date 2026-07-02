@@ -8,7 +8,7 @@
  * 한줄로 AI 프로 요금제 이상.
  */
 
-import { Request, Response, Router } from 'express';
+import { Request, Response, Router, json } from 'express';
 import path from 'path';
 import fs from 'fs';
 import multer from 'multer';
@@ -98,6 +98,12 @@ const DM_IMAGE_DIR = path.join(process.cwd(), 'uploads', 'dm-images');
 // ============================================================
 
 export const dmPublicRouter = Router();
+
+// ★ 2026-07-02(5) 본문 파서 — 공개 라우터는 app.ts에서 helmet·전역 express.json() '앞'에 마운트되므로
+//   (인라인 스크립트 CSP 때문) 여기 POST(track·event-response·ab track)는 전역 파서를 못 거친다.
+//   그 결과 req.body가 비어 비콘의 토큰·anon·scroll·duration이 전부 유실 → 열람 껍데기 행만 쌓이던 결함.
+//   라우터 자체 JSON 파서를 붙여 본문을 받게 한다(GET 뷰어는 본문 없어 영향 0).
+dmPublicRouter.use(json({ limit: '1mb' }));
 
 // DM 이미지 서빙
 dmPublicRouter.get('/images/:companyId/:filename', (req: Request, res: Response) => {

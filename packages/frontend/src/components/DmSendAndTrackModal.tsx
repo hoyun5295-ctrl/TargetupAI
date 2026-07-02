@@ -7,7 +7,7 @@
  *   DM 링크는 %DM링크% 위치에 자동 삽입(수신자별). 없으면 문안 끝에 첨부.
  */
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Sparkles, Send, RefreshCw, Check, X, Wand2, ShieldCheck, Clock, Smartphone } from 'lucide-react';
 import { useToast } from './ToastProvider';
 import TargetExtractModal, { type ExtractedTarget } from './TargetExtractModal';
@@ -100,6 +100,10 @@ export default function DmSendAndTrackModal({ dmId, dmTitle, show, onClose, init
   // ★ 2026-07-02(3) 발신번호 선택 — 회사 등록 번호 목록(기본 = is_default). 발송·스팸테스트 공용.
   const [callbackList, setCallbackList] = useState<Array<{ phone: string; isDefault: boolean }>>([]);
   const [callback, setCallback] = useState('');
+  // ★ 2026-07-02(5) 고객사 보유 필드 — 꾸미기 활용 다중 선택 (AI 오퍼레이터 '활용 가능 컬럼' 패턴 미러).
+  //   token/label = %변수% 안쪽 표시명(예 '고객명'). 시스템 변수 제외한 실제 고객 데이터 필드만.
+  const [companyFields, setCompanyFields] = useState<Array<{ token: string; label: string; category: string }>>([]);
+  const [decorateVars, setDecorateVars] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     if (!show) return;
@@ -123,8 +127,30 @@ export default function DmSendAndTrackModal({ dmId, dmTitle, show, onClose, init
         setOpt080(String(sdata?.reject_number || '').trim());
         setOpt080Loaded(true);
       } catch { /* 미조회 = 미리보기에 번호 미표시 (발송은 백엔드 가드) */ }
+      try {
+        // 고객사 실제 보유 필드 — getAvailableVariables(회사 스키마 매핑). 시스템 변수 제외 = 고객 데이터 필드만.
+        const vres = await fetch('/api/dm/variables', { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } });
+        const vdata = await vres.json();
+        const list: any[] = Array.isArray(vdata?.variables) ? vdata.variables : [];
+        setCompanyFields(
+          list
+            .filter((v: any) => v?.displayName && v.category !== 'system')
+            .map((v: any) => ({ token: String(v.displayName), label: String(v.displayName), category: String(v.category || '') })),
+        );
+      } catch { /* 필드 조회 실패 = 꾸미기 필드 미표시 (삽입 칩은 기본값 폴백) */ }
     })();
   }, [show]);
+
+  // ★ 2026-07-02(5) 본문에 실제 쓰인 보유 필드는 꾸미기 대상으로 자동 선택(추가 선택은 유지) — AI 오퍼레이터 패턴.
+  useEffect(() => {
+    if (companyFields.length === 0) return;
+    const valid = new Set(companyFields.map((f) => f.token));
+    const used: string[] = [];
+    for (const m of Array.from(messageText.matchAll(/%([^%]+)%/g))) {
+      if (valid.has(m[1])) used.push(m[1]);
+    }
+    if (used.length > 0) setDecorateVars((prev) => new Set([...prev, ...used]));
+  }, [messageText, companyFields]);
 
   // 예약 시각
   const [scheduleMode, setScheduleMode] = useState<'immediate' | 'manual' | 'ai'>('immediate');
@@ -141,6 +167,10 @@ export default function DmSendAndTrackModal({ dmId, dmTitle, show, onClose, init
   const [confirmState, setConfirmState] = useState<ConfirmState | null>(null);
   const isIndividualCb = callback === INDIVIDUAL_CB;
   const defaultRegisteredCb = callbackList.find((c) => c.isDefault)?.phone || callbackList[0]?.phone || '';
+  // ★ 2026-07-02(5) 본문 삽입 칩 = %DM링크%(DM 전용) + 고객사 실제 보유 필드. 미로드 시 기본값 폴백.
+  const insertChips = companyFields.length > 0
+    ? ['%DM링크%', ...companyFields.map((f) => `%${f.token}%`)]
+    : VAR_CHIPS;
 
   const loadTracking = async () => {
     setView('track');
@@ -168,7 +198,22 @@ export default function DmSendAndTrackModal({ dmId, dmTitle, show, onClose, init
   if (!show) return null;
   const token = () => localStorage.getItem('token');
 
-  const insertVar = (v: string) => setMessageText((prev) => (prev ? `${prev} ${v}` : v));
+  // ★ 2026-07-02(5) 변수 칩은 커서 위치에 삽입 (항상 끝에 붙던 결함 수정)
+  const messageRef = useRef<HTMLTextAreaElement>(null);
+  const insertVar = (v: string) => {
+    const el = messageRef.current;
+    if (!el) { setMessageText((prev) => (prev ? `${prev} ${v}` : v)); return; }
+    // 버튼 클릭으로 blur돼도 textarea의 마지막 selection 값은 보존된다
+    const start = el.selectionStart ?? el.value.length;
+    const end = el.selectionEnd ?? el.value.length;
+    setMessageText((prev) => prev.slice(0, start) + v + prev.slice(end));
+    // 삽입 직후 커서를 삽입 텍스트 뒤로 이동 + 포커스 복귀
+    requestAnimationFrame(() => {
+      el.focus();
+      const pos = start + v.length;
+      el.setSelectionRange(pos, pos);
+    });
+  };
 
   // 미리보기 치환값 = 추출 타겟 샘플(실데이터, ‹ › 로 수신자별 확인). 타겟 미추출 시 중립 기본값.
   const samples = target?.samples || [];
@@ -222,12 +267,15 @@ export default function DmSendAndTrackModal({ dmId, dmTitle, show, onClose, init
 
   const handleDecorate = async () => {
     if (!messageText.trim()) { toast.warning('먼저 문안을 작성해주세요.'); return; }
+    // ★ 2026-07-02(5) 하드코딩 3개 대신 선택된 고객사 보유 필드를 활용 컬럼으로 전송
+    const vars = Array.from(decorateVars);
+    if (vars.length === 0) { toast.warning('꾸미기에 활용할 필드를 1개 이상 선택해주세요.'); return; }
     setDecorating(true);
     try {
       const res = await fetch('/api/ai/operator/decorate-message', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token()}` },
-        body: JSON.stringify({ message: messageText, selectedVars: ['고객명', '등급', '지역'], channel: 'lms', isAd }),
+        body: JSON.stringify({ message: messageText, selectedVars: vars, channel: 'lms', isAd }),
       });
       const data = await res.json();
       if (data.success) { setMessageText(String(data.message || messageText)); toast.success('꾸미기를 적용했습니다. (3크레딧)'); }
@@ -361,17 +409,48 @@ export default function DmSendAndTrackModal({ dmId, dmTitle, show, onClose, init
 
                   <div>
                     <label className="text-[11px] text-white/60 mb-1 block">문자 본문 {mode === 'ai' ? '(생성 후 편집 가능)' : ''}</label>
-                    <textarea value={messageText} onChange={(e) => setMessageText(e.target.value)} rows={5} placeholder="문안을 작성하거나 AI로 생성하세요. %DM링크% 위치에 수신자별 개인화 링크가 들어갑니다." className="w-full bg-slate-950/60 border border-white/10 rounded-lg px-3 py-2.5 text-sm text-white placeholder:text-white/30 focus:outline-none focus:border-indigo-400/60 resize-none" />
+                    <textarea ref={messageRef} value={messageText} onChange={(e) => setMessageText(e.target.value)} rows={5} placeholder="문안을 작성하거나 AI로 생성하세요. %DM링크% 위치에 수신자별 개인화 링크가 들어갑니다." className="w-full bg-slate-950/60 border border-white/10 rounded-lg px-3 py-2.5 text-sm text-white placeholder:text-white/30 focus:outline-none focus:border-indigo-400/60 resize-none" />
                     <div className="mt-1.5 flex flex-wrap gap-1">
-                      {VAR_CHIPS.map((v) => (
-                        <button key={v} onClick={() => insertVar(v)} className={`text-[10px] px-2 py-0.5 rounded border transition-colors ${v === '%DM링크%' ? 'border-fuchsia-400/40 text-fuchsia-200 bg-fuchsia-500/10' : 'border-white/10 text-white/60 bg-white/5 hover:bg-white/10'}`}>{v}</button>
+                      {insertChips.map((v) => (
+                        <button key={v} onClick={() => insertVar(v)} title="커서 위치에 삽입" className={`text-[10px] px-2 py-0.5 rounded border transition-colors ${v === '%DM링크%' ? 'border-fuchsia-400/40 text-fuchsia-200 bg-fuchsia-500/10' : 'border-white/10 text-white/60 bg-white/5 hover:bg-white/10'}`}>{v}</button>
                       ))}
                     </div>
                   </div>
 
+                  {/* ★ 2026-07-02(5) 꾸미기 활용 필드 — 고객사 보유 필드 별도 선택(본문에 쓰인 필드 자동 선택 + 추가 토글). AI 오퍼레이터 '활용 가능 컬럼' 미러. */}
+                  <div className="rounded-xl border border-violet-400/20 bg-violet-500/5 p-3">
+                    <div className="flex items-center justify-between gap-2 mb-2">
+                      <div className="flex items-center gap-2">
+                        <div className="w-6 h-6 rounded-lg bg-gradient-to-br from-violet-500 to-fuchsia-500 flex items-center justify-center flex-shrink-0"><Wand2 className="w-3.5 h-3.5 text-white" /></div>
+                        <div>
+                          <p className="text-[11px] font-bold text-white">꾸미기에 활용할 필드</p>
+                          <p className="text-[9.5px] text-white/45">본문에 쓴 필드는 자동 선택 · 더 넣을 필드를 골라 AI가 자연스럽게 녹입니다{decorateVars.size > 0 ? ` · ${decorateVars.size}개 선택` : ''}</p>
+                        </div>
+                      </div>
+                      <button onClick={handleDecorate} disabled={decorating || decorateVars.size === 0} className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[11px] font-semibold text-white bg-gradient-to-r from-violet-500 to-fuchsia-500 hover:from-violet-600 hover:to-fuchsia-600 disabled:opacity-40 disabled:cursor-not-allowed flex-shrink-0"><Wand2 className="w-3.5 h-3.5" />{decorating ? '꾸미는 중...' : 'AI 꾸미기'}</button>
+                    </div>
+                    {companyFields.length === 0 ? (
+                      <p className="text-[10px] text-white/40">고객 데이터가 있어야 개인화 필드가 표시됩니다. (고객DB 업로드 후 이용)</p>
+                    ) : (
+                      <div className="flex flex-wrap gap-1.5">
+                        {companyFields.map((f) => {
+                          const on = decorateVars.has(f.token);
+                          return (
+                            <button
+                              key={f.token}
+                              onClick={() => setDecorateVars((prev) => { const n = new Set(prev); if (n.has(f.token)) n.delete(f.token); else n.add(f.token); return n; })}
+                              className={`px-2.5 py-1 rounded-full text-[10px] font-medium border transition-all ${on ? 'bg-violet-500/30 text-violet-100 border-violet-400/50' : 'bg-white/5 text-white/55 border-white/10 hover:bg-white/10 hover:text-white/80'}`}
+                            >
+                              %{f.label}%
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+
                   {/* 툴바 */}
                   <div className="flex flex-wrap gap-1.5">
-                    <button onClick={handleDecorate} disabled={decorating} className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[11px] font-medium text-white/80 bg-white/5 hover:bg-white/10 border border-white/10 disabled:opacity-40"><Wand2 className="w-3.5 h-3.5" />{decorating ? '꾸미는 중...' : '꾸미기'}</button>
                     <button onClick={() => { if (!messageText.trim()) { toast.warning('먼저 문안을 작성해주세요.'); return; } setRefineOpen(true); }} className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[11px] font-medium text-white/80 bg-white/5 hover:bg-white/10 border border-white/10"><Sparkles className="w-3.5 h-3.5" />다듬기</button>
                     <button onClick={openSpamTest} className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[11px] font-medium text-white/80 bg-white/5 hover:bg-white/10 border border-white/10"><ShieldCheck className="w-3.5 h-3.5" />스팸테스트</button>
                   </div>
