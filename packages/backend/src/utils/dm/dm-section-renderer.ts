@@ -66,6 +66,13 @@ export function fsDecl(size: unknown): string {
   return `;font-size:${n}px`;
 }
 
+/** ★ 2026-07-02(2) 섹션 공통 텍스트 크기 검증 — 유효(10~80)하면 정수 px, 아니면 null. */
+export function fsVarPx(size: unknown): number | null {
+  const n = Math.round(Number(size));
+  if (!Number.isFinite(n) || n < 10 || n > 80) return null;
+  return n;
+}
+
 /** ★ 2026-07-02(2) 상품 할인율 계산 — 수동 discount_rate(1~99) 우선, 없으면 정가/할인가로 산출. 유효하지 않으면 null. */
 export function computeDmDiscountRate(price: unknown, discountPrice: unknown, manualRate?: unknown): number | null {
   const manual = Math.round(Number(manualRate));
@@ -593,7 +600,12 @@ function renderGallery(p: any): string {
   const imgStyle = isList
     ? 'width:100%;height:auto;display:block;border-radius:var(--dm-radius-md)'
     : 'width:100%;aspect-ratio:1;object-fit:cover;border-radius:var(--dm-radius-md)';
-  const items = images.map((img: any) => `<img src="${escapeHtml(publicImageUrl(img.url))}" loading="lazy" alt="${escapeHtml(img.caption || '')}" style="${imgStyle}"/>`).join('');
+  // ★ 2026-07-02(3) link_url 있으면 이미지 링크 연결 (입력받고도 발행물에서 안 쓰이던 결함)
+  const items = images.map((img: any) => {
+    const tag = `<img src="${escapeHtml(publicImageUrl(img.url))}" loading="lazy" alt="${escapeHtml(img.caption || '')}" style="${imgStyle}"/>`;
+    const href = img.link_url ? safeUrl(img.link_url) : '#';
+    return href !== '#' ? `<a href="${href}" target="_blank" rel="noopener" style="display:block">${tag}</a>` : tag;
+  }).join('');
   return `<div class="dm-section dm-gallery" style="padding:var(--dm-sp-4)">
     ${p.title ? `<div style="font-size:var(--dm-fs-h3);font-weight:700;margin-bottom:var(--dm-sp-3)">${escapeHtml(p.title)}</div>` : ''}
     <div style="display:grid;grid-template-columns:repeat(${cols},1fr);gap:${isList ? 10 : 6}px">${items}</div>
@@ -605,22 +617,30 @@ function renderSlideshow(p: any): string {
   if (slides.length === 0) {
     return `<div class="dm-section dm-slideshow dm-mood-slot" style="padding:var(--dm-sp-6);text-align:center;color:var(--dm-neutral-400)">[슬라이드를 추가해주세요]</div>`;
   }
-  const first = slides[0];
-  return `<div class="dm-section dm-slideshow" style="padding:var(--dm-sp-4)">
-    <img src="${escapeHtml(publicImageUrl(first.image_url || ''))}" loading="lazy" alt="${escapeHtml(first.caption || '')}" style="width:100%;aspect-ratio:16/9;object-fit:cover;border-radius:var(--dm-radius-md)"/>
-    ${first.caption ? `<div style="font-size:var(--dm-fs-small);margin-top:var(--dm-sp-2)">${escapeHtml(first.caption)}</div>` : ''}
-  </div>`;
+  // ★ 2026-07-02(3) 첫 장만 고정 렌더되던 결함 수정 — 전 슬라이드 렌더 + 자동 전환 + 인디케이터 + 링크 (뷰어 스크립트 연동)
+  const interval = Math.max(1500, Math.min(60000, Number(p.interval_ms) || 4000));
+  const slidesHtml = slides.map((s: any, i: number) => {
+    const img = `<img src="${escapeHtml(publicImageUrl(s.image_url || ''))}" loading="lazy" alt="${escapeHtml(s.caption || '')}" style="width:100%;aspect-ratio:16/9;object-fit:cover;border-radius:var(--dm-radius-md)"/>`;
+    const href = s.link_url ? safeUrl(s.link_url) : '#';
+    const inner = href !== '#' ? `<a href="${href}" target="_blank" rel="noopener" style="display:block">${img}</a>` : img;
+    return `<div data-dm-slide style="display:${i === 0 ? 'block' : 'none'}">${inner}${s.caption ? `<div style="font-size:var(--dm-fs-small);margin-top:var(--dm-sp-2)">${escapeHtml(s.caption)}</div>` : ''}</div>`;
+  }).join('');
+  const dots = p.show_indicator !== false && slides.length > 1
+    ? `<div style="display:flex;justify-content:center;gap:6px;margin-top:var(--dm-sp-2)">${slides.map((_: any, i: number) => `<span data-dm-slide-dot="${i}" style="width:8px;height:8px;border-radius:50%;background:${i === 0 ? 'var(--dm-primary)' : 'var(--dm-neutral-300)'};cursor:pointer"></span>`).join('')}</div>`
+    : '';
+  return `<div class="dm-section dm-slideshow" data-dm-slideshow data-interval="${interval}" style="padding:var(--dm-sp-4)">${slidesHtml}${dots}</div>`;
 }
 
 function renderTabCards(p: any): string {
   const tabs = Array.isArray(p?.tabs) ? p.tabs : [];
   if (tabs.length === 0) return '';
-  const first = tabs[0];
-  return `<div class="dm-section dm-tab-cards" style="padding:var(--dm-sp-4)">
-    <div style="display:flex;gap:4px;border-bottom:1px solid var(--dm-neutral-200);margin-bottom:var(--dm-sp-3)">
-      ${tabs.map((t: any, i: number) => `<span style="padding:8px 12px;border-bottom:2px solid ${i === 0 ? 'var(--dm-primary)' : 'transparent'};color:${i === 0 ? 'var(--dm-primary)' : 'var(--dm-neutral-600)'};font-size:var(--dm-fs-small);font-weight:600">${escapeHtml(t.label || '')}</span>`).join('')}
-    </div>
-    <div style="font-size:var(--dm-fs-small);line-height:1.6">${escapeHtml(first.content || '')}</div>
+  // ★ 2026-07-02(3) 첫 탭만 고정 렌더되던 결함 수정 — 전 탭 렌더 + 클릭 전환 (뷰어 스크립트 연동)
+  const di = Math.min(Math.max(0, Math.floor(Number(p.default_tab_index) || 0)), tabs.length - 1);
+  const btns = tabs.map((t: any, i: number) => `<span data-dm-tab="${i}" style="padding:8px 12px;cursor:pointer;border-bottom:2px solid ${i === di ? 'var(--dm-primary)' : 'transparent'};color:${i === di ? 'var(--dm-primary)' : 'var(--dm-neutral-600)'};font-size:var(--dm-fs-small);font-weight:600">${escapeHtml(t.label || '')}</span>`).join('');
+  const panels = tabs.map((t: any, i: number) => `<div data-dm-tab-panel="${i}" style="font-size:var(--dm-fs-small);line-height:1.6;white-space:pre-wrap;display:${i === di ? 'block' : 'none'}">${escapeHtml(t.content || '')}</div>`).join('');
+  return `<div class="dm-section dm-tab-cards" data-dm-tabs style="padding:var(--dm-sp-4)">
+    <div style="display:flex;gap:4px;border-bottom:1px solid var(--dm-neutral-200);margin-bottom:var(--dm-sp-3);flex-wrap:wrap">${btns}</div>
+    ${panels}
   </div>`;
 }
 
@@ -640,12 +660,29 @@ function renderSurvey(p: any): string {
   if (questions.length === 0) {
     return `<div class="dm-section dm-survey" style="padding:var(--dm-sp-4);text-align:center;color:var(--dm-neutral-400);font-style:italic">[설문 질문을 추가해주세요]</div>`;
   }
-  const items = questions.map((q: any) => `<div style="margin-bottom:var(--dm-sp-3)"><div style="font-size:var(--dm-fs-small);font-weight:600;margin-bottom:6px">${escapeHtml(q.question || '')}${q.required ? ' <span style="color:var(--dm-error)">*</span>' : ''}</div></div>`).join('');
+  // ★ 2026-07-02(3) 질문 라벨만 렌더되고 답변 입력·제출이 아예 없던 결함 수정 — 타입별 입력 + 제출 (뷰어 스크립트 연동)
+  const items = questions.map((q: any, qi: number) => {
+    const qid = escapeHtml(String(q.id || qi));
+    let control = '';
+    if (q.type === 'text') {
+      control = `<input type="text" data-dm-q="${qid}" placeholder="답변을 입력해주세요" style="width:100%;padding:10px 12px;border:1px solid var(--dm-neutral-300);border-radius:var(--dm-radius-md);font-size:var(--dm-fs-small);background:var(--dm-bg)"/>`;
+    } else if (q.type === 'rating') {
+      control = `<div data-dm-rating data-dm-q="${qid}" style="display:flex;gap:6px">${[1, 2, 3, 4, 5].map((n) => `<span data-dm-rate="${n}" style="font-size:24px;color:var(--dm-neutral-300);cursor:pointer">★</span>`).join('')}</div>`;
+    } else {
+      const multi = q.type === 'multiple';
+      control = (Array.isArray(q.options) ? q.options : []).map((opt: any) =>
+        `<label style="display:flex;align-items:center;gap:8px;padding:8px 10px;background:var(--dm-bg);border:1px solid var(--dm-neutral-200);border-radius:var(--dm-radius-md);font-size:var(--dm-fs-small);margin-bottom:6px;cursor:pointer"><input type="${multi ? 'checkbox' : 'radio'}" name="dmq-${qid}" value="${escapeHtml(String(opt))}" data-dm-q="${qid}"/>${escapeHtml(String(opt))}</label>`,
+      ).join('');
+    }
+    return `<div data-dm-question data-required="${q.required ? '1' : '0'}" style="margin-bottom:var(--dm-sp-4);text-align:left"><div style="font-size:var(--dm-fs-small);font-weight:600;margin-bottom:6px">${escapeHtml(q.question || '')}${q.required ? ' <span style="color:var(--dm-error)">*</span>' : ''}</div>${control}</div>`;
+  }).join('');
   const body = `
     ${p.title ? `<div style="font-size:var(--dm-fs-h3);font-weight:700;margin-bottom:var(--dm-sp-3)">${escapeHtml(p.title)}</div>` : ''}
     ${items}
-    ${p.completion_reward_text ? `<div style="font-size:var(--dm-fs-small);color:var(--dm-primary);margin-top:var(--dm-sp-3);font-weight:600">${escapeHtml(p.completion_reward_text)}</div>` : ''}`;
-  return `<div class="dm-section dm-survey">${dmEventCard({ accentVar: '--dm-primary', icon: 'survey', body })}</div>`;
+    <button data-dm-submit class="dm-cta dm-cta-primary" style="width:100%">제출하기</button>
+    ${p.completion_reward_text ? `<div style="font-size:var(--dm-fs-small);color:var(--dm-primary);margin-top:var(--dm-sp-3);font-weight:600">${escapeHtml(p.completion_reward_text)}</div>` : ''}
+    <div data-dm-result style="display:none"></div>`;
+  return `<div class="dm-section dm-survey" data-dm-survey>${dmEventCard({ accentVar: '--dm-primary', icon: 'survey', body })}</div>`;
 }
 
 function renderEmailCapture(p: any): string {
@@ -669,7 +706,9 @@ function renderClickRewards(p: any): string {
         <div style="font-size:var(--dm-fs-small);font-weight:600">${escapeHtml(p.reward_description || '')}</div>
         ${p.show_progress ? `<div style="font-size:var(--dm-fs-tiny);color:var(--dm-neutral-500);margin-top:2px">목표 ${p.target_count || 0}회</div>` : ''}
       </div>
-    </div>`;
+    </div>
+    <button data-dm-claim data-claim-success="참여가 완료되었습니다. 감사합니다!" class="dm-cta dm-cta-primary" style="width:100%;margin-top:var(--dm-sp-3)">참여하기</button>
+    <div data-dm-result style="display:none"></div>`;
   return `<div class="dm-section dm-click-rewards">${dmEventCard({ accentVar: '--dm-accent', body })}</div>`;
 }
 
@@ -707,9 +746,10 @@ function renderInstantCoupon(p: any): string {
     <div style="font-size:var(--dm-fs-h3);font-weight:700;color:var(--dm-primary);margin-bottom:var(--dm-sp-2)">${escapeHtml(p.coupon_label || '')}</div>
     <div style="font-size:var(--dm-fs-small);color:var(--dm-neutral-700);margin-bottom:var(--dm-sp-3)">${escapeHtml(p.discount_description || '')}</div>
     ${p.expires_at ? `<div style="font-size:var(--dm-fs-tiny);color:var(--dm-primary);margin-bottom:var(--dm-sp-3);font-weight:600">만료: ${escapeHtml(new Date(p.expires_at).toLocaleString('ko-KR'))}</div>` : ''}
-    <button class="dm-cta dm-cta-primary">쿠폰 받기</button>
+    <button data-dm-claim data-claim-success="${escapeHtml(p.usage_instructions ? `쿠폰이 발급되었습니다. ${p.usage_instructions}` : '쿠폰이 발급되었습니다. 결제 시 적용해주세요.')}" class="dm-cta dm-cta-primary">쿠폰 받기</button>
     ${p.conditions ? `<div style="font-size:var(--dm-fs-tiny);color:var(--dm-neutral-500);margin-top:var(--dm-sp-2)">${escapeHtml(p.conditions)}</div>` : ''}
-    ${p.usage_instructions ? `<div style="font-size:var(--dm-fs-tiny);color:var(--dm-neutral-500);margin-top:4px">${escapeHtml(p.usage_instructions)}</div>` : ''}`;
+    ${p.usage_instructions ? `<div style="font-size:var(--dm-fs-tiny);color:var(--dm-neutral-500);margin-top:4px">${escapeHtml(p.usage_instructions)}</div>` : ''}
+    <div data-dm-result style="display:none"></div>`;
   return `<div class="dm-section dm-instant-coupon"><div style="padding:var(--dm-sp-6) var(--dm-sp-5);background:var(--dm-primary-light);border:2px dashed var(--dm-primary);border-radius:var(--dm-radius-xl);margin:var(--dm-sp-3) 0"><div style="color:var(--dm-primary);margin-bottom:var(--dm-sp-3)">${dmIcon('ticket', 26)}</div>${body}</div></div>`;
 }
 
@@ -724,7 +764,10 @@ function renderLimitedQuantity(p: any): string {
       <div style="font-size:var(--dm-fs-tiny);color:var(--dm-neutral-600);margin-bottom:6px;display:flex;justify-content:space-between"><span>남은 수량</span><span style="font-weight:700">${remaining} / ${total}</span></div>
       <div style="width:100%;height:8px;background:var(--dm-neutral-200);border-radius:var(--dm-radius-full);overflow:hidden"><div style="width:${percent}%;height:100%;background:var(--dm-accent)"></div></div>
     </div>
-    <button class="dm-cta dm-cta-primary" style="width:100%">선착순 참여하기</button>`;
+    ${p.signup_url
+      ? `<a href="${safeUrl(p.signup_url)}" target="_blank" rel="noopener" class="dm-cta dm-cta-primary" style="width:100%;display:block">선착순 참여하기</a>`
+      : `<button data-dm-claim data-claim-success="참여가 완료되었습니다!" class="dm-cta dm-cta-primary" style="width:100%">선착순 참여하기</button>`}
+    <div data-dm-result style="display:none"></div>`;
   return `<div class="dm-section dm-limited-quantity">${dmEventCard({ accentVar: '--dm-accent', icon: 'clock', body })}</div>`;
 }
 
@@ -747,7 +790,7 @@ function renderInstagramEmbed(p: any): string {
     return `<div class="dm-section dm-instagram-embed dm-mood-slot" style="padding:var(--dm-sp-6);text-align:center;color:var(--dm-neutral-400)">[Instagram URL을 입력해주세요]</div>`;
   }
   return `<div class="dm-section dm-instagram-embed" style="padding:var(--dm-sp-4)">
-    <a href="${escapeHtml(p.post_url)}" target="_blank" rel="noopener noreferrer" style="display:block;padding:var(--dm-sp-5);background:var(--dm-neutral-50);border:1px solid var(--dm-neutral-200);border-radius:var(--dm-radius-md);text-align:center;text-decoration:none;box-shadow:var(--dm-shadow-sm)">
+    <a href="${safeUrl(p.post_url)}" target="_blank" rel="noopener noreferrer" style="display:block;padding:var(--dm-sp-5);background:var(--dm-neutral-50);border:1px solid var(--dm-neutral-200);border-radius:var(--dm-radius-md);text-align:center;text-decoration:none;box-shadow:var(--dm-shadow-sm)">
       <div style="color:var(--dm-accent);display:flex;justify-content:center;margin-bottom:6px">${dmIcon('image', 26)}</div>
       <div style="font-size:var(--dm-fs-small);font-weight:600;color:var(--dm-neutral-800)">Instagram 게시물 보기</div>
     </a>
@@ -806,7 +849,13 @@ export function renderSection(section: Section, ctx: SectionRenderContext): stri
   const al = section.align || 'center';
   const just = al === 'left' ? 'flex-start' : al === 'right' ? 'flex-end' : 'center';
   const treatmentAttr = treatment && treatment !== 'classic' ? ` data-treatment="${escapeHtml(treatment)}"` : '';
-  const wrapStyle = `text-align:${al};--dm-section-justify:${just}${section.accent_color ? `;--dm-primary:${escapeHtml(section.accent_color)}` : ''}`;
+  // ★ 2026-07-02(2) 섹션 공통 텍스트 크기 — 제목급/본문급 폰트 토큰을 섹션 wrap에서 override (전 27섹션 일괄 적용)
+  const titleN = fsVarPx(section.title_size);
+  const textN = fsVarPx(section.text_size);
+  const sizeVars =
+    `${titleN ? `;--dm-fs-hero:${titleN}px;--dm-fs-h1:${titleN}px;--dm-fs-h2:${titleN}px;--dm-fs-h3:${titleN}px` : ''}` +
+    `${textN ? `;--dm-fs-body:${textN}px;--dm-fs-small:${textN}px` : ''}`;
+  const wrapStyle = `text-align:${al};--dm-section-justify:${just}${section.accent_color ? `;--dm-primary:${escapeHtml(section.accent_color)}` : ''}${sizeVars}`;
   return `<div class="dm-section-wrap" data-section-id="${escapeHtml(section.id)}" data-section-type="${escapeHtml(section.type)}" data-variant="${escapeHtml(variant)}"${treatmentAttr} style="${wrapStyle}">${inner}</div>`;
 }
 

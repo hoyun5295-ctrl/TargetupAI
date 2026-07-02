@@ -4,7 +4,7 @@
  */
 import { useMemo } from 'react';
 import { useDmBuilderStore } from '../../stores/dmBuilderStore';
-import { SECTION_META } from '../../utils/dm-section-defaults';
+import { SECTION_META, DM_FONT_SIZE_OPTIONS } from '../../utils/dm-section-defaults';
 import SectionPropsEditor from './panels/SectionPropsEditor';
 
 // ★ 2026-06-25 (P1) 섹션 구도(treatment) 픽커 — 백엔드 dm-art-direction.TREATMENTS 미러(우선 4섹션).
@@ -140,6 +140,29 @@ export default function DmRightPanel() {
                       </button>
                     )}
                   </div>
+                </LabelRow>
+                {/* ★ 2026-07-02(2) 섹션 공통 텍스트 크기 — 전 섹션 제목급/본문급 일괄, 발행물 동일 적용 */}
+                <LabelRow label="제목 크기">
+                  <select
+                    value={selected.title_size ? String(selected.title_size) : ''}
+                    onChange={(e) => setSectionStyle(selected.id, { title_size: e.target.value ? Number(e.target.value) : undefined })}
+                    style={selectStyle}
+                  >
+                    {DM_FONT_SIZE_OPTIONS.map((o) => (
+                      <option key={o.value} value={o.value}>{o.label}</option>
+                    ))}
+                  </select>
+                </LabelRow>
+                <LabelRow label="본문 크기">
+                  <select
+                    value={selected.text_size ? String(selected.text_size) : ''}
+                    onChange={(e) => setSectionStyle(selected.id, { text_size: e.target.value ? Number(e.target.value) : undefined })}
+                    style={selectStyle}
+                  >
+                    {DM_FONT_SIZE_OPTIONS.map((o) => (
+                      <option key={o.value} value={o.value}>{o.label}</option>
+                    ))}
+                  </select>
                 </LabelRow>
               </section>
 

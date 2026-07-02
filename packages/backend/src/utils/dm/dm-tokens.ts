@@ -229,7 +229,20 @@ button { font-family: inherit; cursor: pointer; border: 0; background: transpare
 
 .dm-section {
   position: relative;
+  /* ★ 2026-07-02(2) 한국어 단어 단위 줄바꿈 + 넘침 방지 — 긴 문구 잘림 근본 차단 */
+  word-break: keep-all;
+  overflow-wrap: anywhere;
 }
+
+/* ★ 2026-07-02(2) 타이포 유틸 — 에디터(dm-builder.css)와 동일 정의. 그동안 발행물에 이 클래스 정의가
+   빠져 있어 .dm-text-hero(쿠폰 라벨·히어로 기본 구도 헤드라인 등)가 본문 크기로 렌더되던 결함 수정. */
+.dm-text-hero  { font-size: var(--dm-fs-hero);  line-height: var(--dm-lh-hero);  font-weight: 800; letter-spacing: -0.02em; }
+.dm-text-h1    { font-size: var(--dm-fs-h1);    line-height: var(--dm-lh-h1);    font-weight: 700; letter-spacing: -0.01em; }
+.dm-text-h2    { font-size: var(--dm-fs-h2);    line-height: var(--dm-lh-h2);    font-weight: 700; }
+.dm-text-h3    { font-size: var(--dm-fs-h3);    line-height: var(--dm-lh-h3);    font-weight: 600; }
+.dm-text-body  { font-size: var(--dm-fs-body);  line-height: var(--dm-lh-body);  font-weight: 400; }
+.dm-text-small { font-size: var(--dm-fs-small); line-height: var(--dm-lh-small); font-weight: 400; }
+.dm-text-tiny  { font-size: var(--dm-fs-tiny);  line-height: var(--dm-lh-tiny);  font-weight: 400; }
 
 .dm-cta {
   display: inline-block;

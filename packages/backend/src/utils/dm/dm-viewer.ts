@@ -661,6 +661,112 @@ ${counterHtml}
       });
     });
   });
+
+  // ── ★ 2026-07-02(3) 발행물에서 죽어있던 섹션 동작 일괄 배선 ──
+
+  // 탭 카드 — 클릭 전환
+  Array.prototype.forEach.call(document.querySelectorAll('[data-dm-tabs]'), function (box) {
+    var btns = box.querySelectorAll('[data-dm-tab]');
+    var panels = box.querySelectorAll('[data-dm-tab-panel]');
+    Array.prototype.forEach.call(btns, function (btn) {
+      btn.addEventListener('click', function () {
+        var i = btn.getAttribute('data-dm-tab');
+        Array.prototype.forEach.call(btns, function (b) {
+          var on = b.getAttribute('data-dm-tab') === i;
+          b.style.borderBottom = on ? '2px solid var(--dm-primary)' : '2px solid transparent';
+          b.style.color = on ? 'var(--dm-primary)' : 'var(--dm-neutral-600)';
+        });
+        Array.prototype.forEach.call(panels, function (pn) {
+          pn.style.display = pn.getAttribute('data-dm-tab-panel') === i ? 'block' : 'none';
+        });
+      });
+    });
+  });
+
+  // 슬라이드쇼 — 자동 전환 + 인디케이터 클릭
+  Array.prototype.forEach.call(document.querySelectorAll('[data-dm-slideshow]'), function (box) {
+    var slides = box.querySelectorAll('[data-dm-slide]');
+    if (slides.length < 2) return;
+    var dotEls = box.querySelectorAll('[data-dm-slide-dot]');
+    var cur = 0;
+    function show(i) {
+      cur = (i + slides.length) % slides.length;
+      Array.prototype.forEach.call(slides, function (s, si) { s.style.display = si === cur ? 'block' : 'none'; });
+      Array.prototype.forEach.call(dotEls, function (d, di) { d.style.background = di === cur ? 'var(--dm-primary)' : 'var(--dm-neutral-300)'; });
+    }
+    Array.prototype.forEach.call(dotEls, function (d, di) { d.addEventListener('click', function () { show(di); }); });
+    var iv = parseInt(box.getAttribute('data-interval') || '4000', 10);
+    if (!(iv >= 1500 && iv <= 60000)) iv = 4000;
+    setInterval(function () { if (document.visibilityState === 'visible') show(cur + 1); }, iv);
+  });
+
+  // 설문 별점 — 클릭 선택
+  Array.prototype.forEach.call(document.querySelectorAll('[data-dm-rating]'), function (r) {
+    var stars = r.querySelectorAll('[data-dm-rate]');
+    Array.prototype.forEach.call(stars, function (st) {
+      st.addEventListener('click', function () {
+        var v = parseInt(st.getAttribute('data-dm-rate') || '0', 10);
+        r.setAttribute('data-value', String(v));
+        Array.prototype.forEach.call(stars, function (s2, i2) { s2.style.color = i2 < v ? '#f59e0b' : 'var(--dm-neutral-300)'; });
+      });
+    });
+  });
+
+  // 설문 — 답변 수집(라디오/체크박스/텍스트/별점) → 제출
+  Array.prototype.forEach.call(document.querySelectorAll('[data-dm-survey]'), function (box) {
+    var info = wrapInfo(box);
+    var btn = box.querySelector('[data-dm-submit]');
+    if (!info || !btn) return;
+    btn.addEventListener('click', function () {
+      if (btn.disabled) return;
+      var answers = {};
+      var missing = false;
+      Array.prototype.forEach.call(box.querySelectorAll('[data-dm-question]'), function (qbox) {
+        var required = qbox.getAttribute('data-required') === '1';
+        var qid = null; var val = '';
+        var rating = qbox.querySelector('[data-dm-rating]');
+        if (rating) {
+          qid = rating.getAttribute('data-dm-q');
+          val = rating.getAttribute('data-value') || '';
+        } else {
+          var checks = qbox.querySelectorAll('input[type=radio]:checked, input[type=checkbox]:checked');
+          if (checks.length > 0) {
+            qid = checks[0].getAttribute('data-dm-q');
+            var vals = [];
+            Array.prototype.forEach.call(checks, function (c) { vals.push(c.value); });
+            val = vals.join(', ');
+          } else {
+            var inp = qbox.querySelector('input[type=text][data-dm-q]');
+            if (inp) { qid = inp.getAttribute('data-dm-q'); val = inp.value; }
+            else { var anyQ = qbox.querySelector('[data-dm-q]'); qid = anyQ ? anyQ.getAttribute('data-dm-q') : null; }
+          }
+        }
+        if (qid) answers['q_' + qid] = val || '';
+        if (required && !(val && String(val).trim())) missing = true;
+      });
+      if (missing) { showMsg(box, '필수 질문에 답해주세요.', false); return; }
+      btn.disabled = true; btn.style.opacity = '0.6';
+      submitInteraction(info.id, info.type, answers).then(function (res) {
+        if (res && res.success) showMsg(box, res.already ? '이미 참여하셨습니다.' : '설문이 제출되었습니다. 감사합니다!', true);
+        else { btn.disabled = false; btn.style.opacity = '1'; showMsg(box, (res && res.error) || '잠시 후 다시 시도해주세요.', false); }
+      }).catch(function () { btn.disabled = false; btn.style.opacity = '1'; showMsg(box, '잠시 후 다시 시도해주세요.', false); });
+    });
+  });
+
+  // 원클릭 참여 — 즉시쿠폰 받기 / 선착순 참여 / 클릭 리워드 (1인 1회는 서버 dedup)
+  Array.prototype.forEach.call(document.querySelectorAll('[data-dm-claim]'), function (btn) {
+    var info = wrapInfo(btn);
+    if (!info) return;
+    var box = (btn.closest && btn.closest('.dm-section-wrap')) || document.body;
+    btn.addEventListener('click', function () {
+      if (btn.disabled) return;
+      btn.disabled = true; btn.style.opacity = '0.6';
+      submitInteraction(info.id, info.type, {}).then(function (res) {
+        if (res && res.success) showMsg(box, res.already ? '이미 참여하셨습니다.' : (btn.getAttribute('data-claim-success') || '참여가 완료되었습니다!'), true);
+        else { btn.disabled = false; btn.style.opacity = '1'; showMsg(box, (res && res.error) || '잠시 후 다시 시도해주세요.', false); }
+      }).catch(function () { btn.disabled = false; btn.style.opacity = '1'; showMsg(box, '잠시 후 다시 시도해주세요.', false); });
+    });
+  });
 })();
 ${hasCountdown ? COUNTDOWN_SCRIPT : ''}
 </script>

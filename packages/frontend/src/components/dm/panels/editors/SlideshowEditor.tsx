@@ -23,6 +23,8 @@ export default function SlideshowEditor({ props, onUpdate }: EditorProps<Slidesh
               <ImageUploader label="슬라이드 이미지" value={it.image_url} onChange={(url) => setItem(i, { image_url: url })} />
               <div style={{ height: 6 }} />
               <TextInput value={it.caption} onChange={(v) => setItem(i, { caption: v })} placeholder="캡션 (선택)" />
+              <div style={{ height: 6 }} />
+              <TextInput type="url" value={it.link_url} onChange={(v) => setItem(i, { link_url: v })} placeholder="슬라이드 링크 https:// (선택)" />
             </>
           )}
         />

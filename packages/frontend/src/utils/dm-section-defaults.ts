@@ -286,6 +286,9 @@ export type Section = {
   align?: 'left' | 'center' | 'right';
   /** 섹션 버튼/액센트 색 override — 미설정 시 브랜드 색 */
   accent_color?: string;
+  /** ★ 2026-07-02(2) 섹션 공통 텍스트 크기(px) — 제목급/본문급 토큰 일괄 override. 미설정=기본 */
+  title_size?: number;
+  text_size?: number;
   /** 개인화 조건부 표시 — 충족 안 하는 수신자에겐 이 섹션 제외(미설정=항상 표시). 이메일 발송 시 평가 */
   display_condition?: {
     field: string;

@@ -92,11 +92,23 @@ export default function SectionRenderer({
 
   // 섹션 공통 정렬·액센트색 → 텍스트/버튼/플렉스가 참조하는 CSS 변수로 주입 (전 섹션 일괄)
   const sAlign = section.align || 'center';
+  // ★ 2026-07-02(2) 섹션 공통 텍스트 크기 — 발행물 SSR(renderSection wrap)과 동일하게 폰트 토큰 override
+  const fsVarPx = (v: unknown): number | null => {
+    const n = Math.round(Number(v));
+    return Number.isFinite(n) && n >= 10 && n <= 80 ? n : null;
+  };
+  const titleN = fsVarPx(section.title_size);
+  const textN = fsVarPx(section.text_size);
   const styleVars = {
     textAlign: sAlign,
     ['--dm-section-justify']: sAlign === 'left' ? 'flex-start' : sAlign === 'right' ? 'flex-end' : 'center',
     // 액센트색 = 이 섹션 한정으로 --dm-primary 덮어쓰기 → 브랜드색 쓰던 모든 버튼이 자동 적용
     ...(section.accent_color ? { ['--dm-primary']: section.accent_color } : {}),
+    ...(titleN ? {
+      ['--dm-fs-hero']: `${titleN}px`, ['--dm-fs-h1']: `${titleN}px`,
+      ['--dm-fs-h2']: `${titleN}px`, ['--dm-fs-h3']: `${titleN}px`,
+    } : {}),
+    ...(textN ? { ['--dm-fs-body']: `${textN}px`, ['--dm-fs-small']: `${textN}px` } : {}),
   } as CSSProperties;
 
   if (readOnly) return <div style={styleVars}>{inner}</div>;

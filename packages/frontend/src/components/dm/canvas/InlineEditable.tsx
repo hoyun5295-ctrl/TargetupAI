@@ -132,8 +132,11 @@ export default function InlineEditable({
       onClick={handleClick}
       onMouseDown={handleClick}
       style={{
-        whiteSpace: multiline ? 'pre-wrap' : 'nowrap',
-        wordBreak: 'break-word',
+        // ★ 2026-07-02(2) 한 줄 모드도 nowrap 대신 줄바꿈 — 긴 문구(쿠폰 라벨 등)가 전 섹션에서 잘리던 결함 근본 수정.
+        //   Enter 저장 동작은 keyDown에서 이미 차단되므로 표시만 줄바꿈. keep-all = 한국어 단어 단위 줄바꿈.
+        whiteSpace: 'pre-wrap',
+        wordBreak: 'keep-all',
+        overflowWrap: 'anywhere',
         outline: 'none',
         ...style,
       }}

@@ -36,6 +36,8 @@ export default function GalleryEditor({ props, onUpdate }: EditorProps<GalleryPr
               <ImageUploader label="이미지" value={it.url} onChange={(url) => setItem(i, { url })} />
               <div style={{ height: 6 }} />
               <TextInput value={it.caption} onChange={(v) => setItem(i, { caption: v })} placeholder="캡션 (선택)" />
+              <div style={{ height: 6 }} />
+              <TextInput type="url" value={it.link_url} onChange={(v) => setItem(i, { link_url: v })} placeholder="이미지 링크 https:// (선택)" />
             </>
           )}
         />
