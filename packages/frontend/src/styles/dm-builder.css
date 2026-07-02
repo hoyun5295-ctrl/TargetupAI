@@ -205,17 +205,20 @@
 
 /* ─────────── CTA 공통 ─────────── */
 
+/* ★ 2026-07-02(5) 발행물(SSR) .dm-cta 격상과 동일 — 에디터·발행물 시각 일치 */
 .dm-cta {
   display: inline-block;
-  padding: var(--dm-sp-3) var(--dm-sp-6);
+  padding: 14px 28px;
   min-height: 44px;
   min-width: 44px;
-  border-radius: var(--dm-radius-lg);
+  border-radius: 14px;
   font-size: var(--dm-fs-body);
   font-weight: 700;
+  letter-spacing: -0.01em;
   text-decoration: none;
   text-align: center;
   cursor: pointer;
+  box-shadow: 0 2px 10px rgba(15, 23, 42, 0.10);
   transition: transform var(--dm-motion-duration-fast) var(--dm-motion-easing-out),
               background var(--dm-motion-duration-hover) var(--dm-motion-easing-out);
 }

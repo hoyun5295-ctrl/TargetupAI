@@ -41,7 +41,8 @@ import { buildCustomerFilter } from '../utils/customer-filter';
 import { buildChannelEligibilityWhere } from '../utils/channel-eligibility';
 import { createDirectSendCampaign, countStagingFiltered } from '../utils/direct-send-core';
 import { DirectSendError } from '../utils/direct-send-spec';
-import { getOpt080Number } from '../utils/messageUtils';
+import { getOpt080Number, stripAdPartsDeep } from '../utils/messageUtils';
+import { isUuid } from '../utils/normalize';
 import { callAIWithFallback, getSeasonContext } from '../services/ai';
 import { buildSystemPromptWithBrandVoice } from '../utils/brand-voice-prompt';
 import { getAvailableVariables } from '../utils/dm/dm-variable-resolver';
@@ -313,7 +314,10 @@ dmRouter.post('/', async (req: any, res: any) => {
 });
 
 // GET /api/dm/:id — 상세
-dmRouter.get('/:id', async (req: any, res: any) => {
+dmRouter.get('/:id', async (req: any, res: any, next: any) => {
+  // ★ 2026-07-02: uuid 아닌 경로('/overview'·'/brand-kit' 등 뒤에 등록된 정적 GET)가
+  //   '/:id'에 가로채여 500 나던 결함 — uuid 형식이 아니면 다음 라우트로 넘긴다.
+  if (!isUuid(req.params.id)) return next();
   try {
     const companyId = req.user?.companyId;
     if (!companyId) return res.status(403).json({ error: '회사 권한이 필요합니다.' });
@@ -327,7 +331,8 @@ dmRouter.get('/:id', async (req: any, res: any) => {
 });
 
 // PUT /api/dm/:id — 수정
-dmRouter.put('/:id', async (req: any, res: any) => {
+dmRouter.put('/:id', async (req: any, res: any, next: any) => {
+  if (!isUuid(req.params.id)) return next(); // '/brand-kit' 등 정적 PUT 가로채기 차단
   try {
     const companyId = req.user?.companyId;
     if (!companyId) return res.status(403).json({ error: '회사 권한이 필요합니다.' });
@@ -341,7 +346,8 @@ dmRouter.put('/:id', async (req: any, res: any) => {
 });
 
 // DELETE /api/dm/:id — 삭제
-dmRouter.delete('/:id', async (req: any, res: any) => {
+dmRouter.delete('/:id', async (req: any, res: any, next: any) => {
+  if (!isUuid(req.params.id)) return next(); // 정적 DELETE 경로 가로채기 차단
   try {
     const companyId = req.user?.companyId;
     if (!companyId) return res.status(403).json({ error: '회사 권한이 필요합니다.' });
@@ -698,7 +704,10 @@ dmRouter.post('/:id/send-to-target', async (req: any, res: any) => {
     }
 
     // 본문 = 사용자 문구 + 수신자별 링크. %DM링크% 위치에 링크(없으면 끝에 첨부). 수신자별 = %기타1%.
-    const bodyText = messageText.trim();
+    // ★ 2026-07-02: 광고 발송은 문안 속 (광고)/무료수신거부 문구를 먼저 걷어낸다 — 남아 있으면
+    //   buildAdMessage가 이미 붙은 것으로 판단해 설정된 080 합성을 건너뛰어 임의 번호가 그대로 발송됨.
+    const bodyText = isAd ? stripAdPartsDeep(messageText.trim()) : messageText.trim();
+    if (!bodyText) return res.status(400).json({ error: '문자 본문을 입력해주세요.' });
     const finalMessage = bodyText.includes('%DM링크%')
       ? bodyText.split('%DM링크%').join('%기타1%')
       : `${bodyText}\n%기타1%`;
@@ -897,6 +906,9 @@ dmRouter.post('/:id/generate-copy', async (req: any, res: any) => {
     }
     // 리터럴 \n(백슬래시+n)로 온 줄바꿈을 실제 줄바꿈으로 정규화
     msg = msg.replace(/\\n/g, '\n').trim();
+    // ★ 2026-07-02: AI가 문안에 넣은 (광고)/무료수신거부(임의 번호 포함) 제거 —
+    //   080 문구는 발송 시점에 buildAdMessage가 설정된 번호로 합성한다.
+    msg = stripAdPartsDeep(msg);
     if (!msg) return res.status(500).json({ error: '문안 생성 결과가 비어 있습니다. 다시 시도해주세요.' });
     if (!msg.includes('%DM링크%')) msg = `${msg}\n%DM링크%`;
     return res.json({ success: true, message: msg });

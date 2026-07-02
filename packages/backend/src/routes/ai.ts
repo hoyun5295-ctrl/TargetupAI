@@ -1934,7 +1934,7 @@ router.get('/operator/continuous/learning-summary', async (req: Request, res: Re
 
     // 2. 옛 30일 영역 안 최고 성과 패턴 5건 (importance 높은 순)
     const topPatternsRes = await query(
-      `SELECT memory_type, summary, importance, usage_count, updated_at
+      `SELECT memory_type, memory_value AS summary, importance, usage_count, updated_at
        FROM ai_company_memory
        WHERE company_id = $1::uuid AND importance >= 5
        ORDER BY importance DESC, usage_count DESC NULLS LAST

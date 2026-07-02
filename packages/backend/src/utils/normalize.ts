@@ -40,6 +40,17 @@ export function getGenderVariants(standardValue: string): string[] {
 }
 
 // ============================================================
+// uuid 형식 판정
+// ★ 2026-07-02: Express '/:id' 라우트가 '/overview' 같은 정적 경로를
+//   가로채 PG uuid 캐스트 오류를 내던 결함 차단용. 라우트 가드에서 사용.
+// ============================================================
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+export function isUuid(value: any): boolean {
+  return typeof value === 'string' && UUID_RE.test(value);
+}
+
+// ============================================================
 // 등급 정규화
 // 표준값: 'VVIP', 'VIP', 'GOLD', 'SILVER', 'BRONZE', 'NORMAL'
 // ============================================================

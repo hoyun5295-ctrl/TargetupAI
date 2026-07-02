@@ -9,12 +9,13 @@ export default function FooterSection({ props, onEdit }: { props: FooterProps; o
   const showUnsub = props.show_unsubscribe_link !== false;
   const editable = !!onEdit;
 
+  // ★ 2026-07-02(5) 발행물(SSR) 격상과 동일 스타일 — 에디터·발행물 시각 일치
   return (
-    <div className="dm-section dm-footer" style={{ padding: 'var(--dm-sp-6) var(--dm-sp-5)', background: 'var(--dm-neutral-100)', borderTop: '1px solid var(--dm-neutral-200)' }}>
+    <div className="dm-section dm-footer" style={{ padding: 'var(--dm-sp-8) var(--dm-sp-6)', background: 'var(--dm-neutral-100)', borderTop: '1px solid var(--dm-neutral-200)', textAlign: 'center' }}>
       {(props.notes || editable) && (
         <InlineEditable
           className="dm-text-small"
-          style={{ color: 'var(--dm-neutral-600)', marginBottom: 'var(--dm-sp-3)' }}
+          style={{ color: 'var(--dm-neutral-600)', marginBottom: 'var(--dm-sp-4)', lineHeight: 1.8 }}
           value={props.notes || ''}
           placeholder="유의사항을 입력하세요 (선택)"
           onChange={(v) => onEdit?.({ notes: v } as Partial<FooterProps>)}

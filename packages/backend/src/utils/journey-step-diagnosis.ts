@@ -265,7 +265,7 @@ export async function recommendNextJourneyStep(
 ): Promise<NextStepRecommendation> {
   // journey 정보 조회
   const journeyRes = await query(
-    `SELECT j.id, j.name, j.template_code, j.trigger_event, j.objective,
+    `SELECT j.id, j.name, j.template_code, j.trigger_event,
             (SELECT json_agg(s ORDER BY s.step_order)
              FROM (
                SELECT id, step_order, step_type, channel, delay_hours, message_template, subject

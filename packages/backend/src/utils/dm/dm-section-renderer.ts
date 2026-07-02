@@ -244,16 +244,15 @@ function couponMeta(props: CouponProps): string {
 function renderCouponClassic(props: CouponProps): string {
   const discountLabel = escapeHtml(props.discount_label || '');
   const code = props.coupon_code ? escapeHtml(props.coupon_code) : '';
-  const expire = props.expire_date ? formatKoreanDate(props.expire_date) : '';
 
-  return `<div class="dm-section dm-coupon" data-section-type="coupon" style="padding:var(--dm-sp-6) var(--dm-sp-5);background:var(--dm-primary-light)">
-    <div style="background:var(--dm-bg);border:2px dashed var(--dm-primary);border-radius:var(--dm-radius-lg);padding:var(--dm-sp-6)">
-      <div class="dm-text-hero" style="color:var(--dm-primary);font-weight:900">${discountLabel}</div>
-      ${code ? `<div style="margin-top:var(--dm-sp-3);background:var(--dm-primary);color:#fff;display:inline-block;padding:var(--dm-sp-2) var(--dm-sp-5);border-radius:var(--dm-radius-md);font-family:var(--dm-font-mono);font-size:var(--dm-fs-h3);font-weight:700;letter-spacing:2px">${code}</div>` : ''}
-      ${expire ? `<div class="dm-text-small" style="margin-top:var(--dm-sp-3);color:var(--dm-neutral-500)">유효기간: ~ ${escapeHtml(expire)}</div>` : ''}
-      ${props.min_purchase ? `<div class="dm-text-small" style="margin-top:var(--dm-sp-1);color:var(--dm-neutral-500)">${Number(props.min_purchase).toLocaleString('ko-KR')}원 이상 구매 시</div>` : ''}
-      ${props.usage_condition ? `<div class="dm-text-tiny" style="margin-top:var(--dm-sp-2);color:var(--dm-neutral-500)">${escapeHtml(props.usage_condition)}</div>` : ''}
-      ${props.cta_url ? `<div style="margin-top:var(--dm-sp-4)"><a href="${safeUrl(props.cta_url)}" class="dm-cta dm-cta-primary" target="_blank">쿠폰 사용하기</a></div>` : ''}
+  // ★ 2026-07-02(5) 발행물 디자인 격상 — 이메일 톤: 점선 테두리 카드 → 정돈된 카드 + 코드 점선 분리
+  return `<div class="dm-section dm-coupon" data-section-type="coupon" style="padding:var(--dm-sp-8) var(--dm-sp-5);background:var(--dm-primary-light)">
+    <div style="background:var(--dm-bg);border:1px solid var(--dm-neutral-200);border-radius:20px;box-shadow:var(--dm-shadow-md);padding:var(--dm-sp-8) var(--dm-sp-6);text-align:center">
+      <div style="font-size:var(--dm-fs-tiny);font-weight:700;letter-spacing:3px;color:var(--dm-neutral-500);margin-bottom:var(--dm-sp-3)">COUPON</div>
+      <div class="dm-text-hero" style="color:var(--dm-primary);font-weight:900;font-family:var(--dm-font-display)">${discountLabel}</div>
+      ${code ? `<div style="margin-top:var(--dm-sp-4);border-top:1px dashed var(--dm-neutral-300);padding-top:var(--dm-sp-4)"><span style="background:var(--dm-neutral-900);color:#fff;display:inline-block;padding:var(--dm-sp-2) var(--dm-sp-6);border-radius:999px;font-family:var(--dm-font-mono);font-size:var(--dm-fs-h3);font-weight:700;letter-spacing:3px">${code}</span></div>` : ''}
+      ${couponMeta(props)}
+      ${props.cta_url ? `<div style="margin-top:var(--dm-sp-5)"><a href="${safeUrl(props.cta_url)}" class="dm-cta dm-cta-primary" target="_blank" style="width:100%;max-width:280px">쿠폰 사용하기</a></div>` : ''}
     </div>
   </div>`;
 }
@@ -289,9 +288,10 @@ function renderCountdown(props: CountdownProps): string {
   const end = props.end_datetime || '';
   const urgency = escapeHtml(props.urgency_text || '마감까지');
 
-  return `<div class="dm-section dm-countdown" data-section-type="countdown" data-end="${escapeHtml(end)}" style="padding:var(--dm-sp-6) var(--dm-sp-5);background:var(--dm-neutral-900);color:#fff">
-    <div class="dm-text-h3" style="color:var(--dm-accent);font-weight:700;margin-bottom:var(--dm-sp-3)">${urgency}</div>
-    <div class="dm-countdown-display" style="display:flex;gap:var(--dm-sp-3);justify-content:var(--dm-section-justify,center);flex-wrap:wrap">
+  // ★ 2026-07-02(5) 발행물 디자인 격상 — 이메일 톤: 중앙 정렬 + 자간 라벨 + 여백 리듬 + 절제된 타일
+  return `<div class="dm-section dm-countdown" data-section-type="countdown" data-end="${escapeHtml(end)}" style="padding:var(--dm-sp-8) var(--dm-sp-5);background:var(--dm-neutral-900);color:#fff;text-align:center">
+    <div style="font-size:var(--dm-fs-small);font-weight:700;letter-spacing:3px;color:var(--dm-accent);margin-bottom:var(--dm-sp-5)">${urgency}</div>
+    <div class="dm-countdown-display" style="display:flex;gap:var(--dm-sp-2);justify-content:var(--dm-section-justify,center);flex-wrap:wrap;align-items:stretch">
       ${props.show_days    ? `<div class="cd-unit"><div class="cd-num" data-unit="d">00</div><div class="cd-lbl">일</div></div>` : ''}
       ${props.show_hours   ? `<div class="cd-unit"><div class="cd-num" data-unit="h">00</div><div class="cd-lbl">시간</div></div>` : ''}
       ${props.show_minutes ? `<div class="cd-unit"><div class="cd-num" data-unit="m">00</div><div class="cd-lbl">분</div></div>` : ''}
@@ -397,18 +397,20 @@ function renderTextCardFramed(props: TextCardProps): string {
   </div>`;
 }
 
-// 바: 풀폭 악센트 바 + 화살표(첫 버튼 강조).
+// 바: 악센트 바 + 화살표(첫 버튼 강조).
+// ★ 2026-07-02(5) 발행물 디자인 격상 — 화면 끝까지 붙던 원색 띠 → 여백 안 라운드 바 + 원형 화살표
 function renderCtaBar(props: CtaProps): string {
   const buttons = Array.isArray(props.buttons) ? props.buttons : [];
   if (buttons.length === 0) return '';
   const b = buttons[0];
   const more = buttons.slice(1);
   const moreHtml = more.map((x) => `<a href="${safeUrl(x.url)}" class="dm-cta dm-cta-secondary" target="_blank">${escapeHtml(x.label || '자세히 보기')}</a>`).join('');
-  return `<div class="dm-section dm-cta-section" data-section-type="cta" style="padding:0">
-    <a href="${safeUrl(b.url)}" target="_blank" style="display:flex;align-items:center;justify-content:space-between;gap:var(--dm-sp-3);background:var(--dm-primary);color:#fff;padding:var(--dm-sp-5);font-size:var(--dm-fs-h3);font-weight:700">
-      <span>${escapeHtml(b.label || '자세히 보기')}</span><span aria-hidden="true">→</span>
+  return `<div class="dm-section dm-cta-section" data-section-type="cta" style="padding:var(--dm-sp-5)">
+    <a href="${safeUrl(b.url)}" target="_blank" style="display:flex;align-items:center;justify-content:space-between;gap:var(--dm-sp-3);background:var(--dm-primary);color:#fff;padding:var(--dm-sp-5) var(--dm-sp-6);font-size:var(--dm-fs-h3);font-weight:700;letter-spacing:-0.01em;border-radius:16px;box-shadow:var(--dm-shadow-md)">
+      <span>${escapeHtml(b.label || '자세히 보기')}</span>
+      <span aria-hidden="true" style="width:28px;height:28px;border-radius:50%;background:rgba(255,255,255,0.18);display:inline-flex;align-items:center;justify-content:center;font-size:15px;flex-shrink:0">→</span>
     </a>
-    ${moreHtml ? `<div style="display:flex;flex-direction:column;gap:var(--dm-sp-2);padding:var(--dm-sp-4) var(--dm-sp-5)">${moreHtml}</div>` : ''}
+    ${moreHtml ? `<div style="display:flex;flex-direction:column;gap:var(--dm-sp-2);padding:var(--dm-sp-4) 0 0">${moreHtml}</div>` : ''}
   </div>`;
 }
 
@@ -509,11 +511,12 @@ function renderFooter(props: FooterProps, ctx: SectionRenderContext): string {
     ? `<a href="/api/unsubscribes/form" target="_blank" style="color:var(--dm-neutral-500);text-decoration:underline">수신거부</a>`
     : '';
 
-  return `<div class="dm-section dm-footer" data-section-type="footer" style="padding:var(--dm-sp-6) var(--dm-sp-5);background:var(--dm-neutral-100);border-top:1px solid var(--dm-neutral-200)">
-    ${props.notes ? `<div class="dm-text-small" style="color:var(--dm-neutral-600);margin-bottom:var(--dm-sp-3);white-space:pre-wrap">${escapeHtml(props.notes)}</div>` : ''}
-    ${props.cs_phone ? `<div class="dm-text-small" style="color:var(--dm-neutral-700);margin-bottom:var(--dm-sp-1)"><strong>고객센터</strong> <a href="tel:${escapeHtml(props.cs_phone)}" style="color:var(--dm-primary)">${escapeHtml(props.cs_phone)}</a></div>` : ''}
+  // ★ 2026-07-02(5) 발행물 디자인 격상 — 이메일 톤: 중앙 정렬 + 여유 행간 + 넉넉한 여백
+  return `<div class="dm-section dm-footer" data-section-type="footer" style="padding:var(--dm-sp-8) var(--dm-sp-6);background:var(--dm-neutral-100);border-top:1px solid var(--dm-neutral-200);text-align:center">
+    ${props.notes ? `<div class="dm-text-small" style="color:var(--dm-neutral-600);margin-bottom:var(--dm-sp-4);white-space:pre-wrap;line-height:1.8">${escapeHtml(props.notes)}</div>` : ''}
+    ${props.cs_phone ? `<div class="dm-text-small" style="color:var(--dm-neutral-700);margin-bottom:var(--dm-sp-1)"><strong>고객센터</strong> <a href="tel:${escapeHtml(props.cs_phone)}" style="color:var(--dm-primary);font-weight:600">${escapeHtml(props.cs_phone)}</a></div>` : ''}
     ${props.cs_hours ? `<div class="dm-text-tiny" style="color:var(--dm-neutral-500);margin-bottom:var(--dm-sp-2)">${escapeHtml(props.cs_hours)}</div>` : ''}
-    ${props.legal_text ? `<div class="dm-text-tiny" style="color:var(--dm-neutral-500);margin-top:var(--dm-sp-3);white-space:pre-wrap">${escapeHtml(props.legal_text)}</div>` : ''}
+    ${props.legal_text ? `<div class="dm-text-tiny" style="color:var(--dm-neutral-500);margin-top:var(--dm-sp-3);white-space:pre-wrap;line-height:1.7">${escapeHtml(props.legal_text)}</div>` : ''}
     <div class="dm-text-tiny" style="color:var(--dm-neutral-400);margin-top:var(--dm-sp-4)">
       ${unsubLink}
     </div>

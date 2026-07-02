@@ -90,7 +90,11 @@ export default function DmSendAndTrackModal({ dmId, dmTitle, show, onClose, init
   const [generating, setGenerating] = useState(false);
   const [decorating, setDecorating] = useState(false);
 
-  const [isAd, setIsAd] = useState(false);
+  // ★ 2026-07-02(5) 타겟 DM 문자는 광고성이 기본 — (광고)+무료수신거부 080 자동 합성이 기본 동작
+  const [isAd, setIsAd] = useState(true);
+  // 설정된 수신거부(080) 번호 — 미리보기 합성 표시용 (발송 합성은 백엔드 CT가 동일 번호로 수행)
+  const [opt080, setOpt080] = useState('');
+  const [opt080Loaded, setOpt080Loaded] = useState(false);
   const [refineOpen, setRefineOpen] = useState(false);
   const [spamOpen, setSpamOpen] = useState(false);
   // ★ 2026-07-02(3) 발신번호 선택 — 회사 등록 번호 목록(기본 = is_default). 발송·스팸테스트 공용.
@@ -112,6 +116,13 @@ export default function DmSendAndTrackModal({ dmId, dmTitle, show, onClose, init
         const def = mapped.find((c) => c.isDefault) || mapped[0];
         setCallback((prev) => prev || def?.phone || '');
       } catch { /* 목록 조회 실패 = 발송 시 백엔드가 기본 번호 사용 */ }
+      try {
+        // reject_number = 설정 화면과 동일한 우선순위(getOpt080Number: user → 회사)로 확정된 080 번호
+        const sres = await fetch('/api/companies/settings', { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } });
+        const sdata = await sres.json();
+        setOpt080(String(sdata?.reject_number || '').trim());
+        setOpt080Loaded(true);
+      } catch { /* 미조회 = 미리보기에 번호 미표시 (발송은 백엔드 가드) */ }
     })();
   }, [show]);
 
@@ -177,7 +188,12 @@ export default function DmSendAndTrackModal({ dmId, dmTitle, show, onClose, init
     return out;
   };
 
-  const previewText = substituteVars(messageText, sample, 'https://hanjul.ai/dm(개인화)');
+  // ★ 2026-07-02(5) 광고성이면 실발송과 동일하게 (광고)+무료수신거부 080까지 합성해 미리보기 —
+  //   어떤 번호가 붙는지 발송 전에 눈으로 확인 (백엔드 buildAdMessage와 동일 형식)
+  const previewBody = substituteVars(messageText, sample, 'https://hanjul.ai/dm(개인화)');
+  const previewText = isAd && previewBody.trim()
+    ? `(광고) ${previewBody}\n무료수신거부 ${opt080 || '(080 미등록 — 수신거부번호 설정 필요)'}`
+    : previewBody;
   // ★ 2026-07-02(3) 스팸테스트 본문 = 첫 샘플 고객 치환본 (원본 변수 그대로 들어가던 결함 수정).
   //   링크는 실발송 개인화 링크와 같은 길이 구조의 자리값 — 바이트·스팸 판정 정확도 유지.
   const spamTestMessage = substituteVars(messageText, samples[0], 'https://hanjul.ai/api/dm/v/dm-XXXXXXX?r=XXXXXXXXXXXXXXXXXXXXXXXX');
@@ -243,6 +259,7 @@ export default function DmSendAndTrackModal({ dmId, dmTitle, show, onClose, init
     if (!target || target.channelEligibleCount === 0) { toast.warning('먼저 타겟을 추출해주세요.'); return; }
     if (!messageText.trim()) { toast.warning('문자 본문을 작성해주세요.'); return; }
     if (!callback) { toast.warning('발신번호를 선택해주세요. (발신번호 관리에서 등록)'); return; }
+    if (isAd && opt080Loaded && !opt080) { toast.warning('광고성 발송은 무료수신거부(080) 번호가 필요합니다. 수신거부번호 설정에서 등록해주세요.'); return; }
     const scheduledAtVal = scheduleMode === 'immediate' ? null : scheduledAt;
     if (scheduleMode !== 'immediate' && !scheduledAtVal) { toast.warning('예약 시각을 선택해주세요.'); return; }
     setSending(true);
@@ -277,7 +294,9 @@ export default function DmSendAndTrackModal({ dmId, dmTitle, show, onClose, init
       }
       if (!res.ok || !data.success) { toast.error(data?.error || '발송에 실패했습니다.'); return; }
       setSentCount(data.sent);
-      toast.success(scheduledAtVal ? `${Number(data.sent).toLocaleString()}명 예약 완료.` : `${Number(data.sent).toLocaleString()}명에게 발송했습니다.`);
+      toast.success(scheduledAtVal ? `${Number(data.sent).toLocaleString()}명 예약 완료.` : `${Number(data.sent).toLocaleString()}명에게 발송했습니다. 열람 현황은 DM 카드의 [발송 추적]에서 확인하세요.`);
+      // ★ 2026-07-02(5) 발송 완료 = 창 닫기 (Harold 지시) — 토스트는 z-9990이라 닫힌 뒤에도 표시됨
+      onClose();
     } catch (e: any) {
       toast.error(e?.message || '발송 중 오류가 발생했습니다.');
     } finally {
@@ -358,7 +377,12 @@ export default function DmSendAndTrackModal({ dmId, dmTitle, show, onClose, init
                   </div>
 
                   <label className="flex items-center gap-2 text-[11px] text-white/60 cursor-pointer">
-                    <input type="checkbox" checked={isAd} onChange={(e) => setIsAd(e.target.checked)} className="rounded" /> 광고성 메시지 (수신거부 080·(광고) 자동 표기)
+                    <input type="checkbox" checked={isAd} onChange={(e) => setIsAd(e.target.checked)} className="rounded" /> 광고성 메시지 — (광고)·무료수신거부 자동 표기
+                    {isAd && (
+                      <span className={`font-mono ${opt080 ? 'text-emerald-300/90' : 'text-amber-300/90'}`}>
+                        {opt080 ? opt080 : opt080Loaded ? '080 미등록' : ''}
+                      </span>
+                    )}
                   </label>
                 </div>
 

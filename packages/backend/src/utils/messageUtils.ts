@@ -464,6 +464,25 @@ export function stripAdParts(text: string): string {
 }
 
 /**
+ * ★ 2026-07-02: 깊은 제거 버전 — 본문 "중간"에 들어간 (광고)/무료수신거부 문구까지 제거.
+ * 문구가 본문 어디든 남아 있으면 buildAdMessage(hasRejectFooter)가 설정 080 합성을 건너뛰어
+ * 문안 속 임의 번호가 그대로 발송되는 결함 차단용 — DM 타겟 발송 문안 정리에 사용.
+ * 주의: 해당 문구가 포함된 텍스트 조각을 지우므로, buildAdMessage 정확 패턴만 걷어내야 하는
+ * 기존 경로(campaigns direct-send 등)는 계속 stripAdParts를 사용한다.
+ */
+export function stripAdPartsDeep(text: string): string {
+  if (!text) return '';
+  let result = stripAdParts(text);
+  // 본문 중간의 무료수신거부/무료거부 문구 + 뒤따르는 번호 제거
+  result = result.replace(/[ \t]*(?:무료\s*수신\s*거부|무료거부)[ \t]*[:：]?[ \t]*[\d-]*[ \t]*/g, '');
+  // 본문 중간의 (광고) 마커 제거
+  result = result.replace(/\(광고\)[ \t]*/g, '');
+  // 제거로 생긴 빈 줄/꼬리 공백 정리
+  result = result.replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
+  return result;
+}
+
+/**
  * ★ KISA 2026-05: LMS/MMS 제목에 (광고) 자동 부착
  * - isAd=true + LMS/MMS일 때만 제목 앞에 "(광고) " 접두사
  * - SMS는 제목 필드 없으므로 원본 반환

@@ -288,7 +288,10 @@ export async function syncPendingTemplatesJob(): Promise<void> {
 
       // ★ 2026-06-13: 검수 종결(승인/반려) 도착 시 reviewed_at 기록 — 변경 이력에는 남는데
       //   본 컬럼이 영구 NULL이던 구멍(인비토 반려 건 실측). 최초 도착 시각만 보존(COALESCE).
-      const reviewedAtExpr = `CASE WHEN $1 IN ('APPROVED','REJECTED','KREJ','HREJ')
+      // ★ 2026-07-02: 42P08 차단 — `SET status = $1`(varchar 추론)과 CASE 비교(text 추론)가
+      //   같은 param을 두 타입으로 추론해 5분 주기 sync가 반복 실패하던 결함.
+      //   비교용 param을 분리 + 명시 캐스트 (0701 ensureSystemSyncUser와 동일 처방).
+      const reviewedAtExprFor = (p: string) => `CASE WHEN ${p}::text IN ('APPROVED','REJECTED','KREJ','HREJ')
                                    THEN COALESCE(reviewed_at, now()) ELSE reviewed_at END`;
       try {
         await query(
@@ -296,11 +299,11 @@ export async function syncPendingTemplatesJob(): Promise<void> {
               SET status              = $1,
                   reject_reason       = $2,
                   imc_template_status = $3,
-                  reviewed_at         = ${reviewedAtExpr},
+                  reviewed_at         = ${reviewedAtExprFor('$5')},
                   last_synced_at      = now(),
                   updated_at          = now()
             WHERE id = $4`,
-          [latestStatus, rejectReason, imcTemplateStatus, row.id],
+          [latestStatus, rejectReason, imcTemplateStatus, row.id, latestStatus],
         );
       } catch (colErr: any) {
         const msg = colErr?.message || '';
@@ -310,11 +313,11 @@ export async function syncPendingTemplatesJob(): Promise<void> {
             `UPDATE kakao_templates
                 SET status          = $1,
                     reject_reason   = $2,
-                    reviewed_at     = ${reviewedAtExpr},
+                    reviewed_at     = ${reviewedAtExprFor('$4')},
                     last_synced_at  = now(),
                     updated_at      = now()
               WHERE id = $3`,
-            [latestStatus, rejectReason, row.id],
+            [latestStatus, rejectReason, row.id, latestStatus],
           );
         } else {
           throw colErr;

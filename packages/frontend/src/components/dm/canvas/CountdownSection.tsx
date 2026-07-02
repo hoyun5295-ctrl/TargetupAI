@@ -36,22 +36,22 @@ export default function CountdownSection({ props, onEdit }: { props: CountdownPr
     { show: props.show_seconds, val: t.s, label: '초' },
   ];
 
+  // ★ 2026-07-02(5) 발행물(SSR) 격상과 동일 스타일 — 에디터·발행물 시각 일치 (3면 대조)
   return (
-    <div className="dm-section dm-countdown" style={{ padding: 'var(--dm-sp-6) var(--dm-sp-5)', background: 'var(--dm-neutral-900)', color: '#fff' }}>
+    <div className="dm-section dm-countdown" style={{ padding: 'var(--dm-sp-8) var(--dm-sp-5)', background: 'var(--dm-neutral-900)', color: '#fff', textAlign: 'center' }}>
       <InlineEditable
-        className="dm-text-h3"
-        style={{ color: 'var(--dm-accent)', fontWeight: 700, marginBottom: 'var(--dm-sp-3)' }}
+        style={{ fontSize: 'var(--dm-fs-small)', fontWeight: 700, letterSpacing: 3, color: 'var(--dm-accent)', marginBottom: 'var(--dm-sp-5)' }}
         value={props.urgency_text || '마감까지'}
         placeholder="마감 안내 문구"
         onChange={(v) => onEdit?.({ urgency_text: v } as Partial<CountdownProps>)}
         disabled={!editable}
         maxLength={40}
       />
-      <div style={{ display: 'flex', gap: 'var(--dm-sp-3)', justifyContent: 'var(--dm-section-justify, center)', flexWrap: 'wrap' }}>
+      <div style={{ display: 'flex', gap: 'var(--dm-sp-2)', justifyContent: 'var(--dm-section-justify, center)', flexWrap: 'wrap', alignItems: 'stretch' }}>
         {units.filter(u => u.show).map((u, i) => (
-          <div key={i} style={{ background: 'rgba(255,255,255,0.1)', borderRadius: 'var(--dm-radius-md)', padding: 'var(--dm-sp-3) var(--dm-sp-4)', minWidth: 64 }}>
-            <div style={{ fontSize: 'var(--dm-fs-h1)', fontWeight: 900, fontFamily: 'var(--dm-font-mono)' }}>{pad(u.val)}</div>
-            <div style={{ fontSize: 'var(--dm-fs-tiny)', opacity: 0.8, marginTop: 2 }}>{u.label}</div>
+          <div key={i} style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 14, padding: 'var(--dm-sp-4) var(--dm-sp-3)', minWidth: 76 }}>
+            <div style={{ fontSize: 34, fontWeight: 800, fontFamily: 'var(--dm-font-display)', fontVariantNumeric: 'tabular-nums', letterSpacing: 1, lineHeight: 1.1 }}>{pad(u.val)}</div>
+            <div style={{ fontSize: 11, opacity: 0.55, marginTop: 6, letterSpacing: 2 }}>{u.label}</div>
           </div>
         ))}
       </div>

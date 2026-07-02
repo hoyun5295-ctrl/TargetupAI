@@ -11,6 +11,7 @@
  *
  * 모달은 store.openModal 상태로 관리 (DmBuilderPage에서 렌더링).
  */
+import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useDmBuilderStore, type LayoutMode } from '../../stores/dmBuilderStore';
 
@@ -141,24 +142,19 @@ export default function DmTopBar({ onBack, onTestSendClick, onPublishClick }: Dm
       {/* 레이아웃 모드 세그먼트 토글 */}
       <LayoutModeToggle value={layoutMode} onChange={setLayoutMode} />
 
-      {/* AI 그룹 */}
-      <ToolbarGroup>
-        <IconButton onClick={() => setOpenModal('ai-prompt')} title="한 줄 프롬프트 → AI 초안" label="프롬프트" emoji="⚡" />
-        <IconButton onClick={() => setOpenModal('ai-improve')} title="AI 문안 개선" label="AI개선" emoji="✨" />
-      </ToolbarGroup>
-
-      {/* 편집 도구 그룹 */}
-      <ToolbarGroup>
-        <IconButton onClick={() => setOpenModal('brand-kit')} title="브랜드 킷 + URL 자동추출" label="브랜드" emoji="🎨" />
-        <IconButton onClick={() => setOpenModal('validation')} title="10영역 자동 검수" label="검수" emoji="🔍" />
-        <IconButton onClick={() => setOpenModal('version-history')} title="버전 히스토리" label="버전" emoji="📜" />
-      </ToolbarGroup>
-
-      {/* 운영 그룹 */}
-      <ToolbarGroup>
-        <IconButton onClick={() => setOpenModal('ab-test')} title="A/B 테스트" label="A/B" emoji="🔬" />
-        <IconButton onClick={onTestSendClick} title="담당자 번호로 테스트 발송" label="테스트" emoji="📤" />
-      </ToolbarGroup>
+      {/* ★ 2026-07-02(5) Harold 지시 — 버튼 7개(프롬프트·AI개선·브랜드·검수·버전·A/B·테스트)를
+          [도구] 드롭다운 하나로 정리 (진입점 보존 + 상단 바 단순화) */}
+      <ToolsMenu
+        items={[
+          { emoji: '⚡', label: '프롬프트로 AI 초안', onClick: () => setOpenModal('ai-prompt') },
+          { emoji: '✨', label: 'AI 문안 개선', onClick: () => setOpenModal('ai-improve') },
+          { emoji: '🎨', label: '브랜드 킷', onClick: () => setOpenModal('brand-kit') },
+          { emoji: '🔍', label: '자동 검수', onClick: () => setOpenModal('validation') },
+          { emoji: '📜', label: '버전 히스토리', onClick: () => setOpenModal('version-history') },
+          { emoji: '🔬', label: 'A/B 테스트', onClick: () => setOpenModal('ab-test') },
+          { emoji: '📤', label: '테스트 발송', onClick: () => onTestSendClick?.() },
+        ]}
+      />
 
       <button onClick={() => save()} disabled={isSaving} style={btnStyle('secondary')} title="저장 (Ctrl+S)">
         💾 저장
@@ -225,51 +221,90 @@ function LayoutModeToggle({ value, onChange }: { value: LayoutMode; onChange: (m
   );
 }
 
-function ToolbarGroup({ children }: { children: React.ReactNode }) {
-  return (
-    <div
-      style={{
-        display: 'inline-flex',
-        alignItems: 'center',
-        gap: 2,
-        padding: 2,
-        borderRadius: 8,
-        background: 'var(--dm-neutral-50)',
-        flexShrink: 0,
-      }}
-    >
-      {children}
-    </div>
-  );
-}
+/** ★ 2026-07-02(5) 상단 바 정리 — 도구 진입점을 드롭다운 하나로 (바깥 클릭 시 닫힘) */
+function ToolsMenu({ items }: { items: Array<{ emoji: string; label: string; onClick: () => void }> }) {
+  const [open, setOpen] = useState(false);
+  const wrapRef = useRef<HTMLDivElement>(null);
 
-function IconButton({ onClick, title, label, emoji }: { onClick?: () => void; title: string; label: string; emoji: string }) {
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent) => {
+      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener('mousedown', onDown);
+    return () => document.removeEventListener('mousedown', onDown);
+  }, [open]);
+
   return (
-    <button
-      onClick={onClick}
-      title={title}
-      style={{
-        height: 32,
-        padding: '0 10px',
-        border: 'none',
-        background: 'transparent',
-        color: 'var(--dm-neutral-700)',
-        fontSize: 12,
-        fontWeight: 600,
-        borderRadius: 6,
-        cursor: 'pointer',
-        display: 'inline-flex',
-        alignItems: 'center',
-        gap: 4,
-        whiteSpace: 'nowrap',
-        transition: 'background 120ms',
-      }}
-      onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--dm-bg)')}
-      onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
-    >
-      <span>{emoji}</span>
-      <span>{label}</span>
-    </button>
+    <div ref={wrapRef} style={{ position: 'relative', flexShrink: 0 }}>
+      <button
+        onClick={() => setOpen((v) => !v)}
+        title="AI·검수·버전·A/B·테스트 발송"
+        style={{
+          height: 32,
+          padding: '0 12px',
+          border: '1px solid var(--dm-neutral-200)',
+          background: open ? 'var(--dm-neutral-100)' : 'var(--dm-neutral-50)',
+          color: 'var(--dm-neutral-700)',
+          fontSize: 12,
+          fontWeight: 600,
+          borderRadius: 8,
+          cursor: 'pointer',
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: 4,
+          whiteSpace: 'nowrap',
+        }}
+      >
+        <span>🧰</span>
+        <span>도구</span>
+        <span style={{ fontSize: 9, opacity: 0.6 }}>{open ? '▲' : '▼'}</span>
+      </button>
+      {open && (
+        <div
+          style={{
+            position: 'absolute',
+            top: 38,
+            right: 0,
+            minWidth: 180,
+            background: 'var(--dm-bg)',
+            border: '1px solid var(--dm-neutral-200)',
+            borderRadius: 10,
+            boxShadow: '0 8px 24px rgba(15,23,42,0.14)',
+            padding: 4,
+            zIndex: 1300,
+          }}
+        >
+          {items.map((it) => (
+            <button
+              key={it.label}
+              onClick={() => { setOpen(false); it.onClick(); }}
+              style={{
+                width: '100%',
+                textAlign: 'left',
+                border: 'none',
+                background: 'transparent',
+                color: 'var(--dm-neutral-700)',
+                fontSize: 12,
+                fontWeight: 600,
+                padding: '8px 10px',
+                borderRadius: 6,
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8,
+                whiteSpace: 'nowrap',
+              }}
+              onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--dm-neutral-50)')}
+              onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
+            >
+              <span>{it.emoji}</span>
+              <span>{it.label}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 

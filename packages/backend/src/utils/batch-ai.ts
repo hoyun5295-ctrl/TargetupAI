@@ -173,10 +173,10 @@ export async function pollBatch(batchId: string): Promise<BatchJob | null> {
        succeeded_count = $3,
        errored_count = $4,
        expired_count = $5,
-       completed_at = CASE WHEN $2 IN ('completed', 'failed', 'expired') THEN NOW() ELSE completed_at END,
+       completed_at = CASE WHEN $6::text IN ('completed', 'failed', 'expired') THEN NOW() ELSE completed_at END,
        updated_at = NOW()
      WHERE batch_id = $1`,
-    [batchId, newStatus, succeededCount, erroredCount, expiredCount]
+    [batchId, newStatus, succeededCount, erroredCount, expiredCount, newStatus]
   );
 
   return { ...job, status: newStatus, succeededCount, erroredCount, expiredCount };

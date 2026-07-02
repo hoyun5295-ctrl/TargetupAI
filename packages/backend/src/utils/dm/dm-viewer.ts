@@ -417,9 +417,9 @@ html,body{height:100%;margin:0;overflow:hidden;touch-action:pan-y}
 ${tokensCss}
 ${artDirectionToCssVars(artDirection)}
 ${baseCss}
-.cd-unit{background:rgba(255,255,255,0.1);border-radius:var(--dm-radius-md);padding:var(--dm-sp-3) var(--dm-sp-4);min-width:64px}
-.cd-num{font-size:var(--dm-fs-h1);font-weight:900;font-family:var(--dm-font-mono);color:#fff}
-.cd-lbl{font-size:var(--dm-fs-tiny);opacity:0.8;margin-top:2px}
+.cd-unit{background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.12);border-radius:14px;padding:var(--dm-sp-4) var(--dm-sp-3);min-width:76px}
+.cd-num{font-size:34px;font-weight:800;font-family:var(--dm-font-display);font-variant-numeric:tabular-nums;letter-spacing:1px;color:#fff;line-height:1.1}
+.cd-lbl{font-size:11px;opacity:0.55;margin-top:6px;letter-spacing:2px}
 ${modeCss}
 </style>
 </head>

@@ -244,17 +244,20 @@ button { font-family: inherit; cursor: pointer; border: 0; background: transpare
 .dm-text-small { font-size: var(--dm-fs-small); line-height: var(--dm-lh-small); font-weight: 400; }
 .dm-text-tiny  { font-size: var(--dm-fs-tiny);  line-height: var(--dm-lh-tiny);  font-weight: 400; }
 
+/* ★ 2026-07-02(5) 발행물 디자인 격상 — 버튼 여백/자간/그림자 정돈 (이메일 톤) */
 .dm-cta {
   display: inline-block;
-  padding: 12px 24px;
+  padding: 14px 28px;
   min-height: 44px;
   min-width: 44px;
-  border-radius: var(--dm-radius-lg);
+  border-radius: 14px;
   font-size: var(--dm-fs-body);
   font-weight: 700;
+  letter-spacing: -0.01em;
   text-align: center;
   background: var(--dm-primary);
   color: #fff;
+  box-shadow: 0 2px 10px rgba(15, 23, 42, 0.10);
   transition: background 150ms ease-out, transform 100ms ease-out;
 }
 .dm-cta:hover { background: var(--dm-primary-hover); }
