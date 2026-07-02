@@ -1785,7 +1785,7 @@ router.post('/operator/continuous', async (req: Request, res: Response) => {
       name, objective, schedule, schedule_time, schedule_day_of_week, schedule_day_of_month,
       channel, benefit_content, admin_phone_numbers, backup_admin_phone, admin_alert_channel,
       auto_send_lead_minutes, budget_monthly, budget_daily, budget_alert_threshold, delivery_policy,
-      sequence_enabled, sequence_delay_days, sequence_reminder_content,
+      sequence_enabled, sequence_delay_days, sequence_reminder_content, send_time_mode,
     } = req.body;
     const operator = await createOperator({
       companyId,
@@ -1811,6 +1811,8 @@ router.post('/operator/continuous', async (req: Request, res: Response) => {
       sequenceEnabled: sequence_enabled === true,
       sequenceDelayDays: sequence_delay_days != null ? Number(sequence_delay_days) : null,
       sequenceReminderContent: typeof sequence_reminder_content === 'string' ? sequence_reminder_content : null,
+      // ★ 2026-07-02 1단계 B: 발송 시각 모드 — 'fixed'(기본) | 'ai_optimal'
+      sendTimeMode: send_time_mode === 'ai_optimal' ? 'ai_optimal' : 'fixed',
     });
     return res.json({ success: true, operator });
   } catch (err: any) {
@@ -1852,7 +1854,7 @@ router.put('/operator/continuous/:id', async (req: Request, res: Response) => {
       admin_phone_numbers, backup_admin_phone, admin_alert_channel,
       opt_out_minutes, auto_send_lead_minutes, spam_score_threshold, max_spam_retries,
       channel, benefit_content,
-      sequence_enabled, sequence_delay_days, sequence_reminder_content,
+      sequence_enabled, sequence_delay_days, sequence_reminder_content, send_time_mode,
     } = req.body;
     const operator = await updateOperator(companyId, req.params.id, {
       name, objective, schedule, scheduleTime: schedule_time, status,
@@ -1878,6 +1880,8 @@ router.put('/operator/continuous/:id', async (req: Request, res: Response) => {
       sequenceEnabled: sequence_enabled === undefined ? undefined : (sequence_enabled === true),
       sequenceDelayDays: sequence_delay_days === undefined ? undefined : (sequence_delay_days === null ? null : Number(sequence_delay_days)),
       sequenceReminderContent: sequence_reminder_content === undefined ? undefined : (typeof sequence_reminder_content === 'string' ? sequence_reminder_content : null),
+      // ★ 2026-07-02 1단계 B: 발송 시각 모드 (미전송 = 변경 없음)
+      sendTimeMode: send_time_mode === undefined ? undefined : (send_time_mode === 'ai_optimal' ? 'ai_optimal' : 'fixed'),
     });
     if (!operator) return res.status(404).json({ success: false, error: 'Operator를 찾을 수 없습니다.' });
     return res.json({ success: true, operator });

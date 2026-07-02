@@ -138,6 +138,7 @@ export default function ContinuousOperatorPage() {
     admin_alert_channel: e.adminAlertChannel || 'sms',
     opt_out_minutes: e.optOutMinutes ?? 5,
     auto_send_lead_minutes: e.autoSendLeadMinutes ?? 120,
+    send_time_mode: e.sendTimeMode === 'ai_optimal' ? 'ai_optimal' : 'fixed',
     spam_score_threshold: e.spamScoreThreshold ?? 30,
     max_spam_retries: e.maxSpamRetries ?? 3,
     channel: e.channel || 'lms',

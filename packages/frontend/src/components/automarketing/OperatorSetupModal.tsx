@@ -78,10 +78,24 @@ export default function OperatorSetupModal({ editing, setEditing, saving, error,
               </select>
             </div>
             <div>
-              <label className={LAB}>추천 시각 (KST)</label>
+              <label className={LAB}>발송 희망 시각 (KST)</label>
               <input type="time" value={editing.scheduleTime || '09:00'} onChange={(e) => setEditing({ ...editing, scheduleTime: e.target.value })} className={INP} />
             </div>
           </div>
+
+          <label className="flex items-center justify-between rounded-xl border border-white/10 px-4 py-3">
+            <span className="min-w-0">
+              <span className="text-xs text-white/80 block">발송 시각을 AI에게 맡기기</span>
+              <span className="text-[10px] text-white/40 block mt-0.5">
+                {editing.sendTimeMode === 'ai_optimal'
+                  ? '고객 반응(클릭)이 가장 많았던 시간대에 맞춰 발송합니다. 데이터가 부족하면 희망 시각대로 나갑니다.'
+                  : '끄면 위에서 정한 희망 시각 정각에 발송됩니다.'}
+              </span>
+            </span>
+            <button type="button" onClick={() => setEditing({ ...editing, sendTimeMode: editing.sendTimeMode === 'ai_optimal' ? 'fixed' : 'ai_optimal' })} className={`relative w-10 h-5 rounded-full transition-colors shrink-0 ml-3 ${editing.sendTimeMode === 'ai_optimal' ? 'bg-indigo-500' : 'bg-white/15'}`} aria-label="발송 시각 AI 조정">
+              <span className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white transition-transform ${editing.sendTimeMode === 'ai_optimal' ? 'translate-x-5' : ''}`} />
+            </button>
+          </label>
 
           {editing.schedule === 'weekly' && (
             <div>
@@ -171,7 +185,7 @@ export default function OperatorSetupModal({ editing, setEditing, saving, error,
                 <input type="number" min="10" max="1440" value={editing.autoSendLeadMinutes ?? 120} onChange={(e) => setEditing({ ...editing, autoSendLeadMinutes: Number(e.target.value) })} className={INP} />
               </div>
             </div>
-            <div className="text-[10px] text-white/40 leading-relaxed">설정한 시각에 문안을 생성·담당자에게 안내하고, 준비 시간(기본 120분) 뒤 자동 발송합니다. 그 사이 정지할 수 있습니다. 스팸필터를 통과한 문안만 나갑니다.</div>
+            <div className="text-[10px] text-white/40 leading-relaxed">발송 희망 시각의 준비 시간(기본 120분) 전에 문안을 생성해 스팸필터 테스트를 거치고, 담당자에게 실제 문안과 발송 정보(일시·대상·예상 비용)를 문자로 안내합니다. 희망 시각 정각에 자동 발송되며, 그 전까지 [정지]로 취소할 수 있습니다. 스팸필터를 통과한 문안만 나갑니다.</div>
           </Section>
 
           <Section icon={<Wallet className="w-4 h-4" />} title="비용 제어" summary={editing.budgetMonthly ? `월 ${won(editing.budgetMonthly)}` : '예산 무제한'} accent>

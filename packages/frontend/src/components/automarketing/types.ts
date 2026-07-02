@@ -42,6 +42,8 @@ export interface ContinuousOperator {
   spamScoreThreshold?: number;
   maxSpamRetries?: number;
   autoSendLeadMinutes?: number | null;
+  // 발송 시각 모드 — 'fixed'(기본, 희망 시각 정각 발송) | 'ai_optimal'(반응 좋은 시간대로 AI가 조정)
+  sendTimeMode?: 'fixed' | 'ai_optimal';
   channel?: 'sms' | 'lms' | 'mms';
   benefitContent?: string | null;
   sequenceEnabled?: boolean;

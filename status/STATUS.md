@@ -107,6 +107,16 @@
 
 ---
 
+### 🟢 2026-07-02 (5) — DM 추적 근본 수리(본문 파서) + 상세 추적/버튼 단위 + AI 학습 메모리 자동 전송 + 디자인 v2 (★추적 수리 서버 검증완료 / 나머지 배포대기)
+> **★진짜 근본 원인 = 공개 라우터 본문 파서 유실**: DM 개인별 열람이 배포·재기동에도 계속 0이던 것 — app.ts에서 `app.use('/api/dm/v', dmPublicRouter)`가 helmet·전역 `express.json()` **앞**에 마운트돼(뷰어 인라인 스크립트 CSP) `/track` POST의 req.body가 비어서 비콘의 토큰·anon·scroll·duration이 전부 유실 → 껍데기 행만 적재(총 열람 집계는 되나 수신자별 매칭 불가). 지난 세션이 서버측 GET 기록을 없애고 이 POST 비콘에 전부 의존하게 만들며 드러난 잠복 결함. **수정 = dmPublicRouter.use(json())**. event-response(응모·투표·쿠폰·설문 = 응모·액션 늘 0의 원인)·ab track도 동반 복구. 서버 curl로 recipient_token·phone·scroll·duration 실적재 확인 → 실사용 화면에서 100%/95% 완독 확인. 진단 = 서버 로컬 curl 순수 검증(브라우저·문자·모바일 변수 제거)이 결정타. 상세=[[project_2026_0702_dm_tracking_bodyparser_rootcause]].
+> **수신자별 상세 추적(모달 확대)**: 발송 추적 행 클릭 → 그 사람 상세 펼침 — 섹션 여정(발행물 순서대로 조회·클릭, 안 본 섹션 흐리게=멈춘 지점) + 누른 버튼(요소 라벨 칩 "쿠폰 사용하기 ×2") + 열람 요약(첫 열람·체류·깊이·완독) + 응답·액션 이력(투표 선택·설문 답·룰렛 결과·쿠폰 수령 시각). 신규 GET /api/dm/:id/recipient-detail. 모달 1120→1240. 수신자 조회 SQL은 CT getDmRecipientEngagementRows로 이관(목록·상세·학습 워커 공용=이중 진실 차단).
+> **요소(버튼) 단위 추적**: 뷰어가 버튼·링크·투표옵션·탭 클릭 라벨을 캡처 → dm_views.section_interactions(jsonb)에 elements 병합 저장. 공개 입력 clamp(섹션당 라벨 20·라벨 60자). DB ALTER 0.
+> **AI 학습 메모리 자동 전송(DM+이메일)**: 1시간 학습 워커(ai-memory-accumulator)에 2단계 추가 — DM 발행물 성과(열람률·완독·클릭·응모·최다 반응 섹션)와 이메일(오픈·클릭)을 회사 ai_company_memory(channel_performance, 클릭률 10%+면 success_pattern)에 실측 서술로 누적. 원칙 = 실측만(임의 상수 0)·표본 10명+·실측 0 보류(가짜 0% 차단, 기존 게이트 재사용)·20h 멱등·회사 격리·발송/돈 무변경. buildMemoryPromptContext로 AI 오퍼레이터 system prompt 자동 주입. 신설 문구 CT(ai-memory-text) + 기록 CT(company-memory recordDmEngagementLearning/recordEmailEngagementLearning).
+> **디자인 시스템 v2**: 토큰 타입 스케일 상향(히어로 40·h1 28·h2 22·본문 16px + 오버라인 라벨) + 그림자 슬레이트 톤 — SSOT 3파일(backend/frontend dm-tokens + dm-builder.css) 동기. 섹션 27종 발행물 SSR + 에디터 캔버스 격상(카운트다운·쿠폰·CTA바·상품 가격 위계·프로모/즉시쿠폰 다크패널·탭 pill·투표·선착순 게이지·리뷰·SNS·헤더). DM 카피 생성 이모지 전면 금지(장식은 문장) + (광고)·080 표기 금지.
+> **발송 모달 정비**: 발송 성공 시 창 닫힘(토스트 z-9990 유지) / 광고성 기본 ON + 설정 080 미리보기 합성 표시 + 080 미등록 발송 전 차단 / 문안 (광고)·무료수신거부 이중 제거(stripAdPartsDeep — 문안 속 임의 080 발송 차단, 실측 원인=AI가 무료수신거부 080-000-0000 지어넣어 buildAdMessage가 설정번호 합성 skip) / 변수 칩 커서 위치 삽입 / 꾸미기 = 고객사 보유 필드(/api/dm/variables) 선택(사용 필드 자동 선택 — AI 오퍼레이터 패턴, 하드코딩 3개 제거).
+> **백엔드 결함 동반 수정**: dm.ts '/:id' GET/PUT/DELETE uuid 가드(isUuid CT) — /dm/overview·brand-kit·ab-tests가 '/:id'에 가로채여 500 나던 것 해소 / ai.ts learning-summary `summary`→`memory_value` + journey-step-diagnosis `j.objective` 제거(실측 부재) / alimtalk-jobs·batch-ai 42P08(같은 param 두 타입 추론) param 분리+명시 캐스트.
+> **DM 시작화면 재배치**: 좌 프롬프트 입력 크게 단독 + 우 2행(위 빠른시작 모달·아래 자유시작·완성슬라이드), 우측 카드 중앙정렬. 상단 에디터 버튼 7개 → [도구] 드롭다운 1개.
+
 ### 🟢 2026-07-02 (4) — DM·이메일 전면 정비 (★전부 배포완료)
 > **DM 에디터/발행물**: 상품 할인표시(할인율+취소선)·상품/갤러리/슬라이드 링크 연결 / CTA 빈 URL 경고 / %고객명% 공용 링크 fallback("고객님") / 폰트 크기 2계층(섹션 공통 제목·본문 + 히어로·텍스트카드 필드별) / 잘림 근본 2건(InlineEditable nowrap + 발행물 CSS에 .dm-text-* 타이포 클래스 누락 — 에디터=발행물 크기 일치) / 발행물 죽은 동작 9건 배선(설문 입력·제출, 즉시쿠폰/선착순/클릭리워드 참여 기록, 탭 전환, 슬라이드쇼 자동전환, 인스타 safeUrl).
 > **타겟 추출**: "전체 고객" 1급 지원(EMPTY_FILTER 구멍 — AI 플래그+키워드 안전망, DM allCustomers/이메일 빈 필터 허용) + 모달 인라인 에러.

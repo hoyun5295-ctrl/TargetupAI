@@ -794,7 +794,7 @@
 | user_agent | text | |
 | viewed_at | timestamptz | 최초 열람 |
 | last_active_at | timestamptz | 마지막 비콘 |
-| section_interactions | jsonb | D125 — 섹션별 {views, clicks} (2026-07-02부터 실제 적재) |
+| section_interactions | jsonb | D125 — 섹션별 {views, clicks, elements?} (07-02(5) elements = 버튼·링크 라벨별 클릭 카운트 {"쿠폰 사용하기":2}). ★ 07-02(5) 진짜 적재 개시 = 공개 라우터 본문 파서 유실 수정 후부터(LESSONS_BACKEND 2026-07-02 항목) |
 | ab_test_id | uuid | 실측 보강 (기존 문서 누락) |
 | ab_variant | varchar | 실측 보강 (기존 문서 누락) |
 | **recipient_token** | **text** | **★ 2026-07-02 ALTER — 발송 수신자 토큰(추적 1급 키)** |

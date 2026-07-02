@@ -17,6 +17,19 @@
 
 ---
 
+## 라우팅 / 미들웨어 순서 사고
+
+### 2026-07-02(5) — 공개 라우터를 전역 express.json() 앞에 마운트 → POST req.body 유실 (DM 개인별 열람 0 진짜 원인) ★ 신규
+- **현상**: 모바일DM 개인별 열람이 배포·재기동을 반복해도 계속 0. 총 열람 집계(30일 열람 26)는 되는데 수신자별은 전원 미열람. dm_views 행은 쌓이나 recipient_token/phone/anonymous_id/max_scroll_pct/duration이 전부 NULL/0.
+- **오진 3회**: ①배포 안 됨(재기동 필요) → 하드 restart(mem 새 부팅)에도 동일 ②src에 낡은 .js가 .ts를 shadow? → `find src -name '*.js'`=0 ③최종 = `app.ts` 마운트 순서 실측.
+- **결정타**: 서버 로컬 curl로 유효 토큰+anon+scroll+duration을 `/track`에 직접 전송 → 응답 {"ok":true}인데 저장 행 전부 NULL. "코드가 아니라 본문 자체가 안 들어온다"를 증명(브라우저·문자·모바일 변수 전부 제거한 순수 서버 검증).
+- **근본**: `app.ts`에서 `app.use('/api/dm/v', dmPublicRouter)`를 뷰어 인라인 스크립트 CSP 때문에 helmet·전역 `express.json()` **앞**에 마운트. 그 라우터의 POST(`/track`·`/event-response`·`/ab/track`)는 전역 파서를 못 거쳐 `req.body`가 빈 채로 도착 → 비콘 데이터 전부 유실. 지난 세션(0702-3)이 서버측 GET 열람 기록을 없애고 이 POST 비콘 하나에 전부 의존하게 만들며 잠복 결함이 드러남.
+- **수정**: `dmPublicRouter.use(json({ limit: '1mb' }))` (라우터 자체 파서). GET 뷰어·이미지는 본문 없어 영향 0. 같은 원인으로 죽어 있던 `/event-response`(응모·투표·쿠폰·설문 = 응모·액션 늘 0의 원인)·`/ab/track`도 동반 복구. 서버 curl로 recipient_token·phone·scroll·duration 실적재 확인 + 실사용 화면 100%/95% 완독 확인.
+- **교훈**:
+  1. **공개(비인증) 라우터를 전역 body 파서 앞에 마운트하면 그 라우터의 POST는 req.body가 빈다.** helmet/CSP 때문에 앞에 둘 땐 그 라우터에 자체 body 파서를 붙일 것. 새 공개 POST endpoint 추가 시 필수 점검.
+  2. **"배포했는데 옛 동작"은 서버 로컬 curl로 순수 검증하라** — 브라우저/문자/모바일 변수를 다 제거하면 "코드 vs 본문 vs 프로세스" 어느 층 문제인지 한 방에 갈린다. ts-node라도 소스만 보고 "배포 안 됨" 단정 금지.
+  3. **집계는 되는데 개별이 0** = 행은 쌓이나 식별자(join 키)가 안 들어오는 구조 의심. 집계 카운트와 join 매칭을 분리해 볼 것.
+
 ## 발송 시스템 사고
 
 ### 발송 5경로 부분 패치 (반복 패턴)

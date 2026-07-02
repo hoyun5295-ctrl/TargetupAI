@@ -94,6 +94,136 @@ export function decideBudgetGuard(input: BudgetGuardInput): BudgetGuardResult {
 }
 
 /**
+ * 발송 시각 모드 — 2026-07-02 1단계 B (Harold 스펙: 설정 시각 = 발송 희망 시각).
+ *  - 'fixed'(기본): 희망 시각 정각 발송. 생성·스팸테스트·담당자 통지 = 희망 시각 − 준비시간(lead).
+ *  - 'ai_optimal': 클릭 반응 피크 시각으로 발송 시각을 AI가 정함(Phase3 B 유지 — 명시 선택 시에만).
+ */
+export type SendTimeMode = 'fixed' | 'ai_optimal';
+
+export function normalizeSendTimeMode(raw: unknown): SendTimeMode {
+  return raw === 'ai_optimal' ? 'ai_optimal' : 'fixed';
+}
+
+export type OperatorScheduleKind = 'daily' | 'weekly' | 'monthly';
+
+/**
+ * 다음 발송 희망 시각(KST 주기 occurrence) — 지금(now) 이후 가장 가까운 schedule_time.
+ *  continuous-operator.ts computeNextRun의 검증된 KST 산식을 now 주입형 순수 함수로 이동(테스트 가능).
+ *  - weekly: 지정 요일(0=일~6=토), 같은 요일인데 시각이 지났으면 다음 주.
+ *  - monthly: 지정 일자, 말일 초과 시 그 달 말일로 클램프, 이번 달 지났으면 다음 달.
+ */
+export function computeNextOccurrence(
+  schedule: OperatorScheduleKind,
+  scheduleTime: string,
+  dayOfWeek: number | null = null,
+  dayOfMonth: number | null = null,
+  now: Date = new Date(),
+): Date {
+  const [hStr, mStr] = String(scheduleTime || '').split(':');
+  const h = parseInt(hStr) || 9;
+  const m = parseInt(mStr) || 0;
+
+  // 한국 시간 기준 — UTC = KST - 9h
+  const kstNow = new Date(now.getTime() + 9 * 60 * 60 * 1000);
+  const target = new Date(kstNow);
+  target.setUTCHours(h, m, 0, 0);
+
+  if (schedule === 'weekly' && dayOfWeek != null) {
+    let diff = (dayOfWeek - target.getUTCDay() + 7) % 7;
+    if (diff === 0 && target.getTime() <= kstNow.getTime()) diff = 7;
+    target.setUTCDate(target.getUTCDate() + diff);
+  } else if (schedule === 'monthly' && dayOfMonth != null) {
+    const clampToMonth = (t: Date) => {
+      const last = new Date(Date.UTC(t.getUTCFullYear(), t.getUTCMonth() + 1, 0)).getUTCDate();
+      t.setUTCDate(Math.min(dayOfMonth, last));
+    };
+    target.setUTCDate(1);
+    clampToMonth(target);
+    if (target.getTime() <= kstNow.getTime()) {
+      target.setUTCMonth(target.getUTCMonth() + 1, 1);
+      clampToMonth(target);
+    }
+  } else if (target.getTime() <= kstNow.getTime()) {
+    if (schedule === 'daily') target.setUTCDate(target.getUTCDate() + 1);
+    else if (schedule === 'weekly') target.setUTCDate(target.getUTCDate() + 7);
+    else if (schedule === 'monthly') target.setUTCMonth(target.getUTCMonth() + 1);
+  }
+  // KST → UTC
+  return new Date(target.getTime() - 9 * 60 * 60 * 1000);
+}
+
+/**
+ * 다음 생성 시각 = 발송 희망 시각 − 준비시간(lead분) — 2026-07-02 1단계 B.
+ *  생성 시각이 이미 지났으면 한 주기 뒤 occurrence로 넘긴다.
+ *  (generateProposal 직후 재계산이 같은 주기의 T−lead(=지금)를 다시 잡아 1분마다 재생성되는 무한 루프 차단.
+ *   신규 생성 시각이 lead 안쪽이면 첫 주기는 다음 occurrence — 즉시 시작은 run-now가 담당.)
+ */
+export function computeNextGenerationRun(
+  schedule: OperatorScheduleKind,
+  scheduleTime: string,
+  dayOfWeek: number | null,
+  dayOfMonth: number | null,
+  leadMinutes: number,
+  now: Date = new Date(),
+): { nextRunAt: Date; sendAt: Date } {
+  const lead = resolveAutoSendLeadMinutes(leadMinutes);
+  let sendAt = computeNextOccurrence(schedule, scheduleTime, dayOfWeek, dayOfMonth, now);
+  let nextRunAt = new Date(sendAt.getTime() - lead * 60 * 1000);
+  if (nextRunAt.getTime() <= now.getTime()) {
+    sendAt = computeNextOccurrence(schedule, scheduleTime, dayOfWeek, dayOfMonth, new Date(sendAt.getTime() + 60 * 1000));
+    nextRunAt = new Date(sendAt.getTime() - lead * 60 * 1000);
+  }
+  return { nextRunAt, sendAt };
+}
+
+/**
+ * 자율 발송 예정 안내(담당자 통지 2번 문자) 문구 — 2026-07-02 1단계 (Harold 스펙).
+ *  발송 일시 + 추출 타겟 수 + 예상 비용(해당 유형 단가 × 수량) + 예약취소(정지) 안내.
+ *  단가 미상(0 이하)이면 산식은 생략하고 총액만 표기(임의 상수 생성 금지).
+ */
+export interface PrepNoticeInput {
+  sendAtLabel: string;      // 발송 예정 시각 라벨 (KST 조립은 호출부 — 예: '7월 3일 14:00')
+  recipientCount: number;   // 추출 타겟 수
+  costEstimate: number;     // 총 예상 비용(원)
+  channelLabel: string;     // 'SMS' | 'LMS' | 'MMS'
+  unitCost: number;         // 회사 단가(원/건)
+}
+
+export function buildAutoSendPrepInfoBody(input: PrepNoticeInput): string {
+  const count = Math.max(0, Math.floor(Number(input.recipientCount)) || 0);
+  const total = Math.max(0, Math.round(Number(input.costEstimate)) || 0);
+  const unit = Number(input.unitCost) > 0 ? Number(input.unitCost) : 0;
+  const costLine = unit > 0
+    ? `예상 비용 약 ${total.toLocaleString()}원 (${input.channelLabel} ${unit.toLocaleString()}원 × ${count.toLocaleString()}건)`
+    : `예상 비용 약 ${total.toLocaleString()}원`;
+  return [
+    `${input.sendAtLabel}에 위 문안이 ${count.toLocaleString()}명에게 자동 발송됩니다.`,
+    costLine,
+    `예약 취소를 원하시면 발송 전에 한줄로에 접속해 자동마케팅 [정지]를 눌러주세요.`,
+  ].join('\n');
+}
+
+/**
+ * 승인 대기(수동 검토) 담당자 통지 문구 — 자율 발송 자격 미달로 pending에 머무는 새 추천을
+ * 담당자가 모르는 문제 해소(2026-07-02 1단계). 승인해야 발송됨을 명시.
+ */
+export interface PendingReviewNoticeInput {
+  operatorName: string;
+  recipientCount: number;
+  costEstimate: number;
+}
+
+export function buildPendingReviewNoticeBody(input: PendingReviewNoticeInput): string {
+  const count = Math.max(0, Math.floor(Number(input.recipientCount)) || 0);
+  const total = Math.max(0, Math.round(Number(input.costEstimate)) || 0);
+  return [
+    `'${input.operatorName}' 새 추천이 승인 대기 중입니다.`,
+    `대상 ${count.toLocaleString()}명 · 예상 비용 약 ${total.toLocaleString()}원`,
+    `한줄로에 접속해 검토 후 승인하면 발송됩니다. 승인 전에는 발송되지 않습니다.`,
+  ].join('\n');
+}
+
+/**
  * 슈퍼관리자 자율발송 게이트 입력 정규화(순수). companies.cdp_auto_execute_* 4컬럼 UPDATE 직전 적용.
  *  - enabled: boolean true만 ON(문자열/숫자 → false).
  *  - maxRecipients: 1건 미만·과대 운영자 오타 방지 [1, 1,000,000], 미설정 1000.

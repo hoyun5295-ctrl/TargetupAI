@@ -34,7 +34,7 @@ import { insertProposalVariants, recommendVariantForProposal, recordVariantRewar
 // ★ D212+ 정책 (2026-05-23 Harold 명시): CT-64 영역 통합 — 검증 영역 + 담당자 학습
 // ★ D227+ 스팸 안전망 격상 — decideSpamOutcome(실제 테스트 결과 → 상태) + buildSpamRegeneratePrompt(AI 재작성)
 import { recordAdminStopLearning, decideSpamOutcome, buildSpamRegeneratePrompt } from './continuous-operator-policy';
-import { resolveAutoSendLeadMinutes, computeScheduledSendAt, decideSendOutcome, decideStuckSendingRecovery, decideBudgetGuard } from './autosend-policy';
+import { resolveAutoSendLeadMinutes, computeScheduledSendAt, decideSendOutcome, decideStuckSendingRecovery, decideBudgetGuard, buildAutoSendPrepInfoBody, buildPendingReviewNoticeBody, computeNextOccurrence, computeNextGenerationRun, normalizeSendTimeMode, SendTimeMode } from './autosend-policy';
 import { getOpt080Number } from './messageUtils';
 // ★ D227+ 검증된 스팸 자산 재사용 (auto-campaign-worker와 동일 패턴) — 실제 테스트폰 발송 + AI 재생성 + 재테스트
 import { autoSpamTestWithRegenerate } from './spam-test-queue';
@@ -80,6 +80,8 @@ export interface CreateOperatorInput {
   backupAdminPhone?: string | null;    // 백업 담당자
   adminAlertChannel?: 'sms' | 'kakao' | 'email';  // 담당자 알림 채널 (default 'sms')
   autoSendLeadMinutes?: number | null; // 자율 발송 준비 시간(분)
+  // ★ 2026-07-02 1단계 B: 발송 시각 모드 — 'fixed'(기본, 희망 시각 정각) | 'ai_optimal'(클릭 피크 개인화)
+  sendTimeMode?: 'fixed' | 'ai_optimal';
   budgetMonthly?: number | null;
   budgetDaily?: number | null;
   budgetAlertThreshold?: number;
@@ -125,6 +127,8 @@ export interface ContinuousOperator {
   spamScoreThreshold: number;                       // default 30
   maxSpamRetries: number;                           // default 3
   autoSendLeadMinutes: number | null;               // 자율 발송 준비·정지 창(분) — null→120
+  // ★ 2026-07-02 1단계 B: 발송 시각 모드 — schedule_time = 발송 희망 시각, 생성 = 희망 − lead
+  sendTimeMode: SendTimeMode;                       // 'fixed'(기본) | 'ai_optimal'(클릭 피크)
   // ★ 2026-06-26: 발송 채널 + 관리자 입력 혜택
   channel: 'sms' | 'lms' | 'mms';                   // 발송 채널 (default 'lms')
   benefitContent: string | null;                    // 관리자 직접 입력 혜택 (placeholder 치환)
@@ -168,7 +172,12 @@ export async function createOperator(input: CreateOperatorInput): Promise<Contin
   const scheduleTime = input.scheduleTime || '09:00';
   const scheduleDayOfWeek = (schedule === 'weekly' && input.scheduleDayOfWeek != null) ? input.scheduleDayOfWeek : null;
   const scheduleDayOfMonth = (schedule === 'monthly' && input.scheduleDayOfMonth != null) ? input.scheduleDayOfMonth : null;
-  const nextRunAt = computeNextRun(schedule, scheduleTime, scheduleDayOfWeek, scheduleDayOfMonth);
+  // ★ 2026-07-02 1단계 B: schedule_time = 발송 희망 시각 — 생성(next_run_at)은 희망 시각 − 준비시간(lead)
+  const sendTimeMode = normalizeSendTimeMode(input.sendTimeMode);
+  const { nextRunAt } = computeNextGenerationRun(
+    schedule, scheduleTime, scheduleDayOfWeek, scheduleDayOfMonth,
+    resolveAutoSendLeadMinutes(input.autoSendLeadMinutes),
+  );
 
   // ★ 2026-06-26: 생성 시 채널·혜택·담당자·예산도 저장 (기존엔 누락 → 담당자 연락처 드롭·2시간 알림 불가 #3 + 채널 #1 + 혜택 #4 fix)
   const channel = ['sms', 'lms', 'mms'].includes((input.channel || '').toLowerCase()) ? (input.channel as string).toLowerCase() : 'lms';
@@ -191,14 +200,14 @@ export async function createOperator(input: CreateOperatorInput): Promise<Contin
       schedule, schedule_time, schedule_day_of_week, schedule_day_of_month, status, next_run_at,
       channel, benefit_content, admin_phone_numbers, backup_admin_phone, admin_alert_channel,
       auto_send_lead_minutes, budget_monthly, budget_daily, budget_alert_threshold, delivery_policy,
-      sequence_enabled, sequence_delay_days, sequence_reminder_content,
+      sequence_enabled, sequence_delay_days, sequence_reminder_content, send_time_mode,
       created_at, updated_at
     ) VALUES (
       gen_random_uuid(), $1::uuid, $2::uuid, $3, $4,
       $5, $6, $8, $9, 'active', $7,
       $10, $11, $12, $13, $14,
       $15, $16, $17, $18, $19,
-      $20, $21, $22,
+      $20, $21, $22, $23,
       NOW(), NOW()
     ) RETURNING *`,
     [
@@ -210,7 +219,7 @@ export async function createOperator(input: CreateOperatorInput): Promise<Contin
       input.budgetDaily != null ? input.budgetDaily : null,
       input.budgetAlertThreshold != null ? input.budgetAlertThreshold : 80,
       deliveryPolicy,
-      sequenceEnabled, sequenceDelayDays, sequenceReminderContent,
+      sequenceEnabled, sequenceDelayDays, sequenceReminderContent, sendTimeMode,
     ]
   );
   const operator = mapRowToOperator(result.rows[0]);
@@ -280,15 +289,17 @@ export async function updateOperator(
     sequenceEnabled?: boolean;
     sequenceDelayDays?: number | null;
     sequenceReminderContent?: string | null;
+    // ★ 2026-07-02 1단계 B: 발송 시각 모드
+    sendTimeMode?: 'fixed' | 'ai_optimal';
   }
 ): Promise<ContinuousOperator | null> {
-  // schedule/scheduleTime/요일/날짜 변경 시 next_run_at 재계산
+  // schedule/scheduleTime/요일/날짜/준비시간 변경 시 next_run_at 재계산 (생성 = 발송 희망 시각 − lead)
   let nextRunAt: Date | null = null;
   let nextDow: number | null = null;
   let nextDom: number | null = null;
-  if (patch.schedule || patch.scheduleTime || patch.scheduleDayOfWeek !== undefined || patch.scheduleDayOfMonth !== undefined) {
+  if (patch.schedule || patch.scheduleTime || patch.scheduleDayOfWeek !== undefined || patch.scheduleDayOfMonth !== undefined || patch.autoSendLeadMinutes !== undefined) {
     const current = await query(
-      `SELECT schedule, schedule_time, schedule_day_of_week, schedule_day_of_month FROM continuous_operators WHERE id = $1::uuid AND company_id = $2::uuid`,
+      `SELECT schedule, schedule_time, schedule_day_of_week, schedule_day_of_month, auto_send_lead_minutes FROM continuous_operators WHERE id = $1::uuid AND company_id = $2::uuid`,
       [operatorId, companyId]
     );
     if (current.rows.length === 0) return null;
@@ -296,7 +307,10 @@ export async function updateOperator(
     const time = patch.scheduleTime || current.rows[0].schedule_time;
     nextDow = sched === 'weekly' ? (patch.scheduleDayOfWeek !== undefined ? patch.scheduleDayOfWeek : current.rows[0].schedule_day_of_week) : null;
     nextDom = sched === 'monthly' ? (patch.scheduleDayOfMonth !== undefined ? patch.scheduleDayOfMonth : current.rows[0].schedule_day_of_month) : null;
-    nextRunAt = computeNextRun(sched, time, nextDow, nextDom);
+    const lead = resolveAutoSendLeadMinutes(
+      patch.autoSendLeadMinutes !== undefined ? patch.autoSendLeadMinutes : current.rows[0].auto_send_lead_minutes,
+    );
+    nextRunAt = computeNextGenerationRun(sched, time, nextDow, nextDom, lead).nextRunAt;
   }
 
   const result = await query(
@@ -326,6 +340,7 @@ export async function updateOperator(
       sequence_enabled = COALESCE($25, sequence_enabled),
       sequence_delay_days = COALESCE($26, sequence_delay_days),
       sequence_reminder_content = COALESCE($27, sequence_reminder_content),
+      send_time_mode = COALESCE($28, send_time_mode),
       updated_at = NOW()
      WHERE id = $1::uuid AND company_id = $2::uuid
      RETURNING *`,
@@ -356,6 +371,7 @@ export async function updateOperator(
       patch.sequenceEnabled ?? null,
       typeof patch.sequenceDelayDays === 'number' && patch.sequenceDelayDays > 0 ? Math.min(30, Math.floor(patch.sequenceDelayDays)) : null,
       (typeof patch.sequenceReminderContent === 'string' && patch.sequenceReminderContent.trim()) ? patch.sequenceReminderContent.trim().slice(0, 2000) : null,
+      patch.sendTimeMode !== undefined ? normalizeSendTimeMode(patch.sendTimeMode) : null,
     ]
   );
   return result.rows.length > 0 ? mapRowToOperator(result.rows[0]) : null;
@@ -383,6 +399,11 @@ interface CompanyContextRow {
   brand_tone: string | null;
   customer_schema: any;
   reject_number: string | null;
+  // ★ 2026-07-02 1단계: 회사별 메시지 단가 — 예상 비용을 실제 회사 단가로 계산 (미설정 시 getCompanyCosts가 기본 단가 폴백)
+  cost_per_sms: string | number | null;
+  cost_per_lms: string | number | null;
+  cost_per_mms: string | number | null;
+  cost_per_kakao: string | number | null;
   cdp_auto_execute_enabled: boolean;
   cdp_auto_execute_max_recipients: number;
   cdp_auto_execute_max_cost_krw: number;
@@ -448,6 +469,7 @@ export async function generateProposalForOperator(operatorId: string): Promise<O
     `SELECT c.company_name, c.business_type, c.brand_name, c.brand_slogan,
             c.brand_description, c.brand_tone, c.customer_schema,
             COALESCE(c.reject_number, c.opt_out_080_number) AS reject_number,
+            c.cost_per_sms, c.cost_per_lms, c.cost_per_mms, c.cost_per_kakao,
             COALESCE(c.cdp_auto_execute_enabled, false) AS cdp_auto_execute_enabled,
             COALESCE(c.cdp_auto_execute_max_recipients, 1000) AS cdp_auto_execute_max_recipients,
             COALESCE(c.cdp_auto_execute_max_cost_krw, 50000) AS cdp_auto_execute_max_cost_krw,
@@ -484,7 +506,13 @@ export async function generateProposalForOperator(operatorId: string): Promise<O
     brand_tone: ctx.brand_tone,
     customer_schema: ctx.customer_schema,
     reject_number: ctx.reject_number,
-    ...getCompanyCosts({}),
+    // ★ 2026-07-02 1단계: 회사별 단가 반영 — 빈 객체 전달로 항상 기본 단가만 쓰이던 것을 교정.
+    //   raw cost_per_*도 함께 전달해 orchestrate 내부 getCompanyCosts(ctx.companyInfo)가 회사 단가를 해석하게 한다.
+    cost_per_sms: ctx.cost_per_sms,
+    cost_per_lms: ctx.cost_per_lms,
+    cost_per_mms: ctx.cost_per_mms,
+    cost_per_kakao: ctx.cost_per_kakao,
+    ...getCompanyCosts(ctx as any),
   };
 
   console.log(`[ContinuousOperator] ${operator.name} 제안서 생성 시작 (objective: ${operator.objective.slice(0, 50)})`);
@@ -590,8 +618,12 @@ export async function generateProposalForOperator(operatorId: string): Promise<O
 
   // 7. 제안서 INSERT — auto-eligible은 'scheduled'(T에 자율 발송) + scheduled_send_at, 아니면 'pending'(수동 검토)
   const leadMinutes = resolveAutoSendLeadMinutes(operator.autoSendLeadMinutes);
-  // ★ Phase3 B — 발송 예정 시각을 회사 클릭 피크 시각으로 개인화(준비 창 보존·데이터 부족 시 현행 now+lead 폴백).
-  const scheduledSendAt = await resolveOptimalScheduledSendAt(operator.companyId, leadMinutes);
+  // ★ 2026-07-02 1단계 B (Harold 스펙): schedule_time = 발송 희망 시각.
+  //   fixed(기본) = 희망 시각 정각 발송 — 생성 워커가 희망 − lead에 돌므로 다음 occurrence가 이번 주기 희망 시각.
+  //   ai_optimal(명시 선택) = Phase3 B 클릭 피크 개인화(준비 창 보존·데이터 부족 시 now+lead 폴백) 유지.
+  const scheduledSendAt = operator.sendTimeMode === 'ai_optimal'
+    ? await resolveOptimalScheduledSendAt(operator.companyId, leadMinutes)
+    : computeNextOccurrence(operator.schedule, operator.scheduleTime, operator.scheduleDayOfWeek, operator.scheduleDayOfMonth);
   const proposalRes = await query(
     `INSERT INTO operator_proposals (
       id, operator_id, company_id, proposal_json, recipient_count, cost_estimate,
@@ -709,9 +741,16 @@ export async function generateProposalForOperator(operatorId: string): Promise<O
         await notifyOperatorAdmins(operator, '[AI 자동마케팅] 일시정지', `'${operator.name}' 문안이 스팸필터를 통과하지 못해 자동마케팅을 일시정지했습니다. 문안 검토 후 재개해주세요.`).catch((e: any) => console.warn('[ContinuousOperator] 정지 알림 경고:', e?.message));
       } else {
         console.log(`[ContinuousOperator] ${operator.name} 스팸 통과 (재생성 ${regenCount}회)`);
-        // 자율 발송 예정(scheduled) → 담당자에 실문안 + 정지 안내 (준비 시점 알림, 무과금 인증 라인)
+        // 자율 발송 예정(scheduled) → 담당자에 실문안 + 발송 정보(일시·타겟·비용)·정지 안내 (준비 시점 알림, 무과금 인증 라인)
         if (autoExecuteEligible) {
-          await sendAutoSendPrepNotice(operator, proposalRes.rows[0].id, bestMessage, scheduledSendAt).catch((e: any) => console.warn('[ContinuousOperator] 준비 알림 경고:', e?.message));
+          // ★ 2026-07-02: 재생성으로 문안이 교체됐으면 실제 발송될 통과 문안을 통지 (직전엔 원본을 보내 통지≠실발송 불일치)
+          const noticeBody = (variantResult?.regenerated && variantResult.messageText) ? variantResult.messageText : bestMessage;
+          await sendAutoSendPrepNotice(operator, proposalRes.rows[0].id, noticeBody, scheduledSendAt, {
+            recipientCount,
+            costEstimate,
+            channelLabel: channelForSpam,
+            unitCost: Number(orchestratorResult.cost?.unitCost) || 0,
+          }).catch((e: any) => console.warn('[ContinuousOperator] 준비 알림 경고:', e?.message));
         }
       }
     } catch (err: any) {
@@ -728,6 +767,21 @@ export async function generateProposalForOperator(operatorId: string): Promise<O
   }
 
   // (검증 7일 게이팅 제거 — verification_* 컬럼은 보존하되 자율 발송 흐름에서 미사용. 스팸 통과만으로 'scheduled'.)
+
+  // 10. ★ 2026-07-02 1단계: pending(수동 검토)으로 남은 새 추천 — 담당자 승인 대기 통지.
+  //    자율 발송 자격 미달이면 그동안 아무 통지가 없어 담당자가 새 추천을 몰랐음. 통지 실패는 생성 흐름에 영향 X.
+  try {
+    const curRes = await query(`SELECT status FROM operator_proposals WHERE id = $1::uuid`, [proposalRes.rows[0].id]);
+    if (curRes.rows[0]?.status === 'pending') {
+      await notifyOperatorAdmins(
+        operator,
+        '[AI 자동마케팅] 승인 대기',
+        buildPendingReviewNoticeBody({ operatorName: operator.name, recipientCount, costEstimate }),
+      );
+    }
+  } catch (e: any) {
+    console.warn('[ContinuousOperator] 승인 대기 통지 경고:', e?.message);
+  }
 
   // 11. Operator 통계 갱신
   await updateOperatorAfterRun(operator.id, operator.schedule, operator.scheduleTime, 1, autoExecuteEligible);
@@ -826,15 +880,18 @@ async function updateOperatorAfterRun(
   // 지정 요일/날짜 반영 — 컬럼 미존재(ALTER 전) 환경에서도 안전하게 fallback
   let dow: number | null = null;
   let dom: number | null = null;
+  let lead: number | null = null;
   try {
     const dayRes = await query(
-      `SELECT schedule_day_of_week, schedule_day_of_month FROM continuous_operators WHERE id = $1::uuid`,
+      `SELECT schedule_day_of_week, schedule_day_of_month, auto_send_lead_minutes FROM continuous_operators WHERE id = $1::uuid`,
       [operatorId]
     );
     dow = dayRes.rows[0]?.schedule_day_of_week ?? null;
     dom = dayRes.rows[0]?.schedule_day_of_month ?? null;
+    lead = dayRes.rows[0]?.auto_send_lead_minutes ?? null;
   } catch { /* 컬럼 미존재 시 기존 동작 유지 */ }
-  const nextRunAt = computeNextRun(schedule, scheduleTime, dow, dom);
+  // ★ 2026-07-02 1단계 B: 다음 생성 = 다음 발송 희망 시각 − 준비시간 (같은 주기 재선정 없음 — computeNextGenerationRun이 보장)
+  const nextRunAt = computeNextGenerationRun(schedule, scheduleTime, dow, dom, resolveAutoSendLeadMinutes(lead)).nextRunAt;
   await query(
     `UPDATE continuous_operators SET
        last_run_at = NOW(),
@@ -1354,7 +1411,12 @@ async function scheduleSequenceReminder(op: any, p: any, pj: any, companyId: str
     companyId,
     name: op.name || '',
   };
-  await sendAutoSendPrepNotice(operatorForNotice, ins.rows[0].id, reminderContent, reminderSendAt).catch(() => {});
+  await sendAutoSendPrepNotice(operatorForNotice, ins.rows[0].id, reminderContent, reminderSendAt, {
+    recipientCount: Number(p.recipient_count) || 0,
+    costEstimate: Number(p.cost_estimate) || 0,
+    channelLabel: String(pj.channel?.recommended || 'SMS').toUpperCase(),
+    unitCost: Number(pj.cost?.unitCost) || 0,
+  }).catch(() => {});
 }
 
 export function startContinuousOperatorScheduler(): void {
@@ -1408,23 +1470,25 @@ async function notifyOperatorAdmins(
   await bulkInsertSmsQueue([authTable], rows as any, true);
 }
 
-/** 준비 시점 담당자 알림 — 실문안 1건 + 정지 안내 1건(무과금 인증 라인). admin_notified_at 기록. */
+/** 준비 시점 담당자 알림 — 실문안 1건 + 발송 정보(일시·타겟·비용)와 정지 안내 1건(무과금 인증 라인). admin_notified_at 기록. */
 async function sendAutoSendPrepNotice(
   operator: { adminPhoneNumbers: string[]; backupAdminPhone: string | null; companyId: string; name: string },
   proposalId: string,
   messageBody: string,
   scheduledSendAt: Date,
+  // ★ 2026-07-02 1단계 (Harold 스펙): 통지 2번 = 발송 일시 + 추출 타겟 수 + 예상 비용(단가 × 수량) + 정지 안내
+  info: { recipientCount: number; costEstimate: number; channelLabel: string; unitCost: number },
 ): Promise<void> {
   const when = scheduledSendAt.toLocaleString('ko-KR', {
     timeZone: 'Asia/Seoul', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false,
   });
   // 1. 실문안 (고객이 받을 본문 그대로)
   await notifyOperatorAdmins(operator, '[AI 자동마케팅] 발송 예정 문안', messageBody);
-  // 2. 정지 안내
+  // 2. 발송 정보 + 정지 안내 (순수 빌더 — autosend-policy.test.ts로 고정)
   await notifyOperatorAdmins(
     operator,
     '[AI 자동마케팅] 발송 예정 안내',
-    `${when}에 위 문안이 자동 발송됩니다. 원치 않으시면 그 전에 자동마케팅 메뉴에서 [정지]를 눌러주세요.`,
+    buildAutoSendPrepInfoBody({ sendAtLabel: when, ...info }),
   );
   await query(`UPDATE operator_proposals SET admin_notified_at = NOW() WHERE id = $1::uuid`, [proposalId]);
 }
@@ -1462,49 +1526,7 @@ async function resolveOptimalScheduledSendAt(companyId: string, leadMinutes: num
   }
 }
 
-function computeNextRun(
-  schedule: OperatorSchedule,
-  scheduleTime: string,
-  dayOfWeek: number | null = null,
-  dayOfMonth: number | null = null,
-): Date {
-  // KST 기준 schedule_time(HH:mm)에 다음 실행
-  const [hStr, mStr] = scheduleTime.split(':');
-  const h = parseInt(hStr) || 9;
-  const m = parseInt(mStr) || 0;
-
-  // 한국 시간 기준 — UTC = KST - 9h
-  const now = new Date();
-  const kstNow = new Date(now.getTime() + 9 * 60 * 60 * 1000); // UTC → KST
-  const target = new Date(kstNow);
-  target.setUTCHours(h, m, 0, 0);
-
-  if (schedule === 'weekly' && dayOfWeek != null) {
-    // 지정 요일(0=일~6=토)로 — 같은 요일이고 시간이 지났으면 다음 주
-    let diff = (dayOfWeek - target.getUTCDay() + 7) % 7;
-    if (diff === 0 && target.getTime() <= kstNow.getTime()) diff = 7;
-    target.setUTCDate(target.getUTCDate() + diff);
-  } else if (schedule === 'monthly' && dayOfMonth != null) {
-    // 지정 날짜로 — 말일 초과 시 그 달 말일로 클램프, 이번 달 지났으면 다음 달
-    const clampToMonth = (t: Date) => {
-      const last = new Date(Date.UTC(t.getUTCFullYear(), t.getUTCMonth() + 1, 0)).getUTCDate();
-      t.setUTCDate(Math.min(dayOfMonth, last));
-    };
-    target.setUTCDate(1);
-    clampToMonth(target);
-    if (target.getTime() <= kstNow.getTime()) {
-      target.setUTCMonth(target.getUTCMonth() + 1, 1);
-      clampToMonth(target);
-    }
-  } else if (target.getTime() <= kstNow.getTime()) {
-    // 요일/날짜 미지정 — 기존 fallback(현재 요일/날짜 유지)
-    if (schedule === 'daily') target.setUTCDate(target.getUTCDate() + 1);
-    else if (schedule === 'weekly') target.setUTCDate(target.getUTCDate() + 7);
-    else if (schedule === 'monthly') target.setUTCMonth(target.getUTCMonth() + 1);
-  }
-  // KST → UTC
-  return new Date(target.getTime() - 9 * 60 * 60 * 1000);
-}
+// (computeNextRun은 autosend-policy.ts computeNextOccurrence로 이동 — 2026-07-02 1단계 B, now 주입형 순수 CT)
 
 function mapRowToOperator(row: any): ContinuousOperator {
   return {
@@ -1542,6 +1564,8 @@ function mapRowToOperator(row: any): ContinuousOperator {
     spamScoreThreshold: Number(row.spam_score_threshold) || 30,
     maxSpamRetries: Number(row.max_spam_retries) || 3,
     autoSendLeadMinutes: row.auto_send_lead_minutes !== null && row.auto_send_lead_minutes !== undefined ? Number(row.auto_send_lead_minutes) : null,
+    // ★ 2026-07-02 1단계 B: 발송 시각 모드 (컬럼 미존재/ALTER 전 = undefined → 'fixed' 안전 기본)
+    sendTimeMode: normalizeSendTimeMode(row.send_time_mode),
     // ★ 2026-06-26: 발송 채널 + 관리자 입력 혜택
     channel: (['sms', 'lms', 'mms'].includes(row.channel) ? row.channel : 'lms') as 'sms' | 'lms' | 'mms',
     benefitContent: row.benefit_content || null,
