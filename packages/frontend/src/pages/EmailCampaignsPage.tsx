@@ -414,6 +414,12 @@ export default function EmailCampaignsPage() {
   };
 
   const openRecipientsModal = (c: EmailCampaign) => {
+    // ★ 2026-07-02(3) 미완성 = 발송 진입 차단 (버튼 미노출 + 함수 가드 + 백엔드 CAMPAIGN_NOT_COMPLETED 3중)
+    if (!c.completed) {
+      showToast('완성 저장(50크레딧) 후 발송할 수 있습니다. 편집기에서 [완성 저장]을 눌러주세요.', 'warning');
+      openEditor(c);
+      return;
+    }
     // 미입력 자리([…직접 입력…]) 잔존 = 발송 차단 (AI 임의 혜택 룰). 편집기로 유도해 채우게 한다.
     if (c.hasPlaceholder) {
       showToast('직접 입력이 필요한 자리가 남아 있습니다. 편집에서 채운 뒤 발송해주세요.', 'error');
@@ -803,7 +809,8 @@ export default function EmailCampaignsPage() {
                   {c.sentAt && <><span>·</span><span>발송 일자 {new Date(c.sentAt).toLocaleString('ko-KR')}</span></>}
                 </div>
                 <div className="mt-3 pt-2.5 border-t border-white/10 flex flex-wrap items-center gap-1.5">
-                  {(c.status === 'draft' || c.status === 'failed') && (
+                  {/* ★ 2026-07-02(3) Harold 지시 — 발송 버튼은 완성 저장(50크레딧) 후에만 생성. 임시저장(미완성) = 발송 버튼 자체 미노출 */}
+                  {(c.status === 'draft' || c.status === 'failed') && c.completed && (
                     <button
                       onClick={() => openRecipientsModal(c)}
                       disabled={sendingId === c.id || !smtpConfigured}
@@ -811,6 +818,15 @@ export default function EmailCampaignsPage() {
                     >
                       <Send className="w-3 h-3" />
                       {sendingId === c.id ? '발송 중...' : '발송'}
+                    </button>
+                  )}
+                  {(c.status === 'draft' || c.status === 'failed') && !c.completed && (
+                    <button
+                      onClick={() => openEditor(c)}
+                      className="inline-flex items-center gap-1 text-[11px] font-semibold bg-violet-500/20 hover:bg-violet-500/35 text-violet-200 border border-violet-400/30 px-2.5 py-1.5 rounded-lg"
+                      title="편집기에서 완성 저장(50크레딧)하면 발송 버튼이 열립니다"
+                    >
+                      <Lock className="w-3 h-3" /> 완성 저장 후 발송
                     </button>
                   )}
                   {c.sentCount > 0 && (
