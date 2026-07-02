@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
-  AlertCircle, AlertTriangle, ArrowLeft, BarChart3, Cake, Check, ChevronDown, ChevronUp, Clock,
-  Crown, Edit2, Eye, EyeOff, LayoutTemplate, Loader2, Lock, Mail, Moon, Newspaper, Package, PenLine, Plus,
-  RefreshCw, Repeat, Send, Server, Settings, ShieldCheck, ShoppingCart, Smartphone, Sparkles,
+  AlertCircle, AlertTriangle, ArrowLeft, BarChart3, Check, ChevronDown, ChevronUp, Clock,
+  Edit2, Eye, EyeOff, LayoutTemplate, Loader2, Lock, Mail, PenLine,
+  RefreshCw, Send, Server, Settings, ShieldCheck, Smartphone, Sparkles,
   Trash2, TrendingUp, Users, Wand2, X, Zap,
 } from 'lucide-react';
 import ConfirmModal, { ConfirmState } from '../components/ConfirmModal';
@@ -21,19 +21,10 @@ import TargetExtractModal, { type ExtractedTarget } from '../components/TargetEx
 import type { Section } from '../utils/dm-section-defaults';
 import type { EmailCampaign, CampaignStatus } from '../components/email/email-campaign-types';
 
-// ★ 2026-06-13: AI 빠른 시작 7 시나리오 (백엔드 EMAIL_SCENARIO_PRESETS key와 1:1)
-const EMAIL_QUICK_STARTS: Array<{ key: string; label: string; desc: string; icon: typeof Mail; grad: string }> = [
-  { key: 'cart', label: '장바구니 리마인드', desc: '결제 미완료 고객 재유도', icon: ShoppingCart, grad: 'from-rose-500 to-pink-500' },
-  { key: 'dormant', label: '휴면 재활성', desc: '오랜만에 다시 부르기', icon: Moon, grad: 'from-indigo-500 to-violet-500' },
-  { key: 'vip', label: 'VIP 감사', desc: '우수 고객 전용 인사', icon: Crown, grad: 'from-amber-500 to-orange-500' },
-  { key: 'new', label: '신상품 안내', desc: '새 상품·서비스 소개', icon: Package, grad: 'from-emerald-500 to-teal-500' },
-  { key: 'repurchase', label: '재구매 유도', desc: '재구매 시점 환기', icon: Repeat, grad: 'from-cyan-500 to-blue-500' },
-  { key: 'birthday', label: '생일 축하', desc: '생일 고객 축하 인사', icon: Cake, grad: 'from-fuchsia-500 to-pink-500' },
-  { key: 'newsletter', label: '뉴스레터', desc: '브랜드 소식 정기 발송', icon: Newspaper, grad: 'from-sky-500 to-indigo-500' },
-];
+// ★ 2026-07-02(3) 빠른 시작 7카드 제거 — 시작 방식은 [템플릿에서 시작]/[비주얼로 만들기] 2개 + 프롬프트 AI 생성으로 통일 (Harold 확정)
 
 // AI 생성 진행 단계 (시각 효과 — 700ms 간격)
-const EMAIL_GEN_STEPS = ['요청 의도 분석', '브랜드 톤 반영', '제목 3안 작성', '본문 구성', 'HTML 합성', '최종 점검'];
+const EMAIL_GEN_STEPS = ['요청 의도 분석', '브랜드 톤 반영', '제목 3안 작성', '본문 구성', '블록 합성', '최종 점검'];
 
 // ════════════════════════════════════════════════════════════════════
 // ★ D215+ (2026-05-25) Email 캠페인 전면 재작성 — SMTP relay 흐름
@@ -115,15 +106,8 @@ const EMPTY_SMTP_FORM = {
   from_name: '',
 };
 
-const EMPTY_CAMPAIGN_FORM: Partial<EmailCampaign> = {
-  name: '',
-  subject: '',
-  htmlBody: '<p>안녕하세요,</p>',
-  textBody: null,
-  fromName: '',
-  fromEmail: '',
-  isAd: false,
-};
+// ★ 2026-07-02(3) EMPTY_CAMPAIGN_FORM 제거 — 신규 진입은 템플릿/비주얼/프롬프트 전부 비주얼 편집기.
+//   레거시 HTML 폼은 기존 HTML 전용 캠페인 수정(openEditor 폴백)에만 쓰인다.
 
 // ════════════════════════════════════════════════════════════════════
 // 메인 컴포넌트
@@ -440,11 +424,13 @@ export default function EmailCampaignsPage() {
   };
 
   // ──────────────── AI 원샷 생성 (1클릭 = AI 자동 흐름 + 편집 모드 진입) ────────────────
-  const handleAiGenerate = async (opts: { scenario?: string; prompt?: string }) => {
+  // ★ 2026-07-02(3) 편집기 통일 (Harold 확정) — 레거시 HTML 폼(/ai/generate) 대신
+  //   블록 생성(/ai/generate-sections) → 비주얼 편집기로 진입. 시작 방식 = 템플릿/비주얼/프롬프트 전부 비주얼 편집기 1개.
+  const handleAiGenerate = async (opts: { prompt?: string }) => {
     if (customerGate.isEmpty) { setShowDataGate(true); return; }
     if (genStep !== null) return; // 중복 방지
-    if (!opts.scenario && !opts.prompt?.trim()) {
-      showToast('만들고 싶은 이메일을 한 줄로 입력하거나 빠른 시작을 골라주세요.', 'warning');
+    if (!opts.prompt?.trim()) {
+      showToast('만들고 싶은 이메일을 한 줄로 입력해주세요.', 'warning');
       return;
     }
     setGenStep(0);
@@ -453,10 +439,10 @@ export default function EmailCampaignsPage() {
       setGenStep((s) => (s === null ? 0 : Math.min(s + 1, EMAIL_GEN_STEPS.length - 1)));
     }, 700);
     try {
-      const res = await fetch('/api/email/ai/generate', {
+      const res = await fetch('/api/email/ai/generate-sections', {
         method: 'POST',
         headers: authHeaders(),
-        body: JSON.stringify({ scenario: opts.scenario, prompt: opts.prompt?.trim() || undefined, is_ad: aiAsAd }),
+        body: JSON.stringify({ prompt: opts.prompt.trim(), is_ad: aiAsAd }),
       });
       const data = await res.json();
       if (data?.code === 'INSUFFICIENT_CREDIT') { showToast('크레딧이 부족합니다. 충전 후 이용해주세요.', 'warning'); return; }
@@ -464,20 +450,14 @@ export default function EmailCampaignsPage() {
       if (data.success && data.data) {
         const g = data.data;
         setAiPrompt('');
-        setEditing({
-          ...EMPTY_CAMPAIGN_FORM,
-          name: g.name,
+        setVisualEditor({
+          sections: (g.sections || []) as Section[],
+          name: g.name || '',
           subject: (g.subjects && g.subjects[0]) || '',
-          subjects: g.subjects || [],
-          preheader: g.preheader || '',
-          htmlBody: g.htmlBody,
-          textBody: g.textBody || null,
           isAd: aiAsAd,
           aiGenerated: true,
-          fromEmail: smtpConfig?.fromEmail || '',
-          fromName: smtpConfig?.fromName || '한줄로AI',
         });
-        showToast('AI 생성 완료 — 내용을 확인하고 다듬어주세요. (3 크레딧)', 'success');
+        showToast('AI 생성 완료 — 비주얼 편집기에서 확인하고 다듬어주세요. (3 크레딧)', 'success');
       } else {
         showToast(data.error || 'AI 생성 실패', 'error');
       }
@@ -665,15 +645,8 @@ export default function EmailCampaignsPage() {
               <Sparkles className="w-3.5 h-3.5" />
               비주얼로 만들기
             </button>
-            <button
-              onClick={() => setEditing({ ...EMPTY_CAMPAIGN_FORM, fromEmail: smtpConfig?.fromEmail || '', fromName: smtpConfig?.fromName || '한줄로AI' })}
-              disabled={!smtpConfigured}
-              className="text-xs bg-gradient-to-r from-blue-500/40 to-sky-500/40 hover:from-blue-500/60 hover:to-sky-500/60 disabled:opacity-40 disabled:cursor-not-allowed text-blue-50 px-3 py-2 rounded-lg flex items-center gap-1.5 font-medium transition-colors border border-blue-400/30"
-              title={smtpConfigured ? undefined : 'SMTP 설정 완료 후 활용 가능'}
-            >
-              <Plus className="w-3.5 h-3.5" />
-              신규 캠페인
-            </button>
+            {/* ★ 2026-07-02(3) [신규 캠페인](레거시 HTML 폼) 진입 제거 — 시작 방식 = 템플릿/비주얼 2개로 통일.
+                레거시 폼은 기존 HTML 전용 캠페인 수정(openEditor 폴백)에만 유지 */}
           </div>
         </div>
       </div>
@@ -711,7 +684,7 @@ export default function EmailCampaignsPage() {
 
         {/* SMTP 상태·테스트 발송은 헤더의 칩·작은 모달로 이동 — 가로 큰 배너/카드 제거 */}
 
-        {/* ★ 2026-06-13: AI 원샷 생성 — 자연어 입력 + 빠른 시작 7 카드 (SMTP 완료 시) */}
+        {/* ★ 2026-07-02(3): AI 원샷 생성 — 자연어 프롬프트 1개만 (빠른 시작 카드 제거, 결과는 비주얼 편집기로) */}
         {smtpConfigured && (
           <div className="bg-gradient-to-br from-fuchsia-600/20 via-purple-600/15 to-indigo-600/20 border border-fuchsia-400/30 rounded-2xl p-5">
             {customerGate.isEmpty && <CustomerDataRequiredBanner className="mb-4" />}
@@ -743,28 +716,12 @@ export default function EmailCampaignsPage() {
                 {genStep !== null ? '생성 중...' : 'AI 생성'}
               </button>
             </div>
-            <label className="flex items-center gap-2 text-[11px] text-white/60 mb-3 cursor-pointer w-fit">
+            <label className="flex items-center gap-2 text-[11px] text-white/60 cursor-pointer w-fit">
               <input type="checkbox" checked={aiAsAd} onChange={(e) => setAiAsAd(e.target.checked)} disabled={genStep !== null} className="rounded" />
               광고성 이메일로 만들기 (발송 시 "(광고)" + 수신거부 링크 자동 부착)
             </label>
-            <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-2">
-              {EMAIL_QUICK_STARTS.map((qs) => (
-                <button
-                  key={qs.key}
-                  onClick={() => handleAiGenerate({ scenario: qs.key })}
-                  disabled={genStep !== null}
-                  className="group bg-white/5 hover:bg-white/10 border border-white/10 hover:border-white/25 rounded-xl p-3 text-left transition-all disabled:opacity-40 disabled:cursor-not-allowed"
-                >
-                  <div className={`w-8 h-8 rounded-lg bg-gradient-to-br ${qs.grad} flex items-center justify-center mb-2 shadow-md`}>
-                    <qs.icon className="w-4 h-4 text-white" />
-                  </div>
-                  <div className="text-xs font-semibold text-white leading-tight">{qs.label}</div>
-                  <div className="text-[10px] text-white/45 mt-0.5 leading-tight">{qs.desc}</div>
-                </button>
-              ))}
-            </div>
             <div className="text-[10px] text-white/30 italic mt-3">
-              Data source — 회사 Brand Voice 학습 결과 자동 반영 · 구체 혜택은 직접 입력
+              Data source — 회사 Brand Voice 학습 결과 자동 반영 · 구체 혜택은 직접 입력 · 완성된 골격은 [템플릿에서 시작]
             </div>
           </div>
         )}
