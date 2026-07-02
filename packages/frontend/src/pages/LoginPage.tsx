@@ -100,6 +100,9 @@ export default function LoginPage() {
 
       if (user.userType === 'super_admin') {
         navigate('/admin');
+      } else if (user.company?.usageType === 'agent') {
+        // ★ 2026-07-03 에이전트(QTmsg) 전용 회사 — 카카오&RCS 랜딩 (대시보드 차단)
+        navigate('/kakao-rcs');
       } else {
         navigate('/dashboard');
       }
@@ -167,7 +170,9 @@ export default function LoginPage() {
         body: JSON.stringify({ userId: tempUser.id, currentPassword: currentPw, newPassword: newPw }),
       });
       login({ ...tempUser, mustChangePassword: false }, tempToken);
-      if (tempUser.userType === 'super_admin') { navigate('/admin'); } else { navigate('/dashboard'); }
+      if (tempUser.userType === 'super_admin') { navigate('/admin'); }
+      else if (tempUser.company?.usageType === 'agent') { navigate('/kakao-rcs'); } // ★ 2026-07-03 에이전트 전용 랜딩
+      else { navigate('/dashboard'); }
     } catch (err: any) { setPwError('비밀번호 변경에 실패했습니다.'); }
     finally { setPwLoading(false); }
   };

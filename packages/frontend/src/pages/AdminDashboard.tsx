@@ -25,6 +25,7 @@ interface Company {
   plan_name: string;
   reject_number: string;
   created_at: string;
+  usage_type?: 'web' | 'agent' | 'both'; // ★ 2026-07-03 사용구분
 }
 
 interface Plan {
@@ -136,6 +137,7 @@ export default function AdminDashboard() {
     lineGroupId: '',
     kakaoEnabled: false,
     userIsolationEnabled: false,  // ★ D162-3 (2026-05-15) 수신거부 사용자격리 ON/OFF
+    usageType: 'web',  // ★ 2026-07-03 사용구분: web(웹발송) / agent(QTmsg 에이전트 전용) / both(둘다)
     useAiOrchestrator: false,  // ★ D190 #2 (2026-05-22) AI Orchestrator Tool Use 회사별 토글
     cdpAutoExecuteEnabled: false,  // ★ 2026-06-06 자동마케팅 자율발송 게이트
     cdpAutoExecuteMaxRecipients: 1000,
@@ -445,7 +447,76 @@ const [emailSending, setEmailSending] = useState(false);
     contactEmail: '',
     contactPhone: '',
     planId: '',
+    usageType: 'web',  // ★ 2026-07-03 사용구분: web / agent / both
   });
+
+  // ★ 2026-07-03 에이전트(QTmsg) 발송ID 매핑 관리 (수정 모달 내)
+  const [agentIds, setAgentIds] = useState<{ id: string; agent_send_id: string; memo: string | null }[]>([]);
+  const [newAgentSendId, setNewAgentSendId] = useState('');
+  const [newAgentMemo, setNewAgentMemo] = useState('');
+  const [agentIdSaving, setAgentIdSaving] = useState(false);
+
+  const loadAgentIds = async (companyId: string) => {
+    try {
+      const token = localStorage.getItem('token');
+      const res = await fetch(`/api/companies/${companyId}/agent-ids`, {
+        headers: { 'Authorization': `Bearer ${token}` },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setAgentIds(data.agentIds || []);
+      } else {
+        setAgentIds([]);
+      }
+    } catch {
+      setAgentIds([]);
+    }
+  };
+
+  const handleAddAgentId = async () => {
+    const value = newAgentSendId.trim();
+    if (!value || !editCompany.id) return;
+    setAgentIdSaving(true);
+    try {
+      const token = localStorage.getItem('token');
+      const res = await fetch(`/api/companies/${editCompany.id}/agent-ids`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({ agentSendId: value, memo: newAgentMemo.trim() }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        showAlert('오류', data.error || '발송ID 등록 실패', 'error');
+      } else {
+        setNewAgentSendId('');
+        setNewAgentMemo('');
+        await loadAgentIds(editCompany.id);
+      }
+    } catch {
+      showAlert('오류', '서버 오류', 'error');
+    } finally {
+      setAgentIdSaving(false);
+    }
+  };
+
+  const handleRemoveAgentId = async (rowId: string) => {
+    if (!editCompany.id) return;
+    try {
+      const token = localStorage.getItem('token');
+      const res = await fetch(`/api/companies/${editCompany.id}/agent-ids/${rowId}`, {
+        method: 'DELETE',
+        headers: { 'Authorization': `Bearer ${token}` },
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        showAlert('오류', data.error || '발송ID 삭제 실패', 'error');
+      } else {
+        await loadAgentIds(editCompany.id);
+      }
+    } catch {
+      showAlert('오류', '서버 오류', 'error');
+    }
+  };
 
   // 신규 사용자 폼
   const [newUser, setNewUser] = useState({
@@ -1863,6 +1934,7 @@ const handleApproveRequest = async (id: string) => {
         contactEmail: '',
         contactPhone: '',
         planId: '',
+        usageType: 'web',
       });
       loadData();
       showAlert('성공', '고객사가 생성되었습니다.', 'success');
@@ -2121,6 +2193,7 @@ const handleApproveRequest = async (id: string) => {
           lineGroupId: c.line_group_id || '',
           kakaoEnabled: c.kakao_enabled ?? false,
           userIsolationEnabled: c.user_isolation_enabled ?? false,  // ★ D162-3 수신거부 사용자격리
+          usageType: c.usage_type || 'web',  // ★ 2026-07-03 사용구분
           useAiOrchestrator: c.use_ai_orchestrator ?? false,  // ★ D190 #2 AI Orchestrator
           cdpAutoExecuteEnabled: c.cdp_auto_execute_enabled ?? false,  // ★ 2026-06-06 자동마케팅 자율발송 게이트
           cdpAutoExecuteMaxRecipients: c.cdp_auto_execute_max_recipients ?? 1000,
@@ -2135,6 +2208,10 @@ const handleApproveRequest = async (id: string) => {
           aiOperatorTrialUntil: c.ai_operator_trial_until || '',
         });
         setEditCompanyTab('basic');
+        // ★ 2026-07-03 에이전트 발송ID 매핑 로드 (사용구분 관리)
+        setNewAgentSendId('');
+        setNewAgentMemo('');
+        loadAgentIds(c.id);
         setShowEditCompanyModal(true);
       }
     } catch (error) {
@@ -2731,6 +2808,7 @@ const handleApproveRequest = async (id: string) => {
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 whitespace-nowrap">코드</th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 whitespace-nowrap">회사명</th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 whitespace-nowrap">담당자</th>
+                    <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 whitespace-nowrap">사용구분</th>
                     <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 whitespace-nowrap">요금제</th>
                     <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 whitespace-nowrap">상태</th>
                     <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 whitespace-nowrap">고객 수</th>
@@ -2741,7 +2819,7 @@ const handleApproveRequest = async (id: string) => {
                 <tbody className="divide-y divide-gray-200">
                 {filteredCompanies.length === 0 ? (
                     <tr>
-                      <td colSpan={8} className="px-6 py-12 text-center text-gray-500">
+                      <td colSpan={9} className="px-6 py-12 text-center text-gray-500">
                         {companies.length === 0 ? '등록된 고객사가 없습니다.' : '검색 결과가 없습니다.'}
                       </td>
                     </tr>
@@ -2755,6 +2833,16 @@ const handleApproveRequest = async (id: string) => {
                         </td>
                         <td className="px-4 py-3 text-gray-900">{company.company_name}</td>
                         <td className="px-4 py-3 text-gray-500">{company.contact_name || '-'}</td>
+                        <td className="px-4 py-3 text-center whitespace-nowrap">
+                          {/* ★ 2026-07-03 사용구분 배지 */}
+                          {company.usage_type === 'agent' ? (
+                            <span className="inline-block px-2 py-0.5 rounded-full text-xs bg-amber-100 text-amber-700">에이전트</span>
+                          ) : company.usage_type === 'both' ? (
+                            <span className="inline-block px-2 py-0.5 rounded-full text-xs bg-purple-100 text-purple-700">둘다</span>
+                          ) : (
+                            <span className="inline-block px-2 py-0.5 rounded-full text-xs bg-blue-50 text-blue-600">웹</span>
+                          )}
+                        </td>
                         <td className="px-4 py-3 text-center text-gray-500 whitespace-nowrap">{company.plan_name || '-'}</td>
                         <td className="px-4 py-3 text-center">{getStatusBadge(company.status)}</td>
                         <td className="px-4 py-3 text-center text-gray-500 whitespace-nowrap">
@@ -4970,6 +5058,38 @@ const handleApproveRequest = async (id: string) => {
                   ))}
                 </select>
               </div>
+              {/* ★ 2026-07-03 사용구분 — web(웹발송) / agent(QTmsg 에이전트 전용) / both(둘다) */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  사용구분 *
+                </label>
+                <div className="grid grid-cols-3 gap-2">
+                  {([
+                    { value: 'web', label: '웹발송', desc: '한줄로 전체 기능' },
+                    { value: 'agent', label: '에이전트', desc: '카카오템플릿+결과만' },
+                    { value: 'both', label: '둘다', desc: '웹+에이전트 통합' },
+                  ] as const).map((opt) => (
+                    <button
+                      key={opt.value}
+                      type="button"
+                      onClick={() => setNewCompany({ ...newCompany, usageType: opt.value })}
+                      className={`px-2 py-2 rounded-lg border text-center transition ${
+                        newCompany.usageType === opt.value
+                          ? 'border-blue-500 bg-blue-50 text-blue-700'
+                          : 'border-gray-200 text-gray-600 hover:bg-gray-50'
+                      }`}
+                    >
+                      <div className="text-sm font-medium">{opt.label}</div>
+                      <div className="text-[10px] text-gray-400 mt-0.5">{opt.desc}</div>
+                    </button>
+                  ))}
+                </div>
+                {newCompany.usageType === 'agent' && (
+                  <p className="text-xs text-amber-600 mt-1.5">
+                    에이전트 전용 계정은 로그인 시 카카오 템플릿 관리만 접근 가능합니다 (대시보드 차단).
+                  </p>
+                )}
+              </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
                   담당 분류 코드
@@ -5607,6 +5727,81 @@ const handleApproveRequest = async (id: string) => {
                       <option value="terminated">해지</option>
                     </select>
                   </div>
+                  {/* ★ 2026-07-03 사용구분 + 에이전트 발송ID 매핑 */}
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">사용구분 *</label>
+                    <div className="grid grid-cols-3 gap-2">
+                      {([
+                        { value: 'web', label: '웹발송', desc: '한줄로 전체 기능' },
+                        { value: 'agent', label: '에이전트', desc: '카카오템플릿+결과만' },
+                        { value: 'both', label: '둘다', desc: '웹+에이전트 통합' },
+                      ] as const).map((opt) => (
+                        <button
+                          key={opt.value}
+                          type="button"
+                          onClick={() => setEditCompany({ ...editCompany, usageType: opt.value })}
+                          className={`px-2 py-2 rounded-lg border text-center transition ${
+                            editCompany.usageType === opt.value
+                              ? 'border-blue-500 bg-blue-50 text-blue-700'
+                              : 'border-gray-200 text-gray-600 hover:bg-gray-50'
+                          }`}
+                        >
+                          <div className="text-sm font-medium">{opt.label}</div>
+                          <div className="text-[10px] text-gray-400 mt-0.5">{opt.desc}</div>
+                        </button>
+                      ))}
+                    </div>
+                    {editCompany.usageType === 'agent' && (
+                      <p className="text-xs text-amber-600 mt-1.5">
+                        에이전트 전용 계정은 로그인 시 카카오 템플릿 관리만 접근 가능합니다 (대시보드 차단). 다음 로그인부터 적용됩니다.
+                      </p>
+                    )}
+                  </div>
+                  {(editCompany.usageType === 'agent' || editCompany.usageType === 'both') && (
+                    <div className="rounded-lg border border-gray-200 bg-gray-50/60 p-3">
+                      <p className="text-sm font-semibold text-gray-800">에이전트 발송ID 매핑</p>
+                      <p className="text-xs text-gray-500 mt-0.5 mb-2">이 회사에 속한 QTmsg 발송ID 목록. 발송량 조회·정산 합산의 기준이 됩니다.</p>
+                      {agentIds.length > 0 ? (
+                        <div className="space-y-1.5 mb-2">
+                          {agentIds.map((a) => (
+                            <div key={a.id} className="flex items-center justify-between bg-white rounded-lg border border-gray-200 px-3 py-1.5">
+                              <div className="min-w-0">
+                                <span className="text-sm font-mono text-gray-800">{a.agent_send_id}</span>
+                                {a.memo && <span className="ml-2 text-xs text-gray-400">{a.memo}</span>}
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => handleRemoveAgentId(a.id)}
+                                className="text-xs text-red-500 hover:text-red-700 shrink-0 ml-2"
+                              >
+                                해제
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <p className="text-xs text-gray-400 mb-2">등록된 발송ID가 없습니다.</p>
+                      )}
+                      <div className="flex gap-2">
+                        <input type="text" value={newAgentSendId}
+                          onChange={(e) => setNewAgentSendId(e.target.value)}
+                          className="flex-1 px-3 py-1.5 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+                          placeholder="발송ID" />
+                        <input type="text" value={newAgentMemo}
+                          onChange={(e) => setNewAgentMemo(e.target.value)}
+                          className="w-28 px-3 py-1.5 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+                          placeholder="메모(선택)" />
+                        <button
+                          type="button"
+                          onClick={handleAddAgentId}
+                          disabled={agentIdSaving || !newAgentSendId.trim()}
+                          className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-300 text-white rounded-lg text-sm shrink-0"
+                        >
+                          {agentIdSaving ? '등록 중...' : '추가'}
+                        </button>
+                      </div>
+                    </div>
+                  )}
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">구독 상태 *</label>
                     <select value={editCompany.subscriptionStatus}

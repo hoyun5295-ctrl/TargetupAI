@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback, createContext, useContext } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, useNavigate, useLocation } from 'react-router-dom';
-import { useAuthStore } from './stores/authStore';
+import { useAuthStore, isAgentOnlyCompany } from './stores/authStore';
 import { useSessionGuard } from './hooks/useSessionGuard';
 import { useSessionTimeout } from './hooks/useSessionTimeout';
 import SessionTimeoutModal from './components/SessionTimeoutModal';
@@ -70,9 +70,14 @@ export const SessionTimerContext = createContext<SessionTimerContextType>({
   extendSession: () => {},
 });
 
+// ★ 2026-07-03 에이전트(QTmsg) 전용 회사 허용 라우트 — 이 외 전 라우트는 /kakao-rcs로 회수.
+//   메뉴 숨김이 아니라 라우트 자체 차단 (URL 직접 입력 누수 방지). 동종 메시징 업체 대시보드 노출 차단이 목적.
+const AGENT_ALLOWED_PATHS = ['/kakao-rcs'];
+
 // 인증 필요 라우트
 function PrivateRoute({ children, allowedTypes }: { children: React.ReactNode; allowedTypes?: string[] }) {
   const { isAuthenticated, user } = useAuthStore();
+  const location = useLocation();
 
   if (!isAuthenticated) {
     return <Navigate to="/login" replace />;
@@ -80,6 +85,11 @@ function PrivateRoute({ children, allowedTypes }: { children: React.ReactNode; a
 
   if (allowedTypes && user && !allowedTypes.includes(user.userType)) {
     return <Navigate to="/login" replace />;
+  }
+
+  // ★ 2026-07-03 에이전트 전용 게이팅 — 허용 목록 외 전부 /kakao-rcs
+  if (isAgentOnlyCompany(user) && !AGENT_ALLOWED_PATHS.includes(location.pathname)) {
+    return <Navigate to="/kakao-rcs" replace />;
   }
 
   return <>{children}</>;
@@ -267,6 +277,9 @@ function App() {
             isAuthenticated ? (
               user?.userType === 'super_admin' ? (
                 <Navigate to="/admin" replace />
+              ) : isAgentOnlyCompany(user) ? (
+                // ★ 2026-07-03 에이전트 전용 회사 — 카카오&RCS 랜딩
+                <Navigate to="/kakao-rcs" replace />
               ) : (
                 <Navigate to="/dashboard" replace />
               )

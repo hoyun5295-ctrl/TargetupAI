@@ -11,7 +11,14 @@ interface User {
     id: string;
     name: string;
     code: string;
+    // ★ 2026-07-03 사용구분: web(웹발송) / agent(QTmsg 에이전트 전용 — 메뉴 게이팅) / both
+    usageType?: 'web' | 'agent' | 'both';
   };
+}
+
+// ★ 2026-07-03 에이전트 전용 회사 여부 (usage_type='agent' → 카카오&RCS + 발송결과만 허용)
+export function isAgentOnlyCompany(user: User | null): boolean {
+  return user?.company?.usageType === 'agent';
 }
 
 interface AuthState {

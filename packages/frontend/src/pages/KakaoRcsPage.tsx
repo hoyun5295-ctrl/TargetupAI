@@ -1,5 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
+// ★ 2026-07-03 에이전트(QTmsg) 전용 회사 게이팅 — 요금제 가드 면제 + 알림톡 탭만 + 로그아웃 버튼
+import { useAuthStore, isAgentOnlyCompany } from '../stores/authStore';
 import RcsTemplateFormModal from '../components/RcsTemplateFormModal';
 import BrandMessageEditor from '../components/BrandMessageEditor';
 import DirectTargetFilterModal from '../components/DirectTargetFilterModal';
@@ -25,6 +27,9 @@ const STATUS_BADGE: Record<string, { label: string; bg: string; text: string }> 
 
 export default function KakaoRcsPage() {
   const navigate = useNavigate();
+  // ★ 2026-07-03 에이전트 전용 회사: 요금제 가드 면제 + 알림톡 탭만 노출 + 헤더 = 로그아웃
+  const { user, logout } = useAuthStore();
+  const isAgentOnly = isAgentOnlyCompany(user);
   const [activeTab, setActiveTab] = useState<Tab>('alimtalk');
   // ★ D150-2 (2026-05-09): 브랜드 sub-tab (템플릿 관리 / 발송)
   const [brandSubTab, setBrandSubTab] = useState<BrandSubTab>('template');
@@ -128,13 +133,17 @@ export default function KakaoRcsPage() {
 
   const tabs = [
     { key: 'alimtalk' as Tab, label: '알림톡 템플릿', icon: '💬', color: 'amber' },
-    { key: 'brand' as Tab, label: '브랜드메시지', icon: '📢', color: 'blue' },
-    { key: 'rcs' as Tab, label: 'RCS 템플릿', icon: '📱', color: 'purple' },
+    // ★ 2026-07-03 에이전트 전용 회사 = 알림톡 템플릿만 (브랜드메시지·RCS 탭 숨김)
+    ...(isAgentOnly ? [] : [
+      { key: 'brand' as Tab, label: '브랜드메시지', icon: '📢', color: 'blue' },
+      { key: 'rcs' as Tab, label: 'RCS 템플릿', icon: '📱', color: 'purple' },
+    ]),
   ];
 
   // ★ ENTERPRISE 전용 페이지 가드 — planCode 로드 후 비-ENTERPRISE는 블러 프리뷰 + CTA
   //   AutoSendPage 게이팅 패턴 미러. planCode 미로드 시(빈 문자열)는 깜빡임 방지를 위해 통과.
-  if (planCode && planCode !== 'ENTERPRISE') {
+  //   ★ 2026-07-03 에이전트 전용 회사는 요금제 무관 면제 (카카오 템플릿 등록이 계정 목적 그 자체)
+  if (!isAgentOnly && planCode && planCode !== 'ENTERPRISE') {
     return (
       <div className="min-h-screen bg-gray-50">
         <div className="bg-white border-b border-gray-200">
@@ -192,13 +201,21 @@ export default function KakaoRcsPage() {
       <div className="bg-white border-b border-gray-200">
         <div className="max-w-6xl mx-auto px-6 py-5 flex items-center justify-between">
           <div>
-            <h1 className="text-xl font-bold text-gray-900">카카오 & RCS</h1>
-            <p className="text-sm text-gray-500 mt-0.5">알림톡 템플릿, 브랜드메시지, RCS 관리</p>
+            <h1 className="text-xl font-bold text-gray-900">{isAgentOnly ? '카카오 템플릿 관리' : '카카오 & RCS'}</h1>
+            <p className="text-sm text-gray-500 mt-0.5">{isAgentOnly ? '알림톡 템플릿 등록 · 검수 관리' : '알림톡 템플릿, 브랜드메시지, RCS 관리'}</p>
           </div>
-          <button onClick={() => navigate('/')}
-            className="px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-600 rounded-lg text-sm transition">
-            ← 대시보드
-          </button>
+          {isAgentOnly ? (
+            // ★ 2026-07-03 에이전트 전용 회사 — 대시보드 진입점 제거, 로그아웃만
+            <button onClick={() => { logout(); navigate('/login'); }}
+              className="px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-600 rounded-lg text-sm transition">
+              로그아웃
+            </button>
+          ) : (
+            <button onClick={() => navigate('/')}
+              className="px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-600 rounded-lg text-sm transition">
+              ← 대시보드
+            </button>
+          )}
         </div>
       </div>
 

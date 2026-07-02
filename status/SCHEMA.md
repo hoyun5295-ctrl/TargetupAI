@@ -70,6 +70,7 @@
 | 53 | short_urls | 전단AI 단축URL (Phase 1) |
 | 54 | url_clicks | 전단AI 클릭 로그 (Phase 1) |
 | 55 | login_blocks | 로그인 차단 (D145 P0, 2026-05-07 — IP+loginId 쌍 5회/10분 자동 차단 30분) |
+| 56 | company_agent_ids | 에이전트(QTmsg) 발송ID ↔ 회사 매핑 (2026-07-03 신설) |
 
 ---
 
@@ -350,6 +351,17 @@
 | send_hour_end | integer | ★ 실측 레거시(send_end_hour 우선) |
 | holiday_send | boolean | ★ 실측 레거시(holiday_send_allowed 우선) |
 | duplicate_days | integer | ★ 실측 레거시(duplicate_prevention_days 우선) |
+| usage_type | varchar(10) | ★ 2026-07-03 실측 (사용구분: web/agent/both, NOT NULL DEFAULT 'web' + CHECK. agent=QTmsg 에이전트 전용 게이팅) |
+
+### company_agent_ids (에이전트 발송ID 매핑 — 2026-07-03 신설 실측)
+| 컬럼 | 타입 |
+|------|------|
+| id | uuid PK DEFAULT gen_random_uuid() |
+| company_id | uuid FK → companies ON DELETE CASCADE |
+| agent_send_id | varchar(100) NOT NULL UNIQUE (QTmsg 발송ID — 전역 유일, 역매핑용) |
+| memo | varchar(200) |
+| created_at | timestamptz NOT NULL DEFAULT NOW() |
+- INDEX idx_company_agent_ids_company (company_id)
 
 ### company_settings (고객사 설정 KV)
 | 컬럼 | 타입 |

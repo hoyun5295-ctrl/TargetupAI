@@ -1435,7 +1435,13 @@ router.post('/', requireSuperAdmin, async (req: Request, res: Response) => {
       address,
       planId,
       dataInputMethod = 'file',
+      usageType = 'web', // ★ 2026-07-03 사용구분: web(웹발송) / agent(QTmsg 에이전트 전용) / both(둘다)
     } = req.body;
+
+    // usage_type CHECK 제약과 동일 검증 (DB 에러 전에 사용자 친화 차단)
+    if (!['web', 'agent', 'both'].includes(usageType)) {
+      return res.status(400).json({ error: 'usageType은 web/agent/both 중 하나여야 합니다.' });
+    }
 
     const apiKey = `tk_${crypto.randomBytes(24).toString('hex')}`;
     const apiSecret = crypto.randomBytes(32).toString('hex');
@@ -1446,14 +1452,14 @@ router.post('/', requireSuperAdmin, async (req: Request, res: Response) => {
         name, company_code, company_name, business_number, ceo_name,
         contact_name, contact_email, contact_phone, address,
         plan_id, data_input_method, api_key, api_secret, db_name,
-        created_by
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+        created_by, usage_type
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
       RETURNING *`,
       [
         companyName, companyCode, companyName, businessNumber, ceoName,
         contactName, contactEmail, contactPhone, address,
         planId, dataInputMethod, apiKey, apiSecret, dbName,
-        req.user?.userId
+        req.user?.userId, usageType
       ]
     );
 
@@ -1485,6 +1491,15 @@ router.post('/', requireSuperAdmin, async (req: Request, res: Response) => {
     console.error('고객사 생성 에러:', error);
     if (error.code === '23505') {
       return res.status(400).json({ error: '이미 존재하는 고객사 코드입니다.' });
+    }
+    // ★ 2026-07-03 db_alter_safety_net: usage_type 컬럼 미마이그레이션 서버 방어
+    const msg = error?.message || '';
+    if (msg.includes('column') && msg.includes('does not exist')) {
+      return res.status(503).json({
+        success: false,
+        error: 'DB 마이그레이션 필요 — 운영자에게 companies.usage_type ALTER 실행 요청',
+        code: 'DB_MIGRATION_PENDING',
+      });
     }
     return res.status(500).json({ error: '서버 오류가 발생했습니다.' });
   }
@@ -1778,7 +1793,13 @@ router.put('/:id', requireUuidId, requireSuperAdmin, async (req: Request, res: R
       approvalRequired,
       // 분류코드
       storeCodeList,
+      // ★ 2026-07-03 사용구분: web / agent / both
+      usageType,
     } = req.body;
+
+    if (usageType !== undefined && !['web', 'agent', 'both'].includes(usageType)) {
+      return res.status(400).json({ error: 'usageType은 web/agent/both 중 하나여야 합니다.' });
+    }
 
     const result = await query(
       `UPDATE companies SET
@@ -1808,8 +1829,9 @@ router.put('/:id', requireUuidId, requireSuperAdmin, async (req: Request, res: R
         excluded_segments = COALESCE($23, excluded_segments),
         approval_required = COALESCE($24, approval_required),
         store_code_list = COALESCE($25, store_code_list),
+        usage_type = COALESCE($26, usage_type),
         updated_at = CURRENT_TIMESTAMP
-      WHERE id = $26
+      WHERE id = $27
       RETURNING *`,
       [
         companyName, businessNumber, ceoName, contactName,
@@ -1822,6 +1844,7 @@ router.put('/:id', requireUuidId, requireSuperAdmin, async (req: Request, res: R
         excludedSegments ? JSON.stringify(excludedSegments) : null,
         approvalRequired,
         storeCodeList ? JSON.stringify(storeCodeList) : null,
+        usageType,
         id
       ]
     );
@@ -1834,8 +1857,134 @@ router.put('/:id', requireUuidId, requireSuperAdmin, async (req: Request, res: R
       message: '고객사가 수정되었습니다.',
       company: result.rows[0],
     });
-  } catch (error) {
+  } catch (error: any) {
     console.error('고객사 수정 에러:', error);
+    // ★ 2026-07-03 db_alter_safety_net: usage_type 컬럼 미마이그레이션 서버 방어
+    const msg = error?.message || '';
+    if (msg.includes('column') && msg.includes('does not exist')) {
+      return res.status(503).json({
+        success: false,
+        error: 'DB 마이그레이션 필요 — 운영자에게 companies.usage_type ALTER 실행 요청',
+        code: 'DB_MIGRATION_PENDING',
+      });
+    }
+    return res.status(500).json({ error: '서버 오류가 발생했습니다.' });
+  }
+});
+
+// ============================================================
+// ★ 2026-07-03 에이전트(QTmsg) 발송ID 매핑 CRUD (슈퍼관리자 전용)
+//   company_agent_ids: 회사 1 : 에이전트 발송ID N (agent_send_id 전역 UNIQUE — 역매핑 보장)
+//   usage_type='agent'/'both' 회사의 QTmsg 발송량 조회·정산 합산의 기준 축.
+// ============================================================
+
+// GET /api/companies/:id/agent-ids - 회사의 에이전트 발송ID 목록
+router.get('/:id/agent-ids', requireUuidId, requireSuperAdmin, async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const result = await query(
+      `SELECT id, agent_send_id, memo, created_at
+       FROM company_agent_ids WHERE company_id = $1 ORDER BY created_at ASC`,
+      [id]
+    );
+    return res.json({ agentIds: result.rows });
+  } catch (error: any) {
+    console.error('에이전트 발송ID 목록 조회 에러:', error);
+    const msg = error?.message || '';
+    if ((msg.includes('relation') || msg.includes('column')) && msg.includes('does not exist')) {
+      return res.status(503).json({
+        success: false,
+        error: 'DB 마이그레이션 필요 — 운영자에게 company_agent_ids CREATE 실행 요청',
+        code: 'DB_MIGRATION_PENDING',
+      });
+    }
+    return res.status(500).json({ error: '서버 오류가 발생했습니다.' });
+  }
+});
+
+// POST /api/companies/:id/agent-ids - 에이전트 발송ID 등록
+router.post('/:id/agent-ids', requireUuidId, requireSuperAdmin, async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const agentSendId = String((req.body as any)?.agentSendId || '').trim();
+    const memo = String((req.body as any)?.memo || '').trim() || null;
+
+    if (!agentSendId) {
+      return res.status(400).json({ error: 'agentSendId는 필수입니다.' });
+    }
+    if (agentSendId.length > 100) {
+      return res.status(400).json({ error: 'agentSendId는 100자 이하여야 합니다.' });
+    }
+
+    const result = await query(
+      `INSERT INTO company_agent_ids (company_id, agent_send_id, memo)
+       VALUES ($1, $2, $3)
+       RETURNING id, agent_send_id, memo, created_at`,
+      [id, agentSendId, memo]
+    );
+    return res.status(201).json({ agentId: result.rows[0] });
+  } catch (error: any) {
+    console.error('에이전트 발송ID 등록 에러:', error);
+    if (error.code === '23505') {
+      // agent_send_id 전역 UNIQUE — 어느 회사에 이미 매핑됐는지 안내
+      try {
+        const dup = await query(
+          `SELECT c.company_name FROM company_agent_ids a
+           JOIN companies c ON c.id = a.company_id
+           WHERE a.agent_send_id = $1`,
+          [String((req.body as any)?.agentSendId || '').trim()]
+        );
+        const owner = dup.rows[0]?.company_name;
+        return res.status(400).json({
+          error: owner
+            ? `이미 "${owner}"에 매핑된 발송ID입니다.`
+            : '이미 다른 회사에 매핑된 발송ID입니다.',
+        });
+      } catch {
+        return res.status(400).json({ error: '이미 다른 회사에 매핑된 발송ID입니다.' });
+      }
+    }
+    if (error.code === '23503') {
+      return res.status(404).json({ error: '고객사를 찾을 수 없습니다.' });
+    }
+    const msg = error?.message || '';
+    if ((msg.includes('relation') || msg.includes('column')) && msg.includes('does not exist')) {
+      return res.status(503).json({
+        success: false,
+        error: 'DB 마이그레이션 필요 — 운영자에게 company_agent_ids CREATE 실행 요청',
+        code: 'DB_MIGRATION_PENDING',
+      });
+    }
+    return res.status(500).json({ error: '서버 오류가 발생했습니다.' });
+  }
+});
+
+// DELETE /api/companies/:id/agent-ids/:agentIdRowId - 에이전트 발송ID 매핑 해제
+router.delete('/:id/agent-ids/:agentIdRowId', requireUuidId, requireSuperAdmin, async (req: Request, res: Response) => {
+  try {
+    const { id, agentIdRowId } = req.params;
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(agentIdRowId)) {
+      return res.status(400).json({ error: '잘못된 ID 형식입니다.' });
+    }
+    // 효과 검증: 삭제 후 잔존 확인 (RETURNING으로 실제 삭제 행 확정)
+    const result = await query(
+      `DELETE FROM company_agent_ids WHERE id = $1 AND company_id = $2 RETURNING id`,
+      [agentIdRowId, id]
+    );
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: '매핑을 찾을 수 없습니다.' });
+    }
+    return res.json({ message: '발송ID 매핑이 해제되었습니다.' });
+  } catch (error: any) {
+    console.error('에이전트 발송ID 삭제 에러:', error);
+    const msg = error?.message || '';
+    if ((msg.includes('relation') || msg.includes('column')) && msg.includes('does not exist')) {
+      return res.status(503).json({
+        success: false,
+        error: 'DB 마이그레이션 필요 — 운영자에게 company_agent_ids CREATE 실행 요청',
+        code: 'DB_MIGRATION_PENDING',
+      });
+    }
     return res.status(500).json({ error: '서버 오류가 발생했습니다.' });
   }
 });

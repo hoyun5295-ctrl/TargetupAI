@@ -204,7 +204,7 @@ router.post('/login', loginLimiter, async (req: Request, res: Response) => {
 
     // ===== 고객사 사용자 로그인 =====
     const result = await query(
-      `SELECT u.*, u.must_change_password, u.hidden_features, c.company_name as company_name, c.id as company_code, c.subscription_status
+      `SELECT u.*, u.must_change_password, u.hidden_features, c.company_name as company_name, c.id as company_code, c.subscription_status, c.usage_type
        FROM users u
        JOIN companies c ON u.company_id = c.id
        WHERE u.login_id = $1`,
@@ -270,6 +270,17 @@ router.post('/login', loginLimiter, async (req: Request, res: Response) => {
         [user.id, JSON.stringify({ loginId, reason: 'not_company_admin', companyName: user.company_name }), req.ip, req.headers['user-agent'] || '']
       );
       return res.status(403).json({ error: '고객사 관리자 권한이 없습니다.' });
+    }
+
+    // ===== ★ 2026-07-03 에이전트(QTmsg) 전용 회사 — 고객사 관리자 페이지(app) 접속 차단 =====
+    //   에이전트 전용 계정 허용 화면 = hanjul.ai 카카오 템플릿 관리만. 발송통계/고객DB 노출 차단.
+    if (loginSource === 'company-admin' && (user.usage_type || 'web') === 'agent') {
+      await query(
+        `INSERT INTO audit_logs (id, user_id, action, target_type, details, ip_address, user_agent, created_at)
+         VALUES (gen_random_uuid(), $1, 'login_blocked', 'user', $2, $3, $4, NOW())`,
+        [user.id, JSON.stringify({ loginId, reason: 'agent_only_company', companyName: user.company_name }), req.ip, req.headers['user-agent'] || '']
+      );
+      return res.status(403).json({ error: '에이전트 전용 계정은 이 페이지를 사용할 수 없습니다.' });
     }
 
     // ===== ★ D111 P0: app_source 단위 단일 세션 =====
@@ -338,6 +349,8 @@ router.post('/login', loginLimiter, async (req: Request, res: Response) => {
           code: user.company_code,
           kakaoEnabled,
           subscriptionStatus: user.subscription_status || 'trial',
+          // ★ 2026-07-03 사용구분: web(웹발송) / agent(QTmsg 에이전트 전용 — 메뉴 게이팅) / both
+          usageType: user.usage_type || 'web',
         },
       },
       sessionTimeoutMinutes,

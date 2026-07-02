@@ -440,9 +440,14 @@ router.put('/companies/:id', authenticate, requireSuperAdmin, async (req: Reques
     allowCallbackSelfRegister, maxUsers, sessionTimeoutMinutes,
     approvalRequired, targetStrategy, lineGroupId, kakaoEnabled,
     subscriptionStatus,
-    userIsolationEnabled  // ★ D162-3 (2026-05-15) 수신거부 사용자격리 ON/OFF
+    userIsolationEnabled,  // ★ D162-3 (2026-05-15) 수신거부 사용자격리 ON/OFF
+    usageType,  // ★ 2026-07-03 사용구분: web / agent / both
   } = req.body;
-  
+
+  if (usageType !== undefined && !['web', 'agent', 'both'].includes(usageType)) {
+    return res.status(400).json({ error: 'usageType은 web/agent/both 중 하나여야 합니다.' });
+  }
+
   try {
     // ★ CT-17: planId 변경 시 TRIAL plan이면 'trial' 유지, 그 외 유료 플랜이면 'paid'(정식 구독).
     //   (과거 버그 ①: planId 있으면 무조건 'active'로 덮어써서 grant-trial 직후 재저장 시 체험 상태 파괴)
@@ -495,11 +500,12 @@ router.put('/companies/:id', authenticate, requireSuperAdmin, async (req: Reques
           line_group_id = COALESCE($29, line_group_id),
           kakao_enabled = COALESCE($30, kakao_enabled),
           user_isolation_enabled = COALESCE($33, user_isolation_enabled),
+          usage_type = COALESCE($34, usage_type),
           -- subscription_status는 위 plan_id CASE문에서 처리
           updated_at = NOW()
       WHERE id = $32
       RETURNING *
-    `, [companyName, contactName, contactEmail, contactPhone, status, planId, rejectNumber, brandName, sendHourStart, sendHourEnd, dailyLimit, holidaySend, duplicateDays, costPerSms, costPerLms, costPerMms, costPerKakao, storeCodeList ? JSON.stringify(storeCodeList) : null, businessNumber, ceoName, businessType, businessItem, address, allowCallbackSelfRegister !== undefined ? allowCallbackSelfRegister : null, maxUsers || null, sessionTimeoutMinutes || null, approvalRequired !== undefined ? approvalRequired : null, targetStrategy || null, lineGroupId || null, kakaoEnabled !== undefined ? kakaoEnabled : null, finalSubscriptionStatus, id, userIsolationEnabled !== undefined ? userIsolationEnabled : null]);
+    `, [companyName, contactName, contactEmail, contactPhone, status, planId, rejectNumber, brandName, sendHourStart, sendHourEnd, dailyLimit, holidaySend, duplicateDays, costPerSms, costPerLms, costPerMms, costPerKakao, storeCodeList ? JSON.stringify(storeCodeList) : null, businessNumber, ceoName, businessType, businessItem, address, allowCallbackSelfRegister !== undefined ? allowCallbackSelfRegister : null, maxUsers || null, sessionTimeoutMinutes || null, approvalRequired !== undefined ? approvalRequired : null, targetStrategy || null, lineGroupId || null, kakaoEnabled !== undefined ? kakaoEnabled : null, finalSubscriptionStatus, id, userIsolationEnabled !== undefined ? userIsolationEnabled : null, usageType || null]);
     
     if (result.rows.length === 0) {
       return res.status(404).json({ error: '회사를 찾을 수 없습니다.' });
@@ -523,8 +529,17 @@ router.put('/companies/:id', authenticate, requireSuperAdmin, async (req: Reques
     }
 
     res.json({ company: result.rows[0], message: '수정되었습니다.' });
-  } catch (error) {
+  } catch (error: any) {
     console.error('회사 수정 실패:', error);
+    // ★ 2026-07-03 db_alter_safety_net: usage_type 컬럼 미마이그레이션 서버 방어
+    const msg = error?.message || '';
+    if (msg.includes('column') && msg.includes('does not exist')) {
+      return res.status(503).json({
+        success: false,
+        error: 'DB 마이그레이션 필요 — 운영자에게 companies.usage_type ALTER 실행 요청',
+        code: 'DB_MIGRATION_PENDING',
+      });
+    }
     res.status(500).json({ error: '회사 수정 실패' });
   }
 });
