@@ -803,8 +803,9 @@ dmRouter.post('/:id/generate-copy', async (req: any, res: any) => {
     const companyId = req.user?.companyId;
     const userId = req.user?.userId;
     if (!companyId) return res.status(403).json({ error: '회사 권한이 필요합니다.' });
+    // ★ 2026-07-02(3) Harold 지시 — 프롬프트는 선택. 비워두면 편집된 DM 내용만으로 자동 생성.
     const { prompt } = req.body as { prompt?: string };
-    if (!prompt?.trim()) return res.status(400).json({ error: '생성할 문안의 요청을 입력해주세요.' });
+    const userPrompt = prompt?.trim() || '';
 
     // DM 편집 내용 요약 — 문자는 이 DM 페이지를 알리는 것이므로 실제 편집된 내용이 문안의 근거
     const dm = await getDmDetail(req.params.id, companyId);
@@ -845,7 +846,7 @@ dmRouter.post('/:id/generate-copy', async (req: any, res: any) => {
 
     const text = await callAIWithFallback({
       system,
-      userMessage: `요청: ${prompt.trim()}\n\n위 요청과 [DM 페이지 편집 내용]에 맞는 LMS 문안 1개를 본문 텍스트로만 작성하세요. %DM링크% 를 포함하세요.`,
+      userMessage: `${userPrompt ? `추가 요청: ${userPrompt}\n\n` : ''}[DM 페이지 편집 내용]을 고객에게 알리는 LMS 문안 1개를 본문 텍스트로만 작성하세요. %DM링크% 를 포함하세요.`,
       model: 'sonnet',
       maxTokens: 800,
       temperature: 0.7,

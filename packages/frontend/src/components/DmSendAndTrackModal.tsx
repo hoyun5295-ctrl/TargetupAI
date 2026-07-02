@@ -94,7 +94,10 @@ export default function DmSendAndTrackModal({ dmId, dmTitle, show, onClose }: Pr
       try {
         const res = await fetch('/api/manage/callbacks', { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } });
         const data = await res.json();
-        const list: any[] = data?.callbacks || data || [];
+        // 응답 키 = callbackNumbers (manage-callbacks.ts:76) — 구 callbacks 파싱이 항상 빈 목록이던 결함 수정
+        const list: any[] = Array.isArray(data?.callbackNumbers) ? data.callbackNumbers
+          : Array.isArray(data?.callbacks) ? data.callbacks
+          : Array.isArray(data) ? data : [];
         const mapped = list.filter((c: any) => c?.phone).map((c: any) => ({ phone: String(c.phone), isDefault: !!c.is_default }));
         setCallbackList(mapped);
         const def = mapped.find((c) => c.isDefault) || mapped[0];
@@ -112,14 +115,17 @@ export default function DmSendAndTrackModal({ dmId, dmTitle, show, onClose }: Pr
 
   const [tracking, setTracking] = useState<{ summary: TrackSummary; recipients: TrackRecipient[] } | null>(null);
   const [loadingTrack, setLoadingTrack] = useState(false);
+  // ★ 2026-07-02(3) 미리보기 샘플 전환 — 추출된 수신자별 개인화 결과를 눈으로 확인
+  const [sampleIdx, setSampleIdx] = useState(0);
 
   if (!show) return null;
   const token = () => localStorage.getItem('token');
 
   const insertVar = (v: string) => setMessageText((prev) => (prev ? `${prev} ${v}` : v));
 
-  // 미리보기 치환값 = 추출 타겟 첫 샘플(실데이터). 타겟 미추출 시 중립 기본값.
-  const sample = target?.samples?.[0];
+  // 미리보기 치환값 = 추출 타겟 샘플(실데이터, ‹ › 로 수신자별 확인). 타겟 미추출 시 중립 기본값.
+  const samples = target?.samples || [];
+  const sample = samples[Math.min(sampleIdx, Math.max(0, samples.length - 1))];
   const sampleValues: Record<string, string> = {
     '%고객명%': (sample?.name || '').trim() || '고객',
     '%등급%': String(sample?.grade || '').trim() || '일반',
@@ -134,8 +140,8 @@ export default function DmSendAndTrackModal({ dmId, dmTitle, show, onClose }: Pr
     return out;
   })();
 
+  // ★ 2026-07-02(3) 프롬프트 = 선택 — 비워두면 편집된 DM 내용만으로 자동 생성 (백엔드가 DM 섹션 요약 주입)
   const handleGenerate = async () => {
-    if (!prompt.trim()) { toast.warning('생성할 문안의 프롬프트를 입력해주세요.'); return; }
     setGenerating(true);
     try {
       const res = await fetch(`/api/dm/${dmId}/generate-copy`, {
@@ -276,9 +282,10 @@ export default function DmSendAndTrackModal({ dmId, dmTitle, show, onClose }: Pr
 
                   {mode === 'ai' && (
                     <div>
-                      <textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} rows={2} placeholder="예: 재구매 유도 · 이번 주 신상 안내" className="w-full bg-slate-950/60 border border-white/10 rounded-lg px-3 py-2 text-sm text-white placeholder:text-white/30 focus:outline-none focus:border-violet-400/60 resize-none" />
-                      <button onClick={handleGenerate} disabled={!prompt.trim() || generating} className="mt-2 w-full py-2 rounded-lg text-xs font-semibold text-white bg-gradient-to-r from-violet-500 to-fuchsia-500 hover:from-violet-600 hover:to-fuchsia-600 disabled:opacity-30 flex items-center justify-center gap-1.5">
-                        {generating ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}{generating ? '생성 중...' : 'AI 문안 생성 (DM 링크 포함)'}
+                      <p className="text-[10px] text-violet-200/70 mb-1.5">편집해 둔 DM 내용(행사·쿠폰·상품)을 AI가 읽고 문안을 만듭니다 — 프롬프트 없이 바로 생성하세요.</p>
+                      <textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} rows={2} placeholder="추가 요청 (선택) — 예: 정중한 톤으로, 마감 강조" className="w-full bg-slate-950/60 border border-white/10 rounded-lg px-3 py-2 text-sm text-white placeholder:text-white/30 focus:outline-none focus:border-violet-400/60 resize-none" />
+                      <button onClick={handleGenerate} disabled={generating} className="mt-2 w-full py-2 rounded-lg text-xs font-semibold text-white bg-gradient-to-r from-violet-500 to-fuchsia-500 hover:from-violet-600 hover:to-fuchsia-600 disabled:opacity-30 flex items-center justify-center gap-1.5">
+                        {generating ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}{generating ? '생성 중...' : '편집된 DM 내용으로 AI 문안 생성'}
                       </button>
                     </div>
                   )}
@@ -308,9 +315,20 @@ export default function DmSendAndTrackModal({ dmId, dmTitle, show, onClose }: Pr
                 {/* ★ 2026-07-02(3) 발송 시각·발신번호는 항상 보이는 하단 푸터로 이동 (스크롤에 묻히던 문제) */}
               </div>
 
-              {/* 오른쪽 — 핸드폰 미리보기 */}
+              {/* 오른쪽 — 핸드폰 미리보기 (수신자별 개인화 확인) */}
               <div className="flex flex-col items-center">
-                <p className="text-[11px] text-white/50 mb-2 flex items-center gap-1.5"><Smartphone className="w-3.5 h-3.5" /> 핸드폰 미리보기</p>
+                <div className="mb-2 flex items-center gap-2 flex-wrap justify-center">
+                  <p className="text-[11px] text-white/50 flex items-center gap-1.5"><Smartphone className="w-3.5 h-3.5" /> 핸드폰 미리보기</p>
+                  {samples.length > 0 && (
+                    <div className="flex items-center gap-1 rounded-lg bg-white/5 border border-white/10 px-1.5 py-0.5">
+                      <button onClick={() => setSampleIdx((i) => (i - 1 + samples.length) % samples.length)} className="px-1 text-white/60 hover:text-white text-xs" aria-label="이전 수신자">‹</button>
+                      <span className="text-[10px] text-violet-200 font-semibold whitespace-nowrap">
+                        {(sample?.name || '').trim() || '이름 없음'} ({Math.min(sampleIdx + 1, samples.length)}/{samples.length})
+                      </span>
+                      <button onClick={() => setSampleIdx((i) => (i + 1) % samples.length)} className="px-1 text-white/60 hover:text-white text-xs" aria-label="다음 수신자">›</button>
+                    </div>
+                  )}
+                </div>
                 <div className="w-full max-w-[380px] rounded-[34px] border-4 border-slate-700 bg-slate-950 p-4 shadow-2xl">
                   <div className="h-6 flex items-center justify-center"><div className="w-20 h-1.5 rounded-full bg-slate-700" /></div>
                   <div className="mt-2 min-h-[500px] bg-slate-800/50 rounded-2xl p-4">
@@ -319,7 +337,11 @@ export default function DmSendAndTrackModal({ dmId, dmTitle, show, onClose }: Pr
                     </div>
                   </div>
                 </div>
-                <p className="text-[10px] text-white/30 italic mt-2 text-center">Data source — 샘플 고객 기준 미리보기 · 실제는 수신자별 개인화 링크</p>
+                <p className="text-[10px] text-white/30 italic mt-2 text-center">
+                  {target
+                    ? `발송 시 ${target.channelEligibleCount.toLocaleString()}명 각각 본인 이름·등급·지역 + 개인화 링크로 치환되어 나갑니다 — ‹ › 로 수신자별 확인`
+                    : 'Data source — 타겟 추출 후 수신자별 개인화 미리보기가 표시됩니다'}
+                </p>
                 {sentCount !== null && (
                   <div className="mt-3 w-full rounded-xl border border-emerald-400/30 bg-emerald-500/10 p-3 flex items-start gap-2">
                     <Check className="w-4 h-4 text-emerald-300 flex-shrink-0 mt-0.5" />
@@ -425,7 +447,7 @@ export default function DmSendAndTrackModal({ dmId, dmTitle, show, onClose }: Pr
           </div>
         )}
 
-        <TargetExtractModal show={extractOpen} channel="dm" onClose={() => setExtractOpen(false)} onApply={(t) => { setTarget(t); setExtractOpen(false); }} />
+        <TargetExtractModal show={extractOpen} channel="dm" onClose={() => setExtractOpen(false)} onApply={(t) => { setTarget(t); setSampleIdx(0); setExtractOpen(false); }} />
         <AiRefineModal isOpen={refineOpen} originalMessage={messageText} onClose={() => setRefineOpen(false)} onApply={(text) => { setMessageText(text); setRefineOpen(false); }} />
         {spamOpen && (
           <SpamFilterTestModal onClose={() => setSpamOpen(false)} messageContentLms={messageText} callbackNumber={callback} messageType="LMS" subject={dmTitle} isAd={isAd} />
