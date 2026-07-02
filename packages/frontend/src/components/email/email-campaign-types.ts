@@ -24,5 +24,5 @@ export interface EmailCampaign {
   unsubscribeCount: number;
   createdAt: string;
   sections?: Section[] | null; // 비주얼 빌더 Section[] (있으면 비주얼 에디터로 수정)
-  completed?: boolean; // ★ 2026-07-02 완성(50크레딧 납부) 여부 — 미완성 = 발송·PC 미리보기 잠금
+  completed?: boolean; // ★ 2026-07-02 완성(50크레딧 납부) 여부 — 미완성 = 발송 잠금 (PC 미리보기는 항상 허용 — 07-02(3) Harold 지시)
 }

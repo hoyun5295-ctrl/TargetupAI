@@ -786,7 +786,7 @@ export default function EmailCampaignsPage() {
                   <span className="text-base font-bold text-white">{c.name}</span>
                   <StatusBadge status={c.status} />
                   {c.isAd && <span className="text-[10px] bg-amber-500/20 text-amber-300 px-1.5 py-0.5 rounded-full font-medium">광고성</span>}
-                  {c.status === 'draft' && !c.completed && <span className="text-[10px] bg-white/10 text-white/50 px-1.5 py-0.5 rounded-full font-medium" title="완성 저장(50크레딧) 후 발송·PC 미리보기가 열립니다">완성 전</span>}
+                  {c.status === 'draft' && !c.completed && <span className="text-[10px] bg-white/10 text-white/50 px-1.5 py-0.5 rounded-full font-medium" title="완성 저장(50크레딧) 후 발송이 열립니다">완성 전</span>}
                   {c.status === 'draft' && c.hasPlaceholder && <span className="text-[10px] bg-orange-500/25 text-orange-200 px-1.5 py-0.5 rounded-full font-medium">직접 입력 필요</span>}
                 </div>
                 <div className="text-xs text-white/70 mb-2">제목: {c.subject}</div>

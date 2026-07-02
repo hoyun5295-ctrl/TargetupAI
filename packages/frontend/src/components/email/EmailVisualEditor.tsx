@@ -48,7 +48,7 @@ export interface EmailVisualEditorProps {
   initialIsAd?: boolean;
   aiGenerated?: boolean;
   campaignId?: string;
-  /** ★ 2026-07-02 완성(50크레딧 납부) 여부 — true면 발송·PC 미리보기 해금 + 저장 무료 */
+  /** ★ 2026-07-02 완성(50크레딧 납부) 여부 — true면 발송 해금 + 저장 무료 (PC 미리보기는 항상 허용) */
   completed?: boolean;
   authHeaders: () => Record<string, string>;
   onClose: () => void;
@@ -79,7 +79,7 @@ export default function EmailVisualEditor({
   const [sampleCustomers, setSampleCustomers] = useState<Array<{ label: string; customer: Record<string, any> }>>([]);
   // ★ 2026-07-02 개인화 변수 — 회사 실데이터 필드(CT-58)만 노출. 조회 실패 시 fallback.
   const [emailVars, setEmailVars] = useState<EmailVar[]>(DEFAULT_EMAIL_VARS);
-  // ★ 2026-07-02 완성(50크레딧) 상태 — 미완성 = 발송·PC 미리보기 잠금 (임시저장은 무료·무제한)
+  // ★ 2026-07-02 완성(50크레딧) 상태 — 미완성 = 발송 잠금 (임시저장은 무료·무제한, PC 미리보기는 항상 허용)
   const [completedState, setCompletedState] = useState(!!completed);
   const [confirmState, setConfirmState] = useState<ConfirmState | null>(null);
 
@@ -293,8 +293,9 @@ export default function EmailVisualEditor({
   };
 
   // ── 저장 (sections → 백엔드가 html_body 렌더) ──
-  //   ★ 2026-07-02 Harold 확정 크레딧 모델: 임시저장 = 무료·무제한(발송·PC 미리보기 잠금) /
-  //   완성 저장 = 50크레딧 1회(확인 모달 고지 후) → 발송·PC 미리보기 해금. 발송 자체는 무료(고객 SMTP).
+  //   ★ 2026-07-02 Harold 확정 크레딧 모델: 임시저장 = 무료·무제한(발송 잠금) /
+  //   완성 저장 = 50크레딧 1회(확인 모달 고지 후) → 발송 해금. 발송 자체는 무료(고객 SMTP).
+  //   ★ 2026-07-02(3) Harold 지시 — PC 미리보기는 편집 중에도 항상 허용(잠금은 발송에만).
   const persistCampaign = async (): Promise<string | null> => {
     if (!name.trim() || !subject.trim()) { onToast('이름과 제목을 입력해주세요.', 'warning'); return null; }
     if (sections.length === 0) { onToast('블록을 1개 이상 추가해주세요.', 'warning'); return null; }
@@ -316,7 +317,7 @@ export default function EmailVisualEditor({
         onToast(
           completedState
             ? '저장 완료'
-            : '임시저장 완료 — 발송·PC 미리보기는 완성 저장(50크레딧) 후 열립니다.',
+            : '임시저장 완료 — 발송은 완성 저장(50크레딧) 후 열립니다.',
           'success',
         );
         onSaved();
@@ -348,7 +349,7 @@ export default function EmailVisualEditor({
           if (data?.code === 'INSUFFICIENT_CREDIT') { onToast('크레딧이 부족합니다. 충전 후 완성해주세요.', 'warning'); return; }
           if (!data.success) { onToast(data.error || '완성 처리 실패', 'error'); return; }
           setCompletedState(true);
-          onToast('캠페인 완성 — 이제 발송과 PC 미리보기를 사용할 수 있습니다.', 'success');
+          onToast('캠페인 완성 — 이제 발송할 수 있습니다.', 'success');
           onSaved();
           onClose();
         } catch (e: any) {
@@ -382,14 +383,11 @@ export default function EmailVisualEditor({
             <input type="checkbox" checked={isAd} onChange={(e) => setIsAd(e.target.checked)} className="rounded" />광고성
           </label>
           <button
-            onClick={() => {
-              // ★ 2026-07-02 임시저장 상태 = 실발송 HTML 획득 경로 잠금 (완성 50크레딧 후 해금)
-              if (!completedState) { onToast('PC 미리보기는 완성 저장(50크레딧) 후 사용할 수 있습니다.', 'info'); return; }
-              setPcPreviewOpen(true);
-            }}
-            className={`inline-flex items-center gap-1.5 rounded-lg border border-white/15 bg-white/5 px-3 py-2 text-sm font-semibold shrink-0 ${completedState ? 'text-white/80 hover:bg-white/10' : 'text-white/35 cursor-not-allowed'}`}
-            title={completedState ? 'PC(데스크탑) 폭으로 크게 미리보기' : '완성 저장(50크레딧) 후 사용 가능'}
+            onClick={() => setPcPreviewOpen(true)}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-white/15 bg-white/5 px-3 py-2 text-sm font-semibold text-white/80 hover:bg-white/10 shrink-0"
+            title="PC(데스크탑) 폭으로 크게 미리보기"
           >
+            {/* ★ 2026-07-02(3) Harold 지시 — PC 미리보기는 편집 중(완성 전)에도 항상 사용. 잠금은 발송에만 유지 */}
             <Monitor className="w-4 h-4" /><span className="hidden md:inline">PC 미리보기</span>
           </button>
           <button onClick={handleImprove} disabled={improving || sections.length === 0} className="inline-flex items-center gap-1.5 rounded-lg border border-fuchsia-400/40 bg-fuchsia-500/15 px-3 py-2 text-sm font-semibold text-fuchsia-100 hover:bg-fuchsia-500/25 disabled:opacity-40 shrink-0" title="AI가 블록 카피를 매끄럽게 다듬어요 (1 크레딧 · 사실·혜택 보존)">
@@ -401,7 +399,7 @@ export default function EmailVisualEditor({
             </button>
           ) : (
             <>
-              <button onClick={handleSave} disabled={saving} className="inline-flex items-center gap-1.5 rounded-lg border border-white/15 bg-white/5 px-3 py-2 text-sm font-semibold text-white/80 hover:bg-white/10 disabled:opacity-50 shrink-0" title="무료 — 발송·PC 미리보기는 잠긴 상태로 보관됩니다">
+              <button onClick={handleSave} disabled={saving} className="inline-flex items-center gap-1.5 rounded-lg border border-white/15 bg-white/5 px-3 py-2 text-sm font-semibold text-white/80 hover:bg-white/10 disabled:opacity-50 shrink-0" title="무료 — 발송은 잠긴 상태로 보관됩니다">
                 {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}<span className="hidden md:inline">임시저장</span>
               </button>
               <button onClick={handleComplete} disabled={saving} className="inline-flex items-center gap-1.5 rounded-lg bg-gradient-to-r from-violet-600 to-fuchsia-600 px-4 py-2 text-sm font-semibold text-white hover:opacity-90 disabled:opacity-50 shrink-0" title="50크레딧 1회 — 이후 수정·발송·이력 무제한 무료">
