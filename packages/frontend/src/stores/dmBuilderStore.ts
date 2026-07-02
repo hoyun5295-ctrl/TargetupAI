@@ -78,6 +78,8 @@ export type DmBuilderState = {
   brandKit: DmBrandKit;
   layoutMode: LayoutMode;
   approvalStatus: ApprovalStatus;
+  /** ★ 2026-07-02(3) 실제 발행 여부(dm.status='published'/short_code 축) — 발행(100크레딧) 완료 = 버튼 [발송] 전환·크레딧 모달 미노출 */
+  isPublished: boolean;
   templateId: string | null;
   aiPrompt: string;
 
@@ -139,6 +141,7 @@ export type DmBuilderState = {
   setSectionVisible: (id: string, visible: boolean) => void;
   setSectionVariant: (id: string, variant: string) => void;
   setSectionStyle: (id: string, patch: { align?: 'left' | 'center' | 'right'; accent_color?: string; treatment?: string; title_size?: number; text_size?: number }) => void;
+  setPublished: (v: boolean) => void;
   toggleSectionLock: (id: string) => void;
 
   // ── Actions: UI ──
@@ -180,7 +183,7 @@ function emptyPage(name?: string): DmPage {
 const INITIAL_STATE: Pick<
   DmBuilderState,
   | 'dmId' | 'title' | 'storeName' | 'pages' | 'currentPageIndex' | 'sections' | 'brandKit' | 'layoutMode'
-  | 'approvalStatus' | 'templateId' | 'aiPrompt'
+  | 'approvalStatus' | 'isPublished' | 'templateId' | 'aiPrompt'
   | 'selectedSectionId' | 'hoveredSectionId' | 'isDirty' | 'lastSavedAt'
   | 'isSaving' | 'loadError' | 'aiGenerating' | 'validationResult'
   | 'validationRunning' | 'openModal' | 'toast'
@@ -195,6 +198,7 @@ const INITIAL_STATE: Pick<
   brandKit: { ...DEFAULT_BRAND_KIT },
   layoutMode: 'scroll',
   approvalStatus: 'draft',
+  isPublished: false,
   templateId: null,
   aiPrompt: '',
   selectedSectionId: null,
@@ -641,6 +645,8 @@ export const useDmBuilderStore = create<DmBuilderState>((set, get) => ({
     scheduleAutosave(() => { if (get().dmId) void get().save({ silent: true }); });
   },
 
+  setPublished: (v) => set({ isPublished: v }),
+
   toggleSectionLock: (id) => {
     set((s) => markDirty(updateCurrentPageSections(s, (list) =>
       list.map((sec) => sec.id === id ? { ...sec, ai_locked: !sec.ai_locked } : sec),
@@ -694,6 +700,8 @@ export const useDmBuilderStore = create<DmBuilderState>((set, get) => ({
         brandKit: { ...DEFAULT_BRAND_KIT, ...rawBrand },
         layoutMode: dm.layout_mode || 'scroll',
         approvalStatus: dm.approval_status || 'draft',
+        // ★ 발행 여부 = 발행 축(status/short_code)으로 판정 — approval_status(검수 축)와 별개
+        isPublished: dm.status === 'published' || !!dm.short_code,
         templateId: dm.template_id || null,
         aiPrompt: dm.ai_prompt || '',
         isDirty: false,

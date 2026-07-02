@@ -41,6 +41,8 @@ export default function DmTopBar({ onBack, onTestSendClick, onPublishClick }: Dm
   const redoEnabled = canRedo();
 
   const canPublish = validationResult?.can_publish !== false;
+  // ★ 2026-07-02(3) 발행(100크레딧) 완료 = 버튼 [발송] 전환 (재발행 크레딧 모달 오해 차단)
+  const isPublished = useDmBuilderStore((s) => s.isPublished);
 
   const savedLabel = isSaving
     ? '저장 중...'
@@ -165,9 +167,9 @@ export default function DmTopBar({ onBack, onTestSendClick, onPublishClick }: Dm
         onClick={onPublishClick}
         disabled={!canPublish}
         style={btnStyle(canPublish ? 'primary' : 'disabled')}
-        title={canPublish ? '발행' : '검수 통과 후 발행 가능'}
+        title={isPublished ? '타겟 고객에게 발송 (발행 완료 — 추가 과금 없음)' : canPublish ? '발행 (100크레딧, DM당 1회)' : '검수 통과 후 발행 가능'}
       >
-        🚀 발행
+        {isPublished ? '📨 발송' : '🚀 발행'}
       </button>
     </div>
   );

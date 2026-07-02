@@ -1112,7 +1112,10 @@ function TopBarWithBack({ onBack, onPublishDone }: { onBack: () => void; onPubli
   const saveStore = useDmBuilderStore((s) => s.save);
   const dmId = useDmBuilderStore((s) => s.dmId);
   const setToast = useDmBuilderStore((s) => s.setToast);
-  const approvalStatus = useDmBuilderStore((s) => s.approvalStatus);
+  // ★ 2026-07-02(3) 발행 여부 = 발행 축(status/short_code) isPublished — 구 approval_status(검수 축) 판정이
+  //   이미 발행(100크레딧 차감)된 DM에도 크레딧 모달을 다시 띄우던 결함 수정
+  const isPublished = useDmBuilderStore((s) => s.isPublished);
+  const setPublished = useDmBuilderStore((s) => s.setPublished);
   const [confirmPublish, setConfirmPublish] = useState(false);
   const [publishedUrl, setPublishedUrl] = useState<string | null>(null);
   const [sendModalOpen, setSendModalOpen] = useState(false);
@@ -1135,6 +1138,7 @@ function TopBarWithBack({ onBack, onPublishDone }: { onBack: () => void; onPubli
     if (dmId) {
       try {
         const res = await api.post(`/dm/${dmId}/publish`);
+        setPublished(true); // 발행 확정 — 버튼 [발송] 전환 + 이후 크레딧 모달 미노출
         const url = res?.data?.short_url || '';
         if (url) {
           // 발행 완료 → 단축 URL 확인·복사 모달. 목록 이동은 모달 확인 시.
@@ -1155,7 +1159,8 @@ function TopBarWithBack({ onBack, onPublishDone }: { onBack: () => void; onPubli
       <DmTopBar
         onBack={onBack}
         onTestSendClick={handleTestSend}
-        onPublishClick={() => { if (approvalStatus === 'published') { handlePublish(); } else { setConfirmPublish(true); } }}
+        // 발행 완료 = 크레딧 모달 없이 바로 타겟 발송 모달 / 미발행 = 크레딧 확인 후 발행
+        onPublishClick={() => { if (isPublished) { setSendModalOpen(true); } else { setConfirmPublish(true); } }}
       />
       <CreditConfirmModal
         open={confirmPublish}
