@@ -8,6 +8,7 @@
  */
 import { query, pool } from '../../config/database';
 import { getDmByCode, extractFlatSectionsFromDm } from './dm-builder';
+import { lookupDmRecipientToken } from './dm-recipient-token';
 import {
   pickRouletteSegment,
   drawWinners,
@@ -41,6 +42,8 @@ export type SubmitInput = {
   sectionType: string;
   data: any;
   anonymousId: string | null;
+  /** 발송 링크 수신자 토큰(?r=) — 서버 권위 고객 확정 1순위 (2026-07-02) */
+  token?: string | null;
   phone: string | null;
   ip: string | null;
   ua: string | null;
@@ -70,8 +73,19 @@ export async function submitEventResponse(input: SubmitInput): Promise<SubmitRes
     return { ok: false, error: '개인정보 수집·이용 동의가 필요합니다.', status: 400 };
   }
 
-  // 식별 — phone 우선(서버 권위), 없으면 anonymous_id
-  const customerId = await resolveCustomerIdByPhone(companyId, input.phone);
+  // 식별 — 토큰(발송 링크, 서버 권위) > phone > anonymous_id
+  let customerId: string | null = null;
+  if (input.token) {
+    try {
+      const lookup = await lookupDmRecipientToken(input.token);
+      if (lookup && lookup.dmId === campaignId && lookup.companyId === companyId) {
+        customerId = lookup.customerId;
+      }
+    } catch {
+      // 토큰 테이블 미마이그레이션 등 = phone 폴백
+    }
+  }
+  if (!customerId) customerId = await resolveCustomerIdByPhone(companyId, input.phone);
   const anonymousId = input.anonymousId || null;
   const dedupeKey = customerId || anonymousId;
 

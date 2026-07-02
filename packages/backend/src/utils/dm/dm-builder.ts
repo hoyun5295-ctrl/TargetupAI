@@ -7,6 +7,11 @@
 import crypto from 'crypto';
 import { query } from '../../config/database';
 import { normalizeDmShortCode } from './dm-code';
+import {
+  clampPageReached, clampTotalPages, clampDurationDelta, clampScrollPct,
+  sanitizeSectionInteractions, mergeSectionInteractions,
+  type DmSectionInteractions,
+} from './dm-tracking';
 
 // ────────────────── 타입 ──────────────────
 
@@ -381,41 +386,102 @@ export async function publishDm(id: string, companyId: string) {
 
 // ────────────────── 열람 추적 ──────────────────
 
-export async function trackDmView(
-  dmId: string, companyId: string, phone: string | null,
-  pageReached: number, totalPages: number, duration: number,
-  ip: string | null, userAgent: string | null
-) {
-  if (phone) {
-    // 같은 phone + dm_id 조합이면 page_reached/duration 갱신 (UPSERT)
-    const existing = await query(
-      `SELECT id, page_reached FROM dm_views WHERE dm_id = $1 AND phone = $2 ORDER BY viewed_at DESC LIMIT 1`,
-      [dmId, phone]
+/**
+ * 2026-07-02 수신자별 추적 근본 수정 — 뷰어 비콘 입력.
+ * duration/section은 직전 비콘 이후 "증가분"만 담아 서버가 합산 병합한다.
+ * 신규 컬럼(recipient_token/anonymous_id/max_scroll_pct) 미마이그레이션 시 PG 에러 그대로 throw →
+ * 라우트가 isDbMigrationPendingError로 503 변환(db_alter_safety_net).
+ */
+export interface DmViewTrackInput {
+  dmId: string;
+  companyId: string;
+  /** 서버가 토큰으로 확정한 고객 phone (클라 phone 불신뢰) — 구 ?p= 링크 하위호환용으로만 클라 값 허용 */
+  phone?: string | null;
+  /** 발송 링크 수신자 토큰 (추적 1급 키) */
+  recipientToken?: string | null;
+  /** 뷰어 localStorage 익명 ID (토큰·phone 없을 때 행 중복 방지 키) */
+  anonymousId?: string | null;
+  pageReached?: number;
+  totalPages?: number;
+  /** 직전 비콘 이후 체류 증가분(초) */
+  durationDelta?: number;
+  /** 스크롤 최대 도달 %(0~100) — 미측정 null */
+  maxScrollPct?: number | null;
+  /** 섹션별 노출/클릭 증가분 */
+  sectionDelta?: DmSectionInteractions | null;
+  /** 뷰어 진입 비콘 여부 — 신규 행 또는 재방문 시 view_count +1 */
+  isInit?: boolean;
+  ip?: string | null;
+  userAgent?: string | null;
+}
+
+export async function trackDmView(input: DmViewTrackInput) {
+  const { dmId, companyId } = input;
+  const pageReached = clampPageReached(input.pageReached);
+  const totalPages = clampTotalPages(input.totalPages);
+  const durationDelta = clampDurationDelta(input.durationDelta);
+  const maxScrollPct = clampScrollPct(input.maxScrollPct);
+  const sectionDelta = sanitizeSectionInteractions(input.sectionDelta);
+  const hasSectionDelta = Object.keys(sectionDelta).length > 0;
+  const token = input.recipientToken ? String(input.recipientToken).slice(0, 32) : null;
+  const phone = input.phone ? String(input.phone).slice(0, 20) : null;
+  const anonymousId = input.anonymousId ? String(input.anonymousId).slice(0, 100) : null;
+
+  // UPSERT 키 우선순위: 토큰 > phone > 익명ID (같은 사람 = 같은 행에 누적, 열람 1회 = 1행)
+  let existing: { id: string; section_interactions: any } | null = null;
+  if (token) {
+    const r = await query(
+      `SELECT id, section_interactions FROM dm_views WHERE dm_id = $1 AND recipient_token = $2 ORDER BY viewed_at DESC LIMIT 1`,
+      [dmId, token],
     );
-    if (existing.rows[0]) {
-      const newReached = Math.max(existing.rows[0].page_reached, pageReached);
-      await query(
-        `UPDATE dm_views SET page_reached = $1, duration_seconds = duration_seconds + $2, last_active_at = NOW()
-         WHERE id = $3`,
-        [newReached, Math.max(0, duration), existing.rows[0].id]
-      );
-    } else {
-      await query(
-        `INSERT INTO dm_views (dm_id, company_id, phone, page_reached, total_pages, duration_seconds, ip, user_agent)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-        [dmId, companyId, phone, pageReached, totalPages, duration, ip, userAgent]
-      );
+    existing = r.rows[0] || null;
+  }
+  if (!existing && phone) {
+    const r = await query(
+      `SELECT id, section_interactions FROM dm_views WHERE dm_id = $1 AND phone = $2 ORDER BY viewed_at DESC LIMIT 1`,
+      [dmId, phone],
+    );
+    existing = r.rows[0] || null;
+  }
+  if (!existing && !token && !phone && anonymousId) {
+    const r = await query(
+      `SELECT id, section_interactions FROM dm_views WHERE dm_id = $1 AND anonymous_id = $2 ORDER BY viewed_at DESC LIMIT 1`,
+      [dmId, anonymousId],
+    );
+    existing = r.rows[0] || null;
+  }
+
+  if (existing) {
+    const merged = hasSectionDelta ? mergeSectionInteractions(existing.section_interactions, sectionDelta) : null;
+    await query(
+      `UPDATE dm_views SET
+         page_reached = GREATEST(page_reached, $1),
+         total_pages = GREATEST(total_pages, $2),
+         duration_seconds = duration_seconds + $3,
+         max_scroll_pct = CASE WHEN $4::int IS NULL THEN max_scroll_pct ELSE GREATEST(COALESCE(max_scroll_pct, 0), $4::int) END,
+         section_interactions = COALESCE($5::jsonb, section_interactions),
+         recipient_token = COALESCE(recipient_token, $6),
+         phone = COALESCE(phone, $7),
+         anonymous_id = COALESCE(anonymous_id, $8),
+         last_active_at = NOW()
+       WHERE id = $9`,
+      [pageReached, totalPages, durationDelta, maxScrollPct, merged ? JSON.stringify(merged) : null, token, phone, anonymousId, existing.id],
+    );
+    // 재방문(진입 비콘)만 조회수 +1 — 하트비트/이탈 비콘은 미증가
+    if (input.isInit) {
+      await query(`UPDATE dm_pages SET view_count = view_count + 1 WHERE id = $1`, [dmId]);
     }
   } else {
-    // phone 없으면 익명 조회수만 카운트
     await query(
-      `INSERT INTO dm_views (dm_id, company_id, phone, page_reached, total_pages, ip, user_agent)
-       VALUES ($1, $2, NULL, $3, $4, $5, $6)`,
-      [dmId, companyId, pageReached, totalPages, ip, userAgent]
+      `INSERT INTO dm_views (dm_id, company_id, phone, recipient_token, anonymous_id, page_reached, total_pages, duration_seconds, max_scroll_pct, section_interactions, ip, user_agent)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
+      [
+        dmId, companyId, phone, token, anonymousId, pageReached, totalPages, durationDelta, maxScrollPct,
+        hasSectionDelta ? JSON.stringify(sectionDelta) : null, input.ip || null, input.userAgent || null,
+      ],
     );
+    await query(`UPDATE dm_pages SET view_count = view_count + 1 WHERE id = $1`, [dmId]);
   }
-  // 총 조회수 증가
-  await query(`UPDATE dm_pages SET view_count = view_count + 1 WHERE id = $1`, [dmId]);
 }
 
 // ────────────────── 통계 ──────────────────

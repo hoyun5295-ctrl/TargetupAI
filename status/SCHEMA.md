@@ -776,21 +776,32 @@
 | is_active | boolean |
 | created_at | timestamptz |
 
-### dm_views (DM 열람 추적 — D119/D125)
-| 컬럼 | 타입 |
-|------|------|
-| id | uuid PK |
+### dm_views (DM 열람 추적 — D119/D125) ★ 2026-07-02 실측 재기록 + 수신자 추적 3컬럼 ALTER
+> 2026-07-02 information_schema 실측: id=bigint(uuid 아님)·ip=inet(varchar 아님)·ab_test_id/ab_variant 존재(기존 문서 누락).
+> 같은 날 수신자별 추적 근본 수정 ALTER 3컬럼(recipient_token/anonymous_id/max_scroll_pct) 추가.
+> 기록 방식: 뷰어 비콘 UPSERT(키 우선순위 token > phone > anonymous_id) — 열람자 1인 = 1행 누적(duration 합산·scroll GREATEST·sections 병합).
+
+| 컬럼 | 타입 | 비고 |
+|------|------|------|
+| id | bigint PK | 실측 (uuid 아님) |
 | dm_id | uuid FK | dm_pages.id ON DELETE CASCADE |
-| company_id | uuid FK |
-| phone | varchar(20) |
-| page_reached | integer |
-| total_pages | integer |
-| duration_seconds | integer |
-| ip | varchar(45) |
-| user_agent | text |
-| **section_interactions** | **jsonb** | **D125 — 섹션별 체류 시간/클릭 수** |
-| viewed_at | timestamptz |
-| last_active_at | timestamptz |
+| company_id | uuid FK | |
+| phone | varchar | 토큰으로 서버가 확정한 고객 phone (구 ?p= 링크 하위호환) |
+| page_reached | integer | |
+| total_pages | integer | |
+| duration_seconds | integer | 비콘 증가분 합산 (총 체류) |
+| ip | inet | 실측 (varchar 아님 — 문자열 그대로 INSERT 가능) |
+| user_agent | text | |
+| viewed_at | timestamptz | 최초 열람 |
+| last_active_at | timestamptz | 마지막 비콘 |
+| section_interactions | jsonb | D125 — 섹션별 {views, clicks} (2026-07-02부터 실제 적재) |
+| ab_test_id | uuid | 실측 보강 (기존 문서 누락) |
+| ab_variant | varchar | 실측 보강 (기존 문서 누락) |
+| **recipient_token** | **text** | **★ 2026-07-02 ALTER — 발송 수신자 토큰(추적 1급 키)** |
+| **anonymous_id** | **varchar(100)** | **★ 2026-07-02 ALTER — 뷰어 localStorage 익명 키** |
+| **max_scroll_pct** | **integer** | **★ 2026-07-02 ALTER — 스크롤 최대 도달 %(0~100), NULL=미측정** |
+- INDEX: idx_dm_views_token (dm_id, recipient_token) WHERE recipient_token IS NOT NULL ★ 2026-07-02
+- INDEX: idx_dm_views_anon (dm_id, anonymous_id) WHERE anonymous_id IS NOT NULL ★ 2026-07-02
 
 ### dm_event_responses (DM 이벤트 응답 누적) ★ D216+ 신설
 > **신규 16 섹션 (poll / survey / email_capture / lucky_draw / roulette 등) 인터랙션 누적.**

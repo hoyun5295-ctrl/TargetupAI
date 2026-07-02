@@ -33,6 +33,7 @@ import { runInCreditBundle } from '../utils/ai-credit-context';
 import type { Section } from '../utils/dm/dm-section-registry';
 import { selectSampleCustomers, selectSampleCustomerByKey, type SampleCustomerKey } from '../utils/dm/dm-sample-customer';
 import { lookupDmRecipientToken, issueDmRecipientTokensBulk } from '../utils/dm/dm-recipient-token';
+import { computeDmProgressPct, isDmCompleted, sumSectionClicks } from '../utils/dm/dm-tracking';
 import { buildCustomerFilter } from '../utils/customer-filter';
 import { buildChannelEligibilityWhere } from '../utils/channel-eligibility';
 import { createDirectSendCampaign, countStagingFiltered } from '../utils/direct-send-core';
@@ -108,12 +109,8 @@ dmPublicRouter.get('/:code', async (req: Request, res: Response) => {
     const dm = await getDmByCode(req.params.code);
     if (!dm) return res.status(404).send(renderDmErrorHtml('존재하지 않는 DM입니다.'));
 
-    // 초기 추적 (phone 파라미터가 있으면)
-    const phone = (req.query.p as string) || null;
-    const pages = Array.isArray(dm.pages) ? dm.pages : JSON.parse(dm.pages || '[]');
-    const ip = req.ip || req.socket?.remoteAddress || null;
-    const ua = req.headers['user-agent'] || null;
-    trackDmView(dm.id, dm.company_id, phone, 1, pages.length, 0, ip, ua).catch(() => {});
+    // ★ 2026-07-02 서버측 이중 기록 제거 — 열람 기록은 뷰어 진입 비콘(init) 1곳으로 통일.
+    //   (구: 익명 1행 + 토큰 phone 1행 + 클라 비콘 1행 = 열람 1회에 3행·view_count 3배 부풀림)
 
     // ?r=<token> 수신자별 개인화 (토큰 없음/만료/미마이그레이션 = 공용 fallback, PII 노출 0)
     const rToken = (req.query.r as string) || null;
@@ -126,8 +123,6 @@ dmPublicRouter.get('/:code', async (req: Request, res: Response) => {
             [lookup.customerId, dm.company_id],
           );
           if (custR.rows.length > 0) {
-            // 수신자별 추적 — 토큰의 고객 phone으로 열람 기록(추적 페이지가 수신자별 액션 집계)
-            trackDmView(dm.id, dm.company_id, custR.rows[0].phone || null, 1, pages.length, 0, ip, ua).catch(() => {});
             const personalizedHtml = await renderDmViewerHtmlWithCustomer(dm, '/api/dm/v', custR.rows[0], dm.company_id);
             res.setHeader('Content-Type', 'text/html; charset=utf-8');
             return res.send(personalizedHtml);
@@ -147,26 +142,57 @@ dmPublicRouter.get('/:code', async (req: Request, res: Response) => {
   }
 });
 
-// 열람 추적 API
+// 열람 추적 API — ★ 2026-07-02 토큰(r) = 추적 1급 키. 서버가 토큰→고객 phone 확정(클라 phone 불신뢰).
 dmPublicRouter.post('/:code/track', async (req: Request, res: Response) => {
   try {
     const dm = await getDmByCode(req.params.code);
     if (!dm) return res.status(404).json({ error: 'Not found' });
 
-    const { phone, page_reached, total_pages, duration } = req.body;
+    const b = req.body || {};
     const ip = req.ip || req.socket?.remoteAddress || null;
     const ua = req.headers['user-agent'] || null;
 
-    await trackDmView(
-      dm.id, dm.company_id,
-      phone || null,
-      page_reached || 1,
-      total_pages || 0,
-      duration || 0,
-      ip, ua
-    );
+    let token: string | null = typeof b.r === 'string' && b.r ? String(b.r).slice(0, 32) : null;
+    let phone: string | null = null;
+    if (token) {
+      try {
+        const lookup = await lookupDmRecipientToken(token);
+        if (lookup && lookup.dmId === dm.id && lookup.companyId === dm.company_id) {
+          const custR = await query(
+            `SELECT phone FROM customers WHERE id = $1::uuid AND company_id = $2::uuid LIMIT 1`,
+            [lookup.customerId, dm.company_id],
+          );
+          phone = custR.rows[0]?.phone || null;
+        } else {
+          token = null; // 다른 DM 토큰/만료 = 익명 취급
+        }
+      } catch {
+        token = null; // 토큰 테이블 미마이그레이션 등 = 익명 폴백 (열람 기록 자체는 유지)
+      }
+    }
+    // 구 링크(?p=phone) 하위호환 — 토큰 확정 실패 시에만 클라 값 사용
+    if (!phone && typeof b.phone === 'string' && b.phone) phone = String(b.phone).slice(0, 20);
+
+    await trackDmView({
+      dmId: dm.id,
+      companyId: dm.company_id,
+      phone,
+      recipientToken: token,
+      anonymousId: typeof b.anon === 'string' && b.anon ? b.anon : null,
+      pageReached: b.page_reached,
+      totalPages: b.total_pages,
+      durationDelta: b.duration,
+      maxScrollPct: b.max_scroll_pct,
+      sectionDelta: b.section_interactions,
+      isInit: b.init === 1 || b.init === true,
+      ip,
+      userAgent: ua,
+    });
     res.json({ ok: true });
   } catch (err: any) {
+    if (isDbMigrationPendingError(err)) {
+      return send503Migration(res, 'dm_views ALTER(recipient_token/anonymous_id/max_scroll_pct)');
+    }
     console.error('[DM추적] 오류:', err.message);
     res.status(500).json({ error: 'Internal error' });
   }
@@ -679,16 +705,20 @@ dmRouter.get('/:id/recipients-tracking', async (req: any, res: any) => {
     const companyId = req.user?.companyId;
     if (!companyId) return res.status(403).json({ error: '회사 권한이 필요합니다.' });
 
+    // ★ 2026-07-02 토큰 우선 매칭(신규 비콘) + phone 매칭(구 데이터 하위호환) + 깊이/클릭 동봉
     const r = await query(
       `SELECT DISTINCT ON (t.customer_id)
               t.customer_id, c.name, c.phone, t.created_at AS sent_at,
-              v.page_reached, v.total_pages, v.duration_seconds, v.viewed_at, v.last_active_at
+              v.page_reached, v.total_pages, v.duration_seconds, v.max_scroll_pct,
+              v.section_interactions, v.viewed_at, v.last_active_at
          FROM dm_recipient_tokens t
          JOIN customers c ON c.id = t.customer_id AND c.company_id = t.company_id
          LEFT JOIN LATERAL (
-           SELECT page_reached, total_pages, duration_seconds, viewed_at, last_active_at
+           SELECT dv.page_reached, dv.total_pages, dv.duration_seconds, dv.max_scroll_pct,
+                  dv.section_interactions, dv.viewed_at, dv.last_active_at
              FROM dm_views dv
-            WHERE dv.dm_id = t.dm_id AND dv.phone = c.phone
+            WHERE dv.dm_id = t.dm_id
+              AND (dv.recipient_token = t.token OR (dv.phone IS NOT NULL AND dv.phone = c.phone))
             ORDER BY dv.viewed_at DESC LIMIT 1
          ) v ON true
         WHERE t.dm_id = $1::uuid AND t.company_id = $2::uuid
@@ -701,6 +731,8 @@ dmRouter.get('/:id/recipients-tracking', async (req: any, res: any) => {
       const viewed = !!row.viewed_at;
       const totalPages = Number(row.total_pages || 0);
       const pageReached = Number(row.page_reached || 0);
+      const maxScrollPct = row.max_scroll_pct === null || row.max_scroll_pct === undefined ? null : Number(row.max_scroll_pct);
+      const progressPct = viewed ? computeDmProgressPct(pageReached, totalPages, maxScrollPct) : 0;
       return {
         customerId: row.customer_id,
         name: row.name || null,
@@ -709,23 +741,29 @@ dmRouter.get('/:id/recipients-tracking', async (req: any, res: any) => {
         viewed,
         pageReached,
         totalPages,
-        completed: viewed && totalPages > 0 && pageReached >= totalPages,
+        maxScrollPct,
+        progressPct,
+        completed: viewed && isDmCompleted(pageReached, totalPages, maxScrollPct),
+        clicks: sumSectionClicks(row.section_interactions),
         durationSeconds: Number(row.duration_seconds || 0),
         lastActiveAt: row.last_active_at || null,
       };
     });
 
+    // 깔때기 요약: 발송 → 열람 → 50% 도달 → 완독 → 클릭
     const summary = {
       sent: recipients.length,
       viewed: recipients.filter((x) => x.viewed).length,
+      reached50: recipients.filter((x) => x.viewed && x.progressPct >= 50).length,
       completed: recipients.filter((x) => x.completed).length,
+      clicked: recipients.filter((x) => x.clicks > 0).length,
     };
 
     return res.json({ success: true, summary, recipients });
   } catch (err: any) {
     const msg = err?.message || '';
-    if (msg.includes('relation') && msg.includes('does not exist')) {
-      return res.status(503).json({ error: 'DB 마이그레이션 필요 — dm_recipient_tokens 테이블 생성 요청', code: 'DB_MIGRATION_PENDING' });
+    if ((msg.includes('relation') || msg.includes('column')) && msg.includes('does not exist')) {
+      return res.status(503).json({ error: 'DB 마이그레이션 필요 — dm_recipient_tokens 테이블 / dm_views ALTER 실행 요청', code: 'DB_MIGRATION_PENDING' });
     }
     console.error('[DM 발송 추적] 오류:', err?.message);
     return res.status(500).json({ error: err?.message || '추적 조회 실패' });
@@ -1599,7 +1637,8 @@ dmPublicRouter.post('/:code/event-response', async (req: Request, res: Response)
     if (!sectionId || !sectionType) {
       return res.status(400).json({ success: false, error: 'section_id / section_type 필수' });
     }
-    // phone = ?p= 쿼리 우선(발송 링크), 없으면 body.phone. customer_id는 클라 신뢰 X(서버 phone 매칭이 권위).
+    // 식별 우선순위: 토큰(body.r — 발송 링크, 서버 권위) > phone(?p= 쿼리/body — 구 링크 하위호환).
+    // customer_id는 클라 신뢰 X.
     const phone = (req.query.p as string) || body.phone || null;
     const result = await submitEventResponse({
       code,
@@ -1607,6 +1646,7 @@ dmPublicRouter.post('/:code/event-response', async (req: Request, res: Response)
       sectionType,
       data: body.data ?? body.response_data ?? {},
       anonymousId: body.anonymous_id || null,
+      token: typeof body.r === 'string' && body.r ? String(body.r).slice(0, 32) : null,
       phone,
       ip: req.ip || null,
       ua: (req.headers['user-agent'] as string) || null,

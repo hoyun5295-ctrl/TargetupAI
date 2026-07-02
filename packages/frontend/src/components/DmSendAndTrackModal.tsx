@@ -21,8 +21,41 @@ interface TrackRecipient {
   viewed: boolean;
   pageReached: number;
   totalPages: number;
+  maxScrollPct: number | null;
+  progressPct: number;
   completed: boolean;
+  clicks: number;
+  durationSeconds: number;
+  lastActiveAt: string | null;
 }
+
+interface TrackSummary {
+  sent: number;
+  viewed: number;
+  reached50: number;
+  completed: number;
+  clicked: number;
+}
+
+/** 체류 초 → "1분 24초" 표시 */
+const formatDur = (sec: number): string => {
+  const s = Math.max(0, Math.floor(Number(sec) || 0));
+  if (s < 60) return `${s}초`;
+  return `${Math.floor(s / 60)}분 ${s % 60}초`;
+};
+
+/** 마지막 활동 상대 시각 */
+const formatAgo = (iso: string | null): string => {
+  if (!iso) return '';
+  const diff = Date.now() - new Date(iso).getTime();
+  if (!Number.isFinite(diff) || diff < 0) return '';
+  const min = Math.floor(diff / 60000);
+  if (min < 1) return '방금 전';
+  if (min < 60) return `${min}분 전`;
+  const hr = Math.floor(min / 60);
+  if (hr < 24) return `${hr}시간 전`;
+  return `${Math.floor(hr / 24)}일 전`;
+};
 
 interface Props {
   dmId: string;
@@ -63,7 +96,7 @@ export default function DmSendAndTrackModal({ dmId, dmTitle, show, onClose }: Pr
   const [sending, setSending] = useState(false);
   const [sentCount, setSentCount] = useState<number | null>(null);
 
-  const [tracking, setTracking] = useState<{ summary: { sent: number; viewed: number; completed: number }; recipients: TrackRecipient[] } | null>(null);
+  const [tracking, setTracking] = useState<{ summary: TrackSummary; recipients: TrackRecipient[] } | null>(null);
   const [loadingTrack, setLoadingTrack] = useState(false);
 
   if (!show) return null;
@@ -299,11 +332,20 @@ export default function DmSendAndTrackModal({ dmId, dmTitle, show, onClose }: Pr
               <div className="py-12 flex justify-center text-white/50"><RefreshCw className="w-6 h-6 animate-spin" /></div>
             ) : tracking ? (
               <>
-                <div className="grid grid-cols-3 gap-3">
+                {/* 깔때기: 발송 → 열람 → 50% 도달 → 완독 → 클릭 */}
+                <div className="flex items-center justify-between gap-2">
+                  <p className="text-[11px] text-white/50">수신자별 열람 깊이 · 클릭 현황</p>
+                  <button onClick={loadTracking} className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[11px] font-medium text-white/80 bg-white/5 hover:bg-white/10 border border-white/10">
+                    <RefreshCw className="w-3.5 h-3.5" /> 새로고침
+                  </button>
+                </div>
+                <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
                   {[
                     { l: '발송', v: tracking.summary.sent, c: 'text-white' },
                     { l: '열람', v: tracking.summary.viewed, c: 'text-cyan-300' },
+                    { l: '50% 도달', v: tracking.summary.reached50 ?? 0, c: 'text-violet-300' },
                     { l: '완독', v: tracking.summary.completed, c: 'text-emerald-300' },
+                    { l: '클릭', v: tracking.summary.clicked ?? 0, c: 'text-amber-300' },
                   ].map((m) => (
                     <div key={m.l} className="rounded-xl border border-white/10 bg-white/5 p-3 text-center">
                       <p className="text-[10px] text-white/40">{m.l}</p>
@@ -315,16 +357,29 @@ export default function DmSendAndTrackModal({ dmId, dmTitle, show, onClose }: Pr
                   {tracking.recipients.length === 0 ? (
                     <p className="text-xs text-white/40 p-4 text-center">아직 발송 이력이 없습니다.</p>
                   ) : tracking.recipients.map((r) => (
-                    <div key={r.customerId} className="flex items-center gap-2 px-3 py-2 text-[11px]">
+                    <div key={r.customerId} className="flex flex-wrap items-center gap-x-3 gap-y-1 px-3 py-2 text-[11px]">
                       <span className="text-white/80 w-20 truncate">{r.name || '-'}</span>
                       <span className="text-white/40 font-mono w-28 truncate">{r.phone || '-'}</span>
-                      <span className={`ml-auto font-medium ${r.viewed ? (r.completed ? 'text-emerald-300' : 'text-cyan-300') : 'text-white/30'}`}>
-                        {r.viewed ? (r.completed ? '완독' : `${r.pageReached}/${r.totalPages || '?'}p`) : '미열람'}
-                      </span>
+                      {r.viewed ? (
+                        <>
+                          <span className="flex items-center gap-1.5 flex-1 min-w-[110px]">
+                            <span className="flex-1 max-w-[140px] h-1.5 rounded-full bg-white/10 overflow-hidden">
+                              <span className="block h-full rounded-full bg-gradient-to-r from-cyan-400 to-emerald-400" style={{ width: `${Math.min(100, Math.max(2, r.progressPct || 0))}%` }} />
+                            </span>
+                            <span className="text-white/60 w-9 text-right">{r.progressPct || 0}%</span>
+                          </span>
+                          <span className="text-white/50 w-16 text-right">{formatDur(r.durationSeconds)}</span>
+                          <span className={`w-12 text-right ${r.clicks > 0 ? 'text-amber-300 font-semibold' : 'text-white/30'}`}>{r.clicks > 0 ? `클릭 ${r.clicks}` : '-'}</span>
+                          <span className="text-white/30 w-16 text-right hidden md:inline">{formatAgo(r.lastActiveAt)}</span>
+                          <span className={`w-12 text-right font-medium ${r.completed ? 'text-emerald-300' : 'text-cyan-300'}`}>{r.completed ? '완독' : '열람'}</span>
+                        </>
+                      ) : (
+                        <span className="ml-auto font-medium text-white/30">미열람</span>
+                      )}
                     </div>
                   ))}
                 </div>
-                <p className="text-[10px] text-white/30 italic text-center">Data source — dm_recipient_tokens × dm_views (열람 추적)</p>
+                <p className="text-[10px] text-white/30 italic text-center">Data source — dm_recipient_tokens × dm_views (토큰 매칭 · 열람/깊이/체류/클릭)</p>
               </>
             ) : (
               <p className="text-xs text-white/40 text-center py-8">추적 데이터를 불러오는 중입니다.</p>

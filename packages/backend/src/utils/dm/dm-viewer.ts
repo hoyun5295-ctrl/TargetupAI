@@ -196,10 +196,19 @@ body{font-family:'Noto Sans KR',sans-serif;background:#fff;overflow-x:hidden;-we
   var total = ${totalPages};
   var current = 0;
   var startX = 0, diffX = 0, dragging = false;
-  var startTime = Date.now();
   var CODE = 'dm-${dm.short_code || ''}';
   var TRACK_URL = '${trackApiBase}';
-  var PHONE = new URLSearchParams(location.search).get('p') || '';
+  var QS = new URLSearchParams(location.search);
+  var PHONE = QS.get('p') || '';
+  var RTOKEN = QS.get('r') || '';
+  var ANON_KEY = 'dm_anon_' + CODE;
+  var anonId = '';
+  try {
+    anonId = localStorage.getItem(ANON_KEY) || '';
+    if (!anonId) { anonId = 'a' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8); localStorage.setItem(ANON_KEY, anonId); }
+  } catch (e) {}
+  var pageReachedMax = 1;
+  var pendingDur = 0, durTotal = 0;
 
   function goTo(idx) {
     if (idx < 0 || idx >= total) return;
@@ -212,15 +221,25 @@ body{font-family:'Noto Sans KR',sans-serif;background:#fff;overflow-x:hidden;-we
     track(current + 1);
   }
 
-  function track(pageNum) {
+  // 비콘 = 체류 증가분 전송(전송 성공 시 리셋 — 서버 합산). 토큰(r) 동봉 = 수신자 매칭.
+  function track(pageNum, isInit) {
     if (!CODE) return;
-    var dur = Math.round((Date.now() - startTime) / 1000);
-    var body = JSON.stringify({ phone: PHONE, page_reached: pageNum, total_pages: total, duration: dur });
+    if (pageNum > pageReachedMax) pageReachedMax = pageNum;
+    var body = JSON.stringify({
+      r: RTOKEN, phone: PHONE, anon: anonId, init: isInit ? 1 : 0,
+      page_reached: pageReachedMax, total_pages: total,
+      duration: pendingDur,
+      max_scroll_pct: total > 0 ? Math.min(100, Math.round((pageReachedMax / total) * 100)) : 0
+    });
+    var ok = false;
     if (navigator.sendBeacon) {
-      navigator.sendBeacon(TRACK_URL + '/' + CODE + '/track', new Blob([body], {type:'application/json'}));
-    } else {
-      fetch(TRACK_URL + '/' + CODE + '/track', { method:'POST', headers:{'Content-Type':'application/json'}, body: body, keepalive: true }).catch(function(){});
+      try { ok = navigator.sendBeacon(TRACK_URL + '/' + CODE + '/track', new Blob([body], {type:'application/json'})); } catch (e) { ok = false; }
     }
+    if (!ok) {
+      fetch(TRACK_URL + '/' + CODE + '/track', { method:'POST', headers:{'Content-Type':'application/json'}, body: body, keepalive: true }).catch(function(){});
+      ok = true;
+    }
+    if (ok) pendingDur = 0;
   }
 
   // 터치 스와이프
@@ -252,11 +271,19 @@ body{font-family:'Noto Sans KR',sans-serif;background:#fff;overflow-x:hidden;-we
   if (prevBtn) prevBtn.addEventListener('click', function() { goTo(current - 1); });
   if (nextBtn) nextBtn.addEventListener('click', function() { goTo(current + 1); });
 
-  // 페이지 이탈 시 최종 추적
-  window.addEventListener('beforeunload', function() { track(current + 1); });
+  // 체류 1초 tick — 화면이 보이는 동안만, 세션 30분 상한
+  setInterval(function(){
+    if (document.visibilityState === 'visible' && durTotal < 1800) { pendingDur++; durTotal++; }
+  }, 1000);
 
-  // 초기 추적
-  track(1);
+  // 이탈 내구성 — 모바일 beforeunload 미발화 대비 3중 안전망 + 15초 하트비트
+  document.addEventListener('visibilitychange', function(){ if (document.visibilityState === 'hidden') track(current + 1, false); });
+  window.addEventListener('pagehide', function(){ track(current + 1, false); });
+  window.addEventListener('beforeunload', function() { track(current + 1, false); });
+  setInterval(function(){ if (pendingDur > 0) track(current + 1, false); }, 15000);
+
+  // 초기 추적 (조회수 +1)
+  track(1, true);
 })();
 </script>
 </body>
@@ -407,11 +434,22 @@ ${counterHtml}
 (function(){
   var CODE = 'dm-${escapeHtml(shortCode)}';
   var TRACK_URL = '${escapeHtml(trackApiBase)}';
-  var PHONE = new URLSearchParams(location.search).get('p') || '';
+  var QS = new URLSearchParams(location.search);
+  var PHONE = QS.get('p') || '';
+  var RTOKEN = QS.get('r') || '';
   var MODE = document.body.getAttribute('data-layout-mode') || 'scroll';
   var TOTAL_PAGES = ${totalPages};
-  var startTime = Date.now();
-  var sectionInteractions = {};
+  // 익명 ID — 토큰·phone 없는 열람(발행 주소 복사/전달 링크)의 행 중복 방지 키
+  var ANON_KEY = 'dm_anon_' + CODE;
+  var anonId = '';
+  try {
+    anonId = localStorage.getItem(ANON_KEY) || '';
+    if (!anonId) { anonId = 'a' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8); localStorage.setItem(ANON_KEY, anonId); }
+  } catch (e) {}
+  var pendingSections = {};
+  var pendingDur = 0;
+  var durTotal = 0;
+  var maxScrollPct = 0;
   var pageReached = 1;
   var currentIdx = 0;
   var pageEls = Array.prototype.slice.call(document.querySelectorAll('.dm-page'));
@@ -419,27 +457,50 @@ ${counterHtml}
   var dots = Array.prototype.slice.call(document.querySelectorAll('.dm-page-dots .dot'));
   var counter = document.getElementById('dm-cur');
 
-  function sendTrack(extra) {
-    if (!CODE) return;
-    var dur = Math.round((Date.now() - startTime) / 1000);
-    var body = JSON.stringify(Object.assign({
-      phone: PHONE,
-      page_reached: pageReached,
-      total_pages: TOTAL_PAGES || 1,
-      duration: dur,
-      section_interactions: sectionInteractions
-    }, extra || {}));
-    if (navigator.sendBeacon) {
-      navigator.sendBeacon(TRACK_URL + '/' + CODE + '/track', new Blob([body], {type:'application/json'}));
-    } else {
-      fetch(TRACK_URL + '/' + CODE + '/track', { method:'POST', headers:{'Content-Type':'application/json'}, body: body, keepalive: true }).catch(function(){});
+  function bumpSection(sid, field) {
+    if (!sid) return;
+    pendingSections[sid] = pendingSections[sid] || { views: 0, clicks: 0 };
+    pendingSections[sid][field]++;
+  }
+
+  function updateScrollPct() {
+    if (MODE === 'slides') {
+      var p = TOTAL_PAGES > 0 ? Math.round((pageReached / TOTAL_PAGES) * 100) : 0;
+      if (p > maxScrollPct) maxScrollPct = p;
+      return;
     }
+    var doc = document.documentElement;
+    var sh = Math.max(1, doc.scrollHeight || 1);
+    var p2 = Math.min(100, Math.round(((window.scrollY || doc.scrollTop || 0) + window.innerHeight) / sh * 100));
+    if (p2 > maxScrollPct) maxScrollPct = p2;
+  }
+
+  // 비콘 = 증가분 전송(체류·섹션). 전송 성공 시 증가분 리셋 — 서버가 합산 병합.
+  function sendTrack(isInit) {
+    if (!CODE) return;
+    updateScrollPct();
+    var body = JSON.stringify({
+      r: RTOKEN, phone: PHONE, anon: anonId, init: isInit ? 1 : 0,
+      page_reached: pageReached, total_pages: TOTAL_PAGES || 1,
+      duration: pendingDur, max_scroll_pct: maxScrollPct,
+      section_interactions: pendingSections
+    });
+    var ok = false;
+    if (navigator.sendBeacon) {
+      try { ok = navigator.sendBeacon(TRACK_URL + '/' + CODE + '/track', new Blob([body], {type:'application/json'})); } catch (e) { ok = false; }
+    }
+    if (!ok) {
+      fetch(TRACK_URL + '/' + CODE + '/track', { method:'POST', headers:{'Content-Type':'application/json'}, body: body, keepalive: true }).catch(function(){});
+      ok = true;
+    }
+    if (ok) { pendingDur = 0; pendingSections = {}; }
   }
 
   function updateCurrent(idx) {
     if (idx < 0 || idx >= pageEls.length) return;
     currentIdx = idx;
     if (idx + 1 > pageReached) pageReached = idx + 1;
+    updateScrollPct();
     dots.forEach(function(d, i){ d.classList.toggle('active', i === idx); });
     if (counter) counter.textContent = String(idx + 1);
   }
@@ -461,13 +522,7 @@ ${counterHtml}
     // 섹션 단위 뷰 카운트 (섹션별 성과)
     var sectionObserver = new IntersectionObserver(function(entries){
       entries.forEach(function(e){
-        if (e.isIntersecting) {
-          var sid = e.target.getAttribute('data-section-id');
-          if (sid) {
-            sectionInteractions[sid] = sectionInteractions[sid] || { views: 0, clicks: 0 };
-            sectionInteractions[sid].views++;
-          }
-        }
+        if (e.isIntersecting) bumpSection(e.target.getAttribute('data-section-id'), 'views');
       });
     }, { threshold: 0.5 });
     sectionEls.forEach(function(el){ sectionObserver.observe(el); });
@@ -486,34 +541,41 @@ ${counterHtml}
     });
   });
 
-  // 섹션 클릭 → 클릭 카운트
+  // 섹션 클릭 → 클릭 카운트. 외부 링크/CTA는 클릭 즉시 이탈 — 떠나기 전에 비콘으로 클릭 보존.
   document.addEventListener('click', function(e){
     var wrap = e.target.closest && e.target.closest('.dm-section-wrap');
-    if (wrap) {
-      var sid = wrap.getAttribute('data-section-id');
-      if (sid) {
-        sectionInteractions[sid] = sectionInteractions[sid] || { views: 0, clicks: 0 };
-        sectionInteractions[sid].clicks++;
-      }
-    }
+    if (wrap) bumpSection(wrap.getAttribute('data-section-id'), 'clicks');
+    var link = e.target.closest && e.target.closest('a');
+    if (link) sendTrack(false);
   }, true);
 
-  window.addEventListener('beforeunload', function(){ sendTrack(); });
-  sendTrack();
+  // 체류 1초 tick — 화면이 보이는 동안만, 세션 30분 상한
+  setInterval(function(){
+    if (document.visibilityState === 'visible' && durTotal < 1800) { pendingDur++; durTotal++; }
+  }, 1000);
+  // 스크롤 깊이 (250ms 스로틀)
+  var scrollTick = false;
+  window.addEventListener('scroll', function(){
+    if (scrollTick) return;
+    scrollTick = true;
+    setTimeout(function(){ scrollTick = false; updateScrollPct(); }, 250);
+  }, {passive:true});
+  // 이탈 내구성 — 모바일은 beforeunload 미발화가 잦아 3중 안전망 + 15초 하트비트
+  document.addEventListener('visibilitychange', function(){ if (document.visibilityState === 'hidden') sendTrack(false); });
+  window.addEventListener('pagehide', function(){ sendTrack(false); });
+  window.addEventListener('beforeunload', function(){ sendTrack(false); });
+  setInterval(function(){
+    if (pendingDur > 0 || Object.keys(pendingSections).length > 0) sendTrack(false);
+  }, 15000);
+  // 진입 비콘 (조회수 +1)
+  sendTrack(true);
 
   // ── 인터랙션 제출 (B 2026-06-14) — 룰렛 즉시추첨 / 폼 응모 / 투표. native dialog 0 (섹션 내 안내). ──
-  var ANON_KEY = 'dm_anon_' + CODE;
-  var anonId = '';
-  try {
-    anonId = localStorage.getItem(ANON_KEY) || '';
-    if (!anonId) { anonId = 'a' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8); localStorage.setItem(ANON_KEY, anonId); }
-  } catch (e) {}
-
   function submitInteraction(sectionId, sectionType, data) {
     return fetch(TRACK_URL + '/' + CODE + '/event-response', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ section_id: sectionId, section_type: sectionType, data: data, anonymous_id: anonId, phone: PHONE })
+      body: JSON.stringify({ section_id: sectionId, section_type: sectionType, data: data, anonymous_id: anonId, phone: PHONE, r: RTOKEN })
     }).then(function (r) { return r.json(); });
   }
   function wrapInfo(el) {

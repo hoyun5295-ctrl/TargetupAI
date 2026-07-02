@@ -107,6 +107,17 @@
 
 ---
 
+### 🟢 2026-07-02 (2) — 이메일 마케팅 종결: 크레딧 모델 개편 + 개인화 동적화 + 링크/쿠폰/서식/페이징 (★전부 배포완료)
+> **크레딧 모델(Harold 확정)**: 발송 무료(고객 SMTP) / 완성 저장 50 캠페인당 1회(AI·수동·템플릿 불문, 멱등키 email-campaign-complete:ID + 구 email-ai-publish 인정=이중과금 0, 환불 없음) / 임시저장 무료·무제한(발송+PC 미리보기 잠금) / 발송 시 50 차감 제거. 에디터 [임시저장|완성 저장·50] 2버튼+확인 모달, 미완성 발송 시 완성 모달→발송 연속(1클릭). 생성 3·개선 1 현행.
+> **개인화 동적화(하드코딩 금지)**: GET /api/email/personalization-vars = CT-58 실측 70%+ 필드만(15컬럼 후보) — 칩·조건부 필드·수신자 SELECT 단일 소스. 인앱 변수 목록도 blocked(30% 미만) 숨김.
+> **링크 근본 수정**: 스킴 없는 URL(www.x.y)을 렌더러가 href="#"/링크 제거로 죽이고 추적도 skip → normalize CT `normalizeWebUrl` 신설, 이메일 렌더러 5곳+발송 추적 래핑(구 캠페인 발송 시점 치유)+DM safeUrl 통합 적용.
+> **마무리**: 쿠폰 마감 KST 한국어 표시(`formatKoreanDateTimeDisplay`)+빠른 선택 칩(7/14/30일·이달 말) / 히어로·텍스트카드 줄바꿈(\n→br)+색상 직접 지정(headline_color 등, 미지정=기본색) / 캠페인 카드 하단 압축 버튼 행+2열×2줄(4카드) 페이징뷰. 상세 [[project_2026_0702_email_credit_personalization]].
+
+### 🟢 2026-07-02 (1) — 브랜드보이스 형태 추출 강화 + 브랜드 링크 + 문안 편집기 모달 (★전부 배포완료)
+> **형태 추출**: 가이드라인 9→14항목(후크 유형·본문 구조·종결어미·호칭·기호) + 코드 계산 2(길이 범위·링크 습관 정규식 스캔) + robust 파싱. CT-99 "형태 준수 규칙" 섹션(참고→규칙 격상) + CT-100 종결어미·길이 범위 필수 추가 후 generateMessages 첫 배선(미달 시 재생성 1회 creditCost 0). 각 회사 "재추출" 1클릭 필요.
+> **브랜드 링크**: URL만 등록(라벨 서버 자동 부여) → 칩 클릭=커서 삽입(textInsert CT), AI는 {{LINK:라벨}} 토큰만 출력→백엔드 결정 치환(URL 오타 0), 미치환 placeholder 발송 가드(LINK_PLACEHOLDER_UNEDITED). 저장=ai_company_memory brand_link(ALTER 0).
+> **문안 편집기 모달(MessageEditorModal)**: AI Operator 인라인 편집 통 제거 → 큰 본문+바이트 게이지+스마트 경고((광고)/수신거부 직접입력·깨질 이모지·한도)+휴대폰 미리보기(실수신+고객 머지)+우측 삽입 패널(변수·브랜드보이스 CTA/빈출 칩·브랜드 링크·특수문자 CT). 상세 [[project_2026_0702_brand_voice_form_links]].
+
 ### 🟢 2026-07-01 (이어서 3) — 서버 상태 점검 후 코드 수정: 42P08(시스템 sync user INSERT 타입충돌) + PG 부팅 연결 재시도 + CORS 안내 (★배포·검증완료)
 > **42P08**: sync.ts·companies.ts 시스템 user INSERT가 `$1`을 company_id(uuid) + `'system_sync_'||$1::text`(text) 이중 사용 → PG 타입추론 충돌. fix = `utils/system-sync-user.ts` CT `ensureSystemSyncUser`(`$1::uuid` + `$2::text`)로 통합(2곳 인라인 제거, controltower_first). 비치명(수신거부 실차단은 admin·company_user 등록이 담당, 시스템 user 등록만 skip이었음)·기간계 영향0.
 > **PG 부팅**: config/database.ts 부팅 `SELECT 1` 확인 1회→5회 재시도(2초 간격). 부팅 순간 경합 타임아웃 오탐 실패로그 제거, pool·query·발송 로직 무변경. 검증=21:38 재시작 "[PostgreSQL] 연결 재시도 1/5" 후 붙음(bare 실패표시 사라짐).
