@@ -51,7 +51,8 @@ router.post('/extract', requirePlanFeature('ai_messaging'), async (req: Request,
     const ch = channel as ChannelKey;
 
     // 1. 자연어 → CT-01 호환 filter (AI 변환 + 검증, 0건 판정은 아래에서)
-    const { filter, explanation } = await convertNaturalLanguageToFilter({
+    //    ★ 2026-07-02(3) isAll = "전체 고객" — filter {} = 조건 없음 = 아래 SQL이 자연히 전체 카운트
+    const { filter, explanation, isAll } = await convertNaturalLanguageToFilter({
       companyId,
       naturalLanguage,
       customFieldKeys: Array.isArray(customFieldKeys) ? customFieldKeys : undefined,
@@ -109,6 +110,7 @@ router.post('/extract', requirePlanFeature('ai_messaging'), async (req: Request,
       success: true,
       channel: ch,
       filter,
+      isAll: !!isAll,
       explanation,
       matchCount,
       channelEligibleCount,

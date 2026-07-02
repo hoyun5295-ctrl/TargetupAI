@@ -636,8 +636,9 @@ router.post('/campaigns/:id/send', async (req: Request, res: Response) => {
       const grades = Array.isArray(target.grades) ? target.grades.map((g: any) => String(g)) : undefined;
       targetSpec = { type: 'customers', grades };
       resolved = await resolveCustomerRecipients(auth.companyId, grades);
-    } else if (target && target.type === 'filter' && target.filter && typeof target.filter === 'object' && Object.keys(target.filter).length > 0) {
-      // 타겟 추출(/api/targets/extract)로 확정한 filter → 이메일 발송 대상 결합
+    } else if (target && target.type === 'filter' && target.filter && typeof target.filter === 'object') {
+      // 타겟 추출(/api/targets/extract)로 확정한 filter → 이메일 발송 대상 결합.
+      // ★ 2026-07-02(3) 빈 filter {} = "전체 고객"(isAll) — 조건 없음 = 이메일 자격자 전체 (명시적 type:'filter' 확정분만 도달)
       targetSpec = { type: 'filter', filter: target.filter };
       resolved = await resolveCustomerRecipientsByFilter(auth.companyId, target.filter);
     } else {

@@ -117,11 +117,13 @@ ${customFieldsBlock}
 4. 위 [지원 표준 필드] 또는 [회사별 사용자 정의 필드] 목록에 없는 필드 = 사용 X
 5. 위 [지원 operator] 목록에 없는 연산자 = 사용 X
 6. 자동 완화 절대 X — 0건 매칭 위험이 있어도 사용자 조건 그대로 변환 의무
+7. 사용자가 조건 없이 전체 발송을 원하면(예: "전체 고객", "모든 고객에게", "전부 발송") = "all_customers": true + "filter": {} 출력
 
 [응답 형식 — JSON 단일]
 \`\`\`json
 {
   "filter": { "필드명": { "operator": "...", "value": ... }, ... },
+  "all_customers": false,
   "explanation": "변환 결과 요약 (사용자가 입력한 조건을 어떻게 해석했는지 한국어로 1~2 문장)",
   "warnings": ["사용자에게 추가 정정이 필요한 항목 (없으면 빈 배열)"]
 }
@@ -177,7 +179,7 @@ function extractJSON(text: string): string {
  */
 export async function convertNaturalLanguageToFilter(
   input: GenerateSegmentInput,
-): Promise<{ filter: GenerateSegmentResult['filter']; explanation: string }> {
+): Promise<{ filter: GenerateSegmentResult['filter']; explanation: string; isAll?: boolean }> {
   const { companyId, naturalLanguage } = input;
   const customFieldKeys = input.customFieldKeys || [];
 
@@ -214,10 +216,19 @@ export async function convertNaturalLanguageToFilter(
   const filter = parsed?.filter;
   const explanation = String(parsed?.explanation || '').slice(0, 500);
 
-  if (!filter || typeof filter !== 'object' || Object.keys(filter).length === 0) {
+  // ★ 2026-07-02(3) 전체 고객 = 1급 타겟 — "전체고객에게 발송"이 EMPTY_FILTER로 죽던 구멍 수정.
+  //   AI 플래그(all_customers) 우선 + 결정적 키워드 안전망(플래그 누락 대비). filter {} = 조건 없음 = 전체.
+  const emptyFilter = !filter || typeof filter !== 'object' || Object.keys(filter).length === 0;
+  const wantsAll = parsed?.all_customers === true
+    || (emptyFilter && /(전체|모든|모두|전부)/.test(input.naturalLanguage));
+  if (wantsAll) {
+    return { filter: {}, explanation: explanation || '전체 고객을 대상으로 합니다.', isAll: true };
+  }
+
+  if (emptyFilter) {
     throw new SegmentGenerationError(
       'EMPTY_FILTER',
-      'AI가 조건을 추출하지 못했습니다. 더 구체적으로 입력해주세요. (예: "30일 안 구매한 30대 여성")',
+      'AI가 조건을 추출하지 못했습니다. 더 구체적으로 입력해주세요. (예: "30일 안 구매한 30대 여성" / 전체 발송은 "전체 고객")',
     );
   }
 

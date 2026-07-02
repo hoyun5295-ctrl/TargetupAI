@@ -186,7 +186,7 @@ export default function DmSendAndTrackModal({ dmId, dmTitle, show, onClose }: Pr
       const res = await fetch(`/api/dm/${dmId}/send-to-target`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token()}` },
-        body: JSON.stringify({ filter: target.filter, messageText: messageText.trim(), isAd, scheduledAt: scheduledAtVal ? new Date(scheduledAtVal).toISOString() : null }),
+        body: JSON.stringify({ filter: target.filter, allCustomers: !!target.isAll, messageText: messageText.trim(), isAd, scheduledAt: scheduledAtVal ? new Date(scheduledAtVal).toISOString() : null }),
       });
       const data = await res.json();
       if (!res.ok || !data.success) { toast.error(data?.error || '발송에 실패했습니다.'); return; }

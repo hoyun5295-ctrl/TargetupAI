@@ -17,6 +17,8 @@ export type ExtractChannel = 'email' | 'dm' | 'inapp' | 'kakao';
 
 export interface ExtractedTarget {
   filter: Record<string, { operator: string; value: any }>;
+  /** ★ 2026-07-02(3) "전체 고객" 타겟 — filter는 빈 {} (조건 없음 = 전체) */
+  isAll?: boolean;
   explanation: string;
   matchCount: number;
   channelEligibleCount: number;
@@ -54,6 +56,7 @@ const CHANNEL_ELIGIBLE_HINT: Record<ExtractChannel, string> = {
 };
 
 const EXAMPLES = [
+  '전체 고객',
   '30일 안 구매하지 않은 30대 여성',
   'VIP 등급 + 누적 구매 100만원 이상',
   '서울 거주 + 최근 3개월 안 1회 이상 구매',
@@ -65,6 +68,8 @@ export default function TargetExtractModal({ show, channel, onClose, onApply }: 
   const [input, setInput] = useState('');
   const [generating, setGenerating] = useState(false);
   const [result, setResult] = useState<ExtractedTarget | null>(null);
+  // ★ 2026-07-02(3) 추출 실패를 토스트(3초)로만 보여줘 놓치던 문제 — 모달 안 지속 표시
+  const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
   if (!show) return null;
@@ -72,6 +77,7 @@ export default function TargetExtractModal({ show, channel, onClose, onApply }: 
   const reset = () => {
     setInput('');
     setResult(null);
+    setError(null);
   };
 
   const close = () => {
@@ -86,6 +92,7 @@ export default function TargetExtractModal({ show, channel, onClose, onApply }: 
     }
     setGenerating(true);
     setResult(null);
+    setError(null);
     try {
       const token = localStorage.getItem('token');
       const res = await fetch('/api/targets/extract', {
@@ -95,18 +102,23 @@ export default function TargetExtractModal({ show, channel, onClose, onApply }: 
       });
       const data = await res.json();
       if (!res.ok || !data.success) {
-        toast.error(data?.error || '타겟 추출에 실패했습니다.');
+        const msg = data?.error || '타겟 추출에 실패했습니다.';
+        setError(msg);
+        toast.error(msg);
         return;
       }
       setResult({
         filter: data.filter,
+        isAll: !!data.isAll,
         explanation: data.explanation,
         matchCount: data.matchCount,
         channelEligibleCount: data.channelEligibleCount,
         samples: data.samples || [],
       });
     } catch (e: any) {
-      toast.error(e?.message || '서버에 연결할 수 없습니다.');
+      const msg = e?.message || '서버에 연결할 수 없습니다.';
+      setError(msg);
+      toast.error(msg);
     } finally {
       setGenerating(false);
     }
@@ -203,6 +215,14 @@ export default function TargetExtractModal({ show, channel, onClose, onApply }: 
               </button>
             </div>
           </div>
+
+          {/* 추출 실패 — 모달 안 지속 표시 (토스트만으로는 놓침) */}
+          {error && !result && (
+            <div className="rounded-xl border border-rose-400/30 bg-rose-500/10 p-3 flex items-start gap-2">
+              <AlertCircle className="w-4 h-4 text-rose-300 flex-shrink-0 mt-0.5" />
+              <p className="text-xs text-rose-200">{error}</p>
+            </div>
+          )}
 
           {/* 결과 */}
           {result && (

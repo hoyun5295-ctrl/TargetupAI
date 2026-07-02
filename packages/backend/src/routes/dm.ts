@@ -566,15 +566,18 @@ dmRouter.post('/:id/send-to-target', async (req: any, res: any) => {
     const userId = req.user?.userId || companyId;
     if (!companyId) return res.status(403).json({ error: '회사 권한이 필요합니다.' });
 
-    const { filter, messageText, isAd, scheduledAt } = req.body as {
+    const { filter, messageText, isAd, scheduledAt, allCustomers } = req.body as {
       filter?: Record<string, { operator: string; value: any }>;
       messageText?: string;
       isAd?: boolean;
       scheduledAt?: string | null;
+      allCustomers?: boolean;
     };
-    if (!filter || typeof filter !== 'object' || Object.keys(filter).length === 0) {
-      return res.status(400).json({ error: '발송 대상 조건이 필요합니다.' });
+    // ★ 2026-07-02(3) 전체 고객 발송 지원 — 타겟 추출 "전체 고객"(isAll) 확정분은 빈 filter 허용(= 조건 없음 = 전체 + DM 자격)
+    if (!allCustomers && (!filter || typeof filter !== 'object' || Object.keys(filter).length === 0)) {
+      return res.status(400).json({ error: '발송 대상 조건이 필요합니다. 전체 발송은 타겟 추출에서 "전체 고객"으로 확정해주세요.' });
     }
+    const effectiveFilter = allCustomers ? {} : (filter as Record<string, { operator: string; value: any }>);
     if (!messageText?.trim()) return res.status(400).json({ error: '문자 본문을 입력해주세요.' });
     const scheduled = !!scheduledAt;
     if (scheduled) {
@@ -610,7 +613,8 @@ dmRouter.post('/:id/send-to-target', async (req: any, res: any) => {
     if (!callback) return res.status(400).json({ error: '등록된 발신번호가 없습니다. 발신번호 등록 후 발송해주세요.', code: 'NO_CALLBACK' });
 
     // 발송 대상 resolve — DM 채널 자격(전화 유효·수신거부/무효 아님·활성) + filter. phone 중복 제거.
-    const { sql: filterSql, params: filterParams } = buildCustomerFilter(filter, {
+    //   전체 고객(allCustomers)이면 filter 조건 없이 DM 자격만 적용.
+    const { sql: filterSql, params: filterParams } = buildCustomerFilter(effectiveFilter, {
       tableAlias: 'c', startParamIndex: 2, storeCodeMode: 'skip', inputFormat: 'structured',
     });
     const dmWhere = buildChannelEligibilityWhere('dm', 'c');
