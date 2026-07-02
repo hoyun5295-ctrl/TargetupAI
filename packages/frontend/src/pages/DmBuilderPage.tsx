@@ -681,13 +681,13 @@ export default function DmBuilderPage() {
                 onClick={() => { if (!generating) setQuickStartOpen(true); }}
                 disabled={generating}
                 style={{
-                  flex: 1, minHeight: 104, padding: '14px 16px', textAlign: 'left',
+                  flex: 1, minHeight: 104, padding: '14px 16px', textAlign: 'center',
                   background: 'linear-gradient(135deg, rgba(168,85,247,0.22), rgba(217,70,239,0.12))',
                   border: '1px solid rgba(168,85,247,0.45)', borderRadius: 14,
                   cursor: generating ? 'not-allowed' : 'pointer', opacity: generating ? 0.5 : 1,
                 }}
               >
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, marginBottom: 6 }}>
                   <span style={{ fontSize: 18 }}>⚡</span>
                   <span style={{ fontSize: 14, fontWeight: 800, color: '#fff' }}>빠른 시작</span>
                 </div>
@@ -699,12 +699,12 @@ export default function DmBuilderPage() {
                   onClick={handleCreateNew}
                   disabled={generating}
                   style={{
-                    minHeight: 84, padding: '12px 14px', textAlign: 'left',
+                    minHeight: 84, padding: '12px 14px', textAlign: 'center',
                     background: 'rgba(255,255,255,0.04)', border: '1px dashed rgba(255,255,255,0.22)', borderRadius: 12,
                     cursor: generating ? 'not-allowed' : 'pointer', opacity: generating ? 0.5 : 1,
                   }}
                 >
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, marginBottom: 4 }}>
                     <span style={{ fontSize: 15 }}>📄</span>
                     <span style={{ fontSize: 13, fontWeight: 700, color: '#fff' }}>자유 시작</span>
                   </div>
@@ -714,12 +714,12 @@ export default function DmBuilderPage() {
                   onClick={() => { uploadModeRef.current = 'slides'; completedImagesInputRef.current?.click(); }}
                   disabled={generating || uploadingImages}
                   style={{
-                    minHeight: 84, padding: '12px 14px', textAlign: 'left',
+                    minHeight: 84, padding: '12px 14px', textAlign: 'center',
                     background: 'rgba(255,255,255,0.04)', border: '1px dashed rgba(255,255,255,0.22)', borderRadius: 12,
                     cursor: (generating || uploadingImages) ? 'not-allowed' : 'pointer', opacity: (generating || uploadingImages) ? 0.5 : 1,
                   }}
                 >
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, marginBottom: 4 }}>
                     <span style={{ fontSize: 15 }}>🖼️</span>
                     <span style={{ fontSize: 13, fontWeight: 700, color: '#fff' }}>{uploadingImages ? '업로드 중...' : '완성 슬라이드'}</span>
                   </div>
