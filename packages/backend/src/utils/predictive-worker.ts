@@ -141,6 +141,14 @@ export async function runPredictiveBatchNow(): Promise<{
         } catch (recapErr: any) {
           console.warn('[PredictiveWorker] 성과 회고 skip:', row.id, recapErr?.message);
         }
+        // ★ 2026-07-02 (Harold 확정): 월간 캠페인 D-2 사전 준비 문자 — 혜택·전략상품 입력/갱신 안내.
+        try {
+          const { sendMonthlyPrepReminders } = await import('./operator-prep-reminder');
+          const prep = await sendMonthlyPrepReminders(row.id);
+          if (prep.notified > 0) console.log(`[PredictiveWorker] 사전 준비 문자 company=${row.id} ${prep.notified}건`);
+        } catch (prepErr: any) {
+          console.warn('[PredictiveWorker] 사전 준비 문자 skip:', row.id, prepErr?.message);
+        }
         // ★ 2026-07-02 3단계 (Harold 확정): 같은 일일 분석 차감 1회에 "오늘의 추천" 브리핑 동반 생성(추가 차감 0).
         //   실패는 예측·발송에 영향 0 — 격리 후 다음 날 사이클이 재시도.
         try {

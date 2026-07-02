@@ -171,6 +171,30 @@ describe('buildDailyRecapBody — 성과 회고 문자 (2차)', () => {
   });
 });
 
+describe('buildPrepReminderBody — 월간 캠페인 D-2 사전 준비 문자 (Harold 확정)', () => {
+  it('혜택 미입력: 캠페인명·예정 일시·입력 요청·미입력 시 승인 대기 안내를 담는다', async () => {
+    const { buildPrepReminderBody } = await import('./autosend-policy');
+    const body = buildPrepReminderBody({
+      operatorName: '7월 생일 축하', sendAtLabel: '7월 5일 10:00', benefitContent: null,
+    });
+    expect(body).toContain('7월 생일 축하');
+    expect(body).toContain('7월 5일 10:00');
+    expect(body).toContain('혜택');
+    expect(body).toContain('입력');
+    expect(body).toContain('승인 대기');
+  });
+
+  it('혜택 입력됨: 현재 혜택을 보여주고 바꾸려면 수정하라고 안내한다', async () => {
+    const { buildPrepReminderBody } = await import('./autosend-policy');
+    const body = buildPrepReminderBody({
+      operatorName: 'VIP 데이', sendAtLabel: '7월 10일 10:00', benefitContent: '마스크팩 증정',
+    });
+    expect(body).toContain('마스크팩 증정');
+    expect(body).toContain('수정');
+    expect(body).not.toContain('승인 대기');
+  });
+});
+
 describe('wrapOperatorNoticeBody — 담당자 안내 문자 머리말 (Harold 2026-07-02 지시)', () => {
   it('본문이 [한줄로 AI 자동마케팅 안내문자]로 시작한다', async () => {
     const { wrapOperatorNoticeBody } = await import('./autosend-policy');

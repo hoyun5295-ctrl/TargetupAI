@@ -1862,8 +1862,9 @@ router.get('/operator/continuous', async (req: Request, res: Response) => {
   }
 });
 
-// ★ 2026-07-02 4차: 마케팅 캘린더 — 1년치 시즌 캠페인 AI 설계 (등록은 기존 POST /operator/continuous 재사용 = 등록당 과금).
-//   설계 생성 자체는 무과금(creditCost 0) — 과금 창구는 등록(자동마케팅 저장 200) 유지.
+// ★ 2026-07-02 4차: 마케팅 캘린더 — 1년치 시즌 캠페인 AI 설계 (등록은 기존 POST /operator/continuous 재사용 = 등록당 200 별도).
+//   설계 생성 = 매회 50 차감(재생성 포함 — Harold 명시). CREDIT_COST_MAP 'marketing-calendar'가 진실,
+//   callAIWithFallback이 사전 잔액 확인 + 성공 후 차감을 담당.
 router.post('/operator/marketing-calendar/generate', async (req: Request, res: Response) => {
   try {
     const companyId = req.user?.companyId;
@@ -1894,8 +1895,8 @@ router.post('/operator/marketing-calendar/generate', async (req: Request, res: R
       temperature: 0.5,
       model: 'opus',
       companyId,
+      userId: req.user?.userId ? String(req.user.userId) : undefined,
       source: 'marketing-calendar',
-      creditCost: 0,
     });
     const entries = sanitizeCalendarEntries(extractJsonObject(text)?.entries);
     if (entries.length === 0) {

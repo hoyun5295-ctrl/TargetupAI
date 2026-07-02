@@ -1161,6 +1161,11 @@ function TopBarWithBack({ onBack, onPublishDone }: { onBack: () => void; onPubli
   //   이미 발행(100크레딧 차감)된 DM에도 크레딧 모달을 다시 띄우던 결함 수정
   const isPublished = useDmBuilderStore((s) => s.isPublished);
   const setPublished = useDmBuilderStore((s) => s.setPublished);
+  // ★ 2026-07-02 (Harold 명시 크레딧 모달 기준): 인터랙션 DM(추첨·룰렛·설문 등)은 발행 120 차감인데
+  //   모달이 항상 dm-builder(100)로 떠 표시≠실차감이던 결함 수정 — 백엔드 isInteractionCampaign과 동일 기준.
+  const pages = useDmBuilderStore((s) => s.pages);
+  const INTERACTION_TYPES = ['lucky_draw', 'roulette', 'poll', 'survey', 'email_capture', 'click_rewards'];
+  const hasInteraction = pages.some((p: any) => (p?.sections || []).some((sec: any) => sec && INTERACTION_TYPES.includes(sec.type)));
   const [confirmPublish, setConfirmPublish] = useState(false);
   const [publishedUrl, setPublishedUrl] = useState<string | null>(null);
   const [sendModalOpen, setSendModalOpen] = useState(false);
@@ -1209,7 +1214,7 @@ function TopBarWithBack({ onBack, onPublishDone }: { onBack: () => void; onPubli
       />
       <CreditConfirmModal
         open={confirmPublish}
-        source="dm-builder"
+        source={hasInteraction ? 'dm-interaction-publish' : 'dm-builder'}
         onConfirm={() => { setConfirmPublish(false); handlePublish(); }}
         onCancel={() => setConfirmPublish(false)}
       />

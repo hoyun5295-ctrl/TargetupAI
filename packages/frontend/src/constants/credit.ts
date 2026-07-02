@@ -90,8 +90,9 @@ export const CREDIT_SOURCE_LABELS: Record<string, string> = {
   'journey-ai-generate': '여정 생성', 'journey-builder-custom': '여정 생성',
   'journey-activate': '여정 활성화', 'journey-operation': '여정 운영',
   'continuous-operator': '자동 마케팅', 'continuous-operator-send': '자동 마케팅 발송',
+  'marketing-calendar': '마케팅 캘린더 설계',
   'predictive-daily': '예측 분석',
-  'dm-ai-generate': '모바일 DM 생성', 'dm-builder': '모바일 DM 발행',
+  'dm-ai-generate': '모바일 DM 생성', 'dm-builder': '모바일 DM 발행', 'dm-interaction-publish': '인터랙션 DM 발행',
   'inapp-ai-generator': '인앱 생성', 'inapp-publish': '인앱 게시', 'inapp-quick-action': '인앱 다듬기',
   'email-ai-generate': 'Email 생성', 'email-campaign-complete': 'Email 캠페인 완성', 'email-ai-publish': 'Email 발송 확정(구)', 'email-refine': 'Email 다듬기',
   'email-precheck': 'Email 발송 전 진단', 'email-performance-insight': 'Email 성과 진단',
@@ -110,7 +111,12 @@ export const CREDIT_SOURCE_LABELS: Record<string, string> = {
   'brand-voice-extract': '브랜드보이스 추출', 'parse-briefing': '브리핑 분석',
 };
 
-/** 사전 확인 모달 대상 — 큰 확정 차감 source→cost (백엔드 CREDIT_COST_MAP의 확정 차감과 1:1). */
+/**
+ * 사전 확인 모달 대상 — 큰 확정 차감 source→cost (백엔드 CREDIT_COST_MAP의 확정 차감과 1:1).
+ * ★ 기준점 (Harold 명시 2026-07-02): 사용자가 버튼으로 트리거하는 기능 중 20크레딧 이상 = 발동 전
+ *   CreditConfirmModal 의무. 신규 기능이 20 이상 차감이면 여기 등록 + 트리거 지점에 모달 필수.
+ *   (자동/백그라운드 차감 — 예측 일일·여정 운영·자율발송 — 은 모달 불가 → 설정 화면 안내로 고지.)
+ */
 export const CONFIRM_CREDIT_COSTS: Record<string, number> = {
   'dm-ai-generate': 5,           // 모바일 DM 생성 (AI 자동 생성 — 생성 전 확인, 범위 넓어 5)
   'dm-builder': 100,             // DM 발행
@@ -120,6 +126,7 @@ export const CONFIRM_CREDIT_COSTS: Record<string, number> = {
   'inapp-publish': 100,          // 인앱 게시
   'journey-activate': 200,       // 여정 활성화
   'continuous-operator': 200,    // 자동 마케팅 저장
+  'marketing-calendar': 50,      // ★ 2026-07-02 (Harold 명시): 캘린더 1년 설계 — 생성·재생성 매회
   'orchestrate': 300,            // 풀분석
 };
 

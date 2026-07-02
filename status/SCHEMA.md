@@ -2042,9 +2042,13 @@ cd /home/administrator/targetup-app/packages/backend && npm install web-push @ty
 | sequence_enabled | boolean DEFAULT false | Phase3 C 다단계 시퀀스 on/off (2026-06-26 ALTER 실측) |
 | sequence_delay_days | integer | 1차 후 리마인드 대기일 1~30 (2026-06-26 ALTER 실측) |
 | sequence_reminder_content | text | 관리자 직접 입력 리마인드 문안 — AI 임의 생성 금지 (2026-06-26 ALTER 실측) |
+| send_time_mode | text NOT NULL DEFAULT 'fixed' | 발송 시각 모드 fixed(희망 시각 정각)/ai_optimal(클릭 피크) — schedule_time=발송 희망 시각, next_run_at=생성 시각(희망−lead) 의미 전환 (2026-07-02 ALTER 실측) |
+| copy_style | text | 문안 스타일 courteous/friendly/witty/punchy, NULL=브랜드 톤 자동 (2026-07-02 ALTER 실측) |
+| prep_reminder_sent_for | date | 월간 캠페인 D-2 사전 준비 문자 멱등(발송일 기록) (2026-07-02 ALTER — 세션 종료 시점 미실행 확인, Harold 실행 예정) |
 - INDEX: company_id, status WHERE status='active'
 - INDEX: status, next_run_at WHERE status='active' (worker 호출용)
 - 2026-06-26 information_schema 덤프 = 위 33컬럼 전부 존재 확정. 중복 4컬럼(notify_phones/backup_phones/notify_channel/lead_minutes)은 DROP 완료(데이터 0). 재질의 금지.
+- ★ 2026-07-02 의미 전환: next_run_at = "발송 시각"이 아니라 "생성 시각(발송 희망 − auto_send_lead_minutes)". 기존 행은 −lead UPDATE 마이그레이션 완료(UPDATE 4 실측).
 
 ### operator_proposals (AI 매일 제안서) — D176 신규
 
@@ -2064,9 +2068,25 @@ cd /home/administrator/targetup-app/packages/backend && npm install web-push @ty
 | campaign_id | uuid FK → campaigns | 실행 시 박힘 |
 | expires_at | timestamptz | 7일 후 자동 만료 (사용자 미응답 시) |
 | created_at | timestamptz | |
+| recap_notified_at | timestamptz | 성과 회고 문자(발송 다음날 9시) 멱등 마커 (2026-07-02 ALTER 실측 — information_schema 1row 확인) |
 - INDEX: company_id, status, created_at DESC
 - INDEX: operator_id, created_at DESC
 - INDEX: status, expires_at WHERE status='pending' (만료 처리용)
+- (updated_at 컬럼 없음 — UPDATE에 넣으면 조용히 실패, LESSONS_BACKEND)
+
+### company_daily_briefs (오늘의 추천 — 회사 일일 마케팅 브리핑) — 2026-07-02 신규 (CREATE 실측·배포완료)
+
+| 컬럼 | 타입 | 비고 |
+|------|------|------|
+| id | uuid PK DEFAULT gen_random_uuid() | |
+| company_id | uuid NOT NULL | 회사 격리 |
+| brief_date | date NOT NULL | KST 날짜 — UNIQUE(company_id, brief_date) UPSERT |
+| headline | text | 오늘의 한 줄 브리핑 |
+| recommendations | jsonb DEFAULT '[]' | 추천 ≤3 {title, objective, reason, opportunityType, targetCount(실측 귀속), valueAtStake, recommendedChannel} |
+| signals | jsonb DEFAULT '{}' | 수집 신호 원본 {opportunities, activeOperators, pendingProposals, yesterdayRecap, promotionCandidates} |
+| created_at | timestamptz DEFAULT NOW() | |
+- UNIQUE (company_id, brief_date) / INDEX idx_company_daily_briefs_lookup (company_id, brief_date DESC)
+- 생성 = predictive-worker 매일 KST 9시(일일 분석 차감 1회에 포함, 추가 차감 0). 소비 = GET /api/ai/operator/daily-brief + /operator/self-diagnosis 동봉(좌측 진단 패널 단일 소스).
 
 ### D176 운영 환경 실행 SQL (Harold 직접)
 

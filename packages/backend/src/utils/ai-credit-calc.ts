@@ -79,6 +79,8 @@ export function buildIdempotencyKey(source: string, aiCallLogId?: string | null)
  *  - 풀분석 300 / 여정 생성 3·저장 150 / 자동마케팅 저장 200·발송 3 / DM 생성 5·발행 30 / 인앱 생성 3·게시 15 / 문안·분석 5 / 다듬기·질문·매핑 1.
  *  - orchestrate·continuous-operator는 진입점 1회만 차감, 내부 sub 호출은 호출측이 creditCost:0 명시(묶음 회피).
  *  - 미등록 source는 getCreditCost가 0 반환(차감 안 함) — 신규 작업 추가 시 여기 등록 의무.
+ *  - ★ 기준점 (Harold 명시 2026-07-02): 사용자 버튼 트리거 + 20크레딧 이상 = frontend CONFIRM_CREDIT_COSTS
+ *    등록 + 트리거 지점 CreditConfirmModal 의무. 자동/백그라운드 차감은 설정 화면 안내로 고지.
  *  - frontend constants/credit.ts CREDIT_TASK_COSTS와 1:1 일치 유지 (한쪽만 바꾸지 말 것).
  */
 export const CREDIT_COST_MAP: Record<string, number> = {
@@ -100,6 +102,8 @@ export const CREDIT_COST_MAP: Record<string, number> = {
   'continuous-operator': 200,
   // 자동 마케팅 발송 문안 3 — 제안서 발송 확정(수동 승인/자동 실행) 시 문안 1건당. 멱등키 proposalId. 스팸 재생성은 묶음 0.
   'continuous-operator-send': 10,
+  // ★ 2026-07-02 (Harold 명시): 마케팅 캘린더 1년 설계 50 — 생성·재생성 매회 차감(Email 완성 50과 동급). 등록은 'continuous-operator' 200 별도.
+  'marketing-calendar': 50,
   // 예측 자동 분석 (3) — 연동 회사(싱크에이전트/SDK) 매일 1회 예측 점수 갱신. 회사+날짜 멱등.
   'predictive-daily': 3,
   // 모바일 DM 생성(돌려보기) 5 — 자연어→sections + 슬라이드 분할 + 전 섹션 카피까지 생성(범위 넓음). 호출마다 5. 발행은 'dm-builder' 30 별도.

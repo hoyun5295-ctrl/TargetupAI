@@ -24,6 +24,8 @@ export default function MarketingCalendarPage() {
   const [generating, setGenerating] = useState(false);
   const [registering, setRegistering] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
+  // ★ Harold 명시: 설계 생성·재생성 = 매회 크레딧 차감 → 생성 전 확인 모달
+  const [genConfirmOpen, setGenConfirmOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const auth = () => ({ Authorization: `Bearer ${localStorage.getItem('token')}` });
@@ -130,7 +132,7 @@ export default function MarketingCalendarPage() {
               마음에 드는 달만 골라 등록하면 매월 정해진 날, 2시간 전 문안 안내와 함께 자동 발송됩니다.
             </p>
             <button
-              onClick={generate}
+              onClick={() => setGenConfirmOpen(true)}
               disabled={generating}
               className="mt-5 inline-flex items-center gap-2 px-5 py-3 rounded-xl bg-gradient-to-r from-orange-500/80 to-rose-500/80 hover:opacity-90 disabled:opacity-40 text-sm font-semibold transition-opacity"
             >
@@ -146,7 +148,7 @@ export default function MarketingCalendarPage() {
           <>
             <div className="flex items-center justify-between flex-wrap gap-2">
               <div className="text-sm text-white/70">원하는 달을 선택하세요 — 선택 {pickedCount}건</div>
-              <button onClick={generate} disabled={generating} className="text-xs px-3 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 text-white/70 transition-colors">
+              <button onClick={() => setGenConfirmOpen(true)} disabled={generating} className="text-xs px-3 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 text-white/70 transition-colors">
                 다시 설계
               </button>
             </div>
@@ -193,7 +195,7 @@ export default function MarketingCalendarPage() {
                 선택 {pickedCount}건 자동마케팅으로 등록
               </button>
             </div>
-            <div className="text-center text-[11px] text-white/40">등록 시 건당 자동마케팅 저장 크레딧이 차감됩니다. 혜택 문구는 등록 후 각 항목에서 직접 입력할 수 있습니다.</div>
+            <div className="text-center text-[11px] text-white/40">설계 생성·다시 설계는 매회, 등록은 건당 크레딧이 차감됩니다. 혜택 문구는 등록 후 각 항목에서 직접 입력할 수 있습니다.</div>
           </>
         )}
 
@@ -211,6 +213,13 @@ export default function MarketingCalendarPage() {
         source="continuous-operator"
         onConfirm={() => { setConfirmOpen(false); registerSelected(); }}
         onCancel={() => setConfirmOpen(false)}
+      />
+      {/* 설계 생성·재생성 — 매회 차감 확인 (Harold 명시) */}
+      <CreditConfirmModal
+        open={genConfirmOpen}
+        source="marketing-calendar"
+        onConfirm={() => { setGenConfirmOpen(false); generate(); }}
+        onCancel={() => setGenConfirmOpen(false)}
       />
     </div>
   );

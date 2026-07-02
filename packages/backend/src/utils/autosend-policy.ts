@@ -267,6 +267,33 @@ export function buildDailyRecapBody(input: DailyRecapInput): string {
 }
 
 /**
+ * 월간 캠페인 D-2 사전 준비 문자 (Harold 확정 2026-07-02) — 캘린더/월간 오퍼레이터의
+ * "그때그때 달라지는 혜택·전략상품"을 발송 전에 챙기게 하는 안내. 혜택 입력 여부로 문구 분기.
+ */
+export interface PrepReminderInput {
+  operatorName: string;
+  sendAtLabel: string;              // '7월 5일 10:00'
+  benefitContent: string | null;    // 현재 입력된 혜택 (없으면 null)
+}
+
+export function buildPrepReminderBody(input: PrepReminderInput): string {
+  const benefit = (input.benefitContent || '').trim();
+  const head = `'${input.operatorName}' 캠페인이 ${input.sendAtLabel}에 예정되어 있습니다.`;
+  if (!benefit) {
+    return [
+      head,
+      `이번 달 혜택·전략상품이 아직 입력되지 않았습니다. 발송 전에 한줄로 > 자동마케팅에서 입력해 주세요.`,
+      `입력 없이 진행되면 문안이 승인 대기로 전환되어 자동 발송되지 않습니다.`,
+    ].join('\n');
+  }
+  return [
+    head,
+    `입력된 혜택: "${benefit.slice(0, 80)}"`,
+    `이번 달도 그대로 진행하면 그대로 두시고, 바꾸려면 한줄로 > 자동마케팅에서 수정해 주세요.`,
+  ].join('\n');
+}
+
+/**
  * 담당자 안내 문자 머리말 — Harold 2026-07-02 지시: 모든 담당자 안내 문자는
  * "[한줄로 AI 자동마케팅 안내문자]"로 시작해 한줄로 발신임을 분명히 한다. 중복 부착 방지.
  */
