@@ -40,7 +40,12 @@ export default function TextCardSection({ props, onEdit }: { props: TextCardProp
           {(props.headline || editable) && (
             <InlineEditable
               className="dm-text-h2"
-              style={{ color: 'var(--dm-neutral-900)', marginBottom: 'var(--dm-sp-2)' }}
+              style={{
+                color: props.headline_color || 'var(--dm-neutral-900)',
+                marginBottom: 'var(--dm-sp-2)',
+                // ★ 2026-07-02(2) 폰트 크기·색상 직접 지정 — 뷰어 SSR과 동일 규칙
+                ...(props.headline_size ? { fontSize: props.headline_size } : {}),
+              }}
               value={props.headline || ''}
               placeholder="제목"
               onChange={(v) => onEdit?.({ headline: v } as Partial<TextCardProps>)}
@@ -51,7 +56,10 @@ export default function TextCardSection({ props, onEdit }: { props: TextCardProp
           {(props.body || editable) && (
             <InlineEditable
               className="dm-text-body"
-              style={{ color: 'var(--dm-neutral-700)' }}
+              style={{
+                color: props.body_color || 'var(--dm-neutral-700)',
+                ...(props.body_size ? { fontSize: props.body_size } : {}),
+              }}
               value={props.body || ''}
               placeholder="본문 내용을 입력하세요"
               onChange={(v) => onEdit?.({ body: v } as Partial<TextCardProps>)}

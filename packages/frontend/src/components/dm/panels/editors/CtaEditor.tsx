@@ -42,6 +42,11 @@ export default function CtaEditor({ props, onUpdate }: EditorProps<CtaProps>) {
           </div>
           <Field label="라벨"><TextInput value={b.label} onChange={(v) => updateBtn(i, { label: v })} placeholder="자세히 보기" /></Field>
           <Field label="URL"><TextInput type="url" value={b.url} onChange={(v) => updateBtn(i, { url: v })} placeholder="https://..." /></Field>
+          {!String(b.url || '').trim() && (
+            <div style={{ fontSize: 10, color: 'var(--dm-error)', marginTop: 2 }}>
+              링크가 비어 있어 발행물에서 버튼이 동작하지 않습니다. URL을 입력해주세요.
+            </div>
+          )}
           <Field label="스타일">
             <Select
               value={b.style || 'primary'}

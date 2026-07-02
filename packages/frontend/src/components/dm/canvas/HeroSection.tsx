@@ -49,7 +49,12 @@ export default function HeroSection({ props, onEdit }: { props: HeroProps; onEdi
         {(props.headline || editable) && (
           <InlineEditable
             className="dm-text-hero"
-            style={{ fontWeight: 800 }}
+            style={{
+              fontWeight: 800,
+              // ★ 2026-07-02(2) 폰트 크기·색상 직접 지정 — 뷰어 SSR과 동일 규칙 (미지정 = 토큰 크기/기본색)
+              ...(props.headline_size ? { fontSize: props.headline_size } : {}),
+              ...(props.headline_color ? { color: props.headline_color } : {}),
+            }}
             value={props.headline}
             placeholder="큰 제목을 입력하세요"
             onChange={(v) => onEdit?.({ headline: v } as Partial<HeroProps>)}
@@ -61,7 +66,12 @@ export default function HeroSection({ props, onEdit }: { props: HeroProps; onEdi
         {(props.sub_copy || editable) && (
           <InlineEditable
             className="dm-text-body"
-            style={{ marginTop: 'var(--dm-sp-3)', opacity: 0.9 }}
+            style={{
+              marginTop: 'var(--dm-sp-3)',
+              opacity: 0.9,
+              ...(props.sub_copy_size ? { fontSize: props.sub_copy_size } : {}),
+              ...(props.sub_copy_color ? { color: props.sub_copy_color } : {}),
+            }}
             value={props.sub_copy || ''}
             placeholder="부가 설명을 입력하세요 (선택)"
             onChange={(v) => onEdit?.({ sub_copy: v } as Partial<HeroProps>)}

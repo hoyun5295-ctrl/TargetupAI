@@ -59,6 +59,23 @@ export function safeUrl(url: unknown): string {
   return '#';
 }
 
+/** ★ 2026-07-02(2) 폰트 크기 직접 선택 — 유효(10~80px)하면 뒤에 붙는 font-size 선언, 아니면 빈 문자열(기존 토큰 크기 유지). */
+export function fsDecl(size: unknown): string {
+  const n = Math.round(Number(size));
+  if (!Number.isFinite(n) || n < 10 || n > 80) return '';
+  return `;font-size:${n}px`;
+}
+
+/** ★ 2026-07-02(2) 상품 할인율 계산 — 수동 discount_rate(1~99) 우선, 없으면 정가/할인가로 산출. 유효하지 않으면 null. */
+export function computeDmDiscountRate(price: unknown, discountPrice: unknown, manualRate?: unknown): number | null {
+  const manual = Math.round(Number(manualRate));
+  if (Number.isFinite(manual) && manual > 0 && manual < 100) return manual;
+  const p = Number(price);
+  const d = Number(discountPrice);
+  if (!Number.isFinite(p) || !Number.isFinite(d) || p <= 0 || d <= 0 || d >= p) return null;
+  return Math.round((1 - d / p) * 100);
+}
+
 // ────────────── 섹션 렌더러 (11종) ──────────────
 
 function renderHeader(props: HeaderProps, ctx: SectionRenderContext): string {
@@ -138,8 +155,8 @@ function renderHeroClassic(props: HeroProps): string {
     ${img ? `<img src="${escapeHtml(img)}" alt="${escapeHtml(props.headline || '')}" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover">` : ''}
     ${img ? `<div style="position:absolute;inset:0;background:${gradient}"></div>` : ''}
     <div style="position:relative;min-height:${heightPx};display:flex;flex-direction:column;justify-content:flex-end;align-items:${textAlign};padding:var(--dm-sp-8) var(--dm-sp-5);color:${textColor};text-align:${align}">
-      ${props.headline ? `<div class="dm-text-hero" style="font-weight:800${props.headline_color ? `;color:${escapeHtml(props.headline_color)}` : ''}">${escapeHtml(props.headline).replace(/\n/g, '<br>')}</div>` : ''}
-      ${props.sub_copy ? `<div class="dm-text-body" style="margin-top:var(--dm-sp-3);opacity:0.9${props.sub_copy_color ? `;color:${escapeHtml(props.sub_copy_color)}` : ''}">${escapeHtml(props.sub_copy).replace(/\n/g, '<br>')}</div>` : ''}
+      ${props.headline ? `<div class="dm-text-hero" style="font-weight:800${fsDecl(props.headline_size)}${props.headline_color ? `;color:${escapeHtml(props.headline_color)}` : ''}">${escapeHtml(props.headline).replace(/\n/g, '<br>')}</div>` : ''}
+      ${props.sub_copy ? `<div class="dm-text-body" style="margin-top:var(--dm-sp-3);opacity:0.9${fsDecl(props.sub_copy_size)}${props.sub_copy_color ? `;color:${escapeHtml(props.sub_copy_color)}` : ''}">${escapeHtml(props.sub_copy).replace(/\n/g, '<br>')}</div>` : ''}
     </div>
   </div>`;
 }
@@ -149,9 +166,9 @@ function renderHeroTypographic(props: HeroProps): string {
   const head = escapeHtml(props.headline || '');
   const sub = escapeHtml(props.sub_copy || '');
   return `<div class="dm-section dm-hero" data-section-type="hero" style="background:var(--dm-bg);padding:calc(var(--dm-sp-12) * var(--dm-section-pad-scale)) var(--dm-sp-5);display:flex;flex-direction:column;gap:var(--dm-sp-4)">
-    ${head ? `<div style="font-size:var(--dm-fs-hero);font-weight:var(--dm-fw-hero);letter-spacing:var(--dm-ls-hero);line-height:1.12;font-family:var(--dm-font-display);color:var(--dm-neutral-900)">${head}</div>` : ''}
+    ${head ? `<div style="font-size:var(--dm-fs-hero);font-weight:var(--dm-fw-hero);letter-spacing:var(--dm-ls-hero);line-height:1.12;font-family:var(--dm-font-display);color:var(--dm-neutral-900)${fsDecl(props.headline_size)}${props.headline_color ? `;color:${escapeHtml(props.headline_color)}` : ''}">${head}</div>` : ''}
     <div style="height:2px;width:48px;background:var(--dm-primary)"></div>
-    ${sub ? `<div style="font-size:var(--dm-fs-body);color:var(--dm-neutral-600)">${sub}</div>` : ''}
+    ${sub ? `<div style="font-size:var(--dm-fs-body);color:var(--dm-neutral-600)${fsDecl(props.sub_copy_size)}${props.sub_copy_color ? `;color:${escapeHtml(props.sub_copy_color)}` : ''}">${sub}</div>` : ''}
   </div>`;
 }
 
@@ -167,8 +184,8 @@ function renderHeroFullBleed(props: HeroProps): string {
     ${img ? `<img src="${escapeHtml(img)}" alt="${head}" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover">` : ''}
     ${img ? `<div style="position:absolute;inset:0;background:rgba(0,0,0,0.32)"></div>` : ''}
     <div style="position:relative;min-height:${heightPx};display:flex;flex-direction:column;justify-content:center;align-items:center;text-align:center;padding:var(--dm-sp-6) var(--dm-sp-5);color:#fff">
-      ${head ? `<div style="font-size:var(--dm-fs-hero);font-weight:var(--dm-fw-hero);letter-spacing:var(--dm-ls-hero);line-height:1.1;font-family:var(--dm-font-display)">${head}</div>` : ''}
-      ${sub ? `<div style="margin-top:var(--dm-sp-3);font-size:var(--dm-fs-body);opacity:0.92">${sub}</div>` : ''}
+      ${head ? `<div style="font-size:var(--dm-fs-hero);font-weight:var(--dm-fw-hero);letter-spacing:var(--dm-ls-hero);line-height:1.1;font-family:var(--dm-font-display)${fsDecl(props.headline_size)}${props.headline_color ? `;color:${escapeHtml(props.headline_color)}` : ''}">${head}</div>` : ''}
+      ${sub ? `<div style="margin-top:var(--dm-sp-3);font-size:var(--dm-fs-body);opacity:0.92${fsDecl(props.sub_copy_size)}${props.sub_copy_color ? `;color:${escapeHtml(props.sub_copy_color)}` : ''}">${sub}</div>` : ''}
     </div>
   </div>`;
 }
@@ -180,8 +197,8 @@ function renderHeroSplit(props: HeroProps): string {
   const sub = escapeHtml(props.sub_copy || '');
   return `<div class="dm-section dm-hero" data-section-type="hero" style="background:var(--dm-bg)">
     <div style="background:var(--dm-primary);color:#fff;padding:calc(var(--dm-sp-8) * var(--dm-section-pad-scale)) var(--dm-sp-5)">
-      ${head ? `<div style="font-size:var(--dm-fs-hero);font-weight:var(--dm-fw-hero);letter-spacing:var(--dm-ls-hero);line-height:1.12;font-family:var(--dm-font-display)">${head}</div>` : ''}
-      ${sub ? `<div style="margin-top:var(--dm-sp-2);font-size:var(--dm-fs-body);opacity:0.9">${sub}</div>` : ''}
+      ${head ? `<div style="font-size:var(--dm-fs-hero);font-weight:var(--dm-fw-hero);letter-spacing:var(--dm-ls-hero);line-height:1.12;font-family:var(--dm-font-display)${fsDecl(props.headline_size)}${props.headline_color ? `;color:${escapeHtml(props.headline_color)}` : ''}">${head}</div>` : ''}
+      ${sub ? `<div style="margin-top:var(--dm-sp-2);font-size:var(--dm-fs-body);opacity:0.9${fsDecl(props.sub_copy_size)}${props.sub_copy_color ? `;color:${escapeHtml(props.sub_copy_color)}` : ''}">${sub}</div>` : ''}
     </div>
     ${img ? `<img src="${escapeHtml(img)}" alt="${head}" style="width:100%;display:block;object-fit:cover">` : `<div class="dm-mood-slot" style="height:200px;display:flex;align-items:center;justify-content:center">이미지를 추가해주세요</div>`}
   </div>`;
@@ -195,8 +212,8 @@ function renderHeroOverlap(props: HeroProps): string {
   return `<div class="dm-section dm-hero" data-section-type="hero" style="background:var(--dm-bg);padding-bottom:var(--dm-sp-5)">
     ${img ? `<img src="${escapeHtml(img)}" alt="${head}" style="width:100%;display:block;height:280px;object-fit:cover">` : `<div class="dm-mood-slot" style="height:240px"></div>`}
     <div style="margin:-32px var(--dm-sp-5) 0;position:relative;background:var(--dm-bg);border:1px solid var(--dm-neutral-200);border-radius:var(--dm-radius-xl);box-shadow:var(--dm-shadow-lg);padding:var(--dm-sp-6)">
-      ${head ? `<div style="font-size:var(--dm-fs-h1);font-weight:var(--dm-fw-hero);letter-spacing:var(--dm-ls-hero);line-height:1.2;font-family:var(--dm-font-display);color:var(--dm-neutral-900)">${head}</div>` : ''}
-      ${sub ? `<div style="margin-top:var(--dm-sp-2);font-size:var(--dm-fs-body);color:var(--dm-neutral-600)">${sub}</div>` : ''}
+      ${head ? `<div style="font-size:var(--dm-fs-h1);font-weight:var(--dm-fw-hero);letter-spacing:var(--dm-ls-hero);line-height:1.2;font-family:var(--dm-font-display);color:var(--dm-neutral-900)${fsDecl(props.headline_size)}${props.headline_color ? `;color:${escapeHtml(props.headline_color)}` : ''}">${head}</div>` : ''}
+      ${sub ? `<div style="margin-top:var(--dm-sp-2);font-size:var(--dm-fs-body);color:var(--dm-neutral-600)${fsDecl(props.sub_copy_size)}${props.sub_copy_color ? `;color:${escapeHtml(props.sub_copy_color)}` : ''}">${sub}</div>` : ''}
     </div>
   </div>`;
 }
@@ -298,8 +315,8 @@ function renderTextCardClassic(props: TextCardProps): string {
 
   const textBlock = `<div style="flex:1;padding:var(--dm-sp-4) var(--dm-sp-5);text-align:${align}">
     ${props.tag ? `<div style="display:inline-block;background:var(--dm-primary-light);color:var(--dm-primary);padding:var(--dm-sp-1) var(--dm-sp-2);border-radius:var(--dm-radius-sm);font-size:var(--dm-fs-tiny);font-weight:700;margin-bottom:var(--dm-sp-2)">${escapeHtml(props.tag)}</div>` : ''}
-    ${props.headline ? `<div class="dm-text-h2" style="color:var(--dm-neutral-900);margin-bottom:var(--dm-sp-2)">${escapeHtml(props.headline)}</div>` : ''}
-    ${props.body ? `<div class="dm-text-body" style="color:var(--dm-neutral-700);white-space:pre-wrap">${escapeHtml(props.body)}</div>` : ''}
+    ${props.headline ? `<div class="dm-text-h2" style="color:var(--dm-neutral-900);margin-bottom:var(--dm-sp-2)${fsDecl(props.headline_size)}${props.headline_color ? `;color:${escapeHtml(props.headline_color)}` : ''}">${escapeHtml(props.headline)}</div>` : ''}
+    ${props.body ? `<div class="dm-text-body" style="color:var(--dm-neutral-700);white-space:pre-wrap${fsDecl(props.body_size)}${props.body_color ? `;color:${escapeHtml(props.body_color)}` : ''}">${escapeHtml(props.body)}</div>` : ''}
   </div>`;
 
   return `<div class="dm-section dm-text-card" data-section-type="text_card" style="padding:0;background:var(--dm-bg)">
@@ -348,9 +365,9 @@ function renderTextCardLead(props: TextCardProps): string {
   const align = props.align || 'left';
   return `<div class="dm-section dm-text-card" data-section-type="text_card" style="background:var(--dm-bg);padding:calc(var(--dm-sp-8) * var(--dm-section-pad-scale)) var(--dm-sp-5);text-align:${align}">
     ${tag ? `<div style="font-size:var(--dm-fs-tiny);font-weight:700;letter-spacing:2px;color:var(--dm-primary);margin-bottom:var(--dm-sp-3)">${tag}</div>` : ''}
-    ${head ? `<div style="font-size:var(--dm-fs-h1);font-weight:var(--dm-fw-hero);letter-spacing:var(--dm-ls-hero);line-height:1.25;font-family:var(--dm-font-display);color:var(--dm-neutral-900)">${head}</div>` : ''}
+    ${head ? `<div style="font-size:var(--dm-fs-h1);font-weight:var(--dm-fw-hero);letter-spacing:var(--dm-ls-hero);line-height:1.25;font-family:var(--dm-font-display);color:var(--dm-neutral-900)${fsDecl(props.headline_size)}${props.headline_color ? `;color:${escapeHtml(props.headline_color)}` : ''}">${head}</div>` : ''}
     <div style="height:2px;width:40px;background:var(--dm-primary);margin:var(--dm-sp-4) ${align === 'center' ? 'auto' : '0'}"></div>
-    ${body ? `<div style="font-size:var(--dm-fs-body);line-height:1.7;color:var(--dm-neutral-700);white-space:pre-wrap">${body}</div>` : ''}
+    ${body ? `<div style="font-size:var(--dm-fs-body);line-height:1.7;color:var(--dm-neutral-700);white-space:pre-wrap${fsDecl(props.body_size)}${props.body_color ? `;color:${escapeHtml(props.body_color)}` : ''}">${body}</div>` : ''}
   </div>`;
 }
 
@@ -366,8 +383,8 @@ function renderTextCardFramed(props: TextCardProps): string {
       ${img ? `<img src="${escapeHtml(img)}" alt="${head}" style="width:100%;display:block">` : ''}
       <div style="padding:var(--dm-sp-5)">
         ${tag ? `<div style="display:inline-block;background:var(--dm-primary-light);color:var(--dm-primary);padding:var(--dm-sp-1) var(--dm-sp-2);border-radius:var(--dm-radius-sm);font-size:var(--dm-fs-tiny);font-weight:700;margin-bottom:var(--dm-sp-2)">${tag}</div>` : ''}
-        ${head ? `<div style="font-size:var(--dm-fs-h2);font-weight:700;color:var(--dm-neutral-900);margin-bottom:var(--dm-sp-2);font-family:var(--dm-font-display)">${head}</div>` : ''}
-        ${body ? `<div style="font-size:var(--dm-fs-body);line-height:1.65;color:var(--dm-neutral-700);white-space:pre-wrap">${body}</div>` : ''}
+        ${head ? `<div style="font-size:var(--dm-fs-h2);font-weight:700;color:var(--dm-neutral-900);margin-bottom:var(--dm-sp-2);font-family:var(--dm-font-display)${fsDecl(props.headline_size)}${props.headline_color ? `;color:${escapeHtml(props.headline_color)}` : ''}">${head}</div>` : ''}
+        ${body ? `<div style="font-size:var(--dm-fs-body);line-height:1.65;color:var(--dm-neutral-700);white-space:pre-wrap${fsDecl(props.body_size)}${props.body_color ? `;color:${escapeHtml(props.body_color)}` : ''}">${body}</div>` : ''}
       </div>
     </div>
   </div>`;
@@ -537,12 +554,28 @@ function renderProductCarousel(p: any): string {
   if (products.length === 0) {
     return `<div class="dm-section dm-product-carousel dm-mood-slot" style="padding:var(--dm-sp-6);text-align:center;color:var(--dm-neutral-400)">[상품을 추가해주세요]</div>`;
   }
-  const items = products.map((it: any) => `
-    <div style="min-width:140px;max-width:160px">
+  // ★ 2026-07-02(2) 할인 표시(할인율+할인가+정가 취소선) + 상품 링크(link_url) 카드 전체 연결
+  const items = products.map((it: any) => {
+    const price = Number(it.price || 0);
+    const discount = Number(it.discount_price || 0);
+    const rate = computeDmDiscountRate(price, discount, it.discount_rate);
+    const finalPrice = discount > 0 ? discount : price;
+    const priceHtml = rate !== null
+      ? `<div style="display:flex;gap:6px;align-items:baseline;margin-top:2px;flex-wrap:wrap">
+          <span style="font-size:var(--dm-fs-small);font-weight:800;color:var(--dm-error)">${rate}%</span>
+          <span style="font-size:var(--dm-fs-small);font-weight:700">${finalPrice.toLocaleString('ko-KR')}원</span>
+          <span style="font-size:var(--dm-fs-tiny);color:var(--dm-neutral-400);text-decoration:line-through">${price.toLocaleString('ko-KR')}원</span>
+        </div>`
+      : `<div style="font-size:var(--dm-fs-small);font-weight:700;margin-top:2px">${finalPrice.toLocaleString('ko-KR')}원</div>`;
+    const card = `
       ${it.image_url ? `<img src="${escapeHtml(publicImageUrl(it.image_url))}" loading="lazy" alt="${escapeHtml(it.name || '')}" style="width:100%;height:140px;object-fit:cover;border-radius:var(--dm-radius-md)"/>` : `<div style="width:100%;height:140px;background:var(--dm-neutral-100);border-radius:var(--dm-radius-md)"></div>`}
-      <div style="font-size:var(--dm-fs-small);font-weight:600;margin-top:6px">${escapeHtml(it.name || '')}</div>
-      <div style="font-size:var(--dm-fs-small);font-weight:700;margin-top:2px">${Number(it.discount_price || it.price || 0).toLocaleString('ko-KR')}원</div>
-    </div>`).join('');
+      <div style="font-size:var(--dm-fs-small);font-weight:600;margin-top:6px;color:var(--dm-neutral-900)">${escapeHtml(it.name || '')}</div>
+      ${priceHtml}`;
+    const href = it.link_url ? safeUrl(it.link_url) : '#';
+    return href !== '#'
+      ? `<a href="${href}" target="_blank" rel="noopener" style="min-width:140px;max-width:160px;display:block;text-decoration:none;color:inherit">${card}</a>`
+      : `<div style="min-width:140px;max-width:160px">${card}</div>`;
+  }).join('');
   return `<div class="dm-section dm-product-carousel" style="padding:var(--dm-sp-4)">
     ${p.title ? `<div style="font-size:var(--dm-fs-h3);font-weight:700;margin-bottom:var(--dm-sp-3)">${escapeHtml(p.title)}</div>` : ''}
     <div style="display:flex;gap:12px;overflow-x:auto;padding-bottom:8px">${items}</div>

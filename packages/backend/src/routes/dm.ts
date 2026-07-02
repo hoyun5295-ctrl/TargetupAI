@@ -133,7 +133,14 @@ dmPublicRouter.get('/:code', async (req: Request, res: Response) => {
       }
     }
 
-    const html = renderDmViewerHtml(dm, '/api/dm/v');
+    // ★ 2026-07-02(2) 공용 링크(토큰 없음/만료)도 치환 경로(customer=null) — %고객명% 원문 노출 대신 fallback("고객님").
+    //   치환 실패(DB 등)면 원문 렌더로 폴백해 뷰어 자체는 살린다.
+    let html: string;
+    try {
+      html = await renderDmViewerHtmlWithCustomer(dm, '/api/dm/v', null, dm.company_id);
+    } catch {
+      html = renderDmViewerHtml(dm, '/api/dm/v');
+    }
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
     res.send(html);
   } catch (err: any) {
@@ -1386,7 +1393,13 @@ dmPublicRouter.get('/ab/:code', async (req: Request, res: Response) => {
       );
     }
 
-    const html = renderDmViewerHtml(dm, '/api/dm/v');
+    // ★ 2026-07-02(2) A/B 뷰어도 치환 경로(customer=null) — %고객명% 원문 노출 차단 (동일 패턴 전수 적용)
+    let html: string;
+    try {
+      html = await renderDmViewerHtmlWithCustomer(dm, '/api/dm/v', null, dm.company_id);
+    } catch {
+      html = renderDmViewerHtml(dm, '/api/dm/v');
+    }
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
     res.send(html);
   } catch (err: any) {

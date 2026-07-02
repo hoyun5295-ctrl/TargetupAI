@@ -85,6 +85,9 @@ export type HeroProps = {
   // ★ 2026-07-02 텍스트 색상 직접 지정 (미지정 = 기본색) — backend dm-section-registry와 동일
   headline_color?: string;
   sub_copy_color?: string;
+  // ★ 2026-07-02(2) 폰트 크기 직접 선택(px) — backend dm-section-registry와 동일
+  headline_size?: number;
+  sub_copy_size?: number;
 };
 
 export type CouponProps = {
@@ -116,7 +119,16 @@ export type TextCardProps = {
   // ★ 2026-07-02 텍스트 색상 직접 지정 (미지정 = 기본색) — backend dm-section-registry와 동일
   headline_color?: string;
   body_color?: string;
+  // ★ 2026-07-02(2) 폰트 크기 직접 선택(px) — backend dm-section-registry와 동일
+  headline_size?: number;
+  body_size?: number;
 };
+
+// ★ 2026-07-02(2) 폰트 크기 선택지 — 히어로/텍스트 카드 속성 패널 공용 (''=기본 토큰 크기)
+export const DM_FONT_SIZE_OPTIONS: Array<{ value: string; label: string }> = [
+  { value: '', label: '기본 (자동)' },
+  ...[14, 16, 18, 20, 24, 28, 32, 36, 40, 48].map((n) => ({ value: String(n), label: `${n}px` })),
+];
 
 export type CtaButton = {
   label: string;

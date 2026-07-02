@@ -87,6 +87,9 @@ export type HeroProps = {
   // ★ 2026-07-02 텍스트 색상 직접 지정 — 미지정 = 기존 기본색 그대로 (이메일 + DM classic 렌더 적용)
   headline_color?: string;
   sub_copy_color?: string;
+  // ★ 2026-07-02(2) 폰트 크기 직접 선택(px, 10~80) — 미지정 = 기존 토큰 크기 그대로
+  headline_size?: number;
+  sub_copy_size?: number;
 };
 
 export type CouponProps = {
@@ -118,6 +121,9 @@ export type TextCardProps = {
   // ★ 2026-07-02 텍스트 색상 직접 지정 — 미지정 = 기존 기본색 그대로
   headline_color?: string;
   body_color?: string;
+  // ★ 2026-07-02(2) 폰트 크기 직접 선택(px, 10~80) — 미지정 = 기존 토큰 크기 그대로
+  headline_size?: number;
+  body_size?: number;
 };
 
 export type CtaButton = {

@@ -107,6 +107,12 @@
 
 ---
 
+### 🟢 2026-07-02 (3) — 모바일DM 수신자별 추적 근본 수정: 토큰 1급 키 + 열람 깊이/섹션/클릭 + 추적 화면 격상 (★배포완료·ALTER 적용)
+> **근본 결함**: 발송 링크는 ?r=토큰인데 뷰어 비콘은 ?p=만 읽어 전부 익명 적재 — 수신자별 "어디까지 봤는지" 수집 자체가 안 됐음. section_interactions는 /track이 받지 않고 버렸고(저장 0), 열람 1회에 dm_views 3행(view_count 3배), 최종 비콘 beforeunload 단독(모바일 유실).
+> **수정**: 뷰어(신형·레거시) 비콘에 토큰+익명ID 동봉 → /track이 토큰→고객 phone 서버 확정(클라 불신뢰) → trackDmView UPSERT(토큰>phone>익명ID, 체류 증가분 합산·스크롤 GREATEST·섹션 병합·view_count는 진입/신규만). 스크롤 최대 % + visibilitychange/pagehide/15초 하트비트 + 링크 클릭 즉시 비콘. recipients-tracking 깔때기(발송→열람→50%→완독→클릭)+진행 바 UI. event-response 토큰 1순위(응모 회원 매칭 복구). 발송 경로 무변경.
+> **DB**: dm_views ALTER 3컬럼(recipient_token/anonymous_id/max_scroll_pct)+부분 인덱스 2 (Harold 적용). 실측 보강 = id bigint·ip inet·ab_test_id/ab_variant (SCHEMA.md 재기록). 신설 CT dm-tracking.ts(+test 17).
+> **남은 별도 과제**: A/B 뷰어 비콘이 variant 일반 /track으로 가는 구조 검증 / 퀄리티 활용(미열람 리마인드·미클릭 재타겟·CT-86 이탈 깊이 연동).
+
 ### 🟢 2026-07-02 (2) — 이메일 마케팅 종결: 크레딧 모델 개편 + 개인화 동적화 + 링크/쿠폰/서식/페이징 (★전부 배포완료)
 > **크레딧 모델(Harold 확정)**: 발송 무료(고객 SMTP) / 완성 저장 50 캠페인당 1회(AI·수동·템플릿 불문, 멱등키 email-campaign-complete:ID + 구 email-ai-publish 인정=이중과금 0, 환불 없음) / 임시저장 무료·무제한(발송+PC 미리보기 잠금) / 발송 시 50 차감 제거. 에디터 [임시저장|완성 저장·50] 2버튼+확인 모달, 미완성 발송 시 완성 모달→발송 연속(1클릭). 생성 3·개선 1 현행.
 > **개인화 동적화(하드코딩 금지)**: GET /api/email/personalization-vars = CT-58 실측 70%+ 필드만(15컬럼 후보) — 칩·조건부 필드·수신자 SELECT 단일 소스. 인앱 변수 목록도 blocked(30% 미만) 숨김.

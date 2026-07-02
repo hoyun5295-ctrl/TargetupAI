@@ -37,6 +37,8 @@ const STRING_FIELD_KEYS: Record<string, readonly string[]> = {
   sns:        [],  // channels[]는 별도 처리
   promo_code: ['code', 'description', 'instructions', 'cta_label', 'cta_url'],
   footer:     ['notes', 'cs_phone', 'cs_hours', 'legal_text'],
+  // ★ 2026-07-02(2) 상품 슬라이드 제목도 치환 대상 (예: "%고객명%님을 위한 셀렉션")
+  product_carousel: ['title'],
 };
 
 // ────────────── 변수 감지 ──────────────

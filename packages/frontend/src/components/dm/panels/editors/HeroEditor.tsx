@@ -1,4 +1,5 @@
 import type { HeroProps } from '../../../../utils/dm-section-defaults';
+import { DM_FONT_SIZE_OPTIONS } from '../../../../utils/dm-section-defaults';
 import { Field, TextArea, Select, Toggle, ImageUploader, ColorOverride } from '../FormControls';
 import type { EditorProps } from '../SectionPropsEditor';
 
@@ -18,12 +19,29 @@ export default function HeroEditor({ props, onUpdate }: EditorProps<HeroProps>) 
         <ColorOverride value={props.headline_color} onChange={(v) => onUpdate({ headline_color: v })} />
       </Field>
 
+      {/* ★ 2026-07-02(2) 폰트 크기 직접 선택 — 미선택 = 기본(자동) */}
+      <Field label="헤드라인 크기">
+        <Select
+          value={props.headline_size ? String(props.headline_size) : ''}
+          onChange={(v) => onUpdate({ headline_size: v ? Number(v) : undefined })}
+          options={DM_FONT_SIZE_OPTIONS}
+        />
+      </Field>
+
       <Field label="서브 카피" hint="줄바꿈 그대로 반영">
         <TextArea value={props.sub_copy} onChange={(v) => onUpdate({ sub_copy: v })} placeholder="감성을 담은 한 줄 더" rows={2} />
       </Field>
 
       <Field label="서브 카피 색상">
         <ColorOverride value={props.sub_copy_color} onChange={(v) => onUpdate({ sub_copy_color: v })} />
+      </Field>
+
+      <Field label="서브 카피 크기">
+        <Select
+          value={props.sub_copy_size ? String(props.sub_copy_size) : ''}
+          onChange={(v) => onUpdate({ sub_copy_size: v ? Number(v) : undefined })}
+          options={DM_FONT_SIZE_OPTIONS}
+        />
       </Field>
 
       <Field label="높이">
