@@ -269,7 +269,7 @@ export default function SpamFilterTestModal({
   // 로딩 중 표시
   if (loading) {
     return (
-      <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60]">
+      <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[2000]">
         <div className="bg-white rounded-2xl shadow-2xl p-8 flex items-center gap-3">
           <div className="animate-spin w-5 h-5 border-2 border-blue-500 border-t-transparent rounded-full" />
           <span className="text-gray-600">테스트 상태 확인 중...</span>
@@ -279,7 +279,7 @@ export default function SpamFilterTestModal({
   }
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60]">
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[2000]">
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl overflow-hidden animate-in fade-in zoom-in duration-200">
         <div className="p-5 bg-gradient-to-r from-blue-50 to-indigo-50 border-b flex items-center justify-between">
           <div className="flex items-center gap-3">

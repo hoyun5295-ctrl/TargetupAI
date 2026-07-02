@@ -7,7 +7,7 @@
  *   DM 링크는 %DM링크% 위치에 자동 삽입(수신자별). 없으면 문안 끝에 첨부.
  */
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Sparkles, Send, RefreshCw, Check, X, Wand2, ShieldCheck, Clock, Smartphone } from 'lucide-react';
 import { useToast } from './ToastProvider';
 import TargetExtractModal, { type ExtractedTarget } from './TargetExtractModal';
@@ -84,7 +84,24 @@ export default function DmSendAndTrackModal({ dmId, dmTitle, show, onClose }: Pr
   const [isAd, setIsAd] = useState(false);
   const [refineOpen, setRefineOpen] = useState(false);
   const [spamOpen, setSpamOpen] = useState(false);
-  const [spamCallback, setSpamCallback] = useState('');
+  // ★ 2026-07-02(3) 발신번호 선택 — 회사 등록 번호 목록(기본 = is_default). 발송·스팸테스트 공용.
+  const [callbackList, setCallbackList] = useState<Array<{ phone: string; isDefault: boolean }>>([]);
+  const [callback, setCallback] = useState('');
+
+  useEffect(() => {
+    if (!show) return;
+    (async () => {
+      try {
+        const res = await fetch('/api/manage/callbacks', { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } });
+        const data = await res.json();
+        const list: any[] = data?.callbacks || data || [];
+        const mapped = list.filter((c: any) => c?.phone).map((c: any) => ({ phone: String(c.phone), isDefault: !!c.is_default }));
+        setCallbackList(mapped);
+        const def = mapped.find((c) => c.isDefault) || mapped[0];
+        setCallback((prev) => prev || def?.phone || '');
+      } catch { /* 목록 조회 실패 = 발송 시 백엔드가 기본 번호 사용 */ }
+    })();
+  }, [show]);
 
   // 예약 시각
   const [scheduleMode, setScheduleMode] = useState<'immediate' | 'manual' | 'ai'>('immediate');
@@ -158,19 +175,10 @@ export default function DmSendAndTrackModal({ dmId, dmTitle, show, onClose }: Pr
     }
   };
 
-  const openSpamTest = async () => {
+  const openSpamTest = () => {
     if (!messageText.trim()) { toast.warning('먼저 문안을 작성해주세요.'); return; }
-    try {
-      const res = await fetch('/api/manage/callbacks', { headers: { Authorization: `Bearer ${token()}` } });
-      const data = await res.json();
-      const list: any[] = data?.callbacks || data || [];
-      const def = list.find((c: any) => c.is_default) || list[0];
-      if (!def?.phone) { toast.error('등록된 발신번호가 없습니다. 발신번호 등록 후 이용해주세요.'); return; }
-      setSpamCallback(String(def.phone));
-      setSpamOpen(true);
-    } catch (e: any) {
-      toast.error(e?.message || '발신번호 조회 중 오류가 발생했습니다.');
-    }
+    if (!callback) { toast.error('등록된 발신번호가 없습니다. 발신번호 등록 후 이용해주세요.'); return; }
+    setSpamOpen(true);
   };
 
   const applyAiTime = () => {
@@ -185,6 +193,7 @@ export default function DmSendAndTrackModal({ dmId, dmTitle, show, onClose }: Pr
   const handleSend = async () => {
     if (!target || target.channelEligibleCount === 0) { toast.warning('먼저 타겟을 추출해주세요.'); return; }
     if (!messageText.trim()) { toast.warning('문자 본문을 작성해주세요.'); return; }
+    if (!callback) { toast.warning('발신번호를 선택해주세요. (발신번호 관리에서 등록)'); return; }
     const scheduledAtVal = scheduleMode === 'immediate' ? null : scheduledAt;
     if (scheduleMode !== 'immediate' && !scheduledAtVal) { toast.warning('예약 시각을 선택해주세요.'); return; }
     setSending(true);
@@ -192,7 +201,7 @@ export default function DmSendAndTrackModal({ dmId, dmTitle, show, onClose }: Pr
       const res = await fetch(`/api/dm/${dmId}/send-to-target`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token()}` },
-        body: JSON.stringify({ filter: target.filter, allCustomers: !!target.isAll, messageText: messageText.trim(), isAd, scheduledAt: scheduledAtVal ? new Date(scheduledAtVal).toISOString() : null }),
+        body: JSON.stringify({ filter: target.filter, allCustomers: !!target.isAll, messageText: messageText.trim(), isAd, callback, scheduledAt: scheduledAtVal ? new Date(scheduledAtVal).toISOString() : null }),
       });
       const data = await res.json();
       if (!res.ok || !data.success) { toast.error(data?.error || '발송에 실패했습니다.'); return; }
@@ -296,19 +305,7 @@ export default function DmSendAndTrackModal({ dmId, dmTitle, show, onClose }: Pr
                   </label>
                 </div>
 
-                {/* 예약 시각 */}
-                <div className="rounded-xl border border-white/10 bg-white/5 p-4 space-y-2">
-                  <p className="text-[11px] text-white/60 flex items-center gap-1.5"><Clock className="w-3.5 h-3.5" /> 발송 시각</p>
-                  <div className="flex gap-1.5">
-                    <button onClick={() => setScheduleMode('immediate')} className={`flex-1 py-1.5 rounded-lg text-[11px] font-semibold ${scheduleMode === 'immediate' ? 'bg-indigo-500/40 text-white' : 'bg-white/5 text-white/50'}`}>즉시</button>
-                    <button onClick={() => setScheduleMode('manual')} className={`flex-1 py-1.5 rounded-lg text-[11px] font-semibold ${scheduleMode === 'manual' ? 'bg-indigo-500/40 text-white' : 'bg-white/5 text-white/50'}`}>직접 예약</button>
-                    <button onClick={applyAiTime} className={`flex-1 py-1.5 rounded-lg text-[11px] font-semibold ${scheduleMode === 'ai' ? 'bg-violet-500/40 text-white' : 'bg-white/5 text-white/50'}`}>AI 추천</button>
-                  </div>
-                  {scheduleMode !== 'immediate' && (
-                    <input type="datetime-local" value={scheduledAt} onChange={(e) => { setScheduledAt(e.target.value); setScheduleMode('manual'); }} className="w-full px-2.5 py-1.5 bg-slate-950/60 border border-white/10 rounded-lg text-xs text-white [color-scheme:dark]" />
-                  )}
-                  {scheduleMode === 'ai' && <p className="text-[10px] text-violet-300">AI 추천 — 내일 오전 10시</p>}
-                </div>
+                {/* ★ 2026-07-02(3) 발송 시각·발신번호는 항상 보이는 하단 푸터로 이동 (스크롤에 묻히던 문제) */}
               </div>
 
               {/* 오른쪽 — 핸드폰 미리보기 */}
@@ -394,19 +391,44 @@ export default function DmSendAndTrackModal({ dmId, dmTitle, show, onClose }: Pr
         )}
 
         {view === 'compose' && (
-          <div className="px-5 py-3.5 border-t border-white/10 bg-slate-950/60 flex justify-end gap-2">
-            <button onClick={onClose} className="px-4 py-2 rounded-lg text-xs text-white/70 hover:bg-white/5">닫기</button>
-            <button onClick={handleSend} disabled={!target || target.channelEligibleCount === 0 || !messageText.trim() || sending} className="px-5 py-2 rounded-lg text-sm font-semibold text-white bg-gradient-to-r from-indigo-500 to-violet-500 hover:from-indigo-600 hover:to-violet-600 disabled:opacity-30 disabled:cursor-not-allowed flex items-center gap-1.5">
-              {sending ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
-              {sending ? '처리 중...' : scheduleMode === 'immediate' ? (target ? `${target.channelEligibleCount.toLocaleString()}명 발송` : '발송') : '예약 발송'}
-            </button>
+          <div className="px-5 py-3 border-t border-white/10 bg-slate-950/60 flex flex-wrap items-center gap-x-4 gap-y-2">
+            {/* 발신번호 선택 */}
+            <div className="flex items-center gap-1.5">
+              <span className="text-[10px] text-white/40 whitespace-nowrap">발신번호</span>
+              <select
+                value={callback}
+                onChange={(e) => setCallback(e.target.value)}
+                className="bg-slate-950/60 border border-white/10 rounded-lg px-2 py-1.5 text-xs text-white focus:outline-none focus:border-indigo-400/60"
+              >
+                {callbackList.length === 0
+                  ? <option value="">등록된 번호 없음</option>
+                  : callbackList.map((cb) => <option key={cb.phone} value={cb.phone}>{cb.phone}{cb.isDefault ? ' (기본)' : ''}</option>)}
+              </select>
+            </div>
+            {/* 발송 시각 — 즉시 / 직접 예약 / AI 추천 */}
+            <div className="flex items-center gap-1 flex-wrap">
+              <span className="text-[10px] text-white/40 flex items-center gap-1 whitespace-nowrap"><Clock className="w-3 h-3" /> 발송 시각</span>
+              <button onClick={() => setScheduleMode('immediate')} className={`px-2.5 py-1.5 rounded-lg text-[11px] font-semibold ${scheduleMode === 'immediate' ? 'bg-indigo-500/40 text-white' : 'bg-white/5 text-white/50 hover:bg-white/10'}`}>즉시</button>
+              <button onClick={() => setScheduleMode('manual')} className={`px-2.5 py-1.5 rounded-lg text-[11px] font-semibold ${scheduleMode === 'manual' ? 'bg-indigo-500/40 text-white' : 'bg-white/5 text-white/50 hover:bg-white/10'}`}>직접 예약</button>
+              <button onClick={applyAiTime} title="AI 추천 — 내일 오전 10시" className={`px-2.5 py-1.5 rounded-lg text-[11px] font-semibold ${scheduleMode === 'ai' ? 'bg-violet-500/40 text-white' : 'bg-white/5 text-white/50 hover:bg-white/10'}`}>AI 추천</button>
+              {scheduleMode !== 'immediate' && (
+                <input type="datetime-local" value={scheduledAt} onChange={(e) => { setScheduledAt(e.target.value); setScheduleMode('manual'); }} className="px-2 py-1.5 bg-slate-950/60 border border-white/10 rounded-lg text-xs text-white [color-scheme:dark]" />
+              )}
+            </div>
+            <div className="ml-auto flex items-center gap-2">
+              <button onClick={onClose} className="px-4 py-2 rounded-lg text-xs text-white/70 hover:bg-white/5">닫기</button>
+              <button onClick={handleSend} disabled={!target || target.channelEligibleCount === 0 || !messageText.trim() || sending} className="px-5 py-2 rounded-lg text-sm font-semibold text-white bg-gradient-to-r from-indigo-500 to-violet-500 hover:from-indigo-600 hover:to-violet-600 disabled:opacity-30 disabled:cursor-not-allowed flex items-center gap-1.5">
+                {sending ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+                {sending ? '처리 중...' : scheduleMode === 'immediate' ? (target ? `${target.channelEligibleCount.toLocaleString()}명 발송` : '발송') : '예약 발송'}
+              </button>
+            </div>
           </div>
         )}
 
         <TargetExtractModal show={extractOpen} channel="dm" onClose={() => setExtractOpen(false)} onApply={(t) => { setTarget(t); setExtractOpen(false); }} />
         <AiRefineModal isOpen={refineOpen} originalMessage={messageText} onClose={() => setRefineOpen(false)} onApply={(text) => { setMessageText(text); setRefineOpen(false); }} />
         {spamOpen && (
-          <SpamFilterTestModal onClose={() => setSpamOpen(false)} messageContentLms={messageText} callbackNumber={spamCallback} messageType="LMS" subject={dmTitle} isAd={isAd} />
+          <SpamFilterTestModal onClose={() => setSpamOpen(false)} messageContentLms={messageText} callbackNumber={callback} messageType="LMS" subject={dmTitle} isAd={isAd} />
         )}
       </div>
     </div>

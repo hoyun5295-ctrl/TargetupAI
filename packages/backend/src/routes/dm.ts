@@ -567,12 +567,14 @@ dmRouter.post('/:id/send-to-target', async (req: any, res: any) => {
     const userId = req.user?.userId || companyId;
     if (!companyId) return res.status(403).json({ error: '회사 권한이 필요합니다.' });
 
-    const { filter, messageText, isAd, scheduledAt, allCustomers } = req.body as {
+    const { filter, messageText, isAd, scheduledAt, allCustomers, callback: callbackReq } = req.body as {
       filter?: Record<string, { operator: string; value: any }>;
       messageText?: string;
       isAd?: boolean;
       scheduledAt?: string | null;
       allCustomers?: boolean;
+      /** ★ 2026-07-02(3) 발신번호 선택 — 회사 등록 번호만 허용, 미전달 = 기본 번호 */
+      callback?: string;
     };
     // ★ 2026-07-02(3) 전체 고객 발송 지원 — 타겟 추출 "전체 고객"(isAll) 확정분은 빈 filter 허용(= 조건 없음 = 전체 + DM 자격)
     if (!allCustomers && (!filter || typeof filter !== 'object' || Object.keys(filter).length === 0)) {
@@ -605,12 +607,23 @@ dmRouter.post('/:id/send-to-target', async (req: any, res: any) => {
       if (!opt080) return res.status(400).json({ error: '광고성 발송은 무료수신거부(080) 번호 등록이 필요합니다.', code: 'NO_OPT080' });
     }
 
-    // 발신번호 (회사 기본 등록 번호)
-    const cbRes = await query(
-      `SELECT REPLACE(phone, '-', '') AS phone FROM callback_numbers WHERE company_id = $1 AND is_default = true LIMIT 1`,
-      [companyId],
-    );
-    const callback = cbRes.rows[0]?.phone || null;
+    // 발신번호 — 선택값(회사 등록 번호인지 검증) 우선, 미전달 시 기본 등록 번호
+    let callback: string | null = null;
+    const wantedCb = callbackReq ? String(callbackReq).replace(/\D/g, '') : '';
+    if (wantedCb) {
+      const cbSel = await query(
+        `SELECT REPLACE(phone, '-', '') AS phone FROM callback_numbers WHERE company_id = $1 AND REPLACE(phone, '-', '') = $2 LIMIT 1`,
+        [companyId, wantedCb],
+      );
+      callback = cbSel.rows[0]?.phone || null;
+      if (!callback) return res.status(400).json({ error: '등록되지 않은 발신번호입니다. 발신번호 관리에서 확인해주세요.', code: 'INVALID_CALLBACK' });
+    } else {
+      const cbRes = await query(
+        `SELECT REPLACE(phone, '-', '') AS phone FROM callback_numbers WHERE company_id = $1 AND is_default = true LIMIT 1`,
+        [companyId],
+      );
+      callback = cbRes.rows[0]?.phone || null;
+    }
     if (!callback) return res.status(400).json({ error: '등록된 발신번호가 없습니다. 발신번호 등록 후 발송해주세요.', code: 'NO_CALLBACK' });
 
     // 발송 대상 resolve — DM 채널 자격(전화 유효·수신거부/무효 아님·활성) + filter. phone 중복 제거.
