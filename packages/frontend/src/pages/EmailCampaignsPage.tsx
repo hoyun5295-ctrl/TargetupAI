@@ -802,8 +802,8 @@ export default function EmailCampaignsPage() {
             {smtpConfigured ? ' "신규 캠페인" 버튼을 눌러 시작해주세요.' : ' SMTP 설정 후 진입 가능합니다.'}
           </div>
         ) : (
-          <div className="space-y-2">
-            {/* ★ 2026-07-02 Harold 지시 — 우측 세로 액션 컬럼 제거(가로 낭비), 하단 압축 버튼 행으로 재구성 */}
+          // ★ 2026-07-02 Harold 지시 — 가로 여백 낭비 제거: 카드 2열 그리드(모바일 1열) + 하단 압축 버튼 행
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 items-start">
             {campaigns.map((c) => (
               <div key={c.id} className="bg-white/5 border border-white/10 rounded-xl p-4 hover:bg-white/10 transition-colors">
                 <div className="flex items-center gap-2 mb-1 flex-wrap">
