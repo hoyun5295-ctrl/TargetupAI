@@ -18,6 +18,14 @@
 
 ## 사고 이력
 
+### 2026-07-02(5) — "글씨색" 반복 사고 뿌리 차단 (option 전역 !important + 흰 패널 컨트롤 명시색)
+- **반복 원인**: 네이티브 폼 컨트롤(option/input) 글자·배경색이 컴포넌트마다 제각각. 다크 select 옵션 흰글씨(6/29 전역 규칙)로 한 번 막았는데, 이번엔 `[&>option]:bg-slate-800`가 옵션 배경만 덮어써 전역 `select option{color:#1e293b}`와 글자색=배경색 충돌(여정 대상 드롭다운). 또 흰 패널(AlimtalkChannelPanel `bg-white`)의 input은 색 미지정이라 다크 모달(ModalShell `text-white`) 안에서 흰글씨(여정 정보알림 대체 LMS 제목).
+- **뿌리 fix (2단)**:
+  1. option = 전역 `select option, select optgroup { color:#1e293b !important; background:#fff !important }`(index.css). `!important`라 컴포넌트가 `[&>option]:bg-*`로 배경만 덮어도 절대 안 깨짐. **개별 컴포넌트에서 option 색 지정 금지 — 전역이 단일 진실.** 기존 3곳(`JourneyBuilderUi:92,95`·`DateAnchorJourneyBuilder:74`)의 `[&>option]:bg-slate-800` 제거.
+  2. 흰 패널 = 루트에 `[&_input]:text-gray-900 [&_input]:bg-white [&_textarea]:text-gray-900 [&_textarea]:bg-white [&_select]:text-gray-900` 지정 → 패널 내 모든 컨트롤(현재+미래)을 검은 글자·흰 배경 고정. 어느 모달에 삽입돼도 안전.
+- **전역 `input{color:검정}`은 금지**: 다크 입력칸(text-white만 있고 배경 미지정)이 흰 배경 위 흰글씨로 뒤집혀 새 버그가 난다. 그래서 "option=전역 강제 / 흰 패널=패널 단위 명시" 2단으로만.
+- **교훈**: 네이티브 컨트롤 색은 상속에 맡기지 말 것 — 테마 경계(다크 모달 → 흰 패널)를 넘으면 뒤집힌다. 흰 패널의 input/textarea/select는 명시색 의무, option은 전역 규칙이 단일 진실.
+
 ### 2026-07-02(4) — z-index 티어 위반 재발 3건 + 에디터-발행물 3면 대조 + 상태 축 혼용
 - **z-index 재발**: 6/25 티어 룰(인터럽트 z-[2000]) 확립 후에도 SpamFilterTestModal(z-60)·AiRefineModal(z-70)·ToastProvider(z-100)가 DM 발송 모달(z-1100) 뒤에 깔림 — 스팸테스트가 "안 눌리는 것처럼" 보인 원인. 일괄 상향(모달 2000·토스트 9990). **교훈: 위반은 "모달 안에서 뜨는 공용 컴포넌트"가 새로 연결될 때마다 재발 — 공용 모달/토스트를 새 모달에 붙일 때 z 티어부터 확인.**
 - **에디터-발행물 3면 대조**: DM 신규 16섹션이 에디터 캔버스에는 동작(탭 전환·설문 입력·슬라이드 넘김)하는데 발행물 SSR은 껍데기(첫 탭/첫 장 고정·설문 입력칸 없음·참여 버튼 무동작) — 죽은 동작 9건. **교훈: 섹션 점검 = 입력 패널 / 에디터 캔버스 / 발행물 SSR 3면 대조가 기본 틀. 캔버스에서 되는 것이 발행물에서 되는지 별도 확인.**

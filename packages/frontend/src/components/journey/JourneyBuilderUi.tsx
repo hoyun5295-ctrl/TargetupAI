@@ -89,10 +89,10 @@ export function AudienceModal({ initial, onSave, onClose }: { initial: AudienceC
       <p className="text-[11px] text-white/50">등급·지역·매장·포인트 등 자유롭게 조합합니다. 조건이 없으면 전체 활성 고객이 대상입니다.</p>
       {conditions.map((c, i) => (
         <div key={i} className="flex items-center gap-1.5">
-          <select value={c.field} onChange={(e) => upd(i, { field: e.target.value })} className="bg-white/[0.06] border border-white/15 rounded px-2 py-1.5 text-xs text-white [&>option]:bg-slate-800">
+          <select value={c.field} onChange={(e) => upd(i, { field: e.target.value })} className="bg-white/[0.06] border border-white/15 rounded px-2 py-1.5 text-xs text-white">
             {COND_FIELDS.map((f) => <option key={f.key} value={f.key}>{f.label}</option>)}
           </select>
-          <select value={c.op} onChange={(e) => upd(i, { op: e.target.value })} className="bg-white/[0.06] border border-white/15 rounded px-2 py-1.5 text-xs text-white [&>option]:bg-slate-800">
+          <select value={c.op} onChange={(e) => upd(i, { op: e.target.value })} className="bg-white/[0.06] border border-white/15 rounded px-2 py-1.5 text-xs text-white">
             {COND_OPS.map((o) => <option key={o.key} value={o.key}>{o.label}</option>)}
           </select>
           <input value={c.value} onChange={(e) => upd(i, { value: e.target.value })} placeholder="값" className="flex-1 min-w-0 bg-white/[0.06] border border-white/15 rounded px-2 py-1.5 text-xs text-white" />

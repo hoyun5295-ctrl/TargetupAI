@@ -17,6 +17,24 @@
 
 ---
 
+## 자동마케팅 완성 세션 (2026-07-02 추가)
+
+### 스케줄 컬럼 의미 전환 = 기존 행 마이그레이션 + 재계산 루프 점검
+- `continuous_operators.next_run_at`을 "발송 시각"→"생성 시각(발송 희망−lead)"으로 전환하면서 기존 행 −lead UPDATE 미동반 시 weekly/monthly가 한 주기 밀림. 또 생성 직후 next 재계산이 같은 주기의 T−lead(=지금)를 다시 잡으면 1분 워커가 무한 재생성 — 순수 함수(computeNextGenerationRun)가 생성 시각이 지났으면 한 주기 뒤로 밀도록 테스트로 고정.
+- **교훈**: 시각 컬럼의 "의미"를 바꾸면 ①쓰기 3경로(생성/수정/실행 후) 전수 ②기존 행 마이그레이션 ③재계산이 같은 주기를 재선정하지 않는지, 셋을 한 세트로.
+
+### 빈 객체 폴백 인자 = 조용한 전 회사 기본값
+- `getCompanyCosts({})`처럼 "회사 row를 받아 폴백하는 헬퍼"에 빈 객체를 넘기면 모든 회사가 기본 단가로 계산된다(예상 비용·예산 가드 전부). 전수 grep으로 빈 객체 전달 1곳 확인 후 실컬럼(cost_per_*) 조회로 교정.
+- **교훈**: `헬퍼(row)` 시그니처에 `{}`/`|| {}`를 넘기는 호출부는 의도된 기본값인지 전수 확인.
+
+### 유료 AI 기능 신설 = 크레딧 3점 세트 (Harold 확정 기준)
+- `callAIWithFallback`은 creditCost 미지정 시 source 맵(getCreditCost)으로 사전 확인+성공 후 차감까지 자체 처리(묶음 안은 0). 신규 유료 기능은 backend CREDIT_COST_MAP + frontend CONFIRM_CREDIT_COSTS/라벨 + 트리거 지점 CreditConfirmModal을 한 세트로. **기준: 버튼 트리거 20크레딧 이상 = 사전 모달 의무. 모달 표시 금액 = 실차감** — 백엔드가 조건 분기 차감(인터랙션 DM 발행 120)이면 프론트도 같은 기준으로 source 분기(2026-07-02 표시 100≠차감 120 결함 수정).
+
+### 신규 컬럼/테이블 + 배포 1회 원칙 양립 패턴
+- 검증 SELECT(0 rows 확인)→ALTER/CREATE를 배포 블록에 묶고, 코드는 `does not exist` catch로 해당 기능만 조용히 skip(워커) 또는 503 DB_MIGRATION_PENDING(라우트). 실측 사례: recap_notified_at은 사전 SELECT에서 1 row(이미 존재)로 확인돼 ALTER 생략 — 사전 확인이 이중 ALTER를 차단. prep_reminder_sent_for는 0 rows로 실행 대상 확정.
+
+---
+
 ## 라우팅 / 미들웨어 순서 사고
 
 ### 2026-07-02(5) — 공개 라우터를 전역 express.json() 앞에 마운트 → POST req.body 유실 (DM 개인별 열람 0 진짜 원인) ★ 신규

@@ -71,7 +71,7 @@ function SettingsModal({ initial, onSave, onClose }: {
         </div>
         <div>
           <label className="block text-[11px] text-white/50 mb-1">발송 시각 (KST)</label>
-          <select value={hourKst} onChange={(e) => setHourKst(e.target.value)} className="w-full bg-white/[0.06] border border-white/15 rounded-lg px-3 py-2 text-sm text-white [&>option]:bg-slate-800">
+          <select value={hourKst} onChange={(e) => setHourKst(e.target.value)} className="w-full bg-white/[0.06] border border-white/15 rounded-lg px-3 py-2 text-sm text-white">
             {Array.from({ length: 14 }, (_, i) => i + 8).map((h) => <option key={h} value={h}>{h}시</option>)}
           </select>
         </div>

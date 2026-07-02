@@ -186,6 +186,11 @@ export default function AlimtalkManagementSection() {
   const [toast, setToast] = useState<string | null>(null);
   const [confirm, setConfirm] = useState<ConfirmState | null>(null);
 
+  // ★ 2026-07-02 (직원 서수란 신고): 여러 템플릿 일괄 검수요청 — 등록(DRAFT/REG) 행 다중 선택 + 한 번에 요청.
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [bulkSubmitting, setBulkSubmitting] = useState(false);
+  const [bulkProgress, setBulkProgress] = useState<{ done: number; total: number } | null>(null);
+
   // ★ D150-2 (2026-05-09): 슈퍼관리자 전용 변경 이력 조회 모달
   const [historyTarget, setHistoryTarget] = useState<{
     templateCode: string;
@@ -252,6 +257,11 @@ export default function AlimtalkManagementSection() {
     return () => clearTimeout(t);
   }, [toast]);
 
+  // ★ 2026-07-02 일괄 검수요청: 필터/검색 변경 시 선택 초기화 — 숨겨진 행이 선택에 남지 않도록.
+  useEffect(() => {
+    setSelectedIds(new Set());
+  }, [filter, searchType, searchKeyword]);
+
   // ★ D152-4 Harold님 지시 (2026-05-12): IMC 6단계 정합 — filter 탭 ↔ DB status 매핑.
   //   IMC raw(REG/REQ/KREQ/KREJ/HREJ/APR) + 한줄로 풀네임(DRAFT/REQUESTED/REVIEWING/APPROVED/REJECTED) 양쪽 호환.
   //   레거시 REJECTED/REJ는 "카카오 반려"(KREJ) 탭에 흡수 — 운영 데이터 손실 없이 6단계 UI 정합.
@@ -282,6 +292,16 @@ export default function AlimtalkManagementSection() {
       return String(fieldValue).toLowerCase().includes(kw);
     });
   }, [templates, filter, searchType, searchKeyword]);
+
+  // ★ 2026-07-02 일괄 검수요청 — 현재 목록 중 검수요청 가능(등록 DRAFT/REG) 행만 대상.
+  //   개별 '검수요청' 버튼 노출 기준(isDraft)과 동일. 반려 건은 본문 수정이 필요해 '재검수' 개별 흐름 유지.
+  const bulkEligible = useMemo(
+    () => filtered.filter((t) => ['DRAFT', 'REG'].includes(t.status)),
+    [filtered],
+  );
+  const allEligibleSelected =
+    bulkEligible.length > 0 && bulkEligible.every((t) => selectedIds.has(t.id));
+  const someEligibleSelected = bulkEligible.some((t) => selectedIds.has(t.id));
 
   // ★ D142+ F (2026-04-29) PDF 0428 알림톡 #3: 검수요청 시 코멘트 + 증빙자료 입력 모달.
   //   "코멘트 입력칸 + 코멘트 증빙자료 추가" — 직원 요구. backend는 이미 /inspect-with-file 보유.
@@ -357,6 +377,74 @@ export default function AlimtalkManagementSection() {
         setToast(data.success ? '검수요청 취소' : data?.error || '실패');
         load();
       },
+    });
+  };
+
+  // ★ 2026-07-02 일괄 검수요청 선택 토글 (개별/전체).
+  const toggleSelect = (id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+  const toggleSelectAll = () => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      const allSelected =
+        bulkEligible.length > 0 && bulkEligible.every((t) => prev.has(t.id));
+      if (allSelected) bulkEligible.forEach((t) => next.delete(t.id));
+      else bulkEligible.forEach((t) => next.add(t.id));
+      return next;
+    });
+  };
+
+  // 선택된 등록 행에 순차로 POST /inspect. 진행률 표시 + 성공/실패 요약 토스트.
+  const runBulkInspect = async () => {
+    const targets = bulkEligible.filter((t) => selectedIds.has(t.id));
+    if (targets.length === 0) return;
+    setBulkSubmitting(true);
+    setBulkProgress({ done: 0, total: targets.length });
+    let ok = 0;
+    let fail = 0;
+    for (let i = 0; i < targets.length; i++) {
+      const t = targets[i];
+      try {
+        const res = await fetch(
+          `/api/alimtalk/templates/${t.template_code}/inspect`,
+          {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${getToken()}`,
+            },
+            body: JSON.stringify({ comment: '' }),
+          },
+        );
+        const data = await res.json();
+        if (res.ok && data.success) ok++;
+        else fail++;
+      } catch {
+        fail++;
+      }
+      setBulkProgress({ done: i + 1, total: targets.length });
+    }
+    setBulkSubmitting(false);
+    setBulkProgress(null);
+    setSelectedIds(new Set());
+    setToast(fail === 0 ? `${ok}건 검수요청 완료` : `${ok}건 완료 · ${fail}건 실패`);
+    load();
+  };
+  const confirmBulkInspect = () => {
+    const count = bulkEligible.filter((t) => selectedIds.has(t.id)).length;
+    if (count === 0) return;
+    setConfirm({
+      mode: 'default',
+      title: '일괄 검수요청',
+      description: `선택한 ${count}개 템플릿을 카카오 검수요청 합니다. 계속할까요?`,
+      confirmLabel: `${count}개 검수요청`,
+      onConfirm: runBulkInspect,
     });
   };
 
@@ -635,6 +723,34 @@ export default function AlimtalkManagementSection() {
         </div>
       </div>
 
+      {/* ★ 2026-07-02 일괄 검수요청 액션 바 — 등록 행을 하나라도 선택하면 노출 */}
+      {selectedIds.size > 0 && (
+        <div className="flex items-center justify-between flex-wrap gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2">
+          <span className="text-xs font-medium text-amber-800">
+            {selectedIds.size}개 선택됨
+            {bulkProgress && ` · 처리 중 ${bulkProgress.done}/${bulkProgress.total}`}
+          </span>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setSelectedIds(new Set())}
+              disabled={bulkSubmitting}
+              className="px-3 py-1.5 text-xs bg-white border border-gray-300 text-gray-600 rounded-lg hover:bg-gray-50 disabled:opacity-50"
+            >
+              선택 해제
+            </button>
+            <button
+              type="button"
+              onClick={confirmBulkInspect}
+              disabled={bulkSubmitting}
+              className="px-4 py-1.5 text-xs bg-amber-600 hover:bg-amber-700 text-white rounded-lg font-medium disabled:opacity-50"
+            >
+              {bulkSubmitting ? '검수요청 중...' : '일괄 검수요청'}
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* ── 목록 ───────────────────────────────── */}
       {loading ? (
         <div className="text-center py-10 text-sm text-gray-400">로딩 중...</div>
@@ -659,6 +775,20 @@ export default function AlimtalkManagementSection() {
           <table className="w-full text-xs">
             <thead className="bg-gray-50 text-[11px] text-gray-500">
               <tr>
+                {/* ★ 2026-07-02 일괄 검수요청: 등록 행 전체 선택 체크박스 */}
+                <th className="px-3 py-2 whitespace-nowrap w-8">
+                  <input
+                    type="checkbox"
+                    aria-label="등록 상태 템플릿 전체 선택"
+                    checked={allEligibleSelected}
+                    ref={(el) => {
+                      if (el) el.indeterminate = !allEligibleSelected && someEligibleSelected;
+                    }}
+                    onChange={toggleSelectAll}
+                    disabled={bulkEligible.length === 0}
+                    className="cursor-pointer accent-amber-600 disabled:cursor-not-allowed disabled:opacity-30"
+                  />
+                </th>
                 <th className="text-left px-3 py-2 whitespace-nowrap">템플릿</th>
                 {/* ★ D188 (2026-05-21) 영업팀장 신고 #3: 템플릿코드 컬럼 신규 — 사용자가 발송 매칭/디버그용 표시 정합. */}
                 <th className="text-left px-3 py-2 whitespace-nowrap">템플릿코드</th>
@@ -691,6 +821,18 @@ export default function AlimtalkManagementSection() {
                 void isKreq; // KREQ는 액션 버튼 미노출(상세보기만) — 상태 라벨로만 표시
                 return (
                   <tr key={t.id} className="border-t border-gray-100 hover:bg-gray-50">
+                    {/* ★ 2026-07-02 일괄 검수요청: 등록(DRAFT/REG) 행만 선택 가능 */}
+                    <td className="px-3 py-2 whitespace-nowrap w-8">
+                      {isDraft && (
+                        <input
+                          type="checkbox"
+                          aria-label={`${t.template_name} 선택`}
+                          checked={selectedIds.has(t.id)}
+                          onChange={() => toggleSelect(t.id)}
+                          className="cursor-pointer accent-amber-600"
+                        />
+                      )}
+                    </td>
                     <td className="px-3 py-2 whitespace-nowrap">
                       <div className="font-medium text-gray-900 text-xs">{t.template_name}</div>
                       {/* ★ D162-4 (2026-05-15) 2차: Harold님 명시 정합 — 반려사유 펼침 영역 제거.
