@@ -72,9 +72,10 @@ export function decideSpamOutcome(
 /**
  * 스팸 차단 시 AI 재생성 프롬프트 — generateMessages에 전달.
  * 구체 혜택(%/할인/쿠폰) 생성 금지 명시 (feedback_ai_no_arbitrary_benefit).
+ * ★ 2026-07-02 2단계: styleHint(문안 스타일 지시 블록) 전달 시 재생성 문안도 같은 스타일 유지.
  */
-export function buildSpamRegeneratePrompt(objective: string): string {
-  return `${objective}
+export function buildSpamRegeneratePrompt(objective: string, styleHint?: string): string {
+  return `${objective}${styleHint ? `\n${styleHint}` : ''}
 (이전 문안이 스팸필터에 차단되었습니다. 같은 목표를 유지하되 다른 표현으로 다시 작성해주세요. 할인율·쿠폰·금액 같은 구체 혜택은 임의로 만들지 마세요.)`;
 }
 

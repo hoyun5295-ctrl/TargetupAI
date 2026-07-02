@@ -105,6 +105,50 @@ describe('computeNextGenerationRun — 생성 시각 = 발송 희망 시각 − 
   });
 });
 
+describe('normalizeCopyStyle / buildCopyStylePromptBlock — 문안 스타일 4종 (2단계)', () => {
+  it('4종 화이트리스트만 통과, 그 외/미지정은 null(브랜드 톤 자동)', async () => {
+    const { normalizeCopyStyle } = await import('./autosend-policy');
+    expect(normalizeCopyStyle('courteous')).toBe('courteous');
+    expect(normalizeCopyStyle('friendly')).toBe('friendly');
+    expect(normalizeCopyStyle('witty')).toBe('witty');
+    expect(normalizeCopyStyle('punchy')).toBe('punchy');
+    expect(normalizeCopyStyle('funny')).toBeNull();
+    expect(normalizeCopyStyle(undefined)).toBeNull();
+    expect(normalizeCopyStyle(null)).toBeNull();
+  });
+
+  it('스타일 지정 시 문안 생성 프롬프트 블록을, null이면 빈 문자열을 돌려준다', async () => {
+    const { buildCopyStylePromptBlock } = await import('./autosend-policy');
+    expect(buildCopyStylePromptBlock(null)).toBe('');
+    const block = buildCopyStylePromptBlock('witty');
+    expect(block).toContain('문안 스타일');
+    expect(block).toContain('위트');
+  });
+
+  it('프롬프트 블록에 구체 혜택 유도 표현(%/원/쿠폰/무료)이 없다', async () => {
+    const { buildCopyStylePromptBlock, COPY_STYLES } = await import('./autosend-policy');
+    for (const s of COPY_STYLES) {
+      const block = buildCopyStylePromptBlock(s.key);
+      expect(block).not.toMatch(/%|원 |쿠폰|무료/);
+    }
+  });
+});
+
+describe('wrapOperatorNoticeBody — 담당자 안내 문자 머리말 (Harold 2026-07-02 지시)', () => {
+  it('본문이 [한줄로 AI 자동마케팅 안내문자]로 시작한다', async () => {
+    const { wrapOperatorNoticeBody } = await import('./autosend-policy');
+    const wrapped = wrapOperatorNoticeBody('내용입니다.');
+    expect(wrapped.startsWith('[한줄로 AI 자동마케팅 안내문자]\n')).toBe(true);
+    expect(wrapped).toContain('내용입니다.');
+  });
+
+  it('이미 머리말이 있으면 중복으로 붙이지 않는다', async () => {
+    const { wrapOperatorNoticeBody } = await import('./autosend-policy');
+    const once = wrapOperatorNoticeBody('내용');
+    expect(wrapOperatorNoticeBody(once)).toBe(once);
+  });
+});
+
 describe('buildPendingReviewNoticeBody — 승인 대기(수동 검토) 통지 문구', () => {
   it('오퍼레이터명·타겟 수·예상 비용·승인 안내를 담는다', () => {
     const body = buildPendingReviewNoticeBody({

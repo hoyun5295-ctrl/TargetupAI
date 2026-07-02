@@ -44,6 +44,8 @@ export interface ContinuousOperator {
   autoSendLeadMinutes?: number | null;
   // 발송 시각 모드 — 'fixed'(기본, 희망 시각 정각 발송) | 'ai_optimal'(반응 좋은 시간대로 AI가 조정)
   sendTimeMode?: 'fixed' | 'ai_optimal';
+  // 문안 스타일 4종 — null/미지정 = 브랜드 톤 자동
+  copyStyle?: 'courteous' | 'friendly' | 'witty' | 'punchy' | null;
   channel?: 'sms' | 'lms' | 'mms';
   benefitContent?: string | null;
   sequenceEnabled?: boolean;

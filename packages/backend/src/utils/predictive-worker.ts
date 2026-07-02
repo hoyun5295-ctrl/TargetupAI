@@ -133,6 +133,17 @@ export async function runPredictiveBatchNow(): Promise<{
           createdBy: adminRes.rows[0]?.id || null,
           idempotencyKey: `predictive-daily:${row.id}:${todayKst}`,
         });
+        // ★ 2026-07-02 3단계 (Harold 확정): 같은 일일 분석 차감 1회에 "오늘의 추천" 브리핑 동반 생성(추가 차감 0).
+        //   실패는 예측·발송에 영향 0 — 격리 후 다음 날 사이클이 재시도.
+        try {
+          const { generateCompanyDailyBrief } = await import('./company-daily-brief');
+          const brief = await generateCompanyDailyBrief(row.id);
+          if (brief.saved) {
+            console.log(`[PredictiveWorker] 일일 브리핑 저장 company=${row.id} 추천 ${brief.recommendationCount}건 (AI ${brief.aiCalled ? 1 : 0}회)`);
+          }
+        } catch (briefErr: any) {
+          console.warn('[PredictiveWorker] 일일 브리핑 생성 skip:', row.id, briefErr?.message);
+        }
       } catch (err: any) {
         console.warn('[PredictiveWorker] 회사 batch 오류, skip:', row.id, err?.message);
       }

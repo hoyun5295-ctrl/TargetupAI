@@ -177,6 +177,30 @@ export function computeNextGenerationRun(
 }
 
 /**
+ * 문안 스타일 4종 — 2026-07-02 2단계 (Harold 스펙: 설정 시 문안 느낌 선택지 4가지).
+ *  선택 없음(null) = 브랜드 톤 자동(기존 동작 그대로). 프롬프트는 톤 지시만 — 구체 혜택 생성 금지 원칙과 충돌 없음.
+ */
+export type CopyStyle = 'courteous' | 'friendly' | 'witty' | 'punchy';
+
+export const COPY_STYLES: Array<{ key: CopyStyle; label: string; prompt: string }> = [
+  { key: 'courteous', label: '정중한', prompt: '격식 있는 정중한 존댓말로, 신뢰감 있게 안내하는 톤으로 작성하라.' },
+  { key: 'friendly', label: '친근한', prompt: '단골에게 말 걸 듯 다정하고 부드러운 톤으로 작성하라. 과한 격식은 뺀다.' },
+  { key: 'witty', label: '위트있는', prompt: '가볍게 미소 짓게 하는 위트를 한 스푼 담아 작성하라. 유치한 말장난은 피하고 센스 있는 한 줄 중심.' },
+  { key: 'punchy', label: '짧고 강한', prompt: '군더더기 없이 핵심만 짧고 강하게. 문장 수를 최소화하고 임팩트 있는 첫 줄로 시작하라.' },
+];
+
+export function normalizeCopyStyle(raw: unknown): CopyStyle | null {
+  return COPY_STYLES.some((s) => s.key === raw) ? (raw as CopyStyle) : null;
+}
+
+/** 문안 생성 objective에 덧붙일 스타일 지시 블록. null = 빈 문자열(브랜드 톤 자동). */
+export function buildCopyStylePromptBlock(style: CopyStyle | null): string {
+  if (!style) return '';
+  const def = COPY_STYLES.find((s) => s.key === style)!;
+  return `[문안 스타일 — 반드시 반영] ${def.label} 톤: ${def.prompt}`;
+}
+
+/**
  * 자율 발송 예정 안내(담당자 통지 2번 문자) 문구 — 2026-07-02 1단계 (Harold 스펙).
  *  발송 일시 + 추출 타겟 수 + 예상 비용(해당 유형 단가 × 수량) + 예약취소(정지) 안내.
  *  단가 미상(0 이하)이면 산식은 생략하고 총액만 표기(임의 상수 생성 금지).
@@ -201,6 +225,18 @@ export function buildAutoSendPrepInfoBody(input: PrepNoticeInput): string {
     costLine,
     `예약 취소를 원하시면 발송 전에 한줄로에 접속해 자동마케팅 [정지]를 눌러주세요.`,
   ].join('\n');
+}
+
+/**
+ * 담당자 안내 문자 머리말 — Harold 2026-07-02 지시: 모든 담당자 안내 문자는
+ * "[한줄로 AI 자동마케팅 안내문자]"로 시작해 한줄로 발신임을 분명히 한다. 중복 부착 방지.
+ */
+const OPERATOR_NOTICE_HEADER = '[한줄로 AI 자동마케팅 안내문자]';
+
+export function wrapOperatorNoticeBody(body: string): string {
+  const b = String(body || '');
+  if (b.startsWith(OPERATOR_NOTICE_HEADER)) return b;
+  return `${OPERATOR_NOTICE_HEADER}\n${b}`;
 }
 
 /**

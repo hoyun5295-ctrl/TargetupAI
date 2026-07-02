@@ -19,6 +19,7 @@ import ScenarioStart, { ScenarioPick } from '../components/automarketing/Scenari
 import OperatorSetupModal from '../components/automarketing/OperatorSetupModal';
 import MultiGoalModal from '../components/automarketing/MultiGoalModal';
 import OperatorsManageList from '../components/automarketing/OperatorsManageList';
+import DailyBriefCard, { DailyBrief, DailyBriefRecommendation } from '../components/automarketing/DailyBriefCard';
 
 const VIEW_TITLE: Record<AutoMarketingView, string> = {
   launcher: 'AI 자동 마케팅',
@@ -41,6 +42,7 @@ export default function ContinuousOperatorPage() {
   const [proposals, setProposals] = useState<OperatorProposal[]>([]);
   const [proposalStatus, setProposalStatus] = useState<'pending' | 'all'>('pending');
   const [learningSummary, setLearningSummary] = useState<LearningSummary | null>(null);
+  const [dailyBrief, setDailyBrief] = useState<DailyBrief | null>(null);
   const [variantsMap, setVariantsMap] = useState<Record<string, { variants: ProposalVariant[]; recommendation: BanditRecommendation | null }>>({});
   const [expandedProposal, setExpandedProposal] = useState<string | null>(null);
 
@@ -76,17 +78,21 @@ export default function ContinuousOperatorPage() {
     setLoading(true);
     setError(null);
     try {
-      const [opRes, propRes, learnRes] = await Promise.all([
+      const [opRes, propRes, learnRes, briefRes] = await Promise.all([
         fetch('/api/ai/operator/continuous', { headers: auth() }),
         fetch(`/api/ai/operator/proposals?status=${proposalStatus}`, { headers: auth() }),
         fetch('/api/ai/operator/continuous/learning-summary', { headers: auth() }),
+        fetch('/api/ai/operator/daily-brief', { headers: auth() }),
       ]);
       const opData = await opRes.json();
       const propData = await propRes.json();
       const learnData = await learnRes.json();
+      const briefData = await briefRes.json().catch(() => ({ success: false }));
       if (opData.success) setOperators(opData.operators || []);
       if (propData.success) setProposals(propData.proposals || []);
       if (learnData.success) setLearningSummary(learnData.summary || null);
+      // 브리핑은 부가 정보 — 미생성(503)·오류 시 조용히 숨김
+      if (briefData.success) setDailyBrief(briefData.brief || null);
       if (!opRes.ok && opData.code === 'BETA_GATE') setError('본 기능은 비즈니스 / 엔터프라이즈 요금제 베타에서 이용 가능합니다.');
     } catch (e: any) {
       setError(e?.message || '조회 중 오류');
@@ -139,6 +145,7 @@ export default function ContinuousOperatorPage() {
     opt_out_minutes: e.optOutMinutes ?? 5,
     auto_send_lead_minutes: e.autoSendLeadMinutes ?? 120,
     send_time_mode: e.sendTimeMode === 'ai_optimal' ? 'ai_optimal' : 'fixed',
+    copy_style: e.copyStyle ?? null,
     spam_score_threshold: e.spamScoreThreshold ?? 30,
     max_spam_retries: e.maxSpamRetries ?? 3,
     channel: e.channel || 'lms',
@@ -221,15 +228,21 @@ export default function ContinuousOperatorPage() {
     setPendingConfig(editing);
   };
 
-  // 자연어 제출: 스마트 기본값 + 목표 → 크레딧 확인 → 생성 + 즉시 초안.
-  const handleNaturalSubmit = (goal: string) => {
+  // 자연어 제출: 스마트 기본값 + 목표 (+선택 문안 스타일) → 크레딧 확인 → 생성 + 즉시 초안.
+  const handleNaturalSubmit = (goal: string, copyStyle: 'courteous' | 'friendly' | 'witty' | 'punchy' | null) => {
     if (!goal) return;
-    setPendingConfig({ ...SMART_DEFAULTS, name: goal.slice(0, 40), objective: goal });
+    setPendingConfig({ ...SMART_DEFAULTS, name: goal.slice(0, 40), objective: goal, copyStyle });
   };
 
   // 시나리오 선택: 세부설정 모달 prefill (가동 전 한 번 확인).
   const handleScenarioSelect = (s: ScenarioPick) => {
     setEditing({ ...SMART_DEFAULTS, name: s.name, objective: s.objective });
+  };
+
+  // 오늘의 브리핑 추천 → 한 클릭 시작: 크레딧 확인 → 생성 + 즉시 초안 (전체 AI 체인은 이 순간에만).
+  const handleBriefStart = (rec: DailyBriefRecommendation) => {
+    if (!rec.objective) return;
+    setPendingConfig({ ...SMART_DEFAULTS, name: rec.title.slice(0, 40), objective: rec.objective });
   };
 
   // ── 제안 액션 (ConfirmModal) ──
@@ -366,6 +379,13 @@ export default function ContinuousOperatorPage() {
 
             {view === 'recommendations' && (
               <div className="space-y-4">
+                {dailyBrief && (
+                  <DailyBriefCard
+                    brief={dailyBrief}
+                    submitting={creating}
+                    onStart={handleBriefStart}
+                  />
+                )}
                 {learningSummary && learningSummary.memory.total > 0 && <LearningCard summary={learningSummary} />}
                 <div className="flex items-center gap-2">
                   <span className="text-xs text-white/50">상태</span>

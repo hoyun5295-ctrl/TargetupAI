@@ -75,6 +75,9 @@ export interface AgentContext {
   // ★ 2026-06-26: 자동마케팅 채널 고정(#1) + 관리자 입력 혜택(#4) — 옵셔널, 미설정 시 기존 동작(AI 추천 채널·placeholder 유지).
   forcedChannel?: string;          // 'sms'|'lms'|'mms' — 설정 시 AI 추천 대신 이 채널로 문안·검수·발송 일관
   benefitContent?: string | null;  // 관리자 직접 입력 혜택 — 생성 문안의 [혜택 ...] placeholder 치환
+  // ★ 2026-07-02 (Harold 명시): 자동마케팅 = 마케팅 = 무조건 광고. true면 AI 판정과 무관하게 is_ad 고정 →
+  //   문안 생성·검수·스팸테스트·발송((광고)+무료거부 080 자동 합성)까지 전 하류 일관.
+  forcedIsAd?: boolean;
 }
 
 export interface ComplianceResult {
@@ -342,6 +345,11 @@ async function _orchestrateImpl(ctx: AgentContext): Promise<OrchestratorResult> 
     targetResult.recommended_channel = ctx.forcedChannel.toUpperCase();
   }
 
+  // ★ 2026-07-02 (Harold 명시): 자동마케팅 = 무조건 광고 — forcedChannel과 같은 1곳 override로 하류 전부 일관.
+  if (ctx.forcedIsAd === true) {
+    targetResult.is_ad = true;
+  }
+
   let estimatedCount = Math.max(0, targetResult.estimated_count || 0);
 
   // ============ 2. Target Verification (D168 — Tool Use SQL Loop 정신) ============
@@ -373,8 +381,11 @@ async function _orchestrateImpl(ctx: AgentContext): Promise<OrchestratorResult> 
   //   AI userMessage 안 안전/분기/차단 3단계 분류 동적 주입 → 어설픈 개인화 사고 차단.
   const companyDataProfile = await getCompanyDataProfile(ctx.companyId);
 
+  // ★ 2026-07-02 3단계: 회사 누적 학습(성공 패턴·채널 성과·정지 사유)을 문안 생성에 주입 — 계절 힌트와 같은 채널.
+  //   그동안 쓰기만 되고 기본 경로에서 읽히지 않던 ai_company_memory가 여기서 처음 반영된다. 실패 시 빈 문자열(영향 0).
+  const learnedMemoryContext = await buildCompanyMemoryPromptContext(ctx.companyId, 20).catch(() => '');
   const messagesResult = await generateMessages(
-    buildMessageObjective(ctx.objective, ctx.seasonHint),
+    buildMessageObjective(ctx.objective, [ctx.seasonHint, learnedMemoryContext].filter(Boolean).join('\n\n')),
     {
       total_count: estimatedCount,
       avg_purchase_count: parseFloat(ctx.customerStats.avg_purchase_count) || 0,
@@ -630,6 +641,8 @@ async function _orchestrateWithAIImpl(ctx: AgentContext): Promise<OrchestratorRe
           ctx.companyId, ctx.objective, ctx.customerStats, ctx.companyInfo as any,
           { model: 'opus' }
         );
+        // ★ 2026-07-02 (Harold 명시): 자동마케팅 = 무조건 광고 — orchestrate와 동일 1곳 override.
+        if (ctx.forcedIsAd === true) targetResult.is_ad = true;
         estimatedCount = Math.max(0, targetResult.estimated_count || 0);
         mark('target', start);
         return {

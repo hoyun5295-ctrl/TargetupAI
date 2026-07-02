@@ -6,6 +6,7 @@ import {
   Brain, X, Gift, Layers, Bell, Wallet, ChevronDown, ChevronUp, Loader2, AlertCircle,
 } from 'lucide-react';
 import { ContinuousOperator, Schedule, OperatorStatus, won } from './types';
+import CopyStylePicker from './CopyStylePicker';
 
 const INP = 'w-full px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-sm text-white placeholder-white/30 focus:outline-none focus:border-indigo-400/50 transition-colors';
 const LAB = 'text-xs font-medium text-white/70 block mb-1.5';
@@ -66,6 +67,11 @@ export default function OperatorSetupModal({ editing, setEditing, saving, error,
                 );
               })}
             </div>
+          </div>
+
+          <div>
+            <label className={LAB}>문안 느낌 (선택)</label>
+            <CopyStylePicker value={editing.copyStyle ?? null} onChange={(next) => setEditing({ ...editing, copyStyle: next })} disabled={saving} />
           </div>
 
           <div className="grid grid-cols-2 gap-3">
@@ -174,11 +180,8 @@ export default function OperatorSetupModal({ editing, setEditing, saving, error,
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className="text-[11px] text-white/60 block mb-1">담당자 알림 채널</label>
-                <select value={editing.adminAlertChannel || 'sms'} onChange={(e) => setEditing({ ...editing, adminAlertChannel: e.target.value as 'sms' | 'kakao' | 'email' })} className={INP}>
-                  <option value="sms">SMS</option>
-                  <option value="kakao">카카오 알림톡</option>
-                  <option value="email">이메일</option>
-                </select>
+                <div className={`${INP} flex items-center text-white/70`}>문자 (LMS)</div>
+                <div className="text-[10px] text-white/40 mt-1">담당자 안내는 문자로 발송됩니다.</div>
               </div>
               <div>
                 <label className="text-[11px] text-white/60 block mb-1">자율 발송 준비 시간 (분)</label>

@@ -1785,7 +1785,7 @@ router.post('/operator/continuous', async (req: Request, res: Response) => {
       name, objective, schedule, schedule_time, schedule_day_of_week, schedule_day_of_month,
       channel, benefit_content, admin_phone_numbers, backup_admin_phone, admin_alert_channel,
       auto_send_lead_minutes, budget_monthly, budget_daily, budget_alert_threshold, delivery_policy,
-      sequence_enabled, sequence_delay_days, sequence_reminder_content, send_time_mode,
+      sequence_enabled, sequence_delay_days, sequence_reminder_content, send_time_mode, copy_style,
     } = req.body;
     const operator = await createOperator({
       companyId,
@@ -1813,6 +1813,8 @@ router.post('/operator/continuous', async (req: Request, res: Response) => {
       sequenceReminderContent: typeof sequence_reminder_content === 'string' ? sequence_reminder_content : null,
       // ★ 2026-07-02 1단계 B: 발송 시각 모드 — 'fixed'(기본) | 'ai_optimal'
       sendTimeMode: send_time_mode === 'ai_optimal' ? 'ai_optimal' : 'fixed',
+      // ★ 2026-07-02 2단계: 문안 스타일 (createOperator가 화이트리스트 정규화)
+      copyStyle: typeof copy_style === 'string' ? copy_style : null,
     });
     return res.json({ success: true, operator });
   } catch (err: any) {
@@ -1840,6 +1842,34 @@ router.get('/operator/continuous', async (req: Request, res: Response) => {
   }
 });
 
+// ★ 2026-07-02 3단계: 오늘의 추천 브리핑 — 매일 9시 일일 분석이 저장한 최신 브리핑(회사 격리, 읽기 전용).
+router.get('/operator/daily-brief', async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+    const r = await query(
+      `SELECT brief_date, headline, recommendations, created_at
+         FROM company_daily_briefs
+        WHERE company_id = $1::uuid
+        ORDER BY brief_date DESC
+        LIMIT 1`,
+      [companyId],
+    );
+    return res.json({ success: true, brief: r.rows[0] || null });
+  } catch (err: any) {
+    const msg = err?.message || '';
+    if (msg.includes('does not exist')) {
+      return res.status(503).json({
+        success: false,
+        error: 'DB 마이그레이션 필요 — 운영자에게 company_daily_briefs 테이블 생성 요청이 필요합니다.',
+        code: 'DB_MIGRATION_PENDING',
+      });
+    }
+    console.error('[Operator daily-brief GET] 오류:', err);
+    return res.status(500).json({ success: false, error: err?.message || '조회 실패' });
+  }
+});
+
 router.put('/operator/continuous/:id', async (req: Request, res: Response) => {
   try {
     const companyId = req.user?.companyId;
@@ -1854,7 +1884,7 @@ router.put('/operator/continuous/:id', async (req: Request, res: Response) => {
       admin_phone_numbers, backup_admin_phone, admin_alert_channel,
       opt_out_minutes, auto_send_lead_minutes, spam_score_threshold, max_spam_retries,
       channel, benefit_content,
-      sequence_enabled, sequence_delay_days, sequence_reminder_content, send_time_mode,
+      sequence_enabled, sequence_delay_days, sequence_reminder_content, send_time_mode, copy_style,
     } = req.body;
     const operator = await updateOperator(companyId, req.params.id, {
       name, objective, schedule, scheduleTime: schedule_time, status,
@@ -1882,6 +1912,8 @@ router.put('/operator/continuous/:id', async (req: Request, res: Response) => {
       sequenceReminderContent: sequence_reminder_content === undefined ? undefined : (typeof sequence_reminder_content === 'string' ? sequence_reminder_content : null),
       // ★ 2026-07-02 1단계 B: 발송 시각 모드 (미전송 = 변경 없음)
       sendTimeMode: send_time_mode === undefined ? undefined : (send_time_mode === 'ai_optimal' ? 'ai_optimal' : 'fixed'),
+      // ★ 2026-07-02 2단계: 문안 스타일 (미전송 = 변경 없음, null/그 외 = 해제)
+      copyStyle: copy_style === undefined ? undefined : (typeof copy_style === 'string' ? copy_style : null),
     });
     if (!operator) return res.status(404).json({ success: false, error: 'Operator를 찾을 수 없습니다.' });
     return res.json({ success: true, operator });

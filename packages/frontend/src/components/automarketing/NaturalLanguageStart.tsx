@@ -3,6 +3,7 @@
 // AI 초안 생성은 5초+ 소요 → 제출 중 로딩 오버레이 + 닫기 차단(D185).
 import { useState } from 'react';
 import { Sparkles, Check, Lock, Loader2 } from 'lucide-react';
+import CopyStylePicker, { CopyStyleKey } from './CopyStylePicker';
 
 const EXAMPLES: Array<{ label: string; goal: string }> = [
   { label: 'VIP 재구매', goal: 'VIP 등급 고객 중 최근 30일 구매가 없는 고객에게 재구매를 유도' },
@@ -14,8 +15,9 @@ const EXAMPLES: Array<{ label: string; goal: string }> = [
 
 const AUTO_ITEMS = ['타겟', '채널', '발송 시각', '문안 초안', '예상 성과'];
 
-export default function NaturalLanguageStart({ submitting, onSubmit }: { submitting: boolean; onSubmit: (goal: string) => void }) {
+export default function NaturalLanguageStart({ submitting, onSubmit }: { submitting: boolean; onSubmit: (goal: string, copyStyle: CopyStyleKey | null) => void }) {
   const [goal, setGoal] = useState('');
+  const [copyStyle, setCopyStyle] = useState<CopyStyleKey | null>(null);
   const canSubmit = goal.trim().length > 0 && !submitting;
 
   return (
@@ -48,6 +50,11 @@ export default function NaturalLanguageStart({ submitting, onSubmit }: { submitt
         </div>
       </div>
 
+      <div className="mt-4">
+        <div className="text-xs text-white/40 mb-2">문안 느낌 고르기 (선택)</div>
+        <CopyStylePicker compact value={copyStyle} onChange={setCopyStyle} disabled={submitting} />
+      </div>
+
       <div className="mt-5 rounded-xl border border-white/10 bg-white/5 px-4 py-3">
         <div className="text-xs text-white/40 mb-2.5">이 항목은 AI가 자동으로 잡습니다 — 필요하면 다음 단계에서 조정</div>
         <div className="flex flex-wrap gap-2">
@@ -60,7 +67,7 @@ export default function NaturalLanguageStart({ submitting, onSubmit }: { submitt
       </div>
 
       <button
-        onClick={() => onSubmit(goal.trim())}
+        onClick={() => onSubmit(goal.trim(), copyStyle)}
         disabled={!canSubmit}
         className="mt-5 w-full inline-flex items-center justify-center gap-2 bg-indigo-500/40 hover:bg-indigo-500/60 disabled:opacity-30 disabled:cursor-not-allowed text-indigo-50 text-sm font-semibold py-3.5 rounded-xl transition-colors"
       >

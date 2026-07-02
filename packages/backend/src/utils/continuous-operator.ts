@@ -34,7 +34,7 @@ import { insertProposalVariants, recommendVariantForProposal, recordVariantRewar
 // ★ D212+ 정책 (2026-05-23 Harold 명시): CT-64 영역 통합 — 검증 영역 + 담당자 학습
 // ★ D227+ 스팸 안전망 격상 — decideSpamOutcome(실제 테스트 결과 → 상태) + buildSpamRegeneratePrompt(AI 재작성)
 import { recordAdminStopLearning, decideSpamOutcome, buildSpamRegeneratePrompt } from './continuous-operator-policy';
-import { resolveAutoSendLeadMinutes, computeScheduledSendAt, decideSendOutcome, decideStuckSendingRecovery, decideBudgetGuard, buildAutoSendPrepInfoBody, buildPendingReviewNoticeBody, computeNextOccurrence, computeNextGenerationRun, normalizeSendTimeMode, SendTimeMode } from './autosend-policy';
+import { resolveAutoSendLeadMinutes, computeScheduledSendAt, decideSendOutcome, decideStuckSendingRecovery, decideBudgetGuard, buildAutoSendPrepInfoBody, buildPendingReviewNoticeBody, computeNextOccurrence, computeNextGenerationRun, normalizeSendTimeMode, SendTimeMode, normalizeCopyStyle, buildCopyStylePromptBlock, CopyStyle, wrapOperatorNoticeBody } from './autosend-policy';
 import { getOpt080Number } from './messageUtils';
 // ★ D227+ 검증된 스팸 자산 재사용 (auto-campaign-worker와 동일 패턴) — 실제 테스트폰 발송 + AI 재생성 + 재테스트
 import { autoSpamTestWithRegenerate } from './spam-test-queue';
@@ -82,6 +82,8 @@ export interface CreateOperatorInput {
   autoSendLeadMinutes?: number | null; // 자율 발송 준비 시간(분)
   // ★ 2026-07-02 1단계 B: 발송 시각 모드 — 'fixed'(기본, 희망 시각 정각) | 'ai_optimal'(클릭 피크 개인화)
   sendTimeMode?: 'fixed' | 'ai_optimal';
+  // ★ 2026-07-02 2단계: 문안 스타일 4종 — 미지정(null) = 브랜드 톤 자동
+  copyStyle?: string | null;
   budgetMonthly?: number | null;
   budgetDaily?: number | null;
   budgetAlertThreshold?: number;
@@ -129,6 +131,8 @@ export interface ContinuousOperator {
   autoSendLeadMinutes: number | null;               // 자율 발송 준비·정지 창(분) — null→120
   // ★ 2026-07-02 1단계 B: 발송 시각 모드 — schedule_time = 발송 희망 시각, 생성 = 희망 − lead
   sendTimeMode: SendTimeMode;                       // 'fixed'(기본) | 'ai_optimal'(클릭 피크)
+  // ★ 2026-07-02 2단계: 문안 스타일 4종 (null = 브랜드 톤 자동)
+  copyStyle: CopyStyle | null;
   // ★ 2026-06-26: 발송 채널 + 관리자 입력 혜택
   channel: 'sms' | 'lms' | 'mms';                   // 발송 채널 (default 'lms')
   benefitContent: string | null;                    // 관리자 직접 입력 혜택 (placeholder 치환)
@@ -174,6 +178,8 @@ export async function createOperator(input: CreateOperatorInput): Promise<Contin
   const scheduleDayOfMonth = (schedule === 'monthly' && input.scheduleDayOfMonth != null) ? input.scheduleDayOfMonth : null;
   // ★ 2026-07-02 1단계 B: schedule_time = 발송 희망 시각 — 생성(next_run_at)은 희망 시각 − 준비시간(lead)
   const sendTimeMode = normalizeSendTimeMode(input.sendTimeMode);
+  // ★ 2026-07-02 2단계: 문안 스타일 (화이트리스트 밖/미지정 = null → 브랜드 톤 자동)
+  const copyStyle = normalizeCopyStyle(input.copyStyle);
   const { nextRunAt } = computeNextGenerationRun(
     schedule, scheduleTime, scheduleDayOfWeek, scheduleDayOfMonth,
     resolveAutoSendLeadMinutes(input.autoSendLeadMinutes),
@@ -200,14 +206,14 @@ export async function createOperator(input: CreateOperatorInput): Promise<Contin
       schedule, schedule_time, schedule_day_of_week, schedule_day_of_month, status, next_run_at,
       channel, benefit_content, admin_phone_numbers, backup_admin_phone, admin_alert_channel,
       auto_send_lead_minutes, budget_monthly, budget_daily, budget_alert_threshold, delivery_policy,
-      sequence_enabled, sequence_delay_days, sequence_reminder_content, send_time_mode,
+      sequence_enabled, sequence_delay_days, sequence_reminder_content, send_time_mode, copy_style,
       created_at, updated_at
     ) VALUES (
       gen_random_uuid(), $1::uuid, $2::uuid, $3, $4,
       $5, $6, $8, $9, 'active', $7,
       $10, $11, $12, $13, $14,
       $15, $16, $17, $18, $19,
-      $20, $21, $22, $23,
+      $20, $21, $22, $23, $24,
       NOW(), NOW()
     ) RETURNING *`,
     [
@@ -219,7 +225,7 @@ export async function createOperator(input: CreateOperatorInput): Promise<Contin
       input.budgetDaily != null ? input.budgetDaily : null,
       input.budgetAlertThreshold != null ? input.budgetAlertThreshold : 80,
       deliveryPolicy,
-      sequenceEnabled, sequenceDelayDays, sequenceReminderContent, sendTimeMode,
+      sequenceEnabled, sequenceDelayDays, sequenceReminderContent, sendTimeMode, copyStyle,
     ]
   );
   const operator = mapRowToOperator(result.rows[0]);
@@ -291,6 +297,8 @@ export async function updateOperator(
     sequenceReminderContent?: string | null;
     // ★ 2026-07-02 1단계 B: 발송 시각 모드
     sendTimeMode?: 'fixed' | 'ai_optimal';
+    // ★ 2026-07-02 2단계: 문안 스타일 (undefined = 변경 없음, null/화이트리스트 밖 = 해제 → 브랜드 톤 자동)
+    copyStyle?: string | null;
   }
 ): Promise<ContinuousOperator | null> {
   // schedule/scheduleTime/요일/날짜/준비시간 변경 시 next_run_at 재계산 (생성 = 발송 희망 시각 − lead)
@@ -341,6 +349,7 @@ export async function updateOperator(
       sequence_delay_days = COALESCE($26, sequence_delay_days),
       sequence_reminder_content = COALESCE($27, sequence_reminder_content),
       send_time_mode = COALESCE($28, send_time_mode),
+      copy_style = CASE WHEN $29::text = '__keep__' THEN copy_style ELSE NULLIF($29::text, '') END,
       updated_at = NOW()
      WHERE id = $1::uuid AND company_id = $2::uuid
      RETURNING *`,
@@ -372,6 +381,8 @@ export async function updateOperator(
       typeof patch.sequenceDelayDays === 'number' && patch.sequenceDelayDays > 0 ? Math.min(30, Math.floor(patch.sequenceDelayDays)) : null,
       (typeof patch.sequenceReminderContent === 'string' && patch.sequenceReminderContent.trim()) ? patch.sequenceReminderContent.trim().slice(0, 2000) : null,
       patch.sendTimeMode !== undefined ? normalizeSendTimeMode(patch.sendTimeMode) : null,
+      // copy_style: undefined = 유지('__keep__'), 그 외 = 정규화 값 or ''(해제 → SQL NULLIF로 null)
+      patch.copyStyle === undefined ? '__keep__' : (normalizeCopyStyle(patch.copyStyle) ?? ''),
     ]
   );
   return result.rows.length > 0 ? mapRowToOperator(result.rows[0]) : null;
@@ -526,10 +537,16 @@ export async function generateProposalForOperator(operatorId: string): Promise<O
       companyInfo,
       customerStats,
       // ★ 계절 문안 주입 — objective는 불변, 그 달 시즌을 메시지 톤·소재로만(§6-8).
-      seasonHint: buildSeasonPromptBlock(getSeasonContext(new Date()).month, ctx.business_type),
+      //   2026-07-02 2단계: 관리자 선택 문안 스타일 지시를 같은 힌트 채널로 함께 주입(미선택 = 계절만).
+      seasonHint: [
+        buildSeasonPromptBlock(getSeasonContext(new Date()).month, ctx.business_type),
+        buildCopyStylePromptBlock(operator.copyStyle),
+      ].filter(Boolean).join('\n'),
       // ★ 2026-06-26: 폼에서 고정한 채널(#1) + 관리자 입력 혜택(#4) 주입 → 제안·테스트·발송 일관
       forcedChannel: operator.channel,
       benefitContent: operator.benefitContent,
+      // ★ 2026-07-02 (Harold 명시): 자동마케팅 = 마케팅 = 무조건 광고 — (광고)+무료거부 080 자동 합성 전제.
+      forcedIsAd: true,
     }, { source: 'continuous-operator', cost: 0 });  // ★ 2026-06-02: 제안서 생성(매일)은 무과금 — 200은 저장 1회, 발송 시 문안 3로 재배치. source는 이력용 유지.
     // ★ D227+ 종량제: 크레딧 충분해 정상 실행 — paused_no_credit였으면 자동 재개
     await query(
@@ -573,13 +590,17 @@ export async function generateProposalForOperator(operatorId: string): Promise<O
   // 6. 자동 발송 자격 체크 (ENT 옵션)
   const costEstimate = orchestratorResult.cost?.estimated || 0;
   const compliance = orchestratorResult.compliance || { passed: true, riskLevel: 'low' };
-  const isAd = orchestratorResult.channel?.isAd || false;
+  // ★ 2026-07-02 (Harold 명시): 자동마케팅 = 무조건 광고. orchestrate에 forcedIsAd로 고정했지만
+  //   이 파일 안 판정도 상수로 고정(이중 안전) — 스팸테스트·080 가드·발송 전부 광고 기준.
+  const isAd = true;
 
   // 자율 발송 가능 조건(발신번호 + 문안 + SMS/LMS) — 스팸테스트·실발송에 필수. 미충족이면 수동 검토(pending)로.
   const channelForSpam = (orchestratorResult.channel?.recommended || 'SMS').toUpperCase();
   const callbackForSpam = String(companyInfo.callback || companyInfo.callback_number || ctx.reject_number || '').trim();
   const firstMsg = ((orchestratorResult.messages as any[]) || [])[0];
   const bestMessage = firstMsg ? String(firstMsg.body || firstMsg.message || '') : '';
+  // ★ 2026-07-02: 담당자에게 안내할 "실제 발송될 문안" — 스팸 재생성으로 교체되면 아래에서 갱신
+  let finalNoticeCopy = bestMessage;
   const bestSubject = firstMsg ? String(firstMsg.subject || '') : '';
   const canAutoSend = !!bestMessage && !!callbackForSpam && channelForSpam !== '카카오' && channelForSpam !== 'KAKAO';
 
@@ -691,7 +712,7 @@ export async function generateProposalForOperator(operatorId: string): Promise<O
           try {
             // 스팸 재생성은 자동마케팅 사이클 안전망(품질 보증) → 묶음으로 차감 0 (사이클 1회 200에 포함).
             const regen = await runInCreditBundle(() => generateMessages(
-              buildSpamRegeneratePrompt(operator.objective),
+              buildSpamRegeneratePrompt(operator.objective, buildCopyStylePromptBlock(operator.copyStyle)),
               { count: recipientCount, segmentName: orchestratorResult.target?.suggestedName || operator.name, criteria: orchestratorResult.target?.criteria || '' } as any,
               { channel: channelForSpam, isAd: !!isAd, rejectNumber: ctx.reject_number || undefined, model: 'opus', companyId: operator.companyId },
             ));
@@ -708,6 +729,7 @@ export async function generateProposalForOperator(operatorId: string): Promise<O
 
       // 재생성된 문안이 통과했으면 proposal_json의 best 메시지를 교체 (실제 발송될 문안 = 통과 문안)
       if (variantResult?.regenerated && variantResult.messageText) {
+        finalNoticeCopy = variantResult.messageText;
         try {
           const pj = orchestratorResult;
           if (pj.messages?.[0]) {
@@ -744,8 +766,7 @@ export async function generateProposalForOperator(operatorId: string): Promise<O
         // 자율 발송 예정(scheduled) → 담당자에 실문안 + 발송 정보(일시·타겟·비용)·정지 안내 (준비 시점 알림, 무과금 인증 라인)
         if (autoExecuteEligible) {
           // ★ 2026-07-02: 재생성으로 문안이 교체됐으면 실제 발송될 통과 문안을 통지 (직전엔 원본을 보내 통지≠실발송 불일치)
-          const noticeBody = (variantResult?.regenerated && variantResult.messageText) ? variantResult.messageText : bestMessage;
-          await sendAutoSendPrepNotice(operator, proposalRes.rows[0].id, noticeBody, scheduledSendAt, {
+          await sendAutoSendPrepNotice(operator, proposalRes.rows[0].id, finalNoticeCopy, scheduledSendAt, {
             recipientCount,
             costEstimate,
             channelLabel: channelForSpam,
@@ -768,11 +789,15 @@ export async function generateProposalForOperator(operatorId: string): Promise<O
 
   // (검증 7일 게이팅 제거 — verification_* 컬럼은 보존하되 자율 발송 흐름에서 미사용. 스팸 통과만으로 'scheduled'.)
 
-  // 10. ★ 2026-07-02 1단계: pending(수동 검토)으로 남은 새 추천 — 담당자 승인 대기 통지.
+  // 10. ★ 2026-07-02 1단계: pending(수동 검토)으로 남은 새 추천 — 담당자 통지 문자 2건.
   //    자율 발송 자격 미달이면 그동안 아무 통지가 없어 담당자가 새 추천을 몰랐음. 통지 실패는 생성 흐름에 영향 X.
+  //    Harold 2026-07-02: 승인 대기도 ①실제 발송될 문안 ②승인 안내(대상·비용) 2건으로 — 자율발송 예고와 같은 짜임.
   try {
     const curRes = await query(`SELECT status FROM operator_proposals WHERE id = $1::uuid`, [proposalRes.rows[0].id]);
     if (curRes.rows[0]?.status === 'pending') {
+      if (finalNoticeCopy.trim()) {
+        await notifyOperatorAdmins(operator, '[AI 자동마케팅] 추천 문안', finalNoticeCopy);
+      }
       await notifyOperatorAdmins(
         operator,
         '[AI 자동마케팅] 승인 대기',
@@ -1240,7 +1265,9 @@ async function dispatchProposalSend(p: any): Promise<{ action: 'sent' | 'skipped
   const subject = String(msg.subject || '');
   const channel = String(pj.channel?.recommended || 'SMS').toUpperCase();
   const msgType = (channel === 'LMS' || channel === 'MMS') ? channel : 'SMS';
-  const isAd = !!(pj.channel?.isAd);  // 광고성이면 발송 시 (광고)·무료거부 080 자동 합성(direct-send-worker)
+  // ★ 2026-07-02 (Harold 명시): 자동마케팅 = 무조건 광고 — 과거 저장분(pj.channel.isAd=false)도 광고로 발송.
+  //   (광고)·무료거부 080 자동 합성(direct-send-worker) + 080 미설정 시 발송 보류 가드가 전 건 적용된다.
+  const isAd = true;
 
   let stagingId = '';
   let rows: any[] = [];
@@ -1455,11 +1482,13 @@ async function notifyOperatorAdmins(
   if (unique.length === 0) return;
 
   // TODO(알림톡 템플릿 등록 후): 1순위 알림톡(insertAlimtalkQueue) → 실패 시 아래 문자(2순위)로 fallback.
+  // ★ Harold 2026-07-02: 모든 담당자 안내 문자 첫 줄 = [한줄로 AI 자동마케팅 안내문자] (중앙 1곳 부착)
+  const wrappedBody = wrapOperatorNoticeBody(body);
   const authTable = await getAuthSmsTable();
   const rows = unique.map((phone) => [
     phone,                  // dest_no
     phone,                  // call_back
-    body,                   // msg_contents
+    wrappedBody,            // msg_contents
     'L',                    // msg_type (LMS)
     title.slice(0, 40),     // title_str
     null,                   // sendreq_time (useNow)
@@ -1566,6 +1595,8 @@ function mapRowToOperator(row: any): ContinuousOperator {
     autoSendLeadMinutes: row.auto_send_lead_minutes !== null && row.auto_send_lead_minutes !== undefined ? Number(row.auto_send_lead_minutes) : null,
     // ★ 2026-07-02 1단계 B: 발송 시각 모드 (컬럼 미존재/ALTER 전 = undefined → 'fixed' 안전 기본)
     sendTimeMode: normalizeSendTimeMode(row.send_time_mode),
+    // ★ 2026-07-02 2단계: 문안 스타일 (미존재/NULL = 브랜드 톤 자동)
+    copyStyle: normalizeCopyStyle(row.copy_style),
     // ★ 2026-06-26: 발송 채널 + 관리자 입력 혜택
     channel: (['sms', 'lms', 'mms'].includes(row.channel) ? row.channel : 'lms') as 'sms' | 'lms' | 'mms',
     benefitContent: row.benefit_content || null,
