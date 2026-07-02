@@ -579,6 +579,22 @@ export function normalizeEmail(value: any): string | null {
 }
 
 // ============================================================
+// 웹 URL 정규화 — ★ 2026-07-02 (Harold 신고: www.poppon.co.kr 이메일 링크 이동 안 됨)
+// 스킴 없는 도메인형(www.x.y / a.b/path)에 https:// 부착.
+// 기존 스킴(http/https/mailto/tel)·앵커(#)·상대경로(/)·개인화 변수({{)는 그대로 보존.
+// 소비처: 이메일 섹션 렌더러 · 이메일 클릭 추적 래핑 · DM safeUrl (전수 통합 — 인라인 스킴 검사 대체)
+// ============================================================
+export function normalizeWebUrl(value: any): string {
+  const s = String(value ?? '').trim();
+  if (!s) return '';
+  if (/^(https?:|mailto:|tel:|#|\/)/i.test(s)) return s;
+  if (s.includes('{{')) return s; // Liquid 개인화 변수 URL은 치환 전이라 손대지 않음
+  // 도메인형 (www.poppon.co.kr, poppon.co.kr/event?x=1 등) = https:// 부착
+  if (/^[a-z0-9-]+(\.[a-z0-9-]+)+([/?#].*)?$/i.test(s)) return `https://${s}`;
+  return s;
+}
+
+// ============================================================
 // 필드키 기반 정규화 디스패처
 // standard-field-map.ts의 normalizeFunction 값에 따라 호출
 // ============================================================

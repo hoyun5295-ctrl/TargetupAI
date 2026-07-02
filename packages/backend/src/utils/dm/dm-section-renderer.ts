@@ -22,6 +22,8 @@ import { publicImageUrl, youtubeEmbedUrl } from './dm-viewer-utils';
 import { dmIcon, dmEventCard } from './dm-render-primitives';
 // ★ 2026-06-25 (P1) 아트디렉션 — 섹션 구도(treatment) 선택. 미설정/미허용=classic(현행 동일).
 import { selectTreatment, type ArtDirection } from './dm-art-direction';
+// ★ 2026-07-02 스킴 없는 URL(www.x.y) https:// 정규화 — 이메일 "링크 이동 안 됨" 신고와 동일 구멍 통합 수정
+import { normalizeWebUrl } from '../normalize';
 
 // ────────────── 렌더 컨텍스트 ──────────────
 
@@ -48,10 +50,11 @@ export function escapeHtml(input: unknown): string {
     .replace(/'/g, '&#39;');
 }
 
-/** URL이 안전한 스킴(http/https/tel/mailto)인지 검증. 그 외는 # 로 대체 */
+/** URL이 안전한 스킴(http/https/tel/mailto)인지 검증. 그 외는 # 로 대체.
+ *  ★ 2026-07-02 스킴 없는 도메인형(www.x.y)은 https:// 부착 후 통과 — 죽은 '#' 링크 방지. */
 export function safeUrl(url: unknown): string {
   if (!url) return '#';
-  const s = String(url).trim();
+  const s = normalizeWebUrl(String(url).trim());
   if (/^(https?:|tel:|mailto:|#|\/)/i.test(s)) return escapeHtml(s);
   return '#';
 }

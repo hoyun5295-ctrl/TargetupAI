@@ -16,6 +16,8 @@ import type {
 import type { DmBrandKit } from '../dm/dm-tokens';
 import { resolveEmailBrand, type EmailBrand } from './email-tokens';
 import { EMAIL_BLOCK_WHITELIST, EMAIL_INCOMPATIBLE } from './email-blocks';
+// ★ 2026-07-02 스킴 없는 URL(www.x.y) https:// 정규화 — "링크 이동 안 됨" 신고 근본 수정 (normalize CT)
+import { normalizeWebUrl } from '../normalize';
 
 export interface EmailRenderCtx {
   brandKit?: DmBrandKit | null;
@@ -115,7 +117,8 @@ function renderTextCard(p: TextCardProps, b: EmailBrand, ctx: EmailRenderCtx): s
 
 // 이메일 호환 버튼 — 이미지 버튼 금지, table 셀 배경 + padding (아웃룩 호환).
 function renderButton(btn: CtaButton, b: EmailBrand): string {
-  const url = /^https?:\/\//i.test(btn.url || '') ? btn.url : '#';
+  const normalized = normalizeWebUrl(btn.url || '');
+  const url = /^https?:\/\//i.test(normalized) ? normalized : '#';
   let bg = b.primary, color = '#ffffff', border = b.primary;
   if (btn.style === 'secondary') { bg = b.accent; border = b.accent; }
   else if (btn.style === 'outline') { bg = b.cardBg; color = b.primary; }
@@ -169,7 +172,8 @@ function renderProductCarousel(p: ProductCarouselProps, b: EmailBrand, ctx: Emai
   const title = p.title ? `<div style="font-size:${b.type.h3.size};font-weight:700;color:${b.text};padding:0 0 ${b.sp[4]};text-align:center">${esc(p.title)}</div>` : '';
   const cellFor = (it: ProductCarouselItem): string => {
     const img = emailImg(it.image_url, ctx.publicBase);
-    const url = it.link_url && /^https?:\/\//i.test(it.link_url) ? it.link_url : '';
+    const normalizedLink = normalizeWebUrl(it.link_url || '');
+    const url = /^https?:\/\//i.test(normalizedLink) ? normalizedLink : '';
     const price = it.discount_price != null
       ? `<span style="color:${b.primary};font-weight:700">${formatWon(it.discount_price)}</span> <span style="color:${b.textMuted};text-decoration:line-through;font-size:${b.type.small.size}">${formatWon(it.price)}</span>`
       : `<span style="color:${b.text};font-weight:700">${formatWon(it.price)}</span>`;
@@ -195,7 +199,8 @@ function renderGallery(p: GalleryProps, b: EmailBrand, ctx: EmailRenderCtx): str
   const cellFor = (im: GalleryImage): string => {
     const img = emailImg(im.url, ctx.publicBase);
     const tag = `<img src="${esc(img)}" alt="${esc(im.caption || '')}" style="width:100%;display:block;border:0;border-radius:${b.radius.sm}">`;
-    const wrapped = im.link_url && /^https?:\/\//i.test(im.link_url) ? `<a href="${esc(im.link_url)}">${tag}</a>` : tag;
+    const galleryLink = normalizeWebUrl(im.link_url || '');
+    const wrapped = /^https?:\/\//i.test(galleryLink) ? `<a href="${esc(galleryLink)}">${tag}</a>` : tag;
     return `<td width="${w}%" valign="top" style="padding:${b.sp[1]}">${wrapped}</td>`;
   };
   const rows: string[] = [];
@@ -210,8 +215,9 @@ function renderPromoCode(p: PromoCodeProps, b: EmailBrand): string {
   const desc = p.description ? `<div style="font-size:${b.type.body.size};color:${b.text};margin-bottom:${b.sp[3]}">${esc(p.description)}</div>` : '';
   const codeBox = `<div style="display:inline-block;padding:${b.sp[3]} ${b.sp[6]};background:${b.bg};border:1px dashed ${b.primary};border-radius:${b.radius.sm};font-family:${b.mono};font-size:${b.type.h3.size};font-weight:700;letter-spacing:2px;color:${b.primary}">${esc(p.code)}</div>`;
   const instr = p.instructions ? `<div style="font-size:${b.type.tiny.size};color:${b.textMuted};margin-top:${b.sp[3]}">${esc(p.instructions)}</div>` : '';
-  const cta = p.cta_url && /^https?:\/\//i.test(p.cta_url)
-    ? `<div style="margin-top:${b.sp[4]}">${renderButton({ label: p.cta_label || '사용하기', url: p.cta_url, style: 'primary' }, b)}</div>`
+  const promoCtaUrl = normalizeWebUrl(p.cta_url || '');
+  const cta = /^https?:\/\//i.test(promoCtaUrl)
+    ? `<div style="margin-top:${b.sp[4]}">${renderButton({ label: p.cta_label || '사용하기', url: promoCtaUrl, style: 'primary' }, b)}</div>`
     : '';
   return `<tr><td style="padding:${b.sp[5]} ${b.sp[6]};text-align:center">${desc}${codeBox}${instr}${cta}</td></tr>`;
 }
@@ -225,7 +231,7 @@ function renderStoreInfo(p: StoreInfoProps, b: EmailBrand): string {
   line('전화', p.phone);
   line('운영시간', p.business_hours);
   if (p.website) {
-    const wurl = /^https?:\/\//i.test(p.website) ? p.website : 'https://' + p.website;
+    const wurl = normalizeWebUrl(p.website);
     rows.push(`<div style="font-size:${b.type.small.size};margin:${b.sp[1]} 0"><a href="${esc(wurl)}" style="color:${b.primary};text-decoration:none">${esc(p.website)}</a></div>`);
   }
   if (rows.length === 0) return '';
@@ -233,7 +239,9 @@ function renderStoreInfo(p: StoreInfoProps, b: EmailBrand): string {
 }
 
 function renderSns(p: SnsProps, b: EmailBrand): string {
-  const ch = (p.channels || []).filter((c) => c && c.url && /^https?:\/\//i.test(c.url));
+  const ch = (p.channels || [])
+    .map((c) => (c && c.url ? { ...c, url: normalizeWebUrl(c.url) } : c))
+    .filter((c) => c && c.url && /^https?:\/\//i.test(c.url));
   if (ch.length === 0) return '';
   const labels: Record<string, string> = { instagram: 'Instagram', youtube: 'YouTube', kakao: '카카오', naver: '네이버', facebook: 'Facebook', twitter: 'X' };
   const links = ch.map((c) => `<a href="${esc(c.url)}" style="display:inline-block;margin:0 ${b.sp[2]};font-size:${b.type.small.size};color:${b.primary};text-decoration:none;font-weight:600">${esc(labels[c.type] || c.type)}</a>`).join('');

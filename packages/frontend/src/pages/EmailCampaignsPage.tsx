@@ -179,6 +179,9 @@ export default function EmailCampaignsPage() {
   const [creditConfirm, setCreditConfirm] = useState<{ campaign: EmailCampaign; payload: any; desc: string } | null>(null);
   // 비주얼 빌더 에디터 (sections 기반)
   const [visualEditor, setVisualEditor] = useState<{ sections: Section[]; name?: string; subject?: string; isAd?: boolean; aiGenerated?: boolean; campaignId?: string; completed?: boolean } | null>(null);
+  // ★ 2026-07-02 캠페인 목록 페이징 — 2열 그리드 × 5행 = 페이지당 10건
+  const CAMPAIGN_PAGE_SIZE = 10;
+  const [campaignPage, setCampaignPage] = useState(1);
   // 템플릿 갤러리 모달 (즉시·무료 골격)
   const [showGallery, setShowGallery] = useState(false);
   // 성과 분석 대시보드 모달
@@ -801,10 +804,15 @@ export default function EmailCampaignsPage() {
             아직 등록된 캠페인이 없습니다.
             {smtpConfigured ? ' "신규 캠페인" 버튼을 눌러 시작해주세요.' : ' SMTP 설정 후 진입 가능합니다.'}
           </div>
-        ) : (
-          // ★ 2026-07-02 Harold 지시 — 가로 여백 낭비 제거: 카드 2열 그리드(모바일 1열) + 하단 압축 버튼 행
+        ) : (() => {
+          // ★ 2026-07-02 Harold 지시 — 2열 그리드 + 페이징뷰(페이지당 10건). 삭제로 페이지 수가 줄면 안전 범위로 보정.
+          const totalCampaignPages = Math.max(1, Math.ceil(campaigns.length / CAMPAIGN_PAGE_SIZE));
+          const safeCampaignPage = Math.min(campaignPage, totalCampaignPages);
+          const pagedCampaigns = campaigns.slice((safeCampaignPage - 1) * CAMPAIGN_PAGE_SIZE, safeCampaignPage * CAMPAIGN_PAGE_SIZE);
+          return (
+          <>
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 items-start">
-            {campaigns.map((c) => (
+            {pagedCampaigns.map((c) => (
               <div key={c.id} className="bg-white/5 border border-white/10 rounded-xl p-4 hover:bg-white/10 transition-colors">
                 <div className="flex items-center gap-2 mb-1 flex-wrap">
                   <span className="text-base font-bold text-white">{c.name}</span>
@@ -877,7 +885,43 @@ export default function EmailCampaignsPage() {
               </div>
             ))}
           </div>
-        )}
+
+          {/* 페이저 — 이전 / 숫자 / 다음 (1페이지뿐이면 숨김) */}
+          {totalCampaignPages > 1 && (
+            <div className="flex items-center justify-center gap-1.5 mt-4 flex-wrap">
+              <button
+                onClick={() => setCampaignPage(Math.max(1, safeCampaignPage - 1))}
+                disabled={safeCampaignPage <= 1}
+                className="px-3 py-1.5 text-[11px] rounded-lg border border-white/15 text-white/70 hover:bg-white/10 disabled:opacity-30 disabled:cursor-not-allowed"
+              >
+                이전
+              </button>
+              {Array.from({ length: totalCampaignPages }, (_, i) => i + 1).map((p) => (
+                <button
+                  key={p}
+                  onClick={() => setCampaignPage(p)}
+                  className={`w-8 h-8 text-[11px] rounded-lg border transition-colors ${
+                    p === safeCampaignPage
+                      ? 'bg-violet-600 border-violet-500 text-white font-bold'
+                      : 'border-white/15 text-white/60 hover:bg-white/10'
+                  }`}
+                >
+                  {p}
+                </button>
+              ))}
+              <button
+                onClick={() => setCampaignPage(Math.min(totalCampaignPages, safeCampaignPage + 1))}
+                disabled={safeCampaignPage >= totalCampaignPages}
+                className="px-3 py-1.5 text-[11px] rounded-lg border border-white/15 text-white/70 hover:bg-white/10 disabled:opacity-30 disabled:cursor-not-allowed"
+              >
+                다음
+              </button>
+              <span className="ml-2 text-[10px] text-white/35">{campaigns.length}건 중 {safeCampaignPage}/{totalCampaignPages}페이지</span>
+            </div>
+          )}
+          </>
+          );
+        })()}
       </div>
 
       {/* ★ D225+ 발송 이력 모달 */}

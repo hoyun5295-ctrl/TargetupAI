@@ -17,6 +17,8 @@
  *   - 모델명/내부 시스템명 노출 X
  */
 import crypto from 'crypto';
+// ★ 2026-07-02 스킴 없는 href(www.x.y) 발송 시점 치유 — 이미 저장된 캠페인 HTML도 발송 때 정상 링크+추적으로 복구
+import { normalizeWebUrl } from './normalize';
 
 export interface TrackingPayload {
   /** campaignId (uuid) */
@@ -115,7 +117,9 @@ export function wrapLinksForTracking(html: string, campaignId: string, email: st
   return html.replace(
     /(<a\b[^>]*?\bhref\s*=\s*")([^"]+)(")/gi,
     (whole, before: string, href: string, after: string) => {
-      const trimmed = href.trim();
+      // ★ 2026-07-02 스킴 없는 도메인형(www.x.y)은 https:// 부착 후 래핑 — 저장된 구 캠페인 HTML도 발송 시점 치유.
+      //   mailto:/tel:/#/상대경로/개인화 변수는 normalizeWebUrl이 그대로 보존하므로 아래 https 검사에서 제외됨.
+      const trimmed = normalizeWebUrl(href);
       if (!/^https?:\/\//i.test(trimmed)) return whole;          // mailto:/tel:/#/상대경로 제외
       if (trimmed.includes('{{')) return whole;                   // 개인화 변수 URL 제외
       if (/\/api\/email\/(t|u)\//.test(trimmed)) return whole;    // 이미 트래킹/수신거부 URL
