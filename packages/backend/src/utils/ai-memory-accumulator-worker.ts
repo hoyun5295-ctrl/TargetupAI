@@ -6,9 +6,15 @@
 //   게이트에서 학습이 보류된다(가짜 0% 차단). 등급 인사이트는 customers 실측만 사용(cdp 불요).
 
 import { query } from '../config/database';
-import { recordCampaignLearning, addMemory, cleanupDeprecatedMemories } from './company-memory';
+import {
+  recordCampaignLearning, addMemory, cleanupDeprecatedMemories,
+  recordDmEngagementLearning, recordEmailEngagementLearning,
+} from './company-memory';
 import { buildCustomerInsights } from './ai-memory-customer-insight';
 import { pickMemoriesToPrune } from './ai-memory-text';
+// ★ 2026-07-02(5) DM 참여 학습 — 추적 endpoint와 동일 CT로 수신자 행 집계 (이중 진실 차단)
+import { getDmRecipientEngagementRows, getDmDetail, extractFlatSectionsFromDm } from './dm/dm-builder';
+import { sanitizeSectionInteractions, sumSectionClicks, isDmCompleted, buildDmSectionLabel } from './dm/dm-tracking';
 
 const INTERVAL_MS = 60 * 60 * 1000; // 1시간
 const INSIGHT_MIN_SAMPLE = 10;      // 등급별 최소 표본 (미만 = 인사이트 생성 보류)
@@ -32,10 +38,13 @@ export async function runAiMemoryAccumulatorTick(): Promise<void> {
   try {
     const journeyLearned = await accumulateJourneyLearning();
     const insightCompanies = await accumulateCustomerInsights();
+    // ★ 2026-07-02(5) Harold 지시 — DM·이메일 추적 데이터를 회사 AI 학습 메모리로 자동 전송
+    const dmLearned = await accumulateDmEngagement();
+    const emailLearned = await accumulateEmailEngagement();
     const pruned = await pruneOverCapMemories();
-    if (journeyLearned || insightCompanies || pruned) {
+    if (journeyLearned || insightCompanies || dmLearned || emailLearned || pruned) {
       console.log(
-        `[ai-memory-accumulator] tick — 여정 ${journeyLearned} / 등급인사이트 ${insightCompanies}사 / 정리 ${pruned}건`,
+        `[ai-memory-accumulator] tick — 여정 ${journeyLearned} / 등급인사이트 ${insightCompanies}사 / DM ${dmLearned} / 이메일 ${emailLearned} / 정리 ${pruned}건`,
       );
     }
   } catch (err: any) {
@@ -155,6 +164,108 @@ async function accumulateCustomerInsights(): Promise<number> {
     }
   }
   return done;
+}
+
+// 4) ★ 2026-07-02(5) DM 참여 학습 — 최근 7일 열람 활동이 있는 발송 DM을 회사·DM별 집계 후 메모리 기록.
+//    멱등: metadata.last_dm_id + 20h 윈도우(NOT EXISTS). 표본·실측 게이트는 record CT 내부(shouldRecordDmEngagement).
+async function accumulateDmEngagement(): Promise<number> {
+  const dms = await query(
+    `SELECT DISTINCT t.company_id, t.dm_id, p.title
+       FROM dm_recipient_tokens t
+       JOIN dm_pages p ON p.id = t.dm_id
+      WHERE EXISTS (
+              SELECT 1 FROM dm_views v
+               WHERE v.dm_id = t.dm_id AND v.last_active_at >= NOW() - INTERVAL '7 days'
+            )
+        AND NOT EXISTS (
+              SELECT 1 FROM ai_company_memory m
+               WHERE m.company_id = t.company_id
+                 AND m.memory_type = 'channel_performance'
+                 AND m.memory_key = 'channel_dm'
+                 AND m.metadata->>'last_dm_id' = t.dm_id::text
+                 AND m.updated_at >= NOW() - INTERVAL '20 hours'
+            )
+      LIMIT 20`,
+  );
+  let learned = 0;
+  for (const row of dms.rows) {
+    try {
+      const rows = await getDmRecipientEngagementRows(row.dm_id, row.company_id);
+      const sentCount = rows.length;
+      let viewedCount = 0;
+      let completedCount = 0;
+      let clickedCount = 0;
+      let respondedCount = 0;
+      const sectionClicks: Record<string, number> = {};
+      for (const r of rows as any[]) {
+        if (r.viewed_at) viewedCount += 1;
+        if (r.viewed_at && isDmCompleted(r.page_reached, r.total_pages, r.max_scroll_pct)) completedCount += 1;
+        if (sumSectionClicks(r.section_interactions) > 0) clickedCount += 1;
+        if (r.responded) respondedCount += 1;
+        const si = sanitizeSectionInteractions(r.section_interactions);
+        for (const [sid, c] of Object.entries(si)) {
+          sectionClicks[sid] = (sectionClicks[sid] || 0) + c.clicks;
+        }
+      }
+      // 최다 클릭 섹션 라벨 (클릭 실측 있을 때만 — 발행물 섹션 메타에서 라벨 구성)
+      let topSectionLabel: string | undefined;
+      const top = Object.entries(sectionClicks).sort((a, b) => b[1] - a[1]).find(([, n]) => n > 0);
+      if (top) {
+        const dm = await getDmDetail(row.dm_id, row.company_id);
+        const sec = dm ? extractFlatSectionsFromDm(dm).find((s: any) => String(s?.id) === top[0]) : null;
+        if (sec) topSectionLabel = buildDmSectionLabel(String((sec as any).type || ''), (sec as any).props);
+      }
+      const ok = await recordDmEngagementLearning({
+        companyId: row.company_id,
+        dmId: row.dm_id,
+        dmTitle: String(row.title || '모바일DM'),
+        sentCount, viewedCount, completedCount, clickedCount, respondedCount, topSectionLabel,
+      });
+      if (ok) learned += 1;
+    } catch (err: any) {
+      console.log(`[ai-memory-accumulator] dm=${row.dm_id} 오류 — ${err?.message || 'unknown'}`);
+    }
+  }
+  return learned;
+}
+
+// 5) ★ 2026-07-02(5) 이메일 성과 학습 — 최근 7일 발송·오픈 실측 캠페인을 메모리 기록.
+//    멱등: metadata.last_campaign_id + 20h 윈도우. 게이트(표본 10+·오픈 실측)는 record CT 내부.
+async function accumulateEmailEngagement(): Promise<number> {
+  const campaigns = await query(
+    `SELECT ec.id, ec.company_id, ec.name, ec.sent_count, ec.open_count, ec.click_count
+       FROM email_campaigns ec
+      WHERE ec.sent_at IS NOT NULL
+        AND ec.sent_at >= NOW() - INTERVAL '7 days'
+        AND ec.sent_count >= 10
+        AND ec.open_count > 0
+        AND NOT EXISTS (
+              SELECT 1 FROM ai_company_memory m
+               WHERE m.company_id = ec.company_id
+                 AND m.memory_type = 'channel_performance'
+                 AND m.memory_key = 'channel_email'
+                 AND m.metadata->>'last_campaign_id' = ec.id::text
+                 AND m.updated_at >= NOW() - INTERVAL '20 hours'
+            )
+      LIMIT 50`,
+  );
+  let learned = 0;
+  for (const row of campaigns.rows) {
+    try {
+      const ok = await recordEmailEngagementLearning({
+        companyId: row.company_id,
+        campaignId: row.id,
+        name: String(row.name || '이메일 캠페인'),
+        sentCount: Number(row.sent_count) || 0,
+        openCount: Number(row.open_count) || 0,
+        clickCount: Number(row.click_count) || 0,
+      });
+      if (ok) learned += 1;
+    } catch (err: any) {
+      console.log(`[ai-memory-accumulator] email=${row.id} 오류 — ${err?.message || 'unknown'}`);
+    }
+  }
+  return learned;
 }
 
 // 3) 타입별 상한 초과 메모리 정리 — 초과한 (회사,타입)만 골라 저신호 우선 삭제(pickMemoriesToPrune).

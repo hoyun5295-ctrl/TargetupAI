@@ -17,7 +17,7 @@ import { query } from '../config/database';
 import { authenticate } from '../middlewares/auth';
 import {
   createDm, updateDm, deleteDm, getDmList, getDmDetail, getDmByCode, cloneDm,
-  publishDm, trackDmView, getDmStats,
+  publishDm, trackDmView, getDmStats, getDmRecipientEngagementRows,
   saveDmVersion, listDmVersions, restoreDmVersion, setApprovalStatus,
   extractFlatSectionsFromDm, extractPagesFromDm,
 } from '../utils/dm/dm-builder';
@@ -33,7 +33,10 @@ import { runInCreditBundle } from '../utils/ai-credit-context';
 import type { Section } from '../utils/dm/dm-section-registry';
 import { selectSampleCustomers, selectSampleCustomerByKey, type SampleCustomerKey } from '../utils/dm/dm-sample-customer';
 import { lookupDmRecipientToken, issueDmRecipientTokensBulk } from '../utils/dm/dm-recipient-token';
-import { computeDmProgressPct, isDmCompleted, sumSectionClicks } from '../utils/dm/dm-tracking';
+import {
+  computeDmProgressPct, isDmCompleted, sumSectionClicks,
+  sanitizeSectionInteractions, buildDmSectionLabel, dmSectionTypeLabel, summarizeDmResponse,
+} from '../utils/dm/dm-tracking';
 import { extractJsonFromAiText } from '../utils/ai-json';
 // ★ CT-08 개별회신번호 — 고객 등록매장 번호(store_phone) 발송 + 미등록 번호 제외(직접발송과 동일 안전망)
 import { filterByIndividualCallback, buildCallbackErrorResponse, buildCallbackConfirmResponse } from '../utils/callback-filter';
@@ -768,29 +771,10 @@ dmRouter.get('/:id/recipients-tracking', async (req: any, res: any) => {
     if (!companyId) return res.status(403).json({ error: '회사 권한이 필요합니다.' });
 
     // ★ 2026-07-02 토큰 우선 매칭(신규 비콘) + phone 매칭(구 데이터 하위호환) + 깊이/클릭 동봉
-    const r = await query(
-      `SELECT DISTINCT ON (t.customer_id)
-              t.customer_id, c.name, c.phone, t.created_at AS sent_at,
-              v.page_reached, v.total_pages, v.duration_seconds, v.max_scroll_pct,
-              v.section_interactions, v.viewed_at, v.last_active_at,
-              EXISTS (SELECT 1 FROM dm_event_responses er WHERE er.campaign_id = t.dm_id AND er.customer_id = t.customer_id) AS responded
-         FROM dm_recipient_tokens t
-         JOIN customers c ON c.id = t.customer_id AND c.company_id = t.company_id
-         LEFT JOIN LATERAL (
-           SELECT dv.page_reached, dv.total_pages, dv.duration_seconds, dv.max_scroll_pct,
-                  dv.section_interactions, dv.viewed_at, dv.last_active_at
-             FROM dm_views dv
-            WHERE dv.dm_id = t.dm_id
-              AND (dv.recipient_token = t.token OR (dv.phone IS NOT NULL AND dv.phone = c.phone))
-            ORDER BY dv.viewed_at DESC LIMIT 1
-         ) v ON true
-        WHERE t.dm_id = $1::uuid AND t.company_id = $2::uuid
-        ORDER BY t.customer_id, t.created_at DESC
-        LIMIT 1000`,
-      [req.params.id, companyId],
-    );
+    //   2026-07-02(5) CT 이관 — 상세 endpoint·AI 학습 워커와 공용 (getDmRecipientEngagementRows)
+    const rows = await getDmRecipientEngagementRows(req.params.id, companyId);
 
-    const recipients = r.rows.map((row: any) => {
+    const recipients = rows.map((row: any) => {
       const viewed = !!row.viewed_at;
       const totalPages = Number(row.total_pages || 0);
       const pageReached = Number(row.page_reached || 0);
@@ -833,6 +817,85 @@ dmRouter.get('/:id/recipients-tracking', async (req: any, res: any) => {
     }
     console.error('[DM 발송 추적] 오류:', err?.message);
     return res.status(500).json({ error: err?.message || '추적 조회 실패' });
+  }
+});
+
+// GET /api/dm/:id/recipient-detail?customerId= — 수신자 1명 상세 (섹션 여정 + 요소 클릭 + 응답 이력)
+//   ★ 2026-07-02(5) Harold 지시 — "어떤 섹션을 보고 어떤 버튼을 눌렀고 무슨 액션을 했는지" 행 단위 상세.
+dmRouter.get('/:id/recipient-detail', async (req: any, res: any) => {
+  try {
+    const companyId = req.user?.companyId;
+    if (!companyId) return res.status(403).json({ error: '회사 권한이 필요합니다.' });
+    const customerId = String(req.query.customerId || '');
+    if (!isUuid(req.params.id) || !isUuid(customerId)) return res.status(400).json({ error: '잘못된 요청입니다.' });
+
+    const dm = await getDmDetail(req.params.id, companyId);
+    if (!dm) return res.status(404).json({ error: 'DM을 찾을 수 없습니다.' });
+
+    const rows = await getDmRecipientEngagementRows(req.params.id, companyId, customerId);
+    const row: any = rows[0] || null;
+    const si = sanitizeSectionInteractions(row?.section_interactions);
+
+    // 발행물 섹션 순서대로 여정 구성 (조회/클릭 0인 섹션도 포함 = 어디서 멈췄는지 보이게)
+    const seen = new Set<string>();
+    const sections = extractFlatSectionsFromDm(dm).map((s: any) => {
+      const id = String(s?.id || '');
+      seen.add(id);
+      const c = si[id];
+      return {
+        id,
+        type: String(s?.type || ''),
+        label: buildDmSectionLabel(String(s?.type || ''), s?.props),
+        views: c?.views || 0,
+        clicks: c?.clicks || 0,
+        elements: c?.elements || null,
+      };
+    });
+    // 편집에서 삭제됐지만 기록은 남은 섹션 — 뒤에 덧붙여 데이터 유실 없이 표시
+    for (const [id, c] of Object.entries(si)) {
+      if (seen.has(id)) continue;
+      sections.push({ id, type: '', label: '(삭제된 섹션)', views: c.views, clicks: c.clicks, elements: c.elements || null });
+    }
+
+    const rres = await query(
+      `SELECT section_id, section_type, response_data, occurred_at
+         FROM dm_event_responses
+        WHERE company_id = $1::uuid AND campaign_id = $2::uuid AND customer_id = $3::uuid
+        ORDER BY occurred_at ASC
+        LIMIT 200`,
+      [companyId, req.params.id, customerId],
+    );
+    const responses = rres.rows.map((r: any) => ({
+      sectionId: r.section_id,
+      sectionType: r.section_type,
+      typeLabel: dmSectionTypeLabel(String(r.section_type || '')),
+      summary: summarizeDmResponse(String(r.section_type || ''), r.response_data),
+      occurredAt: r.occurred_at,
+    }));
+
+    const viewed = !!row?.viewed_at;
+    return res.json({
+      success: true,
+      view: viewed ? {
+        viewedAt: row.viewed_at,
+        lastActiveAt: row.last_active_at || null,
+        durationSeconds: Number(row.duration_seconds || 0),
+        maxScrollPct: row.max_scroll_pct === null || row.max_scroll_pct === undefined ? null : Number(row.max_scroll_pct),
+        pageReached: Number(row.page_reached || 0),
+        totalPages: Number(row.total_pages || 0),
+        progressPct: computeDmProgressPct(row.page_reached, row.total_pages, row.max_scroll_pct),
+        completed: isDmCompleted(row.page_reached, row.total_pages, row.max_scroll_pct),
+      } : null,
+      sections,
+      responses,
+    });
+  } catch (err: any) {
+    const msg = err?.message || '';
+    if ((msg.includes('relation') || msg.includes('column')) && msg.includes('does not exist')) {
+      return res.status(503).json({ error: 'DB 마이그레이션 필요 — dm_recipient_tokens/dm_views/dm_event_responses 확인 요청', code: 'DB_MIGRATION_PENDING' });
+    }
+    console.error('[DM 수신자 상세] 오류:', err?.message);
+    return res.status(500).json({ error: err?.message || '수신자 상세 조회 실패' });
   }
 });
 

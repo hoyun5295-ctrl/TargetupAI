@@ -25,7 +25,11 @@
  */
 
 import { query } from '../config/database';
-import { composeCampaignLearningText, shouldRecordCampaignLearning } from './ai-memory-text';
+import {
+  composeCampaignLearningText, shouldRecordCampaignLearning,
+  composeDmEngagementText, shouldRecordDmEngagement,
+  composeEmailEngagementText, shouldRecordEmailEngagement,
+} from './ai-memory-text';
 
 // ════════════════════════════════════════════════════════════════════
 // 타입
@@ -281,6 +285,104 @@ export async function recordCampaignLearning(input: CampaignLearningInput): Prom
       ...(input.hasConversionData ? { last_conversion_rate: conversionRate } : {}),
     },
   });
+}
+
+// ════════════════════════════════════════════════════════════════════
+// ★ 2026-07-02(5) DM·이메일 참여 자동 학습 (Harold 지시 — 추적 데이터 → 회사 AI 메모리)
+//   원칙: 실측만 서술(임의 상수 0) / 표본·실측 게이트(가짜 0% 차단) / 회사 격리 /
+//   success_pattern·클릭률 축은 기존 recordCampaignLearning CT 재사용(게이트·문구·중요도 동일).
+// ════════════════════════════════════════════════════════════════════
+
+export interface DmEngagementLearningInput {
+  companyId: string;
+  dmId: string;
+  dmTitle: string;
+  sentCount: number;
+  viewedCount: number;
+  completedCount: number;
+  clickedCount: number;      // 클릭 1회 이상 수신자 수
+  respondedCount: number;    // 응모/투표/쿠폰 등 액션 수신자 수
+  topSectionLabel?: string;  // 최다 클릭 섹션 (실측 있을 때만)
+}
+
+export async function recordDmEngagementLearning(input: DmEngagementLearningInput): Promise<boolean> {
+  if (!shouldRecordDmEngagement({ sentCount: input.sentCount, viewedCount: input.viewedCount })) return false;
+
+  // 클릭률 기반 success_pattern은 기존 캠페인 학습 흐름 그대로 (클릭 실측 없으면 내부 게이트가 보류)
+  await recordCampaignLearning({
+    companyId: input.companyId,
+    campaignId: input.dmId,
+    campaignName: input.dmTitle,
+    channel: 'dm',
+    messageBody: '',
+    sentCount: input.sentCount,
+    clickCount: input.clickedCount,
+    conversionCount: 0,
+    hasConversionData: false,
+    isAd: false,
+  });
+
+  // 채널 성과는 열람·완독·액션·최다 반응 섹션까지 담은 실측 서술로 최종 기록
+  // (같은 key UPSERT — 위 호출이 남긴 클릭률 단문을 풍부한 서술로 덮는다)
+  await addMemory({
+    companyId: input.companyId,
+    memoryType: 'channel_performance',
+    memoryKey: 'channel_dm',
+    memoryValue: composeDmEngagementText(input),
+    importance: 6,
+    source: 'dm_engagement',
+    metadata: {
+      last_dm_id: input.dmId,
+      sent: input.sentCount,
+      viewed: input.viewedCount,
+      completed: input.completedCount,
+      clicked: input.clickedCount,
+      responded: input.respondedCount,
+    },
+  });
+  return true;
+}
+
+export interface EmailEngagementLearningInput {
+  companyId: string;
+  campaignId: string;
+  name: string;
+  sentCount: number;
+  openCount: number;
+  clickCount: number;
+}
+
+export async function recordEmailEngagementLearning(input: EmailEngagementLearningInput): Promise<boolean> {
+  if (!shouldRecordEmailEngagement({ sentCount: input.sentCount, openCount: input.openCount })) return false;
+
+  await recordCampaignLearning({
+    companyId: input.companyId,
+    campaignId: input.campaignId,
+    campaignName: input.name,
+    channel: 'email',
+    messageBody: '',
+    sentCount: input.sentCount,
+    clickCount: input.clickCount,
+    conversionCount: 0,
+    hasConversionData: false,
+    isAd: false,
+  });
+
+  await addMemory({
+    companyId: input.companyId,
+    memoryType: 'channel_performance',
+    memoryKey: 'channel_email',
+    memoryValue: composeEmailEngagementText(input),
+    importance: 6,
+    source: 'email_engagement',
+    metadata: {
+      last_campaign_id: input.campaignId,
+      sent: input.sentCount,
+      open: input.openCount,
+      click: input.clickCount,
+    },
+  });
+  return true;
 }
 
 // ════════════════════════════════════════════════════════════════════

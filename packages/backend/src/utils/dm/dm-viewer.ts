@@ -463,6 +463,22 @@ ${counterHtml}
     pendingSections[sid][field]++;
   }
 
+  // ★ 2026-07-02(5) 요소 단위 클릭 — 어떤 버튼/링크를 눌렀는지 라벨별 카운트 (섹션당 20개 상한)
+  function bumpElement(sid, label) {
+    if (!sid || !label) return;
+    pendingSections[sid] = pendingSections[sid] || { views: 0, clicks: 0 };
+    var els = pendingSections[sid].elements = pendingSections[sid].elements || {};
+    if (els[label] === undefined && Object.keys(els).length >= 20) return;
+    els[label] = (els[label] || 0) + 1;
+  }
+
+  function elementLabel(el) {
+    if (!el) return '';
+    var t = (el.textContent || '').trim().replace(/\\s+/g, ' ');
+    if (!t && el.getAttribute) t = el.getAttribute('aria-label') || el.getAttribute('title') || '';
+    return String(t).slice(0, 60);
+  }
+
   function updateScrollPct() {
     if (MODE === 'slides') {
       var p = TOTAL_PAGES > 0 ? Math.round((pageReached / TOTAL_PAGES) * 100) : 0;
@@ -541,10 +557,19 @@ ${counterHtml}
     });
   });
 
-  // 섹션 클릭 → 클릭 카운트. 외부 링크/CTA는 클릭 즉시 이탈 — 떠나기 전에 비콘으로 클릭 보존.
+  // 섹션 클릭 → 클릭 카운트 + 요소(버튼/링크/옵션/탭) 라벨 카운트.
+  // 외부 링크/CTA는 클릭 즉시 이탈 — 떠나기 전에 비콘으로 클릭 보존.
   document.addEventListener('click', function(e){
     var wrap = e.target.closest && e.target.closest('.dm-section-wrap');
-    if (wrap) bumpSection(wrap.getAttribute('data-section-id'), 'clicks');
+    if (wrap) {
+      var sid = wrap.getAttribute('data-section-id');
+      bumpSection(sid, 'clicks');
+      var target = e.target.closest && e.target.closest('a,button,[data-dm-poll-option],[data-dm-tab],[data-dm-slide-dot]');
+      if (target) {
+        var lbl = elementLabel(target);
+        if (lbl) bumpElement(sid, lbl);
+      }
+    }
     var link = e.target.closest && e.target.closest('a');
     if (link) sendTrack(false);
   }, true);

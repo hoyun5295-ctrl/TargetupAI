@@ -435,6 +435,37 @@ export interface DmViewTrackInput {
   userAgent?: string | null;
 }
 
+/**
+ * ★ 2026-07-02(5) 수신자별 발송·열람 원시 행 — CT 단일 진입.
+ * 소비처: dm.ts recipients-tracking(목록) / recipient-detail(1명) / ai-memory-accumulator-worker(DM 학습).
+ * customerId 전달 시 그 수신자 1명만 반환.
+ */
+export async function getDmRecipientEngagementRows(dmId: string, companyId: string, customerId?: string) {
+  const r = await query(
+    `SELECT DISTINCT ON (t.customer_id)
+            t.customer_id, c.name, c.phone, t.created_at AS sent_at,
+            v.page_reached, v.total_pages, v.duration_seconds, v.max_scroll_pct,
+            v.section_interactions, v.viewed_at, v.last_active_at,
+            EXISTS (SELECT 1 FROM dm_event_responses er WHERE er.campaign_id = t.dm_id AND er.customer_id = t.customer_id) AS responded
+       FROM dm_recipient_tokens t
+       JOIN customers c ON c.id = t.customer_id AND c.company_id = t.company_id
+       LEFT JOIN LATERAL (
+         SELECT dv.page_reached, dv.total_pages, dv.duration_seconds, dv.max_scroll_pct,
+                dv.section_interactions, dv.viewed_at, dv.last_active_at
+           FROM dm_views dv
+          WHERE dv.dm_id = t.dm_id
+            AND (dv.recipient_token = t.token OR (dv.phone IS NOT NULL AND dv.phone = c.phone))
+          ORDER BY dv.viewed_at DESC LIMIT 1
+       ) v ON true
+      WHERE t.dm_id = $1::uuid AND t.company_id = $2::uuid
+        AND ($3::uuid IS NULL OR t.customer_id = $3::uuid)
+      ORDER BY t.customer_id, t.created_at DESC
+      LIMIT 1000`,
+    [dmId, companyId, customerId || null],
+  );
+  return r.rows;
+}
+
 export async function trackDmView(input: DmViewTrackInput) {
   const { dmId, companyId } = input;
   const pageReached = clampPageReached(input.pageReached);

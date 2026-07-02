@@ -187,6 +187,28 @@ export default function DmSendAndTrackModal({ dmId, dmTitle, show, onClose, init
     }
   };
 
+  // ★ 2026-07-02(5) 수신자 상세 — 행 클릭 시 섹션 여정·요소 클릭·응답 이력 lazy 로드
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [detailMap, setDetailMap] = useState<Record<string, any>>({});
+  const [detailLoading, setDetailLoading] = useState<string | null>(null);
+
+  const toggleDetail = async (customerId: string) => {
+    if (expandedId === customerId) { setExpandedId(null); return; }
+    setExpandedId(customerId);
+    if (detailMap[customerId]) return;
+    setDetailLoading(customerId);
+    try {
+      const res = await fetch(`/api/dm/${dmId}/recipient-detail?customerId=${encodeURIComponent(customerId)}`, { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } });
+      const data = await res.json();
+      if (res.ok && data.success) setDetailMap((prev) => ({ ...prev, [customerId]: data }));
+      else toast.error(data?.error || '상세 조회에 실패했습니다.');
+    } catch (e: any) {
+      toast.error(e?.message || '상세 조회 중 오류가 발생했습니다.');
+    } finally {
+      setDetailLoading(null);
+    }
+  };
+
   // 카드 [발송 추적] 진입 = 추적 탭 직행 + 자동 로드
   useEffect(() => {
     if (!show) return;
@@ -354,7 +376,7 @@ export default function DmSendAndTrackModal({ dmId, dmTitle, show, onClose, init
 
   return (
     <div className="fixed inset-0 z-[1100] flex items-center justify-center p-3 bg-black/60 backdrop-blur-sm">
-      <div className="w-full max-w-[1120px] max-h-[95vh] overflow-hidden flex flex-col bg-slate-900 border border-white/10 rounded-2xl shadow-2xl">
+      <div className="w-full max-w-[1240px] max-h-[95vh] overflow-hidden flex flex-col bg-slate-900 border border-white/10 rounded-2xl shadow-2xl">
         <div className="px-5 py-4 border-b border-white/10 bg-slate-950/80 flex items-center justify-between">
           <div className="flex items-center gap-2.5">
             <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-indigo-500 to-violet-500 flex items-center justify-center flex-shrink-0"><Send className="w-4 h-4 text-white" /></div>
@@ -535,31 +557,102 @@ export default function DmSendAndTrackModal({ dmId, dmTitle, show, onClose, init
                 <div className="rounded-xl border border-white/10 bg-white/5 divide-y divide-white/5 max-h-[52vh] overflow-y-auto">
                   {tracking.recipients.length === 0 ? (
                     <p className="text-xs text-white/40 p-4 text-center">아직 발송 이력이 없습니다.</p>
-                  ) : tracking.recipients.map((r) => (
-                    <div key={r.customerId} className="flex flex-wrap items-center gap-x-3 gap-y-1 px-3 py-2 text-[11px]">
-                      <span className="text-white/80 w-20 truncate">{r.name || '-'}</span>
-                      <span className="text-white/40 font-mono w-28 truncate">{r.phone || '-'}</span>
-                      {r.viewed ? (
-                        <>
-                          <span className="flex items-center gap-1.5 flex-1 min-w-[110px]">
-                            <span className="flex-1 max-w-[140px] h-1.5 rounded-full bg-white/10 overflow-hidden">
-                              <span className="block h-full rounded-full bg-gradient-to-r from-cyan-400 to-emerald-400" style={{ width: `${Math.min(100, Math.max(2, r.progressPct || 0))}%` }} />
-                            </span>
-                            <span className="text-white/60 w-9 text-right">{r.progressPct || 0}%</span>
-                          </span>
-                          <span className="text-white/50 w-16 text-right">{formatDur(r.durationSeconds)}</span>
-                          <span className={`w-12 text-right ${r.clicks > 0 ? 'text-amber-300 font-semibold' : 'text-white/30'}`}>{r.clicks > 0 ? `클릭 ${r.clicks}` : '-'}</span>
-                          {r.responded && <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-fuchsia-500/20 text-fuchsia-200 border border-fuchsia-400/30 font-semibold">응모</span>}
-                          <span className="text-white/30 w-16 text-right hidden md:inline">{formatAgo(r.lastActiveAt)}</span>
-                          <span className={`w-12 text-right font-medium ${r.completed ? 'text-emerald-300' : 'text-cyan-300'}`}>{r.completed ? '완독' : '열람'}</span>
-                        </>
-                      ) : (
-                        <span className="ml-auto font-medium text-white/30">미열람</span>
-                      )}
-                    </div>
-                  ))}
+                  ) : tracking.recipients.map((r) => {
+                    const isOpen = expandedId === r.customerId;
+                    const detail = detailMap[r.customerId];
+                    return (
+                      <div key={r.customerId}>
+                        <div
+                          onClick={() => { void toggleDetail(r.customerId); }}
+                          className={`flex flex-wrap items-center gap-x-3 gap-y-1 px-3 py-2 text-[11px] cursor-pointer transition-colors ${isOpen ? 'bg-white/5' : 'hover:bg-white/[0.03]'}`}
+                        >
+                          <span className={`text-[9px] text-white/40 transition-transform ${isOpen ? 'rotate-90' : ''}`}>▶</span>
+                          <span className="text-white/80 w-20 truncate">{r.name || '-'}</span>
+                          <span className="text-white/40 font-mono w-28 truncate">{r.phone || '-'}</span>
+                          {r.viewed ? (
+                            <>
+                              <span className="flex items-center gap-1.5 flex-1 min-w-[110px]">
+                                <span className="flex-1 max-w-[140px] h-1.5 rounded-full bg-white/10 overflow-hidden">
+                                  <span className="block h-full rounded-full bg-gradient-to-r from-cyan-400 to-emerald-400" style={{ width: `${Math.min(100, Math.max(2, r.progressPct || 0))}%` }} />
+                                </span>
+                                <span className="text-white/60 w-9 text-right">{r.progressPct || 0}%</span>
+                              </span>
+                              <span className="text-white/50 w-16 text-right">{formatDur(r.durationSeconds)}</span>
+                              <span className={`w-12 text-right ${r.clicks > 0 ? 'text-amber-300 font-semibold' : 'text-white/30'}`}>{r.clicks > 0 ? `클릭 ${r.clicks}` : '-'}</span>
+                              {r.responded && <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-fuchsia-500/20 text-fuchsia-200 border border-fuchsia-400/30 font-semibold">응모</span>}
+                              <span className="text-white/30 w-16 text-right hidden md:inline">{formatAgo(r.lastActiveAt)}</span>
+                              <span className={`w-12 text-right font-medium ${r.completed ? 'text-emerald-300' : 'text-cyan-300'}`}>{r.completed ? '완독' : '열람'}</span>
+                            </>
+                          ) : (
+                            <span className="ml-auto font-medium text-white/30">미열람</span>
+                          )}
+                        </div>
+                        {/* ★ 2026-07-02(5) 수신자 상세 — 섹션 여정(본 곳·누른 버튼) + 열람 요약 + 응답·액션 이력 */}
+                        {isOpen && (
+                          <div className="px-4 pb-3 pt-2 bg-white/[0.02] border-t border-white/5">
+                            {detailLoading === r.customerId ? (
+                              <div className="py-4 flex justify-center text-white/40"><RefreshCw className="w-4 h-4 animate-spin" /></div>
+                            ) : detail ? (
+                              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                <div>
+                                  <p className="text-[10px] font-semibold text-white/50 mb-1.5">섹션 여정 — 본 곳과 누른 버튼</p>
+                                  <div className="space-y-1 max-h-[240px] overflow-y-auto pr-1">
+                                    {(detail.sections || []).map((s: any) => (
+                                      <div key={s.id} className={`rounded-lg px-2.5 py-1.5 border ${(s.views > 0 || s.clicks > 0) ? 'border-white/10 bg-white/5' : 'border-white/5 opacity-45'}`}>
+                                        <div className="flex items-center gap-2">
+                                          <span className="text-[10.5px] text-white/80 flex-1 truncate">{s.label}</span>
+                                          <span className={`text-[10px] ${s.views > 0 ? 'text-cyan-300' : 'text-white/25'}`}>조회 {s.views}</span>
+                                          <span className={`text-[10px] ${s.clicks > 0 ? 'text-amber-300 font-semibold' : 'text-white/25'}`}>클릭 {s.clicks}</span>
+                                        </div>
+                                        {s.elements && Object.keys(s.elements).length > 0 && (
+                                          <div className="mt-1 flex flex-wrap gap-1">
+                                            {Object.entries(s.elements as Record<string, number>).map(([label, n]) => (
+                                              <span key={label} className="text-[9.5px] px-1.5 py-0.5 rounded-full bg-amber-500/15 text-amber-200 border border-amber-400/25">{label} ×{String(n)}</span>
+                                            ))}
+                                          </div>
+                                        )}
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                                <div className="space-y-2">
+                                  <div>
+                                    <p className="text-[10px] font-semibold text-white/50 mb-1.5">열람 요약</p>
+                                    {detail.view ? (
+                                      <div className="rounded-lg border border-white/10 bg-white/5 px-2.5 py-2 text-[10.5px] text-white/70 space-y-0.5">
+                                        <p>첫 열람 {new Date(detail.view.viewedAt).toLocaleString('ko-KR')} · 마지막 활동 {formatAgo(detail.view.lastActiveAt) || '-'}</p>
+                                        <p>체류 {formatDur(detail.view.durationSeconds)} · 도달 깊이 {detail.view.progressPct}%{detail.view.completed ? ' · 완독' : ''}</p>
+                                      </div>
+                                    ) : <p className="text-[10.5px] text-white/35">아직 열람 전입니다.</p>}
+                                  </div>
+                                  <div>
+                                    <p className="text-[10px] font-semibold text-white/50 mb-1.5">응답·액션 이력</p>
+                                    {(detail.responses || []).length === 0 ? (
+                                      <p className="text-[10.5px] text-white/35">응모·투표·쿠폰 등 액션 기록이 없습니다.</p>
+                                    ) : (
+                                      <div className="space-y-1 max-h-[170px] overflow-y-auto pr-1">
+                                        {detail.responses.map((resp: any, i: number) => (
+                                          <div key={i} className="rounded-lg border border-fuchsia-400/20 bg-fuchsia-500/5 px-2.5 py-1.5 flex items-center gap-2">
+                                            <span className="text-[9.5px] px-1.5 py-0.5 rounded-full bg-fuchsia-500/20 text-fuchsia-200 border border-fuchsia-400/30 font-semibold flex-shrink-0">{resp.typeLabel}</span>
+                                            <span className="text-[10.5px] text-white/75 flex-1 truncate">{resp.summary}</span>
+                                            <span className="text-[9.5px] text-white/35 flex-shrink-0">{new Date(resp.occurredAt).toLocaleString('ko-KR', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</span>
+                                          </div>
+                                        ))}
+                                      </div>
+                                    )}
+                                  </div>
+                                </div>
+                              </div>
+                            ) : (
+                              <p className="text-[10.5px] text-white/35 py-2 text-center">상세를 불러오지 못했습니다.</p>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
                 </div>
-                <p className="text-[10px] text-white/30 italic text-center">Data source — dm_recipient_tokens × dm_views (토큰 매칭 · 열람/깊이/체류/클릭)</p>
+                <p className="text-[10px] text-white/30 italic text-center">행을 클릭하면 섹션 여정·버튼 클릭·응답 상세가 열립니다 · Data source — dm_recipient_tokens × dm_views × dm_event_responses</p>
               </>
             ) : (
               <p className="text-xs text-white/40 text-center py-8">추적 데이터를 불러오는 중입니다.</p>

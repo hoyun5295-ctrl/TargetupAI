@@ -41,6 +41,66 @@ export function shouldRecordCampaignLearning(input: { sentCount: number; clickCo
 }
 
 // ════════════════════════════════════════════════════════════════════
+// ★ 2026-07-02(5) DM·이메일 참여 학습 문구 (실측 서술만 — 임의 상수·추정 0)
+// ════════════════════════════════════════════════════════════════════
+
+export interface DmEngagementTextInput {
+  dmTitle: string;
+  sentCount: number;
+  viewedCount: number;
+  completedCount: number;
+  clickedCount: number;      // 클릭 1회 이상 수신자 수
+  respondedCount: number;    // 응모/투표/쿠폰 등 액션 수신자 수
+  topSectionLabel?: string;  // 최다 클릭 섹션 (실측 있을 때만)
+}
+
+/** DM 참여 실측 서술 — 발송·열람·완독·클릭·액션 사실만. */
+export function composeDmEngagementText(input: DmEngagementTextInput): string {
+  const pct = (n: number) => input.sentCount > 0 ? `${((n / input.sentCount) * 100).toFixed(0)}%` : '0%';
+  const parts = [
+    `발송 ${input.sentCount}명`,
+    `열람 ${input.viewedCount}명(${pct(input.viewedCount)})`,
+    `완독 ${input.completedCount}명`,
+    `클릭 ${input.clickedCount}명`,
+  ];
+  if (input.respondedCount > 0) parts.push(`응모·액션 ${input.respondedCount}명`);
+  const top = input.topSectionLabel ? ` / 최다 반응 섹션: ${input.topSectionLabel}` : '';
+  return `모바일DM "${input.dmTitle}" 결과 — ${parts.join('·')}${top} (실측)`;
+}
+
+/**
+ * DM 참여 학습 게이트 — 열람 실측 표본이 있어야만 기록(가짜 0% 차단, 기존 캠페인 게이트와 동일 원칙).
+ */
+export function shouldRecordDmEngagement(input: { sentCount: number; viewedCount: number }): boolean {
+  if (input.sentCount < 10) return false;
+  if (input.viewedCount <= 0) return false;
+  return true;
+}
+
+export interface EmailEngagementTextInput {
+  name: string;
+  sentCount: number;
+  openCount: number;
+  clickCount: number;
+}
+
+/** 이메일 성과 실측 서술 — 오픈·클릭 사실만(클릭 0이면 절 생략, 가짜 0% 문구 차단). */
+export function composeEmailEngagementText(input: EmailEngagementTextInput): string {
+  const openPct = input.sentCount > 0 ? ((input.openCount / input.sentCount) * 100).toFixed(1) : '0.0';
+  const clickClause = input.clickCount > 0 && input.sentCount > 0
+    ? ` / 클릭률 ${((input.clickCount / input.sentCount) * 100).toFixed(1)}%`
+    : '';
+  return `이메일 "${input.name}" — ${input.sentCount}명 발송·오픈율 ${openPct}%${clickClause} (실측)`;
+}
+
+/** 이메일 학습 게이트 — 오픈 실측 표본이 있어야만 기록. */
+export function shouldRecordEmailEngagement(input: { sentCount: number; openCount: number }): boolean {
+  if (input.sentCount < 10) return false;
+  if (input.openCount <= 0) return false;
+  return true;
+}
+
+// ════════════════════════════════════════════════════════════════════
 // Brand Voice 가이드라인 변화 감지 (brand_tone_evolution writer 순수 코어)
 // ════════════════════════════════════════════════════════════════════
 
