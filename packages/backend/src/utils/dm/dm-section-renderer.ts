@@ -120,7 +120,7 @@ function renderHeader(props: HeaderProps, ctx: SectionRenderContext): string {
       const logoH = props.logo_size === 'sm' ? '24px' : props.logo_size === 'lg' ? '48px' : '32px';
       const logoBrand = `<div style="display:flex;align-items:center;gap:var(--dm-sp-2)">
           ${logo ? `<img src="${escapeHtml(logo)}" alt="${brand}" style="height:${logoH};border-radius:var(--dm-radius-sm)">` : ''}
-          ${brand ? `<div style="font-size:${brandFs};font-weight:700;color:var(--dm-neutral-900)">${brand}</div>` : ''}
+          ${brand ? `<div style="font-size:${brandFs};font-weight:800;letter-spacing:-0.01em;color:var(--dm-neutral-900)">${brand}</div>` : ''}
         </div>`;
       if (align === 'center') {
         return `<div class="dm-header dm-header-logo" data-variant="${escapeHtml(variant)}" style="background:var(--dm-bg);padding:var(--dm-sp-4) var(--dm-sp-5);border-bottom:1px solid var(--dm-neutral-200);display:flex;flex-direction:column;align-items:center;gap:var(--dm-sp-1);text-align:center">
@@ -452,11 +452,11 @@ function renderStoreInfo(props: StoreInfoProps): string {
 
   if (items.length === 0) return '';
 
-  return `<div class="dm-section dm-store-info" data-section-type="store_info" style="padding:var(--dm-sp-5);background:var(--dm-neutral-50);border-top:1px solid var(--dm-neutral-200)">
-    <div style="display:flex;flex-direction:column;gap:var(--dm-sp-2);font-size:var(--dm-fs-small);color:var(--dm-neutral-700)">
+  return `<div class="dm-section dm-store-info" data-section-type="store_info" style="padding:var(--dm-sp-6) var(--dm-sp-5);background:var(--dm-neutral-50);border-top:1px solid var(--dm-neutral-200)">
+    <div style="display:flex;flex-direction:column;gap:var(--dm-sp-3);font-size:var(--dm-fs-small);line-height:1.6;color:var(--dm-neutral-700)">
       ${items.join('')}
     </div>
-    ${props.map_url ? `<div style="margin-top:var(--dm-sp-3);text-align:center"><a href="${safeUrl(props.map_url)}" target="_blank" class="dm-cta dm-cta-outline">매장 위치 보기</a></div>` : ''}
+    ${props.map_url ? `<div style="margin-top:var(--dm-sp-4);text-align:center"><a href="${safeUrl(props.map_url)}" target="_blank" class="dm-cta dm-cta-outline">매장 위치 보기</a></div>` : ''}
   </div>`;
 }
 
@@ -485,7 +485,7 @@ function renderSns(props: SnsProps): string {
     const label = snsLabels[ch.type] || ch.type;
     const emoji = snsEmojis[ch.type] || '🔗';
     if (isIconMode) {
-      return `<a href="${safeUrl(ch.url)}" target="_blank" title="${escapeHtml(label)}" style="display:flex;align-items:center;justify-content:center;width:44px;height:44px;border-radius:var(--dm-radius-full);background:var(--dm-bg);color:${color};font-size:18px;text-decoration:none;box-shadow:var(--dm-shadow-sm)">${emoji}</a>`;
+      return `<a href="${safeUrl(ch.url)}" target="_blank" title="${escapeHtml(label)}" style="display:flex;align-items:center;justify-content:center;width:48px;height:48px;border-radius:var(--dm-radius-full);background:var(--dm-neutral-100);border:1px solid var(--dm-neutral-200);color:${color};font-size:19px;text-decoration:none">${emoji}</a>`;
     }
     return `<a href="${safeUrl(ch.url)}" target="_blank" style="display:flex;align-items:center;gap:var(--dm-sp-2);padding:var(--dm-sp-3) var(--dm-sp-4);border-radius:var(--dm-radius-md);background:${color};color:#fff;text-decoration:none;font-weight:600"><span>${emoji}</span><span>${escapeHtml(label)}</span>${ch.handle ? `<span style="opacity:0.8;font-weight:400">@${escapeHtml(ch.handle)}</span>` : ''}</a>`;
   }).join('');
@@ -498,11 +498,13 @@ function renderSns(props: SnsProps): string {
 function renderPromoCode(props: PromoCodeProps): string {
   if (!props.code) return '';
 
-  return `<div class="dm-section dm-promo-code" data-section-type="promo_code" style="padding:var(--dm-sp-6) var(--dm-sp-5);background:linear-gradient(135deg,var(--dm-accent) 0%,var(--dm-primary) 100%);color:#fff">
-    ${props.description ? `<div class="dm-text-h3" style="font-weight:600;margin-bottom:var(--dm-sp-3)">${escapeHtml(props.description)}</div>` : ''}
-    <div style="background:rgba(255,255,255,0.95);color:var(--dm-primary);display:inline-block;padding:var(--dm-sp-3) var(--dm-sp-6);border-radius:var(--dm-radius-md);font-family:var(--dm-font-mono);font-size:var(--dm-fs-h2);font-weight:900;letter-spacing:3px;border:2px dashed rgba(255,255,255,0.5)">${escapeHtml(props.code)}</div>
-    ${props.instructions ? `<div class="dm-text-small" style="margin-top:var(--dm-sp-3);opacity:0.9">${escapeHtml(props.instructions)}</div>` : ''}
-    ${props.cta_url ? `<div style="margin-top:var(--dm-sp-4)"><a href="${safeUrl(props.cta_url)}" class="dm-cta" style="background:#fff;color:var(--dm-primary)" target="_blank">${escapeHtml(props.cta_label || '지금 사용하기')}</a></div>` : ''}
+  // ★ 2026-07-02 v2 — 원색 그라데이션 도배 → 다크 에디토리얼 패널 + 대형 모노 코드
+  return `<div class="dm-section dm-promo-code" data-section-type="promo_code" style="padding:var(--dm-sp-8) var(--dm-sp-5);background:var(--dm-neutral-900);color:#fff;text-align:center">
+    <div class="dm-overline" style="color:var(--dm-accent);margin-bottom:var(--dm-sp-3)">PROMO CODE</div>
+    ${props.description ? `<div class="dm-text-h3" style="font-weight:600;margin-bottom:var(--dm-sp-4);opacity:0.92">${escapeHtml(props.description)}</div>` : ''}
+    <div style="font-family:var(--dm-font-mono);font-size:var(--dm-fs-h1);font-weight:800;letter-spacing:5px;padding:var(--dm-sp-3) var(--dm-sp-5);border:1px dashed rgba(255,255,255,0.35);border-radius:14px;display:inline-block">${escapeHtml(props.code)}</div>
+    ${props.instructions ? `<div class="dm-text-small" style="margin-top:var(--dm-sp-4);color:rgba(255,255,255,0.65)">${escapeHtml(props.instructions)}</div>` : ''}
+    ${props.cta_url ? `<div style="margin-top:var(--dm-sp-5)"><a href="${safeUrl(props.cta_url)}" class="dm-cta" style="background:#fff;color:var(--dm-neutral-900)" target="_blank">${escapeHtml(props.cta_label || '지금 사용하기')}</a></div>` : ''}
   </div>`;
 }
 
@@ -571,23 +573,27 @@ function renderProductCarousel(p: any): string {
     const rate = computeDmDiscountRate(price, discount, it.discount_rate);
     const finalPrice = discount > 0 ? discount : price;
     const priceHtml = rate !== null
-      ? `<div style="display:flex;gap:6px;align-items:baseline;margin-top:2px;flex-wrap:wrap">
-          <span style="font-size:var(--dm-fs-small);font-weight:800;color:var(--dm-error)">${rate}%</span>
-          <span style="font-size:var(--dm-fs-small);font-weight:700">${finalPrice.toLocaleString('ko-KR')}원</span>
+      ? `<div style="display:flex;gap:6px;align-items:baseline;margin-top:4px;flex-wrap:wrap;font-variant-numeric:tabular-nums">
+          <span style="font-size:var(--dm-fs-h3);font-weight:800;color:var(--dm-error)">${rate}%</span>
+          <span style="font-size:var(--dm-fs-body);font-weight:800;color:var(--dm-neutral-900)">${finalPrice.toLocaleString('ko-KR')}원</span>
           <span style="font-size:var(--dm-fs-tiny);color:var(--dm-neutral-400);text-decoration:line-through">${price.toLocaleString('ko-KR')}원</span>
         </div>`
-      : `<div style="font-size:var(--dm-fs-small);font-weight:700;margin-top:2px">${finalPrice.toLocaleString('ko-KR')}원</div>`;
+      : `<div style="font-size:var(--dm-fs-body);font-weight:800;margin-top:4px;color:var(--dm-neutral-900);font-variant-numeric:tabular-nums">${finalPrice.toLocaleString('ko-KR')}원</div>`;
+    // ★ 2026-07-02 v2 — 라운드 카드 + 가격 타이포 위계(할인율 강조·최종가 굵게) 격상
     const card = `
-      ${it.image_url ? `<img src="${escapeHtml(publicImageUrl(it.image_url))}" loading="lazy" alt="${escapeHtml(it.name || '')}" style="width:100%;height:140px;object-fit:cover;border-radius:var(--dm-radius-md)"/>` : `<div style="width:100%;height:140px;background:var(--dm-neutral-100);border-radius:var(--dm-radius-md)"></div>`}
-      <div style="font-size:var(--dm-fs-small);font-weight:600;margin-top:6px;color:var(--dm-neutral-900)">${escapeHtml(it.name || '')}</div>
-      ${priceHtml}`;
+      ${it.image_url ? `<img src="${escapeHtml(publicImageUrl(it.image_url))}" loading="lazy" alt="${escapeHtml(it.name || '')}" style="width:100%;height:150px;object-fit:cover;display:block"/>` : `<div style="width:100%;height:150px;background:var(--dm-neutral-100)"></div>`}
+      <div style="padding:10px 12px 12px">
+        <div style="font-size:var(--dm-fs-small);font-weight:600;color:var(--dm-neutral-900);line-height:1.4">${escapeHtml(it.name || '')}</div>
+        ${priceHtml}
+      </div>`;
+    const cardWrapStyle = 'min-width:150px;max-width:170px;display:block;text-decoration:none;color:inherit;background:var(--dm-bg);border:1px solid var(--dm-neutral-200);border-radius:16px;overflow:hidden;box-shadow:var(--dm-shadow-sm)';
     const href = it.link_url ? safeUrl(it.link_url) : '#';
     return href !== '#'
-      ? `<a href="${href}" target="_blank" rel="noopener" style="min-width:140px;max-width:160px;display:block;text-decoration:none;color:inherit">${card}</a>`
-      : `<div style="min-width:140px;max-width:160px">${card}</div>`;
+      ? `<a href="${href}" target="_blank" rel="noopener" style="${cardWrapStyle}">${card}</a>`
+      : `<div style="${cardWrapStyle}">${card}</div>`;
   }).join('');
-  return `<div class="dm-section dm-product-carousel" style="padding:var(--dm-sp-4)">
-    ${p.title ? `<div style="font-size:var(--dm-fs-h3);font-weight:700;margin-bottom:var(--dm-sp-3)">${escapeHtml(p.title)}</div>` : ''}
+  return `<div class="dm-section dm-product-carousel" style="padding:var(--dm-sp-6) var(--dm-sp-5)">
+    ${p.title ? `<div class="dm-text-h2" style="color:var(--dm-neutral-900);margin-bottom:var(--dm-sp-4)">${escapeHtml(p.title)}</div>` : ''}
     <div style="display:flex;gap:12px;overflow-x:auto;padding-bottom:8px">${items}</div>
   </div>`;
 }
@@ -609,9 +615,9 @@ function renderGallery(p: any): string {
     const href = img.link_url ? safeUrl(img.link_url) : '#';
     return href !== '#' ? `<a href="${href}" target="_blank" rel="noopener" style="display:block">${tag}</a>` : tag;
   }).join('');
-  return `<div class="dm-section dm-gallery" style="padding:var(--dm-sp-4)">
-    ${p.title ? `<div style="font-size:var(--dm-fs-h3);font-weight:700;margin-bottom:var(--dm-sp-3)">${escapeHtml(p.title)}</div>` : ''}
-    <div style="display:grid;grid-template-columns:repeat(${cols},1fr);gap:${isList ? 10 : 6}px">${items}</div>
+  return `<div class="dm-section dm-gallery" style="padding:var(--dm-sp-6) var(--dm-sp-5)">
+    ${p.title ? `<div class="dm-text-h2" style="color:var(--dm-neutral-900);margin-bottom:var(--dm-sp-4)">${escapeHtml(p.title)}</div>` : ''}
+    <div style="display:grid;grid-template-columns:repeat(${cols},1fr);gap:${isList ? 12 : 8}px">${items}</div>
   </div>`;
 }
 
@@ -639,23 +645,24 @@ function renderTabCards(p: any): string {
   if (tabs.length === 0) return '';
   // ★ 2026-07-02(3) 첫 탭만 고정 렌더되던 결함 수정 — 전 탭 렌더 + 클릭 전환 (뷰어 스크립트 연동)
   const di = Math.min(Math.max(0, Math.floor(Number(p.default_tab_index) || 0)), tabs.length - 1);
-  const btns = tabs.map((t: any, i: number) => `<span data-dm-tab="${i}" style="padding:8px 12px;cursor:pointer;border-bottom:2px solid ${i === di ? 'var(--dm-primary)' : 'transparent'};color:${i === di ? 'var(--dm-primary)' : 'var(--dm-neutral-600)'};font-size:var(--dm-fs-small);font-weight:600">${escapeHtml(t.label || '')}</span>`).join('');
-  const panels = tabs.map((t: any, i: number) => `<div data-dm-tab-panel="${i}" style="font-size:var(--dm-fs-small);line-height:1.6;white-space:pre-wrap;display:${i === di ? 'block' : 'none'}">${escapeHtml(t.content || '')}</div>`).join('');
-  return `<div class="dm-section dm-tab-cards" data-dm-tabs style="padding:var(--dm-sp-4)">
-    <div style="display:flex;gap:4px;border-bottom:1px solid var(--dm-neutral-200);margin-bottom:var(--dm-sp-3);flex-wrap:wrap">${btns}</div>
+  // ★ 2026-07-02 v2 — 밑줄 탭 → 알약(pill) 세그먼트 탭
+  const btns = tabs.map((t: any, i: number) => `<span data-dm-tab="${i}" style="padding:9px 16px;cursor:pointer;border-radius:999px;background:${i === di ? 'var(--dm-neutral-900)' : 'var(--dm-neutral-100)'};color:${i === di ? '#fff' : 'var(--dm-neutral-600)'};font-size:var(--dm-fs-small);font-weight:600;transition:all 150ms">${escapeHtml(t.label || '')}</span>`).join('');
+  const panels = tabs.map((t: any, i: number) => `<div data-dm-tab-panel="${i}" style="font-size:var(--dm-fs-small);line-height:1.7;white-space:pre-wrap;display:${i === di ? 'block' : 'none'};color:var(--dm-neutral-700)">${escapeHtml(t.content || '')}</div>`).join('');
+  return `<div class="dm-section dm-tab-cards" data-dm-tabs style="padding:var(--dm-sp-6) var(--dm-sp-5)">
+    <div style="display:flex;gap:8px;margin-bottom:var(--dm-sp-4);flex-wrap:wrap">${btns}</div>
     ${panels}
   </div>`;
 }
 
 function renderPoll(p: any): string {
   const options = Array.isArray(p?.options) ? p.options : [];
-  const items = options.map((o: any, i: number) => `<div data-dm-poll-option data-option-id="${escapeHtml(o.id || String(i))}" style="padding:12px 14px;background:var(--dm-bg);border:1px solid var(--dm-neutral-200);border-radius:var(--dm-radius-md);font-size:var(--dm-fs-small);margin-bottom:var(--dm-sp-2);cursor:pointer">${escapeHtml(o.label || '')}</div>`).join('');
+  const items = options.map((o: any, i: number) => `<div data-dm-poll-option data-option-id="${escapeHtml(o.id || String(i))}" style="padding:14px 16px;background:var(--dm-neutral-50);border:1px solid var(--dm-neutral-200);border-radius:12px;font-size:var(--dm-fs-body);font-weight:500;margin-bottom:var(--dm-sp-2);cursor:pointer;transition:all 150ms">${escapeHtml(o.label || '')}</div>`).join('');
   const body = `
-    <div style="font-size:var(--dm-fs-h3);font-weight:700;margin-bottom:var(--dm-sp-3)">${escapeHtml(p.question || '[질문을 작성해주세요]')}</div>
+    <div class="dm-text-h2" style="color:var(--dm-neutral-900);margin-bottom:var(--dm-sp-4)">${escapeHtml(p.question || '[질문을 작성해주세요]')}</div>
     ${items}
     ${p.one_vote_per_user ? `<div style="font-size:var(--dm-fs-tiny);color:var(--dm-neutral-500);margin-top:var(--dm-sp-2)">1인 1회 투표</div>` : ''}
     <div data-dm-result style="display:none"></div>`;
-  return `<div class="dm-section dm-poll" data-dm-poll>${dmEventCard({ accentVar: '--dm-primary', icon: 'poll', body })}</div>`;
+  return `<div class="dm-section dm-poll" data-dm-poll>${dmEventCard({ accentVar: '--dm-primary', icon: 'poll', overline: 'POLL', body })}</div>`;
 }
 
 function renderSurvey(p: any): string {
@@ -685,7 +692,7 @@ function renderSurvey(p: any): string {
     <button data-dm-submit class="dm-cta dm-cta-primary" style="width:100%">제출하기</button>
     ${p.completion_reward_text ? `<div style="font-size:var(--dm-fs-small);color:var(--dm-primary);margin-top:var(--dm-sp-3);font-weight:600">${escapeHtml(p.completion_reward_text)}</div>` : ''}
     <div data-dm-result style="display:none"></div>`;
-  return `<div class="dm-section dm-survey" data-dm-survey>${dmEventCard({ accentVar: '--dm-primary', icon: 'survey', body })}</div>`;
+  return `<div class="dm-section dm-survey" data-dm-survey>${dmEventCard({ accentVar: '--dm-primary', icon: 'survey', overline: 'SURVEY', body })}</div>`;
 }
 
 function renderEmailCapture(p: any): string {
@@ -697,7 +704,7 @@ function renderEmailCapture(p: any): string {
     <button data-dm-submit class="dm-cta dm-cta-primary" style="width:100%">${escapeHtml(p.reward_description ? `참여하고 ${p.reward_description}` : '참여하기')}</button>
     ${p.legal_notice ? `<div style="font-size:var(--dm-fs-tiny);color:var(--dm-neutral-500);margin-top:var(--dm-sp-2);line-height:1.5">${escapeHtml(p.legal_notice)}</div>` : ''}
     <div data-dm-result style="display:none"></div>`;
-  return `<div class="dm-section dm-email-capture" data-dm-form>${dmEventCard({ accentVar: '--dm-primary', icon: 'mail', body })}</div>`;
+  return `<div class="dm-section dm-email-capture" data-dm-form>${dmEventCard({ accentVar: '--dm-primary', icon: 'mail', overline: 'JOIN US', body })}</div>`;
 }
 
 function renderClickRewards(p: any): string {
@@ -730,7 +737,7 @@ function renderLuckyDraw(p: any): string {
     <button data-dm-submit class="dm-cta dm-cta-primary" style="width:100%">응모하기</button>
     ${p.draw_at ? `<div style="font-size:var(--dm-fs-tiny);color:var(--dm-neutral-500);margin-top:var(--dm-sp-2);text-align:center">발표: ${escapeHtml(new Date(p.draw_at).toLocaleString('ko-KR'))}</div>` : ''}
     <div data-dm-result style="display:none"></div>`;
-  return `<div class="dm-section dm-lucky-draw" data-dm-form>${dmEventCard({ accentVar: '--dm-accent', icon: 'gift', body })}</div>`;
+  return `<div class="dm-section dm-lucky-draw" data-dm-form>${dmEventCard({ accentVar: '--dm-accent', icon: 'gift', overline: 'EVENT', body })}</div>`;
 }
 
 function renderRoulette(p: any): string {
@@ -741,7 +748,7 @@ function renderRoulette(p: any): string {
     <button data-dm-spin class="dm-cta dm-cta-primary">룰렛 돌리기</button>
     ${p.one_spin_per_user ? `<div style="font-size:var(--dm-fs-tiny);color:var(--dm-neutral-500);margin-top:var(--dm-sp-2)">1인 1회 한정</div>` : ''}
     <div data-dm-result style="display:none"></div>`;
-  return `<div class="dm-section dm-roulette" data-dm-roulette data-segments="${escapeHtml(JSON.stringify(segs))}">${dmEventCard({ accentVar: '--dm-primary', icon: 'wheel', body })}</div>`;
+  return `<div class="dm-section dm-roulette" data-dm-roulette data-segments="${escapeHtml(JSON.stringify(segs))}">${dmEventCard({ accentVar: '--dm-primary', icon: 'wheel', overline: 'EVENT', body })}</div>`;
 }
 
 function renderInstantCoupon(p: any): string {
@@ -753,7 +760,8 @@ function renderInstantCoupon(p: any): string {
     ${p.conditions ? `<div style="font-size:var(--dm-fs-tiny);color:var(--dm-neutral-500);margin-top:var(--dm-sp-2)">${escapeHtml(p.conditions)}</div>` : ''}
     ${p.usage_instructions ? `<div style="font-size:var(--dm-fs-tiny);color:var(--dm-neutral-500);margin-top:4px">${escapeHtml(p.usage_instructions)}</div>` : ''}
     <div data-dm-result style="display:none"></div>`;
-  return `<div class="dm-section dm-instant-coupon"><div style="padding:var(--dm-sp-6) var(--dm-sp-5);background:var(--dm-primary-light);border:2px dashed var(--dm-primary);border-radius:var(--dm-radius-xl);margin:var(--dm-sp-3) 0"><div style="color:var(--dm-primary);margin-bottom:var(--dm-sp-3)">${dmIcon('ticket', 26)}</div>${body}</div></div>`;
+  // ★ 2026-07-02 v2 — 점선 상자 → 라운드 카드 + 아이콘 칩 + 오버라인
+  return `<div class="dm-section dm-instant-coupon"><div style="padding:var(--dm-sp-8) var(--dm-sp-6);background:var(--dm-primary-light);border:1px solid var(--dm-neutral-200);border-radius:20px;box-shadow:var(--dm-shadow-md);margin:var(--dm-sp-2) 0"><div style="width:44px;height:44px;border-radius:12px;background:var(--dm-bg);color:var(--dm-primary);display:inline-flex;align-items:center;justify-content:center;margin-bottom:var(--dm-sp-4)">${dmIcon('ticket', 22)}</div><div class="dm-overline" style="color:var(--dm-primary);margin-bottom:var(--dm-sp-2)">COUPON</div>${body}</div></div>`;
 }
 
 function renderLimitedQuantity(p: any): string {
@@ -763,15 +771,15 @@ function renderLimitedQuantity(p: any): string {
   const body = `
     <div style="font-size:var(--dm-fs-h3);font-weight:700;margin-bottom:var(--dm-sp-2)">${escapeHtml(p.title || '[선착순 이벤트 제목]')}</div>
     ${p.description ? `<div style="font-size:var(--dm-fs-small);color:var(--dm-neutral-700);margin-bottom:var(--dm-sp-3);line-height:1.6">${escapeHtml(p.description)}</div>` : ''}
-    <div style="margin-bottom:var(--dm-sp-3)">
-      <div style="font-size:var(--dm-fs-tiny);color:var(--dm-neutral-600);margin-bottom:6px;display:flex;justify-content:space-between"><span>남은 수량</span><span style="font-weight:700">${remaining} / ${total}</span></div>
-      <div style="width:100%;height:8px;background:var(--dm-neutral-200);border-radius:var(--dm-radius-full);overflow:hidden"><div style="width:${percent}%;height:100%;background:var(--dm-accent)"></div></div>
+    <div style="margin-bottom:var(--dm-sp-4)">
+      <div style="font-size:var(--dm-fs-small);color:var(--dm-neutral-600);margin-bottom:8px;display:flex;justify-content:space-between;font-variant-numeric:tabular-nums"><span>남은 수량</span><span style="font-weight:800;color:var(--dm-neutral-900)">${remaining} / ${total}</span></div>
+      <div style="width:100%;height:10px;background:var(--dm-neutral-100);border-radius:var(--dm-radius-full);overflow:hidden"><div style="width:${percent}%;height:100%;background:linear-gradient(90deg,var(--dm-accent),var(--dm-primary));border-radius:var(--dm-radius-full)"></div></div>
     </div>
     ${p.signup_url
       ? `<a href="${safeUrl(p.signup_url)}" target="_blank" rel="noopener" class="dm-cta dm-cta-primary" style="width:100%;display:block">선착순 참여하기</a>`
       : `<button data-dm-claim data-claim-success="참여가 완료되었습니다!" class="dm-cta dm-cta-primary" style="width:100%">선착순 참여하기</button>`}
     <div data-dm-result style="display:none"></div>`;
-  return `<div class="dm-section dm-limited-quantity">${dmEventCard({ accentVar: '--dm-accent', icon: 'clock', body })}</div>`;
+  return `<div class="dm-section dm-limited-quantity">${dmEventCard({ accentVar: '--dm-accent', icon: 'clock', overline: 'LIMITED', body })}</div>`;
 }
 
 function renderYoutubeEmbed(p: any): string {
@@ -819,18 +827,19 @@ function renderMapStoreLocator(p: any): string {
 function renderReviews(p: any): string {
   const reviews = Array.isArray(p?.reviews) ? p.reviews : [];
   const avg = reviews.length > 0 ? (reviews.reduce((sum: number, r: any) => sum + (r.rating || 0), 0) / reviews.length).toFixed(1) : '0.0';
+  // ★ 2026-07-02 v2 — 리뷰 카드 라운드/여백/평점 타이포 격상
   const items = reviews.slice(0, 3).map((r: any) => `
-    <div style="padding:var(--dm-sp-3);background:var(--dm-neutral-50);border-radius:var(--dm-radius-md);margin-bottom:var(--dm-sp-2)">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
-        <span style="color:var(--dm-accent);font-size:var(--dm-fs-small);letter-spacing:1px">${'★'.repeat(r.rating || 0)}${'☆'.repeat(5 - (r.rating || 0))}</span>
+    <div style="padding:var(--dm-sp-4) var(--dm-sp-5);background:var(--dm-bg);border:1px solid var(--dm-neutral-200);border-radius:14px;margin-bottom:var(--dm-sp-2);box-shadow:var(--dm-shadow-sm)">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+        <span style="color:var(--dm-accent);font-size:var(--dm-fs-small);letter-spacing:2px">${'★'.repeat(r.rating || 0)}${'☆'.repeat(5 - (r.rating || 0))}</span>
         <span style="font-size:var(--dm-fs-tiny);color:var(--dm-neutral-500)">${escapeHtml(r.author || '')}</span>
       </div>
-      <div style="font-size:var(--dm-fs-small);line-height:1.5">${escapeHtml(r.body || '')}</div>
-      ${r.date ? `<div style="font-size:var(--dm-fs-tiny);color:var(--dm-neutral-400);margin-top:4px">${escapeHtml(r.date)}</div>` : ''}
+      <div style="font-size:var(--dm-fs-small);line-height:1.7;color:var(--dm-neutral-700)">${escapeHtml(r.body || '')}</div>
+      ${r.date ? `<div style="font-size:var(--dm-fs-tiny);color:var(--dm-neutral-400);margin-top:6px">${escapeHtml(r.date)}</div>` : ''}
     </div>`).join('');
-  return `<div class="dm-section dm-reviews" style="padding:var(--dm-sp-4)">
-    ${p.title ? `<div style="display:flex;align-items:center;gap:6px;font-size:var(--dm-fs-h3);font-weight:700;margin-bottom:var(--dm-sp-3)"><span style="color:var(--dm-accent)">${dmIcon('star', 18)}</span>${escapeHtml(p.title)}</div>` : ''}
-    ${reviews.length > 0 && p.show_average_rating !== false ? `<div style="display:flex;align-items:baseline;gap:8px;margin-bottom:var(--dm-sp-3)"><span style="font-size:var(--dm-fs-h1);font-weight:700">${avg}</span><span style="color:var(--dm-accent)">★★★★★</span><span style="font-size:var(--dm-fs-tiny);color:var(--dm-neutral-500)">(${reviews.length}건)</span></div>` : ''}
+  return `<div class="dm-section dm-reviews" style="padding:var(--dm-sp-6) var(--dm-sp-5)">
+    ${p.title ? `<div class="dm-text-h2" style="display:flex;align-items:center;gap:8px;color:var(--dm-neutral-900);margin-bottom:var(--dm-sp-3)"><span style="color:var(--dm-accent)">${dmIcon('star', 20)}</span>${escapeHtml(p.title)}</div>` : ''}
+    ${reviews.length > 0 && p.show_average_rating !== false ? `<div style="display:flex;align-items:baseline;gap:10px;margin-bottom:var(--dm-sp-4)"><span style="font-size:var(--dm-fs-hero);font-weight:800;font-variant-numeric:tabular-nums;letter-spacing:-0.02em">${avg}</span><span style="color:var(--dm-accent);letter-spacing:2px">★★★★★</span><span style="font-size:var(--dm-fs-tiny);color:var(--dm-neutral-500)">(${reviews.length}건)</span></div>` : ''}
     ${items || `<div class="dm-mood-slot" style="text-align:center;color:var(--dm-neutral-400);padding:var(--dm-sp-6)">[리뷰를 추가해주세요]</div>`}
   </div>`;
 }

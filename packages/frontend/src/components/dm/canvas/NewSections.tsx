@@ -335,7 +335,7 @@ export function ClickRewardsSection({ props }: { props: ClickRewardsProps }) {
 export function LuckyDrawSection({ props }: { props: LuckyDrawProps }) {
   return (
     <div className="dm-section dm-lucky-draw">
-      <DmEventCard accentVar="--dm-accent" icon="gift">
+      <DmEventCard accentVar="--dm-accent" icon="gift" overline="EVENT">
         <div style={TITLE_STYLE}>{props.title || '[추첨 이벤트 제목을 작성해주세요]'}</div>
         {props.description && (
           <div style={{ fontSize: 'var(--dm-fs-small)', color: 'var(--dm-neutral-700)', marginBottom: 'var(--dm-sp-3)', lineHeight: 1.6 }}>{props.description}</div>
@@ -369,7 +369,7 @@ export function RouletteSection({ props }: { props: RouletteProps }) {
   const segments = props?.segments || [];
   return (
     <div className="dm-section dm-roulette">
-      <DmEventCard accentVar="--dm-primary" icon="wheel">
+      <DmEventCard accentVar="--dm-primary" icon="wheel" overline="EVENT">
         <div style={TITLE_STYLE}>룰렛 이벤트</div>
         <div
           style={{
@@ -425,7 +425,7 @@ export function LimitedQuantitySection({ props }: { props: LimitedQuantityProps 
   const percent = props.total_quantity > 0 ? (remaining / props.total_quantity) * 100 : 0;
   return (
     <div className="dm-section dm-limited-quantity">
-      <DmEventCard accentVar="--dm-accent" icon="clock">
+      <DmEventCard accentVar="--dm-accent" icon="clock" overline="LIMITED">
         <div style={TITLE_STYLE}>{props.title || '[선착순 이벤트 제목을 작성해주세요]'}</div>
         {props.description && (
           <div style={{ fontSize: 'var(--dm-fs-small)', color: 'var(--dm-neutral-700)', marginBottom: 'var(--dm-sp-3)', lineHeight: 1.6 }}>{props.description}</div>

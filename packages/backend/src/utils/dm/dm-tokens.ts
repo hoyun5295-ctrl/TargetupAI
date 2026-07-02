@@ -58,13 +58,15 @@ export const DM_TYPOGRAPHY = {
     serif:   '"Noto Serif KR", serif',
     mono:    '"JetBrains Mono", Menlo, Consolas, monospace',
   },
+  // ★ 2026-07-02 디자인 시스템 v2 — 디스플레이급 타입 스케일 상향 (Harold 동의).
+  //   SSOT: frontend/src/utils/dm-tokens.ts + styles/dm-builder.css 동시 수정 필수.
   scale: {
-    hero:  { size: '32px', lineHeight: '1.2', weight: 800, letterSpacing: '-0.02em' },
-    h1:    { size: '24px', lineHeight: '1.3', weight: 700, letterSpacing: '-0.01em' },
-    h2:    { size: '20px', lineHeight: '1.4', weight: 700, letterSpacing: '0' },
+    hero:  { size: '40px', lineHeight: '1.15', weight: 800, letterSpacing: '-0.03em' },
+    h1:    { size: '28px', lineHeight: '1.25', weight: 700, letterSpacing: '-0.02em' },
+    h2:    { size: '22px', lineHeight: '1.35', weight: 700, letterSpacing: '-0.01em' },
     h3:    { size: '18px', lineHeight: '1.4', weight: 600, letterSpacing: '0' },
-    body:  { size: '15px', lineHeight: '1.6', weight: 400, letterSpacing: '0' },
-    small: { size: '13px', lineHeight: '1.5', weight: 400, letterSpacing: '0' },
+    body:  { size: '16px', lineHeight: '1.65', weight: 400, letterSpacing: '0' },
+    small: { size: '13px', lineHeight: '1.55', weight: 400, letterSpacing: '0' },
     tiny:  { size: '11px', lineHeight: '1.4', weight: 400, letterSpacing: '0' },
   },
 } as const;
@@ -96,11 +98,12 @@ export const DM_RADIUS = {
   full:  '9999px',
 } as const;
 
+// ★ 2026-07-02 v2 — 슬레이트 틴트의 넓고 부드러운 그림자 (SSOT 3파일 동기)
 export const DM_SHADOW = {
-  sm: '0 1px 2px rgba(0,0,0,0.05)',
-  md: '0 4px 6px -1px rgba(0,0,0,0.08), 0 2px 4px -1px rgba(0,0,0,0.04)',
-  lg: '0 10px 15px -3px rgba(0,0,0,0.1), 0 4px 6px -2px rgba(0,0,0,0.05)',
-  xl: '0 20px 25px -5px rgba(0,0,0,0.1), 0 10px 10px -5px rgba(0,0,0,0.04)',
+  sm: '0 1px 2px rgba(15,23,42,0.06)',
+  md: '0 6px 16px -4px rgba(15,23,42,0.10), 0 2px 6px -2px rgba(15,23,42,0.06)',
+  lg: '0 12px 28px -6px rgba(15,23,42,0.12), 0 4px 10px -4px rgba(15,23,42,0.06)',
+  xl: '0 24px 48px -12px rgba(15,23,42,0.16), 0 10px 18px -8px rgba(15,23,42,0.06)',
 } as const;
 
 // ────────────── BrandKit 타입 ──────────────
@@ -243,6 +246,13 @@ button { font-family: inherit; cursor: pointer; border: 0; background: transpare
 .dm-text-body  { font-size: var(--dm-fs-body);  line-height: var(--dm-lh-body);  font-weight: 400; }
 .dm-text-small { font-size: var(--dm-fs-small); line-height: var(--dm-lh-small); font-weight: 400; }
 .dm-text-tiny  { font-size: var(--dm-fs-tiny);  line-height: var(--dm-lh-tiny);  font-weight: 400; }
+/* ★ 2026-07-02 v2 — 오버라인 라벨(자간 넓은 소형 라벨 → 큰 헤드라인 3단 위계의 1단) */
+.dm-overline   { font-size: 11px; font-weight: 700; letter-spacing: 0.18em; }
+
+/* ★ 2026-07-02 v2 — 소형 화면 타입 축소 (디스플레이급 스케일의 375px 이하 보정) */
+@media (max-width: 375px) {
+  :root { --dm-fs-hero: 34px; --dm-fs-h1: 25px; }
+}
 
 /* ★ 2026-07-02(5) 발행물 디자인 격상 — 버튼 여백/자간/그림자 정돈 (이메일 톤) */
 .dm-cta {

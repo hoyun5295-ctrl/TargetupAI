@@ -39,10 +39,15 @@ export function dmIcon(name: IconName, size = 22): string {
 /**
  * 이벤트/강조 섹션 공통 셸 — 토큰 배경 + 라운드 + 그림자.
  * accentVar는 아이콘 색으로 쓸 CSS 변수명(예: '--dm-accent').
+ * ★ 2026-07-02 v2 — 아이콘 칩 + 오버라인 라벨(선택) + 넉넉한 여백/라운드로 격상.
+ *   이 카드를 쓰는 이벤트 섹션 전체(추첨·룰렛·설문·투표·즉시쿠폰·선착순·이메일수집 등)가 함께 격상된다.
  */
-export function dmEventCard(opts: { accentVar: string; body: string; icon?: IconName }): string {
+export function dmEventCard(opts: { accentVar: string; body: string; icon?: IconName; overline?: string }): string {
   const icon = opts.icon
-    ? `<div style="color:var(${opts.accentVar});margin-bottom:var(--dm-sp-3)">${dmIcon(opts.icon, 26)}</div>`
+    ? `<div style="width:44px;height:44px;border-radius:12px;background:var(--dm-neutral-100);color:var(${opts.accentVar});display:inline-flex;align-items:center;justify-content:center;margin-bottom:var(--dm-sp-4)">${dmIcon(opts.icon, 22)}</div>`
     : '';
-  return `<div style="padding:var(--dm-sp-6) var(--dm-sp-5);background:var(--dm-neutral-50);border:1px solid var(--dm-neutral-200);border-radius:var(--dm-radius-xl);box-shadow:var(--dm-shadow-md);margin:var(--dm-sp-3) 0">${icon}${opts.body}</div>`;
+  const overline = opts.overline
+    ? `<div class="dm-overline" style="color:var(${opts.accentVar});margin-bottom:var(--dm-sp-2)">${opts.overline}</div>`
+    : '';
+  return `<div style="padding:var(--dm-sp-8) var(--dm-sp-6);background:var(--dm-bg);border:1px solid var(--dm-neutral-200);border-radius:20px;box-shadow:var(--dm-shadow-md);margin:var(--dm-sp-2) 0">${icon}${overline}${opts.body}</div>`;
 }

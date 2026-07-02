@@ -30,34 +30,43 @@ export function DmIcon({ name, size = 22 }: { name: DmIconName; size?: number })
   );
 }
 
+// ★ 2026-07-02 v2 — backend dmEventCard 격상과 동일 (아이콘 칩 + 오버라인 + 넉넉한 여백/라운드)
 const EVENT_CARD_STYLE: CSSProperties = {
-  padding: 'var(--dm-sp-6) var(--dm-sp-5)',
-  background: 'var(--dm-neutral-50)',
+  padding: 'var(--dm-sp-8) var(--dm-sp-6)',
+  background: 'var(--dm-bg)',
   border: '1px solid var(--dm-neutral-200)',
-  borderRadius: 'var(--dm-radius-xl)',
+  borderRadius: 20,
   boxShadow: 'var(--dm-shadow-md)',
-  margin: 'var(--dm-sp-3) 0',
+  margin: 'var(--dm-sp-2) 0',
 };
 
 /** 이벤트/강조 섹션 공통 셸 — 토큰 배경 + 라운드 + 그림자. accentVar는 아이콘 색 CSS 변수명. */
-export function DmEventCard({ accentVar, icon, children }: { accentVar: string; icon?: DmIconName; children: ReactNode }) {
+export function DmEventCard({ accentVar, icon, overline, children }: { accentVar: string; icon?: DmIconName; overline?: string; children: ReactNode }) {
   return (
     <div style={EVENT_CARD_STYLE}>
-      {icon && <div style={{ color: `var(${accentVar})`, marginBottom: 'var(--dm-sp-3)' }}><DmIcon name={icon} size={26} /></div>}
+      {icon && (
+        <div style={{ width: 44, height: 44, borderRadius: 12, background: 'var(--dm-neutral-100)', color: `var(${accentVar})`, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', marginBottom: 'var(--dm-sp-4)' }}>
+          <DmIcon name={icon} size={22} />
+        </div>
+      )}
+      {overline && <div className="dm-overline" style={{ color: `var(${accentVar})`, marginBottom: 'var(--dm-sp-2)' }}>{overline}</div>}
       {children}
     </div>
   );
 }
 
 /** 공통 CTA 버튼 스타일(토큰). 풀폭이 필요하면 { ...DM_CTA_STYLE, width: '100%' }. */
+// ★ 2026-07-02 v2 — 발행물 .dm-cta 격상과 동일 (라운드 14·자간·그림자)
 export const DM_CTA_STYLE: CSSProperties = {
   minHeight: 44,
-  padding: '0 24px',
+  padding: '0 28px',
   background: 'var(--dm-primary)',
   color: '#fff',
   border: 'none',
-  borderRadius: 'var(--dm-radius-md)',
+  borderRadius: 14,
   fontSize: 'var(--dm-fs-body)',
   fontWeight: 700,
+  letterSpacing: '-0.01em',
+  boxShadow: '0 2px 10px rgba(15, 23, 42, 0.10)',
   cursor: 'pointer',
 };
