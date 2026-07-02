@@ -25,8 +25,8 @@ export default function CouponEditor({ props, onUpdate }: EditorProps<CouponProp
         <TextInput value={props.coupon_code} onChange={(v) => onUpdate({ coupon_code: v })} placeholder="SPRING20" />
       </Field>
 
-      <Field label="유효기간 종료일">
-        <DateTimePicker value={props.expire_date} onChange={(v) => onUpdate({ expire_date: v })} />
+      <Field label="유효기간 종료일" hint="빠른 선택을 누르면 그날 23:59로 잡히고, 아래에서 미세 조정할 수 있어요">
+        <DateTimePicker value={props.expire_date} onChange={(v) => onUpdate({ expire_date: v })} quickPresets />
       </Field>
 
       <Field label="최소 구매 금액">

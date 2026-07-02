@@ -1,5 +1,5 @@
 import type { HeroProps } from '../../../../utils/dm-section-defaults';
-import { Field, TextInput, TextArea, Select, Toggle, ImageUploader } from '../FormControls';
+import { Field, TextArea, Select, Toggle, ImageUploader, ColorOverride } from '../FormControls';
 import type { EditorProps } from '../SectionPropsEditor';
 
 export default function HeroEditor({ props, onUpdate }: EditorProps<HeroProps>) {
@@ -9,12 +9,21 @@ export default function HeroEditor({ props, onUpdate }: EditorProps<HeroProps>) 
         <ImageUploader value={props.image_url} onChange={(url) => onUpdate({ image_url: url })} label="히어로 이미지" />
       </Field>
 
-      <Field label="메인 헤드라인" hint="18자 이내 권장">
-        <TextInput value={props.headline} onChange={(v) => onUpdate({ headline: v })} placeholder="봄, 당신을 위한 특별한 제안" />
+      {/* ★ 2026-07-02 줄바꿈 지원 — 입력한 줄바꿈이 결과물에 그대로 반영 */}
+      <Field label="메인 헤드라인" hint="줄바꿈 그대로 반영 · 한 줄 18자 이내 권장">
+        <TextArea value={props.headline} onChange={(v) => onUpdate({ headline: v })} placeholder="봄, 당신을 위한 특별한 제안" rows={2} />
       </Field>
 
-      <Field label="서브 카피">
+      <Field label="헤드라인 색상">
+        <ColorOverride value={props.headline_color} onChange={(v) => onUpdate({ headline_color: v })} />
+      </Field>
+
+      <Field label="서브 카피" hint="줄바꿈 그대로 반영">
         <TextArea value={props.sub_copy} onChange={(v) => onUpdate({ sub_copy: v })} placeholder="감성을 담은 한 줄 더" rows={2} />
+      </Field>
+
+      <Field label="서브 카피 색상">
+        <ColorOverride value={props.sub_copy_color} onChange={(v) => onUpdate({ sub_copy_color: v })} />
       </Field>
 
       <Field label="높이">

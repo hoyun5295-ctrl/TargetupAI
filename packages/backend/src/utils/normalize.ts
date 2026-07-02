@@ -579,6 +579,33 @@ export function normalizeEmail(value: any): string | null {
 }
 
 // ============================================================
+// 한국어 날짜 표시 — ★ 2026-07-02 (Harold 신고: 쿠폰 마감이 "2026-07-30T03:00:00.000Z까지"로 노출)
+// ISO/날짜 문자열 → KST 기준 "YYYY. M. D" (+자정/23:59가 아니면 " HH:mm"). 파싱 불가 = 원문 그대로(손입력 보존).
+// 소비처: 이메일 쿠폰 렌더러 (DM은 기존 formatKoreanDate 표시 형식 유지)
+// ============================================================
+export function formatKoreanDateTimeDisplay(value: any): string {
+  const s = String(value ?? '').trim();
+  if (!s) return '';
+  // 날짜만(YYYY-MM-DD) = 시간대 해석 없이 그대로 (UTC 자정 파싱으로 하루 밀리는 함정 회피)
+  const dateOnly = s.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (dateOnly) {
+    return `${Number(dateOnly[1])}. ${Number(dateOnly[2])}. ${Number(dateOnly[3])}`;
+  }
+  const d = new Date(s);
+  if (isNaN(d.getTime())) return s;
+  const parts = new Intl.DateTimeFormat('ko-KR', {
+    timeZone: 'Asia/Seoul', year: 'numeric', month: 'numeric', day: 'numeric',
+    hour: '2-digit', minute: '2-digit', hour12: false,
+  }).formatToParts(d);
+  const get = (t: string) => parts.find((p) => p.type === t)?.value || '';
+  const hh = get('hour');
+  const mm = get('minute');
+  const datePart = `${get('year')}. ${Number(get('month'))}. ${Number(get('day'))}`;
+  if (((hh === '00' || hh === '24') && mm === '00') || (hh === '23' && mm === '59')) return datePart;
+  return `${datePart} ${hh}:${mm}`;
+}
+
+// ============================================================
 // 웹 URL 정규화 — ★ 2026-07-02 (Harold 신고: www.poppon.co.kr 이메일 링크 이동 안 됨)
 // 스킴 없는 도메인형(www.x.y / a.b/path)에 https:// 부착.
 // 기존 스킴(http/https/mailto/tel)·앵커(#)·상대경로(/)·개인화 변수({{)는 그대로 보존.

@@ -1,5 +1,5 @@
 import type { TextCardProps } from '../../../../utils/dm-section-defaults';
-import { Field, TextInput, TextArea, Select, ImageUploader } from '../FormControls';
+import { Field, TextInput, TextArea, Select, ImageUploader, ColorOverride } from '../FormControls';
 import type { EditorProps } from '../SectionPropsEditor';
 
 export default function TextCardEditor({ props, onUpdate }: EditorProps<TextCardProps>) {
@@ -9,12 +9,21 @@ export default function TextCardEditor({ props, onUpdate }: EditorProps<TextCard
         <TextInput value={props.tag} onChange={(v) => onUpdate({ tag: v })} placeholder="NEW" />
       </Field>
 
-      <Field label="헤드라인">
-        <TextInput value={props.headline} onChange={(v) => onUpdate({ headline: v })} placeholder="이번 달 추천 상품" />
+      {/* ★ 2026-07-02 줄바꿈 지원 + 색상 직접 지정 */}
+      <Field label="헤드라인" hint="줄바꿈 그대로 반영">
+        <TextArea value={props.headline} onChange={(v) => onUpdate({ headline: v })} placeholder="이번 달 추천 상품" rows={2} />
+      </Field>
+
+      <Field label="헤드라인 색상">
+        <ColorOverride value={props.headline_color} onChange={(v) => onUpdate({ headline_color: v })} />
       </Field>
 
       <Field label="본문">
         <TextArea value={props.body} onChange={(v) => onUpdate({ body: v })} rows={5} placeholder="고객님을 위한 한 마디..." />
+      </Field>
+
+      <Field label="본문 색상">
+        <ColorOverride value={props.body_color} onChange={(v) => onUpdate({ body_color: v })} />
       </Field>
 
       <Field label="이미지 (선택)">

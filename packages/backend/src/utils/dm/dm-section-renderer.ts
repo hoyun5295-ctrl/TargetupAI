@@ -138,8 +138,8 @@ function renderHeroClassic(props: HeroProps): string {
     ${img ? `<img src="${escapeHtml(img)}" alt="${escapeHtml(props.headline || '')}" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover">` : ''}
     ${img ? `<div style="position:absolute;inset:0;background:${gradient}"></div>` : ''}
     <div style="position:relative;min-height:${heightPx};display:flex;flex-direction:column;justify-content:flex-end;align-items:${textAlign};padding:var(--dm-sp-8) var(--dm-sp-5);color:${textColor};text-align:${align}">
-      ${props.headline ? `<div class="dm-text-hero" style="font-weight:800">${escapeHtml(props.headline)}</div>` : ''}
-      ${props.sub_copy ? `<div class="dm-text-body" style="margin-top:var(--dm-sp-3);opacity:0.9">${escapeHtml(props.sub_copy)}</div>` : ''}
+      ${props.headline ? `<div class="dm-text-hero" style="font-weight:800${props.headline_color ? `;color:${escapeHtml(props.headline_color)}` : ''}">${escapeHtml(props.headline).replace(/\n/g, '<br>')}</div>` : ''}
+      ${props.sub_copy ? `<div class="dm-text-body" style="margin-top:var(--dm-sp-3);opacity:0.9${props.sub_copy_color ? `;color:${escapeHtml(props.sub_copy_color)}` : ''}">${escapeHtml(props.sub_copy).replace(/\n/g, '<br>')}</div>` : ''}
     </div>
   </div>`;
 }

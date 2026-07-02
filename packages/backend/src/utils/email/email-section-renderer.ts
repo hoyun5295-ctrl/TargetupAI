@@ -16,8 +16,8 @@ import type {
 import type { DmBrandKit } from '../dm/dm-tokens';
 import { resolveEmailBrand, type EmailBrand } from './email-tokens';
 import { EMAIL_BLOCK_WHITELIST, EMAIL_INCOMPATIBLE } from './email-blocks';
-// ★ 2026-07-02 스킴 없는 URL(www.x.y) https:// 정규화 — "링크 이동 안 됨" 신고 근본 수정 (normalize CT)
-import { normalizeWebUrl } from '../normalize';
+// ★ 2026-07-02 스킴 없는 URL(www.x.y) https:// 정규화 + 쿠폰 마감 한국어 표시 (normalize CT)
+import { normalizeWebUrl, formatKoreanDateTimeDisplay } from '../normalize';
 
 export interface EmailRenderCtx {
   brandKit?: DmBrandKit | null;
@@ -59,17 +59,18 @@ function renderHero(p: HeroProps, b: EmailBrand, ctx: EmailRenderCtx): string {
     const overlay = p.overlay_gradient !== false
       ? 'linear-gradient(180deg,rgba(0,0,0,0) 35%,rgba(0,0,0,0.55) 100%)'
       : 'rgba(0,0,0,0)';
-    const headline = `<div style="font-size:${b.type.hero.size};line-height:${b.type.hero.lineHeight};font-weight:${b.type.hero.weight};letter-spacing:${b.type.hero.letterSpacing};color:#ffffff;margin:0">${esc(p.headline)}</div>`;
+    // ★ 2026-07-02 줄바꿈(\n→<br>) + 색상 직접 지정(미지정 = 기존 기본색)
+    const headline = `<div style="font-size:${b.type.hero.size};line-height:${b.type.hero.lineHeight};font-weight:${b.type.hero.weight};letter-spacing:${b.type.hero.letterSpacing};color:${esc(p.headline_color || '#ffffff')};margin:0">${esc(p.headline).replace(/\n/g, '<br>')}</div>`;
     const sub = p.sub_copy
-      ? `<div style="font-size:${b.type.body.size};line-height:${b.type.body.lineHeight};color:rgba(255,255,255,0.92);margin-top:${b.sp[3]}">${esc(p.sub_copy)}</div>`
+      ? `<div style="font-size:${b.type.body.size};line-height:${b.type.body.lineHeight};color:${esc(p.sub_copy_color || 'rgba(255,255,255,0.92)')};margin-top:${b.sp[3]}">${esc(p.sub_copy).replace(/\n/g, '<br>')}</div>`
       : '';
     return `<tr><td style="padding:0"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:${b.text};background-image:url('${esc(img)}');background-position:center center;background-size:cover;background-repeat:no-repeat"><tr><td height="${minH}" valign="bottom" style="height:${minH}px;background:${overlay};padding:${b.sp[8]} ${b.sp[6]};text-align:${align}">${headline}${sub}</td></tr></table></td></tr>`;
   }
 
-  // 이미지 없음 — 높이만 적용(텍스트 세로 가운데). 단색/투명 배경.
-  const headlineD = `<div style="font-size:${b.type.hero.size};line-height:${b.type.hero.lineHeight};font-weight:${b.type.hero.weight};letter-spacing:${b.type.hero.letterSpacing};color:${b.text};margin:0">${esc(p.headline)}</div>`;
+  // 이미지 없음 — 높이만 적용(텍스트 세로 가운데). 단색/투명 배경. ★ 2026-07-02 줄바꿈+색상 지정 동일 적용
+  const headlineD = `<div style="font-size:${b.type.hero.size};line-height:${b.type.hero.lineHeight};font-weight:${b.type.hero.weight};letter-spacing:${b.type.hero.letterSpacing};color:${esc(p.headline_color || b.text)};margin:0">${esc(p.headline).replace(/\n/g, '<br>')}</div>`;
   const subD = p.sub_copy
-    ? `<div style="font-size:${b.type.body.size};line-height:${b.type.body.lineHeight};color:${b.textMuted};margin-top:${b.sp[3]}">${esc(p.sub_copy)}</div>`
+    ? `<div style="font-size:${b.type.body.size};line-height:${b.type.body.lineHeight};color:${esc(p.sub_copy_color || b.textMuted)};margin-top:${b.sp[3]}">${esc(p.sub_copy).replace(/\n/g, '<br>')}</div>`
     : '';
   return `<tr><td height="${minH}" valign="middle" style="height:${minH}px;padding:${b.sp[8]} ${b.sp[6]};text-align:${align}">${headlineD}${subD}</td></tr>`;
 }
@@ -96,8 +97,9 @@ function renderTextCard(p: TextCardProps, b: EmailBrand, ctx: EmailRenderCtx): s
   const img = p.image_url ? emailImg(p.image_url, ctx.publicBase) : '';
   const imgTag = img ? `<img src="${esc(img)}" alt="${esc(p.headline || '')}" style="width:100%;max-width:552px;display:block;border:0;border-radius:${b.radius.md}">` : '';
   const tag = p.tag ? `<div style="font-size:${b.type.tiny.size};font-weight:700;letter-spacing:0.05em;color:${b.primary};margin-bottom:${b.sp[2]}">${esc(p.tag)}</div>` : '';
-  const head = p.headline ? `<div style="font-size:${b.type.h2.size};line-height:${b.type.h2.lineHeight};font-weight:${b.type.h2.weight};color:${b.text};margin:0 0 ${b.sp[3]} 0">${esc(p.headline)}</div>` : '';
-  const bodyHtml = p.body ? `<div style="font-size:${b.type.body.size};line-height:${b.type.body.lineHeight};color:${b.text}">${esc(p.body).replace(/\n/g, '<br>')}</div>` : '';
+  // ★ 2026-07-02 헤드라인 줄바꿈 + 색상 직접 지정 (미지정 = 기존 기본색)
+  const head = p.headline ? `<div style="font-size:${b.type.h2.size};line-height:${b.type.h2.lineHeight};font-weight:${b.type.h2.weight};color:${esc(p.headline_color || b.text)};margin:0 0 ${b.sp[3]} 0">${esc(p.headline).replace(/\n/g, '<br>')}</div>` : '';
+  const bodyHtml = p.body ? `<div style="font-size:${b.type.body.size};line-height:${b.type.body.lineHeight};color:${esc(p.body_color || b.text)}">${esc(p.body).replace(/\n/g, '<br>')}</div>` : '';
   const textHtml = `<div style="text-align:${align}">${tag}${head}${bodyHtml}</div>`;
   const pos = p.image_position || 'top';
   let inner: string;
@@ -156,7 +158,8 @@ function renderCoupon(p: CouponProps, b: EmailBrand): string {
   if (!label && !p.coupon_code) return '';
   const cond: string[] = [];
   if (p.min_purchase) cond.push(formatWon(p.min_purchase) + ' 이상');
-  if (p.expire_date) cond.push(esc(p.expire_date) + '까지');
+  // ★ 2026-07-02 ISO 원문("2026-07-30T03:00:00.000Z") 노출 → KST 한국어 표시
+  if (p.expire_date) cond.push(esc(formatKoreanDateTimeDisplay(p.expire_date)) + '까지');
   if (p.usage_condition) cond.push(esc(p.usage_condition));
   const codeBox = p.coupon_code
     ? `<div style="display:inline-block;margin-top:${b.sp[3]};padding:${b.sp[2]} ${b.sp[5]};background:#ffffff;border:1px dashed ${b.primary};border-radius:${b.radius.sm};font-family:${b.mono};font-size:${b.type.h3.size};font-weight:700;letter-spacing:2px;color:${b.primary}">${esc(p.coupon_code)}</div>`

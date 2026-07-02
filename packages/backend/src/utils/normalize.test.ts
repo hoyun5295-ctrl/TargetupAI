@@ -1,5 +1,28 @@
 import { describe, test, expect } from 'vitest';
-import { normalizeOpt080Input, normalizeWebUrl } from './normalize';
+import { normalizeOpt080Input, normalizeWebUrl, formatKoreanDateTimeDisplay } from './normalize';
+
+describe('formatKoreanDateTimeDisplay — 쿠폰 마감 한국어 표시 (2026-07-02 ISO 원문 노출 신고)', () => {
+  test('ISO Z = KST로 변환해 표시 (03:00Z → 12:00 KST)', () => {
+    expect(formatKoreanDateTimeDisplay('2026-07-30T03:00:00.000Z')).toBe('2026. 7. 30 12:00');
+  });
+
+  test('KST 23:59 = 날짜만 (하루 종일 개념)', () => {
+    expect(formatKoreanDateTimeDisplay('2026-07-29T14:59:00.000Z')).toBe('2026. 7. 29');
+  });
+
+  test('날짜만(YYYY-MM-DD) = 시간대 해석 없이 그대로', () => {
+    expect(formatKoreanDateTimeDisplay('2026-07-30')).toBe('2026. 7. 30');
+  });
+
+  test('파싱 불가 손입력은 원문 보존', () => {
+    expect(formatKoreanDateTimeDisplay('7월 말까지 매장 문의')).toBe('7월 말까지 매장 문의');
+  });
+
+  test('빈 값은 빈 문자열', () => {
+    expect(formatKoreanDateTimeDisplay('')).toBe('');
+    expect(formatKoreanDateTimeDisplay(null)).toBe('');
+  });
+});
 
 describe('normalizeWebUrl — 스킴 없는 URL https:// 정규화 (2026-07-02 이메일 링크 이동 안 됨 신고)', () => {
   test('www. 도메인형에 https:// 부착', () => {

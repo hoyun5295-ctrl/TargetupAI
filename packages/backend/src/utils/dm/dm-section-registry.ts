@@ -84,6 +84,9 @@ export type HeroProps = {
   overlay_gradient?: boolean;
   align: 'left' | 'center' | 'right';
   height: 'sm' | 'md' | 'lg' | 'full';
+  // ★ 2026-07-02 텍스트 색상 직접 지정 — 미지정 = 기존 기본색 그대로 (이메일 + DM classic 렌더 적용)
+  headline_color?: string;
+  sub_copy_color?: string;
 };
 
 export type CouponProps = {
@@ -112,6 +115,9 @@ export type TextCardProps = {
   align: 'left' | 'center';
   image_url?: string;
   image_position: 'top' | 'left' | 'right' | 'bottom';
+  // ★ 2026-07-02 텍스트 색상 직접 지정 — 미지정 = 기존 기본색 그대로
+  headline_color?: string;
+  body_color?: string;
 };
 
 export type CtaButton = {

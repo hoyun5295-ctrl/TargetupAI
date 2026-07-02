@@ -160,9 +160,33 @@ export function ColorPicker({ value, onChange }: { value: string | undefined; on
   );
 }
 
+// ────────────── ColorOverride — 색상 직접 지정 + "기본색" 복귀 (2026-07-02) ──────────────
+
+export function ColorOverride({ value, onChange }: { value: string | undefined; onChange: (v: string | undefined) => void }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+      <div style={{ flex: 1 }}>
+        <ColorPicker value={value} onChange={(v) => onChange(v || undefined)} />
+      </div>
+      <button
+        type="button"
+        onClick={() => onChange(undefined)}
+        title="직접 지정을 지우고 테마 기본색으로 돌아갑니다"
+        style={{
+          height: 28, padding: '0 10px', borderRadius: 6, border: '1px solid var(--dm-neutral-200)',
+          background: value ? 'var(--dm-bg)' : 'var(--dm-neutral-200)', color: 'var(--dm-neutral-700)',
+          fontSize: 11, fontWeight: 600, cursor: 'pointer', whiteSpace: 'nowrap',
+        }}
+      >
+        기본색
+      </button>
+    </div>
+  );
+}
+
 // ────────────── DateTimePicker ──────────────
 
-export function DateTimePicker({ value, onChange }: { value: string | undefined; onChange: (v: string) => void }) {
+export function DateTimePicker({ value, onChange, quickPresets }: { value: string | undefined; onChange: (v: string) => void; quickPresets?: boolean }) {
   // ISO 문자열 → datetime-local 포맷 (YYYY-MM-DDTHH:mm)
   const toLocal = (iso?: string): string => {
     if (!iso) return '';
@@ -178,13 +202,47 @@ export function DateTimePicker({ value, onChange }: { value: string | undefined;
     try { return new Date(local).toISOString(); } catch { return local; }
   };
 
+  // ★ 2026-07-02 빠른 선택 — 마감시간 직접 고르기 어렵다는 신고. 전부 그날 23:59로 설정 후 입력칸에서 미세 조정.
+  const presetChip = (label: string, make: () => Date) => (
+    <button
+      key={label}
+      type="button"
+      onClick={() => {
+        const d = make();
+        d.setHours(23, 59, 0, 0);
+        onChange(d.toISOString());
+      }}
+      style={{
+        height: 24, padding: '0 10px', borderRadius: 12, border: '1px solid var(--dm-neutral-200)',
+        background: 'var(--dm-bg)', color: 'var(--dm-neutral-700)', fontSize: 11, cursor: 'pointer',
+      }}
+    >
+      {label}
+    </button>
+  );
+
   return (
-    <input
-      type="datetime-local"
-      value={toLocal(value)}
-      onChange={(e) => onChange(fromLocal(e.target.value))}
-      style={inputStyle}
-    />
+    <div>
+      {quickPresets && (
+        <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginBottom: 6 }}>
+          {presetChip('7일 뒤', () => { const d = new Date(); d.setDate(d.getDate() + 7); return d; })}
+          {presetChip('14일 뒤', () => { const d = new Date(); d.setDate(d.getDate() + 14); return d; })}
+          {presetChip('30일 뒤', () => { const d = new Date(); d.setDate(d.getDate() + 30); return d; })}
+          {presetChip('이달 말', () => { const d = new Date(); return new Date(d.getFullYear(), d.getMonth() + 1, 0); })}
+        </div>
+      )}
+      <input
+        type="datetime-local"
+        value={toLocal(value)}
+        onChange={(e) => onChange(fromLocal(e.target.value))}
+        style={inputStyle}
+      />
+      {quickPresets && value && (
+        <div style={{ fontSize: 10, color: 'var(--dm-neutral-500)', marginTop: 3 }}>
+          선택된 마감: {(() => { try { const d = new Date(value); return isNaN(d.getTime()) ? value : d.toLocaleString('ko-KR', { year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' }); } catch { return value; } })()}
+        </div>
+      )}
+    </div>
   );
 }
 
