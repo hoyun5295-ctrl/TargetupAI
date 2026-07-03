@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { formatDate, formatPreviewValue, formatPhoneNumber, compactTimestamp } from '../utils/formatDate';
+import { formatDate, formatPreviewValue, formatPhoneNumber, compactTimestamp, formatIfIsoDate } from '../utils/formatDate';
 import { useToast } from './ToastProvider';
 
 interface CustomerDBModalProps {
@@ -361,7 +361,8 @@ export default function CustomerDBModal({ onClose, token, userType }: CustomerDB
   const baseKeys = new Set(baseDetailFields.map(f => f.key));
   const extraDetailFields = fieldColumns
     .filter(f => f.is_custom && !baseKeys.has(f.field_key))
-    .map(f => ({ key: f.field_key, label: f.field_label || f.display_name || f.field_key, format: undefined as ((v: any) => string) | undefined }));
+    // ★ 2026-07-03: 커스텀 값이 명백한 ISO 타임스탬프면 날짜 표시, 아니면 원본 그대로(D142)
+    .map(f => ({ key: f.field_key, label: f.field_label || f.display_name || f.field_key, format: ((v: any) => formatIfIsoDate(v) ?? (v != null ? String(v) : '-')) as ((v: any) => string) | undefined }));
   const detailFields = [...baseDetailFields, ...extraDetailFields];
 
   return (
@@ -591,7 +592,8 @@ export default function CustomerDBModal({ onClose, token, userType }: CustomerDB
                             </td>
                           );
                         } else {
-                          display = val != null ? String(val) : '-';
+                          // ★ 2026-07-03: 명백한 ISO 타임스탬프(싱크 custom 날짜)만 날짜 표시 — 그 외 원본 유지(D142)
+                          display = val != null ? (formatIfIsoDate(val) ?? String(val)) : '-';
                         }
                         return <td key={f.field_key} className="px-3 py-2.5 text-center text-xs text-gray-600 whitespace-nowrap">{display}</td>;
                       })}

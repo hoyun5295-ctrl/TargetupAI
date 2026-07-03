@@ -86,6 +86,21 @@ export function formatDate(dateStr: string | null | undefined): string {
 }
 
 /**
+ * ★ 2026-07-03: 값이 명백한 ISO 날짜/타임스탬프 문자열일 때만 날짜 표시(KST)로 변환.
+ *   싱크에이전트 custom 필드(Oracle DATE → JSONB ISO 직렬화)가 화면에 raw로 노출되는 문제 정정.
+ *   D142(커스텀=원본 그대로) 원칙의 예외는 오변환 여지 0인 이 패턴뿐 —
+ *   6/8자리 숫자·콤마·전화번호 등 기존 사고 패턴은 일절 건드리지 않는다(ISO 아니면 null 반환).
+ *   사용처: CustomerDBModal(목록 셀·상세 패널). 메시지 변수 치환 경로에는 미적용(미리보기=실발송 일치 유지).
+ */
+export function formatIfIsoDate(val: any): string | null {
+  if (val == null) return null;
+  const s = String(val).trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return formatDate(s);
+  if (/^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:?\d{2})?$/.test(s)) return formatDate(s);
+  return null;
+}
+
+/**
  * ★ D92: 변수 치환 미리보기용 포맷팅 — 프론트 전 경로의 유일한 포맷팅 함수
  *
  * - 날짜(ISO): "2025-03-01T00:00:00.000Z" → "2025. 3. 1."

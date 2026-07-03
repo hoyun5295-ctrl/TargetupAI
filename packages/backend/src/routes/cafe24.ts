@@ -65,24 +65,31 @@ router.post('/webhook', json({ limit: '1mb', verify: (req: any, _res, buf) => { 
       return res.status(400).json({ success: false, error: 'event 또는 mall_id를 식별할 수 없습니다.' });
     }
 
-    // 회사 식별 (mall_id → company_integrations)
-    const integration = await getCafe24IntegrationByMallId(mallId);
-    if (!integration) {
-      console.warn('[Cafe24 Webhook] 미연동 mall_id, 무시:', mallId);
-      return res.status(404).json({ success: false, error: '연동된 mall_id가 없습니다.' });
-    }
-
     // 인증 — X-API-Key(실제 방식, .env CAFE24_WEBHOOK_API_KEY) 우선, 구형 HMAC 서명 하위 호환
     const apiKeyHeader = (req.headers['x-api-key'] || req.headers['X-API-Key']) as string | undefined;
-    let authed = verifyCafe24WebhookApiKey(apiKeyHeader);
-    if (!authed) {
+    const apiKeyOk = verifyCafe24WebhookApiKey(apiKeyHeader);
+
+    // 회사 식별 (mall_id → company_integrations)
+    const integration = await getCafe24IntegrationByMallId(mallId);
+
+    if (!apiKeyOk) {
+      // 구형 HMAC 경로 — integration의 webhook_secret 필요
       const signature = (req.headers['x-cafe24-hmac-sha256'] || req.headers['X-Cafe24-Hmac-Sha256']) as string | undefined;
       const rawBody = (req as any).rawBody || JSON.stringify(req.body);
-      authed = verifyCafe24WebhookSignature(rawBody, signature || '', integration.webhookSecret);
+      const hmacOk = integration
+        ? verifyCafe24WebhookSignature(rawBody, signature || '', integration.webhookSecret)
+        : false;
+      if (!hmacOk) {
+        console.warn('[Cafe24 Webhook] 인증 실패 (X-API-Key/서명 모두 불일치), mall_id=', mallId);
+        return res.status(401).json({ success: false, error: '웹훅 인증에 실패했습니다.' });
+      }
     }
-    if (!authed) {
-      console.warn('[Cafe24 Webhook] 인증 실패 (X-API-Key/서명 모두 불일치), mall_id=', mallId);
-      return res.status(401).json({ success: false, error: '웹훅 인증에 실패했습니다.' });
+
+    if (!integration) {
+      // 인증은 통과(카페24 발신 확인)했으나 미연동 몰 — 개발자센터 TEST(샘플 몰ID)·연동 해제 몰 이벤트가 여기 해당.
+      // 404로 거부하면 카페24 실패 집계에 쌓여 "실패 100건+성공률 10% 미만 = 수신 자동 차단" 정책에 걸린다 → 200 무시.
+      console.log('[Cafe24 Webhook] 미연동 mall_id — 인증된 요청이라 200 무시:', mallId, 'event:', event);
+      return res.json({ success: true, ignored: true });
     }
 
     // idempotency_key — CT-85 단일 진입점 (event_no 전송 고유값 우선 + 본문 해시)
