@@ -71,6 +71,9 @@
 | 54 | url_clicks | 전단AI 클릭 로그 (Phase 1) |
 | 55 | login_blocks | 로그인 차단 (D145 P0, 2026-05-07 — IP+loginId 쌍 5회/10분 자동 차단 30분) |
 | 56 | company_agent_ids | 에이전트(QTmsg) 발송ID ↔ 회사 매핑 (2026-07-03 신설) |
+| 57 | customer_send_stats | 고객별 발송 누적 카운터 (2026-07-03 신설 — 예측 분모 전용. customer_id PK(FK customers CASCADE), company_id(idx), total_sent, last_sent_at. 고객당 1행) |
+| 58 | customer_send_stats_marks | 발송 카운터 캠페인 멱등 마커 (2026-07-03 신설 — campaign_ref varchar(120) PK, 재시도 중복 카운트 차단) |
+| - | ai_training_logs | 문안 학습 로그 (회사별 tenant_ref HMAC 격리). ★ 2026-07-03 실측: `ck_training_message_type` CHECK = message_type IN ('SMS','LMS','MMS','KAKAO','EMAIL','DM') — DM 추가(전 채널 학습 통합 Phase 1). 적재=fire-and-forget 격리(발송 무영향), source_ref 멱등 |
 
 ---
 

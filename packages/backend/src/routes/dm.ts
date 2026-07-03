@@ -19,8 +19,12 @@ import {
   createDm, updateDm, deleteDm, getDmList, getDmDetail, getDmByCode, cloneDm,
   publishDm, trackDmView, getDmStats, getDmRecipientEngagementRows,
   saveDmVersion, listDmVersions, restoreDmVersion, setApprovalStatus,
-  extractFlatSectionsFromDm, extractPagesFromDm,
+  extractFlatSectionsFromDm, extractPagesFromDm, extractDmCopyText,
 } from '../utils/dm/dm-builder';
+// ★ 2026-07-03 DM 문안 학습 코퍼스 적재 (전 채널 학습 통합 Phase 1)
+import { logCampaignTraining } from '../utils/training-logger';
+// ★ 2026-07-03 Gap5 Layer2: 고객별 발송 카운터 (예측 분모 전용 — 타겟 선정 무관)
+import { recordCustomerSends } from '../utils/customer-send-stats';
 import { renderDmViewerHtml, renderDmViewerHtmlWithCustomer, renderDmErrorHtml } from '../utils/dm/dm-viewer';
 import {
   parsePrompt, recommendLayout, generateCopy, transformTone, improveMessage,
@@ -754,6 +758,29 @@ dmRouter.post('/:id/send-to-target', async (req: any, res: any) => {
         return res.status(e.httpStatus || 400).json({ error: e.message, code: e.code, ...(e.extra || {}) });
       }
       throw e;
+    }
+
+    // ★ 2026-07-03 Gap5 Layer2: 고객별 발송 카운터 (예측 분모 전용, fire-and-forget — 발송·돈 무영향, campaignRef 멱등)
+    void recordCustomerSends({
+      companyId,
+      campaignRef: `dm:${campaignId}`,
+      customerIds: recipients.map((r: any) => String(r.id || '')).filter(Boolean),
+    });
+
+    // ★ 2026-07-03 DM 문안 학습 코퍼스 적재 (fire-and-forget, 발송·응답 무영향).
+    //   DM 카드 창작 문안 + isAd + 대상 수 → ai_training_logs(messageType='DM'). source_ref=dm.id 멱등(재발송 중복 0).
+    //   문안두뇌 RAG 검색·미래 학습 모델의 DM 원천. 열람 결과 라벨은 Phase 1d에서 환류.
+    const dmCopyText = extractDmCopyText(dm);
+    if (dmCopyText) {
+      logCampaignTraining({
+        campaignId: dm.id,
+        companyId,
+        messageType: 'DM',
+        isAd: isAd === true,
+        targetCount: sendCount,
+        finalMessage: dmCopyText,
+        finalSource: 'manual',
+      }).catch(() => { /* 학습 적재 실패는 발송에 영향 없음 */ });
     }
 
     return res.json({ success: true, campaignId, sent: sendCount });

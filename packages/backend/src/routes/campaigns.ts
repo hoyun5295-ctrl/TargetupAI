@@ -5,6 +5,8 @@ import { authenticate } from '../middlewares/auth';
 import { extractVarCatalog, validatePersonalizationVars, VarCatalogEntry } from '../services/ai';
 import { buildGenderFilter, buildGradeFilter, buildRegionFilter, getRegionVariants } from '../utils/normalize';
 import { getSourceRef, logTrainingData, updateTrainingMetrics } from '../utils/training-logger';
+// ★ 2026-07-03 Gap5 Layer2: 고객별 발송 카운터 (예측 분모 전용 — 타겟 선정 무관)
+import { recordCustomerSends } from '../utils/customer-send-stats';
 import { replaceVariables, enrichWithCustomFields, getOpt080Number, buildAdMessage, prepareFieldMappings, prepareSendMessage, stripAdParts } from '../utils/messageUtils';
 import { SUCCESS_CODES, PENDING_CODES, isSuccess, isFail, SPAM_RESULT } from '../utils/sms-result-map';
 import { DEFAULT_COSTS, redis, CACHE_TTL, BATCH_SIZES, SEND_HOURS } from '../config/defaults';
@@ -2103,6 +2105,14 @@ router.post('/direct-send', async (req: Request, res: Response) => {
         console.warn('[direct-send] campaign_runs INSERT 실패 (발송에 영향 없음):', runErr);
       }
     }
+
+    // ★ 2026-07-03 Gap5 Layer2: 고객별 발송 카운터 (예측 분모 전용, fire-and-forget — 발송·돈 무영향, campaignRef 멱등).
+    //   직접발송 recipients는 프론트 원천이라 customer id가 있는 행만 집계(주소록·엑셀 행 = id 없음 = 기존과 동일 미집계).
+    void recordCustomerSends({
+      companyId,
+      campaignRef: `ds:${campaignId}`,
+      customerIds: filteredRecipients.map((r: any) => String(r.id || '')).filter(Boolean),
+    });
 
     // ★ AI 학습 데이터 적재 — 직접발송 (비동기, 실패해도 발송에 영향 없음)
     const directCompanyInfo = await query('SELECT name, brand_tone FROM companies WHERE id = $1', [companyId]);

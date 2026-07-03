@@ -70,6 +70,36 @@ export function extractFlatSectionsFromDm(dm: any): any[] {
   return [];
 }
 
+// ★ 2026-07-03 DM 카드 창작 문안 추출 (문안 학습 코퍼스 ai_training_logs 적재용).
+//   섹션 props에서 카피성 텍스트 필드만 재귀 수집 → 대표 문안 1건. URL·색·id·enum은 제외.
+//   실패/빈 값이어도 throw 하지 않음(빈 문자열) — fire-and-forget 학습 적재 안전.
+const DM_COPY_KEY = /head|title|body|text|caption|desc|label|message|content|copy|sub/i;
+const DM_COPY_SKIP_KEY = /url|link|color|colour|_id|^id$|type|style|align|variant|icon|image|img|src|href|font|size|width|height/i;
+export function extractDmCopyText(dm: any): string {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  const walk = (val: any, keyHint?: string): void => {
+    if (val == null) return;
+    if (typeof val === 'string') {
+      const t = val.trim();
+      if (
+        keyHint && DM_COPY_KEY.test(keyHint) && !DM_COPY_SKIP_KEY.test(keyHint) &&
+        t.length >= 2 && !/^https?:\/\//i.test(t) && !seen.has(t)
+      ) {
+        seen.add(t);
+        out.push(t);
+      }
+      return;
+    }
+    if (Array.isArray(val)) { for (const v of val) walk(v, keyHint); return; }
+    if (typeof val === 'object') { for (const k of Object.keys(val)) walk(val[k], k); return; }
+  };
+  try {
+    for (const s of extractFlatSectionsFromDm(dm)) walk(s?.props, undefined);
+  } catch { /* 빈 문자열 반환 */ }
+  return out.join('\n').slice(0, 2000);
+}
+
 /**
  * DM에서 페이지 구조(DmPageGroup[]) 추출.
  * 없으면 sections를 단일 페이지로 감싸서 반환.

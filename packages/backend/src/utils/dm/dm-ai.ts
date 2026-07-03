@@ -12,6 +12,8 @@
  * 설계서: status/DM-PRO-DESIGN.md §9
  */
 import { callAIWithFallback } from '../../services/ai';
+// ★ 2026-07-03 DM 문안두뇌 주입 (전 채널 학습 통합 Phase 1c) — 회사 성과 DM 문안 RAG + 브랜드 키트
+import { composeCopyBrain } from '../copy-prompt-composer';
 import {
   SECTION_META, SECTION_DEFAULTS, type Section, type SectionType,
   createSection,
@@ -359,8 +361,20 @@ ${sectionHint}
 아래 JSON 스키마로만 응답:
 ${schema}`;
 
+  // ★ 2026-07-03 문안두뇌 주입 — 회사 성과 DM 문안 RAG + 브랜드 키트(시그니처·슬로건·금지어)를 시스템에 덧붙임.
+  //   companyId 있을 때만, 실패해도 기본 프롬프트로 그대로 생성(생성 무영향). isAd=true(DM=판촉 기본).
+  let genSystem = COPY_GEN_SYSTEM;
+  if (companyId) {
+    try {
+      const brain = await composeCopyBrain({ companyId, channels: ['DM'], isAd: true });
+      if (brain.promptSuffix) genSystem = COPY_GEN_SYSTEM + brain.promptSuffix;
+    } catch (err) {
+      console.warn('[copy-brain] DM generateCopy 주입 실패 — 기본 프롬프트로 진행:', (err as Error)?.message);
+    }
+  }
+
   const text = await callAIWithFallback({
-    system: COPY_GEN_SYSTEM,
+    system: genSystem,
     userMessage,
     maxTokens: 800,
     temperature: 0.8,

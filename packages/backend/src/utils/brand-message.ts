@@ -15,6 +15,8 @@ import { prepaidDeduct, prepaidRefund } from './prepaid';
 import { buildUnsubscribeExistsFilter } from './unsubscribe-helper';
 import { normalizePhone } from './normalize-phone';
 import { query } from '../config/database';
+// ★ 2026-07-03 KAKAO(브랜드메시지) 문안 학습 코퍼스 적재 (전 채널 학습 통합 Phase 2) — fire-and-forget, 발송 무영향
+import { logCampaignTraining } from './training-logger';
 
 // ============================================================
 // 상수 정의
@@ -374,6 +376,29 @@ export interface BrandSendResult {
   error?: string;
 }
 
+// ★ 2026-07-03 KAKAO 브랜드메시지 문안 학습 코퍼스 적재 (Phase 2 공통 헬퍼).
+//   ⚠️ 기간계 무영향: MySQL INSERT 루프 종료 후 · 미await fire-and-forget · try-catch 이중 격리.
+//   자유 본문(message) + campaignId 있을 때만 1회. source_ref=campaignId:brand 멱등(친구톡/알림톡과 키 분리).
+function logBrandKakaoTraining(
+  params: { companyId: string; campaignId?: string; message?: string; isAd?: boolean },
+  sentCount: number,
+): void {
+  try {
+    const msg = (params.message || '').trim();
+    if (sentCount > 0 && params.companyId && params.campaignId && msg) {
+      logCampaignTraining({
+        campaignId: `${params.campaignId}:brand`,
+        companyId: params.companyId,
+        messageType: 'KAKAO',
+        isAd: params.isAd === true,
+        targetCount: sentCount,
+        finalMessage: msg,
+        finalSource: 'manual',
+      }).catch(() => { /* 학습 적재 실패는 발송에 영향 없음 */ });
+    }
+  } catch { /* 학습 준비 실패도 발송 무영향 */ }
+}
+
 /**
  * 자유형 브랜드메시지 발송
  * - validation → 수신거부 필터 → 선불 차감 → MySQL INSERT → 결과 반환
@@ -459,6 +484,9 @@ export async function sendBrandMessage(params: BrandMessageParams): Promise<Bran
   if (failCount > 0) {
     await prepaidRefund(params.companyId, failCount, 'kakao', params.campaignId || '', '브랜드메시지 발송 실패분 환불');
   }
+
+  // ★ 2026-07-03 KAKAO 문안 학습 코퍼스 적재 (Phase 2, fire-and-forget)
+  logBrandKakaoTraining(params, sentCount);
 
   return { success: true, sentCount, failCount, campaignId: params.campaignId };
 }
@@ -552,6 +580,9 @@ export async function sendBrandMessageTemplate(params: BrandTemplateParams): Pro
   if (failCount > 0) {
     await prepaidRefund(params.companyId, failCount, 'kakao', params.campaignId || '', '브랜드메시지 발송 실패분 환불');
   }
+
+  // ★ 2026-07-03 KAKAO 문안 학습 코퍼스 적재 (Phase 2, fire-and-forget)
+  logBrandKakaoTraining(params, sentCount);
 
   return { success: true, sentCount, failCount, campaignId: params.campaignId };
 }

@@ -173,8 +173,13 @@ export async function retrieveCopyExamples(input: RetrieveInput): Promise<Retrie
   }
 
   const companyRows = companyRes.rows as TrainingRow[];
-  const examples = rankExamples(companyRows, industryRows, limit, MIN_COMPANY_SAMPLE, !!input.brandVoiceRegistered);
+  const ranked = rankExamples(companyRows, industryRows, limit, MIN_COMPANY_SAMPLE, !!input.brandVoiceRegistered);
   const industryFeatures = industryRows.length > 0 ? summarizeIndustryFeatures(industryRows) : null;
+
+  // ★ 2026-07-03 Phase4 격리 방어: 타사(industry) "원문"은 반환하지 않는다 — 업종은 구조·통계(industryFeatures)만.
+  //   조립기는 원래 company 소스만 원문 인용하므로 생성 결과 동일. 미래의 어떤 소비처가 examples를
+  //   그대로 프롬프트에 넣어도 타사 문장·시그니처 누출이 원천 차단된다(시그니처 누출 0 설계의 완결).
+  const examples = ranked.filter((e) => e.source === 'company');
 
   // 정직 폴백: 회사+업종 합계가 최소 표본 미만이면 빈 결과(가짜 예시 금지)
   if (companyRows.length + industryRows.length < MIN_TOTAL_SAMPLE) {

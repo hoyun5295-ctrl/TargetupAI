@@ -49,6 +49,8 @@ import { buildFilterWhereClauseCompat } from './customer-filter';
 import { buildSendableRecipientsSql } from './operator-recipients';
 import { createDirectSendCampaign } from './direct-send-core';
 import { DirectSendError } from './direct-send-spec';
+// ★ 2026-07-03 Gap5 Layer2: 고객별 발송 카운터 (예측 분모 전용 — 타겟 선정 무관)
+import { recordCustomerSends } from './customer-send-stats';
 // ★ Phase2 A (2026-06-26): 발송 본문 URL 단축 + 변이 추적(클릭→operator 변이 보상). journey-executor와 동일 패턴.
 import { shortenUrlsInText } from './short-url';
 // ★ Phase3 B (2026-06-26): 자율 발송 시각을 회사 클릭 반응 시간대로 개인화(데이터 부족 시 현행 폴백).
@@ -1369,6 +1371,13 @@ async function dispatchProposalSend(p: any): Promise<{ action: 'sent' | 'skipped
 
   // 발송 커밋 마커 — campaign_id 즉시 기록. 이후 최종 UPDATE가 실패해도 정리 패스가 'sent'로 마감(정지 방지·재발송 X).
   await query(`UPDATE operator_proposals SET campaign_id = $2::uuid WHERE id = $1::uuid`, [proposalId, campaignId]).catch((e: any) => console.warn('[ContinuousOperator AutoSend] campaign_id 기록 경고:', e?.message));
+
+  // ★ 2026-07-03 Gap5 Layer2: 고객별 발송 카운터 (예측 분모 전용, fire-and-forget — 발송·돈 무영향, campaignRef 멱등)
+  void recordCustomerSends({
+    companyId,
+    campaignRef: `op:${campaignId}`,
+    customerIds: rows.map((r: any) => String(r.id || '')).filter(Boolean),
+  });
 
   // 기능 크레딧 1회 차감 (멱등키 proposalId) — 발송 성공 시점에만
   await deductCreditSafe({

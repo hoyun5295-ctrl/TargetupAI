@@ -15,6 +15,8 @@ import { pickMemoriesToPrune } from './ai-memory-text';
 // ★ 2026-07-02(5) DM 참여 학습 — 추적 endpoint와 동일 CT로 수신자 행 집계 (이중 진실 차단)
 import { getDmRecipientEngagementRows, getDmDetail, extractFlatSectionsFromDm } from './dm/dm-builder';
 import { sanitizeSectionInteractions, sumSectionClicks, isDmCompleted, buildDmSectionLabel } from './dm/dm-tracking';
+// ★ 2026-07-03 DM 성과 라벨을 문안 학습 코퍼스(ai_training_logs)에도 환류 (전 채널 학습 통합 Phase 1d)
+import { getSourceRef, updateTrainingMetrics } from './training-logger';
 
 const INTERVAL_MS = 60 * 60 * 1000; // 1시간
 const INSIGHT_MIN_SAMPLE = 10;      // 등급별 최소 표본 (미만 = 인사이트 생성 보류)
@@ -222,6 +224,16 @@ async function accumulateDmEngagement(): Promise<number> {
         sentCount, viewedCount, completedCount, clickedCount, respondedCount, topSectionLabel,
       });
       if (ok) learned += 1;
+
+      // ★ 2026-07-03 DM 성과 라벨 → 문안 학습 코퍼스 환류 (fire-and-forget, 실패해도 워커 무영향).
+      //   source_ref=getSourceRef(dm_id) = 1b 발송 적재와 동일 키. success=열람(viewed, SMS 클릭에 상응).
+      //   updateTrainingMetrics는 절대값 SET이라 매 tick 최신 누적으로 덮어씀(멱등). 미적재 DM이면 0행 no-op.
+      updateTrainingMetrics({
+        sourceRef: getSourceRef(row.dm_id),
+        sentCount,
+        successCount: viewedCount,
+        failCount: Math.max(0, sentCount - viewedCount),
+      }).catch(() => { /* 학습 환류 실패는 워커·발송에 영향 없음 */ });
     } catch (err: any) {
       console.log(`[ai-memory-accumulator] dm=${row.dm_id} 오류 — ${err?.message || 'unknown'}`);
     }

@@ -75,8 +75,8 @@ interface TrainingLogParams {
   targetCount?: number;
   segmentKey?: string;
 
-  // 메시지
-  messageType: 'SMS' | 'LMS' | 'MMS' | 'KAKAO' | 'EMAIL';
+  // 메시지 (★ 2026-07-03 DM 추가 — 전 채널 학습 통합 Phase 1)
+  messageType: 'SMS' | 'LMS' | 'MMS' | 'KAKAO' | 'EMAIL' | 'DM';
   isAd: boolean;
   aiMessages?: string[];           // AI 제안 메시지 원문 배열
   selectedIndex?: number;          // 사용자가 선택한 인덱스 (0-based)
@@ -342,7 +342,7 @@ export async function logTrainingData(params: TrainingLogParams): Promise<void> 
 export async function logCampaignTraining(input: {
   campaignId: string;
   companyId: string;
-  messageType: 'SMS' | 'LMS' | 'MMS' | 'KAKAO' | 'EMAIL';
+  messageType: 'SMS' | 'LMS' | 'MMS' | 'KAKAO' | 'EMAIL' | 'DM'; // ★ 2026-07-03 DM 추가
   isAd: boolean;
   targetCount?: number;
   finalMessage: string;

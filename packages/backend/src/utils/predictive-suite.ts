@@ -100,8 +100,15 @@ export interface ModelAccuracy {
 
 const NEUTRAL_VALUE = 0.5;
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000;  // 24h
-const COLD_START_VERSION = 'v1.0-cold';
+// ★ 2026-07-03 Gap5 Layer1: cold-start가 실제 클릭 "횟수"를 반영하도록 공식 보정 → v1.1-cold.
+//   (기존엔 클릭 최근성 ±0.10만 반영 — 클릭 20회와 1회가 같은 점수였음. trained 공식은 불변 = v1.0-trained 유지)
+const COLD_START_VERSION = 'v1.1-cold';
 const TRAINED_VERSION = 'v1.0-trained';
+// cold-start 클릭 횟수 가산: 1회당 +0.02, 상한 +0.10 (등급 base 0.12~0.32 · 최근성 ±0.10과 동일 스케일의 보정 상수)
+const COLD_CLICK_COUNT_STEP = 0.02;
+const COLD_CLICK_COUNT_CAP = 0.10;
+// cold-start 구매가능성 클릭 보너스: trained 분기의 clickBoost(0.08)와 동일 상수 재사용
+const COLD_PURCHASE_CLICK_BOOST = 0.08;
 
 // 등급별 평균 (cold start fallback)
 const GRADE_AVG_CLICK: Record<string, number> = {
@@ -135,9 +142,12 @@ export async function computePredictions(
           WHERE customer_id = c.id AND event_name = 'message_click') AS total_clicks,
          (SELECT COUNT(*) FROM cdp_events
           WHERE customer_id = c.id AND event_name IN ('order', 'purchase')) AS total_orders,
+         -- ★ 2026-07-03 Gap5 Layer2: 분모 = 여정 발송 + 고객별 발송 카운터(직접발송·DM·자동마케팅) 합산.
+         --   두 소스는 배타적(여정은 카운터 미기록) — 중복 0. ⚠️ 벌크 SQL과 동일 합산 유지 의무.
          (SELECT COUNT(*) FROM journey_step_logs l
           JOIN journey_executions e ON e.id = l.execution_id
-          WHERE e.customer_id = c.id AND l.status = 'sent') AS total_sent,
+          WHERE e.customer_id = c.id AND l.status = 'sent')
+         + COALESCE((SELECT s.total_sent FROM customer_send_stats s WHERE s.customer_id = c.id), 0) AS total_sent,
          -- ★ D211+ Predictive 강화 (2026-05-23 Harold 명시): 채널 / 시간대 선호 영역
          (SELECT s.channel FROM journey_step_logs l
           JOIN journey_executions e ON e.id = l.execution_id
@@ -191,7 +201,12 @@ export async function computePredictions(
         if (daysSinceClick <= 30) adjust = 0.10;
         else if (daysSinceClick >= 60) adjust = -0.05;
       }
-      clickScore = clip(base + adjust, 0, 1);
+      // ★ 2026-07-03 Gap5 Layer1: 클릭 "횟수" 가산 (1회당 +0.02, 상한 +0.10).
+      //   발송 기록(total_sent)이 여정만 집계돼 cold에 머무는 직접발송 회사도, 이미 쌓인
+      //   실제 클릭(cdp_events message_click — 전 채널 단축URL)만큼은 점수에 반영한다.
+      //   ⚠️ 벌크 SQL(아래 UPSERT CTE)과 반드시 동일 공식 유지 — 한쪽만 수정 금지(이중 진실).
+      const clickCountBonus = Math.min(COLD_CLICK_COUNT_STEP * totalClicks, COLD_CLICK_COUNT_CAP);
+      clickScore = clip(base + adjust + clickCountBonus, 0, 1);
     }
 
     // ─── 이탈 위험 ─────────────────────────────────
@@ -217,7 +232,10 @@ export async function computePredictions(
       // Cold start: 등급별 평균 + 마지막 활동 보정
       const base = GRADE_AVG_PURCHASE[grade] ?? 0.10;
       const recencyBoost = daysSinceActivity <= 30 ? 0.10 : daysSinceActivity <= 90 ? 0 : -0.08;
-      purchaseLikelihood = clip(base + recencyBoost, 0, 1);
+      // ★ 2026-07-03 Gap5 Layer1: 클릭 실측 보너스 — trained 분기 clickBoost(0.08)와 동일 상수.
+      //   ⚠️ 벌크 SQL과 동일 공식 유지 의무.
+      const coldClickBoost = totalClicks > 0 ? COLD_PURCHASE_CLICK_BOOST : 0;
+      purchaseLikelihood = clip(base + recencyBoost + coldClickBoost, 0, 1);
     }
 
     // ━━━━ ★ D211+ Predictive 강화 (2026-05-23 Harold 명시): LTV + 다음 구매 + 채널/시간/톤 선호 ━━━━
@@ -591,8 +609,9 @@ export async function getCompanyPredictionSummary(companyId: string): Promise<Co
     const r = await query(
       `SELECT
          COUNT(*) AS total,
-         COUNT(*) FILTER (WHERE model_version = 'v1.0-cold') AS cold_count,
-         COUNT(*) FILTER (WHERE model_version = 'v1.0-trained') AS trained_count,
+         -- ★ 2026-07-03 Gap5 Layer1: cold 버전 bump(v1.1-cold) 대응 — 등호 대신 suffix 비교(버전 무관 영구 안전)
+         COUNT(*) FILTER (WHERE model_version LIKE '%-cold') AS cold_count,
+         COUNT(*) FILTER (WHERE model_version LIKE '%-trained') AS trained_count,
          COUNT(*) FILTER (WHERE churn_risk > 0.7) AS high_risk,
          COUNT(*) FILTER (WHERE purchase_likelihood > 0.6) AS high_potential,
          AVG(click_score) AS avg_click,
@@ -832,7 +851,8 @@ export async function listCompanyPredictionCustomers(
       case 'high_ltv': return `AND p.ltv_365d > (SELECT COALESCE(AVG(ltv_365d), 0) * 2 FROM cdp_customer_predictions WHERE company_id = $1::uuid)`;
       case 'first_purchase': return 'AND COALESCE(c.purchase_count, 0) = 0';
       case 'repurchase': return 'AND p.next_purchase_days BETWEEN 0 AND 14';
-      case 'cold_start': return `AND p.model_version = 'v1.0-cold'`;
+      // ★ 2026-07-03 Gap5 Layer1: cold 버전 bump(v1.1-cold) 대응 — suffix 비교(버전 무관 영구 안전)
+      case 'cold_start': return `AND p.model_version LIKE '%-cold'`;
       case 'all':
       default: return '';
     }
@@ -1066,7 +1086,8 @@ export async function computeCompanyPredictionsBatch(
           c.created_at,
           cl.last_click_at,
           COALESCE(cl.total_clicks, 0) AS total_clicks,
-          COALESCE(s.total_sent, 0) AS total_sent,
+          -- ★ 2026-07-03 Gap5 Layer2: 분모 = 여정 발송 + 고객별 발송 카운터 합산 (TS computePredictions와 동일 의무)
+          COALESCE(s.total_sent, 0) + COALESCE(css.total_sent, 0) AS total_sent,
           GREATEST(
             COALESCE(c.recent_purchase_date, '1970-01-01'::timestamptz),
             COALESCE(cl.last_click_at, '1970-01-01'::timestamptz),
@@ -1086,6 +1107,8 @@ export async function computeCompanyPredictionsBatch(
         FROM base_customers c
         LEFT JOIN click_events cl ON cl.customer_id = c.id
         LEFT JOIN sent_logs s ON s.customer_id = c.id
+        -- ★ 2026-07-03 Gap5 Layer2: 고객별 발송 카운터 (PK JOIN — 비용 무시 수준)
+        LEFT JOIN customer_send_stats css ON css.customer_id = c.id
       ),
       computed AS (
         SELECT
@@ -1112,6 +1135,8 @@ export async function computeCompanyPredictionsBatch(
                     WHEN EXTRACT(EPOCH FROM (NOW() - last_click_at)) / 86400 >= 60 THEN -0.05
                     ELSE 0
                   END)
+                -- ★ 2026-07-03 Gap5 Layer1: 클릭 횟수 가산 (1회당 +0.02, 상한 +0.10) — TS computePredictions와 동일 공식 의무
+                + LEAST(0.02 * total_clicks, 0.10)
               )::numeric))
           END AS click_score,
           -- churn_risk = sigmoid((daysSinceActivity - 60) / 20) — 60일 0.5, 90일 0.78, 120일 0.95
@@ -1145,6 +1170,8 @@ export async function computeCompanyPredictionsBatch(
                     WHEN EXTRACT(EPOCH FROM (NOW() - last_activity_at)) / 86400 <= 90 THEN 0
                     ELSE -0.08
                   END)
+                -- ★ 2026-07-03 Gap5 Layer1: 클릭 실측 보너스 (trained clickBoost 0.08 동일 상수) — TS와 동일 공식 의무
+                + (CASE WHEN total_clicks > 0 THEN 0.08 ELSE 0 END)
               )::numeric))
           END AS purchase_likelihood,
           -- ★ D211+ Predictive 강화 (2026-05-23 Harold 명시): recency_factor 영역
@@ -1181,7 +1208,8 @@ export async function computeCompanyPredictionsBatch(
         ROUND(avg_purchase_amount * purchase_likelihood * 12 * recency_factor)::int,
         next_purchase_days,
         NOW(),
-        CASE WHEN total_sent >= 3 THEN 'v1.0-trained' ELSE 'v1.0-cold' END
+        -- ★ 2026-07-03 Gap5 Layer1: cold 공식 보정 → v1.1-cold (TS COLD_START_VERSION과 동일 유지 의무)
+        CASE WHEN total_sent >= 3 THEN 'v1.0-trained' ELSE 'v1.1-cold' END
       FROM computed
       ON CONFLICT (customer_id) DO UPDATE SET
         click_score = EXCLUDED.click_score,
