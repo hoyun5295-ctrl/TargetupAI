@@ -399,7 +399,9 @@ export async function cafe24ApiCall<T = unknown>(
   const headers: Record<string, string> = {
     Authorization: `Bearer ${fresh.accessToken}`,
     'Content-Type': 'application/json',
-    'X-Cafe24-Api-Version': '2024-09-01',
+    // ★ 2026-07-03 실측 정정 — 앱 API 버전(개발자센터 설정)이 2026-03-01. 옛 2024-09-01은 이 앱에서 미제공(400).
+    //   (gyunoo83 scripttags GET raw 응답: "2024-09-01 version ... not available. default ... 2026-03-01")
+    'X-Cafe24-Api-Version': '2026-03-01',
   };
 
   const fetchOpts: RequestInit = {
