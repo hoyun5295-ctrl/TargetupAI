@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { customersApi, manageUsersApi } from '../api/client';
 import { formatDateTime } from '../utils/formatDate';
 
@@ -47,6 +47,15 @@ export default function CustomersTab() {
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<{ type: 'individual' | 'bulk'; customer?: Customer; count?: number } | null>(null);
   const [deleteLoading, setDeleteLoading] = useState(false);
+
+  // ★ 2026-07-03: 구매 이력 모달
+  const [purchaseCustomer, setPurchaseCustomer] = useState<Customer | null>(null);
+  const [purchaseLoading, setPurchaseLoading] = useState(false);
+  const [purchaseData, setPurchaseData] = useState<{
+    summary: { totalCount: number; totalAmount: number };
+    purchases: Array<{ purchase_date: string; total_amount: number; quantity: number; store_code: string; store_name: string }>;
+    pagination: Pagination;
+  } | null>(null);
 
   // 토스트
   const [toast, setToast] = useState<{ msg: string; type: 'success' | 'error' } | null>(null);
@@ -109,6 +118,43 @@ export default function CustomersTab() {
     } else {
       setSelectedIds(new Set(customers.map(c => c.id)));
     }
+  };
+
+  // ★ 2026-07-03: 구매 이력 조회 (열기 + 페이지 이동 공용)
+  //   요청 카운터 가드 — 연타/늦은 응답이 다른 고객 모달을 오염·강제 종료하지 않게 최신 요청만 반영
+  const purchaseReqRef = useRef(0);
+  const loadPurchases = async (customer: Customer, page = 1) => {
+    const reqId = ++purchaseReqRef.current;
+    const isInitial = purchaseCustomer?.id !== customer.id || !purchaseData;
+    setPurchaseCustomer(customer);
+    if (isInitial) setPurchaseData(null);
+    setPurchaseLoading(true);
+    try {
+      const res = await customersApi.purchases(customer.id, { page, limit: 20 });
+      if (purchaseReqRef.current !== reqId) return;
+      setPurchaseData({
+        summary: res.data.summary || { totalCount: 0, totalAmount: 0 },
+        purchases: res.data.purchases || [],
+        pagination: res.data.pagination || { total: 0, page, limit: 20, totalPages: 0 },
+      });
+    } catch (e: any) {
+      if (purchaseReqRef.current !== reqId) return;
+      setToast({ msg: e.response?.data?.error || '구매 이력 조회 실패', type: 'error' });
+      // 최초 열기 실패만 모달 닫기 — 페이지 이동 실패는 보던 데이터 유지
+      if (isInitial) {
+        setPurchaseCustomer(null);
+        setPurchaseData(null);
+      }
+    } finally {
+      if (purchaseReqRef.current === reqId) setPurchaseLoading(false);
+    }
+  };
+
+  const closePurchaseModal = () => {
+    purchaseReqRef.current++; // 진행 중 요청 무효화
+    setPurchaseCustomer(null);
+    setPurchaseData(null);
+    setPurchaseLoading(false);
   };
 
   // 개별 삭제 확인
@@ -242,14 +288,15 @@ export default function CustomersTab() {
                 <th className="px-4 py-3 text-right font-medium text-gray-600">총구매액</th>
                 <th className="px-4 py-3 text-center font-medium text-gray-600">최근구매</th>
                 <th className="px-4 py-3 text-center font-medium text-gray-600">등록일</th>
+                <th className="px-4 py-3 text-center font-medium text-gray-600 w-20">구매이력</th>
                 <th className="px-4 py-3 text-center font-medium text-gray-600 w-16">삭제</th>
               </tr>
             </thead>
             <tbody className="divide-y">
               {loading ? (
-                <tr><td colSpan={12} className="text-center py-12 text-gray-400">불러오는 중...</td></tr>
+                <tr><td colSpan={13} className="text-center py-12 text-gray-400">불러오는 중...</td></tr>
               ) : customers.length === 0 ? (
-                <tr><td colSpan={12} className="text-center py-12 text-gray-400">고객 데이터가 없습니다</td></tr>
+                <tr><td colSpan={13} className="text-center py-12 text-gray-400">고객 데이터가 없습니다</td></tr>
               ) : customers.map((c) => (
                 <tr key={c.id} className={`hover:bg-gray-50 transition ${selectedIds.has(c.id) ? 'bg-blue-50/50' : ''}`}>
                   <td className="px-4 py-3 text-center">
@@ -287,6 +334,15 @@ export default function CustomersTab() {
                     {c.created_at ? formatDateTime(c.created_at) : '-'}
                   </td>
                   <td className="px-4 py-3 text-center">
+                    <button onClick={() => loadPurchases(c)}
+                      className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition"
+                      title="구매 이력">
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 11V7a4 4 0 00-8 0v4M5 9h14l1 12H4L5 9z" />
+                      </svg>
+                    </button>
+                  </td>
+                  <td className="px-4 py-3 text-center">
                     <button onClick={() => confirmDeleteOne(c)}
                       className="p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition"
                       title="삭제">
@@ -322,6 +378,97 @@ export default function CustomersTab() {
           </div>
         )}
       </div>
+
+      {/* ★ 2026-07-03: 구매 이력 모달 */}
+      {purchaseCustomer && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 animate-in fade-in"
+          onMouseDown={(e) => { if (e.target === e.currentTarget) closePurchaseModal(); }}>
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[85vh] flex flex-col animate-in zoom-in-95 fade-in duration-200">
+            {/* 헤더 */}
+            <div className="flex items-start justify-between p-5 border-b">
+              <div>
+                <h3 className="text-lg font-bold text-gray-900">구매 이력</h3>
+                <p className="text-sm text-gray-500 mt-0.5">
+                  {purchaseCustomer.name || '-'} · {purchaseCustomer.phone}
+                </p>
+              </div>
+              <button onClick={closePurchaseModal}
+                className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition" title="닫기">
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+
+            {/* 요약 — 페이지 이동 중에도 유지(총계는 불변, 깜빡임 방지) */}
+            {purchaseData && (
+              <div className="flex gap-2 px-5 pt-4">
+                <span className="px-2.5 py-1 bg-blue-50 text-blue-700 rounded-full text-xs font-medium">
+                  총 {purchaseData.summary.totalCount.toLocaleString()}건
+                </span>
+                <span className="px-2.5 py-1 bg-emerald-50 text-emerald-700 rounded-full text-xs font-medium">
+                  총 구매액 {Number(purchaseData.summary.totalAmount).toLocaleString()}원
+                </span>
+              </div>
+            )}
+
+            {/* 목록 */}
+            <div className="flex-1 overflow-y-auto p-5">
+              {purchaseLoading ? (
+                <div className="text-center py-12 text-gray-400">불러오는 중...</div>
+              ) : !purchaseData || purchaseData.purchases.length === 0 ? (
+                <div className="text-center py-12 text-gray-400">구매 이력이 없습니다</div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead className="bg-gray-50 border-b">
+                      <tr>
+                        <th className="px-3 py-2 text-left font-medium text-gray-600">구매일</th>
+                        <th className="px-3 py-2 text-right font-medium text-gray-600">금액</th>
+                        <th className="px-3 py-2 text-center font-medium text-gray-600">수량</th>
+                        <th className="px-3 py-2 text-left font-medium text-gray-600">매장</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y">
+                      {purchaseData.purchases.map((p, i) => (
+                        <tr key={i} className="hover:bg-gray-50 transition">
+                          <td className="px-3 py-2 text-left text-gray-700">{p.purchase_date || '-'}</td>
+                          <td className="px-3 py-2 text-right text-gray-800 font-medium">{formatAmount(p.total_amount)}</td>
+                          <td className="px-3 py-2 text-center text-gray-600">{p.quantity ?? '-'}</td>
+                          <td className="px-3 py-2 text-left text-gray-600 text-xs">{p.store_name || p.store_code || '-'}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+
+            {/* 페이지네이션 + 닫기 */}
+            <div className="flex items-center justify-between px-5 py-3 border-t bg-gray-50 rounded-b-2xl">
+              <div className="text-sm text-gray-500">
+                {purchaseData && purchaseData.pagination.totalPages > 1
+                  ? `${purchaseData.pagination.page} / ${purchaseData.pagination.totalPages} 페이지`
+                  : ''}
+              </div>
+              <div className="flex gap-1">
+                {purchaseData && purchaseData.pagination.totalPages > 1 && (
+                  <>
+                    <button onClick={() => loadPurchases(purchaseCustomer, purchaseData.pagination.page - 1)}
+                      disabled={purchaseLoading || purchaseData.pagination.page === 1}
+                      className="px-3 py-1.5 text-sm border rounded-lg disabled:opacity-30 hover:bg-white transition">‹</button>
+                    <button onClick={() => loadPurchases(purchaseCustomer, purchaseData.pagination.page + 1)}
+                      disabled={purchaseLoading || purchaseData.pagination.page === purchaseData.pagination.totalPages}
+                      className="px-3 py-1.5 text-sm border rounded-lg disabled:opacity-30 hover:bg-white transition">›</button>
+                  </>
+                )}
+                <button onClick={closePurchaseModal}
+                  className="px-4 py-1.5 text-sm font-medium border rounded-lg hover:bg-white transition ml-2">닫기</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* 삭제 확인 모달 */}
       {showDeleteModal && deleteTarget && (

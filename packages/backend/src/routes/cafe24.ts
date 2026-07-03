@@ -28,6 +28,7 @@ import {
   getCafe24Integration,
   getCafe24IntegrationByMallId,
   verifyCafe24WebhookSignature,
+  verifyCafe24WebhookApiKey,
   cafe24Adapter,
   saveCafe24ByoCredentials,
   getCafe24ByoCredentials,
@@ -54,12 +55,14 @@ const router = Router();
  */
 router.post('/webhook', json({ limit: '1mb', verify: (req: any, _res, buf) => { req.rawBody = buf; } }), async (req: Request, res: Response) => {
   try {
-    const event = (req.headers['x-cafe24-event'] || req.headers['X-Cafe24-Event']) as string | undefined;
-    const signature = (req.headers['x-cafe24-hmac-sha256'] || req.headers['X-Cafe24-Hmac-Sha256']) as string | undefined;
-    const mallId = (req.headers['x-cafe24-mall-id'] || req.headers['X-Cafe24-Mall-Id'] || req.body?.resource?.mall_id) as string | undefined;
+    // ★ 2026-07-03 공식 문서 실측 정정 — 실제 형식: X-API-Key 헤더 인증 + 본문 { event_no, resource }.
+    //   이벤트 식별: (구형 가정) X-Cafe24-Event 헤더 하위 호환 → body.event_no 매핑 (CT mapCafe24EventNo).
+    const event = cafe24Adapter.extractEventFromWebhook(req.headers as any, req.body || {});
+    const mallId = cafe24Adapter.extractMallIdFromWebhook(req.headers as any, req.body || {});
 
     if (!event || !mallId) {
-      return res.status(400).json({ success: false, error: 'event 또는 mall_id 헤더가 누락되었습니다.' });
+      console.warn('[Cafe24 Webhook] event/mall_id 식별 실패 — event_no:', req.body?.event_no, 'mall_id:', mallId);
+      return res.status(400).json({ success: false, error: 'event 또는 mall_id를 식별할 수 없습니다.' });
     }
 
     // 회사 식별 (mall_id → company_integrations)
@@ -69,12 +72,17 @@ router.post('/webhook', json({ limit: '1mb', verify: (req: any, _res, buf) => { 
       return res.status(404).json({ success: false, error: '연동된 mall_id가 없습니다.' });
     }
 
-    // 서명 검증
-    const rawBody = (req as any).rawBody || JSON.stringify(req.body);
-    const isValid = verifyCafe24WebhookSignature(rawBody, signature || '', integration.webhookSecret);
-    if (!isValid) {
-      console.warn('[Cafe24 Webhook] 서명 검증 실패, mall_id=', mallId);
-      return res.status(401).json({ success: false, error: '서명 검증에 실패했습니다.' });
+    // 인증 — X-API-Key(실제 방식, .env CAFE24_WEBHOOK_API_KEY) 우선, 구형 HMAC 서명 하위 호환
+    const apiKeyHeader = (req.headers['x-api-key'] || req.headers['X-API-Key']) as string | undefined;
+    let authed = verifyCafe24WebhookApiKey(apiKeyHeader);
+    if (!authed) {
+      const signature = (req.headers['x-cafe24-hmac-sha256'] || req.headers['X-Cafe24-Hmac-Sha256']) as string | undefined;
+      const rawBody = (req as any).rawBody || JSON.stringify(req.body);
+      authed = verifyCafe24WebhookSignature(rawBody, signature || '', integration.webhookSecret);
+    }
+    if (!authed) {
+      console.warn('[Cafe24 Webhook] 인증 실패 (X-API-Key/서명 모두 불일치), mall_id=', mallId);
+      return res.status(401).json({ success: false, error: '웹훅 인증에 실패했습니다.' });
     }
 
     // idempotency_key — CT-85 단일 진입점 (event_no 전송 고유값 우선 + 본문 해시)

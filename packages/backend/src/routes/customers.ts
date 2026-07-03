@@ -1583,6 +1583,78 @@ router.post('/delete-all', blockIfSyncActive, async (req: Request, res: Response
 });
 
 // GET /api/customers/:id - 고객 상세 (⚠️ 반드시 맨 아래! 위의 라우트보다 뒤에 있어야 함)
+// ★ 2026-07-03: 고객별 구매 이력 조회 — 구매 데이터를 눈으로 볼 화면 부재(직원 요청)
+//   구매=돈 데이터라 B16-01 매장 스코프(목록 GET /와 동일 격리) 적용. LIMIT/OFFSET는 id DESC tie-breaker 필수(D150-4).
+router.get('/:id/purchases', async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    const userId = req.user?.userId;
+    const userType = req.user?.userType;
+    const { id } = req.params;
+    if (!companyId) {
+      return res.status(403).json({ error: '회사 권한이 필요합니다' });
+    }
+    // 비-uuid는 PG 22P02(500) 전에 404로 차단
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) {
+      return res.status(404).json({ error: '고객을 찾을 수 없습니다.' });
+    }
+
+    const pageRaw = Number(req.query.page);
+    const page = Number.isFinite(pageRaw) && pageRaw >= 1 ? Math.min(Math.floor(pageRaw), 100000) : 1;
+    const limitRaw = Number(req.query.limit);
+    const limit = Number.isFinite(limitRaw) && limitRaw >= 1 ? Math.min(Math.floor(limitRaw), 100) : 20;
+    const offset = (page - 1) * limit;
+
+    // ★ B16-01: company_user 브랜드(store_code) 격리 — 목록 라우트와 동일 패턴
+    let scopeClause = '';
+    const custParams: any[] = [id, companyId];
+    if (userType === 'company_user' && userId) {
+      const scope = await getStoreScope(companyId, userId);
+      if (scope.type === 'blocked') {
+        return res.status(404).json({ error: '고객을 찾을 수 없습니다.' });
+      }
+      if (scope.type === 'filtered') {
+        scopeClause = ' AND id IN (SELECT customer_id FROM customer_stores WHERE company_id = $2 AND store_code = ANY($3::text[]))';
+        custParams.push(scope.storeCodes);
+      }
+    }
+
+    const cust = await query(
+      `SELECT id, name, phone FROM customers WHERE id = $1 AND company_id = $2 AND is_active = true${scopeClause}`,
+      custParams
+    );
+    if (cust.rows.length === 0) {
+      return res.status(404).json({ error: '고객을 찾을 수 없습니다.' });
+    }
+
+    const [summary, list] = await Promise.all([
+      query(
+        'SELECT COUNT(*)::int AS total_count, COALESCE(SUM(total_amount), 0) AS total_amount FROM purchases WHERE customer_id = $1 AND company_id = $2',
+        [id, companyId]
+      ),
+      query(
+        `SELECT TO_CHAR(purchase_date, 'YYYY-MM-DD') AS purchase_date, total_amount, quantity, store_code, store_name
+         FROM purchases
+         WHERE customer_id = $1 AND company_id = $2
+         ORDER BY purchase_date DESC, id DESC
+         LIMIT $3 OFFSET $4`,
+        [id, companyId, limit, offset]
+      ),
+    ]);
+
+    const totalCount = summary.rows[0]?.total_count || 0;
+    res.json({
+      customer: cust.rows[0],
+      summary: { totalCount, totalAmount: Number(summary.rows[0]?.total_amount || 0) },
+      purchases: list.rows,
+      pagination: { total: totalCount, page, limit, totalPages: Math.ceil(totalCount / limit) },
+    });
+  } catch (error) {
+    console.error('고객 구매 이력 조회 에러:', error);
+    res.status(500).json({ error: '구매 이력 조회 실패' });
+  }
+});
+
 router.get('/:id', async (req: Request, res: Response) => {
   try {
     const companyId = req.user?.companyId;

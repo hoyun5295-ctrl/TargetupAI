@@ -72,6 +72,8 @@ export const customersApi = {
   list: (params?: any) => api.get('/customers', { params }),
   deleteOne: (id: string) => api.delete(`/customers/${id}`),
   bulkDelete: (ids: string[]) => api.post('/customers/bulk-delete', { ids }),
+  // ★ 2026-07-03: 고객별 구매 이력
+  purchases: (id: string, params?: any) => api.get(`/customers/${id}/purchases`, { params }),
 };
 
 export default api;

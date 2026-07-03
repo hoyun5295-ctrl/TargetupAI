@@ -24,7 +24,7 @@
  */
 
 import { query } from '../config/database';
-import { createHmac } from 'crypto';
+import { createHmac, timingSafeEqual } from 'crypto';
 import {
   IProviderAdapter,
   ProviderCapabilities,
@@ -447,6 +447,54 @@ export function verifyCafe24WebhookSignature(rawBody: Buffer | string, signature
   }
 }
 
+/**
+ * ★ 2026-07-03 실측 정정 — 카페24 WebHook 실제 인증 = X-API-Key 헤더 (공식 WebHook 안내 문서).
+ * 개발자센터 [개발정보 관리]의 WebHook 인증정보 값이 X-API-Key로 그대로 전송된다.
+ * 서버 .env CAFE24_WEBHOOK_API_KEY와 timing-safe 비교. env 미설정 = 검증 불가 = false.
+ */
+export function verifyCafe24WebhookApiKey(headerKey: string | undefined | null): boolean {
+  const expected = process.env.CAFE24_WEBHOOK_API_KEY || '';
+  if (!expected || !headerKey) return false;
+  try {
+    const a = Buffer.from(String(headerKey), 'utf8');
+    const b = Buffer.from(expected, 'utf8');
+    if (a.length !== b.length) return false;
+    return timingSafeEqual(a, b);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * ★ 2026-07-03 실측 정정 — 카페24 WebHook 본문은 { event_no, resource } 형식 (X-Cafe24-Event 헤더 없음).
+ * 공식 "수신 가능 이벤트 및 필요 권한" 표의 이벤트 번호 → 내부 이벤트 문자열 매핑.
+ * 등록 이벤트(2026-07-03): 90023/90025/90026/90029/90084 (주문·장바구니). 회원(90032/90080/90144)은
+ * 개인정보(Privacy) 권한 확보 후 등록 예정 — 매핑은 미리 준비.
+ */
+const CAFE24_EVENT_NO_MAP: Record<number, string> = {
+  // 회원
+  90032: 'customer.created',   // 신규 회원 가입
+  90080: 'customer.updated',   // 회원정보 변경
+  90144: 'customer.updated',   // 회원 등급 변경
+  // 주문
+  90023: 'order.created',      // 주문 접수
+  90024: 'order.updated',      // 배송상태 변경
+  90071: 'order.updated',      // 배송상태 변경(일괄)
+  90025: 'order.updated',      // 입금상태 변경
+  90026: 'order.cancelled',    // 취소상태 변경
+  90072: 'order.cancelled',    // 취소상태 변경(일괄)
+  90029: 'order.refunded',     // 환불상태 변경
+  90073: 'order.refunded',     // 환불상태 변경(일괄)
+  // 장바구니
+  90084: 'cart.added',         // 상품이 장바구니에 담긴 경우
+};
+
+export function mapCafe24EventNo(eventNo: unknown): string | null {
+  const n = Number(eventNo);
+  if (!isFinite(n)) return null;
+  return CAFE24_EVENT_NO_MAP[n] || null;
+}
+
 // ════════════════════════════════════════════════════════════════════
 // 헬퍼
 // ════════════════════════════════════════════════════════════════════
@@ -591,6 +639,29 @@ export const cafe24Adapter: IProviderAdapter = {
         });
         break;
 
+      case 'cart.added':
+        // ★ 2026-07-03 — 장바구니 웹훅(90084). SDK 미설치 몰에서도 cart_add 신호 확보 (성과리포트 퍼널 축과 동일 이벤트명).
+        // 비회원 장바구니(member_id 없음)는 고객 매칭 불가 — 기록 생략 (deliveries 원문은 이미 저장됨).
+        {
+          const cartExternalId = String(resource.member_id || resource.customer_id || '');
+          if (!cartExternalId) {
+            console.log('[Cafe24 Adapter] cart.added 비회원 — 고객 매칭 생략');
+            break;
+          }
+          await trackEvent(companyId, {
+            source: 'cafe24',
+            eventName: 'cart_add',
+            externalId: cartExternalId,
+            properties: {
+              product_no: resource.product_no,
+              product_name: resource.product_name,
+              quantity: resource.quantity,
+            },
+            occurredAt: resource.created_date || new Date().toISOString(),
+          });
+        }
+        break;
+
       default:
         console.log(`[Cafe24 Adapter] 처리하지 않는 event: ${event}`);
     }
@@ -602,10 +673,11 @@ export const cafe24Adapter: IProviderAdapter = {
     return body?.resource?.mall_id || null;
   },
 
-  extractEventFromWebhook(headers, _body): string | null {
+  extractEventFromWebhook(headers, body): string | null {
+    // 구형(가정) 헤더 하위 호환 → 실제 형식(body.event_no) 순서로 식별 (2026-07-03 공식 문서 실측 정정)
     const fromHeader = headers['x-cafe24-event'] || headers['X-Cafe24-Event'];
-    if (!fromHeader) return null;
-    return Array.isArray(fromHeader) ? fromHeader[0] : fromHeader;
+    if (fromHeader) return Array.isArray(fromHeader) ? fromHeader[0] : fromHeader;
+    return mapCafe24EventNo(body?.event_no);
   },
 
   buildIdempotencyKey(event: string, resource: Record<string, any>, body: Record<string, any>): string {
