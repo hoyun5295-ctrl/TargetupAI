@@ -12,7 +12,7 @@ import { splitLiveAndLogTables, mergeCampaignCounts, type CampaignAggCounts } fr
 import { splitLinesByMsgType } from './sms-line-split';
 import { toQtmsgType } from './qtmsg-type';
 // ★ 2026-07-03 KAKAO 문안 학습 코퍼스 적재 (전 채널 학습 통합 Phase 2) — fire-and-forget, 발송 무영향
-import { logCampaignTraining } from './training-logger';
+import { logCampaignTraining, getSourceRef } from './training-logger';
 
 export type { CampaignAggCounts } from './sms-table-split';
 
@@ -984,14 +984,22 @@ export async function insertAlimtalkQueue(
   }
 
   // ★ 2026-07-03 KAKAO(알림톡) 문안 학습 코퍼스 적재 (Phase 2).
-  //   ⚠️ 기간계 무영향: 큐 INSERT 완료 후 · 미await fire-and-forget · try-catch 이중 격리 · return 값/타이밍 불변.
+  //   ⚠️ 기간계 무영향: 큐 INSERT 완료 후 · 미await 비동기 IIFE(fire-and-forget) · try-catch 이중 격리 · return 값/타이밍 불변.
   //   알림톡 4경로(직접발송/자동캠페인/direct-send-processor/여정)의 단일 길목 = 여기서 1회 커버.
   //   알림톡=승인 템플릿(정보성) → isAd=false. 캠페인당 1회(대표 rows[0] 본문, PII는 maskForTraining이 마스킹).
   //   source_ref=appEtc1:kakao 멱등(재호출 중복 0). companyId/appEtc1/본문 없으면 skip.
-  try {
-    const first = rows[0];
-    if (appEtc1 && first?.companyId && first?.message) {
-      logCampaignTraining({
+  //   ★ 2026-07-03 중복 가드(실측 결함 fix): 커밋/예약 경로는 createDirectSendCampaign가 이미 같은 캠페인의
+  //     KAKAO 문안을 적재(source_ref=hmac(appEtc1)) — 그 행이 있으면 skip해 같은 발송 2행 적재를 차단.
+  void (async () => {
+    try {
+      const first = rows[0];
+      if (!appEtc1 || !first?.companyId || !first?.message) return;
+      const dup = await query(
+        `SELECT 1 FROM ai_training_logs WHERE source_ref = $1 LIMIT 1`,
+        [getSourceRef(appEtc1)],
+      );
+      if (dup.rows.length > 0) return; // 기존 경로가 이미 이 캠페인 문안을 적재함
+      await logCampaignTraining({
         campaignId: `${appEtc1}:kakao`,
         companyId: first.companyId,
         messageType: 'KAKAO',
@@ -999,9 +1007,9 @@ export async function insertAlimtalkQueue(
         targetCount: inserted,
         finalMessage: first.message,
         finalSource: 'manual',
-      }).catch(() => { /* 학습 적재 실패는 발송에 영향 없음 */ });
-    }
-  } catch { /* 학습 준비 실패도 발송 무영향 */ }
+      });
+    } catch { /* 학습 적재 실패는 발송에 영향 없음 */ }
+  })();
 
   return inserted;
 }
