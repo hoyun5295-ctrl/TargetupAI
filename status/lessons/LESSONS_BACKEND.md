@@ -17,6 +17,19 @@
 
 ---
 
+## 자사몰 연동 API 실측 (카페24·고도몰) — 2026-07-03 추가
+
+### 외부 몰 Open API 연동 = raw 에러가 스펙이다
+- **파트너키+상점키 이중 구조 + 상점 동의 필수**: 카페24 OAuth(앱 승인) / 고도몰 partner_key(env, 전사)+key(몰별). 데이터 주인(몰)이 승인해야 함 — "우리만으로 처리"는 불가. 몰별 key는 실제 개설된 몰이 있어야 발급된다.
+- **API 버전은 앱 등록 버전에 맞춘다**: 카페24 `X-Cafe24-Api-Version`이 앱 버전과 다르면 400("version not available. default 2026-03-01"). raw 응답이 정답 버전을 알려줌 — 추측 말고 실측(feedback_external_api_response_verification).
+- **scripttag src는 CORS `Access-Control-Allow-Origin:*` 필수**(422). nginx 정적 파일엔 CORS 헤더가 없어, backend가 `/api/...` 경로로 파일을 읽어 CORS+CORP(helmet 기본 same-origin 덮기) 헤더와 함께 서빙하고 그 URL을 src로 등록. `.js` 경로가 nginx 정적에 가로채이지 않는지 curl로 본문·헤더 확인.
+- **스크립트 자동삽입 API 유무가 turnkey를 가른다**: 카페24=scripttags API로 자동삽입 / 고도몰=삽입 API 없음 → 고객사가 스킨에 수동 삽입(치환코드 `{=gSess.memNo}` 등). 화면에 복붙 블록 제공이 최선.
+- **브라우저 SDK page_view는 몰 도메인이 cdp_allowed_origins에 있어야**(requireCdpBrowserOrigin 403). 연동 시 자동 등록 안 하면 SDK 깔아도 수집 0.
+
+### 연동 상태는 실제 검증 후에만 connected (6원칙②)
+- `getXxxIntegration`이 status 무필터로 행을 반환하면 revoked·pending도 "연동됨"으로 오보고(카페24 revoked·고도몰 저장만 한 가짜 active 실측). 상태 판정 = `status='active'` + 검증 신호(connected_at) 존재.
+- 자격 **저장** 시점에 status='active' 금지 → 저장=`pending`, 실제 연결 확인(verify) 성공 시에만 `active`+connected_at. 저장만으론 "연동됨" 절대 표시 X.
+
 ## 자동마케팅 완성 세션 (2026-07-02 추가)
 
 ### 스케줄 컬럼 의미 전환 = 기존 행 마이그레이션 + 재계산 루프 점검
