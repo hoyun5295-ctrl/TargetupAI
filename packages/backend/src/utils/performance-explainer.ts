@@ -43,7 +43,9 @@ export interface PerformanceExplanation {
 export async function explainPerformance(
   companyId: string,
   snapshot: PerformanceSnapshot,
-  companyInfo: { company_name?: string; brand_name?: string; business_type?: string }
+  companyInfo: { company_name?: string; brand_name?: string; business_type?: string },
+  // ★ 2026-07-03 고객 축 — 등급·전 채널 실측 라인 주입(옵셔널 — 기존 호출부 무변). 'audience' factors 실동작용.
+  extraLines?: string[]
 ): Promise<PerformanceExplanation> {
   const brandName = companyInfo.brand_name || companyInfo.company_name || '브랜드';
 
@@ -71,6 +73,7 @@ ${snapshot.byHour.sort((a, b) => b.sent - a.sent).slice(0, 5).map((h) => `  · $
 - 30일 신규 고객: ${snapshot.newCustomers30d.toLocaleString()}명 / 활성 고객: ${snapshot.activeCustomers30d.toLocaleString()}명
 - 30일 추정 매출 (CDP): ${snapshot.estimatedRevenue.toLocaleString()}원
 ${snapshot.funnelStats ? `- CDP Funnel: 조회 ${snapshot.funnelStats.viewCount} → 장바구니 ${snapshot.funnelStats.cartAddCount} → 구매 ${snapshot.funnelStats.purchaseCount} (전환율 ${(snapshot.funnelStats.purchaseConversionRate * 100).toFixed(2)}%)` : '- CDP 미연동'}
+${extraLines && extraLines.length > 0 ? `\n## 고객 축 실측 (등급·전 채널 — audience 요인 근거)\n${extraLines.map((l) => `- ${l}`).join('\n')}` : ''}
 
 ## 요청
 위 데이터를 분석해 영향 요인 매트릭스를 도출해주세요:

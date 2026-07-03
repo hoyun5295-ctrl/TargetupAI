@@ -8,6 +8,7 @@ import type { buildCampaignAttribution } from './campaign-response-attribution';
 import type { SegmentAnalysis } from './segment-analysis';
 import type { MultiDimComparison, MessageAnalysis, ForecastResult } from './full-analysis-collect';
 import type { ActionItem } from './action-plan';
+import type { GradePerformanceRow, RecipientAttributionResult } from './performance-customer-axis';
 
 export interface PerformancePdfData {
   snapshot: Awaited<ReturnType<typeof buildPerformanceSnapshotV2>>;
@@ -22,10 +23,13 @@ export interface PerformancePdfData {
   message?: MessageAnalysis | null;
   forecast?: ForecastResult | null;
   actionPlan?: ActionItem[] | null;
+  // ★ 2026-07-03 고객 축 — 없으면 섹션 생략 (기존 호출부 무변)
+  gradePerformance?: GradePerformanceRow[] | null;
+  recipientAttribution?: RecipientAttributionResult | null;
 }
 
 export function renderPerformanceReportPdf(doc: any, data: PerformancePdfData): void {
-  const { snapshot, explanation, cohort, attribution, companyName, period, segment, multidim, message, forecast, actionPlan } = data;
+  const { snapshot, explanation, cohort, attribution, companyName, period, segment, multidim, message, forecast, actionPlan, gradePerformance, recipientAttribution } = data;
   const path = require('path');
   const fs = require('fs');
   const fontPath = path.join(__dirname, '../../fonts/malgun.ttf');
@@ -203,6 +207,31 @@ export function renderPerformanceReportPdf(doc: any, data: PerformancePdfData): 
       doc.text(line, 50, y); y += 15;
     }
     y += 8;
+  }
+
+  // 수신 고객 기준 기여 (★ 2026-07-03 고객 축 — 여정·DM customer_id 정확 매칭)
+  if (recipientAttribution && recipientAttribution.totalRecipients > 0) {
+    if (y > 700) { doc.addPage(); y = 50; }
+    setFont(true); doc.fontSize(13).fillColor(primary).text('수신 고객 기준 기여 (여정·DM 정확 매칭)', 50, y); y += 20;
+    setFont(false); doc.fontSize(9).fillColor(dark);
+    doc.text(`기간 내 수신 고객 ${recipientAttribution.totalRecipients.toLocaleString()}명`, 50, y); y += 15;
+    for (const w of recipientAttribution.windows) {
+      doc.text(`수신 후 ${w.windowLabel} — 구매 고객 ${w.buyers.toLocaleString()}명 / 구매 ${w.purchases.toLocaleString()}건 / 매출 ${won(w.revenue)}`, 50, y); y += 15;
+    }
+    y += 8;
+  }
+
+  // 고객 등급 성과 (★ 2026-07-03 고객 축)
+  if (gradePerformance && gradePerformance.length > 0) {
+    if (y > 660) { doc.addPage(); y = 50; }
+    setFont(true); doc.fontSize(13).fillColor(primary).text('고객 등급 성과', 50, y); y += 20;
+    setFont(false); doc.fontSize(9).fillColor(dark);
+    for (const g of gradePerformance.slice(0, 8)) {
+      if (y > 760) { doc.addPage(); y = 50; }
+      doc.text(`· ${g.grade} — 여정 ${g.journeySent.toLocaleString()}건 / DM ${g.dmSent.toLocaleString()}명(열람 ${g.dmViewers.toLocaleString()}) / 이메일 클릭 ${g.emailClickers.toLocaleString()} / 구매 ${g.buyers.toLocaleString()}명 / 매출 ${won(g.revenue)}`, 60, y, { width: 485 }); y += 14;
+    }
+    setFont(false); doc.fontSize(8).fillColor(gray);
+    doc.text('여정·DM = 고객 단위 정확 매칭 / 이메일 = 반응자 기준 / SMS 캠페인 발송분은 채널 성과 절 참조', 60, y); y += 16;
   }
 
   // 가입월별 잔존 (코호트)

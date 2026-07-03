@@ -31,6 +31,7 @@ import { buildCohortRetention } from '../utils/performance-cohort';
 import { buildBenchmark } from '../utils/performance-benchmark';
 import { renderPerformanceReportPdf } from '../utils/performance-pdf-render';
 import { buildCampaignAttribution } from '../utils/campaign-response-attribution';
+import { buildGradePerformance, buildRecipientAttribution } from '../utils/performance-customer-axis';
 import { createJob, getJob } from '../utils/full-analysis-job';
 import { stepProgress } from '../utils/full-analysis-steps';
 import { runFullAnalysis } from '../utils/full-analysis-runner';
@@ -1422,6 +1423,11 @@ router.post('/operator/performance/report-pdf', async (req: Request, res: Respon
     try { const sn = await buildPerformanceSnapshot(companyId); explanation = await explainPerformance(companyId, sn, companyInfo); } catch (e: any) { console.log('[report-pdf] explain skip:', e?.message); }
     try { cohort = await buildCohortRetention(companyId, 12); } catch (e: any) { console.log('[report-pdf] cohort skip:', e?.message); }
     try { attribution = await buildCampaignAttribution(companyId, days); } catch (e: any) { console.log('[report-pdf] attribution skip:', e?.message); }
+    // ★ 2026-07-03 고객 축 (실패 graceful — PDF 생성은 계속)
+    let gradePerformance: Awaited<ReturnType<typeof buildGradePerformance>> | null = null;
+    let recipientAttribution: Awaited<ReturnType<typeof buildRecipientAttribution>> | null = null;
+    try { gradePerformance = await buildGradePerformance(companyId, days); } catch (e: any) { console.log('[report-pdf] grade skip:', e?.message); }
+    try { recipientAttribution = await buildRecipientAttribution(companyId, days); } catch (e: any) { console.log('[report-pdf] recipient-attr skip:', e?.message); }
 
     // 차감 — 회사+기간+날짜 멱등(같은 날 같은 기간 재다운로드는 무료)
     const todayKst = kstDateTag(new Date());
@@ -1439,7 +1445,7 @@ router.post('/operator/performance/report-pdf', async (req: Request, res: Respon
     doc.pipe(res);
 
     // 본문 렌더 = 공통 CT(performance-pdf-render) 재사용 — 인라인 중복 제거(no_inline_duplication).
-    renderPerformanceReportPdf(doc, { snapshot, explanation, cohort, attribution, companyName, period });
+    renderPerformanceReportPdf(doc, { snapshot, explanation, cohort, attribution, companyName, period, gradePerformance, recipientAttribution });
 
     doc.end();
     console.log(`[Performance] report-pdf 생성 company=${companyId} period=${period}`);
@@ -1527,7 +1533,17 @@ router.post('/operator/performance/explain', async (req: Request, res: Response)
     );
     const companyInfo = companyResult.rows[0] || {};
     const snapshot = await buildPerformanceSnapshot(companyId);
-    const explanation = await explainPerformance(companyId, snapshot, companyInfo);
+    // ★ 2026-07-03 고객 축 — 등급 실측 상위 라인을 AI 진단 입력에 주입 (실패 시 skip, 진단은 계속)
+    let extraLines: string[] | undefined;
+    try {
+      const grades = await buildGradePerformance(companyId, 30);
+      extraLines = grades.slice(0, 4).map((g) =>
+        `${g.grade} 등급: 여정 발송 ${g.journeySent.toLocaleString()}건 · DM 수신 ${g.dmSent.toLocaleString()}명(열람 ${g.dmViewers.toLocaleString()}명) · 이메일 클릭 ${g.emailClickers.toLocaleString()}명 · 구매 ${g.buyers.toLocaleString()}명 · 매출 ${Math.round(g.revenue).toLocaleString()}원`);
+      if (extraLines.length === 0) extraLines = undefined;
+    } catch (e: any) {
+      console.log('[Performance] explain 고객 축 주입 skip:', e?.message || e);
+    }
+    const explanation = await explainPerformance(companyId, snapshot, companyInfo, extraLines);
     return res.json({ success: true, explanation });
   } catch (err: any) {
     console.error('[Performance] explain 오류:', err);
@@ -1739,6 +1755,30 @@ router.get('/operator/performance/attribution', async (req: Request, res: Respon
   } catch (err: any) {
     console.error('[Performance] attribution 오류:', err);
     return res.status(500).json({ success: false, error: err?.message || 'attribution 조회 실패' });
+  }
+});
+
+// 7-2) GET /operator/performance/customer-axis — ★ 2026-07-03 고객 축(등급 성과 + 수신 고객 정밀 기여)
+//   설계: docs/superpowers/specs/2026-07-03-performance-customer-axis-design.md
+//   snapshot-v2에 얹지 않고 모달 lazy load 전용 (D231 요청 경로 성능 원칙)
+router.get('/operator/performance/customer-axis', async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+    const planCtx = await loadPlanContext(companyId);
+    if (!planCtx) return res.status(404).json({ success: false, error: '회사 정보를 찾을 수 없습니다.' });
+    if (!isAiOperatorAllowed(planCtx, req.user)) {
+      return res.status(403).json({ success: false, error: '본 기능은 엔터프라이즈 베타 운영 중입니다.', code: 'BETA_GATE' });
+    }
+    const days = Math.max(7, Math.min(90, parseInt(String(req.query.days || '30'), 10) || 30));
+    const [gradePerformance, recipientAttribution] = await Promise.all([
+      buildGradePerformance(companyId, days),
+      buildRecipientAttribution(companyId, days),
+    ]);
+    return res.json({ success: true, gradePerformance, recipientAttribution });
+  } catch (err: any) {
+    console.error('[Performance] customer-axis 오류:', err);
+    return res.status(500).json({ success: false, error: err?.message || '고객 축 조회 실패' });
   }
 });
 

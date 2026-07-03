@@ -215,25 +215,6 @@
       자가 검증: 매 큰 작업 진입 직전 = "어떤 superpowers skill 호출 의무?" 자가 질의 의무.
       [상세 룰] `memory/feedback_default_superpowers_workflow.md` 참조
     </RULE>
-
-    <RULE id="doc_routing" priority="HIGH">
-      ★ 2026-07-03 관제탑 재설계 v2 신설.
-      세션 상시 로드는 CLAUDE.md + status/STATUS.md 둘뿐이다.
-      그 외 모든 문서는 STATUS.md 라우팅 표가 지시하는 상황에서, 지시된 범위(해당 절/항목)만 읽는다.
-      문서 전체 로드 금지. 아카이브는 status/archive/INDEX.md grep 경유로만 진입한다.
-      아카이브·과거 문서와 현재 코드가 다르면 현재 코드가 진실이다.
-    </RULE>
-
-    <RULE id="doc_ownership" priority="HIGH">
-      ★ 2026-07-03 관제탑 재설계 v2 신설.
-      정보 하나 = 소유 문서 하나. 타 문서에 복사 금지, 링크만.
-      행동 룰은 CLAUDE.md 밖으로 이동 금지 (분리 = 미적용).
-      신규 문서 생성 시 STATUS.md 라우팅 표 등재 의무. 라우팅 표 25행 초과 시 통폐합 먼저.
-      STATUS.md 30KB 초과 = 회전 룰 미이행으로 간주 — 즉시 아카이브 회전 수행.
-      비토 memory/(MEMORY.md·feedback·project)는 세션 간 개인 작업 기억+포인터 전용 — repo 문서가 팀 SoT이며 memory에 repo 문서 내용을 복사하지 않는다(포인터·교훈만).
-      단어 검증 패턴(박-단어 활용형·모델명·떠넘기기 등)의 소유 문서 = status/lessons/LESSONS_META.md "매 답변 자가 검증" 절 — 타 문서는 참조만, 패턴 전문 복사 금지.
-      기계 검증 = `bash scripts/harness-check.sh` (크기 상한·라우팅 등재·INDEX 링크 — CLAUDE.md/status 문서 수정 후 실행 의무. 훅 등록 시 자동).
-    </RULE>
   </ACTION_FORCING_RULES>
 
   <MANDATORY_CHECKLIST>
@@ -297,56 +278,35 @@
 | 서버 | `/home/administrator/targetup-app/` (Harold님 직접 SSH) |
 | 배포 | atomic safe-build 단계별 (한 줄 명령어 금지) |
 
-## 필수 참조 문서 (★ 2026-07-03 관제탑 재설계 v2)
+## 필수 참조 문서
 
-**문서 라우팅의 소유자 = `status/STATUS.md` §1 라우팅 표.** 상황별 참조 문서·읽는 범위는 그 표를 따른다 (doc_routing 룰).
-CLAUDE.md에는 도메인별 LESSONS 우선 정독 라우팅(read_lessons_first 룰)만 남는다. 신규 계층 2 문서: `status/ARCHITECTURE.md`(시스템 구조) · `status/DECISIONS.md`(ADR) · `status/RISKS.md`(리스크). 과거 작업 = `status/archive/INDEX.md` grep 경유.
+| 문서 | 용도 | 언제 읽나 |
+|------|------|-----------|
+| `status/LESSONS_LEARNED.md` | **인덱스** — 도메인별 LESSONS 파일 라우팅 | 매 작업 시작 시 (도메인 식별) |
+| `status/lessons/LESSONS_ARCHITECTURE.md` | 컨트롤타워(CT-01~76) + 도메인 흐름 + 작업 진입 자기 점검 | 컨트롤타워 수정/도메인 흐름 확인 시 |
+| `status/lessons/LESSONS_DB.md` | DB/SCHEMA/돈/환불/마이그레이션 사고 | DB 쿼리/SCHEMA 변경/환불 작업 시 |
+| `status/lessons/LESSONS_FRONTEND.md` | UI/모달/모바일/모델명 노출 사고 | Frontend 페이지/컴포넌트 작업 시 |
+| `status/lessons/LESSONS_BACKEND.md` | API/Query/발송/AI 호출 사고 | Backend route/utils/발송/AI 작업 시 |
+| `status/lessons/LESSONS_DEPLOY.md` | 배포/SSH/빌드/의존성 사고 + 표준 출력 형식 | 배포 명령어 안내 시 |
+| `status/lessons/LESSONS_META.md` | AI 메타 위반 패턴 4-1 ~ 4-25 | **매 답변 직전 정독 의무** |
+| `status/STATUS.md` | 전체 프로젝트 현황 + CURRENT_TASK | 세션 시작 시 |
+| `status/BUGS.md` | 버그 트래커 | 버그 수정 작업 시 |
+| `status/OPS.md` | 서버/배포/인프라 | 서버 관련 작업 시 |
+| `status/SCHEMA.md` | PostgreSQL/MySQL 전체 DB 스키마 | 쿼리 작성/DB 작업 시 |
+| `status/SYNC-AGENT-TROUBLESHOOTING.md` | 싱크에이전트 진단 | 싱크 이슈 시 |
+| `docs/AI_OPERATOR_기능정의서.md` | AI Operator 기능 정의서 (D170~D214+ 누적) | AI Operator / CDP / Provider 영역 작업 시 |
+| `docs/한줄로_BEYOND_BRAZE_비전.md` | 체어맨 + CTO 전용 살아있는 비전 문서 | 압축 로드맵 진입 / 5년 시야 영역 작업 시 |
+| `docs/인앱메세지전용.md` | D215+ 인앱메시지 강화 진입 설계서 | D215+ 진입 시 |
+| `status/ai_operator_progress.md` | AI Operator 진행 매트릭스 | AI Operator 세션 진입 시 |
 
-## 작업 시작 체크리스트 (2026-07-03 관제탑 v2 정합)
+## 작업 시작 체크리스트 (D215+ 정합)
 
 1. CLAUDE.md (이 문서) 정독
-2. `status/STATUS.md` 정독 — CURRENT_TASK + 라우팅 표 (상시 로드는 이 2개뿐)
-3. **작업 도메인 식별** → 라우팅 표가 지시하는 문서의 해당 범위만 읽기 (LESSONS 도메인 정독 포함)
-4. `status/lessons/LESSONS_META.md` 정독 (답변 패턴 위반 차단)
-5. 관련 버그 있으면 `status/BUGS.md` 해당 항목 확인
-6. DB 관련이면 `status/SCHEMA.md` 대상 테이블 절 확인
+2. **작업 도메인 식별** → 해당 `status/lessons/LESSONS_*.md` 우선 정독 (라우팅 표 참조)
+3. `status/lessons/LESSONS_META.md` 정독 (답변 패턴 위반 차단)
+4. `status/STATUS.md` CURRENT_TASK 확인
+5. 관련 버그 있으면 `status/BUGS.md` 확인
+6. DB 관련이면 `status/SCHEMA.md` 확인
 7. 수정 대상 파일의 현재 코드를 반드시 먼저 read
 8. Harold님께 수정 방향 보고 → 컨펌 → 구현
 9. `packages/` 메인코드에 직접 수정 (worktree 금지)
-
----
-
-## STATUS.md 이관 상시 룰 (★ 2026-07-03 관제탑 재설계 v2 — 옛 STATUS §1·§2·§3·§5 고유분)
-
-### 페르소나·계약 (옛 §1)
-- 역할: 15년 차 시니어 풀스택 (Node.js/Express + React/TS + PG/MySQL + Docker/PM2, 한국 통신사 SMS/LMS/MMS/카카오 발송 인프라 정통). 목표: 버그 없는 견고한 아키텍처 + 유지보수 쉬운 코드. 스타일: 엄격한 TypeScript·SRP·명확한 네이밍.
-- 범위는 CURRENT_TASK 밖으로 확장하지 않는다 (필요하면 "추가 과제"로 분리 제안만).
-- 의사결정은 status/DECISIONS.md에 기록. 모든 변경은 최소 영향·가역성(rollback) 우선.
-- Harold님께 항상 존댓말, 호칭은 "Harold님". 안전·법률·정책 위배 요청은 수행하지 않고 대안 제시.
-
-### 개발 안전 (옛 §2 고유분)
-- 처음부터 제대로 — "일단 만들고 나중에 업그레이드" 없음. UI는 처음부터 완성 퀄리티.
-- 백업 필수: 컨테이너 작업 전 pg_dump. DB 파괴적 작업 절대 신중 (데이터 손실 = 매출 손실).
-- **Docker 컨테이너 재생성 시 포트 바인딩 반드시 `127.0.0.1`. `0.0.0.0` 절대 금지.** (2026-02-28 MySQL 랜섬웨어 교훈)
-- 배포 코드는 TypeScript 타입 에러 0 필수 (타입 에러 배포 = 서버 크래시, 2026-02-19 교훈). 단 tsc 통과 ≠ SQL 유효 (db_column_verify_before_code).
-- 하드코딩 매핑 금지 — standard_fields 테이블 + `standard-field-map.ts`가 필드 매핑의 유일 기준. "기준은 하나, 입구는 여럿."
-- 대상자 수는 AI 추정이 아닌 DB 실제 쿼리 결과로 산출.
-
-### HOTFIX 트랙 + 게이트 (옛 §3 고유분)
-- Harold님이 `[HOTFIX]` 명시 시: UI 문구/오타/스타일 등 저위험 변경(스키마·보안 변경 없음)은 구현→검증→배포 (설계 단계 암묵 합의).
-- 핵심 게이트: tsc 컴파일 / (DB 변경 시) pg_dump 백업 / 회귀 확인 / 롤백 방법 확보.
-
-### 발송 파이프라인 절대 보호 영역 (옛 §5 전문)
-아래 파일들은 발송·정산·결과조회의 핵심. (D32~D33 공통 치환 통합 + 5경로 전수, D43-7 결과 해석 sms-result-map.ts 중앙화)
-
-| 파일 | 역할 |
-|------|------|
-| campaigns.ts | AI 캠페인 발송 (예약+즉시) + 선불 차감/환불 |
-| spam-filter.ts | 스팸필터 테스트 (Android 앱 연동) |
-| messageUtils.ts | 공통 변수 치환 (`replaceVariables`) |
-| results.ts | 발송 결과 조회 + MySQL LIVE/LOG 통합 |
-| billing.ts | 정산·거래내역서 PDF |
-| direct-send (campaigns.ts 내) | 직접 타겟 발송 |
-
-### 이관하지 않은 항목 (중복·충돌·사장 판정 — 2026-07-03)
-- 옛 §2-1(코드 전 컨펌)·§3-1(파이프라인) = workflow_4_1 중복. §2-6(옵션 2개 제시) = no_option_recommend와 충돌 → CLAUDE.md(정답 1개) 우선. §2-7(수정파일 다운로드 제공) = 현행 Edit 직접 수정 방식으로 사장.

@@ -2,14 +2,14 @@
  * ★ CT-25: Step 1 Next Action Advisor 컨트롤타워 — D174 (2026-05-19)
  *
  * 🎯 목적
- *   AI Operator의 "1회성 발송툴 탈출" 진정 가치 박는 영역.
+ *   AI Operator의 "1회성 발송툴 탈출" 핵심 가치를 담는 부분.
  *   - 회사의 과거 30일 캠페인 성과 + 고객 RFM + CDP 이벤트(D172) 통합 분석
  *   - Opus 4.7이 다음 캠페인 자동 제안 (타겟 + 채널 + 시점 + 핵심 인사이트)
  *   - 기존 services/ai.ts recommendNextCampaign (Sonnet 4.6, PRO+ 게이팅)와 분리
  *     → 본 함수는 AI Operator 전용 (Opus 4.7, BUSINESS+ 베타)
  *
  * ⛔ 영구 원칙
- *   - 모델 분리 룰: Opus 4.7 박음 (Sonnet 4.6 흐름 영향 0건) — feedback_ai_operator_model_isolation.md
+ *   - 모델 분리 룰: Opus 4.7 적용 (Sonnet 4.6 흐름 영향 0건) — feedback_ai_operator_model_isolation.md
  *   - 타겟 0건 자동완화 X (Harold 영구 원칙) — feedback_no_target_auto_relax.md
  *   - 추천 결과는 사용자가 직접 검토 + 승인 후 발송 (AI 단독 발송 X)
  */
@@ -38,7 +38,7 @@ export interface PerformanceSnapshot {
   byChannel: Array<{ channel: string; sent: number; success: number; successRate: number }>;
   /** 시간대별 성과 (hour bucket 0-23) */
   byHour: Array<{ hour: number; sent: number; successRate: number }>;
-  /** 매출 영향 추정 (CDP cdp_events 'purchase' 박힘 시) */
+  /** 매출 영향 추정 (CDP cdp_events 'purchase' 적재 시) */
   estimatedRevenue: number;
   /** 30일 신규 고객 (customers.created_at 또는 cdp_identity_links) */
   newCustomers30d: number;
@@ -99,7 +99,7 @@ export interface NextActionResult {
   recommendedTime: string;
   /** 핵심 인사이트 3~5개 */
   insights: string[];
-  /** 다음 마케팅 목표 (AI Operator orchestrate에 박을 자연어 한 줄) */
+  /** 다음 마케팅 목표 (AI Operator orchestrate에 전달할 자연어 한 줄) */
   suggestedObjective: string;
   /** 추정 성과 (클릭률 / 전환율 / 매출) */
   expectedClickRate: number;
@@ -147,7 +147,7 @@ export async function buildPerformanceSnapshot(companyId: string): Promise<Perfo
     [companyId]
   );
 
-  // 4. 매출 추정 (CDP purchase 이벤트 박힘 시)
+  // 4. 매출 추정 (CDP purchase 이벤트 적재 시)
   const revenueResult = await query(
     `SELECT COALESCE(SUM((properties->>'total_amount')::numeric), 0) AS total
      FROM cdp_events
@@ -159,7 +159,7 @@ export async function buildPerformanceSnapshot(companyId: string): Promise<Perfo
 
   // 5. 신규/활성 고객
   // D183 fix: campaign_runs / campaigns 영역 customer_id 컬럼 부재 (SCHEMA L152-215 검증) → active_via_campaign 영역 영구 제거.
-  // 진정 활성 고객 본질 = cdp_events 영역 (purchase / page_view / cart_add 등 행동) 정합.
+  // 실제 활성 고객 기준 = cdp_events 행동(purchase / page_view / cart_add 등) 일치.
   const customerStats = await query(
     `SELECT
         (SELECT COUNT(*)::int FROM customers WHERE company_id = $1::uuid AND created_at > NOW() - INTERVAL '30 days') AS new_customers,
@@ -217,8 +217,8 @@ export async function recommendNextAction(
 회사의 최근 30일 캠페인 성과 + 고객 데이터를 분석하여 다음 캠페인을 추천합니다.
 
 영구 원칙:
-- 타겟 매칭 0건 시 자동완화 절대 금지. 사용자에게 조건 재입력 안내만 박을 것.
-- 추천 시점은 한국 표준시(KST) 기준 08:00~21:00 사이만 박을 것.
+- 타겟 매칭 0건 시 자동완화 절대 금지. 사용자에게 조건 재입력 안내만 제시할 것.
+- 추천 시점은 한국 표준시(KST) 기준 08:00~21:00 사이만 제안할 것.
 - 추천 결과는 사용자가 직접 검토 + 승인 후 발송. AI 단독 발송 X.
 
 JSON 형식으로만 응답하세요.`;
@@ -249,7 +249,7 @@ ${snapshot.byHour.sort((a, b) => b.sent - a.sent).slice(0, 5).map((h) => `  · $
 3. 추천 채널 (SMS / LMS / MMS / KAKAO 중 하나)
 4. 추천 발송 시점 (다음 7일 내 KST 08~21시 1개)
 5. 핵심 인사이트 3~5개 (데이터 기반, 구체 수치 포함)
-6. 다음 마케팅 목표 자연어 한 줄 (AI Operator 자연어 입력칸에 박을 형식)
+6. 다음 마케팅 목표 자연어 한 줄 (AI Operator 자연어 입력칸에 넣을 형식)
 7. 추정 성과 (클릭률 0.01~0.10, 전환율 0.001~0.05, 매출 원화)
 
 ## 출력 형식 (JSON만 응답)
@@ -587,6 +587,78 @@ export async function buildPerformanceSnapshotV2(
     };
   });
 
+  // ★ 2026-07-03 고객 축 — EMAIL·DM 채널 행 합류 (집계 원천이 campaigns 밖이라 별도 조회)
+  //   EMAIL: email_campaigns 집계(발송/열람/클릭 — 발송 무료 정책이라 비용 0, success=열람).
+  //   DM: dm_recipient_tokens 수신 고객 + dm_views 열람 고객(success=열람). 발송 문자분은 SMS 행에
+  //   이미 포함(createDirectSendCampaign 경유)이라 DM 행은 "열람 축" — 이중 계상 아님(라벨로 명시).
+  //   실패 시 skip — 기존 채널 행 영향 0. (컬럼 = information_schema 2026-07-03 실측)
+  try {
+    const emailAgg = await query(
+      `SELECT CASE WHEN sent_at > NOW() - ($1 || ' days')::interval THEN 'current' ELSE 'previous' END AS bucket,
+              COALESCE(SUM(sent_count), 0)::int AS sent,
+              COALESCE(SUM(open_count), 0)::int AS opens
+         FROM email_campaigns
+        WHERE company_id = $2::uuid
+          AND sent_at IS NOT NULL
+          AND sent_at > NOW() - ($3 || ' days')::interval
+        GROUP BY 1`,
+      [days, companyId, days * 2]
+    );
+    const emailCur = emailAgg.rows.find((r: any) => r.bucket === 'current');
+    const emailPrev = emailAgg.rows.find((r: any) => r.bucket === 'previous');
+    const emailSent = Number(emailCur?.sent) || 0;
+    const emailOpens = Number(emailCur?.opens) || 0;
+    if (emailSent > 0 || Number(emailPrev?.sent) > 0) {
+      byChannelROI.push({
+        channel: 'EMAIL',
+        sent: emailSent,
+        success: emailOpens,
+        successRate: emailSent > 0 ? emailOpens / emailSent : 0,
+        estimatedRevenue: 0,
+        estimatedCost: 0,
+        roas: 0,
+        previousSent: Number(emailPrev?.sent) || 0,
+      });
+    }
+
+    const dmAgg = await query(
+      `SELECT CASE WHEN created_at > NOW() - ($1 || ' days')::interval THEN 'current' ELSE 'previous' END AS bucket,
+              COUNT(DISTINCT customer_id)::int AS recipients
+         FROM dm_recipient_tokens
+        WHERE company_id = $2::uuid
+          AND created_at > NOW() - ($3 || ' days')::interval
+        GROUP BY 1`,
+      [days, companyId, days * 2]
+    );
+    const dmCur = dmAgg.rows.find((r: any) => r.bucket === 'current');
+    const dmPrev = dmAgg.rows.find((r: any) => r.bucket === 'previous');
+    const dmRecipients = Number(dmCur?.recipients) || 0;
+    if (dmRecipients > 0 || Number(dmPrev?.recipients) > 0) {
+      const dmViewersResult = await query(
+        `SELECT COUNT(DISTINCT t.customer_id)::int AS viewers
+           FROM dm_views v
+           JOIN dm_recipient_tokens t ON t.token = v.recipient_token
+          WHERE v.company_id = $1::uuid
+            AND v.recipient_token IS NOT NULL
+            AND v.viewed_at > NOW() - ($2 || ' days')::interval`,
+        [companyId, days]
+      );
+      const dmViewers = Number(dmViewersResult.rows[0]?.viewers) || 0;
+      byChannelROI.push({
+        channel: 'DM',
+        sent: dmRecipients,
+        success: dmViewers,
+        successRate: dmRecipients > 0 ? dmViewers / dmRecipients : 0,
+        estimatedRevenue: 0,
+        estimatedCost: 0,
+        roas: 0,
+        previousSent: Number(dmPrev?.recipients) || 0,
+      });
+    }
+  } catch (e: any) {
+    console.log('[snapshot-v2] EMAIL/DM 채널 행 skip:', e?.message || e);
+  }
+
   // 7) byHourWeekday (24 × 7 매트릭스, KST)
   const hourWeekdayMap = new Map<string, { sent: number; success: number }>();
   for (const m of currentMetrics) {
@@ -711,6 +783,6 @@ export async function buildPerformanceSnapshotV2(
     funnelStats,
     topCampaigns,
     computedAt: new Date().toISOString(),
-    source: 'campaigns + MySQL 큐 직접 집계 (D144 정합 — aggregateSmsCountsByCampaign + kakaoBatchAggByGroup) + cdp_events.purchase + customers',
+    source: 'campaigns + MySQL 큐 직접 집계 (D144 정합 — aggregateSmsCountsByCampaign + kakaoBatchAggByGroup) + cdp_events.purchase + customers + email_campaigns/dm_recipient_tokens(2026-07-03 채널 합류)',
   };
 }

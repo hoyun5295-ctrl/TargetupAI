@@ -24,7 +24,7 @@ import {
 import {
   ArrowLeft, BarChart3, Brain, Clock, Loader2, RefreshCw, Sparkles, TrendingUp, Users,
   AlertTriangle, MousePointerClick, Database, Activity, ChevronRight, ChevronLeft, ChevronDown, ChevronUp,
-  Search, Filter, ArrowUpDown, FileDown, X, Check,
+  Search, Filter, ArrowUpDown, FileDown, X, Check, Crown,
 } from 'lucide-react';
 import { useToast } from '../components/ToastProvider';
 import CreditConfirmModal from '../components/credit/CreditConfirmModal';
@@ -195,9 +195,36 @@ interface DrillCampaign {
   sentAt: string;
 }
 
+// ★ 2026-07-03 고객 축 — 등급 성과 + 수신 고객 정밀 기여 (customer-axis endpoint)
+interface GradePerformanceRow {
+  grade: string;
+  journeySent: number;
+  dmSent: number;
+  dmViewers: number;
+  emailClickers: number;
+  smsTargetedSent: number;
+  buyers: number;
+  revenue: number;
+}
+
+interface RecipientAttributionWindow {
+  windowLabel: string;
+  windowHours: number;
+  buyers: number;
+  purchases: number;
+  revenue: number;
+}
+
+interface RecipientAttribution {
+  totalRecipients: number;
+  windows: RecipientAttributionWindow[];
+  computedAt: string;
+  source: string;
+}
+
 type ModalKey =
   | null | 'revenue' | 'channel' | 'hour' | 'funnel'
-  | 'cohort' | 'trend' | 'diagnosis' | 'campaigns';
+  | 'cohort' | 'trend' | 'diagnosis' | 'campaigns' | 'grade';
 
 type QuickActionType = 'channel_recovery' | 'time_optimization' | 'top_performer_replication';
 
@@ -254,6 +281,13 @@ export default function PerformancePage() {
   const [sort, setSort] = useState('sent_desc');
 
   const [explainLoading, setExplainLoading] = useState(false);
+
+  // ★ 2026-07-03 고객 축 — 모달 열 때 lazy load (snapshot에 얹지 않음)
+  const [customerAxis, setCustomerAxis] = useState<{
+    gradePerformance: GradePerformanceRow[];
+    recipientAttribution: RecipientAttribution | null;
+  } | null>(null);
+  const [customerAxisLoading, setCustomerAxisLoading] = useState(false);
 
   // 일일 인사이트 (CT-98 collectCompanyInsight) — Tier 3 접이식 칩
   const [dailyInsight, setDailyInsight] = useState<{
@@ -452,6 +486,30 @@ export default function PerformancePage() {
     if (activeModal === 'campaigns') loadCampaigns();
   }, [activeModal, loadCampaigns]);
 
+  // ★ 2026-07-03 고객 축 — 기간 변경 시 초기화, 등급/매출 모달 열 때 1회 로드
+  useEffect(() => { setCustomerAxis(null); }, [period]);
+  useEffect(() => {
+    if ((activeModal !== 'grade' && activeModal !== 'revenue') || customerAxis || customerAxisLoading) return;
+    (async () => {
+      setCustomerAxisLoading(true);
+      try {
+        const res = await fetch(`/api/ai/operator/performance/customer-axis?days=${periodToDays(period)}`, {
+          headers: { Authorization: `Bearer ${token()}` },
+        });
+        const data = await res.json();
+        if (data.success) {
+          setCustomerAxis({
+            gradePerformance: data.gradePerformance || [],
+            recipientAttribution: data.recipientAttribution || null,
+          });
+        }
+      } catch {}
+      finally {
+        setCustomerAxisLoading(false);
+      }
+    })();
+  }, [activeModal, customerAxis, customerAxisLoading, period]);
+
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
     setSearchQuery(searchInput.trim());
@@ -559,6 +617,9 @@ export default function PerformancePage() {
   const cohortSummary = cohort && cohort.totalCohortCustomers > 0
     ? `30일 잔존 ${formatPct(cohort.avgM1Rate)}`
     : '데이터 준비 중';
+  const gradeSummary = customerAxis
+    ? (customerAxis.gradePerformance.length > 0 ? `${customerAxis.gradePerformance.length}개 등급 매칭` : '매칭 데이터 준비 중')
+    : '등급 × 전 채널 성과';
 
   return (
     <div className="min-h-screen bg-slate-950 text-white">
@@ -850,6 +911,7 @@ export default function PerformancePage() {
               ) : (
                 <SummaryChip icon={<Database className="w-4 h-4" />} accent="text-cyan-300" label="자사몰 연동" summary="실매출·퍼널·기여도 보기" onClick={() => navigate('/cdp-settings')} />
               )}
+              <SummaryChip icon={<Crown className="w-4 h-4" />} accent="text-amber-300" label="고객 등급" summary={gradeSummary} onClick={() => openModal('grade')} />
               <SummaryChip icon={<Users className="w-4 h-4" />} accent="text-violet-300" label="코호트" summary={cohortSummary} onClick={() => openModal('cohort')} />
               <SummaryChip icon={<TrendingUp className="w-4 h-4" />} accent="text-emerald-300" label="추세" summary={`${period} 일별 추이`} onClick={() => openModal('trend')} />
               </div>
@@ -993,9 +1055,78 @@ export default function PerformancePage() {
                 ) : (
                   <div className="text-center text-xs text-white/40 py-4">발송 캠페인 후 구매 반응이 쌓이면 여기에 표시됩니다.</div>
                 )}
+                {/* ★ 2026-07-03 고객 축 — 수신 고객 기준 정밀 기여 (여정·DM customer_id 매칭) */}
+                <div className="pt-2 border-t border-white/10">
+                  <div className="text-[11px] text-white/60 mb-2">수신 고객 기준 기여 <span className="text-emerald-300/80">(여정·DM — 고객 단위 정확 매칭)</span></div>
+                  {customerAxisLoading ? (
+                    <div className="flex items-center gap-2 text-[11px] text-white/40 py-2"><Loader2 className="w-3.5 h-3.5 animate-spin" /> 고객 매칭 집계 중…</div>
+                  ) : customerAxis?.recipientAttribution && customerAxis.recipientAttribution.totalRecipients > 0 ? (
+                    <>
+                      <div className="text-[10px] text-white/40 mb-2">기간 내 수신 고객 {formatNum(customerAxis.recipientAttribution.totalRecipients)}명</div>
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
+                        {customerAxis.recipientAttribution.windows.map((w) => (
+                          <div key={w.windowLabel} className="p-3 bg-white/5 border border-white/10 rounded-lg">
+                            <div className="text-[10px] text-white/40 mb-1">수신 후 {w.windowLabel}</div>
+                            <div className="text-base font-bold text-emerald-300 font-mono">{formatNum(w.buyers)}명 구매</div>
+                            <div className="text-[10px] text-white/60 mt-0.5">매출 <span className="text-amber-300 font-mono">{formatWon(w.revenue)}</span></div>
+                          </div>
+                        ))}
+                      </div>
+                      <div className="text-[10px] text-white/30 italic mt-1.5">Data source — {customerAxis.recipientAttribution.source}</div>
+                    </>
+                  ) : (
+                    <div className="text-[11px] text-white/40 py-1">여정·DM 발송이 쌓이면 "발송받은 그 고객의 구매"를 고객 단위로 매칭해 보여드립니다.</div>
+                  )}
+                </div>
               </div>
             ) : (
               <CdpUpsellCard onConnect={() => navigate('/cdp-settings')} lines="실매출 · 발송 후 구매 기여를 자사몰 연동 시 집계합니다." />
+            )}
+          </PerfModal>
+
+          {/* ★ 2026-07-03 고객 등급 성과 모달 (고객 축) */}
+          <PerfModal open={activeModal === 'grade'} onClose={closeModal} title="고객 등급 성과" icon={<Crown className="w-4 h-4 text-amber-300" />} source="journey_step_logs · dm_recipient_tokens/dm_views · email_events · campaigns.target_filter(근사) · cdp_events" wide>
+            {customerAxisLoading ? (
+              <div className="flex items-center justify-center gap-2 text-xs text-white/40 py-10"><Loader2 className="w-4 h-4 animate-spin" /> 등급별 고객 매칭 집계 중…</div>
+            ) : customerAxis && customerAxis.gradePerformance.length > 0 ? (
+              <>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-[11px] whitespace-nowrap">
+                    <thead>
+                      <tr className="text-white/40 border-b border-white/10">
+                        <th className="text-left py-2 pr-3 font-medium">등급</th>
+                        <th className="text-right py-2 px-3 font-medium">여정 발송</th>
+                        <th className="text-right py-2 px-3 font-medium">DM 수신</th>
+                        <th className="text-right py-2 px-3 font-medium">DM 열람</th>
+                        <th className="text-right py-2 px-3 font-medium">이메일 클릭</th>
+                        <th className="text-right py-2 px-3 font-medium">SMS 타겟발송</th>
+                        <th className="text-right py-2 px-3 font-medium">구매 고객</th>
+                        <th className="text-right py-2 pl-3 font-medium">매출</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {customerAxis.gradePerformance.map((g) => (
+                        <tr key={g.grade} className="border-b border-white/5">
+                          <td className="py-2 pr-3 text-amber-200 font-medium">{g.grade}</td>
+                          <td className="py-2 px-3 text-right text-white/70 font-mono">{formatNum(g.journeySent)}</td>
+                          <td className="py-2 px-3 text-right text-white/70 font-mono">{formatNum(g.dmSent)}</td>
+                          <td className="py-2 px-3 text-right text-cyan-300 font-mono">{formatNum(g.dmViewers)}</td>
+                          <td className="py-2 px-3 text-right text-fuchsia-300 font-mono">{formatNum(g.emailClickers)}</td>
+                          <td className="py-2 px-3 text-right text-white/50 font-mono">{formatNum(g.smsTargetedSent)}</td>
+                          <td className="py-2 px-3 text-right text-emerald-300 font-mono">{formatNum(g.buyers)}</td>
+                          <td className="py-2 pl-3 text-right text-amber-300 font-mono">{formatWon(g.revenue)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <div className="text-[10px] text-white/40 mt-2">여정·DM = 고객 단위 정확 매칭 / 이메일 = 반응자 기준 / SMS 타겟발송 = 등급 타겟 캠페인 근사</div>
+              </>
+            ) : (
+              <div className="text-center text-xs text-white/40 py-8">
+                고객 등급과 발송·구매 기록이 매칭되면 여기에 표시됩니다.
+                <br />여정·DM 발송 또는 등급 타겟 캠페인이 쌓이면 자동 활성화됩니다.
+              </div>
             )}
           </PerfModal>
 
@@ -1019,13 +1150,16 @@ export default function PerformancePage() {
                     <div key={c.channel} className="flex items-center justify-between text-[11px]">
                       <span className="text-white/70 font-medium w-12">{c.channel}</span>
                       <div className="flex items-center gap-3 text-white/50">
-                        <span>성공률 <span className="text-emerald-300 font-mono">{formatPct(c.successRate)}</span></span>
-                        <span>비용 <span className="text-amber-300 font-mono">{formatWon(c.estimatedCost)}</span></span>
+                        <span>{c.channel === 'EMAIL' || c.channel === 'DM' ? '열람률' : '성공률'} <span className="text-emerald-300 font-mono">{formatPct(c.successRate)}</span></span>
+                        <span>비용 <span className="text-amber-300 font-mono">{c.estimatedCost > 0 ? formatWon(c.estimatedCost) : '무료'}</span></span>
                         <span>ROAS <span className="text-cyan-300 font-mono">{c.roas > 0 ? c.roas.toFixed(2) + '×' : '-'}</span></span>
                       </div>
                     </div>
                   ))}
                 </div>
+                {snapshot.byChannelROI.some((c) => c.channel === 'EMAIL' || c.channel === 'DM') && (
+                  <div className="text-[10px] text-white/40 mt-2">EMAIL = 발송 무료(열람 기준) / DM = 열람 축(문자 발송분은 SMS·LMS 행에 포함) — 2026-07-03 전 채널 합류</div>
+                )}
               </>
             ) : (
               <div className="text-center text-xs text-white/40 py-8">발송 데이터 없음 — 첫 캠페인 발송 후 활성</div>

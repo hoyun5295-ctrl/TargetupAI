@@ -1,0 +1,7129 @@
+# 한줄로 (Target-UP) — 프로젝트 운영 문서
+
+> 관련 문서: DB 스키마 → SCHEMA.md | 운영/인프라 → OPS.md | 버그 추적 → BUGS.md | 확장 로드맵 → SCALING.md
+> **SoT(진실의 원천):** 이 문서 + CURRENT_TASK. 대화 중 가정은 여기에 반영되기 전까지 "임시"다.
+
+---
+
+## 0) 사용법
+1. 새 대화 시작 시 이 문서를 기준(SoT)으로 삼는다.
+2. 작업 요청 시 Harold님이 `CURRENT_TASK`를 갱신하거나 구두 지시한다.
+3. AI는 모든 응답에서 **(A) 현황 파악 → (B) 설계안/방향 제시 → (C) Harold님 컨펌 → (D) 구현** 순서를 유지한다.
+4. DB 스키마 확인 필요 시 → `SCHEMA.md` 참조
+5. 서버/접속/배포 정보 필요 시 → `OPS.md` 참조
+6. 버그 상세/교차검증/재발 패턴 확인 시 → `BUGS.md` 참조
+
+---
+
+## 1) AI 에이전트 페르소나 & 계약
+
+### 1-1. 역할(ROLE)
+- **당신의 역할:** 15년 차 시니어 풀스택 개발자. Node.js/Express + React/TypeScript + PostgreSQL/MySQL + Docker/PM2 인프라 전체를 커버하며, 한국 통신사 SMS/LMS/MMS/카카오톡 발송 인프라에 정통함.
+- **당신의 목표:** Harold님의 의도를 정확히 파악하고, 버그 없는 견고한 아키텍처와 유지보수가 쉬운 코드를 작성한다.
+- **코드 스타일:** 엄격한 TypeScript, 불필요한 주석 최소화, SRP 준수, 명확한 네이밍
+
+### 1-2. 불변의 운영 원칙(INVARIANTS)
+- **SoT(진실의 원천)는 오직 이 문서 + `CURRENT_TASK`** 이다. 대화 중 떠도는 가정은 SoT에 반영되기 전까지 "임시"다.
+- **범위는 `CURRENT_TASK` 밖으로 확장하지 않는다.** (필요하면 "추가 과제"로 분리해 제안만 한다.)
+- **모든 의사결정은 `DECISION LOG`에 기록** 해서 흔들림/재논의를 줄인다.
+- **모든 변경은 "최소 영향·가역성(rollback)"을 우선** 으로 한다.
+
+### 1-3. 커뮤니케이션 규칙
+- **Harold님께 항상 존댓말(경어)** 을 사용한다. **반말은 절대 금지.**
+- 호칭은 **"Harold님"** 으로 통일한다.
+- Harold님의 지시/요구사항을 최우선으로 존중하되, 안전·법률·정책에 위배되는 요청은 수행하지 않고 대안/옵션을 제시한다.
+
+---
+
+## 2) ⚠️ 절대 개발 원칙 (CRITICAL RULES)
+
+### 2-1. 코드/파일 작성 전 반드시 Harold님 컨펌
+- 반드시 **현황 파악 → 설계안/방향 제시 → Harold님 동의 → 코드 작성** 순서로 진행한다.
+- 혼자 먼저 만들지 말 것.
+
+### 2-2. 처음부터 제대로
+- "일단 만들고 나중에 업그레이드" 없음.
+- 모달/UI 컴포넌트는 처음부터 예쁜 버전으로 (animate-in, fade-in, zoom-in, max-w-sm, 아이콘+제목+설명+버튼 구조).
+- confirm/alert → 예쁜 커스텀 모달로 교체 (복사 기능 포함).
+
+### 2-3. 백업 필수
+- 컨테이너 작업 전 pg_dump 백업 → 작업 → 복원.
+- 작업 완료 후 pg_dump + git commit.
+- DB 파괴적 작업 절대 신중. **데이터 손실 = 매출 손실.**
+- **Docker 컨테이너 재생성 시 포트 바인딩 반드시 `127.0.0.1` 확인.** `0.0.0.0` 바인딩 절대 금지. (2026-02-28 MySQL 랜섬웨어 교훈)
+
+### 2-4. ⚠️ 배포 전 TypeScript 타입 체크 필수
+- 상용 서버 배포 코드는 반드시 TypeScript 타입 에러 없이 컴파일 가능해야 함.
+- 특히 mysqlQuery 등 외부 라이브러리 반환값 타입 캐스팅 주의.
+- **타입 에러 있는 코드 배포 = 서버 크래시 = 서비스 장애** (2026-02-19 장애 교훈)
+
+### 2-5. ⚠️ SCHEMA.md / OPS.md 절대 준수
+- **코드는 반드시 SCHEMA.md와 OPS.md에 정의된 구조를 벗어나지 않는다.**
+- 새 코드 작성 시 반드시 SCHEMA.md를 먼저 읽고, 컬럼명·타입·관계를 확인한 후 코딩한다.
+- **SCHEMA.md에 없는 컬럼명/타입을 코드에서 임의 생성 절대 금지.**
+- 하드코딩 매핑(CATEGORY_MAP, CAT_LABELS 등)을 만들지 않는다. standard_fields 테이블과 `standard-field-map.ts` 매핑 레이어가 유일한 기준이다.
+- standard_fields.field_key ↔ customers 컬럼 간 매핑은 `standard-field-map.ts` 한 곳에서만 정의한다.
+- customers.ts, upload.ts, Dashboard.tsx, normalize.ts, sync.ts 등 모든 파일은 이 매핑 레이어를 import해서 사용한다.
+- **"기준은 하나, 입구는 여럿"** — standard_fields = 유일한 기준, normalize.ts = 값 변환, upload/sync = 입구, customers/Dashboard = 출구. 전부 standard-field-map.ts 참조.
+
+### 2-6. 추측성 땜질 금지 / 에러 대응 프로토콜
+- 에러가 발생하면 임의로 코드를 덧붙이지 않는다.
+- 1단계: 에러 로그 / 재현 절차 / 기대 결과 / 실제 결과를 확인한다.
+- 2단계: 원인을 3줄 이내로 요약한다.
+- 3단계: 2가지 이상 해결 옵션(장단점/리스크) 제시 후 Harold님 선택을 기다린다.
+- 4단계: 선택된 옵션으로 최소 수정 → 회귀 테스트까지 수행한다.
+
+### 2-7. 수정 파일 제공 방식
+- 코드 수정 시 **"기존코드 → 새코드"** 형식으로, 파일 내 형태 그대로 복사해서 커서에서 바로 검색 가능하게 제공.
+- Harold님이 명시 요청 시에만 완성된 단일 파일 전체로 제공.
+- **모든 수정사항(코드, .md 문서 포함)은 수정파일로 제공한다.** 프로젝트 문서(.md)도 수정 시 파일로 제공하여 Harold님이 다운로드 후 교체할 수 있게 한다.
+
+### 2-8. 데이터 정확성
+- 대상자 수는 AI 추정이 아닌 DB 실제 쿼리 결과로 산출.
+
+---
+
+## 3) 표준 작업 흐름(Workflow) & 게이트
+
+### 3-1. 기본 파이프라인
+1) **요청 접수** → 2) **현황 파악** → 3) **설계안 제시** → 4) **Harold님 컨펌** → 5) **구현** → 6) **검증** → 7) **배포**
+
+### 3-2. HOTFIX 트랙 (Harold님이 `[HOTFIX]` 태그 명시 시)
+**조건:** UI 문구/오타/스타일, 설정값, 단순 조건 분기 등 저위험 변경. DB 스키마 변경 없음, 보안/인증 로직 변경 없음.
+**흐름:** 구현 → 검증 → 배포 (설계 단계 암묵 합의)
+
+### 3-3. 핵심 게이트 체크
+- [ ] TypeScript 타입 에러 없이 컴파일 가능한가?
+- [ ] pg_dump 백업 완료했는가? (DB 변경 시)
+- [ ] 기존 기능 깨짐(회귀) 확인했는가?
+- [ ] 롤백 방법이 있는가?
+
+---
+
+## 4) 🎯 CURRENT_TASK (현재 집중 작업)
+
+> **규칙:** 아래 목표에만 100% 리소스를 집중한다.
+> **⚠️ D-Day: 2026-05-05 새벽 레거시 이관 최종 단계 (Harold + Claude 공동).** 예약발송 + 레거시 Agent 차단.
+
+---
+
+### 🟢 2026-07-02 (6) — 자동마케팅 완성: 발송 전 흐름 스펙 + 일일 분석 엔진(오늘의 추천) + 회고·ROI·캘린더·D-2 준비 (★배포완료 — 단 prep_reminder_sent_for ALTER 1건 잔여 실측, Harold 실행 예정)
+> **발송 전 흐름(Harold 스펙)**: schedule_time = 발송 희망 시각으로 의미 전환 — 생성·스팸테스트·담당자 통지 = 희망−준비시간(기본 120분, next_run_at=생성 시각, 기존 행 −lead UPDATE 마이그레이션), 발송 = 정각. send_time_mode fixed(기본)/ai_optimal(클릭 피크는 명시 선택만). 통지 2번 문자 = 일시+타겟 수+예상 비용(회사 단가×수량 — generateProposal이 cost_per_* 4컬럼 조회, 옛 getCompanyCosts({}) 전 회사 기본단가 결함 교정)+정지 안내. 승인 대기(자격 미달 pending)도 문안+안내 2건 통지 신설. 모든 담당자 문자 첫 줄 `[한줄로 AI 자동마케팅 안내문자]`(notifyOperatorAdmins 중앙 1곳). 재생성 문안 통지≠실발송 불일치 수정. **광고 강제(Harold 명시)**: orchestrate forcedIsAd + 생성/발송 isAd 상수 — (광고)+080 합성·080 미설정=보류 가드 전 건. 문안 스타일 4종(copy_style, 예시 미리보기 3곳) 프롬프트 주입(스팸 재생성 유지).
+> **오늘의 추천 = 일일 분석 엔진**: 신규 company_daily_briefs + CT company-daily-brief/daily-brief-policy(순수 테스트) — predictive 9시 사이클 합류(DB 규모 차감 1회 포함, 신호 0=AI 미호출). 신호=journey-opportunities 재사용+ai_company_memory+어제 성과+정착 후보(30발송/5클릭 표본 가드). 추천≤3 = 숫자 실측 귀속·혜택 패턴 폐기·journey_promotion("여정으로 굳히기"→승격다리)·recommendedChannel(email/dm 배지→해당 화면). 학습 메모리 첫 읽기 연결 = orchestrate 문안 프롬프트에 buildMemoryPromptContext(타겟 추출 미주입 — 0건 차단 보호). 화면 = 자동마케팅 추천 상단 DailyBriefCard + AI Operator 좌측 진단 패널 단일 소스 통합(룰 추천=폴백, 임의 상수 "30% 복귀/2~3배/1.5배" 제거, 자동마케팅 현황 strip).
+> **루프·확장**: 성과 회고 문자(다음날 9시 — campaigns 실측+변이 클릭, 멱등 recap_notified_at) / 자동마케팅 ROI(automarketing-roi CT — 발송 후 7일 cdp purchase 매출 귀속, PerformancePage 카드, 미연동=정직 표기) / 마케팅 캘린더(/marketing-calendar 신규 모듈+AI Operator 빈 타일 — 1년 12개월 설계 50크레딧 매회+CreditConfirmModal, 등록=기존 POST 재사용 건당 200, monthly 프리필) / 시나리오 3종(생일 매월·포인트 사용·VIP 데이 — 월간형 주기 프리필) / 월간 캠페인 D-2 사전 준비 문자(혜택 입력 여부 분기, 멱등 prep_reminder_sent_for).
+> **크레딧 사전 모달 기준(Harold 확정)**: 버튼 트리거 20크레딧+ = 발동 전 CreditConfirmModal 의무(백·프론트 맵 주석+메모리 영구 룰). 전수 대조 중 인터랙션 DM 발행 표시 100≠실차감 120 결함 발견 — DmBuilderPage가 백엔드 isInteractionCampaign 동일 기준으로 source 분기 수정.
+> **이연**: 담당자 알림톡 전환(카카오 템플릿 검수 대기) / 이메일·DM 실제 자동 발송 파이프라인 / Bandit 구매 신호(고객 단위 클릭 귀속 부재 — 캠페인 단위 ROI로 대체). 상세=[[project_2026_0702_automarketing_completion]].
+
+### 🟢 2026-07-02 (5) — DM 추적 근본 수리(본문 파서) + 상세 추적/버튼 단위 + AI 학습 메모리 자동 전송 + 디자인 v2 (★추적 수리 서버 검증완료 / 나머지 배포대기)
+> **★진짜 근본 원인 = 공개 라우터 본문 파서 유실**: DM 개인별 열람이 배포·재기동에도 계속 0이던 것 — app.ts에서 `app.use('/api/dm/v', dmPublicRouter)`가 helmet·전역 `express.json()` **앞**에 마운트돼(뷰어 인라인 스크립트 CSP) `/track` POST의 req.body가 비어서 비콘의 토큰·anon·scroll·duration이 전부 유실 → 껍데기 행만 적재(총 열람 집계는 되나 수신자별 매칭 불가). 지난 세션이 서버측 GET 기록을 없애고 이 POST 비콘에 전부 의존하게 만들며 드러난 잠복 결함. **수정 = dmPublicRouter.use(json())**. event-response(응모·투표·쿠폰·설문 = 응모·액션 늘 0의 원인)·ab track도 동반 복구. 서버 curl로 recipient_token·phone·scroll·duration 실적재 확인 → 실사용 화면에서 100%/95% 완독 확인. 진단 = 서버 로컬 curl 순수 검증(브라우저·문자·모바일 변수 제거)이 결정타. 상세=[[project_2026_0702_dm_tracking_bodyparser_rootcause]].
+> **수신자별 상세 추적(모달 확대)**: 발송 추적 행 클릭 → 그 사람 상세 펼침 — 섹션 여정(발행물 순서대로 조회·클릭, 안 본 섹션 흐리게=멈춘 지점) + 누른 버튼(요소 라벨 칩 "쿠폰 사용하기 ×2") + 열람 요약(첫 열람·체류·깊이·완독) + 응답·액션 이력(투표 선택·설문 답·룰렛 결과·쿠폰 수령 시각). 신규 GET /api/dm/:id/recipient-detail. 모달 1120→1240. 수신자 조회 SQL은 CT getDmRecipientEngagementRows로 이관(목록·상세·학습 워커 공용=이중 진실 차단).
+> **요소(버튼) 단위 추적**: 뷰어가 버튼·링크·투표옵션·탭 클릭 라벨을 캡처 → dm_views.section_interactions(jsonb)에 elements 병합 저장. 공개 입력 clamp(섹션당 라벨 20·라벨 60자). DB ALTER 0.
+> **AI 학습 메모리 자동 전송(DM+이메일)**: 1시간 학습 워커(ai-memory-accumulator)에 2단계 추가 — DM 발행물 성과(열람률·완독·클릭·응모·최다 반응 섹션)와 이메일(오픈·클릭)을 회사 ai_company_memory(channel_performance, 클릭률 10%+면 success_pattern)에 실측 서술로 누적. 원칙 = 실측만(임의 상수 0)·표본 10명+·실측 0 보류(가짜 0% 차단, 기존 게이트 재사용)·20h 멱등·회사 격리·발송/돈 무변경. buildMemoryPromptContext로 AI 오퍼레이터 system prompt 자동 주입. 신설 문구 CT(ai-memory-text) + 기록 CT(company-memory recordDmEngagementLearning/recordEmailEngagementLearning).
+> **디자인 시스템 v2**: 토큰 타입 스케일 상향(히어로 40·h1 28·h2 22·본문 16px + 오버라인 라벨) + 그림자 슬레이트 톤 — SSOT 3파일(backend/frontend dm-tokens + dm-builder.css) 동기. 섹션 27종 발행물 SSR + 에디터 캔버스 격상(카운트다운·쿠폰·CTA바·상품 가격 위계·프로모/즉시쿠폰 다크패널·탭 pill·투표·선착순 게이지·리뷰·SNS·헤더). DM 카피 생성 이모지 전면 금지(장식은 문장) + (광고)·080 표기 금지.
+> **발송 모달 정비**: 발송 성공 시 창 닫힘(토스트 z-9990 유지) / 광고성 기본 ON + 설정 080 미리보기 합성 표시 + 080 미등록 발송 전 차단 / 문안 (광고)·무료수신거부 이중 제거(stripAdPartsDeep — 문안 속 임의 080 발송 차단, 실측 원인=AI가 무료수신거부 080-000-0000 지어넣어 buildAdMessage가 설정번호 합성 skip) / 변수 칩 커서 위치 삽입 / 꾸미기 = 고객사 보유 필드(/api/dm/variables) 선택(사용 필드 자동 선택 — AI 오퍼레이터 패턴, 하드코딩 3개 제거).
+> **백엔드 결함 동반 수정**: dm.ts '/:id' GET/PUT/DELETE uuid 가드(isUuid CT) — /dm/overview·brand-kit·ab-tests가 '/:id'에 가로채여 500 나던 것 해소 / ai.ts learning-summary `summary`→`memory_value` + journey-step-diagnosis `j.objective` 제거(실측 부재) / alimtalk-jobs·batch-ai 42P08(같은 param 두 타입 추론) param 분리+명시 캐스트.
+> **DM 시작화면 재배치**: 좌 프롬프트 입력 크게 단독 + 우 2행(위 빠른시작 모달·아래 자유시작·완성슬라이드), 우측 카드 중앙정렬. 상단 에디터 버튼 7개 → [도구] 드롭다운 1개.
+
+### 🟢 2026-07-02 (4) — DM·이메일 전면 정비 (★전부 배포완료)
+> **DM 에디터/발행물**: 상품 할인표시(할인율+취소선)·상품/갤러리/슬라이드 링크 연결 / CTA 빈 URL 경고 / %고객명% 공용 링크 fallback("고객님") / 폰트 크기 2계층(섹션 공통 제목·본문 + 히어로·텍스트카드 필드별) / 잘림 근본 2건(InlineEditable nowrap + 발행물 CSS에 .dm-text-* 타이포 클래스 누락 — 에디터=발행물 크기 일치) / 발행물 죽은 동작 9건 배선(설문 입력·제출, 즉시쿠폰/선착순/클릭리워드 참여 기록, 탭 전환, 슬라이드쇼 자동전환, 인스타 safeUrl).
+> **타겟 추출**: "전체 고객" 1급 지원(EMPTY_FILTER 구멍 — AI 플래그+키워드 안전망, DM allCustomers/이메일 빈 필터 허용) + 모달 인라인 에러.
+> **이메일**: 빠른시작 7카드 제거 → 시작 허브(템플릿/비주얼 카드) + AI 생성 → 비주얼 편집기 통일(generate-sections) + [신규 캠페인] 레거시 진입 제거 / PC 미리보기 상시 허용(잠금=발송만) / 발송 버튼 = 완성 저장 후 생성(3중 가드).
+> **DM 발행**: 발행 축 수정(approval_status→status/short_code isPublished) — 발행 후 버튼 [발송] 전환·크레딧 모달 미노출.
+> **DM 발송 모달**: z-index 3건 상향(스팸테스트/다듬기 z-2000·토스트 z-9990) / 발송시각·발신번호 푸터 상시 노출 / 발신번호 응답키(callbackNumbers) 결함 수정 / 문안 생성 = DM 편집내용 근거+계절감(getSeasonContext)+JSON 방어파싱+프롬프트 선택화 / 미리보기 실타겟 치환+샘플 ‹› 전환 / 스팸테스트 = 첫 샘플 치환본 / 개별 회신(CT-08 — 고객 store_phone, 미등록 번호 제외 확인 흐름).
+> **DM 카드**: [발송 추적] 직행(has_send_history) + 응모·액션 지표(dm_event_responses) 추가. DB ALTER 0.
+
+### 🟢 2026-07-02 (3) — 모바일DM 수신자별 추적 근본 수정: 토큰 1급 키 + 열람 깊이/섹션/클릭 + 추적 화면 격상 (★배포완료·ALTER 적용)
+> **근본 결함**: 발송 링크는 ?r=토큰인데 뷰어 비콘은 ?p=만 읽어 전부 익명 적재 — 수신자별 "어디까지 봤는지" 수집 자체가 안 됐음. section_interactions는 /track이 받지 않고 버렸고(저장 0), 열람 1회에 dm_views 3행(view_count 3배), 최종 비콘 beforeunload 단독(모바일 유실).
+> **수정**: 뷰어(신형·레거시) 비콘에 토큰+익명ID 동봉 → /track이 토큰→고객 phone 서버 확정(클라 불신뢰) → trackDmView UPSERT(토큰>phone>익명ID, 체류 증가분 합산·스크롤 GREATEST·섹션 병합·view_count는 진입/신규만). 스크롤 최대 % + visibilitychange/pagehide/15초 하트비트 + 링크 클릭 즉시 비콘. recipients-tracking 깔때기(발송→열람→50%→완독→클릭)+진행 바 UI. event-response 토큰 1순위(응모 회원 매칭 복구). 발송 경로 무변경.
+> **DB**: dm_views ALTER 3컬럼(recipient_token/anonymous_id/max_scroll_pct)+부분 인덱스 2 (Harold 적용). 실측 보강 = id bigint·ip inet·ab_test_id/ab_variant (SCHEMA.md 재기록). 신설 CT dm-tracking.ts(+test 17).
+> **남은 별도 과제**: A/B 뷰어 비콘이 variant 일반 /track으로 가는 구조 검증 / 퀄리티 활용(미열람 리마인드·미클릭 재타겟·CT-86 이탈 깊이 연동).
+
+### 🟢 2026-07-02 (2) — 이메일 마케팅 종결: 크레딧 모델 개편 + 개인화 동적화 + 링크/쿠폰/서식/페이징 (★전부 배포완료)
+> **크레딧 모델(Harold 확정)**: 발송 무료(고객 SMTP) / 완성 저장 50 캠페인당 1회(AI·수동·템플릿 불문, 멱등키 email-campaign-complete:ID + 구 email-ai-publish 인정=이중과금 0, 환불 없음) / 임시저장 무료·무제한(발송+PC 미리보기 잠금) / 발송 시 50 차감 제거. 에디터 [임시저장|완성 저장·50] 2버튼+확인 모달, 미완성 발송 시 완성 모달→발송 연속(1클릭). 생성 3·개선 1 현행.
+> **개인화 동적화(하드코딩 금지)**: GET /api/email/personalization-vars = CT-58 실측 70%+ 필드만(15컬럼 후보) — 칩·조건부 필드·수신자 SELECT 단일 소스. 인앱 변수 목록도 blocked(30% 미만) 숨김.
+> **링크 근본 수정**: 스킴 없는 URL(www.x.y)을 렌더러가 href="#"/링크 제거로 죽이고 추적도 skip → normalize CT `normalizeWebUrl` 신설, 이메일 렌더러 5곳+발송 추적 래핑(구 캠페인 발송 시점 치유)+DM safeUrl 통합 적용.
+> **마무리**: 쿠폰 마감 KST 한국어 표시(`formatKoreanDateTimeDisplay`)+빠른 선택 칩(7/14/30일·이달 말) / 히어로·텍스트카드 줄바꿈(\n→br)+색상 직접 지정(headline_color 등, 미지정=기본색) / 캠페인 카드 하단 압축 버튼 행+2열×2줄(4카드) 페이징뷰. 상세 [[project_2026_0702_email_credit_personalization]].
+
+### 🟢 2026-07-02 (1) — 브랜드보이스 형태 추출 강화 + 브랜드 링크 + 문안 편집기 모달 (★전부 배포완료)
+> **형태 추출**: 가이드라인 9→14항목(후크 유형·본문 구조·종결어미·호칭·기호) + 코드 계산 2(길이 범위·링크 습관 정규식 스캔) + robust 파싱. CT-99 "형태 준수 규칙" 섹션(참고→규칙 격상) + CT-100 종결어미·길이 범위 필수 추가 후 generateMessages 첫 배선(미달 시 재생성 1회 creditCost 0). 각 회사 "재추출" 1클릭 필요.
+> **브랜드 링크**: URL만 등록(라벨 서버 자동 부여) → 칩 클릭=커서 삽입(textInsert CT), AI는 {{LINK:라벨}} 토큰만 출력→백엔드 결정 치환(URL 오타 0), 미치환 placeholder 발송 가드(LINK_PLACEHOLDER_UNEDITED). 저장=ai_company_memory brand_link(ALTER 0).
+> **문안 편집기 모달(MessageEditorModal)**: AI Operator 인라인 편집 통 제거 → 큰 본문+바이트 게이지+스마트 경고((광고)/수신거부 직접입력·깨질 이모지·한도)+휴대폰 미리보기(실수신+고객 머지)+우측 삽입 패널(변수·브랜드보이스 CTA/빈출 칩·브랜드 링크·특수문자 CT). 상세 [[project_2026_0702_brand_voice_form_links]].
+
+### 🟢 2026-07-01 (이어서 3) — 서버 상태 점검 후 코드 수정: 42P08(시스템 sync user INSERT 타입충돌) + PG 부팅 연결 재시도 + CORS 안내 (★배포·검증완료)
+> **42P08**: sync.ts·companies.ts 시스템 user INSERT가 `$1`을 company_id(uuid) + `'system_sync_'||$1::text`(text) 이중 사용 → PG 타입추론 충돌. fix = `utils/system-sync-user.ts` CT `ensureSystemSyncUser`(`$1::uuid` + `$2::text`)로 통합(2곳 인라인 제거, controltower_first). 비치명(수신거부 실차단은 admin·company_user 등록이 담당, 시스템 user 등록만 skip이었음)·기간계 영향0.
+> **PG 부팅**: config/database.ts 부팅 `SELECT 1` 확인 1회→5회 재시도(2초 간격). 부팅 순간 경합 타임아웃 오탐 실패로그 제거, pool·query·발송 로직 무변경. 검증=21:38 재시작 "[PostgreSQL] 연결 재시도 1/5" 후 붙음(bare 실패표시 사라짐).
+> **CORS**: app.ts 정상(.env CORS_ORIGIN 읽음). 서버 .env에 운영 도메인(hanjul.ai·app.hanjul.ai·sys.hanjullo.com) 추가 시 경고 소멸(코드 아님). 상세 [[project_2026_0701_server_health_fixes]].
+
+### 🟢 2026-07-01 (이어서 2) — 예측 일일차감 eligibility 요금제기반 재정의 + 슈퍼관리자 화이트 모던화 + 이메일 placeholder 발송 UX (★전부 배포·검증완료)
+> **예측 일일차감(돈)**: eligibility = plan-guard `ACTIVE_PAID_PLAN_WHERE`(plan_code≠FREE + subscription_status expired/suspended 아님, TRIAL 포함) + EXISTS customers. predictive_enabled 토글 폐지(무시). `runPredictiveBatchNow`(시간가드 없이 멱등) 분리 → 매일 9시 스케줄 + 슈퍼관리자 수동 트리거 `POST /api/admin/predictive/run-now`(크레딧 탭 버튼) 공유. 멱등키 predictive-daily:회사:YYYYMMDD. PricingPage 하단 DB규모별 차감표(dailyDbAnalysisCredits). 현재 대상 5개사(BASIC 3·ENT 2).
+> **슈퍼관리자 모던화**: bg-slate-50 + sticky 헤더 + 카드 rounded-2xl 토큰 일괄 통일(화이트 유지, 다크 미도입). 드롭다운 클릭토글+onBlur 경합 제거 → menuRef 바깥클릭·ESC(단일 클릭 고정). 요금제 관리 max_customers 컬럼·입력 제거(state 보존=payload 회귀0). 크레딧 탭 3개 가로 패널 → 3칸 타일+클릭 모달. 미사용 기능 정리=다음.
+> **이메일 placeholder UX(발송)**: `[혜택을 직접 입력해주세요]` 실존 시 발송 차단(가드 정상, 오탐 아님). email-ai.ts `findUneditedPlaceholder`(위치·샘플) → 차단 메시지에 자리+텍스트 표기. email-channel.ts mapRow `hasPlaceholder` → 초안 카드 "직접 입력 필요" 배지 + 발송 클릭 시 편집기 유도. stuck sending은 email-send-sweeper 30분 복구로 기처리. 상세 [[project_2026_0701_predictive_eligibility_superadmin_email]].
+
+### 🟢 2026-07-01 (이어서) — 비-문자 개인화+타겟추출 전체(이메일·인앱·DM) + DM 수신자별 토큰 발송/추적/편집기 + 발행 주소복사 (★전부 배포완료)
+> **공용(P1)**: 순수 CT `channel-eligibility.ts`(채널별 발송 자격 WHERE 미러)+test7 · CT-97 `convertNaturalLanguageToFilter` 코어 분리 · `POST /api/targets/extract`(matchCount+channelEligibleCount+samples·0건 no-relax·503 안전망) · 공용 `TargetExtractModal`(channel prop).
+> **이메일(P2)**: RecipientsModal [AI 정밀 타겟] 탭 → filter 발송(target type='filter' · `resolveCustomerRecipientsByFilter` 즉시·예약 sweeper). ★email 발송 자격=`RECIPIENT_SAFETY_WHERE`(email_opt_in IS DISTINCT FROM false·is_active 미적용).
+> **인앱(P3)**: `cdp_inapp_messages.audience_filter jsonb`(ALTER) + `customerMatchesFilter`+serve 가드평가(기존 6천사 메시지 NULL=미영향) + `PUT /cdp/inapp/:id/audience-filter` + InAppMessagesPage 타겟 탭 [표시 대상 추출]. 인앱 개인화 흐름 점검=이미 작동(SDK identify externalId+phone/email→CT-20 identifyCustomer→cdp_identity_links→getInAppCustomerForBrowser 동봉→SDK 치환).
+> **DM(P4)**: `dm_recipient_tokens`(CREATE) + `dm-recipient-token`(issue/lookup/bulk 난수·30일) + 뷰어 `?r=token` 개인화(실패=공용 fallback·PII0) + `POST /dm/:id/send-to-target`(createDirectSendCampaign 재사용·안전망 보존 · 토큰링크 staging extra1→%기타1% · %DM링크% 매핑 · 예약 · countStagingFiltered 정확과금) + `GET /dm/:id/recipients-tracking`(열람/완독) + `DmSendAndTrackModal` 단일 편집기(2모드 AI생성/직접+핸드폰미리보기+꾸미기[decorate-message]/다듬기[AiRefineModal]/스팸테스트[SpamFilterTestModal]+예약시각+변수칩) + DmBuilderPage 발행모달 [타겟 고객에게 발송]. ★후속: 문안 생성=DM 전용 경량 `POST /dm/:id/generate-copy`(브랜드보이스 주입·1개·%DM링크%·3크레딧) 신설(캠페인 generate-message 대체) + 발송 모달·핸드폰 미리보기 확대. + 발행 주소복사·재발행 크레딧 모달 skip.
+> **DM 발행 주소복사**: 발행 카드 [발행 주소 복사](멱등발행=0과금 short_url 재사용) + 이미 발행 시 편집모드 발행 크레딧 모달 skip(재발행 멱등=이중과금 원래 없음·오해 차단).
+> **마이그레이션(Harold 적용완료)**: `cdp_inapp_messages.audience_filter` · `dm_recipient_tokens`. **검증**: backend/frontend tsc 0 · channel-eligibility vitest 7 · 모델명/native dialog/박-단어 0. 상세 [[project_2026_0701_nonsms_personalization_target_extraction]].
+> **다음 세션 = predictive-daily 크레딧**: 설계서 `docs/superpowers/specs/2026-07-01-predictive-daily-credit-diagnosis-pricing-table-design.md`. 매일 9시 차감 로직 이미 구현(predictive-worker) → 진단(미배포/미연동/worker)부터 + 요금제 DB 수량별 차감표.
+
+### 🟢 2026-07-01 — AI 모델 전환: 문안=Sonnet 5 / 오퍼레이터 정밀=Opus 4.8 + 검수 thinking·오탐차단 + 브랜드보이스 톤 강화 (★전부 배포완료·로그검증)
+> **모델 분리 (Harold 명시)**: 문안 생성 전체(generate/refine/email/dm/inapp, model 'sonnet') = **Claude Sonnet 5**(도입가 $2/$10, 대량 비용↓). AI Operator 정밀(target/compliance/orchestrator, model 'opus') = **Claude Opus 4.8**(검수·타겟 정확도 핵심·저빈도). 오퍼레이터 message sub-agent는 본래 model 'sonnet'이라 문안은 Sonnet 5. `config/defaults.ts AI_MODELS` 진실(claude=sonnet-5·opus=opus-4-8). model 파라미터는 이제 Claude 분기 아닌 GPT fallback 분기(gpt-5.4-mini vs gpt-5.5)에만 의미. 서버 .env CLAUDE_MODEL/CLAUDE_OPUS_MODEL 미설정 확인(코드 default 적용).
+> **게이팅 신설 (defaults.ts)**: `isAdaptiveOnlyModel(model)`=/sonnet-5|opus-4-7|opus-4-8/ → Anthropic 직접 호출 6곳(ai.ts 중앙·refine / ai-orchestrator / analysis / batch-ai / citations) ① temperature/top_p/top_k 미전송(보내면 400) ② thinking 미요청 시 {type:'disabled'}(Sonnet 5 생략 시 adaptive 자동 ON → max_tokens 잠식·문안 잘림 차단). `resolveMaxTokens(base,model)`=adaptiveOnly면 ×1.5(상한 16000) — 새 토크나이저 ~30% 토큰↑ 문안 잘림 차단. ai-mapping.ts(CSV 필드매핑)만 범위 밖(자체 env, Opus 4.7).
+> **검수 정밀도 (Sonnet 5 전환 시 오탐 발생 → 정정)**: 증상=무료거부 080 본문에 있는데 "누락 추정"·발신번호 누락 오탐(Sonnet 5 thinking-off가 검수 프롬프트 안 따르고 환각). fix=① 모델 Opus 4.8 ② `checkCompliance` thinking ON+maxTokens 512→2048 ③ 검수 프롬프트 "검수 제외"(광고/무료거부 080/발신번호·상호명/카카오수신=시스템·발신 설정 자동처리, 본문에 없어도 정상) 명시. [테스트계정] placeholder 경고는 정식 검수 기준 유지. 검증=재생성 후 오탐 사라지고 placeholder 경고만 남음.
+> **브랜드보이스 (학습·적용 정상 확인 + 톤 강화)**: 오퍼레이터 메시지가 companyId 전달(ai-orchestrator:395·699)→generateMessages buildSystemPromptWithBrandVoice 주입(ai.ts:1185)=미주입 버그 X. base 감성/심리 카피 프롬프트가 강해 학습 톤(정보/실용) 약화 → `brand-voice-prompt.ts` "톤 충돌 시 학습 톤 우선" 명시 강화. 검증=재생성 시 혜택강조형(구조·정보 중심) 추천.
+> **확인 가시화 + 교훈**: ai.ts 호출 성공 로그에 실제 모델명 출력(response.model). 검증 로그=`claude-opus-4-8 · OPUS · Thinking`(검수)·`claude-sonnet-5`(문안). ★교훈=build:safe가 dist는 빌드해도 pm2 리로드를 놓치는 케이스 → 소스·dist 신코드인데 런타임 로그만 옛 모델이면 `pm2 restart targetup-backend`(running process가 옛 dist 메모리 보유). 상세 [[feedback_ai_operator_model_isolation]] · [[project_2026_0701_ai_model_split]].
+
+### 🟢 2026-06-30 (이어서3) — 알림톡 흰글씨 fix + 싱크에이전트 페이지네이션 전면 견고화 + 자동마케팅 중복 정정 + 비-문자 개인화 설계서
+> **여정 정보알림 알림톡 대체 제목/문구 흰글씨 fix (★배포완료)**: `AlimtalkChannelPanel.tsx` 흰 카드 패널이 자기 글자색 미지정 → 다크 여정(`InfoAlertJourneyBuilder` text-white) 안에서 input/textarea가 흰글씨 상속. 루트(257행) `text-gray-900` 1줄 — 6곳 공용이라 여정 정상화+라이트 5곳 영향0. tsc0.
+> **싱크에이전트 full/증분 조기종료 근본 정정 (★코드완료·검증·5티어 빌드완료 / 업로드=Harold)**: 이새(win-legacy×Oracle, 실고객 1호) full이 원천 13만(계획 35배치)인데 25/35에서 끊겨 99,852만 적재(증분이 우연히 메움). 근본=공용 엔진이 "짧은 페이지면 끝" 단정(OFFSET 깊은구간 짧은/빈 페이지). 데이터 확정=sync_logs total_batches=35 vs 실제 batch_index=25 + 최종 /log 머지·커서 세팅=프로세스 재시작 아님 증명. 정정=engine 키셋 우선+getRowCount 완전성 가드(full·증분, "짧으면 끝" 제거)+Oracle ROWID 키셋+MySQL/MSSQL 안정정렬(PK)+전 어댑터 증분 타이브레이커. 키셋 실패=OFFSET 폴백+가드 이중망. tsc0+테스트25. 5티어 exe+20zip 빌드완료. customers 137,082 전부 유니크(중복0) 확인. Sync.md `status/SYNC-AGENT-ENVIRONMENTS.md` 신설(OS×DB 조합표·검증=이새만·신규설치 체크리스트). ★별건 진단(미수정): `customer-upsert.ts:180` ON CONFLICT (company,store,phone) vs 실 제약 `customers_company_id_phone_key`(company,phone) 불일치 → 같은 전화 다른 매장·가짜전화 65건 dup-key 실패(제약 정상작동, 정정 미실행).
+> **자동마케팅 중복 추천 — 진단·기존정리 완료 / ★코드 구현=다음 세션(미구현)**: `generateProposalForOperator`가 제외 없이 항상 INSERT → pending 누적(SQL 확정: 테스트계정2 operator2개 4건·인비토 operator5개 5건, 직원 테스트분). 기존 누적은 Harold가 `UPDATE 2`로 정리(operator당 최신1건). 정정 방향 합의=operator당 미처리1건(직전 pending/admin_review 만료 후 fresh)+scheduled 이중예약방지. **코드는 아직 안 씀** — 다음 세션 구현 시: ① INSERT 2경로(generate 579 + 시퀀스 리마인드 1314='scheduled' 의도 생성) 상호작용 처리(리마인드는 막거나 만료시키면 안 됨) ② 순수 `operator-proposal-dedup.ts` + verify ③ `operator_proposals` updated_at 컬럼 없음(status만 set). 2차(직전 실발송 비슷한건 제외)=이연.
+> **비-문자 채널 개인화+타겟추출 UI = 설계서만(구현 다음 세션)**: 이메일·DM·인앱·카카오. 그라운딩=자연어 추출+인원수+세그저장 백엔드 이미 존재(CT-97 `generateSegmentFromNaturalLanguage`·`/api/saved-segments/generate-from-text`·CT-01 `buildCustomerFilter`·`saveSegment` filter_jsonb), 개인화도 채널별 존재. 실질 신규=모바일DM 수신자별 토큰 링크 1개(`renderDmViewerHtmlWithCustomer`는 있고 접속자 식별만). 설계 A1=공용 추출 재사용+공용 모달+채널 개인화. 설계서 `specs/2026-06-30-non-sms-personalization-target-extraction-design.md`(§9 구현전 확정6·§10 P1~P4). sub-project B(카페24·고도몰 적용+과금)=별도 스펙.
+> **다음 세션 = 비-문자 개인화+타겟추출 구현**: 위 설계서 §9 6개(엔드포인트 방식·모달 통합·인앱 식별자·카카오 수신동의·DM 토큰 DDL·DM staging) grep/information_schema 확정 후 P1 착수.
+
+### 🟢 2026-06-30 (이어서2) — 여정 일반화 전체 구현 + 빌더 정정 + AI Operator fallback 근본 정정 (★전부 배포완료)
+> **여정 일반화 (★배포완료)**: `start_kind` 1급(event/standing/date_anchor/one_shot) + SP-A 알림톡 템플릿 우선 + SP-B 날짜축 D-N(anchor_date+반복+anchor_offset_days + 순수 computeAnchorStepRunAt/computeNextAnchor/isAnchorCycleComplete + journey-anchor-scheduler·one_shot dispatch). executor 단발 분기(event/standing byte 불변). ALTER 적용완료(journeys 6컬럼·journey_steps.anchor_offset_days·journey_anchor_dispatch). 설계서 `specs/2026-06-30-journey-generalization-design.md` · 플랜 `plans/2026-06-30-journey-generalization.md`.
+> **날짜축/정보알림 빌더 정정 (★배포완료)**: ① 직접 문안 강요·포인트 한정 폐지 → 자연어 [AI 자동 생성](7일전·3일전·당일 정규식 파싱→D-N 스텝+문안, 1건 1크레딧) + 스텝별 [문안 편집] 모달(AI 다듬기·꾸미기) + 대상 일반조건(points 포함). ② AI Operator 전 영역 심플+버튼/모달 표준 정합 — 긴 1열 폼 폐기, 공용 `JourneyBuilderUi`(ModalShell·SummaryButton·AudienceModal) 추출, 두 빌더 컴팩트 메인+버튼/모달. ③ (광고)/무료수신거부 정정 — AI 생성문 `stripAdParts` 순수화 + 스텝 편집 모달 "발송 미리보기"(buildAdMessageFront).
+> **AI Operator 문안 fallback 근본 정정 (★배포완료)**: 증상=혜택·개인화 무시+골격 문안. 근본=풍성화 후 AI 응답 JSON에 raw 줄바꿈 → `extractJsonFromAiText` JSON.parse "Bad control character" throw → `getFallbackVariants`. 운영 로그로 확정(추측 0). fix=`ai-json.ts`(CT) 문자열 내부 제어문자 escape 후 재파싱(verify8, 모든 AI 호출부 수혜) + `copy-rag-retriever` createdAt(PG Date) ISO 강제(RAG degrade 정정). 브랜드보이스 직원 신고는 fallback 동반인지 별개인지 배포 후 회사·증상 확인 예정(단정 X). 상세 [[project_2026_0630_journey_generalization_design]] · [[project_2026_0630_copy_quality_brand_voice]].
+
+### 🟢 2026-06-30 (이어서) — 문안 퀄리티/브랜드보이스 강화 + AI Operator 정정 + 발송현황 카드 (★배포완료) + 여정 일반화 설계서
+> **문안 퀄리티/브랜드보이스 강화 (★배포완료)**: `brand-voice-prompt.ts` AND 완화(가이드라인만 있어도 톤 적용·무증상 OFF 종결)+few-shot 조건부+대표문안 5→10(OFF 안내 배너) · 신규 순수 CT `copy-benefit-detector`(혜택 토큰 감지 + 채널별 강조/시의성 풍성, TDD9) · `generateMessages` 배선(혜택강조·앵글·채널분리·단일호출 자가비평=추가차감0) · A6 회사 격리 게이트(`copy-rag-retriever` 등록=업종폴백OFF/미등록=`summarizeIndustryFeatures` 통계만·원문0 누출0) · 출력 금지어 가드(`findBannedWords`) · 꾸미기 `decorateOperatorMessages`(단일호출 3개=3크레딧·체크집합 정확). propose는 orchestrate→generateMessages 경유라 자동 반영. backend/frontend tsc0·vitest145.
+> **AI Operator 정정 (★배포완료)**: ① 변형 유형 감성형/혜택강조형/MZ감성형 복원 — 내가 넣은 angle 줄이 `BRAND_SYSTEM_PROMPT`(877~975) 정의를 덮어 직설형 개명+긴이름 40% 카드 넘쳐 창 깨짐 → 줄 제거+variant_name 고정. ② 풍성화=내용 기준(계절감/해당월 시의성 적극·3안 색깔 다양화), 이름 아님. ③ 활용 컬럼 자동체크 근본fix — 칩 토큰=bare '고객명'(percentVar) vs 본문 '%고객명%' 불일치 → 캡처그룹 비교 + 변형 클릭마다 그 변형 사용컬럼 갱신 useEffect.
+> **메인 대시보드 발송현황 카드 (★배포완료)**: `customers.ts` stats가 totalSent(전송)·fail_count(실패)를 이미 계산/보유 → 응답에 `monthly_total`·`monthly_fail` 노출만(ALTER0·신규SQL0) + `Dashboard.tsx` 카드 3단(전송/성공/실패/성공률 · 채널별 수량 · 총사용금액), 라이트 톤.
+> **여정 일반화 (★배포완료 2026-06-30)**: `start_kind` 1급(event/standing/date_anchor/one_shot) + SP-A 알림톡 템플릿 우선(트리거 카드 제거→템플릿→시작방식→대상) + SP-B 날짜축 D-N(anchor_date+반복+anchor_offset_days + 순수 `computeAnchorStepRunAt`/`computeNextAnchor`/`isAnchorCycleComplete` + `journey-anchor-scheduler`, 스텝별 날짜 스케줄 발송·D-0후 정지(none)/다음앵커 갱신(recurrence)). one_shot=활성 시 단발 dispatch. 신규 CT `journey-start-kind`. 빌더 2신규(InfoAlert 재작성·DateAnchor). executor 단발 분기(event/standing byte 불변). BE/FE tsc0 · verify 23(start-kind11+anchor12) · vitest 14 회귀0 · 모델명/native dialog/박-단어 0. ALTER 적용완료(journeys 6컬럼·journey_steps.anchor_offset_days·journey_anchor_dispatch·idx, SCHEMA.md 2026-06-30 기록). 설계서 `specs/2026-06-30-journey-generalization-design.md` · 플랜 `plans/2026-06-30-journey-generalization.md`. [[project_2026_0630_journey_generalization_design]]. 실측(날짜축 D-N 1건·one_shot 1건)은 직원 몫.
+
+---
+
+### 🟢 2026-06-30 — 크레딧 모델 v2 (코드완료·검증) + 메인 대시보드 카드 + 문안 퀄리티/브랜드보이스 설계서
+> **크레딧 모델 v2 (코드완료·검증완료 · 배포 Harold 진행)**: 단가 재조정(꾸미기 1→3·DM 30→100·인앱 15→100·이메일 30→50·인터랙션 50→120·여정활성화 150→200·운영 10) + DB 규모 일일분석 공식 `round(3+(10만블록−1)×1.5)`(predictive-worker·수동재계산 회사별 차감, "매일 자동 예측" 토글 폐지) + 여정 운영과금(`journey-operation` 발송성공 직후 멱등 `journeyId:날짜` = 하루 1회 상한) + 음수 허용(운영 source만 −1개월 grant 상한)·리셋 음수상계 + 요금제/메인/예측 화면(DB캡 표시 폐지·크레딧 중심) + 슈퍼관리자 "크레딧 위험 회사" 패널 + 스팸필터 100만원+ 무료 폐지. ALTER 0(기존 컬럼 재사용). BE/FE tsc0 + verify 55(ai-credit-calc)/23(ai-credit-tx). 스펙 `specs/2026-06-30-credit-model-v2-design.md` · 계획 `plans/2026-06-30-credit-model-v2-engine.md`. 상세 [[project_2026_0630_credit_model_v2]].
+> **문안 퀄리티 강화 + 브랜드보이스 점검 = 설계서만(구현 다음 세션)**: 감사 — 학습(`ai_training_logs` 전 발송 적재+성과+성과순 RAG) 가동 중 / 생성은 단발·혜택강조 0 / **브랜드보이스 고장 = `brand-voice-prompt.ts:174` 가이드라인 AND 대표문안 둘 다 있어야 작동(무증상 OFF, 운영 PG 3사 중 1사만 작동 확인)**. 설계 확정: 두 갈래(혜택입력=강조극대 / 미입력=계절·시의성 풍성) · 회사 격리 게이트(등록=자기것만 10문안 / 미등록=같은업종 `message_features` 구조·통계만 = 시그니처 누출 0) · 꾸미기 컬럼 체크 정합(사용 자동체크 + 토글 무조건 반영/제거 + 3개 변형 전부) · AND 완화+OFF 가시화 · 멀티패스·앵글·채널분리. 설계서 `specs/2026-06-30-copy-quality-brand-voice-design.md` 1개로 잠금. [[feedback_copy_quality_priority]].
+> **다음 세션 = 문안 전용 구현**: 위 설계서대로. 구현 1단계 = ① AI Operator propose가 generateMessages 경로 타는지 ② `copy-similarity-guard` 출력 적용 확인.
+
+---
+
+### 🟢 2026-06-29 — 여정 자동화 재설계 + 오늘의 여정 기회(분석 엔진) + 대화형 수정 + AI Operator 소개 PPT 뷰어 + 제안화면 강화 (★배포완료)
+> **여정 자동화 재설계(Phase 1·2)**: 메인 상단 좌우 히어로(왼쪽 큰 자연어 입력 + 오른쪽 마케팅/정보알림 2버튼 → 우측 빈칸 제거·세로 압축) · 정보 알림 인라인→모달화(`createPortal`) · 빠른 시작 중앙정렬 칩 · 검토 화면 각 step 한 줄 요약 카드 + `편집` 클릭 모달(인라인 편집기 난잡함 제거, 저장 payload 무변경). `JourneysPage.tsx` + `InfoAlertJourneyBuilder`(embedded). 설계 `specs/2026-06-29-journey-redesign-design.md`.
+> **오늘의 여정 기회(Phase 3 — 실데이터 분석 엔진)**: `journey-opportunities.ts` 전면 재작성 — 고정 3종 폐기, 6신호(장바구니/신규/휴면/생일/재구매주기/찜)를 단일 스캔 FILTER로 집계 · 휴면·재구매 임계 = 회사 구매분포 `PERCENTILE_CONT`로 도출(하드코딩 X) · 매출 규모 실측 우선순위 + `우선` 배지 · 의미 있는 것만 가변 개수 + 3개 초과 페이징 + 중앙정렬. `GET /operator/journeys-opportunities` + 프론트 카드.
+> **대화형 여정 수정**: `journey-ai-editor.ts`(message/wait/condition/알림톡 step 보존, 혜택 임의생성 금지) + `POST /operator/journeys-ai-edit`. 검토 화면 "대화형 수정" 입력(예: "2단계 하루 늦추고 VIP만").
+> **AI Operator 소개 = 리디자인 PPT 뷰어**: PowerPoint COM 자동화로 17슬라이드를 1920×1080 PNG 원본 렌더 → `public/about-ai-operator/slide-1~17.png` + `about-ai-operator.html`(좌우/키보드/스와이프/점 네비/전체화면, 다크 톤). 헤더 `AI Operator 소개` 링크 그대로.
+> **AI Operator 제안화면 강화(5)**: ① 발송시점+예상비용 2칸 한 줄 ② 활용 가능 컬럼(data-profile 안전변수) 다중 선택 ③ AI 꾸미기(`operator-message-decorator.ts` + `POST /operator/decorate-message` — 선택 컬럼 %변수% 자연스럽게 녹임, 원본외 정보·혜택 금지·EUC-KR sanitize) ④ 치환+하이라이트 토글(기존 원본/적용 재사용) ⑤ AI 제안 요약 버튼→모달 탭(예상·진단/종합/추천/활용데이터, `AiProposalSummaryModal`) — 메인 장황함 제거.
+> **정보알림 모달 가독성 fix**: portal 모달 `text-white` 상속 끊김으로 글자 어둡던 것 → info-alert·step 편집 모달 컨테이너 `text-white` 추가 + 빌더 카드 대비 강화.
+> **SCHEMA.md 실측 기록**: customers·cdp_events·journeys·journey_executions를 운영 PG `information_schema` 실측 대조 후 보강(cdp_events 6컬럼 + journeys 8 + journey_executions 4). 이 4테이블은 SCHEMA.md 신뢰 → 재질의 X.
+> **후속 정정(같은 세션)**: ① 제안 요약 종합 분석 탭 마크다운 표 raw 깨짐 → 경량 마크다운 렌더(표/헤더/볼드, `AiProposalSummaryModal`) ② 치환 토글 미표시 **근본 버그 fix** — `/operator/sample-customer`가 `triggerEvent`만 읽어 AiOperatorPage의 `{filters}`엔 항상 `sampleCustomer:null` 반환 → 원본/적용 토글이 한 번도 안 떴음. filters 경로 분기 추가(`buildFilterWhereClauseCompat` + 상위 LTV/구매액 1명, `mapSampleCustomerRow` 헬퍼 추출) ③ AI 제안 요약 버튼 단독 부유 → 발송 CTA 줄로 통합.
+> **검증·배포**: frontend tsc0 · backend tsc0 · 자가 grep(모델명/native dialog/박-단어) 0. **배포완료(2026-06-29).** 상세 [[project_2026_0629_ai_operator_journey_overhaul]].
+> **★다음 세션 이연**: ① 여정 "켜기 전 30일 성과 예측"(내가 구현할 기능) ② 여정 Phase 2-B(AB·세그먼트=발송 6원칙 게이트) ③ AI Operator C5 발송·돈 실측 1건(주인님).
+
+---
+
+### 🟢 2026-06-28(이어서2) — 이메일 마케팅 마무리 + Phase 2-A 분석 대시보드 + 후속 UX (★배포완료)
+> **화면 단순화(Harold 신규 영구 룰 — 가로 큰 배너 배제)**: EmailCampaignsPage SMTP 완료 배너·테스트 발송 큰 카드 제거 → 헤더 한 줄 상태 칩 + 작은 테스트 발송 모달, "영구 제거"는 SMTP 모달 안. [[feedback_design_modal_first_simplicity]] 기록.
+> **Phase 1 폴리시**: ① 1클릭 AI 개선(HTML 모달 "한 번에 다듬기" + 비주얼 에디터 "AI로 개선" + 신규 `POST /ai/refine-sections` — 순수 코어 `email-section-refine`[마케팅 카피만·사실/혜택/변수 보존·무변경시 무차감]·TDD7) ② 템플릿 AI 추천 배선(`GET /brand-signal`=companies.industry_code → 갤러리 상단 추천) ③ 변수 커서 삽입(클립보드→입력칸 커서, SectionPropsEditor 무수정).
+> **Phase 2-A 분석 대시보드(읽기 전용)**: 헤더 "분석" → `EmailAnalyticsModal`(요약 5지표+이전 동기간 대비 · AI 종합 진단 on-demand 5크레딧 · 일자별 추이 · 캠페인 비교+1클릭 액션). 백엔드 `GET /analytics`(make_interval·KST) + `POST /ai/account-insight` + `buildEmailAccountInsight` + 순수 `email-analytics-calc`(TDD5). 신규 컬럼 0. EmailCampaign 공유 타입 추출. 설계 `docs/superpowers/specs/2026-06-28-email-analytics-dashboard-design.md`.
+> **후속 UX**: ① 이메일 PC 미리보기 버튼(데스크탑 폭 전체화면 모달) ② 히어로 높이 버그 근본 fix(`renderHero`가 height/overlay_gradient 무시 → 배경이미지+오버레이+높이 적용, 전체화면=600px, 아웃룩은 배경이미지 미지원 폴백) ③ AI 메모리 대표문안 모달화(인라인 나열→버튼화+휴대폰 편집 모달, 모달/미리보기 크게+sticky) + 가이드라인 "전체 보기·정정" 모달이 카드 backdrop-blur에 짤리던 버그 → `createPortal(body)` 해결.
+> **검증·배포**: backend tsc0 · frontend tsc0 · vitest 12(refine7+calc5) · 자가 grep(모델명/native dialog/박-단어) 0. DB 마이그레이션 0. **배포완료(2026-06-28).** 상세 [[project_2026_0628_email_marketing_finish]].
+> **★다음 세션**: C5 발송·돈 실측 1건(주인님 — 변수·조건부·히어로 높이 테스트발송 확인 후 실고객 대량) · Phase 2-B(A/B·세그먼트 = 발송 경로 6원칙 승인+실측 게이트).
+
+---
+
+### 🟢 2026-06-28(이어서) — 인앱 진입 재설계 + 이메일 브레이즈급 Phase 1 + AiMemory 모달화 + 버그 2건 (★배포완료)
+> **버그 2(배포완료)**: SegmentsPage 뒤로가기 `/dashboard`→`/ai-operator`(AI Operator 계열 15개 전수 점검, 이 한 곳만 오류) + App.tsx 전역 `ScrollToTop`(라우트 진입 시 최상단 복원, 전 메뉴 일괄).
+> **인앱 진입 재설계(배포완료)**: `InAppMessagesPage` !channel 화면 = 빠른 시작 7카드(채널 무관→채널 선택 모달→AI 자동 1흐름) + 컴팩트 채널 2카드(미니 썸네일) + 최근 인앱(`GET /inapp` 채널 없이=전체, 데이터 적응)→폰 미리보기 모달. 설계 `specs/2026-06-28-inapp-entry-redesign-design.md`.
+> **이메일 브레이즈급 Phase 1(배포완료)**: A 에디터 드래그(@dnd-kit)·복제 / B 템플릿 갤러리(프리셋 6, 1클릭 무료) / C 개인화(`Section.display_condition` jsonb·ALTER 0 + 신규 CT `email/email-personalization`[Liquid 재사용·verify 9/9] + render-preview sampleCustomer + `/preview-customers` + 에디터 변수칩·조건부·VIP/일반/신규 미리보기) / C5 발송 수신자별 렌더(섹션 없으면 무회귀, 즉시·예약 단일 길목). **★발송·돈 = 실측 1건(주인님 테스트발송 `{{ customer.name }}`+조건부 확인) 후 실고객 대량 발송.** 설계 `specs/2026-06-28-email-braze-phase1-design.md` + 계획 `plans/2026-06-28-email-braze-phase1.md`. 상세 [[project_2026_0628_email_braze_inapp_redesign]].
+> **AiMemoryPage(배포완료)**: `BrandVoiceCard` 9+항목 펼침 → 요약 카드 + "전체 보기·정정" 모달. 신규 룰 [[feedback_braze_win_formula]](편리함+AI 풍부) + AI Operator 전 메뉴 버튼+모달화([[feedback_design_modal_first_simplicity]]). MEMORY.md 144KB→21KB 압축.
+> **★다음 세션 = 이메일 마케팅 마무리** → `docs/superpowers/handoffs/2026-06-28-email-marketing-finish-handoff.md` 정독. 남은 = ① C5 실측 1건(주인님) ② Phase 1 폴리시(1클릭 AI 개선·템플릿 AI 추천 배선·변수 커서 삽입) ③ Phase 2(분석 대시보드/AB/세그먼트 우선순위 확정).
+
+---
+
+### 🟢 2026-06-28 — 문안 두뇌(7천건 RAG) 배포완료 + AI 학습/브랜드보이스 화면 밀도 개선 + 다음 설계서 2건
+> **문안 두뇌(★배포+backfill 완료)**: 7천건 `ai_training_logs` RAG(`composeCopyBrain` 회사 우선 + 업종 비식별 폴백 + 성과 정렬) + 시의성(`copy-context` 요일·계절·공휴일·시즌) + 브랜드 키트(시그니처 조합·금지어) + 복제가드(타사 시그니처 3단 차단). 이메일·캠페인 SMS 생성에 배선. 회사명→업종 매핑 backfill 6,353건. 신규 `copy-context/copy-similarity-guard/copy-rag-retriever/copy-prompt-composer/industry-codes`. backend tsc0·vitest119·frontend tsc0. 설계 `docs/superpowers/specs/2026-06-27-copy-brain-rag-brand-kit-design.md`.
+> **디자인 밀도(★배포)**: AiMemoryPage violet→slate + 여백/도넛 데이터적응(5건 미만 숨김), BrandVoiceCard 가이드라인 14항목 2열 + 입력칸 축소 + **폰 미리보기 모달**(저장 문안→휴대폰 아이콘→폰 프레임 모달+수정/닫기). 디자인 철학 = 심플 이즈 베스트(입력→저장→폰모달→수정, 가로 긴 버튼 X, 데이터 적응) — `feedback_design_modal_first_simplicity` 메모리.
+> **다음 세션 설계서 2건(구현 대기)**: `docs/superpowers/specs/2026-06-28-inapp-entry-redesign-design.md`(인앱 진입 화면 — 빠른시작 채널무관 + 컴팩트 카드 + 최근목록 + 폰 미리보기 모달) + `2026-06-28-email-marketing-braze-level-design.md`(이메일 마케팅 브레이즈급 — brainstorming 우선순위 확정 후 구현). + 잔여: AiMemoryPage 1열→2단 그리드.
+
+---
+
+### 🟢 2026-06-27 — 인앱 메시지 렌더 격상(블록+테마+모션) + 인앱 콘솔 슬레이트 리디자인 + 제안서 보강 (★코드 배포완료 / PPT는 산출물 전달)
+> **인앱 블록 시스템(D230+, 배포완료)**: 쇼핑객이 보는 인앱을 단색 텍스트 → 블록 조립 + 큐레이션 테마 + 모션으로 격상(브레이즈급). `cdp_inapp_messages`에 **content_blocks jsonb · theme varchar(30) · accent_color varchar(20)** 3컬럼 ALTER(Harold 적용). content_blocks 비면 레거시 단색 렌더 그대로(운영 6,000사+ 외형 변화 0) — 신규·전환만 블록.
+> · SDK: `inapp-theme.ts`(resolveTheme + 테마 5종 light/dark/brand/vibrant/minimal + auto, 대비 보정) · `inapp-blocks.ts`(13 블록 렌더러 + 템플릿별 허용 필터 + 순차 등장 + is_ad 자동 광고표기) · `inapp.ts`(renderMessage 블록/레거시 분기 · makeContainer 8형태 · spring/celebrate + prefers-reduced-motion · 컨페티 · 레거시 render 7종 보존). 테스트 `inapp-blocks.test.ts` 25.
+> · 백엔드: `inapp-message.ts`(FULL_COLUMNS·INSERT·UPDATE 3컬럼 + sanitizeContentBlocks/normalizeTheme/blocksHaveUneditedPlaceholder 공용 검증 · BENEFIT_PLACEHOLDER) · `inapp-ai-generator.ts`(블록 출력 + 시스템 프롬프트 카탈로그 + forceBlockSafety[benefit placeholder 강제·image url 제거] + synthesizeBlocks 폴백) · `cdp.ts`(benefit placeholder 잔존 400 차단) · `inapp-personalization.ts`(블록 텍스트 변수 스캔). 테스트 `inapp-blocks-validation.test.ts` 12.
+> · 프론트: `inapp/blockTheme.ts`(테마 미러) · `inapp/BlockPreview.tsx`(parity) · `InAppMessagePreview.tsx`(블록 렌더 + 글자 크기 스케일 + 디바이스 프레임 확대 + 모달 maxHeight 스크롤) · `InAppMessagesPage.tsx`(블록 컴포저 13종 + 테마 피커·강조색 + 레거시 전환 + 이미지 업로드→media 블록 자동 + 헤드라인/본문 글자 크기 + 메인 단순화[데이터부족·AI진단·1-click 카드 → "AI 개선" 한 카드 통합, 자세히 분석 → 모달, 메시지 만들기 히어로 최상단, violet→slate 톤 전환]).
+> · 룰 정합: AI 임의 혜택 0(benefit placeholder 강제 + 저장 차단) · 모델명 UI 0 · native dialog 0 · is_ad → 광고 자동.
+> · 검증: backend tsc 0 · 프론트 tsc 0 · SDK 빌드 0(esm/cjs/types + iife) · vitest SDK 113(레거시 회귀 9 포함) · 백엔드 90. 설계서 `docs/superpowers/specs/2026-06-27-inapp-message-elevation-design.md`. 상세 [[project_2026_0627_inapp_block_elevation]].
+> **제안서(PPT) 보강(산출물 전달, repo 외 Downloads)**: 리디자인 덱(15장) 갭분석 → 디자인 브리프 + 추가수정 지시 .md, PRODUCT IN ACTION 콘솔 목업 4 SVG, RESULTS 카드 filler 4 SVG, PRICING 교체 내용(요금제별 기능 동일·차이는 관리DB·월크레딧·인프라 / 스타터 15만~엔터프라이즈 550만 5티어 + 작업당 크레딧표).
+
+---
+
+### 🟢 2026-06-26 — 자동마케팅 Phase 1~3 + 운영 디버깅 + 고객사 관리자 페이지 모던 리디자인 (★전부 배포완료)
+> **배포완료**(세션 종료 일괄, [[session_wrap_means_deployed]]). DB ALTER/DROP Harold 직접 적용 완료. 운영 실측(다단계 리마인드 N일 후·Bandit 학습·UI 렌더)은 직원 몫.
+> **앞 디버깅(배포완료)**: 모바일DM 드래그 순서변경(onPointerDown stopPropagation 제거 + splice 후 order 재부여) · 발송통계/예약 문안 표시 · AI 다듬기 080 재부착 · 여정 5건 · 슈퍼관리자 긴급취소 cancelCampaign 배선(큐 DELETE+잔존0+환불).
+> **자동마케팅 Phase 1~3(배포완료)**: P1 6이슈(#1채널·#3담당자·#4혜택·#5폴1분, #2버그아님·#6현행). P2 D예산가드(decideBudgetGuard 자율발송직전 당월로그SUM) · A성과학습(보상 `if(sent<=0)return` 가드가 클릭/전환 떨궈 학습정지였음→α/β 실측count서 도출 deriveBanditArm·여정A/B 정상화·자율발송 Bandit변이+본문URL단축추적). P3 B시각최적화(cdp message_click KST피크·insufficient_data폴백) · C다단계시퀀스(여정자동생성 대신 dispatchProposalSend 재사용·N일후 미클릭자 excludeClickedSince anti-join·sequence 3컬럼ALTER). tsc0·vitest78·verify28/9/16. 상세 [[project_2026_0626_auto_marketing_phase1]].
+> **고객사 관리자 페이지 모던 리디자인(배포완료)**: ManagePage 전체+5탭(사용자·발신번호·예약·발송통계·고객DB) 화이트 유지+슬레이트/인디고 통일. 카드 rounded-2xl·테이블 대문자 슬레이트 헤더+행호버·아이콘 배지·상태 점배지·tabular-nums·모바일반응형. StatsTab 상세모달 폭확대+메시지 복사팝업. frontend tsc0. 상세 [[project_2026_0626_admin_ui_modernization]].
+
+---
+
+### 🟢 2026-06-25 (세션2) — CDP 갭보강 A~E + 모바일DM 아트디렉션 P1 + CustomerDataGate 디버깅3 (★전부 배포완료)
+> **CDP 갭보강 A~E (배포완료)**: 순수함수 TDD. A1 phone 자동갱신(타고객 점유만 skip)+A4 email≠phone 충돌 플래그(`cdp_identity_review` 테이블 생성완료)·B provider connectMethod/available 단일출처+고도몰/가비아 어댑터+register-providers(gap7)·C bulkImport truncation경고/occurred_at 미래클램프/버스트rate limit·D 여정트리거 분류(이벤트성 커서밖 0건=문서만)·E 문서. 상세 [[project_2026_0625_cdp_gap_hardening]].
+> **모바일DM 아트디렉션 엔진 P1 (배포완료)**: 근본=섹션마다 구도1개 고정+디렉터 색만. 섹션 구도(treatment hero5/coupon3/text_card3/cta3)+DM 아트디렉션(타입스케일·여백) 깨움. `dm-art-direction.ts`순수·렌더러 디스패처(classic byte불변 골든)·AI 디렉터 treatment출력(혜택0)·프론트 구도픽커. treatment는 Section데이터 영속(컬럼불요). P2이연=캔버스 픽셀미러·AD 뷰어영속. 상세 [[project_2026_0625_dm_art_direction_p1]].
+> **CustomerDataGate 디버깅3 (배포완료)**: ① 게이트가 DM 모달 뒤 깔림=모달 z-index 척도 불일치 → **확인/차단 인터럽트 모달 통일티어 z-[2000]**(게이트·ConfirmModal·CreditConfirmModal, DM ModalBase 1000 위·시스템 9997 아래. VersionHistory/AbTest 안 ConfirmModal도 동시해결). ② 게이트 '올리러가기' `/manage`(관리자전용·비admin차단)→`/dashboard?upload=1`+Dashboard 자동 업로드모달. ③ 업로드해도 '고객없음'=`clearCompanyDataProfileCache` 호출0건→1h캐시 이전0 잔존 → 업로드/삭제 길목 무효화배선+TTL 1h→5분. 상세 [[project_2026_0625_customer_data_gate_fixes]].
+
+### 🟢 2026-06-25 — 운영 디버깅 5건 + CDP(자사몰 연동) 심층감사 → 보강 설계서 (★디버깅 배포완료 / CDP 구현완료)
+> **디버깅(배포완료)**:
+> ① **선불 sweep 초과환불**(심각·돈): 환불 산식 `차감−성공−대기`→**`실패+미적재(차감−적재)`** 교체(refund-calc·mysql-refund-sweeper, 성공 의존 폐기 = 발송 직후 이동 중 과소집계 초과환불 차단). 과거 초과 **129,670.8원/25건**(폴라초이스코리아·쇼메·베이컨·콤비타코리아 등)은 **서팀장 수동회수**(표 전달).
+> ② **여정 원본편집 광고표기 표시**(JourneysPage — (광고)+무료수신거부 읽기전용, value는 raw=이중부착X).
+> ③ **고객DB 0명 시 AI 문안생성 전 안내**(`CustomerDataGate` 공용모듈 — 배너+다크모달, 5진입점: AiOperator·여정·인앱·이메일·DmBuilder).
+> ④ **싱크에이전트 중단 알림 종일스팸 fix** — 쿨다운이 프로세스메모리라 재시작마다 초기화 → **PG `system_alert_state` 영속화**(하루 2번). 테이블 CREATE 완료.
+> ⑤ **모바일DM 테스트발송 "MMS 이미지필수" 실패** — `toQtmsgType`이 풀네임만 받아 'L'→'M'(MMS) 변환 → dm.ts `'L'`→`'LMS'` + 순수모듈 `qtmsg-type.ts` 하드닝(단축코드 수용·안전default).
+> **CDP(다음세션)**: 자사몰 연동 전경로(인증·식별·이벤트·주문·환불·멱등·webhook·여정커서·provider·프론트·SDK) 심층감사 — 뼈대 견고, 보강 갭 8 + 문서 드리프트 1. 설계서 `docs/superpowers/specs/2026-06-25-cdp-gap-hardening-design.md`(5 phase A~E: 발송정확도→provider단일화→하드닝→여정변수→문서). 다음세션 phase 순 구현.
+
+---
+
+### 🟡 2026-06-22 — 싱크에이전트 2008R2+Oracle 대응 + 위저드 전수조사 (★코드·빌드 완료 / 미배포)
+> **발단**: 인비토(Windows Server 2008 R2 SP1 + Oracle 11g) 싱크에이전트 설치 원격 3회 실패(exe 실행조차 안 됨, `0xC0000139` STATUS_ENTRYPOINT_NOT_FOUND).
+> **근본 2겹**: ① 빌드 티어 설계가 "node14=2008R2 최저선" **틀린 전제**(공식 node14 바닥=Win8.1, node14+ EOL Windows 차단) → 고객엔 node20 빌드가 나가 죽음. 2008R2 도는 마지막 Node=**node12**. ② 고객 DB=Oracle 11g → thin(oracledb 6.0+/node14.6+ + DB12.1+) 불가 = **thick 필수**.
+> **수정**: `win-legacy` 티어 node14→**node12**(build-tier.js·build-tiers.js·agent-build-tiers.ts) + oracledb 5.x thick(napi 1바이너리 pkg assets 동봉) + mssql9/nodemailer6. 커넥터 페이지네이션 전수 — Oracle `OFFSET/FETCH`(12c+)→**ROWNUM**(11g), **MSSQL도 같은 버그** `OFFSET/FETCH`(2012+)→**ROW_NUMBER**(2008). Oracle thick=ORACLE_HOME 있으면 전 티어 확장(11g 지원). 위저드 전수조사 — win-mid가 Server 2012(비R2, node16 미지원) 거짓표기 → win-legacy(node12)로 이동·라벨/주석 정정. 엑셀/CSV 소스 제거(DB 커넥터 아님). ai.ts 2에러(여정 작업 것) 빌드 unblock. 빌드 파일 티어별 deps 세분화.
+> **검증**: Docker로 Oracle 11g·MySQL·PG 실측 통과(연결·스키마·증분·한글·페이지네이션 + 11g/MSSQL 버그 발견·수정·재검증). MSSQL은 SQL Server 이미지 MCR 막혀 코드·문서 검증(검증 SQL 제공). `build:tiers` 5티어 완료 + UCRT 동봉(win-mid/legacy 49 DLL) + zip 5 + manifest(win-legacy node12). sync-agent·backend tsc 0. **프론트 빌드 불요**(위저드 데이터기반, 엑셀/CSV 하드코딩 0 — backend DB_OPTIONS만 수정).
+> **배포(Harold)**: ① invito = `dist-tiers/win-legacy/SyncAgent`(node12 exe+UCRT49+INSTALL bat) 전달 ② 5 zip scp → 서버 `packages/backend/agent-builds/` ③ backend(agent-build-tiers·ai.ts)는 여정 Phase 3 정리 후 일괄(diff 섞임 주의). **DB 마이그레이션 SQL 없음.**
+> 상세 [[project_2026_0622_sync_agent_2008r2_oracle]] · 진단 `SYNC-AGENT-TROUBLESHOOTING.md` § 2-5.
+
+---
+
+### 🟢 2026-06-21 — AI Operator P1 + 모바일DM 퀄리티 Phase 1+3 (★배포완료 2026-06-21)
+> **AI Operator P1**(`ai-orchestrator.ts`): A1 orchestrateWithAI가 seasonHint를 메시지 생성에 누락하던 결함 fix(`buildMessageObjective` 공통 헬퍼로 orchestrate와 통일) · A2 Orchestrator AI 통합분석(finalText)을 버리던 것 → `meta.aiSynthesis` 반환 + frontend "AI 종합 분석" 카드 · A3 모델 주석 stale 5곳 정정(Compliance Haiku→Opus·Message opus→sonnet). cdp 취소/환불 매출 차감 = 실재 확인(syncOrder reverse + revenue_reversed 마커, fix 불요) · journey-executor 1216줄 정독(견고, 숨은 결함 없음). 담당자 알림톡은 카카오 승인 후 전환 보류(현 무과금 LMS 유지, L1160 seam). TDD season verify 13.
+> **모바일DM Phase 1+3** ("AI가 만들어준다" 체감): 신규 16섹션 렌더 토큰 격상(backend `dm-section-renderer` + frontend `NewSections`, 하드코딩 색·이모지 → 디자인 토큰·단색 SVG 아이콘, 공통 프리미티브 `dm-render-primitives`/`dm-primitives` 신설) + AI 비주얼 디렉터(`dm-visual-direction` 순수 + `dm-ai.designVisualConcept` opus, 캠페인별 색·무드·강조 + 이미지 없는 hero=브랜드/업종색 그라데이션 무드 배경) + AI 섹션 chain 다양화(`dm-section-layout` 정규화 가드 + `dm-ai.designSectionLayout` opus, 자유 프롬프트만·빠른시작 12 시나리오 고정). **Phase 2(상품 자동연결) 폐기 = 자체 업로드 권장**(약속 미이행 리스크).
+> **검증**: verify(render-primitives 5·visual-direction 9·section-layout 8·season 13) + backend/frontend tsc 0 + 신규16 hex·이모지 0 + 박-단어·모델명·native dialog 0. AI 임의혜택 생성 X 전 경로 유지.
+> **배포완료(2026-06-21)**: tp-push 1회 → git pull + pm2 restart all(backend ts-node, build:safe 금지) + frontend build:safe. 운영 검증(실제 생성 1건)은 Harold/직원.
+> 상세 [[project_2026_0621_ai_operator_p1_done]] · [[project_2026_0621_dm_quality_phase1]]. 설계 = docs/superpowers/specs·plans/2026-06-2{0,1}-*.
+
+---
+
+### 🟢 2026-06-18 — 인앱 메시지 전면 개선 (디자인·카피·편집3탭·이미지·도메인 ★배포완료 / 모달 표시 1건 미해결)
+> **범위**: 디자인 격상(이미지 4:3·뱃지·본문3줄) + AI 카피 짧게(제목18/본문40~70자) + 시나리오별 색·뱃지 + 편집 모달 3탭(내용/디자인/타겟·시점) + badge_text 컬럼 + 이미지 공개 서빙 endpoint(CORP cross-origin) + 편집 진입 전체 필드 복원(list raw 반환) + CTA 클릭 시 모달 닫기 + 캐시 once_per_session/day 재노출 차단 + 도메인 www/non-www 동일 취급(norm) + AI 빈도 기본 once_per_session.
+> **검증·배포**: backend·frontend·sdk-js tsc 0 · sdk vitest 88 · grep(모델명·native dialog) 0. 6차에 걸쳐 배포완료(Harold). ALTER `badge_text varchar(20)`.
+> **★미해결(다음 세션 1순위)**: 자사몰(poppon) 인앱 모달이 시크릿모드로도 안 뜸. 서버 active는 curl로 정상 반환 확인·www fix 배포 후에도 미해결 → 실제 브라우저 요청 Origin·자사몰이 부르는 SDK 파일 버전·active 호출 도달 여부를 PM2 로그(`grep 'inapp/active\|ORIGIN'`)로 확인이 다음 수.
+> 상세 [[project_2026_0618_inapp_design_copy_redesign]].
+
+---
+
+### 🔵 다음 세션 (예정) — 팝폰(Poppon) SDK 검증용 코드 분석
+> **목표**: 한줄로 SDK(v0.3.6)를 한줄로가 자체 운영하는 팝폰(www.poppon.co.kr)에 연동·테스트할 수 있는지 판정 + 단계 설계. 자체 서비스라 SDK 전 흐름(수집·identify·인앱) 실측 최적 베드(고객사 의존 0).
+> **팝폰 현황(2026-06-18 사이트 확인)**: 딜·쿠폰 정보 중개 플랫폼(전자상거래 X — 직접 판매·장바구니·결제 없음, 구매는 외부 브랜드). 회원 로그인·마이페이지(`/me`) 있음. Next.js SPA(`/_next`, 동적 라우팅 `/d/[id]`·`/c/[category]`). gtag/dataLayer는 노출 HTML엔 안 보임(프로덕션 확인 필요).
+> **로컬 코드**: `C:\Users\ceo\projects\poppon-workspace` (별개 프로젝트 — 이번 세션 미정독, 컨텍스트 절약 위해 다음 세션에서).
+> **할 일**: poppon-workspace 정독 → ① 스택·라우팅·로그인 흐름 ② SDK(v0.3.6) 삽입 지점(Next.js `<head>`·`data-hjl-key`) ③ identify 배선(로그인 시 externalId) ④ 추적할 행동(딜 조회=product_view/click·쿠폰 클릭=custom) ⑤ 인앱 메시지 테스트 가능 여부 ⑥ 연동 테스트 가능 여부 판정 + 단계. Harold 계정 실연동 전제. brainstorming→설계→동의→구현.
+> 상세 [[project_2026_0618_selfhosted_mall_app_collection]].
+
+---
+
+### 🟢 2026-06-18 — 자체 자사몰 + 앱 데이터 수집 고도화 (Track A·B·C ★배포완료 2026-06-18)
+> **배경**: 어제 인앱 웹/앱 채널 분리 + 웹뷰 앱 지원 배포완료. 빠진 퍼즐 = 이커머스 행동 자동수집 — 장바구니·구매 트리거 인앱이 작동하려면 필수(트리거 표준 = cart_add/cart_view/checkout_start).
+> **Track A (SDK 이커머스 자동수집)**: sdk-js `auto-capture/ecommerce.ts` 신설 — GA4 dataLayer 후킹 매핑(view_item→product_view·add_to_cart→cart_add·purchase 등) + `window.hjl.ecommerce.*` 헬퍼 → `hjl.track` 위임 → 적재(/ingest 'track' 경로, 백엔드 0) + 인앱 트리거(T2 브리지) 자동. 웹+웹뷰앱 공용(platform 재사용). vitest 11 신규(sdk-js 전체 88)+tsc 0. SDK v0.3.5→**v0.3.6**(캐시 버스팅).
+> **Track B (서버 턴키+검증)**: 자체 호스팅 모달에 Python 스니펫 추가(Node·PHP·Python HMAC) + "최근 수신 확인"(GET `/api/cdp/custom/deliveries` — `cdp_webhook_deliveries` 기존 컬럼만, 신규 0). backend·frontend tsc 0.
+> **Track C (네이티브 REST 가이드)**: 순수 네이티브 앱 = 공개키로 `/api/cdp/ingest`·`/inapp/active` 직접 호출(secret 앱에 X, 회원/주문은 고객사 서버) + curl·Swift·Kotlin 예시. backend 0.
+> **검증**: sdk-js 88 vitest + tsc 0, backend tsc 0, frontend tsc 0 + grep(모델명·native dialog·박단어) 0. 설계 = `docs/superpowers/specs/2026-06-18-selfhosted-mall-app-collection-design.md`, 계획 = `plans/2026-06-18-selfhosted-mall-app-collection.md`.
+> **★ 배포완료 (2026-06-18 Harold)**: SDK v0.3.6 빌드(rollup)·서빙(v0.3.6 + 기존 v0.3.5에도 cp) + backend·frontend 재시작(targetup-backend·hanjuldm-api 둘 다 online) + frontend atomic swap 성공. **퍼스트몰(가비아) 커넥터 = 서수란팀장 가비아 API 수령 후 별도**(빌드가이드 PDF엔 API 스펙 없음 — 운영자 매뉴얼).
+> 상세 [[project_2026_0618_selfhosted_mall_app_collection]].
+
+---
+
+### 🟢 2026-06-17~18 — SDK 강화: 자사몰 BYO 자격 연동 (카페24·네이버 BYO 폼 + 고도몰 커넥터, ★배포완료 2026-06-18)
+> **배경**: "자사몰(카페24·고도몰·네이버) 연동이 실제로 도냐"에서 출발. 조사 — 카페24 env 키 미설정(현재 dormant)·`cafe24ApiCall` 호출처 0(백필 없음)·토큰 갱신 0, 고도몰 전용 커넥터 없음(속빈 껍데기). 세일즈포스/브레이즈 = 공유앱+OAuth(출시·심사 전제). **Harold 결정 = 고객이 자기 self-app 키 직접 입력(BYO/model B), 우리 출시·심사 0.**
+> **구현(검증 tsc 0·verify pass·미배포)**: `provider-credentials.ts`(자격 resolver 5/5)·`provider-oauth-url.ts`(URL 빌더 11/11) 순수 신설 + `cafe24-client`·`naver-commerce-client` OAuth·갱신·apiCall 전부 `creds?`(회사별, 없으면 env) + `save/getByoCredentials`(meta 저장·resolver 조회) + `routes/cafe24`·`routes/naver-commerce` `POST /byo-credentials` + authorize/callback BYO 사용. 역호환(env 경로 보존, 신규 endpoint는 UI 전까지 미호출). 고도몰 스펙 PDF 확정·기록(`openhub.godo.co.kr`, partner_key+key body, XML, IP등록 — partner_key 약 3일 후).
+> **2026-06-18 진행**: ① 연동센터 UI 완료(`CdpSettingsPage` 카페24·네이버 모달에 BYO 안내 4단계 + Client ID/Secret 입력 폼 + 저장→authorize, 프론트 tsc 0·grep 0·미배포). 남음 ② 백필(Admin API raw 확인 후 — D217, 실키 대기) ③ 고도몰 커넥터 코드 완료(godo-parse 순수+TDD 21건·godo-client IO·routes/godo·연동센터 godo 키 폼·fast-xml-parser dep, backend/frontend tsc 0·grep 0). 남음 = ② 카페24·네이버 백필(D217 실키 raw 확인 후 — 키 대기). 고도몰 live = 서버 npm install + `GODO_PARTNER_KEY`(약 3일) + 서버 IP NHN 허용 등록(996) 후 실측. 배포 = 프론트 + 백엔드(df448eed + 고도몰) 함께. 설계·진행 = `docs/superpowers/specs/2026-06-17-byo-credentials-cdp-connectors-design.md` + `plans/2026-06-18-godo-connector.md`. 상세 [[project_2026_0617_byo_credentials_cdp_connectors]].
+> **★ 2026-06-18 배포완료** (Harold): 카페24·네이버 BYO 폼 + 고도몰 커넥터 + web-push repo 정식 선언 라이브. 남은 = ② 카페24·네이버 백필(D217 실키 대기) · 고도몰 live(`GODO_PARTNER_KEY` 약 3일·서버 IP NHN 허용 등록·실측 1건). **다음 = 가비아·자체 자사몰 고도화 (진행 중).**
+
+---
+
+### 🟢 2026-06-17 — 인앱 메시지 웹/앱 채널 분리 1·2단계 (★배포완료)
+> **배경**: "인앱 메시지" 메뉴가 실제로는 웹 자사몰 온사이트 팝업만 구현(`sdk-js` 브라우저 전용)·모바일 네이티브 SDK 0 = 이름/실체 불일치(Harold 직감 — "인앱인데 앱엔 어떻게?"). → 웹/앱 진입부터 분리, 각 채널에 맞는 확실한 형태만.
+> **1단계 (채널 분리 토대)**: `cdp_inapp_messages.channel` ALTER(web/app, 기존 web 자동분류) + `getActiveMessagesForCustomerV2 channel='web'`(웹 SDK가 앱 메시지 못 받게 차단 — 2단계서 param화) + 생성/목록/통계 channel(impression은 channel 없어 `message_id IN (채널 메시지)` 서브쿼리) + 프론트 진입 웹/앱 선택 화면(channel 가드)·헤더 뱃지·웹 4종(모달·슬라이드·토스트·플로팅)/앱 6종(+전면·배너) 형태(`CHANNEL_TEMPLATES`, 배제 형태 렌더러는 보존·선택지만 숨김)·앱 미리보기 배지.
+> **2단계 웹뷰**: 서버 active channel param(앱=app 수신) + `sdk-js inapp.ts` `platform:'app'`→`channel=app` + 앱 형태 렌더(기존 8 templates 재사용=추가 렌더 0) + 스니펫 `data-hjl-platform="app"` 자동 배선(`auto-capture/index.ts`의 `auto-init→hjl.init→inappBaseInput→inapp.init`) + CdpSettingsPage 웹/앱 스니펫 분리 안내. 웹뷰로 iOS·안드로이드 한 벌(JS=OS 무관), 순수 네이티브는 향후(REST 가이드/클라우드 빌드 GitHub Actions macOS 러너).
+> **빌드 fix**: `sdk-js/tsconfig.json` exclude에 `src/**/*.test.ts`·`__tests__` 추가(빌드가 test 포함→운영서버 vitest·rollup devDep 없어 TS2307 실패 차단). sdk-js 배포=서버 `npm install --include=dev`→`build:all`→`dist/iife/hanjul.min.js`를 company-frontend `public`·`dist`의 `sdk/v0.3.5/` cp.
+> **검증·배포**: backend·frontend·sdk-js tsc 0 · vitest 77 pass(앱 모드 `channel=app` 실측 2케이스 추가) · 박-단어/모델명/native dialog grep 0. **1·2단계 전부 배포완료**(진입 분기 화면 Harold 실측). 설계·계획 `docs/superpowers/{specs,plans}/2026-06-17-onsite-app-message-redesign*`. 상세 [[project_2026_0617_inapp_web_app_channel_split]].
+> **남은 것**: 운영 검증(실 자사몰·웹뷰 앱 — Harold/직원, 실 환경) + 순수 네이티브 앱(향후 수요 시).
+
+---
+
+### 🟢 2026-06-17 — 발신프로필 080 필드 교체 (상태/브랜드메시지/등록일) (★배포완료)
+> **신고(박성용 psy5868)**: 알림톡 발신프로필 관리(고객사)에서 대체발송 080·080 설정은 불필요 → IMC에서 받을 수 있는 상태(정상/휴면/차단)·브랜드메시지(사용/미사용)·등록일 필드 추가.
+> **fix**: 고객사 `AlimtalkManagementSection`에서 "대체발송 080" 컬럼·"080 설정" 버튼·`UnsubscribeSettingModal` 제거(슈퍼관리자·DB·IMC 연동은 보존) → 상태·브랜드메시지·등록일(카카오 채널 생성일 `createdAt`) 3컬럼. `kakao_sender_profiles` 4컬럼(`block_yn`/`dormant_yn`/`brand_message_yn`/`channel_created_at`) ALTER + `syncSenderStatusJob` 확장(IMC `block`/`dormant`/`brandMessage`/`createdAt` 저장 + 첫 응답 raw 로그 — 외부 API 응답 추측 금지). 상태 매핑=block_yn→차단/dormant_yn→휴면/그 외→정상(IMC status 실측 'A').
+> **검증·배포**: backend·frontend tsc 0 · 모델명/박-단어/native dialog grep 0. 배포완료.
+
+---
+
+### 🟢 2026-06-17 — 직원 디버깅 2건(전송 대기 미처리·전송≠통계) + 시세이도 미발송 근본 (★배포완료)
+> **디버깅1 (에이스 6/13 캠페인관리 대기 666)**: 완료 캠페인(result_final) PG 캐시 fail이 실측보다 적게 굳어, 적재−(성공+실패) 차액 666이 frontend에서 "대기"로 둔갑(캡쳐02 상세 실패 1,565 = 캐시 899 + 666).
+> **디버깅2 (시세이도 6/9 전송 1613 ≠ 성공+실패 1646)**: 슈퍼관리자 캠페인관리(`admin.ts:1769`)가 result_final 분기에서 sent_count 직접 표시(reconcile 누락). results.ts(사용자)만 어제 고쳐 표면 불일치.
+> **fix — 카운트 단일 산식**: `computeDisplayCounts`(sms-table-split, 완료=적재−성공−실패·진행중=실측, 완료 0강제 X) 신설 → `getCampaignResultCounts` {sent,success,fail,pending} 반환 → admin 캠페인관리/통계(querySendStats)/results 요약·목록·CSV·차트/엑셀 통일 + frontend 자체파생(AdminDashboard 캠페인관리·통계·일별 / ResultsModal / CampaignDetailModal) 제거 + campaign-sync-worker 재대조 윈도우 24h→7일(늦은 통신사 리포트 흡수).
+> **시세이도 2건 미발송 근본**: QTmsg Agent가 `rsv1='3'`(서버전송요청완료, 매뉴얼 p.6) 마킹 후 중계서버 미수신(엔진 없음) = 전송 유실 + 재시도 없음. 적재·회신번호 검증 정상(미등록이면 status 9008인데 104). 신규 `expired-pending-sweeper`(1분, cancelled-queue-sweeper 미러) = `rsv1=3 + status 100/104 + mobsend_time NULL + 48h(매뉴얼 SMS·LMS 최장 2일) 초과` → `status 4000`(전송시간초과=실패) 자동 마킹(절대 안 나감 + 화면 실패) · **rsv1=1·2(정상 예약) 절대 보존** + `smsCampaignCountsSafe` lf(라이브 만료 fail 집계 → 대기 잔존 차단). 알림 방식 기각(957건=폭탄, Harold). 정상분 Agent→서버 유실 자체는 게이트웨이 Agent 영역.
+> **검증**: backend·frontend tsc 0 · 순수 `verify-display-counts` 12 PASS · 박-단어/모델명/native dialog grep 0. 설계서 `docs/superpowers/specs/2026-06-17-send-stats-count-unify-design.md`. 상세 [[project_2026_0617_send_count_pending_unify]].
+> **★ 배포 후 reconcile 폭증 재수정·해결 실측**: 에이스 666이 안 고쳐져 확인 → reconcile 윈도우를 24h→7일로 넓힌 게 대상을 1,779건으로 폭증시켰는데 실제 불일치는 1건(에이스)뿐. BATCH 50 + send_base ASC라 최근(6/13) 에이스가 영원히 차례 안 옴. fix=`reconcileFinalizedCampaigns` completed 분기에 불일치(`success+fail < sent_count`) 조건 추가 → 대상 1,779→1. 라인 커버는 `getCompanySmsTablesWithLogs`(회사 전 사용자라인+당월 이력)로 정상이었음(0610 수정). **reconcile 5분 주기(INTERVAL_MS)로 에이스 fail 899→1,565·대기 666→0·result_synced_at 갱신 실측 확인.** 시세이도 status 4000 확인. expired-sweeper 957건 첫 사이클 로그는 운영 잔여.
+
+---
+
+### 🟢 2026-06-16 — 싱크에이전트 OS별 빌드 5티어 + 슈퍼관리자 배포 위저드 + 다운로드 엔드포인트 + 매뉴얼 갱신 (★배포완료)
+> **배경**: 인비토(Server 2008 R2) 원격 설치 2회 실패 — 단일 빌드(node **16.20.2**)가 구형 OS에서 에러창 없이 로드 실패(node16 공식 최소사양=Win8.1/Server2012R2). 런타임 DLL 동봉만으론 node 버전 벽 못 넘음 → OS 범위별 빌드 티어로 해결.
+> **지원 바닥(미만 명시적 비지원)**: Windows = Server 2008R2/Win7 SP1(node14), Linux = CentOS7/RHEL7/Ubuntu14.04 glibc2.17(node16).
+> **빌드 5종** (`sync-agent && npm run build:tiers`): win-modern(20)/win-mid(16)/win-legacy(14)/linux-modern(20)/linux-legacy(16). Windows 구형 2종은 `dist-tiers/<tier>/SyncAgent/`에 UCRT46+vcruntime3+wasm+자가진단 bat(`INSTALL-run-as-admin.bat`, EXIT_CODE→diagnose.txt) 동봉 = vc_redist 불필요. manifest=`release/build-manifest.json`. 스크립트=`scripts/build-tier.js`·`build-tiers.js`·`bundle-windows-runtime.js`. 5종 산출 + win-legacy/win-modern `--version` v1.5.5 실측.
+> **배포 위저드**: 슈퍼관리자→시스템→"싱크에이전트 배포"(`components/admin/AgentDeployWizard.tsx`, AdminDashboard 탭 `agentDeploy`). 단계별(플랫폼→OS→DB) — **서수란 팀장이 OS만 평범한 말로 고르면** 빌드·설치절차·DB주의 출력(node/glibc 비노출). 룰표 단일진실원 CT=`utils/agent-build-tiers.ts`(AI판단0), endpoint=`admin-sync.ts` build-tiers+resolve+download. 화이트톤(슈퍼관리자 톤 맞춤). 다운로드는 authenticate가 토큰 헤더 요구라 `<a href>` 불가 → **인증 fetch+blob** 저장.
+> **다운로드 서빙**: `/api/admin/sync/build-tiers/download/:tier` = 서버 `packages/backend/agent-builds/`(startup 자동생성, ENV `AGENT_BUILDS_DIR`)의 `sync-agent-<tier>.zip` 서빙. 빌드머신(Win)↔서버(Linux) 분리라 빌드 후 zip 5개(`dist-tiers/downloads/`)를 agent-builds/에 업로드 1회 필요(scp).
+> **매뉴얼**: `installer/README.md` + 고객 docx(`SyncAgent_설치매뉴얼_v1_5_5.docx`, 생성기 `build-manual.js`) — 지원범위·신규 §3.0 구형 폴더+bat 설치·위저드·v1.5.5 이력 반영 재생성. PDF는 Word 재export(LibreOffice 미설치).
+> **검증**: backend·frontend tsc 0 / 새너티 8/8 / native dialog·모델명·금지어 0. 설계·계획 `docs/superpowers/specs·plans/2026-06-16-sync-agent-build-tiers`. 상세 [[project_2026_0616_sync_agent_build_tiers]].
+> **운영 잔여(Harold)**: ① 프론트 배포(다운로드 fetch+blob) ② zip 5개 서버 agent-builds/ 업로드 ③ PDF Word 재export ④ 구형 OS 실측(Win7=2008R2 동일커널 6.1.7601 → EXIT_CODE=0 + 실DB동기화 1건 후 통과 티어만 위저드 노출).
+
+---
+
+### 🟢 2026-06-16 — 비토(Bito) 자체 게이트웨이 연동(Agent 설치·라인 bito) + 아난티 시연 DB (★배포완료)
+> **비토 게이트웨이 `SMSQ_SEND_13` 연동**: Bito Agent v1.0.5 설치(`~/bito-install` — repo 밖, `sudo bash install.sh`). MySQL은 **기존 `smsuser` 재사용**(신규 계정 만들지 않음 — `hanjul01`은 비토 발급 `agent_id`/`token`이지 MySQL 계정 아님). agent-config `state_policy=transition_column`(field_map `status=rsv1` · `result_code=status_code` 분리 → status_code엔 최종결과만, 진행상태는 rsv1), result_policy 6/1000/1800/7830/7831, `where_extra bill_id LIKE 'BITOTEST-%'`(테스트 격리). doctor **PASS 12**(DB `smsuser` 연결 OK) · Gateway WARN(`--skip-gateway`). 라인 코드: `sms-queue.ts` 발송/집계 3곳(`getCompanySmsTables`×2·`getAllCompanyUserLineTables`) + `AdminDashboard.tsx` 발송 라인 드롭다운 2곳(사용자·고객사) `group_type 'bulk'→IN('bulk','bito')` → 비토 배정 시 SMSQ_SEND_13 발송·집계·드롭다운 노출. `getAllBulkSmsTables`(전체 안전망)는 회사별 `getCompanySmsTables`로 충분해 의도적 제외. backend·frontend tsc 0.
+> **남은(다음 세션 진입점)**: ① 우리 서버 공인 IP `58.227.193.62`를 비토 Gateway(`139.150.81.213:9090`) 허용목록에 등록(자비스) → doctor Gateway PASS ② 고객사/사용자에 비토(13) 라인 배정(드롭다운) ③ `SMSQ_SEND_13`에 `BITOTEST-` bill_id 1건 발송 → Agent 픽업 → `status_code` 실측. 명세 `docs/bito-gateway-integration-spec.md` · 매뉴얼 `~/bito-install/README.install-linux.md`. 라인 확장(12개=3개씩 4그룹, SMSQ_SEND_12 흡수)은 1건 검증 후.
+> **아난티 시연 가상 DB**: 2만 건 xlsx(`C:\Users\ceo\Downloads\아난티_시연_고객DB_20000.xlsx`) — 실발송 회피용 가짜 `010-0XXX-XXXX`(중복 0), 18필드(회원등급 피라미드 Welcome~Diamond + 누적결제·방문·포인트 상관, 지점/객실/관심사). 생성기 `Downloads/gen_ananti_demo.py`(seed 고정).
+> **버그4(알림톡 대표링크) 2026-06-16 해결**: 변수명 `attachment_link`(link 아님)가 정답 — 상세는 아래 2026-06-15 항목 참조.
+
+---
+
+### 🟢 2026-06-15(이어서) — 발송/싱크/알림톡 5건 전건 수정·배포·확인 + 빌드 멈춤 fix + 슈퍼관리자 상세 엑셀 (★배포완료, 버그4 2026-06-16 해결)
+> **버그 1·2·3·5 수정·배포** (핸드오프 `docs/superpowers/handoffs/2026-06-15-5-bug-fix-handoff.md` 처리결과 절):
+> ① 발송일시 — 상세·엑셀이 통신사 응답시각(`mobsend_time`)→발송요청시각(`sendreq_time`). ResultsModal·AdminDashboard·results.ts CSV. **CSV 실측 전 행 06.11(06.12 0건).**
+> ② 싱크 변경분 — `reconcileSyncUnsubscribes`(옛 registerSyncUnsubscribes) 양방향화: 동의 전환 시 `source='sync'` unsubscribes 제거(능동/legacy 보존). **실측 인비토 sync 4건 자동 삭제.** (가설 'upsert sms_opt_in 제외'는 틀렸고 upsert는 COALESCE로 이미 갱신.)
+> ③ 통계 전송≠성공+실패 — `reconcileSentCount` CT(`sms-table-split.ts`)=max(적재 sent_count, 성공+실패+대기) 4표면(getCampaignResultCounts·results 요약/목록/상세) 통일. **시세이도 6/9 1613→1646.** 정합 캠페인 no-op·건5 회귀 없음. 별개 root=대체발송 1명 2행 이중집계(범위 밖).
+> ⑤ 템플릿코드 — `kakao-template-sync.ts` 스캔 필터 `'Tmp'`→`'Tm'` 3곳(Tmq/Tmo 키 누락 차단). **실측 버튼3개 Tmq→`B_XX_018_02_80943`.**
+> **빌드 멈춤 fix(배포)**: frontend Vite 난독화(`vite-plugin-javascript-obfuscator` splitStrings:5+base64 전체번들) render hang/OOM → `vite.config.ts` 경량화(splitStrings·stringArrayCallsTransform·numbersToExpressions·체인래퍼 off, 보호 핵심 유지) + `safe-build.sh` NODE_OPTIONS=4096. **빌드 16.52s 완주.**
+> **신규(배포)**: 슈퍼관리자 캠페인 상세 엑셀 다운로드 — `utils/campaign-sms-export.ts` CT + admin.ts `GET /campaigns/:id/sms-detail/export`(requireSuperAdmin) + AdminDashboard 모달 버튼. backend·frontend tsc 0.
+> **버그 4 (대표링크 동봉) — 완료·배포·1800 확정 (2026-06-16)**: 변수명 `attachment_link`(link 아님)가 정답. `buildAlimtalkEtcJson`(CT)에 representLink 인자 + `toAttachmentLink`(camel→snake) + 발송 5경로(commit/즉시 `campaigns.ts`·`auto-campaign-worker`·staging `direct-send-processor`·`journey-executor`)가 `kakao_templates.represent_link` 조회 → k_etc_json에 `{"attachment_link":{url_mobile,url_pc,scheme_ios,scheme_android}}`(값 있는 키만) 동봉. staging은 commit 저장 attachment_link 보존(고정링크). 실측 79738(승인 안내)→010-5295-8517 `status_code` 1800. 6/11 `link` 키 7300의 원인 = 변수명 불일치(형식·엔진매핑·서팀장 아님), 게이트웨이 외주가 attachment_link 명시. backend tsc 0·순수테스트 10/10. **강조형(title)은 0609 이후 정상 — 대표링크와 별개(혼동 금지).** 상세 메모리 `project_2026_0615_campaign_bito_5bugs`.
+
+### 🟢 2026-06-15 — 캠페인관리·싱크 레거시빌드·Bito 게이트웨이 연동 + 발송/싱크/알림톡 5건 버그(다음세션 일괄수정)
+> **완료(배포)**: ① 캠페인관리 진입 당일 기본조회(`formatDate.ts kstTodayStr`) + 예약 캠페인 빠른순(`admin.ts /campaigns/scheduled` ORDER BY `scheduled_at ASC, id ASC`). ② 싱크 인비토(Server 2008 R2) node16 레거시 빌드(`build:exe-legacy`=vercel/pkg@5.8.1 → `sync-agent-legacy.exe`, 인비토 적용 대기). ③ Bito 게이트웨이 `SMSQ_SEND_13` 라인(테이블 LIKE 12·`sms_line_groups` 'bito'·`sms-queue.ts` BULK_ONLY 격리 완료 / env·비토 Agent 계정·배포 남음, 명세 `docs/bito-gateway-integration-spec.md`).
+> **다음 세션 = 5건 버그 일괄 수정** → `docs/superpowers/handoffs/2026-06-15-5-bug-fix-handoff.md` 정독 후 1건씩 grep→컨펌→수정: ①발송일시 상세=리포트시간 ②싱크 변경분 미반영 ③통계 대상=성공+실패≠전송 ④대표링크 `k_etc_json` 동봉(0611 7300 후속) ⑤템플릿코드 버튼3개=templateKey.
+
+### 🟢 2026-06-14 — 모바일 DM 전면 재설계 (B~G 엔진/editor + 캔버스 편집 UX 보강) — ★Harold 배포 완료. ★세션2 완료(배포 대기) = ⑥ AI 슬라이드 자동생성(신규 dm-page-split TDD11·scroll/slides 자동·페이지 분할·편집 토글 재분할)+카피 8섹션 채움 / ⑦ dm-ai-generate 3→5(생성 전 CreditConfirmModal 확인) / 정렬 근본(section.align 단일화·캔버스+뷰어) / 스냅 제거(scroll·slides 2개). backend/frontend tsc 0 · 순수 11 GREEN. 핸드오프 `docs/superpowers/handoffs/2026-06-14-dm-ai-slides-credit-handoff.md`
+> **★ 캔버스 편집 UX 보강(세션 후반 — Harold 지적, "tsc만 보고 완료 보고한 잘못")**: ① 이미지 업로드/표시 근본 fix — 업로드 반환 URL이 서빙 안 되는 `/api/flyer/p/dm-images`였음 → `/api/dm/v/images`로 변경 + 프런트 `dmImageUrl` 정규화 헬퍼를 캔버스 6곳·editor 썸네일에 적용(기존 깨짐도 복구). ② 전 섹션 정렬(좌/가운데/우) — `Section.align` 공통 필드 + 공통 패널 컨트롤 + 캔버스 SectionRenderer/뷰어 renderSection 래퍼가 `text-align`+`--dm-section-justify` 주입 + CTA 플렉스 정렬 변수화. ③ 섹션 버튼색 개별 — `Section.accent_color` → 그 섹션 한정 `--dm-primary` 덮어쓰기(브랜드색 버튼 자동 적용) + 공통 패널 색상 선택기. ④ 헤더 브랜드명/로고 크기(sm/md/lg) — HeaderProps brand_size·logo_size + renderHeader·HeaderSection·HeaderEditor. ⑤ 레이아웃 스크롤·슬라이드 — 토글(DmTopBar)·캔버스 페이지 네비·뷰어 3모드 렌더 작동 확인. backend/frontend tsc 0. **남은 것(다음 세션, Harold 합의): ⑥ AI 자동생성이 슬라이드 모드도 — 현 `layoutMode:'scroll'` 하드코딩 해제 + `applyAiGenerated` 섹션→페이지 분할 + "어지간한 건 거의 다" 채움(혜택 숫자만 placeholder) ⑦ 그 가치에 맞는 크레딧.**
+> **B 인터랙션 엔진**: 순수 추첨 코어(pickRouletteSegment/drawWinners/parseWinnerRows, ts-node TDD) + dm-interaction CT(제출·룰렛 즉시추첨·원자적 재고차감·조회·집계·xlsx 다운로드·엑셀 사전지정·경품 동기화) + dm-draw-worker(1분 cron 마감추첨, dm_draw_runs 원자적 claim) + 공개 제출 endpoint 확장(`/:code/event-response`: 동의·phone매칭·1인1회·룰렛 즉시결과) + 뷰어 인터랙션 JS(룰렛 회전·폼·투표) + admin endpoint(responses/winners/event-stats/event-insight/export/winners-import/prizes). **신규 3테이블(dm_prizes·dm_winners·dm_draw_runs)+부분UNIQUE Harold 실행 완료**(SCHEMA.md 기록).
+> **A 섹션 editor**: 신규 16섹션 editor 전부 + RepeatableList 공용 + 룰렛/추첨 경품 설정(확률 합계 검증) + SectionPropsEditor 27 case(빈 패널 해소). LuckyDrawProps.prizes·RouletteSegment.prize_count SSOT 양쪽. 발행 시 syncPrizesFromSections→dm_prizes(당첨자 있으면 재고 보존).
+> **C 이미지**: publicImageUrl(base64→공개경로 `/api/dm/v/images`, 뷰어 동일 라우터라 도달 보장+HTML 경량) + lazy-load + 2MB→5MB + 클라 canvas 리사이즈(ImageUploader, 대용량 사진 자동 축소) + MultiImageUploader(갤러리/슬라이드 일괄).
+> **D 빠른시작 12**: SCENARIO_MAP 7→12(갤러리룩북·리뷰모음·선착순특가·실시간투표·VIP초대) + QUICK_STARTS 12카드(고유 아이콘·그라데이션) + DmThumbnail 12종 각 고유 일러스트(갤러리 그리드·별점 후기·모래시계·막대그래프·왕관). 1클릭 = oneShotGenerate.
+> **E 디자인**: 헤더 정렬 옵션(좌/가운데, 기본 가운데) — props SSOT+뷰어 렌더러+캔버스 HeaderSection+editor 4곳 일관(캔버스↔뷰어 일치).
+> **F 크레딧(안1 확정)**: `dm-interaction-publish` 50(일반 발행 30보다 높게) — 발행 라우트가 인터랙션 캠페인 자동 분기(isInteractionCampaign). 당첨 통보 발송 = 기존 발송 크레딧(발송은 발송대로). 베타 하향은 config.
+> **G AI**: applyInteractionDefaults(인터랙션 시나리오 → 경품 구조 placeholder 자동완성, 구체 혜택 임의생성 X) + buildEventInsight 순수 결과분석(실데이터만·임의상수 0·div0 가드) + `/:id/event-insight` endpoint.
+> **검증**: backend tsc 0 · frontend tsc 0 · 순수 코어 19 GREEN · 박-단어/모델명/native dialog 0(자가 grep). **배포 = `tp-push` → backend `pm2 restart all`(ts-node) + frontend `build:safe`**(신규 SQL은 실행 완료, 추가 SQL 0).
+> **의도적 후속(돈/발송=실측 필요, AI 영역)**: ① 당첨 통보 자동발송 endpoint — 현재는 당첨자 xlsx 다운로드 → 기존 직접발송으로 통보(F 안1 "기존 발송 크레딧 재사용", notified_at 컬럼 준비됨) ② AI 자연어 경품 파싱 심화("에어팟 1명" 파싱) + AI 통보 문안 — 현재 결정적 구조+placeholder+카피 AI, 외부 AI raw 검증(feedback_external_api_response_verification)+실측 후 별도. 계획서 = `docs/superpowers/plans/2026-06-14-dm-interaction-engine-B.md`.
+
+### 🟢 2026-06-13(이번 세션) — 인비토AI 학습 데이터 + 모바일 DM 재설계 설계 (배포완료)
+> **인비토AI 학습**: #3 이메일 적재 완료(ai_training_logs 'EMAIL' + sendEmailCampaign 발송완료 직후 logCampaignTraining+updateTrainingMetrics, buildEmailTrainingMessage 순수 TDD 11) + ③ 스팸 분류 학습셋(spam_filter_test_results blocked 124 → buildSpamFilterExample, export-training-data 합류) + ceo 학습페이지 '스팸 분류 학습' 섹션(차단 124+문안 리스트+통신사 배지). ② cdp 전환 = purchase 0건이라 자사몰 연동 후 보류. 상세 = memory `project_2026_0613_training_pipeline`.
+> **모바일 DM 재설계**: 7개 설계서 작성(위 다음 세션 블록). 구현은 다음 세션.
+> **배포 교훈**: targetup-backend = ts-node → 코드 반영 = `pm2 restart all`만(build:safe 무관, dist 안 읽음). frontend만 build하고 backend pm2 restart 누락 = "빌드 정상인데 화면 안 바뀜" 반나절 삽질. 상세 = memory `feedback_push_and_deploy_commands`.
+
+---
+
+### 🟢 2026-06-13(밤) — AI 학습 메모리 "제대로 학습엔진" A~G (배포완료) + 인비토AI 파인튜닝 데이터 파이프라인 보강·ceo 학습 페이지 (배포완료)
+> **① AI 학습 메모리 A~G (배포완료)**: 핵심 실측 = **cdp_events 전체 0건**(클릭/전환 데이터 없음) → channel_performance 57건 전부 가짜 0% 삭제. A 정직성(`utils/ai-memory-text.ts` 순수 — 전환 없으면 문구 생략+클릭 실측 0 기록 보류). B 죽은 2타입 부활(customer_insight=`ai-memory-customer-insight.ts` 등급 실측 배수·임의상수0·표본≥10 / brand_tone_evolution=`brand-tone-evolution.ts` diffGuideline) + accumulator 워커 일배치(회사+20h 멱등). C 수명관리(pickMemoriesToPrune 타입 상한+cleanup, C2 롤링키는 sweeper 캠페인 dedup 깸→미적용 C1 prune 대체). D usage_count 기존 존재(ALTER 불요). E legacy `/operator/memory` 프런트 CRUD 유일경로라 제거X. F company-memory/sweeper 주석 정리. G AiMemoryPage 5타입 출처·미생성 명시. backend+frontend tsc 0·순수 24 GREEN·박-단어/모델명 0. 설계=`docs/superpowers/specs/2026-06-13-ai-memory-learning-engine-design.md`. 상세=`memory/project_2026_0613_ai_memory_engine.md`.
+> **② 인비토AI 파인튜닝 데이터 파이프라인 (배포완료)**: training-logger→ai_training_logs(SCALING.md Phase 2) 적재가 **최근 7일 30건 급감** — logTrainingData가 campaigns.ts 2곳뿐이라 D231 후 비동기 createDirectSendCampaign→worker·여정·자율·알림톡·이메일 전부 미적재(KAKAO 0건 증거). 보강 = `logCampaignTraining` 헬퍼 + **#1 createDirectSendCampaign**(직접+자율+KAKAO 해결) + **#2 journey-executor**(여정). fire-and-forget·source_ref 멱등(발송·돈 영향 0). **C export** = `utils/export-training-core.ts`(순수 11 GREEN) + `scripts/export-training-data.ts`(generation/preference/spam JSONL). **#4 operator 결과 = operator_proposals에 이미 저장→export서 KTO 선호 추출(새 적재 0)**. **ceo 전용 페이지** = 슈퍼관리자 시스템 메뉴 "AI 학습 데이터"(`AiTrainingDataPage`+`/admin/ai-training`+admin.ts `/ai-training/overview`·`/access`, env `AI_TRAINING_VIEWER_IDS` 기본 ceo). backend+frontend tsc 0·박-단어/모델명 0. **배포완료(2026-06-13 밤). 남은=#3 이메일 학습(EMAIL 타입, 다음 세션).** 상세=`memory/project_2026_0613_training_pipeline.md`.
+> **타임라인 논의**: "Opus급 마케팅 AI" = 범용 프런티어 X, 작은 모델을 마케팅 태스크에서 프런티어 품질로 파인튜닝. 시간 = 데이터 양(양질 수천~1만+선호쌍 수천)이 결정, 대략 6~18개월(AI 기능 채택률이 최대 변수). 가속 = Opus 증류·좁은 태스크(스팸 5,158건) 먼저·지금은 RAG(회사 메모리).
+
+---
+
+### 🟡 2026-06-13(저녁) — Email 캠페인 AI 강화 + DM 빌더 목록 강화·시나리오 썸네일 (코드 완료·배포 대기) + AI 학습 메모리 설계서 (★다음 세션 구현)
+> **① Email 캠페인 AI 강화 (코드 완료·tsc 0·순수 40/40·배포 대기)**: 자체 오픈/클릭 트래킹 발신부 신설(`utils/email-tracking.ts` CT — HMAC 토큰 픽셀/클릭 리다이렉트/개인 토큰 수신거부, 클릭 토큰에 원본 URL까지 서명=open redirect 차단) + 고객DB 수신자 연동(등급 멀티선택·미리보기·email_opt_in/is_opt_out/is_invalid 자동 제외) + 발송 비동기화(setImmediate+sent_count 폴링) + 예약 발송 sweeper(`utils/email-send-sweeper.ts` 1분, target_spec 도래 발송+sending 30분 정체 failed) + AI 5종(`utils/email-ai.ts` CT — 원샷 생성 3 / 다듬기 1 / 발송 전 진단 1 / 성과 진단 5 / 발송 시간 추천 5, 표본 30 미만 insufficient_data 차감 0) + 미오픈자 SMS 크로스(AI 0=차감 0). 차감 = CREDIT_COST_MAP 6 source 추가(email-ai-generate 3/email-ai-publish 30/email-refine 1/email-precheck 1/email-performance-insight 5/email-send-time-recommend 5) + constants/credit.ts 1:1. 구체 혜택 placeholder + 발송 차단 가드. **배포 = ALTER 2(email_campaigns.ai_generated boolean·target_spec jsonb, 둘 다 503 분기 보호) 먼저 → backend+frontend build:safe.** 설계=`docs/superpowers/specs/2026-06-13-email-ai-enhancement-design.md`. 정정=내부 룰 안내 카드 제거(Harold 지시).
+> **② DM 빌더 목록 강화 (코드 완료·tsc 0×2·순수 17/17·배포 대기)**: 페이지 "부족함" 3원인 = overview null 시 중단부 전체 증발(`/dm/overview`가 dm_views/dm_event_responses 테이블 1개만 없어도 endpoint 전체 500 — isDbMigrationPendingError가 column만 잡고 relation 미포착)→**부분 실패 허용 fix**(dm_pages 집계는 살리고 나머지 0 degrade)+프런트 항상 표시(스켈레톤/목록 길이 폴백) / 목록 그리드 auto-fill 좌측 쏠림→고정 트랙+중앙 정렬 / 카드 글자뿐→**폰목업 썸네일**. backend=`getDmList` 확장(layout_mode·approval_status·section_summary 추가, raw pages 미전송)+`buildSectionSummary` 순수+`cloneDm`(POST /dm/:id/clone, AI 0=차감 0). frontend=`components/dm/DmThumbnails.tsx` 분리(PhoneFrame+DmThumbnail 섹션 블록+**QuickStartThumbnail 7 시나리오 고유 SVG** — 룰렛 회전판·지도+핀·카운트다운+할인뱃지 등)+복제/성과/희소 상태/문구 자연 한국어. DB 변경 0. 설계=`docs/superpowers/specs/2026-06-13-dm-builder-list-enhancement-design.md`. **배포 = backend+frontend build:safe(ALTER 없음).**
+> **③ ★다음 세션 = AI 학습 메모리 "제대로 학습엔진" 구현**: 설계 완료(이번 세션 설계만). 7대 결함 확정 — customer_insight·brand_tone_evolution 자동 writer 0건(계속 빈칸) / 여정 학습이 클릭 0 전달=가짜 0% 메모리 AI 프롬프트 오염 / 전환율 항상 0 가짜 노출 / 주석 박-단어 오염 / usage_count ALTER 503 / legacy 중복 / 수명관리 0. 데이터 소스 전부 실재(클릭=cdp_events message_click·구매=purchase/order+campaign-response-attribution·등급=cdp_events.customer_id⋈customers.grade·톤=brand_guideline 비교). **진입 = `docs/superpowers/specs/2026-06-13-ai-memory-learning-engine-design.md` 정독 → Phase A(정직성)부터.**
+
+---
+
+### 🟢 2026-06-13 — 직원 디버깅 5건 전건 원인 확정 + 일괄 수정 (배포 완료 2026-06-13)
+> **검증 결과(전건 SQL·스크린샷 실측)**: ①싱크에이전트 동의 변경 = 이미 반영(sms_opt_in=true·동의 저장값 단일) — 실체는 매시 1건 INSERT 실패(1,504 중 1,503만 존재·기록 부재)+동기화 6/13 06:00 중단 ②발송일시 = 표시 정확(mobsend_time) — 실체는 큐 일부 행 지연 실발송(톤28 92행 익일 10:32~17:07 성공, 시세이도 +24h 3006, 시세이도3 +40분) ③수신거부 전체 다운로드 = 기능 신설 ④알림톡 = 반려 LMS 6/11 21:18 실발송·전달 1000 확정(보고는 그 이전 시점)·반려 템플릿 IMC 코드(B_IV_013_02_80287) 미반영 확정(코드 백필이 승인 한정 스캔) ⑤에이치피오 = 재오염 없음(정정값 유지·reconcile 6/12 10:00 재검증 동일) — 캡처는 정정 이전, 남은 실체는 admin 상세 라인 한정 조회. 별건 발견 = bfee8e09(취소·발송0) fail 87,014 잔존 기록.
+> **수정(배포 완료)**: [B+D] 시스템 크리티컬 문자 알림 CT `system-alert.ts`(SYSTEM_ALERT_PHONES env·쿨다운 6h·인증라인 LMS) + `system-monitor-worker.ts`(5분 — 발송 큐 지연 정체(60분 경과+12분 비감소 정체 판정·야간 강조) + 에이전트 중단(하트비트 60분/동기화 3×주기)) + 목록 "동기화 지연" 배지 [C] sync.ts agentId status='active' 필터 제거(per-batch failures 기록 누락 구멍)+`/log` 병합(동기화 1회=1행 유지)+실패 stdout+admin-sync failures 응답+상세 화면 실패 행 표시 [E] 상태 동기화 시 reviewed_at 기록+단건 GET 응답으로 템플릿코드 즉시 반영(syncSingleTemplateCode 재사용)+코드 백필 스캔을 검수중/반려까지 확대 [G] getCampaignSmsTables 전 라인 합집합 전환(admin 상세 0행 구멍·0610 예고 후속)+취소 문구는 발송 이력 없는 취소에만 [A] 발송일시 예약 우선 3곳(CampaignDetailModal 2·발송통계 상세 1) [F] 검수 알림 수신자 0명 시 미발송 안내 문구 [H] 수신거부 전체 CSV 다운로드(`GET /api/unsubscribes/export`+버튼, 격리 기준 동일, formatPhoneDisplay 신설로 앞 0 보존). tsc 0×2·refund-calc 8/8·sms-table-split 8/8·direct-send-spec 12·sms-channel-split 13.
+> **배포 후**: SYSTEM_ALERT_PHONES env 추가 → bfee8e09 counts 0 정정 SQL → 인비토 누락 1명 식별(첫 동기화 failures 자동) → Task 10 실측. 외부 = 서팀장(큐 지연 처리·3006 +24h 의미) / 인비토 PC 재기동 / 직원 응대 정정 2건(톤28 익일 실발송·박성용 반려 LMS 6/11 21:18 도착).
+> **[같은 날 2차 — 예약 상세 속도 + 행 상태 구분(배포 완료)]** 예약 [조회] 10초+(에이스하드웨어 47,846 실측) = 클릭 1회당 MySQL 전체 스캔 4회(헤더 집계·발송시각 보정·COUNT·행 SELECT) 구조. fix=①예약 캠페인은 헤더 집계·시각 보정·COUNT를 MySQL로 가지 않음(결과 없음 — PG sent_count 사용, 필터/검색 시만 COUNT) ②getCampaignSmsTables에 send_config.sentTables(0611 적재 기록) 우선 — 기록 있으면 그 테이블만(전 라인 합집합은 기록 없는 과거 건만) ③행 상태 3분류: 대기 코드+발송 요청 시각 미래 = **"발송 예약"(파란 칩)** / 시각 경과 = "결과 대기" / 성공·실패 — CT `getQueueRowStatus`(sms-result-map) 신설, admin 상세·사용자 상세·엑셀 3표면 동일 산출, 통신사 '-' 표시(미발송 행 "나간 거 아냐?" 불안 차단, Harold 지시). 부수 정리=상세·엑셀 카카오 UNION 분기 컬럼 위치를 SMS와 1:1 정렬(both 채널 잠재 불일치). tsc 0×2·회귀 4종 동일. 인덱스 실측=idx_app_etc1_status(app_etc1+status_code) 존재 — DDL 불요. **[3차 — 배포 후 잔여 10초 추가 확정(배포 완료)]** 잔여 병목=smsSelectAll/상세 UNION이 `SELECT * FROM (UNION ALL…) ORDER BY … LIMIT` 구조라 일치 행 전체(본문 mediumtext 포함)를 임시 테이블 실체화 후 정렬 — 인덱스 있어도 8만 행 페이지당 수 초. fix=CT `smsSelectPagedAll` 신설(테이블별 내부 ORDER BY+LIMIT(offset+limit) 선잘라내기 → 외부 병합은 테이블수×K행만, 결과 동일·깊은 페이지만 완만 저하) — admin sms-detail 교체 + results.ts 사용자 상세 3개 서브쿼리(SMS·카카오·fallback) 동일 적용. backend만 변경. tsc 0·회귀 4종 동일.
+> **[4차 — 슈퍼관리자 전반 로딩 지연 근본 fix(배포 완료·효과 실측 확인)]** SHOW FULL PROCESSLIST 실측 = `smsCampaignCountsSafe` 이력 집계(IN 380건 × 9라인×2개월 18테이블 UNION) 10초 쿼리 상시 점유. 원인 2축 확정: ①mysql-refund-sweeper(30초)가 선불사 14일치 sending/completed 전체를 매 사이클 실집계(LIMIT·마커 없음) ②markFinalized 완전집계 조건(success+fail>=sent_count) 영구 미충족 terminal 캠페인 94건(completed 90+failed 4, 5/7~)이 굳힘·재대조 양쪽에서 누락 → 발송통계/발송결과가 매 로딩 전부 실측. fix=①CT `sweep-cadence.ts` 신설(발송 48h 이내=매 사이클/경과 휴면=60분 1회, 메모리 마커 — 후보 SELECT·환불 산식·14일 안전망 불변, 보정 도착만 최대 60분 지연) ②reconcile에 굳힘 탈출구 무리(terminal+result_final=false+발송 72h, 21일 하한 없음·사이클당 50건) — 실측값으로 counts 교정 후 굳힘(화면 숫자 연속, 잔존 94건 자동 소화·향후 72h 자동 졸업) ③reconcile 실측에 카카오 합산 추가(PG의 SMS+카카오 합산값을 SMS 단독으로 덮어 카카오 몫 깎이던 잠재 과소 동시 차단). backend 2파일+CT 1+검증 1. tsc 0·sweep-cadence 9/9·refund-calc 8/8·sms-table-split 8/8·direct-send-spec 12·sms-channel-split 13. 배포 후 검증=PROCESSLIST 10초 쿼리 소멸+nonFinal 분포 SQL 94→감소+화면 체감. **[4차 배포 후 실측]** PROCESSLIST 거대 집계 소멸(엔진 픽업 쿼리만 잔존)·nonFinal 94→41(oldest 5/7→6/1, 72h 이내분 잔류는 설계 정상)·load 3.3=평시 바닥값.
+> **[5차 — 슈퍼관리자 최초 로딩 5초+ "로딩 중..." 차단 fix(배포 완료·체감 확인)]** 원인 2축 실측: ①AdminDashboard loadData가 7개 API(고객사 1000·요금제·사용자·예약·발신번호·요금제목록·충전관리)를 직렬 await — 전부 끝나야 loading 게이트(2353) 해제 = 합산 대기 ②/api/admin/users(사용자 173명×상관 서브쿼리 2개)+/api/companies 목록(76개×1개)이 행마다 24만 행 customers 탐침(총 422회). fix=①loadData 게이트를 고객사+요금제 2개로 축소+나머지 5개 Promise.allSettled 병렬 백그라운드(각자 도착 즉시 채움, 표시 값 동일) ②두 목록 쿼리를 GROUP BY 1회 집계 LEFT JOIN으로 전환(값 동일 — 상관 COUNT 0 ↔ 그룹 부재 COALESCE 0, 타입 bigint 동일). 동일 패턴 전수 grep 12곳 = N행 2곳만 수정·단건 10곳 무해 유지. tsc 0×2. **배포 완료 — Harold 체감 확인("빨라졌다") 2026-06-13.** 이로써 0613 속도 3건(예약 상세 10초+ / 슈퍼관리자 전반 지연 / 최초 로딩 5초+) 전부 종결.
+
+---
+
+### 🟢 2026-06-11(밤) — 디버깅 배치 5건+건6 전건 원인 확정·근본 코드 완료 (배포 완료 — 2026-06-13 세션에서 확인)
+> P0 데이터 3건 종결(인비토 자동발송 active 4건 paused+잔존 0 / 에이치피오 성공 84,259 실측 정정+큐 누수 2,128 삭제+audit 2행, 청구=성공 84,259건 / 폴라초이스 환불 불필요 확정 — 15,697 전량 발송 시도·실패 562 전액 자동환불 완료) + P2 KREJ 반려 미알림=5월 구코드(D188 이전 무조건 마킹) 선기록 잔존 확정·정정(자동 재발송, 전수=시스템 1건뿐) + P3 전수(과거 미환불 0건) + 건6 신규=**큐→이력 이동 중 이중 집계가 굳힘**(sent_count>target 16건, toun28 실재 7,171 전원 고유 vs 기록 7,520).
+> **근본 코드(전부 backend)**: ①환불 단일 산식 refund-calc CT(차감 실측−성공−대기 — worker 미적재분/sweep 실측실패분이 같은 누적 풀에서 max 수렴하던 과소환불 차단, send_phase 가드) ②전 bulk 라인 합집합 getAllBulkSmsTables(라인 해제 내성 — 큐 작업 6곳+집계 10곳 자동 보강) ③billing 정산 2축(회사 라인만→전 라인 + campaign_runs 미생성 신 직접발송 UNION 포함) ④sent_count=적재 실측 보존(sync/sweep success+fail 덮어쓰기 제거) ⑤취소 시 counts 덮어쓰기 제거(실측 보존) ⑥worker 제외 사유 send_config.exclusions 기록 ⑦cancelled-queue-sweeper 픽업 행 9999+잔존 재카운트 ⑧자동발송 워커 영구 가드(AUTO_CAMPAIGN_RETIRED) ⑨**집계 단일 산식 smsCampaignCountsSafe — 결과=월별 이력만(append-only라 과대 불가)·대기=라이브 대기코드만 → 부풀린 값이 기록되는 것 자체 차단**(소비처 6곳 전수 교체+채널분리 동일 적용·기존 합산 함수 외부 호출 잔존 0 grep). tsc 0·refund-calc 8/8·sms-table-split 8/8.
+> **잔여 4(배포 후)**: backend build:safe+pm2 restart → 굳은 16건 리셋 SQL(reconcile 1h 자동 교정·toun28은 발송+24h) → 반려 LMS 수신 확인(박성용) → 소량 실측 1건 시나리오(설계서 Task 10). 설계서=`docs/superpowers/plans/2026-06-11-debug-p1-root-fix.md` · 건별 종결=`status/debug-notes-2026-06-11.md`.
+
+---
+
+### 🔴 2026-06-11(오후) — ★다음 세션 = 디버깅 5건 일괄 작업★ + 싱크에이전트 v1.5.5 + 무료체험 6/30 마감·배너 (전부 배포 완료)
+> **★ 다음 세션 진입 = `status/debug-notes-2026-06-11.md`(현상·실측) + `status/DEBUG-FIX-DESIGN-2026-06-11.md`(수정 설계·우선순위·확정 SQL/로그) 두 문서 정독 → P0부터.** 디버깅 5건: ①[시한 06-16 월 10:00] 인비토 자동발송 잔존 실행(폐기가 POST 410만·active+워커 유지) ②검수알림 지연=6/10 기수정 후폭풍 종결·KREJ 반려 미알림만 확정 필요 ③[청구] 에이치피오 87,014 cancelled 굳음→실측 재집계 정정 ④[돈] 폴라초이스 227건 차감만·미환불(차감=COUNT 산식 예상치 vs 적재=DELETE+INSERT 실측 별개 구현·worker 환불 1회성 catch·sweep은 실패행 기준) ⑤시세이도 기록vs실측 화면 혼용(통계 대상 2,885=실측합/전송 2,895=기록합 증명). 관통 근원=기록↔실측 자동 대조 부재 → 수량 3층 정의+차감↔적재 환불 sweeper+확정 카운트 UPDATE+출처 단일화.
+> **싱크에이전트 v1.5.5(배포·패키지 완료)**: 인비토 3건 — 버전 불일치(배너가 config.enc 저장값 보고+하드코딩 5곳 → AGENT_VERSION 단일 진입점+저장 4경로 강제+`--version` 플래그) / 증분 매주기 207(fallbackToFullSync 소비 0건 → getColumns 실재 검증+전체 동기화 대체+기동 경고) / 정규화 제외=정상 동작 회신. 전달물=`sync-agent/installer/SyncAgent-Setup-1.5.5.zip`(Setup exe+매뉴얼 v1.5.5 PDF). 1.5.4 이하 산출물·이전 매뉴얼 전부 삭제(이전 zip은 4-28 빌드=구버전 전달 추정 원인). vitest 9/9·zip 내부 1.5.5 실측. 상세=`status/SYNC-AGENT-TROUBLESHOOTING.md` § 2-4.
+> **무료체험 6/30 마감+상시 배너(배포 완료)**: 마감 상수 2곳(utils/basic-trial.ts↔OpenTrialPopup.tsx, KST 6-30 23:59:59)+3중 차단(팝업/배너/서버 TRIAL_PERIOD_ENDED)+대시보드 발송현황 아래 와이드 배너(FREE+기한 내, pending '검토 중', forceOpen으로 24h dismiss 무시. 헤더 버튼은 메뉴 과밀로 회수 net 0).
+
+---
+
+### 🔴 2026-06-11 — 에이치피오 예약취소 87,014건 실발송 사고 (손해 250만원) — 근본수정 5겹+감사로그 푸시 완료
+> **사고**: 06-10 17:50 취소한 87,014건 LMS가 06-11 10:00 실발송. 근본 = 적재는 사용자 라인(direct-send-worker:55 userId)·취소는 회사 라인만(campaign-lifecycle:158 userId 누락) DELETE 0건 + 효과 검증 없이 cancelled 표시. 라인 불일치는 에이치피오 유일(회사 7,8,9 vs 사용자 1,2,3 — 06-04 09:26 admin 계정이 수동 지정, nginx+audit_logs+MySQL 월별이력 3종 대조로 행위자·시점 확정). 18:00 재예약 bfee8e09 = 그대로 발송 결정.
+> **근본수정 5겹(커밋 93d37a0)**: ① 발송 당시 테이블 기록 send_config.sentTables ② getCampaignQueueTables CT 신설(기록 1순위+전 라인 합집합) — 취소·수신자조회/삭제·시간변경·문안수정·안전망 6곳 단일 헬퍼 ③ 취소 = 삭제 후 잔존 0 검증 후에만 성공(거짓 표시 차단) ④ direct-send-worker 취소 가드 3곳(적재 전/중/직후) ⑤ cancelled-queue-sweeper 1분 안전망 신규.
+> **후속(커밋 83b780f)**: 감사 로그 — utils/audit-log.ts CT + 기록 5곳(사용자 수정 diff·라인그룹 CRUD·회사 라인 변경) + 열람 ceo 전용(AUDIT_LOG_VIEWER_IDS, /audit-logs 403+access+메뉴 게이팅) + 사용자 수정 3필드(line_group_id/store_codes/opt_out_080) 무조건 덮어쓰기 → 명시 시에만 변경.
+> **영구 룰**: CLAUDE.md 최상단 `dev_process_six_rules` 6원칙 신설(전수 grep 쓰기 경로까지/효과 검증 후 성공 표시/이중 진실=안전망 워커/라우팅 축=영향표/실측 1건/수정 전 승인).
+> **잔여**: billing.ts:23 정산이 회사 라인만 집계(돈 — 별도 검증 의무) / 과거 취소 건 실발송 사후 대조 / sync-agent 설치 UI 모델명·단가 노출 13곳 제거(재빌드 필요, Harold 결정 대기).
+
+---
+
+### 🟢 2026-06-11 — 인앱메시지 SDK 배선 T0~T6 구현 완료(배포완료) + 고도몰 SDK 가이드 3차 보강(완성코드판)
+> **인앱 배선(코드 완료·배포완료)**: 설계도 T0~T6 전 단계 TDD(신규 테스트 16) 구현. T0=운영 43컬럼 실측 ALTER 불요(SCHEMA.md 실측 기록). T1=auto-capture IIFE에 HanjulloInAppModule 생성+window.hjl.inapp 공개+identify 직후 init+늦은 로그인 재조회. T2=track(cart_add/cart_view/checkout_start) 인앱 트리거 브리지+cart-estimate.ts(price×quantity 세션 누적→cart_value). T3=/inapp/active 응답 customer 동봉(CT-79 확장: INAPP_BROWSER_VAR_WHITELIST phone 제외+extractUsedInAppVariables+getInAppCustomerForBrowser)+SDK fallback·캐시 보존. T4=lastInput(늦은 identify에도 최신 identity)+cart_value_min 클라 필터(캐시 hit 포함)+dwell_seconds+data-hjl-inapp-container+401/403 재시도 중단. seenMessageIds는 V2 Step 7 기존 소비 확인(작업 불요). T5=IIFE 재빌드 23,311B(인앱 마커 6종 포함)+v0.3.5 사본 덮어쓰기(해시 동일 — 가이드 기전달·설치 0곳이라 URL 유지 결정). 검증=sdk vitest 75/75·backend ts-node verify OK·tsc 양쪽 0·금지패턴 0. T7 실측 1건(center_modal 표시→impressions 기록→once_per_session→cart_add 트리거)은 배포 후. 발견(추가 과제)=inapp 자동 트리거가 scroll_percent/time_on_page_seconds 조건값 클라 비교 없음.
+> **고도몰 가이드 3차 보강(`docs/고도몰_SDK_설치가이드.md`+docx 129단락)**: ①용어 한눈에 표 14항목(비전공자용, 영업 혼란 사건 — 발급 화면 5종 값 용도 불명 → "SDK 설치는 설치 스크립트 한 줄뿐" 표 신설) ②실변수 완성코드 — 회원식별 `{=gSess.memNo}/{=gSess.cellPhone}/{=gSess.memNm}`(이메일은 gSess 표준에 없음 명시)·장바구니 `{=goodsView['goodsNm']}`/`{=gd_isset(goodsView['goodsPrice'],0)}`+AJAX 성공 콜백 안내·구매 `{=orderInfo.orderNo}` ③PC·모바일 스킨 양쪽 설치 명시 ④트러블슈팅 6단계(허용도메인→스킨반영→한쪽누락→광고차단→키→연락) ⑤인앱 자동표시 절+CDN 내부항목 제거. 다른 페이블 리뷰 4지적 전부 반영.
+> **고도몰(기존)**: 업체 전달용 Word 2건 — `docs/고도몰_연동_가이드_업체전달용.docx` + `sync-agent/SyncAgent_설치매뉴얼_v1_5_4_개정_2026-06.docx`. 에이전트 동의 컬럼 미매핑 = 전원 동의(true) 등록(sync.ts:615) — SDK/웹훅(기본 false)과 반대.
+> **배포(인앱 배선분)**: backend+company-frontend 두 곳 build:safe (frontend 무변경). 설계도 D절 AI 백로그 5건+E절 크레딧 권고는 Harold 선별 대기.
+
+---
+
+### 🔴 2026-06-11 — 알림톡 강조표기형 7300 **최종 근본 확정 = 대표링크(ATTACHMENT.link) 미동봉** — 게이트웨이 매핑 추가 대기(서팀장)
+> **최종 근본(휴머스온 답변+실측 5회 확정)**: 79738만 `kakao_templates.represent_link` 등록(`{"urlPc","urlMobile"}` — 정상 발송 5개 템플릿은 전부 미등록, PG 실측)인데 **발송 요청에 link 미동봉 → 카카오 템플릿 불일치 거부**. 한줄로는 represent_link를 저장만 하고 발송 경로 소비 0건(grep). 옛 가설 2개 폐기 — ① sender_code concat(부차: 가드 수정 완료, 식별코드 301170011 엔진 자동삽입) ② imc_template_status R 차단(휴머스온 정의 **S=중지/A=정상/R=발송 전 대기, 첫 발송 시 자동 A** — R은 차단 사유 아님, CT-87 R 차단은 신규 템플릿 첫 발송 영구 차단 역효과라 정정 의무).
+> **운반 구간 실측(LINKTEST1~6, Harold 번호 2개)**: etcJson snake/camel link·btnJson link객체·btnJson 버튼형식(name 유/무) 전부 7300. 게이트웨이(인비토 자체, mmsr3/ngen) 로그 = **etcJson의 link가 게이트웨이까지 온전 도달** + 휴머스온 "IMC 접수에 ATTACHMENT 없음" → **막히는 지점 = 게이트웨이 엔진이 etcJson에서 title만 IMC로 옮기고 link 미전달**. 타업체 성공 사례는 전부 대표링크 없는 템플릿(etcJson title만 — 전달 모양 한줄로와 동일). deliver 전문 필드=title/btnJson/etcJson뿐(link 전용 자리 없음). btnJson 버튼형식은 button으로 변환됨(채널추가 1800 실증 — 버튼 통로 정상).
+> **해법(확정·진행 대기)**: ① 서팀장 — 게이트웨이 엔진에 etcJson 안 `link` 객체 → IMC 요청 최상위 `link`(urlMobile/urlPc) 매핑 추가. ② 한줄로 — 발송 4경로에서 대표링크 템플릿이면 etcJson에 `{"title":…,"link":{"urlMobile":…,"urlPc":…}}` 합성(공통 CT, buildAlimtalkEtcJson 확장) — ① 완료 통보 후 구현+실측 1건. ③ 어제 배포완료분 정정 묶음 = CT-87 R 차단 해제(S/D만)+화면 "발송불가" 뱃지 문구+SCHEMA.md imc_template_status 주석 — Harold 동의 대기.
+> **잔여**: 진단로그 `[ALIMTALK-DEBUG2]`(direct-send-processor) 제거 의무(종결 시). LINKTEST1~6 테스트 행 = SMSQ_SEND_1_202606 app_etc1 LIKE 'LINKTEST%' (정산 집계 시 제외 식별 가능). IMC v1 스펙 제약 = link 포함 시 버튼 최대 2개. 5월 79955 버튼 발송 url1_1 빈 값 92 건은 CT(convertButtonsToQTmsg) 도입 전 경로 — 현행 CT는 urlMobile 정상 처리.
+> 상세=`memory/project_2026_0609_alimtalk_emphasize_etcjson_diagnosis.md`(2026-06-11 갱신)+IMC v1 스펙=Developer Portal(link 최상위 camelCase·강조형 link 허용).
+
+---
+
+### 🟢 2026-06-09 — 발송통계 성공→실패 오분류 + 미도래 예약 대기집계 정정 (코드 완료·배포완료 / 데이터 65건 정정 완료, P1 돈/정산)
+> **근본 원인(확정)**: 발송시각이 아니라 등록 시각(예약은 `sent_at`이 생성 때 찍힘) 기준으로 체크하던 것. ① 예약발송 120분 타임아웃이 `sent_at`(=등록) 기준이라, 실제 전송시각(`scheduled_at`)에 발송되는 순간 이미 "120분 초과" → 통신사 결과가 몇 초만 늦어도 pending→실패로 굳고, `success+fail=target`이라 재sync에서 영구 제외(상세는 MySQL 실시간이라 성공, 목록·통계는 캐시라 실패). ② 미도래 예약이 발송통계에 '대기'로 집계됨.
+> **원칙(Harold 명시)**: 모든 통계·sync·타임아웃·확정 = **발송시각 `COALESCE(scheduled_at, sent_at)`** 기준. 전송시각 미도래 예약은 발송 시작 전이라 통계 제외(그 전엔 취소 가능).
+> **수정(backend, ~25곳)**: 발송시각 base = `campaign-lifecycle`(AI·직접 타임아웃 + 예약 발송전 제외 가드 + 윈도우)·`campaign-sync-worker`(후보 윈도우·markFinalized)·`mysql-refund-sweeper`(윈도우)·`stats-aggregation` aggregateCampaignPerformance. 발송시작 가드 = `STAT_STARTED_GUARD` CT 신설(stats-aggregation) + 소비처 전수(querySendStats·querySendStatsDetail·admin 발송통계/상세/캠페인관리/발송결과/export·results 요약+목록2 인라인). 후불은 `prepaidRefund` no-op(prepaid.ts:68)이라 돈 영향 0(표시 전용). backend tsc 0 + grep 전수(옛 타임아웃 순서 0·가드 적용 확인).
+> **데이터 정정(완료)**: 굳은 65건 `result_final=false`+`success/fail=0` UPDATE → MySQL 실시간 복귀 + 워커 재집계. (조건: completed·result_final·success0·fail=target·발송시각 21일내.)
+> **목록 vs 통계 분리(확정)**: STAT_STARTED_GUARD는 **통계/정산/export만**(querySendStats·Detail·admin 발송통계1316/상세1480/export3270·results 요약115). **캠페인관리(admin798)·발송결과 목록(admin1658·results248/393)은 가드 제외** — 예약 그대로 표시(취소·관리용). [1차 실수: 목록까지 가드 넣어 예약관리 화면에서 scheduled 예약이 숨겨짐 → Harold 신고 → 즉시 목록 가드 revert, tsc0. 발송은 무관(MySQL 큐+Agent)이라 사고 아님.] 실측: 미래 예약 `scheduled 91건`(cancelled_at NULL=정상 발송 예정) / cancelled 13건(기존 사용자 취소).
+> **남음**: backend 재배포(tp-push+build:safe+pm2 restart all) → 발송시각 기준+통계 가드+목록 가드 revert 반영. 데이터 65건은 정정 완료.
+
+---
+
+### 🟢 2026-06-09 — CDP 페이지 전면 모달화 Task1~9 완료 (배포완료, frontend-only)
+> **CDP(자사몰 연동) 페이지 재설계 끝까지 구현. 단일 파일 `CdpSettingsPage.tsx` 재배치(신규 백엔드 0). frontend tsc 0 + 금지패턴 grep 0.**
+> - **Task1 게이팅(완료·기배포)**: `cdp_enabled` 판정 → `cdpLocked`(`plan_code==='FREE'`) = STARTER+ 전부 개방, FREE만 안내. 백엔드(plan-guard ai_cdp·cdp-auth isCdpEnabledForPlan) 이미 FREE만 차단.
+> - **Task2 매트릭스(완료·기배포)**: "지원 자사몰 매트릭스" 나열 제거 → "어떤 자사몰이든 연동" 안내.
+> - **Task3~8 모달화(완료·배포완료·★Harold 화면 피드백 정정 반영)**: 메인 = 헤더 → 게이팅 → 연동 상태 카드 → **자사몰 선택 2열 그리드(가로 2분할: 카페24·네이버·고도몰·가비아 + 자체호스팅/그 외 full-width)** → 5 metric → 요약 칩(데이터 분석·AI진단 / 활성 고객, `hasCdpData`일 때만). **카드 클릭 = 그 업체 전용 연동 모달**(`connectProvider` state·카페24/네이버=OAuth, 고도몰/가비아/자체호스팅=webhook 공용 그룹 `webhookProviderOpen`). 모달 4종(createPortal·slate-900·ESC): 업체별 연동 / 데이터 분석·AI진단(open 시 자동 로드+영향요인+6차트+컴퓨팅) / 활성 고객. **정정 경위: 1차 구현이 "자사몰 연동하기 버튼 1개"로 카페24·네이버를 메인에서 빼 화면이 비어 보임 → Harold "단순화하라 했지 없애라 했나" → provider 카드 그리드 + 업체별 모달로 복원.** 제거=AI진단 큰 카드·자세히 토글 / 죽은 코드(providers·ProviderInfo·detailsExpanded·handleQuickAction·QuickActionCard·dataAvailabilityCards·/cdp/providers fetch). 모델명/native/박-단어 0.
+> - **Task9 SDK 소스 재점검(완료·블로킹 이슈 0)**: cdp.ts·cdp-auth.ts·cafe24.ts·naver-commerce.ts 정독. 게이팅 전 유료 일치(isCdpEnabledForPlan=plan_code≠FREE 전 엔드포인트)·DB ALTER 503 안전망 ~15곳·회사 격리(SDK=key→company / admin=req.user.companyId, body 미신뢰)·webhook 서명검증+멱등(cdp_webhook_deliveries ON CONFLICT)+duplicate 마커·OAuth state CSRF+10분 TTL. 모델명 grep 2건=백엔드 코드 주석(룰 예외)=사용자 노출 0. (경미: cdp.ts 주석 "BUSINESS+" stale·webhook 실패 retry는 Phase2 cron 미구현 — 백엔드 무수정 유지.)
+> - **배포(frontend-only)**: `tp-push` → `git pull` → `packages/frontend npm run build:safe` (backend 무수정 → 빌드/restart 불요). **미결 1: 연동 안내 "고객센터" placeholder 실제 연락처 Harold 제공 시 교체.** 핸드오프=`docs/superpowers/handoffs/2026-06-09-cdp-redesign-handoff.md`(수정 설계 진실 원천).
+
+---
+
+### 🟢 2026-06-08 — 발송일시 송출일 기준 통일(배포) + 풀분석 프리미엄 보고서 Plan1+2·레이아웃 완료·Plan3 설계(배포완료)
+> **① 발송일시 버그(배포 완료): 슈퍼관리자 캠페인관리·발송결과 날짜 기준을 발송통계와 동일 `STAT_DATE_EXPR`(`COALESCE(scheduled_at,sent_at)` scheduled 우선)로 통일 — 예약발송(scheduled≠sent)이 통계 8건↔관리 9건 어긋나던 것 정정. ② 풀분석 = 성과리포트 내 기간종합 AI 분석 PDF(15만원/300크레딧). Plan1 백엔드+Plan2 프론트+레이아웃+Plan3 RFM 완료, 나머지 Plan3는 설계서로 다음 세션. 배포완료(Plan1+2+3 한 번에).**
+> - ①: 날짜 기준이 `sent` 우선이라 예약발송이 처리일(등록계열)로 잡혔음. admin.ts 798·1663, results.ts 118·248·393, AdminDashboard 발송일시 표시를 `scheduled` 우선으로 통일(=발송통계). 근본=직접발송 worker가 PDF처럼 `sent_at=NOW()`를 처리시점에 기록.
+> - 풀분석 Plan1: `full-analysis-steps/job/runner`+`performance-pdf-render`(추출)+`ai.ts` endpoint3(start/status/download). `full_analysis_jobs` 테이블 생성. 차감=PDF성공후 멱등·실패시0.
+> - Plan2: `PerformancePage` 풀분석버튼+설정/동의(CreditConfirmModal 재사용)/진행도모달 폴링. 레이아웃=AI진단 좌측 좁은카드(36%)+6카드 우측 grid 2단·벤치마크 칩 제거.
+> - Plan3 RFM: `rfm-segment.ts`(순수 분위수 TDD)+`segment-analysis.ts`(호출부 RFM+등급+LTV).
+> - **★ 풀분석 Plan 3 완료(T1~T9 구현·검증) — 배포완료(Plan1+2+3 한 번에 배포 대기).** 신규 순수 CT 5(multidim-comparison·message-analysis·message-byte·forecast·action-plan, 전부 .verify TDD)+호출부 full-analysis-collect(campaigns/customers/companies SELECT·발송일 COALESCE(scheduled_at,sent_at)·단가 0/null→null 임의상수0)+PDF 10섹션(익스큐티브 서머리·세그먼트 심층 RFM/등급/LTV·다차원·메시지·예측·액션·부록)·벤치마크 전 영역 제거(PDF/러너/프론트 모달·state·fetch)·ai.ts report-pdf 인라인 200줄→공통 render(중복 제거). 검증=backend tsc0·frontend tsc0·순수 7+스모크 1 PASS·박단어/모델명/native 0. SCHEMA.md 3테이블 실측 보강. 풀분석 모달 3개(설정·진행·크레딧) `createPortal(document.body)` fix — 헤더 `backdrop-filter`가 자식 `fixed`의 containing block을 가둬 모달 상단이 잘리던 버그(조상 transform 0·backdrop-blur가 유일 원인). 상세=`memory/project_2026_0608_full_analysis_premium_report.md`.
+> - 검증: backend tsc0·frontend tsc0·순수 TDD(steps/rfm-segment) PASS·박-단어/모델명/native 0.
+
+---
+
+### 🟢 2026-06-08 — 성과 리포트 전면 재설계 + 세그먼트 메뉴 이동 + BASIC 무료체험 시스템 (전부 배포)
+> **① 성과리포트(/performance) 3단 위계 재설계(헤드라인 KPI4+AI진단 → 요약칩 → 9 다크모달·slate-950·CDP적응형)+백엔드 estimatedRoas/report-pdf 풀보고서 ② 세그먼트 메뉴 AI Operator 서브메뉴 이동(AI Operator 전 유료 개방 확인) ③ BASIC 1개월 무료체험(팝업신청→슈퍼관리자 승인 grantBasicTrial→30일 후 자동 FREE강등)+요금제변경 모달+만료 D-N+FREE 고객DB업로드 차단/주소록 전체10만cap+TRIAL max_customers 30만통일. 전부 배포.**
+> - **①**: PerformancePage 전면 재작성(단일파일+인라인 컴포넌트). `performance-roas-core`(TDD6)·`next-action-advisor` estimatedRoas·`ai.ts` report-pdf 확장. 성과 엔드포인트 전부 실데이터(explain impactScore=AI 판정). 상세=`memory/project_2026_0608_performance_redesign_segment.md`.
+> - **②**: `ai-operator-modules` SUB_MODULE_CARDS 세그먼트 추가·`DashboardHeader` 제거. `isAiOperatorAllowed=!isUnsubscribed`(전 유료 개방) 코드 확인.
+> - **③**: `basic-trial.ts grantBasicTrial`(plan=BASIC+status=trial+30일+base750·purchased보존)·companies/admin/trial-downgrade-worker(status='trial' 강등)·`OpenTrialPopup`·`PlanChangeModal`·`customers.ts` FREE 차단(customer_db_enabled)·`address-books` 전체10만cap. message 센티넬 마커 ALTER0. 상세=`memory/project_2026_0608_basic_trial_system.md`.
+> - 검증: backend tsc0·frontend tsc0·ROAS TDD6·모델명/native dialog/박-단어0. 배포교훈=backend는 ts-node지만 build:safe 항상 포함이 안전(단정 정정·`feedback_push_and_deploy_commands` 갱신).
+
+---
+
+### 🟢 2026-06-08 — 발송버그1 마무리 + 체험크레딧 정리 + AI게이팅 스타터화 + AI Operator 소개 메뉴 + 로그인 팝업 교체 (전부 배포)
+> **① 발송버그1(알림톡 강조 title 4경로 공통 CT 통일 + 여정 senderkey·채널추가형 0=정상) ② 체험만료 크레딧 정리(base만 0·purchased 불가침)+강등워커 자동리셋 ③ AI 게이팅 베이직→스타터 ④ AI Operator 소개 메뉴(매뉴얼 옆·모든 요금제) ⑤ 로그인 팝업=오픈 기념 구독할인(12개월 약정 시 2개월 무료) 교체. 전부 배포.**
+> - **①**: `utils/alimtalk-emphasize.ts buildAlimtalkEtcJson`({senderkey,title}·본문동일 #{변수}치환·치환함수 주입)로 직접/staging/여정/자동 4경로 통일 + 여정 LEFT JOIN profile_key. 채널추가형 80149=message_type BA(이름만)·AD는 카카오 자동=버그 아님. TDD emphasize7. 상세=`memory/project_2026_0607_alimtalk_emphasize_ct.md`.
+> - **②③**: 크레딧 2버킷 base(체험600 매월리셋) vs purchased(구매=돈). trial-downgrade-worker가 강등 시 base 안 지움→FREE/trial_expired 64곳 base 38,394·purchased 0 → SQL base=0(Harold)+강등 UPDATE에 base 리셋 추가. 게이팅=백엔드 canUseFeature는 이미 isUnsubscribed(스타터+)·프론트가 ai_messaging_enabled 플래그(STARTER=f)로 잠금→SQL STARTER 플래그 true(Harold)+프론트 "베이직"→"스타터" 14곳. 상세=`memory/project_2026_0608_credit_cleanup_gating.md`.
+> - **④⑤**: `DashboardHeader` "AI Operator 소개"(새 탭→/about-ai-operator.html·게이팅 없음) + 로그인 팝업 `AiGuidePopup`→`OpenPromoPopup`(오픈기념 구독할인·셀프게이팅·24h dismiss·옛 파일 삭제) 교체. 마스터프롬프트=`docs/promo-popup-master-prompt.md`. 상세=`memory/project_2026_0608_promo_popup_menu.md`.
+> - 검증: backend tsc 0 · frontend tsc 0 · TDD 29(emphasize7/button9/channel-split13). SQL 3건 Harold 직접(크레딧 64행·STARTER 플래그·게이팅 확인).
+> - **★ 다음 세션 = 성과 리포트(`/performance`) 전면 재설계 구현** (설계 문서 완료·미구현). 성과리포트=과거 성과 분석(자율예측=미래 예측과 다름). 분석 서사(결과→원인→제안)·헤드라인 KPI4+AI 한줄 진단·요약 바 클릭→모달·자사몰 적응형(hasCdpIntegration)·PDF 풀 보고서. 백엔드 데이터 완비=프론트 재구성 중심. 설계=`docs/superpowers/specs/2026-06-08-performance-report-redesign-design.md`.
+
+---
+
+### 🟢 2026-06-07 — 발송 버그 3건 수정 (버그2·3 완료 / 버그1 부분 · 전부 배포완료)
+> **① 알림톡 버튼/강조 ② 발송내역 발송일 검색기준 ③ 대체발송 SMS/LMS 정산구분. 버그2·3 코드 완료, 버그1 버튼 5경로+직접발송 강조 완료·나머지 경로 강조 title+채널추가형 buttons=0 조사 남음. 전부 배포완료. 다음 세션 = 리포트 .md로 이어서.**
+> - 리포트(현 상태+남은 것+진입 명령어) = `docs/superpowers/handoffs/2026-06-07-send-bugs-report.md`.
+> - 검증: backend tsc OK · frontend tsc OK · TDD(alimtalk-button 9 · sms-channel-split 13).
+> - 버그2: 검색 COALESCE(sent_at,scheduled_at) created_at 제거(admin 4곳·results 3곳)+표시 sent_at(AdminDashboard 4078·results 466). 완료.
+> - 버그3: sms-result-map classifyMsgChannel substitute_lms/sms 세분화+export 2행+대체필터 L/S. 완료.
+> - 버그1: 신규 CT alimtalk-button(IMC linkType/linkMo+프론트 형식)+버튼 5경로(직접/staging/여정/자동)+직접발송 강조 title 변수치환 완료. **남은것=나머지 3경로(staging-processor/여정/자동) 강조 title 치환(공통CT 권장)+채널추가형 80149 btn_cnt 0 조사**. SQL=buttons 다수 존재(btn_cnt 1=발송코드 작동), 79738 강조표기(버튼없음=etcJson title 원인).
+> - 배포완료 자율예측(6종·VIP numeric·재계산 버튼·worker 조건)도 별도 배포완료.
+
+---
+
+### 🟢 2026-06-07 — 재검증(이상0) + C게이트 토글 + 크레딧 보강 + 자율예측 재설계 완료(배포완료)
+> **자동마케팅+여정 전수 재검증(결함 0) / C게이트 슈퍼관리자 토글 / 크레딧 멱등 보강 / 자율예측 재설계 완료(메인 3블록 발견세그먼트 주인공 + 전부 모달 + backend discoveredSegments 실데이터 근거 TDD). 다음 = 배포 + 운영검증.**
+> - **재검증**: 자동마케팅(A진입/B발송/C돈/D정확/E표시) + 여정(진입 안전필터·발송직전 isCustomerSendable·알림톡 승인3중·J1~J3·마커게이트·cdp커서·조건 fail-safe·변이 bandit_*) 전수 — 결함 0. send_type default 'ai' 확인(여정 표시 정상).
+> - **C게이트**: `autosend-policy` normalizeCdpAutoExecuteGate(+verify 19) / `admin.ts` PATCH `/companies/:id/cdp-auto-execute`(503 분기) / `AdminDashboard` editCompany 모달. companies 4컬럼 information_schema 실재 확인.
+> - **크레딧 보강**: `continuous-operator` reconcileStuckSending mark_sent 멱등 차감(키 proposalId).
+> - **자율예측 UI 1차**: PredictiveDashboardPage 안내2→1·인라인→모달·metric→큰카드6·자세히→모달·액션통합·cold start 흐림 + backend predictive-explainer 텍스트 정리. **Harold "어정쩡"(큰 카드만으론 부족)** → 2차 재설계.
+> - **자율예측 2차 재설계(배포완료)**: 메인 3블록(헤더+안내 1줄+**AI 발견 세그먼트 3장 주인공**[N명+근거 한 줄+「근거 보기」「캠페인 만들기」]+작은 요약 바 5)+나머지 전부 모달(전체고객목록·분포정확도·고객상세). `predictive-segments-core.ts` 신규(순수·TDD 11 green) buildDiscoveredSegments(실측→근거 한 줄)·`predictive-suite` getCompanyPredictionSummary discoveredSegments(보조집계 1쿼리: 이탈 avg미활동일·구매 avg다음구매일·VIP 합산365LTV·신규컬럼0)+고객목록 high_ltv/ltv_365d_desc·`routes/ai` quick-action objective/error 자연 한국어. 큰카드6·미사용컴포넌트 제거·slate-950. backend+frontend tsc OK·grep 0(모델명/박단어/native/영역). 상세=`memory/project_2026_0607_predictive_redesign_brainstorm.md`.
+> - **다음 = 배포(Harold 비번)+운영검증**. **미점검(별도)**: billing send_type='manual' 정산 / impactScore·churn 임의상수 실데이터 점검. 핸드오프=`docs/superpowers/handoffs/2026-06-07-ai-predictive-redesign-handoff.md`.
+
+---
+
+### 🟢 2026-06-06 — 자동마케팅 점검+정정 & 여정 엔진 재점검+정정 (전부 배포)
+> **자동마케팅(Continuous Operator) 10항 점검+정정 & 여정 엔진 24파일 전수 재점검+정정. 전부 배포 완료. 다음 세션 = 다시 전수 재점검 + C 게이트 결정.**
+> - **자동마케팅**: A 정지복구(reviewed_at·dispatchProposalSend 커밋 전 try/catch→admin_review·createDirectSendCampaign 직후 campaign_id 마커·runAutoSendPass reconcileStuckSending·순수 decideStuckSendingRecovery+verify) / B 광고080 가드(자격+발송 직전) / D listProposals status 파라미터화+validStatuses 6 추가 / E markProposalExecuted 제거 / F 프론트 죽은 검증·옵트아웃 UI 제거·카피·누출단어 정리. **C 게이트(cdp_auto_execute_enabled 설정 화면·API 부재=DB 전용)=Harold 의도 미정(자가서브 토글 vs 베타 DB 전용).**
+> - **여정**: J1 차감↔발송 원자성(**발송 성공 시점 차감**·큐 앞 read-only 사전확인·멱등 마커 'sent' 먼저·미발송 경로 비용 0) / J2 budget_monthly=당월 journey_step_logs 실발송 비용 SUM(옛 stats_total_cost 전기간) / J3 변이 통계 bandit_alpha/bandit_beta/variant_id 별칭(arm_*/variant_label은 503 때 추가만·미갱신 stale 0.5고정) / 2h 스캐너 journey callback 전달. 세션7·D232·D230 정정 전부 유지 확인. 신규 DB 컬럼 0.
+> - 상세=`memory/project_2026_0606_operator_journey_audit_fixes.md`. 핸드오프=`docs/superpowers/handoffs/2026-06-06-operator-journey-reaudit-handoff.md`(회귀 확인 + 미결 + 진입 명령어).
+
+---
+
+### 🟢 2026-06-05 세션8 — 자동마케팅 자율 발송 구현 완성 (배포 완료)
+> **세션7 점검의 CRITICAL(자동실행이 크레딧만 차감·실발송 코드 전무) 해소 + 자율 발송 전 구현. spec §6 질의 10건 Harold 확정 → §7 TDD 구현. backend·frontend tsc0 · 순수 38 assertion · 박/모델명/native dialog 0 · 배포완료. ★다음 세션 = 자동마케팅 코드 전수 점검.**
+> - **신규 CT 5종(순수 TDD)**: season-context(월별 시즌+업종톤) / operator-recipients(buildSendableRecipientsSql, filterWhere 주입형 DB-free) / direct-send-spec(buildDirectSendCampaignParams 18컬럼 고정) / direct-send-core(countStagingFiltered 이동·createDirectSendCampaign) / autosend-policy(resolveAutoSendLeadMinutes·computeScheduledSendAt·decideSendOutcome).
+> - **흐름**: prep(schedule_time<=NOW)=계절 문안 생성→스팸 2회 재생성→통과 시 status='scheduled'+scheduled_send_at=now+lead+담당자 실문안/정지안내 → 발송 패스(scheduled_send_at<=NOW)=타겟 재추출(안전필터)→staging→createDirectSendCampaign(직접발송 공유)→크레딧 멱등(continuous-operator-send:proposalId)→status='sent'+campaign_id→완료통지. 스팸 끝내 실패→operator 'paused'+알림 / 0건·잔액→skip+알림 / 정지창(adminStopProposal 'scheduled' 허용).
+> - **안전필터 통일**: countFilteredCustomers·preview-recipients가 buildJourneySafetyFilter(is_opt_out·is_invalid·수신거부 회사+전화). 직접발송 commit→createDirectSendCampaign 위임(톤28 504 정정 동작 보존).
+> - **정정**: compliance fail-open→passed=false / 검증 7일 게이팅 제거(컬럼 보존) / operator_proposals updated_at 없는 컬럼 버그 / 예산 집계 status IN 'sent' 추가 / 광고성 허용(adEnabled=isAd, (광고)/080 합성=스팸테스트와 buildAdMessage 공유) / 수동 승인 원자성(dispatchProposalSend 공유, 발송 성공 시점 차감) / lead 설정 UI(auto_send_lead_minutes) / 죽은 스팸코드 제거.
+> - **ALTER 완료(Harold)**: operator_proposals.scheduled_send_at · continuous_operators.auto_send_lead_minutes. 타이밍=운영자 설정 시각=준비·알림, 발송=+lead(2h)=정지 창.
+> - 상세 = `memory/project_2026_0605_session8_autosend_backend.md`. 다음 세션 핸드오프 = `docs/superpowers/handoffs/2026-06-05-continuous-operator-audit-handoff.md`(점검 체크리스트 10항 + 진입 명령어).
+
+---
+
+### 🟢 2026-06-05 세션7 — 여정 결함 11건 fix(배포) + 자동마케팅 점검 + 자율발송 설계
+> **여정 엔진 결함 11건 fix(설계서 대조 전수점검·전부 배포) + 자동마케팅(Continuous Operator) 점검(★자동실행 실발송 코드 없음 CRITICAL) + 자율발송 설계서. 다음 세션 = 자동발송 spec §6 질의 10건 → 구현.**
+> - **여정 11건(배포)**: ①발송/재진입 공통 안전필터(isCustomerSendable+reentry buildJourneySafetyFilter) ②휴면/생일/포인트 진입안티조인(buildReentryAntiJoin)+워처 cap+1 ③목록 status SQL주입 화이트리스트(journey-list-filter) ④활성화 전 검증 마커게이트(journeys.last_pretest_passed_at ALTER 완료+503) ⑤정지 레이스(executor statusCheck가 journey.status까지)+무효UPDATE제거 ⑥**전원진입(원래의도)=추출 LIMIT제거+일괄INSERT(루프폐기)+장바구니 재진입안티조인** ⑦검증비용 회사실단가(임의상수 제거) ⑧죽은 resumeJourney제거 ⑨지연상한 8760h통일 ⑩wait delayMode relative_at_hour ⑪cdp커서 LIMIT누락(planCdpCursorBatch 마지막이벤트시각까지). 신규순수TDD safety-filter/list-filter/cdp-cursor · 백엔드 tsc0 · 여정 순수테스트 127건 green · 박단어0. 방식차이3(의도충족)=§6일괄INSERT·§7 campaign공유멱등·§11 마커게이트.
+> - **자동마케팅 점검(CRITICAL)**: 자동실행(auto_executed)이 크레딧만 차감하고 **실제 발송 코드 전무**(continuous-operator:593 차감, markProposalExecuted 호출0, 발송 워커·엔드포인트0). +안전필터갭(countFilteredCustomers services/ai.ts:2282 is_opt_out·is_invalid 누락 — 여정 #1과 동일)+검증기간 차단불완전(580 vs 593)+compliance fail-open(ai-orchestrator:280)+죽은 스팸코드.
+> - **자동발송 설계(Harold 확정)**: 매달 계절문안 AI생성+조건타겟 자동추출+테스트후 자율발송. 첫 달부터 자율, 운영자가 발송시각 T 선택, 2h전 담당자 테스트/알림(정지창), 스팸 2회재생성 실패시 운영자정지+사유알림, 타겟0건이면 스킵. 발송=직접발송 파이프라인 재사용(sendCampaignDirect 추출). spec=`docs/superpowers/specs/2026-06-05-continuous-operator-autosend-design.md` §6 비토 질의 10건. 핸드오프=`docs/superpowers/handoffs/2026-06-05-journey-fixes-automarketing-handoff.md`.
+
+---
+
+### 🟢 2026-06-05 세션6 — 발송결과 markFinalized 완전집계 + 알림톡 변수매칭 필드 노출
+> **① soos 발송결과 목록↔상세 불일치 + ② 알림톡 발송 주소록/엑셀 변수매칭 필드 미노출. 둘 다 코드·검증·배포 완료(2026-06-05). ★다음 세션 = 여정 점검(executor/builder/step-campaign/trigger 전면).**
+> - **① soos 발송결과(운영 고객사 수스_대행)**: 목록=PG캐시(과소 2,304) vs 상세=MySQL실시간(정확 2,685) 불일치. 원인 = 5/30 result_final 일괄 마킹(4,517건) 때 success+fail(2,362)<sent(2,840)인 **4건이 미완성으로 확정**(markFinalizedCampaigns가 `(success+fail)>0`만 검사). 5/31~6/5 신규 935건 gap 0(일회성). 정산(billing.ts /generate·admin 요금정산)은 MySQL 직접 집계라 **영향 0**. 수정 = `campaign-sync-worker.ts:243`에 `sent_count>0 AND (success+fail)>=sent_count` 강화 + soos 4건 `result_final=false`(실시간 복귀) + hoyun 542 `cancelled`+`result_final=true`(폭발 해소, 차감 reference_id≠campaign.id라 prepaidRefund(campaign.id) 환불 0·후불).
+> - **② 알림톡 변수매칭(직원 psy5868 신고)**: 주소록/엑셀 불러오면 수신자에 phone만·드롭다운에 필드 0. 원인 = 수신자 미리보기가 `mappedColumns`(변수매칭 선택된 것만) 렌더 + 드롭다운 라벨 영문 + 자동매핑이 변수명=필드명 완전일치만. backend(`address-books.ts:57` SELECT 5컬럼)·불러오기(`AddressBookModal:624` 5키 map)는 정상 → 미리보기 표시 로직이 버그. 수정 = `AlimtalkSendModal.tsx` previewColumns(recipients[0] keys 항상 표시) + FIELD_LABEL_MAP 한글(이름·기타1~3) + 자동매핑 useEffect(변수↔필드 의미일치). tsc 0.
+> - **배포 완료(2026-06-05)**: backend `campaign-sync-worker.ts` + frontend `AlimtalkSendModal.tsx` + soos/hoyun SQL 2개 실행 완료.
+> - **다음 세션 = 여정 점검**: 이번 세션 내내 여정 코드 X 원칙 유지. 여정 엔진(executor/builder/step-campaign/trigger) 전면 점검 진입. 핸드오프 = `memory/project_2026_0605_session6.md`.
+
+---
+
+### 🟢 2026-06-05 세션5 — 직원 디버깅 3건 + 발송통계 캐시·라인그룹
+> **① 알림톡 대체발송 통계 분리(배포) ② 발송결과 채널통합조회 엑셀 다운로드+줄바꿈fix(배포) ③ hpio 발송통계 0=라인그룹 합집합(배포) ④ 발송통계 5곳 result_final 캐시 전환(배포완료). 핸드오프 `docs/superpowers/handoffs/2026-06-05-session5-stats-cache-handoff.md` 정독 의무. ★여정 코드 절대 X.**
+> - **알림톡 대체발송 분리**: 통계 엑셀 알림톡 캠페인 "알림톡"(K)/"알림톡대체발송"(L·k_oriseq>0) 2행. sms-result-map classifyMsgChannel/tallySmsChannelCounts(순수 TDD) + aggregateSmsChannelSplitByCampaign + admin /stats/export.
+> - **발송결과 엑셀**: 프론트 ESM라 backend CSV(campaign-list-csv 순수 TDD) + results.ts /campaigns/export(필터 sendType/sender=login_id, :id보다 먼저 라우팅) + ResultsModal 버튼. 메시지 줄바꿈→공백 fix.
+> - **hpio 0**: 발송 company라인{7,8,9} vs 집계 user라인{1,2,3} 어긋남(user 개별 라인그룹 발송후 부여). mergeLineTables(순수)+getCompanySmsTablesWithLogs user+company 합집합. 발송 무영향.
+> - **발송통계 캐시**: 5곳(querySendStats·Detail·admin send·detail·export else) getCampaignResultCounts(result_final 캐시). 완료=PG캐시 MySQL skip, 진행중=실시간. result_final/sent_count/success_count/fail_count information_schema 확인. tsc0·grep0·배포완료.
+> - **hoyun 500 폭발**: 6/4 여정 500 campaign status='sending'+result_final=false(syncCampaignResults app_etc1 매칭 0→status 미전환)→캐시없음→발송결과 조회 raw 폭발. 인덱스OK(6.7ms). **여정 코드 X(주인님 격분 — 묶음 이미 고침)**.
+> - **잔여**: ②캐시 배포검증 ③hoyun status sending→failed 정리(환불 실측 먼저) ④status 안전망(campaign-sync-worker). 여정 코드 0.
+
+---
+
+### 🟢 2026-06-05 세션4 — 여정 엔진 Phase 9 완료 (배포완료)
+> **Phase 9 전면 구현·검증 완료, 배포완료(Harold 배포). 설계 `docs/superpowers/specs/2026-06-04-journey-phase9-design.md` · 계획 `docs/superpowers/plans/2026-06-04-journey-phase9.md`.**
+> - **9-1 미리보기=실발송 통일**: 시뮬레이터 `matchTriggerCustomers`(cdp 30일/custom 전체 분기) 폐기 → 발송과 같은 `selectJourneyTargetCustomerIds` 재사용. 신규 `countJourneyTargetCustomers`(ID 추출 후 등급 집계, 상한 10만 capped)·`gradeBreakdownForIds`·`averageScoresForIds`. 미리보기 2 endpoint + 시뮬레이트 = 같은 함수.
+> - **실데이터 예측(임의 상수 제거)**: 잔존율 0.85·객단가 5만·0.15/0.05 폐기 → 객단가 `customers.avg_order_value`·전환/클릭 `cdp_customer_predictions`·비용 `companies.cost_per_*`(회사 실 단가). 없으면 "데이터 부족" 정직 표기. 조건 step 하류 발송=null(변동). `journey-simulator-core.ts`(순수 buildSegmentBreakdown+buildProjection).
+> - **시점 N일+시각**: `send-time-util` `relative_at_hour` 모드 신설(기존 3모드 불변). 편집 캔버스 발송 시점 시간→**일+시간 입력 + 발송 시각** 드롭다운. `journey-builder` 339행 target_hour_kst를 relative_at_hour도 저장(specific_hour 전용→확장). 타입 union 3곳 + AIGeneratedStep.
+> - **타임라인·라벨**: `journey-step-format.ts`(순수 formatStepTiming/formatConditionChip) → `getJourneyDetail`가 timingLabel·conditionLabel 부착. 저장 여정 step 리스트 = 시점 배지 + 조건 칩.
+> - **여정 옵션 편집**: `PATCH /operator/journeys/:id/options`(draft/paused만, 부분 갱신, 컬럼 고정·503분기) + `journey-options-validator.ts`(순수 normalizeJourneyOptions, clampInt/isValidMmdd export 재사용) + `JourneyOptionsEditor.tsx`(트리거 타이밍·포인트·한도·예산·재진입, useToast). 표시 전용 트리거 카드 대체.
+> - **미리보기 total**: 샘플 카드 "전체 N명 중 10명".
+> - **검증**: backend tsc 0 · frontend tsc 0 · 순수 테스트 75건 green(send-time 9·step-format 9·validator 12·simulator-core 5·points 16·condition 16·safety 8) · 신규 컬럼/마이그레이션 0(전부 information_schema 확인) · 박-단어/모델명/native dialog 신규 0.
+> - **배포**: 시뮬레이트 응답 shape 변경(매출/클릭/전환 null 허용) → **backend+frontend 함께**(별도 시 시뮬 카드 깨짐). 나머지(라벨·total·옵션 PATCH)는 추가 필드 안전. DB 마이그레이션 0. Codex `/codex:adversarial-review`(DB 만진 추출기/시뮬레이터/옵션) 권장.
+> - **남은 것**: cdp 미리보기 "추정" 배지(minor). ※ 2026-06-03 메모의 "JourneysPage native dialog 29곳"은 2026-06-05 grep 재확인 결과 0건(이미 ConfirmModal/useToast로 교체 완료) — stale 정정.
+> - **배포 후 발견·수정(2026-06-05, 운영 실측)**: 발송 시각(09/10시) 저장 안 되던 버그 = `journey-builder.ts` `createJourneyFromTemplate`의 `input.steps.map`(246)이 step 재생성 시 `delayMode`·`targetHourKst`·알림톡 6필드·`mmsImagePaths`를 **안 담음** → 프론트가 보내고 백엔드가 받아도(PM2 로그 입증) INSERT 직전 누락. 9필드 map 보존 + 일 상한 720h→8760h. **검토 캔버스로 만든 모든 여정이 발송시각·알림톡·MMS 설정을 잃던 이전부터의 버그**. 옵셔널 필드라 tsc·순수테스트 미검출 → 생성→DB 왕복 실측으로 확정. 배포=ts-node라 pull+pm2 restart(빌드 X). 기존 2개 여정은 재생성 필요. 미완=저장된 여정 발송시각 편집 컨트롤(JourneyMessageEditModal에 없음, PATCH는 지원). **운영 실측(2026-06-05)**: 발송시각 relative_at_hour/10 저장 정상 + 신규가입 baseline 2만=2만·entered 0(폭발 차단 입증) + 생일 추출 active 59=하루치 D-7 코호트(고객2만/365≈55 일치, 폭발 아님). 단 실제 step1 발송은 미검증(일시정지 상태) — 스모크 남음. 핸드오프 `docs/superpowers/handoffs/2026-06-05-journey-phase9-postdeploy-handoff.md`.
+
+---
+
+### 🟢 2026-06-04 세션3 — 여정 엔진 Phase 7·6A·6B·8 완료·배포 (Phase 9만 남음)
+> **여정 엔진 재설계 Phase 7·6A·6B·8 코드·검증·배포(408f6e9). 다음 세션 핸드오프 `docs/superpowers/handoffs/2026-06-04-journey-phase9-handoff.md` 정독 의무.**
+> - **Phase 7** 조건평가 안전분기 — `evaluateCondition` met/not_met/error 3분기, DB오류=발송 보류+재시도(발송 X). `journey-condition.ts`(신규 순수 CT)+executor `handleConditionEvalError`.
+> - **Phase 6A** step1 시점 — `calculateNextRunAt`를 `send-time-util.ts` CT로 이동(now 인자), trigger-watcher 두 enqueue에 delay_mode·target_hour_kst 적용.
+> - **Phase 6B** 발송 2시간 전 스팸테스트 — `journey-pretest-notifier` 재작성(`scanAndPretest`, 깨진 `predictNextSendTimes` 폐기), 걸리면 1회 재생성(`regenerateStepAvoidingSpam`, journey-ai-refine=1크레딧)+재테스트→통과면 snapshot 갱신, 또 걸리면 `pauseJourney`. `runStepSpamTest` 공용 추출, `pauseJourney` 공용 CT, `journey-pretest-scan.ts`(신규 순수).
+> - **Phase 8** 포인트 소멸 trigger — `customer.points_expiring`(points 임계+미사용 / 연 소멸일 D-N). `journey-points-trigger.ts`(신규 순수)+extractor case+JOURNEY_TEMPLATE. 소멸일은 고객 필드 X = 여정 정책.
+> - **검증**: backend tsc 0 / 순수 테스트 5종 55단언 GREEN / 자가 grep 0 / 신규 컬럼·마이그레이션 0(기존 컬럼만).
+> - **배포**: 408f6e9 push 완료. 서버 = `cd /home/administrator/targetup-app` → `git pull` → backend `build:safe` → `pm2 restart targetup-backend`(restart all은 한줄전단까지 건드림 — 변경된 프로세스만).
+> - **남은 것**: Phase 9(미리보기 실발송 일치 통일 + step 시점·조건 UI). 설계서 §10·§13.
+
+---
+
+### 🟢 2026-06-04 세션2 — 여정 엔진 재설계 Phase 1~5 완료·배포 (6~9 다음 세션)
+> **여정 엔진 전면 재설계 Phase 1~5 코드·검증 완료, 배포(Harold). 다음 세션 핸드오프 `docs/superpowers/handoffs/2026-06-04-journey-redesign-phase6-9-handoff.md` 정독 의무.**
+> - **완료**: 1 공통 안전필터(`utils/journey-safety-filter.ts`) · 2 신규가입 진입 원장(`journey-entry-ledger.ts` + entry_baseline_at + 대량 차단기) · 3 cdp 이벤트 커서(last_event_cursor + 원자 진입/커서 전진) · 4 자유여정 진입(audience 안티조인) · 5 묶음 발송(`journey-step-campaign.ts`, (journey,step,날짜)당 campaign 1건 + app_etc1=campaignId 정정). **결함 #1·#2·#3·#5·#6(cdp)·#8 닫힘.**
+> - **검증**: 매 단계 tsc 0 / 순수 테스트 8+7 GREEN / 박-단어·모델명 0. 직접발송·billing 무수정(여정=prepaid 차감, campaign_runs 밖 → app_etc1 변경 영향 0).
+> - **DDL(1회)**: `docs/superpowers/plans/2026-06-04-journey-redesign.sql`(journey_entry_ledger · journey_step_campaigns · entry_baseline_at · last_event_cursor + 백필).
+> - **배포**: PG 마이그레이션 → `tp-push "여정 엔진 재설계 Phase 1-5"` → backend `build:safe` → `pm2 restart all`.
+> - **남은 것(다음 세션)**: **7 조건평가 안전분기[권장 우선, DB오류 시 발송 차단]** · 6 step 시점+스팸 2h(깨진 notifier — journey_executions에 scheduled_at·step_id 없음) · 8 포인트 trigger(소멸일 출처 Harold 확인) · 9 미리보기 통일·UI. 설계서 `docs/superpowers/specs/2026-06-04-journey-engine-redesign-design.md`.
+> - **핵심 발견**: 여정 SMS 큐 app_etc1/app_etc2 뒤바뀜(app_etc1=company_id였음) → 여정 SMS 수신자 상세 미조회 원인, Phase 5에서 정정.
+
+---
+
+### 🔴 2026-06-04 세션 — 톤28 504 실증 완료 + 여정 엔진 전면 재설계 필요(결함 9개)
+> **① 톤28 504 fix 실증 ② 아이디룩 동일 뿌리 닫음 ③ 여정 점검 → 엔진 결함 9개(전면 재설계 필요). 핸드오프 `docs/superpowers/handoffs/2026-06-04-journey-engine-redesign-handoff.md` 정독 의무.**
+> - **톤28 504 실증**: commit=정제 DELETE 제거+COUNT 3개만(countStagingFiltered) hoyun 더미 10만 **266ms** / 정제 ctid+ROW_NUMBER **107ms**(self-join 240초 대비). nginx 실측 08:13/21/34(KST) 504+upstream timeout, 백엔드 error.log commit 예외 0 = "백엔드 정상·nginx만 504" 확정. cancelled 2건(948/939) status='completed' 정정(통계=MySQL 집계라 completed면 잡힘, 톤28 후불 환불무관).
+> - **아이디룩**: 5/29 에러로 발송못함 = 톤28 동일 뿌리(대량→백엔드 응답불가→프론트 HTML JSON파싱 "Unexpected token <"). 톤28 fix가 OOM·타임아웃 둘 다 커버. 추가조사 X.
+> - **여정 결함 9개(라인=핸드오프/LESSONS_BACKEND D232+)**: ①자유여정 진입 부재(activateJourney enqueue 0+trigger-watcher 제외=발송0) ②신규가입 created_at 재업로드 취약(2만 일괄→전체 신규 오인) ③cdp opt-out/is_active 필터 누락(JOIN 조건부=수신거부 발송) ④조건평가 default pass(DB오류 통과) ⑤고객당 개별 campaign(500명=500건 폭주) ⑥LIMIT 500 ⑦step 시점 now+delay(전일묶음·지정시각 아님) ⑧is_invalid 누락 ⑨미리보기(30)vs실발송(500) 불일치. 긍정=2h전 담당자 알림 토대 있음(scheduleNotificationsForActivation).
+> - **다음 세션**: 핸드오프 정독 → 신규가입 판정 기준(가입일 컬럼/진짜 신규 유입) Harold 확인 → superpowers brainstorming 여정 전면 재설계(진입·발송 staging묶음·step시점·스팸필터·조건평가 안전분기·UI) → 설계문서 승인 → 단계별 구현. **최우선=조건 맞는 타겟 정확·실수없이 추출(자유여정 포함)**. 기존 미완(여정[3]spam_filter_tests first_recipient ALTER·[4]dead resume 제거)은 재설계에 흡수.
+
+---
+
+### 🟡 2026-06-03 세션 (미완) — 크레딧 UI 강화 + 여정 503 디버깅
+> **크레딧 UI(사전모달+사후토스트+토스트 다크톤 통일) 완료·배포완료 + 여정503/native dialog 미완. 다음 세션 핸드오프 `docs/superpowers/handoffs/2026-06-03-credit-ui-journey503-handoff.md` 정독 의무.**
+> - **완료(tsc0·배포완료)**: 크레딧 차감 2단계(DM 생성3·발행30 / 인앱 생성3·게시15 / 직접발송 다듬기 refine-direct 1 = refineDirectMessage callAIWithFallback 우회로 누락이었음) + 안내카드 9칸 + CreditConfirmModal 5곳 + 사후토스트 전역(request-context+app.ts 헤더+credit-interceptor) + 토스트 다크톤 통일(옛 Toast.tsx 제거·Dashboard shim) + D배지 6곳 제거 + "DB마이그레이션" 노출 5곳 친화 + 여정 종료/일시정지 모달 + pretest-validate catch 에러로그.
+> - **미완(다음 세션)**: ①여정 활성화 503 — buildJourneyStats 6함수 중 variant 외 한 함수가 없는 컬럼 조회. backend 배포→여정 활성화→`pm2 logs grep pretest-validate`→정확 컬럼→information_schema 확인→ALTER. (journey_step_variants variant_label/arm 추가완료, snapshots/schedules/pause_logs는 이미존재 오진) ②JourneysPage native dialog 29곳(alert25+confirm4) 전수 교체.
+> - **교훈**: DB 컬럼 ALTER 전 information_schema 실제 확인→없는 것만 ADD 의무(이번 3번 틀려 Harold 격분). PM2 실제 에러 먼저. catch가 에러 삼키면 디버깅 불가.
+
+---
+
+### 🟢 2026-06-03 세션 — 알림톡 변수검증 강화 + 부달 B 재추가 + 자동마케팅 크레딧 재배치 + 이폴리움 연동 문서화
+> **이번 세션(구현·검증·배포 완료 2026-06-03) = ① 알림톡 변수 미지정·누락 발송 차단(검증 기준 variableMap→템플릿 본문 변수 전체, alimtalkVars·alimtalk-vars CT 시그니처+호출부4) ② 부달 B(LMS+문구) 재추가(NEXT_TYPE_OPTIONS+grid3, 백엔드 무수정) ③ 자동마케팅 크레딧 재배치(저장200 createOperator 멱등operatorId / 제안서0 orchestrate cost:0 / 발송3 auto+approve 멱등proposalId / 스팸0, continuous-operator-send=3·주석50→200, TDD verify33) ④ 이폴리움 연동(고도몰 SDK + 네이버 스마트스토어 D178 멀티테넌트) 문서화. 상세=`memory/project_2026_0603_alimtalk_credit_epolium.md`.**
+> - 배포 완료(2026-06-03): tp-push + backend·frontend build:safe + pm2 restart all 완료 (company-frontend X).
+> - 선결: 고도몰 SDK = CDN URL 확정(app vs cdn.hanjul.ai/sdk) + hjl_ 키 발급 + 수집 허용 도메인 등록 / 스마트스토어 = 한줄로 개발사 계정(스토어 심사 ~3영업일 [신청중]).
+> - 문서: `docs/이폴리움_연동_진행.md` · `docs/고도몰_SDK_설치가이드.md` (업체 전달 docx는 Harold 별도 제작).
+
+---
+
+### 🟢 2026-06-02 세션 — 여정 미리보기 타겟 연동 + 크레딧 재매핑 작업1 + 작업2~5 핸드오프
+> **이번 세션 = ① 여정 미리보기 타겟 연동(완료·tsc0) ② 크레딧 재설계 토론·확정 ③ 작업1(한줄입력 풀분석300→문안·분석5) 완료·검증 ④ 작업2~5 핸드오프 작성. 전부 배포완료 — 통합 배포 예정.**
+> - **여정 미리보기**: 항상 남다은(LTV1위) 고정 → 여정 trigger 기준 실제 고객 추출(`utils/journey-target-extractor.ts` 신규, 발송 SQL 1:1 이전 동작 보존). Liquid `{{}}` 치환값 하이라이트 누락 fix(highlightVars 토큰 재작성). 0명 안내. plan=`docs/superpowers/plans/2026-06-02-journey-preview-target-fix.md`.
+> - **크레딧 재매핑 확정(Harold 토론)**: 한줄입력(코드명 orchestrate=풀분석이나 실제는 일회성 타겟+문안) → **문안·분석 5** / **풀분석 300 = 성과 리포트(기간 성과분석)+PDF 보고서** / 여정 **돌려보기 3 + 저장 150**(재사용 자산) / 예측 자동 = 연동(`sync_agents`·`cdp_events.source='custom_sdk'`) 회사만 **매일 3** + 온오프(`companies.predictive_enabled` ALTER) / 여정 **수정 버튼** 신설. **작업당 크레딧 금액표·플랜 크레딧 실값(스타터300/베이직750/프로2400/비즈7800/엔터16500)은 불변, 매핑만 변경. ⚠️ SCHEMA.md `ai_credits_per_month` 옛값(스타터50)은 stale — plans row로만 확정.**
+> - **작업1 완료**: `CREDIT_COST_MAP`에 `ai-operator-propose:5` 신규(orchestrate 300 보존), propose가 creditOpts로 5 차감, credit.ts 라벨. backend·frontend tsc0 · verify ok.
+> - **다음 세션**: `docs/superpowers/handoffs/2026-06-02-credit-remap-handoff.md` 정독 → 작업2~5 빈틈없이 (멱등키·DB ALTER·PDF 주의). spec=`docs/superpowers/specs/2026-06-02-credit-remap-and-features.md`.
+
+### 🟢 2026-06-01 세션 — AI 크레딧 가치 기반 전면 재설계 + 모델 핵심 고급 + 설정 페이지 재개편
+
+> **코드·검증 완료, plans/동기화/이력 SQL Harold 실행, 배포 Harold.** 상세 = `memory/project_2026_0601_credit_value_redesign.md`
+> - **가치 재설계(1크레딧 500원)**: 작업당 풀분석 300·여정 150·자동마케팅 200·모바일DM 30·인앱 15·문안 5·다듬기 1. 요금제+보너스(스타터 300 / 베이직 750+7% / 프로 2400+20% / 비즈 7800+30% / 엔터 16500+50% / TRIAL 600 / FREE 0). 충전 500·단위 50/100/300/500. ai-credit-calc CREDIT_COST_MAP + constants/credit.ts 1:1 + planBonusPct.
+> - **ORCHESTRATE_CREDIT 20 하드코딩 제거** → getCreditCost(source) 단일 진실. orchestrate/orchestrateWithAI creditOpts(source). **자동마케팅 = 풀분석 자동**(continuous-operator source 200 차감 + 스팸 재생성 runInCreditBundle 묶음 0). verify 27 GREEN.
+> - **모델 핵심만 고급**(Harold "한번에 다"): 여정 생성·DM 4호출 sonnet→opus(인앱·풀분석 기존 opus, 다듬기·문안·분석 경량 유지). feedback_ai_operator_model_isolation §7 갱신.
+> - **SQL(Harold 실행)**: plans 7건 UPDATE + 동기화(companies.base=plan + reset_at NOW 71곳 — reset_at 이번달이라 인상 미반영된 것 fix) + 이력 정합(ai_credit_transactions type 'reset' 보정 INSERT, idempotency_key + ON CONFLICT). ai_call_log cost_won=0 원가 미기록(토큰 직접 환산).
+> - **대시보드 UI**: 발송현황 크레딧 제거 → 요금제 카드 이동(stopPropagation) + CreditHistoryModal max-w-lg + 3칸(기본/사용/충전 violet/amber/emerald). **Settings.tsx 전면 재개편**(sticky 헤더·저장 상단·min-h 제거·grid-cols-1 lg:grid-cols-2·섹션 색 아이콘·focus ring·글씨 위계 축소, 기능 보존).
+> - backend·frontend tsc 0 + verify 27 GREEN + 자가 grep(모델명·native dialog·박-단어) 0. 배포 전 /codex:adversarial-review 권장(돈·요금제).
+> - **다음 세션**: ① plans 변경/동기화 시 ai_credit_transactions 거래 기록 자동 동반 코드화(이번엔 수동 SQL) ② 자동마케팅 빈도(daily/weekly)별 월 소모 점검 ③ status/lessons/LESSONS_BACKEND "기존 한줄로AI sonnet 절대" 본문 갱신.
+
+---
+
+### 🟢 2026-06-01 세션 — 크레딧 점검 #1/#2/#3 + 요금제 UI 재구성
+
+> **점검·UI 코드·검증 완료, 배포 Harold.** 상세 = `memory/project_2026_0601_credit_audit_ui.md`
+> - **UI**: 세그먼트 모달 흰배경+흰글씨(Tailwind 중복불투명도 `bg-violet-900/50/50` 10곳 — SegmentsPage·InAppMessages·AiUsage·AiMemory) fix / 수신거부 관리 흰톤 모던 재작성(이모지→lucide) / 직접발송 3버튼 색차별화(미리보기 sky·스팸 amber·AI violet+glow, dead CSS `.ds-btn-sec--primary/--ghost` 제거·"파일 선택" 라벨 emerald 보존).
+> - **크레딧 점검 #1 차감무결성**: `deductCreditSafe` 신설(통계와 분리 + 재시도3 + stdout `[CREDIT][MISS/SKIP]` + aiCallLogId 없을 때 fallback 멱등키) → 5곳 통일(ai.ts 2·orchestrator 2·dm 1). spec=`2026-06-01-credit-deduct-integrity-design`. safe.verify 8 GREEN.
+> - **#2 충전·지급 멱등**: 클라이언트 멱등키(모달 mount uuid) + 서버 FOR UPDATE 뒤 dup 체크(`idempotency_key` UNIQUE 재사용, DB변경0), 하위호환(키 없으면 기존). spec=`recharge-idempotency`. adjust dup 3 GREEN.
+> - **#3 overage 월말청구**: `ai_credit_transactions.overage_credits` ALTER(Harold 완료) + `_deductWithClient` shortfall 기록 + billing generate 기간 `SUM(overage_credits)×2000`을 ai_credit_supply 통합(이중방지=기존 기간겹침 차단). spec=`overage-billing`. tx.verify 16 GREEN. catch 503.
+> - **요금제 반반카드**: CreditSummaryBar 재작성(좌 요금제+DB게이지 | 우 크레딧잔여+6칩 3열) + 종량제 띠 삭제 + 어필문구 제거(Harold "굳이 어필 X") + 현재플랜카드 분기(무료체험 D-N 분리·미가입/FREE만 단독) + 주요 라벨 1.45배. backend·frontend tsc 0.
+> - **보류**: 크레딧 양(프로 1000=풀분석50회/월) 과함 직관(Harold) — 사용 업체 0이라 실데이터 없음 → 데이터 쌓인 후 `plans.ai_credits_per_month` 등급별 조정(임의상수 금지). 화면 6칩·캡션 크기 미세조정도 배포 후. **#4 설계문서 과거값 정리 미완**(2026-05-31-credit-based-pricing-redesign 의 50/200/800/2500/5500·10체계·1200/1000/900 ↔ 실제 70/200/1000/3500/7000·20체계·2000).
+> - 배포(Harold): tp-push + git pull + backend build:safe + pm2 restart all + frontend build:safe.
+
+---
+
+### 🟢 2026-06-01 세션 — 크레딧 UI 폴리시 + 충전/이력 완성 + 알림톡 디버깅 4건 설계도
+
+> **이번 세션 = 크레딧 코드 다수 + 알림톡 디버깅 조사·설계. 다음 세션 = 알림톡 디버깅 4건 수정.**
+>
+> **A. 크레딧 UI 폴리시 (배포 완료 — Harold 화면 확인):** PricingPage 전면 재설계(컴팩트 요약 바 CreditSummaryBar + 작업당 칩 + 플랜 카드 값-시각화: 월 크레딧 히어로·환산·상대 게이지·인프라 등급 / 등급별 기능 나열 폐기, 스타터부터 동일 / 인프라 = 표준 공유[스타터~프로]·전용 서버[비즈]·전용 AI 서버[엔터, 당사 IDC 입고·전담 관리] / 만원당·가성비 표기 제거). 사용 이력 모달(CreditHistoryModal) + 선불 잔액 모달 현대화(BalanceModals 돈자루 제거) + AI Operator 칩→이력 모달 연결. 전부 화이트/모던(대시보드 톤 — Harold 명시). constants/credit.ts 신설.
+>
+> **B. 크레딧 충전 (구현·검증 완료, 배포는 Harold):** 단가 2,000원/크레딧+VAT 10%, 보너스 없음(비싸게 둬 구독 유도). 선불=발송 잔액 즉시 차감, 후불=슈퍼관리자 승인+월말 문자요금 합산. CT `utils/ai-credit-recharge.ts`(선불 즉시·후불 요청/승인/거절, 단일 원자 트랜잭션 FOR UPDATE) + 단가 calc(ai-credit-calc.ts) + endpoint(사용자 3·슈퍼관리자 3) + CreditRechargeModal(화이트) + 슈퍼관리자 충전 큐 + 후불 정산서 자동 합산(billing.ts subtotal+VAT+billed + PDF/이메일 명세). DB(Harold 실행): `ai_credit_requests` 신설 + `billings` ai_credit_count/ai_credit_supply ALTER. backend·frontend tsc 0 + 자가 grep 0. 배포 전 `/codex:adversarial-review` 권장(돈). 미사용 CreditGauge.tsx=죽은 코드(삭제 보류).
+>
+> **C. 알림톡 디버깅 4건 — 근본원인 조사·설계도 완료 (코드 수정 0):** 설계도 = `docs/superpowers/specs/2026-06-01-alimtalk-debug-4-design.md`(airtight + 시작 가이드). #1 모달 닫을 때 `directSendChannel` 'sms' 미복원(Dashboard 3545) / #2 발송 후 모달 recipients 미초기화 / #3-1 변수 자동매핑(데이터 없이, AlimtalkChannelPanel 178) / #3-2 변수 미검증 발송(handleSend) / #4-a 발송 시 `campaigns.kakao_template_id` 미저장(campaigns.ts 1367 INSERT) ↔ 결과는 그 FK JOIN(results.ts 557) → 항상 "[알림톡 템플릿 미설정]" / #4-b 미수신(QTmsg raw 필요) / #4-c LMS 대체 결과 미집계.
+>
+> **다음 세션 = 알림톡 디버깅 4건 수정** (설계도 정독 → C #4-a → B #3 → A #1·#2 → C #4-b/#4-c). 수정 전 `campaigns.kakao_template_id` information_schema 검증.
+>
+> **★ 2026-06-01 갱신 — 알림톡 디버깅 코드·검증 완료 (배포 Harold):** #4-a campaigns.kakao_template_id 저장(commit·direct-send·journey) + #3 변수 검증(프론트 utils/alimtalkVars.ts validateAlimtalkVariables 7/7 + handleSend + 백엔드 utils/alimtalk-vars.ts findUnfilledAlimtalkVars, 자동매핑 유지) + #1 모달 onClose 채널 복원 + #2 resetSignal 리스트 초기화 + **#4-c 진짜 원인 = insertAlimtalkQueue app_etc1 누락(설계도 resend 컬럼 오진) → 4 호출처 app_etc1 저장(direct/commit워커/auto=campaignId, journey=journey:id:step)**. #4-b는 #3로 빈변수 차단(잔여=QTmsg 반려코드 Harold). DB 변경 0(kakao_template_id·app_etc1 기존 컬럼). backend·frontend tsc 0. 배포 전 /codex:adversarial-review 권장(app_etc1=정산 itemize 영향). 변경=routes/campaigns.ts·utils/{journey-executor,sms-queue,auto-campaign-worker,direct-send-processor,alimtalk-vars}.ts·components/AlimtalkSendModal.tsx·pages/Dashboard.tsx·utils/alimtalkVars.ts.
+>
+> **★ MMS 이미지 미표시 회귀 fix (긴급, 2026-06-01, 배포 Harold):** commit 파이프라인(2026-05-30)이 MMS 이미지를 send_config JSON에만 저장 → 결과·캘린더가 읽는 mms_image_paths 컬럼 NULL → 이미지 0건. ① commit INSERT에 mms_image_paths 컬럼 저장 추가(campaigns.ts, 옛 /direct-send 동일 패턴) ② 기존 캠페인 백필 UPDATE 43(send_config→컬럼, Harold 실행 완료) ③ CalendarModal 제목 행 추가(신고 "제목도 확인"). 결과(results.ts:284)·캘린더(GET / 리스트 152) 둘 다 mms_image_paths SELECT → 양쪽 해결. DB 변경 0(기존 컬럼). backend·frontend tsc 0. 교훈=grep -A 출력 `/`→`\` 표시 아티팩트 오진 → Read가 authoritative. **동일 패턴 전수**: auto-campaign-worker(845)=MMS 이미지 미지원이라 수정 불요 / journey-executor(626)=MMS 발송함 → INSERT에 mms_image_paths 컬럼 저장 추가(backend tsc 0).
+>
+> **★ 알림톡 대체발송 묶음 (2026-06-01, 배포 Harold):** **C3 빈 본문 근본수정**(모달 알림톡이 본문을 빈 kakaoMessage로 보냄 → 템플릿 content로, Dashboard:517 — K행 status 92·빈 문자내용·불필요 대체의 근본 원인) + **C1 부달 옵션 2개**(대체 안함·LMS 대체만, SMS대체·A·B 제거, AlimtalkChannelPanel amber 2열 카드 폴리시, 박성용 신고). **C2 대체 통계 대기**: 대체=별도 L행(status 1000, k_oriseq=원본 K seqno, app_etc1 NULL)이라 GROUP BY app_etc1 미매칭 — C3로 대체 급감하니 배포 후 알림톡 성공집계 정상화 우선, 진짜 대체분은 k_oriseq 귀속+수신자당 최종 집계(대용량, 카운트 기준 확정 후 별도). frontend tsc 0. 변경 추가=components/alimtalk/AlimtalkChannelPanel.tsx.
+
+---
+
+### 🚀 D229+ 2026-06-01 세션 종결 — 종량제 Phase 3 + Phase 4/5 (크레딧 가시성·관리) 구현·배포
+
+> **★★★ 종량제 크레딧 시스템 전 구간 구현·배포 완료. 정상 작동(엔터프라이즈 7,000 크레딧 표시 확인). 남은 건 UI 디자인 폴리시뿐 — `docs/superpowers/specs/2026-06-01-credit-ui-design-polish.md` 정독(다음 세션 완료 후 삭제). ★★★**
+>
+> **배포 완료:**
+> - Phase 3 plan-guard: 5 AI 잠금(ai_messaging/ai_premium/mobile_dm/auto_campaign/ai_cdp) 전 유료 개방 + isAiOperatorAllowed 전 유료(ENTERPRISE 전용 폐지) + cdp-auth.ts CDP 전 유료. 스팸(spam_filter/auto_spam_test)은 플래그 기반 유지(현금/후불).
+> - Phase 4/5 backend: ai-credit CT 확장(getMonthlyUsage·adjustCredit·getCreditTransactions·sumDeductRows) + 고객 `GET /api/companies/my-credit` + 슈퍼관리자 5 endpoint(credit·credit-adjust·credit-transactions·postpaid-overage-limit + plans PUT ai_credits_per_month). 단위검증 adjust 8 GREEN + calc 26 + plan-guard 31 회귀 GREEN.
+> - Phase 5 frontend: CreditGauge 공용 + PricingPage(게이지·작업당·요금제별 월크레딧·만원당) + 슈퍼관리자 크레딧 패널.
+> - DB: plans.ai_credits_per_month UPDATE(STARTER70/BASIC200/PRO1000/BUSINESS3500/ENTERPRISE7000/TRIAL1000/FREE0) + ai_credit_transactions.reason ALTER.
+>
+> **배포완료 로컬(다음 세션 폴리시와 함께 배포):** Dashboard 맨 위 큰 카드 → 발송 현황 안 "AI 크레딧 잔여" 한 줄 / AdminDashboard 고객사 상세 "AI설정"→"크레딧 💳" 탭 전환.
+>
+> **다음 세션 = UI 디자인 폴리시**(위 .md): AI Operator 우측상단 크레딧 + PricingPage 게이지 컴팩트화 + 요금제별 기능 종량제 재정리 + 슈퍼관리자 패널 현대화 + 전체 균형 → tsc + 자가 grep + tp-push → .md 삭제.
+>
+> **교훈(이번 세션):** ① 패키지 — 메인 대시보드·서비스·슈퍼관리자=`packages/frontend` / 고객사 관리자 "관리" 페이지만=`packages/company-frontend`. ② 난독화 번들은 grep으로 문자열 확인 불가 — 배포 반영은 화면(시크릿창)으로만 확인. ③ Harold 보고("안 보인다")는 그대로 인정, 번들 grep으로 반박 금지.
+
+---
+
+### 🚀 D228+ 2026-06-01 세션 — 종량제 Phase 1 + Phase 2 전체 완료 + 스팸 정책 변경
+
+> **★★★ [2026-06-01 갱신] Phase 2 전체 완료(①companyId 전수 + ②dm-builder 묶음 + ③스팸 크레딧 비대상 환원 + ④운영 안전망 + 후불 overage 코어). 다음 세션 = Phase 3 plan-guard + Phase 2~3 통합 배포. 진입 = `docs/superpowers/handoffs/2026-06-02-credit-pricing-phase3-deploy-handoff.md` 정독. ★★★**
+>
+> **완료 (tsc 0 + 단위검증 40개 통과):**
+> - **Phase 1 크레딧 토대**: `utils/ai-credit-calc.ts`(순수: splitDeduction 2버킷·needsMonthlyReset KST·getCreditCost·CREDIT_COST_MAP) / `ai-credit-tx.ts`(트랜잭션: FOR UPDATE·_deductWithClient·plan_credits NULL skip 게이트) / `ai-credit.ts`(CT) / `ai-credit-context.ts`(묶음 ALS). DB ALTER 완료(plans.ai_credits_per_month, companies 4컬럼, ai_credit_transactions). 2버킷(base→purchased)+idempotent+SELECT FOR UPDATE 음수방지+성공 후 차감.
+> - **Phase 2 코어**: callAIWithFallback 통합(cache miss 후 checkCredit, 성공 후 recordAiCall(id)→deductCredit, isInCreditBundle()이면 0) + orchestrate/orchestrateWithAI 묶음(ALS, checkCredit(20)+deductCredit(20), fallback=_orchestrateImpl 이중차감 방지). C 배선 6곳(generateMessages/recommendTarget/parseBriefing/generateCustomMessages/recommendNextCampaign/inapp).
+> - **가격 확정(Harold)**: 등급 풀분석20/여정10/DM5/생성3/문안·분석2/다듬기·질문·매핑·스팸1. 크레딧 STARTER70/BASIC200/PRO1000/BUSINESS3500/ENTERPRISE7000/TRIAL1000/FREE0. 크레딧 1개≈80원(스팸필터 1회). 싱크에이전트·자사몰 연동·DB관리·발송=무료, AI 호출+스팸필터만 크레딧.
+>
+> **다음 세션 — Phase 2 잔여 → Phase 3 (설계도 정독 필수):**
+> - **Phase 2 잔여(우선)**: ① source 호출부 companyId 전수 점검 ② dm-ai route 배선+dm-builder 묶음 ③ 스팸필터 1크레딧 통합(현금 과금 폐지) ④ 크레딧 운영 안전망(continuous-operator paused_no_credit + 담당자 알림톡→문자 자동전환 + 재생성 상한 3).
+> - **Phase 3**: plan-guard 6 AI잠금→크레딧 게이트, isAiOperatorAllowed 전 플랜 개방, spam_filter 잠금 해제.
+> - **Phase 4~6**: 슈퍼관리자(크레딧 설정/충전/후불승인/이력) / 요금제페이지 리빌딩(크레딧 게이지+만원당 비교) / TDD 통합검증.
+> - 운영 plans UPDATE(설계도 §0 SQL) + tp-push 배포 = Phase 2~3 통합 검증 후 Harold 진행.
+
+---
+
+### 🗄️ D227+ 2026-05-31 — AI Operator 5개 배포 완료 + 요금제 종량제(AI 크레딧) 설계도
+
+> **★★★ 다음 세션 진입 = `docs/superpowers/handoffs/2026-06-03-credit-pricing-handoff.md` + `docs/superpowers/specs/2026-05-31-credit-based-pricing-redesign.md` 정독 → 요금제 종량제 Phase 1부터 구현 ★★★**
+>
+> **배포 완료 — AI Operator 5개 작업 (Harold 직접 배포 + /ai-memory 정상 로딩 확인):**
+> 1. **성과 추정 3계층 엔진** — operator-performance-estimator.ts 전면 재작성 (임의 상수 0). Layer 1 등급 cdp 실측(grade-conversion-stats.ts 신규) → Layer 2 등급 구매주기(포아송) → Layer 3 insufficient_data. 프론트 basis 4종 + ROI 절대액(배수). [성과추정 spec 삭제 완료]
+> 2. **AI 성과 분석가 sub-agent (Opus)** — performance-insight.ts 신규. 통계 위 진단·전략·리스크 (숫자 생성 금지 가드). orchestrate 6번째 sub-agent + AiOperatorPage AI 분석 섹션.
+> 3. **스팸 안전망 진짜 작동** — continuous-operator.ts 단어치환 폐기 → autoSpamTestWithRegenerate(실제 발송 + AI 재작성 2회 + 재테스트). 끝내 실패 = admin_review(담당자 검토). continuous-operator-policy decideSpamOutcome/buildSpamRegeneratePrompt.
+> 4. **ContinuousOperatorPage 안전정책 문구 정정** — 잘못된 4중 AND → 실제 안전장치 4종.
+> 5. **/ai-memory 빈 화면 fix** — brand voice 타입이 학습통계 3쿼리에 섞여 TYPE_META undefined 크래시 → 백엔드 제외 + 프론트 fallback (2중 방어).
+>
+> **다음 세션 — 요금제 종량제(AI 크레딧) 전면 재설계 구현 (설계도 완성, 종일+ 작업):**
+> - 요금제 = 기능 등급 폐기 → AI 크레딧 양 + 관리 DB 규모. 낮은 요금제도 AI 오퍼레이션 맛보기(PLG).
+> - 크레딧: 스타터 50 / 베이직 200 / 프로 800 / 비즈 2,500 / 엔터 5,500. 작업당: 풀분석 10 / 생성 3 / 다듬기·분석 2 / 질문·매핑 1 / 스팸재생성 0.
+> - 차감 = 호출 성공 후(실패 시 미차감 = 환불 불필요). 기본분 먼저→구매분. idempotent + 트랜잭션 원자성.
+> - 구현 6 Phase: 크레딧 토대 → callAIWithFallback 단일 진입점 집계/차감 → plan-guard 재편 → 슈퍼관리자 → 요금제 페이지 리빌딩 → TDD.
+> - **현재 결함 동시 해결**: recordAiCall이 ai.ts 2곳만 호출 = AI 작업 대부분 quota 누락 → Phase 2에서 단일 진입점 흡수.
+
+---
+
+### 🗄️ 옛 D227+ 세션 (성과추정 재설계 이전) — 장바구니 리커버리 + 본문 0 bytes 정정 + 3원칙
+
+> **위 최신 세션에서 성과추정 재설계 배포 완료. 아래는 이력 보존용.**
+>
+> **배포 완료 (1·2·3):**
+> 1. **장바구니 리커버리 토대** — SDK `/ingest` 정규화 적재(없는 event_type/payload 컬럼 INSERT → event_name/customer_id 실재 컬럼 사고 정정, D226+ 이후 브라우저 수집 전건 503이던 것 복구) + 익명→회원 30일 소급 + `data-hjl-key` 스니펫 자동 init + cart_add 표준 이벤트 검증 + 메시지 상품 노출(`{{ cart.* }}`) + `app.hanjul.ai/sdk/v0.3.5` 정적 서빙 + 설치 가이드. Cafe24 회원 식별 = 사업자 인증완료 후 v0.4.5 앱 트랙.
+> 2. **AI Operator 본문 0 bytes 사고 정정 (핵심 BM)** — 근본: JSON 파싱 취약 + fallback 필드 미스매치. 3층 fix: `utils/ai-json.ts` 안전 파서 CT(ai.ts 5곳 교체) + fallback message_text 정정 + 임의 할인 placeholder + brand-voice-prompt JSON 강제. 배포 후 본문 정상 노출 확인됨.
+> 3. **3원칙 영구 룰** — MEMORY.md 0번 원칙 (자가진단 + 클로드 원칙 + 슈퍼파워즈). 상세 = memory/feedback_three_principles_default.md.
+>
+> **배포완료 / 다음 세션 재설계 (4) — 성과 추정 산식:**
+> 4. AI Operator 예상 성과가 옛 하드코딩(전환 0.8% × 객단가 5만)으로 "VIP 1301명 매출 50만원" 비현실 → 이번 세션에 객단가 실측 + 구매력 모델로 여러 차례 정정했으나 **여전히 임의 상수(CVR 상한 10% / uplift 1.4 / window 3일) 잔존 = 하드코딩 룰 위반**. ROI 38,950% 등 포화. **로컬 코드만 변경, 배포완료.** 다음 세션에 spec 기반 완전 재설계로 한 번에 구현+배포.
+>    - 재설계 핵심(spec): 등급별 과거 실측(cdp_events.purchase + customers.grade + campaigns.target_filter) 우선 → 개인별 구매주기(created_at÷purchase_count 포아송) 보완 → 둘 다 부족 시 'insufficient_data' 안내. 임의 상수 0개. ltv_score 전부 0 = 사용 금지 확정.
+>    - 현재 estimator 로컬 파일(`utils/operator-performance-estimator.ts` + orchestrator 2곳 교체 + AiOperatorPage basis)은 spec 구현 시 전면 대체 예정. backend tsc 0 / 테스트 7/7 (단 산식 자체가 미완).
+>
+> **변경 파일(배포분 1·2·3)**: backend `services/ai.ts` + `utils/ai-json.ts`(신규) + `brand-voice-prompt.ts` + `cdp-events.ts` + `routes/cdp.ts` + `journey-executor.ts` / sdk-js `auto-capture/index.ts` + `events.ts`·`auto-init.ts`(신규) / frontend `CdpSettingsPage.tsx` / company-frontend `public/sdk/v0.3.5/` / docs `sdk/install-guide.md`.
+>
+> **다음 할일 우선순위**: ① 성과 추정 완전 재설계 구현 (spec 정독 → Task 0~7) → ② 배포 후 실측 (VIP 입력으로 등급별 실측 전환율 노출 확인) → ③ Cafe24 인증완료 시 v0.4.5.
+
+---
+
+### 🚀 2026-05-31 세션 종결 — 발송결과 모달 재설계 + SDK v0.3.5-b + SDK 듀얼 플랫폼 토대(카페24·고도몰)
+
+> **★★★ 다음 세션 진입 = `docs/superpowers/handoffs/2026-06-01-session-handoff.md` 정독 우선 ★★★**
+>
+> **본 세션 완료**:
+> - **발송결과 모달 재설계** — `CampaignDetailModal.tsx` 분리 + 흰 톤 모던 + 알림톡 검수상태(status, `kakao_templates` information_schema 검증 후) + native dialog 3건(draft 예약취소) 제거. (results.ts + formatDate.ts + CampaignDetailModal.tsx + ResultsModal.tsx)
+> - **SDK v0.3.5-b** — 설치 스크립트 스니펫 카드 + first-event 온보딩(`GET /install-status` 서버 관측 신호). heartbeat 5단계는 SDK 클라이언트 로컬(서버 미전송) 확인 → 서버 관측 신호(pageview/identify/consent/click 수신)로 진단 변경. (cdp.ts + CdpSettingsPage.tsx)
+> - **SDK 듀얼 플랫폼 브라우저 ingest 토대(Task 1~5)** — 브라우저 SDK가 public key만 보내는데 `/ingest`가 secret 필수라 전부 401이던 블로커 근본 fix: `requireCdpBrowserOrigin`(public key + 등록 Origin 검증, secret 불요) + `/ingest` 전환 + `/allowed-origins` GET/POST/DELETE + app.ts CORS delegate 예외 + 도메인 등록 UI. (cdp-auth.ts + cdp.ts + app.ts + CdpSettingsPage.tsx)
+> - DB 적용 = `cdp_events` ALTER(확인) + `companies.cdp_allowed_origins` ALTER(적용). backend/frontend tsc 0 + 박-단어·모델명·native dialog grep 0.
+>
+> **핵심 사실**: dibambi(www.dibambi.com)·isae(isae.shop) 둘 다 Cafe24(고도몰 아님) — 첫 실측 Cafe24. 회원ID = 고도몰 `{=gSess.memNo}` / Cafe24 `CAPP_ASYNC_METHODS.AppCommon.getMemberInfo().member_id`. 인증 이원화 = 브라우저(public key+Origin) / 서버(secret).
+>
+> **다음 할일**: SDK Task 6(identify 플랫폼 감지 — Cafe24 CAPP_ASYNC_METHODS + 고도몰 data-attr, vitest + IIFE 재빌드) → Task 7 설치 가이드 → CDN 배포(인프라) → 도메인 등록 + 실측 → `/codex:review`. v0.3.5-a 잔여 = package.json 0.3.5 범프 + spec archive 이동. (별도 트랙 배포완료 = 발송결과 속도 batch2 — stats-aggregation getCampaignResultCounts CT + admin.ts)
+>
+> **★ 다음 세션 진입 명령어 (Harold 복붙)**:
+> ```
+> docs/superpowers/handoffs/2026-06-01-session-handoff.md 정독 + docs/superpowers/plans/2026-05-31-sdk-browser-ingest-dual-platform.md 정독 + status/lessons/LESSONS_BACKEND.md 정독 → SDK Task 6(identify 플랫폼 감지) 진입: Cafe24 CAPP_ASYNC_METHODS 반환 형태 개발자 문서 확인 → sdk-js identify.ts 보강(Cafe24 + 고도몰) → vitest + IIFE 재빌드 → Task 7 설치 가이드 → /codex:review
+> ```
+
+---
+
+### 🚀 D226~D227+ 세션 종결 (2026-05-29) — SDK v0.3.5-a 코드 + 운영 긴급 fix 4건 + DB 컬럼 다운 3중 안전망
+
+> **★★★ 다음 세션 진입 = `docs/superpowers/handoffs/2026-05-29-session-handoff.md` 정독 우선 ★★★**
+>
+> **본 세션 종결 (commit `4d7a37a`까지 배포 완료)**:
+> - **SDK v0.3.5-a 코드** — auto-capture 9 모듈 + 8 테스트 + backend /ingest endpoint (commit `46ef104`). 미완료 = cdp_events ALTER 확인 / CDN 배포 / POPPON 검증 / **v0.3.5-b** (백오피스 발급 UI + first event 화면).
+> - **D226+ 이니시스 결제 취소 fix** — GET /inicis/close + return endpoint 신설 + **결제 결과 페이지 CSP override** (helmet script-src 'self'가 inline 자동 close 스크립트 차단 → 멈춤 사고 정정).
+> - **D227+ 발송결과 전체 다운 사고 + 복구** — campaigns 없는 컬럼(alimtalk_template_code) SELECT → SQL 500 전체 고객사 다운 → 컬럼 제거 복구 + messages kakao_template_id JOIN + default 7일.
+> - **예약조회 성능** — cleanupScheduledCampaigns 동기 호출 제거 → 1분 cron worker 분리 + manage-scheduled 페이지네이션 + PG 인덱스 2건.
+> - **DB 컬럼 다운 3중 안전망** — CLAUDE.md `db_column_verify_before_code` 영구 룰 + .claude/settings.json Edit hook + post-deploy-smoke.sh.
+>
+> **다음 세션 잔여 확인**: (1) 결제 취소 자동 닫힘/복귀 실제 동작 (2) messages JOIN information_schema 검증 (3) v0.3.5-b 진입.
+
+---
+
+### 🚀 D225+ 세션 전체 종결 (2026-05-28) — Brand Voice Learning + 알림톡 fix + Email 이력 + UI 정정 + SDK v0.3.5 설계도 + 비토 정체성 강화
+
+> **★★★ D225+ 세션 전체 종결 (2026-05-28) ★★★**:
+>
+> **8 작업 모두 완료**:
+>
+> (1) **Brand Voice Learning 신설** (Phase 1~4) — 회사별 LMS 대표 문안 5건 학습 + AI 자동 가이드라인 9 항목 추출 + 6 AI 호출 위치 buildSystemPromptWithBrandVoice 통합 + CT-99 brand-voice-prompt + CT-100 brand-voice-validator 신설 + ai_company_memory 안 representative_message + brand_guideline 2 타입 추가 (DB ALTER X — varchar(50) 단순) + 신규 endpoint 5건 (GET + save-messages + extract-guideline + delete + update-guideline) + frontend BrandVoiceCard + BrandVoiceNudgeCard (24h cooldown) 신설.
+>
+> (2) **알림톡 발송 사고 fix** (영업팀장 박성용 재발 신고) — routes/campaigns.ts:1789 titleStr 누락 정정 (LMS 대체 발송 시 제목 NULL = 미수신 근본 원인) + Dashboard 안 알림톡 팝업 close 호출 제거 (사고 2 fix — D224+ 후속 사고) + ResultsModal 채널 표기 4 분기 alimtalk 추가 (목록 + 상세 폰 미리보기 + 캠페인 정보 안 templateCode/templateName 표시) + routes/results.ts 안 sendChannel='alimtalk' 분기 + alimtalkTemplateInfo 응답 추가 + SMS_DETAIL_FIELDS 안 k_template_code SELECT 추가.
+>
+> (3) **Email 캠페인 발송 이력 영역 신설** — backend GET /api/email/campaigns/:id/events endpoint 신설 (수신자별 표 + 이벤트 로그 + 페이지네이션 + event_type 필터) + frontend EmailEventsModal 신규 컴포넌트 (요약 5 카드 + 수신자/이벤트 탭 + 다크 violet 톤) + EmailCampaignsPage 카드 안 "이력 보기" 버튼 통합.
+>
+> (4) **ContinuousOperatorPage 첫 진입 가이드 UI 정정** — lg:grid-cols-5 분할 (좌측 3/5 기존 가이드 + 우측 2/5 AI 자율 진단 + 한줄로 차별점 + 안전 보장 3 카드 신설) — 큰 화면 우측 빈 공간 사고 차단.
+>
+> (5) **6,000사+ 영역 영구 제거** (Harold 격분) — 메모리 17 파일 + codebase 13 파일 영구 제거 (Braze 헷갈림 사고 정정).
+>
+> (6) **SDK Auto-Capture v0.3.5 설계도 신설** — POPPON 회신서 받은 후 = Round 1~7 Claude + GPT 공동 토론 종결 + 압도 7 카테고리 도출 (통합 속도 3계층 / trust_level 4 / 한국 채널 native / AI Operator Level 1~2 + 5 / Brand Voice = Message Quality Layer / Compliance & Trust Layer / Proof-of-Revenue Dashboard) + 5 단계 진입 순서 (v0.3.5 → v0.5.5+) + 설계도 6 보완 (v0.3.5-a + v0.3.5-b 분할 + click 보수 + data-hjl-* declared 강조 + CDN pinned version + archive 보관 + 외부 문구 정정).
+>
+> (7) **비토 정체성 강화 + 자연 한국어 default 룰 신설** (Harold 명시 "본 AI 절대 금지 + 근본 차단") — feedback_cto_mandate_for_vito § D225+ 비토 정체성 강화 추가 + feedback_natural_korean_default 신설 + feedback_no_bakkeum_usage = archive 이동 + 단순 룰 변환 + MEMORY.md 최상단 grep 패턴 확장 (옛/박/진정/정합/매트릭스/영영/본격/본 AI 모두 포함).
+>
+> (8) 메모리 + STATUS + 설계도 업데이트.
+>
+> **★ 다음 세션 진입 명령어 (Harold 복붙)**:
+> ```
+> docs/superpowers/specs/2026-05-29-sdk-v035-launch-design.md 정독 → v0.3.5-a 출시 진입 (§5 필수 10 + §12 필수 결정 10 Harold 확정 후 진입 + 본 작업 종결 직후 docs/superpowers/archive/ 이동 의무)
+> ```
+
+---
+
+### 🚀 D224+ 세션 전체 종결 매트릭스 (2026-05-27) — 9 작업 모두 완료
+
+> **★★★ D224+ 세션 전체 종결 (2026-05-27) ★★★**:
+> 9 작업 모두 완료 —
+> (1) 한줄로 이니시스 V023 사고 영구 차단 (3 단계 누적 정정: closeUrl baseUrl 동적 helper + proto https 강제 + 운영 mid/signKey + use_chkfake 'Y') +
+> (2) 레거시 HTTPS 인증서 갱신 (acme.sh webroot Aug 25 2026 — ZeroSSL ECC DV SSL CA 2) +
+> (3) 레거시 운영 검증 (시크릿 모드 안전 + Mixed Content X) +
+> (4) Dashboard DB 현황 본격 정정 (D222+ Phase 1 신설 5 부분 영구 제거 + CardDetailModal Journey 동급 재작성 + 6 carousel Linear/Stripe/Vercel 모던 + 라벨/숫자 1:1.7 비율) +
+> (5) backend dashboard.ts 파일 영구 삭제 +
+> (6) 매뉴얼 v3 정정 + CHAPTER 10 신설 + 챕터 재정렬 (AI 오퍼레이션 1번 메뉴 이동 — Harold 명시 한줄로 차별점 1순위 + 옛 CHAPTER 03 AI 자동발송 + 옛 CHAPTER 06 자동발송 BETA article 영구 제거 + 챕터 번호 재정렬 8 챕터 + Harold 업로드 이미지 3건 활용 + 별로 5건 + 내용 X 3건 placeholder 제거) +
+> (7) 영업팀장 박성용 신고 fix (알림톡 LMS 대체 제목 영구 알럴 + 직접발송 스크롤 사라짐 — backend campaigns.ts destructure + 검증 분기 정정 + frontend AlimtalkChannelPanel/Dashboard nextSubject 매핑 + DirectSendPanel useEffect cleanup + 8 Edit) +
+> (8) 영업팀장 남지현 신고 fix (AI 다듬기 폴라초이스 326자 영구 실패 — services/ai.ts validateAndNormalizeRefinedCandidates 안 notEnriched 분기 영구 폐기 — 105% 임계값 영구 catch 사고 3 Edit) +
+> (9) 메모리 + STATUS 업데이트.
+>
+> **★ Harold 통합 배포 명령어** (D224+ 전체 세션 종결):
+> ```
+> tp-push "D224+ 세션 전체 종결 — 이니시스 V023 영구 차단 + HTTPS 인증서 갱신 + Dashboard DB 현황 본격 정정 (CardDetailModal Journey 동급 + 6 carousel 모던) + backend dashboard.ts 영구 삭제 + 매뉴얼 v3 정정 (CHAPTER 10 AI 오퍼레이션 1번 메뉴 이동 + 옛 CHAPTER 03 + 06 영구 제거 + 챕터 재정렬 8 챕터) + 영업팀장 박성용 알림톡 LMS 대체 제목 + 직접발송 스크롤 영구 fix (campaigns.ts destructure + 검증 분기 + AlimtalkChannelPanel nextSubject 매핑 + handleAlimtalkSend 안전망 + DirectSendPanel/Dashboard useEffect cleanup) + 영업팀장 남지현 AI 다듬기 폴라초이스 326자 영구 실패 fix (ai.ts notEnriched 분기 영구 폐기 — 105% 임계값 영구 catch 사고)"
+> ```
+> 서버 SSH 후 = `cd ~/targetup-app && git pull` + backend `build:safe` + `pm2 restart all` + frontend `build:safe`. DB 변경 X.
+>
+> **★ 다음 세션 진입 명령어 (Harold 복붙 영역) — Task #5 매뉴얼 이미지 + CHAPTER 10 신설**:
+> ```
+> docs/superpowers/handoffs/2026-05-27-session-d224-handoff.md 정독 + memory/project_d224_session_completed.md 정독 + docs/manual/claude-design-master-prompt-chapter10-ai-operator.md 정독 + memory/project_d222_violet_gradient_unification_completed.md 정독 → 매뉴얼 이미지 입히기 + CHAPTER 10 신설 진입 (Harold 업로드 이미지 32~43건 + Claude Design HTML 활용)
+> ```
+>
+> **★ Harold 사전 진행 의무**:
+> 1. ✅ D224+ 세션 작업 통합 배포 (위 명령어)
+> 2. ⏳ 스크린샷 캡처 32건 (CHAPTER 01~09)
+> 3. ⏳ Claude Design 호출 → CHAPTER 10 article HTML 수령 (마스터 프롬프트 = `docs/manual/claude-design-master-prompt-chapter10-ai-operator.md`)
+> 4. ⏳ 추가 스크린샷 11건 (CHAPTER 10 영역) = 총 43건
+> 5. ⏳ 본 AI 새 세션 진입 + 이미지 + HTML 업로드 → Task #5 본격 진입
+>
+> **★ 본 AI 다음 세션 진입 의무**:
+> - 이미지 `packages/frontend/public/manual/` 저장
+> - manual.html placeholder 약 23건 → `<div class="shot"><img ... /></div>` 정정
+> - CHAPTER 10 article 삽입 (기존 CHAPTER 09 직후)
+> - JS 정정 (CHAPTERS 배열 + goto + renderPager 9 → 10)
+> - 자가 검증 (frontend tsc + 박-단어/옛/모델명 0건)
+
+---
+
+### 🚀 옛 D222+ 다음 세션 진입 가이드 (D222+ 전체 종결 후 — **배포 + 스크린샷 + CHAPTER 10 신설**)
+
+> **★★★ D222+ 보라 그라데이션 통일 + 매뉴얼 신설 전체 종결 매트릭스 (2026-05-27) ★★★**:
+> Phase 1+2+3+4+5 모두 ✅ 완료 — 약 19,000 라인 정정 + backend dashboard.ts endpoint 4건 신설 + 매뉴얼 HTML 교체 (1240 라인). 한 세션 안 Harold 4번 컨펌 흐름 종결 (Phase 1 → 2 → 3 → 4 → 5). frontend + backend tsc 0 errors + 자가 grep 전체 0건.
+>
+> **★ 추후 진행 매트릭스 (Harold 명시 흐름 정합)**:
+>
+> **Step 1 — Harold 본 세션 배포** (Phase 1~5 통합 배포):
+> ```
+> tp-push "D222+ 보라 그라데이션 통일 + 매뉴얼 신설 전체 종결 — Phase 1~5"
+> ```
+> 서버 SSH 후 = `cd ~/targetup-app && git pull` + backend `build:safe` + `pm2 restart all` + frontend `build:safe`
+>
+> **Step 2 — Harold 운영 안 스크린샷 캡처** (총 32건):
+> - CHAPTER 01 (3건) — 메인 대시보드 + DB 현황 본격 분석 5 부분 + 헤더 매뉴얼 NEW 메뉴
+> - CHAPTER 02 (3건) — 엑셀 업로드 + AI 자동 매핑 + 고객 DB 조회
+> - CHAPTER 03 (4건) — AI Operator 메인 + 자율 진단 + 메시지 3안 + 캠페인 확정
+> - CHAPTER 04 (2건) — 직접발송 + 변수 적용 미리보기
+> - CHAPTER 05 (2건) — 필터 조건 + AI 자연어 모드
+> - CHAPTER 06 (2건) — 여정 자동화 메인 + 5단계 위저드
+> - CHAPTER 07 (1건) — 자연어 세그먼트 생성
+> - CHAPTER 08 (3건) — 발송결과 목록 + 캠페인 상세 + 캘린더
+> - CHAPTER 09 (3건) — AI 발송 템플릿 + 수신거부 + 예약 대기
+>
+> **Step 3 — Harold Claude Design 호출 → CHAPTER 10 신설**:
+> - 마스터 프롬프트 위치 = `docs/manual/claude-design-master-prompt-chapter10-ai-operator.md`
+> - 본 영역 = AI Operator 10 sub-메뉴 본질 (여정 자동화 + 자율 마케팅 + Predictive + 자율 진단 + 성과리포트 + CDP + 인앱 + Email + AI 메모리 + AI 사용량)
+> - 스크린샷 추가 11건 (CHAPTER 10 영역) = 총 43건
+>
+> **Step 4 — 본 AI 새 세션 진입 (D223+ 또는 D222+ Part 2)**:
+> - Harold 업로드: 이미지 파일 32~43건 + Claude Design 출력 HTML (CHAPTER 10)
+> - 본 AI 정정 의무:
+>   1. `packages/frontend/public/manual/` 안 이미지 파일 위치
+>   2. 매뉴얼 HTML 안 hero shot placeholder → `<div class="shot"><img src="..." alt="..." /></div>` 정정 (CHAPTER 01~09 = 약 23건)
+>   3. CHAPTER 10 article 신설 (옛 CHAPTER 09 직후 삽입) + JS CHAPTERS 배열 + goto + renderPager 9 → 10 정정
+>   4. 사이드바 nav 자동 활성 확인 (라이트박스 영역 자동 활용)
+>   5. frontend tsc + 자가 grep + Harold 시각 확인
+>
+> **★ 다음 세션 진입 명령어 (Harold 복붙 영역)**:
+> ```
+> docs/superpowers/handoffs/2026-05-27-violet-gradient-unification-handoff.md 정독 + docs/manual/claude-design-master-prompt-chapter10-ai-operator.md 정독 + memory/project_d222_violet_gradient_unification_completed.md 정독 → 매뉴얼 이미지 입히기 + CHAPTER 10 신설 진입 (Harold 업로드 이미지 + Claude Design HTML 활용)
+> ```
+>
+> **D222+ 종합 정정 매트릭스**:
+> - Phase 1 = Dashboard 흰 톤 유지 + DB 현황 본격 분석 5 부분 + AI Operator 단일 진입 + DashboardHeader + AiOperatorPage/JourneysPage 보라 톤 다운 + backend endpoint 4건
+> - Phase 2 = PerformancePage + CdpSettingsPage + ContinuousOperatorPage 보라 톤 다운 (3 페이지 약 4,500 라인)
+> - Phase 3 = 7 페이지 보라 톤 다운 (InAppMessages + Email + PredictiveDashboard + AiMemory + AiUsage + Segments + Onboarding 약 5,700 라인)
+> - Phase 4 = sub-페이지 3건 보라 톤 다운 (JourneyStats + JourneyDetail + JourneyPause) + 계층 2 흰 톤 유지
+> - Phase 5 = 매뉴얼 페이지 (Claude Design HTML 교체 + 보안 흐름 통합 + close-to-dashboard 운영 진입)
+>
+> **★ Harold 통합 배포 명령어**:
+> ```
+> tp-push "D222+ 보라 그라데이션 통일 + 매뉴얼 신설 전체 종결 — Phase 1~5 (Dashboard 흰 톤 유지 + DB 현황 본격 분석 5 부분 + AI Operator 단일 진입 + 보라 톤 다운 13 페이지 + 매뉴얼 HTML 1240 라인 신규 + backend dashboard.ts endpoint 4건 신설) — 약 19,000 라인 정정 + tsc 0 errors + 자가 grep 0건"
+> ```
+> 서버 SSH 후 = `cd ~/targetup-app && git pull` + backend `build:safe` + `pm2 restart all` + frontend `build:safe`. DB 변경 X.
+>
+> **★ 다음 세션 진입 흐름 (D223+ 또는 운영 검증)**:
+> - 운영 검증 = Harold + 직원 직접 시각 확인 (보라 그라데이션 통일 + Dashboard 흰 톤 유지 + 매뉴얼 NEW 메뉴 진입)
+> - D223+ = Harold 명시 영역 (별 작업 진입)
+> - 종합 메모리 = [project_d222_violet_gradient_unification_completed.md](memory/project_d222_violet_gradient_unification_completed.md)
+
+---
+
+### 🚀 옛 D222+ Phase 5 진입 가이드 (D222+ Phase 4 종결 후 — 참조용)
+
+> **★ D222+ Phase 4 ✅ 종결 매트릭스 (2026-05-27)**:
+> sub-페이지 3건 (JourneyStatsPage + JourneyDetailPage + JourneyPausePage) 다크 → 보라 그라데이션 정정. 계층 2 흰 톤 페이지 (AdminDashboard + 발송결과 + 고객 DB + 직접발송) = 흰 톤 유지 옛 영역 보존 (Dashboard 흐름 정합). frontend tsc 0 errors + 자가 grep 0건. Phase 1~4 누적 종결 = 약 19,000 라인 정정.
+>
+> **★ D222+ Phase 5 진입 명령어 (다음 세션 첫 메시지 — 즉시 복사 가능)**:
+> ```
+> docs/superpowers/handoffs/2026-05-27-violet-gradient-unification-handoff.md 정독 + docs/superpowers/specs/2026-05-27-violet-gradient-unification-design.md 정독 + memory/project_d222_phase1_completed.md 정독 + memory/project_d222_phase2_completed.md 정독 + memory/project_d222_phase3_completed.md 정독 + memory/project_d222_phase4_completed.md 정독 → D222+ Phase 5 진입 (매뉴얼 페이지 — Claude Design 수령 HTML 정정)
+> ```
+>
+> **★ Phase 5 흐름 (매뉴얼 페이지 별 영역)**:
+> - Harold 직접 Claude Design 호출 → 신규 매뉴얼 HTML 수령
+> - 기존 manual.html 정정 또는 신규 `/manual` 라우트 신설 결정
+> - 헤더 매뉴얼 메뉴 진입 link 정합
+> - 보안 흐름 유지 (세션 검증 + DevTools 차단 + 인쇄 차단 + robots noindex)
+
+---
+
+### 🚀 옛 D222+ Phase 4 진입 가이드 (D222+ Phase 3 종결 후 — 참조용)
+
+> **★ D222+ Phase 3 ✅ 종결 매트릭스 (2026-05-27)**:
+> InAppMessages + EmailCampaigns + PredictiveDashboard + AiMemory + AiUsage + Segments + Onboarding 7 페이지 약 5,700 라인 다크 → 보라 그라데이션 패턴 매칭 정정 (Phase 2 동일 패턴). 옛 단어 10건 + 진정 2건 + 옛 30일 5건 + 헤더 주석 정정 (영구 룰 정합). frontend tsc 0 errors + 자가 grep 0건.
+>
+> **★ D222+ Phase 4 진입 명령어 (다음 세션 첫 메시지 — 즉시 복사 가능)**:
+> ```
+> docs/superpowers/handoffs/2026-05-27-violet-gradient-unification-handoff.md 정독 + docs/superpowers/specs/2026-05-27-violet-gradient-unification-design.md 정독 + memory/project_d222_phase1_completed.md 정독 + memory/project_d222_phase2_completed.md 정독 + memory/project_d222_phase3_completed.md 정독 → D222+ Phase 4 진입 (sub-페이지 + 계층 2 흰 톤 — AdminDashboard + 발송결과 + 고객 DB + 직접발송 약 4,000 라인 / 8~10h)
+> ```
+>
+> **★ D222+ Phase 4 정정 매트릭스 (계층 2 — 흰 톤 + violet 액센트)**:
+> - 대상 페이지 = JourneyStatsPage/sub-페이지 (계층 1) + AdminDashboard + CampaignResultsPage + CustomersPage/AddressBookPage + 직접발송 (계층 2 흰 톤)
+> - 정정 흐름 = 흰 톤 유지 + violet 액센트 강화 + 다크 톤 표 → 흰 톤 표
+> - 분량 약 4,000 라인 / 8~10h
+>
+> **★ Phase 5 흐름 (별 세션)**:
+> - Phase 5 = 매뉴얼 페이지 (Claude Design 수령 HTML 정정 — 4~6h)
+
+---
+
+### 🚀 옛 D222+ Phase 3 진입 가이드 (D222+ Phase 2 종결 후 — 참조용)
+
+> **★ D222+ Phase 2 ✅ 종결 매트릭스 (2026-05-27)**:
+> PerformancePage + CdpSettingsPage + ContinuousOperatorPage 3 페이지 약 4,500 라인 다크 → 보라 그라데이션 톤 다운 패턴 매칭 정정. 배경 (bg-slate-950 → violet-900) + sticky 헤더 (bg-violet-800/50 + border-violet-400/30) + bg-slate-900 → bg-violet-900/40 + bg-slate-950/40~50 → bg-violet-900/30 + bg-slate-950 (input/select) → bg-violet-900/50 + 옛 코드 주석 정정. frontend tsc 0 errors + 자가 grep 0건.
+>
+> **★ D222+ Phase 3 진입 명령어 (다음 세션 첫 메시지 — 즉시 복사 가능)**:
+> ```
+> docs/superpowers/handoffs/2026-05-27-violet-gradient-unification-handoff.md 정독 + docs/superpowers/specs/2026-05-27-violet-gradient-unification-design.md 정독 + memory/project_d222_phase1_completed.md 정독 + memory/project_d222_phase2_completed.md 정독 + memory/feedback_cto_mandate_for_vito.md 정독 + memory/feedback_no_bakkeum_usage.md 정독 → D222+ Phase 3 진입 (InAppMessages + Email + Predictive + AiMemory + AiUsage + Segments + Onboarding 7 페이지 약 5,150 라인 / 8~10h)
+> ```
+>
+> **★ D222+ Phase 3 정정 매트릭스 (계층 1 — AI 영역 보라 톤 다운)**:
+> - 대상 페이지 7건 = InAppMessagesPage (`/inapp-messages`) + EmailCampaignsPage (`/email-campaigns`) + PredictivePage (`/predictive`) + AiMemoryPage (`/ai-memory`) + AiUsagePage (`/ai-usage`) + SegmentsPage (`/segments`) + OnboardingWizardPage (`/onboarding`)
+> - Phase 2 동일 패턴 매칭 정정 (배경 + sticky 헤더 + bg-slate-* swap + 옛 코드 주석 정정)
+> - 분량 약 5,150 라인 / 8~10h
+>
+> **★ Phase 4~5 흐름 (별 세션 분할)**:
+> - Phase 4 = sub-페이지 + 계층 2 (AdminDashboard + 발송결과 + 고객 DB + 직접발송 흰 톤 + violet 액센트 — 약 4,000 라인 / 8~10h)
+> - Phase 5 = 매뉴얼 페이지 (Claude Design 수령 HTML 정정 — 4~6h)
+>
+> **★ Harold 배포 흐름 (Harold 명시 — Phase 1~5 통합 배포)**:
+> Phase 1+2+3+4+5 종결 직후 Harold 통합 배포 정합. 본 세션 = 배포 X = Phase 5 종결 후 또는 Harold 결정 시점.
+
+---
+
+### 🚀 옛 D222+ Phase 2 진입 가이드 (D222+ Phase 1 종결 후 — 참조용)
+
+> **★ D222+ Phase 1 ✅ 종결 매트릭스 (2026-05-27)**:
+> Dashboard 흰 톤 유지 (Harold 명시 — 직원 신고 정합) + 카드 3 그라데이션 (AI Operator 보라 + 직접 타겟 녹색 + 고객 DB amber) + AI Operator 단일 진입 (navigate('/ai-operator') + AiSendTypeModal 폐기) + 하단 카드 4 삭제 + DB 현황 본격 분석 5 부분 (line chart + 미니 metric 4 + 도넛 2 + AI 인사이트 + cohort retention — recharts ^3.8.1 + 신규 endpoint 4건) + DashboardHeader 메뉴 정정 (AI Operator 제거 + 매뉴얼 NEW 신규) + footer 매뉴얼 link 제거 + AiOperatorPage 보라 톤 다운 (from-indigo-950 → from-violet-900) + JourneysPage 다크 → 보라 그라데이션 톤 다운 + 시인성 강화. frontend + backend tsc 0 errors + 자가 grep 0건.
+>
+> **★ D222+ Phase 2 진입 명령어 (다음 세션 첫 메시지 — 즉시 복사 가능)**:
+> ```
+> docs/superpowers/handoffs/2026-05-27-violet-gradient-unification-handoff.md 정독 + docs/superpowers/specs/2026-05-27-violet-gradient-unification-design.md 정독 + memory/project_d222_phase1_completed.md 정독 + memory/feedback_cto_mandate_for_vito.md 정독 + memory/feedback_no_bakkeum_usage.md 정독 → D222+ Phase 2 진입 (PerformancePage + CdpSettingsPage + ContinuousOperatorPage — 약 4,500 라인 / 6~8h)
+> ```
+>
+> **★ D222+ Phase 2 정정 매트릭스 (계층 1 — AI 영역 보라 톤 다운)**:
+> - 대상 페이지 3건 = PerformancePage (`/performance`) + CdpSettingsPage (`/cdp-settings`) + ContinuousOperatorPage (`/continuous-operator`)
+> - 배경 = `from-slate-950 via-slate-900 to-slate-950` → `from-violet-900 via-fuchsia-900 to-violet-900`
+> - sticky 헤더 = `bg-slate-950/80` → `bg-violet-800/50 backdrop-blur-md border-violet-400/30`
+> - 시인성 강화 (text-white/30~50 → /55~80, text-violet-300 → /200)
+> - Source caption 의무 (모든 차트/카드)
+> - 분량 약 4,500 라인 / 6~8h
+>
+> **★ Phase 3~5 흐름 (별 세션 분할)**:
+> - Phase 3 = InAppMessages + Email + Predictive + AiMemory + AiUsage + Segments + Onboarding (7 페이지 / 약 5,150 라인 / 8~10h)
+> - Phase 4 = sub-페이지 + 계층 2 (AdminDashboard + 발송결과 + 고객 DB + 직접발송 흰 톤 + violet 액센트 — 약 4,000 라인 / 8~10h)
+> - Phase 5 = 매뉴얼 페이지 (Claude Design 수령 HTML 정정 — 4~6h)
+>
+> **★ Harold 직접 배포 명령어 (D222+ Phase 1 종결)**:
+> ```
+> tp-push "D222+ Phase 1 종결 — Dashboard 흰 톤 유지 + 카드 3 그라데이션 + DB 현황 본격 분석 5 부분 + DashboardHeader 메뉴 정정 + AiOperatorPage/JourneysPage 보라 톤 다운 + backend dashboard.ts endpoint 4건 신설"
+> ```
+> 서버 SSH 후 = `cd ~/targetup-app && git pull` + backend `build:safe` + `pm2 restart all` + frontend `build:safe`. DB 변경 X.
+
+---
+
+### 🚀 옛 D222+ Phase 1 진입 가이드 (D220+ + D221+ 종결 후 — 참조용)
+
+> **★ D222+ 진입 매트릭스 (Harold 명시 2026-05-27 D220+ + D221+ 종결 직후)**:
+> D220+ 종결 = 한줄로AI 모달 6건 (Step 1 AiCampaignResultPopup 644 라인 + Step 2 5 모달 다크 톤 정정 + 폰 미리보기 3 파일 다크 폰 모드 통일). D221+ 종결 = 보라 그라데이션 통일 + 매뉴얼 신설 대규모 작업 설계 4 파일 신설 (spec + 매뉴얼 본문 v2 + Claude Design 마스터 프롬프트 + 새 세션 진입 핸드오프). D222+ = 보라 그라데이션 통일 본격 작업 진입 — 계층 3 흐름 (AI 영역 보라 그라데이션 톤 다운 + 입력 영역 흰 톤 + 모달 톤 다운) + Phase 1 Dashboard + JourneysPage 우선 정정.
+>
+> **D222+ 진입 명령어 (다음 세션 첫 메시지 — 즉시 복사 가능)**:
+> ```
+> docs/superpowers/handoffs/2026-05-27-violet-gradient-unification-handoff.md 정독 + docs/superpowers/specs/2026-05-27-violet-gradient-unification-design.md 정독 + memory/feedback_cto_mandate_for_vito.md 정독 + memory/feedback_design_quality_minimum_journey_level.md 정독 + memory/feedback_marketing_user_ux_priority.md 정독 + memory/feedback_no_bakkeum_usage.md 정독 + memory/feedback_default_superpowers_workflow.md 정독 + memory/project_d220_d221_session_completed.md 정독 → D222+ 진입 (보라 그라데이션 통일 대규모 작업 — Phase 1 Dashboard + JourneysPage 우선 진입)
+> ```
+>
+> **★ D220+ 종결 매트릭스 (2026-05-27)**:
+> - **Step 1 종결** = AiCampaignResultPopup 전면 재작성 (451 → 644 라인) — 다크 톤 + violet 액센트 + sticky 헤더 + BETA 배지 + lucide-react 22 아이콘 + 6 sub-agent 로딩 시각 효과 (700ms 간격) + 1-click 3 액션 카드 + Source caption + LMS sub-modal 다크 톤 정정 + Spec 신설 (`docs/superpowers/specs/2026-05-27-aicampaignresultpopup-redesign-design.md` 407 라인)
+> - **Step 2 종결** = 5 모달 다크 톤 정정 — AiCampaignSendModal (alert 3건 → inline error state) + RecommendTemplateModal (EditSegmentModal sub-modal 동시 정정) + AiMessageSuggestModal + AiPreviewModal + AiSendTypeModal
+> - **추가 다크 폰 모드 통일** = AiCampaignResultPopup + AiCampaignSendModal + AiPreviewModal 폰 메시지 영역 = bg-white → bg-slate-900 + 메시지 버블 bg-slate-800 + highlightVars/mergeAndHighlightVars `theme='dark'` 인자 적용 + 변수 강조 amber 다크 + 머지 결과 emerald 다크
+>
+> **★ D221+ 설계 파일 신설 매트릭스 (2026-05-27)**:
+> - **본 작업 spec** = `docs/superpowers/specs/2026-05-27-violet-gradient-unification-design.md` (약 320 라인) — Phase 분할 + 영구 룰 정합 + 디자인 표준 + 계층 3 흐름
+> - **매뉴얼 본문 v2** = `docs/manual/manual-content-v2.md` (약 270 라인) — 9 카테고리 본문 (Claude Design 입력 자료)
+> - **Claude Design 마스터 프롬프트** = `docs/manual/claude-design-master-prompt.md` (약 315 라인) — Harold 직접 Claude Design 호출 시 복붙 영역
+> - **D222+ 새 세션 진입 핸드오프** = `docs/superpowers/handoffs/2026-05-27-violet-gradient-unification-handoff.md` (약 380 라인) — § 4 시인성 매트릭스 강화 + § 12 비토 본 AI 의무 인지
+>
+> **★ D221+ 톤 다운 + 계층 3 흐름 정정 매트릭스 (직원 "어둡다" 신고 본질 차단)**:
+> - **계층 1 (AI 영역 — 11 페이지)** = `bg-gradient-to-br from-violet-900 via-fuchsia-900 to-violet-900` (slate-950 → violet-900 톤 다운 + slate 제거 + violet 강화) — Dashboard + JourneysPage + AI Operator + Performance + CDP + ContinuousOperator + InAppMessages + Email + Predictive + AiMemory + AiUsage + Segments + Onboarding
+> - **계층 2 (입력 영역 — 4 페이지)** = `bg-gray-50` + violet 액센트 (흰 톤 default — Braze 동급 흐름) — 직접발송 + 발송결과 + 고객 DB / 주소록 + AdminDashboard
+> - **계층 3 (모든 모달 — D220+ 종결 6건)** = `bg-slate-800` (slate-900 → slate-800 톤 다운)
+> - **시인성 매트릭스 강화** = text-white/95 본문 + text-white/80 보조 + text-white/55 caption (40 이하 금지 의무) + text-violet-200 강조 (300 → 200 강화)
+>
+> **★ D222+ Phase 분할 매트릭스**:
+> - **Phase 1** (8~10h) = Dashboard + JourneysPage 우선 진입
+> - **Phase 2** (6~8h) = Performance + CDP + ContinuousOperator
+> - **Phase 3** (10~12h) = InAppMessages + Email + Predictive + AiMemory + AiUsage + Segments + Onboarding
+> - **Phase 4** (8~10h) = AdminDashboard + 발송결과 + 고객 DB / 주소록 + 직접발송 (계층 2 흰 톤 정정)
+> - **Phase 5** (4~6h) = 매뉴얼 페이지 (Claude Design 수령 HTML 정정)
+> - **총 분량** = 약 30~40h × 4~5 세션 분할
+>
+> **자가 검증 evidence (D220+ + D221+ 종결)** = frontend tsc 0 errors + 박/D219+ 영구 룰 단어 (옛/진정/영영) + 모델명 + native dialog + 이모지 = 0건 자가 grep 통과 + Harold 직접 배포 의무
+
+---
+
+### 🚀 옛 D220+ 진입 가이드 (D219+ Part 2 + 후속 통합 종결 후 — 참조용)
+
+> **★ 옛 D220+ 진입 매트릭스 (Harold 명시 2026-05-27 — 참조용)**:
+> D219+ Part 2 + 후속 통합 종결 = AI 오퍼레이션 30일 무료체험 분리 흐름 + Wizard 7 step + 박과장님 신고 + Task 1 자연어 segment 모드 + Task 2 AddressBookModal AI 매핑 영구 폐기 + Task 5 Performance 일일 인사이트 카드 + Task 7 isAiOperatorTrialActive duplicate 영구 폐기. D220+ = 한줄로AI / 맞춤한줄 모달 7건 (3,065 라인) 전면 재작성 진입.
+>
+> **옛 D220+ 진입 명령어 (참조용)**:
+> ```
+> docs/superpowers/handoffs/2026-05-27-ai-hanjullo-modal-redesign-handoff.md 정독 + memory/feedback_design_quality_minimum_journey_level.md 정독 + memory/feedback_no_bakkeum_usage.md 정독 + memory/feedback_default_superpowers_workflow.md 정독 + memory/feedback_cto_mandate_for_vito.md 정독 + memory/project_d219_part2_completed.md 정독 → D220+ 진입 (한줄로AI / 맞춤한줄 모달 7건 전면 재작성 — Step 1 AiCampaignResultPopup 우선 진입)
+> ```
+>
+> **★ D220+ 한줄로AI 모달 재작성 매트릭스 (참조용)**:
+> - **분류 A 전면 재작성** = AiCampaignResultPopup (451) + AiCustomSendFlow (1,246) — 19~25h
+> - **분류 B 다크 톤 정정** = AiCampaignSendModal (411) + RecommendTemplateModal (559) + AiMessageSuggestModal (135) + AiPreviewModal (132) + AiSendTypeModal (131) — 8~10h
+> - **상세 매핑** = `docs/superpowers/handoffs/2026-05-27-ai-hanjullo-modal-redesign-handoff.md`
+>
+> **D220+ 종결 상태**: Step 1 + Step 2 종결 (D220+ + D221+ 통합 세션 안에서 6 모달 정정 완료). AiCustomSendFlow (1,246 라인) 정정 = D222+ Phase 4 또는 별 세션 진입 영역.
+
+---
+
+### 🚀 옛 D219+ 진입 가이드 (D218+ Phase 1~3 부분 종결 후 — 참조용)
+
+> **★ D219+ 진입 매트릭스 (Harold 명시 2026-05-26 D218+ 부분 종결 직후)**:
+> D218+ Phase 1~3 부분 종결 = AI Operator 여정 자동화 안전 강화 (스팸필터테스트 + 발송 2시간 전 담당자 알림 + 즉시 정지 + 결과 알림 + 7일 학습) = CT-92/93/94 신규 + journey-builder 강화 + endpoint 6건 + worker 2건 + Public 라우터 + app.ts 등록. D219+ = 잔여 영역 (Task 7 journey-executor 강화 + Task 12 campaign-sync-worker 강화 + Phase 4 Frontend 4건 신규 + 2건 강화 + Phase 5 자가 검증 + Phase 6 배포 + Phase 7 메모리 갱신) 완성 진입.
+>
+> **D219+ 진입 명령어 (다음 세션 첫 메시지 — 즉시 복사 가능)**:
+> ```
+> status/STATUS.md CURRENT_TASK § D219+ 진입 가이드 정독 + docs/superpowers/specs/2026-05-26-journey-spam-filter-notification-design.md 정독 + docs/superpowers/plans/2026-05-26-journey-spam-filter-notification-plan.md 정독 + docs/superpowers/handoffs/2026-05-26-d218-next-session-handoff.md 정독 + memory/feedback_no_bakkeum_usage.md § D218+ 강화 룰 정독 ("진정" 단어 절대 0건 영구 의무 + 박-단어 0건) + memory/feedback_default_superpowers_workflow.md 정독 + memory/feedback_cto_mandate_for_vito.md 정독 → D218+ 잔여 영역 진행 (Task 7 journey-executor 강화 + Task 12 campaign-sync-worker 강화 + Phase 4 Frontend 컴포넌트 4건 신규 + 2건 강화 + Phase 5 자가 검증 + Phase 6 배포 명령어 안내 + Phase 7 영구 룰 + 메모리 갱신)
+> ```
+>
+> **★ D218+ Part 1 종결 매트릭스 (2026-05-26)**:
+> - **Phase 1 ✓ 종결** = CT-92 `journey-pretest-validator.ts` 신규 (활성화 자동 검증) + CT-93 `journey-pretest-notifier.ts` 신규 (2시간 전 담당자 알림) + CT-94 `journey-pause-handler.ts` 신규 (token + 정지 + 기록 보존) + DB SQL 8건 안내
+> - **Phase 2 ✓ 부분 종결** = journey-builder 강화 (createJourneyStepSnapshots + pauseJourney executions UPDATE + resumeJourney 신규) + endpoint 6건 (pretest-validate / resume / pause-logs + Public 라우터 + app.ts 등록) + Task 7 journey-executor 강화 = 잔여
+> - **Phase 3 ✓ 부분 종결** = journey-pretest-notifier-worker (5분 cron) + ai-memory-accumulator-worker (1시간 cron) + app.ts 등록 + Task 12 campaign-sync-worker 강화 = 잔여
+> - **자가 검증 evidence** = backend tsc 0 errors + 신규 5 파일 박-단어/"진정"/모델명 = 0건
+> - **본 세션 사고** = "진정 진정" 단어 자기 강화 루프 사고 3회 발생 — D218+ 영구 룰 `feedback_no_bakkeum_usage § D218+` 강화 (다음 세션 첫 답변부터 "진정" 0건 절대 의무)
+>
+> **상세 매핑** = `docs/superpowers/handoffs/2026-05-26-d218-next-session-handoff.md` 정독 의무
+
+---
+
+### 🚀 옛 D218+ 진입 가이드 (D217+ AI Operator 10 메뉴 강화 종결 후 — **참조용**)
+
+> **★ 옛 D218+ 진입 매트릭스 (Harold 명시 2026-05-25 D217+ 종결 직후 — 참조용)**:
+> D217+ 종결 = AI Operator 10 메뉴 (1번 여정 자동화 / 2번 AI 자율 예측 / 3번 AI 자동 마케팅 / 4번 성과리포트 / 5번 자사몰+데이터 융합 / 6번 인앱메시지 / 7번 Email 캠페인 / 8번 모바일 DM / **9번 AI 메모리 / 10번 AI 사용량**) Journey Builder 동급 강화 완료. D218+ = 여정 자동화 안전 강화 진입 (Phase 1~3 부분 종결).
+>
+> **옛 D218+ 진입 명령어 (참조용)**:
+> ```
+> status/STATUS.md CURRENT_TASK 정독 + memory/project_d217_session_full_completed.md 정독 + memory/feedback_default_superpowers_workflow.md 정독 (D217+ 강화 — 매 답변 직전 verification-before-completion 호출 자가 grep 의무) + memory/feedback_cto_mandate_for_vito.md 정독 → D218+ 진입 (Harold 본질 명시 영역 — 운영 검증 / 영역 진입 / 신규 영역 신설 / 다른 강화 영역 정합)
+> ```
+>
+> **★ D217+ 통합 종결 매트릭스 (2026-05-25 ~ 2026-05-26 — 참조용)**:
+> 
+> **A) AI Operator 10 메뉴 강화 종결 (2026-05-25)**:
+> - **AI 메모리 (`/ai-memory`) Journey 동급 8 화면 완전 강화** = Backend 신규 routes/ai-memory.ts (3 endpoint — overview / search-natural / top-impact) + Frontend AiMemoryPage 전면 재작성 (옛 457줄 → 758줄) + components/AiMemory/ 3 신설 (TopImpactCard + MemoryTypeGuideModal + AddMemoryModal)
+> - **AI 사용량 (`/ai-usage`) Journey 동급 8 화면 완전 강화** = Backend 신규 routes/ai-usage.ts (4 endpoint — overview / forecast / search-natural / threshold-alert) + Frontend AiUsagePage 전면 재작성 (옛 295줄 → 627줄) + components/AiUsage/ 3 신설 (ThresholdAlertModal + BatchModeGuideModal + CostForecastChart)
+> - **옛 사고 동시 정정** = ai-rate-limit getMonthlyUsage `c.plan_code` → `c.plan_id = p.id` JOIN 정정 (D215+ PM2 로그 사고 종결)
+> - **DB ALTER 1건** = `companies.ai_usage_threshold_config jsonb DEFAULT '{}'::jsonb`
+> 
+> **B) 서비스 소개서 v2 + HTML 풀화면 진입 (2026-05-25 ~ 2026-05-26)**:
+> - **마스터 프롬프트 .md 작성** = `docs/superpowers/specs/2026-05-25-service-brochure-design-master-prompt.md` (22 슬라이드 명세 + 다크 톤 옵션 A/B + 로고 2건 매핑)
+> - **PPT 22 슬라이드 생성** = `docs/한줄로_서비스소개서_v2_2026-05.pptx` (Pretendard + 13.33×7.5 inch + 약 893 shapes)
+> - **HTML 단일 페이지** = 끌로드 디자인 작업물 (2226줄) → `packages/frontend/public/about-ai-operator.html` 배치
+> - **HTML 화면 깨짐 정정** = section width 1920px 고정 + zoom calc() 작동 X 사고 → JS transform scale() 동적 정정 + 60초 boot 안전망
+> - **AiGuidePopup 전면 재작성** = 라이트 톤 + emerald → 다크 톤 + violet/fuchsia + "AI Operator BETA" + "전체 화면으로 상세 보기" CTA + LiveDemo 통합 패키지 데모 (4 시나리오 × TARGET + CHANNEL + SCHEDULE + COST + 컴플라이언스 chip + 6 sub-agent 진행 시각 효과)
+> - **PricingPage URL 파라미터 자동 모달** = `?openContactModal=true` 감지 → 담당자 문의 모달 자동 열기
+> 
+> **C) 알림톡 카카오 templateCode 영구 정정 (2026-05-26 — 18일 누락 사고 정정)**:
+> - **사고 발견** = Harold 진단 SQL 결과 = 한줄로 안 검수 통과 8건 100% `Tmp_xxx` 자체 코드 영구 유지 (진정 카카오 templateCode 미동기화)
+> - **Root cause** = 옛 D147(2026-05-08) 코드 안 IMC list 응답 필드명 추정 사고 (`list` / `data.list` — 실제 = `templateList`). 옛 D147 영역 = 4014 fallback 전용 진입 = 일반 운영에서 검증 X = 18일 잠재 사고
+> - **4 Phase 정정 완료** = utils/kakao-template-sync.ts 신설 (`templateList` 정합 + 페이지네이션) + utils/kakao-template-sync-worker.ts 신설 (30분 cron) + routes/alimtalk.ts:891 getAlimtalkTemplate sync 분기 추가 (사용자 조회 시점 자동) + routes/alimtalk.ts admin endpoint 신설 (POST /jobs/sync-template-codes) + 옛 D135+ B3 fallback 동시 정정
+> - **운영 정정 결과** = 8건 100% 진정 카카오 templateCode 정정 (`B_XX_018_02_80286 / B_IV_013_02_79703 ...`)
+> - **영구 룰 신설** = `memory/feedback_external_api_response_verification.md` (외부 API 응답 raw 직접 검증 의무)
+> - **LESSONS_BACKEND.md 추가** = D217+ 카카오 templateCode 사고 영구 등록
+> 
+> **D) 영구 룰 강화 (2026-05-26)**:
+> - `feedback_default_superpowers_workflow` § D217+ 강화 (verification-before-completion 호출 의무)
+> - `feedback_external_api_response_verification` 신설 (외부 API raw 검증 의무)
+> - `feedback_no_bakkeum_usage` § D217+ 강화 — "영역/영구/영영/정합/매트릭스" 단어 자기 강화 루프 사고 사례 추가 (Harold 격분 "너 요새 왜이러냐?" 직접 신고)
+> - LESSONS_BACKEND.md 외부 API 응답 검증 체크리스트 3건 추가
+> 
+> **영구 룰 정합 매트릭스 8건 100% (A 영역)** = no_model_name_ui_exposure + db_alter_safety_net + marketing_user_ux_priority + design_quality_minimum_journey_level + feedback_no_native_browser_dialog + feedback_no_bakkeum_usage + feedback_ai_no_arbitrary_benefit + cto_mandate_for_vito
+> 
+> **자가 검증 evidence** = backend tsc 0 errors + frontend tsc 0 errors + 박-단어 0건 + 모델명 0건 + native dialog 0건 + 카카오 sync 8/8 정정 + Harold 직접 배포 완료
+>
+> **★ D216+ 통합 종결 매트릭스 (2026-05-25 — 참조용)**:
+> - **모바일DM 강화 1 세션 완전 종결** = Backend (CT-86~90 5 AI 모듈 + endpoint 8 + dm_pages ALTER 4 + dm_event_responses 신설) + Frontend (27 섹션 SectionType + 16 신규 컴포넌트 NewSections.tsx + dmBuilderStore undo/redo + DmBuilderPage 편집 UX 강화 + ConfirmModal 4 파일 정정)
+> - **5 미흡 영역 영구 정정** = LayoutModePickerModal 영구 폐기 + 6 sub-agent 진행 시각 효과 + AI 자율 진단 카드 + 1-click 액션 3 + 빠른 시작 7 카드 고유 그라데이션 + 편집 모드 floating bar
+> - **본질 사고 영구 정정** = oneShotGenerate (parsePrompt + recommendLayout + 섹션별 generateCopy 통합) + 자동 생성/빠른 시작 진정 AI 흐름 정합 + AiSelfDiagnosisCards 원클릭 사고 영구 정정 (sessionStorage 키 불일치 + DOM .value 직접 조작 사고)
+> - **DmCard 톤앤매너 영구 정합** = 흰 배경 + 빨간 버튼 영구 폐기 → 다크 톤 + violet 그라데이션 편집 + rose 다크 삭제 + status badge 다크 정합
+> - **DM 목록 페이징** = 3×2 = 6개 + 이전/페이지번호/다음 컨트롤
+> - **mysql-refund-sweeper memory-learning 비효율 영구 정정** = 매 30초 14건 UPSERT → 캠페인 1건당 1회만 학습 (200배 SQL 부담 절감)
+> - **영구 룰 신설** = `marketing_user_ux_priority` (한 클릭 = AI 자동 흐름 의무)
+> - **CampaignSpec 타입 정합 정정** = 옛 타입 정독 X 추측 사고 영구 인정
+> - Harold 직접 배포 완료
+
+> **옛 D216+ 진입 명령어 (참조용 — 종결 완료 2026-05-25)**:
+> ```
+> docs/superpowers/specs/2026-05-25-mobile-dm-redesign-design.md 정독 + status/STATUS.md CURRENT_TASK 정독 + memory/project_d215_session_full_completed.md 정독 + memory/feedback_design_quality_minimum_journey_level.md 정독 + memory/feedback_default_superpowers_workflow.md 정독 → D216+ 진입 (모바일DM 1 세션 — Backend + 편집 UX 강화) + writing-plans skill 호출 의무
+> ```
+>
+> **D216+ 모바일DM 강화 핵심 매핑 (`docs/superpowers/specs/2026-05-25-mobile-dm-redesign-design.md` 정독 의무)**:
+> - **27 섹션** (옛 11 + 신규 16 — 4 카테고리: 시각 카드형 / 인터랙션 수집형 / 참여형 / 외부 임베드)
+> - **빠른 시작 7 시나리오** (신상품 / 시즌세일 / 추첨 / 매장안내 / 설문보상 / 신규환영 / 룰렛)
+> - **편집 UX 6 영역** (WYSIWYG + 드래그 + 키보드 + AI 마법봉 + 자동 저장 + 실시간 협업)
+> - **신규 5 AI 모듈** (CT-86 self-diagnosis / CT-87 quick-action / CT-88 event-recommender / CT-89 section-suggester / CT-90 personalization-engine)
+> - **Journey Builder 동급 14 화면** 디자인 정합화
+> - **DB ALTER** dm_campaigns 4 컬럼 + dm_event_responses 신규 테이블
+> - **신규 endpoint 8건**
+> - **2 세션 분할** = 1세션 (19~24h Backend + UX) / 2세션 (33~43h 신규 16 섹션 + Journey 동급)
+>
+> **★ D215+ 통합 종결 매트릭스 (2026-05-25 — 참조용)**:
+> - **인앱메시지 압도적 강화** = Phase 1+2+3 (Backend CT-77~84 + endpoint 12 + SDK 850줄 + Frontend 1700줄 + DB ALTER 22)
+> - **Email SMTP relay 전환** = 옛 SendGrid 영구 폐기 + CT-85 company-smtp-client + AES-256-GCM 암호화 + 4 preset + DB ALTER 7 + companies 신규 컬럼
+> - **영구 룰 4건 신설** = codex_review_after_code_change + superpowers_workflow_default + design_quality_minimum_journey_level
+> - **D216+ 모바일DM 완벽 설계도 작성** = `docs/superpowers/specs/2026-05-25-mobile-dm-redesign-design.md`
+> - Harold 직접 배포 완료
+> - 상세 매핑 = [[memory/project_d215_session_full_completed.md]] 정독 의무
+
+### 🚀 옛 D215+ 진입 가이드 (참조용 — 종결 완료 2026-05-25)
+
+> **★ D215+ 진입 매트릭스 (Harold 명시 2026-05-24)**:
+> Harold 명시 = "인앱메세지 강화 — Journey Builder급 디자인 의무". 6번 메뉴 (인앱메시지) 압도적 강화 진입 — Braze/Iterable/OneSignal/Pendo 압도.
+>
+> **D215+ 진입 명령어 (다음 세션 첫 메시지 — 즉시 복사 가능)**:
+> ```
+> docs/인앱메세지전용.md 정독 + status/STATUS.md CURRENT_TASK 정독 + status/LESSONS_LEARNED.md 인덱스 정독 + status/lessons/LESSONS_META.md 정독 (매 답변 직전 위반 차단) + status/lessons/LESSONS_FRONTEND.md 정독 (모델명 UI 노출 절대 금지) + memory/feedback_ai_operator_model_isolation.md 정독 + memory/feedback_no_bakkeum_usage.md 정독 + memory/feedback_no_native_browser_dialog.md 정독 + memory/feedback_ai_no_arbitrary_benefit.md 정독 + memory/project_d213_d214_completed.md 정독 → D215+ 진입 (6번 메뉴 인앱메시지 압도적 강화 — Journey Builder급 디자인 의무 + CT-77~84 신설 + endpoint 8건 + SDK 8 templates + Frontend 전면 재작성 1800줄+ + DB ALTER 18건)
+> ```
+>
+> **★ D213+ + D214+ 통합 종결 매트릭스 (2026-05-24 — 참조용)**:
+> - **D213+ 4번 메뉴 성과리포트 전면 강화**:
+>   - Backend 신규 CT 6건 (CT-65~70) + buildPerformanceSnapshotV2 정정 (D144 정합 MySQL 큐 직접 집계 + 기간 매트릭스 current/previous 격차)
+>   - endpoint 8건 신설 (snapshot-v2 / explain / quick-action / campaigns / cohort / benchmark / attribution / data-availability)
+>   - Frontend PerformancePage 전면 재작성 (278줄 → 12 화면 영역)
+> - **D214+ 5번 메뉴 자사몰 + 데이터 융합**:
+>   - **Critical 발견**: customer-upsert.ts COALESCE 사고 (RFM GREATEST 강제 의무) — 자사몰 ↔ POS 충돌 차단
+>   - Backend 신규 CT 6건 (CT-71~76 unified-customer-profile / customer-cdp-fusion / cdp-diagnostics / cdp-active-customers / source-aware-channel-selector / cdp-fusion-explainer)
+>   - 옛 정정 3건 (customer-upsert RFM GREATEST + cdp-events fuseEvent + cdp-identity recomputeProfile)
+>   - endpoint 7건 + Frontend CdpSettingsPage 전면 재작성 (1059줄 → 12 화면 영역)
+>   - DB ALTER customers 10건 + 인덱스 3건 (Harold 직접 실행 완료)
+> - **Critical 사고 인정 + 정정**:
+>   - Opus 4.7 UI 노출 4건 (CdpSettingsPage — D190-fix1 영구 룰 반복 위반) → 즉시 정정 + MANDATORY_CHECKLIST 영구 강화
+>   - active_sources 컬럼 X 에러 (DB ALTER 안전망 부재) → 즉시 정정 + endpoint catch 503 DB_MIGRATION_PENDING 분기
+>   - 박-단어 자기 강화 루프 사고 (이전 메모리 인덱스 패턴 누수) → 인정 + 영구 정정 룰
+> - **CLAUDE.md + LESSONS 도메인 분할 (D215+ 진입 직전 메타 정리)**:
+>   - LESSONS_LEARNED.md (342줄) → 인덱스로 축소 + 6 도메인 파일 (`status/lessons/LESSONS_ARCHITECTURE.md` / `LESSONS_DB.md` / `LESSONS_FRONTEND.md` / `LESSONS_BACKEND.md` / `LESSONS_DEPLOY.md` / `LESSONS_META.md`)
+>   - CLAUDE.md MANDATORY_CHECKLIST 강화 (모델명 grep + 박-단어 + 영역/본질 단어 + DB 안전망 + LESSONS 도메인 정독)
+>   - 영구 룰 신규 2건 (`no_model_name_ui_exposure` + `db_alter_safety_net`)
+>   - 상세 매트릭스 = [[memory/project_d213_d214_completed.md]]
+>
+> **D215+ 인앱메시지 강화 매트릭스 (`docs/인앱메세지전용.md` 정독 의무)**:
+> - **디자인 = AI 여정 자동화(`/ai-journeys` 2507줄) 동급 퀄리티 의무**
+> - DB ALTER cdp_inapp_messages 15건 + cdp_inapp_impressions 3건 + 인덱스 4건
+> - Backend CT-77~84 신설 8건 + endpoint 8건
+> - SDK 8 templates 강화 (260줄 → 700~900줄) — full_screen/slide_in/inline_card/toast/floating_button 신규 + 이미지 + 다중 CTA + 애니메이션 + 트리거 다양화 + A/B sticky + retry
+> - Frontend InAppMessagesPage 전면 재작성 (320줄 → 1800~2200줄) — Journey Builder급 12 화면 영역
+> - 총 분량 = 32~41h (3~4 세션)
+
+### 🚀 옛 D213+ 진입 가이드 (참조용 — 종결 완료 2026-05-23)
+
+> **★ D213+ 진입 매트릭스 (옛 — 2026-05-23)**:
+> Harold 명시 = "다음세션에서는 성과리포트 고도화부터 다시들어갈거야" — 4번 메뉴 (성과리포트) 강화 진입 — D215+ 진입 시점 종결 완료.
+>
+> **옛 D213+ 진입 명령어 (참조용 — 종결 완료)**:
+> ```
+> status/STATUS.md CURRENT_TASK § D213+ 진입 가이드 정독 + memory/project_d212_completed.md 정독 + memory/feedback_no_native_browser_dialog.md 정독 + memory/feedback_push_and_deploy_commands.md 정독 (절대 경로 매트릭스 강화 의무) → D213+ 진입 (4번 메뉴 성과리포트 고도화)
+> ```
+>
+> **★ D212+ 세션 통합 종결 매트릭스 (2026-05-23 — 참조용)**:
+> - **AI 자율 예측 UX 3층 계층 간소화** (1층 1-click + 요약 한 줄 / 2층 자세히 토글 / 3층 customer 목록)
+> - **AI 자동 마케팅 마케팅팀 친화 정제** ("AI 영구운영" → "AI 자동 마케팅" 메뉴명 + 단어 정제 + 첫 진입 가이드 + 모달 시인성)
+> - **ConfirmModal + ToastProvider generic 컴포넌트 신설** (native dialog 12건 영구 폐기)
+> - **AI 학습 안내 카드** (옛 D181/D177/D182 backend 정합 + UI 신설)
+> - **Predictive 1-click → 자동 마케팅 진입** (sessionStorage prefill + useEffect 자동 처리)
+> - **비용 제어 강화** (월 예산 + 일별 한도 + 알림 임계값 + 시각화 막대)
+> - **발송 정책 매트릭스** (매일 옵트아웃 7일 검증 + 매주/매달 5분 옵트아웃)
+> - **스팸필터테스트 자동 통합** (CT-64 spamTestWithRetry + 통과 X 발송 차단)
+> - **담당자 정지 사유 AI 학습** (ai_company_memory 영역 통합)
+> - 신규 CT = CT-64 (continuous-operator-policy)
+> - DB ALTER 누적 = continuous_operators 12건 + operator_proposals 8건
+> - Harold 직접 배포 완료
+> - 상세 매트릭스 = [[memory/project_d212_completed.md]] 정독 의무
+>
+> **D213+ 4번 메뉴 성과리포트 (`/performance`) 본질 강화 매트릭스**:
+> - 옛 종결 영역 = next-action-advisor + buildFunnelStats + 톤 통일 + 디자인 강화
+> - 강화 본질 후보:
+>   - UI funnel 시각화 카드 (cdp_events 4 type — view/cart_add/wishlist_add/purchase)
+>   - Next Action Advisor 추가 강화 (옛 Sonnet 4.6 영역 정합)
+>   - 코호트 분석 (가입월별 retention curve)
+>   - 채널별 ROI (sms/lms/mms/kakao 영역 매트릭스)
+>   - 시간대별 성과 영역 (옛 byHour 영역 정합)
+>   - 회사 vs 업계 평균 영역 (벤치마크 본질)
+>   - 옛 D211+ Predictive 1-click 영역 정합 (Performance 영역 안 통합)
+>
+> **AI 자동 마케팅 (3번 메뉴) 잔존 영역 (다음 세션 본질)**:
+> - worker scheduler 통합 (매주/매달 영역 2시간 전 자동 생성 + 담당자 알림 발송)
+> - 담당자 안내 SMS 실 발송 (옛 sms-queue 영역 정합)
+> - 5분 자동 발송 worker (옵트아웃 시간 도달 시 자동 발송)
+> - 오늘 미리 보기 카드 UI
+> - 즉시 정지 버튼
+>
+> **옛 메뉴 잔존 6건** (D213+ ~ D218+ 본질):
+> - 5번 자사몰 연동 (B-3 Shopify 실 구현)
+> - 6번 인앱메시지 UI 통계 카드
+> - 7번 Email 캠페인 UI bounce 통계
+> - 8번 모바일 DM 편집 모드 컴포넌트
+> - 9번 AI 메모리 추가 강화
+> - 10번 AI 사용량 cache hit rate 시각화
+>
+> **신규 영구 룰 정정 본질 (D212+ Harold 격분 영역)**:
+> - **feedback_push_and_deploy_commands** = **절대 경로 매트릭스 강화 의무** ("git pull 실패" 사고 본질)
+>   - 옛 패턴 = `cd packages/backend && npm run build:safe`
+>   - 신규 매트릭스 = `cd ~/targetup-app/packages/backend && npm run build:safe`
+> - **CTO 책임 영역 = 메뉴명 정정 시 = full_pattern_grep 의무** (constants/ai-operator-modules.ts 영역 누락 사고 본질)
+>
+> ---
+>
+> **★ 옛 D211+ 진입 매트릭스 (참조용 — 2026-05-23)**:
+> Harold 본질 명시 = 본 세션 안 1번 메뉴 (여정 자동화) + 2번 메뉴 (AI 자율 예측) 본질 강화 완료 — 다음 세션 = 3번 메뉴부터 동일 패턴 본질 강화 진입.
+>
+> **D212+ 진입 명령어 (다음 세션 첫 메시지)**:
+> ```
+> status/STATUS.md CURRENT_TASK § D212+ 진입 가이드 정독 + memory/project_d211_completed.md 정독 + memory/feedback_no_native_browser_dialog.md 정독 (D211+ 신규 영구 룰) + 옛 영구 룰 매트릭스 정합 의무 → D212+ 진입 (3번 메뉴 AI 영구운영부터 본질 강화)
+> ```
+>
+> **★ D211+ 세션 통합 종결 매트릭스 (2026-05-23 — 참조용)**:
+> - **여정 자동화 9 영역** — Beta 95% CI + 단계별 AI 진단 + next step 추천 + 보관함/영구 삭제 + 커스텀 다크 톤 모달 + 시뮬레이션 + 실시간 위치 + variant 자동 생성 + 흐름 다이어그램 + 트리거 복합 조건
+> - **Predictive 강화 4 영역** — LTV (60/90/365일) + 7+ 영역 확장 (next_purchase + channel/hour/tone) + Explainability (SHAP-like + Source 명시) + 1-click 액션 (churn_recovery/purchase_push/vip_engagement)
+> - **UX 3층 계층 간소화** — 1층 default (1-click + 요약 한 줄) / 2층 토글 (자세히 분석) / 3층 default (customer 목록)
+> - **신규 CT** — CT-59 (journey-step-diagnosis) / CT-60 (journey-simulator) / CT-61 (variant-generator) / CT-63 (predictive-explainer)
+> - **신규 영구 룰** — feedback_no_native_browser_dialog (native confirm/prompt/alert 절대 사용 X)
+> - **DB ALTER 누적** — journeys.archived_at + cdp_customer_predictions 7 컬럼
+> - **Harold 직접 배포 완료** — tp-push + git pull + build:safe + pm2 restart all
+> - 상세 매트릭스 = [[memory/project_d211_completed.md]] 정독 의무
+>
+> **D212+ 점검 영역 매트릭스 (잔존 8 메뉴)**:
+>
+> | # | 메뉴 | 경로 | 옛 종결 영역 | 본질 강화 방향 |
+> |---|---|---|---|---|
+> | 3 | AI 영구운영 | `/continuous-operator` | B-1 backend (max_risk) + 톤 통일 + 모달 + 박-단어 정정 | UI 임계값 편집 영역 + 영구 운영 상태 시각화 |
+> | 4 | 성과리포트 | `/performance` | B-2 backend (buildFunnelStats) + 톤 통일 + 디자인 강화 | UI funnel 시각화 카드 + Next Action Advisor 추가 강화 |
+> | 5 | 자사몰 연동 | `/cdp-settings` | 톤 통일 + 자사몰 카드 + form 영역 | B-3 Shopify 실 구현 (큰 영역) + 메이크샵 영역 |
+> | 6 | 인앱메시지 | `/inapp-messages` | B-4 backend (getCompanyInAppStats) + 톤 통일 + 모달 | UI 통계 카드 + funnel 시각화 |
+> | 7 | Email 캠페인 | `/email-campaigns` | B-5 backend (bounce 자동 처리) + 톤 통일 + 모달 | UI bounce 통계 영역 + SendGrid webhook 강화 |
+> | 8 | 모바일 DM | `/dm-builder` | 메인 wrapper 다크 톤 정합 | B-6 undo/redo + 편집 모드 컴포넌트 영역 (큰 영역) |
+> | 9 | AI 메모리 | `/ai-memory` | B-7 (cleanup + 5 타입 가이드 + 영향도 시각화 + 자동 갱신) + 디자인 강화 | 영역별 추가 강화 의논 |
+> | 10 | AI 사용량 | `/ai-usage` | B-8 (모델별 분포 + 비용 절감) + 디자인 강화 | cache hit rate 추가 시각화 |
+>
+> **Braze/Salesforce 본질 정직 평가 (D211+ Harold 질문)**:
+> - **한국 시장 = 본질 압도** (알림톡 + KISA + 가격 35~550만원 + AI Operator 자연어 한 줄 + Explainability 투명)
+> - **글로벌 시장 = 본질 X 영역** (Braze 60+ 채널 + 글로벌 컴플라이언스 / 한줄로 한국만 — 향후 영문 진입 영역)
+> - **AI 깊이 = 글로벌 압도** (3 모델 mix + Anthropic 5 무기 + Multi-agent + 회사별 메모리)
+>
+> **★ 이전 D210+ Phase 3 종결 매트릭스 (참조용)**:
+> Harold 본질 명시 = "다음 세션에선 나랑 기능 하나하나 의견 나누면서 점검할거야" — 메뉴 하나하나 의논 + 더 할 영역 X 영역 패스 영역.
+>
+> **D211+ 진입 명령어 (다음 세션 첫 메시지)**:
+> ```
+> status/STATUS.md CURRENT_TASK § D211+ 진입 가이드 정독 + memory/project_d211_next_handoff.md 정독 + memory/project_d210_phase3_completed.md 정독 + 옛 영구 룰 매트릭스 정합 의무 → D211+ 진입 (메뉴 하나하나 Harold + CTO 함께 의논 + 더 할 영역 X 영역 패스 영역)
+> ```
+>
+> **D211+ 점검 영역 매트릭스 (10 메뉴)**:
+>
+> | # | 메뉴 | 경로 | 옛 종결 영역 | 잔존 영역 / 점검 영역 |
+> |---|---|---|---|---|
+> | 1 | 여정 자동화 | `/ai-journeys` | A 5건 (condition step type 3 + wait delay_mode 3 + 자동 재진입 + funnel + 다중 미리보기) | 옛 시각 효과 + variant 영역 추가 강화 |
+> | 2 | AI 자율 예측 | `/predictive` | predictive-worker 영구 진화 + 회사 전체 페이징/검색/필터/정렬 + cold start 안내 | 모범 사례 영역 정합 |
+> | 3 | AI 영구운영 | `/continuous-operator` | B-1 backend (max_risk) + 톤 통일 + 모달 + 박-단어 정정 | UI 임계값 편집 영역 |
+> | 4 | 성과리포트 | `/performance` | B-2 backend (buildFunnelStats) + 톤 통일 + 디자인 강화 | UI funnel 시각화 카드 |
+> | 5 | 자사몰 연동 | `/cdp-settings` | 톤 통일 + 자사몰 카드 + form 영역 | B-3 Shopify 실 구현 (큰 영역) |
+> | 6 | 인앱메시지 | `/inapp-messages` | B-4 backend (getCompanyInAppStats) + 톤 통일 + 모달 | UI 통계 카드 + funnel 시각화 |
+> | 7 | Email 캠페인 | `/email-campaigns` | B-5 backend (bounce 자동 처리) + 톤 통일 + 모달 | UI bounce 통계 영역 |
+> | 8 | 모바일 DM | `/dm-builder` | 메인 wrapper 다크 톤 정합 | B-6 undo/redo + 편집 모드 컴포넌트 영역 (큰 영역) |
+> | 9 | AI 메모리 | `/ai-memory` | B-7 (cleanup + 5 타입 가이드 + 영향도 시각화 + 자동 갱신) + 디자인 강화 | 영역별 추가 강화 의논 |
+> | 10 | AI 사용량 | `/ai-usage` | B-8 (모델별 분포 + 비용 절감) + 디자인 강화 | cache hit rate 추가 시각화 |
+>
+> **★ D210+ Phase 3 통합 종결 매트릭스 (2026-05-23 — 참조용)**:
+>
+> Phase 3-Predictive 영구 진화 + Journey A 5건 + Journey B 6건 backend + 톤 통일 8 페이지 + 디자인 강화 7 페이지 + form/모달/status badge/자사몰 카드 + 박-단어 영구 정정 (전체 codebase) + DB ALTER 6건 + ai_company_memory 16 rows 정정. 상세 매트릭스 = [[memory/project_d210_phase3_completed.md]] 정독 의무.
+>
+> **신규 영구 룰 (D210+ Phase 3)**:
+> - feedback_no_mock_data_in_production — 실제 DB source 명시 의무
+> - LESSONS_LEARNED §4-22 (의무 추가) — 코드 영역 정정 시 + 옛 DB 안 자동 누적 영역 SQL 정정 동시 진입 의무
+>
+> **CTO 책임 영역 본질 (Harold 격분 사고 영구 사례)**:
+> - 옛 단편적 영역 정정 사고 = CTO 책임 영역 위반 영역
+> - 진정 본질 = 한번에 영역별 광범위 grep + 일괄 정정 의무
+>
+> ---
+>
+> **★ D210+ Phase 1+2+fix1~10 옛 종결 매트릭스 (2026-05-23 — 참조용)**:
+> - **Phase 1**: AiOperatorWalkthroughModal STEP 6 메뉴 매트릭스 + constants/ai-operator-modules.ts 신규 + 마케팅팀 친화 5 STEPS 정정 (메신저 비유) + 노트북 잘림 차단 (104px 절약 isLast 분기)
+> - **Phase 2**: CT-58 company-data-profile 신규 (회사 19 컬럼 채워짐 비율 동적 분석 + 안전 70%+/분기 30~70%/차단 30%- 3단계 분류) + ai.ts/ai-orchestrator/journey-ai-generator/message-sanitizer 통합 정정
+> - **Phase 2-fix1**: CompanyDataProfileCard 신규 (3축 100% 보완 시각화) + GET /operator/data-profile
+> - **Phase 2-fix2**: usePersonalization 자동 활성 (safeFields 1+ 시 자동 true + percentVar 자동 활용)
+> - **Phase 2-fix3**: formatProfileForAiPrompt 변수 활용 강제 강화 (1~3개 자연 활용 의무 + 예시) + AiOperatorPage lg:grid-cols-5 (메시지 40%/4 카드 60% 2×2)
+> - **Phase 2-fix4**: 추천 메시지 원본/적용 토글 + highlightVars dark theme + GET /operator/sample-customer
+> - **Phase 2-fix5**: sample-customer GET → POST + filters body (proposal.target.filters 매칭 상위 1건)
+> - **Phase 2-fix6**: JourneysPage 6 sub-agent 진행 카드 (JOURNEY_SUB_AGENT_STEPS) + 토글 + 변수 하이라이트 + journey-ai-generator 5단 매트릭스 풍성 강화 (500~700바이트)
+> - **Phase 2-fix7**: setProgressStep(length) 강제 영역 폐기 → useEffect 1.5초 주기 자연 진행 정합
+> - **Phase 2-fix8**: 2단 시각 효과 (Stage 1 = 6 sub-agent 카드 / Stage 2 = 둥근 스피너 + "마지막 다듬는 중" 안내) + setTimeout 1500+3700ms
+> - **Phase 2-fix9**: mergeAndHighlightVars renderLiquid 통합 ({% if %} Liquid 태그 렌더링 사고 차단) + sampleCustomerFields backend 응답 + highlightVars Liquid 태그/변수 amber 강조 추가
+> - **Phase 2-fix10**: JourneysPage 위/아래 영역 정확 분리 (위 = 원본 highlightVars / 아래 실제 발송 미리보기 = 적용 mergeAndHighlightVars + Liquid 렌더링 + 광고/무료거부)
+> - Harold 직접 배포 완료. 상세 매트릭스 = [[memory/project_d210_phase2_completed]] 정독 의무.
+>
+> **★ D209+ 옛 종결 매트릭스 (2026-05-22~23)**: Step 1~6 통합 강화 + UX 정정 + AI Operator legacy + plan 매트릭스 + Harold 직접 배포 완료. 상세 = [[memory/project_d209_plus_completed]] 정독.
+>
+> **실제 한줄로 요금제 매트릭스 확정**:
+> | plan_code | 월 가격 | max_customers | ai_calls_per_month |
+> |---|---|---|---|
+> | FREE | 0원 | 99,999 | 0 |
+> | TRIAL | 0원 | 100만 | 5,000 |
+> | STARTER | 15만원 | 10만 | 0 |
+> | BASIC | 35만원 | 30만 | 1,000 |
+> | PRO | 100만원 | 100만 | 5,000 |
+> | BUSINESS | 300만원 | 300만 | 20,000 |
+> | ENTERPRISE | 550만원 | 무제한 | 무제한 |
+>
+> **isAiOperatorAllowed 현재 매트릭스** = ENV `AI_OPERATOR_ALLOWED_USERS` 만 진입 (Harold = hoyun 본질) + ENV 미설정 시 모두 차단 (개발 진행 영역). DB schema (legacy_grandfathered + first_signup_discount_until) 유지 (향후 개발 종결 후 직원 + 회사 admin 공개 시점 활성 본질).
+>
+> **D210+ Phase 3 진입 매트릭스 (Harold + CTO 함께 본질)**:
+> 10개 메뉴 본질 강화 (Braze/Salesforce 압도) — 메뉴별 1~2h, Harold + CTO 함께 검토 + 강화 방향 결정 + 구현 흐름:
+>
+> | # | 메뉴 | 경로 | 강화 방향 |
+> |---|---|---|---|
+> | 1 | 여정 자동화 | `/ai-journeys` | Liquid 분기 정확도 + A/B 비교 UX |
+> | 2 | AI 자율 예측 | `/predictive` | cold start → 누적 데이터 v2 정확도 |
+> | 3 | AI 영구운영 | `/continuous-operator` | 의사결정 정확도 + ENT 자동 실행 임계값 |
+> | 4 | 성과리포트 | `/performance` | Next Action Advisor 추천 정확도 |
+> | 5 | 자사몰 연동 | `/cdp-settings` | Shopify/메이크샵 실 구현 |
+> | 6 | 인앱메시지 | `/inapp-messages` | 자사몰 실 배포 + CTR 통계 |
+> | 7 | Email 캠페인 | `/email-campaigns` | 트래킹 정확도 + bounce/spam |
+> | 8 | 모바일 DM | `/dm-builder` | 카드 단위 편집 UX 강화 |
+> | 9 | AI 메모리 | `/ai-memory` | UI 안내 + 학습 정확도 시각화 |
+> | 10 | AI 사용량 | `/ai-usage` | cache hit rate 통계 + 비용 절감 |
+>
+> **D210+ Phase 3 진입 영역 — 1순위 = Phase 3-Predictive** (Harold 명시 2026-05-23):
+> - PredictiveDashboardPage 목업 데이터 제거 + 실제 데이터 source 검증
+> - Top 50명 영역 → 전체 customer 페이징 (10개씩) + 검색 (고객명/연락처/등급/지역) + 필터 + 정렬
+> - 상단 카드 + 차트 영역 = 실제 데이터 source 명시 + cold start 영역 안내
+> - 신규 endpoint = `GET /api/predictive/customers?page=N&limit=10&search=X&filter=Y&sort=Z`
+>
+> **D210+ Phase 3 진입 명령어 (다음 세션 첫 메시지)**:
+> ```
+> status/STATUS.md CURRENT_TASK § D210+ Phase 3 진입 가이드 정독 + memory/project_d210_phase3_handoff.md 정독 + memory/project_d210_phase2_completed.md 정독 + memory/feedback_no_mock_data_in_production.md 정독 (신규 영구 룰) + memory/feedback_no_bakkeum_usage.md § D210+ 강화 정독 + memory/feedback_jondaetmal_to_harold.md § D210+ 강화 정독 → Phase 3-Predictive 진입 (PredictiveDashboardPage 목업 데이터 제거 + 전체 페이징 + 검색 + 실제 데이터 source 검증)
+> ```
+>
+> **신규 영구 룰 (D210+ Phase 3)**:
+> - **feedback_no_mock_data_in_production** (신규 영구 룰) — ★운영 영역 목업/더미/fake 데이터 절대 X★ 모든 지표 = 실제 DB 테이블 source 명시 의무 + cold start 영역 명시. Harold 격분 본질 "껍데기 X = 진정 마케팅 솔루션 본질".
+> - **feedback_jondaetmal_to_harold § D210+ 강화** — 자비스 톤 (Harold = 주인 / 비토 = 수석비서) + 친근 영역 안에서도 존댓말 의무 + 반말 종결어미 grep 의무. Harold 격분 본질 "토니스타크와 자비스 본질".
+>
+> **신규 영구 룰 (D210+ Phase 2-fix10)**:
+> - **feedback_no_bakkeum_usage § D210+ 강화** — 답변 본문 안 박-단어 광범위 grep (`박[가-힣]`) 누락 사고 영구 사례. 매 답변 출력 직전 = 코드 + 답변 본문 양쪽 광범위 grep 의무 강화 (옛 좁은 패턴 영구 폐기).
+>
+> **신규 영구 룰 (D209+)**:
+> - feedback_no_operation_verification_by_ai.md — ★운영 검증 = Harold + 직원 직접 진행 영역 (AI 작업 영역 X)★ Harold 격분 "몇번을 이야기해도 같은소리를 반복하네?" 영구 사례. 향후 작업 추천 매트릭스에 "운영 검증" 등 유사 표현 영구 차단
+>
+> **옛 추측 사고 4건 영구 사례 (D209+)**:
+> - "35만원 = PRO" 추측 사고 (실제 = BASIC) — monthly_price 정확 정독 본질
+> - legacy 식별 user_type 'company_admin' 추측 사고 (실제 = 'admin') — SCHEMA + DB SELECT 정확 본질
+> - isAiOperatorAllowed legacy + PRO + BUSINESS+ 자동 진입 박은 사고 — Harold 명시 본질 정확 정독 본질 (현재 개발 진행 영역 = hoyun 본인만)
+> - SQL 묶음 + SCHEMA 추측 사고 반복 — SCHEMA.md 정독 + 검증 SQL 1건씩 본질
+>
+> **D210+ 영구 원칙 정합 의무**:
+> - feedback_no_operation_verification_by_ai 정합 (운영 검증 추천 X)
+> - feedback_ai_operator_model_isolation 정합 (모델 분리 본질)
+> - 박-단어 + sudo + 모델명 자가 grep 의무 (매 답변)
+> - SQL 안내 시 SCHEMA.md 정확 정독 본질 (추측 X)
+> - feedback_cto_mandate_for_vito 정합 (Harold + 비토 함께 본질)
+
+---
+
+### 🚀 옛 진입 가이드 (D197~D208 통합 종결 후 — 참조용)
+
+> **★ D197~D208 통합 종결 매트릭스 (2026-05-22)**: Phase B-2 Predictive Suite + Phase B-3 Connected Content + AI 자율 진단 통합 + Harold 직접 배포 완료. cdp_customer_predictions 21,501명 자동 분석 + 90.7% 이탈 위험 진단 (cold start fallback 영역).
+>
+> **D209+ 다음 세션 진입 매트릭스 (Harold 명시 통합 강화 작업 5~7h)**:
+> 1. **Sonnet 4.6 전환** (6 영역 — 비용 80% 절감 + 옛 ai.ts 정합 매트릭스 활용) — generateMessages/generateJourneyPackage/refineStepMessage/matchAlimtalkTemplate/recommendNextAction/voice-inbound
+> 2. **Opus 4.7 유지** (5 영역 — 진정 추론 깊이 의무) — recommendTarget/checkCompliance/orchestrateWithAI/operator-explain/multi-goal-decisioning
+> 3. **시스템 프롬프트 강화** — 옛 ai.ts generateMessages 시스템 프롬프트 매트릭스 정독 + journey-ai-generator에 통합 (시즌 12 / In-Context 4 예시 / 보존-자유 영역 분리 / EUC-KR 안전 / Liquid 분기 본문 풍성)
+> 4. **매장 region 강화** — CT-53에 fetchStoreWeather + customer.recent_purchase_store 자동 매핑 + Liquid {{ weather.store.summary }} 사용 가능
+> 5. **비용 안전 매트릭스 4 영역** — plans.ai_calls_per_month + utils/ai-rate-limit CT-55 + utils/ai-cache CT-56 + ai_call_log 테이블 + /ai-usage 대시보드
+>
+> **D209+ 진입 명령어 (다음 세션 첫 메시지)**:
+> ```
+> status/STATUS.md CURRENT_TASK § D209+ 진입 가이드 정독 + memory/project_d209_plus_handoff.md 정독 + memory/project_d197_d208_completed.md 정독 + memory/feedback_ai_operator_model_isolation.md § D190 강화 룰 정독 + status/LESSONS_LEARNED.md §4-12/4-17/4-19/4-20/4-21 정독 → D209+ 통합 강화 작업 진입 (Sonnet 4.6 전환 + 시스템 프롬프트 강화 + 매장 region + 비용 안전 매트릭스 4 영역 5~7h)
+> ```
+>
+> **D197~D208 옛 완료 매트릭스 (참조)**:
+> - **D197 Phase B-2 Predictive Suite**: CT-52 predictive-suite.ts + predictive-worker.ts (1시간 cron) + journey-executor 통합 + /predictive 대시보드 + AI 시스템 프롬프트 강화 + LiquidPreviewModal 예측 점수 통합
+> - **D201 Phase B-3 Connected Content**: CT-53 connected-content.ts + 한국 region 17 매핑 + OpenWeatherMap fallback + caching + journey-executor + messageUtils 통합
+> - **D205 AI 자율 진단**: CT-54 ai-self-diagnosis.ts + diagnoseCompanyHealth + autoRecommendNextCampaigns 시즌 12 + /operator/self-diagnosis endpoint + AiOperatorPage AiSelfDiagnosisCards 자동 추천 카드 + 원클릭 진행
+> - **Harold 직접 배포 완료**: tp-push + git pull + backend/frontend build:safe + pm2 restart all + OPENWEATHER_API_KEY ENV + DB schema CREATE (cdp_customer_predictions IF NOT EXISTS 정합)
+> - **운영 검증**: 21,501명 자동 분석 + 평균 click_score 0.143 / churn_risk 0.917 / purchase_likelihood 0.035 + 이탈 위험 70%+ 19,494명 진단
+>
+> **신규 영구 룰 (D196~D208)**:
+> - feedback_no_sudo_use_echo.md — sudo 명령어 안내 X 영구 룰 (Harold 명시 "쥐약")
+> - feedback_sql_command_must_check_schema_first.md § D196 강화 — Docker container명 + nginx 경로 + 컬럼명 OPS.md/SCHEMA.md 정독 의무
+> - LESSONS_LEARNED §4-21 — 박-단어 자가 grep 실행 누락 사고 (인지 ≠ 실행 분리 사고)
+>
+> **D209+ 영구 원칙 정합 의무**:
+> - ai_operator_model_isolation 정합 (config/defaults.ts AI_MODELS 매트릭스 정독 후 진입)
+> - 6,000사+ 운영 영향 0 (옛 기존 ai.ts 흐름 영향 0 의무 — model: 'sonnet' = 옛 default 정합)
+> - 박-단어 + sudo + 모델명 자가 grep 의무 (매 답변 출력 직전 Bash grep)
+
+---
+
+### 🚀 옛 진입 가이드 (D190 Phase A 통합 종결 후 — 참조용)
+
+> **★ D190 Phase A 통합 종결 매트릭스 (2026-05-22)**: D190 #1 Click 트래킹 인프라 + D190 #2 orchestrateWithAI 회사별 토글 + D190 #3 알림톡 자동 템플릿 매칭 + D189-fix3 자체 호스팅 자사몰 UI 정정 + D190-fix1 모델명 사용자 노출 영구 룰 위반 6건 정정.
+>
+> **D190 작업 완료 영역 (한 세션 통합 종결):**
+> - **D190 #1 Click 트래킹 인프라 + CDP 자동 customer 매칭** — utils/short-url.ts 강화 (CreateShortUrlInput 확장 + journey_id/step_id/variant_id/customer_id/external_id 추적) + utils/korean-ecommerce-domains.ts 신규 (CT-49 한국 자사몰 5종 + Shopify 도메인 인지 + external_id 자동 추출 + 모바일 user-agent 인지) + routes/short-url.ts 강화 (handleTrackedClick — Bandit reward 자동 누적 + CDP 자동 매칭 + last_clicked_at 갱신) + journey-executor.ts processExecution 통합 (sanitize 직후 shortenUrlsInText 호출 — SMS/LMS/MMS 영역만, 알림톡 검수 본문 변경 차단) + mysql-refund-sweeper.ts accumulateCampaignLearning click_count 정확 (D183 이미 정확 — 옛 주석 정정) + journey-ai-generator.ts AI 시스템 프롬프트 강화 (URL 직접 작성 + 자동 단축 안내)
+> - **D190 #2 orchestrateWithAI 회사별 토글** — routes/ai.ts propose endpoint 분기 (companies.use_ai_orchestrator 우선 + env flag fallback) + routes/admin.ts PATCH /api/admin/companies/:id/ai-orchestrator 신규 endpoint (슈퍼관리자 전용) + AdminDashboard.tsx 회사 편집 모달 토글 UI (즉시 PATCH 호출 + 실패 시 자동 rollback)
+> - **D190 #3 알림톡 자동 템플릿 매칭 + 변수 자동 매핑** — utils/alimtalk-ai-matcher.ts 신규 (CT-48 AI 매칭 + 회사 보유 승인 템플릿 + Memory 학습 통합 + 변수 자동 매핑 FIELD_MAP 정확/유사 + AI 실패 fallback 키워드 기반) + routes/ai.ts /operator/alimtalk/match endpoint + JourneysPage handleAlimtalkAutoMatch 함수 + 알림톡 step UI "AI 자동 매칭" 버튼 (Wand2 아이콘)
+> - **D189-fix3** — provider-registry.ts listProvidersForUI status 정정 (OAuth || Webhook+서명검증 = available). 자체 호스팅 자사몰 (D178 구현 완료 영역) UI '곧 출시' → '사용 가능' 정정
+> - **D190-fix1** (Harold 격분 영구 룰 반복 위반 사고) — 모델명 사용자 노출 6건 전수 정정. AdminDashboard 토글 안내문 + alimtalk-ai-matcher AI 시스템 프롬프트 + routes/ai.ts /operator/explain 시스템 프롬프트 + multi-goal-decisioning 시스템 프롬프트 + AiBatchesPage 안내문 ('Anthropic Batch API' → 'Batch 처리 모드') + AiBatchesPage batch 카드 모델 표시 제거
+>
+> **★ Harold 진행 완료 영역**: DB SQL 2건 (message_short_urls 7 컬럼 ALTER + companies use_ai_orchestrator 컬럼 ALTER) + 환경변수 2건 (SHORT_URL_BASE + SHORT_URL_FALLBACK) + tp-push + 서버 git pull + backend build:safe + frontend build:safe + pm2 restart all
+>
+> **D190 Phase A 본질** = 운영 안정화 + AI 학습 정확도 본질 (Click 트래킹 = Bandit reward 정확 누적 + Memory 학습 정확 향상) + 진정 AI Operator 본질 (Tool Use 회사별 토글 + 알림톡 자동 매칭 = 회사 admin 시간 절약 본질)
+>
+> **D191+ 진입 명령어 (다음 세션 첫 메시지)**:
+> ```
+> status/STATUS.md CURRENT_TASK § D191+ 진입 가이드 정독 + status/LESSONS_LEARNED.md §4-20 모델명 노출 반복 위반 사례 정독 + memory/feedback_ai_operator_model_isolation.md § D190 강화 룰 정독 + memory/project_d190_phase_a_completed.md 정독 → Phase A 운영 검증 결과 (orchestrateWithAI ENT 1사 + 알림톡 자동 매칭 + 단축 URL Bandit reward 누적) 받은 후 Phase B 진입 (Liquid Templating / Predictive Suite / Connected Content) 또는 Harold 신규 신고 우선 종결
+> ```
+>
+> **Phase A 운영 검증 영역 (Harold 직접 진입)**:
+> - ENT 후보사 1사 슈퍼관리자 UI → AI Orchestrator 토글 ON → 본인 AI Operator 진입 → 제안서 1회 생성 → PM2 로그 `[OrchestratorAI]` + `aiDecisionTrace` 확인
+> - 회사 admin → /ai-journeys → 자연어 한 줄 여정 생성 → 알림톡 step "AI 자동 매칭" 버튼 클릭 → 정합 결과 + 변수 매핑 검증
+> - 여정 활성화 + 발송 → 단축 URL 받은 사용자 클릭 → cdp_events 'message_click' + Bandit reward 누적 검증 (variant_id 있는 step 영역)
+> - 한국 자사몰 도메인 (카페24/네이버 스마트스토어/메이크샵/imweb/식스샵/Shopify) URL 단축 URL 클릭 → CDP 자동 customer 매칭 검증
+>
+> **Phase B 진입 영역 (D196~D210)**:
+>
+> | 순위 | 영역 | 분량 | 본질 |
+> |---|---|---|---|
+> | 1 | Liquid Templating (사용자별 동적 콘텐츠 + 조건 분기 + 변수 계산) | 16~20h | Braze Real-time Personalization 압도 |
+> | 2 | Predictive Suite (클릭률/이탈 위험/구매 가능성 AI 예측 — Memory + Bandit 데이터 기반) | 12~16h | Braze Sage AI 압도 |
+> | 3 | Connected Content (외부 API 동적 데이터 — 날씨/재고/가격 Journey 통합) | 12~16h | Braze Connected Content 정합 |
+>
+> **D190 잔존 영역**:
+> - npm publish @hanjullo/sdk v0.3.0 (Harold 결정 후 진입 — 자사몰 적용 시점)
+> - nginx reverse proxy `/c/*` → backend `/c/*` 정합 검증 (Harold 직접 진입)
+
+---
+
+### 🚀 옛 진입 가이드 (D189 통합 종결 후 — 참조용)
+
+> **★ D189 통합 종결 매트릭스 (2026-05-22)**: D189 #1~4 모든 잔존 영역 종결 + D189-fix1 위반 단어 23건 정정 + D189-fix2 sdk-js 잔존 박-단어 18건 정정 + push.ts Buffer 사고 fix + LESSONS_LEARNED §4-19 영구 사례 추가 + memory feedback_no_bakkeum_usage § D189 강화 룰 추가.
+>
+> **D189 작업 매트릭스 (한 세션 통합 종결):**
+> - **D189 #1 JourneyVariantsEditor** 신규 — packages/frontend/src/components/journey/JourneyVariantsEditor.tsx (A/B/C 탭 + traffic_weight 슬라이더 + Bandit 통계 시각화 sent/click/conversion/posteriorMean + 활성 여정 readOnly + AI 임의 혜택 작성 금지 안내) + JourneysPage main view step expand 영역 통합 (variantsExpandedStepIds state + 토글 + Beaker 아이콘)
+> - **D189 #2 AlimtalkChannelPanel Journey kakao step 임베드** — JourneysPage 라인 905~956 단순 input 4건 → AlimtalkChannelPanel 통합 (발신프로필 + 템플릿 매트릭스 + 변수 매핑 + 부달 + 미리보기) + 헬퍼 2건 (stepToAlimtalkState + alimtalkStateToStepPatch) + 회사 발신프로필/템플릿/필드 fetch useEffect
+> - **D189 #3 JourneyMmsUploader** 신규 — packages/frontend/src/components/journey/JourneyMmsUploader.tsx (최대 3장 JPG 300KB + 미리보기 + 삭제 + 클라이언트 사전 검증 + 한글 파일명 ASCII 변환 안내) + JourneysPage subject input 직후 통합
+> - **D189 #4 @hanjullo/sdk v0.3.0 + 백엔드 CDP endpoint** — packages/sdk-js/src/journey-variants.ts 신규 (HanjulloJourneyVariantsModule + trackClick/trackConversion) + types.ts VariantTrackParams + VariantTrackResponse + index.ts HanjulloSDK class journeyVariants 모듈 + package.json 0.3.0 + backend routes/cdp.ts POST /api/cdp/journey-variants/:variantId/track (cdpAuth 인증 + 회사 격리)
+> - **D189-fix1 위반 단어 23건 전수 정정** (Harold 격분 사고) — frontend 2 (EmailCampaignsPage + InAppMessagesPage) + backend 21 (company-memory + email-channel + multi-goal-decisioning + voice-inbound + journey-ai-generator + ai-orchestrator + bandit-optimizer + citations + routes/ai + routes/email). AI 시스템 프롬프트 + AI 응답 reasoning + Citations document context + 이메일 본문 + error response + 자동 학습 메모리 영역 영구 정정
+> - **D189-fix2 sdk-js 잔존 박-단어 18건 정정** — push.ts 6 (Buffer 사고 fix 포함) + index.ts 8 + inapp.ts 2 + types.ts 6 + service-worker.ts 2. 자사몰 개발자 IDE 노출 영역 (JSDoc + 인라인 주석) 영구 정정. push.ts Buffer fallback 제거 (브라우저 only 매트릭스 정합 — @types/node 미설치 환경 tsc 사고 차단)
+> - **신규 영구 메모리 1건** + **LESSONS_LEARNED §4-19 신규 사례 1건** — feedback_no_bakkeum_usage § D189 강화 룰 (광범위 grep 패턴 `['"`+백틱]+[^'"`+백틱]{1,200}박[...]` + 사용자 노출 영역 10분류 매트릭스 + SDK 빌드 영구 룰) + LESSONS_LEARNED §4-19 사용자 노출 영역 광범위 grep 패턴 누락 사고 영구 사례
+>
+> **★ Harold 진행 완료 영역**: tp-push + ssh + git pull + backend build:safe + frontend build:safe + sdk-js npm install --include=dev + npm run build (esm + cjs + types 빌드 정합) + pm2 restart all
+>
+> **D189 본질** = Journey Builder Phase 2-C 완성 (A/B Bandit 시각화 + 알림톡 통합 패널 + MMS 업로드 + SDK 트래킹) + 위반 단어 영구 룰 강화 100% (frontend + backend 사용자 노출 영역 + SDK 모든 영역) + sdk-js v0.3.0 안정화 (Buffer 사고 fix + 빌드 정합)
+>
+> **D190+ 진입 명령어 (다음 세션 첫 메시지)**:
+> ```
+> status/STATUS.md CURRENT_TASK § D190+ 진입 가이드 정독 + status/LESSONS_LEARNED.md §3 D188-Phase2B + §4-19 D189-fix1+fix2 사례 정독 + memory/feedback_no_bakkeum_usage.md § D189 강화 룰 정독 → 운영 검증 (영업팀장 알림톡 14건 + Journey Builder + sdk-js + Variants 트래킹) 결과 받은 후 D190+ 진입 (Shopify/메이크샵 구체 구현 / 음성 AI Phase 2 / 클릭 트래킹 인프라 / 단축 URL redirect endpoint / 또는 Harold 신규 신고 우선 종결)
+> ```
+>
+> **D190+ 영역 (다음 세션 진입 시 참조)**:
+>
+> | 우선순위 | 영역 | 분량 | 진입 조건 |
+> |---|---|---|---|
+> | 1 | 박성용 인비토 admin + Journey Variants 운영 검증 결과 정정 | 명시 시 | Harold 신고 시 |
+> | 2 | 단축 URL redirect endpoint (Journey 메시지 본문 → variantId 자동 트래킹) | 3~4h | 클릭 트래킹 인프라 의무 |
+> | 3 | 클릭 트래킹 인프라 (cdp_events.event_name='message_click' 매트릭스) | 3~4h | accumulateCampaignLearning click_count 정확도 향상 |
+> | 4 | Shopify / 메이크샵 wrapper 구체 구현 | 큰 영역 | ENT 후보사 자사몰 종류 박힌 후 |
+> | 5 | 음성 AI Phase 2 (외향 발신) | 큰 영역 | 정보통신망법 + 한국어 자연도 검토 |
+> | 6 | npm publish @hanjullo/sdk v0.3.0 (자사몰 적용 영역) | 1h | Harold 결정 영역 |
+>
+> ---
+>
+> ### 🚀 옛 진입 가이드 (D188 통합 종결 후 — 참조용)
+
+> **★ D188 통합 종결 매트릭스 (2026-05-21)**: 영업팀장 알림톡 14건 fix + Journey Builder Phase 2-B 통합 (wait/condition + MMS/KAKAO + A/B Bandit + 자동발송 폐기) + 위반 단어 영구 룰 전수 정정 117건.
+>
+> **D188 작업 매트릭스 (한 세션 통합 종결):**
+> - **D188 영업팀장 알림톡 14건 통합 fix** (9 파일) — AlimtalkPreview select-text + AlimtalkTemplateFormV2 wrapper readOnly attribute + 반려사유 박스 max-h+scroll + AlimtalkManagementSection 템플릿코드 컬럼 + 검색 UI(4 옵션) + AlimtalkChannelPanel rows={6} + LMS 대체 subject input + 본문 변수 자동 동기화 + AlimtalkSendModal handleClose 안전망 + nextSubject 검증 + Dashboard alimtalkNextSubject state + 3 모달 props + alimtalk-jobs callback fallback (admin_phone_number 빈 영역 → sender_registrations approved.phone + count > 0 시 alarm_notified_status UPDATE 안전망)
+> - **D188-fix1** AlimtalkPreview JSX 주석 위치 사고 정정 + TargetSendModal/DirectSendPanel props interface 정합
+> - **D188-fix2** AlimtalkManagementSection 매트릭스 줄바꿈 정정 (overflow-x-auto + whitespace-nowrap + text-xs + 관리 컬럼 inline-flex)
+> - **D188 Phase 2-B-4 자동발송 영구 폐기** (Harold 명시 "사용 고객사 0 + 여정이 진짜 업그레이드") — DashboardHeader 메뉴 영구 제거 + AutoSendPage 안내 페이지 (여정 빌더 진입) + routes/auto-campaigns POST 410 Gone (운영 데이터 보존 — auto_campaigns + plans 컬럼 + worker 유지)
+> - **D188 Phase 2-B-1 Journey wait + condition step 신규** — journey-builder JourneyStepDefinition stepType+conditionJsonb + activateJourney step_type별 검증 (wait delay>0 / condition conditionJsonb 정합) + AI 시스템 프롬프트 강화 (step_type 3종 가이드 + 11 필드 + 10 operator) + journey-executor step_type 분기 (waited/condition_passed/condition_failed 3 신규 outcome) + evaluateCondition 함수 신규 (customer_field 9 operator + custom_fields JSONB fallback) + JourneysPage step_type select + condition GUI 빌더 (11 필드 × 10 operator + value input)
+> - **D188 Phase 2-B-2 channel 확장 MMS + KAKAO** — DB ALTER journey_steps 7 컬럼 (alimtalk_profile_id/template_code/variable_map/next_type/next_contents/next_subject + mms_image_paths) + JourneyStepDefinition 알림톡/MMS 필드 + createJourneyFromTemplate INSERT + updateJourneyStep patch + processExecution channel 분기 (kakao_templates 조회 + 변수 치환 + insertAlimtalkQueue) + 헬퍼 3종 (replaceAlimtalkVars + convertButtonsToQTmsgInline + extractBasename) + ChannelType kakao + JourneysPage kakao step UI
+> - **D188 Phase 2-B-3 A/B + Bandit 통합** — DB CREATE journey_step_variants + bandit-optimizer.ts 신규 7 함수 (listJourneyStepVariants/selectJourneyStepVariant/recordJourneyStepVariantReward/createJourneyStepVariant/deleteJourneyStepVariant/JourneyStepVariant interface) + processExecution variants Bandit 선택 + reward 누적 + routes/ai.ts variants 4 endpoint (GET/POST/DELETE/track) + PATCH step patch 확장 (stepType/conditionJsonb/alimtalk/mms 영역)
+> - **D188 BetaFeatureModal 여정 강조 통합** — 여정 자동화 카드 description 강화 (7 표준 여정 + Wait/Condition + 다채널 + A/B Bandit) + 실시간 트리거 강화 (여정 즉시 진입) + 헤더 부제 강화
+> - **D188 위반 단어 영구 룰 전수 정정 사고** (Harold 격분 — PDF 캡처 ContinuousOperatorPage + CdpSettingsPage). Phase 1 (PDF 캡처 영역 31건) + Phase 2 (frontend 21 파일 57건) + Phase 3 (backend 응답 메시지 21건) + 활용형 변형 8건 (박히지/박혔/박힐/박았 등) — 총 117건 정정. 사용자 노출 영역만 정정 (backend 코드 주석 skip — Harold 명시 정합)
+> - **신규 영구 메모리 2건** — feedback_no_bakkeum_usage.md § D188 강화 룰 (활용형 grep 패턴 매트릭스 + 정상 한국어 대체 매핑) + feedback_push_and_deploy_commands.md § 4-1 표준 출력 형식 영구 룰 (Harold 명시 — 매 수정 완료 시 무조건 형식)
+>
+> **★ Harold 진행 영역**: DB SQL 2건 (ALTER journey_steps 7 컬럼 + CREATE journey_step_variants) + 인비토 admin_phone_number UPDATE SQL + alarm_notified_status RESET SQL + tp-push + 서버 git pull + build:safe + pm2 restart all
+>
+> **D188 본질** = Braze Canvas Journey 압도 완성 + 자동발송 영구 폐기 (여정이 진짜 업그레이드) + Bandit Thompson Sampling 자동 최적화 + 다채널(SMS/LMS/MMS/알림톡) 통합 + 위반 단어 영구 룰 정합 100% + 표준 출력 형식 영구 룰
+>
+> **D189+ 진입 명령어 (다음 세션 첫 메시지)**:
+> ```
+> status/STATUS.md CURRENT_TASK § D189 진입 가이드 정독 + status/LESSONS_LEARNED.md §3 D188 + §4 메타 위반 정독 + memory/feedback_no_bakkeum_usage.md § D188 강화 룰 정독 + memory/feedback_push_and_deploy_commands.md § 4-1 표준 출력 형식 정독 + memory/project_d188_full_session_consolidated.md 정독 → 운영 검증 (박성용 인비토 admin 검증 결과) 받은 후 D189 잔존 영역 진입 또는 Harold 신규 신고 우선 종결
+> ```
+>
+> **D189 잔존 영역 (다음 세션 진입 시 참조)**:
+>
+> | 우선순위 | 영역 | 분량 |
+> |---|---|---|
+> | 1 | JourneyVariantsEditor (A/B/C 탭 + traffic_weight 슬라이더 + Bandit 통계 시각화) | 3~4h |
+> | 2 | AlimtalkChannelPanel 임베드 (Journey kakao step — 발신프로필+템플릿+변수 매핑 UI 통합) | 2~3h |
+> | 3 | JourneyMmsUploader (MMS 이미지 업로드 UI — 최대 3개 + 미리보기) | 1~2h |
+> | 4 | variants click/conversion 트래킹 SDK 통합 | 2~3h |
+> | 5 | 박성용 인비토 admin 검증 결과 정정 (잔존 신고 시) | 명시 시 |
+> | 6 | 음성 AI Phase 2 (외향 발신) / 자사몰 Shopify/메이크샵 구체 구현 / 클릭 트래킹 인프라 | 큰 영역 |
+>
+> **D184~D187 종결 매트릭스** (D187 세션 종결 시점):
+> - **D184 이니시스 표준결제 한줄로 이전 완료** (CT-41 inicis-client.ts + CT-42 payment-processor.ts + routes/payments.ts 5 endpoint + BalanceModals.tsx 카드결제 활성 + 가상계좌 영구 제거 + PaymentResultPage.tsx 신규 + payments ALTER 9 컬럼 + 2 UNIQUE INDEX + 4 INDEX) — Harold signKey `UzZjT0d2V3FyaDgxSmZwWlY4OUdhQT09` + .env INICIS_MODE=test
+> - **D184-fix** company-frontend/package.json `vite-plugin-javascript-obfuscator: ^3.1.0` devDependencies 누락 정정 (1ca6ee8 commit 2달+ 누적 사고)
+> - **D185 사용자 신고** AddressBookModal 대량 업로드 (130,962건+) 로딩 안내 — isUploading state + 4 fetch try/finally + 로딩 오버레이 + close 차단 + 모든 버튼 disabled
+> - **D186 Phase 1 모달 정렬 정정** — 7 파일 / 19 모달 / 4 좌우 분할 영역 stacked (Dashboard 4 + DirectSendPanel 2 + TargetSendModal + AlimtalkSendModal + ResultsModal 5 + ScheduledCampaignModal 5 + DirectPreviewModal)
+> - **D186 Phase 1.5** DashboardHeader 가로 스크롤 + Dashboard 메인 카드 stacked + DB 카드 grid-cols-2 md:grid-cols-3 (숫자 겹침 사고 정정) + 5 기능 카드 grid-cols-2 md:grid-cols-4
+> - **D186 Phase 2-A** direct-send.css 모바일 @media 쿼리 추가 (1509 라인 @media 0건 사고) + 드래그 스크롤 사고 정정 (`overflow: hidden` 3곳 → 모바일 `visible` + backdrop overflow-y:auto + iOS touch scroll)
+> - **D187 Journey Builder Lite Step 1 종결** — DB 4 테이블 + 6 인덱스 + utils CT-43 journey-builder + CT-44 journey-executor + journey-trigger-watcher (5분 cron 2건) + routes/ai.ts 8 endpoint + JourneysPage /ai-journeys + AiOperatorPage SUB_MODULE_CARDS 12건 + App.tsx 라우트 + app.ts worker 2건 등록
+> - **D187-fix1** Opus 4.7 모델명 UI 노출 9건 전수 정정 (JourneysPage / AiExplainPage / ContinuousOperatorPage / PerformancePage / VoiceInboundPage + journey-builder.ts JOURNEY_TEMPLATES.custom.description + App.tsx 주석 + AiExplainPage 주석) — Harold 영구 룰 정합
+> - **D187-fix2** AI 임의 혜택 박지 X 영구 룰 + step 직접 편집 UI + 회신번호 선택 드롭다운 + AI 다듬기 + DB ALTER (journeys.callback_number + journey_steps.is_ad) + activateJourney placeholder 검증 + 신규 영구 메모리 feedback_ai_no_arbitrary_benefit
+> - **D187-fix3** One-shot AI 매트릭스 — wizard 5단계 폐기 → 자연어 한 줄 / 7 빠른 시작 → Opus 4.7 5~10초 완전 자동 → 1 페이지 검토. utils CT-45 journey-ai-generator (SEASON_BY_MONTH 12월 시즌 키워드 + ai_company_memory + 3 톤 refine 다양성) + JourneysPage 전체 재작성 (main + review 2 view)
+> - **D187-fix4** LMS/MMS subject 누락 사고 정정 — DB ALTER journey_steps.subject + AI 자동 생성 + executor 빈 subject 발송 차단 + JourneysPage 제목 input + 활성화 전 검증
+> - **D187-fix5** 이모지/비표준 특수문자 SMS/LMS 미지원 사고 정정 — utils CT-46 message-sanitizer (EMOJI_RANGES 5 Unicode 영역 + SPECIAL_CHAR_MAP 70+ 매핑 / 대시·불릿·화살표·표시·따옴표·전각·zero-width) + journey-ai-generator AI 응답 자동 sanitize + executor 최후 안전망 + frontend 실시간 경고
+> - **D187 서비스 소개서** — `docs/한줄로_서비스소개서_2026-05.pptx` 16 슬라이드 / 모노크롬 톤 (한줄로 로고 정합) / Pretendard 폰트 / 라임 액센트 1색 / 표지+AI Operator+CTA 다크 임팩트 + 콘텐츠 라이트 / 금지 단어 grep 0건 (AI 모델명·솔루션 구조·휴머스온·D-시리즈·SQL 모두 X)
+> - **신규 영구 메모리 2건** — feedback_ai_no_arbitrary_benefit (AI 혜택 임의 박지 X / 회사 admin 직접 작성) + feedback_no_preview_verification (Claude_Preview MCP 도구 절대 사용 X / hook 안내 무시)
+> - **LESSONS_LEARNED §4 신규 사고 사례 3건** — 4-14 preview verification 의미 0건 / 4-15 MANDATORY_CHECKLIST 누락 반복 / 4-16 SCHEMA 추측 SQL 사고 (lg.name)
+>
+> **D187 본질** = Braze Canvas Journey 압도 차별화 + 진짜 AI Operator 본질 정합 — 자연어 한 줄로 시작 + 5~10초 완전 자동 + 회사 admin은 혜택 부분만 직접 수정 + 활성화. 진정 AI 마케팅 자동화 SaaS의 새로운 기준.
+>
+> **선행 정독:** `docs/AI_OPERATOR_기능정의서.md` v1.2.0 + `docs/한줄로_BEYOND_BRAZE_비전.md` v0.6 + `status/ai_operator_progress.md`
+>
+> **영구 원칙 (모든 작업 시 정합):** [[feedback_no_target_auto_relax]] + [[feedback_ai_operator_model_isolation]] + [[feedback_no_future_roadmap_user_exposure]] + [[feedback_sub_module_back_navigation]] + [[feedback_jondaetmal_to_harold]] + [[feedback_push_and_deploy_commands]] + [[feedback_no_humuson_keyword_exposure]] + [[feedback_no_devtools_browser_diagnostic]] + [[feedback_ai_operator_user_gating]] + [[feedback_no_bakkeum_usage]] + [[feedback_ai_no_arbitrary_benefit]] + [[feedback_no_preview_verification]]
+
+#### 1순위 — 운영 환경 사용 검증 (D182 fix 배포 후)
+
+> Harold 환경 — `.env` `AI_OPERATOR_ALLOWED_USERS=hoyun` 박힘 종결. **hoyun만 실제 진입 / 그 외 모두 BetaFeatureModal**.
+
+| 영역 | 검증 항목 |
+|------|---------|
+| **D182 신고 1 검증** | 직접발송 패널 보관함 버튼 → 저장 메시지 클릭 시 "전문 보기/접기" 토글 정상 동작 |
+| **D182 신고 2 검증** | mysql-refund-sweeper PM2 로그 grep — `[reverse-refund]` / `[memory-learning]` row 박힌 확인 (30초 주기) |
+| **D182 신고 3 검증** | 슈퍼관리자 + 회사 admin 사용자 비밀번호 초기화 → PM2 로그 `SMSQ_SEND_10` 라인 사용 확인 |
+| **영향받은 회사 보전** | 디에스패션 26.4원 + 태영 60.5원 PG SQL 직접 처리 (이전 답변 안내) |
+| AI Operator 메인 | `/ai-operator` 자연어 한 줄 → 통합 제안서 + 발송 |
+| Continuous Operator + Bandit + Multi-Goal | `/continuous-operator` 영구 운영 + Bandit variant 추천 + "다중 목표 분석" 모달 |
+| 성과리포트 | `/performance` 30일 성과 + AI Next Action |
+| 자사몰 연동 (CDP) | `/cdp-settings` — 자체 호스팅 + 네이버 스마트스토어 + 카페24 |
+| Web Push / In-app (admin) | `/push-campaigns` / `/inapp-messages` |
+| 인바운드 음성 AI (admin) | `/voice-inbound` — Clova 환경변수 박힌 후 통화 이력 확인 |
+| Email 캠페인 (admin) | `/email-campaigns` — SendGrid 환경변수 박힌 후 발송 |
+| **D181/D182 신규 — AI 학습 메모리** | `/ai-memory` — 5 타입 검토/삭제/직접 입력. 자동 학습 cron 30초 주기로 누적 |
+| **D181/D182 신규 — AI에게 질문** | `/ai-explain` — Citations 자연어 질문 + 근거 인용 |
+| **D181/D182 신규 — AI Batch** | `/ai-batches` — Batch 진행 상태 + 50% 비용 절감 통계 |
+| **모바일 DM** (AI Operator 안으로 이동) | `/dm-builder` — 헤더 메뉴 제거됨, SUB_MODULE_CARDS에서 진입 |
+
+#### 2순위 — Harold 박을 외부 영역 (운영 진입 박음 시점)
+
+| 영역 | 환경변수 / DB |
+|------|------------|
+| **DB SQL 7건** (D178~D181 신규) | operator_proposal_variants + voice_inbound_calls + email_campaigns + email_events + companies ALTER voice_inbound_enabled + **ai_company_memory + ai_batch_jobs** (D181 신규 2건) |
+| **네이버 커머스 API** | NAVER_COMMERCE_CLIENT_ID + NAVER_COMMERCE_CLIENT_SECRET + NAVER_COMMERCE_REDIRECT_URI |
+| **Naver Clova STT/TTS** | NAVER_CLOVA_STT_INVOKE_URL + NAVER_CLOVA_STT_SECRET + NAVER_CLOVA_TTS_CLIENT_ID + NAVER_CLOVA_TTS_CLIENT_SECRET |
+| **통신사 음성 Webhook** | VOICE_WEBHOOK_SECRET (통신사 박은 HMAC-SHA256 박음) |
+| **SendGrid** | SENDGRID_API_KEY + SENDGRID_FROM_DOMAIN (SPF/DKIM/DMARC 박힘 도메인) |
+| **hoyun 박음 게이팅** ✓ | AI_OPERATOR_ALLOWED_USERS=hoyun (박힘 종결) |
+
+#### 3순위 — 다음 세션 CTO 진행 우선순위 (운영 데이터 누적 병행)
+
+| 순위 | 영역 | 분량 | 진입 조건 |
+|---|------|---|---|
+| **1** | **D183 Journey Builder Lite Step 1** | 큰 (수 일+) | 운영 데이터 1주+ + Bandit/Multi-Goal/Memory 누적 학습 데이터 확인 후 |
+| **2** | **@hanjullo/sdk v0.3.0** (sendEmail + voiceInbound 메서드) | 1~2h | 즉시 가능 |
+| **3** | **D162-4 잔존** (직접타겟발송 검증 + AlimtalkSendModal 수신자 리스트) | 1~2h | Harold 명시 시 |
+| **4** | **클릭 트래킹 인프라** (cdp_events.event_name='message_click') | 3~4h | accumulateCampaignLearning click_count 정확도 향상 필요 시 |
+| **5** | **타임아웃 환불 reverse 슈퍼관리자 알람 SMS** | 1h | 알람 인프라 검토 후 |
+| **6** | **Shopify / 메이크샵 wrapper 구체 구현** | 큰 영역 | ENT 후보사 자사몰 종류 박힌 후 (Harold 결정) |
+| **7** | **D195+ 외향 음성 AI Phase 2** | 큰 영역 | 정보통신망법 + 한국어 자연도 검토 (Harold 결정) |
+| **8** | **D196~D200 AI 챗봇 (자사몰 In-app)** | 큰 영역 | 음성 AI 박힌 후 |
+
+#### Journey Builder Lite (D183~D185) 박을 설계 (다음 세션 진입 시 참조)
+
+**박을 구조**:
+- 6 표준 여정 템플릿: 가입 / 재구매 / 휴면 / 장바구니 포기 / 생일 / 예약
+- 자연어 진입 ("재구매 여정 시작" → Opus 4.7이 6 step 자동 박음)
+- Continuous Operator + Multi-Goal + Bandit 통합 (여정 step별 변형 + 충돌 분석)
+- Memory tool 활용 — 회사별 학습 패턴 기반 step 자동 조정
+
+**박을 영역 예측**:
+- DB: `journeys` + `journey_steps` + `journey_executions` + `journey_step_logs` (4 신규 테이블)
+- utils: `journey-builder.ts` CT-40 + `journey-executor.ts` CT-41
+- routes: `/api/ai/operator/journeys` CRUD + `/start` + `/pause` + `/status`
+- frontend: `/ai-journeys` 페이지 (시각적 step 흐름 + 사용자 진행 추적)
+- Braze Canvas 본질 대응 — 자연어 진입 + AI 자동 step 박음 = 압도 차별화
+
+#### 4순위 — Harold 결정 영역 (운영 검증 후)
+
+| 항목 | 결정 영역 |
+|------|----------|
+| **ENT 베타 진입 회사 1~3사 명단** | 자체 호스팅 / 네이버스토어 / 카페24 종류 + 등급 정합 |
+| **AI Operator 메뉴 디자인 톤다운** | 운영 환경 노출 본 후 BETA 뱃지/색상 박음 |
+| **음성 AI 통신사 인프라 선택** | NCloud SIP / Twilio / 통신사 직접 박음 결정 |
+| **외향 음성 AI 진입** | Phase 2 박을 시점 결정 (정보통신망법 검토 박힌 후) |
+| **AI_OPERATOR_ALLOWED_USERS 박은 영역 확장** | 직원/운영팀 박을 시점 (hoyun 박은 영역에서 영구 검증 박힌 후) |
+
+#### 5순위 — 잔존 영역 (Harold 명시 시 박음)
+
+- D162-4 잔존 (직접타겟발송 검증 + AlimtalkSendModal 수신자 리스트 수정사항)
+- recordCampaignLearning 자동 박음 cron (캠페인 종료 박은 영역 자동 호출, 별 cron 박음)
+- D181 Memory + Batch + Citations Frontend UI 박음 (회사 admin 메모리 검토/삭제 UI + Batch 진행 상태 모니터링 UI + Citations 사용자 질문 박은 영역 박음)
+
+#### 진입 명령 (다음 세션 첫 메시지)
+
+```
+status/STATUS.md CURRENT_TASK § "다음 세션 진입 가이드" 정독 + docs/AI_OPERATOR_기능정의서.md v1.0.10 + docs/한줄로_BEYOND_BRAZE_비전.md v0.6 + status/ai_operator_progress.md 정독 → Harold 신고 우선 종결 또는 D183 Journey Builder Lite 진입 또는 SDK v0.3.0 진입
+```
+
+---
+
+### 🔥 D162-4 (2026-05-15 ~ 2026-05-19, 진행 중) — 알림톡 발송 모달 전면 재구성 + 잔존 검증
+
+> **Harold님 명시:** "직접타겟발송은 검증이 더 필요한 상황이야 여전히 리스트 부분에서 수정사항이 좀 있어"
+>
+> **상세 메모리:** `memory/project_d162_4_alimtalk_send_modal_overhaul.md` 정독 — 1~8차 누적 + 변경 파일 + 잔존 작업.
+
+#### 진행 완료 (1~8차, 배포 완료)
+
+PDF 0515 알림톡 3건 root cause fix + Harold UX 8차 반복 정합:
+- AlimtalkSendModal.tsx 신규 풀 화면 모달 (좌측 채널 + 우측 수신자/매칭/발송, 직접입력/파일등록/주소록 3 탭, 파일 컬럼 매핑 모달 내장)
+- DirectSendPanel/TargetSendModal 알림톡 채널 탭 제거 + 헤더에 amber 톤 "알림톡 발송" 버튼 + onAlimtalkOpen prop
+- AlimtalkVariableMappingPanel 4열 grid 컴팩트 + AlimtalkChannelPanel sampleRecipient prop으로 실제 row 값 치환
+- routes/companies.ts `/:id` requireUuidId 미들웨어 (`/kakao-templates` 가로채던 1년+ 사고 영구 종결)
+- useEffect 분리 ([show] state reset + [show, initialRecipients] setRecipients) — deps 누락 사고 차단
+- dynamicFieldOptions 3-tier 우선순위 (recipients[0] keys > enabledFields > props customerFieldOptions)
+- 휴머스온 키워드 전수 제거 (frontend 3 + backend 9 파일, "카카오 검수팀"/"내부 반려" 단일화)
+- 반려사유 상세 모달 분리 (max-w-2xl max-h-80vh)
+
+#### 잔존 작업 (다음 세션 진입 시)
+
+- ★ **직접타겟발송 검증** — 8차 useEffect deps fix 후 추출된 수신자가 알림톡 모달에 정상 인계되는지 + 변수 매칭 드롭다운에 추출 컬럼만 노출되는지 검증
+- ★ **AlimtalkSendModal 수신자 리스트 수정사항** — Harold 미명시(다음 세션에서 구체 신고 받음)
+
+#### 메모리 신규 박음 (D162-4 기간)
+
+- `feedback_no_devtools_browser_diagnostic.md` — F12 안내 절대 금지
+- `feedback_push_and_deploy_commands.md` — 푸시/배포 표준 형식
+- `feedback_no_humuson_keyword_exposure.md` — 휴머스온 키워드 노출 금지
+- `feedback_jondaetmal_to_harold.md` — Harold님 대상 존댓말 절대 (D162-5에서 명시 지적)
+
+---
+
+### 🚀 D162-5 → D170+ (2026-05-19) — Braze급 SaaS Step 0 (D163~D170) 완료 + 배포
+
+> **Harold님 명시:** "제대로 만들어보자 우리 제대로된 브레이즈급의 SaaS 를 말야 너와 내가"
+>
+> ★ **누적 작업 상세 추적:** [`status/ai_operator_progress.md`](status/ai_operator_progress.md) — 박힌 파일/잔여 작업/Harold 정합 룰 매트릭스
+> ★ **메모리:** `memory/project_d162_5_braze_grade_roadmap_kickoff.md` + `memory/feedback_ai_operator_model_isolation.md`
+
+#### Step 0 (D163~D170) ✓ 완료 + 배포 매트릭스
+
+| Phase | 핵심 | 상태 |
+|-------|------|:-:|
+| D163 | 베타 안내 시스템 인프라 (헤더 메뉴 + BetaFeatureModal + isBetaAccessAllowed + /ai-operator 라우트) | ✓ |
+| D164 | `POST /api/ai/operator/propose` endpoint + Hero/Pipeline/Result 6 카드 | ✓ |
+| D165 | 결과 카드 정합 (메시지 3안 토글 + 다듬기 + 성과 차트 + 비용 breakdown + (광고) 미리보기) | ✓ |
+| D166 | 승인→발송 (preview-recipients + /direct-send 2-step) + 발송 시점 안전장치(sendMode 3분기 + datetime input + confirm) | ✓ |
+| D167 | Prompt Caching (cache_control ephemeral) | ✓ |
+| D168 | Count 검증 (countFilteredCustomers — AI 추정 → DB 실제) | ✓ |
+| D169 | Extended Thinking 옵션 (Opus 4.7 adaptive 호환) | ✓ |
+| D170 | Multi-Agent Orchestrator (services/ai-orchestrator.ts + 6 Sub-agent + 회사별 메모리) | ✓ |
+| D170+ | Harold 명시 정합 fix 누적 (모델 분리 + Opus 4.7 breaking changes + GPT 5.5 fallback + UI 모델명 제거 + CSS warning fix) | ✓ |
+| D171 | SESSION_MILESTONES 갱신 (A) + ENT 베타 운영 진입 가이드 (C) + **Zero-Count Auto-Relax 영구 제거 (B, Harold 명시 — 타겟 정합성 100%, 0건 = 발송 차단)** + **진정 Orchestrator AI (D, Opus 4.7 Tool Use 기반 multi-agent loop, env flag toggle)** | ✓ (빌드 대기) |
+| D172 | **한줄로 CDP 박음 — A+B 동일 세션 종결.** Harold 명시 "다음세션 X 여기서 전부 마무리". **A 백엔드 코어**: cdp 컬럼 + 4 테이블 + utils CT 4(cdp-auth/cdp-identity/cdp-events/cdp-orders) + routes/cdp.ts 7 endpoint + plan-guard ai_cdp + app.ts + CdpSettingsPage + 메뉴. **B SDK + 카페24**: packages/sdk-js/ 패키지 `@hanjullo/sdk` 4 메서드 + utils/cafe24-client.ts CT-23 + routes/cafe24.ts OAuth/Webhook + company_integrations 테이블 + 카페24 연동 UI. BUSINESS+ 베타 + bcrypt + idempotency. 단일 push + DB SQL 9+1건 + 환경변수 3건 (CAFE24_*) | ✓ (빌드 + DB schema SQL + 환경변수 대기) |
+| D173 | **Provider Adapter 일반화 (자사몰 종합 세트)** Harold 명시 "카페24만 X 다양한 자사몰 종합 대응" 정합. utils/provider-registry.ts (CT-24 IProviderAdapter base + Registry + SkeletonProviderAdapter Shopify/메이크샵/imweb/식스샵/WooCommerce 등록) + cafe24-client.ts cafe24Adapter 박음(첫 구현체) + routes/cafe24 위임(7-1 단일 진실) + GET /api/cdp/providers + CdpSettingsPage "지원 자사몰 매트릭스" 카드 | ✓ (빌드 대기) |
+| D174 | **Step 1 Next Action Advisor 핵심 ("1회성 발송툴 탈출")** Harold 명시 "Braze 월등하고 범용적인 Operator". utils/next-action-advisor.ts (CT-25 buildPerformanceSnapshot + recommendNextAction Opus 4.7) + POST /api/ai/operator/next-action + PerformancePage(30일 성과 매트릭스 + AI 추천 카드 + AI Operator prefill 흐름) + DashboardHeader 성과리포트 메뉴 + /performance 라우트 + AiOperatorPage prefill objective. Opus 4.7 모델 분리 룰 정합 | ✓ (빌드 대기) |
+| D175 | **공식 기능 정의서 박음** Harold 명시 "이력 관리 + 소개서 .docx 변환 정합" → `docs/AI_OPERATOR_기능정의서.md` 신설 (살아있는 문서, v1.0.3, 14 섹션: 개요/차별화/아키텍처/모델/Sub-agent/기능/영구원칙/CDP/Provider/베타게이팅/API매트릭스/로드맵/환경변수/변경이력) + CLAUDE.md 필수 참조 매트릭스 박음 + ai_operator_progress.md 정의서 연결 | ✓ (문서) |
+| D175-A | **Web Push + In-app Message 채널 (SDK 확장)** Harold 명시 "Web Push까지 가도록" + 영업팀장 의견 정합. DB 4 신규 테이블(cdp_push_subscriptions/cdp_push_campaigns/cdp_inapp_messages/cdp_inapp_impressions) + utils CT-26 web-push(VAPID + 자동 expire) + CT-27 inapp-message(CRUD + frequency 제어 + 트래킹) + routes/cdp.ts push+inapp endpoint 9건 + SDK `@hanjullo/sdk` v0.2.0(push/inapp/service-worker 3 모듈) + PushCampaignsPage + InAppMessagesPage + 메뉴 2건(회사 admin only). 환경변수 3건(VAPID_*) + `web-push` 패키지 의존성. 기능 정의서 v1.0.4 갱신 | ✓ (빌드 + DB SQL 4건 + 환경변수 + npm install 대기) |
+| D175-B | **BEYOND BRAZE 비전 문서 박음** Harold 명시 "글로벌 최강 마테크 + 가장 압도적인 마케팅 AI Operator + 누구도 못 따라하는 솔루션 + 원칙 정합". 체어맨 + CTO 전용 살아있는 문서 `docs/한줄로_BEYOND_BRAZE_비전.md` v0.1 12 섹션(Manifesto + 영구 원칙 5건 + Braze 진정 강점/한계 + 8축 차별화 + Continuous Operator 사용자 동의 흐름 정정 + 음성 AI 정직 분석 + 압축 로드맵 D176~D200 + 5년 시야 Phase 매트릭스 + 진입 장벽 + KPI + 협업 원칙) + CLAUDE.md 필수 참조 매트릭스 박음. **Harold 정정 정합: AI 자기 맘대로 X / 항상 사용자 동의 후 실행** | ✓ (문서) |
+| D176 | **Continuous Agentic Operator (사용자 동의 흐름)** BEYOND BRAZE 비전 압축 로드맵 1순위 박힘. DB 2 테이블(continuous_operators + operator_proposals) + companies ALTER 3 컬럼(cdp_auto_execute_*) + utils CT-28 continuous-operator(createOperator + generateProposalForOperator + Zero-Count 영구 원칙 정합 0건 시 제안서 박지 X + ENT 자동 실행 임계값 + 7일 자동 만료 + 5분 worker scheduler) + routes/ai.ts Operator CRUD + run-now + Proposals 승인/거부 + ContinuousOperatorPage(2 탭 + 모달) + "AI 영구운영" 메뉴 + /continuous-operator 라우트 + app.ts worker 등록. **AI 단독 실행 X 영구 원칙 100% 정합 + ENT 자동 실행 default OFF + 1,000건/5만원/low risk/비광고 임계값.** 기능정의서 v1.0.5 + 비전 v0.2 갱신 | ✓ (빌드 + DB SQL 3건 대기) |
+| D177-fix | **AiOperatorPage SESSION_MILESTONES + 진행률 카드 + 9 세션 로드맵 영구 제거** Harold 명시 — "이미 작업완료한건 언제 적용? / 굳이 업그레이드 보여줄 필요 X / 직원들한테 방향성 잡음 명시 X". 직원/외부 노출 시 미래 로드맵 = 영업/보안/사용자 혼란 위험. type MilestoneStatus + interface SessionMilestone + SESSION_MILESTONES + STATUS_CONFIG + doneCount/progress 계산 + 진행률 카드 렌더링 + 9 세션 로드맵 렌더링 전체 제거 | ✓ (빌드 대기) |
+| D177-ux | **DashboardHeader 메뉴 간소화 — AI Operator dropdown 통합** Harold 명시 — "메인 메뉴 헤더 복잡 / AI 오퍼레이션 안 하위 메뉴 / 디자인 신경써서 마무리 / 신규 메뉴들 전부 AI Operator 하위". MenuItem interface 확장(subMenu) + AI Operator 메뉴에 subMenu 5건 통합(AI Operator/AI 영구운영/성과리포트/자사몰 연동/Web Push/인앱메시지) + 기존 헤더 별도 박힌 5건 메뉴 제거 + dropdown UI 박음(hover trigger + 그라데이션 상단 강조선 + label+description + BETA 뱃지 + 하단 안내 "AI가 제안 · 사용자가 승인 후 발송" + animate-in fade-in zoom-in-95 + 호버 보라색 hover bg) | ✓ (빌드 대기) |
+| D177-ux2 | **dropdown 영구 제거 + AiOperatorPage 안 sub-module 박음** Harold 명시 정정 — "dropdown X / AI Operator 페이지 안 메뉴 박음". DashboardHeader SubMenuItem interface + AI Operator subMenu + dropdown 렌더링 영구 제거 + AiOperatorPage에 SUB_MODULE_CARDS 5건(AI 영구운영/성과리포트/자사몰 연동/Web Push 회사 admin only/인앱메시지 회사 admin only) + "함께 사용하는 AI 영역" 섹션 박음(7 엔진 카드 위) + 카드별 그라데이션 + BETA 뱃지 + 호버 효과 + → 화살표 transition. 헤더는 AI Operator 메뉴만 박음 | ✓ (빌드 대기) |
+| D177-ux3 | **sub-module 페이지 뒤로가기 일관성 fix** Harold 명시 — "AI 오퍼레이션 메뉴로 돌아가는게 아니라 메인페이지로 돌아간다 / 원칙에 맞도록". 5 페이지(CdpSettings/Performance/ContinuousOperator/PushCampaigns/InAppMessages) ArrowLeft 박을 때 navigate('/') → navigate('/ai-operator') 일괄 정정. 부모-자식 계층 본질 정합. 영구 원칙 박음(memory/feedback_sub_module_back_navigation.md) | ✓ (빌드 대기) |
+| **D178 Track A-1 자체 호스팅** | Harold 명시 "카페24보다 자체 호스팅 자사몰 위주". utils/custom-self-hosted-adapter.ts CT-29(HMAC-SHA256 hex/base64 + identifyCustomer/syncOrder/trackEvent 표준 + issueCustomWebhookSecret) + routes/cdp.ts /webhook/custom + 회사 admin 3 endpoint + CdpSettingsPage 카드(secret 1회 노출 + Node.js 코드 샘플) | ✓ (빌드 대기) |
+| **D178 Track A-2 네이버 스마트스토어** | Harold 명시 "네이버스토어를 자사몰처럼 쓰는 회사들 많음". utils/naver-commerce-client.ts CT-30 + routes/naver-commerce.ts(authorize/callback/webhook/status/disconnect, cafe24 미러) + naverSmartStoreAdapter + CdpSettingsPage 카드 + 환경변수 3건 | ✓ (빌드 + 환경변수 대기) |
+| **D177 Self-Optimizing Bandit** | utils/bandit-optimizer.ts CT-31 Thompson Sampling(Beta-Bernoulli + Marsaglia-Tsang Gamma + cold start explore + operator 누적 학습) + operator_proposal_variants 테이블 + continuous-operator 확장 + routes/ai variants endpoint 2건 + ContinuousOperatorPage variant 매트릭스 | ✓ (빌드 + DB SQL 1건 대기) |
+| **D178 인바운드 음성 AI** | utils/naver-clova-client.ts CT-32(STT/TTS) + utils/voice-inbound.ts CT-33(Opus 4.7 + CDP 매칭 + TTS) + voice_inbound_calls 테이블 + companies ALTER voice_inbound_enabled + routes/voice.ts + VoiceInboundPage(토글 + 영구 원칙 + 통화 이력 + 트랜스크립트 사후 확인) | ✓ (빌드 + DB SQL 1건 + ALTER + Clova 환경변수 4건 + VOICE_WEBHOOK_SECRET 대기) |
+| **D179 Multi-Goal Decisioning** | utils/multi-goal-decisioning.ts CT-32(Opus 4.7 충돌 분석 + sub_plans + conflict_matrix + recommended_order + 가중치 자동 정규화 + fallback) + routes/ai /operator/multi-goal/analyze | ✓ (빌드 대기) |
+| **D180 SendGrid Email** | utils/sendgrid-client.ts CT-35 native fetch + utils/email-channel.ts CT-36(Zero-Count + 광고성 prefix + 무료거부 + 1,000건 batch) + email_campaigns/events 2 테이블 + routes/email.ts + EmailCampaignsPage | ✓ (빌드 + DB SQL 2건 + 환경변수 3건 대기) |
+| **D178 hoyun 박음 게이팅** | utils/plan-guard.ts isAiOperatorAllowed 박음 + routes/ai.ts 5건 정정 + GET /operator/access endpoint + Dashboard.tsx onAiOperatorClick 박음. ENV `AI_OPERATOR_ALLOWED_USERS=hoyun` 박힘 시 hoyun만 진입, 그 외 모두 BetaFeatureModal | ✓ + ENV 박음 종결 (Harold 직접 2026-05-19) |
+| **D181 #1 D179 Frontend UI** | ContinuousOperatorPage 다중 목표 modal + analyze + sub_plans + conflict_matrix + recommended_order UI + 가중치 자동 정규화 + 헤더 "다중 목표 분석" 버튼 박음 | ✓ (빌드 대기) |
+| **D181 #2 Anthropic Memory tool 패턴** | utils/company-memory.ts CT-37(5 메모리 타입 + addMemory + listMemories + buildMemoryPromptContext + recordCampaignLearning) + DB ai_company_memory + ai-orchestrator buildMemoryPromptContext 박음 + routes/ai.ts 회사 admin 3 endpoint | ✓ (빌드 + DB SQL 1건 대기) |
+| **D181 #3 Anthropic Batch API** | utils/batch-ai.ts CT-38(Anthropic native messages.batches + submitBatch + pollBatch + getBatchResults + listBatchJobs) + DB ai_batch_jobs + routes/ai.ts /operator/batches 2 endpoint. **대량 발송 50% 비용 절감 (24h SLA)** | ✓ (빌드 + DB SQL 1건 대기) |
+| **D181 #4 Anthropic Citations** | utils/citations.ts CT-39(buildCompanyDocuments 4 document + callAIWithCitations Opus 4.7 native citations.enabled) + routes/ai.ts /operator/explain endpoint. **사용자 신뢰 #4 본질** | ✓ (빌드 대기, DB 박지 X) |
+| **DB schema** | **D172/D172-B/D175-A/D176 운영 환경 SQL 17건 전체 박힘 종결** (Harold 직접 PostgreSQL 실행, 2026-05-19) — 검증 SQL 결과 11 테이블 + 6 companies 컬럼 + 2 plans 컬럼 모두 정합 | ✓ 박힘 종결 |
+| **D178~D181 신규 DB schema** | **7 신규 항목 박을 영역** — operator_proposal_variants + voice_inbound_calls + email_campaigns + email_events + companies ALTER voice_inbound_enabled + **ai_company_memory + ai_batch_jobs (D181)** | ⏸ Harold 직접 박을 영역 |
+
+#### Harold 명시 모델 영역 절대 분리
+
+- **AI Operator 신메뉴** = Claude Opus 4.7 + GPT 5.5 (둘 다 temperature 박지 X)
+- **기존 한줄로AI 전체** = Claude Sonnet 4.6 + gpt-5.4-mini (절대 변경 X, 6,000사+ 영향)
+- 결정 위치: `packages/backend/src/config/defaults.ts` AI_MODELS (코드 default가 진실, .env는 override만)
+
+#### 잔여 (Phase 1+ 예정)
+
+- **Step 0 종결:** D171 코드 작업 (A/B/C) 종결 — 빌드/배포 후 ENT 베타 진입 대상사 확정 단계만 Harold 결정 대기 (상세 = `status/ai_operator_progress.md` § "ENTERPRISE 베타 운영 진입 가이드")
+- **Step 1 (D172~D180)**: 성과 리포트 → Next Action 추천 (recommendNextCampaign 강화 + 매출/ROI/LTV 통합 리포트)
+- **Step 2 (D181~D200)**: Journey Builder Lite (가입/재구매/휴면 자동 여정)
+- **Step 3 (D201~D230)**: Decisioning Engine (고객별 채널/시점/오퍼 AI 결정)
+
+---
+
+### 🚀 D162-5 원본 kickoff (2026-05-19) — 참조용
+
+> **상세 메모리:** `memory/project_d162_5_braze_grade_roadmap_kickoff.md` 정독 — 두 docx(Braze_HanjulloAI_Briefing + HanjulloAI_Braze_Grade_Product_Strategy) 정독 결과 + AI 4 결합 전략 + 9 세션 분할 + ENTERPRISE+ 베타 게이팅.
+>
+> **D163 핸드오프:** `status/handoff_D163_beta_modal_system.md` 정독 — 변경 파일 4건 정확한 위치 + BetaFeatureModal 디자인 가이드.
+
+#### 진단 (Harold님 명시)
+
+- 무료체험 67사 AI 활용 0건 — 진짜 root cause = "AI로 뭘 해야 할지 모름" 진입 friction + 가치 인지 실패
+- 두 가정 평가:
+  - 가정 1 (유료 전환 부담) = 정합. 35만원 베이직도 못 쓰면 어차피 타겟 외. 단 "써보지 않음"의 root cause는 가격 아님.
+  - 가정 2 (밥줄 위협) = 부분 사실. 한국 SMB 마케팅 현장은 1인 담당(환영) / 5~10명 팀(저항) / 대표 직접(환영)으로 갈림. 한줄로 타겟 비중 작음.
+- 진짜 답 = Braze 문서 "사용자는 캠페인 세팅 배우고 싶어 하지 않는다 — 한 줄 목표 입력하면 AI가 실행 패키지로 바꿔야 한다"
+
+#### 9 세션 분할 (Step 0)
+
+| D | 범위 | 등급 가시성 |
+|---|------|-----------|
+| **D163** | 베타 안내 시스템 인프라 (헤더 메뉴 + 모달 + 게이팅) | 모달=전체, 기능=ENT+ |
+| **D164** | 무료체험 진입 wizard + 자연어 입력 prominently | ENT+ |
+| **D165** | AI 제안서 통합 카드 (타겟+메시지+채널+시간+비용+성과) | ENT+ |
+| **D166** | 승인→발송→결과 reactive 흐름 | ENT+ |
+| **D167** | Prompt Caching (services/ai.ts callAIWithFallback 강화) | backend 인프라 |
+| **D168** | Tool Use SQL Loop (recommendTarget + relaxFilters 자동) | backend 인프라 |
+| **D169** | Extended Thinking (recommendNextCampaign + 채널 의사결정 reasoning trace) | backend 인프라 |
+| **D170** | 회사별 메모리 + Multi-agent (Orchestrator Opus 4.7 + Sub-agent Sonnet 4.6) | backend 인프라 |
+| **D171** | Step 0 통합 검증 + ENTERPRISE 대상 베타 운영 진입 | 운영 진입 |
+
+#### AI 4 결합 전략 (D162-5 확정)
+
+1. **3 모델 mix:** Opus 4.7 (1M ctx, orchestrator) + Sonnet 4.6 (sub-agent 병렬) + Haiku 4.5 (분류 단순)
+2. **5 API 무기:** Prompt Caching + Tool Use + Extended Thinking + Batch API + Citations
+3. **Multi-agent loop:** Orchestrator + Target/Message/Compliance/Channel/Schedule/Cost-ROI/Journey 6~7 Sub-agent
+4. **회사별 메모리 누적:** Anthropic Memory tool + 30일 캠페인 history 시스템 프롬프트 캐싱
+
+#### 베타 게이팅 정책 (Harold 명시)
+
+- ENTERPRISE/BUSINESS = 실제 베타 기능 진입
+- 그 외 (TRIAL/FREE/STARTER/BASIC/PRO) = BetaFeatureModal (아주 예쁜 디자인) 표시
+- 헤더 메뉴는 전체 노출 = "곧 어마어마한 기능 옵니다" 마케팅 효과
+- 안정성 검증 후 PRO → BASIC 단계적 확장
+
+#### Step 1~3 (D172+ 예고)
+
+- **Step 1** (D172~D180): 성과 리포트 → Next Action 추천 ("1회성 발송툴" 탈출)
+- **Step 2** (D181~D200): Journey Builder Lite (가입/재구매/휴면/장바구니 자동 여정)
+- **Step 3** (D201~D230): Decisioning Engine (고객별 채널/시점/오퍼 AI 결정)
+
+#### 진입 순서
+
+1. **선행** = D162-4 잔존(직접타겟발송 검증 + AlimtalkSendModal 수신자 리스트) 종결
+2. **D163 진입** = `status/handoff_D163_beta_modal_system.md` 정독 + Step A-D 박음
+3. **검증** = tsc 0 errors + 로컬 동작 + 디자인 정합 + atomic safe-build
+4. **배포** = Harold님 직접 진행
+
+---
+
+### 🟢 D150 (2026-05-08~11) — 알림톡+카카오 전체 마무리 (코드 작업 종결, 월요일 자연 검증만 잔여)
+
+> **Harold님 명시:** "5월 10일 일요일까지 전부 끝내려고 해. 같이 제대로 해보자 원칙에 맞게."
+>
+> **상세 메모리:** `memory/project_d150_alimtalk_kakao_full_audit.md` 정독 — Step 0~4 결과 + 다음 세션 진입 가이드.
+
+#### ✅ 5/9 토요일 작업 결과 (Step 0~3 모두 완료)
+
+| Step | 결과 |
+|---|---|
+| **0** D150-1 이미지 업로드 9개 atomic 배포 | ✅ 5/9 08:05 KST. dist 매칭 6건 / hanjul.ai HTTP/1.1 200 OK |
+| **1** updateAlimtalkTemplate D148 누락 점검 | ✅ 누락 0건 (normalize 자동 경유 확인) |
+| **2** 브랜드메시지 9개 매뉴얼+코드 정독 | ✅ 누락 0건 (brand-message.ts 처음부터 snake_case + 이미지 6종 D150-1 자동 반영) |
+| **3** 알림톡 매뉴 24개 vs 한줄로 14개 매핑 | ✅ 시급 누락 0건 (미구현 10개 모두 불요 또는 선택) |
+
+#### ⏸ Step 4 — 월요일(5/11) 직원 자연 검증만 잔여
+
+- 토요일 직원 검증 불가
+- **A안:** 박성용 과장님 새 템플릿 시도 → IMC 화면 정상 표시
+- **B안:** 한줄로 자체 검증 (node IMC GET 직접) — magic `ffd8ffe0` + size 일치 + match PG: true
+
+검증 통과 시 D135~D150 100% 마감.
+
+#### D135~D150 종결 매트릭스 (검증 후 확정)
+
+| 신고 | fix | 검증 |
+|---|---|:-:|
+| 등록창 안 닫힘 | D147 자동 | ✅ |
+| 한줄로 관리화면 등록 안됨 | D147 | ✅ |
+| 상태별 액션 버튼 | D139 + D147 | ✅ |
+| 대표링크 IMC 미전달 (7번 누적) | D148 (snake_case) | ✅ |
+| 안내문구 삭제 | D146 | ✅ |
+| 이미지 추출 실패 | D146 | ✅ |
+| 수정 시 한줄로 미반영 | D149-#A | ✅ |
+| **IMC 이미지 깨짐 (4주 누적)** | **D149-#B (Content-Length)** | ✅ byte 일치 검증 |
+| 이미지 업로드 9개 동일 risk | **D150-1 (D149-#B 패턴 미러)** | ✅ 배포 |
+| updateAlimtalkTemplate D148 누락 | Step 1 검증 | ✅ |
+| 브랜드메시지 D148/D149-#B 누락 | Step 2 검증 | ✅ |
+| 알림톡 매뉴 24개 누락 | Step 3 검증 | ✅ |
+| 월요일 직원 자연 검증 | A/B안 | ⏸ 5/11 |
+
+#### IMC API 60개 vs 한줄로 적용 매트릭스
+
+| 영역 | 개수 | D148 (snake_case) | D149-#B (Content-Length) | 시급 |
+|---|:-:|:-:|:-:|:-:|
+| **이미지 업로드** | **9** | N/A | ❌ **미적용** | 🔴 |
+| 알림톡 템플릿 관리 | 24 | createTemplate ✅ / updateTemplate **미점검** | requestInspectionWithFile ✅ | 🟡 |
+| 검수 알림 수신자 관리 | 5 | N/A | N/A | 🟢 |
+| 브랜드메시지 템플릿 | 9 | **미점검** | **미점검** | 🟡 |
+| 발신프로필 관리 | 11 | N/A | N/A | 🟢 |
+| 템플릿 카테고리 조회 | 2 | N/A | N/A | 🟢 |
+
+#### 5/10 마감 작업 우선순위
+
+1. **🔴 이미지 업로드 9개 Content-Length 적용** (D149-#B 검증된 패턴 미러 / 회귀 위험 0 / 즉시 진행)
+2. **🟡 updateAlimtalkTemplate D148 변환 누락 점검** (코드 정독 → 필요 시 normalizeTemplateBodyForImc 호출 추가)
+3. **🟡 브랜드메시지 9개 매뉴얼 정독 + 패턴 적용** (Harold님 페이지 따주신 후)
+4. **🟡 알림톡 매뉴 24개 전수 비교** (현재 한줄로 구현 vs 매뉴얼)
+
+#### 끌로드원칙 자기검증 의무
+
+작업 진입 시 한 줄: 적용 feedback 명시 → 매뉴얼/코드 정독 → grep 전수 → 보고 → 컨펌 → Edit → 잔존 0 grep → TS 0 → atomic 배포.
+
+**금지 패턴 (D149-#B에서 반복 위반):** 옵션 A/B/C 추천 / Auto mode 절차 우회 / grep 후행 / 매뉴얼 미검증 가설.
+
+---
+
+### 🟢 D149-#B 진짜 root cause 100% 검증 (2026-05-08 저녁) — D135~ 4주 알림톡 디버깅 진짜 종결
+
+> **상태:** ✅ **5/8 19:58 atomic safe-build + 검증 흐름(PG hex + IMC GET 직접 호출 + 재전송 재현)으로 진짜 root cause 100% 확정.** IMC 측 저장 binary와 PG 174905 bytes byte 단위 일치 검증.
+
+#### 🎯 진짜 root cause = form-data + axios Content-Length 누락 → chunked Transfer-Encoding → IMC binary 저장 누락
+
+**검증 흐름 (사실 기반):**
+1. **PG `inspection_evidence_data` 100% 정상** (`encode(..., 'hex')` 검증) — size 174,905 / magic `ffd8ffe0` / first_16 `ffd8ffe000104a464946000101010060` (JFIF JPG 표준)
+2. **IMC GET `/comment/file` 직접 호출** (alimtalk-api.ts:`getAlimtalkCommentFile` + 검증 라우트 `_debug-evidence-binary` 신설) → 105 bytes JSON `{"code":"4104","message":"파일 다운로드 실패","data":null}` = **IMC 측 첨부파일 미저장 확정**
+3. **D149-#B 1차 fix(mimetype + contentType + knownLength)로 안 됨** → 2차 fix: `form.getLength()` 호출 + `Content-Length` 헤더 명시 + `maxBodyLength: Infinity`
+4. **재현 검증** — 동일 PG buffer로 D149-#B fix 적용 IMC 재전송 + 즉시 GET 다운로드:
+   - POST: `code:"0000", message:"SUCCESS"` + formLength=175301 (form 전체 길이 명시 박힘)
+   - GET: 174,905 bytes / magic `ffd8ffe0` / **match PG?: true** = byte 단위 일치
+
+→ **유일한 차이 = Content-Length 헤더 명시.** form-data + axios 조합에서 자동 계산 X → chunked Transfer-Encoding → IMC가 multipart binary 저장 시 누락. **D135부터 4주 끌어온 진짜 root cause.**
+
+#### ✅ D147+D148+D149-#A+D149-#B 종합
+
+| # | fix |
+|:-:|---|
+| **D147** | `templateCode` null fallback (templateKey 3단계 폴백) |
+| **D148** | `templateRepresentLink` camelCase → snake_case 변환 |
+| **D149-#A** | V2 PUT PG 본문 미갱신 → INSERT 패턴 미러 UPDATE |
+| **D149-#B 1차** | mimetype + contentType + knownLength 명시 |
+| **D149-#B 2차 (진짜 fix)** | **form.getLength() + Content-Length 헤더 명시** (chunked transfer 차단) |
+| 검증 라우트 | `getAlimtalkCommentFile` 함수 + `_debug-evidence-binary` 라우트 신설 (미래 비슷한 사고 즉시 진단) |
+
+#### ✅ D135부터 누적 신고 모두 종결
+
+| 신고 | 처리 |
+|---|:-:|
+| 등록창 안 닫힘 | ✅ D147 자동 |
+| 한줄로 관리화면 등록 안됨 | ✅ D147 |
+| 상태별 액션 버튼 | ✅ D139 + D147 자동 |
+| **대표링크 IMC 미전달 (7번 누적)** | ✅ **D148 (snake_case)** |
+| 안내문구 삭제 | ✅ D146 |
+| 이미지 추출 실패 | ✅ D146 |
+| 수정 시 한줄로 미반영 | ✅ D149-#A |
+| **IMC 이미지 깨짐 (4주 누적)** | ✅ **D149-#B 2차 (Content-Length 명시) — IMC 측 byte 단위 일치 확정** |
+| 코멘트/증빙자료 등록 시점 | ✅ 매뉴얼 동작 정상 (검수요청 시점, 직원 검증) |
+
+#### 잔존 별건 (낮은 우선순위)
+
+1. ALIMTALK-DESIGN.md:626-631 명세 정정 (camelCase → snake_case)
+2. AlimtalkTemplateFormModal V1 레거시 폐기 (D143 명시)
+3. emphasize_sub_title 컬럼 DB DROP (V1 폐기 후)
+4. uploadSingleImage / uploadMultipleImages도 Content-Length 명시 (현재 작동 중 + 직원 신고 0건 = 시급 X, 미래 사고 방지)
+
+---
+
+### 🟢 D147+D148+D149 (2026-05-08 오후) — 알림톡 PDF 0508 누적 4건 root cause fix 종결 (D135~ 마감)
+
+> **상태:** ✅ **5/8 17:10 atomic safe-build + pm2 reload 배포 + dist/PG/PM2/외부응답 검증 완료.** 직원 1회 IMC 이미지 정상 표시 자연 검증만 잔여. **D135부터 누적 신고된 알림톡 사고 진짜 마감.**
+>
+> **상세 메모리:** `memory/project_d147_d148_d149_alimtalk_종결.md` 정독.
+
+#### 🎯 4건 root cause + fix
+
+| # | root cause | fix |
+|:-:|---|---|
+| **D147** | IMC 등록 응답 `templateCode=null + inspectionStatus="REG"` 회신 (검수요청 전 정상). D135부터 `r.data.templateCode`만 의존 → 라인 708 `!templateCode` 분기 400 차단 | `alimtalk.ts:690` 3단계 fallback `templateCode \|\| templateKey \|\| 로컬 templateKey` |
+| **D148** | IMC 매뉴얼 응답 명세 `{url_mobile, url_pc, scheme_android, scheme_ios}` (snake_case). D135부터 한줄로가 camelCase로 보냄 → IMC 키 매칭 실패 → 빈 echo + IMC DB 미저장 | `alimtalk-api.ts:467,478` `toImcRepresentLink` 변환 함수 신설 — IMC 호출 직전에만 변환, frontend/PG는 camelCase 유지 |
+| **D149-#A** | V2 PUT가 IMC만 갱신 + PG는 `updated_at, last_synced_at`만 (D146/D147 명시 별건) | `alimtalk.ts:923` INSERT 패턴 미러 UPDATE — 모든 본문 컬럼 + emphasize_subtitle/sub_title 둘 다 |
+| **D149-#B** | `requestInspectionWithFile` FormData에 contentType 미명시 → IMC가 attachment를 octet-stream 인식 → 이미지 깨짐 | `alimtalk-api.ts:629` + `alimtalk.ts:1098/1147` 3곳: mimetype 파라미터 추가 + `guessMimeFromFilename` fallback (매뉴얼 8개 확장자) |
+
+#### ✅ D135부터 누적 신고 7건 + 직원 카톡 후속 2건 모두 종결
+
+| 신고 | 처리 |
+|---|:-:|
+| 등록창 안 닫힘 | ✅ D147 자동 |
+| 한줄로 관리화면 등록 안됨 | ✅ D147 |
+| 상태별 액션 버튼 | ✅ D139 + D147 자동 |
+| **대표링크 IMC 미전달 (7번 누적)** | ✅ **D148 진짜 fix (snake_case)** |
+| 안내문구 삭제 | ✅ D146 |
+| 이미지 추출 실패 | ✅ D146 |
+| 수정 시 한줄로 미반영 | ✅ D149-#A |
+| **IMC 이미지 깨짐** | ✅ **D149-#B (mimetype)** |
+| 코멘트/증빙자료 등록 시점 미전달 | ✅ 매뉴얼 동작 정상 (검수요청 시점 전달, 직원 검증) |
+
+#### ✅ 검증 매트릭스
+
+- atomic safe-build → dist-new → atomic mv (5/8 17:10)
+- pm2 reload (graceful, 1~3초 순단)
+- backend dist `D149-#B + guessMimeFromFilename` grep 매칭 4건
+- backend dist `inspection_evidence_mimetype` grep 매칭 6건
+- hanjul.ai HTTP/1.1 200 OK
+- D147 PG 검증: `template_code = template_key` 박힘
+- D148 PM2 raw: `IMC 응답 templateRepresentLink {url_mobile,url_pc}` 정상 echo
+
+#### 끌로드원칙 7-1 자기검증 (반성)
+
+D149-#B 진행 시 절차 위반 — grep을 수정 후 한 역순 + 옵션 A/B/C 추천 + Auto mode 우회. Harold님 분노 정당. 신규 메모리 3건 박음:
+- `feedback_no_auto_mode_excuse_for_principles.md` — Auto mode와 끌로드원칙 무관
+- `feedback_no_option_recommend.md` — 옵션 추천 = 추측 = 금지
+- `feedback_reload_feedbacks_on_session_start.md` — 매 작업 시작 시 적용 feedback 자기검증
+
+#### 잔존 별건 (낮은 우선순위, 다음 세션 가능)
+
+1. ALIMTALK-DESIGN.md:626-631 명세 정정 (camelCase → snake_case, 코드 동작 영향 0)
+2. AlimtalkTemplateFormModal V1 레거시 폐기 (D143 명시)
+3. emphasize_sub_title 컬럼 자체 DB DROP (V1 폐기 후)
+4. uploadSingleImage / uploadMultipleImages 시그니처에 mimetype optional 추가 (미래 사고 방지, D146에서 작동 확인됨 + 직원 신고 0건 = 시급 X)
+
+---
+
+### 🟢 D147 (2026-05-08 오후) — 알림톡 PDF 0508 root cause fix + atomic safe-build (고객사 사용 중 차단 0초)
+
+> **상태:** ✅ **5/8 16:07 atomic safe-build + pm2 reload 배포 + PG/PM2 검증 완료.** 직원 1회 시도 → PG row 등장 + 모든 컬럼 정상 INSERT 확정.
+>
+> **상세 메모리:** `memory/project_d147_alimtalk_pdf0508.md` 정독.
+
+#### 🎯 root cause 100% 확정 (PM2 raw)
+
+IMC 등록 응답: `{templateKey:"Tmowko4nzkdq3fvmg59", templateCode:null, templateRepresentLink:{}, inspectionStatus:"REG"}`
+
+D135부터 깔린 `r.data.templateCode` 의존 가정이 D139 #4 (등록과 검수요청 분리) 후 깨짐. IMC가 등록 시점에 templateCode 발급 안 함 (검수요청 후 발급) → null 회신 → alimtalk.ts:708 분기 400 → PG INSERT 차단.
+
+#### ✅ D147 fix (alimtalk.ts:690 — 3단계 fallback)
+
+```typescript
+let templateCode: string | null =
+  r.data?.templateCode || (r.data as any)?.templateKey || templateKey || null;
+```
+
+PG `template_code = template_key` 박힘 → 다른 라우트(GET/PUT/DELETE/inspect) 정상 작동.
+
+#### ✅ 7건 동시 해결 (PDF 0508 검증 row 등장)
+
+| # | 결과 |
+|:-:|---|
+| #1 등록창 안 닫힘 | ✅ 자동 (201 응답 → onSuccess+onClose) |
+| #2 한줄로 관리화면 등록 안됨 | ✅ **직접 해결** |
+| #3 상태별 액션 버튼 | ✅ 자동 (PG row 등장 → D139 #4-1 표시) |
+| #4-한줄로 대표링크 | ✅ represent_link JSONB 정상 INSERT |
+| #4-한줄로 코멘트 | ✅ inspection_comment 정상 |
+| #4-한줄로 증빙자료 | ✅ inspection_evidence 2675 bytes BYTEA 정상 |
+
+#### 잔존 별건 (D148+)
+
+- **IMC 측 representLink 빈 echo** — payload는 정확히 보냄, IMC 응답 `{}` + IMC 화면 비어있음. IMC 매뉴얼 + `getAlimtalkTemplate` 직접 호출 검증 필요
+- V2 PUT PG 본문 미갱신 (D146 명시)
+- AlimtalkTemplateFormModal V1 레거시 폐기 (D143 명시)
+- emphasize_sub_title 컬럼 DB DROP (V1 폐기 후)
+
+#### atomic build 흐름 (D145 사고 재발 방지 + 고객사 사용 중 차단 0초)
+
+```bash
+cd /home/administrator/targetup-app && git pull
+cd /home/administrator/targetup-app/packages/backend && bash scripts/safe-build.sh
+pm2 reload targetup-backend
+```
+
+→ `dist-new` 빌드 → 검증 → `atomic mv` swap. 빌드 실패 시 옛 dist 그대로 유지 = 차단 0초.
+
+---
+
+### 🟢 D146 (2026-05-07 밤) — 알림톡 PDF 0506 7건 마감 + emphasize 정합화 + atomic build 메모리
+
+> **상태:** ✅ **5/7 22:36 빌드 + PM2 재시작 + 운영 dist + Node 시뮬레이션 검증 완료.** 직원 1회 시도 자연 검증만 잔여.
+>
+> **상세 메모리:** `memory/project_d146_alimtalk_pdf0506.md` 정독.
+
+#### 🎯 root cause 100% 확정 (PM2 raw + Node 시뮬레이션)
+
+PM2 raw IMC 응답: `{"code":"0000","data":{"image":"https://mud-kage.kakao.com/dn/.../img_l.jpg"}}` — 단일 `image` 키 + string URL 변종. D131(sender/template unwrap) / D142+(이중래핑) / D143 E(extractImageFromAnyShape 평탄화) **모두 미처리한 새 변종** → frontend "이미지 정보를 추출하지 못했습니다" 토스트.
+
+#### ✅ 7건 처리 결과
+
+| # | 카테고리 | 처리 |
+|:-:|---|---|
+| **#5** | 안내문구 2건 삭제 (UI) | ✅ FormV2.tsx:703 ⚠ + 791 📌 박스 제거. 라인 722 유지 (PDF 직접 언급 X) |
+| **#6+#7** | 이미지 업로드 추출 실패 | ✅ extractImageFromAnyShape stringCands 분기 추가 (URL 끝 파일명 → imageName fallback). extractImageListFromAnyShape list 변종 3종 수용. **9개 업로드 라우트 자동 반영.** |
+| **#1** | 등록창 안 닫힘 | ✅ D142+ A1+A2 코드 이미 박힘 + 부모 setToast('저장 완료'). PDF는 D142+ 빌드 이전 옛 캡처 추정 |
+| **#3** | 상태별 액션 버튼 4종 | ✅ D139 #4-1 코드 이미 박힘. PG 0행이라 표시 X. #2 해결 시 자동 |
+| **#2** | 한줄로 관리화면 등록 안됨 | ✅ INSERT 진단 로그 2곳 추가 (createTemplate 진입 + 성공). PG 0행은 #6/#7 좌절로 도달 못함. #6/#7 fix 후 자연 해결 |
+| **#4** | 대표링크 IMC 미전달 | ✅ INSERT/페이로드 코드 정상 + 진단 로깅 박힘. PG 0행 → #2 해결 후 재검증 |
+
+#### ✅ 추가 작업
+
+- **emphasize_subtitle/sub_title 중복 컬럼 정합화** — V1 INSERT/UPDATE (companies.ts:1815, 1871) + V2 INSERT (alimtalk.ts:737) 3곳 두 컬럼 동시 갱신. V1↔V2 SELECT 분기 차단.
+- **`feedback_atomic_build_only.md` 메모리 박음** — tp-deploy-full 단일 안내 영구 금지. atomic build 4단계 분리 강제.
+
+#### ✅ 검증
+
+- backend dist 5/7 22:36 + frontend dist 5/7 22:36 빌드
+- PM2 재시작 22:36:19 KST, uptime 2m+ 정상
+- `stringCands` 매칭 2건 + `D146` 매칭 5건 운영 dist 박힘
+- 컴파일된 분기 본문 정확: `if (typeof url === 'string' && url.startsWith('http'))`
+- **Node 시뮬레이션** (운영 코드 + 실제 IMC raw 응답): `{ imageUrl, imageName: "img_l.jpg" }` 정상 반환
+- TS 0 error (backend + frontend)
+
+#### 별건 (D147+ 처리)
+
+- V2 PUT `/templates/:templateCode` PG 본문 미갱신 ([alimtalk.ts:914-934](packages/backend/src/routes/alimtalk.ts:914)) — IMC만 갱신 + PG는 last_synced_at만. #2 자연 해결 후 발현 위험.
+- AlimtalkTemplateFormModal V1 레거시 폐기 (D143 메모리 명시).
+- emphasize_sub_title 컬럼 자체 DB DROP (V1 폐기 후).
+
+#### 직원 1회 시도 자연 검증 항목
+
+- PM2 새 로그: `image-upload 비정상응답` 미출현 + `createTemplate 진입`+`성공` 출현
+- `kakao_image_uploads` 새 행: `image_name = 'img_l.jpg'`(URL 끝 파일명)
+- `kakao_templates` 새 행: `emphasize_subtitle == emphasize_sub_title` + `represent_link` JSONB 정상
+
+---
+
+### 🟢 D145 (2026-05-07) — 9시간 사고 복구 + PDF 0506 13건 배포 + 영구 재발 방지 인프라 적용
+
+> **상태:** ✅ **5/7 오전 마감.** PDF 0506 13건 배포 + atomic deploy 인프라 적용 + SMS 알림 통합 완료.
+>
+> **남은 1회 작업 (다음 세션):** crontab 등록 + (선택) PowerShell `tp-deploy-full` 함수 교체.
+>
+> **상세 메모리:** `memory/project_d145_critical_deploy_failure.md` 정독.
+
+#### ✅ 영구 재발 방지 3단 안전망 완성 (5/7 오전 적용)
+
+| 안전망 | 파일 | 효과 |
+|---|---|---|
+| **1차 — atomic deploy** | `packages/{frontend,company-frontend,flyer-frontend}/scripts/safe-build.sh` + `build:safe` 스크립트 | 빌드 실패 시 옛 dist 유지 = 차단 0초 |
+| **2차 — 모니터링 cron** | `scripts/monitor-dist.sh` | 1분 cron — dist 부재 감지 → 자동 재빌드 |
+| **3차 — SMS 알림** | `routes/internal-alert.ts` (localhost only) → SMSQ_SEND_10 → 010-5295-8517 | 자동 복구 결과 즉시 휴대폰 LMS |
+
+**검증:** 5/7 09:32 frontend build:safe 첫 실행 → 30.51초 + dist/index.html 3420 bytes 정상 생성 + dist-old 자동 백업.
+
+#### ✅ PDF 0506 13건 배포 완료 (5/6 18:26 + 5/7 오전)
+
+- 5/6 18:26: D144 후속2 + P8/P4/P7/P6 (어제 배포)
+- 5/7 오전: P2 cleanLeftoverVars CT(8곳) + P9 정렬 + P12 발신번호검색 + P11+P13 SearchableSelect + P5 고객DB 전체삭제(CustomerDBModal + ManageCustomersTab) + P10 슈퍼관리자 정보출력 제거+전체삭제 유지 + P1 보관함 fs.existsSync 자동정리 + P3 주소록 직접입력+다중선택 + P4/P7 후속(admin/campaigns status='sending' 자동 정리)
+- 폴라초이스 14df97e7 환불 4,859.80원 (Harold님 직접 SQL)
+
+#### ✅ 5/7 밤 — PDF 0507 후속 3건 진짜 근본 마감
+
+| Issue | 진단 | Fix |
+|---|---|---|
+| **#1** 폴라초이스 카드(16,106) vs 목록(15,640) 불일치 | 차감 16,106 정확. MySQL 16,106 정확. **PG `target_count`만 15,640으로 잘못 박힘** — 코드 흐름 정독상 UPDATE 경로 0건. PM2 로그 라우트 호출 0건. 5/7 새벽 D145 P0 환불 무한루프 fix 디버깅 도중 수동 SQL 추정. **466 차감 누락 가설 폐기**(회사 손실 0건) | (a) `protect_completed_target_count` PG trigger 신설 — 완료 캠페인 target_count UPDATE 시 RAISE EXCEPTION 영구 차단. (b) target_count 정정(15640→16106). (c) ResultsModal frontend (sent_count 우선 + 대기 음수가드). |
+| **#2** 트렉스타 11:49(607건)/14:46(68건) 환불 누락 17,820원 | D145 P0 강화 가드(`refundedCount >= count` 차단)가 호출측 delta와 의미 충돌 → 정상 환불도 차단 | prepaid.ts **idempotent 패턴**(count=누적 totalFailCount, 함수가 alreadyRefunded와 비교해 `additionalRefund` 자동 계산). delta 계산 폐기. campaign-lifecycle.ts 3분기(cleanup/AI/Direct) 누적값 호출 통일. 자동 보정 — sync-results 다음 호출 시 누락분 자동 환불. |
+| **#3** 발신번호 등록 모달 162개 회사 dropdown | 입력 검색 불가 | `<select>` → `<SearchableSelect>` (D144 P11/P13 컴포넌트 재활용). |
+| **(C)** directChannel='both' SMS+카카오 동시 환불 차단 위험 | prepaid.ts `alreadyRefunded`/`totalDeducted` 조회가 messageType 무관 합산 | balance_transactions에 **`message_type` 컬럼 신설(DDL)** + INSERT 시 박음 + SELECT WHERE filter (`message_type = $X OR IS NULL` — 옛 row 호환). |
+| **(인프라)** backend atomic deploy 미적용 | D145에서 frontend 3패키지만 build:safe. backend 일반 build | `packages/backend/scripts/safe-build.sh` 신설 + `build:safe` 스크립트 추가. backend도 dist-new → 검증 → atomic mv. |
+
+**신규 메모리:**
+- `feedback_no_manual_sql_update` — 수동 PG UPDATE/DELETE 신중 + 영향 범위 명시 의무화
+- `feedback_tp_push_no_followup` — git push는 `tp-push` 통일 / 별건 미루지 않기
+- `project_d145_pdf_followup` — D145 PDF 0507 신고 3건 종합
+- `project_d145_p0plus_refund_idempotent` — 환불 idempotent 패턴 근본 해결
+
+**다음 세션 작업: 알림톡 디버깅** (Harold님 명시 — 다음 세션 시작 시 디테일 확인)
+
+#### ⏳ 다음 세션 1회 작업 (Harold님 직접)
+
+```bash
+# 1. 서버 crontab 등록 (1분 cron — dist 모니터링 + SMS 알림)
+ssh administrator@58.227.193.62
+(crontab -l 2>/dev/null; echo "* * * * * /home/administrator/targetup-app/scripts/monitor-dist.sh >> /home/administrator/dist-monitor.log 2>&1") | crontab -
+crontab -l
+
+# 2. (선택) 알림 작동 검증
+curl -X POST http://127.0.0.1:3000/api/internal/dist-alert \
+  -H "Content-Type: application/json" \
+  -d '{"message":"테스트 알림 — atomic deploy 작동 검증"}'
+# → 1분 내 010-5295-8517 LMS 도착 확인
+
+# 3. (선택) 로컬 PowerShell tp-deploy-full 함수 교체
+#    status/D145-DEPLOY-SAFETY.md § B 그대로 — npm run build → npm run build:safe
+```
+
+#### 🔧 별건 (다음 세션 또는 후속)
+
+- **company-frontend dist 갱신** — 4/30 잔존, 다음 build:safe 실행 시 자동 갱신
+- **callback-filter.ts:85 `c.callback.trim is not a function`** — 직접발송 일부 회사 영향 (PM2 로그 별건)
+
+---
+
+### 🟡 D144/D145 배포완료 작업 보존 (참고)
+
+> **상태:** 🔴 **오픈 둘째날 critical 사고 발생 후 복구.** 5/6 18:54 ~ 5/7 04:00 거래처 9시간 사이트 차단.
+>
+> **사고 원인:** 5/6 18:26 `tp-deploy-full` 실행 → backend 빌드 OK → frontend `vite build` 단계가 `emptyOutDir: true`(기본)로 dist 비운 후 비정상 종료 → dist 비어있는 상태로 tp-deploy-full 정상 종료 → nginx 403 `"directory index of dist/ is forbidden"` 9시간.
+>
+> **복구:** 5/7 04:00 Harold님이 SSH 후 `cd packages/frontend && npm run build` 한 줄로 dist 재생성.
+>
+> **🚨 다음 세션 1순위:** atomic deploy 패턴 (dist-new swap) + dist 모니터링 cron으로 영구 재발 방지.
+>
+> **상세 메모리:** `memory/project_d145_critical_deploy_failure.md` 정독 필수.
+
+#### ✅ 5/6 18:26 운영 배포 완료 (D144 후속2 + 그룹 A/B)
+- D144 후속2 — sent_at MySQL 직접 + status `'sending'`→`'completed'` 정책 + 슈퍼관리자 메시지 클릭 복사
+- P8 — `admin.ts:701,706` 슈퍼관리자 예약관리 sent_at COALESCE 통일
+- P4/P7 — `sms-result-map.ts:28-29` 라벨 `'발송 대기'` → `'결과 대기'`
+- P6 — `campaign-lifecycle.ts:175-180, 305-310` sync-results 진입 조건 완화 (target_count 비교)
+- 폴라초이스 14df97e7 LMS 188건 × 25.85 = **4,859.80원 환불** (Harold님 직접 SQL 실행)
+
+#### 🟡 5/7 새벽 배포완료 (코드 + 빌드 통과, 다음 배포 대기)
+
+**Backend (6파일):** messageUtils.ts (cleanLeftoverVars CT 신설+2곳) / ai.ts (cleanLeftoverVars 2곳) / customers.ts (delete-all 권한 확장) / sms-templates.ts (filterExistingImagePaths fs.existsSync 검증+DB 정리) / admin.ts (status='sending' 자동 정리) / campaigns.ts (동일 패턴)
+
+**Frontend (5파일):** formatDate.ts (cleanLeftoverVars CT 신설+3곳) / SearchableSelect.tsx (**신설**) / AdminDashboard.tsx (SearchableSelect 2곳+고객사 정렬+발신번호 검색+**P10 정정 DB 출력 제거+전체삭제 유지**) / CustomerDBModal.tsx (전체삭제 버튼+confirm) / AddressBookModal.tsx (직접입력+다중선택) / **components/manage/ManageCustomersTab.tsx (전체삭제 버튼+confirm — P5 정정 누락 발견 추가)**
+
+#### 🚀 안전 배포 절차 (한 줄 명령어 금지 — D145 사고 재발 방지)
+
+```bash
+# 1. 로컬 push
+tp-push "0507 D145 — PDF 0506 13건 + P4/P7 후속 + P10/P5 정정 (atomic deploy 적용 전 안전 배포)"
+
+# 2. 서버 SSH 단계별 배포 (반드시 단계별 검증)
+ssh administrator@58.227.193.62
+cd /home/administrator/targetup-app && git pull
+cd packages/frontend && npm run build 2>&1 | tail -5
+ls -la dist/index.html  # ★ 시각이 방금이어야 통과
+cd ../backend && npm run build
+pm2 restart all
+
+# 3. 즉시 https://hanjul.ai 접속 검증 (Ctrl+F5)
+```
+
+#### 🔍 배포 후 검증 항목 (8건)
+1. https://hanjul.ai 정상 로드 (Ctrl+F5)
+2. 고객사관리자 ManagePage → 고객DB 탭 → "전체 삭제" 빨간 버튼 + confirm 모달 작동
+3. 슈퍼관리자 회사 편집 모달 → 고객DB 탭 → 정보 출력 X + "전체 삭제" 버튼만
+4. 슈퍼관리자 발송관리 → status='sending' 잔존 캠페인 자동 '완료' 전환
+5. 슈퍼관리자 사용자 추가 + 발송통계 회사 필터 SearchableSelect 검색 작동
+6. 슈퍼관리자 발신번호 관리 번호 입력 검색 작동
+7. 직접발송 "50%~30% 할인" 입력 → 본문 보존 (안전망 regex 한글/영문 시작 강제)
+8. 주소록 모달 — 직접 입력 + 다중 선택 일괄 불러오기 작동
+
+#### 🔧 다음 세션 1순위 (영구 재발 방지)
+1. **atomic deploy 패턴 적용** — `vite build --outDir dist-new` → `index.html` 생성 시에만 `dist`로 swap
+2. **dist 모니터링 cron** — 1분 간격 부재 감지 → 자동 알림 + 자동 빌드 재시도
+3. **PM2 로그 `c.callback.trim is not a function` 별건 수정** — `callback-filter.ts:85` String() 캐스팅 (직접발송 일부 회사)
+
+---
+
+### 🔥 D144 후속2 (2026-05-06 17:00 작성, 5/7 새벽 D145로 흡수) — **참고 보존**
+
+> **상태:** ✅ 일부는 5/6 18:26 배포 완료, 나머지 + PDF 0506은 5/7 새벽 D145로 이관 (위 D145 섹션 참조).
+
+#### 📦 배포완료 변경 파일 (Backend 6 + Frontend 2)
+
+| 영역 | 파일 | 작업 |
+|---|---|---|
+| **sent_at MySQL 직접** | `packages/backend/src/utils/stats-aggregation.ts` | `aggregateSmsSendTimesByCampaign` helper 신설 — `MIN(sendreq_time)` UNION ALL + DATE_FORMAT `+09:00` ISO 명시(서버 TZ 무관) + byTableSet 그룹핑 + `querySendStatsDetail` campaignRows 매핑 |
+| | `packages/backend/src/routes/admin.ts` | sent_at 매핑 3곳: `/stats/send/detail`, `/campaigns/all`, `/campaigns/:id/sms-detail` header. + MessageDetailModal import + state(`smsDetailMsgModal`) 코드는 frontend |
+| | `packages/backend/src/routes/campaigns.ts` | sent_at 매핑(`/api/campaigns`) — 회사+사용자 메타 SELECT 후 helper로 매핑 |
+| | `packages/backend/src/routes/results.ts` | sent_at 매핑 2곳: `/campaigns` row + `/campaigns/:id` chart |
+| **status 'sending'→'completed'** | `packages/backend/src/routes/campaigns.ts` | AI 발송(line 927, 940) + 직접발송(line 1813) + 자동완료 처리(line 142-172) `pendingCount === 0` 조건 제거 |
+| | `packages/backend/src/utils/auto-campaign-worker.ts` | line 911-921 자동발송 status 'sending'→'completed' (campaigns + campaign_runs) |
+| | `packages/backend/src/utils/campaign-lifecycle.ts` | sync newStatus 단순화 — line 227(AI run) + line 349(direct campaign): `(success+fail+pending) > 0 ? 'completed' : 'failed'`. 진입 조건도 `pendingCount > 0` 추가하여 pending만 있어도 sync 진입 |
+| **메시지 클릭 복사** | `packages/frontend/src/components/MessageDetailModal.tsx` | **신설(CT)** — content/onClose props, 모달 내 메시지 전체 + 복사 버튼 + 닫기. 슈퍼관리자 전용 |
+| | `packages/frontend/src/pages/AdminDashboard.tsx` | import + state `smsDetailMsgModal` + 발송 상세 모달 메시지 셀 onClick(`setSmsDetailMsgModal(r.msgContents)`) + 모달 렌더링 (예약관리/캠페인관리 [조회] 버튼이 같은 모달이라 한 번 적용으로 둘 다 커버) |
+
+#### 🛡 사용자 측 불변 (검증 완료)
+- `packages/frontend/src/components/ResultsModal.tsx` MessageCell 변경 0 ✅ (Harold님 지시 — 사용자 측 건드리지 않음)
+
+#### ✅ 검증 완료
+- Backend `tsc --noEmit` → EXIT=0
+- Frontend `tsc --noEmit` → EXIT=0
+- grep 재확인: 잔존 `'sending'`은 임시 INSERT 시점값(직후 UPDATE에서 'completed' set) + read condition만 — 정상
+
+#### 🚀 배포 명령어 (다음 세션에서 추가 수정 후 일괄 실행)
+
+```powershell
+tp-push "0506 D144 후속2 — sent_at MySQL 직접(MIN sendreq_time) + status 'sending'→'completed' 정책(INSERT 완료=발송완료, pending은 통신사 백그라운드) + 슈퍼관리자 메시지 셀 클릭 복사(MessageDetailModal CT 신설). 사용자측 불변."
+tp-deploy-full
+```
+
+#### 🔍 배포 후 검증 항목
+
+1. **슈퍼관리자 캠페인관리/예약관리 [조회]** → 발송 상세 모달 → 메시지 셀 클릭 → 복사 모달 정상 표시 + 복사 버튼 작동
+2. **status 자동 완료** — 5/6 발송 캠페인의 "발송중" 표시가 "완료"로 자동 전환 확인 (자동완료 처리 GET /api/campaigns?status=scheduled 호출 시 작동)
+3. **폴라초이스 sent_at = 11:00:00 그대로** (PG 보정값 + MySQL `MIN(sendreq_time)` = 같은 값)
+4. **다른 5/6 캠페인 sent_at 자동 정상화** — 라프레리 16:24 잘못 표시 → 16:00 (또는 실제 통신사 시각)으로 자동 변경
+5. **PM2 로그 에러 없음** — `pm2 logs targetup-backend --lines 30`
+6. **사용자 측 ResultsModal 발송결과 모달** — MessageCell 동작 변경 없음 (클릭 시 상세 모달 열림 그대로)
+
+#### 📋 D144 후속1 (점심시간 12:00경 배포 완료) — 참고
+
+| 영역 | 작업 |
+|---|---|
+| Phase 1~5 | stats-aggregation/admin/results/campaigns/customers/ai 카운트 MySQL 직접 |
+| byTableSet 최적화 | 67회사 통계 N회 sequential → K회 (라인그룹 테이블셋별 그룹핑) |
+| fire-and-forget 복원 | Dashboard/ResultsModal 진입 시 sync-results 호출 — 통신사 실패분 자동 환불 + status 전환 + auto_campaign_runs 갱신 보장 |
+| Phase 5-A | sync-results-worker.ts 삭제 + app.ts 롤백 (5/6 5분 워커 거부 결정 따름) |
+
+#### 🚧 다음 세션에서 검토할 추가 수정 후보
+
+**📄 0506 PDF 사용자 피드백 13건 분석 완료 → [`status/D144-PDF-0506-FIXES.md`](D144-PDF-0506-FIXES.md) 정독**
+
+| 그룹 | PDF 항목 | 우선순위 | 배포완료 연관성 |
+|---|---|---|---|
+| A — 배포완료 + 검증 | P4 (발송완료 표시) / P7 (성공 대기 표시) | 🔴 긴급 | ✅ 후속2 status 정책 그대로 해결 |
+| B — 정산/환불 직결 | P8 (슈퍼관리자 기간 필터 sent_at 기준) / P6 (폴라초이스 환불 누락) | 🟠 높음 | ⚠️ 부분 연관 — 추가 작업 필요 |
+| C — 발송 정확성 | P2 (% 데이터 보존) / P1 (MMS 보관함 이미지) | 🟠 높음 | ❌ 별건 |
+| D — UX | P11 (사용자 추가 회사 검색) / P13 (발송통계 회사 검색) / P12 (발신번호 검색) / P9 (고객사 정렬) | 🟡 중간 | ❌ 별건 |
+| E — 신규 기능 | P5 (중간관리자 DB 전체삭제) + P10 (슈퍼관리자 DB 화면 단순화) / P3 (주소록 직접입력+다중선택) | 🟡 중간 | ❌ 별건 |
+
+**다음 세션 진행 옵션 (Harold님 결정):**
+- **Option 1 (권장):** D144 후속2 배포완료 + 그룹 A/B 묶음 배포 (P4/P7 검증 + P8 기간필터 잔존 점검 + P6 환불 검증)
+- Option 2: 그룹 A 먼저 빠르게 (D144 후속2만 우선 배포 후 안정화)
+- Option 3: 그룹 A/B/C 모두 한 번에 (시간 여유 있을 때)
+
+---
+
+### 🟢 D143 D-Day (2026-05-05) — 레거시 이관 100% 완료 · 5/6 발송 모니터링만 잔여
+
+> **상태:** 🟢 **데이터 이관 4종 + 레거시 차단 모두 완료.** ⏳ **5/6 07:00 첫 발송 모니터링만 잔여.**
+>
+> **🚨 다음 세션 시작 시 반드시:** `memory/project_d143_reservation_migration.md` (D-Day 최종본) 정독.
+
+#### ✅ 데이터 이관 결과 (모두 BEGIN/COMMIT 트랜잭션 + 사전/사후 검증 통과)
+
+| 영역 | 결과 |
+|---|---|
+| **예약발송** | PG `campaigns` 70건 + MySQL `SMSQ_SEND_*` 1,454건 + MMS 이미지 9개 (PG path ↔ 서버 jpg 100% 일치) |
+| **회신번호 D143 차분** | sgbaek `01082336860` callback 1 + assignment 4 / kumkang2 `0338115560` assignment 4 추가 (B안 적용) |
+| **수신거부 D143 차분** | BLOCKEDNUM 4/22~5/5 phone DIFF → **5,607건 INSERT** (`source='legacy_d143'`, ON CONFLICT DO NOTHING로 4건 자동 스킵) |
+| **선불잔액** | 34사 / **19,742,368원** UPDATE (4/22 베이스라인 -655,742원 소진 = 정상) |
+| **시세이도/아이소이** | callback 119개 + assignment 14개 모두 한줄로AI 측 5/4 직접 등록되어 있어 추가 작업 불필요. 검증 통과 |
+| **D135 정합** | 1,492 callback / 1,051 assignment 누락 0 ✅ |
+
+#### ✅ 레거시 차단 결과
+
+| 영역 | 결과 |
+|---|---|
+| QTmsg Agent | 운영 6대(invitoMsg_auto/web/gyeongnam/web1/web2/web3) + 별개 1대(/home/event/libs/invitoMsg) = **7대 모두 정지** (`ps grep "qtmsg\|invito"` 0건) |
+| MSGSUMMARY 예약 | **70건 RESERVEYN='0' 차단** (사후 SELECT 0건 확인 + COMMIT) |
+
+#### ⏳ 5/6 모니터링 (Harold님)
+
+| 시점 | 항목 |
+|---|---|
+| **5/6 07:00 KST** | bhappy4 LMS 14건 (캐럿글로벌, app_etc2=e8f0ffa7…) — 1차 검증 포인트 |
+| 5/6 09:00~ | hddg2135 SMS (라프레리 현대대구) 연속 |
+| 5/7 14:00 | choisun MMS 1,371건 (DYB최선어학원 시간표) |
+| ~ 5/31 | 70건 분산 발송 |
+| 6/30 | 레거시 읽기전용 병행 종료 (자연) |
+
+QTmsg `status_code` 1000=성공 / 6=진행중 / 7/8/16/55/2008=실패
+
+---
+
+### ✅ D144 (2026-05-06) — SMSQ_SEND 정체 확정 종결
+
+> **결론:** **`SMSQ_SEND`는 BASE TABLE이 아니라 VIEW** (`SMSQ_SEND_1 ~ SMSQ_SEND_11` UNION ALL).
+> "잔재 19,871건"은 잘못된 전제. 실제로는 SMSQ_SEND_1~11 base table에 한줄로AI가 정상 INSERT한 5/6~5/31 발송 데이터를 VIEW가 그대로 비춘 것. 발송되면 VIEW에서 자동 사라짐.
+> **운영 영향 0, 잔재 정리 불필요, D-Day 추가 작업 불필요.**
+
+#### 검증 사실 (2026-05-06 검증, 추측 0)
+
+1. `information_schema.TABLES` → `SMSQ_SEND` `TABLE_TYPE='VIEW'`
+2. `information_schema.VIEWS.VIEW_DEFINITION` → `SELECT * FROM SMSQ_SEND_1 UNION ALL ... SMSQ_SEND_11` 단순 UNION 가상 뷰
+3. MySQL 전체 SMSQ_SEND* 68개 = VIEW 1 + LIVE base 12 (1~12, 12는 env 미포함 잔존) + LOG 55
+4. 레거시 invitoMsg watch 대상이던 `SMSQ_SEND_AUTH/GYEONGNAM/01/02/03` MySQL DB에 **0건 존재** — 레거시 base table 이미 제거됨, VIEW 1개만 잔존
+5. `bulkInsertSmsQueue`는 INSERT 시 seqno 컬럼 미명시 (코드 검증) — 한줄로AI는 SMSQ_SEND VIEW에 INSERT 불가능
+6. 라프레리 8c9e4b12 캠페인의 SMSQ_SEND seqno=223091/223125가 SMSQ_SEND_1/2/3의 AUTO_INCREMENT seqno와 정확 일치 — VIEW가 그대로 비춘 것
+7. 5/6 캐럿 14건 정상 발송: SMSQ_SEND_4/5/6_202605 LOG status=1000 확인 (정상 동작)
+
+#### 정정된 이전 가정
+
+- ❌ "SMSQ_SEND에 19,871건 잔재 INSERT됨" → 실제로는 base table 0건, VIEW 통한 가상 표시
+- ❌ "이중 INSERT 의심" → VIEW의 정상 동작
+- ❌ "잔재 정리 필요" → 정리할 잔재 없음, SMSQ_SEND_X 발송되면 VIEW 자동 갱신
+
+#### 캐럿 5/6 발송 14건 메시지 검증 (2026-05-06 완료)
+
+- 캠페인 ID `9d56b7a1-a2b0-4264-a25c-2a3553197e3f` LMS 14건 — `[삼성전자 DS부문 전기작업 폐강 안내]`
+- 14/14 status=1000, 통신사 리포트(repmsg_recvtm) 정상 수신 (5/6 07:00:03~34 KST)
+- 본문 문의번호(010-3806-5467) = call_back 일치, 정보성 안내라 (광고)/무료거부 미부착 정상
+- 한줄로AI 정식 오픈 후 첫 실제 발송 성공 — D-Day 이관 완전 안정화 확인
+
+#### 잔여 별건 (D144와 무관, 별도 진행)
+
+1. **🔥 발송 통계 실시간 동기화 근본 리팩터 (다음 세션 1순위)** — 5/6 운영 첫날 슈퍼관리자/고객사 발송통계가 모든 회사에 대해 잘못 표시되는 문제 발생 (폴라/자연인/한국시세이도/이새/수스 등). 근본 원인은 PG `campaigns.sent_count/success_count/fail_count` 캐시 + sync 의존 설계. 옵션 B (PG 카운트 deprecate, 화면 모두 MySQL 직접 카운트) 진행 결정. **상세: [`status/D144-STATS-REALTIME-REFACTOR.md`](D144-STATS-REALTIME-REFACTOR.md) 정독 후 § 9 절차대로 시작.**
+2. **잔액 정합성 (직원 비교)** — 비즈웹 vs 한줄로AI 잔액 1~30원 ~ 백단위 차이. Harold 결정: 직원에게 적당히 처리하라고 함. 종결.
+3. **(낮은 우선순위) 호버 팝업 (광고) 표시 일관성** — DB는 D102 정책 준수, 화면 잘림 가능성 재확인
+4. **(별건) 폴라초이스 5번 등록 UX** — 사용자가 예약 버튼 5번 눌러서 4번 취소 + 1번 활성. 중복 등록 방지 confirm 검토.
+5. **(별건) `cancelled_at < created_at` 시간 역전** — 5/6 캐럿 직접발송 cancelled_at 5/5로 표시. UTC/KST 변환 잠재 버그.
+6. **(참고) SMSQ_SEND_12 base table 존재** — env 미포함, 운영 무관.
+
+#### 🔍 [참고] D-Day 검증 SQL 자료 (이미 통과 — 다음 세션 재실행 불필요)
+
+##### A. 캠페인별 수신자 수 일치 (PG.target_count vs MySQL row count) — 가장 중요
+```sql
+-- (PG psql) 70건 캠페인 ID + target_count
+\COPY (
+  SELECT id::text, u.login_id, ca.message_type, ca.target_count
+  FROM campaigns ca JOIN users u ON ca.created_by = u.id
+  WHERE ca.campaign_name LIKE '[레거시이관]%'
+  ORDER BY u.login_id, ca.scheduled_at
+) TO '/tmp/pg_70.csv' CSV HEADER;
+```
+```sql
+-- (MySQL) 같은 app_etc1별 행수 (3+3 라인그룹 합산)
+SELECT app_etc1 AS campaign_id, COUNT(*) AS mysql_cnt FROM (
+  SELECT app_etc1 FROM SMSQ_SEND_1 WHERE app_etc1 IN (SELECT app_etc1 FROM SMSQ_SEND_1 WHERE app_etc2='df63bcb0-3900-4a1c-8ad0-93c6b5a1db04' AND status_code=100)
+  UNION ALL SELECT app_etc1 FROM SMSQ_SEND_2 WHERE app_etc2='df63bcb0-3900-4a1c-8ad0-93c6b5a1db04' AND status_code=100
+  UNION ALL SELECT app_etc1 FROM SMSQ_SEND_3 WHERE app_etc2='df63bcb0-3900-4a1c-8ad0-93c6b5a1db04' AND status_code=100
+  UNION ALL SELECT app_etc1 FROM SMSQ_SEND_4 WHERE app_etc2 IN ('0d20b03b-4c66-4205-ae81-a3b53a70481d','e8f0ffa7-2e59-4e2c-ad9f-b762c1d81f98') AND status_code=100
+  UNION ALL SELECT app_etc1 FROM SMSQ_SEND_5 WHERE app_etc2 IN ('0d20b03b-4c66-4205-ae81-a3b53a70481d','e8f0ffa7-2e59-4e2c-ad9f-b762c1d81f98') AND status_code=100
+  UNION ALL SELECT app_etc1 FROM SMSQ_SEND_6 WHERE app_etc2 IN ('0d20b03b-4c66-4205-ae81-a3b53a70481d','e8f0ffa7-2e59-4e2c-ad9f-b762c1d81f98') AND status_code=100
+) t GROUP BY app_etc1 ORDER BY mysql_cnt DESC;
+```
+**기대:** 70 캠페인 ID 각각 PG.target_count == MySQL.cnt. 합계 1454.
+
+##### B. 캠페인별 발송시각 일치 (PG.scheduled_at vs MySQL.sendreq_time)
+```sql
+-- (PG)
+SELECT id::text, TO_CHAR(scheduled_at AT TIME ZONE 'Asia/Seoul', 'YYYY-MM-DD HH24:MI:SS') AS pg_sched
+FROM campaigns WHERE campaign_name LIKE '[레거시이관]%';
+```
+```sql
+-- (MySQL) 캠페인별 sendreq_time DISTINCT (한 캠페인 = 하나 시각이어야)
+SELECT app_etc1, sendreq_time FROM SMSQ_SEND_1 WHERE app_etc2='df63bcb0-3900-4a1c-8ad0-93c6b5a1db04' AND status_code=100 GROUP BY app_etc1, sendreq_time
+UNION ALL SELECT app_etc1, sendreq_time FROM SMSQ_SEND_2 WHERE app_etc2='df63bcb0-3900-4a1c-8ad0-93c6b5a1db04' AND status_code=100 GROUP BY app_etc1, sendreq_time
+UNION ALL SELECT app_etc1, sendreq_time FROM SMSQ_SEND_3 WHERE app_etc2='df63bcb0-3900-4a1c-8ad0-93c6b5a1db04' AND status_code=100 GROUP BY app_etc1, sendreq_time
+UNION ALL SELECT app_etc1, sendreq_time FROM SMSQ_SEND_4 WHERE app_etc2 IN ('0d20b03b-4c66-4205-ae81-a3b53a70481d','e8f0ffa7-2e59-4e2c-ad9f-b762c1d81f98') AND status_code=100 GROUP BY app_etc1, sendreq_time
+UNION ALL SELECT app_etc1, sendreq_time FROM SMSQ_SEND_5 WHERE app_etc2 IN ('0d20b03b-4c66-4205-ae81-a3b53a70481d','e8f0ffa7-2e59-4e2c-ad9f-b762c1d81f98') AND status_code=100 GROUP BY app_etc1, sendreq_time
+UNION ALL SELECT app_etc1, sendreq_time FROM SMSQ_SEND_6 WHERE app_etc2 IN ('0d20b03b-4c66-4205-ae81-a3b53a70481d','e8f0ffa7-2e59-4e2c-ad9f-b762c1d81f98') AND status_code=100 GROUP BY app_etc1, sendreq_time;
+```
+**기대:** 캠페인별 PG vs MySQL 발송시각 1초도 안 틀림. MySQL은 KST 그대로 ('YYYY-MM-DD HH:MM:SS'). PG는 timestamptz라 KST 변환 후 비교.
+
+##### C. 캠페인별 회신번호 일치 (PG.callback_number vs MySQL.call_back)
+```sql
+-- (PG)
+SELECT id::text, callback_number FROM campaigns WHERE campaign_name LIKE '[레거시이관]%';
+```
+```sql
+-- (MySQL) 같은 app_etc1의 call_back DISTINCT (1개여야)
+SELECT app_etc1, call_back FROM SMSQ_SEND_1 WHERE app_etc2='df63bcb0-3900-4a1c-8ad0-93c6b5a1db04' AND status_code=100 GROUP BY app_etc1, call_back
+UNION ALL ... 6개 라인그룹;
+```
+
+##### D. MMS 24건 file_name1 일치 (PG.mms_image_paths.path vs MySQL.file_name1)
+```sql
+-- (PG) MMS 24건의 mms_image_paths.path (jsonb 추출)
+SELECT id::text, mms_image_paths::jsonb->0->>'path' AS pg_mms_path
+FROM campaigns WHERE campaign_name LIKE '[레거시이관]%' AND message_type='MMS';
+```
+```sql
+-- (MySQL) 같은 app_etc1의 file_name1 DISTINCT (1개여야)
+SELECT app_etc1, file_name1 FROM SMSQ_SEND_1 WHERE app_etc2='df63bcb0-3900-4a1c-8ad0-93c6b5a1db04' AND status_code=100 AND msg_type='M' GROUP BY app_etc1, file_name1
+UNION ALL ... 6개 라인그룹;
+```
+**기대:** 24행, PG.path == MySQL.file_name1, 9개 unique 이미지 경로
+
+##### E. 메시지 본문 sample 일치 (3건)
+```sql
+-- (PG)
+SELECT id::text, LEFT(message_content, 80) AS msg_head, LENGTH(message_content) AS len
+FROM campaigns WHERE campaign_name LIKE '[레거시이관]%'
+AND id IN (앞 쿼리 A에서 첫 3건 ID) ;
+```
+```sql
+-- (MySQL)
+SELECT app_etc1, LEFT(msg_contents, 80) AS msg_head, LENGTH(msg_contents) AS len
+FROM SMSQ_SEND_X WHERE app_etc1 IN (...) GROUP BY app_etc1, msg_contents LIMIT 3;
+```
+**기대:** 본문 80자 sample + LENGTH 동일
+
+##### F. user → company 매핑 일치 (PG.created_by user의 company_id vs MySQL.app_etc2)
+```sql
+SELECT ca.id::text, u.login_id, u.company_id AS pg_user_company,
+       'expected_app_etc2' AS expected_mysql
+FROM campaigns ca JOIN users u ON ca.created_by = u.id
+WHERE ca.campaign_name LIKE '[레거시이관]%' GROUP BY ca.id, u.login_id, u.company_id;
+```
+**기대:** 라프레리 67캠페인 user.company_id = df63bcb0... / 최선 2 = 0d20b03b... / 캐럿 1 = e8f0ffa7...
+
+#### 🚦 다음 세션 §2. 5/6 새벽 발송 모니터링
+
+- **5/6 07:00 KST bhappy4 LMS 14건** (캐럿글로벌) — 가장 빠른 발송, 1차 검증 포인트
+- 5/6 09:00~ hddg2135 SMS 4건 (라프레리 현대대구) 연속
+- QTmsg `status_code` 확인:
+  - 1000 = 성공
+  - 6 = 진행중
+  - 7/8/16/55/2008 = 실패
+- 발송 결과 모니터링 SQL:
+```sql
+-- 5/6 새벽 발송 결과 (PG)
+SELECT id, message_type, target_count, sent_count, success_count, fail_count, status, sent_at
+FROM campaigns WHERE campaign_name LIKE '[레거시이관]%' AND scheduled_at < '2026-05-06 12:00:00 KST'
+ORDER BY scheduled_at;
+```
+
+#### 🔒 다음 세션 §3. 레거시 RESERVEYN=0 차단 (5/6 첫 발송 OK 확인 후)
+
+```bash
+ssh -p 27153 root@27.102.203.143
+su - oracle && sqlplus usom_user/<pw>@orcl
+```
+```sql
+UPDATE MSGSUMMARY SET RESERVEYN='0', FINAL_UPD_ID='legacy_migration', FINAL_UPD_DT=TO_CHAR(SYSDATE,'YYYYMMDDHH24MISS')
+WHERE RESERVEYN='1' AND SENTYN='0' AND RESERVEDT >= '20260506000000';
+COMMIT;
+SELECT COUNT(*) FROM MSGSUMMARY WHERE RESERVEYN='1' AND SENTYN='0' AND RESERVEDT >= '20260506000000';
+-- 0 기대
+```
+
+#### 🔑 핵심 자산 위치
+- **스크립트:** `migrate-legacy/scripts/migrate-reservations.js` (dry-run + live 모드)
+- **데이터:** `migrate-legacy/data/recipients_v2.csv` (1454행, MSGDV 정확)
+- **MMS UUID 캐시:** `migrate-legacy/data/mms-uuid-map.json` (재실행 시 동일 UUID 재사용)
+- **user 매핑:** `migrate-legacy/data/user-map.json` (USERID 7명 → user_id/company_id)
+- **MMS 9개 서버 위치:** `/home/administrator/mms-images/{company_id}/{uuid}.jpg`
+- **런북:** `migrate-legacy/D-DAY-RESERVATION-RUNBOOK.md`
+
+#### ⚠️ 다음 세션 절대 금지 (D-Day 검증 과정 5번 사고 교훈)
+1. **추측 절대 금지** — MSGSUMMARY.MSGDV가 진실의 원천 (SMSQ_SEND.MSG_TYPE='M' ≠ MMS, 35건 LMS를 MMS로 오판한 사고)
+2. **MSGATTACH 53,367행은 미사용** — 첨부는 SMSQ_SEND.FILE_NAME1만
+3. **AI는 SSH/git/배포/.env 비번 읽기 절대 금지** — Harold 직접 실행
+4. **docker 접속:** PG = `docker exec -it targetup-postgres psql -U targetup targetup` / MySQL = `docker exec -it targetup-mysql mysql -usmsuser -p smsdb`
+5. **6개 정합 SQL 모두 실행 + Harold 결과 보고** 후에만 5/6 발송 모니터링 진행
+
+---
+
+### 🟢 D143 (2026-04-30) — ENTERPRISE 잠금 + 매뉴얼 + 자연인 오픈 + app.hanjul.ai 폐기 (배포 완료)
+
+> **상태:** 🟢 배포 완료 (PM2 restart 4/30 17:24 KST 확인). 자연인 isoi/isoics 첫 시범 업체 오픈 준비 완료.
+
+#### 처리 항목
+
+1. **자동발송/카카오&RCS ENTERPRISE 잠금 + 베타테스트 안내**
+   - DB: `UPDATE plans SET auto_campaign_enabled = (plan_code = 'ENTERPRISE')`
+   - Frontend: DashboardHeader planCode prop, 메뉴 자물쇠+베타 모달, KakaoRcsPage 페이지 잠금, AutoSendPage 멘트 변경
+   - **🔮 디버깅 완료 후 환원 SQL 메모됨** (project_d143_session.md 9. 핵심메모 참조)
+
+2. **자연인 isoi/isoics 오픈 준비**
+   - `must_change_password=true` 강제 (직원이 한 번 로그인해서 false였던 것 정정)
+   - 비밀번호는 `qwer1234` 유지 (직원 안내값 그대로)
+   - **하지만 자연인 plan은 PRO 그대로** — Harold님 결정. 디버깅 완료 후 plans 환원 시 자동발송 자동 사용 가능
+
+3. **로그인 ID 공백 trim — 사고 차단**
+   - 자연인 isoi 로그인 4회 실패 사고 추적: audit_logs `details::text`로 입력값에 공백 발견(` isoi`, ` isoi `)
+   - LoginPage.tsx + auth.ts trim
+   - DB CHECK: `users_login_id_no_space CHECK (login_id !~ '\s')` 재발 방지
+
+4. **app.hanjul.ai 폐기 → hanjul.ai 자동 리다이렉트**
+   - `packages/company-frontend/index.html` `<head>` 최상단에 location.replace
+   - **company-frontend는 별도 빌드 필요:** `cd packages/company-frontend && npm run build`
+   - 발견: company-frontend LoginPage.tsx에 mustChangePassword 체크 누락 → 폐기로 자연 해결
+
+5. **사용자 매뉴얼 (manual.html) 신설**
+   - `git mv "한줄로 매뉴얼 html" "packages/frontend/public/manual"` (history 보존)
+   - 9장 페이징 방식 (좌측 메뉴 클릭 → 챕터 단위 전환, 키보드 ←/→ 단축키, URL #ch 해시)
+   - 보안 8중: 우클릭/단축키/window.print/이미지 드래그/텍스트 선택/DevTools 감지 blur/세션 검증/robots noindex
+   - Dashboard.tsx 푸터에 `사용자 매뉴얼` 링크 추가
+   - 직원 검토 4건 반영 (담당자 테스트 위치/회신번호 제외/AI 발송 템플릿/매일 제거)
+   - TargetUp → hanjul.ai, MMS 1장 → 3장
+
+6. **SyncAgent 설치매뉴얼 v1.5.4 신설**
+   - `sync-agent/SyncAgent_설치매뉴얼_v1_5_4.docx` (24KB) — 신규
+   - v1.5(구버전) 그대로 보존
+   - 9.4 신설: 한줄로 슈퍼관리자 원격 제어
+   - Q10/Q11/Q12 트러블슈팅 추가 (1053/Delayed Auto Start/단건 재시도)
+   - 12. 버전 히스토리 v1.5.1/v1.5.2/v1.5.4 추가
+   - **🔒 한줄로 내부 정보 노출 0건 검증 완료** (IP/DB/스키마/API 경로/도메인/Docker/Nginx/SSH/bcrypt/JWT 모두 grep 0건)
+
+#### 미완료 (다음 세션 이어가기)
+
+- **알림톡 PDF 0430 7건 진단** — D142 0428 작업 후에도 재발 신고
+  - **#7 등록 폼 코멘트 입력 위치 오류** 확정 (D142 F가 검수요청 모달에 잘못 추가) — 즉시 수정 가능
+  - 나머지 6건 — 사용자 재현 + pm2 로그 캡처 필요. PM2 메모리 새 코드 로드 확인됨(4/30 15:14 KST)
+- **MEMORY.md 크기 38KB** — 한도(24.4KB) 초과. 다음 세션에서 정리 필요
+
+#### 배포 명령
+
+```powershell
+tp-push "D143 ENTERPRISE잠금+매뉴얼+로그인trim+자연인오픈+appHanjulAi폐기"
+tp-deploy-full
+# 추가
+cd packages/company-frontend && npm run build  # app.hanjul.ai redirect 적용
+```
+
+---
+
+### 🟡 D142+ 알림톡 PDF 0428 (2026-04-29) — D135/D139 후속 7건 + IMC 이미지 이중 래핑 unwrap (수정 완료 · 배포 대기)
+
+> **상태:** 🟡 코드 수정 완료 · TS 0 error · **배포 대기**
+>
+> **PDF:** `한줄로 알림톡_260428.pdf` (D135 9건 + D139 7건 배포 후 직원 재검수)
+>
+> #### 처리 6건 + 별건 1건
+>
+> | # | 카테고리 | 처리 |
+> |:--:|:--:|------|
+> | A1+A2 | 등록창 close + 중복 등록 | `AlimtalkTemplateFormV2.tsx` `handleSave`에 `if (saving) return` 가드 + 성공 시 `setSaving(true)` 유지 + `onClose()` fallback |
+> | C 4-1 | 상태별 액션 버튼 | D139에서 이미 구현 ✅ (재확인). **4 일괄 체크박스+DORMANT는 신규 기능 → 별건 분리** |
+> | D | 아이템리스트 최소 2개 | `ItemListEditor.tsx` `removeRow` 가드 + 삭제 버튼 disabled + validate 최소 2개 |
+> | F | 검수요청 시 코멘트+증빙자료 모달 | `AlimtalkManagementSection.tsx` 모달 신설. backend `/inspect-with-file`은 D135부터 보유 |
+> | B | 대표링크 IMC 미전달 | `AlimtalkTemplateFormV2.tsx` `handleSave` 페이로드 조건 체크박스 의존 제거 → Mobile URL 자체가 enabled 시그널. URL onChange 시 자동 체크 ON |
+> | **E** 🎯 | 이미지 업로드 "카카오 응답에 이미지가 없습니다" | **`alimtalk-api.ts` uploadSingleImage/uploadMultipleImages에 IMC 이중 래핑 unwrap 추가** (D131 패턴이 image API에 미적용되어 사고 발생). 응답 raw 로그 강화 |
+>
+> #### 핵심 교훈
+> 1. IMC 이중 래핑 unwrap은 **모든 IMC API에 일관 적용 필수**. D131에서 sender/template만 처리하고 image API 빠뜨려 3일 후 신고 재발
+> 2. 체크박스+URL 입력 UX는 위험 (사용자가 한쪽만 충족하는 케이스 多). URL 입력 자체를 enabled 시그널로
+> 3. 신규 기능 보고 받으면 **backend 우선 grep** (검수요청 모달은 backend 라우트 이미 있었음)
+>
+> **수정 파일 (4개):**
+> - `frontend/components/alimtalk/AlimtalkTemplateFormV2.tsx`
+> - `frontend/components/alimtalk/AlimtalkManagementSection.tsx`
+> - `frontend/components/alimtalk/ItemListEditor.tsx`
+> - `backend/utils/alimtalk-api.ts`
+>
+> **배포:** `tp-push "0429 D142 알림톡 PDF 0428 7건 — A1+A2 close 가드 / B 대표링크 체크박스 의존 제거 / D 아이템리스트 최소 2개 / E IMC 이미지 이중 래핑 unwrap / F 검수요청 코멘트+증빙자료 모달"` → `tp-deploy-full`
+
+---
+
+### 🟡 D142 (2026-04-28) — 한줄로_20260428.pdf 11건 + 1년 반복 필드값 사고 패턴 구조적 종결 (수정 완료 · 배포 대기)
+
+> **상태:** 🟡 코드 수정 + sync-agent v1.5.4 빌드 완료 · **배포 대기**
+>
+> **PDF:** `C:\Users\ceo\OneDrive\문서\카카오톡 받은 파일\한줄로_20260428.pdf` 11건 (suran/eunji/Jihyun/시세이도 + 슈퍼관리자)
+>
+> **🚨 Harold님 정당한 분노 — "한 달 넘게 같은 필드값 사고 반복":**
+> 1년 누적 패턴: D104(formatNumberPreview) → D136 P1(CustomerDBModal fieldKey) → D141(B5) → 0428 #5. 매번 인라인 누더기 패치 → 호출부 누락 → 재발 → 또 패치. **사람 기억 의존 = 100% 재발.**
+>
+> **Harold님 답 (단순함이 정답):** "고정필드 22개는 그 필드 룰대로 / 커스텀필드는 있는 그대로"
+>
+> #### D142 1차 — 필드값 컨트롤타워 통합 (구조적 종결)
+>
+> | 변경 | 위치 | 효과 |
+> |------|------|------|
+> | **`FIELD_DISPLAY_FORMAT_MAP` + `renderFieldValue()` 신설** | `backend/utils/standard-field-map.ts` | 22개 고정 displayFormat 1:1 매핑. custom_1~15는 의도적 미등록 → 자동으로 String(원본) 반환. **호출부 fieldKey 누락 = 안전한 기본값** |
+> | **`FRONT_DISPLAY_FORMAT_MAP` + `displayValue()` 신설** | `frontend/utils/formatDate.ts` | 백엔드 미러. fmtPhone/fmtDate/fmtMoney/fmtInt/fmtGender/fmtSmsOptIn/fmtString 헬퍼 |
+> | **`replaceVariables` 자동 type 추론 분기 전부 삭제** | `backend/utils/messageUtils.ts` | mapping.type === 'number' → renderFieldValue 단일 호출 |
+> | **5개 변수치환 컨트롤타워 displayValue 통합** | frontend formatDate.ts | formatByType / formatPreviewValue / replaceMessageVars / replaceVarsByFieldMeta / replaceVarsBySampleCustomer |
+> | **TargetSendModal:244 / AiCustomSendFlow:1140 호출부 fieldKey 전달** | 2개 컴포넌트 | PDF #5 직접타겟발송 담당자테스트 + 미리보기 콤마 차단 |
+> | **백엔드 4곳 custom_fields 평면화 시 String() 강제** | customers.ts /extract / ai.ts parse-briefing/recommend-target / target-sample.ts | 프론트 typeof 자동 추론 차단 (D142 안전망 1차) |
+> | **전화번호 regex 정밀화** | normalize.ts + formatDate.ts + sync-agent index.ts (3곳) | `\d{6,10}` → prefix별 `\d{7,8}`. 8자리 대표번호(1588/1644/1670/1800/1899) 휴대폰 prefix 매치 차단 |
+>
+> #### D142 2차 — Harold님 추가 지시 5건
+>
+> | # | 카테고리 | 처리 |
+> |:--:|:--:|------|
+> | **#1** A 엑셀다운로드 | `customers.ts /download` row 변환부 → `renderFieldValue` 단일 진입점. **화면 ≡ 다운로드 100% 일치** (boolean Y/N만 엑셀 관행 유지) |
+> | **#4** D 분할전송 UI | 기본 1000건/분 + min={1} max={9999} 검증 + CSS width 50→64px (4자리 안 잘리고 다 보임) |
+> | **#7** E 자동발송 | **4단계 → 3단계 단순화**: ① D-1 (12~36h) AI생성+스팸 ② D-day 2h전 스팸+담당자테스트 ③ D-day 발송. 사전알림 단계 메인 루프 호출 제거. 48h 미만 풀백 무한리턴 차단 |
+> | **#9** F SyncAgent 중복/합산 | **3곳 동시 수정** — sync.ts /sync 후 SET 스냅샷 + heartbeat에서 total_customers_synced 무시 + Agent state.ts `+= count` → `= count` 직접 대입 |
+> | **#10** F SyncAgent 자동실행 | `start= auto` → **`start= delayed-auto`**. 부팅 후 ~2분 지연으로 네트워크/DB 안정화 후 시작 |
+>
+> #### sync-agent v1.5.4 산출물 + v1.5.3 구버전 전부 삭제
+>
+> - ✅ `SyncAgent-Setup-1.5.4.exe` (19.4 MB)
+> - ✅ `SyncAgent-Setup-1.5.4.zip` (19.4 MB)
+> - ✅ `SyncAgent-1.5.4-linux-x64.tar.gz` (38.2 MB)
+> - 🗑 v1.5.3 .exe / .zip / .tar.gz 전부 삭제
+>
+> #### D142 3차 — 별건 잔존 2건 추가 처리
+>
+> | # | 카테고리 | 처리 |
+> |:--:|:--:|------|
+> | **#8** | E 자동발송 바이트 계산 | `AutoSendFormModal` `msgBytes` 계산을 **`spamSampleCustomer`로 변수치환 + `buildAdMessageFront`로 (광고)+080 부착 후** 결과 기준 계산. 직접발송·AiCustomSendFlow:1129 패턴 이식. 개인화 적용으로 길어진 메시지 SMS 90byte 초과 시 자동 LMS 전환 정상 동작 |
+> | **#11** | F SyncAgent 행 skip | sync-agent engine.ts는 이미 normalize/validation 실패 행 단위 skip 구현 ✅ (재확인). **진짜 문제는 backend** `sync.ts` chunk(500건) 일괄 UPSERT 실패 시 1건 잘못으로 500건 전부 fail 처리되던 사고. customers + purchases **2곳 단건 재시도 패턴 적용** — chunk 실패 시 1건씩 재시도 → 실패 행만 정확히 식별 + 정상 행은 정상 처리 |
+>
+> #### PDF 0428 11건 최종 처리 현황 (D142 1차+2차+3차 합산)
+>
+> | 상태 | 건수 | 번호 |
+> |:----:|:----:|------|
+> | ✅ 완벽 처리 | **11건** | #1, #2, #3, #4, #5, #6, #7, #8, #9, #10, #11 |
+>
+> #### TypeScript 빌드 (3프로젝트 모두 0 error)
+>
+> ✅ backend / ✅ frontend / ✅ sync-agent
+>
+> **🎓 D142 핵심 교훈 (CLAUDE.md 갱신 대상):**
+> 1. **호출부 의존 가드 = 1년 재발 패턴** — fieldKey 누락 시 자동 type 추론 발동 → 매번 새 호출부에서 재발. 이번에 **컨트롤타워 자체 안전한 기본값**(매칭 실패 = String 원본)으로 구조적 종결
+> 2. **고정 22개 룰대로 / 커스텀 원본 그대로** — Harold님 정답. 자동 type 추론 분기 자체가 위험. dataType 보고 콤마 찍지 말 것
+> 3. **데이터 출처 시점에 String() 박제** — backend 평면화 4곳에서 custom_fields 값을 String() 강제. 프론트 typeof 자동 추론 자체를 불가능하게
+> 4. **자동발송 D-2 → D-1로 시점 당김** — 발송시각 24h 미만 등록 시 풀백 무한리턴 차단. 단계 4→3로 단순화
+> 5. **SyncAgent 누적 합산 ≠ 실제 카운트** — sync_agents.total_customers_synced는 누적이 아니라 회사별 실제 customers COUNT 스냅샷이어야 함
+> 6. **Windows 서비스 `start= delayed-auto`** — 부팅 직후 네트워크/DB 미준비 상태에서 시작 실패 방지
+>
+> **배포 명령:**
+> ```
+> tp-push "0428 D142 필드값 사고 1년 패턴 구조적 종결 + Harold님 추가 지시 5건 + sync-agent v1.5.4"
+> tp-deploy-full
+> ```
+>
+> **SyncAgent 배포:** 직원에게 `SyncAgent-Setup-1.5.4.exe` 또는 `.zip` 배포. 기존 v1.5.2/v1.5.3 사용자는 제거 후 재설치 권장 (start type이 auto → delayed-auto로 바뀌므로).
+
+---
+
+### 🟢 D141 (2026-04-27~28) — 한줄로_20260427.pdf 5건 근본수정 + 끌로드원칙 7-1 3차 재점검 (배포 완료 2026-04-28)
+
+> **상태:** ✅ 배포 완료 (2026-04-28)
+>
+> **PDF:** `C:\Users\ceo\OneDrive\문서\카카오톡 받은 파일\한줄로_20260427.pdf` 5건
+>
+> **🚨 1차→2차→3차 재점검에서 누적 추가 사고 후보 8건 발견 + 차단 (Harold님 끌로드원칙 강조 지시):**
+>
+> #### PDF 5건 직접 수정
+> | # | 이슈 | 파일 / 핵심 변경 |
+> |---|------|------------------|
+> | B1 | 직접발송 파일 업로드 동일 기준필드(전화번호 컬럼 2개) → 회신번호 하나로만 인식 | **`upload.ts` `dedupeHeaders` 헬퍼 신설** + 3곳 적용 (/parse, /validate-mapping, processUploadInBackground). Set 기반 단일 패스 — 어떤 입력도 결과 unique 보장 |
+> | B2 | 직접발송 화면에 파일 드래그 시 업로드 안되고 다운로드됨 | `DirectSendPanel.tsx` 모달 root 글로벌 차단 + dropzone 4핸들러(onDragEnter/Over/Leave/Drop) + `direct-send.css` `ds-dropzone--active` 시각 피드백 |
+> | B3 | 직접발송 보관함 적용 후 미리보기 클릭 → 흰화면 + 새로고침 시 로그아웃 | **근본 원인:** `resolveRecipientCallback(undefined,...)` → `recipient.callback` TypeError → React 트리 unmount. `formatDate.ts`의 5개 변수치환 컨트롤타워 모두 가드 추가 |
+> | B4 | 한줄로(AI) LMS 채널일 때 MMS 이미지 첨부란 노출 → 자동 MMS 전환 → 첨부 삭제해도 MMS 잠금 → 발송 차단 | `AiCampaignResultPopup.tsx:303` `selectedChannel === 'MMS' && (...)` 가드 (맞춤한줄 패턴 이식) + Dashboard 발송 payload 4곳 channel 가드 통일 |
+> | B5 | 발송결과-테스트발송 담당자/스팸필터 컬럼 순서 불일치 | `ResultsModal.tsx:693-725` 스팸필터 컬럼을 **날짜/발송자/유형/통신사/문안/판정**으로 변경 (담당자 테스트와 1~3 컬럼 일치) |
+>
+> #### 끌로드원칙 7-1 3차 재점검에서 추가 발견 + 수정한 잠재 사고 8건
+>
+> | 차수 | 발견 |
+> |------|------|
+> | 1차 | PDF 5건 표면 수정 — `/parse`만 디덱싱 |
+> | **2차** | `upload.ts /validate-mapping` + `processUploadInBackground` 디덱싱 누락 발견 → 고객DB 업로드 매핑 미적용 데이터 손실 사고 잠재 차단. `dedupeHeaders` 헬퍼 추출로 3곳 통합 |
+> | **3차** | (a) `dedupeHeaders` 카운터 방식 엣지 케이스 `["A", "A", "A (2)"]` → `["A", "A (2)", "A (2)"]` 충돌 가능 → Set 기반 재작성 / (b) `FileUploadMappingModal` 모달 root 글로벌 차단 누락 (D131 누락분, B2 일관성) / (c) `replaceDirectVars` 컨트롤타워 자체에 recipient 가드 누락 / (d) `replaceMessageVars` 컨트롤타워 자체에 customerData 가드 누락 (호출부 3곳에서 sampleData/sc/spamSampleCustomer undefined 시 흰화면 잠재) / (e) Dashboard 발송 payload mmsImagePaths channel 가드 4곳 누락 (직접발송/직접타겟/한줄로AI 캠페인/한줄로AI 담당자테스트/직접타겟 담당자테스트) |
+>
+> #### 5경로 매트릭스 검증 (D109 원칙 준수)
+>
+> | # | 경로 | UI LMS 가드 | Payload channel 가드 |
+> |---|------|------------|--------------------|
+> | 1 | 한줄로AI | ✅ 이번 | ✅ 이번 (Dashboard:1671, 1916) |
+> | 2 | 맞춤한줄 | ✅ 기존 | ✅ 기존 (1809) |
+> | 3 | 자동발송 | ✅ 기존 | ⚠️ 별건 — MMS 이미지 서버 업로드 미구현 (별개 버그) |
+> | 4 | 직접발송 | ✅ 기존 | ✅ 이번 (Dashboard:464) |
+> | 5 | 직접타겟발송 | ✅ 기존 | ✅ 이번 (Dashboard:625, 1967) |
+>
+> #### 컨트롤타워 가드 매트릭스 (5/5 완성)
+>
+> | 함수 | 가드 |
+> |------|------|
+> | `replaceDirectVars` | ✅ `if (!text \|\| !recipient) return text` (이번 추가) |
+> | `replaceMessageVars` | ✅ `const data = customerData \|\| {}` (이번 추가) |
+> | `replaceVarsByFieldMeta` | ✅ 기존 |
+> | `replaceVarsBySampleCustomer` | ✅ `const sc = sampleCustomer \|\| {}` 기존 |
+> | `resolveRecipientCallback` | ✅ `if (!recipient) return fallbackCallback \|\| null` (이번 추가) |
+>
+> **수정 파일 (8개):**
+> - 백엔드: `routes/upload.ts` (dedupeHeaders 헬퍼 + 3곳)
+> - 프론트: `components/DirectSendPanel.tsx` / `styles/direct-send.css` / `components/FileUploadMappingModal.tsx` / `components/AiCampaignResultPopup.tsx` / `components/ResultsModal.tsx` / `utils/formatDate.ts` / `pages/Dashboard.tsx`
+>
+> **🎓 D141 핵심 교훈:**
+> 1. **PDF 표면 수정만으로 절대 완료 선언 금지** — 1차에서 /parse만 보고 완료 보고했다가 2차에서 /validate-mapping + processUploadInBackground 매핑 미적용 사고 잠재 차단. **데이터 흐름 끝까지 추적 (입력→처리→저장→조회→표시) 절대 필수**
+> 2. **컨트롤타워 자체에 안전망** — D109 원칙 "데이터 출처 시점에서 안전 처리". 외부 호출부 가드는 향후 추가 호출부 누락 시 재발. 컨트롤타워에 가드 두면 모든 호출부 자동 보호. 변수치환 컨트롤타워 5개 모두 가드 정합 완성
+> 3. **5경로 매트릭스 × Payload 일관성** — UI 가드만으로는 부족. 발송 payload(channel === 'MMS' ? ... : []) 5경로 일관성 통일이 진짜 안전망. 채널 변경 로직 깨질 시에도 LMS+MMS paths 불일치 차단
+> 4. **엣지 케이스 단일 패스 보장** — 카운터 방식 디덱싱은 입력에 디덱스 결과와 같은 헤더가 있으면 충돌. Set 기반 단일 패스로 어떤 입력도 결과 unique 보장
+> 5. **3차 재점검 = 진짜 끌로드원칙** — 1차 표면 / 2차 호출부 전수 / 3차 컨트롤타워 자체 + 엣지 케이스 + payload 일관성. Harold님 "끌로드원칙에 맞게 전수 재점검" 지시 3회로 누적 8개 사고 후보 차단
+>
+> **⏭️ 별건 대기 (D141에서 식별):**
+> - `AddressBookModal` 드래그앤드롭 미적용 (B2 패턴)
+> - `Unsubscribes` 드래그앤드롭 미적용 (B2 패턴)
+> - `flyer/customers.ts` / `flyer/flyers.ts` 헤더 디덱싱 미적용 (B1 패턴, 전단AI)
+> - 자동발송 MMS 이미지 서버 업로드 미구현 (`AutoSendFormModal.handleMmsImageUpload`은 blob URL만 생성, 서버 업로드 안 함, body에 mms_image_paths 누락 → 자동발송 MMS 발송 자체 불가)
+
+---
+
+### 🟣 D140 (2026-04-25) — 브랜드메시지 IMC 매뉴얼 16개 정합성 전수 점검 + Phase C 정제 헬퍼 일반화
+
+> **상태:** 🟡 코드 수정 완료 · **배포 대기**
+>
+> **매뉴얼 자료:** `Downloads/imc_extracted/` 11_18~21번대 16개 IMC 공식 스펙 + `OneDrive/바탕 화면/bito-gateway/[휴머스온]브랜드메시지 Agent 사용 메뉴얼_20260209.pdf` (40p)
+>
+> **점검 결과 16/16 매뉴얼 정합 ✅** (큰 리팩토링 불필요. D130 결정 아키텍처 유지):
+>
+> | 그룹 | 한줄로 정석 | 상태 |
+> |------|-----------|------|
+> | 관리 API 14개 (#3~#16) | 백엔드 IMC HTTP 직접 호출 (`alimtalk-api.ts`) | ✅ 라우트+함수 |
+> | 발송 API 2개 (#1~#2) | MySQL 큐 INSERT (`insertKakaoQueue`/`insertKakaoBasicQueue` → `IMC_BM_FREE_BIZ_MSG`/`IMC_BM_BASIC_BIZ_MSG`) → QTmsg/BM Agent 위임 | ✅ Agent 영역 |
+> | 8종 chatBubbleType / 8종 BUTTON | 백엔드 `brand-message.ts` + 프론트 `BrandMessageEditor.tsx` 동기화 | ✅ 모든 제약 정합 |
+>
+> **Phase C 보강 (D139 IMC 단어 정책 일관 적용):**
+> - **신규 헬퍼 (`routes/alimtalk.ts`):** `sanitizeImcMessageForUser(rawMsg, code, fallback)` 일반화 + `sendImcManagedResponse(res, r, opts)` 통합 헬퍼
+> - **브랜드 라우트 7곳 일괄 적용:** `POST /senders/:id/brand-targeting`, `GET /senders/:id/brand-targeting-check`, `POST/PUT/DELETE /brand-templates/...` (5종)
+> - **DB 부정합 방지:** IMC 실패 시 한국 DB UPDATE 안 함 (기존: IMC 실패해도 `updated_at` 갱신되던 라우트 다수)
+> - **운영 진단 로그 raw 보존:** `console.warn`은 IMC code/message 그대로 (개발자 전용)
+>
+> **빌드 검증:** 백엔드 + 프론트 `tsc --noEmit` 0 에러
+>
+> **🎓 D140 핵심 교훈:**
+> 1. **발송 정석 = MySQL INSERT (D130 아키텍처)** — 처음 잘못 분석한 "IMC API 직접 호출"을 Harold님 지적("매뉴얼이 정석") 받고 정정
+> 2. **매뉴얼 우선 — 옵션 비교 X** — A/B/C 옵션 분류는 잘못된 접근
+> 3. **D139 IMC 단어 정책 일관 적용** — 신규/기존 라우트 모두 정제 헬퍼 사용
+> 4. **Auto mode이지만 끌로드원칙 7-1 절차 유지** — 각 Phase 직전 grep 전수 리스트업 + 변경 범위 보고
+>
+> **배포:** `tp-push "0425 D140 브랜드메시지 IMC 매뉴얼 정합성 전수 점검 + Phase C 정제 헬퍼 일반화 + 브랜드 라우트 7곳 IMC 단어 노출 차단"` → `tp-deploy-full`
+
+---
+
+### 🟣 D139 (2026-04-25) — 알림톡 PDF 7건 후속 검수 피드백 (D135 후속)
+
+> **상태:** 🟡 코드 수정 완료 (5개 파일) · **배포 대기**
+>
+> **PDF:** `OneDrive/문서/카카오톡 받은 파일/한줄로 알림톡_260424.pdf` (D135 B1~B9 배포 후 직원 재검수)
+>
+> **✅ 7건 전건 수정 (5개 파일):**
+>
+> | # | 이슈 | 파일 / 핵심 변경 |
+> |---|------|------------------|
+> | #1+#3 | SUCCESS 후 등록창 닫힘 + 재클릭 IMC 중복 + 관리화면 미반영 | `routes/alimtalk.ts` PG INSERT를 try/catch로 감싸 실패 시 `imc.deleteAlimtalkTemplate` 자동 롤백. IMC-DB 정합성 100% |
+> | #4 | "등록 + 검수요청" → "등록만"으로 분리 | `routes/alimtalk.ts` 자동 검수요청 블록 제거 / `AlimtalkTemplateFormV2.tsx` 등록 버튼 텍스트 변경 + `inspectionError` alert 제거 |
+> | #4-1 | 상태별 액션 버튼 4종 분기 (DRAFT/REQ·REV/REJ/APR) | `AlimtalkManagementSection.tsx` 액션 셀 재구성 + `viewing` state 신설 + readOnly DetailModal 인스턴스 / `AlimtalkTemplateFormV2.tsx` `readOnly` prop 추가 |
+> | #5 | [강조표기형] 이미지/헤더 체크 해제 안 됨 | `ItemListEditor.tsx` `imageToggleManual`/`headerToggleManual` sentinel 양방향 동기화 |
+> | #6 | 하이라이트 썸네일 체크 미반영 + 업로드 200 | `ItemListEditor.tsx` `checked={imageUrl !== undefined}` 변경 (빈 문자열도 ON) + `routes/alimtalk.ts` `sendImageUploadResponse` 헬퍼 |
+> | #7+#6-1 | 이미지 업로드 "오류코드 200" 사용자 메시지 정제 | `routes/alimtalk.ts` `sendImageUploadResponse` 헬퍼 추출 + 9개 업로드 라우트 일괄 적용. IMC 거부 시 영문 ExceptionName/IMC 코드 제거 + 한글 메시지만 노출 |
+> | #2 | 대표링크 IMC 전달 검증 (코드는 정상, 진단 강화) | `AlimtalkTemplateFormV2.tsx` UI 가드 3중 (빨강/녹색/amber 안내) + `alimtalk-api.ts` `templateRepresentLink` 포함여부 + IMC 응답 echo back 검증 로깅 |
+>
+> **추가 보강:**
+> - **multer originalname latin1→utf8 디코딩** (`decodeOriginalName` 헬퍼) — 한글 파일명 깨짐 (`ë틀ɑì틀´.jpg`) 근본 해결
+> - **사용자 노출 IMC 단어 5곳 → '카카오'로 통일** (D135 정책 재발 방지)
+> - **catch 블록 에러 메시지 상세화** (F12 차단 환경에서 fetch throw 원인 노출)
+>
+> **🎓 D139 핵심 교훈:**
+> 1. **끌로드원칙 7-1 절차 위반 후 Harold님 정당한 지적** ("니 멋대로 코드 보고 바로 수정하라고했나") — 1단계 컨펌이 큰 우산이어도 각 수정 직전 명시적 grep 리스트업+컨펌 재거쳐야 함
+> 2. **사용자 노출 텍스트에 'IMC'/'humuson' 단어 절대 금지** — D135 작업 재발. `feedback_no_imc_keyword_in_user_text.md` 메모리 신설로 영구 기록
+> 3. **IMC-DB 롤백 패턴** — 정합성 문제는 양방향 처리 (IMC 성공+DB 실패 시 IMC 롤백)
+> 4. **9곳 동일 응답 패턴 = 즉시 헬퍼 추출** — 원칙 3 (CT 추출)
+> 5. **F12 차단 환경 진단** — 토스트 에러 메시지 상세화가 유일한 통로
+
+---
+
+### 🟣 D138 (2026-04-24~25 새벽) — 직접발송 파일등록+개별회신번호 "발송 실패" 근본 수정
+
+> **상태:** 🟡 코드 수정 완료 (5건) · **배포 대기**
+>
+> **증상:** 직접발송 창 20,000건 CSV + 개별회신번호(매장전화번호 수신자별) 선택 → "발송 실패" 토스트만 뜨고 미등록 회신번호 확인 모달 안 뜸. PM2에 `direct-send` 요청 0건.
+>
+> **✅ 최종 근본 수정 5건:**
+>
+> | # | 파일 | 핵심 변경 |
+> |---|------|----------|
+> | 1 | `DirectSendPanel.tsx:427` | `handleMappingApply` `entry`에 `...row` 보존 (미리보기용 원본 헤더 키) |
+> | 2 | `formatDate.ts:749` | `resolveRecipientCallback`에 optional `fallbackCallback` 파라미터 추가 (하위호환) |
+> | 3 | `Dashboard.tsx:448` | **`executeDirectSend` recipients 페이로드 경량화** — `...r` 제거, 표준 필드만 + `resolveRecipientCallback`으로 callback resolve |
+> | 4 | `Dashboard.tsx:534` | **catch 에러 상세화** — `err.message`를 토스트에 120자까지 노출. F12 차단 환경 진단 |
+> | 5 | `DirectPreviewModal.tsx:58` | 인라인 `resolveCallback` 6줄 제거 → CT 호출 (원칙 3 "2곳 이상 = CT") |
+>
+> **🎓 D138 핵심 교훈:**
+> 1. **recipients payload `...r` 스프레드 금지** — 엑셀 원본 row(한글 키/Date/커스텀 필드) 그대로 실으면 nginx body size/JSON 파싱 실패로 fetch가 throw → 백엔드 도달조차 안 됨
+> 2. **F12 차단 환경의 catch 블록은 반드시 `err.message` 토스트 노출** — "발송 실패" 고정 문자열만으로는 원인 파악 불가
+> 3. **"껍데기만 바꿨지" Harold님 지적이 정확** — 1차 미리보기 수정이 오히려 catch 진입 유발. 흐름 전체 검증 필수
+> 4. **PM2 로그 빈 결과 = 요청 미도달** — 프론트에서 막힌 것
+
+---
+
+### 🟣 D137 (2026-04-24) — 한줄로_20260423.pdf 10건 전건 근본수정 + Sync Agent v1.5.2 빌드 완료
+
+> **상태:** 🟡 코드 수정 + Agent 빌드 완료 · **배포 대기** · **다음 세션 실서버 재검증 필수**
+>
+> **PDF:** `C:\Users\ceo\OneDrive\문서\카카오톡 받은 파일\한줄로_20260423.pdf` 10건
+>
+> **✅ 수정 완료 (10건 전건):**
+>
+> | # | 제목 | 수정 파일 | 방식 |
+> |---|------|----------|------|
+> | D1 | DB현황 카드 모달 "타겟발송 바로가기" 삭제 | CardDetailModal/Dashboard/DirectTargetFilterModal (3파일 14지점) | **옵션 A 뿌리째** — `CardTargetFilterOutput` 타입·`onTargetSend` prop·`buildTargetFilters` 함수·푸터 버튼·Dashboard state·DirectTargetFilterModal `initialFilters` prop까지 완전 제거 |
+> | D2 | LMS/MMS 무료거부 위 빈 줄 과잉 (D136 D2 재발) | `messageUtils.ts` L378 + `formatDate.ts` L785 + `services/ai.ts` L950-951, L1912-1913 | **근본 분리:** `minBreaks = 1` 통일 (LMS/MMS 강제 빈줄 제거) + AI 자동제거 regex `\n?` 삭제 (AI 경로 원본 개행 보존) → 직접발송은 고객 입력대로, AI 경로는 빈줄 1개 유지 |
+> | D3 | 직접발송 "상위 10개 표시" 제거 + 페이지네이션 | `DirectSendPanel.tsx` (state + 렌더 + 페이지네이션 UI) | BirthdayCustomerList 톤 계승 (이전/1-N/다음), selectedRecipients `originalIdx` 기반이라 페이지 이동해도 선택 유지 |
+> | D4 | 발송 전 안내창 중복제거 건수 표시 | 백엔드 `/api/unsubscribes/check` + `SendConfirmModal` + 호출부 4곳 | CT-14 `deduplicateByPhone` 재사용 → 발송 시 실제 dedup 기준과 카운트 일치 보장 |
+> | D5 | 수신번호/회신번호 앞 0 자동 보정 | `formatDate.ts` `normalizePhoneKr` 신설 + 백엔드 `normalize.ts` 미러 + `DirectSendPanel.tsx` 5지점 | 한국 전화번호 prefix 전수(02/01X/03X/04X/05X/50X/06X/70) · 정상 입력은 절대 변형 X · Harold님 지시 "phone + callback 2개 필드만" 준수 |
+> | D6 | (광고)/무료거부 표시 불일치 — D102/D106/D109 **3번째 재발** | `formatDate.ts` `formatCampaignMessageForDisplay` | **근본:** `realSentMessage`도 `stripAdParts + buildAdMessageFront` 파이프라인 통과 → msg_contents 저장 상태와 무관하게 모든 표시 경로에서 완전 일관 |
+> | D7 | MMS 이미지 1/2/3 순서 카운트 이상 (D136 D3 재발) | `Dashboard.tsx` `handleMmsSlotUpload` guard + `MmsUploadModal.tsx` 잠금 UI | Harold님 지시 **"왼쪽부터 순서대로 강제"** 방식: `slotIndex > length` 차단 + 잠긴 슬롯 UI(🔒 + 안내) |
+> | D8 | Sync Agent 크래시 후 서비스 중지 + 자동재시작 실패 | `sync-agent/src/index.ts` L395 | `unhandledRejection` / `uncaughtException` 핸들러 추가 → 일시 장애에도 서비스 유지 (+ Harold님 Windows 서비스 복구 설정 조치 필요) |
+> | D9 | Sync Agent grade `NORMAL/SILVER` 영문 표기 | `field-map.ts` grade `trim` 유지 | **코드 이미 OK** (D131 반영) · **배포된 Setup-1.5.1.exe가 구 빌드** → v1.5.2 재빌드로 해결 |
+> | D10 | 슈퍼관리자 대시보드 카드 설정 `custom_1` 라벨 | `sync-agent/src/index.ts` L198 + L208 근본 수정 | **근본 2단:** (a) `customFieldLabels` 자동 유도 — config 비어있으면 `mapping.customers` 역추출로 원본 DB 컬럼명을 라벨로 (b) `isFieldDefinitionsRegistered()` 체크 제거 — 매 시작 시 재등록 (CT-07 idempotent) |
+>
+> **📦 Sync Agent v1.5.2 빌드 완료:**
+> - Windows: `sync-agent/installer/SyncAgent-Setup-1.5.2.exe` (19MB, NSIS)
+> - Linux: `sync-agent/installer/SyncAgent-1.5.2-linux-x64.tar.gz` (37MB)
+> - 구 버전(1.5.0 tar.gz / 1.5.1 exe·zip) 전부 삭제
+> - `package.json` 1.5.1 → 1.5.2, `config/schema.ts` default 1.5.2
+>
+> **🎓 D137 핵심 교훈:**
+> 1. **서브 폴더 추측 금지** — sync-agent가 `packages/` 밑이 아닌 프로젝트 루트에 있는데 `packages/`만 보고 "저장소 밖"이라고 오판. 전체 tree 확인 절대 필수.
+> 2. **재발 버그는 경로 불일치** — D2/D7 둘 다 D136에서 "1곳만" 수정됐던 것. **5경로×표시경로 매트릭스** 전수 점검이 아닌 SMS/맞춤한줄만 보고 완료 선언한 게 원인.
+> 3. **컨트롤타워 + 배포된 빌드 버전 불일치** — D9는 소스는 D131에서 `trim`으로 고쳤지만 배포된 Setup-1.5.1.exe가 구 빌드. **소스 수정 + 빌드 + 재배포 3중 확인** 필수.
+> 4. **근본 분리 원칙** — D2 해결 시 "AI 경로 빈줄 유지" vs "직접발송 빈줄 제거" 충돌처럼 보였지만 실제로는 두 경로의 데이터 흐름이 달라 **regex `\n?` 제거 + `minBreaks=1` 분리 수정**으로 근본 분리. 한쪽 정책 철회가 아니라 경로별 분리.
+>
+> **🚦 배포 순서 (Harold님):**
+> 1. `tp-push "D137 PDF 10건 근본수정 + Sync Agent v1.5.2"` → `tp-deploy-full` (백엔드 + 프론트)
+> 2. `sync-agent/installer/SyncAgent-Setup-1.5.2.exe` 각 업체 PC 재설치 (Linux는 tar.gz)
+> 3. Windows `services.msc` → SyncAgent → 복구 탭: 첫 번째/두 번째/후속 실패 → **"서비스 다시 시작"** (1분 간격)
+>
+> **🧪 다음 세션 재검증 필수 (Harold님 지시):**
+>
+> 배포 후 실서버에서 D1~D10 전건 재검증:
+>
+> | # | 검증 방법 |
+> |---|-----------|
+> | D1 | DB현황 카드(생일/등급/성별 등) 클릭 → 상세 모달 하단에 "타겟 발송 바로가기" 버튼 **없음** 확인 |
+> | D2 | 직접발송/직접타겟발송 LMS/MMS 미리보기: 본문 끝 개행 없이 입력 → 무료거부 위 빈줄 **없음**. AI 한줄로 생성 시 LMS/MMS는 "[브랜드]\n\n무료수신거부" 빈줄 1개 유지 |
+> | D3 | 직접발송 주소록 대량(수만건) 업로드 → "(상위 10개 표시)" 문구 **없음** + 하단 이전/N-M/다음 페이지네이션 정상 작동 + 검색 시 페이지 리셋 |
+> | D4 | 직접발송 즉시발송/예약발송 안내창에 "중복 제외 N건" 라인 표시 (수신거부 제외 아래) |
+> | D5 | 직접입력 `1052958517` 입력 → 리스트/실발송에 `01052958517` 로 보정. `01052958517` 정상 입력은 그대로. 파일업로드도 동일. **회신번호도 동일 보정** |
+> | D6 | 발송결과 리스트 / "보기 상세" / "발송내역보기" / 캠페인 상세 → 동일 메시지에 (광고)/무료거부가 **모든 창에서 일관** 표시 |
+> | D7 | MMS 업로드 모달에서 빈 1번 슬롯 있을 때 2번/3번 슬롯 🔒 잠금 표시 + 클릭 시 토스트 "이미지 N번부터 순서대로 등록해주세요" |
+> | D8 | Agent 강제 crash 시뮬레이션 (일시 DB 단절 등) → 서비스 유지 확인. Windows 서비스 "복구" 탭 설정 확인 |
+> | D9 | 시세이도 등 `일반/실버/골든` 한글 고객 데이터 sync → 한줄로 고객DB 조회에 한글 그대로 표시 |
+> | D10 | 슈퍼관리자 → 고객사 관리 → 대시보드 카드 설정 → **커스텀 필드 라벨이 업체 DB 원본 컬럼명으로 표시** (`custom_1` 원문 아님) |
+>
+> **⚠️ D-Day(2026-05-05 레거시 이관)까지 D-11. D137 배포 + 재검증 먼저 완료 후 레거시 이관 작업 진행.**
+
+---
+
+### 🟢 D136 P1 (2026-04-22 밤 연속 세션) — PDF 9건 전체 완료 + 전수점검 추가 수정
+
+> **상태:** 코드 수정 완료, 1차 배포 완료(D1/D1-2/D9/D6/D8/CustomerDBModal fieldKey), 전수점검 추가 2건 배포 대기(upload.ts/unsubscribe-helper.ts CT-03 통합)
+>
+> **✅ D136 P1 추가 완료 (전수점검으로 마무리):**
+>
+> | # | 내용 | 파일 |
+> |---|------|------|
+> | D1 근본 | **CT-18 신설** `utils/enabled-fields.ts` — `detectEnabledFields` + `buildDynamicSelectExpr`. standardHeaders 19개 하드코딩 전면 제거. enabled-fields ≡ download 100% 일치 | `utils/enabled-fields.ts` (신설), `routes/customers.ts` |
+> | D1-2 근본 | sync.ts `/customers` 핸들러에 `customer_field_definitions` 자동 UPSERT 안전망 | `routes/sync.ts` |
+> | D9-a/b 근본 | `getStoreScope` 유령 배정 방어 + **CT-03 `registerBulkCompanyUserUnsubscribes` 신설**으로 sync.ts/upload.ts/unsubscribe-helper.ts 3곳 분산 인라인 SQL 통합 | `utils/store-scope.ts`, `utils/unsubscribe-helper.ts`, `routes/sync.ts`, `routes/upload.ts` |
+> | D6 | 예약대기 MMS 이미지 클릭 확대 모달 (ResultsModal 패턴) | `components/ScheduledCampaignModal.tsx` |
+> | D8 | 대시보드 동적 카드 (`dyn_{key}_{aggType}` 패턴) — 고객사 업로드 커스텀 필드 기반 자동 생성 | `utils/dashboard-card-pool.ts`, `routes/admin.ts`, `routes/companies.ts`, `pages/Dashboard.tsx` |
+> | 추가 P1 | CustomerDBModal fieldKey 전달 3곳 (커스텀 필드 콤마 포맷 가드 활성화) | `components/CustomerDBModal.tsx` |
+> | 추가 P1 | admin.ts PUT dashboard-cards 카드 상한 17→50 (동적 카드 대응) | `routes/admin.ts` |
+>
+> **🎓 D136 P1 핵심 교훈 (CLAUDE.md 필수 체크 원칙 4 신설):**
+>
+> Harold님 지적: "전수 점검에서 맨날 놓치는게 있네" — sync.ts만 보고 "완료" 보고했으나 같은 SQL 패턴이 upload.ts + unsubscribe-helper.ts에 분산되어 있음. CLAUDE.md 7-1 프로세스 정면 위반.
+>
+> **교정:** 작업 시작 전 반드시 `grep -rn "패턴"` 전수 리스트업 → Harold님께 "N곳 수정" 컨펌 후 작업 → 완료 선언 전 grep 재확인.
+>
+> **배포 대기:**
+> 1. `tp-push "D136 P1 전수점검 완료 (upload.ts + CT-03 통합)"` → `tp-deploy-full`
+> 2. Agent 재동기화 후 Harold님 검증:
+>    - suran/gwchae/sgbaek 고객DB 1500명 노출
+>    - unsubscribes 카운트 5건 동일 (mobile/system_sync/suran/gwchae/sgbaek)
+>    - 슈퍼관리자 대시보드 카드 설정에 커스텀 필드 동적 카드 추가 노출
+>    - 예약대기 MMS 이미지 클릭 확대
+>
+> ---
+>
+> ### 🔴 D136 (초기 세션 — PDF 9건 최초 기록 / 아카이브)
+>
+> **PDF:** `C:\Users\ceo\OneDrive\문서\카카오톡 받은 파일\한줄로_20260422.pdf` 9건
+> **세션 완료분 (타입체크 통과, 배포 대기):**
+>
+> | # | 제목 | 상태 | 파일 |
+> |---|------|------|------|
+> | D2 | 직접발송 무료거부 위 줄바꿈 과잉 제거 (고객 개행 100% 보존, AI 프롬프트 갱신) | ✅ | `messageUtils.ts` + `formatDate.ts` + `services/ai.ts` |
+> | D3 | MMS 이미지 1/2/3 순서 어긋남 (toMmsImagePaths 빈슬롯 compact) | ✅ | `utils/mmsImage.ts` |
+> | D4 | 맞춤한줄 MMS 담당자테스트 거부 (mmsImagePaths 하드코딩 수정) | ✅ | `AiCustomSendFlow.tsx:234` |
+> | D5 | 맞춤한줄 머지결과 강조색 사라짐 (mergeAndHighlightVars 교체) | ✅ | `AiCustomSendFlow.tsx` |
+> | D7-1 | 등급 NORMAL/SILVER 잔존 — 서버 dist trim 정상 확인. **시세이도 재업로드 대기** | 🟡 코드 OK / Harold님 재업로드 필요 | — |
+> | D7-2 | 커스텀필드 varchar 숫자 콤마 — 원본 보존 원칙 구현 (formatByType fieldKey 가드) | ✅ | `formatDate.ts` + `feedback_custom_field_raw_preserve.md` |
+> | D1-1 | 엑셀 다운로드 매칭 안 한 컬럼 빈값 출력 (activeHeaders 필터) | ✅ | `routes/customers.ts download` |
+> | D1-2 | 엑셀 다운로드 커스텀필드 빈값 (JSONB key fallback) | 🟡 부분해결 | `routes/customers.ts download` |
+> | — | 알림톡 템플릿등록 팝업 "휴머스온 IMC" 노출 → "카카오 검수" 중립화 (6곳) | ✅ | frontend alimtalk 전체 |
+> | — | 슈퍼관리자 발신번호 회사별 페이징 10개씩 (금강제화 160개 무한 스크롤) | ✅ | `AdminDashboard.tsx` |
+>
+> **🔥 즉시 수정 필요 (다음 세션 최우선):**
+>
+> | # | 제목 | 이유 |
+> |---|------|------|
+> | **D1-2 (근본)** | `sync.ts /customers`에서 `customer_field_definitions` 자동 UPSERT | Sync Agent가 field-definitions API 미호출 → suran 계정 라벨 0건 / 시세이도는 upload.ts 정상 |
+> | **D1 (근본)** | `routes/customers.ts download`를 `enabled-fields` 로직과 100% 동일하게 재작성 | Harold님 원칙: "고객DB 현황에 보이는 내역 그대로 다운로드". 현재 standardHeaders 하드코딩 → 화면과 불일치 가능 |
+> | **D6** | 예약대기 MMS 이미지 클릭 시 확대 화면 (발송결과처럼) | `ScheduledCampaignModal.tsx` MMS 썸네일 클릭 이벤트 + 확대 모달 |
+> | **D8** | 슈퍼관리자 대시보드 카드 선택 — 고객 업로드 컬럼 기준으로 동적 확장 (현재 7개 고정) | D133 후속. 회의 합의 내용 구현 미완 |
+> | **D9-(a)** | 담당브랜드 없는 중간관리자(suran)에서 수신거부 자동 업로드 안 됨 (중간관리자 5건, suran 0건) | `admin-sync.ts` 또는 `upload.ts` 수신거부 처리 경로 |
+> | **D9-(b)** | gwchae/sgbaek 담당브랜드 지정됐으나 "분류코드 없어 전체 접근"으로 표시됨 + 실제 DB조회 안 됨 | `store-scope.ts` (CT-02) 또는 사용자 관리 UI |
+> | **알림톡 B7** | 강조 이미지 업로드 실패 (800x400 25.3KB JPG) — pm2 로그 재현 후 진단 | Harold님 업로드 재시도 + 로그 확인 |
+> | **CSS 경고 정리** | Vite 빌드 시 `Expected identifier but found "-"` 경고 — `new Date().toISOString().replace(/[-:T]/g, '')` regex를 Tailwind JIT가 arbitrary value로 오스캔 → `-: T;` 무효 CSS 생성 (런타임 영향 0, 무해). 6개 파일 `compactTimestamp()` 유틸로 통합 | `CustomerDBModal.tsx:279` + 5곳 동일 패턴. `formatDate.ts`에 `compactTimestamp()` 신설 후 import 교체 |
+>
+> **배포 순서 (오늘 세션 완료분):**
+> 1. `tp-push "D136 디버깅 9건 수정"` → `tp-deploy-full`
+> 2. Harold님 실서버 검증:
+>    - 직접발송 줄바꿈 (고객 여러 줄 띄운 것 그대로 유지)
+>    - MMS 이미지 2번 슬롯에만 업로드 → 1장 카운트 + 엑박 없음
+>    - 맞춤한줄 MMS 담당자테스트 + 머지결과 강조색
+>    - 엑셀 다운로드 (suran 계정에서 custom_1/custom_2 값 나옴)
+> 3. 다음 세션: 즉시 수정 필요 6건 착수
+>
+> **📊 이관 진행 현황 (2026-04-22 D134/D135 선제 완료):**
+> | 종류 | 건수 | 상태 | 일자 |
+> |---|---:|---|---|
+> | 계정 (companies 62 + users 141) | — | ✅ | D134 2026-04-22 밤 |
+> | 회신번호 callback_numbers + assignments | 1,492 + 1,051 | ✅ | D135 2026-04-22 오후 |
+> | 수신거부 unsubscribes | 321,389 | ✅ | D135 2026-04-22 오후 |
+> | 레거시 서버 팝업 교체 (migration-popup.jsp) | 10,457→13,924 bytes | ✅ | D135 2026-04-22 저녁 |
+> | 레거시 `/transition` 랜딩 배포 (Nginx) | 47,736 bytes | ✅ | D135 2026-04-22 저녁 |
+> | 주소록 | — | ⛔ 포기 | — |
+> | **선불 잔액 이관 준비** (34사 / 20,398,110원) | 🟡 준비완료 | ⏳ 5/5 재조회후 UPDATE | 런북: `migrate-legacy/D-DAY-PREPAID-RUNBOOK.md` |
+> | **예약발송 76건 + Agent 차단** | 76 | ⏳ **5/5 남음** | 2026-05-05 새벽 |
+>
+> **D135 정합성 검증**: 141명 login_id 전원 expected vs actual 완전 일치 PASS ✅
+> **전환 안내 UI 검증**: Harold님 시크릿창 실화면 전 항목 통과 ✅
+>
+> **이관 정책 (2026-04-20, 영업팀장 컨펌 완료):**
+> - **주소록 이관 X** — 레거시 "쌓아두기" 관행(gwss 샘플 CREATEDT 2.5년) → 각 고객사가 한줄로에 신규 엑셀 재업로드
+> - **이관 대상 3종**: 수신거부(BLOCKEDNUM 33만) + 회신번호(MEMBER_SEND_NUM 3천) + 예약발송(MSGSUMMARY 76건)
+> - **FREE 플랜 상한 10만명** 확정 (Brevo/솔라피 벤치마크)
+> - **예약발송 이관 순서 (중복 발송 방지):** ① 한줄로 campaigns INSERT → ② 레거시 RESERVEYN=0 UPDATE → ③ 레거시 Agent 중지
+> - 제외 대상: 90일 미사용(lush*/labnosh/amanex 등) + 이미 이관(gwss/isoi/shiseido* — 직원 직접 재업로드 예정)
+> - 상세: [`status/LEGACY-MIGRATION.md`](LEGACY-MIGRATION.md) + [`migrate-legacy/`](../migrate-legacy/) 작업 디렉토리
+
+---
+
+### 🚑 D131 (2026-04-21) — 싱크에이전트 실점검 이슈 3건 해결 + D130 이슈 일괄 정리
+
+> **문서**: [`status/SYNC-AGENT-TROUBLESHOOTING.md`](SYNC-AGENT-TROUBLESHOOTING.md) — 진단 체크리스트 + 에러 유형별 대응 + Agent 재시작
+>
+> **실점검 이슈 (sync-agent-001, 인비토 MS-SQL 테스트):**
+> 1. 상태값 "지연" 오표시 — Agent heartbeat 60분 주기 vs 서버 판정 10/30분 불일치 → `admin-sync.ts` 70/130분으로 완화
+> 2. `POST /api/sync/customers` 1500건 전건 실패 — `insertCols`에 region 중복 → **CT-16 `customer-upsert.ts` 신설** + upload.ts/sync.ts/customers.ts(단건/벌크) 전부 `createCustomerUpsertBuilder().buildBatch()` 호출로 통합
+> 3. `GET /api/sync/version` 500 → Agent 크래시 — `sync_releases.checksum` 컬럼 누락 → `ALTER ADD COLUMN` 완료
+>
+> **D130 관련 동시 수정:**
+> - 알림톡 템플릿 등록 권한: `POST /alimtalk/templates` `requireCompanyAdmin` 추가 + 프론트 `AlimtalkManagementSection` `canManage` 조건부 UI 3곳
+> - `auto_campaigns` D130 알림톡 컬럼 7개 추가 (`channel`, `alimtalk_profile_id`, `alimtalk_template_id`, `alimtalk_template_code`, `alimtalk_variable_map`, `alimtalk_next_type`, `alimtalk_next_contents`)
+> - 자동발송 '매일' 주기 제거 (D-2 AI 생성 시점 구조적 모순) — frontend SCHEDULE_TYPES + backend validation
+>
+> **0417 PDF 12건 검수 수정 (B1~B12):** 보관함 광고 상태 DB 왕복(is_ad 컬럼) + MMS 이미지 공용 컴포넌트 `MmsImagePreview` 신설 + 5경로 MMS 이미지 차단 검증(`validateMmsBeforeSend`) + 자동발송 스팸필터/제외하고 생성 버그 + AI 문안 3→1 variant 등
+>
+> **잔여 과제 (오픈 후):**
+> - 중복 인덱스 `customers_company_store_phone_unique_idx` DROP (D131 실수로 추가)
+> - 중복 UNIQUE 제약 `customers_company_phone_unique` DROP
+> - Agent uncaughtException 핸들러 점검 (version check 500에서 복구 로직)
+> - `sync_logs.failures` JSONB 기록 경로 검증
+>
+> **🚨 다음 세션 최우선 과제 — Agent v1.5.1 CWD 패치:** ✅ **2026-04-21 저녁 세션 완료**
+> - 지시서: [`status/SYNC-AGENT-CWD-PATCH-v1.5.1.md`](SYNC-AGENT-CWD-PATCH-v1.5.1.md)
+> - 증상: Windows 서비스로 실행 시 1053 에러 (cwd=System32 → config/data 경로 틀어짐)
+> - 수정: `sync-agent/src/index.ts` 최상단에 `process.chdir(path.dirname(process.execPath))` 추가 (3줄) — 배포 완료
+
+---
+
+### 💎 D132 (2026-04-22) — CT-17 요금제 게이팅 + 30일 PRO 무료체험 + subscription_status 네이밍 정리 (✅ 배포+검증 완료)
+
+> **세션 기록:** [`.claude/projects/.../memory/project_plan_gating_policy.md`](../.claude/projects/C--Users-ceo-projects-targetup/memory/project_plan_gating_policy.md)
+>
+> **배경:** Harold님 5회 정책 교정 끝에 2단계 구조 확정 — FREE(미가입) / TRIAL(무료체험=PRO와 동일 기능). 기존 `plan_code='FREE' && created_at+7d` 자동 체험 로직 폐기, 모바일 DM 게이팅 누락 버그(BASIC에서도 열림) 동시 해결. **오후 추가 세션에서 subscription_status 네이밍 충돌('active' 중복) 근본 정리 + 대시보드 요금제 현황 카드 D-N 뱃지 추가.**
+>
+> **매트릭스 (Harold님 확정):**
+> | 기능 | FREE(미가입) | STARTER+ | BASIC+ | PRO/TRIAL+ |
+> |---|---|---|---|---|
+> | 직접발송·수신거부·발송결과·예약(직접) | ✅ | ✅ | ✅ | ✅ |
+> | 고객DB·직접타겟발송·AI자동매핑·스팸필터수동 | ❌ | ✅ | ✅ | ✅ |
+> | AI 메시지·AI 타겟 | ❌ | ❌ | ✅ | ✅ |
+> | 자동발송·모바일DM·AI프리미엄·스팸자동화 | ❌ | ❌ | ❌ | ✅ |
+>
+> **주소록 한도(direct_recipient_limit):** FREE=99,999 / STARTER=100k / BASIC=300k / PRO+=NULL(무제한)
+>
+> ---
+>
+> #### 🅰️ 오전 세션 (CT-17 게이팅 시스템)
+>
+> **백엔드:**
+> - `utils/plan-guard.ts` **신설** (CT-17, FeatureKey 10종: basic_send / customer_db / target_send / ai_mapping / spam_filter / ai_messaging / ai_premium / auto_campaign / mobile_dm / auto_spam_test)
+> - `utils/trial-downgrade-worker.ts` **신설** — 매일 04:00 KST, `plan_code='TRIAL'` + 만료 조건으로 자동 강등
+> - `routes/ai.ts` 5곳 인라인 → canUseFeature CT 호출 통일
+> - `routes/auto-campaigns.ts` checkPlanGating CT-17 래퍼 재작성
+> - `routes/companies.ts` plan-info SELECT 교체 + **grant-trial(TRIAL plan 사용)** + revoke-trial API
+> - `routes/dm.ts` `requirePlanFeature('mobile_dm')` 미들웨어 (D131 BASIC 누락 버그 해결)
+> - `app.ts` `startTrialDowngradeWorker()` 등록
+>
+> **프론트:**
+> - `DmBuilderPage.tsx` 403 PLAN_FEATURE_LOCKED 수신 시 violet 가드 화면
+> - `AdminDashboard.tsx` 고객사 상세 → "30일 PRO 체험 부여/취소" 버튼 + 모달
+> - `PricingPage.tsx` violet 안내 카드 — "현재 무료체험 중인 요금제는 **프로 플랜**입니다" + 기능 나열 + D-N + 만료일 + TRIAL plan 카드 제외
+> - `Dashboard.tsx` AI 발송 템플릿 카드 `isAiMessagingLocked` 잠금 표시 (FREE에서 403 토스트 방지)
+>
+> **DB DDL Step 1:**
+> - plans 테이블 4컬럼 추가: `mobile_dm_enabled` / `ai_mapping_enabled` / `target_send_enabled` / `direct_recipient_limit`
+> - FREE plan: `plan_name='미가입'`, 플래그 전부 false, `direct_recipient_limit=99999`, `max_customers=99999`
+> - STARTER+: 기능 플래그 정책대로 설정
+>
+> **DB DDL Step 2 (오전 말미 실행):**
+> - **TRIAL plan INSERT** (PRO와 기능 동일, `monthly_price=0`)
+> - 기존 체험 회사 → `plan_id=TRIAL`로 이동
+>
+> ---
+>
+> #### 🅱️ 오후 세션 (subscription_status 네이밍 정리 + D-N 뱃지 추가)
+>
+> **🚨 발견된 3중 버그 (오후 실화면 검증 중):**
+> 1. `admin.ts:384,1031` — 슈퍼관리자 요금제 수정/승인 API가 `subscription_status='active'`로 무조건 덮어쓰기 → grant-trial 후 저장 버튼만 눌러도 'trial' → 'active' 파괴
+> 2. `trial-downgrade-worker` SQL에 `AND c.subscription_status='trial'` 조건 → 'active'로 바뀐 체험은 **영원히 강등 못 하는 무제한 체험 버그**
+> 3. `PricingPage.isOnTrial` 판정이 `subscription_status='trial'` 기반 → 'active'로 바뀌면 D-N·violet 카드·안내 전부 미표시
+>
+> **🔍 근본 원인 추적:**
+> - `companies.status`('active'/'inactive'/'terminated')와 `subscription_status`('trial'/'active'/'trial_expired'/...) 두 다른 컬럼에 **`'active'` 값이 공존** → 업계 표준('paid')과도 불일치 (CT-17 설계서는 'paid'로 정의했으나 코드는 'active' 사용)
+> - 'active'는 회사 운영 상태 용도, 구독 상태는 `'paid'`가 표준. **오픈 D-Day 전에 근본 정리**가 맞다 판단 (Harold님 지시)
+>
+> **✅ 근본 수정 (옵션 B — 'paid'로 통일):**
+> - `utils/plan-guard.ts` `SubscriptionStatus` 타입에서 `'active'` 제거, `'paid'` 공식화 / `isTrialActive` 판정을 `plan_code='TRIAL'` 기반 (subscription_status 의존 제거)
+> - `utils/trial-downgrade-worker.ts` SQL에서 `subscription_status='trial'` 조건 제거 — `plan_code='TRIAL' + trial_expires_at<NOW()` 만으로 강등
+> - `routes/admin.ts:384` 회사 수정 API: `planId` 있으면 **TRIAL→'trial' / 그 외→'paid'** 분기 (과거: 무조건 'active')
+> - `routes/admin.ts:1031` 요금제 승인 API: 동일 분기 로직
+> - `routes/companies.ts` revoke-trial 조건을 `plan_code='TRIAL'` 기반으로 (subscription_status 무관 — 'active'로 오염된 체험도 취소 가능) / grant-trial RETURNING에 `plan_code` 추가
+> - `PricingPage.tsx` `isOnTrial = plan_code==='TRIAL' && !!trial_expires_at` (견고화) / `isUpgrade` 로직에 TRIAL 추가 → 무료체험 사용자 모든 카드 "업그레이드 신청" (다운그레이드 개념 제거)
+> - `AdminDashboard.tsx` grant-trial 응답 후 `planCode: 'PRO'` 하드코딩 → API 응답 `plan_code` 사용
+> - `Dashboard.tsx` 요금제 현황 카드에 **violet D-N 뱃지** — "요금제 만료 D-30" (PricingPage와 톤 통일)
+>
+> **DB 마이그레이션 (5단계, 모두 성공):**
+> 1. CHECK constraint 사전 점검 — 없음 확인 (0 rows)
+> 2. TRIAL plan인데 'active'로 오염된 1건 → 'trial' 복구 (테스트계정)
+> 3. 남은 `'active'` 9건 → `'paid'` 마이그레이션
+> 4. 검증: `paid: 9 / trial: 1` — `'active'` 0건
+> 5. 테스트계정 재확인: `trial | 2026-05-21 | TRIAL` ✓
+>
+> **검증 결과:**
+> - ✅ 대시보드 요금제 현황: "무료체험" + violet "요금제 만료 D-30" 뱃지
+> - ✅ `/pricing`: "무료체험중 (요금제 프로플랜 체험) D-30" + violet 안내 카드 "현재 무료체험 중인 요금제는 **프로 플랜**입니다" + 기능 6종 나열 + 만료일 + 29일 남음
+> - ✅ 요금제 비교 카드 5개 전부 **"업그레이드 신청"** (다운그레이드 완전 제거)
+> - ✅ Harold님 실화면 최종 검증 통과
+
+---
+
+### 🚛 D135 (2026-04-22) — 레거시 회신번호+수신거부 이관 + 전환 안내 팝업/랜딩 배포 (✅ 완료)
+
+> **세션 기록:** [`.claude/projects/.../memory/project_d135_legacy_callbacks_unsubs.md`](../.claude/projects/C--Users-ceo-projects-targetup/memory/project_d135_legacy_callbacks_unsubs.md)
+>
+> **배경:** D134 ID 이관 다음날 Harold님 "미리 옮기자" 지시로 5/5 D-Day 전 선제 진행. 레거시 Agent 아직 구동 중이라 예약발송은 5/5에 남김. 오후 데이터 이관 + 저녁 전환 안내 UI 배포까지 한 세션에 통합.
+
+> **🎨 저녁 추가 작업 — 전환 안내 UI 2중 레이어 배포:**
+> - **팝업 (footer include)** `/www/usom/WebContent/inc/migration-popup.jsp` 10,457 → **13,924 bytes** 교체
+>   - D-Day 실시간 카운트다운 배지 (pulse 애니메이션)
+>   - 혜택 배너 최상단에 ✅ "회신번호·수신거부 자동이관 완료" 1줄 추가
+>   - 임시 비번 `qwer1234!` 하드코딩 → "안내받으신 임시 비밀번호" **추상화** (공개 페이지 자격증명 노출 금지)
+>   - 보조 outline CTA "자세한 내용을 확인하세요" → `/transition` 연결
+>   - 커스텀 스크롤바 (`scrollbar-width:thin` + 상하 20px margin)
+> - **랜딩** `https://www.invitobiz.com/transition` 신규 배포 (`/usr/local/nginx/html/transition.html` 47,736 bytes)
+>   - Claude.ai `frontend-design` artifact 초안 → Claude Code가 비번 5곳 제거 / Cloudflare email 난독화 제거 / `app.hanjul.ai`→`hanjul.ai` 전역 / `11년`→`10년` / Footer 중복 링크 제거
+>   - Nginx 설정: `charset utf-8;` 앵커로 sed 안전 삽입 — `location = /transition` exact match (기존 `location /` Tomcat 프록시 영향 0)
+>   - 구성: Hero D-Day count-up + Core 3 + 3-step Guide + Migration Checklist + Big CTA + FAQ + Footer
+> - **로컬 원본**: `docs/legacy-popup.html` / `docs/transition.html` / `docs/migration-popup.jsp`
+> - **배포 절차 8단계** 전부 Harold님 SSH 실행 (CLAUDE.md 원칙 — AI는 서버 접속 금지, 명령어만 안내) → 브라우저 시크릿창 실화면 검증 통과
+>
+> **🎓 핵심 교훈 (메모리 반영):**
+> 1. **공개 페이지 임시비번 하드코딩 금지** — `feedback_no_secret_in_public_page.md` 신설. qwer1234! 노출이 Claude 수동편집 + Claude.ai artifact 양쪽에서 재발 → grep 검증 루틴 필수
+> 2. **Nginx 1.6.3 단일파일 sed 안전 삽입** — `charset utf-8;` 유일 라인 앵커로 사용하여 다른 server 블록 영향 없이 삽입, diff로 정확히 추가 라인만 확인 후 reload
+> 3. **JSP include는 컴파일 시점 include** — `<%@ include %>`는 호출하는 쪽(footer.jsp) touch로 재컴파일 유도, Tomcat 재시작 불필요
+>
+> ---
+>
+> **📊 오후 데이터 이관 결과:**
+>
+> **이관 결과:**
+> | 테이블 | INSERT | 비고 |
+> |---|---:|---|
+> | callback_numbers | 1,492 | label='레거시', 단독 scope='all' / 다중 scope='assigned' |
+> | callback_number_assignments | 1,051 | 다중회사 18곳 배정, assigned_by=해당 company admin |
+> | unsubscribes | 321,389 | source='legacy_migration', user 265,619 + admin 합집합 55,770 (D88 정책) |
+>
+> **정합성 검증 PASS (141/141):** `expected-per-user.json` ↔ `verify_actual.csv` 자동 비교 — 단독회사 admin, 다중회사 user 개별 배정, 다중회사 admin 합집합 DISTINCT 전부 일치.
+>
+> **발생 이슈 + 해결:**
+> 1. `assigned_by` NOT NULL (SCHEMA.md 불일치, D134 교훈 재발) → `admin_user_id` 채움, 전면 롤백 후 재실행
+> 2. `unsubscribes` UNIQUE(user_id, phone) 실제 DB엔 없음 (SCHEMA.md 불일치) → ON CONFLICT 제거, JS Map DISTINCT로 대체
+> 3. Oracle `BLOCKEDNUM.CREATEDT` NULL + `MEMBER_SEND_NUM.REG_DT` VARCHAR2 → 타임스탬프 덤프 제외, USERID+PHONE 2컬럼만
+> 4. sqlplus 로케일 → `LANG=C NLS_LANG=AMERICAN_AMERICA.UTF8`
+> 5. oracle `su - oracle` 다단 명령 붙여넣기로 4회 비번 실패 (계정잠금 직전) → `whoami` 확인 후 우회
+> 6. BLOCKEDNUM 58,209건(18%) 정규화 탈락 중 94%가 빈 phone — 레거시 "쌓아두기" 관행 실증
+> 7. Windows SCP 0바이트 문제 → `cat` 결과 채팅 붙여넣기 우회
+>
+> **작업 디렉토리** `migrate-legacy/`:
+> - scripts 7종: build-user-map / analyze-coverage / gen-dump-sql(+v2) / build-migration-sql / gen-verify-sql / compare-verification
+> - data: 매핑 JSON 3종 + 원본 CSV 2종 + 이관 SQL 2종 + expected/actual + verification-report.json
+> - 5/5 예약발송 이관 시 동일 디렉토리 재활용
+>
+> **핵심 교훈:**
+> 1. **SCHEMA.md 맹신 금지 — D134/D135 연속 재발**. SQL 작성 전 `information_schema.columns` + `pg_constraint` 선행 필수
+> 2. **다단 SSH 명령 블록 일괄 붙여넣기 금지** — 엔터 타이밍 어긋남으로 비번란에 잔여 문자 → 계정잠금 위험
+> 3. **expected vs actual 자동 비교 스크립트**가 정합성 보증의 표준 — 141명 unsub/cb_assign 완전 일치 확인
+> 4. **레거시 Oracle DATE vs VARCHAR2 혼재** — 덤프 전 `DESC TABLE` 필수
+> 5. **다중회사 admin 합집합 (D88 정책) 정상 동작 확인** — 18개 전 회사에서 검증
+
+---
+
+### 🔄 D134 (2026-04-22 밤늦게) — 레거시 ID 일괄 이관 (62 회사 + 141 사용자) + 후속 UI 수정 (✅ 완료)
+
+> **세션 기록:** [`.claude/projects/.../memory/project_d134_legacy_migration.md`](../.claude/projects/C--Users-ceo-projects-targetup/memory/project_d134_legacy_migration.md)
+>
+> **배경:** 오픈 D-Day(5/5) 대비. 서팀장 `ID 신규생성리스트.xlsx`(123명 / 62 회사, 이관완료 6명 제외) 기준 회사·사용자 일괄 SQL 생성·실행. 직원 수작업 며칠→SQL 한 번에 처리.
+>
+> **규칙 (Harold님 확정):**
+> - 단독 회사 (1명, 44개) → 기존 유저ID 그대로 `admin` 승격 (회신번호 등록 권한 필수)
+> - 다중 회사 (2명+, 18개) → 영문명+`01`/`a` 신규 `admin` ID 18개 생성 + 기존 멤버 전부 `user`
+> - 접미 규칙: 영문명에 숫자 포함 → `a` / 없음 → `01`
+> - 임시 비밀번호 `qwer1234!` + `must_change_password=true`
+>
+> **자동화:** `_temp_generate_sql.js` — xlsx 읽기 + bcryptjs hash + UUID 생성 + SQL 조립 → `legacy_migration.sql` 53KB → `psql -1` 단일 트랜잭션 실행
+>
+> **🚨 발생 이슈 + 수정:**
+> 1. `users_user_type_check` CHECK 위반 — DB 허용값 `('admin','user','system')`인데 코드 용어 `company_admin`/`company_user`로 INSERT 시도 → `admin`/`user` 교정 후 재실행 성공
+> 2. 슈퍼관리자 고객사 목록 "총 20개" 표시 — `companiesApi.list()` 기본 limit 20 → `{ limit: 1000 }` 교정 (`AdminDashboard.tsx:997`)
+> 3. 사용자 목록 회사 그룹 무한 스크롤 — `userPage` state + 20개씩 페이지네이션 + 검색/필터 변경 시 1페이지 리셋
+>
+> **최종 검증:**
+> - companies 10 → **72** (신규 62)
+> - users 30 → **171** (admin 69 / user 93 / system 9)
+> - login_id 중복 0건
+> - 슈퍼관리자 UI 정상 표시
+>
+> **배포 완료:** DB INSERT 성공 + 프론트 UI 수정 `tp-deploy-full` 배포
+>
+> **남은 작업 (오픈 D-Day까지):**
+> - 영업팀 임시 비밀번호 안내 (`qwer1234!` + 다중 회사 18개 관리자 ID)
+> - 영문명 검색권장 19개 서팀장 확정 시 변경 (bacon/paige/nsb/jisam/chaumet 등)
+>
+> **핵심 교훈 (CLAUDE.md 반영):**
+> 1. DB CHECK 제약은 `pg_constraint` 쿼리 선행 필수 (SCHEMA.md 맹신 금지)
+> 2. INSERT 사전 충돌 검사는 UNIQUE + CHECK 둘 다
+> 3. 프론트 `pagination.total` vs `배열.length` 혼동 주의 (큰 리스트는 `{limit:1000}` 명시)
+> 4. xlsx 병합셀 `sheet_to_json` 무시 → `sheet['!merges']` 상속 처리 필수
+> 5. 코드 용어(company_admin) vs DB 실값(admin) 불일치 문서화 필요
+
+---
+
+### 📊 D133 (2026-04-22 밤) — 대시보드 카드 상세 개선 + 고객 DB 다운로드 (Phase A+B 통합 — ✅ 배포+실화면 검증 완료)
+
+> **세션 기록:** [`.claude/projects/.../memory/project_dashboard_card_detail.md`](../.claude/projects/C--Users-ceo-projects-targetup/memory/project_dashboard_card_detail.md)
+>
+> **배경:** Harold님 대시보드 피드백 2건 — (1) DB 현황 카드 "언밸런스" (count 카드 숫자만 / distribution 카드 프로그레스바 꽉 참 → 밀도 불균형) (2) 각 카드 클릭 시 세부 지표 모달 원함. 추가 요청: 고객DB 현황 모달에 필터 조건 유지된 채 엑셀 다운로드.
+>
+> **✅ Phase A — 델타 뱃지 + 고객 DB 다운로드:**
+> - 백엔드 `routes/companies.ts` `CardDataResult` 인터페이스 4필드(delta/deltaPercent/deltaBaseline/hasTrend) 확장 + `aggregateDashboardCards`에 30일 전 동일 시점 카운트 동시 집계 + `calcDelta` 헬퍼 추가. count 카드 7종 델타 계산 (total/gender_male/gender_female/opt_in_count/new_this_month/recent_30d_purchase/inactive_90d)
+> - 백엔드 `routes/customers.ts` `GET /api/customers/download` 신설 — **CT-01 `buildDynamicFilterCompat` 재활용** + XLSX 응답. 한글 헤더 20컬럼 + gender enum 역변환(M→남성/F→여성) + sms_opt_in Y/N 변환 + customer_field_definitions 기반 custom_fields 평면화(동적 컬럼)
+> - 프론트 `components/dashboard/DeltaBadge.tsx` **신설** — 증가 green / 감소 red / 변화없음 gray 뱃지 (PricingPage violet 톤)
+> - 프론트 `Dashboard.tsx` `DashboardCardData` 4필드 확장 + 카드 렌더링에 델타 뱃지 1줄 추가 ("지난달 대비" 라벨 함께) + hover violet 테두리
+> - 프론트 `components/CustomerDBModal.tsx` 헤더 우측 violet 그라디언트 "엑셀 다운로드" 버튼 + `handleDownload` (현재 `activeFilters`/`filterSmsOptIn`/`filterStoreCode` 그대로 query string으로 전달 → Blob 다운로드)
+>
+> **✅ Phase B — 카드 클릭 상세 모달 + 타겟 발송 연계:**
+> - 백엔드 `routes/companies.ts` **`GET /api/companies/dashboard-cards/:cardId/detail`** 신설. 카드 타입별 자동 분기:
+>   - **trend** (6개월 월별): count 카드 7종. generate_series + 상관 서브쿼리로 각 월말 기준 누적 카운트 (new_this_month는 해당월 신규, recent_30d_purchase는 각 월말 기준 최근 30일, inactive_90d는 90일 이상 비활성)
+>   - **breakdown**: 성별/연령대/등급/지역 4종 (Promise.all 병렬), gender enum 역변환, 연령대는 10대 단위 CASE
+>   - **topList** (생일 카드 전용): 이름/전화 검색(q) + 페이지네이션(page/limit). name ILIKE OR phone ILIKE
+>   - **fullDistribution** (distribution 카드): 전체 확장 (age/grade/region/store, LIMIT 상향)
+> - `npm install recharts` (React 친화 차트 라이브러리, ~50KB gzipped)
+> - 프론트 `components/dashboard/CardDetailModal.tsx` **신설** — FileUploadMappingModal violet 톤 100% 계승 (그라디언트 헤더/rounded-2xl/shadow-xl). 구조:
+>   - 요약 카드 2개 (현재값 + 지난달 대비 DeltaBadge)
+>   - recharts `LineChart` 6개월 추이 (violet stroke + 그라디언트 필)
+>   - breakdown 4칸 (성별/연령/등급/지역 프로그레스 바)
+>   - 생일 카드: BirthdayCustomerList 렌더
+>   - distribution 카드: fullDistribution 리스트
+>   - 푸터 CTA: "닫기" + violet 그라디언트 **"타겟 발송 바로가기"** (cardId별 필터 매핑 후 부모 콜백)
+> - 프론트 `components/dashboard/BirthdayCustomerList.tsx` **신설** — 검색 input + 페이지네이션(이전/다음) + 테이블(이름/전화/성별/생일/등급/총구매/최근구매). 페이지당 20건, violet 톤
+> - 프론트 `components/DirectTargetFilterModal.tsx` **`initialFilters` optional prop 추가** (하위호환 — undefined면 기존 `sms_opt_in=true` 기본 유지). 주입 시 `selectedFields`/`filterValues` 자동 세팅. 기존 5개 호출부(Dashboard/DirectPreviewModal/TargetSendModal/KakaoRcsPage) 영향 없음
+> - 프론트 `Dashboard.tsx` 카드 `onClick={() => setDetailCard(card)}` + CardDetailModal state(`detailCard`, `cardTargetFilters`) 연결 → "타겟 발송 바로가기" 클릭 시 `cardTargetFilters` 세팅 후 `showDirectTargeting=true`로 자동 연계
+>
+> **🛡️ 끌로드원칙 준수:**
+> - **CT-01 재활용** (다운로드 API는 `buildDynamicFilterCompat` 직접 호출) / CT-02(store-scope) 재활용
+> - 하드코딩 금지 (cardId/라벨/field_key 동적), 기간계 무접촉, 인라인 금지(3컴포넌트 별도 파일), 하위호환(DirectTargetFilterModal)
+> - 타입 체크 백엔드/프론트 모두 **0 error**
+>
+> **🛠 덤 — CT-07 `field_type_check` 위반 근본 방어 (체크리스트 처리):** 로그 추적 결과 upload.ts:793 `fieldType = 'NUMBER'` 하드코딩(비표준) + CT-07 `toDbFieldType`의 대소문자 폴백 일부 엣지 취약. 3중 방어:
+> 1. `upload.ts:793` `'NUMBER'` → `'INT'` (DB CHECK 표준값 직접 사용, 호출부 통일)
+> 2. `utils/standard-field-map.ts` `FIELD_TYPE_DB_MAP`에 대문자 변형 8종 명시 추가 (`NUMBER`/`STRING`/`DATETIME`/`FLOAT`/`DECIMAL`/`BIGINT`/`TIMESTAMP`/`BIT`) + `toDbFieldType`에 `String(input).trim()` + 대문자/소문자 2단 폴백 + 매핑 실패 시 warning 로그
+> 3. upsert 에러 로그에 `inputType` + `dbType` + `labelLen` 명시 — 재발 시 즉시 원인 특정
+>
+> **배포 (✅ 반영 완료):** `tp-push` → 서버 `git pull` + `npm run build` + `pm2 restart all`. grep 6건으로 dist/ 전수 확인 완료.
+>
+> **검증 체크리스트 (배포 후):**
+> - [ ] DB 현황 count 카드에 violet/green/red 델타 뱃지 (`↑ +240 (+2.4%) 지난달 대비`)
+> - [ ] 카드 hover → violet 테두리 + cursor pointer
+> - [ ] 카드 클릭 → 상세 모달 (violet 헤더 + 요약 + 6개월 라인차트 + breakdown 4칸)
+> - [ ] 생일 카드 상세 → 검색/페이지네이션 테이블
+> - [ ] distribution 카드(연령/매장) 상세 → 전체 확장 리스트
+> - [ ] "타겟 발송 바로가기" → DirectTargetFilterModal 자동 필터 적용 (예: 남성 → gender=M)
+> - [ ] 고객 DB 조회 모달 → "엑셀 다운로드" 버튼 → 필터 적용된 XLSX 다운 (한글 헤더 + 성별/수신동의 변환 확인)
+
+---
+
+### 🔥 D131 (2026-04-21 저녁) — Agent v1.5.1 + 알림톡 IMC 6005 + 담당자테스트 9007 + PPT 9건 일괄 처리
+
+> **세션 기록:** [`.claude/projects/.../memory/project_d131.md`](../.claude/projects/C--Users-ceo-projects-targetup/memory/project_d131.md) — 8섹션 전수 기록
+>
+> **싱크에이전트 v1.5.1** (수란님 긴급):
+> - Windows 서비스 1053 에러 cwd 교정 (patch 3줄)
+> - 버전 0.1.0 → 1.5.1 통일 (6곳)
+> - **normalize 전면 미러링**: `sync-agent/src/normalize/index.ts`를 백엔드 `utils/normalize.ts`와 1:1 복제 + `field-map.ts` 신설 + 개별 6파일 삭제. 서수란 팀장 제보(포인트 "1,800"→NULL, 등급 한글→영문) 근본 해결.
+> - 빌드: `sync-agent.exe` v1.5.1 (113.9MB) + `SyncAgent-Setup-1.5.1.exe` NSIS (19.4MB). 구버전 삭제 완료.
+>
+> **알림톡 IMC 템플릿 등록 6005 해결**:
+> - 근본: `templateKey` 길이. IMC 공식 문서 128자 표기 but 실제 20자 (휴머스온 인정). `T{base36}` 20자 교정.
+> - `handleImcError` IMC 응답 body + `createAlimtalkTemplate` 요청/응답 로깅 추가 (이전엔 서버 로그 0건).
+> - 이중 래핑 자동 unwrap (D130 §2-1 블로커 해결).
+> - 부수: 검수 알림 수신자 10→3명 + name 필수 + 동일 yellow_id 중복 등록 409 + `customSenderKey` UI/백엔드 제거 + `SenderData` 11필드 확장 + `listSenders` 파라미터 스펙 준수 + `syncSenderStatusJob`에 uuid→yellow_id 동기화.
+>
+> **담당자 테스트 9007 파일 오류** (37% 실패, 서수란 팀장 제보):
+> - 근본: MMS + 이미지 0장 → QTmsg Agent가 파일 없음 → status_code=9007 반려 → 단말 미도달.
+> - **3계층 가드**: `utils/mms-validator.ts` 컨트롤타워 신설 (인라인 3곳 작성 후 Harold님 지적받아 리팩터) → 라우트 3곳(test-send/direct-send/POST /) CT 호출 + `insertTestSmsQueue` throw + 프론트 4곳(handleTestSend/handleTargetTestSend/executeTargetSend/handleAiCampaignSend selectedChannel 교정).
+>
+> **PPT 9건 일괄 수정** (서수란 팀장):
+> - #2 SMS 광고 빈줄 `\n\n→\n` (buildAdMessage 백/프론트 미러) · #4 맞춤한줄 MMS 이미지명 · #5 엑셀 수신확인시간 헤더 제거 · #6 취소건 `(예약취소)` · #7 MMS 미리보기 일관성 · #8 기간조회 limit 50→2000 · #9 예약대기 이미지명 · #10 자동발송 스팸필터 샘플 callback 폴백
+>
+> **FileUploadMappingModal violet 톤업** (전단AI 스타일 이식):
+> - 헤더 그라디언트 + AI 이모지 뱃지 · 드래그/드롭 영역 + SVG 스피너 + 3단계 dots + 진행바 · 안내카드 드래그영역 밖 분리(눌린 느낌 수정) · rounded-2xl + 그림자
+>
+> **DB 정리**: `kakao_sender_profiles` truncated row 1건 삭제 완료.
+>
+> **메모리 반영**: `feedback_mirror_hanjul_standard.md` D131 추가 교훈 — Agent 미러 범위는 파일 단위로 전체 복제, 개별 분기 금지.
+>
+> **배포 대기**: Harold님 `tp-push` + `tp-deploy-full` + 수란님 exe 전달 + NSIS Setup 배포.
+
+---
+
+### 🔗 Sync Agent v1.5.0 — ✅ Day 1~3 전구간 구현 + 배포 완료 (2026-04-18)
+
+> **배경:** 한줄로AI 최신화 맞춰 싱크에이전트 재정의 + AI 자동 매핑 + Linux/Windows 전 환경 커버.
+> **설계서:** [`status/SYNC-AGENT-V1.5.0-DESIGN.md`](SYNC-AGENT-V1.5.0-DESIGN.md)
+> **QA 가이드:** [`status/SYNC-AGENT-V1.5.0-QA-GUIDE.md`](SYNC-AGENT-V1.5.0-QA-GUIDE.md) — 8개 시나리오 (A~H)
+> **릴리스 노트:** [`status/SYNC-AGENT-V1.5.0-RELEASE-NOTES.md`](SYNC-AGENT-V1.5.0-RELEASE-NOTES.md)
+> **고객 배포용 매뉴얼:** [`sync-agent/SyncAgent_설치매뉴얼_v1_5.docx`](../sync-agent/SyncAgent_설치매뉴얼_v1_5.docx) (내부 스키마/AI 모델명 전부 배제)
+> **다음 세션 핸드오프:** [`status/SYNC-AGENT-V1.5.0-SESSION-HANDOFF.md`](SYNC-AGENT-V1.5.0-SESSION-HANDOFF.md)
+> **배포:** v1.5.0 빅뱅. 파일럿 없음 (기존 사용자 0).
+
+#### ✅ 완료 (2026-04-18 단일 세션)
+- **Day 1 백엔드** (7파일): `utils/ai-mapping.ts` CT + `routes/sync.ts` 확장 (`/ai-mapping`, `/field-map`, 응답 config, 3단 수신거부) + `auth.ts` is_system 차단 + `middlewares/sync-active-check.ts` + `routes/customers.ts`/`upload.ts` blockIfSyncActive + `routes/companies.ts` 시스템 user 자동 생성
+- **Day 2 Agent** (14파일): types/customer.ts 레거시 9개 제거 / normalize/phone.ts normalizeStorePhone / scheduler 6h주기 + pollRemoteConfig 제거 + applyRemoteConfig / api/client.ts setRemoteConfigHandler + aiMapping + getFieldMap / setup/ai-mapping-client.ts 신규 / mapping/index.ts suggestMappingWithAI / setup-html.ts Step 4 AI 버튼 / cli.ts AI 대화형 / edit-config.ts aiRemap / index.ts ApiClient↔Scheduler 연결
+- **Day 3 프론트** (2파일): `SyncActiveBlockModal.tsx` 신규 + `Dashboard.tsx` sync_block_active 수신 + 업로드 3곳 체크
+- **DB 마이그레이션 적용**: users.is_system + customers.customer_code + customer_code_sequences + plans.ai_mapping_monthly_quota + companies.ai_mapping_calls_month/last_month. user_type CHECK 제약 확장 ('system' 허용). 9개 회사 시스템 user 자동 생성 + customer_code `{company_code}-000001` 부여
+- **tsc 0 에러 전영역** (backend + sync-agent + frontend)
+- **Git push**: commit `c5f2393` ("0418 싱크에이전트 대규모 업데이트 및 마이그레이션")
+- **tp-deploy-full 배포 완료**
+- **고객 배포용 매뉴얼 docx 작성** (내부 스키마 전부 배제 버전)
+
+#### ✅ 빌드 완료 (2026-04-20)
+1. **sync-agent 빌드 — 4개 산출물 전부 생성**:
+   - `sync-agent/release/sync-agent.exe` (108.7MB, Windows pkg)
+   - `sync-agent/release/sync-agent` (121.8MB, Linux pkg)
+   - `sync-agent/installer/SyncAgent-Setup-1.5.0.exe` (18.5MB, NSIS)
+   - `sync-agent/installer/SyncAgent-1.5.0-linux-x64.tar.gz` (36.4MB)
+2. **불필요 파일 정리** — sync-agent/ 폴더 1.7GB → 532MB (구버전 인스톨러 12개 + 오래된 로그 삭제)
+
+#### ⚠️ 빌드 중 이슈 기록 (향후 정리 필요)
+- **`build-installer.bat` 인코딩**: BOM 없는 UTF-8 → PowerShell에서 cmd.exe 파싱 시 한글 깨져 `'S' is not recognized` 등 에러. 우회책으로 PowerShell에서 `makensis.exe` 직접 호출. **향후 수정 필요:** UTF-8 BOM 추가 또는 CP949 재저장
+- **`package.json` version `"0.1.0"` 방치**: 빌드 CLI 인자로 버전 주입하는 구조라 기능상 무해하지만 `"1.5.0"` 정정 권장
+- **pkg 경고 무시 OK**: `Cannot resolve 'mod'`, `xdg-open`, `Failed to make bytecode` 등 v1.4 동일 경고로 실제 동작 영향 없음
+
+#### 🚧 남은 작업 (다음 세션 — Harold님 직접)
+1. **GitHub Releases v1.5.0 등록** — 4개 빌드 산출물 업로드
+2. **`sync_releases` 테이블 v1.5.0 INSERT** — 자동 업데이트 활성화 (서버 PG에서 실행)
+3. **서팀장 QA** — `SYNC-AGENT-V1.5.0-QA-GUIDE.md` 8개 시나리오 E2E 테스트
+4. **QA 이슈 반영** (발생 시 BUGS.md 등록 후 수정)
+5. **첫 고객사 배포** — Windows 인스톨러 + 매뉴얼 docx 전달
+
+#### ⚠️ 배포 중 배운 교훈
+- **GitHub 100MB 제한**: 빌드 산출물(.exe, linux 바이너리, zip)은 반드시 `.gitignore`로 제외. `sync-agent/release/`, `installer/release/`, `*.exe`, `*.zip` 추가됨. 배포는 **GitHub Releases** 사용 권장 (2GB까지)
+- **fail2ban restart 주의**: `systemctl restart fail2ban` 하면 Currently banned 목록이 리셋됨 → 공격자 IP 다시 차단되지 않음. 영구 차단이 필요하면 iptables 사용. 이번엔 원래 10개 차단 수동 복구 완료
+- **서버 비밀번호 실수 방지**: SSH 키 인증은 로컬 PC 해킹 시 동일 리스크라 Harold님 보류. 대신 신중하게 한 번에 입력 + 실수 시 핫스팟으로 IP 밴 해제하는 방식 유지
+
+---
+
+### 📨 D130 — 알림톡/브랜드메시지 IMC 연동 Phase 1 — 🔄 2026-04-21 화요일 실점검 + 전수감사 진행 중
+
+> **다음 세션 필독:** [`status/D130-NEXT-ACTIONS.md`](D130-NEXT-ACTIONS.md) — 남은 블로커 + 우선순위 + 실패 대응 가이드 포함
+
+> **배경:** 레거시에서 수동으로 하던 "템플릿 관리자 + 발신프로필 등록"을 한줄로에 재구현 + 휴머스온 IMC API 연동으로 자동화.
+> 승인 상태는 웹훅으로 실시간 반영 → 발송 시 `status='APPROVED'`만 노출 → 레거시의 수동 확인 절차 제거.
+> **설계서:** [`status/ALIMTALK-DESIGN.md`](ALIMTALK-DESIGN.md) (1,735줄)
+> **플랜:** [`.claude/plans/hidden-twirling-waffle.md`](../.claude/plans/hidden-twirling-waffle.md)
+> **🚨 다음 세션 필독:** [`status/D130-SESSION-HANDOFF.md`](D130-SESSION-HANDOFF.md) — 현재 진행 상태 스냅샷 + Day 2 착수 순서 완전본
+
+#### 🎯 Harold님 확정 정책 (2026-04-18 세션 종료 시점)
+| 자원 | 등록 | 승인 | 조회·사용 범위 |
+|------|------|------|-------------|
+| **발신프로필** (회사 자산) | `company_admin`만 | `super_admin`만 | 회사 전체 공유 (승인 완료된 것만) |
+| **알림톡 템플릿** (개인 자산) | 모든 로그인 사용자 | 카카오 검수 | `company_user`: 본인 등록 것만 / `company_admin`: 회사 전체 / `super_admin`: 전체 |
+
+#### Day 1 완료 (2026-04-18)
+**DB (Harold님 서버 psql 직접 실행):**
+- ALTER `kakao_sender_profiles` +13 컬럼 / ALTER `kakao_templates` +14 컬럼
+- CREATE 5종: `brand_message_templates` / `kakao_alarm_users` / `kakao_sender_categories` / `kakao_template_categories` / `kakao_webhook_events` / `kakao_image_uploads`
+- 인덱스 전부 포함, 모두 IF NOT EXISTS + nullable (기간계 무접촉)
+
+**백엔드 (tsc 0 — Harold님 `npm install axios form-data` 필요):**
+- **CT-16** `utils/alimtalk-api.ts` — 39개 함수 (발신프로필 11 + 템플릿 13 + 알림수신자 4 + 카테고리 2 + 이미지 9). Lazy init, env 미설정 시에도 부팅 가능
+- **CT-17** `utils/alimtalk-result-map.ts` — IMC 응답코드 맵 + 리포트 코드 맵 (resolveImcCode, resolveReportCode)
+- **CT-18** `utils/alimtalk-webhook-handler.ts` — processKakaoWebhook + verifyWebhookSignature (HMAC-SHA256) + isAllowedWebhookIp + generateMessageKey(CR_/DS_/TS_/AC_)
+- `utils/alimtalk-jobs.ts` — 카테고리 일일 동기화(03:00 KST) / 검수 템플릿 폴링(5분) / 발신프로필 상태(1시간). env 미설정 시 no-op
+- `routes/alimtalk.ts` — 33 엔드포인트 전부 구현 (발신프로필 + 카테고리 + 템플릿 + 브랜드 + 이미지 + 알림수신자 + 웹훅)
+- `app.ts` — 라우트 등록 + webhook raw body parser + scheduler
+- `routes/companies.ts` — kakao-profiles/kakao-templates 기존 섹션에 @deprecated 주석만 추가 (로직 수정 0)
+
+**프론트 (tsc 0 통과):**
+- `pages/AlimtalkTemplatesPage.tsx` — 고객사 템플릿 목록 + 상태 배지(DRAFT/REQUESTED/REVIEWING/APPROVED/REJECTED/DORMANT) + 필터 + 검수요청/취소/삭제
+- `pages/AlimtalkSendersPage.tsx` — 슈퍼관리자 발신프로필 목록 + 등록 Wizard + 080 설정 + 휴면해제
+- `components/alimtalk/SenderRegistrationWizard.tsx` — 3-Step (채널ID/카테고리 → 인증번호 요청 → 인증번호 입력)
+- `components/alimtalk/UnsubscribeSettingModal.tsx` — 080 무료수신거부 설정
+- `components/alimtalk/AlimtalkTemplateFormV2.tsx` — **16조합 동적 UI** (BA/EX/AD/MI × NONE/TEXT/IMAGE/ITEM_LIST) + 실시간 미리보기
+- `components/alimtalk/AlimtalkPreview.tsx` — 카톡 말풍선 실시간 렌더
+- `components/alimtalk/ButtonEditor.tsx` — 버튼 9종 타입(WL/AL/DS/BK/MD/BF/BC/AC/PD) 최대 5개
+- `components/alimtalk/QuickReplyEditor.tsx` — 빠른답장 5종 타입 최대 10개
+- `components/alimtalk/ItemListEditor.tsx` — header + highlight + list(10) + summary
+- `components/alimtalk/KakaoChannelImageUpload.tsx` — 업로드 타입 9종 공용 래퍼
+- `components/alimtalk/AlarmUserManager.tsx` — 검수 알림 수신자 회사당 10명 관리
+- `App.tsx` — `/alimtalk-templates` (고객사) + `/admin/alimtalk-senders` (슈퍼관리자) 라우트
+- `DashboardHeader.tsx` — "알림톡" 메뉴 추가 (카카오&RCS 옆)
+- `AdminDashboard.tsx` — 헤더 "알림톡 발신프로필" 버튼
+
+**DB/컨트롤타워 보존:**
+- ❌ 수정 금지: `utils/brand-message.ts` (CT-12), `utils/sms-queue.ts` (CT-04), `routes/campaigns.ts` 5경로, `routes/auto-campaigns.ts`, `utils/auto-campaign-worker.ts` — 기간계 무접촉
+
+#### 🛠️ Day 1 추가 실수 수정 (2026-04-18 오후)
+- ✅ 헤더 **"알림톡" 중복 메뉴 제거** — `카카오&RCS` 탭 안에 이미 있었음
+- ✅ `/alimtalk-templates` 라우트 제거 + `pages/AlimtalkTemplatesPage.tsx` 삭제
+- ✅ `components/alimtalk/AlimtalkManagementSection.tsx` 신규 — KakaoRcsPage 알림톡 탭 내부에 통합 렌더
+- ✅ KakaoRcsPage 레거시 state/모달 정리 (기존 AlimtalkTemplateFormModal 제거)
+- ✅ 발신프로필 등록 권한 `super_admin` → `company_admin` 완화 (이후 Harold님 정책 확정으로 유지)
+- ✅ 백엔드 승인/반려 엔드포인트 추가: `PUT /senders/:id/approve`, `PUT /senders/:id/reject` (super_admin 전용)
+- ✅ POST `/senders` 등록 시 `approval_status` 자동 설정 (super_admin=APPROVED, company_admin=PENDING_APPROVAL)
+- ✅ AlimtalkManagementSection에 승인 상태 배지 + "승인 대기 중 안내" 문구 추가
+- ✅ `tp-deploy-full` PowerShell 프로필 롤백 (`$cmds` 배열 방식 → 한 줄 쌍따옴표 방식, `Connection closed` 재발 방지) + `backend npm install` + `flyer-frontend` 빌드 포함
+
+#### ✅ Day 2 완료 (2026-04-18 오후 연속 세션)
+
+**DB ALTER (Harold님 서버 psql 실행 완료):**
+- `kakao_sender_profiles` +5컬럼 — `approval_status`(DEFAULT 'PENDING_APPROVAL')/`approval_requested_at`/`approved_at`/`approved_by`/`reject_reason` + idx
+- `kakao_templates` +1컬럼 — `created_by uuid REFERENCES users(id)` + idx
+- 검증 통과: `\d kakao_sender_profiles` 24컬럼 / `\d kakao_templates` 41컬럼
+- 기존 프로필 2건은 테스트 데이터(테스트계정2/인비토, yellow_id 없음)로 PENDING_APPROVAL 상태 유지
+
+**백엔드 템플릿 소유자 체크 (tsc 0):**
+- `resolveTemplateContext` 시그니처 확장 — user 파라미터 추가, `company_user`이면 `created_by = userId` 체크, forbidden 반환
+- **신규 컨트롤타워 `requireTemplateAccess(req, res)`** — `companyId` 확보 + `resolveTemplateContext` + 404/403 응답 일원화. 13개 호출부의 2단계 패턴을 1단계로 축약
+- `POST /templates` — `requireCompanyAdmin` 제거(모든 로그인 사용자 허용) + INSERT에 `created_by` 추가 + 승인되지 않은 발신프로필 사용 차단
+- `GET /templates` — `company_user`면 `WHERE created_by = $N` 필터 + `LEFT JOIN users u ON u.id = t.created_by` + 응답에 `created_by_name`/`created_by_login_id`
+- `GET /templates/:templateCode` — `requireTemplateAccess` 적용 + 응답 쿼리에도 users join
+- `PUT/DELETE/inspect/inspect-with-file/cancel-inspect/release/custom-code/exposure/service-mode` 9개 라우트 — `requireCompanyAdmin` 제거 + `requireTemplateAccess`로 소유자 체크 일원화 (인라인 2단계 패턴 0건)
+
+**프론트 (tsc 0):**
+- `pages/AlimtalkSendersPage.tsx` — 승인/반려 UI 완성. 4탭 필터(전체/승인대기/승인완료/반려 + 카운트 배지), 승인 액션, 반려 사유 모달(3자 이상, 최대 500자), 재승인 액션, 반려 사유 인라인 표시, 커스텀 모달(window.confirm/alert 미사용 정책 준수)
+- `components/alimtalk/AlimtalkTemplateFormV2.tsx` — `approval_status === 'APPROVED'` 프로필만 드롭다운 노출. 미등록/미승인 상태 안내 문구 + select 비활성화
+- `components/alimtalk/AlimtalkManagementSection.tsx` — Template 인터페이스에 `created_by/_name/_login_id` 추가, 목록 테이블에 "등록자" 컬럼 신설(이름 + 로그인 ID 병기)
+
+#### ✅ Day 3 완료 (2026-04-18 야간 연속 세션) — 알림톡 발송창 전구간
+
+**전제 확인 (Harold님 지시):**
+- 휴머스온 IMC 발송 API 별도 호출 없음 → QTmsg Agent가 기존 `SMSQ_SEND`에 `msg_type='K'`로 INSERT하면 자동 발송 (QTmsg 매뉴얼 ver4.0 §5 + sample_insert.sql 검증 완료)
+- Phase 0 수령 없이도 발송 자체는 가동 가능 (템플릿 승인만 IMC 검수 필요)
+
+**슈퍼관리자 UI 정리:**
+- AdminDashboard 상단 "알림톡 발신프로필" 별도 버튼 제거
+- 발송 관리 탭 내부 레거시 발신프로필 섹션(Sender Key 수동 입력) + 등록 모달 + 관련 state/handler 전부 제거
+- 신규 `components/alimtalk/AlimtalkSendersSection.tsx` — AlimtalkSendersPage의 main 부분을 섹션으로 분리 → AdminDashboard 임베드. AlimtalkSendersPage는 wrapper로 축소.
+
+**SenderRegistrationWizard 고객사 admin 모드 UX 개선:**
+- `/api/companies/me` 가상 API 호출 제거 → `useAuthStore.user.company` 직접 참조
+- `companies.length === 1`이면 귀속 회사 드롭다운 자체 숨김 (고객사 admin은 본인 회사 자동 고정)
+- 카테고리 캐시 비어있을 때 안내 문구를 `singleCompany` 여부에 따라 분기
+
+**신규 공용 컨트롤타워:** `components/alimtalk/AlimtalkChannelPanel.tsx` — 설계서 §6-3-D 반영
+- 발신프로필 드롭다운 (승인된 것만, 1개면 자동 고정)
+- 템플릿 드롭다운 (status APPROVED/APR/A/approved 호환)
+- 변수 자동 매핑 (`#{...}` 추출 + 고객 필드 드롭다운 + `@@fieldKey@@` placeholder)
+- 부달 5종 (N/S/L/A/B) + A/B 때만 대체 문구 입력
+- 미리보기 (원본/치환 토글, 말풍선 + 강조 타이틀 + 버튼)
+- `convertButtonsToQTmsg()` export — QTmsg `{"name1","type1","url1_1","url1_2",...}` 변환
+- 단가 표시 제외 (Harold님 지시: 후불 위주라 불필요)
+
+**3경로 발송창 Panel 적용:**
+- `DirectSendPanel.tsx` — 알림톡 블록 전체 Panel 교체 + props에 `alimtalkSenders`/`alimtalkProfileId`/`alimtalkNextContents` 추가
+- `TargetSendModal.tsx` — 알림톡 블록 Panel 교체 + 동일 props
+- `AutoSendFormModal.tsx` — Step 5 탭에 🔔 알림톡 추가, `channel === 'alimtalk'`이면 SMS/LMS/MMS UI 전체 숨김 + Panel 임베드 + 폴백용 발신번호 필드, handleSubmit body에 `channel`/`alimtalk_*` 필드 포함
+
+**버그 수정:** `Dashboard.tsx:540` 타겟발송 `sendChannel: 'kakao'` → `'alimtalk'` (백엔드 `directChannel === 'alimtalk'` 체크와 정합 불일치 해소)
+
+**백엔드:**
+- `campaigns.ts /direct-send` — 알림톡 분기에 `alimtalkProfileId`/`alimtalkVariableMap`/`alimtalkNextContents` 파라미터 + 승인 이중 가드(템플릿 status + 프로필 approval_status) + `k_etc_json`에 senderkey 자동 포함 + `#{변수}` 백엔드 치환
+- `auto-campaigns.ts POST/PUT` — `channel`/`alimtalk_profile_id`/`alimtalk_template_id`/`alimtalk_template_code`/`alimtalk_variable_map`/`alimtalk_next_type`/`alimtalk_next_contents` 7개 컬럼 INSERT/UPDATE
+- `auto-campaign-worker.ts executeAutoCampaign` — `channel === 'alimtalk'` 분기 → `insertAlimtalkQueue` 호출 (승인 가드 + variable map 치환 + senderkey etcJson)
+- `alimtalk-senders` 화면용 DB/SELECT 정상. Dashboard.tsx `loadKakaoTemplates`는 `/api/alimtalk/senders` 병렬 로드로 `alimtalkSenders` 세팅
+
+**검증:**
+- 백엔드 `npx tsc --noEmit` 0 에러
+- 프론트 `npx tsc --noEmit` 0 에러
+- 잔존 인라인 알림톡 UI 0건 (DirectSendPanel/TargetSendModal/AutoSendFormModal 전부 Panel)
+
+#### ✅ 2026-04-18 야간 배포 완료 (Day 1+2+3)
+- 로컬: 백엔드/프론트 tsc 0
+- 서버 DB: Day 2 DDL + Day 3 `auto_campaigns` 알림톡 7컬럼 반영
+- 서버 코드: tp-deploy-full 완료
+
+#### 🔄 2026-04-21 화요일 — Phase 0 수령 + 전수감사 + 버그 7건 수정
+
+**Phase 0 (IMC 운영 API 키) 수령:**
+- ✅ `IMC_API_KEY` (운영계) — 서버 `.env` 주입 + pm2 restart 완료
+- ✅ `IMC_BASE_URL_PRD=https://msg-api.humuson.com`
+- ✅ `IMC_WEBHOOK_ALLOWED_IPS=121.189.17.243,121.189.17.244`
+- ❌ `IMC_WEBHOOK_HMAC_SECRET` — 폴링으로 대체, Phase 2 전 수령 필요
+- ❌ `IMC_API_KEY_SANDBOX` — Phase 1은 운영계 관리 API로 충분
+
+**IMC 스펙 전수감사 (Harold님이 `C:\Users\ceo\Downloads\imc_extracted\` 55개 공식 문서 페이지 직접 저장해서 제공):**
+- Day 1~3 구현이 설계서 추측 기반이었음이 드러남 → 버그 7건 발견·수정
+- 직접 Read한 파일 15개 (템플릿 13 + 알림수신자 2 + 응답코드 1)
+- 미직접 대조 파일 17개 (발신프로필 9 + 템플릿 카테고리 2 + 알림수신자 2 + 브랜드메시지 5) → `D130-NEXT-ACTIONS.md §3`에 목록
+
+**확정·수정된 버그 7건 (tsc 0):**
+1. `listSenderCategories` 응답 이중 래핑 `data.data` + flat 11자리 (2026-04-21 오전 실측 후 서버 DB 272건 반영 완료)
+2. 알림톡 검수요청(첨부): `/comment-with-file` → `/comment/file`, multipart `file` → `attachment`
+3. 알림톡 노출 여부 수정: `/exposure` → `/show-yn`, body `exposureYn` → `showYn`
+4. 알림톡 검수요청 취소: `/comment-cancel` → `/comment/cancel`
+5. Button/QuickReply 필드명 camelCase → snake_case 자동 변환 (`normalizeTemplateBodyForImc`)
+6. 알림수신자 `alarmUserId` → `alarmUserKey` (body + URL path + DB INSERT 값)
+7. 카카오 리포트 코드 1001~1004 오매핑 교정 + 11개 → 55개 확장
+
+**남은 🔴 블로커 (다음 세션 착수 시점):**
+- 2-1: `createAlimtalkTemplate` 응답 이중 래핑 가능성 → Harold님 실점검 시 `template_code` null 여부 확인으로 확정
+- 2-2: `listSenders` 파라미터 불일치 (`count→size`, `yellowId→uuid`, 12개 필터 누락) — 발신프로필 목록 조회 시 영향
+- 2-3: `SenderData` 인터페이스 필드 불일치 (`yellowId→uuid` + 누락 7개)
+- 2-4: 웹훅 HMAC 검증 강제 — Phase 2 전환 시점 대응, 지금은 폴링으로 커버
+
+**실점검 진행 상태 (2026-04-21 11:02 KST 배포 직후):**
+- ✅ 알림톡 스케줄러 3종 가동 (`[alimtalk-jobs][scheduler] started`)
+- ✅ `GET /api/alimtalk/categories/sender 200 23587 bytes` — Wizard 카테고리 드롭다운 정상 로드 가능
+- ⏳ Wizard 3-Step 등록 / 슈퍼관리자 승인 / 고객사 템플릿 등록 + 검수요청 테스트 대기
+
+#### 🚨 다음 세션 즉시 할 일
+
+1. [`status/D130-NEXT-ACTIONS.md`](D130-NEXT-ACTIONS.md) 정독
+2. Harold님 실점검 진행 상황 확인 (Wizard 통과? 템플릿 등록 성공?)
+3. 실패 로그 있으면 해당 IMC 스펙 파일 직접 Read → 즉시 수정
+4. 실점검 막힘없이 통과했으면 §3 미대조 파일 순차 Read + 블로커 2-2, 2-3 수정 기반
+
+#### 🚨 배포 전 Harold님 DB ALTER 필수
+
+```sql
+BEGIN;
+ALTER TABLE auto_campaigns
+  ADD COLUMN IF NOT EXISTS channel                 varchar(20) DEFAULT 'sms',
+  ADD COLUMN IF NOT EXISTS alimtalk_profile_id     uuid REFERENCES kakao_sender_profiles(id),
+  ADD COLUMN IF NOT EXISTS alimtalk_template_id    uuid REFERENCES kakao_templates(id),
+  ADD COLUMN IF NOT EXISTS alimtalk_template_code  varchar(50),
+  ADD COLUMN IF NOT EXISTS alimtalk_variable_map   jsonb DEFAULT '{}'::jsonb,
+  ADD COLUMN IF NOT EXISTS alimtalk_next_type      varchar(1) DEFAULT 'L',
+  ADD COLUMN IF NOT EXISTS alimtalk_next_contents  text;
+CREATE INDEX IF NOT EXISTS idx_auto_campaigns_channel
+  ON auto_campaigns(company_id, channel);
+COMMIT;
+```
+
+검증: `\d auto_campaigns` → 기존 컬럼 + 신규 7개 확인. 롤백은 동일 컬럼 DROP.
+
+#### Phase 0 일부 수령 (2026-04-18 야간, 세션 종료 직전)
+- ✅ **IMC API Key (운영계)** 수령 — 서버 `.env`에 `IMC_API_KEY`로 주입 필요 (Key 값은 대화 로그 보안상 여기 기록 안 함)
+- ✅ **Webhook 발신 IP**: `121.189.17.243`, `121.189.17.244` → `IMC_WEBHOOK_ALLOWED_IPS`
+- ✅ **운영 Base URL**: `https://msg-api.humuson.com` → `IMC_BASE_URL_PRD`
+- ✅ **API 문서**: `https://msg-api.humuson.com/docs/getting-started?version=v1.0.0`
+- ✅ **우리 Webhook URL 결정**: `https://app.hanjul.ai/api/alimtalk/webhook`
+- ⏳ **Harold님 응답 필요**: 인비토 서버 공인 IP (`curl ifconfig.me`) 확인 후 휴머스온에 전달 → 방화벽 화이트리스트
+- ❌ **미수령 — 추가 요청 필수**: `IMC_WEBHOOK_HMAC_SECRET` (우리 `verifyWebhookSignature()`가 검증 강제, 없으면 실 웹훅 401)
+- ❌ **미수령 — 선택적 요청**: `IMC_API_KEY_SANDBOX` + `IMC_BASE_URL_STG` (샌드박스 E2E 없이 운영계 직행 시 카톡 실발송 주의)
+
+#### 월요일(2026-04-21) 실점검 체크리스트
+- [ ] 서버 공인 IP 확인 + 휴머스온 방화벽 추가 요청
+- [ ] Webhook HMAC Secret 수령 + `.env` 주입
+- [ ] `.env` 주입(IMC_ENV=PRD, IMC_API_KEY, IMC_BASE_URL_PRD, IMC_WEBHOOK_ALLOWED_IPS, IMC_WEBHOOK_HMAC_SECRET) + `pm2 restart all`
+- [ ] 카테고리 동기화 1회 실행 → `kakao_sender_categories` 채워짐 확인
+- [ ] 발신프로필 Wizard 3-Step E2E (token 요청 → 카톡 인증번호 수신 → createSender)
+- [ ] 슈퍼관리자 승인 → 템플릿 등록 → 검수요청 → IMC 웹훅 수신 → 승인 처리
+- [ ] 3경로 실발송 (직접/타겟/자동) — 본인 번호로 1건씩, `SMSQ_SEND` msg_type='K' INSERT 확인
+
+---
+
+### 🎨 D126 V2 + D127 V3 + D128 V4 — DM 빌더 고도화 (2026-04-17) — ✅ 전 구간 완료, 배포 대기
+
+> **배경:** D125 V1 이후 연속 세션. V2 고도화 → V3 페이징 3모드 → V4 페이지 계층 구조까지 진행.
+> **메모리:** [`project_d126.md`](../.claude/projects/C--Users-ceo-projects-targetup/memory/project_d126.md) (V2) + [`project_d127_d128.md`](../.claude/projects/C--Users-ceo-projects-targetup/memory/project_d127_d128.md) (V3+V4)
+
+#### D126 V2 — 8과제 + 공용 인프라 3종 (완료, 배포)
+- 인라인 텍스트 편집(11섹션) / AI 프롬프트 모달 / AI 개선 diff / 검수 모달 / 버전 히스토리 / 브랜드킷 URL 추출 / A/B 테스트 / style_variant 10종 CSS
+- ModalBase / LCS text-diff / Zustand openModal 중앙화
+- **26파일 신설/수정, 11개 라우트, DDL 3종 실행 완료**
+
+#### D126 V2 배포 후 수정 3건 (완료)
+- AI 프롬프트 모달 런타임 에러 — `parseRes.data?.spec ?? parseRes.data` unwrap 수정
+- 공용 SaaS 시세이도 브랜드명 3곳 제거 (DmBuilderPage/HeaderEditor/unsubscribe-helper 주석)
+- 섹션 드래그 재정렬 동작 — @dnd-kit 핸들 `touchAction:'none'` + `<button>`→`<div>`
+
+#### D127 V3 — 페이징 3모드 (완료)
+- `layout_mode`에 `scroll_snap` 추가, 총 3종 (scroll / scroll_snap / slides)
+- LayoutModePickerModal 신설 (신규 DM 생성 시 카드 선택)
+- DmTopBar 3모드 세그먼트 토글 (편집 중 자유 전환)
+- dm-viewer.ts 모드별 CSS/JS 분기 + dots + counter + IntersectionObserver 추적
+
+#### D128 V4 — 페이지 계층 구조 (완료)
+- 구조: `sections: Section[]` → `pages: DmPage[]` (1페이지 = 여러 섹션 조립)
+- layout_mode는 **페이지 간 전환 방식**만 결정
+- 좌측 패널 2단계: 상단 페이지 목록(이름/복제/삭제/이동) + 하단 현재 페이지 섹션 목록
+- DmCanvas 상단 페이지 네비게이션 바 (◁ 페이지명 ▷ 모드 배지)
+- 뷰어 `renderPagesHtml`로 재작성 (페이지 단위 스냅/슬라이드, 페이지 내부는 세로 스크롤)
+- **DDL 변경 없음** — 기존 `dm_pages.pages`/`sections` JSONB 컬럼 재활용, 런타임 구조 확장
+- 하위호환: 스토어 top-level `sections`를 pages[currentPageIndex].sections 뷰로 유지 → 기존 10+ 파일 호출부 무수정
+
+#### 레거시 인프라 복구 (관련 작업, 완료)
+- 레거시 kkotemp Agent MySQL 연결 실패 → socat systemd 영구화
+- `/etc/systemd/system/socat-mysql.service` + `Restart=always` → SIGKILL 시 819ms 자동 복구
+- rc.local 중복 라인 sed로 주석 처리
+- 참조 문서: `C:\Users\ceo\Downloads\INVITO-INFRA-HANDOVER.md`
+
+#### 배포 대기 (Harold님 직접)
+```powershell
+tp-push
+tp-deploy-full
+```
+- DDL: D126 V2용 3종(brand_kit/dm_ab_tests/dm_views 확장) 이미 실행 완료, D127/D128 DDL 추가 없음
+- 타입: 백엔드 tsc 0건 / 프론트 tsc 0건
+
+#### 다음 세션 후보
+- D128 배포 후 실사용 피드백 반영
+- 페이지 단위 AI 개선 (현재는 현재 페이지만)
+- 페이지 단위 A/B 테스트 (variant = 페이지 레이아웃)
+- 페이지 간 드래그 재정렬 (현재 ⋯ 메뉴의 위/아래 버튼만)
+
+---
+
+### 🎨 D125 — 모바일 DM 빌더 프로모델 v1 구현 (2026-04-17) — ✅ **전 구간 완료**
+
+> **배경:** D119 슬라이드형 DM → **섹션 기반 실전 프로모델**로 전면 재설계. "MVP 아니고 실전 프로모델" (Harold님 2026-04-16 지시).
+> **설계서:** [`status/DM-PRO-DESIGN.md`](DM-PRO-DESIGN.md) 19섹션 + **메모리 [`project_d125.md`](../.claude/projects/C--Users-ceo-projects-targetup/memory/project_d125.md) 구현 상세**
+>
+> **완료 집계:**
+> - 의존성 그래프 14단계 + 통합 QA **전 구간 완료**
+> - 신설/수정 **37파일** (백엔드 14 + 프론트 23)
+> - 신설 API 라우트 **19개** (`/ai/*` 5, `/templates/*` 3, `/brand-kit` 2, `/versions/*` 3, 승인 3, 검수/변수/샘플/테스트/변환 각 1)
+> - 신설 컨트롤타워 **11개** (dm-tokens/section-registry/section-renderer/viewer-utils/ai/validate/variable-resolver/sample-customer/brand-kit/template-registry/legacy-converter)
+> - TypeScript 타입 에러 **0건** (백엔드·프론트 모두)
+>
+> **완료 영역:**
+> - DB: dm_pages 7컬럼 + dm_versions + dm_templates + section_interactions (Harold님 실행 완료)
+> - 디자인 토큰 3파일 (color/typography/spacing/radius/shadow/motion) + CSS 변수 234줄
+> - 섹션 시스템 11종 (backend/frontend SSOT 미러)
+> - 에디터 3분할 (좌 섹션목록+추가 / 중 모바일프레임+캔버스 / 우 필드에디터)
+> - @dnd-kit/sortable 세로 DnD
+> - 필드 에디터 11종 + 공용 컨트롤 7종
+> - AI 4모듈 (Prompt Parser / Layout Recommender / Copy Generator / Tone Transformer) + improve 보너스
+> - 변수 바인딩 + fallback + VIP/Newbie/Empty 3종 샘플 렌더링
+> - 검수 10영역 × 3등급 (fatal/recommend/improve)
+> - 브랜드킷 + 템플릿 7카테고리 (뷰티/패션/긴급/포인트/재방문/오프라인/VIP)
+> - 버전 관리 스냅샷/복원 + 승인 플로우 (draft→review→approved/rejected→published)
+> - 테스트 발송 (insertTestSmsQueue 재활용, 최대 5명, LMS)
+> - 레거시 변환 (slides→scroll 자동)
+>
+> **배포:** Harold님 `tp-push` + `tp-deploy-full` 직접 실행 대기
+>
+> **V2 이관:** D126 섹션 참조 (메모리 project_d125.md)
+
+---
+
+### 🔧 D124 — 0416 직원 검수 5건 + 필드명 통일 + 무료수신거부 빈줄 (2026-04-16) — 🟡 수정완료-배포완료
+
+> **배경:** 직원 검수 PDF(한줄로_20260416.pdf) 5건. D123 후속 수정 + 추가 UX/AI 개선.
+
+#### 수정 5건 + 부가 2건
+
+| # | 영역 | 근본 원인 | 해결 |
+|---|---|---|---|
+| **N1** | 직접타겟발송 하단 "중복제거" 버튼 잔존 | D123 P3에서 상단 체크박스만 제거, 하단 버튼 놓침 | TargetSendModal.tsx 하단 버튼 삭제. 선택삭제/전체삭제 유지 |
+| **N2** | 발송결과 시간/엑셀/웹 불일치 | "등록일시" 값이 sendreq_time(QTmsg INSERT)이라 "한줄로에서 발송을 건 시간" 의미와 불일치. 엑셀 필드명·순서도 웹과 다름 | **UI 2컬럼 수신확인 제거 / 엑셀 3컬럼 유지** + **등록일시 값 = 캠페인 `created_at`** (ResultsModal/엑셀/AdminDashboard 3곳 동기화) + 엑셀 헤더 웹과 순서·이름 통일(수신번호,회신번호,메시지내용,등록일시,발송일시,전송결과,결과코드,통신사,메시지유형,수신확인시간) + 발송 내역 모달 960→1300px + 셀 whitespace-nowrap |
+| **N3** | 특수문자 선택 시 문안 끝에 붙음 | Dashboard 특수문자 모달이 `setMessage(prev => prev + char)` — 개인화 변수는 이미 커서 삽입 | **신규 컨트롤타워 `utils/textInsert.ts`** (insertAtCursor / insertAtCursorOrAppend / insertAtCursorPos 3함수) + 4곳 인라인 제거 (Dashboard 특수문자 / DirectSendPanel 자동입력 / TargetSendModal insertVariable / AutoSendFormModal insertVariable) + textarea `data-char-target` 속성 |
+| **N4** | MMS 이미지 호버 시 UUID 파일명 표시 | DB `mms_image_paths`가 문자열 배열(절대경로)만 저장. 원본 파일명 기록 없음 | `mms_image_paths` JSONB를 **객체 배열({path, originalName})로 확장** + **컨트롤타워 2종 신설** (백엔드 mms-image-util.ts / 프론트 mmsImage.ts) + 업로드 응답에 originalName(한글 latin1→utf8 복원) + 소비처 전수 호환 (Dashboard 7곳 / campaigns.ts / ResultsModal / AiCustomSendFlow / props 타입 3곳) |
+| **N5** | AI 문안 하단(마무리/연락처) 줄바꿈 없이 붙음 | D123 P12 `dnCount ≤ 3` 강제 축소가 자연스러운 단락 구분까지 파괴 | BRAND_SYSTEM_PROMPT 재작성("마무리 앞 빈 줄 필수" 명시) + post-processing dnCount 제거. `\n{3,}→\n\n` 방어선만 유지 |
+| **+α** | 무료수신거부 앞에 빈 줄 없음 | `buildAdMessage`가 `\n무료수신거부`만 부착 | `\n\n무료수신거부`로 변경(백·프론트 동기) + 본문 끝 개행 정규화(`\n+$`) + 5경로 + 스팸테스트 + 표시경로 자동 반영 |
+| **+β** | DM 빌더 프로모델 설계서 | MVP → 실전 프로모델 방향 전환 | **DM-PRO-DESIGN.md 19섹션 완성** — 다음 세션부터 구현 착수 |
+
+#### 수정 파일 총 약 18개
+
+**백엔드:**
+- `utils/messageUtils.ts` — buildAdMessage `\n\n무료수신거부` + 본문 끝 개행 정규화(N5/+α), replaceVariables skipNumberFormatting(D123 P2 유지)
+- `routes/campaigns.ts` — 직접발송 3곳 skipNumberFormatting(D123 P2), MMS path normalizeMmsImagePaths(N4)
+- `routes/admin.ts` — `/stats/send/detail` SELECT c.created_at(N2), `/sms-detail` recvTime 반환 제거(N2)
+- `routes/results.ts` — SMS_DETAIL/EXPORT_FIELDS, 카카오 UNION ALL 필드, CSV 헤더/데이터 재정렬(N2)
+- `routes/mms-images.ts` — originalName 응답 포함, latin1→utf8 복원(N4)
+- `services/ai.ts` — BRAND_SYSTEM_PROMPT 재작성, dnCount 제거(N5)
+- **신설** `utils/mms-image-util.ts` — MMS 경로/파일명 컨트롤타워(N4)
+
+**프론트엔드:**
+- `components/TargetSendModal.tsx` — 하단 중복제거 버튼 제거(N1), insertAtCursor 사용(N3), data-char-target(N3)
+- `components/DirectSendPanel.tsx` — insertAtCursorPos 사용(N3), data-char-target(N3)
+- `components/AutoSendFormModal.tsx` — insertAtCursorPos 사용(N3)
+- `components/ResultsModal.tsx` — 수신확인 컬럼 제거, 등록일시=selectedCampaign.created_at, 모달 1300px, whitespace-nowrap, getMmsImageDisplayName(N2/N4)
+- `components/AiCustomSendFlow.tsx` — img alt/title originalName 우선(N4)
+- `pages/AdminDashboard.tsx` — 캠페인리스트/SMS상세/통계모달 등록/발송 2컬럼(N2)
+- `pages/Dashboard.tsx` — 특수문자 모달 컨트롤타워(N3), mmsUploadedImages state+7곳 body 객체배열(N4), saveTemplate 타입(N4), 템플릿 복원 호환(N4)
+- `utils/formatDate.ts` — buildAdMessageFront `\n\n무료수신거부`(+α)
+- **신설** `utils/textInsert.ts` — 커서 삽입 컨트롤타워(N3)
+- **신설** `utils/mmsImage.ts` — MMS 경로/파일명 컨트롤타워(N4)
+
+#### 핵심 교훈 (D124)
+
+> 1. **SQL 파일 자동생성 금지** — OPS.md 기반 Harold님 직접 실행 안내로 대체. feedback_no_sql_generation.md 메모리 기록.
+> 2. **MVP 마인드 탈피** — 프로 요금제 차별화 기능은 "월 100만원 값어치" 기준. 기능·디자인 동시 완성도.
+> 3. **컬럼 통일 요구는 순서·이름 양쪽** — 데이터 의미 같아도 헤더명·순서 다르면 직원 혼란. 웹 기준으로 엑셀 맞춤.
+> 4. **동일 로직 2곳 이상 = 즉시 컨트롤타워** 원칙 4번 반복 적용 (N3 커서삽입 4곳→textInsert.ts / N4 MMS 경로 추출 여러 곳→mmsImage.ts).
+> 5. **JSONB 구조 확장 > DB 스키마 변경** — mms_image_paths 객체 배열 / dm_pages layout_mode 등 하위호환 JSONB 확장이 안전.
+> 6. **컨트롤타워 함수 시그니처는 범용 우선** — `(newValue: string) => void`가 React Dispatch와 일반 콜백 양쪽 호환 → TargetSendModal props 형태도 수용.
+> 7. **"재작업"은 사용자 의도 재확인부터** — N2는 PDF 오독으로 3번 뒤집음 (엑셀 3컬럼 유지 / 등록일시=created_at 의미). "제대로 읽기"가 "빠르게 수정"보다 우선.
+
+---
+
+### 🔧 D123 — 0415 직원 검수 12건 전수 수정 + 레거시 인프라 복구 + 영업총판 제안서 (2026-04-16) — ✅ 배포완료
+
+> **배경:** 직원 검수 PDF(한줄로_20260415.pdf) 12건 전수 수정. 080번호 누락 / 직접발송 숫자 콤마 / 직접타겟발송 체크박스 / 발송결과 상세 시간 / MMS 이미지 / 회신번호 하이픈 / 예약대기 드래그 / 자동발송 5건 / AI 줄바꿈 과다.
+> **관련 인프라 복구:** 동일 세션에서 레거시 서버(invitobiz.com) 템플릿관리자 QTmsg Agent 문자발송 복구(MySQL 3306→3388 socat 포워딩) + 이니시스 PG 카드결제 복구(Tomcat setenv.sh에 JAVA_HOME=Oracle JDK 1.7.0_45 고정 — Java 8 설치로 alternatives 바뀌면서 SSL 컨텍스트 초기화 실패). 한줄로 프로젝트 범위 밖이지만 같은 세션에서 처리.
+> **부가 업무:** 전단AI 영업총판 제안 대응 — 상대방 5:5 수익배분 제안 거절 후 30% recurring 총판 계약 제안서 Word 문서 작성 (`docs/인비토_솔루션_영업총판_제안서_20260416.md` + 바탕화면 .docx). 경어체 + 표/불릿/번호리스트 포함. DID 별도 사업/공동사업 거절/5개 독소조항 차단.
+
+#### 수정 12건
+
+| # | 영역 | 근본 원인 | 해결 |
+|---|---|---|---|
+| **P1** | 080번호 누락 (auto_sync OFF) | `getOpt080Number()`가 users.opt_out_080_number → companies.opt_out_080_number만 조회, D120 이전 데이터는 companies.opt_out_080_number NULL이고 reject_number에만 값 존재 → 080번호 빈값 반환 → (광고)+080 누락 | `getOpt080Number()` company 폴백을 `COALESCE(NULLIF(opt_out_080_number, ''), reject_number)`로 변경. 컨트롤타워 1곳 수정으로 5개 발송 경로 + 스팸테스트 12곳 전체 자동 반영. Harold님 일괄 동기화 SQL 실행 완료 |
+| **P2** | 직접발송 숫자 콤마 자동 변환 | `replaceVariables()`가 모든 발송 경로에서 `formatNumericLike()` 무조건 호출 → 직접발송도 고객 업로드 원본(1000, 250103)이 1,000 / 250,103으로 변환되어 나감 | `replaceVariables()`에 `skipNumberFormatting` 옵션 추가. `prepareSendMessage()` 옵션 전달. 직접발송 3곳(SMS/카카오/알림톡) `skipNumberFormatting: true`. 프론트 `replaceDirectVars`도 `formatPreviewValue` 제거하여 raw 값 표시 |
+| **P3** | 직접타겟발송 중복제거/수신거부제거 체크박스 무의미 | 앞 단에서 이미 중복 제거 + 수신거부 필터 적용된 데이터가 넘어오는데 추가 체크박스 UI 존재 | TargetSendModal 체크박스 2개 UI 제거 (state는 유지 — 백엔드 API 하위호환) |
+| **P4** | 발송결과 상세 시간 컬럼 부족 + admin.ts UTC 그대로 표시 | (1) ResultsModal 상세 테이블에 "수신확인"(repmsg_recvtm) 컬럼 없음 (2) admin.ts sms-detail 쿼리가 `DATE_ADD +9h` 없이 raw SELECT → 슈퍼관리자 화면에서 UTC 그대로 표시 | ResultsModal에 "수신확인" 컬럼 + `formatDateTime(m.repmsg_recvtm)` 추가 (colSpan 9→10). admin.ts sms-detail 쿼리에 `DATE_ADD(mobsend_time/repmsg_recvtm, INTERVAL 9 HOUR)` 추가 |
+| **P5** | MMS 캠페인 상세 이미지 너무 작음(64px) + 파일명 불가 | `mms_image_paths` 렌더링 시 `w-16 h-16` 고정, alt/title 없음 → 날짜/사은품 등 비슷한 이미지 구분 불가 | 경로에서 파일명 추출하여 `title` 속성(호버 툴팁) + 에메랄드 링 hover + `onClick` 전체화면 확대 모달. `enlargedImage` state + full-screen overlay(z-[90], 배경/✕ 클릭 닫기, 하단 파일명 카드) |
+| **P6** | 회신번호 하이픈 불일치 (02-3449-0012 → 023-449-0012) | 인라인 `formatPhone` 함수가 **9곳**에 중복 정의, 10자리 → 3-3-4 단순 분할로 서울 02를 지역번호 0XX로 오인. CLAUDE.md 컨트롤타워 원칙 위반 상태 | `formatPhoneNumber()` 컨트롤타워로 통일. 050X 12자리(0507-1234-5678) 케이스 추가. 9곳 인라인 전부 제거 + import 교체 — ResultsModal/Settings/Unsubscribes/CustomerDBModal/CallbacksTab/AiCustomSendFlow/Dashboard/AutoSendFormModal. 백엔드 services/ai.ts `formatRejectNumber`도 동일 규칙으로 보강 |
+| **P7** | 예약대기 메시지 상세보기 드래그 복사 불가 | 상위에 `select-none`은 없지만 명시적 `select-text` 미지정으로 상속/기본 스타일에서 드래그 차단 | ScheduledCampaignModal 본문 div에 `select-text cursor-text` 명시 |
+| **P8** | 자동발송 이력 통계 (D-2 AI 생성 알림 미기록) | `runMessageGeneration()`이 담당자 AI 생성 알림 SMS 발송 후 `auto_campaign_runs INSERT`를 아예 안 함 → 이력 탭에 AI 생성 알림 회차 자체가 안 보임 | `runMessageGeneration()` 알림 발송 직후 `auto_campaign_runs INSERT` 추가 (status='ai_generated_notified', target/sent/success = phones.length). AutoSendPage.tsx `statusMap`에 `ai_generated_notified`(AI문안알림) + `spam_tested`(스팸테스트) 라벨 추가. 시간 분기도 포함 |
+| **P9** | 자동발송 담당자번호 미입력 시 다음 단계 진행 가능 | `canProceed()` Step 4 검증 누락 + pre_notify 토글 OFF 가능 → AI 생성/스팸테스트/D-1 알림 수신 못 함 | AutoSendFormModal: **pre_notify 토글 완전 제거** (항상 true 고정). `canProceed()` Step 4에 `notifyPhones.length === 0` 차단 추가. 경고 메시지 "📌"→"⚠️", 빨간색. 5단계 확인 화면 단순화 |
+| **P10** | 담당자 알림 특수문자 누락 | `applyAdAndSanitize()`가 messageContent에 `sanitizeSmsText()` 강제 적용 → 실제 발송에는 ★/※/▼ 나가지만 담당자 알림에는 제거되어 발송 | `applyAd()`로 함수명 변경 + sanitize 제거. messageContent 원본 그대로. 알림 템플릿 고정 부분은 영향 없음. 호출부 3곳 교체 |
+| **P11** | 자동발송 미등록 회신번호 — "생성 실패" 메시지만 | 생성 API에 pre-flight validation 없음. 실제 발송 시점 CT-08이 자동 제외하지만 고객은 이유 모름 | auto-campaigns.ts POST에 pre-flight — `use_individual_callback=true` + `force !== true`이면 고객 조회 → CT-08 `filterByIndividualCallback` → 미등록 있으면 `409 code='UNREGISTERED_CALLBACKS'` 응답. CallbackConfirmModal sendType에 `'auto'` 추가. AutoSendFormModal에 `submitWithForce(force)` 함수 — 409 응답 시 모달 표시, "제외하고 생성" 클릭 시 `force=true`로 재호출 |
+| **P12** | AI 추천 문안 줄바꿈 과다 (타 업체 대비 내실 없어 보임) | BRAND_SYSTEM_PROMPT에 빈 줄 총량 제약 없음. Post-processing도 `\n{3,}→\n\n`만 처리 | 프롬프트에 "과도한 줄바꿈 금지" 섹션 추가 (빈 줄 3개 이내, 의미 단위 묶기, 좋은 예/나쁜 예 쌍). Post-processing에 빈 줄(`\n\n`) 최대 3개 제한 로직 추가 (3개 초과분은 단일 줄바꿈으로 축소) |
+
+#### 수정 파일 총 약 20개
+
+**백엔드:**
+- `messageUtils.ts` — getOpt080Number(P1), replaceVariables+prepareSendMessage(P2)
+- `campaigns.ts` — 직접발송 3곳 skipNumberFormatting(P2)
+- `admin.ts` — sms-detail DATE_ADD(P4)
+- `services/ai.ts` — formatRejectNumber 보강(P6), BRAND_SYSTEM_PROMPT 줄바꿈 제약(P12), post-processing 빈줄 최대 3개(P12)
+- `auto-campaign-worker.ts` — runMessageGeneration INSERT(P8)
+- `auto-notify-message.ts` — applyAd messageContent sanitize 제외(P10)
+- `auto-campaigns.ts` — POST pre-flight validation(P11)
+
+**프론트엔드:**
+- `TargetSendModal.tsx` — 체크박스 제거(P3)
+- `ResultsModal.tsx` — 수신확인 컬럼(P4), MMS 확대 모달(P5), formatPhone 교체(P6)
+- `CustomerDBModal.tsx`, `CallbacksTab.tsx`, `Settings.tsx`, `Unsubscribes.tsx` — formatPhone 컨트롤타워화(P6)
+- `AiCustomSendFlow.tsx`, `Dashboard.tsx`, `AutoSendFormModal.tsx` — formatRejectNumber 컨트롤타워화(P6)
+- `formatDate.ts` — formatPhoneNumber 050X 12자리 보강(P6), replaceDirectVars raw 값(P2)
+- `ScheduledCampaignModal.tsx` — select-text cursor-text(P7)
+- `AutoSendPage.tsx` — statusMap + 시간 분기(P8)
+- `AutoSendFormModal.tsx` — 토글 제거+필수화(P9), CallbackConfirmModal 연동(P11)
+- `CallbackConfirmModal.tsx` — sendType 'auto' 추가(P11)
+
+#### 핵심 교훈 (D123)
+> 1. **자동발송 5단계 라이프사이클 전수 이해 필수.** runMessageGeneration/runPreNotification/runPreSendSpamTest/executeAutoCampaign 각각 auto_campaign_runs INSERT 방식이 다름 → 하나만 보면 누락 발견 못 함.
+> 2. **컨트롤타워 형태로 통합되어 있어도 소비처 전수 확인 필수.** formatPhone 인라인 9곳 중복(formatDate.ts에 formatPhoneNumber 있지만 import 안 함). 기존 컨트롤타워가 있다는 사실만으로 안심하지 말고 grep으로 인라인 패턴 전수 확인.
+> 3. **settings 저장 시 양쪽 필드 동기화 원칙(D120)은 기존 데이터에 소급 적용 안 됨.** DB 마이그레이션 또는 읽기 쪽 폴백 로직으로 커버.
+> 4. **AI 프롬프트 제약은 프롬프트+post-processing 이중 안전장치.** 프롬프트만 바꾸면 AI가 무시할 수 있음 → 코드에서 강제 축소 로직 추가.
+> 5. **"기능 잠금"은 진짜 잠금 + UX 명시 2중 효과 필요.** 자동발송 담당자 번호처럼 필수 기능은 UI에서 토글 자체를 제거하고 필수 표시.
+
+---
+
+### 🔧 D122 — 전단AI 대규모 업데이트 + 한줄로 카카오추천 제거 (2026-04-15) — ✅ 배포완료
+
+> **배경:** 전단AI 인쇄전단/장바구니/주문/POS자동/감사로그/엑셀매핑 등 엔터프라이즈급 기능 대량 추가. 한줄로 AI 추천에서 카카오 채널 추천 제거.
+
+#### 전단AI 신규 기능 (10건)
+| # | 영역 | 내용 |
+|---|---|---|
+| **#1** | 인쇄전단 시스템 | PrintFlyerPage.tsx + flyer-print-renderer.ts — 한국 마트 규격(A3/B4/A4/8절/타블로이드) 5종 + 9가지 테마(봄/여름/가을/겨울/추석/설+기본3색). 카테고리별 상품 그리드 에디터, 네이버 이미지 자동검색+직접업로드, 300dpi PDF 생성 |
+| **#2** | 장바구니/주문 | flyer-carts.ts(CT-F19) + flyer-orders.ts(CT-F20) + OrdersPage.tsx — phone 기반 장바구니 UPSERT, 주문 생명주기(pending→confirmed→ready→completed/cancelled), 요약 카드 4개 + 상태탭 필터 |
+| **#3** | POS 자동전단 생성 | flyer-pos-auto.ts(CT-F22) — 5분 간격 미처리 할인건 감지 → 카탈로그 이미지 매칭 → 할인율 분류(메인30%↑/서브10%↑/일반) → auto_draft 자동 생성 |
+| **#4** | 수신자별 단축URL 추적 | flyer-short-code.ts(CT-F18) — base62 5자리 코드(9억 조합), 배치 INSERT 5000단위, 90일 만료, 클릭통계(유니크phone/첫클릭/총클릭) |
+| **#5** | 감사로그 | flyer-audit-log.ts(CT-F23) — 로그인/전단생성/발송/주문/설정 등 13가지 액션 기록. 비동기 처리. 슈퍼관리자 FlyerAdminDashboard에 조회UI 추가 |
+| **#6** | 엑셀 AI 자동매핑 | flyer-excel-mapper.ts(CT-F24) + ExcelUploadModal.tsx — 엑셀 헤더→상품필드 AI 매핑(Claude주/GPT폴백). 3단계(업로드→매핑확인→미리보기). 할인율 기반 promoType 자동분류 |
+| **#7** | 배경제거 | flyer-rembg.ts — rembg Docker 서비스 호출(15초 타임아웃), 실패 시 원본 폴백 |
+| **#8** | 인쇄전단 백엔드 수정 | flyers.ts — created_by→user_id, store_address→business_address 컬럼 변경 |
+| **#9** | PDF 다운로드 토큰 | 인쇄전단 PDF 다운로드 시 인증 토큰 처리 수정 |
+| **#10** | 인쇄전단 메뉴 이동 | App.tsx 메뉴 구조 개선, 인쇄전단 메뉴 위치 조정 |
+
+#### 전단AI 오류 수정 (3건)
+| # | 영역 | 해결 |
+|---|---|---|
+| **F1** | 전단생성 실패 | flyers.ts 전단 생성 로직 오류 수정 |
+| **F2** | 인쇄전단 오류 | PrintFlyerPage 렌더링/이벤트 핸들링 수정 |
+| **F3** | 전단 업데이트 | 인쇄전단 업데이트 로직 안정화 |
+
+#### 한줄로AI 수정 (1건)
+| # | 영역 | 변경 |
+|---|---|---|
+| **#1** | 추천카카오 제거 | AI 추천에서 카카오 채널 추천 옵션 제거 (ai.ts) |
+
+#### 수정 파일 총 31개
+- **전단AI 백엔드 (16개):** flyers.ts, carts.ts, orders.ts, pos.ts, short-urls.ts, stats.ts, flyer-admin.ts, auth.ts, app.ts, flyer-audit-log.ts, flyer-carts.ts, flyer-orders.ts, flyer-pos-auto.ts, flyer-pos-ingest.ts, flyer-print-renderer.ts, flyer-rembg.ts, flyer-templates.ts, flyer-send.ts, flyer-short-code.ts, flyer-excel-mapper.ts, index.ts
+- **전단AI 프론트 (4개):** App.tsx, PrintFlyerPage.tsx, OrdersPage.tsx, ExcelUploadModal.tsx
+- **한줄로 (2개):** ai.ts, FlyerAdminDashboard.tsx
+- **기타:** CLAUDE.md, InvitoAI_Technical_Whitepaper_2026.docx
+
+---
+
+### 🔧 D121 — KISA subject(광고) 전경로 + AI 문안 4차/5차 강화 + 빈필드 제외 (2026-04-14~15) — ✅ 배포완료
+
+> **배경:** KISA 2026-05 LMS/MMS 제목(광고) 의무 표기 전경로 적용 + AI 문안 생성 프롬프트 4차(감각언어/사용시나리오/업종별킬포인트) + 5차(소비자심리학/브랜드품격) 대규모 강화 + 빈 필드 변수 자동 제외
+
+#### KISA subject(광고) 전경로 적용
+**컨트롤타워 신설:**
+- `messageUtils.ts` — `buildAdSubject(subject, msgType, isAd)` 신설
+- `prepareSendMessage` 반환값 `{message, subject}`로 확장
+- `formatDate.ts` — `buildAdSubjectFront` (프론트 미리보기용)
+
+| 구분 | 적용 위치 | 건수 |
+|---|---|---|
+| **백엔드 발송** | campaigns.ts(AI/테스트/직접/예약수정 4곳), auto-campaign-worker.ts(1곳), spam-test-queue.ts(1곳), spam-filter.ts(1곳) | 7곳 |
+| **프론트 제목 입력란** | DirectSendPanel/TargetSendModal/AutoSendFormModal/AiCampaignSendModal/ScheduledCampaignModal | 5곳 |
+| **프론트 제목 표시** | AiCampaignResultPopup/AiPreviewModal/AiCustomSendFlow/ScheduledCampaignModal/ResultsModal | 5곳+(2추가) |
+| **스팸필터 isAd prop** | SpamFilterTestModal + 호출부(Dashboard/AiCampaignResultPopup/AiCustomSendFlow/DirectSendPanel/TargetSendModal) | 5곳 |
+
+#### AI 문안 생성 프롬프트 4차+5차 강화
+**4차 — BRAND_SYSTEM_PROMPT 전면 교체:**
+- 사용 시나리오 기법 (고객 생활 속 제품 사용 장면)
+- 감각 언어 가이드 (오감 자극 표현)
+- 업종별 킬 포인트 10개 업종
+- 문장 리듬 (짧은↔긴 교차)
+- A/B/C variant 설득 전략 자체 분리
+- "왜 지금, 왜 나한테, 왜 이 브랜드" 3박자
+- generateCustomMessages systemPrompt도 동일 적용
+
+**5차 — 소비자 심리학 + 브랜드 품격:**
+- AI 사고 과정 강제 (브랜드 이미지? 페인포인트? 감정? 과장 없이?)
+- 소비자 심리 5가지: 손실회피/호기심갭/소속감·자부심/자연스러운긴급성/1:1대화 착각
+- 전부 좋은 예+나쁜 예 쌍 — 과장/허풍 금지, 브랜드 품격 유지
+- 느낌표 최대 2~3개, 과장 형용사 금지
+
+#### 개인화 변수 데이터 필터링 (filterVarCatalogByData)
+- `services/ai.ts` — `filterVarCatalogByData(varCatalog, availableVars, companyId)` 신설
+- 직접 컬럼/커스텀 필드 데이터 0건이면 varCatalog에서 제거 → AI가 빈 필드 변수 사용 방지
+- 적용: routes/ai.ts generate-messages + auto-campaign-worker.ts
+
+#### 스팸필터 개인화 치환 불일치 수정
+- **원인:** sampleCustomer 키 "이름" vs 메시지 변수 %고객명% — 미리보기에는 aliasMap 있지만 스팸필터에는 누락
+- **수정:** AiCampaignResultPopup + AiCustomSendFlow 스팸필터 데이터에 aliasMap 적용
+
+#### 스팸필터테스트 고객일치화 수정
+- **원인:** 스팸필터 테스트 시 sampleCustomer가 없거나 타겟 무관 고객 사용
+- **수정:** 미리보기와 동일한 sampleCustomer 전달
+
+#### 수정 파일 총 21개
+- **백엔드 (7개):** ai.ts(routes), ai.ts(services), campaigns.ts, spam-filter.ts, auto-campaign-worker.ts, messageUtils.ts, spam-test-queue.ts
+- **프론트 (13개):** AiCampaignResultPopup, AiCampaignSendModal, AiCustomSendFlow, AiPreviewModal, AutoSendFormModal, DirectSendPanel, ResultsModal, ScheduledCampaignModal, SpamFilterTestModal, TargetSendModal, AutoSendPage, Dashboard, formatDate.ts
+- **문서 (1개):** STATUS.md
+
+#### 핵심 교훈 (D121)
+> 1. **전수파악 없이 "다 했다" 보고 금지** — subject(광고) 적용을 4번 배포시킴. 매번 추가 발견.
+> 2. **발송 경로뿐 아니라 표시 경로(미리보기/스팸필터/발송확인 모달) 전수 필수.**
+> 3. **컨트롤타워를 만들면 호출부에서 각각 호출 X → 단일 진입점(prepareSendMessage)에서 처리.**
+> 4. **동일 기능(변수 치환)을 여러 곳에서 호출할 때 옵션(aliasMap 등)도 동일해야 함.**
+
+---
+
+### 🔧 D120 — UI 통일 + 캘린더 이동 + 080 버그 + 전단AI user_id 격리 (2026-04-14) — ✅ 배포완료
+
+> **배경:** 한줄로AI UI 통일감 작업 + 080 수신거부 저장 버그 + 전단AI 사용자별 데이터 격리
+
+#### 한줄로AI 수정 5건
+| # | 영역 | 변경 |
+|---|---|---|
+| **#1** | AiPreviewModal 핸드폰 프레임 리뉴얼 | 960px 텍스트 모달 → 400px 핸드폰 프레임 (맞춤한줄과 통일). 하단 버튼 4개 제거 (문안선택 화면에 이미 있음). 인라인 replaceAllVars → replaceVarsBySampleCustomer 컨트롤타워 |
+| **#2** | DashboardHeader 메뉴 정리 | AI 분석 + 캘린더 메뉴 제거 (캘린더는 발송결과 모달로 이동) |
+| **#3** | ResultsModal 캘린더 + 메시지 모달 | 콘텐츠 우측 상단에 캘린더 버튼(보라색) 추가 → CalendarModal 트리거. 스팸필터 이력 문안 클릭 가능(MessageCell 컨트롤타워). 메시지 상세 모달 핸드폰 프레임 리뉴얼 |
+| **#4** | 080 수신거부 저장 버그 | PUT /settings에서 reject_number만 UPDATE → opt_out_080_number도 동기화. 근본 원인: GET은 opt_out_080_number를 읽는데 PUT은 reject_number에만 저장 |
+| **#5** | CalendarModal embedded prop | 향후 임베드 가능하도록 embedded 옵션 추가 |
+
+#### 전단AI 수정 1건
+| # | 영역 | 변경 |
+|---|---|---|
+| **#1** | 전단지 목록 user_id 격리 | flyers.ts GET / — company_id만 필터 → user_id 추가. 같은 총판 내 다른 매장 사용자 전단 격리 |
+
+#### 0414 PDF 디버깅 8건
+| # | 영역 | 해결 |
+|---|---|---|
+| **P1** | 평균주문금액 날짜변환 | formatPreviewValue에 fieldLabel 키워드 판정 추가 (금액→숫자, 생일→날짜). CustomerDBModal "이름" 하드코딩→동적 |
+| **P2** | 개인화/특수문자 커서 위치 | AutoSendFormModal+DirectSendPanel에 onSelect 커서 추적 + selectionStart 기반 삽입 |
+| **P3** | 예약취소 미표시 | 미확정 draft DELETE 처리 + campaigns.ts/results.ts sent_count=0 제외조건 제거 |
+| **P4** | 상세내역 시간 라벨 | "요청시간"→"등록일시", "발송시간"→"발송일시" |
+| **P5** | 취소건 파란색 | cancelled 건 발송일시 회색+취소선+(예약취소) 표기 |
+| **P6** | 캘린더 테스트탭 | 요약탭에서만 표시 + 무료/만료 사용자 잠금 |
+| **P7** | 자동발송 이력 통계 | 알림류 run INSERT에 success_count 즉시 기록 (sync 대상 아님) |
+| **P8** | AI문구 영문변수 | AutoSendFormModal personalFields 영문key→한글displayName 변환 |
+
+#### AI 문안 생성 프롬프트 대규모 고도화 (3차 튜닝)
+- BRAND_SYSTEM_PROMPT 전면 개편 — 실전 마케팅 기법 반영
+- **뻔한 표현 금지 목록:** "안녕하세요", "특별한 소식", "준비했어요" 등 상투적 표현 금지
+- **실전 기법 7가지:** 알림형식 차용, 고객한정 특별감, 호기심 유발, 시의성, 제품 어필, 개인화 고도 활용, 혜택 구조화
+- **variant별 도입부 완전 분리:** 감성형(계절감) / 혜택강조(첫줄 숫자) / MZ(호기심 질문)
+- **LMS 적정 길이:** 600~1200바이트 권장, 300바이트 미만 실격
+- **계절감 + 월별 이벤트** 반영 필수
+- campaigns 실발송 성공 문안 자동 조회 → 프롬프트 few-shot 레퍼런스
+- ~~⚠️ 잔존 과제: 제미나이 대비 제품 사용 시나리오, 감각적 표현 부족~~ → **D121에서 4차/5차 프롬프트 강화로 해결 완료**
+
+#### 수정 파일 총 14개
+- `AiPreviewModal.tsx` — 핸드폰 프레임 전면 리뉴얼
+- `DashboardHeader.tsx` — AI분석 + 캘린더 메뉴 제거
+- `ResultsModal.tsx` — 캘린더 버튼 + 스팸필터 MessageCell + 메시지 모달 핸드폰 프레임 + P4/P5/P6
+- `CalendarModal.tsx` — embedded prop 추가
+- `CustomerDBModal.tsx` — P1 하드코딩 제거 + fieldLabel 전달
+- `formatDate.ts` — P1 formatPreviewValue fieldLabel 키워드 판정
+- `AutoSendFormModal.tsx` — P2 커서위치 삽입 + P8 personalFields 한글변환
+- `DirectSendPanel.tsx` — P2 커서위치 삽입
+- `Dashboard.tsx` — P3 DELETE + P6 캘린더 props 전달
+- `companies.ts` (백엔드) — 080 opt_out_080_number 동기화
+- `campaigns.ts` (백엔드) — P3 draft DELETE + sent_count 조건 제거
+- `results.ts` (백엔드) — P3 sent_count 조건 제거
+- `auto-campaign-worker.ts` (백엔드) — P7 알림 run success_count
+- `ai.ts` + `routes/ai.ts` (백엔드) — AI 프롬프트 고도화 + 레퍼런스 문안 자동 조회
+- `flyers.ts` (백엔드) — 전단AI user_id 격리
+
+#### 전단AI 사업 확장 회의
+- 회의록: `status/전단AI_회의록_20260414.docx`
+- 설계서: `status/FLYER-EXPANSION-DESIGN.md`
+- 4단계: 수신자별 단축URL → 인쇄용 전단 → 장바구니/주문 → POS 자동 생성
+- 목표: 마트 2,000개+, 월 순수익 1.4억원
+
+---
+
+### 🔧 D119 — 0413 직원검수 7건 + 전단AI 흰화면 + 모바일DM 빌더 신규 (2026-04-13) — ✅ 배포완료
+
+> **배경:** 직원 디버깅 PPT(한줄로_20260413.pptx) 7건 수정 + 전단AI 로그인 흰화면 + 총판모달 스크롤 + **모바일DM 빌더 신규 기능 (프로 요금제 이상)**
+
+#### 한줄로AI 버그 수정 7건
+| # | 영역 | 원인 | 해결 |
+|---|---|---|---|
+| **#1** | 고객DB 커스텀필드 날짜값 숫자처리 | CustomerDBModal에서 인라인 `Number().toLocaleString()` 사용 → YYYYMMDD 날짜에 쉼표 | formatPreviewValue 컨트롤타워 교체 + formatNumericLike에서 YYYYMMDD/YYMMDD → 날짜 문자열 반환 (백엔드 format-number.ts 동기화) |
+| **#2** | 스팸필터 이력에 문안 미표시 | ResultsModal 테이블에 "문안" 컬럼 자체 없음 (API는 content 이미 제공) | 문안 컬럼 추가 (30자 truncate + title) |
+| **#3** | (광고)+080 표기 누락 | `!isAd \|\| !optOutNumber`이면 통째로 안 붙임 → 080 미할당 계정 전부 누락 | `!isAd`만 체크 + 080 없어도 (광고)+무료거부 부착 (프론트 buildAdMessageFront + 백엔드 buildAdMessage + AutoSendFormModal getAdSuffix) |
+| **#4** | 직접발송 리스트 없이 스팸테스트 | directRecipients[0] undefined → target-sample.ts가 DB 임의 고객 반환 | DirectSendPanel에서 리스트 0건이면 토스트 + 차단 |
+| **#5** | 회신번호 취소 시 다른 타겟수 취소건 | draft→cancelled 전환 후 sent_count=0인 건이 캘린더/최근캠페인에 표시 | `NOT (status='cancelled' AND COALESCE(sent_count,0)=0)` 조건 추가 |
+| **#6** | 자동발송 AI문구추천 개인화 미적용 | 프론트 `personalFields` → 백엔드 `personalizationVars` 키 불일치 | ai.ts에서 `personalFields` destructure + fallback |
+| **#7** | 자동발송 회신번호 AI모드 선택 불가 | AI모드 발신번호 select에 `__individual__` 옵션 없음 + validation에 `useIndividualCallback` 체크 누락 | 양쪽 추가 |
+
+#### 전단AI 수정
+- **로그인 흰 화면:** App.tsx `useState(showMore)`가 조건부 return 뒤에 선언 → React Hooks 규칙 위반. 조건부 return 전으로 이동
+- **총판/매장 등록·수정 모달 4개:** `max-h-[90vh] flex flex-col` + 본문 `overflow-y-auto` + 버튼 `shrink-0 border-t` 하단 고정
+
+#### 모바일 DM 빌더 (신규 — 프로 요금제 이상)
+- **DB:** `dm_pages` + `dm_views` 테이블, `plans.dm_builder_enabled` 컬럼
+- **백엔드 CT:** `utils/dm/dm-builder.ts` (CRUD+발행+추적+통계), `utils/dm/dm-viewer.ts` (공개 뷰어 HTML)
+- **백엔드 라우트:** `routes/dm.ts` (인증 CRUD+이미지업로드) + `routes/flyer/short-urls.ts`에 DM 공개 뷰어 합류 (`/dm-:code`)
+- **프론트:** `DmBuilderPage.tsx` (3컬럼 레이아웃), App.tsx `/dm-builder` 라우트, DashboardHeader "모바일DM" 메뉴
+- **기능:** 이미지/동영상/텍스트카드/CTA카드 4종 레이아웃, 상단 4종(로고/풀배너/카운트다운/쿠폰), 하단 4종(고객센터/CTA버튼/SNS/프로모코드)
+- **발행 URL:** `https://hanjul-flyer.kr/dm-코드` (Nginx 수정 없이 기존 프록시 활용)
+- **열람 추적:** `?p=전화번호` 파라미터로 고객별 페이지 도달/체류시간 추적
+
+---
+
+### 🔧 D114 — 0410 PDF 버그 10건 + 신규 기능 1건 (2026-04-12) — ✅ 배포완료
+
+> **배경:** 4/13 레거시 이관 직후. 직원 검수 PDF(한줄로_20260410.pdf) 11건 중 P11(스팸테스트 불안정 — 서버 확인 결과 테스트폰 앱 상태 문제로 코드 이슈 아님) 제외 10건 수정 + 엑셀 다운로드 신규 기능.
+
+#### 해결 항목 (10건)
+| # | 영역 | 근본 원인 | 해결 |
+|---|---|---|---|
+| **P1** | 고객 전체삭제 후 업로드 충돌 | delete-all이 customer_field_definitions/customer_stores/unsubscribes/customer_schema 미정리 | 4개 테이블 삭제 + customer_schema 초기화 추가 |
+| **P2** | 매핑 충돌 덮어쓰기 실패 | 고객 0명인데도 error 모달 표시 | 고객 0명이면 warning으로 격하 (3가지 충돌 타입 전부) |
+| **P3** | 수신거부 사용자 간 공유 | company_user 업로드 시 회사 전체 sms_opt_in=false 대상 INSERT | store_code 필터 추가 (본인 브랜드 범위만) |
+| **P4** | 직접발송 숫자 구분자 미적용 | 주소록 기타1/2/3 치환 시 formatNumericLike 미적용 | replaceVariables 0단계에 formatNumericLike 적용 |
+| **P5b** | 맞춤한줄 필드명 영문 출력 | RecommendTemplateModal에서 field key 그대로 표시 | FIELD_KEY_DISPLAY_MAP 컨트롤타워 + 한글 변환 |
+| **P6** | 자동발송 AI문안 알림 2건 중복 | runMessageGeneration에 잠금 없음 → 1분 간격 워커가 동일 캠페인 2번 픽업 | generating_at 컬럼 + 원자적 UPDATE RETURNING 잠금 |
+| **P7** | 자동발송 AI문안 변수 미치환 | personal_fields가 field key(['name']) → AI가 %name% 생성 → 매칭 실패 | getFieldByKey→displayName 변환 (['고객명']) |
+| **P8** | 자동발송 실행이력 3건 | 알림/스팸 run target_count=0 + 시간 불일치 + 실패건 성공 표시 | 건수 기록 + started_at 추가 + success_count=0 초기 + sync 연동 |
+| **P9** | 슈퍼관리자 고객사 고객 수 0 | companies.ts 목록 SELECT에 total_customers 서브쿼리 없음 | COUNT(*) 서브쿼리 추가 |
+| **P10** | 발송통계 엑셀 다운로드 (신규) | 기능 미존재 | admin.ts CSV 엔드포인트 + fetch+blob 다운로드 |
+
+#### DDL (실행 완료)
+```sql
+ALTER TABLE auto_campaigns ADD COLUMN IF NOT EXISTS generating_at TIMESTAMPTZ;
+```
+
+#### 수정 파일 (12개)
+customers.ts, upload-mapping-validator.ts, companies.ts, upload.ts, messageUtils.ts, auto-campaign-worker.ts, campaign-lifecycle.ts, AutoSendPage.tsx, RecommendTemplateModal.tsx, formatDate.ts, admin.ts, AdminDashboard.tsx
+
+#### 핵심 교훈 (D114)
+> 1. **전수 점검 3회 반복 — 매회 추가 발견.** 1차: 기본 수정. 2차: customer_stores 누락 + label_moved severity + CSV 이스케이핑 + window.open 인증 미전달 4건. 3차: spam_tested run target_count/started_at 미포함 1건. **처음부터 끝까지 데이터 흐름 추적하지 않으면 반드시 빠짐.**
+> 2. **SCHEMA.md 맹신 금지.** spam_filter_tests의 sms_table/sms_msgkey/started_at 컬럼이 SCHEMA.md에는 있지만 실제 DB에 없었음. 서버 `\d` 명령으로 실제 구조 확인 필수.
+> 3. **window.open은 Authorization 헤더를 보내지 않음.** 인증 필요 API의 파일 다운로드는 반드시 fetch+blob 패턴 사용.
+
+---
+
+### 🔧 D111 — 0408 검수 9건 + 오픈 전 결정사항 2건 (2026-04-09) — ✅ 배포완료
+
+> **배경:** 4/13 레거시 이관 D-4. 0408 직원 검수리스트/PDF 지적 9건 + 오픈 전 결정사항(업로드 매핑 충돌 / 소수점 포맷) 2건을 한 세션에 전수 수정. 컨트롤타워 원칙 + 매트릭스 전수 점검으로 재발 차단.
+
+#### 신규 컨트롤타워 (6개)
+| 컨트롤타워 | 역할 |
+|---|---|
+| `utils/session-manager.ts` | 세션 무효화/생성 단일 진입점. `app_source`(hanjul/flyer/super) 분리로 전단AI와 한줄로 공존 + 같은 앱 내 단일 세션 강제 |
+| `utils/campaign-validation.ts` | 과거 예약 차단 `validateScheduledAt()` — 파싱/과거/최대 365일 검증. POST `/`, `/direct-send`, PUT `/:id/reschedule` 3곳 통합 |
+| `utils/format-number.ts` (+ frontend `formatDate.ts` 동일 함수) | `formatNumericLike()` — 정수/소수 자동 포맷. trailing zero 제거, 전화번호/YYMMDD 제외. 백/프론트 완전 동일 규칙 |
+| `utils/upload-mapping-validator.ts` | 업로드 매핑 충돌 검증 `validateUploadMapping()`. 충돌 4종(slot_label/slot_type/label_moved/label_duplicate) × 해결 4종(유지/덮어쓰기/이동/취소) |
+| `standard-field-map.ts` `applyFieldAliases()` | FIELD_MAP aliases(`name:['이름','성함']`) 자동 주입 — `extractVarCatalog` 최종 반환 전 호출하여 모든 회사 자동 혜택 |
+| `components/NameEmptyWarningModal.tsx` / `UploadMappingConflictModal.tsx` | 재사용 가능 프론트 모달 2개 신설 |
+
+#### 해결 항목 (PDF 9건 + 결정사항 2건)
+| # | 영역 | 근본 원인 | 해결 |
+|---|---|---|---|
+| **P0** | 계정 중복접속 차단 | D100에서 "전단AI 401 방지"를 위해 5개 세션 허용했던 것이 "3명 동시 로그인 허용"으로 남음 | session-manager.ts + `app_source` 컬럼으로 서비스 분리. hanjul 1세션 + flyer 1세션 공존. 로그인 3곳(frontend/company-frontend/flyer-frontend) appSource 전달 + useSessionGuard storage 이벤트로 즉시 감지 |
+| **P2** | isoi 직접발송 `%이름%` NULL | customer_schema.field_mappings 비어있는 회사에서 FIELD_MAP fallback 시 displayName('고객명')만 등록 → `%이름%` 매칭 실패 → 안전망이 빈값 치환 | 4단계 방어: (1) FIELD_MAP.aliases + applyFieldAliases (2) replaceVariables 폴백 — customer.name 비면 addressBookFields.name 사용 (3) NameEmptyWarningModal — 프론트 경고 (4) 직접발송 + 직접타겟발송 양쪽 |
+| **P3** | 맞춤한줄 발송확정 (광고)+080 중복 | Dashboard.tsx 1968(미리보기) + 1664(실발송 body) 2곳 모두 `isAd={isAd}` Dashboard 전역 state 사용 → 맞춤한줄 Step 3에서 사용자 토글한 `customSendData.isAd` 무시 | 2곳 전부 `customSendData.isAd ?? false`로 변경 (미리보기와 실발송 동일) |
+| **P4** | 예약대기 race condition + 과거 예약 orphan | (1) onClick 핸들러가 state 초기화 없이 fetch → 응답 도착 순서 역전 시 덮어쓰기 (2) D110 UNION ALL 승격 시 outer `ORDER BY seqno`가 inner alias `idx`와 충돌 → MySQL 에러 → 0건 (3) POST /, direct-send, reschedule에 과거 예약 차단 검증 전무 (4) 기존 32건 orphan draft 누적 | (1) `latestSelectedIdRef` + 4곳 race guard + state 선초기화 (2) **`smsSelectAll` 컨트롤타워에 alias 자동 재작성** — `extractAliasMap` + `rewriteSuffixWithAliases` → outer suffix의 raw 컬럼명을 자동으로 inner alias로 치환 (3) campaign-validation.ts 신설 + 호출부 3곳 적용 (4) orphan 32건 서버에서 일괄 cancelled 처리 |
+| **P5** | 자동발송 사전알림 (광고) 누락 | CT-B `buildPreNotifyMessage`/`buildAiGeneratedNotifyMessage`/`buildSpamTestResultNotifyMessage` 3개 빌더가 `messageContent`를 순수 본문 그대로 push — buildAdMessage 호출 없음 | CT-B에 `isAd`/`opt080Number`/`messageType` 파라미터 추가 + `applyAdAndSanitize()` 내부 헬퍼 신설. auto-campaign-worker 호출부 3곳에서 `getOpt080Number` 조회 후 전달 |
+| **P6** | 자동발송 스팸결과 "통과 통과" 중복 | auto-campaign-worker가 `'통과 ✓'`를 spamResultLabel로 넘기는데, CT-B 빌더가 `.replace(/✓/g, '통과')` → `통과 통과` 중복 | 호출부 라벨 `'통과'/'차단'` 단순화 + 빌더 replace 제거 (sanitize strip만 유지) |
+| **E1** | 직접타겟발송 gender 'F' 노출 | TargetSendModal.tsx + DirectTargetFilterModal.tsx에 D109 이전의 인라인 `GENDER_DISPLAY_MAP`/`isGenderField` 하드코딩이 잔존 → D109 `FRONT_FIELD_DISPLAY_MAP` 컨트롤타워 미사용 | 인라인 하드코딩 2곳 전부 삭제 → `FRONT_FIELD_DISPLAY_MAP`/`reverseDisplayValueFront` 호출로 통합 |
+| **E2** | 자동발송 시간 불일치 | `calcNextRunAt` 로직이 `routes/auto-campaigns.ts` + `utils/auto-campaign-worker.ts` **2곳에 동일 코드 중복** — 한쪽 수정 시 불일치 재발 위험 | worker 하나로 통합 `export` + routes에서 import. 워커 주기 1분 + 정각 align 유지 |
+| **E3** | 캘린더 취소 이력 미표시 | D100에서 `cancelled/draft` 둘 다 캘린더 기본 제외 처리 — 취소 이력 확인 불가 | `draft`만 제외하도록 변경 (CalendarModal은 이미 cancelled 스타일/취소사유 렌더링 준비됨) |
+| **①** | 업로드 매핑 충돌 | AI 자동 매핑이 회차마다 같은 헤더를 다른 custom_N 슬롯에 배정 가능 + CT-07이 `ON CONFLICT DO UPDATE` 라 기존 라벨/타입 조용히 덮어씀 → 기존 고객과 신규 고객의 custom_fields 의미 불일치 → 타겟팅 오류 | upload-mapping-validator.ts + `POST /api/upload/validate-mapping` + UploadMappingConflictModal 신설. 업로드 흐름: parse → mapping → **validate-mapping** → save |
+| **②** | 숫자/소수점 포맷 미리보기 vs 실발송 불일치 | 백엔드 `replaceVariables`는 `/\d+\.\d+/` (소수점 필수) 패턴 → 정수 `50000` 감지 못함 → 쉼표 없이 발송. 프론트 formatPreviewValue는 정수도 감지 → 미리보기만 쉼표 | `formatNumericLike()` 컨트롤타워 백/프론트 동일 신설. messageUtils + formatPreviewValue + formatNumberPreview 3곳 통합. 규칙: 정수 그대로 / trailing zero 제거 / 유효 소수 보존 / 전화번호 / YYMMDD / YYYYMMDD 제외 |
+
+#### DB 마이그레이션
+```sql
+ALTER TABLE user_sessions ADD COLUMN IF NOT EXISTS app_source VARCHAR(20) NOT NULL DEFAULT 'hanjul';
+CREATE INDEX IF NOT EXISTS idx_user_sessions_user_app_active ON user_sessions(user_id, app_source) WHERE is_active = true;
+
+-- orphan draft 32건 정리
+UPDATE campaigns SET status='cancelled', cancel_reason='D111 P4: 과거 예약 orphan draft 일괄 정리'
+WHERE scheduled_at IS NOT NULL AND scheduled_at < NOW() AND status='draft';
+```
+
+#### 핵심 교훈 (D111)
+> **1. "동일 로직 2곳 이상 = 즉시 컨트롤타워" 원칙 또 적용됨.** `calcNextRunAt`이 routes/utils 2곳에 중복돼 있었고 한쪽 수정 시 불일치 위험. D110의 `smsSelectAll` UNION ALL 승격 시 호출부의 `ORDER BY seqno`/`ORDER BY msg_instm` 같은 raw 컬럼명 참조가 inner alias와 충돌 — **컨트롤타워가 alias 매핑을 자동 추출해서 suffix를 재작성하도록** 근본 수정. 호출부 땜질 3건은 전부 revert.
+>
+> **2. "설계 → 컨펌 → 전수 파악 → 구현 → 검증" 프로세스 재확인.** P3 수정 시 미리보기 prop 1줄만 고치고 "완료" 하려다 실발송 body도 같은 버그 있었음을 Harold님이 재현하시면서 발견. 이후 isAd 관련 호출부 매트릭스 전수 grep 후 2곳 동시 수정.
+>
+> **3. 자연어 "우기는" 행동 절대 금지.** 제가 배포 여부를 Harold님 기억보다 제 추측으로 판단해서 "배포 안 된 것 같다"고 우겼다가 서버 확인 결과 D111 완전 반영 상태였음. 서버 조회 명령어 먼저 안내하고 결과 기반으로 판단하는 원칙 철저 준수.
+>
+> **4. 5개 발송 경로 × 데이터 출처 매트릭스 유효.** D109에 이어 D111도 매트릭스 전수 점검으로 잔존 인라인(TargetSendModal/DirectTargetFilterModal의 GENDER_DISPLAY_MAP) 발견. 신규 컨트롤타워 만든 후 반드시 `grep -rn` 으로 기존 인라인 잔존 확인 필수.
+>
+> **5. 이관 D-4 리스크 관리.** 4/13 레거시 이관 전 마지막 세션이라 Harold님 예민도 극대. 땜질/대강 훑기 절대 금지, 컨트롤타워 + 전수 + 근본 원칙 철저히. 내일~12일까지 직원 자체 검증, 12일 코드 동결 추천.
+
+#### 산출물
+- **`status/한줄로_업데이트_검증가이드_2026-04-09.docx`** — 직원 검증용 Word 문서. 마지막 결정사항 2건(업로드 매핑 충돌 / 숫자 포맷)에 대한 수정 내용 + 5단계 검증 체크리스트. 표지+1번+2번+보고방법 4섹션.
+
+---
+
+### 🔧 D110 — 캠페인 결과조회 버그 + CT-04 전면 UNION ALL 최적화 (2026-04-08) — ✅ 코드수정완료, 배포완료
+
+> **배경:** 슈퍼관리자 "캠페인내역 조회" 모달에서 완료된 캠페인 상세 조회 시 0건으로 나오는 버그 발견. 근본 원인은 `admin.ts sms-detail` 라우트가 `FROM SMSQ_SEND` 단일 테이블에 하드코딩되어 있어 QTmsg Agent가 완료 처리 후 LOG 테이블(`SMSQ_SEND_X_YYYYMM`)로 이동시킨 데이터를 못 찾는 것. 단순 버그 수정 후 Harold님 지시로 **발송·결과 양쪽 경로 전체 성능 재검토 + CT-04 전면 UNION ALL 승격**까지 확장.
+
+#### 📌 버그 (B-D110-01) — 캠페인 상세 조회 0건
+- **현상:** 슈퍼관리자 발송통계 화면의 [조회] 클릭 시 "발송 내역이 없습니다" 표시 (완료된 캠페인)
+- **원인:** `packages/backend/src/routes/admin.ts:1534,1540` — `FROM SMSQ_SEND` 단일 테이블 하드코딩 (CLAUDE.md 4-2 하드코딩 금지 위반)
+- **확인 절차:** QTmsg Agent가 rsv1=5 완료 처리 시 LIVE 테이블(SMSQ_SEND_X) → LOG 테이블(SMSQ_SEND_X_YYYYMM)로 이동. 완료 캠페인은 LOG에만 존재
+- **해결:** `getCampaignSmsTables(companyId, refDate, userId)` CT-04 신설 — 해당 회사 라인그룹 LIVE(1~2개) + 발송월 LOG(1개) = **O(2~3) 테이블만** 조회. `smsCountAll` + `smsSelectAll` 컨트롤타워로 교체. 카카오 인라인 쿼리도 `kakaoCountWhere` + `kakaoSelectWhere`로 교체
+
+#### 🚀 성능 최적화 — CT-04 전면 UNION ALL 승격
+
+Harold님 지시: **"고객사가 늘어나도 가장 최적의 속도를 보장할 수 있도록 발송 및 결과 둘 다 체크해보도록하자"**
+
+**기존 CT-04 helper의 문제:**
+- `smsCountAll` / `smsAggAll` / `smsSelectAll` / `smsMinAll` 모두 **for 루프 N회 쿼리** (N = 회사 라인그룹 테이블 수)
+- `results.ts`에는 이미 UNION ALL 기반 `smsUnionCount`/`smsUnionSelect`/`smsUnionGroupBy` 로컬 함수가 있었음 — 검증된 패턴
+- 그러나 CT-04는 미승격 → 같은 패턴 중복
+
+**승격/신설 컨트롤타워 (sms-queue.ts):**
+
+| 함수 | 이전 | 이후 |
+|------|------|------|
+| `smsCountAll` | for 루프 N쿼리 | **UNION ALL 단일 쿼리** (SUM 외곽) |
+| `smsAggAll` | for 루프 N쿼리 | **UNION ALL 단일 쿼리** + JS 합산 |
+| `smsSelectAll` | for 루프 N쿼리 | **UNION ALL 단일 쿼리** + `_sms_table` 리터럴 보존 |
+| `smsMinAll` | for 루프 N쿼리 | **UNION ALL 단일 쿼리** (MIN 외곽) |
+| `smsGroupByAll` (신규) | results.ts 로컬 | **CT-04 승격** — UNION ALL + GROUP BY |
+| `smsBatchAggByGroup` (신규) | 없음 | **다중 campaign_id IN + GROUP BY 배치 집계** (sync-results 루프 최적화용) |
+| `getCampaignSmsTables` (신규) | 전역 스캔 | **회사 LIVE + 발송월 LOG = O(2~3)** |
+| `kakaoCountWhere` (신규) | results.ts 로컬 | CT-04 승격 |
+| `kakaoSelectWhere` (신규) | results.ts 로컬 | CT-04 승격 |
+| `kakaoGroupBy` (신규) | 없음 | 카카오 범용 GROUP BY |
+| `kakaoBatchAggByGroup` (신규) | 없음 | 카카오 다중 REQUEST_UID 배치 집계 |
+
+**whereClause 규약 유연화:** 모든 helper에 `normalizeWhere()` — `"WHERE ..."` 접두사 유무 자동 수용 (호출부 규약 차이 흡수)
+
+#### 🔄 sync-results 루프 배치화 (campaign-lifecycle.ts)
+
+**기존:**
+```
+for (const run of runs) {
+  smsAggAll(runTables, ..., [run.campaign_id])  // N개 run × N개 테이블 = N² 쿼리
+  kakaoAgg('REQUEST_UID = ?', [run.campaign_id]) // N개 쿼리
+}
+```
+
+**개선:**
+```
+회사/유저 조합별 그룹핑 → smsBatchAggByGroup(tables, 'app_etc1', aggFields, [id들])  // 1~2 쿼리
+kakaoBatchAggByGroup(allIds)  // 카카오 전체 1 쿼리
+for (const run of runs) { smsAggMap.get(run.campaign_id) ... }  // 메모리 조회
+```
+
+**쿼리 수: O(N²) → O(1)** — 고객사 수/캠페인 수 무관
+
+#### 📋 수정 파일 요약
+
+| 파일 | 변경 |
+|------|------|
+| `packages/backend/src/utils/sms-queue.ts` | CT-04 helper UNION ALL 재작성, 신규 함수 7개 추가 (`getCampaignSmsTables`, `smsGroupByAll`, `smsBatchAggByGroup`, `kakaoCountWhere`, `kakaoSelectWhere`, `kakaoGroupBy`, `kakaoBatchAggByGroup`), `getAllSmsTablesWithLogs` (사용 안함 유지) |
+| `packages/backend/src/routes/admin.ts` | sms-detail 라우트 — `getCampaignSmsTables` + `smsCountAll`/`smsSelectAll`, 카카오는 `kakaoCountWhere`/`kakaoSelectWhere`. 1186/1331 테스트 통계는 `getTestSmsTables()` + `smsAggAll`/`smsSelectAll` |
+| `packages/backend/src/routes/manage-users.ts` | 임시비밀번호 SMS INSERT — `SMSQ_SEND` 하드코딩 → `getAuthSmsTable()` 동적 조회 (시스템 SMS는 auth 라인 사용) |
+| `packages/backend/src/routes/billing.ts` | `getBillingCompanyTables`/`getBillingTestTables` 자체 헬퍼 → CT-04 `getCompanySmsTables`/`getTestSmsTables` 래퍼 + `getBillingLogTables`는 information_schema REGEXP로 변경 |
+| `packages/backend/src/utils/campaign-lifecycle.ts` | `syncCampaignResults` 루프 → 배치 집계 (AI runs + 직접발송 양쪽). `smsAggAll`/`kakaoAgg` import 제거 |
+| `packages/backend/src/routes/results.ts` | 로컬 `smsUnionCount`/`smsUnionGroupBy`/`kakaoCountWhere`/`kakaoSelectWhere` 제거, CT-04 import로 교체. `smsUnionSelect`만 호환 래퍼로 유지 (ORDER BY/LIMIT 후미구문 호환) |
+
+#### 📊 확장성 결과
+
+| 시나리오 | 이전 | 이후 |
+|---|---|---|
+| 캠페인 1건 상세 조회 | 27 테이블 × 2 = 54 쿼리 | **1 쿼리** (UNION ALL 2~3 테이블) |
+| 회사 1곳 sync (N runs) | N runs × 2 쿼리 = 2N | **1~2 쿼리** (회사당 + 카카오 1) |
+| 대시보드 차트 1건 | 이미 UNION ALL (기존) | 동일 (CT-04로 승격) |
+| 발송 70만건 | 140 배치 bulk INSERT (기존) | 동일 (변경 없음) |
+
+**고객사 1개 → 1000개로 확장되어도 단일 캠페인 조회 쿼리 수는 일정.**
+
+#### ⚠️ 배포 주의
+- **tp-push + tp-deploy-full 미실행 상태** (Harold님 오늘 밤 배포 계획)
+- 배포 후 전지영 주임님 기보 건과 무관, 버그 수정은 즉시 배포 필요
+
+#### 핵심 교훈 (D110 — 컨트롤타워 반복 승격)
+
+> **1. "동일 로직이 2곳 이상 = 즉시 컨트롤타워" 원칙이 또 적용됨.** `results.ts`가 이미 UNION ALL 패턴을 로컬로 검증해두고 있었는데 CT-04 미승격 → admin.ts/campaign-lifecycle.ts가 옛 for 루프 패턴을 그대로 씀 → 성능 격차. **검증된 로컬 패턴은 즉시 컨트롤타워로 승격해야 확장 이득이 발생.**
+>
+> **2. 하드코딩 테이블명(`SMSQ_SEND`)은 "숨어 있는 지뢰".** CLAUDE.md 4-2에 명시된 원칙이지만 admin.ts에 여전히 존재 → B-D110-01로 실화. 신규 파일 작성 시 `grep -rn "SMSQ_SEND"` 정기 스캔 필요.
+>
+> **3. "전역 스캔" 함수는 확장성 킬러.** 초기 수정 시 `getAllSmsTablesWithLogs()` (회사 무관 전역) 만들었다가 속도 저하 체감 → `getCampaignSmsTables(companyId, refDate, userId)` (해당 회사 발송월만)로 재설계. **캠페인 단일 조회는 항상 회사 + 발송월 기준으로 좁혀야 함.**
+>
+> **4. Promise.all 병렬화보다 UNION ALL 단일 쿼리가 상위.** Promise.all은 여전히 N회 왕복 + 커넥션 풀 점유. UNION ALL은 1회 왕복. 단, 호출부 규약(`WHERE` 접두사 유무)을 흡수하는 `normalizeWhere()` 필수.
+
+---
+
+### 🔧 D109 — 0406+0407 PDF 버그 + 검수리스트 일괄 처리 (2026-04-07) — ✅ 배포완료
+
+> **배경:** 직원 검수리스트 + PDF 버그리포트 2일치(0406, 0407) 13건을 한 번에 잡음. 핵심은 컨트롤타워화 — 인라인 중복 함수 7개를 컨트롤타워 4개로 통합 + 백엔드 데이터 출처 시점 enum 변환으로 표시 경로 자동 정상화.
+
+#### 신규 컨트롤타워 (8개)
+| 컨트롤타워 | 위치 | 효과 |
+|-----------|------|------|
+| `CAMPAIGN_OPT080_SELECT_EXPR` + `buildCampaignOpt080LeftJoin()` | unsubscribe-helper.ts (CT-03 확장) | 캠페인 SELECT 8곳에 user/company 080번호 LEFT JOIN — alias 가변 (자동발송 'ac' 지원) |
+| `formatCampaignMessageForDisplay()` + `stripAdParts()` | formatDate.ts (frontend) | 표시용 메시지 컨트롤타워 — D103 위반 데이터(message_content에 (광고)/무료거부 박힌 케이스) 정규화 후 is_ad에 따라 재부착 |
+| `FIELD_DISPLAY_MAP` + `reverseDisplayValue()` | standard-field-map.ts (backend) | DB enum 값(gender F/M) → 표시 한글(여성/남성) 역변환 — 향후 enum 필드 추가 시 한 곳만 수정 |
+| `FRONT_FIELD_DISPLAY_MAP` + `reverseDisplayValueFront()` | formatDate.ts (frontend) | 백엔드 FIELD_DISPLAY_MAP과 동기화 |
+| `replaceVarsByFieldMeta()` | formatDate.ts | FieldMeta[] 기반 변수 치환 (DirectPreviewModal/TargetSendModal 인라인 통합) |
+| `replaceVarsBySampleCustomer()` | formatDate.ts | sampleCustomer(displayName 키) 기반 + aliasMap 옵션 (AiCampaignResultPopup/AiPreviewModal 인라인 통합) |
+| `fetchTargetSampleCustomer()` (CT-A) | utils/target-sample.ts | 자동발송 미리보기/스팸테스트 첫 고객 조회 단일 진입점 — store_code 격리 + 수신거부 제외 자동 |
+| `buildAiGeneratedNotifyMessage()` / `buildPreNotifyMessage()` / `buildSpamTestResultNotifyMessage()` + `sanitizeSmsText()` (CT-B) | utils/auto-notify-message.ts | 자동발송 담당자 알림 빌더 — dingbats/이모지 자동 제거 + 옵션 A(=== 가로선) 디자인 |
+
+#### 해결 항목 (PDF 13건 + 검수리스트)
+| # | 영역 | 근본원인 | 해결 |
+|---|------|---------|------|
+| **B1** | 맞춤한줄 MMS 이미지 첨부 누락 | AiCustomSendFlow에 MMS UI 자체 미구현 + Dashboard handleAiCustomSend의 mmsImagePaths 하드코딩 [] | UI 인라인 추가 (Step 2 + variant 카드 + 미리보기 모달 + 발송확정 모달 4곳) + Dashboard에서 props 전달 + mmsImagePaths 조건부 전달 |
+| **B2** | 발송결과 상세보기 (광고)+080 누락 | (1) 백엔드 results.ts SELECT에 opt_out_080_number 누락 (2) 호출부 7곳이 callback_number를 4번째 인자로 잘못 전달 (3) ResultsModal 794줄 buildAdMessageFront 미적용 (4) frontend buildAdMessageFront에 idempotent 처리 누락 → 중복 부착 발생 | 백엔드 SELECT 8곳에 LEFT JOIN 추가 + formatCampaignMessageForDisplay 컨트롤타워 + stripAdParts 정규화 + buildAdMessageFront idempotent 추가 |
+| **B3** | 캘린더 광고 미표기인데 (광고)+080 자동기입 | direct-send INSERT 컬럼에 `is_ad` 자체가 누락 → 항상 false로 저장 + D103 위반 데이터(message_content에 (광고) 박힌 캠페인) | direct-send INSERT에 is_ad 컬럼 추가 + stripAdParts로 표시 시점 정규화 |
+| **B8** | 슈퍼관리자 발송통계 일/월 뒤바뀜 | `setStatsView(key); setTimeout(() => loadSendStats(1), 0)` — React state batched 라 setTimeout 안에서도 statsView가 stale | `loadSendStats(page, viewOverride)` 시그니처 + `loadSendStats(1, key)` 명시 전달 |
+| **검수 UX** | 캠페인 확정 후 변수 직관성 부족 | 변수 위치 vs 머지 결과를 동시에 못 봄 | `mergeAndHighlightVars()` 신설 + AiCampaignSendModal/AiCustomSendFlow 변수 강조 ↔ 머지 결과 토글 |
+| **0407-1** | 직접타겟발송 성별(여성) `F` 출력 | 5개 발송 경로 × 데이터 출처 4곳에서 enum 'F'/'M'을 한글로 역변환하지 않음. frontend 인라인 replaceVars 7곳이 산재 | (1) backend ai.ts:recommend-target + customers.ts:/extract + customers.ts:/enabled-fields + target-sample.ts 4곳에서 데이터 응답 시점에 reverseDisplayValue 적용 → 한 곳만 수정해도 모든 frontend 표시 경로 자동 정상화 (2) frontend 인라인 replaceVars 7곳을 컨트롤타워 4개(`replaceVarsByFieldMeta` / `replaceVarsBySampleCustomer` / `replaceMessageVars` / `replaceDirectVars`)로 통합 |
+| **0407-2** | 맞춤한줄 매장/브랜드 수정 시 0명 | (1) ai.ts:recount-target에 minPurchaseAmount 처리 자체 누락 (2) 매장/구매기간/기타조건 등 자연어 필드는 백엔드 재파싱 불가 | 발송대상 카드 + 프로모션 카드 양쪽 수정 기능 제거 (read-only) → "변경하려면 이전 단계에서 새 브리핑" 안내. 변수 케이스 폭발 방지 |
+| **0407-3** | 맞춤한줄 LMS 제목 수정 미반영 | Dashboard.tsx:1632 `subject: variant.subject || ''` ← modalData.subject(사용자 수정값) 무시 | `subject: modalData.subject ?? variant.subject ?? ''` 우선순위 변경 |
+| **자동발송 5건** (B4~B7, 0407-4) | 자동발송 영역 | 직원 검증 예정 — Harold님 검증 범위 외 | (코드 수정 완료, 직원 검증 후 처리) |
+
+#### 자동발송 5건 코드 변경 요약 (직원 검증 대기)
+- **B4 자동발송 스팸필터 미리보기 개인화** — AutoSendFormModal에서 스팸필터 모달 직전 `POST /api/auto-campaigns/preview-sample` 호출 (CT-A 신설)
+- **B5 자동발송 스팸테스트 타겟 불일치** — auto-campaign-worker 인라인 SELECT 2곳 → CT-A로 통합 (store_code 격리 자동)
+- **B6 자동발송 알림 ?/이모지** — 알림 메시지 빌더 3곳 → CT-B 통합 (sanitizeSmsText로 dingbats 자동 제거)
+- **B7 자동발송 시간 지연** — 워커 주기 3분 → 1분 + 다음 분 0초 align
+- **0407-4 자동발송 AI 개인화 미적용** — auto_campaigns 테이블에 personal_fields TEXT[] 컬럼 추가 + INSERT/UPDATE/worker extraContext (`personalizationVars`) 전달
+
+#### DB 마이그레이션
+```sql
+ALTER TABLE auto_campaigns ADD COLUMN IF NOT EXISTS personal_fields TEXT[] DEFAULT NULL;
+```
+
+#### 수정 파일 (24개)
+**백엔드 (12)**
+- (신규) `utils/target-sample.ts` (CT-A), `utils/auto-notify-message.ts` (CT-B)
+- `utils/standard-field-map.ts` (FIELD_DISPLAY_MAP)
+- `utils/unsubscribe-helper.ts` (CAMPAIGN_OPT080_*)
+- `utils/messageUtils.ts` (replaceVariables enum 역변환)
+- `utils/auto-campaign-worker.ts` (인라인 SELECT 2곳→CT-A, 알림 3곳→CT-B, 워커 1분+정각, personalizationVars)
+- `utils/stats-aggregation.ts` (캠페인 SELECT opt_out_080)
+- `routes/results.ts` (캠페인 목록/상세 SELECT)
+- `routes/campaigns.ts` (캘린더/캠페인 상세 SELECT + direct-send is_ad INSERT)
+- `routes/admin.ts` (슈퍼관리자 통계 SELECT)
+- `routes/ai.ts` (recommend-target sampleCustomer enum 변환 + recount-target storeName contains/minPurchaseAmount)
+- `routes/auto-campaigns.ts` (preview-sample 라우트 + INSERT/UPDATE personal_fields)
+- `routes/customers.ts` (/extract + /enabled-fields enum 변환)
+
+**프론트엔드 (12)**
+- `utils/formatDate.ts` (formatCampaignMessageForDisplay/stripAdParts/replaceVarsByFieldMeta/replaceVarsBySampleCustomer/FRONT_FIELD_DISPLAY_MAP)
+- `utils/highlightVars.tsx` (mergeAndHighlightVars)
+- `components/ResultsModal.tsx` (3곳 컨트롤타워 호출)
+- `components/CalendarModal.tsx` (컨트롤타워 호출)
+- `components/AiCustomSendFlow.tsx` (MMS UI 4곳 + 머지 토글 + 발송대상 카드 read-only)
+- `components/AutoSendFormModal.tsx` (preview-sample 호출)
+- `components/AiCampaignSendModal.tsx` (머지 토글 + 인라인 통합)
+- `components/AiCampaignResultPopup.tsx` (인라인 통합)
+- `components/AiPreviewModal.tsx` (인라인 통합)
+- `components/DirectPreviewModal.tsx` (인라인 통합)
+- `components/TargetSendModal.tsx` (인라인 통합)
+- `pages/Dashboard.tsx` (handleAiCustomSend modalData.subject 우선 + mmsImagePaths 조건부)
+- `pages/AdminDashboard.tsx` (loadSendStats viewOverride + 컨트롤타워 호출)
+- `pages/AutoSendPage.tsx` (history 컨트롤타워)
+
+#### 핵심 교훈 (B+0407 — 매트릭스 전수파악)
+> **데이터 출처에서 변환하면 표시 경로 모두 자동 정상화.** frontend 표시 함수마다 enum 매핑을 추가하는 것보다, 백엔드 응답 시점에 한 번 변환하는 게 안전 + 컨트롤타워 효율 압도적.
+>
+> **인라인 함수 7곳 산재 = D106 재발 패턴.** 동일 로직이 2곳 이상이면 즉시 컨트롤타워 추출. 시간 없어서 인라인으로 빠르게 패치 = 다음 세션에 또 잡힘.
+>
+> **5개 발송 경로 × 데이터 출처 매트릭스로 한 번에 점검.** 한 경로씩 보면 또 빠짐. 매트릭스 = (한줄로AI / 맞춤한줄 / 직접발송 / 직접타겟발송 / 자동발송) × (미리보기 / 스팸필터 / 담당자테스트 / 실제발송) × (데이터 출처 API).
+
+---
+
+### 🔧 D108 — AI 분석 시각화 고도화 + BUSINESS 자동화 연계 + 예시 PDF (2026-04-04) — ✅ 배포완료
+
+> **배경:** PRO(기본분석)와 BUSINESS(상세분석)의 체감 차이가 텍스트 인사이트 개수 차이뿐이었음. 시각적 차트 + BUSINESS 전용 자동화 연계 버튼 + 시연용 예시 PDF로 고도화.
+
+#### 핵심 변경
+- **PRO 차트 6종 추가:** 가로바(채널 성공률), 히트맵(요일x시간), 도넛(채널비율), 스택바(성별/등급), 미니라인(수신거부), 스코어카드(종합점수)
+- **BUSINESS 차트 추가:** RFM 매트릭스, 퍼널(발송→성공→구매전환), 액션 타임라인
+- **BUSINESS 자동화 연계:** "이 타겟으로 캠페인 만들기" 버튼 → 분석 결과에서 AI 한줄로 자동 실행
+- **PRO 블러 배지:** 액션 버튼 자리에 "비즈니스 요금제에서 바로 실행 가능" 블러
+- **collectedData 응답 포함:** 프론트에서 차트용 원본 데이터 직접 접근
+- **히트맵 쿼리 추가:** 요일x시간 교차 성공률 데이터
+- **예시 PDF 2종:** PRO(122KB, 5p, 차트6종) + BUSINESS(145KB, 8p, 차트12종+RFM+퍼널+액션플랜)
+- **"고객 인사이트" → "AI 분석" 카드 교체:** 대시보드 하단 카드에서 AI 분석 맛보기 + 예시 리포트 다운로드 연결
+- **예시 리포트 다운로드:** AnalysisModal 분석 실행 전 화면 + 프리뷰 섹션(무료) 양쪽에 PRO/BUSINESS 예시 PDF 다운로드 버튼
+
+#### 수정 파일 (6개)
+| 파일 | 변경 |
+|------|------|
+| **(신규)** `AnalysisCharts.tsx` | 순수 SVG/CSS 차트 컴포넌트 9종 |
+| **(신규)** `public/sample_analysis_pro.pdf` | PRO 예시 리포트 (차트 포함) |
+| **(신규)** `public/sample_analysis_business.pdf` | BUSINESS 예시 리포트 (차트+RFM+퍼널+액션플랜) |
+| `analysis.ts` (백엔드) | collectedData 응답 포함 + 히트맵 쿼리 + actionItems 프롬프트 |
+| `AnalysisModal.tsx` | 차트 렌더링 + 액션 버튼 + 예시 PDF 다운로드 + keyMetrics/recommendations |
+| `Dashboard.tsx` | "고객 인사이트"→"AI 분석" 카드 교체 + onActionPrompt 콜백 |
+
+---
+
+### 🔧 D107 — AI 발송 템플릿 + DB 현황 디자인 리뉴얼 + 메시지 셀 컨트롤타워 (2026-04-04) — ✅ 배포완료
+
+> **배경:** 기존 "빠른 발송 예시" 하드코딩 4개 카드를 "AI 발송 템플릿" 시스템으로 고도화. DB 현황 카드 디자인 모던화. 발송 내역 메시지 셀 컨트롤타워화.
+
+#### 신규 컨트롤타워
+| 컨트롤타워 | 파일 | 효과 |
+|-----------|------|------|
+| `saveSegment()` | saved-segments.ts | 세그먼트 저장 (20개 제한) |
+| `getSegments()` | saved-segments.ts | 목록 조회 (최근 사용순) |
+| `updateSegment()` | saved-segments.ts | 세그먼트 수정 (소유자 확인) |
+| `deleteSegment()` | saved-segments.ts | 삭제 (소유자 확인) |
+| `touchSegment()` | saved-segments.ts | 사용 시각 갱신 |
+| `MessageCell` | ResultsModal.tsx | 메시지 내용 셀 렌더링 3곳 통일 |
+
+#### 핵심 변경
+- **"AI 발송 템플릿" 전면 구축** — 하드코딩 4개 예시 제거 → 전부 DB 저장. 업체/사용자별 완전 격리. 검색/8개씩 페이징/수정모달/+새로 만들기. 맞춤한줄 필드 선택은 한글 체크박스 목록(enabled-fields API 연동)
+- **AiSendTypeModal 스킵** — 템플릿 클릭 시 타입이 이미 정해져 있으므로 중간 모달 없이 바로 실행
+- **맞춤한줄 Step 1 스킵** — preloadData prop으로 필드/브리핑/채널 사전 세팅, Step 2부터 시작
+- **발송 성공 후 저장** — CampaignSuccessModal에 "이 설정 저장하기" 인라인 폼 (이모지 16종 + 이름 입력)
+- **DB 현황 디자인 리뉴얼** — 파스텔 bg 제거 → 화이트 카드 + 아이콘 컬러 배경 + distribution 프로그레스 바 + 호버 shadow. 요금제/발송 현황 헤더 통일 (녹색 바 + 볼드). 페이징 좌우 < > 화살표 추가
+- **메시지 셀 컨트롤타워** — ResultsModal 3곳 인라인 메시지 표시를 MessageCell 서브 컴포넌트로 통일 (40글자 표시 + 클릭→모달 전체 보기)
+
+#### DB 마이그레이션
+```sql
+CREATE TABLE saved_segments (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  company_id UUID NOT NULL REFERENCES companies(id),
+  user_id UUID NOT NULL REFERENCES users(id),
+  name VARCHAR(100) NOT NULL,
+  emoji VARCHAR(10) DEFAULT '📋',
+  segment_type VARCHAR(20) NOT NULL,
+  prompt TEXT,
+  auto_relax BOOLEAN DEFAULT false,
+  selected_fields TEXT[],
+  briefing TEXT,
+  url VARCHAR(500),
+  channel VARCHAR(10),
+  is_ad BOOLEAN DEFAULT false,
+  last_used_at TIMESTAMP,
+  created_at TIMESTAMP DEFAULT NOW(),
+  updated_at TIMESTAMP DEFAULT NOW()
+);
+CREATE INDEX idx_saved_segments_company_user ON saved_segments(company_id, user_id);
+```
+
+#### 수정 파일 (11개)
+| 파일 | 변경 |
+|------|------|
+| **(신규)** `utils/saved-segments.ts` | 컨트롤타워 5함수 (save/get/update/delete/touch) |
+| **(신규)** `routes/saved-segments.ts` | CRUD 라우트 5개 (GET/POST/PUT/DELETE/POST touch) |
+| `app.ts` | 라우트 등록 |
+| `RecommendTemplateModal.tsx` | 전면 재작성 — 검색/페이징/수정모달(EditSegmentModal)/+새로만들기/한글 체크박스 필드선택 |
+| `CampaignSuccessModal.tsx` | 저장 세그먼트 UI (이모지 + 이름 + 저장) |
+| `AiCustomSendFlow.tsx` | preloadData prop + Step 2 자동 점프 |
+| `Dashboard.tsx` | "AI 발송 템플릿" 카드 + DB 현황 리뉴얼 + 헤더 통일 + 페이징 화살표 + customFlowPreload/lastSendConfig state |
+| `ResultsModal.tsx` | MessageCell 서브 컴포넌트 + 3곳 교체 (메시지 40글자+클릭→모달) |
+
+#### 수정 파일 (7개)
+| 파일 | 변경 |
+|------|------|
+| **(신규)** `utils/saved-segments.ts` | 컨트롤타워 4함수 |
+| **(신규)** `routes/saved-segments.ts` | CRUD 라우트 4개 |
+| `app.ts` | 라우트 등록 |
+| `RecommendTemplateModal.tsx` | 전면 리뉴얼 (Props 변경, 세그먼트 로드/삭제) |
+| `Dashboard.tsx` | customFlowPreload/lastSendConfig state + 배선 변경 + 저장 콜백 |
+| `AiCustomSendFlow.tsx` | preloadData prop + Step 스킵 useEffect |
+| `CampaignSuccessModal.tsx` | 저장 세그먼트 UI (이모지 + 이름 + 저장) |
+
+#### DB 마이그레이션 (Harold님 서버 실행)
+```sql
+CREATE TABLE saved_segments (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  company_id UUID NOT NULL REFERENCES companies(id),
+  user_id UUID NOT NULL REFERENCES users(id),
+  name VARCHAR(100) NOT NULL,
+  emoji VARCHAR(10) DEFAULT '📋',
+  segment_type VARCHAR(20) NOT NULL,
+  prompt TEXT,
+  auto_relax BOOLEAN DEFAULT false,
+  selected_fields TEXT[],
+  briefing TEXT,
+  url VARCHAR(500),
+  channel VARCHAR(10),
+  is_ad BOOLEAN DEFAULT false,
+  last_used_at TIMESTAMP,
+  created_at TIMESTAMP DEFAULT NOW(),
+  updated_at TIMESTAMP DEFAULT NOW()
+);
+CREATE INDEX idx_saved_segments_company_user ON saved_segments(company_id, user_id);
+```
+
+---
+
+### 🔧 D103 — (광고) 중복 수정 + 발송 경로 컨트롤타워 전면 통합 + 개별회신번호 동적 필터링 (2026-04-02) — ✅ 배포완료
+
+> **배경:** (광고) 중복 발송 버그 + 발송 경로 인라인 반복 패턴 전면 컨트롤타워화 + 개별회신번호 드롭다운에 전화번호 필드만 동적 표시.
+
+#### 신규 컨트롤타워 6개 (핵심 성과)
+| 컨트롤타워 | 파일 | 효과 |
+|-----------|------|------|
+| `prepareSendMessage()` | messageUtils.ts | 변수 치환 + (광고)+080 통합. 6경로 인라인 2줄 조합 제거 |
+| `toQtmsgType()` | sms-queue.ts | SMS→S 코드 변환. 8곳 인라인 제거 |
+| `insertTestSmsQueue()` | sms-queue.ts | 테스트 SMS INSERT. 인라인 함수 2개 + 호출 3곳 제거 |
+| `resolveCustomerCallback()` | callback-filter.ts | 개별회신번호 최종 결정. 4곳 인라인 제거 |
+| `isPhoneLikeValue()` + `detectPhoneFields()` | callback-filter.ts | DB 고객에서 전화번호 형태 필드 동적 감지 |
+| `isPhoneLikeValue()` + `detectPhoneHeaders()` | formatDate.ts (프론트) | 파일 업로드 시 전화번호 컬럼 동적 감지 |
+
+#### 구조 변경
+- **(광고) 중복 원천 차단** — DB에는 순수 본문만 저장, (광고)+080은 백엔드 `prepareSendMessage()` 한 곳에서만 추가. 프론트 API body에서 `buildAdMessageFront()` 전면 제거.
+- **`buildAdMessage()` 중복방지 안전장치** — 이미 (광고)가 있으면 접두사 안 붙임, 이미 수신거부가 있으면 푸터 안 붙임.
+- **개별회신번호 드롭다운 5곳 통일** — `__col__` 패턴 + `phoneFields` 기반 동적 필터. 생일/주소 등 비전화번호 필드 제외. 하드코딩 'store_phone' 제거.
+- **enabled-fields API** — `phoneFields` 응답 추가 (FIELD_MAP + 커스텀 필드 샘플링 기반 자동 감지)
+
+#### 수정 파일 (13개)
+| 파일 | 변경 |
+|------|------|
+| `messageUtils.ts` | prepareSendMessage + buildAdMessage 중복방지 |
+| `sms-queue.ts` | toQtmsgType + insertTestSmsQueue |
+| `callback-filter.ts` | resolveCustomerCallback + isPhoneLikeValue + detectPhoneFields |
+| `campaigns.ts` | 4경로 prepareSendMessage + toQtmsgType + insertTestSmsQueue + resolveCustomerCallback |
+| `auto-campaign-worker.ts` | prepareSendMessage + toQtmsgType + resolveCustomerCallback |
+| `spam-test-queue.ts` | 인라인 함수 2개 삭제 → CT import |
+| `spam-filter.ts` | 인라인 함수 1개 삭제 + getOpt080Number CT + toQtmsgType |
+| `customers.ts` | enabled-fields API에 phoneFields 추가 |
+| `Dashboard.tsx` | API body 순수 본문 + phoneFields 로드/전달 + 하드코딩 제거 |
+| `AiCustomSendFlow.tsx` | API body 순수 본문 |
+| `DirectSendPanel.tsx` | __col__ 패턴 + detectPhoneHeaders 동적 필터 |
+| `TargetSendModal.tsx` | phoneFields 기반 동적 필터 |
+| `AiCampaignSendModal.tsx` | __col__ 패턴 + phoneFields 동적 |
+| `DirectTargetFilterModal.tsx` | phoneFields 콜백 전달 |
+| `formatDate.ts` | isPhoneLikeValue + detectPhoneHeaders |
+| `CLAUDE.md` | 절대 개발원칙 4-4 강화 |
+
+---
+
+### 🔧 D104 — 0402 PPT 버그리포트 10건 (타임존 컨트롤타워화 + 숫자필터 + YYMMDD + cooldown) (2026-04-02) — ✅ 배포완료
+
+> **배경:** 직원 PPT(한줄로_20260402.pdf) 10건. 타임존 날짜 비교를 컨트롤타워화, 숫자 필터 근본 수정, YYMMDD 보호, cooldown 축소. 자동발송 4건은 별도 세션.
+
+#### 핵심 수정
+1. **타임존 날짜 비교 컨트롤타워화** — `AT TIME ZONE 'Asia/Seoul'` → `($N || ' 00:00:00+09')::timestamptz` (PG TZ=UTC에서 정확). stats-aggregation.ts 컨트롤타워 + 4개 라우트 import 교체. 서버 검증 7건 확인
+2. **숫자 필터 근본 수정** — buildDynamicFiltersForAPI를 `filterValues` 순회 → `selectedFields` 순회로 변경. 포인트+누적구매금액+평균주문금액 등 전체 숫자 필드 필터 정상화
+3. **YYMMDD 보호** — formatPreviewValue + formatNumberPreview 양쪽에 6/8자리 날짜 패턴 보호
+4. **타겟발송 날짜 표시** — formatCellValue 인라인 toLocaleString → formatByType 컨트롤타워
+5. **발송결과 cooldown** — 30초→5초 + 날짜 변경 시 force=true + onClick 래핑(D93 재발 방지)
+
+#### 수정 파일 (11개)
+| 파일 | 변경 |
+|------|------|
+| stats-aggregation.ts | buildDateRangeFilter/buildMonthRangeFilter/buildPeriodFilter KST timestamptz 패턴 |
+| admin.ts | 발송통계+스팸필터 → 컨트롤타워 import |
+| manage-stats.ts | 발송통계+스팸필터 → 컨트롤타워 import |
+| results.ts | summary+campaigns → buildPeriodFilter import |
+| campaigns.ts | 스팸필터 → buildDateRangeFilter import |
+| billing.ts | 정산 스팸필터 2곳 인라인 패턴 수정 |
+| database.ts | 타입파서 'Z'(UTC) 유지 확인 |
+| DirectTargetFilterModal.tsx | selectedFields 순회 + 포인트 min/max UI + B17-06 중복 제거 |
+| formatDate.ts | formatPreviewValue+formatNumberPreview YYMMDD 보호 |
+| TargetSendModal.tsx | formatCellValue → formatByType CT |
+| ResultsModal.tsx | cooldown 5초 + force 파라미터 + onClick 래핑 |
+
+#### 자동발송 4건 — ✅ D105에서 수정 완료
+
+---
+
+### 🔧 D106 — 0403 버그리포트 8건 + 컨트롤타워 전수점검 강제 프로세스 (2026-04-04) — ✅ 배포완료
+
+> **배경:** 직원 PDF(한줄로_20260403.pdf) 8건. 발송통계 컨트롤타워화, 발송결과 SQL ambiguous 수정, 회신번호 동적 감지 보강, 캘린더 (광고)+080 표시 경로 전수 적용, 자동발송 담당자 알림 라인 분리.
+
+#### 핵심 수정 (8건)
+| # | 버그 | 원인 | 수정 |
+|---|------|------|------|
+| B1 | 발송결과 조회 0건 | `LEFT JOIN users`에서 `status` ambiguous + `created_at` 필터 | aliasedWhere에 `\bstatus\b`,`\bsent_count\b`,`\bsent_at\b` 추가 + `COALESCE(sent_at, created_at)` 필터 |
+| B2 | 회신번호 드롭다운 무관 컬럼 | `detectPhoneFields` data_type 미체크 + 날짜 패턴 오매칭 | data_type 필터 추가 + isPhoneLikeValue에 `(19\|20)\d{6}` 제외 + 수신번호 컬럼 제외 |
+| B3 | 캘린더 (광고)+080 누락 | CalendarModal/ResultsModal/AdminDashboard에서 buildAdMessageFront 미호출 | 3곳 컨트롤타워 호출 추가 |
+| B4 | 자동발송 의견 미반영 | 담당자 알림이 대량발송 라인(차단됨)으로 발송 | B6과 동일 원인 — 11번 라인으로 수정 |
+| B5 | 스팸필터 미리보기 개인화 미치환 | replaceDirectVars(직접발송 변수 5개만)를 사용 → 필드매핑 변수 미인식 | AutoSendFormModal에서 replaceMessageVars로 사전 치환 후 전달 |
+| B6 | D-1 알림 미발송 | 담당자 알림이 getCompanySmsTables(대량발송 라인)으로 INSERT → Agent 차단 | 알림 3곳 getAuthSmsTable(11번 라인)으로 변경 |
+| B7 | 설정시간 3분 지연 | 5분 폴링 구조 한계 | 워커 간격 5분→3분 축소 |
+| B8 | 일별/월별 뒤바뀜 | 인라인 통계 쿼리 + 프론트 race condition | querySendStats 컨트롤타워 + requestIdRef stale 응답 무시 |
+
+#### 컨트롤타워 신설/강화
+| 컨트롤타워 | 파일 | 효과 |
+|-----------|------|------|
+| `querySendStats()` | stats-aggregation.ts | 발송통계 일별/월별 조회 단일 진입점. manage-stats.ts 인라인 쿼리 제거 |
+| `querySendStatsDetail()` | stats-aggregation.ts | 발송통계 상세(사용자별) 단일 진입점 |
+| `ensureMonthlyLogTables()` | sms-queue.ts | 앱 기동 시 당월+다음달 MySQL 로그 테이블 자동 확인/생성 (202604 미생성 사고 재발 방지) |
+
+#### 수정 파일 (14개)
+| 파일 | 변경 |
+|------|------|
+| stats-aggregation.ts | querySendStats + querySendStatsDetail 컨트롤타워 신설 |
+| manage-stats.ts | 인라인 통계 쿼리 → 컨트롤타워 import 교체 |
+| results.ts | aliasedWhere 컬럼 누락 수정 + COALESCE(sent_at, created_at) |
+| callback-filter.ts | isPhoneLikeValue 날짜패턴 제외 + detectPhoneFields data_type 필터 |
+| auto-campaign-worker.ts | 담당자 알림 3곳 → 11번 라인 + 워커 3분 간격 |
+| sms-queue.ts | ensureMonthlyLogTables 자동 생성 |
+| app.ts | ensureMonthlyLogTables 기동 시 호출 |
+| CalendarModal.tsx | buildAdMessageFront 적용 |
+| ResultsModal.tsx | buildAdMessageFront 적용 |
+| AdminDashboard.tsx | buildAdMessageFront 적용 |
+| AutoSendFormModal.tsx | replaceMessageVars 사전 치환 |
+| DirectSendPanel.tsx | 수신번호 컬럼 회신번호 드롭다운 제외 |
+| manage/StatsTab.tsx | requestIdRef race condition 방지 + period 키 |
+| StatsTab-company.tsx | requestIdRef race condition 방지 + period 키 |
+| formatDate.ts | isPhoneLikeValue 날짜패턴 제외 |
+
+#### CLAUDE.md 교훈 추가
+- **섹션 7-1 신설:** 컨트롤타워 수정/생성 시 필수 3단계 프로세스 (1단계: 소비처 전수 리스트업 → 2단계: 인라인 잔존 0건 확인 → 3단계: 표시 경로까지 확인)
+- **과거 교훈 테이블:** B1(status ambiguous), B2(isPhoneLikeValue 날짜오매칭), B3(buildAdMessageFront 표시경로 누락), B5(replaceDirectVars vs replaceMessageVars), B6(담당자 알림 라인 분리) 추가
+
+---
+
+### 🔧 D105 — 자동발송 4단계 라이프사이클 개선 (P7~P10) (2026-04-02) — ✅ 배포완료
+
+> **배경:** 직원 테스트에서 발견된 자동발송 버그 4건 + D-day 스팸테스트 신설. 직원 요청 프로세스에 맞게 워커 3단계→4단계로 확장.
+
+#### 워커 4단계 라이프사이클
+| 단계 | 시점 | 동작 | 담당자 알림 |
+|------|------|------|------------|
+| 1 | D-2 | AI 문안 생성 | **[P7 신설]** 생성된 문안 SMS 발송 |
+| 2 | D-1 | 사전 알림 | **[P9 개선]** 타겟 N명 + 발송시각 포함 |
+| 3 | D-day 2시간 전 | **[신설]** 자동 스팸테스트 | 결과(통과/차단) SMS 발송 |
+| 4 | D-day 정각 | 실제 발송 | - |
+
+#### 수정 내역
+| # | 버그 | 수정 |
+|---|------|------|
+| P7 | AI문안 생성 후 담당자에게 알림 안 됨 | 문안 생성 완료 후 notify_phones에 SMS 발송 추가 |
+| P8 | 스팸필터 미리보기 개인화 미적용 | AutoSendFormModal → SpamFilterTestModal에 firstRecipient 전달 (recommend-target의 sample_customer_raw 사용) |
+| P9 | D-1 알림 메시지에 타겟 수/발송시각 없음 | CT-01 + CT-03으로 타겟 수 실시간 조회, "X월 X일 XX:XX" 형식으로 개선 |
+| P10 | 워커 10분 간격 → 최대 10분 지연 | 워커 간격 5분으로 축소 (최대 5분 지연) |
+| 신규 | D-day 스팸테스트 없음 | runPreSendSpamTest() 신설 — CT-09 재활용, 결과를 담당자에게 SMS 발송 |
+
+#### 수정 파일 (2개)
+| 파일 | 변경 |
+|------|------|
+| auto-campaign-worker.ts | P7(AI알림) + P9(D-1개선) + P10(5분) + runPreSendSpamTest 신설 + buildUnsubscribeFilter import |
+| AutoSendFormModal.tsx | P8: spamSampleCustomer state + recommend-target에서 sample_customer_raw 저장 + SpamFilterTestModal에 firstRecipient 전달 |
+
+#### SCHEMA 변경
+- auto_campaign_runs.status에 `spam_tested` 값 추가 (varchar — DB 마이그레이션 불필요)
+
+#### 컨트롤타워 원칙 준수
+- CT-01 buildFilterQueryCompat — 타겟 수 조회 (P9), 샘플 고객 조회 (스팸테스트)
+- CT-03 buildUnsubscribeFilter — 수신거부 제외 (P9)
+- CT-04 bulkInsertSmsQueue — 알림 SMS 발송 (전 단계)
+- CT-09 autoSpamTestWithRegenerate — D-day 스팸테스트
+- 인라인 로직 0개, 전부 기존 컨트롤타워 import
+
+---
+
+### 🔧 D102 — 0401 PPT 버그리포트 15건 + 맞춤한줄 회신번호 + 중복제거/수신거부 (2026-04-01) — ✅ 배포완료
+
+> **배경:** 직원 PPT(한줄로_20260401.pptx) 15건 + 맞춤한줄 개별회신번호 대표번호 폴백 + 중복제거/수신거부 체크박스 미동작.
+
+#### 신규 컨트롤타워 4개 (핵심 성과)
+| 컨트롤타워 | 파일 | 효과 |
+|-----------|------|------|
+| `buildAdMessage()` | messageUtils.ts | 백엔드 (광고)+080 전 발송 경로 통일. 기존 4곳 인라인 제거 |
+| `getOpt080Number()` | messageUtils.ts | 080번호 조회 users→companies 폴백 통일. 기존 7곳 인라인 제거 |
+| `prepareFieldMappings()` | messageUtils.ts | schema+extractVarCatalog+enrich 3종세트 통일. 기존 7곳 인라인 제거 |
+| `buildAdMessageFront()` | formatDate.ts | 프론트 (광고)+080 미리보기/바이트계산 통일. 기존 21곳 인라인 제거 |
+
+#### 구조 변경
+- **customMessages 프론트→백엔드 분기 완전 제거** — 모든 발송 경로에서 백엔드 replaceVariables 컨트롤타워 하나로 통일. 프론트 치환 경로 폐기.
+- **숫자 포맷팅** — Math.round() + toLocaleString('ko-KR') 명시. 소수점 2자리(.00) 원천 차단.
+- **중복제거/수신거부제거** — 프론트 체크박스를 state 연결 + 백엔드 플래그 전달. 기본 true, 해제 가능.
+
+#### 슬라이드별 수정
+| # | 내용 | 근본 원인 | 수정 |
+|---|------|---------|------|
+| 1,6,8 | 날짜/숫자 포맷팅 실발송 깨짐 | 프론트 customMessages가 replaceVariables 우회 | customMessages 폐기, 백엔드 통일 |
+| 2 | 062 지역번호 NULL | isValidKoreanLandline 범위 0[3-5] 한정 | 범위 제한 제거 |
+| 3 | AI 개인화 고객명만 매칭 | displayName 정확 매칭만 | fuzzy 매칭(includes) 추가 |
+| 4 | AI(취소) 중복 2건 | 미발송 cancelled 목록 표시 | sent_count=0 취소 캠페인 제외 |
+| 5 | 나이 51→52 불일치 | 생일 지남 여부 미반영 | derivedBirthMonthDay > todayMD 비교 |
+| 7,12 | (광고)+080 누락 | auto-campaign-worker 로직 없음 + AI발송/직접발송 미적용 | buildAdMessage 컨트롤타워 전 경로 |
+| 9 | 회신번호 드롭다운에 phone | 필터에 phone 포함 | phone 제외 |
+| 13 | 자동발송 11시→11:49 | 워커 1시간 간격 | 10분 축소 |
+| 15 | 메시지 확인 불가 | API에 message_content 누락 | SELECT 추가 + 클릭 모달 |
+| 추가 | 맞춤한줄 회신번호 폴백 | handleAiCustomSend에 individualCallbackColumn 파라미터 누락 | 타입 추가 + 폴백 'store_phone' |
+| 추가 | 중복제거/수신거부 체크박스 | UI만 있고 state 미연결 | state 연결 + API 전달 + 백엔드 플래그 |
+
+---
+
+### 🔧 D101 — 0331 PPT 버그리포트 15건 디버깅 (2026-03-31) — ✅ 배포완료
+
+> **배경:** 직원 PPT 0331 버그리포트 15건. 커스텀 필드 타입 동적화, AI 개인화 커스텀필드 지원, 회신번호 자동설정, 수신자 선택삭제 등.
+
+#### 핵심 변경
+- **enrichWithCustomFields** — field_type 기반 동적 type 설정 (기존 'string' 하드코딩 → NUMBER/DATE/VARCHAR 분기)
+- **formatDateValue** — YYMMDD 6자리, YYYYMMDD 8자리 날짜 포맷팅 추가
+- **formatByType** (프론트 신규) — data_type 기반 날짜/숫자/문자열 포맷팅 분기 (formatPreviewValue 대체)
+- **parsePersonalizationDirective** — "개인화 :" 패턴도 감지 (기존 "개인화 필수:" 한정 → 완화)
+- **parseBriefing + generateMessages** — 커스텀 필드 라벨을 availableVars에 동적 추가
+
+#### 수정 파일 (12개)
+- `messageUtils.ts` — enrichWithCustomFields field_type 동적 + formatDateValue YYMMDD + else 분기 소수점 감지
+- `formatDate.ts` (프론트) — formatDatePreview/formatNumberPreview/formatByType 신규 + replaceMessageVars 타입 기반 분기
+- `ai.ts` (services) — parsePersonalizationDirective regex 완화 + parseBriefing 커스텀필드 availableVars 추가
+- `ai.ts` (routes) — generateMessages용 availableVars 커스텀필드 추가 + sampleCustomer 커스텀필드 타입 포맷팅
+- `TargetSendModal.tsx` — 체크박스+선택삭제+중복제거 구현 + 회신번호 드롭다운 비전화번호 필드 제거 + formatByType 교체
+- `AiCampaignSendModal.tsx` — individualCallbackColumn 'store_phone' 기본 전달 + 타입 확장
+- `Dashboard.tsx` — AI 개별회신번호 추천 시 individualCallbackColumn 자동설정
+- `auto-campaign-worker.ts` — 스팸테스트 firstRecipient(타겟 첫 고객) 전달
+- `campaigns.ts` — 직접발송 campaign_runs INSERT 추가
+- `upload.ts` — 커스텀 필드 field_type 자동감지 (날짜→DATE, 숫자→NUMBER)
+- `ResultsModal.tsx` — overscrollBehavior: contain
+- `AutoSendFormModal.tsx` — D-1 알림 "ON (알림번호 미입력)" 표시
+
+#### 교훈
+- **땜질식 수정 절대 금지** — 코드 한 줄 쓰기 전에 PPT 시나리오대로 전체 데이터 경로 추적 + 실서버 데이터 확인. D101에서 5번 이상 고쳐가며 땜질 반복한 원인: 실데이터 미확인 상태에서 추측 기반 코드 작성
+- **enrichWithCustomFields VARCHAR 샘플링 부작용** — 시리얼/고객번호(정수)에 쉼표 찍히는 부작용. field_type에만 의존하는 것이 안전. 자동 감지는 upload.ts에서 1회만
+- **formatPreviewValue 직접 호출 경로 전수 확인** — replaceMessageVars뿐 아니라 TargetSendModal, AiPreviewModal 등 인라인 호출부도 확인 필수
+- **AiCampaignSendModal individualCallbackColumn 미전달** — 한줄로/맞춤한줄 양쪽에서 개별회신번호 선택해도 컬럼 미전달 → 발송 시 대표번호 폴백
+
+#### 서버 확인 필요
+- **버그2:** 엑셀 업로드 시 매장전화번호 미매핑 (데이터 문제 — SH 일부 레코드 store_phone 빈값)
+- **버그14-15:** campaigns 182건/campaign_runs 146건 데이터 존재 — 배포 후 슈퍼관리자 화면 재확인
+
+---
+
+### 🔧 D100 — PPT 버그리포트 전면 디버깅 + 전단AI 이미지 + 세션 동시접속 (2026-03-31) — ✅ 배포완료
+
+> **배경:** 0327+0330 직원 PPT 버그리포트 전면 수정. 날짜 밀림 근본 해결, 사용금액 격리, 중복예약 방지, 전단AI 이미지 서빙, 세션 동시접속 허용.
+
+#### 신규 컨트롤타워
+- **formatDateValue** (messageUtils.ts) — 날짜 표시용 포맷팅 컨트롤타워 (순수 YYYY-MM-DD 직접 파싱, ISO→KST 변환). 백엔드 전 경로 통합.
+
+#### 수정 파일 (12개)
+- `messageUtils.ts` — formatDateValue 컨트롤타워 신설 (export). replaceVariables에서 사용. Date 객체 방어 처리
+- `ai.ts` — sampleCustomer 날짜 포맷팅 → formatDateValue import로 통합 (인라인 new Date() 제거)
+- `upload.ts` — parse API preview+allData에서 Date 객체 → normalizeDate() 컨트롤타워 (JSON.stringify UTC 밀림 방지)
+- `customers.ts` — (1) 테스트/스팸 비용 balance_transactions 기반 전환 (created_by 격리) (2) enabled-fields VARCHAR일 때도 데이터 샘플링
+- `campaigns.ts` — (1) testBillId=userId 저장 (2) cancelled/draft 캘린더 기본 제외 (3) campaign_runs 중복 INSERT 차단 (4) useIndividualCallback 컬럼 존재 조건
+- `callback-filter.ts` — callbackColumn 지정 시에도 값 비면 store_phone 폴백
+- `Dashboard.tsx` — (1) sampleCustomerRaw 타겟추출 시 업데이트 (2) MMS 템플릿 JSON.parse 추가 (3) 모달 이중호출 방지
+- `ResultsModal.tsx` — 발송내역 min-h-[70vh] 제거
+- `auth.ts` — 동시 세션 최대 5개 허용 (전단AI+메인 동시 사용 지원)
+- `flyer/flyers.ts` — (1) company_admin 권한 추가 (403 수정) (2) product-images jpg 서빙 지원
+- `flyer/short-urls.ts` — 인라인 formatDate 순수 YYYY-MM-DD 직접 파싱
+- `product-images.ts` (백엔드+프론트) — Unsplash→Pixabay 로컬 이미지 47개 매핑 + resolveProductImageUrl 활성화
+
+#### 교훈
+- **new Date("YYYY-MM-DD") UTC 자정 해석** — 순수 날짜 문자열을 new Date()로 파싱하면 UTC 자정 → KST 변환 시 하루 전. 직접 파싱 필수
+- **JSON.stringify(Date) UTC ISO 변환** — 엑셀 Date 객체가 API 응답에 포함되면 "1995-02-28T15:00:00.000Z"로 전달 → 프론트에서 하루 밀림. API 반환 전 normalizeDate 필수
+- **로그인 시 기존 세션 전부 무효화** — 전단AI+메인이 같은 JWT/세션 사용 → 한쪽 로그인 시 다른쪽 세션 사망. 동시 세션 허용으로 해결
+- **company_admin vs admin 타입 체크 누락** — JWT userType='company_admin'인데 코드에서 'admin'만 체크 → 403
+- **balance_transactions가 유일한 비용 SoT** — MySQL 테스트 테이블에는 userId 미저장이었으므로 balance_transactions(created_by 정확) 기반으로 전환
+- **커스텀 필드 field_type='VARCHAR' 기본값** — 업로드 시 fieldType 미전달 → 'VARCHAR' 저장 → enabled-fields에서 숫자 감지 건너뜀 → 쉼표 미적용. VARCHAR일 때도 샘플링 필요
+
+---
+
+### 🔧 D99 — 브랜드메시지 수신자 확장 + 날짜 밀림 최종 수정 + 개별회신번호 컬럼 선택 (2026-03-28) — ✅ 배포완료
+
+> **배경:** 브랜드메시지 수신자 입력 3탭(직접입력/파일등록/DB추출) + 미리보기 통합 + 날짜 밀림 근본 수정 + 개별회신번호 컬럼 선택 기능.
+
+#### 신규 컨트롤타워
+- **resolveRecipientCallback** (formatDate.ts) — 수신자별 개별회신번호 값 추출 (individualCallbackColumn 기반)
+
+#### 수정 파일
+- `KakaoRcsPage.tsx` — 브랜드메시지 수신자 3탭(직접입력/파일등록/DB추출), DirectTargetFilterModal 재활용
+- `BrandMessageEditor.tsx` — 미리보기(BrandMessagePreview) 에디터 내부 통합 (우측 분리 제거)
+- `BrandMessagePreview.tsx` — 미리보기 크기 확대 (w-[360px], min-h-[400px], 말풍선 max-w-[290px])
+- `normalize.ts` — normalizeDate: Math.ceil(올림) UTC 기준 자정 보정 (D98 로컬TZ 방식 실패 → 근본 수정)
+- `normalize.ts` — normalizeByFieldKey: Date 객체 String() 변환 방지 (커스텀 필드 날짜 밀림 수정)
+- `callback-filter.ts` (CT-08) — callbackColumn 파라미터 추가 (지정 컬럼에서 회신번호 추출)
+- `campaigns.ts` — individualCallbackColumn 파라미터 처리 (AI send + direct-send)
+- `TargetSendModal.tsx` — 회신번호 드롭다운 컬럼 선택 UI (optgroup: 수신자별 컬럼 + 등록 회신번호)
+- `Dashboard.tsx` — individualCallbackColumn state + resolveRecipientCallback CT 호출 + API 전달
+- `formatDate.ts` — resolveRecipientCallback CT 추가
+
+#### DB 마이그레이션
+- `ALTER TABLE campaigns ADD COLUMN individual_callback_column VARCHAR(50)` (완료)
+
+#### 교훈
+- **xlsx cellDates 부동소수점 오차** — 엑셀 시리얼→Date 변환 시 자정에서 ~9시간 부족한 값 생성 → Math.ceil(올림)으로 다음 자정 복원
+- **normalizeByFieldKey가 Date를 String()으로 변환** — 커스텀 필드 경로에서 Date 객체가 영문 문자열로 변환 → normalizeDate의 문자열 파싱 경로를 타서 밀림 → Date 객체 보존 필수
+- **recipientsWithMessage 구성 시 원본 필드 탈락** — phone/callback/message만 추출하면 store_phone 등 다른 컬럼이 사라짐 → resolveRecipientCallback을 원본 데이터에서 호출해야 함
+- **프론트에서 callback 매핑 후 백엔드 CT-08에 callbackColumn 전달하면 덮어씌워짐** — direct-send는 프론트 매핑 완료이므로 callbackColumn 미전달
+
+---
+
+### 🔧 D98 — PPT 버그리포트 11건 전면 수정 + 재검증 (2026-03-27) — ✅ 배포완료
+
+> **배경:** 테스터 직원 PPT 11건 전면 수정. 컨트롤타워 원칙 + 데이터 흐름 끝까지 추적 검증.
+
+#### 신규 컨트롤타워
+- **CT-14 deduplicate.ts** — 수신자 중복제거 단일 진입점 (phone 기준 normalizePhone)
+- **mmsServerPathToUrl** (formatDate.ts) — MMS 이미지 serverPath→API URL 변환 (Dashboard+ResultsModal 2곳)
+- **SMS_DETAIL_FIELDS / SMS_EXPORT_FIELDS** (results.ts) — SMS 필드 정의 상수 (3곳 인라인→상수 2개)
+
+#### 수정 파일 (이번 세션 추가분 — D97 커밋 이후)
+- `results.ts` — S8 mms_image_paths SELECT + S9 draft 실패카운트 + S10 smsFields CT화
+- `CustomerDBModal.tsx` — S4 data_type/field_type 양쪽 체크
+- `ResultsModal.tsx` — S9 draft "실패" 표시 + MMS URL CT 교체
+- `Dashboard.tsx` — MMS URL CT 교체
+- `formatDate.ts` — mmsServerPathToUrl CT 추가
+- `OPS.md` — MySQL TZ 문서화 (sendreq_time=KST, mobsend_time/repmsg_recvtm=UTC)
+
+#### D97 커밋에 포함된 수정 (이전 세션)
+- S1 사용금액 격리: prepaid.ts created_by + 전 호출부 9곳 + companies.ts 대시보드 필터
+- S2 업로드 미리보기: FileUploadMappingModal formatPreviewValue 적용
+- S3 날짜 밀림: normalize.ts 로컬TZ 기준 getFullYear/getMonth/getDate
+- S5 MMS 이미지: Dashboard.tsx serverPath→API URL 변환
+- S6 중복제거: deduplicate.ts CT-14 + campaigns.ts direct-send 적용
+- S10 엑셀 시간: formatCsvDateTime 함수 추가
+- S11 알림톡 UI: AlimtalkTemplateFormModal 4건
+- B97-01 스팸필터: SpamFilterTestModal+DirectPreviewModal 인라인→replaceDirectVars CT
+- B97-02 담당자: CT-11 test-contact-helper.ts + test_contacts 테이블 완전 이관
+
+#### 교훈
+- **검증은 데이터 흐름 끝까지 추적** — 코드 존재가 아니라 입력→처리→저장→조회→표시 전체 경로를 실제 값으로 따라감
+- **API 반환 키(data_type)와 프론트 접근 키(field_type)가 일치하는지 확인** — S4에서 키 불일치 발견
+- **직원 요청 원문과 구현 결과의 의미가 동일한지 대조** — S9 "실패로 카운트" ≠ "목록에서 제외"
+- **MySQL TZ ≠ QTmsg Agent TZ** — MySQL 서버는 KST이지만 통신사 리포트 시간은 UTC로 저장됨
+
+---
+
+### 🔧 D97 — 브랜드메시지 전체 구현 + 디버깅 이슈 발견 (2026-03-27) — ✅ 배포완료
+
+> **배경:** 브랜드메시지 8종 자유형 + 기본형(템플릿) 전체 구현. CT-12 컨트롤타워 신설.
+
+#### 브랜드메시지 전체 구현
+
+**CT-12 brand-message.ts (신규 컨트롤타워):**
+- `validateBrandMessage()` — 유형별 필수값/길이/버튼개수 검증
+- `buildAttachmentJson()` — ATTACHMENT_JSON 구성 (버튼/이미지/쿠폰/리스트/커머스/동영상)
+- `buildCarouselJson()` — CAROUSEL_JSON 구성 (head/items/tail)
+- `sendBrandMessage()` — 자유형 발송 (validation → 수신거부 → 선불차감 → MySQL INSERT)
+- `sendBrandMessageTemplate()` — 기본형 발송 (템플릿 코드 + 변수 JSON)
+- 상수: BUBBLE_TYPES, BUTTON_TYPES, TARGETING_OPTIONS, RESEND_TYPES
+
+**sms-queue.ts (CT-04 확장):**
+- `insertKakaoBasicQueue()` 신규 — IMC_BM_BASIC_BIZ_MSG INSERT (TEMPLATE_CODE + 7개 VARIABLE_JSON)
+
+**campaigns.ts:**
+- `POST /brand-send` 엔드포인트 신규 — HTTP 핸들링만, 핵심 로직은 CT-12 호출
+
+**프론트엔드:**
+- `BrandMessageEditor.tsx` (신규) — 8종 유형 카드 선택 + 유형별 입력 폼 + 버튼/쿠폰/캐러셀 에디터
+- `BrandMessagePreview.tsx` (신규) — 카카오 말풍선 스타일 미리보기
+- `KakaoRcsPage.tsx` — 브랜드MSG 탭 플레이스홀더 → 실제 구현 교체
+
+**브랜드메시지 엔터프라이즈 게이팅:**
+- KakaoRcsPage 브랜드MSG 탭에 plan_code 기반 잠금 (ENTERPRISE 이상만 접근)
+- 잠금 모달: "엔터프라이즈 요금제부터 이용 가능" 안내
+
+#### 디버깅 이슈 발견 (다음 세션 처리 예정)
+
+1. **스팸필터 미리보기 %회신번호% 숫자 포맷팅:** `1800-8125` → 하이픈 제거 → `18008125` → toLocaleString → `18,008,125`. 전화번호 형태 값은 숫자 포맷팅 제외 필요
+2. **담당자 설정 회사 전체 공유:** 사용자별 담당자 격리 미완성. settings 저장/조회 시 users vs companies 테이블 흐름 추적 필요 → 컨트롤타워 필요
+3. **직접발송 파일업로드 전화번호 하이픈 제거:** 엑셀에 `010-5295-8517`로 있는데 하이픈 없이 저장/표시됨 + 하이픈 없는 번호도 포맷팅해서 표시 필요
+4. **생일 날짜 밀림:** 엑셀 Date 부동소수점 오차 관련 추가 확인 필요
+
+#### 수정 파일 (6개)
+
+**프론트엔드 (3개):**
+- `packages/frontend/src/components/BrandMessageEditor.tsx` (신규)
+- `packages/frontend/src/components/BrandMessagePreview.tsx` (신규)
+- `packages/frontend/src/pages/KakaoRcsPage.tsx`
+
+**백엔드 (3개):**
+- `packages/backend/src/utils/brand-message.ts` (신규 — CT-12)
+- `packages/backend/src/utils/sms-queue.ts`
+- `packages/backend/src/routes/campaigns.ts`
+
+---
+
+### 🔧 D96 — 자동발송 테스터 피드백 5건 + 직접발송 분리 + 슈퍼관리자 (2026-03-26) — ✅ 배포완료
+
+> **배경:** 자동발송 테스터 PPT 5건 처리 + Dashboard.tsx 직접발송 컴포넌트 분리 + 직접발송 변수맵 컨트롤타워 통합
+
+#### 자동발송 테스터 피드백 (슬라이드 5건)
+
+**슬1 개별회신번호:** 답변용 — 스팸테스트는 단일 발신번호만 가능(테스트폰 1대), 실제 발송은 개별회신번호 지원됨
+**슬2 스팸테스트:** 답변용 — AI 3 variant 생성 → 각각 스팸테스트 → best 1건 선택. 정상 동작
+**슬3 3번씩 발송:** 답변용 — D-2 자동 스팸테스트 3 variant. 정상 동작
+**슬4 AI 생성 문안 확인/수정 불가:**
+- `auto-campaigns.ts` — PUT /:id/generated-message 엔드포인트 추가
+- `AutoSendPage.tsx` — AI 생성 문안 확인/수정 모달 + 캠페인 카드 AI상태 배지 + 실행이력 문안 표시
+**슬5 모달 드래그 시 초기화:**
+- `AutoSendFormModal.tsx` — overscrollBehavior: contain + onMouseDown stopPropagation
+
+#### 직접발송 Dashboard 분리 (D96 핵심)
+
+**컴포넌트 분리:**
+- `DirectSendPanel.tsx` — **신규** (1,072줄). 직접발송 모달 전체를 Dashboard에서 분리
+- `Dashboard.tsx` — 4,400줄 → 3,367줄 (-1,033줄). DirectSendPanel props 전달로 교체
+- 직접발송 전용 내부 state 12개를 DirectSendPanel로 이동 (파일매핑, 직접입력, 검색, 선택 등)
+- 발송 실행 로직(executeDirectSend)은 Dashboard에 그대로 유지 — 기간계 무접촉
+
+**변수맵 컨트롤타워 통합:**
+- `formatDate.ts` — DIRECT_VAR_MAP, DIRECT_VAR_TO_FIELD, DIRECT_FIELD_LABELS, DIRECT_MAPPING_FIELDS, replaceDirectVars 추가
+- `Dashboard.tsx` — 하드코딩 변수맵 5곳 → 컨트롤타워 import로 교체 (자동입력 버튼, 스팸필터, 직접입력, 파일매핑, 바이트 계산)
+
+#### 기타
+
+**슈퍼관리자 반려 모달:**
+- `AdminDashboard.tsx` — prompt('반려 사유') → 커스텀 모달 (rejectModal + handleTemplateRejectConfirm)
+
+**담당자 폴백 제거:**
+- `companies.ts` — settings GET에서 companies.manager_contacts 폴백 제거 → 사용자별 완전 격리
+
+#### 수정 파일 (9개)
+
+**프론트엔드 (7개):**
+- `packages/frontend/src/components/DirectSendPanel.tsx` (신규)
+- `packages/frontend/src/components/AutoSendFormModal.tsx`
+- `packages/frontend/src/pages/AutoSendPage.tsx`
+- `packages/frontend/src/pages/AdminDashboard.tsx`
+- `packages/frontend/src/pages/Dashboard.tsx`
+- `packages/frontend/src/utils/formatDate.ts`
+
+**백엔드 (2개):**
+- `packages/backend/src/routes/auto-campaigns.ts`
+- `packages/backend/src/routes/companies.ts`
+
+#### 미완료 (다음 세션)
+
+**Dashboard 2차 리팩토링:**
+- useSendExecution() 훅: executeDirectSend/executeTargetSend + 관련 state 캡슐화
+- 공용 모달 분리 (SendOptionModals.tsx)
+- AI 발송 흐름 분리
+- 같은 패턴으로 AI발송, 타겟발송도 순차 분리 → Dashboard를 레이아웃+라우팅 역할만으로 경량화
+
+**직접발송 추가 개선:**
+- RCS 템플릿 폼 보강 (버튼, 브랜드정보)
+- 직접발송 UI를 커스텀 훅 패턴으로 전환 (props 최소화)
+
+---
+
+### 🔧 D95 — QA 버그리포트 11건 + 컨트롤타워 정비 + 헤더 UI (2026-03-26) — ✅ 배포 완료
+
+> **배경:** 0326 테스터 PPT 11건 버그 수정 + 프론트 바이트계산/변수치환 컨트롤타워 추출 + 헤더 메뉴 필(pill) 스타일 통일
+
+#### 세션1 완료 (이전 세션)
+
+**AI 발송 카카오 제거:** AiCampaignResultPopup, AiCampaignSendModal, AiPreviewModal, Dashboard
+**하이라이트 효과:** highlightVars.tsx %변수% regex 수정
+**직접발송 파일매핑:** 2열 콤팩트 + 동적 표시 + 알림톡 템플릿 변수 + 샘플 표시
+**슈퍼관리자:** 통계 자동로드, 프로필 등록 커스텀 모달
+**스팸필터:** Grace Period 10초→20초
+
+#### 세션2 완료 (이번 세션) — 0326 QA 버그리포트 11건
+
+**슬4 파일매핑 선택창 겹침/짤림:**
+- `Dashboard.tsx` — grid 셀/select에 min-w-0, 모달 max-h-[80vh] overflow-y-auto
+
+**슬5 머지 바이트 계산 오류:**
+- `Dashboard.tsx` — messageBytes를 getMaxByteMessage(변수 치환 후) 기반 계산으로 변경. 비용절감도 동일
+
+**슬6 맞춤한줄 미리보기 %개인화% 미치환:**
+- `AiCustomSendFlow.tsx` — 미리보기 모달에서 sampleData 있으면 replaceSampleVars 적용
+
+**슬7 미리보기 전화번호/날짜 이상:**
+- `formatDate.ts` — formatPreviewValue: 0시작 숫자(전화번호) 보호 + ISO 타임스탬프 KST 변환
+
+**슬8 회신번호 미등록 시 예약 중복:**
+- `Dashboard.tsx` — CallbackConfirmModal 취소 시 draft 캠페인 cancel
+- `client.ts` — campaignsApi.cancel 추가
+- `campaign-lifecycle.ts` — cancelCampaign에 draft 상태 허용
+
+**슬9 발송결과 메시지 스크롤 전체확인 불가:**
+- `ResultsModal.tsx` — msg_contents 클릭 시 상세 모달 onClick 추가
+
+**슬10 자동발송 모달 배경클릭 초기화:**
+- `AutoSendFormModal.tsx` — 배경 onClick={onClose} 제거
+
+**슬11 알림톡 템플릿 등록 UI 보강:**
+- `AlimtalkTemplateFormModal.tsx` — 채널추가(AC) 자동 삽입, PC URL(linkP), 앱링크(scheme), 강조보조문구(emphasizeSubTitle)
+- `companies.ts` — POST/PUT에 emphasize_sub_title 저장
+
+**슬3 엑셀 날짜형식 업로드:**
+- `normalize.ts` — normalizeCustomFieldValue 컨트롤타워 추가 (Date 객체 + JS Date.toString() + ISO 처리)
+- `upload.ts`, `sync.ts` — 커스텀 필드 normalizeCustomFieldValue 사용
+
+**슬7 백엔드 날짜 불일치:**
+- `messageUtils.ts` — 순수 YYYY-MM-DD 감지 regex 수정 (`($|T|\s)`)
+
+**컨트롤타워 정비 (D95 신규):**
+- `formatDate.ts` — `calculateSmsBytes`, `truncateToSmsBytes`, `replaceMessageVars` 3개 컨트롤타워 추가
+- `Dashboard.tsx` — 인라인 바이트 계산 5곳 제거 → calculateSmsBytes 사용
+- `AiCustomSendFlow.tsx` — 인라인 replaceVars 2곳 → replaceMessageVars 사용
+- `ResultsModal.tsx`, `AutoSendFormModal.tsx`, `ScheduledCampaignModal.tsx` — 인라인 바이트 계산 → calculateSmsBytes
+- `Dashboard.tsx` — replaceVars 하드코딩 변수 9개 → 동적 Object.entries 순회
+- `Dashboard.tsx` — directVarMap 3곳 통일 (%매장명%, %포인트% 추가)
+
+**헤더 메뉴 UI 개선:**
+- `DashboardHeader.tsx` — 밑줄 제거 → 필(pill) 스타일. useLocation 현재 페이지 활성 표시. tracking-wide 글자 간격. gap-1 메뉴 간격
+
+**DB 마이그레이션 (서버 반영 완료):**
+- `ALTER TABLE kakao_templates ADD COLUMN IF NOT EXISTS emphasize_sub_title VARCHAR(50);`
+- `UPDATE customer_field_definitions SET field_type = 'INT' WHERE field_key = 'custom_1' AND company_id = (시세이도ID);`
+
+#### 수정 파일 (15개)
+
+**프론트엔드 (9개):**
+- `packages/frontend/src/utils/formatDate.ts`
+- `packages/frontend/src/pages/Dashboard.tsx`
+- `packages/frontend/src/components/AiCustomSendFlow.tsx`
+- `packages/frontend/src/components/ResultsModal.tsx`
+- `packages/frontend/src/components/AutoSendFormModal.tsx`
+- `packages/frontend/src/components/ScheduledCampaignModal.tsx`
+- `packages/frontend/src/components/AlimtalkTemplateFormModal.tsx`
+- `packages/frontend/src/components/DashboardHeader.tsx`
+- `packages/frontend/src/api/client.ts`
+
+**백엔드 (6개):**
+- `packages/backend/src/utils/normalize.ts`
+- `packages/backend/src/utils/messageUtils.ts`
+- `packages/backend/src/utils/campaign-lifecycle.ts`
+- `packages/backend/src/routes/companies.ts`
+- `packages/backend/src/routes/upload.ts`
+- `packages/backend/src/routes/sync.ts`
+
+#### 미완료 (다음 세션)
+
+**직접발송 전체 UI 재설계:**
+- 직접입력: 메시지 변수 기반 동적 입력폼 (변수에 맞는 칸만 표시)
+- 파일매핑: 알림톡은 템플릿 #{변수} 기준 매핑 (이름/기타1/2/3 대신)
+- RCS 템플릿 폼 보강 (버튼, 브랜드정보)
+- sms-result-map.ts 카카오 결과코드 보강
+
+**슈퍼관리자:**
+- 템플릿 수동등록 모달: prompt() → 커스텀 모달 + 고객사/사용자 드롭다운
+
+**슬1 담당자 일괄변경:** ✅ settings GET에서 companies.manager_contacts 폴백 제거 → 각 사용자가 자기 담당자만 봄 (미설정 시 빈 배열)
+**슬10 자동발송 질문사항:** AI 문안 확인/수정 기능, 개별회신번호 지원 등 기능 미비 — Phase 3 검토
+
+---
+
+### 🔧 D94 — 채널 확장 Phase 1: 카카오&RCS 메뉴 + 알림톡 발송 (2026-03-25) — ✅ 배포 완료
+
+> **배경:** 발송창 탭 재구성(브랜드MSG→RCS) + 카카오&RCS 신규 메뉴(알림톡 템플릿/RCS 템플릿 관리) + 알림톡 실제 발송 연결 + 슈퍼관리자 템플릿 관리
+> **설계:** `status/CHANNEL-EXPANSION.md` / `status/BRAND-MESSAGE-DESIGN.md`
+
+#### 구현 내용
+
+**DB 마이그레이션 (서버 반영 완료):**
+- kakao_templates 12개 컬럼 확장 (category, message_type, emphasize_type, buttons JSON 등)
+- rcs_templates 3개 컬럼 추가 (requested_at, reviewed_at, reviewed_by)
+
+**백엔드 API:**
+- 알림톡/RCS 템플릿 CRUD — `companies.ts` (GET/POST/PUT/DELETE 8개 엔드포인트)
+- 슈퍼관리자 템플릿 승인/반려/수동등록 — `admin.ts` (7개 엔드포인트)
+- 알림톡 발송 컨트롤타워 — `sms-queue.ts`의 `insertAlimtalkQueue()` (SMSQ_SEND msg_type='K')
+- 직접발송 알림톡 분기 — `campaigns.ts` direct-send에 sendChannel='alimtalk' 처리
+
+**프론트엔드:**
+- 카카오&RCS 페이지 신규 — `KakaoRcsPage.tsx` (3탭: 알림톡 템플릿/브랜드메시지/RCS 템플릿)
+- 알림톡 템플릿 등록 모달 — `AlimtalkTemplateFormModal.tsx` (카테고리, 유형, 강조, 버튼, 변수감지)
+- RCS 템플릿 등록 모달 — `RcsTemplateFormModal.tsx`
+- 메뉴 "카카오&RCS" 추가 (녹색) — `DashboardHeader.tsx`
+- 라우트 `/kakao-rcs` 추가 — `App.tsx`
+- 발송창 탭 변경: 문자/RCS/알림톡 (브랜드MSG 제거) — `Dashboard.tsx`, `TargetSendModal.tsx`
+- 알림톡 탭 실제 발송 연결 (준비중 → 발송 버튼)
+- AI 한줄로 유형선택에서 카카오 제거
+- 슈퍼관리자 템플릿 관리 탭 + 2줄 메뉴 — `AdminDashboard.tsx`
+
+#### 추가 수정 (전수점검 + UI 개선)
+- `companies.ts` — 담당자 `manager_contacts` companies 덮어쓰기 방지 (슬라이드1 버그)
+- `Dashboard.tsx` — 스팸테스트 `%회신번호%` selectedCallback 폴백 (슬라이드6 버그)
+- `Dashboard.tsx` — RCS 탭 텍스트입력 → 템플릿 선택 기반으로 교체
+- `Dashboard.tsx` — 알림톡/RCS 승인 템플릿 자동 로드 추가
+- `ResultsModal.tsx` — 메시지 상세보기 모달 overscrollBehavior: contain (슬라이드11)
+- `AdminDashboard.tsx` — 14개 탭 → 드롭다운 그룹 메뉴 (고객관리/발송관리/요금정산/시스템)
+
+#### 수정 파일 (14개)
+- `packages/backend/src/utils/sms-queue.ts` — CT-04 `insertAlimtalkQueue()` 추가
+- `packages/backend/src/routes/companies.ts` — 알림톡/RCS 템플릿 CRUD 8개 엔드포인트
+- `packages/backend/src/routes/admin.ts` — 슈퍼관리자 템플릿 관리 7개 엔드포인트
+- `packages/backend/src/routes/campaigns.ts` — 직접발송 알림톡 분기 + import
+- `packages/frontend/src/pages/KakaoRcsPage.tsx` — 신규
+- `packages/frontend/src/components/AlimtalkTemplateFormModal.tsx` — 신규
+- `packages/frontend/src/components/RcsTemplateFormModal.tsx` — 신규
+- `packages/frontend/src/components/DashboardHeader.tsx` — 카카오&RCS 메뉴 추가
+- `packages/frontend/src/App.tsx` — `/kakao-rcs` 라우트
+- `packages/frontend/src/pages/Dashboard.tsx` — 발송창 탭 변경 + 알림톡 발송 연결 + 카카오 옵션 제거
+- `packages/frontend/src/components/TargetSendModal.tsx` — 탭 변경 + 알림톡 발송 연결
+- `packages/frontend/src/components/AiCampaignSendModal.tsx` — 타입 변경 (kakao_brand→rcs)
+- `packages/frontend/src/pages/AdminDashboard.tsx` — 템플릿 관리 탭 + 2줄 메뉴
+- `status/CHANNEL-EXPANSION.md` — 문서 업데이트
+
+#### Phase 2 예정
+- 휴머스온 알림톡 API 연동 (템플릿 등록 자동화 + 발송)
+- 젬텍 RCS API 연동 (발송)
+- 브랜드메시지 8종 메시지 유형 확장 (`status/BRAND-MESSAGE-DESIGN.md` 참조)
+- QTmsg SMSQ_SEND 알림톡 발송 완전 연결 (`status/BRAND-MESSAGE-DESIGN.md` §10~11 참조)
+
+---
+
+### 🔧 D91 — QA 버그리포트 10건 전면 수정 (2026-03-23) — ✅ 수정 완료
+
+> **배경:** 테스터 PPT 버그리포트 (한줄로_20260323.pptx) — 10개 슬라이드, 5개 그룹. 컨트롤타워 우선 수정 원칙 준수.
+> **상세:** `status/D91-BUGFIX-REPORT.md` 참조
+
+#### 수정 그룹 (5개)
+
+**그룹1: 콜백번호 (A+B)**
+- A: 미등록 회신번호 발송 시 "수신거부번호 미로딩" 에러 → 에러 메시지 명확화 (080 미설정 안내)
+- B: 발신번호 배정(assigned) 미작동 → CT-08에 userId + assignment_scope 필터 추가
+
+**그룹2: 담당자 격리 (C)**
+- 담당자 등록 시 회사 전체 브랜드 공유 → users.manager_contacts 컬럼 추가 (DB 마이그레이션) + 사용자별 저장/조회
+
+**그룹3: 소수점+스팸테스트 (E+H+I)**
+- E+H: 맞춤한줄 자동 스팸테스트에서 타겟 아닌 고객 데이터 사용 → ai.ts에서 타겟 필터 적용 샘플을 firstRecipient로 전달
+- I: 맞춤한줄/직접타겟발송 미리보기 소수점 잔존 → 프론트 replaceVars 숫자 포맷팅 추가
+
+**그룹4: LMS (F+G)**
+- F: LMS 제목 미입력 발송 가능 → campaigns.ts에 subject 필수 검증 추가
+- G: 맞춤한줄 SMS 초과 시 LMS 전환 불가 → LMS 전환 확인 모달 추가
+
+**그룹5: 필터/표시 (D+J)**
+- D: 평균주문금액 드롭다운만 제공 → sampleValues 필터링 강화 (trim + null/빈값 정확 제거)
+- J: 발송결과 LMS/MMS 제목 미표시 → results.ts SELECT + ResultsModal 제목 표시
+
+#### 수정 파일 (12개)
+- `packages/backend/src/utils/callback-filter.ts` — CT-08 userId + assignment_scope 필터
+- `packages/backend/src/routes/campaigns.ts` — CT-08 userId 전달 + LMS subject 필수 + user 담당자 조회
+- `packages/backend/src/routes/companies.ts` — GET/PUT settings 사용자별 manager_contacts
+- `packages/backend/src/routes/ai.ts` — 스팸테스트 firstRecipient 전달 (2곳)
+- `packages/backend/src/routes/customers.ts` — 자동 타입 감지 sampleValues 필터링 강화
+- `packages/backend/src/routes/results.ts` — SELECT에 subject/message_subject 추가
+- `packages/frontend/src/pages/Dashboard.tsx` — 080 미설정 에러 메시지 개선
+- `packages/frontend/src/components/AiCustomSendFlow.tsx` — LMS 전환 모달 + 숫자 포맷팅
+- `packages/frontend/src/components/TargetSendModal.tsx` — replaceVars 숫자 포맷팅
+- `packages/frontend/src/components/ResultsModal.tsx` — LMS/MMS 제목 표시
+
+#### DB 마이그레이션 (실행 완료)
+- `users.manager_contacts` JSONB 컬럼 추가 + 기존 companies 데이터 admin에 복사
+
+#### D91 교훈
+- **컨트롤타워에 필터 추가 시 모든 발송 경로 확인:** callback-numbers 조회에만 배정 필터 적용하고 발송 시 CT-08에 미적용하면 배정이 무의미
+- **스팸테스트·미리보기·발송의 고객 데이터는 반드시 타겟 필터 적용 동일 데이터:** 임의 고객으로 테스트하면 개인화 불일치
+- **프론트 인라인 치환에도 백엔드와 동일한 숫자 포맷팅 필수:** 한쪽만 수정하면 나머지 경로에서 소수점 잔존
+
+---
+
+### 🔧 D90 — AI 한줄로/맞춤한줄 개별회신번호 옵션 누락 수정 (2026-03-20) — ✅ 수정 완료
+
+> **배경:** AI 맞춤한줄 발송 모달에서 "📱 개별회신번호 (고객별 매장번호)" 옵션이 표시되지 않는 문제. 직접발송에서는 항상 표시되지만 AI 발송 모달에서만 `callbackNumbers.length >= 2` 조건이 걸려 있어 불일치 발생.
+
+#### 원인
+- `AiCampaignSendModal.tsx` 237줄에 `{callbackNumbers.length >= 2 && (...)}` 조건이 있어, callback_numbers가 1개(기본번호)인 경우 개별회신번호 옵션이 숨겨짐
+- 직접발송(Dashboard.tsx), TargetSendModal.tsx 등 다른 모든 발송 경로에는 이 조건이 없어 항상 표시됨
+
+#### 수정
+- `AiCampaignSendModal.tsx`에서 `callbackNumbers.length >= 2` 조건 제거 → 직접발송과 동일하게 조건 없이 항상 표시
+
+#### 수정 파일 (1개)
+- `packages/frontend/src/components/AiCampaignSendModal.tsx` — 개별회신번호 옵션 조건부 렌더링 → 무조건 렌더링
+
+#### D90 교훈
+- **동일 UI 요소(개별회신번호 드롭다운)는 모든 발송 경로에서 동일한 조건으로 표시.** 한 경로에만 추가 조건을 걸면 UX 불일치 발생
+
+---
+
+### 🔧 D89 — 마이너 수정 5건 + D88 직접발송 잠금 회귀 수정 (2026-03-20) — ✅ 배포 완료
+
+> **배경:** 테스터 PPT 마이너 수정 요청 5건 (한줄로(마이너한 수정 요청)_20260320.pptx) + D88에서 직접발송까지 과잉 잠금한 회귀 버그 수정.
+
+#### 1. 고객DB 검색 정규화 (CT-01 customer-filter.ts)
+- 전화번호 검색: 하이픈 자동 제거 (`REPLACE(col, '-', '')`)
+- 주소/매장명 검색: 공백+언더스코어 자동 제거
+- structured + mixed 양쪽 모드 적용
+
+#### 2. 고객DB 숫자 포맷 (CustomerDBModal.tsx)
+- 포인트/구매횟수/커스텀 NUMBER 필드에 toLocaleString() 적용
+
+#### 3. 발송결과 전화번호 검색 (results.ts)
+- SMS/카카오/폴백 3곳 하이픈 제거 정규화 적용
+
+#### 4. 날짜 표시 하루 밀림 수정 (formatDate.ts)
+- YYYY-MM-DD 순수 날짜를 UTC 변환 없이 직접 파싱하여 하루 밀림 방지
+
+#### 5. 예약발송 바이트 계산 (ScheduledCampaignModal.tsx)
+- UTF-8 TextEncoder → EUC-KR 기준 (한글 2바이트) 계산으로 변경
+
+#### 6. D88 회귀 수정: 직접발송 잠금 해제 (DashboardHeader.tsx)
+- D88에서 lockGuard()가 직접발송까지 잠금 → 무료체험 만료 시 직접발송 불가 회귀
+- **수정:** 직접발송 메뉴에서 lockGuard + locked:isSubscriptionLocked 제거
+- **정책:** 직접발송은 구독 상태 무관하게 항상 사용 가능. 스팸필터테스트만 잠금 유지
+
+#### 수정 파일 (6개)
+- `packages/backend/src/utils/customer-filter.ts` — normalizeContainsSearch 헬퍼 추가
+- `packages/backend/src/routes/results.ts` — 하이픈 제거 검색 3곳
+- `packages/frontend/src/components/CustomerDBModal.tsx` — 숫자 포맷팅
+- `packages/frontend/src/utils/formatDate.ts` — 날짜 파싱 재작성
+- `packages/frontend/src/components/ScheduledCampaignModal.tsx` — EUC-KR 바이트 계산
+- `packages/frontend/src/components/DashboardHeader.tsx` — 직접발송 lockGuard 해제
+
+#### D89 교훈
+- **lockGuard 등 잠금 적용 시 "이 기능이 정말 잠겨야 하는가?" 기능별로 판단 필수.** 무료체험 만료여도 직접발송(기본 기능)은 사용 가능해야 함
+- **검색 정규화는 컨트롤타워(CT-01)에서 일괄 처리.** 인라인 REPLACE 금지
+- **SMS 바이트 계산은 EUC-KR 기준(한글 2바이트).** TextEncoder(UTF-8, 한글 3바이트)와 혼동 금지
+
+---
+
+### 🔧 D88 — QA 버그리포트 11건 전면 수정 (2026-03-20) — ✅ 배포 완료
+
+> **배경:** 테스터 직원들의 PPT 버그리포트 (한줄로_20260320.pptx) — 11개 슬라이드, 7개 그룹(A~G). 컨트롤타워 패턴 + 동적 처리 원칙으로 전체 수정.
+
+#### A. 구독/게이팅 (슬라이드 1)
+- 무료체험 만료 후 자동발송/캘린더/스팸필터 사용 가능했던 문제
+- **수정:** DashboardHeader.tsx `isSubscriptionLocked` prop + `lockGuard()` → AI 분석/자동발송/캘린더 잠금. Dashboard.tsx `isSpamFilterLocked` 등에 OR 조건 추가. auto-campaigns.ts `checkPlanGating`에 subscription_status + is_trial_expired 체크 추가
+- **⚠️ D89 회귀 수정:** 직접발송까지 lockGuard 적용하여 과잉 잠금 → D89에서 직접발송 lockGuard 해제. 직접발송은 구독 상태 무관 항상 사용 가능
+
+#### B. 고객DB 필터 (슬라이드 3-4)
+- 수신동의여부: 텍스트 입력 → 동의/거부 드롭다운 필요
+- 평균주문금액: 금액인데 상세조건(이상/이하/범위) 없음
+- VIP행사참석: "참석" 검색 시 "미참석" 포함 전체 추출
+- **수정:** CustomerDBModal.tsx boolean 필드 자동 드롭다운('동의'/'거부'). enabled-fields API D88 자동 타입 감지(샘플 20건→number/date/string). customer-filter.ts dropdown 필드 contains→eq 자동 전환
+
+#### C. 개인화/소수점 (슬라이드 7-8-9)
+- 맞춤한줄 미리보기에 타겟 아닌 고객 표시 + 스팸테스트 개인화 NULL + 금액 소수점 2자리
+- **수정:** ai.ts parse-briefing에서 타겟 필터 적용 sampleCustomer 반환 → AiCustomSendFlow.tsx setSampleData. 스팸테스트 replaceVars에 field_key→field_label 매핑 추가. messageUtils.ts string→Number 파싱 후 toLocaleString(). AiCustomSendFlow.tsx replaceSampleVars도 동일 처리
+
+#### D. 발신번호 배정 격리 (슬라이드 10) + 미등록 회신번호 확인 (슬라이드 2)
+- 시세이도 나스만 배정한 번호가 다른 사용자에게도 공유
+- **수정:** companies.ts callback-numbers: `company_admin`도 admin과 동일하게 전체 조회 (기존에는 company_user와 같은 필터 적용)
+- 미등록 회신번호 확인 모달: 기존 CT-08 buildCallbackConfirmResponse 기반 4경로(direct/target/ai/aiCustom) 전부 적용 확인
+
+#### E. 수신거부 자동 등록 (슬라이드 5)
+- admin이 DB 업로드 시 수신거부 자동 반영 안 됨
+- **수정:** upload.ts admin 경로에 ① admin 본인 user_id INSERT 추가 + ② 고객 store_code 기준 브랜드 사용자 배정 유지
+
+#### F. 중간관리자 사용자별 DB 조회 (슬라이드 11)
+- 시세이도 중간관리자가 사용자별 DB 조회 시 데이터 없음
+- **수정:** customers.ts filterUserId를 `uploaded_by` → 해당 사용자의 `store_codes` 기준 `store_code = ANY(store_codes)` 필터로 변경
+
+#### G. 스팸테스트 광고표기 (슬라이드 6)
+- 스팸테스트 시 (광고)/무료수신거부 표기 없이 테스트됨
+- **수정:** spam-test-queue.ts autoSpamTestWithRegenerate에서 isAd=true일 때 (광고) 접두사 + 무료수신거부 접미사 래핑 후 테스트
+
+#### 수정 파일 (11개)
+- `packages/backend/src/routes/customers.ts` — enabled-fields 자동 타입 감지 + filterUserId store_codes 기반
+- `packages/backend/src/routes/companies.ts` — callback-numbers company_admin 전체 조회
+- `packages/backend/src/routes/upload.ts` — admin 수신거부 자동 등록
+- `packages/backend/src/routes/auto-campaigns.ts` — checkPlanGating 구독 체크
+- `packages/backend/src/routes/ai.ts` — parse-briefing sampleCustomer 반환
+- `packages/backend/src/utils/messageUtils.ts` — numeric string 포맷팅
+- `packages/backend/src/utils/customer-filter.ts` — contains→eq 자동 전환
+- `packages/backend/src/utils/spam-test-queue.ts` — 광고문구 래핑
+- `packages/frontend/src/pages/Dashboard.tsx` — isSubscriptionLocked 전파
+- `packages/frontend/src/components/DashboardHeader.tsx` — lockGuard + 잠금 prop
+- `packages/frontend/src/components/AiCustomSendFlow.tsx` — sampleData/replaceVars/replaceSampleVars 수정
+- `packages/frontend/src/components/CustomerDBModal.tsx` — boolean 드롭다운
+
+#### D88 교훈
+- **DB 값의 실제 타입을 맹신하지 않는다:** PostgreSQL numeric 필드가 JS에서 string으로 올 수 있음 → 항상 타입 체크 후 변환
+- **미리보기 샘플은 타겟 필터를 적용한 고객이어야 한다:** enabled-fields의 범용 샘플 ≠ 타겟 매칭 샘플
+- **dropdown 필드에 contains 연산자가 오면 eq로 전환:** "참석" contains → "미참석"도 매칭되는 패턴 방지
+- **admin 업로드 시 수신거부는 admin 본인에게도 등록:** 단일 브랜드 회사에서 브랜드 사용자 없으면 수신거부 0건
+- **구독 만료 게이팅은 프론트+백엔드 양쪽 필수:** 프론트만 차단하면 API 직접 호출로 우회 가능
+
+---
+
+### 🔧 D87 — 발신번호 사용자별 배정 기능 (2026-03-19~20) — ✅ 배포 완료
+
+> **배경:** 발신번호를 "전체 사용" 또는 "특정 사용자에게만 배정" 선택적으로 관리하는 기능 요청 (Harold님 실무 피드백)
+
+#### 수정 내용
+- **DB 변경 (✅ 마이그레이션 완료):**
+  - `callback_numbers.assignment_scope` 컬럼 추가 (VARCHAR(10), DEFAULT 'all')
+  - `callback_number_assignments` 테이블 생성 (callback_number_id + user_id 매핑)
+- **컨트롤타워 (CT-10 sender-registration.ts):**
+  - 배정 관리 함수 7개 추가: updateAssignmentScope, assignUsersToCallback, unassignUserFromCallback, getAssignmentsByCallback, getAssignedCallbackIds, replaceAssignments
+- **백엔드 API (manage-callbacks.ts):**
+  - PUT /:id/scope — 전체/지정 전환
+  - GET /:id/assignments — 배정된 사용자 조회
+  - PUT /:id/assignments — 배정 사용자 전체 교체
+  - DELETE /:id/assignments/:userId — 개별 배정 해제
+  - GET / 목록에 assignment_scope 포함
+- **발송 시 필터링 (companies.ts):**
+  - callback-numbers 조회에 assignment_scope 기반 필터 적용
+  - **admin 사용자:** assignment_scope 무관하게 전체 번호 조회 (관리 가시성 보장)
+  - **일반 사용자:** scope='all' + 본인 배정된 'assigned' 번호만 조회
+  - company-users API 추가 (배정 모달용)
+  - 중복 callback-numbers 라우트 제거 (D87 버전으로 통합)
+- **프론트엔드 (CallbacksTab.tsx):**
+  - 등록 발신번호 테이블에 "사용 범위" 컬럼 + 전체/지정 토글
+  - 사용자 배정 모달 (체크박스 선택 → 저장 + 이름/이메일 검색 기능)
+  - **배정 0명 안전장치:** 저장/취소 시 배정 사용자 0명이면 자동으로 'all'(전체 사용)로 복귀
+  - "발신번호 등록/삭제는 슈퍼관리자만 가능합니다" 안내 문구 제거
+- **API 클라이언트 (api/client.ts):** manageCallbacksApi에 배정 메서드 4개 추가
+
+#### 수정 파일 (5개)
+- `packages/backend/src/utils/sender-registration.ts` — 배정 관리 컨트롤타워 함수
+- `packages/backend/src/routes/manage-callbacks.ts` — 배정 API 4개
+- `packages/backend/src/routes/companies.ts` — callback-numbers 필터링 (admin 전체조회 + 중복라우트 제거) + company-users API
+- `packages/frontend/src/api/client.ts` — 배정 API 메서드
+- `packages/frontend/src/components/manage/CallbacksTab.tsx` — 배정 UI + 0명 안전장치
+
+#### D87 교훈
+- **assigned 상태에서 배정 사용자 0명 → 아무도 해당 번호를 볼 수 없음** → AutoSendFormModal "등록된 발신번호가 없습니다" 사고 발생. admin은 항상 전체 조회 + 0명이면 자동 'all' 복귀 안전장치로 해결
+
+---
+
+### 🔧 D86 — 자동발송 완전화 + 맞춤한줄/개인화/스팸 수정 (2026-03-19) — ✅ 배포 완료
+
+> **배경:** (1) 맞춤한줄 발송대상 추출 0명/전체 (2) 개인화 NULL (3) 맞춤한줄 스팸 자동화 미구현 (4) 날짜 UTC raw 표시 (5) 자동발송 Phase 2 미완성 (타겟필터/D-1알림/실행이력)
+
+#### D84 — 맞춤한줄 발송대상 추출 0명/전체 (✅ 배포완료)
+- **근본 원인:** parseBriefing 프롬프트 하드코딩 (직접 컬럼 9개만) → 커스텀 필드/registered_store 등 AI가 필터 생성 불가
+- **수정:** `detectActiveFields()` + `buildFilterFieldsPrompt()` 공통 함수 추출 → recommendTarget과 parseBriefing 공용. 하드코딩 프롬프트 → 동적 프롬프트 전환
+- **수정 파일:** services/ai.ts, routes/ai.ts, AiCustomSendFlow.tsx
+
+#### D85 — 개인화 NULL + 맞춤한줄 스팸 자동화 + 날짜 KST (✅ 배포완료)
+- **개인화 NULL 원인:** recommend-target이 `sample_customer`를 displayName 키("이름")로 반환 → test-send의 `replaceVariables`는 column 키("name")로 접근 → undefined
+- **수정:** `sample_customer_raw` (column 키 DB row 원본) 추가 반환. Dashboard.tsx에서 test-send 호출 시 raw 데이터 전달
+- **맞춤한줄 스팸 자동화:** generate-custom 라우트에 프로 이상 `autoSpamTestWithRegenerate` 추가 (한줄로와 동일 로직)
+- **날짜 KST:** `replaceVariables`에 `timeZone: 'Asia/Seoul'` 고정 + ISO 문자열 자동 감지 포맷팅
+- **수정 파일:** routes/ai.ts, pages/Dashboard.tsx, AiCustomSendFlow.tsx, utils/messageUtils.ts
+
+#### D86 — 자동발송 완전화 3건 (✅ 배포완료)
+- **D86-1 타겟 설정:** AutoSendFormModal 5→6단계. Step 3에 AI 기반 타겟 자동 생성 (`recommend-target` 컨트롤타워 재활용, `auto_relax: false`). 사용자가 자연어로 대상 설명 → AI가 target_filter 생성 → 예상 인원 표시. 매 실행 시 동적 조회. 빈 필터 {} 차단 (D83 사고 방지)
+- **D86-2 D-1 사전 알림 UI:** Step 4(스케줄) 하단에 ON/OFF 토글 + 전화번호 입력. `pre_notify` + `notify_phones` handleSave에 전달. 백엔드 `sendPreNotification()` 기존 구현 활용
+- **D86-3 실행 이력 조회:** AutoSendPage 캠페인 카드에 "이력" 버튼. GET /:id API → 모달에 회차별 결과 (대상/발송/성공/실패/상태/AI여부)
+- **수정 파일:** AutoSendFormModal.tsx, AutoSendPage.tsx, DirectTargetFilterModal.tsx (원복)
+
+#### D79 — ✅ 배포 완료 (Harold님 확인)
+#### D83 — ✅ 배포 완료 (Harold님 확인)
+
+#### 자동발송 Phase 2 완성 상태
+- ✅ AI 문안 자동생성 (D80)
+- ✅ 타겟 필터 설정 (D86-1) — recommend-target 재활용, 매 실행 시 동적 조회
+- ✅ D-1 사전 알림 (D86-2)
+- ✅ 실행 이력 상세 조회 (D86-3)
+- ✅ 3건 중복 방지 + KST 이중변환 (D83)
+- 🔜 Phase 3 (A/B 테스트, 발송 최적 시간 추천) — 향후 과제
+
+---
+
+### 🔧 D83 — 고객DB 필터 전면 수정 + 자동발송 3건 중복/시간오차/개인화 (2026-03-19) — ✅ 배포 완료
+
+> **배경:** 직원 리포트 5건. (1) 고객DB 필터 검색 다수 컬럼 미작동 (2) 한줄로 정상 (3) 맞춤한줄 타겟추출 0명/전체 (4) 미리보기/담당자테스트 개인화 불일치 (5) 자동발송 3건 중복+시간오차+D-1 알림 미발송
+
+#### 수정 항목 (8개 파일)
+
+**1. structured 모드 FIELD_MAP 동적 루프 통일 (customer-filter.ts — CT-01)**
+- **문제:** NUMERIC_FIELDS/DATE_FIELDS 하드코딩 리스트 + store_name 전용 핸들러 → contains 미지원, 새 필드 누락
+- **수정:** 하드코딩 리스트 전부 삭제 → 한줄로(mixed 모드)와 동일한 FIELD_MAP 동적 루프로 통일. 특수 처리 필드(gender/grade/region/sms_opt_in/store_code/age)만 전용 핸들러 유지
+- **추가:** age에 eq 연산자 추가 (일치 검색 시 전체 리스트 반환 버그), safeDateValue 방어 (한국식 날짜 입력 시 쿼리 에러 방지), 디버그 로그
+
+**2. normalizeDate 한국식 날짜 패턴 (normalize.ts)**
+- **문제:** "2025. 12. 17." 같은 한국식 형식 미지원 → 날짜 필터 시 PostgreSQL DateTimeParseError
+- **수정:** 한국식 날짜 패턴 regex 추가 ("YYYY. M. D." → "YYYY-MM-DD")
+
+**3. 날짜 필드 date picker (CustomerDBModal.tsx)**
+- **문제:** 날짜 필드에 텍스트 자유 입력 → 비정상 형식 직접 입력 가능
+- **수정:** `<input type="date">` 적용 (비정상 입력 원천 차단)
+
+**4. 성별 dropdown (customers.ts + CustomerDBModal.tsx)**
+- **문제:** filter-options API에 genders 미포함 → 성별이 텍스트 입력(contains) → 핸들러에서 무시 → 전체 리스트
+- **수정:** filter-options에 genders 추가 + CustomerDBModal에서 성별 dropdown 활성화
+
+**5. 맞춤한줄 담당자테스트 sampleCustomer (AiCustomSendFlow.tsx)**
+- **문제:** test-send API 호출 시 sampleCustomer 미전달 → 미리보기와 다른 고객으로 개인화
+- **수정:** sampleData를 sampleCustomer로 전달
+
+**6. 자동발송 3건 중복 방지 (auto-campaign-worker.ts)**
+- **문제:** `status='active'→'active'` UPDATE는 잠금 역할 못 함 → 워커 1시간 간격 재실행 시 동일 캠페인 반복 처리
+- **수정:** `status='active'→'executing'` 원자적 잠금 + 완료 후 'active' 복원. executing 상태에서 다음 워커가 스킵
+
+**7. 자동발송 KST 이중변환 (auto-campaigns.ts + auto-campaign-worker.ts)**
+- **문제:** `toLocaleString('Asia/Seoul') + kstToUtc(-9h)` → KST 서버에서 이중 변환 → 9시간 오차 (10:00 KST 설정 → 01:00 KST 실행)
+- **수정:** 서버 타임존 무관한 UTC+9 오프셋 기반 계산으로 교체 (`Date.UTC() - KST_OFFSET_MS`)
+
+#### 미해결 (다음 세션)
+- 자동발송 target_filter UI 미구현 (Phase 2 미완성) → 필터 `{}` → 전체 고객 발송
+- 커스텀 필드(VIP행사참석 등) dropdown 연동 확인 (배포 후 디버그 로그로 확인)
+- 자동발송 D-1 알림: pre_notify/notify_phones 설정 여부 확인 필요
+
+#### 수정 파일 (8개)
+- `packages/backend/src/utils/customer-filter.ts` — structured 하드코딩 삭제 + FIELD_MAP 통일 + age eq + safeDateValue + 디버그 로그
+- `packages/backend/src/utils/normalize.ts` — 한국식 날짜 패턴
+- `packages/backend/src/routes/customers.ts` — filter-options genders 추가
+- `packages/frontend/src/components/CustomerDBModal.tsx` — date picker + gender dropdown
+- `packages/frontend/src/components/AiCustomSendFlow.tsx` — sampleCustomer 전달
+- `packages/backend/src/utils/auto-campaign-worker.ts` — executing 잠금 + calcNextRunAt KST 수정
+- `packages/backend/src/routes/auto-campaigns.ts` — calcNextRunAt KST 수정
+
+---
+
+### 🔧 D82 — AI 타겟추출 정상화 + 전체필드 동적필터 통일 + 개인화 통일 + 자동발송 시간 KST (2026-03-18) — ✅ 배포 완료
+
+> **배경:** (1) AI 타겟추출 0명 버그 (2) 전체고객 풀백 방지 과잉 로직 (3) address/name/phone 등 필터 누락 (4) 미리보기 vs 테스트발송 개인화 불일치 (5) 자동발송 시간 표시 오류 (6) 고객DB 필터 UI 중복/과잉
+
+#### 수정 항목
+
+**1. AI 타겟추출 0명 → 정상 추출 복구 (routes/ai.ts + services/ai.ts)**
+- **문제:** 어제 커밋(73cd231)의 "전체 고객 풀백 방지" 로직이 정상 결과까지 0으로 덮어씀
+- **수정:** (1) 풀백 방지 과잉 로직 삭제 — 로그만 남기고 actualCount를 임의로 0으로 만들지 않음 (2) AI 프롬프트 "핵심 안전 규칙" 삭제 — AI가 `filters: {}` 과잉 반환 유발 (3) countFilteredCustomers 에러 핸들링 — catch에서 조용히 0 반환 → throw로 전환
+
+**2. 전체 필드 동적 필터 통일 (customer-filter.ts — CT-01)**
+- **문제:** mixed 모드 SPECIAL_FIELDS에 name/email/address 포함 → FIELD_MAP 동적 루프에서 건너뜀 → AI가 address 필터 반환해도 SQL 미생성 → 전체 고객 반환
+- **문제:** structured 모드 STRING_FIELDS에 phone 미포함 → 고객DB에서 전화번호 필터 무시
+- **수정 (mixed 모드):** SPECIAL_FIELDS에서 name/email/address 제거 → FIELD_MAP 동적 루프가 자동 처리. SPECIAL_FIELDS에는 진짜 특수 처리 필요한 7개만 (gender, grade, region, age, phone, sms_opt_in, store_code)
+- **수정 (structured 모드):** STRING_FIELDS/NUMERIC_FIELDS/DATE_FIELDS 하드코딩 분기 뒤에 FIELD_MAP 동적 처리 추가 → phone 포함 모든 직접 컬럼 필드 자동 처리. 새 필드 추가 시 FIELD_MAP에만 등록하면 양쪽 모드 모두 자동 반영.
+
+**3. 고객DB 필터 UI 통합 (CustomerDBModal.tsx)**
+- **수정:** (1) 상단 "이름 또는 전화번호 검색" 중복 영역 삭제 (2) 필터 한 줄로 통합 (3) 문자열 필드 → 연산자 드롭다운 없이 자동 contains(포함) 검색 (4) 숫자/날짜 필드만 이상/이하/범위 연산자 표시 (5) 초기화 버튼 필터 라인 끝으로 이동
+
+**4. 미리보기 = 테스트발송 = 스팸테스트 개인화 통일 (Dashboard.tsx + campaigns.ts + spam-test-queue.ts)**
+- **문제:** 미리보기 `ORDER BY name ASC` vs 테스트발송 `ORDER BY created_at DESC` → 서로 다른 고객 데이터로 치환
+- **수정:** (1) Dashboard.tsx handleTestSend/handleTargetTestSend에 sampleCustomer body 전달 (2) campaigns.ts test-send에서 sampleCustomer 수신 시 DB 재조회 없이 그대로 사용 (3) spam-test-queue.ts 폴백 정렬 name ASC로 통일
+
+**5. 자동발송 다음 발송일 시간 표시 KST 변환 (AutoSendPage.tsx)**
+- **문제:** DB에 UTC로 저장된 next_run_at을 프론트에서 getHours()로 표시 → 10:00이 01:00으로 표시
+- **수정:** formatDate()에서 UTC → KST (+9시간) 변환 후 getUTCHours()로 표시
+
+#### 수정 파일 (8개)
+- `packages/backend/src/utils/customer-filter.ts` — mixed SPECIAL_FIELDS 최소화 + structured FIELD_MAP 동적 처리
+- `packages/backend/src/utils/spam-test-queue.ts` — 폴백 정렬 name ASC 통일
+- `packages/backend/src/routes/ai.ts` — 풀백 방지 과잉 로직 삭제 + countFilteredCustomers 에러 핸들링
+- `packages/backend/src/services/ai.ts` — AI 프롬프트 과잉 규칙 삭제 + countFilteredCustomers throw 전환
+- `packages/backend/src/routes/campaigns.ts` — test-send sampleCustomer 수용
+- `packages/frontend/src/pages/Dashboard.tsx` — sampleCustomer 전달
+- `packages/frontend/src/components/CustomerDBModal.tsx` — 필터 UI 통합 + 자동 contains
+- `packages/frontend/src/pages/AutoSendPage.tsx` — formatDate KST 변환
+
+#### ⚠️ 검증 TODO
+- [ ] AI 한줄로 타겟추출 → 정상 인원수 표시 확인
+- [ ] 고객DB 필터 → 전화번호/주소/이름 포함 검색 정상 작동
+- [ ] 담당자테스트 → 미리보기와 동일 고객명으로 개인화 확인
+- [ ] 자동발송 다음 발송일 → 설정한 시간(KST) 그대로 표시 확인
+- [ ] 자동발송 D-1 담당자 사전 알림 발송 여부 (내일 확인)
+
+---
+
+### 🔧 D78 — 프로 요금제 자동 스팸필터 테스트 + CT-09 (2026-03-16) — 배포 완료, 실서비스 검증 필요
+
+> **배경:** 프로(100만원) 요금제 차별화 핵심 기능. AI 문안생성 시 자동으로 스팸필터 테스트 수행 → 차단 문안은 자동 재생성하여 안전한 문안만 제공.
+> **⚠️ 상태: 코드 배포 완료, 실서비스 환경에서 E2E 검증 필요 (테스트폰 ACK 연동, 큐 순차 처리, 재생성 흐름 등)**
+
+#### 구현 내역
+
+**1. CT-09: spam-test-queue.ts (신규 컨트롤타워)**
+- 글로벌 큐 기반 순차 처리 — 동시에 1건만 active (테스트폰 충돌 방지)
+- batch_id로 3개 variant 그룹핑
+- 차단 시 자동 재생성 (최대 2회, AI 프롬프트에 "스팸 차단됨, 다른 표현" 지시)
+- Grace Period: 수동=10초, 자동=20초 (자동은 false positive 최소화)
+- 3초 간격 큐 워커 (app.ts listen 콜백에서 시작)
+
+**2. ai.ts — 자동 스팸테스트 연동**
+- POST /generate-message: AI 문안 생성 후 plans.auto_spam_test_enabled=true이면 자동 스팸테스트 실행
+- 3개 variant 전부 큐잉 → 순차 테스트 → 차단 시 재생성 → 결과를 응답에 포함
+- 응답에 spam_result, spam_regenerated, spamTestBatchId 등 추가
+
+**3. spam-filter.ts — 프로 이상 무료**
+- auto_spam_test_enabled=true인 요금제: 스팸필터 테스트 선불 차감 skip (무료)
+- 기존 베이직 요금제: 기존대로 수동 테스트 + 유료
+
+**4. AiCampaignResultPopup.tsx — 스팸 배지 UI**
+- Step 2 상단: 자동 스팸검사 진행/완료 배너 (검사 중.../전체 안전/N건 재생성됨)
+- variant별 배지: ✅ 수신 안전 / 🔄 재생성 완료 / 🚫 스팸 차단
+- 차단 variant 선택 불가 + 캠페인확정 버튼 disabled
+
+**5. spam_check_number 하드코딩 제거**
+- DB DEFAULT '0807196700' 제거 → 고객사 실제 080번호 동적 조회 (users 우선 → companies fallback)
+
+#### DB 변경 (적용 완료)
+```sql
+ALTER TABLE plans ADD COLUMN auto_spam_test_enabled BOOLEAN DEFAULT false;
+UPDATE plans SET auto_spam_test_enabled = true WHERE plan_code IN ('PRO', 'BUSINESS', 'ENTERPRISE');
+ALTER TABLE spam_filter_tests ADD COLUMN source VARCHAR(20) DEFAULT 'manual';
+ALTER TABLE spam_filter_tests ADD COLUMN variant_id VARCHAR(2);
+ALTER TABLE spam_filter_tests ADD COLUMN batch_id UUID;
+CREATE INDEX idx_spam_filter_tests_queued ON spam_filter_tests (status, created_at) WHERE status = 'queued';
+ALTER TABLE spam_filter_tests ALTER COLUMN spam_check_number DROP DEFAULT;
+```
+
+#### 수정 파일 (7개)
+- `packages/backend/src/utils/spam-test-queue.ts` — **신규** CT-09 컨트롤타워 (~450줄)
+- `packages/backend/src/routes/ai.ts` — 자동 스팸테스트 연동
+- `packages/backend/src/routes/spam-filter.ts` — 프로 무료 + 080번호 동적 조회
+- `packages/backend/src/routes/companies.ts` — my-plan 쿼리에 auto_spam_test_enabled 추가
+- `packages/backend/src/app.ts` — 큐 워커 시작 추가
+- `packages/frontend/src/components/AiCampaignResultPopup.tsx` — 스팸 배지 UI
+- 문서: CLAUDE.md (CT-09 추가), SCHEMA.md (컬럼 추가), STATUS.md
+
+#### ⚠️ 실서비스 검증 TODO
+- [ ] 프로 요금제 업체에서 AI 문안생성 → 자동 스팸테스트 실행 확인
+- [ ] 큐 워커 정상 동작 (3초 간격 폴링, 순차 처리)
+- [ ] 테스트폰 ACK → pass/blocked 판정 정상 여부
+- [ ] 차단 시 자동 재생성 → 새 문안으로 교체 확인
+- [ ] 여러 업체 동시 테스트 시 큐 충돌 없음 확인
+- [ ] 베이직 요금제 → 기존대로 수동 테스트 유지 확인
+- [ ] 프론트엔드 스팸 배지 표시 + 차단 variant 선택 불가 확인
+
+#### TypeScript 타입 체크
+- 백엔드/프론트엔드: ✅ 0 에러
+
+---
+
+### 🔧 D79 — 인라인 함수 전수조사/제거 + 날짜 정규화 수정 + 필터 UI 동적화 + plan_code 수정 (2026-03-16) — 배포 대기
+
+> **배경:** (1) YYMMDD 6자리 엑셀 업로드 에러 재발 (2) 프로 요금제 대시보드에 스팸필터 테스트 비용 합산 (3) 고객DB 필터 UI 하드코딩 (4) 인라인 중복 함수 전수조사 — Harold님 강력 지시로 routes/ 전체 파일에서 컨트롤타워 중복 함수 제거
+> **핵심:** CLAUDE.md 인라인 금지 원칙에도 불구하고 8건의 인라인 중복 함수가 잔존 → 물리적으로 전수 제거하여 구조적 재발 방지
+
+#### 수정 항목
+
+**1. YYMMDD 6자리 날짜 정규화 — 컨트롤타워(normalize.ts) 수정 (D79 핵심 교훈)**
+- **문제:** upload.ts에 인라인 `normalizeDateValue()` 함수가 존재 → 이전 세션에서 인라인 함수만 수정 → FIELD_MAP 경로(`normalizeByFieldKey` → `normalizeDate`)에 미반영 → 업로드 에러 재발
+- **수정:** normalize.ts `normalizeDate()`에 YYMMDD 6자리 핸들러 추가 (250103 → 2025-01-03). upload.ts 인라인 `normalizeDateValue()` + `excelSerialToDateStr()` 완전 삭제, `normalizeDate` import로 교체
+
+**2. 프로 요금제 대시보드 — plan_code 대소문자 불일치**
+- **문제:** customers.ts에서 `planCode === 'pro'`로 비교 → DB에 'PRO'(대문자) 저장 → 항상 false → 프로 계정도 스팸테스트 비용 합산
+- **수정:** `.toUpperCase()` 적용 + 대문자 비교 (`'PRO', 'BUSINESS', 'ENTERPRISE'`)
+
+**3. 고객DB 모달 필터 UI 동적화 (CustomerDBModal.tsx)**
+- **문제:** 성별/등급/지역 필터가 하드코딩 버튼 → 새 필드 추가 불가
+- **수정:** enabled-fields API 기반 동적 필드 드롭다운 + 연산자 선택 + 값 입력 UI. activeFilters 배열 → `buildDynamicFilterCompat` structured 형식 변환
+
+**4. customers_unified VIEW — uploaded_by 컬럼 추가**
+- **문제:** customers 테이블에 uploaded_by 추가 후 VIEW 미재생성 → 조회 에러
+- **수정:** Harold님이 서버에서 직접 DROP VIEW + CREATE VIEW DDL 실행 완료
+
+**5. ⚠️ 인라인 중복 함수 전수조사 — 8건 제거**
+
+| # | 파일 | 인라인 함수 | 컨트롤타워 교체 |
+|---|------|-----------|--------------|
+| 1 | upload.ts | `normalizeDateValue()` + `excelSerialToDateStr()` | normalize.ts `normalizeDate()` |
+| 2 | customers.ts | `buildDynamicFilter()` 래퍼 | customer-filter.ts `buildDynamicFilterCompat()` 직접 호출 |
+| 3 | ai.ts | `buildFilterWhereClause()` 래퍼 | customer-filter.ts `buildFilterWhereClauseCompat()` 직접 호출 |
+| 4 | campaigns.ts | `buildFilterQuery()` 래퍼 | customer-filter.ts `buildFilterQueryCompat()` 직접 호출 |
+| 5 | manage-stats.ts | `getTestSmsTable()` | sms-queue.ts `getTestSmsTables()` |
+| 6 | spam-filter.ts | `normalizeContent()` + `computeMessageHash()` + `getTestSmsTable()` | spam-test-queue.ts + sms-queue.ts |
+| 7 | auto-campaigns.ts | `kstToUtc()` | auto-campaign-worker.ts `kstToUtc()` |
+| 8 | spam-test-queue.ts / auto-campaign-worker.ts | (export 누락) | `export` 키워드 추가 |
+
+#### 수정 파일 (12개)
+- `packages/backend/src/utils/normalize.ts` — YYMMDD 6자리 핸들러 추가
+- `packages/backend/src/utils/spam-test-queue.ts` — normalizeContent/computeMessageHash export 추가
+- `packages/backend/src/utils/auto-campaign-worker.ts` — kstToUtc export 추가
+- `packages/backend/src/routes/upload.ts` — 인라인 제거 + normalizeDate import
+- `packages/backend/src/routes/customers.ts` — plan_code 대소문자 수정 + buildDynamicFilter 래퍼 제거
+- `packages/backend/src/routes/ai.ts` — buildFilterWhereClause 래퍼 제거
+- `packages/backend/src/routes/campaigns.ts` — buildFilterQuery 래퍼 제거
+- `packages/backend/src/routes/manage-stats.ts` — getTestSmsTable 제거 + getTestSmsTables import
+- `packages/backend/src/routes/spam-filter.ts` — 3개 인라인 제거 + import 교체
+- `packages/backend/src/routes/auto-campaigns.ts` — kstToUtc 제거 + import
+- `packages/frontend/src/components/CustomerDBModal.tsx` — 동적 필터 UI 전면 개편
+- `CLAUDE.md` — 인라인 금지 원칙 + D79 사례 추가
+- 서버 DDL: customers_unified VIEW 재생성 (Harold님 직접 실행 완료)
+
+#### TypeScript 타입 체크
+- 백엔드/프론트엔드: ✅ 0 에러
+
+---
+
+### 🔧 D81 — 대시보드 카드 동적 필터링 + UI 개선 4건 (2026-03-17) — 배포 대기 (git lock 해결 후)
+
+> **배경:** (1) 자동조건완화 토글 기본값 OFF (2) 직접타겟발송 회신번호 제거 (3) 빈 배열 저장 허용 (4) 대시보드 카드 동적 필터링 (고객사 DB 데이터 유무 기반)
+
+#### 수정 항목
+
+**1. 자동 조건완화 토글 기본값 OFF**
+- `AiSendTypeModal.tsx` — `useState(true)` → `useState(false)` (사용자가 명시적으로 켜야 함)
+
+**2. 직접 타겟 설정 모달 회신번호 제거**
+- `DirectTargetFilterModal.tsx` — CallbackNumber interface, callbackNumbers prop, selectedCallbackPhone state, 회신번호 select UI 블록 완전 삭제
+- `Dashboard.tsx` — DirectTargetFilterModal 호출에서 `callbackNumbers={callbackNumbers}` prop 제거
+
+**3. 대시보드 카드 빈 배열 저장 허용**
+- `admin.ts` PUT — `cards.length === 0` 차단 조건 제거 → 카드 전부 해제 후 저장 가능
+
+**4. ⚠️ 대시보드 카드 동적 필터링 (프론트+백엔드)**
+- **핵심 버그:** 프론트엔드 AdminDashboard.tsx에 17개 카드 풀이 **하드코딩**되어 있어 백엔드 API의 동적 필터링을 완전히 무시 → 몇 번 배포해도 변경 없음
+- **백엔드 (admin.ts GET /dashboard-cards):**
+  - 직접 컬럼 EXISTS 서브쿼리로 데이터 유무 체크
+  - customer_field_definitions + custom_fields JSONB 조합으로 커스텀 필드 체크
+  - `filterPoolByAvailableData()` (dashboard-card-pool.ts) — 필터링된 pool만 API 응답에 포함
+- **백엔드 (dashboard-card-pool.ts):**
+  - DashboardCardDef에 `requiresField`, `customLabelPatterns`, `emoji` 속성 추가
+  - 17개 카드 각각에 의존 직접 컬럼 + 커스텀 필드 라벨 패턴 매핑
+- **프론트엔드 (AdminDashboard.tsx):**
+  - ❌ 하드코딩 `DASHBOARD_CARD_POOL` 17개 **완전 삭제**
+  - ✅ API 응답 `pool`을 `dashboardCardPool` state로 저장하여 동적 렌더링
+  - 2열 그리드 레이아웃 (`grid-cols-1` → `grid-cols-2`)
+  - 이모지 표시 (`card.icon` → `card.emoji`)
+
+#### ⚠️ 배포 상태
+- **git index.lock 이슈:** Harold님 로컬에서 `.git/index.lock` 파일 존재 → git add/commit 실패 → push 시 "Everything up-to-date" → 서버에 변경 미반영
+- **해결:** `del C:\Users\ceo\projects\targetup\.git\index.lock` 후 재push 필요
+- **테스트계정 예상 결과:** total_purchase_amount(0건), recent_purchase_date(0건) 관련 카드 3개(총 구매금액, 30일 내 구매, 90일+ 미구매) 필터링되어 14개 표시
+
+#### 수정 파일 (6개)
+- `packages/backend/src/utils/dashboard-card-pool.ts` — emoji 필드 추가, filterPoolByAvailableData() 함수
+- `packages/backend/src/routes/admin.ts` — GET 동적 필터링 + PUT 빈 배열 허용
+- `packages/frontend/src/pages/AdminDashboard.tsx` — 하드코딩 제거 → API pool 사용, 2열 그리드
+- `packages/frontend/src/components/AiSendTypeModal.tsx` — 자동조건완화 기본 OFF
+- `packages/frontend/src/components/DirectTargetFilterModal.tsx` — 회신번호 완전 제거
+- `packages/frontend/src/pages/Dashboard.tsx` — callbackNumbers prop 제거
+
+#### TypeScript 타입 체크
+- 백엔드: ✅ 서버 tsc 0 에러 확인 완료
+- 프론트엔드: ✅ Vite 빌드 성공 확인 완료 (git push 미반영 상태)
+
+---
+
+### ✅ D80 — AI 프리미엄 기능 3종 (자동조건완화 + 성과추천 + 문안자동생성) (2026-03-16) — 배포 완료
+
+> **배경:** 프로(100만원) 요금제 전용 AI 프리미엄 기능 3종. plans.ai_premium_enabled 게이팅.
+> **DB 마이그레이션:** ✅ 완료 (`migrations/ai-premium-features.sql`)
+
+#### 기능 1: AI 타겟 자동조건완화 + ON/OFF 토글
+- `services/ai.ts` — `relaxFilters()` 추가: AI가 조건을 완화하면서 마케팅 의도 유지
+- `services/ai.ts` — `countFilteredCustomers()` 추가: 중복 COUNT 쿼리 공통화
+- `routes/ai.ts` — recommend-target에 auto-relax 로직 (최대 2회, ai_premium_enabled 게이팅)
+  - `auto_relax` 파라미터: 프론트에서 ON/OFF 제어 (기본 true)
+- `AiSendTypeModal.tsx` — "AI 한줄로" 프롬프트 영역에 자동조건완화 ON/OFF 토글 추가
+  - 프로 이상(aiPremiumEnabled)일 때만 표시
+  - ON: "매칭 0건 시 AI가 조건을 완화하여 재추천"
+  - OFF: "정확한 조건만 적용 (완화 없음)"
+- `Dashboard.tsx` — `handleAiCampaignGenerate`에서 autoRelax 값을 recommendTarget API에 전달
+
+#### 기능 2: 캠페인 성과 → AI 다음 캠페인 추천
+- `stats-aggregation.ts` — `aggregateCampaignPerformance()` 추가: 세그먼트별/시간대별/메시지타입별/TOP5 다각도 집계
+- `services/ai.ts` — `recommendNextCampaign()` 추가: AI가 성과 데이터 분석 → 다음 캠페인 추천
+- `routes/ai.ts` — `POST /api/ai/recommend-next-campaign` 엔드포인트 추가
+- `AiCustomSendFlow.tsx` — Step 2 헤더에 "AI 추천" 버튼 (앰버 그라데이션) + 호버 시 기능 설명 툴팁
+
+#### 기능 3: 자동발송 + AI 문안 자동생성 (D-2/D-1/D-day 3단계 생명주기)
+- `auto-campaign-worker.ts` — 전면 리팩토링:
+  - Stage 1 `runMessageGeneration()`: D-2에 AI 문안생성 + `autoSpamTestWithRegenerate()` 자동 스팸테스트
+  - Stage 2 `runPreNotification()`: D-1에 담당자 테스트발송 알림
+  - Stage 3 `executeAutoCampaign()`: D-day 실제 발송 (AI 폴백 체인: generated → fallback → message_content)
+- `auto-campaigns.ts` — CRUD API에 AI 필드 지원 (ai_generate_enabled, ai_prompt, ai_tone, fallback_message_content)
+  - `checkAiPremiumGating()` — AI 프리미엄 게이팅 체크 함수 추가
+  - CREATE/UPDATE에 AI 필수값 검증 + generated 필드 초기화 로직
+  - GET 목록에 `ai_premium_enabled` 프론트 전달
+- `AutoSendFormModal.tsx` — Step 4에 AI 자동생성 모드 토글:
+  - 프로 이상만 표시되는 ON/OFF 토글 (문안 톤 선택 제거 — 불필요)
+  - ON: 마케팅 컨셉 프롬프트 + 폴백 메시지 입력
+  - OFF: 기존 수동 메시지 작성 (변경 없음)
+  - Step 5 확인에 AI 설정 요약 표시
+  - 발신번호 라벨 개선: "발신번호 (수신자에게 표시되는 번호)" + 매장전화번호 개별회신번호 안내
+- `AutoSendPage.tsx` — PlanInfo에 ai_premium_enabled 추가, 모달에 prop 전달
+- SMS + LMS 모두 AI 문안생성 지원 (message_type 동적 전달)
+
+#### plan-info API 개선
+- `companies.ts` — plan-info 조회에 `p.ai_premium_enabled` 추가
+- `Dashboard.tsx` — PlanInfo 인터페이스에 `ai_premium_enabled` 타입 추가
+
+#### 수정 파일 목록
+- `migrations/ai-premium-features.sql` (신규)
+- `packages/backend/src/utils/stats-aggregation.ts`
+- `packages/backend/src/utils/auto-campaign-worker.ts`
+- `packages/backend/src/services/ai.ts`
+- `packages/backend/src/routes/ai.ts`
+- `packages/backend/src/routes/auto-campaigns.ts`
+- `packages/backend/src/routes/companies.ts`
+- `packages/frontend/src/components/AutoSendFormModal.tsx`
+- `packages/frontend/src/components/AiSendTypeModal.tsx`
+- `packages/frontend/src/components/AiCustomSendFlow.tsx`
+- `packages/frontend/src/pages/AutoSendPage.tsx`
+- `packages/frontend/src/pages/Dashboard.tsx`
+- `status/SCHEMA.md`, `status/STATUS.md`, `CLAUDE.md`
+
+#### TypeScript 타입 체크
+- 백엔드: ✅ 0 에러
+- 프론트엔드: ✅ 0 에러
+
+---
+
+### ✅ D77 — 대시보드 DB현황 6분할 페이징 뷰 (2026-03-16) — 배포 완료
+
+> **배경:** 대시보드 DB현황 카드가 4개/8개 고정 선택이었음. 카드를 자유롭게 선택하고 6개씩(3×2) 페이징으로 보여주도록 개선.
+
+#### 수정 항목
+
+**1. 슈퍼관리자 — 카드 선택 제한 해제 (AdminDashboard.tsx + admin.ts)**
+- 4칸/8칸 토글 버튼 제거 → "자유롭게 선택, 6개씩 페이징" 안내 UI로 교체
+- 체크박스 비활성화(isFull) 로직 제거 → 17종 풀에서 제한 없이 선택 가능
+- 백엔드 PUT 검증: `cardCount !== 4 && !== 8` 제거 → 선택한 카드 수 자동 반영
+
+**2. 고객사 대시보드 — 6분할 페이징 뷰 (Dashboard.tsx)**
+- `grid-cols-4` → `grid-cols-3` (3열×2행 = 6개씩 표시)
+- 페이지 state(dbCardPage) 추가, 도트 인디케이터로 페이지 전환 (2페이지 이상일 때만 표시)
+- 블러 처리(미업로드)도 3×2 그리드로 통일
+- 카드 색상은 전체 인덱스(globalIdx) 기준으로 페이지 간 일관성 유지
+
+**3. 컨트롤타워 주석 업데이트 (dashboard-card-pool.ts)**
+- "4개 또는 8개" → "원하는 만큼 선택, 6개씩 페이징 표시"
+
+#### 수정 파일 (4개)
+- `packages/backend/src/utils/dashboard-card-pool.ts` — 주석 업데이트
+- `packages/backend/src/routes/admin.ts` — PUT 검증 로직 변경 (4/8 제한 제거)
+- `packages/frontend/src/pages/AdminDashboard.tsx` — 4/8 토글 제거, 자유 선택 UI
+- `packages/frontend/src/pages/Dashboard.tsx` — 6분할 페이징 뷰 + 도트 인디케이터
+
+#### TypeScript 타입 체크
+- 백엔드/프론트엔드: ✅ 0 에러
+
+#### 하위호환
+- 기존 4개/8개 설정 고객사 → 그대로 동작 (4개=1페이지, 8개=2페이지)
+- DB/마이그레이션 불필요
+
+---
+
+### ✅ D76 — AI 문안 요일 오류 수정 + 요금제 피처 업데이트 + 자동발송 회사별 오버라이드 (2026-03-15) — 배포 완료
+
+> **배경:** (1) AI 메시지 생성 시 요일이 틀림(3/20목→실제 금) — AI가 요일을 자체 계산해서 오류. (2) 요금제 비교 페이지 피처 업데이트 필요. (3) 베이직 업체에 서비스로 자동발송 1건 제공 필요.
+
+#### 수정 항목
+
+**1. AI 문안 요일 오류 — getKoreanCalendar() 누락 (ai.ts)**
+- generateMessages() 프롬프트에 달력 미제공 → AI가 요일 자체 계산 → 오류
+- getKoreanCalendar() + 경고 문구를 generateMessages, parseBriefing, optimizePrompt 3곳 추가
+- getKoreanToday() 사용처 4곳 = getKoreanCalendar() 사용처 4곳 전수 일치 확인
+
+**2. 요금제 피처 업데이트 (PricingPage.tsx)**
+- 베이직: 분할 발송 제거, AI 자동매핑 추가
+- 프로: API 연동→Sync-Agent 연동, 카카오톡 연동 제거, DB 실시간 동기화 추가, 자동발송 5건 추가
+- 비즈니스: DB 실시간 동기화 제거(PRO에 이관), 자동발송 10건 추가
+- 엔터프라이즈: 자동발송 무제한 추가
+
+**3. 자동발송 회사별 오버라이드 (auto-campaigns.ts + DB)**
+- companies 테이블에 auto_campaign_override 컬럼 추가 (INTEGER, DEFAULT NULL)
+- NULL=플랜설정따름, 0=강제비활성, 1+=해당건수허용
+- checkPlanGating() 수정: 오버라이드 값이 있으면 플랜보다 우선 적용
+- GET / 목록 조회: 프론트에 전달하는 plan 정보도 오버라이드 반영
+- 사용법: `UPDATE companies SET auto_campaign_override = 1 WHERE id = '업체ID';`
+
+#### 수정 파일 (3개) + DB 마이그레이션 (1개)
+- `packages/backend/src/services/ai.ts` — 3곳에 getKoreanCalendar() 추가
+- `packages/frontend/src/pages/PricingPage.tsx` — getPlanFeatures() 피처 목록 업데이트
+- `packages/backend/src/routes/auto-campaigns.ts` — checkPlanGating + GET / 오버라이드 반영
+- `status/migrations/D76-auto-campaign-override.sql` — DB 마이그레이션
+
+#### TypeScript 타입 체크
+- 백엔드: ✅ 0 에러
+
+#### ⚠️ 배포 시 필수 작업
+1. 서버 DB에서 마이그레이션 SQL 실행: `status/migrations/D76-auto-campaign-override.sql`
+2. 이후 tp-push → tp-deploy-full
+
+---
+
+### ✅ D75 — UI/UX 버그 4건 수정 + CT-08 개별회신번호 필터링 컨트롤타워 (2026-03-14) — 배포 완료
+
+> **배경:** 직원(isoi, sh_de) 버그리포트 4건 — LMS 제목 입력 누락, 회신번호 에러 UX, 커스텀필드 타겟추출 NULL, 타겟추출 10000건 하드코딩 제한
+> **원칙:** 컨트롤타워를 수정하고 나머지는 컨트롤타워를 바라보게 업데이트 (Harold님 명시 지시)
+
+#### 수정 항목
+
+**Bug 1 (B-D75-01): SMS→LMS 자동전환 시 제목 입력 불가 + window.confirm**
+- AiCampaignResultPopup.tsx: `window.confirm` → 커스텀 모달 (amber/orange 그라데이션, 바이트 표시, LMS 전환 버튼)
+- AiCampaignSendModal.tsx: LMS 제목 입력 필드 추가 (selectedChannel === 'LMS' || 'MMS' 일 때 표시)
+- AiCampaignSendModal.tsx: 하드코딩 샘플 데이터 `{ '이름': '김민수', ... }` 제거 → `sampleCustomer` prop으로 실제 데이터 전달
+- Dashboard.tsx: `sampleCustomer` prop 체인 연결, `subject` 전달 로직 추가
+
+**Bug 2 (B-D75-02): 개별회신번호 미등록 시 전체 차단 → 개별 제외로 변경**
+- ★ **CT-08 신설: `callback-filter.ts`** — 개별회신번호 필터링 컨트롤타워
+  - `filterByIndividualCallback(customers, companyId)` — store_phone 폴백 → callback 미보유 제외 → 미등록 회신번호 제외
+  - `buildCallbackErrorResponse(missing, unregistered)` — 제외 사유 구체적 안내 응답 생성
+- campaigns.ts AI send 경로: 인라인 ~50줄 → CT-08 호출로 교체
+- campaigns.ts direct-send 경로: 인라인 ~50줄 → CT-08 호출로 교체
+- 에러 응답에 `callbackMissingCount`, `callbackUnregisteredCount`, `isCallbackIssue` 포함
+
+**Bug 3 (B-D75-03): 직접타겟설정 커스텀필드 NULL 표시**
+- customers.ts extract API: custom_fields JSONB를 flat하게 풀어서 반환 (백엔드 컨트롤타워에서 처리)
+- Dashboard.tsx: 프론트엔드 인라인 flat 로직 제거 (백엔드로 이관)
+
+**Bug 4 (B-D75-04): 타겟추출 10,000건 하드코딩 제한**
+- customers.ts: `limit = 10000` 하드코딩 제거, LIMIT 절 완전 삭제 (무제한 추출)
+- Dashboard.tsx: toast에 `toLocaleString()` 천단위 구분 적용
+
+#### 수정 파일 (6개)
+- `packages/backend/src/utils/callback-filter.ts` — ★ CT-08 신규 생성
+- `packages/backend/src/routes/campaigns.ts` — CT-08 import + AI send/direct-send 인라인→CT-08 교체
+- `packages/backend/src/routes/customers.ts` — limit 제거 + custom_fields flat 처리
+- `packages/frontend/src/components/AiCampaignResultPopup.tsx` — window.confirm→커스텀 모달
+- `packages/frontend/src/components/AiCampaignSendModal.tsx` — LMS 제목 입력 + sampleCustomer prop
+- `packages/frontend/src/pages/Dashboard.tsx` — sampleCustomer/subject prop 연결 + toLocaleString
+
+#### TypeScript 타입 체크
+- 백엔드: ✅ 0 에러
+- 프론트엔드: ✅ 0 에러
+
+---
+
+### ✅ D74 — 컨트롤타워 동적화 + store_phone 정규화 수정 (2026-03-14) — 배포 완료
+
+> **배경:** sh_cpb 버그리포트 — AI 한줄로 타겟추출 시 타겟 수 불일치(1,224 vs 823) + 매장전화번호 개인화 실패
+> **근본 원인:** (1) normalizePhone이 유선번호를 전부 null 처리, (2) customer-filter.ts/ai.ts에 필터 필드 하드코딩 잔존
+> **핵심 수정:** 컨트롤타워를 FIELD_MAP 기반 동적 구조로 전환. 필드 추가 시 핸들러 수동 추가 불필요.
+
+#### 수정 항목
+- **normalizeStorePhone:** normalize.ts에 유선번호(02/031~055/070/080/1588 등) 허용 함수 추가. standard-field-map.ts store_phone → normalizeStorePhone 변경
+- **customer-filter.ts 동적화:** mixed 모드 하드코딩 핸들러 전부 제거 → getColumnFields() 기반 dataType별(number/date/string) 자동 필터 생성. 새 필드 추가 시 핸들러 추가 불필요
+- **ai.ts 프롬프트 동적화:** 하드코딩 필터 필드 목록 제거 → getColumnFields() + COUNT FILTER(데이터 있는 필드만) + customer_field_definitions(커스텀 필드 라벨) 동적 생성
+
+#### 수정 파일 (4개)
+- `packages/backend/src/utils/normalize.ts` — isValidKoreanLandline + normalizeStorePhone 추가, normalizeByFieldKey switch 추가
+- `packages/backend/src/utils/standard-field-map.ts` — store_phone normalizeFunction 변경
+- `packages/backend/src/utils/customer-filter.ts` — mixed 모드 FIELD_MAP 기반 동적 필터
+- `packages/backend/src/services/ai.ts` — 프롬프트 필터 필드 동적 생성
+
+---
+
+### ✅ D73 — 무료체험 게이팅 + 수신거부 아키텍처 정비 + 커스텀 필드 라벨 CT-07 (2026-03-14) — 배포 완료
+
+> **배경:** 직원 버그리포트 11건 중 관련 6건 처리 — 무료체험 기능제한, 수신거부 데이터 격리, 커스텀 필드 라벨 밀림
+> **핵심 정책 결정:** company_admin은 발송 차단(관리 전용). 수신거부는 user_id(브랜드) 기준. 전체 데이터 = 회사 = 고객사관리자 뷰, 분류코드(store_code) = 사용자 = 브랜드 뷰.
+
+#### 완료 항목
+- **무료체험 게이팅:** FREE 플랜 → PRO 레벨 기능 7일 개방, 체험 만료 후 직접발송(파일/주소록 업로드)만 유지, 스팸필터테스트만 잠금
+  - Dashboard.tsx: `isSubscriptionLocked`에 `plan_code=FREE && is_trial_expired` 추가, AI카드 opacity/lock 아이콘
+  - upload.ts: 직접발송 파일파싱(`?includeData=true`) customer_db_enabled 게이팅 면제
+- **수신거부 아키텍처 정비 (CT-03):**
+  - `getUserUnsubscribes()` 확장: company_admin → `WHERE company_id` (전체), company_user → `WHERE user_id` (본인)
+  - `registerUnsubscribe()` 신설: company_admin 등록 시 고객 store_code 기준 올바른 브랜드 사용자에게 자동 배정
+  - unsubscribes.ts: 수동추가/CSV업로드 전부 CT-03 호출로 전환 (인라인 쿼리 제거)
+  - upload.ts: sms_opt_in=false 자동등록도 admin이면 store_code 기준 브랜드 배정
+  - DB 데이터 보정: 시세이도 admin에 몰린 1486건 → 각 브랜드 사용자에게 store_code 기준 재배정
+- **커스텀 필드 라벨 CT-07:**
+  - `upsertCustomFieldDefinitions()` 신설: ON CONFLICT DO UPDATE (라벨 항상 최신화, "최초 등록 우선" 정책 제거)
+  - upload.ts, sync.ts 인라인 로직 → CT-07 호출로 전환
+  - DB 데이터 보정: 시세이도 custom_1~6 라벨 1칸 밀림 교정 + custom_7(무데이터) 삭제
+- **고객 상세 필드 누락:** CustomerDBModal.tsx에 주소, 최근구매금액 추가
+
+#### 수정 파일 (8개)
+- `packages/backend/src/utils/standard-field-map.ts` — CT-07 upsertCustomFieldDefinitions 추가
+- `packages/backend/src/utils/unsubscribe-helper.ts` — CT-03 getUserUnsubscribes 확장 + registerUnsubscribe 추가
+- `packages/backend/src/routes/unsubscribes.ts` — CT-03 호출 전환
+- `packages/backend/src/routes/upload.ts` — CT-07 전환 + 직접발송 게이팅 면제 + admin 수신거부 배정
+- `packages/backend/src/routes/sync.ts` — CT-07 전환
+- `packages/frontend/src/pages/Dashboard.tsx` — 무료체험 만료 잠금
+- `packages/frontend/src/components/CustomerDBModal.tsx` — 상세 필드 추가
+- `CLAUDE.md` — 섹션 0 컨트롤타워 우선 확인 원칙 + CT-07 문서화
+
+---
+
+### 🔧 D69 — 자동발송 기능 (2026-03-12) — Phase 1 배포 완료 + 모달 개선 진행 중
+
+> **배경:** 메트로시티 요청 — 생일자 자동발송 등 반복 스케줄 설정 기능
+> **적용:** 프로 요금제(100만원) 이상
+> **설계 문서:** `status/AUTO-SCHEDULE-DESIGN.md`
+
+#### Phase 1 구현 완료 항목
+- **DB:** auto_campaigns + auto_campaign_runs 테이블 생성 완료, plans.auto_campaign_enabled + plans.max_auto_campaigns 컬럼 추가 완료
+- **백엔드:** routes/auto-campaigns.ts(CRUD 9개 엔드포인트) + utils/auto-campaign-worker.ts(매 1시간 체크 워커) + app.ts 마운트/워커 시작 연결
+- **프론트:** DashboardHeader 메뉴 추가('AI 분석'↔'직접발송' 사이) + AutoSendPage.tsx(프로 미만 블러+CTA / 프로 이상 실제 기능) + AutoSendFormModal.tsx(5단계 모달)
+- **UX:** AnalysisModal 블러 패턴 적용 — 누구나 메뉴 클릭→페이지 진입→상단 설명+하단 블러+CTA
+- **권한:** company_admin + company_user(브랜드담당자) 모두 생성/수정/삭제 가능 (store_code 범위 내)
+- **스케줄:** 매월(1~28일)/매주/매일 + 발송 시각 설정. 매월 28일 max (2월 고려)
+- **게이팅:** 요금제별 동시 활성 수 제한 — PRO: 5개, BUSINESS: 10개, ENTERPRISE: 무제한
+- **실패 정책:** 스킵 + failed 기록 → next_run_at 다음 스케줄로 갱신 (중복 발송 방지)
+- **기존 파이프라인 100% 재활용:** customer-filter, sms-queue, messageUtils, unsubscribe-helper, prepaid, campaign-lifecycle, store-scope
+
+#### AutoSendFormModal 개선 (2026-03-12, 배포 완료)
+- **버그 수정:** 발신번호 로딩 — `data.callbackNumbers` → `data.numbers` (API 응답 키 불일치 수정)
+- **5단계 재구성:** 1.기본정보 → 2.활용필드선택(신규) → 3.스케줄 → 4.메시지 → 5.확인
+- **2단계 활용필드선택:** AiCustomSendFlow 패턴 — `/api/customers/enabled-fields` 기반 카테고리별 동적 필드 체크박스. 선택한 필드가 4단계 변수 드롭다운과 AI 문구생성 personalFields에 연동
+- **4단계 메시지 보강:** SMS/LMS/MMS 수동 탭 토글, 바이트 동적표시(90/2000), 광고문구 실시간 미리보기((광고)+무료거부), 이모지 경고, MMS 이미지 업로드, LMS/MMS 제목 필수 체크
+- **AI 문구추천:** AiMessageSuggestModal 연동 + selectedFields 기반 개인화. 프로 이상 접근이므로 잠금 제거
+- **스팸필터테스트:** SpamFilterTestModal 연동. 프로 이상 접근이므로 잠금 제거
+- **자동입력 변수:** 하드코딩 5개 버튼 → enabled-fields 기반 동적 드롭다운 (TargetSendModal 패턴)
+- **⚠️ 미완료:** 타겟 필터 UI (Phase 2), 실행 이력 상세 조회 (Phase 2)
+
+#### Phase 2 (미구현, 향후)
+- D-1 사전 알림 (auto-campaign-notify.ts)
+- 타겟 필터 UI (AutoSendFormModal에 필터 단계 추가)
+- 실행 이력 상세 조회
+- 캘린더 연동 (CalendarPage에 자동발송 이벤트 표시)
+- 슈퍼관리자 모니터링 (admin 대시보드)
+
+#### Phase 3 (미구현, 향후)
+- AI 메시지 자동 생성 연동 (매 실행마다 시즌별 메시지 자동 생성)
+- 실행 결과 리포트 (월간 자동발송 성과 대시보드)
+- 카카오톡 채널 자동발송 지원
+
+---
+
+### ✅ D72 — 예약캠페인 관리 + 발송비용 계산 + storageType 동적필터 + 발송 성능개선 (2026-03-13) — 배포 완료
+
+> **배경:** (1) 예약 대기 모달에 예약 캠페인이 표시되지 않고 취소 수단 없음, (2) 발송결과 모달의 예상 비용이 메시지 타입 무시하고 SMS 단가(9.9원)로만 계산됨, (3) 예약발송 시 `column "custom_2" does not exist` 에러 — enrichWithCustomFields가 JSONB 내부 키를 SQL SELECT에 노출, (4) 25,000건 발송에 3분 소요 — 건건이 MySQL INSERT (70만건이면 90분).
+> **원칙:** 기록 보존 원칙 (삭제 아닌 상태 변경), 기간계 무접촉, 하드코딩 금지 — storageType 동적 판별, 컨트롤타워(CT-04) 활용.
+
+#### ✅ 버그 1: 예약 대기 모달 — draft 캠페인 미표시 + 취소 기능 없음
+
+**현상:** AI 캠페인 생성 후 예약 시간이 설정되어 있으나 예약 대기 모달에 표시되지 않음. 취소 수단 자체가 없음.
+**원인:** AI 캠페인 생성 시 status='draft'로 INSERT, 예약 대기 모달은 status='scheduled'만 조회 → draft+scheduled_at 캠페인 누락
+**수정 파일 및 내용:**
+
+| 파일 | 수정 내용 |
+|------|-----------|
+| `campaigns.ts` | `DELETE /:id` 엔드포인트 추가 — 실제 삭제 아닌 `status='cancelled'`로 변경 (기록 보존). 과거 예약 차단 + 15분 이내 취소 제한 |
+| `Dashboard.tsx` | `loadScheduledCampaigns` — draft+scheduled_at 캠페인도 함께 조회 (Promise.all 병렬 fetch) |
+| `ScheduledCampaignModal.tsx` | draft 캠페인 "(미확정)" 라벨 표시, draft/scheduled 분기 취소 처리, 15분 제한 |
+| `CalendarModal.tsx` | draft 캠페인 amber 색상 표시, 예약 취소 버튼 + 시간 제한 (과거/15분 이내 비활성화) |
+| `ResultsModal.tsx` | 취소된 캠페인도 결과 목록에 기록 보존 (삭제하지 않음) |
+
+#### ✅ 버그 2: 발송결과 모달 — 예상 비용 SMS 단가로만 계산
+
+**현상:** LMS 27원인데 발송현황의 예상 비용이 SMS 9.9원 기준으로 계산
+**원인:** ResultsModal.tsx에서 `totalSuccess * perSms` 단일 계산 — message_type 무시
+**수정:**
+
+| 파일 | 수정 내용 |
+|------|-----------|
+| `ResultsModal.tsx` | 캠페인별 `message_type`(SMS/LMS/MMS) + `send_channel`(kakao) 체크하여 올바른 단가 적용. `filteredCampaigns.reduce()` 패턴으로 개별 합산 |
+
+**단가 기준:** SMS 9.9원 / LMS 27원 / MMS 50원 / 카카오 7.5원 (백엔드 results.ts API에서 조회)
+
+#### ✅ 버그 3: 예약발송 `column "custom_2" does not exist` — storageType 동적 필터
+
+**현상:** 예약발송 시 서버 500 에러 — `column "custom_2" does not exist at character 618`
+**원인:** `enrichWithCustomFields()`가 customer_field_definitions에서 커스텀 필드를 fieldMappings에 추가할 때 `column: 'custom_2'` (custom_fields JSONB 내부 키)를 설정 → 5개 발송 경로의 동적 SELECT에 그대로 포함 → PostgreSQL에 실제 컬럼이 없으므로 에러
+**해결 방향:** `VarCatalogEntry`에 `storageType` 속성 추가 — `'column'` (SQL SELECT 가능) vs `'custom_fields'` (JSONB 내부 키, SQL SELECT 불가). 모든 동적 SELECT 생성 지점에서 `storageType !== 'custom_fields'` 필터링.
+
+| 파일 | 수정 내용 |
+|------|-----------|
+| `services/ai.ts` | `VarCatalogEntry` 인터페이스에 `storageType?: 'column' \| 'custom_fields'` 추가, `buildVarCatalogFromFieldMap()`에서 `storageType: 'column'` 설정 |
+| `utils/messageUtils.ts` | `enrichWithCustomFields()`에서 `storageType: 'custom_fields'` 설정 |
+| `routes/campaigns.ts` | **4곳** 동적 SELECT에 `.filter(m => m.storageType !== 'custom_fields')` 적용 — test-send, /:id/send, direct-send, schedule/문안수정 |
+| `utils/auto-campaign-worker.ts` | **1곳** 동적 SELECT에 storageType 필터 적용 |
+| `routes/spam-filter.ts` | **1곳** 동적 SELECT에 storageType 필터 적용 + custom_fields 컬럼 SELECT에 추가 |
+
+**⚠️ 전수점검 — 동적 SELECT 6곳 모두 적용 완료:**
+1. campaigns.ts ~277 (test-send)
+2. campaigns.ts ~600 (/:id/send AI캠페인)
+3. campaigns.ts ~1470 (direct-send)
+4. campaigns.ts ~2088 (schedule/문안수정)
+5. auto-campaign-worker.ts (자동발송)
+6. spam-filter.ts (스팸필터 테스트)
+
+#### ✅ 성능개선: 발송 MySQL INSERT 벌크화 — bulkInsertSmsQueue 컨트롤타워 (CT-04)
+
+**현상:** 25,000건 발송에 약 3분 소요 — 건건이 MySQL INSERT (25,000회 DB 왕복). 70만건이면 ~90분.
+**해결:** `sms-queue.ts` (CT-04)에 `bulkInsertSmsQueue()` 함수 추가 — 테이블 라운드로빈 분배 + 5,000건 배치 bulk INSERT.
+
+| 파일 | 수정 내용 |
+|------|-----------|
+| `utils/sms-queue.ts` | `bulkInsertSmsQueue(tables, rows, useNow)` 함수 추가 — 라운드로빈 테이블 분배, BATCH_SIZES.smsSend(5000) 단위 배치 |
+| `config/defaults.ts` | `BATCH_SIZES.smsSend: 5000` 추가 (max_allowed_packet 64MB 기준) |
+| `routes/campaigns.ts` | AI캠페인(/:id/send): 건건이 INSERT → `bulkInsertSmsQueue()` 1줄 호출. 직접발송(direct-send): inline bulk → `bulkInsertSmsQueue()` + app_etc2(companyId) 추가 |
+| `utils/auto-campaign-worker.ts` | 건건이 INSERT → `bulkInsertSmsQueue()` 1줄 호출, `mysqlQuery`/`BATCH_SIZES` import 제거 |
+
+**적용 경로 (3개):**
+- AI캠페인 `/:id/send` → `bulkInsertSmsQueue(companyTables, aiSmsRows, !isScheduled)`
+- 직접발송 `/direct-send` → `bulkInsertSmsQueue(companyTables, directSmsRows, useNow)`
+- 자동발송 `auto-campaign-worker` → `bulkInsertSmsQueue(companyTables, autoSmsRows, true)`
+
+**미적용 (2개, 사유):**
+- 테스트발송 `/test-send`: 1~3건 극소량 + bill_id 추가 컬럼 → 개별 INSERT 유지
+- 문안수정 `/:id/schedule`: UPDATE (INSERT 아님) → 해당 없음
+
+**성능 예상:** 25,000건 기준 25,000회 → 5회 INSERT (5000건 배치) = 약 5,000배 DB 왕복 감소
+
+**TypeScript:** 백엔드 `tsc --noEmit` 에러 없이 통과
+
+---
+
+### 🔧 D71 — 시세이도 3만건 업로드 후속 수정 (2026-03-13) — ✅ 완료 (배포 완료)
+
+> **배경:** 시세이도CPB 30,000건 엑셀 업로드 후 (1) 슈퍼관리자 고객 목록 500에러, (2) 업로드 전건 에러, (3) 조회 시 일부 컬럼 null 표시, (4) 업로드 속도 저하 발견.
+> **원칙:** 하나씩 근본 원인 파악 → 수정. 기간계 무접촉.
+
+#### ✅ customers_unified VIEW store_phone 누락 수정 (서버 DDL 직접 실행)
+- **현상:** 슈퍼관리자 고객 목록 500에러
+- **원인:** customers 테이블에 store_phone 컬럼 추가했지만 customers_unified VIEW 재생성 안 함 → SELECT에서 "column store_phone does not exist" 에러
+- **수정:** DROP VIEW + CREATE VIEW (store_phone 포함, 3개 SELECT 모두에 명시적 추가)
+
+#### ✅ upload.ts region 중복 INSERT 수정 (배포 완료)
+- **현상:** 30,000건 업로드 전건 에러 ("column region specified more than once")
+- **원인:** D70-17에서 region을 FIELD_MAP에 추가 → getColumnFields()에 region 포함 + insertCols/rowValues/updateClauses에 명시적 region이 남아있어 중복
+- **수정:** 명시적 region 3곳(insertCols, rowValues push, updateClauses) 제거, FIELD_MAP 루프에서 derivedRegion 우선 처리
+
+#### ✅ upload.ts AI 매핑 프롬프트 정합성 수정
+- **현상:** 엑셀에 데이터가 있는데 DB에 null로 저장
+- **원인 1:** 프롬프트 예시에 `"구매횟수": "custom_1"` — FIELD_MAP의 `purchase_count`와 모순
+- **원인 2:** `recent_purchase_date` FIELD_MAP 미등록 → AI 매핑 대상 자체에 없음
+- **원인 3:** mappingTargets, standardFields에 region 중복 (FIELD_MAP + 하드코딩)
+- **원인 4:** 프롬프트에 store_name, 날짜/구매 관련 필드 구분 안내 없음
+- **수정:**
+  - `standard-field-map.ts`: `recent_purchase_date` 필드 추가 (dataType: date, normalizeDate)
+  - `upload.ts` 프롬프트: 예시 수정 (`purchase_count`, `recent_purchase_date`), 규칙 #6 store_name 추가, 규칙 #7 날짜/구매 필드 구분 추가
+  - `upload.ts` mappingTargets: region 하드코딩 삭제 (FIELD_MAP에서 자동 생성)
+  - `upload.ts` standardFields: region 수동 push 삭제 (FIELD_MAP에서 자동 포함)
+  - 주석: "필수 17개" 숫자 하드코딩 → "직접 컬럼 필드"로 변경
+
+#### ✅ customers.ts SELECT 누락 컬럼 3개 추가
+- **현상:** 고객DB 조회 시 최근구매금액, 구매횟수, 주소가 `-` 표시
+- **원인:** 데이터는 DB에 정상 저장되어 있으나 customers.ts의 SELECT 쿼리에서 `address`, `recent_purchase_amount`, `purchase_count` 3개 컬럼을 가져오지 않음
+- **수정:** SELECT에 3개 컬럼 추가. 재업로드 불필요 — 배포만 하면 기존 데이터 즉시 표시
+
+#### ✅ 업로드 배치 사이즈 복원 (500 → 2000)
+- **현상:** 업로드 속도 체감 저하
+- **원인:** 초기 BATCH_SIZE 4000 → 어느 시점에 500으로 축소 → 30,000건 기준 8배치→60배치 (7.5배 증가)
+- **수정:** `defaults.ts` customerUpload 500 → 2000 (30,000건 = 15배치, 4배 개선)
+
+#### 수정 파일 목록
+| 파일 | 수정 내용 |
+|------|-----------|
+| `standard-field-map.ts` | recent_purchase_date 추가, 주석 숫자 하드코딩 제거 |
+| `upload.ts` | AI 프롬프트 예시/규칙 수정, region 중복 제거, 주석 정리 |
+| `customers.ts` | SELECT에 address, recent_purchase_amount, purchase_count 추가 |
+| `defaults.ts` | customerUpload 배치 사이즈 500→2000 |
+
+**⚠️ 배포 필요:** tp-push + tp-deploy-full
+
+---
+
+### 🔧 D70 — 직원 QA 버그 일괄수정 (2026-03-12) — 🔶 진행 중 (3차 배포 완료, 잔여 1건 B-D70-18)
+
+> **배경:** 직원 2명이 실동작 검증 후 PPT(8슬라이드) + 체크리스트(30항목) 버그 리포트 제출. 서버 검증 후 순차 수정.
+> **원칙:** 직원 리포트 그대로 믿지 않고, 서버 실데이터/코드로 교차검증 후 수정.
+
+#### ✅ 수정 완료 (1차 배포 완료)
+1. **Redis 캐시키 브랜드 격리 (Slide 1):** `stats:${companyId}` → `stats:${companyId}:${userId}` — 다른 브랜드 담당자 간 캐시 충돌 방지 (`customers.ts`)
+2. **고객DB 날짜 표시 (Slide 3):** `T15:00:00.000Z` → `formatDate()` 적용. birth_date, recent_purchase_date, created_at, wedding_anniversary, DATE 타입 필드 (`CustomerDBModal.tsx`)
+3. **커스텀 필드 정의 저장 (Slide 4 일부):** field_type `'text'` → `'VARCHAR'` — customer_field_definitions CHECK 제약조건 위반 수정 (`upload.ts`)
+4. **MMS 보관함 이미지 (Slide 7):** sms_templates.mms_image_paths 컬럼 추가 (ALTER TABLE 실행 완료) + 저장/불러오기 코드 (`sms-templates.ts`, `Dashboard.tsx`)
+5. **주소록 파일업로드 401 (Slide 8a):** Authorization 헤더 누락 → `Bearer ${token}` 추가 (`AddressBookModal.tsx`)
+6. **주소록 브랜드 격리 (Slide 8b):** address_books.user_id 컬럼 추가 (ALTER TABLE 실행 완료) + 4개 라우트에 user_id 필터 적용 (`address-books.ts`)
+7. **대시보드 성공건수 (신규 발견):** `monthly_sent: totalSent`(큐 INSERT 건수) → `totalSuccess`(실제 성공건수)로 변경 + 담당자테스트/스팸필터 성공건수도 합산 (`customers.ts`)
+8. **직접발송 머지변수 NULL (Slide 5):** replaceVariables 컨트롤타워에 `addressBookFields` 4번째 파라미터 추가 — %기타1/2/3%, %회신번호% 주소록 변수를 fieldMappings 순회 전에 치환하여 안전망에 잡히지 않도록 처리 (`messageUtils.ts`, `campaigns.ts` SMS+카카오 양쪽)
+9. **upload.ts customer_schema 미갱신:** 엑셀 업로드 후 companies.customer_schema 자동 갱신 로직 추가 — customers.ts 일괄추가와 동일 쿼리 (`upload.ts`)
+
+#### ✅ 수정 완료 (2차 배포 완료)
+10. **브랜드 격리 — store_code 자동할당 (Slide 2):** 엑셀에 store_code 컬럼이 없으면 업로드 사용자의 `store_codes[0]`을 자동 할당 → UNIQUE(company_id, store_code, phone) 제약에 의해 브랜드별 별개 레코드 분리 (`upload.ts`)
+11. **브랜드 격리 — 필드 라벨 덮어쓰기 방지:** customer_field_definitions에 이미 라벨이 있는 필드는 덮어쓰지 않음 — "최초 등록 우선" 정책 (`upload.ts`)
+12. **고객사관리자 브랜드 필터:** 고객DB에서 브랜드(store_code) 드롭다운 필터 추가. filter-options API에 store_codes 목록 포함 (`customers.ts`, `CustomerDBModal.tsx`, `Dashboard.tsx`)
+13. **store_phone → callback 폴백:** 개별회신번호 사용 시 callback이 없으면 store_phone을 회신번호로 사용. 둘 다 없는 수신자는 제외 (`campaigns.ts` /:id/send + /direct-send 양쪽)
+14. **MMS 이미지 있을 때 비용절감 추천 스킵:** MMS 이미지가 업로드된 상태에서 SMS 전환 안내 모달을 띄우지 않음 (`Dashboard.tsx`, `TargetSendModal.tsx`)
+15. **MMS 전송 후 이미지 리셋:** 직접발송/타겟발송 성공 후 `setMmsUploadedImages([])` 추가 — 이전 발송 이미지가 잔류하던 문제 해결 (`Dashboard.tsx`)
+
+#### ✅ 수정 완료 (3차 배포 완료)
+16. **매장 필드 고객DB 미표시 (Slide 4 일부):** customers.ts SELECT에 registered_store, recent_purchase_store, store_phone, registration_type 컬럼 누락 → 추가. CustomerDBModal에 4개 필드 표시 추가 (`customers.ts`, `CustomerDBModal.tsx`)
+17. **AI맞춤한줄 개인화 불일치 (B8-03):** buildVarCatalogFromFieldMap()이 custom_fields를 스킵 → 커스텀 필드 라벨이 발송 시 fieldMappings에 없음 → 안전망이 제거. enrichWithCustomFields() 헬퍼 신설 + 5경로 전부 적용 (`messageUtils.ts`, `campaigns.ts` 4경로, `auto-campaign-worker.ts`)
+18. **필터 UI 보유필드 미표시 (D39):** region, store_name, purchase_count가 FIELD_MAP에 미정의 → enabled-fields 감지 불가. FIELD_MAP에 3개 필드 추가 (`standard-field-map.ts`)
+
+#### ❌ 미해결 (다음 세션)
+- **B-D70-18 — 직원 QA 추가 버그:** Harold님이 다음 세션에서 추가 스크린샷 확인 예정
+
+---
+
+### ✅ D68 — 대시보드 UI 수정 + AI 생일 타겟팅 + 테스트 비용 합산 + 커스텀 필드 라벨 (2026-03-12) — 배포 완료
+
+> **배경:** 메트로시티 첫 시연 준비 중 발견된 4건. 대시보드 UI 이슈 + AI 필터 누락 + 비용 집계 누락.
+> **원칙:** 기간계 무접촉. 프론트+백엔드 수정만.
+
+#### ✅ 대시보드 총 구매금액 아이콘/포맷 수정
+
+**파일:** `dashboard-card-pool.ts`, `Dashboard.tsx`
+**원인:** 총 구매금액 카드에 DollarSign($) 아이콘 + 천 단위 콤마 없음
+**수정:** DollarSign → CreditCard 아이콘, `.toFixed(0)` → `Math.round().toLocaleString()` 천 단위 콤마 추가
+
+#### ✅ 커스텀 필드 라벨 미표시 버그 수정
+
+**파일:** `customers.ts`, `upload.ts`
+**원인:** upload.ts에서 customer_field_definitions INSERT 시 `is_hidden` 미설정 → NULL로 저장 → enabled-fields 쿼리 `is_hidden = false` 조건에 NULL 미매칭 → FIELD_MAP 기본값 "커스텀1/2/3"으로 폴백
+**수정:** 조회 조건 `(is_hidden = false OR is_hidden IS NULL)` + INSERT 시 `is_hidden = false` 명시
+
+#### ✅ AI 생일 타겟팅 전체 고객 선택 버그 수정
+
+**파일:** `customer-filter.ts`, `services/ai.ts`, `routes/ai.ts`, `AiCustomSendFlow.tsx`
+**원인:** (1) AI 프롬프트에 birth_date 필터 필드 누락 → AI가 생일 필터 생성 불가 (2) customer-filter.ts mixed 형식에 birth_date 핸들러 없음 → 필터 생성해도 무시
+**수정:**
+- customer-filter.ts: mixed 형식에 birth_date 핸들러 추가 (birth_month/gte/lte/between)
+- services/ai.ts: recommend-target + parseBriefing 프롬프트에 birth_date 필터 + birth_month 연산자 추가
+- routes/ai.ts: recount-target에 birthMonth→birth_date 변환 추가
+- AiCustomSendFlow.tsx: TargetCondition 인터페이스 + EMPTY_TARGET_CONDITION에 birthMonth 추가
+- **3개 경로 전부 적용:** AI 한줄로(recommend-target) + AI 맞춤한줄(parse-briefing) + 타겟 수정 재조회(recount-target) + 실제 발송(campaigns.ts)
+
+#### ✅ 대시보드 발송현황 총 사용금액에 테스트 비용 합산
+
+**파일:** `customers.ts`
+**원인:** 발송현황 통계가 campaign_runs + 직접발송만 집계, 담당자 테스트 + 스팸필터 테스트 비용 미포함
+**수정:** 성공건수/성공률은 실발송만 유지, 총 사용금액에 MySQL 담당자 테스트(getTestSmsTables) + PostgreSQL 스팸필터(spam_filter_test_results) 비용 합산. try-catch 안전 처리.
+
+#### 메트로시티 가상 고객 DB 2만건 생성
+
+**출력:** `메트로시티_가상고객DB_20000건.xlsx`
+**내용:** 전화번호 010-0001-0001~010-0002-0000, 메트로시티 매장 15개, 등급 6단계(VVIP~NORMAL), 수신동의 변형 포함, 스키마 필수 17필드 + 커스텀 3필드(선호스타일/최근방문일/구매횟수)
+
+**⚠️ 배포 필요:** tp-push + tp-deploy-full
+
+---
+
+### 🔧 D67 — 080 콜백 진단 + 수신동의 변형 인식 + 사용자별 고객DB 삭제 (2026-03-12~) — ✅ 완료 (배포 완료)
+
+> **배경:** 직원 080 수신거부 테스트 미동작 + DB 업로드 시 수신거부 자동등록 미작동 신고 + 슈퍼관리자 사용자별 고객DB 삭제 기능 요청.
+> **원칙:** 하나씩 원인 파악 → 수정. 기간계 무접촉.
+
+#### ✅ 080 나래인터넷 콜백 미동작 진단 완료
+
+**현상:** sh_cpb 계정 080-540-5648로 전화 → 서버 콜백 미수신
+**진단:**
+- curl 직접 테스트 → 응답 `1` (서버 코드 정상, 080번호 매칭 성공)
+- pm2 로그에 10:39 나래 콜백 기록 **0건** → 나래인터넷이 080-540-5648에 대해 콜백을 보내지 않음
+- **원인:** 나래인터넷에 080-540-5648 번호의 콜백 URL 미등록. 080-719-6700(Harold님)은 등록되어 있어 정상 작동.
+- **조치:** 나래인터넷에 080-540-5648 콜백 URL 등록 요청 필요 (`https://app.hanjul.ai/api/unsubscribes/080callback`)
+
+#### ✅ 연동 테스트 버튼 stale state 버그 수정
+
+**파일:** `packages/frontend/src/pages/Unsubscribes.tsx`
+**원인:** `loadUnsubscribes()` 후 React state(비동기)를 바로 참조 → 항상 이전 값으로 체크
+**수정:** `loadUnsubscribes()`가 최신 데이터를 return하도록 변경, `handleSyncTest()`에서 반환값으로 직접 체크
+
+#### ✅ SMS_OPT_IN 변형 값 인식 확대
+
+**파일:** `packages/backend/src/utils/normalize.ts`
+**원인:** "비동의", "불동의", "미동의" 등이 인식 목록에 없어 null → 기본값 true(동의)로 저장됨
+**수정:** SMS_OPT_IN_FALSE에 비동의/불동의/미동의/동의안함/거절/수신거절/해지/탈퇴/철회 추가, SMS_OPT_IN_TRUE에 수신 동의/동의함/수신동의함 추가
+
+#### ✅ 슈퍼관리자 사용자별 고객 DB 삭제 기능
+
+**파일:** `packages/backend/src/routes/admin.ts`, `packages/frontend/src/pages/AdminDashboard.tsx`
+**기존:** customers 테이블에 `uploaded_by` 컬럼이 이미 존재하고 사용자 ID 저장 중
+**추가:**
+- 백엔드: 사용자 목록 조회에 `uploaded_customer_count` 추가 + `DELETE /api/admin/users/:id/customers` API (연관 purchases/consents 삭제 + 감사로그)
+- 프론트: 사용자 수정 모달에 "업로드 고객 DB: N건 + 삭제 버튼" UI
+
+**✅ 배포 완료**
+
+#### ✅ 수정 완료-배포 완료: store_code/created_by 전수 격리
+
+**배경:** Harold님이 사용자 ID(hoyun123, store_code=ONLINE)로 로그인 시 고객사관리자(hoyun)의 발송현황이 그대로 보이는 문제 발견.
+
+**격리 원칙 (Harold님 확정):**
+- **고객사관리자(company_admin):** company_id 전체 데이터 조회
+- **사용자(company_user):** 고객 데이터는 store_code 기준, 발송 데이터는 created_by(본인 발송만)
+- store_code 미배정 사용자: company_id 전체 (no_filter)
+
+**수정 완료 파일 (TypeScript 0 에러):**
+1. `routes/customers.ts` — 발송현황 카드에 created_by 격리 추가 (campaignStats, directStats)
+2. `routes/companies.ts` — dashboard-cards 전체에 store_code + created_by 격리 (aggregateDashboardCards에 userId/userType 전달)
+3. `routes/results.ts` — campaigns/:id 상세에 created_by 격리 추가
+
+**⚠️ 배포 필요:** tp-push + tp-deploy-full 실행 대기 중
+
+#### tp-deploy-full 백엔드 빌드 누락 해결
+
+**문제:** tp-deploy-full이 프론트엔드만 빌드하고 백엔드 TypeScript 빌드(tsc)를 하지 않음 → 서버 dist/ 폴더에 이전 JS가 남아 코드 수정이 반영 안 됨 (080 버튼 미표시 원인)
+**수정:** Harold님 PowerShell 프로필에 백엔드 빌드 단계 추가 — `cd packages/backend && npm run build`
+**결과:** tp-deploy-full 실행 시 자동으로 백엔드도 빌드됨
+
+#### D66 17차 실동작 검증 대기 (B17-01~B17-16)
+- 16건 전건 수정+배포 완료 (2026-03-12)
+- 15건 🟡수정완료-검증대기 (B17-08 배포 후 재확인, B17-13 코드이상없음 제외)
+- 직원 재검증 결과 대기 중
+
+---
+
+### 🔧 D62 — 13차~15차 실동작 검증 버그 수정 (2026-03-09~03-10) — ✅ 15차 빌드+배포 완료 (2026-03-10 22:17), 실동작 검증 대기
+
+> **배경:** 직원 전수 실동작 검증(30개 항목) + 한줄로 PPT 버그리포트(7슬라이드) 결과, 기존 버그 재발(Reopened) + 신규 버그(13차) 총 21건 확인.
+> **범위:** 백엔드 8파일 + 프론트엔드 6파일. 기간계(발송 INSERT/차감/환불) 무접촉.
+> **원칙:** 파일 1개씩 순차 수정 (병렬 에이전트 금지 — 파일 손상 교훈 반영)
+> **결과:** FIX-GUIDE-D62.md 기반 11파일 수정 + 추가 수정(B8-13 성능최적화, B10-03 AI 매장맵핑, B13-03/04 AiPreviewModal 누락분, B13-06 특수문자 비호환 제거). TypeScript 0 에러. 전건 🟡수정완료-검증대기.
+> **⚠️ 교훈:** B13-03/B13-04는 최초 수정 시 엉뚱한 파일(AiCampaignResultPopup.tsx)만 수정 — 실제 화면은 AiPreviewModal.tsx. Harold님 현장 확인으로 발견하여 재수정. **다음 세션에서 전건 전수점검 재실시 필수.**
+
+#### 검증 결과 요약 (2026-03-09)
+- **검증 항목:** 30개 (실동작검증-체크리스트_0309.xlsx)
+- **통과(O):** 17개 → 해당 버그 ✅ Closed
+- **실패(X):** 10개 → 코드 재수정 완료 → 🟡 수정완료-검증대기
+- **미검증:** 3개
+- **신규(PPT):** 9건 → B13-01 ~ B13-09 코드 수정 완료 → 🟡 수정완료-검증대기
+- **추가 발견:** B8-13 대량 발송결과 성능 → 코드 수정 완료 → 🟡 수정완료-검증대기
+- **현장 확인 재수정:** B13-03(개인화 미리보기), B13-04(스팸필터 "준비중"), B13-06(특수문자 비호환) — AiPreviewModal.tsx 누락 + 특수문자 팝업 비호환 문자 제거
+
+#### ✅ 전수점검 결과 (2026-03-09)
+- **22건 🟡수정완료-검증대기 전수점검**: 코드 직접 읽기 검증 (에이전트 위임 없이 직접 수행)
+- **18건 코드 정상 확인** — 수정 코드가 관련 경로 전부에 일관 적용
+- **3건 실제 미수정 발견 + 수정 완료:**
+  - B14-01: 직접발송 수신거부 company_id→user_id 통일 (campaigns.ts L2088-2093)
+  - B14-02: generateCustomMessages byte_count/byte_warning 누락 (ai.ts L1516-1528)
+  - B14-04: sync-results 주석 60분→30분 수정 (campaigns.ts L1795)
+- **1건 신규 발견 + 수정 완료:**
+  - B14-03: 예약취소 시 campaign_runs 상태+fail_count 미변경 (campaigns.ts L2531-2552)
+- **B12-02/B13-09 보완:** AI캠페인 타임아웃 60→30분 통일 (campaigns.ts L1791)
+
+#### 🔧 15차 재수정 (2026-03-10) — 실동작검증 체크리스트 X 10건 메인코드 직접 반영
+- **문제:** 기존 수정이 worktree에만 반영되고 메인코드에 미적용된 건들 발견
+- **조치:** 10건 전부 메인코드(`packages/`)에 직접 반영 완료
+  - B8-04: campaigns.ts — callback/useIndividualCallback INSERT 추가
+  - B8-08: campaigns.ts — target_count 수신거부 NOT EXISTS + send u.user_id→u.company_id 4곳
+  - B8-09: ai.ts — SMS 바이트 경고 (이미 메인코드 반영됨 확인)
+  - B8-10: upload.ts/normalize.ts — 셀타입 처리 (이미 메인코드 반영됨 확인)
+  - B8-13: campaigns.ts — sync-results company_id + 7일 제한, Dashboard.tsx fire-and-forget
+  - B10-01: customers.ts/unsubscribes.ts — store_code 격리 (이미 메인코드 반영됨 확인)
+  - B10-02: customers.ts — enabled-fields customer_schema 라벨 복구 + 자동보정 INSERT, upload.ts labels merge
+  - B10-03: customers.ts — GET / SELECT에 registered_store, recent_purchase_store 등 누락 컬럼 추가
+  - B10-04: normalize.ts — Integer 제약 제거 + Math.floor (이미 메인코드 반영됨 확인)
+  - B10-06: ai.ts — generateMessages 프롬프트에 타겟 필터조건 주입 + ai route targetFilters 전달
+
+#### ✅ 배포 완료 (2026-03-10 22:17)
+- **tp-deploy-full 실행:** campaigns.ts (61줄 변경) + Dashboard.tsx (12줄 변경) 서버 반영 확인
+- **서버 grep 검증:** useIndividualCallback 12곳, u.company_id 4곳, INTERVAL '7 days' 2곳, sync-results fire-and-forget — 전부 정상
+- **PM2 재시작:** targetup-backend online 확인
+- **프론트엔드 빌드:** vite 정상 빌드 (1837 modules, 15.4s)
+
+#### ⚠️ 다음 단계 TODO
+- **실동작 검증** — 30개 항목 전체 재검증 (특히 X 10건 집중 확인)
+- 점검 시 **실제 화면에서 동작 확인** (코드 수정 파일이 아닌 사용자가 보는 화면 기준)
+
+---
+
+### 🔧 D63 — 16차 버그리포트 수정 + 메시징 컨트롤타워 리팩토링 (2026-03-10~) — 🟡 진행 중
+
+> **배경:** 직원 PPT 버그리포트(한줄로_20260310.pptx, 7슬라이드) + Harold님 추가 리포팅. 15차 배포(22:17) 이전 오후 5시에 수신된 리포트이므로, 15차에서 수정한 건은 재검증 필요 (실패 단정 불가).
+> **핵심 원칙:** 땜질식 수정 절대 금지. 컨트롤타워 기반으로 근본 원인 해결. 하나씩 원인 파악 → 수정안 브리핑 → Harold님 컨펌 → 작업.
+> **에이전트 병렬 금지** — 하나씩 천천히 직접 읽고 정확하게.
+
+#### ✅ 완료된 작업
+
+**B16-01: 고객 DB 통합 문제 (브랜드 격리 체계)** — ✅ 배포 완료
+- **근본 원인:** store_code 기반 브랜드 격리가 산재되어 있고, 브랜드 없는 단일 본사 고객사 케이스 미고려
+- **수정:** `utils/store-scope.ts` 컨트롤타워 신규 생성
+  - 3단계 판단: no_filter(브랜드 없음) / filtered(할당됨) / blocked(미할당)
+  - customers.ts 7곳, campaigns.ts 3곳, ai.ts 3곳 총 13곳 일관 적용
+  - buildDynamicFilter store_code 서브쿼리에 company_id 조건 추가
+- **파일:** NEW utils/store-scope.ts, MOD customers.ts, campaigns.ts, ai.ts
+
+**B16-02: 예약취소 불가 + 취소해도 실제 발송됨** — ✅ 배포 완료
+- **근본 원인:** manage-scheduled.ts의 cancel이 PostgreSQL만 업데이트하고 **MySQL 큐를 전혀 건드리지 않음** → QTmsg Agent가 예약시간에 그대로 발송
+- **수정:** 메시징 컨트롤타워 3개 모듈 생성 + 대규모 리팩토링
+  - `utils/sms-queue.ts` — MySQL 큐 조작의 유일한 진입점 (campaigns.ts에서 20+ 함수 이동)
+  - `utils/prepaid.ts` — 선불 차감/환불의 유일한 진입점
+  - `utils/campaign-lifecycle.ts` — 캠페인 취소 + 결과 동기화 통합
+  - campaigns.ts 3030줄 → 2340줄 (발송 인프라 유틸 분리)
+  - manage-scheduled.ts → cancelCampaign() 컨트롤타워 호출로 교체 (MySQL 삭제 + 환불 + PG 상태 변경 전부 처리)
+  - spam-filter.ts, results.ts, admin.ts → import 경로 utils/로 변경
+- **파일:** NEW utils/sms-queue.ts, utils/prepaid.ts, utils/campaign-lifecycle.ts, MOD campaigns.ts, manage-scheduled.ts, spam-filter.ts, results.ts, admin.ts
+- **기간계 영향:** 로직 변경 없음. 함수 위치만 이동 (동일 코드). manage-scheduled의 cancel만 MySQL 처리 추가 (버그 수정).
+- **TypeScript:** 0 에러 확인
+
+**추가 리포팅: 발송 완료인데 성공/실패 0/0** — ✅ 동일 수정으로 해결
+- **원인:** sync-results 로직이 campaigns.ts 로컬 함수로 갇혀 있어 다른 곳에서 접근 불가
+- **수정:** campaign-lifecycle.ts의 `syncCampaignResults()` 함수로 추출, campaigns.ts sync-results 라우트에서 호출
+
+**CT-01: `utils/customer-filter.ts` — 고객 필터/쿼리 빌더 컨트롤타워** — ✅ 배포 완료
+- campaigns.ts, customers.ts, ai.ts 3곳의 필터 빌딩 로직을 통합
+- `buildCustomerFilter()` 단일 함수: mixed(ai.ts 방식) + structured(customers.ts 방식) 2가지 입력 포맷 지원
+- 호환 래퍼: `buildFilterWhereClauseCompat()` (ai.ts용), `buildDynamicFilterCompat()` (customers.ts용)
+- campaigns.ts의 `buildFilterQuery()`도 래퍼로 교체
+- 내부에서 normalize.ts의 buildGenderFilter, buildGradeFilter, getRegionVariants 재사용
+- **파일:** NEW utils/customer-filter.ts, MOD ai.ts, customers.ts, campaigns.ts
+
+**B16-03: AI 맞춤한줄에 스팸필터/담당자테스트 추가** — ✅ 배포 완료
+- AiCustomSendFlow.tsx Step 4에 담당자테스트 + 스팸필터 버튼 추가
+- AI한줄로(AiCampaignResultPopup)의 기존 패턴 재사용: sampleCustomer로 변수 치환 후 테스트
+- Dashboard.tsx에서 9개 props 전달 (setShowSpamFilter, handleTestSend, sampleCustomer 등)
+- **파일:** MOD AiCustomSendFlow.tsx, Dashboard.tsx
+
+**B16-04: EUC-KR 비호환 특수문자 제거** — ✅ 배포 완료
+- Python EUC-KR 인코딩 테스트로 52개 특수문자 전수 확인
+- 비호환 4개(♢, ♦, ✉, ☀) 제거 → 48개로 축소
+- **파일:** MOD Dashboard.tsx
+
+**B16-05: SMS 전환 후 MMS 이미지 잔존** — ✅ 배포 완료
+- MMS 이미지 미리보기 조건: `directMsgType === 'MMS' || mmsUploadedImages.length > 0` → `directMsgType === 'MMS'`
+- LmsConvert/SmsConvert 콜백에 `setMmsUploadedImages([])` 추가
+- **파일:** MOD Dashboard.tsx, TargetSendModal.tsx
+
+**B16-06: AI 타겟추출 age 필터 오류 (0명 반환)** — ✅ 배포 완료
+- **근본 원인:** AI 경로(mixed 모드)는 `(currentYear - birth_year)` 계산, 직접타겟 경로(structured 모드)는 `age` 컬럼 직접 사용 → birth_year NULL이면 AI 경로 0명
+- **수정:** CT-01 customer-filter.ts mixed 모드의 age 처리를 `age` 컬럼 직접 사용으로 통일 (BETWEEN, >=, <=)
+- minAge/maxAge 기존 호환도 동일하게 변경
+- **파일:** MOD utils/customer-filter.ts
+
+**B16-07: 직접타겟 회신번호 선택 + 미등록 회신번호 제외** — ✅ 배포 완료
+- **프론트엔드:** DirectTargetFilterModal에 회신번호 선택 드롭다운 추가 (기본/개별/특정번호)
+  - 선택된 회신번호를 onExtracted 콜백으로 Dashboard에 전달
+  - Dashboard에서 TargetSendModal의 selectedCallback/useIndividualCallback에 자동 반영
+- **백엔드:** 미등록 회신번호 처리 변경 — 전체 발송 차단 → 해당 고객만 제외
+  - `/:id/send` (AI 캠페인 발송): 미등록 회신번호 고객 제외 + callbackUnregisteredCount 응답 포함
+  - `/direct-send` (직접발송): 동일 로직 적용 + validRecipients 별도 변수로 처리
+  - 응답에 callbackMissingCount/callbackUnregisteredCount 구분 건수 포함
+- **파일:** MOD DirectTargetFilterModal.tsx, Dashboard.tsx, campaigns.ts
+
+#### 🔧 1순위: 추가 컨트롤타워 생성 (Harold님 컨펌 완료)
+
+> **배경:** D63에서 sms-queue.ts, prepaid.ts, campaign-lifecycle.ts 3개 컨트롤타워를 만들어 campaigns.ts 3030줄→2340줄로 리팩토링한 결과, 예약취소 버그(B16-02)가 근본 해결됨. Harold님 피드백: "유틸파일을 기준으로 잡고 통일하는게 문제점 잡기엔 좋더라고". 동적치환 때 standard-field-map.ts로 통일한 것과 같은 패턴.
+> **원칙:** 하나씩 생성 → Harold님 컨펌 → 적용. 기존 로직 변경 없이 위치만 이동(함수 추출). 기간계 무접촉.
+
+**CT-01: `utils/customer-filter.ts` — 고객 필터/쿼리 빌더 컨트롤타워** — ✅ 완료 (위 완료 목록 참조)
+
+**CT-02: `utils/permission-helper.ts` — 권한/스코프 헬퍼 컨트롤타워** — ⏳ 대기
+- **문제:** `getCompanyScope()` 함수가 manage-scheduled.ts, manage-stats.ts, manage-callbacks.ts 등 **6개 이상 파일에 복붙**으로 존재. 슈퍼관리자/고객사관리자/일반사용자 분기 + 사용자 필터 + 매장 스코프 적용 로직이 8개 이상 라우트에서 각각 구현.
+- **중복 패턴 3가지:**
+  - (A) `getCompanyScope(req)` — super_admin이면 query에서, 아니면 토큰에서 companyId 추출. manage-stats.ts, manage-callbacks.ts, analysis.ts 등 6곳 동일 복붙
+  - (B) 사용자 필터 — `company_user`면 `created_by = userId` 조건 추가, `company_admin`이면 `filter_user_id` 지원. campaigns.ts, results.ts, manage-stats.ts 등 8곳 유사 구현
+  - (C) 매장 스코프 — `store-scope.ts`의 `getStoreScope()` 호출 후 WHERE 절 추가. campaigns.ts, customers.ts, ai.ts 등 5곳 유사 패턴
+- **합치면:** 약 150줄 이상 중복 제거, 보안 일관성 확보
+- **효과:** 권한 체크 누락 버그 방지 (하나 고치면 8곳 자동 반영). 특히 사용자 필터/매장 스코프 적용이 누락되는 보안 리스크 제거
+- **설계:**
+  ```typescript
+  // utils/permission-helper.ts
+  interface CompanyScope { companyId: string; isAdmin: boolean; isSuperAdmin: boolean; userId: string; }
+  interface UserFilter { where: string; params: any[]; nextIndex: number; }
+  function getCompanyScope(req: Request): CompanyScope
+  function buildUserFilter(req: Request, startParamIndex: number): UserFilter
+  function buildStoreFilter(req: Request, companyId: string, startParamIndex: number): Promise<FilterResult>
+  ```
+- **적용 파일:** manage-stats.ts, manage-callbacks.ts, analysis.ts, campaigns.ts, results.ts, customers.ts, ai.ts, unsubscribes.ts (8개)
+
+**CT-03: `utils/unsubscribe-helper.ts` — 수신거부 관리 컨트롤타워** — ✅ 완료 (D64, 2026-03-11)
+- **문제:** 수신거부 필터 SQL 패턴이 4곳에 산재 + 080 콜백이 companies 레벨에서만 매칭되어 사용자별 080번호 지원 불가
+- **해결:** 기존 SQL 빌더 + 080 자동연동 + 슈퍼관리자 수신거부 관리 기능 통합
+- **함수:**
+  ```typescript
+  // 기존 (CT-03 초기)
+  buildUnsubscribeFilter(), buildUnsubscribeExistsFilter(), buildUnsubscribeCase()
+  syncCustomerOptIn(), isUnsubscribed(), getUnsubscribedPhones()
+  // 신규 (D64 080 확장)
+  findUserBy080Number()    — users 우선 → companies fallback 매칭
+  process080Callback()     — 080 콜백 처리 통합 (INSERT + sms_opt_in 동기화)
+  getUserUnsubscribes()    — 슈퍼관리자용 사용자별 수신거부 조회
+  deleteUserUnsubscribes() — 슈퍼관리자용 일괄삭제 + sms_opt_in 복구
+  exportUserUnsubscribes() — CSV 다운로드용 전체 조회
+  ```
+- **적용 파일:** unsubscribes.ts(080콜백→컨트롤타워 위임), admin.ts(API 3개 신규), AdminDashboard.tsx(UI)
+
+**CT-04: `utils/stats-aggregation.ts` — 통계 집계 컨트롤타워** — ⏳ 대기
+- **문제:** manage-stats.ts와 results.ts에서 날짜 범위 필터링(KST 타임존 처리), 캠페인 성공/실패 집계 쿼리, 월별/일별 그루핑 로직이 거의 동일하게 중복
+- **효과:** 통계 쿼리 변경 시 한 곳만 수정, KST 타임존 처리 일관성 확보
+- **설계:**
+  ```typescript
+  // utils/stats-aggregation.ts
+  interface DateRangeFilter { sql: string; params: any[]; nextIndex: number; }
+  function buildDateRangeFilter(startDate?: string, endDate?: string, startParamIndex?: number): DateRangeFilter
+  async function getCampaignSummary(companyId: string, options: StatsOptions): Promise<CampaignStats>
+  ```
+- **적용 파일:** manage-stats.ts, results.ts, analysis.ts
+
+---
+
+#### 🔧 2순위: 16차 버그리포트 수정 (Harold님 컨펌 완료, 하나씩 진행)
+
+**B16-03 ~ B16-07:** ✅ 전부 수정 완료 (위 완료 목록 참조)
+
+**개인화 미리보기 통일** — ✅ 완료 (D64, 2026-03-11)
+- **수정:** AiCampaignResultPopup.tsx에서 sampleCustomer 치환 로직 제거
+  - 추천 카드: `%고객명%` 변수 원본 그대로 표시
+  - 미리보기(AiPreviewModal.tsx): 기존대로 샘플 데이터 치환 표시
+- **수정 파일:** `components/AiCampaignResultPopup.tsx`
+
+**080번호 사용자별 관리 + 수신거부 관리** — ✅ 완료 (D64, 2026-03-11)
+- **수정:** 080 관리를 회사 단위 → 사용자 단위로 이전, CT-03 컨트롤타워에 통합
+  - users 테이블에 `opt_out_080_number`, `opt_out_auto_sync` 컬럼 추가
+  - 슈퍼관리자 사용자 편집 모달에 080 연동 설정/수신거부 관리 UI 추가
+  - 나래인터넷 080 콜백: users 우선 → companies fallback 매칭
+- **수정 파일:** `utils/unsubscribe-helper.ts`, `routes/unsubscribes.ts`, `routes/admin.ts`, `pages/AdminDashboard.tsx`
+
+#### 추가 사항 (Harold님 언급)
+- **DB삭제 사용자별** — 고객 DB 삭제를 사용자별로 권한 관리
+
+#### 수정 파일 목록 (D63 전체)
+
+**신규 생성 (유틸 컨트롤타워):**
+- `utils/store-scope.ts` — 브랜드 격리 컨트롤타워 (B16-01)
+- `utils/sms-queue.ts` — MySQL 큐 조작 컨트롤타워 (B16-02)
+- `utils/prepaid.ts` — 선불 차감/환불 컨트롤타워 (B16-02)
+- `utils/campaign-lifecycle.ts` — 캠페인 취소/결과동기화 컨트롤타워 (B16-02)
+- `utils/customer-filter.ts` — 고객 필터/쿼리 빌더 컨트롤타워 (CT-01)
+
+**백엔드 수정:**
+- `routes/campaigns.ts` — B16-01(store-scope), B16-02(함수→import 교체), B16-07(미등록 회신번호 개별 제외)
+- `routes/customers.ts` — B16-01(store-scope 7곳), CT-01(buildDynamicFilter 래퍼)
+- `routes/ai.ts` — B16-01(store-scope 3곳), CT-01(buildFilterWhereClause 래퍼)
+- `routes/manage-scheduled.ts` — B16-02(cancelCampaign 컨트롤타워 적용)
+- `routes/spam-filter.ts` — B16-02(import 경로 변경)
+- `routes/results.ts` — B16-02(import 경로 변경)
+- `routes/admin.ts` — B16-02(import 경로 변경)
+
+**프론트엔드 수정:**
+- `components/AiCustomSendFlow.tsx` — B16-03(스팸필터/담당자테스트 추가)
+- `components/DirectTargetFilterModal.tsx` — B16-07(회신번호 선택 드롭다운)
+- `components/TargetSendModal.tsx` — B16-05(MMS 이미지 조건 수정)
+- `pages/Dashboard.tsx` — B16-03(props 전달), B16-04(특수문자), B16-05(MMS 초기화), B16-07(회신번호 연동)
+
+---
+
+#### 수정 대상 버그 목록 (21건)
+
+| 우선순위 | 버그ID | 제목 | 수정 파일 |
+|:--------:|--------|------|-----------|
+| 🔴🔴 | B13-07 | 수신거부 제외 오류 — 직접발송 시 수신거부자 포함 발송됨 | campaigns.ts, unsubscribes.ts |
+| 🔴 | B13-05 | 금액필터 — 직접타겟 금액 조건 미작동 | campaigns.ts, DirectTargetFilterModal.tsx |
+| 🔴 | B8-04 | AI 회신번호 — AI 발송 시 회신번호 '1234' 차단 안됨 | campaigns.ts |
+| 🔴 | B10-01 | store_code 격리 — 다매장 고객 데이터 혼재 | customers.ts, unsubscribes.ts |
+| 🔴 | B12-01 | 예약취소 — 예약 캠페인 취소 안됨 | campaigns.ts |
+| 🔴 | B12-02 | 발송중 고착 — 결과 수신 후에도 '발송중' 유지 | campaigns.ts |
+| 🔴 | B13-09 | 발송중 유지 — 직접발송 즉시도 '발송중' 고착 | campaigns.ts |
+| 🟠 | B8-08 | 수신거부 건수 — 발송 성공 모달에 수신거부 건수 미표시 | campaigns.ts, Dashboard.tsx |
+| 🟠 | B8-09 | SMS 바이트 경고 — AI 결과 SMS 90바이트 초과 시 경고 없음 | ai.ts, AiCampaignResultPopup.tsx |
+| 🟠 | B8-10 | 엑셀 셀타입 — 숫자/날짜 셀 파싱 오류 | upload.ts, normalize.ts |
+| 🟠 | B10-02 | 커스텀 필드 라벨 — 고객 상세 모달에서 커스텀 필드 라벨 누락 | CustomerDBModal.tsx |
+| 🟠 | B10-03 | 매장필드 NULL — 엑셀 업로드 시 매장 필드 null 저장 | upload.ts |
+| 🟠 | B10-04 | 날짜 시리얼 — 엑셀 날짜 셀이 숫자로 저장됨 | upload.ts, normalize.ts |
+| 🟠 | B10-06 | 등급 프롬프트 — AI 프롬프트에 등급명 하드코딩 | ai.ts |
+| 🟠 | B13-01 | 생일/나이 라벨 — 고객 상세 모달 나이 필드 라벨 미표시 | CustomerDBModal.tsx |
+| 🟠 | B13-02 | 날짜 포맷 — 엑셀 날짜 YYYY-MM-DD 미변환 | upload.ts, normalize.ts |
+| 🟠 | B13-03 | 미리보기 개인화 — AI 결과 미리보기에 %고객명% 치환 안됨 (**재수정**) | AiPreviewModal.tsx, AiCampaignResultPopup.tsx, Dashboard.tsx |
+| 🟠 | B13-06 | 이모지 경고 + 특수문자 비호환 (**재수정**) | Dashboard.tsx, TargetSendModal.tsx |
+| 🟠 | B13-08 | MMS→SMS 이미지 — MMS에서 SMS 전환 시 이미지 잔존 | TargetSendModal.tsx |
+| 🟡 | B10-02 | 커스텀 필드 라벨 — fieldColumns 빈 배열 시 미표시 | CustomerDBModal.tsx |
+| 🟡 | B13-04 | 스팸필터 "준비중" — 미리보기에서 스팸필터 미작동 (**재수정**) | AiPreviewModal.tsx, Dashboard.tsx |
+| 🔴 | B8-13 | 대량 발송결과 성능 — 70~400만건 조회 시 로딩 불가 (**추가**) | ResultsModal.tsx, results.ts, defaults.ts |
+
+#### 수정 대상 파일 (13개) — 전체 수정 완료 ✅
+
+**백엔드 (8파일):**
+1. `routes/campaigns.ts` — B13-07, B13-05, B8-04, B12-01, B12-02, B13-09, B8-08 ✅
+2. `routes/customers.ts` — B10-01 (store_code 격리, 이미 적용 확인) ✅
+3. `routes/unsubscribes.ts` — B10-01, B13-07 ✅
+4. `routes/upload.ts` — B8-10, B10-03, B10-04, B13-02 ✅
+5. `services/ai.ts` — B8-09, B10-06, B10-03(매장맵핑 분리) ✅
+6. `utils/normalize.ts` — B8-10, B10-04, B13-02 ✅
+7. `routes/results.ts` — B8-13 (Redis 캐시 + COUNT 최적화) ✅ **추가**
+8. `config/defaults.ts` — B8-13 (CACHE_TTL 추가) ✅ **추가**
+
+**프론트엔드 (6파일):**
+9. `pages/Dashboard.tsx` — B8-08, B13-06(이모지+특수문자팝업), B13-03/B13-04(props전달) ✅ **재수정**
+10. `components/AiCampaignResultPopup.tsx` — B8-09, B13-03(별칭매핑추가) ✅ **재수정**
+11. `components/AiPreviewModal.tsx` — B13-03(개인화치환), B13-04(스팸필터연동) ✅ **신규 추가**
+12. `components/TargetSendModal.tsx` — B13-08, B13-06 ✅
+13. `components/CustomerDBModal.tsx` — B13-01, B10-02 ✅
+14. `components/DirectTargetFilterModal.tsx` — B13-05 ✅
+15. `components/ResultsModal.tsx` — B8-13 (sync-results fire-and-forget) ✅
+
+**기간계 무접촉:** 발송 INSERT/차감/환불/인증 로직 일절 미수정.
+
+---
+
+### 🔧 D66 — 17차 실동작 검증 + PPT 버그리포트 수정 (2026-03-11~03-12) — ✅ 수정+배포 완료, 실동작 검증 대기
+
+> **배경:** 직원 전수 실동작 검증(체크리스트 30개 항목, 0311) + PPT 버그리포트(9슬라이드) 결과 종합 분석.
+> **검증 결과:** O(통과) 15건, X(실패) 8건, ▲(부분통과) 4건, 미검증 3건. PPT 신규 포함 총 16건 수정 대상.
+> **원칙:** 하나씩 코드 직접 읽고 근본 원인 파악 → Harold님 컨펌 → 수정. 병렬 에이전트 금지.
+> **기간계 무접촉:** 발송 INSERT/차감/환불 로직 직접 수정 금지.
+> **결과:** B17-01~B17-07(이전 세션), B17-09~B17-16(이번 세션) 수정 완료 + 080 admin 자동동기화 추가. TypeScript 0 에러. 배포 완료(2026-03-12).
+
+#### 체크리스트 결과 요약 (2026-03-11)
+
+| 결과 | 건수 | 항목 |
+|------|------|------|
+| O (통과) | 15건 | B8-01,02,05,06,11,13, S9-04,08, B10-01,05,06,07, B11-01,03,04 |
+| X (실패) | 8건 | B8-04,08,09,10,12, B10-02, B10-04, D39 |
+| ▲ (부분) | 4건 | B8-03,07, B10-03, B11-02 |
+| 미검증 | 3건 | B11-05, Phase2, B8-13b |
+
+#### 수정 대상 버그 목록 (16건 — 우선순위순)
+
+| # | 버그ID | 심각도 | 제목 | 상태 |
+|---|--------|--------|------|------|
+| 1 | B17-01 | 🔴🔴 | 직접발송 수신거부 제외가 발송에 미반영 (추출은 정상, 전송 시 전체 발송) | 🟡 수정완료-검증대기 |
+| 2 | B17-02 | 🔴🔴 | 예약취소 완전 불가 — 캘린더/예약대기/발송결과 3곳 취소 안 됨 + 취소해도 발송됨 | 🟡 수정완료-검증대기 |
+| 3 | B17-03 | 🔴 | AI한줄로/맞춤한줄 발송 시 "서버 오류" — AI 경로 전체 발송 불가 | 🟡 수정완료-검증대기 |
+| 4 | B17-04 | 🔴 | AI 선택 문안 ≠ 실제 발송 — 두번째 발송 시 첫번째 문안 중복 | 🟡 수정완료-검증대기 |
+| 5 | B17-05 | 🟠 | AI 맞춤한줄 스팸테스트 개인화 공백 (간헐적) | 🟡 수정완료-검증대기 |
+| 6 | B17-06 | 🟠 | 직접타겟 누적금액/포인트 필터 미작동 — 전체 고객 추출됨 | 🟡 수정완료-검증대기 |
+| 7 | B17-07 | 🟠 | MMS 비용절감 모달 후 LMS유지/SMS전환 눌러도 발송 불가 | 🟡 수정완료-검증대기 |
+| 8 | B17-08 | 🟠 | 직접타겟 회신번호 리스트 로딩 안 됨 + 자동입력 변수 "고객명"만 표시 | 🟡 배포 후 재확인 |
+| 9 | B17-09 | 🟠 | 엑셀 날짜 ISO/영문 표시 (B8-10/B10-04 재발) | 🟡 수정완료-검증대기 |
+| 10 | B17-10 | 🟠 | AI한줄로 SMS 바이트 초과 시 LMS 전환 안내 없이 발송 가능 | 🟡 수정완료-검증대기 |
+| 11 | B17-11 | 🟠 | 080 수신거부 자동연동 미동작 (슈퍼관리자 설정 후 0건) | 🟡 수정완료-검증대기 |
+| 12 | B17-12 | 🟠 | AI맞춤한줄 담당자테스트 버튼 불안정 (실행됐다 안 됐다) | 🟡 수정완료-검증대기 |
+| 13 | B17-13 | 🟡 | 커스텀 필드 라벨 여전히 "커스텀1,2" 표시 (B10-02 재발) | 🟡 코드 이상 없음-재업로드 시 해결 |
+| 14 | B17-14 | 🟡 | 필터 UI — 대량 값 시 선택창 무한 + 매장번호/지역 미노출 (D39) | 🟡 수정완료-검증대기 |
+| 15 | B17-15 | 🟡 | Toast 알림 리셋 안 됨 — 새로고침 전까지 남아있음 (B11-02) | 🟡 수정완료-검증대기 |
+| 16 | B17-16 | 🟡 | DB 현황에서 AI 매핑 필드(등록매장 등) 미표시 (B10-03) | 🟡 수정완료-검증대기 |
+
+#### 관련 이전 버그 매핑
+
+| 17차 | 관련 이전 버그 | 비고 |
+|------|--------------|------|
+| B17-01 | B13-07, B14-01 | 수신거부 필터가 추출만 반영, 발송 INSERT에 미반영 |
+| B17-02 | B12-01 | campaign-lifecycle.ts 배포 안 됐거나 manage-scheduled 미적용 |
+| B17-03 | B8-04, B8-08 | AI 경로 공통 서버 오류 — 근본 원인 별도 분석 필요 |
+| B17-04 | B8-12 | AI 캠페인 선택 문안 state 관리 문제 |
+| B17-05 | B8-03 | 간헐적 = 비동기/타이밍 문제 가능성 |
+| B17-06 | B13-05 | CT-01 customer-filter 배포 여부 확인 필요 |
+| B17-07 | B16-05, B13-08 | MMS 전환 모달 콜백 문제 |
+| B17-09 | B8-10, B10-04 | normalize.ts 날짜 처리 재발 |
+| B17-11 | 신규 | CT-03 unsubscribe-helper 080 연동 배포 여부 확인 |
+| B17-13 | B10-02 | customer_schema 라벨 복구 로직 미동작 |
+
+#### 수정 내역 상세 (2026-03-11~03-12, 2세션)
+
+**세션1 (D66 전반 — B17-01~B17-07):**
+- B17-01: unsubscribes 10파일 user_id 통일 (campaigns.ts, customers.ts, ai.ts 등)
+- B17-04: AI 캠페인 state 초기화 (Dashboard.tsx aiResult/selectedAiMsgIdx 리셋)
+- B17-06: customer-filter.ts 숫자 필드 연산자 처리 수정
+- B17-07: MMS 비용절감 모달 콜백 루프 수정 (SendConfirmModal.tsx)
+
+**세션2 (D66 후반 — B17-09~B17-16 + 080 admin 동기화):**
+- B17-09: upload.ts, sync.ts — XLSX Date 객체 normalizeDateValue() 처리
+- B17-10: AiCampaignResultPopup.tsx — 캠페인확정 시 SMS 바이트 체크 + LMS 전환 confirm
+- B17-11: 080 수신거부 — 7개 파일 users 우선→companies fallback 패턴 적용 (unsubscribes.ts, campaigns.ts×3, ai.ts×3, companies.ts)
+- B17-12: AiCustomSendFlow.tsx — 자체 handleCustomTestSend 함수 생성 (variants 기반)
+- B17-13: 코드 이상 없음 — customer_field_definitions 정상, 데이터 재업로드 시 해결
+- B17-14: DirectTargetFilterModal.tsx — 15개 초과 시 검색+스크롤 영역
+- B17-15: Dashboard.tsx — useEffect 4초 자동 해제 + 닫기 버튼
+- B17-16: companies.ts — store_name(미존재)→COALESCE(registered_store, recent_purchase_store), opt_outs→unsubscribes
+
+**추가 개선 (080 admin 자동동기화):**
+- unsubscribe-helper.ts process080Callback() — 080 콜백 시 같은 회사의 admin user에게도 자동 INSERT (source='080_ars_sync')
+- 매칭된 user INSERT 후 → 같은 company의 user_type='admin' 조회 → 미포함 admin에게 INSERT
+
+#### 수정 파일 전체 목록 (D66 세션2)
+- `utils/unsubscribe-helper.ts` — 080 admin 자동동기화
+- `routes/unsubscribes.ts` — B17-11 users 우선 조회
+- `routes/campaigns.ts` — B17-11 AI발송/직접발송/예약발송 3곳
+- `routes/ai.ts` — B17-11 generate-message/recommend/generate-custom 3곳
+- `routes/companies.ts` — B17-11 settings reject_number override + B17-16 store_name/opt_outs 수정
+- `routes/upload.ts` — B17-09 Date 객체 처리
+- `routes/sync.ts` — B17-09 Date 객체 처리
+- `components/AiCampaignResultPopup.tsx` — B17-10 SMS 바이트 체크
+- `components/AiCustomSendFlow.tsx` — B17-12 자체 테스트 핸들러
+- `components/DirectTargetFilterModal.tsx` — B17-14 검색+스크롤
+- `pages/Dashboard.tsx` — B17-15 Toast 자동해제
+
+#### 배포 후 재확인 필요
+- B17-08: 콜백 목록 (이전 세션 배포 분)
+- B17-11: 080 실제 콜백 동작 (나래인터넷 → sh_cpb/sh_sh 테스트)
+- B17-13: 커스텀 필드 라벨 (데이터 재업로드 후)
+
+---
+
+### ✅ D65 — sync-results 결과동기화 Blocker 수정 (2026-03-11) — 완료, 배포 완료
+
+> **배경:** 발송 완료된 캠페인이 영구적으로 "발송중" + 성공/실패 0/0으로 고착. 결과 화면이 전혀 업데이트되지 않는 Blocker 버그.
+> **진단 방법:** 서버 로그(pm2 logs) 기반 근본 원인 추적.
+
+#### 발견된 근본 원인 3가지
+
+1. **kakaoAgg() 미존재 테이블 throw** — MySQL에 `IMC_BM_FREE_BIZ_MSG` 테이블이 없는 상태에서 `kakaoAgg()`를 호출하면 에러 throw → `syncCampaignResults()` 함수 전체 중단 → SMS 결과 집계가 정상이어도 DB 업데이트까지 도달하지 못함
+2. **PostgreSQL $3 타입 추론 실패** — UPDATE 쿼리에서 `status = $3`과 `CASE WHEN $3 = 'completed'`에 동일 파라미터 사용 → PostgreSQL이 `inconsistent types deduced for parameter $3` 에러
+3. **캠페인별 에러 격리 없음** — for 루프에 try/catch가 없어 1건의 에러가 나머지 전체 캠페인 동기화를 중단
+
+#### 수정 내용 (campaign-lifecycle.ts)
+
+- `kakaoAgg()` 호출을 try/catch로 감싸 테이블 미존재 시 `{total:0, success:0, fail:0, pending:0}` 반환 (AI + 직접발송 2곳)
+- UPDATE 쿼리 `$3` → `$3::text` 명시 캐스팅 (campaign_runs AI, campaigns AI, campaigns 직접발송, campaign_runs 직접발송 — 4곳)
+- AI캠페인 / 직접발송 for 루프에 캠페인별 try/catch 추가 (2곳)
+- 디버그 로그 추가: tables, created_by, success/fail/pending 카운트
+
+#### 수정 파일 (sync-results)
+- `utils/campaign-lifecycle.ts` — syncCampaignResults 함수
+
+#### 추가 수정: 발송 내역 0건 표시 (B15-01)
+
+**근본 원인:** mysql2의 `conn.execute()`(prepared statement)가 UNION ALL + 다수 `?` 파라미터 바인딩에서 `Incorrect arguments to mysqld_stmt_execute` 에러 발생 (mysql2 known issue). LIVE 테이블 fallback도 동일 실패.
+
+**수정:**
+- `config/database.ts` — `mysqlQuery` 함수의 `conn.execute()` → `conn.query()` 변경. `query()`는 문자열 이스케이프 방식이라 UNION ALL 문제 없음. `?` 파라미터 바인딩 동일 지원.
+- `routes/results.ts` — SMS 서브쿼리의 `NULL AS kakao_*` → `'' AS kakao_*` 변경 (메인+fallback 2곳)
+
+#### 추가 수정: 캠페인 상세 메시지 미리보기 overflow (B15-02)
+
+**수정:** `ResultsModal.tsx` — 메시지 말풍선에 `break-all overflow-hidden` 추가. 긴 특수문자가 폰 프레임 밖으로 넘치던 문제 해결.
+
+#### 추가 수정: 발송시간 UTC→KST 변환
+
+**근본 원인:** QTmsg Agent가 `mobsend_time`, `repmsg_recvtm`을 UTC로 기록. `sendreq_time`은 앱에서 MySQL NOW()(KST)로 INSERT하므로 정상이나, QTmsg가 기록하는 발송시간/결과수신시간은 9시간 느리게 표시.
+
+**수정:** `routes/results.ts` — messages/fallback/export 3곳에 `DATE_ADD(mobsend_time, INTERVAL 9 HOUR)`, `DATE_ADD(repmsg_recvtm, INTERVAL 9 HOUR)` 적용.
+
+#### 추가 수정: 캠페인 상세 엉뚱한 메시지 표시 + 회신번호 공란 (B15-03)
+
+**근본 원인:**
+1. `ResultsModal.tsx` — "상세" 클릭 시 이전 캠페인의 `messages` state가 초기화되지 않아 `messages[0]?.msg_contents`가 이전 캠페인 내용을 표시
+2. `results.ts` — 캠페인 목록 SELECT에 `callback_number` 컬럼 누락 → 프론트에서 항상 `-` 표시
+
+**수정:**
+- `ResultsModal.tsx` — 상세 클릭 시 `setMessages([])`, `setShowSendDetail(false)` 호출 추가
+- `results.ts` — 캠페인 목록 SELECT에 `c.callback_number` 추가
+
+#### 수정 파일 전체 목록 (D65)
+- `utils/campaign-lifecycle.ts` — syncCampaignResults: kakao try/catch, $3::text 캐스팅, 캠페인별 try/catch
+- `config/database.ts` — mysqlQuery: conn.execute() → conn.query()
+- `routes/results.ts` — NULL→'' 변경, callback_number 추가, mobsend_time KST 변환
+- `components/ResultsModal.tsx` — messages 초기화, 미리보기 overflow 수정
+
+#### 관련 버그 Closed
+- **B12-02** (발송결과 "발송중" 영구 고착) → ✅ Closed
+- **B13-09** (결과 수신 후에도 미변경) → ✅ Closed
+- **B15-01** (발송 내역 0건 표시) → ✅ Closed (신규)
+- **B15-02** (미리보기 overflow + 발송시간 UTC) → ✅ Closed (신규)
+- **B15-03** (상세 엉뚱한 메시지 + 회신번호 공란) → ✅ Closed (신규)
+
+#### 기간계 영향: 없음
+발송 INSERT/차감/환불 무접촉. 결과 동기화 + 조회 로직만 수정.
+
+---
+
+### ✅ D61 — 프론트엔드 난독화 적용 (2026-03-08) — 완료
+
+> **배경:** 상용화 전 소스 코드 보호. STATUS.md 런칭 체크리스트 항목.
+> **범위:** frontend + company-frontend 양쪽 vite.config.ts
+> **결과:** `vite-plugin-javascript-obfuscator` 적용. production 빌드 시에만 활성화. stringArray+base64 인코딩, disableConsoleOutput, identifierNamesGenerator 등. 개발 환경 무영향.
+> **배포:** 서버에서 `npm install` → `npm run build` 시 자동 적용
+
+### ✅ D60 — SyncAgent API Key 관리 + 사용자별 라인그룹 배정 (2026-03-08) — 완료
+
+> **배경:** (1) 상용화 시 고객사 온보딩마다 DB 직접 접근 불가 → 슈퍼관리자 UI 필요 (2) 동일 회사 내 사용자간 발송 라인 공유 → 대량발송 시 다른 사용자 홀딩 문제
+> **범위:** 백엔드(admin.ts, campaigns.ts) + 프론트엔드(AdminDashboard.tsx) + DB DDL(users.line_group_id)
+> **결과:**
+> - SyncAgent: 고객사 편집 모달 9번째 탭 추가 — API Key/Secret 조회·재발급·비활성화, use_db_sync 토글. 3개 엔드포인트 신규.
+> - 라인그룹: users 테이블에 line_group_id 추가(nullable). 발송 시 사용자 개별 라인그룹 우선, 없으면 회사 fallback. 슈퍼관리자 사용자 편집 모달에 라인그룹 드롭다운 추가. 고객사 관리자 접근 불가.
+> - 고객사 편집 모달 너비/탭 UI 개선 (max-w-lg → max-w-2xl, 탭 라벨 줄바꿈 방지)
+> **기간계 영향:** campaigns.ts getCompanySmsTables에 userId optional 파라미터 추가 (기존 호출 100% 호환)
+> **DDL:** `ALTER TABLE users ADD COLUMN IF NOT EXISTS line_group_id uuid REFERENCES sms_line_groups(id) ON DELETE SET NULL` — 실행 완료 (2026-03-08)
+> **tsc:** backend + frontend 모두 통과
+
+### ✅ D59 — 2차 코드 전수점검 (2026-03-07) — 완료
+
+> **배경:** 상용화 전 전체 코드 레벨 정밀 감사. 1차 점검(03-05 교통정리) 이후 코드 실물 기반 전수점검.
+> **범위:** 전체 백엔드(routes, services, config, utils) + 전체 프론트엔드(pages, components) + company-frontend
+> **결과:** P1~P6 총 28건 수정 완료, P7 장기 8건 백로그 기록. 기간계 무접촉. tsc 3패키지 통과.
+> **상세:** `status/교통정리-전수점검-20260305.md` 섹션 11~14 참조 + `status/CODE-REVIEW-P7-BACKLOG.md`
+
+---
+
+### 🔧 D53 — 요금제별 기능 게이팅 구현 (2026-03-04~)
+
+> **배경:** 상용화 직전, 레거시 웹 업체를 무료요금제로 강제이관 후 유료 전환 유도 전략. 기존 plans 테이블에 5단계 요금제 존재하나, 기능별 잠금이 AI 분석(`ai_analysis_level`)과 고객DB 한도(`max_customers`)에만 적용됨. 스팸필터·AI메시징·고객DB/타겟팅 등 핵심 기능에 요금제별 게이팅이 필요.
+> **목표:** 요금제별로 기능 접근을 제어하여 무료→스타터→베이직 단계별 업셀 구조 완성.
+> **원칙:** 기간계(발송/DB/인증) 무접촉. plans 테이블 컬럼 추가 + 백엔드 미들웨어 + 프론트 UI 잠금.
+
+#### 요금제별 기능 매트릭스 (Harold님 확정 2026-03-04)
+
+| 기능 | 무료(체험후) | 스타터(15만) | 베이직(35만) | 프로 | 비즈니스 |
+|------|:-----------:|:-----------:|:-----------:|:----:|:--------:|
+| 직접발송 (상단메뉴) | O | O | O | O | O |
+| 발송결과 (상단메뉴) | O | O | O | O | O |
+| 수신거부 (상단메뉴) | O | O | O | O | O |
+| 설정 (상단메뉴) | O | O | O | O | O |
+| 고객 DB 업로드 | X | O | O | O | O |
+| 직접 타겟 발송 | X | O | O | O | O |
+| 스팸필터 테스트 | X | O | O | O | O |
+| 캘린더 | X | O | O | O | O |
+| AI 추천 발송 (한줄로/맞춤한줄) | X | X | O | O | O |
+| AI 분석 | X | X | X | basic | advanced |
+
+#### 안건 목록
+
+| # | 안건 | 성격 | 난이도 | 상태 |
+|---|------|------|--------|------|
+| 1 | plans 테이블 컬럼 추가 — `spam_filter_enabled`, `ai_messaging_enabled`, `customer_db_enabled` | DB/DDL | 낮음 | ✅ 완료 (DB 실행 완료 2026-03-05) |
+| 2 | plans 테이블 데이터 업데이트 — 5개 요금제별 플래그값 설정 | DB/DML | 낮음 | ✅ 완료 (DB 실행 완료 2026-03-05) |
+| 3 | 백엔드: /api/companies/my-plan 응답에 새 플래그 포함 | 백엔드 | 낮음 | ✅ 완료 |
+| 4 | 백엔드: 스팸필터 API 게이팅 — spam-filter.ts에서 `spam_filter_enabled` 체크 | 백엔드 | 낮음 | ✅ 완료 |
+| 5 | 백엔드: AI 발송 API 게이팅 — ai.ts에서 `ai_messaging_enabled` 체크 (recommend-target, parse-briefing, generate-custom) | 백엔드 | 낮음 | ✅ 완료 |
+| 6 | 백엔드: 고객DB/타겟팅 API 게이팅 — upload.ts(parse/save)/customers.ts(extract)에서 `customer_db_enabled` 체크 | 백엔드 | 낮음 | ✅ 완료 |
+| 7 | 프론트: Dashboard.tsx — PlanInfo 인터페이스 확장 + 3개 카드 잠금 UI (🔒 + opacity) | 프론트 | 중간 | ✅ 완료 |
+| 8 | 프론트: 상단메뉴 게이팅 — 캘린더 메뉴 customer_db_enabled 체크 + 🔒 표시 | 프론트 | 낮음 | ✅ 완료 |
+| 9 | 프론트: 업그레이드 유도 모달 — PlanUpgradeModal 범용화 (featureName/requiredPlan props) + SpamFilterLockModal 텍스트 수정 | 프론트 | 중간 | ✅ 완료 |
+| 10 | 검증: DB 실행 완료 + 실서버 테스트 대기 | 검증 | 중간 | ✅ DB실행완료 (2026-03-05 plans 3컬럼 ALTER+UPDATE 6건 정상) |
+
+#### 상세 구현 계획
+
+**안건 #1-2: DB 변경**
+```sql
+-- plans 테이블 컬럼 추가
+ALTER TABLE plans ADD COLUMN customer_db_enabled boolean DEFAULT false;
+ALTER TABLE plans ADD COLUMN spam_filter_enabled boolean DEFAULT false;
+ALTER TABLE plans ADD COLUMN ai_messaging_enabled boolean DEFAULT false;
+
+-- 요금제별 플래그 설정
+UPDATE plans SET customer_db_enabled = false, spam_filter_enabled = false, ai_messaging_enabled = false WHERE plan_code = 'FREE';
+UPDATE plans SET customer_db_enabled = true,  spam_filter_enabled = true,  ai_messaging_enabled = false WHERE plan_code = 'STARTER';
+UPDATE plans SET customer_db_enabled = true,  spam_filter_enabled = true,  ai_messaging_enabled = true  WHERE plan_code = 'BASIC';
+UPDATE plans SET customer_db_enabled = true,  spam_filter_enabled = true,  ai_messaging_enabled = true  WHERE plan_code = 'PRO';
+UPDATE plans SET customer_db_enabled = true,  spam_filter_enabled = true,  ai_messaging_enabled = true  WHERE plan_code = 'BUSINESS';
+```
+
+**안건 #3: 백엔드 my-plan 응답 확장**
+- 파일: `companies.ts` GET `/my-plan`
+- 기존 `ai_analysis_level` 외에 `customer_db_enabled`, `spam_filter_enabled`, `ai_messaging_enabled` 추가
+- PlanInfo 인터페이스에 3개 boolean 필드 추가
+
+**안건 #4: 스팸필터 게이팅**
+- 파일: `spam-filter.ts` POST `/test`
+- 발송 전 company의 plan → `spam_filter_enabled` 체크
+- false면 403 + `{ error: '스팸필터 테스트는 스타터 이상 요금제에서 이용 가능합니다', code: 'PLAN_FEATURE_LOCKED' }`
+- 기존 SpamFilterLockModal.tsx가 이미 존재 (monthly_price >= 150,000 체크) → plan 필드 기반으로 전환
+
+**안건 #5: AI 발송 게이팅**
+- 파일: `routes/ai.ts` POST `/recommend-target` (AI 한줄로), POST `/custom-send` (AI 맞춤한줄)
+- 파일: `campaigns.ts` POST `/ai-send`
+- company의 plan → `ai_messaging_enabled` 체크
+- false면 403 + `{ error: 'AI 추천 발송은 베이직 이상 요금제에서 이용 가능합니다', code: 'PLAN_FEATURE_LOCKED' }`
+
+**안건 #6: 고객DB/타겟팅 게이팅**
+- 파일: `upload.ts` POST `/validate`, POST `/save`
+- 파일: `customers.ts` POST `/extract` (타겟 추출)
+- company의 plan → `customer_db_enabled` 체크
+- false면 403 + `{ error: '고객 DB 관리는 스타터 이상 요금제에서 이용 가능합니다', code: 'PLAN_FEATURE_LOCKED' }`
+
+**안건 #7: 대시보드 카드 잠금**
+- 파일: `Dashboard.tsx`
+- PlanInfo 인터페이스에 새 필드 추가
+- 3개 메인 카드(AI 추천 발송, 직접 타겟 발송, 고객 DB 업로드)에 잠금 오버레이:
+  - `ai_messaging_enabled = false` → AI 추천 발송 카드에 🔒 + "베이직 이상"
+  - `customer_db_enabled = false` → 직접 타겟 발송 카드, 고객 DB 업로드 카드에 🔒 + "스타터 이상"
+- 클릭 시 업그레이드 유도 모달 표시 (기존 PlanUpgradeModal 활용/확장)
+
+**안건 #8: 상단메뉴 게이팅**
+- 파일: `DashboardHeader.tsx`
+- AI 분석 메뉴: `ai_analysis_level === 'none'`이면 클릭 시 업그레이드 모달 (기존 로직 유지)
+- 캘린더 메뉴: `customer_db_enabled = false`면 클릭 시 업그레이드 모달
+
+**안건 #9: 업그레이드 유도 모달**
+- 기존 PlanUpgradeModal.tsx 확장 또는 범용화
+- props: `requiredPlan` ('STARTER' | 'BASIC' | 'PRO') + `featureName` (잠긴 기능명)
+- "이 기능은 {requiredPlan} 이상 요금제에서 이용 가능합니다" + [요금제 안내] 버튼 → /pricing
+
+#### 수정 대상 파일 목록
+
+**백엔드 (5파일):**
+1. `routes/companies.ts` — my-plan 응답 확장
+2. `routes/spam-filter.ts` — spam_filter_enabled 게이팅
+3. `routes/ai.ts` — ai_messaging_enabled 게이팅
+4. `routes/campaigns.ts` — ai-send ai_messaging_enabled 게이팅
+5. `routes/upload.ts` — customer_db_enabled 게이팅
+6. `routes/customers.ts` — extract customer_db_enabled 게이팅
+
+**프론트엔드 (4~5파일):**
+1. `pages/Dashboard.tsx` — PlanInfo 인터페이스 + 카드 잠금 UI
+2. `components/DashboardHeader.tsx` — 메뉴 게이팅
+3. `components/PlanUpgradeModal.tsx` — 범용 업그레이드 모달 확장
+4. `components/SpamFilterLockModal.tsx` — plan 필드 기반 전환 (기존 price 기반→boolean 기반)
+5. `components/DirectTargetFilterModal.tsx` — customer_db_enabled 체크 (선택적)
+
+**기간계 무접촉:** 발송 파이프라인(campaigns.ts send/direct-send), 차감/환불(billing.ts), 인증(auth.ts), DB(database.ts) 전부 미수정.
+
+---
+
+### 🔧 D43 — 기능 정상화 및 DB 동적 기준 정립 (2026-02-27~) — ✅ 전체 완료
+
+> **배경:** D39 표준 필드 아키텍처 확립 후 아직 반영되지 않은 부분들이 존재. 기존 발송 파이프라인의 발송 흐름/차감/환불 로직은 절대 건드리지 않음 (D43-7에서 결과값 해석 로직만 sms-result-map.ts 중앙화 전환).
+> **목표:** DB 기준에 맞게 기능을 정상화하고, 동적 데이터 흐름을 확립한다.
+> **원칙:** 스키마 벗어나는 하드코딩 금지. 의논 → 검증 → 실행.
+
+#### 안건 목록
+
+| # | 안건 | 성격 | 난이도 | 상태 |
+|---|------|------|--------|------|
+| 1 | 대시보드 회사명 — 슈퍼관리자 수정이 반영 안 됨 | 버그 | 낮음 | ✅ 완료 |
+| 2 | AI 매핑 화면 개편 — 표준 17개 명확 나열 + 커스텀 필드 라벨 지정 | 기능개편 | 중간 | ✅ 완료 |
+| 3 | 직접 타겟 설정 — enabled-fields 기반 동적 필터 조건 | 기능개발 | 중간 | ✅ 완료 |
+| 4 | 수신거부 양방향 동기화 (독립 관리 vs DB 연동) | 설계+구현 | 높음 | ✅ 완료 (나래 080 콜백 연동 완료 2026-03-05) |
+| 5 | AI 한줄로 입력 포맷 강제화 + 샘플 고객 미리보기 + 이모지 제거 | 기능개선 | 중간 | ✅ 완료 |
+| 6 | 🚨 긴급: 스팸필터 테스트 안됨 (원인: MySQL 랜섬웨어) | 인프라/보안 | 높음 | ✅ 완료 |
+| 7 | 결과값 매핑 중앙화 — sms-result-map.ts 컨트롤타워 | 구조개선 | 높음 | ✅ 완료 (3-Tier 전수 점검) |
+
+#### 안건 #1: 대시보드 회사명 미반영 — ✅ 완료
+
+- **증상:** 슈퍼관리자에서 회사명 → "테스트계정" 수정 완료했으나, 대시보드 좌측 상단에 "디버깅테스트" 표시
+- **원인:** 이중 문제 — ① auth.ts가 `c.name`(구 컬럼) 조회, 슈퍼관리자는 `company_name` 수정 → 컬럼 불일치 ② authStore가 로그인 시점 localStorage 캐시 사용
+- **해결 (D43-1, 2026-02-27):**
+  - auth.ts: 로그인 쿼리 `c.name` → `c.company_name` 통일
+  - companies.ts: GET /settings에 `company_name` 추가, PUT /:id에서 `name`도 동기 수정
+  - Dashboard.tsx: `companyNameFromDB` state 추가 → loadCompanySettings에서 DB 실시간 조회값 우선 표시
+- **수정 파일 3개:** auth.ts, companies.ts, Dashboard.tsx
+
+#### 안건 #2: AI 매핑 결과 화면 개편 — ✅ 완료
+
+- **증상:** 드롭다운 16개 하드코딩(레거시 컬럼 포함), 표준 17개 기준 불명확, 커스텀 필드 배정 불가, 공간 낭비
+- **해결 (D43-2, 2026-02-27):**
+  - **컴포넌트 분리:** Dashboard.tsx에서 파일 업로드+매핑 모달 310줄 분리 → FileUploadMappingModal.tsx 신규 (5,239줄→4,948줄)
+  - **매핑 UI 개편:** 하드코딩 드롭다운 → FIELD_MAP 기반 동적 표준 20개(필수17+파생3), 카테고리별 그룹, 2열 컴팩트 그리드, 태그 클릭 방식(미배정 컬럼 팝업), 중복 배정 자동 방지
+  - **커스텀 필드:** +/- 방식으로 슬롯 추가(최대 15개), 라벨명 직접 입력, AI 배정분 자동 초기 표시
+  - **백엔드:** upload.ts `/mapping` 응답에 standardFields+categoryLabels 추가, `/save`에 customLabels 지원 → customer_field_definitions 라벨 저장
+  - **팝업 overflow 수정:** absolute→fixed 포지션, 클릭 위치 기반 좌표 계산, 하단 공간 부족 시 위로 자동 조정
+- **수정 파일 3개:** upload.ts, Dashboard.tsx, FileUploadMappingModal.tsx(신규)
+
+#### 안건 #3: 직접 타겟 설정 동적 필터 — ✅ 완료
+
+- **작업 완료 (D43-3, 2026-02-27):**
+  - **컴포넌트 분리:** Dashboard.tsx에서 직접타겟 모달 265줄 분리 → DirectTargetFilterModal.tsx 신규 (4,952줄→4,547줄)
+  - **모달 전면 리팩토링:**
+    - SKIP_FIELDS 제거 → **전체 필드 노출** (Harold님 확정: 사용자가 선택하게)
+    - 2열 컴팩트 그리드 (체크+조건 인라인)
+    - 연령: 다중 체크(20대+30대) + 직접 범위 입력(25~35세) 전환
+    - 문자열 필드: 단일 드롭다운 → **다중 태그 선택** (☑VIP ☑GOLD → OR 조건)
+    - 금액/포인트/날짜: 드롭다운 → **프리셋 태그 토글**
+    - sms_opt_in: 별도 체크박스 → 마케팅 카테고리 통합 (기본 ON)
+  - **백엔드 개선 (customers.ts):**
+    - enabled-fields 옵션: 4개 하드코딩 → **모든 string 필드 DISTINCT 동적 조회** (커스텀 포함)
+    - buildDynamicFilter: `name`, `email`, `address` 등 직접 컬럼 → contains 검색 지원
+    - numericFields: `recent_purchase_amount` 추가
+    - extract SELECT: 6개 → 표준 필드 전체 반환
+  - **Dashboard.tsx 연결:**
+    - 기존 직접타겟 state 10개 + 함수 5개 제거
+    - `handleTargetExtracted` 콜백으로 기존 발송 흐름 연결
+- **수정 파일 3개:** DirectTargetFilterModal.tsx(신규), Dashboard.tsx, customers.ts
+
+- **🚨 버그: 타겟 추출 후 발송 모달 미표시 — ✅ 수정 완료 (D43-3b, 2026-02-27)**
+  - **증상:** 대상 인원 10,000명 조회 성공 → "타겟 추출" 클릭 → 아무 반응 없음 (발송 모달 안 뜸)
+  - **확정 원인 3가지:**
+    1. **extract SELECT 하드코딩 + customers_unified 뷰 불일치** — SELECT 컬럼 17개 하드코딩으로 나열 + `FROM customers_unified` 사용 → DDL 이후 뷰 미갱신으로 `store_phone`, `registration_type` 등 컬럼 참조 시 SQL 에러 → 500 반환 → `data.success` undefined → `onExtracted` 미호출
+    2. **age 필터 birth_date 역산** — `buildDynamicFilter`에서 age 조건을 `EXTRACT(YEAR FROM AGE(birth_date))`로 처리 → `birth_date` NULL인 고객 전부 탈락 → 연령대 필터 시 0명
+    3. **에러 핸들링 부재** — extract API 500 에러 시 DirectTargetFilterModal에서 `!res.ok` 체크 없이 `res.json()` 시도 → 파싱 실패하거나 success 없어서 조용히 실패
+  - **수정 내용 (customers.ts + DirectTargetFilterModal.tsx):**
+    - **extract SELECT 동적화:** 하드코딩 17개 컬럼 → `getColumnFields()` (FIELD_MAP 기반) + region/custom_fields/callback 추가. 필드 변경 시 FIELD_MAP만 수정하면 자동 반영
+    - **customers_unified → customers 테이블 직접 조회:** extract + filter-count 모두 뷰 의존 제거
+    - **age 필터 수정:** `EXTRACT(YEAR FROM AGE(birth_date))` → `age` 컬럼 직접 사용 (birth_date NULL인 고객도 필터 가능)
+    - **에러 핸들링 추가:** `!res.ok` 체크 + `!data.success` 체크 + catch 네트워크 에러 → 모두 커스텀 알림 모달 표시 (animate-in zoom-in-95, error/warning/info 아이콘 분기)
+    - **loadTargetCount에도 동일 에러 핸들링 적용**
+  - **수정 파일 2개:** customers.ts, DirectTargetFilterModal.tsx
+  - **기간계 미접촉:** campaigns.ts, spam-filter.ts, messageUtils.ts, results.ts, billing.ts, Dashboard.tsx 전부 미수정
+
+- **발송창 하드코딩 전면 제거 + 컴포넌트 분리 — ✅ 완료 (D43-3c, 2026-02-27)**
+  - **TargetSendModal.tsx 신규 (901줄):** Dashboard.tsx에서 직접타겟발송 모달 703줄 분리
+  - **하드코딩 8곳 동적화 (fieldsMeta 기반):**
+    1. SMS 자동입력 변수 (5개 고정 → fieldsMeta 동적)
+    2. 카카오 자동입력 변수 (4개 고정 → fieldsMeta 동적)
+    3. 수신자 테이블 헤더/데이터 (5컬럼 고정 → fieldsMeta 동적)
+    4. handleTargetExtracted 매핑 (5개 하드코딩 → 원본 저장)
+    5. executeTargetSend 치환 (5개 replace → fieldsMeta.forEach 동적)
+    6. 스팸필터 replaceVars (8개 하드코딩 → fieldsMeta.forEach 동적)
+    7. targetVarMap 바이트 체크 (5개 고정 → fieldsMeta 동적)
+    8. DirectPreviewModal 미리보기 치환 (하드코딩 → replaceVarsWithMeta 동적)
+  - **커서 위치 삽입 버그 수정:** `setTargetMessage(prev => prev + value)` → `textarea.selectionStart` 기반 정확한 위치 삽입
+  - **데이터 흐름:** DirectTargetFilterModal → onExtracted(recipients, count, **fieldsMeta**) → Dashboard → TargetSendModal/DirectPreviewModal
+  - **FieldMeta 인터페이스:** `{ field_key, display_name, variable, data_type, category }` — DirectTargetFilterModal에서 export
+  - **Dashboard.tsx:** 4,548줄 → 3,910줄 (638줄 감소)
+  - **수정 파일 4개:** TargetSendModal.tsx(신규), DirectTargetFilterModal.tsx, Dashboard.tsx, DirectPreviewModal.tsx
+  - **기간계 미접촉:** campaigns.ts, spam-filter.ts, messageUtils.ts, results.ts, billing.ts 전부 미수정
+
+- **직접타겟발송 발송창 하드코딩 전면 제거 + 컴포넌트 분리 — ✅ 완료 (D43-3c)**
+
+#### 안건 #4: 수신거부 양방향 동기화 — ✅ 완료 (D43-4 + 2026-03-05 나래 080 콜백 연동)
+
+- **설계 확정 내용:**
+  - opt_outs 테이블 미사용 확인 (레거시) → **unsubscribes 테이블이 SoT**
+  - 발송 파이프라인 이중 체크 유지: `sms_opt_in = true AND NOT EXISTS (SELECT 1 FROM unsubscribes ...)`
+  - plan_id 기준 단순화: 플랜 있는 업체만 customers.sms_opt_in 동시 UPDATE, 없으면 unsubscribes만
+  - `syncCustomerOptIn()` / `syncCustomerOptInBulk()` 공통 헬퍼 도입 (중복 제거)
+- **DDL 완료:**
+  - `ALTER TABLE companies ADD COLUMN opt_out_auto_sync boolean DEFAULT false;`
+  - 테스트계정 opt_out_auto_sync = true 설정 완료
+- **코드 배포 완료 (수정 2파일):**
+  - **unsubscribes.ts:** 080콜백 opt_out_auto_sync 체크 추가, 직접추가/업로드/삭제 4곳 syncCustomerOptIn 적용, GET / 응답에 opt080Number+optOutAutoSync 추가
+  - **Unsubscribes.tsx:** 080번호 하드코딩 제거→API 동적 표시, 연동테스트 버튼 optOutAutoSync=true일 때만 노출, 080 안내 모달
+- **✅ 나래 080 콜백 연동 완료 (2026-03-05):**
+  - 나래 담당자 콜백 URL 등록 확인 완료
+  - 실제 080 ARS 수신거부 테스트 — 나래 IP(183.98.207.13) 콜백 수신 + 수신거부 DB 등록 정상 확인
+  - OPT_OUT_080_TOKEN 검증 제거 — Nginx IP 화이트리스트(나래 6개 IP)로 보안 대체
+  - 기존 누적 수신거부 목록: 한줄로 이관 시 수동 처리 예정 (별도 벌크 동기화 불필요)
+- **기간계 미접촉:** campaigns.ts 발송 파이프라인 전체 미수정
+
+#### 안건 #6: 🚨 긴급 — 스팸필터 테스트 안됨 → ✅ 완료 (원인: MySQL 랜섬웨어 공격)
+
+- **증상 (2026-02-27 오전~):** 스팸필터 테스트 버튼 클릭 시 500 에러. PM2 로그: `Table 'smsdb.SMSQ_SEND_10' doesn't exist`
+- **원인 — MySQL 랜섬웨어 공격:**
+  - MySQL 컨테이너가 `0.0.0.0:3306`으로 외부에 노출된 상태 + 취약한 비밀번호(`sms123`/`root123`)
+  - 2026-02-25~26 MySQL 타임존 설정 작업 중 컨테이너 3회 재생성하면서 포트가 `0.0.0.0`으로 바인딩됨
+  - 자동화 봇이 3306 포트 스캔 → 딕셔너리 공격으로 비밀번호 탈취 → SMSQ_SEND_1~11 테이블 전체 삭제 → `RECOVER_YOUR_DATA_info` 랜섬 메시지 테이블 삽입
+  - root 비밀번호 변경됨 (smsuser는 권한 제한으로 무사)
+  - **PostgreSQL 무사** (처음부터 127.0.0.1 바인딩) — 핵심 데이터(고객/캠페인/정산) 전부 안전
+- **복구 조치 (2026-02-28, D49):**
+  1. ✅ MySQL 포트 `0.0.0.0:3306` → `127.0.0.1:3306` (외부 접근 원천 차단)
+  2. ✅ root 비밀번호 강화 (취약 비밀번호 → 강화 비밀번호)
+  3. ✅ smsuser 비밀번호 강화 + QTmsg Agent 11개 `encrypt_pass` 동기 변경 (DES 암호화 도구 자체 제작: EncryptPass.java)
+  4. ✅ smsuser 권한 최소화: `ALL PRIVILEGES` → `SELECT, INSERT, UPDATE, DELETE` (DROP TABLE 불가)
+  5. ✅ SMSQ_SEND_1~11 테이블 재생성 (SMSQ_SEND 뷰 기반 스키마 복원)
+  6. ✅ 로그 테이블 SMSQ_SEND_*_202602 / 202603 재생성
+  7. ✅ 이벤트 스케줄러 `auto_create_sms_log_tables` 정상 확인
+  8. ✅ `RECOVER_YOUR_DATA_info` 랜섬 테이블 삭제
+  9. ✅ QTmsg Agent 11개 재시작 + 통신사 바인딩 확인 (bind ack 성공)
+  10. ✅ 스팸필터 테스트 정상화 확인 (LG U+ 수신 완료)
+- **보안 강화 조치:**
+  1. ✅ UFW 불필요 포트 차단: 3000(Node.js), 9001~9011(QTmsg Agent 관리) DENY
+  2. ✅ SSH root 로그인 비활성화 (`PermitRootLogin no`)
+  3. ✅ fail2ban 강화: 10분 내 3회 실패 → 1시간 자동 밴 (설정 직후 5개 IP 차단)
+  4. ✅ MySQL smsuser DROP 권한 제거 (설령 뚫려도 테이블 삭제 불가)
+- **피해 범위:** MySQL SMSQ 발송 큐 테이블 삭제 (임시 데이터). **고객 개인정보 유출 없음** (PostgreSQL 무사)
+- **교훈:** Docker 컨테이너 재생성 시 포트 바인딩 반드시 127.0.0.1 확인. 외부 노출 DB는 강력한 비밀번호 + 권한 분리 필수
+
+#### 안건 #5: AI 한줄로 입력 포맷 강제화 + 샘플 고객 미리보기 + 이모지 제거 — ✅ 완료
+
+- **문제 3가지:**
+  1. AI 한줄로(일반)가 고객사 DB 전체 필드를 통으로 바라봄 → 오류 확률 높음
+  2. AI 결과 메시지에 `%고객명%` 등 변수가 그대로 표시됨 → 실제 모습 확인 불가
+  3. AI가 프롬프트 무시하고 이모지(🔥📅⏰🎉) 삽입 → SMS/LMS에서 깨짐
+- **해결 (D43-5, 2026-02-27):**
+  - **개인화 필수 파싱 (services/ai.ts):** `parsePersonalizationDirective()` 신규 — "개인화 필수:" 키워드 감지 → 지정 변수만 AI에 전달, 없으면 기존 로직 유지 (하위호환 100%)
+  - **샘플 고객 미리보기 (routes/ai.ts → Dashboard.tsx → AiCampaignResultPopup.tsx):** `/recommend-target` 응답에 `sample_customer` 추가 (필터 맞는 실제 고객 1명, FIELD_MAP displayName 키 기반) → AI 결과 메시지 미리보기에서 `%변수%` → 실제 데이터 치환 표시 + 스팸필터 점검에도 치환 적용
+  - **이모지 강제 제거 (services/ai.ts):** `stripEmojis()` 후처리 안전장치 — SMS/LMS/MMS 발송 시 유니코드 이모지 자동 제거, KS X 1001 특수문자(★☆●○▶◀■□△▲【】「」 등) 유지. 카카오 채널은 이모지 허용으로 미적용
+  - **하드코딩 제거:** AiCampaignResultPopup.tsx의 하드코딩 sampleData 9개 + replaceVars 8개 제거 → 동적 sampleCustomer 기반으로 전환
+- **수정 파일 4개:** services/ai.ts, routes/ai.ts, Dashboard.tsx, AiCampaignResultPopup.tsx
+- **UI 힌트 추가:** AiSendTypeModal.tsx placeholder + 개인화 안내 힌트
+
+#### 안건 #7: 결과값 매핑 중앙화 — sms-result-map.ts 컨트롤타워 — ✅ 완료 (3-Tier 전수 점검 · Phase 4) (D43-7, 2026-02-28)
+
+- **문제:** QTmsg status_code 해석, 통신사 코드, 스팸필터 판정 결과가 12곳에서 각자 하드코딩 → standard-field-map.ts 이전의 필드 매핑 문제와 동일 패턴
+  - 스팸필터 테스트 결과 전부 "대기" 고착 (근본 원인: 백엔드 `'received'` 저장 → 프론트 `'pass'`만 정상 처리)
+  - 스팸필터 테스트 이력에 수신번호 노출 (테스트 방식 유추 가능)
+  - 발송결과 AI분석 탭 중복 (메인메뉴에 이미 존재)
+- **해결 Phase 1 — 전수 파악 + 설계:**
+  - 12곳 하드코딩 위치 전체 식별 (campaigns.ts 5곳, results.ts 5곳, ResultsModal.tsx 2곳 + spam-filter.ts 판정 로직)
+  - sms-result-map.ts 컨트롤타워 설계 확정 (STATUS_CODE_MAP + CARRIER_MAP + SPAM_RESULT 3파트)
+- **해결 Phase 2 — 백엔드 전환 + 프론트 1차 수정 (배포 완료):**
+  - **sms-result-map.ts 신규 (148줄):** `backend/utils/` — STATUS_CODE_MAP, CARRIER_MAP, SPAM_RESULT 상수 + 헬퍼 함수 (isSuccess/isFail/isPending/getStatusLabel/getCarrierLabel/getSpamResultLabel)
+  - **campaigns.ts 8곳 전환:** 가이드 기반 Harold님 수정 — SUCCESS_CODES/PENDING_CODES/isSuccess/isFail/SPAM_RESULT 사용
+  - **results.ts 6곳 전환:** statusCodeMap/carrierMap 로컬 정의 제거 → import 사용, SQL WHERE도 상수 참조
+  - **spam-filter.ts 6곳 전환:** 판정 로직 `sc === 6 || sc === 1000` → `SUCCESS_CODES.includes(sc)`, 문자열 `'received'`/`'timeout'`/`'failed'` → SPAM_RESULT 상수, SQL 파라미터화
+  - **ResultsModal.tsx 3건 수정:** ① AI분석 탭 제거 (2탭 구조) ② 스팸필터 수신번호 컬럼 완전 제거 ③ 스팸판정 표시 확장 (pass/received→정상, blocked→차단, failed→실패, timeout→시간초과)
+  - **DB 마이그레이션:** `UPDATE spam_filter_test_results SET result = 'pass' WHERE result = 'received'` — 384건 변환 완료
+- **해결 Phase 3 — 프론트 하드코딩 제거 + 실코드 검증 (2026-02-28):**
+  - **campaigns.ts 실코드 검증 완료:** 8곳 모두 sms-result-map.ts import 정상 사용 확인. `status_code = 100` (14곳)은 큐 관리용 초기 상태 특정이므로 정확 (PENDING_CODES로 바꾸면 104 처리중 건까지 삭제 위험)
+  - **results.ts 3곳 추가 수정:** ① import에 `getStatusType`, `isSuccess` 추가 ② `/campaigns/:id/messages` 응답에 `status_label`/`status_type`/`carrier_label` 해석값 3개 필드 추가 (원본 유지+해석값 추가 → 하위호환 100%) ③ CSV export 카카오 분기 `m.status_code === 1800` → `isSuccess(m.status_code)` 헬퍼 사용
+  - **ResultsModal.tsx 3곳 수정:** ① `STATUS_CODE_MAP` 14개 하드코딩 전체 삭제 (백엔드 22개와 8개 누락 불일치 해소) ② `CARRIER_MAP` 9개 하드코딩 전체 삭제 ③ 메시지 렌더링에서 백엔드 응답 `m.status_label`/`m.status_type`/`m.carrier_label` 직접 사용
+- **해결 Phase 4 — 3-Tier 전수 점검 + admin.ts/billing.ts 전환 (2026-02-28):**
+  - **서비스 프론트 (hanjul.ai) 7파일 점검 완료:** Dashboard.tsx, CampaignSuccessModal.tsx, AiCampaignResultPopup.tsx, AnalysisModal.tsx, TargetSendModal.tsx, DashboardHeader.tsx — 하드코딩 0건. ResultsModal.tsx getPreviewText sampleData 9개 레거시 삭제 → messages[0].msg_contents 동적 치환으로 전환
+  - **슈퍼관리자 프론트 (sys.hanjullo.com) 1파일:** AdminDashboard.tsx 4562번 `[6,1000,1800].includes(r.statusCode)` → `r.statusType === 'success'` 동적 분기로 전환
+  - **관리자 프론트 (app.hanjul.ai) 4파일 점검 완료:** CompanyDashboard.tsx, StatsTab.tsx, ScheduledTab.tsx, (UsersTab/CallbacksTab/CustomersTab 무관) — 하드코딩 0건
+  - **admin.ts 5곳 전환:** ① import 추가 ② 테스트 통계 SQL `IN (6,1000,1800)` → `SUCCESS_CODES_SQL`/`PENDING_CODES_SQL` ③ 테스트 상세 `[6,1000,1800].includes()` → `isSuccess()`/`isPending()` ④ sms-detail 필터 SQL → 상수 참조 ⑤ statusMap 7개 + carrierMap 3개 로컬 하드코딩 삭제 → `getStatusLabel()`(22개)/`getCarrierLabel()`(9개) + statusType 필드 추가
+  - **billing.ts 5곳 전환 + 버그 수정:** ① import 추가 ② smsAggByDateType 성공/실패/대기 3곳 → 상수 참조 ③ smsAggByRunAndType 성공 1곳 ④ smsAggTestByType 성공 1곳. **🐛 `>= 200` 버그 발견·수정:** 실패 판정에 `status_code >= 200` 조건이 있어 비가입자(7)/Power-off(8)/스팸차단(16)/기타실패(55) 등 200 미만 실패 코드가 정산 실패 건수에서 누락. 다른 파일과 통일하여 `NOT IN (성공, 대기) = 실패`로 수정
+- **수정 파일 (전체):** sms-result-map.ts(신규), campaigns.ts, results.ts, spam-filter.ts, admin.ts, billing.ts, ResultsModal.tsx, AdminDashboard.tsx
+- **기간계 미접촉:** 발송 흐름/차감/환불 로직 전부 미수정. 결과값 해석 로직만 sms-result-map.ts 중앙화 전환
+- **3-Tier 전수 점검 결과:** 백엔드 6파일 + 프론트 12파일 = **18파일 점검, 하드코딩 잔존 0건**
+
+#### 진행 순서 (Harold님 확정)
+
+1. ~~**#1** 대시보드 회사명 (빠른 해결)~~ ✅ 완료
+2. ~~**#2** AI 매핑 화면 개편 (컴포넌트 분리 + 태그 클릭 UI)~~ ✅ 완료
+3. ~~**#5** AI 한줄로 포맷 강제화 + 미리보기 + 이모지 제거~~ ✅ 완료
+4. ~~**#3** 직접 타겟 설정~~ ✅ 완료 (백엔드 버그 수정 + 발송창 하드코딩 전면 제거)
+5. ~~**#4** 수신거부 동기화~~ ✅ 완료 — 나래 080 콜백 연동 완료 (2026-03-05), 토큰 검증 제거→Nginx IP 화이트리스트
+6. ~~**🚨 #6 긴급: 스팸필터 테스트 안됨**~~ ✅ 완료 — 원인: MySQL 랜섬웨어 공격 (D49 보안 대응)
+7. ~~**#7** 결과값 매핑 중앙화~~ ✅ 완료 — Phase 4: 3-Tier 전수 점검 + admin.ts/billing.ts 전환 + `>= 200` 버그 수정
+
+→ 각 안건을 별도 채팅 세션에서 설계→컨펌→구현→테스트→정립 후 다음으로 진행
+
+#### ⛔ 진행 규칙
+- 기존 발송 파이프라인의 발송 흐름/차감/환불 로직 절대 건드리지 않음
+- 코드 작성 전 Harold님 컨펌 필수
+- SCHEMA.md에 없는 컬럼 임의 생성 금지
+- standard-field-map.ts가 유일한 필드 매핑 기준
+- sms-result-map.ts가 유일한 결과값 매핑 기준
+- 의논 → 검증 → 실행 순서 엄수
+
+---
+
+### ✅ 이전 완료 요약
+
+| 항목 | 상태 |
+|------|------|
+| D39 표준 필드 아키텍처 (세션0~2 전체) | ✅ 코드 수정 완료 · 실동작 검증 대기 |
+| D40 AI 맞춤한줄 동적 필드 + UX | ✅ 완료 |
+| D41 대시보드 동적 카드 시스템 (세션1~2) | ✅ 완료 |
+| D42 발송현황 하드코딩 제거 | ✅ 완료 |
+| D43 안건#1 회사명 | ✅ 완료 |
+| D43 안건#2 매핑 UI 개편 | ✅ 완료 |
+| D43 안건#3 직접타겟 리팩토링 | ✅ 완료 (백엔드 버그 + 발송창 하드코딩 전면 제거) |
+| D43 안건#4 수신거부 동기화 | ✅ 완료 — 나래 080 콜백 연동 + 토큰 검증 제거 (2026-03-05) |
+| D43 안건#5 AI 포맷+미리보기+이모지 | ✅ 완료 |
+| D43 안건#7 결과값 매핑 중앙화 | ✅ 완료 — Phase 4: 3-Tier 18파일 전수 점검, 백엔드 6파일+프론트 12파일 하드코딩 0건, billing.ts `>=200` 버그 수정 |
+| AI 맞춤한줄 Phase 1 (AI-CUSTOM-SEND.md) | ✅ 8단계 전체 완료 |
+| 선불 요금제 Phase 1-A | ✅ 완료 |
+| 8차 버그 13건 수정 | ✅ 코드 수정 완료 · 실동작 검증 대기 |
+| AI 분석 모달 전체 | ✅ 완료 |
+| 스팸필터 전체 (Android 앱 포함) | ✅ 완료 |
+
+---
+
+## 5) ⚠️ 발송 파이프라인 절대 보호 영역
+
+> **아래 파일들은 발송·정산·결과조회의 핵심.** 2026-02-26 D32~D33에서 공통 치환 함수 통합 + 5개 경로 전수 점검 완료. 2026-02-28 D43-7에서 결과값 해석 로직을 sms-result-map.ts 중앙화로 전환 (발송 흐름/차감/환불 로직 미접촉).
+
+| 파일 | 역할 | 비고 |
+|------|------|------|
+| campaigns.ts | AI 캠페인 발송 (예약+즉시) + 선불 차감/환불 | D43-7: 결과값 해석 8곳 → sms-result-map.ts 참조로 전환 |
+| spam-filter.ts | 스팸필터 테스트 (Android 앱 연동) | D43-7: 판정 로직 6곳 → SPAM_RESULT 상수 전환, 'received'→'pass' |
+| messageUtils.ts | 공통 변수 치환 (`replaceVariables`) | 미수정 |
+| results.ts | 발송 결과 조회 + MySQL LIVE/LOG 통합 | D43-7: statusCodeMap/carrierMap 6곳 → sms-result-map.ts import + messages API에 해석값 3필드(status_label/status_type/carrier_label) 추가 |
+| billing.ts | 정산·거래내역서 PDF | D43-7: 3개 집계함수 5곳 → SUCCESS_CODES_SQL/PENDING_CODES_SQL 참조. `>=200` 버그 수정(비가입자/Power-off/스팸차단 등 200 미만 실패코드 정산 누락 해소) |
+| direct-send (campaigns.ts 내) | 직접 타겟 발송 | D43-7: 결과값 해석 동일 전환 |
+
+---
+
+## 6) 🏗️ 시스템 아키텍처
+
+### 6-1. 3-Tier 도메인 구조
+| 도메인 | 역할 | 사용자 |
+|--------|------|--------|
+| hanjul.ai | 서비스 사용자 대시보드 | 마케터/직원 |
+| app.hanjul.ai | 회사 관리자 대시보드 | 고객사 관리자 |
+| sys.hanjullo.com | 슈퍼관리자 시스템 | INVITO 내부 |
+
+### 6-2. 핵심 인프라
+- **발송 엔진:** QTmsg Agent 11개 (SKT 6 / KT 4 / LGU+ 1) → MySQL 큐 관리
+- **DB:** PostgreSQL (메타데이터) + MySQL (SMS 큐)
+- **배포:** Docker + PM2 + Nginx
+- **AI:** Claude API (primary) + GPT API (fallback)
+
+---
+
+## 7) 💡 핵심 아키텍처 참조
+
+### 7-1. 데이터 정규화 (utils/normalize.ts + utils/standard-field-map.ts)
+
+고객사별 DB 형식 차이를 흡수하는 핵심 레이어.
+
+**아키텍처 (D39 확정 — 필수17 + 커스텀15):**
+1. **standard-field-map.ts** — 유일한 매핑 정의 (field_key ↔ customers 컬럼/custom_fields 위치 ↔ 카테고리 ↔ normalize 함수)
+2. **normalize.ts** — 값 변환 함수 (다양한 입력 → 표준값)
+3. **customer_field_definitions** — 고객사별 커스텀 필드 라벨 정의
+
+**필수 직접 컬럼 17개:** name, phone, gender, age, birth_date, email, address, recent_purchase_store, store_code, registration_type, registered_store, store_phone(DDL신규), recent_purchase_amount, total_purchase_amount, grade, points, sms_opt_in
+**커스텀 슬롯 15개:** custom_1 ~ custom_15 (custom_fields JSONB)
+
+**절대 원칙:** SCHEMA.md에 정의된 컬럼명/타입만 사용. 하드코딩 매핑 금지. FIELD-INTEGRATION.md가 기준 문서.
+
+참조 파일: ai.ts, customers.ts, campaigns.ts, upload.ts, sync.ts
+
+### 7-1b. 발송 결과값 매핑 (utils/sms-result-map.ts) — D43-7 신규
+
+QTmsg status_code, 통신사 코드, 스팸필터 판정 결과를 한 곳에서 정의하는 컨트롤타워.
+
+**구조 (3파트):**
+1. **STATUS_CODE_MAP** — QTmsg status_code → 라벨/타입 (성공: 6/1000/1800, 대기: 100/104, 실패: 7/8/16/55/2008 등)
+2. **CARRIER_MAP** — mob_company → 통신사명 (11→SKT, 16→KT, 19→LG U+ 등)
+3. **SPAM_RESULT** — 스팸필터 판정 상수 (PASS/BLOCKED/FAILED/TIMEOUT)
+
+**헬퍼 함수:** isSuccess(), isFail(), isPending(), getStatusLabel(), getCarrierLabel(), getSpamResultLabel(), getSpamResultType()
+**SQL용 상수:** SUCCESS_CODES_SQL, PENDING_CODES_SQL (IN 절 문자열)
+
+**참조 파일 (전환 완료):** campaigns.ts, results.ts, spam-filter.ts, admin.ts, billing.ts (백엔드 6파일) / ResultsModal.tsx, AdminDashboard.tsx (프론트 2파일)
+
+**절대 원칙:** 새로운 status_code 추가/변경 시 sms-result-map.ts만 수정. 개별 파일에 하드코딩 금지.
+
+**역할 3가지:**
+1. **값 정규화** — 어떤 형태로 들어오든 표준값으로 통일
+   - 성별: 남/남자/male/man/1 → 'M' | 등급: vip/VIP고객/V → 'VIP'
+   - 전화번호: +82-10-1234-5678 → '01012345678'
+   - 금액: ₩1,000원 → 1000 | 날짜: 20240101, 2024.01.01 → '2024-01-01'
+2. **필드명 매핑** — `normalizeCustomerRecord()`에서 다양한 컬럼명을 표준 필드로 통일
+   - raw.mobile / raw.phone_number / raw.tel → phone
+   - raw.sex / raw.성별 → gender | raw.등급 / raw.membership → grade
+3. **AI 동적 구성** — 고객사가 올린 데이터 기반으로 사용 가능한 변수 목록 생성 → AI 프롬프트에 주입
+
+> **주의:** opt_in_sms(field_key) ↔ sms_opt_in(customers 컬럼) 등 이름 불일치는 standard-field-map.ts에서 처리. 컬럼명 변경 금지.
+
+### 7-2. 선불/후불 요금제 시스템
+
+**개요:**
+- **후불(postpaid)**: 기본값. 제한 없이 발송, 월말 정산 (기존 방식)
+- **선불(prepaid)**: 잔액 충전 후 사용, 발송 시 atomic 차감, 실패 시 환불
+
+**단가 체계:**
+- companies.cost_per_sms/lms/mms/kakao → **VAT 포함 금액** 저장
+- 프론트엔드: 단가 × 건수로 표시
+- PDF 거래내역서만: 총액 ÷ 1.1로 공급가액/부가세 분리
+
+**발송 시 차감 흐름 (campaigns.ts):**
+1. `prepaidDeduct()` → billing_type 확인 → postpaid면 즉시 pass
+2. 필요금액 = 건수 × VAT포함단가
+3. Atomic 차감: `UPDATE companies SET balance = balance - $1 WHERE balance >= $1`
+4. 성공 → balance_transactions 기록 / 실패 → 402 응답 (insufficientBalance)
+5. 발송 결과 sync 시 실패 건수 → `prepaidRefund()` 환불 (중복 방지 내장)
+
+**통합 포인트 (8곳):**
+- POST /test-send: 테스트 발송 전 잔액 체크
+- POST /:id/send: AI 캠페인 발송 전 차감
+- POST /direct-send: 직접발송 전 차감
+- POST /sync-results: 결과 동기화 시 실패분 환불 (campaign_runs/direct 모두)
+- POST /:id/cancel: 예약 취소 시 대기 건수 전액 환불
+- GET /: 목록 조회 시 완료 캠페인 자동 환불 체크
+
+**슈퍼관리자 API:**
+- PATCH /api/admin/companies/:id/billing-type → 후불↔선불 전환
+- POST /api/admin/companies/:id/balance-adjust → 수동 충전/차감 (사유 필수)
+- GET /api/admin/companies/:id/balance-transactions → 회사별 이력
+- GET /api/admin/balance-overview → 전체 선불 고객사 잔액 현황
+
+**서비스 사용자 API:**
+- GET /api/balance → 잔액 + billing_type + 단가 조회
+- GET /api/balance/transactions → 변동 이력 (페이지네이션, 타입/날짜 필터)
+- GET /api/balance/summary → 월별 충전/차감/환불 요약
+
+---
+
+## 8) 📲 진행 예정 작업 (TODO)
+
+### 🟡 잔여 — 직원 버그리포트 실동작 검증 (코드 수정 전체 완료)
+- [ ] **8차 B8-01~B8-13: 직원 실서비스 테스트** (app.hanjul.ai)
+- [ ] **9차 S9-04/S9-08: 발송결과 조회 성능 + sent_at 정확성 확인**
+- [ ] **D39 세션2 실동작 검증: 필터 UI + AI 보유필드 확인**
+
+### ✅ 완료 — 표준 필드 아키텍처 통합 (D39)
+- [x] 세션 0: DDL + standard-field-map.ts 재정의 (필수17+커스텀15)
+- [x] 세션 1: upload.ts + normalize.ts 입구 정상화
+- [x] 세션 2: customers.ts + Dashboard.tsx + ai.ts + AiCustomSendFlow.tsx 조회+AI 정상화
+
+### 대시보드 리팩토링 Phase 3 (추후)
+- [x] 직접 타겟 설정 모달 분리 — ✅ D43-3a DirectTargetFilterModal.tsx (729줄)
+- [x] 직접 타겟 발송 모달 분리 — ✅ D43-3c TargetSendModal.tsx (901줄)
+- Dashboard.tsx 누적 감소: 8,039줄 → 3,910줄 (총 4,129줄 감소)
+
+### AI 맞춤한줄 Phase 2 (발송 연결) — ✅ 구현 완료 (문서 미갱신이었음, 2026-03-05 코드 검증)
+- [x] 발송 확정 → AiCustomSendFlow.tsx Step 4 onConfirmSend 콜백으로 variant+targetFilters 전달
+- [x] AiCampaignSendModal 연결 → Dashboard.tsx handleAiCustomSend에서 campaignsApi.create+send 호출
+- [x] 전체 플로우 코드 구현 완료 (Step4 → 모달 → 캠페인생성 → targetFilter기반 고객조회 → 개인화치환 → MySQL INSERT)
+- [ ] 실서비스 통합 테스트 (실제 발송 확인) — Harold님 검증 대기
+
+### 카카오 알림톡 템플릿 관리 (Humuson API v2.1.1)
+- [ ] 고객사 관리자(app.hanjul.ai) 템플릿 CRUD + 검수 프로세스 + 발신프로필 조회 + 관리 UI
+- [ ] 슈퍼관리자(sys.hanjullo.com) 고객사별 Humuson 연동 설정 (humuson_user_id, uuid)
+- [ ] 서비스 사용자(hanjul.ai) 캠페인 발송 시 APR 상태 템플릿만 선택
+- [ ] 기술: 백엔드 프록시 /api/kakao-templates/*, DB kakao_templates 확장, 상태 전이 규칙
+- [ ] Phase 2: 이미지 업로드, 알림 수신자 관리, 발신프로필 그룹
+
+### 080 수신거부 (✅ 나래인터넷 콜백 연동 완료 — 2026-03-05)
+- [x] 콜백 엔드포인트 구현 (고객사별 080번호 자동 매칭)
+- [x] 토큰 검증 제거 — Nginx IP 화이트리스트(나래 6개 IP)로 보안 대체
+- [x] Nginx 080callback 경로 나래 IP 화이트리스트 적용
+- [x] D43-4 양방향 동기화: opt_out_auto_sync DDL + syncCustomerOptIn 헬퍼 + 4곳 적용
+- [x] D43-4 프론트: 080번호 동적 표시 + 연동테스트 버튼 (auto_sync=true 조건부)
+- [x] curl 로컬 테스트 정상 확인 (서버 `1` 반환)
+- [x] 나래 담당자 콜백 URL 등록 확인 완료 (2026-03-05)
+- [x] 실제 080 ARS 수신거부 테스트 — 나래 IP(183.98.207.13) 콜백 수신 + 수신거부 DB 등록 정상 확인
+- [x] 기존 누적 수신거부 목록 — 한줄로 이관 시 수동 처리 예정 (벌크 동기화 불필요)
+
+### 선불 요금제 Phase 1-B~2
+- [ ] Phase 1-B: KCP PG 연동 (카드결제만, 가상계좌 제외)
+- [ ] Phase 2: 입금감지 API 자동화
+
+### Sync Agent
+- [x] Sync Agent 코어 완성 (비토 v1.3.0 개발 완료)
+- [x] 슈퍼관리자 SyncAgent API Key 관리 UI — ✅ D60 (2026-03-08): 고객사 편집 모달 9번째 탭. API Key/Secret 조회·재발급·비활성화, use_db_sync 토글. 백엔드 3개 엔드포인트 신규.
+- [ ] sync_releases에 v1.3.0 릴리스 레코드 등록 (비토 최종 빌드 후)
+
+### 보안
+- [x] 소스 보호: 우클릭/F12/개발자도구/드래그 차단 (3개 도메인 전체 적용)
+- [x] 🔴 MySQL 랜섬웨어 대응 (2026-02-28, D49): 외부 차단+비밀번호 강화+권한분리+fail2ban+포트차단 — 상세 내용 D43 안건#6 참조
+- [x] 프론트엔드 난독화 — ✅ D61 (2026-03-08): vite-plugin-javascript-obfuscator 적용, production 빌드 시 stringArray+base64+disableConsoleOutput. frontend+company-frontend 양쪽 적용.
+- [ ] 슈퍼관리자 IP 화이트리스트 설정
+- [x] 외부 자동 백업 구축 — ✅ 2026-03-05 완료: pg_dump+mysqldump → 59번 서버(58.227.193.59) SCP 전송, SSH 키 인증, crontab 매일 03:00 KST, 7일 로컬 보관. 스크립트: /home/administrator/backups/backup.sh
+- [x] 웹 애플리케이션 SQL Injection 점검 — ✅ D56 테이블명 화이트리스트 + D57-C4 sendTime 파라미터화 + D59 custom_fields JSONB 키 화이트리스트(3파일) + dateFilter 파라미터화 완료 (SSRF 별도)
+- [ ] SSH 키 인증 전용 전환 (비밀번호 로그인 비활성화) — 선택
+
+### 인비토AI (메시징 특화 모델)
+- [x] ai_training_logs 테이블 + training-logger.ts + campaigns.ts 연결
+- [ ] 이용약관에 비식별 데이터 활용 조항 추가
+- [ ] 데이터 충분히 축적 후 모델 학습 파이프라인 설계
+
+---
+
+## 9) DECISION LOG (ADR Index)
+> 항목이 10개를 초과하면 오래된 항목은 아카이브로 이동하고 1줄 요약만 남긴다.
+
+| ID | 날짜 | 결정 | 근거 |
+|----|------|------|------|
+| D36 | 02-26 | MySQL 타임존 KST — 풀 레벨 보강 | 커넥션 풀 10개 중 1개만 TZ 설정되는 구조적 문제 |
+| D37 | 02-26 | GPT 의견 수용 원칙 — 코드 근거 기반 판단 | GPT "미수정" 지적에 코드 확인 없이 동의→문서 오염 |
+| D38 | 02-26 | 표준 필드 아키텍처 복구 — standard-field-map.ts 매핑 레이어 도입 | 4곳 하드코딩 불일치→필터 전멸+데이터 손실 |
+| D39 | 02-26 | 표준 필드 아키텍처 재정의 — 필수 17개 + 커스텀 15개 확정 | 기존 41개→32개 정리. FIELD-INTEGRATION.md 기준 |
+| D40 | 02-27 | AI 맞춤한줄 동적 필드 + UX 개선 — 커스텀 실데이터만 노출 + 톤 제거 + 필드명 표시 | enabled-fields 단일 경로+JSONB 실데이터만 반환 |
+| D41 | 02-27 | 대시보드 동적 카드 시스템 — 슈퍼관리자 체크 설정 + FIELD_MAP 17개 기반 카드 풀 | 고객사마다 보유 데이터 다름. 하드코딩 고정→동적 전환. company_settings 활용, 4칸/8칸 모드 |
+| D42 | 02-27 | 발송현황 하드코딩 제거 — VIP/30일매출 → 성공건수/평균성공률/총사용금액 | 발송현황 영역에 VIP·매출은 맥락 불일치. 발송 관련 지표로 통일 |
+| D43 | 02-27 | 기능 정상화 및 DB 동적 기준 정립 — 5개 안건 (회사명/매핑UI/타겟필터/수신거부동기화/AI포맷) | D39 이후 미반영 기능 정상화. 발송 파이프라인 미접촉 |
+| D44 | 02-27 | AI 매핑 화면 개편 — 컴포넌트 분리 + 태그 클릭 2열 그리드 + 커스텀 +/- | 하드코딩 드롭다운 16개→FIELD_MAP 동적 20개, Dashboard.tsx 310줄 분리 경량화 |
+| D45 | 02-27 | AI 한줄로 3종 개선 — 개인화 필수 파싱 + 샘플 고객 미리보기 + 이모지 강제 제거 | 변수 오류 방지+미리보기 실감+SMS 깨짐 방지. 발송 파이프라인 무접촉 |
+| D46 | 02-27 | 직접 타겟 설정 전면 리팩토링 — 컴포넌트 분리 + 전체 필드 노출 + 2열 컴팩트 + 다중선택 + 연령범위 | SKIP_FIELDS 제거(Harold님 확정), 사용자에게 필드 선택 위임. Dashboard 405줄 감소 |
+| D47 | 02-27 | 직접 타겟 발송 모달 분리 + 하드코딩 8곳 동적화 + 커서위치 버그 수정 — TargetSendModal.tsx 신규 | fieldsMeta 기반 동적(자동입력/테이블/치환/바이트체크/미리보기). Dashboard 638줄 감소 |
+| D48 | 02-27 | 수신거부 양방향 동기화 — plan_id 기준 customers.sms_opt_in 동시 UPDATE + opt_out_auto_sync 플래그 | unsubscribes=SoT, opt_outs 레거시 확인, 나래인터넷 전용 auto_sync 분기. 080번호 하드코딩 제거→동적 |
+| D49 | 02-28 | 🔴 MySQL 랜섬웨어 긴급 대응 — 외부 차단+비밀번호 강화+권한 분리+보안 강화 | 3306 외부 노출→봇 공격→SMSQ 테이블 삭제. 127.0.0.1 바인딩+smsuser DROP 권한 제거+fail2ban+UFW 포트 차단. PostgreSQL 무사, 고객 데이터 유출 없음 |
+| D50 | 02-28 | 결과코드 매핑 Phase 3 — 프론트 하드코딩 제거 + 백엔드 해석값 전달 | ResultsModal.tsx STATUS_CODE_MAP(14개)/CARRIER_MAP(9개) 하드코딩 삭제→백엔드 API가 sms-result-map.ts 기반 해석값 직접 전달. 프론트에 결과코드 매핑 로직 없음=불일치 불가 |
+| D51 | 02-28 | 결과코드 매핑 Phase 4 — 3-Tier 전수 점검 완료 + admin.ts/billing.ts 전환 | admin.ts 5곳(statusMap7개+carrierMap3개 로컬 삭제→헬퍼 사용+statusType 추가) + billing.ts 5곳(3개 집계함수→상수참조) + `>=200` 버그 수정(실패 건수 누락). AdminDashboard.tsx statusType 동적 분기. ResultsModal.tsx sampleData 동적 치환. **18파일 점검, 하드코딩 잔존 0건** |
+| D52 | 03-04 | 하드코딩 전수조사 + 동적 전환 + 설정 중앙집중화 (B11-01~05) | (1) campaigns.ts `'18008125'` 폴백→DB 필수화 (2) alert()→setToast 전면교체(40+곳) (3) ai.ts `'0807196700'`→DB 동적조회 (4) 단가 5파일→defaults.ts (5) AI모델명 4파일→AI_MODELS (6) Redis 4곳→공유인스턴스 (7) 타임아웃/배치/캐시TTL/RateLimit 12파일→중앙상수. **총 21건 전체 해소, 12파일 수정, 기간계 무접촉** |
+| D53 | 03-04 | 요금제별 기능 게이팅 — 무료/스타터/베이직/프로/비즈니스 5단계 기능 잠금 | plans 테이블 3컬럼 추가(customer_db_enabled/spam_filter_enabled/ai_messaging_enabled). 백엔드 6파일 API 게이팅 + 프론트 5파일 UI 잠금. 무료=직접발송만, 스타터=+스팸필터+고객DB+타겟팅, 베이직=+AI발송, 프로=+AI분석basic, 비즈니스=+AI분석advanced. **기간계 무접촉** |
+| D54 | 03-05 | 스팸필터 폴링 로직 개선 — QTmsg 성공 후 10초 대기→BLOCKED 판정 | 기존 3분 무조건 대기→QTmsg 성공 시점 추적(qtmsgSuccessTime Map)+10초 grace period. 타임아웃 180→60초. 이력 탭 추가. **기간계 무접촉** |
+| D55 | 03-05 | 보안 긴급점검 + 슈퍼관리자 세션 관리 + 세션 타이머 UI | JWT_SECRET/MYSQL_PASSWORD fail-fast(폴백값 제거, 미설정 시 서버 기동 차단). mms-images.ts 자체 JWT→공용 authenticate. Math.random()→crypto.randomInt(). 슈퍼관리자 3중 구멍 수정(세션 미생성/세션체크 건너뛰기/프론트 감시 스킵→전부 해소, 30분 타임아웃). user_sessions.user_id FK 제거(DDL-D55, super_admins ID 허용). expires_at 서버측 만료 강제(브라우저 닫기→재오픈 시 서버 차단). dotenv.config() app.ts 최상단 이동. 은행 스타일 세션 타이머 UI 전체 사용자 적용. **코드+DDL+배포 완료. 기간계 무접촉** |
+| D56 | 03-05 | P0-Q1 SQL Injection 방지 + 스팸필터 선불차감 누락 수정 | sms-table-validator.ts 신규(화이트리스트 정규식). admin.ts 라인그룹 생성/수정 API 입구 검증. campaigns.ts 환경변수 경고+DB 조회 필터링+prepaidDeduct/prepaidRefund export. spam-filter.ts 선불차감 추가(테스트폰×메시지타입 건수). 수정 3파일+신규 1파일. **기간계 무접촉. 배포+실서버 검증 완료** |
+| D57 | 03-05 | P0-C1~C5 발송 파이프라인 안정화 5건 전체 구현 | **(C1)** AI발송+직접발송 per-customer/per-batch try/catch→sentCount 추적→부분실패 시 실패분만 선별적 환불(기존 all-or-nothing 제거). **(C2)** normalize-phone.ts 신규(normalizePhone 단일함수, `/\D/g` 비숫자 전체 제거)→campaigns.ts 27곳 `replace(/-/g,'')` 통일 교체+**directCustomerMap 키 불일치 핵심버그 수정**(L1962 raw phone→normalizePhone). **(C3)** calcSplitSendTime() 헬퍼 신규—SEND_HOURS.end 초과 시 다음날 start로 이월. defaults.ts SEND_HOURS 설정 추가(환경변수 SEND_START_HOUR/SEND_END_HOUR). 직접발송 SMS+카카오 2경로 적용. **(C4)** AI발송 sendTime `'${sendTime}'` 템플릿 리터럴→`?` 파라미터화(SQL Injection 차단). **(C5)** 테스트발송 bill_id `userId\|\|''`→`randomUUID()` 고유 추적ID+requestUid 통일+실패건 DB 기록+응답에 testRequestUid 반환. 수정 2파일(campaigns.ts, defaults.ts)+신규 1파일(normalize-phone.ts). TypeScript 0에러. **기간계 발송 흐름 자체는 변경 없음 — 에러 처리/환불/정규화 보강만** |
+| D58 | 03-06 | 12차 버그리포트 4건 수정 + 기능개선 3건 — 예약취소 Agent 대응, 발송결과 타임아웃, 필터 UI 전면개선, 담당자테스트 | **(B12-01)** 예약취소 DELETE+UPDATE 이중처리(Agent 픽업건 9999 코드) **(B12-02)** sync-results 60분 타임아웃+환불 **(B12-03)** 스팸필터 subject 전달 **(B12-04)** 특수문자/보관함/저장 모달 공용화 **(F12-01)** AI 머지태그 원본 표시 **(F12-02)** 필터 UI: 성별 자동감지 패턴매칭(gender/sex/성별)+DB값 자동매핑(M/F/male/남/여/1/0→한글), 생일 월별 프리셋, 금액 최소~최대 범위입력(콤마포맷+원 단위+빠른선택+col-span-2), 수신자 테이블 성별 한글 표시 **(F12-03)** 타겟발송 담당자테스트 버튼(3열 그리드+10초 쿨다운). 수정 7파일. **기간계 무접촉** |
+| D59 | 03-07 | 2차 코드 전수점검 P1~P6 총 28건 수정 — 정산정확성+SQL Injection+입력검증+하드코딩+인프라+프론트엔드 | **(P1)** ai.ts `\|\|10`→`??10`, analysis.ts 채널별 정확비용, manage-stats.ts dead code 삭제. **(P2)** safe-field-name.ts 신규+campaigns/customers/ai 3파일 custom_fields 화이트리스트+dateFilter 파라미터화. **(P3)** mms-images UUID검증, upload.ts path.basename, manage-users 비밀번호8~72자. **(P4)** SYSTEM_SMS_CALLBACK 환경변수화, INVITO_INFO 상수+billing 4곳교체, ©연도 동적화5곳, constants/company.ts 신규+15곳교체. **(P5)** Redis error handler, AI API 키 warn, process 에러핸들러(PM2 연계), PG Pool 환경변수설정. **(P6)** Dashboard setInterval cleanup, optOutNumber 안전장치, 교차중복발송방지, console.log삭제. 수정20파일+신규4파일. **기간계 무접촉. tsc 3패키지 전체 통과** |
+| D60 | 03-08 | SyncAgent API Key 관리 UI + 사용자별 라인그룹 배정 | 상용화 온보딩 시 DB 직접 접근 불가→슈퍼관리자 UI 필요. 동일 회사 내 사용자간 발송 라인 공유→홀딩 문제. users.line_group_id 추가, getCompanySmsTables userId optional 확장. 기간계 기존 호출 100% 호환. |
+| D61 | 03-08 | 프론트엔드 난독화 적용 | 상용화 전 소스 보호. vite-plugin-javascript-obfuscator production only. stringArray+base64+disableConsoleOutput. frontend+company-frontend 양쪽. |
+| D67 | 03-12 | 080 콜백 진단 + 수신동의 변형 + 사용자별 고객DB 삭제 | 080 콜백 서버코드 정상 확인(나래측 URL 미등록 원인). 연동테스트 stale state 버그 수정. SMS_OPT_IN_FALSE 13개 변형 추가(비동의/불동의/거절/해지 등). admin.ts 사용자별 uploaded_by 기준 고객 삭제 API+UI. 기간계 무접촉 |
+| D68 | 03-12 | 대시보드 UI 4건 + AI 생일 타겟팅 + 테스트 비용 합산 | (1) 총구매금액 $→CreditCard+천단위콤마 (2) 커스텀필드 라벨 is_hidden NULL 미매칭 수정 (3) AI 생일타겟팅: 프롬프트+customer-filter mixed+3경로 전부 birth_date 추가 (4) 발송현황 총사용금액에 담당자테스트+스팸필터 비용 합산. 메트로시티 가상DB 2만건 생성. 기간계 무접촉 |
+| D69 | 03-12 | 자동발송 기능 기초 설계 | 메트로시티 요청. auto_campaigns+auto_campaign_runs 테이블 설계, PM2 워커+D-1 사전알림 아키텍처, 프론트 AutoSendPage(블러 프리뷰 게이팅)+DashboardHeader 메뉴 추가. 프로 이상 전용. company_user(브랜드담당자) 생성/수정/삭제 가능. 매월 28일 max. 기존 파이프라인(customer-filter, sms-queue, messageUtils) 100% 재활용. 설계문서: AUTO-SCHEDULE-DESIGN.md |
+| D73 | 03-14 | 무료체험 PRO 게이팅 + 수신거부 브랜드 자동배정(CT-03) + 커스텀 필드 라벨 UPSERT(CT-07) | 무료체험 만료 후 직접발송만 유지. 수신거부 admin 등록 시 store_code 기준 브랜드 사용자 자동배정(기존 admin 몰림 방지). "최초 등록 우선" 라벨 고착 버그→ON CONFLICT DO UPDATE. 컨트롤타워 우선 확인 원칙 CLAUDE.md 섹션 0 추가 |
+| D78 | 03-16 | 프로 자동 스팸필터 테스트 + CT-09 spam-test-queue.ts | 프로 요금제 차별화 핵심. AI 문안생성→자동 스팸테스트(큐 기반 순차처리)→차단 시 자동 재생성(최대2회). 프로 이상 무료. DB: plans.auto_spam_test_enabled + spam_filter_tests(source/variant_id/batch_id). spam_check_number 하드코딩 제거→080번호 동적조회. **배포 완료, 실서비스 E2E 검증 필요** |
+| D71 | 03-13 | customers_unified 뷰 store_phone 누락 + upload.ts region 중복 수정 | (1) 슈퍼관리자 고객DB 탭 500 에러: customers_unified 뷰에 store_phone 미포함 → DROP+CREATE VIEW로 store_phone 추가 (서버 DDL). (2) 엑셀 업로드 30,000건 전건 오류: D70-17에서 region을 FIELD_MAP에 추가했으나 upload.ts에서 이미 파생 컬럼으로 별도 처리 → INSERT에 region 중복 → insertCols/rowValues/updateClauses 3곳에서 명시적 region 제거, FIELD_MAP 순회에서 derivedRegion 우선 사용하도록 통합. **교훈:** ①customers 테이블 컬럼 추가 시 customers_unified 뷰도 반드시 재생성 ②FIELD_MAP에 필드 추가 시 upload.ts 파생 컬럼과 중복 여부 확인 필수. 수정 1파일(upload.ts)+DDL 1건 |
+
+**아카이브:** D1-AI발송2분기(02-22) | D2-브리핑방식(02-22) | D3-개인화필드체크박스(02-22) | D4-textarea제거(02-22) | D5-별도컴포넌트분리(02-22) | D6-대시보드레이아웃(02-22) | D7-헤더탭스타일(02-23) | D8-AUTO/PRO뱃지(02-23) | D9-캘린더상태기준(02-23) | D10-6차세션분할(02-23) | D11-KCP전환(02-23) | D12-이용약관(02-23) | D13-수신거부SoT(02-23) | D14-7차3세션분할(02-24) | D15-제목머지→D28번복(02-25) | D16-스팸테스트과금(02-25) | D17-테스트통계확장(02-25) | D18-정산자체헬퍼(02-25) | D19-구독상태필드(02-25) | D20-AI분석차별화(02-25) | D21-planInfo실시간(02-25) | D22-스팸잠금직접발송만(02-25) | D23-preview보안(02-25) | D24-run세션1완전구현(02-25) | D25-pdfkit선택(02-25) | D26-분석캐싱24h(02-25) | D27-비즈니스3회최적화(02-25) | D28-제목머지제거(02-25) | D29-5경로전수점검(02-25) | D30-즉시sending전환(02-25) | D31-GPT fallback(02-25) | D32-발송파이프라인복구(02-26) | D33-messageUtils통합(02-26) | D34-스팸필터DB직접조회(02-26) | D35-선불환불보장(02-26) | D-대시보드모달분리(02-23): 8,039줄→4,964줄
+
+---
+
+## 10) ASSUMPTION LEDGER (가정 목록)
+
+(아직 없음)
+
+---
+
+## 11) RISK REGISTER (리스크 목록)
+| ID | 리스크 | 확률(1-5) | 영향(1-5) | 점수 | 대응 |
+|----|--------|-----------|-----------|------|------|
+| R1 | TypeScript 타입 에러 배포 → 서버 크래시 | 2 | 5 | 10 | 배포 전 tsc --noEmit 필수 체크 |
+| R2 | DB 파괴적 작업 시 데이터 유실 | 2 | 5 | 10 | pg_dump 백업 후 작업, 트랜잭션 활용 |
+| R3 | QTmsg sendreq_time UTC/KST 혼동 | 1 | 4 | 4 | ✅ 해결: database.ts 풀 레벨 KST 보장 |
+| R4 | 라인그룹 미설정 고객사 → 전체 라인 폴백 오발송 | 1 | 5 | 5 | ✅ 해결: 이중 방어 적용 |
+| R5 | QTmsg LIVE→LOG 이동 후 결과 조회 불가 | 1 | 4 | 4 | ✅ 해결: LIVE+LOG 통합 조회 |
+| R6 | 스팸필터 동시 테스트 시 결과 충돌 | 1 | 4 | 4 | ✅ 해결: SHA-256 세션 격리 + 디바이스 fallback |
+| R15 | 발송 5개 경로 치환 로직 분산 → 재발 | 1 | 5 | 5 | ✅ 해결: messageUtils.ts 통합 |
+| R16 | results.ts 대량 캠페인 OOM | 1 | 4 | 4 | ✅ 해결: UNION ALL 서버측 페이지네이션 |
+| R17 | 선불 차감 후 발송 실패 → 정산 이슈 | 1 | 5 | 5 | ✅ 해결: 3경로 prepaidRefund + D57 C1 선별적 환불(부분실패 정확 환불) |
+| R21 | standard_fields ↔ 코드 하드코딩 불일치 | 1 | 5 | 5 | ✅ 해결: D39 3세션 완료 — FIELD_MAP 단일 기준 |
+| R22 | MySQL 외부 노출 → 랜섬웨어/데이터 삭제 | 1 | 5 | 5 | ✅ 해결: D49 — 127.0.0.1 바인딩+smsuser DROP 제거+비밀번호 강화+fail2ban+UFW |
+| R23 | Docker 컨테이너 재생성 시 포트 바인딩 0.0.0.0 실수 | 2 | 5 | 10 | ⚠️ 운영: 컨테이너 작업 시 반드시 `docker ps --format` 포트 확인. OPS.md에 안전 명령어 기록 |
+| R24 | SQL Injection → 내부 DB 공격 (127.0.0.1 우회) | 1 | 5 | 5 | ✅ 해결: D56 테이블명 화이트리스트 + D57-C4 sendTime 파라미터화 + **D59 custom_fields JSONB 키 화이트리스트(safe-field-name.ts 신규, campaigns/customers/ai 3파일 적용) + dateFilter MySQL 파라미터화 + mms-images UUID 검증 + upload.ts path.basename 경로탐색 방어** |
+| R29 | 스팸필터 테스트 선불 차감 누락 → 무과금 발송 | 1 | 3 | 3 | ✅ 해결: D56 — spam-filter.ts에 prepaidDeduct 적용, 테스트폰×메시지타입 건수 차감 |
+| R26 | JWT_SECRET/MYSQL_PASSWORD 환경변수 누락 → 서버 기동 실패 | 1 | 5 | 5 | ✅ 해결: D55 — fail-fast 적용, 폴백값 완전 제거. dotenv.config() app.ts 최상단 이동으로 로딩 순서 보장 |
+| R27 | 슈퍼관리자 세션 무제한 → 토큰 탈취 시 24시간 악용 | 1 | 5 | 5 | ✅ 해결: D55 — 세션 레코드 생성+30분 타임아웃+서버측 세션 체크 적용 |
+| R28 | Math.random() 임시비밀번호 → 예측 가능 | 1 | 3 | 3 | ✅ 해결: D55 — crypto.randomInt() CSPRNG 교체 |
+| R25 | 백업 부재 → 랜섬웨어 시 복구 불가 | 1 | 3 | 3 | ✅ 해결: 2026-03-05 — pg_dump+mysqldump 자동화, 59번 서버(58.227.193.59) SCP 전송, SSH 키 인증, crontab 매일 03:00, 7일 보관 |
+| R30 | 전화번호 정규화 불일치 → 개인화 메시지 치환 실패 | 1 | 4 | 4 | ✅ 해결: D57 C2 — normalizePhone() 단일함수 통일, directCustomerMap 키 불일치 수정 |
+| R31 | 분할발송 시간 오버플로우 → 심야/새벽 발송 | 1 | 4 | 4 | ✅ 해결: D57 C3 — calcSplitSendTime() SEND_HOURS 경계 체크, 환경변수 기반 |
+| R32 | AI발송 sendTime SQL Injection | 1 | 5 | 5 | ✅ 해결: D57 C4 — 템플릿 리터럴 삽입 제거, ? 파라미터화 |
+| R33 | 테스트발송 bill_id 빈문자열 → 결과 추적 불가 | 1 | 3 | 3 | ✅ 해결: D57 C5 — randomUUID() 고유 추적ID 생성 |
+| R34 | Redis 연결 에러 → 서버 크래시 | 1 | 5 | 5 | ✅ 해결: D59 — redis.on('error') 에러 핸들러 추가 |
+| R35 | unhandledRejection/uncaughtException → 로깅 없이 서버 크래시 | 1 | 5 | 5 | ✅ 해결: D59 — process.on 핸들러 추가, PM2 자동 재시작 연계 |
+| R36 | PostgreSQL Pool 커넥션 부족/누수 | 1 | 4 | 4 | ✅ 해결: D59 — max/idleTimeout/connectionTimeout 환경변수 기반 설정 |
+| R37 | 수신거부번호 미로딩 상태 발송 → 법적 문제 | 1 | 5 | 5 | ✅ 해결: D59 — optOutNumber 초기값 '' + 3개 발송함수 가드 |
+| R38 | 발송 상태 플래그 교차 미체크 → 동시 발송 | 1 | 3 | 3 | ✅ 해결: D59 — isSending/directSending 교차체크 3곳 |
+
+---
+
+## 12) ✅ DONE LOG (완료 기록)
+> 항목이 10개를 초과하면 오래된 항목은 아카이브로 이동하고 1줄 요약만 남긴다.
+> 상세 변경 이력은 Git 커밋 히스토리 참고.
+
+| 날짜 | 완료 항목 |
+|------|----------|
+| 03-20 | **D88 QA 버그리포트 11건(7그룹) 전면 수정:** 테스터 PPT 버그리포트 기반. (A) DashboardHeader isSubscriptionLocked+lockGuard+auto-campaigns checkPlanGating 구독/트라이얼 체크. (B) CustomerDBModal boolean 자동 드롭다운+enabled-fields 자동 타입 감지(샘플20건)+customer-filter contains→eq 전환. (C) ai.ts parse-briefing 타겟 필터 sampleCustomer+AiCustomSendFlow replaceVars field_key→field_label 매핑+messageUtils string→Number 파싱+toLocaleString. (D) companies.ts company_admin 전체 조회+CT-08 확인 모달 4경로 적용. (E) upload.ts admin 본인 user_id 수신거부 INSERT. (F) customers.ts filterUserId store_codes 기준. (G) spam-test-queue.ts 광고문구 래핑. 수정 11파일. tsc 프론트+백엔드 통과. **기간계 무접촉.** |
+| 03-08 | **D61 프론트엔드 난독화 적용:** vite-plugin-javascript-obfuscator — frontend+company-frontend 양쪽 vite.config.ts. production 빌드 시에만 활성화(mode === 'production'). stringArray+base64 인코딩, disableConsoleOutput, identifierNamesGenerator('hexadecimal'), splitStrings. 개발 환경(npm run dev) 무영향. 서버 배포 시 npm install 필요. |
+| 03-08 | **D60 SyncAgent API Key 관리 + 사용자별 라인그룹 배정:** (1) SyncAgent: 고객사 편집 모달 9번째 탭 'Sync' 추가. 백엔드 3개 엔드포인트(GET sync-keys, POST regenerate, PUT use_db_sync 토글). 프론트 마스킹+보기/숨김+복사+2단계 재발급 확인 UI. (2) 사용자별 라인그룹: DDL users.line_group_id uuid FK nullable 추가(실행 완료). campaigns.ts getCompanySmsTables(companyId, userId?) 확장—사용자 개별 라인그룹 우선→회사 fallback. admin.ts 사용자 수정 API lineGroupId 추가+사용자 목록에 line_group_name 포함. 프론트 사용자 편집 모달에 라인그룹 드롭다운(슈퍼관리자 전용). 고객사 편집 모달 너비 max-w-lg→max-w-2xl+탭 UI 개선. 수정 3파일(admin.ts, campaigns.ts, AdminDashboard.tsx)+DDL 1건+신규 1파일(DDL-user-line-group.sql). **기간계: getCompanySmsTables userId optional 추가만, 기존 호출 100% 호환.** tsc 통과. |
+| 03-07 | **D59 2차 코드 전수점검 P1~P6 총 28건 수정 완료:** **(P1 정산/데이터 3건)** ai.ts `\|\|10`→`??10` AI추정 0%치환 버그 수정. analysis.ts 하드코딩 `totalSent*15` 제거→채널별(SMS/LMS/MMS/KAKAO) getCompanyCosts() 정확 비용 계산. manage-stats.ts dead code 4줄 삭제. **(P2 SQL Injection 4건)** safe-field-name.ts 신규(custom_1~15 화이트리스트)→campaigns.ts buildFilterQuery, customers.ts buildDynamicFilter, ai.ts buildFilterWhereClause 3곳 적용. campaigns.ts dateFilter MySQL `?` 파라미터화+DATE_FORMAT 정규식 검증. **(P3 입력검증 3건)** mms-images.ts companyId UUID 정규식 검증. upload.ts `path.basename(fileId)` 디렉토리 탐색 방어. manage-users.ts 비밀번호 8~72자 bcrypt 안전 범위 검증. **(P4 하드코딩 5건)** admin.ts+manage-users.ts SMS 회신번호→`SYSTEM_SMS_CALLBACK` 환경변수(미설정 시 throw). defaults.ts `INVITO_INFO` 상수 신규+billing.ts PDF 2곳+이메일 2곳 import 교체. 프론트엔드 5곳 `©2026`→`©{new Date().getFullYear()}`. `constants/company.ts` 신규(frontend+company-frontend)+8파일 15곳 회사정보 상수 교체. **(P5 인프라 4건)** defaults.ts Redis error handler. ai.ts AI API 키 미설정 console.warn. app.ts unhandledRejection+uncaughtException PM2 연계. database.ts PG Pool max/idle/connection 환경변수 기반. **(P6 프론트 4건)** Dashboard.tsx setInterval→useRef+useEffect cleanup. optOutNumber 초기값''→미로딩 시 발송차단 가드 3곳. isSending/directSending 교차 중복 발송 방지 3곳. console.log 4줄 삭제. **(P7 장기 8건)** CODE-REVIEW-P7-BACKLOG.md 기록. 수정 20파일+신규 4파일. **기간계 무접촉. tsc backend+frontend+company-frontend 3패키지 전체 통과.** |
+| 03-06 | **D58 12차 버그리포트 4건+기능개선 3건 전체 완료:** (B12-01) 예약취소 DELETE(pending)+UPDATE(Agent 픽업건→9999) 이중처리 (B12-02) sync-results 60분 타임아웃 강제완료+환불 (B12-03) 스팸필터 subject/firstRecipient 전달 (B12-04) 특수문자/보관함/저장 모달 showDirectSend 바깥 이동→공용화 (F12-01) AI 결과팝업 머지태그 원본 표시 (F12-02) 필터 UI 전면개선: 성별 자동감지(`isGenderField` 패턴매칭)+다양한 DB값 한글 매핑, 생일 월별 프리셋+`birth_month` 오퍼레이터, 금액 최소~최대 범위 입력(콤마포맷+'원' 단위+빠른선택 버튼+`col-span-2`+백엔드 `between` 대응), 수신자 테이블 `formatCellValue` 성별 한글 표시 (F12-03) 타겟발송 담당자테스트 버튼(3열 그리드+`handleTargetTestSend`+10초 쿨다운). 수정 7파일(campaigns.ts, Dashboard.tsx, TargetSendModal.tsx, DirectTargetFilterModal.tsx, AiCampaignResultPopup.tsx, CalendarModal.tsx, customers.ts). **기간계 무접촉.** |
+| 03-05 | **나래 080 수신거부 콜백 연동 완료:** (1) 나래 담당자 콜백 URL 등록 확인 (2) 실제 080 ARS 테스트 — 나래 IP(183.98.207.13) 콜백 수신+수신거부 DB 등록 정상 (3) OPT_OUT_080_TOKEN 검증 제거→Nginx IP 화이트리스트(나래 6개 IP)로 보안 대체 (4) 기존 누적 수신거부: 한줄로 이관 시 수동 처리 예정. 수정 1파일(unsubscribes.ts). **기간계 무접촉.** |
+| 03-05 | **D57 P0-C1~C5 발송 파이프라인 안정화 5건:** (C1) AI발송+직접발송 per-customer/per-batch try/catch→sentCount 추적→부분실패 선별적 환불. (C2) normalize-phone.ts 신규→campaigns.ts 27곳 통일+directCustomerMap 키 불일치 핵심버그 수정. (C3) calcSplitSendTime() SEND_HOURS 경계→오버플로우 방지, defaults.ts SEND_HOURS 추가. (C4) AI발송 sendTime `?` 파라미터화. (C5) 테스트발송 bill_id→randomUUID()+실패건 DB 기록+응답 testRequestUid. 수정 2파일(campaigns.ts, defaults.ts)+신규 1파일(normalize-phone.ts). TypeScript 0에러. **기간계 발송 흐름 자체 변경 없음** |
+| 03-05 | **D56 P0-Q1 SQL Injection 방지 + 스팸필터 선불차감:** (1) sms-table-validator.ts 신규 — `/^SMSQ_SEND(_\d{1,3})?(_\d{4,8})?$/` 화이트리스트 정규식, validateSmsTable/validateSmsTables/isValidSmsTable 3함수 export. (2) admin.ts — POST/PUT `/api/admin/line-groups` 라인그룹 생성·수정 API에서 smsTables 검증, 잘못된 테이블명 400 거부. (3) campaigns.ts — 서버 기동 시 ALL_SMS_TABLES 검증(경고 로그, 기동 미차단) + getCompanySmsTables DB 조회 결과 필터링(잘못된 값 스킵→BULK_ONLY_TABLES 폴백) + prepaidDeduct/prepaidRefund export 추가. (4) spam-filter.ts — POST `/test`에 선불 잔액 차감 추가: testId 생성 후 prepaidDeduct(companyId, spamSendCount, spamDeductType, testId) 호출, 잔액 부족 시 402+테스트 cancelled, 응답에 deducted 금액 포함. 수정 3파일(admin.ts, campaigns.ts, spam-filter.ts)+신규 1파일(sms-table-validator.ts). TypeScript 타입 에러 0건. **기간계 무접촉. 배포+실서버 선불차감 로그 확인 완료.** |
+| 03-05 | **D55 보안 긴급점검 + 슈퍼관리자 세션 관리 + 세션 타이머 UI (코드+DDL+배포 완료):** (1) JWT_SECRET fail-fast — auth.ts 미들웨어에서 환경변수 미설정 시 `process.exit(1)` 서버 기동 차단, 폴백값 `'dev-only-secret'` 제거. (2) mms-images.ts 자체 JWT 인증(`'your-secret-key'`) 완전 제거 → 공용 `authenticate` 미들웨어로 교체. (3) MYSQL_PASSWORD fail-fast — database.ts에서 미설정 시 `process.exit(1)`, 폴백값 `'sms123'` 제거. (4) dotenv.config() 로딩 순서 수정 — app.ts 최상단(1행)으로 이동, 모듈 import 전에 환경변수 로딩 보장. (5) Math.random()→crypto.randomInt() — admin.ts/manage-users.ts 임시비밀번호 생성을 암호학적 안전 난수로 교체. (6) 슈퍼관리자 세션 관리 — DDL-D55로 user_sessions.user_id FK 제거(super_admins ID INSERT 허용, 보안영향 없음=서버코드만 INSERT) + 로그인 시 user_sessions 레코드 생성+sessionId JWT 포함+기존 세션 무효화, auth.ts 미들웨어 `super_admin` 세션체크 건너뛰기 제거 + expires_at 서버측 만료 강제(브라우저 닫았다 열어도 서버가 차단), extend-session 슈퍼관리자 지원, defaults.ts `superAdminSessionMinutes: 30` (환경변수 변경 가능). (7) 프론트엔드 useSessionGuard 슈퍼관리자 스킵 제거 → 30초마다 서버 세션 체크. (8) 은행 스타일 세션 타이머 UI — SessionTimer.tsx 신규 컴포넌트(초록/주황/빨강 색상전환+5분미만 깜빡임+클릭 세션연장), SessionTimerContext Provider(App.tsx), DashboardHeader+AdminDashboard 양쪽 헤더에 삽입. 수정 12파일(app.ts, auth.ts미들웨어, auth.ts라우트, mms-images.ts, database.ts, defaults.ts, admin.ts, manage-users.ts, useSessionGuard.ts, useSessionTimeout.ts, App.tsx, DashboardHeader.tsx, AdminDashboard.tsx)+신규1파일(SessionTimer.tsx)+DDL 1건 실행 완료(`docker exec -it targetup-postgres psql -U targetup targetup`). **기간계 무접촉.** |
+| 03-05 | **D54 스팸필터 폴링 로직 개선 + 이력 탭 추가:** (1) QTmsg 성공 후 3분 대기→10초 대기 후 BLOCKED 판정으로 변경 (qtmsgSuccessTime Map 기반 시점 추적, BLOCKED_GRACE_MS=10초). 실서버 테스트로 앱 ACK 즉시 수신 확인 후 Harold님과 합의. (2) 타임아웃 180초→60초(안전장치), 안전 강제종료 240초→90초 (defaults.ts). (3) 프론트 SpamFilterTestModal.tsx 카운트다운 180→60초 동기화. (4) SpamFilterTestModal에 **내 테스트 이력 탭** 추가 — `/api/spam-filter/tests?mine=true` 본인 필터 + 메시지 내용 반환 + 통신사별 판정결과 펼침 UI. 수정 3파일(spam-filter.ts, defaults.ts, SpamFilterTestModal.tsx). **기간계(발송파이프라인) 무접촉.** |
+| 03-05 | **D53 DB 실행 완료 + 백업 자동화 구축 + AI 맞춤한줄 Phase 2 문서 정정:** (1) plans 테이블 3컬럼 ALTER TABLE + 6개 요금제 UPDATE 실서버 실행 완료 (2) 외부 백업 자동화 — pg_dump+mysqldump → 59번 서버(58.227.193.59:27616) SCP 전송, SSH 키 인증, crontab 매일 03:00, 7일 보관. R25 리스크 해소 (3) AI 맞춤한줄 Phase 2 코드 검증 — 실제로 발송 연결 전체 구현 완료 확인(AiCustomSendFlow→Dashboard→campaignsApi.create+send), STATUS.md Phase 2 항목 [x] 갱신 |
+| 03-04 | **D53 요금제별 기능 게이팅 구현 + 배포 완료:** plans 테이블 3컬럼 추가(customer_db_enabled/spam_filter_enabled/ai_messaging_enabled)+5개 요금제+ENTERPRISE 플래그 설정. 백엔드 5파일 게이팅(companies.ts my-plan 확장, spam-filter.ts/ai.ts 3엔드포인트/upload.ts parse·save/customers.ts extract). 프론트 4파일(Dashboard.tsx PlanInfo 확장+하드코딩 가격체크 제거+3카드 잠금UI, DashboardHeader.tsx 캘린더 게이팅, PlanUpgradeModal.tsx 범용화 featureName/requiredPlan, SpamFilterLockModal.tsx 프로→스타터 텍스트 수정). tsc 에러 2건 수정(auth.ts jwt.sign 타입/campaigns.ts useIndividualCallback 선언순서). SCHEMA.md plans 테이블 반영. **기간계 무접촉.** |
+| 03-04 | **프로젝트 루트 정리 (~1.51GB 확보):** 오래된 DB 백업 8개 삭제(backup_docker/for_server/utf8/before_sync/before_billing/before_maxusers/sync_phase4/20260214_kakao_enabled.sql, 총 1.46GB) + 일회성 SQL 패치 8개 삭제(fix_admin/fix_password/add_columns/update_schema/seed_customers/migration-phase1a/migration_plan_requests/sync_ddl.sql) + qtmsg_5agents.tgz(48MB) 삭제 + 빈 폴더 2개 삭제(files/, targetup-app/). git 히스토리 정리는 추후 결정 예정 |
+| 03-04 | **10차 버그리포트 7건 전체 수정 (B10-01~07):** 직원 PDF 버그리포팅 기반. ①B10-01 🔴 customers.ts store_code 격리 누락 — GET `/`, POST `/filter`, GET `/filter-options`, GET `/enabled-fields` 4개 엔드포인트 `uploaded_by`→`store_codes` JOIN 패턴 통일 ②B10-07 🔴 campaigns.ts 회신번호 검증 UNION 누락 — `/:id/send`+`/direct-send` 2곳에 `sender_numbers UNION callback_numbers` 적용 ③B10-06 ai.ts 등급 하드코딩(`VIP,GOLD,SILVER,BRONZE`)→`SELECT DISTINCT` 실시간 조회+키워드맵 정리 ④B10-04 normalize.ts `normalizeDate()` 엑셀 시리얼넘버 변환 추가 ⑤B10-05 normalize.ts `isValidKoreanPhone()` 050x 안심번호 허용 ⑥B10-03 upload.ts AI 매핑 프롬프트 매장4필드 구분규칙 추가 ⑦B10-02 CustomerDBModal.tsx 커스텀필드 라벨 `fieldColumns` 조회 표시. **기간계 무접촉 확인.** 수정 6파일(campaigns.ts, normalize.ts, ai.ts, customers.ts, upload.ts, CustomerDBModal.tsx) |
+| 03-04 | 스팸필터 테스트 LMS 제목 누락 수정: 전 구간(프론트→백엔드→MySQL)에서 subject가 빠져있던 문제. ①Dashboard.tsx spamFilterData 타입에 subject 추가+직접발송 스팸필터 호출에 directSubject 전달 ②SpamFilterTestModal.tsx subject prop 추가+API body에 subject 전달+LMS 미리보기에 제목 표시 ③spam-filter.ts req.body에서 subject 추출+insertSmsQueue에 title_str 컬럼 추가. ⚠️ PG spam_filter_tests에 subject/message_type 컬럼 미존재 확인(SCHEMA.md와 실제 DB 불일치) — PG INSERT는 기존 유지, MySQL title_str만 추가. 수정 3파일(spam-filter.ts, SpamFilterTestModal.tsx, Dashboard.tsx) |
+| 02-28 | D43-7 Phase 4 결과코드 매핑 3-Tier 전수 점검 완료: **18파일 점검, 하드코딩 잔존 0건.** admin.ts 5곳 전환(statusMap7개+carrierMap3개 로컬삭제→getStatusLabel(22개)/getCarrierLabel(9개)+statusType 추가) + billing.ts 5곳 전환(3개 집계함수→SUCCESS_CODES_SQL/PENDING_CODES_SQL) + **billing.ts `>=200` 버그 수정**(비가입자7/Power-off8/스팸차단16 등 200미만 실패코드 정산 누락 해소). AdminDashboard.tsx statusType 동적분기. ResultsModal.tsx sampleData9개 삭제→messages[0].msg_contents 동적치환. 서비스/관리자/슈퍼관리자 프론트 12파일 점검 깨끗. 수정 4파일(admin.ts, billing.ts, AdminDashboard.tsx, ResultsModal.tsx) |
+| 02-28 | 🔴 D49 MySQL 랜섬웨어 긴급 대응: 원인(3306 외부 노출+취약 비밀번호→봇 공격→SMSQ_SEND_1~11 삭제). 복구(127.0.0.1 바인딩+테이블 재생성+로그 테이블 복구+Agent 재시작+이벤트 스케줄러 확인). 보안 강화(root/smsuser 비밀번호 강화+Agent encrypt_pass DES 암호화 동기 변경+smsuser DROP 권한 제거+UFW 3000/9001~9011 차단+SSH root 로그인 차단+fail2ban 3회→1h밴). 피해: SMSQ 큐만 삭제(복구 완료), PostgreSQL/고객 데이터 무사. 스팸필터 테스트 LG U+ 수신 확인 |
+| 02-27 | D43-4 수신거부 양방향 동기화: unsubscribes=SoT 확정, opt_outs 레거시 확인. syncCustomerOptIn 헬퍼+4곳(080콜백/직접추가/업로드/삭제) 적용. DDL opt_out_auto_sync 추가. 프론트 080번호 동적+연동테스트 조건부. curl 테스트 정상. **나래 콜백 미수신→월요일 확인.** 수정 2파일(unsubscribes.ts, Unsubscribes.tsx)+DDL 1건 |
+| 02-27 | D43-3c 직접타겟 발송창 하드코딩 전면 제거 + 컴포넌트 분리: TargetSendModal.tsx 신규(901줄)+DirectTargetFilterModal.tsx FieldMeta export+onExtracted fieldsMeta 추가+Dashboard.tsx 638줄 감소(4548→3910)+DirectPreviewModal.tsx 동적치환. 하드코딩 8곳→fieldsMeta 동적. 커서위치 삽입 버그 수정(selectionStart). 발송파이프라인 미접촉 |
+| 02-27 | D43-3b 직접타겟 백엔드 버그 3건 수정: ①extract SELECT 하드코딩→getColumnFields() FIELD_MAP 동적+customers_unified→customers 직접조회 ②filter-count도 customers_unified→customers 전환 ③buildDynamicFilter age 필터 EXTRACT(birth_date)→age 컬럼 직접사용 ④DirectTargetFilterModal 에러핸들링+커스텀알림모달 추가. 수정 2파일(customers.ts, DirectTargetFilterModal.tsx) |
+| 02-27 | D43 안건#3 직접타겟 리팩토링: DirectTargetFilterModal.tsx 신규(646줄)+Dashboard.tsx 405줄 감소+customers.ts 옵션 동적화+extract SELECT 확장+buildDynamicFilter contains 지원. **🚨 타겟추출→발송모달 연결 버그 미해결 (다음 세션)** |
+| 02-27 | D43 안건#5 AI 한줄로 3종 개선: ①개인화필수 파싱(services/ai.ts parsePersonalizationDirective) ②샘플고객 미리보기(routes/ai.ts sample_customer+Dashboard+AiCampaignResultPopup 동적 치환) ③이모지 강제제거(services/ai.ts stripEmojis, SMS/LMS/MMS 후처리). 수정 5파일 |
+| 02-27 | D43 안건#2 AI 매핑 화면 개편: 컴포넌트 분리(FileUploadMappingModal.tsx 신규)+태그클릭 2열 그리드+커스텀 +/- 슬롯+upload.ts 백엔드 지원. 수정 3파일 |
+| 02-27 | D43 안건#1 회사명 미반영 해결: auth.ts c.name→c.company_name 통일, companies.ts name동기수정+settings company_name추가, Dashboard.tsx DB실시간조회 우선표시. 수정 3파일 |
+| 02-27 | D41 세션2 대시보드 대개편 완료 + D42 발송현황 수정: AdminDashboard.tsx 대시보드탭(4/8모드+17종체크)+Dashboard.tsx 고객현황 하드코딩 제거→동적카드+블러+발송현황 3칸(성공건수/성공률/사용금액). 수정 2파일 |
+| 02-27 | D41 세션1 백엔드 API: dashboard-card-pool.ts(카드풀17종)+companies.ts(dashboard-cards 집계API)+admin.ts(카드설정 GET/PUT)+idx_company_settings_unique+plans 오염 수정. 신규1+수정2파일 |
+| 02-27 | DashboardHeader.tsx AI 분석 메뉴 스타일 변경: 맨 앞 이동, Sparkles 아이콘 제거, gold+emphasized 유지 |
+| 02-27 | AI 맞춤한줄 동적 필드 + Step 2 UX 개선 (D40): customers.ts enabled-fields 단일 경로, AiCustomSendFlow.tsx 톤 제거+필드명 태그, ai.ts tone optional. 수정 3파일 |
+| 02-27 | D39 세션2 조회+AI 정상화 완료: customers.ts/ai.ts/Dashboard.tsx/AiCustomSendFlow.tsx 하드코딩 4곳 전수 제거→FIELD_MAP 동적. 수정 4파일 |
+| 02-26 | D39 세션0+세션1 완료: DDL(store_phone)+standard_fields 32개+standard-field-map.ts 재작성+upload.ts+normalize.ts FIELD_MAP 기반 동적 전환 |
+| 02-26 | 코드 실물 검증 5건 + S9-04/S9-08/GP-04 수정 + S9-07 모달 6곳 교체 + upload.ts sanitize/cleanup/인증 |
+
+**아카이브 (02-26 이전):**
+- 02-26: 구조적 결함 7건 발견 + D32 공통 치환 함수 통합(messageUtils.ts) + 5개 경로 연결
+- 02-25: AI 분석 4세션 완료 + 요금제 기능 제한 + 구독 실시간 반영 + 스팸필터 잠금 + 8차 버그 13건 + GPT fallback + 대시보드 반응속도 개선
+- 02-25: 발송통계 고도화 + 7차 3세션 완료 + 6차 11건 완료
+- 02-24: 직원 버그리포트 7차 세션1(동적필드전환) + 요금제 게이지바 + 소스보호 + 어드민통계 수정 + 080연동
+- 02-23: 대시보드 모달 분리(8039→4964줄) + 헤더 탭스타일 + 배포자동화 + 수신거부통합 + 6차 세션1
+- 02-22: 대시보드 레이아웃 전면 개편 + AI 맞춤한줄 Phase 1 시작
+- ~02-21: 수신거부 미반영 수정 + 스팸필터 완성 + 업로드 안정화 + 라인그룹 시스템
+- ~02-10: 서버 인프라 전체 배포, 핵심 기능 완성, 슈퍼관리자·고객사관리자 대시보드, 정산 시스템, QTmsg Agent 5→11개

@@ -818,18 +818,6 @@
 - INDEX: idx_dm_views_token (dm_id, recipient_token) WHERE recipient_token IS NOT NULL ★ 2026-07-02
 - INDEX: idx_dm_views_anon (dm_id, anonymous_id) WHERE anonymous_id IS NOT NULL ★ 2026-07-02
 
-### dm_recipient_tokens (DM 수신자별 토큰 — 발송 고객 1급 연결) ★ 2026-07-03 information_schema 실측 기록
-> 0702 수신자 추적 작업 신설분. DM 발송 시 고객별 토큰 발급(dm.ts → dm-recipient-token.ts) — "DM 발송 고객 명단"의 원천. 성과리포트 고객 축이 발송 집합으로 사용.
-
-| 컬럼 | 타입 |
-|------|------|
-| token | varchar PK |
-| dm_id | uuid |
-| customer_id | uuid |
-| company_id | uuid |
-| created_at | timestamptz |
-| expires_at | timestamptz |
-
 ### dm_event_responses (DM 이벤트 응답 누적) ★ D216+ 신설
 > **신규 16 섹션 (poll / survey / email_capture / lucky_draw / roulette 등) 인터랙션 누적.**
 
