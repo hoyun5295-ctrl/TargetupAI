@@ -1,10 +1,11 @@
 /**
- * @hanjullo/sdk v0.3.6-a — Auto-Capture IIFE 진입점
+ * @hanjullo/sdk v0.3.8 — Auto-Capture IIFE 진입점
  *
- * 설치: <script src="https://app.hanjul.ai/sdk/v0.3.6/hanjul.min.js" data-hjl-key="hjl_..." async></script>
+ * 설치: <script src="https://app.hanjul.ai/sdk/v0.3.8/hanjul.min.js" data-hjl-key="hjl_..." async></script>
+ * 자사몰 앱 연동(카페24 scripttags 등) 자동삽입 시: src="...?k=hjl_..."로도 키 전달 가능(v0.3.8+).
  * 유료 요금제 이용 가능 (백엔드 검증 — 무료 플랜만 차단).
  *
- * 매뉴얼: https://hanjul.ai/docs/sdk/v0.3.5
+ * 매뉴얼: https://hanjul.ai/docs/sdk/v0.3.8
  */
 
 import { isValidEventName, INAPP_BRIDGE_EVENT_NAMES } from './events';
@@ -47,7 +48,7 @@ interface HjlGlobal {
 
 const INAPP_BRIDGE_SET = new Set<string>(INAPP_BRIDGE_EVENT_NAMES);
 
-const VERSION = '0.3.6-a';
+const VERSION = '0.3.8';
 
 function createHjlGlobal(): HjlGlobal {
   let firstEventSent = false;

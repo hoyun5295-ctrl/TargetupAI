@@ -10,7 +10,7 @@ export default {
     format: 'iife',
     name: 'Hanjullo',
     sourcemap: true,
-    banner: '/*! @hanjullo/sdk v0.3.6-a — Auto-Capture IIFE | (c) Hanjullo (TargetUp) | MIT */',
+    banner: '/*! @hanjullo/sdk v0.3.8 — Auto-Capture IIFE | (c) Hanjullo (TargetUp) | MIT */',
   },
   plugins: [
     resolve({ browser: true }),

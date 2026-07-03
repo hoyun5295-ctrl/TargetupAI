@@ -61,6 +61,33 @@ describe('autoInitFromScriptTag — data-hjl-key 스니펫 자동 init', () => {
     expect(init).not.toHaveBeenCalled();
   });
 
+  it('data 속성 없이 src ?k= 쿼리로 키 전달(scripttags 자동삽입) → 해당 키로 init', () => {
+    const s = document.createElement('script');
+    s.setAttribute('src', 'https://app.hanjul.ai/sdk/v0.3.8/hanjul.min.js?k=hjl_fromquery');
+    document.head.appendChild(s);
+
+    const init = vi.fn();
+    (window as any).hjl = { init };
+
+    autoInitFromScriptTag();
+
+    expect(init).toHaveBeenCalledWith({ apiKey: 'hjl_fromquery' });
+  });
+
+  it('data-hjl-key 속성이 있으면 ?k= 쿼리보다 우선', () => {
+    const s = document.createElement('script');
+    s.setAttribute('data-hjl-key', 'hjl_attr');
+    s.setAttribute('src', 'https://app.hanjul.ai/sdk/v0.3.8/hanjul.min.js?k=hjl_query');
+    document.head.appendChild(s);
+
+    const init = vi.fn();
+    (window as any).hjl = { init };
+
+    autoInitFromScriptTag();
+
+    expect(init).toHaveBeenCalledWith({ apiKey: 'hjl_attr' });
+  });
+
   it('data-hjl-inapp-container 속성이 있으면 init config에 inappContainer 전달', () => {
     const s = document.createElement('script');
     s.setAttribute('data-hjl-key', 'hjl_abc123');

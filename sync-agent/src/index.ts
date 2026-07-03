@@ -40,6 +40,7 @@ import { HeartbeatManager } from './heartbeat';
 import { Scheduler } from './scheduler';
 import { AlertManager, loadAlertConfig } from './alert';
 import { AGENT_VERSION } from './version';
+import { selfHealBinaries } from './updater';
 
 // ★ v1.5.1: Windows 서비스 실행 시 cwd=C:\Windows\System32 → config/data/logs 경로 틀어짐
 //   → 바이너리 실행 경로(process.execPath) 기준으로 cwd 강제 설정
@@ -88,6 +89,9 @@ async function main(): Promise<void> {
   // 2. 로거 초기화
   const logger = initLogger(config.log);
   const log = getLogger('main');
+
+  // ★ 2026-07-03: 자기교체 잔여물(.old/.new) 정리 — 원자 스왑 후 교체 스크립트가 정리 전에 죽었을 때 대비 (D-4 안전망)
+  try { selfHealBinaries(); } catch { /* 정리 실패는 치명적 아님 */ }
 
   log.info('========================================');
   // ★ 2026-06-11: 배너/보고 버전은 실행 파일 자신의 버전(AGENT_VERSION)만 사용.

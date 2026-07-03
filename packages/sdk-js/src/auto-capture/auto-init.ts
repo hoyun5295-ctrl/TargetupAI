@@ -33,6 +33,33 @@ export function autoInitFromScriptTag(): void {
     }
   }
 
+  // 3) fallback — src의 ?k= 쿼리에서 공개 키를 읽는다.
+  //    자사몰 앱 연동(카페24 scripttags 등)은 data 속성을 부여할 수 없고 src만 등록되므로
+  //    src="https://app.hanjul.ai/sdk/vX/hanjul.min.js?k=hjl_..." 형태로 키를 전달한다.
+  if (!apiKey) {
+    const keyFromSrc = (src: string | null | undefined): string | null => {
+      if (!src) return null;
+      const q = src.indexOf('?');
+      if (q < 0) return null;
+      try {
+        return new URLSearchParams(src.slice(q + 1)).get('k');
+      } catch {
+        return null;
+      }
+    };
+    apiKey = keyFromSrc(current ? current.src : null);
+    if (!apiKey) {
+      const srcTags = document.querySelectorAll('script[src]');
+      for (let i = 0; i < srcTags.length; i++) {
+        const src = (srcTags[i] as HTMLScriptElement).src;
+        if (src && src.indexOf('hanjul') >= 0) {
+          const k = keyFromSrc(src);
+          if (k) { apiKey = k; break; }
+        }
+      }
+    }
+  }
+
   if (!apiKey) return;
 
   const hjl = (window as any).hjl;

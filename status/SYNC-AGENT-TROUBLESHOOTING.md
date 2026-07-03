@@ -166,6 +166,33 @@ ALTER TABLE sync_releases ADD COLUMN IF NOT EXISTS checksum VARCHAR(255);
 
 **build:tiers 경고는 무해 (빌드 실패 아님)**: `Cannot resolve 'mod'`(어느 의존성의 런타임 변수 동적 require), `open`·`xdg-open`·`default-browser`·`is-wsl` bytecode 실패, `@azure/*`·`tedious` bytecode 실패, `import.meta` parse 실패 — 전부 경고일 뿐 `완료:`가 찍히면 그 티어 성공. `open`(브라우저 여는 유틸)은 mssql의 Azure 인증 경로로 딸려온 미사용 의존성이라 에이전트가 안 부른다(에이전트 src grep 0건). 빌드 성공 판정 = 5티어 `완료:` + `동봉 완료`(win-mid/legacy 각 UCRT DLL 49개) + `다운로드 zip 생성`(5개) + `manifest 생성`이 다 뜨면 정상. 경고를 지우려고 작동하는 빌드 설정(esbuild external·pkg config)을 건드리지 말 것 — `open` 잘못 제외 시 mssql 깨질 위험, 실익은 출력 청소뿐.
 
+### 2-6. 2026-07-03 isae — 자동 업데이트 감지·다운로드는 무선 성공, 마지막 교체 단계 실패 (updater 자기교체 결함) ★해결(v1.6.0, 전 티어 게이트 통과)
+
+> **해결 요약 (2026-07-03, v1.6.0)**: updater 자기교체를 서비스/작업 밖에서 원자적으로 수행하도록 근본수정. 코드 = `sync-agent/src/updater/scripts.ts`(순수 빌더) + `updater/index.ts`(가드·실행) + `updater/restart.ts` + `index.ts` self-heal.
+> - **Windows**: 교체 bat을 SyncAgent 작업 job 밖(별도 일회성 작업 `SyncAgentUpdate`)에서 실행 → `schtasks /End /TN SyncAgent`에 생존. spike + 실 2008 R2 VM E2E 통과.
+> - **Linux**: 교체 sh를 `systemd-run --unit=sync-agent-update`(transient **서비스**, `--scope` 아님)로 실행 → 서비스 cgroup·`ProtectSystem` 밖에서 실행(stop 생존 + exe 쓰기 가능). spike-2 + Docker systemd E2E 통과.
+> - **원자 스왑**: `move /y`(NTFS)·`mv`(rename) = 동일 볼륨 원자 교체 → exe 부재 순간 제거(브릭 차단). 옛 `rename→copy` 공백 패턴 폐기.
+> - **하드닝**: 빈 버전 가드, checksum 필수화(미제공 시 거부), self-heal 잔여물(.old/.new) 정리, 교체/재시작 트리거 성공 확인 후에만 `process.exit(0)`.
+> - **restart 명령 동반 수정**: 예약작업/systemd 모델에서 `process.exit(0)`은 자동 재시작 안 됨(exit 0=정상종료) → 별도 작업(Win)·`systemctl restart` 위임(Linux)으로 실제 재기동.
+> - **★ schtasks 함정(2008 R2 VM E2E가 잡음)**: `schtasks /TR "C:\...\x.bat"`(bat 경로만)은 2008 R2에서 작업이 bat을 **실행하지 않는다**. 반드시 `/TR "cmd /c <bat>"`. 설치 경로 공백 없음(C:\SyncAgent) 전제.
+> - **버전 1.6.0**, 5티어 재빌드 완료, 티어별 sha256 = 릴리즈 `sync_releases.checksum`. isae 1.5.7은 동결(자동 안 밈), 필요 시 수동 1회 교체.
+> - **미해결 잔재**: 2008 R2 IE8 웹 설치 마법사 미동작(터미널 `--setup-cli` 사용) — 이번 범위 밖, 별도 과제. 설계서 `docs/superpowers/specs/2026-07-03-sync-agent-updater-selfreplace-design.md`.
+
+
+**증상**: 서버에 새 exe 릴리즈 등록 후, 박스가 정각에 `GET /version`으로 새 버전 감지 → `/download` 200으로 exe 전량(103MB) 수신까지 무선으로 성공. 그런데 `current_version`이 새 버전으로 안 올라오고 박스가 멈춤(heartbeat 정지). tasklist 프로세스 없음, 예약작업 상태=준비(마지막 결과 0=정상종료).
+
+**근본 원인 (확정)**: updater가 다운로드 후 `temp\update.bat`을 생성·실행하고 `process.exit(0)`로 자신을 종료하는 구조인데, **그 update.bat의 step 1이 `schtasks /End /TN SyncAgent`다. bat은 SyncAgent 작업(에이전트)이 spawn한 자식 = 같은 작업 job 소속**이라, 에이전트 exit(0) 또는 이 `/End`가 job을 닫는 순간 **bat도 rename(step 2) 전에 함께 종료**된다. 결과: exe 교체·재시작 미수행, 감지·다운로드까지만 되고 죽음. 증거 = `.old` 미생성 + `sync-agent.exe`가 옛 크기/날짜 그대로 + `temp\sync-agent-<버전>.exe`는 존재.
+
+**부수 함정 2개(오늘 별개로 해소)**:
+- 슈퍼관리자에서 옛날에 넣어둔 stale `restart` 명령이 큐에 남아 있으면, 재기동한 에이전트가 첫 heartbeat에 그 명령을 집어 스스로 재시작→죽음. (큐는 1회 전달 후 서버가 비우므로 자연 소비되나, 재기동 루프처럼 보인다. `SELECT jsonb_pretty(config) FROM sync_agents`로 확인, 필요 시 `jsonb_set(config,'{commands}','[]')`.)
+- 릴리즈 `force_update=true`면 이미 최신 버전인 박스도 정각마다 자기 버전으로 재-업데이트를 시도해 위 결함으로 죽는다. **동일 버전 배포 완료 후에는 `UPDATE sync_releases SET force_update=false`.**
+
+**임시 복구(서팀장 원격 1회 — 2008 R2 PowerShell 2.0 전제)**: 이미 `temp`에 받아둔 exe로 수동 교체. 절차·복붙 명령 = `docs/session-recovery/2026-0702-isae-remote-runbook.md` 교체 블록(B). certutil로 체크섬 대조(2008 R2는 `Get-FileHash` 없음), `.bak` 백업 후 copy, `schtasks /Run`.
+
+**근본 수정(다음 exe 버전업 전 필수)**: update.bat을 **SyncAgent 작업 job 밖에서 실행**하도록 updater 변경 — `CREATE_BREAKAWAY_FROM_JOB`로 spawn / 또는 일회성 별도 예약작업(`schtasks /Create` transient)으로 bat 실행 / 또는 `wmic process call create`(부모 job 미상속). 이 수정본이 처음 깔리는 그 1회만 박스 개입이 남고, 그 뒤부터 완전 무선.
+
+**교훈**: Windows 예약작업(또는 서비스)이 spawn한 자식 프로세스는 그 작업의 job에 속한다 — **자기 작업을 `/End`하거나 부모가 exit하면 그 자식(교체 bat)도 죽는다.** 자기 자신을 교체·재시작하는 스크립트는 반드시 부모 job에서 분리해서 띄운다.
+
 ---
 
 ## § 3. 진단 체크리스트 (문제 발생 시 순서대로 실행)

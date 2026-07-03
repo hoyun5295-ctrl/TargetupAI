@@ -23,6 +23,7 @@ import type { ApiClient } from '../api/client';
 import type { SyncStateManager } from '../sync/state';
 import { getLogger } from '../logger';
 import type { AgentCommand, UpdateConfigPayload } from '../types/api';
+import { restartAgent } from '../updater/restart';
 
 const logger = getLogger('scheduler');
 
@@ -261,8 +262,10 @@ export class Scheduler {
 
           case 'restart':
             logger.info('🔄 원격 명령: Agent 재시작');
-            // 프로세스 종료 → Windows 서비스가 자동 재시작
-            process.exit(0);
+            // 예약작업(Windows)/systemd(Linux) 모델은 exit(0)로 자동 재시작되지 않는다
+            //   (예약작업 exit 0=정상종료→RestartOnFailure 미발동 / systemd Restart=on-failure).
+            //   restartAgent가 OS별로 실제 재기동을 트리거한다(별도 일회성 작업 / systemctl restart 위임).
+            restartAgent();
             break;
 
           // ★ D131 후속(2026-04-21): 원격 pause/resume

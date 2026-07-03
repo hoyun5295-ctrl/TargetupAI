@@ -5,7 +5,20 @@
 
 ---
 
-## ★ 최종 마무리 — 원격 1회 완결 (2026-07-01 갱신, 이 섹션만 보면 됨)
+## ✅ 완료 (2026-07-03) — 아래 옛 지시서는 이력 참고용
+
+**isae 전부 완결. 이 문서는 이제 이력 기록이다.**
+- **에이전트 1.5.7 원격 교체 성공**(서팀장 원격 1회). 절차·근본원인 = `docs/session-recovery/2026-0702-isae-remote-runbook.md` + [[project_2026_0703_isae_157_mapping_purchase_summary]].
+- **custom 매핑 15/15 정상.** 슈퍼관리자 "매핑"(update_config)으로 전송 — custom_5=신규등록일자 교정, custom_14=최종접속일**시**(컬럼명 가설 적중). **매핑은 표준 포함 전체 28행을 통째로 보내야 함**(에이전트가 customerMapping 통째 교체 — custom만 보내면 phone/name 소실).
+- **클린 재적재 완료:** 고객 137,267 / 구매 1,854,706. custom·표준 전수 검증 통과.
+- **구매요약 집계·구매이력 화면·고객DB 성능** 후속 배포 완료(같은 프로젝트 메모리 참조).
+
+### ⚠️ 남은 유일 과제 — updater 자기교체 결함 (다음 exe 버전업 전 필수)
+1.5.6/**1.5.7 updater의 update.bat이 `schtasks /End /TN SyncAgent`로 자기가 속한 작업 job을 종료**시켜, rename(교체) 전에 bat이 같이 죽는다(증거: .old 미생성·exe 미교체). 그래서 감지·다운로드는 무선으로 되지만 **마지막 교체 단계가 실패** → 1.5.8로 넘어가는 첫 1회는 박스 개입 가능성 잔존. **수정 = update.bat을 작업 job 밖에서 실행(CREATE_BREAKAWAY_FROM_JOB / 별도 transient task / wmic process create).** 이 수정본이 깔린 뒤부터 완전 무선. → `SYNC-AGENT-TROUBLESHOOTING.md § 2-6` 상세.
+
+---
+
+## ★ 최종 마무리 — 원격 1회 완결 (2026-07-01 갱신 — 이력)
 
 ### ★★ Harold 확정 방침 (2026-07-01 밤 명시 — 이대로만 진행)
 **구매 full sync가 다 들어올 때까지 기다린다(중간에 절대 멈추지 않음) → 구매 완료 후 전체 데이터 삭제 → 처음부터 재동기화 → custom 검증.**

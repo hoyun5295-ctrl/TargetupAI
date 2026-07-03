@@ -33,8 +33,6 @@ import {
   saveCafe24ByoCredentials,
   getCafe24ByoCredentials,
 } from '../utils/cafe24-client';
-import { isCdpEnabledForPlan } from '../utils/cdp-auth';
-
 const router = Router();
 
 // ════════════════════════════════════════════════════════════════════
@@ -150,6 +148,27 @@ router.post('/webhook', json({ limit: '1mb', verify: (req: any, _res, buf) => { 
 });
 
 // ════════════════════════════════════════════════════════════════════
+// 앱 실행 랜딩 파라미터 실측 로그 (A-0) — 공개(인증 전).
+//   카페24 "앱 실행" 시 App URL이 붙이는 쿼리(mall_id/user_id/timestamp/hmac 등)를
+//   PM2 로그로 캡처해 확정용. 저장/부작용 없음(로그만). 공개 라우터라 자체 json 파서 필수
+//   (전역 파서 앞 마운트 대비 — LESSONS_BACKEND 2026-07-02 공개 라우터 body 유실 교훈).
+// ════════════════════════════════════════════════════════════════════
+router.post('/launch-log', json({ limit: '16kb' }), (req: Request, res: Response) => {
+  try {
+    const src = { ...(req.body || {}), ...(req.query || {}) } as Record<string, unknown>;
+    const WHITELIST = ['mall_id', 'user_id', 'user_name', 'user_type', 'shop_no', 'timestamp', 'hmac', 'lang', 'nation', 'is_multi_shop', 'multi_shop_no', 'path', 'referer'];
+    const picked: Record<string, string> = {};
+    for (const k of WHITELIST) {
+      if (src[k] !== undefined && src[k] !== null) picked[k] = String(src[k]).slice(0, 200);
+    }
+    console.log('[Cafe24 Launch] 앱 실행 파라미터 실측:', JSON.stringify(picked));
+    return res.json({ success: true });
+  } catch {
+    return res.json({ success: true }); // 로그 실패는 랜딩 방해 X
+  }
+});
+
+// ════════════════════════════════════════════════════════════════════
 // 회사 admin 인증 — authorize / callback / status / disconnect
 // ════════════════════════════════════════════════════════════════════
 
@@ -167,14 +186,10 @@ router.get('/oauth/authorize', async (req: Request, res: Response) => {
     if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
     if (userType !== 'company_admin') return res.status(403).json({ success: false, error: '카페24 연동은 회사 관리자만 가능합니다.' });
 
-    const cdpEnabled = await isCdpEnabledForPlan(companyId);
-    if (!cdpEnabled) {
-      return res.status(403).json({
-        success: false,
-        error: '카페24 연동은 유료 요금제 가입 후 이용 가능합니다.',
-        code: 'PLAN_FEATURE_LOCKED',
-      });
-    }
+    // ★ 2026-07-03 A-3(Harold 확정): FREE(미가입) 계정도 카페24 OAuth 연동 "시작"을 허용한다.
+    //   심사위원 동선 = 신규 가입 FREE 상태로 앱 실행 → 여기서 403이면 심사 반려 위험.
+    //   요금제 게이팅(isCdpEnabledForPlan)은 SDK/webhook ingest 경로(cdp-auth)에 그대로 유지 — 연동 시작만 개방.
+    //   남용은 이벤트 ingest 월 한도(isOverMonthlyCdpLimit)가 별도 통제 + 연동에는 로그인·OAuth 동의가 필수라 무해.
 
     const mallId = String(req.query.mall_id || '').trim().toLowerCase();
     if (!mallId || !/^[a-z0-9_-]+$/i.test(mallId)) {

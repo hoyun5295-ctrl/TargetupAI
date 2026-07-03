@@ -1991,8 +1991,8 @@ client.newCall(req).execute()`}</pre>
               </div>
             </div>
             {(() => {
-              const snippet = `<script src="https://app.hanjul.ai/sdk/v0.3.7/hanjul.min.js" data-hjl-key="${usage.public_key}" async></script>`;
-              const appSnippet = `<script src="https://app.hanjul.ai/sdk/v0.3.7/hanjul.min.js" data-hjl-key="${usage.public_key}" data-hjl-platform="app" async></script>`;
+              const snippet = `<script src="https://app.hanjul.ai/sdk/v0.3.8/hanjul.min.js" data-hjl-key="${usage.public_key}" async></script>`;
+              const appSnippet = `<script src="https://app.hanjul.ai/sdk/v0.3.8/hanjul.min.js" data-hjl-key="${usage.public_key}" data-hjl-platform="app" async></script>`;
               return (
                 <>
                   <div className="text-xs font-medium text-white/70 mb-1.5">웹 자사몰 — &lt;head&gt;에 붙여넣기</div>
@@ -2014,7 +2014,7 @@ client.newCall(req).execute()`}</pre>
                 </>
               );
             })()}
-            <div className="text-[10px] text-white/30 italic mt-2">Data source — app.hanjul.ai/sdk/v0.3.7</div>
+            <div className="text-[10px] text-white/30 italic mt-2">Data source — app.hanjul.ai/sdk/v0.3.8</div>
           </div>
         )}
 

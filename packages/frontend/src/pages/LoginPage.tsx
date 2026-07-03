@@ -104,7 +104,14 @@ export default function LoginPage() {
         // ★ 2026-07-03 에이전트(QTmsg) 전용 회사 — 카카오&RCS 랜딩 (대시보드 차단)
         navigate('/kakao-rcs');
       } else {
-        navigate('/dashboard');
+        // ★ 2026-07-03 카페24 앱 실행 랜딩 복귀 — 비로그인으로 /cafe24/launch 진입 시 저장한 mall_id로 복귀
+        const cafe24Mall = sessionStorage.getItem('cafe24_return_mall_id');
+        if (cafe24Mall) {
+          sessionStorage.removeItem('cafe24_return_mall_id');
+          navigate(`/cafe24/launch?mall_id=${encodeURIComponent(cafe24Mall)}`);
+        } else {
+          navigate('/dashboard');
+        }
       }
     } catch (err: any) {
       const status = err.response?.status;
@@ -172,7 +179,12 @@ export default function LoginPage() {
       login({ ...tempUser, mustChangePassword: false }, tempToken);
       if (tempUser.userType === 'super_admin') { navigate('/admin'); }
       else if (tempUser.company?.usageType === 'agent') { navigate('/kakao-rcs'); } // ★ 2026-07-03 에이전트 전용 랜딩
-      else { navigate('/dashboard'); }
+      else {
+        // ★ 2026-07-03 카페24 앱 실행 랜딩 복귀
+        const cafe24Mall = sessionStorage.getItem('cafe24_return_mall_id');
+        if (cafe24Mall) { sessionStorage.removeItem('cafe24_return_mall_id'); navigate(`/cafe24/launch?mall_id=${encodeURIComponent(cafe24Mall)}`); }
+        else { navigate('/dashboard'); }
+      }
     } catch (err: any) { setPwError('비밀번호 변경에 실패했습니다.'); }
     finally { setPwLoading(false); }
   };

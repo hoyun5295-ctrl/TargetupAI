@@ -14,14 +14,45 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
-import { execFile, spawn } from 'node:child_process';
+import { execFile, execSync, spawn, spawnSync } from 'node:child_process';
 import type { ApiClient } from '../api/client';
 import type { VersionResponse } from '../types/api';
 import { getLogger } from '../logger';
+import {
+  buildWindowsUpdateBat,
+  buildWindowsUpdateLauncher,
+  buildLinuxUpdateSh,
+  buildLinuxUpdateLauncher,
+} from './scripts';
 
 const logger = getLogger('updater');
 
 const isWindows = process.platform === 'win32';
+
+/** schtasks /ST용 HH:MM (지금+mins분). /Run으로 즉시 실행하므로 실제 트리거 시각은 무의미하나 유효 포맷 필요. */
+export function hhmmMinutesFromNow(mins: number): string {
+  const d = new Date(Date.now() + mins * 60_000);
+  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+}
+
+/**
+ * 기동 시 자기교체 잔여물 정리 (D-4 안전망).
+ * 원자적 move/mv로 exe 부재 순간은 없지만, 교체 bat이 정리 전에 죽으면 .old/.new가 남을 수 있다.
+ * 현재 exe가 실행 중(=이 코드가 도는 것 자체가 증거)이므로 .old/.new는 안전하게 제거 가능.
+ */
+export function selfHealBinaries(exePath: string = process.execPath): void {
+  for (const suffix of ['.old', '.new']) {
+    const p = exePath + suffix;
+    try {
+      if (fs.existsSync(p)) {
+        fs.unlinkSync(p);
+        logger.info(`자기교체 잔여물 정리: ${path.basename(p)}`);
+      }
+    } catch (e: any) {
+      logger.warn(`잔여물 정리 실패(${path.basename(p)}): ${e?.message || e}`);
+    }
+  }
+}
 
 export class UpdateManager {
   private apiClient: ApiClient;
@@ -55,8 +86,24 @@ export class UpdateManager {
       return false;
     }
 
-    // 현재 버전과 동일하면 스킵
+    // D-5①: 빈/undefined 버전 진입 차단.
+    //   서버 응답 파싱 정합이 깨져 latestVersion이 비면 이후 다운로드 URL/버전이 전부 무의미하고,
+    //   동일버전 가드(undefined===current=false)가 무력화돼 force 재시도 루프가 생긴다.
+    if (!versionInfo.latestVersion) {
+      logger.warn('latestVersion이 비어 있음 — 업데이트 스킵 (서버 /version 응답 파싱 정합 확인 필요)');
+      return false;
+    }
+
+    // 현재 버전과 동일하면 스킵 (force여도 동일버전 재교체 방지)
     if (versionInfo.latestVersion === this.currentVersion) {
+      return false;
+    }
+
+    // D-5②/오배포 차단(spec 3-3): checksum 미제공 시 업데이트 거부.
+    //   티어 오매핑(win-modern 슬롯에 win-legacy 바이너리 등) 브릭을 checksum 불일치로 막으려면
+    //   checksum이 반드시 있어야 한다. 없으면 검증 자체가 불가하므로 교체하지 않는다.
+    if (!(versionInfo as any).checksum) {
+      logger.error('릴리즈 checksum 미제공 — 오배포/무결성 검증 불가로 업데이트 거부');
       return false;
     }
 
@@ -74,16 +121,14 @@ export class UpdateManager {
       // 1. 다운로드
       const downloadPath = await this.download(versionInfo);
 
-      // 2. 체크섬 검증 (서버가 checksum 제공한 경우)
-      if ((versionInfo as any).checksum) {
-        const valid = await this.verifyChecksum(downloadPath, (versionInfo as any).checksum);
-        if (!valid) {
-          logger.error('체크섬 검증 실패 — 업데이트 취소');
-          this.cleanup(downloadPath);
-          return false;
-        }
-        logger.info('체크섬 검증 통과 ✓');
+      // 2. 체크섬 검증 (checksum은 위에서 필수화 — 항상 검증)
+      const valid = await this.verifyChecksum(downloadPath, (versionInfo as any).checksum);
+      if (!valid) {
+        logger.error('체크섬 검증 실패 — 업데이트 취소');
+        this.cleanup(downloadPath);
+        return false;
       }
+      logger.info('체크섬 검증 통과');
 
       // 3. OS별 교체 + 재시작
       if (isWindows) {
@@ -180,88 +225,55 @@ export class UpdateManager {
 
   private async applyUpdateWindows(newBinPath: string, newVersion: string): Promise<void> {
     const currentExePath = process.execPath;
-    const currentExeName = path.basename(currentExePath);
-    const backupExePath = currentExePath + '.old';
     const batPath = path.join(this.tempDir, 'update.bat');
 
     const isService = process.argv.includes('--service') ||
                       process.env.RUNNING_AS_SERVICE === 'true';
 
-    // 2026-06-18: Windows 서비스 → 작업 스케줄러로 교체됨에 따라 net stop/start → schtasks
-    const stopCmd = isService
-      ? 'schtasks /End /TN SyncAgent >nul 2>&1'
-      : `taskkill /PID ${process.pid} /F >nul 2>&1`;
-
-    const startCmd = isService
-      ? 'schtasks /Run /TN SyncAgent'
-      : `start "" "${currentExePath}"`;
-
-    // 콘솔 bat는 전부 ASCII (2008 R2 cp949 콘솔에서 한글 bat는 명령 파싱이 깨져 실행 실패 — 2026-06-19 실측 확인)
-    const batContent = `@echo off
-chcp 65001 >nul
-echo [Sync Agent Updater] Update start: ${this.currentVersion} to ${newVersion}
-
-REM 1. stop current process
-echo Waiting for process to stop (PID: ${process.pid})...
-${stopCmd}
-
-REM wait up to 30s
-set /a count=0
-:waitloop
-tasklist /FI "PID eq ${process.pid}" 2>nul | find "${process.pid}" >nul
-if errorlevel 1 goto :continue
-timeout /t 1 /nobreak >nul
-set /a count+=1
-if %count% geq 30 (
-  echo [ERROR] Process stop timeout - update canceled
-  exit /b 1
-)
-goto :waitloop
-
-:continue
-echo Process stopped
-
-REM 2. backup current exe
-if exist "${backupExePath}" del /f "${backupExePath}"
-echo Backup: ${currentExeName} to ${currentExeName}.old
-rename "${currentExePath}" "${currentExeName}.old"
-
-REM 3. apply new exe
-echo Applying new version...
-copy /y "${newBinPath}" "${currentExePath}" >nul
-if errorlevel 1 (
-  echo [ERROR] Copy failed - rolling back
-  rename "${backupExePath}" "${currentExeName}"
-  exit /b 1
-)
-echo New version applied
-
-REM 4. restart agent
-echo Restarting agent...
-${startCmd}
-
-REM 5. cleanup (after 5s)
-timeout /t 5 /nobreak >nul
-if exist "${backupExePath}" del /f "${backupExePath}"
-if exist "${newBinPath}" del /f "${newBinPath}"
-
-echo [Sync Agent Updater] Update complete: v${newVersion}
-REM self-delete
-(goto) 2>nul & del "%~f0"
-`;
-
+    // 콘솔 모드는 예약작업 job이 없어 자기교체 문제가 없다 — taskkill/PID + start로 교체.
+    // 서비스 모드는 SyncAgent 작업 job 밖(별도 일회성 작업)에서 bat을 실행해야 job 자살을 피한다. [spike-1 실측]
+    // 양쪽 모두 원자적 스왑(copy→.new, 검증, .old 백업, move /y = NTFS 원자 교체)으로 exe 부재 순간을 없앤다(D-4).
+    const batContent = buildWindowsUpdateBat({
+      currentVersion: this.currentVersion,
+      newVersion,
+      currentExePath,
+      newBinPath,
+      pid: process.pid,
+      ...(isService ? {} : {
+        stopCmd: `taskkill /PID ${process.pid} /F`,
+        restartCmd: `start "" "${currentExePath}"`,
+      }),
+    });
+    // 콘솔 bat는 전부 ASCII (2008 R2 cp949 콘솔에서 한글 bat는 파싱이 깨져 실행 실패 — 2026-06-19 실측).
     fs.writeFileSync(batPath, batContent, { encoding: 'utf8' });
     logger.info(`업데이트 스크립트 생성: ${batPath}`);
 
-    logger.info('업데이트 스크립트 실행 — Agent가 곧 재시작됩니다...');
+    if (isService) {
+      // 별도 일회성 작업(SyncAgentUpdate)으로 실행 — SyncAgent 작업 job 밖이라 /End에 안 죽는다.
+      // 등록·실행을 동기로 확인한 뒤에만 process.exit — 실패 시 에이전트를 유지(교체 미실행+종료=죽은 박스 방지).
+      const startHHMM = hhmmMinutesFromNow(3);
+      const { createCmd, runCmd } = buildWindowsUpdateLauncher(batPath, undefined, startHHMM);
+      try {
+        try { execSync('schtasks /Delete /TN SyncAgentUpdate /F', { stdio: 'ignore' }); } catch { /* 잔존 없으면 무시 */ }
+        execSync(createCmd, { stdio: 'ignore' });
+        execSync(runCmd, { stdio: 'ignore' });
+      } catch (e: any) {
+        logger.error(`업데이트 작업 등록/실행 실패 — 교체 취소, 에이전트 유지: ${e?.message || e}`);
+        return;
+      }
+      logger.info('업데이트 작업(SyncAgentUpdate) 실행 — Agent 종료 후 새 버전으로 교체됩니다');
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      process.exit(0);
+    }
+
+    // 콘솔 모드: detached 실행 (job 자살 없음)
+    logger.info('업데이트 스크립트 실행(콘솔) — Agent 재시작 예정');
     const child = execFile('cmd.exe', ['/c', batPath], {
       detached: true,
       windowsHide: true,
       stdio: 'ignore',
     } as any);
     child.unref();
-
-    logger.info(`Agent 종료 — v${newVersion}으로 재시작 예정`);
     await new Promise(resolve => setTimeout(resolve, 1000));
     process.exit(0);
   }
@@ -270,87 +282,62 @@ REM self-delete
 
   private async applyUpdateLinux(newBinPath: string, newVersion: string): Promise<void> {
     const currentBinPath = process.execPath;
-    const currentBinName = path.basename(currentBinPath);
-    const backupBinPath = currentBinPath + '.old';
     const shPath = path.join(this.tempDir, 'update.sh');
 
     // systemd 서비스로 실행 중인지 확인
     const isService = process.env.RUNNING_AS_SERVICE === 'true' ||
                       process.env.INVOCATION_ID !== undefined; // systemd가 설정하는 환경변수
 
-    const serviceName = 'sync-agent';
-
-    const stopCmd = isService
-      ? `systemctl stop ${serviceName} 2>/dev/null || true`
-      : `kill ${process.pid} 2>/dev/null || true`;
-
-    const startCmd = isService
-      ? `systemctl start ${serviceName}`
-      : `nohup "${currentBinPath}" > /dev/null 2>&1 &`;
-
-    const shContent = `#!/bin/bash
-echo "[Sync Agent Updater] 업데이트 시작: ${this.currentVersion} → ${newVersion}"
-
-# 1. 현재 프로세스 종료
-echo "프로세스 종료 대기 중 (PID: ${process.pid})..."
-${stopCmd}
-
-# 종료 대기 (최대 30초)
-count=0
-while kill -0 ${process.pid} 2>/dev/null; do
-  sleep 1
-  count=$((count + 1))
-  if [ $count -ge 30 ]; then
-    echo "[ERROR] 프로세스 종료 타임아웃 — 업데이트 취소"
-    exit 1
-  fi
-done
-echo "프로세스 종료 확인"
-
-# 2. 현재 바이너리 백업
-rm -f "${backupBinPath}"
-echo "백업: ${currentBinName} → ${currentBinName}.old"
-mv "${currentBinPath}" "${backupBinPath}"
-
-# 3. 새 바이너리 적용
-echo "새 버전 적용 중..."
-cp "${newBinPath}" "${currentBinPath}"
-if [ $? -ne 0 ]; then
-  echo "[ERROR] 복사 실패 — 롤백 진행"
-  mv "${backupBinPath}" "${currentBinPath}"
-  exit 1
-fi
-chmod 755 "${currentBinPath}"
-echo "새 버전 적용 완료"
-
-# 4. Agent 재시작
-echo "Agent 재시작 중..."
-${startCmd}
-
-# 5. 정리 (5초 후)
-sleep 5
-rm -f "${backupBinPath}"
-rm -f "${newBinPath}"
-
-echo "[Sync Agent Updater] 업데이트 완료: v${newVersion}"
-
-# sh 자기 삭제
-rm -f "$0"
-`;
-
+    const shContent = buildLinuxUpdateSh({
+      currentVersion: this.currentVersion,
+      newVersion,
+      currentBinPath,
+      newBinPath,
+      pid: process.pid,
+      ...(isService ? {} : {
+        stopCmd: `kill ${process.pid}`,
+        startCmd: `nohup "${currentBinPath}" > /dev/null 2>&1 &`,
+      }),
+    });
     fs.writeFileSync(shPath, shContent, { encoding: 'utf8', mode: 0o755 });
     logger.info(`업데이트 스크립트 생성: ${shPath}`);
 
-    logger.info('업데이트 스크립트 실행 — Agent가 곧 재시작됩니다...');
+    // 서비스 + systemd-run 가용 → transient 서비스로 실행(서비스 cgroup/ProtectSystem 밖). [spike-2 실측]
+    if (isService && this.hasCommand('systemd-run')) {
+      const { cmd, args } = buildLinuxUpdateLauncher(shPath);
+      try {
+        try { execSync('systemctl reset-failed sync-agent-update', { stdio: 'ignore' }); } catch { /* 잔존 없으면 무시 */ }
+        const r = spawnSync(cmd, args, { stdio: 'ignore' });
+        if (r.error) throw r.error;
+        if (typeof r.status === 'number' && r.status !== 0) throw new Error(`systemd-run exit ${r.status}`);
+      } catch (e: any) {
+        logger.error(`systemd-run 실행 실패 — 교체 취소, 에이전트 유지: ${e?.message || e}`);
+        return;
+      }
+      logger.info('업데이트(systemd-run transient 서비스) 실행 — Agent 종료 후 교체됩니다');
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      process.exit(0);
+    }
+
+    // systemd-run 부재 또는 콘솔 모드: detached 실행
+    logger.info('업데이트 스크립트 실행(detached) — Agent 재시작 예정');
     const child = spawn('/bin/bash', [shPath], {
       detached: true,
       stdio: 'ignore',
     });
     child.unref();
-
-    logger.info(`Agent 종료 — v${newVersion}으로 재시작 예정`);
     await new Promise(resolve => setTimeout(resolve, 1000));
     process.exit(0);
+  }
+
+  // ─── 유틸: 명령 존재 확인 ─────────────────────────────
+  private hasCommand(cmd: string): boolean {
+    try {
+      execSync(isWindows ? `where ${cmd}` : `command -v ${cmd}`, { stdio: 'ignore' });
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   // ─── 유틸 ─────────────────────────────────────────────

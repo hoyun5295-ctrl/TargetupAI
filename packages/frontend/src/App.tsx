@@ -26,6 +26,8 @@ import AlimtalkSendersPage from './pages/AlimtalkSendersPage';
 import AiOperatorPage from './pages/AiOperatorPage';
 // ★ D172 (2026-05-19): 한줄로 CDP — 자사몰 → 한줄로 sync 설정 페이지
 import CdpSettingsPage from './pages/CdpSettingsPage';
+// ★ 2026-07-03: 카페24 앱 실행 랜딩 (심사위원 동선 — 공개 라우트)
+import Cafe24LaunchPage from './pages/Cafe24LaunchPage';
 // ★ D174 (2026-05-19): Step 1 — 성과 리포트 + AI 다음 캠페인 추천
 import PerformancePage from './pages/PerformancePage';
 // ★ D175-A (2026-05-19): Web Push + In-app Message 채널
@@ -274,7 +276,10 @@ function App() {
         <Route
           path="/"
           element={
-            isAuthenticated ? (
+            // ★ 2026-07-03: 과거 App URL(루트)로 mall_id 쿼리 진입 대비 — 쿼리 보존해 카페24 랜딩으로
+            new URLSearchParams(window.location.search).get('mall_id') ? (
+              <Navigate to={`/cafe24/launch${window.location.search}`} replace />
+            ) : isAuthenticated ? (
               user?.userType === 'super_admin' ? (
                 <Navigate to="/admin" replace />
               ) : isAgentOnlyCompany(user) ? (
@@ -519,6 +524,8 @@ function App() {
         <Route path="/pricing" element={<PrivateRoute><PricingPage /></PrivateRoute>} />
         <Route path="/privacy" element={<PrivacyPage />} />
         <Route path="/terms" element={<TermsPage />} />
+        {/* ★ 2026-07-03 카페24 앱 실행 랜딩 (심사위원 동선) — 공개, 페이지가 로그인 3분기 판별 */}
+        <Route path="/cafe24/launch" element={<Cafe24LaunchPage />} />
         {/* D184: 이니시스 결제 결과 fallback (인증 X — 새 창 자동 close 차단 시 표시) */}
         <Route path="/payment/result" element={<PaymentResultPage />} />
 

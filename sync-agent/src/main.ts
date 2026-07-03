@@ -21,6 +21,8 @@
  */
 
 import dotenv from 'dotenv';
+import os from 'node:os';
+import { resolveSetupMode } from './setup/setup-mode';
 dotenv.config();
 
 const args = process.argv;
@@ -81,9 +83,8 @@ else if (args.includes('--setup-web')) {
 // ─── 설치 마법사 (OS 자동 감지) ──────────────────────────
 
 else if (args.includes('--setup')) {
-  const isWindows = process.platform === 'win32';
-
-  if (isWindows) {
+  // old Windows(IE8 등 구형 브라우저)·비Windows는 웹 마법사가 안 뜨므로 CLI 마법사로 라우팅.
+  if (resolveSetupMode(process.platform, os.release()) === 'web') {
     console.log('[SETUP] 설치 마법사 (웹 UI) 모드로 실행합니다...');
     import('./setup/server').then(({ startSetupWizard }) => {
       startSetupWizard({ autoLaunchAgent: true });
@@ -121,9 +122,8 @@ else {
       console.log('==================================================');
       console.log('');
 
-      const isWindows = process.platform === 'win32';
-
-      if (isWindows) {
+      // old Windows(IE8 등)·비Windows는 웹 마법사가 안 뜨므로 CLI 마법사로 라우팅.
+      if (resolveSetupMode(process.platform, os.release()) === 'web') {
         import('./setup/server').then(({ startSetupWizard }) => {
           startSetupWizard({ autoLaunchAgent: true });
         });

@@ -49,6 +49,9 @@ const DEFAULT_SCOPE = [
   'mall.read_order',
   'mall.read_product',
   'mall.read_application',
+  // ★ 2026-07-03 B-1: scripttags(SDK 자동삽입 — 행동 수집 개통)는 앱(Application) 쓰기 권한 필요.
+  //   개발자센터 앱 권한은 이미 앱 읽기+쓰기 확보 상태 → scope만 추가. 기존 연동 몰은 재동의 필요.
+  'mall.write_application',
 ].join(',');
 
 const TOKEN_REFRESH_MARGIN_MS = 5 * 60 * 1000; // 만료 5분 전 갱신
