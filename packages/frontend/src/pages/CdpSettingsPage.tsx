@@ -32,7 +32,7 @@ import {
 } from 'recharts';
 import {
   ArrowLeft, Database, Brain, Loader2, RefreshCw, Sparkles, Users, AlertTriangle,
-  Activity, Info, Link2, Store, Server,
+  Activity, Info, Link2, Store, Server, ShoppingBag, Boxes, Cloud, Palette, LayoutTemplate, Package, Blocks,
   KeyRound, Copy, Check, Unlink, MousePointerClick, AlertCircle, ShoppingCart, Code2, X,
   Eye, EyeOff, ExternalLink, ChevronDown, ChevronUp,
 } from 'lucide-react';
@@ -309,20 +309,20 @@ const BACKEND_ID_TO_KEY: Record<string, ProviderKey> = {
 // 카드 렌더 단일 모델 — 백엔드 로드 성공 시 available/스켈레톤을 반영, 실패 시 하드코딩 5종 폴백(빈 화면 방지).
 type RenderProviderCard = { key: string; name: string; desc: string; full?: boolean; available: boolean; modalKey: ProviderKey | null };
 
-// 업체별 브랜드 심볼 — 실제 로고(외부 이미지) 대신 브랜드색 배지 + 약칭으로 구분. 컴팩트 그리드용.
-function providerBrand(key: string, name: string): { mark: string; bg: string } {
+// 업체별 브랜드 아이콘 — 실제 로고(외부 이미지) 대신 lucide SVG 아이콘 + 브랜드색 그라데이션 배지로 구분.
+function providerBrand(key: string, name: string): { Icon: typeof Store; badge: string } {
   const n = (name || '').toLowerCase();
-  if (key === 'cafe24' || n.includes('카페24') || n.includes('cafe24')) return { mark: '24', bg: 'bg-[#1f6feb]' };
-  if (key === 'naver' || n.includes('네이버') || n.includes('naver')) return { mark: 'N', bg: 'bg-[#03c75a]' };
-  if (key === 'godo' || n.includes('고도몰')) return { mark: '고', bg: 'bg-[#2563eb]' };
-  if (key === 'gabia' || n.includes('가비아')) return { mark: '가', bg: 'bg-[#00a3a3]' };
-  if (n.includes('shopify')) return { mark: 'S', bg: 'bg-[#7ab55c]' };
-  if (n.includes('메이크샵') || n.includes('makeshop')) return { mark: 'M', bg: 'bg-[#e0483d]' };
-  if (n.includes('imweb') || n.includes('아임웹')) return { mark: 'iW', bg: 'bg-[#4f46e5]' };
-  if (n.includes('식스샵') || n.includes('sixshop') || n.includes('six')) return { mark: '6', bg: 'bg-[#0f172a]' };
-  if (n.includes('woo')) return { mark: 'W', bg: 'bg-[#7f54b3]' };
-  if (key === 'custom') return { mark: '', bg: 'bg-gradient-to-br from-violet-500 to-fuchsia-600' };
-  return { mark: (name.trim()[0] || '?').toUpperCase(), bg: 'bg-slate-600' };
+  if (key === 'cafe24' || n.includes('카페24') || n.includes('cafe24')) return { Icon: Store, badge: 'from-blue-500 to-blue-600 shadow-blue-500/25' };
+  if (key === 'naver' || n.includes('네이버') || n.includes('naver')) return { Icon: ShoppingBag, badge: 'from-green-500 to-emerald-600 shadow-green-500/25' };
+  if (key === 'godo' || n.includes('고도몰')) return { Icon: Boxes, badge: 'from-sky-500 to-indigo-600 shadow-sky-500/25' };
+  if (key === 'gabia' || n.includes('가비아')) return { Icon: Cloud, badge: 'from-teal-500 to-cyan-600 shadow-teal-500/25' };
+  if (n.includes('shopify')) return { Icon: ShoppingCart, badge: 'from-lime-500 to-green-600 shadow-lime-500/25' };
+  if (n.includes('메이크샵') || n.includes('makeshop')) return { Icon: Palette, badge: 'from-rose-500 to-red-600 shadow-rose-500/25' };
+  if (n.includes('imweb') || n.includes('아임웹')) return { Icon: LayoutTemplate, badge: 'from-indigo-500 to-violet-600 shadow-indigo-500/25' };
+  if (n.includes('식스샵') || n.includes('sixshop') || n.includes('six')) return { Icon: Package, badge: 'from-slate-500 to-slate-700 shadow-slate-500/25' };
+  if (n.includes('woo')) return { Icon: Blocks, badge: 'from-purple-500 to-fuchsia-600 shadow-purple-500/25' };
+  if (key === 'custom') return { Icon: Database, badge: 'from-violet-500 to-fuchsia-600 shadow-violet-500/25' };
+  return { Icon: Database, badge: 'from-slate-500 to-slate-700 shadow-slate-500/25' };
 }
 
 // ════════════════════════════════════════════════════════════════════
@@ -997,16 +997,16 @@ export default function CdpSettingsPage() {
           </div>
         )}
 
-        {/* 자사몰 선택 그리드 — 업체별 브랜드 심볼 + 컴팩트 3열(모바일 2열) */}
+        {/* 자사몰 선택 그리드 — 업체별 브랜드 아이콘 + 아이콘·이름·설명·상태를 좌우로 채운 카드 */}
         {!cdpLocked && (
-          <div className="grid grid-cols-2 lg:grid-cols-3 gap-2.5">
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
             {providerCards.map((p) => {
               const connected = p.modalKey === 'cafe24' ? !!cafe24Status?.connected
                 : p.modalKey === 'naver' ? !!naverStatus?.connected
                 : p.modalKey === 'godo' ? !!godoStatus?.connected
                 : (p.modalKey === 'custom' || p.modalKey === 'gabia') ? !!customInfo?.hasSecret
                 : false;
-              const brand = providerBrand(p.key, p.name);
+              const { Icon, badge } = providerBrand(p.key, p.name);
               const clickable = p.available && p.modalKey !== null;
               const label = p.key === 'custom' ? '자체 호스팅' : p.name;
               return (
@@ -1016,21 +1016,20 @@ export default function CdpSettingsPage() {
                   disabled={!clickable}
                   onClick={clickable ? () => setConnectProvider(p.modalKey as ProviderKey) : undefined}
                   title={p.name}
-                  className={`text-left p-3 rounded-xl border flex items-center gap-2.5 transition-colors ${connected ? 'bg-emerald-500/[0.07] border-emerald-400/25' : 'bg-white/5 border-white/10'} ${clickable ? 'hover:bg-white/10 hover:border-violet-400/40 cursor-pointer' : 'opacity-50 cursor-default'}`}
+                  className={`group flex items-center gap-3.5 p-4 rounded-2xl border text-left transition-all duration-200 ${connected ? 'bg-emerald-500/[0.06] border-emerald-400/25' : 'bg-white/[0.04] border-white/10'} ${clickable ? 'cursor-pointer hover:border-violet-400/40 hover:bg-white/[0.07] hover:-translate-y-0.5' : 'opacity-45 cursor-default'}`}
                 >
-                  <div className={`w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0 text-white font-bold text-[13px] shadow-sm ${brand.bg}`}>
-                    {brand.mark || <Database className="w-4 h-4" />}
+                  <div className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 text-white shadow-lg bg-gradient-to-br ${badge}`}>
+                    <Icon className="w-5 h-5" />
                   </div>
                   <div className="flex-1 min-w-0">
-                    <div className="text-[13px] font-semibold text-white truncate">{label}</div>
-                    <div className="mt-0.5">
-                      {!p.available
-                        ? <span className="text-[10px] px-1.5 py-0.5 rounded bg-white/10 text-white/40 font-medium">곧 출시</span>
-                        : connected
-                          ? <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-300 font-medium">연동됨</span>
-                          : <span className="text-[10px] px-1.5 py-0.5 rounded bg-violet-500/20 text-violet-200 font-medium">연동하기</span>}
-                    </div>
+                    <div className="text-sm font-semibold text-white truncate">{label}</div>
+                    <div className="text-[11px] text-white/45 truncate mt-0.5">{p.desc}</div>
                   </div>
+                  {!p.available
+                    ? <span className="flex-shrink-0 text-[10px] px-2 py-1 rounded-full bg-white/5 text-white/40 border border-white/10 font-medium">곧 출시</span>
+                    : connected
+                      ? <span className="flex-shrink-0 text-[10px] px-2 py-1 rounded-full bg-emerald-500/15 text-emerald-300 border border-emerald-400/25 font-medium inline-flex items-center gap-1"><Check className="w-3 h-3" />연동됨</span>
+                      : <span className="flex-shrink-0 text-[10px] px-2 py-1 rounded-full bg-violet-500/15 text-violet-200 border border-violet-400/25 font-medium">연동하기</span>}
                 </button>
               );
             })}

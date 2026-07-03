@@ -177,6 +177,7 @@ ALTER TABLE sync_releases ADD COLUMN IF NOT EXISTS checksum VARCHAR(255);
 > - **★ schtasks 함정(2008 R2 VM E2E가 잡음)**: `schtasks /TR "C:\...\x.bat"`(bat 경로만)은 2008 R2에서 작업이 bat을 **실행하지 않는다**. 반드시 `/TR "cmd /c <bat>"`. 설치 경로 공백 없음(C:\SyncAgent) 전제.
 > - **버전 1.6.0**, 5티어 재빌드 완료, 티어별 sha256 = 릴리즈 `sync_releases.checksum`. isae 1.5.7은 동결(자동 안 밈), 필요 시 수동 1회 교체.
 > - **설치 마법사 라우팅 동반 수정**: 2008 R2 IE8 웹 설치 마법사 미동작 → `resolveSetupMode`(`src/setup/setup-mode.ts`)로 old Windows(release major<10 = 2008 R2/7/8/8.1/2012/2012 R2) 감지 시 `--setup`·설정없음 진입을 CLI 마법사(`--setup-cli`)로 자동 라우팅. modern(10/11/2016+) 웹 유지. `src/main.ts` 2경로 적용, 유닛 6. 설계서 `docs/superpowers/specs/2026-07-03-sync-agent-updater-selfreplace-design.md`.
+> - **★ 릴리즈 배포 안전(치명적)**: 5티어 무선용 서버 보완 = `POST /api/admin/sync/releases` download_url 티어 인코딩(`buildReleaseDownloadUrl` → `/api/sync/download/<version>-<tier>`) + `npm run upload:releases`(exe → `agent-releases/sync-agent-<version>-<tier>.exe`). **주의: 1.5.x→1.6.0 무선 교체는 불가**(교체를 1.5.x의 깨진 updater가 수행) → 기존 1.5.x 박스 있는 티어에 1.6.0 **active 등록 금지**(win-legacy=isae 1.5.7 가동 중 → 등록 시 감지→깨진 자가교체→정지 사고 재현). 등록은 다음 버전(1.6.1)부터(박스가 1.6.0 된 뒤). **파일 업로드(zip·exe)는 안전** — 자동교체 트리거는 파일이 아니라 sync_releases 테이블(`/version`)뿐. 2026-07-03 세션: upload 완료, sync_releases 등록은 의도적 보류, isae 무손.
 
 
 **증상**: 서버에 새 exe 릴리즈 등록 후, 박스가 정각에 `GET /version`으로 새 버전 감지 → `/download` 200으로 exe 전량(103MB) 수신까지 무선으로 성공. 그런데 `current_version`이 새 버전으로 안 올라오고 박스가 멈춤(heartbeat 정지). tasklist 프로세스 없음, 예약작업 상태=준비(마지막 결과 0=정상종료).

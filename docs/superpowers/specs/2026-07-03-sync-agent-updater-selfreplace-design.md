@@ -179,3 +179,5 @@ rename "<exe>.new" "<exe>"            :: 새것 자리로 (여기 실패 시 .ol
 - **티어 게이트**: win-legacy 실 2008 R2 VM E2E PASS / linux-modern·linux-legacy Docker systemd E2E PASS(실 exe, transient, ProtectSystem 탈출, 원자 mv) / win-mid·win-modern은 동일 schtasks cmd/c 메커니즘 + 유닛으로 합성 PASS. 실패주입=원자 스왑 설계로 브릭 불가, 오배포거부=checksum 필수 가드 유닛.
 - **잔여(Harold 서버)**: 5티어 exe 호스팅 + sync_releases 등록(version 1.6.0·tier·download_url·checksum·force_update=false) + 옛 결함본 is_active=false. isae 1.5.7 동결.
 - **설치 마법사 라우팅 동반 수정(같은 1.6.0에 포함)**: 2008 R2 IE8 웹 마법사 미동작 → `resolveSetupMode`(`src/setup/setup-mode.ts`)로 old Windows(major<10)는 `--setup`·설정없음 진입을 CLI 마법사로 자동 라우팅(유닛 6), modern(10+) 웹 유지. `src/main.ts` 2경로 적용.
+- **서버 릴리즈 보완(5티어 무선)**: `POST /api/admin/sync/releases` download_url 티어 인코딩(`buildReleaseDownloadUrl`, agent-build-tiers.ts) + `npm run upload:releases`. 티어별 exe = 서버 `agent-releases/sync-agent-<version>-<tier>.exe`.
+- **★ 배포 안전(치명)**: 1.5.x→1.6.0 무선 불가(교체 주체가 1.5.x 깨진 updater) → 해당 티어 1.5.x 박스 있는 채로 1.6.0 active 등록 금지(win-legacy=isae → 등록 시 사고 재현). 파일 업로드는 안전(트리거는 sync_releases뿐). 등록은 1.6.1부터. **세션 종료 상태**: upload 완료 / git push·sync_releases 등록 미완(등록 보류) / isae 무손.
