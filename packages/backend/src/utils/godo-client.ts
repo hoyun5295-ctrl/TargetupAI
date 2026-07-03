@@ -194,6 +194,13 @@ export async function verifyGodoConnection(companyId: string): Promise<void> {
   const start = new Date();
   start.setDate(start.getDate() - 1);
   await fetchGodoOrderPage({ key: creds.key, startDate: ymd(start), endDate: ymd(end), size: 1 });
+  // ★ 2026-07-03 검증 성공 시에만 active + connected_at 기록 (실제 효과 검증 후 연동 표시 — 6원칙 ②).
+  await query(
+    `UPDATE company_integrations
+     SET status = 'active', connected_at = COALESCE(connected_at, NOW()), updated_at = NOW()
+     WHERE company_id = $1::uuid AND provider = 'godo' AND mall_id = $2`,
+    [companyId, GODO_INTEGRATION_MALL_ID],
+  );
 }
 
 // ════════════════════════════════════════════════════════════════════
@@ -208,11 +215,11 @@ export async function saveGodoCredentials(companyId: string, key: string): Promi
       token_expires_at, scope, meta, webhook_secret, connected_at, status, created_at, updated_at
     ) VALUES (
       gen_random_uuid(), $1::uuid, 'godo', $2, '', '',
-      NULL, '', $3::jsonb, NULL, NULL, 'active', NOW(), NOW()
+      NULL, '', $3::jsonb, NULL, NULL, 'pending', NOW(), NOW()
     )
     ON CONFLICT (company_id, provider, mall_id) DO UPDATE SET
       meta = company_integrations.meta || EXCLUDED.meta,
-      status = 'active',
+      status = 'pending',
       updated_at = NOW()`,
     [companyId, GODO_INTEGRATION_MALL_ID, JSON.stringify({ godo_key: key })],
   );
@@ -246,9 +253,10 @@ export async function getGodoStatus(companyId: string): Promise<GodoStatus> {
   );
   if (r.rows.length === 0) return { connected: false };
   const row = r.rows[0];
-  const hasKey = !!(row.meta && (row.meta as { godo_key?: string }).godo_key);
+  // ★ 2026-07-03 검증된 연동만 connected — status='active' AND connected_at 존재(verify/backfill 성공 시에만 기록).
+  //   저장만 하고 검증 안 된 key(가짜 active·connected_at NULL)는 미연동으로 판정.
   return {
-    connected: hasKey && row.status !== 'revoked',
+    connected: row.status === 'active' && !!row.connected_at,
     status: row.status,
     connectedAt: row.connected_at ? new Date(row.connected_at).toISOString() : null,
   };
