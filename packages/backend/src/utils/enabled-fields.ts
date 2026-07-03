@@ -95,13 +95,18 @@ async function detectCustomFieldTypeFromSamples(
   fieldKey: string,
 ): Promise<'string' | 'number' | 'date'> {
   try {
+    // ★ 2026-07-03 성능: LIMIT이 DISTINCT 뒤에 걸리면 13만+ 전수 스캔 × 필드 수만큼 반복(고객DB 현황 수 초 지연).
+    //   내부 서브쿼리 LIMIT 200으로 스캔 조기 종료 → 그 표본에서 DISTINCT 20 (판정 정확도 동일).
     const sampleResult = await query(
-      `SELECT DISTINCT custom_fields->>'${fieldKey}' as val
-         FROM customers
-        WHERE ${scopeWhere}
-          AND custom_fields->>'${fieldKey}' IS NOT NULL
-          AND custom_fields->>'${fieldKey}' != ''
-        LIMIT 20`,
+      `SELECT DISTINCT val FROM (
+         SELECT custom_fields->>'${fieldKey}' as val
+           FROM customers
+          WHERE ${scopeWhere}
+            AND custom_fields->>'${fieldKey}' IS NOT NULL
+            AND custom_fields->>'${fieldKey}' != ''
+          LIMIT 200
+       ) sample_rows
+       LIMIT 20`,
       scopeParams,
     );
     const samples = sampleResult.rows
