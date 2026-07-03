@@ -165,7 +165,8 @@ if (smsOptIn === 'true') {
               recent_purchase_amount, purchase_count,
               CASE WHEN EXISTS (SELECT 1 FROM unsubscribes u WHERE u.user_id = $${unsubCaseIdx} AND u.phone = customers_unified.phone)
                    THEN false ELSE sms_opt_in END as sms_opt_in,
-              TO_CHAR(recent_purchase_date, 'YYYY-MM-DD') as recent_purchase_date, total_purchase_amount, custom_fields
+              TO_CHAR(recent_purchase_date, 'YYYY-MM-DD') as recent_purchase_date, total_purchase_amount, custom_fields,
+              created_at
        FROM customers_unified
        ${whereClause}
        ORDER BY created_at DESC
