@@ -176,7 +176,7 @@ ALTER TABLE sync_releases ADD COLUMN IF NOT EXISTS checksum VARCHAR(255);
 > - **restart 명령 동반 수정**: 예약작업/systemd 모델에서 `process.exit(0)`은 자동 재시작 안 됨(exit 0=정상종료) → 별도 작업(Win)·`systemctl restart` 위임(Linux)으로 실제 재기동.
 > - **★ schtasks 함정(2008 R2 VM E2E가 잡음)**: `schtasks /TR "C:\...\x.bat"`(bat 경로만)은 2008 R2에서 작업이 bat을 **실행하지 않는다**. 반드시 `/TR "cmd /c <bat>"`. 설치 경로 공백 없음(C:\SyncAgent) 전제.
 > - **버전 1.6.0**, 5티어 재빌드 완료, 티어별 sha256 = 릴리즈 `sync_releases.checksum`. isae 1.5.7은 동결(자동 안 밈), 필요 시 수동 1회 교체.
-> - **미해결 잔재**: 2008 R2 IE8 웹 설치 마법사 미동작(터미널 `--setup-cli` 사용) — 이번 범위 밖, 별도 과제. 설계서 `docs/superpowers/specs/2026-07-03-sync-agent-updater-selfreplace-design.md`.
+> - **설치 마법사 라우팅 동반 수정**: 2008 R2 IE8 웹 설치 마법사 미동작 → `resolveSetupMode`(`src/setup/setup-mode.ts`)로 old Windows(release major<10 = 2008 R2/7/8/8.1/2012/2012 R2) 감지 시 `--setup`·설정없음 진입을 CLI 마법사(`--setup-cli`)로 자동 라우팅. modern(10/11/2016+) 웹 유지. `src/main.ts` 2경로 적용, 유닛 6. 설계서 `docs/superpowers/specs/2026-07-03-sync-agent-updater-selfreplace-design.md`.
 
 
 **증상**: 서버에 새 exe 릴리즈 등록 후, 박스가 정각에 `GET /version`으로 새 버전 감지 → `/download` 200으로 exe 전량(103MB) 수신까지 무선으로 성공. 그런데 `current_version`이 새 버전으로 안 올라오고 박스가 멈춤(heartbeat 정지). tasklist 프로세스 없음, 예약작업 상태=준비(마지막 결과 0=정상종료).

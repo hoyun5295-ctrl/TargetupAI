@@ -178,4 +178,4 @@ rename "<exe>.new" "<exe>"            :: 새것 자리로 (여기 실패 시 .ol
 - **5티어 재빌드**(v1.6.0) + 티어별 sha256 산출(= sync_releases.checksum).
 - **티어 게이트**: win-legacy 실 2008 R2 VM E2E PASS / linux-modern·linux-legacy Docker systemd E2E PASS(실 exe, transient, ProtectSystem 탈출, 원자 mv) / win-mid·win-modern은 동일 schtasks cmd/c 메커니즘 + 유닛으로 합성 PASS. 실패주입=원자 스왑 설계로 브릭 불가, 오배포거부=checksum 필수 가드 유닛.
 - **잔여(Harold 서버)**: 5티어 exe 호스팅 + sync_releases 등록(version 1.6.0·tier·download_url·checksum·force_update=false) + 옛 결함본 is_active=false. isae 1.5.7 동결.
-- **범위 밖(별도 과제)**: 2008 R2 IE8 웹 설치 마법사 미동작 → old Windows는 CLI(`--setup-cli`) 라우팅 개선.
+- **설치 마법사 라우팅 동반 수정(같은 1.6.0에 포함)**: 2008 R2 IE8 웹 마법사 미동작 → `resolveSetupMode`(`src/setup/setup-mode.ts`)로 old Windows(major<10)는 `--setup`·설정없음 진입을 CLI 마법사로 자동 라우팅(유닛 6), modern(10+) 웹 유지. `src/main.ts` 2경로 적용.

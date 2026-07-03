@@ -33,6 +33,8 @@ import {
   saveCafe24ByoCredentials,
   getCafe24ByoCredentials,
 } from '../utils/cafe24-client';
+import { ensureCafe24ScriptTag, removeCafe24ScriptTag } from '../utils/cafe24-scripttag';
+
 const router = Router();
 
 // ════════════════════════════════════════════════════════════════════
@@ -301,6 +303,12 @@ router.delete('/disconnect', async (req: Request, res: Response) => {
     if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
     if (userType !== 'company_admin') return res.status(403).json({ success: false, error: '연동 해제는 회사 관리자만 가능합니다.' });
 
+    // ★ 2026-07-03 B-2: 해제 전(토큰 유효 상태) scripttag 제거 — fire-and-forget
+    const integ = await getCafe24Integration(companyId);
+    if (integ?.mallId) {
+      removeCafe24ScriptTag(companyId, integ.mallId).catch(() => {});
+    }
+
     await query(
       `UPDATE company_integrations
        SET status = 'revoked', updated_at = NOW()
@@ -366,6 +374,12 @@ cafe24CallbackRouter.get('/oauth/callback', async (req: Request, res: Response) 
     const byoCreds = await getCafe24ByoCredentials(parsed.company_id, mallId);
     const tokenRes = await exchangeCafe24Code(mallId, code, byoCreds);
     await saveCafe24Integration(parsed.company_id, mallId, tokenRes);
+
+    // ★ 2026-07-03 B-2: 연동 성공 직후 SDK scripttag 자동삽입 (fire-and-forget — 실패해도 연동은 성공).
+    //   mall.write_application scope(B-1) 필요 — 재연동 후에만 성공. raw 응답은 [Cafe24 ScriptTag] 로그로 실측.
+    ensureCafe24ScriptTag(parsed.company_id, mallId).catch((e: any) =>
+      console.log('[Cafe24 callback] scripttag 자동삽입 실패(연동은 성공):', e?.message || e),
+    );
 
     // state 정리
     await query(
