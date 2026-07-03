@@ -275,7 +275,9 @@ router.get('/status', async (req: Request, res: Response) => {
     if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
 
     const integration = await getCafe24Integration(companyId);
-    if (!integration) {
+    // ★ 2026-07-03 fix: getCafe24Integration은 status 무관 반환 → 해제(revoked)·미완료(pending_oauth) 행도 있었다.
+    //   active만 connected로 응답해야 연동 해제가 화면에 반영되고 재연동 흐름이 복구된다.
+    if (!integration || integration.status !== 'active') {
       return res.json({ success: true, connected: false });
     }
     return res.json({
