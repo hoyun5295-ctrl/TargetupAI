@@ -422,9 +422,10 @@ POST /api/sync/purchases   ← 구매내역 벌크 INSERT (배치 최대 1000건
 
 | 변수 | 박힘 영역 | 비고 |
 |------|---------|------|
-| `CAFE24_CLIENT_ID` | 박지 X | 카페24 App Marketplace 박은 영역 |
-| `CAFE24_CLIENT_SECRET` | 박지 X | |
-| `CAFE24_REDIRECT_URI` | 박지 X | `https://app.hanjul.ai/api/cafe24/oauth/callback` |
+| `CAFE24_CLIENT_ID` | 설정됨 | 2026-07-03 개발자센터 앱 "한줄로AI" 키 등록 (Harold 실행) |
+| `CAFE24_CLIENT_SECRET` | 설정됨 | 〃 |
+| `CAFE24_REDIRECT_URI` | 설정됨 | `https://app.hanjul.ai/api/cafe24/oauth/callback` |
+| `CAFE24_WEBHOOK_API_KEY` | 설정됨 | 2026-07-03 신규 — WebHook X-API-Key 인증(개발정보 관리 인증정보 값). 미설정 시 구형 HMAC 경로만 동작 |
 | `NAVER_COMMERCE_CLIENT_ID` | 박지 X | 네이버 커머스 API 콘솔 박은 영역 |
 | `NAVER_COMMERCE_CLIENT_SECRET` | 박지 X | |
 | `NAVER_COMMERCE_REDIRECT_URI` | 박지 X | `https://app.hanjul.ai/api/naver-commerce/oauth/callback` |

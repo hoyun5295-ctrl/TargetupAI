@@ -15,7 +15,7 @@
  *   - Access token TTL: 2시간 / Refresh token TTL: 14일
  *
  * 🔐 인증 정보 보관
- *   - company_integrations 테이블에 access_token/refresh_token 박힘 (company_id + provider='cafe24' + mall_id UNIQUE)
+ *   - company_integrations 테이블에 access_token/refresh_token 저장 (company_id + provider='cafe24' + mall_id UNIQUE)
  *
  * 📝 환경변수 (Harold .env)
  *   - CAFE24_CLIENT_ID: 한줄로AI 앱의 카페24 client_id
@@ -430,7 +430,7 @@ export async function cafe24ApiCall<T = unknown>(
 /**
  * 카페24 webhook 서명 검증.
  * - X-Cafe24-Hmac-Sha256 헤더 vs HMAC-SHA256(webhook_secret, raw_body) base64
- * - webhook_secret이 미박힘이면 검증 skip (Phase 2 강화 영역)
+ * - webhook_secret 미설정이면 검증 skip (Phase 2 강화 예정이던 부분)
  */
 export function verifyCafe24WebhookSignature(rawBody: Buffer | string, signature: string, secret: string | null): boolean {
   // 2026-06-10 정정: secret 미설정 시 무조건 통과시키던 분기 제거.
@@ -563,7 +563,7 @@ export const cafe24Adapter: IProviderAdapter = {
   },
 
   async processWebhookEvent(companyId: string, event: string, resource: Record<string, any>): Promise<void> {
-    // routes/cafe24.ts processCafe24Event 박힌 로직과 동일 — 단일 진실 박음 정합점.
+    // routes/cafe24.ts processCafe24Event가 여기로 위임 — 단일 진실.
     switch (event) {
       case 'customer.created':
       case 'customer.updated':

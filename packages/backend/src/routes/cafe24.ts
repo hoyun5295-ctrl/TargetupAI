@@ -10,11 +10,11 @@
  *
  * 보안:
  *   - authorize/callback/status/disconnect: 회사 admin 인증 (authenticate)
- *   - webhook: X-Cafe24-Hmac-Sha256 서명 검증 (webhook_secret 박힘 시)
+ *   - webhook: X-API-Key 인증(2026-07-03 실측 정정) + 구형 HMAC 하위 호환
  *
  * idempotency:
  *   - 모든 webhook은 cdp_webhook_deliveries 테이블의 (company_id, source, idempotency_key)로 중복 차단
- *   - idempotency_key = `${webhook_event}:${order_id || customer_id || timestamp}` 박음
+ *   - idempotency_key = `${webhook_event}:${order_id || customer_id || timestamp}` 적용
  */
 
 import { Router, Request, Response, json } from 'express';
@@ -133,7 +133,7 @@ router.post('/webhook', json({ limit: '1mb', verify: (req: any, _res, buf) => { 
          WHERE id = $1::uuid`,
         [deliveryId, String(processErr?.message || 'unknown').slice(0, 1000)]
       );
-      // 카페24는 200 반환해야 retry 안 일어남 — 한줄로 측 retry는 별도 cron 박을 가치 (Phase 2)
+      // 카페24는 200 반환해야 retry 안 일어남 — 한줄로 측 retry는 별도 cron 검토 (Phase 2)
       return res.json({ success: false, error: '이벤트 처리 실패, 한줄로 측에서 재처리 예약됩니다.' });
     }
   } catch (err: any) {
@@ -175,7 +175,7 @@ router.get('/oauth/authorize', async (req: Request, res: Response) => {
     }
 
     const csrfNonce = randomBytes(16).toString('hex');
-    // state 저장 (10분 TTL — Phase 2에서 Redis 박을 가치)
+    // state 저장 (10분 TTL — Phase 2에서 Redis 검토)
     await query(
       `INSERT INTO cdp_webhook_deliveries (
         id, company_id, source, webhook_event, idempotency_key, payload, status, created_at
@@ -203,8 +203,8 @@ router.get('/oauth/authorize', async (req: Request, res: Response) => {
  * → 카페24가 redirect_uri로 호출. state 검증 후 토큰 교환 + DB 저장 + 종료 페이지 HTML 응답.
  *
  * NOTE: 본 endpoint는 카페24가 호출 (사용자 브라우저 redirect)이므로 authenticate 우회.
- * authenticate 미들웨어가 위에서 박혀있어 본 endpoint는 ★ authenticate 통과 못 함 — 별도 라우터 분리 필요.
- * → 해결: callback은 본 라우터 등록 전에 별도 endpoint 박음 (아래 보조 라우터에서 박힘).
+ * authenticate 미들웨어가 위에 걸려 있어 이 endpoint는 ★ authenticate 통과 못 함 — 별도 라우터 분리 필요.
+ * → 해결: callback은 이 라우터 등록 전에 별도 endpoint로 둠 (아래 보조 라우터가 담당).
  */
 router.get('/oauth/callback', (_req: Request, res: Response) => {
   // 이 경로는 callbackRouter (아래)가 먼저 매칭되어야 정합.
@@ -361,7 +361,7 @@ cafe24CallbackRouter.get('/oauth/callback', async (req: Request, res: Response) 
 });
 
 // ════════════════════════════════════════════════════════════════════
-// 이벤트 처리 디스패처 — D173 cafe24Adapter.processWebhookEvent로 위임 (단일 진실 박음)
+// 이벤트 처리 디스패처 — D173 cafe24Adapter.processWebhookEvent로 위임 (단일 진실)
 // ════════════════════════════════════════════════════════════════════
 
 async function processCafe24Event(companyId: string, event: string, resource: any): Promise<void> {
