@@ -283,7 +283,7 @@ const NAVER_REQUIRED_SCOPES = ['commerce.product.read', 'commerce.order.read', '
 
 const PROVIDER_META: Record<ProviderKey, { title: string; note: string }> = {
   cafe24: { title: '카페24 연동', note: '쇼핑몰 ID만 입력하면 한줄로 공식 카페24 앱으로 연결됩니다. OAuth 동의 후 회원·주문이 자동 동기화됩니다.' },
-  naver: { title: '네이버 스마트스토어 연동', note: '네이버 커머스 API센터에서 만든 애플리케이션의 Client ID·Secret을 입력하면, OAuth 인증 후 주문·회원이 동기화됩니다. (네이버 정책상 phone/email이 제한될 수 있어 매칭률이 낮을 수 있습니다.)' },
+  naver: { title: '네이버 스마트스토어 연동', note: '네이버 커머스 API센터에서 만든 애플리케이션 자격을 입력하면 주문·회원이 동기화됩니다. 구매자 성명·휴대폰 번호는 주문 데이터로 제공되어 발송에 쓸 수 있습니다. 단 주문 안내 같은 정보성 메시지는 즉시 가능하지만, 광고성 메시지는 별도의 광고 수신동의가 필요합니다.' },
   godo: { title: '고도몰 연동', note: '고도몰 쇼핑몰 인증키(key)를 입력하면 주문·고객 데이터가 자동으로 동기화됩니다.' },
   gabia: { title: '가비아 연동', note: '가비아 쇼핑몰은 webhook 방식으로 연동합니다. 아래 Secret·도메인·SDK를 설정하세요.' },
   custom: { title: '자체 호스팅 / 그 외 자사몰 연동', note: '직접 개발했거나 목록에 없는 자사몰은 webhook 방식으로 연동합니다. 환경이 특수해 막히면 고객센터로 문의 주세요.' },
@@ -997,42 +997,68 @@ export default function CdpSettingsPage() {
           </div>
         )}
 
-        {/* 자사몰 선택 그리드 — 업체별 브랜드 아이콘 + 아이콘·이름·설명·상태를 좌우로 채운 카드 */}
+        {/* 자사몰 선택 — 좌측 대형 자체 호스팅(그 외 모든 몰 webhook 흡수) + 우측 2×3 그리드 */}
         {!cdpLocked && (
-          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
-            {providerCards.map((p) => {
-              const connected = p.modalKey === 'cafe24' ? !!cafe24Status?.connected
-                : p.modalKey === 'naver' ? !!naverStatus?.connected
-                : p.modalKey === 'godo' ? !!godoStatus?.connected
-                : (p.modalKey === 'custom' || p.modalKey === 'gabia') ? !!customInfo?.hasSecret
-                : false;
-              const { Icon, badge } = providerBrand(p.key, p.name);
-              const clickable = p.available && p.modalKey !== null;
-              const label = p.key === 'custom' ? '자체 호스팅' : p.name;
-              return (
-                <button
-                  key={p.key}
-                  type="button"
-                  disabled={!clickable}
-                  onClick={clickable ? () => setConnectProvider(p.modalKey as ProviderKey) : undefined}
-                  title={p.name}
-                  className={`group flex items-center gap-3.5 p-4 rounded-2xl border text-left transition-all duration-200 ${connected ? 'bg-emerald-500/[0.06] border-emerald-400/25' : 'bg-white/[0.04] border-white/10'} ${clickable ? 'cursor-pointer hover:border-violet-400/40 hover:bg-white/[0.07] hover:-translate-y-0.5' : 'opacity-45 cursor-default'}`}
-                >
-                  <div className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 text-white shadow-lg bg-gradient-to-br ${badge}`}>
-                    <Icon className="w-5 h-5" />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="text-sm font-semibold text-white truncate">{label}</div>
-                    <div className="text-[11px] text-white/45 truncate mt-0.5">{p.desc}</div>
-                  </div>
-                  {!p.available
-                    ? <span className="flex-shrink-0 text-[10px] px-2 py-1 rounded-full bg-white/5 text-white/40 border border-white/10 font-medium">곧 출시</span>
-                    : connected
-                      ? <span className="flex-shrink-0 text-[10px] px-2 py-1 rounded-full bg-emerald-500/15 text-emerald-300 border border-emerald-400/25 font-medium inline-flex items-center gap-1"><Check className="w-3 h-3" />연동됨</span>
-                      : <span className="flex-shrink-0 text-[10px] px-2 py-1 rounded-full bg-violet-500/15 text-violet-200 border border-violet-400/25 font-medium">연동하기</span>}
-                </button>
-              );
-            })}
+          <div className="grid grid-cols-1 lg:grid-cols-5 gap-3">
+            {/* 좌측 대형 — 자체 호스팅: Shopify·WooCommerce·식스샵 등 목록에 없는 모든 몰 흡수 */}
+            <button
+              type="button"
+              onClick={() => setConnectProvider('custom')}
+              title="자체 호스팅 · 그 외 모든 자사몰"
+              className={`lg:col-span-2 group flex flex-col justify-between p-5 rounded-2xl border text-left transition-all duration-200 ${customInfo?.hasSecret ? 'bg-emerald-500/[0.06] border-emerald-400/25' : 'bg-white/[0.04] border-white/10'} cursor-pointer hover:border-violet-400/40 hover:bg-white/[0.07] hover:-translate-y-0.5`}
+            >
+              <div className="flex items-start gap-3.5">
+                <div className="w-12 h-12 rounded-2xl flex items-center justify-center flex-shrink-0 text-white shadow-lg bg-gradient-to-br from-violet-500 to-fuchsia-600 shadow-violet-500/25">
+                  <Database className="w-6 h-6" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="text-base font-semibold text-white">자체 호스팅 · 그 외 모든 몰</div>
+                  <div className="text-[12px] text-white/55 mt-1 leading-relaxed">직접 개발한 자사몰은 물론 <span className="text-white/80">Shopify · WooCommerce · 식스샵</span> 등 목록에 없는 모든 몰을 webhook 한 줄로 연결합니다.</div>
+                </div>
+                {customInfo?.hasSecret
+                  ? <span className="flex-shrink-0 text-[10px] px-2 py-1 rounded-full bg-emerald-500/15 text-emerald-300 border border-emerald-400/25 font-medium inline-flex items-center gap-1"><Check className="w-3 h-3" />연동됨</span>
+                  : <span className="flex-shrink-0 text-[10px] px-2 py-1 rounded-full bg-violet-500/15 text-violet-200 border border-violet-400/25 font-medium">연동하기</span>}
+              </div>
+              <div className="mt-4 flex items-center gap-1.5 text-[11px] text-white/40">
+                <Server className="w-3.5 h-3.5" /> Secret 발급 → SDK/webhook 설정 → 수신 검증
+              </div>
+            </button>
+
+            {/* 우측 2×3 — 나머지 자사몰(전용 모달 보유분 + 곧 출시) */}
+            <div className="lg:col-span-3 grid grid-cols-1 sm:grid-cols-2 gap-3">
+              {providerCards.filter((p) => p.key !== 'custom').map((p) => {
+                const connected = p.modalKey === 'cafe24' ? !!cafe24Status?.connected
+                  : p.modalKey === 'naver' ? !!naverStatus?.connected
+                  : p.modalKey === 'godo' ? !!godoStatus?.connected
+                  : p.modalKey === 'gabia' ? !!customInfo?.hasSecret
+                  : false;
+                const { Icon, badge } = providerBrand(p.key, p.name);
+                const clickable = p.available && p.modalKey !== null;
+                return (
+                  <button
+                    key={p.key}
+                    type="button"
+                    disabled={!clickable}
+                    onClick={clickable ? () => setConnectProvider(p.modalKey as ProviderKey) : undefined}
+                    title={p.name}
+                    className={`group flex items-center gap-3.5 p-4 rounded-2xl border text-left transition-all duration-200 ${connected ? 'bg-emerald-500/[0.06] border-emerald-400/25' : 'bg-white/[0.04] border-white/10'} ${clickable ? 'cursor-pointer hover:border-violet-400/40 hover:bg-white/[0.07] hover:-translate-y-0.5' : 'opacity-45 cursor-default'}`}
+                  >
+                    <div className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 text-white shadow-lg bg-gradient-to-br ${badge}`}>
+                      <Icon className="w-5 h-5" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="text-sm font-semibold text-white truncate">{p.name}</div>
+                      <div className="text-[11px] text-white/45 truncate mt-0.5">{p.desc}</div>
+                    </div>
+                    {!p.available
+                      ? <span className="flex-shrink-0 text-[10px] px-2 py-1 rounded-full bg-white/5 text-white/40 border border-white/10 font-medium">곧 출시</span>
+                      : connected
+                        ? <span className="flex-shrink-0 text-[10px] px-2 py-1 rounded-full bg-emerald-500/15 text-emerald-300 border border-emerald-400/25 font-medium inline-flex items-center gap-1"><Check className="w-3 h-3" />연동됨</span>
+                        : <span className="flex-shrink-0 text-[10px] px-2 py-1 rounded-full bg-violet-500/15 text-violet-200 border border-violet-400/25 font-medium">연동하기</span>}
+                  </button>
+                );
+              })}
+            </div>
           </div>
         )}
 
