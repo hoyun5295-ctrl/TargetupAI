@@ -50,6 +50,7 @@ import cdpRoutes from './routes/cdp';
 import cafe24Routes, { cafe24CallbackRouter } from './routes/cafe24';
 // ★ D178 (2026-05-19): 네이버 스마트스토어 (커머스 API) OAuth + Webhook
 import naverCommerceRoutes, { naverCommerceCallbackRouter } from './routes/naver-commerce';
+import imwebRoutes, { imwebCallbackRouter } from './routes/imweb';
 // ★ 2026-06-18: 고도몰(NHN커머스) BYO-키 폴링 커넥터
 import godoRoutes from './routes/godo';
 // ★ 2026-06-25 (gap 7): CDP Provider 등록 단일 출처 — routes import 부수효과 의존 제거
@@ -185,7 +186,7 @@ const cdpPublicLimiter = rateLimit({
   legacyHeaders: false,
   message: { success: false, error: '요청이 너무 잦습니다. 잠시 후 다시 시도해주세요.', code: 'RATE_LIMITED' },
 });
-app.use(['/api/cdp/ingest', '/api/cdp/webhook', '/api/cafe24/webhook', '/api/naver-commerce/webhook'], cdpPublicLimiter);
+app.use(['/api/cdp/ingest', '/api/cdp/webhook', '/api/cafe24/webhook', '/api/naver-commerce/webhook', '/api/imweb/webhook'], cdpPublicLimiter);
 
 // ★ D130: IMC 웹훅은 HMAC 검증을 위해 raw body 필요
 //    express.json()이 먼저 파싱하면 rawBody 손실되므로 이 경로만 선처리
@@ -282,6 +283,9 @@ app.use('/api/cafe24', cafe24Routes);
 // ★ D178: 네이버 스마트스토어 OAuth callback (authenticate 우회) → naverCommerceRoutes보다 먼저 등록
 app.use('/api/naver-commerce', naverCommerceCallbackRouter);
 app.use('/api/naver-commerce', naverCommerceRoutes);
+// ★ 2026-07-04: 아임웹 OAuth callback (authenticate 우회) → imwebRoutes보다 먼저 등록
+app.use('/api/imweb', imwebCallbackRouter);
+app.use('/api/imweb', imwebRoutes);
 // ★ 2026-06-18: 고도몰(NHN커머스) BYO-키 폴링 커넥터 (OAuth/Webhook 없음 — callback 라우터 불필요)
 app.use('/api/godo', godoRoutes);
 // ★ D178: 인바운드 AI 음성 응답 (통신사 webhook + 회사 admin 토글/이력)

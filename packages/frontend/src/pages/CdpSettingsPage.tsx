@@ -87,6 +87,14 @@ interface NaverCommerceStatus {
   scope?: string;
 }
 
+interface ImwebStatus {
+  connected: boolean;
+  site_code?: string;
+  status?: string;
+  token_expires_at?: string;
+  scope?: string;
+}
+
 interface GodoStatus {
   connected: boolean;
   status?: string;
@@ -264,13 +272,14 @@ const CHANNEL_COLOR: Record<string, string> = {
 };
 
 // 자사몰 선택 카드 — 카드 클릭 시 해당 업체 전용 연동 모달 (가로 2열 그리드)
-type ProviderKey = 'cafe24' | 'naver' | 'godo' | 'gabia' | 'custom';
+type ProviderKey = 'cafe24' | 'naver' | 'godo' | 'gabia' | 'imweb' | 'custom';
 
 const PROVIDER_CARDS: Array<{ key: ProviderKey; name: string; desc: string; full?: boolean }> = [
   { key: 'cafe24', name: '카페24', desc: 'OAuth 자동 연동 — 코딩 없이 회원·주문 동기화' },
   { key: 'naver', name: '네이버 스마트스토어', desc: 'Commerce OAuth — 주문·회원 동기화' },
   { key: 'godo', name: '고도몰', desc: '쇼핑몰 인증키 입력 — 주문·고객 자동 동기화' },
   { key: 'gabia', name: '가비아', desc: 'webhook 방식 — Secret·SDK 설정으로 연동' },
+  { key: 'imweb', name: '아임웹', desc: 'OAuth 자동 연동 — 회원·주문·수신동의 동기화' },
   { key: 'custom', name: '자체 호스팅 / 그 외 자사몰', desc: '직접 개발했거나 목록에 없는 자사몰 — webhook 방식', full: true },
 ];
 
@@ -286,6 +295,7 @@ const PROVIDER_META: Record<ProviderKey, { title: string; note: string }> = {
   naver: { title: '네이버 스마트스토어 연동', note: '네이버 커머스 API센터에서 만든 애플리케이션 자격을 입력하면 주문·회원이 동기화됩니다. 구매자 성명·휴대폰 번호는 주문 데이터로 제공되어 발송에 쓸 수 있습니다. 단 주문 안내 같은 정보성 메시지는 즉시 가능하지만, 광고성 메시지는 별도의 광고 수신동의가 필요합니다.' },
   godo: { title: '고도몰 연동', note: '고도몰 쇼핑몰 인증키(key)를 입력하면 주문·고객 데이터가 자동으로 동기화됩니다.' },
   gabia: { title: '가비아 연동', note: '가비아 쇼핑몰은 webhook 방식으로 연동합니다. 아래 Secret·도메인·SDK를 설정하세요.' },
+  imweb: { title: '아임웹 연동', note: '아임웹 사이트 코드(siteCode)를 입력하면 OAuth 인증 후 회원·주문·수신동의·장바구니가 동기화됩니다. 사이트 코드는 아임웹 앱스토어에서 한줄로를 추가할 때 전달됩니다.' },
   custom: { title: '자체 호스팅 / 그 외 자사몰 연동', note: '직접 개발했거나 목록에 없는 자사몰은 webhook 방식으로 연동합니다. 환경이 특수해 막히면 고객센터로 문의 주세요.' },
 };
 
@@ -303,6 +313,7 @@ const BACKEND_ID_TO_KEY: Record<string, ProviderKey> = {
   naver_smart_store: 'naver',
   godo: 'godo',
   gabia: 'gabia',
+  imweb: 'imweb',
   custom: 'custom',
 };
 
@@ -372,6 +383,9 @@ export default function CdpSettingsPage() {
   const [godoKey, setGodoKey] = useState('');
   const [godoConnecting, setGodoConnecting] = useState(false);
   const [showGodoKey, setShowGodoKey] = useState(false);
+  const [imwebStatus, setImwebStatus] = useState<ImwebStatus | null>(null);
+  const [imwebSiteCode, setImwebSiteCode] = useState('');
+  const [imwebConnecting, setImwebConnecting] = useState(false);
   const [customInfo, setCustomInfo] = useState<CustomWebhookInfo | null>(null);
   const [customIssuedSecret, setCustomIssuedSecret] = useState<CustomIssuedSecret | null>(null);
   const [customIssuing, setCustomIssuing] = useState(false);
@@ -430,8 +444,9 @@ export default function CdpSettingsPage() {
     if (cafe24Status?.connected) list.push('카페24');
     if (naverStatus?.connected) list.push('네이버 스마트스토어');
     if (godoStatus?.connected) list.push('고도몰');
+    if (imwebStatus?.connected) list.push('아임웹');
     return list;
-  }, [customInfo?.hasSecret, cafe24Status?.connected, naverStatus?.connected, godoStatus?.connected]);
+  }, [customInfo?.hasSecret, cafe24Status?.connected, naverStatus?.connected, godoStatus?.connected, imwebStatus?.connected]);
   const isConnected = connectedProviders.length > 0 || !!usage?.has_key;
   const hasCdpData = isConnected || (diagnostics?.events30d ?? 0) > 0;
 
@@ -541,7 +556,7 @@ export default function CdpSettingsPage() {
       const headers = { Authorization: `Bearer ${token()}` };
       const [
         usageRes, diagRes, funnelRes, timelineRes, activeRes, chDistRes,
-        cafe24Res, naverRes, godoRes, customRes, providersRes,
+        cafe24Res, naverRes, godoRes, imwebRes, customRes, providersRes,
       ] = await Promise.all([
         fetch('/api/cdp/usage', { headers }),
         fetch('/api/cdp/diagnostics', { headers }),
@@ -552,6 +567,7 @@ export default function CdpSettingsPage() {
         fetch('/api/cafe24/status', { headers }),
         fetch('/api/naver-commerce/status', { headers }),
         fetch('/api/godo/status', { headers }),
+        fetch('/api/imweb/status', { headers }),
         fetch('/api/cdp/custom/info', { headers }),
         fetch('/api/cdp/providers', { headers }),
       ]);
@@ -564,6 +580,7 @@ export default function CdpSettingsPage() {
       const cafe24Data = await cafe24Res.json();
       const naverData = await naverRes.json();
       const godoData = await godoRes.json();
+      const imwebData = await imwebRes.json();
       const customData = await customRes.json();
       const providersData = await providersRes.json();
 
@@ -579,6 +596,7 @@ export default function CdpSettingsPage() {
       if (cafe24Data.success) setCafe24Status(cafe24Data);
       if (naverData.success) setNaverStatus(naverData);
       if (godoData.success) setGodoStatus(godoData);
+      if (imwebData.success) setImwebStatus(imwebData);
       if (customData.success) {
         setCustomInfo({
           hasSecret: customData.hasSecret,
@@ -771,6 +789,37 @@ export default function CdpSettingsPage() {
         const res = await fetch('/api/naver-commerce/disconnect', { method: 'DELETE', headers: { Authorization: `Bearer ${token()}` } });
         const data = await res.json();
         if (data.success) { await loadAll(); toast.success('네이버 스마트스토어 연동 해제 완료'); }
+        else { toast.error(data.error || '연동 해제 실패'); }
+      },
+    });
+  };
+
+  // 아임웹 — siteCode 입력 → OAuth (단일 공식 앱, BYO 없음)
+  const handleImwebConnect = async () => {
+    const siteCode = imwebSiteCode.trim();
+    if (!siteCode) { toast.error('아임웹 사이트 코드(siteCode)를 입력해주세요.'); return; }
+    setImwebConnecting(true);
+    try {
+      const res = await fetch(`/api/imweb/oauth/authorize?site_code=${encodeURIComponent(siteCode)}`, {
+        headers: { Authorization: `Bearer ${token()}` },
+      });
+      const data = await res.json();
+      if (data.success && data.authorize_url) {
+        window.open(data.authorize_url, 'imweb_oauth', 'width=720,height=820');
+        toast.info('새 창에서 아임웹 로그인 + 동의 완료 후 새로고침해주세요.');
+      } else { toast.error(data.error || '아임웹 연동 시작 실패'); }
+    } catch (e: any) { toast.error(e?.message || '아임웹 연동 처리 오류'); }
+    finally { setImwebConnecting(false); }
+  };
+  const handleImwebDisconnect = () => {
+    setConfirm({
+      mode: 'danger',
+      title: '아임웹 연동 해제',
+      description: '자사몰 → 한줄로 sync가 즉시 중단됩니다.',
+      onConfirm: async () => {
+        const res = await fetch('/api/imweb/disconnect', { method: 'DELETE', headers: { Authorization: `Bearer ${token()}` } });
+        const data = await res.json();
+        if (data.success) { await loadAll(); toast.success('아임웹 연동 해제 완료'); }
         else { toast.error(data.error || '연동 해제 실패'); }
       },
     });
@@ -1030,6 +1079,7 @@ export default function CdpSettingsPage() {
                 const connected = p.modalKey === 'cafe24' ? !!cafe24Status?.connected
                   : p.modalKey === 'naver' ? !!naverStatus?.connected
                   : p.modalKey === 'godo' ? !!godoStatus?.connected
+                  : p.modalKey === 'imweb' ? !!imwebStatus?.connected
                   : p.modalKey === 'gabia' ? !!customInfo?.hasSecret
                   : false;
                 const { Icon, badge } = providerBrand(p.key, p.name);
@@ -1813,6 +1863,63 @@ client.newCall(req).execute()`}</pre>
                 </button>
                 {!isAdmin && <div className="text-[11px] text-white/50 text-center">연동은 회사 관리자만 가능합니다.</div>}
                 <div className="text-[10px] text-white/30 italic">Client Secret은 한줄로 서버에 안전 보관되며 화면에 다시 표시되지 않습니다.</div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* 아임웹 — OAuth (siteCode) */}
+        {connectProvider === 'imweb' && (
+          <div id="section-imweb" className="bg-white/5 border border-white/10 rounded-xl p-6">
+            <div className="flex items-center gap-2 mb-4">
+              <LayoutTemplate className="w-5 h-5 text-indigo-300" />
+              <h2 className="text-base font-bold text-white">아임웹 연동</h2>
+              <span className="text-xs bg-indigo-500/20 text-indigo-300 px-2 py-0.5 rounded-full font-medium">imweb OAuth</span>
+            </div>
+
+            {imwebStatus?.connected ? (
+              <div className="space-y-3">
+                <div className="bg-emerald-500/10 border border-emerald-400/30 rounded-lg p-4 flex items-start gap-3">
+                  <Check className="w-5 h-5 text-emerald-300 mt-0.5 shrink-0" />
+                  <div className="flex-1">
+                    <div className="text-sm font-medium text-emerald-100">{imwebStatus.site_code} 아임웹 연동됨</div>
+                    <div className="text-xs text-emerald-300 mt-1">status: {imwebStatus.status} · 토큰 만료: {imwebStatus.token_expires_at ? new Date(imwebStatus.token_expires_at).toLocaleString('ko-KR') : '-'}</div>
+                  </div>
+                </div>
+                {isAdmin && (
+                  <button onClick={handleImwebDisconnect} className="px-4 py-2 bg-rose-500/15 border border-rose-400/40 hover:bg-rose-500/25 text-rose-200 text-sm font-medium rounded-lg flex items-center gap-2">
+                    <Unlink className="w-4 h-4" /> 연동 해제
+                  </button>
+                )}
+              </div>
+            ) : (
+              <div className="space-y-4">
+                <div className="bg-violet-500/10 border border-violet-400/30 rounded-xl p-4 space-y-3">
+                  <div className="text-xs font-semibold text-violet-100">아임웹 연결 — 2단계</div>
+                  <GuideStep n={1}>
+                    아임웹 앱스토어에서 <strong className="text-white/90">한줄로</strong> 앱을 추가하면 전달되는 <strong className="text-white/90">사이트 코드(siteCode)</strong>를 확인합니다.
+                  </GuideStep>
+                  <GuideStep n={2}>
+                    사이트 코드를 아래에 입력하고 연결하면, 새 창에서 아임웹 동의 후 회원·주문·수신동의·장바구니가 자동 동기화됩니다.
+                  </GuideStep>
+                </div>
+
+                <div>
+                  <label className="block text-[11px] text-white/50 mb-1">사이트 코드(siteCode)</label>
+                  <input
+                    type="text"
+                    value={imwebSiteCode}
+                    onChange={(e) => setImwebSiteCode(e.target.value)}
+                    placeholder="예: S2025012450f7813d2ddau"
+                    className="w-full px-3 py-2 bg-violet-900/40 border border-white/10 rounded-lg text-sm text-white placeholder-white/30 focus:outline-none focus:border-indigo-400/50 font-mono"
+                  />
+                </div>
+
+                <button onClick={handleImwebConnect} disabled={imwebConnecting || !isAdmin || !imwebSiteCode.trim()} className="w-full px-4 py-2.5 bg-indigo-500/30 hover:bg-indigo-500/50 text-indigo-100 text-sm font-medium rounded-lg disabled:opacity-40 flex items-center justify-center gap-2">
+                  {imwebConnecting ? <><Loader2 className="w-4 h-4 animate-spin" /> 연결 준비 중...</> : <><Link2 className="w-4 h-4" /> 아임웹 연결</>}
+                </button>
+                {!isAdmin && <div className="text-[11px] text-white/50 text-center">연동은 회사 관리자만 가능합니다.</div>}
+                <div className="text-[10px] text-white/30 italic">Data source — 아임웹 Open API (openapi.imweb.me). 회원·주문·수신동의 읽기 전용.</div>
               </div>
             )}
           </div>

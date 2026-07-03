@@ -9,6 +9,7 @@ import { naverSmartStoreAdapter } from './naver-commerce-client';
 import { customSelfHostedAdapter } from './custom-self-hosted-adapter';
 import { godoAdapter } from './godo-adapter';
 import { gabiaAdapter } from './gabia-adapter';
+import { imwebAdapter } from './imweb-client';
 
 let registered = false;
 
@@ -20,5 +21,6 @@ export function registerAllProviders(): void {
   registerProvider(customSelfHostedAdapter);
   registerProvider(godoAdapter);
   registerProvider(gabiaAdapter);
+  registerProvider(imwebAdapter);
   registered = true;
 }

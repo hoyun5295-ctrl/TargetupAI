@@ -9,7 +9,7 @@
  *
  * 📋 등록된 Provider (등록 출처 = app.ts registerAllProviders() / utils/register-providers.ts 단일 출처. 2026-06-25 갱신)
  *   - 'cafe24'(oauth) / 'naver_smart_store'(oauth) / 'custom'(webhook) / 'godo'(polling) / 'gabia'(webhook) = 사용 가능(available)
- *   - 'makeshop' / 'imweb' = skeleton(available:false → coming_soon, Phase 2). shopify/sixshop/woocommerce는 자체 호스팅 webhook으로 흡수(2026-07-04 제거)
+ *   - 'makeshop' = skeleton(available:false → coming_soon). 'imweb'(oauth)는 imweb-client.ts에서 실 어댑터로 등록. shopify/sixshop/woocommerce는 자체 호스팅 webhook으로 흡수(2026-07-04 제거)
  *   - 어댑터가 connectMethod/available을 직접 선언 → listProvidersForUI가 추론 없이 그대로 노출(D189 추론 폐기)
  *
  * ⛔ 영구 원칙
@@ -217,8 +217,7 @@ export class SkeletonProviderAdapter implements IProviderAdapter {
 // ════════════════════════════════════════════════════════════════════
 
 registerProvider(new SkeletonProviderAdapter('makeshop', '메이크샵'));
-registerProvider(new SkeletonProviderAdapter('imweb', 'imweb'));
-// 2026-07-04 — shopify/sixshop/woocommerce 스켈레톤 제거(국내 사용 미미 + 개방 API 불확실).
+// 2026-07-04 — imweb은 imweb-client.ts에서 실 어댑터로 등록(승격). shopify/sixshop/woocommerce 스켈레톤 제거(국내 사용 미미 + 개방 API 불확실).
 //   그 외 모든 몰은 custom(자체 호스팅) webhook으로 흡수. 특수 케이스는 개별 커스텀.
 
 // 카페24는 cafe24-client.ts에서 별도 등록 (D173 리팩토링 시)
