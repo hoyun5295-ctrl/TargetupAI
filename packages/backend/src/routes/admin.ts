@@ -8,7 +8,7 @@ import { streamCampaignSmsCsv } from '../utils/campaign-sms-export';
 // ★ 2026-06-25: 업로더별 고객 삭제 시 해당 회사 데이터 프로필 캐시 무효화(게이트 즉시 반영)
 import { clearCompanyDataProfileCache } from '../utils/company-data-profile';
 import { DASHBOARD_CARD_POOL, validateCardIds, getRequiredFields, filterPoolByAvailableData, generateDynamicCards } from '../utils/dashboard-card-pool';
-import { detectEnabledFields } from '../utils/enabled-fields';
+import { detectEnabledFields, clearEnabledFieldsCache } from '../utils/enabled-fields';
 import { SUCCESS_CODES_SQL, PENDING_CODES_SQL, getStatusLabel, getStatusType, getCarrierLabel, isSuccess, isPending, getSendTypeLabel, getCampaignChannelLabel, getQueueRowStatus } from '../utils/sms-result-map';
 import { DEFAULT_COSTS } from '../config/defaults';
 import { validateSmsTables } from '../utils/sms-table-validator';
@@ -283,6 +283,8 @@ router.delete('/users/:id/customers', authenticate, requireSuperAdmin, async (re
 
     // ★ 2026-06-25: 고객 수 변동 → 해당 회사 데이터 프로필 캐시 무효화(게이트 즉시 반영)
     if (user.company_id) clearCompanyDataProfileCache(user.company_id);
+    // ★ 2026-07-03: 활성 필드 캐시 동반 무효화
+    if (user.company_id) clearEnabledFieldsCache(user.company_id);
 
     // 감사 로그
     await query(

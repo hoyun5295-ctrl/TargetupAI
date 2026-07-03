@@ -20,6 +20,10 @@ import { callAiMapping, AiMappingQuotaExceeded, AiMappingUnavailable, SupportedD
 import { createCustomerUpsertBuilder } from '../utils/customer-upsert';
 import { registerBulkCompanyUserUnsubscribes } from '../utils/unsubscribe-helper';
 import { resolveBuildTierFromOsInfo } from '../utils/agent-build-tiers';
+// ★ 2026-07-03: 구매 배치 적재 직후 고객 구매요약 컬럼 재계산 (총구매액/최근구매 '-' 문제 근본)
+import { updateCustomerPurchaseAggregates } from '../utils/customer-purchase-aggregates';
+// ★ 2026-07-03: 필드정의 변경 시 활성 필드 캐시 무효화 (고객DB 현황 성능 캐시)
+import { clearEnabledFieldsCache } from '../utils/enabled-fields';
 
 const router = Router();
 
@@ -720,6 +724,9 @@ router.post('/customers', async (req: SyncAuthRequest, res: Response) => {
     }
 
     // sync_logs 기록
+    // ★ 2026-07-03: 고객 배치 upsert = 신규 custom_fields 키 유입 가능 — 활성 필드 캐시 무효화
+    if (upsertedCount > 0) clearEnabledFieldsCache(companyId);
+
     if (agentId) {
       await query(
         `INSERT INTO sync_logs (agent_id, company_id, sync_type, mode, batch_index, total_batches, total_count, success_count, fail_count, failures, completed_at)
@@ -982,6 +989,17 @@ router.post('/purchases', async (req: SyncAuthRequest, res: Response) => {
             });
           }
         }
+      }
+    }
+
+    // ★ 2026-07-03: 이 배치에 등장한 고객들의 구매요약 컬럼 재계산 (멱등 — 원장 기준 전체 재계산)
+    //   집계 실패가 적재 응답을 막지 않도록 격리. idx_purchases_customer 인덱스 기반 소량(≤배치 고객 수).
+    if (insertedCount > 0) {
+      try {
+        const aggIds = Object.values(phoneToCustomerId).filter((v): v is string => !!v);
+        await updateCustomerPurchaseAggregates(companyId, aggIds);
+      } catch (aggError: any) {
+        console.warn(`[Sync] 구매요약 집계 실패(적재는 정상, 다음 배치에서 재계산됨): ${aggError?.message || aggError}`);
       }
     }
 
@@ -1377,6 +1395,9 @@ router.post('/field-definitions', async (req: SyncAuthRequest, res: Response) =>
       fieldType: def.field_type || 'VARCHAR',
     }));
     const upsertedCount = await upsertCustomFieldDefinitions(companyId, mapped);
+
+    // ★ 2026-07-03: 필드정의가 바뀌면 활성 필드 캐시 무효화 (매핑 변경 즉시 화면 반영)
+    clearEnabledFieldsCache(companyId);
 
     // ★ D131 후속(2026-04-21): 전부 실패하면 success=false로 응답 (Agent 재시도 유도).
     //   기존 코드는 upsertedCount=0 이어도 success:true → Agent가 재시도 안 함 → 라벨 영구 미등록.

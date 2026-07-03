@@ -34,7 +34,7 @@ import {
   ArrowLeft, Database, Brain, Loader2, RefreshCw, Sparkles, Users, AlertTriangle,
   Activity, Info, Link2, Store, Server,
   KeyRound, Copy, Check, Unlink, MousePointerClick, AlertCircle, ShoppingCart, Code2, X,
-  Eye, EyeOff, ExternalLink,
+  Eye, EyeOff, ExternalLink, ChevronDown, ChevronUp,
 } from 'lucide-react';
 import { useAuthStore } from '../stores/authStore';
 import ConfirmModal, { type ConfirmState } from '../components/ConfirmModal';
@@ -282,7 +282,7 @@ const CAFE24_REQUIRED_SCOPES = ['mall.read_customer', 'mall.read_order', 'mall.r
 const NAVER_REQUIRED_SCOPES = ['commerce.product.read', 'commerce.order.read', 'commerce.customer.read'];
 
 const PROVIDER_META: Record<ProviderKey, { title: string; note: string }> = {
-  cafe24: { title: '카페24 연동', note: '카페24 개발자센터에서 만든 자체앱의 Client ID·Secret을 입력하면, OAuth 인증 후 회원·주문이 자동 동기화됩니다.' },
+  cafe24: { title: '카페24 연동', note: '쇼핑몰 ID만 입력하면 한줄로 공식 카페24 앱으로 연결됩니다. OAuth 동의 후 회원·주문이 자동 동기화됩니다.' },
   naver: { title: '네이버 스마트스토어 연동', note: '네이버 커머스 API센터에서 만든 애플리케이션의 Client ID·Secret을 입력하면, OAuth 인증 후 주문·회원이 동기화됩니다. (네이버 정책상 phone/email이 제한될 수 있어 매칭률이 낮을 수 있습니다.)' },
   godo: { title: '고도몰 연동', note: '고도몰 쇼핑몰 인증키(key)를 입력하면 주문·고객 데이터가 자동으로 동기화됩니다.' },
   gabia: { title: '가비아 연동', note: '가비아 쇼핑몰은 webhook 방식으로 연동합니다. 아래 Secret·도메인·SDK를 설정하세요.' },
@@ -344,9 +344,10 @@ export default function CdpSettingsPage() {
   const [naverStatus, setNaverStatus] = useState<NaverCommerceStatus | null>(null);
   const [naverStoreId, setNaverStoreId] = useState('');
   const [naverConnecting, setNaverConnecting] = useState(false);
-  // BYO self-app 자격 입력 (회사가 직접 발급한 Client ID/Secret)
+  // BYO self-app 자격 입력 (회사가 직접 발급한 Client ID/Secret) — 2026-07-03부터 고급 옵션(기본 = 한줄로 공식 앱)
   const [cafe24ClientId, setCafe24ClientId] = useState('');
   const [cafe24ClientSecret, setCafe24ClientSecret] = useState('');
+  const [cafe24ShowByo, setCafe24ShowByo] = useState(false);
   const [showCafe24Secret, setShowCafe24Secret] = useState(false);
   const [naverClientId, setNaverClientId] = useState('');
   const [naverClientSecret, setNaverClientSecret] = useState('');
@@ -644,7 +645,29 @@ export default function CdpSettingsPage() {
     finally { setIssuing(false); }
   };
 
-  // 카페24 — self-app 자격 저장(POST /byo-credentials) 후 OAuth 연결 (BYO)
+  // 카페24 — 한줄로 공식 앱으로 연결 (기본 흐름, 2026-07-03): mall_id만 입력 → OAuth.
+  //   백엔드 /oauth/authorize가 자체앱(BYO) 자격 미저장 시 한줄로 공식 앱 키(.env)로 자동 fallback.
+  const handleCafe24ConnectOfficial = async () => {
+    const mallId = cafe24MallId.trim().toLowerCase();
+    if (!mallId || !/^[a-z0-9_-]+$/i.test(mallId)) {
+      toast.error('카페24 쇼핑몰 ID 형식이 올바르지 않습니다 (예: hanjullo-test)');
+      return;
+    }
+    setCafe24Connecting(true);
+    try {
+      const res = await fetch(`/api/cafe24/oauth/authorize?mall_id=${encodeURIComponent(mallId)}`, {
+        headers: { Authorization: `Bearer ${token()}` },
+      });
+      const data = await res.json();
+      if (data.success && data.authorize_url) {
+        window.open(data.authorize_url, 'cafe24_oauth', 'width=720,height=820');
+        toast.info('새 창에서 카페24 로그인 + 동의 완료 후 새로고침해주세요.');
+      } else { toast.error(data.error || '카페24 연동 시작 실패'); }
+    } catch (e: any) { toast.error(e?.message || '카페24 연동 처리 오류'); }
+    finally { setCafe24Connecting(false); }
+  };
+
+  // 카페24 — self-app 자격 저장(POST /byo-credentials) 후 OAuth 연결 (BYO — 고급 옵션)
   const handleCafe24Connect = async () => {
     const mallId = cafe24MallId.trim().toLowerCase();
     const clientId = cafe24ClientId.trim();
@@ -1561,75 +1584,95 @@ client.newCall(req).execute()`}</pre>
               </div>
             ) : (
               <div className="space-y-4">
-                {/* 안내 — 자체앱 만들기 4단계 */}
-                <div className="bg-violet-500/10 border border-violet-400/30 rounded-xl p-4 space-y-3">
-                  <div className="text-xs font-semibold text-violet-100">자체앱 연결 — 4단계</div>
-                  <GuideStep n={1}>
-                    <a href="https://developers.cafe24.com" target="_blank" rel="noreferrer" className="text-violet-200 underline inline-flex items-center gap-1">카페24 개발자센터<ExternalLink className="w-3 h-3" /></a>에서 "앱 만들기"(자체앱)를 생성합니다.
-                  </GuideStep>
-                  <GuideStep n={2}>
-                    앱의 <strong className="text-white/90">Redirect URI</strong>에 아래 주소를 그대로 등록합니다.
-                    <div className="flex items-center gap-2 bg-slate-950 border border-white/10 rounded-lg px-3 py-2 mt-1.5">
-                      <code className="flex-1 text-[11px] text-emerald-200 font-mono break-all">{CAFE24_CALLBACK_URL}</code>
-                      <button onClick={() => copyText(CAFE24_CALLBACK_URL, 'Redirect URI')} className="shrink-0 p-1.5 rounded-md bg-white/5 hover:bg-white/10 text-white/60" title="복사"><Copy className="w-3.5 h-3.5" /></button>
-                    </div>
-                  </GuideStep>
-                  <GuideStep n={3}>
-                    다음 권한(scope)을 모두 선택합니다.
-                    <div className="flex flex-wrap gap-1.5 mt-1.5">
-                      {CAFE24_REQUIRED_SCOPES.map((s) => <span key={s} className="text-[10px] font-mono bg-white/5 border border-white/10 text-white/60 px-2 py-0.5 rounded-full">{s}</span>)}
-                    </div>
-                  </GuideStep>
-                  <GuideStep n={4}>
-                    발급된 <strong className="text-white/90">Client ID·Secret</strong>을 아래에 입력합니다.
-                  </GuideStep>
+                {/* 기본 흐름 — 한줄로 공식 앱 (mall_id만 입력, 2026-07-03) */}
+                <div className="bg-violet-500/10 border border-violet-400/30 rounded-xl p-4">
+                  <div className="text-xs font-semibold text-violet-100 mb-1">쇼핑몰 ID만 입력하면 연결됩니다</div>
+                  <div className="text-[11px] text-white/50">한줄로 공식 카페24 앱으로 연결되어 회원·주문·장바구니가 자동 동기화됩니다. 새 창에서 카페24 로그인 + 권한 동의만 하면 끝.</div>
                 </div>
 
-                {/* 입력 — mall_id + Client ID + Secret */}
-                <div className="space-y-2.5">
-                  <div>
-                    <label className="block text-[11px] text-white/50 mb-1">mall_id</label>
-                    <input
-                      type="text"
-                      value={cafe24MallId}
-                      onChange={(e) => setCafe24MallId(e.target.value)}
-                      placeholder="예: hanjullo-test"
-                      className="w-full px-3 py-2 bg-violet-900/40 border border-white/10 rounded-lg text-sm text-white placeholder-white/30 focus:outline-none focus:border-amber-400/50"
-                    />
-                    <div className="text-[11px] text-white/40 mt-1">admin URL <span className="font-mono">https://hanjullo-test.cafe24.com/admin</span> → mall_id = <span className="font-mono">hanjullo-test</span></div>
-                  </div>
-                  <div>
-                    <label className="block text-[11px] text-white/50 mb-1">Client ID</label>
-                    <input
-                      type="text"
-                      value={cafe24ClientId}
-                      onChange={(e) => setCafe24ClientId(e.target.value)}
-                      placeholder="자체앱 Client ID"
-                      className="w-full px-3 py-2 bg-violet-900/40 border border-white/10 rounded-lg text-sm text-white placeholder-white/30 focus:outline-none focus:border-amber-400/50 font-mono"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-[11px] text-white/50 mb-1">Client Secret</label>
-                    <div className="relative">
-                      <input
-                        type={showCafe24Secret ? 'text' : 'password'}
-                        value={cafe24ClientSecret}
-                        onChange={(e) => setCafe24ClientSecret(e.target.value)}
-                        placeholder="자체앱 Client Secret"
-                        className="w-full px-3 py-2 pr-10 bg-violet-900/40 border border-white/10 rounded-lg text-sm text-white placeholder-white/30 focus:outline-none focus:border-amber-400/50 font-mono"
-                      />
-                      <button type="button" onClick={() => setShowCafe24Secret((v) => !v)} className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-white/40 hover:text-white/70" title={showCafe24Secret ? '숨기기' : '보기'}>
-                        {showCafe24Secret ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                      </button>
-                    </div>
-                  </div>
+                <div>
+                  <label className="block text-[11px] text-white/50 mb-1">쇼핑몰 ID (mall_id)</label>
+                  <input
+                    type="text"
+                    value={cafe24MallId}
+                    onChange={(e) => setCafe24MallId(e.target.value)}
+                    placeholder="예: hanjullo-test"
+                    className="w-full px-3 py-2 bg-violet-900/40 border border-white/10 rounded-lg text-sm text-white placeholder-white/30 focus:outline-none focus:border-amber-400/50"
+                  />
+                  <div className="text-[11px] text-white/40 mt-1">쇼핑몰 주소가 <span className="font-mono">hanjullo-test.cafe24.com</span>이면 → <span className="font-mono">hanjullo-test</span></div>
                 </div>
 
-                <button onClick={handleCafe24Connect} disabled={cafe24Connecting || !isAdmin || !cafe24MallId.trim() || !cafe24ClientId.trim() || !cafe24ClientSecret.trim()} className="w-full px-4 py-2.5 bg-amber-500/30 hover:bg-amber-500/50 text-amber-100 text-sm font-medium rounded-lg disabled:opacity-40 flex items-center justify-center gap-2">
-                  {cafe24Connecting ? <><Loader2 className="w-4 h-4 animate-spin" /> 연결 준비 중...</> : <><Link2 className="w-4 h-4" /> 저장하고 카페24 연결</>}
+                <button onClick={handleCafe24ConnectOfficial} disabled={cafe24Connecting || !isAdmin || !cafe24MallId.trim()} className="w-full px-4 py-2.5 bg-amber-500/30 hover:bg-amber-500/50 text-amber-100 text-sm font-medium rounded-lg disabled:opacity-40 flex items-center justify-center gap-2">
+                  {cafe24Connecting ? <><Loader2 className="w-4 h-4 animate-spin" /> 연결 준비 중...</> : <><Link2 className="w-4 h-4" /> 카페24 연결</>}
                 </button>
                 {!isAdmin && <div className="text-[11px] text-white/50 text-center">연동은 회사 관리자만 가능합니다.</div>}
-                <div className="text-[10px] text-white/30 italic">Client Secret은 한줄로 서버에 안전 보관되며 화면에 다시 표시되지 않습니다.</div>
+
+                {/* 고급 — 자체앱(직접 발급 키)으로 연결 (접이식) */}
+                <div className="border border-white/10 rounded-xl overflow-hidden">
+                  <button onClick={() => setCafe24ShowByo((v) => !v)} className="w-full px-4 py-2.5 flex items-center justify-between text-[11px] text-white/50 hover:bg-white/5">
+                    <span>자체앱(직접 발급한 키)으로 연결 — 고급</span>
+                    {cafe24ShowByo ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+                  </button>
+                  {cafe24ShowByo && (
+                    <div className="p-4 pt-2 space-y-4 border-t border-white/10">
+                      <div className="bg-violet-500/10 border border-violet-400/30 rounded-xl p-4 space-y-3">
+                        <div className="text-xs font-semibold text-violet-100">자체앱 연결 — 4단계</div>
+                        <GuideStep n={1}>
+                          <a href="https://developers.cafe24.com" target="_blank" rel="noreferrer" className="text-violet-200 underline inline-flex items-center gap-1">카페24 개발자센터<ExternalLink className="w-3 h-3" /></a>에서 "앱 만들기"(자체앱)를 생성합니다.
+                        </GuideStep>
+                        <GuideStep n={2}>
+                          앱의 <strong className="text-white/90">Redirect URI</strong>에 아래 주소를 그대로 등록합니다.
+                          <div className="flex items-center gap-2 bg-slate-950 border border-white/10 rounded-lg px-3 py-2 mt-1.5">
+                            <code className="flex-1 text-[11px] text-emerald-200 font-mono break-all">{CAFE24_CALLBACK_URL}</code>
+                            <button onClick={() => copyText(CAFE24_CALLBACK_URL, 'Redirect URI')} className="shrink-0 p-1.5 rounded-md bg-white/5 hover:bg-white/10 text-white/60" title="복사"><Copy className="w-3.5 h-3.5" /></button>
+                          </div>
+                        </GuideStep>
+                        <GuideStep n={3}>
+                          다음 권한(scope)을 모두 선택합니다.
+                          <div className="flex flex-wrap gap-1.5 mt-1.5">
+                            {CAFE24_REQUIRED_SCOPES.map((s) => <span key={s} className="text-[10px] font-mono bg-white/5 border border-white/10 text-white/60 px-2 py-0.5 rounded-full">{s}</span>)}
+                          </div>
+                        </GuideStep>
+                        <GuideStep n={4}>
+                          발급된 <strong className="text-white/90">Client ID·Secret</strong>을 아래에 입력합니다.
+                        </GuideStep>
+                      </div>
+
+                      <div className="space-y-2.5">
+                        <div>
+                          <label className="block text-[11px] text-white/50 mb-1">Client ID</label>
+                          <input
+                            type="text"
+                            value={cafe24ClientId}
+                            onChange={(e) => setCafe24ClientId(e.target.value)}
+                            placeholder="자체앱 Client ID"
+                            className="w-full px-3 py-2 bg-violet-900/40 border border-white/10 rounded-lg text-sm text-white placeholder-white/30 focus:outline-none focus:border-amber-400/50 font-mono"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[11px] text-white/50 mb-1">Client Secret</label>
+                          <div className="relative">
+                            <input
+                              type={showCafe24Secret ? 'text' : 'password'}
+                              value={cafe24ClientSecret}
+                              onChange={(e) => setCafe24ClientSecret(e.target.value)}
+                              placeholder="자체앱 Client Secret"
+                              className="w-full px-3 py-2 pr-10 bg-violet-900/40 border border-white/10 rounded-lg text-sm text-white placeholder-white/30 focus:outline-none focus:border-amber-400/50 font-mono"
+                            />
+                            <button type="button" onClick={() => setShowCafe24Secret((v) => !v)} className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-white/40 hover:text-white/70" title={showCafe24Secret ? '숨기기' : '보기'}>
+                              {showCafe24Secret ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+
+                      <button onClick={handleCafe24Connect} disabled={cafe24Connecting || !isAdmin || !cafe24MallId.trim() || !cafe24ClientId.trim() || !cafe24ClientSecret.trim()} className="w-full px-4 py-2.5 bg-white/5 hover:bg-white/10 border border-white/10 text-white/70 text-sm font-medium rounded-lg disabled:opacity-40 flex items-center justify-center gap-2">
+                        {cafe24Connecting ? <><Loader2 className="w-4 h-4 animate-spin" /> 연결 준비 중...</> : <><Link2 className="w-4 h-4" /> 자체앱 키 저장하고 연결</>}
+                      </button>
+                      <div className="text-[10px] text-white/30 italic">Client Secret은 한줄로 서버에 안전 보관되며 화면에 다시 표시되지 않습니다. 쇼핑몰 ID는 위 입력칸을 함께 사용합니다.</div>
+                    </div>
+                  )}
+                </div>
               </div>
             )}
           </div>

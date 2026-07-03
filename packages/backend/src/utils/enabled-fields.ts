@@ -125,6 +125,24 @@ async function detectCustomFieldTypeFromSamples(
   return 'string';
 }
 
+// ─── 결과 캐시 ───
+// ★ 2026-07-03 성능: 대형 고객사(13만+ × custom 15)에서 전수 스캔 3종이 수 초 → 결과 캐시.
+//   LESSONS_BACKEND 캐시 원칙 준수 — 무효화 길목 배선(업로드 save·전체삭제·업로더별삭제·싱크 필드정의 등록)
+//   + 다중 pm2(메모리 캐시 비전파) 대비 TTL 상한 5분.
+//   키에 scopeWhere/params 포함 — company_user 매장 격리 스코프별 결과 분리.
+const ENABLED_FIELDS_CACHE_TTL_MS = 5 * 60 * 1000;
+const enabledFieldsCache = new Map<string, { at: number; data: EnabledFieldsResult }>();
+
+export function clearEnabledFieldsCache(companyId?: string): void {
+  if (!companyId) {
+    enabledFieldsCache.clear();
+    return;
+  }
+  for (const key of enabledFieldsCache.keys()) {
+    if (key.startsWith(companyId + '|')) enabledFieldsCache.delete(key);
+  }
+}
+
 // ─── 메인 함수 ───
 
 /**
@@ -137,8 +155,23 @@ export async function detectEnabledFields(
 ): Promise<EnabledFieldsResult> {
   const { companyId, scopeWhere, scopeParams } = params;
 
+  // ★ 2026-07-03: 캐시 조회 (5분 TTL) — 소비처가 배열을 변형해도 안전하게 얕은 복사로 반환
+  const cacheKey = `${companyId}|${scopeWhere}|${JSON.stringify(scopeParams)}`;
+  const cached = enabledFieldsCache.get(cacheKey);
+  if (cached && Date.now() - cached.at < ENABLED_FIELDS_CACHE_TTL_MS) {
+    return {
+      fields: [...cached.data.fields],
+      fieldDefLabels: { ...cached.data.fieldDefLabels },
+      fieldDefTypes: { ...cached.data.fieldDefTypes },
+    };
+  }
+
   const fields: EnabledField[] = [];
   const existingKeys = new Set<string>();
+
+  // ★ 2026-07-03: 내부 쿼리가 하나라도 실패하면(부분 결과) 캐시 저장 금지 —
+  //   일시 DB 오류로 축소된 필드 목록이 5분간 화면/엑셀/카드에 고정되는 것 차단
+  let degraded = false;
 
   // ─── 0. customer_field_definitions 라벨/타입 맵 ───
   const fieldDefLabels: Record<string, string> = {};
@@ -158,6 +191,7 @@ export async function detectEnabledFields(
       if (fd.display_order != null) fieldDefOrder[fd.field_key] = fd.display_order;
     }
   } catch (err) {
+    degraded = true;
     console.warn('[CT-18] customer_field_definitions 조회 실패 — FIELD_MAP만 사용:', (err as any)?.message);
   }
 
@@ -232,6 +266,7 @@ export async function detectEnabledFields(
         }
       }
     } catch (err) {
+      degraded = true;
       console.warn('[CT-18] 직접 컬럼 COUNT FILTER 실패:', (err as any)?.message);
     }
   }
@@ -281,11 +316,20 @@ export async function detectEnabledFields(
       existingKeys.add(fieldKey);
     }
   } catch (err) {
+    degraded = true;
     console.warn('[CT-18] custom_fields JSONB 키 조회 실패:', (err as any)?.message);
   }
 
   // 정렬: sort_order 기준
   fields.sort((a, b) => a.sort_order - b.sort_order);
+
+  // ★ 2026-07-03: 캐시 저장 (원본 보관, 반환은 얕은 복사). 부분 실패(degraded) 결과는 캐시 금지.
+  if (!degraded) {
+    enabledFieldsCache.set(cacheKey, {
+      at: Date.now(),
+      data: { fields: [...fields], fieldDefLabels: { ...fieldDefLabels }, fieldDefTypes: { ...fieldDefTypes } },
+    });
+  }
 
   return { fields, fieldDefLabels, fieldDefTypes };
 }

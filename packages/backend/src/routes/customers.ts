@@ -15,7 +15,7 @@ import { detectPhoneFields } from '../utils/callback-filter';
 import { aggregateSmsCountsByCampaign } from '../utils/stats-aggregation';
 import { blockIfSyncActive } from '../middlewares/sync-active-check';
 import { createCustomerUpsertBuilder } from '../utils/customer-upsert';
-import { detectEnabledFields, buildDynamicSelectExpr } from '../utils/enabled-fields';
+import { detectEnabledFields, buildDynamicSelectExpr, clearEnabledFieldsCache } from '../utils/enabled-fields';
 // ★ D219+ Part 2 후속 (2026-05-27): CT-97 활용 — DirectTargetFilterModal 자연어 모드 (BASIC+ 게이팅)
 import { requirePlanFeature } from '../utils/plan-guard';
 import { generateSegmentFromNaturalLanguage, SegmentGenerationError } from '../utils/ai-segment-generator';
@@ -551,6 +551,9 @@ router.post('/', blockIfSyncActive, async (req: Request, res: Response) => {
       );
     }
 
+    // ★ 2026-07-03: 수동 등록도 필드 구성 변경 가능 — 활성 필드 캐시 무효화
+    clearEnabledFieldsCache(companyId);
+
     return res.status(201).json({
       message: '고객이 추가되었습니다',
       customer: result.rows[0],
@@ -660,6 +663,9 @@ router.post('/bulk', blockIfSyncActive, async (req: Request, res: Response) => {
         )
       ) WHERE id = $1
     `, [companyId]);
+
+    // ★ 2026-07-03: 일괄 등록 = 필드 구성 변경 가능 — 활성 필드 캐시 무효화
+    clearEnabledFieldsCache(companyId);
 
     return res.json({
       message: `${successCount}건 성공, ${failCount}건 실패`,
@@ -1191,18 +1197,17 @@ router.get('/filter-options', async (req: Request, res: Response) => {
     }
 
     // ★ D83: genders 추가 — 성별도 dropdown으로 제공 (contains 검색 시 필터 무시 버그 방지)
-    const gendersResult = await query(
-      `SELECT DISTINCT gender FROM customers WHERE ${scopeWhere} AND gender IS NOT NULL AND gender != '' ORDER BY gender`,
+    // ★ 2026-07-03 성능: DISTINCT 3회 순차 전수 스캔 → 단일 스캔 통합 (13만+ 고객사 3배 단축)
+    const optsResult = await query(
+      `SELECT
+         array_agg(DISTINCT gender) FILTER (WHERE gender IS NOT NULL AND gender != '') AS genders,
+         array_agg(DISTINCT grade)  FILTER (WHERE grade  IS NOT NULL AND grade  != '') AS grades,
+         array_agg(DISTINCT region) FILTER (WHERE region IS NOT NULL AND region != '') AS regions
+       FROM customers WHERE ${scopeWhere}`,
       scopeParams
     );
-    const gradesResult = await query(
-      `SELECT DISTINCT grade FROM customers WHERE ${scopeWhere} AND grade IS NOT NULL AND grade != '' ORDER BY grade`,
-      scopeParams
-    );
-    const regionsResult = await query(
-      `SELECT DISTINCT region FROM customers WHERE ${scopeWhere} AND region IS NOT NULL AND region != '' ORDER BY region`,
-      scopeParams
-    );
+    const opts = optsResult.rows[0] || {};
+    const sortKo = (arr: any[] | null) => (arr || []).sort((a, b) => String(a).localeCompare(String(b), 'ko'));
 
     // ★ 브랜드(store_code) 목록 — 고객사관리자/슈퍼관리자가 브랜드 필터에 사용
     let storeCodes: string[] = [];
@@ -1215,9 +1220,9 @@ router.get('/filter-options', async (req: Request, res: Response) => {
     }
 
     res.json({
-      genders: gendersResult.rows.map((r: any) => r.gender),
-      grades: gradesResult.rows.map((r: any) => r.grade),
-      regions: regionsResult.rows.map((r: any) => r.region),
+      genders: sortKo(opts.genders),
+      grades: sortKo(opts.grades),
+      regions: sortKo(opts.regions),
       store_codes: storeCodes,
     });
   } catch (error) {
@@ -1480,6 +1485,9 @@ router.post('/bulk-delete', blockIfSyncActive, async (req: Request, res: Respons
       ]
     );
 
+    // ★ 2026-07-03: 일괄 삭제 = 어떤 필드의 마지막 데이터가 사라질 수 있음 — 활성 필드 캐시 무효화
+    if (companyId) clearEnabledFieldsCache(companyId);
+
     res.json({
       success: true,
       message: `${deleteResult.rowCount}명의 고객이 삭제되었습니다`,
@@ -1550,6 +1558,8 @@ router.post('/delete-all', blockIfSyncActive, async (req: Request, res: Response
 
     // ★ 2026-06-25: 고객 0건이 됐으므로 데이터 프로필 캐시 무효화 → 게이트 즉시 재표시
     clearCompanyDataProfileCache(deleteCompanyId);
+    // ★ 2026-07-03: 전체삭제 = 활성 필드도 사라짐 — 활성 필드 캐시 동반 무효화
+    clearEnabledFieldsCache(deleteCompanyId);
 
     // 감사 로그
     await query(

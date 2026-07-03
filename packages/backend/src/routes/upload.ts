@@ -11,6 +11,7 @@ import { validateUploadMapping } from '../utils/upload-mapping-validator';
 import { createCustomerUpsertBuilder } from '../utils/customer-upsert';
 // ★ 2026-06-25: 고객 업로드 완료 시 회사 데이터 프로필 캐시 무효화(게이트 "고객 없음" 오표시 차단)
 import { clearCompanyDataProfileCache } from '../utils/company-data-profile';
+import { clearEnabledFieldsCache } from '../utils/enabled-fields';
 import { dropEmptyColumns, dropEmptyHeaderColumns, isFirstRowHeaderRow } from '../utils/excel-columns';
 import { registerBulkCompanyUserUnsubscribes } from '../utils/unsubscribe-helper';
 
@@ -808,6 +809,8 @@ async function processUploadInBackground(
 
     // ★ 2026-06-25: 고객 수/필드 채워짐이 바뀌었으므로 데이터 프로필 캐시 무효화 → 게이트·AI 프롬프트 즉시 반영
     if (companyId) clearCompanyDataProfileCache(companyId);
+    // ★ 2026-07-03: 업로드로 필드 구성이 바뀔 수 있음 — 활성 필드 캐시 동반 무효화
+    if (companyId) clearEnabledFieldsCache(companyId);
 
     console.log(`[업로드 완료] fileId=${fileId}, 신규=${insertCount}, 업데이트=${duplicateCount}, 오류=${errorCount}`);
 
