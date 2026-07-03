@@ -19,6 +19,8 @@
 
 import { Router, Request, Response, json } from 'express';
 import { randomBytes } from 'crypto';
+import { readFileSync } from 'fs';
+import { resolve } from 'path';
 import { authenticate } from '../middlewares/auth';
 import { query } from '../config/database';
 import {
@@ -167,6 +169,34 @@ router.post('/launch-log', json({ limit: '16kb' }), (req: Request, res: Response
     return res.json({ success: true });
   } catch {
     return res.json({ success: true }); // 로그 실패는 랜딩 방해 X
+  }
+});
+
+// ════════════════════════════════════════════════════════════════════
+// SDK 서빙 (CORS) — 공개(인증 전). 카페24 scripttag는 src에 Access-Control-Allow-Origin: * 를 요구(422).
+//   nginx 정적(/sdk/)엔 CORS 헤더가 없어, backend가 CORS + CORP 헤더와 함께 SDK를 서빙한다.
+//   실물 = company-frontend/public/sdk/{version}/hanjul.min.js (커밋 소스 → git pull이면 항상 존재, 버전별 1회 캐시).
+// ════════════════════════════════════════════════════════════════════
+const sdkFileCache = new Map<string, Buffer>();
+router.get('/sdk/:version/hanjul.min.js', (req: Request, res: Response) => {
+  const version = String(req.params.version || '');
+  if (!/^v[0-9]+\.[0-9]+\.[0-9]+(-[a-z0-9]+)?$/.test(version)) {
+    return res.status(400).type('text/plain').send('invalid version');
+  }
+  try {
+    let buf = sdkFileCache.get(version);
+    if (!buf) {
+      buf = readFileSync(resolve(__dirname, '../../../company-frontend/public/sdk', version, 'hanjul.min.js'));
+      sdkFileCache.set(version, buf);
+    }
+    res.setHeader('Content-Type', 'application/javascript; charset=utf-8');
+    res.setHeader('Access-Control-Allow-Origin', '*'); // 카페24 scripttag src CORS 요구
+    res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin'); // helmet 기본(same-origin) 덮어 교차 로드 허용
+    res.setHeader('Cache-Control', 'public, max-age=3600');
+    return res.send(buf);
+  } catch (e: any) {
+    console.log('[Cafe24 SDK] 서빙 실패 version=', version, e?.message || e);
+    return res.status(404).type('text/plain').send('not found');
   }
 });
 
