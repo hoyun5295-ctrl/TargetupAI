@@ -37,6 +37,7 @@ import { syncOrder } from './cdp-orders';
 import { trackEvent } from './cdp-events';
 import { buildWebhookIdempotencyKey } from './cdp-idempotency';
 import { buildCafe24AuthorizeUrl as buildCafe24Url } from './provider-oauth-url';
+import { firstPositiveAmount } from './normalize';
 import { resolveProviderOAuthCredentials, type ProviderOAuthCredentials } from './provider-credentials';
 
 const CAFE24_CLIENT_ID = process.env.CAFE24_CLIENT_ID || '';
@@ -495,6 +496,9 @@ export function mapCafe24EventNo(eventNo: unknown): string | null {
   return CAFE24_EVENT_NO_MAP[n] || null;
 }
 
+// 금액 파싱은 공용 CT normalize.firstPositiveAmount 사용 — "0.00" 문자열 truthy 함정 방어
+// (2026-07-03 gyunoo83 실주문 실측 — 순서: 실결제액 → 주문 총액(배송비 포함) → 상품 금액)
+
 // ════════════════════════════════════════════════════════════════════
 // 헬퍼
 // ════════════════════════════════════════════════════════════════════
@@ -586,7 +590,10 @@ export const cafe24Adapter: IProviderAdapter = {
         break;
 
       case 'order.created':
-      case 'order.updated':
+      case 'order.updated': {
+        // ★ 2026-07-03 실측 정정(gyunoo83 실주문 payload) — 상품 목록은 items가 아니라 extra_info로 온다.
+        const orderItems = Array.isArray(resource.items) ? resource.items
+          : (Array.isArray(resource.extra_info) ? resource.extra_info : undefined);
         await syncOrder(companyId, {
           source: 'cafe24',
           orderId: String(resource.order_id || ''),
@@ -595,9 +602,9 @@ export const cafe24Adapter: IProviderAdapter = {
           phone: resource.buyer_cellphone || resource.buyer_phone,
           name: resource.buyer_name,
           status: resource.order_status === 'completed' ? 'completed' : (resource.order_status || 'pending'),
-          totalAmount: Number(resource.actual_payment_amount || resource.order_price_amount || 0),
-          itemCount: resource.items ? resource.items.length : undefined,
-          items: Array.isArray(resource.items) ? resource.items.map((it: any) => ({
+          totalAmount: firstPositiveAmount(resource.actual_payment_amount, resource.initial_total_amount_due, resource.order_price_amount),
+          itemCount: orderItems ? orderItems.length : undefined,
+          items: orderItems ? orderItems.map((it: any) => ({
             productId: it.product_no ? String(it.product_no) : undefined,
             productName: it.product_name,
             price: it.product_price ? Number(it.product_price) : undefined,
@@ -607,6 +614,7 @@ export const cafe24Adapter: IProviderAdapter = {
           currency: 'KRW',
         });
         break;
+      }
 
       case 'order.cancelled':
       case 'order.refunded':
@@ -619,7 +627,7 @@ export const cafe24Adapter: IProviderAdapter = {
           phone: resource.buyer_cellphone || resource.buyer_phone,
           name: resource.buyer_name,
           status: event === 'order.refunded' ? 'refunded' : 'cancelled',
-          totalAmount: Number(resource.actual_payment_amount || resource.order_price_amount || 0),
+          totalAmount: firstPositiveAmount(resource.actual_payment_amount, resource.initial_total_amount_due, resource.order_price_amount),
           orderedAt: resource.cancelled_date || resource.order_date || new Date().toISOString(),
           currency: 'KRW',
         });

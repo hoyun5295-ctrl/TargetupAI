@@ -693,3 +693,17 @@ export function cellToString(val: unknown): string {
   if (val instanceof Date) return val.toISOString();
   return String(val);
 }
+
+/**
+ * ★ 2026-07-03 — 자사몰 웹훅 금액 파싱 공용 헬퍼 (CT — cafe24/naver 어댑터 공유).
+ * 외부 커머스 API 금액은 "0.00" 같은 문자열로 와서 truthy — `a || b` fallback이 동작하지 않아
+ * 미입금 주문 매출이 0으로 적재되던 결함(2026-07-03 카페24 gyunoo83 실주문으로 확인).
+ * 양수로 파싱되는 첫 값을 채택. 전부 0/무효면 0.
+ */
+export function firstPositiveAmount(...vals: unknown[]): number {
+  for (const v of vals) {
+    const n = Number(v);
+    if (isFinite(n) && n > 0) return n;
+  }
+  return 0;
+}

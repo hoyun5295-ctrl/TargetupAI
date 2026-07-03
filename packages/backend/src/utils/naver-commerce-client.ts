@@ -3,7 +3,7 @@
  *
  * 🎯 목적
  *   Harold 명시 — "네이버스토어를 자사몰처럼 쓰는 회사들 많음". 네이버 커머스 API OAuth + Webhook + REST 표준 wrapper.
- *   cafe24-client.ts (CT-23) 미러 패턴 + naverSmartStoreAdapter 박음 (Provider Registry 자동 등록).
+ *   cafe24-client.ts (CT-23) 미러 패턴 + naverSmartStoreAdapter 등록 (Provider Registry 자동 등록).
  *
  * 📋 네이버 커머스 API 표준 (Application 등록 후)
  *   - Authorize URL: https://api.commerce.naver.com/oauth2/authorize
@@ -15,8 +15,8 @@
  *   - NAVER_COMMERCE_CLIENT_SECRET
  *   - NAVER_COMMERCE_REDIRECT_URI (예: https://app.hanjul.ai/api/naver-commerce/oauth/callback)
  *
- * ⛔ 외부 API 실 endpoint URL + scope + 토큰 TTL은 Harold 박은 네이버 커머스 콘솔에서 최종 검증 필요.
- *   본 wrapper는 cafe24와 동일한 표준 OAuth 2.0 흐름 + HMAC-SHA256 Webhook 서명 박음.
+ * ⛔ 외부 API 실 endpoint URL + scope + 토큰 TTL은 Harold가 등록한 네이버 커머스 콘솔에서 최종 검증 필요.
+ *   이 wrapper는 cafe24와 동일한 표준 OAuth 2.0 흐름 + HMAC-SHA256 Webhook 서명 적용.
  */
 
 import { query } from '../config/database';
@@ -33,6 +33,7 @@ import { syncOrder } from './cdp-orders';
 import { trackEvent } from './cdp-events';
 import { buildWebhookIdempotencyKey } from './cdp-idempotency';
 import { resolveProviderOAuthCredentials, type ProviderOAuthCredentials } from './provider-credentials';
+import { firstPositiveAmount } from './normalize';
 
 const NAVER_COMMERCE_CLIENT_ID = process.env.NAVER_COMMERCE_CLIENT_ID || '';
 const NAVER_COMMERCE_CLIENT_SECRET = process.env.NAVER_COMMERCE_CLIENT_SECRET || '';
@@ -483,7 +484,8 @@ export const naverSmartStoreAdapter: IProviderAdapter = {
           phone: resource.buyer_cellphone || resource.phone,
           name: resource.buyer_name || resource.name,
           status: String(resource.status || 'pending'),
-          totalAmount: Number(resource.total_payment_amount || resource.total_amount || 0),
+          // "0.00" 문자열 truthy 함정 방어 — 공용 CT firstPositiveAmount (2026-07-03 카페24 실측 교훈 동반 적용)
+          totalAmount: firstPositiveAmount(resource.total_payment_amount, resource.total_amount),
           itemCount: Array.isArray(resource.items) ? resource.items.length : undefined,
           items: Array.isArray(resource.items) ? resource.items.map((it: any) => ({
             productId: it.product_id ? String(it.product_id) : undefined,
