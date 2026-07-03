@@ -12,7 +12,7 @@ import { Router, Request, Response } from 'express';
 import { randomUUID } from 'crypto';
 import { authenticate, requireSuperAdmin } from '../middlewares/auth';
 import { query } from '../config/database';
-import { PLATFORMS, OS_TIERS, DB_OPTIONS, VERIFIED_COMBOS, resolveAgentBuild, PlatformId } from '../utils/agent-build-tiers';
+import { PLATFORMS, OS_TIERS, DB_OPTIONS, VERIFIED_COMBOS, resolveAgentBuild, buildReleaseDownloadUrl, PlatformId } from '../utils/agent-build-tiers';
 import path from 'path';
 import fs from 'fs';
 
@@ -460,11 +460,13 @@ router.post('/releases', authenticate, requireSuperAdmin, async (req: Request, r
       await query(`UPDATE sync_releases SET is_active = false WHERE is_active = true AND tier IS NULL`);
     }
     // download_url = 서버 서빙 라우트(에이전트 baseURL 기준 상대경로). released_at/created_at은 default now().
+    //   ★ 2026-07-03: 티어별 릴리즈는 티어를 인코딩(/download/<version>-<tier>) → 티어마다 다른 exe 무선 서빙.
+    //   서버 파일 = agent-releases/sync-agent-<version>-<tier>.exe (전역이면 sync-agent-<version>.exe).
     const { rows } = await query(
       `INSERT INTO sync_releases (version, download_url, checksum, release_notes, force_update, is_active, tier)
        VALUES ($1, $2, $3, $4, $5, true, $6)
        RETURNING id, version, tier, download_url, force_update, is_active, released_at`,
-      [version, `/api/sync/download/${version}`, checksum || null, release_notes || null, force_update ?? true, tier || null]
+      [version, buildReleaseDownloadUrl(version, tier || null), checksum || null, release_notes || null, force_update ?? true, tier || null]
     );
     res.json({ success: true, release: rows[0] });
   } catch (error) {

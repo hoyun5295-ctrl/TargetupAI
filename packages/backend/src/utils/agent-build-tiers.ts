@@ -214,6 +214,19 @@ export const VERIFIED_COMBOS = new Set<string>([
   'win-2008r2__oracle-10g',
 ]);
 
+/**
+ * ★ 2026-07-03: 자동 업데이트 릴리즈 download_url 생성.
+ *   티어별 릴리즈는 티어마다 다른 exe를 무선 서빙해야 하므로 download_url에 티어를 인코딩한다.
+ *   GET /api/sync/download/:version 이 <param>을 그대로 sync-agent-<param>.exe 로 서빙(하이픈 허용)하므로
+ *   서버 파일명 = sync-agent-<version>-<tier>.exe, 라우트 변경 불필요.
+ *   tier 없으면(전역) 종전대로 sync-agent-<version>.exe.
+ */
+export function buildReleaseDownloadUrl(version: string, tier: string | null | undefined): string {
+  return tier
+    ? `/api/sync/download/${version}-${tier}`
+    : `/api/sync/download/${version}`;
+}
+
 /** dbId → driver (DB_OPTIONS의 driver 필드가 진실, 헬퍼는 fallback). */
 export function driverOfDb(dbId: string): DriverId | null {
   return DB_OPTIONS.find((d) => d.id === dbId)?.driver ?? null;

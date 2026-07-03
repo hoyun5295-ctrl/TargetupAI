@@ -1835,6 +1835,39 @@ client.newCall(req).execute()`}</pre>
                 <div className="text-[10px] text-white/30 italic">인증키는 한줄로 서버에 안전 보관되며 화면에 다시 표시되지 않습니다.</div>
               </div>
             )}
+
+            {/* ★ 2026-07-03 고도몰 SDK 설치 (행동·회원 수집) — 주문 API 키와 별개. 고도몰은 자동삽입 불가라 스킨 복붙. */}
+            <div className="mt-5 pt-5 border-t border-white/10 space-y-4">
+              <div className="flex items-center gap-2">
+                <Code2 className="w-4 h-4 text-violet-300" />
+                <h3 className="text-sm font-bold text-white">SDK 설치 — 방문·회원·장바구니 수집</h3>
+              </div>
+              <div className="text-[11px] text-white/50 -mt-2">주문(위)과 별개입니다. 방문·회원·장바구니까지 수집하려면 고도몰 스킨(PC·모바일 각각)에 아래를 붙여넣으세요. 고도몰5 표준 치환코드라 수정 없이 동작합니다.</div>
+              {(() => {
+                const godoHead = `<script src="https://app.hanjul.ai/sdk/v0.3.8/hanjul.min.js" data-hjl-key="${usage?.public_key || 'hjl_발급받은_공개키'}" async></script>`;
+                const godoBody = `<body data-hjl-user-id="{=gSess.memNo}" data-hjl-phone="{=gSess.cellPhone}" data-hjl-name="{=gSess.memNm}">`;
+                const godoCart = `<script>\n  // 장바구니 담기 성공 시점(담기 버튼/AJAX 성공)에 호출\n  window.hjl && window.hjl.track('cart_add', {\n    product_name: "{=goodsView['goodsNm']}",\n    price: Number("{=gd_isset(goodsView['goodsPrice'],0)}"),\n    product_url: location.href,\n    quantity: 1\n  });\n</script>`;
+                const godoPurchase = `<script>\n  window.hjl && window.hjl.track('purchase', { order_id: '{=orderInfo.orderNo}' });\n</script>`;
+                const blk = (label: string, code: string, copyLabel: string) => (
+                  <div key={copyLabel}>
+                    <div className="text-xs font-medium text-white/70 mb-1.5">{label}</div>
+                    <pre className="bg-slate-950 border border-white/10 rounded-xl p-3 text-[11px] text-emerald-200 overflow-x-auto whitespace-pre-wrap break-all">{code}</pre>
+                    <button type="button" onClick={() => copyText(code, copyLabel)} className="mt-2 px-3 py-2 bg-indigo-500/40 hover:bg-indigo-500/60 text-white rounded-lg text-xs font-medium inline-flex items-center gap-1.5">
+                      <Copy className="w-3.5 h-3.5" />복사
+                    </button>
+                  </div>
+                );
+                return (
+                  <div className="space-y-4">
+                    {blk('① 설치 스크립트 — 모든 페이지 스킨 <head>', godoHead, '고도몰 설치 스크립트')}
+                    {blk('② 회원 식별 — 로그인 스킨 <body> 태그', godoBody, '고도몰 회원 식별 코드')}
+                    {blk('③ 장바구니 담기 — 상품상세(goods_view) 스킨', godoCart, '고도몰 장바구니 코드')}
+                    {blk('④ 구매 완료 — 주문완료(order_end) 스킨', godoPurchase, '고도몰 구매 완료 코드')}
+                    <div className="text-[10px] text-amber-300/70 italic">PC·모바일 스킨 양쪽에 넣어야 합니다. 그리고 "수집 허용 도메인"에 몰 도메인을 등록해야 수집이 시작됩니다.</div>
+                  </div>
+                );
+              })()}
+            </div>
           </div>
         )}
 
