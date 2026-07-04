@@ -602,11 +602,10 @@ router.get('/templates', async (req: Request, res: Response) => {
       params.push(profileId);
       where.push(`t.profile_id = $${params.length}`);
     }
-    // 소유자 필터: company_user는 본인 등록 템플릿만 (D130 §2-2)
-    if (req.user?.userType === 'company_user') {
-      params.push(req.user.userId);
-      where.push(`t.created_by = $${params.length}`);
-    }
+    // ★ 2026-07-04 (Harold 정책): 조회는 회사 전체 노출. 등록·수정·삭제만 소유자/관리자 제한.
+    //   기존 company_user는 created_by=본인 필터로 목록이 늘 0건이었다(등록은 requireCompanyAdmin 전용이라
+    //   company_user가 만든 템플릿이 존재할 수 없음). 사용자 계정도 회사가 등록한 템플릿을 모두 볼 수 있게 필터 제거.
+    //   쓰기(수정/삭제/검수요청 등)는 requireTemplateAccess의 소유권 검사(company_user=소유자, admin=전체)로 별도 게이팅.
     const r = await query(
       `SELECT t.*, p.profile_key, p.profile_name,
               u.name AS created_by_name, u.login_id AS created_by_login_id
@@ -848,12 +847,18 @@ router.post(
 
 // 공용 헬퍼: templateCode → {senderKey, id, createdBy} 찾기
 // user 정보가 전달되면 company_user는 본인 소유만 접근 허용 (소유자 체크 D130)
-type TemplateCtx = { senderKey: string; id: string; createdBy: string | null; templateKey: string | null };
+// imcTemplateKey = IMC 경로 식별자(templateKey 기준). D217이 template_code를 카카오 코드(B_XX)로
+//   덮어쓴 뒤 IMC 조회/수정/삭제/검수요청은 여전히 templateKey(=한줄로가 발급해 보낸 로컬 키, template_key 컬럼)로만
+//   식별된다. template_key가 있으면 그것을, 없으면(옛 데이터) URL의 template_code로 폴백.
+type TemplateCtx = { senderKey: string; id: string; createdBy: string | null; templateKey: string | null; imcTemplateKey: string };
 
 async function resolveTemplateContext(
   companyId: string,
   templateCode: string,
   user?: { userId: string; userType: string } | undefined,
+  // ★ 2026-07-04: 조회(목록/상세/이력)는 회사 전체 허용, 쓰기(수정/삭제/검수요청)만 소유자 검사.
+  //   requireOwnership=false면 같은 회사(companyId 일치)이기만 하면 접근 허용(소유자 아니어도 조회 OK).
+  requireOwnership: boolean = true,
 ): Promise<TemplateCtx | null | 'forbidden'> {
   const r = await query(
     `SELECT t.id, t.created_by, t.template_key, p.profile_key
@@ -864,10 +869,16 @@ async function resolveTemplateContext(
   );
   if (r.rows.length === 0) return null;
   const row = r.rows[0];
-  if (user?.userType === 'company_user' && row.created_by !== user.userId) {
+  if (requireOwnership && user?.userType === 'company_user' && row.created_by !== user.userId) {
     return 'forbidden';
   }
-  return { senderKey: row.profile_key, id: row.id, createdBy: row.created_by, templateKey: row.template_key || null };
+  return {
+    senderKey: row.profile_key,
+    id: row.id,
+    createdBy: row.created_by,
+    templateKey: row.template_key || null,
+    imcTemplateKey: row.template_key || templateCode,
+  };
 }
 
 // 컨트롤타워: 템플릿 접근 체크 + companyId 확보 + 404/403 응답 일원화 (D130)
@@ -875,6 +886,7 @@ async function resolveTemplateContext(
 async function requireTemplateAccess(
   req: Request,
   res: Response,
+  opts?: { requireOwnership?: boolean },
 ): Promise<({ companyId: string } & TemplateCtx) | null> {
   const companyId = requireCompany(req, res);
   if (!companyId) return null;
@@ -882,6 +894,7 @@ async function requireTemplateAccess(
     companyId,
     req.params.templateCode,
     req.user,
+    opts?.requireOwnership !== false, // 기본 true(쓰기 소유권 검사). 조회 라우트만 false 전달.
   );
   if (ctx === null) {
     res.status(404).json({ success: false, error: '템플릿 없음' });
@@ -899,7 +912,8 @@ async function requireTemplateAccess(
 
 router.get('/templates/:templateCode', async (req: Request, res: Response) => {
   try {
-    const ctx = await requireTemplateAccess(req, res);
+    // 조회(상세)는 회사 전체 허용 (Harold 정책 2026-07-04) — 같은 회사면 소유자 아니어도 열람 가능.
+    const ctx = await requireTemplateAccess(req, res, { requireOwnership: false });
     if (!ctx) return;
 
     // IMC 최신 상태 동기화
@@ -909,7 +923,7 @@ router.get('/templates/:templateCode', async (req: Request, res: Response) => {
     //   2) 기존엔 IMC의 "활성상태(status A/R/S)"를 검수상태 컬럼(status)에 그대로 덮어써
     //      상태 어휘가 섞였다 → 검수상태는 inspectionStatus 정규화로, 활성상태는 imc_template_status로 분리.
     try {
-      const r = await imc.getAlimtalkTemplate(ctx.senderKey, ctx.templateKey || req.params.templateCode);
+      const r = await imc.getAlimtalkTemplate(ctx.senderKey, ctx.imcTemplateKey);
       if (r.code === '0000' && r.data) {
         const d: any = r.data;
         const inspection = d.inspectionStatus ? normalizeImcTemplateStatus(String(d.inspectionStatus)) : null;
@@ -982,7 +996,7 @@ router.get(
   async (req: Request, res: Response) => {
     try {
       const tpl = await query(
-        `SELECT p.profile_key
+        `SELECT p.profile_key, t.template_key
            FROM kakao_templates t
            LEFT JOIN kakao_sender_profiles p ON p.id = t.profile_id
           WHERE t.template_code = $1
@@ -994,7 +1008,7 @@ router.get(
       }
       const r = await imc.getAlimtalkTemplateHistory(
         tpl.rows[0].profile_key,
-        req.params.templateCode,
+        tpl.rows[0].template_key || req.params.templateCode,
       );
       return sendImcManagedResponse(res, r, { fallback: '이력 조회에 실패했습니다' });
     } catch (err) {
@@ -1009,7 +1023,7 @@ router.get(
   async (req: Request, res: Response) => {
     try {
       const tpl = await query(
-        `SELECT p.profile_key
+        `SELECT p.profile_key, t.template_key
            FROM kakao_templates t
            LEFT JOIN kakao_sender_profiles p ON p.id = t.profile_id
           WHERE t.template_code = $1
@@ -1021,7 +1035,7 @@ router.get(
       }
       const r = await imc.getAlimtalkTemplateHistoryDetail(
         tpl.rows[0].profile_key,
-        req.params.templateCode,
+        tpl.rows[0].template_key || req.params.templateCode,
         req.params.histId,
       );
       return sendImcManagedResponse(res, r, { fallback: '이력 상세 조회에 실패했습니다' });
@@ -1044,7 +1058,7 @@ router.put(
       const body = req.body || {};
       const r = await imc.updateAlimtalkTemplate(
         ctx.senderKey,
-        req.params.templateCode,
+        ctx.imcTemplateKey,
         body,
       );
       if (r.code !== '0000') {
@@ -1144,7 +1158,7 @@ router.get(
       let imcResult: any = null;
       let imcError: any = null;
       try {
-        const imcDownload = await imc.getAlimtalkCommentFile(ctx.senderKey, req.params.templateCode);
+        const imcDownload = await imc.getAlimtalkCommentFile(ctx.senderKey, ctx.imcTemplateKey);
         imcResult = {
           size: imcDownload.size,
           content_type: imcDownload.contentType,
@@ -1186,7 +1200,7 @@ router.delete(
     try {
       const ctx = await requireTemplateAccess(req, res);
       if (!ctx) return;
-      const r = await imc.deleteAlimtalkTemplate(ctx.senderKey, req.params.templateCode);
+      const r = await imc.deleteAlimtalkTemplate(ctx.senderKey, ctx.imcTemplateKey);
       await query(
         `UPDATE kakao_templates SET status='DELETED', updated_at=now() WHERE id=$1`,
         [ctx.id],
@@ -1293,7 +1307,7 @@ router.post(
       if (evidenceBuffer) {
         r = await imc.requestInspectionWithFile(
           ctx.senderKey,
-          req.params.templateCode,
+          ctx.imcTemplateKey,
           finalComment,
           evidenceBuffer,
           evidenceFilename,
@@ -1302,7 +1316,7 @@ router.post(
       } else {
         r = await imc.requestInspection(
           ctx.senderKey,
-          req.params.templateCode,
+          ctx.imcTemplateKey,
           finalComment || undefined,
         );
       }
@@ -1356,7 +1370,7 @@ router.post(
       }
       const r = await imc.requestInspectionWithFile(
         ctx.senderKey,
-        req.params.templateCode,
+        ctx.imcTemplateKey,
         req.body?.comment || '',
         buffer,
         filename,
@@ -1381,7 +1395,7 @@ router.put(
     try {
       const ctx = await requireTemplateAccess(req, res);
       if (!ctx) return;
-      const r = await imc.cancelInspection(ctx.senderKey, req.params.templateCode);
+      const r = await imc.cancelInspection(ctx.senderKey, ctx.imcTemplateKey);
       await query(
         `UPDATE kakao_templates SET status='DRAFT', updated_at=now() WHERE id=$1`,
         [ctx.id],
@@ -1399,7 +1413,7 @@ router.put(
     try {
       const ctx = await requireTemplateAccess(req, res);
       if (!ctx) return;
-      const r = await imc.releaseTemplateDormant(ctx.senderKey, req.params.templateCode);
+      const r = await imc.releaseTemplateDormant(ctx.senderKey, ctx.imcTemplateKey);
       await query(
         `UPDATE kakao_templates SET status='APPROVED', updated_at=now() WHERE id=$1`,
         [ctx.id],
@@ -1426,7 +1440,7 @@ router.patch(
       if (!ctx) return;
       const r = await imc.updateCustomCode(
         ctx.senderKey,
-        req.params.templateCode,
+        ctx.imcTemplateKey,
         customTemplateCode,
       );
       await query(
@@ -1452,7 +1466,7 @@ router.patch(
       if (!ctx) return;
       const r = await imc.updateExposure(
         ctx.senderKey,
-        req.params.templateCode,
+        ctx.imcTemplateKey,
         exposureYn,
       );
       res.json({ success: r.code === '0000', imc: r });
@@ -1474,7 +1488,7 @@ router.patch(
       if (!ctx) return;
       const r = await imc.updateServiceMode(
         ctx.senderKey,
-        req.params.templateCode,
+        ctx.imcTemplateKey,
         serviceMode,
       );
       await query(

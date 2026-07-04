@@ -798,7 +798,8 @@ export default function AlimtalkManagementSection() {
                 <th className="text-center px-3 py-2 whitespace-nowrap">상태</th>
                 <th className="text-left px-3 py-2 whitespace-nowrap">등록일시</th>
                 <th className="text-left px-3 py-2 whitespace-nowrap">업데이트</th>
-                <th className="text-right px-3 py-2 whitespace-nowrap">관리</th>
+                {/* ★ 2026-07-04: 관리(액션) 열 우측 고정 — 표가 뷰포트보다 넓어도 액션 버튼이 항상 보이게. */}
+                <th className="sticky right-0 z-20 bg-gray-50 border-l border-gray-200 text-right px-3 py-2 whitespace-nowrap">관리</th>
               </tr>
             </thead>
             <tbody>
@@ -819,11 +820,15 @@ export default function AlimtalkManagementSection() {
                 const isKreq  = t.status === 'KREQ';
                 const isRej   = ['REJECTED', 'REJ', 'HREJ', 'KREJ'].includes(t.status);
                 void isKreq; // KREQ는 액션 버튼 미노출(상세보기만) — 상태 라벨로만 표시
+                // ★ 2026-07-04 (Harold 정책): 조회는 회사 전체, 수정/검수요청/삭제는 소유자·관리자만.
+                //   company_user가 남의 템플릿 쓰기 버튼을 눌러 백엔드 403을 만나지 않도록 프론트에서 게이팅.
+                const isOwner = !!authUser?.id && t.created_by === authUser.id;
+                const canEdit = canManage || isOwner;
                 return (
-                  <tr key={t.id} className="border-t border-gray-100 hover:bg-gray-50">
+                  <tr key={t.id} className="group border-t border-gray-100 hover:bg-gray-50">
                     {/* ★ 2026-07-02 일괄 검수요청: 등록(DRAFT/REG) 행만 선택 가능 */}
                     <td className="px-3 py-2 whitespace-nowrap w-8">
-                      {isDraft && (
+                      {isDraft && canEdit && (
                         <input
                           type="checkbox"
                           aria-label={`${t.template_name} 선택`}
@@ -896,7 +901,7 @@ export default function AlimtalkManagementSection() {
                         ? new Date(t.updated_at).toLocaleString('ko-KR')
                         : '-'}
                     </td>
-                    <td className="text-right px-3 py-2 whitespace-nowrap">
+                    <td className="sticky right-0 z-10 bg-white group-hover:bg-gray-50 border-l border-gray-200 text-right px-3 py-2 whitespace-nowrap">
                       <div className="inline-flex flex-nowrap gap-1 items-center">
                       {/* 상세보기: 모든 상태에서 노출 (read-only 모달) */}
                       <button
@@ -907,7 +912,7 @@ export default function AlimtalkManagementSection() {
                         상세보기
                       </button>
                       {/* 수정: DRAFT(등록)에서만 */}
-                      {isDraft && (
+                      {isDraft && canEdit && (
                         <button
                           type="button"
                           onClick={() => setEditing(toFormData(t))}
@@ -917,7 +922,7 @@ export default function AlimtalkManagementSection() {
                         </button>
                       )}
                       {/* 검수요청: DRAFT 전용 */}
-                      {isDraft && (
+                      {isDraft && canEdit && (
                         <button
                           type="button"
                           onClick={() => inspect(t)}
@@ -927,7 +932,7 @@ export default function AlimtalkManagementSection() {
                         </button>
                       )}
                       {/* 검수요청 취소: REQUESTED/REVIEWING */}
-                      {isReq && (
+                      {isReq && canEdit && (
                         <button
                           type="button"
                           onClick={() => cancelInspect(t)}
@@ -957,7 +962,7 @@ export default function AlimtalkManagementSection() {
                           기존엔 inspect(t) → 작은 검수요청 모달(코멘트+증빙자료만)로 본문 수정 동선이 없던 사고.
                           이제 setEditing + setEditingMeta로 풀 폼(AlimtalkTemplateFormV2 editing mode)에 들어가 본문 수정 후
                           저장하면 autoInspectAfterSave 분기로 자동 POST /inspect 호출 → 재검수 요청 완료. */}
-                      {isRej && (
+                      {isRej && canEdit && (
                         <button
                           type="button"
                           onClick={() => {
@@ -973,7 +978,7 @@ export default function AlimtalkManagementSection() {
                         </button>
                       )}
                       {/* 삭제: DRAFT 전용 (remove 함수 내 이중 가드) */}
-                      {isDraft && (
+                      {isDraft && canEdit && (
                         <button
                           type="button"
                           onClick={() => remove(t)}
