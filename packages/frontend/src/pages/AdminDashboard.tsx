@@ -2697,6 +2697,8 @@ const handleApproveRequest = async (id: string) => {
                   { key: 'agentDeploy', label: '싱크에이전트 배포' },
                   // ★ 2026-06-11: 감사 로그 = 허용 계정(기본 ceo)에만 노출
                   ...(auditAccessAllowed ? [{ key: 'auditLogs', label: '감사 로그' }] : []),
+                  // ★ 2026-07-04: 베스트 문안(업종 큐레이션) = 슈퍼관리자 공용(직원 큐레이션, ceo 게이트 없음)
+                  { key: 'bestCopy', label: '베스트 문안', onClick: () => navigate('/admin/best-copy') },
                   // ★ 2026-06-13: AI 학습 데이터 = 허용 계정(기본 ceo)에만 노출 (별도 페이지 navigate)
                   ...(aiTrainingAllowed ? [{ key: 'aiTraining', label: 'AI 학습 데이터', onClick: () => navigate('/admin/ai-training') }] : []),
                   { key: 'loginBlocks', label: '로그인 차단 관리' },

@@ -36,6 +36,11 @@ import { createJob, getJob } from '../utils/full-analysis-job';
 import { stepProgress } from '../utils/full-analysis-steps';
 import { runFullAnalysis } from '../utils/full-analysis-runner';
 import { buildDataAvailability } from '../utils/performance-data-availability';
+// ★ 2026-07-04 스타일 참고(specs/2026-07-04-best-copy-evolution-design.md §4) — 원문의 벽:
+//   내 승리 문안(자사 데이터 자사 노출) + 업종 스타일(AI 재창작 예시만, 타사 원문 노출 0)
+import { listStyleExamples } from '../utils/best-copy-assets';
+import { getTenantRef } from '../utils/training-logger';
+import { industryLabel } from '../utils/industry-codes';
 import { aggregateSmsCountsByCampaign } from '../utils/stats-aggregation';
 import { kakaoBatchAggByGroup } from '../utils/sms-queue';
 // ★ D176 (2026-05-19): Continuous Agentic Operator (사용자 동의 흐름)
@@ -151,6 +156,51 @@ router.get('/status', async (req: Request, res: Response) => {
 });
 
 // POST /api/ai/generate-message - AI 메시지 생성
+// ★ 2026-07-04 스타일 참고 갤러리 — AI 문구 추천 모달용.
+//   myBest = 자사 발송 이력 성과 상위(자기 데이터 자기 노출 = 오해 소지 0)
+//   styles = 업종 스타일 예시(AI 재창작본만 — 타사 실발송 원문은 탈색본이라도 절대 미노출)
+router.get('/style-gallery', authenticate, async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    if (!companyId) return res.status(403).json({ error: '회사 권한이 필요합니다' });
+
+    // 업종 조회 (미설정 시 스타일 예시 없이 myBest만)
+    const compR = await query('SELECT industry_code FROM companies WHERE id = $1', [companyId]);
+    const industryCode = compR.rows[0]?.industry_code ? String(compR.rows[0].industry_code).trim() : null;
+
+    // 내 승리 문안 — 자사 학습 로그 성과 상위 4 (성과 라벨 있는 발송만, 실데이터)
+    const tenantRef = getTenantRef(companyId);
+    const myR = await query(
+      `SELECT final_message, message_type, sent_count, success_count
+       FROM ai_training_logs
+       WHERE tenant_ref = $1 AND final_message IS NOT NULL AND length(final_message) >= 10
+         AND sent_count IS NOT NULL AND sent_count > 0
+       ORDER BY (success_count::float / NULLIF(sent_count, 0)) DESC NULLS LAST, sent_count DESC, created_at DESC
+       LIMIT 4`,
+      [tenantRef],
+    );
+    const myBest = myR.rows.map((r: any) => ({
+      text: r.final_message,
+      messageType: r.message_type,
+      sentCount: r.sent_count,
+      successRate: r.sent_count > 0 ? Math.round(((r.success_count || 0) / r.sent_count) * 100) : null,
+    }));
+
+    // 업종 스타일 예시 — best_copy_assets(kind='style_example'). 테이블/데이터 없으면 빈 배열(degrade)
+    const styles = industryCode ? await listStyleExamples(industryCode) : [];
+
+    res.json({
+      success: true,
+      myBest,
+      styles,
+      industryLabel: industryCode ? industryLabel(industryCode) : null,
+    });
+  } catch (err: any) {
+    console.error('[style-gallery] 조회 실패:', err?.message);
+    res.status(500).json({ error: '스타일 참고 조회에 실패했습니다.' });
+  }
+});
+
 router.post('/generate-message', async (req: Request, res: Response) => {
   try {
     const companyId = req.user?.companyId;

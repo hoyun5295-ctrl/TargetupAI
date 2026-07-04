@@ -9,6 +9,7 @@ import { ToastProvider } from './components/ToastProvider';
 import LoginPage from './pages/LoginPage';
 import AdminDashboard from './pages/AdminDashboard';
 import AiTrainingDataPage from './pages/AiTrainingDataPage';
+import BestCopyPage from './pages/BestCopyPage';
 import Dashboard from './pages/Dashboard';
 import ManagePage from './pages/ManagePage';
 import CalendarPage from './pages/CalendarPage';
@@ -236,6 +237,14 @@ function App() {
           element={
             <PrivateRoute allowedTypes={['super_admin']}>
               <AiTrainingDataPage />
+            </PrivateRoute>
+          }
+        />
+        <Route
+          path="/admin/best-copy"
+          element={
+            <PrivateRoute allowedTypes={['super_admin']}>
+              <BestCopyPage />
             </PrivateRoute>
           }
         />

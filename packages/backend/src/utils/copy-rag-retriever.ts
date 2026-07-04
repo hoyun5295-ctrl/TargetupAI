@@ -15,6 +15,7 @@ import { getTenantRef } from './training-logger';
 import { hasIdentifierLeak } from './copy-deidentify';
 
 export interface TrainingRow {
+  id?: string; // ★ 2026-07-04 성과 환류: 업종 시드 행 식별(사용 기록용)
   final_message: string;
   message_features: Record<string, unknown> | null;
   sent_count: number | null;
@@ -27,6 +28,7 @@ export interface CopyExample {
   source: 'company' | 'industry';
   features: Record<string, unknown> | null;
   successRate: number | null;
+  seedId?: string; // ★ 2026-07-04 성과 환류: industry(큐레이션 시드)일 때만 채움
 }
 
 export interface RetrieveInput {
@@ -70,7 +72,11 @@ function toRanked(row: TrainingRow, source: 'company' | 'industry'): RankedRow {
   //   검색 전체 degrade(0630 문안 두뇌 미작동). ISO 문자열로 강제(문자열 비교 = 시간순). null/문자열도 안전.
   const ca = row.created_at as unknown;
   return {
-    ex: { text: row.final_message, source, features: row.message_features, successRate },
+    ex: {
+      text: row.final_message, source, features: row.message_features, successRate,
+      // ★ 2026-07-04 성과 환류: 시드 사용 기록용 id — industry(큐레이션 시드)만
+      ...(source === 'industry' && row.id ? { seedId: String(row.id) } : {}),
+    },
     createdAt: ca instanceof Date ? ca.toISOString() : String(ca || ''),
   };
 }
@@ -144,7 +150,7 @@ export function summarizeIndustryFeatures(rows: TrainingRow[]): IndustryFeatureS
   };
 }
 
-const SELECT_COLS = 'final_message, message_features, sent_count, success_count, created_at';
+const SELECT_COLS = 'id, final_message, message_features, sent_count, success_count, created_at';
 
 /** DB 검색 — 회사 1차 + (부족 시) 업종 2차 → rankExamples */
 export async function retrieveCopyExamples(input: RetrieveInput): Promise<RetrieveResult> {

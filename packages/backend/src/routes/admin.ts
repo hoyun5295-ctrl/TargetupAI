@@ -5,7 +5,12 @@ import { mysqlQuery, query } from '../config/database';
 import { authenticate, requireSuperAdmin } from '../middlewares/auth';
 import { ALL_SMS_TABLES, invalidateLineGroupCache, getCampaignSmsTables, smsCountAll, smsSelectAll, smsSelectPagedAll, smsAggAll, getTestSmsTables, kakaoCountWhere, kakaoSelectWhere, kakaoBatchAggByGroup } from '../utils/sms-queue';
 import { streamCampaignSmsCsv } from '../utils/campaign-sms-export';
-import { mineCuratedCandidates, insertCuratedSeeds, listCuratedSeeds, deleteCuratedSeed } from '../utils/copy-seed-curator';
+import { insertCuratedSeeds, listCuratedSeeds, listCuratedSeedCounts, deleteCuratedSeed, saveCuratedSeedOne, updateCuratedSeed, SeedGateFail } from '../utils/copy-seed-curator';
+import { startMiningJob, getMiningJob } from '../utils/best-copy-miner';
+import { INDUSTRY_CODES, INDUSTRY_LABELS, isIndustryCode } from '../utils/industry-codes';
+// ★ 2026-07-04 진화: 성과 환류(usage 집계) + 공식 증류/예시(specs/2026-07-04-best-copy-evolution-design.md)
+import { getSeedUsageStats, getIndustryFormula, listStyleExamples } from '../utils/best-copy-assets';
+import { distillIndustryFormula } from '../utils/industry-formula';
 // ★ 2026-06-25: 업로더별 고객 삭제 시 해당 회사 데이터 프로필 캐시 무효화(게이트 즉시 반영)
 import { clearCompanyDataProfileCache } from '../utils/company-data-profile';
 import { DASHBOARD_CARD_POOL, validateCardIds, getRequiredFields, filterPoolByAvailableData, generateDynamicCards } from '../utils/dashboard-card-pool';
@@ -2875,60 +2880,159 @@ router.get('/ai-training/access', authenticate, requireSuperAdmin, async (req: R
   res.json({ allowed: await isAiTrainingViewer(req.user?.userId) });
 });
 
-// ★ 2026-07-04 큐레이션 시드 — Track B 업종 베스트 채굴/검수/저장(하이브리드). 슈퍼관리자·AI학습 뷰어 전용.
-router.get('/ai-training/seed/mine', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
-  try {
-    if (!(await isAiTrainingViewer(req.user?.userId))) return res.status(403).json({ error: 'AI 학습 데이터 열람 권한이 없습니다.' });
-    const industryCode = String(req.query.industryCode || '').trim();
-    if (!industryCode) return res.status(400).json({ error: 'industryCode가 필요합니다.' });
-    const channel = String(req.query.channel || 'SMS').trim().toUpperCase();
-    const isAd = req.query.isAd === 'true';
-    const channels = channel === 'SMS' ? ['SMS', 'LMS', 'MMS'] : [channel];
-    const candidates = await mineCuratedCandidates({ industryCode, channels, isAd, limit: 20 });
-    res.json({ success: true, candidates });
-  } catch (err: any) {
-    res.status(500).json({ error: err?.message || '채굴 실패' });
-  }
-});
+// ===== 베스트 문안(업종 큐레이션 시드) — 슈퍼관리자 공용(직원 큐레이션) =====
+// ★ 2026-07-04 재설계(Harold 명시): 학습 페이지 채굴 모달 폐기 → 별도 메뉴.
+//   직원 직접 입력 + AI 전수 채굴(best-copy-miner) 병행. ceo 게이트 없음(학습 overview만 ceo 전용 유지).
+//   저장분(sentinel tenant)만 Track B(브랜드보이스 미등록) 생성 참고 원문으로 서빙.
 
-router.post('/ai-training/seed/approve', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
-  try {
-    if (!(await isAiTrainingViewer(req.user?.userId))) return res.status(403).json({ error: 'AI 학습 데이터 열람 권한이 없습니다.' });
-    const rawItems = Array.isArray(req.body?.items) ? req.body.items : [];
-    const items = rawItems
-      .filter((it: any) => it && typeof it.text === 'string' && it.text.trim() && it.industryCode && it.messageType)
-      .map((it: any) => ({
-        text: String(it.text),
-        industryCode: String(it.industryCode),
-        messageType: String(it.messageType).toUpperCase(),
-        isAd: it.isAd === true,
-      }));
-    if (items.length === 0) return res.status(400).json({ error: '승인할 항목이 없습니다.' });
-    const inserted = await insertCuratedSeeds(items);
-    res.json({ success: true, inserted });
-  } catch (err: any) {
-    res.status(500).json({ error: err?.message || '저장 실패' });
-  }
-});
+const SEED_GATE_MESSAGES: Record<SeedGateFail, string> = {
+  too_short: '저장할 수 없습니다 — 연락처·주소 등 자동 제거 후 12자 이상이어야 합니다.',
+  leak: '전화번호·URL·이메일 등 개인정보/식별 정보가 남아 있습니다. 제거 후 저장해주세요.',
+  spam: '스팸 위험 표현이 많아 시드로 저장할 수 없습니다. 표현을 다듬어주세요.',
+  duplicate: '동일한 문안이 이미 저장되어 있습니다.',
+  not_found: '대상 문안을 찾을 수 없습니다.',
+};
 
-router.get('/ai-training/seed/list', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
+const SEED_CHANNELS = ['SMS', 'LMS', 'MMS', 'KAKAO'];
+
+function parseSeedBody(body: any): { text: string; industryCode: string; messageType: string; isAd: boolean } | null {
+  const text = typeof body?.text === 'string' ? body.text.trim() : '';
+  const industryCode = String(body?.industryCode || '').trim();
+  const messageType = String(body?.messageType || '').trim().toUpperCase();
+  if (!text || !isIndustryCode(industryCode) || !SEED_CHANNELS.includes(messageType)) return null;
+  return { text, industryCode, messageType, isAd: body?.isAd === true };
+}
+
+router.get('/best-copy/list', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
   try {
-    if (!(await isAiTrainingViewer(req.user?.userId))) return res.status(403).json({ error: 'AI 학습 데이터 열람 권한이 없습니다.' });
     const industryCode = String(req.query.industryCode || '').trim() || undefined;
-    const seeds = await listCuratedSeeds(industryCode);
-    res.json({ success: true, seeds });
+    const [seeds, counts, stats] = await Promise.all([
+      listCuratedSeeds(industryCode),
+      listCuratedSeedCounts(),
+      getSeedUsageStats(), // 테이블 미생성 시 빈 맵(42P01 degrade)
+    ]);
+    // 업종 목록 SSOT = industry-codes.ts (프론트 하드코딩 금지)
+    const industries = INDUSTRY_CODES.map((code) => ({ code, label: INDUSTRY_LABELS[code], count: counts[code] || 0 }));
+    // ★ 2026-07-04 성과 환류: 카드 뱃지용 — 참고 횟수(정확) + 참고 후 7일 발송 성공률(근사)
+    const seedsWithStats = seeds.map((s) => ({ ...s, usage: stats[s.id] || null }));
+    // 업종 지정 시 공식 + 재창작 예시 동봉(관리자 패널)
+    let formula = null; let styleExamples: any[] = [];
+    if (industryCode) {
+      formula = await getIndustryFormula(industryCode);
+      styleExamples = await listStyleExamples(industryCode);
+    }
+    res.json({ success: true, seeds: seedsWithStats, industries, formula, styleExamples });
   } catch (err: any) {
     res.status(500).json({ error: err?.message || '조회 실패' });
   }
 });
 
-router.delete('/ai-training/seed/:id', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
+// ★ 2026-07-04 공식 증류 — 업종 시드 → 승리 공식 + 스타일 예시 재창작(유사도 가드). 직원 1클릭.
+router.post('/best-copy/formula/refresh', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
   try {
-    if (!(await isAiTrainingViewer(req.user?.userId))) return res.status(403).json({ error: 'AI 학습 데이터 열람 권한이 없습니다.' });
+    const industryCode = String(req.body?.industryCode || '').trim();
+    if (!isIndustryCode(industryCode)) return res.status(400).json({ error: '업종을 선택해주세요.' });
+    const r = await distillIndustryFormula(industryCode);
+    if (!r.ok) {
+      const msg = r.reason === 'insufficient_seeds'
+        ? '시드가 3건 이상 필요합니다. 먼저 베스트 문안을 채워주세요.'
+        : r.reason === 'table_missing'
+          ? 'DB 마이그레이션 필요 — 운영자에게 best_copy_assets 테이블 생성 요청이 필요합니다.'
+          : 'AI 응답 해석에 실패했습니다. 다시 시도해주세요.';
+      return res.status(r.reason === 'table_missing' ? 503 : 400).json({ error: msg, code: r.reason === 'table_missing' ? 'DB_MIGRATION_PENDING' : r.reason });
+    }
+    res.json({ success: true, formula: r.formula, exampleCount: r.exampleCount, discardedBySimilarity: r.discardedBySimilarity });
+  } catch (err: any) {
+    res.status(500).json({ error: err?.message || '공식 갱신 실패' });
+  }
+});
+
+router.post('/best-copy/save', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
+  try {
+    const item = parseSeedBody(req.body);
+    if (!item) return res.status(400).json({ error: '문안·업종·채널을 확인해주세요.' });
+    const r = await saveCuratedSeedOne(item);
+    if (!r.ok) return res.status(400).json({ error: SEED_GATE_MESSAGES[r.reason] });
+    res.json({ success: true, text: r.text });
+  } catch (err: any) {
+    res.status(500).json({ error: err?.message || '저장 실패' });
+  }
+});
+
+router.put('/best-copy/:id', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
+  try {
+    const item = parseSeedBody(req.body);
+    if (!item) return res.status(400).json({ error: '문안·업종·채널을 확인해주세요.' });
+    const r = await updateCuratedSeed(String(req.params.id), item);
+    if (!r.ok) return res.status(400).json({ error: SEED_GATE_MESSAGES[r.reason] });
+    res.json({ success: true, text: r.text });
+  } catch (err: any) {
+    res.status(500).json({ error: err?.message || '수정 실패' });
+  }
+});
+
+router.delete('/best-copy/:id', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
+  try {
     const ok = await deleteCuratedSeed(String(req.params.id));
     res.json({ success: ok });
   } catch (err: any) {
     res.status(500).json({ error: err?.message || '삭제 실패' });
+  }
+});
+
+// AI 전수 채굴 — 업종 학습 코퍼스 전건 AI 판정(백그라운드 잡 + 진행률 폴링)
+router.post('/best-copy/mine', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
+  try {
+    const industryCode = String(req.body?.industryCode || '').trim();
+    if (!isIndustryCode(industryCode)) return res.status(400).json({ error: '업종을 선택해주세요.' });
+    const r = startMiningJob(industryCode);
+    res.json({ success: true, already: r.already === true });
+  } catch (err: any) {
+    res.status(500).json({ error: err?.message || '채굴 시작 실패' });
+  }
+});
+
+router.get('/best-copy/mine/status', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
+  try {
+    const industryCode = String(req.query.industryCode || '').trim();
+    if (!isIndustryCode(industryCode)) return res.status(400).json({ error: '업종을 선택해주세요.' });
+    const job = getMiningJob(industryCode);
+    if (!job) return res.json({ success: true, status: 'none' });
+    res.json({
+      success: true,
+      status: job.status,
+      totalMessages: job.totalMessages,
+      totalBatches: job.totalBatches,
+      processedBatches: job.processedBatches,
+      failedBatches: job.failedBatches,
+      candidates: job.status === 'done' ? job.candidates : [],
+      error: job.error || null,
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err?.message || '상태 조회 실패' });
+  }
+});
+
+router.post('/best-copy/mine/approve', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
+  try {
+    const industryCode = String(req.body?.industryCode || '').trim();
+    if (!isIndustryCode(industryCode)) return res.status(400).json({ error: '업종을 선택해주세요.' });
+    const rawItems = Array.isArray(req.body?.items) ? req.body.items : [];
+    const items = rawItems
+      .filter((it: any) => it && typeof it.text === 'string' && it.text.trim() && SEED_CHANNELS.includes(String(it.messageType || '').toUpperCase()))
+      .map((it: any) => ({
+        text: String(it.text),
+        industryCode,
+        messageType: String(it.messageType).toUpperCase(),
+        isAd: it.isAd !== false, // 채굴 승인분 기본 = 마케팅(광고성)
+      }));
+    if (items.length === 0) return res.status(400).json({ error: '승인할 항목이 없습니다.' });
+    const inserted = await insertCuratedSeeds(items);
+    // ★ 2026-07-04: 승인 저장 직후 공식·예시 자동 갱신(fire-and-forget — 응답 지연 0)
+    if (inserted > 0) void distillIndustryFormula(industryCode).catch(() => {});
+    res.json({ success: true, inserted });
+  } catch (err: any) {
+    res.status(500).json({ error: err?.message || '저장 실패' });
   }
 });
 

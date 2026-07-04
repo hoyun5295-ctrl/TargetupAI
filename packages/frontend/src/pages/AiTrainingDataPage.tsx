@@ -8,10 +8,9 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
-  ArrowLeft, Database, RefreshCw, Loader2, TrendingUp, Layers, ThumbsUp, FileJson, Info, ShieldAlert, Sparkles,
+  ArrowLeft, Database, RefreshCw, Loader2, TrendingUp, Layers, ThumbsUp, FileJson, Info, ShieldAlert,
 } from 'lucide-react';
 import { useToast } from '../components/ToastProvider';
-import SeedCurationModal from '../components/SeedCurationModal';
 
 interface Overview {
   summary: {
@@ -37,7 +36,6 @@ export default function AiTrainingDataPage() {
   const [data, setData] = useState<Overview | null>(null);
   const [loading, setLoading] = useState(true);
   const [denied, setDenied] = useState(false);
-  const [seedOpen, setSeedOpen] = useState(false);
 
   const authHeader = () => ({ Authorization: `Bearer ${localStorage.getItem('token')}` });
 
@@ -79,18 +77,12 @@ export default function AiTrainingDataPage() {
             </div>
             <p className="text-xs text-white/50 mt-0.5 hidden md:block">한줄로 발송·제안에서 쌓이는 자체 마케팅 AI 학습 데이터 (전사 비식별 집계)</p>
           </div>
-          <button onClick={() => setSeedOpen(true)} className="text-xs bg-gradient-to-r from-violet-500 to-fuchsia-500 text-white px-3 py-2 rounded-lg flex items-center gap-1.5" aria-label="시드 큐레이션">
-            <Sparkles className="w-3.5 h-3.5" />
-            <span className="hidden md:inline">시드 큐레이션</span>
-          </button>
           <button onClick={load} className="text-xs text-white/70 hover:bg-white/10 px-3 py-2 rounded-lg flex items-center gap-1.5" aria-label="새로고침">
             <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
             <span className="hidden md:inline">새로고침</span>
           </button>
         </div>
       </div>
-
-      <SeedCurationModal open={seedOpen} onClose={() => setSeedOpen(false)} />
 
       <div className="max-w-6xl mx-auto px-4 md:px-6 py-6 space-y-6">
         {denied ? (

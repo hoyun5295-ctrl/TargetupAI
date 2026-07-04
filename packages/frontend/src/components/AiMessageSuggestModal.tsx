@@ -1,4 +1,10 @@
-import { Sparkles, X, Loader2, Lightbulb } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { Sparkles, X, Loader2, Lightbulb, Trophy, Palette, ChevronDown, ChevronUp } from 'lucide-react';
+
+// ★ 2026-07-04 스타일 참고(specs/2026-07-04-best-copy-evolution-design.md §4)
+//   위 = 내 승리 문안(자사 데이터) / 아래 = 업종 스타일(AI 재창작 예시 — 타사 원문 절대 아님, 캡션 고정)
+interface MyBestCopy { text: string; messageType: string; sentCount: number; successRate: number | null }
+interface StyleExample { id: string; text: string; tags: string[] }
 
 interface AiMessageSuggestModalProps {
   show: boolean;
@@ -18,7 +24,51 @@ export default function AiMessageSuggestModal({
   aiHelperLoading, aiHelperResults, aiHelperRecommendation,
   onGenerate, onSelectMessage, msgType,
 }: AiMessageSuggestModalProps) {
+  // ★ 2026-07-04 스타일 참고 — 모달 자체 fetch(부모 배선 0). 실패·빈 결과 = 섹션 미노출(조용히 degrade)
+  const [galleryOpen, setGalleryOpen] = useState(false);
+  const [myBest, setMyBest] = useState<MyBestCopy[]>([]);
+  const [styles, setStyles] = useState<StyleExample[]>([]);
+  const [industryName, setIndustryName] = useState<string | null>(null);
+  const [galleryLoaded, setGalleryLoaded] = useState(false);
+
+  useEffect(() => {
+    if (!show || galleryLoaded) return;
+    (async () => {
+      try {
+        const r = await fetch('/api/ai/style-gallery', {
+          headers: { Authorization: `Bearer ${localStorage.getItem('token')}` },
+        });
+        const j = await r.json();
+        if (j.success) {
+          setMyBest(j.myBest || []);
+          setStyles(j.styles || []);
+          setIndustryName(j.industryLabel || null);
+        }
+      } catch { /* 스타일 참고는 부가 기능 — 실패해도 문구 추천 흐름 무영향 */ }
+      setGalleryLoaded(true);
+    })();
+  }, [show, galleryLoaded]);
+
+  const applyMyBest = (c: MyBestCopy) => {
+    const base = aiHelperPrompt.trim();
+    setAiHelperPrompt(
+      `${base ? `${base}\n\n` : ''}[스타일 참고] 지난 발송 중 반응이 좋았던 우리 문안의 톤·구조를 참고해줘:\n"${c.text}"`,
+    );
+    setGalleryOpen(false);
+  };
+
+  const applyStyle = (s: StyleExample) => {
+    const base = aiHelperPrompt.trim();
+    const tagLine = s.tags.length > 0 ? s.tags.join(' · ') : '업종 추천';
+    setAiHelperPrompt(
+      `${base ? `${base}\n\n` : ''}[스타일 참고] ${tagLine} 스타일로, 후킹 → 핵심 내용 → 행동 유도 구성으로 작성해줘.`,
+    );
+    setGalleryOpen(false);
+  };
+
   if (!show) return null;
+
+  const hasGallery = myBest.length > 0 || styles.length > 0;
 
   return (
     <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 z-[60] animate-[fadeIn_0.2s_ease-out]">
@@ -75,6 +125,80 @@ export default function AiMessageSuggestModal({
             </button>
           </div>
         </div>
+
+        {/* ★ 2026-07-04 스타일 참고 — 접이식. 내 승리(자사) / 업종 스타일(AI 재창작 예시) 층 분리 */}
+        {hasGallery && (
+          <div className="px-6 pb-3">
+            <button
+              onClick={() => setGalleryOpen(!galleryOpen)}
+              className="w-full flex items-center justify-between px-3 py-2 bg-white/5 border border-white/10 rounded-xl text-xs text-white/70 hover:bg-white/10 transition-colors"
+            >
+              <span className="flex items-center gap-1.5">
+                <Palette className="w-3.5 h-3.5 text-violet-300" />
+                스타일 참고 (선택) — 내 승리 문안 {myBest.length} · 업종 스타일 {styles.length}
+              </span>
+              {galleryOpen ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+            </button>
+
+            {galleryOpen && (
+              <div className="mt-2 space-y-3 max-h-[38vh] overflow-y-auto pr-1">
+                {myBest.length > 0 && (
+                  <div>
+                    <p className="text-[11px] text-emerald-300/80 font-medium flex items-center gap-1 mb-1.5">
+                      <Trophy className="w-3 h-3" /> 내 승리 문안 — 우리 회사 발송 중 성과 상위
+                    </p>
+                    <div className="space-y-1.5">
+                      {myBest.map((c, i) => (
+                        <button
+                          key={i}
+                          onClick={() => applyMyBest(c)}
+                          className="w-full text-left p-3 bg-emerald-500/5 border border-emerald-400/20 rounded-xl hover:bg-emerald-500/10 hover:border-emerald-400/40 transition-colors"
+                        >
+                          <div className="flex items-center gap-1.5 mb-1">
+                            <span className="text-[9px] bg-white/10 text-white/60 px-1.5 py-0.5 rounded font-mono">{c.messageType}</span>
+                            {c.successRate !== null && (
+                              <span className="text-[9px] bg-emerald-500/20 text-emerald-200 px-1.5 py-0.5 rounded">성공률 {c.successRate}%</span>
+                            )}
+                            <span className="text-[9px] text-white/40 ml-auto">클릭 = 프롬프트에 참고 지시 추가</span>
+                          </div>
+                          <p className="text-[11px] text-white/80 leading-relaxed line-clamp-3 whitespace-pre-wrap">{c.text}</p>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {styles.length > 0 && (
+                  <div>
+                    <p className="text-[11px] text-violet-300/80 font-medium flex items-center gap-1 mb-1.5">
+                      <Palette className="w-3 h-3" /> {industryName ? `${industryName} ` : ''}업종 스타일 추천
+                    </p>
+                    <div className="space-y-1.5">
+                      {styles.map((s) => (
+                        <button
+                          key={s.id}
+                          onClick={() => applyStyle(s)}
+                          className="w-full text-left p-3 bg-violet-500/5 border border-violet-400/20 rounded-xl hover:bg-violet-500/10 hover:border-violet-400/40 transition-colors"
+                        >
+                          <div className="flex items-center gap-1.5 mb-1 flex-wrap">
+                            {s.tags.map((t) => (
+                              <span key={t} className="text-[9px] bg-violet-500/20 text-violet-200 px-1.5 py-0.5 rounded">{t}</span>
+                            ))}
+                            <span className="text-[9px] text-white/40 ml-auto">클릭 = 이 스타일로 작성 지시</span>
+                          </div>
+                          <p className="text-[11px] text-white/70 leading-relaxed line-clamp-3 whitespace-pre-wrap">{s.text}</p>
+                        </button>
+                      ))}
+                    </div>
+                    <p className="text-[10px] text-white/35 italic mt-1.5">
+                      AI가 업종 공통 패턴을 분석해 작성한 예시입니다. 실제 업체의 발송 문안이 아닙니다.
+                    </p>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
 
         {/* 결과 영역 */}
         {aiHelperResults.length > 0 && (

@@ -14,6 +14,9 @@ import { retrieveCopyExamples } from './copy-rag-retriever';
 import { buildTemporalContext, buildIndustryEvents, renderContextForPrompt } from './copy-context';
 import { getBrandGuideline } from './brand-voice-prompt';
 import { hasIdentifierLeak } from './copy-deidentify';
+// ★ 2026-07-04 진화(specs/2026-07-04-best-copy-evolution-design.md): 시드 사용 기록 + 업종 승리 공식 주입
+import { recordSeedUsage, getIndustryFormula } from './best-copy-assets';
+import { renderFormulaBlock } from './industry-formula';
 
 export interface BrandKit {
   signatureLocked?: string;
@@ -55,6 +58,7 @@ export function buildCopyBrainPrompt(opts: {
   contextLine: string;
   kit: BrandKit;
   channel: string;
+  formulaBlock?: string; // ★ 2026-07-04: 업종 승리 공식 지침(Track B만, 원문 아님)
 }): string {
   const { examples, industryFeatures, contextLine, kit } = opts;
   const parts: string[] = [];
@@ -75,6 +79,11 @@ export function buildCopyBrainPrompt(opts: {
   if (industry.length > 0) {
     const list = industry.map((e, i) => `${i + 1}. ${e.text}`).join('\n');
     parts.push(`## 같은 업종에서 검증된 문안 (탈색됨 — 구조·표현만 참고, 회사 식별정보 제거 / 그대로 베끼지 말 것)\n${list}`);
+  }
+
+  // ★ 2026-07-04: 업종 승리 공식(증류 지침 — 원문 아님). 시드 원문 블록과 공존.
+  if (opts.formulaBlock && opts.formulaBlock.trim()) {
+    parts.push(opts.formulaBlock.trim());
   }
 
   // ★ A6 (2026-06-30): 같은 업종은 원문이 아니라 구조·통계만 (타사 시그니처 누출 0)
@@ -163,6 +172,24 @@ export async function composeCopyBrain(input: ComposeInput): Promise<ComposeResu
   });
 
   const channel = input.channels[0] || 'EMAIL';
-  const promptSuffix = buildCopyBrainPrompt({ examples, industryFeatures, contextLine, kit, channel });
+
+  // ★ 2026-07-04 성과 환류: Track B에 업종 시드가 서빙되면 사용 기록(fire-and-forget — 실패해도 생성 무영향)
+  const servedSeedIds = examples.filter((e) => e.source === 'industry' && e.seedId).map((e) => e.seedId as string);
+  if (!brandVoiceRegistered && servedSeedIds.length > 0) {
+    void recordSeedUsage(input.companyId, servedSeedIds, channel).catch(() => {});
+  }
+
+  // ★ 2026-07-04 공식 주입: Track B(브랜드보이스 미등록)만 — 등록 회사는 자기 보이스 우선(주입 X)
+  let formulaBlock = '';
+  if (!brandVoiceRegistered && industryCode) {
+    try {
+      const f = await getIndustryFormula(industryCode);
+      if (f) formulaBlock = renderFormulaBlock(f.meta);
+    } catch (err) {
+      console.warn('[copy-brain] 업종 공식 조회 실패 — 공식 없이 진행:', (err as Error)?.message);
+    }
+  }
+
+  const promptSuffix = buildCopyBrainPrompt({ examples, industryFeatures, contextLine, kit, channel, formulaBlock });
   return { promptSuffix, examples, bannedWords: kit.bannedWords || [] };
 }
