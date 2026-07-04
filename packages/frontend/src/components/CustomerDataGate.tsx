@@ -105,7 +105,6 @@ export function CustomerDataRequiredModal({ open, onClose }: { open: boolean; on
   return createPortal(
     <div
       className="fixed inset-0 z-[2000] flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm"
-      onClick={onClose}
     >
       <div
         className={`relative w-full max-w-lg overflow-hidden rounded-2xl border border-white/10 bg-slate-900 shadow-2xl transition-all duration-200 ${shown ? 'opacity-100 scale-100' : 'opacity-0 scale-95'}`}

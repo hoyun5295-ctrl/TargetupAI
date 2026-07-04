@@ -14,7 +14,6 @@ const LineGroupErrorModal: React.FC<LineGroupErrorModalProps> = ({ show, onClose
       {/* 배경 오버레이 */}
       <div
         className="absolute inset-0 bg-black/50 animate-[fadeIn_0.2s_ease-out]"
-        onClick={onClose}
       />
 
       {/* 모달 본체 */}

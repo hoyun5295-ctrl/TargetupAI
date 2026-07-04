@@ -29,7 +29,6 @@ export default function SyncActiveBlockModal({ isOpen, onClose, message }: SyncA
   return (
     <div
       className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 backdrop-blur-sm animate-in fade-in duration-200"
-      onClick={onClose}
     >
       <div
         className="bg-white rounded-2xl shadow-2xl max-w-sm w-full mx-4 p-6 animate-in zoom-in-95 duration-200"

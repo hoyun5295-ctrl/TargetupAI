@@ -583,7 +583,7 @@ export default function SegmentsPage() {
 
       {/* Toast */}
       {toast && (
-        <div className="fixed bottom-6 right-6 z-[60]">
+        <div className="fixed bottom-6 right-6 z-[10000]">
           <div className={`px-4 py-3 rounded-lg shadow-2xl backdrop-blur-sm flex items-center gap-2 text-sm font-medium border ${
             toast.type === 'success'
               ? 'bg-emerald-500/20 border-emerald-400/40 text-emerald-100'

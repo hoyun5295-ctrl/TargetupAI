@@ -125,7 +125,7 @@ export default function EmailEventsModal({ campaignId, campaignName, onClose, to
   const totalPages = Math.ceil(recipientsTotal / PAGE_SIZE);
 
   return (
-    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[60] flex items-center justify-center p-3 md:p-6" onClick={onClose}>
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[60] flex items-center justify-center p-3 md:p-6">
       <div
         className="bg-slate-900 border border-white/10 rounded-2xl shadow-2xl w-full max-w-5xl max-h-[90vh] flex flex-col overflow-hidden"
         onClick={(e) => e.stopPropagation()}

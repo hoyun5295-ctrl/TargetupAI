@@ -361,9 +361,6 @@ export default function BrandTemplateForm({ mode, template, profiles, onClose, o
   return (
     <div
       className="fixed inset-0 bg-black/40 z-[60] flex items-center justify-center p-4 animate-in fade-in duration-150"
-      onClick={(e) => {
-        if (e.target === e.currentTarget) onClose();
-      }}
     >
       <div className="bg-white rounded-xl shadow-xl w-full max-w-3xl max-h-[92vh] flex flex-col">
         {/* 헤더 */}

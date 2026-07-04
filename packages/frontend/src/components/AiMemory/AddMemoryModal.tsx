@@ -153,7 +153,6 @@ export default function AddMemoryModal({ open, onClose, onSave, initialType = 'c
   return (
     <div
       className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50"
-      onClick={() => !saving && onClose()}
       role="dialog"
       aria-modal="true"
     >

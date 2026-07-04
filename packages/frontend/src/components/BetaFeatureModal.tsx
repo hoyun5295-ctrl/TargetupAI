@@ -89,7 +89,6 @@ export default function BetaFeatureModal({ show, onClose }: BetaFeatureModalProp
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-md animate-in fade-in duration-200"
-      onClick={onClose}
     >
       <div
         className="relative w-full max-w-5xl max-h-[90vh] overflow-y-auto rounded-3xl border border-white/10 shadow-2xl bg-gradient-to-br from-indigo-950 via-purple-950 to-fuchsia-950 animate-in fade-in zoom-in-95 duration-300"

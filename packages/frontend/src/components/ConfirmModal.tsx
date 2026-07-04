@@ -110,7 +110,6 @@ export default function ConfirmModal({ state, onClose }: Props) {
     //   (확인창은 자신을 띄운 모달보다 항상 위에 떠야 함. 기존 z-[140]은 DM 모달 뒤로 깔리던 결함.)
     <div
       className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-[2000] p-4"
-      onClick={onClose}
     >
       <div
         className={`bg-slate-900 border ${config.border} rounded-2xl shadow-2xl max-w-md w-full overflow-hidden`}

@@ -381,8 +381,7 @@ export default function CustomersTab() {
 
       {/* ★ 2026-07-03: 구매 이력 모달 */}
       {purchaseCustomer && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 animate-in fade-in"
-          onMouseDown={(e) => { if (e.target === e.currentTarget) closePurchaseModal(); }}>
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 animate-in fade-in">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[85vh] flex flex-col animate-in zoom-in-95 fade-in duration-200">
             {/* 헤더 */}
             <div className="flex items-start justify-between p-5 border-b">

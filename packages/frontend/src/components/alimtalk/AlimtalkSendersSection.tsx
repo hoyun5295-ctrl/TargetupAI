@@ -561,7 +561,7 @@ export default function AlimtalkSendersSection() {
 
       {toast && (
         <div
-          className="fixed bottom-6 right-6 bg-gray-900 text-white text-sm px-4 py-2 rounded-lg shadow-lg z-[60] cursor-pointer"
+          className="fixed bottom-6 right-6 bg-gray-900 text-white text-sm px-4 py-2 rounded-lg shadow-lg z-[10000] cursor-pointer"
           onClick={() => setToast(null)}
         >
           {toast}

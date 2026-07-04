@@ -567,7 +567,7 @@ export default function EmailVisualEditor({
 
       {/* PC(데스크탑) 폭 전체화면 미리보기 — 실제 발송 HTML */}
       {pcPreviewOpen && (
-        <div className="fixed inset-0 z-[130] bg-slate-950/90 backdrop-blur-sm flex flex-col" onClick={() => setPcPreviewOpen(false)}>
+        <div className="fixed inset-0 z-[130] bg-slate-950/90 backdrop-blur-sm flex flex-col">
           <div className="flex items-center justify-between px-4 py-3 border-b border-white/10 shrink-0" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center gap-2 text-sm text-white/80"><Monitor className="w-4 h-4" /> PC 미리보기 — 데스크탑 폭 (실제 발송 HTML)</div>
             <button onClick={() => setPcPreviewOpen(false)} className="text-white/60 hover:text-white p-1.5 rounded hover:bg-white/10" aria-label="닫기"><X className="w-5 h-5" /></button>

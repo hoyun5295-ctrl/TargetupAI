@@ -618,7 +618,7 @@ export default function AutoSendFormModal({ campaign, aiPremiumEnabled, onClose,
 
       {/* 토스트 */}
       {toast.show && (
-        <div className={`fixed top-4 left-1/2 -translate-x-1/2 z-[70] px-4 py-2.5 rounded-lg text-sm font-medium shadow-lg transition-all ${
+        <div className={`fixed top-4 left-1/2 -translate-x-1/2 z-[10000] px-4 py-2.5 rounded-lg text-sm font-medium shadow-lg transition-all ${
           toast.type === 'success' ? 'bg-green-500 text-white' :
           toast.type === 'error' ? 'bg-red-500 text-white' :
           toast.type === 'warning' ? 'bg-amber-500 text-white' : 'bg-gray-700 text-white'

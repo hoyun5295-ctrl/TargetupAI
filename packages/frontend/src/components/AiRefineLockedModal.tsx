@@ -46,7 +46,6 @@ export default function AiRefineLockedModal({ isOpen, onClose }: Props) {
       aria-modal="true"
       aria-labelledby="ai-refine-locked-title"
       className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 z-[70] animate-in fade-in duration-200"
-      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
     >
       <div className="relative w-full max-w-[480px] bg-slate-900 border border-white/10 rounded-2xl shadow-2xl animate-in zoom-in-95 duration-200 overflow-hidden">
         {/* 헤더 그라데이션 */}

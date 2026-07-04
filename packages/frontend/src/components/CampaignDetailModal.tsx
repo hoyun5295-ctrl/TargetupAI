@@ -88,7 +88,7 @@ export default function CampaignDetailModal({
   ];
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60] p-2 md:p-4" onClick={onClose}>
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60] p-2 md:p-4">
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-[880px] max-h-[92vh] overflow-hidden flex flex-col" onClick={(e) => e.stopPropagation()}>
         {/* 헤더 — 캠페인명 + 채널 chip + 상태 badge + 발송일시 */}
         <div className="flex justify-between items-start gap-3 px-6 py-4 border-b border-slate-200 bg-white sticky top-0 z-10">

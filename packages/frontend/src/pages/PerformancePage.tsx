@@ -682,7 +682,7 @@ export default function PerformancePage() {
 
             {/* 풀분석 설정 모달 — 기간 + 초점 + 제목 */}
             {showSettings && createPortal(
-              <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/60 backdrop-blur-sm px-4" onClick={() => setShowSettings(false)}>
+              <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/60 backdrop-blur-sm px-4">
                 <div className="w-full max-w-md bg-slate-900 border border-white/10 rounded-2xl shadow-2xl p-6" onClick={(e) => e.stopPropagation()}>
                   <div className="flex items-center gap-3">
                     <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-violet-500 to-fuchsia-500 flex items-center justify-center flex-shrink-0"><FileDown className="w-5 h-5 text-white" /></div>
@@ -1591,7 +1591,6 @@ function PerfModal({
   return (
     <div
       className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-sm"
-      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
     >
       <div className={`w-full ${wide ? 'max-w-3xl' : 'max-w-xl'} max-h-[calc(100vh-2rem)] flex flex-col bg-slate-900 border border-white/10 rounded-2xl shadow-2xl`}>
         <div className="flex items-center gap-2 px-5 py-3.5 border-b border-white/10 flex-shrink-0">

@@ -113,7 +113,7 @@ export default function BalanceModals({
     <>
       {/* 잔액 현황 모달 — 화이트/모던 (D229+, 대시보드 톤 일치) */}
       {showBalanceModal && balanceInfo && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 p-4" onClick={() => setShowBalanceModal(false)}>
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 p-4">
           <div className="w-full max-w-sm overflow-hidden rounded-2xl border border-gray-100 bg-white shadow-2xl" onClick={e => e.stopPropagation()}>
             {/* 헤더 — 충전 잔액 */}
             <div className="relative overflow-hidden border-b border-gray-100 px-5 py-5">

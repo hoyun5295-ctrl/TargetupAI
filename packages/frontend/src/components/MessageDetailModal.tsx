@@ -42,7 +42,6 @@ export default function MessageDetailModal({ content, onClose }: Props) {
   return (
     <div
       className="fixed inset-0 bg-black/40 z-[60] flex items-center justify-center p-4"
-      onClick={onClose}
     >
       <div
         className="bg-white rounded-xl shadow-2xl w-full max-w-2xl max-h-[80vh] flex flex-col animate-in fade-in zoom-in-95 duration-200"

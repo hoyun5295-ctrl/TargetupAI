@@ -106,7 +106,6 @@ export default function JourneyActionConfirmModal({ mode, journeyName, onConfirm
   return (
     <div
       className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 p-4"
-      onClick={onClose}
     >
       <div
         className={`bg-slate-900 border ${config.accent} rounded-2xl shadow-2xl max-w-md w-full overflow-hidden`}

@@ -387,7 +387,7 @@ function EditSegmentModal({ mode, segment, onClose, onSave }: {
   };
 
   return (
-    <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 z-[60]" onClick={onClose}>
+    <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 z-[60]">
       <div
         className="bg-slate-900 border border-white/10 rounded-2xl shadow-2xl w-full max-w-[520px] max-h-[90vh] overflow-hidden animate-in fade-in zoom-in duration-150 flex flex-col max-md:fixed max-md:inset-0 max-md:max-w-none max-md:max-h-none max-md:rounded-none"
         onClick={e => e.stopPropagation()}

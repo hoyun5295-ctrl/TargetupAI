@@ -943,7 +943,7 @@ export default function EmailCampaignsPage() {
 
       {/* 테스트 발송 — 작은 모달 (가로 큰 카드 대체) */}
       {testModalOpen && (
-        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => !testSending && setTestModalOpen(false)}>
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="bg-slate-900 border border-white/10 rounded-2xl shadow-2xl w-full max-w-md" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between px-5 py-3 border-b border-white/10">
               <h3 className="text-sm font-bold text-white flex items-center gap-2"><Send className="w-4 h-4 text-cyan-300" /> 테스트 발송</h3>
@@ -1122,7 +1122,7 @@ interface SmtpFormModalProps {
 function SmtpFormModal({ form, setForm, presetKey, setPresetKey, showPassword, setShowPassword, saving, onSave, onClose, onClear, isUpdate }: SmtpFormModalProps) {
   const currentPreset = SMTP_PRESETS.find((p) => p.key === presetKey);
   return (
-    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50" onClick={onClose}>
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50">
       <div className="bg-violet-900/40 border border-white/10 rounded-2xl shadow-2xl w-full max-w-2xl max-h-[95vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
         <div className="sticky top-0 bg-violet-900/40 border-b border-white/10 px-6 py-4 flex items-center justify-between">
           <h3 className="text-lg font-bold text-white flex items-center gap-2">
@@ -1338,7 +1338,7 @@ function CampaignFormModal({ editing, setEditing, saving, onSave, authHeaders, o
   };
 
   return (
-    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50" onClick={() => setEditing(null)}>
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50">
       <div className="bg-violet-900/40 border border-white/10 rounded-2xl shadow-2xl w-full max-w-3xl max-h-[95vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
         <div className="sticky top-0 bg-violet-900/40 border-b border-white/10 px-6 py-4 flex items-center justify-between z-10">
           <h3 className="text-lg font-bold text-white flex items-center gap-2">
@@ -1644,7 +1644,7 @@ function RecipientsModal({ campaign, authHeaders, onProceed, onClose, onToast }:
 
   return (
     <>
-    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50" onClick={onClose}>
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50">
       <div className="bg-violet-900/40 border border-white/10 rounded-2xl shadow-2xl w-full max-w-xl max-h-[95vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
         <div className="sticky top-0 bg-violet-900/40 border-b border-white/10 px-6 py-4 flex items-center justify-between z-10">
           <h3 className="text-lg font-bold text-white flex items-center gap-2">
@@ -1834,7 +1834,7 @@ function InsightModal({ campaign, authHeaders, onClose, onToast }: InsightModalP
   }, []);
 
   return (
-    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-[60]" onClick={onClose}>
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-[60]">
       <div className="bg-violet-900/40 border border-white/10 rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
         <div className="sticky top-0 bg-violet-900/40 border-b border-white/10 px-6 py-4 flex items-center justify-between">
           <h3 className="text-lg font-bold text-white flex items-center gap-2"><Sparkles className="w-5 h-5 text-fuchsia-300" /> AI 성과 진단</h3>
@@ -1925,7 +1925,7 @@ function NonOpenerModal({ campaign, authHeaders, onClose, onToast, onGoSms }: No
   };
 
   return (
-    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-[60]" onClick={onClose}>
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-[60]">
       <div className="bg-violet-900/40 border border-white/10 rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
         <div className="sticky top-0 bg-violet-900/40 border-b border-white/10 px-6 py-4 flex items-center justify-between">
           <h3 className="text-lg font-bold text-white flex items-center gap-2"><Smartphone className="w-5 h-5 text-cyan-300" /> 미오픈자 SMS 재발송</h3>

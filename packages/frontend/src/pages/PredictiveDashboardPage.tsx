@@ -577,7 +577,7 @@ export default function PredictiveDashboardPage() {
 
       {/* ── 모달: 분포 · 정확도 ── */}
       {showDetails && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm" onClick={() => setShowDetails(false)}>
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
           <div className="bg-slate-900 border border-white/10 rounded-2xl shadow-2xl w-full max-w-4xl max-h-[85vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
             <div className="sticky top-0 bg-slate-900/95 backdrop-blur border-b border-white/10 px-5 py-4 flex items-center justify-between z-10">
               <h2 className="text-base font-semibold text-white">분포 · 모델 정확도</h2>
@@ -664,7 +664,7 @@ export default function PredictiveDashboardPage() {
 
       {/* ── 모달: 전체 고객 목록 (검색 · 필터 · 정렬 · 페이지네이션) ── */}
       {showCustomersModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm" onClick={() => setShowCustomersModal(false)}>
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
           <div className="bg-slate-900 border border-white/10 rounded-2xl shadow-2xl w-full max-w-5xl max-h-[88vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
             <div className="sticky top-0 bg-slate-900/95 backdrop-blur border-b border-white/10 px-5 py-4 flex items-start justify-between z-10">
               <div className="min-w-0 pr-3">
@@ -938,7 +938,7 @@ function PredictiveDetailModal({
   const fmtPct = (n: number) => `${(n * 100).toFixed(1)}%`;
   const fmtWon = (n: number) => `${Math.round(n).toLocaleString()}원`;
   return (
-    <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm" onClick={onClose}>
+    <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
       <div className="bg-slate-900 border border-white/10 rounded-2xl shadow-2xl w-full max-w-lg max-h-[85vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
         <div className="sticky top-0 bg-slate-900/95 backdrop-blur border-b border-white/10 px-5 py-4 flex items-center justify-between z-10">
           <div>

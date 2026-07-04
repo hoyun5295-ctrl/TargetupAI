@@ -3662,7 +3662,7 @@ const campaignData = {
 
       {/* 특수문자 모달 (직접발송 + 직접타겟발송 공용) */}
       {showSpecialChars && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[70] p-4" onClick={() => setShowSpecialChars(null)}>
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[70] p-4">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-[400px] max-h-[90vh] overflow-hidden animate-in fade-in zoom-in" onClick={e => e.stopPropagation()}>
             <div className="p-4 border-b bg-purple-50 flex justify-between items-center">
               <h3 className="font-bold text-lg">✨ 특수문자</h3>
@@ -3696,7 +3696,7 @@ const campaignData = {
 
       {/* 보관함 모달 (직접발송 + 직접타겟발송 공용) */}
       {showTemplateBox && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[70] p-4" onClick={() => setShowTemplateBox(null)}>
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[70] p-4">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-[500px] max-h-[85vh] overflow-hidden animate-in fade-in zoom-in" onClick={e => e.stopPropagation()}>
             <div className="p-4 border-b bg-amber-50 flex justify-between items-center">
               <h3 className="font-bold text-lg">📂 보관함</h3>
@@ -3805,7 +3805,7 @@ const campaignData = {
 
       {/* 문자저장 모달 (직접발송 + 직접타겟발송 공용) */}
       {showTemplateSave && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[70] p-4" onClick={() => setShowTemplateSave(null)}>
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[70] p-4">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-[400px] max-h-[90vh] overflow-hidden animate-in fade-in zoom-in" onClick={e => e.stopPropagation()}>
             <div className="p-4 border-b bg-emerald-50 flex justify-between items-center">
               <h3 className="font-bold text-lg">💾 문자 저장</h3>

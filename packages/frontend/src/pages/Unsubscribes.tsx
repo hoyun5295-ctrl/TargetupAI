@@ -236,7 +236,7 @@ export default function Unsubscribes() {
     <div className="min-h-screen bg-slate-50">
       {/* 토스트 */}
       {toast.show && (
-        <div className="fixed top-4 right-4 z-50 flex items-center gap-3 px-4 py-3 rounded-xl bg-white shadow-lg ring-1 ring-slate-200 max-w-sm animate-in fade-in slide-in-from-top-2 duration-200">
+        <div className="fixed top-4 right-4 z-[10000] flex items-center gap-3 px-4 py-3 rounded-xl bg-white shadow-lg ring-1 ring-slate-200 max-w-sm animate-in fade-in slide-in-from-top-2 duration-200">
           {toast.type === 'success' ? (
             <CheckCircle2 className="w-5 h-5 text-emerald-500 shrink-0" />
           ) : toast.type === 'info' ? (
@@ -251,7 +251,7 @@ export default function Unsubscribes() {
       {/* 삭제 확인 모달 */}
       {deleteModal.show && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-          <div className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm" onClick={() => !deleting && setDeleteModal({ show: false, id: '', phone: '' })} />
+          <div className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm" />
           <div className="relative bg-white rounded-2xl shadow-xl ring-1 ring-slate-200 max-w-sm w-full animate-in fade-in zoom-in duration-200">
             <div className="p-6 text-center">
               <div className="w-14 h-14 mx-auto mb-4 bg-rose-50 rounded-2xl flex items-center justify-center">
@@ -288,7 +288,7 @@ export default function Unsubscribes() {
       {/* D43-4: 080 연동 테스트 안내 모달 — opt_out_auto_sync=true일 때만 열림 */}
       {syncTestModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-          <div className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm" onClick={() => setSyncTestModal(false)} />
+          <div className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm" />
           <div className="relative bg-white rounded-2xl shadow-xl ring-1 ring-slate-200 max-w-sm w-full animate-in fade-in zoom-in duration-200">
             <div className="p-6 text-center">
               <div className="w-14 h-14 mx-auto mb-4 bg-sky-50 rounded-2xl flex items-center justify-center">

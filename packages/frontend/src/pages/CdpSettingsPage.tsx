@@ -2265,7 +2265,7 @@ function MetricBlock({ label, value, sub, color }: { label: string; value: strin
 function CdpModal({ open, onClose, title, icon, children }: { open: boolean; onClose: () => void; title: string; icon: React.ReactNode; children: React.ReactNode }) {
   if (!open) return null;
   return createPortal(
-    <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/60 backdrop-blur-sm px-4 py-8 overflow-y-auto" onClick={onClose}>
+    <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/60 backdrop-blur-sm px-4 py-8 overflow-y-auto">
       <div className="w-full max-w-3xl bg-slate-900 border border-white/10 rounded-2xl shadow-2xl my-auto" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center gap-3 px-5 py-4 border-b border-white/10 sticky top-0 bg-slate-900 rounded-t-2xl z-10">
           <div className="w-8 h-8 rounded-lg bg-white/10 flex items-center justify-center flex-shrink-0">{icon}</div>

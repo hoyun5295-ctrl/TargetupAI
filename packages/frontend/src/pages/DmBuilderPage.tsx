@@ -783,7 +783,6 @@ export default function DmBuilderPage() {
         {/* ★ 2026-07-02(5) 빠른 시작 12 시나리오 — 모달 (시나리오 클릭 = 즉시 AI 생성 확인 → 편집 진입) */}
         {quickStartOpen && (
           <div
-            onClick={() => setQuickStartOpen(false)}
             style={{ position: 'fixed', inset: 0, zIndex: 1200, background: 'rgba(2,6,23,0.72)', backdropFilter: 'blur(4px)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}
           >
             <div

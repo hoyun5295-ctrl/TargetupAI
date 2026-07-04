@@ -40,7 +40,7 @@ export default function ModalBase({
   size = 'md',
   children,
   footer,
-  closeOnBackdrop = true,
+  closeOnBackdrop = false,
   closeOnEsc = true,
   badge,
 }: ModalBaseProps) {

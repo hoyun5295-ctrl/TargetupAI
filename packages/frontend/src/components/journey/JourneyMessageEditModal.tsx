@@ -182,7 +182,6 @@ export default function JourneyMessageEditModal({
   return (
     <div
       className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 p-3"
-      onClick={saving ? undefined : onClose}
     >
       <div
         className="bg-slate-900 border border-white/10 rounded-2xl shadow-2xl w-full max-w-[96vw] h-[94vh] flex flex-col overflow-hidden"

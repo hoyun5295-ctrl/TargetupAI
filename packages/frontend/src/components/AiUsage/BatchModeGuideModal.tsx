@@ -79,7 +79,6 @@ export default function BatchModeGuideModal({ open, onClose }: Props) {
   return (
     <div
       className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50"
-      onClick={onClose}
       role="dialog"
       aria-modal="true"
     >

@@ -177,7 +177,6 @@ export default function AiRefineModal({
   return (
     <div
       className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 z-[2000] animate-in fade-in duration-150"
-      onClick={(e) => { if (e.target === e.currentTarget && !loading) onClose(); }}
       role="dialog"
       aria-modal="true"
     >

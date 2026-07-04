@@ -560,7 +560,6 @@ export default function ScheduledCampaignModal({
     {enlargedImage && (
       <div
         className="fixed inset-0 bg-black/80 flex items-center justify-center z-[90] animate-in fade-in duration-150 p-6"
-        onClick={() => setEnlargedImage(null)}
       >
         <div className="relative max-w-[90vw] max-h-[90vh] flex flex-col items-center" onClick={(e) => e.stopPropagation()}>
           <button

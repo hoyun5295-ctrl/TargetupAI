@@ -403,7 +403,6 @@ export default function CardDetailModal({ card, onClose }: CardDetailModalProps)
   return (
     <div
       className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-[60] p-0 md:p-4 animate-[fadeIn_0.18s_ease-out]"
-      onClick={onClose}
     >
       <div
         className="bg-white w-full md:max-w-5xl md:rounded-3xl md:max-h-[90vh] max-h-screen overflow-hidden flex flex-col shadow-2xl animate-[zoomIn_0.22s_ease-out]"

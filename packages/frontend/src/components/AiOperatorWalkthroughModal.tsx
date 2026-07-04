@@ -107,7 +107,7 @@ export default function AiOperatorWalkthroughModal({ forceShow, onClose }: AiOpe
   const isLast = stepIdx === STEPS.length - 1;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-md animate-in fade-in duration-200" onClick={() => handleClose(false)}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-md animate-in fade-in duration-200">
       <div
         className={`relative w-full ${isLast ? 'max-w-5xl' : 'max-w-2xl'} rounded-3xl border border-white/10 shadow-2xl bg-gradient-to-br from-indigo-950 via-purple-950 to-fuchsia-950 overflow-hidden animate-in fade-in zoom-in-95 duration-300 transition-[max-width]`}
         onClick={(e) => e.stopPropagation()}

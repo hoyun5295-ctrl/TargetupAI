@@ -83,7 +83,6 @@ export default function PlanChangeModal({
       className="fixed inset-0 z-[9997] flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-sm"
       role="dialog"
       aria-modal="true"
-      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
     >
       <div className="relative w-full max-w-[460px] overflow-hidden rounded-2xl border border-white/10 bg-slate-900 shadow-2xl">
         <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/25 to-transparent" />

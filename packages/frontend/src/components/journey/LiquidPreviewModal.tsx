@@ -55,7 +55,7 @@ export default function LiquidPreviewModal({ messageTemplate, subject, samples, 
 
   if (samples.length === 0) {
     return (
-      <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4" onClick={onClose}>
+      <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
         <div className="bg-slate-900 border border-violet-400/30 rounded-xl max-w-md w-full p-6 text-center" onClick={(e) => e.stopPropagation()}>
           <Code className="w-8 h-8 text-violet-400 mx-auto mb-3" />
           <h3 className="text-base font-semibold mb-2">미리보기 대상 없음</h3>
@@ -67,7 +67,7 @@ export default function LiquidPreviewModal({ messageTemplate, subject, samples, 
   }
 
   return (
-    <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4" onClick={onClose}>
+    <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
       <div className="bg-slate-900 border border-violet-400/30 rounded-xl max-w-6xl w-full max-h-[90vh] overflow-hidden flex flex-col" onClick={(e) => e.stopPropagation()}>
         {/* 헤더 */}
         <div className="p-4 border-b border-white/10 flex items-center justify-between bg-violet-500/5">

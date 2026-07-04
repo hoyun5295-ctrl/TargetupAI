@@ -212,7 +212,7 @@ export default function AnalysisModal({ show, onClose, analysisLevel, onActionPr
   if (!show) return null;
 
   return (
-    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-[70]" onClick={onClose}>
+    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-[70]">
       <style>{`
         @keyframes analysisModalIn {
           from { opacity: 0; transform: scale(0.95) translateY(10px); }

@@ -437,7 +437,7 @@ export default function BrandVoiceCard({ apiBase, token, onToast, onConfirm }: B
               </div>
 
               {showGuidelineModal && createPortal(
-                <div className="fixed inset-0 z-[2000] flex items-center justify-center bg-black/70 backdrop-blur-sm p-3 md:p-4" onClick={() => setShowGuidelineModal(false)}>
+                <div className="fixed inset-0 z-[2000] flex items-center justify-center bg-black/70 backdrop-blur-sm p-3 md:p-4">
                   <div className="bg-slate-900 border border-white/10 rounded-2xl shadow-2xl w-full max-w-2xl max-h-[88vh] flex flex-col overflow-hidden" onClick={(e) => e.stopPropagation()}>
                     <div className="flex items-center justify-between px-5 py-3 border-b border-white/10">
                       <h4 className="text-sm font-semibold text-white flex items-center gap-2">
@@ -555,7 +555,7 @@ export default function BrandVoiceCard({ apiBase, token, onToast, onConfirm }: B
     </div>
 
     {editor && (
-      <div className="fixed inset-0 z-[2000] flex items-center justify-center bg-black/70 backdrop-blur-sm p-3 md:p-4" onClick={() => setEditor(null)}>
+      <div className="fixed inset-0 z-[2000] flex items-center justify-center bg-black/70 backdrop-blur-sm p-3 md:p-4">
         <div className="bg-slate-900 border border-white/10 rounded-2xl shadow-2xl w-full max-w-5xl max-h-[95vh] flex flex-col overflow-hidden" onClick={(e) => e.stopPropagation()}>
           <div className="flex items-center justify-between px-5 py-3 border-b border-white/10">
             <h4 className="text-sm font-semibold text-white flex items-center gap-2">

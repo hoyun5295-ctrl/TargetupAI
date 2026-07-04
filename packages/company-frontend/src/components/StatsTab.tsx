@@ -229,8 +229,7 @@ export default function StatsTab() {
 
       {/* 상세 모달 */}
       {detailInfo && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 animate-[fadeIn_0.15s_ease-out]"
-          onClick={() => { setDetailInfo(null); setDetail(null); }}>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 animate-[fadeIn_0.15s_ease-out]">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-5xl mx-4 max-h-[85vh] overflow-auto animate-[zoomIn_0.2s_ease-out]"
             onClick={(e) => e.stopPropagation()}>
             <div className="px-6 pt-6 pb-4 bg-gradient-to-r from-blue-50 to-indigo-50 border-b sticky top-0 z-10">

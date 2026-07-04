@@ -1107,7 +1107,7 @@ export default function ResultsModal({ onClose, token, customerDbEnabled, isSubs
 
         {/* ==================== 예약(draft) 취소 확인 모달 (native dialog 대체) ==================== */}
         {draftCancelTarget && (
-          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60] p-4" onClick={() => setDraftCancelTarget(null)}>
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60] p-4">
             <div className="bg-white rounded-2xl shadow-2xl w-full max-w-[400px] overflow-hidden" onClick={(e) => e.stopPropagation()}>
               <div className="bg-rose-50 px-6 py-4 border-b border-rose-100">
                 <h3 className="text-lg font-bold text-rose-700">예약 취소</h3>
@@ -1147,7 +1147,7 @@ export default function ResultsModal({ onClose, token, customerDbEnabled, isSubs
 
         {/* 토스트 */}
         {toast.show && (
-          <div className={`fixed top-6 left-1/2 transform -translate-x-1/2 px-6 py-3 rounded-lg shadow-lg z-[100] text-sm font-medium ${
+          <div className={`fixed top-6 left-1/2 transform -translate-x-1/2 px-6 py-3 rounded-lg shadow-lg z-[10000] text-sm font-medium ${
             toast.type === 'success' ? 'bg-green-600 text-white' : 'bg-red-600 text-white'
           }`}>
             {toast.message}
@@ -1157,7 +1157,6 @@ export default function ResultsModal({ onClose, token, customerDbEnabled, isSubs
         {enlargedImage && (
           <div
             className="fixed inset-0 bg-black/80 flex items-center justify-center z-[90] animate-in fade-in duration-150 p-6"
-            onClick={() => setEnlargedImage(null)}
           >
             <div className="relative max-w-[90vw] max-h-[90vh] flex flex-col items-center" onClick={(e) => e.stopPropagation()}>
               <button
@@ -1183,7 +1182,7 @@ export default function ResultsModal({ onClose, token, customerDbEnabled, isSubs
           // ★ 알림톡(msg_type='K')은 카카오 톤 미리보기 — 문자(LMS/SMS/MMS·카카오실패 대체발송)는 아래 기존 문자창
           if (msgType === 'K') {
             return (
-              <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[80] animate-in fade-in duration-150 p-4" onClick={() => setMsgDetailContent(null)}>
+              <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[80] animate-in fade-in duration-150 p-4">
                 <div className="bg-white rounded-2xl shadow-2xl w-full max-w-[400px] max-h-[90vh] overflow-hidden animate-in zoom-in-95 duration-200" onClick={(e) => e.stopPropagation()}>
                   <div className="p-4 border-b bg-amber-50 flex justify-between items-center">
                     <h3 className="font-bold text-lg">📱 메시지 내용</h3>
@@ -1225,7 +1224,7 @@ export default function ResultsModal({ onClose, token, customerDbEnabled, isSubs
           const maxBytes = typeLabel === 'SMS' ? 90 : 2000;
           const hasImages = Array.isArray(mmsImages) && mmsImages.length > 0;
           return (
-            <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[80] animate-in fade-in duration-150 p-4" onClick={() => setMsgDetailContent(null)}>
+            <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[80] animate-in fade-in duration-150 p-4">
               <div className="bg-white rounded-2xl shadow-2xl w-full max-w-[400px] max-h-[90vh] overflow-hidden animate-in zoom-in-95 duration-200" onClick={(e) => e.stopPropagation()}>
                 <div className="p-4 border-b bg-emerald-50 flex justify-between items-center">
                   <h3 className="font-bold text-lg">📱 메시지 내용</h3>

@@ -2276,7 +2276,7 @@ export default function JourneysPage() {
                     </div>
 
                     {editingStepIdx === idx && createPortal(
-                      <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-[45] p-4" onClick={() => setEditingStepIdx(null)}>
+                      <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-[45] p-4">
                         <div className="bg-slate-900 border border-white/10 rounded-2xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-hidden flex flex-col text-white" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
                           <div className="flex items-center justify-between p-5 border-b border-white/10 bg-gradient-to-r from-fuchsia-500/10 via-violet-500/10 to-purple-500/10">
                             <div className="flex items-center gap-3">
@@ -2886,7 +2886,7 @@ export default function JourneysPage() {
 
       {/* AI 다듬기 modal */}
       {refining && (
-        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4" onClick={() => setRefining(null)}>
+        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
           <div className="bg-slate-900 border border-white/10 rounded-xl max-w-3xl w-full max-h-[85vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
             <div className="p-4 border-b border-white/10 flex items-center justify-between sticky top-0 bg-slate-900">
               <h3 className="text-base font-semibold flex items-center gap-2"><Wand2 className="w-4 h-4 text-violet-400" />AI 다듬기 — 3 톤 후보</h3>
@@ -3039,7 +3039,7 @@ export default function JourneysPage() {
 
       {/* 정보 알림 — 버튼 클릭 모달화 (거래 통지 알림톡 빌더). 인라인 페이지 교체 폐기 → 닫으면 메인 그대로 */}
       {view === 'main' && purpose === 'info-alert' && createPortal(
-        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 p-4" onClick={() => setPurpose('marketing')}>
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 p-4">
           <div className="bg-slate-900 border border-white/10 rounded-2xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-hidden flex flex-col text-white" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
             <div className="flex items-center justify-between p-5 border-b border-white/10 bg-gradient-to-r from-teal-500/10 via-emerald-500/10 to-teal-500/10">
               <div className="flex items-center gap-3">
@@ -3073,7 +3073,7 @@ export default function JourneysPage() {
 
       {/* 날짜축 여정 — 지정일 D-N 빌더 모달 (2026-06-30 여정 일반화 SP-B) */}
       {view === 'main' && purpose === 'date-anchor' && createPortal(
-        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 p-4" onClick={() => setPurpose('marketing')}>
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 p-4">
           <div className="bg-slate-900 border border-white/10 rounded-2xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-hidden flex flex-col text-white" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
             <div className="flex items-center justify-between p-5 border-b border-white/10 bg-gradient-to-r from-indigo-500/10 via-violet-500/10 to-indigo-500/10">
               <div className="flex items-center gap-3">

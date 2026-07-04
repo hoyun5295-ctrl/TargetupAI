@@ -42,7 +42,7 @@ export function ModalShell({ title, subtitle, icon, onClose, children, footer, m
   title: string; subtitle?: string; icon: ReactNode; onClose: () => void; children: ReactNode; footer?: ReactNode; maxW?: string;
 }) {
   return createPortal(
-    <div className="fixed inset-0 bg-black/75 backdrop-blur-sm flex items-center justify-center z-[2000] p-4" onClick={onClose}>
+    <div className="fixed inset-0 bg-black/75 backdrop-blur-sm flex items-center justify-center z-[2000] p-4">
       <div className={`bg-slate-900 border border-white/10 rounded-2xl shadow-2xl ${maxW} w-full max-h-[92vh] overflow-hidden flex flex-col text-white`} onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
         <div className="flex items-center justify-between p-4 border-b border-white/10 bg-gradient-to-r from-indigo-500/10 to-violet-500/10">
           <div className="flex items-center gap-2">

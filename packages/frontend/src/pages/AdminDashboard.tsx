@@ -3945,7 +3945,7 @@ const handleApproveRequest = async (id: string) => {
 
             {/* 크레딧 충전 요청 모달 */}
             {creditPanel === 'requests' && (
-              <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50" onClick={() => setCreditPanel(null)}>
+              <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
                 <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[85vh] flex flex-col overflow-hidden" onClick={(e) => e.stopPropagation()}>
                   <div className="px-6 py-4 border-b flex items-center justify-between">
                     <h3 className="text-lg font-semibold text-gray-900">크레딧 충전 요청 {creditRequests.length}건 <span className="text-sm font-normal text-gray-400">(후불)</span></h3>
@@ -3980,7 +3980,7 @@ const handleApproveRequest = async (id: string) => {
 
             {/* 크레딧 위험 회사 모달 */}
             {creditPanel === 'risk' && (
-              <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50" onClick={() => setCreditPanel(null)}>
+              <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
                 <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[85vh] flex flex-col overflow-hidden" onClick={(e) => e.stopPropagation()}>
                   <div className="px-6 py-4 border-b flex items-center justify-between">
                     <div>
@@ -4023,7 +4023,7 @@ const handleApproveRequest = async (id: string) => {
 
             {/* 예측 일괄 분석·차감 실행 모달 */}
             {creditPanel === 'predictive' && (
-              <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50" onClick={() => setCreditPanel(null)}>
+              <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
                 <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden" onClick={(e) => e.stopPropagation()}>
                   <div className="px-6 py-4 border-b flex items-center justify-between">
                     <h3 className="text-lg font-semibold text-gray-900">예측 일괄 분석·차감 실행</h3>
@@ -4812,7 +4812,7 @@ const handleApproveRequest = async (id: string) => {
 
       {/* 템플릿 상세 모달 — 고객사 업로드 템플릿 정보 확인 (발송/승인 내용·반려 사유) */}
       {templateDetail && (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-50" onClick={() => setTemplateDetail(null)}>
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-hidden flex flex-col" onClick={(e) => e.stopPropagation()}>
             <div className="px-6 py-4 border-b bg-gradient-to-r from-blue-50 to-white flex justify-between items-center flex-shrink-0">
               <div>
@@ -7933,7 +7933,7 @@ const handleApproveRequest = async (id: string) => {
       )}
       {/* ★ D102: 메시지 내용 상세 모달 */}
       {messageDetailContent && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={() => setMessageDetailContent(null)}>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg mx-4 max-h-[80vh] overflow-auto" onClick={e => e.stopPropagation()}>
             <div className="px-6 pt-5 pb-3 border-b bg-gray-50 rounded-t-2xl flex justify-between items-center">
               <div>
@@ -7950,7 +7950,7 @@ const handleApproveRequest = async (id: string) => {
         <div className="bg-white rounded-2xl border border-gray-200/70 shadow-sm">
           {/* 빌링 토스트 */}
           {billingToast && (
-            <div className={`fixed top-6 right-6 z-[70] px-5 py-3 rounded-xl shadow-lg text-white text-sm font-medium transition-all ${
+            <div className={`fixed top-6 right-6 z-[10000] px-5 py-3 rounded-xl shadow-lg text-white text-sm font-medium transition-all ${
               billingToast.type === 'success' ? 'bg-green-500' : 'bg-red-500'
             }`}>
               {billingToast.msg}

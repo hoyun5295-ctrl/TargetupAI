@@ -270,8 +270,7 @@ export default function StatsTab() {
 
       {/* 상세 모달 */}
       {detailInfo && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 animate-[fadeIn_0.15s_ease-out]"
-          onClick={() => { setDetailInfo(null); setDetail(null); }}>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 animate-[fadeIn_0.15s_ease-out]">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-5xl mx-4 max-h-[85vh] overflow-auto animate-[zoomIn_0.2s_ease-out]"
             onClick={(e) => e.stopPropagation()}>
             <div className="px-6 py-5 bg-gradient-to-r from-indigo-50 via-white to-white border-b border-slate-100 sticky top-0 z-10">
@@ -475,7 +474,7 @@ export default function StatsTab() {
 
       {/* 메시지내용 전체 보기 모달 */}
       {msgDetail && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 animate-[fadeIn_0.15s_ease-out]" onClick={() => setMsgDetail(null)}>
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 animate-[fadeIn_0.15s_ease-out]">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-xl max-h-[82vh] flex flex-col overflow-hidden animate-[zoomIn_0.2s_ease-out]" onClick={(e) => e.stopPropagation()}>
             {/* 헤더 */}
             <div className="px-5 py-4 bg-gradient-to-r from-blue-50 to-indigo-50 border-b border-gray-100 flex items-start justify-between gap-3">

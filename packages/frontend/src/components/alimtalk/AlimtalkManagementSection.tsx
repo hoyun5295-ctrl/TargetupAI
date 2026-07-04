@@ -1056,9 +1056,6 @@ export default function AlimtalkManagementSection() {
       {rejectReasonTarget && (
         <div
           className="fixed inset-0 bg-black/50 backdrop-blur-sm z-[60] flex items-center justify-center p-4"
-          onClick={(e) => {
-            if (e.target === e.currentTarget) setRejectReasonTarget(null);
-          }}
         >
           <div
             className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[80vh] flex flex-col overflow-hidden"
@@ -1123,11 +1120,6 @@ export default function AlimtalkManagementSection() {
       {inspectionTarget && (
         <div
           className="fixed inset-0 bg-black/40 z-[60] flex items-center justify-center animate-in fade-in duration-150"
-          onClick={(e) => {
-            if (e.target === e.currentTarget && !inspectionSubmitting) {
-              setInspectionTarget(null);
-            }
-          }}
         >
           <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full mx-4 p-6 animate-in zoom-in-95 duration-200">
             <h3 className="text-lg font-semibold text-gray-900 mb-1">검수요청</h3>
@@ -1220,7 +1212,7 @@ export default function AlimtalkManagementSection() {
 
       {toast && (
         <div
-          className="fixed bottom-6 right-6 bg-gray-900 text-white text-sm px-4 py-2 rounded-lg shadow-lg z-[60]"
+          className="fixed bottom-6 right-6 bg-gray-900 text-white text-sm px-4 py-2 rounded-lg shadow-lg z-[10000]"
           onClick={() => setToast(null)}
         >
           {toast}

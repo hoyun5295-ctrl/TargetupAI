@@ -36,6 +36,14 @@
 
 > **회전 룰:** 완료(★배포완료) 엔트리는 원문을 archive/TASKS_YYYY-MM.md로 이동 + INDEX 등재하고, 아래 "최근 완료 인덱스"에 1줄만 남긴다. 30KB 초과 = 회전 미이행 — 즉시 회전.
 
+### 🟢 2026-07-04 — 문안 퀄리티 엔진 + 비토 자체게이트웨이 E2E + 메모리 관제탑 정리
+> **① 문안 퀄리티 엔진(cold-start) — 코드완료·tsc0·vitest35/35 / 1차 배포됨·fix분 재배포 대기**: GPT 차별화 목표. 계획1 자기검수 루프(스팸 회피 — generateMessages 기존 재생성 루프에 접합, 중복0) / 계획2 업종 베스트 주입(탈색·베스트랭커·검색+조립기 + 슈퍼관리자 시드 큐레이션 모달 — sentinel tenant=**스키마 ALTER 0**) / 계획3 라벨 누수 차단(`:kakao` 평문화 + 라벨 전용 스윕=여정·브랜드, campaign-lifecycle 환불루프와 분리=이중환불0) / 별건 예측 '일반' 클릭 0.12 두 벌 정렬. ★검수 후 fix(재배포 필요): `final_source` CHECK 제약(ck_training_final_source) 위반→'manual' + 탈색에 개인화토큰·수신자이름(PII) 제거·저가치 제외 + 모달 페이징(5/page·선택유지·가독). 설계·계획=docs/superpowers/{specs/2026-07-04-copy-quality-engine-design.md, plans/2026-07-04-copy-quality-engine-plan1·2.md}. 상세 [[project_2026_0704_copy_quality_engine]]. 후속: 여정 SMS/LMS 라벨·성과 Tier2 귀속 엔진.
+> **② 비토 자체게이트웨이(라인13) SMSQ_SEND_13 E2E 완주 ★**: 앱→라인13 한글 SMS 정상(status_code 100→6). 픽업 0 원인=비토 Agent 스펙 외 `bill_id LIKE 'BITOTEST-%'` where_extra(한줄로 무결). 한줄로 코드 수정 0(자비스 게이트웨이+설정 수정). 상세 [[project_2026_0704_bito_gateway_pickup_rootcause]].
+> **③ 메모리 관제탑 정리**: MEMORY.md 인덱스 축소 — 완료 프로젝트 36건을 memory/archive/ + archive/INDEX.md 카탈로그로(누락 0).
+> **잔여**: ① fix분 재배포(백엔드 build:safe+pm2 / 프론트 빌드+Ctrl+F5) + 배포 후 실측(여정 KAKAO 라벨 환류·시드 큐레이션 채굴→승인 E2E·스팸 유도 시 재생성).
+
+---
+
 ### 🟢 2026-07-03 — 관제탑 재설계 v2 + 사용구분 게이팅 + 전 채널 학습 루프 + 레거시 SSL 무료전환
 > **① 관제탑 재설계 v2 (★완료·문서만·tp-push 대기)**: STATUS 736KB→16.7KB, 상시 로드=CLAUDE.md+STATUS.md 둘뿐(doc_routing/doc_ownership 룰 신설). 3계층 라우팅+archive/INDEX.md(증상어 177행). `scripts/harness-check.sh` 기계 검증 7종 + PostToolUse 훅 등록(.claude/settings.json, BOM 제거 완료). 백업=`status/_backup-20260703-관제탑재설계전/`. 상세 [[project_2026_0703_control_tower_redesign]].
 > **② 사용구분 게이팅 (코드완료·배포 진행)**: `companies.usage_type`(web/agent/both)+`company_agent_ids` DDL 실행완료. 에이전트 전용 계정=카카오 템플릿 관리만(4경로 게이팅: 라우트 회수/랜딩/app 403/알림톡 탭). 슈퍼관리자 사용구분 UI+발송ID 매핑. 상세 [[project_2026_0703_legacy_server_decommission]].
