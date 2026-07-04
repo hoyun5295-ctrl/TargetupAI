@@ -18,7 +18,7 @@
  */
 
 import { useNavigate } from 'react-router-dom';
-import { Lock, Sparkles, X, ArrowRight, Check, Zap, BarChart3, Target } from 'lucide-react';
+import { Lock, Sparkles, X, ArrowRight, Check, Zap, BarChart3, Target, ShieldCheck } from 'lucide-react';
 
 interface PlanUpgradeModalProps {
   show: boolean;
@@ -73,6 +73,25 @@ const FEATURE_VALUE_MAP: Record<string, { icon: typeof Sparkles; description: st
       '엑셀 / CSV 파일 일괄 업로드 (수만 건 처리)',
       'AI 자동 컬럼 매핑 (수동 매핑 30+ 클릭 폐기)',
       '사용자 정의 필드 자유 추가 + 검색 / 필터',
+    ],
+  },
+  // ★ 2026-07-04 직접발송 보조 기능 잠금 통일 (기존 SpamFilterLockModal·AiRefineLockedModal 대체)
+  'AI 문안 다듬기': {
+    icon: Sparkles,
+    description: '직접 쓴 메시지를 톤·길이·이모지·스팸 회피까지 한 번에 정리합니다.',
+    benefits: [
+      '회사 30일 발송 패턴 학습 → 우리 톤으로 자동 정리',
+      'SMS/LMS 길이 자동 조정 + 광고 규정 자동 적용',
+      '스팸 유발 표현 자동 회피로 전달률 향상',
+    ],
+  },
+  '스팸필터 테스트': {
+    icon: ShieldCheck,
+    description: 'SKT · KT · LG U+ 3사의 실제 스팸 차단 여부를 발송 전에 미리 확인합니다.',
+    benefits: [
+      '통신사 3사 실제 스팸 판정 사전 확인',
+      '차단 위험 문구를 발송 전에 교정',
+      'AI 다듬기와 연동해 안전한 문안으로 발송',
     ],
   },
 };

@@ -41,10 +41,8 @@ import {
   resolveRecipientCallback,
 } from '../utils/formatDate';
 import { insertAtCursorPos } from '../utils/textInsert';
-import BrandLinkChips from './BrandLinkChips';
 import MmsImagePreview from './shared/MmsImagePreview';
 import AiRefineModal from './AiRefineModal';
-import AiRefineLockedModal from './AiRefineLockedModal';
 import AlimtalkChannelPanel, {
   type AlimtalkChannelState,
   type AlimtalkSenderProfile,
@@ -103,12 +101,14 @@ export interface DirectSendPanelProps {
 
   // 스팸필터
   isSpamFilterLocked: boolean;
-  setShowSpamFilterLock: (b: boolean) => void;
   setSpamFilterData: (d: any) => void;
   setShowSpamFilter: (b: boolean) => void;
 
   // ★ D152+ AI 다듬기 요금제 잠금 (BASIC 이상 + TRIAL만 활성, FREE/STARTER 잠금)
   isAiMessagingLocked?: boolean;
+
+  // ★ 2026-07-04 미가입 보조기능 잠금 통일 — 스팸필터/AI 다듬기 클릭 시 요금제 업그레이드 모달(PlanUpgradeModal)
+  onLockedFeature: (feature: string, requiredPlan: string) => void;
 
   // 카카오 (알림톡 전용 — SMS/RCS는 건드리지 않음)
   kakaoTemplates: any[];
@@ -192,8 +192,8 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
     splitEnabled, setSplitEnabled, splitCount, setSplitCount,
     optOutNumber,
     mmsUploadedImages, setMmsUploadedImages, setShowMmsUploadModal,
-    isSpamFilterLocked, setShowSpamFilterLock, setSpamFilterData, setShowSpamFilter,
-    isAiMessagingLocked,
+    isSpamFilterLocked, setSpamFilterData, setShowSpamFilter,
+    isAiMessagingLocked, onLockedFeature,
     kakaoTemplates, kakaoSelectedTemplate, setKakaoSelectedTemplate,
     kakaoTemplateVars, setKakaoTemplateVars,
     alimtalkFallback, setAlimtalkFallback,
@@ -225,8 +225,6 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
   // ★ D152+ (PDF 0511 funnel fix): AI 인라인 다듬기 모달 토글.
   //   STARTER 이상 + TRIAL 자동. CT-17 ai_messaging_enabled 게이팅은 백엔드에서.
   const [showAiRefineModal, setShowAiRefineModal] = useState(false);
-  // ★ D152+ FREE 잠금 사용자에게 가치 안내 + 업그레이드 동선 (어떤 기능인지 + 스타터 이상 안내)
-  const [showAiRefineLockedModal, setShowAiRefineLockedModal] = useState(false);
 
   // ★ D152+ 진입 안내 팝업의 "지금 써볼게요" → CustomEvent 'focus-ai-refine-btn' → 버튼 3초 glow + focus.
   //   Dashboard.tsx closeAiRefinePopup('now') 핸들러에서 dispatch.
@@ -448,7 +446,7 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
 
   // 스팸필터
   const handleSpamFilter = () => {
-    if (isSpamFilterLocked) { setShowSpamFilterLock(true); return; }
+    if (isSpamFilterLocked) { onLockedFeature('스팸필터 테스트', '스타터'); return; }
     if (!directRecipients || directRecipients.length === 0) {
       setToast({ show: true, type: 'error', message: '발송리스트를 먼저 업로드해주세요.' });
       return;
@@ -898,21 +896,6 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
                   );
                 })()}
 
-                {/* ★ 2026-07-02 브랜드 링크 — 칩 클릭 = 커서 위치 URL 삽입 (textInsert CT 재사용) */}
-                <BrandLinkChips
-                  tone="light"
-                  onToast={(message, type) => setToast({ show: true, type: type === 'error' ? 'error' : 'success', message })}
-                  onInsert={(u) => {
-                    insertAtCursorPos(
-                      directCursorPosRef.current,
-                      u,
-                      setDirectMessage,
-                      directTextareaRef.current,
-                      directCursorPosRef,
-                    );
-                  }}
-                />
-
                 {/* 보조 액션 3등분 (미리보기 / 스팸필터테스트 / AI 다듬기 — D152+ PDF 0511 funnel fix) */}
                 <div className="grid grid-cols-3 gap-2">
                   <button
@@ -940,9 +923,9 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
                     data-ai-refine-btn
                     className={`ds-btn-sec ds-t flex items-center justify-center gap-1.5 rounded-lg border-2 border-violet-200 bg-gradient-to-r from-violet-50 to-fuchsia-50 hover:from-violet-100 hover:to-fuchsia-100 hover:border-violet-300 text-violet-700 font-semibold transition-all ${aiBtnGlowing ? 'animate-pulse ring-4 ring-violet-400/60 shadow-lg shadow-violet-300/50' : ''}`}
                     onClick={() => {
-                      // ★ D152+ FREE 잠금 시 — 기능 안내 + 스타터 이상 업그레이드 동선
+                      // ★ 2026-07-04 미가입 잠금 시 — 요금제 업그레이드 모달(PlanUpgradeModal) 통일
                       if (isAiMessagingLocked) {
-                        setShowAiRefineLockedModal(true);
+                        onLockedFeature('AI 문안 다듬기', '스타터');
                         return;
                       }
                       if (!directMessage.trim()) { setToast({ show: true, type: 'error', message: '다듬을 메시지를 입력해주세요' }); return; }
@@ -1635,12 +1618,6 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
             setDirectMessage(text);
             setToast({ show: true, type: 'success', message: 'AI 안 적용됨 · 발송 전 미리보기 확인 권장' });
           }}
-        />
-
-        {/* ★ D152+ FREE 잠금 안내 — 기능 설명 + 스타터 이상 업그레이드 동선 */}
-        <AiRefineLockedModal
-          isOpen={showAiRefineLockedModal}
-          onClose={() => setShowAiRefineLockedModal(false)}
         />
 
       </div>

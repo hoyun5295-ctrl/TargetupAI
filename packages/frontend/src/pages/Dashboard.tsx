@@ -43,7 +43,6 @@ import ScheduleTimeModal from '../components/ScheduleTimeModal';
 import CallbackConfirmModal, { type CallbackConfirmData } from '../components/CallbackConfirmModal';
 import NameEmptyWarningModal from '../components/NameEmptyWarningModal';
 import SendConfirmModal from '../components/SendConfirmModal';
-import SpamFilterLockModal from '../components/SpamFilterLockModal';
 import SpamFilterTestModal from '../components/SpamFilterTestModal';
 import SubscriptionLockModal from '../components/SubscriptionLockModal';
 import SyncActiveBlockModal from '../components/SyncActiveBlockModal';
@@ -162,7 +161,6 @@ export default function Dashboard() {
   // 요금제 잠금 체크
   const subscriptionStatus = (user as any)?.company?.subscriptionStatus || 'trial';
   const [showSubscriptionLock, setShowSubscriptionLock] = useState(false);
-  const [showSpamFilterLock, setShowSpamFilterLock] = useState(false);
   const [showPlanApproval, setShowPlanApproval] = useState(false);
   const [planApproval, setPlanApproval] = useState<{requestId: string; planName: string} | null>(null);
   // ★ D163 (2026-05-19) Braze급 SaaS Step 0 — AI Operator 베타 모달 (전체 등급 노출, ENT+만 실제 진입)
@@ -2120,9 +2118,6 @@ const campaignData = {
 
   return (
     <div className="min-h-screen bg-gray-100">
-      {/* 스팸필터 잠금 모달 */}
-      <SpamFilterLockModal show={showSpamFilterLock} onClose={() => setShowSpamFilterLock(false)} />
-
       {/* 요금제 승인 알림 모달 */}
       <PlanApprovalModal
         show={showPlanApproval}
@@ -3555,7 +3550,8 @@ const campaignData = {
           optOutNumber={optOutNumber}
           mmsUploadedImages={mmsUploadedImages} setMmsUploadedImages={setMmsUploadedImages}
           setShowMmsUploadModal={setShowMmsUploadModal}
-          isSpamFilterLocked={isSpamFilterLocked} setShowSpamFilterLock={setShowSpamFilterLock}
+          isSpamFilterLocked={isSpamFilterLocked}
+          onLockedFeature={(f, p) => { setPlanUpgradeFeature(f); setPlanUpgradeRequired(p); setShowPlanUpgradeModal(true); }}
           isAiMessagingLocked={isAiMessagingLocked}
           setSpamFilterData={setSpamFilterData} setShowSpamFilter={setShowSpamFilter}
           kakaoTemplates={kakaoTemplates}
