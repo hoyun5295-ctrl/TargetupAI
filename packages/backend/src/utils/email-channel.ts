@@ -265,7 +265,7 @@ export async function sendEmailCampaign(input: SendCampaignInput): Promise<{ mes
   let finalSubject = campaign.subject;
   let finalHtml = campaign.htmlBody;
   if (campaign.isAd) {
-    if (!finalSubject.startsWith('(광고)')) finalSubject = `(광고) ${finalSubject}`;
+    if (!/^\s*[(（]\s*광고\s*[)）]/.test(finalSubject)) finalSubject = `(광고) ${finalSubject}`; // 반각·전각 중복 방지
     if (!finalHtml.includes('수신거부') && !finalHtml.includes('unsubscribe')) {
       finalHtml += adFooter;
     }

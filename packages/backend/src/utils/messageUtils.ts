@@ -414,7 +414,7 @@ export function buildAdMessage(
   //   - SMS/LMS/MMS 공통: 최소 1개 개행 보장 (무료거부가 본문에 안 붙도록)
   //   - AI 문안이 이미 "무료수신거부 080..."을 포함하면 hasRejectFooter=true → 원본 그대로
   //   - D102/D103 안전장치(중복 방지)는 그대로 유지
-  const hasAdPrefix = message.startsWith('(광고)');
+  const hasAdPrefix = /^\s*[(（]\s*광고\s*[)）]/.test(message); // 반각·전각 (광고) 모두 인식 — 이중부착 방지
   const hasRejectFooter = /무료수신거부|무료거부/.test(message);
 
   const finalPrefix = hasAdPrefix ? '' : adPrefix;
@@ -458,8 +458,8 @@ export function stripAdParts(text: string): string {
   result = result.replace(/\s*\n?\s*무료수신거부\s*[\d-]+\s*$/g, '');
   // 끝의 무료거부 (SMS) 제거: "\n무료거부080xxxxxxxx"
   result = result.replace(/\s*\n?\s*무료거부\d+\s*$/g, '');
-  // 시작의 (광고) prefix 제거 (양식: "(광고)" or "(광고) ")
-  result = result.replace(/^\s*\(광고\)\s*/g, '');
+  // 시작의 (광고) prefix 제거 (반각 "(광고)" + 전각 "（광고）" + 내부/양끝 공백)
+  result = result.replace(/^\s*[(（]\s*광고\s*[)）]\s*/g, '');
   return result;
 }
 
@@ -475,8 +475,8 @@ export function stripAdPartsDeep(text: string): string {
   let result = stripAdParts(text);
   // 본문 중간의 무료수신거부/무료거부 문구 + 뒤따르는 번호 제거
   result = result.replace(/[ \t]*(?:무료\s*수신\s*거부|무료거부)[ \t]*[:：]?[ \t]*[\d-]*[ \t]*/g, '');
-  // 본문 중간의 (광고) 마커 제거
-  result = result.replace(/\(광고\)[ \t]*/g, '');
+  // 본문 중간의 (광고) 마커 제거 (반각·전각)
+  result = result.replace(/[(（]\s*광고\s*[)）][ \t]*/g, '');
   // 제거로 생긴 빈 줄/꼬리 공백 정리
   result = result.replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
   return result;
@@ -494,7 +494,7 @@ export function buildAdSubject(subject: string, msgType: string, isAd: boolean):
   if (!isAd) return subject;
   if (msgType !== 'LMS' && msgType !== 'MMS') return subject;
   if (!subject) return '(광고)';
-  if (subject.startsWith('(광고)')) return subject; // 중복 방지
+  if (/^\s*[(（]\s*광고\s*[)）]/.test(subject)) return subject; // 중복 방지 (반각·전각)
   return `(광고) ${subject}`;
 }
 

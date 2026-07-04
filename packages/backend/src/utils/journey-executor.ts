@@ -47,6 +47,7 @@ import {
   getOpt080Number,
 } from './messageUtils';
 import { resolveJourneyAdFlag } from './journey-ad-policy';
+import { isCallbackRegistered } from './callback-filter';
 import { prepaidDeduct } from './prepaid';
 import { deductCreditSafe } from './ai-credit';
 import { getCreditCost, kstDateTag } from './ai-credit-calc';
@@ -414,6 +415,14 @@ async function processExecution(exec: ExecutionRow): Promise<StepOutcome> {
   //   callback-filter CT의 store_phone 폴백 개념을 여정 단건/기존 호환에 맞춰 적용(기존 우선순위 보존).
   const useStoreCallback = exec.callback_mode === 'store';
   const storePhoneCallback = useStoreCallback ? String(customer.store_phone || '').trim() : '';
+  // ★ 매장번호 발송(store 모드): store_phone이 있는데 등록 발신번호가 아니면 발송 시도 없이 이 고객만 자동 실패.
+  //   발신번호 사전등록제 — 미등록 발송은 통신사 거부. 크레딧 차감/발송 이전 단계라 미차감, 여정 전체는 계속 진행.
+  //   매장번호가 아예 없는 고객은 아래 fallback(고정 회신번호)으로 발송된다.
+  if (storePhoneCallback && !(await isCallbackRegistered(exec.company_id, storePhoneCallback, exec.created_by || undefined))) {
+    await logFailedStep(exec.execution_id, step.id, 'callback_not_registered');
+    await advanceOrComplete(exec, step, 0);
+    return 'failed';
+  }
   const callbackNumber = String(storePhoneCallback || exec.journey_callback_number || customer.callback || '').trim();
   if (!callbackNumber) {
     await pauseJourney(exec.journey_id, '회신번호가 비어있어 발송 차단됨');

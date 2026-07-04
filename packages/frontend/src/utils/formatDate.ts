@@ -941,7 +941,7 @@ export function buildAdMessageFront(
   //   - minBreaks=1 통일 (D136까지 LMS/MMS=2 강제 → D137 완화, 사용자 직접발송 빈 줄 제거)
   //   - 빈 줄은 고객 입력 또는 AI 원본 개행 (ai.ts 자동제거 regex `\n?` 제거로 보존)에 의해서만 발생
   //   - AI 문안이 이미 "무료수신거부 080..."을 포함하면 hasRejectFooter=true → 원본 유지
-  const hasAdPrefix = message.startsWith('(광고)');
+  const hasAdPrefix = /^\s*[(（]\s*광고\s*[)）]/.test(message); // 반각·전각 (광고) 모두 인식 — 이중부착 방지
   const hasRejectFooter = /무료수신거부|무료거부/.test(message);
 
   const finalPrefix = hasAdPrefix ? '' : adPrefix;
@@ -971,7 +971,7 @@ export function buildAdSubjectFront(subject: string, msgType: string, isAd: bool
   if (!isAd) return subject;
   if (msgType !== 'LMS' && msgType !== 'MMS') return subject;
   if (!subject) return '(광고)';
-  if (subject.startsWith('(광고)')) return subject;
+  if (/^\s*[(（]\s*광고\s*[)）]/.test(subject)) return subject; // 반각·전각 중복 방지
   return `(광고) ${subject}`;
 }
 
@@ -994,8 +994,8 @@ function stripAdParts(text: string): string {
   result = result.replace(/\s*\n?\s*무료수신거부\s*[\d-]+\s*$/g, '');
   // 끝의 무료거부 (SMS) 제거: "\n무료거부080xxxxxxxx"
   result = result.replace(/\s*\n?\s*무료거부\d+\s*$/g, '');
-  // 시작의 (광고) prefix 제거 (양식: "(광고)" or "(광고) ")
-  result = result.replace(/^\s*\(광고\)\s*/g, '');
+  // 시작의 (광고) prefix 제거 (반각 "(광고)" + 전각 "（광고）" + 내부/양끝 공백)
+  result = result.replace(/^\s*[(（]\s*광고\s*[)）]\s*/g, '');
   return result;
 }
 

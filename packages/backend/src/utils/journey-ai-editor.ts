@@ -14,6 +14,7 @@
 
 import { callAIWithFallback } from '../services/ai';
 import { sanitizeForSms } from './message-sanitizer';
+import { stripAdParts } from './messageUtils';
 import { resolveJourneyAdFlag } from './journey-ad-policy';
 
 type ChannelType = 'sms' | 'lms' | 'mms' | 'kakao';
@@ -88,8 +89,9 @@ function normalizeStep(s: any, idx: number): any {
   base.channel = channel;
   const rawMessage = String(s?.messageTemplate || '').slice(0, 2000);
   const rawSubject = channel === 'sms' ? '' : String(s?.subject || '').slice(0, 50);
-  base.messageTemplate = sanitizeForSms(rawMessage).sanitized;
-  base.subject = sanitizeForSms(rawSubject).sanitized;
+  // 순수 본문/제목만 보존 — (광고)/무료수신거부는 발송·미리보기 시 합성 (이중부착 방지)
+  base.messageTemplate = stripAdParts(sanitizeForSms(rawMessage).sanitized);
+  base.subject = stripAdParts(sanitizeForSms(rawSubject).sanitized);
   base.isAd = channel === 'kakao' ? false : resolveJourneyAdFlag(channel, s?.isAd);
 
   // 알림톡(kakao) 설정 보존

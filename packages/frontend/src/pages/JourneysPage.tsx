@@ -345,7 +345,9 @@ function adRejectFor(channel: ChannelType, opt080: string): string {
 
 function buildPreview(message: string, isAd: boolean, channel: ChannelType, opt080: string): string {
   if (!isAd || !message) return message;
-  return `${adPrefixFor(channel)}${message}\n${adRejectFor(channel, opt080)}`;
+  // 본문에 이미 (광고) 마커(반각/전각)가 있으면 제거 후 표준 1회 부착 — 이중부착 방지
+  const pure = message.replace(/^\s*[(（]\s*광고\s*[)）]\s*/, '');
+  return `${adPrefixFor(channel)}${pure}\n${adRejectFor(channel, opt080)}`;
 }
 
 // ★ 2026-06-22: 스텝 타임라인 지연 표시 — 이전 스텝 후 대기 시간을 사람이 읽기 쉽게
@@ -2743,7 +2745,7 @@ export default function JourneysPage() {
                             {(s.channel === 'lms' || s.channel === 'mms') && s.subject && (
                               <div className="mb-2 pb-2 border-b border-white/10 text-[12px]">
                                 <span className="text-white/45">제목 </span>
-                                <span className="text-white/85">{s.isAd ? (s.subject.startsWith('(광고)') ? s.subject : `(광고) ${s.subject}`) : s.subject}</span>
+                                <span className="text-white/85">{s.isAd ? (/^\s*[(（]\s*광고\s*[)）]/.test(s.subject) ? s.subject : `(광고) ${s.subject}`) : s.subject}</span>
                               </div>
                             )}
                             {/* ★ 2026-06-26 라프레리 신고 fix: Liquid({{ }}) 미렌더로 원문 노출 → renderLiquid 먼저 적용 후 %변수% 머지 */}

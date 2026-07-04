@@ -36,6 +36,13 @@
 
 > **회전 룰:** 완료(★배포완료) 엔트리는 원문을 archive/TASKS_YYYY-MM.md로 이동 + INDEX 등재하고, 아래 "최근 완료 인덱스"에 1줄만 남긴다. 30KB 초과 = 회전 미이행 — 즉시 회전.
 
+### 🟢 2026-07-05 — 자동마케팅 4수정(배포완료) + 비토 Agent v1.0.8/MMS + 레거시 템플릿 이관 조사
+> **① 자동마케팅 전수점검 4수정 (★배포완료, 커밋 38c06ea8)**: 발송 상한(LIMIT 10000) 제거 = 서버사이드 staging INSERT(operator-recipients `buildSendableStagingInsertSql`·customer-send-stats `recordCustomerSendsByFilter`, 상한 없음) / 크레딧 차감 유실 차단('sent' 전환을 차감 성공에 종속→reconcile 재차감) / approve 라우트 `isAiOperatorAllowed` 게이트 / non-ad→광고 라벨. 통제선=고객 예산·선불 잔액(우리 강제상한 0). tsc0·순수17.
+> **② 비토 Agent v1.0.8 MMS (Agent 배포완료·Gateway v135 대기)**: 라인13 MMS 이미지 누락 진단(앱 정상, Agent가 파일 미독) → 조언문서 → 자비스 당일 v135/v1.0.8. Agent v1.0.5→1.0.7→1.0.8 교체 + `mms:` config. **Gateway v135(139.150.81.213) 반영 + E2E 미실측 대기**. OPS.md §6-2 갱신. 상세 [[project_2026_0705_bito_agent_v108_mms]].
+> **③ 레거시 카카오 템플릿 이관 조사·핸드오프 (서팀장 회의 대기)**: event-admin(4519 템플릿) → 한줄로. 확정19/신규34/A-B(IMC 계정) 미확정. SoT=docs/2026-07-05-legacy-template-migration-handoff.md. 상세 [[project_2026_0705_legacy_template_migration]].
+
+---
+
 ### 🟢 2026-07-04 (2) — 모달/토스트 UX + 베스트 문안 재설계·진화 + 발송결과 집계 근본수정 + 스크롤 복원 + 직접발송 정리
 > **① 모달 배경클릭 닫힘 전면 제거 (★배포완료)**: 전 모달(frontend 약60 + company-frontend 2)에서 오버레이 백드롭 닫힘(onClick/onMouseDown/currentTarget) 제거 — X·취소·ESC만. `ModalBase closeOnBackdrop` 기본 false. 드롭다운/캔버스/이미지라이트박스 판별 제외, 잔존 0 재grep.
 > **② 크레딧·피드백 토스트 z-index (★배포완료)**: `credit:used` 토스트(ToastProvider) + 로컬 코너 토스트 13곳을 z-[10000]로 상향(모달 z-[9999] 위, 세션만료 99999만 최상위). 모달 뒤로 깔려 안 보이던 문제 해소.

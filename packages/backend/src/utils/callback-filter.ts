@@ -101,39 +101,8 @@ export async function filterByIndividualCallback(
   const unregisteredDetails: UnregisteredCallbackDetail[] = [];
   const callbackPhones = [...new Set(filtered.map((c: any) => normalizePhone(c.callback || '')).filter(Boolean))];
   if (callbackPhones.length > 0) {
-    // 등록된 발신번호 조회 (sender_numbers + callback_numbers)
-    // D91: userId가 있으면 assignment_scope 필터 적용 — 'all' 또는 본인 배정된 'assigned'만 허용
-    let registeredSql = `
-      SELECT REPLACE(phone_number, '-', '') as phone FROM sender_numbers WHERE company_id = $1 AND is_active = true
-      UNION SELECT REPLACE(cn.phone, '-', '') as phone FROM callback_numbers cn WHERE cn.company_id = $1
-    `;
-    const registeredParams: any[] = [companyId];
-
-    if (userId) {
-      // assignment_scope 컬럼 존재 시에만 필터 적용 (하위호환)
-      try {
-        await query(`SELECT assignment_scope FROM callback_numbers LIMIT 0`);
-        registeredSql = `
-          SELECT REPLACE(phone_number, '-', '') as phone FROM sender_numbers WHERE company_id = $1 AND is_active = true
-          UNION SELECT REPLACE(cn.phone, '-', '') as phone FROM callback_numbers cn
-          WHERE cn.company_id = $1
-            AND (
-              cn.assignment_scope = 'all'
-              OR cn.assignment_scope IS NULL
-              OR EXISTS (
-                SELECT 1 FROM callback_number_assignments cna
-                WHERE cna.callback_number_id = cn.id AND cna.user_id = $2
-              )
-            )
-        `;
-        registeredParams.push(userId);
-      } catch {
-        // assignment_scope 컬럼 미존재 — 기존 쿼리 유지
-      }
-    }
-
-    const registeredResult = await query(registeredSql, registeredParams);
-    const registeredSet = new Set((registeredResult.rows as any[]).map((r: any) => r.phone));
+    // 등록된 발신번호 집합 (sender_numbers ∪ callback_numbers, assignment_scope 반영) — CT 공유 헬퍼
+    const registeredSet = await getRegisteredCallbackSet(companyId, userId);
 
     // 미등록 회신번호별 제외 인원수 집계
     const unregCountMap = new Map<string, number>();
@@ -166,6 +135,56 @@ export async function filterByIndividualCallback(
     callbackSkippedCount: callbackMissingCount + callbackUnregisteredCount,
     unregisteredDetails,
   };
+}
+
+/**
+ * 회사의 등록 발신번호 집합 (sender_numbers 활성 ∪ callback_numbers, assignment_scope 반영).
+ * 정규화(하이픈 제거) 전화번호 Set. filterByIndividualCallback(리스트)·isCallbackRegistered(단건)이 공유.
+ */
+export async function getRegisteredCallbackSet(companyId: string, userId?: string): Promise<Set<string>> {
+  // D91: userId가 있으면 assignment_scope 필터 적용 — 'all' 또는 본인 배정된 'assigned'만 허용
+  let registeredSql = `
+    SELECT REPLACE(phone_number, '-', '') as phone FROM sender_numbers WHERE company_id = $1 AND is_active = true
+    UNION SELECT REPLACE(cn.phone, '-', '') as phone FROM callback_numbers cn WHERE cn.company_id = $1
+  `;
+  const registeredParams: any[] = [companyId];
+
+  if (userId) {
+    // assignment_scope 컬럼 존재 시에만 필터 적용 (하위호환)
+    try {
+      await query(`SELECT assignment_scope FROM callback_numbers LIMIT 0`);
+      registeredSql = `
+        SELECT REPLACE(phone_number, '-', '') as phone FROM sender_numbers WHERE company_id = $1 AND is_active = true
+        UNION SELECT REPLACE(cn.phone, '-', '') as phone FROM callback_numbers cn
+        WHERE cn.company_id = $1
+          AND (
+            cn.assignment_scope = 'all'
+            OR cn.assignment_scope IS NULL
+            OR EXISTS (
+              SELECT 1 FROM callback_number_assignments cna
+              WHERE cna.callback_number_id = cn.id AND cna.user_id = $2
+            )
+          )
+      `;
+      registeredParams.push(userId);
+    } catch {
+      // assignment_scope 컬럼 미존재 — 기존 쿼리 유지
+    }
+  }
+
+  const registeredResult = await query(registeredSql, registeredParams);
+  return new Set((registeredResult.rows as any[]).map((r: any) => r.phone));
+}
+
+/**
+ * 단건 회신번호가 등록 발신번호인지 판정 — 여정 실행기 등 1건씩 발송하는 경로용.
+ * (campaigns/자동발송은 filterByIndividualCallback 리스트 필터 사용.)
+ */
+export async function isCallbackRegistered(companyId: string, phone: string, userId?: string): Promise<boolean> {
+  const norm = normalizePhone(phone || '');
+  if (!norm) return false;
+  const set = await getRegisteredCallbackSet(companyId, userId);
+  return set.has(norm);
 }
 
 /**

@@ -52,7 +52,7 @@ export default function DirectPreviewModal({
 
   // ★ D137 UI: 제목에 (광고) 자동 prefix — 이미 포함되어 있으면 중복 방지
   const subjectWithAd = adTextEnabled && directSubject
-    ? (directSubject.trim().startsWith('(광고)') ? directSubject : `(광고) ${directSubject}`)
+    ? (/^\s*[(（]\s*광고\s*[)）]/.test(directSubject.trim()) ? directSubject : `(광고) ${directSubject}`)
     : directSubject;
 
   // ★ D137 (0424): formatDate.ts resolveRecipientCallback 컨트롤타워 사용 (원칙 3 준수).

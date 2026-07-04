@@ -77,12 +77,13 @@ export default function JourneyActivationConfirmModal({
   journeyId, journeyName, journeyStatus, onClose, onActivated, token,
 }: Props) {
   const toast = useToast();
-  const [phase, setPhase] = useState<'validating' | 'failed' | 'ready' | 'activating' | 'migration_pending'>('validating');
+  const [phase, setPhase] = useState<'validating' | 'failed' | 'ready' | 'activating' | 'migration_pending' | 'callback_confirm'>('validating');
   const [activeCardIndex, setActiveCardIndex] = useState(0);
   const [result, setResult] = useState<ValidationResult | null>(null);
   const [balance, setBalance] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [creditConfirm, setCreditConfirm] = useState(false);
+  const [callbackConfirm, setCallbackConfirm] = useState<{ count: number; details: { phone: string; excludedCount: number }[]; message: string } | null>(null);
 
   // sub-agent 카드 700ms 간격 진행
   useEffect(() => {
@@ -146,18 +147,27 @@ export default function JourneyActivationConfirmModal({
     }
   };
 
-  const runActivate = async () => {
+  const runActivate = async (confirmExclusion = false) => {
     setPhase('activating');
     try {
       const res = await fetch(`/api/ai/operator/journeys/${journeyId}/activate`, {
         method: 'POST',
-        headers: { Authorization: `Bearer ${token}` },
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ confirmCallbackExclusion: confirmExclusion }),
       });
       const data = await res.json();
       if (res.ok && data.success) {
         toast.success('여정이 활성화되었습니다');
         onActivated();
         onClose();
+      } else if (data?.callbackConfirmRequired) {
+        // 매장번호 발송(store 모드) 미등록 회신번호 — 실패 예정 인원 고지 후 재확인
+        setCallbackConfirm({
+          count: Number(data.callbackUnregisteredCount || 0),
+          details: Array.isArray(data.unregisteredDetails) ? data.unregisteredDetails : [],
+          message: String(data.message || ''),
+        });
+        setPhase('callback_confirm');
       } else {
         toast.error(data?.error || '활성화 오류');
         setPhase('ready');
@@ -404,6 +414,41 @@ export default function JourneyActivationConfirmModal({
               )}
             </div>
           )}
+          {/* 매장번호 발송 — 미등록 회신번호 실패 예정 고지 */}
+          {phase === 'callback_confirm' && callbackConfirm && (
+            <div className="space-y-3">
+              <div className="p-4 rounded-xl bg-amber-500/10 border border-amber-400/30">
+                <div className="flex items-start gap-2">
+                  <AlertTriangle className="w-5 h-5 text-amber-300 flex-shrink-0 mt-0.5" />
+                  <div>
+                    <div className="text-[14px] font-semibold text-amber-100">
+                      미등록 매장번호 — 발송 실패 예정 {callbackConfirm.count.toLocaleString()}명
+                    </div>
+                    <div className="text-[12px] text-amber-100/80 mt-1 leading-relaxed">
+                      {callbackConfirm.message || '매장번호가 등록 발신번호가 아닌 고객은 발송이 자동 실패 처리됩니다.'}
+                      {' '}발신번호 관리에서 매장번호를 등록하면 정상 발송됩니다. 매장번호가 없는 고객은 기본 회신번호로 발송됩니다.
+                    </div>
+                  </div>
+                </div>
+              </div>
+              {callbackConfirm.details.length > 0 && (
+                <div className="p-3 rounded-xl bg-white/5 border border-white/10">
+                  <div className="text-[11px] text-white/60 mb-2">미등록 매장번호별 실패 예정 인원</div>
+                  <div className="space-y-1 max-h-40 overflow-y-auto">
+                    {callbackConfirm.details.slice(0, 20).map((d) => (
+                      <div key={d.phone} className="flex items-center justify-between text-[12px]">
+                        <span className="font-mono text-white/80">{d.phone}</span>
+                        <span className="text-rose-300">{d.excludedCount.toLocaleString()}명 실패</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+              <div className="text-[10px] text-white/30 italic">
+                Data source — customers.store_phone ↔ 등록 발신번호(callback_numbers) 대조
+              </div>
+            </div>
+          )}
         </div>
 
         {/* 액션 */}
@@ -417,7 +462,7 @@ export default function JourneyActivationConfirmModal({
                 취소
               </button>
               <button
-                onClick={journeyStatus === 'draft' ? () => setCreditConfirm(true) : runActivate}
+                onClick={journeyStatus === 'draft' ? () => setCreditConfirm(true) : () => runActivate()}
                 disabled={isInsufficientBalance}
                 className="flex-1 px-4 py-2 bg-gradient-to-r from-violet-500 to-fuchsia-500 hover:from-violet-600 hover:to-fuchsia-600 disabled:opacity-30 disabled:cursor-not-allowed text-white rounded-lg text-sm font-semibold transition-colors shadow-lg shadow-violet-500/30"
               >
@@ -439,6 +484,23 @@ export default function JourneyActivationConfirmModal({
                 className="flex-1 px-4 py-2 bg-violet-500/30 hover:bg-violet-500/50 text-violet-100 rounded-lg text-sm font-semibold transition-colors"
               >
                 다시 검증
+              </button>
+            </>
+          )}
+
+          {phase === 'callback_confirm' && (
+            <>
+              <button
+                onClick={onClose}
+                className="flex-1 px-4 py-2 bg-white/5 hover:bg-white/10 text-white/80 rounded-lg text-sm font-medium transition-colors"
+              >
+                취소
+              </button>
+              <button
+                onClick={() => runActivate(true)}
+                className="flex-1 px-4 py-2 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-white rounded-lg text-sm font-semibold transition-colors shadow-lg shadow-amber-500/30"
+              >
+                확인하고 활성화
               </button>
             </>
           )}

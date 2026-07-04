@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { goBackOr } from '../lib/scroll-restoration';
 import {
   AlertTriangle,
   ArrowLeft,
@@ -671,7 +670,7 @@ export default function AiOperatorPage() {
         <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
           <button
             type="button"
-            onClick={() => goBackOr(navigate, '/dashboard')}
+            onClick={() => navigate('/dashboard')}
             className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-white/80 hover:text-white hover:bg-white/15 transition-all text-sm"
           >
             <ArrowLeft className="w-4 h-4" />

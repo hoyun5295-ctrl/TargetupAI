@@ -7,6 +7,7 @@ import { FIELD_MAP, FIELD_DISPLAY_MAP, reverseDisplayValue } from '../utils/stan
 import { replaceVariables } from '../utils/messageUtils';
 import { STANDARD_FIELD_FALLBACKS } from '../utils/var-fallback';
 import { selectJourneyTargetCustomerIds } from '../utils/journey-target-extractor';
+import { filterByIndividualCallback } from '../utils/callback-filter';
 import { isValidCustomFieldKey } from '../utils/safe-field-name';
 import { getStoreScope } from '../utils/store-scope';
 import { buildFilterWhereClauseCompat } from '../utils/customer-filter';
@@ -2895,7 +2896,7 @@ router.post('/operator/journeys/:id/activate', async (req: Request, res: Respons
     let stRow;
     try {
       stRow = await query(
-        `SELECT status, last_pretest_passed_at, start_kind FROM journeys WHERE id = $1::uuid AND company_id = $2::uuid`,
+        `SELECT status, last_pretest_passed_at, start_kind, callback_mode, trigger_event, trigger_filters FROM journeys WHERE id = $1::uuid AND company_id = $2::uuid`,
         [req.params.id, companyId]
       );
     } catch (colErr: any) {
@@ -2912,6 +2913,34 @@ router.post('/operator/journeys/:id/activate', async (req: Request, res: Respons
     if (!stRow.rows[0].last_pretest_passed_at) {
       return res.status(400).json({ success: false, error: '발송 전 문안 검증을 먼저 통과해 주세요. 미리보기에서 검증 후 활성화할 수 있습니다.', code: 'PRETEST_REQUIRED' });
     }
+
+    // ★ 매장번호 발송(store 모드) 미등록 회신번호 pre-flight — 미등록이 있으면 확인 모달 요청(활성화 보류).
+    //   실제 발송 시 실행기가 미등록 store_phone을 자동 실패 처리하므로, 활성화 전 사용자에게 실패 예정 인원 고지.
+    const confirmCbExcl = !!(req.body && (req.body as any).confirmCallbackExclusion);
+    if (stRow.rows[0].callback_mode === 'store' && stRow.rows[0].trigger_event && !confirmCbExcl) {
+      try {
+        const cbIds = await selectJourneyTargetCustomerIds(companyId, stRow.rows[0].trigger_event, stRow.rows[0].trigger_filters || {}, 1000);
+        if (cbIds.length > 0) {
+          const cbCust = await query(
+            `SELECT store_phone, callback, custom_fields FROM customers WHERE company_id = $1::uuid AND id = ANY($2::uuid[])`,
+            [companyId, cbIds]
+          );
+          const cbResult = await filterByIndividualCallback(cbCust.rows, companyId, userId, 'store_phone');
+          if (cbResult.callbackUnregisteredCount > 0) {
+            return res.json({
+              success: false,
+              callbackConfirmRequired: true,
+              callbackUnregisteredCount: cbResult.callbackUnregisteredCount,
+              unregisteredDetails: cbResult.unregisteredDetails,
+              message: `매장번호가 등록 발신번호가 아닌 고객 ${cbResult.callbackUnregisteredCount}명은 발송이 자동 실패 처리됩니다. 계속 활성화할까요?`,
+            });
+          }
+        }
+      } catch (cbErr: any) {
+        console.warn('[Journeys activate] 미등록 회신번호 pre-flight 검증 실패(무시):', cbErr?.message);
+      }
+    }
+
     const firstActivation = stRow.rows[0].status === 'draft';
     if (firstActivation) await checkCredit(companyId, getCreditCost('journey-activate'));
 

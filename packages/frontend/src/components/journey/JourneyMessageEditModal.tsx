@@ -306,7 +306,7 @@ export default function JourneyMessageEditModal({
                           ) : (
                             <div className="w-full px-3 py-2 rounded-lg bg-slate-950/60 border border-white/10 text-sm text-white whitespace-pre-wrap break-words min-h-[38px]">
                               {s.subject
-                                ? (() => { const t = previewResults[s.id]?.subject ?? mergeVarsPlain(s.subject, SAMPLE_KO, SAMPLE); return (s.isAd && !t.startsWith('(광고)')) ? '(광고) ' + t : t; })()
+                                ? (() => { const t = previewResults[s.id]?.subject ?? mergeVarsPlain(s.subject, SAMPLE_KO, SAMPLE); return (s.isAd && !/^\s*[(（]\s*광고\s*[)）]/.test(t)) ? '(광고) ' + t : t; })()
                                 : <span className="text-white/30">(제목 없음)</span>}
                             </div>
                           )}

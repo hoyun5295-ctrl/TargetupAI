@@ -196,7 +196,7 @@ router.post('/test', authenticate, async (req: Request, res: Response) => {
 
         // QTmsg 테스트 라인으로 발송
         // ★ KISA 2026-05: 본문에 (광고) 포함 여부로 광고 판단 → 제목에도 (광고) 부착
-        const isAdDetected = (content || '').startsWith('(광고)');
+        const isAdDetected = /^\s*[(（]\s*광고\s*[)）]/.test(content || ''); // 반각·전각 (광고) 모두 감지
         const titleStr = (msgType === 'LMS' || msgType === 'MMS') ? buildAdSubject(subject || '', msgType, isAdDetected) : '';
         await insertTestSmsQueue(
           device.phone,

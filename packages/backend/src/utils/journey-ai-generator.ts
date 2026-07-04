@@ -552,8 +552,10 @@ VIP 회원님만을 위해 준비한 이번 봄 특별 안내,
       stepType: 'message' as const,
       delayHours: Math.max(0, Math.min(720, Number(s.delayHours) || 0)),
       channel,
-      messageTemplate: messageSan.sanitized,
-      subject: subjectSan.sanitized,
+      // ★ 본문/제목은 순수 상태로 저장 — (광고)/무료수신거부는 발송·미리보기 시 buildAdMessage가 합성.
+      //   AI가 본문에 (광고)를 넣어도 여기서 제거해야 이중부착(미리보기·발송)이 안 남.
+      messageTemplate: stripAdParts(messageSan.sanitized),
+      subject: stripAdParts(subjectSan.sanitized),
       isAd: resolveJourneyAdFlag(channel, s.isAd),
       stepIntent: String(s.stepIntent || '').slice(0, 100),
     };
@@ -680,7 +682,7 @@ ${memoryContext}
     // ★ D187-fix5: refine 응답도 sanitize 자동 적용
     const san = sanitizeForSms(rawMsg);
     return {
-      message: san.sanitized,
+      message: stripAdParts(san.sanitized), // 순수 본문 — (광고)는 발송/미리보기 합성 (이중부착 방지)
       tone: validTones.includes(c.tone) ? c.tone : '감성적',
       bytes: getBytes(san.sanitized),
       reasoning: String(c.reasoning || '').slice(0, 200),
