@@ -1,5 +1,29 @@
 import { describe, test, expect } from 'vitest';
-import { shouldFinalizeCampaign } from './sms-table-split';
+import { shouldFinalizeCampaign, classifyResultTables } from './sms-table-split';
+
+// ★ 2026-07-04 라인13 비토 게이트웨이 성공 0 사고 근본 수정 검증 — LOG 짝 없는 LIVE는 결과까지 집계.
+describe('classifyResultTables — LOG 짝 없는 LIVE는 결과 집계 대상', () => {
+  test('LOG 없는 라인13 = 그 LIVE가 결과 집계 대상, 대기전용 아님', () => {
+    const r = classifyResultTables(['SMSQ_SEND_13']);
+    expect(r.resultTables).toEqual(['SMSQ_SEND_13']);
+    expect(r.pendingLiveTables).toEqual([]);
+  });
+  test('LOG 있는 표준 라인 = LIVE는 대기전용, 결과는 LOG', () => {
+    const r = classifyResultTables(['SMSQ_SEND_1', 'SMSQ_SEND_1_202607']);
+    expect(r.resultTables).toEqual(['SMSQ_SEND_1_202607']);
+    expect(r.pendingLiveTables).toEqual(['SMSQ_SEND_1']);
+  });
+  test('혼합(표준+라인13) = 표준 LIVE만 대기전용, 라인13은 결과 집계', () => {
+    const r = classifyResultTables(['SMSQ_SEND_1', 'SMSQ_SEND_1_202607', 'SMSQ_SEND_13']);
+    expect(r.pendingLiveTables).toEqual(['SMSQ_SEND_1']);
+    expect([...r.resultTables].sort()).toEqual(['SMSQ_SEND_13', 'SMSQ_SEND_1_202607'].sort());
+  });
+  test('언더스코어 경계 — SMSQ_SEND_1 이 SMSQ_SEND_13_YYYYMM 을 자기 LOG로 오매칭하지 않음', () => {
+    const r = classifyResultTables(['SMSQ_SEND_1', 'SMSQ_SEND_13', 'SMSQ_SEND_13_202607']);
+    expect(r.pendingLiveTables).toEqual(['SMSQ_SEND_13']);
+    expect([...r.resultTables].sort()).toEqual(['SMSQ_SEND_1', 'SMSQ_SEND_13_202607'].sort());
+  });
+});
 
 const HOUR = 60 * 60 * 1000;
 const NOW = 1_750_000_000_000; // 고정 기준 시각(테스트 결정성)

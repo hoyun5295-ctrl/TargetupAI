@@ -16,6 +16,22 @@ export function splitLiveAndLogTables(tables: string[]): { live: string[]; logs:
   return { live, logs };
 }
 
+/**
+ * ★ 2026-07-04: 결과 집계 대상 / 대기전용 LIVE 분리 (순수) — 라인13 비토 게이트웨이 성공 0 사고 근본 수정.
+ * 표준 라인은 결과가 LOG(_YYYYMM)로 이동하나, 일부 게이트웨이(SMSQ_SEND_13)는 status를 제자리 갱신만 하고
+ * LOG를 만들지 않는다. 그런 LIVE는 LOG 짝이 없어 그 행이 다른 테이블에 중복될 수 없으므로 결과까지 세도
+ * 이중카운트 구조적 불가. LOG 짝이 있는 LIVE만 대기 전용(현행) 유지 → 이동 중 이중카운트 차단 불변.
+ * 언더스코어 경계(`${t}_`)로 SMSQ_SEND_1 이 SMSQ_SEND_13_YYYYMM 을 오매칭하지 않게 한다.
+ * @returns resultTables = 성공/실패/대기 집계 대상(각 행 1회) / pendingLiveTables = 대기·만료실패만 볼 LIVE
+ */
+export function classifyResultTables(tables: string[]): { resultTables: string[]; pendingLiveTables: string[] } {
+  const { live, logs } = splitLiveAndLogTables(tables);
+  const hasLog = (t: string) => logs.some((l) => l.startsWith(`${t}_`));
+  const pendingLiveTables = live.filter(hasLog);
+  const liveNoLog = live.filter((t) => !hasLog(t));
+  return { resultTables: [...logs, ...liveNoLog], pendingLiveTables };
+}
+
 export interface CampaignAggCounts { total: number; success: number; fail: number; pending: number }
 
 /**

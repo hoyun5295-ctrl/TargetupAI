@@ -8,7 +8,7 @@ import { CACHE_TTL, BATCH_SIZES } from '../config/defaults';
 import { isValidSmsTable } from './sms-table-validator';
 import { query } from '../config/database';
 import { SUCCESS_CODES, PENDING_CODES } from './sms-result-map';
-import { splitLiveAndLogTables, mergeCampaignCounts, type CampaignAggCounts } from './sms-table-split';
+import { classifyResultTables, mergeCampaignCounts, type CampaignAggCounts } from './sms-table-split';
 import { splitLinesByMsgType } from './sms-line-split';
 import { toQtmsgType } from './qtmsg-type';
 // ★ 2026-07-03 KAKAO 문안 학습 코퍼스 적재 (전 채널 학습 통합 Phase 2) — fire-and-forget, 발송 무영향
@@ -457,19 +457,21 @@ export async function smsCampaignCountsSafe(
 ): Promise<Map<string, CampaignAggCounts>> {
   const out = new Map<string, CampaignAggCounts>();
   if (tables.length === 0 || ids.length === 0) return out;
-  const { live, logs } = splitLiveAndLogTables(tables);
+  // ★ 2026-07-04: LOG 짝 없는 LIVE(라인13 비토 게이트웨이 등)는 결과까지 집계 (성공 0 사고 근본 수정).
+  //   판정 = classifyResultTables (sms-table-split CT 단일 진실). 이중카운트 구조적 불가 근거는 그 함수 주석.
+  const { resultTables, pendingLiveTables } = classifyResultTables(tables);
   const SUC = SUCCESS_CODES.join(',');
   const PEN = PENDING_CODES.join(',');
 
-  const logAgg = logs.length > 0
-    ? await smsBatchAggByGroup(logs, groupField, `
+  const logAgg = resultTables.length > 0
+    ? await smsBatchAggByGroup(resultTables, groupField, `
         COUNT(*) as t,
         SUM(CASE WHEN status_code IN (${SUC}) THEN 1 ELSE 0 END) as s,
         SUM(CASE WHEN status_code NOT IN (${SUC}, ${PEN}) THEN 1 ELSE 0 END) as f,
         SUM(CASE WHEN status_code IN (${PEN}) THEN 1 ELSE 0 END) as p`, ids)
     : new Map<string, Record<string, number>>();
-  const liveAgg = live.length > 0
-    ? await smsBatchAggByGroup(live, groupField, `
+  const liveAgg = pendingLiveTables.length > 0
+    ? await smsBatchAggByGroup(pendingLiveTables, groupField, `
         SUM(CASE WHEN status_code IN (${PEN}) THEN 1 ELSE 0 END) as lp,
         SUM(CASE WHEN status_code NOT IN (${SUC}, ${PEN}) AND mobsend_time IS NULL THEN 1 ELSE 0 END) as lf`, ids)
     : new Map<string, Record<string, number>>();
