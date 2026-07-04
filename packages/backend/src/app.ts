@@ -68,6 +68,7 @@ import { startAlimtalkScheduler } from './utils/alimtalk-jobs';
 // ★ D218+ (2026-05-26) 여정 발송 2시간 전 담당자 알림 + 7일 KPI 학습 worker
 import { startJourneyPretestNotifierWorker } from './utils/journey-pretest-notifier-worker';
 import { startAiMemoryAccumulatorWorker } from './utils/ai-memory-accumulator-worker';
+import { startCopyLabelSweeperWorker } from './utils/copy-label-sweeper';
 // ★ CT-17: 30일 PRO 무료체험 자동 강등 Cron (2026-04-22)
 import { startTrialDowngradeWorker } from './utils/trial-downgrade-worker';
 // ★ D219+ Part 2 (2026-05-27): AI 오퍼레이션 30일 무료체험 자동 만료 Cron (매일 04:00 KST 로그)
@@ -397,6 +398,9 @@ app.listen(PORT, () => {
   //   클릭률 + 이탈 위험 + 구매 가능성 (Logistic Regression + cold start fallback)
   //   24h TTL — 발송 시점 cache 우선 + 없으면 즉시 계산
   startPredictiveWorker();
+
+  // ★ 2026-07-04: 여정·브랜드 KAKAO 학습 라벨 스윕 — 30분 주기(환불·상태·큐 무접촉, 라벨 전용). 발견1(라벨 누수) fix.
+  startCopyLabelSweeperWorker();
 
   // ★ D210+ Phase 3 (2026-05-23 Harold 명시): 자동 재진입 worker — 6시간 주기 + 회사 admin 명시 활성 정합
   //   journeys.auto_reentry_enabled = true 영역만 진입 (default OFF — feedback_no_target_auto_relax 정합)

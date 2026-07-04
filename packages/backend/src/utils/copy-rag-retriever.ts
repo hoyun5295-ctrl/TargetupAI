@@ -12,6 +12,7 @@
 
 import pool from '../config/database';
 import { getTenantRef } from './training-logger';
+import { hasIdentifierLeak } from './copy-deidentify';
 
 export interface TrainingRow {
   final_message: string;
@@ -52,6 +53,9 @@ export const MIN_TOTAL_SAMPLE = 3;
 export const DEFAULT_LIMIT = 8;
 // DB에서 후보로 가져올 행 수 (앱에서 성과 정렬 후 limit만 사용)
 const FETCH_CANDIDATES = 60;
+
+// 큐레이션 시드 = 탈색·검수된 업종 베스트를 sentinel tenant로 저장(스키마 ALTER 0). 세더·검색기 공유 키.
+export const CURATED_SEED_KEY = '__CURATED_SEED__';
 
 interface RankedRow {
   ex: CopyExample;
@@ -147,6 +151,7 @@ export async function retrieveCopyExamples(input: RetrieveInput): Promise<Retrie
   const { companyId, industryCode, channels, isAd } = input;
   const limit = input.limit ?? DEFAULT_LIMIT;
   const tenantRef = getTenantRef(companyId);
+  const curatedTenant = getTenantRef(CURATED_SEED_KEY);
 
   const companyRes = await pool.query(
     `SELECT ${SELECT_COLS}
@@ -158,28 +163,31 @@ export async function retrieveCopyExamples(input: RetrieveInput): Promise<Retrie
     [tenantRef, channels, isAd, FETCH_CANDIDATES],
   );
 
+  // ★ 2026-07-04 Track B 업종 보강 = 탈색·검수된 큐레이션 시드(sentinel tenant)만. 원본 타사 행 미조회(누출 0).
   let industryRows: TrainingRow[] = [];
   if (!input.brandVoiceRegistered && companyRes.rows.length < MIN_COMPANY_SAMPLE && industryCode) {
     const industryRes = await pool.query(
       `SELECT ${SELECT_COLS}
        FROM ai_training_logs
-       WHERE industry_code = $1 AND tenant_ref <> $2 AND message_type = ANY($3::text[]) AND is_ad = $4
+       WHERE tenant_ref = $1 AND industry_code = $2 AND message_type = ANY($3::text[]) AND is_ad = $4
          AND final_message IS NOT NULL AND length(final_message) >= 10
        ORDER BY created_at DESC
        LIMIT $5`,
-      [industryCode, tenantRef, channels, isAd, FETCH_CANDIDATES],
+      [curatedTenant, industryCode, channels, isAd, FETCH_CANDIDATES],
     );
-    industryRows = industryRes.rows as TrainingRow[];
+    // 방어: 시드는 이미 탈색됐지만, 식별자 잔존 행은 서빙에서 제외(누출 0 이중)
+    industryRows = (industryRes.rows as TrainingRow[]).filter((r) => !hasIdentifierLeak(r.final_message));
   }
 
   const companyRows = companyRes.rows as TrainingRow[];
   const ranked = rankExamples(companyRows, industryRows, limit, MIN_COMPANY_SAMPLE, !!input.brandVoiceRegistered);
   const industryFeatures = industryRows.length > 0 ? summarizeIndustryFeatures(industryRows) : null;
 
-  // ★ 2026-07-03 Phase4 격리 방어: 타사(industry) "원문"은 반환하지 않는다 — 업종은 구조·통계(industryFeatures)만.
-  //   조립기는 원래 company 소스만 원문 인용하므로 생성 결과 동일. 미래의 어떤 소비처가 examples를
-  //   그대로 프롬프트에 넣어도 타사 문장·시그니처 누출이 원천 차단된다(시그니처 누출 0 설계의 완결).
-  const examples = ranked.filter((e) => e.source === 'company');
+  // ★ 2026-07-04 업종 원문 서빙 = 탈색·검수된 큐레이션 시드에 한함(위 쿼리가 sentinel tenant만 조회).
+  //   회사 예시 + 시드(비누출) 유지. 시드는 조립기에서 "탈색·참고용" 블록으로 렌더된다.
+  const examples = ranked.filter(
+    (e) => e.source === 'company' || (e.source === 'industry' && !hasIdentifierLeak(e.text)),
+  );
 
   // 정직 폴백: 회사+업종 합계가 최소 표본 미만이면 빈 결과(가짜 예시 금지)
   if (companyRows.length + industryRows.length < MIN_TOTAL_SAMPLE) {

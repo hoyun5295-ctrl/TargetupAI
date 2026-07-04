@@ -13,6 +13,7 @@ import type { CopyExample, IndustryFeatureSummary } from './copy-rag-retriever';
 import { retrieveCopyExamples } from './copy-rag-retriever';
 import { buildTemporalContext, buildIndustryEvents, renderContextForPrompt } from './copy-context';
 import { getBrandGuideline } from './brand-voice-prompt';
+import { hasIdentifierLeak } from './copy-deidentify';
 
 export interface BrandKit {
   signatureLocked?: string;
@@ -67,6 +68,13 @@ export function buildCopyBrainPrompt(opts: {
   if (company.length > 0) {
     const list = company.map((e, i) => `${i + 1}. ${e.text}`).join('\n');
     parts.push(`## 우리 회사에서 반응이 좋았던 문안 (톤·구조 참고용 — 본문을 그대로 베끼지 말 것)\n${list}`);
+  }
+
+  // ★ 2026-07-04 같은 업종 베스트(탈색·검수된 큐레이션 시드)를 참고 원문으로 렌더. 식별자 잔존 행은 방어적으로 제외.
+  const industry = examples.filter((e) => e.source === 'industry' && !hasIdentifierLeak(e.text));
+  if (industry.length > 0) {
+    const list = industry.map((e, i) => `${i + 1}. ${e.text}`).join('\n');
+    parts.push(`## 같은 업종에서 검증된 문안 (탈색됨 — 구조·표현만 참고, 회사 식별정보 제거 / 그대로 베끼지 말 것)\n${list}`);
   }
 
   // ★ A6 (2026-06-30): 같은 업종은 원문이 아니라 구조·통계만 (타사 시그니처 누출 0)

@@ -5,6 +5,7 @@ import { mysqlQuery, query } from '../config/database';
 import { authenticate, requireSuperAdmin } from '../middlewares/auth';
 import { ALL_SMS_TABLES, invalidateLineGroupCache, getCampaignSmsTables, smsCountAll, smsSelectAll, smsSelectPagedAll, smsAggAll, getTestSmsTables, kakaoCountWhere, kakaoSelectWhere, kakaoBatchAggByGroup } from '../utils/sms-queue';
 import { streamCampaignSmsCsv } from '../utils/campaign-sms-export';
+import { mineCuratedCandidates, insertCuratedSeeds, listCuratedSeeds, deleteCuratedSeed } from '../utils/copy-seed-curator';
 // ★ 2026-06-25: 업로더별 고객 삭제 시 해당 회사 데이터 프로필 캐시 무효화(게이트 즉시 반영)
 import { clearCompanyDataProfileCache } from '../utils/company-data-profile';
 import { DASHBOARD_CARD_POOL, validateCardIds, getRequiredFields, filterPoolByAvailableData, generateDynamicCards } from '../utils/dashboard-card-pool';
@@ -2872,6 +2873,63 @@ router.get('/audit-logs/access', authenticate, requireSuperAdmin, async (req: Re
 // ★ 2026-06-13: AI 학습 데이터(인비토AI) 열람 — ceo 전용 (AI_TRAINING_VIEWER_IDS, 기본 'ceo')
 router.get('/ai-training/access', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
   res.json({ allowed: await isAiTrainingViewer(req.user?.userId) });
+});
+
+// ★ 2026-07-04 큐레이션 시드 — Track B 업종 베스트 채굴/검수/저장(하이브리드). 슈퍼관리자·AI학습 뷰어 전용.
+router.get('/ai-training/seed/mine', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
+  try {
+    if (!(await isAiTrainingViewer(req.user?.userId))) return res.status(403).json({ error: 'AI 학습 데이터 열람 권한이 없습니다.' });
+    const industryCode = String(req.query.industryCode || '').trim();
+    if (!industryCode) return res.status(400).json({ error: 'industryCode가 필요합니다.' });
+    const channel = String(req.query.channel || 'SMS').trim().toUpperCase();
+    const isAd = req.query.isAd === 'true';
+    const channels = channel === 'SMS' ? ['SMS', 'LMS', 'MMS'] : [channel];
+    const candidates = await mineCuratedCandidates({ industryCode, channels, isAd, limit: 20 });
+    res.json({ success: true, candidates });
+  } catch (err: any) {
+    res.status(500).json({ error: err?.message || '채굴 실패' });
+  }
+});
+
+router.post('/ai-training/seed/approve', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
+  try {
+    if (!(await isAiTrainingViewer(req.user?.userId))) return res.status(403).json({ error: 'AI 학습 데이터 열람 권한이 없습니다.' });
+    const rawItems = Array.isArray(req.body?.items) ? req.body.items : [];
+    const items = rawItems
+      .filter((it: any) => it && typeof it.text === 'string' && it.text.trim() && it.industryCode && it.messageType)
+      .map((it: any) => ({
+        text: String(it.text),
+        industryCode: String(it.industryCode),
+        messageType: String(it.messageType).toUpperCase(),
+        isAd: it.isAd === true,
+      }));
+    if (items.length === 0) return res.status(400).json({ error: '승인할 항목이 없습니다.' });
+    const inserted = await insertCuratedSeeds(items);
+    res.json({ success: true, inserted });
+  } catch (err: any) {
+    res.status(500).json({ error: err?.message || '저장 실패' });
+  }
+});
+
+router.get('/ai-training/seed/list', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
+  try {
+    if (!(await isAiTrainingViewer(req.user?.userId))) return res.status(403).json({ error: 'AI 학습 데이터 열람 권한이 없습니다.' });
+    const industryCode = String(req.query.industryCode || '').trim() || undefined;
+    const seeds = await listCuratedSeeds(industryCode);
+    res.json({ success: true, seeds });
+  } catch (err: any) {
+    res.status(500).json({ error: err?.message || '조회 실패' });
+  }
+});
+
+router.delete('/ai-training/seed/:id', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
+  try {
+    if (!(await isAiTrainingViewer(req.user?.userId))) return res.status(403).json({ error: 'AI 학습 데이터 열람 권한이 없습니다.' });
+    const ok = await deleteCuratedSeed(String(req.params.id));
+    res.json({ success: ok });
+  } catch (err: any) {
+    res.status(500).json({ error: err?.message || '삭제 실패' });
+  }
 });
 
 router.get('/ai-training/overview', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {

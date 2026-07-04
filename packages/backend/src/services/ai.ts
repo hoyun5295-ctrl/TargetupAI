@@ -16,6 +16,7 @@ import { buildSystemPromptWithBrandVoice, getBrandGuideline, getBrandLinks } fro
 import { applyBrandLinkTokens, type BrandLink } from '../utils/brand-link-core';
 import { validateBrandVoiceCompliance, buildRetryHintFromIssues } from '../utils/brand-voice-validator';
 import { composeCopyBrain } from '../utils/copy-prompt-composer';
+import { scoreSpamRisk, SPAM_FAIL_THRESHOLD } from '../utils/copy-spam-risk';
 import { detectBenefits, buildBenefitEmphasis } from '../utils/copy-benefit-detector';
 import { findBannedWords } from '../utils/copy-similarity-guard';
 // ★ D227+ AI 응답 JSON 안전 추출 (코드펜스 없이 설명문 혼입 방어 — 본문 0 bytes 사고 정정)
@@ -1321,27 +1322,41 @@ ${usePersonalization ? `- 사용할 개인화 변수: ${personalizationTags}
     let result = await runGenerateOnce('');
 
     // ★ 2026-07-02 CT-100 배선 — 브랜드보이스 기계 검증(빈출 표현·(광고) 위치·이모지·종결어미·길이 범위).
+    // ★ 2026-07-04 스팸 위험 자기검수 추가(전 회사 적용) — 스팸 사전 대조로 재생성 유도.
     //   미달 시 재생성 1회 한정(추가 차감 0) — nginx 60초 응답 한도(D231) 안에서 안전.
     //   검증 단계 오류는 1차 결과 그대로 진행 (fail-safe — 생성·발송 영향 0).
-    if (extraContext?.companyId) {
+    if (Array.isArray(result.variants) && result.variants.length > 0) {
       try {
-        const guideline = await getBrandGuideline(extraContext.companyId);
-        if (guideline && Array.isArray(result.variants) && result.variants.length > 0) {
-          const allIssues = new Set<string>();
-          for (const variant of result.variants) {
-            const check = validateBrandVoiceCompliance(String((variant as any).message_text || ''), guideline, { channel });
-            check.issues.forEach((i) => allIssues.add(i));
-          }
-          if (allIssues.size > 0) {
-            console.log(`[brand-voice] 검증 미달 ${allIssues.size}건 — 재생성 1회 진행: ${Array.from(allIssues).join(' | ')}`);
-            const retried = await runGenerateOnce(buildRetryHintFromIssues(Array.from(allIssues)));
-            if (retried && Array.isArray(retried.variants) && retried.variants.length > 0) {
-              result = retried;
+        const allIssues = new Set<string>();
+
+        // 브랜드보이스 기계 검증 (가이드라인 등록 회사만)
+        if (extraContext?.companyId) {
+          const guideline = await getBrandGuideline(extraContext.companyId);
+          if (guideline) {
+            for (const variant of result.variants) {
+              const check = validateBrandVoiceCompliance(String((variant as any).message_text || ''), guideline, { channel });
+              check.issues.forEach((i) => allIssues.add(i));
             }
           }
         }
-      } catch (bvErr) {
-        console.log('[brand-voice] 검증 단계 오류 — 1차 결과 그대로 진행:', (bvErr as Error)?.message);
+
+        // ★ 2026-07-04 스팸 위험 자기검수 — 가이드라인 유무 무관, 로컬 스팸 사전 대조로 재생성 유도
+        for (const variant of result.variants) {
+          const spam = scoreSpamRisk(String((variant as any).message_text || ''));
+          if (spam.score >= SPAM_FAIL_THRESHOLD) {
+            allIssues.add(`스팸 위험 표현 회피 필요(${spam.hits.join(', ') || '특수문자 과다'})`);
+          }
+        }
+
+        if (allIssues.size > 0) {
+          console.log(`[copy-quality] 검증 미달 ${allIssues.size}건 — 재생성 1회 진행: ${Array.from(allIssues).join(' | ')}`);
+          const retried = await runGenerateOnce(buildRetryHintFromIssues(Array.from(allIssues)));
+          if (retried && Array.isArray(retried.variants) && retried.variants.length > 0) {
+            result = retried;
+          }
+        }
+      } catch (qErr) {
+        console.log('[copy-quality] 검증 단계 오류 — 1차 결과 그대로 진행:', (qErr as Error)?.message);
       }
     }
 

@@ -987,7 +987,7 @@ export async function insertAlimtalkQueue(
   //   ⚠️ 기간계 무영향: 큐 INSERT 완료 후 · 미await 비동기 IIFE(fire-and-forget) · try-catch 이중 격리 · return 값/타이밍 불변.
   //   알림톡 4경로(직접발송/자동캠페인/direct-send-processor/여정)의 단일 길목 = 여기서 1회 커버.
   //   알림톡=승인 템플릿(정보성) → isAd=false. 캠페인당 1회(대표 rows[0] 본문, PII는 maskForTraining이 마스킹).
-  //   source_ref=appEtc1:kakao 멱등(재호출 중복 0). companyId/appEtc1/본문 없으면 skip.
+  //   ★ 2026-07-04 source_ref=hmac(appEtc1) 평문(결과 라벨 환류·dup-guard와 키 일치). companyId/appEtc1/본문 없으면 skip.
   //   ★ 2026-07-03 중복 가드(실측 결함 fix): 커밋/예약 경로는 createDirectSendCampaign가 이미 같은 캠페인의
   //     KAKAO 문안을 적재(source_ref=hmac(appEtc1)) — 그 행이 있으면 skip해 같은 발송 2행 적재를 차단.
   void (async () => {
@@ -1000,7 +1000,7 @@ export async function insertAlimtalkQueue(
       );
       if (dup.rows.length > 0) return; // 기존 경로가 이미 이 캠페인 문안을 적재함
       await logCampaignTraining({
-        campaignId: `${appEtc1}:kakao`,
+        campaignId: appEtc1,
         companyId: first.companyId,
         messageType: 'KAKAO',
         isAd: false,

@@ -1127,6 +1127,7 @@ export async function computeCompanyPredictionsBatch(
                   WHEN 'Gold' THEN 0.24
                   WHEN 'Silver' THEN 0.18
                   WHEN '신규' THEN 0.20
+                  WHEN '일반' THEN 0.12
                   ELSE 0.15
                 END)
                 + (CASE
