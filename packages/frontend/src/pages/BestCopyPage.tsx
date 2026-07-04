@@ -426,7 +426,7 @@ export default function BestCopyPage() {
                         </span>
                       </div>
                       <div className="relative h-[190px] overflow-hidden">
-                        <div className="bg-white/8 border border-white/10 rounded-2xl rounded-tl-sm p-3 text-[11px] leading-relaxed text-white/85 whitespace-pre-wrap break-words">
+                        <div className="bg-white/10 border border-white/10 rounded-2xl rounded-tl-sm p-3 text-[11px] leading-relaxed text-white/85 whitespace-pre-wrap break-words">
                           {s.text}
                         </div>
                         <div className="absolute bottom-0 left-0 right-0 h-8 bg-gradient-to-t from-slate-950 to-transparent" />
@@ -458,11 +458,11 @@ export default function BestCopyPage() {
         </div>
       </div>
 
-      {/* 입력/편집 모달 — 핸드폰 목업 */}
+      {/* 입력/편집 모달 — 좌: 큰 액정(흰 화면·검은 글씨, 실제 문자 느낌) / 우: 기능(업종·채널·광고성·저장) */}
       {editor && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
-          <div className="bg-slate-900 border border-white/10 rounded-2xl shadow-2xl w-full max-w-md max-h-[92vh] overflow-y-auto">
-            <div className="flex items-center justify-between p-4 border-b border-white/10 sticky top-0 bg-slate-900 rounded-t-2xl z-10">
+          <div className="bg-slate-900 border border-white/10 rounded-2xl shadow-2xl w-full max-w-3xl max-h-[92vh] flex flex-col overflow-hidden">
+            <div className="flex items-center justify-between p-4 border-b border-white/10 shrink-0">
               <div className="flex items-center gap-2">
                 <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-amber-400 to-orange-500 flex items-center justify-center">
                   <MessageSquareText className="w-4 h-4 text-white" />
@@ -474,73 +474,94 @@ export default function BestCopyPage() {
               </button>
             </div>
 
-            <div className="p-4 space-y-4">
-              <PhoneFrame className="max-w-[300px] mx-auto">
-                <div className="px-3 pb-3">
-                  <textarea
-                    value={editor.text}
-                    onChange={(e) => setEditor({ ...editor, text: e.target.value })}
-                    placeholder={'베스트 문안을 붙여넣거나 입력하세요.\n(받아본 문자 중 반응이 좋았던 문안)'}
-                    className="w-full h-52 bg-white/8 border border-white/10 rounded-2xl rounded-tl-sm p-3 text-[12px] leading-relaxed text-white/90 placeholder:text-white/30 resize-none focus:outline-none focus:border-violet-400/50"
-                  />
-                  <div className="text-right text-[10px] text-white/40 mt-1">{editor.text.length}자</div>
+            <div className="flex-1 overflow-y-auto">
+              <div className="grid md:grid-cols-[minmax(0,1fr)_280px]">
+                {/* 좌: 핸드폰 액정 — 문안 작성 전용. 흰 화면 + 검은 글씨 명시색(상속 금지) */}
+                <div className="p-5 flex items-center justify-center bg-slate-950/40">
+                  <div className="w-full max-w-[340px] rounded-[1.75rem] border border-white/15 bg-slate-950 p-2 shadow-xl shadow-black/30">
+                    <div className="rounded-[1.35rem] bg-white overflow-hidden">
+                      <div className="flex justify-center pt-2 pb-1 bg-slate-100 border-b border-slate-200">
+                        <div className="w-14 h-1.5 rounded-full bg-slate-300" />
+                      </div>
+                      <textarea
+                        value={editor.text}
+                        onChange={(e) => setEditor({ ...editor, text: e.target.value })}
+                        placeholder={'베스트 문안을 붙여넣거나 입력하세요.\n(받아본 문자 중 반응이 좋았던 문안)'}
+                        className="block w-full h-[340px] md:h-[420px] bg-white text-slate-900 placeholder:text-slate-400 p-4 text-[13px] leading-relaxed resize-none focus:outline-none"
+                        autoFocus
+                      />
+                      <div className="text-right text-[11px] text-slate-400 bg-white px-4 pb-2.5">{editor.text.length}자</div>
+                    </div>
+                  </div>
                 </div>
-              </PhoneFrame>
 
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="text-[11px] text-white/50 block mb-1">업종</label>
-                  <select
-                    value={editor.industryCode}
-                    onChange={(e) => setEditor({ ...editor, industryCode: e.target.value })}
-                    className="w-full bg-slate-800 border border-white/10 text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-violet-400/50"
+                {/* 우: 기능 */}
+                <div className="p-5 border-t md:border-t-0 md:border-l border-white/10 flex flex-col gap-4">
+                  <div>
+                    <label className="text-[11px] text-white/50 block mb-1">업종</label>
+                    <select
+                      value={editor.industryCode}
+                      onChange={(e) => setEditor({ ...editor, industryCode: e.target.value })}
+                      className="w-full bg-slate-800 border border-white/10 text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-violet-400/50"
+                    >
+                      {industries.map((i) => <option key={i.code} value={i.code}>{i.label}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="text-[11px] text-white/50 block mb-1">채널</label>
+                    <select
+                      value={editor.messageType}
+                      onChange={(e) => setEditor({ ...editor, messageType: e.target.value })}
+                      className="w-full bg-slate-800 border border-white/10 text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-violet-400/50"
+                    >
+                      {CHANNELS.map((c) => <option key={c} value={c}>{c}</option>)}
+                    </select>
+                  </div>
+
+                  <button
+                    onClick={() => setEditor({ ...editor, isAd: !editor.isAd })}
+                    className="w-full flex items-center justify-between p-3 bg-white/5 border border-white/10 rounded-xl"
                   >
-                    {industries.map((i) => <option key={i.code} value={i.code}>{i.label}</option>)}
-                  </select>
-                </div>
-                <div>
-                  <label className="text-[11px] text-white/50 block mb-1">채널</label>
-                  <select
-                    value={editor.messageType}
-                    onChange={(e) => setEditor({ ...editor, messageType: e.target.value })}
-                    className="w-full bg-slate-800 border border-white/10 text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-violet-400/50"
+                    <div className="flex items-center gap-2 text-sm">
+                      {editor.isAd ? <Megaphone className="w-4 h-4 text-amber-300" /> : <Info className="w-4 h-4 text-cyan-300" />}
+                      <span>{editor.isAd ? '광고성 문안' : '정보성 문안'}</span>
+                    </div>
+                    <div className={`w-10 h-6 rounded-full transition-colors relative ${editor.isAd ? 'bg-amber-500/60' : 'bg-white/15'}`}>
+                      <div className={`absolute top-0.5 w-5 h-5 rounded-full bg-white transition-all ${editor.isAd ? 'left-[18px]' : 'left-0.5'}`} />
+                    </div>
+                  </button>
+
+                  <p className="text-[11px] text-white/40 leading-relaxed">
+                    전화번호·URL·이메일·브랜드명은 저장 시 자동으로 일반화됩니다. 저장분은 브랜드보이스 미등록 업체의 문안 생성 참고로만 쓰입니다.
+                  </p>
+
+                  <div className="flex-1" />
+
+                  <button
+                    onClick={saveEditor}
+                    disabled={saving || !editor.text.trim()}
+                    className="w-full px-4 py-2.5 bg-gradient-to-r from-violet-500 to-fuchsia-500 disabled:opacity-40 text-white rounded-lg text-sm font-semibold flex items-center justify-center gap-1.5"
                   >
-                    {CHANNELS.map((c) => <option key={c} value={c}>{c}</option>)}
-                  </select>
+                    {saving && <Loader2 className="w-3.5 h-3.5 animate-spin" />} 저장
+                  </button>
+                  <button
+                    onClick={() => setEditor(null)}
+                    disabled={saving}
+                    className="w-full px-4 py-2.5 bg-white/5 hover:bg-white/10 text-white/80 rounded-lg text-sm disabled:opacity-50"
+                  >
+                    취소
+                  </button>
+                  {editor.id && (
+                    <button
+                      onClick={askDelete}
+                      disabled={saving}
+                      className="w-full px-4 py-2 bg-rose-500/10 hover:bg-rose-500/20 text-rose-300/90 rounded-lg text-xs flex items-center justify-center gap-1.5 disabled:opacity-50"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" /> 이 문안 삭제
+                    </button>
+                  )}
                 </div>
               </div>
-
-              <button
-                onClick={() => setEditor({ ...editor, isAd: !editor.isAd })}
-                className="w-full flex items-center justify-between p-3 bg-white/5 border border-white/10 rounded-xl"
-              >
-                <div className="flex items-center gap-2 text-sm">
-                  {editor.isAd ? <Megaphone className="w-4 h-4 text-amber-300" /> : <Info className="w-4 h-4 text-cyan-300" />}
-                  <span>{editor.isAd ? '광고성 문안' : '정보성 문안'}</span>
-                </div>
-                <div className={`w-10 h-6 rounded-full transition-colors relative ${editor.isAd ? 'bg-amber-500/60' : 'bg-white/15'}`}>
-                  <div className={`absolute top-0.5 w-5 h-5 rounded-full bg-white transition-all ${editor.isAd ? 'left-[18px]' : 'left-0.5'}`} />
-                </div>
-              </button>
-
-              <p className="text-[11px] text-white/40 leading-relaxed">
-                전화번호·URL·이메일·브랜드명은 저장 시 자동으로 일반화됩니다. 저장분은 브랜드보이스 미등록 업체의 문안 생성 참고로만 쓰입니다.
-              </p>
-            </div>
-
-            <div className="flex items-center gap-2 p-4 border-t border-white/10 bg-slate-950/50 rounded-b-2xl">
-              {editor.id && (
-                <button onClick={askDelete} disabled={saving} className="px-3 py-2 bg-rose-500/15 hover:bg-rose-500/25 text-rose-300 rounded-lg text-sm flex items-center gap-1.5 disabled:opacity-50">
-                  <Trash2 className="w-3.5 h-3.5" /> 삭제
-                </button>
-              )}
-              <div className="flex-1" />
-              <button onClick={() => setEditor(null)} disabled={saving} className="px-4 py-2 bg-white/5 hover:bg-white/10 text-white/80 rounded-lg text-sm disabled:opacity-50">
-                취소
-              </button>
-              <button onClick={saveEditor} disabled={saving || !editor.text.trim()} className="px-4 py-2 bg-gradient-to-r from-violet-500 to-fuchsia-500 disabled:opacity-40 text-white rounded-lg text-sm font-semibold flex items-center gap-1.5">
-                {saving && <Loader2 className="w-3.5 h-3.5 animate-spin" />} 저장
-              </button>
             </div>
           </div>
         </div>
