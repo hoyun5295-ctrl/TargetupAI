@@ -20,6 +20,17 @@ describe('copy-best-ranker', () => {
     const lo = scoreCandidate({ final_message: '지금 확인', sent_count: 100, success_count: 5 });
     expect(hi).toBeGreaterThan(lo);
   });
+  // ★ 2026-07-04 Tier 1 승급 검증 — 반응(클릭) 신호가 전달 성공률을 이긴다
+  it('클릭률 있는 행이 전달 성공률만 높은 행보다 상위', () => {
+    const clicked = scoreCandidate({ final_message: '지금 확인', sent_count: 100, success_count: 60, click_count: 30 });
+    const deliveredOnly = scoreCandidate({ final_message: '지금 확인', sent_count: 100, success_count: 99, click_count: 0 });
+    expect(clicked).toBeGreaterThan(deliveredOnly);
+  });
+  it('click_count 미존재(컬럼 미생성)면 기존 점수와 동일 — 회귀 0', () => {
+    const withUndefined = scoreCandidate({ final_message: '지금 확인', sent_count: 100, success_count: 80 });
+    const withNull = scoreCandidate({ final_message: '지금 확인', sent_count: 100, success_count: 80, click_count: null });
+    expect(withUndefined).toBe(withNull);
+  });
   it('limit·dedup·빈 본문 제외', () => {
     const rows = [
       { final_message: '지금 확인' },

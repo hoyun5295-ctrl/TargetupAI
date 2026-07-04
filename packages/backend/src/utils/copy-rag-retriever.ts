@@ -20,6 +20,7 @@ export interface TrainingRow {
   message_features: Record<string, unknown> | null;
   sent_count: number | null;
   success_count: number | null;
+  click_count?: number | null; // ★ 2026-07-04 Tier 1 반응 신호(컬럼 미생성 시 undefined — 정렬 자동 폴백)
   created_at: string;
 }
 
@@ -62,11 +63,15 @@ export const CURATED_SEED_KEY = '__CURATED_SEED__';
 interface RankedRow {
   ex: CopyExample;
   createdAt: string;
+  clickRate: number | null; // ★ 2026-07-04 Tier 1: 클릭 수신자/발송 (없으면 null — successRate 폴백)
 }
 
 function toRanked(row: TrainingRow, source: 'company' | 'industry'): RankedRow {
   const sent = row.sent_count;
   const successRate = sent && sent > 0 ? (row.success_count || 0) / sent : null;
+  // ★ 2026-07-04 Tier 1: 반응 신호(클릭)가 있으면 최우선 정렬 신호. 같은 채널군 안에서만 비교되므로
+  //   (retrieve가 message_type 필터) 신호 있는 채널(DM 열람·이메일 클릭)끼리만 경쟁 — 채널 간 왜곡 없음.
+  const clickRate = row.click_count != null && sent && sent > 0 ? Math.min(row.click_count / sent, 1) : null;
   // ★ 2026-06-30 정정: PG created_at은 런타임 Date 객체(타입은 string이나 실제 Date) →
   //   sortRanked가 문자열 메서드 .localeCompare를 호출하다 "is not a function" throw → RAG 성과 문안
   //   검색 전체 degrade(0630 문안 두뇌 미작동). ISO 문자열로 강제(문자열 비교 = 시간순). null/문자열도 안전.
@@ -78,12 +83,20 @@ function toRanked(row: TrainingRow, source: 'company' | 'industry'): RankedRow {
       ...(source === 'industry' && row.id ? { seedId: String(row.id) } : {}),
     },
     createdAt: ca instanceof Date ? ca.toISOString() : String(ca || ''),
+    clickRate,
   };
 }
 
-// 성과 높은 순(있는 것 우선), 동률·무성과는 최신순
+// ★ 2026-07-04 Tier 1 정렬: 클릭률(반응) > 전달 성공률 > 최신 — 있는 신호만 쓰고 없으면 자연 폴백(임의 상수 0)
 function sortRanked(rows: RankedRow[]): RankedRow[] {
   return rows.sort((a, b) => {
+    // 1) 반응 신호(클릭률) 우선 — 한쪽만 있으면 그쪽 우대
+    if (a.clickRate !== null || b.clickRate !== null) {
+      if (a.clickRate === null) return 1;
+      if (b.clickRate === null) return -1;
+      if (b.clickRate !== a.clickRate) return b.clickRate - a.clickRate;
+    }
+    // 2) 전달 성공률
     const ar = a.ex.successRate;
     const br = b.ex.successRate;
     if (ar === null && br === null) return b.createdAt.localeCompare(a.createdAt);
@@ -152,15 +165,33 @@ export function summarizeIndustryFeatures(rows: TrainingRow[]): IndustryFeatureS
 
 const SELECT_COLS = 'id, final_message, message_features, sent_count, success_count, created_at';
 
+// ★ 2026-07-04 Tier 1: click_count 컬럼 존재 1회 프로브(information_schema) — 마이그레이션 전 배포 안전.
+//   pm2 재시작 시 재프로브. 존재하면 SELECT에 포함 → 정렬이 반응 신호로 자동 승급.
+let engagementColsAvailable: boolean | null = null;
+async function selectColsWithEngagement(): Promise<string> {
+  if (engagementColsAvailable === null) {
+    try {
+      const r = await pool.query(
+        `SELECT 1 FROM information_schema.columns WHERE table_name = 'ai_training_logs' AND column_name = 'click_count' LIMIT 1`,
+      );
+      engagementColsAvailable = r.rows.length > 0;
+    } catch {
+      engagementColsAvailable = false;
+    }
+  }
+  return engagementColsAvailable ? `${SELECT_COLS}, click_count` : SELECT_COLS;
+}
+
 /** DB 검색 — 회사 1차 + (부족 시) 업종 2차 → rankExamples */
 export async function retrieveCopyExamples(input: RetrieveInput): Promise<RetrieveResult> {
   const { companyId, industryCode, channels, isAd } = input;
   const limit = input.limit ?? DEFAULT_LIMIT;
   const tenantRef = getTenantRef(companyId);
   const curatedTenant = getTenantRef(CURATED_SEED_KEY);
+  const cols = await selectColsWithEngagement(); // ★ 2026-07-04 Tier 1: click_count 있으면 포함
 
   const companyRes = await pool.query(
-    `SELECT ${SELECT_COLS}
+    `SELECT ${cols}
      FROM ai_training_logs
      WHERE tenant_ref = $1 AND message_type = ANY($2::text[]) AND is_ad = $3
        AND final_message IS NOT NULL AND length(final_message) >= 10
@@ -173,7 +204,7 @@ export async function retrieveCopyExamples(input: RetrieveInput): Promise<Retrie
   let industryRows: TrainingRow[] = [];
   if (!input.brandVoiceRegistered && companyRes.rows.length < MIN_COMPANY_SAMPLE && industryCode) {
     const industryRes = await pool.query(
-      `SELECT ${SELECT_COLS}
+      `SELECT ${cols}
        FROM ai_training_logs
        WHERE tenant_ref = $1 AND industry_code = $2 AND message_type = ANY($3::text[]) AND is_ad = $4
          AND final_message IS NOT NULL AND length(final_message) >= 10

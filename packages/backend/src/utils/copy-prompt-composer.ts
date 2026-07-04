@@ -17,6 +17,8 @@ import { hasIdentifierLeak } from './copy-deidentify';
 // ★ 2026-07-04 진화(specs/2026-07-04-best-copy-evolution-design.md): 시드 사용 기록 + 업종 승리 공식 주입
 import { recordSeedUsage, getIndustryFormula } from './best-copy-assets';
 import { renderFormulaBlock } from './industry-formula';
+// ★ 2026-07-04 학습 루프 ③: 회사 축적 메모리(성공 패턴·채널 성과·피할 것)를 문안 생성에도 주입 — Operator 전용이던 학습의 첫 생성 연결
+import { buildMemoryPromptContext } from './company-memory';
 
 export interface BrandKit {
   signatureLocked?: string;
@@ -190,6 +192,17 @@ export async function composeCopyBrain(input: ComposeInput): Promise<ComposeResu
     }
   }
 
-  const promptSuffix = buildCopyBrainPrompt({ examples, industryFeatures, contextLine, kit, channel, formulaBlock });
+  // ★ 2026-07-04 학습 루프 ③: 회사 축적 메모리 상위 6건(성공 패턴·채널 성과·거부 학습 포함) 주입.
+  //   실패·빈 결과 = 빈 문자열(기존 흐름 무영향). 과길이 방어 1,200자 cap.
+  let memoryBlock = '';
+  try {
+    const ctx = await buildMemoryPromptContext(input.companyId, 6);
+    if (ctx && ctx.trim()) memoryBlock = ctx.trim().slice(0, 1200);
+  } catch (err) {
+    console.warn('[copy-brain] 회사 메모리 조회 실패 — 메모리 없이 진행:', (err as Error)?.message);
+  }
+
+  let promptSuffix = buildCopyBrainPrompt({ examples, industryFeatures, contextLine, kit, channel, formulaBlock });
+  if (memoryBlock) promptSuffix = `${promptSuffix}\n\n${memoryBlock}`;
   return { promptSuffix, examples, bannedWords: kit.bannedWords || [] };
 }

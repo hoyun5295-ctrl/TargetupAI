@@ -100,6 +100,9 @@ interface TrainingMetricsParams {
   successCount: number;
   failCount: number;
   spamBlocked?: number;
+  // ★ 2026-07-04 Tier 1 반응 신호(클릭·전환) — 컬럼 미생성(42703) 시 자동 폴백(배포 순서 자유)
+  clickCount?: number;
+  conversionCount?: number;
 }
 
 // ============================================================
@@ -377,29 +380,96 @@ export async function logCampaignTraining(input: {
 // 6) 성과 데이터 업데이트 — 결과 동기화 완료 시 호출
 //    ⚠️ try-catch 격리: 실패해도 동기화 플로우에 영향 없음
 // ============================================================
+// ★ 2026-07-04: click/conversion 컬럼 존재 여부 캐시 — 42703(undefined_column) 1회 감지 후 폴백 고정
+let clickColsAvailable: boolean | null = null;
+
 export async function updateTrainingMetrics(params: TrainingMetricsParams): Promise<void> {
   try {
-    const query = `
-      UPDATE ai_training_logs
-      SET sent_count = $2,
-          success_count = $3,
-          fail_count = $4,
-          spam_blocked = $5,
-          metrics_updated_at = NOW()
-      WHERE source_ref = $1
-    `;
+    const wantsEngagement =
+      (params.clickCount != null || params.conversionCount != null) && clickColsAvailable !== false;
 
-    await pool.query(query, [
-      params.sourceRef,
-      params.sentCount,
-      params.successCount,
-      params.failCount,
-      params.spamBlocked || 0,
-    ]);
+    if (wantsEngagement) {
+      try {
+        await pool.query(
+          `UPDATE ai_training_logs
+           SET sent_count = $2,
+               success_count = $3,
+               fail_count = $4,
+               spam_blocked = $5,
+               click_count = COALESCE($6, click_count),
+               conversion_count = COALESCE($7, conversion_count),
+               metrics_updated_at = NOW()
+           WHERE source_ref = $1`,
+          [
+            params.sourceRef,
+            params.sentCount,
+            params.successCount,
+            params.failCount,
+            params.spamBlocked || 0,
+            params.clickCount ?? null,
+            params.conversionCount ?? null,
+          ],
+        );
+        clickColsAvailable = true;
+        console.log(`[TrainingLog] 성과 업데이트(+반응): ${params.sourceRef.substring(0, 8)}...`);
+        return;
+      } catch (e: any) {
+        if (e?.code === '42703') {
+          clickColsAvailable = false; // 마이그레이션 전 — 기본 메트릭만으로 폴백(재시도 감지: pm2 재시작 시 재프로브)
+        } else {
+          throw e;
+        }
+      }
+    }
+
+    await pool.query(
+      `UPDATE ai_training_logs
+       SET sent_count = $2,
+           success_count = $3,
+           fail_count = $4,
+           spam_blocked = $5,
+           metrics_updated_at = NOW()
+       WHERE source_ref = $1`,
+      [
+        params.sourceRef,
+        params.sentCount,
+        params.successCount,
+        params.failCount,
+        params.spamBlocked || 0,
+      ],
+    );
 
     console.log(`[TrainingLog] 성과 업데이트: ${params.sourceRef.substring(0, 8)}...`);
   } catch (err) {
     console.error('[TrainingLog] 성과 업데이트 실패 (동기화에 영향 없음):', err);
+  }
+}
+
+/**
+ * ★ 2026-07-04 반응 신호만 갱신(클릭·전환) — sent/success/fail을 덮지 않는다.
+ *   소비처: 이메일 참여 환류(발송 메트릭은 발송 시점 SMTP 실측이 진실 — 절대값 SET로 덮으면 안 됨).
+ *   컬럼 미생성 시 조용히 no-op(배포 순서 자유).
+ */
+export async function updateTrainingEngagement(
+  sourceRef: string,
+  clickCount: number | null,
+  conversionCount: number | null,
+): Promise<void> {
+  if (clickColsAvailable === false) return;
+  if (clickCount == null && conversionCount == null) return;
+  try {
+    await pool.query(
+      `UPDATE ai_training_logs
+       SET click_count = COALESCE($2, click_count),
+           conversion_count = COALESCE($3, conversion_count),
+           metrics_updated_at = NOW()
+       WHERE source_ref = $1`,
+      [sourceRef, clickCount, conversionCount],
+    );
+    clickColsAvailable = true;
+  } catch (e: any) {
+    if (e?.code === '42703') clickColsAvailable = false;
+    else console.error('[TrainingLog] 반응 신호 갱신 실패 (무영향):', (e as Error)?.message);
   }
 }
 

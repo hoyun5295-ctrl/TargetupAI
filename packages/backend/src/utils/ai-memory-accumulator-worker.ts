@@ -16,7 +16,10 @@ import { pickMemoriesToPrune } from './ai-memory-text';
 import { getDmRecipientEngagementRows, getDmDetail, extractFlatSectionsFromDm } from './dm/dm-builder';
 import { sanitizeSectionInteractions, sumSectionClicks, isDmCompleted, buildDmSectionLabel } from './dm/dm-tracking';
 // ★ 2026-07-03 DM 성과 라벨을 문안 학습 코퍼스(ai_training_logs)에도 환류 (전 채널 학습 통합 Phase 1d)
-import { getSourceRef, updateTrainingMetrics } from './training-logger';
+// ★ 2026-07-04 Tier 1 반응 신호 — DM 클릭(updateTrainingMetrics.clickCount) + 이메일 클릭(updateTrainingEngagement)
+import { getSourceRef, updateTrainingMetrics, updateTrainingEngagement } from './training-logger';
+// ★ 2026-07-04 학습 루프 ②: 거부 제안 → "피할 것" 증류 (negative 신호 첫 활용)
+import { callAIWithFallback } from '../services/ai';
 
 const INTERVAL_MS = 60 * 60 * 1000; // 1시간
 const INSIGHT_MIN_SAMPLE = 10;      // 등급별 최소 표본 (미만 = 인사이트 생성 보류)
@@ -43,10 +46,12 @@ export async function runAiMemoryAccumulatorTick(): Promise<void> {
     // ★ 2026-07-02(5) Harold 지시 — DM·이메일 추적 데이터를 회사 AI 학습 메모리로 자동 전송
     const dmLearned = await accumulateDmEngagement();
     const emailLearned = await accumulateEmailEngagement();
+    // ★ 2026-07-04 학습 루프 ②: 거부 제안 5건+ 회사의 "피할 것" 증류 (주간 멱등·tick당 5사 상한)
+    const avoidLearned = await accumulateAvoidPatterns();
     const pruned = await pruneOverCapMemories();
-    if (journeyLearned || insightCompanies || dmLearned || emailLearned || pruned) {
+    if (journeyLearned || insightCompanies || dmLearned || emailLearned || avoidLearned || pruned) {
       console.log(
-        `[ai-memory-accumulator] tick — 여정 ${journeyLearned} / 등급인사이트 ${insightCompanies}사 / DM ${dmLearned} / 이메일 ${emailLearned} / 정리 ${pruned}건`,
+        `[ai-memory-accumulator] tick — 여정 ${journeyLearned} / 등급인사이트 ${insightCompanies}사 / DM ${dmLearned} / 이메일 ${emailLearned} / 거부증류 ${avoidLearned}사 / 정리 ${pruned}건`,
       );
     }
   } catch (err: any) {
@@ -233,6 +238,8 @@ async function accumulateDmEngagement(): Promise<number> {
         sentCount,
         successCount: viewedCount,
         failCount: Math.max(0, sentCount - viewedCount),
+        // ★ 2026-07-04 Tier 1: 클릭 수신자 수(clickedCount) — 랭커·검색기의 반응 기반 정렬 신호
+        clickCount: clickedCount,
       }).catch(() => { /* 학습 환류 실패는 워커·발송에 영향 없음 */ });
     } catch (err: any) {
       console.log(`[ai-memory-accumulator] dm=${row.dm_id} 오류 — ${err?.message || 'unknown'}`);
@@ -273,8 +280,91 @@ async function accumulateEmailEngagement(): Promise<number> {
         clickCount: Number(row.click_count) || 0,
       });
       if (ok) learned += 1;
+
+      // ★ 2026-07-04 Tier 1: 이메일 클릭을 문안 학습 코퍼스에 환류 — 반응 신호만 갱신
+      //   (sent/success는 발송 시점 SMTP 실측이 진실 — updateTrainingMetrics 절대값 SET로 덮지 않는다)
+      void updateTrainingEngagement(getSourceRef(row.id), Number(row.click_count) || 0, null);
     } catch (err: any) {
       console.log(`[ai-memory-accumulator] email=${row.id} 오류 — ${err?.message || 'unknown'}`);
+    }
+  }
+  return learned;
+}
+
+// 6) ★ 2026-07-04 학습 루프 ②: 거부 제안 → "피할 것" 증류.
+//    최근 30일 rejected 제안 5건+ 회사만, 기존 증류가 7일 내면 skip(멱등·LLM 비용 가드), tick당 5사 상한.
+//    산출 = ai_company_memory(brand_tone_evolution/avoid_patterns 단일 행 upsert) →
+//    buildMemoryPromptContext 경유로 Operator + 문안 생성(composeCopyBrain ③)에 자동 주입.
+async function accumulateAvoidPatterns(): Promise<number> {
+  const companies = await query(
+    `SELECT p.company_id, COUNT(*)::int AS cnt
+       FROM operator_proposals p
+      WHERE p.status = 'rejected'
+        AND p.created_at >= NOW() - INTERVAL '30 days'
+        AND NOT EXISTS (
+              SELECT 1 FROM ai_company_memory m
+               WHERE m.company_id = p.company_id
+                 AND m.memory_type = 'brand_tone_evolution'
+                 AND m.memory_key = 'avoid_patterns'
+                 AND m.updated_at >= NOW() - INTERVAL '7 days'
+            )
+      GROUP BY p.company_id
+     HAVING COUNT(*) >= 5
+      LIMIT 5`,
+  );
+  let learned = 0;
+  for (const row of companies.rows) {
+    try {
+      const proposals = await query(
+        `SELECT proposal_json FROM operator_proposals
+          WHERE company_id = $1::uuid AND status = 'rejected'
+            AND created_at >= NOW() - INTERVAL '30 days'
+          ORDER BY created_at DESC LIMIT 10`,
+        [row.company_id],
+      );
+      // proposal_json.messages에서 문안 텍스트 방어적 추출 (variant 구조 키 여러 형태 대응)
+      const texts: string[] = [];
+      for (const p of proposals.rows) {
+        const pj = typeof p.proposal_json === 'string' ? JSON.parse(p.proposal_json) : p.proposal_json;
+        const msgs = Array.isArray(pj?.messages) ? pj.messages : [];
+        for (const m of msgs) {
+          const t = String(m?.message_text || m?.lms_text || m?.sms_text || m?.body || '').trim();
+          if (t.length >= 20) texts.push(t.slice(0, 300));
+          if (texts.length >= 15) break;
+        }
+        if (texts.length >= 15) break;
+      }
+      if (texts.length < 3) continue; // 표본 부족 — 증류 보류(가짜 패턴 차단)
+
+      const raw = await callAIWithFallback({
+        system:
+          '너는 마케팅 카피 분석가다. 아래는 이 회사 담당자가 "거부"한 AI 제안 문안들이다. '
+          + '거부된 문안들의 공통 문제 패턴을 3~5개 추출한다. 특정 문안의 문장을 인용하지 말고 패턴만(예: "과도한 감탄사", "혜택 없이 긴 인사말"). '
+          + 'JSON 배열만 출력: ["패턴1","패턴2"]',
+        userMessage: texts.map((t, i) => `${i + 1}. ${t.replace(/\n/g, ' / ')}`).join('\n'),
+        maxTokens: 500,
+        temperature: 0.2,
+        model: 'sonnet',
+        creditCost: 0, // 내부 학습 — 사용자 크레딧 차감 없음
+      });
+      const m = raw.match(/\[[\s\S]*\]/);
+      if (!m) continue;
+      let donts: string[] = [];
+      try { donts = (JSON.parse(m[0]) as any[]).map(String).filter((s) => s.trim()).slice(0, 5); } catch { continue; }
+      if (donts.length === 0) continue;
+
+      await addMemory({
+        companyId: row.company_id,
+        memoryType: 'brand_tone_evolution',
+        memoryKey: 'avoid_patterns',
+        memoryValue: `담당자가 거부한 제안들의 공통 패턴 — 새 문안에서 피할 것: ${donts.join(' / ')}`,
+        importance: 7,
+        source: 'reject_distill',
+        metadata: { sample_count: texts.length, rejected_30d: Number(row.cnt) || 0 },
+      });
+      learned += 1;
+    } catch (err: any) {
+      console.log(`[ai-memory-accumulator] avoid company=${row.company_id} 오류 — ${err?.message || 'unknown'}`);
     }
   }
   return learned;

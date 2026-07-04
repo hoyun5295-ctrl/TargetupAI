@@ -9,6 +9,7 @@ export interface CandidateRow {
   spam_blocked?: number | null;  // >0 = 스팸 걸린 이력
   sent_count?: number | null;
   success_count?: number | null;
+  click_count?: number | null;   // ★ 2026-07-04 Tier 1 반응 신호 (없으면 기존 점수 그대로 — 회귀 0)
 }
 
 export interface RankedCandidate {
@@ -29,6 +30,10 @@ export function scoreCandidate(row: CandidateRow): number {
   // 성과(있을 때만): successRate 가산 (Tier 1/2 승급 지점)
   const sent = row.sent_count || 0;
   if (sent > 0) score += Math.min((row.success_count || 0) / sent, 1) * 0.4;
+  // ★ 2026-07-04 Tier 1 승급: 반응(클릭) 신호가 있으면 전달 성공률보다 큰 가중 — 실측 비율만 사용(임의 상수 0)
+  if (row.click_count != null && sent > 0) {
+    score += Math.min(row.click_count / sent, 1) * 0.6;
+  }
   // 구조 루브릭: CTA 포함
   if (hasCta(row.final_message || '')) score += 0.15;
   return score;
