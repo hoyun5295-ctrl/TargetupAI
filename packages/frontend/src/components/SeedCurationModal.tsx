@@ -26,6 +26,8 @@ export default function SeedCurationModal({ open, onClose }: { open: boolean; on
   const [seeds, setSeeds] = useState<Seed[]>([]);
   const [loadingSeeds, setLoadingSeeds] = useState(false);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const [page, setPage] = useState(0);
+  const PAGE_SIZE = 5;
 
   const authHeader = () => ({ Authorization: `Bearer ${localStorage.getItem('token')}` });
 
@@ -50,6 +52,7 @@ export default function SeedCurationModal({ open, onClose }: { open: boolean; on
     if (!industryCode.trim()) { toast.error('업종 코드를 입력하세요.'); return; }
     setMining(true);
     setCandidates([]);
+    setPage(0);
     try {
       const params = new URLSearchParams({ industryCode: industryCode.trim(), channel, isAd: String(isAd) });
       const r = await fetch(`/api/admin/ai-training/seed/mine?${params.toString()}`, { headers: authHeader() });
@@ -115,7 +118,7 @@ export default function SeedCurationModal({ open, onClose }: { open: boolean; on
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm" onClick={onClose}>
       <div
-        className="bg-slate-900 border border-white/10 rounded-2xl shadow-2xl w-full max-w-3xl max-h-[90vh] flex flex-col overflow-hidden"
+        className="bg-slate-900 border border-white/10 rounded-2xl shadow-2xl w-full max-w-4xl max-h-[92vh] flex flex-col overflow-hidden"
         onClick={(e) => e.stopPropagation()}
       >
         {/* 헤더 */}
@@ -172,38 +175,64 @@ export default function SeedCurationModal({ open, onClose }: { open: boolean; on
           </div>
 
           {/* 후보 검수 */}
-          {candidates.length > 0 && (
-            <div className="space-y-2">
-              <div className="flex items-center justify-between">
-                <p className="text-xs text-white/50">후보 {candidates.length}건 · 선택 {selectedCount}건 (탈색·누출/스팸 게이트 통과분)</p>
-                <button
-                  onClick={approve}
-                  disabled={saving || selectedCount === 0}
-                  className="px-3 py-1.5 rounded-lg bg-emerald-500/90 hover:bg-emerald-500 text-white text-xs font-medium flex items-center gap-1.5 disabled:opacity-50"
-                >
-                  {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
-                  선택 승인 저장
-                </button>
-              </div>
-              {candidates.map((c, i) => (
-                <div key={i} className={`rounded-xl border p-3 flex gap-3 ${c.selected ? 'border-violet-400/40 bg-violet-500/5' : 'border-white/10 bg-slate-800/40'}`}>
-                  <button
-                    onClick={() => setCandidates((arr) => arr.map((x, j) => j === i ? { ...x, selected: !x.selected } : x))}
-                    className={`mt-1 w-5 h-5 rounded flex-shrink-0 flex items-center justify-center border ${c.selected ? 'bg-violet-500 border-violet-500' : 'border-white/30'}`}
-                    aria-label="선택"
-                  >
-                    {c.selected && <Check className="w-3.5 h-3.5 text-white" />}
-                  </button>
-                  <textarea
-                    value={c.text}
-                    onChange={(e) => setCandidates((arr) => arr.map((x, j) => j === i ? { ...x, text: e.target.value } : x))}
-                    rows={2}
-                    className="flex-1 bg-transparent text-sm text-white/90 resize-y focus:outline-none"
-                  />
+          {candidates.length > 0 && (() => {
+            const totalPages = Math.ceil(candidates.length / PAGE_SIZE);
+            const cur = Math.min(page, totalPages - 1);
+            const start = cur * PAGE_SIZE;
+            const pageItems = candidates.slice(start, start + PAGE_SIZE);
+            return (
+              <div className="space-y-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <p className="text-xs text-white/50">후보 {candidates.length}건 · 선택 {selectedCount}건 (탈색·누출/스팸 게이트 통과분)</p>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => setCandidates((arr) => arr.map((x) => ({ ...x, selected: selectedCount < arr.length })))}
+                      className="px-2.5 py-1.5 rounded-lg bg-white/10 hover:bg-white/15 text-white/70 text-xs"
+                    >
+                      {selectedCount < candidates.length ? '전체 선택' : '전체 해제'}
+                    </button>
+                    <button
+                      onClick={approve}
+                      disabled={saving || selectedCount === 0}
+                      className="px-3 py-1.5 rounded-lg bg-emerald-500/90 hover:bg-emerald-500 text-white text-xs font-medium flex items-center gap-1.5 disabled:opacity-50"
+                    >
+                      {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
+                      선택 {selectedCount}건 승인 저장
+                    </button>
+                  </div>
                 </div>
-              ))}
-            </div>
-          )}
+                {pageItems.map((c, k) => {
+                  const i = start + k;
+                  return (
+                    <div key={i} className={`rounded-xl border p-3 flex gap-3 ${c.selected ? 'border-violet-400/40 bg-violet-500/5' : 'border-white/10 bg-slate-800/40'}`}>
+                      <button
+                        onClick={() => setCandidates((arr) => arr.map((x, j) => (j === i ? { ...x, selected: !x.selected } : x)))}
+                        className={`mt-1 w-6 h-6 rounded-md flex-shrink-0 flex items-center justify-center border ${c.selected ? 'bg-violet-500 border-violet-500' : 'border-white/30'}`}
+                        aria-label="선택"
+                      >
+                        {c.selected && <Check className="w-4 h-4 text-white" />}
+                      </button>
+                      <textarea
+                        value={c.text}
+                        onChange={(e) => setCandidates((arr) => arr.map((x, j) => (j === i ? { ...x, text: e.target.value } : x)))}
+                        rows={4}
+                        className="flex-1 bg-slate-900/40 border border-white/5 rounded-lg px-3 py-2 text-sm leading-relaxed text-white/90 resize-y focus:outline-none focus:border-violet-400/40 min-h-[92px]"
+                      />
+                    </div>
+                  );
+                })}
+                {totalPages > 1 && (
+                  <div className="flex items-center justify-center gap-3 pt-1">
+                    <button onClick={() => setPage(Math.max(0, cur - 1))} disabled={cur === 0}
+                      className="px-3 py-1.5 rounded-lg bg-white/10 hover:bg-white/15 text-white/70 text-xs disabled:opacity-40">이전</button>
+                    <span className="text-xs text-white/60">{cur + 1} / {totalPages}</span>
+                    <button onClick={() => setPage(Math.min(totalPages - 1, cur + 1))} disabled={cur >= totalPages - 1}
+                      className="px-3 py-1.5 rounded-lg bg-white/10 hover:bg-white/15 text-white/70 text-xs disabled:opacity-40">다음</button>
+                  </div>
+                )}
+              </div>
+            );
+          })()}
 
           {/* 저장된 시드 */}
           <div className="pt-2 border-t border-white/10">

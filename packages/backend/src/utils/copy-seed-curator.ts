@@ -20,6 +20,7 @@ export function selectSeedCandidates(rows: CandidateRow[], limit: number): strin
   for (const r of ranked) {
     const clean = deBrand(r.text);
     if (!clean || hasIdentifierLeak(clean)) continue; // 누출 시드 금지
+    if (clean.replace(/\s/g, '').length < 12) continue; // 인사말·조각 등 저가치 시드 제외(예: "고객님 안녕하세요")
     if (scoreSpamRisk(clean).score >= SPAM_SEED_EXCLUDE) continue; // 스팸 위험 시드 금지
     const key = clean.replace(/\s+/g, ' ');
     if (seen.has(key)) continue;
@@ -82,7 +83,7 @@ export async function insertCuratedSeeds(items: {
         sourceRef, tenantRef, it.industryCode, null,
         null, null, null, 'curated_seed',
         it.messageType, it.isAd, null, null,
-        clean, 'curated', JSON.stringify({}),
+        clean, 'manual', JSON.stringify({}),  // ★ final_source=CHECK 제약(ck_training_final_source) 허용값. 시드 표식=tenant+segment_key
         new Date(),
         'v1', 'v1', 'v1',
         null, null,

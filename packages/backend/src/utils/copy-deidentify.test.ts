@@ -25,4 +25,11 @@ describe('copy-deidentify', () => {
     expect(hasIdentifierLeak(s)).toBe(true);
     expect(hasIdentifierLeak(s)).toBe(true);
   });
+  it('개인화 토큰(% {})·수신자 이름(PII)을 제거한다', () => {
+    const out = deBrand('한경자 고객님 이번 주 세일 %포인트% 적립 {brand} 매장');
+    expect(out).not.toContain('한경자');
+    expect(out).not.toContain('%');
+    expect(out).not.toContain('{');
+    expect(out).toContain('고객님'); // 일반 호칭은 유지
+  });
 });

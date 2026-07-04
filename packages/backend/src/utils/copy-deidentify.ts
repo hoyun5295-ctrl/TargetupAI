@@ -7,6 +7,8 @@ const BRACKET_G = /[[【][^\]】]*[\]】]/g;
 const URL_G = /(https?:\/\/\S+)|((?:www\.)?[\w-]+\.(?:com|co\.kr|kr|net|shop|store|io|me)(?:\/\S*)?)/gi;
 const EMAIL_G = /\S+@\S+\.\S+/g;
 const PHONE_G = /(1[5-9]\d{2}[-.\s]?\d{4})|(0\d{1,2}[-.\s]?\d{3,4}[-.\s]?\d{4})/g;
+const TOKEN_G = /%[^%\n]{1,20}%|\{[^}\n]{1,20}\}/g;   // 개인화 토큰 %이름% {brand} — 시드엔 불필요
+const RECIPIENT_NAME_G = /[가-힣]{2,4}\s*고객님/g;      // 수신자 이름(PII) 제거, 일반 호칭 '고객님'만 유지
 
 const BRACKET = /[[【][^\]】]*[\]】]/;
 const URL = /(https?:\/\/\S+)|((?:www\.)?[\w-]+\.(?:com|co\.kr|kr|net|shop|store|io|me)(?:\/\S*)?)/i;
@@ -17,7 +19,8 @@ const PHONE = /(1[5-9]\d{2}[-.\s]?\d{4})|(0\d{1,2}[-.\s]?\d{3,4}[-.\s]?\d{4})/;
 export function deBrand(text: string): string {
   let t = String(text || '');
   // 순서 중요: EMAIL 먼저(도메인부가 URL로 먼저 지워지면 'abc@'가 orphan으로 남음) → URL → PHONE → BRACKET
-  t = t.replace(EMAIL_G, ' ').replace(URL_G, ' ').replace(PHONE_G, ' ').replace(BRACKET_G, ' ');
+  t = t.replace(EMAIL_G, ' ').replace(URL_G, ' ').replace(PHONE_G, ' ').replace(BRACKET_G, ' ')
+       .replace(TOKEN_G, ' ').replace(RECIPIENT_NAME_G, '고객님');
   return t.replace(/[ \t]{2,}/g, ' ').replace(/ *\n */g, '\n').trim();
 }
 
