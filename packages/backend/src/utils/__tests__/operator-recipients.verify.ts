@@ -4,7 +4,7 @@
  * (DB import 0 — buildSendableRecipientsSql은 문자열만 합성. filterWhere는 주입.)
  */
 import assert from 'node:assert';
-import { buildSendableRecipientsSql } from '../operator-recipients';
+import { buildSendableRecipientsSql, buildSendableStagingInsertSql } from '../operator-recipients';
 
 let passed = 0;
 function ok(name: string, fn: () => void) { fn(); passed++; console.log(`  ok - ${name}`); }
@@ -59,6 +59,55 @@ ok('지정 시 → cdp_events message_click NOT EXISTS + occurred_at >= 마지�
   assert.ok(/ce\.customer_id\s*=\s*c\.id/.test(sql), 'customer 매칭');
   assert.ok(/ce\.occurred_at\s*>=\s*\$3/.test(sql), 'since param $3');
   assert.deepStrictEqual(params, ['CID', 'VIP', since]);
+});
+
+console.log('[operator-recipients] buildSendableStagingInsertSql — 발송용 서버사이드 적재(상한 없음)');
+ok('INSERT INTO campaign_send_staging + SELECT customers (UNNEST 아님)', () => {
+  const { sql } = buildSendableStagingInsertSql('STG', 'CID', '', [], '');
+  assert.ok(/INSERT\s+INTO\s+campaign_send_staging\s*\(staging_id,\s*company_id,\s*phone,\s*name\)/.test(sql), 'INSERT 대상 4컬럼');
+  assert.ok(/FROM\s+customers\s+c/.test(sql), 'SELECT FROM customers');
+  assert.ok(!/UNNEST/.test(sql), 'Node 배열 UNNEST 없음');
+});
+ok('LIMIT 없음 (강제 상한 제거 — 발송 전량)', () => {
+  const { sql } = buildSendableStagingInsertSql('STG', 'CID', '', [], '');
+  assert.ok(!/LIMIT/i.test(sql), 'LIMIT 미포함');
+});
+ok('발송 안전필터 4종 + 회사+전화 안티조인 동일 적용', () => {
+  const { sql } = buildSendableStagingInsertSql('STG', 'CID', '', [], '');
+  assert.ok(/c\.is_active\s*=\s*true/.test(sql), 'is_active');
+  assert.ok(/c\.sms_opt_in\s*=\s*true/.test(sql), 'sms_opt_in');
+  assert.ok(/c\.is_opt_out\s+IS\s+NOT\s+TRUE/.test(sql), 'is_opt_out');
+  assert.ok(/c\.is_invalid\s+IS\s+NOT\s+TRUE/.test(sql), 'is_invalid');
+  assert.ok(/unsubscribes\s+u[\s\S]*u\.company_id\s*=\s*c\.company_id[\s\S]*u\.phone\s*=\s*c\.phone/.test(sql), 'unsub company+phone');
+});
+ok('phone 숫자만 정규화(regexp_replace) + name 적재', () => {
+  const { sql } = buildSendableStagingInsertSql('STG', 'CID', '', [], '');
+  assert.ok(/regexp_replace\(c\.phone,\s*'\[\^0-9\]',\s*''/.test(sql), 'phone digit-strip');
+  assert.ok(/c\.name/.test(sql), 'name 적재');
+});
+ok('param 배치 = companyId $1, filterParams $2+, stagingId 마지막', () => {
+  const { sql, params } = buildSendableStagingInsertSql('STG', 'CID', 'AND c.grade = $2', ['VIP'], '');
+  assert.deepStrictEqual(params, ['CID', 'VIP', 'STG'], 'params 순서');
+  assert.ok(/c\.company_id\s*=\s*\$1/.test(sql), 'company $1');
+  assert.ok(/\$3::uuid/.test(sql), 'stagingId $3(마지막)');
+  assert.ok(sql.includes('AND c.grade = $2'), 'filterWhere 그대로');
+});
+ok('storeFilter 그대로 합성', () => {
+  const { sql } = buildSendableStagingInsertSql('STG', 'CID', '', [], ' AND c.id IN (1)');
+  assert.ok(sql.includes('AND c.id IN (1)'));
+});
+ok('excludeClickedSince 미지정 → message_click 안티조인 없음', () => {
+  const { sql, params } = buildSendableStagingInsertSql('STG', 'CID', '', [], '', null);
+  assert.ok(!/message_click/.test(sql));
+  assert.deepStrictEqual(params, ['CID', 'STG']);
+});
+ok('excludeClickedSince 지정 → 미클릭가드 + stagingId는 since 뒤(마지막)', () => {
+  const since = new Date('2026-06-26T00:00:00Z');
+  const { sql, params } = buildSendableStagingInsertSql('STG', 'CID', 'AND c.grade = $2', ['VIP'], '', since);
+  assert.ok(/NOT\s+EXISTS[\s\S]*cdp_events\s+ce[\s\S]*message_click/.test(sql), 'message_click 안티조인');
+  assert.ok(/ce\.occurred_at\s*>=\s*\$3/.test(sql), 'since $3');
+  assert.ok(/\$4::uuid/.test(sql), 'stagingId $4(since 뒤)');
+  assert.deepStrictEqual(params, ['CID', 'VIP', since, 'STG']);
 });
 
 console.log(`\n${passed} assertions passed`);

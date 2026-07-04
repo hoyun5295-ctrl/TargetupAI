@@ -2265,6 +2265,11 @@ router.post('/operator/proposals/:id/approve', async (req: Request, res: Respons
     if (userType !== 'company_admin') {
       return res.status(403).json({ success: false, error: '승인은 회사 관리자만 가능합니다.' });
     }
+    // ★ 발송 개시 경로 — 생성/propose와 동일 게이트. 강등 회사가 남은 pending을 수동 발송하는 구멍 차단(조회·거부·정지는 열어 둠).
+    const planCtx = await loadPlanContext(companyId);
+    if (!planCtx || !isAiOperatorAllowed(planCtx, req.user)) {
+      return res.status(403).json({ success: false, error: '본 기능은 엔터프라이즈 베타 운영 중입니다.', code: 'BETA_GATE' });
+    }
     const result = await approveProposal(companyId, req.params.id, userId);
     if (!result.ok) return res.status(400).json({ success: false, error: result.reason });
     // 승인 = 백엔드 즉시 발송(자동 경로와 동일). 크레딧↔발송 원자성.

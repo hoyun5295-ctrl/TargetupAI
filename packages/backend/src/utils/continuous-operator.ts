@@ -46,11 +46,11 @@ import { runInCreditBundle } from './ai-credit-context';
 import { getAuthSmsTable, bulkInsertSmsQueue } from './sms-queue';
 import { randomUUID } from 'crypto';
 import { buildFilterWhereClauseCompat } from './customer-filter';
-import { buildSendableRecipientsSql } from './operator-recipients';
+import { buildSendableStagingInsertSql } from './operator-recipients';
 import { createDirectSendCampaign } from './direct-send-core';
 import { DirectSendError } from './direct-send-spec';
 // ★ 2026-07-03 Gap5 Layer2: 고객별 발송 카운터 (예측 분모 전용 — 타겟 선정 무관)
-import { recordCustomerSends } from './customer-send-stats';
+import { recordCustomerSendsByFilter } from './customer-send-stats';
 // ★ Phase2 A (2026-06-26): 발송 본문 URL 단축 + 변이 추적(클릭→operator 변이 보상). journey-executor와 동일 패턴.
 import { shortenUrlsInText } from './short-url';
 // ★ Phase3 B (2026-06-26): 자율 발송 시각을 회사 클릭 반응 시간대로 개인화(데이터 부족 시 현행 폴백).
@@ -627,7 +627,7 @@ export async function generateProposalForOperator(operatorId: string): Promise<O
     adRejectOk;
 
   const autoExecuteReason = autoExecuteEligible
-    ? `자동 실행 임계값 통과: ${recipientCount}명 / ${costEstimate.toLocaleString()}원 / ${compliance.riskLevel} risk (회사 max ${ctx.cdp_auto_execute_max_risk}) / non-ad`
+    ? `자동 실행 임계값 통과: ${recipientCount}명 / ${costEstimate.toLocaleString()}원 / ${compliance.riskLevel} risk (회사 max ${ctx.cdp_auto_execute_max_risk}) / 광고`
     : `자동 실행 미통과 — ${[
         !ctx.cdp_auto_execute_enabled && '옵션 OFF',
         !['ENTERPRISE', 'BUSINESS'].includes(ctx.plan_code) && '요금제',
@@ -1272,8 +1272,15 @@ async function dispatchProposalSend(p: any): Promise<{ action: 'sent' | 'skipped
   const isAd = true;
 
   let stagingId = '';
-  let rows: any[] = [];
+  let recipientTotal = 0;
   let callback: string | null = null;
+  // 발송 타겟 필터 — try 밖(발송 후 예측 분모 적재)에서도 참조하므로 함수 스코프에 둔다.
+  // ★ Phase3 C — 리마인드면 미클릭가드(excludeClickedSince)로 1차 클릭 고객 제외.
+  const filters = pj.target?.filters || {};
+  const excludeClickedSince = pj.meta?.excludeClickedSince ? new Date(pj.meta.excludeClickedSince) : null;
+  // filterWhere 컴파일은 try 안에서(throw 시 admin_review 정리 보존) — 값은 발송 후 예측 카운터에서도 쓰므로 스코프 선언.
+  let filterWhere = '';
+  let filterParams: any[] = [];
   try {
     // operator(통지 대상 · created_by · Phase3 C 시퀀스 설정)
     const opRes = await query(
@@ -1295,23 +1302,7 @@ async function dispatchProposalSend(p: any): Promise<{ action: 'sent' | 'skipped
       }
     }
 
-    // 발송 시점 타겟 재추출 (공통 안전필터 — 정지 창 동안 새 수신거부 반영)
-    // ★ Phase3 C — 리마인드 제안이면 1차 발송 후 클릭한 고객(미반응 아님)을 제외(meta.excludeClickedSince).
-    const filters = pj.target?.filters || {};
-    const excludeClickedSince = pj.meta?.excludeClickedSince ? new Date(pj.meta.excludeClickedSince) : null;
-    const { sql: filterWhere, params: filterParams } = buildFilterWhereClauseCompat(filters, 2);
-    const { sql: recSql, params: recParams } = buildSendableRecipientsSql(filterWhere, filterParams, [companyId], '', excludeClickedSince);
-    rows = (await query(recSql, recParams)).rows;
-
-    // 0건 → 스킵 + 통지 (operator는 다음 주기 정상)
-    const outcome = decideSendOutcome({ recipientCount: rows.length, balanceOk: true });
-    if (outcome.action === 'skip') {
-      await query(`UPDATE operator_proposals SET status = 'skipped', auto_execute_reason = $2 WHERE id = $1::uuid`, [proposalId, outcome.reason]);
-      if (outcome.notify) await notify('[AI 자동마케팅] 발송 생략', `'${op.name || ''}' 이번 사이클은 ${outcome.reason}.`);
-      return { action: 'skipped', reason: outcome.reason };
-    }
-
-    // 발송 발신번호 (회사 기본 등록 번호)
+    // 발송 발신번호 먼저 확인 (없으면 staging 적재 자체가 무의미 — 매 사이클 대량 적재+삭제 낭비 차단).
     const cbRes = await query(
       `SELECT REPLACE(phone, '-', '') AS phone FROM callback_numbers WHERE company_id = $1 AND is_default = true LIMIT 1`,
       [companyId],
@@ -1323,15 +1314,23 @@ async function dispatchProposalSend(p: any): Promise<{ action: 'sent' | 'skipped
       return { action: 'skipped', reason: '발신번호 미설정' };
     }
 
-    // staging 적재 (phone + name — %고객명% 치환용; 그 외 변수는 발송기가 customers 재조회로 치환)
+    // 발송 시점 타겟 재추출 → campaign_send_staging 서버사이드 직접 적재(상한 없음 · Node 왕복 없음).
+    //   옛 결함: preview 표본용 buildSendableRecipientsSql(LIMIT 10000)을 발송이 공유 → 1만 초과 조용한 누락.
+    //   통제선은 고객 예산·선불 잔액뿐. 정지 창 동안 새 수신거부는 공통 안전필터가 발송 시점에 반영.
+    const compiled = buildFilterWhereClauseCompat(filters, 2);
+    filterWhere = compiled.sql;
+    filterParams = compiled.params;
     stagingId = randomUUID();
-    const phones = rows.map((r: any) => String(r.phone || '').replace(/\D/g, ''));
-    const names = rows.map((r: any) => (r.name ?? null));
-    await query(
-      `INSERT INTO campaign_send_staging (staging_id, company_id, phone, name)
-       SELECT $1::uuid, $2::uuid, u.phone, u.name FROM UNNEST($3::text[], $4::text[]) AS u(phone, name)`,
-      [stagingId, companyId, phones, names],
-    );
+    const { sql: insSql, params: insParams } = buildSendableStagingInsertSql(stagingId, companyId, filterWhere, filterParams, '', excludeClickedSince);
+    recipientTotal = (await query(insSql, insParams)).rowCount || 0;
+
+    // 0건 → 스킵 + 통지 (operator는 다음 주기 정상). staging 0행이라 잔여 없음.
+    const outcome = decideSendOutcome({ recipientCount: recipientTotal, balanceOk: true });
+    if (outcome.action === 'skip') {
+      await query(`UPDATE operator_proposals SET status = 'skipped', auto_execute_reason = $2 WHERE id = $1::uuid`, [proposalId, outcome.reason]);
+      if (outcome.notify) await notify('[AI 자동마케팅] 발송 생략', `'${op.name || ''}' 이번 사이클은 ${outcome.reason}.`);
+      return { action: 'skipped', reason: outcome.reason };
+    }
   } catch (preErr: any) {
     // 발송 커밋 전 예외 → 'sending' 정지 방지: 담당자 검토로 내리고(자동 재발송 X) 통지 후 재던짐.
     await query(`UPDATE operator_proposals SET status = 'admin_review', scheduled_send_at = NULL, auto_execute_reason = '발송 준비 오류 — 담당자 검토' WHERE id = $1::uuid AND status = 'sending'`, [proposalId]).catch(() => {});
@@ -1353,7 +1352,7 @@ async function dispatchProposalSend(p: any): Promise<{ action: 'sent' | 'skipped
         stagingId,
         campaignName: `AI 자동마케팅 ${op.name || ''} ${new Date().toLocaleDateString('ko-KR')}`,
         msgType, message: trackedBody, subject: subject || null, callback, sendChannel: 'sms',
-        adEnabled: isAd, total: rows.length, dedupEnabled: true, unsubFilterEnabled: true,
+        adEnabled: isAd, total: recipientTotal, dedupEnabled: true, unsubFilterEnabled: true,
       },
       { companyId, userId },
       { finalSource: 'selected_as_is', aiMessages: [trackedBody] },
@@ -1373,28 +1372,39 @@ async function dispatchProposalSend(p: any): Promise<{ action: 'sent' | 'skipped
   await query(`UPDATE operator_proposals SET campaign_id = $2::uuid WHERE id = $1::uuid`, [proposalId, campaignId]).catch((e: any) => console.warn('[ContinuousOperator AutoSend] campaign_id 기록 경고:', e?.message));
 
   // ★ 2026-07-03 Gap5 Layer2: 고객별 발송 카운터 (예측 분모 전용, fire-and-forget — 발송·돈 무영향, campaignRef 멱등)
-  void recordCustomerSends({
+  //   서버사이드 필터 적재라 id를 Node로 안 들고온다(대량 상한 제거와 정합). 발송 추출과 동일 where.
+  void recordCustomerSendsByFilter({
     companyId,
     campaignRef: `op:${campaignId}`,
-    customerIds: rows.map((r: any) => String(r.id || '')).filter(Boolean),
+    filterWhere, filterParams, excludeClickedSince,
   });
 
-  // 기능 크레딧 1회 차감 (멱등키 proposalId) — 발송 성공 시점에만
-  await deductCreditSafe({
-    companyId, cost: getCreditCost('continuous-operator-send'), source: 'continuous-operator-send',
-    createdBy: userId, idempotencyKey: `continuous-operator-send:${proposalId}`,
-  }).catch((e: any) => console.warn('[ContinuousOperator AutoSend] 크레딧 차감 경고:', e?.message));
+  // 기능 크레딧 1회 차감 (멱등키 proposalId) — 발송 성공 시점에만.
+  //   ★ 'sent' 전환을 차감 성공에 종속: 차감 실패면 status='sending' 유지(campaign_id 마커 있음) →
+  //     다음 워커 패스 reconcileStuckSending이 mark_sent + 동일 멱등키로 재차감(유실 0). 발송 자체는 이미 커밋됨.
+  let creditDeducted = true;
+  try {
+    await deductCreditSafe({
+      companyId, cost: getCreditCost('continuous-operator-send'), source: 'continuous-operator-send',
+      createdBy: userId, idempotencyKey: `continuous-operator-send:${proposalId}`,
+    });
+  } catch (e: any) {
+    creditDeducted = false;
+    console.warn('[ContinuousOperator AutoSend] 크레딧 차감 실패 — sending 유지(정지복구가 재차감):', e?.message);
+  }
 
-  // 완료 표시 + 통지
-  await query(
-    `UPDATE operator_proposals SET status = 'sent', auto_sent_at = NOW() WHERE id = $1::uuid AND status = 'sending'`,
-    [proposalId],
-  );
-  await notify('[AI 자동마케팅] 발송 완료', `'${op.name || ''}' ${rows.length}명에게 발송을 완료했습니다.`);
+  // 완료 표시(차감 성공 시에만 'sent' 마감) + 통지 — 발송은 커밋됐으므로 통지는 진행.
+  if (creditDeducted) {
+    await query(
+      `UPDATE operator_proposals SET status = 'sent', auto_sent_at = NOW() WHERE id = $1::uuid AND status = 'sending'`,
+      [proposalId],
+    );
+  }
+  await notify('[AI 자동마케팅] 발송 완료', `'${op.name || ''}' ${recipientTotal}명에게 발송을 완료했습니다.`);
 
   // ★ Phase2 A — 발송된 변이에 실측 trial(sent_count) 누적 → 다음 제안 Bandit 추천 정교화(클릭/전환은 추적 경로에서 별도 누적).
   if (chosenVariantId) {
-    await recordVariantReward({ variantId: chosenVariantId, sent: rows.length, clicked: 0, converted: 0 })
+    await recordVariantReward({ variantId: chosenVariantId, sent: recipientTotal, clicked: 0, converted: 0 })
       .catch((e: any) => console.warn('[ContinuousOperator AutoSend] Bandit trial 기록 경고:', e?.message));
   }
 
@@ -1403,7 +1413,7 @@ async function dispatchProposalSend(p: any): Promise<{ action: 'sent' | 'skipped
     await scheduleSequenceReminder(op, p, pj, companyId).catch((e: any) =>
       console.warn('[ContinuousOperator Sequence] 리마인드 예약 경고:', e?.message));
   }
-  return { action: 'sent', campaignId, sentCount: rows.length };
+  return { action: 'sent', campaignId, sentCount: recipientTotal };
 }
 
 /**
