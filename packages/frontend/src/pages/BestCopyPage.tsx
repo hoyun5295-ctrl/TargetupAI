@@ -10,6 +10,7 @@
  */
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { goBackOr } from '../lib/scroll-restoration';
 import {
   ArrowLeft, MessageSquareText, Plus, Loader2, RefreshCw, Sparkles, X, Trash2, Check, Megaphone, Info,
 } from 'lucide-react';
@@ -278,7 +279,7 @@ export default function BestCopyPage() {
       {/* 헤더 */}
       <div className="bg-slate-900/60 backdrop-blur-md border-b border-white/10 sticky top-0 z-30">
         <div className="max-w-6xl mx-auto px-4 md:px-6 py-3 md:py-4 flex items-center gap-3 flex-wrap">
-          <button onClick={() => navigate('/admin')} className="p-2 rounded-lg hover:bg-white/10 transition-colors" aria-label="슈퍼관리자로">
+          <button onClick={() => goBackOr(navigate, '/admin')} className="p-2 rounded-lg hover:bg-white/10 transition-colors" aria-label="슈퍼관리자로">
             <ArrowLeft className="w-5 h-5" />
           </button>
           <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-amber-400 to-orange-500 flex items-center justify-center flex-shrink-0 shadow-lg shadow-amber-500/20">

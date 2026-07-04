@@ -8,6 +8,7 @@
  */
 
 import { useNavigate } from 'react-router-dom';
+import { goBackOr } from '../lib/scroll-restoration';
 import AlimtalkSendersSection from '../components/alimtalk/AlimtalkSendersSection';
 
 export default function AlimtalkSendersPage() {
@@ -24,7 +25,7 @@ export default function AlimtalkSendersPage() {
         </div>
         <button
           type="button"
-          onClick={() => navigate('/admin')}
+          onClick={() => goBackOr(navigate, '/admin')}
           className="px-3 py-1.5 text-sm bg-gray-100 hover:bg-gray-200 rounded-lg"
         >
           관리자 홈

@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { goBackOr } from '../lib/scroll-restoration';
 import { AlertCircle, ArrowLeft, BookOpen, FileText, Loader2, Search, Sparkles } from 'lucide-react';
 
 // ★ D181 (2026-05-19): Anthropic Citations 페이지
@@ -83,7 +84,7 @@ export default function AiExplainPage() {
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-indigo-50">
       <div className="bg-white border-b">
         <div className="max-w-4xl mx-auto px-6 py-4 flex items-center gap-3">
-          <button onClick={() => navigate('/ai-operator')} className="text-gray-500 hover:text-gray-700 p-1">
+          <button onClick={() => goBackOr(navigate, '/ai-operator')} className="text-gray-500 hover:text-gray-700 p-1">
             <ArrowLeft className="w-5 h-5" />
           </button>
           <BookOpen className="w-5 h-5 text-indigo-600" />
