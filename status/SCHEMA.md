@@ -74,6 +74,9 @@
 | 57 | customer_send_stats | 고객별 발송 누적 카운터 (2026-07-03 신설 — 예측 분모 전용. customer_id PK(FK customers CASCADE), company_id(idx), total_sent, last_sent_at. 고객당 1행) |
 | 58 | customer_send_stats_marks | 발송 카운터 캠페인 멱등 마커 (2026-07-03 신설 — campaign_ref varchar(120) PK, 재시도 중복 카운트 차단) |
 | - | ai_training_logs | 문안 학습 로그 (회사별 tenant_ref HMAC 격리). ★ 2026-07-03 실측: `ck_training_message_type` CHECK = message_type IN ('SMS','LMS','MMS','KAKAO','EMAIL','DM') — DM 추가(전 채널 학습 통합 Phase 1). 적재=fire-and-forget 격리(발송 무영향), source_ref 멱등 |
+| - | ai_training_logs **(2026-07-04 ADD 대기)** | `click_count int` · `conversion_count int` — Tier1 반응 신호(DM·이메일 클릭 환류, 랭커/검색기 클릭 우선 정렬). 코드 42703 폴백이라 미실행 무영향. `ALTER TABLE ai_training_logs ADD COLUMN click_count integer; ADD COLUMN conversion_count integer;` |
+| - | best_copy_seed_usage **(2026-07-04 CREATE 대기)** | 시드 사용 기록(성과 환류). `id bigserial PK, seed_id uuid, tenant_ref varchar(64)=getTenantRef, channel varchar(10), used_at timestamptz`. INDEX(seed_id),(tenant_ref,used_at). 코드 42P01 폴백(미생성 무영향) |
+| - | best_copy_assets **(2026-07-04 CREATE 대기)** | 업종 승리공식·AI 재창작 예시. `id uuid PK, kind varchar(20)[formula\|style_example], industry_code varchar(20), channel varchar(10), is_ad bool, content text, meta jsonb, created_at timestamptz`. INDEX(kind,industry_code). 코드 42P01 폴백 |
 
 ---
 

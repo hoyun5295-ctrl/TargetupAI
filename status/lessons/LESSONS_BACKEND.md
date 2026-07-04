@@ -17,6 +17,15 @@
 
 ---
 
+## 발송결과 집계 — LIVE/LOG 게이트웨이 (2026-07-04 추가)
+
+### 요약 성공 0인데 상세는 성공 = LIVE 대기전용 집계 + LOG 미생성 게이트웨이
+- **현상**: 비토 자체 게이트웨이(라인13, SMSQ_SEND_13) 직접발송이 발송결과 **요약**은 성공/실패/대기 전부 0, **상세내역**은 status_code 6/1000 성공 정상. 07.02 표준라인 발송은 6/6 정상.
+- **근본**: `smsCampaignCountsSafe`(요약 실시간·6h 확정워커·정산환불·라이프사이클 5소비처 공용 유일 진입점) 산식 = **성공/실패는 LOG(_YYYYMM)에서만, 대기는 LIVE 큐의 status_code IN(100,104)에서만**(2026-06-11 큐→이력 이동 중 이중카운트 차단). 전제 = 표준 QTmsg는 결과 확정 시 행이 LOG로 이동. **라인13은 status를 제자리(100→1000) 갱신만 하고 LOG를 안 만듦** → LIVE 대기필터에 성공행(6/1000) 걸러지고 LOG엔 행 없음 → 전부 0. `result_final=false`(실시간)라 요약이 실시간 집계 경로.
+- **확정**: 실데이터로 검증(no_guess) — PG `campaigns.result_final=f·success_count=0·send_config.sentTables=["SMSQ_SEND_13"]` + MySQL SMSQ_SEND_13 status 6/1000 존재 + SMSQ_SEND_13_202607 테이블 부재.
+- **fix**: `classifyResultTables`(sms-table-split CT 단일 진실) — LIVE를 "LOG 짝 있음(대기전용 유지)/없음(결과까지 집계)"으로 분리. LOG 짝 없는 LIVE 행은 다른 테이블에 중복 불가 → 결과까지 세도 이중카운트 구조적 불가. 언더스코어 경계(`${t}_`)로 `_1` vs `_13` 오매칭 차단. smsCampaignCountsSafe + 엑셀 채널분리 집계(stats-aggregation) 통일. 표준 라인 산식 불변(회귀 0, 유닛 테스트로 고정).
+- **교훈**: LIVE/LOG 이중 저장소 집계는 "결과=LOG only" 전제가 깔려 있다. LOG를 안 만드는 새 게이트웨이/라인은 그 전제를 깨서 성공이 통째로 누락된다. 새 발송 라인 추가 시 "결과 행이 LOG로 이동하는가"를 반드시 확인. 요약(캐시/집계) ≠ 상세(raw) 불일치는 집계 산식의 저장소 전제부터 의심.
+
 ## 자사몰 연동 API 실측 (카페24·고도몰) — 2026-07-03 추가
 
 ### 외부 몰 Open API 연동 = raw 에러가 스펙이다

@@ -18,6 +18,17 @@
 
 ## 사고 이력
 
+### 2026-07-04 — 스크롤 복원 전역 통일 (뒤로가기=복원 / 메뉴=최상단)
+- **현상**: 하위 모듈(모바일 DM 등) 진입 후 좌상단 뒤로가기 → AI Operator가 보던 위치가 아니라 최상단으로 튐.
+- **근본**: 옛 전역 `ScrollToTop`(App.tsx)이 pathname 변경마다 무조건 `window.scrollTo(0,0)`(6/28 "메뉴 진입 top" 룰). 메뉴/뒤로가기가 둘 다 `navigate('/x')`=PUSH라 pathname만으론 구분 불가 — 구분 신호는 히스토리 타입(PUSH/POP)뿐.
+- **fix**: `lib/scroll-restoration.tsx` — `ScrollManager`(POP=location.key별 저장 위치 복원[sessionStorage+비동기 성장 대비 rAF/timeout 재시도], PUSH/REPLACE=top). 뒤로가기 버튼 14곳 = `goBackOr(navigate, fallback)`(앱 히스토리 있으면 navigate(-1)=POP, 없으면 fallback). 옛 ScrollToTop 폐기. React Router BrowserRouter(비-데이터 라우터)라 내장 ScrollRestoration 불가 → 직접 구현.
+- **교훈**: **새 뒤로가기(←/돌아가기) 버튼은 반드시 `goBackOr(navigate,'/x')`.** `navigate('/x')` 직접 = PUSH라 복원 안 됨(재발 지점). 메뉴/완료(→dashboard) 진입은 그대로 navigate('/x')(top이 맞음). [[feedback_scroll_restoration_convention]].
+
+### 2026-07-04 — 모달 배경(백드롭) 클릭 닫힘 전면 제거
+- **현상**: 모달 바깥 흐린 배경을 클릭하면 모달이 닫혀 작업 손실(Harold 격분, 슈퍼관리자·일반 전 영역).
+- **fix**: 오버레이 div의 닫기 트리거(`onClick={onClose}`/`onMouseDown`/`e.target===e.currentTarget` 가드) 전수 제거 — X·취소·ESC만 유지. `ModalBase closeOnBackdrop` 기본값 true→false. frontend 약60 + company-frontend 2.
+- **판별 주의**: `<div inset-0 onClick>`이라도 **드롭다운 클릭캐처·DM 캔버스 클릭·이미지 라이트박스**는 정상 UX라 제외. 진짜 모달(가운데 정렬 + 내부 카드 stopPropagation)만 수정. `onClick={onClose}`는 X/취소 버튼에도 쓰여 오탐 — 오버레이 div에 달린 것만 골라야.
+
 ### 2026-07-02(5) — "글씨색" 반복 사고 뿌리 차단 (option 전역 !important + 흰 패널 컨트롤 명시색)
 - **반복 원인**: 네이티브 폼 컨트롤(option/input) 글자·배경색이 컴포넌트마다 제각각. 다크 select 옵션 흰글씨(6/29 전역 규칙)로 한 번 막았는데, 이번엔 `[&>option]:bg-slate-800`가 옵션 배경만 덮어써 전역 `select option{color:#1e293b}`와 글자색=배경색 충돌(여정 대상 드롭다운). 또 흰 패널(AlimtalkChannelPanel `bg-white`)의 input은 색 미지정이라 다크 모달(ModalShell `text-white`) 안에서 흰글씨(여정 정보알림 대체 LMS 제목).
 - **뿌리 fix (2단)**:

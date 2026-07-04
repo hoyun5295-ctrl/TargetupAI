@@ -36,6 +36,18 @@
 
 > **회전 룰:** 완료(★배포완료) 엔트리는 원문을 archive/TASKS_YYYY-MM.md로 이동 + INDEX 등재하고, 아래 "최근 완료 인덱스"에 1줄만 남긴다. 30KB 초과 = 회전 미이행 — 즉시 회전.
 
+### 🟢 2026-07-04 (2) — 모달/토스트 UX + 베스트 문안 재설계·진화 + 발송결과 집계 근본수정 + 스크롤 복원 + 직접발송 정리
+> **① 모달 배경클릭 닫힘 전면 제거 (★배포완료)**: 전 모달(frontend 약60 + company-frontend 2)에서 오버레이 백드롭 닫힘(onClick/onMouseDown/currentTarget) 제거 — X·취소·ESC만. `ModalBase closeOnBackdrop` 기본 false. 드롭다운/캔버스/이미지라이트박스 판별 제외, 잔존 0 재grep.
+> **② 크레딧·피드백 토스트 z-index (★배포완료)**: `credit:used` 토스트(ToastProvider) + 로컬 코너 토스트 13곳을 z-[10000]로 상향(모달 z-[9999] 위, 세션만료 99999만 최상위). 모달 뒤로 깔려 안 보이던 문제 해소.
+> **③ 베스트 문안 재설계 (코드완료·tsc0·vitest·미배포)**: 학습(ceo전용) 분리 → 슈퍼관리자 공용 '베스트 문안' 메뉴(`/admin/best-copy`). 휴리스틱 채굴(최근300·정보성 기본값→예약안내 오뽑) 폐기 → AI 전수 채굴(`best-copy-miner`, 전건 배치판정·is_ad 라벨 불신) + 직원 직접 입력(핸드폰 목업 좌액정/우기능). `gateSeedText` 단일 저장 게이트. 상세 [[project_2026_0704_best_copy_curation_evolution]].
+> **④ 학습 루프 진화 (코드완료·미배포·★DB 대기)**: 시드 성과 환류(best_copy_seed_usage) + 업종 승리공식 증류(best_copy_assets·`industry-formula`) + 사용자 스타일 갤러리(원문의 벽·jaccard 가드·`/api/ai/style-gallery`) + Tier1 반응신호(`ai_training_logs.click_count/conversion_count` — DM·이메일 클릭 환류 + 랭커/검색기 클릭 우선 정렬) + 회사 메모리→문안 생성 주입(composeCopyBrain) + 거부 제안 '피할것' 증류. SoT=specs/2026-07-04-best-copy-evolution-design.md.
+> **⑤ 발송결과 집계 근본수정 (코드완료·tsc0·테스트·미배포)**: 라인13 비토 게이트웨이(SMSQ_SEND_13) 요약 성공 0 = LIVE 대기전용 집계 + LOG(_YYYYMM) 미생성(제자리 status 갱신)이 겹친 구조 결함(상세는 raw라 정상). `classifyResultTables`(sms-table-split CT) — "LOG 짝 없는 LIVE는 결과까지 집계"(이중카운트 구조적 불가). `smsCampaignCountsSafe`+엑셀 집계 통일(요약·6h워커·정산환불·라이프사이클 5소비처 자동 정합). 실데이터 확정 후 수정. → LESSONS_BACKEND.
+> **⑥ 스크롤 복원 전역 통일 (코드완료·tsc0·미배포)**: BrowserRouter(비-데이터 라우터)라 직접 구현 — `ScrollManager`(POP=이전 위치 복원 / PUSH=top, 6/28 '메뉴=최상단' 유지) + 뒤로가기 버튼 14곳 `goBackOr(navigate, fallback)`(앱 히스토리 있으면 navigate(-1)=POP). 옛 `ScrollToTop` 폐기. [[feedback_scroll_restoration_convention]]. → LESSONS_FRONTEND.
+> **⑦ 직접발송 정리 (코드완료·tsc0·미배포)**: 브랜드링크(BrandLinkChips) 직접발송에서만 제거(유료 3곳=브랜드보이스·직접타겟발송·에디터 유지) + 스팸필터·AI다듬기 미가입 게이팅을 표준 `PlanUpgradeModal`로 통일(구식 SpamFilterLockModal·AiRefineLockedModal 삭제).
+> **잔여**: ③④⑤⑥⑦ tp-push + frontend `build:safe` / backend(③④⑤) `pm2 restart all` / **★서버 psql 2세트: best_copy_seed_usage·best_copy_assets(CREATE) + ai_training_logs.click_count·conversion_count(ADD)** — 코드 42P01/42703 폴백이라 순서 자유(SCHEMA.md 등재). 배포 후 실측(라인13 요약 성공 3·베스트문안 채굴→승인 E2E·스크롤 뒤로가기 복원·직접발송 게이팅 모달).
+
+---
+
 ### 🟢 2026-07-04 — 문안 퀄리티 엔진 + 비토 자체게이트웨이 E2E + 메모리 관제탑 정리
 > **① 문안 퀄리티 엔진(cold-start) — 코드완료·tsc0·vitest35/35 / 1차 배포됨·fix분 재배포 대기**: GPT 차별화 목표. 계획1 자기검수 루프(스팸 회피 — generateMessages 기존 재생성 루프에 접합, 중복0) / 계획2 업종 베스트 주입(탈색·베스트랭커·검색+조립기 + 슈퍼관리자 시드 큐레이션 모달 — sentinel tenant=**스키마 ALTER 0**) / 계획3 라벨 누수 차단(`:kakao` 평문화 + 라벨 전용 스윕=여정·브랜드, campaign-lifecycle 환불루프와 분리=이중환불0) / 별건 예측 '일반' 클릭 0.12 두 벌 정렬. ★검수 후 fix(재배포 필요): `final_source` CHECK 제약(ck_training_final_source) 위반→'manual' + 탈색에 개인화토큰·수신자이름(PII) 제거·저가치 제외 + 모달 페이징(5/page·선택유지·가독). 설계·계획=docs/superpowers/{specs/2026-07-04-copy-quality-engine-design.md, plans/2026-07-04-copy-quality-engine-plan1·2.md}. 상세 [[project_2026_0704_copy_quality_engine]]. 후속: 여정 SMS/LMS 라벨·성과 Tier2 귀속 엔진.
 > **② 비토 자체게이트웨이(라인13) SMSQ_SEND_13 E2E 완주 ★**: 앱→라인13 한글 SMS 정상(status_code 100→6). 픽업 0 원인=비토 Agent 스펙 외 `bill_id LIKE 'BITOTEST-%'` where_extra(한줄로 무결). 한줄로 코드 수정 0(자비스 게이트웨이+설정 수정). 상세 [[project_2026_0704_bito_gateway_pickup_rootcause]].
