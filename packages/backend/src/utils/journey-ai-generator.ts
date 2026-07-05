@@ -3,7 +3,8 @@
  *
  * 목적
  *   자연어 한 줄 → 완전 여정 패키지 자동 생성. 진정 AI Operator 본질 정합.
- *   Sonnet 4.6 + ai_company_memory + 시즌 컨텍스트 + 회사 톤 + 메모리 통합 (D209+ 전환 — 기존 ai.ts 흐름 정합).
+ *   Sonnet 4.6 + ai_company_memory + 회사 톤 + 메모리 통합 (D209+ 전환 — 기존 ai.ts 흐름 정합).
+ *   ★ 2026-07-05: 시즌 컨텍스트 주입 제거 — 여정은 상시 발송이라 계절 박제 금지(Harold 확정). 시간 불문 감성으로 통일.
  *
  * 영구 룰 정합
  *   - 여정 생성 model:'opus' (2026-06-01 가치 가격 — 핵심 작업 고급), 여정 다듬기는 'sonnet' 유지
@@ -87,31 +88,10 @@ export interface StepSpamRegenInput {
   matchedStopWords: string[];  // 스팸 판정에 걸린 단어 — 이 표현을 피해 재작성
 }
 
-// ════════════════════════════════════════════════════════════════════
-// 시즌 컨텍스트 매트릭스 (KST 월 기준)
-// ════════════════════════════════════════════════════════════════════
-
-const SEASON_BY_MONTH: Record<number, { season: string; keywords: string[] }> = {
-  1:  { season: '겨울', keywords: ['새해', '새출발', '신년 계획', '추위', '연말정산'] },
-  2:  { season: '겨울 끝', keywords: ['설날', '발렌타인데이', '입학 준비', '봄맞이'] },
-  3:  { season: '봄', keywords: ['새 학기', '봄꽃', '환절기', '새로운 시작', '화이트데이'] },
-  4:  { season: '봄', keywords: ['벚꽃', '봄나들이', '식목일', '야외활동'] },
-  5:  { season: '봄 끝', keywords: ['가정의달', '어린이날', '어버이날', '스승의날', '부부의날', '봄 마무리'] },
-  6:  { season: '초여름', keywords: ['호국보훈의달', '현충일', '여름맞이', '장마 준비'] },
-  7:  { season: '여름', keywords: ['장마', '바캉스', '휴가', '제헌절', '여름 휴가'] },
-  8:  { season: '여름', keywords: ['휴가 절정', '광복절', '여름 마무리', '개학 준비'] },
-  9:  { season: '가을', keywords: ['추석', '한가위', '환절기', '가을맞이'] },
-  10: { season: '가을', keywords: ['단풍', '국군의날', '개천절', '한글날', '가을 정취'] },
-  11: { season: '늦가을', keywords: ['빼빼로데이', '수능', '김장', '겨울맞이'] },
-  12: { season: '겨울', keywords: ['크리스마스', '연말', '송년', '겨울 휴가', '새해 준비'] },
-};
-
-function getSeasonContext(): { month: number; season: string; keywords: string[] } {
-  const now = new Date(Date.now() + 9 * 60 * 60 * 1000);
-  const month = now.getUTCMonth() + 1;
-  const ctx = SEASON_BY_MONTH[month] || { season: '계절', keywords: [] };
-  return { month, season: ctx.season, keywords: ctx.keywords };
-}
+// ★ 2026-07-05 (Harold 확정): 여정은 상시 자동 발송이라 생성 시점 계절이 문안에 박제되면
+//   이후 달에 어긋난 문자가 나간다(7월 생성 → 8월에도 "장마" 발송). 여정 생성·재생성·날짜축
+//   전 경로에서 시즌 컨텍스트 주입을 제거하고 시간 불문(evergreen) 감성으로 통일.
+//   (캠페인·자동마케팅·DM·인앱은 즉시 발송이라 season-context CT 주입 유지 — 여정만 제외.)
 
 // ════════════════════════════════════════════════════════════════════
 // 회사 컨텍스트
@@ -173,7 +153,6 @@ export async function generateJourneyPackage(input: JourneyAIGenerateInput): Pro
 
   const ctx = await loadCompanyContext(input.companyId);
   const memoryContext = await buildMemoryPromptContext(input.companyId, 30).catch(() => '');
-  const season = getSeasonContext();
   // ★ D210+ Phase 2 (Harold 명시 2026-05-23): 회사 customer DB 실측 프로필 (CT-58).
   //   AI 시스템 프롬프트 안 안전/분기/차단 3단계 분류 동적 주입.
   const dataProfile = await getCompanyDataProfile(input.companyId).catch(() => null);
@@ -188,10 +167,13 @@ export async function generateJourneyPackage(input: JourneyAIGenerateInput): Pro
 - 톤앤매너: ${ctx.brandTone || '친근함'}
 - 업종: ${ctx.businessType || '(미설정)'}
 
-[현재 시점 컨텍스트 — KST]
-- 현재 월: ${season.month}월 (${season.season})
-- 시즌 키워드: ${season.keywords.join(', ')}
-- 이 시즌의 자연스러운 단어/감성/이벤트를 메시지에 녹여내세요.
+[★ ★ ★ 상시 발송 원칙 — 계절 언급 절대 금지 (Harold 확정 2026-07-05) ★ ★ ★]
+이 여정은 한 번 만들면 연중 내내 자동 발송됩니다 (신규 가입·구매·휴면 등 트리거가 발생할 때마다).
+지금 만든 문안이 8월에도, 12월에도 그대로 나갑니다.
+✗ 계절·월·날씨·명절·시기 언급 절대 금지: "장마", "여름", "벚꽃", "봄", "크리스마스", "7월", "요즘 날씨", "환절기", "연말" 등 전부 금지
+✗ "이 계절", "계절이 바뀌는 요즘" 같은 우회 표현도 금지
+✓ 대신 시간 불문 감성으로 풍성하게: 첫 인연의 설렘 / 진심 어린 감사 / 일상 공감 / 기다림과 반가움 / 브랜드 따뜻함
+   (단, 사용자 목표문에 계절·명절·특정 시기가 명시된 경우에만 그 시기를 반영)
 
 ${getKoreanCalendar()}
 ⚠️ 날짜에 요일을 표기할 때(예: "7월 30일(목)") 반드시 위 달력의 요일을 그대로 사용하세요. 직접 요일을 계산하지 마세요. 위 달력에 없는 월의 날짜는 요일을 괄호로 표기하지 마세요 (날짜만 표기).
@@ -223,9 +205,9 @@ ${memoryContext}
 3. delay_hours: 0(즉시) / 24(1일) / 72(3일) / 168(7일) / 336(14일) / 720(30일) 자연 단위
 4. channel: 'lms' default (광고 표기 + 무료거부 자동 합성 시 90바이트 SMS 한계 초과)
 5. isAd: 마케팅성은 true default (정보 안내성만 false)
-6. subject (제목): LMS/MMS 채널 시 필수 — 한 줄 20자 안 / 본문 핵심을 단순 요약 / 호기심 유발 / 시즌감
+6. subject (제목): LMS/MMS 채널 시 필수 — 한 줄 20자 안 / 본문 핵심을 단순 요약 / 호기심 유발 / 따뜻한 감성 (계절 단어 금지)
    ★ Harold 명시 영구 룰: 제목은 변수(%고객명% / %이름% 등) + Liquid 문법({{ }} / {% %}) 절대 사용 금지. 모든 수신자에게 동일 단순 텍스트만 사용 (가독성 + 통신사 표시 영역 좁음 + 개인화는 본문에서).
-   좋은 예시: "곧 다가올 생일을 미리 축하해요" / "VIP만 받는 봄 안내" / "오랜만에 안부 전해요" / "이번 달 감사 인사" / "봄나들이 시즌 새 소식"
+   좋은 예시: "곧 다가올 생일을 미리 축하해요" / "VIP만 받는 첫 안내" / "오랜만에 안부 전해요" / "함께하게 되어 반가워요" / "감사한 마음을 전해요"
    나쁜 예시: "%고객명%님, 곧 생일이에요" (변수 X) / "{{ customer.name | default: '고객' }}님 안내" (Liquid X)
    SMS 채널은 빈 문자열 ""로 응답 (제목 없음).
 7. allow_reentry / reentry_cooldown_days: 시리즈에 맞춰 자동 결정
@@ -248,10 +230,10 @@ ${memoryContext}
    - "단골" → "오랜 시간 함께해주신" / "꾸준한 관심을 보내주신" / "변함없이 찾아주시는" / "한결같은 신뢰를 보내주신"
    - "단골 고객님" → "오래 함께해주신 고객님" / "소중한 고객님" / "꾸준히 사랑해주시는 고객님"
 ✓ 브랜드 톤 본질: 격조 / 정중함 / 진심 어린 감사 / 절제된 감성 — 친근한 대화체 X, 정중한 안부 O
-✓ 안내문 / 인사 / 감성 텍스트 / 시즌 단어 / 회사 톤 = 매우 풍성하게 직접 작성 (마케팅 가치 본질)
+✓ 안내문 / 인사 / 감성 텍스트 / 회사 톤 = 매우 풍성하게 직접 작성 (마케팅 가치 본질 — 계절 단어 없이)
    - 단순 "안녕하세요 고객님" 수준 X = 5단 매트릭스 자연 전개 의무 (★ D210+ Phase 2-fix6 Harold 명시 강화):
-     1) 공감 도입 (1~2 문장) = 시즌 + 안부 + %고객명%님 자연 호명 (메신저 보내듯 친밀한 톤)
-     2) 시즌 디테일 (2~3 문장) = 현재 시즌 키워드 + 감성 묘사 + 사용자 일상 공감 ("벚꽃 흩날리는 4월", "쌀쌀한 가을 저녁" 등 구체 묘사)
+     1) 공감 도입 (1~2 문장) = 안부 + %고객명%님 자연 호명 (메신저 보내듯 친밀한 톤)
+     2) 감성 디테일 (2~3 문장) = 시간 불문 감성 묘사 + 사용자 일상 공감 ("첫 인연을 맺어주신 반가움", "늘 곁에 두고 싶은 브랜드가 되고 싶은 마음" 등 구체 묘사 — 계절·날씨·월 언급 금지)
      3) 가치 제안 (2~3 문장) = [혜택 안내 — 직접 수정해주세요] placeholder + 왜 이 안내가 특별한지 스토리 (기존 고객 / VIP / 오랜 관심 등 맥락)
      4) CTA 안내 (1~2 문장) = 구체 행동 유도 + URL 또는 매장 방문 자연 안내 ("아래 링크에서 확인하세요" / "%최근구매매장%에서 바로 사용 가능해요")
      5) 안부 마무리 (1~2 문장) = 진심 어린 감사 + 기대감 + 브랜드 따뜻함 ("늘 함께해주셔서 감사해요", "오랜만의 인사가 반가우셨길")
@@ -274,15 +256,15 @@ ${memoryContext}
    - 변수 {{ customer.X }} / %고객명% → 자리 그대로 보존
 ✓ 자유 영역 (적극 활용 — 카피라이터 감각으로):
    - 수식어 / 감성 표현 ("기다리시던" / "소중한" / "정성스럽게" / "오랜 시간 함께해주신")
-   - 시즌 묘사 (현재 시즌 키워드 + 자연스러운 1~2 줄 묘사)
+   - 감성 묘사 (시간 불문 — 인연·감사·설렘·일상 공감의 자연스러운 1~2 줄 묘사, 계절 단어 금지)
    - 1:1 대화감 (단체 안내 X, 브랜드가 나한테 직접 보낸 느낌)
    - 문장 리듬 (짧은 문장 + 긴 문장 교차)
    - 호기심 갭 (정보 일부 열고 나머지 궁금증 유발 — 사용자가 URL 클릭하고 싶은 느낌)
 
 [★ ★ ★ 뻔한 표현 금지 (D209+ Harold 명시 강화 — 옛 ai.ts 정합 통합) ★ ★ ★]
-✗ "안녕하세요 고객님" — 금지 (시즌감 / 질문 / 숫자로 시작)
+✗ "안녕하세요 고객님" — 금지 (감성 도입 / 질문 / 숫자로 시작 — 단 계절 단어는 금지)
 ✗ "특별한 혜택 / 소식 / 선물" — 금지 (구체 혜택 placeholder 사용)
-✗ "준비했어요 / 준비했습니다" — 금지 ("지금 ~할 수 있어요" 또는 시즌 도입부로)
+✗ "준비했어요 / 준비했습니다" — 금지 ("지금 ~할 수 있어요" 또는 감성 도입부로)
 ✗ "소중한 고객님" — 금지 (%고객명% 또는 {{ customer.name | default: '고객' }} 직접 활용)
 ✗ "다양한 혜택" — 금지 (핵심 1가지 구체 placeholder)
 ✗ "많은 관심 부탁드립니다" — 금지 (구체 CTA로)
@@ -334,21 +316,21 @@ ${dataProfilePrompt}
 예시 1 — 이탈 위험 분기:
 {{ customer.name | default: '고객' }}님,
 {% if customer.churn_risk > 0.7 %}
-오랜만에 인사드려요. 곧 봄을 맞아 [회복 안내 — 직접 작성해주세요] 준비했어요.
+오랜만에 인사드려요. 다시 뵙고 싶은 마음에 [회복 안내 — 직접 작성해주세요] 준비했어요.
 {% elsif customer.purchase_likelihood > 0.6 %}
 {{ customer.name | default: '고객' }}님께 어울리는 새 상품 [추천 안내 — 직접 작성해주세요]
 {% else %}
-이번 봄 새로운 소식 전해드려요.
+새로운 소식 전해드려요.
 {% endif %}
 
 예시 2 — 클릭 가능성 + 등급 통합:
 {{ customer.name | default: '고객' }}님,
 {% if customer.click_score > 0.4 and customer.grade == 'VIP' %}
-VIP 회원님께 먼저 안내드리는 봄 소식.
+VIP 회원님께 가장 먼저 안내드리는 소식.
 {% elsif customer.churn_risk > 0.6 %}
 오랜만에 안부 전해드려요.
 {% else %}
-봄 새 소식 안내.
+새 소식 안내.
 {% endif %}
 
 [Predictive 점수 분기 본질 룰]
@@ -370,25 +352,24 @@ VIP 회원님께 먼저 안내드리는 봄 소식.
 ✓ SMS 호환 특수문자 화이트리스트 (D209+ 강화 — EUC-KR 통신사 검증 정합): ★ ☆ ♥ ♡ ◆ ◇ ■ □ ▲ △ ▶ ◀ ● ○ ◎ ♨ ※ ☞ ☎ ① ② ③ ④ ⑤ ↑ ↓ ← → ㈜ ㎝ ㎏ ㎡
 ✓ "→" 단어는 자세히 안내 화살표로 허용
 
-[좋은 메시지 예시 — 5월 생일 D-7 사전 안내 (풍성 본문 + 단순 제목)]
+[좋은 메시지 예시 — 생일 D-7 사전 안내 (풍성 본문 + 단순 제목 · 계절 언급 없음)]
 제목: "곧 다가올 생일을 미리 축하해요"
 
 본문:
 %고객명%님, 안녕하세요.
 
-봄의 끝자락, 5월의 따뜻한 햇살이 가득한 이 계절에
-곧 다가올 %고객명%님의 생일을 미리 떠올려봤어요.
+달력을 넘기다 곧 다가올 %고객명%님의 생일을 미리 떠올려봤어요.
 
-가정의 달 5월은 사랑하는 사람들과 함께하는 특별한 시간이죠.
 한 해 한 살 더 나이를 먹는다는 건
 그만큼 더 많은 추억과 이야기가 쌓인다는 의미이기도 해요.
+일 년 중 단 하루, %고객명%님이 주인공인 날이니까요.
 
 %고객명%님의 이번 생일은
 조금 더 특별하게 기억되길 바라는 마음으로 작은 선물을 준비했어요.
 
 [혜택 안내 — 직접 수정해주세요]
 
-미리 축하드려요. 생일 당일까지 즐거운 봄날 되시길.
+미리 축하드려요. 생일 당일까지 설레는 하루하루 되시길.
 
 자세히 → [URL 입력]
 
@@ -400,12 +381,12 @@ VIP 회원님께 먼저 안내드리는 봄 소식.
 
 {% if customer.grade == 'VIP' %}
 저희 매장의 VIP 회원님이신 {{ customer.name | default: '고객' }}님께
-먼저 전하고 싶은 봄 소식이 있어 인사드려요.
+가장 먼저 전하고 싶은 소식이 있어 인사드려요.
 
 오랜 시간 변함없이 찾아주시는 발걸음 하나하나가
 저희에게는 가장 큰 힘이 되고 있어요.
 
-VIP 회원님만을 위해 준비한 이번 봄 특별 안내,
+VIP 회원님만을 위해 마련한 이번 특별 안내,
 가장 먼저 받아보실 수 있도록 정성껏 준비했답니다.
 {% elsif customer.purchase_count > 10 %}
 {{ customer.name | default: '고객' }}님과 함께한 {{ customer.purchase_count }}번의 만남,
@@ -415,14 +396,14 @@ VIP 회원님만을 위해 준비한 이번 봄 특별 안내,
 {{ customer.name | default: '고객' }}님 같은 고객님이 계셔서
 저희가 더 좋은 제품과 서비스를 고민할 수 있어요.
 
-봄을 맞아 오래 함께해주신 분들께만 전해드리는 특별한 인사 준비했어요.
+오래 함께해주신 분들께만 전해드리는 특별한 인사 준비했어요.
 {% else %}
-봄꽃이 한창인 요즘, 새로운 소식 전해드리고 싶어
+새로운 소식 전해드리고 싶어
 {{ customer.name | default: '고객' }}님께 인사드려요.
 
-따뜻해진 날씨처럼 마음도 한결 가벼워지는 계절이에요.
-이번 봄, 저희가 준비한 새로운 이야기에
-%고객명%님의 일상에도 작은 즐거움을 더해드릴게요.
+바쁜 하루하루 속에서도 잠시 미소 지을 수 있는 순간이 되길 바라며,
+저희가 준비한 새로운 이야기로
+%고객명%님의 일상에 작은 즐거움을 더해드릴게요.
 {% endif %}
 
 [혜택 안내 — 직접 수정해주세요]
@@ -438,7 +419,7 @@ VIP 회원님만을 위해 준비한 이번 봄 특별 안내,
 오늘 저희 매장의 새 가족이 되어주셔서
 진심으로 감사한 마음을 먼저 전해요.
 
-봄꽃이 한창인 이 계절, 첫 인연을 맺게 된 {{ customer.name | default: '고객' }}님께
+첫 인연을 맺게 된 {{ customer.name | default: '고객' }}님께
 저희가 가장 정성껏 준비한 첫 인사를 드리고 싶었어요.
 
 처음 만나는 분께만 드리는 작은 선물 한 가지,
@@ -463,9 +444,9 @@ VIP 회원님만을 위해 준비한 이번 봄 특별 안내,
 
 [혜택 안내 — 직접 수정해주세요]
 {% else %}
-계절이 바뀌어가는 요즘, 잘 지내고 계신지 안부 전해드려요.
+문득 {{ customer.name | default: '고객' }}님 생각이 나 잘 지내고 계신지 안부 전해드려요.
 
-새로운 봄 소식과 함께 {{ customer.name | default: '고객' }}님께
+오랜만에 전하는 소식과 함께 {{ customer.name | default: '고객' }}님께
 어울리는 작은 안내 드리고 싶었어요.
 
 [혜택 안내 — 직접 수정해주세요]
@@ -504,9 +485,9 @@ VIP 회원님만을 위해 준비한 이번 봄 특별 안내,
 
   let userMessage: string;
   if (input.objective && input.objective.trim().length >= 3) {
-    userMessage = `여정 목표: ${input.objective.trim()}\n\n위 회사 컨텍스트 + 시즌 + 메모리를 종합하여 완전한 여정 패키지 JSON을 응답하세요. 시즌 단어를 자연스럽게 녹여내고, 혜택 영역은 placeholder로 처리하세요.`;
+    userMessage = `여정 목표: ${input.objective.trim()}\n\n위 회사 컨텍스트 + 메모리를 종합하여 완전한 여정 패키지 JSON을 응답하세요. 계절·월·날씨 언급 없이 시간 불문 감성으로 풍성하게 작성하고, 혜택 영역은 placeholder로 처리하세요.`;
   } else {
-    userMessage = `7 표준 시리즈 단축 진입: ${input.templateHint}\n\n위 회사 컨텍스트 + 시즌 + 메모리에 맞춰 ${input.templateHint} 시리즈의 표준 흐름을 풍성하게 작성한 JSON 응답하세요.`;
+    userMessage = `7 표준 시리즈 단축 진입: ${input.templateHint}\n\n위 회사 컨텍스트 + 메모리에 맞춰 ${input.templateHint} 시리즈의 표준 흐름을 계절 언급 없이 풍성하게 작성한 JSON 응답하세요.`;
   }
 
   // ★ D225+ Brand Voice Learning — 회사별 가이드라인 자동 주입 (회사 등록 미존재 시 옛 흐름 그대로)
@@ -602,7 +583,6 @@ export async function refineStepMessage(input: StepRefineInput): Promise<{ candi
 
   const ctx = await loadCompanyContext(input.companyId);
   const memoryContext = await buildMemoryPromptContext(input.companyId, 20).catch(() => '');
-  const season = getSeasonContext();
 
   const maxBytes = input.channel === 'sms' ? 90 : 2000;
 
@@ -615,9 +595,8 @@ export async function refineStepMessage(input: StepRefineInput): Promise<{ candi
 - 톤앤매너: ${ctx.brandTone || '친근함'}
 - 업종: ${ctx.businessType || '(미설정)'}
 
-[시즌 컨텍스트]
-- 현재 ${season.month}월 (${season.season})
-- 시즌 키워드: ${season.keywords.join(', ')}
+[상시 발송 원칙 — 계절 언급 금지]
+이 문안은 여정에서 연중 상시 자동 발송됩니다. 계절·월·날씨·명절 언급 절대 금지 (원본에 있던 계절 표현도 시간 불문 감성으로 교체).
 
 ${memoryContext}
 
@@ -625,7 +604,7 @@ ${memoryContext}
 
 [다듬기 원칙]
 ✓ 원본의 의미 / 변수 / 혜택 placeholder([혜택 안내 — 직접 수정해주세요]) / URL placeholder 모두 보존
-✓ 안내문 / 인사 / 감성 텍스트는 시즌과 회사 톤에 맞춰 풍성하게 정련
+✓ 안내문 / 인사 / 감성 텍스트는 회사 톤에 맞춰 풍성하게 정련 (계절 단어 없이)
 ✗ 구체 혜택 (% / 원 / 무료 / 쿠폰) 임의 생성 금지 — placeholder 유지
 ✗ (광고) / 무료수신거부 080 직접 작성 X
 ✗ 날씨 단순 단어 직접 작성 X — {{ weather.summary }} / {{ weather.store.summary }} Liquid 변수 의무 (D209+ Connected Content 정합)
@@ -634,10 +613,10 @@ ${memoryContext}
 ✓ ★ D209+ 강화 (옛 ai.ts 정합 통합):
   - 뻔한 표현 금지: "안녕하세요 고객님" / "특별한 혜택" / "준비했어요" / "소중한 고객님" / "다양한 혜택" / "많은 관심 부탁드립니다" / 느낌표 폭탄 / 과장 형용사 ("초특가" / "역대급" / "미친" / "대박")
   - SMS 호환 특수문자 화이트리스트 (EUC-KR 통신사 검증 정합): ★ ☆ ♥ ♡ ◆ ◇ ■ □ ▲ △ ▶ ◀ ● ○ ◎ ♨ ※ ☞ ☎ ① ② ③ ④ ⑤ ↑ ↓ ← → ㈜ ㎝ ㎏ ㎡
-  - 자유 영역 (수식어 / 감성 / 시즌감 / 1:1 대화감 / 호기심 갭) 적극 활용, 사실 영역 (숫자 / 장소 / 약속 / 혜택) 절대 보존
+  - 자유 영역 (수식어 / 감성 / 1:1 대화감 / 호기심 갭) 적극 활용, 사실 영역 (숫자 / 장소 / 약속 / 혜택) 절대 보존
 
 [3 후보 톤 매트릭스]
-1. 감성적: 따뜻함 / 시즌감 강조 / 호기심 유발 / 정서적 공감
+1. 감성적: 따뜻함 / 정서적 공감 / 호기심 유발 / 진심 어린 안부 (계절 단어 없이)
 2. 실용적: 명확 / 정보 중심 / CTA 강조 / 구체적 안내
 3. 캐주얼: 친근 / 가벼움 / 일상적 / 부담 X 톤
 
@@ -705,7 +684,6 @@ export async function generateAnchorStepMessage(input: {
 }): Promise<{ subject: string; message: string }> {
   const ctx = await loadCompanyContext(input.companyId);
   const memoryContext = await buildMemoryPromptContext(input.companyId, 20).catch(() => '');
-  const season = getSeasonContext();
   const offset = Math.max(0, Math.floor(Number(input.offsetDays) || 0));
   const timing = offset === 0 ? '기준일 당일(D-0, 마지막 안내)' : `기준일 ${offset}일 전(D-${offset})`;
 
@@ -718,8 +696,9 @@ export async function generateAnchorStepMessage(input: {
 - 톤앤매너: ${ctx.brandTone || '친근함'}
 - 업종: ${ctx.businessType || '(미설정)'}
 
-[시즌 컨텍스트]
-- 현재 ${season.month}월 (${season.season}) · 키워드: ${season.keywords.join(', ')}
+[계절 언급 원칙]
+발송일은 회사가 지정한 기준 날짜에 따라 반복될 수 있습니다. 오늘(생성 시점)의 계절·월·날씨를 언급하지 마세요.
+여정 목표문에 계절·명절·특정 시기가 명시된 경우(예: "추석 감사 인사")에만 그 시기를 반영합니다.
 
 ${memoryContext}
 
@@ -727,7 +706,7 @@ ${memoryContext}
 
 [작성 원칙]
 ✓ %고객명% 변수로 시작 (예: "%고객명%님, ...")
-✓ 안내문 / 인사 / 감성 텍스트 / 시즌감 / 긴박감(D-N) = 풍성하게 직접 작성
+✓ 안내문 / 인사 / 감성 텍스트 / 긴박감(D-N) = 풍성하게 직접 작성 (계절 단어는 목표문에 명시된 경우만)
 ✓ 제목 = 본문 요약 한 줄 (40자 안, LMS 필수)
 ✗ 구체 혜택(% / 원 / 무료 / 쿠폰 / 사은품 / 적립 / 할인 / 무료배송) 임의 생성 절대 금지 → 정확히 \`[혜택 안내 — 직접 수정해주세요]\` placeholder 1개 사용
 ✗ 상품명 / 일시 / 숫자 / 연락처 임의 작성 X (모르면 placeholder)
