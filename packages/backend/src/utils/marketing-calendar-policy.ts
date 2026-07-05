@@ -56,13 +56,15 @@ export function buildCalendarSystemPrompt(): string {
 }`;
 }
 
-export function buildCalendarUserMessage(input: {
+export interface CalendarPromptInput {
   businessType: string | null;
   brandName: string | null;
   brandTone: string | null;
   customerCount: number;
   currentMonth: number;
-}): string {
+}
+
+export function buildCalendarUserMessage(input: CalendarPromptInput): string {
   return `## 회사 정보
 - 업종: ${input.businessType || '(미설정)'}
 - 브랜드: ${input.brandName || '(미설정)'}
@@ -71,4 +73,26 @@ export function buildCalendarUserMessage(input: {
 - 현재 월: ${input.currentMonth}월
 
 이 회사의 1년치 시즌 캠페인 캘린더를 JSON으로 설계하세요.`;
+}
+
+/** 정제(sanitize) 후 비어 있는 달(1~12) 목록 — 혜택 필터 등으로 걸러진 달 보정용. */
+export function missingCalendarMonths(entries: CalendarEntry[]): number[] {
+  const have = new Set(entries.map((e) => e.month));
+  const out: number[] = [];
+  for (let m = 1; m <= 12; m++) if (!have.has(m)) out.push(m);
+  return out;
+}
+
+/**
+ * 부족 달만 다시 설계하는 보정 요청 메시지 (2026-07-05).
+ * 1차 응답이 혜택 필터에 걸러지거나 달을 빼먹으면 그 달만 재요청 — 12개월 결손 캘린더 방지.
+ * 혜택 금지를 재강조해 같은 이유로 또 걸러지는 것을 줄인다.
+ */
+export function buildCalendarRepairMessage(input: CalendarPromptInput, missingMonths: number[]): string {
+  return `${buildCalendarUserMessage(input)}
+
+## 보정 요청
+이전 설계에서 다음 달이 비어 있습니다: ${missingMonths.join(', ')}월.
+이 달들만 다시 설계하세요. 할인율·금액·쿠폰·무료 같은 구체 혜택 표현은 절대 넣지 마세요(혜택은 담당자가 직접 입력).
+출력은 동일한 JSON 형식으로, entries에는 위 달만 포함하세요.`;
 }

@@ -60,9 +60,9 @@ describe('computeNextOccurrence — 다음 발송 희망 시각(KST)', () => {
     const { computeNextOccurrence } = await import('./autosend-policy');
     // now = KST 2026-07-02 12:00 (UTC 03:00)
     const now = new Date('2026-07-02T03:00:00Z');
-    const later = computeNextOccurrence('daily', '14:00', null, null, now);
+    const later = computeNextOccurrence('daily', '14:00', null, null, null, now);
     expect(later.toISOString()).toBe('2026-07-02T05:00:00.000Z'); // KST 14:00 당일
-    const passed = computeNextOccurrence('daily', '09:00', null, null, now);
+    const passed = computeNextOccurrence('daily', '09:00', null, null, null, now);
     expect(passed.toISOString()).toBe('2026-07-03T00:00:00.000Z'); // KST 09:00 다음날
   });
 
@@ -70,9 +70,9 @@ describe('computeNextOccurrence — 다음 발송 희망 시각(KST)', () => {
     const { computeNextOccurrence } = await import('./autosend-policy');
     // 2026-07-02 = 목요일(4). now = KST 12:00.
     const now = new Date('2026-07-02T03:00:00Z');
-    const thuLater = computeNextOccurrence('weekly', '14:00', 4, null, now);
+    const thuLater = computeNextOccurrence('weekly', '14:00', 4, null, null, now);
     expect(thuLater.toISOString()).toBe('2026-07-02T05:00:00.000Z'); // 같은 목요일 14:00
-    const thuPassed = computeNextOccurrence('weekly', '09:00', 4, null, now);
+    const thuPassed = computeNextOccurrence('weekly', '09:00', 4, null, null, now);
     expect(thuPassed.toISOString()).toBe('2026-07-09T00:00:00.000Z'); // 다음 주 목요일 09:00
   });
 
@@ -80,8 +80,33 @@ describe('computeNextOccurrence — 다음 발송 희망 시각(KST)', () => {
     const { computeNextOccurrence } = await import('./autosend-policy');
     // now = KST 2026-06-15 12:00 → 6월 31일 없음 → 6월 30일로 클램프
     const now = new Date('2026-06-15T03:00:00Z');
-    const d = computeNextOccurrence('monthly', '10:00', null, 31, now);
+    const d = computeNextOccurrence('monthly', '10:00', null, 31, null, now);
     expect(d.toISOString()).toBe('2026-06-30T01:00:00.000Z'); // KST 6/30 10:00
+  });
+
+  it('yearly: 지정 월·일 연 1회 — 올해 지났으면 내년 (2026-07-05 캘린더 시즌)', async () => {
+    const { computeNextOccurrence } = await import('./autosend-policy');
+    // now = KST 2026-07-05 12:00
+    const now = new Date('2026-07-05T03:00:00Z');
+    // 3월 14일은 올해 지남 → 내년 3월 14일
+    const passed = computeNextOccurrence('yearly', '10:00', null, 14, 3, now);
+    expect(passed.toISOString()).toBe('2027-03-14T01:00:00.000Z');
+    // 9월 10일은 아직 → 올해 9월 10일
+    const upcoming = computeNextOccurrence('yearly', '10:00', null, 10, 9, now);
+    expect(upcoming.toISOString()).toBe('2026-09-10T01:00:00.000Z');
+    // 같은 달 미래 일자 → 올해 그 날
+    const sameMonth = computeNextOccurrence('yearly', '10:00', null, 20, 7, now);
+    expect(sameMonth.toISOString()).toBe('2026-07-20T01:00:00.000Z');
+    // 같은 달 지난 일자 → 내년
+    const sameMonthPassed = computeNextOccurrence('yearly', '10:00', null, 1, 7, now);
+    expect(sameMonthPassed.toISOString()).toBe('2027-07-01T01:00:00.000Z');
+  });
+
+  it('yearly: 2월 30일 같은 없는 날짜는 그 달 말일로 클램프', async () => {
+    const { computeNextOccurrence } = await import('./autosend-policy');
+    const now = new Date('2026-07-05T03:00:00Z');
+    const feb = computeNextOccurrence('yearly', '10:00', null, 30, 2, now);
+    expect(feb.toISOString()).toBe('2027-02-28T01:00:00.000Z'); // 2027년 2월 말일
   });
 });
 
@@ -90,7 +115,7 @@ describe('computeNextGenerationRun — 생성 시각 = 발송 희망 시각 − 
     const { computeNextGenerationRun } = await import('./autosend-policy');
     // now = KST 11:00, 희망 14:00 daily, lead 120분 → 생성 KST 12:00 / 발송 KST 14:00
     const now = new Date('2026-07-02T02:00:00Z');
-    const r = computeNextGenerationRun('daily', '14:00', null, null, 120, now);
+    const r = computeNextGenerationRun('daily', '14:00', null, null, null, 120, now);
     expect(r.sendAt.toISOString()).toBe('2026-07-02T05:00:00.000Z');
     expect(r.nextRunAt.toISOString()).toBe('2026-07-02T03:00:00.000Z');
   });
@@ -99,9 +124,18 @@ describe('computeNextGenerationRun — 생성 시각 = 발송 희망 시각 − 
     const { computeNextGenerationRun } = await import('./autosend-policy');
     // now = KST 12:00 정각(= 생성 시각) — 같은 주기 재선정 금지 → 다음날 14:00 / 생성 다음날 12:00
     const now = new Date('2026-07-02T03:00:00Z');
-    const r = computeNextGenerationRun('daily', '14:00', null, null, 120, now);
+    const r = computeNextGenerationRun('daily', '14:00', null, null, null, 120, now);
     expect(r.sendAt.toISOString()).toBe('2026-07-03T05:00:00.000Z');
     expect(r.nextRunAt.toISOString()).toBe('2026-07-03T03:00:00.000Z');
+  });
+
+  it('yearly: 생성 = 대상 월·일 발송 − lead (2026-07-05)', async () => {
+    const { computeNextGenerationRun } = await import('./autosend-policy');
+    // now = KST 2026-07-05 12:00, 대상 = 9월 10일 10:00, lead 120분
+    const now = new Date('2026-07-05T03:00:00Z');
+    const r = computeNextGenerationRun('yearly', '10:00', null, 10, 9, 120, now);
+    expect(r.sendAt.toISOString()).toBe('2026-09-10T01:00:00.000Z');   // KST 9/10 10:00
+    expect(r.nextRunAt.toISOString()).toBe('2026-09-09T23:00:00.000Z'); // KST 9/10 08:00
   });
 });
 

@@ -64,7 +64,8 @@ import { buildSeasonPromptBlock, getSeasonContext } from './season-context';
 // 타입
 // ════════════════════════════════════════════════════════════════════
 
-export type OperatorSchedule = 'daily' | 'weekly' | 'monthly';
+// ★ 2026-07-05: 'yearly' 신설 — 마케팅 캘린더 시즌 캠페인(연 1회, schedule_month 월 + schedule_day_of_month 일).
+export type OperatorSchedule = 'daily' | 'weekly' | 'monthly' | 'yearly';
 export type OperatorStatus = 'active' | 'paused' | 'paused_no_credit' | 'archived';
 export type ProposalStatus = 'pending' | 'approved' | 'rejected' | 'auto_executed' | 'expired' | 'admin_review' | 'admin_stopped' | 'scheduled' | 'sending' | 'sent' | 'skipped';
 
@@ -76,7 +77,8 @@ export interface CreateOperatorInput {
   schedule?: OperatorSchedule;
   scheduleTime?: string;  // HH:mm KST, default 09:00
   scheduleDayOfWeek?: number | null;   // 0(일)~6(토) — weekly 전용 (미지정 시 생성일 요일)
-  scheduleDayOfMonth?: number | null;  // 1~31 — monthly 전용 (말일 초과 시 그 달 말일로 클램프)
+  scheduleDayOfMonth?: number | null;  // 1~31 — monthly·yearly 전용 (말일 초과 시 그 달 말일로 클램프)
+  scheduleMonth?: number | null;       // 1~12 — yearly 전용 대상 월 (2026-07-05)
   // ★ 2026-06-26: 생성 시에도 저장(기존 누락 → #1 채널·#3 담당자·#4 혜택·예산 드롭 사고 fix)
   channel?: string;                    // 'sms' | 'lms' | 'mms' — 발송 채널 (default 'lms')
   benefitContent?: string | null;      // 관리자 직접 입력 혜택 (placeholder 치환)
@@ -107,7 +109,8 @@ export interface ContinuousOperator {
   schedule: OperatorSchedule;
   scheduleTime: string;
   scheduleDayOfWeek: number | null;   // 0(일)~6(토) — weekly 전용
-  scheduleDayOfMonth: number | null;  // 1~31 — monthly 전용
+  scheduleDayOfMonth: number | null;  // 1~31 — monthly·yearly 전용
+  scheduleMonth: number | null;       // 1~12 — yearly 전용 대상 월 (2026-07-05)
   status: OperatorStatus;
   lastRunAt: Date | null;
   nextRunAt: Date | null;
@@ -176,16 +179,22 @@ export async function createOperator(input: CreateOperatorInput): Promise<Contin
   if (input.objective.trim().length < 5) {
     throw new Error('objective는 5자 이상 입력해주세요.');
   }
-  const schedule: OperatorSchedule = ['daily', 'weekly', 'monthly'].includes(input.schedule || '') ? input.schedule! : 'daily';
+  const schedule: OperatorSchedule = ['daily', 'weekly', 'monthly', 'yearly'].includes(input.schedule || '') ? input.schedule! : 'daily';
   const scheduleTime = input.scheduleTime || '09:00';
   const scheduleDayOfWeek = (schedule === 'weekly' && input.scheduleDayOfWeek != null) ? input.scheduleDayOfWeek : null;
-  const scheduleDayOfMonth = (schedule === 'monthly' && input.scheduleDayOfMonth != null) ? input.scheduleDayOfMonth : null;
+  const scheduleDayOfMonth = ((schedule === 'monthly' || schedule === 'yearly') && input.scheduleDayOfMonth != null) ? input.scheduleDayOfMonth : null;
+  // ★ 2026-07-05 yearly: 대상 월(1~12) 필수 — 시즌 캠페인 연 1회 (없으면 매월 반복으로 오등록되므로 차단)
+  const scheduleMonth = (schedule === 'yearly' && input.scheduleMonth != null && Number(input.scheduleMonth) >= 1 && Number(input.scheduleMonth) <= 12)
+    ? Math.floor(Number(input.scheduleMonth)) : null;
+  if (schedule === 'yearly' && scheduleMonth === null) {
+    throw new Error('연 1회 일정은 대상 월(1~12)을 지정해야 합니다.');
+  }
   // ★ 2026-07-02 1단계 B: schedule_time = 발송 희망 시각 — 생성(next_run_at)은 희망 시각 − 준비시간(lead)
   const sendTimeMode = normalizeSendTimeMode(input.sendTimeMode);
   // ★ 2026-07-02 2단계: 문안 스타일 (화이트리스트 밖/미지정 = null → 브랜드 톤 자동)
   const copyStyle = normalizeCopyStyle(input.copyStyle);
   const { nextRunAt } = computeNextGenerationRun(
-    schedule, scheduleTime, scheduleDayOfWeek, scheduleDayOfMonth,
+    schedule, scheduleTime, scheduleDayOfWeek, scheduleDayOfMonth, scheduleMonth,
     resolveAutoSendLeadMinutes(input.autoSendLeadMinutes),
   );
 
@@ -211,6 +220,7 @@ export async function createOperator(input: CreateOperatorInput): Promise<Contin
       channel, benefit_content, admin_phone_numbers, backup_admin_phone, admin_alert_channel,
       auto_send_lead_minutes, budget_monthly, budget_daily, budget_alert_threshold, delivery_policy,
       sequence_enabled, sequence_delay_days, sequence_reminder_content, send_time_mode, copy_style,
+      schedule_month,
       created_at, updated_at
     ) VALUES (
       gen_random_uuid(), $1::uuid, $2::uuid, $3, $4,
@@ -218,6 +228,7 @@ export async function createOperator(input: CreateOperatorInput): Promise<Contin
       $10, $11, $12, $13, $14,
       $15, $16, $17, $18, $19,
       $20, $21, $22, $23, $24,
+      $25,
       NOW(), NOW()
     ) RETURNING *`,
     [
@@ -230,6 +241,7 @@ export async function createOperator(input: CreateOperatorInput): Promise<Contin
       input.budgetAlertThreshold != null ? input.budgetAlertThreshold : 80,
       deliveryPolicy,
       sequenceEnabled, sequenceDelayDays, sequenceReminderContent, sendTimeMode, copyStyle,
+      scheduleMonth,
     ]
   );
   const operator = mapRowToOperator(result.rows[0]);
@@ -277,6 +289,7 @@ export async function updateOperator(
     scheduleTime?: string;
     scheduleDayOfWeek?: number | null;
     scheduleDayOfMonth?: number | null;
+    scheduleMonth?: number | null;  // ★ 2026-07-05 yearly 전용 대상 월(1~12)
     status?: OperatorStatus;
     // ★ D212+ 5번 (2026-05-23 Harold 명시): 비용 제어 강화 patch
     budgetMonthly?: number | null;
@@ -309,20 +322,23 @@ export async function updateOperator(
   let nextRunAt: Date | null = null;
   let nextDow: number | null = null;
   let nextDom: number | null = null;
-  if (patch.schedule || patch.scheduleTime || patch.scheduleDayOfWeek !== undefined || patch.scheduleDayOfMonth !== undefined || patch.autoSendLeadMinutes !== undefined) {
+  let nextMonth: number | null = null;
+  if (patch.schedule || patch.scheduleTime || patch.scheduleDayOfWeek !== undefined || patch.scheduleDayOfMonth !== undefined || patch.scheduleMonth !== undefined || patch.autoSendLeadMinutes !== undefined) {
     const current = await query(
-      `SELECT schedule, schedule_time, schedule_day_of_week, schedule_day_of_month, auto_send_lead_minutes FROM continuous_operators WHERE id = $1::uuid AND company_id = $2::uuid`,
+      `SELECT schedule, schedule_time, schedule_day_of_week, schedule_day_of_month, schedule_month, auto_send_lead_minutes FROM continuous_operators WHERE id = $1::uuid AND company_id = $2::uuid`,
       [operatorId, companyId]
     );
     if (current.rows.length === 0) return null;
     const sched = (patch.schedule || current.rows[0].schedule) as OperatorSchedule;
     const time = patch.scheduleTime || current.rows[0].schedule_time;
     nextDow = sched === 'weekly' ? (patch.scheduleDayOfWeek !== undefined ? patch.scheduleDayOfWeek : current.rows[0].schedule_day_of_week) : null;
-    nextDom = sched === 'monthly' ? (patch.scheduleDayOfMonth !== undefined ? patch.scheduleDayOfMonth : current.rows[0].schedule_day_of_month) : null;
+    nextDom = (sched === 'monthly' || sched === 'yearly') ? (patch.scheduleDayOfMonth !== undefined ? patch.scheduleDayOfMonth : current.rows[0].schedule_day_of_month) : null;
+    // ★ 2026-07-05 yearly: 대상 월 — patch 우선, 없으면 기존 값
+    nextMonth = sched === 'yearly' ? (patch.scheduleMonth !== undefined ? patch.scheduleMonth : current.rows[0].schedule_month) : null;
     const lead = resolveAutoSendLeadMinutes(
       patch.autoSendLeadMinutes !== undefined ? patch.autoSendLeadMinutes : current.rows[0].auto_send_lead_minutes,
     );
-    nextRunAt = computeNextGenerationRun(sched, time, nextDow, nextDom, lead).nextRunAt;
+    nextRunAt = computeNextGenerationRun(sched, time, nextDow, nextDom, nextMonth, lead).nextRunAt;
   }
 
   const result = await query(
@@ -354,6 +370,7 @@ export async function updateOperator(
       sequence_reminder_content = COALESCE($27, sequence_reminder_content),
       send_time_mode = COALESCE($28, send_time_mode),
       copy_style = CASE WHEN $29::text = '__keep__' THEN copy_style ELSE NULLIF($29::text, '') END,
+      schedule_month = COALESCE($30, schedule_month),
       updated_at = NOW()
      WHERE id = $1::uuid AND company_id = $2::uuid
      RETURNING *`,
@@ -387,6 +404,7 @@ export async function updateOperator(
       patch.sendTimeMode !== undefined ? normalizeSendTimeMode(patch.sendTimeMode) : null,
       // copy_style: undefined = 유지('__keep__'), 그 외 = 정규화 값 or ''(해제 → SQL NULLIF로 null)
       patch.copyStyle === undefined ? '__keep__' : (normalizeCopyStyle(patch.copyStyle) ?? ''),
+      nextMonth,
     ]
   );
   return result.rows.length > 0 ? mapRowToOperator(result.rows[0]) : null;
@@ -648,7 +666,7 @@ export async function generateProposalForOperator(operatorId: string): Promise<O
   //   ai_optimal(명시 선택) = Phase3 B 클릭 피크 개인화(준비 창 보존·데이터 부족 시 now+lead 폴백) 유지.
   const scheduledSendAt = operator.sendTimeMode === 'ai_optimal'
     ? await resolveOptimalScheduledSendAt(operator.companyId, leadMinutes)
-    : computeNextOccurrence(operator.schedule, operator.scheduleTime, operator.scheduleDayOfWeek, operator.scheduleDayOfMonth);
+    : computeNextOccurrence(operator.schedule, operator.scheduleTime, operator.scheduleDayOfWeek, operator.scheduleDayOfMonth, operator.scheduleMonth);
   const proposalRes = await query(
     `INSERT INTO operator_proposals (
       id, operator_id, company_id, proposal_json, recipient_count, cost_estimate,
@@ -909,18 +927,20 @@ async function updateOperatorAfterRun(
   // 지정 요일/날짜 반영 — 컬럼 미존재(ALTER 전) 환경에서도 안전하게 fallback
   let dow: number | null = null;
   let dom: number | null = null;
+  let mon: number | null = null;
   let lead: number | null = null;
   try {
     const dayRes = await query(
-      `SELECT schedule_day_of_week, schedule_day_of_month, auto_send_lead_minutes FROM continuous_operators WHERE id = $1::uuid`,
+      `SELECT schedule_day_of_week, schedule_day_of_month, schedule_month, auto_send_lead_minutes FROM continuous_operators WHERE id = $1::uuid`,
       [operatorId]
     );
     dow = dayRes.rows[0]?.schedule_day_of_week ?? null;
     dom = dayRes.rows[0]?.schedule_day_of_month ?? null;
+    mon = dayRes.rows[0]?.schedule_month ?? null;
     lead = dayRes.rows[0]?.auto_send_lead_minutes ?? null;
   } catch { /* 컬럼 미존재 시 기존 동작 유지 */ }
   // ★ 2026-07-02 1단계 B: 다음 생성 = 다음 발송 희망 시각 − 준비시간 (같은 주기 재선정 없음 — computeNextGenerationRun이 보장)
-  const nextRunAt = computeNextGenerationRun(schedule, scheduleTime, dow, dom, resolveAutoSendLeadMinutes(lead)).nextRunAt;
+  const nextRunAt = computeNextGenerationRun(schedule, scheduleTime, dow, dom, mon, resolveAutoSendLeadMinutes(lead)).nextRunAt;
   await query(
     `UPDATE continuous_operators SET
        last_run_at = NOW(),
@@ -1592,6 +1612,7 @@ function mapRowToOperator(row: any): ContinuousOperator {
     scheduleTime: row.schedule_time,
     scheduleDayOfWeek: row.schedule_day_of_week ?? null,
     scheduleDayOfMonth: row.schedule_day_of_month ?? null,
+    scheduleMonth: row.schedule_month ?? null,  // ★ 2026-07-05 yearly (컬럼 미존재/ALTER 전 = null 안전)
     status: row.status,
     lastRunAt: row.last_run_at ? new Date(row.last_run_at) : null,
     nextRunAt: row.next_run_at ? new Date(row.next_run_at) : null,

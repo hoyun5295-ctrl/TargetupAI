@@ -81,6 +81,7 @@ export default function OperatorSetupModal({ editing, setEditing, saving, error,
                 <option value="daily">매일</option>
                 <option value="weekly">매주</option>
                 <option value="monthly">매월</option>
+                <option value="yearly">매년 (특정 월)</option>
               </select>
             </div>
             <div>
@@ -118,6 +119,26 @@ export default function OperatorSetupModal({ editing, setEditing, saving, error,
                 {Array.from({ length: 31 }, (_, i) => i + 1).map((d) => <option key={d} value={d}>{d}일</option>)}
               </select>
               <div className="text-[10px] text-white/40 mt-1">없는 날짜(예: 31일)는 그 달 말일에 발송됩니다.</div>
+            </div>
+          )}
+          {editing.schedule === 'yearly' && (
+            <div>
+              {/* ★ 2026-07-05: 연 1회(시즌) — 대상 월 + 발송 날짜. 마케팅 캘린더 등록분과 동일 축 */}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className={LAB}>발송 월 (매년)</label>
+                  <select value={editing.scheduleMonth ?? 1} onChange={(e) => setEditing({ ...editing, scheduleMonth: Number(e.target.value) })} className={INP}>
+                    {Array.from({ length: 12 }, (_, i) => i + 1).map((m) => <option key={m} value={m}>{m}월</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className={LAB}>발송 날짜</label>
+                  <select value={editing.scheduleDayOfMonth ?? 1} onChange={(e) => setEditing({ ...editing, scheduleDayOfMonth: Number(e.target.value) })} className={INP}>
+                    {Array.from({ length: 31 }, (_, i) => i + 1).map((d) => <option key={d} value={d}>{d}일</option>)}
+                  </select>
+                </div>
+              </div>
+              <div className="text-[10px] text-white/40 mt-1">매년 지정한 월·일에 1회 발송됩니다. 없는 날짜는 그 달 말일로 조정됩니다.</div>
             </div>
           )}
           {isEdit && (

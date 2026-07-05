@@ -23,6 +23,7 @@ import { getCacheStats } from '../utils/ai-cache';
 import { orchestrate, orchestrateWithAI } from '../services/ai-orchestrator';
 // ★ 크레딧 종량제 — 여정 저장(활성화) 등 endpoint 직접 차감용 (callAIWithFallback 경유 외)
 import { checkCredit, deductCreditSafe, InsufficientCreditError } from '../utils/ai-credit';
+import { randomUUID } from 'crypto';
 import { getCreditCost, kstDateTag, dailyDbAnalysisCredits } from '../utils/ai-credit-calc';
 // ★ D174 (2026-05-19): Step 1 Next Action Advisor — Opus 4.7
 import { buildPerformanceSnapshot, recommendNextAction, buildPerformanceSnapshotV2, type PerformancePeriod } from '../utils/next-action-advisor';
@@ -1893,11 +1894,28 @@ router.post('/operator/continuous', async (req: Request, res: Response) => {
     }
 
     const {
-      name, objective, schedule, schedule_time, schedule_day_of_week, schedule_day_of_month,
+      name, objective, schedule, schedule_time, schedule_day_of_week, schedule_day_of_month, schedule_month,
       channel, benefit_content, admin_phone_numbers, backup_admin_phone, admin_alert_channel,
       auto_send_lead_minutes, budget_monthly, budget_daily, budget_alert_threshold, delivery_policy,
       sequence_enabled, sequence_delay_days, sequence_reminder_content, send_time_mode, copy_style,
+      calendar_month,
     } = req.body;
+
+    // ★ 2026-07-05 마케팅 캘린더 경유 등록 — 같은 달에 살아있는 등록이 있으면 409(200크레딧 중복 차감 차단)
+    const calendarMonth = calendar_month != null && Number(calendar_month) >= 1 && Number(calendar_month) <= 12
+      ? Math.floor(Number(calendar_month)) : null;
+    if (calendarMonth != null) {
+      const { getActiveRegistration } = await import('../utils/marketing-calendar-store');
+      const existing = await getActiveRegistration(companyId, calendarMonth);
+      if (existing) {
+        return res.status(409).json({
+          success: false,
+          error: `${calendarMonth}월 캠페인은 이미 자동마케팅으로 등록되어 있습니다. 자동 마케팅 화면에서 확인해주세요.`,
+          code: 'CALENDAR_MONTH_ALREADY_REGISTERED',
+        });
+      }
+    }
+
     const operator = await createOperator({
       companyId,
       createdBy: userId,
@@ -1907,6 +1925,7 @@ router.post('/operator/continuous', async (req: Request, res: Response) => {
       scheduleTime: schedule_time,
       scheduleDayOfWeek: schedule_day_of_week != null ? Number(schedule_day_of_week) : null,
       scheduleDayOfMonth: schedule_day_of_month != null ? Number(schedule_day_of_month) : null,
+      scheduleMonth: schedule_month != null ? Number(schedule_month) : null,  // ★ 2026-07-05 yearly 대상 월
       // ★ 2026-06-26: 생성 시에도 채널·혜택·담당자·예산 저장 (#1 채널 / #3 담당자·2h알림 / #4 혜택 fix)
       channel,
       benefitContent: typeof benefit_content === 'string' ? benefit_content : null,
@@ -1927,6 +1946,12 @@ router.post('/operator/continuous', async (req: Request, res: Response) => {
       // ★ 2026-07-02 2단계: 문안 스타일 (createOperator가 화이트리스트 정규화)
       copyStyle: typeof copy_style === 'string' ? copy_style : null,
     });
+    // ★ 2026-07-05: 캘린더 경유 등록 기록 — 실패해도 등록은 성공(fire-safe, 테이블 미생성 = 내부 생략)
+    if (calendarMonth != null) {
+      const { markCalendarRegistration } = await import('../utils/marketing-calendar-store');
+      markCalendarRegistration(companyId, calendarMonth, operator.id).catch((e: any) =>
+        console.log('[MarketingCalendar] 등록 기록 실패(등록은 성공):', e?.message || e));
+    }
     return res.json({ success: true, operator });
   } catch (err: any) {
     if (err instanceof InsufficientCreditError) {
@@ -1970,28 +1995,64 @@ router.post('/operator/marketing-calendar/generate', async (req: Request, res: R
       query(`SELECT COUNT(*)::int AS n FROM customers WHERE company_id = $1::uuid AND is_active = true`, [companyId]),
     ]);
     const info = infoRes.rows[0] || {};
-    const { buildCalendarSystemPrompt, buildCalendarUserMessage, sanitizeCalendarEntries } = await import('../utils/marketing-calendar-policy');
+    const { buildCalendarSystemPrompt, buildCalendarUserMessage, buildCalendarRepairMessage, missingCalendarMonths, sanitizeCalendarEntries } = await import('../utils/marketing-calendar-policy');
     const { extractJsonObject } = await import('../utils/daily-brief-policy');
     const kstMonth = new Date(Date.now() + 9 * 60 * 60 * 1000).getUTCMonth() + 1;
-    const text = await callAIWithFallback({
+    const calendarInput = {
+      businessType: info.business_type || null,
+      brandName: info.brand_name || null,
+      brandTone: info.brand_tone || null,
+      customerCount: Number(cntRes.rows[0]?.n) || 0,
+      currentMonth: kstMonth,
+    };
+
+    // ★ 2026-07-05 차감 구조 정정 — 옛 구조는 AI 응답 시점에 50 차감 → sanitize가 혜택 포함 달을 버려
+    //   0건이면 차감 후 502(빈손), 일부 걸러지면 결손 캘린더였다.
+    //   사전 잔액 확인 → 무과금 호출(creditCost 0) → 결손 달 1회 보정 재호출(무과금) →
+    //   반환할 결과가 있을 때만 50 차감(멱등키). 매회 차감 정책(Harold 명시)은 "성공 반환당 1회"로 유지.
+    const cost = getCreditCost('marketing-calendar');
+    await checkCredit(companyId, cost);
+    const userId = req.user?.userId ? String(req.user.userId) : undefined;
+    const callOnce = async (userMessage: string) => callAIWithFallback({
       system: buildCalendarSystemPrompt(),
-      userMessage: buildCalendarUserMessage({
-        businessType: info.business_type || null,
-        brandName: info.brand_name || null,
-        brandTone: info.brand_tone || null,
-        customerCount: Number(cntRes.rows[0]?.n) || 0,
-        currentMonth: kstMonth,
-      }),
+      userMessage,
       maxTokens: 2400,
       temperature: 0.5,
       model: 'opus',
       companyId,
-      userId: req.user?.userId ? String(req.user.userId) : undefined,
+      userId,
       source: 'marketing-calendar',
+      creditCost: 0,
     });
-    const entries = sanitizeCalendarEntries(extractJsonObject(text)?.entries);
+
+    let entries = sanitizeCalendarEntries(extractJsonObject(await callOnce(buildCalendarUserMessage(calendarInput)))?.entries);
+    const missing = missingCalendarMonths(entries);
+    if (missing.length > 0 && missing.length < 12) {
+      // 일부 달만 결손 — 그 달만 보정 재요청 후 병합(전부 결손이면 보정도 무의미 → 아래 502)
+      try {
+        const repaired = sanitizeCalendarEntries(extractJsonObject(await callOnce(buildCalendarRepairMessage(calendarInput, missing)))?.entries);
+        entries = [...entries, ...repaired.filter((e) => missing.includes(e.month))].sort((a, b) => a.month - b.month);
+      } catch (repairErr: any) {
+        console.log('[MarketingCalendar] 결손 달 보정 재호출 실패(1차 결과로 진행):', repairErr?.message || repairErr);
+      }
+    }
+
     if (entries.length === 0) {
-      return res.status(502).json({ success: false, error: '캘린더 설계 생성에 실패했습니다. 잠시 후 다시 시도해주세요.' });
+      return res.status(502).json({ success: false, error: '캘린더 설계 생성에 실패했습니다. 크레딧은 차감되지 않았습니다. 잠시 후 다시 시도해주세요.' });
+    }
+    await deductCreditSafe({
+      companyId,
+      cost,
+      source: 'marketing-calendar',
+      createdBy: userId ?? null,
+      idempotencyKey: `marketing-calendar:${companyId}:${randomUUID()}`,
+    });
+    // ★ 2026-07-05: 설계 저장 — 새로고침·이탈에도 유지(50크레딧 증발 방지). 실패해도 응답은 성공.
+    try {
+      const { saveCalendarEntries } = await import('../utils/marketing-calendar-store');
+      await saveCalendarEntries(companyId, entries);
+    } catch (saveErr: any) {
+      console.log('[MarketingCalendar] 설계 저장 실패(생성은 성공):', saveErr?.message || saveErr);
     }
     return res.json({ success: true, entries });
   } catch (err: any) {
@@ -2000,6 +2061,33 @@ router.post('/operator/marketing-calendar/generate', async (req: Request, res: R
     }
     console.error('[MarketingCalendar] 생성 오류:', err);
     return res.status(500).json({ success: false, error: err?.message || '캘린더 설계 실패' });
+  }
+});
+
+// ★ 2026-07-05: 저장된 마케팅 캘린더 조회 — 진입 시 로드(재생성 50크레딧 없이 이어보기) + 등록 상태.
+//   registrations는 살아있는(보관 아님) 오퍼레이터만 반환 — 보관했으면 재등록 가능하도록 정직 표기.
+router.get('/operator/marketing-calendar', async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+    const { getSavedCalendar } = await import('../utils/marketing-calendar-store');
+    const calendar = await getSavedCalendar(companyId);
+    if (!calendar) return res.json({ success: true, calendar: null });
+    const ids = Object.values(calendar.registrations);
+    if (ids.length > 0) {
+      const alive = await query(
+        `SELECT id FROM continuous_operators WHERE company_id = $1::uuid AND id = ANY($2::uuid[]) AND status != 'archived'`,
+        [companyId, ids],
+      );
+      const aliveSet = new Set(alive.rows.map((r: any) => String(r.id)));
+      calendar.registrations = Object.fromEntries(
+        Object.entries(calendar.registrations).filter(([, oid]) => aliveSet.has(String(oid))),
+      );
+    }
+    return res.json({ success: true, calendar });
+  } catch (err: any) {
+    console.error('[MarketingCalendar] 조회 오류:', err);
+    return res.status(500).json({ success: false, error: err?.message || '캘린더 조회 실패' });
   }
 });
 
@@ -2038,7 +2126,7 @@ router.put('/operator/continuous/:id', async (req: Request, res: Response) => {
     // 2026-06-19 (Harold 명시): 일반 사용자도 본인 회사의 자동 마케팅을 수정 가능 (operator는 회사 스코프).
     const {
       name, objective, schedule, schedule_time, status,
-      schedule_day_of_week, schedule_day_of_month,
+      schedule_day_of_week, schedule_day_of_month, schedule_month,
       budget_monthly, budget_daily, budget_alert_threshold,
       // ★ D212+ 정책 (2026-05-23 Harold 명시)
       delivery_policy, verification_required_days,
@@ -2051,6 +2139,7 @@ router.put('/operator/continuous/:id', async (req: Request, res: Response) => {
       name, objective, schedule, scheduleTime: schedule_time, status,
       scheduleDayOfWeek: schedule_day_of_week === undefined ? undefined : (schedule_day_of_week === null ? null : Number(schedule_day_of_week)),
       scheduleDayOfMonth: schedule_day_of_month === undefined ? undefined : (schedule_day_of_month === null ? null : Number(schedule_day_of_month)),
+      scheduleMonth: schedule_month === undefined ? undefined : (schedule_month === null ? null : Number(schedule_month)),  // ★ 2026-07-05 yearly
       budgetMonthly: budget_monthly === undefined ? undefined : (budget_monthly === null ? null : Number(budget_monthly)),
       budgetDaily: budget_daily === undefined ? undefined : (budget_daily === null ? null : Number(budget_daily)),
       budgetAlertThreshold: budget_alert_threshold !== undefined ? Number(budget_alert_threshold) : undefined,

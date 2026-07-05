@@ -5,8 +5,8 @@
  * 발송 2일 전 담당자에게 "예정 안내 + 혜택 입력/갱신 요청" 문자를 보내 그때그때 값을 챙기게 한다.
  * (혜택 미입력이면 발송 시점 문안이 placeholder로 남아 검수에서 승인 대기로 빠지는 안전망은 별도 유지.)
  *
- * 실행 = 매일 9시 predictive 사이클(무과금 인증 라인). 대상 = monthly 활성 오퍼레이터 중
- * 다음 발송 희망일이 KST 기준 오늘+2일인 것. 멱등 = continuous_operators.prep_reminder_sent_for(date)
+ * 실행 = 매일 9시 predictive 사이클(무과금 인증 라인). 대상 = monthly + yearly(2026-07-05 캘린더 시즌) 활성
+ * 오퍼레이터 중 다음 발송 희망일이 KST 기준 오늘+2일인 것. 멱등 = continuous_operators.prep_reminder_sent_for(date)
  * — 같은 발송일에 1회만(수동 run-now 재실행에도 중복 0). 컬럼 미생성 = 전체 skip(ALTER 후 자동 활성).
  */
 
@@ -22,10 +22,10 @@ export async function sendMonthlyPrepReminders(
   let rows: any[] = [];
   try {
     const r = await query(
-      `SELECT id, name, schedule_time, schedule_day_of_month, benefit_content,
+      `SELECT id, name, schedule, schedule_time, schedule_day_of_month, schedule_month, benefit_content,
               admin_phone_numbers, backup_admin_phone, prep_reminder_sent_for
          FROM continuous_operators
-        WHERE company_id = $1::uuid AND status = 'active' AND schedule = 'monthly'`,
+        WHERE company_id = $1::uuid AND status = 'active' AND schedule IN ('monthly', 'yearly')`,
       [companyId],
     );
     rows = r.rows;
@@ -42,7 +42,7 @@ export async function sendMonthlyPrepReminders(
 
   for (const row of rows) {
     try {
-      const sendAt = computeNextOccurrence('monthly', row.schedule_time, null, row.schedule_day_of_month ?? null, now);
+      const sendAt = computeNextOccurrence(row.schedule === 'yearly' ? 'yearly' : 'monthly', row.schedule_time, null, row.schedule_day_of_month ?? null, row.schedule_month ?? null, now);
       if (kstDateTag(sendAt) !== targetTag) continue;
       const sentFor = row.prep_reminder_sent_for ? kstDateTag(new Date(row.prep_reminder_sent_for)) : null;
       // date 컬럼은 자정(UTC) 해석 시 KST 태그가 어긋날 수 있어 문자열 비교도 함께 — YYYY-MM-DD 원본 대조

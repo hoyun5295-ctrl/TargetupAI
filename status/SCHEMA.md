@@ -2043,10 +2043,11 @@ cd /home/administrator/targetup-app/packages/backend && npm install web-push @ty
 | created_by | uuid FK → users | |
 | name | varchar(100) | 사용자가 박은 Operator 이름 ("VIP 재구매 영구 운영" 등) |
 | objective | text | 자연어 한 줄 ("VIP 재구매 유도 + 매출 30% 증대") |
-| schedule | varchar(20) DEFAULT 'daily' | daily / weekly / monthly |
+| schedule | varchar(20) DEFAULT 'daily' | daily / weekly / monthly / yearly(2026-07-05 신설 — 시즌 연 1회) |
 | schedule_time | varchar(10) DEFAULT '09:00' | KST 발송 시각 |
 | schedule_day_of_week | smallint | 0(일)~6(토) — weekly 전용 (G 2026-06-20 ALTER 실측) |
-| schedule_day_of_month | smallint | 1~31 — monthly 전용 (말일 초과 시 그 달 말일 클램프, G 2026-06-20 ALTER 실측) |
+| schedule_day_of_month | smallint | 1~31 — monthly·yearly 전용 (말일 초과 시 그 달 말일 클램프, G 2026-06-20 ALTER 실측) |
+| schedule_month | integer | 1~12 — yearly 전용 대상 월 (2026-07-05 ALTER — 마케팅 캘린더 매월 반복 오발송 근본 수정) |
 | status | varchar(20) DEFAULT 'active' | active / paused / archived |
 | last_run_at | timestamptz | 마지막 제안서 생성 시각 |
 | next_run_at | timestamptz | 다음 제안서 생성 예약 시각 |
@@ -2119,6 +2120,17 @@ cd /home/administrator/targetup-app/packages/backend && npm install web-push @ty
 | created_at | timestamptz DEFAULT NOW() | |
 - UNIQUE (company_id, brief_date) / INDEX idx_company_daily_briefs_lookup (company_id, brief_date DESC)
 - 생성 = predictive-worker 매일 KST 9시(일일 분석 차감 1회에 포함, 추가 차감 0). 소비 = GET /api/ai/operator/daily-brief + /operator/self-diagnosis 동봉(좌측 진단 패널 단일 소스).
+
+### company_marketing_calendars (마케팅 캘린더 저장 — 회사당 1행) — 2026-07-05 신규 (CREATE Harold 실행 대기, 코드 42P01 폴백)
+
+| 컬럼 | 타입 | 비고 |
+|------|------|------|
+| company_id | uuid PK REFERENCES companies(id) ON DELETE CASCADE | 회사당 1행 UPSERT |
+| entries | jsonb NOT NULL DEFAULT '[]' | AI 설계 12개월 [{month,title,objective,suggestedDay}] — 재생성 시 통째 교체 |
+| registrations | jsonb NOT NULL DEFAULT '{}' | {"월": operator_id} — 등록 이력(재생성에도 유지, 같은 달 중복 등록 409 차단) |
+| created_at | timestamptz NOT NULL DEFAULT NOW() | |
+| updated_at | timestamptz NOT NULL DEFAULT NOW() | |
+- 생성/소비 = utils/marketing-calendar-store.ts CT 단일 진입점 (routes/ai.ts generate 저장·GET 조회·POST /operator/continuous calendar_month 등록 기록).
 
 ### D176 운영 환경 실행 SQL (Harold 직접)
 

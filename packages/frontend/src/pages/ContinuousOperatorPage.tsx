@@ -132,7 +132,8 @@ export default function ContinuousOperatorPage() {
     schedule: e.schedule || 'daily',
     schedule_time: e.scheduleTime || '09:00',
     schedule_day_of_week: e.schedule === 'weekly' ? (e.scheduleDayOfWeek ?? 1) : null,
-    schedule_day_of_month: e.schedule === 'monthly' ? (e.scheduleDayOfMonth ?? 1) : null,
+    schedule_day_of_month: (e.schedule === 'monthly' || e.schedule === 'yearly') ? (e.scheduleDayOfMonth ?? 1) : null,
+    schedule_month: e.schedule === 'yearly' ? (e.scheduleMonth ?? 1) : null,  // ★ 2026-07-05 yearly 대상 월
     status: e.status,
     budget_monthly: e.budgetMonthly,
     budget_daily: e.budgetDaily,

@@ -11,7 +11,7 @@ interface Props {
   onCreate: () => void;
 }
 
-const POLICY_LABEL: Record<string, string> = { daily: '매일', weekly: '매주', monthly: '매월' };
+const POLICY_LABEL: Record<string, string> = { daily: '매일', weekly: '매주', monthly: '매월', yearly: '매년' };
 
 export default function OperatorsManageList({ operators, onRunNow, onEdit, onDelete, onCreate }: Props) {
   if (operators.length === 0) {
@@ -45,7 +45,7 @@ export default function OperatorsManageList({ operators, onRunNow, onEdit, onDel
                 </div>
                 <div className="text-sm text-white/70 mb-2">{op.objective}</div>
                 <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-white/50">
-                  <span><Clock className="w-3 h-3 inline" /> {POLICY_LABEL[op.schedule] || op.schedule} {op.scheduleTime} (KST)</span>
+                  <span><Clock className="w-3 h-3 inline" /> {POLICY_LABEL[op.schedule] || op.schedule}{op.schedule === 'yearly' && op.scheduleMonth ? ` ${op.scheduleMonth}월 ${op.scheduleDayOfMonth ?? 1}일` : ''} {op.scheduleTime} (KST)</span>
                   <span>·</span>
                   <span>다음 실행 {op.nextRunAt ? new Date(op.nextRunAt).toLocaleString('ko-KR') : '-'}</span>
                   <span>·</span>

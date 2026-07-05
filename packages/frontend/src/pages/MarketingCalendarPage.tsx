@@ -1,9 +1,11 @@
 // 마케팅 캘린더 — 1년 시즌 캠페인 AI 설계 → 선택 등록 (2026-07-02 4차, Harold 확정)
-// 흐름(1클릭 원칙): [AI로 1년 설계] → 12개월 카드 → 원하는 달 선택 → [등록] → 크레딧 확인 → 자동마케팅(월간) 일괄 등록.
+// 흐름(1클릭 원칙): [AI로 1년 설계] → 12개월 카드 → 원하는 달 선택 → [등록] → 크레딧 확인 → 자동마케팅 일괄 등록.
+// ★ 2026-07-05 재점검: 등록 = 연 1회(yearly + 대상 월) — 옛 monthly는 시즌 캠페인이 매월 반복 발송되는 구조 결함.
+//   설계는 서버 저장(새로고침에도 유지) + 등록된 달은 배지 표시·재등록 차단(200크레딧 중복 차감 방지).
 // 다크 slate + 단일 액센트, native dialog 0(useToast + CreditConfirmModal), 생성 중 로딩 오버레이 + 닫기 차단(D185).
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowLeft, CalendarDays, Sparkles, Loader2, Check } from 'lucide-react';
+import { ArrowLeft, CalendarDays, Sparkles, Loader2, Check, CheckCircle2 } from 'lucide-react';
 import { useToast } from '../components/ToastProvider';
 import CreditConfirmModal from '../components/credit/CreditConfirmModal';
 
@@ -21,6 +23,8 @@ export default function MarketingCalendarPage() {
   const toast = useToast();
   const [entries, setEntries] = useState<CalendarEntry[]>([]);
   const [selected, setSelected] = useState<Set<number>>(new Set());
+  // ★ 2026-07-05: 등록 상태 — { "월": operator_id }. 등록된 달 = 배지 + 재등록 차단
+  const [registrations, setRegistrations] = useState<Record<string, string>>({});
   const [generating, setGenerating] = useState(false);
   const [registering, setRegistering] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
@@ -29,6 +33,26 @@ export default function MarketingCalendarPage() {
   const [error, setError] = useState<string | null>(null);
 
   const auth = () => ({ Authorization: `Bearer ${localStorage.getItem('token')}` });
+
+  // ★ 2026-07-05: 저장된 설계 로드 — 새로고침·재진입에도 50크레딧 재생성 없이 이어보기 + 등록 배지
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await fetch('/api/ai/operator/marketing-calendar', { headers: auth() });
+        const data = await res.json();
+        if (data?.success && data.calendar) {
+          const saved: CalendarEntry[] = Array.isArray(data.calendar.entries) ? data.calendar.entries : [];
+          const regs: Record<string, string> = data.calendar.registrations || {};
+          if (saved.length > 0) {
+            setEntries(saved);
+            setSelected(new Set(saved.map((e) => e.month).filter((m) => !regs[String(m)])));
+          }
+          setRegistrations(regs);
+        }
+      } catch { /* 저장본 없음/조회 실패 — 새 설계 흐름 그대로 */ }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const generate = async () => {
     setGenerating(true);
@@ -44,7 +68,8 @@ export default function MarketingCalendarPage() {
         return;
       }
       setEntries(data.entries || []);
-      setSelected(new Set((data.entries || []).map((e: CalendarEntry) => e.month)));
+      // 등록된 달은 기본 선택에서 제외 — 재등록(중복 차감) 방지
+      setSelected(new Set((data.entries || []).map((e: CalendarEntry) => e.month).filter((m: number) => !registrations[String(m)])));
       toast.success('1년 캘린더 설계가 준비됐습니다. 원하는 달을 골라 등록하세요.');
     } catch (e: any) {
       setError(e?.message || '네트워크 오류');
@@ -55,6 +80,7 @@ export default function MarketingCalendarPage() {
   };
 
   const toggle = (month: number) => {
+    if (registrations[String(month)]) return; // 등록된 달은 선택 불가(재등록 = 중복 차감)
     setSelected((prev) => {
       const next = new Set(prev);
       if (next.has(month)) next.delete(month); else next.add(month);
@@ -67,11 +93,12 @@ export default function MarketingCalendarPage() {
   };
 
   const registerSelected = async () => {
-    const picks = entries.filter((e) => selected.has(e.month));
+    const picks = entries.filter((e) => selected.has(e.month) && !registrations[String(e.month)]);
     if (picks.length === 0) return;
     setRegistering(true);
     let ok = 0;
     let fail = 0;
+    let firstError: string | null = null;
     for (const e of picks) {
       try {
         const res = await fetch('/api/ai/operator/continuous', {
@@ -80,25 +107,34 @@ export default function MarketingCalendarPage() {
           body: JSON.stringify({
             name: `${MONTH_LABEL[e.month]} ${e.title}`.slice(0, 100),
             objective: e.objective,
-            schedule: 'monthly',
+            // ★ 2026-07-05: 시즌 캠페인 = 연 1회(yearly + 대상 월). 옛 monthly는 매월 반복 오발송 구조라 폐기.
+            schedule: 'yearly',
+            schedule_month: e.month,
             schedule_time: '10:00',
             schedule_day_of_month: e.suggestedDay,
             channel: 'lms',
             send_time_mode: 'fixed',
             delivery_policy: 'monthly',
+            calendar_month: e.month, // 서버 등록 기록 + 같은 달 중복 등록 409 차단
           }),
         });
         const data = await res.json();
-        if (data.success) ok++; else fail++;
+        if (data.success) {
+          ok++;
+          if (data.operator?.id) setRegistrations((prev) => ({ ...prev, [String(e.month)]: String(data.operator.id) }));
+          setSelected((prev) => { const next = new Set(prev); next.delete(e.month); return next; });
+        } else {
+          fail++;
+          if (!firstError) firstError = data.error || null;
+        }
       } catch { fail++; }
     }
     setRegistering(false);
-    if (ok > 0) toast.success(`${ok}건을 자동마케팅으로 등록했습니다.${fail > 0 ? ` (${fail}건 실패)` : ''}`);
-    else toast.error('등록에 실패했습니다. 크레딧과 권한을 확인해주세요.');
-    if (ok > 0) navigate('/continuous-operator');
+    if (ok > 0) toast.success(`${ok}건을 연 1회 캠페인으로 등록했습니다.${fail > 0 ? ` (${fail}건 실패)` : ''} 자동 마케팅 화면에서 관리할 수 있습니다.`);
+    else toast.error(firstError || '등록에 실패했습니다. 크레딧과 권한을 확인해주세요.');
   };
 
-  const pickedCount = entries.filter((e) => selected.has(e.month)).length;
+  const pickedCount = entries.filter((e) => selected.has(e.month) && !registrations[String(e.month)]).length;
 
   return (
     <div className="min-h-screen bg-slate-950 text-white">
@@ -129,7 +165,7 @@ export default function MarketingCalendarPage() {
             <h2 className="mt-4 text-lg font-semibold">1년치 마케팅, 한 번에 설계합니다</h2>
             <p className="mt-1.5 text-[13px] text-white/55 leading-relaxed">
               설날·여름 휴가·추석·연말 같은 시즌과 업종 성수기를 조합해 12개월 캠페인을 제안합니다.<br />
-              마음에 드는 달만 골라 등록하면 매월 정해진 날, 2시간 전 문안 안내와 함께 자동 발송됩니다.
+              마음에 드는 달만 골라 등록하면 그 달 정해진 날에 연 1회, 2시간 전 문안 안내와 함께 자동 발송됩니다.
             </p>
             <button
               onClick={() => setGenConfirmOpen(true)}
@@ -155,18 +191,25 @@ export default function MarketingCalendarPage() {
 
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
               {entries.map((e) => {
-                const on = selected.has(e.month);
+                const registered = !!registrations[String(e.month)];
+                const on = !registered && selected.has(e.month);
                 return (
-                  <div key={e.month} className={`rounded-2xl border p-4 transition-colors ${on ? 'bg-orange-500/10 border-orange-400/40' : 'bg-white/5 border-white/10'}`}>
-                    <div className="flex items-center justify-between">
-                      <div className="text-sm font-semibold">{MONTH_LABEL[e.month]} · {e.title}</div>
-                      <button
-                        onClick={() => toggle(e.month)}
-                        className={`w-6 h-6 rounded-md border flex items-center justify-center transition-colors ${on ? 'bg-orange-500/60 border-orange-400/60' : 'bg-white/5 border-white/20'}`}
-                        aria-label={`${MONTH_LABEL[e.month]} 선택`}
-                      >
-                        {on && <Check className="w-4 h-4 text-white" />}
-                      </button>
+                  <div key={e.month} className={`rounded-2xl border p-4 transition-colors ${registered ? 'bg-emerald-500/5 border-emerald-400/30' : on ? 'bg-orange-500/10 border-orange-400/40' : 'bg-white/5 border-white/10'}`}>
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="text-sm font-semibold min-w-0 truncate">{MONTH_LABEL[e.month]} · {e.title}</div>
+                      {registered ? (
+                        <span className="inline-flex items-center gap-1 text-[10px] font-bold text-emerald-300 bg-emerald-500/15 border border-emerald-400/30 rounded-full px-2 py-0.5 flex-shrink-0">
+                          <CheckCircle2 className="w-3 h-3" /> 등록됨
+                        </span>
+                      ) : (
+                        <button
+                          onClick={() => toggle(e.month)}
+                          className={`w-6 h-6 rounded-md border flex items-center justify-center transition-colors flex-shrink-0 ${on ? 'bg-orange-500/60 border-orange-400/60' : 'bg-white/5 border-white/20'}`}
+                          aria-label={`${MONTH_LABEL[e.month]} 선택`}
+                        >
+                          {on && <Check className="w-4 h-4 text-white" />}
+                        </button>
+                      )}
                     </div>
                     <p className="mt-2 text-[12px] text-white/60 leading-relaxed">{e.objective}</p>
                     <div className="mt-3 flex items-center gap-2 text-[11px] text-white/50">
@@ -174,11 +217,12 @@ export default function MarketingCalendarPage() {
                       <select
                         value={e.suggestedDay}
                         onChange={(ev) => setDay(e.month, Number(ev.target.value))}
-                        className="px-2 py-1 bg-white/5 border border-white/10 rounded text-white text-[11px] focus:outline-none focus:border-orange-400/50"
+                        disabled={registered}
+                        className="px-2 py-1 bg-white/5 border border-white/10 rounded text-white text-[11px] focus:outline-none focus:border-orange-400/50 disabled:opacity-40"
                       >
                         {Array.from({ length: 28 }, (_, i) => i + 1).map((d) => <option key={d} value={d}>{d}일</option>)}
                       </select>
-                      <span>· 오전 10:00 · 발송 2시간 전 문안 안내</span>
+                      <span>· 오전 10:00 · 연 1회 · 발송 2시간 전 문안 안내</span>
                     </div>
                   </div>
                 );
@@ -208,9 +252,11 @@ export default function MarketingCalendarPage() {
         )}
       </div>
 
+      {/* ★ 2026-07-05: 표시=실차감 일치 — N건 선택 등록은 단가×N로 표시(quantity) */}
       <CreditConfirmModal
         open={confirmOpen}
         source="continuous-operator"
+        quantity={pickedCount}
         onConfirm={() => { setConfirmOpen(false); registerSelected(); }}
         onCancel={() => setConfirmOpen(false)}
       />

@@ -2,7 +2,8 @@
 // proposal_json = orchestrate() 결과 전체(OrchestratorResult)가 저장된다(continuous-operator.ts).
 // 화면은 그 전부를 위계로 렌더한다 — 버리는 데이터 0.
 
-export type Schedule = 'daily' | 'weekly' | 'monthly';
+// ★ 2026-07-05: 'yearly' 신설 — 마케팅 캘린더 시즌 캠페인(연 1회, scheduleMonth 월 + scheduleDayOfMonth 일)
+export type Schedule = 'daily' | 'weekly' | 'monthly' | 'yearly';
 export type OperatorStatus = 'active' | 'paused' | 'archived' | 'paused_no_credit';
 export type ProposalStatus =
   | 'pending' | 'approved' | 'rejected' | 'auto_executed' | 'expired'
@@ -19,6 +20,7 @@ export interface ContinuousOperator {
   scheduleTime: string;
   scheduleDayOfWeek?: number | null;
   scheduleDayOfMonth?: number | null;
+  scheduleMonth?: number | null;  // 1~12 — yearly 전용 대상 월 (2026-07-05)
   status: OperatorStatus;
   lastRunAt: string | null;
   nextRunAt: string | null;

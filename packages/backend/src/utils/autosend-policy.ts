@@ -104,19 +104,23 @@ export function normalizeSendTimeMode(raw: unknown): SendTimeMode {
   return raw === 'ai_optimal' ? 'ai_optimal' : 'fixed';
 }
 
-export type OperatorScheduleKind = 'daily' | 'weekly' | 'monthly';
+// ★ 2026-07-05: 'yearly' 신설 — 마케팅 캘린더 시즌 캠페인(연 1회, 해당 월·일)용.
+//   옛 캘린더 등록이 monthly라 "3월 화이트데이"가 매월 반복 발송되던 구조 결함의 근본 수정.
+export type OperatorScheduleKind = 'daily' | 'weekly' | 'monthly' | 'yearly';
 
 /**
  * 다음 발송 희망 시각(KST 주기 occurrence) — 지금(now) 이후 가장 가까운 schedule_time.
  *  continuous-operator.ts computeNextRun의 검증된 KST 산식을 now 주입형 순수 함수로 이동(테스트 가능).
  *  - weekly: 지정 요일(0=일~6=토), 같은 요일인데 시각이 지났으면 다음 주.
  *  - monthly: 지정 일자, 말일 초과 시 그 달 말일로 클램프, 이번 달 지났으면 다음 달.
+ *  - yearly(2026-07-05): 지정 월(1~12)·일자 — 시즌 캠페인 연 1회. 올해 지났으면 내년.
  */
 export function computeNextOccurrence(
   schedule: OperatorScheduleKind,
   scheduleTime: string,
   dayOfWeek: number | null = null,
   dayOfMonth: number | null = null,
+  monthOfYear: number | null = null,
   now: Date = new Date(),
 ): Date {
   const [hStr, mStr] = String(scheduleTime || '').split(':');
@@ -143,10 +147,23 @@ export function computeNextOccurrence(
       target.setUTCMonth(target.getUTCMonth() + 1, 1);
       clampToMonth(target);
     }
+  } else if (schedule === 'yearly' && monthOfYear != null && dayOfMonth != null) {
+    // 연 1회 — 올해 지정 월·일(말일 클램프), 지났으면 내년 같은 월·일.
+    const clampToYearMonth = (t: Date) => {
+      t.setUTCMonth(monthOfYear - 1, 1);
+      const last = new Date(Date.UTC(t.getUTCFullYear(), monthOfYear, 0)).getUTCDate();
+      t.setUTCDate(Math.min(dayOfMonth, last));
+    };
+    clampToYearMonth(target);
+    if (target.getTime() <= kstNow.getTime()) {
+      target.setUTCFullYear(target.getUTCFullYear() + 1);
+      clampToYearMonth(target);
+    }
   } else if (target.getTime() <= kstNow.getTime()) {
     if (schedule === 'daily') target.setUTCDate(target.getUTCDate() + 1);
     else if (schedule === 'weekly') target.setUTCDate(target.getUTCDate() + 7);
     else if (schedule === 'monthly') target.setUTCMonth(target.getUTCMonth() + 1);
+    else if (schedule === 'yearly') target.setUTCFullYear(target.getUTCFullYear() + 1);
   }
   // KST → UTC
   return new Date(target.getTime() - 9 * 60 * 60 * 1000);
@@ -163,14 +180,15 @@ export function computeNextGenerationRun(
   scheduleTime: string,
   dayOfWeek: number | null,
   dayOfMonth: number | null,
+  monthOfYear: number | null,
   leadMinutes: number,
   now: Date = new Date(),
 ): { nextRunAt: Date; sendAt: Date } {
   const lead = resolveAutoSendLeadMinutes(leadMinutes);
-  let sendAt = computeNextOccurrence(schedule, scheduleTime, dayOfWeek, dayOfMonth, now);
+  let sendAt = computeNextOccurrence(schedule, scheduleTime, dayOfWeek, dayOfMonth, monthOfYear, now);
   let nextRunAt = new Date(sendAt.getTime() - lead * 60 * 1000);
   if (nextRunAt.getTime() <= now.getTime()) {
-    sendAt = computeNextOccurrence(schedule, scheduleTime, dayOfWeek, dayOfMonth, new Date(sendAt.getTime() + 60 * 1000));
+    sendAt = computeNextOccurrence(schedule, scheduleTime, dayOfWeek, dayOfMonth, monthOfYear, new Date(sendAt.getTime() + 60 * 1000));
     nextRunAt = new Date(sendAt.getTime() - lead * 60 * 1000);
   }
   return { nextRunAt, sendAt };
