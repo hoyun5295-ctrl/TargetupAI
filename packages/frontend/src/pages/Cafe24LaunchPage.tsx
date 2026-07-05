@@ -5,7 +5,7 @@
  * 공개 라우트(PrivateRoute 아님) — 이 페이지가 로그인 상태 분기를 스스로 판별한다.
  *   1) 로그인 + 회사관리자 + 미연동 → [카페24 연결](기존 /oauth/authorize 재사용)
  *   2) 로그인 + 이미 연동됨 → 현황 보기 / 대시보드
- *   3) 비로그인 → [카페24 연동 시작](로그인 없이 /oauth/install-start = 설치 인증) + 기존 고객용 로그인 보조.
+ *   3) 비로그인 → 로그인(토큰) 없으면 즉시 /oauth/install-start로 자동 이동(설치 인증) + 버튼 폴백 + 기존 고객용 로그인 보조.
  *      카페24 앱은 계약 고객의 자사몰 연동 도구 — 설치 동선에서 계정 없이 OAuth만 완료(계정 자동생성·발송 없음).
  *
  * A-0: 최초 진입 시 앱 실행 파라미터를 서버로 fire-and-forget POST → PM2 로그로 실측(저장/부작용 없음).
@@ -44,6 +44,15 @@ export default function Cafe24LaunchPage() {
     }).catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // ★ 2026-07-05 카페24 설치·심사 동선 — mall_id 있고 로그인(토큰) 없으면 버튼 없이 즉시 설치 OAuth로.
+  //   카페24 반려 #1 "설치 시 인증 자동 수행" 정면 충족. 로그인 사용자(토큰 有)는 아래 분기 흐름 유지.
+  //   리다이렉트 차단 등 예외 시 화면의 "카페24 연동 시작" 버튼이 폴백.
+  useEffect(() => {
+    if (mallId && !localStorage.getItem('token')) {
+      window.location.replace(`/api/cafe24/oauth/install-start?mall_id=${encodeURIComponent(mallId)}`);
+    }
+  }, [mallId]);
 
   // company_admin이면 현재 카페24 연동 상태 조회
   useEffect(() => {
