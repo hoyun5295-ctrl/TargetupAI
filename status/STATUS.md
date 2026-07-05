@@ -36,6 +36,14 @@
 
 > **회전 룰:** 완료(★배포완료) 엔트리는 원문을 archive/TASKS_YYYY-MM.md로 이동 + INDEX 등재하고, 아래 "최근 완료 인덱스"에 1줄만 남긴다. 30KB 초과 = 회전 미이행 — 즉시 회전.
 
+### 🟢 2026-07-05 (2) — 여정 재점검: 3버그 + 발송 피로도 보호 + 계절감 제거 (전부 ★배포완료) — 상세 [[project_2026_0705_journey_reinforcement]]
+> **① 여정 3버그 (a903f880)**: 네비 "대시보드로 돌아가기" goBackOr→`navigate('/dashboard')`(최상위 이탈, 부모복귀 13곳 유지) / (광고)이중부착=생성·refine·대화형수정 stripAdParts 순수화 + dedup 반각·전각 정규화 `/^\s*[(（]\s*광고\s*[)）]/` 전수(messageUtils·formatDate·프리뷰3·email·spam-filter) / 매장번호 `callback_mode='store'` 미등록 자동실패(callback-filter `isCallbackRegistered`/`getRegisteredCallbackSet` 추출·미차감·여정계속) + /activate `callbackConfirmRequired` 활성화 모달 경고.
+> **② 발송 피로도 보호 (83b85674+DDL)**: 회사 opt-in "N일 광고 M건" 전역 게이트(캠페인·여정·자동마케팅·직접발송 5경로 차감 이전). `fatigue-guard(-core).ts`+`send_fatigue_daily`(company+phone+day KST)+`companies.fatigue_cap_days/max`(42P01/42703 폴백=비활성). Settings 체크박스+프리셋. 광고성만·정보성/수동/시스템 제외. → LESSONS_BACKEND.
+> **③ 계절감 제거**: 여정=상시발송이라 계절 박제 금지 — journey-ai-generator 시즌주입 3지점+SEASON_BY_MONTH 삭제→시간불문 감성·few-shot 재작성, editor 동일. 목표문 명시 시만 반영. 즉시발송(캠페인/자동/DM/인앱) 유지. 기존 초안=AI 다시생성.
+> **로드맵·잔여**: 여정 보완 ②~⑦(목표 즉시이탈·분기·홀드아웃·wait-until-event·채널폴백·STO) 미착수(UI 안 복잡·신규페이지0 원칙) / daily_limit·duplicate_prevention_days=死설정 후속 / 매뉴얼 stale 미수정 / 아임웹 심사대기.
+
+---
+
 ### 🟢 2026-07-05 — 자동마케팅 4수정(배포완료) + 비토 Agent v1.0.8/MMS + 레거시 템플릿 이관 조사
 > **① 자동마케팅 전수점검 4수정 (★배포완료, 커밋 38c06ea8)**: 발송 상한(LIMIT 10000) 제거 = 서버사이드 staging INSERT(operator-recipients `buildSendableStagingInsertSql`·customer-send-stats `recordCustomerSendsByFilter`, 상한 없음) / 크레딧 차감 유실 차단('sent' 전환을 차감 성공에 종속→reconcile 재차감) / approve 라우트 `isAiOperatorAllowed` 게이트 / non-ad→광고 라벨. 통제선=고객 예산·선불 잔액(우리 강제상한 0). tsc0·순수17.
 > **② 비토 Agent v1.0.8 MMS (Agent 배포완료·Gateway v135 대기)**: 라인13 MMS 이미지 누락 진단(앱 정상, Agent가 파일 미독) → 조언문서 → 자비스 당일 v135/v1.0.8. Agent v1.0.5→1.0.7→1.0.8 교체 + `mms:` config. **Gateway v135(139.150.81.213) 반영 + E2E 미실측 대기**. OPS.md §6-2 갱신. 상세 [[project_2026_0705_bito_agent_v108_mms]].
@@ -52,14 +60,6 @@
 > **⑥ 스크롤 복원 전역 통일 (코드완료·tsc0·미배포)**: BrowserRouter(비-데이터 라우터)라 직접 구현 — `ScrollManager`(POP=이전 위치 복원 / PUSH=top, 6/28 '메뉴=최상단' 유지) + 뒤로가기 버튼 14곳 `goBackOr(navigate, fallback)`(앱 히스토리 있으면 navigate(-1)=POP). 옛 `ScrollToTop` 폐기. [[feedback_scroll_restoration_convention]]. → LESSONS_FRONTEND.
 > **⑦ 직접발송 정리 (코드완료·tsc0·미배포)**: 브랜드링크(BrandLinkChips) 직접발송에서만 제거(유료 3곳=브랜드보이스·직접타겟발송·에디터 유지) + 스팸필터·AI다듬기 미가입 게이팅을 표준 `PlanUpgradeModal`로 통일(구식 SpamFilterLockModal·AiRefineLockedModal 삭제).
 > **잔여**: ③④⑤⑥⑦ tp-push + frontend `build:safe` / backend(③④⑤) `pm2 restart all` / **★서버 psql 2세트: best_copy_seed_usage·best_copy_assets(CREATE) + ai_training_logs.click_count·conversion_count(ADD)** — 코드 42P01/42703 폴백이라 순서 자유(SCHEMA.md 등재). 배포 후 실측(라인13 요약 성공 3·베스트문안 채굴→승인 E2E·스크롤 뒤로가기 복원·직접발송 게이팅 모달).
-
----
-
-### 🟢 2026-07-04 — 문안 퀄리티 엔진 + 비토 자체게이트웨이 E2E + 메모리 관제탑 정리
-> **① 문안 퀄리티 엔진(cold-start) — 코드완료·tsc0·vitest35/35 / 1차 배포됨·fix분 재배포 대기**: GPT 차별화 목표. 계획1 자기검수 루프(스팸 회피 — generateMessages 기존 재생성 루프에 접합, 중복0) / 계획2 업종 베스트 주입(탈색·베스트랭커·검색+조립기 + 슈퍼관리자 시드 큐레이션 모달 — sentinel tenant=**스키마 ALTER 0**) / 계획3 라벨 누수 차단(`:kakao` 평문화 + 라벨 전용 스윕=여정·브랜드, campaign-lifecycle 환불루프와 분리=이중환불0) / 별건 예측 '일반' 클릭 0.12 두 벌 정렬. ★검수 후 fix(재배포 필요): `final_source` CHECK 제약(ck_training_final_source) 위반→'manual' + 탈색에 개인화토큰·수신자이름(PII) 제거·저가치 제외 + 모달 페이징(5/page·선택유지·가독). 설계·계획=docs/superpowers/{specs/2026-07-04-copy-quality-engine-design.md, plans/2026-07-04-copy-quality-engine-plan1·2.md}. 상세 [[project_2026_0704_copy_quality_engine]]. 후속: 여정 SMS/LMS 라벨·성과 Tier2 귀속 엔진.
-> **② 비토 자체게이트웨이(라인13) SMSQ_SEND_13 E2E 완주 ★**: 앱→라인13 한글 SMS 정상(status_code 100→6). 픽업 0 원인=비토 Agent 스펙 외 `bill_id LIKE 'BITOTEST-%'` where_extra(한줄로 무결). 한줄로 코드 수정 0(자비스 게이트웨이+설정 수정). 상세 [[project_2026_0704_bito_gateway_pickup_rootcause]].
-> **③ 메모리 관제탑 정리**: MEMORY.md 인덱스 축소 — 완료 프로젝트 36건을 memory/archive/ + archive/INDEX.md 카탈로그로(누락 0).
-> **잔여**: ① fix분 재배포(백엔드 build:safe+pm2 / 프론트 빌드+Ctrl+F5) + 배포 후 실측(여정 KAKAO 라벨 환류·시드 큐레이션 채굴→승인 E2E·스팸 유도 시 재생성).
 
 ---
 
@@ -100,6 +100,8 @@
 ---
 
 ### 최근 완료 인덱스 (원문 = 링크의 월별 아카이브)
+
+- 🟢 2026-07-04 — 문안 퀄리티 엔진(cold-start, GPT 차별화·fix분 재배포 대기) + 비토 자체게이트웨이 라인13 E2E 완주 + 메모리 관제탑 정리 → [archive/TASKS_2026-07.md](archive/TASKS_2026-07.md)
 
 - 🟢 2026-07-02 (6) — 자동마케팅 완성: 발송 전 흐름 스펙 + 일일 분석 엔진(오늘의 추천) + 회고·ROI·캘린더·D-2 준비 → [archive/TASKS_2026-07.md](archive/TASKS_2026-07.md)
 - 🟢 2026-07-02 (5) — DM 추적 근본 수리(본문 파서) + 상세 추적/버튼 단위 + AI 학습 메모리 자동 전송 + 디자인 v2 → [archive/TASKS_2026-07.md](archive/TASKS_2026-07.md)

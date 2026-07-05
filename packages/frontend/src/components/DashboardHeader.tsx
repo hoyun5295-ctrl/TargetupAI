@@ -31,8 +31,8 @@ interface DashboardHeaderProps {
   onAiOperatorClick?: () => void;
 }
 
-// ★ D222+ Phase 1 (2026-05-27): AI Operator 메뉴 제거 + 매뉴얼 (NEW) 메뉴 신규 추가.
-//   'new' 색상 = 매뉴얼 메뉴 강조 (그라데이션 violet→fuchsia).
+// ★ D222+ Phase 1 (2026-05-27): AI Operator 메뉴 제거. 2026-07-05 매뉴얼 메뉴 → 푸터 이동(Dashboard.tsx).
+//   'new' 색상 = 신규 메뉴 강조 (그라데이션 violet→fuchsia, 현재 'AI Operator 소개').
 type MenuColor = 'green' | 'gold' | 'gray' | 'beta' | 'new';
 
 interface MenuItem {
@@ -105,14 +105,8 @@ export default function DashboardHeader({
   const menuItems: MenuItem[] = [
     // ★ D222+ Phase 1 (2026-05-27): AI Operator (BETA) 메뉴 영구 제거 — Dashboard 우측 카드 "AI Operator" 라벨 통합 진입.
     //   onAiOperatorClick prop = 호환성 유지 (Dashboard 우측 카드 클릭 callback). 헤더 메뉴 영역 = 제거.
-    // ★ D222+ Phase 1: 매뉴얼 (NEW) 메뉴 신규 추가 — manual.html 새 탭 진입.
-    {
-      label: '매뉴얼',
-      onClick: () => window.open('/manual/manual.html', '_blank', 'noopener'),
-      color: 'new',
-      newBadge: true,
-    },
-    // ★ AI Operator 소개 — about-ai-operator.html 새 탭 진입(매뉴얼과 동일 패턴). 모든 요금제 공통(게이팅 없음).
+    // ★ 2026-07-05 (Harold 명시): 헤더 '매뉴얼' 메뉴 제거 → 하단 푸터 링크로 복귀 (Dashboard.tsx 푸터). 헤더 간소화.
+    // ★ AI Operator 소개 — about-ai-operator.html 새 탭 진입. 모든 요금제 공통(게이팅 없음).
     {
       label: 'AI Operator 소개',
       onClick: () => window.open('/about-ai-operator.html', '_blank', 'noopener'),
