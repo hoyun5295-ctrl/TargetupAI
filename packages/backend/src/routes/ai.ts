@@ -1998,12 +1998,16 @@ router.post('/operator/marketing-calendar/generate', async (req: Request, res: R
     const { buildCalendarSystemPrompt, buildCalendarUserMessage, buildCalendarRepairMessage, missingCalendarMonths, sanitizeCalendarEntries } = await import('../utils/marketing-calendar-policy');
     const { extractJsonObject } = await import('../utils/daily-brief-policy');
     const kstMonth = new Date(Date.now() + 9 * 60 * 60 * 1000).getUTCMonth() + 1;
+    // ★ 2026-07-05 P2-6: 회사 실데이터 컨텍스트(월별 구매 실측·학습 메모리·기존 캠페인) — best-effort, 실패 축은 생략
+    const { buildCompanyCalendarContext } = await import('../utils/marketing-calendar-store');
+    const companyCtx = await buildCompanyCalendarContext(companyId);
     const calendarInput = {
       businessType: info.business_type || null,
       brandName: info.brand_name || null,
       brandTone: info.brand_tone || null,
       customerCount: Number(cntRes.rows[0]?.n) || 0,
       currentMonth: kstMonth,
+      ...companyCtx,
     };
 
     // ★ 2026-07-05 차감 구조 정정 — 옛 구조는 AI 응답 시점에 50 차감 → sanitize가 혜택 포함 달을 버려
@@ -2061,6 +2065,95 @@ router.post('/operator/marketing-calendar/generate', async (req: Request, res: R
     }
     console.error('[MarketingCalendar] 생성 오류:', err);
     return res.status(500).json({ success: false, error: err?.message || '캘린더 설계 실패' });
+  }
+});
+
+// ★ 2026-07-05 P3: 한 달만 다시 설계 — 10크레딧(12×10 > 전체 50이라 부분 재생성으로 전체 우회 불가).
+//   20 미만이라 사전 모달 비대상(버튼에 비용 명시 + 차감 후 토스트). 성공 반환 시에만 차감(멱등키).
+router.post('/operator/marketing-calendar/regenerate-month', async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+    const planCtx = await loadPlanContext(companyId);
+    if (!planCtx) return res.status(404).json({ success: false, error: '회사 정보를 찾을 수 없습니다.' });
+    if (!isAiOperatorAllowed(planCtx, req.user)) {
+      return res.status(403).json({ success: false, error: '본 기능은 엔터프라이즈 베타 운영 중입니다.', code: 'BETA_GATE' });
+    }
+    const month = Math.floor(Number(req.body?.month));
+    if (!(month >= 1 && month <= 12)) {
+      return res.status(400).json({ success: false, error: 'month는 1~12 사이여야 합니다.' });
+    }
+
+    const { getSavedCalendar, saveCalendarEntries, getActiveRegistration, buildCompanyCalendarContext } = await import('../utils/marketing-calendar-store');
+    const saved = await getSavedCalendar(companyId);
+    if (!saved || saved.entries.length === 0) {
+      return res.status(404).json({ success: false, error: '저장된 설계가 없습니다. 먼저 1년 설계를 생성해주세요.' });
+    }
+    const registered = await getActiveRegistration(companyId, month);
+    if (registered) {
+      return res.status(409).json({ success: false, error: `${month}월은 이미 자동마케팅으로 등록되어 있어 다시 설계할 수 없습니다.`, code: 'CALENDAR_MONTH_ALREADY_REGISTERED' });
+    }
+
+    const cost = getCreditCost('marketing-calendar-month');
+    await checkCredit(companyId, cost);
+    const userId = req.user?.userId ? String(req.user.userId) : undefined;
+
+    const [infoRes, cntRes] = await Promise.all([
+      query(`SELECT business_type, brand_name, brand_tone FROM companies WHERE id = $1::uuid`, [companyId]),
+      query(`SELECT COUNT(*)::int AS n FROM customers WHERE company_id = $1::uuid AND is_active = true`, [companyId]),
+    ]);
+    const info = infoRes.rows[0] || {};
+    const { buildCalendarSystemPrompt, buildCalendarRepairMessage, sanitizeCalendarEntries } = await import('../utils/marketing-calendar-policy');
+    const { extractJsonObject } = await import('../utils/daily-brief-policy');
+    const kstMonth = new Date(Date.now() + 9 * 60 * 60 * 1000).getUTCMonth() + 1;
+    const companyCtx = await buildCompanyCalendarContext(companyId);
+    const calendarInput = {
+      businessType: info.business_type || null,
+      brandName: info.brand_name || null,
+      brandTone: info.brand_tone || null,
+      customerCount: Number(cntRes.rows[0]?.n) || 0,
+      currentMonth: kstMonth,
+      ...companyCtx,
+    };
+
+    // 보정 요청 빌더 재사용 — 대상 달 하나만 다시 설계
+    const text = await callAIWithFallback({
+      system: buildCalendarSystemPrompt(),
+      userMessage: buildCalendarRepairMessage(calendarInput, [month]),
+      maxTokens: 1200,
+      temperature: 0.5,
+      model: 'opus',
+      companyId,
+      userId,
+      source: 'marketing-calendar-month',
+      creditCost: 0,
+    });
+    const regenerated = sanitizeCalendarEntries(extractJsonObject(text)?.entries);
+    const entry = regenerated.find((e) => e.month === month);
+    if (!entry) {
+      return res.status(502).json({ success: false, error: '해당 달 재설계에 실패했습니다. 크레딧은 차감되지 않았습니다. 잠시 후 다시 시도해주세요.' });
+    }
+
+    await deductCreditSafe({
+      companyId,
+      cost,
+      source: 'marketing-calendar-month',
+      createdBy: userId ?? null,
+      idempotencyKey: `marketing-calendar-month:${companyId}:${randomUUID()}`,
+    });
+    const merged = [...saved.entries.filter((e) => e.month !== month), entry].sort((a, b) => a.month - b.month);
+    try {
+      await saveCalendarEntries(companyId, merged);
+    } catch (saveErr: any) {
+      console.log('[MarketingCalendar] 한 달 재설계 저장 실패(재설계는 성공):', saveErr?.message || saveErr);
+    }
+    return res.json({ success: true, entry, entries: merged });
+  } catch (err: any) {
+    if (err instanceof InsufficientCreditError) {
+      return res.status(402).json({ success: false, error: 'AI 크레딧이 부족합니다.', code: 'INSUFFICIENT_CREDIT' });
+    }
+    console.error('[MarketingCalendar] 한 달 재설계 오류:', err);
+    return res.status(500).json({ success: false, error: err?.message || '한 달 재설계 실패' });
   }
 });
 

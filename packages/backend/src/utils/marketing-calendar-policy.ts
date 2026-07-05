@@ -62,17 +62,54 @@ export interface CalendarPromptInput {
   brandTone: string | null;
   customerCount: number;
   currentMonth: number;
+  // ★ 2026-07-05 P2-6 — 회사 실데이터 컨텍스트. 없으면 해당 절 생략(업종 일반론 폴백) — 임의 상수 생성 금지.
+  monthlyRevenue?: Array<{ month: number; purchases: number; revenue: number }>;
+  memoryContext?: string;
+  existingCampaigns?: Array<{ name: string; schedule: string; scheduleMonth: number | null; scheduleDayOfMonth: number | null }>;
+}
+
+/** 기존 캠페인 주기 라벨 — 프롬프트 표기용 순수 포맷. */
+function formatCampaignCadence(c: { schedule: string; scheduleMonth: number | null; scheduleDayOfMonth: number | null }): string {
+  if (c.schedule === 'yearly' && c.scheduleMonth) return `매년 ${c.scheduleMonth}월${c.scheduleDayOfMonth ? ` ${c.scheduleDayOfMonth}일` : ''}`;
+  if (c.schedule === 'monthly') return `매월${c.scheduleDayOfMonth ? ` ${c.scheduleDayOfMonth}일` : ''}`;
+  if (c.schedule === 'weekly') return '매주';
+  return '매일';
 }
 
 export function buildCalendarUserMessage(input: CalendarPromptInput): string {
-  return `## 회사 정보
+  const parts: string[] = [`## 회사 정보
 - 업종: ${input.businessType || '(미설정)'}
 - 브랜드: ${input.brandName || '(미설정)'}
 - 톤앤매너: ${input.brandTone || '(미설정)'}
 - 고객 DB: ${input.customerCount.toLocaleString()}명
-- 현재 월: ${input.currentMonth}월
+- 현재 월: ${input.currentMonth}월`];
 
-이 회사의 1년치 시즌 캠페인 캘린더를 JSON으로 설계하세요.`;
+  // ★ 2026-07-05 P2-6: 이 회사의 실제 구매 계절성 — 업종 일반론이 아니라 실측 기반 설계
+  if (input.monthlyRevenue && input.monthlyRevenue.length > 0) {
+    const rows = input.monthlyRevenue
+      .map((r) => `- ${r.month}월: 구매 ${r.purchases.toLocaleString()}건 / 매출 ${Math.round(r.revenue).toLocaleString()}원`)
+      .join('\n');
+    parts.push(`## 최근 12개월 구매 실측(월별, 이 회사 실데이터)
+${rows}
+구매가 몰리는 달은 그 성수기를 살리는 캠페인으로, 약한 달은 수요를 깨우는 캠페인으로 설계하세요.`);
+  }
+
+  if (input.memoryContext && input.memoryContext.trim()) {
+    parts.push(`## 회사 학습 메모리(참고)
+${input.memoryContext.trim()}`);
+  }
+
+  if (input.existingCampaigns && input.existingCampaigns.length > 0) {
+    const rows = input.existingCampaigns
+      .map((c) => `- ${c.name} (${formatCampaignCadence(c)})`)
+      .join('\n');
+    parts.push(`## 이미 운영 중인 자동 캠페인
+${rows}
+위 캠페인과 같은 달에 목적·타겟이 겹치는 설계는 피하세요.`);
+  }
+
+  parts.push('이 회사의 1년치 시즌 캠페인 캘린더를 JSON으로 설계하세요.');
+  return parts.join('\n\n');
 }
 
 /** 정제(sanitize) 후 비어 있는 달(1~12) 목록 — 혜택 필터 등으로 걸러진 달 보정용. */

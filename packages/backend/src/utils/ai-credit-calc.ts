@@ -104,6 +104,8 @@ export const CREDIT_COST_MAP: Record<string, number> = {
   'continuous-operator-send': 10,
   // ★ 2026-07-02 (Harold 명시): 마케팅 캘린더 1년 설계 50 — 생성·재생성 매회 차감(Email 완성 50과 동급). 등록은 'continuous-operator' 200 별도.
   'marketing-calendar': 50,
+  // ★ 2026-07-05: 캘린더 한 달만 다시 설계 10 — 12×10>50이라 부분 재생성으로 전체(50) 우회 불가. 성공 반환 시에만 차감.
+  'marketing-calendar-month': 10,
   // 예측 자동 분석 (3) — 연동 회사(싱크에이전트/SDK) 매일 1회 예측 점수 갱신. 회사+날짜 멱등.
   'predictive-daily': 3,
   // 모바일 DM 생성(돌려보기) 5 — 자연어→sections + 슬라이드 분할 + 전 섹션 카피까지 생성(범위 넓음). 호출마다 5. 발행은 'dm-builder' 30 별도.

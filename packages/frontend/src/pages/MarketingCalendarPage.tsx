@@ -5,7 +5,7 @@
 // 다크 slate + 단일 액센트, native dialog 0(useToast + CreditConfirmModal), 생성 중 로딩 오버레이 + 닫기 차단(D185).
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowLeft, CalendarDays, Sparkles, Loader2, Check, CheckCircle2 } from 'lucide-react';
+import { ArrowLeft, CalendarDays, Sparkles, Loader2, Check, CheckCircle2, RefreshCcw } from 'lucide-react';
 import { useToast } from '../components/ToastProvider';
 import CreditConfirmModal from '../components/credit/CreditConfirmModal';
 
@@ -26,6 +26,8 @@ export default function MarketingCalendarPage() {
   // ★ 2026-07-05: 등록 상태 — { "월": operator_id }. 등록된 달 = 배지 + 재등록 차단
   const [registrations, setRegistrations] = useState<Record<string, string>>({});
   const [generating, setGenerating] = useState(false);
+  // ★ 2026-07-05 P3: 한 달만 다시 설계(10크레딧) — 진행 중인 달 표시
+  const [regenMonth, setRegenMonth] = useState<number | null>(null);
   const [registering, setRegistering] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
   // ★ Harold 명시: 설계 생성·재생성 = 매회 크레딧 차감 → 생성 전 확인 모달
@@ -90,6 +92,30 @@ export default function MarketingCalendarPage() {
 
   const setDay = (month: number, day: number) => {
     setEntries((prev) => prev.map((e) => (e.month === month ? { ...e, suggestedDay: day } : e)));
+  };
+
+  // ★ 2026-07-05 P3: 한 달만 다시 설계 — 10크레딧(20 미만 = 사전 모달 비대상, 버튼에 비용 명시 + 차감 후 토스트)
+  const regenerateMonth = async (month: number) => {
+    if (regenMonth !== null || generating || registering) return;
+    setRegenMonth(month);
+    try {
+      const res = await fetch('/api/ai/operator/marketing-calendar/regenerate-month', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...auth() },
+        body: JSON.stringify({ month }),
+      });
+      const data = await res.json();
+      if (data?.success && data.entry) {
+        setEntries((prev) => prev.map((e) => (e.month === month ? data.entry : e)));
+        toast.success(`${MONTH_LABEL[month]} 캠페인을 다시 설계했습니다. (10 크레딧)`);
+      } else {
+        toast.error(data?.error || '한 달 재설계에 실패했습니다.');
+      }
+    } catch (e: any) {
+      toast.error(e?.message || '네트워크 오류가 발생했습니다.');
+    } finally {
+      setRegenMonth(null);
+    }
   };
 
   const registerSelected = async () => {
@@ -224,6 +250,17 @@ export default function MarketingCalendarPage() {
                       </select>
                       <span>· 오전 10:00 · 연 1회 · 발송 2시간 전 문안 안내</span>
                     </div>
+                    {!registered && (
+                      <button
+                        type="button"
+                        onClick={() => regenerateMonth(e.month)}
+                        disabled={regenMonth !== null || generating || registering}
+                        className="mt-2.5 inline-flex items-center gap-1.5 text-[11px] text-white/45 hover:text-white/80 disabled:opacity-40 transition-colors"
+                      >
+                        <RefreshCcw className={`w-3 h-3 ${regenMonth === e.month ? 'animate-spin' : ''}`} />
+                        {regenMonth === e.month ? '다시 설계하는 중...' : '이 달만 다시 설계 (10 크레딧)'}
+                      </button>
+                    )}
                   </div>
                 );
               })}

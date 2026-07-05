@@ -36,10 +36,10 @@
 
 > **회전 룰:** 완료(★배포완료) 엔트리는 원문을 archive/TASKS_YYYY-MM.md로 이동 + INDEX 등재하고, 아래 "최근 완료 인덱스"에 1줄만 남긴다. 30KB 초과 = 회전 미이행 — 즉시 회전.
 
-### 🟢 2026-07-05 (3) — 마케팅 캘린더 헛점 12건 분석 + P1·P2 근본 수정 (코드완료·tsc0·vitest 31/31·★미배포 — DDL 2건 선행)
-> **분석**: /marketing-calendar 전 경로 실측 — 치명 3(①시즌 캠페인이 monthly 등록 = 매월 반복 오발송(월 정보가 이름 문자열에만 존재) ②크레딧 모달 200 표시 ≠ 실차감 N×200(기본 12건 전선택=2,400) ③AI 차감 후 sanitize가 혜택 달을 버려 빈손 502/결손 캘린더) + 중대 3(저장 없음=새로고침 증발 / 등록 상태·중복 관리 없음 / 입력 컨텍스트 5필드) + 나머지 6. 운영 등록분 0행 실측(마이그레이션 불요).
-> **수정**: ① `yearly` 스케줄 신설(OperatorScheduleKind/OperatorSchedule + `computeNextOccurrence·computeNextGenerationRun` monthOfYear + `continuous_operators.schedule_month`) — 캘린더 등록=yearly+대상월, 소비 전 경로(create/update/proposal 발송시각/워커 재계산/D-2 준비문자 IN('monthly','yearly')/설정모달·관리목록 UI) 영향표 전수 반영 ② CreditConfirmModal `quantity` prop(표시=단가×N, 기존 호출부 무영향) ③ generate = 사전 checkCredit → 무과금 호출 → 결손 달 1회 보정 재호출(`buildCalendarRepairMessage`) → 성공 반환 시에만 50 차감(멱등키) ④ `marketing-calendar-store.ts` CT 신설(회사 1행 UPSERT·42P01 폴백) + GET /operator/marketing-calendar + 등록 기록/같은 달 409 + 프론트 저장 로드·등록됨 배지.
-> **★DDL 2건(Harold psql, 코드 42703/42P01 폴백이지만 재시작 전 실행 권장)**: `ALTER TABLE continuous_operators ADD COLUMN schedule_month integer;` + `CREATE TABLE company_marketing_calendars(...)`(SCHEMA.md 절 참조). **잔여**: P2-6 컨텍스트 강화(cdp 월별 매출·메모리·기존 오퍼레이터 주입) / P3(월 복수·부분 재생성 가격=Harold 결정 대기·혜택 입력칸·채널·시각 노출).
+### 🟢 2026-07-05 (3) — 마케팅 캘린더 헛점 12건 분석 + 근본 수정 (코드완료·tsc0·vitest 35/35·★미배포 — DDL 2건 선행) — 상세 [[project_2026_0705_marketing_calendar_overhaul]]
+> **치명 3 수정**: ① 시즌 캠페인 monthly 등록=매월 반복 오발송 → `yearly` 스케줄 신설(`schedule_month` 컬럼 + computeNextOccurrence 연간 분기, 소비 전 경로 영향표 반영 — 생성/수정/발송시각/워커/D-2 문자/설정모달/관리목록) ② 모달 200 표시≠실차감 N×200 → CreditConfirmModal `quantity`(표시=단가×N) ③ 차감 후 sanitize 빈손/결손 → 무과금 호출+결손 달 보정 재호출+성공 시에만 50 차감(멱등키). 운영 등록분 0행 실측=마이그레이션 불요.
+> **기능 보강**: `marketing-calendar-store.ts` CT — 설계 서버 저장(회사 1행 UPSERT·42P01 폴백)+GET+등록 기록·같은 달 409·등록됨 배지 / P2-6 설계 컨텍스트(`buildCompanyCalendarContext` — cdp 월별 구매 실측·학습 메모리·활성 캠페인 20 중복 회피, 축별 best-effort) / **한 달만 다시 = 10크레딧**(`marketing-calendar-month`, 12×10>50 우회 차단·20 미만=모달 비대상, regenerate-month endpoint+카드 버튼).
+> **★DDL 2건(재시작 전 실행)**: `ALTER TABLE continuous_operators ADD COLUMN schedule_month integer;` + `CREATE TABLE company_marketing_calendars(...)`(SCHEMA.md 절). **잔여**: P3 소분(월 복수 상한 2·카드 혜택 입력칸·채널/시각 노출·걸러진 달 사유).
 
 ### 🟢 2026-07-05 — 자동마케팅 4수정(배포완료) + 비토 Agent v1.0.8/MMS + 레거시 템플릿 이관 조사
 > **① 자동마케팅 전수점검 4수정 (★배포완료, 커밋 38c06ea8)**: 발송 상한(LIMIT 10000) 제거 = 서버사이드 staging INSERT(operator-recipients `buildSendableStagingInsertSql`·customer-send-stats `recordCustomerSendsByFilter`, 상한 없음) / 크레딧 차감 유실 차단('sent' 전환을 차감 성공에 종속→reconcile 재차감) / approve 라우트 `isAiOperatorAllowed` 게이트 / non-ad→광고 라벨. 통제선=고객 예산·선불 잔액(우리 강제상한 0). tsc0·순수17.

@@ -19,7 +19,7 @@
  */
 
 import { query } from '../config/database';
-import type { CalendarEntry } from './marketing-calendar-policy';
+import type { CalendarEntry, CalendarPromptInput } from './marketing-calendar-policy';
 
 export interface SavedMarketingCalendar {
   entries: CalendarEntry[];
@@ -96,6 +96,65 @@ export async function getActiveRegistration(companyId: string, month: number): P
     if (isMissingTable(err)) return null;
     throw err;
   }
+}
+
+/**
+ * ★ 2026-07-05 P2-6: 캘린더 설계용 회사 실데이터 컨텍스트 — 축별 best-effort(실패 = 그 축만 생략, 설계는 진행).
+ * - monthlyRevenue: cdp_events purchase/order 월별 집계(컬럼 전부 automarketing-roi 배포 실증분 재사용)
+ * - memoryContext: ai_company_memory 요약(buildMemoryPromptContext CT 재사용, 상위 10)
+ * - existingCampaigns: 활성 오퍼레이터 최근 20 — 같은 달 목적 중복 회피 지시용(schedule_month 42703 = 생략)
+ */
+export type CompanyCalendarContext = Pick<CalendarPromptInput, 'monthlyRevenue' | 'memoryContext' | 'existingCampaigns'>;
+
+export async function buildCompanyCalendarContext(companyId: string): Promise<CompanyCalendarContext> {
+  const ctx: CompanyCalendarContext = {};
+  try {
+    const rev = await query(
+      `SELECT EXTRACT(MONTH FROM occurred_at)::int AS month,
+              COUNT(*)::int AS purchases,
+              COALESCE(SUM((properties->>'total_amount')::numeric), 0)::float AS revenue
+         FROM cdp_events
+        WHERE company_id = $1::uuid
+          AND event_name IN ('purchase', 'order')
+          AND occurred_at > NOW() - interval '365 days'
+        GROUP BY 1 ORDER BY 1`,
+      [companyId],
+    );
+    if (rev.rows.length > 0) {
+      ctx.monthlyRevenue = rev.rows.map((r: any) => ({
+        month: Number(r.month), purchases: Number(r.purchases) || 0, revenue: Number(r.revenue) || 0,
+      }));
+    }
+  } catch (e: any) {
+    console.log('[MarketingCalendarStore] 월별 구매 컨텍스트 생략:', e?.message || e);
+  }
+  try {
+    const { buildMemoryPromptContext } = await import('./company-memory');
+    const mem = await buildMemoryPromptContext(companyId, 10);
+    if (mem && mem.trim()) ctx.memoryContext = mem;
+  } catch (e: any) {
+    console.log('[MarketingCalendarStore] 학습 메모리 컨텍스트 생략:', e?.message || e);
+  }
+  try {
+    const ops = await query(
+      `SELECT name, schedule, schedule_month, schedule_day_of_month
+         FROM continuous_operators
+        WHERE company_id = $1::uuid AND status = 'active'
+        ORDER BY created_at DESC LIMIT 20`,
+      [companyId],
+    );
+    if (ops.rows.length > 0) {
+      ctx.existingCampaigns = ops.rows.map((r: any) => ({
+        name: String(r.name || ''),
+        schedule: String(r.schedule || 'daily'),
+        scheduleMonth: r.schedule_month ?? null,
+        scheduleDayOfMonth: r.schedule_day_of_month ?? null,
+      }));
+    }
+  } catch (e: any) {
+    console.log('[MarketingCalendarStore] 기존 캠페인 컨텍스트 생략:', e?.message || e);
+  }
+  return ctx;
 }
 
 /** 등록 기록 — registrations["월"] = operator_id. 행 없으면 생성. 테이블 미생성 = 생략. */

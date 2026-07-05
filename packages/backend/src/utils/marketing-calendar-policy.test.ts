@@ -3,6 +3,7 @@ import { describe, it, expect } from 'vitest';
 import {
   sanitizeCalendarEntries,
   buildCalendarSystemPrompt,
+  buildCalendarUserMessage,
   missingCalendarMonths,
   buildCalendarRepairMessage,
 } from './marketing-calendar-policy';
@@ -63,6 +64,52 @@ describe('missingCalendarMonths — 결손 달 판정 (2026-07-05 보정 재호�
     expect(missing).toContain(3);
     expect(missing).not.toContain(4);
     expect(missing.length).toBe(11);
+  });
+});
+
+describe('buildCalendarUserMessage — P2-6 회사 실데이터 컨텍스트 (2026-07-05)', () => {
+  const base = { businessType: '카페', brandName: '한줄로', brandTone: null, customerCount: 100, currentMonth: 7 };
+
+  it('컨텍스트 미지정 = 기본 프롬프트(절 없음) — 폴백 유지', () => {
+    const msg = buildCalendarUserMessage(base);
+    expect(msg).toContain('## 회사 정보');
+    expect(msg).not.toContain('구매 실측');
+    expect(msg).not.toContain('학습 메모리');
+    expect(msg).not.toContain('운영 중인 자동 캠페인');
+    expect(msg).toContain('1년치 시즌 캠페인 캘린더를 JSON으로 설계');
+  });
+
+  it('월별 구매 실측 절 — 실데이터 행과 설계 지시 포함', () => {
+    const msg = buildCalendarUserMessage({
+      ...base,
+      monthlyRevenue: [{ month: 5, purchases: 120, revenue: 3400000 }, { month: 12, purchases: 300, revenue: 9100000 }],
+    });
+    expect(msg).toContain('구매 실측');
+    expect(msg).toContain('5월: 구매 120건');
+    expect(msg).toContain('3,400,000원');
+    expect(msg).toMatch(/성수기.*캠페인/);
+  });
+
+  it('학습 메모리·기존 캠페인 절 — 내용과 중복 회피 지시 포함', () => {
+    const msg = buildCalendarUserMessage({
+      ...base,
+      memoryContext: '- 금요일 오전 발송 반응이 좋다',
+      existingCampaigns: [
+        { name: '3월 화이트데이', schedule: 'yearly', scheduleMonth: 3, scheduleDayOfMonth: 14 },
+        { name: 'VIP 리텐션', schedule: 'monthly', scheduleMonth: null, scheduleDayOfMonth: 1 },
+      ],
+    });
+    expect(msg).toContain('금요일 오전 발송 반응이 좋다');
+    expect(msg).toContain('3월 화이트데이 (매년 3월 14일)');
+    expect(msg).toContain('VIP 리텐션 (매월 1일)');
+    expect(msg).toMatch(/겹치.*피하/);
+  });
+
+  it('빈 배열·빈 문자열 컨텍스트 = 절 생략', () => {
+    const msg = buildCalendarUserMessage({ ...base, monthlyRevenue: [], memoryContext: '  ', existingCampaigns: [] });
+    expect(msg).not.toContain('구매 실측');
+    expect(msg).not.toContain('학습 메모리');
+    expect(msg).not.toContain('운영 중인 자동 캠페인');
   });
 });
 

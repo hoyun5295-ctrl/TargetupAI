@@ -90,7 +90,7 @@ export const CREDIT_SOURCE_LABELS: Record<string, string> = {
   'journey-ai-generate': '여정 생성', 'journey-builder-custom': '여정 생성',
   'journey-activate': '여정 활성화', 'journey-operation': '여정 운영',
   'continuous-operator': '자동 마케팅', 'continuous-operator-send': '자동 마케팅 발송',
-  'marketing-calendar': '마케팅 캘린더 설계',
+  'marketing-calendar': '마케팅 캘린더 설계', 'marketing-calendar-month': '마케팅 캘린더 한 달 재설계',
   'predictive-daily': '예측 분석',
   'dm-ai-generate': '모바일 DM 생성', 'dm-builder': '모바일 DM 발행', 'dm-interaction-publish': '인터랙션 DM 발행',
   'inapp-ai-generator': '인앱 생성', 'inapp-publish': '인앱 게시', 'inapp-quick-action': '인앱 다듬기',
