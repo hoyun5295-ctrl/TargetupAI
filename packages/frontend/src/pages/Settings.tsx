@@ -46,6 +46,9 @@ export default function Settings() {
     target_strategy: 'balanced',
     cross_category_allowed: true,
     approval_required: false,
+    // ★ 2026-07-05 발송 피로도 보호 — null = 비활성(제한 없음). 둘 다 설정해야 동작.
+    fatigue_cap_days: null as number | null,
+    fatigue_cap_max: null as number | null,
   });
 
   useEffect(() => {
@@ -379,6 +382,56 @@ export default function Settings() {
                 <input type="checkbox" checked={settings.holiday_send_allowed} onChange={(e) => setSettings({ ...settings, holiday_send_allowed: e.target.checked })} className="h-4 w-4 rounded accent-violet-600" />
                 <span className="text-sm text-gray-700">휴일 발송 허용</span>
               </label>
+
+              {/* ★ 2026-07-05 발송 피로도 보호 — opt-in. 끄면(미설정) 제한 없음(현행 그대로) */}
+              <div className="mt-3 rounded-xl border border-gray-100 bg-gray-50 p-3">
+                <label className="flex w-fit cursor-pointer items-center gap-2">
+                  <input
+                    type="checkbox"
+                    checked={settings.fatigue_cap_days != null && settings.fatigue_cap_max != null}
+                    onChange={(e) => setSettings({ ...settings, fatigue_cap_days: e.target.checked ? 7 : null, fatigue_cap_max: e.target.checked ? 3 : null })}
+                    className="h-4 w-4 rounded accent-violet-600"
+                  />
+                  <span className="text-sm text-gray-700">발송 피로도 보호</span>
+                </label>
+                <p className="mt-1 text-[11px] text-gray-400">
+                  최근 N일 안에 광고 메시지(문자·알림톡 합산)를 M건 이상 받은 고객을 모든 자동·타겟 발송에서 자동 제외합니다.
+                  정보성 메시지와 직접 입력한 수신자는 제한하지 않습니다.
+                </p>
+                {settings.fatigue_cap_days != null && settings.fatigue_cap_max != null && (
+                  <div className="mt-2 flex flex-wrap items-center gap-2">
+                    {[{ label: '주 1건', days: 7, max: 1 }, { label: '주 2건', days: 7, max: 2 }, { label: '주 3건', days: 7, max: 3 }].map((p) => (
+                      <button
+                        key={p.label}
+                        type="button"
+                        onClick={() => setSettings({ ...settings, fatigue_cap_days: p.days, fatigue_cap_max: p.max })}
+                        className={`rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors ${settings.fatigue_cap_days === p.days && settings.fatigue_cap_max === p.max ? 'border-violet-300 bg-violet-50 text-violet-700' : 'border-gray-200 bg-white text-gray-600 hover:bg-gray-100'}`}
+                      >
+                        {p.label}
+                      </button>
+                    ))}
+                    <span className="ml-1 text-xs text-gray-500">직접 설정: 최근</span>
+                    <input
+                      type="number"
+                      min={1}
+                      max={30}
+                      value={settings.fatigue_cap_days}
+                      onChange={(e) => setSettings({ ...settings, fatigue_cap_days: Math.max(1, Math.min(30, Number(e.target.value) || 1)) })}
+                      className="w-16 rounded-lg border border-gray-200 px-2 py-1.5 text-center text-xs"
+                    />
+                    <span className="text-xs text-gray-500">일 동안</span>
+                    <input
+                      type="number"
+                      min={1}
+                      max={100}
+                      value={settings.fatigue_cap_max}
+                      onChange={(e) => setSettings({ ...settings, fatigue_cap_max: Math.max(1, Math.min(100, Number(e.target.value) || 1)) })}
+                      className="w-16 rounded-lg border border-gray-200 px-2 py-1.5 text-center text-xs"
+                    />
+                    <span className="text-xs text-gray-500">건까지 허용</span>
+                  </div>
+                )}
+              </div>
             </section>
           )}
 

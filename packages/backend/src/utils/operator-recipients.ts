@@ -11,6 +11,8 @@
  *   고객(message_click)을 제외(미반응자만). 미지정이면 기존 동작 불변. cdp_events 회사 격리($1) 정합.
  */
 import { buildJourneySafetyFilter } from './journey-safety-filter';
+// ★ 2026-07-05: 발송 피로도 보호 — 순수 clause 빌더(DB import 0)라 본 모듈 순수성 유지.
+import { buildFatigueGuardClause, FatigueCap } from './fatigue-guard-core';
 
 export function buildSendableRecipientsSql(
   filterWhere: string,   // buildFilterWhereClauseCompat(...).sql ('' 가능)
@@ -62,6 +64,8 @@ export function buildSendableStagingInsertSql(
   filterParams: any[],
   storeFilter: string,   // operator 발송은 '' (store-scope 없음). 넘길 경우 $1=company 기준으로 합성됨.
   excludeClickedSince?: Date | null,
+  // ★ 2026-07-05: 발송 피로도 보호 — cap 지정 시 최근 N일 M건+ 수신자를 추출 단계에서 제외(차감 전 = 환불 불필요)
+  fatigueCap?: FatigueCap | null,
 ): { sql: string; params: any[] } {
   const params: any[] = [companyId, ...filterParams];
   let clickGuard = '';
@@ -76,6 +80,7 @@ export function buildSendableStagingInsertSql(
             AND ce.occurred_at >= $${params.length}
        )`;
   }
+  const fatigueGuard = fatigueCap ? buildFatigueGuardClause(params, fatigueCap, 'c') : '';
   params.push(stagingId);
   const stgIdx = params.length;
   const sql =
@@ -87,6 +92,7 @@ export function buildSendableStagingInsertSql(
         AND ${buildJourneySafetyFilter('c')}
         ${storeFilter}
         ${filterWhere}
-        ${clickGuard}`;
+        ${clickGuard}
+        ${fatigueGuard}`;
   return { sql, params };
 }

@@ -109,6 +109,8 @@ import { startCdpWebhookRetryWorker } from './utils/cdp-webhook-retry-worker';
 import { startCdpProfileRecomputeWorker } from './utils/cdp-profile-recompute-worker';
 // ★ 2026-06-13: 시스템 크리티컬 감지 워커 (발송 큐 지연 정체 + 싱크에이전트 중단 → 운영자 문자 통지)
 import { startSystemMonitorWorker } from './utils/system-monitor-worker';
+// ★ 2026-07-05: 발송 피로도 보호 — send_fatigue_daily 45일 초과 버킷 프루닝 (6시간 주기)
+import { startFatiguePruneWorker } from './utils/fatigue-guard';
 
 // 공용 관리 라우트 (슈퍼관리자 + 고객사관리자)
 import manageUsersRoutes from './routes/manage-users';
@@ -430,6 +432,9 @@ app.listen(PORT, () => {
   // ★ 2026-06-13: 시스템 크리티컬 감지 (5분 주기) — 발송 큐 지연 정체 + 싱크에이전트 중단을
   //   운영자 문자(SYSTEM_ALERT_PHONES)로 직접 통지. 톤28 지연 실발송·인비토 동기화 중단 실측 후속.
   startSystemMonitorWorker();
+
+  // ★ 2026-07-05: 발송 피로도 보호 — 일일 버킷 프루닝 (6시간 주기, 42P01 무해)
+  startFatiguePruneWorker();
 
   // ★ 2026-06-13: 예약 Email 발송 + 정체 캠페인 복구 (1분 주기) — scheduled 도래 발송 + sending 30분+ 정체 failed
   startEmailSendSweeper();

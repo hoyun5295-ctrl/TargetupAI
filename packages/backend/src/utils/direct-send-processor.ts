@@ -15,6 +15,8 @@ import { fillAlimtalkVarMap } from './alimtalk-vars';
 import { bulkInsertSmsQueue, insertKakaoQueue, insertAlimtalkQueue, toQtmsgType } from './sms-queue';
 import { normalizeMmsImagePaths } from './mms-image-util';
 import { resolveCustomerCallback } from './callback-filter';
+// ★ 2026-07-05: 발송 피로도 카운터 (광고성 발송 기록 — 발송 무영향 fire-and-forget)
+import { recordFatigueSends } from './fatigue-guard';
 import { buildAlimtalkEtcJson } from './alimtalk-emphasize';
 
 /** 청크 1건 수신자 — worker가 staging row + 계산된 sendTime을 채워 전달 */
@@ -250,6 +252,11 @@ export async function processSendChunk(p: SendChunkParams): Promise<SendChunkRes
       console.error('[direct-send-processor] 알림톡 INSERT 실패:', alimtalkErr);
       sentCount = 0;
     }
+  }
+
+  // ★ 2026-07-05 발송 피로도 카운터 — 광고성만, 큐 커밋 후 fire-and-forget (staging 대량·자동마케팅 발송 공용 지점)
+  if (p.finalIsAd && sentCount > 0) {
+    void recordFatigueSends(p.companyId, recipients.map((r) => String(r.phone || '')));
   }
 
   return { sentCount, failedCount: recipients.length - sentCount };

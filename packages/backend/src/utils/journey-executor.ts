@@ -48,6 +48,8 @@ import {
 } from './messageUtils';
 import { resolveJourneyAdFlag } from './journey-ad-policy';
 import { isCallbackRegistered } from './callback-filter';
+// ★ 2026-07-05: 발송 피로도 보호 — 광고 step 단건 게이트(차감 전 skip) + 발송 카운터
+import { getFatigueCap, isFatigueBlocked, recordFatigueSends } from './fatigue-guard';
 import { prepaidDeduct } from './prepaid';
 import { deductCreditSafe } from './ai-credit';
 import { getCreditCost, kstDateTag } from './ai-credit-calc';
@@ -430,6 +432,17 @@ async function processExecution(exec: ExecutionRow): Promise<StepOutcome> {
     return 'failed';
   }
 
+  // ★ 2026-07-05 발송 피로도 보호 — 회사 opt-in + 광고성 step만. 이 step 발송만 skip(비용 0·여정은 계속 진행,
+  //   다음 step 시점에 윈도우가 풀리면 정상 발송). 정보성 알림톡(is_ad=false)은 게이트 대상 아님.
+  if (resolveJourneyAdFlag(step.channel, step.is_ad)) {
+    const fatigueCap = await getFatigueCap(exec.company_id);
+    if (fatigueCap && (await isFatigueBlocked(exec.company_id, fatigueCap, customer.phone))) {
+      await logSkippedStep(exec.execution_id, step.id, 'fatigue_capped');
+      await advanceOrComplete(exec, step, 0);
+      return 'skipped_opt_out';
+    }
+  }
+
   // ★ D188 Phase 2-B-2 (2026-05-21): channel 분기 — SMS/LMS/MMS = 기존 prepareSendMessage 흐름 / KAKAO = kakao_templates 조회 + alimtalk_variable_map 치환 + insertAlimtalkQueue.
   // 6. 메시지 + 비용 계산
   const channelLower = (step.channel || 'lms').toLowerCase();
@@ -791,6 +804,11 @@ async function processExecution(exec: ExecutionRow): Promise<StepOutcome> {
         (msgType === 'MMS' && step.mms_image_paths && step.mms_image_paths[2]) ? extractBasename(step.mms_image_paths[2]) : '',
       ];
       await bulkInsertSmsQueue(tables, [row], true);
+    }
+
+    // ★ 2026-07-05 발송 피로도 카운터 — 광고성만(알림톡 정보성 제외), 큐 커밋 후 fire-and-forget
+    if (isAd) {
+      void recordFatigueSends(exec.company_id, [String(customer.phone || '')]);
     }
   } catch (sendErr: any) {
     // ★ D218+ (2026-05-26) 통신사 일시 fail 분기 — error_count < 1 = 5분 후 자동 재시도 1회 / 그 이상 = autoPauseExecution + pauseJourney.

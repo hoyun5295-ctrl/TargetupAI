@@ -36,6 +36,8 @@ import { cancelCampaign, syncCampaignResults, cleanupScheduledCampaigns } from '
 import { buildFilterQueryCompat } from '../utils/customer-filter';
 import { findUnfilledAlimtalkVars, fillAlimtalkVarMap } from '../utils/alimtalk-vars';
 import { filterByIndividualCallback, buildCallbackErrorResponse, buildCallbackConfirmResponse, resolveCustomerCallback } from '../utils/callback-filter';
+// ★ 2026-07-05: 발송 피로도 보호 — 회사 opt-in "최근 N일 광고 M건" 게이트(차감 전 제외) + 광고 발송 카운터
+import { getFatigueCap, getFatigueBlockedSet, recordFatigueSends } from '../utils/fatigue-guard';
 import { deduplicateByPhone } from '../utils/deduplicate';
 import { getUserTestContacts } from '../utils/test-contact-helper';
 import { validateScheduledAt } from '../utils/campaign-validation';
@@ -724,6 +726,23 @@ if (filteredCustomers.length === 0) {
   return res.status(400).json(errBody);
 }
 
+// ★ 2026-07-05 발송 피로도 보호 — 회사 opt-in(fatigue_cap) + 광고 캠페인만. 차감·run 생성 전 제외라 환불 배관 불필요.
+let fatigueSkippedCount = 0;
+if (campaign.is_ad) {
+  const fatigueCap = await getFatigueCap(companyId);
+  if (fatigueCap) {
+    const blockedSet = await getFatigueBlockedSet(companyId, fatigueCap, filteredCustomers.map((c: any) => c.phone));
+    if (blockedSet.size > 0) {
+      const beforeFatigue = filteredCustomers.length;
+      filteredCustomers = filteredCustomers.filter((c: any) => !blockedSet.has(normalizePhone(c.phone)));
+      fatigueSkippedCount = beforeFatigue - filteredCustomers.length;
+    }
+    if (filteredCustomers.length === 0) {
+      return res.status(400).json({ error: `발송 대상이 없습니다. (피로도 보호 ${fatigueSkippedCount}명 제외)`, fatigueSkippedCount });
+    }
+  }
+}
+
     // ★ D100: 동일 캠페인 중복 발송 방지 — 이미 sending/scheduled run이 있으면 차단
     const existingRun = await query(
       `SELECT id FROM campaign_runs WHERE campaign_id = $1 AND status IN ('sending', 'scheduled') LIMIT 1`,
@@ -876,6 +895,11 @@ for (const kakaoItem of aiKakaoQueue) {
   }
 }
 
+// ★ 2026-07-05 발송 피로도 카운터 — 광고성만, 큐 커밋 후 fire-and-forget(발송·응답 무영향)
+if (campaign.is_ad) {
+  void recordFatigueSends(companyId, filteredCustomers.map((c: any) => String(c.phone || '')));
+}
+
 // ★ C1: 부분 실패 시 실패분만 선별적 환불
 const aiFailCount = filteredCustomers.length - aiSentCount;
 if (aiFailCount > 0) {
@@ -933,7 +957,7 @@ await query(
       });
 
       return res.json({
-      message: `${aiSentCount}건 발송이 시작되었습니다.${aiFailCount > 0 ? ` (${aiFailCount}건 실패, 자동 환불)` : ''}${callbackMissingCount > 0 ? ` (회신번호 없음 ${callbackMissingCount}명 제외)` : ''}${callbackUnregisteredCount > 0 ? ` (미등록 회신번호 ${callbackUnregisteredCount}명 제외)` : ''}`,
+      message: `${aiSentCount}건 발송이 시작되었습니다.${aiFailCount > 0 ? ` (${aiFailCount}건 실패, 자동 환불)` : ''}${callbackMissingCount > 0 ? ` (회신번호 없음 ${callbackMissingCount}명 제외)` : ''}${callbackUnregisteredCount > 0 ? ` (미등록 회신번호 ${callbackUnregisteredCount}명 제외)` : ''}${fatigueSkippedCount > 0 ? ` (피로도 보호 ${fatigueSkippedCount}명 제외)` : ''}`,
       sentCount: aiSentCount,
       failCount: aiFailCount,
       callbackSkippedCount,
@@ -1562,6 +1586,27 @@ router.post('/direct-send', async (req: Request, res: Response) => {
       }
     }
 
+    // ★ 2026-07-05 발송 피로도 보호 — 고객DB 타겟 행(r.id 보유)만 게이트.
+    //   수동 입력/파일 행(id 없음) = 사용자 명시 행동이라 제외하지 않음 (Harold 확정 정책).
+    let directFatigueSkipped = 0;
+    if (adEnabled === true) {
+      const directFatigueCap = await getFatigueCap(companyId);
+      if (directFatigueCap) {
+        const dbRows = finalRecipients.filter((r: any) => r.id);
+        if (dbRows.length > 0) {
+          const blockedSet = await getFatigueBlockedSet(companyId, directFatigueCap, dbRows.map((r: any) => String(r.phone || '')));
+          if (blockedSet.size > 0) {
+            const beforeFatigue = finalRecipients.length;
+            finalRecipients = finalRecipients.filter((r: any) => !r.id || !blockedSet.has(normalizePhone(String(r.phone || ''))));
+            directFatigueSkipped = beforeFatigue - finalRecipients.length;
+          }
+        }
+        if (finalRecipients.length === 0) {
+          return res.status(400).json({ success: false, error: `발송 대상이 없습니다. (피로도 보호 ${directFatigueSkipped}명 제외)`, fatigueSkippedCount: directFatigueSkipped });
+        }
+      }
+    }
+
     // ★ D91: LMS/MMS 제목 필수 검증
     // ★ D218+ (2026-05-26) PDF 신고 #4 사고 정정: alimtalk 발송 path (frontend msgType='LMS' 강제 설정 — D162-4 정합)
     //   에서 alimtalkNextType이 'L'(LMS 대체) 또는 'B'(LMS+문구) 아닐 경우 subject 검증 skip 의무.
@@ -2114,6 +2159,11 @@ router.post('/direct-send', async (req: Request, res: Response) => {
       customerIds: filteredRecipients.map((r: any) => String(r.id || '')).filter(Boolean),
     });
 
+    // ★ 2026-07-05 발송 피로도 카운터 — 광고성만(수동 입력 수신자 포함: 실제 수신 피로는 동일), fire-and-forget
+    if (finalIsAd) {
+      void recordFatigueSends(companyId, filteredRecipients.map((r: any) => String(r.phone || '')));
+    }
+
     // ★ AI 학습 데이터 적재 — 직접발송 (비동기, 실패해도 발송에 영향 없음)
     const directCompanyInfo = await query('SELECT name, brand_tone FROM companies WHERE id = $1', [companyId]);
     logTrainingData({
@@ -2140,7 +2190,7 @@ router.post('/direct-send', async (req: Request, res: Response) => {
       callbackSkippedCount,
       callbackMissingCount,
       callbackUnregisteredCount,
-      message: `${directTotalSent}건 발송 ${scheduled ? '예약' : '완료'}${duplicateCount > 0 ? ` (중복 ${duplicateCount}건 제거)` : ''}${directFailTotal > 0 ? ` (${directFailTotal}건 실패, 자동 환불)` : ''}${excludedCount > 0 ? ` (수신거부 ${excludedCount}건 제외)` : ''}${callbackMissingCount > 0 ? ` (회신번호 없음 ${callbackMissingCount}명 제외)` : ''}${callbackUnregisteredCount > 0 ? ` (미등록 회신번호 ${callbackUnregisteredCount}명 제외)` : ''}`
+      message: `${directTotalSent}건 발송 ${scheduled ? '예약' : '완료'}${duplicateCount > 0 ? ` (중복 ${duplicateCount}건 제거)` : ''}${directFailTotal > 0 ? ` (${directFailTotal}건 실패, 자동 환불)` : ''}${excludedCount > 0 ? ` (수신거부 ${excludedCount}건 제외)` : ''}${callbackMissingCount > 0 ? ` (회신번호 없음 ${callbackMissingCount}명 제외)` : ''}${callbackUnregisteredCount > 0 ? ` (미등록 회신번호 ${callbackUnregisteredCount}명 제외)` : ''}${directFatigueSkipped > 0 ? ` (피로도 보호 ${directFatigueSkipped}명 제외)` : ''}`
     });
 
     } catch (sendError) {

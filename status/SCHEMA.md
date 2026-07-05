@@ -77,6 +77,8 @@
 | - | ai_training_logs **(2026-07-04 ADD 대기)** | `click_count int` · `conversion_count int` — Tier1 반응 신호(DM·이메일 클릭 환류, 랭커/검색기 클릭 우선 정렬). 코드 42703 폴백이라 미실행 무영향. `ALTER TABLE ai_training_logs ADD COLUMN click_count integer; ADD COLUMN conversion_count integer;` |
 | - | best_copy_seed_usage **(2026-07-04 CREATE 대기)** | 시드 사용 기록(성과 환류). `id bigserial PK, seed_id uuid, tenant_ref varchar(64)=getTenantRef, channel varchar(10), used_at timestamptz`. INDEX(seed_id),(tenant_ref,used_at). 코드 42P01 폴백(미생성 무영향) |
 | - | best_copy_assets **(2026-07-04 CREATE 대기)** | 업종 승리공식·AI 재창작 예시. `id uuid PK, kind varchar(20)[formula\|style_example], industry_code varchar(20), channel varchar(10), is_ad bool, content text, meta jsonb, created_at timestamptz`. INDEX(kind,industry_code). 코드 42P01 폴백 |
+| - | send_fatigue_daily **(2026-07-05 CREATE 대기)** | 발송 피로도 일일 버킷(광고성 문자+알림톡 합산, day=KST). `company_id uuid NOT NULL, phone varchar(20) NOT NULL, day date NOT NULL, sent_count int NOT NULL DEFAULT 0, PK(company_id,phone,day)` + INDEX(day). 45일 초과 프루닝(fatigue-guard 6h 워커). 코드 42P01 폴백(미생성=게이트·카운터 비활성) |
+| - | companies **(2026-07-05 ADD 대기)** | `fatigue_cap_days int` · `fatigue_cap_max int` — 발송 피로도 상한(최근 N일 M건). NULL=비활성(opt-in — 회사가 설정 화면에서 켠 경우만 게이트). 코드 42703 폴백. `ALTER TABLE companies ADD COLUMN fatigue_cap_days integer; ALTER TABLE companies ADD COLUMN fatigue_cap_max integer;` |
 
 ---
 

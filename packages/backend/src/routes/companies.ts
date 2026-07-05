@@ -69,6 +69,16 @@ router.get('/settings', authenticate, async (req: Request, res: Response) => {
     // v1.5.0: 싱크 차단 모달 판정 플래그
     row.sync_block_active = syncBlockActive;
 
+    // ★ 2026-07-05 발송 피로도 보호 설정 — 별도 SELECT + try/catch (컬럼 미마이그레이션 42703이어도 기존 설정 조회 무영향)
+    try {
+      const fg = await query(`SELECT fatigue_cap_days, fatigue_cap_max FROM companies WHERE id = $1`, [companyId]);
+      row.fatigue_cap_days = fg.rows[0]?.fatigue_cap_days ?? null;
+      row.fatigue_cap_max = fg.rows[0]?.fatigue_cap_max ?? null;
+    } catch {
+      row.fatigue_cap_days = null;
+      row.fatigue_cap_max = null;
+    }
+
     res.json(row);
   } catch (error) {
     console.error('설정 조회 에러:', error);
@@ -87,7 +97,9 @@ router.put('/settings', authenticate, async (req: Request, res: Response) => {
       send_start_hour, send_end_hour, daily_limit_per_customer,
       holiday_send_allowed, duplicate_prevention_days,
       target_strategy, cross_category_allowed, excluded_segments,
-      approval_required
+      approval_required,
+      // ★ 2026-07-05 발송 피로도 보호 — null 명시 = 해제(비활성). COALESCE 미사용 별도 UPDATE.
+      fatigue_cap_days, fatigue_cap_max
     } = req.body;
     // ★ D97: manager_contacts는 test_contacts 테이블로 완전 이관
     // PUT /settings에서 manager_contacts 저장 로직 완전 제거
@@ -138,6 +150,23 @@ router.put('/settings', authenticate, async (req: Request, res: Response) => {
            WHERE id = $2 AND COALESCE(opt_out_080_number, '') <> ''`,
         [normalizeOpt080Input(reject_number), userId]
       );
+    }
+
+    // ★ 2026-07-05 발송 피로도 보호 저장 — 명시 null = 해제라 COALESCE 미사용 별도 UPDATE.
+    //   컬럼 미마이그레이션(42703)이어도 기존 설정 저장은 성공 (try/catch 분리 — db_alter_safety_net 정신).
+    if (fatigue_cap_days !== undefined || fatigue_cap_max !== undefined) {
+      try {
+        const fdNum = Number(fatigue_cap_days);
+        const fmNum = Number(fatigue_cap_max);
+        const fd = fatigue_cap_days == null || !Number.isFinite(fdNum) || fdNum < 1 ? null : Math.min(Math.floor(fdNum), 30);
+        const fm = fatigue_cap_max == null || !Number.isFinite(fmNum) || fmNum < 1 ? null : Math.min(Math.floor(fmNum), 100);
+        await query(
+          `UPDATE companies SET fatigue_cap_days = $1, fatigue_cap_max = $2, updated_at = NOW() WHERE id = $3`,
+          [fd, fm, companyId]
+        );
+      } catch (fgErr: any) {
+        console.warn('[settings] 피로도 보호 설정 저장 실패 (컬럼 미마이그레이션?):', fgErr?.message);
+      }
     }
 
     res.json({ message: '설정이 저장되었습니다' });

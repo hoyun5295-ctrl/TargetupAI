@@ -40,6 +40,8 @@ import {
 import { prepaidDeduct, prepaidRefund } from './prepaid';
 import { normalizePhone } from './normalize-phone';
 import { resolveCustomerCallback } from './callback-filter';
+// ★ 2026-07-05: 발송 피로도 보호 — 차감 전 게이트 + 광고 발송 카운터
+import { getFatigueCap, getFatigueBlockedSet, recordFatigueSends } from './fatigue-guard';
 import { extractVarCatalog, filterVarCatalogByData, generateMessages } from '../services/ai';
 import { autoSpamTestWithRegenerate } from './spam-test-queue';
 import { buildUnsubscribeFilter } from './unsubscribe-helper';
@@ -746,12 +748,30 @@ async function executeAutoCampaign(ac: any): Promise<void> {
       [ac.company_id, ...filterResult.params, ...storeParams, ac.user_id]
     );
 
-    const customers = customersResult.rows;
+    let customers = customersResult.rows;
 
     if (customers.length === 0) {
       console.log(`${logPrefix} 타겟 고객 0명 — 스킵`);
       await markFailed(ac, '타겟 고객 없음 (필터 결과 0명)');
       return;
+    }
+
+    // ★ 2026-07-05 발송 피로도 보호 — 회사 opt-in + 광고 캠페인만. 차감(prepaidDeduct) 전 제외 = 환불 배관 불필요.
+    if (ac.is_ad) {
+      const fatigueCap = await getFatigueCap(ac.company_id);
+      if (fatigueCap) {
+        const blockedSet = await getFatigueBlockedSet(ac.company_id, fatigueCap, customers.map((c: any) => String(c.phone || '')));
+        if (blockedSet.size > 0) {
+          const beforeFatigue = customers.length;
+          customers = customers.filter((c: any) => !blockedSet.has(normalizePhone(String(c.phone || ''))));
+          console.log(`${logPrefix} 피로도 보호 — ${beforeFatigue - customers.length}명 제외 (${customers.length}명 남음)`);
+        }
+        if (customers.length === 0) {
+          console.log(`${logPrefix} 피로도 보호로 전원 제외 — 스킵`);
+          await markFailed(ac, '피로도 보호로 발송 대상 전원 제외');
+          return;
+        }
+      }
     }
 
     console.log(`${logPrefix} 타겟 ${customers.length}명`);
@@ -1014,6 +1034,11 @@ async function executeAutoCampaign(ac: any): Promise<void> {
       }
 
       sentCount = await bulkInsertSmsQueue(companyTables, autoSmsRows, true);
+    }
+
+    // ★ 2026-07-05 발송 피로도 카운터 — 광고성만(알림톡/SMS 공통), 큐 커밋 후 fire-and-forget
+    if (ac.is_ad && sentCount > 0) {
+      void recordFatigueSends(ac.company_id, filteredCustomers.map((c: any) => String(c.phone || '')));
     }
 
     // ★ 부분 실패 시 환불

@@ -51,6 +51,8 @@ import { createDirectSendCampaign } from './direct-send-core';
 import { DirectSendError } from './direct-send-spec';
 // ★ 2026-07-03 Gap5 Layer2: 고객별 발송 카운터 (예측 분모 전용 — 타겟 선정 무관)
 import { recordCustomerSendsByFilter } from './customer-send-stats';
+// ★ 2026-07-05: 발송 피로도 보호 — staging 추출 anti-join용 cap 조회
+import { getFatigueCap } from './fatigue-guard';
 // ★ Phase2 A (2026-06-26): 발송 본문 URL 단축 + 변이 추적(클릭→operator 변이 보상). journey-executor와 동일 패턴.
 import { shortenUrlsInText } from './short-url';
 // ★ Phase3 B (2026-06-26): 자율 발송 시각을 회사 클릭 반응 시간대로 개인화(데이터 부족 시 현행 폴백).
@@ -1321,7 +1323,9 @@ async function dispatchProposalSend(p: any): Promise<{ action: 'sent' | 'skipped
     filterWhere = compiled.sql;
     filterParams = compiled.params;
     stagingId = randomUUID();
-    const { sql: insSql, params: insParams } = buildSendableStagingInsertSql(stagingId, companyId, filterWhere, filterParams, '', excludeClickedSince);
+    // ★ 2026-07-05 발송 피로도 보호 — 자동마케팅은 광고 강제(0705 라벨 정정)라 cap 설정 회사면 추출 단계에서 제외(차감 전).
+    const fatigueCap = await getFatigueCap(companyId);
+    const { sql: insSql, params: insParams } = buildSendableStagingInsertSql(stagingId, companyId, filterWhere, filterParams, '', excludeClickedSince, fatigueCap);
     recipientTotal = (await query(insSql, insParams)).rowCount || 0;
 
     // 0건 → 스킵 + 통지 (operator는 다음 주기 정상). staging 0행이라 잔여 없음.
