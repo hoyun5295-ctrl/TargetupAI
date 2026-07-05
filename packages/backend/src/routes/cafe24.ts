@@ -36,6 +36,7 @@ import {
   getCafe24ByoCredentials,
 } from '../utils/cafe24-client';
 import { ensureCafe24ScriptTag, removeCafe24ScriptTag } from '../utils/cafe24-scripttag';
+import { signCafe24InstallState, verifyCafe24InstallState } from '../utils/cafe24-install-state';
 
 const router = Router();
 
@@ -363,12 +364,46 @@ export default router;
 
 export const cafe24CallbackRouter = Router();
 
+/**
+ * GET /api/cafe24/oauth/install-start?mall_id=...
+ * → 계정(로그인) 없이 카페24 OAuth를 시작한다(앱스토어 설치·심사 동선). state = HMAC 서명된 install state.
+ *   authenticate 우회(공개) — 본 라우터가 authenticate 라우터보다 app.ts에서 먼저 마운트됨.
+ *   mall_id는 정규식 검증(SSRF/오픈리다이렉트 방어) 후 authorize URL의 서브도메인으로만 사용.
+ */
+cafe24CallbackRouter.get('/oauth/install-start', (req: Request, res: Response) => {
+  try {
+    const mallId = String(req.query.mall_id || '').trim().toLowerCase();
+    if (!mallId || !/^[a-z0-9_-]+$/.test(mallId)) {
+      return res.status(400).send(renderCafe24CallbackHtml('error', 'mall_id 형식이 올바르지 않습니다.'));
+    }
+    const state = signCafe24InstallState(mallId, Date.now());
+    const authorizeUrl = buildCafe24AuthorizeUrl(mallId, state);
+    return res.redirect(302, authorizeUrl);
+  } catch (err: any) {
+    console.error('[Cafe24 /oauth/install-start] 오류:', err);
+    return res.status(500).send(renderCafe24CallbackHtml('error', err?.message || '카페24 연동 시작에 실패했습니다.'));
+  }
+});
+
 cafe24CallbackRouter.get('/oauth/callback', async (req: Request, res: Response) => {
   try {
     const code = String(req.query.code || '');
     const stateRaw = String(req.query.state || '');
     if (!code || !stateRaw) {
       return res.status(400).send(renderCafe24CallbackHtml('error', '카페24가 보낸 응답에 code 또는 state가 누락되었습니다.'));
+    }
+
+    // ★ 2026-07-05 설치(앱스토어·심사) 동선 — 로그인 없이 시작한 install state(HMAC 서명).
+    //   토큰 교환(=설치 인증)만 하고 회사에 저장하지 않는다. 카페24 앱은 계약 고객의 자사몰 연동 도구라
+    //   계정 자동생성·발송은 없음(선 계약 후 발급 모델 유지). 기존 고객은 로그인 후 자사몰 연동에서 연결.
+    const installState = verifyCafe24InstallState(stateRaw);
+    if (installState) {
+      await exchangeCafe24Code(installState.mallId, code); // env 자격으로 교환 → 설치 인증 완료
+      console.log('[Cafe24 install] OAuth 설치 인증 완료 mall_id=', installState.mallId);
+      return res.send(renderCafe24CallbackHtml(
+        'ok',
+        `${installState.mallId} 쇼핑몰 설치·인증이 완료되었습니다. 한줄로는 사전 계약 후 이용하는 서비스로, 이미 한줄로를 이용 중이시면 로그인 후 자사몰 연동에서 이 몰을 연결하실 수 있습니다.`,
+      ));
     }
 
     let parsed: { company_id?: string; nonce?: string; ts?: number };

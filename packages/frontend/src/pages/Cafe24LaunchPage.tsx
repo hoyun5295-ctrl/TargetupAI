@@ -1,18 +1,19 @@
 /**
  * Cafe24LaunchPage — 카페24 "앱 실행" 랜딩 (심사위원 동선 방어).
  *
- * 진입: 카페24 개발자센터 App URL = https://app.hanjul.ai/cafe24/launch (쿼리 mall_id 등 부착).
- * 공개 라우트(PrivateRoute 아님) — 이 페이지가 로그인 상태 3분기를 스스로 판별한다.
+ * 진입: 카페24 개발자센터 App URL = https://hanjul.ai/cafe24/launch (쿼리 mall_id 등 부착).
+ * 공개 라우트(PrivateRoute 아님) — 이 페이지가 로그인 상태 분기를 스스로 판별한다.
  *   1) 로그인 + 회사관리자 + 미연동 → [카페24 연결](기존 /oauth/authorize 재사용)
  *   2) 로그인 + 이미 연동됨 → 현황 보기 / 대시보드
- *   3) 비로그인 → 로그인(복귀 mall_id sessionStorage 보존) / 가입 안내
+ *   3) 비로그인 → [카페24 연동 시작](로그인 없이 /oauth/install-start = 설치 인증) + 기존 고객용 로그인 보조.
+ *      카페24 앱은 계약 고객의 자사몰 연동 도구 — 설치 동선에서 계정 없이 OAuth만 완료(계정 자동생성·발송 없음).
  *
  * A-0: 최초 진입 시 앱 실행 파라미터를 서버로 fire-and-forget POST → PM2 로그로 실측(저장/부작용 없음).
  */
 
 import { useEffect, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { Store, ArrowRight, CheckCircle2, LogIn, ShieldCheck, Loader2, ExternalLink, RefreshCcw } from 'lucide-react';
+import { Store, ArrowRight, CheckCircle2, LogIn, ShieldCheck, Loader2, RefreshCcw } from 'lucide-react';
 import { useAuthStore } from '../stores/authStore';
 import { useToast } from '../components/ToastProvider';
 
@@ -135,24 +136,27 @@ export default function Cafe24LaunchPage() {
       );
     }
 
-    // 비로그인 — 로그인 후 이 몰로 복귀
+    // 비로그인 — 계정 없이 바로 카페24 OAuth(설치 인증) 시작. 한줄로 로그인은 기존 고객용 보조 경로.
     if (!isAuthenticated) {
       return (
         <div className="text-center">
           <p className="text-white/70 text-sm leading-relaxed mb-6">
-            한줄로 계정으로 로그인하면 이 몰 연결이 이어집니다.
+            아래 버튼을 누르면 카페24 권한 동의 후 이 몰의 설치·연동이 완료됩니다.
           </p>
-          <button type="button" className={primaryBtn} onClick={handleLoginContinue}>
-            <LogIn className="w-4 h-4" /> 한줄로 로그인하고 연결
-          </button>
-          <a
-            href="https://hanjul.ai"
-            target="_blank"
-            rel="noreferrer"
-            className="inline-flex items-center gap-1 text-white/40 hover:text-white/70 text-xs mt-4 transition-colors"
+          <button
+            type="button"
+            className={primaryBtn}
+            onClick={() => { window.location.href = `/api/cafe24/oauth/install-start?mall_id=${encodeURIComponent(mallId)}`; }}
           >
-            아직 계정이 없다면 한줄로 시작하기 <ExternalLink className="w-3 h-3" />
-          </a>
+            <ShieldCheck className="w-4 h-4" /> 카페24 연동 시작
+          </button>
+          <button
+            type="button"
+            className="inline-flex items-center gap-1.5 text-white/40 hover:text-white/70 text-xs mt-4 transition-colors"
+            onClick={handleLoginContinue}
+          >
+            <LogIn className="w-3 h-3" /> 이미 한줄로를 이용 중이신가요? 로그인
+          </button>
         </div>
       );
     }
