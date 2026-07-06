@@ -454,3 +454,102 @@ export async function buildInAppOverview(companyId: string, channel?: 'web' | 'a
     dataSource: 'cdp_inapp_messages + cdp_inapp_impressions (30일 윈도우 vs 이전 30일)',
   };
 }
+
+// ════════════════════════════════════════════════════════════════════
+// ★ 2026-07-06 식별 고객 열람 목록 (Harold 확정 절충안)
+//   인앱은 push가 아니라 방문자 pull 구조 + 익명 다수 — DM식 "전 수신자 명단"은 성립 불가.
+//   가능한 범위만 정직하게: 식별된 고객(customer_id 연결분)은 DM처럼 목록으로,
+//   나머지는 "익명 방문자 N명" 합산. 구매는 첫 표시 후 7일 purchases 실측(추정 0).
+// ════════════════════════════════════════════════════════════════════
+
+export interface InAppIdentifiedViewer {
+  customerId: string;
+  name: string | null;
+  phone: string | null;
+  impressions: number;
+  clicks: number;
+  lastSeenAt: string | null;
+  purchaseCount: number;
+  purchaseAmount: number;
+}
+
+export interface InAppViewersResult {
+  viewers: InAppIdentifiedViewer[];
+  identifiedTotal: number;
+  anonymous: { visitors: number; impressions: number; clicks: number };
+  dataSource: string;
+}
+
+/** 메시지별 식별 고객 열람 목록 + 익명 합산 — 통계 모달 "누가 봤는지" 절충 표시. */
+export async function buildIdentifiedViewers(companyId: string, messageId: string): Promise<InAppViewersResult> {
+  // 1) 식별 고객별 표시/클릭/최근 (customer_id 연결분만 — cdp_identity_links 매칭이 적재 시점에 이미 수행됨)
+  const vRes = await query(
+    `SELECT i.customer_id, c.name, c.phone,
+            COUNT(*) FILTER (WHERE i.event_type = 'impression')::int AS impressions,
+            COUNT(*) FILTER (WHERE i.event_type = 'click')::int AS clicks,
+            MAX(i.occurred_at) AS last_seen
+       FROM cdp_inapp_impressions i
+       JOIN customers c ON c.id = i.customer_id AND c.company_id = i.company_id
+      WHERE i.company_id = $1::uuid AND i.message_id = $2::uuid AND i.customer_id IS NOT NULL
+      GROUP BY i.customer_id, c.name, c.phone
+      ORDER BY MAX(i.occurred_at) DESC
+      LIMIT 500`,
+    [companyId, messageId],
+  );
+
+  // 2) 구매 실측 — 고객별 첫 표시 시각 이후 7일 purchases (purchase_date = KST naive → 변환 명시)
+  const purchaseByCust: Record<string, { count: number; amount: number }> = {};
+  try {
+    const pRes = await query(
+      `SELECT f.customer_id, COUNT(*)::int AS cnt, COALESCE(SUM(p.total_amount), 0)::numeric AS amt
+         FROM (
+           SELECT customer_id, MIN(occurred_at) AS first_seen
+             FROM cdp_inapp_impressions
+            WHERE company_id = $1::uuid AND message_id = $2::uuid AND customer_id IS NOT NULL
+            GROUP BY customer_id
+         ) f
+         JOIN purchases p ON p.company_id = $1::uuid AND p.customer_id = f.customer_id
+          AND p.purchase_date >= (f.first_seen AT TIME ZONE 'Asia/Seoul')
+          AND p.purchase_date <= (f.first_seen AT TIME ZONE 'Asia/Seoul') + INTERVAL '7 days'
+        GROUP BY f.customer_id`,
+      [companyId, messageId],
+    );
+    for (const r of pRes.rows) purchaseByCust[String(r.customer_id)] = { count: Number(r.cnt) || 0, amount: Number(r.amt) || 0 };
+  } catch (e: any) {
+    console.warn('[buildIdentifiedViewers] 구매 실측 조회 실패(구매 없이 응답):', e?.message);
+  }
+
+  // 3) 익명 합산 — customer_id 미연결분 (비로그인 방문자)
+  const aRes = await query(
+    `SELECT COUNT(DISTINCT anonymous_id) FILTER (WHERE anonymous_id IS NOT NULL)::int AS visitors,
+            COUNT(*) FILTER (WHERE event_type = 'impression')::int AS impressions,
+            COUNT(*) FILTER (WHERE event_type = 'click')::int AS clicks
+       FROM cdp_inapp_impressions
+      WHERE company_id = $1::uuid AND message_id = $2::uuid AND customer_id IS NULL`,
+    [companyId, messageId],
+  );
+  const a = aRes.rows[0] || {};
+
+  return {
+    viewers: vRes.rows.map((r: any) => {
+      const p = purchaseByCust[String(r.customer_id)] || null;
+      return {
+        customerId: String(r.customer_id),
+        name: r.name ? String(r.name) : null,
+        phone: r.phone ? String(r.phone) : null,
+        impressions: Number(r.impressions) || 0,
+        clicks: Number(r.clicks) || 0,
+        lastSeenAt: r.last_seen ? new Date(r.last_seen).toISOString() : null,
+        purchaseCount: p?.count || 0,
+        purchaseAmount: p?.amount || 0,
+      };
+    }),
+    identifiedTotal: vRes.rows.length,
+    anonymous: {
+      visitors: Number(a.visitors) || 0,
+      impressions: Number(a.impressions) || 0,
+      clicks: Number(a.clicks) || 0,
+    },
+    dataSource: 'cdp_inapp_impressions × customers (식별분) + 익명 합산 · purchases 7일 실측',
+  };
+}

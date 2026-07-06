@@ -13,8 +13,10 @@
 
 import { useEffect, useState } from 'react';
 import {
-  X, Loader2, Mail, MailOpen, MousePointerClick, AlertCircle, UserMinus, RefreshCw, ChevronDown, ChevronUp,
+  X, Loader2, Mail, MailOpen, MousePointerClick, AlertCircle, UserMinus, RefreshCw, ChevronDown, ChevronUp, Download,
 } from 'lucide-react';
+// ★ 2026-07-06 이력 CSV 다운로드 (Harold 지시) — 공용 CT (BOM + 셀 이스케이프)
+import { downloadCsv, safeCsvFilename } from '../../utils/csv-download';
 
 interface CampaignSummary {
   id: string;
@@ -117,6 +119,58 @@ export default function EmailEventsModal({ campaignId, campaignName, onClose, to
     }
   }
 
+  // ★ 2026-07-06 CSV 다운로드 — 화면 페이징(100)과 무관하게 전체 수집(서버 상한 500씩 순회) 후 내보내기
+  const [exporting, setExporting] = useState(false);
+  const fmtCsvDate = (iso: string | null) => (iso ? new Date(iso).toLocaleString('ko-KR') : '');
+  async function handleCsvDownload() {
+    if (exporting) return;
+    setExporting(true);
+    try {
+      const LIMIT = 500;
+      const MAX_ROWS = 50000; // 폭주 방어 상한 — 초과 시 수집분까지 내보내고 안내
+      if (activeTab === 'recipients') {
+        const all: RecipientRow[] = [];
+        let total = 0;
+        for (let offset = 0; offset < MAX_ROWS; offset += LIMIT) {
+          const params = new URLSearchParams({ limit: String(LIMIT), offset: String(offset) });
+          const res = await fetch(`/api/email/campaigns/${campaignId}/events?${params}`, { headers: { Authorization: `Bearer ${token}` } });
+          const json: EventsResponse = await res.json();
+          if (!json.success) throw new Error((json as any).error || '이력 조회 실패');
+          all.push(...(json.recipients || []));
+          total = json.recipients_total || 0;
+          if (all.length >= total || (json.recipients || []).length < LIMIT) break;
+        }
+        downloadCsv(
+          safeCsvFilename(campaignName, '이메일_수신자이력'),
+          ['이메일', '전달', '오픈', '오픈수', '클릭', '클릭수', '반송', '수신거부', '최근 이벤트'],
+          all.map((r) => [r.email, fmtCsvDate(r.deliveredAt), fmtCsvDate(r.openedAt), r.openCount, fmtCsvDate(r.clickedAt), r.clickCount, fmtCsvDate(r.bouncedAt), fmtCsvDate(r.unsubscribedAt), fmtCsvDate(r.lastEventAt)]),
+        );
+        onToast(`수신자 ${all.length.toLocaleString()}건 CSV 다운로드 완료${all.length < total ? ` (상한 ${MAX_ROWS.toLocaleString()}건 적용)` : ''}`, 'success');
+      } else {
+        const all: EventRow[] = [];
+        for (let offset = 0; offset < MAX_ROWS; offset += LIMIT) {
+          const params = new URLSearchParams({ limit: String(LIMIT), offset: String(offset) });
+          if (eventTypeFilter !== 'all') params.set('event_type', eventTypeFilter);
+          const res = await fetch(`/api/email/campaigns/${campaignId}/events?${params}`, { headers: { Authorization: `Bearer ${token}` } });
+          const json: EventsResponse = await res.json();
+          if (!json.success) throw new Error((json as any).error || '이력 조회 실패');
+          all.push(...(json.events || []));
+          if ((json.events || []).length < LIMIT) break;
+        }
+        downloadCsv(
+          safeCsvFilename(campaignName, '이메일_이벤트로그'),
+          ['이메일', '이벤트', 'URL', '사유', '발생 시각'],
+          all.map((e) => [e.email, EVENT_TYPE_META[e.eventType]?.label || e.eventType, e.url || '', e.reason || '', fmtCsvDate(e.occurredAt)]),
+        );
+        onToast(`이벤트 ${all.length.toLocaleString()}건 CSV 다운로드 완료`, 'success');
+      }
+    } catch (err: any) {
+      onToast(err?.message || 'CSV 다운로드 실패', 'error');
+    } finally {
+      setExporting(false);
+    }
+  }
+
   const campaign = data?.campaign;
   const openRate = campaign && campaign.sentCount > 0 ? ((campaign.openCount / campaign.sentCount) * 100).toFixed(1) : '0';
   const clickRate = campaign && campaign.sentCount > 0 ? ((campaign.clickCount / campaign.sentCount) * 100).toFixed(1) : '0';
@@ -141,6 +195,15 @@ export default function EmailEventsModal({ campaignId, campaignName, onClose, to
               <p className="text-xs text-white/50">발송 이력</p>
             </div>
           </div>
+          <button
+            onClick={handleCsvDownload}
+            disabled={exporting || loading || !data}
+            className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[11px] font-medium text-white/80 bg-white/5 hover:bg-white/10 border border-white/10 disabled:opacity-40 mr-1.5"
+            title={activeTab === 'recipients' ? '수신자 매트릭스 전체를 CSV로 저장' : '이벤트 로그 전체를 CSV로 저장'}
+          >
+            {exporting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
+            CSV
+          </button>
           <button
             onClick={loadEvents}
             disabled={loading}

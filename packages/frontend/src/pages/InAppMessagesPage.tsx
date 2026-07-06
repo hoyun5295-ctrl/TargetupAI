@@ -3,10 +3,12 @@ import { useNavigate } from 'react-router-dom';
 import { goBackOr } from '../lib/scroll-restoration';
 import {
   Activity, AlertCircle, AlertTriangle, ArrowLeft, BarChart3, ChevronDown, ChevronUp,
-  Clock, Crown, Edit2, Eye, Globe, ImageIcon, Layers, Lightbulb, Loader2, Moon, MousePointer,
+  Clock, Crown, Download, Edit2, Eye, Globe, ImageIcon, Layers, Lightbulb, Loader2, Moon, MousePointer,
   Plus, RefreshCw, Repeat, ShoppingCart, Smartphone, Sparkles, Target, Trash2, TrendingDown,
   TrendingUp, Upload, UserPlus, Users, Wand2, X,
 } from 'lucide-react';
+// ★ 2026-07-06 식별 고객 목록 CSV 다운로드 — 공용 CT (BOM + 셀 이스케이프)
+import { downloadCsv, safeCsvFilename } from '../utils/csv-download';
 import ConfirmModal, { ConfirmState } from '../components/ConfirmModal';
 // 고객 데이터 없으면 AI 문안 생성 전 안내 (공용 게이트)
 import { useCustomerDataGate, CustomerDataRequiredBanner, CustomerDataRequiredModal } from '../components/CustomerDataGate';
@@ -85,6 +87,22 @@ interface QuickStartCard {
   label: string;
   hint: string;
   defaultTemplate: Template;
+}
+
+// ★ 2026-07-06 식별 고객 열람 목록 + 익명 합산 (GET /api/cdp/inapp/viewers/:id — 절충안)
+interface InAppViewersData {
+  viewers: Array<{
+    customerId: string;
+    name: string | null;
+    phone: string | null;
+    impressions: number;
+    clicks: number;
+    lastSeenAt: string | null;
+    purchaseCount: number;
+    purchaseAmount: number;
+  }>;
+  identifiedTotal: number;
+  anonymous: { visitors: number; impressions: number; clicks: number };
 }
 
 // ★ 2026-07-06 인앱 표시 가능성 (GET /api/cdp/inapp/display-eligibility) — 지원 매트릭스는 백엔드 CT 단일 정의
@@ -249,6 +267,8 @@ export default function InAppMessagesPage() {
   const [drillMessageId, setDrillMessageId] = useState<string | null>(null);
   const [drillStats, setDrillStats] = useState<FunnelStats | null>(null);
   const [drillExplain, setDrillExplain] = useState<ExplainResult | null>(null);
+  // ★ 2026-07-06 식별 고객 열람 목록 + 익명 합산 (절충안)
+  const [drillViewers, setDrillViewers] = useState<InAppViewersData | null>(null);
   const [drillLoading, setDrillLoading] = useState(false);
 
   const token = () => localStorage.getItem('token');
@@ -605,14 +625,18 @@ export default function InAppMessagesPage() {
     setDrillMessageId(m.id);
     setDrillStats(null);
     setDrillExplain(null);
+    setDrillViewers(null);
     setDrillLoading(true);
     try {
-      const [funnelRes, explainRes] = await Promise.all([
+      const [funnelRes, explainRes, viewersRes] = await Promise.all([
         fetch(`/api/cdp/inapp/funnel-stats/${m.id}`, { headers: authHeaders() }),
         fetch('/api/cdp/inapp/explain', { method: 'POST', headers: authHeaders(), body: JSON.stringify({ message_id: m.id }) }),
+        // ★ 2026-07-06 식별 고객 열람 목록 + 익명 합산 (절충안)
+        fetch(`/api/cdp/inapp/viewers/${m.id}`, { headers: authHeaders() }),
       ]);
       const funnelData = await funnelRes.json();
       const explainData = await explainRes.json();
+      const viewersData = await viewersRes.json();
       if (funnelData.success) {
         setDrillStats({
           funnel: funnelData.funnel,
@@ -622,6 +646,7 @@ export default function InAppMessagesPage() {
         });
       }
       if (explainData.success) setDrillExplain(explainData.result);
+      if (viewersData.success) setDrillViewers({ viewers: viewersData.viewers || [], identifiedTotal: viewersData.identifiedTotal || 0, anonymous: viewersData.anonymous || { visitors: 0, impressions: 0, clicks: 0 } });
     } catch (e: any) {
       showToast(e?.message || '드릴다운 로드 실패', { type: 'error' });
     } finally {
@@ -1294,7 +1319,9 @@ export default function InAppMessagesPage() {
           loading={drillLoading}
           stats={drillStats}
           explain={drillExplain}
-          onClose={() => { setDrillMessageId(null); setDrillStats(null); setDrillExplain(null); }}
+          viewers={drillViewers}
+          messageTitle={messages.find((m) => m.id === drillMessageId)?.title || '인앱'}
+          onClose={() => { setDrillMessageId(null); setDrillStats(null); setDrillExplain(null); setDrillViewers(null); }}
         />
       )}
 
@@ -2079,10 +2106,12 @@ interface DrillDownProps {
   loading: boolean;
   stats: FunnelStats | null;
   explain: ExplainResult | null;
+  viewers: InAppViewersData | null;
+  messageTitle: string;
   onClose: () => void;
 }
 
-function DrillDownModal({ loading, stats, explain, onClose }: DrillDownProps) {
+function DrillDownModal({ loading, stats, explain, viewers, messageTitle, onClose }: DrillDownProps) {
   return (
     <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50">
       <div className="bg-slate-900/60 border border-white/10 rounded-2xl shadow-2xl w-full max-w-4xl max-h-[95vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
@@ -2134,6 +2163,54 @@ function DrillDownModal({ loading, stats, explain, onClose }: DrillDownProps) {
                 )}
                 <div className="text-[10px] text-white/30 italic mt-3">Data source — {stats.funnel.dataSource}</div>
               </div>
+
+              {/* ★ 2026-07-06 누가 봤는지 — 식별 고객 목록 + 익명 합산 (절충안: 익명 다수 구조라 전 명단은 불가, 가능한 범위만 정직 표시) */}
+              {viewers && (
+                <div className="bg-white/5 border border-white/10 rounded-xl p-4">
+                  <div className="flex items-center justify-between gap-2 mb-3 flex-wrap">
+                    <h4 className="text-sm font-bold text-white">누가 봤는지 — 식별된 고객 {viewers.identifiedTotal.toLocaleString()}명</h4>
+                    {viewers.viewers.length > 0 && (
+                      <button
+                        onClick={() => {
+                          downloadCsv(
+                            safeCsvFilename(messageTitle, '인앱_열람고객'),
+                            ['이름', '전화번호', '표시 횟수', '클릭 수', '구매 건수(7일)', '구매 금액(7일)', '마지막 열람'],
+                            viewers.viewers.map((v) => [
+                              v.name || '', v.phone || '', v.impressions, v.clicks,
+                              v.purchaseCount || '', v.purchaseAmount ? Math.round(Number(v.purchaseAmount)) : '',
+                              v.lastSeenAt ? new Date(v.lastSeenAt).toLocaleString('ko-KR') : '',
+                            ]),
+                          );
+                        }}
+                        className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[11px] font-medium text-white/80 bg-white/5 hover:bg-white/10 border border-white/10"
+                      >
+                        <Download className="w-3.5 h-3.5" /> CSV
+                      </button>
+                    )}
+                  </div>
+                  {viewers.viewers.length === 0 ? (
+                    <p className="text-xs text-white/40">아직 로그인 등으로 식별된 열람 고객이 없습니다.</p>
+                  ) : (
+                    <div className="divide-y divide-white/5 max-h-[240px] overflow-y-auto rounded-lg border border-white/5">
+                      {viewers.viewers.slice(0, 100).map((v) => (
+                        <div key={v.customerId} className="flex flex-wrap items-center gap-x-3 gap-y-1 px-3 py-2 text-[11px]">
+                          <span className="text-white/80 w-20 truncate">{v.name || '-'}</span>
+                          <span className="text-white/40 font-mono w-28 truncate">{v.phone || '-'}</span>
+                          <span className="text-white/50">표시 {v.impressions}</span>
+                          <span className={v.clicks > 0 ? 'text-amber-300 font-semibold' : 'text-white/30'}>클릭 {v.clicks}</span>
+                          {v.purchaseCount > 0 && <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-rose-500/20 text-rose-200 border border-rose-400/30 font-semibold">구매 {Math.round(Number(v.purchaseAmount)).toLocaleString()}원</span>}
+                          <span className="ml-auto text-white/30">{v.lastSeenAt ? new Date(v.lastSeenAt).toLocaleString('ko-KR', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : ''}</span>
+                        </div>
+                      ))}
+                      {viewers.viewers.length > 100 && <div className="px-3 py-2 text-[10px] text-white/40 text-center">외 {(viewers.viewers.length - 100).toLocaleString()}명 — CSV로 전체 확인</div>}
+                    </div>
+                  )}
+                  <div className="mt-2.5 text-[11px] text-white/50">
+                    익명 방문자 <strong className="text-white/80">{viewers.anonymous.visitors.toLocaleString()}명</strong> — 표시 {viewers.anonymous.impressions.toLocaleString()} · 클릭 {viewers.anonymous.clicks.toLocaleString()} <span className="text-white/35">(비로그인 방문은 개인 식별이 불가해 합산으로만 표시)</span>
+                  </div>
+                  <div className="text-[10px] text-white/30 italic mt-2">Data source — cdp_inapp_impressions × customers(식별분) + 익명 합산 · purchases 7일 실측</div>
+                </div>
+              )}
 
               {/* 24시간 분포 */}
               <div className="bg-white/5 border border-white/10 rounded-xl p-4">

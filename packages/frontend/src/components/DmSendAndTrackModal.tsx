@@ -8,7 +8,9 @@
  */
 
 import { useEffect, useRef, useState } from 'react';
-import { Sparkles, Send, RefreshCw, Check, X, Wand2, ShieldCheck, Clock, Smartphone } from 'lucide-react';
+import { Sparkles, Send, RefreshCw, Check, X, Wand2, ShieldCheck, Clock, Smartphone, Download } from 'lucide-react';
+// ★ 2026-07-06 발송 추적 CSV 다운로드 (Harold 지시) — 공용 CT (BOM + 셀 이스케이프)
+import { downloadCsv, safeCsvFilename } from '../utils/csv-download';
 import { useToast } from './ToastProvider';
 import TargetExtractModal, { type ExtractedTarget } from './TargetExtractModal';
 import AiRefineModal from './AiRefineModal';
@@ -22,6 +24,7 @@ interface TrackRecipient {
   customerId: string;
   name: string | null;
   phone: string | null;
+  sentAt: string | null;
   viewed: boolean;
   pageReached: number;
   totalPages: number;
@@ -587,6 +590,28 @@ export default function DmSendAndTrackModal({ dmId, dmTitle, show, onClose, init
                         <Send className="w-3.5 h-3.5" /> 미열람자 재발송 ({tracking.recipients.filter((r) => !r.viewed).length.toLocaleString()}명)
                       </button>
                     )}
+                    {/* ★ 2026-07-06 추적 CSV 다운로드 — 로드된 전체 수신자(서버 LIMIT 1000) 내보내기 */}
+                    <button
+                      onClick={() => {
+                        downloadCsv(
+                          safeCsvFilename(dmTitle || 'DM', 'DM_발송추적'),
+                          ['이름', '전화번호', '발송 시각', '상태', '진행률(%)', '체류(초)', '클릭 수', '응모·액션', '재열람 횟수', '열람 기기 수', '구매 건수(7일)', '구매 금액(7일)', '마지막 활동'],
+                          tracking.recipients.map((r) => [
+                            r.name || '', r.phone || '', r.sentAt ? new Date(r.sentAt).toLocaleString('ko-KR') : '',
+                            r.viewed ? (r.completed ? '완독' : '열람') : '미열람',
+                            r.viewed ? (r.progressPct || 0) : '',
+                            r.viewed ? r.durationSeconds : '',
+                            r.clicks, r.responded ? 'Y' : '', r.openCount || '', r.deviceCount || '',
+                            r.purchaseCount || '', r.purchaseAmount ? Math.round(Number(r.purchaseAmount)) : '',
+                            r.lastActiveAt ? new Date(r.lastActiveAt).toLocaleString('ko-KR') : '',
+                          ]),
+                        );
+                        toast.success(`${tracking.recipients.length.toLocaleString()}건 CSV 다운로드 완료`);
+                      }}
+                      className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[11px] font-medium text-white/80 bg-white/5 hover:bg-white/10 border border-white/10"
+                    >
+                      <Download className="w-3.5 h-3.5" /> CSV
+                    </button>
                     <button onClick={loadTracking} className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[11px] font-medium text-white/80 bg-white/5 hover:bg-white/10 border border-white/10">
                       <RefreshCw className="w-3.5 h-3.5" /> 새로고침
                     </button>

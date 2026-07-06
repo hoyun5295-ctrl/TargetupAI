@@ -86,6 +86,7 @@ import {
   buildDeviceBreakdown,
   buildTopMessages,
   buildInAppOverview,
+  buildIdentifiedViewers,
 } from '../utils/inapp-funnel-stats';
 import {
   quickActionAIRefine,
@@ -1459,6 +1460,23 @@ router.get('/inapp/funnel-stats/:id', async (req: Request, res: Response) => {
     console.error('[CDP /inapp/funnel-stats] 오류:', err);
     if (handleDbMigrationError(err, res, 'cdp_inapp_impressions')) return;
     return res.status(500).json({ success: false, error: err?.message || 'Funnel 통계 실패' });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────
+// 5-1. GET /api/cdp/inapp/viewers/:id — ★ 2026-07-06 식별 고객 열람 목록 + 익명 합산 (Harold 확정 절충안)
+//   인앱은 익명 다수라 DM식 전 명단 불가 — 식별분만 목록, 나머지는 익명 N명 정직 합산.
+// ─────────────────────────────────────────────────────────────────────
+router.get('/inapp/viewers/:id', async (req: Request, res: Response) => {
+  const auth = await ensureInAppAdmin(req, res);
+  if (!auth) return;
+  try {
+    const result = await buildIdentifiedViewers(auth.companyId, req.params.id);
+    return res.json({ success: true, ...result });
+  } catch (err: any) {
+    console.error('[CDP /inapp/viewers] 오류:', err);
+    if (handleDbMigrationError(err, res, 'cdp_inapp_impressions')) return;
+    return res.status(500).json({ success: false, error: err?.message || '열람 고객 조회 실패' });
   }
 });
 
