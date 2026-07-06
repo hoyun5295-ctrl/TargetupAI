@@ -3,8 +3,9 @@ import fs from 'fs';
 import multer from 'multer';
 import path from 'path';
 import * as XLSX from 'xlsx';
+import Anthropic from '@anthropic-ai/sdk';
 import { query } from '../config/database';
-import { redis, AI_MODELS, AI_MAX_TOKENS, CACHE_TTL, TIMEOUTS, BATCH_SIZES } from '../config/defaults';
+import { redis, AI_MODELS, AI_MAX_TOKENS, CACHE_TTL, TIMEOUTS, BATCH_SIZES, isAdaptiveOnlyModel, resolveMaxTokens } from '../config/defaults';
 import { normalizeByFieldKey, normalizeRegion, normalizeDate, normalizeCustomFieldValue } from '../utils/normalize';
 import { CATEGORY_LABELS, FIELD_MAP, getColumnFields, getCustomFields, getFieldByKey, upsertCustomFieldDefinitions } from '../utils/standard-field-map';
 import { validateUploadMapping } from '../utils/upload-mapping-validator';
@@ -25,6 +26,10 @@ import { requirePlanFeature } from '../utils/plan-guard';
 import { mapColumnsWithAi, ColumnMappingError } from '../utils/ai-column-mapper';
 
 const router = Router();
+
+// ★ 2026-07-06 raw fetch 폐기 — SDK 클라이언트 (7/1 Sonnet 5 게이팅 sweep이 raw fetch만 놓쳐
+//   적응형 사고 블록 선행 시 빈 매핑이 되던 사고의 뿌리. ai-call-invariants.test가 raw fetch 재유입을 기계 차단)
+const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY || '' });
 
 // 파일 저장 설정
 const storage = multer.diskStorage({
@@ -264,31 +269,27 @@ JSON 형식으로만 응답해줘 (다른 설명 없이):
 예시: {"고객번호": null, "휴대폰": "phone", "이름": "name", "성별코드": "gender", "등급": "grade", "구매횟수": "purchase_count", "최근구매일": "recent_purchase_date"}
 ⚠️ 반드시 DB컬럼의 영문 key(phone, name, gender 등)를 값으로 넣어야 합니다. 한글 설명을 넣지 마세요!`;
 
-    let aiText = '{}';
+    let aiText = '';
 
-    // 1차: Claude
+    // 1차: Claude (★ 2026-07-06 raw fetch → SDK 전환 — analysis.ts 정답 패턴 미러.
+    //   7/1 Sonnet 5 전환의 게이팅 sweep이 raw fetch만 놓쳐, 적응형 사고 블록이 첫 블록으로 오면
+    //   content[0].text=undefined → 빈 매핑인데 "호출 성공" 로그가 찍히던 사고(박성용 0706 18:01)의 뿌리.)
     try {
-      const response = await fetch('https://api.anthropic.com/v1/messages', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-api-key': process.env.ANTHROPIC_API_KEY || '',
-          'anthropic-version': '2023-06-01'
-        },
-        body: JSON.stringify({
-          model: AI_MODELS.claude,
-          max_tokens: AI_MAX_TOKENS.fieldMapping,
-          messages: [{ role: 'user', content: mappingPrompt }]
-        })
+      const adaptiveGuard: any = isAdaptiveOnlyModel(AI_MODELS.claude) ? { thinking: { type: 'disabled' } } : {};
+      const response: any = await anthropic.messages.create({
+        model: AI_MODELS.claude,
+        max_tokens: resolveMaxTokens(AI_MAX_TOKENS.fieldMapping, AI_MODELS.claude),
+        messages: [{ role: 'user', content: mappingPrompt }],
+        ...adaptiveGuard,
       });
-      const aiResult: any = await response.json();
-      if (aiResult.error) throw new Error(aiResult.error.message || 'Claude API error');
-      aiText = aiResult.content?.[0]?.text || '{}';
+      // 첫 블록 가정 폐기 — text 타입 블록 탐색 (사고 블록 선행 대응)
+      aiText = (response.content || []).find((b: any) => b?.type === 'text')?.text || '';
+      if (!aiText.trim()) throw new Error('응답에 text 블록 없음');
       console.log('[AI 매핑] Claude 호출 성공');
     } catch (claudeErr: any) {
-      console.warn(`[AI 매핑] Claude 실패 (${claudeErr.message}) → gpt-5.1 fallback`);
+      console.warn(`[AI 매핑] Claude 실패 (${claudeErr.message}) → gpt fallback`);
 
-      // 2차: gpt-5.1 fallback
+      // 2차: gpt fallback
       if (!process.env.OPENAI_API_KEY) throw new Error('Claude 실패 + OPENAI_API_KEY 미설정');
       const gptResponse = await fetch('https://api.openai.com/v1/chat/completions', {
         method: 'POST',
@@ -303,10 +304,13 @@ JSON 형식으로만 응답해줘 (다른 설명 없이):
         })
       });
       const gptResult: any = await gptResponse.json();
-      aiText = gptResult.choices?.[0]?.message?.content || '{}';
-      console.log('[AI 매핑] gpt-5.1 fallback 성공');
+      // ★ 2026-07-06 폴백 응답 검증 — 오류/빈 응답인데 "성공" 로그를 찍고 빈 매핑을 내보내던 위장 성공 제거 (6원칙 ②)
+      if (gptResult.error) throw new Error(`gpt fallback 실패: ${gptResult.error.message || 'API error'}`);
+      aiText = gptResult.choices?.[0]?.message?.content || '';
+      if (!aiText.trim()) throw new Error('gpt fallback 응답 비어 있음');
+      console.log('[AI 매핑] gpt fallback 성공');
     }
-    
+
     let mapping: { [key: string]: string | null } = {};
     try {
       const jsonMatch = aiText.match(/\{[\s\S]*\}/);
@@ -315,6 +319,13 @@ JSON 형식으로만 응답해줘 (다른 설명 없이):
       }
     } catch (e) {
       console.error('AI 응답 파싱 실패:', aiText);
+    }
+
+    // ★ 2026-07-06 빈 매핑 정직 처리 — AI가 매핑 JSON을 못 준 경우 "AI 매핑 완료"로 위장하지 않고
+    //   전 컬럼 null + 명시 안내로 수동 매핑을 유도한다 (모달은 열려야 수동 배정 가능 — 200 유지).
+    const aiMappingEmpty = Object.keys(mapping).length === 0;
+    if (aiMappingEmpty) {
+      console.error('[AI 매핑] 매핑 결과 0건 — 수동 매핑 안내로 응답:', aiText.slice(0, 200));
       headers.forEach((h: string) => { mapping[h] = null; });
     }
 
@@ -343,7 +354,10 @@ JSON 형식으로만 응답해줘 (다른 설명 없이):
       hasPhone,
       standardFields,
       categoryLabels: CATEGORY_LABELS,
-      message: hasPhone ? 'AI 매핑 완료' : '전화번호 컬럼을 찾을 수 없습니다.'
+      // ★ 2026-07-06 정직 안내 — AI 매핑 0건이면 "완료" 위장 대신 수동 매핑 안내
+      message: aiMappingEmpty
+        ? 'AI 자동 매핑에 실패했습니다. 컬럼을 수동으로 선택해주세요.'
+        : (hasPhone ? 'AI 매핑 완료' : '전화번호 컬럼을 찾을 수 없습니다.')
     });
 
   } catch (error: any) {

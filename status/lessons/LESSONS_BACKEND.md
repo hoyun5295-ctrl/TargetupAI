@@ -558,6 +558,28 @@ else concat(concat(concat('{"sendercode":"',sender_code),'",'), replace(k_etc_js
 
 ---
 
+## AI 매핑 빈손 — 전수 정정 sweep이 "패턴"으로 grep해 raw fetch 1곳 누락 (2026-07-06 추가)
+
+### 2026-07-06 — 고객 DB 업로드 AI 매핑 전 필드 미배정 (박성용 18:01, "호출 성공" 로그와 함께 빈손)
+
+**현상**: 엑셀 업로드 AI 매핑이 전 컬럼 미배정. PM2에는 "[AI 매핑] Claude 호출 성공"만 찍힘(실패·파싱 로그 0).
+
+**근본**: 7/1 Sonnet 5 전환 커밋(a2f7ff60)이 "직접호출 7곳"에 isAdaptiveOnlyModel 게이팅(thinking disabled)을 정정했지만, **upload.ts /mapping은 SDK가 아니라 raw fetch라 sweep(패턴 grep)에서 누락**. Sonnet 5는 thinking 생략 시 적응형 사고 자동 ON → 첫 블록이 사고 블록인 요청에서 `content[0].text`=undefined → `'{}'` → 빈 매핑 + 성공 로그. 적응형이라 요청마다 발동이 달라 7/1 이후 "가끔"만 터짐. 부차 결함: GPT 폴백 응답 오류 무검사(실패도 "성공" 로그) + 빈 매핑을 "AI 매핑 완료"로 응답(위장 성공 — 6원칙 ②).
+
+**정정**: ① upload.ts raw fetch → SDK + 게이팅(analysis.ts 정답 패턴 미러) + text 블록 탐색 ② GPT 폴백 오류·빈 응답 검사(실패는 실패로) ③ 빈 매핑 시 "수동 매핑 안내" 정직 응답(모달은 열려야 하므로 200 유지) ④ ai-mapping.ts(싱크에이전트)도 동일 게이팅+탐색 예방 + 1차 모델 Sonnet 5 통일(Harold 지시 — defaults.ts 단일 진실) ⑤ analysis.ts 첫 블록 가정도 탐색으로 통일.
+
+**★ 기계 재발 차단 — `utils/__tests__/ai-call-invariants.test.ts` (소스 전수 스캔, npm test마다 강제)**:
+- 불변식 1: `api.anthropic.com/v1/messages` raw fetch 금지 (SDK/callAIWithFallback만)
+- 불변식 2: `anthropic.messages.create` 직접 호출 파일 = isAdaptiveOnlyModel 게이팅 동반 의무
+- 불변식 3: Claude 응답 첫 블록 가정(`content[0].text/type`) 금지 — text 타입 블록 탐색 의무
+
+**교훈**:
+- **전수 정정 sweep은 호출 "패턴"이 아니라 "도착지"로 grep** — SDK 호출만 찾으면 raw fetch·다른 클라이언트 변형이 빠진다. 도착지(api.anthropic.com / anthropic. / OpenAI 등) 기준이 전수다. (0611 "쓰기 경로 누락"과 같은 뿌리 — sweep의 축이 좁으면 반복된다)
+- **모델 세대 전환(응답 구조 변화)은 "호출부 정정"이 아니라 "불변식 테스트"로 닫아라** — 사람이 7곳을 고쳐도 8번째가 재유입된다. 소스 스캔 테스트 1개가 영구 차단.
+- **폴백 체인의 각 단계는 응답 검증 후에만 성공 로그** — 오류 객체를 빈 문자열로 삼켜 "성공"이라 적으면 시스템이 거짓말한다.
+
+---
+
 ## 자가 검증 매트릭스 (Backend 작업 시)
 
 - [ ] 발송 5경로 전수 점검 (AI/직접/타겟/스케줄/테스트)

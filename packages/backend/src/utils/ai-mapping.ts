@@ -5,8 +5,9 @@
  *
  * 역할:
  *   - 고객사 소스 DB 컬럼명을 한줄로 FIELD_MAP 표준 필드에 매핑
- *   - Claude Opus 4.7 우선 호출 + 프롬프트 캐싱(FIELD_MAP 정의부 ephemeral 5분 TTL)
- *   - 폴백 체인: Opus 4.7 → Sonnet 4.6 → 호출 실패 응답 (Agent가 로컬 autoSuggestMapping 폴백)
+ *   - 1차 모델 = AI_MODELS.claude(Sonnet 5 — defaults.ts 단일 진실, ★ 2026-07-06 Harold 지시로 통일)
+ *     + 프롬프트 캐싱(FIELD_MAP 정의부 ephemeral 5분 TTL)
+ *   - 폴백 체인: 1차 → Sonnet 4.5 legacy → 호출 실패 응답 (Agent가 로컬 autoSuggestMapping 폴백)
  *   - 회사당 월 호출 쿼터 (plans.ai_mapping_monthly_quota, 기본 10)
  *
  * 설계 참조: status/SYNC-AGENT-V1.5.0-DESIGN.md §5
@@ -18,12 +19,15 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { query } from '../config/database';
 import { FIELD_MAP } from './standard-field-map';
+import { AI_MODELS, isAdaptiveOnlyModel } from '../config/defaults';
 
 // ============================================================
 // 환경변수 / 모델
 // ============================================================
 
-const MODEL_OPUS = process.env.CLAUDE_MAPPING_MODEL || 'claude-opus-4-7';
+// ★ 2026-07-06 Harold 지시 — 매핑 1차 모델을 Sonnet 5(AI_MODELS.claude)로 통일. 모델 정책은 defaults.ts 한 곳이 진실.
+//   (서버 .env에 CLAUDE_MAPPING_MODEL이 명시돼 있으면 그 값이 우선 — 배포 시 확인)
+const MODEL_PRIMARY = process.env.CLAUDE_MAPPING_MODEL || AI_MODELS.claude;
 const MODEL_SONNET_FALLBACK = process.env.CLAUDE_MAPPING_FALLBACK || 'claude-sonnet-4-5-20250929';
 const MAX_TOKENS = 4000;
 
@@ -214,6 +218,9 @@ async function callClaudeModel(modelId: string, input: AiMappingInput): Promise<
   const systemBlock = buildFieldMapReference();
   const userPrompt = buildUserPrompt(input);
 
+  // ★ 2026-07-06 적응형 사고 게이팅 — Sonnet 5·Opus 4.7/4.8은 thinking 생략 시 자동 ON.
+  //   사고 블록이 첫 블록으로 오면 아래 추출이 빈손이 되므로 disabled 명시 (7/1 SDK 7곳 정정과 동일 정합).
+  const adaptiveGuard: any = isAdaptiveOnlyModel(modelId) ? { thinking: { type: 'disabled' } } : {};
   const response: any = await anthropic.messages.create({
     model: modelId,
     max_tokens: MAX_TOKENS,
@@ -225,9 +232,11 @@ async function callClaudeModel(modelId: string, input: AiMappingInput): Promise<
       } as any,
     ],
     messages: [{ role: 'user', content: userPrompt }],
+    ...adaptiveGuard,
   } as any);
 
-  const text = response.content?.[0]?.type === 'text' ? response.content[0].text : '';
+  // ★ 2026-07-06 첫 블록 가정 폐기 — text 타입 블록 탐색 (사고 블록 선행 대응, 업로드 매핑 빈손 사고 동일 클래스)
+  const text = (response.content || []).find((b: any) => b?.type === 'text')?.text || '';
   const usage = response.usage || {};
   const cacheRead = Number(usage.cache_read_input_tokens || 0);
   const inputTokens = Number(usage.input_tokens || 0);
@@ -330,8 +339,8 @@ function estimateCost(modelUsed: string, tokensUsed: number): number {
  *
  * 처리 순서:
  *   1. 쿼터 체크 (월 10회 기본) — 초과 시 AiMappingQuotaExceeded
- *   2. Claude Opus 4.7 호출 (프롬프트 캐싱 적용)
- *   3. 실패 시 Sonnet 4.6 폴백
+ *   2. 1차 모델(AI_MODELS.claude = Sonnet 5) 호출 (프롬프트 캐싱 적용)
+ *   3. 실패 시 Sonnet 4.5 legacy 폴백
  *   4. 둘 다 실패 시 AiMappingUnavailable
  *   5. 응답 JSON 파싱 + sanitize + 카운트 증가
  *
@@ -357,25 +366,25 @@ export async function callAiMapping(
   // 쿼터 체크 (예외 발생 가능)
   const { limit, usedBefore } = await checkQuotaAndReset(companyId);
 
-  // 1차: Opus 4.7
+  // 1차: MODEL_PRIMARY (Sonnet 5 — defaults.ts 단일 진실)
   let raw: RawCallResult;
   try {
-    raw = await callClaudeModel(MODEL_OPUS, input);
+    raw = await callClaudeModel(MODEL_PRIMARY, input);
     console.log(
-      `[AI Mapping] Opus 호출 성공 (company=${companyId}, tokens=${raw.tokensUsed}, cacheHit=${raw.cacheHit})`
+      `[AI Mapping] 1차(${raw.modelUsed}) 호출 성공 (company=${companyId}, tokens=${raw.tokensUsed}, cacheHit=${raw.cacheHit})`
     );
-  } catch (opusErr: any) {
-    console.warn(`[AI Mapping] Opus 실패 (${opusErr.status || opusErr.message}) → Sonnet 폴백`);
-    // 2차: Sonnet 폴백
+  } catch (primaryErr: any) {
+    console.warn(`[AI Mapping] 1차 실패 (${primaryErr.status || primaryErr.message}) → legacy 폴백`);
+    // 2차: Sonnet 4.5 legacy 폴백
     try {
       raw = await callClaudeModel(MODEL_SONNET_FALLBACK, input);
       console.log(
-        `[AI Mapping] Sonnet 폴백 성공 (company=${companyId}, tokens=${raw.tokensUsed})`
+        `[AI Mapping] legacy 폴백 성공 (company=${companyId}, tokens=${raw.tokensUsed})`
       );
-    } catch (sonnetErr: any) {
-      console.error(`[AI Mapping] Sonnet도 실패 (${sonnetErr.status || sonnetErr.message})`);
+    } catch (fallbackErr: any) {
+      console.error(`[AI Mapping] 폴백도 실패 (${fallbackErr.status || fallbackErr.message})`);
       throw new AiMappingUnavailable(
-        `Opus+Sonnet 모두 실패. Agent 로컬 autoSuggestMapping을 사용하세요.`
+        `1차+폴백 모두 실패. Agent 로컬 autoSuggestMapping을 사용하세요.`
       );
     }
   }

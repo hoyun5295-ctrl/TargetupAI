@@ -306,7 +306,8 @@ async function callClaude(userMessage: string, maxRetries = 2): Promise<Analysis
         messages: [{ role: 'user', content: userMessage }],
       });
 
-      const text = response.content[0].type === 'text' ? response.content[0].text : '';
+      // ★ 2026-07-06 첫 블록 가정 폐기 — text 타입 블록 탐색 (사고 블록 선행 대응, 전 소스 불변식 통일)
+      const text = ((response.content || []) as any[]).find((b: any) => b?.type === 'text')?.text || '';
       console.log(`[AI 분석] Claude 호출 성공 (시도 ${attempt + 1})`);
       return parseClaudeResponse(text);
     } catch (error: any) {
