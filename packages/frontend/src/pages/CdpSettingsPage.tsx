@@ -1799,7 +1799,8 @@ client.newCall(req).execute()`}</pre>
                   <Check className="w-5 h-5 text-emerald-300 mt-0.5 shrink-0" />
                   <div className="flex-1">
                     <div className="text-sm font-medium text-emerald-100">{naverStatus.store_id} 네이버 스마트스토어 연동됨</div>
-                    <div className="text-xs text-emerald-300 mt-1">status: {naverStatus.status} · 토큰 만료: {naverStatus.token_expires_at ? new Date(naverStatus.token_expires_at).toLocaleString('ko-KR') : '-'}</div>
+                    {/* ★ 2026-07-06 토큰 만료 시각 노출 제거 — client_credentials는 자동 재발급이라 만료 시각이 불안만 유발(Harold 지적) */}
+                    <div className="text-xs text-emerald-300 mt-1">연동 유지 중 · 토큰 자동 갱신</div>
                   </div>
                 </div>
                 {isAdmin && (
