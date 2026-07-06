@@ -277,7 +277,7 @@ type ProviderKey = 'cafe24' | 'naver' | 'godo' | 'gabia' | 'imweb' | 'custom';
 
 const PROVIDER_CARDS: Array<{ key: ProviderKey; name: string; desc: string; full?: boolean }> = [
   { key: 'cafe24', name: '카페24', desc: 'OAuth 자동 연동 — 코딩 없이 회원·주문 동기화' },
-  { key: 'naver', name: '네이버 스마트스토어', desc: 'Commerce OAuth — 주문·회원 동기화' },
+  { key: 'naver', name: '네이버 스마트스토어', desc: '커머스 API — 주문·구매고객 동기화' },
   { key: 'godo', name: '고도몰', desc: '쇼핑몰 인증키 입력 — 주문·고객 자동 동기화' },
   { key: 'gabia', name: '가비아', desc: 'webhook 방식 — Secret·SDK 설정으로 연동' },
   { key: 'imweb', name: '아임웹', desc: 'OAuth 자동 연동 — 회원·주문·수신동의 동기화' },
@@ -286,10 +286,11 @@ const PROVIDER_CARDS: Array<{ key: ProviderKey; name: string; desc: string; full
 
 // 고객 self-app에 등록하는 한줄로 고정 콜백 (백엔드 CAFE24_CALLBACK_REDIRECT / NAVER_CALLBACK_REDIRECT 기본값과 동일)
 const CAFE24_CALLBACK_URL = 'https://app.hanjul.ai/api/cafe24/oauth/callback';
-const NAVER_CALLBACK_URL = 'https://app.hanjul.ai/api/naver-commerce/oauth/callback';
 // 고객 self-app에 필요한 권한 (백엔드 DEFAULT_SCOPE와 동일)
 const CAFE24_REQUIRED_SCOPES = ['mall.read_customer', 'mall.read_order', 'mall.read_product', 'mall.read_application'];
-const NAVER_REQUIRED_SCOPES = ['commerce.product.read', 'commerce.order.read', 'commerce.customer.read'];
+// ★ 2026-07-06 네이버 커머스 = client_credentials — scope/Redirect URI 개념 없음. 앱에 서버 IP 등록 + "주문 판매자" API 그룹 필요.
+const NAVER_SERVER_API_IP = '58.227.193.62'; // 한줄로 서버 egress IP (네이버 앱 "API 호출 IP"에 등록)
+const NAVER_REQUIRED_API_GROUPS = ['주문 판매자'];
 
 const PROVIDER_META: Record<ProviderKey, { title: string; note: string }> = {
   cafe24: { title: '카페24 연동', note: '쇼핑몰 ID만 입력하면 한줄로 공식 카페24 앱으로 연결됩니다. OAuth 동의 후 회원·주문이 자동 동기화됩니다.' },
@@ -372,6 +373,7 @@ export default function CdpSettingsPage() {
   const [naverStatus, setNaverStatus] = useState<NaverCommerceStatus | null>(null);
   const [naverStoreId, setNaverStoreId] = useState('');
   const [naverConnecting, setNaverConnecting] = useState(false);
+  const [naverPreviewing, setNaverPreviewing] = useState(false);
   // BYO self-app 자격 입력 (회사가 직접 발급한 Client ID/Secret) — 2026-07-03부터 고급 옵션(기본 = 한줄로 공식 앱)
   const [cafe24ClientId, setCafe24ClientId] = useState('');
   const [cafe24ClientSecret, setCafe24ClientSecret] = useState('');
@@ -750,37 +752,50 @@ export default function CdpSettingsPage() {
     });
   };
 
-  // 네이버 스마트스토어 — self-app 자격 저장(POST /byo-credentials) 후 OAuth 연결 (BYO)
+  // 네이버 스마트스토어 — ★ 2026-07-06 커머스 API 실제 인증 = client_credentials(자격 입력).
+  //   OAuth 팝업 폐기 — POST /connect 한 번으로 서버가 토큰 발급을 실제 검증한 뒤에만 연동 완료.
   const handleNaverConnect = async () => {
     const storeId = naverStoreId.trim();
     const clientId = naverClientId.trim();
     const clientSecret = naverClientSecret.trim();
     if (!storeId) { toast.error('네이버 스마트스토어 store_id를 입력해주세요.'); return; }
     if (!clientId || !clientSecret) {
-      toast.error('애플리케이션 Client ID와 Client Secret을 모두 입력해주세요.');
+      toast.error('애플리케이션 ID와 시크릿을 모두 입력해주세요.');
       return;
     }
     setNaverConnecting(true);
     try {
-      const saveRes = await fetch('/api/naver-commerce/byo-credentials', {
+      const res = await fetch('/api/naver-commerce/connect', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token()}` },
         body: JSON.stringify({ store_id: storeId, client_id: clientId, client_secret: clientSecret }),
       });
-      const saveData = await saveRes.json();
-      if (!saveData.success) { toast.error(saveData.error || '애플리케이션 자격 저장 실패'); return; }
-
-      const res = await fetch(`/api/naver-commerce/oauth/authorize?store_id=${encodeURIComponent(storeId)}`, {
-        headers: { Authorization: `Bearer ${token()}` },
-      });
       const data = await res.json();
-      if (data.success && data.authorize_url) {
-        window.open(data.authorize_url, 'naver_oauth', 'width=720,height=820');
-        toast.info('새 창에서 네이버 로그인 + 동의 완료 후 새로고침해주세요.');
-      } else { toast.error(data.error || '네이버 스마트스토어 연동 시작 실패'); }
+      if (data.success) {
+        await loadAll();
+        toast.success('네이버 스마트스토어 연동이 완료되었습니다.');
+      } else {
+        toast.error(data.error || '네이버 스마트스토어 연동 검증에 실패했습니다.');
+        if (data.hint) toast.info(data.hint);
+      }
     } catch (e: any) { toast.error(e?.message || '네이버 스마트스토어 처리 오류'); }
     finally { setNaverConnecting(false); }
   };
+  // 연동 검증 — 최근 24시간 변경 주문을 실제 API로 당겨 건수 확인 (스키마 raw는 서버 로그에 기록됨)
+  const handleNaverPreview = async () => {
+    setNaverPreviewing(true);
+    try {
+      const res = await fetch('/api/naver-commerce/orders/preview?hours=24', { headers: { Authorization: `Bearer ${token()}` } });
+      const data = await res.json();
+      if (data.success) {
+        toast.success(`최근 24시간 변경 주문 ${Number(data.idCount || 0).toLocaleString()}건 확인 — 연동 정상`);
+      } else {
+        toast.error(data.error || '주문 데이터 확인 실패');
+      }
+    } catch (e: any) { toast.error(e?.message || '주문 데이터 확인 오류'); }
+    finally { setNaverPreviewing(false); }
+  };
+
   const handleNaverDisconnect = () => {
     setConfirm({
       mode: 'danger',
@@ -1769,13 +1784,13 @@ client.newCall(req).execute()`}</pre>
           </div>
         )}
 
-        {/* 네이버 스마트스토어 — OAuth */}
+        {/* 네이버 스마트스토어 — 커머스 API 자격 입력형 (★ 2026-07-06 OAuth 폐기, client_credentials) */}
         {connectProvider === 'naver' && (
           <div id="section-naver" className="bg-white/5 border border-white/10 rounded-xl p-6">
             <div className="flex items-center gap-2 mb-4">
               <ShoppingCart className="w-5 h-5 text-emerald-300" />
               <h2 className="text-base font-bold text-white">네이버 스마트스토어 연동</h2>
-              <span className="text-xs bg-emerald-500/20 text-emerald-300 px-2 py-0.5 rounded-full font-medium">Naver Commerce OAuth</span>
+              <span className="text-xs bg-emerald-500/20 text-emerald-300 px-2 py-0.5 rounded-full font-medium">커머스 API</span>
             </div>
 
             {naverStatus?.connected ? (
@@ -1788,9 +1803,14 @@ client.newCall(req).execute()`}</pre>
                   </div>
                 </div>
                 {isAdmin && (
-                  <button onClick={handleNaverDisconnect} className="px-4 py-2 bg-rose-500/15 border border-rose-400/40 hover:bg-rose-500/25 text-rose-200 text-sm font-medium rounded-lg flex items-center gap-2">
-                    <Unlink className="w-4 h-4" /> 연동 해제
-                  </button>
+                  <div className="flex gap-2">
+                    <button onClick={handleNaverPreview} disabled={naverPreviewing} className="px-4 py-2 bg-emerald-500/15 border border-emerald-400/40 hover:bg-emerald-500/25 text-emerald-200 text-sm font-medium rounded-lg flex items-center gap-2 disabled:opacity-40">
+                      {naverPreviewing ? <Loader2 className="w-4 h-4 animate-spin" /> : <ShoppingCart className="w-4 h-4" />} 주문 데이터 확인 (24h)
+                    </button>
+                    <button onClick={handleNaverDisconnect} className="px-4 py-2 bg-rose-500/15 border border-rose-400/40 hover:bg-rose-500/25 text-rose-200 text-sm font-medium rounded-lg flex items-center gap-2">
+                      <Unlink className="w-4 h-4" /> 연동 해제
+                    </button>
+                  </div>
                 )}
               </div>
             ) : (
@@ -1798,25 +1818,25 @@ client.newCall(req).execute()`}</pre>
                 <div className="text-xs text-amber-200/80 bg-amber-500/10 border border-amber-400/30 rounded p-2">
                   ★ 네이버 정책상 휴대폰·이메일 등 개인정보 제공이 제한될 수 있어, 기존 고객과의 매칭률이 낮을 수 있습니다.
                 </div>
-                {/* 안내 — 애플리케이션 등록 4단계 */}
+                {/* 안내 — 애플리케이션 등록 4단계 (client_credentials — Redirect URI/scope 없음) */}
                 <div className="bg-violet-500/10 border border-violet-400/30 rounded-xl p-4 space-y-3">
                   <div className="text-xs font-semibold text-violet-100">애플리케이션 연결 — 4단계</div>
                   <GuideStep n={1}>네이버 커머스 API센터에서 애플리케이션을 등록합니다.</GuideStep>
                   <GuideStep n={2}>
-                    애플리케이션의 <strong className="text-white/90">Redirect URI</strong>(callback)에 아래 주소를 그대로 등록합니다.
+                    애플리케이션의 <strong className="text-white/90">API 호출 IP</strong>에 아래 한줄로 서버 IP를 등록합니다. (미등록 시 연동이 거부됩니다)
                     <div className="flex items-center gap-2 bg-slate-950 border border-white/10 rounded-lg px-3 py-2 mt-1.5">
-                      <code className="flex-1 text-[11px] text-emerald-200 font-mono break-all">{NAVER_CALLBACK_URL}</code>
-                      <button onClick={() => copyText(NAVER_CALLBACK_URL, 'Redirect URI')} className="shrink-0 p-1.5 rounded-md bg-white/5 hover:bg-white/10 text-white/60" title="복사"><Copy className="w-3.5 h-3.5" /></button>
+                      <code className="flex-1 text-[11px] text-emerald-200 font-mono break-all">{NAVER_SERVER_API_IP}</code>
+                      <button onClick={() => copyText(NAVER_SERVER_API_IP, 'API 호출 IP')} className="shrink-0 p-1.5 rounded-md bg-white/5 hover:bg-white/10 text-white/60" title="복사"><Copy className="w-3.5 h-3.5" /></button>
                     </div>
                   </GuideStep>
                   <GuideStep n={3}>
-                    다음 권한(scope)을 모두 선택합니다.
+                    API 그룹에서 다음 그룹을 추가합니다.
                     <div className="flex flex-wrap gap-1.5 mt-1.5">
-                      {NAVER_REQUIRED_SCOPES.map((s) => <span key={s} className="text-[10px] font-mono bg-white/5 border border-white/10 text-white/60 px-2 py-0.5 rounded-full">{s}</span>)}
+                      {NAVER_REQUIRED_API_GROUPS.map((s) => <span key={s} className="text-[10px] bg-white/5 border border-white/10 text-white/60 px-2 py-0.5 rounded-full">{s}</span>)}
                     </div>
                   </GuideStep>
                   <GuideStep n={4}>
-                    발급된 <strong className="text-white/90">Client ID·Secret(애플리케이션 ID·시크릿)</strong>을 아래에 입력합니다.
+                    발급된 <strong className="text-white/90">애플리케이션 ID·시크릿</strong>을 아래에 입력하고 연동하기를 누릅니다.
                   </GuideStep>
                 </div>
 
@@ -1860,7 +1880,7 @@ client.newCall(req).execute()`}</pre>
                 </div>
 
                 <button onClick={handleNaverConnect} disabled={naverConnecting || !isAdmin || !naverStoreId.trim() || !naverClientId.trim() || !naverClientSecret.trim()} className="w-full px-4 py-2.5 bg-emerald-500/30 hover:bg-emerald-500/50 text-emerald-100 text-sm font-medium rounded-lg disabled:opacity-40 flex items-center justify-center gap-2">
-                  {naverConnecting ? <><Loader2 className="w-4 h-4 animate-spin" /> 연결 준비 중...</> : <><Link2 className="w-4 h-4" /> 저장하고 네이버 연결</>}
+                  {naverConnecting ? <><Loader2 className="w-4 h-4 animate-spin" /> 연동 확인 중...</> : <><Link2 className="w-4 h-4" /> 연동하기</>}
                 </button>
                 {!isAdmin && <div className="text-[11px] text-white/50 text-center">연동은 회사 관리자만 가능합니다.</div>}
                 <div className="text-[10px] text-white/30 italic">Client Secret은 한줄로 서버에 안전 보관되며 화면에 다시 표시되지 않습니다.</div>

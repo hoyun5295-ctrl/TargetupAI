@@ -49,7 +49,7 @@ import cdpRoutes from './routes/cdp';
 // ★ D172-B (2026-05-19): 카페24 OAuth + Webhook receiver
 import cafe24Routes, { cafe24CallbackRouter } from './routes/cafe24';
 // ★ D178 (2026-05-19): 네이버 스마트스토어 (커머스 API) OAuth + Webhook
-import naverCommerceRoutes, { naverCommerceCallbackRouter } from './routes/naver-commerce';
+import naverCommerceRoutes from './routes/naver-commerce';
 import imwebRoutes, { imwebCallbackRouter } from './routes/imweb';
 // ★ 2026-06-18: 고도몰(NHN커머스) BYO-키 폴링 커넥터
 import godoRoutes from './routes/godo';
@@ -283,8 +283,7 @@ app.use('/api/cdp', cdpRoutes); // ★ D172: 한줄로 CDP — 자사몰 → 한
 // ★ D172-B: 카페24 OAuth callback (authenticate 우회 — 카페24가 브라우저 redirect로 호출) → cafe24Routes보다 먼저 등록
 app.use('/api/cafe24', cafe24CallbackRouter);
 app.use('/api/cafe24', cafe24Routes);
-// ★ D178: 네이버 스마트스토어 OAuth callback (authenticate 우회) → naverCommerceRoutes보다 먼저 등록
-app.use('/api/naver-commerce', naverCommerceCallbackRouter);
+// ★ D178 / 2026-07-06 재작성: 네이버 커머스 = client_credentials(자격 입력형) — OAuth callback 라우터 폐기
 app.use('/api/naver-commerce', naverCommerceRoutes);
 // ★ 2026-07-04: 아임웹 OAuth callback (authenticate 우회) → imwebRoutes보다 먼저 등록
 app.use('/api/imweb', imwebCallbackRouter);

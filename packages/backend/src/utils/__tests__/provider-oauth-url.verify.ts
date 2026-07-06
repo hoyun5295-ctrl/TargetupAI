@@ -1,10 +1,11 @@
 /**
- * provider-oauth-url.verify.ts — 카페24·네이버 authorize URL 빌더 (순수, 자격 주입)
+ * provider-oauth-url.verify.ts — 카페24 authorize URL 빌더 (순수, 자격 주입)
  * 실행: npx ts-node --project packages/backend/tsconfig.json packages/backend/src/utils/__tests__/provider-oauth-url.verify.ts
  * 핵심: client_id/redirect_uri는 주입된 creds 그대로(회사 BYO든 env든 무관) — model B 토대.
+ * ★ 2026-07-06: 네이버 절 삭제 — 커머스 API는 client_credentials(authorize URL 없음, 서버 실측 확정).
  */
 import assert from 'node:assert';
-import { buildCafe24AuthorizeUrl, buildNaverCommerceAuthorizeUrl } from '../provider-oauth-url';
+import { buildCafe24AuthorizeUrl } from '../provider-oauth-url';
 
 const creds = { clientId: 'CID', clientSecret: 'SEC', redirectUri: 'https://app.hanjul.ai/api/cafe24/oauth/callback' };
 
@@ -26,16 +27,6 @@ console.log('[1] 카페24 authorize URL');
 console.log('[2] 카페24 mall_id 형식 오류 → throw');
 {
   ok('잘못된 mall_id throw', () => assert.throws(() => buildCafe24AuthorizeUrl(creds, 'bad mall!', 'ST', 'x')));
-}
-
-console.log('[3] 네이버 authorize URL');
-{
-  const url = buildNaverCommerceAuthorizeUrl(creds, 'store1', 'ST2', 'commerce.order.read');
-  const u = new URL(url);
-  ok('네이버 커머스 authorize 호스트', () => assert.strictEqual(u.host, 'api.commerce.naver.com'));
-  ok('store_id 전달', () => assert.strictEqual(u.searchParams.get('store_id'), 'store1'));
-  ok('client_id = 주입', () => assert.strictEqual(u.searchParams.get('client_id'), 'CID'));
-  ok('redirect_uri = 주입', () => assert.strictEqual(u.searchParams.get('redirect_uri'), 'https://app.hanjul.ai/api/cafe24/oauth/callback'));
 }
 
 console.log(`\n${passed} assertions passed — provider-oauth-url`);
