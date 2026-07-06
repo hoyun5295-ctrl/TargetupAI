@@ -7,9 +7,10 @@
 
 import type { CSSProperties } from 'react';
 import type { InAppTheme } from './blockTheme';
-import { withAlpha } from './blockTheme';
+import { withAlpha, shadeHex } from './blockTheme';
 
-const FONT_STACK = '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif';
+// 2026-07-07 디자인 2.0 — SDK inapp-blocks FONT_STACK 미러
+const FONT_STACK = '"Pretendard Variable", Pretendard, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Apple SD Gothic Neo", "Malgun Gothic", sans-serif';
 
 const ICON_PATHS: Record<string, string> = {
   check: 'M20 6 9 17l-5-5',
@@ -47,21 +48,27 @@ function renderBlock(b: any, i: number, ctx: Ctx): JSX.Element | null {
       if (!text) return null;
       const tone = b.tone || 'accent';
       const color = tone === 'on_media' ? theme.onMedia : tone === 'neutral' ? theme.textSecondary : theme.accent;
-      const style: CSSProperties = { fontSize: 11, fontWeight: 600, letterSpacing: '0.04em', color, alignSelf: 'flex-start', lineHeight: 1.2 };
-      if (tone === 'accent') Object.assign(style, { background: withAlpha(theme.accent, 0.12), padding: '4px 10px', borderRadius: 999, display: 'inline-flex' });
-      return <div key={i} style={style}>{text}</div>;
+      const style: CSSProperties = { fontSize: 11, fontWeight: 700, letterSpacing: '0.05em', color, alignSelf: 'flex-start', lineHeight: 1.2, display: 'inline-flex', alignItems: 'center', gap: 5 };
+      if (tone === 'accent') Object.assign(style, { background: theme.accentSoft, padding: '5px 11px', borderRadius: 999, boxShadow: `inset 0 0 0 1px ${withAlpha(theme.accent, 0.14)}` });
+      return (
+        <div key={i} style={style}>
+          {tone === 'accent' && <span style={{ width: 4, height: 4, borderRadius: 999, background: theme.accent, flexShrink: 0 }} />}
+          {text}
+        </div>
+      );
     }
     case 'headline': {
       const text = t(b.text).trim();
       if (!text) return null;
-      const hs: Record<string, number> = { sm: 16, md: 18, lg: 18, xl: 22 };
-      return <div key={i} style={{ fontWeight: 600, fontSize: hs[String(b.size)] || 18, letterSpacing: b.size === 'xl' ? '-0.01em' : '-0.005em', lineHeight: 1.3, color: theme.textPrimary }}>{text}</div>;
+      const hs: Record<string, number> = { sm: 16, md: 19, lg: 21, xl: 24 };
+      const xl = b.size === 'xl';
+      return <div key={i} style={{ fontWeight: xl ? 800 : 700, fontSize: hs[String(b.size)] || 19, letterSpacing: xl ? '-0.02em' : '-0.01em', lineHeight: 1.28, color: theme.textPrimary }}>{text}</div>;
     }
     case 'body': {
       const text = t(b.text);
       if (!text.trim()) return null;
-      const bs: Record<string, number> = { sm: 12.5, md: 13.5, lg: 15.5 };
-      return <div key={i} style={{ fontSize: bs[String(b.size)] || 13.5, lineHeight: 1.55, color: theme.textSecondary, whiteSpace: 'pre-wrap' }}>{text}</div>;
+      const bs: Record<string, number> = { sm: 13, md: 14, lg: 15.5 };
+      return <div key={i} style={{ fontSize: bs[String(b.size)] || 14, lineHeight: 1.6, letterSpacing: '-0.005em', color: theme.textSecondary, whiteSpace: 'pre-wrap' }}>{text}</div>;
     }
     case 'bullets': {
       const items = Array.isArray(b.items) ? b.items.filter((it: any) => String(it?.text || '').trim()) : [];
@@ -81,20 +88,30 @@ function renderBlock(b: any, i: number, ctx: Ctx): JSX.Element | null {
     }
     case 'benefit': {
       const text = t(b.text || '[혜택 안내 — 직접 작성해주세요]');
+      const notch: CSSProperties = { position: 'absolute', top: '50%', transform: 'translateY(-50%)', width: 13, height: 13, borderRadius: 999, background: theme.surface, boxShadow: `inset 0 0 0 1.5px ${withAlpha(theme.accent, 0.28)}` };
       return (
-        <div key={i} style={{ position: 'relative', display: 'flex', alignItems: 'center', gap: 10, padding: '12px 14px', background: withAlpha(theme.accent, 0.1), border: `1px dashed ${withAlpha(theme.accent, 0.5)}`, borderRadius: 12 }}>
-          <span style={{ position: 'absolute', left: -7, top: '50%', transform: 'translateY(-50%)', width: 12, height: 12, borderRadius: 999, background: theme.surface }} />
-          <Icon name="gift" color={theme.accent} size={20} />
-          <div style={{ fontSize: 13, fontWeight: 600, lineHeight: 1.4, color: theme.textPrimary, minWidth: 0 }}>{text}</div>
+        <div key={i} style={{ position: 'relative', display: 'flex', alignItems: 'center', gap: 11, padding: '13px 18px 13px 14px', background: `linear-gradient(135deg, ${withAlpha(theme.accent, 0.09)} 0%, ${withAlpha(theme.accent, 0.16)} 100%)`, border: `1.5px dashed ${withAlpha(theme.accent, 0.45)}`, borderRadius: 14 }}>
+          <span style={{ ...notch, left: -8 }} />
+          <span style={{ ...notch, right: -8 }} />
+          <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 32, height: 32, borderRadius: 10, background: theme.accentSoft, flexShrink: 0 }}>
+            <Icon name="gift" color={theme.accent} size={18} />
+          </span>
+          <div style={{ fontSize: 13.5, fontWeight: 700, lineHeight: 1.4, letterSpacing: '-0.01em', color: theme.textPrimary, minWidth: 0 }}>{text}</div>
         </div>
       );
     }
     case 'countdown': {
+      const seg: CSSProperties = { minWidth: 26, padding: '3px 5px', textAlign: 'center', borderRadius: 7, background: withAlpha(theme.textPrimary, 0.06), fontSize: 13.5, fontWeight: 800, fontVariantNumeric: 'tabular-nums', color: theme.textPrimary, lineHeight: 1.2 };
+      const colon: CSSProperties = { fontSize: 12, fontWeight: 700, color: theme.textSecondary };
       return (
-        <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 12px', borderRadius: 12, background: theme.surfaceElevated }}>
-          <Icon name="clock" color={theme.accent} size={16} />
-          {b.label && <span style={{ fontSize: 12, color: theme.textSecondary }}>{t(b.label)}</span>}
-          <span style={{ fontSize: 14, fontWeight: 700, color: theme.textPrimary, fontVariantNumeric: 'tabular-nums' }}>23:59:59</span>
+        <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '11px 13px', borderRadius: 14, background: theme.surfaceElevated, boxShadow: `inset 0 0 0 1px ${theme.border}` }}>
+          <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 28, height: 28, borderRadius: 9, background: theme.accentSoft, flexShrink: 0 }}>
+            <Icon name="clock" color={theme.accent} size={15} />
+          </span>
+          {b.label && <span style={{ fontSize: 12, fontWeight: 500, color: theme.textSecondary }}>{t(b.label)}</span>}
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3, marginLeft: 'auto' }}>
+            <span style={seg}>23</span><span style={colon}>:</span><span style={seg}>59</span><span style={colon}>:</span><span style={seg}>59</span>
+          </span>
         </div>
       );
     }
@@ -119,17 +136,17 @@ function renderBlock(b: any, i: number, ctx: Ctx): JSX.Element | null {
       const name = t(b.name).trim();
       if (!name) return null;
       return (
-        <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: 10, borderRadius: 14, background: theme.surfaceElevated, border: `1px solid ${theme.border}` }}>
-          {b.image && <img src={b.image} alt="" onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }} style={{ width: 52, height: 52, borderRadius: 10, objectFit: 'cover', flexShrink: 0 }} />}
+        <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: 11, borderRadius: 16, background: theme.surfaceElevated, border: `1px solid ${theme.border}`, boxShadow: '0 2px 8px rgba(0,0,0,0.04)' }}>
+          {b.image && <img src={b.image} alt="" onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }} style={{ width: 56, height: 56, borderRadius: 12, objectFit: 'cover', flexShrink: 0, boxShadow: `inset 0 0 0 1px ${theme.border}` }} />}
           <div style={{ minWidth: 0, flex: 1 }}>
-            <div style={{ fontSize: 13.5, fontWeight: 600, color: theme.textPrimary, lineHeight: 1.3 }}>{name}</div>
+            <div style={{ fontSize: 14, fontWeight: 700, letterSpacing: '-0.01em', color: theme.textPrimary, lineHeight: 1.3 }}>{name}</div>
             {b.meta && <div style={{ fontSize: 12, color: theme.textSecondary, marginTop: 2 }}>{t(b.meta)}</div>}
           </div>
         </div>
       );
     }
     case 'divider':
-      return <div key={i} style={{ height: 1, width: '100%', background: theme.border }} />;
+      return <div key={i} style={{ height: 1, width: '100%', background: `linear-gradient(90deg, transparent 0%, ${theme.border} 18%, ${theme.border} 82%, transparent 100%)` }} />;
     case 'spacer': {
       const h: Record<string, number> = { sm: 4, md: 10, lg: 20 };
       return <div key={i} style={{ height: h[String(b.size)] ?? 10 }} />;
@@ -156,7 +173,7 @@ function renderBlock(b: any, i: number, ctx: Ctx): JSX.Element | null {
       if (!url) return null;
       const pad: Record<string, string> = { '16:9': '56.25%', '4:3': '75%', '1:1': '100%', banner: '34%' };
       return (
-        <div key={i} style={{ position: 'relative', width: '100%', paddingTop: pad[String(b.aspect)] || pad['16:9'], borderRadius: Math.max(10, theme.radius - 8), overflow: 'hidden', background: theme.surfaceElevated }}>
+        <div key={i} style={{ position: 'relative', width: '100%', paddingTop: pad[String(b.aspect)] || pad['16:9'], borderRadius: Math.max(10, theme.radius - 8), overflow: 'hidden', background: theme.surfaceElevated, boxShadow: `inset 0 0 0 1px ${theme.border}` }}>
           <img src={url} alt="" onError={(e) => { (e.currentTarget.parentElement as HTMLElement).style.display = 'none'; }} style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: b.fit === 'contain' ? 'contain' : 'cover' }} />
         </div>
       );
@@ -174,12 +191,15 @@ function renderBlock(b: any, i: number, ctx: Ctx): JSX.Element | null {
             const isTertiary = style === 'tertiary';
             return (
               <div key={j} style={{
-                padding: isGhost ? '8px 10px' : '11px 18px', borderRadius: 12, fontSize: 13.5, fontWeight: isPrimary ? 700 : 600,
+                padding: isGhost ? '9px 11px' : '13px 20px', borderRadius: 14, fontSize: 14, fontWeight: isPrimary ? 800 : 700,
+                letterSpacing: '-0.01em',
                 textAlign: 'center', width: stack ? '100%' : 'auto', whiteSpace: 'nowrap', boxSizing: 'border-box',
                 border: isTertiary ? `1px solid ${theme.border}` : 'none',
-                background: isPrimary ? theme.accent : isGhost ? 'transparent' : theme.surfaceElevated,
+                background: isPrimary ? `linear-gradient(180deg, ${shadeHex(theme.accent, 6)} 0%, ${shadeHex(theme.accent, -12)} 100%)` : isGhost ? 'transparent' : theme.surfaceElevated,
                 color: isPrimary ? theme.accentText : isGhost ? theme.accent : theme.textPrimary,
-                boxShadow: isPrimary ? `0 6px 18px ${withAlpha(theme.accent, 0.32)}` : 'none',
+                boxShadow: isPrimary
+                  ? `0 1px 2px ${withAlpha(shadeHex(theme.accent, -40), 0.3)}, 0 8px 22px ${withAlpha(theme.accent, 0.38)}, inset 0 1px 0 rgba(255,255,255,0.18)`
+                  : isTertiary ? 'none' : `inset 0 0 0 1px ${theme.border}`,
               }}>
                 {t(btn.label)}
               </div>
@@ -208,7 +228,7 @@ export function BlockPreview({ blocks, theme, replaceVars, isAd }: {
   const list = Array.isArray(blocks) ? blocks : [];
   const hasFooter = list.some((b) => b?.type === 'footer');
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 12, color: theme.textPrimary, fontFamily: FONT_STACK }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 13, color: theme.textPrimary, fontFamily: FONT_STACK, letterSpacing: '-0.005em' }}>
       {list.map((b, i) => renderBlock(b, i, ctx)).filter(Boolean)}
       {isAd && !hasFooter && (
         <div style={{ fontSize: 11, fontWeight: 500, color: withAlpha(theme.textSecondary, 0.85) }}>(광고)</div>

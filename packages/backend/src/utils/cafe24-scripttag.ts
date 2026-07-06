@@ -18,7 +18,7 @@ import { issueCdpKeyPair } from './cdp-auth';
 
 // 카페24 scripttag src는 CORS(Access-Control-Allow-Origin: *)가 필수 → backend CORS 서빙 경로 사용.
 //   (nginx 정적 /sdk/ 엔 CORS 헤더 없음 — 422 방지.) ?k= 로 공개 키 전달(SDK v0.3.8+ fallback).
-const SDK_SRC_BASE = 'https://app.hanjul.ai/api/cafe24/sdk/v0.3.8/hanjul.min.js';
+const SDK_SRC_BASE = 'https://app.hanjul.ai/api/cafe24/sdk/v0.3.9/hanjul.min.js';
 
 /** 회사 CDP public key 확보 — 있으면 재사용(기존 SDK 설치 보호), 없을 때만 신규 발급. */
 async function ensureCompanyPublicKey(companyId: string): Promise<string | null> {

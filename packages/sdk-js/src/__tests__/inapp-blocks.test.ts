@@ -13,17 +13,20 @@ import { renderBlocks, isBlockAllowed, type BlockRenderContext, type ContentBloc
 
 describe('resolveTheme', () => {
   it('light/dark 기본 면 토큰', () => {
+    // 2026-07-07 디자인 2.0 — dark 면 #161b30 / 글자 #f2f4fb (그라데이션 면 surfaceBg 동반)
     const light = resolveTheme('light', null);
     expect(light.surface).toBe('#ffffff');
     expect(light.textPrimary).toBe('#0f172a');
+    expect(light.surfaceBg).toContain('linear-gradient');
     const dark = resolveTheme('dark', null);
-    expect(dark.surface).toBe('#14182b');
-    expect(dark.textPrimary).toBe('#eef1f8');
+    expect(dark.surface).toBe('#161b30');
+    expect(dark.textPrimary).toBe('#f2f4fb');
+    expect(dark.surfaceBg).toContain('linear-gradient');
   });
 
   it('auto는 prefersDark에 따라 light/dark', () => {
     expect(resolveTheme('auto', null, { prefersDark: false }).surface).toBe('#ffffff');
-    expect(resolveTheme('auto', null, { prefersDark: true }).surface).toBe('#14182b');
+    expect(resolveTheme('auto', null, { prefersDark: true }).surface).toBe('#161b30');
   });
 
   it('accent_color(hex)를 accent로 사용, 비-hex는 기본 accent', () => {
@@ -45,7 +48,8 @@ describe('resolveTheme', () => {
   });
 
   it('minimal/brand 키 안전 처리 + 알 수 없는 키는 auto', () => {
-    expect(resolveTheme('minimal', null).radius).toBe(18);
+    expect(resolveTheme('minimal', null).radius).toBe(20); // 2026-07-07 디자인 2.0
+    expect(resolveTheme('light', null).radius).toBe(24);
     expect(resolveTheme('brand', '#10b981').accent).toBe('#10b981');
     expect(resolveTheme('이상한값' as any, null).key).toBe('auto');
   });

@@ -22,7 +22,8 @@
 import { resolveTheme, withAlpha, type InAppTheme } from './inapp-theme';
 import { renderBlocks, type ContentBlock, type BlockRenderContext } from './inapp-blocks';
 
-const INAPP_FONT_STACK = '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif';
+// 2026-07-07 디자인 2.0 — Pretendard 우선(호스트 몰에 있으면 사용, 없으면 시스템 한글 폴백. 외부 로드 0)
+const INAPP_FONT_STACK = '"Pretendard Variable", Pretendard, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Apple SD Gothic Neo", "Malgun Gothic", sans-serif';
 
 // ════════════════════════════════════════════════════════════════════
 // 타입
@@ -560,7 +561,7 @@ export class HanjulloInAppModule {
       color: msg.textColor,
       boxShadow: template === 'top_banner' ? '0 6px 24px rgba(0,0,0,0.16)' : '0 -6px 24px rgba(0,0,0,0.16)',
       zIndex: '2147483647',
-      fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif',
+      fontFamily: INAPP_FONT_STACK,
       boxSizing: 'border-box',
     });
     this.applyAnimation(root, animation, template);
@@ -588,29 +589,29 @@ export class HanjulloInAppModule {
     Object.assign(backdrop.style, {
       position: 'fixed',
       inset: '0',
-      background: 'rgba(15,15,20,0.55)',
-      backdropFilter: 'blur(4px)',
+      background: 'rgba(8,10,18,0.55)',
+      backdropFilter: 'blur(14px) saturate(1.35)',
       zIndex: '2147483646',
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'center',
       padding: '16px',
     });
-    (backdrop.style as any).webkitBackdropFilter = 'blur(4px)';
+    (backdrop.style as any).webkitBackdropFilter = 'blur(14px) saturate(1.35)';
 
     const root = document.createElement('div');
     root.setAttribute('data-hanjullo-msg', msg.id);
     Object.assign(root.style, {
-      maxWidth: '400px',
+      maxWidth: '420px',
       width: '100%',
       background: msg.backgroundColor,
       color: msg.textColor,
-      borderRadius: '22px',
+      borderRadius: '24px',
       overflow: 'hidden',
-      boxShadow: '0 30px 80px rgba(0,0,0,0.45)',
+      boxShadow: '0 2px 8px rgba(0,0,0,0.25), 0 18px 46px rgba(0,0,0,0.35), 0 44px 110px rgba(0,0,0,0.45)',
       position: 'relative',
       zIndex: '2147483647',
-      fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif',
+      fontFamily: INAPP_FONT_STACK,
       boxSizing: 'border-box',
     });
     this.applyAnimation(root, animation, 'modal');
@@ -664,7 +665,7 @@ export class HanjulloInAppModule {
       alignItems: 'center',
       justifyContent: 'center',
       padding: '24px',
-      fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+      fontFamily: INAPP_FONT_STACK,
     });
     this.applyAnimation(root, animation, 'full');
 
@@ -701,7 +702,7 @@ export class HanjulloInAppModule {
       padding: '20px',
       boxShadow: '0 16px 40px rgba(0,0,0,0.28)',
       zIndex: '2147483647',
-      fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif',
+      fontFamily: INAPP_FONT_STACK,
       boxSizing: 'border-box',
     });
     this.applyAnimation(root, animation, 'slide-right');
@@ -741,7 +742,7 @@ export class HanjulloInAppModule {
       padding: '22px',
       margin: '16px 0',
       boxShadow: '0 6px 20px rgba(0,0,0,0.12)',
-      fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif',
+      fontFamily: INAPP_FONT_STACK,
       boxSizing: 'border-box',
     });
 
@@ -775,7 +776,7 @@ export class HanjulloInAppModule {
       boxShadow: '0 4px 14px rgba(0,0,0,0.2)',
       zIndex: '2147483647',
       fontSize: '13px',
-      fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+      fontFamily: INAPP_FONT_STACK,
     });
     this.applyAnimation(root, animation, 'toast');
 
@@ -825,7 +826,7 @@ export class HanjulloInAppModule {
       fontSize: '14px',
       fontWeight: '600',
       cursor: 'pointer',
-      fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+      fontFamily: INAPP_FONT_STACK,
     });
     root.textContent = title || action.label;
     root.addEventListener('click', () => {
@@ -890,13 +891,17 @@ export class HanjulloInAppModule {
     const card = document.createElement('div');
     card.setAttribute('data-hanjullo-msg', msg.id);
     const baseCard: Record<string, string> = {
-      background: theme.surface,
+      background: theme.surfaceBg || theme.surface,
       color: theme.textPrimary,
       fontFamily: INAPP_FONT_STACK,
       boxSizing: 'border-box',
+      letterSpacing: '-0.005em',
     };
+    (card.style as any).webkitFontSmoothing = 'antialiased';
     const content = document.createElement('div');
-    Object.assign(content.style, { display: 'flex', flexDirection: 'column', gap: '12px', minWidth: '0' });
+    Object.assign(content.style, { display: 'flex', flexDirection: 'column', gap: '13px', minWidth: '0' });
+    // 링(상단 하이라이트) + 3중 그림자 합성 — 유리 모서리 광
+    const cardShadow = theme.ring ? `${theme.ring}, ${theme.shadow}` : theme.shadow;
 
     const escClose = (removeFn: () => void) => {
       const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') removeFn(); };
@@ -908,18 +913,23 @@ export class HanjulloInAppModule {
     if (template === 'center_modal') {
       const backdrop = document.createElement('div');
       Object.assign(backdrop.style, {
-        position: 'fixed', inset: '0', background: 'rgba(15,15,20,0.55)', backdropFilter: 'blur(4px)',
+        position: 'fixed', inset: '0', background: 'rgba(8,10,18,0.55)',
+        backdropFilter: 'blur(14px) saturate(1.35)',
         zIndex: '2147483646', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px',
+        opacity: '0', transition: 'opacity 0.35s ease',
       });
-      (backdrop.style as any).webkitBackdropFilter = 'blur(4px)';
+      (backdrop.style as any).webkitBackdropFilter = 'blur(14px) saturate(1.35)';
       Object.assign(card.style, baseCard, {
-        maxWidth: '400px', width: '100%', borderRadius: `${theme.radius}px`, overflow: 'hidden',
-        boxShadow: theme.shadow, position: 'relative', border: `1px solid ${theme.border}`,
+        maxWidth: '420px', width: '100%', borderRadius: `${theme.radius}px`, overflow: 'hidden',
+        boxShadow: cardShadow, position: 'relative', border: `1px solid ${theme.border}`,
       });
-      Object.assign(content.style, { padding: '26px 24px 24px' });
+      Object.assign(content.style, { padding: '28px 26px 26px' });
       card.appendChild(content);
       backdrop.appendChild(card);
       document.body.appendChild(backdrop);
+      // 백드롭 자체 페이드 인 (reduced motion이면 즉시)
+      if (this.prefersReducedMotion()) backdrop.style.opacity = '1';
+      else requestAnimationFrame(() => requestAnimationFrame(() => { backdrop.style.opacity = '1'; }));
       let off = () => {};
       const remove = () => { off(); try { document.body.removeChild(backdrop); } catch {} };
       off = escClose(remove);
@@ -930,7 +940,8 @@ export class HanjulloInAppModule {
     if (template === 'full_screen') {
       Object.assign(card.style, baseCard, {
         position: 'fixed', inset: '0', display: 'flex', flexDirection: 'column',
-        alignItems: 'center', justifyContent: 'center', padding: '24px',
+        alignItems: 'center', justifyContent: 'center',
+        padding: 'calc(24px + env(safe-area-inset-top, 0px)) 24px calc(24px + env(safe-area-inset-bottom, 0px))',
       });
       Object.assign(content.style, { maxWidth: '460px', width: '100%' });
       card.appendChild(content);
@@ -944,8 +955,9 @@ export class HanjulloInAppModule {
     // ── slide_in
     if (template === 'slide_in') {
       Object.assign(card.style, baseCard, {
-        position: 'fixed', right: '20px', bottom: '20px', maxWidth: '340px', width: 'calc(100vw - 40px)',
-        borderRadius: `${theme.radius}px`, padding: '20px', boxShadow: theme.shadow,
+        position: 'fixed', right: '20px', bottom: 'calc(20px + env(safe-area-inset-bottom, 0px))',
+        maxWidth: '360px', width: 'calc(100vw - 40px)',
+        borderRadius: `${theme.radius}px`, padding: '22px', boxShadow: cardShadow,
         border: `1px solid ${theme.border}`,
       });
       card.appendChild(content);
@@ -954,12 +966,16 @@ export class HanjulloInAppModule {
       return { contentRoot: content, animationTarget: card, dismissTarget: card, closeTarget: card, remove, showClose: true, closeLayout: 'absolute-top-right' as const, motionContext: 'slide-right', mounted: true };
     }
 
-    // ── toast
+    // ── toast — 글래스(반투명 + blur). surface가 hex일 때만 반투명(아니면 원색)
     if (template === 'toast') {
       Object.assign(card.style, baseCard, {
-        position: 'fixed', top: '20px', right: '20px', maxWidth: '320px', width: 'calc(100vw - 40px)',
-        borderRadius: '14px', padding: '13px 15px', boxShadow: theme.shadow, border: `1px solid ${theme.border}`,
+        position: 'fixed', top: 'calc(20px + env(safe-area-inset-top, 0px))', right: '20px',
+        maxWidth: '340px', width: 'calc(100vw - 40px)',
+        background: withAlpha(theme.surface, 0.92),
+        backdropFilter: 'blur(16px) saturate(1.3)',
+        borderRadius: '16px', padding: '14px 16px', boxShadow: cardShadow, border: `1px solid ${theme.border}`,
       });
+      (card.style as any).webkitBackdropFilter = 'blur(16px) saturate(1.3)';
       Object.assign(content.style, { gap: '6px' });
       card.appendChild(content);
       document.body.appendChild(card);
@@ -976,8 +992,8 @@ export class HanjulloInAppModule {
         return { contentRoot: content, animationTarget: card, dismissTarget: card, closeTarget: card, remove: () => {}, showClose: false, closeLayout: 'inline' as const, motionContext: 'fade', mounted: false };
       }
       Object.assign(card.style, baseCard, {
-        borderRadius: `${theme.radius}px`, padding: '22px', margin: '16px 0',
-        boxShadow: theme.shadow, border: `1px solid ${theme.border}`,
+        borderRadius: `${theme.radius}px`, padding: '24px', margin: '16px 0',
+        boxShadow: cardShadow, border: `1px solid ${theme.border}`,
       });
       card.appendChild(content);
       container.appendChild(card);
@@ -985,14 +1001,20 @@ export class HanjulloInAppModule {
       return { contentRoot: content, animationTarget: card, dismissTarget: card, closeTarget: card, remove, showClose: false, closeLayout: 'inline' as const, motionContext: 'fade', mounted: true };
     }
 
-    // ── top_banner / bottom_banner (+ 알 수 없는 템플릿 fallback)
+    // ── top_banner / bottom_banner (+ 알 수 없는 템플릿 fallback) — 반투명 + blur (콘텐츠 위에 떠도 자연스럽게)
     const isBottom = template === 'bottom_banner';
     Object.assign(card.style, baseCard, {
       position: 'fixed', left: '0', right: '0', [isBottom ? 'bottom' : 'top']: '0',
-      padding: '14px 20px', display: 'flex', alignItems: 'center', gap: '14px',
-      boxShadow: isBottom ? '0 -6px 24px rgba(0,0,0,0.16)' : '0 6px 24px rgba(0,0,0,0.16)',
+      padding: isBottom
+        ? '14px 20px calc(14px + env(safe-area-inset-bottom, 0px))'
+        : 'calc(14px + env(safe-area-inset-top, 0px)) 20px 14px',
+      display: 'flex', alignItems: 'center', gap: '14px',
+      background: withAlpha(theme.surface, 0.94),
+      backdropFilter: 'blur(12px) saturate(1.3)',
+      boxShadow: isBottom ? '0 -8px 32px rgba(0,0,0,0.18)' : '0 8px 32px rgba(0,0,0,0.18)',
       [isBottom ? 'borderTop' : 'borderBottom']: `1px solid ${theme.border}`,
     });
+    (card.style as any).webkitBackdropFilter = 'blur(12px) saturate(1.3)';
     Object.assign(content.style, { flex: '1' });
     card.appendChild(content);
     document.body.appendChild(card);
@@ -1023,12 +1045,19 @@ export class HanjulloInAppModule {
     const root = document.createElement('button');
     root.setAttribute('data-hanjullo-msg', msg.id);
     Object.assign(root.style, {
-      position: 'fixed', right: '20px', bottom: '20px',
-      background: theme.accent, color: theme.accentText, border: 'none', borderRadius: '999px',
-      padding: '14px 22px', boxShadow: `0 8px 24px ${withAlpha(theme.accent, 0.4)}`,
-      zIndex: '2147483647', fontSize: '14px', fontWeight: '700', cursor: 'pointer', fontFamily: INAPP_FONT_STACK,
+      position: 'fixed', right: '20px', bottom: 'calc(20px + env(safe-area-inset-bottom, 0px))',
+      background: `linear-gradient(180deg, ${theme.accent} 0%, ${withAlpha(theme.accent, 0.85)} 100%)`,
+      color: theme.accentText, border: 'none', borderRadius: '999px',
+      padding: '15px 24px',
+      boxShadow: `0 2px 6px ${withAlpha(theme.accent, 0.3)}, 0 10px 28px ${withAlpha(theme.accent, 0.45)}, inset 0 1px 0 rgba(255,255,255,0.2)`,
+      zIndex: '2147483647', fontSize: '14px', fontWeight: '800', letterSpacing: '-0.01em',
+      cursor: 'pointer', fontFamily: INAPP_FONT_STACK,
+      transition: 'transform 0.2s cubic-bezier(0.22,1,0.36,1), box-shadow 0.2s ease',
     });
     root.textContent = this.replaceVariables(label, input.customer || {});
+    root.addEventListener('mouseenter', () => { root.style.transform = 'translateY(-2px) scale(1.02)'; });
+    root.addEventListener('mouseleave', () => { root.style.transform = 'none'; });
+    root.addEventListener('mousedown', () => { root.style.transform = 'scale(0.96)'; });
     root.addEventListener('click', () => {
       this.track(msg.id, 'click', input, btnId);
       if (actionUrl && !actionUrl.startsWith('[')) window.location.href = actionUrl;
@@ -1245,25 +1274,37 @@ export class HanjulloInAppModule {
     layout: 'inline' | 'absolute-top-right' = 'inline',
   ): void {
     const close = document.createElement('button');
-    close.textContent = '✕';
     close.setAttribute('aria-label', '닫기');
+    // SVG X — 텍스트 ✕보다 선명하고 어느 폰트 환경에서도 동일
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('viewBox', '0 0 24 24');
+    svg.setAttribute('width', '13');
+    svg.setAttribute('height', '13');
+    svg.setAttribute('fill', 'none');
+    svg.setAttribute('stroke', 'currentColor');
+    svg.setAttribute('stroke-width', '2.4');
+    svg.setAttribute('stroke-linecap', 'round');
+    const p = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    p.setAttribute('d', 'M6 6l12 12M18 6L6 18');
+    svg.appendChild(p);
+    close.appendChild(svg);
 
     const baseStyle: Record<string, string> = {
-      background: 'rgba(127,127,127,0.14)',
+      background: 'rgba(127,127,127,0.13)',
+      backdropFilter: 'blur(8px)',
       border: 'none',
       color: 'inherit',
-      fontSize: '13px',
       lineHeight: '1',
       cursor: 'pointer',
-      width: '28px',
-      height: '28px',
+      width: '30px',
+      height: '30px',
       borderRadius: '50%',
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'center',
       flexShrink: '0',
-      opacity: '0.6',
-      transition: 'opacity 0.15s ease, background 0.15s ease',
+      opacity: '0.65',
+      transition: 'opacity 0.2s ease, background 0.2s ease, transform 0.3s cubic-bezier(0.22,1,0.36,1)',
     };
 
     if (layout === 'absolute-top-right') {
@@ -1271,24 +1312,48 @@ export class HanjulloInAppModule {
         position: 'absolute',
         top: '12px',
         right: '12px',
+        zIndex: '2',
       });
       parent.style.position = parent.style.position || 'relative';
     }
 
     Object.assign(close.style, baseStyle);
+    (close.style as any).webkitBackdropFilter = 'blur(8px)';
     close.addEventListener('mouseenter', () => {
       close.style.opacity = '1';
       close.style.background = 'rgba(127,127,127,0.26)';
+      close.style.transform = 'rotate(90deg)';
     });
     close.addEventListener('mouseleave', () => {
-      close.style.opacity = '0.6';
-      close.style.background = 'rgba(127,127,127,0.14)';
+      close.style.opacity = '0.65';
+      close.style.background = 'rgba(127,127,127,0.13)';
+      close.style.transform = 'none';
     });
     close.addEventListener('click', () => {
       this.track(msg.id, 'dismiss', input);
-      try { onClose(); } catch {}
+      this.gracefulClose(close, onClose);
     });
     parent.appendChild(close);
+  }
+
+  /** 닫기 — 카드가 살짝 줄며 사라진 뒤 제거 (reduced motion이면 즉시). onClose 실패해도 조용히. */
+  private gracefulClose(fromEl: HTMLElement, onClose: () => void): void {
+    try {
+      if (this.prefersReducedMotion()) { onClose(); return; }
+      const rootEl = fromEl.closest('[data-hanjullo-msg]') as HTMLElement | null;
+      // 모달 = 카드의 부모(백드롭)까지 함께 페이드
+      const wrap = rootEl && rootEl.parentElement && rootEl.parentElement !== document.body ? rootEl.parentElement : rootEl;
+      if (!wrap) { onClose(); return; }
+      wrap.style.transition = 'opacity 0.22s ease';
+      wrap.style.opacity = '0';
+      if (rootEl && rootEl !== wrap) {
+        rootEl.style.transition = 'transform 0.22s ease';
+        rootEl.style.transform = 'scale(0.97)';
+      }
+      setTimeout(() => { try { onClose(); } catch {} }, 200);
+    } catch {
+      try { onClose(); } catch {}
+    }
   }
 
   private applyAnimation(el: HTMLElement, animation: string, context: string): void {
@@ -1299,16 +1364,17 @@ export class HanjulloInAppModule {
       return;
     }
 
-    // CSS transition + 초기 transform 적용 후 다음 frame에 정상 상태로
+    // CSS transition + 초기 transform 적용 후 다음 frame에 정상 상태로 (2026-07-07 스프링 커브 2.0)
     const startStates: Record<string, string> = {
       'fade': 'opacity: 0;',
-      'fade-up': 'opacity: 0; transform: translateY(12px);',
+      'fade-up': 'opacity: 0; transform: translateY(14px);',
+      'rise': 'opacity: 0; transform: scale(0.96) translateY(12px);',
       'slide-top': 'transform: translateY(-100%);',
       'slide-bottom': 'transform: translateY(100%);',
-      'slide-right': 'transform: translateX(100%);',
-      'bounce': 'transform: scale(0.7); opacity: 0;',
-      'pulse': 'transform: scale(0.95);',
-      'spring': 'transform: scale(0.92); opacity: 0;',
+      'slide-right': 'transform: translateX(calc(100% + 24px));',
+      'bounce': 'transform: scale(0.8); opacity: 0;',
+      'pulse': 'transform: scale(0.94); opacity: 0;',
+      'spring': 'transform: scale(0.92) translateY(10px); opacity: 0;',
     };
 
     let startKey = 'fade';
@@ -1324,12 +1390,16 @@ export class HanjulloInAppModule {
       startKey = 'spring';
     } else if (animation === 'celebrate') {
       startKey = 'fade-up';
+    } else if (animation === 'fade' && (context === 'modal' || context === 'slide-right')) {
+      // 모달·슬라이드인의 기본 fade = 살짝 떠오르는 rise (밋밋함 제거 — 사용자 선택 의미는 유지)
+      startKey = 'rise';
     }
 
     const startCss = startStates[startKey] || startStates.fade;
-    const transition = startKey === 'spring'
-      ? 'transform 0.45s cubic-bezier(0.34,1.56,0.64,1), opacity 0.3s ease'
-      : 'opacity 0.3s ease, transform 0.3s ease';
+    const springy = startKey === 'spring' || startKey === 'bounce' || startKey === 'rise' || startKey === 'pulse';
+    const transition = springy
+      ? 'transform 0.55s cubic-bezier(0.34,1.4,0.64,1), opacity 0.32s ease'
+      : 'opacity 0.4s cubic-bezier(0.22,1,0.36,1), transform 0.5s cubic-bezier(0.22,1,0.36,1)';
     el.style.cssText += `; ${startCss} transition: ${transition};`;
 
     requestAnimationFrame(() => {
@@ -1343,10 +1413,13 @@ export class HanjulloInAppModule {
   private setupAutoDismiss(el: HTMLElement, seconds: number): void {
     setTimeout(() => {
       try {
+        el.style.transition = 'opacity 0.35s ease, transform 0.35s ease';
         el.style.opacity = '0';
+        // fixed 요소만 살짝 내려가며 퇴장 (inline_card 등 문서 흐름 요소는 페이드만)
+        if (el.style.position === 'fixed') el.style.transform = 'translateY(8px)';
         setTimeout(() => {
           try { el.parentNode?.removeChild(el); } catch {}
-        }, 300);
+        }, 340);
       } catch {
         // 조용히 실패
       }

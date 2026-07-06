@@ -8,7 +8,7 @@
  */
 
 import type { InAppTheme } from './inapp-theme';
-import { withAlpha } from './inapp-theme';
+import { withAlpha, shadeHex } from './inapp-theme';
 
 // ════════════════════════════════════════════════════════════════════
 // 타입
@@ -147,7 +147,8 @@ function illustrationSvg(key: string, accent: string, soft: string): SVGSVGEleme
   return svg;
 }
 
-const FONT_STACK = '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif';
+// 2026-07-07 디자인 2.0 — Pretendard 우선(호스트 몰에 있으면 사용, 없으면 시스템 한글 폴백. 외부 로드 0)
+const FONT_STACK = '"Pretendard Variable", Pretendard, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Apple SD Gothic Neo", "Malgun Gothic", sans-serif';
 
 // ════════════════════════════════════════════════════════════════════
 // 블록별 렌더러 (HTMLElement | null — null = skip)
@@ -185,6 +186,7 @@ function renderMedia(b: ContentBlock, ctx: BlockRenderContext): HTMLElement | nu
   const frame = el('div', {
     position: 'relative', width: '100%', paddingTop: pad,
     borderRadius: radius, overflow: 'hidden', background: theme.surfaceElevated,
+    boxShadow: `inset 0 0 0 1px ${theme.border}`,
   });
   const img = document.createElement('img');
   img.src = ctx.absoluteImageUrl(url);
@@ -200,7 +202,7 @@ function renderMedia(b: ContentBlock, ctx: BlockRenderContext): HTMLElement | nu
   if (b.overlay) {
     const ov = el('div', {
       position: 'absolute', inset: '0',
-      background: 'linear-gradient(180deg, rgba(0,0,0,0) 40%, rgba(0,0,0,0.45) 100%)',
+      background: 'linear-gradient(180deg, rgba(0,0,0,0) 45%, rgba(0,0,0,0.28) 75%, rgba(0,0,0,0.52) 100%)',
     });
     frame.appendChild(ov);
   }
@@ -214,29 +216,36 @@ function renderEyebrow(b: ContentBlock, ctx: BlockRenderContext): HTMLElement | 
   const tone = b.tone || 'accent';
   const color = tone === 'on_media' ? theme.onMedia : tone === 'neutral' ? theme.textSecondary : theme.accent;
   const chip = el('div', {
-    display: 'inline-flex', alignItems: 'center', alignSelf: 'flex-start',
-    fontSize: '11px', fontWeight: '600', letterSpacing: '0.04em',
+    display: 'inline-flex', alignItems: 'center', gap: '5px', alignSelf: 'flex-start',
+    fontSize: '11px', fontWeight: '700', letterSpacing: '0.05em',
     color, lineHeight: '1.2',
   }, text);
   if (tone === 'accent') {
     Object.assign(chip.style, {
-      background: withAlpha(theme.accent, 0.12), padding: '4px 10px', borderRadius: '999px',
+      background: theme.accentSoft, padding: '5px 11px', borderRadius: '999px',
+      boxShadow: `inset 0 0 0 1px ${withAlpha(theme.accent, 0.14)}`,
     });
+    // 앞에 작은 점 하나 — 라벨 칩의 생동감 (텍스트보다 먼저 삽입)
+    const dot = el('span', {
+      width: '4px', height: '4px', borderRadius: '999px', background: theme.accent, flexShrink: '0',
+    });
+    chip.insertBefore(dot, chip.firstChild);
   }
   return chip;
 }
 
-const HEADLINE_SIZES: Record<string, string> = { sm: '16px', md: '18px', lg: '18px', xl: '22px' };
-const BODY_SIZES: Record<string, string> = { sm: '12.5px', md: '13.5px', lg: '15.5px' };
+const HEADLINE_SIZES: Record<string, string> = { sm: '16px', md: '19px', lg: '21px', xl: '24px' };
+const BODY_SIZES: Record<string, string> = { sm: '13px', md: '14px', lg: '15.5px' };
 
 function renderHeadline(b: ContentBlock, ctx: BlockRenderContext): HTMLElement | null {
   const text = ctx.replaceVars(String(b.text || '')).trim();
   if (!text) return null;
+  const xl = b.size === 'xl';
   return el('div', {
-    fontWeight: '600',
-    fontSize: HEADLINE_SIZES[String(b.size)] || '18px',
-    letterSpacing: b.size === 'xl' ? '-0.01em' : '-0.005em',
-    lineHeight: '1.3',
+    fontWeight: xl ? '800' : '700',
+    fontSize: HEADLINE_SIZES[String(b.size)] || '19px',
+    letterSpacing: xl ? '-0.02em' : '-0.01em',
+    lineHeight: '1.28',
     color: ctx.theme.textPrimary,
   }, text);
 }
@@ -245,7 +254,8 @@ function renderBody(b: ContentBlock, ctx: BlockRenderContext): HTMLElement | nul
   const text = ctx.replaceVars(String(b.text || ''));
   if (!text.trim()) return null;
   return el('div', {
-    fontSize: BODY_SIZES[String(b.size)] || '13.5px', fontWeight: '400', lineHeight: '1.55',
+    fontSize: BODY_SIZES[String(b.size)] || '14px', fontWeight: '400', lineHeight: '1.6',
+    letterSpacing: '-0.005em',
     color: ctx.theme.textSecondary, whiteSpace: 'pre-wrap',
   }, text);
 }
@@ -275,28 +285,33 @@ function renderBullets(b: ContentBlock, ctx: BlockRenderContext): HTMLElement | 
 function renderBenefit(b: ContentBlock, ctx: BlockRenderContext): HTMLElement | null {
   const { theme } = ctx;
   const text = ctx.replaceVars(String(b.text || '[혜택 안내 — 직접 작성해주세요]'));
+  // 쿠폰 티켓 2.0 — 그라데이션 워시 + 양측 펀치홀 + 아이콘 배지
   const ticket = el('div', {
-    position: 'relative', display: 'flex', alignItems: 'center', gap: '10px',
-    padding: '12px 14px',
-    background: withAlpha(theme.accent, 0.10),
-    border: `1px dashed ${withAlpha(theme.accent, 0.5)}`,
-    borderRadius: '12px',
+    position: 'relative', display: 'flex', alignItems: 'center', gap: '11px',
+    padding: '13px 18px 13px 14px',
+    background: `linear-gradient(135deg, ${withAlpha(theme.accent, 0.09)} 0%, ${withAlpha(theme.accent, 0.16)} 100%)`,
+    border: `1.5px dashed ${withAlpha(theme.accent, 0.45)}`,
+    borderRadius: '14px',
     color: theme.textPrimary,
   });
-  // 좌측 노치 (티켓 펀치홀 — 면 색으로 구멍처럼)
-  const notch = el('span', {
-    position: 'absolute', left: '-7px', top: '50%', transform: 'translateY(-50%)',
-    width: '12px', height: '12px', borderRadius: '999px', background: theme.surface,
-  });
-  ticket.appendChild(notch);
+  // 양측 노치 (티켓 펀치홀 — 면 색으로 구멍처럼)
+  const notchStyle = {
+    position: 'absolute', top: '50%', transform: 'translateY(-50%)',
+    width: '13px', height: '13px', borderRadius: '999px', background: theme.surface,
+    boxShadow: `inset 0 0 0 1.5px ${withAlpha(theme.accent, 0.28)}`,
+  } as Record<string, string>;
+  ticket.appendChild(el('span', { ...notchStyle, left: '-8px' }));
+  ticket.appendChild(el('span', { ...notchStyle, right: '-8px' }));
   const ic = el('span', {
     display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-    width: '26px', height: '26px', flexShrink: '0',
+    width: '32px', height: '32px', borderRadius: '10px', flexShrink: '0',
+    background: theme.accentSoft,
   });
-  ic.appendChild(iconSvg('gift', theme.accent, 20));
+  ic.appendChild(iconSvg('gift', theme.accent, 18));
   ticket.appendChild(ic);
   ticket.appendChild(el('div', {
-    fontSize: '13px', fontWeight: '600', lineHeight: '1.4', color: theme.textPrimary, minWidth: '0',
+    fontSize: '13.5px', fontWeight: '700', lineHeight: '1.4', letterSpacing: '-0.01em',
+    color: theme.textPrimary, minWidth: '0',
   }, text));
   return ticket;
 }
@@ -306,26 +321,52 @@ function renderCountdown(b: ContentBlock, ctx: BlockRenderContext): HTMLElement 
   if (!isFinite(endMs)) return null;
   const { theme } = ctx;
   const box = el('div', {
-    display: 'flex', alignItems: 'center', gap: '8px',
-    padding: '10px 12px', borderRadius: '12px',
+    display: 'flex', alignItems: 'center', gap: '9px',
+    padding: '11px 13px', borderRadius: '14px',
     background: theme.surfaceElevated, color: theme.textPrimary,
+    boxShadow: `inset 0 0 0 1px ${theme.border}`,
   });
-  const ic = el('span', { display: 'inline-flex', flexShrink: '0' });
-  ic.appendChild(iconSvg('clock', theme.accent, 16));
+  const ic = el('span', {
+    display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+    width: '28px', height: '28px', borderRadius: '9px', background: theme.accentSoft, flexShrink: '0',
+  });
+  ic.appendChild(iconSvg('clock', theme.accent, 15));
   box.appendChild(ic);
   const label = String(b.label || '').trim();
-  if (label) box.appendChild(el('span', { fontSize: '12px', color: theme.textSecondary }, ctx.replaceVars(label)));
-  const time = el('span', { fontSize: '14px', fontWeight: '700', fontVariantNumeric: 'tabular-nums', color: theme.textPrimary });
-  box.appendChild(time);
+  if (label) box.appendChild(el('span', { fontSize: '12px', fontWeight: '500', color: theme.textSecondary }, ctx.replaceVars(label)));
 
-  const fmt = (ms: number): string => {
+  // 세그먼트 시계 (HH:MM:SS 각 칸 분리 — 1일 이상은 "N일 H시간" 단일 표기)
+  const time = el('span', {
+    display: 'inline-flex', alignItems: 'center', gap: '3px', marginLeft: 'auto',
+  });
+  box.appendChild(time);
+  const seg = (txt: string, urgent: boolean) => el('span', {
+    minWidth: '26px', padding: '3px 5px', textAlign: 'center', borderRadius: '7px',
+    background: urgent ? theme.accentSoft : withAlpha(theme.textPrimary, 0.06),
+    fontSize: '13.5px', fontWeight: '800', fontVariantNumeric: 'tabular-nums', letterSpacing: '0.01em',
+    color: urgent ? theme.accent : theme.textPrimary, lineHeight: '1.2',
+  }, txt);
+  const colon = () => el('span', { fontSize: '12px', fontWeight: '700', color: theme.textSecondary }, ':');
+
+  const render = (ms: number) => {
     const s = Math.max(0, Math.floor(ms / 1000));
     const d = Math.floor(s / 86400);
     const h = Math.floor((s % 86400) / 3600);
     const m = Math.floor((s % 3600) / 60);
     const sec = s % 60;
-    if (d > 0) return `${d}일 ${h}시간`;
-    return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(sec).padStart(2, '0')}`;
+    const urgent = ms < 3600 * 1000; // 1시간 미만 = accent 강조
+    while (time.firstChild) time.removeChild(time.firstChild);
+    if (d > 0) {
+      time.appendChild(el('span', {
+        fontSize: '14px', fontWeight: '800', fontVariantNumeric: 'tabular-nums', color: theme.textPrimary,
+      }, `${d}일 ${h}시간`));
+      return;
+    }
+    time.appendChild(seg(String(h).padStart(2, '0'), urgent));
+    time.appendChild(colon());
+    time.appendChild(seg(String(m).padStart(2, '0'), urgent));
+    time.appendChild(colon());
+    time.appendChild(seg(String(sec).padStart(2, '0'), urgent));
   };
   const tick = () => {
     const remain = endMs - Date.now();
@@ -334,7 +375,7 @@ function renderCountdown(b: ContentBlock, ctx: BlockRenderContext): HTMLElement 
       if (timer) clearInterval(timer);
       return;
     }
-    time.textContent = fmt(remain);
+    render(remain);
     // 카드에서 떨어져 나가면(닫힘) 인터벌 정리
     if (typeof document !== 'undefined' && !document.contains(box) && timer) clearInterval(timer);
   };
@@ -373,8 +414,9 @@ function renderProduct(b: ContentBlock, ctx: BlockRenderContext): HTMLElement | 
   const { theme } = ctx;
   const card = el('div', {
     display: 'flex', alignItems: 'center', gap: '12px',
-    padding: '10px', borderRadius: '14px',
+    padding: '11px', borderRadius: '16px',
     background: theme.surfaceElevated, border: `1px solid ${theme.border}`,
+    boxShadow: '0 2px 8px rgba(0,0,0,0.04)',
   });
   const imgUrl = String(b.image || '').trim();
   if (imgUrl) {
@@ -383,12 +425,12 @@ function renderProduct(b: ContentBlock, ctx: BlockRenderContext): HTMLElement | 
     img.alt = '';
     img.loading = 'lazy';
     img.referrerPolicy = 'no-referrer';
-    Object.assign(img.style, { width: '52px', height: '52px', borderRadius: '10px', objectFit: 'cover', flexShrink: '0' });
+    Object.assign(img.style, { width: '56px', height: '56px', borderRadius: '12px', objectFit: 'cover', flexShrink: '0', boxShadow: `inset 0 0 0 1px ${theme.border}` });
     img.onerror = () => { img.style.display = 'none'; };
     card.appendChild(img);
   }
   const col = el('div', { minWidth: '0', flex: '1' });
-  col.appendChild(el('div', { fontSize: '13.5px', fontWeight: '600', color: theme.textPrimary, lineHeight: '1.3' }, name));
+  col.appendChild(el('div', { fontSize: '14px', fontWeight: '700', letterSpacing: '-0.01em', color: theme.textPrimary, lineHeight: '1.3' }, name));
   const meta = ctx.replaceVars(String(b.meta || '')).trim();
   if (meta) col.appendChild(el('div', { fontSize: '12px', color: theme.textSecondary, marginTop: '2px' }, meta));
   if (b.rating) {
@@ -400,7 +442,11 @@ function renderProduct(b: ContentBlock, ctx: BlockRenderContext): HTMLElement | 
 }
 
 function renderDivider(_b: ContentBlock, ctx: BlockRenderContext): HTMLElement {
-  return el('div', { height: '1px', width: '100%', background: ctx.theme.border });
+  // 양끝이 스며드는 페이드 구분선
+  return el('div', {
+    height: '1px', width: '100%',
+    background: `linear-gradient(90deg, transparent 0%, ${ctx.theme.border} 18%, ${ctx.theme.border} 82%, transparent 100%)`,
+  });
 }
 
 function renderSpacer(b: ContentBlock): HTMLElement {
@@ -421,22 +467,36 @@ function renderCtaGroup(b: ContentBlock, ctx: BlockRenderContext): HTMLElement |
     const isPrimary = style === 'primary';
     const isGhost = style === 'ghost';
     const isTertiary = style === 'tertiary';
+    // primary = 세로 그라데이션(accent → 짙은 accent) + 근접/원거리 2중 그림자 — 눌리는 입체감
+    const primaryBg = `linear-gradient(180deg, ${shadeHex(theme.accent, 6)} 0%, ${shadeHex(theme.accent, -12)} 100%)`;
+    const primaryShadow = `0 1px 2px ${withAlpha(shadeHex(theme.accent, -40), 0.3)}, 0 8px 22px ${withAlpha(theme.accent, 0.38)}, inset 0 1px 0 rgba(255,255,255,0.18)`;
+    const primaryShadowHover = `0 2px 4px ${withAlpha(shadeHex(theme.accent, -40), 0.3)}, 0 12px 28px ${withAlpha(theme.accent, 0.48)}, inset 0 1px 0 rgba(255,255,255,0.18)`;
     const node = el('button', {
       cursor: 'pointer', fontFamily: FONT_STACK,
-      padding: isGhost ? '8px 10px' : '11px 18px',
-      borderRadius: '12px',
-      fontSize: '13.5px', fontWeight: isPrimary ? '700' : '600',
+      padding: isGhost ? '9px 11px' : '13px 20px',
+      borderRadius: '14px',
+      fontSize: '14px', fontWeight: isPrimary ? '800' : '700',
       letterSpacing: '-0.01em', whiteSpace: 'nowrap', textAlign: 'center',
       width: stack ? '100%' : 'auto',
-      transition: 'transform 0.12s ease, box-shadow 0.15s ease, background 0.15s ease',
+      transition: 'transform 0.16s cubic-bezier(0.22,1,0.36,1), box-shadow 0.2s ease, background 0.2s ease, filter 0.2s ease',
       border: isTertiary ? `1px solid ${theme.border}` : 'none',
-      background: isPrimary ? theme.accent : isGhost ? 'transparent' : theme.surfaceElevated,
+      background: isPrimary ? primaryBg : isGhost ? 'transparent' : theme.surfaceElevated,
       color: isPrimary ? theme.accentText : isGhost ? theme.accent : theme.textPrimary,
-      boxShadow: isPrimary ? `0 6px 18px ${withAlpha(theme.accent, 0.32)}` : 'none',
+      boxShadow: isPrimary ? primaryShadow : isTertiary ? 'none' : `inset 0 0 0 1px ${theme.border}`,
     }, ctx.replaceVars(btn.label));
-    node.addEventListener('mousedown', () => { node.style.transform = 'scale(0.98)'; });
-    node.addEventListener('mouseup', () => { node.style.transform = 'none'; });
-    node.addEventListener('mouseleave', () => { node.style.transform = 'none'; });
+    // 마이크로 인터랙션 — hover 살짝 떠오름 + 그림자 확장, press 눌림
+    node.addEventListener('mouseenter', () => {
+      node.style.transform = 'translateY(-1px)';
+      if (isPrimary) node.style.boxShadow = primaryShadowHover;
+      else if (!isGhost) node.style.filter = 'brightness(1.04)';
+    });
+    node.addEventListener('mouseleave', () => {
+      node.style.transform = 'none';
+      if (isPrimary) node.style.boxShadow = primaryShadow;
+      node.style.filter = 'none';
+    });
+    node.addEventListener('mousedown', () => { node.style.transform = 'scale(0.97)'; });
+    node.addEventListener('mouseup', () => { node.style.transform = 'translateY(-1px)'; });
     node.addEventListener('click', () => {
       ctx.onButtonClick(String(btn.id || `btn_${idx}`), btn.action_url ?? null);
     });
@@ -506,7 +566,7 @@ export function renderBlocks(root: HTMLElement, blocks: ContentBlock[], ctx: Blo
   applyStagger(rendered, ctx.reducedMotion);
 }
 
-/** 블록 0→N 순차 등장 (opacity + translateY). reducedMotion이면 즉시 표시. */
+/** 블록 0→N 순차 등장 (opacity + translateY, easeOutQuint). reducedMotion이면 즉시 표시. */
 function applyStagger(nodes: HTMLElement[], reducedMotion: boolean): void {
   if (reducedMotion || nodes.length === 0) return;
   const raf = typeof requestAnimationFrame === 'function'
@@ -514,12 +574,12 @@ function applyStagger(nodes: HTMLElement[], reducedMotion: boolean): void {
     : (cb: FrameRequestCallback) => setTimeout(() => cb(Date.now()), 16) as any;
   nodes.forEach((n) => {
     n.style.opacity = '0';
-    n.style.transform = 'translateY(8px)';
-    n.style.transition = 'opacity 0.32s ease, transform 0.32s ease';
+    n.style.transform = 'translateY(10px)';
+    n.style.transition = 'opacity 0.45s cubic-bezier(0.22,1,0.36,1), transform 0.45s cubic-bezier(0.22,1,0.36,1)';
   });
   raf(() => raf(() => {
     nodes.forEach((n, i) => {
-      const delay = Math.min(i * 60, 360);
+      const delay = Math.min(i * 70, 420);
       setTimeout(() => { n.style.opacity = '1'; n.style.transform = 'none'; }, delay);
     });
   }));

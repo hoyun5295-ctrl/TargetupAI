@@ -118,7 +118,9 @@ function CardInner({ title, body, imageUrl, badge, buttons, textColor, variant }
 function Overlay({ variant, themeTokens, ...rest }: { variant: Variant; themeTokens?: InAppTheme | null } & Omit<InAppMessagePreviewProps, 'template'>) {
   const { backgroundColor, textColor, blocks, replaceVars, isAd } = rest;
   const usingBlocks = !!(themeTokens && blocks && blocks.length > 0);
-  const cardBg = usingBlocks ? themeTokens!.surface : (backgroundColor || '#4f46e5');
+  // 2026-07-07 디자인 2.0 — SDK makeContainer 미러: 그라데이션 면(surfaceBg) + 링+3중 그림자 합성
+  const cardBg = usingBlocks ? (themeTokens!.surfaceBg || themeTokens!.surface) : (backgroundColor || '#4f46e5');
+  const cardShadow = usingBlocks ? `${themeTokens!.ring}, ${themeTokens!.shadow}` : undefined;
   const inner = usingBlocks
     ? <BlockPreview blocks={blocks!} theme={themeTokens!} replaceVars={replaceVars} isAd={isAd} />
     : <CardInner {...rest} variant={variant} textColor={textColor} />;
@@ -126,22 +128,23 @@ function Overlay({ variant, themeTokens, ...rest }: { variant: Variant; themeTok
   const cardBase: CSSProperties = {
     background: cardBg,
     position: 'absolute',
-    fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+    fontFamily: '"Pretendard Variable", Pretendard, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Apple SD Gothic Neo", "Malgun Gothic", sans-serif',
     boxSizing: 'border-box',
     ...(usingBlocks ? { color: themeTokens!.textPrimary, border: `1px solid ${themeTokens!.border}` } : {}),
   };
   const r = (def: number) => (usingBlocks ? themeTokens!.radius : def);
+  const sh = (def: string) => cardShadow || def;
 
   if (variant === 'banner') {
-    return <div style={{ ...cardBase, top: 0, left: 0, right: 0, padding: '13px 16px', boxShadow: '0 6px 22px rgba(0,0,0,0.18)' }}>{inner}</div>;
+    return <div style={{ ...cardBase, top: 0, left: 0, right: 0, padding: '13px 16px', boxShadow: '0 8px 28px rgba(0,0,0,0.18)' }}>{inner}</div>;
   }
   if (variant === 'modal') {
     const heroImg = usingBlocks ? undefined : toAbsoluteImage(rest.imageUrl);
     return (
-      <div style={{ position: 'absolute', inset: 0, background: 'rgba(15,15,20,0.5)', backdropFilter: 'blur(3px)', WebkitBackdropFilter: 'blur(3px)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 18 } as CSSProperties}>
-        <div style={{ ...cardBase, position: 'relative', maxWidth: 330, width: '100%', maxHeight: '92%', display: 'flex', flexDirection: 'column', borderRadius: r(20), overflow: 'hidden', boxShadow: '0 24px 60px rgba(0,0,0,0.45)' }}>
+      <div style={{ position: 'absolute', inset: 0, background: 'rgba(8,10,18,0.55)', backdropFilter: 'blur(10px) saturate(1.35)', WebkitBackdropFilter: 'blur(10px) saturate(1.35)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 18 } as CSSProperties}>
+        <div style={{ ...cardBase, position: 'relative', maxWidth: 330, width: '100%', maxHeight: '92%', display: 'flex', flexDirection: 'column', borderRadius: r(20), overflow: 'hidden', boxShadow: sh('0 24px 60px rgba(0,0,0,0.45)') }}>
           {heroImg && <img src={heroImg} alt="" onError={hideOnError} style={{ width: '100%', maxHeight: 130, objectFit: 'cover', display: 'block', flexShrink: 0 }} />}
-          <div style={{ padding: 20, overflowY: 'auto' }}>
+          <div style={{ padding: 22, overflowY: 'auto' }}>
             {usingBlocks ? inner : <CardInner {...rest} imageUrl={null} variant="modal" textColor={textColor} />}
           </div>
         </div>
@@ -152,10 +155,10 @@ function Overlay({ variant, themeTokens, ...rest }: { variant: Variant; themeTok
     return <div style={{ ...cardBase, inset: 0, display: 'flex', flexDirection: 'column', justifyContent: 'center', padding: 24, overflowY: 'auto' }}>{inner}</div>;
   }
   if (variant === 'slide') {
-    return <div style={{ ...cardBase, right: 16, bottom: 16, maxWidth: 232, maxHeight: '88%', overflowY: 'auto', borderRadius: r(16), padding: 16, boxShadow: '0 16px 40px rgba(0,0,0,0.3)' }}>{inner}</div>;
+    return <div style={{ ...cardBase, right: 16, bottom: 16, maxWidth: 236, maxHeight: '88%', overflowY: 'auto', borderRadius: r(16), padding: 17, boxShadow: sh('0 16px 40px rgba(0,0,0,0.3)') }}>{inner}</div>;
   }
   if (variant === 'toast') {
-    return <div style={{ ...cardBase, top: 16, right: 16, maxWidth: 230, borderRadius: r(12), padding: '11px 13px', boxShadow: '0 8px 22px rgba(0,0,0,0.25)' }}>{inner}</div>;
+    return <div style={{ ...cardBase, top: 16, right: 16, maxWidth: 234, borderRadius: r(14), padding: '12px 14px', boxShadow: sh('0 8px 22px rgba(0,0,0,0.25)') }}>{inner}</div>;
   }
   if (variant === 'floating') {
     let label = rest.buttons?.[0]?.label || rest.title || '문의하기';
@@ -165,12 +168,12 @@ function Overlay({ variant, themeTokens, ...rest }: { variant: Variant; themeTok
       label = (f?.label) || rest.title || '문의하기';
     }
     if (replaceVars) label = replaceVars(label);
-    return <div style={{ ...cardBase, right: 16, bottom: 16, borderRadius: 999, padding: '12px 20px', fontWeight: 700, fontSize: 13, color: usingBlocks ? themeTokens!.accentText : textColor, background: usingBlocks ? themeTokens!.accent : cardBg, border: 'none', boxShadow: '0 8px 22px rgba(0,0,0,0.3)' }}>{label}</div>;
+    return <div style={{ ...cardBase, right: 16, bottom: 16, borderRadius: 999, padding: '13px 21px', fontWeight: 800, letterSpacing: '-0.01em', fontSize: 13, color: usingBlocks ? themeTokens!.accentText : textColor, background: usingBlocks ? themeTokens!.accent : cardBg, border: 'none', boxShadow: '0 2px 6px rgba(0,0,0,0.18), 0 10px 26px rgba(0,0,0,0.3)' }}>{label}</div>;
   }
   // inline_card — 본문 흐름 안
   return (
     <div style={{ position: 'absolute', top: 64, left: 14, right: 14 }}>
-      <div style={{ ...cardBase, position: 'relative', borderRadius: r(15), padding: 18, boxShadow: '0 6px 20px rgba(0,0,0,0.12)' }}>{inner}</div>
+      <div style={{ ...cardBase, position: 'relative', borderRadius: r(15), padding: 18, boxShadow: sh('0 6px 20px rgba(0,0,0,0.12)') }}>{inner}</div>
     </div>
   );
 }
