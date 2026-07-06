@@ -12,6 +12,8 @@ import ConfirmModal, { ConfirmState } from '../components/ConfirmModal';
 import { useCustomerDataGate, CustomerDataRequiredBanner, CustomerDataRequiredModal } from '../components/CustomerDataGate';
 import CreditConfirmModal from '../components/credit/CreditConfirmModal';
 import { useToast } from '../components/ToastProvider';
+import { DateTimeField, isoToLocalInput, localInputToIso } from '../components/DateTimeField';
+import { takeEventDraft, EVENT_EMAIL_DRAFT_KEY } from '../components/EventCampaignModal';
 // ★ D225+ (2026-05-28 Harold 명시): Email 발송 이력 모달 신설
 import EmailEventsModal from '../components/email/EmailEventsModal';
 // 비주얼 빌더 에디터
@@ -477,6 +479,22 @@ export default function EmailCampaignsPage() {
   };
 
   useEffect(() => () => { if (genTimer.current) clearInterval(genTimer.current); }, []);
+
+  // ★ 2026-07-07(4) 행사 캠페인 — EventCampaignModal이 생성해둔 이메일 초안 자동 적용 (30분 TTL, 1회 소비)
+  useEffect(() => {
+    const d = takeEventDraft<{ data?: any; isAd?: boolean }>(EVENT_EMAIL_DRAFT_KEY);
+    if (!d?.data) return;
+    const g = d.data;
+    setVisualEditor({
+      sections: (g.sections || []) as Section[],
+      name: g.name || '행사 캠페인 이메일',
+      subject: (g.subjects && g.subjects[0]) || '',
+      isAd: d.isAd !== false,
+      aiGenerated: true,
+    });
+    showToast('행사 캠페인 이메일 초안을 불러왔습니다 — 이미지만 올리고 다듬어주세요.', 'success');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // ──────────────── 발송 진행 (수신자 모달 → 확인 → POST → 폴링) ────────────────
   const pollCampaign = (campaignId: string) => {
@@ -1735,11 +1753,10 @@ function RecipientsModal({ campaign, authHeaders, onProceed, onClose, onToast }:
             <button onClick={() => setMode('scheduled')} className={`flex-1 py-2 rounded-lg text-xs font-semibold border transition-colors flex items-center justify-center gap-1.5 ${mode === 'scheduled' ? 'bg-blue-500/30 border-blue-400/50 text-white' : 'bg-white/5 border-white/10 text-white/60'}`}><Clock className="w-3.5 h-3.5" /> 예약 발송</button>
           </div>
           {mode === 'scheduled' && (
-            <input
-              type="datetime-local"
-              value={scheduledAt}
-              onChange={(e) => setScheduledAt(e.target.value)}
-              className="w-full px-3 py-2 bg-violet-900/50 border border-white/10 rounded-lg text-sm text-white focus:outline-none focus:border-blue-400/50 [color-scheme:dark]"
+            <DateTimeField
+              value={localInputToIso(scheduledAt)}
+              onChange={(iso) => setScheduledAt(isoToLocalInput(iso))}
+              tone="dark"
             />
           )}
 

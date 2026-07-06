@@ -8,7 +8,7 @@
  */
 
 import type { InAppTheme } from './inapp-theme';
-import { withAlpha, shadeHex } from './inapp-theme';
+import { withAlpha, shadeHex, pickReadableText } from './inapp-theme';
 
 // ════════════════════════════════════════════════════════════════════
 // 타입
@@ -605,6 +605,123 @@ export function renderBlocks(root: HTMLElement, blocks: ContentBlock[], ctx: Blo
   }
 
   applyStagger(rendered, ctx.reducedMotion);
+}
+
+// ════════════════════════════════════════════════════════════════════
+// 카드 형태 축 (2026-07-07(2) 디자인 언어 2.1) — 색상(테마)과 독립인 "형태" 축
+//   classic = 기본 카드 / bubble = 꼬리 달린 둥근 말풍선 / ticket = 절취선 쿠폰 티켓 / poster = 매거진 포스터
+//   토스트·배너·플로팅은 자체 형태라 미적용(classic 동작).
+// ════════════════════════════════════════════════════════════════════
+
+export type CardStyle = 'classic' | 'bubble' | 'ticket' | 'poster';
+export const CARD_STYLES: CardStyle[] = ['classic', 'bubble', 'ticket', 'poster'];
+
+export function normalizeCardStyle(v: any): CardStyle {
+  return (CARD_STYLES as string[]).includes(String(v)) ? (String(v) as CardStyle) : 'classic';
+}
+
+export interface CardLayoutPlan {
+  /** poster — 히어로로 승격되는 첫 media(image) 블록. 없으면 null(강조색 면 히어로) */
+  hero: ContentBlock | null;
+  /** poster — 히어로 위에 겹칠 블록 (eyebrow·headline 각 첫 1개) */
+  overlay: ContentBlock[];
+  /** 본문 영역 블록 */
+  main: ContentBlock[];
+  /** ticket — 절취선 뒤 스터브 블록 (마지막 cta_group부터 끝까지) */
+  stub: ContentBlock[];
+}
+
+/** 카드 형태별 블록 배치 계획 — SDK 렌더와 관리자 미리보기가 같은 분할을 쓰도록 순수 함수로 고정 */
+export function planCardLayout(blocks: ContentBlock[], style: CardStyle): CardLayoutPlan {
+  const list = Array.isArray(blocks) ? blocks.filter((b) => b && typeof b === 'object') : [];
+  if (style === 'poster') {
+    let hero: ContentBlock | null = null;
+    const overlay: ContentBlock[] = [];
+    const main: ContentBlock[] = [];
+    let eyebrowTaken = false;
+    let headlineTaken = false;
+    for (const b of list) {
+      if (!hero && b.type === 'media' && (b.variant === 'image' || (!b.variant && b.url)) && String(b.url || '').trim()) { hero = b; continue; }
+      if (!eyebrowTaken && b.type === 'eyebrow') { overlay.push(b); eyebrowTaken = true; continue; }
+      if (!headlineTaken && b.type === 'headline') { overlay.push(b); headlineTaken = true; continue; }
+      main.push(b);
+    }
+    return { hero, overlay, main, stub: [] };
+  }
+  if (style === 'ticket') {
+    let cut = -1;
+    for (let i = list.length - 1; i >= 0; i--) {
+      if (String(list[i].type) === 'cta_group') { cut = i; break; }
+    }
+    if (cut <= 0) return { hero: null, overlay: [], main: list, stub: [] };
+    return { hero: null, overlay: [], main: list.slice(0, cut), stub: list.slice(cut) };
+  }
+  return { hero: null, overlay: [], main: list, stub: [] };
+}
+
+/** poster 히어로 — 이미지(스크림+겹침 텍스트) 또는 강조색 면 + 헤드라인. 순수 DOM. */
+export function renderPosterHero(plan: CardLayoutPlan, ctx: BlockRenderContext): HTMLElement | null {
+  if (!plan.hero && plan.overlay.length === 0) return null;
+  const { theme } = ctx;
+  const hero = el('div', {
+    position: 'relative', width: '100%', minHeight: '136px', borderRadius: `${Math.max(12, theme.radius - 8)}px`,
+    overflow: 'hidden', display: 'flex', alignItems: 'flex-end',
+    background: plan.hero
+      ? theme.surfaceElevated
+      : `linear-gradient(135deg, ${shadeHex(theme.accent, 10)} 0%, ${theme.accent} 55%, ${shadeHex(theme.accent, -25)} 100%)`,
+  });
+  if (plan.hero) {
+    const img = document.createElement('img');
+    img.src = ctx.absoluteImageUrl(String(plan.hero.url || ''));
+    img.alt = '';
+    img.loading = 'lazy';
+    img.referrerPolicy = 'no-referrer';
+    Object.assign(img.style, { position: 'absolute', inset: '0', width: '100%', height: '100%', objectFit: 'cover' });
+    img.onerror = () => { img.style.display = 'none'; };
+    hero.appendChild(img);
+    hero.appendChild(el('div', {
+      position: 'absolute', inset: '0',
+      background: 'linear-gradient(180deg, rgba(0,0,0,0.02) 30%, rgba(0,0,0,0.58) 100%)',
+    }));
+  }
+  const onHero = plan.hero ? '#ffffff' : pickReadableText(theme.accent);
+  const txt = el('div', { position: 'relative', padding: '18px 18px 16px', display: 'flex', flexDirection: 'column', gap: '7px', width: '100%', boxSizing: 'border-box' });
+  for (const b of plan.overlay) {
+    const t = ctx.replaceVars(String(b.text || '')).trim();
+    if (!t) continue;
+    if (b.type === 'eyebrow') {
+      txt.appendChild(el('div', {
+        alignSelf: 'flex-start', fontSize: '10.5px', fontWeight: '800', letterSpacing: '0.14em',
+        color: onHero, opacity: '0.88', lineHeight: '1.2',
+      }, t));
+    } else if (b.type === 'headline') {
+      txt.appendChild(el('div', {
+        fontSize: '22px', fontWeight: '800', letterSpacing: '-0.02em', lineHeight: '1.22',
+        color: onHero, textShadow: plan.hero ? '0 2px 12px rgba(0,0,0,0.35)' : 'none',
+      }, t));
+    }
+  }
+  hero.appendChild(txt);
+  return hero;
+}
+
+/** ticket 절취선 — 양측 펀치홀 + 점선. 순수 DOM. */
+export function renderTicketPerforation(theme: InAppTheme): HTMLElement {
+  const row = el('div', { position: 'relative', height: '22px', display: 'flex', alignItems: 'center' });
+  const hole = (side: 'left' | 'right') => {
+    const h = el('span', {
+      position: 'absolute', top: '50%', transform: 'translateY(-50%)',
+      width: '16px', height: '16px', borderRadius: '999px',
+      background: theme.surfaceElevated,
+      boxShadow: `inset 0 1px 3px rgba(0,0,0,0.12), inset 0 0 0 1px ${theme.border}`,
+    });
+    (h.style as any)[side] = '-6px';
+    return h;
+  };
+  row.appendChild(hole('left'));
+  row.appendChild(el('div', { flex: '1', margin: '0 16px', borderTop: `2px dashed ${withAlpha(theme.textPrimary, 0.16)}` }));
+  row.appendChild(hole('right'));
+  return row;
 }
 
 /** 블록 0→N 순차 등장 (opacity + translateY, easeOutQuint). reducedMotion이면 즉시 표시. */

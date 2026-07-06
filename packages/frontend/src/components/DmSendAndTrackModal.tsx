@@ -16,6 +16,7 @@ import TargetExtractModal, { type ExtractedTarget } from './TargetExtractModal';
 import AiRefineModal from './AiRefineModal';
 import SpamFilterTestModal from './SpamFilterTestModal';
 import ConfirmModal, { type ConfirmState } from './ConfirmModal';
+import { DateTimeField, isoToLocalInput, localInputToIso } from './DateTimeField';
 
 /** 발신번호 select 특수값 — 고객별 등록매장 번호(개별 회신) */
 const INDIVIDUAL_CB = '__individual__';
@@ -106,6 +107,8 @@ export default function DmSendAndTrackModal({ dmId, dmTitle, show, onClose, init
   // 문안 — 2모드
   const [mode, setMode] = useState<'ai' | 'direct'>('ai');
   const [prompt, setPrompt] = useState('');
+  // ★ 2026-07-07(4) 문안 길이 — lms(기존 80~250자) / sms(90바이트 단문 — hlj.kr 단축링크로 가능해진 저단가 옵션)
+  const [copyLen, setCopyLen] = useState<'lms' | 'sms'>('lms');
   const [messageText, setMessageText] = useState('');
   const [generating, setGenerating] = useState(false);
   const [decorating, setDecorating] = useState(false);
@@ -299,7 +302,7 @@ export default function DmSendAndTrackModal({ dmId, dmTitle, show, onClose, init
       const res = await fetch(`/api/dm/${dmId}/generate-copy`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token()}` },
-        body: JSON.stringify({ prompt: prompt.trim() }),
+        body: JSON.stringify({ prompt: prompt.trim(), length_mode: copyLen }),
       });
       const data = await res.json();
       if (!res.ok || !data.success) { toast.error(data?.error || '문안 생성에 실패했습니다.'); return; }
@@ -462,6 +465,19 @@ export default function DmSendAndTrackModal({ dmId, dmTitle, show, onClose, init
                   {mode === 'ai' && (
                     <div>
                       <p className="text-[10px] text-violet-200/70 mb-1.5">편집해 둔 DM 내용(행사·쿠폰·상품)을 AI가 읽고 문안을 만듭니다 — 프롬프트 없이 바로 생성하세요.</p>
+                      {/* ★ 2026-07-07(4) SMS 우선 옵션 — hlj.kr 단축링크(22자)로 90바이트 단문 발송 가능 (원가 절감) */}
+                      <div className="flex items-center gap-1.5 mb-1.5">
+                        <span className="text-[10px] text-white/40">길이</span>
+                        {([['lms', 'LMS 여유 (80~250자)'], ['sms', 'SMS 짧게 (90바이트·저단가)']] as const).map(([v, label]) => (
+                          <button
+                            key={v}
+                            onClick={() => setCopyLen(v)}
+                            className={`text-[10px] px-2 py-1 rounded-lg border transition-colors ${copyLen === v ? 'bg-violet-500/30 border-violet-400/50 text-white' : 'bg-white/5 border-white/10 text-white/50 hover:text-white/80'}`}
+                          >
+                            {label}
+                          </button>
+                        ))}
+                      </div>
                       <textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} rows={2} placeholder="추가 요청 (선택) — 예: 정중한 톤으로, 마감 강조" className="w-full bg-slate-950/60 border border-white/10 rounded-lg px-3 py-2 text-sm text-white placeholder:text-white/30 focus:outline-none focus:border-violet-400/60 resize-none" />
                       <button onClick={handleGenerate} disabled={generating} className="mt-2 w-full py-2 rounded-lg text-xs font-semibold text-white bg-gradient-to-r from-violet-500 to-fuchsia-500 hover:from-violet-600 hover:to-fuchsia-600 disabled:opacity-30 flex items-center justify-center gap-1.5">
                         {generating ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}{generating ? '생성 중...' : '편집된 DM 내용으로 AI 문안 생성'}
@@ -806,7 +822,11 @@ export default function DmSendAndTrackModal({ dmId, dmTitle, show, onClose, init
               <button onClick={() => setScheduleMode('manual')} className={`px-2.5 py-1.5 rounded-lg text-[11px] font-semibold ${scheduleMode === 'manual' ? 'bg-indigo-500/40 text-white' : 'bg-white/5 text-white/50 hover:bg-white/10'}`}>직접 예약</button>
               <button onClick={applyAiTime} title="AI 추천 — 내일 오전 10시" className={`px-2.5 py-1.5 rounded-lg text-[11px] font-semibold ${scheduleMode === 'ai' ? 'bg-violet-500/40 text-white' : 'bg-white/5 text-white/50 hover:bg-white/10'}`}>AI 추천</button>
               {scheduleMode !== 'immediate' && (
-                <input type="datetime-local" value={scheduledAt} onChange={(e) => { setScheduledAt(e.target.value); setScheduleMode('manual'); }} className="px-2 py-1.5 bg-slate-950/60 border border-white/10 rounded-lg text-xs text-white [color-scheme:dark]" />
+                <DateTimeField
+                  value={localInputToIso(scheduledAt)}
+                  onChange={(iso) => { setScheduledAt(isoToLocalInput(iso)); setScheduleMode('manual'); }}
+                  tone="dark"
+                />
               )}
             </div>
             <div className="ml-auto flex items-center gap-2">

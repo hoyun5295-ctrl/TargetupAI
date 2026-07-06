@@ -78,6 +78,8 @@ export interface CreateInAppMessageInput {
   content_blocks?: any[] | null;
   theme?: string | null;
   accent_color?: string | null;
+  // ★ 2026-07-07(2) 형태 축 — classic/bubble/ticket/poster (색상 테마와 독립)
+  card_style?: string | null;
 }
 
 // ════════════════════════════════════════════════════════════════════
@@ -105,6 +107,14 @@ export function sanitizeContentBlocks(blocks: any): any[] {
 /** theme 키 화이트리스트 (아니면 auto) */
 export function normalizeTheme(theme: any): string {
   return (INAPP_THEME_KEYS as readonly string[]).includes(String(theme)) ? String(theme) : 'auto';
+}
+
+// ★ 2026-07-07(2) 형태 축 화이트리스트 — SDK inapp-blocks CARD_STYLES와 1:1
+export const INAPP_CARD_STYLES = ['classic', 'bubble', 'ticket', 'poster'] as const;
+
+/** card_style 화이트리스트 (아니면 classic — 구버전·임의 값 안전) */
+export function normalizeCardStyle(style: any): string {
+  return (INAPP_CARD_STYLES as readonly string[]).includes(String(style)) ? String(style) : 'classic';
 }
 
 function textHasPlaceholder(t: any): boolean {
@@ -164,7 +174,7 @@ export async function createInAppMessage(
       template, image_url, buttons, segment_conditions, trigger_conditions,
       personalization_vars, auto_dismiss_seconds, max_displays_per_user,
       send_start_hour, send_end_hour, allowed_weekdays, animation, badge_text,
-      content_blocks, theme, accent_color,
+      content_blocks, theme, accent_color, card_style,
       created_at, updated_at
     ) VALUES (
       gen_random_uuid(), $1::uuid, $2::uuid, $3, $4, $5, $6,
@@ -173,7 +183,7 @@ export async function createInAppMessage(
       $16, $17, $18::jsonb, $19::jsonb, $20::jsonb,
       $21::jsonb, $22, $23,
       $24, $25, $26, $27, $28,
-      $29::jsonb, $30, $31,
+      $29::jsonb, $30, $31, $32,
       NOW(), NOW()
     ) RETURNING *`,
     [
@@ -189,6 +199,7 @@ export async function createInAppMessage(
       input.send_start_hour ?? null, input.send_end_hour ?? null, input.allowed_weekdays || [0, 1, 2, 3, 4, 5, 6], input.animation || 'fade',
       input.badge_text ?? null,
       JSON.stringify(contentBlocks), normalizeTheme(input.theme), input.accent_color ?? null,
+      normalizeCardStyle(input.card_style),
     ]
   );
   return mapRowToMessage(result.rows[0]);
@@ -252,6 +263,7 @@ export async function updateInAppMessage(
       content_blocks = COALESCE($28::jsonb, content_blocks),
       theme = COALESCE($29, theme),
       accent_color = COALESCE($30, accent_color),
+      card_style = COALESCE($31, card_style),
       updated_at = NOW()
      WHERE id = $1::uuid AND company_id = $2::uuid
      RETURNING *`,
@@ -271,6 +283,7 @@ export async function updateInAppMessage(
       input.allowed_weekdays ?? null, input.animation ?? null,
       input.badge_text ?? null,
       blocksParam, input.theme ? normalizeTheme(input.theme) : null, input.accent_color ?? null,
+      input.card_style !== undefined && input.card_style !== null ? normalizeCardStyle(input.card_style) : null,
     ]
   );
   return result.rows.length > 0 ? mapRowToMessage(result.rows[0]) : null;
@@ -515,6 +528,8 @@ export interface InAppMessageDetail extends InAppMessage {
   contentBlocks: any[];
   theme: string;
   accentColor: string | null;
+  /** ★ 2026-07-07(2) 형태 축 — classic/bubble/ticket/poster */
+  cardStyle: string;
   audienceFilter?: Record<string, any> | null;
 }
 
@@ -540,6 +555,7 @@ function mapRowToMessageDetail(row: any): InAppMessageDetail {
     contentBlocks: Array.isArray(row.content_blocks) ? row.content_blocks : [],
     theme: row.theme || 'auto',
     accentColor: row.accent_color || null,
+    cardStyle: normalizeCardStyle(row.card_style),
     audienceFilter: row.audience_filter || null,
   };
 }
@@ -568,7 +584,7 @@ const FULL_COLUMNS = `id, title, body, action_url, action_label, position, backg
                       personalization_vars, parent_message_id, variant_weight,
                       auto_dismiss_seconds, max_displays_per_user,
                       send_start_hour, send_end_hour, allowed_weekdays, locale_variants, animation, channel,
-                      content_blocks, theme, accent_color, audience_filter`;
+                      content_blocks, theme, accent_color, card_style, audience_filter`;
 
 /**
  * ★ D215+ V2 — SDK GET /inapp/active 호출 진입.

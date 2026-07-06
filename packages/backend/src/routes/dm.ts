@@ -55,6 +55,7 @@ import { buildSystemPromptWithBrandVoice } from '../utils/brand-voice-prompt';
 import { getAvailableVariables } from '../utils/dm/dm-variable-resolver';
 import { validateDm } from '../utils/dm/dm-validate';
 import { getCompanyBrandKit, updateCompanyBrandKit, DEFAULT_BRAND_KIT } from '../utils/dm/dm-brand-kit';
+import { buildEventPromptBlock, normalizeEventText } from '../utils/event-brief';
 import { listTemplates, getTemplate, instantiateTemplate } from '../utils/dm/dm-template-registry';
 import { insertTestSmsQueue } from '../utils/sms-queue';
 import { getUserTestContacts } from '../utils/test-contact-helper';
@@ -472,19 +473,25 @@ dmRouter.post('/ai/one-shot-generate', async (req: any, res: any) => {
     const prompt: string = (req.body?.prompt || '').toString().trim();
     const scenario: string | undefined = req.body?.scenario;
     const brandName: string | undefined = req.body?.brand_name;
+    // ★ 2026-07-07(4) 행사 캠페인 — 행사 원문 단독 입력도 생성 가능. 브리프 블록을 프롬프트에 합성
+    //   (parsePrompt가 원문 기재 혜택을 spec.benefit으로 추출 → 기재 혜택만 카피에 반영되는 기존 경로 그대로).
+    const eventText = req.body?.event_text ? normalizeEventText(req.body.event_text) : '';
 
-    if (!prompt && !scenario) {
+    if (!prompt && !scenario && !eventText) {
       return res.status(400).json({ error: 'prompt 또는 scenario 영역 필요' });
     }
     if (prompt.length > 2000) {
       return res.status(400).json({ error: '프롬프트는 2000자 이내로 입력해주세요.' });
     }
+    const effectivePrompt = eventText
+      ? `${buildEventPromptBlock(eventText)}${prompt ? `\n\n[추가 요청]\n${prompt}` : ''}`
+      : prompt;
 
     // ★ 종량제: DM 생성(돌려보기) = 3크레딧 묶음 (내부 parse/copy/tone은 집계만, 차감 0). 발행 시 30 별도.
     const genCost = getCreditCost('dm-ai-generate');  // 3
     await checkCredit(companyId, genCost);
     const result = await runInCreditBundle(async () => {
-      const r = await oneShotGenerate({ prompt, scenario, brandName, companyId });
+      const r = await oneShotGenerate({ prompt: effectivePrompt, scenario, brandName, companyId });
       await deductCreditSafe({ companyId, cost: genCost, source: 'dm-ai-generate', createdBy: req.user?.userId });
       return r;
     });
@@ -1063,6 +1070,8 @@ dmRouter.post('/:id/generate-copy', async (req: any, res: any) => {
     // ★ 2026-07-02(3) Harold 지시 — 프롬프트는 선택. 비워두면 편집된 DM 내용만으로 자동 생성.
     const { prompt } = req.body as { prompt?: string };
     const userPrompt = prompt?.trim() || '';
+    // ★ 2026-07-07(4) SMS 우선 옵션 — hlj.kr 단축링크(22자) 도입으로 90바이트 SMS가 가능해짐. 기본은 기존 LMS.
+    const lengthMode: 'sms' | 'lms' = req.body?.length_mode === 'sms' ? 'sms' : 'lms';
 
     // DM 편집 내용 요약 — 문자는 이 DM 페이지를 알리는 것이므로 실제 편집된 내용이 문안의 근거
     const dm = await getDmDetail(req.params.id, companyId);
@@ -1087,6 +1096,12 @@ dmRouter.post('/:id/generate-copy', async (req: any, res: any) => {
         case 'lucky_draw': if (p.title) dmLines.push(`응모 이벤트: ${p.title}`); break;
         case 'roulette': if (p.title) dmLines.push(`룰렛 이벤트: ${p.title}`); break;
         case 'cta': { const b = (Array.isArray(p.buttons) ? p.buttons : [])[0]; if (b?.label) dmLines.push(`행동 유도: ${b.label}`); break; }
+        // ★ 2026-07-07(4) 16섹션 커버리지 — 열거 밖 신규/기타 섹션도 대표 텍스트를 요약에 반영 (탭·설문·투표·이메일수집 등)
+        default: {
+          const rep = p.headline || p.title || p.question || p.label || p.text;
+          if (rep && String(rep).trim()) dmLines.push(`${String(s?.type || '섹션')}: ${String(rep).slice(0, 80)}`);
+          break;
+        }
       }
     }
     const dmSummary = dmLines.length
@@ -1095,12 +1110,16 @@ dmRouter.post('/:id/generate-copy', async (req: any, res: any) => {
 
     // ★ 2026-07-02(3) 계절·시기 감성 주입 — DM 내용 + 시즌감으로 풍성한 카피 (구체 사실 창작은 여전히 금지)
     const { monthLabel, seasonHint } = getSeasonContext();
-    const baseSystem = `당신은 한줄로 SMS/LMS 마케팅 카피라이터입니다. 아래 조건으로 LMS 문자 본문 1개만 작성합니다.
+    const lengthRule = lengthMode === 'sms'
+      ? `- 단문(SMS) 우선: %DM링크%는 발송 시 22자 내외 단축링크로 치환됩니다. 링크를 제외한 본문은 한글 기준 28자 안(전체 90바이트 안)으로 — 감성 후크 반 줄 + 핵심 한 조각 + %DM링크%. 줄바꿈 없이 한 줄.`
+      : `- 밋밋한 나열 대신 감성 후크(첫 줄) + 핵심 내용 + 행동 유도 흐름으로.
+- 80~250자. 줄바꿈은 실제 줄바꿈 문자로.`;
+    const baseSystem = `당신은 한줄로 SMS/LMS 마케팅 카피라이터입니다. 아래 조건으로 ${lengthMode === 'sms' ? '단문(SMS)' : 'LMS'} 문자 본문 1개만 작성합니다.
 - 반드시 %DM링크% 를 문안 안 자연스러운 위치에 1회 포함(수신자별 개인화 링크가 여기 들어갑니다).
 - 혜택·쿠폰·이벤트는 [DM 페이지 편집 내용]에 실제 적힌 표현만 그대로 인용 — 거기 없는 혜택(%/원/쿠폰/무료/할인/사은품/적립) 임의 창작 절대 금지.
 - 지금은 ${monthLabel}(${seasonHint}) — 계절감과 시기 감성을 가벼운 수식·인사로 자연스럽게 녹여 카피를 풍성하게. 단 시즌 묘사는 일반적 사실만, 통계·행사 등 구체 사실 지어내기 금지.
-- 밋밋한 나열 대신 감성 후크(첫 줄) + 핵심 내용 + 행동 유도 흐름으로.
-- 유니코드 이모지 금지(SMS 호환). 80~250자. 줄바꿈은 실제 줄바꿈 문자로.
+${lengthRule}
+- 유니코드 이모지 금지(SMS 호환).
 - 개인화는 %고객명% 등 명시된 변수만 사용.
 [출력 형식 — 절대 준수] 문자 본문 텍스트만 그대로 출력. JSON·코드블록·따옴표·"channel"·"body" 같은 형식 절대 금지.${dmSummary}`;
     const system = await buildSystemPromptWithBrandVoice(companyId, baseSystem);

@@ -27,8 +27,9 @@ import { buildMemoryPromptContext } from './company-memory';
 import { getCompanyDataProfile, formatProfileForAiPrompt } from './company-data-profile';
 import { query } from '../config/database';
 import { getCompanyBrandKitRaw } from './dm/dm-brand-kit';
+import { buildEventPromptBlock, benefitMatchesEventText, normalizeEventText } from './event-brief';
 // ★ D230+ 블록 — CT-27 공용 검증/정규화 (인라인 중복 금지)
-import { sanitizeContentBlocks, normalizeTheme, BENEFIT_PLACEHOLDER } from './inapp-message';
+import { sanitizeContentBlocks, normalizeTheme, normalizeCardStyle, INAPP_CARD_STYLES, BENEFIT_PLACEHOLDER } from './inapp-message';
 
 // ════════════════════════════════════════════════════════════════════
 // 타입
@@ -110,6 +111,8 @@ export interface GeneratedInAppMessage {
   content_blocks: any[];
   theme: string;
   accent_color: string | null;
+  // ★ 2026-07-07(2) 형태 축 — classic/bubble/ticket/poster
+  card_style: string;
 }
 
 export interface SubAgentStep {
@@ -129,6 +132,9 @@ export interface InAppAIGenerateInput {
   createdBy: string;
   objective?: string;
   templateHint?: QuickStartScenario;
+  /** ★ 2026-07-07(4) 행사 캠페인 — 사용자가 입력한 행사 원문. 있으면 이 행사를 알리는 메시지로 생성,
+   *  원문에 기재된 혜택만 원문 그대로 통과(benefitMatchesEventText 기계 검증). */
+  eventText?: string;
 }
 
 // ════════════════════════════════════════════════════════════════════
@@ -301,6 +307,17 @@ const SCENARIO_ACCENT: Record<QuickStartScenario, string> = {
   repeat_purchase: '#0ea5e9',
 };
 
+// ★ 2026-07-07(2) 시나리오별 추천 형태 — 대화 회복=말풍선 / 혜택 유도=티켓 / 신상품=포스터 / 포멀=클래식
+const SCENARIO_CARD_STYLE: Record<QuickStartScenario, string> = {
+  cart_recovery: 'ticket',
+  new_welcome: 'bubble',
+  dormant_recovery: 'bubble',
+  new_product: 'poster',
+  vip_appreciation: 'classic',
+  checkout_abandon: 'bubble',
+  repeat_purchase: 'ticket',
+};
+
 function isAccentHex(c: any): boolean {
   return typeof c === 'string' && /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(c.trim());
 }
@@ -310,10 +327,14 @@ function isAccentHex(c: any): boolean {
  * - benefit.text = 고정 placeholder (AI는 구체 혜택 절대 작성 X — 회사 admin 직접)
  * - media(image)·product.image url 제거 (이미지 AI 생성 금지, 회사 admin 업로드만)
  */
-function forceBlockSafety(b: any): any {
+function forceBlockSafety(b: any, eventText?: string): any {
   if (!b || typeof b !== 'object') return b;
   const out = { ...b };
-  if (out.type === 'benefit') out.text = BENEFIT_PLACEHOLDER;
+  if (out.type === 'benefit') {
+    // ★ 2026-07-07(4) 행사 캠페인 예외 — 행사 원문에 실존하는 혜택 표현만 통과 (환각 혜택은 원문 검증에서 탈락 → placeholder)
+    const keep = !!eventText && !!String(out.text || '').trim() && benefitMatchesEventText(out.text, eventText);
+    if (!keep) out.text = BENEFIT_PLACEHOLDER;
+  }
   if (out.type === 'media' && (out.variant === 'image' || (!out.variant && out.url))) delete out.url;
   if (out.type === 'product') delete out.image;
   return out;
@@ -347,12 +368,13 @@ function synthesizeBlocks(flat: { badge?: string | null; title: string; body: st
 export async function generateInAppMessagePackage(
   input: InAppAIGenerateInput
 ): Promise<InAppAIPackage> {
-  if (!input.objective && !input.templateHint) {
-    throw new Error('objective (자연어) 또는 templateHint (빠른 시작 7 시나리오 중 하나) 중 하나는 필수입니다.');
+  const eventText = normalizeEventText(input.eventText || '');
+  if (!input.objective && !input.templateHint && !eventText) {
+    throw new Error('objective (자연어) 또는 templateHint (빠른 시작 7 시나리오) 또는 event_text (행사 내용) 중 하나는 필수입니다.');
   }
 
   // templateHint 우선 — 빠른 시작 SEED 사용
-  let effectiveObjective = input.objective || '';
+  let effectiveObjective = input.objective || (eventText ? '아래 행사 내용을 자사몰 방문 고객에게 알리는 인앱 메시지' : '');
   let suggestedTemplate: InAppTemplate = 'center_modal';
   let suggestedTrigger: TriggerConditions['event'] = 'page_load';
 
@@ -388,12 +410,13 @@ export async function generateInAppMessagePackage(
 
 ${memoryContext}
 
+${eventText ? `${buildEventPromptBlock(eventText)}\n` : ''}
 [★ ★ ★ 영구 룰 — 절대 위반 X ★ ★ ★]
 
 1. AI 임의 혜택 절대 금지:
    ✗ 구체 혜택 (% / 원 / 무료 / 쿠폰 / 사은품 / 적립 / 무료배송 / 할인) 절대 임의 작성 X
    ✓ 혜택 부분은 \`[혜택 안내 — 직접 작성해주세요]\` placeholder만 정확히 사용
-   ✓ 회사 admin이 검토 + 편집 단계에서 실제 정책 작성 의무
+   ✓ 회사 admin이 검토 + 편집 단계에서 실제 정책 작성 의무${eventText ? `\n   ✓ 예외 1가지: 위 [행사 내용] 원문에 기재된 혜택 표현은 원문 그대로(변형 금지) benefit에 사용 가능 — 원문에 없는 혜택은 여전히 절대 금지` : ''}
 
 2. AI 메시지 = 메시지 흐름 / 구조 / 인사 / 시즌 감성 텍스트만 작성
    ✓ 안부 / 공감 도입 / 시즌 묘사 / 가치 제안 / CTA 안내 / 진심 마무리 = 적극 작성
@@ -531,6 +554,9 @@ ${brandAccent
     : `accent_color = 강조색 hex (예: "#4f46e5"). 회사 브랜드 색이 확인되지 않았으므로 시나리오 무드에 맞는 차분한 색 1개만 선택.`}
 - 환영 / 감사 / 축하 = vibrant 권장. 정보 / 안내 = light · brand 권장. 프리미엄 · VIP = minimal · dark 권장.
 
+[형태 (card_style)] — 색상과 독립인 카드 형태 축. 다음 중 하나:
+- classic(정돈된 기본 카드) · bubble(꼬리 달린 둥근 말풍선 — 환영·안부·대화 회복) · ticket(절취선 쿠폰 티켓 — 혜택·재구매 유도) · poster(매거진 포스터 — 신상품·이미지 중심 발표)
+
 [is_ad 광고 표기]
 
 - 마케팅성 메시지 (혜택 / 할인 안내) = is_ad: true
@@ -569,6 +595,7 @@ ${brandAccent
   "is_ad": false,
   "theme": "vibrant",
   "accent_color": "#6d5cf0",
+  "card_style": "bubble",
   "content_blocks": [
     { "type": "eyebrow", "text": "오랜만이에요", "tone": "accent" },
     { "type": "headline", "text": "다시 만나 반가워요", "size": "lg" },
@@ -629,8 +656,8 @@ ${brandAccent
     text_color: String(b.text_color || '#ffffff'),
   })) : [];
 
-  // ★ D230+ 블록 — AI 블록 우선(안전 처리: benefit placeholder 강제 + image url 제거), 없으면 평면에서 합성
-  let content_blocks = sanitizeContentBlocks(parsed.content_blocks).map(forceBlockSafety);
+  // ★ D230+ 블록 — AI 블록 우선(안전 처리: benefit은 행사 원문 실존분만 통과, 그 외 placeholder 강제 + image url 제거), 없으면 평면에서 합성
+  let content_blocks = sanitizeContentBlocks(parsed.content_blocks).map((b) => forceBlockSafety(b, eventText));
   if (content_blocks.length === 0) {
     content_blocks = synthesizeBlocks({ badge: badge_text, title, body, buttons });
   }
@@ -638,6 +665,11 @@ ${brandAccent
   const scenarioAccent = input.templateHint ? SCENARIO_ACCENT[input.templateHint] : null;
   // 브랜드 킷 설정 회사 = 그 색으로 강제 (AI 출력 무시 — 임의 hex 차단). 미설정 = AI 제안 → 시나리오 팔레트 순.
   const accent_color = brandAccent || (isAccentHex(parsed.accent_color) ? String(parsed.accent_color).trim() : (scenarioAccent || null));
+  // 형태 — AI 제안(화이트리스트 통과분) 우선, 아니면 시나리오 추천, 그마저 없으면 classic
+  const scenarioCard = input.templateHint ? SCENARIO_CARD_STYLE[input.templateHint] : null;
+  const card_style = (INAPP_CARD_STYLES as readonly string[]).includes(String(parsed.card_style))
+    ? String(parsed.card_style)
+    : normalizeCardStyle(scenarioCard);
 
   const message: GeneratedInAppMessage = {
     title,
@@ -664,6 +696,7 @@ ${brandAccent
     content_blocks,
     theme,
     accent_color,
+    card_style,
   };
 
   // 6 sub-agent 진행 — Frontend 시각 효과용 응답 (5~10초 시뮬레이션)

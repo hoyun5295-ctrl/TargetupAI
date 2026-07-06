@@ -17,6 +17,7 @@ import { createSection } from '../utils/dm-section-defaults';
 import { uploadOne } from '../components/dm/panels/FormControls';
 import { useDmKeyboardShortcuts } from '../hooks/useDmKeyboardShortcuts';
 import ConfirmModal, { type ConfirmState } from '../components/ConfirmModal';
+import { takeEventDraft, EVENT_DM_DRAFT_KEY } from '../components/EventCampaignModal';
 import CreditConfirmModal from '../components/credit/CreditConfirmModal';
 import DmSendAndTrackModal from '../components/DmSendAndTrackModal';
 import DmTopBar from '../components/dm/DmTopBar';
@@ -248,6 +249,24 @@ export default function DmBuilderPage() {
       setNaturalLanguage('');
     }
   }, [generating, createNew, applyAiGenerated, save, setToast, customerGate.isEmpty]);
+
+  // ★ 2026-07-07(4) 행사 캠페인 — EventCampaignModal이 생성해둔 DM 초안 자동 적용 (30분 TTL, 1회 소비)
+  useEffect(() => {
+    const d = takeEventDraft<{ prompt?: string; data?: any }>(EVENT_DM_DRAFT_KEY);
+    if (!d?.data) return;
+    try {
+      const { sections, brand_kit, pages, layout_mode } = d.data;
+      createNew({ title: String(d.prompt || '행사 캠페인').split('\n')[0].slice(0, 30) || '행사 캠페인' });
+      applyAiGenerated(sections || [], brand_kit, String(d.prompt || ''), { pages, layoutMode: layout_mode });
+      save({ silent: true }).catch(() => {});
+      setMode('edit');
+      setShowAiFloatingBar(true);
+      setToast({ type: 'success', message: '행사 캠페인 DM 초안을 불러왔습니다 — 이미지만 올리고 다듬어주세요.' });
+    } catch {
+      // 초안 손상 = 조용히 무시 (일반 진입 흐름 무손상)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // ★ 2026-06-19: 완성 이미지 업로드 → 슬라이드 DM 자동 생성 (외주 완성 시안 대응 — 신규 섹션 타입 불요, slideshow 재사용)
   const handleCompletedImagesSelected = useCallback(async (files: FileList | null, mode: 'slides' | 'scroll' = 'scroll') => {

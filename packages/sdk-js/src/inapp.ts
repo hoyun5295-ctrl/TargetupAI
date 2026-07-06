@@ -20,7 +20,10 @@
  */
 
 import { resolveTheme, withAlpha, type InAppTheme } from './inapp-theme';
-import { renderBlocks, type ContentBlock, type BlockRenderContext } from './inapp-blocks';
+import {
+  renderBlocks, planCardLayout, renderPosterHero, renderTicketPerforation, normalizeCardStyle,
+  type ContentBlock, type BlockRenderContext, type CardStyle,
+} from './inapp-blocks';
 
 // 2026-07-07 디자인 2.0 — Pretendard 우선(호스트 몰에 있으면 사용, 없으면 시스템 한글 폴백. 외부 로드 0)
 const INAPP_FONT_STACK = '"Pretendard Variable", Pretendard, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Apple SD Gothic Neo", "Malgun Gothic", sans-serif';
@@ -89,6 +92,9 @@ export interface InAppMessageSdk {
   accent_color?: string | null;
   isAd?: boolean;
   is_ad?: boolean;
+  /** ★ 2026-07-07(2) 형태 축 — classic/bubble/ticket/poster. 미지정·미지원 값 = classic (구버전 안전) */
+  cardStyle?: string | null;
+  card_style?: string | null;
 }
 
 export interface InAppInitInput {
@@ -848,6 +854,9 @@ export class HanjulloInAppModule {
     const animation = msg.animation || 'fade';
     let autoDismissSec = msg.autoDismissSeconds ?? msg.auto_dismiss_seconds;
     const isAd = !!(msg.is_ad ?? msg.isAd);
+    // ★ 2026-07-07(2) 형태 축 — 카드형 템플릿만 적용 (토스트·배너·플로팅 = 자체 형태)
+    const cardish = template === 'center_modal' || template === 'slide_in' || template === 'inline_card' || template === 'full_screen';
+    const cardStyle: CardStyle = cardish ? normalizeCardStyle(msg.cardStyle ?? msg.card_style) : 'classic';
 
     // floating_button = 알약 1개 (블록 중 첫 CTA 라벨)
     if (template === 'floating_button') {
@@ -855,7 +864,7 @@ export class HanjulloInAppModule {
       return;
     }
 
-    const c = this.makeContainer(msg, template, theme, input);
+    const c = this.makeContainer(msg, template, theme, input, cardStyle);
     if (!c.mounted) return;
 
     const ctx: BlockRenderContext = {
@@ -872,7 +881,20 @@ export class HanjulloInAppModule {
       isAd,
     };
 
-    renderBlocks(c.contentRoot, blocks, ctx);
+    // 형태별 배치 — poster: 히어로+겹침 텍스트 / ticket: 절취선+스터브 / 그 외: 순차 렌더
+    const plan = planCardLayout(blocks, cardStyle);
+    if (cardStyle === 'poster' && (plan.hero || plan.overlay.length > 0)) {
+      const hero = renderPosterHero(plan, ctx);
+      if (hero) c.contentRoot.appendChild(hero);
+      renderBlocks(c.contentRoot, plan.main, ctx);
+    } else if (cardStyle === 'ticket' && plan.stub.length > 0) {
+      // (광고) 자동 표기는 마지막 구간에서만 (이중 주입 방지)
+      renderBlocks(c.contentRoot, plan.main, { ...ctx, isAd: false });
+      c.contentRoot.appendChild(renderTicketPerforation(theme));
+      renderBlocks(c.contentRoot, plan.stub, ctx);
+    } else {
+      renderBlocks(c.contentRoot, blocks, ctx);
+    }
 
     if (c.showClose) {
       this.appendCloseButton(c.closeTarget, msg, input, c.remove, c.closeLayout);
@@ -887,7 +909,7 @@ export class HanjulloInAppModule {
   }
 
   /** 템플릿별 컨테이너(위치·면·모서리·그림자)를 테마 토큰으로 생성 + DOM 마운트. blocks는 contentRoot에. */
-  private makeContainer(msg: InAppMessageSdk, template: InAppTemplate, theme: InAppTheme, input: InAppInitInput) {
+  private makeContainer(msg: InAppMessageSdk, template: InAppTemplate, theme: InAppTheme, input: InAppInitInput, cardStyle: CardStyle = 'classic') {
     const card = document.createElement('div');
     card.setAttribute('data-hanjullo-msg', msg.id);
     const baseCard: Record<string, string> = {
@@ -902,6 +924,24 @@ export class HanjulloInAppModule {
     Object.assign(content.style, { display: 'flex', flexDirection: 'column', gap: '13px', minWidth: '0' });
     // 링(상단 하이라이트) + 3중 그림자 합성 — 유리 모서리 광
     const cardShadow = theme.ring ? `${theme.ring}, ${theme.shadow}` : theme.shadow;
+
+    // ★ 2026-07-07(2) 둥근 말풍선 — 한 모서리만 좁힌 챗 버블 + 꼬리 (형태 축)
+    const bubble = cardStyle === 'bubble';
+    const bubbleRadius = (small: 'bl' | 'br') => {
+      const r = theme.radius + 4;
+      return small === 'bl' ? `${r}px ${r}px ${r}px 14px` : `${r}px ${r}px 14px ${r}px`;
+    };
+    const attachBubbleTail = (host: HTMLElement, side: 'left' | 'right') => {
+      const tail = document.createElement('div');
+      Object.assign(tail.style, {
+        position: 'absolute', bottom: '-9px', width: '20px', height: '20px',
+        background: theme.surface, transform: 'rotate(45deg)',
+        borderRight: `1px solid ${theme.border}`, borderBottom: `1px solid ${theme.border}`,
+        borderRadius: '0 0 5px 0',
+      });
+      (tail.style as any)[side] = '30px';
+      host.appendChild(tail);
+    };
 
     const escClose = (removeFn: () => void) => {
       const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') removeFn(); };
@@ -923,6 +963,11 @@ export class HanjulloInAppModule {
         maxWidth: '420px', width: '100%', borderRadius: `${theme.radius}px`, overflow: 'hidden',
         boxShadow: cardShadow, position: 'relative', border: `1px solid ${theme.border}`,
       });
+      if (bubble) {
+        // 꼬리가 카드 밖으로 나가야 해서 overflow 개방 (블록 콘텐츠는 패딩 안이라 안전)
+        Object.assign(card.style, { borderRadius: bubbleRadius('bl'), overflow: 'visible' });
+        attachBubbleTail(card, 'left');
+      }
       Object.assign(content.style, { padding: '28px 26px 26px' });
       card.appendChild(content);
       backdrop.appendChild(card);
@@ -960,6 +1005,10 @@ export class HanjulloInAppModule {
         borderRadius: `${theme.radius}px`, padding: '22px', boxShadow: cardShadow,
         border: `1px solid ${theme.border}`,
       });
+      if (bubble) {
+        Object.assign(card.style, { borderRadius: bubbleRadius('br') });
+        attachBubbleTail(card, 'right');
+      }
       card.appendChild(content);
       document.body.appendChild(card);
       const remove = () => { try { document.body.removeChild(card); } catch {} };
@@ -994,7 +1043,9 @@ export class HanjulloInAppModule {
       Object.assign(card.style, baseCard, {
         borderRadius: `${theme.radius}px`, padding: '24px', margin: '16px 0',
         boxShadow: cardShadow, border: `1px solid ${theme.border}`,
+        ...(bubble ? { borderRadius: bubbleRadius('bl'), position: 'relative' } : {}),
       });
+      if (bubble) attachBubbleTail(card, 'left');
       card.appendChild(content);
       container.appendChild(card);
       const remove = () => { try { card.parentNode?.removeChild(card); } catch {} };

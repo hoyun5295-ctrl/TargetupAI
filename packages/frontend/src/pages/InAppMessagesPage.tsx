@@ -1,11 +1,11 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { goBackOr } from '../lib/scroll-restoration';
 import {
-  Activity, AlertCircle, AlertTriangle, ArrowLeft, BarChart3, ChevronDown, ChevronUp,
-  Clock, Crown, Download, Edit2, Eye, Globe, ImageIcon, Layers, Lightbulb, Loader2, Moon, MousePointer,
-  Plus, RefreshCw, Repeat, ShoppingCart, Smartphone, Sparkles, Target, Trash2, TrendingDown,
-  TrendingUp, Upload, UserPlus, Users, Wand2, X,
+  Activity, AlertCircle, AlertTriangle, AlignLeft, ArrowLeft, BarChart3, ChevronDown, ChevronUp,
+  Clock, Crown, Download, Edit2, Eye, Globe, ImageIcon, Layers, Lightbulb, ListChecks, Loader2, Minus, Moon, MousePointer,
+  MousePointerClick, MoveVertical, Plus, RefreshCw, Repeat, ShoppingBag, ShoppingCart, Smartphone, Sparkles, Star,
+  Tag, Target, Ticket, Timer, Trash2, TrendingDown, TrendingUp, Type, Upload, UserPlus, Users, Wand2, X,
 } from 'lucide-react';
 // ★ 2026-07-06 식별 고객 목록 CSV 다운로드 — 공용 CT (BOM + 셀 이스케이프)
 import { downloadCsv, safeCsvFilename } from '../utils/csv-download';
@@ -16,7 +16,10 @@ import { InAppMessagePreview } from '../components/InAppMessagePreview';
 import CreditConfirmModal from '../components/credit/CreditConfirmModal';
 import { useToast } from '../components/ToastProvider';
 import TargetExtractModal from '../components/TargetExtractModal';
-import { THEME_OPTIONS } from '../components/inapp/blockTheme';
+import { THEME_OPTIONS, CARD_STYLE_OPTIONS, type CardStyle } from '../components/inapp/blockTheme';
+import { Icon as BlockIcon } from '../components/inapp/BlockPreview';
+import { DateTimeField } from '../components/DateTimeField';
+import { takeEventDraft, EVENT_INAPP_DRAFT_KEY } from '../components/EventCampaignModal';
 
 // ════════════════════════════════════════════════════════════════════
 // ★ D215+ (2026-05-25) 인앱 메시지 압도적 강화 — Journey Builder급 12 화면 영역
@@ -75,6 +78,8 @@ interface MessageRow {
   content_blocks?: any[] | null;
   theme?: string | null;
   accent_color?: string | null;
+  // ★ 2026-07-07(2) 형태 축 — classic/bubble/ticket/poster
+  card_style?: string | null;
   status: Status;
   channel?: 'web' | 'app';
   startAt?: string | null;
@@ -213,6 +218,7 @@ const EMPTY_FORM: Partial<MessageRow> = {
   status: 'active',
   buttons: [],
   variant_weight: 100,
+  card_style: 'classic',
 };
 
 // ════════════════════════════════════════════════════════════════════
@@ -253,6 +259,43 @@ export default function InAppMessagesPage() {
   const [aiGenerating, setAiGenerating] = useState(false);
   const [aiProgressStep, setAiProgressStep] = useState<number>(-1);
   const [aiObjective, setAiObjective] = useState('');
+
+  // ★ 2026-07-07(4) 행사 캠페인 — EventCampaignModal이 생성해둔 인앱 초안 자동 적용 (30분 TTL, 1회 소비)
+  useEffect(() => {
+    const d = takeEventDraft<{ pkg?: any }>(EVENT_INAPP_DRAFT_KEY);
+    const msg = d?.pkg?.message;
+    if (!msg) return;
+    setChannel('web');
+    setEditing({
+      title: msg.title,
+      body: msg.body,
+      template: msg.template,
+      image_url: msg.image_url,
+      badge_text: msg.badge_text,
+      buttons: msg.buttons || [],
+      background_color: msg.background_color,
+      text_color: msg.text_color,
+      trigger_event: msg.trigger_conditions?.event || 'page_load',
+      trigger_conditions: msg.trigger_conditions,
+      segment_conditions: msg.segment_conditions,
+      personalization_vars: msg.personalization_vars,
+      display_frequency: msg.display_frequency,
+      auto_dismiss_seconds: msg.auto_dismiss_seconds,
+      max_displays_per_user: msg.max_displays_per_user,
+      send_start_hour: msg.send_start_hour,
+      send_end_hour: msg.send_end_hour,
+      allowed_weekdays: msg.allowed_weekdays,
+      animation: msg.animation,
+      content_blocks: msg.content_blocks || [],
+      theme: msg.theme || 'auto',
+      accent_color: msg.accent_color || null,
+      card_style: msg.card_style || 'classic',
+      status: 'active',
+      channel: 'web',
+    });
+    toast.success('행사 캠페인 인앱 초안을 불러왔습니다 — 이미지만 올리고 다듬어주세요.');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // 자율 진단 상태
   const [diagnosing, setDiagnosing] = useState(false);
@@ -447,10 +490,11 @@ export default function InAppMessagesPage() {
         send_end_hour: pkg.message.send_end_hour,
         allowed_weekdays: pkg.message.allowed_weekdays,
         animation: pkg.message.animation,
-        // ★ D230+ 블록 + 테마
+        // ★ D230+ 블록 + 테마 + 형태
         content_blocks: pkg.message.content_blocks || [],
         theme: pkg.message.theme || 'auto',
         accent_color: pkg.message.accent_color || null,
+        card_style: pkg.message.card_style || 'classic',
         status: 'active',
         channel: channelOverride || channel || 'web',
       });
@@ -926,6 +970,7 @@ export default function InAppMessagesPage() {
                   blocks={previewMsg.content_blocks && previewMsg.content_blocks.length ? previewMsg.content_blocks : undefined}
                   theme={previewMsg.theme}
                   accentColor={previewMsg.accent_color}
+                  cardStyle={previewMsg.card_style}
                 />
               </div>
               <div className="flex gap-2 mt-4">
@@ -1374,6 +1419,58 @@ export default function InAppMessagesPage() {
 // 편집 모달 (10 영역)
 // ════════════════════════════════════════════════════════════════════
 
+/** 형태 4종 미니 썸네일 — 실제 카드 해부도를 축소한 시각 표본 (글자 버튼 금지 — 눈으로 고르게) */
+function CardStyleThumb({ k, active }: { k: CardStyle; active: boolean }) {
+  const line = (w: string, h = 3) => <div style={{ width: w, height: h, borderRadius: 2, background: 'rgba(255,255,255,0.35)' }} />;
+  const accent = active ? '#c4b5fd' : 'rgba(255,255,255,0.5)';
+  const face = 'rgba(255,255,255,0.12)';
+  const edge = '1px solid rgba(255,255,255,0.16)';
+  const common: CSSProperties = { position: 'relative', width: '100%', height: 52, borderRadius: 8, background: face, border: edge, padding: 7, display: 'flex', flexDirection: 'column', gap: 4 };
+  if (k === 'bubble') {
+    return (
+      <div style={{ ...common, borderRadius: '12px 12px 12px 4px' }}>
+        {line('40%')}
+        {line('75%')}
+        <div style={{ marginTop: 'auto', width: '55%', height: 8, borderRadius: 99, background: accent }} />
+        <div style={{ position: 'absolute', bottom: -4, left: 10, width: 8, height: 8, background: 'rgba(148,143,184,0.35)', borderRight: edge, borderBottom: edge, transform: 'rotate(45deg)' }} />
+      </div>
+    );
+  }
+  if (k === 'ticket') {
+    return (
+      <div style={common}>
+        {line('60%')}
+        <div style={{ position: 'relative', margin: '2px -10px', display: 'flex', alignItems: 'center' }}>
+          <span style={{ width: 7, height: 7, borderRadius: 99, background: 'rgba(2,6,23,0.85)', marginLeft: 6 }} />
+          <div style={{ flex: 1, borderTop: '2px dashed rgba(255,255,255,0.35)', margin: '0 5px' }} />
+          <span style={{ width: 7, height: 7, borderRadius: 99, background: 'rgba(2,6,23,0.85)', marginRight: 6 }} />
+        </div>
+        <div style={{ width: '100%', height: 9, borderRadius: 4, background: accent }} />
+      </div>
+    );
+  }
+  if (k === 'poster') {
+    return (
+      <div style={{ ...common, padding: 0, overflow: 'hidden' }}>
+        <div style={{ height: 30, background: `linear-gradient(135deg, ${accent}, rgba(255,255,255,0.15))`, display: 'flex', alignItems: 'flex-end', padding: 5 }}>
+          <div style={{ width: '55%', height: 5, borderRadius: 2, background: 'rgba(255,255,255,0.9)' }} />
+        </div>
+        <div style={{ padding: 6, display: 'flex', flexDirection: 'column', gap: 4 }}>
+          {line('80%')}
+          {line('50%')}
+        </div>
+      </div>
+    );
+  }
+  return (
+    <div style={common}>
+      <div style={{ width: 26, height: 6, borderRadius: 99, background: accent }} />
+      {line('75%')}
+      {line('55%')}
+    </div>
+  );
+}
+
 interface EditModalProps {
   editing: Partial<MessageRow>;
   setEditing: (m: Partial<MessageRow> | null) => void;
@@ -1628,10 +1725,32 @@ function EditModal({ editing, setEditing, availableVariables, onSave, fileInputR
               </div>
             </div>
 
-            {/* 탭 디자인: 테마 + 강조색 (블록 모드) */}
+            {/* 탭 디자인: 형태(디자인) + 색상 + 강조색 (블록 모드) */}
             <div className={activeTab === 'design' && hasBlocks ? '' : 'hidden'}>
               <h4 className="text-xs font-bold text-white/80 mb-2 flex items-center gap-1.5">
-                <Wand2 className="w-3 h-3 text-fuchsia-300" /> 테마
+                <Layers className="w-3 h-3 text-fuchsia-300" /> 디자인 (형태 4종)
+              </h4>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mb-4">
+                {CARD_STYLE_OPTIONS.map((cs) => {
+                  const active = (editing.card_style || 'classic') === cs.key;
+                  return (
+                    <button
+                      key={cs.key}
+                      onClick={() => updateField('card_style', cs.key)}
+                      className={`rounded-xl border p-2 text-left transition-colors ${active ? 'bg-violet-500/25 border-violet-400/60' : 'bg-slate-900/60 border-white/10 hover:bg-white/5'}`}
+                    >
+                      <CardStyleThumb k={cs.key} active={active} />
+                      <span className={`block text-[11px] font-bold mt-1.5 ${active ? 'text-white' : 'text-white/80'}`}>{cs.label}</span>
+                      <span className="block text-[9px] text-white/45 mt-0.5">{cs.hint}</span>
+                    </button>
+                  );
+                })}
+              </div>
+              {['toast', 'floating_button', 'top_banner', 'bottom_banner'].includes(editing.template || '') && (
+                <div className="text-[10px] text-white/40 -mt-2 mb-3">토스트·배너·플로팅 버튼은 자체 형태라 형태 선택이 적용되지 않습니다 (모달·슬라이드에서 적용).</div>
+              )}
+              <h4 className="text-xs font-bold text-white/80 mb-2 flex items-center gap-1.5">
+                <Wand2 className="w-3 h-3 text-fuchsia-300" /> 색상
               </h4>
               <div className="grid grid-cols-2 md:grid-cols-3 gap-2 mb-3">
                 {THEME_OPTIONS.map((t) => (
@@ -2132,6 +2251,7 @@ function EditModal({ editing, setEditing, availableVariables, onSave, fileInputR
               blocks={hasBlocks ? blocks : undefined}
               theme={editing.theme}
               accentColor={editing.accent_color}
+              cardStyle={editing.card_style}
               replaceVars={(t) => replaceVars(t, sampleCustomer)}
             />
           </div>
@@ -2352,23 +2472,27 @@ function DrillDownModal({ loading, stats, explain, viewers, messageTitle, onClos
 const ICON_KEYS = ['gift', 'bell', 'heart', 'star', 'tag', 'sparkle', 'cart', 'user', 'check', 'clock'];
 const ILLUS_KEYS = ['welcome', 'celebrate', 'empty_cart', 'gift', 'bell', 'heart'];
 
-const BLOCK_ADD_MENU: { type: string; label: string }[] = [
-  { type: 'eyebrow', label: '라벨' },
-  { type: 'headline', label: '헤드라인' },
-  { type: 'body', label: '본문' },
-  { type: 'bullets', label: '체크 리스트' },
-  { type: 'benefit', label: '혜택(티켓)' },
-  { type: 'rating', label: '별점' },
-  { type: 'product', label: '상품 카드' },
-  { type: 'media', label: '미디어' },
-  { type: 'countdown', label: '카운트다운' },
-  { type: 'cta_group', label: '버튼(CTA)' },
-  { type: 'divider', label: '구분선' },
-  { type: 'spacer', label: '여백' },
-  { type: 'footer', label: '잔글씨/광고' },
+// 2026-07-07(2) 팔레트 업그레이드 — 글자 버튼 나열 폐기: 카테고리 + 아이콘 + 한 줄 설명
+type BlockCat = '텍스트' | '시각 요소' | '전환 유도' | '구조';
+const BLOCK_ADD_MENU: { type: string; label: string; desc: string; cat: BlockCat; icon: any }[] = [
+  { type: 'eyebrow', label: '라벨', desc: '작은 강조 칩 (NEW · VIP)', cat: '텍스트', icon: Tag },
+  { type: 'headline', label: '헤드라인', desc: '큰 제목 한 줄', cat: '텍스트', icon: Type },
+  { type: 'body', label: '본문', desc: '설명 문단 · 변수 지원', cat: '텍스트', icon: AlignLeft },
+  { type: 'footer', label: '잔글씨/광고', desc: '하단 안내 · (광고) 표기', cat: '텍스트', icon: AlertCircle },
+  { type: 'bullets', label: '체크 리스트', desc: '아이콘 + 장점 2~4줄', cat: '시각 요소', icon: ListChecks },
+  { type: 'rating', label: '별점', desc: '평점 + 후기 수', cat: '시각 요소', icon: Star },
+  { type: 'product', label: '상품 카드', desc: '이미지 + 상품명 + 설명', cat: '시각 요소', icon: ShoppingBag },
+  { type: 'media', label: '미디어', desc: '아이콘 · 일러스트 · 이미지', cat: '시각 요소', icon: ImageIcon },
+  { type: 'benefit', label: '혜택(티켓)', desc: '점선 쿠폰 스타일 강조', cat: '전환 유도', icon: Ticket },
+  { type: 'countdown', label: '카운트다운', desc: '마감까지 실시간 시계', cat: '전환 유도', icon: Timer },
+  { type: 'cta_group', label: '버튼(CTA)', desc: '이동 버튼 1~3개', cat: '전환 유도', icon: MousePointerClick },
+  { type: 'divider', label: '구분선', desc: '내용 사이 나누기', cat: '구조', icon: Minus },
+  { type: 'spacer', label: '여백', desc: '간격 조절', cat: '구조', icon: MoveVertical },
 ];
 
 const BLOCK_LABELS: Record<string, string> = Object.fromEntries(BLOCK_ADD_MENU.map((b) => [b.type, b.label]));
+const BLOCK_ICONS: Record<string, any> = Object.fromEntries(BLOCK_ADD_MENU.map((b) => [b.type, b.icon]));
+const BLOCK_CATS: BlockCat[] = ['텍스트', '시각 요소', '전환 유도', '구조'];
 
 function newBlock(type: string): any {
   switch (type) {
@@ -2415,6 +2539,8 @@ const COMPOSER_INPUT = 'w-full px-2 py-1.5 bg-slate-900/60 border border-white/1
 
 function BlockComposer({ blocks, onChange, uploadImage }: { blocks: any[]; onChange: (b: any[]) => void; uploadImage: (file: File) => Promise<string | null> }) {
   const [showAdd, setShowAdd] = useState(false);
+  const [highlight, setHighlight] = useState<number | null>(null);
+  const listEndRef = useRef<HTMLDivElement | null>(null);
   const update = (i: number, patch: any) => onChange(blocks.map((b, idx) => (idx === i ? { ...b, ...patch } : b)));
   const remove = (i: number) => onChange(blocks.filter((_, idx) => idx !== i));
   const move = (i: number, dir: -1 | 1) => {
@@ -2424,38 +2550,189 @@ function BlockComposer({ blocks, onChange, uploadImage }: { blocks: any[]; onCha
     [next[i], next[j]] = [next[j], next[i]];
     onChange(next);
   };
-  const add = (type: string) => { onChange([...blocks, newBlock(type)]); setShowAdd(false); };
+  const add = (type: string) => {
+    onChange([...blocks, newBlock(type)]);
+    setShowAdd(false);
+    setHighlight(blocks.length);
+  };
+  // 추가된 블록으로 자동 스크롤 + 잠시 하이라이트 — "추가했는데 어디 갔지" 방지
+  useEffect(() => {
+    if (highlight === null) return;
+    listEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    const t = setTimeout(() => setHighlight(null), 1600);
+    return () => clearTimeout(t);
+  }, [highlight]);
 
   return (
     <div className="space-y-2">
-      {blocks.map((b, i) => (
-        <div key={i} className="bg-slate-800/50 border border-white/10 rounded-xl p-3">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-[11px] font-bold text-violet-200 bg-violet-500/15 px-2 py-0.5 rounded-full">{BLOCK_LABELS[b.type] || b.type}</span>
-            <div className="flex items-center gap-0.5">
-              <button onClick={() => move(i, -1)} disabled={i === 0} className="p-1 text-white/40 hover:text-white disabled:opacity-20" aria-label="위로"><ChevronUp className="w-3.5 h-3.5" /></button>
-              <button onClick={() => move(i, 1)} disabled={i === blocks.length - 1} className="p-1 text-white/40 hover:text-white disabled:opacity-20" aria-label="아래로"><ChevronDown className="w-3.5 h-3.5" /></button>
-              <button onClick={() => remove(i)} className="p-1 text-rose-300/70 hover:text-rose-300" aria-label="삭제"><Trash2 className="w-3.5 h-3.5" /></button>
+      {blocks.map((b, i) => {
+        const Ic = BLOCK_ICONS[b.type] || Layers;
+        return (
+          <div key={i} className={`bg-slate-800/50 border rounded-xl p-3 transition-all ${highlight === i ? 'border-violet-400/70 ring-2 ring-violet-400/30' : 'border-white/10'}`}>
+            <div className="flex items-center justify-between mb-2">
+              <span className="inline-flex items-center gap-1.5 text-[11px] font-bold text-violet-200 bg-violet-500/15 px-2 py-0.5 rounded-full">
+                <Ic className="w-3 h-3" /> {BLOCK_LABELS[b.type] || b.type}
+              </span>
+              <div className="flex items-center gap-0.5">
+                <button onClick={() => move(i, -1)} disabled={i === 0} className="p-1 text-white/40 hover:text-white disabled:opacity-20" aria-label="위로"><ChevronUp className="w-3.5 h-3.5" /></button>
+                <button onClick={() => move(i, 1)} disabled={i === blocks.length - 1} className="p-1 text-white/40 hover:text-white disabled:opacity-20" aria-label="아래로"><ChevronDown className="w-3.5 h-3.5" /></button>
+                <button onClick={() => remove(i)} className="p-1 text-rose-300/70 hover:text-rose-300" aria-label="삭제"><Trash2 className="w-3.5 h-3.5" /></button>
+              </div>
             </div>
+            <BlockEditor block={b} onChange={(patch) => update(i, patch)} uploadImage={uploadImage} />
           </div>
-          <BlockEditor block={b} onChange={(patch) => update(i, patch)} uploadImage={uploadImage} />
-        </div>
-      ))}
+        );
+      })}
+      <div ref={listEndRef} />
 
       <div className="relative">
         <button onClick={() => setShowAdd((v) => !v)} className="w-full text-xs text-violet-200 bg-violet-500/10 hover:bg-violet-500/20 border border-dashed border-violet-400/30 rounded-lg py-2 flex items-center justify-center gap-1.5">
           <Plus className="w-3.5 h-3.5" /> 블록 추가
         </button>
         {showAdd && (
-          <div className="mt-2 grid grid-cols-3 gap-1.5 bg-slate-900/80 border border-white/10 rounded-lg p-2">
-            {BLOCK_ADD_MENU.map((m) => (
-              <button key={m.type} onClick={() => add(m.type)} className="text-[11px] text-white/80 bg-white/5 hover:bg-violet-500/20 border border-white/10 rounded px-2 py-1.5">
-                {m.label}
-              </button>
+          <div className="mt-2 bg-slate-900/80 border border-white/10 rounded-xl p-3 space-y-3">
+            {BLOCK_CATS.map((cat) => (
+              <div key={cat}>
+                <div className="text-[10px] font-bold text-white/40 mb-1.5 tracking-wide">{cat}</div>
+                <div className="grid grid-cols-2 md:grid-cols-3 gap-1.5">
+                  {BLOCK_ADD_MENU.filter((m) => m.cat === cat).map((m) => {
+                    const Ic = m.icon;
+                    return (
+                      <button
+                        key={m.type}
+                        onClick={() => add(m.type)}
+                        className="flex items-start gap-2 text-left bg-white/5 hover:bg-violet-500/20 border border-white/10 hover:border-violet-400/40 rounded-lg px-2.5 py-2 transition-colors"
+                      >
+                        <span className="w-6 h-6 rounded-md bg-violet-500/15 border border-violet-400/20 flex items-center justify-center shrink-0 mt-0.5">
+                          <Ic className="w-3.5 h-3.5 text-violet-200" />
+                        </span>
+                        <span className="min-w-0">
+                          <span className="block text-[11px] font-bold text-white/85">{m.label}</span>
+                          <span className="block text-[9px] text-white/45 leading-tight mt-0.5">{m.desc}</span>
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
             ))}
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+// ── 편집기 공용 소도구 (2026-07-07(2) 허접 요소 제거) ──
+
+/** 세그먼트 버튼 — 드롭다운 대체 (한눈에 보고 즉시 클릭) */
+function Seg({ options, value, onChange }: { options: { v: string; label: string }[]; value: string; onChange: (v: string) => void }) {
+  return (
+    <div className="inline-flex rounded-lg border border-white/10 overflow-hidden">
+      {options.map((o) => (
+        <button
+          key={o.v}
+          type="button"
+          onClick={() => onChange(o.v)}
+          className={`px-2.5 py-1.5 text-[11px] font-medium transition-colors ${value === o.v ? 'bg-violet-500/30 text-white' : 'bg-slate-900/60 text-white/50 hover:text-white/80'}`}
+        >
+          {o.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+// 일러스트 키 → 표시용 아이콘 (SDK illustrationSvg 매핑과 동일)
+const ILLUS_DISPLAY: Record<string, string> = { welcome: 'user', empty_cart: 'cart', celebrate: 'sparkle' };
+
+/** 아이콘 그리드 픽커 — 영문 드롭다운 대체 (SVG를 눈으로 보고 클릭) */
+function IconGrid({ keys, value, onChange, illustration }: { keys: string[]; value: string; onChange: (k: string) => void; illustration?: boolean }) {
+  return (
+    <div className="flex flex-wrap gap-1.5">
+      {keys.map((k) => (
+        <button
+          key={k}
+          type="button"
+          onClick={() => onChange(k)}
+          title={k}
+          className={`w-8 h-8 rounded-lg border flex items-center justify-center transition-colors ${value === k ? 'bg-violet-500/30 border-violet-400/60' : 'bg-slate-900/60 border-white/10 hover:bg-white/5'}`}
+        >
+          <BlockIcon name={illustration ? (ILLUS_DISPLAY[k] || k) : k} color={value === k ? '#e9d5ff' : 'rgba(255,255,255,0.6)'} size={15} />
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/** 별점 직접 클릭 (0.5 단위 — 별의 좌반/우반) */
+function StarInput({ value, onChange }: { value: number; onChange: (v: number) => void }) {
+  return (
+    <div className="flex items-center gap-0.5">
+      {[1, 2, 3, 4, 5].map((n) => (
+        <span key={n} className="relative inline-flex">
+          <BlockIcon name="star" color={value >= n - 0.5 ? '#fbbf24' : 'rgba(255,255,255,0.25)'} size={20} fill={value >= n} />
+          <button type="button" aria-label={`${n - 0.5}점`} onClick={() => onChange(n - 0.5)} className="absolute inset-y-0 left-0 w-1/2" />
+          <button type="button" aria-label={`${n}점`} onClick={() => onChange(n)} className="absolute inset-y-0 right-0 w-1/2" />
+        </span>
+      ))}
+      <span className="text-xs text-white/70 font-bold ml-1.5 tabular-nums">{Number(value || 0).toFixed(1)}</span>
+    </div>
+  );
+}
+
+/** 마감까지 남은 시간 실시간 배지 — 편집 중 즉시 확인 */
+function RemainBadge({ endsAt }: { endsAt: string }) {
+  const end = Date.parse(endsAt || '');
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!isFinite(end) || end <= Date.now()) return;
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, [end]);
+  if (!isFinite(end)) return <span className="text-[10px] text-white/40">마감 시각을 설정하면 남은 시간이 표시됩니다</span>;
+  const remain = end - now;
+  if (remain <= 0) return <span className="text-[10px] text-rose-300">이미 지난 시각 — 자사몰에 표시되지 않습니다</span>;
+  const s = Math.floor(remain / 1000);
+  const d = Math.floor(s / 86400);
+  const h = Math.floor((s % 86400) / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  return <span className="text-[10px] text-emerald-300 tabular-nums">지금 기준 {d > 0 ? `${d}일 ${h}시간` : `${h}시간 ${m}분`} 남음</span>;
+}
+
+/** 체크 리스트 편집 — 항목별 아이콘 그리드 토글 */
+function BulletsEditor({ b, onChange }: { b: any; onChange: (patch: any) => void }) {
+  const [iconOpenIdx, setIconOpenIdx] = useState<number | null>(null);
+  const items = Array.isArray(b.items) ? b.items : [];
+  const setItem = (j: number, patch: any) => {
+    const next = [...items];
+    next[j] = { ...next[j], ...patch };
+    onChange({ items: next });
+  };
+  return (
+    <div className="space-y-1.5">
+      {items.map((it: any, j: number) => (
+        <div key={j} className="bg-slate-900/40 border border-white/10 rounded-lg p-1.5 space-y-1.5">
+          <div className="flex items-center gap-1.5">
+            <button
+              type="button"
+              onClick={() => setIconOpenIdx(iconOpenIdx === j ? null : j)}
+              className="w-8 h-8 rounded-lg bg-violet-500/15 border border-violet-400/30 flex items-center justify-center shrink-0"
+              title="아이콘 선택"
+            >
+              <BlockIcon name={it.icon || 'check'} color="#e9d5ff" size={15} />
+            </button>
+            <input type="text" value={it.text || ''} onChange={(e) => setItem(j, { text: e.target.value })} placeholder="항목 텍스트" className={COMPOSER_INPUT} />
+            <button onClick={() => onChange({ items: items.filter((_: any, x: number) => x !== j) })} className="text-rose-300/70 hover:text-rose-300 p-1 shrink-0" aria-label="항목 삭제"><Trash2 className="w-3.5 h-3.5" /></button>
+          </div>
+          {iconOpenIdx === j && (
+            <IconGrid keys={ICON_KEYS} value={it.icon || 'check'} onChange={(k) => { setItem(j, { icon: k }); setIconOpenIdx(null); }} />
+          )}
+        </div>
+      ))}
+      {items.length < 4 && (
+        <button onClick={() => onChange({ items: [...items, { icon: 'check', text: '' }] })} className="text-[11px] text-violet-300 hover:bg-violet-500/10 px-2 py-1 rounded flex items-center gap-1"><Plus className="w-3 h-3" /> 항목 추가</button>
+      )}
     </div>
   );
 }
@@ -2468,13 +2745,12 @@ function BlockEditor({ block, onChange, uploadImage }: { block: any; onChange: (
       return <input type="text" value={b.text || ''} onChange={(e) => onChange({ text: e.target.value })} placeholder={b.type === 'footer' ? '잔글씨 / (광고) 표기' : '짧은 라벨 (NEW · 오랜만이에요)'} className={COMPOSER_INPUT} />;
     case 'headline':
       return (
-        <div className="grid grid-cols-[1fr,72px] gap-2">
+        <div className="space-y-1.5">
           <input type="text" value={b.text || ''} onChange={(e) => onChange({ text: e.target.value })} placeholder="헤드라인 (변수 X)" className={COMPOSER_INPUT} />
-          <select value={b.size || 'lg'} onChange={(e) => onChange({ size: e.target.value })} className={COMPOSER_INPUT}>
-            <option value="sm">작게</option>
-            <option value="lg">보통</option>
-            <option value="xl">크게</option>
-          </select>
+          <div className="flex items-center gap-2">
+            <span className="text-[10px] text-white/40">크기</span>
+            <Seg options={[{ v: 'sm', label: '작게' }, { v: 'lg', label: '보통' }, { v: 'xl', label: '크게' }]} value={b.size || 'lg'} onChange={(v) => onChange({ size: v })} />
+          </div>
         </div>
       );
     case 'body':
@@ -2483,11 +2759,7 @@ function BlockEditor({ block, onChange, uploadImage }: { block: any; onChange: (
           <textarea value={b.text || ''} onChange={(e) => onChange({ text: e.target.value })} placeholder="본문 (변수/Liquid 활용 가능)" className={`${COMPOSER_INPUT} resize-y h-16`} />
           <div className="flex items-center gap-2">
             <span className="text-[10px] text-white/40">글자 크기</span>
-            <select value={b.size || 'md'} onChange={(e) => onChange({ size: e.target.value })} className={`${COMPOSER_INPUT} w-auto`}>
-              <option value="sm">작게</option>
-              <option value="md">보통</option>
-              <option value="lg">크게</option>
-            </select>
+            <Seg options={[{ v: 'sm', label: '작게' }, { v: 'md', label: '보통' }, { v: 'lg', label: '크게' }]} value={b.size || 'md'} onChange={(v) => onChange({ size: v })} />
           </div>
         </div>
       );
@@ -2499,45 +2771,51 @@ function BlockEditor({ block, onChange, uploadImage }: { block: any; onChange: (
         </div>
       );
     case 'bullets':
-      return (
-        <div className="space-y-1.5">
-          {(b.items || []).map((it: any, j: number) => (
-            <div key={j} className="grid grid-cols-[72px,1fr,32px] gap-1.5 items-center">
-              <select value={it.icon || 'check'} onChange={(e) => { const items = [...(b.items || [])]; items[j] = { ...items[j], icon: e.target.value }; onChange({ items }); }} className={COMPOSER_INPUT}>
-                {ICON_KEYS.map((k) => <option key={k} value={k}>{k}</option>)}
-              </select>
-              <input type="text" value={it.text || ''} onChange={(e) => { const items = [...(b.items || [])]; items[j] = { ...items[j], text: e.target.value }; onChange({ items }); }} placeholder="항목 텍스트" className={COMPOSER_INPUT} />
-              <button onClick={() => onChange({ items: (b.items || []).filter((_: any, x: number) => x !== j) })} className="text-rose-300/70 hover:text-rose-300 p-1" aria-label="항목 삭제"><Trash2 className="w-3.5 h-3.5" /></button>
-            </div>
-          ))}
-          {(b.items || []).length < 4 && (
-            <button onClick={() => onChange({ items: [...(b.items || []), { icon: 'check', text: '' }] })} className="text-[11px] text-violet-300 hover:bg-violet-500/10 px-2 py-1 rounded flex items-center gap-1"><Plus className="w-3 h-3" /> 항목 추가</button>
-          )}
-        </div>
-      );
+      return <BulletsEditor b={b} onChange={onChange} />;
     case 'rating':
       return (
-        <div className="grid grid-cols-3 gap-2">
-          <label className="text-[10px] text-white/50">별점<input type="number" min={0} max={5} step={0.1} value={b.value ?? ''} onChange={(e) => onChange({ value: e.target.value === '' ? 0 : Number(e.target.value) })} className={COMPOSER_INPUT} /></label>
-          <label className="text-[10px] text-white/50">후기 수<input type="number" min={0} value={b.count ?? ''} onChange={(e) => onChange({ count: e.target.value === '' ? 0 : Number(e.target.value) })} className={COMPOSER_INPUT} /></label>
-          <label className="text-[10px] text-white/50">라벨<input type="text" value={b.label || ''} onChange={(e) => onChange({ label: e.target.value })} className={COMPOSER_INPUT} /></label>
+        <div className="space-y-2">
+          <div className="flex items-center gap-2">
+            <span className="text-[10px] text-white/40">별점 (클릭 — 반쪽 = 0.5)</span>
+            <StarInput value={Number(b.value ?? 0)} onChange={(v) => onChange({ value: v })} />
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <label className="text-[10px] text-white/50">후기 수<input type="number" min={0} value={b.count ?? ''} onChange={(e) => onChange({ count: e.target.value === '' ? 0 : Number(e.target.value) })} className={COMPOSER_INPUT} /></label>
+            <label className="text-[10px] text-white/50">라벨<input type="text" value={b.label || ''} onChange={(e) => onChange({ label: e.target.value })} placeholder="후기" className={COMPOSER_INPUT} /></label>
+          </div>
         </div>
       );
     case 'product':
       return (
         <div className="space-y-1.5">
-          <input type="text" value={b.name || ''} onChange={(e) => onChange({ name: e.target.value })} placeholder="상품명" className={COMPOSER_INPUT} />
-          <input type="text" value={b.meta || ''} onChange={(e) => onChange({ meta: e.target.value })} placeholder="간단 설명 (가격 자리)" className={COMPOSER_INPUT} />
+          <div className="flex gap-2 items-start">
+            {b.image ? (
+              <div className="relative shrink-0">
+                <img src={b.image} alt="" onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }} className="w-14 h-14 object-cover rounded-lg border border-white/10 bg-white/5" />
+                <button onClick={() => onChange({ image: '' })} className="absolute -top-1.5 -right-1.5 bg-rose-500 hover:bg-rose-600 text-white rounded-full w-4 h-4 flex items-center justify-center text-[9px]" aria-label="이미지 제거">✕</button>
+              </div>
+            ) : (
+              <label className="w-14 h-14 shrink-0 flex flex-col items-center justify-center text-[9px] text-white/50 bg-white/5 hover:bg-white/10 border border-dashed border-white/20 rounded-lg cursor-pointer transition-colors">
+                <ImageIcon className="w-4 h-4 mb-0.5" />이미지
+                <input type="file" accept="image/jpeg,image/png,image/gif,image/webp" className="hidden"
+                  onChange={async (e) => { const f = e.target.files?.[0]; const el = e.currentTarget; if (f) { const url = await uploadImage(f); if (url) onChange({ image: url }); } el.value = ''; }} />
+              </label>
+            )}
+            <div className="flex-1 space-y-1.5 min-w-0">
+              <input type="text" value={b.name || ''} onChange={(e) => onChange({ name: e.target.value })} placeholder="상품명" className={COMPOSER_INPUT} />
+              <input type="text" value={b.meta || ''} onChange={(e) => onChange({ meta: e.target.value })} placeholder="간단 설명 (가격 자리)" className={COMPOSER_INPUT} />
+            </div>
+          </div>
         </div>
       );
     case 'media':
       return (
         <div className="space-y-1.5">
-          <select value={b.variant || 'icon'} onChange={(e) => onChange({ variant: e.target.value })} className={COMPOSER_INPUT}>
-            <option value="icon">아이콘</option>
-            <option value="illustration">일러스트</option>
-            <option value="image">이미지(URL)</option>
-          </select>
+          <Seg
+            options={[{ v: 'icon', label: '아이콘' }, { v: 'illustration', label: '일러스트' }, { v: 'image', label: '이미지' }]}
+            value={b.variant || 'icon'}
+            onChange={(v) => onChange({ variant: v, ...(v !== 'image' ? { icon: v === 'illustration' ? 'welcome' : 'gift' } : {}) })}
+          />
           {b.variant === 'image' ? (
             <div className="space-y-1.5">
               {b.url && <img src={b.url} alt="" onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }} className="w-full max-h-28 object-cover rounded-lg border border-white/10" />}
@@ -2556,49 +2834,56 @@ function BlockEditor({ block, onChange, uploadImage }: { block: any; onChange: (
               <input type="text" value={b.url || ''} onChange={(e) => onChange({ url: e.target.value })} placeholder="또는 이미지 URL 직접 입력" className={COMPOSER_INPUT} />
             </div>
           ) : (
-            <select value={b.icon || (b.variant === 'illustration' ? 'welcome' : 'gift')} onChange={(e) => onChange({ icon: e.target.value })} className={COMPOSER_INPUT}>
-              {(b.variant === 'illustration' ? ILLUS_KEYS : ICON_KEYS).map((k) => <option key={k} value={k}>{k}</option>)}
-            </select>
+            <IconGrid
+              keys={b.variant === 'illustration' ? ILLUS_KEYS : ICON_KEYS}
+              value={b.icon || (b.variant === 'illustration' ? 'welcome' : 'gift')}
+              onChange={(k) => onChange({ icon: k })}
+              illustration={b.variant === 'illustration'}
+            />
           )}
         </div>
       );
     case 'countdown':
       return (
-        <div className="grid grid-cols-2 gap-2">
-          <label className="text-[10px] text-white/50">마감 시각<input type="datetime-local" value={b.ends_at ? String(b.ends_at).slice(0, 16) : ''} onChange={(e) => onChange({ ends_at: e.target.value ? new Date(e.target.value).toISOString() : '' })} className={COMPOSER_INPUT} /></label>
-          <label className="text-[10px] text-white/50">라벨<input type="text" value={b.label || ''} onChange={(e) => onChange({ label: e.target.value })} className={COMPOSER_INPUT} /></label>
+        <div className="space-y-1.5">
+          <div className="text-[10px] text-white/50 mb-1">마감 시각 — 날짜는 캘린더, 시간은 직접 입력</div>
+          <DateTimeField value={b.ends_at || ''} onChange={(iso) => onChange({ ends_at: iso })} tone="dark" />
+          <div className="flex items-center gap-2">
+            <input type="text" value={b.label || ''} onChange={(e) => onChange({ label: e.target.value })} placeholder="라벨 (마감까지)" className={`${COMPOSER_INPUT} w-40`} />
+            <RemainBadge endsAt={b.ends_at || ''} />
+          </div>
         </div>
       );
     case 'spacer':
       return (
-        <select value={b.size || 'md'} onChange={(e) => onChange({ size: e.target.value })} className={COMPOSER_INPUT}>
-          <option value="sm">좁게</option>
-          <option value="md">보통</option>
-          <option value="lg">넓게</option>
-        </select>
+        <Seg options={[{ v: 'sm', label: '좁게' }, { v: 'md', label: '보통' }, { v: 'lg', label: '넓게' }]} value={b.size || 'md'} onChange={(v) => onChange({ size: v })} />
       );
     case 'divider':
       return <div className="text-[10px] text-white/40">구분선 (옵션 없음)</div>;
     case 'cta_group':
       return (
         <div className="space-y-1.5">
-          <select value={b.layout || 'stack'} onChange={(e) => onChange({ layout: e.target.value })} className={COMPOSER_INPUT}>
-            <option value="stack">세로 정렬</option>
-            <option value="inline">가로 정렬</option>
-          </select>
-          {(b.buttons || []).map((btn: any, j: number) => (
-            <div key={j} className="grid grid-cols-[1fr,1fr,72px,28px] gap-1.5 items-center">
-              <input type="text" value={btn.label || ''} onChange={(e) => { const buttons = [...(b.buttons || [])]; buttons[j] = { ...buttons[j], label: e.target.value }; onChange({ buttons }); }} placeholder="라벨" className={COMPOSER_INPUT} />
-              <input type="text" value={btn.action_url || ''} onChange={(e) => { const buttons = [...(b.buttons || [])]; buttons[j] = { ...buttons[j], action_url: e.target.value }; onChange({ buttons }); }} placeholder="이동 URL" className={COMPOSER_INPUT} />
-              <select value={btn.style || 'primary'} onChange={(e) => { const buttons = [...(b.buttons || [])]; buttons[j] = { ...buttons[j], style: e.target.value }; onChange({ buttons }); }} className={COMPOSER_INPUT}>
-                <option value="primary">강조</option>
-                <option value="secondary">보통</option>
-                <option value="tertiary">외곽선</option>
-                <option value="ghost">텍스트</option>
-              </select>
-              <button onClick={() => onChange({ buttons: (b.buttons || []).filter((_: any, x: number) => x !== j) })} className="text-rose-300/70 hover:text-rose-300 p-1" aria-label="버튼 삭제"><Trash2 className="w-3.5 h-3.5" /></button>
-            </div>
-          ))}
+          <div className="flex items-center gap-2">
+            <span className="text-[10px] text-white/40">정렬</span>
+            <Seg options={[{ v: 'stack', label: '세로' }, { v: 'inline', label: '가로' }]} value={b.layout || 'stack'} onChange={(v) => onChange({ layout: v })} />
+          </div>
+          {(b.buttons || []).map((btn: any, j: number) => {
+            const setBtn = (patch: any) => { const buttons = [...(b.buttons || [])]; buttons[j] = { ...buttons[j], ...patch }; onChange({ buttons }); };
+            return (
+              <div key={j} className="bg-slate-900/40 border border-white/10 rounded-lg p-2 space-y-1.5">
+                <div className="flex items-center gap-1.5">
+                  <input type="text" value={btn.label || ''} onChange={(e) => setBtn({ label: e.target.value })} placeholder="버튼 문구" className={COMPOSER_INPUT} />
+                  <button onClick={() => onChange({ buttons: (b.buttons || []).filter((_: any, x: number) => x !== j) })} className="text-rose-300/70 hover:text-rose-300 p-1 shrink-0" aria-label="버튼 삭제"><Trash2 className="w-3.5 h-3.5" /></button>
+                </div>
+                <input type="text" value={btn.action_url || ''} onChange={(e) => setBtn({ action_url: e.target.value })} placeholder="이동 URL (https://...)" className={COMPOSER_INPUT} />
+                <Seg
+                  options={[{ v: 'primary', label: '강조' }, { v: 'secondary', label: '보통' }, { v: 'tertiary', label: '외곽선' }, { v: 'ghost', label: '텍스트' }]}
+                  value={btn.style || 'primary'}
+                  onChange={(v) => setBtn({ style: v })}
+                />
+              </div>
+            );
+          })}
           {(b.buttons || []).length < 3 && (
             <button onClick={() => onChange({ buttons: [...(b.buttons || []), { id: `btn_${(b.buttons || []).length}`, label: '버튼', action_url: '[URL — 회사 admin 수정]', style: 'secondary' }] })} className="text-[11px] text-violet-300 hover:bg-violet-500/10 px-2 py-1 rounded flex items-center gap-1"><Plus className="w-3 h-3" /> 버튼 추가</button>
           )}

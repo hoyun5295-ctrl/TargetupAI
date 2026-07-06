@@ -7,7 +7,7 @@
 
 import { useState, type CSSProperties } from 'react';
 import { Monitor, Smartphone, Sun, Moon } from 'lucide-react';
-import { resolveTheme, type InAppTheme } from './inapp/blockTheme';
+import { resolveTheme, normalizeCardStyle, type InAppTheme } from './inapp/blockTheme';
 import { BlockPreview } from './inapp/BlockPreview';
 
 export interface PreviewButton {
@@ -32,6 +32,8 @@ export interface InAppMessagePreviewProps {
   accentColor?: string | null;
   isAd?: boolean;
   replaceVars?: (t: string) => string;
+  /** ★ 2026-07-07(2) 형태 축 — classic/bubble/ticket/poster (SDK 렌더 1:1) */
+  cardStyle?: string | null;
 }
 
 /** 미리보기는 관리자 화면 = 백엔드와 같은 도메인. 상대경로(/api/..., /uploads/...)를 그대로 둬 현재 origin으로 로드한다.
@@ -118,11 +120,28 @@ function CardInner({ title, body, imageUrl, badge, buttons, textColor, variant }
 function Overlay({ variant, themeTokens, ...rest }: { variant: Variant; themeTokens?: InAppTheme | null } & Omit<InAppMessagePreviewProps, 'template'>) {
   const { backgroundColor, textColor, blocks, replaceVars, isAd } = rest;
   const usingBlocks = !!(themeTokens && blocks && blocks.length > 0);
+  // ★ 2026-07-07(2) 형태 축 — 카드형 variant에만 적용 (SDK와 동일 게이트)
+  const cardish = variant === 'modal' || variant === 'slide' || variant === 'inline' || variant === 'full';
+  const cardStyle = usingBlocks && cardish ? normalizeCardStyle(rest.cardStyle) : 'classic';
+  const bubble = cardStyle === 'bubble' && (variant === 'modal' || variant === 'slide' || variant === 'inline');
+  const bubbleRadius = (small: 'bl' | 'br') => {
+    const rr = themeTokens ? themeTokens.radius + 4 : 24;
+    return small === 'bl' ? `${rr}px ${rr}px ${rr}px 14px` : `${rr}px ${rr}px 14px ${rr}px`;
+  };
+  const bubbleTail = (side: 'left' | 'right') => (
+    <div style={{
+      position: 'absolute', bottom: -9, [side]: 30, width: 20, height: 20,
+      background: themeTokens?.surface || '#ffffff', transform: 'rotate(45deg)',
+      borderRight: `1px solid ${themeTokens?.border || 'rgba(0,0,0,0.08)'}`,
+      borderBottom: `1px solid ${themeTokens?.border || 'rgba(0,0,0,0.08)'}`,
+      borderRadius: '0 0 5px 0',
+    } as CSSProperties} />
+  );
   // 2026-07-07 디자인 2.0 — SDK makeContainer 미러: 그라데이션 면(surfaceBg) + 링+3중 그림자 합성
   const cardBg = usingBlocks ? (themeTokens!.surfaceBg || themeTokens!.surface) : (backgroundColor || '#4f46e5');
-  const cardShadow = usingBlocks ? `${themeTokens!.ring}, ${themeTokens!.shadow}` : undefined;
+  const cardShadow = usingBlocks ? `${themeTokens!.ring ? `${themeTokens!.ring}, ` : ''}${themeTokens!.shadow}` : undefined;
   const inner = usingBlocks
-    ? <BlockPreview blocks={blocks!} theme={themeTokens!} replaceVars={replaceVars} isAd={isAd} />
+    ? <BlockPreview blocks={blocks!} theme={themeTokens!} replaceVars={replaceVars} isAd={isAd} cardStyle={cardish ? cardStyle : undefined} />
     : <CardInner {...rest} variant={variant} textColor={textColor} />;
 
   const cardBase: CSSProperties = {
@@ -142,11 +161,12 @@ function Overlay({ variant, themeTokens, ...rest }: { variant: Variant; themeTok
     const heroImg = usingBlocks ? undefined : toAbsoluteImage(rest.imageUrl);
     return (
       <div style={{ position: 'absolute', inset: 0, background: 'rgba(8,10,18,0.55)', backdropFilter: 'blur(10px) saturate(1.35)', WebkitBackdropFilter: 'blur(10px) saturate(1.35)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 18 } as CSSProperties}>
-        <div style={{ ...cardBase, position: 'relative', maxWidth: 330, width: '100%', maxHeight: '92%', display: 'flex', flexDirection: 'column', borderRadius: r(20), overflow: 'hidden', boxShadow: sh('0 24px 60px rgba(0,0,0,0.45)') }}>
+        <div style={{ ...cardBase, position: 'relative', maxWidth: 330, width: '100%', maxHeight: '92%', display: 'flex', flexDirection: 'column', borderRadius: bubble ? bubbleRadius('bl') : r(20), overflow: bubble ? 'visible' : 'hidden', boxShadow: sh('0 24px 60px rgba(0,0,0,0.45)') }}>
           {heroImg && <img src={heroImg} alt="" onError={hideOnError} style={{ width: '100%', maxHeight: 130, objectFit: 'cover', display: 'block', flexShrink: 0 }} />}
           <div style={{ padding: 22, overflowY: 'auto' }}>
             {usingBlocks ? inner : <CardInner {...rest} imageUrl={null} variant="modal" textColor={textColor} />}
           </div>
+          {bubble && bubbleTail('left')}
         </div>
       </div>
     );
@@ -155,7 +175,12 @@ function Overlay({ variant, themeTokens, ...rest }: { variant: Variant; themeTok
     return <div style={{ ...cardBase, inset: 0, display: 'flex', flexDirection: 'column', justifyContent: 'center', padding: 24, overflowY: 'auto' }}>{inner}</div>;
   }
   if (variant === 'slide') {
-    return <div style={{ ...cardBase, right: 16, bottom: 16, maxWidth: 236, maxHeight: '88%', overflowY: 'auto', borderRadius: r(16), padding: 17, boxShadow: sh('0 16px 40px rgba(0,0,0,0.3)') }}>{inner}</div>;
+    return (
+      <div style={{ ...cardBase, right: 16, bottom: 16, maxWidth: 236, maxHeight: '88%', overflowY: bubble ? 'visible' : 'auto', borderRadius: bubble ? bubbleRadius('br') : r(16), padding: 17, boxShadow: sh('0 16px 40px rgba(0,0,0,0.3)') }}>
+        {inner}
+        {bubble && bubbleTail('right')}
+      </div>
+    );
   }
   if (variant === 'toast') {
     return <div style={{ ...cardBase, top: 16, right: 16, maxWidth: 234, borderRadius: r(14), padding: '12px 14px', boxShadow: sh('0 8px 22px rgba(0,0,0,0.25)') }}>{inner}</div>;
@@ -173,7 +198,10 @@ function Overlay({ variant, themeTokens, ...rest }: { variant: Variant; themeTok
   // inline_card — 본문 흐름 안
   return (
     <div style={{ position: 'absolute', top: 64, left: 14, right: 14 }}>
-      <div style={{ ...cardBase, position: 'relative', borderRadius: r(15), padding: 18, boxShadow: sh('0 6px 20px rgba(0,0,0,0.12)') }}>{inner}</div>
+      <div style={{ ...cardBase, position: 'relative', borderRadius: bubble ? bubbleRadius('bl') : r(15), padding: 18, boxShadow: sh('0 6px 20px rgba(0,0,0,0.12)') }}>
+        {inner}
+        {bubble && bubbleTail('left')}
+      </div>
     </div>
   );
 }

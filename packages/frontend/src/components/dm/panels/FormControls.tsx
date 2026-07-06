@@ -6,6 +6,7 @@ import type { ChangeEvent, ReactNode } from 'react';
 import { useRef, useState } from 'react';
 import axios from 'axios';
 import { dmImageUrl } from '../../../utils/dm-image-url';
+import { DateTimeField } from '../../DateTimeField';
 
 const api = axios.create({ baseURL: '/api' });
 api.interceptors.request.use((cfg) => {
@@ -187,21 +188,6 @@ export function ColorOverride({ value, onChange }: { value: string | undefined; 
 // ────────────── DateTimePicker ──────────────
 
 export function DateTimePicker({ value, onChange, quickPresets }: { value: string | undefined; onChange: (v: string) => void; quickPresets?: boolean }) {
-  // ISO 문자열 → datetime-local 포맷 (YYYY-MM-DDTHH:mm)
-  const toLocal = (iso?: string): string => {
-    if (!iso) return '';
-    try {
-      const d = new Date(iso);
-      if (isNaN(d.getTime())) return '';
-      const pad = (n: number) => String(n).padStart(2, '0');
-      return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
-    } catch { return ''; }
-  };
-  const fromLocal = (local: string): string => {
-    if (!local) return '';
-    try { return new Date(local).toISOString(); } catch { return local; }
-  };
-
   // ★ 2026-07-02 빠른 선택 — 마감시간 직접 고르기 어렵다는 신고. 전부 그날 23:59로 설정 후 입력칸에서 미세 조정.
   const presetChip = (label: string, make: () => Date) => (
     <button
@@ -231,12 +217,8 @@ export function DateTimePicker({ value, onChange, quickPresets }: { value: strin
           {presetChip('이달 말', () => { const d = new Date(); return new Date(d.getFullYear(), d.getMonth() + 1, 0); })}
         </div>
       )}
-      <input
-        type="datetime-local"
-        value={toLocal(value)}
-        onChange={(e) => onChange(fromLocal(e.target.value))}
-        style={inputStyle}
-      />
+      {/* 2026-07-07(2) — 브라우저 시간 스크롤 폐기: 날짜 캘린더 + 오전/오후 토글 + 시·분 직접 입력 */}
+      <DateTimeField value={value || ''} onChange={onChange} tone="light" />
       {quickPresets && value && (
         <div style={{ fontSize: 10, color: 'var(--dm-neutral-500)', marginTop: 3 }}>
           선택된 마감: {(() => { try { const d = new Date(value); return isNaN(d.getTime()) ? value : d.toLocaleString('ko-KR', { year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' }); } catch { return value; } })()}

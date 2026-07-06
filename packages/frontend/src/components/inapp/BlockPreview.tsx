@@ -5,14 +5,14 @@
  * 미리보기는 정적 표현 — 클릭/카운트다운 틱 없이 형태·내용만.
  */
 
-import type { CSSProperties } from 'react';
-import type { InAppTheme } from './blockTheme';
-import { withAlpha, shadeHex } from './blockTheme';
+import { useEffect, useState, type CSSProperties } from 'react';
+import type { InAppTheme, CardLayoutPlan } from './blockTheme';
+import { withAlpha, shadeHex, pickReadableText, planCardLayout, normalizeCardStyle } from './blockTheme';
 
 // 2026-07-07 디자인 2.0 — SDK inapp-blocks FONT_STACK 미러
 const FONT_STACK = '"Pretendard Variable", Pretendard, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Apple SD Gothic Neo", "Malgun Gothic", sans-serif';
 
-const ICON_PATHS: Record<string, string> = {
+export const ICON_PATHS: Record<string, string> = {
   check: 'M20 6 9 17l-5-5',
   gift: 'M20 12v9H4v-9M2 7h20v5H2zM12 22V7M12 7a3 3 0 0 1-3-3 2 2 0 0 1 2-2c2 0 3 2.5 3 5M12 7a3 3 0 0 0 3-3 2 2 0 0 0-2-2c-2 0-3 2.5-3 5',
   star: 'M12 2l2.9 6.3 6.9.8-5.1 4.7 1.4 6.8L12 17.8 5.9 20.6l1.4-6.8L2.2 9.1l6.9-.8z',
@@ -25,7 +25,7 @@ const ICON_PATHS: Record<string, string> = {
   user: 'M20 21a8 8 0 1 0-16 0M12 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8z',
 };
 
-function Icon({ name, color, size = 16, fill = false }: { name: string; color: string; size?: number; fill?: boolean }) {
+export function Icon({ name, color, size = 16, fill = false }: { name: string; color: string; size?: number; fill?: boolean }) {
   return (
     <svg viewBox="0 0 24 24" width={size} height={size} fill={fill ? color : 'none'} stroke={fill ? 'none' : color}
       strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
@@ -124,21 +124,9 @@ function renderBlock(b: any, i: number, ctx: Ctx): JSX.Element | null {
         </div>
       );
     }
-    case 'countdown': {
-      const seg: CSSProperties = { minWidth: 26, padding: '3px 5px', textAlign: 'center', borderRadius: 7, background: withAlpha(theme.textPrimary, 0.06), fontSize: 13.5, fontWeight: 800, fontVariantNumeric: 'tabular-nums', color: theme.textPrimary, lineHeight: 1.2 };
-      const colon: CSSProperties = { fontSize: 12, fontWeight: 700, color: theme.textSecondary };
-      return (
-        <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '11px 13px', borderRadius: theme.innerRadius, background: theme.surfaceElevated, boxShadow: `inset 0 0 0 1px ${theme.border}` }}>
-          <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 28, height: 28, borderRadius: 9, background: theme.accentSoft, flexShrink: 0 }}>
-            <Icon name="clock" color={theme.accent} size={15} />
-          </span>
-          {b.label && <span style={{ fontSize: 12, fontWeight: 500, color: theme.textSecondary }}>{t(b.label)}</span>}
-          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3, marginLeft: 'auto' }}>
-            <span style={seg}>23</span><span style={colon}>:</span><span style={seg}>59</span><span style={colon}>:</span><span style={seg}>59</span>
-          </span>
-        </div>
-      );
-    }
+    case 'countdown':
+      // 2026-07-07(2) — 고정 목업(23:59:59) 폐기: 실제 마감 시각 기준 실시간 계산 (SDK 산식 1:1)
+      return <CountdownLive key={i} b={b} theme={theme} t={t} />;
     case 'rating': {
       const value = Math.max(0, Math.min(5, Number(b.value)));
       if (!value) return null;
@@ -241,18 +229,132 @@ function renderBlock(b: any, i: number, ctx: Ctx): JSX.Element | null {
   }
 }
 
-export function BlockPreview({ blocks, theme, replaceVars, isAd }: {
+/** 카운트다운 실시간 미리보기 — SDK renderCountdown 산식 1:1 (1일+ = "N일 H시간" / 1시간 미만 = accent 경고 / 마감 후 숨김) */
+function CountdownLive({ b, theme, t }: { b: any; theme: InAppTheme; t: (s: any) => string }) {
+  const endMs = Date.parse(String(b?.ends_at || ''));
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!isFinite(endMs) || endMs - Date.now() <= 0) return;
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, [endMs]);
+  if (!isFinite(endMs)) {
+    // 마감 시각 미설정 — 자사몰에선 표시 안 됨(SDK skip). 편집자에게만 안내.
+    return (
+      <div style={{ fontSize: 11, color: theme.textSecondary, padding: '9px 12px', borderRadius: theme.innerRadius, background: theme.surfaceElevated, boxShadow: `inset 0 0 0 1px ${theme.border}` }}>
+        마감 시각을 설정하면 카운트다운이 표시됩니다
+      </div>
+    );
+  }
+  const remain = endMs - now;
+  if (remain <= 0) return null; // SDK와 동일 — 마감 지나면 숨김
+  const s = Math.floor(remain / 1000);
+  const d = Math.floor(s / 86400);
+  const h = Math.floor((s % 86400) / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const sec = s % 60;
+  const urgent = remain < 3600 * 1000;
+  const segStyle: CSSProperties = { minWidth: 26, padding: '3px 5px', textAlign: 'center', borderRadius: 7, background: urgent ? theme.accentSoft : withAlpha(theme.textPrimary, 0.06), fontSize: 13.5, fontWeight: 800, fontVariantNumeric: 'tabular-nums', letterSpacing: '0.01em', color: urgent ? theme.accent : theme.textPrimary, lineHeight: 1.2 };
+  const seg = (txt: string): JSX.Element => <span style={segStyle}>{txt}</span>;
+  const colon: CSSProperties = { fontSize: 12, fontWeight: 700, color: theme.textSecondary };
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '11px 13px', borderRadius: theme.innerRadius, background: theme.surfaceElevated, boxShadow: `inset 0 0 0 1px ${theme.border}` }}>
+      <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 28, height: 28, borderRadius: 9, background: theme.accentSoft, flexShrink: 0 }}>
+        <Icon name="clock" color={theme.accent} size={15} />
+      </span>
+      {b.label && <span style={{ fontSize: 12, fontWeight: 500, color: theme.textSecondary }}>{t(b.label)}</span>}
+      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3, marginLeft: 'auto' }}>
+        {d > 0 ? (
+          <span style={{ fontSize: 14, fontWeight: 800, fontVariantNumeric: 'tabular-nums', color: theme.textPrimary }}>{d}일 {h}시간</span>
+        ) : (
+          <>
+            {seg(String(h).padStart(2, '0'))}<span style={colon}>:</span>
+            {seg(String(m).padStart(2, '0'))}<span style={colon}>:</span>
+            {seg(String(sec).padStart(2, '0'))}
+          </>
+        )}
+      </span>
+    </div>
+  );
+}
+
+/** poster 히어로 — SDK renderPosterHero 미러 (이미지+스크림+겹침 텍스트 / 무이미지=강조색 면) */
+function PosterHero({ plan, theme, t }: { plan: CardLayoutPlan; theme: InAppTheme; t: (s: any) => string }) {
+  const onHero = plan.hero ? '#ffffff' : pickReadableText(theme.accent);
+  return (
+    <div style={{ position: 'relative', width: '100%', minHeight: 136, borderRadius: Math.max(12, theme.radius - 8), overflow: 'hidden', display: 'flex', alignItems: 'flex-end', background: plan.hero ? theme.surfaceElevated : `linear-gradient(135deg, ${shadeHex(theme.accent, 10)} 0%, ${theme.accent} 55%, ${shadeHex(theme.accent, -25)} 100%)` }}>
+      {plan.hero && (
+        <>
+          <img src={String(plan.hero.url || '')} alt="" onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }} style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' }} />
+          <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(180deg, rgba(0,0,0,0.02) 30%, rgba(0,0,0,0.58) 100%)' }} />
+        </>
+      )}
+      <div style={{ position: 'relative', padding: '18px 18px 16px', display: 'flex', flexDirection: 'column', gap: 7, width: '100%', boxSizing: 'border-box' }}>
+        {plan.overlay.map((ob: any, j: number) => {
+          const txt = t(ob.text).trim();
+          if (!txt) return null;
+          return ob.type === 'eyebrow' ? (
+            <div key={j} style={{ alignSelf: 'flex-start', fontSize: 10.5, fontWeight: 800, letterSpacing: '0.14em', color: onHero, opacity: 0.88, lineHeight: 1.2 }}>{txt}</div>
+          ) : (
+            <div key={j} style={{ fontSize: 22, fontWeight: 800, letterSpacing: '-0.02em', lineHeight: 1.22, color: onHero, textShadow: plan.hero ? '0 2px 12px rgba(0,0,0,0.35)' : 'none' }}>{txt}</div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+/** ticket 절취선 — SDK renderTicketPerforation 미러 (점선 + 양측 펀치홀) */
+function TicketPerforation({ theme }: { theme: InAppTheme }) {
+  const hole = (side: 'left' | 'right'): CSSProperties => ({
+    position: 'absolute', top: '50%', transform: 'translateY(-50%)', [side]: -6,
+    width: 16, height: 16, borderRadius: 999,
+    background: theme.surfaceElevated,
+    boxShadow: `inset 0 1px 3px rgba(0,0,0,0.12), inset 0 0 0 1px ${theme.border}`,
+  });
+  return (
+    <div style={{ position: 'relative', height: 22, display: 'flex', alignItems: 'center' }}>
+      <span style={hole('left')} />
+      <div style={{ flex: 1, margin: '0 16px', borderTop: `2px dashed ${withAlpha(theme.textPrimary, 0.16)}` }} />
+      <span style={hole('right')} />
+    </div>
+  );
+}
+
+export function BlockPreview({ blocks, theme, replaceVars, isAd, cardStyle }: {
   blocks: any[];
   theme: InAppTheme;
   replaceVars?: (t: string) => string;
   isAd?: boolean;
+  /** 형태 축 — classic/bubble/ticket/poster (카드형 템플릿에서만 전달) */
+  cardStyle?: string | null;
 }) {
   const ctx: Ctx = { theme, replaceVars: replaceVars || ((s: string) => s) };
   const list = Array.isArray(blocks) ? blocks : [];
   const hasFooter = list.some((b) => b?.type === 'footer');
+  const style = normalizeCardStyle(cardStyle);
+  const plan = planCardLayout(list, style);
+  const t = ctx.replaceVars as (s: any) => string;
+
+  const body =
+    style === 'poster' && (plan.hero || plan.overlay.length > 0) ? (
+      <>
+        <PosterHero plan={plan} theme={theme} t={(s) => t(String(s ?? ''))} />
+        {plan.main.map((b, i) => renderBlock(b, i, ctx)).filter(Boolean)}
+      </>
+    ) : style === 'ticket' && plan.stub.length > 0 ? (
+      <>
+        {plan.main.map((b, i) => renderBlock(b, i, ctx)).filter(Boolean)}
+        <TicketPerforation theme={theme} />
+        {plan.stub.map((b, i) => renderBlock(b, i + plan.main.length + 1, ctx)).filter(Boolean)}
+      </>
+    ) : (
+      <>{list.map((b, i) => renderBlock(b, i, ctx)).filter(Boolean)}</>
+    );
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 13, color: theme.textPrimary, fontFamily: FONT_STACK, letterSpacing: '-0.005em' }}>
-      {list.map((b, i) => renderBlock(b, i, ctx)).filter(Boolean)}
+      {body}
       {isAd && !hasFooter && (
         <div style={{ fontSize: 11, fontWeight: 500, color: withAlpha(theme.textSecondary, 0.85) }}>(광고)</div>
       )}

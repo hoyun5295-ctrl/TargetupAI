@@ -27,6 +27,7 @@ import type { Section } from './dm/dm-section-registry';
 import { collectRefinableTexts, applyRefinedTexts } from './email/email-section-refine';
 // 문안 두뇌: 성과 RAG + 시의성 + 브랜드 키트 주입 + 타사 표현 복제 가드
 import { composeCopyBrain } from './copy-prompt-composer';
+import { buildEventPromptBlock } from './event-brief';
 import { checkCopyLeak } from './copy-similarity-guard';
 
 // ════════════════════════════════════════════════════════════════════
@@ -363,9 +364,13 @@ export async function generateEmailSections(input: {
   prompt?: string;
   scenario?: EmailScenarioKey;
   isAd: boolean;
+  /** ★ 2026-07-07(4) 행사 캠페인 — 행사 원문. 기재된 혜택만 원문 그대로 인용, 없으면 기존 placeholder 규칙 */
+  eventText?: string;
 }): Promise<EmailSectionsGenResult> {
   const scenarioPreset = input.scenario ? EMAIL_SCENARIO_PRESETS[input.scenario] : null;
   const parts: string[] = [];
+  const eventBlock = input.eventText ? buildEventPromptBlock(input.eventText) : '';
+  if (eventBlock) parts.push(eventBlock);
   if (scenarioPreset) parts.push(`[시나리오] ${scenarioPreset.label} — ${scenarioPreset.prompt}`);
   if (input.prompt) parts.push(`[요청 내용] ${input.prompt}`);
   parts.push(`[캠페인 성격] ${input.isAd ? '광고성 (표기는 발송 시 자동 부착 — 직접 넣지 말 것)' : '정보성'}`);

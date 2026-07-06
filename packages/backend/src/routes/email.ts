@@ -86,6 +86,7 @@ import { resolveEmailSectionsForCustomer } from '../utils/email/email-personaliz
 import { rate, relativeDelta, pointDelta } from '../utils/email/email-analytics-calc';
 import { buildPreviewCustomers } from '../utils/inapp-personalization';
 import { getCompanyBrandKit } from '../utils/dm/dm-brand-kit';
+import { normalizeEventText } from '../utils/event-brief';
 import { industryLabel } from '../utils/industry-codes';
 import type { Section } from '../utils/dm/dm-section-registry';
 import { checkCredit, deductCreditSafe, InsufficientCreditError } from '../utils/ai-credit';
@@ -875,7 +876,9 @@ router.post('/ai/generate-sections', async (req: Request, res: Response) => {
     const prompt = req.body?.prompt ? String(req.body.prompt).trim() : '';
     const scenario = req.body?.scenario ? String(req.body.scenario) as EmailScenarioKey : undefined;
     const isAd = !!req.body?.is_ad;
-    if (!prompt && !scenario) {
+    // ★ 2026-07-07(4) 행사 캠페인 — 행사 원문 단독 입력도 생성 가능 (기재 혜택만 원문 그대로)
+    const eventText = req.body?.event_text ? normalizeEventText(req.body.event_text) : '';
+    if (!prompt && !scenario && !eventText) {
       return res.status(400).json({ success: false, error: '요청 내용 또는 시나리오를 입력해주세요.' });
     }
     if (prompt.length > 2000) {
@@ -886,7 +889,7 @@ router.post('/ai/generate-sections', async (req: Request, res: Response) => {
     }
     const cost = getCreditCost('email-ai-generate'); // 3
     await checkCredit(auth.companyId, cost);
-    const result = await generateEmailSections({ companyId: auth.companyId, userId: auth.userId, prompt, scenario, isAd });
+    const result = await generateEmailSections({ companyId: auth.companyId, userId: auth.userId, prompt, scenario, isAd, eventText });
     await deductCreditSafe({ companyId: auth.companyId, cost, source: 'email-ai-generate', createdBy: auth.userId });
     return res.json({ success: true, data: result });
   } catch (err: any) {

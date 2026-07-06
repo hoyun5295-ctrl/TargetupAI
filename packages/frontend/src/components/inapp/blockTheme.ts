@@ -229,6 +229,60 @@ export const THEME_OPTIONS: { key: ThemeKey; label: string; hint: string }[] = [
   { key: 'light', label: '라이트', hint: '소프트 글래스' },
   { key: 'dark', label: '다크', hint: '미드나잇 글로우' },
   { key: 'brand', label: '브랜드', hint: '브랜드 밴드 쇼케이스' },
-  { key: 'vibrant', label: '비비드', hint: '회사색 임팩트 포스터' },
+  { key: 'vibrant', label: '비비드', hint: '회사색 임팩트' },
   { key: 'minimal', label: '미니멀', hint: '모노 에디토리얼' },
 ];
+
+// ════════════════════════════════════════════════════════════════════
+// 카드 형태 축 (2026-07-07(2)) — SDK inapp-blocks.ts CARD_STYLES/planCardLayout 1:1 미러
+//   테마(색상)와 독립. classic/bubble/ticket/poster. 토스트·배너·플로팅 미적용.
+// ════════════════════════════════════════════════════════════════════
+
+export type CardStyle = 'classic' | 'bubble' | 'ticket' | 'poster';
+export const CARD_STYLES: CardStyle[] = ['classic', 'bubble', 'ticket', 'poster'];
+
+export function normalizeCardStyle(v: any): CardStyle {
+  return (CARD_STYLES as string[]).includes(String(v)) ? (String(v) as CardStyle) : 'classic';
+}
+
+export const CARD_STYLE_OPTIONS: { key: CardStyle; label: string; hint: string }[] = [
+  { key: 'classic', label: '클래식 카드', hint: '정돈된 기본 카드' },
+  { key: 'bubble', label: '둥근 말풍선', hint: '꼬리 달린 대화형' },
+  { key: 'ticket', label: '쿠폰 티켓', hint: '절취선 + 스터브 CTA' },
+  { key: 'poster', label: '매거진 포스터', hint: '헤드라인 겹친 히어로' },
+];
+
+export interface CardLayoutPlan {
+  hero: any | null;
+  overlay: any[];
+  main: any[];
+  stub: any[];
+}
+
+/** SDK planCardLayout 미러 — 분할 규칙 동일 유지 의무 */
+export function planCardLayout(blocks: any[], style: CardStyle): CardLayoutPlan {
+  const list = Array.isArray(blocks) ? blocks.filter((b) => b && typeof b === 'object') : [];
+  if (style === 'poster') {
+    let hero: any | null = null;
+    const overlay: any[] = [];
+    const main: any[] = [];
+    let eyebrowTaken = false;
+    let headlineTaken = false;
+    for (const b of list) {
+      if (!hero && b.type === 'media' && (b.variant === 'image' || (!b.variant && b.url)) && String(b.url || '').trim()) { hero = b; continue; }
+      if (!eyebrowTaken && b.type === 'eyebrow') { overlay.push(b); eyebrowTaken = true; continue; }
+      if (!headlineTaken && b.type === 'headline') { overlay.push(b); headlineTaken = true; continue; }
+      main.push(b);
+    }
+    return { hero, overlay, main, stub: [] };
+  }
+  if (style === 'ticket') {
+    let cut = -1;
+    for (let i = list.length - 1; i >= 0; i--) {
+      if (String(list[i].type) === 'cta_group') { cut = i; break; }
+    }
+    if (cut <= 0) return { hero: null, overlay: [], main: list, stub: [] };
+    return { hero: null, overlay: [], main: list.slice(0, cut), stub: list.slice(cut) };
+  }
+  return { hero: null, overlay: [], main: list, stub: [] };
+}

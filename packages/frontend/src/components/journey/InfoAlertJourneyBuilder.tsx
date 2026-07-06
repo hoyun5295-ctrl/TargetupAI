@@ -16,6 +16,7 @@ import AlimtalkChannelPanel, {
   type AlimtalkChannelState,
 } from '../alimtalk/AlimtalkChannelPanel';
 import { ModalShell, SummaryButton, AudienceModal, buildCustomerConditions, audienceSummary, type AudienceCondition } from './JourneyBuilderUi';
+import { DateTimeField, isoToLocalInput, localInputToIso } from '../DateTimeField';
 
 export type InfoAlertStartKind = 'event' | 'one_shot' | 'standing';
 
@@ -185,7 +186,11 @@ export default function InfoAlertJourneyBuilder({ senders, templates, customerFi
               ))}
             </div>
             {scheduleMode === 'scheduled' && (
-              <input type="datetime-local" value={scheduledAt} onChange={(e) => setScheduledAt(e.target.value)} className="w-full bg-white/[0.06] border border-white/15 rounded-lg px-3 py-2 text-sm text-white [color-scheme:dark]" />
+              <DateTimeField
+                value={localInputToIso(scheduledAt)}
+                onChange={(iso) => setScheduledAt(isoToLocalInput(iso))}
+                tone="dark"
+              />
             )}
             <p className="text-[10px] text-white/40 italic">발송 가능 시간(08~21시 KST) 밖이면 다음 가능 시각으로 자동 조정됩니다.</p>
           </div>

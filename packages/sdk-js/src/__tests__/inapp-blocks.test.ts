@@ -1,6 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { resolveTheme, pickReadableText, relativeLuminance, isHexColor } from '../inapp-theme';
-import { renderBlocks, isBlockAllowed, type BlockRenderContext, type ContentBlock } from '../inapp-blocks';
+import {
+  renderBlocks, isBlockAllowed, normalizeCardStyle, planCardLayout, renderPosterHero, renderTicketPerforation,
+  type BlockRenderContext, type ContentBlock,
+} from '../inapp-blocks';
 
 /**
  * D230+ — In-app 블록 렌더 + 테마 해석 테스트.
@@ -294,6 +297,72 @@ describe('renderBlocks — is_ad 자동 footer', () => {
   it('is_ad 아니면 (광고) 미주입', () => {
     const root = render([{ type: 'headline', text: '안내' }], { isAd: false });
     expect(root.textContent).not.toContain('(광고)');
+  });
+});
+
+describe('카드 형태 축 (2026-07-07(2) 디자인 언어 2.1)', () => {
+  it('normalizeCardStyle 화이트리스트 — 미지원 값은 classic', () => {
+    expect(normalizeCardStyle('bubble')).toBe('bubble');
+    expect(normalizeCardStyle('ticket')).toBe('ticket');
+    expect(normalizeCardStyle('poster')).toBe('poster');
+    expect(normalizeCardStyle('classic')).toBe('classic');
+    expect(normalizeCardStyle('없는값')).toBe('classic');
+    expect(normalizeCardStyle(null)).toBe('classic');
+    expect(normalizeCardStyle(undefined)).toBe('classic');
+  });
+
+  it('poster 배치 — 첫 이미지 미디어=히어로 승격, eyebrow/headline 각 첫 1개=overlay, 나머지=main', () => {
+    const blocks: ContentBlock[] = [
+      { type: 'eyebrow', text: 'NEW' },
+      { type: 'media', variant: 'image', url: '/uploads/a.png' },
+      { type: 'headline', text: '헤드라인' },
+      { type: 'body', text: '본문' },
+      { type: 'cta_group', buttons: [{ label: '보기' }] },
+    ];
+    const plan = planCardLayout(blocks, 'poster');
+    expect(plan.hero?.url).toBe('/uploads/a.png');
+    expect(plan.overlay.map((b) => b.type)).toEqual(['eyebrow', 'headline']);
+    expect(plan.main.map((b) => b.type)).toEqual(['body', 'cta_group']);
+
+    // 이미지 없으면 hero=null (강조색 면 히어로), overlay는 그대로
+    const noImg = planCardLayout(blocks.filter((b) => b.type !== 'media'), 'poster');
+    expect(noImg.hero).toBeNull();
+    expect(noImg.overlay.length).toBe(2);
+  });
+
+  it('ticket 배치 — 마지막 cta_group부터 스터브 분리, cta 없거나 첫 블록이면 전부 main', () => {
+    const blocks: ContentBlock[] = [
+      { type: 'headline', text: 'H' },
+      { type: 'benefit', text: '혜택' },
+      { type: 'cta_group', buttons: [{ label: '받기' }] },
+      { type: 'footer', text: '유의사항' },
+    ];
+    const plan = planCardLayout(blocks, 'ticket');
+    expect(plan.main.map((b) => b.type)).toEqual(['headline', 'benefit']);
+    expect(plan.stub.map((b) => b.type)).toEqual(['cta_group', 'footer']);
+
+    const noCta = planCardLayout([{ type: 'headline', text: 'H' }], 'ticket');
+    expect(noCta.stub.length).toBe(0);
+    expect(noCta.main.length).toBe(1);
+  });
+
+  it('renderPosterHero — 이미지=img+스크림+흰 헤드라인 / 무이미지=강조색 면', () => {
+    const ctx = makeCtx();
+    const withImg = renderPosterHero(planCardLayout([
+      { type: 'media', variant: 'image', url: '/uploads/a.png' },
+      { type: 'headline', text: '포스터 헤드라인' },
+    ], 'poster'), ctx);
+    expect(withImg?.querySelector('img')).toBeTruthy();
+    expect(withImg?.textContent).toContain('포스터 헤드라인');
+
+    const noImg = renderPosterHero(planCardLayout([{ type: 'headline', text: 'H' }], 'poster'), ctx);
+    expect(noImg?.querySelector('img')).toBeNull();
+    expect(noImg?.getAttribute('style') || (noImg as HTMLElement).style.background).toBeTruthy();
+  });
+
+  it('renderTicketPerforation — 점선 1 + 펀치홀 2', () => {
+    const row = renderTicketPerforation(resolveTheme('light', '#4f46e5'));
+    expect(row.children.length).toBe(3);
   });
 });
 

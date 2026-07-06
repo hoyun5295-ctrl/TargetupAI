@@ -5,9 +5,10 @@
 // 다크 slate + 단일 액센트, native dialog 0(useToast + CreditConfirmModal), 생성 중 로딩 오버레이 + 닫기 차단(D185).
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowLeft, CalendarDays, Sparkles, Loader2, Check, CheckCircle2, RefreshCcw } from 'lucide-react';
+import { ArrowLeft, CalendarDays, CalendarRange, Sparkles, Loader2, Check, CheckCircle2, RefreshCcw } from 'lucide-react';
 import { useToast } from '../components/ToastProvider';
 import CreditConfirmModal from '../components/credit/CreditConfirmModal';
+import EventCampaignModal from '../components/EventCampaignModal';
 
 interface CalendarEntry {
   month: number;
@@ -33,6 +34,8 @@ export default function MarketingCalendarPage() {
   // ★ Harold 명시: 설계 생성·재생성 = 매회 크레딧 차감 → 생성 전 확인 모달
   const [genConfirmOpen, setGenConfirmOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // ★ 2026-07-07(4) 행사 캠페인 — 등록된 행사로 DM·이메일·인앱 초안 생성 (행사 텍스트 재입력 0)
+  const [eventCampaignText, setEventCampaignText] = useState<string | null>(null);
 
   const auth = () => ({ Authorization: `Bearer ${localStorage.getItem('token')}` });
 
@@ -250,17 +253,27 @@ export default function MarketingCalendarPage() {
                       </select>
                       <span>· 오전 10:00 · 연 1회 · 발송 2시간 전 문안 안내</span>
                     </div>
-                    {!registered && (
+                    <div className="mt-2.5 flex items-center gap-3 flex-wrap">
+                      {!registered && (
+                        <button
+                          type="button"
+                          onClick={() => regenerateMonth(e.month)}
+                          disabled={regenMonth !== null || generating || registering}
+                          className="inline-flex items-center gap-1.5 text-[11px] text-white/45 hover:text-white/80 disabled:opacity-40 transition-colors"
+                        >
+                          <RefreshCcw className={`w-3 h-3 ${regenMonth === e.month ? 'animate-spin' : ''}`} />
+                          {regenMonth === e.month ? '다시 설계하는 중...' : '이 달만 다시 설계 (10 크레딧)'}
+                        </button>
+                      )}
                       <button
                         type="button"
-                        onClick={() => regenerateMonth(e.month)}
-                        disabled={regenMonth !== null || generating || registering}
-                        className="mt-2.5 inline-flex items-center gap-1.5 text-[11px] text-white/45 hover:text-white/80 disabled:opacity-40 transition-colors"
+                        onClick={() => setEventCampaignText(`${MONTH_LABEL[e.month]} ${e.title}\n${e.objective}\n발송 예정일: ${e.month}월 ${e.suggestedDay}일`)}
+                        disabled={generating || registering}
+                        className="inline-flex items-center gap-1.5 text-[11px] text-amber-200/80 hover:text-amber-100 disabled:opacity-40 transition-colors"
                       >
-                        <RefreshCcw className={`w-3 h-3 ${regenMonth === e.month ? 'animate-spin' : ''}`} />
-                        {regenMonth === e.month ? '다시 설계하는 중...' : '이 달만 다시 설계 (10 크레딧)'}
+                        <CalendarRange className="w-3 h-3" /> 이 행사로 채널 초안 만들기
                       </button>
-                    )}
+                    </div>
                   </div>
                 );
               })}
@@ -287,6 +300,9 @@ export default function MarketingCalendarPage() {
             <div className="text-xs text-white/40">창을 닫지 마세요</div>
           </div>
         )}
+
+        {/* ★ 2026-07-07(4) 행사 캠페인 — 캘린더 행사 → 채널별 초안 */}
+        <EventCampaignModal open={eventCampaignText !== null} initialText={eventCampaignText || ''} onClose={() => setEventCampaignText(null)} />
       </div>
 
       {/* ★ 2026-07-05: 표시=실차감 일치 — N건 선택 등록은 단가×N로 표시(quantity) */}

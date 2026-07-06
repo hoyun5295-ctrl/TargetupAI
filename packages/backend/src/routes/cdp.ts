@@ -1306,12 +1306,14 @@ router.post('/inapp/ai-generate', async (req: Request, res: Response) => {
     if (elig && !elig.canCreateWeb) {
       return res.status(400).json({ success: false, error: elig.blockReasonWeb, code: 'INAPP_DISPLAY_UNAVAILABLE' });
     }
-    const { objective, templateHint } = req.body;
+    const { objective, templateHint, event_text } = req.body;
     const pkg = await generateInAppMessagePackage({
       companyId: auth.companyId,
       createdBy: auth.userId,
       objective,
       templateHint,
+      // ★ 2026-07-07(4) 행사 캠페인 — 행사 원문 기반 생성 (기재 혜택만 원문 그대로 통과)
+      eventText: typeof event_text === 'string' ? event_text : undefined,
     });
     return res.json({ success: true, package: pkg });
   } catch (err: any) {
