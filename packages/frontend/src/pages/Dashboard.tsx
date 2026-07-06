@@ -95,6 +95,7 @@ interface Stats {
 interface PlanInfo {
   plan_name: string;
   plan_code: string;
+  plan_change?: { from: string; to: string } | null; // ★ 2026-07-06 서버 판정 요금제 변경 안내 신호(localStorage 비교 폐기)
   monthly_price: number;
   subscription_status: string;
   max_customers: number;
@@ -180,19 +181,22 @@ export default function Dashboard() {
       : undefined;
   // ★ 2026-06-08: 요금제 변경(무료체험 활성/종료 포함) 최초 1회 알림 모달 (localStorage 비교)
   const [planChange, setPlanChange] = useState<{ from: string; to: string; toStatus?: string } | null>(null);
+  // ★ 2026-07-06 요금제 변경 안내 = 서버 판정(my-plan의 plan_change)만 신뢰. localStorage 비교 폐기(브라우저 stale 값 반복 노출 근본 차단).
   useEffect(() => {
-    if (!planInfo?.plan_code) return;
-    try {
-      const KEY = 'targetup_last_seen_plan';
-      const last = localStorage.getItem(KEY);
-      const cur = planInfo.plan_code;
-      if (last && last !== cur) {
-        setPlanChange({ from: last, to: cur, toStatus: planInfo.subscription_status });
-      }
-      localStorage.setItem(KEY, cur);
-    } catch { /* noop */ }
+    const ch = planInfo?.plan_change;
+    if (ch?.from && ch?.to) {
+      setPlanChange({ from: ch.from, to: ch.to, toStatus: planInfo?.subscription_status });
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [planInfo?.plan_code]);
+  }, [planInfo?.plan_change?.from, planInfo?.plan_change?.to]);
+  // 안내 확인/닫기 = 서버에 ack → 다음 조회부터 재노출 없음(계정당 1회, 브라우저·기기 무관)
+  const closePlanChange = async () => {
+    setPlanChange(null);
+    try {
+      const token = localStorage.getItem('token');
+      await fetch('/api/companies/plan-change/ack', { method: 'POST', headers: { Authorization: `Bearer ${token}` } });
+    } catch { /* 실패해도 다음 로드에서 재시도 */ }
+  };
   // ★ CT-17 (2026-04-22): subscription_status === expired/suspended 만 전체 잠금.
   //   FREE(미가입) 자체는 기본 발송/수신거부/발송결과 허용 → 전체 잠금 아님.
   //   각 기능(AI·자동발송·모바일DM)은 plans 플래그 기반 개별 잠금으로 처리.
@@ -4014,7 +4018,7 @@ const campaignData = {
           fromPlan={planChange.from}
           toPlan={planChange.to}
           toStatus={planChange.toStatus}
-          onClose={() => setPlanChange(null)}
+          onClose={closePlanChange}
         />
       )}
 

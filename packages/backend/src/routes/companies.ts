@@ -321,10 +321,51 @@ router.get('/my-plan', async (req: Request, res: Response) => {
       return res.status(404).json({ error: '회사 정보를 찾을 수 없습니다.' });
     }
 
-    res.json(result.rows[0]);
+    const row = result.rows[0];
+    // ★ 2026-07-06 요금제 변경 안내 신호 — "이미 안내함" 상태를 서버(plan_notified_code)로 관리.
+    //   기존 localStorage 비교 방식은 브라우저에 stale 값이 남으면 매 접속 반복 노출되던 구조 → 근본 차단.
+    //   신규 컬럼 처리는 격리(try/catch) — 실패해도 플랜 조회 자체(대시보드 핵심)엔 영향 0.
+    let planChange: { from: string; to: string } | null = null;
+    try {
+      const cur = row.plan_code;
+      if (cur) {
+        const nRes = await query('SELECT plan_notified_code FROM companies WHERE id = $1', [companyId]);
+        const notified = nRes.rows[0]?.plan_notified_code ?? null;
+        if (!notified) {
+          // 최초 조회 = 현재 요금제로 조용히 초기화(안내 X) — 기존 회사 배포 직후 오노출 방지(별도 백필 불필요)
+          await query('UPDATE companies SET plan_notified_code = $2 WHERE id = $1', [companyId, cur]);
+        } else if (notified !== cur) {
+          planChange = { from: notified, to: cur };
+        }
+      }
+    } catch (e: any) {
+      console.warn('[my-plan] plan_notified_code 처리 스킵(신규 컬럼 미마이그레이션 등):', e?.message);
+    }
+
+    res.json({ ...row, plan_change: planChange });
   } catch (error) {
     console.error('플랜 조회 실패:', error);
     res.status(500).json({ error: '플랜 조회 실패' });
+  }
+});
+
+// POST /api/companies/plan-change/ack - 요금제 변경 안내 확인(1회 노출 종료)
+//   확인/닫기 시 서버가 안내한 요금제를 현재 요금제로 갱신 → 다음 조회부터 plan_change=null.
+//   계정당 1회, 브라우저·기기 무관(기존 localStorage 반복 노출 근본 차단).
+router.post('/plan-change/ack', async (req: Request, res: Response) => {
+  try {
+    const companyId = (req as any).user?.companyId;
+    if (!companyId) return res.status(401).json({ error: '인증 필요' });
+    await query(
+      `UPDATE companies
+         SET plan_notified_code = (SELECT p.plan_code FROM plans p WHERE p.id = companies.plan_id)
+       WHERE id = $1`,
+      [companyId],
+    );
+    res.json({ success: true });
+  } catch (error) {
+    console.error('요금제 변경 안내 확인 처리 실패:', error);
+    res.status(500).json({ error: '처리 실패' });
   }
 });
 

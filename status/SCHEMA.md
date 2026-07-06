@@ -318,6 +318,7 @@
 | updated_at | timestamp | |
 | service_type | varchar | ★ 2026-06-08 실측 보강 |
 | subscription_status | varchar | ★ 실측 |
+| plan_notified_code | varchar(20) | ★ 2026-07-06 추가 (ALTER) — 요금제 변경 안내 1회 노출용. 마지막 안내한 plan_code(localStorage 비교 대체). NULL=현재 값으로 조용히 초기화 |
 | line_group_id | uuid | ★ 실측 (발송 라인그룹) |
 | kakao_enabled | boolean | ★ 실측 |
 | billing_cycle_start | integer | ★ 실측 |
