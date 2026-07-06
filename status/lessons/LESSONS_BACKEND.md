@@ -495,6 +495,26 @@ else concat(concat(concat('{"sendercode":"',sender_code),'",'), replace(k_etc_js
 
 ---
 
+## 자사몰 연동 = 공식 문서 정독 → 서버 실측 → 코드 (네이버 커머스·메이크샵, 2026-07-06 추가)
+
+### 2026-07-06 — 네이버 커머스·메이크샵 커머스 API 연동 (실측 우선으로 한 번에 완성)
+
+**패턴**: 외부 커머스 API 연동은 ①공식 인증 문서 정독으로 스펙 확정(추측 0) → ②서버에서 실제 토큰 발급 실측(자격·IP·서명 확정) → ③실측 성공 후에만 코드 작성. 이 순서를 지키면 재작업 0.
+
+**두 API의 인증이 서로 달랐다 (문서/실측으로 확정 — 옛 코드/메모리 추측은 전부 틀림)**:
+- 네이버 커머스: `client_credentials` + **bcrypt 전자서명** `Base64(bcrypt(client_id+"_"+ts, client_secret))`, POST `/external/v1/oauth2/token`, 토큰 3시간, IP 화이트리스트 필수. (옛 코드는 authorization_code OAuth였음 — 완전히 틀림)
+- 메이크샵(커넥트웨이브): `client_credentials` + **Basic 헤더** `Basic base64(id:secret)` + `shop_uid`, POST `connect.makeshop.co.kr/oauth/token`, 토큰 **5분**, IP 화이트리스트 아님(실측). (레거시 openapi.makeshop.co.kr의 Shopkey/Licensekey 방식과 별개 — 신규 파트너센터 방식이 정답)
+
+**교훈**:
+- **인증 방식은 "OAuth 표준이겠지" 추측 절대 금지 — 공식 문서로 확정.** 같은 client_credentials여도 서명 방식(bcrypt vs Basic)·토큰 수명(3h vs 5분)·IP 정책이 provider마다 다르다. 옛 코드가 authorization_code로 짜여 있어도 그게 맞다는 보장 0(네이버 실측 전엔 authorize/callback 흐름이었음).
+- **연동은 "토큰 발급 실검증 성공 후에만 active 저장"**(6원칙 ② — 고도몰 verify-then-active 선례). 자격 저장만 하고 성공 표시 금지.
+- **토큰 수명이 짧으면(메이크샵 5분) 재발급 마진을 그만큼 짧게**(1분). client_credentials는 refresh_token이 없어 만료 임박 시 저장 자격으로 재발급하는 구조 — 자격을 meta에 저장해야 자동 갱신 가능.
+- **응답 스키마는 실데이터로 최종 검증** — 테스트몰이 비어 있으면(회원 0건) list 내부 필드를 못 본다. raw 반환 preview 라우트를 두고 실고객사 데이터로 매핑 확정(스키마 추측 금지 룰).
+- **화면에 토큰 만료 시각 노출 금지** — 자동 갱신되는 값이라 "곧 끊기나?" 불안만 유발. "연동 유지 중·자동 갱신"으로.
+- 구현 = provider-registry IProviderAdapter 미러(webhook 없는 polling은 verify/process no-op) + register-providers 등록 + routes(connect·status·preview·disconnect) + 프론트 자격 입력 카드. 전자서명 같은 순수 로직은 별도 CT로 빼 vitest 검증.
+
+---
+
 ## 대기→실패 변환 + 굳힘 최적화 사각 = 성공 건 영구 실패 표시 재발 (2026-07-06 추가)
 
 ### 2026-07-06 — 베네통·아이디룩 LMS 성공 건이 목록에서 실패 1로 영구 표시 (D233+ 동일 증상 재발)

@@ -53,6 +53,7 @@ import naverCommerceRoutes from './routes/naver-commerce';
 import imwebRoutes, { imwebCallbackRouter } from './routes/imweb';
 // ★ 2026-06-18: 고도몰(NHN커머스) BYO-키 폴링 커넥터
 import godoRoutes from './routes/godo';
+import makeshopRoutes from './routes/makeshop';
 // ★ 2026-06-25 (gap 7): CDP Provider 등록 단일 출처 — routes import 부수효과 의존 제거
 import { registerAllProviders } from './utils/register-providers';
 // ★ D178 (2026-05-19): 인바운드 AI 음성 응답 (Naver Clova STT/TTS + Opus 4.7)
@@ -290,6 +291,8 @@ app.use('/api/imweb', imwebCallbackRouter);
 app.use('/api/imweb', imwebRoutes);
 // ★ 2026-06-18: 고도몰(NHN커머스) BYO-키 폴링 커넥터 (OAuth/Webhook 없음 — callback 라우터 불필요)
 app.use('/api/godo', godoRoutes);
+// ★ 2026-07-06: 메이크샵 커머스 API 폴링 커넥터 (client_credentials 자격 입력 — OAuth/webhook 없음)
+app.use('/api/makeshop', makeshopRoutes);
 // ★ D178: 인바운드 AI 음성 응답 (통신사 webhook + 회사 admin 토글/이력)
 app.use('/api/voice', voiceRoutes);
 // ★ D180: Email 채널 (SendGrid Event Webhook + 회사 admin 캠페인 CRUD/발송)

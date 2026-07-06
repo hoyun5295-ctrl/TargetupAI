@@ -102,6 +102,12 @@ interface GodoStatus {
   connectedAt?: string | null;
 }
 
+interface MakeshopStatus {
+  connected: boolean;
+  shop_uid?: string;
+  status?: string;
+}
+
 interface CustomWebhookInfo {
   hasSecret: boolean;
   webhookUrl: string;
@@ -273,7 +279,7 @@ const CHANNEL_COLOR: Record<string, string> = {
 };
 
 // 자사몰 선택 카드 — 카드 클릭 시 해당 업체 전용 연동 모달 (가로 2열 그리드)
-type ProviderKey = 'cafe24' | 'naver' | 'godo' | 'gabia' | 'imweb' | 'custom';
+type ProviderKey = 'cafe24' | 'naver' | 'godo' | 'gabia' | 'imweb' | 'makeshop' | 'custom';
 
 const PROVIDER_CARDS: Array<{ key: ProviderKey; name: string; desc: string; full?: boolean }> = [
   { key: 'cafe24', name: '카페24', desc: 'OAuth 자동 연동 — 코딩 없이 회원·주문 동기화' },
@@ -281,6 +287,7 @@ const PROVIDER_CARDS: Array<{ key: ProviderKey; name: string; desc: string; full
   { key: 'godo', name: '고도몰', desc: '쇼핑몰 인증키 입력 — 주문·고객 자동 동기화' },
   { key: 'gabia', name: '가비아', desc: 'webhook 방식 — Secret·SDK 설정으로 연동' },
   { key: 'imweb', name: '아임웹', desc: 'OAuth 자동 연동 — 회원·주문·수신동의 동기화' },
+  { key: 'makeshop', name: '메이크샵', desc: '커머스 API — 회원·주문·SMS수신동의 동기화' },
   { key: 'custom', name: '자체 호스팅 / 그 외 자사몰', desc: '직접 개발했거나 목록에 없는 자사몰 — webhook 방식', full: true },
 ];
 
@@ -291,6 +298,8 @@ const CAFE24_REQUIRED_SCOPES = ['mall.read_customer', 'mall.read_order', 'mall.r
 // ★ 2026-07-06 네이버 커머스 = client_credentials — scope/Redirect URI 개념 없음. 앱에 서버 IP 등록 + "주문 판매자" API 그룹 필요.
 //   ★ 보안: 서버 egress IP는 코드/화면 비노출 — 실제 연동 업체만 담당자에게 개별 안내(공개 시 전 고객사가 우리 IP 인지 = 공격 표면).
 const NAVER_REQUIRED_API_GROUPS = ['주문 판매자'];
+// ★ 2026-07-06 메이크샵 = client_credentials(자격 입력) — 파트너센터 App에 회원·주문 Read 권한 필요. IP 등록 불요(실측).
+const MAKESHOP_REQUIRED_PERMISSIONS = ['회원 (Read)', '주문 (Read)'];
 
 const PROVIDER_META: Record<ProviderKey, { title: string; note: string }> = {
   cafe24: { title: '카페24 연동', note: '쇼핑몰 ID만 입력하면 한줄로 공식 카페24 앱으로 연결됩니다. OAuth 동의 후 회원·주문이 자동 동기화됩니다.' },
@@ -298,6 +307,7 @@ const PROVIDER_META: Record<ProviderKey, { title: string; note: string }> = {
   godo: { title: '고도몰 연동', note: '고도몰 쇼핑몰 인증키(key)를 입력하면 주문·고객 데이터가 자동으로 동기화됩니다.' },
   gabia: { title: '가비아 연동', note: '가비아 쇼핑몰은 webhook 방식으로 연동합니다. 아래 Secret·도메인·SDK를 설정하세요.' },
   imweb: { title: '아임웹 연동', note: '아임웹 사이트 코드(siteCode)를 입력하면 OAuth 인증 후 회원·주문·수신동의·장바구니가 동기화됩니다. 사이트 코드는 아임웹 앱스토어에서 한줄로를 추가할 때 전달됩니다.' },
+  makeshop: { title: '메이크샵 연동', note: '메이크샵 파트너센터에서 만든 App의 Client ID·Secret과 상점 ID를 입력하면 회원·주문이 동기화됩니다. 회원 데이터에 SMS 수신동의 여부가 포함되어 광고 발송 대상을 정확히 가려낼 수 있습니다.' },
   custom: { title: '자체 호스팅 / 그 외 자사몰 연동', note: '직접 개발했거나 목록에 없는 자사몰은 webhook 방식으로 연동합니다. 환경이 특수해 막히면 고객센터로 문의 주세요.' },
 };
 
@@ -316,6 +326,7 @@ const BACKEND_ID_TO_KEY: Record<string, ProviderKey> = {
   godo: 'godo',
   gabia: 'gabia',
   imweb: 'imweb',
+  makeshop: 'makeshop',
   custom: 'custom',
 };
 
@@ -389,6 +400,13 @@ export default function CdpSettingsPage() {
   const [imwebStatus, setImwebStatus] = useState<ImwebStatus | null>(null);
   const [imwebSiteCode, setImwebSiteCode] = useState('');
   const [imwebConnecting, setImwebConnecting] = useState(false);
+  const [makeshopStatus, setMakeshopStatus] = useState<MakeshopStatus | null>(null);
+  const [makeshopShopUid, setMakeshopShopUid] = useState('');
+  const [makeshopClientId, setMakeshopClientId] = useState('');
+  const [makeshopClientSecret, setMakeshopClientSecret] = useState('');
+  const [showMakeshopSecret, setShowMakeshopSecret] = useState(false);
+  const [makeshopConnecting, setMakeshopConnecting] = useState(false);
+  const [makeshopPreviewing, setMakeshopPreviewing] = useState(false);
   const [customInfo, setCustomInfo] = useState<CustomWebhookInfo | null>(null);
   const [customIssuedSecret, setCustomIssuedSecret] = useState<CustomIssuedSecret | null>(null);
   const [customIssuing, setCustomIssuing] = useState(false);
@@ -448,8 +466,9 @@ export default function CdpSettingsPage() {
     if (naverStatus?.connected) list.push('네이버 스마트스토어');
     if (godoStatus?.connected) list.push('고도몰');
     if (imwebStatus?.connected) list.push('아임웹');
+    if (makeshopStatus?.connected) list.push('메이크샵');
     return list;
-  }, [customInfo?.hasSecret, cafe24Status?.connected, naverStatus?.connected, godoStatus?.connected, imwebStatus?.connected]);
+  }, [customInfo?.hasSecret, cafe24Status?.connected, naverStatus?.connected, godoStatus?.connected, imwebStatus?.connected, makeshopStatus?.connected]);
   const isConnected = connectedProviders.length > 0 || !!usage?.has_key;
   const hasCdpData = isConnected || (diagnostics?.events30d ?? 0) > 0;
 
@@ -559,7 +578,7 @@ export default function CdpSettingsPage() {
       const headers = { Authorization: `Bearer ${token()}` };
       const [
         usageRes, diagRes, funnelRes, timelineRes, activeRes, chDistRes,
-        cafe24Res, naverRes, godoRes, imwebRes, customRes, providersRes,
+        cafe24Res, naverRes, godoRes, imwebRes, makeshopRes, customRes, providersRes,
       ] = await Promise.all([
         fetch('/api/cdp/usage', { headers }),
         fetch('/api/cdp/diagnostics', { headers }),
@@ -571,6 +590,7 @@ export default function CdpSettingsPage() {
         fetch('/api/naver-commerce/status', { headers }),
         fetch('/api/godo/status', { headers }),
         fetch('/api/imweb/status', { headers }),
+        fetch('/api/makeshop/status', { headers }),
         fetch('/api/cdp/custom/info', { headers }),
         fetch('/api/cdp/providers', { headers }),
       ]);
@@ -584,6 +604,7 @@ export default function CdpSettingsPage() {
       const naverData = await naverRes.json();
       const godoData = await godoRes.json();
       const imwebData = await imwebRes.json();
+      const makeshopData = await makeshopRes.json();
       const customData = await customRes.json();
       const providersData = await providersRes.json();
 
@@ -600,6 +621,7 @@ export default function CdpSettingsPage() {
       if (naverData.success) setNaverStatus(naverData);
       if (godoData.success) setGodoStatus(godoData);
       if (imwebData.success) setImwebStatus(imwebData);
+      if (makeshopData.success) setMakeshopStatus(makeshopData);
       if (customData.success) {
         setCustomInfo({
           hasSecret: customData.hasSecret,
@@ -805,6 +827,55 @@ export default function CdpSettingsPage() {
         const res = await fetch('/api/naver-commerce/disconnect', { method: 'DELETE', headers: { Authorization: `Bearer ${token()}` } });
         const data = await res.json();
         if (data.success) { await loadAll(); toast.success('네이버 스마트스토어 연동 해제 완료'); }
+        else { toast.error(data.error || '연동 해제 실패'); }
+      },
+    });
+  };
+
+  // 메이크샵 — ★ 2026-07-06 커머스 API client_credentials(자격 입력). POST /connect 한 번에 서버가 토큰 발급 실검증 후 연동.
+  const handleMakeshopConnect = async () => {
+    const shopUid = makeshopShopUid.trim();
+    const clientId = makeshopClientId.trim();
+    const clientSecret = makeshopClientSecret.trim();
+    if (!shopUid) { toast.error('메이크샵 상점 ID(shop_uid)를 입력해주세요.'); return; }
+    if (!clientId || !clientSecret) { toast.error('Client ID와 Client Secret을 모두 입력해주세요.'); return; }
+    setMakeshopConnecting(true);
+    try {
+      const res = await fetch('/api/makeshop/connect', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token()}` },
+        body: JSON.stringify({ shop_uid: shopUid, client_id: clientId, client_secret: clientSecret }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        await loadAll();
+        toast.success('메이크샵 연동이 완료되었습니다.');
+      } else {
+        toast.error(data.error || '메이크샵 연동 검증에 실패했습니다.');
+        if (data.hint) toast.info(data.hint);
+      }
+    } catch (e: any) { toast.error(e?.message || '메이크샵 처리 오류'); }
+    finally { setMakeshopConnecting(false); }
+  };
+  const handleMakeshopPreview = async () => {
+    setMakeshopPreviewing(true);
+    try {
+      const res = await fetch('/api/makeshop/preview?days=30', { headers: { Authorization: `Bearer ${token()}` } });
+      const data = await res.json();
+      if (data.success) toast.success('메이크샵 회원·주문 데이터 확인 완료 — 연동 정상');
+      else toast.error(data.error || '데이터 확인 실패');
+    } catch (e: any) { toast.error(e?.message || '데이터 확인 오류'); }
+    finally { setMakeshopPreviewing(false); }
+  };
+  const handleMakeshopDisconnect = () => {
+    setConfirm({
+      mode: 'danger',
+      title: '메이크샵 연동 해제',
+      description: '자사몰 → 한줄로 sync가 즉시 중단됩니다.',
+      onConfirm: async () => {
+        const res = await fetch('/api/makeshop/disconnect', { method: 'DELETE', headers: { Authorization: `Bearer ${token()}` } });
+        const data = await res.json();
+        if (data.success) { await loadAll(); toast.success('메이크샵 연동 해제 완료'); }
         else { toast.error(data.error || '연동 해제 실패'); }
       },
     });
@@ -1096,6 +1167,7 @@ export default function CdpSettingsPage() {
                   : p.modalKey === 'naver' ? !!naverStatus?.connected
                   : p.modalKey === 'godo' ? !!godoStatus?.connected
                   : p.modalKey === 'imweb' ? !!imwebStatus?.connected
+                  : p.modalKey === 'makeshop' ? !!makeshopStatus?.connected
                   : p.modalKey === 'gabia' ? !!customInfo?.hasSecret
                   : false;
                 const { Icon, badge } = providerBrand(p.key, p.name);
@@ -1881,6 +1953,101 @@ client.newCall(req).execute()`}</pre>
 
                 <button onClick={handleNaverConnect} disabled={naverConnecting || !isAdmin || !naverStoreId.trim() || !naverClientId.trim() || !naverClientSecret.trim()} className="w-full px-4 py-2.5 bg-emerald-500/30 hover:bg-emerald-500/50 text-emerald-100 text-sm font-medium rounded-lg disabled:opacity-40 flex items-center justify-center gap-2">
                   {naverConnecting ? <><Loader2 className="w-4 h-4 animate-spin" /> 연동 확인 중...</> : <><Link2 className="w-4 h-4" /> 연동하기</>}
+                </button>
+                {!isAdmin && <div className="text-[11px] text-white/50 text-center">연동은 회사 관리자만 가능합니다.</div>}
+                <div className="text-[10px] text-white/30 italic">Client Secret은 한줄로 서버에 안전 보관되며 화면에 다시 표시되지 않습니다.</div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* 메이크샵 — 커머스 API 자격 입력형 (★ 2026-07-06 client_credentials, polling) */}
+        {connectProvider === 'makeshop' && (
+          <div id="section-makeshop" className="bg-white/5 border border-white/10 rounded-xl p-6">
+            <div className="flex items-center gap-2 mb-4">
+              <Palette className="w-5 h-5 text-rose-300" />
+              <h2 className="text-base font-bold text-white">메이크샵 연동</h2>
+              <span className="text-xs bg-rose-500/20 text-rose-300 px-2 py-0.5 rounded-full font-medium">커머스 API</span>
+            </div>
+
+            {makeshopStatus?.connected ? (
+              <div className="space-y-3">
+                <div className="bg-emerald-500/10 border border-emerald-400/30 rounded-lg p-4 flex items-start gap-3">
+                  <Check className="w-5 h-5 text-emerald-300 mt-0.5 shrink-0" />
+                  <div className="flex-1">
+                    <div className="text-sm font-medium text-emerald-100">{makeshopStatus.shop_uid} 메이크샵 연동됨</div>
+                    <div className="text-xs text-emerald-300 mt-1">연동 유지 중 · 토큰 자동 갱신</div>
+                  </div>
+                </div>
+                {isAdmin && (
+                  <div className="flex gap-2">
+                    <button onClick={handleMakeshopPreview} disabled={makeshopPreviewing} className="px-4 py-2 bg-emerald-500/15 border border-emerald-400/40 hover:bg-emerald-500/25 text-emerald-200 text-sm font-medium rounded-lg flex items-center gap-2 disabled:opacity-40">
+                      {makeshopPreviewing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Boxes className="w-4 h-4" />} 회원·주문 데이터 확인
+                    </button>
+                    <button onClick={handleMakeshopDisconnect} className="px-4 py-2 bg-rose-500/15 border border-rose-400/40 hover:bg-rose-500/25 text-rose-200 text-sm font-medium rounded-lg flex items-center gap-2">
+                      <Unlink className="w-4 h-4" /> 연동 해제
+                    </button>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div className="space-y-4">
+                {/* 안내 — App 등록 3단계 */}
+                <div className="bg-violet-500/10 border border-violet-400/30 rounded-xl p-4 space-y-3">
+                  <div className="text-xs font-semibold text-violet-100">App 연결 — 3단계</div>
+                  <GuideStep n={1}>메이크샵 파트너센터(partner.makeshop.co.kr)에서 App을 등록합니다.</GuideStep>
+                  <GuideStep n={2}>
+                    App에 다음 권한(Read)을 추가합니다.
+                    <div className="flex flex-wrap gap-1.5 mt-1.5">
+                      {MAKESHOP_REQUIRED_PERMISSIONS.map((s) => <span key={s} className="text-[10px] bg-white/5 border border-white/10 text-white/60 px-2 py-0.5 rounded-full">{s}</span>)}
+                    </div>
+                  </GuideStep>
+                  <GuideStep n={3}>
+                    App의 <strong className="text-white/90">Client ID·Secret</strong>과 <strong className="text-white/90">상점 ID(shop_uid)</strong>를 아래에 입력하고 연동하기를 누릅니다.
+                  </GuideStep>
+                </div>
+
+                {/* 입력 — shop_uid + Client ID + Secret */}
+                <div className="space-y-2.5">
+                  <div>
+                    <label className="block text-[11px] text-white/50 mb-1">상점 ID (shop_uid)</label>
+                    <input
+                      type="text"
+                      value={makeshopShopUid}
+                      onChange={(e) => setMakeshopShopUid(e.target.value)}
+                      placeholder="메이크샵 상점 ID"
+                      className="w-full px-3 py-2 bg-violet-900/40 border border-white/10 rounded-lg text-sm text-white placeholder-white/30 focus:outline-none focus:border-emerald-400/50"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] text-white/50 mb-1">Client ID</label>
+                    <input
+                      type="text"
+                      value={makeshopClientId}
+                      onChange={(e) => setMakeshopClientId(e.target.value)}
+                      placeholder="App Client ID"
+                      className="w-full px-3 py-2 bg-violet-900/40 border border-white/10 rounded-lg text-sm text-white placeholder-white/30 focus:outline-none focus:border-emerald-400/50 font-mono"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] text-white/50 mb-1">Client Secret</label>
+                    <div className="relative">
+                      <input
+                        type={showMakeshopSecret ? 'text' : 'password'}
+                        value={makeshopClientSecret}
+                        onChange={(e) => setMakeshopClientSecret(e.target.value)}
+                        placeholder="App Client Secret"
+                        className="w-full px-3 py-2 pr-10 bg-violet-900/40 border border-white/10 rounded-lg text-sm text-white placeholder-white/30 focus:outline-none focus:border-emerald-400/50 font-mono"
+                      />
+                      <button type="button" onClick={() => setShowMakeshopSecret((v) => !v)} className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-white/40 hover:text-white/70" title={showMakeshopSecret ? '숨기기' : '보기'}>
+                        {showMakeshopSecret ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                <button onClick={handleMakeshopConnect} disabled={makeshopConnecting || !isAdmin || !makeshopShopUid.trim() || !makeshopClientId.trim() || !makeshopClientSecret.trim()} className="w-full px-4 py-2.5 bg-emerald-500/30 hover:bg-emerald-500/50 text-emerald-100 text-sm font-medium rounded-lg disabled:opacity-40 flex items-center justify-center gap-2">
+                  {makeshopConnecting ? <><Loader2 className="w-4 h-4 animate-spin" /> 연동 확인 중...</> : <><Link2 className="w-4 h-4" /> 연동하기</>}
                 </button>
                 {!isAdmin && <div className="text-[11px] text-white/50 text-center">연동은 회사 관리자만 가능합니다.</div>}
                 <div className="text-[10px] text-white/30 italic">Client Secret은 한줄로 서버에 안전 보관되며 화면에 다시 표시되지 않습니다.</div>

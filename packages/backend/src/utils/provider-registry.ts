@@ -216,8 +216,8 @@ export class SkeletonProviderAdapter implements IProviderAdapter {
 // Phase 2 박을 자사몰 — skeleton 박음 (UI에 'coming_soon' 표시)
 // ════════════════════════════════════════════════════════════════════
 
-registerProvider(new SkeletonProviderAdapter('makeshop', '메이크샵'));
 // 2026-07-04 — imweb은 imweb-client.ts에서 실 어댑터로 등록(승격). shopify/sixshop/woocommerce 스켈레톤 제거(국내 사용 미미 + 개방 API 불확실).
+// 2026-07-06 — makeshop은 makeshop-client.ts에서 실 어댑터(polling)로 등록(승격, skeleton 제거).
 //   그 외 모든 몰은 custom(자체 호스팅) webhook으로 흡수. 특수 케이스는 개별 커스텀.
 
 // 카페24는 cafe24-client.ts에서 별도 등록 (D173 리팩토링 시)
