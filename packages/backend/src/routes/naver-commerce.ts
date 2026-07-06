@@ -12,7 +12,9 @@
  *   - DELETE /api/naver-commerce/disconnect   : 연동 해제
  *   - POST /api/naver-commerce/webhook        : webhook 수신 (서명 + idempotency_key)
  *
- * 사전조건: 네이버 커머스 API센터 앱 "API 호출 IP"에 서버 egress IP(58.227.193.62) 등록.
+ * 사전조건: 네이버 커머스 API센터 앱 "API 호출 IP"에 한줄로 서버 egress IP 등록.
+ *   ★ 보안 — 서버 IP는 코드/화면/응답 어디에도 리터럴로 두지 않는다(전 고객사 인지 = 공격 표면).
+ *   실제 연동 업체만 SDK 연동 담당자가 개별 안내. 담당자는 서버에서 `curl -s https://api.ipify.org`로 확인.
  */
 
 import { Router, Request, Response, json } from 'express';
@@ -168,10 +170,11 @@ router.post('/connect', async (req: Request, res: Response) => {
   } catch (err: any) {
     console.error('[NaverCommerce /connect] 오류:', err?.message || err);
     // 토큰 발급 실패 = 외부 검증 실패 — 원인 메시지를 그대로 전달해 사용자가 스스로 교정 가능하게
+    // ★ 보안: 서버 IP는 응답에 노출하지 않는다 — 담당자 개별 안내.
     return res.status(502).json({
       success: false,
       error: err?.message || '네이버 커머스 연동 검증에 실패했습니다.',
-      hint: '커머스 API센터 앱의 "API 호출 IP"에 58.227.193.62가 등록되어 있는지, 애플리케이션 ID/시크릿이 정확한지 확인해주세요.',
+      hint: '커머스 API센터 앱의 "API 호출 IP"에 한줄로 서버 IP가 등록되어 있는지(등록 IP는 SDK 연동 담당자에게 문의), 애플리케이션 ID/시크릿이 정확한지 확인해주세요.',
     });
   }
 });

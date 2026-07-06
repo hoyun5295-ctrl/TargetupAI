@@ -289,7 +289,7 @@ const CAFE24_CALLBACK_URL = 'https://app.hanjul.ai/api/cafe24/oauth/callback';
 // 고객 self-app에 필요한 권한 (백엔드 DEFAULT_SCOPE와 동일)
 const CAFE24_REQUIRED_SCOPES = ['mall.read_customer', 'mall.read_order', 'mall.read_product', 'mall.read_application'];
 // ★ 2026-07-06 네이버 커머스 = client_credentials — scope/Redirect URI 개념 없음. 앱에 서버 IP 등록 + "주문 판매자" API 그룹 필요.
-const NAVER_SERVER_API_IP = '58.227.193.62'; // 한줄로 서버 egress IP (네이버 앱 "API 호출 IP"에 등록)
+//   ★ 보안: 서버 egress IP는 코드/화면 비노출 — 실제 연동 업체만 담당자에게 개별 안내(공개 시 전 고객사가 우리 IP 인지 = 공격 표면).
 const NAVER_REQUIRED_API_GROUPS = ['주문 판매자'];
 
 const PROVIDER_META: Record<ProviderKey, { title: string; note: string }> = {
@@ -1823,10 +1823,9 @@ client.newCall(req).execute()`}</pre>
                   <div className="text-xs font-semibold text-violet-100">애플리케이션 연결 — 4단계</div>
                   <GuideStep n={1}>네이버 커머스 API센터에서 애플리케이션을 등록합니다.</GuideStep>
                   <GuideStep n={2}>
-                    애플리케이션의 <strong className="text-white/90">API 호출 IP</strong>에 아래 한줄로 서버 IP를 등록합니다. (미등록 시 연동이 거부됩니다)
-                    <div className="flex items-center gap-2 bg-slate-950 border border-white/10 rounded-lg px-3 py-2 mt-1.5">
-                      <code className="flex-1 text-[11px] text-emerald-200 font-mono break-all">{NAVER_SERVER_API_IP}</code>
-                      <button onClick={() => copyText(NAVER_SERVER_API_IP, 'API 호출 IP')} className="shrink-0 p-1.5 rounded-md bg-white/5 hover:bg-white/10 text-white/60" title="복사"><Copy className="w-3.5 h-3.5" /></button>
+                    애플리케이션의 <strong className="text-white/90">API 호출 IP</strong>에 한줄로 서버 IP를 등록합니다. (미등록 시 연동이 거부됩니다)
+                    <div className="bg-slate-950 border border-white/10 rounded-lg px-3 py-2 mt-1.5 text-[11px] text-white/70 leading-relaxed">
+                      보안을 위해 등록할 IP는 <strong className="text-emerald-200">한줄로 AI · SDK 연동 담당자</strong>에게 문의해 개별 안내받으세요.
                     </div>
                   </GuideStep>
                   <GuideStep n={3}>

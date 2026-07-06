@@ -10,7 +10,7 @@
  *     client_id · timestamp(ms, 5분 유효) · grant_type=client_credentials
  *     · client_secret_sign = Base64(bcrypt(client_id + "_" + timestamp, client_secret)) · type=SELF
  *   - 응답 { access_token, expires_in(10800=3h), token_type } — 남은 30분 미만이면 재호출 시 새 토큰.
- *   - 사전조건: 커머스 API센터 앱의 "API 호출 IP"에 서버 egress IP(58.227.193.62) 등록.
+ *   - 사전조건: 커머스 API센터 앱의 "API 호출 IP"에 한줄로 서버 egress IP 등록(IP는 코드 비노출 — 담당자 개별 안내).
  *   실측: 2026-07-06 서버에서 발급 성공(expires_in 10799) — 스펙·자격·IP 확정.
  *
  * 🔐 자격 보관 — company_integrations.meta { app_client_id, app_client_secret } (회사별) → env fallback
