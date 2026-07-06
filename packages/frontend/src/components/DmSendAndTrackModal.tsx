@@ -217,11 +217,16 @@ export default function DmSendAndTrackModal({ dmId, dmTitle, show, onClose, init
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [show, initialView]);
 
+  // ★ 2026-07-02(5) 변수 칩 커서 삽입용 textarea ref.
+  //   ★ 2026-07-06 훅 규칙 fix — 조기 return(!show) 아래에 있어서 닫힘 렌더(훅 N개)와 열림 렌더(N+1개)의
+  //   훅 개수가 달라져, 발송 버튼 클릭(show false→true) 순간 React가 크래시해 화면 전체가 백지가 되던 근본 원인.
+  //   모든 훅은 반드시 조기 return 위에서 호출한다.
+  const messageRef = useRef<HTMLTextAreaElement>(null);
+
   if (!show) return null;
   const token = () => localStorage.getItem('token');
 
   // ★ 2026-07-02(5) 변수 칩은 커서 위치에 삽입 (항상 끝에 붙던 결함 수정)
-  const messageRef = useRef<HTMLTextAreaElement>(null);
   const insertVar = (v: string) => {
     const el = messageRef.current;
     if (!el) { setMessageText((prev) => (prev ? `${prev} ${v}` : v)); return; }
