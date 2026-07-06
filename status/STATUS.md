@@ -36,6 +36,17 @@
 
 > **회전 룰:** 완료(★배포완료) 엔트리는 원문을 archive/TASKS_YYYY-MM.md로 이동 + INDEX 등재하고, 아래 "최근 완료 인덱스"에 1줄만 남긴다. 30KB 초과 = 회전 미이행 — 즉시 회전.
 
+### 🟢 2026-07-06 — 운영 버그 5건 근본수정 (★전체 배포완료 / Harold 운영검증 대기)
+> **① 발송통계 성공→실패 재발 (backend)**: 통신사 리포트 지연(최대 48h) 건이 campaign-lifecycle 120분 "대기→실패 변환"으로 굳고 6h markFinalized+재대조 필터(합<적재) 사각에서 영구 오표시(베네통·아이디룩 실측). 변환 2곳 삭제 — 마감은 기존 3겹(48h sweeper/6h 게이트/72h 탈출구), 환불은 실패 확정분만. **복구 UPDATE 897건(result_final=false, 6/1↑) 실행완료** → 72h 탈출구가 실측 재확정. 배포 후 UPDATE 재실행(멱등).
+> **② 080 수신거부 자동등록 (backend)**: user 오버라이드 오타(8700)+fallback LIMIT1이 auto_sync=false 회사로 true 회사 가림(psy5868). user+company **합집합** 매칭(공유번호 정식 지원)+auto_sync WHERE화+매칭0 진단로그+발신자 로그. 삭제 격리는 기존 충족. [[feedback_080_shared_number_policy]].
+> **③ DM 발송 클릭 전체 백지 (frontend·긴급)**: DmSendAndTrackModal `if(!show)return null` 아래 useRef(7/2 유입) → show 토글 시 훅 개수 불일치 크래시→루트 언마운트. useRef를 조기return 위로. 후속=루트 ErrorBoundary+rules-of-hooks 린트.
+> **④ 문안 생성 Liquid/없는 필드 노출 (backend)**: CT-58 formatProfileForAiPrompt "분기변수=Liquid 의무" 지시가 %변수% 세계(generateMessages)에도 주입 → 오퍼레이터 문안에 `{% if customer.churn_risk %}` 노출(psy5868 시연). `variableStyle:liquid/percent` 분리(여정·인앱 기본 무변)+출구 평문화 가드(flattenLiquidToPlainText)+발송 최후 방어(messageUtils strip). Harold 원칙=목록 생성+기계 검증 2단.
+> **⑤ 업로드 AI 매핑 빈손 (backend)**: 7/1 Sonnet5 전환 sweep이 raw fetch(upload.ts /mapping) 누락 → 적응형 사고 첫 블록이면 content[0].text 빈손+"성공"로그(박성용). SDK+게이팅 전환·text블록 탐색·GPT폴백 검증·빈매핑 정직안내 / ai-mapping.ts 동일+**1차 모델 Sonnet5 통일**(Harold) / analysis.ts 통일. **★재발차단: `ai-call-invariants.test.ts`(raw fetch 금지·게이팅 의무·첫블록 가정 금지 3불변식 소스 전수 스캔)**.
+> **⑥ 신규 최상위 룰**: CLAUDE.md `impact_analysis_before_modification`(수정 전 연관 영향표 의무, Harold 명시) + 체크리스트 항목. [[feedback_impact_analysis_before_modification]].
+> **★배포완료. Harold 운영검증 대기**: 복구 UPDATE 897 재실행(멱등) + ①두 캠페인 succ1/fail0 ②psy5868 080 재테스트(+테스트계정 6700 정리) ③DM 발송 정상 ④오퍼레이터 문안 중괄호0 ⑤엑셀 재업로드 자동배정 + .env `CLAUDE_MAPPING_MODEL` 확인. 상세 [[project_2026_0706_pending_fail_freeze_rootfix]].
+
+---
+
 ### 🟢 2026-07-05 — 자동마케팅 4수정(배포완료) + 비토 Agent v1.0.8/MMS + 레거시 템플릿 이관 조사
 > **① 자동마케팅 전수점검 4수정 (★배포완료, 커밋 38c06ea8)**: 발송 상한(LIMIT 10000) 제거 = 서버사이드 staging INSERT(operator-recipients `buildSendableStagingInsertSql`·customer-send-stats `recordCustomerSendsByFilter`, 상한 없음) / 크레딧 차감 유실 차단('sent' 전환을 차감 성공에 종속→reconcile 재차감) / approve 라우트 `isAiOperatorAllowed` 게이트 / non-ad→광고 라벨. 통제선=고객 예산·선불 잔액(우리 강제상한 0). tsc0·순수17.
 > **② 비토 Agent v1.0.8 MMS (Agent 배포완료·Gateway v135 대기)**: 라인13 MMS 이미지 누락 진단(앱 정상, Agent가 파일 미독) → 조언문서 → 자비스 당일 v135/v1.0.8. Agent v1.0.5→1.0.7→1.0.8 교체 + `mms:` config. **Gateway v135(139.150.81.213) 반영 + E2E 미실측 대기**. OPS.md §6-2 갱신. 상세 [[project_2026_0705_bito_agent_v108_mms]].
@@ -107,16 +118,8 @@
 - 🟢 2026-07-01 (이어서 2) — 예측 일일차감 eligibility 요금제기반 재정의 + 슈퍼관리자 화이트 모던화 + 이메일 placeholder 발송 UX → [archive/TASKS_2026-07.md](archive/TASKS_2026-07.md)
 - 🟢 2026-07-01 (이어서) — 비-문자 개인화+타겟추출 전체(이메일·인앱·DM) + DM 수신자별 토큰 발송/추적/편집기 + 발행 주소복사 → [archive/TASKS_2026-07.md](archive/TASKS_2026-07.md)
 - 🟢 2026-07-01 — AI 모델 전환: 문안=Sonnet 5 / 오퍼레이터 정밀=Opus 4.8 + 검수 thinking·오탐차단 + 브랜드보이스 톤 강화 → [archive/TASKS_2026-07.md](archive/TASKS_2026-07.md)
-- 🟢 2026-06-30 (이어서3) — 알림톡 흰글씨 fix + 싱크에이전트 페이지네이션 전면 견고화 + 자동마케팅 중복 정정 + 비-문자 개인화 설계서 → [archive/TASKS_2026-06.md](archive/TASKS_2026-06.md)
-- 🟢 2026-06-30 (이어서2) — 여정 일반화 전체 구현 + 빌더 정정 + AI Operator fallback 근본 정정 → [archive/TASKS_2026-06.md](archive/TASKS_2026-06.md)
-- 🟢 2026-06-30 (이어서) — 문안 퀄리티/브랜드보이스 강화 + AI Operator 정정 + 발송현황 카드 (★배포완료) + 여정 일반화 설계서 → [archive/TASKS_2026-06.md](archive/TASKS_2026-06.md)
-- 🟢 2026-06-30 — 크레딧 모델 v2 (코드완료·검증) + 메인 대시보드 카드 + 문안 퀄리티/브랜드보이스 설계서 → [archive/TASKS_2026-06.md](archive/TASKS_2026-06.md)
-- 🟢 2026-06-29 — 여정 자동화 재설계 + 오늘의 여정 기회(분석 엔진) + 대화형 수정 + AI Operator 소개 PPT 뷰어 + 제안화면 강화 → [archive/TASKS_2026-06.md](archive/TASKS_2026-06.md)
-- 🟢 2026-06-28(이어서2) — 이메일 마케팅 마무리 + Phase 2-A 분석 대시보드 + 후속 UX → [archive/TASKS_2026-06.md](archive/TASKS_2026-06.md)
-- 🟢 2026-06-28(이어서) — 인앱 진입 재설계 + 이메일 브레이즈급 Phase 1 + AiMemory 모달화 + 버그 2건 → [archive/TASKS_2026-06.md](archive/TASKS_2026-06.md)
-- 🟢 2026-06-28 — 문안 두뇌(7천건 RAG) 배포완료 + AI 학습/브랜드보이스 화면 밀도 개선 + 다음 설계서 2건 → [archive/TASKS_2026-06.md](archive/TASKS_2026-06.md)
-- 🟢 2026-06-27 — 인앱 메시지 렌더 격상(블록+테마+모션) + 인앱 콘솔 슬레이트 리디자인 + 제안서 보강 → [archive/TASKS_2026-06.md](archive/TASKS_2026-06.md)
-- 🟢 2026-06-26 — 자동마케팅 Phase 1~3 + 운영 디버깅 + 고객사 관리자 페이지 모던 리디자인 → [archive/TASKS_2026-06.md](archive/TASKS_2026-06.md)
+
+> 2026-06-30 이하 완료분 = [archive/INDEX.md](archive/INDEX.md) 카탈로그 경유 (날짜·증상어 grep).
 
 ---
 

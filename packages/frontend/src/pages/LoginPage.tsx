@@ -375,6 +375,14 @@ export default function LoginPage() {
               <>AI 타겟 분석부터 캠페인 발송까지<br/>기업형 비즈메세징을 한번에</>
             )}
           </p>
+          {/* 비로그인 방문자용 서비스 소개 (공개 정적 페이지) — 고객사 로그인 화면에만 */}
+          {!isSuperAdminOnly && (
+            <a href="/about-ai-operator.html" target="_blank" rel="noopener"
+              className="inline-flex items-center gap-1.5 mt-6 text-sm font-medium text-white/90 hover:text-white border border-white/25 hover:border-white/50 rounded-full px-4 py-2 transition">
+              서비스 소개 보기
+              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" strokeWidth={2.2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M13.5 4.5L21 12m0 0l-7.5 7.5M21 12H3" /></svg>
+            </a>
+          )}
         </div>
 
         <div className="relative z-10 space-y-3">
@@ -454,6 +462,16 @@ export default function LoginPage() {
                 {loading ? '로그인 중...' : '로그인'}
               </button>
             </form>
+
+            {!isSuperAdminOnly && (
+              <div className="mt-6 text-center">
+                <a href="/about-ai-operator.html" target="_blank" rel="noopener"
+                  className="inline-flex items-center gap-1 text-sm font-medium text-emerald-600 hover:text-emerald-700 transition">
+                  한줄로가 처음이신가요? 서비스 소개 보기
+                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" strokeWidth={2.2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M13.5 4.5L21 12m0 0l-7.5 7.5M21 12H3" /></svg>
+                </a>
+              </div>
+            )}
 
             <p className="text-center text-xs text-gray-400 mt-6">
               문의전화 {COMPANY_PHONE}
