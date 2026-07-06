@@ -15,7 +15,7 @@ import { formatNumericLike } from './format-number';
 import { reverseDisplayValue, FIELD_DISPLAY_MAP, renderFieldValue } from './standard-field-map';
 import { cellToString } from './normalize';
 import { query } from '../config/database';
-import { renderLiquid, detectLiquidSyntax, flattenCustomerForLiquid } from './liquid-templating';
+import { renderLiquid, detectLiquidSyntax, flattenCustomerForLiquid, stripLiquidLeftovers } from './liquid-templating';
 import { applyVarFallback } from './var-fallback';
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -266,6 +266,13 @@ export function replaceVariables(
     result = liquidResult.rendered;
     if (liquidResult.errors.length > 0) {
       console.warn('[Liquid] 렌더링 오류:', JSON.stringify(liquidResult.errors));
+    }
+    // ★ 2026-07-06 발송 최후 방어 — 렌더 후에도 태그가 남으면(파서 오류 시 원본 반환·부분 렌더) 태그만 제거.
+    //   어떤 엣지에도 고객에게 {{ }}·{% %} 원문이 발송되지 않는 것을 코드가 보장.
+    //   정상 렌더(잔존 0)는 detect=false로 무접촉 — 발송 5경로 기존 동작 영향 0.
+    if (detectLiquidSyntax(result)) {
+      console.warn('[Liquid] 렌더 후 잔존 태그 검출 → 최후 방어 제거');
+      result = stripLiquidLeftovers(result);
     }
   }
 

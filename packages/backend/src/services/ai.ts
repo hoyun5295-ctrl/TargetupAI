@@ -21,6 +21,8 @@ import { detectBenefits, buildBenefitEmphasis } from '../utils/copy-benefit-dete
 import { findBannedWords } from '../utils/copy-similarity-guard';
 // ★ D227+ AI 응답 JSON 안전 추출 (코드펜스 없이 설명문 혼입 방어 — 본문 0 bytes 사고 정정)
 import { extractJsonFromAiText } from '../utils/ai-json';
+// ★ 2026-07-06 Liquid 출구 가드 — %변수% 세계(캠페인·오퍼레이터) 생성물에 템플릿 문법 잔존 0 기계 보장
+import { detectLiquidSyntax, flattenLiquidToPlainText } from '../utils/liquid-templating';
 // ★ D227+ 종량제: 작업당 크레딧 단가 맵 (순수 함수, DB 의존 0)
 import { getCreditCost } from '../utils/ai-credit-calc';
 // ★ D227+ 종량제: orchestrate 묶음 차감 컨텍스트 (묶음 안 sub 호출은 차감 skip)
@@ -1099,8 +1101,11 @@ export async function generateMessages(
 
   // ★ D210+ Phase 2 (Harold 명시 2026-05-23): 회사 실측 데이터 프로필 동적 주입 (CT-58).
   //   안전/분기/차단 3단계 분류 + 채워짐 비율 명시 → AI가 어설픈 변수 임의 작성 차단.
+  // ★ 2026-07-06 variableStyle 'percent' — 이 생성물은 %변수% 세계(발송 편집기 노출·Liquid 렌더 대상 아님).
+  //   기존 기본값('liquid' — 분기 변수 Liquid 패턴 의무 지시)이 그대로 주입돼 오퍼레이터 메인 문안에
+  //   {% if customer.churn_risk > 0.7 %} 같은 템플릿 문법이 생성되던 결선 오류의 뿌리 정정 (psy5868 실측).
   const companyProfilePrompt = extraContext?.companyDataProfile
-    ? formatProfileForAiPrompt(extraContext.companyDataProfile)
+    ? formatProfileForAiPrompt(extraContext.companyDataProfile, { variableStyle: 'percent' })
     : '';
 
   // ★ SMS 바이트 제한 안내 (광고/비광고 구분)
@@ -1216,8 +1221,11 @@ ${usePersonalization ? `- 사용할 개인화 변수: ${personalizationTags}
   }
 
   try {
+    // ★ 2026-07-06 Liquid 출구 가드 기록 — 직전 실행에서 템플릿 문법이 검출됐는지 (재생성 힌트 트리거)
+    let liquidDetectedLastRun = false;
     // ★ 2026-07-02 생성 1회 실행 — CT-100 검증 미달 시 재생성에서 재사용 (재생성 = creditCost 0, 추가 차감 없음)
     const runGenerateOnce = async (retryHint: string): Promise<AIRecommendResult> => {
+    liquidDetectedLastRun = false;
     const text = await callAIWithFallback({
       system: enrichedSystemPrompt,
       userMessage: retryHint ? `${userMessage}${retryHint}` : userMessage,
@@ -1254,6 +1262,14 @@ ${usePersonalization ? `- 사용할 개인화 변수: ${personalizationTags}
         if (channel !== '카카오' && channel !== 'KAKAO') {
           msgField = stripEmojis(msgField);
         }
+        // ★ 2026-07-06 Liquid 출구 가드 — 이 생성물은 %변수% 세계. 프롬프트 지시와 무관하게(모델은 확률적으로
+        //   지시를 어긴다 — psy5868 실측) 템플릿 문법({{ }}·{% %}) 검출 시 결정적 평문화(중립 렌더 → 잔존 제거).
+        //   "존재하지 않는 필드 기반 문법"이 편집기·발송에 노출되는 것을 코드가 보장 차단. 검출 시 재생성 1회도 트리거.
+        if (detectLiquidSyntax(msgField)) {
+          liquidDetectedLastRun = true;
+          msgField = flattenLiquidToPlainText(msgField);
+          console.warn(`[copy-guard] 템플릿 문법(Liquid) 검출 → 평문화: variant ${(variant as any).variant_id || ''}`);
+        }
         msgField = msgField.trim();
         (variant as any).message_text = msgField;
         
@@ -1269,8 +1285,14 @@ ${usePersonalization ? `- 사용할 개인화 변수: ${personalizationTags}
         }
 
         // ★ D28: 제목에서 %변수% 강제 제거 (AI가 프롬프트 무시 시 안전장치)
+        // ★ 2026-07-06: 제목도 템플릿 문법 평문화 동반 (본문과 동일 보장)
         if ((variant as any).subject) {
-          (variant as any).subject = cleanLeftoverVars((variant as any).subject as string).replace(/  +/g, ' ').trim();
+          let subj = String((variant as any).subject);
+          if (detectLiquidSyntax(subj)) {
+            liquidDetectedLastRun = true;
+            subj = flattenLiquidToPlainText(subj);
+          }
+          (variant as any).subject = cleanLeftoverVars(subj).replace(/  +/g, ' ').trim();
         }
         
         // ★ #11 수정: 개인화 모드일 때 personalizationVars(선택된 변수)만 허용, 비선택 변수 제거
@@ -1346,6 +1368,12 @@ ${usePersonalization ? `- 사용할 개인화 변수: ${personalizationTags}
           if (spam.score >= SPAM_FAIL_THRESHOLD) {
             allIssues.add(`스팸 위험 표현 회피 필요(${spam.hits.join(', ') || '특수문자 과다'})`);
           }
+        }
+
+        // ★ 2026-07-06 Liquid 검출 시 재생성 유도 — 평문화(결정적 가드)는 이미 적용됐으나,
+        //   분기 전제로 쓰인 문안은 평문화 후 흐름이 어색할 수 있어 올바른 지시로 1회 재작성 기회 부여.
+        if (liquidDetectedLastRun) {
+          allIssues.add('Liquid 등 템플릿 문법(중괄호 표기·조건 분기 태그) 절대 사용 금지 — 개인화는 %변수% 형태만 사용');
         }
 
         if (allIssues.size > 0) {

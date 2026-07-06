@@ -194,19 +194,37 @@ export function clearCompanyDataProfileCache(companyId?: string): void {
  *
  * 출력 매트릭스 — 안전/분기/차단 3단계 명시 + 실측 채워짐 비율 명시.
  */
-export function formatProfileForAiPrompt(profile: CompanyDataProfile): string {
+export function formatProfileForAiPrompt(
+  profile: CompanyDataProfile,
+  opts?: {
+    /**
+     * ★ 2026-07-06 변수 세계 분리 — 결과물이 Liquid를 렌더하는 경로인지에 따라 지시가 달라야 한다.
+     *   'liquid'(기본값 — 여정·인앱): 현행 그대로. Liquid 분기 fallback 지시 유지.
+     *   'percent'(캠페인·오퍼레이터 generateMessages): %변수% 세계 — Liquid 문법({{ }}·{% %}) 지시·예시 전면 제거.
+     *   기원: 오퍼레이터 메인 생성물에 {% if customer.churn_risk > 0.7 %} 노출(psy5868, 2026-07-06) —
+     *   %변수% 세계에 "분기 변수 = Liquid 패턴 의무" 지시가 그대로 주입되던 결선 오류.
+     */
+    variableStyle?: 'liquid' | 'percent';
+  },
+): string {
+  const style = opts?.variableStyle || 'liquid';
+
   if (profile.totalCustomers === 0) {
     return `[★ ★ ★ 회사 실측 데이터 매트릭스 — 절대 준수 ★ ★ ★]
 - 현재 회사 customer DB = 0건 (cold start)
-- 개인화 변수 절대 사용 금지 (Liquid {{ customer.X }} 또는 %변수% 어디에도 사용 X)
+- 개인화 변수 절대 사용 금지 (${style === 'liquid' ? "Liquid {{ customer.X }} 또는 %변수%" : '%변수% 형태'} 어디에도 사용 X)
 - 모두에게 동일한 일반 안내 본문만 작성 의무
 `;
   }
 
   const formatSafeField = (f: FieldProfile) =>
-    `  - {{ customer.${f.field} }} 또는 %${f.percentVar}% (${f.label}, ${f.fillRate}% 채워짐)`;
+    style === 'liquid'
+      ? `  - {{ customer.${f.field} }} 또는 %${f.percentVar}% (${f.label}, ${f.fillRate}% 채워짐)`
+      : `  - %${f.percentVar}% (${f.label}, ${f.fillRate}% 채워짐)`;
   const formatConditionalField = (f: FieldProfile) =>
-    `  - {{ customer.${f.field} }} 또는 %${f.percentVar}% (${f.label}, ${f.fillRate}% 채워짐)`;
+    style === 'liquid'
+      ? `  - {{ customer.${f.field} }} 또는 %${f.percentVar}% (${f.label}, ${f.fillRate}% 채워짐)`
+      : `  - %${f.percentVar}% (${f.label}, ${f.fillRate}% 채워짐 — 값이 비어 있는 고객 존재)`;
   const formatBlockedField = (f: FieldProfile) =>
     `  - ${f.label} (${f.fillRate}% 채워짐 — 데이터 부족)`;
 
@@ -229,13 +247,21 @@ export function formatProfileForAiPrompt(profile: CompanyDataProfile): string {
 
 ${profile.safeFields.length > 0 ? profile.safeFields.map(formatSafeField).join('\n') : '  (해당 영역 없음 — 안전 변수가 없으므로 변수 사용 신중)'}
 
-[분기 변수 — Liquid fallback 의무 (30~70% 채워짐)]
+${style === 'liquid'
+  ? `[분기 변수 — Liquid fallback 의무 (30~70% 채워짐)]
 ${profile.conditionalFields.length > 0
-  ? profile.conditionalFields.map(formatConditionalField).join('\n') +
-    `\n  → 사용 시 다음 패턴 의무:\n` +
-    `     {{ customer.X | default: '고객' }}   (값 없으면 자동 대체)\n` +
-    `     {% if customer.X %}...{% else %}...{% endif %}   (조건 분기)`
-  : '  (해당 영역 없음)'}
+    ? profile.conditionalFields.map(formatConditionalField).join('\n') +
+      `\n  → 사용 시 다음 패턴 의무:\n` +
+      `     {{ customer.X | default: '고객' }}   (값 없으면 자동 대체)\n` +
+      `     {% if customer.X %}...{% else %}...{% endif %}   (조건 분기)`
+    : '  (해당 영역 없음)'}`
+  : `[주의 변수 — 값이 비어 있을 수 있음 (30~70% 채워짐)]
+${profile.conditionalFields.length > 0
+    ? profile.conditionalFields.map(formatConditionalField).join('\n') +
+      `\n  → 이 변수들은 값이 없는 고객이 있으므로, 확신이 없으면 위 안전 변수만 사용하세요.\n` +
+      `  → 사용한다면 값이 비어도 문장이 자연스럽게 읽히도록 구성하세요.`
+    : '  (해당 영역 없음)'}
+※ ⚠️ 이 문안 형식에서는 Liquid 등 템플릿 문법(중괄호 표기·조건 분기 태그) 절대 사용 금지 — 개인화는 %변수% 형태만 허용됩니다.`}
 
 [차단 변수 — 절대 사용 금지 (30% 미만 채워짐 — 데이터 부족)]
 ${profile.blockedFields.length > 0 ? profile.blockedFields.map(formatBlockedField).join('\n') : '  (해당 영역 없음)'}

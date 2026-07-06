@@ -116,6 +116,38 @@ export function renderLiquid(template: string, context: LiquidContext): LiquidRe
 }
 
 /**
+ * ★ 2026-07-06 잔존 태그 제거 (순수) — 렌더 실패/부분 렌더로 남은 {{ }}·{% %}를 텍스트에서 제거.
+ *   발송 최후 방어(messageUtils)와 생성 출구 가드(services/ai.ts)의 폴백 전용.
+ *   정상 렌더(잔존 0)는 detect=false로 무접촉 — 기존 경로 영향 0.
+ */
+export function stripLiquidLeftovers(text: string): string {
+  if (!text || !detectLiquidSyntax(text)) return text;
+  return text
+    .replace(/\{%[\s\S]*?%\}/g, '')
+    .replace(/\{\{[\s\S]*?\}\}/g, '')
+    .replace(/[ \t]+\n/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .replace(/  +/g, ' ')
+    .trim();
+}
+
+/**
+ * ★ 2026-07-06 생성물 평문화 (순수) — %변수% 세계(캠페인·오퍼레이터 문안) 생성물에 Liquid가 섞인 경우
+ *   중립 컨텍스트로 렌더(조건 전부 false → else 분기 채택, {{ x | default: 'y' }} → 'y') 후 잔존 태그 제거.
+ *   "존재하지 않는 필드 기반 문법"이 사용자 화면·발송에 절대 노출되지 않는 기계 보장 층.
+ *   Liquid 허용 경로(여정·인앱)에서는 호출하지 않는다 — 분기 기능 보존.
+ */
+export function flattenLiquidToPlainText(text: string): string {
+  if (!text || !detectLiquidSyntax(text)) return text;
+  try {
+    const { rendered } = renderLiquid(text, { customer: {} });
+    return stripLiquidLeftovers(rendered);
+  } catch {
+    return stripLiquidLeftovers(text);
+  }
+}
+
+/**
  * customer DB row를 Liquid context 평탄화
  * - 최상위 컬럼 + custom_fields JSONB 평탄화 → customer.X 단일 진입점
  */
