@@ -18,6 +18,7 @@
 | 매 답변 직전 | lessons/LESSONS_META.md | 전체 (경량 유지) |
 | 컨트롤타워·도메인 흐름 | lessons/LESSONS_ARCHITECTURE.md | 해당 CT |
 | 시스템 구조 파악 | ARCHITECTURE.md | 해당 절만 |
+| 자사몰 연동·CDP·커넥터 작업 | INTEGRATIONS.md | 해당 provider 카드 / CDP 공통 절 |
 | 버그 수정 | BUGS.md | 해당 버그 항목 (해결분은 archive/BUGS_RESOLVED.md) |
 | 과거 작업 조회·회귀 의심 | archive/INDEX.md → TASKS_YYYY-MM.md | grep 적중 항목만 |
 | 의사결정 배경 확인 | DECISIONS.md | 해당 ADR |

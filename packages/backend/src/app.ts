@@ -342,7 +342,7 @@ app.listen(PORT, () => {
   console.log('🚀 ================================');
   console.log('');
 
-  // ★ 2026-06-25 (gap 7): CDP Provider registry 부팅 등록 (cafe24·naver·custom·godo·gabia + 스켈레톤 5종)
+  // ★ 2026-06-25 (gap 7): CDP Provider registry 부팅 등록 (cafe24·naver·makeshop·godo·imweb·custom)
   registerAllProviders();
 
   // ★ D106: 로그 테이블 자동 생성 (당월+다음달 — 202604 미생성 사고 재발 방지)

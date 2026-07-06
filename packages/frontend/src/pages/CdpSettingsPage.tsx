@@ -279,13 +279,12 @@ const CHANNEL_COLOR: Record<string, string> = {
 };
 
 // 자사몰 선택 카드 — 카드 클릭 시 해당 업체 전용 연동 모달 (가로 2열 그리드)
-type ProviderKey = 'cafe24' | 'naver' | 'godo' | 'gabia' | 'imweb' | 'makeshop' | 'custom';
+type ProviderKey = 'cafe24' | 'naver' | 'godo' | 'imweb' | 'makeshop' | 'custom';
 
 const PROVIDER_CARDS: Array<{ key: ProviderKey; name: string; desc: string; full?: boolean }> = [
   { key: 'cafe24', name: '카페24', desc: 'OAuth 자동 연동 — 코딩 없이 회원·주문 동기화' },
   { key: 'naver', name: '네이버 스마트스토어', desc: '커머스 API — 주문·구매고객 동기화' },
   { key: 'godo', name: '고도몰', desc: '쇼핑몰 인증키 입력 — 주문·고객 자동 동기화' },
-  { key: 'gabia', name: '가비아', desc: 'webhook 방식 — Secret·SDK 설정으로 연동' },
   { key: 'imweb', name: '아임웹', desc: 'OAuth 자동 연동 — 회원·주문·수신동의 동기화' },
   { key: 'makeshop', name: '메이크샵', desc: '커머스 API — 회원·주문·SMS수신동의 동기화' },
   { key: 'custom', name: '자체 호스팅 / 그 외 자사몰', desc: '직접 개발했거나 목록에 없는 자사몰 — webhook 방식', full: true },
@@ -305,7 +304,6 @@ const PROVIDER_META: Record<ProviderKey, { title: string; note: string }> = {
   cafe24: { title: '카페24 연동', note: '쇼핑몰 ID만 입력하면 한줄로 공식 카페24 앱으로 연결됩니다. OAuth 동의 후 회원·주문이 자동 동기화됩니다.' },
   naver: { title: '네이버 스마트스토어 연동', note: '네이버 커머스 API센터에서 만든 애플리케이션 자격을 입력하면 주문·회원이 동기화됩니다. 구매자 성명·휴대폰 번호는 주문 데이터로 제공되어 발송에 쓸 수 있습니다. 단 주문 안내 같은 정보성 메시지는 즉시 가능하지만, 광고성 메시지는 별도의 광고 수신동의가 필요합니다.' },
   godo: { title: '고도몰 연동', note: '고도몰 쇼핑몰 인증키(key)를 입력하면 주문·고객 데이터가 자동으로 동기화됩니다.' },
-  gabia: { title: '가비아 연동', note: '가비아 쇼핑몰은 webhook 방식으로 연동합니다. 아래 Secret·도메인·SDK를 설정하세요.' },
   imweb: { title: '아임웹 연동', note: '아임웹 사이트 코드(siteCode)를 입력하면 OAuth 인증 후 회원·주문·수신동의·장바구니가 동기화됩니다. 사이트 코드는 아임웹 앱스토어에서 한줄로를 추가할 때 전달됩니다.' },
   makeshop: { title: '메이크샵 연동', note: '메이크샵 파트너센터에서 만든 App의 Client ID·Secret과 상점 ID를 입력하면 회원·주문이 동기화됩니다. 회원 데이터에 SMS 수신동의 여부가 포함되어 광고 발송 대상을 정확히 가려낼 수 있습니다.' },
   custom: { title: '자체 호스팅 / 그 외 자사몰 연동', note: '직접 개발했거나 목록에 없는 자사몰은 webhook 방식으로 연동합니다. 환경이 특수해 막히면 고객센터로 문의 주세요.' },
@@ -324,10 +322,10 @@ const BACKEND_ID_TO_KEY: Record<string, ProviderKey> = {
   cafe24: 'cafe24',
   naver_smart_store: 'naver',
   godo: 'godo',
-  gabia: 'gabia',
   imweb: 'imweb',
   makeshop: 'makeshop',
   custom: 'custom',
+  // gabia는 2026-07-06 제거(퍼스트몰 개방 API 폐쇄형) — 자체호스팅으로 흡수.
 };
 
 // 카드 렌더 단일 모델 — 백엔드 로드 성공 시 available/스켈레톤을 반영, 실패 시 하드코딩 5종 폴백(빈 화면 방지).
@@ -339,7 +337,6 @@ function providerBrand(key: string, name: string): { Icon: typeof Store; badge: 
   if (key === 'cafe24' || n.includes('카페24') || n.includes('cafe24')) return { Icon: Store, badge: 'from-blue-500 to-blue-600 shadow-blue-500/25' };
   if (key === 'naver' || n.includes('네이버') || n.includes('naver')) return { Icon: ShoppingBag, badge: 'from-green-500 to-emerald-600 shadow-green-500/25' };
   if (key === 'godo' || n.includes('고도몰')) return { Icon: Boxes, badge: 'from-sky-500 to-indigo-600 shadow-sky-500/25' };
-  if (key === 'gabia' || n.includes('가비아')) return { Icon: Cloud, badge: 'from-teal-500 to-cyan-600 shadow-teal-500/25' };
   if (n.includes('shopify')) return { Icon: ShoppingCart, badge: 'from-lime-500 to-green-600 shadow-lime-500/25' };
   if (n.includes('메이크샵') || n.includes('makeshop')) return { Icon: Palette, badge: 'from-rose-500 to-red-600 shadow-rose-500/25' };
   if (n.includes('imweb') || n.includes('아임웹')) return { Icon: LayoutTemplate, badge: 'from-indigo-500 to-violet-600 shadow-indigo-500/25' };
@@ -424,7 +421,7 @@ export default function CdpSettingsPage() {
   const [providerList, setProviderList] = useState<ProviderApiEntry[] | null>(null);
   const [customTab, setCustomTab] = useState<'connect' | 'web' | 'app' | 'verify'>('connect');
   const closeModal = () => { setActiveModal(null); setConnectProvider(null); setCustomTab('connect'); };
-  const webhookProviderOpen = connectProvider === 'custom' || connectProvider === 'gabia';
+  const webhookProviderOpen = connectProvider === 'custom';
   const [confirm, setConfirm] = useState<ConfirmState | null>(null);
 
   // ★ 2026-06-25 (gap 3): 렌더 카드 = 백엔드 registry 단일 출처. 로드 성공 시 available/스켈레톤 반영, 실패 시 하드코딩 5종 폴백.
@@ -1092,7 +1089,7 @@ export default function CdpSettingsPage() {
               <h1 className="text-xl md:text-2xl font-semibold text-white">자사몰 연동 (CDP)</h1>
               <span className="text-[10px] bg-gradient-to-r from-amber-400 to-orange-500 text-white px-2 py-0.5 rounded-full font-bold tracking-wide">BETA</span>
             </div>
-            <p className="text-xs md:text-sm text-white/50 mt-0.5">자체 호스팅 · 고도몰 · 가비아 · 카페24 · 네이버 · 싱크에이전트 — 고객 데이터를 한 곳으로 모읍니다</p>
+            <p className="text-xs md:text-sm text-white/50 mt-0.5">카페24 · 네이버 · 메이크샵 · 고도몰 · 아임웹 · 자체 호스팅 · 싱크에이전트 — 고객 데이터를 한 곳으로 모읍니다</p>
           </div>
           <button onClick={loadAll} disabled={loading} className="p-2 rounded-lg hover:bg-white/10 transition-colors" title="새로고침">
             <RefreshCw className={`w-4 h-4 text-white/60 ${loading ? 'animate-spin' : ''}`} />
@@ -1168,7 +1165,6 @@ export default function CdpSettingsPage() {
                   : p.modalKey === 'godo' ? !!godoStatus?.connected
                   : p.modalKey === 'imweb' ? !!imwebStatus?.connected
                   : p.modalKey === 'makeshop' ? !!makeshopStatus?.connected
-                  : p.modalKey === 'gabia' ? !!customInfo?.hasSecret
                   : false;
                 const { Icon, badge } = providerBrand(p.key, p.name);
                 const clickable = p.available && p.modalKey !== null;
@@ -1528,7 +1524,7 @@ export default function CdpSettingsPage() {
           </div>
         )}
 
-        {/* 자체 호스팅 / 고도몰 / 가비아 — webhook 방식 (연결 탭) */}
+        {/* 자체 호스팅 — webhook 방식 (연결 탭) */}
         {webhookProviderOpen && customTab === 'connect' && (
           <div id="section-custom" className="bg-white/5 border border-white/10 rounded-xl p-6">
             <div className="flex items-center gap-2 mb-1">

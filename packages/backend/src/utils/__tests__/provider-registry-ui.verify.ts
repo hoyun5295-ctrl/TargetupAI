@@ -20,7 +20,7 @@ console.log('[provider-registry-ui] buildProvidersForUI — available 직접 사
 const out = buildProvidersForUI([
   fake('cafe24', 'oauth', true),
   fake('godo', 'polling', true),     // 폴링형도 available true면 available
-  fake('gabia', 'webhook', true),
+  fake('custom', 'webhook', true),
   fake('shopify', 'none', false),    // 스켈레톤 → coming_soon
 ]);
 
@@ -30,8 +30,8 @@ ok('godo(polling, available) → available (추론이면 oauth/webhook 없어 co
   assert.strictEqual(out.find(p => p.provider === 'godo')!.status, 'available'));
 ok('godo connectMethod 보존', () =>
   assert.strictEqual(out.find(p => p.provider === 'godo')!.connectMethod, 'polling'));
-ok('gabia(webhook, available) → available', () =>
-  assert.strictEqual(out.find(p => p.provider === 'gabia')!.status, 'available'));
+ok('custom(webhook, available) → available', () =>
+  assert.strictEqual(out.find(p => p.provider === 'custom')!.status, 'available'));
 ok('shopify(none, available=false) → coming_soon', () =>
   assert.strictEqual(out.find(p => p.provider === 'shopify')!.status, 'coming_soon'));
 

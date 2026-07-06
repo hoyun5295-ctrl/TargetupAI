@@ -8,7 +8,7 @@
  *   - cafe24-client.ts (CT-23) 등 자사몰별 client는 IProviderAdapter 구현체
  *
  * 📋 등록된 Provider (등록 출처 = app.ts registerAllProviders() / utils/register-providers.ts 단일 출처. 2026-06-25 갱신)
- *   - 'cafe24'(oauth) / 'naver_smart_store'(oauth) / 'custom'(webhook) / 'godo'(polling) / 'gabia'(webhook) = 사용 가능(available)
+ *   - 'cafe24'(oauth) / 'naver_smart_store'(polling) / 'makeshop'(polling) / 'godo'(polling) / 'imweb'(oauth) / 'custom'(webhook) = 사용 가능(available)
  *   - 'makeshop' = skeleton(available:false → coming_soon). 'imweb'(oauth)는 imweb-client.ts에서 실 어댑터로 등록. shopify/sixshop/woocommerce는 자체 호스팅 webhook으로 흡수(2026-07-04 제거)
  *   - 어댑터가 connectMethod/available을 직접 선언 → listProvidersForUI가 추론 없이 그대로 노출(D189 추론 폐기)
  *
@@ -65,7 +65,7 @@ export interface IProviderAdapter {
   readonly displayName: string;
   /** Provider 능력 매트릭스 */
   readonly capabilities: ProviderCapabilities;
-  /** UI 연결 방식 — 카드 클릭 모달 분기에 사용 (oauth=카페24/네이버, polling=고도몰, webhook=가비아/자체호스팅) */
+  /** UI 연결 방식 — 카드 클릭 모달 분기에 사용 (oauth=카페24/아임웹, polling=네이버/메이크샵/고도몰, webhook=자체호스팅) */
   readonly connectMethod: 'oauth' | 'webhook' | 'polling' | 'none';
   /** 실제 연동 가능 여부(추론 폐기 — 어댑터가 직접 선언). false면 'coming_soon' */
   readonly available: boolean;
