@@ -87,6 +87,16 @@ interface QuickStartCard {
   defaultTemplate: Template;
 }
 
+// ★ 2026-07-06 인앱 표시 가능성 (GET /api/cdp/inapp/display-eligibility) — 지원 매트릭스는 백엔드 CT 단일 정의
+interface DisplayEligibility {
+  platforms: Array<{ provider: string; label: string; support: 'auto' | 'manual' | 'unsupported' }>;
+  webSdkLastSeenAt: string | null;
+  webSdkDetected: boolean;
+  canCreateWeb: boolean;
+  warnWeb: boolean;
+  blockReasonWeb: string | null;
+}
+
 interface AvailableVariable {
   key: string;
   label: string;
@@ -217,6 +227,9 @@ export default function InAppMessagesPage() {
   const [recentMessages, setRecentMessages] = useState<MessageRow[]>([]);
   const [scenarioPick, setScenarioPick] = useState<QuickStartScenario | null>(null);
   const [previewMsg, setPreviewMsg] = useState<MessageRow | null>(null);
+  // ★ 2026-07-06 인앱 표시 가능성 — 연동 플랫폼별 지원 + SDK 신호. 표시할 곳 없으면 생성 차단(크레딧 낭비 방지).
+  const [eligibility, setEligibility] = useState<DisplayEligibility | null>(null);
+  const [showDisplayBlock, setShowDisplayBlock] = useState(false);
 
   // AI 생성 진행 상태
   const [aiGenerating, setAiGenerating] = useState(false);
@@ -286,6 +299,23 @@ export default function InAppMessagesPage() {
 
   useEffect(() => { if (channel) loadAll(); }, [channel]);
 
+  // ★ 2026-07-06 표시 가능성 조회 — 진입 즉시 1회. 조회 실패는 조용히(서버 게이트가 최종 방어).
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        const res = await fetch('/api/cdp/inapp/display-eligibility', { headers: authHeaders() });
+        const data = await res.json();
+        if (alive && data.success) setEligibility(data.eligibility);
+      } catch { /* noop */ }
+    })();
+    return () => { alive = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // 웹 인앱 생성 차단 여부 — 판정 로드 전(null)엔 차단하지 않음(서버 게이트 이중 방어)
+  const webBlocked = !!eligibility && !eligibility.canCreateWeb;
+
   // 진입 화면용 — 채널 무관 최근 인앱 목록 (GET /inapp = channel 없으면 전체). 데이터 적응(없으면 섹션 숨김).
   useEffect(() => {
     if (channel) return;
@@ -341,6 +371,8 @@ export default function InAppMessagesPage() {
 
   const handleAIGenerate = async (objective: string, templateHint?: QuickStartScenario, channelOverride?: 'web' | 'app') => {
     if (customerGate.isEmpty) { setShowDataGate(true); return; }
+    // ★ 2026-07-06 표시 가능성 가드 — 웹에 표시할 곳이 없으면 AI 생성(크레딧) 진입 자체를 차단
+    if ((channelOverride || channel || 'web') === 'web' && webBlocked) { setShowDisplayBlock(true); return; }
     if (!objective.trim() && !templateHint) {
       showToast('자연어 목표 또는 빠른 시작 카드 선택 필수', { type: 'warning' });
       return;
@@ -367,6 +399,7 @@ export default function InAppMessagesPage() {
         return;
       }
       if (!data.success) {
+        if (data.code === 'INAPP_DISPLAY_UNAVAILABLE') { setAiGenerating(false); setShowDisplayBlock(true); return; }
         showToast(data.error || 'AI 생성 실패', { type: 'error' });
         setAiGenerating(false);
         return;
@@ -493,6 +526,11 @@ export default function InAppMessagesPage() {
       showToast('혜택 안내 placeholder를 회사 정책에 맞게 직접 작성 후 저장해주세요.', { type: 'warning' });
       return;
     }
+    // ★ 2026-07-06 표시 가능성 가드 — 웹 메시지를 active로 저장(게시)할 때 표시할 곳 없으면 차단 (paused 저장은 허용)
+    if ((editing?.channel === 'app' ? 'app' : 'web') === 'web' && (editing?.status ?? 'active') === 'active' && webBlocked) {
+      setShowDisplayBlock(true);
+      return;
+    }
     try {
       const isUpdate = !!editing!.id;
       const url = isUpdate ? `/api/cdp/inapp/${editing!.id}` : '/api/cdp/inapp';
@@ -526,6 +564,8 @@ export default function InAppMessagesPage() {
         showToast(isUpdate ? '메시지 수정 완료' : '메시지 생성 완료', { type: 'success' });
         setEditing(null);
         await loadAll();
+      } else if (data.code === 'INAPP_DISPLAY_UNAVAILABLE') {
+        setShowDisplayBlock(true);
       } else {
         showToast(data.error || '저장 실패', { type: 'error' });
       }
@@ -745,7 +785,7 @@ export default function InAppMessagesPage() {
               <h2 className="text-sm font-bold text-white">직접 만들기<span className="text-white/40 font-normal"> — 띄울 곳을 고르면 빈 편집기로</span></h2>
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <button onClick={() => setChannel('web')} className="group flex items-center gap-4 bg-gradient-to-br from-violet-500/12 to-fuchsia-500/12 border border-violet-400/25 hover:border-violet-300/55 rounded-2xl p-4 transition-all text-left">
+              <button onClick={() => { if (webBlocked) { setShowDisplayBlock(true); return; } setChannel('web'); }} className="group flex items-center gap-4 bg-gradient-to-br from-violet-500/12 to-fuchsia-500/12 border border-violet-400/25 hover:border-violet-300/55 rounded-2xl p-4 transition-all text-left">
                 <div className="w-16 h-12 rounded-md bg-slate-800/80 border border-white/10 relative shrink-0 overflow-hidden">
                   <div className="h-2.5 bg-white/10 flex items-center gap-0.5 px-1.5"><span className="w-1 h-1 rounded-full bg-white/30" /><span className="w-1 h-1 rounded-full bg-white/30" /></div>
                   <div className="absolute inset-x-2.5 bottom-1.5 top-4 rounded bg-violet-400/30 border border-violet-300/40" />
@@ -753,7 +793,13 @@ export default function InAppMessagesPage() {
                 <div className="min-w-0">
                   <div className="text-sm font-bold text-white flex items-center gap-1.5"><Globe className="w-3.5 h-3.5 text-violet-200" />웹 자사몰 팝업</div>
                   <div className="text-[11px] text-white/55 mt-0.5 leading-tight">모달 · 슬라이드 · 토스트 · 플로팅</div>
-                  <div className="text-[10px] text-emerald-300/80 mt-1">즉시 사용 가능</div>
+                  {webBlocked ? (
+                    <div className="text-[10px] text-amber-300/90 mt-1">표시할 쇼핑몰 연동 필요 — 눌러서 안내 보기</div>
+                  ) : eligibility?.warnWeb ? (
+                    <div className="text-[10px] text-amber-300/80 mt-1">연동됨 — 쇼핑몰에 SDK 설치 후 표시</div>
+                  ) : (
+                    <div className="text-[10px] text-emerald-300/80 mt-1">즉시 사용 가능</div>
+                  )}
                 </div>
               </button>
               <button onClick={() => setChannel('app')} className="group flex items-center gap-4 bg-gradient-to-br from-sky-500/12 to-indigo-500/12 border border-sky-400/25 hover:border-sky-300/55 rounded-2xl p-4 transition-all text-left">
@@ -811,12 +857,12 @@ export default function InAppMessagesPage() {
               <p className="text-xs text-white/50 mb-4">{SCENARIO_VISUAL[scenarioPick].label} — 채널을 고르면 AI가 바로 만들어요</p>
               <div className="grid grid-cols-2 gap-3">
                 <button
-                  onClick={() => { const sc = scenarioPick; setScenarioPick(null); setChannel('web'); if (sc) handleAIGenerate('', sc, 'web'); }}
+                  onClick={() => { if (webBlocked) { setScenarioPick(null); setShowDisplayBlock(true); return; } const sc = scenarioPick; setScenarioPick(null); setChannel('web'); if (sc) handleAIGenerate('', sc, 'web'); }}
                   className="flex flex-col items-center gap-2 bg-violet-500/15 hover:bg-violet-500/25 border border-violet-400/30 rounded-xl p-4 transition-colors"
                 >
                   <Globe className="w-6 h-6 text-violet-200" />
                   <span className="text-sm font-bold text-white">웹 자사몰</span>
-                  <span className="text-[10px] text-white/50">팝업·슬라이드·토스트</span>
+                  <span className="text-[10px] text-white/50">{webBlocked ? '쇼핑몰 연동 필요' : '팝업·슬라이드·토스트'}</span>
                 </button>
                 <button
                   onClick={() => { const sc = scenarioPick; setScenarioPick(null); setChannel('app'); if (sc) handleAIGenerate('', sc, 'app'); }}
@@ -872,6 +918,14 @@ export default function InAppMessagesPage() {
 
         {/* 고객 데이터 없음 — 생성 차단 안내 (진입 화면 공용) */}
         <CustomerDataRequiredModal open={showDataGate} onClose={() => setShowDataGate(false)} />
+        {/* 표시 채널 없음 — 생성 차단 안내 */}
+        {showDisplayBlock && (
+          <InAppDisplayBlockModal
+            reason={eligibility?.blockReasonWeb || null}
+            onGoSettings={() => { setShowDisplayBlock(false); navigate('/cdp-settings'); }}
+            onClose={() => setShowDisplayBlock(false)}
+          />
+        )}
       </div>
     );
   }
@@ -928,6 +982,33 @@ export default function InAppMessagesPage() {
         )}
 
         {customerGate.isEmpty && <CustomerDataRequiredBanner className="mb-4" />}
+
+        {/* ★ 2026-07-06 인앱 표시 채널 상태 — 표시 불가/미설치를 만들기 전에 인지시켜 크레딧 낭비 차단 */}
+        {channel === 'web' && eligibility && (
+          webBlocked ? (
+            <div className="bg-rose-500/10 border border-rose-400/30 rounded-xl p-4 flex flex-col sm:flex-row sm:items-center gap-3">
+              <AlertTriangle className="w-5 h-5 text-rose-300 shrink-0" />
+              <div className="flex-1 text-xs text-rose-200 leading-relaxed">{eligibility.blockReasonWeb}</div>
+              <button onClick={() => navigate('/cdp-settings')} className="shrink-0 px-3 py-2 bg-rose-500/30 hover:bg-rose-500/50 border border-rose-400/30 rounded-lg text-xs font-semibold text-white">쇼핑몰 연동하러 가기</button>
+            </div>
+          ) : eligibility.warnWeb ? (
+            <div className="bg-amber-500/10 border border-amber-400/30 rounded-xl p-4 flex flex-col sm:flex-row sm:items-center gap-3">
+              <AlertTriangle className="w-5 h-5 text-amber-300 shrink-0" />
+              <div className="flex-1 text-xs text-amber-200 leading-relaxed">
+                {eligibility.platforms.filter((p) => p.support !== 'unsupported').map((p) => p.label).join(' · ')} 연동됨 — 아직 쇼핑몰에서 SDK 신호가 감지되지 않았습니다. 쇼핑몰에 SDK 스크립트를 설치해야 만든 메시지가 실제로 표시됩니다.
+                {eligibility.platforms.some((p) => p.support === 'unsupported') && ' (네이버 스마트스토어는 인앱 표시 미지원 — 데이터 연동만)'}
+              </div>
+              <button onClick={() => navigate('/cdp-settings')} className="shrink-0 px-3 py-2 bg-amber-500/25 hover:bg-amber-500/40 border border-amber-400/30 rounded-lg text-xs font-semibold text-white">설치 가이드 보기</button>
+            </div>
+          ) : (
+            <div className="bg-emerald-500/10 border border-emerald-400/20 rounded-xl px-4 py-2.5 flex items-center gap-2 text-[11px] text-emerald-200/90 flex-wrap">
+              <Activity className="w-3.5 h-3.5 shrink-0" />
+              <span>SDK 신호 감지됨{eligibility.webSdkLastSeenAt ? ` — 최근 ${new Date(eligibility.webSdkLastSeenAt).toLocaleString('ko-KR')}` : ''}</span>
+              {eligibility.platforms.length > 0 && <span className="text-white/40">· 연동: {eligibility.platforms.map((p) => p.label).join(', ')}</span>}
+              {eligibility.platforms.some((p) => p.support === 'unsupported') && <span className="text-amber-300/70">· 네이버 스마트스토어는 인앱 표시 미지원(데이터 연동만)</span>}
+            </div>
+          )
+        )}
         {/* ▼ HERO: 메시지 만들기 (자연어 입력 + 빠른 시작) */}
         <div className="bg-gradient-to-br from-violet-500/12 via-fuchsia-500/8 to-indigo-500/12 border border-violet-400/25 rounded-2xl p-5">
           <div className="flex items-center gap-2 mb-3">
@@ -1221,6 +1302,14 @@ export default function InAppMessagesPage() {
       <ConfirmModal state={confirmState} onClose={() => setConfirmState(null)} />
       {/* 고객 데이터 없음 — 생성 차단 안내 */}
       <CustomerDataRequiredModal open={showDataGate} onClose={() => setShowDataGate(false)} />
+      {/* 표시 채널 없음 — 생성 차단 안내 */}
+      {showDisplayBlock && (
+        <InAppDisplayBlockModal
+          reason={eligibility?.blockReasonWeb || null}
+          onGoSettings={() => { setShowDisplayBlock(false); navigate('/cdp-settings'); }}
+          onClose={() => setShowDisplayBlock(false)}
+        />
+      )}
 
       {/* 자세히 분석 모달 (Top CTR 메시지) */}
       {showDetails && (
@@ -2390,4 +2479,33 @@ function BlockEditor({ block, onChange, uploadImage }: { block: any; onChange: (
     default:
       return null;
   }
+}
+
+// ════════════════════════════════════════════════════════════════════
+// ★ 2026-07-06 표시 채널 없음 차단 모달 — 표시할 곳 없는 인앱 생성(크레딧) 사전 차단
+// ════════════════════════════════════════════════════════════════════
+
+function InAppDisplayBlockModal({ reason, onGoSettings, onClose }: { reason: string | null; onGoSettings: () => void; onClose: () => void }) {
+  return (
+    <div className="fixed inset-0 z-[2000] flex items-center justify-center bg-black/70 backdrop-blur-sm px-4">
+      <div className="w-full max-w-md bg-slate-900 border border-white/10 rounded-2xl shadow-2xl p-6" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-start gap-3 mb-3">
+          <div className="w-10 h-10 rounded-xl bg-amber-500/20 border border-amber-400/30 flex items-center justify-center shrink-0">
+            <AlertTriangle className="w-5 h-5 text-amber-300" />
+          </div>
+          <div className="min-w-0">
+            <h3 className="text-base font-bold text-white">인앱 메시지를 표시할 곳이 없습니다</h3>
+            <p className="text-xs text-white/60 mt-1.5 leading-relaxed">
+              {reason || '인앱 메시지를 표시할 수 있는 쇼핑몰 연동이 없습니다. 카페24·고도몰·메이크샵·아임웹 연동 또는 자체 쇼핑몰에 SDK 설치 후 이용할 수 있습니다.'}
+            </p>
+            <p className="text-[11px] text-white/40 mt-2">표시할 곳이 없는 상태에서는 크레딧이 소모되는 생성·게시가 진행되지 않습니다.</p>
+          </div>
+        </div>
+        <div className="flex gap-2 mt-4">
+          <button onClick={onGoSettings} className="flex-1 py-2.5 bg-gradient-to-r from-violet-600 to-fuchsia-600 hover:opacity-90 rounded-lg text-sm font-bold text-white">쇼핑몰 연동하러 가기</button>
+          <button onClick={onClose} className="px-4 py-2.5 rounded-lg border border-white/15 text-sm text-white/70 hover:bg-white/5">닫기</button>
+        </div>
+      </div>
+    </div>
+  );
 }

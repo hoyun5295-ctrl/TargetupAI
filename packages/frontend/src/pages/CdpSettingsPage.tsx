@@ -1861,6 +1861,11 @@ client.newCall(req).execute()`}</pre>
               <span className="text-xs bg-emerald-500/20 text-emerald-300 px-2 py-0.5 rounded-full font-medium">커머스 API</span>
             </div>
 
+            {/* ★ 2026-07-06 인앱 미지원 명확 안내 — 스마트스토어는 스토어 페이지에 스크립트 설치 불가(폐쇄형) */}
+            <div className="mb-4 bg-amber-500/10 border border-amber-400/25 rounded-lg p-3 text-[11px] text-amber-200/90 leading-relaxed">
+              네이버 스마트스토어는 <strong className="text-white/90">주문·구매고객 데이터 동기화만</strong> 지원됩니다. 스마트스토어 페이지에는 스크립트를 설치할 수 없어 <strong className="text-white/90">인앱 메시지(웹 팝업) 표시는 지원되지 않습니다.</strong> 인앱 메시지는 카페24·고도몰·메이크샵·아임웹·자체 쇼핑몰에서 이용할 수 있습니다.
+            </div>
+
             {naverStatus?.connected ? (
               <div className="space-y-3">
                 <div className="bg-emerald-500/10 border border-emerald-400/30 rounded-lg p-4 flex items-start gap-3">
@@ -2049,6 +2054,27 @@ client.newCall(req).execute()`}</pre>
                 <div className="text-[10px] text-white/30 italic">Client Secret은 한줄로 서버에 안전 보관되며 화면에 다시 표시되지 않습니다.</div>
               </div>
             )}
+
+            {/* ★ 2026-07-06 메이크샵 SDK 설치 (방문·장바구니 수집 + 인앱 메시지 표시) — 주문 API와 별개. 메이크샵은 자동삽입 불가라 디자인 편집 복붙. */}
+            <div className="mt-5 pt-5 border-t border-white/10 space-y-4">
+              <div className="flex items-center gap-2">
+                <Code2 className="w-4 h-4 text-violet-300" />
+                <h3 className="text-sm font-bold text-white">SDK 설치 — 방문·장바구니 수집 + 인앱 메시지 표시</h3>
+              </div>
+              <div className="text-[11px] text-white/50 -mt-2">회원·주문 동기화(위)와 별개입니다. 방문·장바구니 수집과 <strong className="text-white/80">인앱 메시지 표시</strong>는 쇼핑몰 페이지에 아래 스크립트가 설치돼야 작동합니다. 메이크샵 관리자 &gt; 개별디자인(디자인 편집)에서 모든 페이지에 공통 적용되는 상단 HTML(&lt;head&gt;)에 붙여넣으세요. PC·모바일 디자인 양쪽 모두 필요합니다.</div>
+              {(() => {
+                const makeshopHead = `<script src="https://app.hanjul.ai/sdk/v0.3.8/hanjul.min.js" data-hjl-key="${usage?.public_key || 'hjl_발급받은_공개키'}" async></script>`;
+                return (
+                  <div className="space-y-3">
+                    <pre className="bg-slate-950 border border-white/10 rounded-xl p-3 text-[11px] text-emerald-200 overflow-x-auto whitespace-pre-wrap break-all">{makeshopHead}</pre>
+                    <button type="button" onClick={() => copyText(makeshopHead, '메이크샵 설치 스크립트')} className="px-3 py-2 bg-indigo-500/40 hover:bg-indigo-500/60 text-white rounded-lg text-xs font-medium inline-flex items-center gap-1.5">
+                      <Copy className="w-3.5 h-3.5" />복사
+                    </button>
+                    <div className="text-[10px] text-amber-300/70 italic">설치 후 "수집 허용 도메인"에 쇼핑몰 도메인을 등록해야 수집·인앱 표시가 시작됩니다.</div>
+                  </div>
+                );
+              })()}
+            </div>
           </div>
         )}
 
@@ -2106,6 +2132,27 @@ client.newCall(req).execute()`}</pre>
                 <div className="text-[10px] text-white/30 italic">Data source — 아임웹 Open API (openapi.imweb.me). 회원·주문·수신동의 읽기 전용.</div>
               </div>
             )}
+
+            {/* ★ 2026-07-06 아임웹 SDK 설치 (방문·장바구니 수집 + 인앱 메시지 표시) — 주문 API와 별개. 아임웹은 자동삽입 불가라 코드 삽입 복붙. */}
+            <div className="mt-5 pt-5 border-t border-white/10 space-y-4">
+              <div className="flex items-center gap-2">
+                <Code2 className="w-4 h-4 text-violet-300" />
+                <h3 className="text-sm font-bold text-white">SDK 설치 — 방문·장바구니 수집 + 인앱 메시지 표시</h3>
+              </div>
+              <div className="text-[11px] text-white/50 -mt-2">회원·주문 동기화(위)와 별개입니다. 방문·장바구니 수집과 <strong className="text-white/80">인앱 메시지 표시</strong>는 사이트에 아래 스크립트가 설치돼야 작동합니다. 아임웹 관리자 화면의 코드 삽입(HEAD 영역)에 붙여넣으세요.</div>
+              {(() => {
+                const imwebHead = `<script src="https://app.hanjul.ai/sdk/v0.3.8/hanjul.min.js" data-hjl-key="${usage?.public_key || 'hjl_발급받은_공개키'}" async></script>`;
+                return (
+                  <div className="space-y-3">
+                    <pre className="bg-slate-950 border border-white/10 rounded-xl p-3 text-[11px] text-emerald-200 overflow-x-auto whitespace-pre-wrap break-all">{imwebHead}</pre>
+                    <button type="button" onClick={() => copyText(imwebHead, '아임웹 설치 스크립트')} className="px-3 py-2 bg-indigo-500/40 hover:bg-indigo-500/60 text-white rounded-lg text-xs font-medium inline-flex items-center gap-1.5">
+                      <Copy className="w-3.5 h-3.5" />복사
+                    </button>
+                    <div className="text-[10px] text-amber-300/70 italic">설치 후 "수집 허용 도메인"에 사이트 도메인을 등록해야 수집·인앱 표시가 시작됩니다.</div>
+                  </div>
+                );
+              })()}
+            </div>
           </div>
         )}
 

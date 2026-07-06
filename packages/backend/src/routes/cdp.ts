@@ -73,6 +73,8 @@ import {
 } from '../utils/inapp-message';
 // ★ D215+ (2026-05-25) 인앱 메시지 압도적 강화 CT-77~84
 import { generateInAppMessagePackage, listQuickStartCards } from '../utils/inapp-ai-generator';
+// ★ 2026-07-06 인앱 표시 가능성 게이트 — 표시할 곳 없는 고객의 크레딧 낭비 차단 (네이버 단독 등)
+import { getInAppDisplayEligibility } from '../utils/inapp-display-eligibility';
 import { countSegment, describeSegment } from '../utils/inapp-segment-matcher';
 import { buildPreviewCustomers, renderInAppMessage, listAvailableVariables, extractUsedInAppVariables, getInAppCustomerForBrowser } from '../utils/inapp-personalization';
 import { createVariant, listVariantsWithStats, declareWinnerIfReady } from '../utils/inapp-variant-optimizer';
@@ -1079,6 +1081,19 @@ router.get('/inapp/stats', async (req: Request, res: Response) => {
   }
 });
 
+// ★ 2026-07-06 인앱 표시 가능성 조회 — 상태 패널 + 프론트 생성 가드 (연동 플랫폼별 지원 + SDK 신호)
+router.get('/inapp/display-eligibility', async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+    const eligibility = await getInAppDisplayEligibility(companyId);
+    return res.json({ success: true, eligibility });
+  } catch (err: any) {
+    console.error('[CDP /inapp/display-eligibility] 오류:', err);
+    return res.status(500).json({ success: false, error: err?.message || '조회 실패' });
+  }
+});
+
 router.post('/inapp', async (req: Request, res: Response) => {
   try {
     const companyId = req.user?.companyId;
@@ -1095,6 +1110,14 @@ router.post('/inapp', async (req: Request, res: Response) => {
 
     // ★ 종량제: 인앱 게시(확정) = 15, status=active 저장 시 최초 1회(멱등 inapp-publish:messageId). paused/archived 저장은 미과금.
     const willPublish = (req.body?.status ?? 'active') === 'active';
+    // ★ 2026-07-06 표시 가능성 게이트 — 표시할 곳 없는 웹 인앱 게시 = 크레딧 차감 전 차단 (돈 낭비 방지, Harold 확정)
+    //   channel 판정은 createInAppMessage와 동일('app' 외 전부 'web'). 게이트 실패는 격리 — 판정 오류로 게시 자체를 막지 않는다.
+    if (willPublish && (req.body?.channel === 'app' ? 'app' : 'web') === 'web') {
+      const elig = await getInAppDisplayEligibility(companyId).catch(() => null);
+      if (elig && !elig.canCreateWeb) {
+        return res.status(400).json({ success: false, error: elig.blockReasonWeb, code: 'INAPP_DISPLAY_UNAVAILABLE' });
+      }
+    }
     if (willPublish) await checkCredit(companyId, getCreditCost('inapp-publish'));
     const message = await createInAppMessage(companyId, userId, req.body);
     if (message?.status === 'active') {
@@ -1127,6 +1150,21 @@ router.put('/inapp/:id', async (req: Request, res: Response) => {
     if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
     if (userType !== 'company_admin') {
       return res.status(403).json({ success: false, error: '수정은 회사 관리자만 가능합니다.' });
+    }
+    // ★ 2026-07-06 표시 가능성 게이트 — 웹 메시지를 active로 저장(게시/재개)할 때만.
+    //   paused/archived 저장은 통과(중단은 언제나 허용). 판정 오류는 격리(수정 자체를 막지 않음).
+    if (req.body?.status === 'active') {
+      const chRes = await query(
+        `SELECT channel FROM cdp_inapp_messages WHERE id = $1::uuid AND company_id = $2::uuid`,
+        [req.params.id, companyId],
+      ).catch(() => null);
+      const msgChannel = chRes?.rows?.[0]?.channel === 'app' ? 'app' : 'web';
+      if (msgChannel === 'web') {
+        const elig = await getInAppDisplayEligibility(companyId).catch(() => null);
+        if (elig && !elig.canCreateWeb) {
+          return res.status(400).json({ success: false, error: elig.blockReasonWeb, code: 'INAPP_DISPLAY_UNAVAILABLE' });
+        }
+      }
     }
     const message = await updateInAppMessage(companyId, req.params.id, req.body);
     if (!message) return res.status(404).json({ success: false, error: '메시지를 찾을 수 없습니다.' });
@@ -1260,6 +1298,12 @@ router.post('/inapp/ai-generate', async (req: Request, res: Response) => {
   const auth = await ensureInAppAdmin(req, res);
   if (!auth) return;
   try {
+    // ★ 2026-07-06 표시 가능성 게이트 — AI 생성도 크레딧 소모라, 표시할 곳이 전혀 없으면(SDK 신호 0 + 표시 지원 연동 0) 차단.
+    //   앱 SDK·자체몰 설치 회사는 SDK 신호로 통과. 판정 오류는 격리(생성을 막지 않음).
+    const elig = await getInAppDisplayEligibility(auth.companyId).catch(() => null);
+    if (elig && !elig.canCreateWeb) {
+      return res.status(400).json({ success: false, error: elig.blockReasonWeb, code: 'INAPP_DISPLAY_UNAVAILABLE' });
+    }
     const { objective, templateHint } = req.body;
     const pkg = await generateInAppMessagePackage({
       companyId: auth.companyId,
