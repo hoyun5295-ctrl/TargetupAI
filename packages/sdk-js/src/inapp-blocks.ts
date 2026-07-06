@@ -215,21 +215,44 @@ function renderEyebrow(b: ContentBlock, ctx: BlockRenderContext): HTMLElement | 
   const { theme } = ctx;
   const tone = b.tone || 'accent';
   const color = tone === 'on_media' ? theme.onMedia : tone === 'neutral' ? theme.textSecondary : theme.accent;
+
+  // 디자인 언어 2.1 — plain(모노 에디토리얼): 칩 없이 자간 넓은 민무늬 라벨
+  if (tone === 'accent' && theme.eyebrowVariant === 'plain') {
+    return el('div', {
+      alignSelf: 'flex-start', fontSize: '10.5px', fontWeight: '700', letterSpacing: '0.16em',
+      color: theme.textSecondary, lineHeight: '1.2',
+    }, text);
+  }
+
   const chip = el('div', {
     display: 'inline-flex', alignItems: 'center', gap: '5px', alignSelf: 'flex-start',
     fontSize: '11px', fontWeight: '700', letterSpacing: '0.05em',
     color, lineHeight: '1.2',
   }, text);
   if (tone === 'accent') {
-    Object.assign(chip.style, {
-      background: theme.accentSoft, padding: '5px 11px', borderRadius: '999px',
-      boxShadow: `inset 0 0 0 1px ${withAlpha(theme.accent, 0.14)}`,
-    });
-    // 앞에 작은 점 하나 — 라벨 칩의 생동감 (텍스트보다 먼저 삽입)
-    const dot = el('span', {
-      width: '4px', height: '4px', borderRadius: '999px', background: theme.accent, flexShrink: '0',
-    });
-    chip.insertBefore(dot, chip.firstChild);
+    if (theme.eyebrowVariant === 'chip_solid') {
+      // 브랜드 쇼케이스 — accent 솔리드 칩
+      Object.assign(chip.style, {
+        background: theme.accent, color: theme.accentText,
+        padding: '5px 11px', borderRadius: '999px',
+        boxShadow: `0 4px 12px ${withAlpha(theme.accent, 0.35)}`,
+      });
+      const dot = el('span', {
+        width: '4px', height: '4px', borderRadius: '999px',
+        background: theme.accentText, opacity: '0.9', flexShrink: '0',
+      });
+      chip.insertBefore(dot, chip.firstChild);
+    } else {
+      Object.assign(chip.style, {
+        background: theme.accentSoft, padding: '5px 11px', borderRadius: '999px',
+        boxShadow: `inset 0 0 0 1px ${withAlpha(theme.accent, 0.14)}`,
+      });
+      // 앞에 작은 점 하나 — 라벨 칩의 생동감 (텍스트보다 먼저 삽입)
+      const dot = el('span', {
+        width: '4px', height: '4px', borderRadius: '999px', background: theme.accent, flexShrink: '0',
+      });
+      chip.insertBefore(dot, chip.firstChild);
+    }
   }
   return chip;
 }
@@ -240,14 +263,25 @@ const BODY_SIZES: Record<string, string> = { sm: '13px', md: '14px', lg: '15.5px
 function renderHeadline(b: ContentBlock, ctx: BlockRenderContext): HTMLElement | null {
   const text = ctx.replaceVars(String(b.text || '')).trim();
   if (!text) return null;
+  const { theme } = ctx;
   const xl = b.size === 'xl';
-  return el('div', {
-    fontWeight: xl ? '800' : '700',
+  const weight = xl ? Math.max(800, theme.headlineWeight) : theme.headlineWeight;
+  const head = el('div', {
+    fontWeight: String(weight),
     fontSize: HEADLINE_SIZES[String(b.size)] || '19px',
-    letterSpacing: xl ? '-0.02em' : '-0.01em',
+    letterSpacing: xl || weight >= 800 ? '-0.02em' : '-0.01em',
     lineHeight: '1.28',
-    color: ctx.theme.textPrimary,
+    color: theme.textPrimary,
   }, text);
+  if (!theme.headlineAccentBar) return head;
+  // 브랜드 쇼케이스 — 헤드라인 아래 accent 짧은 바
+  const wrap = el('div');
+  wrap.appendChild(head);
+  wrap.appendChild(el('div', {
+    width: '26px', height: '4px', borderRadius: '999px', marginTop: '9px',
+    background: `linear-gradient(90deg, ${theme.accent} 0%, ${shadeHex(theme.accent, 30)} 100%)`,
+  }));
+  return wrap;
 }
 
 function renderBody(b: ContentBlock, ctx: BlockRenderContext): HTMLElement | null {
@@ -264,16 +298,24 @@ function renderBullets(b: ContentBlock, ctx: BlockRenderContext): HTMLElement | 
   const items = Array.isArray(b.items) ? b.items.filter((it: any) => it && String(it.text || '').trim()) : [];
   if (items.length === 0) return null;
   const { theme } = ctx;
-  const list = el('div', { display: 'flex', flexDirection: 'column', gap: '8px' });
+  const mono = theme.bulletVariant === 'mono';
+  const list = el('div', { display: 'flex', flexDirection: 'column', gap: mono ? '9px' : '8px' });
   items.slice(0, 4).forEach((it: any) => {
-    const row = el('div', { display: 'flex', alignItems: 'flex-start', gap: '8px' });
-    const ic = el('span', {
-      display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-      width: '18px', height: '18px', borderRadius: '999px',
-      background: withAlpha(theme.accent, 0.14), marginTop: '1px', flexShrink: '0',
-    });
-    ic.appendChild(iconSvg(String(it.icon || 'check'), theme.accent, 12));
-    row.appendChild(ic);
+    const row = el('div', { display: 'flex', alignItems: 'flex-start', gap: mono ? '9px' : '8px' });
+    if (mono) {
+      // 모노 에디토리얼 — 배지 없이 잉크색 아이콘만
+      const ic = iconSvg(String(it.icon || 'check'), theme.textPrimary, 14);
+      ic.style.marginTop = '2px';
+      row.appendChild(ic);
+    } else {
+      const ic = el('span', {
+        display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+        width: '18px', height: '18px', borderRadius: '999px',
+        background: withAlpha(theme.accent, 0.14), marginTop: '1px', flexShrink: '0',
+      });
+      ic.appendChild(iconSvg(String(it.icon || 'check'), theme.accent, 12));
+      row.appendChild(ic);
+    }
     row.appendChild(el('div', {
       fontSize: '13px', lineHeight: '1.45', color: theme.textPrimary,
     }, ctx.replaceVars(String(it.text))));
@@ -291,7 +333,7 @@ function renderBenefit(b: ContentBlock, ctx: BlockRenderContext): HTMLElement | 
     padding: '13px 18px 13px 14px',
     background: `linear-gradient(135deg, ${withAlpha(theme.accent, 0.09)} 0%, ${withAlpha(theme.accent, 0.16)} 100%)`,
     border: `1.5px dashed ${withAlpha(theme.accent, 0.45)}`,
-    borderRadius: '14px',
+    borderRadius: `${theme.innerRadius}px`,
     color: theme.textPrimary,
   });
   // 양측 노치 (티켓 펀치홀 — 면 색으로 구멍처럼)
@@ -322,7 +364,7 @@ function renderCountdown(b: ContentBlock, ctx: BlockRenderContext): HTMLElement 
   const { theme } = ctx;
   const box = el('div', {
     display: 'flex', alignItems: 'center', gap: '9px',
-    padding: '11px 13px', borderRadius: '14px',
+    padding: '11px 13px', borderRadius: `${theme.innerRadius}px`,
     background: theme.surfaceElevated, color: theme.textPrimary,
     boxShadow: `inset 0 0 0 1px ${theme.border}`,
   });
@@ -414,7 +456,7 @@ function renderProduct(b: ContentBlock, ctx: BlockRenderContext): HTMLElement | 
   const { theme } = ctx;
   const card = el('div', {
     display: 'flex', alignItems: 'center', gap: '12px',
-    padding: '11px', borderRadius: '16px',
+    padding: '11px', borderRadius: `${theme.innerRadius + 2}px`,
     background: theme.surfaceElevated, border: `1px solid ${theme.border}`,
     boxShadow: '0 2px 8px rgba(0,0,0,0.04)',
   });
@@ -442,10 +484,12 @@ function renderProduct(b: ContentBlock, ctx: BlockRenderContext): HTMLElement | 
 }
 
 function renderDivider(_b: ContentBlock, ctx: BlockRenderContext): HTMLElement {
-  // 양끝이 스며드는 페이드 구분선
+  // fade = 양끝이 스며드는 구분선 / solid = 헤어라인 (모노 에디토리얼·브랜드)
   return el('div', {
     height: '1px', width: '100%',
-    background: `linear-gradient(90deg, transparent 0%, ${ctx.theme.border} 18%, ${ctx.theme.border} 82%, transparent 100%)`,
+    background: ctx.theme.dividerVariant === 'solid'
+      ? ctx.theme.border
+      : `linear-gradient(90deg, transparent 0%, ${ctx.theme.border} 18%, ${ctx.theme.border} 82%, transparent 100%)`,
   });
 }
 
@@ -467,28 +511,25 @@ function renderCtaGroup(b: ContentBlock, ctx: BlockRenderContext): HTMLElement |
     const isPrimary = style === 'primary';
     const isGhost = style === 'ghost';
     const isTertiary = style === 'tertiary';
-    // primary = 세로 그라데이션(accent → 짙은 accent) + 근접/원거리 2중 그림자 — 눌리는 입체감
-    const primaryBg = `linear-gradient(180deg, ${shadeHex(theme.accent, 6)} 0%, ${shadeHex(theme.accent, -12)} 100%)`;
-    const primaryShadow = `0 1px 2px ${withAlpha(shadeHex(theme.accent, -40), 0.3)}, 0 8px 22px ${withAlpha(theme.accent, 0.38)}, inset 0 1px 0 rgba(255,255,255,0.18)`;
-    const primaryShadowHover = `0 2px 4px ${withAlpha(shadeHex(theme.accent, -40), 0.3)}, 0 12px 28px ${withAlpha(theme.accent, 0.48)}, inset 0 1px 0 rgba(255,255,255,0.18)`;
+    // 디자인 언어 2.1 — primary 면/글자/그림자/모서리는 테마 토큰이 완성한 값 사용
+    const primaryShadow = theme.buttonPrimaryShadow;
     const node = el('button', {
       cursor: 'pointer', fontFamily: FONT_STACK,
-      padding: isGhost ? '9px 11px' : '13px 20px',
-      borderRadius: '14px',
+      padding: isGhost ? '9px 11px' : theme.buttonRadius >= 999 ? '13px 22px' : '13px 20px',
+      borderRadius: `${theme.buttonRadius}px`,
       fontSize: '14px', fontWeight: isPrimary ? '800' : '700',
       letterSpacing: '-0.01em', whiteSpace: 'nowrap', textAlign: 'center',
       width: stack ? '100%' : 'auto',
       transition: 'transform 0.16s cubic-bezier(0.22,1,0.36,1), box-shadow 0.2s ease, background 0.2s ease, filter 0.2s ease',
       border: isTertiary ? `1px solid ${theme.border}` : 'none',
-      background: isPrimary ? primaryBg : isGhost ? 'transparent' : theme.surfaceElevated,
-      color: isPrimary ? theme.accentText : isGhost ? theme.accent : theme.textPrimary,
+      background: isPrimary ? theme.buttonPrimaryBg : isGhost ? 'transparent' : theme.surfaceElevated,
+      color: isPrimary ? theme.buttonPrimaryText : isGhost ? theme.buttonGhostColor : theme.textPrimary,
       boxShadow: isPrimary ? primaryShadow : isTertiary ? 'none' : `inset 0 0 0 1px ${theme.border}`,
     }, ctx.replaceVars(btn.label));
-    // 마이크로 인터랙션 — hover 살짝 떠오름 + 그림자 확장, press 눌림
+    // 마이크로 인터랙션 — hover 살짝 떠오름 + 밝기 상승, press 눌림
     node.addEventListener('mouseenter', () => {
       node.style.transform = 'translateY(-1px)';
-      if (isPrimary) node.style.boxShadow = primaryShadowHover;
-      else if (!isGhost) node.style.filter = 'brightness(1.04)';
+      if (!isGhost) node.style.filter = 'brightness(1.05)';
     });
     node.addEventListener('mouseleave', () => {
       node.style.transform = 'none';

@@ -19,7 +19,8 @@
 
 import { renderLiquid, flattenCustomerForLiquid, detectLiquidSyntax } from './liquid-templating';
 import { query } from '../config/database';
-import type { GeneratedInAppMessage } from './inapp-ai-generator';
+import type { GeneratedInAppMessage, SegmentConditions } from './inapp-ai-generator';
+import { matchCustomersBySegment, isEmptySegment } from './inapp-segment-matcher';
 
 // ════════════════════════════════════════════════════════════════════
 // 타입
@@ -27,8 +28,11 @@ import type { GeneratedInAppMessage } from './inapp-ai-generator';
 
 export interface PreviewCustomer {
   id: string;
-  label: '신규' | '일반' | 'VIP';
+  /** '타겟'(세그먼트 최상단 실고객) / 'VIP' / '일반' / '신규' */
+  label: string;
   customer: Record<string, any>;
+  /** true = 실고객이 아닌 가상 예시 (고객 DB 0건 회사 폴백) — UI에 "가상 예시" 표기 의무 */
+  is_sample?: boolean;
 }
 
 export interface AvailableVariable {
@@ -219,6 +223,41 @@ export async function buildPreviewCustomers(companyId: string): Promise<PreviewC
   return samples;
 }
 
+/**
+ * 편집 미리보기용 실고객 샘플 — 하드코딩 샘플 영구 대체 (2026-07-07(2)).
+ * - segment_conditions가 있으면 CT-78로 타겟 최상단(최근 활동순) 실고객 1건을 '타겟' 라벨 최우선 배치
+ * - 이어서 등급별 실고객 샘플 (buildPreviewCustomers — 없을 때만 가상 폴백 + is_sample 표기)
+ * - 세그먼트 조회 실패 = 등급 샘플만 (미리보기가 죽지 않게 폴백)
+ */
+export async function buildEditorPreviewCustomers(
+  companyId: string,
+  segmentConditions?: SegmentConditions | null
+): Promise<PreviewCustomer[]> {
+  const base = await buildPreviewCustomers(companyId);
+  if (!companyId || !segmentConditions || isEmptySegment(segmentConditions)) return base;
+
+  try {
+    const ids = await matchCustomersBySegment(companyId, segmentConditions, 1);
+    if (ids.length === 0) return base; // 타겟 0건 = 등급 샘플만 (자동 완화 X — 카운트 UI가 0건을 별도 표시)
+    const r = await query(
+      `SELECT id, name, grade, phone, points, region, recent_purchase_store, recent_purchase_date,
+              total_purchase_amount, purchase_count, last_activity_at, cart_add_count_30d
+       FROM customers
+       WHERE company_id = $1::uuid AND id = $2::uuid LIMIT 1`,
+      [companyId, ids[0]]
+    );
+    if (r.rows.length === 0) return base;
+    const target: PreviewCustomer = {
+      id: String(r.rows[0].id),
+      label: '타겟',
+      customer: enrichCustomerForPreview(r.rows[0]),
+    };
+    return [target, ...base.filter((b) => b.id !== target.id)].slice(0, 4);
+  } catch {
+    return base;
+  }
+}
+
 function enrichCustomerForPreview(row: any): Record<string, any> {
   const lastPurchase = row.recent_purchase_date ? new Date(row.recent_purchase_date) : null;
   const daysAgo = lastPurchase ? Math.floor((Date.now() - lastPurchase.getTime()) / (1000 * 60 * 60 * 24)) : 999;
@@ -244,6 +283,7 @@ function buildFallbackPreviewCustomers(): PreviewCustomer[] {
     {
       id: 'preview-vip',
       label: 'VIP',
+      is_sample: true,
       customer: {
         name: '김민수',
         grade: 'VIP',
@@ -261,6 +301,7 @@ function buildFallbackPreviewCustomers(): PreviewCustomer[] {
     {
       id: 'preview-normal',
       label: '일반',
+      is_sample: true,
       customer: {
         name: '이서연',
         grade: '일반',
@@ -278,6 +319,7 @@ function buildFallbackPreviewCustomers(): PreviewCustomer[] {
     {
       id: 'preview-new',
       label: '신규',
+      is_sample: true,
       customer: {
         name: '정지훈',
         grade: '신규',

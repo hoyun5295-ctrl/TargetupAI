@@ -37,6 +37,17 @@
 
 > **회전 룰:** 완료(★배포완료) 엔트리는 원문을 archive/TASKS_YYYY-MM.md로 이동 + INDEX 등재하고, 아래 "최근 완료 인덱스"에 1줄만 남긴다. 30KB 초과 = 회전 미이행 — 즉시 회전.
 
+### 🟢 2026-07-07 — 인앱/이메일/DM 대개편 6종 + hlj.kr 단축링크 라이브 + 인앱 디자인 2.0 (★DDL 5컬럼 실행완료·hlj.kr 서버배선 라이브 / frontend·SDK build+deploy 잔여)
+> **① 이메일 미수신자 재발송**: "미오픈 SMS"→"미수신자 재발송"(이메일 무료 primary + SMS 유료 secondary). 자식 캠페인(원본 통계 무손상·완성게이트 우회로 크레딧 재부과 0)·재발송 1회 한도·수신거부/반송 제외·자식은 카피학습 코퍼스 skip(이중계상 방지). DDL `email_campaigns.parent_campaign_id·resend_generation`.
+> **② 요금제 변경 반복노출 근본수정**: 접속마다 "베이직 변경" 모달 재발 = localStorage 비교 방식 취약 → 서버 `companies.plan_notified_code`(DDL) + my-plan pending 판정(NULL=조용히 초기화) + POST /plan-change/ack. 계정당 1회·브라우저 무관. Dashboard localStorage 효과 폐기.
+> **③ 인앱 표시 가능성 게이트**: 네이버 스마트스토어=폐쇄형이라 인앱 영구 미지원(데이터 연동만) 명확 안내 + 표시 가능 채널 0이면 생성/게시/AI생성 크레딧 차감 전 차단(INAPP_DISPLAY_UNAVAILABLE). CT `inapp-display-eligibility`(company_integrations active + cdp_events sdk 30일 신호). 메이크샵·아임웹 SDK 설치 가이드 추가. 인앱=company+channel 단위(몰별 타겟팅 없음).
+> **④ hlj.kr DM 단축링크 (★서버 배선 라이브)**: 개인화 URL 75자→`hlj.kr/<8자>` 22자(SMS 90byte 유지=LMS 승격 방지 원가절감). 302 겉껍질(추적·개인화·발송 무변경)+발급 실패 시 긴 링크 폴백. DDL `dm_recipient_tokens.short_code`. 서버 DNS(A=58.227.193.62)+nginx(/api/dm/v/s)+certbot SSL+.env DM_SHORT_LINK_BASE 라이브(https 302 실측). GET /api/dm/v/s/:code.
+> **⑤ DM 추적 강화 5건 + 인앱 통계 절충안 + CSV 3종**: 구매전환(7일 purchases)·미열람자 재발송·재열람/기기 공유신호(dm_views open_count·seen_anon_ids DDL)·열람시간대·섹션이탈 / 인앱 절충안=식별고객 목록+익명 합산(buildIdentifiedViewers, GET /inapp/viewers) / 공용 CT `csv-download`(BOM)로 이메일 이력·DM 추적·인앱 CSV. 전부 격리 try/catch.
+> **⑥ 인앱 디자인 2.0 (SDK v0.3.9·브레이즈급)**: 타이포(Pretendard 700/800)·그라데이션 면+3중그림자+링·글래스 백드롭blur·스프링 모션·CTA/쿠폰티켓/카운트다운 세그먼트/SVG닫기/플로팅·safe-area. 렌더러+빌더 미리보기 1:1. v0.3.9 신설+v0.3.8 제자리 갱신(설치 몰 자동 반영·재설치 불필요), 스니펫 7곳 갱신. shadeHex/accentSoft/surfaceBg/ring 토큰 추가(기존 의미 불변).
+> **검증**: SDK 115/115·backend 312/312·sdk/backend/frontend tsc 0·금지패턴 0. **DDL 5컬럼 서버 실행완료**. **잔여**: tp-push + frontend·company-frontend `build:safe`(새 SDK/프론트 dist) + `pm2 reload targetup-backend`. 배포후 실측(재발송 1건·요금제 모달 소멸·인앱 게이트·hlj.kr 문자링크·CSV·인앱 디자인). 상세 [archive/TASKS_2026-07.md](archive/TASKS_2026-07.md) · [[project_2026_0707_inapp_email_dm_overhaul]].
+
+---
+
 ### 🟢 2026-07-06 — 운영 버그 5건 근본수정 (★전체 배포완료 / Harold 운영검증 대기)
 > **① 발송통계 성공→실패 재발 (backend)**: 통신사 리포트 지연(최대 48h) 건이 campaign-lifecycle 120분 "대기→실패 변환"으로 굳고 6h markFinalized+재대조 필터(합<적재) 사각에서 영구 오표시(베네통·아이디룩 실측). 변환 2곳 삭제 — 마감은 기존 3겹(48h sweeper/6h 게이트/72h 탈출구), 환불은 실패 확정분만. **복구 UPDATE 897건(result_final=false, 6/1↑) 실행완료** → 72h 탈출구가 실측 재확정. 배포 후 UPDATE 재실행(멱등).
 > **② 080 수신거부 자동등록 (backend)**: user 오버라이드 오타(8700)+fallback LIMIT1이 auto_sync=false 회사로 true 회사 가림(psy5868). user+company **합집합** 매칭(공유번호 정식 지원)+auto_sync WHERE화+매칭0 진단로그+발신자 로그. 삭제 격리는 기존 충족. [[feedback_080_shared_number_policy]].
@@ -67,28 +78,18 @@
 
 ---
 
-### 🟢 2026-07-03 — 관제탑 재설계 v2 + 사용구분 게이팅 + 전 채널 학습 루프 + 레거시 SSL 무료전환
-> **① 관제탑 재설계 v2 (★완료·문서만·tp-push 대기)**: STATUS 736KB→16.7KB, 상시 로드=CLAUDE.md+STATUS.md 둘뿐(doc_routing/doc_ownership 룰 신설). 3계층 라우팅+archive/INDEX.md(증상어 177행). `scripts/harness-check.sh` 기계 검증 7종 + PostToolUse 훅 등록(.claude/settings.json, BOM 제거 완료). 백업=`status/_backup-20260703-관제탑재설계전/`. 상세 [[project_2026_0703_control_tower_redesign]].
-> **② 사용구분 게이팅 (코드완료·배포 진행)**: `companies.usage_type`(web/agent/both)+`company_agent_ids` DDL 실행완료. 에이전트 전용 계정=카카오 템플릿 관리만(4경로 게이팅: 라우트 회수/랜딩/app 403/알림톡 탭). 슈퍼관리자 사용구분 UI+발송ID 매핑. 상세 [[project_2026_0703_legacy_server_decommission]].
-> **③ 전 채널 학습 루프 Phase1~4 (코드완료·tsc0·테스트16/16·배포 진행)**: P1 DM(두뇌주입+발송기록+열람환류) / P2 KAKAO(insertAlimtalkQueue+브랜드 CT-12, **중복 가드 fix 재배포 필요**) / P3=Gap5 2층(cold-start 클릭횟수 반영 v1.1-cold + customer_send_stats 분모 — TS·벌크 SQL 두 벌 동일 의무) / P4 검색기 타사원문 차단. **Gap4(예측→타겟)는 영구 금지** [[feedback_prediction_never_selects_target]]. 상세 [[project_2026_0703_all_channel_learning_loop]].
-> **④ 레거시 event-admin SSL 유료→무료 ZeroSSL 자동갱신 (★검증완료)**: 연 99,000원 절감. 가비아 인증서 환불 문의 잔여(2일차 미사용). 상세 [[reference_event_admin_invitobiz_cert_token]].
-> **⑤ 성과리포트 고객 축(코드완료·tsc0·미배포)**: 등급×전채널 성과 표 + 수신 고객 정밀 attribution(여정·DM customer_id) + EMAIL/DM 채널 합류 + explain audience 주입 + PDF 절 2개. 신규 CT `performance-customer-axis(-core)` + endpoint `customer-axis`. 설계=docs/superpowers/specs/2026-07-03-performance-customer-axis-design.md. dm_recipient_tokens SCHEMA.md 실측 등재.
-> **⑥ 카페24 공식 앱 — 심사요청 완료 ★**: 앱 등록·수신부(X-API-Key+event_no)·금액 fix(firstPositiveAmount)·gyunoo83 실주문(앞 세션) + 이번 세션 심사 완주 A~E — 앱 실행 랜딩 `/cafe24/launch`(**App URL=hanjul.ai/cafe24/launch, app.hanjul.ai 아님 — nginx hanjul.ai=frontend·app.hanjul.ai=company-frontend**) + FREE 계정 OAuth 연동 허용 + scripttags 자동삽입(cafe24-scripttag CT; **API버전 2026-03-01·src CORS는 backend `/api/cafe24/sdk/:version` 서빙·display_location ALL 수용**) + SDK `?k=` v0.3.8 + `/status` active-only fix + 판매정보/결제(무료)/고시 → 심사요청 클릭. 잔여: Privacy 권한 문의(spec §F)·page_view 몰 도메인 cdp_allowed_origins 자동허용 후속. 상세 [[project_2026_0703_cafe24_review_godo_integration]]·[[project_2026_0703_cafe24_app_store_integration]].
-> **⑧ 고도몰(NHN커머스) Open API 주문 연동 — 실증 완료 ★배포완료**: partner_key(제휴사=팝폰, env `GODO_PARTNER_KEY` 세팅완료)+key(쇼핑몰별 사용자키) 둘 다 필수. gyunoo8321 사용자키로 **연결 검증(Order_Search) 통과·active**(로그 00:09 credentials/connect/status 200 — 깡통 테스트몰이라 주문 0은 정상). 연동상태 검증 fix(save=pending·verify 성공만 active+connected_at, 6원칙②) + 고도몰 카드 SDK 블록(치환코드 {=gSess.memNo} 복붙) + provider 그리드 브랜드아이콘 재디자인 배포. 고도몰=스크립트삽입 API 없어 SDK는 스킨 수동삽입. **이연(실 고객사 시 처리)**: 고도몰 SDK(행동·회원) 실측 + turnkey gap(고도몰 카드 공개키발급·수집허용도메인 UI — 미등록 시 page_view 403). 상세 [[project_2026_0703_cafe24_review_godo_integration]].
-> **⑦ isae 싱크에이전트 완결 (★배포·백필 완료)**: 에이전트 1.5.7 원격 교체(서팀장 원격 1회) + custom 매핑 15/15(update_config, custom_14=최종접속일시 가설 적중) + 클린 재적재(고객 137,267/구매 1,854,706, 중복 370만 정리) + 구매이력 화면 **두 앱**(app.hanjul.ai CustomersTab·hanjul.ai/manage ManageCustomersTab 사본 2곳) + 고객목록 등록일 fix + custom 날짜 ISO 표시 정정(`formatIfIsoDate` CT) + 고객DB 현황 성능(CT-18 타입감지 조기종료+결과캐시 5분·degraded 가드+filter-options 단일스캔) + **구매요약 집계 CT**(customer-purchase-aggregates: 배치 훅 재계산, 웹훅 `revenue_applied` 이중진실 가드, NULLS LAST — 백필 126,099명 완료). **updater 자기교체 결함 = v1.6.0에서 해결**(2026-07-03, SYNC-AGENT-TROUBLESHOOTING §2-6). 상세 [[project_2026_0703_isae_157_mapping_purchase_summary]].
-> **잔여**: ②③⑤ tp-push+build+pm2 재배포(KAKAO 중복 가드 포함) / 실측(KAKAO 1행·customer_send_stats·⑤ 고객등급 모달 1건 — v1.1-cold는 07-03 실측 확인 완료) / 레거시 폐기 프로젝트 = 서팀장 5문항 회신 대기(docs/레거시서버_폐기_플랜.md SoT) / updater 자기교체 v1.6.0 완료(tp-push + 서버 릴리즈 잔여 — sync_releases 등록은 1.6.1부터·isae 보호).
+### 🟢 2026-07-03 — 관제탑 v2 + 사용구분 게이팅 + 전채널 학습루프 + 레거시 SSL 무료 + 카페24 심사/고도몰/isae 완결 (요약 — 상세는 memory)
+> ★대부분 배포완료: 관제탑 재설계 v2(상시로드=CLAUDE+STATUS·harness-check 훅) / 사용구분 게이팅(companies.usage_type DDL) / 전채널 학습루프 P1~4(Gap4 예측→타겟 영구금지 [[feedback_prediction_never_selects_target]]) / event-admin SSL 무료전환(연 99,000원↓) / 카페24 공식앱 심사요청 완료(App URL=hanjul.ai/cafe24/launch) / 고도몰 주문 연동 실증(partner_key+몰별key) / isae 완결(고객137,267·구매185만).
+> **활성 잔여**: (학습루프 KAKAO 중복가드 포함) ②③⑤ tp-push+build+pm2 재배포 + 실측(customer_send_stats·고객등급 모달) / 레거시 폐기 서팀장 5문항 회신 대기(docs/레거시서버_폐기_플랜.md). 상세 [[project_2026_0703_control_tower_redesign]]·[[project_2026_0703_all_channel_learning_loop]]·[[project_2026_0703_cafe24_review_godo_integration]]·[[project_2026_0703_performance_customer_axis]]·[[project_2026_0703_isae_157_mapping_purchase_summary]].
 
 ---
 
 ### 🟢 2026-07-03 — 싱크에이전트 updater 자기교체 근본수정 v1.6.0 (★코드·5티어빌드·티어 E2E 게이트 완료 / git push·서버 릴리즈만 잔여)
 > updater 교체가 자기 job(Win)·cgroup(Linux)을 자살시켜 무선 교체 실패(isae 실측) → Win=별도 일회성 작업(SyncAgentUpdate, job 밖)+원자 스왑(move /y), Linux=`systemd-run` transient 서비스(--scope 아님=ProtectSystem 상속 회피)+원자 mv + checksum 필수화·빈버전 가드·self-heal·restart 근본수정·old Windows→CLI 설치 라우팅. tsc 0, 유닛 60 GREEN, win-legacy 실 2008R2 VM E2E + linux Docker E2E PASS. 서버: download_url 티어 인코딩+`upload:releases`(5티어 무선). **★배포안전: 1.5.x→1.6.0 무선 불가(깨진 updater)→win-legacy active 등록 금지(isae 깨짐), 등록은 1.6.1부터. 파일 업로드는 안전(sync_releases만 트리거)**. 세션종료 상태: upload 완료 / tp-push·sync_releases 등록 미완(등록 보류) / isae 무손 1.5.7 가동. 상세 [[project_2026_0703_sync_agent_updater_selfreplace]].
 
-### 🔵 다음 세션 (예정) — 팝폰(Poppon) SDK 검증용 코드 분석
-> **목표**: 한줄로 SDK(v0.3.6)를 한줄로가 자체 운영하는 팝폰(www.poppon.co.kr)에 연동·테스트할 수 있는지 판정 + 단계 설계. 자체 서비스라 SDK 전 흐름(수집·identify·인앱) 실측 최적 베드(고객사 의존 0).
-> **팝폰 현황(2026-06-18 사이트 확인)**: 딜·쿠폰 정보 중개 플랫폼(전자상거래 X — 직접 판매·장바구니·결제 없음, 구매는 외부 브랜드). 회원 로그인·마이페이지(`/me`) 있음. Next.js SPA(`/_next`, 동적 라우팅 `/d/[id]`·`/c/[category]`). gtag/dataLayer는 노출 HTML엔 안 보임(프로덕션 확인 필요).
-> **로컬 코드**: `C:\Users\ceo\projects\poppon-workspace` (별개 프로젝트 — 이번 세션 미정독, 컨텍스트 절약 위해 다음 세션에서).
-> **할 일**: poppon-workspace 정독 → ① 스택·라우팅·로그인 흐름 ② SDK(v0.3.6) 삽입 지점(Next.js `<head>`·`data-hjl-key`) ③ identify 배선(로그인 시 externalId) ④ 추적할 행동(딜 조회=product_view/click·쿠폰 클릭=custom) ⑤ 인앱 메시지 테스트 가능 여부 ⑥ 연동 테스트 가능 여부 판정 + 단계. Harold 계정 실연동 전제. brainstorming→설계→동의→구현.
-> 상세 [[project_2026_0618_selfhosted_mall_app_collection]].
+### 🔵 다음 세션 (예정) — 이메일 & 모바일 DM 퀄리티 끌어올리기 (Harold 지시 2026-07-07)
+> 인앱 디자인 2.0(SDK v0.3.9)에 이어 이메일 템플릿/렌더 + 모바일 DM 빌더·발행물 디자인 퀄리티를 브레이즈급으로. brainstorming→설계→동의→구현.
+> (보류) 팝폰 SDK 검증(자체 서비스 SDK 실측 베드) = C:\Users\ceo\projects\poppon-workspace 정독 후 별도. 상세 [[project_2026_0618_selfhosted_mall_app_collection]].
 
 ---
 

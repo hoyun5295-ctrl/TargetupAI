@@ -1388,7 +1388,10 @@ function EditModal({ editing, setEditing, availableVariables, onSave, fileInputR
   const [segmentCount, setSegmentCount] = useState<number | null>(null);
   const [segmentDesc, setSegmentDesc] = useState<string>('');
   const [extractOpen, setExtractOpen] = useState(false);
-  const [previewCustomer, setPreviewCustomer] = useState<'VIP' | '일반' | '신규'>('일반');
+  // ★ 2026-07-07(2) 실고객 샘플 — 하드코딩 페르소나 영구 제거. 타겟 최상단 + 등급별 실고객을 백엔드에서 받아 치환.
+  const [previewPeople, setPreviewPeople] = useState<Array<{ label: string; customer: Record<string, any>; is_sample?: boolean }>>([]);
+  const [previewIdx, setPreviewIdx] = useState(0);
+  const [brandAccent, setBrandAccent] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<'content' | 'design' | 'target'>('content');
 
   const token = () => localStorage.getItem('token');
@@ -1419,6 +1422,36 @@ function EditModal({ editing, setEditing, availableVariables, onSave, fileInputR
     return () => clearTimeout(timer);
   }, [editing.segment_conditions]);
 
+  // 실고객 샘플 로드 — 편집 진입 시 + 타겟 조건 변경 시 (타겟 최상단 실고객 우선)
+  useEffect(() => {
+    const conds = editing.segment_conditions || {};
+    const timer = setTimeout(async () => {
+      try {
+        const res = await fetch('/api/cdp/inapp/preview-customers', {
+          method: 'POST',
+          headers: authHeaders(),
+          body: JSON.stringify({ segment_conditions: conds }),
+        });
+        const data = await res.json();
+        if (data.success && Array.isArray(data.customers) && data.customers.length > 0) {
+          setPreviewPeople(data.customers.map((c: any) => ({ label: String(c.label || ''), customer: c.customer || {}, is_sample: !!c.is_sample })));
+          setPreviewIdx(0);
+          setBrandAccent(typeof data.brand_accent === 'string' ? data.brand_accent : null);
+        }
+      } catch {}
+    }, 500);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editing.segment_conditions]);
+
+  // 신규 메시지 기본 강조색 = 회사 브랜드 킷 색 (brand_kit 설정 회사만 — 미설정은 기존 기본값 유지)
+  useEffect(() => {
+    if (brandAccent && !editing.id && !editing.accent_color) {
+      setEditing({ ...editing, accent_color: brandAccent });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [brandAccent]);
+
   // web 채널은 4종(모달/슬라이드/토스트/플로팅)만 — 이전 배너 등 4종 밖 형태로 저장된 메시지를 열면 모달로 자동 정규화
   useEffect(() => {
     const WEB_OK = ['center_modal', 'slide_in', 'toast', 'floating_button'];
@@ -1447,12 +1480,6 @@ function EditModal({ editing, setEditing, availableVariables, onSave, fileInputR
     setEditing({ ...editing, background_color: p.background, text_color: p.textColor });
   };
 
-  const previewSample: Record<string, Record<string, any>> = {
-    VIP: { name: '김민수', grade: 'VIP', points: 12000, region: '서울', recent_product: '강남점', cart_count: 3, last_purchase_days_ago: 7, purchase_count: 24, total_purchase_amount: 1500000 },
-    '일반': { name: '이서연', grade: '일반', points: 2300, region: '경기', recent_product: '판교점', cart_count: 1, last_purchase_days_ago: 45, purchase_count: 4, total_purchase_amount: 230000 },
-    '신규': { name: '정지훈', grade: '신규', points: 0, region: '인천', recent_product: '', cart_count: 0, last_purchase_days_ago: 999, purchase_count: 0, total_purchase_amount: 0 },
-  };
-
   const replaceVars = (text: string, customer: Record<string, any>): string => {
     if (!text) return '';
     let out = text;
@@ -1476,7 +1503,9 @@ function EditModal({ editing, setEditing, availableVariables, onSave, fileInputR
     return out;
   };
 
-  const sampleCustomer = previewSample[previewCustomer];
+  // 실고객 샘플 (로딩 전 = 빈 객체 → 변수는 기본값으로 치환)
+  const samplePerson = previewPeople[previewIdx] || null;
+  const sampleCustomer: Record<string, any> = samplePerson?.customer || {};
   const renderedTitle = replaceVars(editing.title || '', sampleCustomer);
   const renderedBody = replaceVars(editing.body || '', sampleCustomer);
   // ★ D230+ 블록
@@ -1604,26 +1633,37 @@ function EditModal({ editing, setEditing, availableVariables, onSave, fileInputR
               <h4 className="text-xs font-bold text-white/80 mb-2 flex items-center gap-1.5">
                 <Wand2 className="w-3 h-3 text-fuchsia-300" /> 테마
               </h4>
-              <div className="grid grid-cols-3 gap-2 mb-3">
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-2 mb-3">
                 {THEME_OPTIONS.map((t) => (
                   <button
                     key={t.key}
                     onClick={() => updateField('theme', t.key)}
-                    className={`text-xs px-2 py-2 rounded-lg border transition-colors ${(editing.theme || 'auto') === t.key ? 'bg-violet-500/30 border-violet-400/60 text-white' : 'bg-slate-900/60 border-white/10 text-white/70 hover:bg-white/5'}`}
+                    className={`px-2 py-2 rounded-lg border text-left transition-colors ${(editing.theme || 'auto') === t.key ? 'bg-violet-500/30 border-violet-400/60 text-white' : 'bg-slate-900/60 border-white/10 text-white/70 hover:bg-white/5'}`}
                   >
-                    {t.label}
+                    <span className="block text-xs font-bold">{t.label}</span>
+                    <span className="block text-[9px] text-white/45 mt-0.5">{t.hint}</span>
                   </button>
                 ))}
               </div>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
                 <label className="text-[11px] text-white/60">강조색</label>
                 <input
                   type="color"
-                  value={editing.accent_color || '#6d5cf0'}
+                  value={editing.accent_color || brandAccent || '#6d5cf0'}
                   onChange={(e) => updateField('accent_color', e.target.value)}
                   className="h-9 w-16 bg-slate-900/60 border border-white/10 rounded cursor-pointer"
                 />
-                <span className="text-[10px] text-white/40">면은 테마가, 강조만 회사색</span>
+                {brandAccent && (
+                  <button
+                    onClick={() => updateField('accent_color', brandAccent)}
+                    className="flex items-center gap-1.5 text-[10px] px-2 py-1.5 rounded-lg border border-white/10 bg-slate-900/60 text-white/70 hover:bg-white/5"
+                    title="설정에 저장된 회사 브랜드 색으로 되돌리기"
+                  >
+                    <span className="w-3 h-3 rounded-full border border-white/20" style={{ background: brandAccent }} />
+                    브랜드 색
+                  </button>
+                )}
+                <span className="text-[10px] text-white/40">{brandAccent ? '브랜드 킷에 저장된 회사 색이 기본 적용됩니다' : '면·구조는 테마가, 강조색만 회사 색'}</span>
               </div>
             </div>
 
@@ -2050,23 +2090,34 @@ function EditModal({ editing, setEditing, availableVariables, onSave, fileInputR
                 <span>앱 인앱은 <strong>앱 SDK 연동 후</strong> 실제 표시됩니다. 아래는 내용·형태 미리보기입니다.</span>
               </div>
             )}
-            <div className="flex gap-1">
-              {(['VIP', '일반', '신규'] as const).map((pc) => (
+            <div className="flex gap-1 flex-wrap">
+              {previewPeople.map((p, i) => (
                 <button
-                  key={pc}
-                  onClick={() => setPreviewCustomer(pc)}
+                  key={`${p.label}-${i}`}
+                  onClick={() => setPreviewIdx(i)}
                   className={`flex-1 px-2 py-1.5 text-xs rounded ${
-                    previewCustomer === pc
-                      ? 'bg-violet-500/30 border border-violet-400/40 text-white'
+                    previewIdx === i
+                      ? p.label === '타겟'
+                        ? 'bg-emerald-500/30 border border-emerald-400/40 text-white'
+                        : 'bg-violet-500/30 border border-violet-400/40 text-white'
                       : 'bg-slate-900/60 border border-white/10 text-white/50'
                   }`}
                 >
-                  {pc}
+                  {p.label}
                 </button>
               ))}
             </div>
             <div className="text-[10px] text-white/40">
-              샘플: {sampleCustomer.name} · {sampleCustomer.grade} · {sampleCustomer.points?.toLocaleString()}P
+              {samplePerson ? (
+                <>
+                  샘플: {String(sampleCustomer.name || '고객')} · {String(sampleCustomer.grade || '-')} · {Number(sampleCustomer.points || 0).toLocaleString()}P
+                  {samplePerson.is_sample
+                    ? <span className="text-amber-300/80"> · 가상 예시 — 고객 DB에 데이터가 쌓이면 실제 고객으로 바뀝니다</span>
+                    : <span className="text-emerald-300/70"> · 실제 고객 DB{samplePerson.label === '타겟' ? ' (타겟 조건 최상단 고객)' : ''}</span>}
+                </>
+              ) : (
+                '실제 고객 샘플 불러오는 중...'
+              )}
             </div>
 
             <InAppMessagePreview

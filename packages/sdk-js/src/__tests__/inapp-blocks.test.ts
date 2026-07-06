@@ -48,10 +48,59 @@ describe('resolveTheme', () => {
   });
 
   it('minimal/brand 키 안전 처리 + 알 수 없는 키는 auto', () => {
-    expect(resolveTheme('minimal', null).radius).toBe(20); // 2026-07-07 디자인 2.0
+    expect(resolveTheme('minimal', null).radius).toBe(12); // 2026-07-07(2) 디자인 언어 2.1 — 모노 에디토리얼
     expect(resolveTheme('light', null).radius).toBe(24);
     expect(resolveTheme('brand', '#10b981').accent).toBe('#10b981');
     expect(resolveTheme('이상한값' as any, null).key).toBe('auto');
+  });
+
+  // ★ 2026-07-07(2) 디자인 언어 2.1 — "테마 = 색깔놀이" 재발 차단 고정 테스트.
+  //   라이트 계열 3키(light/brand/minimal)의 면·버튼·라벨 구조가 서로 반드시 달라야 한다.
+  it('테마 6종은 서로 다른 디자인 언어 (면·버튼·라벨 구조 차별)', () => {
+    const accent = '#10b981';
+    const light = resolveTheme('light', accent);
+    const dark = resolveTheme('dark', accent);
+    const brand = resolveTheme('brand', accent);
+    const vibrant = resolveTheme('vibrant', accent);
+    const minimal = resolveTheme('minimal', accent);
+
+    // 면(surfaceBg) 전부 상이 — light≠brand≠minimal≠vibrant≠dark
+    const faces = [light.surfaceBg, dark.surfaceBg, brand.surfaceBg, vibrant.surfaceBg, minimal.surfaceBg];
+    expect(new Set(faces).size).toBe(5);
+
+    // brand = 브랜드 밴드(상단 6px accent 레이어) + 솔리드 칩 + 헤드라인 accent 바 + 플랫 accent 버튼
+    expect(brand.surfaceBg).toContain('100% 6px');
+    expect(brand.surfaceBg).toContain(accent);
+    expect(brand.eyebrowVariant).toBe('chip_solid');
+    expect(brand.headlineAccentBar).toBe(true);
+    expect(brand.buttonPrimaryBg).toBe(accent);
+
+    // minimal = 모노 에디토리얼 (플랫 면 + 민무늬 라벨 + 모노 불릿 + 잉크 버튼 + 링 없음)
+    expect(minimal.surfaceBg).toBe('#ffffff');
+    expect(minimal.eyebrowVariant).toBe('plain');
+    expect(minimal.bulletVariant).toBe('mono');
+    expect(minimal.dividerVariant).toBe('solid');
+    expect(minimal.buttonPrimaryBg).toBe('#111827');
+    expect(minimal.ring).toBe('');
+
+    // vibrant = 알약 반전 버튼 + 샤인 레이어
+    expect(vibrant.buttonRadius).toBe(999);
+    expect(vibrant.surfaceBg).toContain('radial-gradient');
+
+    // dark = accent 글로우 레이어
+    expect(dark.surfaceBg).toContain('radial-gradient');
+    expect(dark.surfaceBg).toContain('#1b2140');
+
+    // light = 글래스 그라데이션 버튼
+    expect(light.buttonPrimaryBg).toContain('linear-gradient');
+    expect(light.eyebrowVariant).toBe('chip');
+  });
+
+  it('brand는 prefersDark와 무관하게 화이트 쇼케이스 고정', () => {
+    const a = resolveTheme('brand', '#10b981', { prefersDark: true });
+    const b = resolveTheme('brand', '#10b981', { prefersDark: false });
+    expect(a.surface).toBe('#ffffff');
+    expect(a.surfaceBg).toBe(b.surfaceBg);
   });
 
   it('색 유틸', () => {
@@ -152,6 +201,32 @@ describe('renderBlocks — 블록 타입', () => {
     const root = render([{ type: 'bullets', items: [{ text: '무료 배송' }, { text: '당일 출고' }] }]);
     expect(root.textContent).toContain('무료 배송');
     expect(root.textContent).toContain('당일 출고');
+  });
+
+  it('디자인 언어 2.1 — 테마별 블록 구조가 실제로 달라진다', () => {
+    // minimal: plain 라벨(칩 배경 X) + 모노 불릿(배지 span 없이 svg 직결)
+    const minimalTheme = resolveTheme('minimal', '#10b981');
+    const m = render([
+      { type: 'eyebrow', text: 'NEW' },
+      { type: 'bullets', items: [{ text: '항목' }] },
+    ], { theme: minimalTheme });
+    expect((m.firstElementChild as HTMLElement).style.background).toBe('');
+    const monoRow = m.children[1].firstElementChild as HTMLElement;
+    expect(monoRow.firstElementChild?.tagName.toLowerCase()).toBe('svg');
+
+    // light(badge): 불릿 아이콘이 원형 배지 span 안에
+    const l = render([{ type: 'bullets', items: [{ text: '항목' }] }]);
+    const badgeRow = l.children[0].firstElementChild as HTMLElement;
+    expect(badgeRow.firstElementChild?.tagName.toLowerCase()).toBe('span');
+
+    // brand: 헤드라인 아래 accent 바 (래퍼 자식 2개) + 솔리드 칩 라벨
+    const brandTheme = resolveTheme('brand', '#10b981');
+    const b = render([
+      { type: 'eyebrow', text: 'VIP' },
+      { type: 'headline', text: '헤드라인' },
+    ], { theme: brandTheme });
+    expect((b.children[0] as HTMLElement).style.background).toContain('rgb(16, 185, 129)'); // jsdom이 #10b981을 rgb로 정규화
+    expect((b.children[1] as HTMLElement).children.length).toBe(2);
   });
 
   it('product: 이름 있으면 카드, 없으면 skip', () => {

@@ -48,11 +48,17 @@ function renderBlock(b: any, i: number, ctx: Ctx): JSX.Element | null {
       if (!text) return null;
       const tone = b.tone || 'accent';
       const color = tone === 'on_media' ? theme.onMedia : tone === 'neutral' ? theme.textSecondary : theme.accent;
+      // 디자인 언어 2.1 — plain(모노 에디토리얼): 칩 없이 자간 넓은 민무늬 라벨 (SDK 미러)
+      if (tone === 'accent' && theme.eyebrowVariant === 'plain') {
+        return <div key={i} style={{ alignSelf: 'flex-start', fontSize: 10.5, fontWeight: 700, letterSpacing: '0.16em', color: theme.textSecondary, lineHeight: 1.2 }}>{text}</div>;
+      }
+      const solid = tone === 'accent' && theme.eyebrowVariant === 'chip_solid';
       const style: CSSProperties = { fontSize: 11, fontWeight: 700, letterSpacing: '0.05em', color, alignSelf: 'flex-start', lineHeight: 1.2, display: 'inline-flex', alignItems: 'center', gap: 5 };
-      if (tone === 'accent') Object.assign(style, { background: theme.accentSoft, padding: '5px 11px', borderRadius: 999, boxShadow: `inset 0 0 0 1px ${withAlpha(theme.accent, 0.14)}` });
+      if (solid) Object.assign(style, { background: theme.accent, color: theme.accentText, padding: '5px 11px', borderRadius: 999, boxShadow: `0 4px 12px ${withAlpha(theme.accent, 0.35)}` });
+      else if (tone === 'accent') Object.assign(style, { background: theme.accentSoft, padding: '5px 11px', borderRadius: 999, boxShadow: `inset 0 0 0 1px ${withAlpha(theme.accent, 0.14)}` });
       return (
         <div key={i} style={style}>
-          {tone === 'accent' && <span style={{ width: 4, height: 4, borderRadius: 999, background: theme.accent, flexShrink: 0 }} />}
+          {tone === 'accent' && <span style={{ width: 4, height: 4, borderRadius: 999, background: solid ? theme.accentText : theme.accent, opacity: solid ? 0.9 : 1, flexShrink: 0 }} />}
           {text}
         </div>
       );
@@ -62,7 +68,18 @@ function renderBlock(b: any, i: number, ctx: Ctx): JSX.Element | null {
       if (!text) return null;
       const hs: Record<string, number> = { sm: 16, md: 19, lg: 21, xl: 24 };
       const xl = b.size === 'xl';
-      return <div key={i} style={{ fontWeight: xl ? 800 : 700, fontSize: hs[String(b.size)] || 19, letterSpacing: xl ? '-0.02em' : '-0.01em', lineHeight: 1.28, color: theme.textPrimary }}>{text}</div>;
+      const weight = xl ? Math.max(800, theme.headlineWeight) : theme.headlineWeight;
+      const head = (
+        <div style={{ fontWeight: weight, fontSize: hs[String(b.size)] || 19, letterSpacing: xl || weight >= 800 ? '-0.02em' : '-0.01em', lineHeight: 1.28, color: theme.textPrimary }}>{text}</div>
+      );
+      if (!theme.headlineAccentBar) return <div key={i}>{head}</div>;
+      // 브랜드 쇼케이스 — 헤드라인 아래 accent 짧은 바 (SDK 미러)
+      return (
+        <div key={i}>
+          {head}
+          <div style={{ width: 26, height: 4, borderRadius: 999, marginTop: 9, background: `linear-gradient(90deg, ${theme.accent} 0%, ${shadeHex(theme.accent, 30)} 100%)` }} />
+        </div>
+      );
     }
     case 'body': {
       const text = t(b.text);
@@ -73,13 +90,20 @@ function renderBlock(b: any, i: number, ctx: Ctx): JSX.Element | null {
     case 'bullets': {
       const items = Array.isArray(b.items) ? b.items.filter((it: any) => String(it?.text || '').trim()) : [];
       if (!items.length) return null;
+      const mono = theme.bulletVariant === 'mono';
       return (
-        <div key={i} style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        <div key={i} style={{ display: 'flex', flexDirection: 'column', gap: mono ? 9 : 8 }}>
           {items.slice(0, 4).map((it: any, j: number) => (
-            <div key={j} style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
-              <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 18, height: 18, borderRadius: 999, background: withAlpha(theme.accent, 0.14), marginTop: 1, flexShrink: 0 }}>
-                <Icon name={it.icon || 'check'} color={theme.accent} size={12} />
-              </span>
+            <div key={j} style={{ display: 'flex', alignItems: 'flex-start', gap: mono ? 9 : 8 }}>
+              {mono ? (
+                <span style={{ marginTop: 2, flexShrink: 0, display: 'inline-flex' }}>
+                  <Icon name={it.icon || 'check'} color={theme.textPrimary} size={14} />
+                </span>
+              ) : (
+                <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 18, height: 18, borderRadius: 999, background: withAlpha(theme.accent, 0.14), marginTop: 1, flexShrink: 0 }}>
+                  <Icon name={it.icon || 'check'} color={theme.accent} size={12} />
+                </span>
+              )}
               <div style={{ fontSize: 13, lineHeight: 1.45, color: theme.textPrimary }}>{t(it.text)}</div>
             </div>
           ))}
@@ -90,7 +114,7 @@ function renderBlock(b: any, i: number, ctx: Ctx): JSX.Element | null {
       const text = t(b.text || '[혜택 안내 — 직접 작성해주세요]');
       const notch: CSSProperties = { position: 'absolute', top: '50%', transform: 'translateY(-50%)', width: 13, height: 13, borderRadius: 999, background: theme.surface, boxShadow: `inset 0 0 0 1.5px ${withAlpha(theme.accent, 0.28)}` };
       return (
-        <div key={i} style={{ position: 'relative', display: 'flex', alignItems: 'center', gap: 11, padding: '13px 18px 13px 14px', background: `linear-gradient(135deg, ${withAlpha(theme.accent, 0.09)} 0%, ${withAlpha(theme.accent, 0.16)} 100%)`, border: `1.5px dashed ${withAlpha(theme.accent, 0.45)}`, borderRadius: 14 }}>
+        <div key={i} style={{ position: 'relative', display: 'flex', alignItems: 'center', gap: 11, padding: '13px 18px 13px 14px', background: `linear-gradient(135deg, ${withAlpha(theme.accent, 0.09)} 0%, ${withAlpha(theme.accent, 0.16)} 100%)`, border: `1.5px dashed ${withAlpha(theme.accent, 0.45)}`, borderRadius: theme.innerRadius }}>
           <span style={{ ...notch, left: -8 }} />
           <span style={{ ...notch, right: -8 }} />
           <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 32, height: 32, borderRadius: 10, background: theme.accentSoft, flexShrink: 0 }}>
@@ -104,7 +128,7 @@ function renderBlock(b: any, i: number, ctx: Ctx): JSX.Element | null {
       const seg: CSSProperties = { minWidth: 26, padding: '3px 5px', textAlign: 'center', borderRadius: 7, background: withAlpha(theme.textPrimary, 0.06), fontSize: 13.5, fontWeight: 800, fontVariantNumeric: 'tabular-nums', color: theme.textPrimary, lineHeight: 1.2 };
       const colon: CSSProperties = { fontSize: 12, fontWeight: 700, color: theme.textSecondary };
       return (
-        <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '11px 13px', borderRadius: 14, background: theme.surfaceElevated, boxShadow: `inset 0 0 0 1px ${theme.border}` }}>
+        <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '11px 13px', borderRadius: theme.innerRadius, background: theme.surfaceElevated, boxShadow: `inset 0 0 0 1px ${theme.border}` }}>
           <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 28, height: 28, borderRadius: 9, background: theme.accentSoft, flexShrink: 0 }}>
             <Icon name="clock" color={theme.accent} size={15} />
           </span>
@@ -136,7 +160,7 @@ function renderBlock(b: any, i: number, ctx: Ctx): JSX.Element | null {
       const name = t(b.name).trim();
       if (!name) return null;
       return (
-        <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: 11, borderRadius: 16, background: theme.surfaceElevated, border: `1px solid ${theme.border}`, boxShadow: '0 2px 8px rgba(0,0,0,0.04)' }}>
+        <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: 11, borderRadius: theme.innerRadius + 2, background: theme.surfaceElevated, border: `1px solid ${theme.border}`, boxShadow: '0 2px 8px rgba(0,0,0,0.04)' }}>
           {b.image && <img src={b.image} alt="" onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }} style={{ width: 56, height: 56, borderRadius: 12, objectFit: 'cover', flexShrink: 0, boxShadow: `inset 0 0 0 1px ${theme.border}` }} />}
           <div style={{ minWidth: 0, flex: 1 }}>
             <div style={{ fontSize: 14, fontWeight: 700, letterSpacing: '-0.01em', color: theme.textPrimary, lineHeight: 1.3 }}>{name}</div>
@@ -146,7 +170,7 @@ function renderBlock(b: any, i: number, ctx: Ctx): JSX.Element | null {
       );
     }
     case 'divider':
-      return <div key={i} style={{ height: 1, width: '100%', background: `linear-gradient(90deg, transparent 0%, ${theme.border} 18%, ${theme.border} 82%, transparent 100%)` }} />;
+      return <div key={i} style={{ height: 1, width: '100%', background: theme.dividerVariant === 'solid' ? theme.border : `linear-gradient(90deg, transparent 0%, ${theme.border} 18%, ${theme.border} 82%, transparent 100%)` }} />;
     case 'spacer': {
       const h: Record<string, number> = { sm: 4, md: 10, lg: 20 };
       return <div key={i} style={{ height: h[String(b.size)] ?? 10 }} />;
@@ -191,15 +215,14 @@ function renderBlock(b: any, i: number, ctx: Ctx): JSX.Element | null {
             const isTertiary = style === 'tertiary';
             return (
               <div key={j} style={{
-                padding: isGhost ? '9px 11px' : '13px 20px', borderRadius: 14, fontSize: 14, fontWeight: isPrimary ? 800 : 700,
+                padding: isGhost ? '9px 11px' : theme.buttonRadius >= 999 ? '13px 22px' : '13px 20px',
+                borderRadius: theme.buttonRadius, fontSize: 14, fontWeight: isPrimary ? 800 : 700,
                 letterSpacing: '-0.01em',
                 textAlign: 'center', width: stack ? '100%' : 'auto', whiteSpace: 'nowrap', boxSizing: 'border-box',
                 border: isTertiary ? `1px solid ${theme.border}` : 'none',
-                background: isPrimary ? `linear-gradient(180deg, ${shadeHex(theme.accent, 6)} 0%, ${shadeHex(theme.accent, -12)} 100%)` : isGhost ? 'transparent' : theme.surfaceElevated,
-                color: isPrimary ? theme.accentText : isGhost ? theme.accent : theme.textPrimary,
-                boxShadow: isPrimary
-                  ? `0 1px 2px ${withAlpha(shadeHex(theme.accent, -40), 0.3)}, 0 8px 22px ${withAlpha(theme.accent, 0.38)}, inset 0 1px 0 rgba(255,255,255,0.18)`
-                  : isTertiary ? 'none' : `inset 0 0 0 1px ${theme.border}`,
+                background: isPrimary ? theme.buttonPrimaryBg : isGhost ? 'transparent' : theme.surfaceElevated,
+                color: isPrimary ? theme.buttonPrimaryText : isGhost ? theme.buttonGhostColor : theme.textPrimary,
+                boxShadow: isPrimary ? theme.buttonPrimaryShadow : isTertiary ? 'none' : `inset 0 0 0 1px ${theme.border}`,
               }}>
                 {t(btn.label)}
               </div>

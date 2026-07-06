@@ -6,7 +6,7 @@
  */
 
 import { useState, type CSSProperties } from 'react';
-import { Monitor, Smartphone } from 'lucide-react';
+import { Monitor, Smartphone, Sun, Moon } from 'lucide-react';
 import { resolveTheme, type InAppTheme } from './inapp/blockTheme';
 import { BlockPreview } from './inapp/BlockPreview';
 
@@ -178,19 +178,26 @@ function Overlay({ variant, themeTokens, ...rest }: { variant: Variant; themeTok
   );
 }
 
-/** 더미 자사몰 배경 — 인앱이 뜨는 맥락(밝은 사이트) */
-function DummySite() {
+/** 더미 자사몰 배경 — 인앱이 뜨는 맥락 (라이트/다크 몰 양쪽) */
+function DummySite({ dark }: { dark?: boolean }) {
+  const bg = dark ? '#101218' : '#f4f4f6';
+  const bar = dark ? '#171a22' : '#fff';
+  const barBorder = dark ? '#232734' : '#ebebee';
+  const chip = dark ? '#2b3040' : '#d6d6db';
+  const dot = dark ? '#262b38' : '#e3e3e7';
+  const card = dark ? '#171a22' : '#fff';
+  const cardBorder = dark ? '#232734' : '#ededf1';
   return (
-    <div style={{ position: 'absolute', inset: 0, background: '#f4f4f6', overflow: 'hidden' }}>
-      <div style={{ height: 34, background: '#fff', borderBottom: '1px solid #ebebee', display: 'flex', alignItems: 'center', padding: '0 14px', gap: 8 }}>
-        <div style={{ width: 46, height: 9, borderRadius: 3, background: '#d6d6db' }} />
+    <div style={{ position: 'absolute', inset: 0, background: bg, overflow: 'hidden' }}>
+      <div style={{ height: 34, background: bar, borderBottom: `1px solid ${barBorder}`, display: 'flex', alignItems: 'center', padding: '0 14px', gap: 8 }}>
+        <div style={{ width: 46, height: 9, borderRadius: 3, background: chip }} />
         <div style={{ flex: 1 }} />
-        <div style={{ width: 9, height: 9, borderRadius: '50%', background: '#e3e3e7' }} />
-        <div style={{ width: 9, height: 9, borderRadius: '50%', background: '#e3e3e7' }} />
+        <div style={{ width: 9, height: 9, borderRadius: '50%', background: dot }} />
+        <div style={{ width: 9, height: 9, borderRadius: '50%', background: dot }} />
       </div>
       <div style={{ padding: 14, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
         {[0, 1, 2, 3].map((i) => (
-          <div key={i} style={{ height: 58, borderRadius: 10, background: '#fff', border: '1px solid #ededf1' }} />
+          <div key={i} style={{ height: 58, borderRadius: 10, background: card, border: `1px solid ${cardBorder}` }} />
         ))}
       </div>
     </div>
@@ -199,15 +206,17 @@ function DummySite() {
 
 export function InAppMessagePreview(props: InAppMessagePreviewProps) {
   const [device, setDevice] = useState<'desktop' | 'mobile'>('desktop');
+  const [siteMode, setSiteMode] = useState<'light' | 'dark'>('light');
   const variant = VARIANT_MAP[props.template] || 'banner';
   const isMobile = device === 'mobile';
   const useBlocks = Array.isArray(props.blocks) && props.blocks.length > 0;
-  const themeTokens = useBlocks ? resolveTheme(props.theme, props.accentColor) : null;
+  const siteDark = siteMode === 'dark';
+  const themeTokens = useBlocks ? resolveTheme(props.theme, props.accentColor, siteDark) : null;
 
   return (
     <div>
-      {/* 디바이스 토글 */}
-      <div style={{ display: 'flex', gap: 6, marginBottom: 12, justifyContent: 'center' }}>
+      {/* 디바이스 + 자사몰 모드 토글 */}
+      <div style={{ display: 'flex', gap: 6, marginBottom: 12, justifyContent: 'center', flexWrap: 'wrap' }}>
         {(['desktop', 'mobile'] as const).map((d) => {
           const Icon = d === 'desktop' ? Monitor : Smartphone;
           const active = device === d;
@@ -221,7 +230,17 @@ export function InAppMessagePreview(props: InAppMessagePreviewProps) {
             </button>
           );
         })}
+        <button
+          onClick={() => setSiteMode(siteDark ? 'light' : 'dark')}
+          title="자사몰 라이트/다크 모드로 보기 (자동 테마는 몰 모드를 따라갑니다)"
+          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs transition-colors ${siteDark ? 'bg-slate-500/30 border border-slate-400/50 text-white' : 'bg-white/5 border border-white/10 text-white/50 hover:text-white/80'}`}
+        >
+          {siteDark ? <Moon className="w-3.5 h-3.5" /> : <Sun className="w-3.5 h-3.5" />} 몰 {siteDark ? '다크' : '라이트'}
+        </button>
       </div>
+      {props.theme === 'auto' && useBlocks && (
+        <div className="text-[10px] text-white/40 text-center -mt-1 mb-2">자동 테마 = 고객 자사몰의 라이트/다크 모드를 따라갑니다 — 위 토글로 양쪽 확인</div>
+      )}
 
       {/* 디바이스 프레임 */}
       <div className="mx-auto" style={{ width: isMobile ? 300 : '100%', maxWidth: isMobile ? 300 : 440, transition: 'width 0.2s ease' }}>
@@ -245,7 +264,7 @@ export function InAppMessagePreview(props: InAppMessagePreviewProps) {
           </div>
           {/* 콘텐츠 (더미 사이트 + 인앱 오버레이) */}
           <div style={{ position: 'relative', height: isMobile ? 580 : 540, overflow: 'hidden' }}>
-            <DummySite />
+            <DummySite dark={siteDark} />
             <Overlay variant={variant} themeTokens={themeTokens} {...props} />
           </div>
         </div>

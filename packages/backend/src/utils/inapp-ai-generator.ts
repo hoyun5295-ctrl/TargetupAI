@@ -26,6 +26,7 @@ import { callAIWithFallback } from '../services/ai';
 import { buildMemoryPromptContext } from './company-memory';
 import { getCompanyDataProfile, formatProfileForAiPrompt } from './company-data-profile';
 import { query } from '../config/database';
+import { getCompanyBrandKitRaw } from './dm/dm-brand-kit';
 // ★ D230+ 블록 — CT-27 공용 검증/정규화 (인라인 중복 금지)
 import { sanitizeContentBlocks, normalizeTheme, BENEFIT_PLACEHOLDER } from './inapp-message';
 
@@ -367,6 +368,10 @@ export async function generateInAppMessagePackage(
   const season = getSeasonContext();
   const dataProfile = await getCompanyDataProfile(input.companyId).catch(() => null);
   const dataProfilePrompt = dataProfile ? formatProfileForAiPrompt(dataProfile) : '';
+  // ★ 2026-07-07(2) 강조색 기준 확립 — 회사가 설정한 브랜드 킷(companies.brand_kit) 색만 사용.
+  //   미설정 회사만 AI 제안(모델 임의 hex) → 시나리오 팔레트 순 폴백.
+  const brandKitRaw = await getCompanyBrandKitRaw(input.companyId).catch(() => null);
+  const brandAccent = isAccentHex(brandKitRaw?.accent_color) ? String(brandKitRaw!.accent_color).trim() : null;
 
   const system = `당신은 한국 마케팅 자동화 인앱 메시지 설계 전문가입니다.
 회사 admin이 입력한 자연어 목표 또는 빠른 시작 시나리오를 받아 완전한 인앱 메시지 패키지를 JSON으로 응답합니다.
@@ -518,11 +523,13 @@ buttons 배열 (최대 3개):
 
 [테마 (theme + accent_color)]
 
-theme = 면(배경) 큐레이션. 다음 중 하나:
-- auto(자사몰 라이트/다크 자동) · light(밝은 면) · dark(어두운 면) · brand(중립 면 + 회사색 강조) · vibrant(회사색으로 면 채움 — 환영·축하·감사 같은 강한 인상) · minimal(절제된 밝은 면)
+theme = 디자인 언어 큐레이션. 다음 중 하나:
+- auto(자사몰 라이트/다크 자동) · light(소프트 글래스) · dark(미드나잇 글로우) · brand(흰 캔버스 + 브랜드 밴드 쇼케이스) · vibrant(회사색 임팩트 포스터 — 환영·축하·감사 같은 강한 인상) · minimal(모노 에디토리얼 — 절제·프리미엄)
 
-accent_color = 회사 강조색 hex (예: "#4f46e5"). 면은 테마가, 강조만 회사색.
-- 환영 / 감사 / 축하 = vibrant + 따뜻한 accent 권장. 정보 / 안내 = light · brand 권장.
+${brandAccent
+    ? `accent_color = 반드시 "${brandAccent}" (회사가 설정한 브랜드 강조색 — 다른 색 임의 선택 절대 금지)`
+    : `accent_color = 강조색 hex (예: "#4f46e5"). 회사 브랜드 색이 확인되지 않았으므로 시나리오 무드에 맞는 차분한 색 1개만 선택.`}
+- 환영 / 감사 / 축하 = vibrant 권장. 정보 / 안내 = light · brand 권장. 프리미엄 · VIP = minimal · dark 권장.
 
 [is_ad 광고 표기]
 
@@ -585,7 +592,7 @@ accent_color = 회사 강조색 hex (예: "#4f46e5"). 면은 테마가, 강조�
 - badge_text 8자 안 짧은 라벨 (혜택·수치 X)
 - segment_conditions / trigger_conditions / personalization_vars 자연어 목표에 정확한 매핑
 - content_blocks 배열로 본문 구성 (eyebrow / headline / body 기본 + 시나리오에 맞는 블록 조합, 5~8개 안). benefit 블록은 placeholder 그대로, 이미지 url은 비움
-- theme + accent_color 선택 (환영·감사·축하 = vibrant 권장, 정보·안내 = light·brand)
+- theme + accent_color 선택 (환영·감사·축하 = vibrant / 정보·안내 = light·brand / 프리미엄·VIP = minimal·dark)${brandAccent ? ` — accent_color는 반드시 "${brandAccent}"` : ''}
 
 응답은 위 응답 JSON 형식 그대로.`;
 
@@ -629,7 +636,8 @@ accent_color = 회사 강조색 hex (예: "#4f46e5"). 면은 테마가, 강조�
   }
   const theme = normalizeTheme(parsed.theme);
   const scenarioAccent = input.templateHint ? SCENARIO_ACCENT[input.templateHint] : null;
-  const accent_color = isAccentHex(parsed.accent_color) ? String(parsed.accent_color).trim() : (scenarioAccent || null);
+  // 브랜드 킷 설정 회사 = 그 색으로 강제 (AI 출력 무시 — 임의 hex 차단). 미설정 = AI 제안 → 시나리오 팔레트 순.
+  const accent_color = brandAccent || (isAccentHex(parsed.accent_color) ? String(parsed.accent_color).trim() : (scenarioAccent || null));
 
   const message: GeneratedInAppMessage = {
     title,

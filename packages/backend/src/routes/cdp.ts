@@ -76,7 +76,8 @@ import { generateInAppMessagePackage, listQuickStartCards } from '../utils/inapp
 // ★ 2026-07-06 인앱 표시 가능성 게이트 — 표시할 곳 없는 고객의 크레딧 낭비 차단 (네이버 단독 등)
 import { getInAppDisplayEligibility } from '../utils/inapp-display-eligibility';
 import { countSegment, describeSegment } from '../utils/inapp-segment-matcher';
-import { buildPreviewCustomers, renderInAppMessage, listAvailableVariables, extractUsedInAppVariables, getInAppCustomerForBrowser } from '../utils/inapp-personalization';
+import { buildPreviewCustomers, buildEditorPreviewCustomers, renderInAppMessage, listAvailableVariables, extractUsedInAppVariables, getInAppCustomerForBrowser } from '../utils/inapp-personalization';
+import { getCompanyBrandKitRaw } from '../utils/dm/dm-brand-kit';
 import { createVariant, listVariantsWithStats, declareWinnerIfReady } from '../utils/inapp-variant-optimizer';
 import { explainInAppMessage } from '../utils/inapp-explainer';
 import {
@@ -1498,6 +1499,30 @@ router.post('/inapp/segment-preview', async (req: Request, res: Response) => {
     console.error('[CDP /inapp/segment-preview] 오류:', err);
     if (handleDbMigrationError(err, res, 'customers')) return;
     return res.status(500).json({ success: false, error: err?.message || '세그먼트 카운트 실패' });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────
+// 6-b. POST /api/cdp/inapp/preview-customers — 편집 미리보기 실고객 샘플 (CT-79)
+//   2026-07-07(2): 하드코딩 샘플 영구 대체 — 타겟 최상단 실고객 + 등급별 실고객.
+//   brand_accent = 회사 brand_kit 실설정 강조색 (미설정 = null) — 신규 메시지 기본 강조색용.
+// ─────────────────────────────────────────────────────────────────────
+router.post('/inapp/preview-customers', async (req: Request, res: Response) => {
+  const auth = await ensureInAppAdmin(req, res);
+  if (!auth) return;
+  try {
+    const raw = req.body?.segment_conditions;
+    const segment = raw && typeof raw === 'object' ? raw : undefined;
+    const customers = await buildEditorPreviewCustomers(auth.companyId, segment);
+    const brandKit = await getCompanyBrandKitRaw(auth.companyId).catch(() => null);
+    const brandAccent = typeof brandKit?.accent_color === 'string' && /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(brandKit.accent_color.trim())
+      ? brandKit.accent_color.trim()
+      : null;
+    return res.json({ success: true, customers, brand_accent: brandAccent });
+  } catch (err: any) {
+    console.error('[CDP /inapp/preview-customers] 오류:', err);
+    if (handleDbMigrationError(err, res, 'customers')) return;
+    return res.status(500).json({ success: false, error: err?.message || '미리보기 샘플 조회 실패' });
   }
 });
 

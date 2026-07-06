@@ -57,6 +57,25 @@ export async function getCompanyBrandKit(companyId: string): Promise<DmBrandKit>
   }
 }
 
+/**
+ * 회사가 실제 저장한 브랜드 킷 원본 — 미설정/컬럼 부재 = null (기본값 병합 X).
+ * "회사가 브랜드 색을 설정했는가" 판정용 (인앱 AI 강조색 강제 등) —
+ * getCompanyBrandKit은 기본값을 병합해 설정 여부를 구분할 수 없다.
+ */
+export async function getCompanyBrandKitRaw(companyId: string): Promise<Partial<DmBrandKit> | null> {
+  const exists = await ensureColumn();
+  if (!exists) return null;
+  try {
+    const res = await query(`SELECT brand_kit FROM companies WHERE id = $1`, [companyId]);
+    const raw = res.rows[0]?.brand_kit;
+    if (!raw) return null;
+    const kit = typeof raw === 'string' ? JSON.parse(raw) : raw;
+    return kit && typeof kit === 'object' ? kit : null;
+  } catch {
+    return null;
+  }
+}
+
 export async function updateCompanyBrandKit(companyId: string, patch: Partial<DmBrandKit>): Promise<DmBrandKit> {
   const exists = await ensureColumn();
   if (!exists) {
