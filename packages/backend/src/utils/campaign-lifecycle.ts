@@ -314,26 +314,18 @@ export async function syncCampaignResults(companyId: string): Promise<SyncResult
       const pendingCount = (smsAgg?.pending || 0) + kakaoResult.pending;
       console.log(`[sync-results] AI run ${run.id} — success:${successCount}, fail:${failCount}, pending:${pendingCount}`);
 
-      // 타임아웃 체크: 발송 후 120분 경과 + pending만 남아있으면 강제 완료
-      // ★ D182 (2026-05-19): 30분 → 120분 변경 (직원 신고 — 30~34분 시점 통신사 응답 도착하는데 환불 처리되어 회사 손해 발생)
-      //   통신사 응답 99%ile 분포 + 안전 마진 = 120분. mysql-refund-sweeper의 reverse refund 로직과 함께 영구 안전망 구축.
-      const campTimeInfo = await query('SELECT sent_at, scheduled_at, created_at FROM campaigns WHERE id = $1', [run.campaign_id]);
-      // ★ 발송시각 기준 — 예약은 scheduled_at(실제 전송 시작)이 우선. sent_at은 등록 시점이라 예약이 발송 전에 타임아웃 오발화 (Harold 명시 2026-06-09)
-      const campSentAt = campTimeInfo.rows[0]?.scheduled_at || campTimeInfo.rows[0]?.sent_at || campTimeInfo.rows[0]?.created_at;
-      const minutesSinceSend = campSentAt ? (Date.now() - new Date(campSentAt).getTime()) / (1000 * 60) : 0;
-      const isTimedOut = minutesSinceSend > 120 && pendingCount > 0 && successCount === 0 && failCount === 0;
-
-      if (successCount > 0 || failCount > 0 || pendingCount > 0 || isTimedOut) {
-        const effectiveFailCount = isTimedOut ? failCount + pendingCount : failCount;
-        const effectivePendingCount = isTimedOut ? 0 : pendingCount;
+      // ★ 2026-07-06 120분 타임아웃(pending→fail 변환) 제거 — 통신사 리포트는 최대 48h 지연이 정상(단말 꺼짐 재시도).
+      //   대기를 실패로 기록하면 그 즉시 sync 후보(target > success+fail)에서 빠져 늦은 성공을 못 읽고,
+      //   6h markFinalized가 굳힌 뒤 재대조 필터(성공+실패<적재)에도 안 잡혀 영구 오표시(베네통·아이디룩 7/2·7/3 실측).
+      //   마감은 기존 3겹이 담당: 48h expired-pending-sweeper(유실=MySQL 4000 실패 확정) +
+      //   6h 확정 게이트(성공+실패≥target만 굳힘) + 72h 탈출구(영구 미달 실측 굳힘).
+      //   환불도 실패 확정분만 — sweeper 정당 환불 산식(refund-calc.ts, 실패+미적재)과 동일 기준.
+      if (successCount > 0 || failCount > 0 || pendingCount > 0) {
         // ★ D144 후속: pending 무관 — 발송 활동(MySQL 큐 INSERT) 있으면 'completed'.
         //   pending은 통신사 처리 대기일 뿐 발송 자체는 끝남. 화면 카운트는 MySQL 직접 갱신.
-        const newStatus = (successCount + effectiveFailCount + effectivePendingCount) > 0 ? 'completed' : 'failed';
-        if (isTimedOut) {
-          console.warn(`[sync-results] campaign_run ${run.id}: 120분 타임아웃 — pending ${pendingCount}건 → fail 처리`);
-        }
+        const newStatus = (successCount + failCount + pendingCount) > 0 ? 'completed' : 'failed';
 
-        // ★ D145 P0+ (2026-05-07): idempotent 환불 패턴 — 호출측은 누적 effectiveFailCount 그대로 보냄
+        // ★ D145 P0+ (2026-05-07): idempotent 환불 패턴 — 호출측은 누적 failCount 그대로 보냄
         //   prepaidRefund가 alreadyRefunded와 비교해 차이만 환불 (idempotency 함수 측 보장)
         //   delta 계산 폐기 — 호출/함수 의미 일치 + 누락 사고 자동 보정 (트렉스타 5/7 16,024원 사고)
 
@@ -347,7 +339,7 @@ export async function syncCampaignResults(companyId: string): Promise<SyncResult
               THEN COALESCE(scheduled_at, NOW())
               ELSE sent_at END
            WHERE id = $4`,
-          [successCount, effectiveFailCount, newStatus, run.id]
+          [successCount, failCount, newStatus, run.id]
         );
 
         // campaigns 테이블도 업데이트
@@ -365,14 +357,14 @@ export async function syncCampaignResults(companyId: string): Promise<SyncResult
                 THEN COALESCE(scheduled_at, NOW())
                 ELSE sent_at END
              WHERE id = $4`,
-            [successCount, effectiveFailCount, newStatus, runInfo.rows[0].campaign_id]
+            [successCount, failCount, newStatus, runInfo.rows[0].campaign_id]
           );
 
           // ★ D145 P0+: idempotent 패턴 — 누적 fail 그대로 (함수가 차이만 환불)
-          if (effectiveFailCount > 0) {
+          if (failCount > 0) {
             const campInfo = await query('SELECT company_id, message_type FROM campaigns WHERE id = $1', [runInfo.rows[0].campaign_id]);
             if (campInfo.rows.length > 0) {
-              await prepaidRefund(campInfo.rows[0].company_id, effectiveFailCount, campInfo.rows[0].message_type, runInfo.rows[0].campaign_id, isTimedOut ? '타임아웃 실패 환불' : '발송 실패 환불');
+              await prepaidRefund(campInfo.rows[0].company_id, failCount, campInfo.rows[0].message_type, runInfo.rows[0].campaign_id, '발송 실패 환불');
             }
           }
 
@@ -382,7 +374,7 @@ export async function syncCampaignResults(companyId: string): Promise<SyncResult
               `UPDATE auto_campaign_runs SET
                 success_count = $1, fail_count = $2
                WHERE campaign_id = $3`,
-              [successCount, effectiveFailCount, runInfo.rows[0].campaign_id]
+              [successCount, failCount, runInfo.rows[0].campaign_id]
             );
           } catch (acrErr) {
             // auto_campaign_runs에 해당 campaign_id가 없을 수 있음 (일반 캠페인)
@@ -392,7 +384,7 @@ export async function syncCampaignResults(companyId: string): Promise<SyncResult
         // AI 학습 성과 데이터 업데이트
         updateTrainingMetrics({
           sourceRef: getSourceRef(run.id),
-          sentCount: successCount + effectiveFailCount,
+          sentCount: successCount + failCount,
           successCount,
           failCount,
         });
@@ -445,25 +437,15 @@ export async function syncCampaignResults(companyId: string): Promise<SyncResult
       const pendingCount = (smsDirectAgg?.pending || 0) + kakaoDirectResult.pending;
       console.log(`[sync-results] direct campaign ${campaign.id} — success:${successCount}, fail:${failCount}, pending:${pendingCount}`);
 
-      // 직접발송 타임아웃: 120분 경과 + pending만 남아있으면 강제 완료
-      // ★ D182 (2026-05-19): 30분 → 120분 변경 (직원 신고 — 30~34분 시점 통신사 응답 도착하는데 환불 처리되어 회사 손해 발생)
-      //   AI 캠페인 영역과 동일 임계값. mysql-refund-sweeper의 reverse refund 로직과 함께 영구 안전망 구축.
-      // ★ 발송시각 기준 — scheduled_at(예약=실제 전송 시작) → sent_at → created_at (AI캠페인과 동일, Harold 명시 2026-06-09)
-      const directSentAt = campaign.scheduled_at || campaign.sent_at || campaign.created_at;
-      const directMinutesSince = directSentAt ? (Date.now() - new Date(directSentAt).getTime()) / (1000 * 60) : 0;
-      const directTimedOut = directMinutesSince > 120 && pendingCount > 0 && successCount === 0 && failCount === 0;
-
-      if (successCount > 0 || failCount > 0 || pendingCount > 0 || directTimedOut) {
-        const dEffectiveFailCount = directTimedOut ? failCount + pendingCount : failCount;
-        const dEffectivePendingCount = directTimedOut ? 0 : pendingCount;
+      // ★ 2026-07-06 120분 타임아웃(pending→fail 변환) 제거 — AI 캠페인 블록과 동일 근거.
+      //   대기를 실패로 기록하면 sync 후보 이탈 → 6h 굳힘 → 재대조 필터(성공+실패<적재) 사각 = 영구 오표시.
+      //   마감 3겹(48h expired-pending-sweeper / 6h 확정 게이트 / 72h 탈출구)이 담당. 환불은 실패 확정분만.
+      if (successCount > 0 || failCount > 0 || pendingCount > 0) {
         // ★ D144 후속: pending 무관 — 발송 활동(MySQL 큐 INSERT) 있으면 'completed'.
         //   pending은 통신사 처리 대기일 뿐 발송 자체는 끝남. 화면 카운트는 MySQL 직접 갱신.
-        const newStatus = (successCount + dEffectiveFailCount + dEffectivePendingCount) > 0 ? 'completed' : 'failed';
-        if (directTimedOut) {
-          console.warn(`[sync-results] direct campaign ${campaign.id}: 120분 타임아웃 — pending ${pendingCount}건 → fail 처리`);
-        }
+        const newStatus = (successCount + failCount + pendingCount) > 0 ? 'completed' : 'failed';
 
-        // ★ D145 P0+ (2026-05-07): idempotent 환불 패턴 — 호출측은 누적 dEffectiveFailCount 그대로 보냄
+        // ★ D145 P0+ (2026-05-07): idempotent 환불 패턴 — 호출측은 누적 failCount 그대로 보냄
         //   prepaidRefund가 alreadyRefunded와 비교해 차이만 환불 (idempotency 함수 측 보장)
         //   delta 계산 폐기 — 호출/함수 의미 일치 + 누락 사고 자동 보정 (트렉스타 5/7 16,024원 사고)
         // ★ 2026-06-11: sent_count = 적재 실측(direct-send-worker 기록)이 진실 — success+fail 덮어쓰기 제거.
@@ -478,21 +460,21 @@ export async function syncCampaignResults(companyId: string): Promise<SyncResult
               THEN COALESCE(scheduled_at, NOW())
               ELSE sent_at END
            WHERE id = $4`,
-          [successCount, dEffectiveFailCount, newStatus, campaign.id]
+          [successCount, failCount, newStatus, campaign.id]
         );
 
         // ★ D145 P0+: idempotent 패턴 — 누적 fail 그대로 (함수가 차이만 환불)
-        if (dEffectiveFailCount > 0) {
+        if (failCount > 0) {
           const campInfo = await query('SELECT company_id, message_type FROM campaigns WHERE id = $1', [campaign.id]);
           if (campInfo.rows.length > 0) {
-            await prepaidRefund(campInfo.rows[0].company_id, dEffectiveFailCount, campInfo.rows[0].message_type, campaign.id, directTimedOut ? '타임아웃 실패 환불' : '발송 실패 환불');
+            await prepaidRefund(campInfo.rows[0].company_id, failCount, campInfo.rows[0].message_type, campaign.id, '발송 실패 환불');
           }
         }
 
         // AI 학습 성과 데이터 업데이트 (직접발송)
         updateTrainingMetrics({
           sourceRef: getSourceRef(campaign.id),
-          sentCount: successCount + dEffectiveFailCount,
+          sentCount: successCount + failCount,
           successCount,
           failCount,
         });

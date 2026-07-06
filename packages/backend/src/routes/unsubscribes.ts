@@ -58,7 +58,7 @@ async function syncCustomerOptInBulk(companyId: string, phones: string[], optIn:
 // ================================================================
 // GET /api/unsubscribes/080callback - 나래인터넷 080 콜백
 // 컨트롤타워(unsubscribe-helper.ts)의 process080Callback()으로 위임.
-// 매칭 우선순위: users.opt_out_080_number → companies.opt_out_080_number fallback
+// 매칭 = users.opt_out_080_number + companies.opt_out_080_number 합집합 (080 공유 계정 전원 등록 — 2026-07-06 Harold 룰)
 // ================================================================
 router.get('/080callback', async (req: Request, res: Response) => {
   try {
@@ -82,7 +82,8 @@ router.get('/080callback', async (req: Request, res: Response) => {
     const result = await process080Callback(phone, opt080Number);
 
     if (!result.success) {
-      console.log(`[080콜백] 매칭 실패 - fr=${fr} (${opt080Number})`);
+      // ★ 2026-07-06: 발신자 번호 동봉 — 매칭 실패로 유실된 수신거부를 사후 수동 등록할 수 있게 (성공 로그와 동일 수준)
+      console.log(`[080콜백] 매칭 실패 - fr=${fr} (${opt080Number}), 발신자=${phone}`);
       return res.send('0');
     }
 

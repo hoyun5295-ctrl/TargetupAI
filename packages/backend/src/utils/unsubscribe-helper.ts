@@ -248,10 +248,11 @@ export async function getUnsubscribedPhones(userId: string, phones: string[]): P
 
 /**
  * 080번호로 사용자 매칭 (나래인터넷 콜백에서 사용).
- * users.opt_out_080_number 우선 매칭 → 없으면 companies.opt_out_080_number fallback.
+ * users.opt_out_080_number 매칭 + companies.opt_out_080_number 매칭의 합집합 (2026-07-06 Harold 룰 —
+ * 같은 080번호는 계정 간 공유 가능, 매칭 전원 등록).
  *
  * @param opt080Number - 나래인터넷에서 전달한 080번호 (숫자만)
- * @returns 매칭된 사용자/회사 정보 배열 (여러 사용자가 같은 080번호를 쓸 수 있음)
+ * @returns 매칭된 사용자/회사 정보 배열 (여러 사용자·회사가 같은 080번호를 공유할 수 있음)
  */
 export async function findUserBy080Number(opt080Number: string): Promise<{
   userId: string;
@@ -259,7 +260,14 @@ export async function findUserBy080Number(opt080Number: string): Promise<{
   companyName: string;
   source: 'user' | 'company';
 }[]> {
-  // 1순위: users 테이블에서 직접 매칭 (사용자 레벨)
+  // ★ 2026-07-06 Harold 명시 룰 — 같은 080번호는 계정(사용자·회사) 간 공유 가능:
+  //   등록 = user 매칭과 company 매칭의 "합집합" 전원 등록. 옛 "1순위 잡히면 2순위 skip" 조기 return은
+  //   공유 상대(회사 레벨 연동)를 누락시키므로 폐기. 삭제는 쓰기 경로가 본인 회사·본인 user 행만 만져
+  //   공유 상대에 영향 없음(설정 저장·슈퍼관리자 수정 전수 확인 2026-07-06).
+  const out: { userId: string; companyId: string; companyName: string; source: 'user' | 'company' }[] = [];
+  const seen = new Set<string>(); // userId dedup — user 매칭과 회사 broadcast 겹침 제거
+
+  // user 레벨 매칭 (사용자별 오버라이드 + auto_sync ON)
   const userResult = await query(
     `SELECT u.id as user_id, u.company_id, c.company_name
      FROM users u
@@ -270,42 +278,53 @@ export async function findUserBy080Number(opt080Number: string): Promise<{
        AND c.status = 'active'`,
     [opt080Number]
   );
-
-  if (userResult.rows.length > 0) {
-    return userResult.rows.map((r: any) => ({
-      userId: r.user_id,
-      companyId: r.company_id,
-      companyName: r.company_name,
-      source: 'user' as const,
-    }));
+  for (const r of userResult.rows) {
+    if (seen.has(r.user_id)) continue;
+    seen.add(r.user_id);
+    out.push({ userId: r.user_id, companyId: r.company_id, companyName: r.company_name, source: 'user' });
   }
 
-  // 2순위: companies 테이블 fallback (기존 호환)
+  // company 레벨 매칭 — auto_sync ON인 매칭 회사 "전부"의 활성 사용자 broadcast.
+  //   ★ 2026-07-06: LIMIT 1 + 단일 행 auto_sync 검사 제거 — 같은 번호 회사 여럿일 때 false 행이
+  //   LIMIT 1(정렬 없음)을 차지하면 true 회사까지 통째로 매칭 실패하던 결함(psy5868/0807196700 실측).
   const companyResult = await query(
-    `SELECT id, company_name, opt_out_auto_sync FROM companies
+    `SELECT id, company_name FROM companies
      WHERE REPLACE(REPLACE(opt_out_080_number, '-', ''), ' ', '') = $1
-       AND status = 'active'
-     LIMIT 1`,
+       AND opt_out_auto_sync = true
+       AND status = 'active'`,
     [opt080Number]
   );
+  for (const company of companyResult.rows) {
+    const usersResult = await query(
+      `SELECT id FROM users WHERE company_id = $1 AND is_active = true`,
+      [company.id]
+    );
+    for (const r of usersResult.rows) {
+      if (seen.has(r.id)) continue;
+      seen.add(r.id);
+      out.push({ userId: r.id, companyId: company.id, companyName: company.company_name, source: 'company' });
+    }
+  }
 
-  if (companyResult.rows.length === 0) return [];
-
-  const company = companyResult.rows[0];
-  if (!company.opt_out_auto_sync) return [];
-
-  // 해당 회사의 모든 활성 사용자에게 broadcast
-  const usersResult = await query(
-    `SELECT id FROM users WHERE company_id = $1 AND is_active = true`,
-    [company.id]
-  );
-
-  return usersResult.rows.map((r: any) => ({
-    userId: r.id,
-    companyId: company.id,
-    companyName: company.company_name,
-    source: 'company' as const,
-  }));
+  if (out.length === 0) {
+    // 매칭 0건 — 번호는 일치하는데 조건(auto_sync/활성)에서 제외된 후보를 로그로 남겨 운영 진단 (읽기 전용)
+    try {
+      const nearMiss = await query(
+        `SELECT 'user' AS src, u.login_id AS name, u.opt_out_auto_sync::text AS auto_sync, u.is_active::text AS active
+           FROM users u
+          WHERE REPLACE(REPLACE(u.opt_out_080_number, '-', ''), ' ', '') = $1
+         UNION ALL
+         SELECT 'company', c.company_name, c.opt_out_auto_sync::text, (c.status = 'active')::text
+           FROM companies c
+          WHERE REPLACE(REPLACE(c.opt_out_080_number, '-', ''), ' ', '') = $1`,
+        [opt080Number]
+      );
+      if (nearMiss.rows.length > 0) {
+        console.log(`[080콜백] 번호 일치·조건 제외 후보 (${opt080Number}): ${JSON.stringify(nearMiss.rows)}`);
+      }
+    } catch { /* 진단 로그 실패는 무시 — 콜백 응답에 영향 X */ }
+  }
+  return out;
 }
 
 /**
