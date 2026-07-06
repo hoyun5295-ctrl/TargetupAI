@@ -33,6 +33,11 @@ interface TrackRecipient {
   responded: boolean;
   durationSeconds: number;
   lastActiveAt: string | null;
+  /** ★ 2026-07-06 재열람 횟수(진입 비콘 누적) · 열람 기기 수(공유 신호) · 발송 후 7일 구매 실측 */
+  openCount?: number;
+  deviceCount?: number;
+  purchaseCount?: number;
+  purchaseAmount?: number;
 }
 
 interface TrackSummary {
@@ -42,6 +47,18 @@ interface TrackSummary {
   completed: number;
   clicked: number;
   responded: number;
+  /** ★ 2026-07-06 구매 전환(명·금액) · 재열람 · 다기기(공유 의심) */
+  purchased?: number;
+  purchaseAmount?: number;
+  reViewed?: number;
+  multiDevice?: number;
+}
+
+interface TrackData {
+  summary: TrackSummary;
+  recipients: TrackRecipient[];
+  hourDistribution?: Array<{ hour: number; cnt: number }>;
+  sectionExits?: Array<{ id: string; label: string; count: number }>;
 }
 
 /** 체류 초 → "1분 24초" 표시 */
@@ -159,8 +176,10 @@ export default function DmSendAndTrackModal({ dmId, dmTitle, show, onClose, init
   const [sending, setSending] = useState(false);
   const [sentCount, setSentCount] = useState<number | null>(null);
 
-  const [tracking, setTracking] = useState<{ summary: TrackSummary; recipients: TrackRecipient[] } | null>(null);
+  const [tracking, setTracking] = useState<TrackData | null>(null);
   const [loadingTrack, setLoadingTrack] = useState(false);
+  // ★ 2026-07-06 미열람자 재발송 모드 — 추적 탭에서 미열람 고객만 추려 발송 탭으로(타겟 추출 대신 고객 id 지정)
+  const [resendIds, setResendIds] = useState<string[] | null>(null);
   // ★ 2026-07-02(3) 미리보기 샘플 전환 — 추출된 수신자별 개인화 결과를 눈으로 확인
   const [sampleIdx, setSampleIdx] = useState(0);
   // ★ 2026-07-02(3) 개별 회신(미등록/미보유 제외) 확인 모달
@@ -178,7 +197,7 @@ export default function DmSendAndTrackModal({ dmId, dmTitle, show, onClose, init
     try {
       const res = await fetch(`/api/dm/${dmId}/recipients-tracking`, { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } });
       const data = await res.json();
-      if (res.ok && data.success) setTracking({ summary: data.summary, recipients: data.recipients });
+      if (res.ok && data.success) setTracking({ summary: data.summary, recipients: data.recipients, hourDistribution: data.hourDistribution || [], sectionExits: data.sectionExits || [] });
       else toast.error(data?.error || '추적 조회에 실패했습니다.');
     } catch (e: any) {
       toast.error(e?.message || '추적 조회 중 오류가 발생했습니다.');
@@ -331,7 +350,8 @@ export default function DmSendAndTrackModal({ dmId, dmTitle, show, onClose, init
   };
 
   const handleSend = async (confirmExclusion = false) => {
-    if (!target || target.channelEligibleCount === 0) { toast.warning('먼저 타겟을 추출해주세요.'); return; }
+    const isResend = !!resendIds && resendIds.length > 0;
+    if (!isResend && (!target || target.channelEligibleCount === 0)) { toast.warning('먼저 타겟을 추출해주세요.'); return; }
     if (!messageText.trim()) { toast.warning('문자 본문을 작성해주세요.'); return; }
     if (!callback) { toast.warning('발신번호를 선택해주세요. (발신번호 관리에서 등록)'); return; }
     if (isAd && opt080Loaded && !opt080) { toast.warning('광고성 발송은 무료수신거부(080) 번호가 필요합니다. 수신거부번호 설정에서 등록해주세요.'); return; }
@@ -343,8 +363,10 @@ export default function DmSendAndTrackModal({ dmId, dmTitle, show, onClose, init
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token()}` },
         body: JSON.stringify({
-          filter: target.filter,
-          allCustomers: !!target.isAll,
+          // ★ 2026-07-06 재발송 모드 = 미열람 고객 id 지정(서버가 자격·수신거부 재적용) / 일반 = 타겟 filter
+          ...(isResend
+            ? { resendCustomerIds: resendIds }
+            : { filter: target!.filter, allCustomers: !!target!.isAll }),
           messageText: messageText.trim(),
           isAd,
           // 개별 회신 = 고객별 등록매장 번호(store_phone) — 미등록 번호 고객은 백엔드 CT-08이 제외(확인 후 발송)
@@ -404,7 +426,17 @@ export default function DmSendAndTrackModal({ dmId, dmTitle, show, onClose, init
               {/* 왼쪽 — 타겟 + 편집 */}
               <div className="space-y-4">
                 <div className="rounded-xl border border-white/10 bg-white/5 p-4">
-                  {target ? (
+                  {resendIds && resendIds.length > 0 ? (
+                    /* ★ 2026-07-06 미열람자 재발송 모드 — 타겟 추출 대신 미열람 고객 지정. 문구를 바꿔 보내면 열람률이 오릅니다. */
+                    <div className="flex items-center justify-between gap-2">
+                      <div>
+                        <p className="text-[10px] text-cyan-300/80 font-semibold">미열람자 재발송</p>
+                        <p className="text-2xl font-bold text-cyan-300">{resendIds.length.toLocaleString()}<span className="text-sm font-normal text-white/50 ml-1">명</span></p>
+                        <p className="text-[10px] text-white/40 mt-0.5">그 사이 수신거부한 고객은 발송 시 자동 제외됩니다. 문구를 바꿔 보내는 것을 권장합니다.</p>
+                      </div>
+                      <button onClick={() => setResendIds(null)} className="text-[11px] text-white/50 hover:text-white">재발송 해제</button>
+                    </div>
+                  ) : target ? (
                     <div className="flex items-center justify-between gap-2">
                       <div>
                         <p className="text-[10px] text-white/40">발송 가능 대상</p>
@@ -538,13 +570,29 @@ export default function DmSendAndTrackModal({ dmId, dmTitle, show, onClose, init
             ) : tracking ? (
               <>
                 {/* 깔때기: 발송 → 열람 → 50% 도달 → 완독 → 클릭 */}
-                <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center justify-between gap-2 flex-wrap">
                   <p className="text-[11px] text-white/50">수신자별 열람 깊이 · 클릭 현황</p>
-                  <button onClick={loadTracking} className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[11px] font-medium text-white/80 bg-white/5 hover:bg-white/10 border border-white/10">
-                    <RefreshCw className="w-3.5 h-3.5" /> 새로고침
-                  </button>
+                  <div className="flex items-center gap-2">
+                    {/* ★ 2026-07-06 미열람자 재발송 — 미열람 고객만 추려 발송 탭으로(문구 수정 후 발송, 비용은 일반 발송과 동일) */}
+                    {tracking.recipients.some((r) => !r.viewed) && (
+                      <button
+                        onClick={() => {
+                          const ids = tracking.recipients.filter((r) => !r.viewed).map((r) => r.customerId);
+                          setResendIds(ids);
+                          setView('compose');
+                          toast.info(`미열람 ${ids.length.toLocaleString()}명이 발송 대상으로 지정되었습니다. 문구를 바꿔 발송해보세요.`);
+                        }}
+                        className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[11px] font-semibold text-cyan-100 bg-cyan-500/20 hover:bg-cyan-500/35 border border-cyan-400/30"
+                      >
+                        <Send className="w-3.5 h-3.5" /> 미열람자 재발송 ({tracking.recipients.filter((r) => !r.viewed).length.toLocaleString()}명)
+                      </button>
+                    )}
+                    <button onClick={loadTracking} className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[11px] font-medium text-white/80 bg-white/5 hover:bg-white/10 border border-white/10">
+                      <RefreshCw className="w-3.5 h-3.5" /> 새로고침
+                    </button>
+                  </div>
                 </div>
-                <div className="grid grid-cols-2 md:grid-cols-6 gap-2">
+                <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-2">
                   {[
                     { l: '발송', v: tracking.summary.sent, c: 'text-white' },
                     { l: '열람', v: tracking.summary.viewed, c: 'text-cyan-300' },
@@ -552,13 +600,21 @@ export default function DmSendAndTrackModal({ dmId, dmTitle, show, onClose, init
                     { l: '완독', v: tracking.summary.completed, c: 'text-emerald-300' },
                     { l: '클릭', v: tracking.summary.clicked ?? 0, c: 'text-amber-300' },
                     { l: '응모·액션', v: tracking.summary.responded ?? 0, c: 'text-fuchsia-300' },
-                  ].map((m) => (
+                    { l: '구매 전환', v: tracking.summary.purchased ?? 0, c: 'text-rose-300', sub: (tracking.summary.purchaseAmount || 0) > 0 ? `${Math.round(Number(tracking.summary.purchaseAmount)).toLocaleString()}원` : undefined },
+                  ].map((m: any) => (
                     <div key={m.l} className="rounded-xl border border-white/10 bg-white/5 p-3 text-center">
                       <p className="text-[10px] text-white/40">{m.l}</p>
                       <p className={`text-xl font-bold ${m.c}`}>{Number(m.v).toLocaleString()}</p>
+                      {m.sub && <p className="text-[9.5px] text-rose-200/70">{m.sub}</p>}
                     </div>
                   ))}
                 </div>
+                {((tracking.summary.reViewed ?? 0) > 0 || (tracking.summary.multiDevice ?? 0) > 0) && (
+                  <p className="text-[10.5px] text-white/45">
+                    재열람 {Number(tracking.summary.reViewed || 0).toLocaleString()}명
+                    {(tracking.summary.multiDevice ?? 0) > 0 && <> · 여러 기기에서 열람 {Number(tracking.summary.multiDevice || 0).toLocaleString()}명 <span className="text-cyan-300/70">(지인 공유 가능성)</span></>}
+                  </p>
+                )}
                 <div className="rounded-xl border border-white/10 bg-white/5 divide-y divide-white/5 max-h-[52vh] overflow-y-auto">
                   {tracking.recipients.length === 0 ? (
                     <p className="text-xs text-white/40 p-4 text-center">아직 발송 이력이 없습니다.</p>
@@ -585,11 +641,18 @@ export default function DmSendAndTrackModal({ dmId, dmTitle, show, onClose, init
                               <span className="text-white/50 w-16 text-right">{formatDur(r.durationSeconds)}</span>
                               <span className={`w-12 text-right ${r.clicks > 0 ? 'text-amber-300 font-semibold' : 'text-white/30'}`}>{r.clicks > 0 ? `클릭 ${r.clicks}` : '-'}</span>
                               {r.responded && <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-fuchsia-500/20 text-fuchsia-200 border border-fuchsia-400/30 font-semibold">응모</span>}
+                              {/* ★ 2026-07-06 재열람·공유·구매 신호 */}
+                              {(r.openCount ?? 0) > 1 && <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-cyan-500/15 text-cyan-200 border border-cyan-400/25">재열람 ×{r.openCount}</span>}
+                              {(r.deviceCount ?? 0) > 1 && <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-sky-500/15 text-sky-200 border border-sky-400/25" title="여러 기기에서 열람 — 지인 공유 가능성">기기 {r.deviceCount}</span>}
+                              {(r.purchaseCount ?? 0) > 0 && <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-rose-500/20 text-rose-200 border border-rose-400/30 font-semibold" title={`발송 후 7일 내 구매 ${r.purchaseCount}건`}>구매 {Math.round(Number(r.purchaseAmount || 0)).toLocaleString()}원</span>}
                               <span className="text-white/30 w-16 text-right hidden md:inline">{formatAgo(r.lastActiveAt)}</span>
                               <span className={`w-12 text-right font-medium ${r.completed ? 'text-emerald-300' : 'text-cyan-300'}`}>{r.completed ? '완독' : '열람'}</span>
                             </>
                           ) : (
-                            <span className="ml-auto font-medium text-white/30">미열람</span>
+                            <span className="ml-auto flex items-center gap-2">
+                              {(r.purchaseCount ?? 0) > 0 && <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-rose-500/20 text-rose-200 border border-rose-400/30 font-semibold" title={`발송 후 7일 내 구매 ${r.purchaseCount}건 (열람 없이 구매)`}>구매 {Math.round(Number(r.purchaseAmount || 0)).toLocaleString()}원</span>}
+                              <span className="font-medium text-white/30">미열람</span>
+                            </span>
                           )}
                         </div>
                         {/* ★ 2026-07-02(5) 수신자 상세 — 섹션 여정(본 곳·누른 버튼) + 열람 요약 + 응답·액션 이력 */}
@@ -657,6 +720,36 @@ export default function DmSendAndTrackModal({ dmId, dmTitle, show, onClose, init
                     );
                   })}
                 </div>
+                {/* ★ 2026-07-06 열람 시간대 + 섹션 이탈 지점 — 다음 발송·콘텐츠 개선 참고 (데이터 있을 때만) */}
+                {((tracking.hourDistribution?.length || 0) > 0 || (tracking.sectionExits?.length || 0) > 0) && (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                    {(tracking.hourDistribution?.length || 0) > 0 && (
+                      <div className="rounded-xl border border-white/10 bg-white/5 p-3">
+                        <p className="text-[10px] font-semibold text-white/50 mb-1.5 flex items-center gap-1"><Clock className="w-3 h-3" /> 열람이 많은 시간대</p>
+                        <div className="flex flex-wrap gap-1.5">
+                          {tracking.hourDistribution!.slice(0, 3).map((h) => (
+                            <span key={h.hour} className="text-[10.5px] px-2 py-1 rounded-lg bg-violet-500/15 text-violet-200 border border-violet-400/25">{h.hour}시 <strong>{h.cnt}</strong>건</span>
+                          ))}
+                        </div>
+                        <p className="text-[9.5px] text-white/35 mt-1.5">다음 발송은 {tracking.hourDistribution![0].hour}시 전후를 권장합니다 · Data source — dm_views 열람 시각(KST)</p>
+                      </div>
+                    )}
+                    {(tracking.sectionExits?.length || 0) > 0 && (
+                      <div className="rounded-xl border border-white/10 bg-white/5 p-3">
+                        <p className="text-[10px] font-semibold text-white/50 mb-1.5">이탈이 많은 섹션 (완독 실패 지점)</p>
+                        <div className="space-y-1">
+                          {tracking.sectionExits!.slice(0, 3).map((s) => (
+                            <div key={s.id} className="flex items-center justify-between text-[10.5px]">
+                              <span className="text-white/70 truncate flex-1">{s.label}</span>
+                              <span className="text-rose-300 font-semibold ml-2">{s.count}명 이탈</span>
+                            </div>
+                          ))}
+                        </div>
+                        <p className="text-[9.5px] text-white/35 mt-1.5">이 섹션 다음 내용을 다듬으면 완독률이 오릅니다 · Data source — section_interactions</p>
+                      </div>
+                    )}
+                  </div>
+                )}
                 <p className="text-[10px] text-white/30 italic text-center">행을 클릭하면 섹션 여정·버튼 클릭·응답 상세가 열립니다 · Data source — dm_recipient_tokens × dm_views × dm_event_responses</p>
               </>
             ) : (
@@ -693,9 +786,11 @@ export default function DmSendAndTrackModal({ dmId, dmTitle, show, onClose, init
             </div>
             <div className="ml-auto flex items-center gap-2">
               <button onClick={onClose} className="px-4 py-2 rounded-lg text-xs text-white/70 hover:bg-white/5">닫기</button>
-              <button onClick={() => handleSend()} disabled={!target || target.channelEligibleCount === 0 || !messageText.trim() || sending} className="px-5 py-2 rounded-lg text-sm font-semibold text-white bg-gradient-to-r from-indigo-500 to-violet-500 hover:from-indigo-600 hover:to-violet-600 disabled:opacity-30 disabled:cursor-not-allowed flex items-center gap-1.5">
+              <button onClick={() => handleSend()} disabled={(resendIds && resendIds.length > 0 ? false : (!target || target.channelEligibleCount === 0)) || !messageText.trim() || sending} className="px-5 py-2 rounded-lg text-sm font-semibold text-white bg-gradient-to-r from-indigo-500 to-violet-500 hover:from-indigo-600 hover:to-violet-600 disabled:opacity-30 disabled:cursor-not-allowed flex items-center gap-1.5">
                 {sending ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
-                {sending ? '처리 중...' : scheduleMode === 'immediate' ? (target ? `${target.channelEligibleCount.toLocaleString()}명 발송` : '발송') : '예약 발송'}
+                {sending ? '처리 중...'
+                  : resendIds && resendIds.length > 0 ? `미열람 ${resendIds.length.toLocaleString()}명 재발송`
+                  : scheduleMode === 'immediate' ? (target ? `${target.channelEligibleCount.toLocaleString()}명 발송` : '발송') : '예약 발송'}
               </button>
             </div>
           </div>

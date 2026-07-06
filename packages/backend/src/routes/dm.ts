@@ -36,7 +36,7 @@ import { getCreditCost } from '../utils/ai-credit-calc';
 import { runInCreditBundle } from '../utils/ai-credit-context';
 import type { Section } from '../utils/dm/dm-section-registry';
 import { selectSampleCustomers, selectSampleCustomerByKey, type SampleCustomerKey } from '../utils/dm/dm-sample-customer';
-import { lookupDmRecipientToken, issueDmRecipientTokensBulk } from '../utils/dm/dm-recipient-token';
+import { lookupDmRecipientToken, issueDmRecipientTokensBulk, lookupDmShortLink } from '../utils/dm/dm-recipient-token';
 import {
   computeDmProgressPct, isDmCompleted, sumSectionClicks,
   sanitizeSectionInteractions, buildDmSectionLabel, dmSectionTypeLabel, summarizeDmResponse,
@@ -118,6 +118,24 @@ dmPublicRouter.get('/images/:companyId/:filename', (req: Request, res: Response)
   const filePath = path.join(DM_IMAGE_DIR, companyId, filename);
   if (!fs.existsSync(filePath)) return res.status(404).send('Not found');
   res.sendFile(filePath);
+});
+
+// ★ 2026-07-06 단축링크 리다이렉트 (hlj.kr/<code> → nginx rewrite → /api/dm/v/s/<code>)
+//   기존 뷰어 URL로 302만 한다 — 추적·개인화(?r)·발송 로직 무변경(무결 최우선, Harold 확정).
+//   만료 토큰 = ?r 없이 공용 렌더로 / 미존재·오류 = 서비스 홈으로. 고객에게 500을 절대 보여주지 않는다.
+dmPublicRouter.get('/s/:code', async (req: Request, res: Response) => {
+  const base = process.env.HANJUL_BASE_URL || 'https://hanjul.ai';
+  try {
+    const found = await lookupDmShortLink(req.params.code);
+    if (!found) return res.redirect(302, base);
+    const target = found.expired
+      ? `${base}/api/dm/v/dm-${found.dmCode}`
+      : `${base}/api/dm/v/dm-${found.dmCode}?r=${found.token}`;
+    return res.redirect(302, target);
+  } catch (e: any) {
+    console.warn('[DM 단축링크] 조회 오류 — 홈으로 폴백:', e?.message);
+    return res.redirect(302, base);
+  }
 });
 
 // DM 뷰어 — 공개 페이지
@@ -588,7 +606,7 @@ dmRouter.post('/:id/send-to-target', async (req: any, res: any) => {
     const userId = req.user?.userId || companyId;
     if (!companyId) return res.status(403).json({ error: '회사 권한이 필요합니다.' });
 
-    const { filter, messageText, isAd, scheduledAt, allCustomers, callback: callbackReq, useIndividualCallback, confirmCallbackExclusion } = req.body as {
+    const { filter, messageText, isAd, scheduledAt, allCustomers, callback: callbackReq, useIndividualCallback, confirmCallbackExclusion, resendCustomerIds } = req.body as {
       filter?: Record<string, { operator: string; value: any }>;
       messageText?: string;
       isAd?: boolean;
@@ -600,12 +618,20 @@ dmRouter.post('/:id/send-to-target', async (req: any, res: any) => {
       useIndividualCallback?: boolean;
       /** 미등록/미보유 제외 안내 확인 후 재호출 플래그 */
       confirmCallbackExclusion?: boolean;
+      /** ★ 2026-07-06 미열람자 재발송 — 지정 고객 id만 발송(자격·수신거부·차감 게이트는 동일 경로 전부 적용) */
+      resendCustomerIds?: string[];
     };
+    // ★ 2026-07-06 재발송 모드 — 서버가 회사 격리 + DM 채널 자격을 재적용하므로 filter 불요
+    const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    const resendIds = Array.isArray(resendCustomerIds)
+      ? resendCustomerIds.map((x) => String(x)).filter((x) => UUID_RE.test(x)).slice(0, 10000)
+      : [];
+    const isResend = resendIds.length > 0;
     // ★ 2026-07-02(3) 전체 고객 발송 지원 — 타겟 추출 "전체 고객"(isAll) 확정분은 빈 filter 허용(= 조건 없음 = 전체 + DM 자격)
-    if (!allCustomers && (!filter || typeof filter !== 'object' || Object.keys(filter).length === 0)) {
+    if (!isResend && !allCustomers && (!filter || typeof filter !== 'object' || Object.keys(filter).length === 0)) {
       return res.status(400).json({ error: '발송 대상 조건이 필요합니다. 전체 발송은 타겟 추출에서 "전체 고객"으로 확정해주세요.' });
     }
-    const effectiveFilter = allCustomers ? {} : (filter as Record<string, { operator: string; value: any }>);
+    const effectiveFilter = (isResend || allCustomers) ? {} : (filter as Record<string, { operator: string; value: any }>);
     if (!messageText?.trim()) return res.status(400).json({ error: '문자 본문을 입력해주세요.' });
     const scheduled = !!scheduledAt;
     if (scheduled) {
@@ -654,17 +680,26 @@ dmRouter.post('/:id/send-to-target', async (req: any, res: any) => {
 
     // 발송 대상 resolve — DM 채널 자격(전화 유효·수신거부/무효 아님·활성) + filter. phone 중복 제거.
     //   전체 고객(allCustomers)이면 filter 조건 없이 DM 자격만 적용.
+    //   ★ 2026-07-06 재발송(resendIds)이면 지정 고객 한정 — 자격 필터는 동일하게 재적용(그 사이 수신거부한 고객 자동 제외).
     const { sql: filterSql, params: filterParams } = buildCustomerFilter(effectiveFilter, {
       tableAlias: 'c', startParamIndex: 2, storeCodeMode: 'skip', inputFormat: 'structured',
     });
     const dmWhere = buildChannelEligibilityWhere('dm', 'c');
-    const recRes = await query(
-      `SELECT DISTINCT ON (c.phone) c.id, c.phone, c.name, c.store_phone
-         FROM customers c
-        WHERE c.company_id = $1::uuid AND (${dmWhere})${filterSql}
-        ORDER BY c.phone, c.id`,
-      [companyId, ...filterParams],
-    );
+    const recRes = isResend
+      ? await query(
+          `SELECT DISTINCT ON (c.phone) c.id, c.phone, c.name, c.store_phone
+             FROM customers c
+            WHERE c.company_id = $1::uuid AND c.id = ANY($2::uuid[]) AND (${dmWhere})
+            ORDER BY c.phone, c.id`,
+          [companyId, resendIds],
+        )
+      : await query(
+          `SELECT DISTINCT ON (c.phone) c.id, c.phone, c.name, c.store_phone
+             FROM customers c
+            WHERE c.company_id = $1::uuid AND (${dmWhere})${filterSql}
+            ORDER BY c.phone, c.id`,
+          [companyId, ...filterParams],
+        );
     let recipients = recRes.rows;
     if (recipients.length === 0) return res.status(400).json({ error: '발송 대상이 0명입니다. 조건을 조정해주세요.', code: 'ZERO_MATCH' });
 
@@ -682,7 +717,7 @@ dmRouter.post('/:id/send-to-target', async (req: any, res: any) => {
     }
 
     // 수신자별 토큰 발급(벌크) + 링크 구성
-    let tokenPairs: Array<{ customerId: string; token: string }>;
+    let tokenPairs: Array<{ customerId: string; token: string; shortCode?: string }>;
     try {
       tokenPairs = await issueDmRecipientTokensBulk(dm.id, companyId, recipients.map((r: any) => String(r.id)), 30);
     } catch (e: any) {
@@ -693,14 +728,24 @@ dmRouter.post('/:id/send-to-target', async (req: any, res: any) => {
       throw e;
     }
     const tokenByCust: Record<string, string> = {};
-    for (const p of tokenPairs) tokenByCust[p.customerId] = p.token;
+    const shortByCust: Record<string, string> = {};
+    for (const p of tokenPairs) {
+      tokenByCust[p.customerId] = p.token;
+      if (p.shortCode) shortByCust[p.customerId] = p.shortCode;
+    }
     const baseUrl = process.env.HANJUL_BASE_URL || 'https://hanjul.ai';
+    // ★ 2026-07-06 단축링크(hlj.kr) — env 설정 + short_code 발급 성공 수신자만 짧은 링크(SMS 바이트 절감).
+    //   env 미설정/발급 폴백 = 기존 긴 링크 그대로(발송·추적 무결 최우선).
+    const shortBase = String(process.env.DM_SHORT_LINK_BASE || '').trim().replace(/\/+$/, '');
 
     // staging 적재 — phone + name(%고객명%) + extra1(수신자별 DM 링크 %기타1%) + callback(개별 회신 시 수신자별 매장번호)
     const stagingId = uuidv4();
     const phones = recipients.map((r: any) => String(r.phone || '').replace(/\D/g, ''));
     const names = recipients.map((r: any) => (r.name ?? null));
-    const links = recipients.map((r: any) => `${baseUrl}/api/dm/v/dm-${shortCode}?r=${tokenByCust[String(r.id)] || ''}`);
+    const links = recipients.map((r: any) => {
+      const sc = shortBase ? shortByCust[String(r.id)] : undefined;
+      return sc ? `${shortBase}/${sc}` : `${baseUrl}/api/dm/v/dm-${shortCode}?r=${tokenByCust[String(r.id)] || ''}`;
+    });
     const cbs = recipients.map((r: any) => (useIndividualCallback && r.callback ? String(r.callback).replace(/\D/g, '') : null));
     await query(
       `INSERT INTO campaign_send_staging (staging_id, company_id, phone, name, extra1, callback)
@@ -801,12 +846,33 @@ dmRouter.get('/:id/recipients-tracking', async (req: any, res: any) => {
     //   2026-07-02(5) CT 이관 — 상세 endpoint·AI 학습 워커와 공용 (getDmRecipientEngagementRows)
     const rows = await getDmRecipientEngagementRows(req.params.id, companyId);
 
+    // ★ 2026-07-06 구매 전환 — 발송(토큰 발급) 후 7일 내 purchases 실측 (고객별 건수·금액).
+    //   purchases.purchase_date = timezone 없는 timestamp(KST 적재) ↔ t.created_at timestamptz → KST 변환 명시.
+    //   조회 실패는 격리(전환 없이 응답) — 기존 추적 표시 무결.
+    const purchaseByCust: Record<string, { count: number; amount: number }> = {};
+    try {
+      const pRes = await query(
+        `SELECT t.customer_id, COUNT(*)::int AS cnt, COALESCE(SUM(p.total_amount), 0)::numeric AS amt
+           FROM dm_recipient_tokens t
+           JOIN purchases p ON p.company_id = t.company_id AND p.customer_id = t.customer_id
+            AND p.purchase_date >= (t.created_at AT TIME ZONE 'Asia/Seoul')
+            AND p.purchase_date <= (t.created_at AT TIME ZONE 'Asia/Seoul') + INTERVAL '7 days'
+          WHERE t.dm_id = $1::uuid AND t.company_id = $2::uuid
+          GROUP BY t.customer_id`,
+        [req.params.id, companyId],
+      );
+      for (const r of pRes.rows) purchaseByCust[String(r.customer_id)] = { count: Number(r.cnt) || 0, amount: Number(r.amt) || 0 };
+    } catch (e: any) {
+      console.warn('[DM 발송 추적] 구매 전환 조회 실패(전환 없이 응답):', e?.message);
+    }
+
     const recipients = rows.map((row: any) => {
       const viewed = !!row.viewed_at;
       const totalPages = Number(row.total_pages || 0);
       const pageReached = Number(row.page_reached || 0);
       const maxScrollPct = row.max_scroll_pct === null || row.max_scroll_pct === undefined ? null : Number(row.max_scroll_pct);
       const progressPct = viewed ? computeDmProgressPct(pageReached, totalPages, maxScrollPct) : 0;
+      const purchase = purchaseByCust[String(row.customer_id)] || null;
       return {
         customerId: row.customer_id,
         name: row.name || null,
@@ -823,10 +889,15 @@ dmRouter.get('/:id/recipients-tracking', async (req: any, res: any) => {
         responded: !!row.responded,
         durationSeconds: Number(row.duration_seconds || 0),
         lastActiveAt: row.last_active_at || null,
+        // ★ 2026-07-06 재열람·기기(공유 신호)·구매 전환
+        openCount: viewed ? Math.max(1, Number(row.open_count) || 1) : 0,
+        deviceCount: Array.isArray(row.seen_anon_ids) ? row.seen_anon_ids.length : (viewed ? 1 : 0),
+        purchaseCount: purchase?.count || 0,
+        purchaseAmount: purchase?.amount || 0,
       };
     });
 
-    // 깔때기 요약: 발송 → 열람 → 50% 도달 → 완독 → 클릭 → 응모(액션)
+    // 깔때기 요약: 발송 → 열람 → 50% 도달 → 완독 → 클릭 → 응모(액션) → 구매 전환
     const summary = {
       sent: recipients.length,
       viewed: recipients.filter((x) => x.viewed).length,
@@ -834,9 +905,64 @@ dmRouter.get('/:id/recipients-tracking', async (req: any, res: any) => {
       completed: recipients.filter((x) => x.completed).length,
       clicked: recipients.filter((x) => x.clicks > 0).length,
       responded: recipients.filter((x) => x.responded).length,
+      purchased: recipients.filter((x) => x.purchaseCount > 0).length,
+      purchaseAmount: recipients.reduce((acc, x) => acc + (x.purchaseAmount || 0), 0),
+      reViewed: recipients.filter((x) => x.openCount > 1).length,
+      multiDevice: recipients.filter((x) => x.deviceCount > 1).length,
     };
 
-    return res.json({ success: true, summary, recipients });
+    // ★ 2026-07-06 열람 시간대 분포(KST) — 다음 발송 시간 참고. 실패 격리.
+    let hourDistribution: Array<{ hour: number; cnt: number }> = [];
+    try {
+      const hRes = await query(
+        `SELECT EXTRACT(HOUR FROM viewed_at AT TIME ZONE 'Asia/Seoul')::int AS hour, COUNT(*)::int AS cnt
+           FROM dm_views WHERE dm_id = $1::uuid AND company_id = $2::uuid
+          GROUP BY 1 ORDER BY 2 DESC`,
+        [req.params.id, companyId],
+      );
+      hourDistribution = hRes.rows.map((r: any) => ({ hour: Number(r.hour), cnt: Number(r.cnt) }));
+    } catch (e: any) {
+      console.warn('[DM 발송 추적] 시간대 분포 조회 실패:', e?.message);
+    }
+
+    // ★ 2026-07-06 섹션 이탈 집계 — 열람자별 "마지막으로 본 섹션"(발행물 순서 기준)을 세어 이탈 지점 top 산출.
+    //   완독자는 이탈로 세지 않는다. 실패 격리.
+    let sectionExits: Array<{ id: string; label: string; count: number }> = [];
+    try {
+      const dm = await getDmDetail(req.params.id, companyId);
+      if (dm) {
+        const ordered = extractFlatSectionsFromDm(dm).map((s: any) => ({
+          id: String(s?.id || ''),
+          label: buildDmSectionLabel(String(s?.type || ''), s?.props),
+        }));
+        const orderIdx = new Map(ordered.map((s, i) => [s.id, i]));
+        const exitCount = new Map<string, number>();
+        for (const r of rows) {
+          if (!r.viewed_at) continue;
+          const completed = isDmCompleted(r.page_reached, r.total_pages, r.max_scroll_pct);
+          if (completed) continue;
+          const si = sanitizeSectionInteractions(r.section_interactions);
+          let lastIdx = -1;
+          for (const id of Object.keys(si)) {
+            if (si[id].views <= 0) continue;
+            const idx = orderIdx.get(id);
+            if (idx !== undefined && idx > lastIdx) lastIdx = idx;
+          }
+          if (lastIdx >= 0) {
+            const id = ordered[lastIdx].id;
+            exitCount.set(id, (exitCount.get(id) || 0) + 1);
+          }
+        }
+        sectionExits = [...exitCount.entries()]
+          .map(([id, count]) => ({ id, label: ordered[orderIdx.get(id)!].label, count }))
+          .sort((a, b) => b.count - a.count)
+          .slice(0, 5);
+      }
+    } catch (e: any) {
+      console.warn('[DM 발송 추적] 섹션 이탈 집계 실패:', e?.message);
+    }
+
+    return res.json({ success: true, summary, recipients, hourDistribution, sectionExits });
   } catch (err: any) {
     const msg = err?.message || '';
     if ((msg.includes('relation') || msg.includes('column')) && msg.includes('does not exist')) {

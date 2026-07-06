@@ -820,6 +820,8 @@
 | ab_variant | varchar | 실측 보강 (기존 문서 누락) |
 | **recipient_token** | **text** | **★ 2026-07-02 ALTER — 발송 수신자 토큰(추적 1급 키)** |
 | **anonymous_id** | **varchar(100)** | **★ 2026-07-02 ALTER — 뷰어 localStorage 익명 키** |
+| open_count | integer NOT NULL DEFAULT 1 | ★ 2026-07-06 ALTER — 재열람 횟수(진입 비콘마다 +1) |
+| seen_anon_ids | jsonb | ★ 2026-07-06 ALTER — 열람 기기 익명ID 배열(최대 20 — 공유 신호) |
 | **max_scroll_pct** | **integer** | **★ 2026-07-02 ALTER — 스크롤 최대 도달 %(0~100), NULL=미측정** |
 - INDEX: idx_dm_views_token (dm_id, recipient_token) WHERE recipient_token IS NOT NULL ★ 2026-07-02
 - INDEX: idx_dm_views_anon (dm_id, anonymous_id) WHERE anonymous_id IS NOT NULL ★ 2026-07-02
@@ -835,6 +837,7 @@
 | company_id | uuid |
 | created_at | timestamptz |
 | expires_at | timestamptz |
+| short_code | varchar(12) UNIQUE(부분 인덱스) — ★ 2026-07-06 추가 (ALTER) — hlj.kr 단축링크 코드(base62 8자). NULL=단축 미발급(긴 링크) |
 
 ### dm_event_responses (DM 이벤트 응답 누적) ★ D216+ 신설
 > **신규 16 섹션 (poll / survey / email_capture / lucky_draw / roulette 등) 인터랙션 누적.**

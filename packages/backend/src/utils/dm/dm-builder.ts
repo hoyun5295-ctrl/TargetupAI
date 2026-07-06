@@ -476,12 +476,14 @@ export async function getDmRecipientEngagementRows(dmId: string, companyId: stri
             t.customer_id, c.name, c.phone, t.created_at AS sent_at,
             v.page_reached, v.total_pages, v.duration_seconds, v.max_scroll_pct,
             v.section_interactions, v.viewed_at, v.last_active_at,
+            v.open_count, v.seen_anon_ids,
             EXISTS (SELECT 1 FROM dm_event_responses er WHERE er.campaign_id = t.dm_id AND er.customer_id = t.customer_id) AS responded
        FROM dm_recipient_tokens t
        JOIN customers c ON c.id = t.customer_id AND c.company_id = t.company_id
        LEFT JOIN LATERAL (
          SELECT dv.page_reached, dv.total_pages, dv.duration_seconds, dv.max_scroll_pct,
-                dv.section_interactions, dv.viewed_at, dv.last_active_at
+                dv.section_interactions, dv.viewed_at, dv.last_active_at,
+                dv.open_count, dv.seen_anon_ids
            FROM dm_views dv
           WHERE dv.dm_id = t.dm_id
             AND (dv.recipient_token = t.token OR (dv.phone IS NOT NULL AND dv.phone = c.phone))
@@ -552,6 +554,28 @@ export async function trackDmView(input: DmViewTrackInput) {
     if (input.isInit) {
       await query(`UPDATE dm_pages SET view_count = view_count + 1 WHERE id = $1`, [dmId]);
     }
+    // ★ 2026-07-06 재열람·기기(공유) 신호 — 별도 UPDATE + 격리(신규 컬럼 미마이그레이션이어도 본 추적은 무결).
+    //   open_count: 진입 비콘마다 +1(재열람 횟수). seen_anon_ids: 새 익명ID만 append(최대 20 — 공유 기기 수).
+    if (input.isInit || anonymousId) {
+      try {
+        await query(
+          `UPDATE dm_views SET
+             open_count = open_count + $1,
+             seen_anon_ids = CASE
+               WHEN $2::text IS NULL THEN seen_anon_ids
+               WHEN seen_anon_ids IS NULL THEN jsonb_build_array($2::text)
+               WHEN NOT (seen_anon_ids @> to_jsonb($2::text)) AND jsonb_array_length(seen_anon_ids) < 20
+                 THEN seen_anon_ids || to_jsonb($2::text)
+               ELSE seen_anon_ids
+             END
+           WHERE id = $3`,
+          [input.isInit ? 1 : 0, anonymousId, existing.id],
+        );
+      } catch (e: any) {
+        // 컬럼 미존재(ALTER 전) = 조용히 skip — 기존 추적 무결
+        if (!String(e?.message || '').includes('does not exist')) console.warn('[trackDmView] 재열람 신호 기록 실패:', e?.message);
+      }
+    }
   } else {
     await query(
       `INSERT INTO dm_views (dm_id, company_id, phone, recipient_token, anonymous_id, page_reached, total_pages, duration_seconds, max_scroll_pct, section_interactions, ip, user_agent)
@@ -562,6 +586,19 @@ export async function trackDmView(input: DmViewTrackInput) {
       ],
     );
     await query(`UPDATE dm_pages SET view_count = view_count + 1 WHERE id = $1`, [dmId]);
+    // ★ 2026-07-06 첫 열람 행에 첫 기기 기록 (open_count는 DEFAULT 1) — 격리, 실패해도 본 추적 무결
+    if (anonymousId) {
+      try {
+        await query(
+          `UPDATE dm_views SET seen_anon_ids = jsonb_build_array($1::text)
+           WHERE dm_id = $2 AND company_id = $3 AND seen_anon_ids IS NULL
+             AND ((recipient_token IS NOT NULL AND recipient_token = $4) OR (recipient_token IS NULL AND anonymous_id = $1))`,
+          [anonymousId, dmId, companyId, token],
+        );
+      } catch (e: any) {
+        if (!String(e?.message || '').includes('does not exist')) console.warn('[trackDmView] 첫 기기 기록 실패:', e?.message);
+      }
+    }
   }
 }
 

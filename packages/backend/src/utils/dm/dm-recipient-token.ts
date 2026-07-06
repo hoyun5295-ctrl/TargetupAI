@@ -22,6 +22,14 @@ export function generateDmToken(len = 24): string {
   return out;
 }
 
+/**
+ * ★ 2026-07-06 단축 코드 (hlj.kr/<code>) — 수신자 토큰과 1:1, base62 8자(62^8 ≈ 218조 — 충돌 사실상 0).
+ * SMS 바이트 절감용. UNIQUE 인덱스가 최종 방어(충돌 시 INSERT 실패 → 호출부 폴백).
+ */
+export function generateDmShortCode(len = 8): string {
+  return generateDmToken(len);
+}
+
 export interface DmTokenLookup {
   dmId: string;
   customerId: string;
@@ -71,23 +79,64 @@ export async function lookupDmRecipientToken(token: string): Promise<DmTokenLook
 
 /**
  * 수신자 목록에 토큰 벌크 발급 (발송 staging 시점, UNNEST 1회 INSERT).
- * 반환 = [{ customerId, token }] — 호출부가 수신자별 링크 구성에 사용.
+ * 반환 = [{ customerId, token, shortCode? }] — 호출부가 수신자별 링크 구성에 사용.
+ * ★ 2026-07-06 short_code 동반 발급 — 컬럼 미마이그레이션/충돌 등 어떤 실패에도
+ *   기존 방식(short_code 없이) INSERT로 폴백해 발송은 절대 죽지 않는다(무결 최우선, Harold 확정).
  */
 export async function issueDmRecipientTokensBulk(
   dmId: string,
   companyId: string,
   customerIds: string[],
   expiresDays = 30,
-): Promise<Array<{ customerId: string; token: string }>> {
+): Promise<Array<{ customerId: string; token: string; shortCode?: string }>> {
   if (!customerIds || customerIds.length === 0) return [];
-  const pairs = customerIds.map((cid) => ({ customerId: String(cid), token: generateDmToken(24) }));
+  const pairs = customerIds.map((cid) => ({
+    customerId: String(cid),
+    token: generateDmToken(24),
+    shortCode: generateDmShortCode(8) as string | undefined,
+  }));
   const tokens = pairs.map((p) => p.token);
   const custs = pairs.map((p) => p.customerId);
-  await query(
-    `INSERT INTO dm_recipient_tokens (token, dm_id, customer_id, company_id, created_at, expires_at)
-     SELECT u.token, $2::uuid, u.customer_id::uuid, $3::uuid, NOW(), NOW() + ($4 || ' days')::interval
-       FROM UNNEST($1::text[], $5::text[]) AS u(token, customer_id)`,
-    [tokens, dmId, companyId, String(Math.max(1, Math.floor(expiresDays))), custs],
+  const codes = pairs.map((p) => p.shortCode as string);
+  const days = String(Math.max(1, Math.floor(expiresDays)));
+  try {
+    await query(
+      `INSERT INTO dm_recipient_tokens (token, dm_id, customer_id, company_id, short_code, created_at, expires_at)
+       SELECT u.token, $2::uuid, u.customer_id::uuid, $3::uuid, u.short_code, NOW(), NOW() + ($4 || ' days')::interval
+         FROM UNNEST($1::text[], $5::text[], $6::text[]) AS u(token, customer_id, short_code)`,
+      [tokens, dmId, companyId, days, custs, codes],
+    );
+    return pairs;
+  } catch (e: any) {
+    // 컬럼 미존재(42703)·UNIQUE 충돌(23505) 등 → 기존 경로 폴백(단축 없이 긴 링크). 발송 무결이 단축보다 우선.
+    console.warn('[dm-recipient-token] short_code 발급 폴백(긴 링크 사용):', e?.message);
+    await query(
+      `INSERT INTO dm_recipient_tokens (token, dm_id, customer_id, company_id, created_at, expires_at)
+       SELECT u.token, $2::uuid, u.customer_id::uuid, $3::uuid, NOW(), NOW() + ($4 || ' days')::interval
+         FROM UNNEST($1::text[], $5::text[]) AS u(token, customer_id)`,
+      [tokens, dmId, companyId, days, custs],
+    );
+    return pairs.map((p) => ({ customerId: p.customerId, token: p.token }));
+  }
+}
+
+/**
+ * ★ 2026-07-06 단축 코드 조회 (공개 리다이렉트 전용) — hlj.kr/<code> → 원 뷰어 URL 재료.
+ * 만료 토큰도 dmCode는 반환(?r 없이 공용 렌더로 리다이렉트 — 링크가 죽지 않게).
+ */
+export async function lookupDmShortLink(code: string): Promise<{ token: string; dmCode: string; expired: boolean } | null> {
+  const c = String(code || '').trim();
+  if (!/^[0-9A-Za-z]{6,12}$/.test(c)) return null;
+  const r = await query(
+    `SELECT t.token, t.expires_at, d.short_code AS dm_code
+       FROM dm_recipient_tokens t
+       JOIN dm_pages d ON d.id = t.dm_id
+      WHERE t.short_code = $1
+      LIMIT 1`,
+    [c],
   );
-  return pairs;
+  if (r.rows.length === 0 || !r.rows[0].dm_code) return null;
+  const row = r.rows[0];
+  const expired = !!row.expires_at && new Date(row.expires_at).getTime() <= Date.now();
+  return { token: String(row.token), dmCode: String(row.dm_code), expired };
 }
