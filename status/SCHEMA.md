@@ -2343,13 +2343,20 @@ CREATE TABLE IF NOT EXISTS email_campaigns (
   unsubscribe_count integer NOT NULL DEFAULT 0,
   ai_generated boolean NOT NULL DEFAULT false,  -- ★ 2026-06-13 추가 (ALTER 필요) — AI 생성 캠페인 발송 시 30크레딧 분기
   target_spec jsonb,                            -- ★ 2026-06-13 추가 (ALTER 필요) — 예약 발송 대상 명세 {type:'customers',grades[]} | {type:'list',recipients[]}
+  sections jsonb,                               -- ★ 실측 (운영 존재) — 비주얼 빌더 Section[] (null = manual HTML)
+  parent_campaign_id uuid REFERENCES email_campaigns(id) ON DELETE SET NULL, -- ★ 2026-07-06 추가 (ALTER 필요) — 미수신자 재발송 자식이면 원본 id (null=원본)
+  resend_generation integer NOT NULL DEFAULT 0, -- ★ 2026-07-06 추가 (ALTER 필요) — 원본=0, 재발송본=1 (재발송 1회 한도 판정)
   created_at timestamptz NOT NULL DEFAULT NOW(),
   updated_at timestamptz NOT NULL DEFAULT NOW()
 );
 CREATE INDEX IF NOT EXISTS idx_email_campaigns_company_created ON email_campaigns(company_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_email_campaigns_parent ON email_campaigns(parent_campaign_id) WHERE parent_campaign_id IS NOT NULL;
 -- ALTER (운영 적용 SQL):
 --   ALTER TABLE email_campaigns ADD COLUMN IF NOT EXISTS ai_generated boolean NOT NULL DEFAULT false;
 --   ALTER TABLE email_campaigns ADD COLUMN IF NOT EXISTS target_spec jsonb;
+--   ALTER TABLE email_campaigns ADD COLUMN IF NOT EXISTS sections jsonb;
+--   ALTER TABLE email_campaigns ADD COLUMN IF NOT EXISTS parent_campaign_id uuid REFERENCES email_campaigns(id) ON DELETE SET NULL;
+--   ALTER TABLE email_campaigns ADD COLUMN IF NOT EXISTS resend_generation integer NOT NULL DEFAULT 0;
 
 -- 5. email_events — 자체 트래킹 적재 (open/click/bounce/unsubscribe/delivered). 2026-06-13 자체 픽셀/링크 발신부 신설.
 CREATE TABLE IF NOT EXISTS email_events (

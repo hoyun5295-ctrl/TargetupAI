@@ -65,6 +65,8 @@ export interface EmailCampaign {
   bounceCount: number;
   unsubscribeCount: number;
   sections: unknown[] | null; // 비주얼 빌더 Section[] (null = manual HTML)
+  parentCampaignId: string | null; // 재발송 자식이면 원본 campaign id (null = 원본)
+  resendGeneration: number;        // 원본=0, 재발송본=1 — 재발송 1회 한도 판정
   createdBy: string | null;
   createdAt: Date;
 }
@@ -365,23 +367,27 @@ export async function sendEmailCampaign(input: SendCampaignInput): Promise<{ mes
 
     // 인비토AI 학습 적재 — 이메일 발송 단일 길목(즉시·예약 공통). fire-and-forget, source_ref(campaignId) 멱등, 발송·돈 영향 0.
     //   finalMessage = 원본 제목+본문(광고 footer 합성 전). 마스킹은 logTrainingData가 별도. metrics = 발송 실측(시도/성공/실패).
-    void logCampaignTraining({
-      campaignId: campaign.id,
-      companyId: campaign.companyId,
-      messageType: 'EMAIL',
-      isAd: campaign.isAd,
-      targetCount: input.recipients.length,
-      finalMessage: buildEmailTrainingMessage(campaign.subject, campaign.textBody, campaign.htmlBody),
-      finalSource: campaign.aiGenerated ? 'selected_as_is' : 'manual',
-      sendAt: new Date(),
-    })
-      .then(() => updateTrainingMetrics({
-        sourceRef: getSourceRef(campaign.id),
-        sentCount: totalAccepted + totalRejected,
-        successCount: totalAccepted,
-        failCount: totalRejected,
-      }))
-      .catch(() => {});
+    //   ★ 재발송 자식(parentCampaignId)은 부모와 같은 카피라 문안 학습 코퍼스 이중 계상 방지 — 학습 적재 skip.
+    //     (반응·채널 성과는 ai-memory-accumulator가 email_campaigns에서 별도 반영하므로 여기서 막는 건 카피 코퍼스뿐)
+    if (!campaign.parentCampaignId) {
+      void logCampaignTraining({
+        campaignId: campaign.id,
+        companyId: campaign.companyId,
+        messageType: 'EMAIL',
+        isAd: campaign.isAd,
+        targetCount: input.recipients.length,
+        finalMessage: buildEmailTrainingMessage(campaign.subject, campaign.textBody, campaign.htmlBody),
+        finalSource: campaign.aiGenerated ? 'selected_as_is' : 'manual',
+        sendAt: new Date(),
+      })
+        .then(() => updateTrainingMetrics({
+          sourceRef: getSourceRef(campaign.id),
+          sentCount: totalAccepted + totalRejected,
+          successCount: totalAccepted,
+          failCount: totalRejected,
+        }))
+        .catch(() => {});
+    }
 
     return { messageId: lastMessageId, sentCount: totalAccepted };
   } catch (err: any) {
@@ -753,6 +759,102 @@ export async function getCampaignNonOpeners(companyId: string, campaignId: strin
 }
 
 // ════════════════════════════════════════════════════════════════════
+// 미수신자 재발송 (이메일 무료) — 미오픈자에게 같은 콘텐츠 재발송 (자식 캠페인)
+//   대상 = delivered 있고 open 없으며 unsubscribe/bounce/spam_report/dropped 없는 수신 이메일.
+//   고객DB 매칭 시 안전 필터(email_opt_in·is_opt_out·is_invalid) 통과분만, 미매칭 이메일은 원발송 대상이라 그대로 포함.
+// ════════════════════════════════════════════════════════════════════
+
+/** 재발송 대상 수신자 — 미오픈(수신거부·반송·스팸 제외) 이메일 → 개인화 customer 매칭. sendEmailCampaign 직접 소비. */
+export async function getCampaignResendRecipients(companyId: string, campaignId: string): Promise<EmailRecipient[]> {
+  const nonOpenRes = await query(
+    `SELECT DISTINCT lower(d.email) AS email
+     FROM email_events d
+     WHERE d.campaign_id = $1::uuid AND d.event_type = 'delivered'
+       AND NOT EXISTS (
+         SELECT 1 FROM email_events x
+         WHERE x.campaign_id = $1::uuid AND lower(x.email) = lower(d.email)
+           AND x.event_type IN ('open', 'unsubscribe', 'bounce', 'spam_report', 'dropped')
+       )`,
+    [campaignId],
+  );
+  const emails = nonOpenRes.rows.map((r: any) => String(r.email));
+  if (emails.length === 0) return [];
+
+  // 고객DB 매칭 — 안전 필터 통과분(개인화 customer 포함). RECIPIENT_SAFETY_WHERE = 등급/필터 발송 경로와 동일.
+  const safeRes = await query(
+    `SELECT DISTINCT ON (lower(email)) lower(email) AS email, ${RECIPIENT_SELECT_COLS}
+     FROM customers
+     WHERE company_id = $1::uuid AND lower(email) = ANY($2) AND ${RECIPIENT_SAFETY_WHERE}
+     ORDER BY lower(email)`,
+    [companyId, emails],
+  );
+  const safeRecipients = safeRes.rows.map(mapEmailRecipientRow);
+
+  // 고객DB에 존재하는 모든 이메일(안전 필터 무관). 미매칭(비고객·원발송 리스트분)만 그대로 포함하기 위한 차집합 —
+  //   수신거부 고객은 customers에 is_opt_out=true 행으로 남아 present에 잡히므로 unmatched에서 자동 배제된다.
+  const presentRes = await query(
+    `SELECT DISTINCT lower(email) AS email FROM customers
+     WHERE company_id = $1::uuid AND lower(email) = ANY($2)`,
+    [companyId, emails],
+  );
+  const presentSet = new Set<string>(presentRes.rows.map((r: any) => String(r.email)));
+  const unmatched: EmailRecipient[] = emails.filter((e) => !presentSet.has(e)).map((email) => ({ email }));
+
+  return [...safeRecipients, ...unmatched];
+}
+
+/** 재발송 자식 수 — 재발송 1회 한도 판정 (parent_campaign_id = 원본 id). 신규 ALTER 컬럼 — 미실행 시 throw → 라우트 503 분기. */
+export async function countResendChildren(companyId: string, campaignId: string): Promise<number> {
+  const res = await query(
+    `SELECT COUNT(*)::int AS cnt FROM email_campaigns
+     WHERE company_id = $1::uuid AND parent_campaign_id = $2::uuid`,
+    [companyId, campaignId],
+  );
+  return Number(res.rows[0]?.cnt) || 0;
+}
+
+/** 재발송 자식 캠페인 생성 — 원본 콘텐츠 복사 + parent_campaign_id + resend_generation. 완성 크레딧 재부과 없음(콘텐츠 재사용=무료). */
+export async function createResendChildCampaign(
+  parent: EmailCampaign,
+  createdBy: string | null,
+  subjectOverride?: string,
+): Promise<EmailCampaign> {
+  const childName = `${parent.name} (재발송)`.slice(0, 200);
+  const childSubject = ((subjectOverride && subjectOverride.trim()) ? subjectOverride.trim() : parent.subject).slice(0, 200);
+  const result = await query(
+    `INSERT INTO email_campaigns (
+       id, company_id, created_by, name, subject, html_body, text_body,
+       from_name, from_email, is_ad, status,
+       sent_count, open_count, click_count, bounce_count, unsubscribe_count,
+       ai_generated, sections, parent_campaign_id, resend_generation,
+       created_at, updated_at
+     ) VALUES (
+       gen_random_uuid(), $1::uuid, $2::uuid, $3, $4, $5, $6,
+       $7, $8, $9, 'draft',
+       0, 0, 0, 0, 0,
+       $10, $11::jsonb, $12::uuid, $13,
+       NOW(), NOW()
+     ) RETURNING *`,
+    [
+      parent.companyId,
+      createdBy,
+      childName,
+      childSubject,
+      parent.htmlBody,
+      parent.textBody,
+      parent.fromName,
+      parent.fromEmail,
+      parent.isAd,
+      parent.aiGenerated,
+      parent.sections ? JSON.stringify(parent.sections) : null,
+      parent.id,
+      parent.resendGeneration + 1,
+    ],
+  );
+  return mapRow(result.rows[0]);
+}
+
+// ════════════════════════════════════════════════════════════════════
 // 헬퍼
 // ════════════════════════════════════════════════════════════════════
 
@@ -786,6 +888,9 @@ function mapRow(row: any): EmailCampaign {
     bounceCount: row.bounce_count || 0,
     unsubscribeCount: row.unsubscribe_count || 0,
     sections: Array.isArray(row.sections) ? row.sections : (row.sections ?? null),
+    // parent_campaign_id / resend_generation = 신규 ALTER 컬럼. SELECT * 결과에 없으면(ALTER 전) 기본값.
+    parentCampaignId: row.parent_campaign_id ?? null,
+    resendGeneration: Number(row.resend_generation) || 0,
     createdBy: row.created_by,
     createdAt: new Date(row.created_at),
   };

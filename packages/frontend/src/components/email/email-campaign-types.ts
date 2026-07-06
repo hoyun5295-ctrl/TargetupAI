@@ -25,4 +25,6 @@ export interface EmailCampaign {
   createdAt: string;
   sections?: Section[] | null; // 비주얼 빌더 Section[] (있으면 비주얼 에디터로 수정)
   completed?: boolean; // ★ 2026-07-02 완성(50크레딧 납부) 여부 — 미완성 = 발송 잠금 (PC 미리보기는 항상 허용 — 07-02(3) Harold 지시)
+  parentCampaignId?: string | null; // ★ 2026-07-06 재발송 자식이면 원본 id (재발송 배지·재발송 게이트)
+  resendGeneration?: number;        // 원본=0, 재발송본=1
 }

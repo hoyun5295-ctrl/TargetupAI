@@ -5,7 +5,7 @@ import {
   AlertCircle, AlertTriangle, ArrowLeft, BarChart3, Check, ChevronDown, ChevronUp, Clock,
   Edit2, Eye, EyeOff, LayoutTemplate, Loader2, Lock, Mail, PenLine,
   RefreshCw, Send, Server, Settings, ShieldCheck, Smartphone, Sparkles,
-  Trash2, TrendingUp, Users, Wand2, X, Zap,
+  Trash2, TrendingUp, Users, Wand2, X,
 } from 'lucide-react';
 import ConfirmModal, { ConfirmState } from '../components/ConfirmModal';
 // 고객 데이터 없으면 AI 문안 생성 전 안내 (공용 게이트)
@@ -792,6 +792,7 @@ export default function EmailCampaignsPage() {
                 <div className="flex items-center gap-2 mb-1 flex-wrap">
                   <span className="text-base font-bold text-white">{c.name}</span>
                   <StatusBadge status={c.status} />
+                  {(c.resendGeneration ?? 0) > 0 && <span className="text-[10px] bg-cyan-500/20 text-cyan-300 px-1.5 py-0.5 rounded-full font-medium">재발송</span>}
                   {c.isAd && <span className="text-[10px] bg-amber-500/20 text-amber-300 px-1.5 py-0.5 rounded-full font-medium">광고성</span>}
                   {c.status === 'draft' && !c.completed && <span className="text-[10px] bg-white/10 text-white/50 px-1.5 py-0.5 rounded-full font-medium" title="완성 저장(50크레딧) 후 발송이 열립니다">완성 전</span>}
                   {c.status === 'draft' && c.hasPlaceholder && <span className="text-[10px] bg-orange-500/25 text-orange-200 px-1.5 py-0.5 rounded-full font-medium">직접 입력 필요</span>}
@@ -850,7 +851,7 @@ export default function EmailCampaignsPage() {
                         onClick={() => setNonOpenerModal({ campaign: c })}
                         className="inline-flex items-center gap-1 text-[11px] text-cyan-300 border border-cyan-400/20 hover:bg-cyan-500/10 px-2.5 py-1.5 rounded-lg"
                       >
-                        <Smartphone className="w-3 h-3" /> 미오픈 SMS
+                        <RefreshCw className="w-3 h-3" /> 미수신자 재발송
                       </button>
                     </>
                   )}
@@ -1006,7 +1007,7 @@ export default function EmailCampaignsPage() {
         />
       )}
 
-      {/* 미오픈자 SMS 크로스 채널 모달 */}
+      {/* 미수신자 재발송 모달 (주: 이메일 무료 재발송 / 부: SMS 유료 상위 옵션) */}
       {nonOpenerModal && (
         <NonOpenerModal
           campaign={nonOpenerModal.campaign}
@@ -1014,6 +1015,7 @@ export default function EmailCampaignsPage() {
           onClose={() => setNonOpenerModal(null)}
           onToast={showToast}
           onGoSms={() => navigate('/dashboard')}
+          onReload={loadAll}
         />
       )}
 
@@ -1891,7 +1893,7 @@ function InsightModal({ campaign, authHeaders, onClose, onToast }: InsightModalP
 }
 
 // ════════════════════════════════════════════════════════════════════
-// 미오픈자 SMS 크로스 채널 모달
+// 미수신자 재발송 모달 (주: 이메일 무료 재발송 / 부: SMS 유료 상위 옵션)
 // ════════════════════════════════════════════════════════════════════
 
 interface NonOpenerModalProps {
@@ -1900,19 +1902,46 @@ interface NonOpenerModalProps {
   onClose: () => void;
   onToast: (msg: string, type?: 'success' | 'error' | 'info' | 'warning') => void;
   onGoSms: () => void;
+  onReload: () => void;
 }
 
-function NonOpenerModal({ campaign, authHeaders, onClose, onToast, onGoSms }: NonOpenerModalProps) {
+interface NonOpenerResult {
+  matched: Array<{ phone: string; name: string | null }>;
+  unmatchedCount: number;
+  totalNonOpeners: number;
+  resendEligible: number;
+  resendable: boolean;
+  resendBlockReason: string | null;
+}
+
+function NonOpenerModal({ campaign, authHeaders, onClose, onToast, onGoSms, onReload }: NonOpenerModalProps) {
+  // ★ 훅은 전부 조기 return 위에 (2026-07-06 훅 개수 불일치 백지 사고 방지)
   const [loading, setLoading] = useState(true);
-  const [result, setResult] = useState<{ matched: Array<{ phone: string; name: string | null }>; unmatchedCount: number; totalNonOpeners: number } | null>(null);
+  const [result, setResult] = useState<NonOpenerResult | null>(null);
+  const [subject, setSubject] = useState(campaign.subject);
+  const [phase, setPhase] = useState<'view' | 'confirm'>('view');
+  const [sending, setSending] = useState(false);
 
   useEffect(() => {
     (async () => {
       try {
         const res = await fetch(`/api/email/campaigns/${campaign.id}/non-openers`, { headers: authHeaders() });
         const data = await res.json();
-        if (data.success) setResult({ matched: data.matched, unmatchedCount: data.unmatchedCount, totalNonOpeners: data.totalNonOpeners });
-        else { onToast(data.error || '미오픈자 조회 실패', 'error'); onClose(); }
+        if (data.success) {
+          setResult({
+            matched: data.matched,
+            unmatchedCount: data.unmatchedCount,
+            totalNonOpeners: data.totalNonOpeners,
+            resendEligible: data.resendEligible ?? 0,
+            resendable: !!data.resendable,
+            resendBlockReason: data.resendBlockReason ?? null,
+          });
+          if (data.subject) setSubject(data.subject);
+        } else if (data.code === 'DB_MIGRATION_PENDING') {
+          onToast('기능을 준비 중입니다. 잠시 후 다시 시도해 주세요.', 'warning'); onClose();
+        } else {
+          onToast(data.error || '미오픈자 조회 실패', 'error'); onClose();
+        }
       } catch (e: any) { onToast(e?.message || '조회 중 오류', 'error'); onClose(); }
       finally { setLoading(false); }
     })();
@@ -1925,18 +1954,48 @@ function NonOpenerModal({ campaign, authHeaders, onClose, onToast, onGoSms }: No
       .catch(() => onToast('복사 실패', 'error'));
   };
 
+  const doResend = async () => {
+    setSending(true);
+    try {
+      const res = await fetch(`/api/email/campaigns/${campaign.id}/resend-non-openers`, {
+        method: 'POST',
+        headers: authHeaders(),
+        body: JSON.stringify({ subject: subject.trim() || undefined }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        onToast(`미수신자 ${Number(data.total).toLocaleString()}명에게 재발송을 시작했습니다 (무료).`, 'success');
+        onReload();
+        onClose();
+      } else if (data.code === 'DB_MIGRATION_PENDING') {
+        onToast('기능을 준비 중입니다. 잠시 후 다시 시도해 주세요.', 'warning');
+        setPhase('view');
+      } else {
+        onToast(data.error || '재발송 실패', 'error');
+        setPhase('view');
+      }
+    } catch (e: any) {
+      onToast(e?.message || '재발송 중 오류', 'error');
+      setPhase('view');
+    } finally {
+      setSending(false);
+    }
+  };
+
+  const LARGE_VOLUME = 10000;
+
   return (
-    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-[60]">
-      <div className="bg-violet-900/40 border border-white/10 rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
-        <div className="sticky top-0 bg-violet-900/40 border-b border-white/10 px-6 py-4 flex items-center justify-between">
-          <h3 className="text-lg font-bold text-white flex items-center gap-2"><Smartphone className="w-5 h-5 text-cyan-300" /> 미오픈자 SMS 재발송</h3>
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-[2000]">
+      <div className="bg-slate-900 border border-white/10 rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+        <div className="sticky top-0 bg-slate-900 border-b border-white/10 px-6 py-4 flex items-center justify-between">
+          <h3 className="text-lg font-bold text-white flex items-center gap-2"><RefreshCw className="w-5 h-5 text-cyan-300" /> 미수신자 재발송</h3>
           <button onClick={onClose} className="text-white/50 hover:text-white p-1.5 rounded hover:bg-white/10" aria-label="닫기"><X className="w-5 h-5" /></button>
         </div>
         <div className="p-6 space-y-4">
-          <div className="text-xs text-white/50">{campaign.name} — 이메일을 열지 않은 고객을 SMS로 다시 만나보세요.</div>
+          <div className="text-xs text-white/50">{campaign.name} — 이메일을 열지 않은 고객에게 다시 보냅니다.</div>
           {loading ? (
             <div className="py-12 flex justify-center text-white/50"><Loader2 className="w-6 h-6 animate-spin" /></div>
-          ) : result && (
+          ) : result && phase === 'view' ? (
             <>
               <div className="grid grid-cols-3 gap-2">
                 <div className="bg-white/5 border border-white/10 rounded-xl p-3 text-center">
@@ -1944,33 +2003,75 @@ function NonOpenerModal({ campaign, authHeaders, onClose, onToast, onGoSms }: No
                   <div className="text-lg font-bold text-white">{result.totalNonOpeners.toLocaleString()}</div>
                 </div>
                 <div className="bg-cyan-500/10 border border-cyan-400/25 rounded-xl p-3 text-center">
-                  <div className="text-[10px] text-white/50">전화 매칭</div>
-                  <div className="text-lg font-bold text-cyan-300">{result.matched.length.toLocaleString()}</div>
+                  <div className="text-[10px] text-white/50">재발송 대상</div>
+                  <div className="text-lg font-bold text-cyan-300">{result.resendEligible.toLocaleString()}</div>
                 </div>
                 <div className="bg-white/5 border border-white/10 rounded-xl p-3 text-center">
-                  <div className="text-[10px] text-white/50">번호 없음</div>
-                  <div className="text-lg font-bold text-white/60">{result.unmatchedCount.toLocaleString()}</div>
+                  <div className="text-[10px] text-white/50">전화 매칭</div>
+                  <div className="text-lg font-bold text-white/60">{result.matched.length.toLocaleString()}</div>
                 </div>
               </div>
-              {result.matched.length > 0 ? (
-                <>
-                  <div className="bg-violet-950/40 rounded-lg p-3 max-h-40 overflow-y-auto text-[11px] text-white/70 space-y-1">
-                    {result.matched.slice(0, 50).map((m, i) => (
-                      <div key={i} className="flex justify-between"><span>{m.name || '(이름 없음)'}</span><span className="text-white/50">{m.phone}</span></div>
-                    ))}
-                    {result.matched.length > 50 && <div className="text-white/40 text-center pt-1">외 {result.matched.length - 50}건</div>}
-                  </div>
+
+              <div className="bg-cyan-500/10 border border-cyan-400/25 rounded-xl p-4 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="text-sm font-bold text-white flex items-center gap-1.5"><Mail className="w-4 h-4 text-cyan-300" /> 이메일로 재발송</div>
+                  <span className="text-[10px] bg-emerald-500/20 text-emerald-300 px-2 py-0.5 rounded-full font-semibold">무료</span>
+                </div>
+                <div className="text-[11px] text-white/60">안 열어본 {result.resendEligible.toLocaleString()}명에게 같은 내용을 다시 보냅니다. 제목을 바꾸면 열람률이 오릅니다.</div>
+                <div>
+                  <label className="text-[10px] text-white/40">제목 (바꿔서 재발송 권장)</label>
+                  <input
+                    value={subject}
+                    onChange={(e) => setSubject(e.target.value)}
+                    maxLength={200}
+                    className="w-full mt-1 px-3 py-2 rounded-lg bg-slate-800 border border-white/10 text-sm text-white placeholder-white/30"
+                    placeholder="이메일 제목"
+                  />
+                </div>
+                <button
+                  disabled={!result.resendable || result.resendEligible === 0}
+                  onClick={() => setPhase('confirm')}
+                  className="w-full py-2.5 bg-gradient-to-r from-cyan-500 to-blue-500 hover:opacity-90 disabled:opacity-30 disabled:cursor-not-allowed rounded-lg text-sm font-bold text-white flex items-center justify-center gap-1.5"
+                >
+                  <RefreshCw className="w-4 h-4" /> {result.resendEligible.toLocaleString()}명에게 재발송
+                </button>
+                {!result.resendable && result.resendBlockReason && (
+                  <div className="text-[11px] text-amber-300/80">{result.resendBlockReason}</div>
+                )}
+              </div>
+
+              <div className="border-t border-white/10 pt-3">
+                <div className="text-[11px] text-white/40 mb-2">더 확실히 닿고 싶으면 — 문자로 (유료)</div>
+                {result.matched.length > 0 ? (
                   <div className="flex gap-2">
-                    <button onClick={copyPhones} className="flex-1 py-2 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg text-xs text-white/80">전화번호 복사</button>
-                    <button onClick={onGoSms} className="flex-1 py-2 bg-gradient-to-r from-cyan-500 to-blue-500 hover:opacity-90 rounded-lg text-xs font-bold text-white flex items-center justify-center gap-1.5"><Zap className="w-3.5 h-3.5" /> SMS 발송하러 가기</button>
+                    <button onClick={copyPhones} className="flex-1 py-2 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg text-xs text-white/70">전화번호 {result.matched.length}건 복사</button>
+                    <button onClick={onGoSms} className="flex-1 py-2 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg text-xs text-white/70 flex items-center justify-center gap-1.5"><Smartphone className="w-3.5 h-3.5" /> SMS 발송하러 가기</button>
                   </div>
-                </>
-              ) : (
-                <div className="text-center text-sm text-white/50 py-6">전화번호가 매칭되는 미오픈 고객이 없습니다.</div>
-              )}
-              <div className="text-[10px] text-white/30 italic">Data source — delivered 후 미오픈 수신자 ↔ 고객DB 전화 매칭</div>
+                ) : (
+                  <div className="text-[11px] text-white/40">전화번호가 매칭되는 미오픈 고객이 없습니다.</div>
+                )}
+              </div>
+
+              <div className="text-[10px] text-white/30 italic">Data source — email_events delivered 후 미오픈(수신거부·반송 제외) · 전화 매칭은 고객DB</div>
             </>
-          )}
+          ) : result && phase === 'confirm' ? (
+            <>
+              <div className="bg-slate-800/60 border border-white/10 rounded-xl p-4 space-y-2">
+                <div className="text-sm text-white">미수신자 <strong className="text-cyan-300">{result.resendEligible.toLocaleString()}명</strong>에게 재발송합니다.</div>
+                <div className="text-[11px] text-white/50 break-words">제목: {subject.trim() || campaign.subject}</div>
+                <div className="text-[11px] text-emerald-300">비용 0원 — 이메일 발송은 회사 SMTP로 나가며 무료입니다.</div>
+                {result.resendEligible >= LARGE_VOLUME && (
+                  <div className="text-[11px] text-amber-300 flex items-start gap-1.5"><AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" /> 대량 발송입니다. 발신 도메인 평판에 영향을 줄 수 있어 재발송은 1회로 제한됩니다.</div>
+                )}
+              </div>
+              <div className="flex gap-2">
+                <button onClick={() => setPhase('view')} disabled={sending} className="flex-1 py-2.5 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg text-sm text-white/70 disabled:opacity-40">뒤로</button>
+                <button onClick={doResend} disabled={sending} className="flex-1 py-2.5 bg-gradient-to-r from-cyan-500 to-blue-500 hover:opacity-90 disabled:opacity-40 rounded-lg text-sm font-bold text-white flex items-center justify-center gap-1.5">
+                  {sending ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />} {sending ? '발송 시작 중...' : '재발송 확정'}
+                </button>
+              </div>
+            </>
+          ) : null}
         </div>
       </div>
     </div>

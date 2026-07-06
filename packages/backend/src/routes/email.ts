@@ -46,6 +46,9 @@ import {
   getCampaignPerformanceStats,
   getCompanyOpenHourDistribution,
   getCampaignNonOpeners,
+  getCampaignResendRecipients,
+  countResendChildren,
+  createResendChildCampaign,
   listEmailPersonalizationVars,
   type EmailRecipient,
   type EmailTargetSpec,
@@ -1271,12 +1274,77 @@ router.get('/campaigns/:id/non-openers', async (req: Request, res: Response) => 
     if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
     const campaign = await getEmailCampaign(companyId, req.params.id);
     if (!campaign) return res.status(404).json({ success: false, error: '캠페인을 찾을 수 없습니다.' });
-    const result = await getCampaignNonOpeners(companyId, req.params.id);
-    return res.json({ success: true, ...result });
+    const smsResult = await getCampaignNonOpeners(companyId, req.params.id);              // SMS 크로스채널(전화 매칭) — 유료 상위 옵션
+    const resendRecipients = await getCampaignResendRecipients(companyId, req.params.id); // 이메일 재발송 대상(무료·주)
+    const childCount = await countResendChildren(companyId, req.params.id);               // 재발송 1회 한도
+    const isChild = campaign.resendGeneration > 0;
+    const resendable = !isChild && childCount === 0 && resendRecipients.length > 0;
+    const resendBlockReason = isChild
+      ? '재발송본은 다시 재발송할 수 없습니다.'
+      : childCount > 0
+        ? '이미 재발송한 캠페인입니다 (재발송 1회 한도).'
+        : resendRecipients.length === 0
+          ? '재발송할 미오픈 대상이 없습니다.'
+          : null;
+    return res.json({
+      success: true,
+      ...smsResult,
+      subject: campaign.subject,
+      resendEligible: resendRecipients.length,
+      resendable,
+      resendBlockReason,
+    });
   } catch (err: any) {
     console.error('[Email /campaigns/:id/non-openers] 오류:', err);
-    if (handleDbMigrationError(err, res, 'email_events')) return;
+    if (handleDbMigrationError(err, res, 'email_campaigns')) return;
     return res.status(500).json({ success: false, error: err?.message || '미오픈자 조회 실패' });
+  }
+});
+
+// ★ 2026-07-06 미수신자 재발송 — 미오픈자에게 같은 콘텐츠를 이메일로 다시 발송(무료).
+//   자식 캠페인 1건 생성(원본 통계 무손상) + 재발송 1회 한도 + 발신 도메인 평판 보호. 완성 크레딧 재부과 없음(콘텐츠 재사용).
+router.post('/campaigns/:id/resend-non-openers', async (req: Request, res: Response) => {
+  const auth = await ensureEmailAdmin(req, res);
+  if (!auth) return;
+  try {
+    const parent = await getEmailCampaign(auth.companyId, req.params.id);
+    if (!parent) return res.status(404).json({ success: false, error: '캠페인을 찾을 수 없습니다.' });
+    if (parent.status !== 'completed' || parent.sentCount <= 0) {
+      return res.status(400).json({ success: false, error: '발송 완료된 캠페인만 재발송할 수 있습니다.' });
+    }
+    // 재발송 세대 한도 1회 — 재발송본 재발송 차단 + 원본당 1회
+    if (parent.resendGeneration > 0) {
+      return res.status(400).json({ success: false, error: '재발송본은 다시 재발송할 수 없습니다.', code: 'RESEND_LIMIT' });
+    }
+    if ((await countResendChildren(auth.companyId, parent.id)) > 0) {
+      return res.status(400).json({ success: false, error: '이미 재발송한 캠페인입니다 (재발송 1회 한도 — 발신 도메인 평판 보호).', code: 'RESEND_LIMIT' });
+    }
+    if (!(await isSmtpConfigured(auth.companyId))) {
+      return res.status(400).json({ success: false, error: '회사 SMTP 설정 후 재발송할 수 있습니다.' });
+    }
+    // 미오픈 이메일 산출(수신거부·반송·스팸·오픈 제외)
+    const recipients = await getCampaignResendRecipients(auth.companyId, parent.id);
+    if (recipients.length === 0) {
+      return res.status(400).json({ success: false, error: '재발송할 미오픈 대상이 0건입니다.', code: 'ZERO_COUNT' });
+    }
+    const subjectOverride = typeof req.body?.subject === 'string' ? req.body.subject : undefined;
+    // 자식 캠페인 생성(콘텐츠 재사용 = 무료, 완성 게이트 우회하도록 sendEmailCampaign 직접 호출)
+    const child = await createResendChildCampaign(parent, auth.userId, subjectOverride);
+    // 즉시 발송 — status='sending' 선점 후 응답, 실제 SMTP 루프는 백그라운드(타임아웃 차단)
+    await query(
+      `UPDATE email_campaigns SET status = 'sending', updated_at = NOW() WHERE id = $1::uuid AND company_id = $2::uuid`,
+      [child.id, auth.companyId],
+    );
+    setImmediate(() => {
+      sendEmailCampaign({ campaignId: child.id, recipients, immediate: true })
+        .catch((e: any) => console.error(`[Email /resend-non-openers] 백그라운드 발송 실패 (child ${child.id}):`, e?.message));
+    });
+    return res.json({ success: true, queued: true, childId: child.id, total: recipients.length });
+  } catch (err: any) {
+    console.error('[Email /campaigns/:id/resend-non-openers] 오류:', err);
+    if (handleDbMigrationError(err, res, 'email_campaigns')) return;
+    if (handleEncryptionKeyError(err, res)) return;
+    return res.status(500).json({ success: false, error: err?.message || '재발송 실패' });
   }
 });
 
