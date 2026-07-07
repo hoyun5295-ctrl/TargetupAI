@@ -11,6 +11,8 @@ import { SUCCESS_CODES, PENDING_CODES } from './sms-result-map';
 import { classifyResultTables, mergeCampaignCounts, type CampaignAggCounts } from './sms-table-split';
 import { splitLinesByMsgType } from './sms-line-split';
 import { toQtmsgType } from './qtmsg-type';
+// ★ 2026-07-07 비토 게이트웨이 라인 전용 SENDER_KEY 주입 (Agent v1.0.10 kakao_sender_key 필수 대응)
+import { withSenderKey } from './alimtalk-emphasize';
 // ★ 2026-07-03 KAKAO 문안 학습 코퍼스 적재 (전 채널 학습 통합 Phase 2) — fire-and-forget, 발송 무영향
 import { logCampaignTraining, getSourceRef } from './training-logger';
 
@@ -666,6 +668,35 @@ export async function getAllBulkSmsTables(): Promise<string[]> {
 }
 
 /**
+ * ★ 2026-07-07: 비토 게이트웨이 라인 테이블 합집합 (캐시).
+ *   비토 Agent(v1.0.10+)는 알림톡에 발신프로필키(kakao_sender_key)를 명시 요구한다
+ *   (미동봉 = Agent 필드매핑 실패 → status_code 9999, 게이트웨이 도달 X).
+ *   insertAlimtalkQueue가 INSERT 대상 테이블이 이 목록에 있을 때만 SENDER_KEY를 주입한다.
+ *   DB(sms_line_groups group_type='bito')가 진실 — 하드코딩 금지. 미설정이면 빈 배열(주입 어디에도 X).
+ */
+export async function getBitoSmsTables(): Promise<string[]> {
+  const cached = lineGroupCache.get('all-bito');
+  if (cached && cached.expires > Date.now()) return cached.tables;
+
+  const result = await query(
+    `SELECT sms_tables FROM sms_line_groups WHERE group_type = 'bito' AND is_active = true`
+  );
+  const merged: string[] = [];
+  for (const row of result.rows) {
+    const arr: string[] = row.sms_tables || [];
+    for (const t of arr) {
+      if (isValidSmsTable(t)) {
+        if (!merged.includes(t)) merged.push(t);
+      } else {
+        console.error(`[QTmsg] ⚠️ bito 라인그룹에 잘못된 테이블명: "${t}" — 스킵`);
+      }
+    }
+  }
+  lineGroupCache.set('all-bito', { tables: merged, hasDedicatedGroup: merged.length > 0, expires: Date.now() + LINE_GROUP_CACHE_TTL });
+  return merged;
+}
+
+/**
  * ★ 2026-06-11: 발송 큐 변경(취소/수신자삭제/예약시간변경/문안수정) 전용 — live 라인 테이블 합집합.
  *   배경 — 에이치피오 예약취소 미삭제 발송 사고: 적재는 사용자 라인(getCompanySmsTables(companyId, userId)),
  *   취소는 회사 라인(getCompanySmsTables(companyId))만 DELETE → 0건 삭제 → PG만 cancelled 표시 → 예약 시각 실발송.
@@ -949,6 +980,39 @@ export async function insertAlimtalkQueue(
   const table = tables[0]; // 알림톡은 첫 번째 테이블 사용
   let inserted = 0;
 
+  // ★ 2026-07-07: 비토 게이트웨이 라인 전용 SENDER_KEY(발신프로필키) 주입.
+  //   비토 Agent v1.0.10+는 kakao_sender_key 필수(미동봉 = 필드매핑 실패 9999·발송 전 차단).
+  //   표준 QTmsg 라인은 중계서버가 템플릿코드로 자동 도출 + 에이전트 select_sql이 k_etc_json을
+  //   SQL 합성(D234+)하므로 절대 주입하지 않는다 — INSERT 대상이 bito 라인일 때만 병합.
+  //   templateCode→profile_key 조인은 발송 gate(campaigns.ts:1390)·resolveTemplateContext(alimtalk.ts)와
+  //   동일 컬럼·동일 조인. 알림톡 4경로 전부 호출당 단일 템플릿(rows 전행 동일 templateCode+companyId)이라 rows[0] 기준 1회 조회.
+  let bitoSenderKey: string | null = null;
+  const bitoTables = await getBitoSmsTables();
+  if (bitoTables.includes(table)) {
+    const first = rows[0];
+    if (first?.templateCode && first?.companyId) {
+      try {
+        const skRes = await query(
+          `SELECT p.profile_key
+             FROM kakao_templates t
+             JOIN kakao_sender_profiles p ON p.id = t.profile_id
+            WHERE t.company_id = $1 AND t.template_code = $2
+            LIMIT 1`,
+          [first.companyId, first.templateCode],
+        );
+        bitoSenderKey = skRes.rows[0]?.profile_key || null;
+      } catch (skErr) {
+        console.error('[QTmsg] 비토 라인 SENDER_KEY 조회 실패 (주입 없이 진행):', skErr);
+      }
+    }
+    if (!bitoSenderKey) {
+      console.error(
+        `[QTmsg] ⚠️ 비토 라인(${table}) 알림톡 SENDER_KEY 도출 실패 — template=${rows[0]?.templateCode || '(없음)'}, company=${rows[0]?.companyId || '(없음)'}. ` +
+        `k_etc_json에 SENDER_KEY 미주입 → Agent 필드검증 실패(9999) 예상`,
+      );
+    }
+  }
+
   // 배치 단위 INSERT (5000건씩)
   const BATCH = 5000;
   for (let i = 0; i < rows.length; i += BATCH) {
@@ -958,6 +1022,16 @@ export async function insertAlimtalkQueue(
 
     for (const r of batch) {
       const idx = params.length;
+      // ★ 2026-07-07: 비토 라인만 SENDER_KEY 병합. varchar(1024) 초과 시 원본 유지(INSERT 오류로 배치 전체 실패 차단).
+      let rowEtcJson: string | null = r.etcJson || null;
+      if (bitoSenderKey) {
+        const mergedEtc = withSenderKey(r.etcJson, bitoSenderKey);
+        if (mergedEtc.length <= 1024) {
+          rowEtcJson = mergedEtc;
+        } else {
+          console.error(`[QTmsg] ⚠️ k_etc_json 1024자 초과(${mergedEtc.length}) — SENDER_KEY 미주입(원본 유지), template=${r.templateCode}`);
+        }
+      }
       values.push(`(?, ?, ?, 'K', ?, ?, ?, ?, ?, NOW(), NOW(), '1', ?, ?, ?)`);
       params.push(
         r.phone,                       // dest_no
@@ -968,7 +1042,7 @@ export async function insertAlimtalkQueue(
         r.nextType || 'L',             // k_next_type
         r.nextContents || null,        // k_next_contents
         r.buttonJson || null,          // k_button_json
-        r.etcJson || null,             // k_etc_json
+        rowEtcJson,                    // k_etc_json (비토 라인 = SENDER_KEY 병합 / 표준 라인 = 원본)
         appEtc1 || null,               // app_etc1 (캠페인/추적 식별자 — #4-c 결과 매칭 fix)
         r.companyId || null,           // app_etc2 (companyId 추적용)
       );

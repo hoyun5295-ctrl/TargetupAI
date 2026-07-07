@@ -775,7 +775,7 @@ async function processExecution(exec: ExecutionRow): Promise<StepOutcome> {
             ? fillAlimtalkVarMap(step.alimtalk_next_contents, step.alimtalk_variable_map || {}, customerWithEvent, undefined, buildDefaultFallbacks(step.alimtalk_variable_map || {}))
             : undefined,
           buttonJson: buttonJson || undefined,
-          // ★ 매뉴얼(qtmsg): 강조표기형 emphasize_title(본문과 동일 치환)만 → k_etc_json (senderkey 제외 — 알림톡 템플릿코드 자동). 직접/자동과 동일 형태.
+          // ★ 매뉴얼(qtmsg): 강조표기형 emphasize_title(본문과 동일 치환)만 → k_etc_json (senderkey는 CT-04가 비토 라인만 주입). 직접/자동과 동일 형태.
           etcJson: buildAlimtalkEtcJson({
             emphasizeTitle: kakaoTemplateRow.emphasize_title,
             representLink: kakaoTemplateRow.represent_link,

@@ -19,7 +19,7 @@ ok('title + 치환 → {title:치환값} (senderkey 없음)', () => {
   });
   const o = JSON.parse(r!);
   assert.strictEqual(o.title, '홍길동님 주문');
-  assert.ok(!('senderkey' in o)); // ★ 매뉴얼: 알림톡은 senderkey 제외
+  assert.ok(!('senderkey' in o)); // ★ builder는 senderkey를 만들지 않음(비토 라인 주입은 CT-04 insertAlimtalkQueue의 withSenderKey)
 });
 
 ok('title만(치환 미주입) → {title:원문}', () => {

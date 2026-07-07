@@ -1397,7 +1397,7 @@ router.post('/direct-send/commit', async (req: Request, res: Response) => {
       // ★ CT-87 (2026-06-10): 검수 승인 + 카카오 활성(A)까지 확인 — 활성 대기(R) 템플릿은 카카오가 전부 7300으로 거부
       const commitTplGuard = decideKakaoTemplateSendable(await getImcTemplateStatusSafe(companyId, alimtalkTemplateCode));
       if (!commitTplGuard.sendable) return res.status(400).json({ success: false, error: commitTplGuard.reason, code: commitTplGuard.code });
-      // ★ 매뉴얼(qtmsg): k_etc_json = 강조표기 title(raw)만 — senderkey 제외(알림톡은 템플릿코드로 중계서버 자동) / k_button_json = 템플릿 buttons(프론트 전송은 폴백)
+      // ★ 매뉴얼(qtmsg): k_etc_json = 강조표기 title(raw)만 — senderkey는 여기서 만들지 않음(표준 라인=중계서버 자동, 비토 라인=CT-04 insertAlimtalkQueue가 주입) / k_button_json = 템플릿 buttons(프론트 전송은 폴백)
       //   title은 #{변수} 포함 가능 — staging worker(direct-send-processor)가 수신자 row별로 치환해 재생성한다.
       alimtalkEtcJson = buildAlimtalkEtcJson({ emphasizeTitle: g.temphasize_title, representLink: g.trepresent_link }) ?? null;
       alimtalkButtonJsonResolved = convertButtonsToQTmsg(g.tbuttons) || alimtalkButtonJson || null;
@@ -2042,7 +2042,7 @@ router.post('/direct-send', async (req: Request, res: Response) => {
         }
       }
 
-      // ★ D130/버그1: k_etc_json(senderkey + 강조표기 title)은 수신자 row별로 생성 — buildAlimtalkEtcJson CT(아래).
+      // ★ D130/버그1: k_etc_json(강조표기 title)은 수신자 row별로 생성 — buildAlimtalkEtcJson CT(아래). senderkey는 CT-04가 비토 라인만 주입.
 
       // ★ D130: 프론트에서 온 variableMap을 백엔드 변수 치환용 extra 인자로 변환
       //   "@@fieldKey@@" 형태는 recipient/dbCustomer에서 자동 치환, 그 외는 직접값
@@ -2084,7 +2084,7 @@ router.post('/direct-send', async (req: Request, res: Response) => {
           }, { skipNumberFormatting: true });
           finalNextContents = fillAlimtalkVarMap(ncBase, alimtalkVariableMap, dbAlimCustomer, recipient);
         }
-        // ★ 매뉴얼(qtmsg): 강조표기 title(#{변수} 본문과 동일 치환)만 → row별 k_etc_json (senderkey 제외 — 알림톡 템플릿코드 자동)
+        // ★ 매뉴얼(qtmsg): 강조표기 title(#{변수} 본문과 동일 치환)만 → row별 k_etc_json (senderkey는 CT-04가 비토 라인만 주입)
         const rowEtcJson = buildAlimtalkEtcJson({
           emphasizeTitle: gate.temphasize_title,
           representLink: gate.trepresent_link,

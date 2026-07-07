@@ -189,7 +189,7 @@ export async function processSendChunk(p: SendChunkParams): Promise<SendChunkRes
       return out;
     };
 
-    // ★ QTmsg 매뉴얼: 알림톡 강조 k_etc_json = {title}만 (senderkey는 k_template_code로 중계서버 자동). commit이 {title} 저장 → row별 #{변수} 치환 재생성.
+    // ★ QTmsg 매뉴얼: 알림톡 강조 k_etc_json = {title}만 (senderkey는 표준 라인=중계서버 자동 / 비토 라인=CT-04 insertAlimtalkQueue 주입). commit이 {title} 저장 → row별 #{변수} 치환 재생성.
     let alimEmphasizeTitleRaw: string | undefined;
     let alimAttachmentLink: Record<string, string> | null = null;  // ★ commit이 저장한 대표링크(snake attachment_link) — 고정링크라 row별 재생성 시 그대로 보존.
     if (p.alimtalkEtcJson) {
@@ -231,7 +231,7 @@ export async function processSendChunk(p: SendChunkParams): Promise<SendChunkRes
         nextContents: finalNextContents,
         titleStr: (p.alimtalkNextType === 'L' || p.alimtalkNextType === 'B') ? (p.alimtalkNextSubject || '') : undefined,
         buttonJson: p.alimtalkButtonJson || undefined,
-        // ★ QTmsg 매뉴얼: 알림톡 강조 k_etc_json = {title}만(senderkey 제외) — #{변수} 본문과 동일 치환.
+        // ★ QTmsg 매뉴얼: 알림톡 강조 k_etc_json = {title}만(senderkey는 CT-04가 비토 라인만 주입) — #{변수} 본문과 동일 치환.
         etcJson: buildAlimtalkEtcJson({
           emphasizeTitle: alimEmphasizeTitleRaw,
           attachmentLink: alimAttachmentLink,

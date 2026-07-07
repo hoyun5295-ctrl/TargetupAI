@@ -998,7 +998,7 @@ async function executeAutoCampaign(ac: any): Promise<void> {
           nextType: ac.alimtalk_next_type || 'L',
           nextContents: finalNextContents,
           buttonJson: autoButtonJson || undefined,
-          // ★ 매뉴얼(qtmsg): 강조표기 title(#{변수} 본문과 동일 치환)만 → row별 k_etc_json (senderkey 제외 — 알림톡 템플릿코드 자동).
+          // ★ 매뉴얼(qtmsg): 강조표기 title(#{변수} 본문과 동일 치환)만 → row별 k_etc_json (senderkey는 CT-04가 비토 라인만 주입).
           etcJson: buildAlimtalkEtcJson({
             emphasizeTitle: emphasizeTitleRaw,
             representLink: representLinkRaw,
