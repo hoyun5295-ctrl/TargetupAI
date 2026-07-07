@@ -736,7 +736,7 @@ export const SECTION_META: Record<SectionType, SectionMeta> = {
   // 카테고리 A. 시각 카드형
   product_carousel: {
     label: '상품 슬라이드',
-    description: '상품 다수 (사진 + 가격 + 할인) 좌우 슬라이드 + 인디케이터',
+    description: '상품 다수 (사진 + 가격 + 할인) 2열 중앙 그리드',
     icon: '🛍️',
     maxCount: 3,
     defaultStyleVariant: 'default',

@@ -583,7 +583,7 @@ function renderProductCarousel(p: any): string {
         <div style="font-size:var(--dm-fs-small);font-weight:600;color:var(--dm-neutral-900);line-height:1.4">${escapeHtml(it.name || '')}</div>
         ${priceHtml}
       </div>`;
-    const cardWrapStyle = 'min-width:150px;max-width:170px;display:block;text-decoration:none;color:inherit;background:var(--dm-bg);border:1px solid var(--dm-neutral-200);border-radius:16px;overflow:hidden;box-shadow:var(--dm-shadow-sm)';
+    const cardWrapStyle = 'width:calc(50% - 8px);max-width:220px;box-sizing:border-box;display:block;text-decoration:none;color:inherit;background:var(--dm-bg);border:1px solid var(--dm-neutral-200);border-radius:16px;overflow:hidden;box-shadow:var(--dm-shadow-sm)';
     const href = it.link_url ? safeUrl(it.link_url) : '#';
     return href !== '#'
       ? `<a href="${href}" target="_blank" rel="noopener" style="${cardWrapStyle}">${card}</a>`
@@ -591,7 +591,7 @@ function renderProductCarousel(p: any): string {
   }).join('');
   return `<div class="dm-section dm-product-carousel" style="padding:var(--dm-sp-6) var(--dm-sp-5)">
     ${p.title ? `<div class="dm-text-h2" style="color:var(--dm-neutral-900);margin-bottom:var(--dm-sp-4)">${escapeHtml(p.title)}</div>` : ''}
-    <div style="display:flex;gap:12px;overflow-x:auto;padding-bottom:8px">${items}</div>
+    <div style="display:flex;flex-wrap:wrap;justify-content:center;gap:12px">${items}</div>
   </div>`;
 }
 
