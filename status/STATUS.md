@@ -51,10 +51,10 @@
 > **⑪ 이메일·모바일DM 디자인 2.0(0707(5))**: 이메일=backend만 수정 3면 동시(브랜드 밴드+프리헤더+쿠폰 티켓 2톤+버튼 그라데이션+상품/리뷰 카드). DM=viewer .dm-cta 그라데이션(dm-builder.css 미러)+스크롤 리빌 모션(no-JS 즉시 표시 폴백)+SNS 이모지→알약 칩+맵 죽은박스 제거. **★재검증(Harold "제대로 체크"): 실측 렌더로 잠복 결함 4건 — 이메일 폰트 큰따옴표 HTML 파손(전 발송메일 영향, inlineFont 수정) 등.**
 > **검증**: SDK 131/131·backend 332/332·sdk/backend/frontend tsc 0·금지패턴 0. **DDL 6컬럼 서버 실행완료**. **잔여**: tp-push + frontend·company-frontend·backend `build:safe` + `pm2 reload targetup-backend` / **Codex 미로드→다음 세션 /codex:review 1순위**. 배포후 실측(재발송·요금제·인앱 게이트·hlj.kr·CSV·형태4·카운트다운·행사 3채널·이메일 미리보기·DM 발행물 열람). 상세 [archive/TASKS_2026-07.md](archive/TASKS_2026-07.md) · [[project_2026_0707_inapp_email_dm_overhaul]].
 
-### 🟢 2026-07-07(6) — 마케팅 캘린더 완비: 등록 200크레딧의 통지·출구·타겟 축 구멍 4건 근본수정 (코드완료·tsc 0·vitest 346 / ★미배포·DDL 2건 대기)
+### 🟢 2026-07-07(6) — 마케팅 캘린더 완비: 등록 200크레딧의 통지·출구·타겟 축 구멍 4건 근본수정 (★배포완료 — DDL 2건+리뷰 정정 2건 포함, Harold 선언 / 운영 실측 = Harold)
 > **구멍(전 경로 실측)**: ①캘린더 등록이 담당자 번호를 안 담아 notifyOperatorAdmins가 조용히 return — 2h 예고·승인 대기·D-2·완료/보류 통지 전멸 ②자율발송 OFF(기본) 회사는 pending 7일 만료로 연 1회 캠페인이 소리 없이 무산 + 늦은 승인=즉시 발송 ③오퍼레이터 발송에만 혜택 placeholder 출구 가드 부재(이메일·인앱·여정엔 있음) — "[혜택 내용을 입력해주세요]" 실고객 노출 가능 ④타겟 확인 지점 0(발송 당일 AI 자유 해석).
 > **수정**: ①createOperator 담당자 기본값=등록 계정 users.phone + notifyOperatorAdmins 폴백(등록 계정→company_admin — CT 1곳, 기존 등록분 포함 전 통지 수혜) + 캘린더 크레딧 모달 extraContent 연락처 입력(선택) ②만료 D-3 리마인드(operator-prep-reminder에 sendPendingExpiryReminders, predictive 9시 사이클 합류, 멱등=expiry_reminder_sent_at) + scheduled_send_at pending에도 저장(발송 패스 status='scheduled' 게이트라 무영향, 소비처 17곳 전수) + 예정일 경과 승인 경고 모달 ③dispatchProposalSend 발송 직전 applyBenefitToBody 재치환(제안 생성 후 입력분 반영) + hasUneditedBenefitPlaceholder 검출 시 admin_review 강등(자동·수동·리마인드 3경로 공유 1곳) ④targetHint 축(TARGET_HINTS 화이트리스트 6종 — 명확 규칙만, 예측 축 금지) = 캘린더 설계 JSON→카드 select→등록 payload→continuous_operators.target_hint→recommendTarget 고정 지시 + 카드 혜택 입력칸.
-> **DDL 2건 (Harold psql — 배포 전 실행 필수, target_hint 미실행 시 오퍼레이터 신규생성 503)**: 검증 후 ALTER — 본문 아래 배포 블록 참조. **잔여**: DDL→tp-push→build:safe(backend·frontend)→pm2 reload→실측 1건(캘린더 등록→08:00 생성→통지 수신→승인/자동발송) / Codex /codex:review(플러그인 미로드). 상세 [[project_2026_0705_marketing_calendar_overhaul]] 갱신분.
+> **배포 2026-07-07 완료(Harold)**: DDL 2건(target_hint·expiry_reminder_sent_at) + 본체(e6c7f62d) + 코드리뷰 정정 2건(혜택 치환 $ 특수패턴 함수 치환 교체 / 통지 폴백 is_active·is_system 필터 — /engineering:code-review로 이중 검증, vitest 347/347). **잔여 = Harold 운영 실측 1건**: 캘린더 등록(대상 축·연락처)→발송일 08:00 생성→통지 수신→혜택 미입력 admin_review 보류 확인→혜택 입력 후 승인 발송(run-now로 단축 가능). 상세 [[project_2026_0705_marketing_calendar_overhaul]] 갱신분.
 
 ---
 

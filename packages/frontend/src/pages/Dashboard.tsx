@@ -2799,11 +2799,10 @@ const campaignData = {
             </div>
           </div>
 
-          {/* ===== 우측 40%: 버튼 3개 세로 스택 — D222+ Phase 1 그라데이션 정정 ===== */}
-          {/* ★ D222+ Phase 1 (2026-05-27): Harold 명시 정합 — 흰 톤 유지 + 카드 3개 그라데이션 정정 (고급 강화).
-              - AI Operator (기존 "AI 추천 발송") = 보라 그라데이션 + navigate('/ai-operator') (AiSendTypeModal 폐기)
-              - 직접 타겟 발송 = 녹색 그라데이션
-              - 고객 DB 업로드 = amber 그라데이션 */}
+          {/* ===== 우측 40%: 버튼 3개 세로 스택 ===== */}
+          {/* ★ 2026-07-07 (Harold 확정): 3색 풀 그라데이션 경합 해소 — 히어로 1장 원칙.
+              주력(AI Operator, hideAi 갈래는 직접 타겟 발송)만 풀 컬러, 나머지는 라이트 카드(흰 배경+컬러 아이콘 칩+컬러 화살표).
+              onClick·게이팅 로직 무변 — 시각 위계만 조정. (기원 D222+ Phase 1 3색 그라데이션) */}
           <div className="w-full lg:w-[40%] flex flex-col gap-4">
             {hideAi ? (
               <>
@@ -2820,13 +2819,18 @@ const campaignData = {
                 {!hideFileUpload && (
                 <button
                   onClick={() => openFileUpload()}
-                  className="p-5 bg-gradient-to-br from-amber-500 to-orange-600 hover:from-amber-400 hover:to-orange-500 rounded-xl transition-all hover:shadow-lg hover:shadow-amber-500/30 text-right flex-1 flex flex-col justify-between"
+                  className="p-5 bg-white hover:bg-amber-50/70 border border-gray-200 hover:border-amber-300 rounded-xl transition-all hover:shadow-md text-right flex-1 flex flex-col justify-between"
                 >
-                  <div>
-                    <div className="text-xl font-bold text-white mb-1">고객 DB 업로드</div>
-                    <div className="text-sm text-amber-100">엑셀/CSV로 고객 추가</div>
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-amber-500 to-orange-600 flex items-center justify-center flex-shrink-0 shadow-sm">
+                      <UserPlus className="w-5 h-5 text-white" />
+                    </div>
+                    <div className="min-w-0">
+                      <div className="text-xl font-bold text-gray-900 mb-1">고객 DB 업로드</div>
+                      <div className="text-sm text-gray-500">엑셀/CSV로 고객 추가</div>
+                    </div>
                   </div>
-                  <div className="text-3xl text-amber-200 self-end">→</div>
+                  <div className="text-3xl text-amber-500 self-end">→</div>
                 </button>
                 )}
               </>
@@ -2865,23 +2869,28 @@ const campaignData = {
                   <div className="text-3xl text-fuchsia-200 self-end">→</div>
                 </button>
 
-                {/* 직접 타겟 발송 — D222+ Phase 1: 녹색 그라데이션 */}
+                {/* 직접 타겟 발송 — 2026-07-07: 라이트 카드(흰 배경+에메랄드 아이콘 칩) — 히어로는 AI Operator 1장 */}
                 <button
                   onClick={() => {
                     if (isSubscriptionLocked) { setShowSubscriptionLock(true); return; }
                     if (isCustomerDbLocked) { setPlanUpgradeFeature('직접 타겟 발송'); setPlanUpgradeRequired('스타터'); setShowPlanUpgradeModal(true); return; }
                     setShowDirectTargeting(true);
                   }}
-                  className={`p-5 bg-gradient-to-br from-emerald-600 to-green-700 hover:from-emerald-500 hover:to-green-600 rounded-xl transition-all hover:shadow-lg hover:shadow-emerald-500/30 text-right flex-1 flex flex-col justify-between ${isSubscriptionLocked || isCustomerDbLocked ? 'opacity-60' : ''}`}
+                  className={`p-5 bg-white hover:bg-emerald-50/70 border border-gray-200 hover:border-emerald-300 rounded-xl transition-all hover:shadow-md text-right flex-1 flex flex-col justify-between ${isSubscriptionLocked || isCustomerDbLocked ? 'opacity-60' : ''}`}
                 >
-                  <div>
-                    <div className="text-xl font-bold text-white mb-1">{(isSubscriptionLocked || isCustomerDbLocked) ? '🔒 ' : ''}직접 타겟 발송</div>
-                    <div className="text-sm text-emerald-100">원하는 고객을 직접 필터링</div>
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-emerald-500 to-green-600 flex items-center justify-center flex-shrink-0 shadow-sm">
+                      <Send className="w-5 h-5 text-white" />
+                    </div>
+                    <div className="min-w-0">
+                      <div className="text-xl font-bold text-gray-900 mb-1">{(isSubscriptionLocked || isCustomerDbLocked) ? '🔒 ' : ''}직접 타겟 발송</div>
+                      <div className="text-sm text-gray-500">원하는 고객을 직접 필터링</div>
+                    </div>
                   </div>
-                  <div className="text-3xl text-emerald-200 self-end">→</div>
+                  <div className="text-3xl text-emerald-500 self-end">→</div>
                 </button>
 
-                {/* 고객 DB 업로드 — D222+ Phase 1: amber 그라데이션 */}
+                {/* 고객 DB 업로드 — 2026-07-07: 라이트 카드(흰 배경+앰버 아이콘 칩) */}
                 <button
                   onClick={() => {
                     if (syncBlockActive) { setShowSyncActiveBlock(true); return; }
@@ -2889,13 +2898,18 @@ const campaignData = {
                     if (isCustomerDbLocked) { setPlanUpgradeFeature('고객 DB 업로드'); setPlanUpgradeRequired('스타터'); setShowPlanUpgradeModal(true); return; }
                     setShowFileUpload(true);
                   }}
-                  className={`p-5 bg-gradient-to-br from-amber-500 to-orange-600 hover:from-amber-400 hover:to-orange-500 rounded-xl transition-all hover:shadow-lg hover:shadow-amber-500/30 text-right flex-1 flex flex-col justify-between ${isSubscriptionLocked || isCustomerDbLocked ? 'opacity-60' : ''}`}
+                  className={`p-5 bg-white hover:bg-amber-50/70 border border-gray-200 hover:border-amber-300 rounded-xl transition-all hover:shadow-md text-right flex-1 flex flex-col justify-between ${isSubscriptionLocked || isCustomerDbLocked ? 'opacity-60' : ''}`}
                 >
-                  <div>
-                    <div className="text-xl font-bold text-white mb-1">{(isSubscriptionLocked || isCustomerDbLocked) ? '🔒 ' : ''}고객 DB 업로드</div>
-                    <div className="text-sm text-amber-100">엑셀/CSV로 고객 추가</div>
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-amber-500 to-orange-600 flex items-center justify-center flex-shrink-0 shadow-sm">
+                      <UserPlus className="w-5 h-5 text-white" />
+                    </div>
+                    <div className="min-w-0">
+                      <div className="text-xl font-bold text-gray-900 mb-1">{(isSubscriptionLocked || isCustomerDbLocked) ? '🔒 ' : ''}고객 DB 업로드</div>
+                      <div className="text-sm text-gray-500">엑셀/CSV로 고객 추가</div>
+                    </div>
                   </div>
-                  <div className="text-3xl text-amber-200 self-end">→</div>
+                  <div className="text-3xl text-amber-500 self-end">→</div>
                 </button>
               </>
             )}

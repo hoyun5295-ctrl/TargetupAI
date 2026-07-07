@@ -2084,7 +2084,7 @@ cd /home/administrator/targetup-app/packages/backend && npm install web-push @ty
 | send_time_mode | text NOT NULL DEFAULT 'fixed' | 발송 시각 모드 fixed(희망 시각 정각)/ai_optimal(클릭 피크) — schedule_time=발송 희망 시각, next_run_at=생성 시각(희망−lead) 의미 전환 (2026-07-02 ALTER 실측) |
 | copy_style | text | 문안 스타일 courteous/friendly/witty/punchy, NULL=브랜드 톤 자동 (2026-07-02 ALTER 실측) |
 | prep_reminder_sent_for | date | 월간 캠페인 D-2 사전 준비 문자 멱등(발송일 기록) (2026-07-02 ALTER — 세션 종료 시점 미실행 확인, Harold 실행 예정) |
-| target_hint | text | 발송 대상 축(all/dormant/recent_buyers/vip/birthday/new_customers, NULL=자유 해석) — 마케팅 캘린더 완비 (2026-07-07 ALTER 대기 — 미실행 시 오퍼레이터 생성이 503 DB_MIGRATION_PENDING) |
+| target_hint | text | 발송 대상 축(all/dormant/recent_buyers/vip/birthday/new_customers, NULL=자유 해석) — 마케팅 캘린더 완비 (2026-07-07 ALTER 실행완료 — Harold 배포 선언) |
 - INDEX: company_id, status WHERE status='active'
 - INDEX: status, next_run_at WHERE status='active' (worker 호출용)
 - 2026-06-26 information_schema 덤프 = 위 33컬럼 전부 존재 확정. 중복 4컬럼(notify_phones/backup_phones/notify_channel/lead_minutes)은 DROP 완료(데이터 0). 재질의 금지.
@@ -2109,7 +2109,7 @@ cd /home/administrator/targetup-app/packages/backend && npm install web-push @ty
 | expires_at | timestamptz | 7일 후 자동 만료 (사용자 미응답 시) |
 | created_at | timestamptz | |
 | recap_notified_at | timestamptz | 성과 회고 문자(발송 다음날 9시) 멱등 마커 (2026-07-02 ALTER 실측 — information_schema 1row 확인) |
-| expiry_reminder_sent_at | timestamptz | 승인 대기 만료 임박(D-3) 리마인드 멱등 마커 (2026-07-07 ALTER 대기 — 미실행 시 리마인드만 skip, 나머지 정상) |
+| expiry_reminder_sent_at | timestamptz | 승인 대기 만료 임박(D-3) 리마인드 멱등 마커 (2026-07-07 ALTER 실행완료 — Harold 배포 선언) |
 | scheduled_send_at | timestamptz | 발송 예정 시각 — 2026-07-07부터 pending에도 저장(예정일 경과 승인 경고용). 자율 발송 트리거는 status='scheduled'만 |
 - INDEX: company_id, status, created_at DESC
 - INDEX: operator_id, created_at DESC
