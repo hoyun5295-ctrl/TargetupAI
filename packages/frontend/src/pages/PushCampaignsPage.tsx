@@ -111,7 +111,7 @@ export default function PushCampaignsPage() {
           </button>
           <Bell className="w-5 h-5 text-indigo-600" />
           <h1 className="text-lg font-bold text-gray-800">Web Push 캠페인</h1>
-          <span className="text-xs bg-indigo-50 text-indigo-700 px-2 py-0.5 rounded-full font-medium">BETA</span>
+          <span className="text-xs bg-indigo-50 text-indigo-700 px-2 py-0.5 rounded-full font-medium">실험실</span>
           <button onClick={load} className="ml-auto text-xs text-indigo-600 hover:bg-indigo-50 px-3 py-1.5 rounded-lg flex items-center gap-1.5">
             <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
             새로고침

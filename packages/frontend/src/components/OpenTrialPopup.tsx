@@ -184,7 +184,7 @@ export default function OpenTrialPopup({ onClose, forceOpen }: Props) {
                   <svg viewBox="0 0 24 24" fill="none" className="h-3.5 w-3.5 text-violet-300" aria-hidden>
                     <path d="M12 2.5l1.7 4.9 4.9 1.7-4.9 1.7L12 15.7l-1.7-4.9L5.4 9.1l4.9-1.7L12 2.5z" fill="currentColor" />
                   </svg>
-                  AI Operator BETA · 오픈 기념
+                  AI Operator · 오픈 기념
                 </span>
                 {/* ★ 2026-06-11 Harold 확정: 신청 마감 표기 — 6월 30일까지만 접수 */}
                 <span className="inline-flex items-center gap-1.5 rounded-full border border-amber-400/40 bg-amber-500/15 px-3 py-1 text-xs font-semibold text-amber-200">

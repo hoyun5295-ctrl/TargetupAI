@@ -487,7 +487,7 @@ export default function PredictiveDashboardPage() {
           <div className="flex-1 min-w-0">
             <h1 className="text-lg md:text-xl font-semibold flex items-center gap-2">
               AI 자율 예측
-              <span className="text-[10px] px-1.5 py-0.5 rounded bg-violet-500/20 text-violet-300 font-medium">BETA</span>
+              <span className="text-[10px] px-1.5 py-0.5 rounded bg-violet-500/20 text-violet-300 font-medium">실험실</span>
             </h1>
             <p className="text-xs text-white/50 mt-0.5 truncate">위험·기회 고객을 AI가 먼저 찾아 제안합니다</p>
           </div>

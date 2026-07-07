@@ -166,7 +166,6 @@ export default function AiCampaignResultPopup({
               <div className="min-w-0">
                 <div className="flex items-center gap-2 flex-wrap">
                   <h3 className="text-white font-bold text-lg whitespace-nowrap">AI 추천 결과</h3>
-                  <span className="px-2 py-0.5 text-[10px] font-bold bg-violet-500/20 text-violet-300 border border-violet-400/30 rounded">BETA</span>
                 </div>
                 <div className="text-xs text-white/50 mt-0.5">
                   {aiStep === 1 ? '타겟 & 채널 확인' : '캠페인 메시지 확정'}

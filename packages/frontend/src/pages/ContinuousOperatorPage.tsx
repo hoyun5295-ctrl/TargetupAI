@@ -93,7 +93,7 @@ export default function ContinuousOperatorPage() {
       if (learnData.success) setLearningSummary(learnData.summary || null);
       // 브리핑은 부가 정보 — 미생성(503)·오류 시 조용히 숨김
       if (briefData.success) setDailyBrief(briefData.brief || null);
-      if (!opRes.ok && opData.code === 'BETA_GATE') setError('본 기능은 비즈니스 / 엔터프라이즈 요금제 베타에서 이용 가능합니다.');
+      if (!opRes.ok && opData.code === 'BETA_GATE') setError('본 기능은 비즈니스 / 엔터프라이즈 요금제에서 이용 가능합니다.');
     } catch (e: any) {
       setError(e?.message || '조회 중 오류');
     } finally {
@@ -368,7 +368,6 @@ export default function ContinuousOperatorPage() {
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2">
               <h1 className="text-lg md:text-xl font-semibold text-white truncate">{VIEW_TITLE[view]}</h1>
-              {view === 'launcher' && <span className="text-[10px] bg-indigo-500/20 text-indigo-200 px-2 py-0.5 rounded-full font-medium">BETA</span>}
             </div>
           </div>
           <div className="ml-auto flex items-center gap-1.5 shrink-0">

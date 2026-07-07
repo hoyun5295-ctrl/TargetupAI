@@ -2879,9 +2879,6 @@ const campaignData = {
                       <Sparkles className="w-5 h-5 text-white" />
                     </div>
                     <div className="min-w-0">
-                      <div className="inline-block bg-gradient-to-r from-amber-400 to-fuchsia-500 text-white text-[10px] font-bold tracking-wider px-2 py-0.5 rounded-full shadow mb-1.5">
-                        BETA
-                      </div>
                       <div className="text-xl font-bold text-white mb-1">{(isSubscriptionLocked || isAiMessagingLocked) ? '🔒 ' : ''}AI Operator</div>
                       <div className="text-sm text-white/75">자연어 한 줄로 AI가 자동 설계</div>
                     </div>

@@ -268,7 +268,6 @@ export default function SegmentsPage() {
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2 flex-wrap">
               <h1 className="text-xl md:text-2xl font-semibold text-white">고객 세그먼트</h1>
-              <span className="text-[10px] bg-violet-500/30 text-violet-200 border border-violet-400/30 px-1.5 py-0.5 rounded-full font-bold">BETA</span>
             </div>
             <p className="text-xs text-white/50 mt-0.5">자연어 → AI 변환 → 검증된 필터 + 매칭 수 즉시 확인 + 발송 흐름 안 재활용</p>
           </div>

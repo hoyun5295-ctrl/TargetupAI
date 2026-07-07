@@ -439,7 +439,6 @@ export default function AiUsagePage() {
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2">
               <h1 className="text-xl md:text-2xl font-semibold text-white">AI 사용량 + 비용 안전</h1>
-              <span className="text-[10px] bg-gradient-to-r from-amber-400 to-orange-500 text-white px-2 py-0.5 rounded-full font-bold tracking-wide">BETA</span>
             </div>
             <p className="text-xs md:text-sm text-white/50 mt-0.5 hidden md:block">회사별 AI 호출 + 한도 + cache 효율 + 비용 예측</p>
           </div>

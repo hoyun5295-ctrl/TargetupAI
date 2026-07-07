@@ -126,7 +126,6 @@ export default function AiPromptModal({ open, onClose }: { open: boolean; onClos
       size="lg"
       title="AI 프롬프트로 초안 만들기"
       subtitle="한 줄로 설명하면 섹션 구조와 카피까지 AI가 만들어요."
-      badge={<span style={{ fontSize: 10, padding: '2px 6px', background: '#eef2ff', color: '#4f46e5', borderRadius: 4, fontWeight: 700 }}>BETA</span>}
       footer={footer}
     >
       {step !== 'preview' && (

@@ -212,7 +212,6 @@ export default function MarketingCalendarPage() {
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2 flex-wrap">
               <h1 className="text-xl md:text-2xl font-semibold">마케팅 캘린더</h1>
-              <span className="text-[10px] bg-gradient-to-r from-amber-400 to-orange-500 text-white px-2 py-0.5 rounded-full font-bold tracking-wide">BETA</span>
             </div>
             <p className="text-xs md:text-sm text-white/50 mt-0.5">업종·시즌·회사 데이터로 1년치 캠페인을 AI가 설계 — 고른 달은 그대로 자동마케팅으로</p>
           </div>

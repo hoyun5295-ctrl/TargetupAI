@@ -99,7 +99,7 @@ export default function VoiceInboundPage() {
           </button>
           <Phone className="w-5 h-5 text-violet-600" />
           <h1 className="text-lg font-bold text-gray-800">인바운드 AI 음성 응답</h1>
-          <span className="text-xs bg-violet-50 text-violet-700 px-2 py-0.5 rounded-full font-medium">BETA</span>
+          <span className="text-xs bg-violet-50 text-violet-700 px-2 py-0.5 rounded-full font-medium">실험실</span>
           <div className="ml-auto">
             <button onClick={loadAll} className="text-xs text-gray-600 hover:bg-gray-100 px-3 py-1.5 rounded-lg flex items-center gap-1.5">
               <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />

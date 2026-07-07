@@ -99,7 +99,6 @@ export default function OnboardingCard() {
                 <h3 className="text-base md:text-lg font-bold text-white">
                   {completed === 0 ? 'AI 오퍼레이션 시작하기' : 'AI 오퍼레이션 계속하기'}
                 </h3>
-                <span className="text-[10px] px-1.5 py-0.5 rounded bg-white/25 text-white border border-white/30 font-semibold">BETA</span>
               </div>
               <p className="text-[12px] text-white/85 leading-relaxed">
                 {completed === 0

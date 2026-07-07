@@ -647,7 +647,6 @@ export default function DmBuilderPage() {
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
             <span style={{ fontSize: 18 }}>✨</span>
             <span style={{ fontSize: 14, fontWeight: 700, color: '#fff' }}>자연어 한 줄로 DM 자동 생성</span>
-            <span style={{ fontSize: 10, padding: '2px 6px', background: 'rgba(217,70,239,0.3)', color: '#f5d0fe', borderRadius: 10, fontWeight: 700 }}>BETA</span>
           </div>
           {customerGate.isEmpty && <CustomerDataRequiredBanner className="mb-3" />}
           {/* ★ 2026-07-02(5) Harold 지시 재배치 — 좌: 프롬프트 단독(크게) / 우: 빠른 시작(위) + 자유 시작·완성 슬라이드(아래) */}

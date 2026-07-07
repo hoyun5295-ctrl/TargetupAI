@@ -28,7 +28,6 @@ export default function AiSendTypeModal({
             <div>
               <div className="flex items-center gap-2">
                 <h3 className="text-white font-bold text-lg">AI 발송 방식 선택</h3>
-                <span className="px-2 py-0.5 text-[10px] font-bold bg-violet-500/20 text-violet-300 border border-violet-400/30 rounded">BETA</span>
               </div>
               <div className="text-xs text-white/50 mt-0.5">목적에 맞는 방식을 선택하세요</div>
             </div>

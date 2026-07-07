@@ -89,7 +89,7 @@ export default function AiExplainPage() {
           </button>
           <BookOpen className="w-5 h-5 text-indigo-600" />
           <h1 className="text-lg font-bold text-gray-800">AI에게 질문 (근거 인용)</h1>
-          <span className="text-xs bg-indigo-50 text-indigo-700 px-2 py-0.5 rounded-full font-medium">BETA</span>
+          <span className="text-xs bg-indigo-50 text-indigo-700 px-2 py-0.5 rounded-full font-medium">실험실</span>
         </div>
       </div>
 

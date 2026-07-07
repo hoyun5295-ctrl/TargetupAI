@@ -175,7 +175,7 @@
       신규 메뉴 / 신규 페이지 / UI 신설 / 옛 페이지 전면 재작성 = **최소 AI 여정 자동화 (Journey Builder, `/ai-journeys`) 동급 디자인 퀄리티 의무**.
       [절대 금지] 옛 단순 form (input + textarea + select + 단순 button) / 옛 단순 table view / 옛 native dialog (alert/confirm/prompt)
       [의무 요소]
-      - 상단 헤더 sticky + BETA badge + 그라데이션 아이콘 (10x10 rounded-xl)
+      - 상단 헤더 sticky + 그라데이션 아이콘 (10x10 rounded-xl) + 라벨 3단 정책(★2026-07-07 Harold 확정 — BETA 뱃지 의무 폐지): 정가 과금 코어=무라벨 / 갓 출시=NEW(4~6주 유효기간, 지나면 제거) / 품질 미보증 실험 기능만="실험실"
       - AI 자율 진단 카드 (violet → fuchsia 그라데이션 + Sparkles + topInsight) — AI 활용 페이지
       - 자연어 입력 카드 (fuchsia/purple/indigo 그라데이션 + Enter 키) — 자동 생성 페이지
       - 빠른 시작 카드 7건 (각 시나리오 고유 icon + gradient) — 자동 생성 페이지

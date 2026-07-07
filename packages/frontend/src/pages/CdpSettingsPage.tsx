@@ -1087,7 +1087,6 @@ export default function CdpSettingsPage() {
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2 flex-wrap">
               <h1 className="text-xl md:text-2xl font-semibold text-white">자사몰 연동 (CDP)</h1>
-              <span className="text-[10px] bg-gradient-to-r from-amber-400 to-orange-500 text-white px-2 py-0.5 rounded-full font-bold tracking-wide">BETA</span>
             </div>
             <p className="text-xs md:text-sm text-white/50 mt-0.5">카페24 · 네이버 · 메이크샵 · 고도몰 · 아임웹 · 자체 호스팅 · 싱크에이전트 — 고객 데이터를 한 곳으로 모읍니다</p>
           </div>

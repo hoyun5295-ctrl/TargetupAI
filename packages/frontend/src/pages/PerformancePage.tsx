@@ -634,7 +634,6 @@ export default function PerformancePage() {
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2 flex-wrap">
               <h1 className="text-xl md:text-2xl font-semibold text-white">성과 리포트</h1>
-              <span className="text-[10px] bg-gradient-to-r from-amber-400 to-orange-500 text-white px-2 py-0.5 rounded-full font-bold tracking-wide">BETA</span>
               {availability && (
                 <span className={`text-[10px] px-2 py-0.5 rounded-full font-semibold border ${
                   hasCdp

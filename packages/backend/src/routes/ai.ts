@@ -1210,7 +1210,7 @@ router.post('/operator/propose', async (req: Request, res: Response) => {
     if (!isAiOperatorAllowed(planCtx, req.user)) {
       return res.status(403).json({
         success: false,
-        error: '본 기능은 엔터프라이즈 베타 운영 중입니다.',
+        error: '본 기능은 비즈니스·엔터프라이즈 요금제 전용입니다.',
         code: 'BETA_GATE',
       });
     }
@@ -1303,7 +1303,7 @@ router.post('/operator/preview-recipients', async (req: Request, res: Response) 
     const ctx = await loadPlanContext(companyId);
     if (!ctx) return res.status(404).json({ success: false, error: '회사 정보를 찾을 수 없습니다.' });
     if (!isAiOperatorAllowed(ctx, req.user)) {
-      return res.status(403).json({ success: false, error: '본 기능은 엔터프라이즈 베타 운영 중입니다.', code: 'BETA_GATE' });
+      return res.status(403).json({ success: false, error: '본 기능은 비즈니스·엔터프라이즈 요금제 전용입니다.', code: 'BETA_GATE' });
     }
 
     const { filters } = req.body;
@@ -1378,7 +1378,7 @@ router.post('/operator/next-action', async (req: Request, res: Response) => {
     const planCtx = await loadPlanContext(companyId);
     if (!planCtx) return res.status(404).json({ success: false, error: '회사 정보를 찾을 수 없습니다.' });
     if (!isAiOperatorAllowed(planCtx, req.user)) {
-      return res.status(403).json({ success: false, error: '본 기능은 엔터프라이즈 베타 운영 중입니다.', code: 'BETA_GATE' });
+      return res.status(403).json({ success: false, error: '본 기능은 비즈니스·엔터프라이즈 요금제 전용입니다.', code: 'BETA_GATE' });
     }
 
     const companyResult = await query(
@@ -1422,7 +1422,7 @@ router.get('/operator/performance/snapshot-v2', async (req: Request, res: Respon
     const planCtx = await loadPlanContext(companyId);
     if (!planCtx) return res.status(404).json({ success: false, error: '회사 정보를 찾을 수 없습니다.' });
     if (!isAiOperatorAllowed(planCtx, req.user)) {
-      return res.status(403).json({ success: false, error: '본 기능은 엔터프라이즈 베타 운영 중입니다.', code: 'BETA_GATE' });
+      return res.status(403).json({ success: false, error: '본 기능은 비즈니스·엔터프라이즈 요금제 전용입니다.', code: 'BETA_GATE' });
     }
 
     const periodParam = String(req.query.period || '30d');
@@ -1448,7 +1448,7 @@ router.post('/operator/performance/report-pdf', async (req: Request, res: Respon
     const planCtx = await loadPlanContext(companyId);
     if (!planCtx) return res.status(404).json({ success: false, error: '회사 정보를 찾을 수 없습니다.' });
     if (!isAiOperatorAllowed(planCtx, req.user)) {
-      return res.status(403).json({ success: false, error: '본 기능은 엔터프라이즈 베타 운영 중입니다.', code: 'BETA_GATE' });
+      return res.status(403).json({ success: false, error: '본 기능은 비즈니스·엔터프라이즈 요금제 전용입니다.', code: 'BETA_GATE' });
     }
 
     const periodParam = String(req.body?.period || '30d');
@@ -1518,7 +1518,7 @@ router.post('/operator/performance/full-analysis/start', async (req: Request, re
     if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
     const planCtx = await loadPlanContext(companyId);
     if (!planCtx || !isAiOperatorAllowed(planCtx, req.user)) {
-      return res.status(403).json({ success: false, code: 'BETA_GATE', error: '본 기능은 엔터프라이즈 베타 운영 중입니다.' });
+      return res.status(403).json({ success: false, code: 'BETA_GATE', error: '본 기능은 비즈니스·엔터프라이즈 요금제 전용입니다.' });
     }
     const periodParam = String(req.body?.period || '30d');
     const period: PerformancePeriod = (['7d', '14d', '30d', '90d'] as const).includes(periodParam as any) ? (periodParam as PerformancePeriod) : '30d';
@@ -1576,7 +1576,7 @@ router.post('/operator/performance/explain', async (req: Request, res: Response)
     const planCtx = await loadPlanContext(companyId);
     if (!planCtx) return res.status(404).json({ success: false, error: '회사 정보를 찾을 수 없습니다.' });
     if (!isAiOperatorAllowed(planCtx, req.user)) {
-      return res.status(403).json({ success: false, error: '본 기능은 엔터프라이즈 베타 운영 중입니다.', code: 'BETA_GATE' });
+      return res.status(403).json({ success: false, error: '본 기능은 비즈니스·엔터프라이즈 요금제 전용입니다.', code: 'BETA_GATE' });
     }
 
     const companyResult = await query(
@@ -1611,7 +1611,7 @@ router.post('/operator/performance/quick-action', async (req: Request, res: Resp
     const planCtx = await loadPlanContext(companyId);
     if (!planCtx) return res.status(404).json({ success: false, error: '회사 정보를 찾을 수 없습니다.' });
     if (!isAiOperatorAllowed(planCtx, req.user)) {
-      return res.status(403).json({ success: false, error: '본 기능은 엔터프라이즈 베타 운영 중입니다.', code: 'BETA_GATE' });
+      return res.status(403).json({ success: false, error: '본 기능은 비즈니스·엔터프라이즈 요금제 전용입니다.', code: 'BETA_GATE' });
     }
 
     const actionTypeParam = String(req.body.actionType || '');
@@ -1643,7 +1643,7 @@ router.get('/operator/performance/campaigns', async (req: Request, res: Response
     const planCtx = await loadPlanContext(companyId);
     if (!planCtx) return res.status(404).json({ success: false, error: '회사 정보를 찾을 수 없습니다.' });
     if (!isAiOperatorAllowed(planCtx, req.user)) {
-      return res.status(403).json({ success: false, error: '본 기능은 엔터프라이즈 베타 운영 중입니다.', code: 'BETA_GATE' });
+      return res.status(403).json({ success: false, error: '본 기능은 비즈니스·엔터프라이즈 요금제 전용입니다.', code: 'BETA_GATE' });
     }
 
     const periodParam = String(req.query.period || '30d');
@@ -1761,7 +1761,7 @@ router.get('/operator/performance/cohort', async (req: Request, res: Response) =
     const planCtx = await loadPlanContext(companyId);
     if (!planCtx) return res.status(404).json({ success: false, error: '회사 정보를 찾을 수 없습니다.' });
     if (!isAiOperatorAllowed(planCtx, req.user)) {
-      return res.status(403).json({ success: false, error: '본 기능은 엔터프라이즈 베타 운영 중입니다.', code: 'BETA_GATE' });
+      return res.status(403).json({ success: false, error: '본 기능은 비즈니스·엔터프라이즈 요금제 전용입니다.', code: 'BETA_GATE' });
     }
     const months = Math.max(1, Math.min(24, parseInt(String(req.query.months || '12'), 10) || 12));
     const result = await buildCohortRetention(companyId, months);
@@ -1780,7 +1780,7 @@ router.get('/operator/performance/benchmark', async (req: Request, res: Response
     const planCtx = await loadPlanContext(companyId);
     if (!planCtx) return res.status(404).json({ success: false, error: '회사 정보를 찾을 수 없습니다.' });
     if (!isAiOperatorAllowed(planCtx, req.user)) {
-      return res.status(403).json({ success: false, error: '본 기능은 엔터프라이즈 베타 운영 중입니다.', code: 'BETA_GATE' });
+      return res.status(403).json({ success: false, error: '본 기능은 비즈니스·엔터프라이즈 요금제 전용입니다.', code: 'BETA_GATE' });
     }
     const days = Math.max(7, Math.min(90, parseInt(String(req.query.days || '30'), 10) || 30));
     const result = await buildBenchmark(companyId, days);
@@ -1799,7 +1799,7 @@ router.get('/operator/performance/attribution', async (req: Request, res: Respon
     const planCtx = await loadPlanContext(companyId);
     if (!planCtx) return res.status(404).json({ success: false, error: '회사 정보를 찾을 수 없습니다.' });
     if (!isAiOperatorAllowed(planCtx, req.user)) {
-      return res.status(403).json({ success: false, error: '본 기능은 엔터프라이즈 베타 운영 중입니다.', code: 'BETA_GATE' });
+      return res.status(403).json({ success: false, error: '본 기능은 비즈니스·엔터프라이즈 요금제 전용입니다.', code: 'BETA_GATE' });
     }
     const days = Math.max(7, Math.min(90, parseInt(String(req.query.days || '30'), 10) || 30));
     const result = await buildCampaignAttribution(companyId, days);
@@ -1820,7 +1820,7 @@ router.get('/operator/performance/customer-axis', async (req: Request, res: Resp
     const planCtx = await loadPlanContext(companyId);
     if (!planCtx) return res.status(404).json({ success: false, error: '회사 정보를 찾을 수 없습니다.' });
     if (!isAiOperatorAllowed(planCtx, req.user)) {
-      return res.status(403).json({ success: false, error: '본 기능은 엔터프라이즈 베타 운영 중입니다.', code: 'BETA_GATE' });
+      return res.status(403).json({ success: false, error: '본 기능은 비즈니스·엔터프라이즈 요금제 전용입니다.', code: 'BETA_GATE' });
     }
     const days = Math.max(7, Math.min(90, parseInt(String(req.query.days || '30'), 10) || 30));
     const [gradePerformance, recipientAttribution] = await Promise.all([
@@ -1842,7 +1842,7 @@ router.get('/operator/performance/automarketing-roi', async (req: Request, res: 
     const planCtx = await loadPlanContext(companyId);
     if (!planCtx) return res.status(404).json({ success: false, error: '회사 정보를 찾을 수 없습니다.' });
     if (!isAiOperatorAllowed(planCtx, req.user)) {
-      return res.status(403).json({ success: false, error: '본 기능은 엔터프라이즈 베타 운영 중입니다.', code: 'BETA_GATE' });
+      return res.status(403).json({ success: false, error: '본 기능은 비즈니스·엔터프라이즈 요금제 전용입니다.', code: 'BETA_GATE' });
     }
     const days = Math.max(7, Math.min(90, parseInt(String(req.query.days || '30'), 10) || 30));
     const { buildAutoMarketingRoi } = await import('../utils/automarketing-roi');
@@ -1862,7 +1862,7 @@ router.get('/operator/performance/data-availability', async (req: Request, res: 
     const planCtx = await loadPlanContext(companyId);
     if (!planCtx) return res.status(404).json({ success: false, error: '회사 정보를 찾을 수 없습니다.' });
     if (!isAiOperatorAllowed(planCtx, req.user)) {
-      return res.status(403).json({ success: false, error: '본 기능은 엔터프라이즈 베타 운영 중입니다.', code: 'BETA_GATE' });
+      return res.status(403).json({ success: false, error: '본 기능은 비즈니스·엔터프라이즈 요금제 전용입니다.', code: 'BETA_GATE' });
     }
     const result = await buildDataAvailability(companyId);
     return res.json({ success: true, availability: result });
@@ -1890,7 +1890,7 @@ router.post('/operator/continuous', async (req: Request, res: Response) => {
     const planCtx = await loadPlanContext(companyId);
     if (!planCtx) return res.status(404).json({ success: false, error: '회사 정보를 찾을 수 없습니다.' });
     if (!isAiOperatorAllowed(planCtx, req.user)) {
-      return res.status(403).json({ success: false, error: '본 기능은 엔터프라이즈 베타 운영 중입니다.', code: 'BETA_GATE' });
+      return res.status(403).json({ success: false, error: '본 기능은 비즈니스·엔터프라이즈 요금제 전용입니다.', code: 'BETA_GATE' });
     }
 
     const {
@@ -1990,7 +1990,7 @@ router.post('/operator/marketing-calendar/generate', async (req: Request, res: R
     const planCtx = await loadPlanContext(companyId);
     if (!planCtx) return res.status(404).json({ success: false, error: '회사 정보를 찾을 수 없습니다.' });
     if (!isAiOperatorAllowed(planCtx, req.user)) {
-      return res.status(403).json({ success: false, error: '본 기능은 엔터프라이즈 베타 운영 중입니다.', code: 'BETA_GATE' });
+      return res.status(403).json({ success: false, error: '본 기능은 비즈니스·엔터프라이즈 요금제 전용입니다.', code: 'BETA_GATE' });
     }
     const [infoRes, cntRes] = await Promise.all([
       query(`SELECT business_type, brand_name, brand_tone FROM companies WHERE id = $1::uuid`, [companyId]),
@@ -2079,7 +2079,7 @@ router.post('/operator/marketing-calendar/regenerate-month', async (req: Request
     const planCtx = await loadPlanContext(companyId);
     if (!planCtx) return res.status(404).json({ success: false, error: '회사 정보를 찾을 수 없습니다.' });
     if (!isAiOperatorAllowed(planCtx, req.user)) {
-      return res.status(403).json({ success: false, error: '본 기능은 엔터프라이즈 베타 운영 중입니다.', code: 'BETA_GATE' });
+      return res.status(403).json({ success: false, error: '본 기능은 비즈니스·엔터프라이즈 요금제 전용입니다.', code: 'BETA_GATE' });
     }
     const month = Math.floor(Number(req.body?.month));
     if (!(month >= 1 && month <= 12)) {
@@ -2453,7 +2453,7 @@ router.post('/operator/proposals/:id/approve', async (req: Request, res: Respons
     // ★ 발송 개시 경로 — 생성/propose와 동일 게이트. 강등 회사가 남은 pending을 수동 발송하는 구멍 차단(조회·거부·정지는 열어 둠).
     const planCtx = await loadPlanContext(companyId);
     if (!planCtx || !isAiOperatorAllowed(planCtx, req.user)) {
-      return res.status(403).json({ success: false, error: '본 기능은 엔터프라이즈 베타 운영 중입니다.', code: 'BETA_GATE' });
+      return res.status(403).json({ success: false, error: '본 기능은 비즈니스·엔터프라이즈 요금제 전용입니다.', code: 'BETA_GATE' });
     }
     const result = await approveProposal(companyId, req.params.id, userId);
     if (!result.ok) return res.status(400).json({ success: false, error: result.reason });
@@ -2566,7 +2566,7 @@ router.post('/operator/multi-goal/analyze', async (req: Request, res: Response) 
     const planCtx = await loadPlanContext(companyId);
     if (!planCtx) return res.status(404).json({ success: false, error: '회사 정보를 찾을 수 없습니다.' });
     if (!isAiOperatorAllowed(planCtx, req.user)) {
-      return res.status(403).json({ success: false, error: '본 기능은 엔터프라이즈 베타 운영 중입니다.', code: 'BETA_GATE' });
+      return res.status(403).json({ success: false, error: '본 기능은 비즈니스·엔터프라이즈 요금제 전용입니다.', code: 'BETA_GATE' });
     }
 
     const { goals } = req.body;
@@ -2754,7 +2754,7 @@ router.post('/operator/explain', async (req: Request, res: Response) => {
     const planCtx = await loadPlanContext(companyId);
     if (!planCtx) return res.status(404).json({ success: false, error: '회사 정보를 찾을 수 없습니다.' });
     if (!isAiOperatorAllowed(planCtx, req.user)) {
-      return res.status(403).json({ success: false, error: '본 기능은 엔터프라이즈 베타 운영 중입니다.', code: 'BETA_GATE' });
+      return res.status(403).json({ success: false, error: '본 기능은 비즈니스·엔터프라이즈 요금제 전용입니다.', code: 'BETA_GATE' });
     }
 
     const { question } = req.body;

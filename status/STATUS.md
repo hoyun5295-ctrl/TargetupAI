@@ -58,6 +58,9 @@
 
 ---
 
+### 🟢 2026-07-07(9) — 뱃지 라벨 3단 정책 정리 (Harold 확정 / 코드완료·tsc 0 / 미배포)
+> BETA 남발 정리: 정가 과금 코어=무라벨 / 갓 출시=NEW(4~6주 유효기간) / 실험만="실험실". frontend 20파일 — 코어 BETA 뱃지 22곳 제거(대시보드·AI Operator 허브+하위 카드·자동마케팅·캘린더·DM·이메일·인앱·성과·세그먼트·CDP·온보딩·AI 캠페인 모달 3종·메모리·사용이력) + "AI Operator 소개" NEW 만료 제거 + 실험 5종(예측·푸시·음성·Batch·설명) "실험실" 전환. backend BETA_GATE 문구 21곳 "엔터프라이즈 베타 운영 중"→"비즈니스·엔터프라이즈 요금제 전용"(코드값 BETA_GATE는 불변 — FE 분기 사용). 유지=카카오&RCS 베타테스트 안내(실검증 중 사실)·슈퍼관리자 내부 3곳. CLAUDE.md 디자인 룰 "BETA badge 의무" 폐지 갱신(재발 차단). 배포 = frontend+backend build:safe + pm2 reload.
+
 ### 🔴 활성 블로커 — 알림톡 강조표기형 7300 (대표링크 게이트웨이 매핑 대기, 서팀장)
 > 원문·해법·잔여 전문 = [BUGS.md](BUGS.md) §2 (2026-07-07 소유 이관 — 버그 상세는 BUGS.md가 소유). 요지: 대표링크 템플릿의 ATTACHMENT.link 미동봉이 근본 — ①서팀장 게이트웨이 etcJson→IMC link 매핑 추가 → ②한줄로 발송 4경로 etcJson link 합성(buildAlimtalkEtcJson 확장) → ③CT-87 R 차단 해제 묶음(Harold 동의 대기).
 

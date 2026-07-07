@@ -705,9 +705,6 @@ export default function AiOperatorPage() {
               <span className="text-lg font-bold bg-gradient-to-r from-amber-200 via-fuchsia-200 to-indigo-200 bg-clip-text text-transparent">
                 AI Operator
               </span>
-              <span className="text-[10px] font-bold tracking-wider px-2 py-0.5 rounded-full bg-gradient-to-r from-amber-400 to-fuchsia-400 text-indigo-950">
-                BETA
-              </span>
             </div>
           </div>
         </div>
@@ -1414,7 +1411,6 @@ export default function AiOperatorPage() {
                           </div>
                           <div className="flex items-center gap-1.5 mb-1">
                             <h3 className="text-white font-semibold text-sm">{card.label}</h3>
-                            <span className="text-[8px] font-bold tracking-wider px-1.5 py-0.5 rounded-full bg-gradient-to-r from-amber-400 to-fuchsia-500 text-white shadow-sm">BETA</span>
                           </div>
                           <p className="text-white/60 text-[11px] leading-relaxed">{card.description}</p>
                           <div className="absolute top-4 right-4 text-white/30 group-hover:text-white/70 group-hover:translate-x-0.5 transition-all text-base">

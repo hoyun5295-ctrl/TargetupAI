@@ -243,7 +243,6 @@ export default function OnboardingWizardPage() {
               <div>
                 <div className="flex items-center gap-2">
                   <h1 className="text-base md:text-lg font-bold text-white">AI 오퍼레이션 시작하기</h1>
-                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-violet-500/30 text-violet-200 border border-violet-400/30 font-semibold">BETA</span>
                 </div>
                 <p className="text-[11px] text-white/50 mt-0.5 flex items-center gap-2">
                   <Clock className="w-3 h-3" />

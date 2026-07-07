@@ -614,7 +614,6 @@ export default function EmailCampaignsPage() {
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2">
               <h1 className="text-xl md:text-2xl font-semibold text-white">Email 캠페인</h1>
-              <span className="text-[10px] bg-gradient-to-r from-amber-400 to-orange-500 text-white px-2 py-0.5 rounded-full font-bold tracking-wide">BETA</span>
             </div>
             <p className="text-xs md:text-sm text-white/50 mt-0.5">회사 SMTP 직접 등록 → 본인 도메인 발신 + 광고 자동 합성 + 오픈/클릭 트래킹</p>
           </div>
