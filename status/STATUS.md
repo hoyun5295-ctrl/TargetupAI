@@ -61,14 +61,14 @@
 ### 🟢 2026-07-07(9) — 뱃지 라벨 3단 정책 정리 (Harold 확정 / 코드완료·tsc 0 / 미배포)
 > BETA 남발 정리: 정가 과금 코어=무라벨 / 갓 출시=NEW(4~6주 유효기간) / 실험만="실험실". frontend 20파일 — 코어 BETA 뱃지 22곳 제거(대시보드·AI Operator 허브+하위 카드·자동마케팅·캘린더·DM·이메일·인앱·성과·세그먼트·CDP·온보딩·AI 캠페인 모달 3종·메모리·사용이력) + "AI Operator 소개" NEW 만료 제거 + 실험 5종(예측·푸시·음성·Batch·설명) "실험실" 전환. backend BETA_GATE 문구 21곳 "엔터프라이즈 베타 운영 중"→"비즈니스·엔터프라이즈 요금제 전용"(코드값 BETA_GATE는 불변 — FE 분기 사용). 유지=카카오&RCS 베타테스트 안내(실검증 중 사실)·슈퍼관리자 내부 3곳. CLAUDE.md 디자인 룰 "BETA badge 의무" 폐지 갱신(재발 차단). 배포 = frontend+backend build:safe + pm2 reload.
 
-### 🔴 활성 블로커 — 알림톡 강조표기형: 대표링크(7300) 해결 → 발신프로필키(senderkey) 관문 (자비스 회신 대기)
-> 원문·전 과정 = [BUGS.md](BUGS.md) §2. 2026-07-07 진척: 비토 게이트웨이(139.150.81.213) v149 + Agent v1.0.10 교체 완료 → k_etc_json attachment_link 합성 완벽·represent_link 일치로 **7300(대표링크) 사실상 해결**. E2E 79738 line13 실측 = **status_code 9999**(발송 전 `kakao_sender_key 필수` 필드매핑 실패). **유일 관문 = senderkey.** 결정(Harold): 게이트웨이가 표준 QTmsg처럼 senderkey **자동 도출**하게 변경 요청(한줄로 무변경·빠름) = [docs/2026-07-07-gateway-auto-senderkey-request.md](docs/2026-07-07-gateway-auto-senderkey-request.md). 대안=한줄로 SENDER_KEY 합성 7지점. **다음 세션**: 자비스 회신 → 무변경/7지점 → 79738 재발송 DONE.
+### 🟢 2026-07-07 — 알림톡 강조표기형 3관문 종결 (7300 대표링크 · 9999 senderkey · 3027 버튼) ★배포완료(716074dc)·전체 발송 정상
+> 커밋 716074dc 배포(한줄로 SENDER_KEY 비토 라인 한정 주입·CT-04 insertAlimtalkQueue 단일 길목) → 79738 대표링크 Gateway report_code 0000. 버튼형 3027은 자비스가 Gateway 버튼 변환(btnJson→IMC attachment.button) 정정 → Harold "전체 발송 잘된다" 확인. 원문·전 과정 = [archive/BUGS_RESOLVED.md](archive/BUGS_RESOLVED.md) 최상단 · [[project_2026_0707_bito_agent_7300_senderkey]]. 잔여 별건 = 진단로그 [ALIMTALK-DEBUG2] 제거.
 
-### 🟡 진행중 — 레거시 PAY 사이트 한줄로 흡수 (Track D, 서팀장 2차 회신 대기)
-> 서팀장 5문항 회신 정독 완료 + 상세 설계안 작성 + 2차 체크 메일 발신(2026-07-07). 요지: 게이트웨이(54·57·58)가 통계·잔액을 1분 실시간 DB직결 적재 → 한줄로 수신 DB(동일스키마, READ-only)로 목적지 변경 + agent/both 조회 3종 + 정산 합산. 선불 5%도 충전 게이트웨이 직접+잔액 게이트웨이 push라 READ-only로 충분. **회신 대기 4건 오면 Phase 1 착수.** SoT=[docs/레거시서버_폐기_플랜.md](docs/레거시서버_폐기_플랜.md)(§4-2 대기항목) · 설계=[docs/2026-07-07-pay-absorption-track-d-design.md](docs/2026-07-07-pay-absorption-track-d-design.md).
+### 🟡 진행중 — 레거시 PAY 사이트 한줄로 흡수 (Track D, ★Phase 1 수신 DB 구축완료 · 강문희 발주 대기)
+> 서팀장 2차 회신 전부 반영. **Phase 1 수신 DB 구축완료(2026-07-07)**: invito `pay-ingest-db`(MariaDB 10.11, 레거시 5.5 호환 --sql-mode="") — 143 dump 3테이블 82MB 복원(934,232/730/7,026 대조 일치)·SysId 백필(B=54/C=57/D=58·NULL 0)·계정(sales×3 IP 58.227.193.54/.57/.58 화이트리스트·hanjul_ro SELECT-only·root@% 제거)·방화벽 systemd `pay-ingest-fw`(DOCKER-USER 3-IP ACCEPT→DROP). 단가=한줄로 직원 입력 확정(레거시 SalesPrice 대부분 NULL). **다음 = 강문희 발주(§7-3 문안·sales 비번만 별도) → 전환일 절차(최종 dump 3테이블 재복원·갭0) → 유입 검증(§7-4) → Phase 2(조회+정산+거래내역서 웹/Agent 구분 일괄 배포).** SoT=[docs/레거시서버_폐기_플랜.md](docs/레거시서버_폐기_플랜.md) · 런북=[docs/2026-07-07-pay-absorption-track-d-design.md](docs/2026-07-07-pay-absorption-track-d-design.md) §7.
 
 ### 🔵 다음 세션 (예정)
-> ① **누적 0707 배포** — tp-push + build:safe(frontend·company-frontend·backend) + pm2 reload + Codex /codex:review(플러그인 미로드분). ② **PAY Track D Phase 1** — 서팀장 2차 회신 도착 시 수신 DB + 강문희 발주.
+> ① **누적 0707 배포** — tp-push + build:safe(frontend·company-frontend·backend) + pm2 reload + Codex /codex:review(플러그인 미로드분). ② **PAY Track D** — 강문희 발주 → 전환 → 유입 검증 → Phase 2 설계(조회+정산+거래내역서 웹/Agent 구분 일괄). ③ **템플릿관리자 흡수(Track B+C)** = 레거시 폐기 최대 잔여 — 0705 이관 핸드오프 정독 + 발신프로필키 축(§5-③) 재검수 여부 카카오 검수팀 확인부터.
 > (보류) 팝폰 SDK 검증(자체 서비스 SDK 실측 베드) = C:\Users\ceo\projects\poppon-workspace 정독 후 별도. 상세 [[project_2026_0618_selfhosted_mall_app_collection]].
 
 ---

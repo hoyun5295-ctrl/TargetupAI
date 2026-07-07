@@ -866,7 +866,7 @@ async function processExecution(exec: ExecutionRow): Promise<StepOutcome> {
     )`,
     [exec.execution_id, step.id, campaignId, sendCost]
   );
-  const deduct = await prepaidDeduct(exec.company_id, 1, prepaidMsgType as any, exec.journey_id, exec.created_by || undefined);
+  const deduct = await prepaidDeduct(exec.company_id, 1, prepaidMsgType as any, exec.journey_id, exec.created_by || undefined, 'journey');
   if (!deduct.ok) {
     console.warn(`[JourneyExecutor] execution=${exec.execution_id} 발송 후 차감 실패(잔액 동시 소진) — 1건 부담 + 여정 정지`);
     await pauseJourney(exec.journey_id, deduct.error || '잔액 부족(발송 후)');

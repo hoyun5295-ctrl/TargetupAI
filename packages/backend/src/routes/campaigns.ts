@@ -319,7 +319,7 @@ router.post('/test-send', async (req: Request, res: Response) => {
 
     // ★ 선불 잔액 체크
     const testMsgType = (messageType || 'SMS') as string;
-    const testDeduct = await prepaidDeduct(companyId, managerContacts.length, testMsgType, '00000000-0000-0000-0000-000000000000', userId);
+    const testDeduct = await prepaidDeduct(companyId, managerContacts.length, testMsgType, '00000000-0000-0000-0000-000000000000', userId, 'test');
     if (!testDeduct.ok) {
       return res.status(402).json({ error: testDeduct.error, insufficientBalance: true, balance: testDeduct.balance, requiredAmount: testDeduct.amount });
     }
@@ -385,7 +385,7 @@ router.post('/test-send', async (req: Request, res: Response) => {
     // ★ P0-3: 테스트 발송 실패건 환불 (차감은 전원 기준, 실패분 돌려줌)
     const testFailCount = managerContacts.length - sentCount;
     if (testFailCount > 0) {
-      await prepaidRefund(companyId, testFailCount, testMsgType, '00000000-0000-0000-0000-000000000000', '테스트 발송 실패 자동 환불');
+      await prepaidRefund(companyId, testFailCount, testMsgType, '00000000-0000-0000-0000-000000000000', '테스트 발송 실패 자동 환불', 'test');
     }
 
     // ★ C5: 실패 건 DB 기록 (비동기, 발송 응답에 영향 없음)

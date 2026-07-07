@@ -163,7 +163,7 @@ router.post('/test', authenticate, async (req: Request, res: Response) => {
     // ★ 크레딧 모델 v2 (2026-06-30): "프로 이상 스팸필터 테스트 무료" 전면 폐지 — 전 플랜 항상 과금(현금/후불).
     let spamDeductAmount = 0;
     {
-      const spamDeduct = await prepaidDeduct(companyId, spamSendCount, spamDeductType, testId, userId);
+      const spamDeduct = await prepaidDeduct(companyId, spamSendCount, spamDeductType, testId, userId, 'spam');
       if (!spamDeduct.ok) {
         // 차감 실패 시 테스트 레코드 cancelled 처리
         await query(`UPDATE spam_filter_tests SET status = 'completed', completed_at = NOW() WHERE id = $1`, [testId]);

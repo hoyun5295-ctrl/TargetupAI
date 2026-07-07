@@ -4,13 +4,18 @@
 // 하드코딩 금지. DB 기반 단가 조회.
 
 import { query } from '../config/database';
+import { buildDeductDescription } from './deduct-reference';
 
 /**
  * 선불 차감
  * @param createdBy - ★ D98: 차감 실행 사용자 ID (user_id 기반 사용금액 격리용)
+ * @param referenceType - ★ 2026-07-07: 차감 유형(campaign/test/spam/journey/brand). 기본 'campaign'(하위호환).
+ *   차감이력에서 스팸/테스트 차감이 일반 발송으로 위장되던 결함 수정 — 차감↔환불은 (reference_type,reference_id)
+ *   쌍으로 매칭되므로 짝이 되는 prepaidRefund 호출도 같은 referenceType을 넘겨야 한다.
  */
 export async function prepaidDeduct(
-  companyId: string, count: number, messageType: string, referenceId: string, createdBy?: string
+  companyId: string, count: number, messageType: string, referenceId: string, createdBy?: string,
+  referenceType: string = 'campaign'
 ): Promise<{ ok: boolean; error?: string; amount?: number; balance?: number; insufficientBalance?: boolean }> {
   const co = await query(
     'SELECT billing_type, balance, cost_per_sms, cost_per_lms, cost_per_mms, cost_per_kakao FROM companies WHERE id = $1',
@@ -46,20 +51,26 @@ export async function prepaidDeduct(
   }
 
   // 거래 기록 — ★ D98: created_by 추가 (사용자별 사용금액 격리)
-  // ★ D145 PDF 후속 (2026-05-07): message_type 컬럼 박음 — both 채널 발송 시 messageType별 환불 분리
+  // ★ D145 PDF 후속 (2026-05-07): message_type 컬럼 추가 — both 채널 발송 시 messageType별 환불 분리
+  // ★ 2026-07-07: reference_type를 유형별로 기록 + 설명에 유형 라벨(스팸/테스트 위장 해소)
   await query(
     `INSERT INTO balance_transactions (company_id, type, amount, balance_after, description, reference_type, reference_id, payment_method, created_by, message_type)
-     VALUES ($1, 'deduct', $2, $3, $4, 'campaign', $5, 'system', $6, $7)`,
-    [companyId, totalAmount, result.rows[0].balance, `${messageType} ${count}건 발송 차감 (건당 ${unitPrice}원)`, referenceId, createdBy || null, messageType]
+     VALUES ($1, 'deduct', $2, $3, $4, $5, $6, 'system', $7, $8)`,
+    [companyId, totalAmount, result.rows[0].balance, buildDeductDescription(referenceType, messageType, count, unitPrice), referenceType, referenceId, createdBy || null, messageType]
   );
 
   console.log(`[선불차감] company=${companyId} ${messageType}×${count} = ${totalAmount}원 차감 → 잔액 ${result.rows[0].balance}원`);
   return { ok: true, amount: totalAmount, balance: Number(result.rows[0].balance) };
 }
 
-/** 선불 환불 (실패건 또는 취소) — 중복 환불 방지 포함 */
+/**
+ * 선불 환불 (실패건 또는 취소) — 중복 환불 방지 포함
+ * @param referenceType - ★ 2026-07-07: 차감과 같은 유형이어야 매칭됨(차감↔환불 쌍 = reference_type+reference_id).
+ *   기본 'campaign'(캠페인 발송 환불 대부분). 테스트 발송 실패 환불은 차감이 'test'이므로 'test'를 넘긴다.
+ */
 export async function prepaidRefund(
-  companyId: string, count: number, messageType: string, campaignId: string, reason: string
+  companyId: string, count: number, messageType: string, campaignId: string, reason: string,
+  referenceType: string = 'campaign'
 ): Promise<{ refunded: number }> {
   const co = await query(
     'SELECT billing_type, cost_per_sms, cost_per_lms, cost_per_mms, cost_per_kakao FROM companies WHERE id = $1',
@@ -82,18 +93,18 @@ export async function prepaidRefund(
   //   해결: messageType별로 alreadyRefunded/totalDeducted 분리 조회
   const existing = await query(
     `SELECT COALESCE(SUM(amount), 0) as total FROM balance_transactions
-     WHERE company_id = $1 AND type = 'refund' AND reference_type = 'campaign' AND reference_id = $2
+     WHERE company_id = $1 AND type = 'refund' AND reference_type = $4 AND reference_id = $2
        AND (message_type = $3 OR message_type IS NULL)`,
-    [companyId, campaignId, messageType]
+    [companyId, campaignId, messageType, referenceType]
   );
   const alreadyRefunded = Number(existing.rows[0].total);
 
   // 원래 차감 금액 조회
   const deducted = await query(
     `SELECT COALESCE(SUM(amount), 0) as total FROM balance_transactions
-     WHERE company_id = $1 AND type = 'deduct' AND reference_type = 'campaign' AND reference_id = $2
+     WHERE company_id = $1 AND type = 'deduct' AND reference_type = $4 AND reference_id = $2
        AND (message_type = $3 OR message_type IS NULL)`,
-    [companyId, campaignId, messageType]
+    [companyId, campaignId, messageType, referenceType]
   );
   const totalDeducted = Number(deducted.rows[0].total);
 
@@ -132,8 +143,8 @@ export async function prepaidRefund(
       : `${reason} (${messageType} ${count}건 × ${unitPrice}원)`;
     await query(
       `INSERT INTO balance_transactions (company_id, type, amount, balance_after, description, reference_type, reference_id, payment_method, message_type)
-       VALUES ($1, 'refund', $2, $3, $4, 'campaign', $5, 'system', $6)`,
-      [companyId, refundAmount, result.rows[0].balance, desc, campaignId, messageType]
+       VALUES ($1, 'refund', $2, $3, $4, $7, $5, 'system', $6)`,
+      [companyId, refundAmount, result.rows[0].balance, desc, campaignId, messageType, referenceType]
     );
     console.log(`[선불환불] company=${companyId} ${refundAmount}원 환불 → 잔액 ${result.rows[0].balance}원`);
   }

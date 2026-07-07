@@ -2,6 +2,14 @@
 > 원본: status/BUGS.md — 2026-07-03 관제탑 재설계 v2로 원문 그대로 이동 (요약·재서술 없음).
 > 본문 내 상대 링크는 재설계 전 경로 기준 — 설계·핸드오프 문서는 archive/DESIGNS/ 에 있다.
 
+## 2026-07-07 ✅ 종결 — 알림톡 강조표기형 3관문(7300 대표링크 · 9999 senderkey · 3027 버튼) 전부 해결
+
+> BUGS.md §2에서 이동(2026-07-07). 비토 자체 게이트웨이(139.150.81.213 / hanjul01 Agent line13 SMSQ_SEND_13→IMC invito11) 알림톡 발송 종결. 교차검증 = 커밋 716074dc 배포 + Gateway DB 실측(79738=0000) + Harold "전체 발송 잘된다". 상세 원본 = `memory/project_2026_0707_bito_agent_7300_senderkey.md`.
+> **결론 3관문**: ①7300(대표링크) = 한줄로 `buildAlimtalkEtcJson`이 top-level `attachment_link`(snake) 합성 + Gateway v149 IMC connector가 ATTACHMENT.link 변환 → 해결. ②9999(senderkey) = Agent v1.0.10이 `kakao_sender_key` 필수 요구(표준 QTmsg는 큐에 senderkey 컬럼 없음+레거시 relay가 템플릿코드로 자동 도출했으나 비토엔 그 매핑 없음) → **한줄로가 비토 라인 한정 주입**(CT-04 `insertAlimtalkQueue` 단일 길목 + `getBitoSmsTables` group_type='bito' 판정 + `withSenderKey` 병합, 값=`kakao_templates→profile_id→kakao_sender_profiles.profile_key`, 표준 라인 payload 불변·vitest 353·tsc 0). ③3027(버튼형) = Gateway의 QTmsg btnJson→IMC attachment.button 변환 불일치(type 숫자→2글자 코드·snake_case·AC URL 키 생략 등, IMC 연동규약서 §3.1 대조) → **자비스가 Gateway 버튼 변환 정정**(질의서 docs/2026-07-07-gateway-button-3027-request.md 발송 후).
+> **원인 위치 교훈**: 한줄로 코드·DB 정상인데 발송 실패 = 게이트웨이/에이전트의 payload 변환 단계 의심(D234+ select_sql, v155 버튼 normalize). senderkey는 매핑 원본 소유자(한줄로 PG)가 명시 주입 = 게이트웨이 이중 진실 회피(6원칙③).
+> **잔여(별건·저위험)**: 진단로그 `[ALIMTALK-DEBUG2]`(direct-send-processor) 종결 정리 시 제거. 8006 코드(19:23 배치·카카오 3xxx 표 외) 소속은 미확인(발송 정상화로 무영향). LINKTEST1~6 테스트 행 = SMSQ_SEND_1_202606 app_etc1 LIKE 'LINKTEST%'.
+> **전 과정 트레이스**: 진행1~2 Agent v1.0.8 config kakao_payload 추가 → 진행3 자비스 회신(변환=Gateway v149) → 진행4 Agent v1.0.10 교체+9999 senderkey 관문 발견 → 진행5 Harold 결정=한줄로 주입(자동도출 v1.0.11급 철회)·구현 완료 → 진행6 배포·79738=0000·버튼형 3027 → 자비스 정정 종결.
+
 ## 과거 현황 블록 (원본 상단 요약 — 5~6월 종결 이력)
 > **목적:** 버그의 발견→분석→수정→교차검증→완료를 체계적으로 관리하여 재발을 방지한다.  
 > **원칙:** (1) 추측성 땜질 금지 (2) 근본 원인 3줄 이내 특정 (3) 교차검증 통과 전까지 Closed 금지 (4) 재발 패턴 기록  
