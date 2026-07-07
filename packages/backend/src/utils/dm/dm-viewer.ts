@@ -544,6 +544,30 @@ ${counterHtml}
     sectionEls.forEach(function(el){ sectionObserver.observe(el); });
   }
 
+  // ★ 2026-07-07(5) 섹션 스크롤 리빌 — 화면 밖 섹션만 .dm-reveal 부여 후 진입 시 순차 등장 (인앱 2.0 톤).
+  //   reduced-motion·IntersectionObserver 미지원·오류 = 부여 자체를 건너뛰어 전부 즉시 표시 (추적 로직 무접촉).
+  try {
+    var reduceMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if (!reduceMotion && 'IntersectionObserver' in window && sectionEls.length > 0) {
+      var revealObserver = new IntersectionObserver(function(entries){
+        entries.forEach(function(en){
+          if (!en.isIntersecting) return;
+          var el = en.target;
+          var order = parseInt(el.getAttribute('data-reveal-i') || '0', 10);
+          setTimeout(function(){ el.classList.add('dm-in'); }, Math.min((order % 4) * 70, 280));
+          revealObserver.unobserve(el);
+        });
+      }, { threshold: 0.12 });
+      sectionEls.forEach(function(el, i){
+        var rct = el.getBoundingClientRect();
+        if (rct.top < window.innerHeight * 0.92) return; // 첫 화면 요소 = 리빌 스킵(즉시 표시)
+        el.classList.add('dm-reveal');
+        el.setAttribute('data-reveal-i', String(i));
+        revealObserver.observe(el);
+      });
+    }
+  } catch (e) {}
+
   // dots 클릭 → 해당 페이지로 이동
   dots.forEach(function(d, i){
     d.addEventListener('click', function(){

@@ -1,5 +1,6 @@
 /**
  * SnsSection — SNS (인스타/유튜브/카카오 등)
+ * ★ 2026-07-07(5) 디자인 2.0 — 이모지 아이콘 폐기 → 브랜드색 점 + 라벨 알약 칩 (backend dm-section-renderer 미러 동기)
  */
 import type { SnsProps } from '../../../utils/dm-section-defaults';
 
@@ -7,12 +8,8 @@ const SNS_LABELS: Record<string, string> = {
   instagram: 'Instagram', youtube: 'YouTube', kakao: '카카오',
   naver: 'Naver', facebook: 'Facebook', twitter: 'Twitter',
 };
-const SNS_EMOJIS: Record<string, string> = {
-  instagram: '📷', youtube: '▶️', kakao: '💬',
-  naver: 'N', facebook: 'f', twitter: '🐦',
-};
 const SNS_COLORS: Record<string, string> = {
-  instagram: '#e1306c', youtube: '#ff0000', kakao: '#fee500',
+  instagram: '#e1306c', youtube: '#ff0000', kakao: '#f5c400',
   naver: '#03c75a', facebook: '#1877f2', twitter: '#1da1f2',
 };
 
@@ -28,18 +25,19 @@ export default function SnsSection({ props }: { props: SnsProps }) {
         {channels.map((ch, i) => {
           const color = SNS_COLORS[ch.type] || 'var(--dm-neutral-700)';
           const label = SNS_LABELS[ch.type] || ch.type;
-          const emoji = SNS_EMOJIS[ch.type] || '🔗';
+          const dot = <span style={{ width: 7, height: 7, borderRadius: 999, background: color, flexShrink: 0 }} />;
           return isIconMode ? (
             <a key={i} href={ch.url || '#'} target="_blank" rel="noreferrer" title={label}
-              style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: 44, height: 44, borderRadius: 'var(--dm-radius-full)', background: 'var(--dm-bg)', color, fontSize: 18, textDecoration: 'none', boxShadow: 'var(--dm-shadow-sm)' }}>
-              {emoji}
+              style={{ display: 'inline-flex', alignItems: 'center', gap: 8, padding: '10px 18px', borderRadius: 999, background: 'var(--dm-neutral-100)', border: '1px solid var(--dm-neutral-200)', color: 'var(--dm-neutral-800)', fontSize: 'var(--dm-fs-small)', fontWeight: 700, textDecoration: 'none' }}>
+              {dot}
+              <span>{label}</span>
             </a>
           ) : (
             <a key={i} href={ch.url || '#'} target="_blank" rel="noreferrer"
-              style={{ display: 'flex', alignItems: 'center', gap: 'var(--dm-sp-2)', padding: 'var(--dm-sp-3) var(--dm-sp-4)', borderRadius: 'var(--dm-radius-md)', background: color, color: '#fff', textDecoration: 'none', fontWeight: 600 }}>
-              <span>{emoji}</span>
+              style={{ display: 'flex', alignItems: 'center', gap: 'var(--dm-sp-2)', padding: 'var(--dm-sp-3) var(--dm-sp-5)', borderRadius: 999, background: 'var(--dm-neutral-100)', border: '1px solid var(--dm-neutral-200)', color: 'var(--dm-neutral-800)', textDecoration: 'none', fontWeight: 700 }}>
+              {dot}
               <span>{label}</span>
-              {ch.handle && <span style={{ opacity: 0.8, fontWeight: 400 }}>@{ch.handle}</span>}
+              {ch.handle && <span style={{ color: 'var(--dm-neutral-500)', fontWeight: 500 }}>@{ch.handle}</span>}
             </a>
           );
         })}

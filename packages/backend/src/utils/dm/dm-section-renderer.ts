@@ -471,23 +471,20 @@ function renderSns(props: SnsProps): string {
     instagram: 'Instagram', youtube: 'YouTube', kakao: '카카오',
     naver: 'Naver', facebook: 'Facebook', twitter: 'Twitter',
   };
-  const snsEmojis: Record<string, string> = {
-    instagram: '📷', youtube: '▶️', kakao: '💬',
-    naver: 'N', facebook: 'f', twitter: '🐦',
-  };
   const snsColors: Record<string, string> = {
-    instagram: '#e1306c', youtube: '#ff0000', kakao: '#fee500',
+    instagram: '#e1306c', youtube: '#ff0000', kakao: '#f5c400',
     naver: '#03c75a', facebook: '#1877f2', twitter: '#1da1f2',
   };
 
+  // ★ 2026-07-07(5) 디자인 2.0 — 이모지 아이콘 폐기 → 브랜드색 점 + 라벨 알약 칩 (프론트 SnsSection 미러 동기)
   const items = channels.map((ch) => {
     const color = snsColors[ch.type] || 'var(--dm-neutral-700)';
     const label = snsLabels[ch.type] || ch.type;
-    const emoji = snsEmojis[ch.type] || '🔗';
+    const dot = `<span style="width:7px;height:7px;border-radius:999px;background:${color};flex-shrink:0"></span>`;
     if (isIconMode) {
-      return `<a href="${safeUrl(ch.url)}" target="_blank" title="${escapeHtml(label)}" style="display:flex;align-items:center;justify-content:center;width:48px;height:48px;border-radius:var(--dm-radius-full);background:var(--dm-neutral-100);border:1px solid var(--dm-neutral-200);color:${color};font-size:19px;text-decoration:none">${emoji}</a>`;
+      return `<a href="${safeUrl(ch.url)}" target="_blank" title="${escapeHtml(label)}" style="display:inline-flex;align-items:center;gap:8px;padding:10px 18px;border-radius:999px;background:var(--dm-neutral-100);border:1px solid var(--dm-neutral-200);color:var(--dm-neutral-800);font-size:var(--dm-fs-small);font-weight:700;text-decoration:none">${dot}<span>${escapeHtml(label)}</span></a>`;
     }
-    return `<a href="${safeUrl(ch.url)}" target="_blank" style="display:flex;align-items:center;gap:var(--dm-sp-2);padding:var(--dm-sp-3) var(--dm-sp-4);border-radius:var(--dm-radius-md);background:${color};color:#fff;text-decoration:none;font-weight:600"><span>${emoji}</span><span>${escapeHtml(label)}</span>${ch.handle ? `<span style="opacity:0.8;font-weight:400">@${escapeHtml(ch.handle)}</span>` : ''}</a>`;
+    return `<a href="${safeUrl(ch.url)}" target="_blank" style="display:flex;align-items:center;gap:var(--dm-sp-2);padding:var(--dm-sp-3) var(--dm-sp-5);border-radius:999px;background:var(--dm-neutral-100);border:1px solid var(--dm-neutral-200);color:var(--dm-neutral-800);text-decoration:none;font-weight:700">${dot}<span>${escapeHtml(label)}</span>${ch.handle ? `<span style="color:var(--dm-neutral-500);font-weight:500">@${escapeHtml(ch.handle)}</span>` : ''}</a>`;
   }).join('');
 
   return `<div class="dm-section dm-sns" data-section-type="sns" style="padding:var(--dm-sp-5);background:var(--dm-bg)">
@@ -817,9 +814,9 @@ function renderMapStoreLocator(p: any): string {
       ${s.phone ? `<div style="font-size:var(--dm-fs-tiny);color:var(--dm-primary);margin-top:4px">전화 ${escapeHtml(s.phone)}</div>` : ''}
       ${s.hours ? `<div style="font-size:var(--dm-fs-tiny);color:var(--dm-neutral-500);margin-top:2px">영업 ${escapeHtml(s.hours)}</div>` : ''}
     </div>`).join('');
-  return `<div class="dm-section dm-map-store-locator" style="padding:var(--dm-sp-4)">
+  // ★ 2026-07-07(5) 디자인 2.0 — 기능 없는 200px 회색 지도 자리(죽은 장식) 제거, 매장 카드만
+  return `<div class="dm-section dm-map-store-locator" style="padding:var(--dm-sp-6) var(--dm-sp-5)">
     <div style="display:flex;align-items:center;gap:6px;font-size:var(--dm-fs-h3);font-weight:700;margin-bottom:var(--dm-sp-3)"><span style="color:var(--dm-primary)">${dmIcon('map', 18)}</span>매장 찾기</div>
-    <div style="width:100%;height:200px;background:var(--dm-neutral-100);border-radius:var(--dm-radius-md);display:flex;align-items:center;justify-content:center;color:var(--dm-neutral-400);margin-bottom:var(--dm-sp-3)">${dmIcon('map', 32)}</div>
     ${items || `<div class="dm-mood-slot" style="text-align:center;color:var(--dm-neutral-400);padding:var(--dm-sp-4)">[매장 정보를 추가해주세요]</div>`}
   </div>`;
 }

@@ -254,7 +254,9 @@ button { font-family: inherit; cursor: pointer; border: 0; background: transpare
   :root { --dm-fs-hero: 34px; --dm-fs-h1: 25px; }
 }
 
-/* ★ 2026-07-02(5) 발행물 디자인 격상 — 버튼 여백/자간/그림자 정돈 (이메일 톤) */
+/* ★ 2026-07-02(5) 발행물 디자인 격상 — 버튼 여백/자간/그림자 정돈 (이메일 톤)
+   ★ 2026-07-07(5) 디자인 2.0 — 그라데이션 면 + 강조색 그림자 + 프레스 마이크로 인터랙션 (인앱 2.0 톤).
+     값 변경 시 frontend/src/styles/dm-builder.css .dm-cta 동시 수정 필수 (에디터·발행물 시각 일치). */
 .dm-cta {
   display: inline-block;
   padding: 14px 28px;
@@ -262,18 +264,33 @@ button { font-family: inherit; cursor: pointer; border: 0; background: transpare
   min-width: 44px;
   border-radius: 14px;
   font-size: var(--dm-fs-body);
-  font-weight: 700;
+  font-weight: 800;
   letter-spacing: -0.01em;
   text-align: center;
-  background: var(--dm-primary);
+  background: linear-gradient(180deg, var(--dm-primary) 0%, var(--dm-primary-hover) 100%);
   color: #fff;
-  box-shadow: 0 2px 10px rgba(15, 23, 42, 0.10);
-  transition: background 150ms ease-out, transform 100ms ease-out;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.14), 0 8px 20px -6px rgba(15, 23, 42, 0.28);
+  transition: filter 150ms ease-out, transform 100ms ease-out, box-shadow 150ms ease-out;
 }
-.dm-cta:hover { background: var(--dm-primary-hover); }
-.dm-cta:active { transform: scale(0.98); }
-.dm-cta-secondary { background: var(--dm-neutral-100); color: var(--dm-neutral-900); }
-.dm-cta-outline { background: transparent; border: 2px solid var(--dm-primary); color: var(--dm-primary); }
+.dm-cta:hover { filter: brightness(1.06); box-shadow: 0 2px 4px rgba(15, 23, 42, 0.14), 0 12px 26px -6px rgba(15, 23, 42, 0.32); }
+.dm-cta:active { transform: scale(0.97); }
+.dm-cta-secondary { background: var(--dm-neutral-100); color: var(--dm-neutral-900); box-shadow: inset 0 0 0 1px var(--dm-neutral-200); }
+.dm-cta-outline { background: transparent; border: 2px solid var(--dm-primary); color: var(--dm-primary); box-shadow: none; }
+
+/* ★ 2026-07-07(5) 섹션 스크롤 리빌 — 뷰어 JS가 화면 밖 섹션에만 .dm-reveal 부여(no-JS = 전부 즉시 표시).
+   reduced-motion은 JS에서 부여 자체를 건너뛴다. */
+.dm-reveal { opacity: 0; transform: translateY(16px); }
+.dm-reveal.dm-in {
+  opacity: 1;
+  transform: none;
+  transition: opacity 550ms cubic-bezier(0.22, 1, 0.36, 1), transform 550ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/* ★ 2026-07-07(5) 데스크탑 열람 — 슬레이트 틴트 배경 + 페이지 프레임 앰비언트 그림자 (모바일 무영향) */
+@media (min-width: 480px) {
+  body { background: linear-gradient(180deg, #eef0f5 0%, #e7eaf1 100%); }
+  .dm-viewer { box-shadow: 0 24px 80px -24px rgba(15, 23, 42, 0.22), 0 2px 8px rgba(15, 23, 42, 0.06); }
+}
 
 @media (prefers-reduced-motion: reduce) {
   * { animation-duration: 0ms !important; transition-duration: 0ms !important; }

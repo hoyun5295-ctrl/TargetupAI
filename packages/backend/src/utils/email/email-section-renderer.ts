@@ -56,11 +56,12 @@ function renderHero(p: HeroProps, b: EmailBrand, ctx: EmailRenderCtx): string {
 
   if (img) {
     // 배경 이미지 + (옵션) 하단 그라데이션 오버레이 + 하단 정렬 텍스트. 아웃룩은 배경이미지 미지원 → bg색 폴백.
+    // ★ 2026-07-07(5) 디자인 2.0 — 스크림 강화(0.62) + 헤드라인 텍스트 섀도(이미지 위 가독)
     const overlay = p.overlay_gradient !== false
-      ? 'linear-gradient(180deg,rgba(0,0,0,0) 35%,rgba(0,0,0,0.55) 100%)'
+      ? 'linear-gradient(180deg,rgba(0,0,0,0) 30%,rgba(0,0,0,0.62) 100%)'
       : 'rgba(0,0,0,0)';
     // ★ 2026-07-02 줄바꿈(\n→<br>) + 색상 직접 지정(미지정 = 기존 기본색)
-    const headline = `<div style="font-size:${b.type.hero.size};line-height:${b.type.hero.lineHeight};font-weight:${b.type.hero.weight};letter-spacing:${b.type.hero.letterSpacing};color:${esc(p.headline_color || '#ffffff')};margin:0">${esc(p.headline).replace(/\n/g, '<br>')}</div>`;
+    const headline = `<div style="font-size:${b.type.hero.size};line-height:${b.type.hero.lineHeight};font-weight:${b.type.hero.weight};letter-spacing:${b.type.hero.letterSpacing};color:${esc(p.headline_color || '#ffffff')};text-shadow:0 2px 14px rgba(0,0,0,0.35);margin:0">${esc(p.headline).replace(/\n/g, '<br>')}</div>`;
     const sub = p.sub_copy
       ? `<div style="font-size:${b.type.body.size};line-height:${b.type.body.lineHeight};color:${esc(p.sub_copy_color || 'rgba(255,255,255,0.92)')};margin-top:${b.sp[3]}">${esc(p.sub_copy).replace(/\n/g, '<br>')}</div>`
       : '';
@@ -96,7 +97,8 @@ function renderTextCard(p: TextCardProps, b: EmailBrand, ctx: EmailRenderCtx): s
   const align = p.align || 'left';
   const img = p.image_url ? emailImg(p.image_url, ctx.publicBase) : '';
   const imgTag = img ? `<img src="${esc(img)}" alt="${esc(p.headline || '')}" style="width:100%;max-width:552px;display:block;border:0;border-radius:${b.radius.md}">` : '';
-  const tag = p.tag ? `<div style="font-size:${b.type.tiny.size};font-weight:700;letter-spacing:0.05em;color:${b.primary};margin-bottom:${b.sp[2]}">${esc(p.tag)}</div>` : '';
+  // ★ 2026-07-07(5) 디자인 2.0 — 태그 = 자간 넓은 오버라인 (쿠폰 COUPON 인장과 동일 언어)
+  const tag = p.tag ? `<div style="font-size:${b.type.tiny.size};font-weight:800;letter-spacing:0.18em;color:${b.primary};margin-bottom:${b.sp[2]}">${esc(p.tag)}</div>` : '';
   // ★ 2026-07-02 헤드라인 줄바꿈 + 색상 직접 지정 (미지정 = 기존 기본색)
   const head = p.headline ? `<div style="font-size:${b.type.h2.size};line-height:${b.type.h2.lineHeight};font-weight:${b.type.h2.weight};color:${esc(p.headline_color || b.text)};margin:0 0 ${b.sp[3]} 0">${esc(p.headline).replace(/\n/g, '<br>')}</div>` : '';
   const bodyHtml = p.body ? `<div style="font-size:${b.type.body.size};line-height:${b.type.body.lineHeight};color:${esc(p.body_color || b.text)}">${esc(p.body).replace(/\n/g, '<br>')}</div>` : '';
@@ -118,13 +120,14 @@ function renderTextCard(p: TextCardProps, b: EmailBrand, ctx: EmailRenderCtx): s
 }
 
 // 이메일 호환 버튼 — 이미지 버튼 금지, table 셀 배경 + padding (아웃룩 호환).
+// ★ 2026-07-07(5) 이메일 디자인 2.0 — primary=그라데이션(미지원 클라이언트 solid 폴백)+그림자, 대형 터치 타깃.
 function renderButton(btn: CtaButton, b: EmailBrand): string {
   const normalized = normalizeWebUrl(btn.url || '');
   const url = /^https?:\/\//i.test(normalized) ? normalized : '#';
-  let bg = b.primary, color = '#ffffff', border = b.primary;
-  if (btn.style === 'secondary') { bg = b.accent; border = b.accent; }
-  else if (btn.style === 'outline') { bg = b.cardBg; color = b.primary; }
-  return `<table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 auto"><tr><td style="border-radius:${b.radius.md};background:${bg};border:1px solid ${border}"><a href="${esc(url)}" style="display:inline-block;padding:${b.sp[3]} ${b.sp[6]};font-size:${b.type.body.size};font-weight:700;color:${color};text-decoration:none">${esc(btn.label)}</a></td></tr></table>`;
+  let bg = b.primary, bgImage = b.btnGrad, color = '#ffffff', border = b.primary, shadow = `0 2px 5px rgba(15,23,42,0.12),0 10px 24px ${b.primaryDashed}`;
+  if (btn.style === 'secondary') { bg = b.accent; bgImage = 'none'; border = b.accent; shadow = '0 2px 8px rgba(15,23,42,0.12)'; }
+  else if (btn.style === 'outline') { bg = b.cardBg; bgImage = 'none'; color = b.primary; shadow = 'none'; }
+  return `<table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 auto"><tr><td style="border-radius:14px;background:${bg};background-image:${bgImage};border:1px solid ${border};box-shadow:${shadow}"><a href="${esc(url)}" style="display:inline-block;padding:14px 34px;font-size:${b.type.body.size};font-weight:800;letter-spacing:-0.01em;color:${color};text-decoration:none">${esc(btn.label)}</a></td></tr></table>`;
 }
 
 function renderCta(p: CtaProps, b: EmailBrand): string {
@@ -143,8 +146,9 @@ function renderFooter(p: FooterProps, b: EmailBrand): string {
   if (cs.length) parts.push(cs.join(' · '));
   if (p.legal_text) parts.push(esc(p.legal_text).replace(/\n/g, '<br>'));
   // 수신거부 링크는 발송 시 시스템 자동 부착 — 여기서 렌더 X.
-  const body = parts.map((t) => `<div style="margin:${b.sp[1]} 0">${t}</div>`).join('');
-  return `<tr><td style="padding:${b.sp[6]};border-top:1px solid ${b.border};text-align:center;font-size:${b.type.tiny.size};line-height:${b.type.tiny.lineHeight};color:${b.textMuted}">${body}</td></tr>`;
+  // ★ 2026-07-07(5) 디자인 2.0 — 여유 행간·여백 (본문과 호흡 분리)
+  const body = parts.map((t) => `<div style="margin:${b.sp[2]} 0">${t}</div>`).join('');
+  return `<tr><td style="padding:${b.sp[8]} ${b.sp[6]};border-top:1px solid ${b.border};text-align:center;font-size:${b.type.tiny.size};line-height:1.7;color:${b.textMuted}">${body}</td></tr>`;
 }
 
 function formatWon(n: number | undefined): string {
@@ -153,6 +157,8 @@ function formatWon(n: number | undefined): string {
   return v.toLocaleString('ko-KR') + '원';
 }
 
+// ★ 2026-07-07(5) 이메일 디자인 2.0 — 쿠폰 = 티켓 2톤 골격 (인앱 쿠폰 티켓 톤 미러).
+//   본권(강조색 워시 + 대형 혜택 타이포) / 절취 점선 / 스터브(흰 면 + 코드). 코드 없으면 본권 단독.
 function renderCoupon(p: CouponProps, b: EmailBrand): string {
   const label = esc(p.discount_label || '');
   if (!label && !p.coupon_code) return '';
@@ -161,11 +167,15 @@ function renderCoupon(p: CouponProps, b: EmailBrand): string {
   // ★ 2026-07-02 ISO 원문("2026-07-30T03:00:00.000Z") 노출 → KST 한국어 표시
   if (p.expire_date) cond.push(esc(formatKoreanDateTimeDisplay(p.expire_date)) + '까지');
   if (p.usage_condition) cond.push(esc(p.usage_condition));
-  const codeBox = p.coupon_code
-    ? `<div style="display:inline-block;margin-top:${b.sp[3]};padding:${b.sp[2]} ${b.sp[5]};background:#ffffff;border:1px dashed ${b.primary};border-radius:${b.radius.sm};font-family:${b.mono};font-size:${b.type.h3.size};font-weight:700;letter-spacing:2px;color:${b.primary}">${esc(p.coupon_code)}</div>`
+  const condLine = cond.length ? `<div style="font-size:${b.type.tiny.size};color:${b.textMuted};margin-top:${b.sp[3]}">${cond.join(' · ')}</div>` : '';
+  const overline = `<div style="font-size:${b.type.tiny.size};font-weight:800;letter-spacing:0.18em;color:${b.primary};margin-bottom:${b.sp[2]}">COUPON</div>`;
+  const labelTag = label ? `<div style="font-size:30px;line-height:1.25;font-weight:800;letter-spacing:-0.02em;color:${b.primary}">${label}</div>` : '';
+  const topRadius = p.coupon_code ? `${b.radius.lg} ${b.radius.lg} 0 0` : b.radius.lg;
+  const mainRow = `<tr><td style="padding:${b.sp[8]} ${b.sp[6]} ${b.sp[6]};background:${b.primarySoft};border:2px dashed ${b.primaryDashed};border-bottom:${p.coupon_code ? 'none' : `2px dashed ${b.primaryDashed}`};border-radius:${topRadius};text-align:center">${overline}${labelTag}${condLine}</td></tr>`;
+  const stubRow = p.coupon_code
+    ? `<tr><td style="padding:${b.sp[5]} ${b.sp[6]};background:${b.cardBg};border:2px dashed ${b.primaryDashed};border-top:2px dashed ${b.primaryDashed};border-radius:0 0 ${b.radius.lg} ${b.radius.lg};text-align:center"><div style="display:inline-block;padding:${b.sp[3]} ${b.sp[6]};background:${b.primarySoft};border:1px dashed ${b.primary};border-radius:${b.radius.sm};font-family:${b.mono};font-size:${b.type.h3.size};font-weight:800;letter-spacing:3px;color:${b.primary}">${esc(p.coupon_code)}</div></td></tr>`
     : '';
-  const condLine = cond.length ? `<div style="font-size:${b.type.tiny.size};color:#ffffff;opacity:0.85;margin-top:${b.sp[3]}">${cond.join(' · ')}</div>` : '';
-  const card = `<table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr><td style="padding:${b.sp[8]} ${b.sp[6]};background:${b.primary};border-radius:${b.radius.lg};text-align:center"><div style="font-size:${b.type.h2.size};line-height:${b.type.h2.lineHeight};font-weight:800;color:#ffffff">${label}</div>${codeBox}${condLine}</td></tr></table>`;
+  const card = `<table role="presentation" width="100%" cellpadding="0" cellspacing="0">${mainRow}${stubRow}</table>`;
   return `<tr><td style="padding:${b.sp[5]} ${b.sp[6]}">${card}</td></tr>`;
 }
 
@@ -173,17 +183,19 @@ function renderProductCarousel(p: ProductCarouselProps, b: EmailBrand, ctx: Emai
   const items = (p.products || []).filter((x) => x && x.name).slice(0, 6);
   if (items.length === 0) return '';
   const title = p.title ? `<div style="font-size:${b.type.h3.size};font-weight:700;color:${b.text};padding:0 0 ${b.sp[4]};text-align:center">${esc(p.title)}</div>` : '';
+  // ★ 2026-07-07(5) 디자인 2.0 — 상품 = 보더 카드(면+테두리+라운드), 가격 강조색 800
   const cellFor = (it: ProductCarouselItem): string => {
     const img = emailImg(it.image_url, ctx.publicBase);
     const normalizedLink = normalizeWebUrl(it.link_url || '');
     const url = /^https?:\/\//i.test(normalizedLink) ? normalizedLink : '';
     const price = it.discount_price != null
-      ? `<span style="color:${b.primary};font-weight:700">${formatWon(it.discount_price)}</span> <span style="color:${b.textMuted};text-decoration:line-through;font-size:${b.type.small.size}">${formatWon(it.price)}</span>`
-      : `<span style="color:${b.text};font-weight:700">${formatWon(it.price)}</span>`;
-    const imgTag = img ? `<img src="${esc(img)}" alt="${esc(it.name)}" style="width:100%;display:block;border:0;border-radius:${b.radius.md}">` : '';
-    const meta = `<div style="font-size:${b.type.small.size};color:${b.text};margin-top:${b.sp[2]};line-height:1.4">${esc(it.name)}</div><div style="font-size:${b.type.body.size};margin-top:${b.sp[1]}">${price}</div>`;
-    const body = url ? `<a href="${esc(url)}" style="text-decoration:none;color:inherit">${imgTag}${meta}</a>` : `${imgTag}${meta}`;
-    return `<td width="50%" valign="top" style="padding:${b.sp[2]}">${body}</td>`;
+      ? `<span style="color:${b.primary};font-weight:800">${formatWon(it.discount_price)}</span> <span style="color:${b.textMuted};text-decoration:line-through;font-size:${b.type.small.size}">${formatWon(it.price)}</span>`
+      : `<span style="color:${b.text};font-weight:800">${formatWon(it.price)}</span>`;
+    const imgTag = img ? `<img src="${esc(img)}" alt="${esc(it.name)}" style="width:100%;display:block;border:0;border-radius:${b.radius.sm}">` : '';
+    const meta = `<div style="font-size:${b.type.small.size};color:${b.text};font-weight:600;margin-top:${b.sp[2]};line-height:1.4">${esc(it.name)}</div><div style="font-size:${b.type.body.size};margin-top:${b.sp[1]}">${price}</div>`;
+    const inner = url ? `<a href="${esc(url)}" style="text-decoration:none;color:inherit">${imgTag}${meta}</a>` : `${imgTag}${meta}`;
+    const cardTable = `<table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr><td style="padding:${b.sp[3]};background:${b.cardBg};border:1px solid ${b.border};border-radius:14px">${inner}</td></tr></table>`;
+    return `<td width="50%" valign="top" style="padding:${b.sp[2]}">${cardTable}</td>`;
   };
   const rows: string[] = [];
   for (let i = 0; i < items.length; i += 2) {
@@ -216,7 +228,7 @@ function renderGallery(p: GalleryProps, b: EmailBrand, ctx: EmailRenderCtx): str
 function renderPromoCode(p: PromoCodeProps, b: EmailBrand): string {
   if (!p.code) return '';
   const desc = p.description ? `<div style="font-size:${b.type.body.size};color:${b.text};margin-bottom:${b.sp[3]}">${esc(p.description)}</div>` : '';
-  const codeBox = `<div style="display:inline-block;padding:${b.sp[3]} ${b.sp[6]};background:${b.bg};border:1px dashed ${b.primary};border-radius:${b.radius.sm};font-family:${b.mono};font-size:${b.type.h3.size};font-weight:700;letter-spacing:2px;color:${b.primary}">${esc(p.code)}</div>`;
+  const codeBox = `<div style="display:inline-block;padding:${b.sp[3]} ${b.sp[6]};background:${b.primarySoft};border:1px dashed ${b.primary};border-radius:${b.radius.sm};font-family:${b.mono};font-size:${b.type.h3.size};font-weight:800;letter-spacing:3px;color:${b.primary}">${esc(p.code)}</div>`;
   const instr = p.instructions ? `<div style="font-size:${b.type.tiny.size};color:${b.textMuted};margin-top:${b.sp[3]}">${esc(p.instructions)}</div>` : '';
   const promoCtaUrl = normalizeWebUrl(p.cta_url || '');
   const cta = /^https?:\/\//i.test(promoCtaUrl)
@@ -238,7 +250,8 @@ function renderStoreInfo(p: StoreInfoProps, b: EmailBrand): string {
     rows.push(`<div style="font-size:${b.type.small.size};margin:${b.sp[1]} 0"><a href="${esc(wurl)}" style="color:${b.primary};text-decoration:none">${esc(p.website)}</a></div>`);
   }
   if (rows.length === 0) return '';
-  return `<tr><td style="padding:${b.sp[6]};background:${b.bg};text-align:center">${rows.join('')}</td></tr>`;
+  // ★ 2026-07-07(5) 디자인 2.0 — 평면 전폭 블록 → 헤어라인 보더 카드
+  return `<tr><td style="padding:${b.sp[5]} ${b.sp[6]}"><table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr><td style="padding:${b.sp[5]} ${b.sp[6]};background:${b.bg};border:1px solid ${b.border};border-radius:14px;text-align:center">${rows.join('')}</td></tr></table></td></tr>`;
 }
 
 function renderSns(p: SnsProps, b: EmailBrand): string {
@@ -247,7 +260,8 @@ function renderSns(p: SnsProps, b: EmailBrand): string {
     .filter((c) => c && c.url && /^https?:\/\//i.test(c.url));
   if (ch.length === 0) return '';
   const labels: Record<string, string> = { instagram: 'Instagram', youtube: 'YouTube', kakao: '카카오', naver: '네이버', facebook: 'Facebook', twitter: 'X' };
-  const links = ch.map((c) => `<a href="${esc(c.url)}" style="display:inline-block;margin:0 ${b.sp[2]};font-size:${b.type.small.size};color:${b.primary};text-decoration:none;font-weight:600">${esc(labels[c.type] || c.type)}</a>`).join('');
+  // ★ 2026-07-07(5) 디자인 2.0 — SNS 링크 = 워시 알약 칩
+  const links = ch.map((c) => `<a href="${esc(c.url)}" style="display:inline-block;margin:${b.sp[1]};padding:${b.sp[2]} ${b.sp[4]};background:${b.primarySoft};border-radius:999px;font-size:${b.type.small.size};color:${b.primary};text-decoration:none;font-weight:700">${esc(labels[c.type] || c.type)}</a>`).join('');
   return `<tr><td style="padding:${b.sp[5]} ${b.sp[6]};text-align:center">${links}</td></tr>`;
 }
 
@@ -256,7 +270,8 @@ function renderReviews(p: ReviewsProps, b: EmailBrand): string {
   if (items.length === 0) return '';
   const title = p.title ? `<div style="font-size:${b.type.h3.size};font-weight:700;color:${b.text};padding:0 0 ${b.sp[4]};text-align:center">${esc(p.title)}</div>` : '';
   const stars = (n: number) => { const r = Math.max(0, Math.min(5, Math.round(Number(n) || 0))); return '★★★★★'.slice(0, r) + '☆☆☆☆☆'.slice(0, 5 - r); };
-  const cards = items.map((r) => `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:${b.sp[3]}"><tr><td style="padding:${b.sp[4]};background:${b.bg};border-radius:${b.radius.md}"><div style="color:${b.accent};font-size:${b.type.body.size}">${stars(r.rating)}</div><div style="font-size:${b.type.body.size};color:${b.text};margin:${b.sp[2]} 0;line-height:1.5">${esc(r.body)}</div><div style="font-size:${b.type.tiny.size};color:${b.textMuted}">${esc(r.author)}${r.date ? ' · ' + esc(r.date) : ''}</div></td></tr></table>`).join('');
+  // ★ 2026-07-07(5) 디자인 2.0 — 리뷰 = 흰 카드 + 헤어라인 보더 (면 위 면 대비)
+  const cards = items.map((r) => `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:${b.sp[3]}"><tr><td style="padding:${b.sp[4]} ${b.sp[5]};background:${b.cardBg};border:1px solid ${b.border};border-radius:14px"><div style="color:${b.accent};font-size:${b.type.body.size};letter-spacing:2px">${stars(r.rating)}</div><div style="font-size:${b.type.body.size};color:${b.text};margin:${b.sp[2]} 0;line-height:1.6">${esc(r.body)}</div><div style="font-size:${b.type.tiny.size};font-weight:600;color:${b.textMuted}">${esc(r.author)}${r.date ? ' · ' + esc(r.date) : ''}</div></td></tr></table>`).join('');
   return `<tr><td style="padding:${b.sp[6]}">${title}${cards}</td></tr>`;
 }
 
@@ -272,9 +287,10 @@ function renderCountdownStatic(p: CountdownProps, b: EmailBrand): string {
     }
   }
   if (!dday && !p.urgency_text) return '';
+  // ★ 2026-07-07(5) 디자인 2.0 — 그라데이션 밴드 카드 (미지원 클라이언트 solid primary 폴백)
   const ddayTag = dday ? `<div style="font-size:${b.type.hero.size};font-weight:800;color:#ffffff;letter-spacing:1px">${dday}</div>` : '';
   const urgency = p.urgency_text ? `<div style="font-size:${b.type.body.size};color:#ffffff;opacity:0.9;margin-top:${b.sp[2]}">${esc(p.urgency_text)}</div>` : '';
-  return `<tr><td style="padding:${b.sp[6]};background:${b.primary};text-align:center">${ddayTag}${urgency}</td></tr>`;
+  return `<tr><td style="padding:${b.sp[5]} ${b.sp[6]}"><table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr><td style="padding:${b.sp[6]};background:${b.primary};background-image:${b.heroGrad};border-radius:${b.radius.lg};text-align:center">${ddayTag}${urgency}</td></tr></table></td></tr>`;
 }
 
 function renderVideoStatic(p: VideoProps, b: EmailBrand, ctx: EmailRenderCtx): string {
@@ -303,8 +319,9 @@ function renderInstagramStatic(p: InstagramEmbedProps, b: EmailBrand): string {
 function renderMapStatic(p: MapStoreLocatorProps, b: EmailBrand): string {
   const stores = (p.stores || []).filter((s) => s && s.name).slice(0, 5);
   if (stores.length === 0) return '';
-  const rows = stores.map((s) => `<div style="margin:${b.sp[2]} 0"><div style="font-size:${b.type.body.size};font-weight:700;color:${b.text}">${esc(s.name)}</div><div style="font-size:${b.type.small.size};color:${b.textMuted}">${esc(s.address)}${s.phone ? ' · ' + esc(s.phone) : ''}</div></div>`).join('');
-  return `<tr><td style="padding:${b.sp[6]};background:${b.bg}">${rows}</td></tr>`;
+  // ★ 2026-07-07(5) 디자인 2.0 — 매장별 헤어라인 보더 카드
+  const rows = stores.map((s) => `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:${b.sp[2]}"><tr><td style="padding:${b.sp[3]} ${b.sp[4]};background:${b.bg};border:1px solid ${b.border};border-radius:12px"><div style="font-size:${b.type.body.size};font-weight:700;color:${b.text}">${esc(s.name)}</div><div style="font-size:${b.type.small.size};color:${b.textMuted};margin-top:2px">${esc(s.address)}${s.phone ? ' · ' + esc(s.phone) : ''}</div></td></tr></table>`).join('');
+  return `<tr><td style="padding:${b.sp[5]} ${b.sp[6]}">${rows}</td></tr>`;
 }
 
 function renderBlock(s: Section, b: EmailBrand, ctx: EmailRenderCtx): string {
@@ -352,15 +369,23 @@ function renderBlock(s: Section, b: EmailBrand, ctx: EmailRenderCtx): string {
   }
 }
 
-/** Section[] → 이메일 안전 HTML(600px 중앙 카드). visible=false 제외 + order 정렬. */
+/** Section[] → 이메일 안전 HTML(600px 중앙 카드). visible=false 제외 + order 정렬.
+ *  ★ 2026-07-07(5) 디자인 2.0 — 상단 브랜드 밴드(그라데이션 6px) + 프리헤더(받은편지함 미리보기 텍스트)
+ *    + 슬레이트 틴트 바깥 배경 + 카드 보더/그림자 (미지원 클라이언트는 각 요소 우아한 폴백). */
 export function renderEmailSections(sections: Section[], ctx: EmailRenderCtx): string {
   const b = resolveEmailBrand(ctx.brandKit);
   const ordered = (sections || [])
     .filter((s) => s.visible !== false)
     .sort((a, c) => (a.order || 0) - (c.order || 0));
   const inner = ordered.map((s) => renderBlock(s, b, ctx)).join('\n');
-  const shellStyle = `max-width:600px;width:100%;background:${b.cardBg};border-radius:${b.radius.lg};overflow:hidden;font-family:${b.fontFamily}`;
-  return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:${b.bg};margin:0;padding:0"><tr><td align="center" style="padding:${b.sp[5]} ${b.sp[3]}"><table role="presentation" width="600" cellpadding="0" cellspacing="0" style="${shellStyle}">${inner}</table></td></tr></table>`;
+  // 프리헤더 — 받은편지함 제목 아래 미리보기 한 줄 (본문 첫 텍스트 90자). &zwnj; 패딩 = 뒤 본문 노출 차단.
+  const preText = extractEmailText(ordered).replace(/\s+/g, ' ').trim().slice(0, 90);
+  const preheader = preText
+    ? `<div style="display:none;font-size:1px;line-height:1px;max-height:0;max-width:0;opacity:0;overflow:hidden;mso-hide:all">${esc(preText)}${'&nbsp;&zwnj;'.repeat(24)}</div>`
+    : '';
+  const bandRow = `<tr><td style="height:6px;font-size:0;line-height:0;background:${b.primary};background-image:${b.bandGrad};border-radius:${b.radius.xl} ${b.radius.xl} 0 0">&nbsp;</td></tr>`;
+  const shellStyle = `max-width:600px;width:100%;background:${b.cardBg};border:1px solid ${b.border};border-radius:${b.radius.xl};overflow:hidden;box-shadow:0 12px 32px rgba(15,23,42,0.08),0 2px 6px rgba(15,23,42,0.05);font-family:${b.fontFamily}`;
+  return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:${b.shellBg};margin:0;padding:0">${preheader ? `<tr><td>${preheader}</td></tr>` : ''}<tr><td align="center" style="padding:${b.sp[6]} ${b.sp[3]} ${b.sp[8]}"><table role="presentation" width="600" cellpadding="0" cellspacing="0" style="${shellStyle}">${bandRow}${inner}</table></td></tr></table>`;
 }
 
 /** Section[]에서 순수 텍스트 본문 추출(이미지 차단 환경 대비). */
