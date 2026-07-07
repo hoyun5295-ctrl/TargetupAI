@@ -230,6 +230,8 @@ export interface OperatorProposal {
   autoExecuted: boolean;
   autoExecuteReason: string | null;
   reviewedAt: string | null;
+  // ★ 2026-07-07: 발송 예정 시각 — pending에도 내려옴(예정일 경과 승인 경고용). 과거 저장분은 null 가능.
+  scheduledSendAt?: string | null;
   expiresAt: string;
   createdAt: string;
   operatorName?: string;

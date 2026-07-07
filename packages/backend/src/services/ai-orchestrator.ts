@@ -50,6 +50,7 @@ import {
 } from '../utils/performance-insight';
 // ★ D227+ 종량제: 풀분석 묶음 차감 — 진입점 1회, sub-agent는 묶음 컨텍스트로 0(과차감 방지)
 import { checkCredit, deductCreditSafe } from '../utils/ai-credit';
+import { applyBenefitToBody, buildTargetHintPromptBlock, normalizeTargetHint } from '../utils/autosend-policy';
 import { currentUserId } from '../utils/request-context';
 import { runInCreditBundle } from '../utils/ai-credit-context';
 import { getCreditCost } from '../utils/ai-credit-calc';
@@ -78,6 +79,9 @@ export interface AgentContext {
   // ★ 2026-07-02 (Harold 명시): 자동마케팅 = 마케팅 = 무조건 광고. true면 AI 판정과 무관하게 is_ad 고정 →
   //   문안 생성·검수·스팸테스트·발송((광고)+무료거부 080 자동 합성)까지 전 하류 일관.
   forcedIsAd?: boolean;
+  // ★ 2026-07-07 마케팅 캘린더 완비: 발송 대상 축(TARGET_HINTS 화이트리스트) — 타겟 sub-agent에만 고정 지시로 주입.
+  //   문안 세계와 타겟 세계 지시 분리 원칙(2026-07-06 Liquid 결선 교훈). 미지정 = 기존 자유 해석.
+  targetHint?: string | null;
 }
 
 export interface ComplianceResult {
@@ -330,12 +334,14 @@ async function _orchestrateImpl(ctx: AgentContext): Promise<OrchestratorResult> 
 
   // ============ 1. Target Sub-agent (Opus 4.7 — Harold 명시) ============
   const targetStart = Date.now();
+  // ★ 2026-07-07: 타겟 축 고정 지시(마케팅 캘린더 완비) — 화이트리스트 정규화 후 지시 블록 생성(이상값 = 무지시).
+  const targetDirective = buildTargetHintPromptBlock(normalizeTargetHint(ctx.targetHint));
   const targetResult = await recommendTarget(
     ctx.companyId,
     ctx.objective,
     ctx.customerStats,
     ctx.companyInfo as any,
-    { model: 'opus' } // ★ D170+ (Harold 명시): AI Operator Target Sub-agent = Opus 4.7
+    { model: 'opus', ...(targetDirective ? { targetDirective } : {}) } // ★ D170+ (Harold 명시): AI Operator Target Sub-agent = Opus 4.7
   );
   mark('target', targetStart);
 
@@ -431,11 +437,11 @@ async function _orchestrateImpl(ctx: AgentContext): Promise<OrchestratorResult> 
   });
 
   // ★ 2026-06-26: 관리자가 입력한 혜택이 있으면 생성 문안의 [혜택 ...] placeholder를 그 값으로 치환 (#4).
-  //   AI는 혜택을 지어내지 않는다(미입력 시 placeholder 유지가 기본 → 승인 단계 차단). 관리자 작성값만 들어간다 — 거짓광고/정보통신망법 정합.
+  //   AI는 혜택을 지어내지 않는다(미입력 시 placeholder 유지가 기본). 관리자 작성값만 들어간다 — 거짓광고/정보통신망법 준수.
+  //   2026-07-07: applyBenefitToBody CT로 통일 — 발송 직전(dispatchProposalSend)도 같은 규칙으로 재치환 + 잔존 시 출구 가드 차단.
   if (ctx.benefitContent && ctx.benefitContent.trim()) {
-    const benefit = ctx.benefitContent.trim();
     for (const m of normalizedMessages) {
-      m.body = m.body.replace(/\[혜택[^\]]*\]/g, benefit);
+      m.body = applyBenefitToBody(m.body, ctx.benefitContent);
     }
   }
 

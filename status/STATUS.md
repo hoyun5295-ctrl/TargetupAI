@@ -37,7 +37,7 @@
 
 > **회전 룰:** 완료(★배포완료) 엔트리는 원문을 archive/TASKS_YYYY-MM.md로 이동 + INDEX 등재하고, 아래 "최근 완료 인덱스"에 1줄만 남긴다. 30KB 초과 = 회전 미이행 — 즉시 회전.
 
-### 🟢 2026-07-07 — 인앱/이메일/DM 대개편 6종 + hlj.kr 단축링크 라이브 + 인앱 디자인 2.0~2.1 + 행사 캠페인 (★DDL 6컬럼 실행완료·hlj.kr 라이브 / frontend·SDK build+deploy 잔여)
+### 🟢 2026-07-07 — 인앱/이메일/DM 대개편 6종 + hlj.kr 단축링크 라이브 + 인앱 디자인 2.0~2.1 + 형태 4종 골격 분화 + 이메일·DM 디자인 2.0 + 행사 캠페인 (★DDL 6컬럼 실행완료·hlj.kr 라이브 / frontend·SDK·backend build+deploy 잔여)
 > **① 이메일 미수신자 재발송**: "미오픈 SMS"→"미수신자 재발송"(이메일 무료 primary + SMS 유료 secondary). 자식 캠페인(원본 통계 무손상·완성게이트 우회로 크레딧 재부과 0)·재발송 1회 한도·수신거부/반송 제외·자식은 카피학습 코퍼스 skip(이중계상 방지). DDL `email_campaigns.parent_campaign_id·resend_generation`.
 > **② 요금제 변경 반복노출 근본수정**: 접속마다 "베이직 변경" 모달 재발 = localStorage 비교 방식 취약 → 서버 `companies.plan_notified_code`(DDL) + my-plan pending 판정(NULL=조용히 초기화) + POST /plan-change/ack. 계정당 1회·브라우저 무관. Dashboard localStorage 효과 폐기.
 > **③ 인앱 표시 가능성 게이트**: 네이버 스마트스토어=폐쇄형이라 인앱 영구 미지원(데이터 연동만) 명확 안내 + 표시 가능 채널 0이면 생성/게시/AI생성 크레딧 차감 전 차단(INAPP_DISPLAY_UNAVAILABLE). CT `inapp-display-eligibility`(company_integrations active + cdp_events sdk 30일 신호). 메이크샵·아임웹 SDK 설치 가이드 추가. 인앱=company+channel 단위(몰별 타겟팅 없음).
@@ -47,15 +47,25 @@
 > **⑦ 인앱 디자인 언어 2.1 + 실고객 샘플 + 브랜드 강조색(0707(2))**: 테마 6종=색깔놀이 지적 → 구조·타이포·장식 토큰 11종 추가(brand=흰 캔버스+브랜드 밴드 쇼케이스·minimal=모노 에디토리얼·dark=글로우 등, SDK+미리보기 1:1). 이서연 하드코딩 삭제 → 실고객 조회(buildEditorPreviewCustomers, 타겟 최상단+등급별, 0명만 "가상 예시"). AI 강조색 임의 hex → companies.brand_kit 실설정 강제(getCompanyBrandKitRaw). 신규 DDL 0.
 > **⑧ 인앱 형태 4종 + 카운트다운 실측화 + 시간입력 교체 + 블록 편집기(0707(3))**: card_style DDL(classic/bubble/ticket/poster, 구버전=classic 폴백). 미리보기 카운트다운 고정목업(23:59:59)→실시간 계산. datetime-local 6곳→공용 DateTimeField(날짜 캘린더+오전/오후+시·분 직접입력). 블록 팔레트 카테고리·아이콘·설명 + IconGrid·Seg·StarInput·CTA 카드화·상품 이미지칸.
 > **⑨ 행사 캠페인 자동생성 + DM 문안 품질 3건(0707(4))**: 행사 1입력→DM·이메일·인앱 선택 생성(그리드 12 유지·AI Operator 칩+캘린더 버튼·슬롯별 크레딧·선택분만 과금·인앱 게이트 잠금·이어서 만들기). CT event-brief(원문 기재 혜택만 통과=benefitMatchesEventText, 환각 탈락). DM→문안 16섹션 요약·SMS 90byte 옵션·브랜드보이스 확인.
-> **검증**: SDK 123/123·backend 317/317·sdk/backend/frontend tsc 0·금지패턴 0. **DDL 6컬럼 서버 실행완료(⑦0·⑧card_style 1·원 6종 5)**. **잔여**: tp-push + frontend·company-frontend `build:safe`(새 SDK/프론트 dist) + `pm2 reload targetup-backend` / **Codex 이중검증=플러그인 미로드로 이 세션 불가 → 다음 세션 /codex:review 1순위**. 배포후 실측(재발송·요금제 모달·인앱 게이트·hlj.kr·CSV·테마6/형태4 실차이·카운트다운·시간입력 6곳·행사 3채널·SMS 문안). 상세 [archive/TASKS_2026-07.md](archive/TASKS_2026-07.md) · [[project_2026_0707_inapp_email_dm_overhaul]].
+> **⑩ 인앱 형태 4종 골격 분화(0707(5))**: card_style이 "공통 카드+액세서리"라 3종 동일 지적 → 골격 분리. bubble=발신자 행+답장 칩 CTA·ticket=2톤 다이컷 절취+benefit 대형타이포·poster=풀블리드 히어로. ZONE_PADS(SDK)+PREVIEW_ZONE_PADS(미러), ctx.cardStyle 추가, zoned 아니면 기존 인셋 폴백(구버전 안전). 재발차단 vitest 8.
+> **⑪ 이메일·모바일DM 디자인 2.0(0707(5))**: 이메일=backend만 수정 3면 동시(브랜드 밴드+프리헤더+쿠폰 티켓 2톤+버튼 그라데이션+상품/리뷰 카드). DM=viewer .dm-cta 그라데이션(dm-builder.css 미러)+스크롤 리빌 모션(no-JS 즉시 표시 폴백)+SNS 이모지→알약 칩+맵 죽은박스 제거. **★재검증(Harold "제대로 체크"): 실측 렌더로 잠복 결함 4건 — 이메일 폰트 큰따옴표 HTML 파손(전 발송메일 영향, inlineFont 수정) 등.**
+> **검증**: SDK 131/131·backend 332/332·sdk/backend/frontend tsc 0·금지패턴 0. **DDL 6컬럼 서버 실행완료**. **잔여**: tp-push + frontend·company-frontend·backend `build:safe` + `pm2 reload targetup-backend` / **Codex 미로드→다음 세션 /codex:review 1순위**. 배포후 실측(재발송·요금제·인앱 게이트·hlj.kr·CSV·형태4·카운트다운·행사 3채널·이메일 미리보기·DM 발행물 열람). 상세 [archive/TASKS_2026-07.md](archive/TASKS_2026-07.md) · [[project_2026_0707_inapp_email_dm_overhaul]].
+
+### 🟢 2026-07-07(6) — 마케팅 캘린더 완비: 등록 200크레딧의 통지·출구·타겟 축 구멍 4건 근본수정 (코드완료·tsc 0·vitest 346 / ★미배포·DDL 2건 대기)
+> **구멍(전 경로 실측)**: ①캘린더 등록이 담당자 번호를 안 담아 notifyOperatorAdmins가 조용히 return — 2h 예고·승인 대기·D-2·완료/보류 통지 전멸 ②자율발송 OFF(기본) 회사는 pending 7일 만료로 연 1회 캠페인이 소리 없이 무산 + 늦은 승인=즉시 발송 ③오퍼레이터 발송에만 혜택 placeholder 출구 가드 부재(이메일·인앱·여정엔 있음) — "[혜택 내용을 입력해주세요]" 실고객 노출 가능 ④타겟 확인 지점 0(발송 당일 AI 자유 해석).
+> **수정**: ①createOperator 담당자 기본값=등록 계정 users.phone + notifyOperatorAdmins 폴백(등록 계정→company_admin — CT 1곳, 기존 등록분 포함 전 통지 수혜) + 캘린더 크레딧 모달 extraContent 연락처 입력(선택) ②만료 D-3 리마인드(operator-prep-reminder에 sendPendingExpiryReminders, predictive 9시 사이클 합류, 멱등=expiry_reminder_sent_at) + scheduled_send_at pending에도 저장(발송 패스 status='scheduled' 게이트라 무영향, 소비처 17곳 전수) + 예정일 경과 승인 경고 모달 ③dispatchProposalSend 발송 직전 applyBenefitToBody 재치환(제안 생성 후 입력분 반영) + hasUneditedBenefitPlaceholder 검출 시 admin_review 강등(자동·수동·리마인드 3경로 공유 1곳) ④targetHint 축(TARGET_HINTS 화이트리스트 6종 — 명확 규칙만, 예측 축 금지) = 캘린더 설계 JSON→카드 select→등록 payload→continuous_operators.target_hint→recommendTarget 고정 지시 + 카드 혜택 입력칸.
+> **DDL 2건 (Harold psql — 배포 전 실행 필수, target_hint 미실행 시 오퍼레이터 신규생성 503)**: 검증 후 ALTER — 본문 아래 배포 블록 참조. **잔여**: DDL→tp-push→build:safe(backend·frontend)→pm2 reload→실측 1건(캘린더 등록→08:00 생성→통지 수신→승인/자동발송) / Codex /codex:review(플러그인 미로드). 상세 [[project_2026_0705_marketing_calendar_overhaul]] 갱신분.
 
 ---
 
 ### 🔴 활성 블로커 — 알림톡 강조표기형 7300 (대표링크 게이트웨이 매핑 대기, 서팀장)
 > 원문·해법·잔여 전문 = [BUGS.md](BUGS.md) §2 (2026-07-07 소유 이관 — 버그 상세는 BUGS.md가 소유). 요지: 대표링크 템플릿의 ATTACHMENT.link 미동봉이 근본 — ①서팀장 게이트웨이 etcJson→IMC link 매핑 추가 → ②한줄로 발송 4경로 etcJson link 합성(buildAlimtalkEtcJson 확장) → ③CT-87 R 차단 해제 묶음(Harold 동의 대기).
 
-### 🔵 다음 세션 (예정) — 이메일 & 모바일 DM 퀄리티 끌어올리기 (Harold 지시 2026-07-07)
-> 인앱 디자인 2.0~2.1(SDK v0.3.9)에 이어 이메일 템플릿/렌더 + 모바일 DM 빌더·발행물 디자인 퀄리티를 브레이즈급으로. brainstorming→설계→동의→구현.
+### 🟡 진행중 — 레거시 PAY 사이트 한줄로 흡수 (Track D, 서팀장 2차 회신 대기)
+> 서팀장 5문항 회신 정독 완료 + 상세 설계안 작성 + 2차 체크 메일 발신(2026-07-07). 요지: 게이트웨이(54·57·58)가 통계·잔액을 1분 실시간 DB직결 적재 → 한줄로 수신 DB(동일스키마, READ-only)로 목적지 변경 + agent/both 조회 3종 + 정산 합산. 선불 5%도 충전 게이트웨이 직접+잔액 게이트웨이 push라 READ-only로 충분. **회신 대기 4건 오면 Phase 1 착수.** SoT=[docs/레거시서버_폐기_플랜.md](docs/레거시서버_폐기_플랜.md)(§4-2 대기항목) · 설계=[docs/2026-07-07-pay-absorption-track-d-design.md](docs/2026-07-07-pay-absorption-track-d-design.md).
+
+### 🔵 다음 세션 (예정)
+> ① **누적 0707 배포** — tp-push + build:safe(frontend·company-frontend·backend) + pm2 reload + Codex /codex:review(플러그인 미로드분). ② **PAY Track D Phase 1** — 서팀장 2차 회신 도착 시 수신 DB + 강문희 발주.
 > (보류) 팝폰 SDK 검증(자체 서비스 SDK 실측 베드) = C:\Users\ceo\projects\poppon-workspace 정독 후 별도. 상세 [[project_2026_0618_selfhosted_mall_app_collection]].
 
 ---

@@ -219,6 +219,103 @@ export function buildCopyStylePromptBlock(style: CopyStyle | null): string {
 }
 
 /**
+ * 타겟 축(target hint) — 2026-07-07 마케팅 캘린더 완비 (Harold 확정).
+ *  캘린더 설계·등록 시 발송 대상 축을 화이트리스트로 고정해, 발송 당일 타겟 AI 해석이
+ *  해마다 흔들리지 않게 앵커를 준다. 전부 "명확한 규칙" 축 — 예측 점수 축 절대 금지
+ *  (feedback_prediction_never_selects_target). null = 축 미지정(기존 동작: objective 자유 해석).
+ */
+export type TargetHint = 'all' | 'dormant' | 'recent_buyers' | 'vip' | 'birthday' | 'new_customers';
+
+export const TARGET_HINTS: Array<{ key: TargetHint; label: string; directive: string }> = [
+  { key: 'all', label: '전체 고객', directive: '수신 가능한 전체 고객(수신동의·활성)을 대상으로 한다. 추가 세분화 필터를 넣지 않는다.' },
+  { key: 'dormant', label: '휴면 고객', directive: '최근 구매(또는 최근 방문) 기록이 오래된 휴면 고객을 대상으로 한다. 회사 스키마에서 최근 구매일/방문일 필드를 찾아 "오래됨" 조건으로 구성한다.' },
+  { key: 'recent_buyers', label: '최근 구매 고객', directive: '최근에 구매한 고객을 대상으로 한다. 회사 스키마의 최근 구매일 필드 기준 최근 구간 조건으로 구성한다.' },
+  { key: 'vip', label: 'VIP·상위 등급', directive: 'VIP 또는 상위 등급 고객을 대상으로 한다. 회사 스키마의 등급(grade) 필드 실제 값 중 상위 등급으로 구성한다.' },
+  { key: 'birthday', label: '이달 생일 고객', directive: '발송 월에 생일이 있는 고객을 대상으로 한다. 생일(birth) 필드의 월 일치 조건으로 구성한다.' },
+  { key: 'new_customers', label: '신규 등록 고객', directive: '최근에 신규 등록된 고객을 대상으로 한다. 등록일 기준 최근 구간 조건으로 구성한다.' },
+];
+
+export function normalizeTargetHint(raw: unknown): TargetHint | null {
+  return TARGET_HINTS.some((h) => h.key === raw) ? (raw as TargetHint) : null;
+}
+
+export function targetHintLabel(hint: TargetHint | null): string {
+  const def = hint ? TARGET_HINTS.find((h) => h.key === hint) : null;
+  return def ? def.label : '';
+}
+
+/** 타겟 sub-agent에 넣을 대상 축 고정 지시 블록. null = 빈 문자열(기존 자유 해석). */
+export function buildTargetHintPromptBlock(hint: TargetHint | null): string {
+  if (!hint) return '';
+  const def = TARGET_HINTS.find((h) => h.key === hint)!;
+  return [
+    `[발송 대상 축 — 회사 확정, 반드시 준수]`,
+    `대상: ${def.label}. ${def.directive}`,
+    `filters는 반드시 이 대상 축을 구현해야 한다. 다른 대상으로 바꾸지 않는다.`,
+  ].join('\n');
+}
+
+/**
+ * 관리자 입력 혜택 → 생성 문안의 [혜택 ...] placeholder 치환 (순수).
+ *  2026-07-07: 제안 생성 시(ai-orchestrator)와 발송 직전(dispatchProposalSend) 두 지점이
+ *  같은 규칙을 쓰도록 CT 통일 — 제안 생성 후 관리자가 혜택을 입력해도 발송 시점에 반영된다.
+ *  혜택이 비어 있으면 원문 그대로(placeholder 보존 → 출구 가드가 차단).
+ */
+export function applyBenefitToBody(body: string, benefit: string | null | undefined): string {
+  const b = String(body || '');
+  const v = String(benefit || '').trim();
+  if (!v) return b;
+  return b.replace(/\[혜택[^\]]*\]/g, v);
+}
+
+/**
+ * 미편집 혜택 placeholder 잔존 검출 (순수) — 자동마케팅 발송 출구 가드.
+ *  2026-07-07: 이메일(hasPlaceholder)·인앱(blocksHaveUneditedPlaceholder)·여정(활성화 차단)과
+ *  같은 클래스의 코드 가드를 오퍼레이터 발송 경로에도 — "AI 지시는 확률적, 보장은 출구 코드"(Harold 2026-07-06).
+ *  대상: [혜택 ...] 대괄호 placeholder + "직접 입력/작성해주세요" 문구 잔존.
+ */
+export function hasUneditedBenefitPlaceholder(text: string): boolean {
+  const s = String(text || '');
+  if (!s) return false;
+  return /\[혜택[^\]]*\]/.test(s) || s.includes('직접 입력해주세요') || s.includes('직접 작성해주세요');
+}
+
+/**
+ * 승인 대기 만료 임박 리마인드 판정 (순수) — 2026-07-07 마케팅 캘린더 완비.
+ *  pending 제안이 승인 없이 7일 만료(expired)되면 연 1회 캠페인이 그 해 소리 없이 무산된다.
+ *  만료 windowDays(기본 3일) 안으로 들어오면 1회 리마인드(멱등 = expiry_reminder_sent_at).
+ */
+export function decideExpiryReminder(
+  input: { status: string; expiresAt: Date | null; reminderSentAt: Date | null },
+  now: Date,
+  windowDays: number = 3,
+): boolean {
+  if (input.status !== 'pending') return false;
+  if (!input.expiresAt) return false;
+  if (input.reminderSentAt) return false;
+  const remainMs = input.expiresAt.getTime() - now.getTime();
+  if (remainMs <= 0) return false; // 이미 만료 — 리마인드 무의미
+  return remainMs <= windowDays * 24 * 60 * 60 * 1000;
+}
+
+export interface ExpiryReminderInput {
+  operatorName: string;
+  expiresAtLabel: string;   // '7월 17일 08:00'
+  recipientCount: number;
+  costEstimate: number;
+}
+
+export function buildExpiryReminderBody(input: ExpiryReminderInput): string {
+  const count = Math.max(0, Math.floor(Number(input.recipientCount)) || 0);
+  const total = Math.max(0, Math.round(Number(input.costEstimate)) || 0);
+  return [
+    `'${input.operatorName}' 추천이 아직 승인 대기 중입니다.`,
+    `대상 ${count.toLocaleString()}명 · 예상 비용 약 ${total.toLocaleString()}원`,
+    `${input.expiresAtLabel}까지 승인하지 않으면 이번 추천은 만료되어 발송되지 않습니다. 한줄로 > 자동마케팅에서 검토해 주세요.`,
+  ].join('\n');
+}
+
+/**
  * 자율 발송 예정 안내(담당자 통지 2번 문자) 문구 — 2026-07-02 1단계 (Harold 스펙).
  *  발송 일시 + 추출 타겟 수 + 예상 비용(해당 유형 단가 × 수량) + 예약취소(정지) 안내.
  *  단가 미상(0 이하)이면 산식은 생략하고 총액만 표기(임의 상수 생성 금지).

@@ -34,7 +34,7 @@ import { insertProposalVariants, recommendVariantForProposal, recordVariantRewar
 // ★ D212+ 정책 (2026-05-23 Harold 명시): CT-64 영역 통합 — 검증 영역 + 담당자 학습
 // ★ D227+ 스팸 안전망 격상 — decideSpamOutcome(실제 테스트 결과 → 상태) + buildSpamRegeneratePrompt(AI 재작성)
 import { recordAdminStopLearning, decideSpamOutcome, buildSpamRegeneratePrompt } from './continuous-operator-policy';
-import { resolveAutoSendLeadMinutes, computeScheduledSendAt, decideSendOutcome, decideStuckSendingRecovery, decideBudgetGuard, buildAutoSendPrepInfoBody, buildPendingReviewNoticeBody, computeNextOccurrence, computeNextGenerationRun, normalizeSendTimeMode, SendTimeMode, normalizeCopyStyle, buildCopyStylePromptBlock, CopyStyle, wrapOperatorNoticeBody } from './autosend-policy';
+import { resolveAutoSendLeadMinutes, computeScheduledSendAt, decideSendOutcome, decideStuckSendingRecovery, decideBudgetGuard, buildAutoSendPrepInfoBody, buildPendingReviewNoticeBody, computeNextOccurrence, computeNextGenerationRun, normalizeSendTimeMode, SendTimeMode, normalizeCopyStyle, buildCopyStylePromptBlock, CopyStyle, wrapOperatorNoticeBody, normalizeTargetHint, TargetHint, applyBenefitToBody, hasUneditedBenefitPlaceholder } from './autosend-policy';
 import { getOpt080Number } from './messageUtils';
 // ★ D227+ 검증된 스팸 자산 재사용 (auto-campaign-worker와 동일 패턴) — 실제 테스트폰 발송 + AI 재생성 + 재테스트
 import { autoSpamTestWithRegenerate } from './spam-test-queue';
@@ -98,6 +98,8 @@ export interface CreateOperatorInput {
   sequenceEnabled?: boolean;
   sequenceDelayDays?: number | null;       // 1~30일
   sequenceReminderContent?: string | null; // 관리자 직접 입력 (AI 임의 생성 금지)
+  // ★ 2026-07-07 마케팅 캘린더 완비: 발송 대상 축(TARGET_HINTS 화이트리스트) — 제안 생성 때 타겟 AI에 고정 지시.
+  targetHint?: string | null;
 }
 
 export interface ContinuousOperator {
@@ -147,6 +149,8 @@ export interface ContinuousOperator {
   sequenceEnabled: boolean;                         // default false
   sequenceDelayDays: number | null;                 // 1~30일 (리마인드 대기)
   sequenceReminderContent: string | null;           // 관리자 직접 입력 리마인드 문안
+  // ★ 2026-07-07 마케팅 캘린더 완비: 발송 대상 축 — null = 축 미지정(objective 자유 해석)
+  targetHint: TargetHint | null;
 }
 
 export interface OperatorProposal {
@@ -162,6 +166,8 @@ export interface OperatorProposal {
   reviewedBy: string | null;
   reviewedAt: Date | null;
   campaignId: string | null;
+  // ★ 2026-07-07: 발송 예정 시각 — pending에도 저장(표시·경과 승인 경고용). 자율 발송 트리거는 status='scheduled'만.
+  scheduledSendAt: Date | null;
   expiresAt: Date;
   createdAt: Date;
   operatorName?: string;
@@ -200,7 +206,19 @@ export async function createOperator(input: CreateOperatorInput): Promise<Contin
 
   // ★ 2026-06-26: 생성 시 채널·혜택·담당자·예산도 저장 (기존엔 누락 → 담당자 연락처 드롭·2시간 알림 불가 #3 + 채널 #1 + 혜택 #4 fix)
   const channel = ['sms', 'lms', 'mms'].includes((input.channel || '').toLowerCase()) ? (input.channel as string).toLowerCase() : 'lms';
-  const adminPhones = Array.isArray(input.adminPhoneNumbers) ? input.adminPhoneNumbers.filter((p) => typeof p === 'string' && p.trim()).slice(0, 3) : [];
+  let adminPhones = Array.isArray(input.adminPhoneNumbers) ? input.adminPhoneNumbers.filter((p) => typeof p === 'string' && p.trim()).slice(0, 3) : [];
+  // ★ 2026-07-07 마케팅 캘린더 완비: 담당자 미입력 = 등록 계정(users.phone) 자동 기본값.
+  //   담당자 번호가 비면 notifyOperatorAdmins가 조용히 통지를 생략해 "발송 2시간 전 문안 안내"·승인 대기·D-2
+  //   문자가 전부 죽던 구멍의 등록 시점 차단(발송 시점 폴백은 notifyOperatorAdmins에 별도 유지).
+  if (adminPhones.length === 0 && input.createdBy) {
+    try {
+      const creatorRes = await query(`SELECT phone FROM users WHERE id = $1::uuid`, [input.createdBy]);
+      const creatorPhone = String(creatorRes.rows[0]?.phone || '').replace(/\D/g, '');
+      if (/^01\d{8,9}$/.test(creatorPhone)) adminPhones = [creatorPhone];
+    } catch (e: any) {
+      console.log('[ContinuousOperator] 등록 계정 연락처 기본값 조회 실패(담당자 없이 생성):', e?.message || e);
+    }
+  }
   const adminAlertChannel = ['sms', 'kakao', 'email'].includes(input.adminAlertChannel || '') ? input.adminAlertChannel! : 'sms';
   const deliveryPolicy = ['daily', 'weekly', 'monthly'].includes(input.deliveryPolicy || '') ? input.deliveryPolicy! : 'daily';
   const benefitContent = typeof input.benefitContent === 'string' && input.benefitContent.trim() ? input.benefitContent.trim() : null;
@@ -209,8 +227,11 @@ export async function createOperator(input: CreateOperatorInput): Promise<Contin
   const sequenceEnabled = input.sequenceEnabled === true;
   const sequenceDelayDays = typeof input.sequenceDelayDays === 'number' && input.sequenceDelayDays > 0 ? Math.min(30, Math.floor(input.sequenceDelayDays)) : null;
   const sequenceReminderContent = typeof input.sequenceReminderContent === 'string' && input.sequenceReminderContent.trim() ? input.sequenceReminderContent.trim().slice(0, 2000) : null;
+  // ★ 2026-07-07: 타겟 축 — 화이트리스트 정규화(이상값·미지정 = null → 기존 자유 해석).
+  const targetHint = normalizeTargetHint(input.targetHint);
 
   // ★ 2026-06-02 종량제: 자동마케팅 저장(활성화) = 200 1회. 사전 잔액 확인(선불 부족 차단) → INSERT → 성공 후 차감(멱등키 operatorId).
+  // ★ 2026-07-07 DDL 의존: target_hint 컬럼 미생성 시 42703 → 라우트 catch가 503 DB_MIGRATION_PENDING(배포 블록에 ALTER 선행 명시).
   const saveCost = getCreditCost('continuous-operator');
   await checkCredit(input.companyId, saveCost);
   const result = await query(
@@ -220,7 +241,7 @@ export async function createOperator(input: CreateOperatorInput): Promise<Contin
       channel, benefit_content, admin_phone_numbers, backup_admin_phone, admin_alert_channel,
       auto_send_lead_minutes, budget_monthly, budget_daily, budget_alert_threshold, delivery_policy,
       sequence_enabled, sequence_delay_days, sequence_reminder_content, send_time_mode, copy_style,
-      schedule_month,
+      schedule_month, target_hint,
       created_at, updated_at
     ) VALUES (
       gen_random_uuid(), $1::uuid, $2::uuid, $3, $4,
@@ -228,7 +249,7 @@ export async function createOperator(input: CreateOperatorInput): Promise<Contin
       $10, $11, $12, $13, $14,
       $15, $16, $17, $18, $19,
       $20, $21, $22, $23, $24,
-      $25,
+      $25, $26,
       NOW(), NOW()
     ) RETURNING *`,
     [
@@ -241,7 +262,7 @@ export async function createOperator(input: CreateOperatorInput): Promise<Contin
       input.budgetAlertThreshold != null ? input.budgetAlertThreshold : 80,
       deliveryPolicy,
       sequenceEnabled, sequenceDelayDays, sequenceReminderContent, sendTimeMode, copyStyle,
-      scheduleMonth,
+      scheduleMonth, targetHint,
     ]
   );
   const operator = mapRowToOperator(result.rows[0]);
@@ -569,6 +590,8 @@ export async function generateProposalForOperator(operatorId: string): Promise<O
       benefitContent: operator.benefitContent,
       // ★ 2026-07-02 (Harold 명시): 자동마케팅 = 마케팅 = 무조건 광고 — (광고)+무료거부 080 자동 합성 전제.
       forcedIsAd: true,
+      // ★ 2026-07-07: 타겟 축 고정(마케팅 캘린더 완비) — 발송 당일 타겟 해석이 등록 때 고른 축에 앵커.
+      targetHint: operator.targetHint,
     }, { source: 'continuous-operator', cost: 0 });  // ★ 2026-06-02: 제안서 생성(매일)은 무과금 — 200은 저장 1회, 발송 시 문안 3로 재배치. source는 이력용 유지.
     // ★ D227+ 종량제: 크레딧 충분해 정상 실행 — paused_no_credit였으면 자동 재개
     await query(
@@ -659,7 +682,9 @@ export async function generateProposalForOperator(operatorId: string): Promise<O
         !adRejectOk && '광고 무료거부 번호(080) 미설정',
       ].filter(Boolean).join(', ')}`;
 
-  // 7. 제안서 INSERT — auto-eligible은 'scheduled'(T에 자율 발송) + scheduled_send_at, 아니면 'pending'(수동 검토)
+  // 7. 제안서 INSERT — auto-eligible은 'scheduled'(T에 자율 발송), 아니면 'pending'(수동 검토).
+  //    ★ 2026-07-07: scheduled_send_at은 pending에도 저장(발송 희망 시각 표시 + 예정일 경과 승인 경고).
+  //      자율 발송 트리거(runAutoSendPass)는 status='scheduled' 게이트라 pending 값 저장은 발송에 영향 0 — 소비처 17곳 전수 확인.
   const leadMinutes = resolveAutoSendLeadMinutes(operator.autoSendLeadMinutes);
   // ★ 2026-07-02 1단계 B (Harold 스펙): schedule_time = 발송 희망 시각.
   //   fixed(기본) = 희망 시각 정각 발송 — 생성 워커가 희망 − lead에 돌므로 다음 occurrence가 이번 주기 희망 시각.
@@ -684,7 +709,7 @@ export async function generateProposalForOperator(operatorId: string): Promise<O
       autoExecuteEligible ? 'scheduled' : 'pending',
       autoExecuteEligible,
       autoExecuteReason,
-      autoExecuteEligible ? scheduledSendAt : null,
+      scheduledSendAt,
     ]
   );
 
@@ -1264,7 +1289,7 @@ async function dispatchProposalSend(p: any): Promise<{ action: 'sent' | 'skipped
   let userId: string = companyId;
   const notify = (title: string, body: string) =>
     notifyOperatorAdmins(
-      { adminPhoneNumbers: Array.isArray(op.admin_phone_numbers) ? op.admin_phone_numbers : [], backupAdminPhone: op.backup_admin_phone || null, companyId },
+      { adminPhoneNumbers: Array.isArray(op.admin_phone_numbers) ? op.admin_phone_numbers : [], backupAdminPhone: op.backup_admin_phone || null, companyId, createdBy: op.created_by || null },
       title, body,
     ).catch((e: any) => console.warn('[ContinuousOperator AutoSend] 통지 경고:', e?.message));
 
@@ -1287,6 +1312,10 @@ async function dispatchProposalSend(p: any): Promise<{ action: 'sent' | 'skipped
   const msg = pj.messages?.[chosenIndex] || pj.messages?.[0] || {};
   const body = String(msg.body || msg.message || '');
   const subject = String(msg.subject || '');
+  // ★ 2026-07-07: 발송 시점 혜택 재치환 대상 — 제안 생성 후 관리자가 혜택을 입력(D-2 안내 흐름)해도 반영되게
+  //   op(benefit_content) 로드 후 값이 확정된다. 이후 발송 경로는 전부 resolvedBody/resolvedSubject 사용.
+  let resolvedBody = body;
+  let resolvedSubject = subject;
   const channel = String(pj.channel?.recommended || 'SMS').toUpperCase();
   const msgType = (channel === 'LMS' || channel === 'MMS') ? channel : 'SMS';
   // ★ 2026-07-02 (Harold 명시): 자동마케팅 = 무조건 광고 — 과거 저장분(pj.channel.isAd=false)도 광고로 발송.
@@ -1304,15 +1333,31 @@ async function dispatchProposalSend(p: any): Promise<{ action: 'sent' | 'skipped
   let filterWhere = '';
   let filterParams: any[] = [];
   try {
-    // operator(통지 대상 · created_by · Phase3 C 시퀀스 설정)
+    // operator(통지 대상 · created_by · Phase3 C 시퀀스 설정 · 2026-07-07 혜택 재치환용 benefit_content)
     const opRes = await query(
       `SELECT created_by, name, admin_phone_numbers, backup_admin_phone,
-              sequence_enabled, sequence_delay_days, sequence_reminder_content
+              sequence_enabled, sequence_delay_days, sequence_reminder_content, benefit_content
        FROM continuous_operators WHERE id = $1::uuid`,
       [p.operator_id],
     );
     op = opRes.rows[0] || {};
     userId = op.created_by || companyId;
+
+    // ★ 2026-07-07 혜택 발송 시점 재치환 + 미편집 placeholder 출구 가드 (마케팅 캘린더 완비).
+    //   제안 생성 후 관리자가 혜택을 입력했으면(D-2 준비 문자 흐름) 여기서 반영된다.
+    //   그래도 placeholder가 남으면 실고객 노출 차단 — 이메일·인앱·여정과 같은 클래스의 코드 가드.
+    //   자동(scheduled)·수동 승인(approveProposal)·시퀀스 리마인드 3경로가 이 함수를 공유하므로 1곳 = 전 경로.
+    resolvedBody = applyBenefitToBody(body, op.benefit_content);
+    resolvedSubject = applyBenefitToBody(subject, op.benefit_content);
+    if (hasUneditedBenefitPlaceholder(resolvedBody) || hasUneditedBenefitPlaceholder(resolvedSubject)) {
+      await query(
+        `UPDATE operator_proposals SET status = 'admin_review', scheduled_send_at = NULL,
+           auto_execute_reason = '혜택 미입력(문안에 입력 안내 문구 잔존) — 발송 보류' WHERE id = $1::uuid`,
+        [proposalId],
+      );
+      await notify('[AI 자동마케팅] 발송 보류', `'${op.name || ''}' 문안에 혜택이 입력되지 않아 발송을 보류했습니다. 한줄로 > 자동마케팅에서 혜택 입력 후 승인해 주세요.`);
+      return { action: 'skipped', reason: '혜택 미입력 — 발송 보류' };
+    }
 
     // 광고 가드 — 광고면 무료거부 번호(080) 해석 결과 필수(정보통신망법). 없으면 발송 보류(담당자 검토).
     if (isAd) {
@@ -1364,9 +1409,10 @@ async function dispatchProposalSend(p: any): Promise<{ action: 'sent' | 'skipped
 
   // ★ Phase2 A — 발송 변이 추적: 본문 URL을 변이 id로 단축 → 클릭 시 operator 변이에 보상 자동 누적.
   //   journey-executor와 동일하게 검증(스팸테스트) 이후 발송 시점 단축. 단축 실패 시 원본 보존(안전).
+  //   ★ 2026-07-07: 혜택 재치환 완료본(resolvedBody) 기준 — placeholder 출구 가드 통과분만 여기 도달.
   const trackedBody = chosenVariantId
-    ? await shortenUrlsInText(body, { companyId, variantId: chosenVariantId }).catch(() => body)
-    : body;
+    ? await shortenUrlsInText(resolvedBody, { companyId, variantId: chosenVariantId }).catch(() => resolvedBody)
+    : resolvedBody;
 
   // 발송 (직접발송 파이프라인 공유) — 잔액 부족이면 skip+통지
   let campaignId: string;
@@ -1375,7 +1421,7 @@ async function dispatchProposalSend(p: any): Promise<{ action: 'sent' | 'skipped
       {
         stagingId,
         campaignName: `AI 자동마케팅 ${op.name || ''} ${new Date().toLocaleDateString('ko-KR')}`,
-        msgType, message: trackedBody, subject: subject || null, callback, sendChannel: 'sms',
+        msgType, message: trackedBody, subject: resolvedSubject || null, callback, sendChannel: 'sms',
         adEnabled: isAd, total: recipientTotal, dedupEnabled: true, unsubFilterEnabled: true,
       },
       { companyId, userId },
@@ -1515,14 +1561,35 @@ export function startContinuousOperatorScheduler(): void {
  */
 // ★ 2026-07-02 2차: 성과 회고(operator-daily-recap)와 공유 — export (담당자 안내 발송 단일 경로 유지)
 export async function notifyOperatorAdmins(
-  operator: { adminPhoneNumbers: string[]; backupAdminPhone: string | null; companyId: string },
+  // ★ 2026-07-07: createdBy 옵셔널 — ContinuousOperator 전체를 넘기는 호출부는 자동 포함(구조 서브셋), 인라인 조립 호출부는 미지정 가능.
+  operator: { adminPhoneNumbers: string[]; backupAdminPhone: string | null; companyId: string; createdBy?: string | null },
   title: string,
   body: string,
 ): Promise<void> {
   const phones = [...(operator.adminPhoneNumbers || []), operator.backupAdminPhone || '']
     .map((p) => String(p || '').replace(/\D/g, ''))
     .filter((p) => /^01\d{8,9}$/.test(p));
-  const unique = Array.from(new Set(phones));
+  let unique = Array.from(new Set(phones));
+  // ★ 2026-07-07 폴백 (마케팅 캘린더 완비): 담당자 번호가 비면 통지가 조용히 전멸하던 구멍 차단.
+  //   ① 오퍼레이터 등록 계정(users.phone) ② 회사 대표 admin(user_type='company_admin' — predictive-worker와 동일 관례).
+  //   기존 등록분(담당자 미입력)과 인라인 조립 호출부까지 CT 1곳에서 일괄 수혜. 조회 실패 = 기존 동작(무통지) 유지.
+  if (unique.length === 0) {
+    try {
+      const fb = await query(
+        `SELECT phone FROM users
+          WHERE ($1::uuid IS NOT NULL AND id = $1::uuid)
+             OR (company_id = $2::uuid AND user_type = 'company_admin')
+          ORDER BY (id = $1::uuid) DESC, id ASC`,
+        [operator.createdBy || null, operator.companyId],
+      );
+      const fallback = fb.rows
+        .map((r: any) => String(r.phone || '').replace(/\D/g, ''))
+        .filter((p: string) => /^01\d{8,9}$/.test(p));
+      if (fallback.length > 0) unique = [fallback[0]];
+    } catch (e: any) {
+      console.log('[ContinuousOperator] 담당자 폴백 연락처 조회 실패(통지 생략):', e?.message || e);
+    }
+  }
   if (unique.length === 0) return;
 
   // TODO(알림톡 템플릿 등록 후): 1순위 알림톡(insertAlimtalkQueue) → 실패 시 아래 문자(2순위)로 fallback.
@@ -1649,6 +1716,8 @@ function mapRowToOperator(row: any): ContinuousOperator {
     sequenceEnabled: row.sequence_enabled === true,
     sequenceDelayDays: row.sequence_delay_days !== null && row.sequence_delay_days !== undefined ? Number(row.sequence_delay_days) : null,
     sequenceReminderContent: row.sequence_reminder_content || null,
+    // ★ 2026-07-07: 타겟 축 (컬럼 미생성/NULL = null → 기존 자유 해석)
+    targetHint: normalizeTargetHint(row.target_hint),
   };
 }
 
@@ -1666,6 +1735,8 @@ function mapRowToProposal(row: any): OperatorProposal {
     reviewedBy: row.reviewed_by,
     reviewedAt: row.reviewed_at ? new Date(row.reviewed_at) : null,
     campaignId: row.campaign_id,
+    // ★ 2026-07-07: pending에도 발송 예정 시각 저장 — 승인 화면 "예정일 경과" 경고용(발송 패스는 status='scheduled' 게이트라 무영향)
+    scheduledSendAt: row.scheduled_send_at ? new Date(row.scheduled_send_at) : null,
     expiresAt: new Date(row.expires_at),
     createdAt: new Date(row.created_at),
     operatorName: row.operator_name,

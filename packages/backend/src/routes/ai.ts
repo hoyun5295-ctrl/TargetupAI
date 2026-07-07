@@ -1898,7 +1898,7 @@ router.post('/operator/continuous', async (req: Request, res: Response) => {
       channel, benefit_content, admin_phone_numbers, backup_admin_phone, admin_alert_channel,
       auto_send_lead_minutes, budget_monthly, budget_daily, budget_alert_threshold, delivery_policy,
       sequence_enabled, sequence_delay_days, sequence_reminder_content, send_time_mode, copy_style,
-      calendar_month,
+      calendar_month, target_hint,
     } = req.body;
 
     // ★ 2026-07-05 마케팅 캘린더 경유 등록 — 같은 달에 살아있는 등록이 있으면 409(200크레딧 중복 차감 차단)
@@ -1945,6 +1945,8 @@ router.post('/operator/continuous', async (req: Request, res: Response) => {
       sendTimeMode: send_time_mode === 'ai_optimal' ? 'ai_optimal' : 'fixed',
       // ★ 2026-07-02 2단계: 문안 스타일 (createOperator가 화이트리스트 정규화)
       copyStyle: typeof copy_style === 'string' ? copy_style : null,
+      // ★ 2026-07-07 마케팅 캘린더 완비: 발송 대상 축 (createOperator가 화이트리스트 정규화)
+      targetHint: typeof target_hint === 'string' ? target_hint : null,
     });
     // ★ 2026-07-05: 캘린더 경유 등록 기록 — 실패해도 등록은 성공(fire-safe, 테이블 미생성 = 내부 생략)
     if (calendarMonth != null) {

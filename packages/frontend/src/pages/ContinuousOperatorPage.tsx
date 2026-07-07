@@ -271,14 +271,27 @@ export default function ContinuousOperatorPage() {
     return res.json();
   };
 
-  const handleApprove = (id: string) => setConfirmState({
-    mode: 'default', title: '제안 승인 + 발송', confirmLabel: '승인 + 발송',
-    description: '이 제안을 승인하고 바로 발송하시겠습니까?\n승인 즉시 대상 고객에게 발송됩니다.',
-    onConfirm: async () => {
-      const d = await proposalAction(`${id}/approve`);
-      if (d.success) { toast.success(d.message || '발송했습니다.'); await loadAll(); } else toast.error(d.error || '승인에 실패했습니다.');
-    },
-  });
+  const handleApprove = (p: OperatorProposal) => {
+    // ★ 2026-07-07 마케팅 캘린더 완비: 발송 예정일이 지난 제안 승인 = 즉시 발송이라, 시즌 캠페인이
+    //   명절·기념일 지나서 나가는 사실을 승인 전에 고지(경고 모드 전환).
+    const sched = p.scheduledSendAt ? new Date(p.scheduledSendAt) : null;
+    const passedMs = sched ? Date.now() - sched.getTime() : 0;
+    const passed = !!sched && passedMs > 0;
+    const passedDays = passed ? Math.floor(passedMs / 86400000) : 0;
+    const schedLabel = sched
+      ? sched.toLocaleString('ko-KR', { month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false })
+      : '';
+    setConfirmState({
+      mode: passed ? 'warning' : 'default', title: '제안 승인 + 발송', confirmLabel: '승인 + 발송',
+      description: passed
+        ? `발송 예정 시각(${schedLabel})이 이미 ${passedDays >= 1 ? `${passedDays}일 ` : ''}지났습니다.\n지금 승인하면 예정일과 무관하게 즉시 발송됩니다. 시즌·기념일 캠페인이라면 시점이 맞는지 확인해 주세요.`
+        : '이 제안을 승인하고 바로 발송하시겠습니까?\n승인 즉시 대상 고객에게 발송됩니다.',
+      onConfirm: async () => {
+        const d = await proposalAction(`${p.id}/approve`);
+        if (d.success) { toast.success(d.message || '발송했습니다.'); await loadAll(); } else toast.error(d.error || '승인에 실패했습니다.');
+      },
+    });
+  };
 
   const handleReject = (id: string) => setConfirmState({
     mode: 'warning', title: '제안 거부', confirmLabel: '거부',
@@ -424,7 +437,7 @@ export default function ContinuousOperatorPage() {
                       expanded={expandedProposal === p.id}
                       variantData={variantsMap[p.id]}
                       onToggleExpand={() => toggleExpand(p.id)}
-                      onApprove={() => handleApprove(p.id)}
+                      onApprove={() => handleApprove(p)}
                       onReject={() => handleReject(p.id)}
                       onStop={() => handleStop(p.id)}
                       onPromoteToJourney={() => handlePromoteToJourney(p)}

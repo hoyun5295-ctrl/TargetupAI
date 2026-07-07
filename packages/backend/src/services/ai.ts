@@ -1529,7 +1529,9 @@ export async function recommendTarget(
   companyInfo?: { business_type?: string; reject_number?: string; brand_name?: string; company_name?: string; customer_schema?: any; has_kakao_profile?: boolean },
   // ★ D170+ (2026-05-19) Harold 명시 — AI Operator Target Sub-agent도 Opus 4.7.
   //   기본 호출(/recommend-target route)은 model 미박힘 → default sonnet 사용 (한줄로 일반 AI 흐름 영향 0).
-  options?: { model?: 'sonnet' | 'opus' }
+  // ★ 2026-07-07 targetDirective — 마케팅 캘린더 타겟 축(TARGET_HINTS) 고정 지시 블록.
+  //   지정 시 "## 마케팅 목표" 바로 아래에 최우선 제약으로 주입 — 발송 당일 해석 흔들림 방지. 미지정 = 기존 자유 해석.
+  options?: { model?: 'sonnet' | 'opus'; targetDirective?: string }
 ): Promise<{
   filters: any;
   reasoning: string;
@@ -1633,7 +1635,7 @@ ${getKoreanCalendar()}
 
 ## 마케팅 목표
 ${cleanObjective}
-
+${options?.targetDirective?.trim() ? `\n${options.targetDirective.trim()}\n` : ''}
 ## 현재 고객 데이터 통계
 - 전체 고객: ${customerStats.total}명
 - SMS 수신동의: ${customerStats.sms_opt_in_count}명

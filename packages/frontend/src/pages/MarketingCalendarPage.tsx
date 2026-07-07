@@ -15,9 +15,23 @@ interface CalendarEntry {
   title: string;
   objective: string;
   suggestedDay: number;
+  // ★ 2026-07-07 완비: 발송 대상 축 — backend TARGET_HINTS(autosend-policy) 화이트리스트와 동일 키.
+  //   카드에서 사용자가 변경 → 등록 시 operator에 고정 → 발송 당일 타겟 AI가 이 축을 준수.
+  targetHint: string;
 }
 
 const MONTH_LABEL = ['', '1월', '2월', '3월', '4월', '5월', '6월', '7월', '8월', '9월', '10월', '11월', '12월'];
+
+// backend autosend-policy TARGET_HINTS와 동일 키·라벨 (화이트리스트 밖 값은 서버가 all로 정규화)
+const TARGET_HINT_OPTIONS: Array<{ key: string; label: string }> = [
+  { key: 'all', label: '전체 고객' },
+  { key: 'dormant', label: '휴면 고객' },
+  { key: 'recent_buyers', label: '최근 구매 고객' },
+  { key: 'vip', label: 'VIP·상위 등급' },
+  { key: 'birthday', label: '이달 생일 고객' },
+  { key: 'new_customers', label: '신규 등록 고객' },
+];
+const normalizeHint = (h: unknown): string => (TARGET_HINT_OPTIONS.some((o) => o.key === h) ? (h as string) : 'all');
 
 export default function MarketingCalendarPage() {
   const navigate = useNavigate();
@@ -26,6 +40,10 @@ export default function MarketingCalendarPage() {
   const [selected, setSelected] = useState<Set<number>>(new Set());
   // ★ 2026-07-05: 등록 상태 — { "월": operator_id }. 등록된 달 = 배지 + 재등록 차단
   const [registrations, setRegistrations] = useState<Record<string, string>>({});
+  // ★ 2026-07-07 완비: 달별 혜택(선택 입력) — 등록 payload benefit_content로 동봉, 비우면 D-2 문자 + 발송 출구 가드가 담당
+  const [benefits, setBenefits] = useState<Record<number, string>>({});
+  // ★ 2026-07-07 완비: 발송 안내 받을 담당자 연락처(선택) — 비우면 등록 계정 연락처가 기본값(서버 처리)
+  const [adminPhone, setAdminPhone] = useState('');
   const [generating, setGenerating] = useState(false);
   // ★ 2026-07-05 P3: 한 달만 다시 설계(10크레딧) — 진행 중인 달 표시
   const [regenMonth, setRegenMonth] = useState<number | null>(null);
@@ -46,7 +64,9 @@ export default function MarketingCalendarPage() {
         const res = await fetch('/api/ai/operator/marketing-calendar', { headers: auth() });
         const data = await res.json();
         if (data?.success && data.calendar) {
-          const saved: CalendarEntry[] = Array.isArray(data.calendar.entries) ? data.calendar.entries : [];
+          // ★ 2026-07-07: targetHint 정규화 — 완비 이전 저장본(축 없음)은 all로 표시
+          const saved: CalendarEntry[] = (Array.isArray(data.calendar.entries) ? data.calendar.entries : [])
+            .map((e: any) => ({ ...e, targetHint: normalizeHint(e?.targetHint) }));
           const regs: Record<string, string> = data.calendar.registrations || {};
           if (saved.length > 0) {
             setEntries(saved);
@@ -72,9 +92,10 @@ export default function MarketingCalendarPage() {
         toast.error(data.error || '설계 생성에 실패했습니다.');
         return;
       }
-      setEntries(data.entries || []);
+      const fresh: CalendarEntry[] = (data.entries || []).map((e: any) => ({ ...e, targetHint: normalizeHint(e?.targetHint) }));
+      setEntries(fresh);
       // 등록된 달은 기본 선택에서 제외 — 재등록(중복 차감) 방지
-      setSelected(new Set((data.entries || []).map((e: CalendarEntry) => e.month).filter((m: number) => !registrations[String(m)])));
+      setSelected(new Set(fresh.map((e) => e.month).filter((m) => !registrations[String(m)])));
       toast.success('1년 캘린더 설계가 준비됐습니다. 원하는 달을 골라 등록하세요.');
     } catch (e: any) {
       setError(e?.message || '네트워크 오류');
@@ -97,6 +118,11 @@ export default function MarketingCalendarPage() {
     setEntries((prev) => prev.map((e) => (e.month === month ? { ...e, suggestedDay: day } : e)));
   };
 
+  // ★ 2026-07-07 완비: 발송 대상 축 변경 — 발송일과 같은 자유도(등록 전 언제든)
+  const setHint = (month: number, hint: string) => {
+    setEntries((prev) => prev.map((e) => (e.month === month ? { ...e, targetHint: normalizeHint(hint) } : e)));
+  };
+
   // ★ 2026-07-05 P3: 한 달만 다시 설계 — 10크레딧(20 미만 = 사전 모달 비대상, 버튼에 비용 명시 + 차감 후 토스트)
   const regenerateMonth = async (month: number) => {
     if (regenMonth !== null || generating || registering) return;
@@ -109,7 +135,7 @@ export default function MarketingCalendarPage() {
       });
       const data = await res.json();
       if (data?.success && data.entry) {
-        setEntries((prev) => prev.map((e) => (e.month === month ? data.entry : e)));
+        setEntries((prev) => prev.map((e) => (e.month === month ? { ...data.entry, targetHint: normalizeHint(data.entry?.targetHint) } : e)));
         toast.success(`${MONTH_LABEL[month]} 캠페인을 다시 설계했습니다. (10 크레딧)`);
       } else {
         toast.error(data?.error || '한 달 재설계에 실패했습니다.');
@@ -128,15 +154,19 @@ export default function MarketingCalendarPage() {
     let ok = 0;
     let fail = 0;
     let firstError: string | null = null;
+    // ★ 2026-07-07 완비: 담당자 연락처(선택) — 숫자만 추려 유효한 휴대폰이면 동봉, 아니면 서버가 등록 계정 연락처로 기본값
+    const adminDigits = adminPhone.replace(/\D/g, '');
+    const adminPhones = /^01\d{8,9}$/.test(adminDigits) ? [adminDigits] : undefined;
     for (const e of picks) {
       try {
+        const benefit = (benefits[e.month] || '').trim();
         const res = await fetch('/api/ai/operator/continuous', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', ...auth() },
           body: JSON.stringify({
             name: `${MONTH_LABEL[e.month]} ${e.title}`.slice(0, 100),
             objective: e.objective,
-            // ★ 2026-07-05: 시즌 캠페인 = 연 1회(yearly + 대상 월). 옛 monthly는 매월 반복 오발송 구조라 폐기.
+            // ★ 2026-07-05: 시즌 캠페인 = 연 1회(yearly + 대상 월). 이전 monthly는 매월 반복 오발송 구조라 폐기.
             schedule: 'yearly',
             schedule_month: e.month,
             schedule_time: '10:00',
@@ -145,6 +175,10 @@ export default function MarketingCalendarPage() {
             send_time_mode: 'fixed',
             delivery_policy: 'monthly',
             calendar_month: e.month, // 서버 등록 기록 + 같은 달 중복 등록 409 차단
+            // ★ 2026-07-07 완비: 대상 축 고정 + 혜택(선택) + 담당자(선택 — 미입력 = 등록 계정 연락처)
+            target_hint: e.targetHint,
+            ...(benefit ? { benefit_content: benefit } : {}),
+            ...(adminPhones ? { admin_phone_numbers: adminPhones } : {}),
           }),
         });
         const data = await res.json();
@@ -194,7 +228,8 @@ export default function MarketingCalendarPage() {
             <h2 className="mt-4 text-lg font-semibold">1년치 마케팅, 한 번에 설계합니다</h2>
             <p className="mt-1.5 text-[13px] text-white/55 leading-relaxed">
               설날·여름 휴가·추석·연말 같은 시즌과 업종 성수기를 조합해 12개월 캠페인을 제안합니다.<br />
-              마음에 드는 달만 골라 등록하면 그 달 정해진 날에 연 1회, 2시간 전 문안 안내와 함께 자동 발송됩니다.
+              마음에 드는 달만 골라 등록하면 그 달 정해진 날 2시간 전에 문안·대상·비용이 담당자에게 안내되고,<br />
+              자동 발송 설정 회사는 정각에 자동 발송, 그 외에는 승인 후 발송됩니다.
             </p>
             <button
               onClick={() => setGenConfirmOpen(true)}
@@ -241,7 +276,7 @@ export default function MarketingCalendarPage() {
                       )}
                     </div>
                     <p className="mt-2 text-[12px] text-white/60 leading-relaxed">{e.objective}</p>
-                    <div className="mt-3 flex items-center gap-2 text-[11px] text-white/50">
+                    <div className="mt-3 flex items-center gap-2 flex-wrap text-[11px] text-white/50">
                       <span>발송일</span>
                       <select
                         value={e.suggestedDay}
@@ -251,8 +286,32 @@ export default function MarketingCalendarPage() {
                       >
                         {Array.from({ length: 28 }, (_, i) => i + 1).map((d) => <option key={d} value={d}>{d}일</option>)}
                       </select>
-                      <span>· 오전 10:00 · 연 1회 · 발송 2시간 전 문안 안내</span>
+                      <span>· 오전 10:00 · LMS · 연 1회 · 발송 2시간 전 문안 안내</span>
                     </div>
+                    {/* ★ 2026-07-07 완비: 발송 대상 축 — 등록 후 발송 당일 타겟 AI가 이 축을 준수 */}
+                    <div className="mt-2 flex items-center gap-2 text-[11px] text-white/50">
+                      <span>대상</span>
+                      <select
+                        value={e.targetHint}
+                        onChange={(ev) => setHint(e.month, ev.target.value)}
+                        disabled={registered}
+                        className="px-2 py-1 bg-white/5 border border-white/10 rounded text-white text-[11px] focus:outline-none focus:border-orange-400/50 disabled:opacity-40"
+                      >
+                        {TARGET_HINT_OPTIONS.map((o) => <option key={o.key} value={o.key}>{o.label}</option>)}
+                      </select>
+                      <span className="text-white/35">· 발송 전 실제 인원으로 산출</span>
+                    </div>
+                    {/* ★ 2026-07-07 완비: 혜택(선택) — 입력하면 문안의 혜택 자리에 그대로, 비우면 발송 2일 전 입력 안내 문자 */}
+                    {!registered && (
+                      <input
+                        type="text"
+                        value={benefits[e.month] || ''}
+                        onChange={(ev) => setBenefits((prev) => ({ ...prev, [e.month]: ev.target.value }))}
+                        maxLength={200}
+                        placeholder="혜택 (선택) 예: 아메리카노 1잔 증정 — 비우면 발송 2일 전 입력 안내"
+                        className="mt-2 w-full px-2.5 py-1.5 bg-white/5 border border-white/10 rounded text-white text-[11px] placeholder-white/25 focus:outline-none focus:border-orange-400/50"
+                      />
+                    )}
                     <div className="mt-2.5 flex items-center gap-3 flex-wrap">
                       {!registered && (
                         <button
@@ -289,7 +348,7 @@ export default function MarketingCalendarPage() {
                 선택 {pickedCount}건 자동마케팅으로 등록
               </button>
             </div>
-            <div className="text-center text-[11px] text-white/40">설계 생성·다시 설계는 매회, 등록은 건당 크레딧이 차감됩니다. 혜택 문구는 등록 후 각 항목에서 직접 입력할 수 있습니다.</div>
+            <div className="text-center text-[11px] text-white/40">설계 생성·다시 설계는 매회, 등록은 건당 크레딧이 차감됩니다. 혜택을 비워두면 발송 2일 전 입력 안내 문자가 가고, 미입력 상태로는 자동 발송되지 않습니다.</div>
           </>
         )}
 
@@ -306,10 +365,24 @@ export default function MarketingCalendarPage() {
       </div>
 
       {/* ★ 2026-07-05: 표시=실차감 일치 — N건 선택 등록은 단가×N로 표시(quantity) */}
+      {/* ★ 2026-07-07 완비: 발송 안내 담당자 연락처(선택) — 비우면 등록 계정 연락처로 자동. 통지 수신처 없는 등록 차단 */}
       <CreditConfirmModal
         open={confirmOpen}
         source="continuous-operator"
         quantity={pickedCount}
+        extraContent={
+          <div className="rounded-lg bg-white/5 border border-white/10 px-3 py-2.5">
+            <label className="text-[11px] text-white/60 block mb-1">발송 안내 받을 담당자 연락처 (선택)</label>
+            <input
+              type="tel"
+              value={adminPhone}
+              onChange={(ev) => setAdminPhone(ev.target.value)}
+              placeholder="비우면 등록 계정 연락처로 안내"
+              className="w-full px-2.5 py-1.5 bg-white/5 border border-white/10 rounded text-white text-[12px] placeholder-white/25 focus:outline-none focus:border-orange-400/50"
+            />
+            <div className="mt-1.5 text-[10px] text-white/35 leading-relaxed">발송 2시간 전 문안·대상·비용 안내와 승인 요청 문자가 이 번호로 발송됩니다.</div>
+          </div>
+        }
         onConfirm={() => { setConfirmOpen(false); registerSelected(); }}
         onCancel={() => setConfirmOpen(false)}
       />

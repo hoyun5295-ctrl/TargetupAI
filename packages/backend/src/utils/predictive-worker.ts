@@ -149,6 +149,15 @@ export async function runPredictiveBatchNow(): Promise<{
         } catch (prepErr: any) {
           console.warn('[PredictiveWorker] 사전 준비 문자 skip:', row.id, prepErr?.message);
         }
+        // ★ 2026-07-07 (Harold 확정): 승인 대기 만료 임박(D-3) 리마인드 — 미승인 만료로 연 1회 캠페인이
+        //   소리 없이 무산되는 것 차단(마케팅 캘린더 완비). 실패는 예측·발송에 영향 0.
+        try {
+          const { sendPendingExpiryReminders } = await import('./operator-prep-reminder');
+          const expiry = await sendPendingExpiryReminders(row.id);
+          if (expiry.notified > 0) console.log(`[PredictiveWorker] 승인 만료 임박 문자 company=${row.id} ${expiry.notified}건`);
+        } catch (expiryErr: any) {
+          console.warn('[PredictiveWorker] 승인 만료 임박 문자 skip:', row.id, expiryErr?.message);
+        }
         // ★ 2026-07-02 3단계 (Harold 확정): 같은 일일 분석 차감 1회에 "오늘의 추천" 브리핑 동반 생성(추가 차감 0).
         //   실패는 예측·발송에 영향 0 — 격리 후 다음 날 사이클이 재시도.
         try {

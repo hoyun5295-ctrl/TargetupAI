@@ -6,7 +6,7 @@
  * 잔액은 GET /api/companies/my-credit로 자체 조회(부모 무관). 비용·라벨은 constants/credit.ts 단일 출처.
  * 작은 차감(생성·문안·다듬기)은 이 모달을 쓰지 않고 차감 후 토스트로만 알린다.
  */
-import { useState, useEffect } from 'react';
+import { useState, useEffect, type ReactNode } from 'react';
 import { Sparkles, X, AlertTriangle } from 'lucide-react';
 import { CONFIRM_CREDIT_COSTS, CREDIT_SOURCE_LABELS } from '../../constants/credit';
 
@@ -17,11 +17,13 @@ interface Props {
   //   미지정 = 1(기존 호출부 전부 무영향).
   quantity?: number;
   description?: string;     // 작업 맥락 1줄 (예: 빠른시작 시나리오 설명) — 있으면 차감 안내 위에 표시
+  // ★ 2026-07-07: 확인과 함께 받을 부가 입력 슬롯(마케팅 캘린더 담당자 연락처 등) — 미지정 = 기존 호출부 전부 무영향.
+  extraContent?: ReactNode;
   onConfirm: () => void;
   onCancel: () => void;
 }
 
-export default function CreditConfirmModal({ open, source, quantity, description, onConfirm, onCancel }: Props) {
+export default function CreditConfirmModal({ open, source, quantity, description, extraContent, onConfirm, onCancel }: Props) {
   const unitCost = CONFIRM_CREDIT_COSTS[source] ?? 0;
   const qty = Math.max(1, Math.floor(Number(quantity)) || 1);
   const cost = unitCost * qty;
@@ -93,6 +95,7 @@ export default function CreditConfirmModal({ open, source, quantity, description
             {description}
           </div>
         )}
+        {extraContent && <div className="mb-3">{extraContent}</div>}
         <div className="text-[13px] text-white/80 leading-relaxed mb-4">
           <span className="font-semibold text-white">{label}</span>
           {qty > 1 ? ` ${qty}건` : ''} 사용으로{' '}

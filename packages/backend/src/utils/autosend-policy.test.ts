@@ -257,3 +257,128 @@ describe('buildPendingReviewNoticeBody — 승인 대기(수동 검토) 통지 �
     expect(body).toContain('승인');
   });
 });
+
+// ── 2026-07-07 마케팅 캘린더 완비 — 타겟 축·혜택 치환·출구 가드·만료 리마인드 ──
+
+describe('normalizeTargetHint / targetHintLabel — 타겟 축 화이트리스트', () => {
+  it('화이트리스트 키만 통과, 그 외/미지정 = null', async () => {
+    const { normalizeTargetHint } = await import('./autosend-policy');
+    expect(normalizeTargetHint('all')).toBe('all');
+    expect(normalizeTargetHint('dormant')).toBe('dormant');
+    expect(normalizeTargetHint('recent_buyers')).toBe('recent_buyers');
+    expect(normalizeTargetHint('vip')).toBe('vip');
+    expect(normalizeTargetHint('birthday')).toBe('birthday');
+    expect(normalizeTargetHint('new_customers')).toBe('new_customers');
+    expect(normalizeTargetHint('churn_risk_high')).toBeNull(); // 예측 축 유입 차단
+    expect(normalizeTargetHint('')).toBeNull();
+    expect(normalizeTargetHint(undefined)).toBeNull();
+    expect(normalizeTargetHint(null)).toBeNull();
+  });
+
+  it('라벨은 한글 표기, null = 빈 문자열', async () => {
+    const { targetHintLabel } = await import('./autosend-policy');
+    expect(targetHintLabel('dormant')).toBe('휴면 고객');
+    expect(targetHintLabel('all')).toBe('전체 고객');
+    expect(targetHintLabel(null)).toBe('');
+  });
+});
+
+describe('buildTargetHintPromptBlock — 타겟 축 고정 지시 블록', () => {
+  it('축 지정 시 라벨·지시·준수 문구를 담는다', async () => {
+    const { buildTargetHintPromptBlock } = await import('./autosend-policy');
+    const block = buildTargetHintPromptBlock('dormant');
+    expect(block).toContain('휴면 고객');
+    expect(block).toContain('반드시');
+    expect(block).toContain('filters');
+  });
+
+  it('null = 빈 문자열(기존 자유 해석 유지)', async () => {
+    const { buildTargetHintPromptBlock } = await import('./autosend-policy');
+    expect(buildTargetHintPromptBlock(null)).toBe('');
+  });
+});
+
+describe('applyBenefitToBody — 혜택 placeholder 치환 (생성·발송 두 지점 공용)', () => {
+  it('[혜택 ...] 대괄호 placeholder를 관리자 입력값으로 전부 치환한다', async () => {
+    const { applyBenefitToBody } = await import('./autosend-policy');
+    const out = applyBenefitToBody(
+      '안녕하세요. [혜택 내용을 입력해주세요] 이번 달 준비했습니다. [혜택 안내 — 직접 작성해주세요]',
+      '아메리카노 1잔 증정',
+    );
+    expect(out).toBe('안녕하세요. 아메리카노 1잔 증정 이번 달 준비했습니다. 아메리카노 1잔 증정');
+  });
+
+  it('혜택이 비어 있으면 원문 그대로(placeholder 보존 → 출구 가드 대상)', async () => {
+    const { applyBenefitToBody } = await import('./autosend-policy');
+    const src = '본문 [혜택 내용을 입력해주세요] 끝';
+    expect(applyBenefitToBody(src, null)).toBe(src);
+    expect(applyBenefitToBody(src, '   ')).toBe(src);
+  });
+});
+
+describe('hasUneditedBenefitPlaceholder — 발송 출구 가드 검출', () => {
+  it('[혜택 대괄호·직접 입력/작성해주세요 잔존 = true', async () => {
+    const { hasUneditedBenefitPlaceholder } = await import('./autosend-policy');
+    expect(hasUneditedBenefitPlaceholder('본문 [혜택 내용을 입력해주세요]')).toBe(true);
+    expect(hasUneditedBenefitPlaceholder('본문 [혜택 안내 — 직접 작성해주세요]')).toBe(true);
+    expect(hasUneditedBenefitPlaceholder('혜택을 직접 입력해주세요 라고 남음')).toBe(true);
+  });
+
+  it('정상 문안(치환 완료·placeholder 없음) = false', async () => {
+    const { hasUneditedBenefitPlaceholder } = await import('./autosend-policy');
+    expect(hasUneditedBenefitPlaceholder('(광고) 이번 달 아메리카노 1잔 증정 안내')).toBe(false);
+    expect(hasUneditedBenefitPlaceholder('')).toBe(false);
+    expect(hasUneditedBenefitPlaceholder('혜택 가득한 하루')).toBe(false); // 대괄호 없는 일반 표현
+  });
+});
+
+describe('decideExpiryReminder — 승인 대기 만료 임박 리마인드 판정', () => {
+  const now = new Date('2026-07-10T00:00:00Z');
+  it('pending + 만료 3일 안 + 미발송 = true', async () => {
+    const { decideExpiryReminder } = await import('./autosend-policy');
+    expect(decideExpiryReminder(
+      { status: 'pending', expiresAt: new Date('2026-07-12T00:00:00Z'), reminderSentAt: null }, now,
+    )).toBe(true);
+  });
+
+  it('만료까지 3일 초과 남음 = false (아직 이르다)', async () => {
+    const { decideExpiryReminder } = await import('./autosend-policy');
+    expect(decideExpiryReminder(
+      { status: 'pending', expiresAt: new Date('2026-07-15T00:00:00Z'), reminderSentAt: null }, now,
+    )).toBe(false);
+  });
+
+  it('이미 만료·이미 리마인드·pending 아님 = false', async () => {
+    const { decideExpiryReminder } = await import('./autosend-policy');
+    expect(decideExpiryReminder(
+      { status: 'pending', expiresAt: new Date('2026-07-09T00:00:00Z'), reminderSentAt: null }, now,
+    )).toBe(false);
+    expect(decideExpiryReminder(
+      { status: 'pending', expiresAt: new Date('2026-07-12T00:00:00Z'), reminderSentAt: new Date('2026-07-09T12:00:00Z') }, now,
+    )).toBe(false);
+    expect(decideExpiryReminder(
+      { status: 'admin_review', expiresAt: new Date('2026-07-12T00:00:00Z'), reminderSentAt: null }, now,
+    )).toBe(false);
+    expect(decideExpiryReminder(
+      { status: 'pending', expiresAt: null, reminderSentAt: null }, now,
+    )).toBe(false);
+  });
+});
+
+describe('buildExpiryReminderBody — 만료 임박 리마인드 문구', () => {
+  it('오퍼레이터명·대상·비용·만료 시한·미승인 시 미발송 경고를 담는다', async () => {
+    const { buildExpiryReminderBody } = await import('./autosend-policy');
+    const body = buildExpiryReminderBody({
+      operatorName: '3월 봄맞이 신규 관심 환기',
+      expiresAtLabel: '3월 21일 08:00',
+      recipientCount: 1200,
+      costEstimate: 32400,
+    });
+    expect(body).toContain('3월 봄맞이 신규 관심 환기');
+    expect(body).toContain('1,200명');
+    expect(body).toContain('32,400원');
+    expect(body).toContain('3월 21일 08:00');
+    expect(body).toContain('만료');
+    expect(body).toContain('발송되지 않습니다');
+  });
+});

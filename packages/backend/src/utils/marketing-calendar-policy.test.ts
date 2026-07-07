@@ -46,12 +46,33 @@ describe('buildCalendarSystemPrompt — 원칙 포함·모델명 미노출', () 
     expect(sys).toMatch(/혜택.*금지|금지.*혜택/);
     expect(sys).not.toMatch(/Opus|Sonnet|Haiku|GPT|Claude/i);
   });
+
+  it('targetHint 화이트리스트 지시와 JSON 필드 예시를 담는다 (2026-07-07 완비)', () => {
+    const sys = buildCalendarSystemPrompt();
+    expect(sys).toContain('targetHint');
+    expect(sys).toContain('"all"');
+    expect(sys).toContain('dormant');
+    expect(sys).toContain('휴면 고객');
+  });
+});
+
+describe('sanitizeCalendarEntries — targetHint 축 (2026-07-07 완비)', () => {
+  it('화이트리스트 값은 보존, 이상값·미지정은 all', () => {
+    const entries = sanitizeCalendarEntries([
+      { month: 3, title: '봄맞이', objective: '휴면 고객 재방문 유도 안내', targetHint: 'dormant' },
+      { month: 7, title: '여름 성수기', objective: '최근 구매 고객 추가 구매 유도', targetHint: 'churn_risk_high' },
+      { month: 9, title: '추석 인사', objective: '전체 고객 명절 인사 전달' },
+    ]);
+    expect(entries.find((e) => e.month === 3)?.targetHint).toBe('dormant');
+    expect(entries.find((e) => e.month === 7)?.targetHint).toBe('all'); // 예측 축 유입 = all로 강등
+    expect(entries.find((e) => e.month === 9)?.targetHint).toBe('all');
+  });
 });
 
 describe('missingCalendarMonths — 결손 달 판정 (2026-07-05 보정 재호출)', () => {
   it('빈 배열이면 1~12 전부, 가득 차면 빈 배열', () => {
     expect(missingCalendarMonths([])).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
-    const full = Array.from({ length: 12 }, (_, i) => ({ month: i + 1, title: 't', objective: '목표 다섯자 이상', suggestedDay: 1 }));
+    const full = Array.from({ length: 12 }, (_, i) => ({ month: i + 1, title: 't', objective: '목표 다섯자 이상', suggestedDay: 1, targetHint: 'all' as const }));
     expect(missingCalendarMonths(full)).toEqual([]);
   });
 
