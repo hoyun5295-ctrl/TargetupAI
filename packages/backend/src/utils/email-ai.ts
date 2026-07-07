@@ -27,7 +27,7 @@ import type { Section } from './dm/dm-section-registry';
 import { collectRefinableTexts, applyRefinedTexts } from './email/email-section-refine';
 // 문안 두뇌: 성과 RAG + 시의성 + 브랜드 키트 주입 + 타사 표현 복제 가드
 import { composeCopyBrain } from './copy-prompt-composer';
-import { buildEventPromptBlock } from './event-brief';
+import { buildEventPromptBlock, validateProductsAgainstEventText } from './event-brief';
 import { checkCopyLeak } from './copy-similarity-guard';
 
 // ════════════════════════════════════════════════════════════════════
@@ -340,7 +340,7 @@ const EMAIL_BLOCKS_SYSTEM = `당신은 한국어 이메일 마케팅 디자이�
 - header: { "variant": "logo", "brand_name": "회사명" }
 - hero: { "headline": "큰 제목", "sub_copy": "한 줄 부제", "align": "center", "height": "md" }
 - text_card: { "tag": "라벨", "headline": "소제목", "body": "본문 2~3문장", "align": "left", "image_position": "top" }
-- product_carousel: { "title": "추천 상품", "products": [{ "name": "상품명", "price": 0, "image_url": "" }] }
+- product_carousel: { "title": "추천 상품", "products": [{ "name": "상품명", "price": 0, "discount_price": 0, "image_url": "" }] }
 - gallery: { "title": "갤러리", "images": [{ "url": "" }] }
 - coupon: { "discount_label": "혜택 제목", "discount_type": "percent", "coupon_code": "" }
 - cta: { "buttons": [{ "label": "버튼 글", "url": "", "style": "primary" }], "layout": "stack" }
@@ -351,6 +351,7 @@ const EMAIL_BLOCKS_SYSTEM = `당신은 한국어 이메일 마케팅 디자이�
 - 위 type만 사용한다. 그 외 type 금지.
 - 모든 이미지(image_url, url)는 빈 문자열로 둔다 (회사가 직접 업로드).
 - 구체 혜택 수치(할인율, 금액, 쿠폰코드, 무료, 사은품)는 임의로 만들지 않는다. 혜택 자리는 "[혜택을 직접 입력해주세요]" 텍스트로 두고, coupon_code는 빈 문자열로 둔다.
+- 단, [행사 내용] 원문에 상품명·가격이 적혀 있으면 그것은 창작이 아니다 — product_carousel 1개에 그 상품들을 원문 수치 그대로 담는다(정가 price, 할인가 discount_price — 원문에 없는 상품·가격 추가 금지).
 - 모든 버튼 url은 빈 문자열로 둔다.
 - 권장 순서: header → hero → 본문(text_card / product_carousel / gallery) → cta → footer.
 
@@ -397,6 +398,22 @@ export async function generateEmailSections(input: {
   const sections = normalizeAiBlocksToSections(parsed.blocks);
   if (sections.length === 0) {
     throw new Error('AI 블록 생성 결과가 비어 있습니다. 다시 시도해주세요.');
+  }
+  // ★ 2026-07-08 행사 원문 상품 기계 검증 — 가격이 원문에 실존하는 상품만 통과(환각 가격 차단, DM과 동일 규칙)
+  if (input.eventText) {
+    for (const s of sections) {
+      if (s.type !== 'product_carousel') continue;
+      const p: any = s.props || {};
+      p.products = validateProductsAgainstEventText(p.products, input.eventText).map((v, i) => ({
+        id: `p-${i + 1}`,
+        image_url: '',
+        name: v.name,
+        price: v.price,
+        ...(v.discount_price ? { discount_price: v.discount_price } : {}),
+        ...(v.discount_rate ? { discount_rate: v.discount_rate } : {}),
+      }));
+      s.props = p;
+    }
   }
   const subjects = (Array.isArray(parsed.subjects) ? parsed.subjects : [])
     .map((s) => String(s || '').trim()).filter(Boolean).slice(0, 3);

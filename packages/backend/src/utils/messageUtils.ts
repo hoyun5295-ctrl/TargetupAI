@@ -559,3 +559,16 @@ export async function prepareFieldMappings(companyId: string): Promise<Record<st
   await enrichWithCustomFields(fieldMappings, companyId);
   return fieldMappings;
 }
+
+/**
+ * ★ 2026-07-08 SMS/LMS 구분선 정규화 — AI 생성 문안의 긴 구분선(----- 등)이
+ * 휴대폰 화면 폭을 넘어 두 줄로 꺾여 보이는 문제 차단.
+ * 구분 문자로만 이뤄진 4자+ 줄을 어느 기기에서도 안 꺾이는 하이픈 10개로 통일.
+ * (본문 문장 안 대시는 건드리지 않음 — 줄 전체가 구분 문자일 때만)
+ */
+export function normalizeSmsSeparatorLines(text: string): string {
+  return String(text ?? '')
+    .split('\n')
+    .map((line) => (/^[\s\-─—–ㅡ=_~·•*]{4,}$/.test(line) && line.trim().length >= 4 ? '----------' : line))
+    .join('\n');
+}

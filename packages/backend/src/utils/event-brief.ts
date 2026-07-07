@@ -30,6 +30,52 @@ ${t}
 }
 
 /**
+ * ★ 2026-07-08 행사 원문 → 상품 구조 추출 검증 (DM one-shot + 이메일 generate-sections 공용)
+ *
+ * AI가 추출한 상품(name/price/discount_price/discount_rate)이 행사 원문에 실존하는지 기계 검증.
+ * - 가격 숫자(정가·할인가)는 원문(콤마·공백 제거)에 그 숫자가 그대로 실존해야 통과 — 환각 가격 자동 탈락
+ * - 할인율은 "N%"가 원문에 실존해야 통과 (없으면 rate만 버리고 상품은 유지 — 렌더러가 가격으로 자동 계산)
+ * - 상품명은 토큰 절반 이상이 원문에 실존해야 통과 (AI가 접두 라벨 등을 다듬는 것 허용)
+ */
+export interface ExtractedEventProduct {
+  name: string;
+  price: number;
+  discount_price?: number;
+  discount_rate?: number;
+}
+
+export function validateProductsAgainstEventText(products: any, eventText: any): ExtractedEventProduct[] {
+  const src = String(eventText ?? '').toLowerCase().replace(/[\s,]+/g, '');
+  if (!src || !Array.isArray(products)) return [];
+  const out: ExtractedEventProduct[] = [];
+  for (const raw of products) {
+    if (!raw || typeof raw !== 'object') continue;
+    const name = String((raw as any).name ?? '').trim().slice(0, 80);
+    const price = Math.round(Number((raw as any).price));
+    if (!name || !Number.isFinite(price) || price <= 0) continue;
+    // 가격 실존 검증 (콤마 제거 원문 안 숫자 그대로)
+    if (!src.includes(String(price))) continue;
+    let discountPrice: number | undefined = Math.round(Number((raw as any).discount_price));
+    if (!Number.isFinite(discountPrice) || discountPrice! <= 0 || discountPrice! >= price || !src.includes(String(discountPrice))) {
+      discountPrice = undefined;
+    }
+    let discountRate: number | undefined = Math.round(Number((raw as any).discount_rate));
+    if (!Number.isFinite(discountRate) || discountRate! <= 0 || discountRate! >= 100 || !src.includes(`${discountRate}%`)) {
+      discountRate = undefined;
+    }
+    // 상품명 토큰 절반 이상 실존 (2자 이상 토큰 기준)
+    const tokens = name.toLowerCase().split(/\s+/).filter((t) => t.replace(/[^0-9a-z가-힣]/g, '').length >= 2);
+    if (tokens.length > 0) {
+      const hit = tokens.filter((t) => src.includes(t.replace(/[\s,]+/g, ''))).length;
+      if (hit * 2 < tokens.length) continue;
+    }
+    out.push({ name, price, ...(discountPrice ? { discount_price: discountPrice } : {}), ...(discountRate ? { discount_rate: discountRate } : {}) });
+    if (out.length >= 8) break;
+  }
+  return out;
+}
+
+/**
  * 혜택 문구가 행사 원문에 실제로 존재하는지 검증.
  * - 수치·혜택 토큰(20%, 5만원, 1+1, 무료배송, 쿠폰, 사은품, 적립 등)이 있으면 전 토큰이 원문에 실존해야 통과
  * - 토큰이 없으면 정규화(공백 제거) 부분 문자열로 판정

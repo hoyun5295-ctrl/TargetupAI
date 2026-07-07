@@ -48,7 +48,7 @@ import { buildCustomerFilter } from '../utils/customer-filter';
 import { buildChannelEligibilityWhere } from '../utils/channel-eligibility';
 import { createDirectSendCampaign, countStagingFiltered } from '../utils/direct-send-core';
 import { DirectSendError } from '../utils/direct-send-spec';
-import { getOpt080Number, stripAdPartsDeep } from '../utils/messageUtils';
+import { getOpt080Number, stripAdPartsDeep, normalizeSmsSeparatorLines } from '../utils/messageUtils';
 import { isUuid } from '../utils/normalize';
 import { callAIWithFallback, getSeasonContext } from '../services/ai';
 import { buildSystemPromptWithBrandVoice } from '../utils/brand-voice-prompt';
@@ -433,11 +433,15 @@ dmRouter.post('/:id/publish', async (req: any, res: any) => {
         idempotencyKey: `dm-publish:${req.params.id}`,
       });
     }
+    // ★ 2026-07-08 발행 URL도 hlj.kr 단축 도메인 — /s/:code가 dm_recipient_tokens 미발견 시
+    //   dm_pages.short_code 폴백 조회 → 토큰 없이 공용 렌더 302 (추적·발송 로직 무변경).
+    //   env(DM_SHORT_LINK_BASE) 미설정 = 기존 긴 뷰어 URL 그대로 (무결 최우선).
+    const pubShortBase = String(process.env.DM_SHORT_LINK_BASE || '').trim().replace(/\/+$/, '');
     return res.json({
       short_code: result.short_code,
-      // ★ 2026-06-22: hanjul-flyer.kr는 한줄전단 제품 도메인 — 한줄로 DM은 거기서 "전단지를 찾을 수 없"으로 404.
-      //   동작하는 한줄로 viewer(테스트발송 링크와 동일 베이스 /api/dm/v)로 발행. getDmByCode가 dm- 접두사 제거해 조회.
-      short_url: `${process.env.HANJUL_BASE_URL || 'https://hanjul.ai'}/api/dm/v/dm-${result.short_code}`,
+      short_url: pubShortBase
+        ? `${pubShortBase}/${result.short_code}`
+        : `${process.env.HANJUL_BASE_URL || 'https://hanjul.ai'}/api/dm/v/dm-${result.short_code}`,
     });
   } catch (err: any) {
     if (err instanceof InsufficientCreditError) {
@@ -491,7 +495,7 @@ dmRouter.post('/ai/one-shot-generate', async (req: any, res: any) => {
     const genCost = getCreditCost('dm-ai-generate');  // 3
     await checkCredit(companyId, genCost);
     const result = await runInCreditBundle(async () => {
-      const r = await oneShotGenerate({ prompt: effectivePrompt, scenario, brandName, companyId });
+      const r = await oneShotGenerate({ prompt: effectivePrompt, scenario, brandName, companyId, eventText });
       await deductCreditSafe({ companyId, cost: genCost, source: 'dm-ai-generate', createdBy: req.user?.userId });
       return r;
     });
@@ -1087,8 +1091,17 @@ dmRouter.post('/:id/generate-copy', async (req: any, res: any) => {
         case 'coupon': if (p.discount_label) dmLines.push(`쿠폰: ${p.discount_label}${p.coupon_code ? ` (코드 ${p.coupon_code})` : ''}`); break;
         case 'instant_coupon': if (p.coupon_label) dmLines.push(`즉시쿠폰: ${p.coupon_label} ${p.discount_description || ''}`.trim()); break;
         case 'product_carousel': {
-          const names = (Array.isArray(p.products) ? p.products : []).map((x: any) => x?.name).filter(Boolean).slice(0, 5).join(', ');
-          if (names) dmLines.push(`상품: ${names}`);
+          // ★ 2026-07-08 가격 동반 요약 — 문안 규칙이 "요약에 적힌 표현만 인용"이라 가격이 여기 있어야 문안에 들어간다
+          const items = (Array.isArray(p.products) ? p.products : []).slice(0, 5).map((x: any) => {
+            const nm = String(x?.name || '').trim();
+            if (!nm) return '';
+            const price = Number(x?.price || 0);
+            const dis = Number(x?.discount_price || 0);
+            if (price > 0 && dis > 0 && dis < price) return `${nm} ${price.toLocaleString('ko-KR')}원 → ${dis.toLocaleString('ko-KR')}원`;
+            const fp = dis > 0 ? dis : price;
+            return fp > 0 ? `${nm} ${fp.toLocaleString('ko-KR')}원` : nm;
+          }).filter(Boolean);
+          if (items.length) dmLines.push(`상품: ${items.join(' / ')}`);
           break;
         }
         case 'countdown': if (p.urgency_text) dmLines.push(`마감 안내: ${p.urgency_text}`); break;
@@ -1118,6 +1131,8 @@ dmRouter.post('/:id/generate-copy', async (req: any, res: any) => {
 - 반드시 %DM링크% 를 문안 안 자연스러운 위치에 1회 포함(수신자별 개인화 링크가 여기 들어갑니다).
 - 혜택·쿠폰·이벤트는 [DM 페이지 편집 내용]에 실제 적힌 표현만 그대로 인용 — 거기 없는 혜택(%/원/쿠폰/무료/할인/사은품/적립) 임의 창작 절대 금지.
 - 지금은 ${monthLabel}(${seasonHint}) — 계절감과 시기 감성을 가벼운 수식·인사로 자연스럽게 녹여 카피를 풍성하게. 단 시즌 묘사는 일반적 사실만, 통계·행사 등 구체 사실 지어내기 금지.
+- [DM 페이지 편집 내용]에 상품 가격이 있으면 대표 상품 1~3개를 "정가 → 할인가" 형식 그대로 본문에 담아라(전 상품 나열로 장황해지지 않게).
+- 구분선은 하이픈 10개(----------)를 초과 금지 — 긴 대시/등호/특수문자 줄은 휴대폰에서 두 줄로 꺾여 보인다.
 ${lengthRule}
 - 유니코드 이모지 금지(SMS 호환).
 - 개인화는 %고객명% 등 명시된 변수만 사용.
@@ -1150,6 +1165,8 @@ ${lengthRule}
     // ★ 2026-07-02: AI가 문안에 넣은 (광고)/무료수신거부(임의 번호 포함) 제거 —
     //   080 문구는 발송 시점에 buildAdMessage가 설정된 번호로 합성한다.
     msg = stripAdPartsDeep(msg);
+    // ★ 2026-07-08 긴 구분선 줄 정규화 — 기기 화면 폭에서 두 줄로 꺾이는 것 차단 (CT-messageUtils)
+    msg = normalizeSmsSeparatorLines(msg);
     if (!msg) return res.status(500).json({ error: '문안 생성 결과가 비어 있습니다. 다시 시도해주세요.' });
     if (!msg.includes('%DM링크%')) msg = `${msg}\n%DM링크%`;
     return res.json({ success: true, message: msg });

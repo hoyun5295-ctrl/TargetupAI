@@ -135,7 +135,16 @@ export async function lookupDmShortLink(code: string): Promise<{ token: string; 
       LIMIT 1`,
     [c],
   );
-  if (r.rows.length === 0 || !r.rows[0].dm_code) return null;
+  if (r.rows.length === 0 || !r.rows[0].dm_code) {
+    // ★ 2026-07-08 발행(공용) 단축링크 폴백 — hlj.kr/<dm_pages.short_code> 진입 시 토큰 없이 공용 렌더로.
+    //   (발행 모달 복사 URL용. 수신자 개인화 코드가 항상 우선 매치 — 기존 발송 링크 동작 무변경)
+    const d = await query(
+      `SELECT short_code FROM dm_pages WHERE short_code = $1 LIMIT 1`,
+      [c],
+    );
+    if (d.rows.length === 0 || !d.rows[0].short_code) return null;
+    return { token: '', dmCode: String(d.rows[0].short_code), expired: true };
+  }
   const row = r.rows[0];
   const expired = !!row.expires_at && new Date(row.expires_at).getTime() <= Date.now();
   return { token: String(row.token), dmCode: String(row.dm_code), expired };

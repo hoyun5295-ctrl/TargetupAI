@@ -14,6 +14,8 @@
 import { callAIWithFallback } from '../../services/ai';
 // ★ 2026-07-03 DM 문안두뇌 주입 (전 채널 학습 통합 Phase 1c) — 회사 성과 DM 문안 RAG + 브랜드 키트
 import { composeCopyBrain } from '../copy-prompt-composer';
+// ★ 2026-07-08 행사 원문 상품 구조 추출 — 원문 실존 검증(환각 가격 차단) 공용 CT
+import { validateProductsAgainstEventText, type ExtractedEventProduct } from '../event-brief';
 import {
   SECTION_META, SECTION_DEFAULTS, type Section, type SectionType,
   createSection,
@@ -563,6 +565,46 @@ export interface OneShotResult {
   pages: Section[][];
 }
 
+// ────────────── 행사 원문 상품 구조 추출 (2026-07-08) ──────────────
+
+const PRODUCT_EXTRACT_SYSTEM = `당신은 행사 원문에서 상품 정보를 구조화하는 파서입니다.
+원문에 명시된 상품만 추출합니다. 원문에 없는 상품·가격·할인 창작 절대 금지.
+
+규칙:
+- name = 상품명 (원문 표기 그대로, 앞뒤 라벨 정리만 허용)
+- price = 정가 (원문 숫자 그대로, 콤마 제거한 정수)
+- discount_price = 할인가 (원문에 있을 때만), discount_rate = 할인율 % (원문에 있을 때만)
+- 가격이 하나만 적힌 상품은 price에 넣고 discount_price 생략
+- 가격이 전혀 없는 상품·상품이 없는 원문 = 빈 배열
+
+JSON만 출력:
+{ "products": [{ "name": "상품명", "price": 0, "discount_price": 0, "discount_rate": 0 }] }`;
+
+/**
+ * 행사 원문 → 상품 목록 추출 + 원문 실존 기계 검증(validateProductsAgainstEventText).
+ * 검증 탈락/파싱 실패 = 빈 배열 (호출부는 placeholder 유지 — 생성 흐름 무영향).
+ */
+export async function extractEventProducts(sourceText: string, companyId?: string): Promise<ExtractedEventProduct[]> {
+  const text = String(sourceText || '').trim();
+  if (!text) return [];
+  try {
+    const raw = await callAIWithFallback({
+      system: PRODUCT_EXTRACT_SYSTEM,
+      userMessage: `[행사 원문]\n${text.slice(0, 3000)}\n\n위 원문에서 상품 목록을 JSON으로 추출하세요.`,
+      maxTokens: 1500,
+      temperature: 0,
+      model: 'sonnet',
+      companyId,
+      source: 'dm-product-extract', // 종량제: 맵 미등록=0 — dm-ai-generate 묶음 안 집계만
+    });
+    const parsed = extractJson<{ products?: unknown[] }>(raw);
+    return validateProductsAgainstEventText(parsed?.products, text);
+  } catch (err) {
+    console.warn('[extractEventProducts] 추출 실패 — 빈 배열 폴백:', (err as any)?.message);
+    return [];
+  }
+}
+
 /**
  * 자연어 한 줄 OR 시나리오명 → 완성된 sections[] + brandKit 통합 생성.
  *
@@ -578,6 +620,7 @@ export async function oneShotGenerate(opts: {
   scenario?: string;
   brandName?: string;
   companyId?: string; // ★ D227+ 종량제: 묶음 집계용 — 내부 parse/copy에 전파
+  eventText?: string; // ★ 2026-07-08 행사 원문 — product_carousel 상품 구조 추출 근거(없으면 prompt로 폴백)
 }): Promise<OneShotResult> {
   const prompt = (opts.prompt || '').trim();
   if (!prompt && !opts.scenario) {
@@ -642,6 +685,24 @@ export async function oneShotGenerate(opts: {
 
     applyInteractionDefaults(section);
     sections.push(section);
+  }
+
+  // ★ 2026-07-08 행사 원문 상품 구조 반영 — 첫 product_carousel.products에 원문 실존 검증 통과분 주입.
+  //   추출 실패/검증 탈락 = placeholder 유지(기존 흐름 무영향). 이미지는 직접 업로드(image_url '').
+  const productSource = (opts.eventText || '').trim() || prompt;
+  const carouselIdx = sections.findIndex((s) => s.type === 'product_carousel');
+  if (carouselIdx >= 0 && productSource) {
+    const extracted = await extractEventProducts(productSource, opts.companyId);
+    if (extracted.length > 0) {
+      (sections[carouselIdx].props as any).products = extracted.map((p) => ({
+        id: randomUUID(),
+        image_url: '',
+        name: p.name,
+        price: p.price,
+        ...(p.discount_price ? { discount_price: p.discount_price } : {}),
+        ...(p.discount_rate ? { discount_rate: p.discount_rate } : {}),
+      }));
+    }
   }
 
   // ★ AI 비주얼 디렉터 — 캠페인별 색·무드·강조 + 섹션 구도(treatment)를 설계해 섹션에 입힘(사진 없어도 완성형).
