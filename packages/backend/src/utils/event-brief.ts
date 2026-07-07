@@ -47,20 +47,25 @@ export interface ExtractedEventProduct {
 export function validateProductsAgainstEventText(products: any, eventText: any): ExtractedEventProduct[] {
   const src = String(eventText ?? '').toLowerCase().replace(/[\s,]+/g, '');
   if (!src || !Array.isArray(products)) return [];
+  // 숫자 실존 검증용 원문 — 숫자 사이 콤마만 제거(공백 유지). 공백까지 지우면 "상품1 1000"이
+  // "상품11000"으로 붙어 경계 검사가 정상 가격을 오탐 탈락시킨다.
+  const srcNum = String(eventText ?? '').toLowerCase().replace(/(\d),(?=\d)/g, '$1');
+  // 숫자 경계 실존 검증 — 부분 문자열 우회 차단 (예: 환각 34000이 원문 134,000 안에서 매치되는 것 방지)
+  const numExists = (n: number, suffix = '') => new RegExp(`(?<!\\d)${n}${suffix}(?!\\d)`).test(srcNum);
   const out: ExtractedEventProduct[] = [];
   for (const raw of products) {
     if (!raw || typeof raw !== 'object') continue;
     const name = String((raw as any).name ?? '').trim().slice(0, 80);
     const price = Math.round(Number((raw as any).price));
     if (!name || !Number.isFinite(price) || price <= 0) continue;
-    // 가격 실존 검증 (콤마 제거 원문 안 숫자 그대로)
-    if (!src.includes(String(price))) continue;
+    // 가격 실존 검증 (콤마 제거 원문 안 숫자 그대로 — 경계 매치)
+    if (!numExists(price)) continue;
     let discountPrice: number | undefined = Math.round(Number((raw as any).discount_price));
-    if (!Number.isFinite(discountPrice) || discountPrice! <= 0 || discountPrice! >= price || !src.includes(String(discountPrice))) {
+    if (!Number.isFinite(discountPrice) || discountPrice! <= 0 || discountPrice! >= price || !numExists(discountPrice!)) {
       discountPrice = undefined;
     }
     let discountRate: number | undefined = Math.round(Number((raw as any).discount_rate));
-    if (!Number.isFinite(discountRate) || discountRate! <= 0 || discountRate! >= 100 || !src.includes(`${discountRate}%`)) {
+    if (!Number.isFinite(discountRate) || discountRate! <= 0 || discountRate! >= 100 || !numExists(discountRate!, '%')) {
       discountRate = undefined;
     }
     // 상품명 토큰 절반 이상 실존 (2자 이상 토큰 기준)

@@ -88,6 +88,20 @@ describe('validateProductsAgainstEventText', () => {
     expect(out[0].discount_rate).toBeUndefined();
   });
 
+  it('부분 문자열 우회 차단 — 원문 숫자 일부와 겹치는 환각 가격 = 탈락', () => {
+    // 134,000 안의 "34000" / 54,400 안의 "4400" — 경계 매치라 탈락해야 한다
+    expect(validateProductsAgainstEventText(
+      [{ name: '시세이도 NEW 파란자차 세트', price: 34000 }],
+      EVENT,
+    )).toHaveLength(0);
+    const out = validateProductsAgainstEventText(
+      [{ name: '시세이도 싱크로 스킨 글로우 쿠션 컴팩트 세트', price: 64000, discount_price: 4400 }],
+      EVENT,
+    );
+    expect(out).toHaveLength(1);
+    expect(out[0].discount_price).toBeUndefined();
+  });
+
   it('상품명이 원문과 무관 = 탈락', () => {
     const out = validateProductsAgainstEventText(
       [{ name: '나이키 운동화 에어맥스', price: 85000 }],
