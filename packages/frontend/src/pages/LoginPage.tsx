@@ -38,6 +38,16 @@ export default function LoginPage() {
   const [showForceLogoutModal, setShowForceLogoutModal] = useState(false);
   const [forceLogoutMessage, setForceLogoutMessage] = useState('');
 
+  // 서비스 이용신청 문의 모달 (비로그인 방문자용 — 공개 endpoint /api/companies/inquiry 재사용)
+  const [showInquiryModal, setShowInquiryModal] = useState(false);
+  const [inquiryForm, setInquiryForm] = useState({
+    companyName: '', contactName: '', phone: '', email: '', subject: '', message: '',
+  });
+  const [inquirySubmitting, setInquirySubmitting] = useState(false);
+  const [inquiryError, setInquiryError] = useState('');
+  const [inquirySuccess, setInquirySuccess] = useState(false);
+  const [inquiryHoneypot, setInquiryHoneypot] = useState('');
+
   // 발송 중 차단 모달
   const [showSendingBlockModal, setShowSendingBlockModal] = useState(false);
   const [sendingBlockMessage, setSendingBlockMessage] = useState('');
@@ -192,6 +202,58 @@ export default function LoginPage() {
   // ===== 모달들 =====
 
   // 강제 로그아웃 모달 (다른 곳에서 로그인)
+  const openInquiry = () => {
+    setInquiryError('');
+    setInquirySuccess(false);
+    setShowInquiryModal(true);
+  };
+
+  const closeInquiry = () => {
+    setShowInquiryModal(false);
+  };
+
+  const handleInquirySubmit = async () => {
+    // 허니팟(봇 차단) — 사용자 비노출 필드가 채워지면 조용히 종료
+    if (inquiryHoneypot) { setShowInquiryModal(false); return; }
+    const f = inquiryForm;
+    if (!f.contactName.trim() || !f.phone.trim() || !f.email.trim() || !f.subject.trim() || !f.message.trim()) {
+      setInquiryError('담당자명, 연락처, 이메일, 제목, 문의 내용을 모두 입력해주세요.');
+      return;
+    }
+    const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailPattern.test(f.email.trim())) {
+      setInquiryError('이메일 형식을 확인해주세요.');
+      return;
+    }
+    setInquirySubmitting(true);
+    setInquiryError('');
+    try {
+      const res = await fetch('/api/companies/inquiry', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          companyName: f.companyName.trim(),
+          contactName: f.contactName.trim(),
+          phone: f.phone.trim(),
+          email: f.email.trim(),
+          subject: f.subject.trim(),
+          message: f.message.trim(),
+        }),
+      });
+      const data = await res.json().catch(() => ({} as any));
+      if (res.ok) {
+        setInquirySuccess(true);
+        setInquiryForm({ companyName: '', contactName: '', phone: '', email: '', subject: '', message: '' });
+      } else {
+        setInquiryError((data && data.error) || '문의 전송에 실패했습니다. 잠시 후 다시 시도해주세요.');
+      }
+    } catch {
+      setInquiryError('문의 전송 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요.');
+    } finally {
+      setInquirySubmitting(false);
+    }
+  };
+
   const forceLogoutModal = showForceLogoutModal && (
     <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-[fadeIn_0.2s_ease-out]">
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden animate-[zoomIn_0.25s_ease-out]">
@@ -351,6 +413,98 @@ export default function LoginPage() {
     </div>
   );
 
+  // 서비스 이용신청 문의 모달
+  const inquiryModal = showInquiryModal && (
+    <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-[fadeIn_0.2s_ease-out]">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden animate-[zoomIn_0.25s_ease-out] max-h-[92vh] flex flex-col">
+        {/* 헤더 */}
+        <div className="relative bg-gradient-to-br from-emerald-600 via-teal-600 to-blue-700 px-6 py-5 flex-shrink-0">
+          <button type="button" onClick={closeInquiry} aria-label="닫기"
+            className="absolute top-4 right-4 w-8 h-8 flex items-center justify-center rounded-lg text-white/80 hover:text-white hover:bg-white/15 transition">
+            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+          </button>
+          <h3 className="text-lg font-bold text-white">서비스 이용신청 문의</h3>
+          <p className="text-sm text-white/80 mt-1">도입 상담을 남겨주시면 담당자가 빠르게 연락드립니다.</p>
+        </div>
+
+        {inquirySuccess ? (
+          <div className="px-6 py-10 text-center">
+            <div className="w-14 h-14 bg-emerald-100 rounded-full flex items-center justify-center mx-auto mb-4">
+              <svg className="w-7 h-7 text-emerald-600" fill="none" viewBox="0 0 24 24" strokeWidth={2.2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" /></svg>
+            </div>
+            <h4 className="text-lg font-bold text-gray-900">문의가 접수되었습니다</h4>
+            <p className="text-sm text-gray-500 mt-2 leading-relaxed">담당자가 확인 후 빠르게 연락드리겠습니다.<br />감사합니다.</p>
+            <button type="button" onClick={closeInquiry}
+              className="mt-6 w-full bg-emerald-600 hover:bg-emerald-700 text-white font-semibold py-2.5 rounded-xl text-sm transition-colors">
+              확인
+            </button>
+          </div>
+        ) : (
+          <div className="px-6 py-5 overflow-y-auto">
+            {/* 허니팟(봇 차단) — 사용자 비노출 */}
+            <input type="text" value={inquiryHoneypot} onChange={(e) => setInquiryHoneypot(e.target.value)}
+              tabIndex={-1} autoComplete="off" aria-hidden="true"
+              className="absolute -left-[9999px] w-px h-px opacity-0" />
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1.5">회사명</label>
+                <input value={inquiryForm.companyName} onChange={(e) => setInquiryForm(f => ({ ...f, companyName: e.target.value }))}
+                  className="w-full px-3.5 py-2.5 border border-gray-300 rounded-xl text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition bg-white"
+                  placeholder="회사명 (선택)" />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1.5">담당자명 <span className="text-emerald-600">*</span></label>
+                <input value={inquiryForm.contactName} onChange={(e) => setInquiryForm(f => ({ ...f, contactName: e.target.value }))}
+                  className="w-full px-3.5 py-2.5 border border-gray-300 rounded-xl text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition bg-white"
+                  placeholder="이름" />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1.5">연락처 <span className="text-emerald-600">*</span></label>
+                <input value={inquiryForm.phone} onChange={(e) => setInquiryForm(f => ({ ...f, phone: e.target.value }))}
+                  className="w-full px-3.5 py-2.5 border border-gray-300 rounded-xl text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition bg-white"
+                  placeholder="010-0000-0000" />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1.5">이메일 <span className="text-emerald-600">*</span></label>
+                <input type="email" value={inquiryForm.email} onChange={(e) => setInquiryForm(f => ({ ...f, email: e.target.value }))}
+                  className="w-full px-3.5 py-2.5 border border-gray-300 rounded-xl text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition bg-white"
+                  placeholder="name@company.com" />
+              </div>
+            </div>
+
+            <div className="mt-3">
+              <label className="block text-xs font-medium text-gray-500 mb-1.5">문의 제목 <span className="text-emerald-600">*</span></label>
+              <input value={inquiryForm.subject} onChange={(e) => setInquiryForm(f => ({ ...f, subject: e.target.value }))}
+                className="w-full px-3.5 py-2.5 border border-gray-300 rounded-xl text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition bg-white"
+                placeholder="예) 도입 상담 및 견적 문의" />
+            </div>
+
+            <div className="mt-3">
+              <label className="block text-xs font-medium text-gray-500 mb-1.5">문의 내용 <span className="text-emerald-600">*</span></label>
+              <textarea value={inquiryForm.message} onChange={(e) => setInquiryForm(f => ({ ...f, message: e.target.value }))}
+                rows={4}
+                className="w-full px-3.5 py-2.5 border border-gray-300 rounded-xl text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition bg-white resize-none"
+                placeholder="문의하실 내용을 자유롭게 작성해주세요." />
+            </div>
+
+            {inquiryError && (
+              <div className="mt-3 bg-red-50 border border-red-200 rounded-xl px-4 py-2.5">
+                <p className="text-sm text-red-600">{inquiryError}</p>
+              </div>
+            )}
+
+            <button type="button" onClick={handleInquirySubmit} disabled={inquirySubmitting}
+              className="mt-5 w-full bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-semibold py-3 rounded-xl text-sm transition-colors">
+              {inquirySubmitting ? '전송 중...' : '문의 전송'}
+            </button>
+            <p className="mt-3 text-center text-[11px] text-gray-400">문의 내용은 담당자 이메일로 전달됩니다.</p>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+
   return (
     <div className="min-h-screen flex">
       {/* 좌측: 브랜드 패널 (슈퍼관리자는 다크, 고객사는 그린 그라데이션) */}
@@ -375,13 +529,20 @@ export default function LoginPage() {
               <>AI 타겟 분석부터 캠페인 발송까지<br/>기업형 비즈메세징을 한번에</>
             )}
           </p>
-          {/* 비로그인 방문자용 서비스 소개 (공개 정적 페이지) — 고객사 로그인 화면에만 */}
+          {/* 비로그인 방문자용 서비스 소개 + 이용신청 문의 — 고객사 로그인 화면에만 */}
           {!isSuperAdminOnly && (
-            <a href="/about-ai-operator.html" target="_blank" rel="noopener"
-              className="inline-flex items-center gap-1.5 mt-6 text-sm font-medium text-white/90 hover:text-white border border-white/25 hover:border-white/50 rounded-full px-4 py-2 transition">
-              서비스 소개 보기
-              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" strokeWidth={2.2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M13.5 4.5L21 12m0 0l-7.5 7.5M21 12H3" /></svg>
-            </a>
+            <div className="mt-6 flex flex-col items-start gap-3">
+              <a href="/about-ai-operator.html" target="_blank" rel="noopener"
+                className="inline-flex items-center gap-1.5 text-sm font-medium text-white/90 hover:text-white border border-white/25 hover:border-white/50 rounded-full px-4 py-2 transition">
+                서비스 소개 보기
+                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" strokeWidth={2.2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M13.5 4.5L21 12m0 0l-7.5 7.5M21 12H3" /></svg>
+              </a>
+              <button type="button" onClick={openInquiry}
+                className="inline-flex items-center gap-1.5 text-sm font-semibold text-emerald-700 bg-white hover:bg-white/90 rounded-full px-4 py-2 shadow-sm transition">
+                서비스 이용신청 문의
+                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" strokeWidth={2.2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M13.5 4.5L21 12m0 0l-7.5 7.5M21 12H3" /></svg>
+              </button>
+            </div>
           )}
         </div>
 
@@ -464,12 +625,19 @@ export default function LoginPage() {
             </form>
 
             {!isSuperAdminOnly && (
-              <div className="mt-6 text-center">
+              <div className="mt-6 text-center space-y-2.5">
                 <a href="/about-ai-operator.html" target="_blank" rel="noopener"
                   className="inline-flex items-center gap-1 text-sm font-medium text-emerald-600 hover:text-emerald-700 transition">
                   한줄로가 처음이신가요? 서비스 소개 보기
                   <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" strokeWidth={2.2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M13.5 4.5L21 12m0 0l-7.5 7.5M21 12H3" /></svg>
                 </a>
+                <div>
+                  <button type="button" onClick={openInquiry}
+                    className="inline-flex items-center justify-center gap-1.5 w-full text-sm font-semibold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded-xl px-4 py-2.5 transition">
+                    서비스 이용신청 문의
+                    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" strokeWidth={2.2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M13.5 4.5L21 12m0 0l-7.5 7.5M21 12H3" /></svg>
+                  </button>
+                </div>
               </div>
             )}
 
@@ -497,6 +665,7 @@ export default function LoginPage() {
       {sendingBlockModalEl}
       {passwordModal}
       {enrollmentModal}
+      {inquiryModal}
     </div>
   );
 }
