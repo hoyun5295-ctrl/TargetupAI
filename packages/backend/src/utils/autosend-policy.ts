@@ -265,7 +265,8 @@ export function applyBenefitToBody(body: string, benefit: string | null | undefi
   const b = String(body || '');
   const v = String(benefit || '').trim();
   if (!v) return b;
-  return b.replace(/\[혜택[^\]]*\]/g, v);
+  // 치환값은 함수로 — 문자열 치환은 $&·$$ 같은 특수 패턴을 해석해 관리자 입력에 $가 있으면 본문이 조용히 손상된다.
+  return b.replace(/\[혜택[^\]]*\]/g, () => v);
 }
 
 /**

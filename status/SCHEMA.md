@@ -1238,6 +1238,7 @@
 | opt_out_080_number | varchar(20) | 나래인터넷 080 수신거부번호 (080-XXX-XXXX). 콜백 매칭용 |
 | opt_out_auto_sync | boolean | 080 수신거부 자동연동 활성화 여부 (default: false). 나래 사용 업체만 ON |
 | manager_contacts | jsonb | D91: 사용자별 담당자 사전수신 정보 (브랜드별 격리). companies.manager_contacts 대신 우선 사용 |
+| is_system | boolean | 싱크에이전트 등 시스템 가상 계정 표식 — 사용자 수 집계·담당자 선정에서 제외(COALESCE(is_system,false)=false 관례, admin.ts:94·billing.ts:533 실사용. 2026-07-07 문서 누락 보강) |
 | created_at | timestamp |
 | updated_at | timestamp |
 | last_login_at | timestamp |

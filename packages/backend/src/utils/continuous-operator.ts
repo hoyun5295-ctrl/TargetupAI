@@ -1577,8 +1577,9 @@ export async function notifyOperatorAdmins(
     try {
       const fb = await query(
         `SELECT phone FROM users
-          WHERE ($1::uuid IS NOT NULL AND id = $1::uuid)
-             OR (company_id = $2::uuid AND user_type = 'company_admin')
+          WHERE (($1::uuid IS NOT NULL AND id = $1::uuid)
+             OR (company_id = $2::uuid AND user_type = 'company_admin'))
+            AND is_active = true AND COALESCE(is_system, false) = false
           ORDER BY (id = $1::uuid) DESC, id ASC`,
         [operator.createdBy || null, operator.companyId],
       );

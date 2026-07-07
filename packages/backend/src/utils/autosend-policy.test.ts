@@ -314,6 +314,12 @@ describe('applyBenefitToBody — 혜택 placeholder 치환 (생성·발송 두 �
     expect(applyBenefitToBody(src, null)).toBe(src);
     expect(applyBenefitToBody(src, '   ')).toBe(src);
   });
+
+  it('혜택 값에 $ 특수 패턴($&·$$)이 있어도 문자 그대로 들어간다 (replace 특수 패턴 미해석)', async () => {
+    const { applyBenefitToBody } = await import('./autosend-policy');
+    expect(applyBenefitToBody('본문 [혜택 내용을 입력해주세요] 끝', '커피 $5 & $& 할인 $$'))
+      .toBe('본문 커피 $5 & $& 할인 $$ 끝');
+  });
 });
 
 describe('hasUneditedBenefitPlaceholder — 발송 출구 가드 검출', () => {
