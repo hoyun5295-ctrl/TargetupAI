@@ -21,12 +21,26 @@
 
 import { resolveTheme, withAlpha, type InAppTheme } from './inapp-theme';
 import {
-  renderBlocks, planCardLayout, renderPosterHero, renderTicketPerforation, normalizeCardStyle,
+  renderBlocks, planCardLayout, renderPosterHero, renderTicketPerforation, renderBubbleSender, normalizeCardStyle,
   type ContentBlock, type BlockRenderContext, type CardStyle,
 } from './inapp-blocks';
 
 // 2026-07-07 디자인 2.0 — Pretendard 우선(호스트 몰에 있으면 사용, 없으면 시스템 한글 폴백. 외부 로드 0)
 const INAPP_FONT_STACK = '"Pretendard Variable", Pretendard, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Apple SD Gothic Neo", "Malgun Gothic", sans-serif';
+
+// ★ 2026-07-07(5) 형태 골격 — ticket(본권/스터브 2톤)·poster(풀블리드 히어로) 존 분할 시
+//   컨테이너 패딩을 0으로 두고 구간별 존이 패딩을 소유한다. 관리자 미리보기와 값 미러.
+const ZONE_PADS: Record<string, { main: string; stub: string; body: string }> = {
+  center_modal: { main: '26px 26px 18px', stub: '16px 26px 22px', body: '20px 26px 26px' },
+  slide_in: { main: '20px 20px 14px', stub: '13px 20px 18px', body: '16px 20px 20px' },
+  inline_card: { main: '22px 22px 16px', stub: '14px 22px 20px', body: '18px 22px 22px' },
+};
+
+function makeZone(pad: string): HTMLDivElement {
+  const z = document.createElement('div');
+  Object.assign(z.style, { display: 'flex', flexDirection: 'column', gap: '13px', padding: pad, minWidth: '0', boxSizing: 'border-box' });
+  return z;
+}
 
 // ════════════════════════════════════════════════════════════════════
 // 타입
@@ -864,12 +878,21 @@ export class HanjulloInAppModule {
       return;
     }
 
-    const c = this.makeContainer(msg, template, theme, input, cardStyle);
+    // ★ 2026-07-07(5) 형태 골격 — 배치 계획을 컨테이너 생성 전에 확정 (존 분할 여부 = 컨테이너 패딩 0)
+    const plan = planCardLayout(blocks, cardStyle);
+    const zonePads = ZONE_PADS[template];
+    const zoned = !!zonePads && (
+      (cardStyle === 'poster' && (!!plan.hero || plan.overlay.length > 0)) ||
+      (cardStyle === 'ticket' && plan.stub.length > 0)
+    );
+
+    const c = this.makeContainer(msg, template, theme, input, cardStyle, zoned);
     if (!c.mounted) return;
 
     const ctx: BlockRenderContext = {
       theme,
       template,
+      cardStyle,
       replaceVars: (t) => this.replaceVariables(t, customer),
       absoluteImageUrl: (u) => this.toAbsoluteImageUrl(u),
       onButtonClick: (buttonId, actionUrl) => {
@@ -881,17 +904,40 @@ export class HanjulloInAppModule {
       isAd,
     };
 
-    // 형태별 배치 — poster: 히어로+겹침 텍스트 / ticket: 절취선+스터브 / 그 외: 순차 렌더
-    const plan = planCardLayout(blocks, cardStyle);
+    // 형태별 골격 — poster: 풀블리드 히어로+본문 존 / ticket: 2톤(본권/스터브) / bubble: 발신자 행+답장 칩 / classic: 순차 렌더
     if (cardStyle === 'poster' && (plan.hero || plan.overlay.length > 0)) {
-      const hero = renderPosterHero(plan, ctx);
+      const hero = renderPosterHero(plan, ctx, zoned);
       if (hero) c.contentRoot.appendChild(hero);
-      renderBlocks(c.contentRoot, plan.main, ctx);
+      if (zoned) {
+        const bodyZone = makeZone(zonePads.body);
+        renderBlocks(bodyZone, plan.main, ctx);
+        c.contentRoot.appendChild(bodyZone);
+      } else {
+        renderBlocks(c.contentRoot, plan.main, ctx);
+      }
     } else if (cardStyle === 'ticket' && plan.stub.length > 0) {
       // (광고) 자동 표기는 마지막 구간에서만 (이중 주입 방지)
-      renderBlocks(c.contentRoot, plan.main, { ...ctx, isAd: false });
-      c.contentRoot.appendChild(renderTicketPerforation(theme));
-      renderBlocks(c.contentRoot, plan.stub, ctx);
+      if (zoned) {
+        const mainZone = makeZone(zonePads.main);
+        renderBlocks(mainZone, plan.main, { ...ctx, isAd: false });
+        c.contentRoot.appendChild(mainZone);
+        // 스터브 = accent 워시 2톤 (절취선부터 카드 하단까지)
+        const stubWrap = document.createElement('div');
+        stubWrap.style.background = withAlpha(theme.accent, 0.06);
+        stubWrap.appendChild(renderTicketPerforation(theme, true));
+        const stubZone = makeZone(zonePads.stub);
+        renderBlocks(stubZone, plan.stub, ctx);
+        stubWrap.appendChild(stubZone);
+        c.contentRoot.appendChild(stubWrap);
+      } else {
+        renderBlocks(c.contentRoot, plan.main, { ...ctx, isAd: false });
+        c.contentRoot.appendChild(renderTicketPerforation(theme));
+        renderBlocks(c.contentRoot, plan.stub, ctx);
+      }
+    } else if (cardStyle === 'bubble' && plan.sender) {
+      const senderRow = renderBubbleSender(plan.sender, ctx);
+      if (senderRow) c.contentRoot.appendChild(senderRow);
+      renderBlocks(c.contentRoot, plan.main, ctx);
     } else {
       renderBlocks(c.contentRoot, blocks, ctx);
     }
@@ -908,8 +954,9 @@ export class HanjulloInAppModule {
     if (autoDismissSec && autoDismissSec > 0) this.setupAutoDismiss(c.dismissTarget, autoDismissSec);
   }
 
-  /** 템플릿별 컨테이너(위치·면·모서리·그림자)를 테마 토큰으로 생성 + DOM 마운트. blocks는 contentRoot에. */
-  private makeContainer(msg: InAppMessageSdk, template: InAppTemplate, theme: InAppTheme, input: InAppInitInput, cardStyle: CardStyle = 'classic') {
+  /** 템플릿별 컨테이너(위치·면·모서리·그림자)를 테마 토큰으로 생성 + DOM 마운트. blocks는 contentRoot에.
+   *  ★ 2026-07-07(5) zoned=true(ticket 2톤/poster 풀블리드) — 패딩을 존이 소유하도록 컨테이너 패딩 0 + 모서리 클립. */
+  private makeContainer(msg: InAppMessageSdk, template: InAppTemplate, theme: InAppTheme, input: InAppInitInput, cardStyle: CardStyle = 'classic', zoned = false) {
     const card = document.createElement('div');
     card.setAttribute('data-hanjullo-msg', msg.id);
     const baseCard: Record<string, string> = {
@@ -968,7 +1015,7 @@ export class HanjulloInAppModule {
         Object.assign(card.style, { borderRadius: bubbleRadius('bl'), overflow: 'visible' });
         attachBubbleTail(card, 'left');
       }
-      Object.assign(content.style, { padding: '28px 26px 26px' });
+      Object.assign(content.style, zoned ? { padding: '0', gap: '0' } : { padding: '28px 26px 26px' });
       card.appendChild(content);
       backdrop.appendChild(card);
       document.body.appendChild(backdrop);
@@ -1002,9 +1049,11 @@ export class HanjulloInAppModule {
       Object.assign(card.style, baseCard, {
         position: 'fixed', right: '20px', bottom: 'calc(20px + env(safe-area-inset-bottom, 0px))',
         maxWidth: '360px', width: 'calc(100vw - 40px)',
-        borderRadius: `${theme.radius}px`, padding: '22px', boxShadow: cardShadow,
+        borderRadius: `${theme.radius}px`, padding: zoned ? '0' : '22px', boxShadow: cardShadow,
         border: `1px solid ${theme.border}`,
+        ...(zoned ? { overflow: 'hidden' } : {}),
       });
+      if (zoned) content.style.gap = '0';
       if (bubble) {
         Object.assign(card.style, { borderRadius: bubbleRadius('br') });
         attachBubbleTail(card, 'right');
@@ -1041,10 +1090,12 @@ export class HanjulloInAppModule {
         return { contentRoot: content, animationTarget: card, dismissTarget: card, closeTarget: card, remove: () => {}, showClose: false, closeLayout: 'inline' as const, motionContext: 'fade', mounted: false };
       }
       Object.assign(card.style, baseCard, {
-        borderRadius: `${theme.radius}px`, padding: '24px', margin: '16px 0',
+        borderRadius: `${theme.radius}px`, padding: zoned ? '0' : '24px', margin: '16px 0',
         boxShadow: cardShadow, border: `1px solid ${theme.border}`,
+        ...(zoned ? { overflow: 'hidden' } : {}),
         ...(bubble ? { borderRadius: bubbleRadius('bl'), position: 'relative' } : {}),
       });
+      if (zoned) content.style.gap = '0';
       if (bubble) attachBubbleTail(card, 'left');
       card.appendChild(content);
       container.appendChild(card);

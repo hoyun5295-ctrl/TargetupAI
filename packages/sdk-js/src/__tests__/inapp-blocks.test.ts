@@ -1,8 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { resolveTheme, pickReadableText, relativeLuminance, isHexColor } from '../inapp-theme';
 import {
-  renderBlocks, isBlockAllowed, normalizeCardStyle, planCardLayout, renderPosterHero, renderTicketPerforation,
-  type BlockRenderContext, type ContentBlock,
+  renderBlocks, isBlockAllowed, normalizeCardStyle, planCardLayout, renderPosterHero, renderTicketPerforation, renderBubbleSender,
+  type BlockRenderContext, type ContentBlock, type CardStyle,
 } from '../inapp-blocks';
 
 /**
@@ -363,6 +363,88 @@ describe('카드 형태 축 (2026-07-07(2) 디자인 언어 2.1)', () => {
   it('renderTicketPerforation — 점선 1 + 펀치홀 2', () => {
     const row = renderTicketPerforation(resolveTheme('light', '#4f46e5'));
     expect(row.children.length).toBe(3);
+  });
+});
+
+// ★ 2026-07-07(5) — "형태 = 같은 카드 + 액세서리" 재발 차단 고정 테스트.
+//   같은 블록이 형태별로 골격(발신자 행·CTA 칩·라벨·타이포·존)이 실제로 달라져야 한다.
+describe('형태 4종 골격 분화 (2026-07-07(5))', () => {
+  const SAMPLE: ContentBlock[] = [
+    { type: 'eyebrow', text: 'NEW' },
+    { type: 'headline', text: '이번 주 신상품' },
+    { type: 'body', text: '본문' },
+    { type: 'benefit', text: '혜택 안내' },
+    { type: 'cta_group', buttons: [{ id: 'go', label: '보기', action_url: null, style: 'primary' }, { id: 'x', label: '닫기', action_url: null, style: 'secondary' }] },
+  ];
+
+  it('planCardLayout bubble — 첫 eyebrow=발신자 승격, main에서 제외. 타 형태 sender=null', () => {
+    const plan = planCardLayout(SAMPLE, 'bubble');
+    expect(plan.sender?.type).toBe('eyebrow');
+    expect(plan.main.some((b) => b.type === 'eyebrow')).toBe(false);
+    expect(planCardLayout(SAMPLE, 'classic').sender).toBeNull();
+    expect(planCardLayout(SAMPLE, 'ticket').sender).toBeNull();
+    expect(planCardLayout(SAMPLE, 'poster').sender).toBeNull();
+  });
+
+  it('renderBubbleSender — 아바타(svg) + 라벨, 빈 텍스트=null', () => {
+    const row = renderBubbleSender({ type: 'eyebrow', text: '스토어 소식' }, makeCtx({ cardStyle: 'bubble' }));
+    expect(row?.querySelector('svg')).toBeTruthy();
+    expect(row?.textContent).toContain('스토어 소식');
+    expect(renderBubbleSender({ type: 'eyebrow', text: '  ' }, makeCtx())).toBeNull();
+  });
+
+  it('bubble CTA = 자동 폭 알약 답장 칩 (classic = 전폭 스택)', () => {
+    const cta: ContentBlock[] = [{ type: 'cta_group', buttons: [{ label: '보기', style: 'primary' }, { label: '닫기', style: 'secondary' }] }];
+    const bubbleRoot = render(cta, { cardStyle: 'bubble' });
+    const chips = bubbleRoot.querySelectorAll('button');
+    expect(chips.length).toBe(2);
+    expect((chips[0] as HTMLElement).style.borderRadius).toBe('999px');
+    expect((chips[0] as HTMLElement).style.width).toBe('auto');
+
+    const classicRoot = render(cta);
+    expect((classicRoot.querySelector('button') as HTMLElement).style.width).toBe('100%');
+  });
+
+  it('bubble 헤드라인 = 채팅 스케일 17px (classic 19px과 상이)', () => {
+    const h: ContentBlock[] = [{ type: 'headline', text: 'H' }];
+    expect((render(h, { cardStyle: 'bubble' }).firstElementChild as HTMLElement).style.fontSize).toBe('17px');
+    expect((render(h).firstElementChild as HTMLElement).style.fontSize).toBe('19px');
+  });
+
+  it('ticket — eyebrow=칩 없는 자간 인장 라벨 / benefit=점선 박스 대신 대형 타이포', () => {
+    const root = render([{ type: 'eyebrow', text: 'COUPON' }, { type: 'benefit', text: '혜택' }], { cardStyle: 'ticket' });
+    const eyebrow = root.children[0] as HTMLElement;
+    expect(eyebrow.style.background).toBe('');
+    expect(eyebrow.style.letterSpacing).toBe('0.18em');
+    const benefit = root.children[1] as HTMLElement;
+    expect(benefit.getAttribute('style') || '').not.toContain('dashed');
+    expect((benefit.lastElementChild as HTMLElement).style.fontSize).toBe('16.5px');
+  });
+
+  it('renderPosterHero fullBleed — 모서리 0 + 히어로 190px (인셋 136px과 상이)', () => {
+    const plan = planCardLayout([{ type: 'headline', text: 'H' }], 'poster');
+    const flat = renderPosterHero(plan, makeCtx({ cardStyle: 'poster' }), true)!;
+    expect(['0', '0px']).toContain(flat.style.borderRadius);
+    expect(flat.style.minHeight).toBe('190px');
+    const inset = renderPosterHero(plan, makeCtx(), false)!;
+    expect(inset.style.minHeight).toBe('136px');
+  });
+
+  it('renderTicketPerforation fullBleed — 다이컷 노치 18px 확대 + 점선 유지', () => {
+    const row = renderTicketPerforation(resolveTheme('light', '#4f46e5'), true);
+    expect(row.children.length).toBe(3);
+    expect((row.children[0] as HTMLElement).style.width).toBe('18px');
+  });
+
+  it('같은 블록이 형태별로 다른 골격을 만든다 (classic/bubble/ticket 전부 상이)', () => {
+    const html = (style: CardStyle) => {
+      const plan = planCardLayout(SAMPLE, style);
+      const root = document.createElement('div');
+      renderBlocks(root, style === 'bubble' ? plan.main : SAMPLE, makeCtx({ cardStyle: style }));
+      return root.innerHTML;
+    };
+    const set = new Set([html('classic'), html('bubble'), html('ticket')]);
+    expect(set.size).toBe(3);
   });
 });
 

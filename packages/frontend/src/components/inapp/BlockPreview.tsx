@@ -37,6 +37,8 @@ export function Icon({ name, color, size = 16, fill = false }: { name: string; c
 interface Ctx {
   theme: InAppTheme;
   replaceVars: (t: string) => string;
+  /** ★ 2026-07-07(5) 형태 골격 — SDK BlockRenderContext.cardStyle 미러 */
+  cardStyle?: string;
 }
 
 function renderBlock(b: any, i: number, ctx: Ctx): JSX.Element | null {
@@ -48,6 +50,10 @@ function renderBlock(b: any, i: number, ctx: Ctx): JSX.Element | null {
       if (!text) return null;
       const tone = b.tone || 'accent';
       const color = tone === 'on_media' ? theme.onMedia : tone === 'neutral' ? theme.textSecondary : theme.accent;
+      // ★ 2026-07-07(5) 형태 골격 — 쿠폰 티켓: 칩 없이 자간 넓은 accent 인장 라벨 (SDK 미러)
+      if (tone === 'accent' && ctx.cardStyle === 'ticket') {
+        return <div key={i} style={{ alignSelf: 'flex-start', fontSize: 11, fontWeight: 800, letterSpacing: '0.18em', color: theme.accent, lineHeight: 1.2 }}>{text}</div>;
+      }
       // 디자인 언어 2.1 — plain(모노 에디토리얼): 칩 없이 자간 넓은 민무늬 라벨 (SDK 미러)
       if (tone === 'accent' && theme.eyebrowVariant === 'plain') {
         return <div key={i} style={{ alignSelf: 'flex-start', fontSize: 10.5, fontWeight: 700, letterSpacing: '0.16em', color: theme.textSecondary, lineHeight: 1.2 }}>{text}</div>;
@@ -66,13 +72,16 @@ function renderBlock(b: any, i: number, ctx: Ctx): JSX.Element | null {
     case 'headline': {
       const text = t(b.text).trim();
       if (!text) return null;
-      const hs: Record<string, number> = { sm: 16, md: 19, lg: 21, xl: 24 };
+      // ★ 2026-07-07(5) 형태 골격 — bubble=채팅 스케일(한 단계 작게)·ticket=800 (SDK 미러)
+      const bubble = ctx.cardStyle === 'bubble';
+      const ticket = ctx.cardStyle === 'ticket';
+      const hs: Record<string, number> = bubble ? { sm: 15, md: 17, lg: 19, xl: 21 } : { sm: 16, md: 19, lg: 21, xl: 24 };
       const xl = b.size === 'xl';
-      const weight = xl ? Math.max(800, theme.headlineWeight) : theme.headlineWeight;
+      const weight = bubble ? 700 : (ticket || xl) ? Math.max(800, theme.headlineWeight) : theme.headlineWeight;
       const head = (
-        <div style={{ fontWeight: weight, fontSize: hs[String(b.size)] || 19, letterSpacing: xl || weight >= 800 ? '-0.02em' : '-0.01em', lineHeight: 1.28, color: theme.textPrimary }}>{text}</div>
+        <div style={{ fontWeight: weight, fontSize: hs[String(b.size)] || (bubble ? 17 : 19), letterSpacing: xl || weight >= 800 ? '-0.02em' : '-0.01em', lineHeight: 1.28, color: theme.textPrimary }}>{text}</div>
       );
-      if (!theme.headlineAccentBar) return <div key={i}>{head}</div>;
+      if (!theme.headlineAccentBar || bubble) return <div key={i}>{head}</div>;
       // 브랜드 쇼케이스 — 헤드라인 아래 accent 짧은 바 (SDK 미러)
       return (
         <div key={i}>
@@ -112,6 +121,17 @@ function renderBlock(b: any, i: number, ctx: Ctx): JSX.Element | null {
     }
     case 'benefit': {
       const text = t(b.text || '[혜택 안내 — 직접 작성해주세요]');
+      // ★ 2026-07-07(5) 형태 골격 — 쿠폰 티켓 카드: 점선 박스 중첩 대신 대형 혜택 타이포 (SDK 미러)
+      if (ctx.cardStyle === 'ticket') {
+        return (
+          <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '15px 16px', borderRadius: theme.innerRadius, background: theme.accentSoft, color: theme.textPrimary }}>
+            <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 38, height: 38, borderRadius: 12, background: theme.accent, flexShrink: 0 }}>
+              <Icon name="gift" color={theme.accentText} size={20} />
+            </span>
+            <div style={{ fontSize: 16.5, fontWeight: 800, lineHeight: 1.35, letterSpacing: '-0.02em', color: theme.textPrimary, minWidth: 0 }}>{text}</div>
+          </div>
+        );
+      }
       const notch: CSSProperties = { position: 'absolute', top: '50%', transform: 'translateY(-50%)', width: 13, height: 13, borderRadius: 999, background: theme.surface, boxShadow: `inset 0 0 0 1.5px ${withAlpha(theme.accent, 0.28)}` };
       return (
         <div key={i} style={{ position: 'relative', display: 'flex', alignItems: 'center', gap: 11, padding: '13px 18px 13px 14px', background: `linear-gradient(135deg, ${withAlpha(theme.accent, 0.09)} 0%, ${withAlpha(theme.accent, 0.16)} 100%)`, border: `1.5px dashed ${withAlpha(theme.accent, 0.45)}`, borderRadius: theme.innerRadius }}>
@@ -193,6 +213,28 @@ function renderBlock(b: any, i: number, ctx: Ctx): JSX.Element | null {
     case 'cta_group': {
       const buttons = Array.isArray(b.buttons) ? b.buttons.filter((x: any) => String(x?.label || '').trim()) : [];
       if (!buttons.length) return null;
+      // ★ 2026-07-07(5) 형태 골격 — 둥근 말풍선: 전폭 버튼 대신 채팅 답장 칩 (SDK 미러)
+      if (ctx.cardStyle === 'bubble') {
+        return (
+          <div key={i} style={{ display: 'flex', flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
+            {buttons.slice(0, 3).map((btn: any, j: number) => {
+              const style = btn.style || (j === 0 ? 'primary' : 'secondary');
+              const isPrimary = style === 'primary';
+              return (
+                <div key={j} style={{
+                  padding: '11px 18px', borderRadius: 999, fontSize: 13.5, fontWeight: isPrimary ? 800 : 700,
+                  letterSpacing: '-0.01em', whiteSpace: 'nowrap', textAlign: 'center', width: 'auto', boxSizing: 'border-box',
+                  background: isPrimary ? theme.accent : 'transparent',
+                  color: isPrimary ? theme.accentText : theme.accent,
+                  boxShadow: isPrimary ? `0 4px 14px ${withAlpha(theme.accent, 0.35)}` : `inset 0 0 0 1.5px ${withAlpha(theme.accent, 0.45)}`,
+                }}>
+                  {t(btn.label)}
+                </div>
+              );
+            })}
+          </div>
+        );
+      }
       const stack = b.layout !== 'inline';
       return (
         <div key={i} style={{ display: 'flex', flexDirection: stack ? 'column' : 'row', gap: 8, flexWrap: 'wrap' }}>
@@ -278,25 +320,26 @@ function CountdownLive({ b, theme, t }: { b: any; theme: InAppTheme; t: (s: any)
   );
 }
 
-/** poster 히어로 — SDK renderPosterHero 미러 (이미지+스크림+겹침 텍스트 / 무이미지=강조색 면) */
-function PosterHero({ plan, theme, t }: { plan: CardLayoutPlan; theme: InAppTheme; t: (s: any) => string }) {
+/** poster 히어로 — SDK renderPosterHero 미러 (이미지+스크림+겹침 텍스트 / 무이미지=강조색 면)
+ *  ★ 2026-07-07(5) fullBleed — 카드 가장자리까지 확장(모서리 0)·히어로 확대·매거진 대형 헤드라인 (SDK 미러) */
+function PosterHero({ plan, theme, t, fullBleed }: { plan: CardLayoutPlan; theme: InAppTheme; t: (s: any) => string; fullBleed?: boolean }) {
   const onHero = plan.hero ? '#ffffff' : pickReadableText(theme.accent);
   return (
-    <div style={{ position: 'relative', width: '100%', minHeight: 136, borderRadius: Math.max(12, theme.radius - 8), overflow: 'hidden', display: 'flex', alignItems: 'flex-end', background: plan.hero ? theme.surfaceElevated : `linear-gradient(135deg, ${shadeHex(theme.accent, 10)} 0%, ${theme.accent} 55%, ${shadeHex(theme.accent, -25)} 100%)` }}>
+    <div style={{ position: 'relative', width: '100%', minHeight: fullBleed ? 170 : 136, borderRadius: fullBleed ? 0 : Math.max(12, theme.radius - 8), overflow: 'hidden', display: 'flex', alignItems: 'flex-end', background: plan.hero ? theme.surfaceElevated : `linear-gradient(135deg, ${shadeHex(theme.accent, 10)} 0%, ${theme.accent} 55%, ${shadeHex(theme.accent, -25)} 100%)` }}>
       {plan.hero && (
         <>
           <img src={String(plan.hero.url || '')} alt="" onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }} style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' }} />
           <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(180deg, rgba(0,0,0,0.02) 30%, rgba(0,0,0,0.58) 100%)' }} />
         </>
       )}
-      <div style={{ position: 'relative', padding: '18px 18px 16px', display: 'flex', flexDirection: 'column', gap: 7, width: '100%', boxSizing: 'border-box' }}>
+      <div style={{ position: 'relative', padding: fullBleed ? '20px 22px 16px' : '18px 18px 16px', display: 'flex', flexDirection: 'column', gap: 7, width: '100%', boxSizing: 'border-box' }}>
         {plan.overlay.map((ob: any, j: number) => {
           const txt = t(ob.text).trim();
           if (!txt) return null;
           return ob.type === 'eyebrow' ? (
-            <div key={j} style={{ alignSelf: 'flex-start', fontSize: 10.5, fontWeight: 800, letterSpacing: '0.14em', color: onHero, opacity: 0.88, lineHeight: 1.2 }}>{txt}</div>
+            <div key={j} style={{ alignSelf: 'flex-start', fontSize: fullBleed ? 11 : 10.5, fontWeight: 800, letterSpacing: fullBleed ? '0.2em' : '0.14em', color: onHero, opacity: 0.88, lineHeight: 1.2 }}>{txt}</div>
           ) : (
-            <div key={j} style={{ fontSize: 22, fontWeight: 800, letterSpacing: '-0.02em', lineHeight: 1.22, color: onHero, textShadow: plan.hero ? '0 2px 12px rgba(0,0,0,0.35)' : 'none' }}>{txt}</div>
+            <div key={j} style={{ fontSize: fullBleed ? 24 : 22, fontWeight: 800, letterSpacing: fullBleed ? '-0.03em' : '-0.02em', lineHeight: fullBleed ? 1.18 : 1.22, color: onHero, textShadow: plan.hero ? '0 2px 12px rgba(0,0,0,0.35)' : 'none' }}>{txt}</div>
           );
         })}
       </div>
@@ -304,60 +347,109 @@ function PosterHero({ plan, theme, t }: { plan: CardLayoutPlan; theme: InAppThem
   );
 }
 
-/** ticket 절취선 — SDK renderTicketPerforation 미러 (점선 + 양측 펀치홀) */
-function TicketPerforation({ theme }: { theme: InAppTheme }) {
+/** ticket 절취선 — SDK renderTicketPerforation 미러 (점선 + 양측 펀치홀)
+ *  ★ 2026-07-07(5) fullBleed — 카드 가장자리 다이컷 노치(반원 절단)로 확대 (SDK 미러) */
+function TicketPerforation({ theme, fullBleed }: { theme: InAppTheme; fullBleed?: boolean }) {
+  const size = fullBleed ? 18 : 16;
   const hole = (side: 'left' | 'right'): CSSProperties => ({
-    position: 'absolute', top: '50%', transform: 'translateY(-50%)', [side]: -6,
-    width: 16, height: 16, borderRadius: 999,
-    background: theme.surfaceElevated,
-    boxShadow: `inset 0 1px 3px rgba(0,0,0,0.12), inset 0 0 0 1px ${theme.border}`,
+    position: 'absolute', top: '50%', transform: 'translateY(-50%)', [side]: fullBleed ? -9 : -6,
+    width: size, height: size, borderRadius: 999,
+    background: fullBleed ? shadeHex(theme.surface, -12) : theme.surfaceElevated,
+    boxShadow: fullBleed
+      ? `inset 0 2px 4px rgba(0,0,0,0.18), inset 0 0 0 1px ${theme.border}`
+      : `inset 0 1px 3px rgba(0,0,0,0.12), inset 0 0 0 1px ${theme.border}`,
   });
   return (
-    <div style={{ position: 'relative', height: 22, display: 'flex', alignItems: 'center' }}>
+    <div style={{ position: 'relative', height: fullBleed ? 24 : 22, display: 'flex', alignItems: 'center' }}>
       <span style={hole('left')} />
-      <div style={{ flex: 1, margin: '0 16px', borderTop: `2px dashed ${withAlpha(theme.textPrimary, 0.16)}` }} />
+      <div style={{ flex: 1, margin: fullBleed ? '0 20px' : '0 16px', borderTop: `2px dashed ${withAlpha(theme.textPrimary, 0.16)}` }} />
       <span style={hole('right')} />
     </div>
   );
 }
 
-export function BlockPreview({ blocks, theme, replaceVars, isAd, cardStyle }: {
+/** ★ 2026-07-07(5) bubble 발신자 행 — SDK renderBubbleSender 미러 (브랜드 그라데이션 아바타 + 라벨) */
+function BubbleSender({ text, theme }: { text: string; theme: InAppTheme }) {
+  if (!text) return null;
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
+      <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 30, height: 30, borderRadius: 999, flexShrink: 0, background: `linear-gradient(135deg, ${theme.accent} 0%, ${shadeHex(theme.accent, -18)} 100%)`, boxShadow: `0 3px 8px ${withAlpha(theme.accent, 0.35)}` }}>
+        <Icon name="sparkle" color={theme.accentText} size={15} />
+      </span>
+      <div style={{ fontSize: 12.5, fontWeight: 800, letterSpacing: '-0.01em', color: theme.textPrimary, minWidth: 0 }}>{text}</div>
+    </div>
+  );
+}
+
+export function BlockPreview({ blocks, theme, replaceVars, isAd, cardStyle, zonePads }: {
   blocks: any[];
   theme: InAppTheme;
   replaceVars?: (t: string) => string;
   isAd?: boolean;
   /** 형태 축 — classic/bubble/ticket/poster (카드형 템플릿에서만 전달) */
   cardStyle?: string | null;
+  /** ★ 2026-07-07(5) ticket/poster 존 분할 시 구간별 패딩 (미전달 = 기존 인셋 렌더) — SDK ZONE_PADS 미러 */
+  zonePads?: { main: string; stub: string; body: string } | null;
 }) {
-  const ctx: Ctx = { theme, replaceVars: replaceVars || ((s: string) => s) };
+  const style = normalizeCardStyle(cardStyle);
+  const ctx: Ctx = { theme, replaceVars: replaceVars || ((s: string) => s), cardStyle: style };
   const list = Array.isArray(blocks) ? blocks : [];
   const hasFooter = list.some((b) => b?.type === 'footer');
-  const style = normalizeCardStyle(cardStyle);
   const plan = planCardLayout(list, style);
   const t = ctx.replaceVars as (s: any) => string;
 
-  const body =
-    style === 'poster' && (plan.hero || plan.overlay.length > 0) ? (
+  const posterOn = style === 'poster' && (plan.hero || plan.overlay.length > 0);
+  const ticketOn = style === 'ticket' && plan.stub.length > 0;
+  const zoned = !!zonePads && (posterOn || ticketOn);
+  const zoneStyle = (pad: string): CSSProperties => ({ display: 'flex', flexDirection: 'column', gap: 13, padding: pad, minWidth: 0, boxSizing: 'border-box' });
+  const adLine = isAd && !hasFooter
+    ? <div style={{ fontSize: 11, fontWeight: 500, color: withAlpha(theme.textSecondary, 0.85) }}>(광고)</div>
+    : null;
+
+  const body = posterOn ? (
+    <>
+      <PosterHero plan={plan} theme={theme} t={(s) => t(String(s ?? ''))} fullBleed={zoned} />
+      {zoned ? (
+        <div style={zoneStyle(zonePads!.body)}>
+          {plan.main.map((b, i) => renderBlock(b, i, ctx)).filter(Boolean)}
+          {adLine}
+        </div>
+      ) : (
+        plan.main.map((b, i) => renderBlock(b, i, ctx)).filter(Boolean)
+      )}
+    </>
+  ) : ticketOn ? (
+    zoned ? (
       <>
-        <PosterHero plan={plan} theme={theme} t={(s) => t(String(s ?? ''))} />
-        {plan.main.map((b, i) => renderBlock(b, i, ctx)).filter(Boolean)}
+        <div style={zoneStyle(zonePads!.main)}>{plan.main.map((b, i) => renderBlock(b, i, ctx)).filter(Boolean)}</div>
+        <div style={{ background: withAlpha(theme.accent, 0.06) }}>
+          <TicketPerforation theme={theme} fullBleed />
+          <div style={zoneStyle(zonePads!.stub)}>
+            {plan.stub.map((b, i) => renderBlock(b, i + plan.main.length + 1, ctx)).filter(Boolean)}
+            {adLine}
+          </div>
+        </div>
       </>
-    ) : style === 'ticket' && plan.stub.length > 0 ? (
+    ) : (
       <>
         {plan.main.map((b, i) => renderBlock(b, i, ctx)).filter(Boolean)}
         <TicketPerforation theme={theme} />
         {plan.stub.map((b, i) => renderBlock(b, i + plan.main.length + 1, ctx)).filter(Boolean)}
       </>
-    ) : (
-      <>{list.map((b, i) => renderBlock(b, i, ctx)).filter(Boolean)}</>
-    );
+    )
+  ) : style === 'bubble' && plan.sender ? (
+    <>
+      <BubbleSender text={t(String(plan.sender.text ?? '')).trim()} theme={theme} />
+      {plan.main.map((b, i) => renderBlock(b, i, ctx)).filter(Boolean)}
+    </>
+  ) : (
+    <>{list.map((b, i) => renderBlock(b, i, ctx)).filter(Boolean)}</>
+  );
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 13, color: theme.textPrimary, fontFamily: FONT_STACK, letterSpacing: '-0.005em' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: zoned ? 0 : 13, color: theme.textPrimary, fontFamily: FONT_STACK, letterSpacing: '-0.005em' }}>
       {body}
-      {isAd && !hasFooter && (
-        <div style={{ fontSize: 11, fontWeight: 500, color: withAlpha(theme.textSecondary, 0.85) }}>(광고)</div>
-      )}
+      {!zoned && adLine}
     </div>
   );
 }

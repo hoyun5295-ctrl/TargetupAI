@@ -8,6 +8,11 @@
 
 | 날짜 | 제목 | 검색 키워드 | 파일 |
 |------|------|-------------|------|
+| 2026-07-06 | 🟢 운영 버그 5건 근본수정 (STATUS→archive 회전 2026-07-07) | 발송통계 성공 실패 복구 UPDATE 897 campaign-lifecycle 080 수신거부 합집합 psy5868 DmSendAndTrackModal useRef 백지 Liquid flattenLiquidToPlainText ai-call-invariants upload.ts 매핑 | [TASKS_2026-07.md](TASKS_2026-07.md) |
+| 2026-07-05 | 🟢 자동마케팅 4수정 + 비토 Agent v1.0.8 MMS + 레거시 템플릿 이관 조사 (STATUS→archive 회전 2026-07-07) | 자동마케팅 LIMIT 10000 staging INSERT 크레딧 차감 유실 isAiOperatorAllowed 비토 Agent MMS Gateway v135 event-admin 4519 템플릿 이관 | [TASKS_2026-07.md](TASKS_2026-07.md) |
+| 2026-07-04 | 🟢 (2) 모달/토스트 UX + 베스트 문안 재설계·진화 + 발송결과 집계 근본수정 + 스크롤 복원 + 직접발송 정리 (STATUS→archive 회전 2026-07-07) | 모달 배경클릭 백드롭 closeOnBackdrop 토스트 z-index 베스트 문안 best-copy-miner best_copy_seed_usage classifyResultTables SMSQ_SEND_13 ScrollManager goBackOr BrandLinkChips PlanUpgradeModal | [TASKS_2026-07.md](TASKS_2026-07.md) |
+| 2026-07-03 | 🟢 관제탑 v2 + 사용구분 게이팅 + 전채널 학습루프 + 레거시 SSL + 카페24/고도몰/isae 완결 (STATUS→archive 회전 2026-07-07) | 관제탑 재설계 harness-check usage_type 학습루프 Gap4 예측 타겟 금지 event-admin SSL 카페24 심사 고도몰 partner_key isae 137267 | [TASKS_2026-07.md](TASKS_2026-07.md) |
+| 2026-07-03 | 🟢 싱크에이전트 updater 자기교체 근본수정 v1.6.0 (STATUS→archive 회전 2026-07-07) | updater 자기교체 SyncAgentUpdate systemd-run checksum win-legacy 2008R2 sync_releases 1.6.1 isae 1.5.7 | [TASKS_2026-07.md](TASKS_2026-07.md) |
 | 2026-02-27 | 🔧 D43 — 기능 정상화 및 DB 동적 기준 정립 (2026-02-27~) — ✅ 전체 완료 | 환불 차감 정산 카카오 수신거부 080 타겟발송 발송결과 개인화 변수 sms-result-map.ts auth.ts companies.ts Dashboard.tsx | [TASKS_2026-02.md](TASKS_2026-02.md) |
 | (무날짜·2026-02) | ✅ 이전 완료 요약 | 선불 수신거부 080 대시보드 요금제 세션 스팸 스팸필터 모달 billing.ts | [TASKS_2026-02.md](TASKS_2026-02.md) |
 | 2026-03-31 | 🔧 D101 — 0331 PPT 버그리포트 15건 디버깅 (2026-03-31) — ✅ 배포완료 | 회신번호 직접발송 개인화 업로드 엑셀 슈퍼관리자 리포트 스팸 배포 messageUtils.ts formatDate.ts ai.ts TargetSendModal.tsx | [TASKS_2026-03.md](TASKS_2026-03.md) |
@@ -191,8 +196,9 @@
 ## 2) 종결 버그·과거 DONE LOG
 
 - [BUGS_RESOLVED.md](BUGS_RESOLVED.md) — 종결 버그 배치 전체 + 과거 현황 블록 (원본 BUGS.md 60행~ 원문)
-- [DONE_LOG_2026.md](DONE_LOG_2026.md) — 옛 DONE LOG 31건 (2~3월 D55~D88 등)
+- [DONE_LOG_2026.md](DONE_LOG_2026.md) — 옛 DONE LOG 31건 (2~3월 D55~D88 등) + STATUS §3 TODO 완료분 회전(2026-07-07)
 - [LESSONS_META_ORIGINAL-20260703.md](LESSONS_META_ORIGINAL-20260703.md) — LESSONS_META 압축 전 원문(사례 경위 전문)
+- [SYNC-AGENT-ISAE-2026-06-30-HANDOFF.md](SYNC-AGENT-ISAE-2026-06-30-HANDOFF.md) — isae(이새에프앤씨) 싱크에이전트 설치 일회성 핸드오프 원문 (✅2026-07-03 완료, 2026-07-07 status→archive 이동. 키워드: Oracle 11g 시노님 2008R2 composite phone 휴대폰 3칸 구매 JOIN 뷰 custom 매핑) — 상시 진단은 status/SYNC-AGENT-TROUBLESHOOTING.md
 
 ## 3) 옛 설계서·핸드오프·디버그노트 (DESIGNS/ — 42개)
 

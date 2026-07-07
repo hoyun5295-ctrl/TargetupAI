@@ -43,6 +43,8 @@ export interface BlockRenderContext {
   reducedMotion: boolean;
   /** is_ad — footer 자동 (광고) 표기 */
   isAd?: boolean;
+  /** ★ 2026-07-07(5) 형태 축 골격 — 블록 렌더가 타이포·CTA·라벨 구조를 형태별로 바꿀 때 참조. 미지정 = classic */
+  cardStyle?: CardStyle;
 }
 
 export const ALL_BLOCK_TYPES: BlockType[] = [
@@ -216,6 +218,14 @@ function renderEyebrow(b: ContentBlock, ctx: BlockRenderContext): HTMLElement | 
   const tone = b.tone || 'accent';
   const color = tone === 'on_media' ? theme.onMedia : tone === 'neutral' ? theme.textSecondary : theme.accent;
 
+  // ★ 2026-07-07(5) 형태 골격 — 쿠폰 티켓: 칩 없이 자간 넓은 accent 인장 라벨 (테마 무관 티켓 시그니처)
+  if (tone === 'accent' && ctx.cardStyle === 'ticket') {
+    return el('div', {
+      alignSelf: 'flex-start', fontSize: '11px', fontWeight: '800', letterSpacing: '0.18em',
+      color: theme.accent, lineHeight: '1.2',
+    }, text);
+  }
+
   // 디자인 언어 2.1 — plain(모노 에디토리얼): 칩 없이 자간 넓은 민무늬 라벨
   if (tone === 'accent' && theme.eyebrowVariant === 'plain') {
     return el('div', {
@@ -258,22 +268,26 @@ function renderEyebrow(b: ContentBlock, ctx: BlockRenderContext): HTMLElement | 
 }
 
 const HEADLINE_SIZES: Record<string, string> = { sm: '16px', md: '19px', lg: '21px', xl: '24px' };
+// ★ 2026-07-07(5) 형태 골격 — 둥근 말풍선은 채팅 스케일 (한 단계 작게, 대화체 밀도)
+const BUBBLE_HEADLINE_SIZES: Record<string, string> = { sm: '15px', md: '17px', lg: '19px', xl: '21px' };
 const BODY_SIZES: Record<string, string> = { sm: '13px', md: '14px', lg: '15.5px' };
 
 function renderHeadline(b: ContentBlock, ctx: BlockRenderContext): HTMLElement | null {
   const text = ctx.replaceVars(String(b.text || '')).trim();
   if (!text) return null;
   const { theme } = ctx;
+  const bubble = ctx.cardStyle === 'bubble';
+  const ticket = ctx.cardStyle === 'ticket';
   const xl = b.size === 'xl';
-  const weight = xl ? Math.max(800, theme.headlineWeight) : theme.headlineWeight;
+  const weight = bubble ? 700 : (ticket || xl) ? Math.max(800, theme.headlineWeight) : theme.headlineWeight;
   const head = el('div', {
     fontWeight: String(weight),
-    fontSize: HEADLINE_SIZES[String(b.size)] || '19px',
+    fontSize: (bubble ? BUBBLE_HEADLINE_SIZES : HEADLINE_SIZES)[String(b.size)] || (bubble ? '17px' : '19px'),
     letterSpacing: xl || weight >= 800 ? '-0.02em' : '-0.01em',
     lineHeight: '1.28',
     color: theme.textPrimary,
   }, text);
-  if (!theme.headlineAccentBar) return head;
+  if (!theme.headlineAccentBar || bubble) return head;
   // 브랜드 쇼케이스 — 헤드라인 아래 accent 짧은 바
   const wrap = el('div');
   wrap.appendChild(head);
@@ -327,6 +341,27 @@ function renderBullets(b: ContentBlock, ctx: BlockRenderContext): HTMLElement | 
 function renderBenefit(b: ContentBlock, ctx: BlockRenderContext): HTMLElement | null {
   const { theme } = ctx;
   const text = ctx.replaceVars(String(b.text || '[혜택 안내 — 직접 작성해주세요]'));
+  // ★ 2026-07-07(5) 형태 골격 — 쿠폰 티켓 카드: 카드 자체가 티켓(절취선+스터브)이라
+  //   점선 박스 중첩(티켓 안 티켓) 대신 대형 혜택 타이포로 승격
+  if (ctx.cardStyle === 'ticket') {
+    const big = el('div', {
+      display: 'flex', alignItems: 'center', gap: '12px',
+      padding: '15px 16px', borderRadius: `${theme.innerRadius}px`,
+      background: theme.accentSoft, color: theme.textPrimary,
+    });
+    const bigIc = el('span', {
+      display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+      width: '38px', height: '38px', borderRadius: '12px', flexShrink: '0',
+      background: theme.accent,
+    });
+    bigIc.appendChild(iconSvg('gift', theme.accentText, 20));
+    big.appendChild(bigIc);
+    big.appendChild(el('div', {
+      fontSize: '16.5px', fontWeight: '800', lineHeight: '1.35', letterSpacing: '-0.02em',
+      color: theme.textPrimary, minWidth: '0',
+    }, text));
+    return big;
+  }
   // 쿠폰 티켓 2.0 — 그라데이션 워시 + 양측 펀치홀 + 아이콘 배지
   const ticket = el('div', {
     position: 'relative', display: 'flex', alignItems: 'center', gap: '11px',
@@ -502,6 +537,37 @@ function renderCtaGroup(b: ContentBlock, ctx: BlockRenderContext): HTMLElement |
   const buttons: BlockButton[] = Array.isArray(b.buttons) ? b.buttons.filter((x: any) => x && String(x.label || '').trim()) : [];
   if (buttons.length === 0) return null;
   const { theme } = ctx;
+
+  // ★ 2026-07-07(5) 형태 골격 — 둥근 말풍선: 전폭 버튼 대신 채팅 답장 칩 (자동 폭 알약, 가로 나열)
+  if (ctx.cardStyle === 'bubble') {
+    const chipWrap = el('div', { display: 'flex', flexDirection: 'row', gap: '8px', flexWrap: 'wrap' });
+    buttons.slice(0, 3).forEach((btn, idx) => {
+      const style = btn.style || (idx === 0 ? 'primary' : 'secondary');
+      const isPrimary = style === 'primary';
+      const chip = el('button', {
+        cursor: 'pointer', fontFamily: FONT_STACK,
+        padding: '11px 18px', borderRadius: '999px',
+        fontSize: '13.5px', fontWeight: isPrimary ? '800' : '700',
+        letterSpacing: '-0.01em', whiteSpace: 'nowrap', textAlign: 'center',
+        width: 'auto', border: 'none',
+        background: isPrimary ? theme.accent : 'transparent',
+        color: isPrimary ? theme.accentText : theme.accent,
+        boxShadow: isPrimary
+          ? `0 4px 14px ${withAlpha(theme.accent, 0.35)}`
+          : `inset 0 0 0 1.5px ${withAlpha(theme.accent, 0.45)}`,
+        transition: 'transform 0.16s cubic-bezier(0.22,1,0.36,1), filter 0.2s ease',
+      }, ctx.replaceVars(btn.label));
+      chip.addEventListener('mouseenter', () => { chip.style.transform = 'translateY(-1px)'; chip.style.filter = 'brightness(1.05)'; });
+      chip.addEventListener('mouseleave', () => { chip.style.transform = 'none'; chip.style.filter = 'none'; });
+      chip.addEventListener('mousedown', () => { chip.style.transform = 'scale(0.96)'; });
+      chip.addEventListener('click', () => {
+        ctx.onButtonClick(String(btn.id || `btn_${idx}`), btn.action_url ?? null);
+      });
+      chipWrap.appendChild(chip);
+    });
+    return chipWrap;
+  }
+
   const stack = b.layout !== 'inline';
   const wrap = el('div', {
     display: 'flex', flexDirection: stack ? 'column' : 'row', gap: '8px', flexWrap: 'wrap',
@@ -629,6 +695,8 @@ export interface CardLayoutPlan {
   main: ContentBlock[];
   /** ticket — 절취선 뒤 스터브 블록 (마지막 cta_group부터 끝까지) */
   stub: ContentBlock[];
+  /** ★ 2026-07-07(5) bubble — 발신자 행(아바타+라벨)으로 승격되는 첫 eyebrow. 그 외 형태 = null */
+  sender: ContentBlock | null;
 }
 
 /** 카드 형태별 블록 배치 계획 — SDK 렌더와 관리자 미리보기가 같은 분할을 쓰도록 순수 함수로 고정 */
@@ -646,25 +714,56 @@ export function planCardLayout(blocks: ContentBlock[], style: CardStyle): CardLa
       if (!headlineTaken && b.type === 'headline') { overlay.push(b); headlineTaken = true; continue; }
       main.push(b);
     }
-    return { hero, overlay, main, stub: [] };
+    return { hero, overlay, main, stub: [], sender: null };
   }
   if (style === 'ticket') {
     let cut = -1;
     for (let i = list.length - 1; i >= 0; i--) {
       if (String(list[i].type) === 'cta_group') { cut = i; break; }
     }
-    if (cut <= 0) return { hero: null, overlay: [], main: list, stub: [] };
-    return { hero: null, overlay: [], main: list.slice(0, cut), stub: list.slice(cut) };
+    if (cut <= 0) return { hero: null, overlay: [], main: list, stub: [], sender: null };
+    return { hero: null, overlay: [], main: list.slice(0, cut), stub: list.slice(cut), sender: null };
   }
-  return { hero: null, overlay: [], main: list, stub: [] };
+  if (style === 'bubble') {
+    let sender: ContentBlock | null = null;
+    const main: ContentBlock[] = [];
+    for (const b of list) {
+      if (!sender && b.type === 'eyebrow') { sender = b; continue; }
+      main.push(b);
+    }
+    return { hero: null, overlay: [], main, stub: [], sender };
+  }
+  return { hero: null, overlay: [], main: list, stub: [], sender: null };
 }
 
-/** poster 히어로 — 이미지(스크림+겹침 텍스트) 또는 강조색 면 + 헤드라인. 순수 DOM. */
-export function renderPosterHero(plan: CardLayoutPlan, ctx: BlockRenderContext): HTMLElement | null {
+/** ★ 2026-07-07(5) bubble 발신자 행 — 브랜드 그라데이션 아바타 + 라벨 (채팅 발신자 골격). 순수 DOM. */
+export function renderBubbleSender(sender: ContentBlock, ctx: BlockRenderContext): HTMLElement | null {
+  const text = ctx.replaceVars(String(sender?.text || '')).trim();
+  if (!text) return null;
+  const { theme } = ctx;
+  const row = el('div', { display: 'flex', alignItems: 'center', gap: '9px' });
+  const avatar = el('span', {
+    display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+    width: '30px', height: '30px', borderRadius: '999px', flexShrink: '0',
+    background: `linear-gradient(135deg, ${theme.accent} 0%, ${shadeHex(theme.accent, -18)} 100%)`,
+    boxShadow: `0 3px 8px ${withAlpha(theme.accent, 0.35)}`,
+  });
+  avatar.appendChild(iconSvg('sparkle', theme.accentText, 15));
+  row.appendChild(avatar);
+  row.appendChild(el('div', {
+    fontSize: '12.5px', fontWeight: '800', letterSpacing: '-0.01em', color: theme.textPrimary, minWidth: '0',
+  }, text));
+  return row;
+}
+
+/** poster 히어로 — 이미지(스크림+겹침 텍스트) 또는 강조색 면 + 헤드라인. 순수 DOM.
+ *  ★ 2026-07-07(5) fullBleed=true — 카드 가장자리까지 확장(모서리 0)·히어로 190px·매거진 대형 헤드라인. */
+export function renderPosterHero(plan: CardLayoutPlan, ctx: BlockRenderContext, fullBleed = false): HTMLElement | null {
   if (!plan.hero && plan.overlay.length === 0) return null;
   const { theme } = ctx;
   const hero = el('div', {
-    position: 'relative', width: '100%', minHeight: '136px', borderRadius: `${Math.max(12, theme.radius - 8)}px`,
+    position: 'relative', width: '100%', minHeight: fullBleed ? '190px' : '136px',
+    borderRadius: fullBleed ? '0' : `${Math.max(12, theme.radius - 8)}px`,
     overflow: 'hidden', display: 'flex', alignItems: 'flex-end',
     background: plan.hero
       ? theme.surfaceElevated
@@ -685,18 +784,20 @@ export function renderPosterHero(plan: CardLayoutPlan, ctx: BlockRenderContext):
     }));
   }
   const onHero = plan.hero ? '#ffffff' : pickReadableText(theme.accent);
-  const txt = el('div', { position: 'relative', padding: '18px 18px 16px', display: 'flex', flexDirection: 'column', gap: '7px', width: '100%', boxSizing: 'border-box' });
+  const txt = el('div', { position: 'relative', padding: fullBleed ? '22px 24px 18px' : '18px 18px 16px', display: 'flex', flexDirection: 'column', gap: '7px', width: '100%', boxSizing: 'border-box' });
   for (const b of plan.overlay) {
     const t = ctx.replaceVars(String(b.text || '')).trim();
     if (!t) continue;
     if (b.type === 'eyebrow') {
       txt.appendChild(el('div', {
-        alignSelf: 'flex-start', fontSize: '10.5px', fontWeight: '800', letterSpacing: '0.14em',
+        alignSelf: 'flex-start', fontSize: fullBleed ? '11px' : '10.5px', fontWeight: '800',
+        letterSpacing: fullBleed ? '0.2em' : '0.14em',
         color: onHero, opacity: '0.88', lineHeight: '1.2',
       }, t));
     } else if (b.type === 'headline') {
       txt.appendChild(el('div', {
-        fontSize: '22px', fontWeight: '800', letterSpacing: '-0.02em', lineHeight: '1.22',
+        fontSize: fullBleed ? '26px' : '22px', fontWeight: '800',
+        letterSpacing: fullBleed ? '-0.03em' : '-0.02em', lineHeight: fullBleed ? '1.18' : '1.22',
         color: onHero, textShadow: plan.hero ? '0 2px 12px rgba(0,0,0,0.35)' : 'none',
       }, t));
     }
@@ -705,21 +806,24 @@ export function renderPosterHero(plan: CardLayoutPlan, ctx: BlockRenderContext):
   return hero;
 }
 
-/** ticket 절취선 — 양측 펀치홀 + 점선. 순수 DOM. */
-export function renderTicketPerforation(theme: InAppTheme): HTMLElement {
-  const row = el('div', { position: 'relative', height: '22px', display: 'flex', alignItems: 'center' });
+/** ticket 절취선 — 양측 펀치홀 + 점선. 순수 DOM.
+ *  ★ 2026-07-07(5) fullBleed=true — 카드 가장자리 다이컷 노치(반원 절단)로 확대. 카드 overflow:hidden이 반원으로 잘라준다. */
+export function renderTicketPerforation(theme: InAppTheme, fullBleed = false): HTMLElement {
+  const row = el('div', { position: 'relative', height: fullBleed ? '24px' : '22px', display: 'flex', alignItems: 'center' });
   const hole = (side: 'left' | 'right') => {
     const h = el('span', {
       position: 'absolute', top: '50%', transform: 'translateY(-50%)',
-      width: '16px', height: '16px', borderRadius: '999px',
-      background: theme.surfaceElevated,
-      boxShadow: `inset 0 1px 3px rgba(0,0,0,0.12), inset 0 0 0 1px ${theme.border}`,
+      width: fullBleed ? '18px' : '16px', height: fullBleed ? '18px' : '16px', borderRadius: '999px',
+      background: fullBleed ? shadeHex(theme.surface, -12) : theme.surfaceElevated,
+      boxShadow: fullBleed
+        ? `inset 0 2px 4px rgba(0,0,0,0.18), inset 0 0 0 1px ${theme.border}`
+        : `inset 0 1px 3px rgba(0,0,0,0.12), inset 0 0 0 1px ${theme.border}`,
     });
-    (h.style as any)[side] = '-6px';
+    (h.style as any)[side] = fullBleed ? '-9px' : '-6px';
     return h;
   };
   row.appendChild(hole('left'));
-  row.appendChild(el('div', { flex: '1', margin: '0 16px', borderTop: `2px dashed ${withAlpha(theme.textPrimary, 0.16)}` }));
+  row.appendChild(el('div', { flex: '1', margin: fullBleed ? '0 20px' : '0 16px', borderTop: `2px dashed ${withAlpha(theme.textPrimary, 0.16)}` }));
   row.appendChild(hole('right'));
   return row;
 }

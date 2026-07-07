@@ -34,3 +34,46 @@
 | 02-27 | D39 세션2 조회+AI 정상화 완료: customers.ts/ai.ts/Dashboard.tsx/AiCustomSendFlow.tsx 하드코딩 4곳 전수 제거→FIELD_MAP 동적. 수정 4파일 |
 | 02-26 | D39 세션0+세션1 완료: DDL(store_phone)+standard_fields 32개+standard-field-map.ts 재작성+upload.ts+normalize.ts FIELD_MAP 기반 동적 전환 |
 | 02-26 | 코드 실물 검증 5건 + S9-04/S9-08/GP-04 수정 + S9-07 모달 6곳 교체 + upload.ts sanitize/cleanup/인증 |
+
+## STATUS §3 TODO 완료분 회전 (2026-07-07 — 원문 무손실 이동)
+
+### 표준 필드 아키텍처 통합 (D39) — ✅ 완료
+- [x] 세션 0: DDL + standard-field-map.ts 재정의 (필수17+커스텀15)
+- [x] 세션 1: upload.ts + normalize.ts 입구 정상화
+- [x] 세션 2: customers.ts + Dashboard.tsx + ai.ts + AiCustomSendFlow.tsx 조회+AI 정상화
+
+### 대시보드 리팩토링 Phase 3
+- [x] 직접 타겟 설정 모달 분리 — ✅ D43-3a DirectTargetFilterModal.tsx (729줄)
+- [x] 직접 타겟 발송 모달 분리 — ✅ D43-3c TargetSendModal.tsx (901줄)
+- Dashboard.tsx 누적 감소: 8,039줄 → 3,910줄 (총 4,129줄 감소)
+
+### AI 맞춤한줄 Phase 2 (발송 연결) — ✅ 구현 완료 (문서 미갱신이었음, 2026-03-05 코드 검증)
+- [x] 발송 확정 → AiCustomSendFlow.tsx Step 4 onConfirmSend 콜백으로 variant+targetFilters 전달
+- [x] AiCampaignSendModal 연결 → Dashboard.tsx handleAiCustomSend에서 campaignsApi.create+send 호출
+- [x] 전체 플로우 코드 구현 완료 (Step4 → 모달 → 캠페인생성 → targetFilter기반 고객조회 → 개인화치환 → MySQL INSERT)
+
+### 080 수신거부 (✅ 나래인터넷 콜백 연동 완료 — 2026-03-05)
+- [x] 콜백 엔드포인트 구현 (고객사별 080번호 자동 매칭)
+- [x] 토큰 검증 제거 — Nginx IP 화이트리스트(나래 6개 IP)로 보안 대체
+- [x] Nginx 080callback 경로 나래 IP 화이트리스트 적용
+- [x] D43-4 양방향 동기화: opt_out_auto_sync DDL + syncCustomerOptIn 헬퍼 + 4곳 적용
+- [x] D43-4 프론트: 080번호 동적 표시 + 연동테스트 버튼 (auto_sync=true 조건부)
+- [x] curl 로컬 테스트 정상 확인 (서버 `1` 반환)
+- [x] 나래 담당자 콜백 URL 등록 확인 완료 (2026-03-05)
+- [x] 실제 080 ARS 수신거부 테스트 — 나래 IP(183.98.207.13) 콜백 수신 + 수신거부 DB 등록 정상 확인
+- [x] 기존 누적 수신거부 목록 — 한줄로 이관 시 수동 처리 예정 (벌크 동기화 불필요)
+
+### Sync Agent (완료분)
+- [x] Sync Agent 코어 완성 (비토 v1.3.0 개발 완료)
+- [x] 슈퍼관리자 SyncAgent API Key 관리 UI — ✅ D60 (2026-03-08): 고객사 편집 모달 9번째 탭. API Key/Secret 조회·재발급·비활성화, use_db_sync 토글. 백엔드 3개 엔드포인트 신규.
+
+### 보안 (완료분)
+- [x] 소스 보호: 우클릭/F12/개발자도구/드래그 차단 (3개 도메인 전체 적용)
+- [x] 🔴 MySQL 랜섬웨어 대응 (2026-02-28, D49): 외부 차단+비밀번호 강화+권한분리+fail2ban+포트차단 — 상세 내용 D43 안건#6 참조
+- [x] 프론트엔드 난독화 — ✅ D61 (2026-03-08): vite-plugin-javascript-obfuscator 적용, production 빌드 시 stringArray+base64+disableConsoleOutput. frontend+company-frontend 양쪽 적용.
+- [x] 외부 자동 백업 구축 — ✅ 2026-03-05 완료: pg_dump+mysqldump → 59번 서버(58.227.193.59) SCP 전송, SSH 키 인증, crontab 매일 03:00 KST, 7일 로컬 보관. 스크립트: /home/administrator/backups/backup.sh
+- [x] 웹 애플리케이션 SQL Injection 점검 — ✅ D56 테이블명 화이트리스트 + D57-C4 sendTime 파라미터화 + D59 custom_fields JSONB 키 화이트리스트(3파일) + dateFilter 파라미터화 완료 (SSRF 별도)
+
+### 인비토AI (완료분)
+- [x] ai_training_logs 테이블 + training-logger.ts + campaigns.ts 연결
+- [x] 이용약관에 비식별 데이터 활용 조항 추가 — 2026-07-03 제14조(데이터의 활용) 신설 + 부칙 3항(공지 후 7일 시행). TermsPage.tsx. 배포 후 서비스 공지 필요

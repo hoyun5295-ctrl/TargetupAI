@@ -1427,37 +1427,51 @@ function CardStyleThumb({ k, active }: { k: CardStyle; active: boolean }) {
   const edge = '1px solid rgba(255,255,255,0.16)';
   const common: CSSProperties = { position: 'relative', width: '100%', height: 52, borderRadius: 8, background: face, border: edge, padding: 7, display: 'flex', flexDirection: 'column', gap: 4 };
   if (k === 'bubble') {
+    // ★ 2026-07-07(5) 골격 미러 — 아바타 발신자 행 + 답장 칩 2개 + 꼬리
     return (
       <div style={{ ...common, borderRadius: '12px 12px 12px 4px' }}>
-        {line('40%')}
-        {line('75%')}
-        <div style={{ marginTop: 'auto', width: '55%', height: 8, borderRadius: 99, background: accent }} />
+        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+          <span style={{ width: 10, height: 10, borderRadius: 99, background: accent, flexShrink: 0 }} />
+          {line('35%')}
+        </div>
+        {line('70%')}
+        <div style={{ marginTop: 'auto', display: 'flex', gap: 3 }}>
+          <div style={{ width: '36%', height: 9, borderRadius: 99, background: accent }} />
+          <div style={{ width: '28%', height: 9, borderRadius: 99, border: '1px solid rgba(255,255,255,0.4)', boxSizing: 'border-box' }} />
+        </div>
         <div style={{ position: 'absolute', bottom: -4, left: 10, width: 8, height: 8, background: 'rgba(148,143,184,0.35)', borderRight: edge, borderBottom: edge, transform: 'rotate(45deg)' }} />
       </div>
     );
   }
   if (k === 'ticket') {
+    // ★ 2026-07-07(5) 골격 미러 — 2톤(본권/스터브) + 가장자리 다이컷 절취선
     return (
-      <div style={common}>
-        {line('60%')}
-        <div style={{ position: 'relative', margin: '2px -10px', display: 'flex', alignItems: 'center' }}>
-          <span style={{ width: 7, height: 7, borderRadius: 99, background: 'rgba(2,6,23,0.85)', marginLeft: 6 }} />
-          <div style={{ flex: 1, borderTop: '2px dashed rgba(255,255,255,0.35)', margin: '0 5px' }} />
-          <span style={{ width: 7, height: 7, borderRadius: 99, background: 'rgba(2,6,23,0.85)', marginRight: 6 }} />
+      <div style={{ ...common, padding: 0, overflow: 'hidden' }}>
+        <div style={{ padding: 7, display: 'flex', flexDirection: 'column', gap: 4 }}>
+          {line('38%')}
+          {line('68%', 5)}
         </div>
-        <div style={{ width: '100%', height: 9, borderRadius: 4, background: accent }} />
+        <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+          <span style={{ width: 9, height: 9, borderRadius: 99, background: 'rgba(2,6,23,0.85)', marginLeft: -4, flexShrink: 0 }} />
+          <div style={{ flex: 1, borderTop: '2px dashed rgba(255,255,255,0.35)', margin: '0 5px' }} />
+          <span style={{ width: 9, height: 9, borderRadius: 99, background: 'rgba(2,6,23,0.85)', marginRight: -4, flexShrink: 0 }} />
+        </div>
+        <div style={{ flex: 1, background: 'rgba(255,255,255,0.09)', padding: 6, display: 'flex', alignItems: 'center' }}>
+          <div style={{ width: '100%', height: 9, borderRadius: 4, background: accent }} />
+        </div>
       </div>
     );
   }
   if (k === 'poster') {
+    // ★ 2026-07-07(5) 골격 미러 — 풀블리드 히어로(카드 절반+) + 겹침 헤드라인
     return (
       <div style={{ ...common, padding: 0, overflow: 'hidden' }}>
-        <div style={{ height: 30, background: `linear-gradient(135deg, ${accent}, rgba(255,255,255,0.15))`, display: 'flex', alignItems: 'flex-end', padding: 5 }}>
-          <div style={{ width: '55%', height: 5, borderRadius: 2, background: 'rgba(255,255,255,0.9)' }} />
+        <div style={{ height: 34, background: `linear-gradient(135deg, ${accent}, rgba(255,255,255,0.15))`, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end', gap: 2, padding: 5 }}>
+          <div style={{ width: '28%', height: 3, borderRadius: 2, background: 'rgba(255,255,255,0.7)' }} />
+          <div style={{ width: '64%', height: 6, borderRadius: 2, background: 'rgba(255,255,255,0.95)' }} />
         </div>
         <div style={{ padding: 6, display: 'flex', flexDirection: 'column', gap: 4 }}>
           {line('80%')}
-          {line('50%')}
         </div>
       </div>
     );

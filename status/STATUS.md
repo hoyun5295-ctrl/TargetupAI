@@ -1,7 +1,7 @@
 # 한줄로 — 관제탑 (STATUS)
 
 > **상시 로드 문서. 30KB 상한.** 룰의 원천은 CLAUDE.md — 이 문서는 "현재 상태"와 "라우팅"만 담는다.
-> 재설계 전 전체 원본 백업: `status/_backup-20260703-관제탑재설계전/` (2026-07-03 관제탑 재설계 v2)
+> 재설계 전(2026-07-03 관제탑 재설계 v2) 전체 원본은 git 이력에 보존 — `_backup-20260703-관제탑재설계전/` 폴더는 2026-07-07 삭제(git 이력에서 복구 가능). 필요 시 `git log --all -- 'status/_backup-20260703-*'`로 해당 커밋 조회.
 > 사용법: 상황이 생기면 아래 라우팅 표에서 문서를 찾아 **지시된 범위만** 읽는다. 문서 전체 로드 금지. 아카이브는 archive/INDEX.md grep 경유로만.
 
 ---
@@ -24,7 +24,7 @@
 | 의사결정 배경 확인 | DECISIONS.md | 해당 ADR |
 | 리스크 전체 확인 | RISKS.md | 전체 |
 | 싱크에이전트 이슈 진단 | SYNC-AGENT-TROUBLESHOOTING.md | 해당 증상 절 |
-| 싱크에이전트 isae 현장 | SYNC-AGENT-ISAE-2026-06-30-HANDOFF.md | 전체 |
+| 싱크에이전트 isae 현장(완료 이력) | archive/SYNC-AGENT-ISAE-2026-06-30-HANDOFF.md | grep 적중 절만 (2026-07-07 archive 이동) |
 | AI Operator·CDP·Provider | docs/AI_OPERATOR_기능정의서.md + ai_operator_progress.md | 해당 절 |
 | 레거시 서버(27.102.203.143) 폐기 | docs/레거시서버_폐기_플랜.md | 전체 (SoT — 진행 시 갱신) |
 | 인앱메시지 설계 | docs/인앱메세지전용.md | 해당 절 |
@@ -37,87 +37,47 @@
 
 > **회전 룰:** 완료(★배포완료) 엔트리는 원문을 archive/TASKS_YYYY-MM.md로 이동 + INDEX 등재하고, 아래 "최근 완료 인덱스"에 1줄만 남긴다. 30KB 초과 = 회전 미이행 — 즉시 회전.
 
-### 🟢 2026-07-07 — 인앱/이메일/DM 대개편 6종 + hlj.kr 단축링크 라이브 + 인앱 디자인 2.0 (★DDL 5컬럼 실행완료·hlj.kr 서버배선 라이브 / frontend·SDK build+deploy 잔여)
+### 🟢 2026-07-07 — 인앱/이메일/DM 대개편 6종 + hlj.kr 단축링크 라이브 + 인앱 디자인 2.0~2.1 + 행사 캠페인 (★DDL 6컬럼 실행완료·hlj.kr 라이브 / frontend·SDK build+deploy 잔여)
 > **① 이메일 미수신자 재발송**: "미오픈 SMS"→"미수신자 재발송"(이메일 무료 primary + SMS 유료 secondary). 자식 캠페인(원본 통계 무손상·완성게이트 우회로 크레딧 재부과 0)·재발송 1회 한도·수신거부/반송 제외·자식은 카피학습 코퍼스 skip(이중계상 방지). DDL `email_campaigns.parent_campaign_id·resend_generation`.
 > **② 요금제 변경 반복노출 근본수정**: 접속마다 "베이직 변경" 모달 재발 = localStorage 비교 방식 취약 → 서버 `companies.plan_notified_code`(DDL) + my-plan pending 판정(NULL=조용히 초기화) + POST /plan-change/ack. 계정당 1회·브라우저 무관. Dashboard localStorage 효과 폐기.
 > **③ 인앱 표시 가능성 게이트**: 네이버 스마트스토어=폐쇄형이라 인앱 영구 미지원(데이터 연동만) 명확 안내 + 표시 가능 채널 0이면 생성/게시/AI생성 크레딧 차감 전 차단(INAPP_DISPLAY_UNAVAILABLE). CT `inapp-display-eligibility`(company_integrations active + cdp_events sdk 30일 신호). 메이크샵·아임웹 SDK 설치 가이드 추가. 인앱=company+channel 단위(몰별 타겟팅 없음).
 > **④ hlj.kr DM 단축링크 (★서버 배선 라이브)**: 개인화 URL 75자→`hlj.kr/<8자>` 22자(SMS 90byte 유지=LMS 승격 방지 원가절감). 302 겉껍질(추적·개인화·발송 무변경)+발급 실패 시 긴 링크 폴백. DDL `dm_recipient_tokens.short_code`. 서버 DNS(A=58.227.193.62)+nginx(/api/dm/v/s)+certbot SSL+.env DM_SHORT_LINK_BASE 라이브(https 302 실측). GET /api/dm/v/s/:code.
 > **⑤ DM 추적 강화 5건 + 인앱 통계 절충안 + CSV 3종**: 구매전환(7일 purchases)·미열람자 재발송·재열람/기기 공유신호(dm_views open_count·seen_anon_ids DDL)·열람시간대·섹션이탈 / 인앱 절충안=식별고객 목록+익명 합산(buildIdentifiedViewers, GET /inapp/viewers) / 공용 CT `csv-download`(BOM)로 이메일 이력·DM 추적·인앱 CSV. 전부 격리 try/catch.
 > **⑥ 인앱 디자인 2.0 (SDK v0.3.9·브레이즈급)**: 타이포(Pretendard 700/800)·그라데이션 면+3중그림자+링·글래스 백드롭blur·스프링 모션·CTA/쿠폰티켓/카운트다운 세그먼트/SVG닫기/플로팅·safe-area. 렌더러+빌더 미리보기 1:1. v0.3.9 신설+v0.3.8 제자리 갱신(설치 몰 자동 반영·재설치 불필요), 스니펫 7곳 갱신. shadeHex/accentSoft/surfaceBg/ring 토큰 추가(기존 의미 불변).
-> **검증**: SDK 115/115·backend 312/312·sdk/backend/frontend tsc 0·금지패턴 0. **DDL 5컬럼 서버 실행완료**. **잔여**: tp-push + frontend·company-frontend `build:safe`(새 SDK/프론트 dist) + `pm2 reload targetup-backend`. 배포후 실측(재발송 1건·요금제 모달 소멸·인앱 게이트·hlj.kr 문자링크·CSV·인앱 디자인). 상세 [archive/TASKS_2026-07.md](archive/TASKS_2026-07.md) · [[project_2026_0707_inapp_email_dm_overhaul]].
+> **⑦ 인앱 디자인 언어 2.1 + 실고객 샘플 + 브랜드 강조색(0707(2))**: 테마 6종=색깔놀이 지적 → 구조·타이포·장식 토큰 11종 추가(brand=흰 캔버스+브랜드 밴드 쇼케이스·minimal=모노 에디토리얼·dark=글로우 등, SDK+미리보기 1:1). 이서연 하드코딩 삭제 → 실고객 조회(buildEditorPreviewCustomers, 타겟 최상단+등급별, 0명만 "가상 예시"). AI 강조색 임의 hex → companies.brand_kit 실설정 강제(getCompanyBrandKitRaw). 신규 DDL 0.
+> **⑧ 인앱 형태 4종 + 카운트다운 실측화 + 시간입력 교체 + 블록 편집기(0707(3))**: card_style DDL(classic/bubble/ticket/poster, 구버전=classic 폴백). 미리보기 카운트다운 고정목업(23:59:59)→실시간 계산. datetime-local 6곳→공용 DateTimeField(날짜 캘린더+오전/오후+시·분 직접입력). 블록 팔레트 카테고리·아이콘·설명 + IconGrid·Seg·StarInput·CTA 카드화·상품 이미지칸.
+> **⑨ 행사 캠페인 자동생성 + DM 문안 품질 3건(0707(4))**: 행사 1입력→DM·이메일·인앱 선택 생성(그리드 12 유지·AI Operator 칩+캘린더 버튼·슬롯별 크레딧·선택분만 과금·인앱 게이트 잠금·이어서 만들기). CT event-brief(원문 기재 혜택만 통과=benefitMatchesEventText, 환각 탈락). DM→문안 16섹션 요약·SMS 90byte 옵션·브랜드보이스 확인.
+> **검증**: SDK 123/123·backend 317/317·sdk/backend/frontend tsc 0·금지패턴 0. **DDL 6컬럼 서버 실행완료(⑦0·⑧card_style 1·원 6종 5)**. **잔여**: tp-push + frontend·company-frontend `build:safe`(새 SDK/프론트 dist) + `pm2 reload targetup-backend` / **Codex 이중검증=플러그인 미로드로 이 세션 불가 → 다음 세션 /codex:review 1순위**. 배포후 실측(재발송·요금제 모달·인앱 게이트·hlj.kr·CSV·테마6/형태4 실차이·카운트다운·시간입력 6곳·행사 3채널·SMS 문안). 상세 [archive/TASKS_2026-07.md](archive/TASKS_2026-07.md) · [[project_2026_0707_inapp_email_dm_overhaul]].
 
 ---
 
-### 🟢 2026-07-06 — 운영 버그 5건 근본수정 (★전체 배포완료 / Harold 운영검증 대기)
-> **① 발송통계 성공→실패 재발 (backend)**: 통신사 리포트 지연(최대 48h) 건이 campaign-lifecycle 120분 "대기→실패 변환"으로 굳고 6h markFinalized+재대조 필터(합<적재) 사각에서 영구 오표시(베네통·아이디룩 실측). 변환 2곳 삭제 — 마감은 기존 3겹(48h sweeper/6h 게이트/72h 탈출구), 환불은 실패 확정분만. **복구 UPDATE 897건(result_final=false, 6/1↑) 실행완료** → 72h 탈출구가 실측 재확정. 배포 후 UPDATE 재실행(멱등).
-> **② 080 수신거부 자동등록 (backend)**: user 오버라이드 오타(8700)+fallback LIMIT1이 auto_sync=false 회사로 true 회사 가림(psy5868). user+company **합집합** 매칭(공유번호 정식 지원)+auto_sync WHERE화+매칭0 진단로그+발신자 로그. 삭제 격리는 기존 충족. [[feedback_080_shared_number_policy]].
-> **③ DM 발송 클릭 전체 백지 (frontend·긴급)**: DmSendAndTrackModal `if(!show)return null` 아래 useRef(7/2 유입) → show 토글 시 훅 개수 불일치 크래시→루트 언마운트. useRef를 조기return 위로. 후속=루트 ErrorBoundary+rules-of-hooks 린트.
-> **④ 문안 생성 Liquid/없는 필드 노출 (backend)**: CT-58 formatProfileForAiPrompt "분기변수=Liquid 의무" 지시가 %변수% 세계(generateMessages)에도 주입 → 오퍼레이터 문안에 `{% if customer.churn_risk %}` 노출(psy5868 시연). `variableStyle:liquid/percent` 분리(여정·인앱 기본 무변)+출구 평문화 가드(flattenLiquidToPlainText)+발송 최후 방어(messageUtils strip). Harold 원칙=목록 생성+기계 검증 2단.
-> **⑤ 업로드 AI 매핑 빈손 (backend)**: 7/1 Sonnet5 전환 sweep이 raw fetch(upload.ts /mapping) 누락 → 적응형 사고 첫 블록이면 content[0].text 빈손+"성공"로그(박성용). SDK+게이팅 전환·text블록 탐색·GPT폴백 검증·빈매핑 정직안내 / ai-mapping.ts 동일+**1차 모델 Sonnet5 통일**(Harold) / analysis.ts 통일. **★재발차단: `ai-call-invariants.test.ts`(raw fetch 금지·게이팅 의무·첫블록 가정 금지 3불변식 소스 전수 스캔)**.
-> **⑥ 신규 최상위 룰**: CLAUDE.md `impact_analysis_before_modification`(수정 전 연관 영향표 의무, Harold 명시) + 체크리스트 항목. [[feedback_impact_analysis_before_modification]].
-> **★배포완료. Harold 운영검증 대기**: 복구 UPDATE 897 재실행(멱등) + ①두 캠페인 succ1/fail0 ②psy5868 080 재테스트(+테스트계정 6700 정리) ③DM 발송 정상 ④오퍼레이터 문안 중괄호0 ⑤엑셀 재업로드 자동배정 + .env `CLAUDE_MAPPING_MODEL` 확인. 상세 [[project_2026_0706_pending_fail_freeze_rootfix]].
-
----
-
-### 🟢 2026-07-05 — 자동마케팅 4수정(배포완료) + 비토 Agent v1.0.8/MMS + 레거시 템플릿 이관 조사
-> **① 자동마케팅 전수점검 4수정 (★배포완료, 커밋 38c06ea8)**: 발송 상한(LIMIT 10000) 제거 = 서버사이드 staging INSERT(operator-recipients `buildSendableStagingInsertSql`·customer-send-stats `recordCustomerSendsByFilter`, 상한 없음) / 크레딧 차감 유실 차단('sent' 전환을 차감 성공에 종속→reconcile 재차감) / approve 라우트 `isAiOperatorAllowed` 게이트 / non-ad→광고 라벨. 통제선=고객 예산·선불 잔액(우리 강제상한 0). tsc0·순수17.
-> **② 비토 Agent v1.0.8 MMS (Agent 배포완료·Gateway v135 대기)**: 라인13 MMS 이미지 누락 진단(앱 정상, Agent가 파일 미독) → 조언문서 → 자비스 당일 v135/v1.0.8. Agent v1.0.5→1.0.7→1.0.8 교체 + `mms:` config. **Gateway v135(139.150.81.213) 반영 + E2E 미실측 대기**. OPS.md §6-2 갱신. 상세 [[project_2026_0705_bito_agent_v108_mms]].
-> **③ 레거시 카카오 템플릿 이관 조사·핸드오프 (서팀장 회의 대기)**: event-admin(4519 템플릿) → 한줄로. 확정19/신규34/A-B(IMC 계정) 미확정. SoT=docs/2026-07-05-legacy-template-migration-handoff.md. 상세 [[project_2026_0705_legacy_template_migration]].
-
----
-
-### 🟢 2026-07-04 (2) — 모달/토스트 UX + 베스트 문안 재설계·진화 + 발송결과 집계 근본수정 + 스크롤 복원 + 직접발송 정리
-> **① 모달 배경클릭 닫힘 전면 제거 (★배포완료)**: 전 모달(frontend 약60 + company-frontend 2)에서 오버레이 백드롭 닫힘(onClick/onMouseDown/currentTarget) 제거 — X·취소·ESC만. `ModalBase closeOnBackdrop` 기본 false. 드롭다운/캔버스/이미지라이트박스 판별 제외, 잔존 0 재grep.
-> **② 크레딧·피드백 토스트 z-index (★배포완료)**: `credit:used` 토스트(ToastProvider) + 로컬 코너 토스트 13곳을 z-[10000]로 상향(모달 z-[9999] 위, 세션만료 99999만 최상위). 모달 뒤로 깔려 안 보이던 문제 해소.
-> **③ 베스트 문안 재설계 (코드완료·tsc0·vitest·미배포)**: 학습(ceo전용) 분리 → 슈퍼관리자 공용 '베스트 문안' 메뉴(`/admin/best-copy`). 휴리스틱 채굴(최근300·정보성 기본값→예약안내 오뽑) 폐기 → AI 전수 채굴(`best-copy-miner`, 전건 배치판정·is_ad 라벨 불신) + 직원 직접 입력(핸드폰 목업 좌액정/우기능). `gateSeedText` 단일 저장 게이트. 상세 [[project_2026_0704_best_copy_curation_evolution]].
-> **④ 학습 루프 진화 (코드완료·미배포·★DB 대기)**: 시드 성과 환류(best_copy_seed_usage) + 업종 승리공식 증류(best_copy_assets·`industry-formula`) + 사용자 스타일 갤러리(원문의 벽·jaccard 가드·`/api/ai/style-gallery`) + Tier1 반응신호(`ai_training_logs.click_count/conversion_count` — DM·이메일 클릭 환류 + 랭커/검색기 클릭 우선 정렬) + 회사 메모리→문안 생성 주입(composeCopyBrain) + 거부 제안 '피할것' 증류. SoT=specs/2026-07-04-best-copy-evolution-design.md.
-> **⑤ 발송결과 집계 근본수정 (코드완료·tsc0·테스트·미배포)**: 라인13 비토 게이트웨이(SMSQ_SEND_13) 요약 성공 0 = LIVE 대기전용 집계 + LOG(_YYYYMM) 미생성(제자리 status 갱신)이 겹친 구조 결함(상세는 raw라 정상). `classifyResultTables`(sms-table-split CT) — "LOG 짝 없는 LIVE는 결과까지 집계"(이중카운트 구조적 불가). `smsCampaignCountsSafe`+엑셀 집계 통일(요약·6h워커·정산환불·라이프사이클 5소비처 자동 정합). 실데이터 확정 후 수정. → LESSONS_BACKEND.
-> **⑥ 스크롤 복원 전역 통일 (코드완료·tsc0·미배포)**: BrowserRouter(비-데이터 라우터)라 직접 구현 — `ScrollManager`(POP=이전 위치 복원 / PUSH=top, 6/28 '메뉴=최상단' 유지) + 뒤로가기 버튼 14곳 `goBackOr(navigate, fallback)`(앱 히스토리 있으면 navigate(-1)=POP). 옛 `ScrollToTop` 폐기. [[feedback_scroll_restoration_convention]]. → LESSONS_FRONTEND.
-> **⑦ 직접발송 정리 (코드완료·tsc0·미배포)**: 브랜드링크(BrandLinkChips) 직접발송에서만 제거(유료 3곳=브랜드보이스·직접타겟발송·에디터 유지) + 스팸필터·AI다듬기 미가입 게이팅을 표준 `PlanUpgradeModal`로 통일(구식 SpamFilterLockModal·AiRefineLockedModal 삭제).
-> **잔여**: ③④⑤⑥⑦ tp-push + frontend `build:safe` / backend(③④⑤) `pm2 restart all` / **★서버 psql 2세트: best_copy_seed_usage·best_copy_assets(CREATE) + ai_training_logs.click_count·conversion_count(ADD)** — 코드 42P01/42703 폴백이라 순서 자유(SCHEMA.md 등재). 배포 후 실측(라인13 요약 성공 3·베스트문안 채굴→승인 E2E·스크롤 뒤로가기 복원·직접발송 게이팅 모달).
-
----
-
-### 🟢 2026-07-03 — 관제탑 v2 + 사용구분 게이팅 + 전채널 학습루프 + 레거시 SSL 무료 + 카페24 심사/고도몰/isae 완결 (요약 — 상세는 memory)
-> ★대부분 배포완료: 관제탑 재설계 v2(상시로드=CLAUDE+STATUS·harness-check 훅) / 사용구분 게이팅(companies.usage_type DDL) / 전채널 학습루프 P1~4(Gap4 예측→타겟 영구금지 [[feedback_prediction_never_selects_target]]) / event-admin SSL 무료전환(연 99,000원↓) / 카페24 공식앱 심사요청 완료(App URL=hanjul.ai/cafe24/launch) / 고도몰 주문 연동 실증(partner_key+몰별key) / isae 완결(고객137,267·구매185만).
-> **활성 잔여**: (학습루프 KAKAO 중복가드 포함) ②③⑤ tp-push+build+pm2 재배포 + 실측(customer_send_stats·고객등급 모달) / 레거시 폐기 서팀장 5문항 회신 대기(docs/레거시서버_폐기_플랜.md). 상세 [[project_2026_0703_control_tower_redesign]]·[[project_2026_0703_all_channel_learning_loop]]·[[project_2026_0703_cafe24_review_godo_integration]]·[[project_2026_0703_performance_customer_axis]]·[[project_2026_0703_isae_157_mapping_purchase_summary]].
-
----
-
-### 🟢 2026-07-03 — 싱크에이전트 updater 자기교체 근본수정 v1.6.0 (★코드·5티어빌드·티어 E2E 게이트 완료 / git push·서버 릴리즈만 잔여)
-> updater 교체가 자기 job(Win)·cgroup(Linux)을 자살시켜 무선 교체 실패(isae 실측) → Win=별도 일회성 작업(SyncAgentUpdate, job 밖)+원자 스왑(move /y), Linux=`systemd-run` transient 서비스(--scope 아님=ProtectSystem 상속 회피)+원자 mv + checksum 필수화·빈버전 가드·self-heal·restart 근본수정·old Windows→CLI 설치 라우팅. tsc 0, 유닛 60 GREEN, win-legacy 실 2008R2 VM E2E + linux Docker E2E PASS. 서버: download_url 티어 인코딩+`upload:releases`(5티어 무선). **★배포안전: 1.5.x→1.6.0 무선 불가(깨진 updater)→win-legacy active 등록 금지(isae 깨짐), 등록은 1.6.1부터. 파일 업로드는 안전(sync_releases만 트리거)**. 세션종료 상태: upload 완료 / tp-push·sync_releases 등록 미완(등록 보류) / isae 무손 1.5.7 가동. 상세 [[project_2026_0703_sync_agent_updater_selfreplace]].
+### 🔴 활성 블로커 — 알림톡 강조표기형 7300 (대표링크 게이트웨이 매핑 대기, 서팀장)
+> 원문·해법·잔여 전문 = [BUGS.md](BUGS.md) §2 (2026-07-07 소유 이관 — 버그 상세는 BUGS.md가 소유). 요지: 대표링크 템플릿의 ATTACHMENT.link 미동봉이 근본 — ①서팀장 게이트웨이 etcJson→IMC link 매핑 추가 → ②한줄로 발송 4경로 etcJson link 합성(buildAlimtalkEtcJson 확장) → ③CT-87 R 차단 해제 묶음(Harold 동의 대기).
 
 ### 🔵 다음 세션 (예정) — 이메일 & 모바일 DM 퀄리티 끌어올리기 (Harold 지시 2026-07-07)
-> 인앱 디자인 2.0(SDK v0.3.9)에 이어 이메일 템플릿/렌더 + 모바일 DM 빌더·발행물 디자인 퀄리티를 브레이즈급으로. brainstorming→설계→동의→구현.
+> 인앱 디자인 2.0~2.1(SDK v0.3.9)에 이어 이메일 템플릿/렌더 + 모바일 DM 빌더·발행물 디자인 퀄리티를 브레이즈급으로. brainstorming→설계→동의→구현.
 > (보류) 팝폰 SDK 검증(자체 서비스 SDK 실측 베드) = C:\Users\ceo\projects\poppon-workspace 정독 후 별도. 상세 [[project_2026_0618_selfhosted_mall_app_collection]].
-
----
-
-### 🔴 2026-06-11 — 알림톡 강조표기형 7300 **최종 근본 확정 = 대표링크(ATTACHMENT.link) 미동봉** — 게이트웨이 매핑 추가 대기(서팀장)
-> **최종 근본(휴머스온 답변+실측 5회 확정)**: 79738만 `kakao_templates.represent_link` 등록(`{"urlPc","urlMobile"}` — 정상 발송 5개 템플릿은 전부 미등록, PG 실측)인데 **발송 요청에 link 미동봉 → 카카오 템플릿 불일치 거부**. 한줄로는 represent_link를 저장만 하고 발송 경로 소비 0건(grep). 옛 가설 2개 폐기 — ① sender_code concat(부차: 가드 수정 완료, 식별코드 301170011 엔진 자동삽입) ② imc_template_status R 차단(휴머스온 정의 **S=중지/A=정상/R=발송 전 대기, 첫 발송 시 자동 A** — R은 차단 사유 아님, CT-87 R 차단은 신규 템플릿 첫 발송 영구 차단 역효과라 정정 의무).
-> **운반 구간 실측(LINKTEST1~6, Harold 번호 2개)**: etcJson snake/camel link·btnJson link객체·btnJson 버튼형식(name 유/무) 전부 7300. 게이트웨이(인비토 자체, mmsr3/ngen) 로그 = **etcJson의 link가 게이트웨이까지 온전 도달** + 휴머스온 "IMC 접수에 ATTACHMENT 없음" → **막히는 지점 = 게이트웨이 엔진이 etcJson에서 title만 IMC로 옮기고 link 미전달**. 타업체 성공 사례는 전부 대표링크 없는 템플릿(etcJson title만 — 전달 모양 한줄로와 동일). deliver 전문 필드=title/btnJson/etcJson뿐(link 전용 자리 없음). btnJson 버튼형식은 button으로 변환됨(채널추가 1800 실증 — 버튼 통로 정상).
-> **해법(확정·진행 대기)**: ① 서팀장 — 게이트웨이 엔진에 etcJson 안 `link` 객체 → IMC 요청 최상위 `link`(urlMobile/urlPc) 매핑 추가. ② 한줄로 — 발송 4경로에서 대표링크 템플릿이면 etcJson에 `{"title":…,"link":{"urlMobile":…,"urlPc":…}}` 합성(공통 CT, buildAlimtalkEtcJson 확장) — ① 완료 통보 후 구현+실측 1건. ③ 어제 배포완료분 정정 묶음 = CT-87 R 차단 해제(S/D만)+화면 "발송불가" 뱃지 문구+SCHEMA.md imc_template_status 주석 — Harold 동의 대기.
-> **잔여**: 진단로그 `[ALIMTALK-DEBUG2]`(direct-send-processor) 제거 의무(종결 시). LINKTEST1~6 테스트 행 = SMSQ_SEND_1_202606 app_etc1 LIKE 'LINKTEST%' (정산 집계 시 제외 식별 가능). IMC v1 스펙 제약 = link 포함 시 버튼 최대 2개. 5월 79955 버튼 발송 url1_1 빈 값 92 건은 CT(convertButtonsToQTmsg) 도입 전 경로 — 현행 CT는 urlMobile 정상 처리.
-> 상세=`memory/project_2026_0609_alimtalk_emphasize_etcjson_diagnosis.md`(2026-06-11 갱신)+IMC v1 스펙=Developer Portal(link 최상위 camelCase·강조형 link 허용).
-
----
 
 ---
 
 ### 최근 완료 인덱스 (원문 = 링크의 월별 아카이브)
 
-- 🟢 2026-07-05 (4) — 카페24 심사 반려 3건 대응(설치 OAuth 로그인 분리+자동시작·상세페이지 이미지) + 마케팅 캘린더 헛점 12건 근본 수정(yearly 스케줄·모달 N×200·차감구조·서버저장·P2-6 컨텍스트·한달 재설계 10) (★배포완료·DDL 2건 포함) → [archive/TASKS_2026-07.md](archive/TASKS_2026-07.md) · 상세 [[project_2026_0705_marketing_calendar_overhaul]] · [[project_2026_0703_cafe24_review_godo_integration]]
+- 🟢 2026-07-06 — 운영 버그 5건 근본수정 (★배포완료 / **잔여: Harold 운영검증** — 복구 UPDATE 897 재실행·5건 실측·.env CLAUDE_MAPPING_MODEL 확인) → [archive/TASKS_2026-07.md](archive/TASKS_2026-07.md) · 상세 [[project_2026_0706_pending_fail_freeze_rootfix]]
+- 🟢 2026-07-05 — 자동마케팅 4수정(★배포완료) + 비토 Agent v1.0.8 MMS(**잔여: Gateway v135 E2E 실측 대기**) + 레거시 템플릿 이관 조사(**잔여: 서팀장 회의**) → [archive/TASKS_2026-07.md](archive/TASKS_2026-07.md) · 상세 [[project_2026_0705_bito_agent_v108_mms]] · [[project_2026_0705_legacy_template_migration]]
+- 🟢 2026-07-05 (4) — 카페24 심사 반려 3건 대응 + 마케팅 캘린더 헛점 12건 근본 수정 (★배포완료·DDL 2건 포함) → [archive/TASKS_2026-07.md](archive/TASKS_2026-07.md) · 상세 [[project_2026_0705_marketing_calendar_overhaul]] · [[project_2026_0703_cafe24_review_godo_integration]]
 - 🟢 2026-07-05 (2) — 여정 재점검: 3버그 + 발송 피로도 보호 + 계절감 제거 (★전부 배포완료) → [archive/TASKS_2026-07.md](archive/TASKS_2026-07.md) · 상세 [[project_2026_0705_journey_reinforcement]]
+- 🟢 2026-07-04 (2) — 모달/토스트 UX(★배포완료) + 베스트 문안 재설계·진화 + 발송결과 집계 근본수정 + 스크롤 복원 + 직접발송 정리 (**잔여: ③④⑤⑥⑦ tp-push+build:safe+pm2 재배포 + 서버 psql 2세트(best_copy_seed_usage·best_copy_assets CREATE / ai_training_logs.click_count·conversion_count ADD)**) → [archive/TASKS_2026-07.md](archive/TASKS_2026-07.md)
 - 🟢 2026-07-04 — 문안 퀄리티 엔진(cold-start, GPT 차별화·fix분 재배포 대기) + 비토 자체게이트웨이 라인13 E2E 완주 + 메모리 관제탑 정리 → [archive/TASKS_2026-07.md](archive/TASKS_2026-07.md)
-
+- 🟢 2026-07-03 — 관제탑 v2 + 사용구분 게이팅 + 전채널 학습루프 + 레거시 SSL + 카페24/고도몰/isae 완결 (**잔여: 학습루프 ②③⑤ 재배포+실측 / 레거시 폐기 서팀장 5문항 회신 대기**) → [archive/TASKS_2026-07.md](archive/TASKS_2026-07.md) · 상세 [[project_2026_0703_control_tower_redesign]] · [[project_2026_0703_all_channel_learning_loop]]
+- 🟢 2026-07-03 — 싱크에이전트 updater 자기교체 근본수정 v1.6.0 (**잔여: tp-push·sync_releases 서버 릴리즈 등록 — win-legacy active 등록은 1.6.1부터**) → [archive/TASKS_2026-07.md](archive/TASKS_2026-07.md) · 상세 [[project_2026_0703_sync_agent_updater_selfreplace]]
 - 🟢 2026-07-02 (6) — 자동마케팅 완성: 발송 전 흐름 스펙 + 일일 분석 엔진(오늘의 추천) + 회고·ROI·캘린더·D-2 준비 → [archive/TASKS_2026-07.md](archive/TASKS_2026-07.md)
 - 🟢 2026-07-02 (5) — DM 추적 근본 수리(본문 파서) + 상세 추적/버튼 단위 + AI 학습 메모리 자동 전송 + 디자인 v2 → [archive/TASKS_2026-07.md](archive/TASKS_2026-07.md)
 - 🟢 2026-07-02 (4) — DM·이메일 전면 정비 → [archive/TASKS_2026-07.md](archive/TASKS_2026-07.md)
 - 🟢 2026-07-02 (3) — 모바일DM 수신자별 추적 근본 수정: 토큰 1급 키 + 열람 깊이/섹션/클릭 + 추적 화면 격상 → [archive/TASKS_2026-07.md](archive/TASKS_2026-07.md)
 - 🟢 2026-07-02 (2) — 이메일 마케팅 종결: 크레딧 모델 개편 + 개인화 동적화 + 링크/쿠폰/서식/페이징 → [archive/TASKS_2026-07.md](archive/TASKS_2026-07.md)
 - 🟢 2026-07-02 (1) — 브랜드보이스 형태 추출 강화 + 브랜드 링크 + 문안 편집기 모달 → [archive/TASKS_2026-07.md](archive/TASKS_2026-07.md)
-- 🟢 2026-07-01 (이어서 3) — 서버 상태 점검 후 코드 수정: 42P08(시스템 sync user INSERT 타입충돌) + PG 부팅 연결 재시도 + CORS 안내 → [archive/TASKS_2026-07.md](archive/TASKS_2026-07.md)
-- 🟢 2026-07-01 (이어서 2) — 예측 일일차감 eligibility 요금제기반 재정의 + 슈퍼관리자 화이트 모던화 + 이메일 placeholder 발송 UX → [archive/TASKS_2026-07.md](archive/TASKS_2026-07.md)
+- 🟢 2026-07-01 (이어서 3) — 서버 상태 점검 후 코드 수정: 42P08 + PG 부팅 연결 재시도 + CORS 안내 → [archive/TASKS_2026-07.md](archive/TASKS_2026-07.md)
+- 🟢 2026-07-01 (이어서 2) — 예측 일일차감 eligibility 재정의 + 슈퍼관리자 화이트 모던화 + 이메일 placeholder 발송 UX → [archive/TASKS_2026-07.md](archive/TASKS_2026-07.md)
 - 🟢 2026-07-01 (이어서) — 비-문자 개인화+타겟추출 전체(이메일·인앱·DM) + DM 수신자별 토큰 발송/추적/편집기 + 발행 주소복사 → [archive/TASKS_2026-07.md](archive/TASKS_2026-07.md)
 - 🟢 2026-07-01 — AI 모델 전환: 문안=Sonnet 5 / 오퍼레이터 정밀=Opus 4.8 + 검수 thinking·오탐차단 + 브랜드보이스 톤 강화 → [archive/TASKS_2026-07.md](archive/TASKS_2026-07.md)
 
@@ -127,25 +87,14 @@
 
 ## 3) 진행 예정 작업 (TODO)
 
+> 완료분(D39·대시보드 리팩토링·AI 맞춤한줄 완료분·080·Sync Agent 완료분·보안 완료분·인비토AI 완료분) 원문 = [archive/DONE_LOG_2026.md](archive/DONE_LOG_2026.md) "STATUS §3 TODO 완료분 회전 (2026-07-07)" 절로 무손실 이동.
+
 ### 🟡 잔여 — 직원 버그리포트 실동작 검증 (코드 수정 전체 완료)
 - [ ] **8차 B8-01~B8-13: 직원 실서비스 테스트** (app.hanjul.ai)
 - [ ] **9차 S9-04/S9-08: 발송결과 조회 성능 + sent_at 정확성 확인**
 - [ ] **D39 세션2 실동작 검증: 필터 UI + AI 보유필드 확인**
 
-### ✅ 완료 — 표준 필드 아키텍처 통합 (D39)
-- [x] 세션 0: DDL + standard-field-map.ts 재정의 (필수17+커스텀15)
-- [x] 세션 1: upload.ts + normalize.ts 입구 정상화
-- [x] 세션 2: customers.ts + Dashboard.tsx + ai.ts + AiCustomSendFlow.tsx 조회+AI 정상화
-
-### 대시보드 리팩토링 Phase 3 (추후)
-- [x] 직접 타겟 설정 모달 분리 — ✅ D43-3a DirectTargetFilterModal.tsx (729줄)
-- [x] 직접 타겟 발송 모달 분리 — ✅ D43-3c TargetSendModal.tsx (901줄)
-- Dashboard.tsx 누적 감소: 8,039줄 → 3,910줄 (총 4,129줄 감소)
-
-### AI 맞춤한줄 Phase 2 (발송 연결) — ✅ 구현 완료 (문서 미갱신이었음, 2026-03-05 코드 검증)
-- [x] 발송 확정 → AiCustomSendFlow.tsx Step 4 onConfirmSend 콜백으로 variant+targetFilters 전달
-- [x] AiCampaignSendModal 연결 → Dashboard.tsx handleAiCustomSend에서 campaignsApi.create+send 호출
-- [x] 전체 플로우 코드 구현 완료 (Step4 → 모달 → 캠페인생성 → targetFilter기반 고객조회 → 개인화치환 → MySQL INSERT)
+### AI 맞춤한줄 Phase 2 (잔여)
 - [ ] 실서비스 통합 테스트 (실제 발송 확인) — Harold님 검증 대기
 
 ### 카카오 알림톡 템플릿 관리 (Humuson API v2.1.1)
@@ -155,49 +104,26 @@
 - [ ] 기술: 백엔드 프록시 /api/kakao-templates/*, DB kakao_templates 확장, 상태 전이 규칙
 - [ ] Phase 2: 이미지 업로드, 알림 수신자 관리, 발신프로필 그룹
 
-### 080 수신거부 (✅ 나래인터넷 콜백 연동 완료 — 2026-03-05)
-- [x] 콜백 엔드포인트 구현 (고객사별 080번호 자동 매칭)
-- [x] 토큰 검증 제거 — Nginx IP 화이트리스트(나래 6개 IP)로 보안 대체
-- [x] Nginx 080callback 경로 나래 IP 화이트리스트 적용
-- [x] D43-4 양방향 동기화: opt_out_auto_sync DDL + syncCustomerOptIn 헬퍼 + 4곳 적용
-- [x] D43-4 프론트: 080번호 동적 표시 + 연동테스트 버튼 (auto_sync=true 조건부)
-- [x] curl 로컬 테스트 정상 확인 (서버 `1` 반환)
-- [x] 나래 담당자 콜백 URL 등록 확인 완료 (2026-03-05)
-- [x] 실제 080 ARS 수신거부 테스트 — 나래 IP(183.98.207.13) 콜백 수신 + 수신거부 DB 등록 정상 확인
-- [x] 기존 누적 수신거부 목록 — 한줄로 이관 시 수동 처리 예정 (벌크 동기화 불필요)
-
 ### 선불 요금제 Phase 1-B~2
 - [ ] Phase 1-B: KCP PG 연동 (카드결제만, 가상계좌 제외)
 - [ ] Phase 2: 입금감지 API 자동화
 
-### Sync Agent
-- [x] Sync Agent 코어 완성 (비토 v1.3.0 개발 완료)
-- [x] 슈퍼관리자 SyncAgent API Key 관리 UI — ✅ D60 (2026-03-08): 고객사 편집 모달 9번째 탭. API Key/Secret 조회·재발급·비활성화, use_db_sync 토글. 백엔드 3개 엔드포인트 신규.
-- [ ] sync_releases에 v1.3.0 릴리스 레코드 등록 (비토 최종 빌드 후)
+### Sync Agent (잔여)
+- [ ] sync_releases에 v1.6.1 릴리스 레코드 등록 (updater 자기교체 fix 안정판 — 1.6.0 win-legacy 등록 금지, TASKS 2026-07-03 참조)
 
-### 보안
-- [x] 소스 보호: 우클릭/F12/개발자도구/드래그 차단 (3개 도메인 전체 적용)
-- [x] 🔴 MySQL 랜섬웨어 대응 (2026-02-28, D49): 외부 차단+비밀번호 강화+권한분리+fail2ban+포트차단 — 상세 내용 D43 안건#6 참조
-- [x] 프론트엔드 난독화 — ✅ D61 (2026-03-08): vite-plugin-javascript-obfuscator 적용, production 빌드 시 stringArray+base64+disableConsoleOutput. frontend+company-frontend 양쪽 적용.
+### 보안 (잔여)
 - [ ] 슈퍼관리자 IP 화이트리스트 설정
-- [x] 외부 자동 백업 구축 — ✅ 2026-03-05 완료: pg_dump+mysqldump → 59번 서버(58.227.193.59) SCP 전송, SSH 키 인증, crontab 매일 03:00 KST, 7일 로컬 보관. 스크립트: /home/administrator/backups/backup.sh
-- [x] 웹 애플리케이션 SQL Injection 점검 — ✅ D56 테이블명 화이트리스트 + D57-C4 sendTime 파라미터화 + D59 custom_fields JSONB 키 화이트리스트(3파일) + dateFilter 파라미터화 완료 (SSRF 별도)
 - [ ] SSH 키 인증 전용 전환 (비밀번호 로그인 비활성화) — 선택
 
-### 인비토AI (메시징 특화 모델)
-- [x] ai_training_logs 테이블 + training-logger.ts + campaigns.ts 연결
-- [x] 이용약관에 비식별 데이터 활용 조항 추가 — 2026-07-03 제14조(데이터의 활용) 신설 + 부칙 3항(공지 후 7일 시행). TermsPage.tsx. 배포 후 서비스 공지 필요
+### 인비토AI (잔여)
 - [ ] 데이터 충분히 축적 후 모델 학습 파이프라인 설계
-
----
+- [ ] 이용약관 제14조(데이터 활용) 배포 후 서비스 공지 (조항 신설은 2026-07-03 완료)
 
 ---
 
 ## 4) 가정 목록 (ASSUMPTION LEDGER)
 
 (아직 없음)
-
----
 
 ---
 
@@ -212,14 +138,15 @@
 
 ## 6) 최근 결정 5건 (1줄 요약 — 전체는 DECISIONS.md)
 
-- D49 (02-28) MySQL 랜섬웨어 긴급 대응 — 127.0.0.1 바인딩+권한 분리+fail2ban
-- D48 (02-27) 수신거부 양방향 동기화 — unsubscribes=SoT
-- D47 (02-27) 직접 타겟 발송 모달 분리 + 하드코딩 동적화
-- D46 (02-27) 직접 타겟 설정 전면 리팩토링 — 필드 선택 사용자 위임
-- D45 (02-27) AI 한줄로 3종 개선 — 개인화 파싱+미리보기+이모지 제거
+- D78 (03-16) 프로 자동 스팸필터 테스트 + CT-09 spam-test-queue — 차단 시 자동 재생성(최대 2회)
+- D73 (03-14) 무료체험 PRO 게이팅 + 수신거부 브랜드 자동배정(CT-03) + 커스텀 라벨 UPSERT(CT-07)
+- D69 (03-12) 자동발송 기능 기초 설계 — auto_campaigns + PM2 워커 + D-1 사전알림
+- D68 (03-12) 대시보드 UI 4건 + AI 생일 타겟팅 + 테스트 비용 합산
+- D67 (03-12) 080 콜백 진단 + 수신동의 변형 13종 + 사용자별 고객DB 삭제
+- ※ 2026-03-16 이후 결정은 DECISIONS.md 미등재(TASKS·memory에 산재) — 소급 등재는 별도 작업으로.
 
 ---
 
 ## 7) DONE LOG
 
-> 최근 완료는 §2 "최근 완료 인덱스"가 담당한다. 과거 DONE LOG(3월 이전 31건) 원문 = [archive/DONE_LOG_2026.md](archive/DONE_LOG_2026.md).
+> 최근 완료는 §2 "최근 완료 인덱스"가 담당한다. 과거 DONE LOG(3월 이전 31건) + STATUS §3 완료분 회전(2026-07-07) 원문 = [archive/DONE_LOG_2026.md](archive/DONE_LOG_2026.md).

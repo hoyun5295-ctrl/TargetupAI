@@ -7,8 +7,16 @@
 
 import { useState, type CSSProperties } from 'react';
 import { Monitor, Smartphone, Sun, Moon } from 'lucide-react';
-import { resolveTheme, normalizeCardStyle, type InAppTheme } from './inapp/blockTheme';
+import { resolveTheme, normalizeCardStyle, planCardLayout, type InAppTheme } from './inapp/blockTheme';
 import { BlockPreview } from './inapp/BlockPreview';
+
+// ★ 2026-07-07(5) 형태 골격 — ticket(2톤)/poster(풀블리드) 존 분할 시 구간별 패딩.
+//   SDK ZONE_PADS 미러 (미리보기 축소 스케일에 맞춰 비례 축소).
+const PREVIEW_ZONE_PADS: Record<string, { main: string; stub: string; body: string }> = {
+  modal: { main: '20px 22px 14px', stub: '13px 22px 18px', body: '16px 22px 22px' },
+  slide: { main: '15px 17px 11px', stub: '10px 17px 14px', body: '12px 17px 17px' },
+  inline: { main: '16px 18px 12px', stub: '11px 18px 15px', body: '13px 18px 18px' },
+};
 
 export interface PreviewButton {
   label: string;
@@ -140,8 +148,15 @@ function Overlay({ variant, themeTokens, ...rest }: { variant: Variant; themeTok
   // 2026-07-07 디자인 2.0 — SDK makeContainer 미러: 그라데이션 면(surfaceBg) + 링+3중 그림자 합성
   const cardBg = usingBlocks ? (themeTokens!.surfaceBg || themeTokens!.surface) : (backgroundColor || '#4f46e5');
   const cardShadow = usingBlocks ? `${themeTokens!.ring ? `${themeTokens!.ring}, ` : ''}${themeTokens!.shadow}` : undefined;
+  // ★ 2026-07-07(5) 형태 골격 — 존 분할 여부 (SDK renderBlockMessage와 동일 판정)
+  const plan = usingBlocks ? planCardLayout(blocks!, cardStyle) : null;
+  const zonePads = PREVIEW_ZONE_PADS[variant as string];
+  const zoned = !!plan && !!zonePads && (
+    (cardStyle === 'poster' && (!!plan.hero || plan.overlay.length > 0)) ||
+    (cardStyle === 'ticket' && plan.stub.length > 0)
+  );
   const inner = usingBlocks
-    ? <BlockPreview blocks={blocks!} theme={themeTokens!} replaceVars={replaceVars} isAd={isAd} cardStyle={cardish ? cardStyle : undefined} />
+    ? <BlockPreview blocks={blocks!} theme={themeTokens!} replaceVars={replaceVars} isAd={isAd} cardStyle={cardish ? cardStyle : undefined} zonePads={zoned ? zonePads : undefined} />
     : <CardInner {...rest} variant={variant} textColor={textColor} />;
 
   const cardBase: CSSProperties = {
@@ -163,7 +178,7 @@ function Overlay({ variant, themeTokens, ...rest }: { variant: Variant; themeTok
       <div style={{ position: 'absolute', inset: 0, background: 'rgba(8,10,18,0.55)', backdropFilter: 'blur(10px) saturate(1.35)', WebkitBackdropFilter: 'blur(10px) saturate(1.35)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 18 } as CSSProperties}>
         <div style={{ ...cardBase, position: 'relative', maxWidth: 330, width: '100%', maxHeight: '92%', display: 'flex', flexDirection: 'column', borderRadius: bubble ? bubbleRadius('bl') : r(20), overflow: bubble ? 'visible' : 'hidden', boxShadow: sh('0 24px 60px rgba(0,0,0,0.45)') }}>
           {heroImg && <img src={heroImg} alt="" onError={hideOnError} style={{ width: '100%', maxHeight: 130, objectFit: 'cover', display: 'block', flexShrink: 0 }} />}
-          <div style={{ padding: 22, overflowY: 'auto' }}>
+          <div style={{ padding: zoned ? 0 : 22, overflowY: 'auto' }}>
             {usingBlocks ? inner : <CardInner {...rest} imageUrl={null} variant="modal" textColor={textColor} />}
           </div>
           {bubble && bubbleTail('left')}
@@ -176,7 +191,7 @@ function Overlay({ variant, themeTokens, ...rest }: { variant: Variant; themeTok
   }
   if (variant === 'slide') {
     return (
-      <div style={{ ...cardBase, right: 16, bottom: 16, maxWidth: 236, maxHeight: '88%', overflowY: bubble ? 'visible' : 'auto', borderRadius: bubble ? bubbleRadius('br') : r(16), padding: 17, boxShadow: sh('0 16px 40px rgba(0,0,0,0.3)') }}>
+      <div style={{ ...cardBase, right: 16, bottom: 16, maxWidth: 236, maxHeight: '88%', overflowY: bubble ? 'visible' : 'auto', borderRadius: bubble ? bubbleRadius('br') : r(16), padding: zoned ? 0 : 17, overflow: zoned ? 'hidden' : undefined, boxShadow: sh('0 16px 40px rgba(0,0,0,0.3)') }}>
         {inner}
         {bubble && bubbleTail('right')}
       </div>
@@ -198,7 +213,7 @@ function Overlay({ variant, themeTokens, ...rest }: { variant: Variant; themeTok
   // inline_card — 본문 흐름 안
   return (
     <div style={{ position: 'absolute', top: 64, left: 14, right: 14 }}>
-      <div style={{ ...cardBase, position: 'relative', borderRadius: bubble ? bubbleRadius('bl') : r(15), padding: 18, boxShadow: sh('0 6px 20px rgba(0,0,0,0.12)') }}>
+      <div style={{ ...cardBase, position: 'relative', borderRadius: bubble ? bubbleRadius('bl') : r(15), padding: zoned ? 0 : 18, overflow: zoned ? 'hidden' : undefined, boxShadow: sh('0 6px 20px rgba(0,0,0,0.12)') }}>
         {inner}
         {bubble && bubbleTail('left')}
       </div>

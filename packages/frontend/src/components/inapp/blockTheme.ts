@@ -247,9 +247,9 @@ export function normalizeCardStyle(v: any): CardStyle {
 
 export const CARD_STYLE_OPTIONS: { key: CardStyle; label: string; hint: string }[] = [
   { key: 'classic', label: '클래식 카드', hint: '정돈된 기본 카드' },
-  { key: 'bubble', label: '둥근 말풍선', hint: '꼬리 달린 대화형' },
-  { key: 'ticket', label: '쿠폰 티켓', hint: '절취선 + 스터브 CTA' },
-  { key: 'poster', label: '매거진 포스터', hint: '헤드라인 겹친 히어로' },
+  { key: 'bubble', label: '둥근 말풍선', hint: '아바타 채팅 + 답장 칩' },
+  { key: 'ticket', label: '쿠폰 티켓', hint: '2톤 절취 티켓 + 다이컷' },
+  { key: 'poster', label: '매거진 포스터', hint: '풀블리드 히어로 겹침' },
 ];
 
 export interface CardLayoutPlan {
@@ -257,6 +257,8 @@ export interface CardLayoutPlan {
   overlay: any[];
   main: any[];
   stub: any[];
+  /** ★ 2026-07-07(5) bubble — 발신자 행(아바타+라벨)으로 승격되는 첫 eyebrow. 그 외 형태 = null */
+  sender: any | null;
 }
 
 /** SDK planCardLayout 미러 — 분할 규칙 동일 유지 의무 */
@@ -274,15 +276,24 @@ export function planCardLayout(blocks: any[], style: CardStyle): CardLayoutPlan 
       if (!headlineTaken && b.type === 'headline') { overlay.push(b); headlineTaken = true; continue; }
       main.push(b);
     }
-    return { hero, overlay, main, stub: [] };
+    return { hero, overlay, main, stub: [], sender: null };
   }
   if (style === 'ticket') {
     let cut = -1;
     for (let i = list.length - 1; i >= 0; i--) {
       if (String(list[i].type) === 'cta_group') { cut = i; break; }
     }
-    if (cut <= 0) return { hero: null, overlay: [], main: list, stub: [] };
-    return { hero: null, overlay: [], main: list.slice(0, cut), stub: list.slice(cut) };
+    if (cut <= 0) return { hero: null, overlay: [], main: list, stub: [], sender: null };
+    return { hero: null, overlay: [], main: list.slice(0, cut), stub: list.slice(cut), sender: null };
   }
-  return { hero: null, overlay: [], main: list, stub: [] };
+  if (style === 'bubble') {
+    let sender: any | null = null;
+    const main: any[] = [];
+    for (const b of list) {
+      if (!sender && b.type === 'eyebrow') { sender = b; continue; }
+      main.push(b);
+    }
+    return { hero: null, overlay: [], main, stub: [], sender };
+  }
+  return { hero: null, overlay: [], main: list, stub: [], sender: null };
 }

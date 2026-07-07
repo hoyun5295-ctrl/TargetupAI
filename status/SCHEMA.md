@@ -1874,7 +1874,7 @@ CAFE24_REDIRECT_URI=https://app.hanjul.ai/api/cafe24/oauth/callback
 | created_at | timestamptz | |
 - INDEX: company_id, created_at DESC
 
-### cdp_inapp_messages (In-app Message 정의) — D175-A 신규 + D215+ 확장 (★ 2026-06-11 실측 32컬럼 + 2026-06-17 channel 1컬럼 + 2026-06-27 블록 3컬럼 = 36)
+### cdp_inapp_messages (In-app Message 정의) — D175-A 신규 + D215+ 확장 (★ 2026-06-11 실측 32컬럼 + 2026-06-17 channel 1컬럼 + 2026-06-27 블록 3컬럼 + 2026-07-07 card_style 1컬럼 = 37)
 
 | 컬럼 | 타입 | 비고 |
 |------|------|------|
@@ -1915,6 +1915,7 @@ CAFE24_REDIRECT_URI=https://app.hanjul.ai/api/cafe24/oauth/callback
 | content_blocks | jsonb DEFAULT '[]' | ★ 2026-06-27 실측 — 블록 조립 배열(13 블록: media·eyebrow·headline·body·bullets·benefit·countdown·rating·product·divider·spacer·cta_group·footer). 비면 레거시 단색 렌더(외형 변화 0) |
 | theme | varchar(30) DEFAULT 'auto' | ★ 2026-06-27 실측 — 큐레이션 테마(auto/light/dark/brand/vibrant/minimal) |
 | accent_color | varchar(20) | ★ 2026-06-27 실측 — 강조색 hex(NULL=테마 기본). background_color는 레거시 전용 보존 |
+| card_style | text | ★ 2026-07-07 실측(서버 ALTER 실행완료) — 형태 축(색상 테마와 독립): classic/bubble/ticket/poster. NULL·미지원 값=classic 폴백. 카드형(center_modal·slide_in·inline_card·full_screen)만 적용, 토스트/배너/플로팅=classic |
 - INDEX: company_id, status, start_at, end_at
 - INDEX: idx_inapp_channel(company_id, channel, status) ★ 2026-06-17
 
