@@ -2800,37 +2800,50 @@ const campaignData = {
           </div>
 
           {/* ===== 우측 40%: 버튼 3개 세로 스택 ===== */}
-          {/* ★ 2026-07-07 (Harold 확정): 3색 풀 그라데이션 경합 해소 — 히어로 1장 원칙.
-              주력(AI Operator, hideAi 갈래는 직접 타겟 발송)만 풀 컬러, 나머지는 라이트 카드(흰 배경+컬러 아이콘 칩+컬러 화살표).
-              onClick·게이팅 로직 무변 — 시각 위계만 조정. (기원 D222+ Phase 1 3색 그라데이션) */}
+          {/* ★ 2026-07-07 (Harold 확정): 3색 풀 그라데이션 유지 + 프리미엄 상향 — 한 단계 옅은 보석톤 +
+              글래스 아이콘 칩 + ring/이중 그림자 + 은은한 광원·워터마크 + 원형 글래스 화살표(인앱 디자인 2.0 문법).
+              onClick·게이팅 로직 무변. (기원 D222+ Phase 1 → 0707 라이트 카드 실험 원복) */}
           <div className="w-full lg:w-[40%] flex flex-col gap-4">
             {hideAi ? (
               <>
                 <button
                   onClick={() => { setShowDirectTargeting(true); }}
-                  className="p-5 bg-gradient-to-br from-emerald-600 to-green-700 hover:from-emerald-500 hover:to-green-600 rounded-xl transition-all hover:shadow-lg hover:shadow-emerald-500/30 text-right flex-1 flex flex-col justify-between"
+                  className="group relative overflow-hidden p-5 bg-gradient-to-br from-emerald-600 to-teal-500 hover:from-emerald-500 hover:to-teal-400 rounded-xl ring-1 ring-white/20 transition-all shadow-lg shadow-emerald-500/25 hover:shadow-xl hover:shadow-emerald-500/40 text-right flex-1 flex flex-col justify-between"
                 >
-                  <div>
-                    <div className="text-xl font-bold text-white mb-1">직접 타겟 발송</div>
-                    <div className="text-sm text-emerald-100">원하는 고객을 직접 필터링</div>
+                  <div className="absolute -top-16 -right-16 w-48 h-48 rounded-full bg-white/10 blur-3xl" />
+                  <Send className="absolute -bottom-4 -left-4 w-24 h-24 text-white/10" />
+                  <div className="relative flex items-start justify-between gap-3">
+                    <div className="w-10 h-10 rounded-xl bg-white/15 ring-1 ring-white/25 backdrop-blur-sm flex items-center justify-center flex-shrink-0">
+                      <Send className="w-5 h-5 text-white" />
+                    </div>
+                    <div className="min-w-0">
+                      <div className="text-xl font-bold text-white mb-1">직접 타겟 발송</div>
+                      <div className="text-sm text-white/75">원하는 고객을 직접 필터링</div>
+                    </div>
                   </div>
-                  <div className="text-3xl text-emerald-200 self-end">→</div>
+                  <div className="relative self-end w-9 h-9 rounded-full bg-white/15 ring-1 ring-white/25 flex items-center justify-center group-hover:translate-x-0.5 transition-transform">
+                    <ChevronRight className="w-5 h-5 text-white" />
+                  </div>
                 </button>
                 {!hideFileUpload && (
                 <button
                   onClick={() => openFileUpload()}
-                  className="p-5 bg-white hover:bg-amber-50/70 border border-gray-200 hover:border-amber-300 rounded-xl transition-all hover:shadow-md text-right flex-1 flex flex-col justify-between"
+                  className="group relative overflow-hidden p-5 bg-gradient-to-br from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 rounded-xl ring-1 ring-white/20 transition-all shadow-lg shadow-amber-500/25 hover:shadow-xl hover:shadow-amber-500/40 text-right flex-1 flex flex-col justify-between"
                 >
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-amber-500 to-orange-600 flex items-center justify-center flex-shrink-0 shadow-sm">
+                  <div className="absolute -top-16 -right-16 w-48 h-48 rounded-full bg-white/10 blur-3xl" />
+                  <UserPlus className="absolute -bottom-4 -left-4 w-24 h-24 text-white/10" />
+                  <div className="relative flex items-start justify-between gap-3">
+                    <div className="w-10 h-10 rounded-xl bg-white/15 ring-1 ring-white/25 backdrop-blur-sm flex items-center justify-center flex-shrink-0">
                       <UserPlus className="w-5 h-5 text-white" />
                     </div>
                     <div className="min-w-0">
-                      <div className="text-xl font-bold text-gray-900 mb-1">고객 DB 업로드</div>
-                      <div className="text-sm text-gray-500">엑셀/CSV로 고객 추가</div>
+                      <div className="text-xl font-bold text-white mb-1">고객 DB 업로드</div>
+                      <div className="text-sm text-white/75">엑셀/CSV로 고객 추가</div>
                     </div>
                   </div>
-                  <div className="text-3xl text-amber-500 self-end">→</div>
+                  <div className="relative self-end w-9 h-9 rounded-full bg-white/15 ring-1 ring-white/25 flex items-center justify-center group-hover:translate-x-0.5 transition-transform">
+                    <ChevronRight className="w-5 h-5 text-white" />
+                  </div>
                 </button>
                 )}
               </>
@@ -2857,40 +2870,53 @@ const campaignData = {
                       setShowWalkthroughModal(true);
                     }
                   }}
-                  className={`p-5 bg-gradient-to-br from-violet-900 via-purple-900 to-fuchsia-900 hover:from-violet-800 hover:via-purple-800 hover:to-fuchsia-800 rounded-xl transition-all hover:shadow-lg hover:shadow-violet-500/40 text-right flex-1 flex flex-col justify-between relative ${isSubscriptionLocked || isAiMessagingLocked ? 'opacity-60' : ''}`}
+                  className={`group relative overflow-hidden p-5 bg-gradient-to-br from-violet-700 via-purple-700 to-fuchsia-600 hover:from-violet-600 hover:via-purple-600 hover:to-fuchsia-500 rounded-xl ring-1 ring-white/20 transition-all shadow-lg shadow-violet-500/25 hover:shadow-xl hover:shadow-violet-500/40 text-right flex-1 flex flex-col justify-between ${isSubscriptionLocked || isAiMessagingLocked ? 'opacity-60' : ''}`}
                 >
-                  <div className="absolute -top-2 right-3 bg-gradient-to-r from-amber-400 to-fuchsia-500 text-white text-[10px] font-bold tracking-wider px-2 py-0.5 rounded-full shadow">
-                    BETA
+                  <div className="absolute -top-16 -right-16 w-48 h-48 rounded-full bg-white/10 blur-3xl" />
+                  <Sparkles className="absolute -bottom-4 -left-4 w-24 h-24 text-white/10" />
+                  <div className="relative flex items-start justify-between gap-3">
+                    <div className="w-10 h-10 rounded-xl bg-white/15 ring-1 ring-white/25 backdrop-blur-sm flex items-center justify-center flex-shrink-0">
+                      <Sparkles className="w-5 h-5 text-white" />
+                    </div>
+                    <div className="min-w-0">
+                      <div className="inline-block bg-gradient-to-r from-amber-400 to-fuchsia-500 text-white text-[10px] font-bold tracking-wider px-2 py-0.5 rounded-full shadow mb-1.5">
+                        BETA
+                      </div>
+                      <div className="text-xl font-bold text-white mb-1">{(isSubscriptionLocked || isAiMessagingLocked) ? '🔒 ' : ''}AI Operator</div>
+                      <div className="text-sm text-white/75">자연어 한 줄로 AI가 자동 설계</div>
+                    </div>
                   </div>
-                  <div>
-                    <div className="text-xl font-bold text-white mb-1">{(isSubscriptionLocked || isAiMessagingLocked) ? '🔒 ' : ''}AI Operator</div>
-                    <div className="text-sm text-violet-200">자연어 한 줄로 AI가 자동 설계</div>
+                  <div className="relative self-end w-9 h-9 rounded-full bg-white/15 ring-1 ring-white/25 flex items-center justify-center group-hover:translate-x-0.5 transition-transform">
+                    <ChevronRight className="w-5 h-5 text-white" />
                   </div>
-                  <div className="text-3xl text-fuchsia-200 self-end">→</div>
                 </button>
 
-                {/* 직접 타겟 발송 — 2026-07-07: 라이트 카드(흰 배경+에메랄드 아이콘 칩) — 히어로는 AI Operator 1장 */}
+                {/* 직접 타겟 발송 — 2026-07-07: 프리미엄 그라데이션(에메랄드→틸, 글래스 칩+링+워터마크) */}
                 <button
                   onClick={() => {
                     if (isSubscriptionLocked) { setShowSubscriptionLock(true); return; }
                     if (isCustomerDbLocked) { setPlanUpgradeFeature('직접 타겟 발송'); setPlanUpgradeRequired('스타터'); setShowPlanUpgradeModal(true); return; }
                     setShowDirectTargeting(true);
                   }}
-                  className={`p-5 bg-white hover:bg-emerald-50/70 border border-gray-200 hover:border-emerald-300 rounded-xl transition-all hover:shadow-md text-right flex-1 flex flex-col justify-between ${isSubscriptionLocked || isCustomerDbLocked ? 'opacity-60' : ''}`}
+                  className={`group relative overflow-hidden p-5 bg-gradient-to-br from-emerald-600 to-teal-500 hover:from-emerald-500 hover:to-teal-400 rounded-xl ring-1 ring-white/20 transition-all shadow-lg shadow-emerald-500/25 hover:shadow-xl hover:shadow-emerald-500/40 text-right flex-1 flex flex-col justify-between ${isSubscriptionLocked || isCustomerDbLocked ? 'opacity-60' : ''}`}
                 >
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-emerald-500 to-green-600 flex items-center justify-center flex-shrink-0 shadow-sm">
+                  <div className="absolute -top-16 -right-16 w-48 h-48 rounded-full bg-white/10 blur-3xl" />
+                  <Send className="absolute -bottom-4 -left-4 w-24 h-24 text-white/10" />
+                  <div className="relative flex items-start justify-between gap-3">
+                    <div className="w-10 h-10 rounded-xl bg-white/15 ring-1 ring-white/25 backdrop-blur-sm flex items-center justify-center flex-shrink-0">
                       <Send className="w-5 h-5 text-white" />
                     </div>
                     <div className="min-w-0">
-                      <div className="text-xl font-bold text-gray-900 mb-1">{(isSubscriptionLocked || isCustomerDbLocked) ? '🔒 ' : ''}직접 타겟 발송</div>
-                      <div className="text-sm text-gray-500">원하는 고객을 직접 필터링</div>
+                      <div className="text-xl font-bold text-white mb-1">{(isSubscriptionLocked || isCustomerDbLocked) ? '🔒 ' : ''}직접 타겟 발송</div>
+                      <div className="text-sm text-white/75">원하는 고객을 직접 필터링</div>
                     </div>
                   </div>
-                  <div className="text-3xl text-emerald-500 self-end">→</div>
+                  <div className="relative self-end w-9 h-9 rounded-full bg-white/15 ring-1 ring-white/25 flex items-center justify-center group-hover:translate-x-0.5 transition-transform">
+                    <ChevronRight className="w-5 h-5 text-white" />
+                  </div>
                 </button>
 
-                {/* 고객 DB 업로드 — 2026-07-07: 라이트 카드(흰 배경+앰버 아이콘 칩) */}
+                {/* 고객 DB 업로드 — 2026-07-07: 프리미엄 그라데이션(앰버→오렌지, 글래스 칩+링+워터마크) */}
                 <button
                   onClick={() => {
                     if (syncBlockActive) { setShowSyncActiveBlock(true); return; }
@@ -2898,18 +2924,22 @@ const campaignData = {
                     if (isCustomerDbLocked) { setPlanUpgradeFeature('고객 DB 업로드'); setPlanUpgradeRequired('스타터'); setShowPlanUpgradeModal(true); return; }
                     setShowFileUpload(true);
                   }}
-                  className={`p-5 bg-white hover:bg-amber-50/70 border border-gray-200 hover:border-amber-300 rounded-xl transition-all hover:shadow-md text-right flex-1 flex flex-col justify-between ${isSubscriptionLocked || isCustomerDbLocked ? 'opacity-60' : ''}`}
+                  className={`group relative overflow-hidden p-5 bg-gradient-to-br from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 rounded-xl ring-1 ring-white/20 transition-all shadow-lg shadow-amber-500/25 hover:shadow-xl hover:shadow-amber-500/40 text-right flex-1 flex flex-col justify-between ${isSubscriptionLocked || isCustomerDbLocked ? 'opacity-60' : ''}`}
                 >
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-amber-500 to-orange-600 flex items-center justify-center flex-shrink-0 shadow-sm">
+                  <div className="absolute -top-16 -right-16 w-48 h-48 rounded-full bg-white/10 blur-3xl" />
+                  <UserPlus className="absolute -bottom-4 -left-4 w-24 h-24 text-white/10" />
+                  <div className="relative flex items-start justify-between gap-3">
+                    <div className="w-10 h-10 rounded-xl bg-white/15 ring-1 ring-white/25 backdrop-blur-sm flex items-center justify-center flex-shrink-0">
                       <UserPlus className="w-5 h-5 text-white" />
                     </div>
                     <div className="min-w-0">
-                      <div className="text-xl font-bold text-gray-900 mb-1">{(isSubscriptionLocked || isCustomerDbLocked) ? '🔒 ' : ''}고객 DB 업로드</div>
-                      <div className="text-sm text-gray-500">엑셀/CSV로 고객 추가</div>
+                      <div className="text-xl font-bold text-white mb-1">{(isSubscriptionLocked || isCustomerDbLocked) ? '🔒 ' : ''}고객 DB 업로드</div>
+                      <div className="text-sm text-white/75">엑셀/CSV로 고객 추가</div>
                     </div>
                   </div>
-                  <div className="text-3xl text-amber-500 self-end">→</div>
+                  <div className="relative self-end w-9 h-9 rounded-full bg-white/15 ring-1 ring-white/25 flex items-center justify-center group-hover:translate-x-0.5 transition-transform">
+                    <ChevronRight className="w-5 h-5 text-white" />
+                  </div>
                 </button>
               </>
             )}
