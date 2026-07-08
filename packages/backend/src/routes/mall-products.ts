@@ -8,7 +8,7 @@
  */
 import { Router, Response } from 'express';
 import { authenticate } from '../middlewares/auth';
-import { getCafe24Integration, getCafe24ByoCredentials, fetchCafe24ProductsRaw } from '../utils/cafe24-client';
+import { getCafe24Integration, getCafe24ByoCredentials, fetchCafe24ProductsRaw, fetchCafe24Products } from '../utils/cafe24-client';
 import { getNaverCommerceIntegration, getNaverCommerceCredentials, fetchNaverProductsRaw } from '../utils/naver-commerce-client';
 
 export const mallProductsRouter = Router();
@@ -45,6 +45,34 @@ mallProductsRouter.get('/preview', async (req: any, res: Response) => {
   } catch (err: any) {
     // 실측 라우트 — 몰 API 에러(스코프 미동의·필수 body 누락 등)를 그대로 노출해 매핑 확정에 쓴다.
     console.error('[mall-products preview] 오류:', err?.message);
+    return res.status(502).json({ success: false, error: err?.message || '상품 조회 실패' });
+  }
+});
+
+// GET /search?provider=cafe24&q=&limit= — 정규화 상품 목록(MallProduct[]) — DM 상품 피커 소스
+//   카페24 = 실측 확정. 네이버·메이크샵·고도몰·아임웹은 각 항목 필드 실측 후 추가.
+mallProductsRouter.get('/search', async (req: any, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+    const provider = String(req.query.provider || '').trim();
+    const q = req.query.q ? String(req.query.q).trim() : undefined;
+    const limit = Math.min(Math.max(parseInt(String(req.query.limit || '50'), 10) || 50, 1), 100);
+
+    if (provider === 'cafe24') {
+      const integ = await getCafe24Integration(companyId);
+      if (!integ) return res.status(404).json({ success: false, error: '카페24 연동이 없습니다.' });
+      const creds = await getCafe24ByoCredentials(companyId, integ.mallId).catch(() => undefined);
+      const products = await fetchCafe24Products(integ, { q, limit }, creds);
+      return res.json({ success: true, provider, products });
+    }
+
+    return res.status(400).json({
+      success: false,
+      error: '현재 상품 불러오기는 카페24만 지원합니다 (네이버 등은 항목 필드 실측 후 추가).',
+    });
+  } catch (err: any) {
+    console.error('[mall-products search] 오류:', err?.message);
     return res.status(502).json({ success: false, error: err?.message || '상품 조회 실패' });
   }
 });

@@ -39,6 +39,7 @@ import { buildWebhookIdempotencyKey } from './cdp-idempotency';
 import { buildCafe24AuthorizeUrl as buildCafe24Url } from './provider-oauth-url';
 import { firstPositiveAmount } from './normalize';
 import { resolveProviderOAuthCredentials, type ProviderOAuthCredentials } from './provider-credentials';
+import { type MallProduct, normalizeCafe24Product } from './mall-product-normalize';
 
 const CAFE24_CLIENT_ID = process.env.CAFE24_CLIENT_ID || '';
 const CAFE24_CLIENT_SECRET = process.env.CAFE24_CLIENT_SECRET || '';
@@ -455,6 +456,23 @@ export async function fetchCafe24ProductsRaw(
     },
     creds,
   );
+}
+
+/** 상품 목록 → 정규화 MallProduct[] (판매·전시중 + 품절 아님만). DM 상품 피커 소스. */
+export async function fetchCafe24Products(
+  integration: Cafe24Integration,
+  opts: { q?: string; limit?: number; offset?: number } = {},
+  creds?: ProviderOAuthCredentials,
+): Promise<MallProduct[]> {
+  const raw = (await fetchCafe24ProductsRaw(
+    integration,
+    { limit: opts.limit ?? 50, offset: opts.offset, productName: opts.q },
+    creds,
+  )) as { products?: any[] };
+  const list = Array.isArray(raw?.products) ? raw.products : [];
+  return list
+    .map((p) => normalizeCafe24Product(p, integration.mallId))
+    .filter((x): x is MallProduct => x !== null);
 }
 
 // ════════════════════════════════════════════════════════════════════
