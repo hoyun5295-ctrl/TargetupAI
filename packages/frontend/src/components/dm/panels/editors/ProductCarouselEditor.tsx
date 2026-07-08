@@ -2,9 +2,23 @@ import type { ProductCarouselProps, ProductCarouselItem } from '../../../../util
 import { Field, TextInput, Toggle, ImageUploader } from '../FormControls';
 import { RepeatableList } from '../RepeatableList';
 import type { EditorProps } from '../SectionPropsEditor';
+import { useState } from 'react';
+import MallProductPickerModal, { type PickedMallProduct } from '../../MallProductPickerModal';
 
 export default function ProductCarouselEditor({ props, onUpdate }: EditorProps<ProductCarouselProps>) {
   const products = props.products || [];
+  const [pickerOpen, setPickerOpen] = useState(false);
+  // 연동 몰 상품 → 슬라이드 항목 매핑 (정가=price, 할인가는 판매가<정가일 때만)
+  const applyPicked = (picked: PickedMallProduct[]) => {
+    const items: ProductCarouselItem[] = picked.map((p) => ({
+      image_url: p.imageUrl || '',
+      name: p.name,
+      price: p.price,
+      discount_price: p.salePrice > 0 && p.salePrice < p.price ? p.salePrice : undefined,
+      link_url: p.productUrl || '',
+    }));
+    onUpdate({ products: [...products, ...items] });
+  };
   const setItem = (i: number, patch: Partial<ProductCarouselItem>) =>
     onUpdate({ products: products.map((it, idx) => (idx === i ? { ...it, ...patch } : it)) });
   const move = (from: number, to: number) => { const a = [...products]; const [m] = a.splice(from, 1); a.splice(to, 0, m); onUpdate({ products: a }); };
@@ -12,6 +26,13 @@ export default function ProductCarouselEditor({ props, onUpdate }: EditorProps<P
     <>
       <Field label="제목 (선택)"><TextInput value={props.title} onChange={(v) => onUpdate({ title: v })} placeholder="이번 주 추천 상품" /></Field>
       <Field label="상품 목록">
+        <button
+          type="button"
+          onClick={() => setPickerOpen(true)}
+          className="w-full mb-2 inline-flex items-center justify-center gap-1.5 rounded-lg border border-emerald-400/40 bg-emerald-500/10 text-emerald-100 text-[13px] font-medium py-2 hover:bg-emerald-500/20 transition-colors"
+        >
+          연동 몰에서 상품 불러오기
+        </button>
         <RepeatableList
           items={products}
           addLabel="+ 상품 추가"
@@ -36,6 +57,7 @@ export default function ProductCarouselEditor({ props, onUpdate }: EditorProps<P
       </Field>
       <Field label="인디케이터"><Toggle value={props.show_indicator ?? true} onChange={(v) => onUpdate({ show_indicator: v })} /></Field>
       <Field label="자동 슬라이드"><Toggle value={props.auto_slide ?? false} onChange={(v) => onUpdate({ auto_slide: v })} /></Field>
+      <MallProductPickerModal open={pickerOpen} onClose={() => setPickerOpen(false)} onPick={applyPicked} />
     </>
   );
 }
