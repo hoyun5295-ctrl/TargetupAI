@@ -103,7 +103,49 @@ export function renderTextForCustomer(
     }
   }
 
+  // ★ 2026-07-08 빈 변수 치환 뒤처리 — 익명·미식별에서 빈 값이 남긴 이중 공백 / 구두점 앞 공백 /
+  //   줄 앞뒤 잔여 공백 정리. 변수 문법이 있던 텍스트에만 적용(직접 입력 텍스트 무손상). 개행은 보존.
+  if (/\{\{|%[가-힣A-Za-z]/.test(text)) {
+    out = out
+      .replace(/[ \t]{2,}/g, ' ')
+      .replace(/[ \t]+([,.!?)\]])/g, '$1')
+      .replace(/^[ \t]+/gm, '')
+      .replace(/[ \t]+$/gm, '');
+  }
+
   return { rendered: out, errors };
+}
+
+/**
+ * ★ 2026-07-08 블록 메시지 텍스트 서버 사전 치환.
+ * /inapp/active가 익명·미식별 방문자에도 변수 공백이 안 나오게, 블록 텍스트 필드
+ * (text / name / meta / label + items[].text + buttons[].label)만 renderTextForCustomer로 렌더한다.
+ * 구조·비텍스트 필드(이미지·색 등)는 그대로. 문자열(JSON)·배열 입력 모두 지원.
+ */
+export function renderBlocksForCustomer(blocksRaw: any, customer: Record<string, any>): any {
+  let blocks = blocksRaw;
+  let wasString = false;
+  if (typeof blocks === 'string') {
+    try { blocks = JSON.parse(blocks); wasString = true; } catch { return blocksRaw; }
+  }
+  if (!Array.isArray(blocks)) return blocksRaw;
+  const r = (t: any) => (typeof t === 'string' ? renderTextForCustomer(t, customer).rendered : t);
+  const out = blocks.map((b: any) => {
+    if (!b || typeof b !== 'object') return b;
+    const nb: any = { ...b };
+    if (typeof nb.text === 'string') nb.text = r(nb.text);
+    if (typeof nb.name === 'string') nb.name = r(nb.name);
+    if (typeof nb.meta === 'string') nb.meta = r(nb.meta);
+    if (typeof nb.label === 'string') nb.label = r(nb.label);
+    if (Array.isArray(nb.items)) {
+      nb.items = nb.items.map((it: any) => (it && typeof it === 'object' && typeof it.text === 'string' ? { ...it, text: r(it.text) } : it));
+    }
+    if (Array.isArray(nb.buttons)) {
+      nb.buttons = nb.buttons.map((bt: any) => (bt && typeof bt === 'object' && typeof bt.label === 'string' ? { ...bt, label: r(bt.label) } : bt));
+    }
+    return nb;
+  });
+  return wasString ? JSON.stringify(out) : out;
 }
 
 /**

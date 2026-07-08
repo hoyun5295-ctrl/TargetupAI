@@ -76,7 +76,7 @@ import { generateInAppMessagePackage, listQuickStartCards } from '../utils/inapp
 // ★ 2026-07-06 인앱 표시 가능성 게이트 — 표시할 곳 없는 고객의 크레딧 낭비 차단 (네이버 단독 등)
 import { getInAppDisplayEligibility } from '../utils/inapp-display-eligibility';
 import { countSegment, describeSegment } from '../utils/inapp-segment-matcher';
-import { buildPreviewCustomers, buildEditorPreviewCustomers, renderInAppMessage, listAvailableVariables, extractUsedInAppVariables, getInAppCustomerForBrowser } from '../utils/inapp-personalization';
+import { buildPreviewCustomers, buildEditorPreviewCustomers, renderInAppMessage, listAvailableVariables, extractUsedInAppVariables, getInAppCustomerForBrowser, renderTextForCustomer, renderBlocksForCustomer } from '../utils/inapp-personalization';
 import { getCompanyBrandKitRaw } from '../utils/dm/dm-brand-kit';
 import { createVariant, listVariantsWithStats, declareWinnerIfReady } from '../utils/inapp-variant-optimizer';
 import { explainInAppMessage } from '../utils/inapp-explainer';
@@ -597,6 +597,28 @@ router.get('/inapp/active', requireCdpKeyOrBrowserOrigin, async (req: Request, r
       const usedVars = extractUsedInAppVariables(messages);
       if (usedVars.length > 0) {
         customer = await getInAppCustomerForBrowser(cdpAuth.companyId, externalId, usedVars).catch(() => null);
+      }
+    }
+
+    // ★ 2026-07-08 서버 사전 치환 — 익명·미식별 방문자도 변수 공백("님,"/"회원님")이 안 나오게.
+    //   이름 없으면 "고객", 빈 변수는 공백 정리. 식별 회원은 실제 값 그대로(회귀 0). SDK는 치환된 텍스트를 그대로 표시.
+    if (messages.length > 0) {
+      const renderCustomer: Record<string, any> = { ...(customer || {}) };
+      if (!renderCustomer.name) renderCustomer.name = '고객';
+      for (const m of messages as any[]) {
+        if (typeof m.title === 'string') m.title = renderTextForCustomer(m.title, renderCustomer).rendered;
+        if (typeof m.body === 'string') m.body = renderTextForCustomer(m.body, renderCustomer).rendered;
+        if (Array.isArray(m.buttons)) {
+          m.buttons = m.buttons.map((b: any) =>
+            b && typeof b.label === 'string' ? { ...b, label: renderTextForCustomer(b.label, renderCustomer).rendered } : b,
+          );
+        }
+        const blocksRaw = m.contentBlocks ?? m.content_blocks;
+        if (blocksRaw != null) {
+          const rendered = renderBlocksForCustomer(blocksRaw, renderCustomer);
+          if ('contentBlocks' in m) m.contentBlocks = rendered;
+          if ('content_blocks' in m) m.content_blocks = rendered;
+        }
       }
     }
 
