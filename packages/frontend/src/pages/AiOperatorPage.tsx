@@ -759,9 +759,10 @@ export default function AiOperatorPage() {
                 className="flex-1 bg-transparent text-white placeholder-white/30 px-1 py-3 resize-none focus:outline-none text-base leading-relaxed min-h-[44px] max-h-[200px] disabled:opacity-50"
               />
               <ImageToCopyButton
+                label="이미지"
                 onExtracted={(t) => setObjective((prev) => (prev.trim() ? `${prev.trim()}\n${t}` : t))}
                 disabled={loading}
-                className="flex-shrink-0 w-11 h-11 inline-flex items-center justify-center rounded-xl border border-white/15 bg-white/5 text-violet-200 hover:bg-violet-500/20 hover:border-violet-400/40 disabled:opacity-40 transition-colors"
+                className="flex-shrink-0 h-11 px-3 inline-flex items-center gap-1.5 rounded-xl border border-white/15 bg-white/5 text-violet-200 text-sm font-medium hover:bg-violet-500/20 hover:border-violet-400/40 disabled:opacity-40 transition-colors"
               />
               <button
                 type="button"

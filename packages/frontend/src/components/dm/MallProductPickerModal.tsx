@@ -6,6 +6,7 @@
  * 연동된 몰만 탭으로 노출(GET /providers). 카페24·네이버 지원(실측 확정). z-[2000] 인터럽트 티어.
  */
 import { useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { Check, Loader2, ShoppingBag, X } from 'lucide-react';
 
 export interface PickedMallProduct {
@@ -94,7 +95,7 @@ export default function MallProductPickerModal({ open, onClose, onPick }: {
     });
   const picked = Object.values(sel);
 
-  return (
+  return createPortal(
     <div className="fixed inset-0 z-[2000] flex items-center justify-center bg-black/70 backdrop-blur-sm px-4 py-8 overflow-y-auto">
       <div className="w-full max-w-2xl bg-slate-900 border border-white/10 rounded-2xl shadow-2xl flex flex-col max-h-[85vh]" onClick={(e) => e.stopPropagation()}>
         <div className="px-6 py-4 border-b border-white/10 flex items-center justify-between shrink-0">
@@ -212,6 +213,7 @@ export default function MallProductPickerModal({ open, onClose, onPick }: {
           </div>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }

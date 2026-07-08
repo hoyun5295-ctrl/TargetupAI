@@ -8,6 +8,7 @@
  * z-[2000] 인터럽트 티어 — 다른 모달(예: 행사 캠페인 모달) 위에서도 위로 뜬다. 백드롭 클릭 닫힘 없음(X만).
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { ImagePlus, Loader2, Sparkles, X } from 'lucide-react';
 import { downscaleToJpeg } from '../utils/image-downscale';
 
@@ -78,7 +79,7 @@ export default function ImageToCopyModal({ open, onClose, onExtracted }: {
 
   if (!open) return null;
 
-  return (
+  return createPortal(
     <div className="fixed inset-0 z-[2000] flex items-center justify-center bg-black/70 backdrop-blur-sm px-4 py-8 overflow-y-auto">
       <div className="w-full max-w-lg bg-slate-900 border border-white/10 rounded-2xl shadow-2xl" onClick={(e) => e.stopPropagation()}>
         <div className="px-6 py-4 border-b border-white/10 flex items-center justify-between">
@@ -142,6 +143,7 @@ export default function ImageToCopyModal({ open, onClose, onExtracted }: {
           </div>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }

@@ -1095,9 +1095,10 @@ export default function InAppMessagesPage() {
               disabled={aiGenerating}
             />
             <ImageToCopyButton
+              label="이미지"
               onExtracted={(t) => setAiObjective((prev) => (prev.trim() ? `${prev.trim()}\n${t}` : t))}
               disabled={aiGenerating}
-              className="w-11 h-11 inline-flex items-center justify-center rounded-lg border border-fuchsia-400/30 bg-slate-900/60 text-fuchsia-200 hover:bg-fuchsia-500/15 hover:border-fuchsia-400/50 disabled:opacity-40 transition-colors"
+              className="h-11 px-3 inline-flex items-center gap-1.5 rounded-lg border border-fuchsia-400/30 bg-slate-900/60 text-fuchsia-200 text-sm font-medium hover:bg-fuchsia-500/15 hover:border-fuchsia-400/50 disabled:opacity-40 transition-colors"
             />
             <button
               onClick={() => handleAIGenerate(aiObjective)}
