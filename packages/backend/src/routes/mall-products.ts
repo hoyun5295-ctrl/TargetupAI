@@ -14,6 +14,23 @@ import { getNaverCommerceIntegration, getNaverCommerceCredentials, fetchNaverPro
 export const mallProductsRouter = Router();
 mallProductsRouter.use(authenticate);
 
+// GET /providers — 이 회사가 연동한 "상품 불러오기 지원" 몰 목록 (피커 탭 구성용)
+mallProductsRouter.get('/providers', async (req: any, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+    const providers: Array<{ provider: string; label: string }> = [];
+    const cafe = await getCafe24Integration(companyId).catch(() => null);
+    if (cafe) providers.push({ provider: 'cafe24', label: '카페24' });
+    const naver = await getNaverCommerceIntegration(companyId).catch(() => null);
+    if (naver) providers.push({ provider: 'naver', label: '네이버 스마트스토어' });
+    return res.json({ success: true, providers });
+  } catch (err: any) {
+    console.error('[mall-products providers] 오류:', err?.message);
+    return res.status(500).json({ success: false, error: err?.message || '연동 몰 조회 실패' });
+  }
+});
+
 // GET /preview?provider=cafe24|naver&q= — 연동 몰 상품 raw 응답(실측)
 mallProductsRouter.get('/preview', async (req: any, res: Response) => {
   try {

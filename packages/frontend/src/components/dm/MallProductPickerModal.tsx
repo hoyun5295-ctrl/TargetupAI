@@ -1,9 +1,9 @@
 /**
  * MallProductPickerModal — 연동 몰에서 상품 불러오기 (2026-07-08)
  *
- * DM 상품 슬라이드(ProductCarousel)에서 "연동 몰에서 상품 불러오기" → 이 모달 → 검색·선택 →
+ * DM 상품 슬라이드(ProductCarousel)에서 "연동 몰에서 상품 불러오기" → 이 모달 → 몰 선택·검색·선택 →
  * onPick(선택 상품[])으로 돌려주면 편집기가 슬라이드 항목(이미지·상품명·정가·할인가·링크)에 자동 채운다.
- * 현재 카페24 확정 지원(네이버 등은 항목 필드 실측 후 provider 추가). z-[2000] 인터럽트 티어.
+ * 연동된 몰만 탭으로 노출(GET /providers). 카페24·네이버 지원(실측 확정). z-[2000] 인터럽트 티어.
  */
 import { useEffect, useState } from 'react';
 import { Check, Loader2, ShoppingBag, X } from 'lucide-react';
@@ -19,6 +19,8 @@ export interface PickedMallProduct {
   productUrl: string | null;
 }
 
+interface ProviderTab { provider: string; label: string; }
+
 const won = (n: number) => `${Math.round(Number(n) || 0).toLocaleString()}원`;
 
 export default function MallProductPickerModal({ open, onClose, onPick }: {
@@ -26,6 +28,8 @@ export default function MallProductPickerModal({ open, onClose, onPick }: {
   onClose: () => void;
   onPick: (products: PickedMallProduct[]) => void;
 }) {
+  const [providers, setProviders] = useState<ProviderTab[]>([]);
+  const [provider, setProvider] = useState<string>('');
   const [q, setQ] = useState('');
   const [products, setProducts] = useState<PickedMallProduct[]>([]);
   const [loading, setLoading] = useState(false);
@@ -34,11 +38,13 @@ export default function MallProductPickerModal({ open, onClose, onPick }: {
 
   const token = () => localStorage.getItem('token');
 
-  const load = async (keyword?: string) => {
+  const load = async (prov: string, keyword?: string) => {
+    if (!prov) { setProducts([]); return; }
     setLoading(true);
     setErr(null);
+    setProducts([]);
     try {
-      const url = `/api/mall-products/search?provider=cafe24${keyword ? `&q=${encodeURIComponent(keyword)}` : ''}`;
+      const url = `/api/mall-products/search?provider=${encodeURIComponent(prov)}${keyword ? `&q=${encodeURIComponent(keyword)}` : ''}`;
       const res = await fetch(url, { headers: { Authorization: `Bearer ${token()}` } });
       const data = await res.json();
       if (!res.ok || data?.success === false) throw new Error(String(data?.error || '상품을 불러오지 못했습니다.'));
@@ -55,17 +61,35 @@ export default function MallProductPickerModal({ open, onClose, onPick }: {
     if (!open) return;
     setSel({});
     setQ('');
-    load();
+    setProducts([]);
+    setErr(null);
+    setLoading(true);
+    fetch('/api/mall-products/providers', { headers: { Authorization: `Bearer ${token()}` } })
+      .then((r) => r.json())
+      .then((data) => {
+        const list: ProviderTab[] = Array.isArray(data?.providers) ? data.providers : [];
+        setProviders(list);
+        if (list.length > 0) {
+          setProvider(list[0].provider);
+          load(list[0].provider);
+        } else {
+          setProvider('');
+          setLoading(false);
+        }
+      })
+      .catch(() => { setProviders([]); setProvider(''); setLoading(false); });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
   if (!open) return null;
 
+  const pickProvider = (p: string) => { setProvider(p); setSel({}); load(p, q.trim()); };
   const toggle = (p: PickedMallProduct) =>
     setSel((s) => {
       const n = { ...s };
-      if (n[p.code]) delete n[p.code];
-      else n[p.code] = p;
+      const key = `${p.provider}:${p.code}`;
+      if (n[key]) delete n[key];
+      else n[key] = p;
       return n;
     });
   const picked = Object.values(sel);
@@ -80,7 +104,7 @@ export default function MallProductPickerModal({ open, onClose, onPick }: {
             </div>
             <div>
               <h3 className="text-base font-bold text-white">연동 몰에서 상품 불러오기</h3>
-              <p className="text-[11px] text-white/50">카페24 상품을 골라 슬라이드에 자동으로 채웁니다 (이미지·정가·할인가·링크)</p>
+              <p className="text-[11px] text-white/50">상품을 골라 슬라이드에 자동으로 채웁니다 (이미지·정가·할인가·링크)</p>
             </div>
           </div>
           <button onClick={onClose} className="text-white/50 hover:text-white p-1.5 rounded-lg hover:bg-white/10" aria-label="닫기">
@@ -88,18 +112,36 @@ export default function MallProductPickerModal({ open, onClose, onPick }: {
           </button>
         </div>
 
+        {providers.length > 0 && (
+          <div className="px-6 pt-3 shrink-0">
+            <div className="flex gap-1.5 flex-wrap">
+              {providers.map((t) => (
+                <button
+                  key={t.provider}
+                  type="button"
+                  onClick={() => pickProvider(t.provider)}
+                  className={`px-3 py-1.5 rounded-lg text-[12px] font-medium border transition-colors ${provider === t.provider ? 'bg-emerald-500/20 border-emerald-400/50 text-emerald-100' : 'bg-slate-950/40 border-white/10 text-white/60 hover:border-white/25'}`}
+                >
+                  {t.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
         <div className="px-6 py-3 border-b border-white/10 shrink-0">
           <div className="flex gap-2">
             <input
               value={q}
               onChange={(e) => setQ(e.target.value)}
-              onKeyDown={(e) => { if (e.key === 'Enter') load(q.trim()); }}
+              onKeyDown={(e) => { if (e.key === 'Enter') load(provider, q.trim()); }}
               placeholder="상품명 검색 (비우면 전체)"
-              className="flex-1 px-3 py-2 bg-slate-950/60 border border-white/10 rounded-lg text-sm text-white placeholder-white/30 focus:outline-none focus:border-emerald-400/40"
+              disabled={!provider}
+              className="flex-1 px-3 py-2 bg-slate-950/60 border border-white/10 rounded-lg text-sm text-white placeholder-white/30 focus:outline-none focus:border-emerald-400/40 disabled:opacity-40"
             />
             <button
-              onClick={() => load(q.trim())}
-              disabled={loading}
+              onClick={() => load(provider, q.trim())}
+              disabled={loading || !provider}
               className="px-4 py-2 rounded-lg bg-emerald-500/20 border border-emerald-400/40 text-emerald-100 text-sm font-medium hover:bg-emerald-500/30 disabled:opacity-40"
             >
               검색
@@ -108,7 +150,9 @@ export default function MallProductPickerModal({ open, onClose, onPick }: {
         </div>
 
         <div className="px-6 py-4 overflow-y-auto flex-1">
-          {loading ? (
+          {providers.length === 0 && !loading ? (
+            <div className="py-10 text-center text-sm text-white/40">연동된 쇼핑몰이 없습니다. 자사몰 연동 후 이용해주세요.</div>
+          ) : loading ? (
             <div className="flex items-center justify-center gap-2 py-12 text-white/50 text-sm"><Loader2 className="w-5 h-5 animate-spin" /> 불러오는 중...</div>
           ) : err ? (
             <div className="py-10 text-center text-sm text-rose-300">{err}</div>
@@ -117,11 +161,12 @@ export default function MallProductPickerModal({ open, onClose, onPick }: {
           ) : (
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
               {products.map((p) => {
-                const on = !!sel[p.code];
+                const key = `${p.provider}:${p.code}`;
+                const on = !!sel[key];
                 const hasDiscount = p.salePrice > 0 && p.salePrice < p.price;
                 return (
                   <button
-                    key={p.code}
+                    key={key}
                     type="button"
                     onClick={() => toggle(p)}
                     className={`text-left flex gap-3 p-2.5 rounded-xl border transition-colors ${on ? 'bg-emerald-500/15 border-emerald-400/50' : 'bg-slate-950/40 border-white/10 hover:border-white/25'}`}
