@@ -46,6 +46,7 @@ import targetsRoutes from './routes/targets';
 import alimtalkRoutes from './routes/alimtalk';
 // ★ D172 (2026-05-19): 한줄로 CDP — 자사몰 sync API (identify/event/order/bulk-import)
 import cdpRoutes from './routes/cdp';
+import { serveSdkFile } from './utils/sdk-serve';
 // ★ D172-B (2026-05-19): 카페24 OAuth + Webhook receiver
 import cafe24Routes, { cafe24CallbackRouter } from './routes/cafe24';
 // ★ D178 (2026-05-19): 네이버 스마트스토어 (커머스 API) OAuth + Webhook
@@ -228,6 +229,11 @@ app.use('/api/spam-filter', spamFilterRoutes);
 app.use('/', shortUrlRoutes);
 // ★ D218+ (2026-05-26): 여정 즉시 정지 페이지 — 공개 endpoint (/journey-pause/:token) — 담당자 LMS 안 단축 URL
 app.use('/', journeyPausePublicRouter);
+// ★ 2026-07-08 SDK 서빙 (CORS, 공개) — 인앱 SDK를 몰 스토어프론트가 교차출처 로드.
+//   /api/cdp/sdk/ = 신규 수동 스니펫(메이크샵·고도몰·아임웹·자체) / /sdk/ = 레거시(nginx가 backend로 넘기면 팝폰 등 옛 스니펫 자동 복구).
+//   반드시 /api/cdp 라우터(아래) 앞에 등록 — 그래야 이 공개 SDK 라우트가 우선한다.
+app.get('/api/cdp/sdk/:version/hanjul.min.js', serveSdkFile);
+app.get('/sdk/:version/hanjul.min.js', serveSdkFile);
 
 // 헬스체크
 app.get('/health', (req, res) => {

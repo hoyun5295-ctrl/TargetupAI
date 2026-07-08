@@ -2062,7 +2062,7 @@ client.newCall(req).execute()`}</pre>
               </div>
               <div className="text-[11px] text-white/50 -mt-2">회원·주문 동기화(위)와 별개입니다. 방문·장바구니 수집과 <strong className="text-white/80">인앱 메시지 표시</strong>는 쇼핑몰 페이지에 아래 스크립트가 설치돼야 작동합니다. 메이크샵 관리자 &gt; 개별디자인(디자인 편집)에서 모든 페이지에 공통 적용되는 상단 HTML(&lt;head&gt;)에 붙여넣으세요. PC·모바일 디자인 양쪽 모두 필요합니다.</div>
               {(() => {
-                const makeshopHead = `<script src="https://app.hanjul.ai/sdk/v0.3.9/hanjul.min.js" data-hjl-key="${usage?.public_key || 'hjl_발급받은_공개키'}" async></script>`;
+                const makeshopHead = `<script src="https://app.hanjul.ai/api/cdp/sdk/v0.3.9/hanjul.min.js" data-hjl-key="${usage?.public_key || 'hjl_발급받은_공개키'}" async></script>`;
                 return (
                   <div className="space-y-3">
                     <pre className="bg-slate-950 border border-white/10 rounded-xl p-3 text-[11px] text-emerald-200 overflow-x-auto whitespace-pre-wrap break-all">{makeshopHead}</pre>
@@ -2140,7 +2140,7 @@ client.newCall(req).execute()`}</pre>
               </div>
               <div className="text-[11px] text-white/50 -mt-2">회원·주문 동기화(위)와 별개입니다. 방문·장바구니 수집과 <strong className="text-white/80">인앱 메시지 표시</strong>는 사이트에 아래 스크립트가 설치돼야 작동합니다. 아임웹 관리자 화면의 코드 삽입(HEAD 영역)에 붙여넣으세요.</div>
               {(() => {
-                const imwebHead = `<script src="https://app.hanjul.ai/sdk/v0.3.9/hanjul.min.js" data-hjl-key="${usage?.public_key || 'hjl_발급받은_공개키'}" async></script>`;
+                const imwebHead = `<script src="https://app.hanjul.ai/api/cdp/sdk/v0.3.9/hanjul.min.js" data-hjl-key="${usage?.public_key || 'hjl_발급받은_공개키'}" async></script>`;
                 return (
                   <div className="space-y-3">
                     <pre className="bg-slate-950 border border-white/10 rounded-xl p-3 text-[11px] text-emerald-200 overflow-x-auto whitespace-pre-wrap break-all">{imwebHead}</pre>
@@ -2221,7 +2221,7 @@ client.newCall(req).execute()`}</pre>
               </div>
               <div className="text-[11px] text-white/50 -mt-2">주문(위)과 별개입니다. 방문·회원·장바구니까지 수집하려면 고도몰 스킨(PC·모바일 각각)에 아래를 붙여넣으세요. 고도몰5 표준 치환코드라 수정 없이 동작합니다.</div>
               {(() => {
-                const godoHead = `<script src="https://app.hanjul.ai/sdk/v0.3.9/hanjul.min.js" data-hjl-key="${usage?.public_key || 'hjl_발급받은_공개키'}" async></script>`;
+                const godoHead = `<script src="https://app.hanjul.ai/api/cdp/sdk/v0.3.9/hanjul.min.js" data-hjl-key="${usage?.public_key || 'hjl_발급받은_공개키'}" async></script>`;
                 const godoBody = `<body data-hjl-user-id="{=gSess.memNo}" data-hjl-phone="{=gSess.cellPhone}" data-hjl-name="{=gSess.memNm}">`;
                 const godoCart = `<script>\n  // 장바구니 담기 성공 시점(담기 버튼/AJAX 성공)에 호출\n  window.hjl && window.hjl.track('cart_add', {\n    product_name: "{=goodsView['goodsNm']}",\n    price: Number("{=gd_isset(goodsView['goodsPrice'],0)}"),\n    product_url: location.href,\n    quantity: 1\n  });\n</script>`;
                 const godoPurchase = `<script>\n  window.hjl && window.hjl.track('purchase', { order_id: '{=orderInfo.orderNo}' });\n</script>`;
@@ -2401,8 +2401,8 @@ client.newCall(req).execute()`}</pre>
               </div>
             </div>
             {(() => {
-              const snippet = `<script src="https://app.hanjul.ai/sdk/v0.3.9/hanjul.min.js" data-hjl-key="${usage.public_key}" async></script>`;
-              const appSnippet = `<script src="https://app.hanjul.ai/sdk/v0.3.9/hanjul.min.js" data-hjl-key="${usage.public_key}" data-hjl-platform="app" async></script>`;
+              const snippet = `<script src="https://app.hanjul.ai/api/cdp/sdk/v0.3.9/hanjul.min.js" data-hjl-key="${usage.public_key}" async></script>`;
+              const appSnippet = `<script src="https://app.hanjul.ai/api/cdp/sdk/v0.3.9/hanjul.min.js" data-hjl-key="${usage.public_key}" data-hjl-platform="app" async></script>`;
               return (
                 <>
                   <div className="text-xs font-medium text-white/70 mb-1.5">웹 자사몰 — &lt;head&gt;에 붙여넣기</div>
