@@ -430,6 +430,34 @@ export async function cafe24ApiCall<T = unknown>(
 }
 
 // ════════════════════════════════════════════════════════════════════
+// 상품 조회 (DM 상품 슬라이드 자동 채우기 소스) — ★ 2026-07-08 신설
+//   ⛔ 응답 스키마 추측 금지(영구 룰) — raw를 그대로 반환. /mall-products/preview 실측으로 구조 확정 후
+//   정규화 매핑(이미지·정가·할인가·링크)은 후속. GET /products = product_no·product_code·product_name·
+//   price(판매가)·retail_price(정가)·list_image/detail_image/small_image. scope=mall.read_product.
+// ════════════════════════════════════════════════════════════════════
+
+/** 상품 목록 raw — 스키마 실측용(매핑 전 raw 그대로). limit 1~100. */
+export async function fetchCafe24ProductsRaw(
+  integration: Cafe24Integration,
+  opts: { limit?: number; offset?: number; productName?: string } = {},
+  creds?: ProviderOAuthCredentials,
+): Promise<unknown> {
+  return cafe24ApiCall<unknown>(
+    integration,
+    '/products',
+    {
+      method: 'GET',
+      query: {
+        limit: Math.min(Math.max(opts.limit ?? 5, 1), 100),
+        offset: Math.max(opts.offset ?? 0, 0),
+        product_name: opts.productName,
+      },
+    },
+    creds,
+  );
+}
+
+// ════════════════════════════════════════════════════════════════════
 // Webhook 서명 검증 (HMAC-SHA256)
 // ════════════════════════════════════════════════════════════════════
 

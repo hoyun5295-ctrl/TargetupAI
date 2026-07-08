@@ -127,6 +127,9 @@ import { dmPublicRouter, dmRouter } from './routes/dm';
 // ★ 2026-07-08 행사 캠페인 — 이미지 판독(vision) + 3채널 생성 초안 DB 임시 보관(소멸 방지)
 import { eventCampaignRouter } from './routes/event-campaigns';
 
+// ★ 2026-07-08 연동 몰 상품 조회 (DM 상품 슬라이드 자동 채우기 — 카페24·네이버 raw preview 실측부터)
+import { mallProductsRouter } from './routes/mall-products';
+
 // ★ D145 P0 (2026-05-07): 슈퍼관리자 로그인 차단 관리
 import loginBlocksRoutes from './routes/admin/login-blocks';
 
@@ -311,6 +314,8 @@ app.use('/api/alimtalk', alimtalkRoutes);
 app.use('/api/dm', dmRouter);
 // ★ 2026-07-08 행사 캠페인 (이미지 판독 + 생성 초안 임시 보관)
 app.use('/api/event-campaigns', eventCampaignRouter);
+// ★ 2026-07-08 연동 몰 상품 조회 (DM 상품 자동 채우기 — preview 실측)
+app.use('/api/mall-products', mallProductsRouter);
 
 // 공용 관리 라우트 (슈퍼관리자 + 고객사관리자)
 app.use('/api/manage/users', manageUsersRoutes);

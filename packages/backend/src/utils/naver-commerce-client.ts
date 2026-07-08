@@ -388,6 +388,35 @@ export async function fetchRecentNaverOrdersPreview(
 }
 
 // ════════════════════════════════════════════════════════════════════
+// 상품 조회 (DM 상품 슬라이드 자동 채우기 소스) — ★ 2026-07-08 신설
+//   ⛔ 응답 스키마 추측 금지(영구 룰) — raw 그대로 반환. /mall-products/preview 실측으로 구조 확정 후
+//   정규화 매핑은 후속. 목록 POST /products/search(요약) → 이미지·판매가 전체는 상세
+//   GET /external/v2/products/channel-products/{no}(images.representativeImage.url·salePrice)로.
+// ════════════════════════════════════════════════════════════════════
+
+/** 상품 목록 raw — POST /external/v1/products/search (매핑 전 raw). 필수 body는 실측으로 확정. */
+export async function fetchNaverProductsRaw(
+  integration: NaverCommerceIntegration,
+  opts: { page?: number; size?: number; searchKeyword?: string } = {},
+  creds?: NaverCommerceCredentials,
+): Promise<unknown> {
+  return naverCommerceApiCall<unknown>(
+    integration,
+    '/products/search',
+    {
+      method: 'POST',
+      body: {
+        searchKeyword: opts.searchKeyword,
+        productStatusTypes: ['SALE'],
+        page: Math.max(opts.page ?? 1, 1),
+        size: Math.min(Math.max(opts.size ?? 5, 1), 50),
+      },
+    },
+    creds,
+  );
+}
+
+// ════════════════════════════════════════════════════════════════════
 // Webhook 서명 검증
 // ════════════════════════════════════════════════════════════════════
 
