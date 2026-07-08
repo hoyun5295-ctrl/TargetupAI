@@ -10,6 +10,7 @@ import { Router, Response } from 'express';
 import { authenticate } from '../middlewares/auth';
 import { getCafe24Integration, getCafe24ByoCredentials, fetchCafe24ProductsRaw, fetchCafe24Products } from '../utils/cafe24-client';
 import { getNaverCommerceIntegration, getNaverCommerceCredentials, fetchNaverProductsRaw, fetchNaverProducts } from '../utils/naver-commerce-client';
+import { matchMallProductByName } from '../utils/mall-product-match';
 
 export const mallProductsRouter = Router();
 mallProductsRouter.use(authenticate);
@@ -100,5 +101,21 @@ mallProductsRouter.get('/search', async (req: any, res: Response) => {
   } catch (err: any) {
     console.error('[mall-products search] 오류:', err?.message);
     return res.status(502).json({ success: false, error: err?.message || '상품 조회 실패' });
+  }
+});
+
+// GET /match?name=&provider= — 상품명 정확 일치 1건(없으면 product:null). 슬라이드 상품명 → 이미지 자동 채우기용.
+mallProductsRouter.get('/match', async (req: any, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+    const name = String(req.query.name || '').trim();
+    if (!name) return res.status(400).json({ success: false, error: '상품명이 필요합니다.' });
+    const provider = req.query.provider ? String(req.query.provider).trim() : undefined;
+    const product = await matchMallProductByName(companyId, name, provider);
+    return res.json({ success: true, product: product || null });
+  } catch (err: any) {
+    console.error('[mall-products match] 오류:', err?.message);
+    return res.status(502).json({ success: false, error: err?.message || '상품 매칭 실패' });
   }
 });

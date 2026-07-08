@@ -87,6 +87,8 @@ import { rate, relativeDelta, pointDelta } from '../utils/email/email-analytics-
 import { buildPreviewCustomers } from '../utils/inapp-personalization';
 import { getCompanyBrandKit } from '../utils/dm/dm-brand-kit';
 import { normalizeEventText } from '../utils/event-brief';
+// ★ 2026-07-08 연동 몰 상품 자동 첨부 (이메일 상품 블록 항목명 → 몰 이름매칭 이미지·링크)
+import { attachMallImagesToProductCarousels } from '../utils/mall-product-match';
 import { industryLabel } from '../utils/industry-codes';
 import type { Section } from '../utils/dm/dm-section-registry';
 import { checkCredit, deductCreditSafe, InsufficientCreditError } from '../utils/ai-credit';
@@ -891,6 +893,8 @@ router.post('/ai/generate-sections', async (req: Request, res: Response) => {
     await checkCredit(auth.companyId, cost);
     const result = await generateEmailSections({ companyId: auth.companyId, userId: auth.userId, prompt, scenario, isAd, eventText });
     await deductCreditSafe({ companyId: auth.companyId, cost, source: 'email-ai-generate', createdBy: auth.userId });
+    // ★ 2026-07-08 연동 몰 상품 자동 첨부 — 상품 슬라이드 항목명 이름매칭 → 이미지·링크·정가·할인가(빈 값만, 실패 skip). 발송 코어 무관(생성 결과 후처리).
+    try { await attachMallImagesToProductCarousels(auth.companyId, (result as any)?.sections); } catch { /* best-effort */ }
     return res.json({ success: true, data: result });
   } catch (err: any) {
     console.error('[Email /ai/generate-sections] 오류:', err);

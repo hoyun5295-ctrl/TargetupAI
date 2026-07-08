@@ -762,7 +762,7 @@ export default function AiOperatorPage() {
                 label="이미지"
                 onExtracted={(t) => setObjective((prev) => (prev.trim() ? `${prev.trim()}\n${t}` : t))}
                 disabled={loading}
-                className="flex-shrink-0 h-11 px-3 inline-flex items-center gap-1.5 rounded-xl border border-white/15 bg-white/5 text-violet-200 text-sm font-medium hover:bg-violet-500/20 hover:border-violet-400/40 disabled:opacity-40 transition-colors"
+                className="flex-shrink-0 px-5 py-3 inline-flex items-center gap-2 rounded-xl bg-violet-500/20 border border-violet-400/40 text-violet-100 font-semibold hover:bg-violet-500/30 hover:border-violet-400/60 disabled:opacity-40 transition-all"
               />
               <button
                 type="button"

@@ -29,7 +29,7 @@ export default function ImageToCopyButton({ onExtracted, className, label, disab
         aria-label="이미지로 문안 생성"
         title="이미지로 문안 생성"
       >
-        <ImagePlus className="w-4 h-4" />
+        <ImagePlus className="w-[18px] h-[18px]" />
         {label ? <span>{label}</span> : null}
       </button>
       <ImageToCopyModal open={open} onClose={() => setOpen(false)} onExtracted={onExtracted} />

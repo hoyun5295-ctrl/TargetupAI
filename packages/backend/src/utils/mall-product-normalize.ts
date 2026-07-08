@@ -5,6 +5,11 @@
  * ⛔ 응답 스키마는 실측으로 확정한 필드만 매핑(추측 금지). 카페24 = /mall-products/preview 실측 확정.
  */
 
+/** 이름 매칭용 정규화 — 소문자 + 공백·괄호·구분자 제거(정확 일치 판정용). 엉뚱한 상품 매칭 방지로 "정확 일치"만 쓴다. */
+export function normalizeNameForMatch(s: any): string {
+  return String(s ?? '').toLowerCase().replace(/[\s[\]()·・,.\-_/~]/g, '');
+}
+
 export interface MallProduct {
   provider: string;
   code: string;          // 몰 상품 코드/번호 (식별)

@@ -26,6 +26,8 @@ import { logCampaignTraining } from '../utils/training-logger';
 // ★ 2026-07-03 Gap5 Layer2: 고객별 발송 카운터 (예측 분모 전용 — 타겟 선정 무관)
 import { recordCustomerSends } from '../utils/customer-send-stats';
 import { renderDmViewerHtml, renderDmViewerHtmlWithCustomer, renderDmErrorHtml } from '../utils/dm/dm-viewer';
+// ★ 2026-07-08 연동 몰 상품 자동 첨부 (생성된 상품 슬라이드 항목명 → 몰 이름매칭 이미지·링크)
+import { attachMallImagesToProductCarousels } from '../utils/mall-product-match';
 import {
   parsePrompt, recommendLayout, generateCopy, transformTone, improveMessage,
   oneShotGenerate,
@@ -499,6 +501,8 @@ dmRouter.post('/ai/one-shot-generate', async (req: any, res: any) => {
       await deductCreditSafe({ companyId, cost: genCost, source: 'dm-ai-generate', createdBy: req.user?.userId });
       return r;
     });
+    // ★ 2026-07-08 연동 몰 상품 자동 첨부 — 상품 슬라이드 항목명 이름매칭 → 이미지·링크·정가·할인가 채움(빈 값만, 몰 실패 skip). 발송 코어 무관(생성 결과 후처리).
+    try { await attachMallImagesToProductCarousels(companyId, result.sections); } catch { /* best-effort */ }
     return res.json({
       success: true,
       data: {
