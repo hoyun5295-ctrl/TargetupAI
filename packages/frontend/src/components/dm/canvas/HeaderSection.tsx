@@ -119,8 +119,9 @@ export default function HeaderSection({ props, storeName = '', onEdit }: { props
       </div>
     );
   }
+  // ★ 2026-07-08: left/right 정렬 반영 (백엔드 dm-section-renderer renderHeader 미러) — center 외 무조건 space-between으로 좌측 고정되던 문제.
   return (
-    <div className="dm-header dm-header-logo" style={{ background: 'var(--dm-bg)', padding: 'var(--dm-sp-4) var(--dm-sp-5)', borderBottom: '1px solid var(--dm-neutral-200)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+    <div className="dm-header dm-header-logo" style={{ background: 'var(--dm-bg)', padding: 'var(--dm-sp-4) var(--dm-sp-5)', borderBottom: '1px solid var(--dm-neutral-200)', display: 'flex', alignItems: 'center', justifyContent: align === 'right' ? 'flex-end' : 'flex-start', gap: 'var(--dm-sp-3)' }}>
       {logoBrand}
       {phoneLink}
     </div>

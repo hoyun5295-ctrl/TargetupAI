@@ -1,6 +1,7 @@
 /**
  * DateTimeField — 날짜(클릭 캘린더) + 시간(오전/오후 + 시·분) 공용 예약 입력
  *   2026-07-07(2) 신설 · 2026-07-08 UI 전면 정비(답답한 wrap·빈 네이티브 박스 → 2행 클린 레이아웃 + 아이콘).
+ *   2026-07-08(2) 한 줄 배치 — Harold님 지시: 날짜·오전/오후·시:분이 줄바꿈 없이 한 줄에 들어가도록 크기·배분 축소(wrap 금지).
  *
  * 브라우저 datetime-local 시간 스크롤이 불편하다는 Harold님 지시로 시간은 [오전|오후] + 시(1~12)·분(0~59) 직접 입력.
  * value/onChange = ISO 문자열. 빈 값 = ''. tone: 'dark'(앱, 기본) | 'light'(DM 라이트 패널).
@@ -37,23 +38,23 @@ interface DateTimeFieldProps {
 
 const TONE = {
   dark: {
-    date: 'w-full pl-10 pr-3 py-2.5 bg-slate-900/70 border border-white/12 rounded-xl text-sm text-white [color-scheme:dark] focus:outline-none focus:border-violet-400/50 transition-colors',
+    date: 'w-full pl-7 pr-1.5 py-2 bg-slate-900/70 border border-white/12 rounded-lg text-xs text-white [color-scheme:dark] focus:outline-none focus:border-violet-400/50 transition-colors',
     icon: 'text-violet-300/70',
-    timeWrap: 'inline-flex items-center gap-1.5 bg-slate-900/70 border border-white/12 rounded-xl pl-3 pr-2.5 py-2',
-    num: 'bg-transparent text-sm text-white text-center font-semibold focus:outline-none w-7 tabular-nums',
+    timeWrap: 'inline-flex shrink-0 items-center gap-1 bg-slate-900/70 border border-white/12 rounded-lg pl-2 pr-1.5 py-2',
+    num: 'bg-transparent text-xs text-white text-center font-semibold focus:outline-none w-5 tabular-nums',
     colon: 'text-white/40 font-bold',
-    segWrap: 'inline-flex rounded-xl border border-white/12 overflow-hidden bg-slate-900/70',
+    segWrap: 'inline-flex shrink-0 rounded-lg border border-white/12 overflow-hidden bg-slate-900/70',
     segOn: 'bg-violet-500/40 text-white',
     segOff: 'text-white/45 hover:text-white/80',
     clear: 'text-white/40 hover:text-white/70',
   },
   light: {
-    date: 'w-full pl-10 pr-3 py-2.5 bg-white border rounded-xl text-sm text-gray-900 focus:outline-none transition-colors',
+    date: 'w-full pl-7 pr-1.5 py-2 bg-white border rounded-lg text-xs text-gray-900 focus:outline-none transition-colors',
     icon: 'text-violet-500/70',
-    timeWrap: 'inline-flex items-center gap-1.5 bg-white border rounded-xl pl-3 pr-2.5 py-2',
-    num: 'bg-transparent text-sm text-gray-900 text-center font-semibold focus:outline-none w-7 tabular-nums',
+    timeWrap: 'inline-flex shrink-0 items-center gap-1 bg-white border rounded-lg pl-2 pr-1.5 py-2',
+    num: 'bg-transparent text-xs text-gray-900 text-center font-semibold focus:outline-none w-5 tabular-nums',
     colon: 'text-gray-400 font-bold',
-    segWrap: 'inline-flex rounded-xl border overflow-hidden bg-white',
+    segWrap: 'inline-flex shrink-0 rounded-lg border overflow-hidden bg-white',
     segOn: 'bg-slate-800 text-white',
     segOff: 'text-gray-500 hover:text-gray-800',
     clear: 'text-gray-400 hover:text-gray-600',
@@ -106,10 +107,10 @@ export function DateTimeField({ value, onChange, tone = 'dark', clearable = fals
   const lightStyle = tone === 'light' ? LIGHT_BORDER : undefined;
 
   return (
-    <div className={`space-y-2 ${disabled ? 'opacity-50 pointer-events-none' : ''}`}>
-      {/* 날짜 — 클릭 캘린더 */}
-      <div className="relative">
-        <Calendar className={`w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none ${t.icon}`} />
+    <div className={`flex items-center gap-1.5 ${disabled ? 'opacity-50 pointer-events-none' : ''}`}>
+      {/* 날짜 — 클릭 캘린더 (한 줄 안에서 남는 폭을 차지, min-w로 잘림 방지) */}
+      <div className="relative flex-1 min-w-[7.5rem]">
+        <Calendar className={`w-3.5 h-3.5 absolute left-2 top-1/2 -translate-y-1/2 pointer-events-none ${t.icon}`} />
         <input
           type="date"
           value={dateStr}
@@ -120,61 +121,60 @@ export function DateTimeField({ value, onChange, tone = 'dark', clearable = fals
         />
       </div>
 
-      {/* 시간 — 오전/오후 + 시:분 */}
-      <div className="flex items-center gap-2 flex-wrap">
-        <div className={t.segWrap} style={lightStyle}>
-          {([['오전', false], ['오후', true]] as const).map(([label, pm]) => (
-            <button
-              key={label}
-              type="button"
-              disabled={disabled}
-              onClick={() => emit(dateStr || todayStr(), pm, clampHour(hourText), clampMin(minText))}
-              className={`px-3.5 py-2 text-sm font-medium transition-colors ${isPm === pm ? t.segOn : t.segOff}`}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
-
-        <div className={t.timeWrap} style={lightStyle}>
-          <Clock className={`w-4 h-4 ${t.icon}`} />
-          <input
-            type="text"
-            inputMode="numeric"
-            maxLength={2}
-            value={hourText}
+      {/* 오전/오후 */}
+      <div className={t.segWrap} style={lightStyle}>
+        {([['오전', false], ['오후', true]] as const).map(([label, pm]) => (
+          <button
+            key={label}
+            type="button"
             disabled={disabled}
-            onChange={(e) => {
-              const raw = e.target.value.replace(/\D/g, '').slice(0, 2);
-              setHourText(raw);
-              if (raw !== '') emit(dateStr || todayStr(), isPm, clampHour(raw), clampMin(minText));
-            }}
-            onBlur={() => setHourText(String(clampHour(hourText)))}
-            aria-label="시 (1~12)"
-            className={t.num}
-          />
-          <span className={`text-sm ${t.colon}`}>:</span>
-          <input
-            type="text"
-            inputMode="numeric"
-            maxLength={2}
-            value={minText}
-            disabled={disabled}
-            onChange={(e) => {
-              const raw = e.target.value.replace(/\D/g, '').slice(0, 2);
-              setMinText(raw);
-              if (raw !== '') emit(dateStr || todayStr(), isPm, clampHour(hourText), clampMin(raw));
-            }}
-            onBlur={() => setMinText(pad(clampMin(minText)))}
-            aria-label="분 (0~59)"
-            className={t.num}
-          />
-        </div>
-
-        {clearable && value && (
-          <button type="button" onClick={() => onChange('')} className={`text-[11px] px-1 ${t.clear}`} aria-label="시각 지우기">지우기</button>
-        )}
+            onClick={() => emit(dateStr || todayStr(), pm, clampHour(hourText), clampMin(minText))}
+            className={`px-2 py-2 text-xs font-medium transition-colors ${isPm === pm ? t.segOn : t.segOff}`}
+          >
+            {label}
+          </button>
+        ))}
       </div>
+
+      {/* 시:분 */}
+      <div className={t.timeWrap} style={lightStyle}>
+        <Clock className={`w-3.5 h-3.5 ${t.icon}`} />
+        <input
+          type="text"
+          inputMode="numeric"
+          maxLength={2}
+          value={hourText}
+          disabled={disabled}
+          onChange={(e) => {
+            const raw = e.target.value.replace(/\D/g, '').slice(0, 2);
+            setHourText(raw);
+            if (raw !== '') emit(dateStr || todayStr(), isPm, clampHour(raw), clampMin(minText));
+          }}
+          onBlur={() => setHourText(String(clampHour(hourText)))}
+          aria-label="시 (1~12)"
+          className={t.num}
+        />
+        <span className={`text-xs ${t.colon}`}>:</span>
+        <input
+          type="text"
+          inputMode="numeric"
+          maxLength={2}
+          value={minText}
+          disabled={disabled}
+          onChange={(e) => {
+            const raw = e.target.value.replace(/\D/g, '').slice(0, 2);
+            setMinText(raw);
+            if (raw !== '') emit(dateStr || todayStr(), isPm, clampHour(hourText), clampMin(raw));
+          }}
+          onBlur={() => setMinText(pad(clampMin(minText)))}
+          aria-label="분 (0~59)"
+          className={t.num}
+        />
+      </div>
+
+      {clearable && value && (
+        <button type="button" onClick={() => onChange('')} className={`shrink-0 text-[11px] px-1 ${t.clear}`} aria-label="시각 지우기">지우기</button>
+      )}
     </div>
   );
 }

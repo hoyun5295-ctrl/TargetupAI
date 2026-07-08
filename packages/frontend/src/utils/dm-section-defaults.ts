@@ -62,7 +62,7 @@ export const SECTION_TYPES: readonly SectionType[] = [
 
 export type HeaderProps = {
   variant: 'logo' | 'banner' | 'countdown' | 'coupon';
-  align?: 'left' | 'center'; // logo형 정렬(기본 center)
+  align?: 'left' | 'center' | 'right'; // logo형 정렬(기본 center) — ★ 2026-07-08 'right' 추가(UI 좌·중·우 버튼 지원, 타입 누락으로 우측 미반영이던 문제)
   brand_size?: 'sm' | 'md' | 'lg'; // 브랜드명 크기(기본 md)
   logo_size?: 'sm' | 'md' | 'lg';  // 로고 크기(기본 md)
   logo_url?: string;

@@ -64,7 +64,7 @@ export const SECTION_TYPES: readonly SectionType[] = [
 
 export type HeaderProps = {
   variant: 'logo' | 'banner' | 'countdown' | 'coupon';
-  align?: 'left' | 'center'; // logo형 정렬(기본 center)
+  align?: 'left' | 'center' | 'right'; // logo형 정렬(기본 center) — ★ 2026-07-08 'right' 추가(프론트 미러, UI 좌·중·우 지원)
   brand_size?: 'sm' | 'md' | 'lg'; // 브랜드명 크기(기본 md)
   logo_size?: 'sm' | 'md' | 'lg';  // 로고 크기(기본 md)
   logo_url?: string;

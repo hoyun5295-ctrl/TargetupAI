@@ -50,7 +50,19 @@ export async function getStoreScope(companyId: string, userId: string): Promise<
   );
 
   if (hasStores.rows[0]?.has_stores) {
-    // 브랜드 체계 있는데 사용자에게 미할당 → 차단
+    // ★ 2026-07-08 (Harold 명시): 회사 옵션 — 하위 사용자 전체 접근 허용 시 차단 대신 회사 전체 조회.
+    //   브랜드 격리 회사에서 미할당 하위 사용자도 회사 전체 고객·구매데이터를 쓰게 하려는 회사만 켠다.
+    //   기본 false = 기존 차단 유지(다른 격리 회사 영향 0). 컬럼 미존재(마이그레이션 전) = false 취급(db_alter_safety_net).
+    let allowUserFullAccess = false;
+    try {
+      const optResult = await query('SELECT allow_user_full_access FROM companies WHERE id = $1', [companyId]);
+      allowUserFullAccess = optResult.rows[0]?.allow_user_full_access === true;
+    } catch (e: any) {
+      const msg = e?.message || '';
+      if (!(msg.includes('column') && msg.includes('does not exist'))) throw e;
+    }
+    if (allowUserFullAccess) return { type: 'no_filter' };
+    // 브랜드 체계 있는데 미할당 + 옵션 꺼짐 → 차단
     return { type: 'blocked' };
   }
 

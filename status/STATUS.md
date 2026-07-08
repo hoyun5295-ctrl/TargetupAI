@@ -37,6 +37,13 @@
 
 > **회전 룰:** 완료(★배포완료) 엔트리는 원문을 archive/TASKS_YYYY-MM.md로 이동 + INDEX 등재하고, 아래 "최근 완료 인덱스"에 1줄만 남긴다. 30KB 초과 = 회전 미이행 — 즉시 회전.
 
+### 🟢 2026-07-08(2) — 원클릭 캠페인(이미지 판독·초안 DB 보관) + 이미지로 문안 전 화면 + 연동 몰 상품 자동채우기(카페24·네이버) + 예약 시점 UI 정비 (★배포완료 — Harold 선언 / 운영 실측 = Harold)
+> **① 원클릭 캠페인(옛 "행사 캠페인" 타일 승격)**: 이미지 업로드→vision 판독(`callAIWithFallback` optional images·cache 우회, additive)으로 상품명·정가·할인가 전사(노이즈 리뷰·별점·10ml당·[네이버단독] 제외, `event-image-extract` CT)→행사 내용 자동 채움. 3채널 생성 초안 DB 임시 보관(`event_campaign_drafts` DDL 실행완료 — 소멸 방지·EventCampaignResumeBar 재개). AI Operator 쌩뚱맞은 알약 제거 → SUB_MODULE_CARDS 'AI 사용량' 슬롯을 **'원클릭 캠페인'**(/quick-campaign·QuickCampaignPage) 타일로 승격, AI 사용량은 DashboardHeader 유틸 nav로 이전.
+> **② 이미지로 문안 생성 전 화면**: 공용 `ImageToCopyModal`/`ImageToCopyButton`(createPortal body — 입력창 backdrop-filter 조상에 갇히던 fixed 버그 fix) → "이미지" 버튼을 AI Operator·DM·이메일·인앱 생성 입력칸에 배선.
+> **③ 연동 몰 상품 자동 채우기(DM 상품 슬라이드)**: products 테이블엔 이미지·링크·할인 없음(주문만 sync) → 몰 상품 API 신규(카페24 `GET /products` scope mall.read_product / 네이버 `POST /products/search` representativeImage — hoyun 실측 확정). 정규화 CT `MallProduct`(mall-product-normalize) + `routes/mall-products`(/preview 실측·/search·/providers·/match). ProductCarouselEditor "연동 몰에서 상품 불러오기" 피커. **자동 이름매칭**: `matchMallProductByName`(정규화 정확일치만)+`attachMallImagesToProductCarousels` 후처리를 DM one-shot·이메일 generate-sections에 배선(빈값만·실패skip·**발송 코어 무수정**).
+> **④ 예약 시점 UI 정비**: 공용 `DateTimeField` 2행 클린 레이아웃(캘린더/시계 아이콘+rounded-xl) — 이메일·인앱·마케팅캘린더·AI Operator 예약 전부 반영.
+> **검증**: backend/frontend tsc 0 · 금지패턴(모델명·native dialog·박-단어) 0. **잔여**: Harold 운영 실측(원클릭 캠페인 이미지·소멸0·상품 자동채움·예약 UI) + 네이버 상품링크 슬러그 + 몰 이미지 재호스팅 판단 + 메이크샵·고도몰·아임웹 상품 API 확장 + `/codex:review`. 상세 [[project_2026_0708_mall_product_autofill_dm]] · [[project_2026_0708_event_campaign_image_and_draft_persistence]].
+
 ### 🟢 2026-07-08 — 행사 캠페인 상품 구조 추출 + 인앱 SDK 서빙 공용화·팝폰 복구 + 인앱 개인화 익명 fallback + 로그인 문의·DM 2열그리드 (★배포완료 — Harold 선언 / 운영 실측 = Harold)
 > **① 행사 캠페인 상품 구조 추출(DM+이메일)**: 행사 원문의 상품명·정가·할인가를 product_carousel에 자동 주입(dm-ai `extractEventProducts` sonnet temp0) + 원문 실존 기계검증(`validateProductsAgainstEventText` — 환각 가격 탈락, event-brief CT). DM 문안 요약에 "이름 정가→할인가" 동반 + 대표 1~3개 가격 프롬프트. 구분선 정규화 CT `normalizeSmsSeparatorLines`(구분문자만 4자+ 줄→하이픈10, **DM 문안 경로에만** 적용). 이메일 AI 스키마 discount_price 추가.
 > **② 인앱 SDK 서빙 공용화(CT `sdk-serve.ts`)**: 정적 `/sdk/` 경로가 SPA index.html로 fallback돼 깨짐(팝폰 v0.3.6 인앱 정지) → backend가 `/sdk/`·`/api/cdp/sdk/`를 CORS+CORP+**버전폴백**(요청 버전 파일 없으면 최신)으로 서빙. cafe24 인라인 라우트 공용화. **nginx `location ^~ /sdk/`→backend:3000**(OPS 갱신, 팝폰 레거시 경로 복구용). 수동 스니펫 4곳 `/api/cdp/sdk/`로. 팝폰 웹(Vercel Next.js `poppon-workspace/poppon`) layout.tsx SDK v0.3.6→v0.3.9.

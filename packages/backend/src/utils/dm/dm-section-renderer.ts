@@ -128,7 +128,9 @@ function renderHeader(props: HeaderProps, ctx: SectionRenderContext): string {
         ${props.phone ? `<a href="tel:${escapeHtml(props.phone)}" style="font-size:var(--dm-fs-tiny);color:var(--dm-neutral-500)">${escapeHtml(props.phone)}</a>` : ''}
       </div>`;
       }
-      return `<div class="dm-header dm-header-logo" data-variant="${escapeHtml(variant)}" style="background:var(--dm-bg);padding:var(--dm-sp-4) var(--dm-sp-5);border-bottom:1px solid var(--dm-neutral-200);display:flex;align-items:center;justify-content:space-between">
+      // ★ 2026-07-08: left/right 정렬 반영 — 기존엔 center가 아니면 무조건 space-between(로고 좌측 고정)이라 '우' 선택이 좌측으로 렌더되던 문제.
+      const logoJustify = align === 'right' ? 'flex-end' : 'flex-start';
+      return `<div class="dm-header dm-header-logo" data-variant="${escapeHtml(variant)}" style="background:var(--dm-bg);padding:var(--dm-sp-4) var(--dm-sp-5);border-bottom:1px solid var(--dm-neutral-200);display:flex;align-items:center;justify-content:${logoJustify};gap:var(--dm-sp-3)">
         ${logoBrand}
         ${props.phone ? `<a href="tel:${escapeHtml(props.phone)}" style="font-size:var(--dm-fs-small);color:var(--dm-neutral-500)">${escapeHtml(props.phone)}</a>` : ''}
       </div>`;

@@ -94,8 +94,9 @@ export const FIELD_MAP: StandardFieldMapping[] = [
   // ★ D131 후속(2026-04-21): 고객사별 등급 체계(시세이도 '일반/실버/골든', 타사 '블루/블랙' 등)는
   //   우리가 미리 대비 불가. 원본 값 그대로 저장/표시가 SaaS 원칙(Harold님 결정).
   //   normalizeGrade 함수/GRADE_MAP은 남겨두되 FIELD_MAP에서 호출 끊음 → trim으로 교체.
-  { fieldKey: 'grade',  category: 'membership', displayName: '고객등급',   dataType: 'string', storageType: 'column', columnName: 'grade',  normalizeFunction: 'trim',           sortOrder: 15 },
-  { fieldKey: 'points', category: 'membership', displayName: '보유포인트', dataType: 'number', storageType: 'column', columnName: 'points', normalizeFunction: 'parseInt',       sortOrder: 16 },
+  // ★ 2026-07-08: aliases 추가 — AI Operator 문안/미리보기는 '등급'·'포인트' 라벨을 쓰는데 발송 사전엔 displayName('고객등급'·'보유포인트')만 있어 %등급%·%포인트%가 발송 시 빈칸이던 문제 해결(name의 '이름'·'성함' 선례 동일).
+  { fieldKey: 'grade',  category: 'membership', displayName: '고객등급',   aliases: ['등급'],   dataType: 'string', storageType: 'column', columnName: 'grade',  normalizeFunction: 'trim',           sortOrder: 15 },
+  { fieldKey: 'points', category: 'membership', displayName: '보유포인트', aliases: ['포인트'], dataType: 'number', storageType: 'column', columnName: 'points', normalizeFunction: 'parseInt',       sortOrder: 16 },
 
   // ── marketing (수신동의) — 1개 ──
   { fieldKey: 'sms_opt_in', category: 'marketing', displayName: '수신동의여부', dataType: 'boolean', storageType: 'column', columnName: 'sms_opt_in', normalizeFunction: 'normalizeSmsOptIn', sortOrder: 17 },

@@ -658,6 +658,10 @@ export default function AiOperatorPage() {
 
   const showAbout = !loading && !proposal;
 
+  // ★ 2026-07-08 (Harold 명시): 문안 미생성(0건 매칭 등) → 빈 제안서 대신 조건 재입력 안내.
+  //   판정 = 문안 개수(백엔드 크레딧 차감 게이트와 동일 신호) — "차감 안 됨" 안내와 실제 차감 정합.
+  const isZeroTarget = !!proposal && (proposal.messages?.length ?? 0) === 0;
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-violet-900 via-fuchsia-900 to-violet-900 text-white">
       <ConfirmModal state={confirm} onClose={() => setConfirm(null)} />
@@ -896,8 +900,35 @@ export default function AiOperatorPage() {
               </span>
             </div>
 
+            {/* ★ 2026-07-08 (Harold 명시): 타겟 0건 — 빈 제안서 대신 조건 재입력 안내 (크레딧 미차감). */}
+            {isZeroTarget && (
+              <div className="mb-5 p-6 rounded-2xl border border-amber-400/30 bg-amber-500/[0.07] backdrop-blur-xl">
+                <div className="flex items-start gap-3">
+                  <div className="shrink-0 w-10 h-10 rounded-xl bg-gradient-to-br from-amber-400/30 to-orange-500/20 flex items-center justify-center">
+                    <AlertTriangle className="w-5 h-5 text-amber-300" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <h3 className="text-base font-bold text-white mb-1">조건에 맞는 고객이 없습니다</h3>
+                    <p className="text-sm text-white/70 leading-relaxed">
+                      {proposal.recommendationReason?.trim()
+                        || '입력하신 조건에 해당하는 고객이 DB에 없어 제안서를 만들지 못했습니다.'}
+                    </p>
+                    <p className="text-xs text-white/45 mt-2">
+                      조건을 넓히거나 다른 등급·기간으로 바꿔 다시 생성해 보세요. 이 경우 크레딧은 차감되지 않습니다.
+                    </p>
+                    <button
+                      onClick={() => setProposal(null)}
+                      className="mt-4 inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-white/10 hover:bg-white/15 border border-white/15 text-sm font-medium text-white transition-colors"
+                    >
+                      조건 다시 입력
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
             {/* ★ D170: Compliance Sub-agent 경고 표시 — high/medium만 노출, low는 ShieldCheck 작은 표시 */}
-            {proposal.compliance && (
+            {!isZeroTarget && proposal.compliance && (
               <>
                 {(proposal.compliance.riskLevel !== 'low' || !proposal.compliance.passed) && (
                   <div className={`mb-5 p-4 rounded-xl border backdrop-blur-xl ${
@@ -936,7 +967,7 @@ export default function AiOperatorPage() {
               </>
             )}
 
-            {(() => {
+            {!isZeroTarget && (() => {
               // ★ D165: 메시지 3안 토글 — 다듬기 결과가 있으면 오버라이드 사용
               const variants = proposal.messages;
               const safeIdx = Math.min(selectedVariantIdx, Math.max(0, variants.length - 1));
@@ -1320,6 +1351,8 @@ export default function AiOperatorPage() {
             })()}
 
             {/* ★ D166: 승인 발송 활성화 — preview-recipients + /direct-send 2-step */}
+            {/* ★ 2026-07-08: 타겟 0건 = 발송/요약 버튼 숨김 (조건 재입력 안내 카드가 대체) */}
+            {!isZeroTarget && (
             <div className="flex flex-col sm:flex-row gap-3">
               <button
                 type="button"
@@ -1349,6 +1382,7 @@ export default function AiOperatorPage() {
                 다시 생성
               </button>
             </div>
+            )}
 
             {/* 발송 에러 */}
             {sendError && (

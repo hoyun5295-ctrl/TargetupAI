@@ -323,7 +323,11 @@ export async function orchestrate(ctx: AgentContext, creditOpts?: { source?: str
   await checkCredit(ctx.companyId, cost);
   return runInCreditBundle(async () => {
     const result = await _orchestrateImpl(ctx);
-    await deductCreditSafe({ companyId: ctx.companyId, cost, source, createdBy: ctx.userId || currentUserId() || null });
+    // ★ 2026-07-08 (Harold 명시): 문안 미출력(0건 매칭 등) = 사용자 결과 없음 → 차감 skip.
+    //   문안이 1개 이상 실제 생성된 경우에만 과금 (6원칙 ② 효과 검증 후 과금).
+    if ((result.messages?.length ?? 0) > 0) {
+      await deductCreditSafe({ companyId: ctx.companyId, cost, source, createdBy: ctx.userId || currentUserId() || null });
+    }
     return result;
   });
 }
@@ -615,7 +619,11 @@ export async function orchestrateWithAI(ctx: AgentContext, creditOpts?: { source
   await checkCredit(ctx.companyId, cost);
   return runInCreditBundle(async () => {
     const result = await _orchestrateWithAIImpl(ctx);
-    await deductCreditSafe({ companyId: ctx.companyId, cost, source, createdBy: ctx.userId || currentUserId() || null });
+    // ★ 2026-07-08 (Harold 명시): 문안 미출력(0건 매칭 등) = 사용자 결과 없음 → 차감 skip.
+    //   문안이 1개 이상 실제 생성된 경우에만 과금 (6원칙 ② 효과 검증 후 과금).
+    if ((result.messages?.length ?? 0) > 0) {
+      await deductCreditSafe({ companyId: ctx.companyId, cost, source, createdBy: ctx.userId || currentUserId() || null });
+    }
     return result;
   });
 }
