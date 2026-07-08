@@ -600,6 +600,24 @@ else concat(concat(concat('{"sendercode":"',sender_code),'",'), replace(k_etc_js
 
 ---
 
+## 타겟 건수 "조회 vs 추출" 불일치 = 데이터 불일치부터 의심 (2026-07-09 추가)
+
+### 2026-07-09 — AI 오퍼레이터 추출 건수 < 고객DB 조회 (인비토 가상데이터 sync 수신거부 잔존, 코드 오판 철회)
+
+**신고**: 인비토(테스트 계정) 고객DB 조회 "수신 동의" 664 vs AI 추출 660 (VVIP+포인트 134 vs 133 등 1~5건 상시 차이). 기대 = 조회 = 추출.
+
+**★ 오판(성급히 한 것) 및 철회**: "조회는 수신거부 user_id 기준, 발송은 회사+전화 기준이라 불일치"로 단정 → `customers.ts` 수신거부 9곳을 `u.user_id`→`u.company_id`로 뒤집음(B17-01 역행). **Harold 지적("동의만 체크했는데 왜 수신거부가 껴있냐 / 가상데이터라 080 수신거부 자체가 안 되는 DB다")으로 실데이터 확인 → 전량 철회(user_id 원복).**
+
+**진짜 근본 (실데이터 확정)**: 차이 4~5명은 `customers.sms_opt_in=true`(동의)인데 `unsubscribes.source='sync'`가 **잔존**한 고객. `source='sync'`는 080/수동 거부가 아니라 **sms_opt_in 파생**이다 — `sync.ts reconcileSyncUnsubscribes`: sms_opt_in=false→sync 등록 / sms_opt_in=true 전환→sync 해제(DELETE, 288-301행 2026-06-15 fix). 인비토는 가상데이터라 sms_opt_in을 sync 밖에서 true로 바꿔 reconcile이 안 돌아 해제 누락 5명. **전 회사 스캔 = 인비토만 5명, 운영 회사 전원 0 = 코드·발송 로직 정상.** 발송(회사+전화 수신거부 제외)이 이 잔존 5명을 빼 660, 조회(user_id)는 664. 즉 **조회 664(동의)가 맞고, 발송이 "해제됐어야 할 sync 수신거부"로 동의 고객을 잘못 제외** — 단 인비토 데이터 한정. 진짜 해결 = 인비토 재sync로 reconcile 자동 해제(둘 다 664).
+
+**교훈**:
+- **"조회 A건 vs 추출 B건 상이" 신고 = 필터 기준(코드)보다 데이터 불일치부터 실측.** sms_opt_in(컬럼) ↔ unsubscribes(목록)는 별개 저장소라 "동의인데 수신거부 목록에 있음"이 생긴다. 조회 기준을 코드로 뒤집기 전에 `JOIN unsubscribes ON source='sync' WHERE sms_opt_in=true` 잔존 + **전 회사 규모(운영 0인지)** 부터 스캔.
+- **증상(A≠B)을 코드로 "일치"시키면 틀린 값끼리 맞추는 함정** — 여기선 조회를 660(동의 5명 잘못 제외한 값)에 맞출 뻔했다. 근본은 데이터(sync 잔존) 정리.
+- **source='sync'는 sms_opt_in 파생이라 sync 시점에만 재조정.** sms_opt_in을 sync 밖 경로(가상데이터 생성·수동 UPDATE)로 바꾸면 unsubscribes(source='sync')가 잔존 → 동의 고객 미발송. 데이터 직접 조작 시 reconcile 동반 필요.
+- **광범위 기준 변경(B17-01 역행 등) 전 = "실제 원인이 이 코드가 맞나"를 데이터로 확정.** 사용자("왜 수정하려 했냐")의 의심이 오판을 차단 — 추측 단정 금지(no_guess) 재확인.
+
+---
+
 ## 자가 검증 매트릭스 (Backend 작업 시)
 
 - [ ] 발송 5경로 전수 점검 (AI/직접/타겟/스케줄/테스트)
