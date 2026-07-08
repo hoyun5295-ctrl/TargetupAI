@@ -20,6 +20,7 @@ import { THEME_OPTIONS, CARD_STYLE_OPTIONS, type CardStyle } from '../components
 import { Icon as BlockIcon } from '../components/inapp/BlockPreview';
 import { DateTimeField } from '../components/DateTimeField';
 import { takeEventDraft, EVENT_INAPP_DRAFT_KEY } from '../components/EventCampaignModal';
+import ImageToCopyButton from '../components/ImageToCopyButton';
 
 // ════════════════════════════════════════════════════════════════════
 // ★ D215+ (2026-05-25) 인앱 메시지 압도적 강화 — Journey Builder급 12 화면 영역
@@ -1092,6 +1093,11 @@ export default function InAppMessagesPage() {
               placeholder="예: 장바구니 24시간 후 회복 메시지 / 신규 가입자 환영 인사"
               className="flex-1 min-w-[240px] px-4 py-2.5 bg-slate-900/60 border border-fuchsia-400/30 rounded-lg text-sm text-white placeholder-white/40 focus:outline-none focus:border-fuchsia-400/60"
               disabled={aiGenerating}
+            />
+            <ImageToCopyButton
+              onExtracted={(t) => setAiObjective((prev) => (prev.trim() ? `${prev.trim()}\n${t}` : t))}
+              disabled={aiGenerating}
+              className="w-11 h-11 inline-flex items-center justify-center rounded-lg border border-fuchsia-400/30 bg-slate-900/60 text-fuchsia-200 hover:bg-fuchsia-500/15 hover:border-fuchsia-400/50 disabled:opacity-40 transition-colors"
             />
             <button
               onClick={() => handleAIGenerate(aiObjective)}

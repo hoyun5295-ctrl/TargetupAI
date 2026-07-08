@@ -131,6 +131,8 @@ export default function DashboardHeader({
     //   AI Operator가 모든 유료 요금제 크레딧 사용으로 전환되어 접근 회귀 없음. aiMessagingEnabled prop은 호환성 위해 유지.
     { label: '발송결과', onClick: onResults, color: 'green', path: '/' },
     { label: '수신거부', onClick: () => navigate('/unsubscribes'), color: 'gold', path: '/unsubscribes' },
+    // ★ 2026-07-08 AI 사용량 — SUB_MODULE_CARDS 타일 슬롯을 원클릭 캠페인에 내주고 헤더 유틸 메뉴로 이전(접근 유지).
+    { label: 'AI 사용량', onClick: () => navigate('/ai-usage'), color: 'green', path: '/ai-usage' },
     { label: '설정', onClick: () => navigate('/settings'), color: 'green', path: '/settings' },
     ...(isCompanyAdmin
       ? [{ label: '관리', onClick: () => navigate('/manage'), color: 'gold' as MenuColor, path: '/manage' }]

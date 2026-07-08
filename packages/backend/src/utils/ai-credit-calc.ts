@@ -118,6 +118,8 @@ export const CREDIT_COST_MAP: Record<string, number> = {
   'inapp-ai-generator': 3,
   // Email 생성(돌려보기) 3 — 자연어/시나리오→제목3안+본문 HTML. 호출마다 3. 캠페인 완성은 'email-campaign-complete' 50 별도.
   'email-ai-generate': 3,
+  // ★ 2026-07-08 행사 캠페인 이미지 판독 3 — 업로드 이미지(스샷)에서 행사 내용(브랜드·상품·정가·할인율·판매가·기간·혜택)을 전사해 행사 내용 텍스트 반환(vision). 성공 시에만 차감. 20 미만이라 확인 모달 비대상.
+  'event-image-extract': 3,
   // ★ 2026-07-02 Harold 확정 — Email 캠페인 완성 50: AI/수동/템플릿 불문 "완성 저장" 시 1회(멱등키 email-campaign-complete:campaignId).
   //   임시저장 무료(발송·PC 미리보기 잠금) / 발송·수신/오픈/클릭 이력 = 무료(고객 SMTP) / 환불 없음.
   'email-campaign-complete': 50,

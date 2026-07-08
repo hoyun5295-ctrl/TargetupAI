@@ -196,6 +196,9 @@ C:\Users\ceo\projects\targetup\  (로컬)
 | `/etc/nginx/sites-available/targetup-company` | sys.hanjullo.com | frontend/dist |
 | `/etc/nginx/sites-available/targetup-app` | app.hanjul.ai | company-frontend/dist |
 
+> **★ 2026-07-08 인앱 SDK 서빙 — `targetup-app`에 `location ^~ /sdk/ { proxy_pass http://127.0.0.1:3000; }` 추가됨** (`location /` SPA 폴백보다 앞·`^~`). 정적 `/sdk/`가 SPA index.html로 새어 팝폰(레거시 `/sdk/v0.3.6/` 스니펫) 인앱이 깨진 것 복구용. **이 블록 지우면 팝폰 인앱 재차단.** backend가 버전폴백으로 서빙(utils/sdk-serve.ts). 신규 몰은 `/api/cdp/sdk/`(이미 `/api/`가 backend).
+> **⚠️ sites-enabled/targetup-app 은 심볼릭이 아니라 사본(copy)** — sites-available만 고치면 반영 안 됨. 실제 로드 파일 = **sites-enabled/targetup-app** 직접 수정(또는 available→enabled cp) 후 `nginx -t && systemctl reload`. **백업 파일은 sites-enabled 밖에 둘 것**(`sites-enabled/*` 전부 로드 → `.bak`가 server_name 중복 경고 유발).
+
 ### 4-2. SSL 인증서 (Let's Encrypt)
 | 도메인 | 인증서 경로 | 만료일 |
 |--------|------------|--------|

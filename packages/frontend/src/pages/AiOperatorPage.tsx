@@ -4,7 +4,6 @@ import {
   AlertTriangle,
   ArrowLeft,
   Brain,
-  CalendarRange,
   Check,
   CheckCircle2,
   Clock,
@@ -25,7 +24,7 @@ import {
 } from 'lucide-react';
 import AiRefineModal from '../components/AiRefineModal';
 import { DateTimeField, isoToLocalInput, localInputToIso } from '../components/DateTimeField';
-import EventCampaignModal from '../components/EventCampaignModal';
+import ImageToCopyButton from '../components/ImageToCopyButton';
 import AiOperatorWalkthroughModal from '../components/AiOperatorWalkthroughModal';
 import CreditHistoryModal from '../components/credit/CreditHistoryModal';
 // ★ D210+ Phase 2-fix1 (Harold 명시 2026-05-23): 회사 데이터 활용 매트릭스 안내 카드 (3축 100% 보완).
@@ -265,8 +264,7 @@ export default function AiOperatorPage() {
   }, []);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   // ★ D174 (2026-05-19): PerformancePage가 sessionStorage에 저장한 prefill objective 자동 로드
-  // ★ 2026-07-07(4) 행사 캠페인 모달 — 자연어 입구에 흡수 (그리드 카드 추가 없음)
-  const [eventCampaignOpen, setEventCampaignOpen] = useState(false);
+  // ★ 2026-07-08 행사 캠페인은 "원클릭 캠페인" 타일(/quick-campaign)로 이전 — 여기선 입력창 이미지 버튼만.
   const [objective, setObjective] = useState(() => {
     if (typeof window === 'undefined') return '';
     const prefill = sessionStorage.getItem('ai_operator_prefill_objective');
@@ -760,6 +758,11 @@ export default function AiOperatorPage() {
                 rows={1}
                 className="flex-1 bg-transparent text-white placeholder-white/30 px-1 py-3 resize-none focus:outline-none text-base leading-relaxed min-h-[44px] max-h-[200px] disabled:opacity-50"
               />
+              <ImageToCopyButton
+                onExtracted={(t) => setObjective((prev) => (prev.trim() ? `${prev.trim()}\n${t}` : t))}
+                disabled={loading}
+                className="flex-shrink-0 w-11 h-11 inline-flex items-center justify-center rounded-xl border border-white/15 bg-white/5 text-violet-200 hover:bg-violet-500/20 hover:border-violet-400/40 disabled:opacity-40 transition-colors"
+              />
               <button
                 type="button"
                 onClick={handleSubmit}
@@ -775,14 +778,7 @@ export default function AiOperatorPage() {
           <div className="mt-2.5 flex items-center justify-between gap-2 flex-wrap px-2 text-[11px] text-white/35">
             <div className="flex items-center gap-3 flex-wrap">
               <span>⌘ + Enter 단축키로 즉시 제출</span>
-              {/* ★ 2026-07-07(4) 행사 캠페인 — 행사 내용 한 번 입력 → DM·이메일·인앱 선택 생성 (그리드 카드 추가 없이 자연어 입구에 흡수) */}
-              <button
-                type="button"
-                onClick={() => setEventCampaignOpen(true)}
-                className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border border-amber-300/30 bg-amber-400/10 text-amber-200 hover:bg-amber-400/20 font-semibold transition-colors"
-              >
-                <CalendarRange className="w-3 h-3" /> 행사 캠페인 — 행사 내용으로 DM·이메일·인앱 초안
-              </button>
+              <span className="text-white/25">· 이미지 버튼으로 이미지에서 문안 불러오기</span>
             </div>
             <span>{objective.length} chars</span>
           </div>
@@ -792,8 +788,6 @@ export default function AiOperatorPage() {
               {error}
             </div>
           )}
-
-          <EventCampaignModal open={eventCampaignOpen} onClose={() => setEventCampaignOpen(false)} />
 
           {/* 예시 프롬프트 칩 (입력 전만) */}
           {!loading && !proposal && objective.length === 0 && (

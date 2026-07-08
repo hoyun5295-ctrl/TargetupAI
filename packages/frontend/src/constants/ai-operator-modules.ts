@@ -9,7 +9,6 @@
  */
 
 import {
-  Activity,
   Brain,
   CalendarDays,
   LineChart,
@@ -17,6 +16,7 @@ import {
   MessageSquare,
   Smartphone,
   Target,
+  Wand2,
   Workflow,
 } from 'lucide-react';
 
@@ -44,7 +44,9 @@ export const SUB_MODULE_CARDS: SubModuleCard[] = [
   { icon: Smartphone,   gradient: 'from-amber-400 to-yellow-500',   label: '모바일 DM',      description: '카드형 미디어 메시지 빌더',      path: '/dm-builder' },
   { icon: Brain,        gradient: 'from-emerald-400 to-teal-500',   label: 'AI 메모리',      description: '회사별 누적 학습 정확도↑',       path: '/ai-memory' },
   { icon: Target,       gradient: 'from-teal-400 to-cyan-500',      label: '세그먼트',       description: '자연어로 고객 그룹 추출',        path: '/segments' },
-  { icon: Activity,     gradient: 'from-blue-400 to-sky-500',       label: 'AI 사용량',      description: '월 한도 + 일별 통계 진단',       path: '/ai-usage' },
+  // ★ 2026-07-08 (Harold 확정): AI 사용량은 헤더 유틸 메뉴(→/ai-usage)로 이전, 이 슬롯 = 원클릭 캠페인.
+  //   행사 내용·이미지 한 번 입력 → DM·이메일·인앱 초안(옛 AI Operator "행사 캠페인" 알약 승격).
+  { icon: Wand2,        gradient: 'from-amber-400 to-fuchsia-500', label: '원클릭 캠페인',  description: '행사·이미지 → 채널 초안',        path: '/quick-campaign' },
   // ★ 2026-07-02 4차 (Harold 확정): 빈 타일 = 마케팅 캘린더 — 1년 시즌 캠페인 AI 설계 → 자동마케팅 등록
   { icon: CalendarDays, gradient: 'from-orange-400 to-rose-500',    label: '마케팅 캘린더',  description: '1년 시즌 캠페인 AI 설계',        path: '/marketing-calendar' },
 ];

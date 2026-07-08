@@ -61,6 +61,7 @@ import JourneyStatsPage from './pages/JourneyStatsPage';
 import PredictiveDashboardPage from './pages/PredictiveDashboardPage';
 // ★ D209+ (2026-05-22) Phase D 비용 안전 매트릭스 — AI 호출 월 한도 + cache 통계 대시보드
 import AiUsagePage from './pages/AiUsagePage';
+import QuickCampaignPage from './pages/QuickCampaignPage';
 
 // ★ 세션 타이머 Context — 헤더 등에서 남은 시간 표시용
 interface SessionTimerContextType {
@@ -495,6 +496,16 @@ function App() {
           element={
             <PrivateRoute allowedTypes={['company_admin', 'company_user']}>
               <AiUsagePage />
+            </PrivateRoute>
+          }
+        />
+
+        {/* ★ 2026-07-08 원클릭 캠페인 (행사·이미지 → DM·이메일·인앱 초안) */}
+        <Route
+          path="/quick-campaign"
+          element={
+            <PrivateRoute allowedTypes={['company_admin', 'company_user']}>
+              <QuickCampaignPage />
             </PrivateRoute>
           }
         />

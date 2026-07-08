@@ -14,6 +14,7 @@ import CreditConfirmModal from '../components/credit/CreditConfirmModal';
 import { useToast } from '../components/ToastProvider';
 import { DateTimeField, isoToLocalInput, localInputToIso } from '../components/DateTimeField';
 import { takeEventDraft, EVENT_EMAIL_DRAFT_KEY } from '../components/EventCampaignModal';
+import ImageToCopyButton from '../components/ImageToCopyButton';
 // ★ D225+ (2026-05-28 Harold 명시): Email 발송 이력 모달 신설
 import EmailEventsModal from '../components/email/EmailEventsModal';
 // 비주얼 빌더 에디터
@@ -712,6 +713,12 @@ export default function EmailCampaignsPage() {
                 placeholder="예: 여름 신상 입고 안내, VIP 고객에게 정중한 톤으로"
                 disabled={genStep !== null}
                 className="flex-1 px-4 py-2.5 bg-violet-950/50 border border-white/15 rounded-xl text-sm text-white placeholder-white/30 focus:outline-none focus:border-fuchsia-400/60 disabled:opacity-50"
+              />
+              <ImageToCopyButton
+                label="이미지"
+                onExtracted={(t) => setAiPrompt((prev) => (prev.trim() ? `${prev.trim()}\n${t}` : t))}
+                disabled={genStep !== null}
+                className="px-3 py-2.5 rounded-xl border border-violet-400/40 bg-violet-500/10 text-violet-100 text-sm font-medium hover:bg-violet-500/20 disabled:opacity-40 inline-flex items-center gap-1.5 whitespace-nowrap"
               />
               <button
                 onClick={() => handleAiGenerate({ prompt: aiPrompt })}

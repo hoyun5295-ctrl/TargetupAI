@@ -71,10 +71,15 @@ export async function callAIWithFallback(params: {
   // ★ D227+ 종량제: 작업당 크레딧. 미지정 시 source 맵(getCreditCost). orchestrate sub-agent는 0 전달(묶음 회피).
   creditCost?: number;
   userId?: string;  // 차감 이력 created_by
+  // ★ 2026-07-08 vision — 행사 이미지 판독 등 이미지 입력(base64). 미지정 시 기존 텍스트 전용 동작 불변. images 있으면 cache 우회.
+  images?: Array<{ media_type: string; data: string }>;
 }): Promise<string> {
   // ★ D227+ 종량제: 작업당 크레딧 (creditCost 우선, 없으면 source 맵).
   //   orchestrate 묶음(runInCreditBundle) 안의 sub 호출은 0 — 진입점에서 1회만 차감(과차감 방지).
   const creditCost = isInCreditBundle() ? 0 : (params.creditCost ?? getCreditCost(params.source));
+  // ★ 2026-07-08 vision 요청 여부 — 이미지 포함 시 cache 우회(이미지 데이터가 cacheKey에 안 담겨 서로 다른 이미지가 충돌). 차감·통계는 그대로 유지.
+  const hasImages = !!(params.images && params.images.length);
+  const skipCache = hasImages;
   // ★ D209+ Phase D: Rate limit 검증 + cache 조회 (companyId 박힘 영역만)
   let cacheKey: string | null = null;
   if (params.companyId) {
@@ -83,10 +88,13 @@ export async function callAIWithFallback(params: {
 
     const { generateCacheKey, getCachedResponse } = await import('../utils/ai-cache');
     cacheKey = generateCacheKey(params.companyId, params.system, params.userMessage);
-    const cached = getCachedResponse(cacheKey);
-    if (cached) {
-      console.log(`[AI] cache hit (company ${params.companyId.slice(0, 8)}, source ${params.source || 'unknown'})`);
-      return cached;
+    // ★ 2026-07-08 vision 요청은 cache 조회 우회 — cacheKey가 이미지 데이터를 안 담아 다른 이미지가 같은 텍스트면 오탐 hit. (차감 게이트용 cacheKey 자체는 유지)
+    if (!skipCache) {
+      const cached = getCachedResponse(cacheKey);
+      if (cached) {
+        console.log(`[AI] cache hit (company ${params.companyId.slice(0, 8)}, source ${params.source || 'unknown'})`);
+        return cached;
+      }
     }
 
     // ★ D227+ 종량제: cache miss 시점 크레딧 사전 체크 (부족 시 throw → 호출측 안내, AI 호출 안 함)
@@ -104,6 +112,17 @@ export async function callAIWithFallback(params: {
     //   legacy(Sonnet 4.6·Haiku): temperature 허용 + thinking enabled+budget.
     const adaptiveOnly = isAdaptiveOnlyModel(modelName);
 
+    // ★ 2026-07-08 vision — 이미지 있으면 image 블록 + text 블록 배열, 없으면 문자열(기존 동작 불변)
+    const claudeUserContent: any = hasImages
+      ? [
+          ...(params.images || []).map((im) => ({
+            type: 'image' as const,
+            source: { type: 'base64' as const, media_type: im.media_type as any, data: im.data },
+          })),
+          { type: 'text' as const, text: params.userMessage },
+        ]
+      : params.userMessage;
+
     const requestParams: any = {
       model: modelName,
       // Sonnet 5 새 토크나이저(~30% 토큰↑) 대응 — 문안 잘림 차단 여유(legacy 모델은 base 그대로)
@@ -115,7 +134,7 @@ export async function callAIWithFallback(params: {
           cache_control: { type: 'ephemeral' as const },
         },
       ],
-      messages: [{ role: 'user', content: params.userMessage }],
+      messages: [{ role: 'user', content: claudeUserContent }],
     };
 
     // temperature — adaptive-only 모델(Sonnet 5·Opus 4.7/4.8)은 보내면 400
@@ -158,7 +177,7 @@ export async function callAIWithFallback(params: {
       // 캐시·통계 = best-effort (실패해도 무방, 차감과 분리)
       try {
         const { setCachedResponse } = await import('../utils/ai-cache');
-        setCachedResponse(cacheKey, text);
+        if (!skipCache) setCachedResponse(cacheKey, text);
         const { recordAiCall } = await import('../utils/ai-rate-limit');
         aiCallLogId = await recordAiCall({
           companyId: params.companyId,
@@ -206,12 +225,23 @@ export async function callAIWithFallback(params: {
   const isOperatorFallback = fallbackModel === AI_MODELS.gptOperator;
 
   try {
+    // ★ 2026-07-08 vision — GPT fallback도 이미지 지원(data URL). 없으면 문자열(기존 동작 불변)
+    const gptUserContent: any = hasImages
+      ? [
+          { type: 'text', text: params.userMessage },
+          ...(params.images || []).map((im) => ({
+            type: 'image_url',
+            image_url: { url: `data:${im.media_type};base64,${im.data}` },
+          })),
+        ]
+      : params.userMessage;
+
     const gptRequest: any = {
       model: fallbackModel,
       max_completion_tokens: params.maxTokens,
       messages: [
         { role: 'system', content: params.system },
-        { role: 'user', content: params.userMessage },
+        { role: 'user', content: gptUserContent },
       ],
     };
     // gpt-5.5는 temperature 박지 X (default 1만 지원). gpt-5.4-mini는 그대로 박음.
@@ -230,7 +260,7 @@ export async function callAIWithFallback(params: {
       // 캐시·통계 = best-effort (실패해도 무방, 차감과 분리)
       try {
         const { setCachedResponse } = await import('../utils/ai-cache');
-        setCachedResponse(cacheKey, text);
+        if (!skipCache) setCachedResponse(cacheKey, text);
         const { recordAiCall } = await import('../utils/ai-rate-limit');
         aiCallLogId = await recordAiCall({
           companyId: params.companyId,

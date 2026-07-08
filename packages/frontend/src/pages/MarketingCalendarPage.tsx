@@ -9,6 +9,7 @@ import { ArrowLeft, CalendarDays, CalendarRange, Sparkles, Loader2, Check, Check
 import { useToast } from '../components/ToastProvider';
 import CreditConfirmModal from '../components/credit/CreditConfirmModal';
 import EventCampaignModal from '../components/EventCampaignModal';
+import EventCampaignResumeBar from '../components/EventCampaignResumeBar';
 
 interface CalendarEntry {
   month: number;
@@ -54,6 +55,9 @@ export default function MarketingCalendarPage() {
   const [error, setError] = useState<string | null>(null);
   // ★ 2026-07-07(4) 행사 캠페인 — 등록된 행사로 DM·이메일·인앱 초안 생성 (행사 텍스트 재입력 0)
   const [eventCampaignText, setEventCampaignText] = useState<string | null>(null);
+  // ★ 2026-07-08 소멸 방지 — 임시 보관 세트 재개 + 목록 새로고침 신호
+  const [resumeDraftId, setResumeDraftId] = useState<string | null>(null);
+  const [resumeRefresh, setResumeRefresh] = useState(0);
 
   const auth = () => ({ Authorization: `Bearer ${localStorage.getItem('token')}` });
 
@@ -325,7 +329,7 @@ export default function MarketingCalendarPage() {
                       )}
                       <button
                         type="button"
-                        onClick={() => setEventCampaignText(`${MONTH_LABEL[e.month]} ${e.title}\n${e.objective}\n발송 예정일: ${e.month}월 ${e.suggestedDay}일`)}
+                        onClick={() => { setResumeDraftId(null); setEventCampaignText(`${MONTH_LABEL[e.month]} ${e.title}\n${e.objective}\n발송 예정일: ${e.month}월 ${e.suggestedDay}일`); }}
                         disabled={generating || registering}
                         className="inline-flex items-center gap-1.5 text-[11px] text-amber-200/80 hover:text-amber-100 disabled:opacity-40 transition-colors"
                       >
@@ -359,8 +363,16 @@ export default function MarketingCalendarPage() {
           </div>
         )}
 
+        {/* ★ 2026-07-08 임시 보관 행사 캠페인 재개 (소멸 방지) */}
+        <EventCampaignResumeBar refreshKey={resumeRefresh} onResume={(id) => { setResumeDraftId(id); setEventCampaignText(''); }} />
+
         {/* ★ 2026-07-07(4) 행사 캠페인 — 캘린더 행사 → 채널별 초안 */}
-        <EventCampaignModal open={eventCampaignText !== null} initialText={eventCampaignText || ''} onClose={() => setEventCampaignText(null)} />
+        <EventCampaignModal
+          open={eventCampaignText !== null}
+          initialText={eventCampaignText || ''}
+          resumeDraftId={resumeDraftId || undefined}
+          onClose={() => { setEventCampaignText(null); setResumeDraftId(null); setResumeRefresh((v) => v + 1); }}
+        />
       </div>
 
       {/* ★ 2026-07-05: 표시=실차감 일치 — N건 선택 등록은 단가×N로 표시(quantity) */}

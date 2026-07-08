@@ -124,6 +124,9 @@ import senderRegistrationRoutes from './routes/sender-registration';
 // ★ 모바일 DM 빌더 (한줄로 AI 프로 기능 — hanjulDM 분리 후 한줄AI 본진 자체 유지)
 import { dmPublicRouter, dmRouter } from './routes/dm';
 
+// ★ 2026-07-08 행사 캠페인 — 이미지 판독(vision) + 3채널 생성 초안 DB 임시 보관(소멸 방지)
+import { eventCampaignRouter } from './routes/event-campaigns';
+
 // ★ D145 P0 (2026-05-07): 슈퍼관리자 로그인 차단 관리
 import loginBlocksRoutes from './routes/admin/login-blocks';
 
@@ -306,6 +309,8 @@ app.use('/api/email', emailRoutes);
 // ★ D130: 알림톡/브랜드메시지 IMC 연동 (발신프로필/템플릿/검수/웹훅/이미지/알림수신자)
 app.use('/api/alimtalk', alimtalkRoutes);
 app.use('/api/dm', dmRouter);
+// ★ 2026-07-08 행사 캠페인 (이미지 판독 + 생성 초안 임시 보관)
+app.use('/api/event-campaigns', eventCampaignRouter);
 
 // 공용 관리 라우트 (슈퍼관리자 + 고객사관리자)
 app.use('/api/manage/users', manageUsersRoutes);

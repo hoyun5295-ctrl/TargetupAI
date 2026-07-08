@@ -18,6 +18,7 @@ import { uploadOne } from '../components/dm/panels/FormControls';
 import { useDmKeyboardShortcuts } from '../hooks/useDmKeyboardShortcuts';
 import ConfirmModal, { type ConfirmState } from '../components/ConfirmModal';
 import { takeEventDraft, EVENT_DM_DRAFT_KEY } from '../components/EventCampaignModal';
+import ImageToCopyButton from '../components/ImageToCopyButton';
 import CreditConfirmModal from '../components/credit/CreditConfirmModal';
 import DmSendAndTrackModal from '../components/DmSendAndTrackModal';
 import DmTopBar from '../components/dm/DmTopBar';
@@ -677,6 +678,12 @@ export default function DmBuilderPage() {
                   borderRadius: 10, fontSize: 14, lineHeight: 1.6, color: '#fff', outline: 'none',
                   resize: 'none', opacity: generating ? 0.6 : 1,
                 }}
+              />
+              <ImageToCopyButton
+                label="이미지로 불러오기"
+                onExtracted={(t) => setNaturalLanguage((prev) => (prev.trim() ? `${prev.trim()}\n${t}` : t))}
+                disabled={generating}
+                className="w-full inline-flex items-center justify-center gap-1.5 rounded-[10px] border border-violet-400/40 bg-violet-500/10 text-violet-100 text-sm font-medium py-2.5 hover:bg-violet-500/20 disabled:opacity-40 transition-colors"
               />
               <button
                 onClick={() => { if (naturalLanguage.trim() && !generating) { setPendingGen({ prompt: naturalLanguage.trim(), desc: `"${naturalLanguage.trim()}" 내용으로 AI가 섹션과 카피를 자동 생성합니다.` }); } }}

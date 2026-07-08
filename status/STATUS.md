@@ -37,6 +37,13 @@
 
 > **회전 룰:** 완료(★배포완료) 엔트리는 원문을 archive/TASKS_YYYY-MM.md로 이동 + INDEX 등재하고, 아래 "최근 완료 인덱스"에 1줄만 남긴다. 30KB 초과 = 회전 미이행 — 즉시 회전.
 
+### 🟢 2026-07-08 — 행사 캠페인 상품 구조 추출 + 인앱 SDK 서빙 공용화·팝폰 복구 + 인앱 개인화 익명 fallback + 로그인 문의·DM 2열그리드 (★배포완료 — Harold 선언 / 운영 실측 = Harold)
+> **① 행사 캠페인 상품 구조 추출(DM+이메일)**: 행사 원문의 상품명·정가·할인가를 product_carousel에 자동 주입(dm-ai `extractEventProducts` sonnet temp0) + 원문 실존 기계검증(`validateProductsAgainstEventText` — 환각 가격 탈락, event-brief CT). DM 문안 요약에 "이름 정가→할인가" 동반 + 대표 1~3개 가격 프롬프트. 구분선 정규화 CT `normalizeSmsSeparatorLines`(구분문자만 4자+ 줄→하이픈10, **DM 문안 경로에만** 적용). 이메일 AI 스키마 discount_price 추가.
+> **② 인앱 SDK 서빙 공용화(CT `sdk-serve.ts`)**: 정적 `/sdk/` 경로가 SPA index.html로 fallback돼 깨짐(팝폰 v0.3.6 인앱 정지) → backend가 `/sdk/`·`/api/cdp/sdk/`를 CORS+CORP+**버전폴백**(요청 버전 파일 없으면 최신)으로 서빙. cafe24 인라인 라우트 공용화. **nginx `location ^~ /sdk/`→backend:3000**(OPS 갱신, 팝폰 레거시 경로 복구용). 수동 스니펫 4곳 `/api/cdp/sdk/`로. 팝폰 웹(Vercel Next.js `poppon-workspace/poppon`) layout.tsx SDK v0.3.6→v0.3.9.
+> **③ 인앱 개인화 익명 fallback**: 미식별 방문자에게 `{{customer.name}}`·`%등급%`가 공백("님, 회원님") → `/inapp/active` **서버 사전치환**(SDK 무변경): 이름 없으면 "고객" + 빈변수 공백정리(이중공백·구두점앞·줄앞뒤). `renderTextForCustomer` 공백정리 + `renderBlocksForCustomer`(블록 text/label/items) 신설(CT-79). 식별 회원 실값 그대로(회귀 0).
+> **④ 로그인 문의 + DM 2열 그리드**: 로그인 페이지 "서비스 이용신청 문의" 버튼+모던 모달(기존 `/api/companies/inquiry` 재사용 — 발신 SMTP_USER·수신 SMTP_TO, 좌 그린패널+우 모바일 양쪽). product_carousel 좌우 스크롤→flex-wrap 2열 justify-center(홀수 마지막 중앙, 발송 렌더러+빌더 미리보기 일관).
+> **검증**: backend tsc 0·vitest 382/382·frontend tsc 0·금지패턴 0. 커밋 a5ea765e·1ba70066·ce67f7c4·a7625642·83a7802d + 개인화 fallback. **잔여**: Harold 운영 실측(행사 3채널 상품 반영·팝폰 인앱 블록/익명 "고객님"·발행 모달 hlj.kr) + `/codex:review`. **후속**: 구분선 정규화 타 AI문안 경로 6곳(services/ai.ts·journey-ai-generator·variant-generator 등, 발송 보호영역 별도 승인). 상세 [[project_2026_0708_event_campaign_product_extraction]] · [[reference_inapp_sdk_serving]].
+
 ### 🟢 2026-07-07 — 인앱/이메일/DM 대개편 6종 + hlj.kr 단축링크 라이브 + 인앱 디자인 2.0~2.1 + 형태 4종 골격 분화 + 이메일·DM 디자인 2.0 + 행사 캠페인 (★DDL 6컬럼 실행완료·hlj.kr 라이브 / frontend·SDK·backend build+deploy 잔여)
 > **① 이메일 미수신자 재발송**: "미오픈 SMS"→"미수신자 재발송"(이메일 무료 primary + SMS 유료 secondary). 자식 캠페인(원본 통계 무손상·완성게이트 우회로 크레딧 재부과 0)·재발송 1회 한도·수신거부/반송 제외·자식은 카피학습 코퍼스 skip(이중계상 방지). DDL `email_campaigns.parent_campaign_id·resend_generation`.
 > **② 요금제 변경 반복노출 근본수정**: 접속마다 "베이직 변경" 모달 재발 = localStorage 비교 방식 취약 → 서버 `companies.plan_notified_code`(DDL) + my-plan pending 판정(NULL=조용히 초기화) + POST /plan-change/ack. 계정당 1회·브라우저 무관. Dashboard localStorage 효과 폐기.
