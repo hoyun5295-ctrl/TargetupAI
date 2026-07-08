@@ -44,3 +44,35 @@ export function normalizeCafe24Product(p: any, mallId: string): MallProduct | nu
     productUrl,
   };
 }
+
+/**
+ * 네이버 커머스 channelProduct(contents[].channelProducts[] 항목) → MallProduct.
+ * 실측 확정: salePrice=정가(판매설정가) · discountedPrice=판매가(할인적용) · representativeImage.url(목록에 바로 옴) ·
+ *   channelProductNo=상품번호 · statusType='SALE' + channelProductDisplayStatusType='ON'만.
+ * 상품링크 = storeUrl(스마트스토어 주소)/products/{channelProductNo} — storeUrl 미확정 시 null.
+ */
+export function normalizeNaverProduct(cp: any, storeUrl?: string): MallProduct | null {
+  if (!cp || typeof cp !== 'object') return null;
+  if (String(cp.statusType) !== 'SALE') return null;
+  if (cp.channelProductDisplayStatusType && String(cp.channelProductDisplayStatusType) !== 'ON') return null;
+  const name = String(cp.name || '').trim();
+  const listPrice = Math.round(Number(cp.salePrice) || 0);           // 정가(판매설정가)
+  if (!name || listPrice <= 0) return null;
+  const discounted = Math.round(Number(cp.discountedPrice) || 0);    // 할인적용가
+  const salePrice = discounted > 0 && discounted < listPrice ? discounted : listPrice; // 판매가
+  const discountRate = listPrice > salePrice && listPrice > 0 ? Math.round((1 - salePrice / listPrice) * 100) : 0;
+  const img = cp.representativeImage?.url || null;
+  const no = cp.channelProductNo;
+  const base = (storeUrl || '').replace(/\/+$/, '');
+  const productUrl = base && no ? `${base}/products/${no}` : null;
+  return {
+    provider: 'naver',
+    code: String(no || cp.originProductNo || ''),
+    name: name.slice(0, 120),
+    price: listPrice,   // 정가
+    salePrice,          // 판매가
+    discountRate,
+    imageUrl: img ? String(img) : null,
+    productUrl,
+  };
+}

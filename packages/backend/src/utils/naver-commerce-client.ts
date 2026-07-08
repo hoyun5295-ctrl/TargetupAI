@@ -35,6 +35,7 @@ import { syncOrder } from './cdp-orders';
 import { trackEvent } from './cdp-events';
 import { buildWebhookIdempotencyKey } from './cdp-idempotency';
 import { firstPositiveAmount } from './normalize';
+import { type MallProduct, normalizeNaverProduct } from './mall-product-normalize';
 
 const NAVER_COMMERCE_CLIENT_ID = process.env.NAVER_COMMERCE_CLIENT_ID || '';
 const NAVER_COMMERCE_CLIENT_SECRET = process.env.NAVER_COMMERCE_CLIENT_SECRET || '';
@@ -414,6 +415,29 @@ export async function fetchNaverProductsRaw(
     },
     creds,
   );
+}
+
+/** 상품 목록 → 정규화 MallProduct[] (판매중+전시ON만). storeUrl 미확정 시 링크 null. DM 상품 피커 소스. */
+export async function fetchNaverProducts(
+  integration: NaverCommerceIntegration,
+  opts: { q?: string; size?: number; storeUrl?: string } = {},
+  creds?: NaverCommerceCredentials,
+): Promise<MallProduct[]> {
+  const raw = (await fetchNaverProductsRaw(
+    integration,
+    { size: opts.size ?? 50, searchKeyword: opts.q },
+    creds,
+  )) as { contents?: any[] };
+  const contents = Array.isArray(raw?.contents) ? raw.contents : [];
+  const out: MallProduct[] = [];
+  for (const c of contents) {
+    const chs = Array.isArray(c?.channelProducts) ? c.channelProducts : [];
+    for (const cp of chs) {
+      const m = normalizeNaverProduct(cp, opts.storeUrl);
+      if (m) out.push(m);
+    }
+  }
+  return out;
 }
 
 // ════════════════════════════════════════════════════════════════════

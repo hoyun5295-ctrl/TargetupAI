@@ -9,7 +9,7 @@
 import { Router, Response } from 'express';
 import { authenticate } from '../middlewares/auth';
 import { getCafe24Integration, getCafe24ByoCredentials, fetchCafe24ProductsRaw, fetchCafe24Products } from '../utils/cafe24-client';
-import { getNaverCommerceIntegration, getNaverCommerceCredentials, fetchNaverProductsRaw } from '../utils/naver-commerce-client';
+import { getNaverCommerceIntegration, getNaverCommerceCredentials, fetchNaverProductsRaw, fetchNaverProducts } from '../utils/naver-commerce-client';
 
 export const mallProductsRouter = Router();
 mallProductsRouter.use(authenticate);
@@ -67,9 +67,18 @@ mallProductsRouter.get('/search', async (req: any, res: Response) => {
       return res.json({ success: true, provider, products });
     }
 
+    if (provider === 'naver') {
+      const integ = await getNaverCommerceIntegration(companyId);
+      if (!integ) return res.status(404).json({ success: false, error: '네이버 스마트스토어 연동이 없습니다.' });
+      const creds = (await getNaverCommerceCredentials(companyId).catch(() => null)) || undefined;
+      // storeUrl(스마트스토어 주소 슬러그) 확정 전 — 링크는 null. 확정 후 opts.storeUrl 주입.
+      const products = await fetchNaverProducts(integ, { q, size: limit }, creds);
+      return res.json({ success: true, provider, products });
+    }
+
     return res.status(400).json({
       success: false,
-      error: '현재 상품 불러오기는 카페24만 지원합니다 (네이버 등은 항목 필드 실측 후 추가).',
+      error: '현재 상품 불러오기는 카페24·네이버만 지원합니다 (메이크샵·고도몰·아임웹은 실측 후 추가).',
     });
   } catch (err: any) {
     console.error('[mall-products search] 오류:', err?.message);
