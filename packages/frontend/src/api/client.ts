@@ -73,6 +73,8 @@ export const customersApi = {
   bulkDelete: (ids: string[]) => api.post('/customers/bulk-delete', { ids }),
   // ★ 2026-07-03: 고객별 구매 이력 (app.hanjul.ai CustomersTab과 동일 endpoint)
   purchases: (id: string, params?: any) => api.get(`/customers/${id}/purchases`, { params }),
+  // ★ 2026-07-08: 구매 통합조회 (전 고객 원장 + 고객/매장별 기간 합계)
+  purchaseOverview: (params?: any) => api.get('/customers/purchases/overview', { params }),
 };
 
 // Campaigns API

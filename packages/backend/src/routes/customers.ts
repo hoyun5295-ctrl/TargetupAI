@@ -1596,6 +1596,183 @@ router.post('/delete-all', blockIfSyncActive, async (req: Request, res: Response
 // GET /api/customers/:id - 고객 상세 (⚠️ 반드시 맨 아래! 위의 라우트보다 뒤에 있어야 함)
 // ★ 2026-07-03: 고객별 구매 이력 조회 — 구매 데이터를 눈으로 볼 화면 부재(직원 요청)
 //   구매=돈 데이터라 B16-01 매장 스코프(목록 GET /와 동일 격리) 적용. LIMIT/OFFSET는 id DESC tie-breaker 필수(D150-4).
+// ★ 2026-07-08: 구매 통합조회 (전 고객 원장 + 고객/매장별 기간 합계). 개별 모달(GET /:id/purchases)은 무수정 —
+//   각 행 [상세]는 그 기존 경로를 재사용. /:id 라우트보다 위에 등록해 라우트 섀도잉 방지.
+router.get('/purchases/overview', async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    const userId = req.user?.userId;
+    const userType = req.user?.userType;
+    if (!companyId) {
+      return res.status(403).json({ error: '회사 권한이 필요합니다' });
+    }
+
+    const mode = req.query.mode === 'summary' ? 'summary' : 'ledger';
+    const groupBy = req.query.groupBy === 'store' ? 'store' : 'customer';
+
+    // 기간: YYYY-MM-DD (from 포함 ~ to 미포함). 기존 표시와 동일하게 wall-clock 비교(TO_CHAR 경로와 정합).
+    const dateRe = /^\d{4}-\d{2}-\d{2}$/;
+    const from = typeof req.query.from === 'string' && dateRe.test(req.query.from) ? req.query.from : null;
+    const to = typeof req.query.to === 'string' && dateRe.test(req.query.to) ? req.query.to : null;
+
+    const pageRaw = Number(req.query.page);
+    const page = Number.isFinite(pageRaw) && pageRaw >= 1 ? Math.min(Math.floor(pageRaw), 100000) : 1;
+    const limitRaw = Number(req.query.limit);
+    const limit = Number.isFinite(limitRaw) && limitRaw >= 1 ? Math.min(Math.floor(limitRaw), 100) : 25;
+    const offset = (page - 1) * limit;
+
+    const search = typeof req.query.search === 'string' ? req.query.search.trim() : '';
+    const storeCode = typeof req.query.storeCode === 'string' ? req.query.storeCode.trim() : '';
+
+    // ===== WHERE 조립 (회사 격리 + 매장 격리 + 기간 + 검색) =====
+    const where: string[] = ['p.company_id = $1', 'c.is_active = true'];
+    const params: any[] = [companyId];
+    let idx = 2;
+
+    // company_user 매장 격리 — 개별 모달/목록과 동일(customer_stores 멤버십 기준)
+    if (userType === 'company_user' && userId) {
+      const scope = await getStoreScope(companyId, userId);
+      if (scope.type === 'blocked') {
+        return res.json({
+          mode, groupBy,
+          summary: { totalCount: 0, totalAmount: 0, customerCount: 0, avgOrder: 0 },
+          rows: [], pagination: { total: 0, page, limit, totalPages: 0 },
+        });
+      }
+      if (scope.type === 'filtered') {
+        where.push(`p.customer_id IN (SELECT customer_id FROM customer_stores WHERE company_id = $1 AND store_code = ANY($${idx}::text[]))`);
+        params.push(scope.storeCodes);
+        idx++;
+      }
+    }
+
+    // 관리자 사용자별 필터 — 목록 라우트(D88)와 동일 규칙
+    const filterUserId = typeof req.query.filterUserId === 'string' ? req.query.filterUserId : '';
+    if (filterUserId && (userType === 'company_admin' || userType === 'super_admin')) {
+      const fu = await query('SELECT store_codes FROM users WHERE id = $1 AND company_id = $2', [filterUserId, companyId]);
+      const fuStores = fu.rows[0]?.store_codes;
+      if (fuStores && fuStores.length > 0) {
+        where.push(`c.store_code = ANY($${idx}::text[])`);
+        params.push(fuStores);
+        idx++;
+      } else {
+        where.push(`c.uploaded_by = $${idx}`);
+        params.push(filterUserId);
+        idx++;
+      }
+    }
+
+    if (from) { where.push(`p.purchase_date >= $${idx}::timestamp`); params.push(from); idx++; }
+    if (to) { where.push(`p.purchase_date < $${idx}::timestamp`); params.push(to); idx++; }
+    if (storeCode) { where.push(`p.store_code = $${idx}`); params.push(storeCode); idx++; }
+
+    if (search) {
+      const clean = search.replace(/-/g, '');
+      if (/^\d+$/.test(clean)) {
+        where.push(`REPLACE(c.phone, '-', '') LIKE $${idx}`);
+        params.push(`%${clean}%`);
+      } else {
+        where.push(`(c.name ILIKE $${idx} OR c.phone ILIKE $${idx})`);
+        params.push(`%${search}%`);
+      }
+      idx++;
+    }
+
+    const whereSql = where.join(' AND ');
+    // base customers 조인(id PK 1:1) — customers_unified는 (company_id·phone·name) 중복제거 뷰라
+    //   구매가 가리키는 id가 dedup 탈락 행이면 매출이 조용히 누락됨. 개별 모달(/:id/purchases)도 base customers 사용(정합).
+    const fromJoin = 'FROM purchases p JOIN customers c ON c.id = p.customer_id AND c.company_id = p.company_id';
+
+    // ===== 요약 타일 (선택 기간 전체 범위 — 페이지 무관) =====
+    const summaryRes = await query(
+      `SELECT COUNT(*)::int AS total_count,
+              COALESCE(SUM(p.total_amount), 0) AS total_amount,
+              COUNT(DISTINCT p.customer_id)::int AS customer_count
+       ${fromJoin} WHERE ${whereSql}`,
+      params
+    );
+    const sTotalCount = summaryRes.rows[0]?.total_count || 0;
+    const sTotalAmount = Number(summaryRes.rows[0]?.total_amount || 0);
+    const sCustomerCount = summaryRes.rows[0]?.customer_count || 0;
+    const summary = {
+      totalCount: sTotalCount,
+      totalAmount: sTotalAmount,
+      customerCount: sCustomerCount,
+      avgOrder: sTotalCount > 0 ? Math.round(sTotalAmount / sTotalCount) : 0,
+    };
+
+    // ===== 행 (mode별) — LIMIT/OFFSET엔 항상 tie-breaker (D150-4) =====
+    const pageParams = [...params, limit, offset];
+    const limitIdx = idx;
+    const offsetIdx = idx + 1;
+    let rows: any[] = [];
+    let total = 0;
+
+    if (mode === 'summary' && groupBy === 'store') {
+      const cnt = await query(
+        `SELECT COUNT(*)::int AS c FROM (
+           SELECT 1 ${fromJoin} WHERE ${whereSql} GROUP BY p.store_code, p.store_name
+         ) t`,
+        params
+      );
+      total = cnt.rows[0]?.c || 0;
+      const list = await query(
+        `SELECT p.store_code,
+                COALESCE(NULLIF(p.store_name, ''), NULLIF(p.store_code, ''), '(미지정)') AS store_label,
+                COUNT(*)::int AS purchase_count,
+                COALESCE(SUM(p.total_amount), 0) AS total_amount,
+                COUNT(DISTINCT p.customer_id)::int AS customer_count,
+                TO_CHAR(MAX(p.purchase_date), 'YYYY-MM-DD') AS last_purchase_date
+         ${fromJoin} WHERE ${whereSql}
+         GROUP BY p.store_code, p.store_name
+         ORDER BY total_amount DESC, COALESCE(p.store_code, '')
+         LIMIT $${limitIdx} OFFSET $${offsetIdx}`,
+        pageParams
+      );
+      rows = list.rows;
+    } else if (mode === 'summary') {
+      const cnt = await query(
+        `SELECT COUNT(DISTINCT p.customer_id)::int AS c ${fromJoin} WHERE ${whereSql}`,
+        params
+      );
+      total = cnt.rows[0]?.c || 0;
+      const list = await query(
+        `SELECT p.customer_id,
+                c.name AS customer_name, c.phone AS customer_phone, c.grade,
+                COUNT(*)::int AS purchase_count,
+                COALESCE(SUM(p.total_amount), 0) AS total_amount,
+                TO_CHAR(MAX(p.purchase_date), 'YYYY-MM-DD') AS last_purchase_date
+         ${fromJoin} WHERE ${whereSql}
+         GROUP BY p.customer_id, c.name, c.phone, c.grade
+         ORDER BY total_amount DESC, p.customer_id
+         LIMIT $${limitIdx} OFFSET $${offsetIdx}`,
+        pageParams
+      );
+      rows = list.rows;
+    } else {
+      total = sTotalCount;
+      const list = await query(
+        `SELECT p.id, TO_CHAR(p.purchase_date, 'YYYY-MM-DD') AS purchase_date,
+                p.customer_id, c.name AS customer_name, c.phone AS customer_phone,
+                p.store_code, p.store_name, p.product_name, p.quantity, p.total_amount
+         ${fromJoin} WHERE ${whereSql}
+         ORDER BY p.purchase_date DESC, p.id DESC
+         LIMIT $${limitIdx} OFFSET $${offsetIdx}`,
+        pageParams
+      );
+      rows = list.rows;
+    }
+
+    res.json({
+      mode, groupBy, summary, rows,
+      pagination: { total, page, limit, totalPages: Math.ceil(total / limit) },
+    });
+  } catch (error) {
+    console.error('구매 통합조회 에러:', error);
+    res.status(500).json({ error: '구매 통합조회 실패' });
+  }
+});
+
 router.get('/:id/purchases', async (req: Request, res: Response) => {
   try {
     const companyId = req.user?.companyId;

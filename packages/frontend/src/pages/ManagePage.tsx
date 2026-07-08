@@ -6,8 +6,9 @@ import CallbacksTab from '../components/manage/CallbacksTab';
 import ScheduledTab from '../components/manage/ScheduledTab';
 import StatsTab from '../components/manage/StatsTab';
 import ManageCustomersTab from '../components/manage/ManageCustomersTab';
+import ManagePurchasesTab from '../components/manage/ManagePurchasesTab';
 
-type Tab = 'users' | 'callbacks' | 'scheduled' | 'stats' | 'customers';
+type Tab = 'users' | 'callbacks' | 'scheduled' | 'stats' | 'customers' | 'purchases';
 
 const TABS: { key: Tab; label: string }[] = [
   { key: 'users', label: '사용자' },
@@ -15,6 +16,7 @@ const TABS: { key: Tab; label: string }[] = [
   { key: 'scheduled', label: '예약캠페인' },
   { key: 'stats', label: '발송통계' },
   { key: 'customers', label: '고객DB' },
+  { key: 'purchases', label: '구매이력' },
 ];
 
 function TabIcon({ k }: { k: Tab }) {
@@ -25,6 +27,7 @@ function TabIcon({ k }: { k: Tab }) {
     case 'scheduled': return <svg {...p}><circle cx="12" cy="12" r="10" /><path d="M12 6v6l4 2" /></svg>;
     case 'stats': return <svg {...p}><path d="M3 3v18h18" /><path d="M18 17V9" /><path d="M13 17V5" /><path d="M8 17v-3" /></svg>;
     case 'customers': return <svg {...p}><path d="M17 21v-2a4 4 0 0 0-3-3.87" /><path d="M9 21v-2a4 4 0 0 0-4-4H4" /><circle cx="9" cy="7" r="4" /><path d="M16 3.13a4 4 0 0 1 0 7.75" /></svg>;
+    case 'purchases': return <svg {...p}><path d="M16 11V7a4 4 0 0 0-8 0v4M5 9h14l1 12H4L5 9z" /></svg>;
   }
 }
 
@@ -104,6 +107,7 @@ export default function ManagePage() {
         {activeTab === 'scheduled' && <ScheduledTab />}
         {activeTab === 'stats' && <StatsTab />}
         {activeTab === 'customers' && <ManageCustomersTab />}
+        {activeTab === 'purchases' && <ManagePurchasesTab />}
       </div>
     </div>
   );
