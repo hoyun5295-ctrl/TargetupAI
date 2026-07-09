@@ -2675,6 +2675,8 @@ const handleApproveRequest = async (id: string) => {
                   { key: 'stats', label: '발송 통계', onClick: () => loadSendStats() },
                   { key: 'scheduled', label: '예약 관리' },
                   { key: 'allCampaigns', label: '캠페인 관리', onClick: () => loadAllCampaigns() },
+                  // ★ 2026-07-09 CRM 캠페인 대행 설계 — 비즈니스+ 업체 접수 요청서 분석 → 제안서 PDF (별도 페이지)
+                  { key: 'campaignAgency', label: '캠페인 대행 설계', onClick: () => navigate('/admin/campaign-agency') },
                   { key: 'templates', label: '템플릿 관리' },
                 ],
               },

@@ -130,6 +130,10 @@ export default function DashboardHeader({
     // ★ 2026-06-08 (Harold 명시): 고객 세그먼트 메뉴는 AI Operator 서브메뉴(SUB_MODULE_CARDS)로 이동.
     //   AI Operator가 모든 유료 요금제 크레딧 사용으로 전환되어 접근 회귀 없음. aiMessagingEnabled prop은 호환성 위해 유지.
     { label: '발송결과', onClick: onResults, color: 'green', path: '/' },
+    // ★ 2026-07-09 CRM 캠페인 대행 — 비즈니스+ 전용 특별 서비스. 미만 요금제 = 메뉴 자체 비노출 (Harold 명시).
+    ...(planCode === 'BUSINESS' || planCode === 'ENTERPRISE'
+      ? [{ label: '캠페인 대행', onClick: () => navigate('/campaign-agency'), color: 'new' as MenuColor, path: '/campaign-agency' }]
+      : []),
     { label: '수신거부', onClick: () => navigate('/unsubscribes'), color: 'gold', path: '/unsubscribes' },
     // ★ 2026-07-08 AI 사용량 — SUB_MODULE_CARDS 타일 슬롯을 원클릭 캠페인에 내주고 헤더 유틸 메뉴로 이전(접근 유지).
     { label: 'AI 사용량', onClick: () => navigate('/ai-usage'), color: 'green', path: '/ai-usage' },

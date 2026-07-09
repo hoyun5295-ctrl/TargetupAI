@@ -62,6 +62,8 @@ import PredictiveDashboardPage from './pages/PredictiveDashboardPage';
 // ★ D209+ (2026-05-22) Phase D 비용 안전 매트릭스 — AI 호출 월 한도 + cache 통계 대시보드
 import AiUsagePage from './pages/AiUsagePage';
 import QuickCampaignPage from './pages/QuickCampaignPage';
+import CampaignAgencyPage from './pages/CampaignAgencyPage'; // ★ 2026-07-09 CRM 캠페인 대행 접수 (비즈니스+ 전용)
+import AdminCampaignAgencyPage from './pages/AdminCampaignAgencyPage'; // ★ 2026-07-09 캠페인 대행 설계 (슈퍼관리자)
 
 // ★ 세션 타이머 Context — 헤더 등에서 남은 시간 표시용
 interface SessionTimerContextType {
@@ -506,6 +508,24 @@ function App() {
           element={
             <PrivateRoute allowedTypes={['company_admin', 'company_user']}>
               <QuickCampaignPage />
+            </PrivateRoute>
+          }
+        />
+
+        {/* ★ 2026-07-09 CRM 캠페인 대행 — 고객사 접수(비즈니스+ 게이트는 페이지/백엔드 이중) + 슈퍼관리자 설계 */}
+        <Route
+          path="/campaign-agency"
+          element={
+            <PrivateRoute allowedTypes={['company_admin', 'company_user']}>
+              <CampaignAgencyPage />
+            </PrivateRoute>
+          }
+        />
+        <Route
+          path="/admin/campaign-agency"
+          element={
+            <PrivateRoute allowedTypes={['super_admin']}>
+              <AdminCampaignAgencyPage />
             </PrivateRoute>
           }
         />

@@ -37,6 +37,9 @@
 
 > **회전 룰:** 완료(★배포완료) 엔트리는 원문을 archive/TASKS_YYYY-MM.md로 이동 + INDEX 등재하고, 아래 "최근 완료 인덱스"에 1줄만 남긴다. 30KB 초과 = 회전 미이행 — 즉시 회전.
 
+### 🟢 2026-07-09 (6) — CRM 캠페인 대행 신설 (비즈니스+ 전용 컨설팅 상품 — 코드완료·미배포)
+> Harold 신사업: 고객사 캠페인대행요청서(xlsx) 접수→슈퍼관리자 "캠페인 대행 설계"에서 **그 업체 단일 스코프**(프로필·AI메모리·캠페인이력) 분석→"한줄로 마케팅 제안서" PDF→오프라인 컨펌→직원 예약 대행(운영). **무과금**(runInCreditBundle — 실행 단계 크레딧에서 회수). 신규: CT 4(crm-agency-request/proposal-core/proposal/pdf-render)+routes/campaign-agency+고객사·슈퍼관리자 페이지+메뉴 게이팅(BUSINESS|ENTERPRISE만 노출). 혜택=요청서 기입값만(출구가드)·타겟=recommendTarget+countFilteredCustomers 실측·503 DDL 안전망. **Codex 적대 리뷰 5건 전건 실증 후 정정**(고아파일 unlink·자격=isSubscriptionBlocked 동반 단일 소스·design 시점 재검증·xlsx 매직바이트·빈 필터 가드). DDL 실행완료. 검증 tsc0·vitest393·금지패턴0. **잔여=배포+실측 1건**. SoT=specs/2026-07-09-crm-campaign-agency-design.md · 상세 [[project_2026_0709_crm_campaign_agency]].
+
 ### 🟢 2026-07-09 (5) — 자동마케팅 디버깅 3건: 노출범위+발송권한 소유자기준 · 오늘의 추천 문안3안 선택+편집 · 담당자 사전알림 발신번호 대표번호 (★배포완료 2026-07-09 — Harold 선언 / 운영 실측 = Harold)
 > **① 노출범위+권한**(임은지): listOperators/listProposals에 소유자 scope(비관리자=`created_by` 본인·관리자=전체) + run-now/approve/reject 게이트를 `userType!=='company_admin'` 하드차단→"관리자 OR operator.created_by===userId"(approve/reject는 proposal→operator JOIN 소유검증). 생성/수정/삭제는 이미 2026-06-19 사용자 허용이라 발송·실행만 막히던 비대칭 해소. 요금제·예산·080·스팸 안전망 불변. 프론트 무변경.
 > **② 문안3안 선택+편집**(임은지): ProposalDecisionCard 3안 클릭 선택("발송 선택됨")+문안 편집 textarea. approve payload{variantIndex,body,subject}→proposal_json.userSelection 병합(jsonb_set)→dispatchProposalSend가 userSelection 우선(없으면 Bandit=자동 스케줄 무변경). 편집 본문>90byte SMS는 LMS 자동승격. 옛 UI가 "고른 변형으로 발송" 표기했으나 선택 UI 부재=거짓 표기였음. DDL 없음.
