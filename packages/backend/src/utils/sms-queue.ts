@@ -200,6 +200,16 @@ export async function getAuthSmsTable(): Promise<string> {
   return tables[0];
 }
 
+/**
+ * ★ 2026-07-09 담당자/운영자 안내 문자 발신번호 — 한줄로 플랫폼 대표번호(1800-8125).
+ * 옛 버그: 안내 문자 call_back을 수신자 본인 번호로 넣어, 발신=수신이 같아 번호도용차단서비스 가입 담당자는 아예 미수신.
+ * 인비토=특수유형 부가통신사업자라 대표번호는 별도 회신번호 등록 없이 발신 가능(Harold 확인 2026-07-09).
+ * internal-alert의 SYSTEM_SMS_CALLBACK과 동일 소스.
+ */
+export function getPlatformNoticeCallback(): string {
+  return (process.env.SYSTEM_SMS_CALLBACK || '18008125').replace(/\D/g, '');
+}
+
 /** 캐시 무효화 (라인그룹 설정 변경 시 호출) */
 export function invalidateLineGroupCache(companyId?: string, userId?: string) {
   if (userId) {

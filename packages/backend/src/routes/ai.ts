@@ -2037,7 +2037,8 @@ router.get('/operator/continuous', async (req: Request, res: Response) => {
   try {
     const companyId = req.user?.companyId;
     if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
-    const operators = await listOperators(companyId);
+    // ★ 2026-07-09 노출 범위: 비관리자=본인이 만든 자동마케팅만, 관리자=회사 전체.
+    const operators = await listOperators(companyId, req.user?.userType === 'company_admin' ? null : req.user?.userId);
     return res.json({ success: true, operators });
   } catch (err: any) {
     console.error('[Operator continuous GET] 오류:', err);
@@ -2465,17 +2466,18 @@ router.get('/operator/continuous/learning-summary', async (req: Request, res: Re
 router.post('/operator/continuous/:id/run-now', async (req: Request, res: Response) => {
   try {
     const companyId = req.user?.companyId;
+    const userId = req.user?.userId;
     const userType = req.user?.userType;
     if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
-    if (userType !== 'company_admin') {
-      return res.status(403).json({ success: false, error: '수동 실행은 회사 관리자만 가능합니다.' });
-    }
-    // 권한 검증 — operator가 본 회사 소유인지
+    // ★ 2026-07-09 권한: 회사 관리자 OR 본인이 만든 operator만 실행. (생성/수정/삭제는 이미 사용자 허용 — 실행만 막히던 비대칭 해소)
     const owner = await query(
-      `SELECT id FROM continuous_operators WHERE id = $1::uuid AND company_id = $2::uuid`,
+      `SELECT created_by FROM continuous_operators WHERE id = $1::uuid AND company_id = $2::uuid`,
       [req.params.id, companyId]
     );
     if (owner.rows.length === 0) return res.status(404).json({ success: false, error: 'Operator를 찾을 수 없습니다.' });
+    if (userType !== 'company_admin' && owner.rows[0].created_by !== userId) {
+      return res.status(403).json({ success: false, error: '본인이 만든 자동마케팅만 실행할 수 있습니다.' });
+    }
     const proposal = await generateProposalForOperator(req.params.id);
     if (!proposal) {
       return res.json({ success: true, proposal: null, message: '0건 매칭 또는 생성 실패 — 제안서가 생성되지 않았습니다.' });
@@ -2498,6 +2500,8 @@ router.get('/operator/proposals', async (req: Request, res: Response) => {
       companyId,
       validStatuses.includes(status) ? (status as any) : 'pending',
       parseInt(String(req.query.limit || '50')) || 50,
+      // ★ 2026-07-09 노출 범위: 비관리자=본인이 만든 operator의 제안만, 관리자=회사 전체.
+      req.user?.userType === 'company_admin' ? null : req.user?.userId,
     );
     return res.json({ success: true, proposals });
   } catch (err: any) {
@@ -2512,15 +2516,31 @@ router.post('/operator/proposals/:id/approve', async (req: Request, res: Respons
     const userId = req.user?.userId;
     const userType = req.user?.userType;
     if (!companyId || !userId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
-    if (userType !== 'company_admin') {
-      return res.status(403).json({ success: false, error: '승인은 회사 관리자만 가능합니다.' });
+    // ★ 2026-07-09 권한: 회사 관리자 OR 본인이 만든 operator의 제안만 승인·발송. (조회 scope와 동일 소유 기준)
+    const own = await query(
+      `SELECT o.created_by FROM operator_proposals p
+         JOIN continuous_operators o ON o.id = p.operator_id
+        WHERE p.id = $1::uuid AND p.company_id = $2::uuid`,
+      [req.params.id, companyId]
+    );
+    if (own.rows.length === 0) return res.status(404).json({ success: false, error: '제안서를 찾을 수 없습니다.' });
+    if (userType !== 'company_admin' && own.rows[0].created_by !== userId) {
+      return res.status(403).json({ success: false, error: '본인이 만든 자동마케팅만 승인·발송할 수 있습니다.' });
     }
-    // ★ 발송 개시 경로 — 생성/propose와 동일 게이트. 강등 회사가 남은 pending을 수동 발송하는 구멍 차단(조회·거부·정지는 열어 둠).
+    // ★ 발송 개시 경로 — 생성/propose와 동일 요금제 게이트. 강등 회사가 남은 pending을 수동 발송하는 구멍 차단(조회·거부·정지는 열어 둠).
     const planCtx = await loadPlanContext(companyId);
     if (!planCtx || !isAiOperatorAllowed(planCtx, req.user)) {
       return res.status(403).json({ success: false, error: '본 기능은 비즈니스·엔터프라이즈 요금제 전용입니다.', code: 'BETA_GATE' });
     }
-    const result = await approveProposal(companyId, req.params.id, userId);
+    // ★ 2026-07-09 문안 3안: 사용자가 고른 변형 index + (편집 시) 본문/제목. 미지정이면 Bandit 추천(자동 경로 동일).
+    const sel = req.body && Number.isInteger(req.body.variantIndex)
+      ? {
+          variantIndex: Number(req.body.variantIndex),
+          body: typeof req.body.body === 'string' ? req.body.body : undefined,
+          subject: typeof req.body.subject === 'string' ? req.body.subject : undefined,
+        }
+      : null;
+    const result = await approveProposal(companyId, req.params.id, userId, sel);
     if (!result.ok) return res.status(400).json({ success: false, error: result.reason });
     // 승인 = 백엔드 즉시 발송(자동 경로와 동일). 크레딧↔발송 원자성.
     const message = result.action === 'sent'
@@ -2539,8 +2559,16 @@ router.post('/operator/proposals/:id/reject', async (req: Request, res: Response
     const userId = req.user?.userId;
     const userType = req.user?.userType;
     if (!companyId || !userId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
-    if (userType !== 'company_admin') {
-      return res.status(403).json({ success: false, error: '거부는 회사 관리자만 가능합니다.' });
+    // ★ 2026-07-09 권한: 회사 관리자 OR 본인이 만든 operator의 제안만 거부.
+    const own = await query(
+      `SELECT o.created_by FROM operator_proposals p
+         JOIN continuous_operators o ON o.id = p.operator_id
+        WHERE p.id = $1::uuid AND p.company_id = $2::uuid`,
+      [req.params.id, companyId]
+    );
+    if (own.rows.length === 0) return res.status(404).json({ success: false, error: '제안서를 찾을 수 없습니다.' });
+    if (userType !== 'company_admin' && own.rows[0].created_by !== userId) {
+      return res.status(403).json({ success: false, error: '본인이 만든 자동마케팅만 거부할 수 있습니다.' });
     }
     const ok = await rejectProposal(companyId, req.params.id, userId);
     if (!ok) return res.status(400).json({ success: false, error: 'pending 상태가 아니거나 권한이 없는 제안서입니다.' });

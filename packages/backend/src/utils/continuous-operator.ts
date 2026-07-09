@@ -43,7 +43,7 @@ import { generateMessages } from '../services/ai';
 import { InsufficientCreditError, checkCredit, deductCreditSafe } from './ai-credit';
 import { getCreditCost } from './ai-credit-calc';
 import { runInCreditBundle } from './ai-credit-context';
-import { getAuthSmsTable, bulkInsertSmsQueue } from './sms-queue';
+import { getAuthSmsTable, bulkInsertSmsQueue, getPlatformNoticeCallback } from './sms-queue';
 import { randomUUID } from 'crypto';
 import { buildFilterWhereClauseCompat } from './customer-filter';
 import { buildSendableStagingInsertSql } from './operator-recipients';
@@ -55,6 +55,7 @@ import { recordCustomerSendsByFilter } from './customer-send-stats';
 import { getFatigueCap } from './fatigue-guard';
 // ★ Phase2 A (2026-06-26): 발송 본문 URL 단축 + 변이 추적(클릭→operator 변이 보상). journey-executor와 동일 패턴.
 import { shortenUrlsInText } from './short-url';
+import { eucKrByteLength } from './message-byte';
 // ★ Phase3 B (2026-06-26): 자율 발송 시각을 회사 클릭 반응 시간대로 개인화(데이터 부족 시 현행 폴백).
 // ★ Phase3 C (2026-06-26): 리마인드 발송 시각을 발송 가능 시간대로 정렬(shiftToSendableHour).
 import { pickBestSendHour, computeOptimalSendAt, shiftToSendableHour } from './send-time-util';
@@ -276,8 +277,12 @@ export async function createOperator(input: CreateOperatorInput): Promise<Contin
   return operator;
 }
 
-export async function listOperators(companyId: string): Promise<ContinuousOperator[]> {
+export async function listOperators(companyId: string, scopeUserId?: string | null): Promise<ContinuousOperator[]> {
   // ★ D212+ 5번 (2026-05-23 Harold 명시): budget_spent_month + budget_spent_today 영역 sub-query
+  // ★ 2026-07-09 노출 범위: scopeUserId 지정(비관리자)=본인이 만든 자동마케팅만 / null(관리자)=회사 전체.
+  const params: any[] = [companyId];
+  let ownerFilter = '';
+  if (scopeUserId) { params.push(scopeUserId); ownerFilter = `AND o.created_by = $${params.length}::uuid`; }
   const result = await query(
     `SELECT o.*,
        COALESCE((
@@ -293,9 +298,9 @@ export async function listOperators(companyId: string): Promise<ContinuousOperat
            AND status IN ('approved', 'auto_executed', 'sent')
        ), 0) AS budget_spent_today
      FROM continuous_operators o
-     WHERE o.company_id = $1::uuid AND o.status != 'archived'
+     WHERE o.company_id = $1::uuid AND o.status != 'archived' ${ownerFilter}
      ORDER BY o.status DESC, o.created_at DESC`,
-    [companyId]
+    params
   );
   return result.rows.map(mapRowToOperator);
 }
@@ -985,7 +990,8 @@ async function updateOperatorAfterRun(
 export async function listProposals(
   companyId: string,
   status: ProposalStatus | 'all' = 'pending',
-  limit: number = 50
+  limit: number = 50,
+  scopeUserId?: string | null,
 ): Promise<OperatorProposal[]> {
   // 만료 자동 처리 (조회 시점에 한 번 실행)
   await query(
@@ -1005,12 +1011,15 @@ export async function listProposals(
       statusFilter = `AND p.status = $${params.length}`;
     }
   }
+  // ★ 2026-07-09 노출 범위: scopeUserId 지정(비관리자)=본인이 만든 operator의 제안만 / null(관리자)=회사 전체.
+  let ownerFilter = '';
+  if (scopeUserId) { params.push(scopeUserId); ownerFilter = `AND o.created_by = $${params.length}::uuid`; }
   params.push(Math.min(limit, 200));
   const result = await query(
     `SELECT p.*, o.name AS operator_name, o.objective AS operator_objective
      FROM operator_proposals p
      LEFT JOIN continuous_operators o ON p.operator_id = o.id
-     WHERE p.company_id = $1::uuid ${statusFilter}
+     WHERE p.company_id = $1::uuid ${statusFilter} ${ownerFilter}
      ORDER BY p.created_at DESC
      LIMIT $${params.length}`,
     params
@@ -1021,17 +1030,30 @@ export async function listProposals(
 export async function approveProposal(
   companyId: string,
   proposalId: string,
-  userId: string
+  userId: string,
+  // ★ 2026-07-09 문안 3안: 사용자가 고른 변형 index + (편집 시) 본문/제목. null이면 Bandit 추천(자동 발송 경로와 동일).
+  selection?: { variantIndex: number; body?: string; subject?: string } | null,
 ): Promise<{ ok: boolean; reason?: string; action?: 'sent' | 'skipped'; campaignId?: string; sentCount?: number }> {
+  // 사용자 선택을 proposal_json.userSelection에 병합 — dispatchProposalSend가 이 값을 우선 사용(없으면 Bandit).
+  const selJson = selection && Number.isInteger(selection.variantIndex) && selection.variantIndex >= 0
+    ? JSON.stringify({
+        variantIndex: selection.variantIndex,
+        ...(typeof selection.body === 'string' && selection.body.trim() ? { body: selection.body } : {}),
+        ...(typeof selection.subject === 'string' ? { subject: selection.subject } : {}),
+      })
+    : null;
   // claim: pending/admin_review → sending. 백엔드에서 바로 발송(자동 경로와 동일)해 크레딧↔발송 원자성 확보.
   const claim = await query(
     `UPDATE operator_proposals SET
        status = 'sending',
        reviewed_by = $3::uuid,
-       reviewed_at = NOW()
+       reviewed_at = NOW(),
+       proposal_json = CASE WHEN $4::jsonb IS NOT NULL
+         THEN jsonb_set(proposal_json, '{userSelection}', $4::jsonb, true)
+         ELSE proposal_json END
      WHERE id = $1::uuid AND company_id = $2::uuid AND status IN ('pending', 'admin_review')
      RETURNING *`,
-    [proposalId, companyId, userId]
+    [proposalId, companyId, userId, selJson]
   );
   if (claim.rows.length === 0) {
     return { ok: false, reason: '승인 가능한 상태가 아니거나 권한이 없는 제안서입니다.' };
@@ -1308,16 +1330,44 @@ async function dispatchProposalSend(p: any): Promise<{ action: 'sent' | 'skipped
     console.warn('[ContinuousOperator AutoSend] Bandit 추천 실패, 0번 변이 fallback:', recErr?.message);
   }
 
+  // ★ 2026-07-09 사용자 수동 선택/편집 우선 (수동 승인 경로) — proposal_json.userSelection이 있으면 그 변형/본문으로 발송.
+  //   없으면(자동 스케줄 발송) 위 Bandit 추천을 그대로 유지 = 자동 경로 무변경.
+  const userSel = (pj.userSelection && typeof pj.userSelection === 'object') ? pj.userSelection : null;
+  let userBodyOverride: string | null = null;
+  let userSubjectOverride: string | null = null;
+  if (userSel) {
+    if (Number.isInteger(userSel.variantIndex) && userSel.variantIndex >= 0 && pj.messages?.[userSel.variantIndex]) {
+      chosenIndex = userSel.variantIndex;
+      // 선택된 변형 id를 index로 재조회(클릭 보상 추적 정합). 실패 시 null(추적만 생략, 발송 정상).
+      chosenVariantId = null;
+      try {
+        const vrow = await query(
+          `SELECT id FROM operator_proposal_variants WHERE proposal_id = $1::uuid AND variant_index = $2 LIMIT 1`,
+          [proposalId, chosenIndex],
+        );
+        chosenVariantId = vrow.rows[0]?.id || null;
+      } catch (e: any) {
+        console.warn('[ContinuousOperator AutoSend] 선택 변형 id 조회 실패:', e?.message);
+      }
+    }
+    if (typeof userSel.body === 'string' && userSel.body.trim()) userBodyOverride = userSel.body;
+    if (typeof userSel.subject === 'string') userSubjectOverride = userSel.subject;
+  }
+
   // 메시지/채널 (스팸 통과 본문) — 광고 가드에 isAd 필요해 먼저 계산.
   const msg = pj.messages?.[chosenIndex] || pj.messages?.[0] || {};
-  const body = String(msg.body || msg.message || '');
-  const subject = String(msg.subject || '');
+  const body = userBodyOverride != null ? userBodyOverride : String(msg.body || msg.message || '');
+  const subject = userSubjectOverride != null ? userSubjectOverride : String(msg.subject || '');
   // ★ 2026-07-07: 발송 시점 혜택 재치환 대상 — 제안 생성 후 관리자가 혜택을 입력(D-2 안내 흐름)해도 반영되게
   //   op(benefit_content) 로드 후 값이 확정된다. 이후 발송 경로는 전부 resolvedBody/resolvedSubject 사용.
   let resolvedBody = body;
   let resolvedSubject = subject;
   const channel = String(pj.channel?.recommended || 'SMS').toUpperCase();
-  const msgType = (channel === 'LMS' || channel === 'MMS') ? channel : 'SMS';
+  // ★ 2026-07-09 편집 본문이 SMS 한도(90byte EUC-KR) 초과면 LMS로 자동 승격(잘림 방지). 편집 없으면 원 채널 유지.
+  let msgType = (channel === 'LMS' || channel === 'MMS') ? channel : 'SMS';
+  if (msgType === 'SMS' && userBodyOverride != null && eucKrByteLength(body) > 90) {
+    msgType = 'LMS';
+  }
   // ★ 2026-07-02 (Harold 명시): 자동마케팅 = 무조건 광고 — 과거 저장분(pj.channel.isAd=false)도 광고로 발송.
   //   (광고)·무료거부 080 자동 합성(direct-send-worker) + 080 미설정 시 발송 보류 가드가 전 건 적용된다.
   const isAd = true;
@@ -1597,9 +1647,11 @@ export async function notifyOperatorAdmins(
   // ★ Harold 2026-07-02: 모든 담당자 안내 문자 첫 줄 = [한줄로 AI 자동마케팅 안내문자] (중앙 1곳 부착)
   const wrappedBody = wrapOperatorNoticeBody(body);
   const authTable = await getAuthSmsTable();
+  // ★ 2026-07-09 발신번호 = 한줄로 대표번호. 옛: call_back에 수신자 본인 번호 → 발신=수신 → 번호도용차단 가입 담당자 미수신.
+  const noticeCallback = getPlatformNoticeCallback();
   const rows = unique.map((phone) => [
     phone,                  // dest_no
-    phone,                  // call_back
+    noticeCallback,         // call_back (한줄로 대표번호)
     wrappedBody,            // msg_contents
     'L',                    // msg_type (LMS)
     title.slice(0, 40),     // title_str

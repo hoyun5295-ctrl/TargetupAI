@@ -19,6 +19,10 @@
 
 ## 사고 이력
 
+### 2026-07-09 — 뒤로가기 navigate 하드코딩 루프 재발 + DM 편집 캔버스↔발행 SSR 미러 부재
+- **뒤로가기 navigate 하드코딩 = 루프+스크롤 미복원 재발점**: 여정 통계분석 뒤로가기가 `navigate('/ai-journeys/:id')`(여정상세) 하드코딩 → 여정상세 back(goBackOr -1)이 다시 통계로 → stats↔상세 무한 루프(대시보드 못 감). 전수 감사로 동일 패턴 9곳(JourneyStats+마케팅캘린더·성과·예측·푸시·음성·원클릭·여정목록·자동마케팅) → 전부 `goBackOr(navigate, fallback)`. **교훈: 새 ←/뒤로가기 버튼은 무조건 `goBackOr(navigate, fallback)`. navigate('/x') 직접=PUSH라 루프+스크롤 미복원. 대시보드/메인 '종료' 라벨·정방향 이동만 navigate 허용.** [[feedback_scroll_restoration_convention]]
+- **DM 구도(treatment) 캔버스 미반영 = 편집≠단말**: 공통 '구도(분할 등)' 선택이 발행 SSR(renderHeroSplit 등)에만 적용되고 편집 캔버스는 classic만 렌더 → 구도·버튼색 바꿔도 편집 화면 변화 0(사용자 혼선). SectionRenderer가 treatment 미계산·미전달이 근본. fix=프론트 selectTreatment 미러(`utils/dm-treatment.ts`)+SectionRenderer 전달+hero/coupon/text_card/cta 캔버스가 SSR treatment를 JSX 1:1 미러(classic 골든보존). **교훈: 공통 속성(구도·색·정렬)은 캔버스+발행 SSR 둘 다 소비해야 편집=발행. 한쪽만=불일치 신고. TextArea 입력 렌더는 캔버스(InlineEditable는 이미 pre-wrap)+SSR 둘 다 `white-space:pre-wrap` 필수(즉시쿠폰 조건 개행 소실).**
+
 ### 2026-07-06 — DM 발송 클릭 시 화면 전체 백지 (조기 return 뒤 훅 = 훅 개수 불일치 크래시)
 - **현상**: DM 빌더에서 [발송] 클릭 → 페이지 전체 백지(URL 유지). 긴급 신고.
 - **근본**: DmSendAndTrackModal이 `if (!show) return null;` **아래에서** `useRef` 호출(7/2(5) 커서 삽입 기능 추가 때 유입). 모달은 항상 렌더되고 show만 토글이라, 닫힘 렌더=훅 N개 / 열림 렌더=N+1개 → React 훅 개수 불일치 크래시 → 루트 언마운트 = 백지. show가 처음부터 true인 다른 진입(발송 추적 카드)은 무증상이라 "발송 버튼에서만·갑자기"로 보임.

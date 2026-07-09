@@ -1,12 +1,12 @@
 // 오늘의 추천 — 의사결정 카드 (2026-06-27)
 // 버리는 데이터 0: proposal_json(orchestrate 결과 전체)을 위계로 렌더한다.
 //   히어로(기대 매출·ROI) → 근거(왜 지금·등급별 전환·안전·채널) → 보조(변형·인사이트·전략·리스크·비용·통합 분석).
-import { ReactNode } from 'react';
+import { ReactNode, useState } from 'react';
 import {
   X, ChevronDown, ChevronUp, Target, ShieldCheck,
-  Send, GitMerge, MessageSquare, AlertCircle,
+  Send, GitMerge, MessageSquare, AlertCircle, Check, Pencil,
 } from 'lucide-react';
-import { OperatorProposal, ProposalVariant, BanditRecommendation, won } from './types';
+import { OperatorProposal, ProposalVariant, BanditRecommendation, ProposalApproveSelection, won } from './types';
 import StatusBadge from './StatusBadge';
 
 interface Props {
@@ -16,7 +16,7 @@ interface Props {
   variantData?: { variants: ProposalVariant[]; recommendation: BanditRecommendation | null };
   busy?: boolean;
   onToggleExpand: () => void;
-  onApprove: () => void;
+  onApprove: (selection: ProposalApproveSelection) => void;
   onReject: () => void;
   onStop: () => void;
   onPromoteToJourney?: () => void;
@@ -30,6 +30,10 @@ export default function ProposalDecisionCard({
   proposal, featured = false, expanded, variantData, busy,
   onToggleExpand, onApprove, onReject, onStop, onPromoteToJourney,
 }: Props) {
+  // ★ 2026-07-09 문안 3안 선택 + 편집 — selectedIdx 미선택 시 Bandit 추천을 따르고, 편집 본문은 선택된 변형 기준.
+  const [selectedIdx, setSelectedIdx] = useState<number | null>(null);
+  const [editing, setEditing] = useState(false);
+  const [editedBody, setEditedBody] = useState<string | null>(null);
   const pj = proposal.proposalJson || {};
   const perf = pj.performance || {};
   const basis = perf.basis || {};
@@ -55,8 +59,13 @@ export default function ProposalDecisionCard({
   const canStop = proposal.status === 'scheduled';
   const canPromote = !!onPromoteToJourney && ['approved', 'auto_executed', 'sent'].includes(proposal.status);
 
-  const bestIdx = recommendedIdx != null && messages[recommendedIdx] ? recommendedIdx : 0;
-  const bestMsg = messages[bestIdx];
+  const banditIdx = recommendedIdx != null && messages[recommendedIdx] ? recommendedIdx : 0;
+  // 사용자가 고른 변형이 있으면 그것, 없으면 Bandit 추천. 미리보기·발송이 모두 이 index를 따른다.
+  const effectiveIdx = selectedIdx != null && messages[selectedIdx] ? selectedIdx : banditIdx;
+  const effectiveMsg = messages[effectiveIdx];
+  const effectiveBody = editedBody != null ? editedBody : (effectiveMsg?.body || effectiveMsg?.message || '');
+  const selectVariant = (i: number) => { setSelectedIdx(i); setEditedBody(null); setEditing(false); };
+  const submitApprove = () => onApprove({ variantIndex: effectiveIdx, body: effectiveBody, subject: effectiveMsg?.subject });
 
   const hero = (
     <div className="flex items-end gap-5 flex-wrap">
@@ -128,12 +137,12 @@ export default function ProposalDecisionCard({
     </div>
   );
 
-  const messagePreview = bestMsg && (
+  const messagePreview = effectiveMsg && (
     <div className="mt-3 rounded-lg border border-white/10 bg-slate-950/40 px-3 py-2.5">
       <div className="text-[10px] text-white/40 mb-1">
-        발송 문안 · 변형 {variantLetter(bestIdx)}{(bestMsg.byteCount || bestMsg.byte_count) ? ` · ${bestMsg.byteCount || bestMsg.byte_count}byte` : ''}
+        발송 문안 · 변형 {variantLetter(effectiveIdx)}{editedBody != null ? ' · 편집됨' : ''}
       </div>
-      <div className="text-[13px] text-white/80 leading-relaxed whitespace-pre-wrap">{bestMsg.body || bestMsg.message || ''}</div>
+      <div className="text-[13px] text-white/80 leading-relaxed whitespace-pre-wrap">{effectiveBody}</div>
     </div>
   );
 
@@ -141,7 +150,7 @@ export default function ProposalDecisionCard({
     <div className="mt-4 flex items-center gap-2 flex-wrap">
       {canApprove && (
         <>
-          <button onClick={onApprove} disabled={busy} className="inline-flex items-center gap-1.5 bg-indigo-500/40 hover:bg-indigo-500/60 disabled:opacity-40 text-indigo-50 text-sm font-semibold px-4 py-2 rounded-lg transition-colors">
+          <button onClick={submitApprove} disabled={busy} className="inline-flex items-center gap-1.5 bg-indigo-500/40 hover:bg-indigo-500/60 disabled:opacity-40 text-indigo-50 text-sm font-semibold px-4 py-2 rounded-lg transition-colors">
             <Send className="w-4 h-4" />승인하고 발송
           </button>
           <button onClick={onReject} disabled={busy} className="inline-flex items-center gap-1.5 border border-rose-400/30 hover:bg-rose-500/20 disabled:opacity-40 text-rose-300 text-sm px-3 py-2 rounded-lg transition-colors">
@@ -179,20 +188,56 @@ export default function ProposalDecisionCard({
       )}
       {messages.length > 0 && (
         <div>
-          <div className="font-medium text-white/70 mb-1.5">메시지 {messages.length}안</div>
+          <div className="font-medium text-white/70 mb-1.5">
+            메시지 {messages.length}안{canApprove ? ' · 눌러서 발송할 문안 선택' : ''}
+          </div>
           <div className="space-y-1.5">
             {messages.map((m, i) => {
               const v = variantData?.variants?.[i];
               const rec = recommendedIdx === i;
+              const isSel = canApprove && effectiveIdx === i;
               return (
-                <div key={i} className={`rounded-lg border px-2.5 py-2 ${rec ? 'bg-indigo-500/10 border-indigo-400/30' : 'bg-white/5 border-white/10'}`}>
+                <div
+                  key={i}
+                  onClick={() => canApprove && selectVariant(i)}
+                  className={`rounded-lg border px-2.5 py-2 transition-colors ${canApprove ? 'cursor-pointer' : ''} ${isSel ? 'bg-indigo-500/20 border-indigo-400/60 ring-1 ring-indigo-400/50' : `bg-white/5 border-white/10${canApprove ? ' hover:border-white/30' : ''}`}`}
+                >
                   <div className="flex items-center gap-2 flex-wrap mb-1">
+                    {isSel && <Check className="w-3.5 h-3.5 text-indigo-300 shrink-0" />}
                     <span className="text-white/80 font-medium">{m.variantName || `변형 ${variantLetter(i)}`}</span>
                     {(m.byteCount || m.byte_count) ? <span className="text-[10px] text-white/40">{m.byteCount || m.byte_count}byte</span> : null}
                     {rec && <span className="text-[10px] bg-indigo-600 text-white px-1.5 py-0.5 rounded-full">Bandit 추천</span>}
+                    {isSel && <span className="text-[10px] bg-indigo-500/30 text-indigo-100 px-1.5 py-0.5 rounded-full">발송 선택됨</span>}
                     {v && <span className="text-[10px] text-white/40">발송 {v.sentCount} · 클릭 {v.clickCount} · 전환 {v.conversionCount}</span>}
                   </div>
-                  <div className="text-white/70 whitespace-pre-wrap leading-relaxed">{m.body || m.message || ''}</div>
+                  {isSel && editing ? (
+                    <textarea
+                      value={effectiveBody}
+                      onChange={(e) => setEditedBody(e.target.value)}
+                      onClick={(e) => e.stopPropagation()}
+                      rows={6}
+                      className="w-full mt-1 rounded-lg bg-slate-950/60 border border-indigo-400/40 text-white/90 text-[13px] leading-relaxed p-2.5 resize-y focus:outline-none focus:border-indigo-300"
+                      placeholder="발송할 문안을 자유롭게 편집하세요"
+                    />
+                  ) : (
+                    <div className="text-white/70 whitespace-pre-wrap leading-relaxed">{isSel ? effectiveBody : (m.body || m.message || '')}</div>
+                  )}
+                  {isSel && (
+                    <div className="mt-1.5 flex items-center gap-2">
+                      <button
+                        onClick={(e) => { e.stopPropagation(); setEditing((prev) => !prev); }}
+                        className="inline-flex items-center gap-1 text-[11px] text-indigo-200 hover:text-indigo-100 border border-indigo-400/30 hover:bg-indigo-500/20 px-2 py-1 rounded-lg transition-colors"
+                      >
+                        <Pencil className="w-3 h-3" />{editing ? '편집 완료' : '문안 편집'}
+                      </button>
+                      {editedBody != null && !editing && (
+                        <button
+                          onClick={(e) => { e.stopPropagation(); setEditedBody(null); }}
+                          className="text-[11px] text-white/50 hover:text-white/80 px-1.5 py-1"
+                        >원래대로</button>
+                      )}
+                    </div>
+                  )}
                 </div>
               );
             })}
@@ -200,7 +245,7 @@ export default function ProposalDecisionCard({
           {variantData?.recommendation && (
             <div className="mt-2 rounded-lg bg-indigo-500/10 border border-indigo-400/30 px-2.5 py-2 text-indigo-200 text-[11px]">
               <span className="font-medium">자동 최적화 추천:</span> {variantData.recommendation.reasoning}
-              <div className="text-indigo-200/70 mt-0.5">AI 추천은 참고이며, 발송은 담당자가 고른 변형으로 진행됩니다.</div>
+              <div className="text-indigo-200/70 mt-0.5">AI 추천은 참고이며, 발송은 위에서 고른 변형(편집분 포함)으로 진행됩니다.</div>
             </div>
           )}
         </div>

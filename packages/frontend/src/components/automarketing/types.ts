@@ -238,6 +238,13 @@ export interface OperatorProposal {
   operatorObjective?: string;
 }
 
+// ★ 2026-07-09 승인 시 사용자가 고른 변형 + (편집 시) 본문 — 없으면 백엔드가 Bandit 추천 사용(자동 발송 경로 동일).
+export interface ProposalApproveSelection {
+  variantIndex: number;
+  body: string;
+  subject?: string;
+}
+
 // 통화/퍼센트 표시 헬퍼 — 모든 카드 공용
 export const won = (n?: number | null): string => `₩${Math.round(Number(n) || 0).toLocaleString('ko-KR')}`;
 export const pct = (r?: number | null, digits = 1): string => `${((Number(r) || 0) * 100).toFixed(digits)}%`;

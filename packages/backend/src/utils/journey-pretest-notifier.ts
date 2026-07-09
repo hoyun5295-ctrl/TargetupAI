@@ -10,7 +10,7 @@
 
 import { query } from '../config/database';
 import { generatePauseToken, pauseJourney } from './journey-pause-handler';
-import { getAuthSmsTable, bulkInsertSmsQueue } from './sms-queue';
+import { getAuthSmsTable, bulkInsertSmsQueue, getPlatformNoticeCallback } from './sms-queue';
 import { runStepSpamTest } from './journey-pretest-validator';
 import { regenerateStepAvoidingSpam } from './journey-ai-generator';
 import { getOpt080Number } from './messageUtils';
@@ -200,8 +200,8 @@ async function notifyManagerForStep(b: PretestBundle, messagePreview: string, mo
   await bulkInsertSmsQueue(
     [authTable],
     [[
-      managerPhone,            // dest_no
-      managerPhone,            // call_back
+      managerPhone,                // dest_no
+      getPlatformNoticeCallback(), // call_back — ★ 2026-07-09 한줄로 대표번호(옛: 수신자 본인 번호=번호도용차단 미수신)
       lmsBody,                 // msg_contents
       'L',                     // msg_type (LMS)
       titleForMode(mode).slice(0, 40), // title_str
