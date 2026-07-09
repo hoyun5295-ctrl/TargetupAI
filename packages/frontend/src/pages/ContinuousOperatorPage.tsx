@@ -4,6 +4,7 @@
 // 다크 slate 톤 + 단일 인디고 액센트. native dialog 0(ConfirmModal·useToast). 모델명 0.
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { goBackOr } from '../lib/scroll-restoration';
 import { ArrowLeft, Brain, RefreshCw, GitMerge, Loader2, Sparkles } from 'lucide-react';
 import ConfirmModal, { ConfirmState } from '../components/ConfirmModal';
 import CreditConfirmModal from '../components/credit/CreditConfirmModal';
@@ -352,7 +353,7 @@ export default function ContinuousOperatorPage() {
   };
 
   const goLauncher = () => setView('launcher');
-  const headerBack = () => (view === 'launcher' ? navigate('/ai-operator') : goLauncher());
+  const headerBack = () => (view === 'launcher' ? goBackOr(navigate, '/ai-operator') : goLauncher());
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 text-white">

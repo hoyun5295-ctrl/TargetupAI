@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
+import { goBackOr } from '../lib/scroll-restoration';
 import {
   ArrowLeft, ChevronDown, ChevronUp, Loader2, Pause, Play, Plus, Power, RefreshCw, Sparkles,
   ShoppingCart, Cake, Calendar as CalendarIcon, UserPlus, Repeat, Moon, MessageSquare,
@@ -1305,7 +1306,7 @@ export default function JourneysPage() {
       <div className="border-b border-violet-400/30 bg-violet-800/50 backdrop-blur-md sticky top-0 z-30">
         <div className="max-w-7xl mx-auto px-3 md:px-6 py-3 md:py-4 flex items-center gap-2 md:gap-4">
           <button
-            onClick={() => view === 'review' ? setConfirm({ mode: 'warning', title: '메인으로 돌아가기', description: '생성한 여정이 사라집니다. 메인으로 돌아가시겠습니까?', confirmLabel: '나가기', onConfirm: () => { setView('main'); setAiPkg(null); } }) : navigate('/ai-operator')}
+            onClick={() => view === 'review' ? setConfirm({ mode: 'warning', title: '메인으로 돌아가기', description: '생성한 여정이 사라집니다. 메인으로 돌아가시겠습니까?', confirmLabel: '나가기', onConfirm: () => { setView('main'); setAiPkg(null); } }) : goBackOr(navigate, '/ai-operator')}
             className="p-2 rounded-lg hover:bg-white/15 transition-colors"
           >
             <ArrowLeft className="w-5 h-5" />

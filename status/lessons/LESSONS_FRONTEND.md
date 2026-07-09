@@ -13,6 +13,7 @@
 - **대량 처리 사용자 안내** — 5초+ 작업 영역 = 로딩 오버레이 + close 차단 + disabled 의무 (D185)
 - **CSS pointer-events-none + select-none wrapper 광범위 X** — 자식 textarea/scroll/copy 차단 사고 (D188)
 - **모달 z-index 티어 통일** (2026-06-25) — 앱 모달 z-[55]~[140] / DM `ModalBase` 1000(outlier) / **확인·차단 인터럽트 모달 = z-[2000]**(ConfirmModal·CreditConfirmModal·CustomerDataGate) / 시스템 9997~99999. 인터럽트 모달이 자신을 띄운 모달보다 z-index 낮으면 뒤로 깔림 — 새 확인/차단 모달은 z-[2000] 의무.
+- **DM 섹션 정렬 = 공통 래퍼 단일 메커니즘, 하드코딩 center 금지** (2026-07-09) — 정렬(좌/중/우)은 래퍼(SectionRenderer/renderSection)의 `text-align` 상속 + `--dm-section-justify` var로 전 섹션 구동. 섹션이 `text-align:center`/`justify-content:center`를 하드코딩하면 래퍼를 덮어 정렬 무력화. 기본 align=center는 래퍼가 center 유지하므로 하드코딩 제거=회귀0, 좌/우만 신규 반영. 헤더 로고형 좌/우는 row+justify-content면 **편집 캔버스 contentEditable(브랜드)가 블록으로 폭을 꽉 채워 flex-end 안 먹음** → center·hero처럼 column+align-items가 정답. 편집 canvas ↔ 발행 SSR(dm-section-renderer) 반드시 미러(3면 일치). 미디어박스·이벤트카드 휠(margin:auto)·폼입력·페이징 점·placeholder·풀폭 CTA는 구조적 중앙(정렬 대상 아님)으로 유지.
 
 ---
 

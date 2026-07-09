@@ -235,7 +235,7 @@ function couponMeta(props: CouponProps): string {
   const expire = props.expire_date ? formatKoreanDate(props.expire_date) : '';
   return `${expire ? `<div class="dm-text-small" style="margin-top:var(--dm-sp-3);color:var(--dm-neutral-500)">유효기간: ~ ${escapeHtml(expire)}</div>` : ''}
       ${props.min_purchase ? `<div class="dm-text-small" style="margin-top:var(--dm-sp-1);color:var(--dm-neutral-500)">${Number(props.min_purchase).toLocaleString('ko-KR')}원 이상 구매 시</div>` : ''}
-      ${props.usage_condition ? `<div class="dm-text-tiny" style="margin-top:var(--dm-sp-2);color:var(--dm-neutral-500)">${escapeHtml(props.usage_condition)}</div>` : ''}`;
+      ${props.usage_condition ? `<div class="dm-text-tiny" style="margin-top:var(--dm-sp-2);color:var(--dm-neutral-500);white-space:pre-wrap">${escapeHtml(props.usage_condition)}</div>` : ''}`;
 }
 
 function renderCouponClassic(props: CouponProps): string {
@@ -284,10 +284,13 @@ function renderCouponSpotlight(props: CouponProps): string {
 function renderCountdown(props: CountdownProps): string {
   const end = props.end_datetime || '';
   const urgency = escapeHtml(props.urgency_text || '마감까지');
+  // 2026-07-09: 배경색·상단문구 글씨색 (미지정 = 기본 다크/accent)
+  const cdBg = props.background_color ? escapeHtml(props.background_color) : 'var(--dm-neutral-900)';
+  const cdUrgencyColor = props.urgency_color ? escapeHtml(props.urgency_color) : 'var(--dm-accent)';
 
   // ★ 2026-07-02(5) 발행물 디자인 격상 — 이메일 톤: 중앙 정렬 + 자간 라벨 + 여백 리듬 + 절제된 타일
-  return `<div class="dm-section dm-countdown" data-section-type="countdown" data-end="${escapeHtml(end)}" style="padding:var(--dm-sp-8) var(--dm-sp-5);background:var(--dm-neutral-900);color:#fff">
-    <div style="font-size:var(--dm-fs-small);font-weight:700;letter-spacing:3px;color:var(--dm-accent);margin-bottom:var(--dm-sp-5)">${urgency}</div>
+  return `<div class="dm-section dm-countdown" data-section-type="countdown" data-end="${escapeHtml(end)}" style="padding:var(--dm-sp-8) var(--dm-sp-5);background:${cdBg};color:#fff">
+    <div style="font-size:var(--dm-fs-small);font-weight:700;letter-spacing:3px;color:${cdUrgencyColor};margin-bottom:var(--dm-sp-5)">${urgency}</div>
     <div class="dm-countdown-display" style="display:flex;gap:var(--dm-sp-2);justify-content:var(--dm-section-justify,center);flex-wrap:wrap;align-items:stretch">
       ${props.show_days    ? `<div class="cd-unit"><div class="cd-num" data-unit="d">00</div><div class="cd-lbl">일</div></div>` : ''}
       ${props.show_hours   ? `<div class="cd-unit"><div class="cd-num" data-unit="h">00</div><div class="cd-lbl">시간</div></div>` : ''}
@@ -751,8 +754,8 @@ function renderInstantCoupon(p: any): string {
     <div style="font-size:var(--dm-fs-small);color:var(--dm-neutral-700);margin-bottom:var(--dm-sp-3)">${escapeHtml(p.discount_description || '')}</div>
     ${p.expires_at ? `<div style="font-size:var(--dm-fs-tiny);color:var(--dm-primary);margin-bottom:var(--dm-sp-3);font-weight:600">만료: ${escapeHtml(new Date(p.expires_at).toLocaleString('ko-KR'))}</div>` : ''}
     <button data-dm-claim data-claim-success="${escapeHtml(p.usage_instructions ? `쿠폰이 발급되었습니다. ${p.usage_instructions}` : '쿠폰이 발급되었습니다. 결제 시 적용해주세요.')}" class="dm-cta dm-cta-primary">쿠폰 받기</button>
-    ${p.conditions ? `<div style="font-size:var(--dm-fs-tiny);color:var(--dm-neutral-500);margin-top:var(--dm-sp-2)">${escapeHtml(p.conditions)}</div>` : ''}
-    ${p.usage_instructions ? `<div style="font-size:var(--dm-fs-tiny);color:var(--dm-neutral-500);margin-top:4px">${escapeHtml(p.usage_instructions)}</div>` : ''}
+    ${p.conditions ? `<div style="font-size:var(--dm-fs-tiny);color:var(--dm-neutral-500);margin-top:var(--dm-sp-2);white-space:pre-wrap">${escapeHtml(p.conditions)}</div>` : ''}
+    ${p.usage_instructions ? `<div style="font-size:var(--dm-fs-tiny);color:var(--dm-neutral-500);margin-top:4px;white-space:pre-wrap">${escapeHtml(p.usage_instructions)}</div>` : ''}
     <div data-dm-result style="display:none"></div>`;
   // ★ 2026-07-02 v2 — 점선 상자 → 라운드 카드 + 아이콘 칩 + 오버라인
   return `<div class="dm-section dm-instant-coupon"><div style="padding:var(--dm-sp-8) var(--dm-sp-6);background:var(--dm-primary-light);border:1px solid var(--dm-neutral-200);border-radius:20px;box-shadow:var(--dm-shadow-md);margin:var(--dm-sp-2) 0"><div style="width:44px;height:44px;border-radius:12px;background:var(--dm-bg);color:var(--dm-primary);display:inline-flex;align-items:center;justify-content:center;margin-bottom:var(--dm-sp-4)">${dmIcon('ticket', 22)}</div><div class="dm-overline" style="color:var(--dm-primary);margin-bottom:var(--dm-sp-2)">COUPON</div>${body}</div></div>`;

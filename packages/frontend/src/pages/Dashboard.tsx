@@ -32,6 +32,7 @@ import TargetSendModal from '../components/TargetSendModal';
 import FileUploadMappingModal from '../components/FileUploadMappingModal';
 import LineGroupErrorModal from '../components/LineGroupErrorModal';
 import MmsUploadModal from '../components/MmsUploadModal';
+import { useMmsUpload } from '../hooks/useMmsUpload';
 import PlanApprovalModal from '../components/PlanApprovalModal';
 import PlanLimitModal from '../components/PlanLimitModal';
 import PlanUpgradeModal from '../components/PlanUpgradeModal';
@@ -823,127 +824,27 @@ export default function Dashboard() {
 
   // MMS 이미지 (서버 업로드 방식)
   // ★ D124 N4: originalName 필드 추가 — 업로드한 원본 파일명 표시용 (DB mms_image_paths 객체 배열 전송에도 사용)
-  const [mmsUploadedImages, setMmsUploadedImages] = useState<{serverPath: string; url: string; filename: string; originalName?: string; size: number}[]>([]);
-  const [mmsUploading, setMmsUploading] = useState(false);
+  // MMS 이미지 업로드 — 공용 훅(useMmsUpload)로 통합 (검증/순서강제/서버삭제 공통, no_inline_duplication).
+  //   onError = 직접발송 다크 토스트 shim(setToast)로 표시 (기존 동작 동일).
+  const {
+    mmsUploadedImages,
+    setMmsUploadedImages,
+    mmsUploading,
+    handleMmsSlotUpload,
+    handleMmsMultiUpload,
+    handleMmsImageRemove,
+  } = useMmsUpload((msg) => {
+    setToast({ show: true, type: 'error', message: msg });
+    setTimeout(() => setToast({ show: false, type: 'error', message: '' }), 3000);
+  });
   const [showMmsUploadModal, setShowMmsUploadModal] = useState(false);
-
-  // MMS 이미지 단일 슬롯 업로드 함수
-  const handleMmsSlotUpload = async (file: File, slotIndex: number) => {
-    // ★ D137 D7: 왼쪽(앞) 슬롯부터 순서대로 등록 강제 — 빈 앞슬롯이 있는 상태에서 뒷슬롯 업로드 차단
-    //   기존 `updated[slotIndex] = img` 가 배열에 빈 자리(hole)를 만들어 length 카운트 오류 유발 →
-    //   근본 해결: "이미지 1 없이 이미지 2/3에 넣을 수 없음" UX 강제.
-    if (slotIndex > mmsUploadedImages.length) {
-      setToast({ show: true, type: 'error', message: `이미지 ${mmsUploadedImages.length + 1}번부터 순서대로 등록해주세요` });
-      setTimeout(() => setToast({ show: false, type: 'error', message: '' }), 3000);
-      return;
-    }
-    // 검증: JPG만
-    if (!file.name.toLowerCase().endsWith('.jpg') && !file.name.toLowerCase().endsWith('.jpeg')) {
-      setToast({ show: true, type: 'error', message: 'JPG 파일만 업로드 가능합니다 (PNG/GIF 미지원)' });
-      setTimeout(() => setToast({ show: false, type: 'error', message: '' }), 3000);
-      return;
-    }
-    // 검증: 300KB
-    if (file.size > 300 * 1024) {
-      setToast({ show: true, type: 'error', message: `${(file.size / 1024).toFixed(0)}KB — 300KB 이하만 가능합니다` });
-      setTimeout(() => setToast({ show: false, type: 'error', message: '' }), 3000);
-      return;
-    }
-
-    setMmsUploading(true);
-    try {
-      const formData = new FormData();
-      formData.append('images', file);
-      const token = localStorage.getItem('token');
-      const res = await fetch('/api/mms-images/upload', {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${token}` },
-        body: formData,
-      });
-      const data = await res.json();
-      if (res.ok && data.success && data.images.length > 0) {
-        setMmsUploadedImages(prev => {
-          // 위 guard 로 slotIndex ≤ prev.length 보장 → 배열 hole 없음
-          const updated = [...prev];
-          updated[slotIndex] = data.images[0];
-          return updated;
-        });
-      } else {
-        setToast({ show: true, type: 'error', message: data.error || '업로드 실패' });
-        setTimeout(() => setToast({ show: false, type: 'error', message: '' }), 3000);
-      }
-    } catch {
-      setToast({ show: true, type: 'error', message: '이미지 업로드 중 오류 발생' });
-      setTimeout(() => setToast({ show: false, type: 'error', message: '' }), 3000);
-    } finally {
-      setMmsUploading(false);
-    }
-  };
 
   // MMS 이미지 서버 업로드 함수 → 모달 오픈으로 변경
   const handleMmsImageUpload = (files: FileList | null, sendType: 'ai' | 'target' | 'direct') => {
     setShowMmsUploadModal(true);
   };
 
-  // MMS 이미지 다중 선택 한번에 첨부 (#14)
-  const handleMmsMultiUpload = async (files: FileList) => {
-    const maxSlots = 3;
-    const currentCount = mmsUploadedImages.length;
-    const available = maxSlots - currentCount;
-    if (available <= 0) {
-      setToast({ show: true, type: 'error', message: '최대 3장까지 첨부 가능합니다' });
-      setTimeout(() => setToast({ show: false, type: 'error', message: '' }), 3000);
-      return;
-    }
-    const filesToUpload = Array.from(files).slice(0, available);
-    // 검증
-    for (const file of filesToUpload) {
-      if (!file.name.toLowerCase().endsWith('.jpg') && !file.name.toLowerCase().endsWith('.jpeg')) {
-        setToast({ show: true, type: 'error', message: `${file.name}: JPG 파일만 업로드 가능합니다` });
-        setTimeout(() => setToast({ show: false, type: 'error', message: '' }), 3000);
-        return;
-      }
-      if (file.size > 300 * 1024) {
-        setToast({ show: true, type: 'error', message: `${file.name}: ${(file.size / 1024).toFixed(0)}KB — 300KB 이하만 가능합니다` });
-        setTimeout(() => setToast({ show: false, type: 'error', message: '' }), 3000);
-        return;
-      }
-    }
-    setMmsUploading(true);
-    try {
-      for (const file of filesToUpload) {
-        const formData = new FormData();
-        formData.append('images', file);
-        const token = localStorage.getItem('token');
-        const res = await fetch('/api/mms-images/upload', {
-          method: 'POST',
-          headers: { Authorization: `Bearer ${token}` },
-          body: formData,
-        });
-        const data = await res.json();
-        if (res.ok && data.success && data.images.length > 0) {
-          setMmsUploadedImages(prev => [...prev, data.images[0]]);
-        }
-      }
-    } catch {
-      setToast({ show: true, type: 'error', message: '이미지 업로드 중 오류 발생' });
-      setTimeout(() => setToast({ show: false, type: 'error', message: '' }), 3000);
-    } finally {
-      setMmsUploading(false);
-    }
-  };
-
-  // MMS 이미지 삭제 함수 (슬롯 기반)
-  const handleMmsImageRemove = async (index: number) => {
-    const img = mmsUploadedImages[index];
-    if (img) {
-      try {
-        const token = localStorage.getItem('token');
-        await fetch(img.url, { method: 'DELETE', headers: { Authorization: `Bearer ${token}` } });
-      } catch { /* 서버 삭제 실패해도 UI에서는 제거 */ }
-    }
-    setMmsUploadedImages(prev => prev.filter((_, i) => i !== index));
-  };
+  // handleMmsMultiUpload / handleMmsImageRemove → useMmsUpload 훅으로 이관 (위 훅 destructure)
   const [directInputMode, setDirectInputMode] = useState<'file' | 'direct' | 'address'>('file');
   const [showAddressBook, setShowAddressBook] = useState(false);
   const [addressGroups, setAddressGroups] = useState<{group_name: string, count: number}[]>([]);
@@ -3282,9 +3183,14 @@ const campaignData = {
           handleMmsSlotUpload={handleMmsSlotUpload}
           handleMmsMultiUpload={handleMmsMultiUpload}
           handleMmsImageRemove={handleMmsImageRemove}
-          setTargetMsgType={setTargetMsgType}
-          setDirectMsgType={setDirectMsgType}
-          setSelectedChannel={setSelectedChannel}
+          onConfirm={(count) => {
+            // 이미지 있으면 3채널 상태 MMS로 동기화 (기존 동작 유지)
+            if (count > 0) {
+              setTargetMsgType('MMS');
+              setDirectMsgType('MMS');
+              setSelectedChannel('MMS');
+            }
+          }}
         />
         
         <RecentCampaignModal show={showRecentCampaigns} onClose={() => setShowRecentCampaigns(false)} recentCampaigns={recentCampaigns} />

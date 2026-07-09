@@ -5,6 +5,7 @@
 // 다크 slate + 단일 액센트, native dialog 0(useToast + CreditConfirmModal), 생성 중 로딩 오버레이 + 닫기 차단(D185).
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { goBackOr } from '../lib/scroll-restoration';
 import { ArrowLeft, CalendarDays, CalendarRange, Sparkles, Loader2, Check, CheckCircle2, RefreshCcw } from 'lucide-react';
 import { useToast } from '../components/ToastProvider';
 import CreditConfirmModal from '../components/credit/CreditConfirmModal';
@@ -207,7 +208,7 @@ export default function MarketingCalendarPage() {
     <div className="min-h-screen bg-slate-950 text-white">
       <div className="bg-slate-950/80 backdrop-blur-sm border-b border-white/10 sticky top-0 z-30">
         <div className="max-w-6xl mx-auto px-4 md:px-6 py-3 md:py-4 flex items-center gap-3 flex-wrap">
-          <button onClick={() => navigate('/ai-operator')} className="p-2 rounded-lg hover:bg-white/10 transition-colors" aria-label="뒤로">
+          <button onClick={() => goBackOr(navigate, '/ai-operator')} className="p-2 rounded-lg hover:bg-white/10 transition-colors" aria-label="뒤로">
             <ArrowLeft className="w-5 h-5" />
           </button>
           <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-orange-400 to-rose-500 flex items-center justify-center flex-shrink-0 shadow-lg shadow-rose-500/20">

@@ -105,11 +105,6 @@ export default function DmRightPanel() {
                     </select>
                   </LabelRow>
                 )}
-                {TREATMENT_OPTIONS[selected.type] && selected.treatment && selected.treatment !== 'classic' && (
-                  <div style={{ fontSize: 10, color: 'var(--dm-neutral-500)', marginTop: -4, marginBottom: 8, lineHeight: 1.4 }}>
-                    선택한 구도는 발행물에 적용됩니다.
-                  </div>
-                )}
                 <LabelRow label="정렬">
                   <div style={{ display: 'flex', gap: 4 }}>
                     {([['left', '좌'], ['center', '중'], ['right', '우']] as const).map(([a, lbl]) => (

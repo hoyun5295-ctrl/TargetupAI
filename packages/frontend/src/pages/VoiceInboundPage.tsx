@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { goBackOr } from '../lib/scroll-restoration';
 import { AlertCircle, ArrowLeft, Loader2, Mic, MicOff, Phone, RefreshCw } from 'lucide-react';
 import { useToast } from '../components/ToastProvider';
 import ConfirmModal, { type ConfirmState } from '../components/ConfirmModal';
@@ -94,7 +95,7 @@ export default function VoiceInboundPage() {
       <ConfirmModal state={confirm} onClose={() => setConfirm(null)} />
       <div className="bg-white border-b">
         <div className="max-w-6xl mx-auto px-6 py-4 flex items-center gap-3">
-          <button onClick={() => navigate('/ai-operator')} className="text-gray-500 hover:text-gray-700 p-1">
+          <button onClick={() => goBackOr(navigate, '/ai-operator')} className="text-gray-500 hover:text-gray-700 p-1">
             <ArrowLeft className="w-5 h-5" />
           </button>
           <Phone className="w-5 h-5 text-violet-600" />

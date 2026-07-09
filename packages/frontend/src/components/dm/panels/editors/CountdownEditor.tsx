@@ -1,5 +1,5 @@
 import type { CountdownProps } from '../../../../utils/dm-section-defaults';
-import { Field, TextInput, Toggle, DateTimePicker } from '../FormControls';
+import { Field, TextInput, Toggle, DateTimePicker, ColorOverride } from '../FormControls';
 import type { EditorProps } from '../SectionPropsEditor';
 
 export default function CountdownEditor({ props, onUpdate }: EditorProps<CountdownProps>) {
@@ -11,6 +11,14 @@ export default function CountdownEditor({ props, onUpdate }: EditorProps<Countdo
 
       <Field label="상단 문구">
         <TextInput value={props.urgency_text} onChange={(v) => onUpdate({ urgency_text: v })} placeholder="마감까지" />
+      </Field>
+
+      <Field label="상단 문구 글씨색" hint="미지정 = 기본 강조색">
+        <ColorOverride value={props.urgency_color} onChange={(v) => onUpdate({ urgency_color: v })} />
+      </Field>
+
+      <Field label="배경색" hint="미지정 = 기본 다크">
+        <ColorOverride value={props.background_color} onChange={(v) => onUpdate({ background_color: v })} />
       </Field>
 
       <Field label="표시 단위">

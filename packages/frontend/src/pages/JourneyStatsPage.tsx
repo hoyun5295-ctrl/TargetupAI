@@ -12,6 +12,7 @@
 
 import { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
+import { goBackOr } from '../lib/scroll-restoration';
 import {
   BarChart, Bar, LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend, CartesianGrid,
 } from 'recharts';
@@ -139,7 +140,7 @@ export default function JourneyStatsPage() {
       <div className="max-w-7xl mx-auto p-4 md:p-6">
         {/* 헤더 */}
         <div className="flex items-center gap-3 mb-6">
-          <button onClick={() => navigate(`/ai-journeys/${id}`)} className="p-2 hover:bg-white/5 rounded-lg">
+          <button onClick={() => goBackOr(navigate, `/ai-journeys/${id}`)} className="p-2 hover:bg-white/5 rounded-lg">
             <ArrowLeft className="w-5 h-5" />
           </button>
           <div className="flex-1">

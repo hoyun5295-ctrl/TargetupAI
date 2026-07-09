@@ -7,6 +7,7 @@
  */
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { goBackOr } from '../lib/scroll-restoration';
 import { ArrowLeft, Sparkles, Wand2 } from 'lucide-react';
 import EventCampaignModal from '../components/EventCampaignModal';
 import EventCampaignResumeBar from '../components/EventCampaignResumeBar';
@@ -25,7 +26,7 @@ export default function QuickCampaignPage() {
       <div className="sticky top-0 z-30 bg-slate-950/80 backdrop-blur-sm border-b border-white/10">
         <div className="max-w-3xl mx-auto px-4 py-4 flex items-center gap-3">
           <button
-            onClick={() => navigate('/ai-operator')}
+            onClick={() => goBackOr(navigate, '/ai-operator')}
             className="text-white/50 hover:text-white p-1.5 rounded-lg hover:bg-white/10"
             aria-label="AI Operator로 돌아가기"
           >

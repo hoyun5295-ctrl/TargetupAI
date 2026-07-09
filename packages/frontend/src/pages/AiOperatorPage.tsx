@@ -10,6 +10,7 @@ import {
   Clock,
   Copy,
   DollarSign,
+  Image as ImageIcon,
   LineChart,
   Loader2,
   MessageSquare,
@@ -41,6 +42,11 @@ import { SUB_MODULE_CARDS } from '../constants/ai-operator-modules';
 import ConfirmModal, { type ConfirmState } from '../components/ConfirmModal';
 // 고객 데이터 없으면 AI 문안 생성 전 안내 (공용 게이트)
 import { useCustomerDataGate, CustomerDataRequiredBanner, CustomerDataRequiredModal } from '../components/CustomerDataGate';
+// 2026-07-09: MMS 이미지 첨부 — 공용 모달 + 업로드 훅 + 경로/검증 컨트롤타워
+import MmsUploadModal from '../components/MmsUploadModal';
+import { useMmsUpload } from '../hooks/useMmsUpload';
+import { toMmsImagePaths } from '../utils/mmsImage';
+import { validateMmsBeforeSend } from '../utils/formatDate';
 
 // ============================================================
 // 타입 정의
@@ -353,6 +359,37 @@ export default function AiOperatorPage() {
   const [decorating, setDecorating] = useState(false);
   // ★ 2026-06-29: AI 제안 요약 모달 (장황한 분석 섹션 통합 — 탭 분리)
   const [showSummary, setShowSummary] = useState(false);
+  // 2026-07-09: 추천 채널 유형 변경(SMS/LMS/MMS) — null이면 AI 추천 채널 사용
+  const [channelOverride, setChannelOverride] = useState<string | null>(null);
+  // 2026-07-09: MMS 이미지 첨부 모달 + 공용 업로드 훅 + 모달 내부 에러
+  const [showMmsModal, setShowMmsModal] = useState(false);
+  const [mmsError, setMmsError] = useState<string | null>(null);
+  const {
+    mmsUploadedImages,
+    setMmsUploadedImages,
+    mmsUploading,
+    handleMmsSlotUpload,
+    handleMmsMultiUpload,
+    handleMmsImageRemove,
+  } = useMmsUpload((msg) => setMmsError(msg));
+  // 채널 변경 시 예상 비용 재계산용 회사 실단가 (SMS/LMS/MMS) — 임의 상수 미사용
+  const [pricing, setPricing] = useState<{ sms: number; lms: number; mms: number } | null>(null);
+
+  // 실효 발송 채널 = 사용자 변경값 우선, 없으면 AI 추천
+  const effectiveChannel = (channelOverride || proposal?.channel?.recommended || 'SMS').toUpperCase();
+  // 실효 단가/예상비용 — 채널 변경 시 회사 실단가로 재계산 (미변경 시 백엔드 계산값=진실)
+  const effectiveUnitCost = (() => {
+    if (!proposal) return 0;
+    const baseUnit = proposal.cost?.unitCost || 0; // zero-target 등 cost 부재 방어
+    if (!channelOverride) return baseUnit;
+    if (pricing) {
+      const key = effectiveChannel === 'MMS' ? 'mms' : effectiveChannel === 'LMS' ? 'lms' : 'sms';
+      const v = pricing[key];
+      if (v > 0) return v;
+    }
+    return baseUnit; // 단가 미확보 시 fallback — 실제 차감은 발송 시 백엔드 확정
+  })();
+  const effectiveEstimatedCost = proposal ? Math.round((proposal.target?.count || 0) * effectiveUnitCost) : 0;
 
   // textarea 자동 높이 조절
   useEffect(() => {
@@ -391,6 +428,24 @@ export default function AiOperatorPage() {
       .catch(() => {});
   }, []);
 
+  // 2026-07-09: 회사 실단가 로드 — 채널 변경 시 예상 비용 재계산용 (임의 상수 미사용)
+  useEffect(() => {
+    const token = localStorage.getItem('token');
+    if (!token) return;
+    fetch('/api/companies/settings', { headers: { Authorization: `Bearer ${token}` } })
+      .then((r) => r.json())
+      .then((d) => {
+        if (!d) return;
+        const sms = Number(d.cost_per_sms);
+        const lms = Number(d.cost_per_lms);
+        const mms = Number(d.cost_per_mms);
+        if ([sms, lms, mms].some((v) => Number.isFinite(v) && v > 0)) {
+          setPricing({ sms: sms || 0, lms: lms || 0, mms: mms || 0 });
+        }
+      })
+      .catch(() => {});
+  }, []);
+
   // ★ 2026-06-30 (A7 정정): 변형 클릭마다 그 변형이 실제 쓴 %변수%만 자동 체크 (변형마다 다른 컬럼 정확 반영)
   useEffect(() => {
     if (!proposal) return;
@@ -421,6 +476,10 @@ export default function AiOperatorPage() {
     setLoading(true);
     setProgressStep(0);
     setProposal(null);
+    // 새 제안 = 새 추천 채널 → 유형 변경/첨부 이미지 초기화
+    setChannelOverride(null);
+    setMmsError(null);
+    setMmsUploadedImages([]);
 
     try {
       const token = localStorage.getItem('token');
@@ -494,6 +553,11 @@ export default function AiOperatorPage() {
     setSampleCustomerFields(null);
     setShowMergedPreview(false);
     setSelectedVars(new Set());
+    // 유형 변경/MMS 첨부 초기화
+    setChannelOverride(null);
+    setShowMmsModal(false);
+    setMmsError(null);
+    setMmsUploadedImages([]);
     textareaRef.current?.focus();
   };
 
@@ -504,7 +568,7 @@ export default function AiOperatorPage() {
     const variants = proposal.messages || [];
     if (variants.length === 0) return;
     const bodies = variants.map((m, i) => refinedOverrides[i] || m.body || '');
-    const ch = (proposal.channel?.recommended || '').toLowerCase();
+    const ch = effectiveChannel.toLowerCase();
     const channel = ch.includes('mms') ? 'mms' : ch.includes('sms') ? 'sms' : 'lms';
     setDecorating(true);
     setError(null);
@@ -600,11 +664,26 @@ export default function AiOperatorPage() {
       const body = refinedOverrides[idx] || variant.body || '';
       if (!body || body.length < 5) throw new Error('메시지 본문이 비어있습니다. 다시 생성해주세요.');
 
-      const channel = (proposal.channel.recommended || 'SMS').toUpperCase();
+      const channel = effectiveChannel; // 사용자 유형 변경(SMS/LMS/MMS) 반영
       const isLmsOrMms = channel === 'LMS' || channel === 'MMS';
       // LMS/MMS subject 필수 — AI가 안 줬으면 suggestedName 또는 회사명으로 fallback (17자 이내)
       const rawSubject = variant.subject || proposal.target.suggestedName || `${companyName || ''} AI 캠페인`.trim() || 'AI Operator';
       const subject = isLmsOrMms ? rawSubject.slice(0, 17) : '';
+
+      // 2026-07-09: MMS 이미지 필수 사전 차단 — 백엔드 도달 전 친절 안내 + 첨부 모달 오픈
+      const mmsImagePaths = channel === 'MMS' ? toMmsImagePaths(mmsUploadedImages) : [];
+      const mmsErr = validateMmsBeforeSend(channel, mmsImagePaths.length);
+      if (mmsErr) {
+        setMmsError(mmsErr);
+        setShowMmsModal(true);
+        throw new Error(mmsErr);
+      }
+      // SMS 90byte 초과 차단 — 광고 문구 잘림/컴플라이언스 손실 방지 (LMS 권장)
+      if (channel === 'SMS') {
+        let sb = 0;
+        for (let i = 0; i < body.length; i++) sb += body.charCodeAt(i) > 0x7F ? 2 : 1;
+        if (sb > 90) throw new Error('본문이 SMS(90byte)를 초과합니다. 채널을 LMS로 변경 후 발송해주세요.');
+      }
 
       // ★ D170+ (Harold 명시): 발송 시점 안전장치 구현 — AI 추천/즉시/사용자 직접 분기
       let scheduled = false;
@@ -659,6 +738,7 @@ export default function AiOperatorPage() {
         sendChannel: 'sms',
         dedupEnabled: true,
         unsubFilterEnabled: true,
+        mmsImagePaths, // MMS 선택 시 첨부 이미지 경로 (그 외 [])
       };
       const suggestedName = proposal.target.suggestedName || 'AI Operator 캠페인';
 
@@ -1011,7 +1091,7 @@ export default function AiOperatorPage() {
               const activeVariant = variants[safeIdx];
               const isRecommended = (proposal.recommendation || '').includes(activeVariant?.variantId || '__none__')
                 || (proposal.recommendation || '').includes(activeVariant?.variantName || '__none__');
-              const activeChannel = (proposal.channel.recommended || 'SMS').toUpperCase();
+              const activeChannel = effectiveChannel; // 사용자 유형 변경 반영
               const overrideText = refinedOverrides[safeIdx];
               const baseBody = activeVariant?.body || '';
               const rawActiveBody = overrideText || baseBody;
@@ -1222,15 +1302,75 @@ export default function AiOperatorPage() {
                     actionHint="추출 대상 리스트 보기"
                   />
 
-                  {/* ============= 추천 채널 ============= */}
+                  {/* ============= 추천 채널 — 2026-07-09: 유형 변경(SMS/LMS/MMS) + MMS 이미지 첨부 ============= */}
                   <ResultCard
                     index={2}
                     accent="emerald"
                     icon={Send}
                     label="추천 채널"
-                    headline={proposal.channel.recommended}
+                    headline={effectiveChannel}
                     subtitle={proposal.channel.isAd ? '광고 메시지 (Ad)' : '정보 메시지 (Info)'}
-                    description={proposal.channel.reason}
+                    description={channelOverride
+                      ? `AI 추천: ${(proposal.channel.recommended || '').toUpperCase()} · 발송 유형을 ${effectiveChannel}로 변경했습니다.`
+                      : proposal.channel.reason}
+                    truncateHeadline={false}
+                    extra={
+                      <div className="mt-3 space-y-2.5">
+                        {/* 유형 변경 세그먼트 */}
+                        <div className="flex items-center gap-1 p-1 rounded-xl bg-white/[0.04] border border-white/10">
+                          {(['SMS', 'LMS', 'MMS'] as const).map((ch) => {
+                            const active = effectiveChannel === ch;
+                            const isAiRec = (proposal.channel.recommended || '').toUpperCase() === ch;
+                            return (
+                              <button
+                                key={ch}
+                                type="button"
+                                onClick={() => {
+                                  // AI 추천과 같은 채널이면 override 해제(null), 아니면 해당 채널로 변경
+                                  setChannelOverride(isAiRec ? null : ch);
+                                  setSendError(null);
+                                  if (ch === 'MMS') { setMmsError(null); setShowMmsModal(true); }
+                                }}
+                                className={`relative flex-1 px-2 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                                  active
+                                    ? 'bg-gradient-to-r from-emerald-500/30 to-teal-500/30 text-white border border-emerald-400/40 shadow'
+                                    : 'text-white/55 hover:text-white/85 hover:bg-white/5 border border-transparent'
+                                }`}
+                              >
+                                {ch}
+                                {isAiRec && (
+                                  <span className="absolute -top-1.5 -right-1 text-[8px] leading-none px-1 py-0.5 rounded-full bg-violet-500 text-white font-bold tracking-tight">AI</span>
+                                )}
+                              </button>
+                            );
+                          })}
+                        </div>
+
+                        {/* MMS 이미지 첨부 상태/버튼 */}
+                        {effectiveChannel === 'MMS' && (
+                          <button
+                            type="button"
+                            onClick={() => { setMmsError(null); setShowMmsModal(true); }}
+                            className={`w-full flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium border transition-all ${
+                              mmsUploadedImages.length > 0
+                                ? 'bg-emerald-500/10 text-emerald-200 border-emerald-400/30 hover:bg-emerald-500/15'
+                                : 'bg-amber-500/10 text-amber-200 border-amber-400/40 hover:bg-amber-500/15'
+                            }`}
+                          >
+                            <ImageIcon className="w-3.5 h-3.5" />
+                            {mmsUploadedImages.length > 0 ? `이미지 ${mmsUploadedImages.length}장 첨부됨 · 변경` : '이미지 첨부 필요 · 클릭'}
+                          </button>
+                        )}
+
+                        {/* SMS 바이트 경고 */}
+                        {effectiveChannel === 'SMS' && activeBytes > 90 && (
+                          <p className="flex items-center gap-1 text-[11px] text-amber-300/90">
+                            <AlertTriangle className="w-3 h-3 shrink-0" />
+                            SMS 90byte 초과분은 잘립니다 · LMS 권장
+                          </p>
+                        )}
+                      </div>
+                    }
                   />
 
                   {/* ============= 발송 시점 — D170+ Harold 명시: 사용자 변경 가능 + 안전장치 (우측 wrapper 안 전체 폭) ============= */}
@@ -1323,14 +1463,14 @@ export default function AiOperatorPage() {
                     accent="violet"
                     icon={DollarSign}
                     label="예상 비용"
-                    headline={`${proposal.cost.estimated.toLocaleString()}원`}
+                    headline={`${effectiveEstimatedCost.toLocaleString()}원`}
                     subtitle={`${activeChannel} ${proposal.target.count.toLocaleString()}건`}
                     truncateHeadline={false}
                     extra={
                       <div className="mt-2 space-y-1.5">
                         <div className="flex items-center justify-between text-xs text-white/60 px-2 py-1.5 rounded-md bg-white/5 border border-white/10">
                           <span>건당 단가</span>
-                          <span className="font-mono font-semibold text-white">{proposal.cost.unitCost.toLocaleString()}원</span>
+                          <span className="font-mono font-semibold text-white">{effectiveUnitCost.toLocaleString()}원</span>
                         </div>
                         <div className="flex items-center justify-between text-xs text-white/60 px-2 py-1.5 rounded-md bg-white/5 border border-white/10">
                           <span>발송 건수</span>
@@ -1338,8 +1478,11 @@ export default function AiOperatorPage() {
                         </div>
                         <div className="flex items-center justify-between text-xs px-2 py-1.5 rounded-md bg-gradient-to-r from-violet-500/15 to-purple-500/15 border border-violet-400/30">
                           <span className="font-semibold text-violet-200">총 예상 비용</span>
-                          <span className="font-mono font-bold text-white">{proposal.cost.estimated.toLocaleString()}원</span>
+                          <span className="font-mono font-bold text-white">{effectiveEstimatedCost.toLocaleString()}원</span>
                         </div>
+                        {channelOverride && (
+                          <p className="text-[10px] text-white/40 italic pt-0.5">채널 변경 반영 · 실제 차감은 발송 시 {effectiveChannel} 단가로 확정</p>
+                        )}
                       </div>
                     }
                   />
@@ -1441,16 +1584,33 @@ export default function AiOperatorPage() {
 
             {/* 2026-07-09: 추천 타겟 카드 클릭 → 추출 대상 리스트 (실조회 · 15명/페이징) */}
             {proposal && (
-              <TargetRecipientsModal
-                show={showTargetList}
-                onClose={() => setShowTargetList(false)}
-                title="추천 타겟 상세"
-                objective={objective}
-                criteria={proposal.target.criteria}
-                totalCount={proposal.target.totalCount}
-                fetchPage={targetFetchPage}
-                sourceLabel="AI Operator preview-recipients (실제 발송 대상)"
-              />
+              <>
+                <TargetRecipientsModal
+                  show={showTargetList}
+                  onClose={() => setShowTargetList(false)}
+                  title="추천 타겟 상세"
+                  objective={objective}
+                  criteria={proposal.target.criteria}
+                  totalCount={proposal.target.totalCount}
+                  fetchPage={targetFetchPage}
+                  sourceLabel="AI Operator preview-recipients (실제 발송 대상)"
+                />
+                {/* 2026-07-09: MMS 이미지 첨부 모달 (추천 채널 MMS 선택 시) */}
+                <MmsUploadModal
+                  show={showMmsModal}
+                  onClose={() => setShowMmsModal(false)}
+                  mmsUploadedImages={mmsUploadedImages}
+                  mmsUploading={mmsUploading}
+                  handleMmsSlotUpload={handleMmsSlotUpload}
+                  handleMmsMultiUpload={handleMmsMultiUpload}
+                  handleMmsImageRemove={handleMmsImageRemove}
+                  errorMessage={mmsError}
+                  onConfirm={(count) => {
+                    // 이미지 첨부 확정 시 발송 유형을 MMS로 고정 + 발송 에러 해제
+                    if (count > 0) { setChannelOverride('MMS'); setSendError(null); }
+                  }}
+                />
+              </>
             )}
           </div>
         )}

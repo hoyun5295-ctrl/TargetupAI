@@ -105,6 +105,9 @@ export type CouponProps = {
 export type CountdownProps = {
   end_datetime: string;
   urgency_text?: string;
+  // 2026-07-09: 카운트다운 배경색·상단문구 글씨색 (미지정 = 기본 다크/accent)
+  background_color?: string;
+  urgency_color?: string;
   show_days: boolean;
   show_hours: boolean;
   show_minutes: boolean;

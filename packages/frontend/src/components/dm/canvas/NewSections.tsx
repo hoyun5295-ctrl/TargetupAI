@@ -410,10 +410,10 @@ export function InstantCouponSection({ props }: { props: InstantCouponProps }) {
         )}
         <button style={DM_CTA_STYLE}>쿠폰 받기</button>
         {props.conditions && (
-          <div style={{ fontSize: 'var(--dm-fs-tiny)', color: 'var(--dm-neutral-500)', marginTop: 'var(--dm-sp-2)' }}>{props.conditions}</div>
+          <div style={{ fontSize: 'var(--dm-fs-tiny)', color: 'var(--dm-neutral-500)', marginTop: 'var(--dm-sp-2)', whiteSpace: 'pre-wrap' }}>{props.conditions}</div>
         )}
         {props.usage_instructions && (
-          <div style={{ fontSize: 'var(--dm-fs-tiny)', color: 'var(--dm-neutral-500)', marginTop: 4 }}>{props.usage_instructions}</div>
+          <div style={{ fontSize: 'var(--dm-fs-tiny)', color: 'var(--dm-neutral-500)', marginTop: 4, whiteSpace: 'pre-wrap' }}>{props.usage_instructions}</div>
         )}
       </div>
     </div>
