@@ -18,6 +18,7 @@ import { calculateSmsBytes, buildAdMessageFront, buildAdSubjectFront, replaceMes
 import MmsImagePreview from './shared/MmsImagePreview';
 import { insertAtCursorPos } from '../utils/textInsert';
 import AiMessageSuggestModal from './AiMessageSuggestModal';
+import TargetRecipientsModal, { type TargetPageLoader } from './TargetRecipientsModal';
 import SpamFilterTestModal from './SpamFilterTestModal';
 // ★ D123 P11: 미등록 회신번호 확인 모달 (한줄로 발송과 동일 패턴)
 import CallbackConfirmModal, { CallbackConfirmData } from './CallbackConfirmModal';
@@ -145,6 +146,19 @@ export default function AutoSendFormModal({ campaign, aiPremiumEnabled, onClose,
   // ★ D86: 타겟 설정 (Step 3) — AI 기반 자동 target_filter 생성
   const [targetFilter, setTargetFilter] = useState<Record<string, any>>(campaign?.target_filter || {});
   const [targetCount, setTargetCount] = useState(0);
+  // 2026-07-09: 발송 대상 리스트 보기 (targetFilter compat 기준 서버 페이징)
+  const [showTargetList, setShowTargetList] = useState(false);
+  const targetListFetchPage: TargetPageLoader = async (pageNo, size) => {
+    const token = localStorage.getItem('token');
+    const res = await fetch('/api/ai/target-recipients', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ targetFilters: targetFilter, page: pageNo, pageSize: size }),
+    });
+    const data = await res.json();
+    if (!res.ok || data.success === false) throw new Error(data?.error || '대상 리스트 조회에 실패했습니다.');
+    return { recipients: data.recipients || [], total: data.total ?? 0 };
+  };
   const [targetDescription, setTargetDescription] = useState(campaign?.description || '');
   const [targetParsing, setTargetParsing] = useState(false);
   const [targetConditionSummary, setTargetConditionSummary] = useState('');
@@ -813,6 +827,16 @@ export default function AutoSendFormModal({ campaign, aiPremiumEnabled, onClose,
 
                     {targetConditionSummary && (
                       <p className="text-sm text-gray-700">{targetConditionSummary}</p>
+                    )}
+
+                    {targetCount > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => setShowTargetList(true)}
+                        className="text-xs font-semibold text-violet-700 bg-violet-100 hover:bg-violet-200 px-3 py-1.5 rounded-lg transition-colors"
+                      >
+                        추출 대상 리스트 보기
+                      </button>
                     )}
 
                     <p className="text-xs text-gray-500">
@@ -1566,6 +1590,17 @@ export default function AutoSendFormModal({ campaign, aiPremiumEnabled, onClose,
           isSending={saving}
         />
       )}
+
+      {/* 2026-07-09: 발송 대상 리스트 (targetFilter compat 기준 · 15명/페이징) */}
+      <TargetRecipientsModal
+        show={showTargetList}
+        onClose={() => setShowTargetList(false)}
+        title="발송 대상"
+        criteria={targetConditionSummary || targetDescription || undefined}
+        totalCount={targetCount}
+        fetchPage={targetListFetchPage}
+        sourceLabel="자동발송 추출 대상 (customer-filter)"
+      />
     </>
   );
 }

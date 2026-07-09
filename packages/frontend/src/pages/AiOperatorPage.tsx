@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import {
   AlertTriangle,
   ArrowLeft,
+  ArrowRight,
   Brain,
   Check,
   CheckCircle2,
@@ -24,6 +25,7 @@ import {
 } from 'lucide-react';
 import AiRefineModal from '../components/AiRefineModal';
 import { DateTimeField, isoToLocalInput, localInputToIso } from '../components/DateTimeField';
+import TargetRecipientsModal, { type TargetPageLoader, type TargetRecipient } from '../components/TargetRecipientsModal';
 import ImageToCopyButton from '../components/ImageToCopyButton';
 import AiOperatorWalkthroughModal from '../components/AiOperatorWalkthroughModal';
 import CreditHistoryModal from '../components/credit/CreditHistoryModal';
@@ -213,13 +215,19 @@ interface ResultCardProps {
   extra?: React.ReactNode;       // ★ D165: 카드 본문 하단 풍부 인터랙션 슬롯 (3안 토글 / 차트 / breakdown 등)
   className?: string;            // ★ D165: 그리드 col-span 등 외부 제어
   truncateHeadline?: boolean;    // ★ D165: 메시지 카드처럼 긴 텍스트 truncate 끄기
+  onClick?: () => void;          // 2026-07-09: 있으면 카드 클릭 가능 (추천 타겟 → 추출 리스트 모달)
+  actionHint?: string;           // onClick 시 하단 어포던스 문구
 }
 
-function ResultCard({ accent, icon: Icon, label, headline, subtitle, description, index, extra, className, truncateHeadline = true }: ResultCardProps) {
+function ResultCard({ accent, icon: Icon, label, headline, subtitle, description, index, extra, className, truncateHeadline = true, onClick, actionHint }: ResultCardProps) {
   const tokens = ACCENT_TOKENS[accent];
   return (
     <div
-      className={`group relative p-6 rounded-2xl bg-white/[0.04] backdrop-blur-xl border ${tokens.border} hover:bg-white/[0.07] hover:scale-[1.01] transition-all duration-300 shadow-lg ${tokens.glow} animate-in fade-in slide-in-from-bottom-3 fill-mode-both ${className || ''}`}
+      onClick={onClick}
+      role={onClick ? 'button' : undefined}
+      tabIndex={onClick ? 0 : undefined}
+      onKeyDown={onClick ? (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onClick(); } } : undefined}
+      className={`group relative p-6 rounded-2xl bg-white/[0.04] backdrop-blur-xl border ${tokens.border} hover:bg-white/[0.07] hover:scale-[1.01] transition-all duration-300 shadow-lg ${tokens.glow} animate-in fade-in slide-in-from-bottom-3 fill-mode-both ${onClick ? 'cursor-pointer' : ''} ${className || ''}`}
       style={{ animationDelay: `${index * 60}ms`, animationDuration: '500ms' }}
     >
       <div className="flex items-start gap-4 mb-4">
@@ -236,6 +244,11 @@ function ResultCard({ accent, icon: Icon, label, headline, subtitle, description
         <p className="text-sm text-white/65 leading-relaxed line-clamp-3 mb-3">{description}</p>
       )}
       {extra && <div className="mt-1">{extra}</div>}
+      {onClick && actionHint && (
+        <div className={`mt-2 flex items-center gap-1 text-[11px] font-semibold ${tokens.text} opacity-80 group-hover:opacity-100 transition-opacity`}>
+          {actionHint} <ArrowRight className="w-3 h-3" />
+        </div>
+      )}
     </div>
   );
 }
@@ -303,6 +316,30 @@ export default function AiOperatorPage() {
   type SendMode = 'aiRecommended' | 'immediate' | 'custom';
   const [sendMode, setSendMode] = useState<SendMode>('aiRecommended');
   const [customScheduledAt, setCustomScheduledAt] = useState<string>(''); // YYYY-MM-DDTHH:mm 형식
+  // 2026-07-09: "직접 시점 선택" 클릭 시 모달 피커 바로 오픈 (DateTimeField 제어형 오픈)
+  const [customPickerOpen, setCustomPickerOpen] = useState(false);
+  // 2026-07-09: 추천 타겟 카드 클릭 → 추출 대상 리스트 모달 (preview-recipients 실조회 · 15명/페이징)
+  const [showTargetList, setShowTargetList] = useState(false);
+  const targetAllRef = useRef<Promise<TargetRecipient[]> | null>(null);
+  const openTargetList = () => { targetAllRef.current = null; setShowTargetList(true); };
+  const targetFetchPage: TargetPageLoader = async (pageNo, size) => {
+    if (!proposal) return { recipients: [], total: 0 };
+    if (!targetAllRef.current) {
+      const token = localStorage.getItem('token');
+      targetAllRef.current = fetch('/api/ai/operator/preview-recipients', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ filters: proposal.target.filters }),
+      })
+        .then((r) => r.json())
+        .then((d) => {
+          if (!d || d.success === false) throw new Error(d?.error || '추출 대상 조회에 실패했습니다.');
+          return (d.recipients || []) as TargetRecipient[];
+        });
+    }
+    const all = await targetAllRef.current;
+    return { recipients: all.slice((pageNo - 1) * size, pageNo * size), total: all.length };
+  };
   // ★ D210+ Phase 2-fix4 (Harold 명시 2026-05-23): 원본/적용 토글 + 상위 고객 샘플 데이터
   //   - sampleCustomer = displayName 키 매트릭스 ({ "고객명": "...", "등급": "...", ... })
   //   - showMergedPreview = false (변수 강조 원본 표시) / true (상위 고객 데이터 치환 적용 표시)
@@ -1181,6 +1218,8 @@ export default function AiOperatorPage() {
                     headline={`${proposal.target.count.toLocaleString()}명`}
                     subtitle={`전체 ${proposal.target.totalCount.toLocaleString()}명 중 ${proposal.target.totalCount > 0 ? ((proposal.target.count / proposal.target.totalCount) * 100).toFixed(1) : 0}%`}
                     description={proposal.target.criteria}
+                    onClick={openTargetList}
+                    actionHint="추출 대상 리스트 보기"
                   />
 
                   {/* ============= 추천 채널 ============= */}
@@ -1247,8 +1286,11 @@ export default function AiOperatorPage() {
                           </div>
                         </label>
 
-                        {/* 사용자 직접 선택 — radio + datetime input */}
-                        <label className="flex items-start gap-2.5 p-2.5 rounded-lg bg-white/[0.04] border border-white/10 hover:bg-white/[0.07] cursor-pointer transition-all">
+                        {/* 사용자 직접 선택 — radio + 모달 피커 (클릭 시 모달 바로 오픈) */}
+                        <div
+                          className="flex items-start gap-2.5 p-2.5 rounded-lg bg-white/[0.04] border border-white/10 hover:bg-white/[0.07] cursor-pointer transition-all"
+                          onClick={() => { setSendMode('custom'); setCustomPickerOpen(true); }}
+                        >
                           <input
                             type="radio"
                             name="sendMode"
@@ -1264,12 +1306,13 @@ export default function AiOperatorPage() {
                                 setCustomScheduledAt(isoToLocalInput(iso));
                                 if (iso) setSendMode('custom');
                               }}
-                              disabled={sendMode !== 'custom'}
+                              open={customPickerOpen}
+                              onOpenChange={setCustomPickerOpen}
                               tone="dark"
                             />
                             <p className="text-[10px] text-white/40 mt-1">발송 허용 시간 · 08:00 ~ 21:00 KST</p>
                           </div>
-                        </label>
+                        </div>
                       </div>
                     }
                   />
@@ -1394,6 +1437,20 @@ export default function AiOperatorPage() {
             {/* ★ 2026-06-29: AI 종합 분석 + 추천 이유 = AI 제안 요약 모달(탭)로 이동 */}
             {showSummary && proposal && (
               <AiProposalSummaryModal proposal={proposal} onClose={() => setShowSummary(false)} />
+            )}
+
+            {/* 2026-07-09: 추천 타겟 카드 클릭 → 추출 대상 리스트 (실조회 · 15명/페이징) */}
+            {proposal && (
+              <TargetRecipientsModal
+                show={showTargetList}
+                onClose={() => setShowTargetList(false)}
+                title="추천 타겟 상세"
+                objective={objective}
+                criteria={proposal.target.criteria}
+                totalCount={proposal.target.totalCount}
+                fetchPage={targetFetchPage}
+                sourceLabel="AI Operator preview-recipients (실제 발송 대상)"
+              />
             )}
           </div>
         )}

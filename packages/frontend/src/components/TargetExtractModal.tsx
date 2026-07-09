@@ -12,6 +12,7 @@
 import { useState } from 'react';
 import { Sparkles, Users, Eye, RefreshCw, Check, AlertCircle, X, Bookmark } from 'lucide-react';
 import { useToast } from './ToastProvider';
+import TargetRecipientsModal, { type TargetPageLoader } from './TargetRecipientsModal';
 
 export type ExtractChannel = 'email' | 'dm' | 'inapp' | 'kakao';
 
@@ -73,6 +74,8 @@ export default function TargetExtractModal({ show, channel, onClose, onApply }: 
   // ★ 2026-07-02(3) 추출 실패를 토스트(3초)로만 보여줘 놓치던 문제 — 모달 안 지속 표시
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  // 2026-07-09: 추출 대상 전체 리스트 보기 (서버 페이징 · 공용 모달)
+  const [showList, setShowList] = useState(false);
 
   if (!show) return null;
 
@@ -80,6 +83,7 @@ export default function TargetExtractModal({ show, channel, onClose, onApply }: 
     setInput('');
     setResult(null);
     setError(null);
+    setShowList(false);
   };
 
   const close = () => {
@@ -156,7 +160,21 @@ export default function TargetExtractModal({ show, channel, onClose, onApply }: 
     reset();
   };
 
+  // 추출 대상 전체 리스트 서버 페이징 로더 (신규 /api/targets/recipients — 채널 발송 자격 기준)
+  const listFetchPage: TargetPageLoader = async (pageNo, size) => {
+    const token = localStorage.getItem('token');
+    const res = await fetch('/api/targets/recipients', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ channel, filter: result?.filter || {}, page: pageNo, pageSize: size }),
+    });
+    const data = await res.json();
+    if (!res.ok || !data.success) throw new Error(data?.error || '리스트 조회에 실패했습니다.');
+    return { recipients: data.recipients || [], total: data.total ?? 0 };
+  };
+
   return (
+    <>
     <div className="fixed inset-0 z-[1200] flex items-center justify-center p-3 bg-black/60 backdrop-blur-sm">
       <div className="w-full max-w-[560px] max-h-[92vh] overflow-hidden flex flex-col bg-slate-900 border border-white/10 rounded-2xl shadow-2xl">
         {/* 헤더 */}
@@ -265,6 +283,15 @@ export default function TargetExtractModal({ show, channel, onClose, onApply }: 
                   <div className="flex items-center gap-1.5 mb-2">
                     <Eye className="w-3.5 h-3.5 text-white/40" />
                     <p className="text-[11px] text-white/60 font-medium">샘플 {result.samples.length}건</p>
+                    {result.channelEligibleCount > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => setShowList(true)}
+                        className="ml-auto flex items-center gap-1 text-[11px] font-semibold text-violet-200 hover:text-white px-2 py-1 rounded-lg bg-violet-500/15 hover:bg-violet-500/25 border border-violet-400/30 transition-colors"
+                      >
+                        <Users className="w-3 h-3" /> 전체 {result.channelEligibleCount.toLocaleString()}명 리스트 보기
+                      </button>
+                    )}
                   </div>
                   <div className="space-y-1">
                     {result.samples.map((s) => (
@@ -312,5 +339,20 @@ export default function TargetExtractModal({ show, channel, onClose, onApply }: 
         </div>
       </div>
     </div>
+
+    {result && (
+      <TargetRecipientsModal
+        show={showList}
+        onClose={() => setShowList(false)}
+        title={`${CHANNEL_LABEL[channel]} 추출 타겟`}
+        objective={input.trim() || undefined}
+        criteria={result.explanation}
+        channelLabel={CHANNEL_LABEL[channel]}
+        totalCount={result.matchCount}
+        fetchPage={listFetchPage}
+        sourceLabel="targets/recipients (채널 발송 자격 기준 실조회)"
+      />
+    )}
+    </>
   );
 }

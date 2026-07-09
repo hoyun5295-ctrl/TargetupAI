@@ -734,6 +734,90 @@ router.post('/recount-target', authenticate, async (req: Request, res: Response)
     res.status(500).json({ error: '타겟 재조회 실패' });
   }
 });
+
+/**
+ * POST /api/ai/target-recipients — targetFilters(compat) 기준 추출 대상 리스트 페이징 조회 (2026-07-09)
+ *   { targetFilters, page, pageSize } → { success, recipients, total, page, pageSize }
+ *   - recount-target과 동일한 WHERE(company·is_active·sms_opt_in·store-scope·user_id 수신거부 제외) + buildFilterWhereClauseCompat.
+ *   - 컬럼은 targets/extract 샘플 SQL과 동일(운영 중 검증됨). SELECT 전용.
+ *   - 맞춤한줄(AiCustomSendFlow) 등 compat targetFilters 발송툴이 "추출 대상 리스트 보기" 공용 모달에서 소비.
+ */
+router.post('/target-recipients', authenticate, async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    const userId = req.user?.userId;
+    const userType = req.user?.userType;
+    if (!companyId) {
+      return res.status(403).json({ success: false, error: '회사 권한이 필요합니다' });
+    }
+
+    const { targetFilters, page, pageSize } = req.body as {
+      targetFilters?: Record<string, unknown>;
+      page?: number;
+      pageSize?: number;
+    };
+    const safeFilters = targetFilters && typeof targetFilters === 'object' ? targetFilters : {};
+    const p = Math.max(1, Math.floor(Number(page) || 1));
+    const size = Math.min(100, Math.max(1, Math.floor(Number(pageSize) || 15)));
+    const offset = (p - 1) * size;
+
+    // ★ B16-01 브랜드 격리 (recount-target 미러)
+    let storeFilter = '';
+    const baseParams: any[] = [companyId];
+    if (userType === 'company_user' && userId) {
+      const scope = await getStoreScope(companyId, userId);
+      if (scope.type === 'filtered') {
+        storeFilter = ' AND id IN (SELECT customer_id FROM customer_stores WHERE company_id = $1 AND store_code = ANY($2::text[]))';
+        baseParams.push(scope.storeCodes);
+      } else if (scope.type === 'blocked') {
+        return res.json({ success: true, recipients: [], total: 0, page: p, pageSize: size });
+      }
+    }
+
+    const { sql: filterSql, params: filterParams } = buildFilterWhereClauseCompat(safeFilters, baseParams.length + 1);
+    const unsubIdx = baseParams.length + filterParams.length + 1; // user_id
+    const whereCommon = `c.company_id = $1 AND c.is_active = true AND c.sms_opt_in = true${storeFilter} ${filterSql}
+       AND NOT EXISTS (SELECT 1 FROM unsubscribes u WHERE u.user_id = $${unsubIdx} AND u.phone = c.phone)`;
+
+    const countResult = await query(
+      `SELECT COUNT(*)::int AS cnt FROM customers c WHERE ${whereCommon}`,
+      [...baseParams, ...filterParams, userId]
+    );
+    const listResult = await query(
+      `SELECT c.id, c.phone, c.name, c.gender, c.grade, c.region, c.last_purchase_date, c.total_purchase_amount
+         FROM customers c
+        WHERE ${whereCommon}
+        ORDER BY c.id ASC
+        LIMIT $${unsubIdx + 1} OFFSET $${unsubIdx + 2}`,
+      [...baseParams, ...filterParams, userId, size, offset]
+    );
+
+    const total = Number(countResult.rows[0]?.cnt ?? 0);
+    const recipients = listResult.rows.map((r: any) => ({
+      phone: r.phone,
+      name: r.name,
+      gender: r.gender,
+      grade: r.grade,
+      region: r.region,
+      last_purchase_date: r.last_purchase_date,
+      total_purchase_amount: r.total_purchase_amount != null ? Number(r.total_purchase_amount) : null,
+    }));
+
+    return res.json({ success: true, recipients, total, page: p, pageSize: size });
+  } catch (err: any) {
+    const msg = err?.message || '';
+    if (msg.includes('column') && msg.includes('does not exist')) {
+      return res.status(503).json({
+        success: false,
+        code: 'DB_MIGRATION_PENDING',
+        error: 'DB 마이그레이션 필요 — 운영자에게 customers 컬럼 확인을 요청해주세요.',
+      });
+    }
+    console.error('[ai/target-recipients] 오류:', err);
+    return res.status(500).json({ success: false, error: '대상 리스트 조회 실패' });
+  }
+});
+
 // POST /api/ai/parse-briefing - 프로모션 브리핑 → 구조화 파싱 + 타겟 고객 수 산출
 router.post('/parse-briefing', authenticate, async (req: Request, res: Response) => {
   try {

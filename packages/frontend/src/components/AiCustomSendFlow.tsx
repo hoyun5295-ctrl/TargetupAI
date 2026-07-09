@@ -22,6 +22,7 @@ import { formatPreviewValue, calculateSmsBytes, replaceMessageVars, buildAdMessa
 import { highlightVars, mergeAndHighlightVars } from '../utils/highlightVars';
 import { toMmsImagePaths } from '../utils/mmsImage';
 import MmsImagePreview from './shared/MmsImagePreview';
+import TargetRecipientsModal, { type TargetPageLoader } from './TargetRecipientsModal';
 
 interface AiCustomSendFlowProps {
   onClose: () => void;
@@ -148,6 +149,19 @@ export default function AiCustomSendFlow({
   const [estimatedCount, setEstimatedCount] = useState(0);
   const [unsubscribeCount, setUnsubscribeCount] = useState(0);
   const [targetRecounting, setTargetRecounting] = useState(false);
+  // 2026-07-09: 발송 대상 리스트 보기 (targetFilters compat 기준 서버 페이징)
+  const [showTargetList, setShowTargetList] = useState(false);
+  const targetListFetchPage: TargetPageLoader = async (pageNo, size) => {
+    const token = localStorage.getItem('token');
+    const res = await fetch('/api/ai/target-recipients', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ targetFilters, page: pageNo, pageSize: size }),
+    });
+    const data = await res.json();
+    if (!res.ok || data.success === false) throw new Error(data?.error || '대상 리스트 조회에 실패했습니다.');
+    return { recipients: data.recipients || [], total: data.total ?? 0 };
+  };
 
   // Step 4
   const [variants, setVariants] = useState<MessageVariant[]>([]);
@@ -772,9 +786,14 @@ export default function AiCustomSendFlow({
 
                 {/* 타겟 조건 카드 (오른쪽) — ★ B+0407-2: 수정 불가 (read-only) */}
                 <div className="bg-gradient-to-br from-blue-50 to-cyan-50 rounded-xl border border-blue-200 p-5">
-                  <div className="flex items-center justify-between mb-4">
+                  <div className="flex items-center justify-between mb-4 gap-2">
                     <div className="flex items-center gap-2"><Users className="w-4 h-4 text-blue-600" /><span className="text-sm font-bold text-blue-700">발송 대상</span></div>
-                    <span className="text-[11px] text-blue-500 italic">변경하려면 이전 단계에서 새 브리핑</span>
+                    <div className="flex items-center gap-2">
+                      {estimatedCount > 0 && (
+                        <button type="button" onClick={() => setShowTargetList(true)} className="text-[11px] font-semibold text-violet-700 bg-violet-100 hover:bg-violet-200 px-2 py-1 rounded-lg transition-colors whitespace-nowrap">리스트 보기</button>
+                      )}
+                      <span className="text-[11px] text-blue-500 italic hidden sm:inline">변경하려면 이전 단계에서 새 브리핑</span>
+                    </div>
                   </div>
 
                   {/* 타겟 요약 (description) — ★ B+0407-2: read-only 모드 */}
@@ -1241,6 +1260,17 @@ export default function AiCustomSendFlow({
           </div>
         </div>
       )}
+
+      {/* 2026-07-09: 발송 대상 리스트 (targetFilters compat 기준 · 15명/페이징) */}
+      <TargetRecipientsModal
+        show={showTargetList}
+        onClose={() => setShowTargetList(false)}
+        title="발송 대상"
+        criteria={targetCondition?.description || undefined}
+        totalCount={estimatedCount}
+        fetchPage={targetListFetchPage}
+        sourceLabel="맞춤한줄 추출 대상 (customer-filter)"
+      />
     </div>
   );
 }

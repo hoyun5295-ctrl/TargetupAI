@@ -5,6 +5,7 @@ import { useAuthStore, isAgentOnlyCompany } from '../stores/authStore';
 import RcsTemplateFormModal from '../components/RcsTemplateFormModal';
 import BrandMessageEditor from '../components/BrandMessageEditor';
 import DirectTargetFilterModal from '../components/DirectTargetFilterModal';
+import TargetRecipientsModal, { arrayPager, type TargetRecipient } from '../components/TargetRecipientsModal';
 // ★ D130: 알림톡 통합 관리 (IMC 연동)
 import AlimtalkManagementSection from '../components/alimtalk/AlimtalkManagementSection';
 // ★ D150-2 (2026-05-09): 브랜드메시지 템플릿 관리 (IMC 연동)
@@ -477,6 +478,9 @@ function BrandMessageTab({ profiles, setToast }: {
 
   // DB추출
   const [showDbExtract, setShowDbExtract] = useState(false);
+  // 2026-07-09: DB추출 전체 recipient 원본 보관 + 리스트 보기 모달
+  const [dbExtractedRecipients, setDbExtractedRecipients] = useState<TargetRecipient[]>([]);
+  const [showTargetList, setShowTargetList] = useState(false);
 
   // 수신자 건수 계산
   const getPhoneList = (): string[] => {
@@ -558,6 +562,8 @@ function BrandMessageTab({ profiles, setToast }: {
   const handleDbExtracted = (recipients: any[], count: number) => {
     const mapped = recipients.map(r => ({ phone: String(r.phone || '').replace(/\D/g, '') })).filter(r => r.phone.length >= 10);
     setRecipientList(mapped);
+    // 리스트 보기용 전체 원본(이름·등급 등) 보관 — 유효 전화만
+    setDbExtractedRecipients(recipients.filter((r) => String(r.phone || '').replace(/\D/g, '').length >= 10));
     setRecipientMode('db');
     setShowDbExtract(false);
     setToast({ show: true, type: 'success', message: `${count.toLocaleString()}명 추출 완료` });
@@ -720,10 +726,15 @@ function BrandMessageTab({ profiles, setToast }: {
                     </div>
                   </div>
                   <div className="flex gap-2">
+                    {dbExtractedRecipients.length > 0 && (
+                      <button onClick={() => setShowTargetList(true)} className="px-3 py-1.5 text-xs font-semibold text-violet-700 bg-violet-100 hover:bg-violet-200 rounded-lg transition-colors">
+                        리스트 보기
+                      </button>
+                    )}
                     <button onClick={() => setShowDbExtract(true)} className="px-3 py-1.5 text-xs font-medium text-blue-700 bg-blue-100 hover:bg-blue-200 rounded-lg transition-colors">
                       다시 추출
                     </button>
-                    <button onClick={() => setRecipientList([])} className="px-3 py-1.5 text-xs font-medium text-gray-500 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors">
+                    <button onClick={() => { setRecipientList([]); setDbExtractedRecipients([]); }} className="px-3 py-1.5 text-xs font-medium text-gray-500 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors">
                       초기화
                     </button>
                   </div>
@@ -815,6 +826,16 @@ function BrandMessageTab({ profiles, setToast }: {
         onExtracted={(recipients, count, _fieldsMeta, _cbPhone) => handleDbExtracted(recipients, count)}
       />
     )}
+
+    {/* 2026-07-09: DB추출 대상 리스트 (메모리 보유 recipients · 15명/페이징) */}
+    <TargetRecipientsModal
+      show={showTargetList}
+      onClose={() => setShowTargetList(false)}
+      title="DB 추출 대상"
+      channelLabel="카카오/RCS"
+      fetchPage={arrayPager(dbExtractedRecipients)}
+      sourceLabel="고객 DB 추출 (customer-filter)"
+    />
     </>
   );
 }

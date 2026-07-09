@@ -195,18 +195,22 @@ docker exec -i pay-ingest-db mariadb -uroot -p'<루트비번>' sales -e "UPDATE 
 (GROUP BY에 NULL 잔존 시 = B/C/D 외 prefix 존재 — 서팀장 확인 대상.)
 ⑤ OS 방화벽 — **⚠️ 도커 함정: `docker -p`로 열린 포트는 ufw·INPUT 체인 규칙을 우회한다**(도커가 nat/FORWARD로 먼저 처리). 도커 트래픽 필터링의 공식 지점 = `DOCKER-USER` 체인:
 ```
-# DROP을 먼저 넣고, ACCEPT 3개를 -I로 그 위에 삽입 (최종 순서: ACCEPT×3 → DROP)
+# -I는 항상 맨 위 삽입 → '마지막 실행'이 최종 맨 위. DROP 먼저 → IP ACCEPT → established를 마지막(=최종 top).
 iptables -I DOCKER-USER -p tcp -m conntrack --ctorigdstport 23388 -j DROP
 iptables -I DOCKER-USER -p tcp -m conntrack --ctorigdstport 23388 -s <IP54> -j ACCEPT
 iptables -I DOCKER-USER -p tcp -m conntrack --ctorigdstport 23388 -s <IP57> -j ACCEPT
 iptables -I DOCKER-USER -p tcp -m conntrack --ctorigdstport 23388 -s <IP58> -j ACCEPT
-iptables -L DOCKER-USER -n --line-numbers   # 순서 확인 (ACCEPT 3개가 DROP 위)
+# ★★ 2026-07-09 필수 (빠뜨려서 실사고) — 리턴 트래픽(ESTABLISHED) 허용을 '맨 마지막'에(=최종 맨 위).
+#   없으면 발송서버 SYN은 ACCEPT로 통과해도 DB 응답(SYN-ACK)의 source가 화이트리스트 밖이라 아래 0.0.0.0/0 DROP에 걸려,
+#   '어떤 IP를 화이트리스트에 넣어도' 접속 불가(로컬 127.0.0.1은 FORWARD 미경유라 되는 착시). tcpdump로 SYN만 재전송·SYN-ACK 0이면 이 룰 누락.
+iptables -I DOCKER-USER -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+iptables -L DOCKER-USER -n --line-numbers   # 최종 순서: ESTABLISHED → ACCEPT×N(IP) → DROP
 ```
 재부팅 시 소실 주의 — `netfilter-persistent save`(설치돼 있으면) 또는 부팅 스크립트로 지속화. 이 단계는 2차 방어(포트 스캔 은닉)이고, 1차 구조 방어는 ③의 계정 host 제한(화이트리스트 외 IP는 인증 시도 자체가 거부)이라 ⑤가 늦어져도 ③만으로 무단 로그인은 불가.
 ⑥ 강문희 발주(§7-3) → 게이트웨이 접속 테스트 → 전환일 확정 → **전환일 절차(기간 갭 0 보장)**: ①[143] 3테이블 최종 dump → ②[invito] 통째 재복원 → ③SysId ALTER+백필 재실행(B=54/C=57/D=58) → ④강문희 접속정보 전환 → ⑤당일 유입 COUNT 확인(이상 시 접속정보 원복 = 즉시 롤백). (최종 dump에 Stts 포함 필수 — replace는 당일만 지워 과거 일자 갭은 자동 복구 안 됨.)
 
 ### 7-3. 강문희 발주 문안 (전환 시 전달 — 비번은 별도 채널)
-> ★ 54·57·58 공인 IP = 58.227.193.54/.57/.58 확정(Harold 2026-07-07 — 한줄로 62와 같은 대역, 서버명=마지막 옥텟 관례. 143=27.102.203.143과 동일 관례).
+> ★ 2026-07-09 정정 — "서버명 마지막 옥텟 = 공인 IP" 관례 추정은 **틀릴 수 있음(실측 필요)**. 우리 비토 게이트웨이도 이름과 실제 아웃바운드 공인 IP(139.150.81.213)가 달랐다. 방화벽 화이트리스트 대상 = 발송서버가 62로 나올 때의 **실제 아웃바운드 공인 IP**(강문희 `curl ifconfig.me` 실측 회신값)이며, 서버명 옥텟(58.227.193.54/57/58)과 다르면 그 실 IP로 계정 host + iptables 반영. (계정 host + iptables ACCEPT 둘 다 실 IP 기준이어야 함.)
 >
 > 수신 DB 준비 완료됐습니다. 아래로 적재 목적지 변경 부탁드립니다.
 > - 호스트 58.227.193.62 / 포트 23388 / DB `sales` / 계정 `sales` / 비번 별도 전달 (MariaDB, 기존과 동일 스키마 3테이블 + 데이터 이관 완료)

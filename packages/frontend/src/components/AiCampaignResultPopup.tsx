@@ -8,6 +8,7 @@ import {
 import { buildAdMessageFront, buildAdSubjectFront, replaceVarsBySampleCustomer } from '../utils/formatDate';
 import { highlightVars } from '../utils/highlightVars';
 import MmsImagePreview from './shared/MmsImagePreview';
+import TargetRecipientsModal, { arrayPager } from './TargetRecipientsModal';
 
 interface AiCampaignResultPopupProps {
   show: boolean;
@@ -87,6 +88,8 @@ export default function AiCampaignResultPopup({
   const [showLmsAlert, setShowLmsAlert] = useState(false);
   const [lmsAlertBytes, setLmsAlertBytes] = useState(0);
   const [elapsedMs, setElapsedMs] = useState(0);
+  // 2026-07-09: 추출된 타겟 카드 클릭 → 추출 대상 리스트 (메모리 보유 recipients · 15명/페이징)
+  const [showTargetList, setShowTargetList] = useState(false);
 
   // 6 sub-agent 로딩 시각 효과 — aiLoading state 흐름
   useEffect(() => {
@@ -219,7 +222,12 @@ export default function AiCampaignResultPopup({
               </div>
 
               <div className="grid grid-cols-2 max-md:grid-cols-1 gap-3">
-                <div className="bg-white/5 border border-white/10 rounded-lg p-3">
+                <button
+                  type="button"
+                  onClick={() => { if (targetRecipients && targetRecipients.length > 0) setShowTargetList(true); }}
+                  disabled={!targetRecipients || targetRecipients.length === 0}
+                  className="bg-white/5 border border-white/10 rounded-lg p-3 text-left w-full hover:bg-white/10 hover:border-violet-400/30 transition-colors disabled:cursor-default disabled:hover:bg-white/5 disabled:hover:border-white/10"
+                >
                   <div className="flex items-center gap-1.5 text-[11px] text-white/50 mb-1">
                     <Users className="w-3 h-3" /> 추출된 타겟
                   </div>
@@ -227,7 +235,10 @@ export default function AiCampaignResultPopup({
                   <div className="text-2xl text-violet-300 font-bold">
                     {targetCount.toLocaleString()}<span className="text-sm text-white/50 ml-1">명</span>
                   </div>
-                </div>
+                  {targetRecipients && targetRecipients.length > 0 && (
+                    <div className="mt-1 text-[10px] font-semibold text-violet-300/80">리스트 보기 →</div>
+                  )}
+                </button>
                 <div className="bg-white/5 border border-white/10 rounded-lg p-3">
                   <div className="flex items-center gap-1.5 text-[11px] text-white/50 mb-1">
                     <Smartphone className="w-3 h-3" /> AI 추천 채널
@@ -706,6 +717,17 @@ export default function AiCampaignResultPopup({
           </div>
         </div>
       )}
+
+      {/* 2026-07-09: 추출된 타겟 리스트 (메모리 보유 recipients · 15명/페이징) */}
+      <TargetRecipientsModal
+        show={showTargetList}
+        onClose={() => setShowTargetList(false)}
+        title="추출된 타겟"
+        criteria={targetDescription}
+        channelLabel={selectedChannel}
+        fetchPage={arrayPager(targetRecipients || [])}
+        sourceLabel="AI 캠페인 추출 대상 (customer-filter)"
+      />
     </div>
   );
 }

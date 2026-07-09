@@ -135,4 +135,85 @@ router.post('/extract', requirePlanFeature('ai_messaging'), async (req: Request,
   }
 });
 
+/**
+ * POST /api/targets/recipients — 추출 타겟 리스트 페이징 조회 (TargetExtractModal 발송툴 공용 · 2026-07-09)
+ *   { channel, filter, page, pageSize } → { recipients, total, page, pageSize }
+ *   - /extract와 동일 필터(buildCustomerFilter, storeCodeMode:'skip') + 채널 자격(buildChannelEligibilityWhere).
+ *   - 컬럼은 /extract 샘플 SQL과 동일(운영 중 검증됨). SELECT 전용. 게이트 ai_messaging.
+ *   - "추출된 타겟 N명"을 눌러 실제 대상 리스트를 15명씩 확인하는 공용 모달(TargetRecipientsModal)이 소비.
+ */
+router.post('/recipients', requirePlanFeature('ai_messaging'), async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    if (!companyId) {
+      return res.status(401).json({ success: false, error: '인증 필요' });
+    }
+
+    const { channel, filter, page, pageSize } = req.body as {
+      channel?: string;
+      filter?: Record<string, unknown>;
+      page?: number;
+      pageSize?: number;
+    };
+    if (!channel || !VALID_CHANNELS.includes(channel as ChannelKey)) {
+      return res.status(400).json({ success: false, error: '지원하지 않는 채널입니다. (email / dm / inapp / kakao)' });
+    }
+    const ch = channel as ChannelKey;
+    const safeFilter = filter && typeof filter === 'object' ? filter : {};
+    const p = Math.max(1, Math.floor(Number(page) || 1));
+    const size = Math.min(100, Math.max(1, Math.floor(Number(pageSize) || 15)));
+    const offset = (p - 1) * size;
+
+    // /extract와 동일 필터·채널 자격 (storeCodeMode:'skip' — extract 카운트와 일치)
+    const { sql: filterSql, params } = buildCustomerFilter(safeFilter, {
+      tableAlias: 'c',
+      startParamIndex: 2,
+      storeCodeMode: 'skip',
+      inputFormat: 'structured',
+    });
+    const channelWhere = buildChannelEligibilityWhere(ch, 'c');
+    const baseParams = [companyId, ...params];
+
+    const countSql = `SELECT COUNT(*)::int AS cnt FROM customers c WHERE c.company_id = $1::uuid AND (${channelWhere})${filterSql}`;
+    const listSql = `
+      SELECT c.id, c.phone, c.name, c.gender, c.grade, c.region, c.last_purchase_date, c.total_purchase_amount
+        FROM customers c
+       WHERE c.company_id = $1::uuid AND (${channelWhere})${filterSql}
+       ORDER BY c.id ASC
+       LIMIT $${baseParams.length + 1} OFFSET $${baseParams.length + 2}`;
+
+    const [countRes, listRes] = await Promise.all([
+      query(countSql, baseParams),
+      query(listSql, [...baseParams, size, offset]),
+    ]);
+
+    const total = Number(countRes.rows[0]?.cnt ?? 0);
+    const recipients = listRes.rows.map((r: any) => ({
+      phone: r.phone,
+      name: r.name,
+      gender: r.gender,
+      grade: r.grade,
+      region: r.region,
+      last_purchase_date: r.last_purchase_date,
+      total_purchase_amount: r.total_purchase_amount != null ? Number(r.total_purchase_amount) : null,
+    }));
+
+    return res.json({ success: true, recipients, total, page: p, pageSize: size });
+  } catch (err: any) {
+    if (err instanceof SegmentGenerationError) {
+      return res.status(400).json({ success: false, code: err.code, error: err.message });
+    }
+    const msg = err?.message || '';
+    if (msg.includes('column') && msg.includes('does not exist')) {
+      return res.status(503).json({
+        success: false,
+        code: 'DB_MIGRATION_PENDING',
+        error: 'DB 마이그레이션 필요 — 운영자에게 customers 컬럼 확인을 요청해주세요.',
+      });
+    }
+    console.error('[targets/recipients] 실패:', err);
+    return res.status(500).json({ success: false, error: '타겟 리스트 조회 실패' });
+  }
+});
+
 export default router;
