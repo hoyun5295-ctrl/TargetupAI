@@ -135,8 +135,8 @@ export default function DashboardHeader({
       ? [{ label: '캠페인 대행', onClick: () => navigate('/campaign-agency'), color: 'new' as MenuColor, path: '/campaign-agency' }]
       : []),
     { label: '수신거부', onClick: () => navigate('/unsubscribes'), color: 'gold', path: '/unsubscribes' },
-    // ★ 2026-07-08 AI 사용량 — SUB_MODULE_CARDS 타일 슬롯을 원클릭 캠페인에 내주고 헤더 유틸 메뉴로 이전(접근 유지).
-    { label: 'AI 사용량', onClick: () => navigate('/ai-usage'), color: 'green', path: '/ai-usage' },
+    // ★ 2026-07-09 (Harold 지시): 'AI 사용량' 헤더 메뉴 제거 — 요금제 미가입 사용자가 다수인 헤더에 둘 이유 없음.
+    //   진입은 AI 학습 메모리(/ai-memory) 상단 서브메뉴로 이동 (AiMemoryPage 헤더 버튼).
     { label: '설정', onClick: () => navigate('/settings'), color: 'green', path: '/settings' },
     ...(isCompanyAdmin
       ? [{ label: '관리', onClick: () => navigate('/manage'), color: 'gold' as MenuColor, path: '/manage' }]

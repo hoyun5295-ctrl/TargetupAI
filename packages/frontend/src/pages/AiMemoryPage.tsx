@@ -580,6 +580,15 @@ export default function AiMemoryPage() {
             <p className="text-xs md:text-sm text-white/50 mt-0.5 hidden md:block">회사별 누적 학습 — 시간이 지날수록 AI 추천 정확도가 향상됩니다</p>
           </div>
           <div className="ml-auto flex items-center gap-2">
+            {/* ★ 2026-07-09 (Harold 지시): AI 사용량 = 헤더 전역 메뉴에서 제거 → AI 메모리 상단 서브메뉴로 이동 */}
+            <button
+              onClick={() => navigate('/ai-usage')}
+              className="text-xs text-violet-200 border border-violet-400/30 hover:bg-violet-500/20 px-3 py-2 rounded-lg flex items-center gap-1.5 transition-colors"
+              aria-label="AI 사용량"
+            >
+              <Activity className="w-3.5 h-3.5" />
+              <span className="hidden md:inline">AI 사용량</span>
+            </button>
             <button
               onClick={reloadAll}
               className="text-xs text-white/70 hover:bg-white/10 px-3 py-2 rounded-lg flex items-center gap-1.5 transition-colors"

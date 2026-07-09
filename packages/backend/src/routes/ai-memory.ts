@@ -782,6 +782,46 @@ router.delete('/brand-voice/message/:id', async (req: Request, res: Response) =>
 });
 
 // ─────────────────────────────────────────────────────────────
+// 5. DELETE /api/ai-memory/brand-voice/guideline — 가이드라인 초기화
+//    (2026-07-09 Harold): 학습된 가이드라인 1행만 삭제. 대표 문안은 유지 → "AI 가이드라인 자동 추출" 재실행 가능.
+// ─────────────────────────────────────────────────────────────
+router.delete('/brand-voice/guideline', async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    const userType = req.user?.userType;
+    if (!companyId) {
+      return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+    }
+    if (userType !== 'company_admin') {
+      return res.status(403).json({ success: false, error: '가이드라인 초기화는 회사 관리자만 가능합니다.' });
+    }
+
+    await query(
+      `DELETE FROM ai_company_memory
+       WHERE company_id = $1::uuid AND memory_type = 'brand_guideline'`,
+      [companyId],
+    );
+    // 효과 검증 — 잔존 0 재확인 후에만 성공 (6원칙 ②)
+    const check = await query(
+      `SELECT COUNT(*)::int AS n FROM ai_company_memory
+        WHERE company_id = $1::uuid AND memory_type = 'brand_guideline'`,
+      [companyId],
+    );
+    if ((check.rows[0]?.n || 0) > 0) {
+      return res.status(500).json({ success: false, error: '초기화가 완료되지 않았습니다. 다시 시도해 주세요.' });
+    }
+
+    const { invalidateBrandVoiceCache } = await import('../utils/brand-voice-prompt');
+    invalidateBrandVoiceCache(companyId);
+
+    return res.json({ success: true });
+  } catch (err: any) {
+    console.error('[Brand Voice reset-guideline] 오류:', err);
+    return res.status(500).json({ success: false, error: err?.message || '초기화 실패' });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────
 // 5. POST /api/ai-memory/brand-voice/update-guideline (회사 admin 직접 정정)
 // ─────────────────────────────────────────────────────────────
 router.post('/brand-voice/update-guideline', async (req: Request, res: Response) => {

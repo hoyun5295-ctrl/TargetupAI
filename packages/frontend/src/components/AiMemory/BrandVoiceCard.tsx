@@ -16,7 +16,7 @@
 import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import {
-  Sparkles, Plus, Trash2, Save, RefreshCw, ChevronDown, ChevronUp,
+  Sparkles, Plus, Trash2, Save, RefreshCw, RotateCcw, ChevronDown, ChevronUp,
   Image, FileText, Loader2, CheckCircle2, AlertCircle, Smartphone, X, Pencil, Link2,
 } from 'lucide-react';
 // ★ 2026-07-02 브랜드 링크 — 관리 모드 (문안 편집기 칩과 같은 데이터)
@@ -252,6 +252,37 @@ export default function BrandVoiceCard({ apiBase, token, onToast, onConfirm }: B
     } finally {
       setSaving(false);
     }
+  }
+
+  // ★ 2026-07-09 (Harold): 가이드라인 초기화 — 학습된 가이드라인만 삭제(대표 문안 유지) → 재추출 가능. 파괴적이라 확인 모달.
+  function resetGuideline() {
+    if (!guideline) return;
+    onConfirm({
+      title: '가이드라인 초기화',
+      description: '학습된 Brand Voice 가이드라인을 완전히 초기화합니다.\n대표 문안은 유지되며, 초기화 후 "AI 가이드라인 자동 추출"로 다시 생성할 수 있습니다.',
+      confirmLabel: '초기화',
+      cancelLabel: '취소',
+      onConfirm: async () => {
+        setSaving(true);
+        try {
+          const res = await fetch(`${apiBase}/api/ai-memory/brand-voice/guideline`, {
+            method: 'DELETE',
+            headers: { Authorization: `Bearer ${token}` },
+          });
+          const data = await res.json();
+          if (!data.success) throw new Error(data.error || '초기화 실패');
+          setGuideline(null);
+          setEditingGuideline(false);
+          setShowGuidelineModal(false);
+          onToast('가이드라인을 초기화했습니다. AI 가이드라인 자동 추출로 다시 생성해 주세요.', 'success');
+          await loadBrandVoice();
+        } catch (err: any) {
+          onToast(err.message || '초기화 실패', 'error');
+        } finally {
+          setSaving(false);
+        }
+      },
+    });
   }
 
   function deleteMessage(message: RepresentativeMessage) {
@@ -514,24 +545,32 @@ export default function BrandVoiceCard({ apiBase, token, onToast, onConfirm }: B
                   onChange={(v) => setGuideline({ ...guideline, banned_words: v })} fullWidth />
               </div>
 
-              {editingGuideline && (
-                <div className="mt-4 flex gap-2">
-                  <button
-                    onClick={saveGuideline}
-                    disabled={saving}
-                    className="px-3 py-1.5 text-xs bg-violet-600 hover:bg-violet-500 text-white rounded flex items-center gap-1 disabled:opacity-50 transition-colors font-semibold"
-                  >
-                    {saving ? <Loader2 className="w-3 h-3 animate-spin" /> : <Save className="w-3 h-3" />}
-                    정정 저장
-                  </button>
-                </div>
-              )}
-
               {guidelineUpdatedAt && (
                 <div className="mt-3 text-[10px] text-white/40 italic">
                   Data source — 회사 대표 문안 {messages.length}건 + AI 자동 추출 · 마지막 갱신: {new Date(guidelineUpdatedAt).toLocaleString('ko-KR')}
                 </div>
               )}
+                    </div>
+                    {/* ★ 2026-07-09 (Harold): 초기화 + 저장 footer. 초기화=가이드라인 삭제(대표 문안 유지→재추출 가능). 저장='직접 정정' 편집분 반영. */}
+                    <div className="flex items-center justify-between gap-2 px-5 py-3 border-t border-white/10">
+                      <button
+                        onClick={resetGuideline}
+                        disabled={saving}
+                        className="px-3 py-2 text-xs text-rose-300 hover:bg-rose-500/10 border border-rose-400/30 rounded-lg flex items-center gap-1.5 disabled:opacity-50 transition-colors"
+                      >
+                        <RotateCcw className="w-3.5 h-3.5" /> 초기화
+                      </button>
+                      <div className="flex items-center gap-2">
+                        <button onClick={() => setShowGuidelineModal(false)} className="px-4 py-2 text-xs text-white/70 border border-white/15 rounded-lg hover:bg-white/10 transition-colors">닫기</button>
+                        <button
+                          onClick={saveGuideline}
+                          disabled={saving || !editingGuideline}
+                          title={editingGuideline ? '' : "'직접 정정'을 켜면 편집 후 저장할 수 있습니다"}
+                          className="px-5 py-2 text-xs bg-violet-600 hover:bg-violet-500 text-white rounded-lg flex items-center gap-1.5 font-semibold disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                        >
+                          {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />} 저장
+                        </button>
+                      </div>
                     </div>
                   </div>
                 </div>
