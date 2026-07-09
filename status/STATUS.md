@@ -26,6 +26,7 @@
 | 싱크에이전트 이슈 진단 | SYNC-AGENT-TROUBLESHOOTING.md | 해당 증상 절 |
 | 싱크에이전트 isae 현장(완료 이력) | archive/SYNC-AGENT-ISAE-2026-06-30-HANDOFF.md | grep 적중 절만 (2026-07-07 archive 이동) |
 | AI Operator·CDP·Provider | docs/AI_OPERATOR_기능정의서.md + ai_operator_progress.md | 해당 절 |
+| CRM 캠페인 대행(설계 대행) 기능 | docs/2026-07-09-crm-campaign-agency-implementation.md | 전체 |
 | 레거시 서버(27.102.203.143) 폐기 | docs/레거시서버_폐기_플랜.md | 전체 (SoT — 진행 시 갱신) |
 | 인앱메시지 설계 | docs/인앱메세지전용.md | 해당 절 |
 | 장기 로드맵·비전 | docs/한줄로_BEYOND_BRAZE_비전.md | 해당 절 |
@@ -37,8 +38,14 @@
 
 > **회전 룰:** 완료(★배포완료) 엔트리는 원문을 archive/TASKS_YYYY-MM.md로 이동 + INDEX 등재하고, 아래 "최근 완료 인덱스"에 1줄만 남긴다. 30KB 초과 = 회전 미이행 — 즉시 회전.
 
-### 🟢 2026-07-09 (6) — CRM 캠페인 대행 신설 (비즈니스+ 전용 컨설팅 상품 — 코드완료·미배포)
-> Harold 신사업: 고객사 캠페인대행요청서(xlsx) 접수→슈퍼관리자 "캠페인 대행 설계"에서 **그 업체 단일 스코프**(프로필·AI메모리·캠페인이력) 분석→"한줄로 마케팅 제안서" PDF→오프라인 컨펌→직원 예약 대행(운영). **무과금**(runInCreditBundle — 실행 단계 크레딧에서 회수). 신규: CT 4(crm-agency-request/proposal-core/proposal/pdf-render)+routes/campaign-agency+고객사·슈퍼관리자 페이지+메뉴 게이팅(BUSINESS|ENTERPRISE만 노출). 혜택=요청서 기입값만(출구가드)·타겟=recommendTarget+countFilteredCustomers 실측·503 DDL 안전망. **Codex 적대 리뷰 5건 전건 실증 후 정정**(고아파일 unlink·자격=isSubscriptionBlocked 동반 단일 소스·design 시점 재검증·xlsx 매직바이트·빈 필터 가드). DDL 실행완료. 검증 tsc0·vitest393·금지패턴0. **잔여=배포+실측 1건**. SoT=specs/2026-07-09-crm-campaign-agency-design.md · 상세 [[project_2026_0709_crm_campaign_agency]].
+### 🟡 2026-07-09 (8) — CRM 캠페인 대행 접수 웹 폼 전환 (xlsx 왕복 폐지 — 코드완료 / 배포 대기)
+> Harold 지시: "엑셀 다운로드·업로드는 잘못된 접수 방식" → **웹 폼(풀화면급 모달) + 행사 이미지 ≤5장(장당 5MB·jpg/png/webp)** 접수로 전면 교체. 고객사 CampaignAgencyPage 재작성(CTA→폼 모달→이력 상세 모달·갤러리) + 슈퍼관리자 AdminCampaignAgencyPage 재작성(상태 칩·목록→상세 모달: 갤러리·라이트박스·보정 폼·[분석 실행]·PDF / 직접 설계도 폼화) + 공용 AgencyRequestForm(다크/화이트 테마). backend: /template 삭제·폼 접수(payload+images multipart·매직바이트 sniffImageMediaType·INSERT 실패 시 전 이미지 unlink)·이미지 인증 스트림 4 endpoint·**분석 축4 = 행사 이미지 vision 전사(기존 event-image-extract CT 재사용·무과금 번들)**·혜택 출구가드에 전사 허용 텍스트 추가·PDF 재디자인(표지 밴드·플랜 스트립·이미지 임베드 jpeg/png·페이지 번호 bufferPages). **DDL 2건 Harold 실행완료**(image_paths jsonb ADD·request_file_path DROP NOT NULL — information_schema 실측). crm-agency-template.ts+왕복 테스트 삭제·**exceljs 의존성 제거**(소비처 1곳 grep 실증, 서버 npm install 권장). legacy xlsx 행 보존(파일 있는 행만 다운로드 노출). 검증 FE/BE tsc0·vitest396·금지패턴0·잔존참조0. 상세 [docs/2026-07-09-crm-campaign-agency-implementation.md](../docs/2026-07-09-crm-campaign-agency-implementation.md) · [[project_2026_0709_crm_agency_webform_redesign]].
+
+### 🟢 2026-07-09 (7) — 요금제 정책 정비 + AI 사용량 메뉴 이동 + Brand Voice 초기화/저장 (★배포완료 2026-07-09 — Harold 선언 / 운영 실측 = Harold)
+> ① **발송결과 캘린더 FREE 개방**(ResultsModal): customerDbEnabled===false 차단 제거 — 미가입도 캘린더 진입(구독 만료/정지 잠금만 유지). ② **요금제 게이팅 감사**: 진실 원천=plans 플래그(코드 아님). 유료 간 차별 4플래그(ai_premium·mobile_dm·auto_spam_test·cdp)+STARTER ai_calls=0(AI 전멸) → **plans UPDATE 4줄 Harold 실행완료**(유료 전 플랜 기능 통일·크레딧이 통제). ③ **BETA_GATE 문구 24곳 정정**: 실제 게이트=유료 전체 개방(FREE만 차단)인데 문구가 "비즈니스·엔터프라이즈 전용"(오도) → "본 기능은 요금제 가입 후 이용 가능합니다"(ai.ts 22+프론트 2). 카카오&RCS ENT 게이트=**의도 유지**(출시 마무리 중·내부 테스트). ④ **AI 사용량 헤더 메뉴 제거→AI 학습 메모리 상단 서브메뉴**(미가입 다수 헤더서 퇴출). ⑤ **Brand Voice 가이드라인 모달 초기화·저장 버튼**: 초기화=AI 가이드라인 1행만 삭제(대표문안 유지→재추출 가능, DELETE /brand-voice/guideline 신설·회사관리자·잔존0 검증)+저장=편집분 반영. 검증 FE/BE tsc0. 상세 [[project_2026_0709_plan_gating_audit]].
+
+### 🟢 2026-07-09 (6) — CRM 캠페인 대행 신설 (비즈니스+ 전용 컨설팅 상품 — ★배포완료 2026-07-09 — Harold 선언 / 운영 실측 = Harold)
+> Harold 신사업: 고객사 캠페인대행요청서(xlsx) 접수→슈퍼관리자 "캠페인 대행 설계"에서 **그 업체 단일 스코프**(프로필·AI메모리·캠페인이력) 분석→"한줄로 마케팅 제안서" PDF→오프라인 컨펌→직원 예약 대행(운영). **무과금**(runInCreditBundle). 신규: CT 5(crm-agency-request/template/proposal-core/proposal/pdf-render)+routes/campaign-agency+고객사·슈퍼관리자 페이지+메뉴 게이팅. 혜택=요청서 기입값만(출구가드)·타겟=recommendTarget+countFilteredCustomers 실측·503 DDL 안전망. **Codex 적대 리뷰 5건 실증 후 정정**(고아파일 unlink·자격=isSubscriptionBlocked·design 재검증·xlsx 매직바이트·빈 필터). **요청서 양식 exceljs 재작성**(옛 SheetJS 서식 미지원→맨 텍스트 사고, 양식↔파서 왕복 테스트). DDL·배포 완료. **exceljs 신규 의존성**(배포 시 npm install). 검증 tsc0·vitest396·금지패턴0. **구현 상세 문서=docs/2026-07-09-crm-campaign-agency-implementation.md** · SoT=specs/2026-07-09-crm-campaign-agency-design.md · [[project_2026_0709_crm_campaign_agency]].
 
 ### 🟢 2026-07-09 (5) — 자동마케팅 디버깅 3건: 노출범위+발송권한 소유자기준 · 오늘의 추천 문안3안 선택+편집 · 담당자 사전알림 발신번호 대표번호 (★배포완료 2026-07-09 — Harold 선언 / 운영 실측 = Harold)
 > **① 노출범위+권한**(임은지): listOperators/listProposals에 소유자 scope(비관리자=`created_by` 본인·관리자=전체) + run-now/approve/reject 게이트를 `userType!=='company_admin'` 하드차단→"관리자 OR operator.created_by===userId"(approve/reject는 proposal→operator JOIN 소유검증). 생성/수정/삭제는 이미 2026-06-19 사용자 허용이라 발송·실행만 막히던 비대칭 해소. 요금제·예산·080·스팸 안전망 불변. 프론트 무변경.
@@ -56,26 +63,6 @@
 ### 🟢 2026-07-09 — 직접시점선택 모달화 + 추출타겟 리스트 공용화 + DM 정렬 전수 일관화 + 개인화 변수 단일소스 통일 (★배포완료 — Harold 선언 / 운영 실측 = Harold)
 > ① 직접시점선택 공용 DateTimeField 모달화(6곳 반영·z-[2000]) ② 추출타겟 공용 모달 TargetRecipientsModal(신규 엔드포인트 targets/recipients·ai/target-recipients, SELECT·DDL없음) ③ DM 섹션 정렬 전수 일관화(하드코딩 center 제거→래퍼 text-align 상속/`--dm-section-justify`, 헤더 로고형 column+align-items, front canvas+백엔드 SSR 미러) ④ 개인화 변수 발송빈칸 근본수정(FIELD_MAP 밖 하드코딩 라벨 3중→displayName 단일소스+`applyFieldDisplayNames`).
 > 검증 frontend/backend tsc0·vitest382·DDL없음. 잔여=Harold 실측·Codex. 상세 [[project_2026_0709_datetime_target_dm_var_unify]].
-
-### 🟢 2026-07-08(3) — AI Operator 0건 크레딧 미차감 + 직원 디버깅 4건 근본수정 (★배포완료 — Harold 선언 / 운영 실측 = Harold)
-> **① AI Operator 0건 크레딧 미차감**: orchestrate/orchestrateWithAI가 impl 성공 후 0건 여부 무관 무조건 5크레딧 차감 → 문안 생성 시(`result.messages.length>0`)만 차감 게이트(ai-orchestrator.ts 326·618, checkCredit 유지) + 프론트 0건 = 빈 제안서 대신 "조건에 맞는 고객 없음" 안내 카드(AiOperatorPage isZeroTarget=messages.length===0, 판정=백엔드 차감 게이트 동일 신호).
-> **② 직원 디버깅 4건**: ①개인화 변수 발송 빈칸=FIELD_MAP grade/points에 aliases('등급'/'포인트') 누락(name의 '이름'/'성함' 선례 동일, standard-field-map.ts) — 미리보기(하드코딩 라벨)만 매칭·발송 사전(displayName '고객등급'/'보유포인트')엔 없어 빈칸 / ②하위계정 DB현황 N/A=브랜드 체계 있는데 하위 user store_codes 미할당→getStoreScope blocked. 회사 옵션 `allow_user_full_access`(폴백 catch)로 회사별 켜고끄기. **DDL: `ALTER TABLE companies ADD COLUMN IF NOT EXISTS allow_user_full_access boolean NOT NULL DEFAULT false;` + 이새(682956b7) UPDATE true** / ③DM헤더 우측정렬=HeaderProps.align 타입 'right' 누락(dm-section-defaults.ts·dm-section-registry.ts) + renderHeader/HeaderSection center 외 무조건 space-between(좌측 고정). align별 flex-start/flex-end(백엔드+프론트 미러) / ④타겟 건수 상이=**[2026-07-09 오판 철회·전량 원복]** 코드 버그 아니라 인비토 가상데이터 sync 수신거부 잔존(sms_opt_in=true인데 source='sync' 미해제 5명·**운영 회사 전원 0**). 성급히 조회 수신거부 기준을 user_id→company_id로 뒤집었다가(B17-01 역행) Harold 지적으로 실데이터 확인→전량 원복. 진짜=인비토 재sync로 reconcileSyncUnsubscribes 자동 해제(조회·발송 둘 다 664).
-> **④ 후속(2026-07-09)**: ①②③만 유효 배포, ④는 코드 무변경(원복). 인비토 데이터 정리(재sync)로 해결. CT-03 발송 경로 user_id 수신거부 vs manual/upload 회사 수신거부 차이는 ④와 **별개·미확정**(운영 sync 잔존 0) — 필요 시 별도 영향표. 상세 lessons/LESSONS_BACKEND.md 2026-07-09.
-> **검증**: backend/frontend tsc 0 · 금지패턴 0 · customers.ts 수신거부 잔존 0. **잔여**: 운영 실측(재발송 %등급%/%포인트% · 이새 하위계정 DB현황 · DM 헤더 우측 · 인비토 동의조회 660) + Codex /codex:review. 상세 [[project_2026_0708_operator_credit_and_staff_debug]].
-
-### 🟢 2026-07-08(2) — 원클릭 캠페인(이미지 판독·초안 DB 보관) + 이미지로 문안 전 화면 + 연동 몰 상품 자동채우기(카페24·네이버) + 예약 시점 UI 정비 (★배포완료 — Harold 선언 / 운영 실측 = Harold)
-> **① 원클릭 캠페인(옛 "행사 캠페인" 타일 승격)**: 이미지 업로드→vision 판독(`callAIWithFallback` optional images·cache 우회, additive)으로 상품명·정가·할인가 전사(노이즈 리뷰·별점·10ml당·[네이버단독] 제외, `event-image-extract` CT)→행사 내용 자동 채움. 3채널 생성 초안 DB 임시 보관(`event_campaign_drafts` DDL 실행완료 — 소멸 방지·EventCampaignResumeBar 재개). AI Operator 쌩뚱맞은 알약 제거 → SUB_MODULE_CARDS 'AI 사용량' 슬롯을 **'원클릭 캠페인'**(/quick-campaign·QuickCampaignPage) 타일로 승격, AI 사용량은 DashboardHeader 유틸 nav로 이전.
-> **② 이미지로 문안 생성 전 화면**: 공용 `ImageToCopyModal`/`ImageToCopyButton`(createPortal body — 입력창 backdrop-filter 조상에 갇히던 fixed 버그 fix) → "이미지" 버튼을 AI Operator·DM·이메일·인앱 생성 입력칸에 배선.
-> **③ 연동 몰 상품 자동 채우기(DM 상품 슬라이드)**: products 테이블엔 이미지·링크·할인 없음(주문만 sync) → 몰 상품 API 신규(카페24 `GET /products` scope mall.read_product / 네이버 `POST /products/search` representativeImage — hoyun 실측 확정). 정규화 CT `MallProduct`(mall-product-normalize) + `routes/mall-products`(/preview 실측·/search·/providers·/match). ProductCarouselEditor "연동 몰에서 상품 불러오기" 피커. **자동 이름매칭**: `matchMallProductByName`(정규화 정확일치만)+`attachMallImagesToProductCarousels` 후처리를 DM one-shot·이메일 generate-sections에 배선(빈값만·실패skip·**발송 코어 무수정**).
-> **④ 예약 시점 UI 정비**: 공용 `DateTimeField` 2행 클린 레이아웃(캘린더/시계 아이콘+rounded-xl) — 이메일·인앱·마케팅캘린더·AI Operator 예약 전부 반영.
-> **검증**: backend/frontend tsc 0 · 금지패턴(모델명·native dialog·박-단어) 0. **잔여**: Harold 운영 실측(원클릭 캠페인 이미지·소멸0·상품 자동채움·예약 UI) + 네이버 상품링크 슬러그 + 몰 이미지 재호스팅 판단 + 메이크샵·고도몰·아임웹 상품 API 확장 + `/codex:review`. 상세 [[project_2026_0708_mall_product_autofill_dm]] · [[project_2026_0708_event_campaign_image_and_draft_persistence]].
-
-### 🟢 2026-07-08 — 행사 캠페인 상품 구조 추출 + 인앱 SDK 서빙 공용화·팝폰 복구 + 인앱 개인화 익명 fallback + 로그인 문의·DM 2열그리드 (★배포완료 — Harold 선언 / 운영 실측 = Harold)
-> **① 행사 캠페인 상품 구조 추출(DM+이메일)**: 행사 원문의 상품명·정가·할인가를 product_carousel에 자동 주입(dm-ai `extractEventProducts` sonnet temp0) + 원문 실존 기계검증(`validateProductsAgainstEventText` — 환각 가격 탈락, event-brief CT). DM 문안 요약에 "이름 정가→할인가" 동반 + 대표 1~3개 가격 프롬프트. 구분선 정규화 CT `normalizeSmsSeparatorLines`(구분문자만 4자+ 줄→하이픈10, **DM 문안 경로에만** 적용). 이메일 AI 스키마 discount_price 추가.
-> **② 인앱 SDK 서빙 공용화(CT `sdk-serve.ts`)**: 정적 `/sdk/` 경로가 SPA index.html로 fallback돼 깨짐(팝폰 v0.3.6 인앱 정지) → backend가 `/sdk/`·`/api/cdp/sdk/`를 CORS+CORP+**버전폴백**(요청 버전 파일 없으면 최신)으로 서빙. cafe24 인라인 라우트 공용화. **nginx `location ^~ /sdk/`→backend:3000**(OPS 갱신, 팝폰 레거시 경로 복구용). 수동 스니펫 4곳 `/api/cdp/sdk/`로. 팝폰 웹(Vercel Next.js `poppon-workspace/poppon`) layout.tsx SDK v0.3.6→v0.3.9.
-> **③ 인앱 개인화 익명 fallback**: 미식별 방문자에게 `{{customer.name}}`·`%등급%`가 공백("님, 회원님") → `/inapp/active` **서버 사전치환**(SDK 무변경): 이름 없으면 "고객" + 빈변수 공백정리(이중공백·구두점앞·줄앞뒤). `renderTextForCustomer` 공백정리 + `renderBlocksForCustomer`(블록 text/label/items) 신설(CT-79). 식별 회원 실값 그대로(회귀 0).
-> **④ 로그인 문의 + DM 2열 그리드**: 로그인 페이지 "서비스 이용신청 문의" 버튼+모던 모달(기존 `/api/companies/inquiry` 재사용 — 발신 SMTP_USER·수신 SMTP_TO, 좌 그린패널+우 모바일 양쪽). product_carousel 좌우 스크롤→flex-wrap 2열 justify-center(홀수 마지막 중앙, 발송 렌더러+빌더 미리보기 일관).
-> **검증**: backend tsc 0·vitest 382/382·frontend tsc 0·금지패턴 0. 커밋 a5ea765e·1ba70066·ce67f7c4·a7625642·83a7802d + 개인화 fallback. **잔여**: Harold 운영 실측(행사 3채널 상품 반영·팝폰 인앱 블록/익명 "고객님"·발행 모달 hlj.kr) + `/codex:review`. **후속**: 구분선 정규화 타 AI문안 경로 6곳(services/ai.ts·journey-ai-generator·variant-generator 등, 발송 보호영역 별도 승인). 상세 [[project_2026_0708_event_campaign_product_extraction]] · [[reference_inapp_sdk_serving]].
 
 ---
 
@@ -96,6 +83,9 @@
 
 ### 최근 완료 인덱스 (원문 = 링크의 월별 아카이브)
 
+- 🟢 2026-07-08(3) — AI Operator 0건 크레딧 미차감 + 직원 디버깅 4건(개인화 라벨·하위계정 DB현황·DM헤더우측·타겟건수 오판철회) (★배포완료) → [archive/TASKS_2026-07.md](archive/TASKS_2026-07.md) · 상세 [[project_2026_0708_operator_credit_and_staff_debug]]
+- 🟢 2026-07-08(2) — 원클릭 캠페인(이미지 판독·초안DB) + 이미지로 문안 + 연동몰 상품 자동채움(카페24·네이버) + 예약 UI (★배포완료) → [archive/TASKS_2026-07.md](archive/TASKS_2026-07.md) · 상세 [[project_2026_0708_mall_product_autofill_dm]] · [[project_2026_0708_event_campaign_image_and_draft_persistence]]
+- 🟢 2026-07-08 — 행사 상품 구조 추출 + 인앱 SDK 서빙 공용화·팝폰 복구 + 인앱 익명 fallback + 로그인 문의·DM 2열 (★배포완료) → [archive/TASKS_2026-07.md](archive/TASKS_2026-07.md) · 상세 [[project_2026_0708_event_campaign_product_extraction]] · [[reference_inapp_sdk_serving]]
 - 🟢 2026-07-07 — 인앱/이메일/DM 대개편 6종 + hlj.kr 단축링크 + 인앱 디자인 2.0~2.1 + 형태 4종 + 이메일·DM 2.0 + 행사 캠페인 (★DDL 6컬럼·hlj.kr 라이브 / frontend·SDK·backend build+deploy 잔여) → [archive/TASKS_2026-07.md](archive/TASKS_2026-07.md) · 상세 [[project_2026_0707_inapp_email_dm_overhaul]]
 - 🟢 2026-07-07(6) — 마케팅 캘린더 완비: 통지·출구·타겟 축 구멍 4건 근본수정 (★배포완료) → [archive/TASKS_2026-07.md](archive/TASKS_2026-07.md) · 상세 [[project_2026_0705_marketing_calendar_overhaul]]
 - 🟢 2026-07-06 — 운영 버그 5건 근본수정 (★배포완료 / **잔여: Harold 운영검증** — 복구 UPDATE 897 재실행·5건 실측·.env CLAUDE_MAPPING_MODEL 확인) → [archive/TASKS_2026-07.md](archive/TASKS_2026-07.md) · 상세 [[project_2026_0706_pending_fail_freeze_rootfix]]

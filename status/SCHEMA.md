@@ -2141,6 +2141,28 @@ cd /home/administrator/targetup-app/packages/backend && npm install web-push @ty
 | updated_at | timestamptz NOT NULL DEFAULT NOW() | |
 - 생성/소비 = utils/marketing-calendar-store.ts CT 단일 진입점 (routes/ai.ts generate 저장·GET 조회·POST /operator/continuous calendar_month 등록 기록).
 
+### campaign_agency_requests (CRM 캠페인 대행 접수·제안서) — 2026-07-09 신규 + 웹 폼 전환 ALTER 2건 (전부 Harold 실행·information_schema 실측 2026-07-09)
+
+| 컬럼 | 타입 | 비고 |
+|------|------|------|
+| id | uuid PK DEFAULT gen_random_uuid() | |
+| company_id | uuid NOT NULL FK → companies ON DELETE CASCADE | 분석 대상 업체(단일 스코프 불변식) |
+| created_by | uuid FK → users ON DELETE SET NULL | 접수 계정 |
+| title | varchar(200) NOT NULL | 행사명 |
+| memo | text | 고객사 메모(웹 폼 접수 = 참고사항 복사) |
+| request_file_path | text **NULL 허용(2026-07-09 DROP NOT NULL)** | legacy xlsx 접수 행 전용 — 웹 폼 접수 = null |
+| request_file_name | text | legacy 원본 파일명 |
+| parsed_json | jsonb | 폼 값 그대로 저장(AgencyRequestParsed — 파싱 단계 소멸)+직원 보정 |
+| status | varchar(20) DEFAULT 'received' | received/designing/delivered/done/on_hold |
+| proposal_pdf_path | text | 제안서(uploads/agency-proposals/<company>/<id>.pdf) |
+| staff_note | text | 직원 내부 메모 |
+| designed_at | timestamptz | 제안서 생성 시각 |
+| created_at | timestamptz DEFAULT NOW() | |
+| updated_at | timestamptz DEFAULT NOW() | |
+| image_paths | jsonb **(2026-07-09 ADD)** | 행사 이미지 [{path,name,mime}] ≤5장 — 경로는 클라이언트 비노출(인증 스트림 전용) |
+- INDEX: (company_id, created_at DESC) / (status, created_at DESC)
+- 소비 = routes/campaign-agency.ts. 비즈니스+ **활성 구독** 게이트(isCompanyEligible). 상세 = docs/2026-07-09-crm-campaign-agency-implementation.md.
+
 ### D176 운영 환경 실행 SQL (Harold 직접)
 
 ```sql

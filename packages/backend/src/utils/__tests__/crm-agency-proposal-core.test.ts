@@ -34,6 +34,20 @@ describe('guardDraftCopyBenefits', () => {
     const r = guardDraftCopyBenefits('신제품 A 29000원 특가', req({ products: [{ name: '신제품 A', price: 39000, salePrice: 29000 }] }));
     expect(r.removed).toBe(false);
   });
+  it('단위 스왑은 차단된다 — 5만원 허용이 5% 할인을 통과시키지 않는다', () => {
+    const r = guardDraftCopyBenefits('지금 구매하면 5% 할인!', req({ benefit: '5만원 이상 구매 시 사은품 증정' }));
+    expect(r.removed).toBe(true);
+    expect(r.copy).not.toContain('5%');
+    const won = guardDraftCopyBenefits('5만원 이상 구매 시 사은품 증정', req({ benefit: '5만원 이상 구매 시 사은품 증정' }));
+    expect(won.removed).toBe(false);
+  });
+  it('행사 이미지 전사(extraAllowedText)에 있는 혜택은 허용된다', () => {
+    const blocked = guardDraftCopyBenefits('선크림 44,200원 특가!', req());
+    expect(blocked.removed).toBe(true);
+    const allowed = guardDraftCopyBenefits('선크림 44,200원 특가!', req(), '퍼펙트 선크림 / 정가 52,000원 / 할인가 44,200원 (15%)');
+    expect(allowed.removed).toBe(false);
+    expect(allowed.copy).toContain('44,200');
+  });
 });
 
 describe('normalizeProposal', () => {

@@ -27,6 +27,15 @@ export const ALLOWED_IMAGE_MEDIA_TYPES = new Set(['image/jpeg', 'image/png', 'im
 /** 한 번에 판독할 이미지 최대 장수 */
 export const MAX_EVENT_IMAGES = 5;
 
+/** 이미지 버퍼 매직 바이트 판별 (jpg/png/webp) — 확장자·mimetype 위장 업로드 차단용. 미지원 형식 = null. */
+export function sniffImageMediaType(buf: Buffer | undefined): string | null {
+  if (!buf || buf.length < 12) return null;
+  if (buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff) return 'image/jpeg';
+  if (buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e && buf[3] === 0x47) return 'image/png';
+  if (buf.subarray(0, 4).toString('ascii') === 'RIFF' && buf.subarray(8, 12).toString('ascii') === 'WEBP') return 'image/webp';
+  return null;
+}
+
 const EXTRACT_SYSTEM_PROMPT = `당신은 쇼핑몰 행사/프로모션 이미지를 읽어 "행사 내용"을 그대로 옮겨 적는 전사 담당입니다.
 
 [출력 목표]

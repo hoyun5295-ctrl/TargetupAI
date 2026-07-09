@@ -17,6 +17,7 @@ import { getCompanyCosts } from '../config/defaults';
 import {
   AgencyProposalResult, buildAgencySystemPrompt, buildAgencyUserMessage, normalizeProposal,
 } from './crm-agency-proposal-core';
+import { extractEventTextFromImages, EventImageInput } from './event-image-extract';
 import type { AgencyRequestParsed } from './crm-agency-request';
 
 interface AgencyContext {
@@ -143,12 +144,25 @@ async function measurePlanTargets(
 /**
  * CRM 캠페인 대행 제안서 생성 — 슈퍼관리자 전용 진입점.
  * @param companyId 분석 대상 업체 (★ 단일 스코프 — 이 함수의 모든 하위 호출이 이 값만 사용)
+ * @param images 고객사가 접수 시 올린 행사 이미지(base64) — 있으면 vision 전사 축 추가 (번들 안 = 무과금)
  */
 export async function generateAgencyProposal(
-  companyId: string, request: AgencyRequestParsed,
+  companyId: string, request: AgencyRequestParsed, images?: EventImageInput[],
 ): Promise<AgencyProposalResult> {
   return runInCreditBundle(async () => {
     const ctx = await collectContext(companyId);
+
+    // 축 4 — 행사 이미지 판독(전사). 실패는 정직 기록 후 계속(기존 축과 동일한 best-effort).
+    let imageTranscript = '';
+    if (images && images.length > 0) {
+      try {
+        imageTranscript = await extractEventTextFromImages({ images, companyId });
+      } catch (e: any) {
+        ctx.notes.push('행사 이미지 판독 실패 — 해당 축 생략');
+        console.log('[CRM대행] 이미지 판독 축 생략:', e?.message || e);
+      }
+    }
+
     const aiText = await callAIWithFallback({
       system: buildAgencySystemPrompt(),
       userMessage: buildAgencyUserMessage({
@@ -160,6 +174,7 @@ export async function generateAgencyProposal(
         memoryLines: ctx.memoryLines,
         campaignLines: ctx.campaignLines,
         request,
+        imageTranscript: imageTranscript || undefined,
       }),
       maxTokens: 4000,
       temperature: 0.5,
@@ -169,7 +184,9 @@ export async function generateAgencyProposal(
       creditCost: 0,  // ★ 무과금 명시 (번들이 이미 0 처리 — 이중 안전)
     });
     const parsed = extractJsonFromAiText(aiText);
-    const result = normalizeProposal(parsed, ctx.companyRow.company_name || '', request);
+    // 이미지 전사 = 고객 제출물 — 혜택 출구가드 허용 텍스트에 포함
+    const result = normalizeProposal(parsed, ctx.companyRow.company_name || '', request, imageTranscript || undefined);
+    if (imageTranscript) result.imageTranscript = imageTranscript;
     await measurePlanTargets(companyId, ctx, result);
     result.dataNotes.push(...ctx.notes);
     return result;

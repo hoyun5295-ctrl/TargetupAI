@@ -1,22 +1,12 @@
 // ============================================================
-// crm-agency-request.ts — CRM 캠페인 대행: 캠페인대행요청서 양식 정의 + 파싱 (순수 CT, DB import 0)
+// crm-agency-request.ts — CRM 캠페인 대행: 요청 폼 정규화 + 필수 검증 (순수 CT, DB import 0)
 // ============================================================
-// 스펙: docs/superpowers/specs/2026-07-09-crm-campaign-agency-design.md §2
-// 양식 구조: A열 라벨 / B열 값 고정. 상품만 productsHeader 아래 3열 표(상품명·정가·할인가).
-// 양식 다운로드(xlsx 생성)와 업로드 파싱이 같은 라벨 상수를 쓰므로 코드 = 단일 진실.
-// 파싱 실패/누락은 throw하지 않고 missingRequired로 보고 — 슈퍼관리자에서 직원이 보정하는 흐름.
-
-export const AGENCY_REQUEST_LABELS = {
-  title: '행사명 (필수)',
-  periodStart: '행사 시작일 (필수, 예: 2026-07-15)',
-  periodEnd: '행사 종료일 (필수)',
-  description: '행사 내용 (필수, 자유롭게 서술)',
-  benefit: '혜택 내용 (필수, 예: 전 구매 고객 10% 할인)',
-  channels: '희망 채널 (선택: 문자/알림톡/DM/이메일/인앱/여정 — 쉼표 구분, 비우면 AI 추천)',
-  budget: '예산 (선택, 원)',
-  note: '참고사항 (선택)',
-  productsHeader: '[대상 상품/신제품 — 아래 표에 입력 (선택)]',
-} as const;
+// 스펙: docs/superpowers/specs/2026-07-09-crm-agency-webform-redesign-design.md
+// ★ 2026-07-09 웹 폼 전환 (Harold): xlsx 양식 다운로드/업로드/파싱 폐지 — 고객사가 구조화 폼 +
+//   행사 이미지(최대 5장)로 직접 접수한다. 폼 값이 AgencyRequestParsed 그대로 parsed_json에
+//   저장되므로 파싱 단계 자체가 없다. 하류(제안서 엔진·PDF·관리자 보정 폼)의 단일 입력 스키마
+//   = AgencyRequestParsed (구조 불변 — 기존 접수 행과 호환).
+// 필수 누락은 throw하지 않고 missingRequired로 보고 — 접수 endpoint가 400 처리, 관리자 보정 폼이 하이라이트.
 
 export interface AgencyRequestProduct {
   name: string;
@@ -34,31 +24,18 @@ export interface AgencyRequestParsed {
   budget: number | null;
   note: string;
   products: AgencyRequestProduct[];
-  /** 누락된 필수 라벨 목록 — throw 대신 보고(직원 보정 흐름) */
+  /** 누락된 필수 항목 라벨 목록 — throw 대신 보고(접수 400 · 직원 보정 흐름) */
   missingRequired: string[];
 }
 
-/** 양식 xlsx의 행(aoa) — 다운로드 endpoint가 XLSX.utils.aoa_to_sheet로 변환해 내려준다. */
-export function buildRequestTemplateRows(): any[][] {
-  const L = AGENCY_REQUEST_LABELS;
-  return [
-    ['한줄로 캠페인대행요청서', ''],
-    ['※ (필수) 항목을 채우신 후 이 파일을 그대로 업로드해 주세요.', ''],
-    [L.title, ''],
-    [L.periodStart, ''],
-    [L.periodEnd, ''],
-    [L.description, ''],
-    [L.benefit, ''],
-    [L.channels, ''],
-    [L.budget, ''],
-    [L.note, ''],
-    [L.productsHeader, '', ''],
-    ['상품명', '정가(원)', '할인가(원)'],
-    ['', '', ''],
-    ['', '', ''],
-    ['', '', ''],
-  ];
-}
+/** 필수 항목 (key → 사용자 라벨) — 접수 폼·관리자 보정 폼·서버 검증의 단일 진실 */
+export const AGENCY_REQUIRED_FIELDS: Array<[string, string]> = [
+  ['title', '행사명'],
+  ['periodStart', '행사 시작일'],
+  ['periodEnd', '행사 종료일'],
+  ['description', '행사 내용'],
+  ['benefit', '혜택 내용'],
+];
 
 const toNum = (v: any): number | null => {
   const n = Number(String(v ?? '').replace(/[^\d.]/g, ''));
@@ -66,46 +43,32 @@ const toNum = (v: any): number | null => {
 };
 const toStr = (v: any): string => String(v ?? '').trim();
 
-/** 업로드된 시트(aoa rows)를 파싱한다. 라벨 텍스트가 살짝 달라져도(고객 편집) 라벨 원문 일치 기준 — 불일치는 누락으로 보고. */
-export function parseRequestSheet(rows: any[][]): AgencyRequestParsed {
-  const L = AGENCY_REQUEST_LABELS;
-  const byLabel = new Map<string, any>();
-  for (const r of rows || []) {
-    const label = toStr(r?.[0]);
-    if (label && !byLabel.has(label)) byLabel.set(label, r?.[1]);
-  }
-  const get = (label: string) => toStr(byLabel.get(label));
+/** 웹 폼 payload(JSON) → 검증된 AgencyRequestParsed. 이상값은 정규화, 필수 누락은 missingRequired 보고. */
+export function buildParsedFromForm(raw: any): AgencyRequestParsed {
+  const channels = (Array.isArray(raw?.channels)
+    ? raw.channels.map(toStr)
+    : toStr(raw?.channels).split(',').map((s) => s.trim())
+  ).filter(Boolean).slice(0, 10);
 
-  // 상품 표 — productsHeader 다음다음 행부터(헤더행 skip), 연속된 행만.
-  // ★ 빈 행 = 표 종료(break). 표 아래 여백·푸터 텍스트가 상품으로 오인되는 것 차단(왕복 테스트로 고정).
-  const products: AgencyRequestProduct[] = [];
-  const headerIdx = (rows || []).findIndex((r) => toStr(r?.[0]) === L.productsHeader);
-  if (headerIdx >= 0) {
-    for (let i = headerIdx + 2; i < rows.length; i++) {
-      const name = toStr(rows[i]?.[0]);
-      if (!name) break;
-      products.push({ name, price: toNum(rows[i]?.[1]), salePrice: toNum(rows[i]?.[2]) });
-    }
-  }
+  const products: AgencyRequestProduct[] = (Array.isArray(raw?.products) ? raw.products : [])
+    .map((p: any) => ({ name: toStr(p?.name).slice(0, 120), price: toNum(p?.price), salePrice: toNum(p?.salePrice) }))
+    .filter((p: AgencyRequestProduct) => p.name)
+    .slice(0, 30);
 
-  const requiredEntries: Array<[string, string]> = [
-    [L.title, get(L.title)],
-    [L.periodStart, get(L.periodStart)],
-    [L.periodEnd, get(L.periodEnd)],
-    [L.description, get(L.description)],
-    [L.benefit, get(L.benefit)],
-  ];
-
-  return {
-    title: get(L.title),
-    periodStart: get(L.periodStart),
-    periodEnd: get(L.periodEnd),
-    description: get(L.description),
-    benefit: get(L.benefit),
-    channels: get(L.channels).split(',').map((s) => s.trim()).filter(Boolean),
-    budget: toNum(byLabel.get(L.budget)),
-    note: get(L.note),
+  const parsed: AgencyRequestParsed = {
+    title: toStr(raw?.title).slice(0, 200),
+    periodStart: toStr(raw?.periodStart).slice(0, 40),
+    periodEnd: toStr(raw?.periodEnd).slice(0, 40),
+    description: toStr(raw?.description).slice(0, 4000),
+    benefit: toStr(raw?.benefit).slice(0, 1000),
+    channels,
+    budget: toNum(raw?.budget),
+    note: toStr(raw?.note).slice(0, 2000),
     products,
-    missingRequired: requiredEntries.filter(([, v]) => !v).map(([label]) => label),
+    missingRequired: [],
   };
+  parsed.missingRequired = AGENCY_REQUIRED_FIELDS
+    .filter(([key]) => !toStr((parsed as any)[key]))
+    .map(([, label]) => label);
+  return parsed;
 }

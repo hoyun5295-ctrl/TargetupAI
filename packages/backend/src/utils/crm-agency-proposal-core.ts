@@ -36,6 +36,8 @@ export interface AgencyProposalResult {
   risks: string[];
   /** insufficient_data 등 정직 표기 */
   dataNotes: string[];
+  /** 행사 이미지 판독(전사) 결과 — 오케스트레이션이 채움(이미지 없으면 undefined). PDF·요약 표기용 */
+  imageTranscript?: string;
 }
 
 const CHANNEL_WHITELIST: AgencyChannel[] = ['sms', 'lms', 'mms', 'alimtalk', 'dm', 'email', 'inapp', 'journey'];
@@ -55,30 +57,55 @@ export function normalizeAgencyChannel(raw: any): AgencyChannel {
 // 구체 혜택 패턴 — 요청서 benefit·상품 가격에 없는 수치 혜택이 문안에 등장하면 그 줄을 제거(출구 가드)
 const BENEFIT_PATTERN = /(\d[\d,.]*\s*%|\d[\d,.]*\s*만?\s*원|무료|쿠폰|사은품|적립|증정)/g;
 
-function collectAllowedBenefitText(request: AgencyRequestParsed): string {
+function collectAllowedBenefitText(request: AgencyRequestParsed, extraAllowedText?: string): string {
   const productNums = request.products
     .flatMap((p) => [p.price, p.salePrice])
     .filter((n): n is number => n != null)
     .map((n) => String(n));
-  return [request.benefit, request.description, ...productNums].join(' ');
+  // extraAllowedText = 행사 이미지 판독(전사) — 고객사가 제출한 이미지의 실측 내용이므로 혜택 허용 텍스트에 포함
+  return [request.benefit, request.description, extraAllowedText || '', ...productNums].join(' ');
+}
+
+/** 숫자 혜택 토큰의 단위 분류 — %와 원을 구분해 "5만원 → 5%" 같은 단위 스왑 통과를 차단(Codex 2차 리뷰 정정). */
+function classifyBenefitToken(m: string): { digits: string; unit: 'percent' | 'won' | 'text' } {
+  const compact = m.replace(/[\s,]/g, '');
+  const digits = compact.replace(/[^\d]/g, '');
+  if (!digits) return { digits: '', unit: 'text' };
+  return { digits, unit: compact.includes('%') ? 'percent' : 'won' };
 }
 
 /** 문안 출구 가드 — 허용 텍스트에 근거 없는 구체 혜택이 든 줄 제거. 제거 발생 시 사유 반환.
- *  숫자 혜택(10%·29000원)은 숫자 코어로 비교(접미 원/% 차이 흡수), 비숫자(무료·쿠폰)는 문자열 포함으로 비교. */
+ *  숫자 혜택은 단위(%/원)까지 일치해야 허용. 단위 없는 허용 수치(상품 가격 등)는 원 단위 표현만 허용.
+ *  비숫자(무료·쿠폰)는 문자열 포함으로 비교. */
 export function guardDraftCopyBenefits(
-  draft: string, request: AgencyRequestParsed,
+  draft: string, request: AgencyRequestParsed, extraAllowedText?: string,
 ): { copy: string; removed: boolean } {
-  const allowedRaw = collectAllowedBenefitText(request);
+  const allowedRaw = collectAllowedBenefitText(request, extraAllowedText);
   const allowed = allowedRaw.replace(/[\s,]/g, '');
-  const allowedDigits = new Set((allowedRaw.match(/\d[\d,.]*/g) || []).map((d) => d.replace(/[^\d]/g, '')));
+  // 허용 텍스트의 단위 붙은 토큰(10%·5만원)은 단위별 세트로, 단위 없는 맨 숫자(상품 가격)는 plain 세트로.
+  const percentSet = new Set<string>();
+  const wonSet = new Set<string>();
+  const unitTokens = allowedRaw.match(BENEFIT_PATTERN) || [];
+  let bareText = allowedRaw;
+  for (const t of unitTokens) {
+    const { digits, unit } = classifyBenefitToken(t);
+    if (!digits) continue;
+    if (unit === 'percent') percentSet.add(digits);
+    else wonSet.add(digits);
+    bareText = bareText.replace(t, ' ');
+  }
+  const plainSet = new Set((bareText.match(/\d[\d,.]*/g) || []).map((d) => d.replace(/[^\d]/g, '')));
+
   let removed = false;
   const lines = String(draft || '').split('\n').filter((line) => {
     const matches = line.match(BENEFIT_PATTERN);
     if (!matches) return true;
     const ok = matches.every((m) => {
       const compact = m.replace(/[\s,]/g, '');
-      const digits = compact.replace(/[^\d]/g, '');
-      return digits ? allowedDigits.has(digits) || allowed.includes(compact) : allowed.includes(compact);
+      const { digits, unit } = classifyBenefitToken(m);
+      if (!digits) return allowed.includes(compact);                          // 무료/쿠폰/사은품 등
+      if (unit === 'percent') return percentSet.has(digits) || allowed.includes(compact);
+      return wonSet.has(digits) || plainSet.has(digits) || allowed.includes(compact);  // 원 단위
     });
     if (!ok) removed = true;
     return ok;
@@ -86,9 +113,10 @@ export function guardDraftCopyBenefits(
   return { copy: lines.join('\n').trim(), removed };
 }
 
-/** AI 응답(JSON parse 결과) → 검증된 결과. plans 0건이면 throw(직원 재실행 흐름 — 위장 성공 금지). */
+/** AI 응답(JSON parse 결과) → 검증된 결과. plans 0건이면 throw(직원 재실행 흐름 — 위장 성공 금지).
+ *  extraAllowedText = 행사 이미지 전사(혜택 출구가드 허용 텍스트에 포함). */
 export function normalizeProposal(
-  raw: any, companyName: string, request: AgencyRequestParsed,
+  raw: any, companyName: string, request: AgencyRequestParsed, extraAllowedText?: string,
 ): AgencyProposalResult {
   const arr = (v: any): string[] => Array.isArray(v) ? v.map((s) => String(s ?? '').trim()).filter(Boolean) : [];
   const rawPlans: any[] = Array.isArray(raw?.plans) ? raw.plans : [];
@@ -98,7 +126,7 @@ export function normalizeProposal(
   const plans: AgencyPlan[] = rawPlans.slice(0, 5).map((p) => {
     let draft = String(p?.draftCopy ?? '').trim();
     if (detectLiquidSyntax(draft)) draft = flattenLiquidToPlainText(draft);
-    const guarded = guardDraftCopyBenefits(draft, request);
+    const guarded = guardDraftCopyBenefits(draft, request, extraAllowedText);
     if (guarded.removed) {
       risks.push(`'${String(p?.title ?? '플랜')}' 문안에서 요청서에 없는 혜택 표현을 제거했습니다 — 발송 전 혜택 확인 필요.`);
     }
@@ -137,7 +165,7 @@ export function buildAgencySystemPrompt(): string {
   return `당신은 한줄로(CRM 마케팅 SaaS)의 시니어 CRM 컨설턴트입니다. 제공된 "실측 데이터"만 근거로, 요청 행사에 맞는 캠페인 플랜 제안서를 JSON으로 작성합니다.
 
 [절대 규칙]
-1. 혜택: "요청 혜택" 텍스트에 있는 내용만 사용. 거기 없는 할인율·금액·무료·쿠폰·사은품을 새로 만들지 마세요.
+1. 혜택: "요청 혜택" 텍스트와 "행사 이미지 판독" 내용에 실제로 있는 것만 사용. 거기 없는 할인율·금액·무료·쿠폰·사은품을 새로 만들지 마세요.
 2. 타겟(targetDescription): 명확한 규칙 한 문장(고객 등급/최근 구매일/보유 포인트/가입 시점/구매 횟수 기준만). 확률·예측·성향 표현 금지.
 3. 개인화 변수: 퍼센트 기호로 감싼 형태만 사용(예: %고객명%, %등급%, %포인트%). 중괄호 기반 템플릿 문법은 절대 사용하지 마세요.
 4. channel 값: sms | lms | mms | alimtalk | dm | email | inapp | journey 중 하나.
@@ -169,11 +197,16 @@ export function buildAgencyUserMessage(input: {
   memoryLines: string[];                      // "type · key: value (중요도 N)"
   campaignLines: string[];                    // "YYYY-MM-DD · 이름 · 유형 · 대상 N · 성공 N"
   request: AgencyRequestParsed;
+  /** 행사 이미지 판독(전사) — 고객사 업로드 이미지의 실측 내용 (없으면 생략) */
+  imageTranscript?: string;
 }): string {
   const r = input.request;
   const products = r.products.length
     ? r.products.map((p) => `- ${p.name}${p.price ? ` 정가 ${p.price}원` : ''}${p.salePrice ? ` → 할인 ${p.salePrice}원` : ''}`).join('\n')
     : '(없음)';
+  const transcriptBlock = input.imageTranscript
+    ? `\n## 행사 이미지 판독 (고객사가 올린 행사 이미지에 실제로 보이는 내용 — 실측 전사)\n${input.imageTranscript}\n`
+    : '';
   return `## 회사
 - 회사명: ${input.companyName} / 업종: ${input.businessType || '미상'} / 브랜드: ${input.brandName || '-'} / 톤: ${input.brandTone || '-'}
 
@@ -196,6 +229,6 @@ ${input.campaignLines.length ? input.campaignLines.join('\n') : '(아직 없음)
 - 대상 상품:
 ${products}
 - 참고사항: ${r.note || '(없음)'}
-
+${transcriptBlock}
 위 실측 데이터에 근거해 이 행사에 맞는 캠페인 플랜 제안서 JSON을 작성하세요.`;
 }
