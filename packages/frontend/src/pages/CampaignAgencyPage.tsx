@@ -10,7 +10,7 @@ import {
 } from 'lucide-react';
 import { useToast } from '../components/ToastProvider';
 import AgencyRequestForm, {
-  AgencyFormValue, EMPTY_AGENCY_FORM, agencyMissingLabels, buildAgencyPayload, parsedToFormValue,
+  AgencyFormValue, EMPTY_AGENCY_FORM, agencyMissingLabels, buildAgencyPayload, parsedToFormValue, mergeAnalyzedIntoForm,
 } from '../components/agency/AgencyRequestForm';
 
 interface AgencyRequestRow {
@@ -44,6 +44,7 @@ export default function CampaignAgencyPage() {
   const [form, setForm] = useState<AgencyFormValue>(EMPTY_AGENCY_FORM);
   const [images, setImages] = useState<File[]>([]);
   const [submitting, setSubmitting] = useState(false);
+  const [analyzing, setAnalyzing] = useState(false);
   // 접수 상세 모달
   const [detail, setDetail] = useState<AgencyRequestRow | null>(null);
   const [detailImageUrls, setDetailImageUrls] = useState<string[]>([]);
@@ -89,6 +90,26 @@ export default function CampaignAgencyPage() {
   }, [detail?.id]);
 
   const openForm = () => { setForm(EMPTY_AGENCY_FORM); setImages([]); setShowForm(true); };
+
+  // 이미지 → AI 자동 입력 (빈 필드만 채움 + 상품 추가 — 입력분은 보존)
+  const analyzeImages = async () => {
+    if (images.length === 0) { toast.error('이미지를 먼저 올려주세요.'); return; }
+    setAnalyzing(true);
+    try {
+      const fd = new FormData();
+      images.forEach((f) => fd.append('images', f));
+      const res = await fetch('/api/campaign-agency/requests/analyze-images', { method: 'POST', headers: auth(), body: fd });
+      const d = await res.json();
+      if (d.success && d.form) {
+        setForm((cur) => mergeAnalyzedIntoForm(cur, d.form));
+        toast.success('이미지 내용을 자동 입력했습니다 — 확인 후 접수해 주세요.');
+      } else {
+        toast.error(d.error || '이미지 판독에 실패했습니다.');
+      }
+    } catch {
+      toast.error('이미지 판독에 실패했습니다. 잠시 후 다시 시도해 주세요.');
+    } finally { setAnalyzing(false); }
+  };
 
   const submit = async () => {
     const missing = agencyMissingLabels(form);
@@ -249,13 +270,14 @@ export default function CampaignAgencyPage() {
             </div>
             {/* 모달 본문 */}
             <div className="flex-1 overflow-y-auto p-4 md:p-5">
-              <AgencyRequestForm theme="dark" value={form} onChange={setForm} disabled={submitting}
-                images={images} onImagesChange={setImages} onImageError={(m) => toast.error(m)} />
+              <AgencyRequestForm theme="dark" value={form} onChange={setForm} disabled={submitting || analyzing}
+                images={images} onImagesChange={setImages} onImageError={(m) => toast.error(m)}
+                onAnalyzeImages={analyzeImages} analyzing={analyzing} />
             </div>
             {/* 모달 푸터 */}
             <div className="px-5 py-4 border-t border-white/10 shrink-0 flex items-center gap-3 flex-wrap">
               <div className="text-[11px] text-white/35 min-w-0 flex-1">접수 후 한줄로 운영팀이 확인하고, 귀사 데이터만으로 분석한 제안서를 전달해 드립니다.</div>
-              <button onClick={submit} disabled={submitting}
+              <button onClick={submit} disabled={submitting || analyzing}
                 className="inline-flex items-center gap-2 bg-violet-500/50 hover:bg-violet-500/70 disabled:opacity-40 text-violet-50 text-sm font-semibold px-6 py-2.5 rounded-xl transition-colors">
                 {submitting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}접수하기
               </button>

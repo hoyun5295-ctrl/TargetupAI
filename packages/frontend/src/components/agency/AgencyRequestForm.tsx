@@ -2,7 +2,7 @@
 // 스펙: docs/superpowers/specs/2026-07-09-crm-agency-webform-redesign-design.md
 // 서버 스키마(AgencyRequestParsed·buildParsedFromForm)와 필드 구조 일치 — payload는 buildAgencyPayload로 생성.
 import { useEffect, useMemo, type ReactNode } from 'react';
-import { Plus, Trash2, ImagePlus, X, CalendarRange, Gift, Megaphone, Package, FileText, Images } from 'lucide-react';
+import { Plus, Trash2, ImagePlus, X, CalendarRange, Gift, Megaphone, Package, FileText, Images, Sparkles, Loader2 } from 'lucide-react';
 
 export interface AgencyProductRow { name: string; price: string; salePrice: string }
 
@@ -53,6 +53,30 @@ export function buildAgencyPayload(v: AgencyFormValue) {
   };
 }
 
+/** 이미지 자동 입력 결과를 폼에 병합 — 이미 입력된 필드는 유지(빈 필드만 채움), 상품은 이름 중복 없이 추가 */
+export function mergeAnalyzedIntoForm(current: AgencyFormValue, analyzed: any): AgencyFormValue {
+  const pick = (cur: string, next: any) => (cur.trim() ? cur : String(next ?? '').trim());
+  const products = [...current.products];
+  for (const p of (Array.isArray(analyzed?.products) ? analyzed.products : [])) {
+    const name = String(p?.name || '').trim();
+    if (!name || products.some((x) => x.name.trim() === name)) continue;
+    products.push({
+      name,
+      price: p?.price != null ? String(p.price) : '',
+      salePrice: p?.salePrice != null ? String(p.salePrice) : '',
+    });
+  }
+  return {
+    ...current,
+    title: pick(current.title, analyzed?.title),
+    periodStart: pick(current.periodStart, analyzed?.periodStart),
+    periodEnd: pick(current.periodEnd, analyzed?.periodEnd),
+    description: pick(current.description, analyzed?.description),
+    benefit: pick(current.benefit, analyzed?.benefit),
+    products,
+  };
+}
+
 /** 저장된 parsed_json → 폼 값 (관리자 보정·상세 표시) */
 export function parsedToFormValue(p: any): AgencyFormValue {
   return {
@@ -92,6 +116,7 @@ const STYLES: Record<Theme, Record<string, string>> = {
     thumbWrap: 'relative group border border-white/10 rounded-xl overflow-hidden',
     thumbRemove: 'absolute top-1 right-1 bg-slate-950/80 text-white/80 hover:text-rose-300 rounded-full p-1',
     hint: 'text-[11px] text-white/35',
+    analyzeBtn: 'w-full inline-flex items-center justify-center gap-2 bg-gradient-to-r from-violet-500/60 to-fuchsia-500/60 hover:from-violet-500/80 hover:to-fuchsia-500/80 disabled:opacity-40 text-white text-sm font-semibold px-4 py-2.5 rounded-xl transition-colors',
   },
   light: {
     input: 'w-full bg-white border border-gray-200 rounded-xl px-3.5 py-2.5 text-sm text-gray-800 placeholder:text-gray-400 focus:outline-none focus:border-violet-400',
@@ -112,6 +137,7 @@ const STYLES: Record<Theme, Record<string, string>> = {
     thumbWrap: 'relative group border border-gray-200 rounded-xl overflow-hidden',
     thumbRemove: 'absolute top-1 right-1 bg-white/90 text-gray-500 hover:text-rose-500 rounded-full p-1 shadow',
     hint: 'text-[11px] text-gray-400',
+    analyzeBtn: 'w-full inline-flex items-center justify-center gap-2 bg-violet-600 hover:bg-violet-700 disabled:opacity-40 text-white text-sm font-semibold px-4 py-2.5 rounded-xl transition-colors',
   },
 };
 
@@ -124,10 +150,13 @@ interface AgencyRequestFormProps {
   images?: File[];
   onImagesChange?: (files: File[]) => void;
   onImageError?: (msg: string) => void;
+  /** 전달 시 이미지 섹션에 [AI로 자동 입력] 버튼 노출 — 부모가 endpoint 호출 후 mergeAnalyzedIntoForm으로 병합 */
+  onAnalyzeImages?: () => void;
+  analyzing?: boolean;
 }
 
 export default function AgencyRequestForm({
-  theme, value, onChange, disabled, images, onImagesChange, onImageError,
+  theme, value, onChange, disabled, images, onImagesChange, onImageError, onAnalyzeImages, analyzing,
 }: AgencyRequestFormProps) {
   const S = STYLES[theme];
   const set = (patch: Partial<AgencyFormValue>) => onChange({ ...value, ...patch });
@@ -165,6 +194,45 @@ export default function AgencyRequestForm({
 
   return (
     <div className="space-y-4">
+      {/* 행사 이미지 — 최상단: 올리면 AI가 아래 필드 자동 입력 (2026-07-09 Harold) */}
+      {onImagesChange && (
+        section(<Images className="w-4 h-4" />, `행사 이미지 (선택, 최대 ${AGENCY_MAX_IMAGES}장)`,
+          '행사 포스터·상품 이미지를 올리면 AI가 아래 내용을 자동으로 채워 드립니다 — 확인·수정만 하시면 됩니다.', (
+          <div className="space-y-3">
+            <label
+              className={`${S.dropzone} block`}
+              onDragOver={(e) => e.preventDefault()}
+              onDrop={(e) => { e.preventDefault(); if (!disabled && !analyzing) addImages(e.dataTransfer.files); }}
+            >
+              <ImagePlus className={`w-6 h-6 mx-auto mb-1.5 ${S.sectionIcon}`} />
+              <div className={S.dropTitle}>클릭 또는 드래그로 이미지 추가</div>
+              <div className={S.dropSub}>JPG · PNG · WebP, 장당 {AGENCY_MAX_IMAGE_MB}MB 이하</div>
+              <input type="file" multiple accept="image/jpeg,image/png,image/webp" className="hidden" disabled={disabled || analyzing}
+                onChange={(e) => { addImages(e.target.files); e.target.value = ''; }} />
+            </label>
+            {previews.length > 0 && (
+              <div className="grid grid-cols-3 md:grid-cols-5 gap-2">
+                {previews.map((p, i) => (
+                  <div key={p.key} className={`${S.thumbWrap} aspect-square`}>
+                    <img src={p.url} alt={p.name} className="w-full h-full object-cover" />
+                    <button type="button" disabled={disabled || analyzing} onClick={() => onImagesChange((images || []).filter((_, j) => j !== i))}
+                      className={S.thumbRemove} aria-label="이미지 삭제">
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+            {onAnalyzeImages && (images || []).length > 0 && (
+              <button type="button" onClick={onAnalyzeImages} disabled={disabled || analyzing} className={S.analyzeBtn}>
+                {analyzing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
+                {analyzing ? '이미지 판독 중 — 잠시만 기다려주세요' : 'AI로 자동 입력 (행사명·기간·내용·혜택·상품)'}
+              </button>
+            )}
+          </div>
+        ))
+      )}
+
       {/* 행사 정보 */}
       {section(<Megaphone className="w-4 h-4" />, '행사 정보', '어떤 행사인지 알려주시면 그대로 분석에 사용됩니다.', (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
@@ -244,38 +312,6 @@ export default function AgencyRequestForm({
           </button>
         </div>
       ))}
-
-      {/* 행사 이미지 */}
-      {onImagesChange && (
-        section(<Images className="w-4 h-4" />, `행사 이미지 (선택, 최대 ${AGENCY_MAX_IMAGES}장)`, '행사 포스터·상품 이미지를 올려주시면 함께 분석해 제안서에 반영합니다.', (
-          <div className="space-y-3">
-            <label
-              className={`${S.dropzone} block`}
-              onDragOver={(e) => e.preventDefault()}
-              onDrop={(e) => { e.preventDefault(); if (!disabled) addImages(e.dataTransfer.files); }}
-            >
-              <ImagePlus className={`w-6 h-6 mx-auto mb-1.5 ${S.sectionIcon}`} />
-              <div className={S.dropTitle}>클릭 또는 드래그로 이미지 추가</div>
-              <div className={S.dropSub}>JPG · PNG · WebP, 장당 {AGENCY_MAX_IMAGE_MB}MB 이하</div>
-              <input type="file" multiple accept="image/jpeg,image/png,image/webp" className="hidden" disabled={disabled}
-                onChange={(e) => { addImages(e.target.files); e.target.value = ''; }} />
-            </label>
-            {previews.length > 0 && (
-              <div className="grid grid-cols-3 md:grid-cols-5 gap-2">
-                {previews.map((p, i) => (
-                  <div key={p.key} className={`${S.thumbWrap} aspect-square`}>
-                    <img src={p.url} alt={p.name} className="w-full h-full object-cover" />
-                    <button type="button" disabled={disabled} onClick={() => onImagesChange((images || []).filter((_, j) => j !== i))}
-                      className={S.thumbRemove} aria-label="이미지 삭제">
-                      <X className="w-3.5 h-3.5" />
-                    </button>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        ))
-      )}
 
       {/* 참고사항 */}
       {section(<FileText className="w-4 h-4" />, '참고사항 (선택)', '운영팀에 전달하고 싶은 내용을 자유롭게 적어주세요.', (

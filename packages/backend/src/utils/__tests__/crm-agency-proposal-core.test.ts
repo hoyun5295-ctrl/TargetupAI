@@ -1,6 +1,6 @@
 // CRM 캠페인 대행 — 제안서 정규화/출구 가드 순수 코어 테스트 (2026-07-09)
 import { describe, it, expect } from 'vitest';
-import { normalizeProposal, normalizeAgencyChannel, guardDraftCopyBenefits } from '../crm-agency-proposal-core';
+import { normalizeProposal, normalizeAgencyChannel, guardDraftCopyBenefits, buildAgencyIntakeSystemPrompt } from '../crm-agency-proposal-core';
 import type { AgencyRequestParsed } from '../crm-agency-request';
 
 const req = (over: Partial<AgencyRequestParsed> = {}): AgencyRequestParsed => ({
@@ -47,6 +47,17 @@ describe('guardDraftCopyBenefits', () => {
     const allowed = guardDraftCopyBenefits('선크림 44,200원 특가!', req(), '퍼펙트 선크림 / 정가 52,000원 / 할인가 44,200원 (15%)');
     expect(allowed.removed).toBe(false);
     expect(allowed.copy).toContain('44,200');
+  });
+});
+
+describe('buildAgencyIntakeSystemPrompt', () => {
+  it('접수 폼 필드 키와 추정 금지 규칙을 포함한다 (buildParsedFromForm 입력 호환)', () => {
+    const p = buildAgencyIntakeSystemPrompt();
+    for (const key of ['title', 'periodStart', 'periodEnd', 'description', 'benefit', 'products']) {
+      expect(p).toContain(key);
+    }
+    expect(p).toContain('지어내지 마세요');
+    expect(p).toContain('YYYY-MM-DD');
   });
 });
 

@@ -17,7 +17,7 @@ import { query } from '../config/database';
 import { authenticate, requireSuperAdmin } from '../middlewares/auth';
 import { loadPlanContext, isBetaAccessAllowed, isSubscriptionBlocked } from '../utils/plan-guard';
 import { buildParsedFromForm, AgencyRequestParsed } from '../utils/crm-agency-request';
-import { generateAgencyProposal } from '../utils/crm-agency-proposal';
+import { generateAgencyProposal, analyzeAgencyIntakeImages } from '../utils/crm-agency-proposal';
 import { renderAgencyProposalPdf } from '../utils/crm-agency-pdf-render';
 import {
   sniffImageMediaType, ALLOWED_IMAGE_MEDIA_TYPES, MAX_EVENT_IMAGES, EventImageInput,
@@ -101,6 +101,19 @@ function validateAndSaveImages(companyId: string, files: Express.Multer.File[]):
   return saved;
 }
 
+/** 업로드 버퍼 → vision 입력(base64) — 매직바이트 검증, 저장 없음(폼 자동 입력 전용) */
+function toVisionInputs(files: Express.Multer.File[]): EventImageInput[] {
+  const inputs: EventImageInput[] = [];
+  for (const f of files) {
+    const sniffed = sniffImageMediaType(f.buffer);
+    if (!sniffed || !MIME_EXT[sniffed]) {
+      throw Object.assign(new Error(`이미지 파일이 아닙니다: ${f.originalname || '이름 없음'} — JPG/PNG/WebP만 가능합니다.`), { statusCode: 400 });
+    }
+    inputs.push({ media_type: sniffed, data: f.buffer.toString('base64') });
+  }
+  return inputs;
+}
+
 function unlinkImages(images: AgencyImageMeta[]): void {
   for (const im of images) {
     try { fs.unlinkSync(im.path); } catch { /* 정리 실패는 무시 — 원 에러 우선 */ }
@@ -138,6 +151,9 @@ function withImageUpload(handler: (req: any, res: Response) => Promise<any>) {
       }
       try { await handler(req, res); } catch (err: any) {
         if (missingRelationResponse(res, err)) return;
+        if (err?.name === 'AiRateLimitExceeded') {
+          return res.status(429).json({ success: false, error: err.message });
+        }
         console.error('[캠페인대행 업로드 핸들러] 오류:', err?.message || err);
         return res.status(err?.statusCode === 400 ? 400 : 500).json({ success: false, error: err?.message || '처리 실패' });
       }
@@ -161,6 +177,18 @@ router.get('/eligibility', async (req: Request, res: Response) => {
     return res.json({ success: true, eligible: false });
   }
 });
+
+/** 이미지 → 접수 폼 자동 입력 (저장 없음 · 무과금) — 폼 최상단 [AI로 자동 입력] 버튼 */
+router.post('/requests/analyze-images', withImageUpload(async (req: any, res: Response) => {
+  const companyId = req.user?.companyId;
+  if (!companyId || !(await checkEligibility(companyId, req.user))) {
+    return res.status(403).json({ success: false, error: '본 기능은 비즈니스·엔터프라이즈 요금제 전용입니다.', code: 'BETA_GATE' });
+  }
+  const files = (req.files as Express.Multer.File[]) || [];
+  if (!files.length) return res.status(400).json({ success: false, error: '이미지를 1장 이상 올려주세요.' });
+  const parsed = await analyzeAgencyIntakeImages(companyId, toVisionInputs(files));
+  return res.json({ success: true, form: parsed });
+}));
 
 /** 요청 접수 — 웹 폼(payload JSON) + 행사 이미지(≤5장). 필수 누락 = 400(폼이 완결 입력을 보장). */
 router.post('/requests', withImageUpload(async (req: any, res: Response) => {
@@ -450,6 +478,19 @@ router.post('/admin/requests/:id/design', requireSuperAdmin, async (req: Request
     return res.status(500).json({ success: false, error: err?.message || '분석 실행 실패' });
   }
 });
+
+/** 직접 설계용 이미지 → 폼 자동 입력 (저장 없음 · 무과금) — 업체 선택 후 사용 */
+router.post('/admin/design-adhoc/analyze-images', requireSuperAdmin, withImageUpload(async (req: any, res: Response) => {
+  const companyId = String(req.body?.companyId || '').trim();
+  if (!companyId) return res.status(400).json({ success: false, error: '업체를 먼저 선택해 주세요.' });
+  if (!(await isCompanyEligible(companyId))) {
+    return res.status(400).json({ success: false, error: '비즈니스·엔터프라이즈 활성 구독 업체만 가능합니다.' });
+  }
+  const files = (req.files as Express.Multer.File[]) || [];
+  if (!files.length) return res.status(400).json({ success: false, error: '이미지를 1장 이상 올려주세요.' });
+  const parsed = await analyzeAgencyIntakeImages(companyId, toVisionInputs(files));
+  return res.json({ success: true, form: parsed });
+}));
 
 /** 직행 — 업체 선택 + 웹 폼(+이미지) → 접수 행 생성 + 즉시 분석 (Harold 흐름: 1단계) */
 router.post('/admin/design-adhoc', requireSuperAdmin, withImageUpload(async (req: any, res: Response) => {

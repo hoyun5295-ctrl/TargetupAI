@@ -12,7 +12,7 @@ import {
 import ConfirmModal, { ConfirmState } from '../components/ConfirmModal';
 import { useToast } from '../components/ToastProvider';
 import AgencyRequestForm, {
-  AgencyFormValue, EMPTY_AGENCY_FORM, agencyMissingLabels, buildAgencyPayload, parsedToFormValue,
+  AgencyFormValue, EMPTY_AGENCY_FORM, agencyMissingLabels, buildAgencyPayload, parsedToFormValue, mergeAnalyzedIntoForm,
 } from '../components/agency/AgencyRequestForm';
 
 interface AdminAgencyRow {
@@ -80,6 +80,7 @@ export default function AdminCampaignAgencyPage() {
   const [adhocForm, setAdhocForm] = useState<AgencyFormValue>(EMPTY_AGENCY_FORM);
   const [adhocImages, setAdhocImages] = useState<File[]>([]);
   const [adhocRunning, setAdhocRunning] = useState(false);
+  const [adhocAnalyzing, setAdhocAnalyzing] = useState(false);
   // adhoc 성공 직후 상세 모달을 열 때, 선택 변경 effect의 runSummary 초기화에 지워지지 않도록 보존
   const pendingSummaryRef = useRef<any>(null);
 
@@ -188,6 +189,24 @@ export default function AdminCampaignAgencyPage() {
   };
 
   const openAdhoc = () => { setAdhocCompany(''); setAdhocForm(EMPTY_AGENCY_FORM); setAdhocImages([]); setShowAdhoc(true); };
+
+  // 직접 설계 이미지 → AI 자동 입력 (크레딧 컨텍스트용 업체 선택 선행)
+  const analyzeAdhocImages = async () => {
+    if (!adhocCompany) { toast.error('업체를 먼저 선택해 주세요.'); return; }
+    if (adhocImages.length === 0) { toast.error('이미지를 먼저 올려주세요.'); return; }
+    setAdhocAnalyzing(true);
+    try {
+      const fd = new FormData();
+      fd.append('companyId', adhocCompany);
+      adhocImages.forEach((f) => fd.append('images', f));
+      const res = await fetch('/api/campaign-agency/admin/design-adhoc/analyze-images', { method: 'POST', headers: auth(), body: fd });
+      const d = await res.json();
+      if (d.success && d.form) {
+        setAdhocForm((cur) => mergeAnalyzedIntoForm(cur, d.form));
+        toast.success('이미지 내용을 자동 입력했습니다 — 확인 후 실행해 주세요.');
+      } else toast.error(d.error || '이미지 판독에 실패했습니다.');
+    } catch { toast.error('이미지 판독에 실패했습니다.'); } finally { setAdhocAnalyzing(false); }
+  };
 
   const runAdhoc = () => {
     if (!adhocCompany) { toast.error('업체를 선택해 주세요.'); return; }
@@ -484,12 +503,13 @@ export default function AdminCampaignAgencyPage() {
                 </select>
                 <div className="text-[11px] text-gray-400 mt-1.5">선택한 업체의 데이터만 분석합니다 — 교차 분석 없음.</div>
               </div>
-              <AgencyRequestForm theme="light" value={adhocForm} onChange={setAdhocForm} disabled={adhocRunning}
-                images={adhocImages} onImagesChange={setAdhocImages} onImageError={(m) => toast.error(m)} />
+              <AgencyRequestForm theme="light" value={adhocForm} onChange={setAdhocForm} disabled={adhocRunning || adhocAnalyzing}
+                images={adhocImages} onImagesChange={setAdhocImages} onImageError={(m) => toast.error(m)}
+                onAnalyzeImages={analyzeAdhocImages} analyzing={adhocAnalyzing} />
             </div>
             <div className="px-5 py-4 border-t border-gray-200 shrink-0 flex items-center gap-2">
               <div className="text-[11px] text-gray-400 min-w-0 flex-1">실행 시 접수함에 "설계 중" 건으로 등록되고 즉시 분석됩니다.</div>
-              <button onClick={runAdhoc} disabled={adhocRunning}
+              <button onClick={runAdhoc} disabled={adhocRunning || adhocAnalyzing}
                 className="inline-flex items-center gap-1.5 bg-violet-600 hover:bg-violet-700 disabled:opacity-40 text-white text-sm font-semibold px-5 py-2.5 rounded-xl">
                 {adhocRunning ? <Loader2 className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4" />}분석 실행 → 제안서 생성
               </button>

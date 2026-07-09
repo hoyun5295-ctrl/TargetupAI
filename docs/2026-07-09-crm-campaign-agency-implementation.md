@@ -27,7 +27,8 @@
 
 ### 고객사 (app.hanjul.ai) — 접수만
 - 헤더 메뉴 "캠페인 대행" (planCode BUSINESS/ENTERPRISE에서만 노출)
-- `/campaign-agency` 페이지(다크): 3단 안내 → [대행 요청 작성] CTA → **풀화면급 폼 모달**(행사명·기간·내용·혜택·채널 칩·예산·상품 행·이미지 드래그&드롭·참고) → 접수 이력(상태 읽기 전용 + 상세 모달: 필드+이미지 갤러리+라이트박스)
+- `/campaign-agency` 페이지(다크): 3단 안내 → [대행 요청 작성] CTA → **풀화면급 폼 모달** → 접수 이력(상태 읽기 전용 + 상세 모달: 필드+이미지 갤러리+라이트박스)
+- ★ 폼 모달 = **이미지 최상단**(2026-07-09 Harold): 행사 이미지 올리고 [AI로 자동 입력] 1클릭 → 행사명·기간·내용·혜택·상품 자동 입력(빈 필드만 채움·상품은 이름 중복 없이 추가·입력분 보존) → 확인·수정 → 접수. 아래로 행사명·기간·내용·혜택·채널 칩·예산·상품 행·참고 필드
 - 접수 시 운영자에게 문자 통지(system-alert)
 
 ### 슈퍼관리자 (sys.hanjullo.com) — 캠페인 대행 설계 (화이트 모던)
@@ -81,6 +82,7 @@ ALTER TABLE campaign_agency_requests ALTER COLUMN request_file_path DROP NOT NUL
 | POST | /requests | multipart: payload(JSON)+images(≤5장·장당 5MB·jpg/png/webp 매직바이트 검증) → 필수 누락 400 → 저장 → INSERT(실패 시 이미지 전체 unlink) → 운영자 통지 |
 | GET | /requests | 본 회사 이력(parsed_json + images name만 — 서버 경로 비노출) |
 | GET | /requests/:id/images/:idx | 본 회사 행 이미지 인증 스트림 |
+| POST | /requests/analyze-images | ★이미지 → 폼 자동 입력(구조화 전사 JSON — 저장 없음·무과금·매직바이트 검증·429 처리) |
 
 **슈퍼관리자 (requireSuperAdmin)**
 | Method | Path | 동작 |
@@ -92,11 +94,14 @@ ALTER TABLE campaign_agency_requests ALTER COLUMN request_file_path DROP NOT NUL
 | PATCH | /admin/requests/:id | status(화이트리스트)·staff_note·parsed(서버 buildParsedFromForm 재정규화) |
 | POST | /admin/requests/:id/design | 분석 실행 → PDF(효과 검증 후 기록). executeDesignForRequest 공유 |
 | POST | /admin/design-adhoc | 업체 선택 + 폼(+이미지) → 접수행 생성 + 즉시 분석(1단계) |
+| POST | /admin/design-adhoc/analyze-images | ★직접 설계용 이미지 → 폼 자동 입력(companyId 필수·eligible 재검증) |
 | GET | /admin/requests/:id/proposal | 제안서 PDF 다운로드 |
 
 (삭제) GET /template — xlsx 양식 다운로드 폐지.
 
 ## 7. 분석 파이프라인 (crm-agency-proposal.ts)
+
+**접수 폼 자동 입력** = `analyzeAgencyIntakeImages(companyId, images)` — 무과금 번들 + `buildAgencyIntakeSystemPrompt`(순수·보이는 것만·JSON) → `buildParsedFromForm` 정규화 + `sanitizeIntakeDates`(ISO만 통과 — 달력 입력칸 호환, 저장·보정 경로엔 미적용으로 legacy 자유 서식 날짜 보존).
 
 `generateAgencyProposal(companyId, request, images?)` — **runInCreditBundle로 전체 감싸 무과금**:
 
@@ -122,7 +127,7 @@ ALTER TABLE campaign_agency_requests ALTER COLUMN request_file_path DROP NOT NUL
 
 ## 11. 검증 (2026-07-09 2차)
 
-backend tsc 0 · frontend tsc 0 · vitest 396/396(template 3 삭제 + request 폼 6 + core 전사 1) · 금지 패턴(모델명·native dialog·박-단어) 0 · /template·crm-agency-template·exceljs 참조 잔존 0 grep.
+backend tsc 0 · frontend tsc 0 · vitest 399/399(template 3 삭제 + request 폼 7 + core 전사·단위스왑·intake 프롬프트 3) · 금지 패턴(모델명·native dialog·박-단어) 0 · /template·crm-agency-template·exceljs 참조 잔존 0 grep · Codex 적대 리뷰 2차 3건 정정(혜택 가드 단위 스왑·저장 mime 폴백 제거·이미지 부분 저장 정리).
 
 ## 12. 배포 주의
 

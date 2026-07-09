@@ -72,3 +72,10 @@ export function buildParsedFromForm(raw: any): AgencyRequestParsed {
     .map(([, label]) => label);
   return parsed;
 }
+
+/** 이미지 자동 입력(접수 폼 프리필) 전용 — 날짜는 ISO(YYYY-MM-DD)만 통과(달력 입력칸 호환), 아니면 빈 값.
+ *  저장·보정 경로에는 적용하지 않는다(legacy xlsx 행의 자유 서식 날짜 보존). */
+export function sanitizeIntakeDates(parsed: AgencyRequestParsed): AgencyRequestParsed {
+  const iso = (s: string) => (/^\d{4}-\d{2}-\d{2}$/.test(s) ? s : '');
+  return { ...parsed, periodStart: iso(parsed.periodStart), periodEnd: iso(parsed.periodEnd) };
+}

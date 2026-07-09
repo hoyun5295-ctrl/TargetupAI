@@ -1,6 +1,6 @@
 // CRM 캠페인 대행 — 웹 폼 정규화/필수 검증 테스트 (2026-07-09 웹 폼 전환)
 import { describe, it, expect } from 'vitest';
-import { buildParsedFromForm, AGENCY_REQUIRED_FIELDS } from '../crm-agency-request';
+import { buildParsedFromForm, sanitizeIntakeDates, AGENCY_REQUIRED_FIELDS } from '../crm-agency-request';
 
 describe('buildParsedFromForm', () => {
   it('완결 폼은 missingRequired 0건으로 정규화한다', () => {
@@ -48,6 +48,13 @@ describe('buildParsedFromForm', () => {
   it('missingRequired 필수 목록 = AGENCY_REQUIRED_FIELDS 단일 진실 (5개 전부)', () => {
     const parsed = buildParsedFromForm({});
     expect(parsed.missingRequired).toEqual(AGENCY_REQUIRED_FIELDS.map(([, label]) => label));
+  });
+
+  it('sanitizeIntakeDates — 이미지 자동 입력 날짜는 ISO만 통과, 아니면 빈 값 (달력 입력칸 호환)', () => {
+    const base = buildParsedFromForm({ periodStart: '2026-07-15', periodEnd: '7월 말까지' });
+    const out = sanitizeIntakeDates(base);
+    expect(out.periodStart).toBe('2026-07-15');
+    expect(out.periodEnd).toBe('');
   });
 
   it('과대 입력은 상한으로 잘린다', () => {

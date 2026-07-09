@@ -38,6 +38,12 @@
 - GET /template · xlsx 업로드/매직바이트 · crm-agency-template.ts · parseRequestSheet · 왕복 테스트 · exceljs 의존성(소비처 1곳뿐 — grep 실증)
 - crm-agency-request.ts는 "폼 정규화+필수 검증 CT"로 개편(buildParsedFromForm)
 
+## 2-1. 이미지 자동 입력 (2026-07-09 추가 승인 — Harold "의뢰가 복잡하면 의뢰 안 한다")
+
+- 폼 모달의 이미지 섹션을 **최상단**으로 이동 — 이미지 추가 시 [AI로 자동 입력] 버튼 1클릭 → 행사명·기간·내용·혜택·상품 자동 입력 → 확인·수정 → 접수
+- 채움 규칙: 빈 필드만 채움(입력분 보존) + 상품은 이름 중복 없이 추가 + 안 보이는 값은 빈 칸(추정 금지)
+- backend: POST /requests/analyze-images(고객) · POST /admin/design-adhoc/analyze-images(직접 설계) — 구조화 전사 JSON(buildAgencyIntakeSystemPrompt 순수) → buildParsedFromForm + sanitizeIntakeDates(ISO만). 저장 없음·무과금(runInCreditBundle)
+
 ## 3. API 변경 요약
 
 | Method/Path | 변경 |

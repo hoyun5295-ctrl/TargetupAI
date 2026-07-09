@@ -15,9 +15,10 @@ import { listMemories } from './company-memory';
 import { runInCreditBundle } from './ai-credit-context';
 import { getCompanyCosts } from '../config/defaults';
 import {
-  AgencyProposalResult, buildAgencySystemPrompt, buildAgencyUserMessage, normalizeProposal,
+  AgencyProposalResult, buildAgencyIntakeSystemPrompt, buildAgencySystemPrompt, buildAgencyUserMessage, normalizeProposal,
 } from './crm-agency-proposal-core';
 import { extractEventTextFromImages, EventImageInput } from './event-image-extract';
+import { buildParsedFromForm, sanitizeIntakeDates } from './crm-agency-request';
 import type { AgencyRequestParsed } from './crm-agency-request';
 
 interface AgencyContext {
@@ -139,6 +140,31 @@ async function measurePlanTargets(
       console.log('[CRM대행] 플랜 타겟 실측 생략:', e?.message || e);
     }
   }
+}
+
+/**
+ * 접수 폼 자동 입력 — 행사 이미지를 구조화 전사해 폼 필드(AgencyRequestParsed)로 반환 (2026-07-09 Harold 승인).
+ * 저장 없음(호출측이 폼 프리필에만 사용). 무과금(runInCreditBundle) — 대행 상품 정책과 동일.
+ * @param companyId 요청 고객사(크레딧 컨텍스트·비즈니스+ 게이트는 호출측 검증)
+ */
+export async function analyzeAgencyIntakeImages(
+  companyId: string, images: EventImageInput[],
+): Promise<AgencyRequestParsed> {
+  return runInCreditBundle(async () => {
+    const aiText = await callAIWithFallback({
+      system: buildAgencyIntakeSystemPrompt(),
+      userMessage: '위 이미지에 실제로 보이는 내용만 규칙대로 JSON으로 정리해줘. 보이지 않는 값은 빈 값으로 둬.',
+      maxTokens: 1500,
+      temperature: 0.2,
+      companyId,
+      source: 'crm-agency-intake',
+      creditCost: 0,  // ★ 무과금 명시 (번들이 이미 0 처리 — 이중 안전)
+      images,
+    });
+    const raw = extractJsonFromAiText(aiText);
+    // 정규화 + 날짜 ISO 가드(달력 입력칸 호환) — 없는 값은 빈 값 그대로(추정 금지)
+    return sanitizeIntakeDates(buildParsedFromForm(raw));
+  });
 }
 
 /**
