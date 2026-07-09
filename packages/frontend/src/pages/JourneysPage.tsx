@@ -15,6 +15,8 @@ import {
   Archive, ArchiveRestore,
   // ★ 2026-06-30 여정 일반화 SP-B: 날짜축 여정 아이콘
   CalendarClock,
+  // ★ 2026-07-10 목표 달성 시 자동 종료
+  Target,
 } from 'lucide-react';
 import JourneyVariantsEditor from '../components/journey/JourneyVariantsEditor';
 import JourneyMmsUploader from '../components/journey/JourneyMmsUploader';
@@ -83,6 +85,9 @@ interface JourneyRow {
   stats_total_entered: number;
   stats_total_completed: number;
   stats_total_cost: number;
+  // ★ 2026-07-10 목표 달성 시 자동 종료 — 옵션 + 목표 달성 종료 수(listJourneys 서브쿼리)
+  goal_exit_enabled?: boolean;
+  goal_met_count?: number;
   paused_at: string | null;
   pause_reason: string | null;
   created_at: string;
@@ -465,6 +470,12 @@ export default function JourneysPage() {
   const [hasMallIntegration, setHasMallIntegration] = useState(false);
   const [reviewBudget, setReviewBudget] = useState('');
   const [reviewThreshold, setReviewThreshold] = useState('');
+  // ★ 2026-07-10 목표 달성 시 자동 종료 — 구매 독려형(재구매·장바구니·휴면)이면 기본 켜짐 제안(끌 수 있음)
+  const [reviewGoalExit, setReviewGoalExit] = useState(false);
+  useEffect(() => {
+    const code = aiPkg?.templateCode;
+    setReviewGoalExit(code === 'repeat' || code === 'cart' || code === 'dormant');
+  }, [aiPkg?.templateCode]);
 
   // step 수정
   const [previewSteps, setPreviewSteps] = useState<Set<number>>(new Set());
@@ -646,8 +657,8 @@ export default function JourneysPage() {
     alimtalkNextSubject: state.nextSubject,
   });
 
-  const loadDetail = async (journeyId: string) => {
-    if (detailsMap[journeyId]) return;
+  const loadDetail = async (journeyId: string, force = false) => {
+    if (!force && detailsMap[journeyId]) return;
     try {
       const res = await fetch(`/api/ai/operator/journeys/${journeyId}`, {
         headers: { Authorization: `Bearer ${token()}` },
@@ -1171,6 +1182,7 @@ export default function JourneysPage() {
         thresholdCost: reviewThreshold ? Number(reviewThreshold) : null,
         allowReentry: aiPkg.allowReentry,
         reentryCooldownDays: aiPkg.reentryCooldownDays,
+        goalExitEnabled: reviewGoalExit,
       };
       // ★ 2026-06-30 여정 일반화 — 시작 방식이 설정된 신규 흐름(SP-A 알림톡 / SP-B 날짜축)만 트리거·앵커 오버라이드 전송.
       //   미설정(기존 마케팅 여정)이면 미전송 = 백엔드가 템플릿 기본 트리거 사용(옛 동작 byte 불변).
@@ -1592,6 +1604,11 @@ export default function JourneysPage() {
                             <div className="text-xs text-white/50 flex flex-wrap gap-x-3 gap-y-0.5">
                               <span className="flex items-center gap-1"><Users className="w-3 h-3" />{j.stats_total_entered}</span>
                               <span className="flex items-center gap-1"><Sparkles className="w-3 h-3" />{j.stats_total_completed}</span>
+                              {Number(j.goal_met_count) > 0 && (
+                                <span className="flex items-center gap-1 text-emerald-300" title="목표 달성 종료 — 진입 후 구매가 확인되어 잔여 발송 없이 종료된 고객">
+                                  <Target className="w-3 h-3" />목표 달성 {Number(j.goal_met_count).toLocaleString()}
+                                </span>
+                              )}
                               <span className="flex items-center gap-1"><DollarSign className="w-3 h-3" />{Number(j.stats_total_cost).toLocaleString()}원</span>
                               {j.callback_number && <span className="flex items-center gap-1 text-cyan-300/80"><Phone className="w-3 h-3" />{j.callback_number}</span>}
                             </div>
@@ -1762,7 +1779,7 @@ export default function JourneysPage() {
 
                           {/* Phase 9: 여정 옵션 편집 (트리거 타이밍·포인트·한도·예산·재진입) — 표시 전용 → 편집 가능 */}
                           {detail.journey && (
-                            <JourneyOptionsEditor journey={detail.journey} token={token() || ''} onSaved={loadAll} />
+                            <JourneyOptionsEditor journey={detail.journey} token={token() || ''} onSaved={() => { loadAll(); loadDetail(j.id, true); }} />
                           )}
 
                           {/* ★ D211+ Phase A 2번 (2026-05-23 Harold 명시): 실시간 진행 위치 요약 (active 여정 영역만) */}
@@ -2227,6 +2244,18 @@ export default function JourneysPage() {
                 <div>
                   <label className="block text-xs text-white/60 mb-1">step당 비용 한도 (원, 선택)</label>
                   <input type="number" value={reviewThreshold} onChange={(e) => setReviewThreshold(e.target.value)} placeholder="비워두면 무제한" className="w-full px-3 py-2 bg-slate-900 border border-white/10 rounded-lg text-sm focus:outline-none focus:border-fuchsia-400" />
+                </div>
+                {/* ★ 2026-07-10 목표 달성 시 자동 종료 — 구매 독려형이면 기본 켜짐 제안 */}
+                <div className="md:col-span-2 p-2.5 bg-slate-950/50 border border-emerald-400/20 rounded-lg">
+                  <label className="flex items-start gap-2.5 cursor-pointer">
+                    <input type="checkbox" checked={reviewGoalExit} onChange={(e) => setReviewGoalExit(e.target.checked)} className="rounded mt-0.5" />
+                    <span className="min-w-0">
+                      <span className="flex items-center gap-1.5 text-xs font-semibold text-white"><Target className="w-3.5 h-3.5 text-emerald-300" />목표 달성 시 자동 종료</span>
+                      <span className="block text-[10px] text-white/45 leading-relaxed mt-0.5">
+                        여정 진입 후 구매가 확인된 고객은 남은 메시지를 받지 않고 "목표 달성"으로 종료됩니다. 이미 산 고객에게 독려 문자가 또 가는 것을 막습니다.
+                      </span>
+                    </span>
+                  </label>
                 </div>
               </div>
               <div className="text-[11px] text-white/50 flex flex-wrap gap-x-3 gap-y-0.5">
@@ -3013,6 +3042,7 @@ export default function JourneysPage() {
           journeyId={activationModal.journeyId}
           journeyName={activationModal.journeyName}
           journeyStatus={activationModal.journeyStatus}
+          goalExitEnabled={journeys.find((j) => j.id === activationModal.journeyId)?.goal_exit_enabled === true}
           token={token() || ''}
           onClose={() => setActivationModal(null)}
           onActivated={() => loadAll()}

@@ -36,6 +36,15 @@ ok('callbackMode weird → fixed', () =>
   assert.strictEqual(normalizeJourneyOptions({ callbackMode: 'weird' }).options.callbackMode, 'fixed'));
 ok('callbackMode store → store', () =>
   assert.strictEqual(normalizeJourneyOptions({ callbackMode: 'store' }).options.callbackMode, 'store'));
+// ★ 2026-07-10 목표 달성 시 자동 종료 — boolean 정규화(true/'true'만 true, 그 외 전부 false)
+ok('goalExitEnabled true → true', () =>
+  assert.strictEqual(normalizeJourneyOptions({ goalExitEnabled: true }).options.goalExitEnabled, true));
+ok('goalExitEnabled "true" → true', () =>
+  assert.strictEqual(normalizeJourneyOptions({ goalExitEnabled: 'true' }).options.goalExitEnabled, true));
+ok('goalExitEnabled 미지정/이상값 → false', () => {
+  assert.strictEqual(normalizeJourneyOptions({}).options.goalExitEnabled, false);
+  assert.strictEqual(normalizeJourneyOptions({ goalExitEnabled: 1 }).options.goalExitEnabled, false);
+});
 
 console.log(`\n${passed} assertions passed`);
 process.exit(0);

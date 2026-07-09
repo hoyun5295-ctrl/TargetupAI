@@ -101,6 +101,8 @@ export interface CreateJourneyInput {
   budgetMonthly?: number | null;
   allowReentry?: boolean;
   reentryCooldownDays?: number | null;
+  /** ★ 2026-07-10 목표 달성 시 자동 종료 — 진입 이후 구매 확인 시 잔여 step 중단 (기본 false) */
+  goalExitEnabled?: boolean;
   // ★ 2026-06-30 여정 일반화 — 시작 방식(start_kind) 1급화 + 날짜축/one_shot 필드.
   startKind?: StartKind;                 // 미지정 시 classifyStartKind(triggerEvent)로 도출
   triggerEvent?: string;                 // 미지정 시 tmpl.triggerEvent (event=거래이벤트 / standing·one_shot·date_anchor='custom')
@@ -327,6 +329,7 @@ export async function createJourneyFromTemplate(input: CreateJourneyInput): Prom
       threshold_recipients_per_step, threshold_cost_per_step, threshold_risk_level,
       callback_number, callback_mode,
       start_kind, anchor_date, anchor_recurrence, anchor_recurrence_day, anchor_hour_kst, one_shot_scheduled_at,
+      goal_exit_enabled,
       created_by, created_at, updated_at
     ) VALUES (
       gen_random_uuid(), $1::uuid, $2, $3, $4, $5::jsonb,
@@ -334,6 +337,7 @@ export async function createJourneyFromTemplate(input: CreateJourneyInput): Prom
       $9, $10, $11,
       $12, $13,
       $15, $16::date, $17, $18, $19, $20::timestamptz,
+      $21,
       $14::uuid, NOW(), NOW()
     ) RETURNING id`,
     [
@@ -357,6 +361,7 @@ export async function createJourneyFromTemplate(input: CreateJourneyInput): Prom
       anchorRecurrenceDayVal,
       anchorHourKstVal,
       oneShotScheduledAtVal,
+      input.goalExitEnabled === true,  // ★ 2026-07-10 목표 달성 자동 종료 (실측 컬럼 — DDL 실행 확인)
     ]
   );
 
@@ -1058,10 +1063,13 @@ export async function listJourneys(companyId: string, status?: JourneyStatus | '
   // ★ Fix #3 (2026-06-05): status는 라우트가 받은 신뢰 불가 값(타입 캐스팅은 런타임 보장 X) →
   //   화이트리스트 CT로 검증해 SQL 주입을 차단한다. archived 분리 + 허용 상태만 보간.
   const where = journeyListWhere(status);
+  // ★ 2026-07-10 goal_met_count — 목표 달성 종료(진입 이후 구매 확인) 카드 뱃지용. 회사당 여정 수가 작아 서브쿼리 COUNT 부담 미미.
   const r = await query(
-    `SELECT * FROM journeys
-     WHERE company_id = $1::uuid ${where}
-     ORDER BY status ASC, created_at DESC`,
+    `SELECT j.*,
+            (SELECT COUNT(*)::int FROM journey_executions e WHERE e.journey_id = j.id AND e.status = 'goal_met') AS goal_met_count
+     FROM journeys j
+     WHERE j.company_id = $1::uuid ${where}
+     ORDER BY j.status ASC, j.created_at DESC`,
     [companyId]
   );
   return r.rows;

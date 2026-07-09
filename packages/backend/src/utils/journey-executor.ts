@@ -92,6 +92,8 @@ interface ExecutionRow {
   callback_mode: string | null;
   // ★ 2026-06-30 여정 일반화 — date_anchor/one_shot은 단발(1 step 후 완료, 상대 advance 안 함).
   start_kind: string | null;
+  // ★ 2026-07-10 목표 달성 자동 종료 — 진입 이후 구매 확인 시 잔여 step 중단(옵션, 기본 false).
+  goal_exit_enabled: boolean;
 }
 
 interface StepRow {
@@ -137,7 +139,7 @@ interface CustomerRow {
 
 // ★ D188 Phase 2-B-1 (2026-05-21): wait/condition step 신규 outcome — 통계 분리 영역.
 // ★ D218+ (2026-05-26): paused_external 추가 — 담당자 단축 URL 정지 / 관리자 직접 정지 / race condition 안전망 사고 차단.
-type StepOutcome = 'sent' | 'skipped_hours' | 'skipped_opt_out' | 'skipped_no_customer' | 'skipped_already_sent' | 'waited' | 'condition_passed' | 'condition_failed' | 'paused_balance' | 'paused_budget' | 'paused_threshold' | 'paused_external' | 'failed' | 'completed';
+type StepOutcome = 'sent' | 'skipped_hours' | 'skipped_opt_out' | 'skipped_no_customer' | 'skipped_already_sent' | 'waited' | 'condition_passed' | 'condition_failed' | 'paused_balance' | 'paused_budget' | 'paused_threshold' | 'paused_external' | 'failed' | 'completed' | 'exited_goal';
 
 // ════════════════════════════════════════════════════════════════════
 // Worker — 5분 cron
@@ -146,13 +148,13 @@ type StepOutcome = 'sent' | 'skipped_hours' | 'skipped_opt_out' | 'skipped_no_cu
 let workerRunning = false;
 
 // ★ D188 Phase 2-B-1 (2026-05-21): summary에 waited / condition_passed / condition_failed 카운트 추가.
-export async function runJourneyExecutor(): Promise<{ processed: number; sent: number; skipped: number; waited: number; conditionPassed: number; conditionFailed: number; paused: number; failed: number }> {
+export async function runJourneyExecutor(): Promise<{ processed: number; sent: number; skipped: number; waited: number; conditionPassed: number; conditionFailed: number; paused: number; failed: number; goalExited: number }> {
   if (workerRunning) {
-    return { processed: 0, sent: 0, skipped: 0, waited: 0, conditionPassed: 0, conditionFailed: 0, paused: 0, failed: 0 };
+    return { processed: 0, sent: 0, skipped: 0, waited: 0, conditionPassed: 0, conditionFailed: 0, paused: 0, failed: 0, goalExited: 0 };
   }
   workerRunning = true;
 
-  const summary = { processed: 0, sent: 0, skipped: 0, waited: 0, conditionPassed: 0, conditionFailed: 0, paused: 0, failed: 0 };
+  const summary = { processed: 0, sent: 0, skipped: 0, waited: 0, conditionPassed: 0, conditionFailed: 0, paused: 0, failed: 0, goalExited: 0 };
 
   try {
     const dueRes = await query(
@@ -165,7 +167,8 @@ export async function runJourneyExecutor(): Promise<{ processed: number; sent: n
          j.budget_monthly, j.threshold_cost_per_step, j.threshold_recipients_per_step,
          j.stats_total_completed, j.stats_total_cost, j.created_by,
          j.callback_number AS journey_callback_number,
-         j.callback_mode, j.start_kind
+         j.callback_mode, j.start_kind,
+         COALESCE(j.goal_exit_enabled, false) AS goal_exit_enabled
        FROM journey_executions e
        JOIN journeys j ON e.journey_id = j.id
        WHERE e.status = 'active'
@@ -185,6 +188,7 @@ export async function runJourneyExecutor(): Promise<{ processed: number; sent: n
         else if (outcome === 'waited') summary.waited++;
         else if (outcome === 'condition_passed') summary.conditionPassed++;
         else if (outcome === 'condition_failed') summary.conditionFailed++;
+        else if (outcome === 'exited_goal') summary.goalExited++;
         else if (outcome.startsWith('paused')) summary.paused++;
         else if (outcome.startsWith('skipped')) summary.skipped++;
         else if (outcome === 'failed') summary.failed++;
@@ -195,7 +199,7 @@ export async function runJourneyExecutor(): Promise<{ processed: number; sent: n
     }
 
     if (dueRes.rows.length > 0) {
-      console.log(`[JourneyExecutor] 처리 완료 — sent=${summary.sent} waited=${summary.waited} cond_pass=${summary.conditionPassed} cond_fail=${summary.conditionFailed} skipped=${summary.skipped} paused=${summary.paused} failed=${summary.failed}`);
+      console.log(`[JourneyExecutor] 처리 완료 — sent=${summary.sent} waited=${summary.waited} cond_pass=${summary.conditionPassed} cond_fail=${summary.conditionFailed} goal_exited=${summary.goalExited} skipped=${summary.skipped} paused=${summary.paused} failed=${summary.failed}`);
     }
   } finally {
     workerRunning = false;
@@ -233,6 +237,22 @@ async function processExecution(exec: ExecutionRow): Promise<StepOutcome> {
   if (statusCheck1.rows[0]?.estatus === 'paused' || statusCheck1.rows[0]?.jstatus !== 'active') {
     console.log(`[JourneyExecutor] execution=${exec.execution_id} 진입 시점 정지 감지(execution/journey) → skip`);
     return 'paused_external';
+  }
+
+  // ★ 2026-07-10 목표 달성 자동 종료 (Harold — 시세이도 시연 질문 기원): 진입 이후 구매가 확인된 고객은
+  //   남은 step(메시지/wait/condition 전부)을 진행하지 않고 'goal_met'로 종료. 차감·발송 이전 단계.
+  //   판정 실패(쿼리 오류)는 통과 — 이탈은 보너스이지 여정을 멈추는 사유가 아니다.
+  if (exec.goal_exit_enabled) {
+    const converted = await isGoalConvertedSinceEntry(exec);
+    if (converted) {
+      await query(
+        `UPDATE journey_executions SET status = 'goal_met', completed_at = NOW()
+         WHERE id = $1::uuid AND status = 'active'`,
+        [exec.execution_id]
+      );
+      console.log(`[JourneyExecutor] execution=${exec.execution_id} 진입 이후 구매 확인 → goal_met 종료(잔여 step 중단)`);
+      return 'exited_goal';
+    }
   }
 
   // 1. 다음 step 조회 (현재 current_step_order + 1)
@@ -1041,6 +1061,36 @@ async function advanceOrComplete(exec: ExecutionRow, currentStep: StepRow, added
 }
 
 // calculateNextRunAt — send-time-util.ts CT로 이동(Phase 6A). advanceOrComplete·trigger-watcher가 거기서 import해 공유.
+
+/** 목표 달성(진입 이후 구매) 판정 — 컬럼 실측 2026-07-10: recent_purchase_date=date · cdp_events.occurred_at=timestamptz.
+ *  신호 1 = recent_purchase_date가 진입일(KST) **다음 날 이후**(엄격 초과 — Codex P1 정정: 진입 당일 구매를 포함하면
+ *    구매가 진입 사유인 여정(cdp.purchase 트리거 등)이 첫 tick에 전원 즉시 이탈해 여정이 죽는다.
+ *    당일 정밀 판정은 신호 2(cdp 이벤트 시각)가 담당 — 프로필만 있는 회사는 다음 날 tick부터 이탈)
+ *  신호 2 = 연동몰 cdp 구매 이벤트(event_name='purchase', extractor와 동일 값)가 진입 시각 이후(시각 정밀) */
+async function isGoalConvertedSinceEntry(exec: ExecutionRow): Promise<boolean> {
+  try {
+    const byProfile = await query(
+      `SELECT 1 FROM customers
+        WHERE id = $1::uuid AND company_id = $2::uuid
+          AND recent_purchase_date IS NOT NULL
+          AND recent_purchase_date > ($3::timestamptz AT TIME ZONE 'Asia/Seoul')::date
+        LIMIT 1`,
+      [exec.customer_id, exec.company_id, exec.entered_at]
+    );
+    if (byProfile.rows.length > 0) return true;
+    const byEvent = await query(
+      `SELECT 1 FROM cdp_events
+        WHERE company_id = $1::uuid AND customer_id = $2::uuid
+          AND event_name = 'purchase' AND occurred_at > $3::timestamptz
+        LIMIT 1`,
+      [exec.company_id, exec.customer_id, exec.entered_at]
+    );
+    return byEvent.rows.length > 0;
+  } catch (e: any) {
+    console.log(`[JourneyExecutor] 목표 달성 판정 실패 — 통과(여정 계속):`, e?.message || e);
+    return false;
+  }
+}
 
 async function markExecutionCompleted(executionId: string, journeyId: string): Promise<void> {
   await query(

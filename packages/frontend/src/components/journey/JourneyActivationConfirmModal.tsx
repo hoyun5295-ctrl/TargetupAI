@@ -27,6 +27,8 @@ interface Props {
   journeyId: string;
   journeyName: string;
   journeyStatus: string;
+  /** ★ 2026-07-10 목표 달성 시 자동 종료 — 활성화 직전 마지막 확인 표시(옵션 상태) */
+  goalExitEnabled?: boolean;
   onClose: () => void;
   onActivated: () => void;
   token: string;
@@ -74,7 +76,7 @@ const SUB_AGENT_CARDS = [
 ];
 
 export default function JourneyActivationConfirmModal({
-  journeyId, journeyName, journeyStatus, onClose, onActivated, token,
+  journeyId, journeyName, journeyStatus, goalExitEnabled, onClose, onActivated, token,
 }: Props) {
   const toast = useToast();
   const [phase, setPhase] = useState<'validating' | 'failed' | 'ready' | 'activating' | 'migration_pending' | 'callback_confirm'>('validating');
@@ -214,7 +216,12 @@ export default function JourneyActivationConfirmModal({
               <h3 className="text-base font-semibold text-white">
                 여정 활성화 자동 검증
               </h3>
-              <p className="text-[11px] text-white/50 mt-0.5">{journeyName}</p>
+              <p className="text-[11px] text-white/50 mt-0.5">
+                {journeyName}
+                <span className={`ml-2 px-1.5 py-0.5 rounded text-[10px] ${goalExitEnabled ? 'bg-emerald-500/15 text-emerald-300' : 'bg-white/10 text-white/40'}`}>
+                  목표 달성 자동 종료 {goalExitEnabled ? '켜짐' : '꺼짐'}
+                </span>
+              </p>
             </div>
           </div>
           {phase !== 'activating' && (

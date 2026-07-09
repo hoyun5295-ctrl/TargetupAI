@@ -15,7 +15,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { goBackOr } from '../lib/scroll-restoration';
 import {
   ArrowLeft, BarChart3, Users, CheckCircle2, XCircle, Pause, Loader2,
-  TrendingUp, DollarSign, Clock,
+  TrendingUp, DollarSign, Clock, Target,
 } from 'lucide-react';
 
 interface OverviewData {
@@ -23,6 +23,8 @@ interface OverviewData {
   totalEntered: number;
   active: number;
   completed: number;
+  /** ★ 2026-07-10 목표 달성 종료(진입 이후 구매 확인 이탈) */
+  goalMet?: number;
   paused: number;
   failed: number;
   totalCost: number;
@@ -57,6 +59,7 @@ const STATUS_OPTIONS = [
   { value: 'all', label: '전체' },
   { value: 'active', label: '진행 중' },
   { value: 'completed', label: '완료' },
+  { value: 'goal_met', label: '목표 달성' },  // ★ 2026-07-10 진입 이후 구매 확인 이탈
   { value: 'paused', label: '일시정지' },
   { value: 'failed', label: '실패' },
 ];
@@ -64,6 +67,7 @@ const STATUS_OPTIONS = [
 const STATUS_BADGE: Record<string, string> = {
   active: 'bg-blue-500/20 text-blue-300',
   completed: 'bg-emerald-500/20 text-emerald-300',
+  goal_met: 'bg-emerald-500/25 text-emerald-200',
   paused: 'bg-amber-500/20 text-amber-300',
   failed: 'bg-rose-500/20 text-rose-300',
 };
@@ -174,12 +178,13 @@ export default function JourneyDetailPage() {
           </button>
         </div>
 
-        {/* Overview 카드 6건 */}
+        {/* Overview 카드 — ★ 2026-07-10 목표 달성(진입 후 구매 확인 이탈) 추가 */}
         {overview && (
-          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 mb-6">
+          <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-3 mb-6">
             <OverviewCard icon={<Users className="w-4 h-4" />} label="총 진입" value={overview.totalEntered.toLocaleString()} color="text-blue-300" />
             <OverviewCard icon={<TrendingUp className="w-4 h-4" />} label="진행 중" value={overview.active.toLocaleString()} color="text-cyan-300" />
             <OverviewCard icon={<CheckCircle2 className="w-4 h-4" />} label="완료" value={overview.completed.toLocaleString()} color="text-emerald-300" />
+            <OverviewCard icon={<Target className="w-4 h-4" />} label="목표 달성" value={Number(overview.goalMet || 0).toLocaleString()} color="text-emerald-300" />
             <OverviewCard icon={<Pause className="w-4 h-4" />} label="일시정지" value={overview.paused.toLocaleString()} color="text-amber-300" />
             <OverviewCard icon={<XCircle className="w-4 h-4" />} label="실패" value={overview.failed.toLocaleString()} color="text-rose-300" />
             <OverviewCard icon={<DollarSign className="w-4 h-4" />} label="총 발송 비용" value={formatCost(overview.totalCost)} color="text-fuchsia-300" />
@@ -266,7 +271,7 @@ export default function JourneyDetailPage() {
                       <td className="px-3 py-2.5 text-center">{c.currentStepOrder + 1}</td>
                       <td className="px-3 py-2.5 text-center">
                         <span className={`px-2 py-0.5 rounded text-[10px] ${STATUS_BADGE[c.status] || 'bg-slate-500/20 text-slate-300'}`}>
-                          {c.status}
+                          {STATUS_OPTIONS.find((s) => s.value === c.status)?.label || c.status}
                         </span>
                       </td>
                       <td className="px-3 py-2.5 text-xs text-white/60">{formatDate(c.enteredAt)}</td>

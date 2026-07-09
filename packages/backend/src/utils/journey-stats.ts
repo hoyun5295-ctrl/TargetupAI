@@ -25,6 +25,8 @@ export interface JourneyOverview {
   totalEntered: number;
   active: number;
   completed: number;
+  /** ★ 2026-07-10 목표 달성 종료(진입 이후 구매 확인 이탈) — 실패가 아니라 성과 지표 */
+  goalMet: number;
   paused: number;
   failed: number;
   totalCost: number;
@@ -140,6 +142,7 @@ async function getJourneyOverview(journeyId: string): Promise<JourneyOverview> {
        COUNT(*) AS total_entered,
        COUNT(*) FILTER (WHERE status = 'active') AS active,
        COUNT(*) FILTER (WHERE status = 'completed') AS completed,
+       COUNT(*) FILTER (WHERE status = 'goal_met') AS goal_met,
        COUNT(*) FILTER (WHERE status = 'paused') AS paused,
        COUNT(*) FILTER (WHERE status = 'failed') AS failed,
        COALESCE(SUM(total_cost), 0) AS total_cost,
@@ -170,6 +173,7 @@ async function getJourneyOverview(journeyId: string): Promise<JourneyOverview> {
     totalEntered,
     active: Number(exec.active) || 0,
     completed,
+    goalMet: Number(exec.goal_met) || 0,
     paused: Number(exec.paused) || 0,
     failed: Number(exec.failed) || 0,
     totalCost: Number(exec.total_cost) || 0,
@@ -460,7 +464,7 @@ async function getJourneyVariantStats(journeyId: string): Promise<JourneyVariant
 //   신규 매트릭스 = search (4 영역 ILIKE) + status filter 5건 + sort 5건 + 페이지네이션
 //   Phase 3-Predictive listCompanyPredictionCustomers 매트릭스 미러 영역 정합
 
-export type JourneyExecutionStatus = 'all' | 'active' | 'completed' | 'paused' | 'ended' | 'failed';
+export type JourneyExecutionStatus = 'all' | 'active' | 'completed' | 'paused' | 'ended' | 'failed' | 'goal_met';  // ★ 2026-07-10 목표 달성 종료
 export type JourneyExecutionSort =
   | 'entered_at_desc'
   | 'entered_at_asc'
@@ -488,7 +492,7 @@ export async function listJourneyEnteredCustomers(
   const search = (options.search || '').trim();
 
   // status 영역 white-list (SQL injection 차단 정합)
-  const validStatuses: JourneyExecutionStatus[] = ['all', 'active', 'completed', 'paused', 'ended', 'failed'];
+  const validStatuses: JourneyExecutionStatus[] = ['all', 'active', 'completed', 'paused', 'ended', 'failed', 'goal_met'];
   const status: JourneyExecutionStatus = options.status && validStatuses.includes(options.status) ? options.status : 'all';
   const statusFilter = status === 'all' ? '' : `AND e.status = '${status}'`;
 

@@ -92,7 +92,11 @@ async function runReentryBatch(): Promise<void> {
            FROM journey_executions je
            JOIN customers c ON c.id = je.customer_id AND c.company_id = $2::uuid
            WHERE je.journey_id = $1::uuid
-             AND je.status = 'completed'
+             -- ★ 2026-07-10: goal_met(목표 달성 종료)도 완주와 동급으로 재진입 대상 — 구매로 이탈한 고객이
+             --   쿨다운 뒤 다시 대상이 되면(휴면 재발 등) 자동 재진입이 막히면 안 된다.
+             -- ★ Codex P2 정정: 단 쿨다운 0일이면 goal_met은 제외 — 방금 구매로 이탈한 고객이 같은 날
+             --   즉시 재진입해 독려를 다시 받는 루프 차단(완주 재진입은 기존 동작 보존).
+             AND (je.status = 'completed' OR (je.status = 'goal_met' AND $3 > 0))
              AND je.completed_at IS NOT NULL
              AND je.completed_at <= NOW() - ($3 * INTERVAL '1 day')
              -- ★ Fix #1 (2026-06-05): 추출과 동일한 공통 안전필터(is_active·sms_opt_in·is_opt_out·is_invalid·수신거부 회사+전화).
@@ -109,7 +113,7 @@ async function runReentryBatch(): Promise<void> {
                SELECT MAX(je3.completed_at) FROM journey_executions je3
                WHERE je3.journey_id = $1::uuid
                  AND je3.customer_id = je.customer_id
-                 AND je3.status = 'completed'
+                 AND je3.status IN ('completed', 'goal_met')
              )
            LIMIT $4
            RETURNING id`,

@@ -18,11 +18,13 @@ import {
 } from 'recharts';
 import {
   ArrowLeft, Users, CheckCircle2, XCircle, Pause, Loader2,
-  TrendingUp, DollarSign, BarChart3, MousePointerClick, ShoppingCart, Beaker,
+  TrendingUp, DollarSign, BarChart3, MousePointerClick, ShoppingCart, Beaker, Target,
 } from 'lucide-react';
 
 interface JourneyStatsData {
   overview: {
+    /** ★ 2026-07-10 목표 달성 종료(진입 이후 구매 확인 이탈) — 성과 지표 */
+    goalMet?: number;
     totalEntered: number;
     active: number;
     completed: number;
@@ -152,15 +154,19 @@ export default function JourneyStatsPage() {
           </div>
         </div>
 
-        {/* Overview 카드 6건 */}
-        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 mb-6">
+        {/* Overview 카드 — ★ 2026-07-10 목표 달성(진입 후 구매 확인 이탈 = 성과) 추가 */}
+        <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-3 mb-6">
           <Card icon={<Users className="w-4 h-4" />} label="총 진입" value={stats.overview.totalEntered.toLocaleString()} color="text-blue-300" />
           <Card icon={<TrendingUp className="w-4 h-4" />} label="진행 중" value={stats.overview.active.toLocaleString()} color="text-cyan-300" />
           <Card icon={<CheckCircle2 className="w-4 h-4" />} label="완료" value={stats.overview.completed.toLocaleString()} color="text-emerald-300" />
+          <Card icon={<Target className="w-4 h-4" />} label="목표 달성" value={Number(stats.overview.goalMet || 0).toLocaleString()} color="text-emerald-300" />
           <Card icon={<Pause className="w-4 h-4" />} label="일시정지" value={stats.overview.paused.toLocaleString()} color="text-amber-300" />
           <Card icon={<XCircle className="w-4 h-4" />} label="실패" value={stats.overview.failed.toLocaleString()} color="text-rose-300" />
           <Card icon={<DollarSign className="w-4 h-4" />} label="총 비용" value={formatCost(stats.overview.totalCost)} color="text-fuchsia-300" />
         </div>
+        {Number(stats.overview.goalMet || 0) > 0 && (
+          <div className="text-[11px] text-emerald-300/70 -mt-4 mb-6">목표 달성 = 여정 진입 후 구매가 확인되어 남은 발송 없이 종료된 고객 — 이 여정이 만든 성과입니다.</div>
+        )}
 
         {/* Step별 통계 */}
         <Section title="Step별 효과 매트릭스" subtitle="발송/실패/Skip + 클릭률 + 전환율">

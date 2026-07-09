@@ -3003,6 +3003,7 @@ router.post('/operator/journeys', async (req: Request, res: Response) => {
       budgetMonthly,
       allowReentry,
       reentryCooldownDays,
+      goalExitEnabled,
       // ★ 2026-06-30 여정 일반화 — 시작 방식(start_kind) + 트리거/대상 + 날짜축/one_shot.
       startKind,
       triggerEvent,
@@ -3036,6 +3037,7 @@ router.post('/operator/journeys', async (req: Request, res: Response) => {
       budgetMonthly: budgetMonthly ?? null,
       allowReentry,
       reentryCooldownDays,
+      goalExitEnabled: goalExitEnabled === true,
       startKind,
       triggerEvent,
       triggerFilters,
@@ -3559,11 +3561,17 @@ router.patch('/operator/journeys/:id/options', async (req: Request, res: Respons
       [req.params.id, companyId]
     );
     if (cur.rows.length === 0) return res.status(404).json({ success: false, error: '여정을 찾을 수 없습니다.' });
+    const body = req.body || {};
     if (cur.rows[0].status !== 'draft' && cur.rows[0].status !== 'paused') {
-      return res.status(400).json({ success: false, error: '운영 중인 여정은 옵션을 바꿀 수 없습니다. 먼저 일시정지해 주세요.' });
+      // ★ 2026-07-10 목표 달성 자동 종료 토글만 운영(active) 중에도 변경 허용 — 발송을 줄이는 안전 방향.
+      //   그 외 옵션(타이밍·한도·예산·재진입·회신)은 기존 규칙 유지(일시정지 후 편집).
+      const keys = Object.keys(body);
+      const onlyGoalToggle = cur.rows[0].status === 'active' && keys.length > 0 && keys.every((k) => k === 'goalExitEnabled');
+      if (!onlyGoalToggle) {
+        return res.status(400).json({ success: false, error: '운영 중인 여정은 옵션을 바꿀 수 없습니다. 먼저 일시정지해 주세요. (목표 달성 자동 종료는 운영 중에도 변경 가능)' });
+      }
     }
 
-    const body = req.body || {};
     const norm = normalizeJourneyOptions(body);
 
     const params: any[] = [req.params.id, companyId];
@@ -3584,6 +3592,7 @@ router.patch('/operator/journeys/:id/options', async (req: Request, res: Respons
     if ('autoReentryEnabled' in body) add('auto_reentry_enabled', norm.options.autoReentryEnabled);
     if ('callbackNumber' in body && norm.options.callbackNumber) add('callback_number', norm.options.callbackNumber);
     if ('callbackMode' in body) add('callback_mode', norm.options.callbackMode);
+    if ('goalExitEnabled' in body) add('goal_exit_enabled', norm.options.goalExitEnabled);  // 실측 컬럼(2026-07-10 DDL 실행 확인)
 
     sets.push('updated_at = NOW()');
 
@@ -3973,7 +3982,7 @@ router.get('/operator/journeys/:id/executions', async (req: Request, res: Respon
     const limit = Math.min(200, Math.max(1, parseInt(String(req.query.limit || '10'), 10) || 10));
     const search = typeof req.query.search === 'string' ? req.query.search.trim() : '';
 
-    const validStatuses = ['all', 'active', 'completed', 'paused', 'ended', 'failed'];
+    const validStatuses = ['all', 'active', 'completed', 'paused', 'ended', 'failed', 'goal_met'];  // ★ 2026-07-10 목표 달성 종료
     const statusRaw = String(req.query.status || 'all');
     const status = validStatuses.includes(statusRaw) ? (statusRaw as any) : 'all';
 

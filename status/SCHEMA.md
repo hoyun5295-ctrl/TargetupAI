@@ -2540,7 +2540,8 @@ CREATE INDEX IF NOT EXISTS idx_journey_step_logs_execution ON journey_step_logs(
 ### ★ 2026-06-29 information_schema 실측 대조 (Harold 제공 — 재질의 금지, 이 기록 신뢰)
 운영 PG `information_schema`로 `customers` · `cdp_events` · `journeys` · `journey_executions` 4개 테이블 실측 대조 완료.
 - `customers` · `cdp_events`(위 6컬럼 보강 반영) = 문서와 일치.
-- `journeys` baseline DDL 외 실측 추가 컬럼(정본): `callback_number`(varchar) · `callback_mode`(text) · `auto_reentry_enabled`(boolean) · `archived_at`(timestamptz) · `pretest_notify_step_defaults`(jsonb) · `entry_baseline_at`(timestamptz) · `last_event_cursor`(timestamptz) · `last_pretest_passed_at`(timestamptz)
+- `journeys` baseline DDL 외 실측 추가 컬럼(정본): `callback_number`(varchar) · `callback_mode`(text) · `auto_reentry_enabled`(boolean) · `archived_at`(timestamptz) · `pretest_notify_step_defaults`(jsonb) · `entry_baseline_at`(timestamptz) · `last_event_cursor`(timestamptz) · `last_pretest_passed_at`(timestamptz) · **`goal_exit_enabled`(boolean NOT NULL DEFAULT false — 2026-07-10 Harold ALTER 실행·실측, 목표 달성 시 자동 종료)**
+- `journey_executions.status` 실사용 값(2026-07-10 정본): active/completed/paused/failed + 'ended'(condition 미충족 종료) + **'goal_met'(2026-07-10 신규 — 진입 이후 구매 확인 이탈, completed_at 동반 기록. 재진입 워커는 completed와 동급 취급)**
 - `journey_executions` baseline DDL 외 실측 추가 컬럼(정본): `error_log`(jsonb) · `last_error_at`(timestamptz) · `error_count`(integer) · `result_notified_at`(timestamptz)
 
 ### ★ 2026-06-30 information_schema 실측 — journey_steps 전체 21컬럼 (Harold 제공, 재질의 금지)

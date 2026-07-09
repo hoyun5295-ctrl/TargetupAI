@@ -18,6 +18,8 @@ export interface NormalizedJourneyOptions {
     autoReentryEnabled: boolean;
     callbackNumber: string | null;
     callbackMode: 'fixed' | 'store';
+    /** ★ 2026-07-10 목표 달성 시 자동 종료 — 진입 이후 구매 확인 시 잔여 step 중단 */
+    goalExitEnabled: boolean;
   };
 }
 
@@ -58,6 +60,7 @@ export function normalizeJourneyOptions(input: Record<string, any>): NormalizedJ
     autoReentryEnabled: src.autoReentryEnabled === true || src.autoReentryEnabled === 'true',
     callbackNumber: typeof src.callbackNumber === 'string' && src.callbackNumber.trim() ? src.callbackNumber.trim() : null,
     callbackMode: src.callbackMode === 'store' ? 'store' : 'fixed',
+    goalExitEnabled: src.goalExitEnabled === true || src.goalExitEnabled === 'true',
   };
 
   return { triggerFilters, options };
