@@ -14,7 +14,8 @@ import { randomUUID } from 'crypto';
 import { query } from '../config/database';
 import { authenticate, requireSuperAdmin } from '../middlewares/auth';
 import { loadPlanContext, isBetaAccessAllowed, isSubscriptionBlocked } from '../utils/plan-guard';
-import { buildRequestTemplateRows, parseRequestSheet, AgencyRequestParsed } from '../utils/crm-agency-request';
+import { parseRequestSheet, AgencyRequestParsed } from '../utils/crm-agency-request';
+import { buildRequestTemplateXlsx } from '../utils/crm-agency-template';
 import { generateAgencyProposal } from '../utils/crm-agency-proposal';
 import { renderAgencyProposalPdf } from '../utils/crm-agency-pdf-render';
 import { sendSystemAlert } from '../utils/system-alert';
@@ -114,11 +115,8 @@ router.get('/template', async (req: Request, res: Response) => {
     if (!companyId || !(await checkEligibility(companyId, req.user))) {
       return res.status(403).json({ success: false, error: '본 기능은 비즈니스·엔터프라이즈 요금제 전용입니다.', code: 'BETA_GATE' });
     }
-    const ws = XLSX.utils.aoa_to_sheet(buildRequestTemplateRows());
-    ws['!cols'] = [{ wch: 56 }, { wch: 44 }, { wch: 16 }];
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, '캠페인대행요청서');
-    const buf = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+    // ★ 2026-07-09 디자인 재작성(Harold 지적) — exceljs 서식 빌더(crm-agency-template CT). 라벨/구조는 파서와 단일 진실.
+    const buf = await buildRequestTemplateXlsx();
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     res.setHeader('Content-Disposition', `attachment; filename="hanjul_campaign_agency_request.xlsx"`);
     return res.send(buf);

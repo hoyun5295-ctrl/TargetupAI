@@ -34,12 +34,13 @@ describe('crm-agency-request', () => {
     expect(parsed.missingRequired).toContain(AGENCY_REQUEST_LABELS.title);
   });
 
-  it('상품 표(3열)를 파싱한다 (빈 행 skip)', () => {
+  it('상품 표(3열)를 파싱하고, 빈 행에서 표를 종료한다 (푸터/여백 오인 차단)', () => {
     const rows = buildRequestTemplateRows();
     const idx = rows.findIndex((r) => r[0] === AGENCY_REQUEST_LABELS.productsHeader);
     rows[idx + 2] = ['신제품 A', '39000', '29000'];
-    rows[idx + 3] = ['', '', ''];
-    rows[idx + 4] = ['신제품 B', '가격미정', ''];
+    rows[idx + 3] = ['신제품 B', '가격미정', ''];
+    rows[idx + 4] = ['', '', ''];
+    rows[idx + 5] = ['문의: 한줄로 고객센터', '', ''];  // 표 아래 잡텍스트 — 상품 아님
     const parsed = parseRequestSheet(rows);
     expect(parsed.products).toEqual([
       { name: '신제품 A', price: 39000, salePrice: 29000 },

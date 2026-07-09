@@ -76,13 +76,14 @@ export function parseRequestSheet(rows: any[][]): AgencyRequestParsed {
   }
   const get = (label: string) => toStr(byLabel.get(label));
 
-  // 상품 표 — productsHeader 다음다음 행부터(헤더행 skip), 상품명 있는 행만
+  // 상품 표 — productsHeader 다음다음 행부터(헤더행 skip), 연속된 행만.
+  // ★ 빈 행 = 표 종료(break). 표 아래 여백·푸터 텍스트가 상품으로 오인되는 것 차단(왕복 테스트로 고정).
   const products: AgencyRequestProduct[] = [];
   const headerIdx = (rows || []).findIndex((r) => toStr(r?.[0]) === L.productsHeader);
   if (headerIdx >= 0) {
     for (let i = headerIdx + 2; i < rows.length; i++) {
       const name = toStr(rows[i]?.[0]);
-      if (!name) continue;
+      if (!name) break;
       products.push({ name, price: toNum(rows[i]?.[1]), salePrice: toNum(rows[i]?.[2]) });
     }
   }
