@@ -11,7 +11,7 @@ export default function FooterSection({ props, onEdit }: { props: FooterProps; o
 
   // ★ 2026-07-02(5) 발행물(SSR) 격상과 동일 스타일 — 에디터·발행물 시각 일치
   return (
-    <div className="dm-section dm-footer" style={{ padding: 'var(--dm-sp-8) var(--dm-sp-6)', background: 'var(--dm-neutral-100)', borderTop: '1px solid var(--dm-neutral-200)', textAlign: 'center' }}>
+    <div className="dm-section dm-footer" style={{ padding: 'var(--dm-sp-8) var(--dm-sp-6)', background: 'var(--dm-neutral-100)', borderTop: '1px solid var(--dm-neutral-200)' }}>
       {(props.notes || editable) && (
         <InlineEditable
           className="dm-text-small"

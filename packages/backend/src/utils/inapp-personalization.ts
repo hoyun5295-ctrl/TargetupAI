@@ -19,6 +19,7 @@
 
 import { renderLiquid, flattenCustomerForLiquid, detectLiquidSyntax } from './liquid-templating';
 import { query } from '../config/database';
+import { getColumnFields } from './standard-field-map';
 import type { GeneratedInAppMessage, SegmentConditions } from './inapp-ai-generator';
 import { matchCustomersBySegment, isEmptySegment } from './inapp-segment-matcher';
 
@@ -53,15 +54,28 @@ export interface RenderResult {
 // 옛 %변수% 치환 (Backward compat) — D191 옛 패턴 정합
 // ════════════════════════════════════════════════════════════════════
 
-const LEGACY_VARIABLE_MAP: Record<string, (c: any) => string> = {
-  '%고객명%':           (c) => String(c.name || '고객'),
-  '%이름%':             (c) => String(c.name || '고객'),
-  '%등급%':             (c) => String(c.grade || ''),
-  '%전화%':             (c) => String(c.phone || ''),
-  '%포인트%':           (c) => String(c.points ?? ''),
-  '%지역%':             (c) => String(c.region || ''),
-  '%최근구매매장%':     (c) => String(c.recent_purchase_store || c.store_name || ''),
-};
+// ★ 2026-07-09: 하드코딩 %변수% 맵 폐기 — FIELD_MAP(standard-field-map) displayName + aliases 단일 소스에서 파생.
+//   AI Operator·여정·인앱이 모두 displayName 토큰(%고객등급%·%등록매장정보% 등)을 emit하므로, 인앱 %변수% 치환도 동일 소스로 인식해야 빈칸 방지.
+//   특수: name은 '고객' fallback / recent_purchase_store는 store_name 폴백 / phone은 브라우저 노출 최소화로 %전화%(옛 호환)만 유지.
+const LEGACY_VARIABLE_MAP: Record<string, (c: any) => string> = (() => {
+  const map: Record<string, (c: any) => string> = {};
+  for (const f of getColumnFields()) {
+    if (f.fieldKey === 'sms_opt_in' || f.fieldKey === 'phone') continue;
+    const col = f.columnName;
+    const fieldKey = f.fieldKey;
+    const getter = (c: any) => {
+      const v = c[col];
+      if (fieldKey === 'name') return String(v || '고객');
+      if (fieldKey === 'recent_purchase_store') return String(v || c.store_name || '');
+      return v == null ? '' : String(v);
+    };
+    map[`%${f.displayName}%`] = getter;
+    for (const a of f.aliases || []) map[`%${a}%`] = getter;
+  }
+  // 옛 호환 별칭 (FIELD_MAP alias 밖) — 인앱 옛 패턴 보존
+  map['%전화%'] = (c) => String(c.phone || '');
+  return map;
+})();
 
 function replaceLegacyVariables(text: string, customer: Record<string, any>): string {
   let out = text;

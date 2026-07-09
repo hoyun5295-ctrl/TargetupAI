@@ -27,6 +27,7 @@
  */
 
 import { query } from '../config/database';
+import { getColumnFields } from './standard-field-map';
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // 외부 노출 인터페이스
@@ -66,27 +67,19 @@ interface FieldDef {
   dataType: 'string' | 'number' | 'date' | 'boolean';
 }
 
-const ANALYZED_FIELDS: FieldDef[] = [
-  { field: 'name',                    label: '고객명',          percentVar: '고객명',         dataType: 'string' },
-  { field: 'grade',                   label: '등급',            percentVar: '등급',           dataType: 'string' },
-  { field: 'gender',                  label: '성별',            percentVar: '성별',           dataType: 'string' },
-  { field: 'age',                     label: '나이',            percentVar: '나이',           dataType: 'number' },
-  { field: 'birth_date',              label: '생일',            percentVar: '생일',           dataType: 'date' },
-  { field: 'email',                   label: '이메일',          percentVar: '이메일',         dataType: 'string' },
-  { field: 'region',                  label: '지역',            percentVar: '지역',           dataType: 'string' },
-  { field: 'address',                 label: '주소',            percentVar: '주소',           dataType: 'string' },
-  { field: 'store_name',              label: '등록 매장',       percentVar: '등록매장',       dataType: 'string' },
-  { field: 'registered_store',        label: '가입 매장',       percentVar: '가입매장',       dataType: 'string' },
-  { field: 'points',                  label: '포인트',          percentVar: '포인트',         dataType: 'number' },
-  { field: 'recent_purchase_date',    label: '최근 구매일',     percentVar: '최근구매일',     dataType: 'date' },
-  { field: 'recent_purchase_amount',  label: '최근 구매액',     percentVar: '최근구매액',     dataType: 'number' },
-  { field: 'recent_purchase_store',   label: '최근 구매 매장',  percentVar: '최근구매매장',   dataType: 'string' },
-  { field: 'total_purchase_amount',   label: '누적 구매액',     percentVar: '누적구매액',     dataType: 'number' },
-  { field: 'purchase_count',          label: '구매 횟수',       percentVar: '구매횟수',       dataType: 'number' },
-  { field: 'avg_order_value',         label: '평균 주문액',     percentVar: '평균주문액',     dataType: 'number' },
-  { field: 'ltv_score',               label: 'LTV 점수',        percentVar: 'LTV점수',        dataType: 'number' },
-  { field: 'wedding_anniversary',     label: '결혼기념일',      percentVar: '결혼기념일',     dataType: 'date' },
-];
+// ★ 2026-07-09: 하드코딩 라벨 테이블 폐기 — FIELD_MAP(standard-field-map) 단일 소스에서 파생.
+//   label·percentVar = FIELD_MAP displayName → 활용가능컬럼 버튼·AI 프롬프트가 emit하는 %토큰%이 발송 사전 키(displayName)와 정확히 일치.
+//   (옛 하드코딩은 '등급'·'등록매장'·'가입매장'·'최근구매액' 등이 displayName '고객등급'·'매장명'·'등록매장정보'·'최근구매금액'과 어긋나 발송 시 빈칸이던 근본 원인.)
+//   phone(수신번호)·sms_opt_in(동의 boolean)은 메시지 변수가 아니므로 제외(buildVarCatalogFromFieldMap과 동일 정책).
+//   FIELD_MAP에 없던 avg_order_value·ltv_score·wedding_anniversary는 애초에 발송 치환 불가(사전에 없음)라 활용 목록에서 자연 제외 = 잠재 빈칸 버그 동시 제거.
+const ANALYZED_FIELDS: FieldDef[] = getColumnFields()
+  .filter((f) => f.fieldKey !== 'phone' && f.fieldKey !== 'sms_opt_in')
+  .map((f) => ({
+    field: f.columnName,
+    label: f.displayName,
+    percentVar: f.displayName,
+    dataType: f.dataType,
+  }));
 
 const SAFE_THRESHOLD = 70;        // 70%+ = 안전 변수
 const CONDITIONAL_THRESHOLD = 30; // 30~70% = 분기 변수, 미만 = 차단
@@ -241,7 +234,7 @@ export function formatProfileForAiPrompt(
 [★ ★ ★ 안전 변수 — 본문 안 1~3개 자연 활용 의무 ★ ★ ★]
 ※ 아래 변수는 회사 customer DB 70% 이상 채워짐 = 발송 시점 100% 안전.
 ※ AI 응답 본문(message_text) 안 = 본 매트릭스 안 1~3개 변수 자연 활용 의무.
-※ 활용 예시: "${safeExamples || '%고객명%'}님 안녕하세요" / "%고객명%님, %등급% 회원 전용 안내드려요" / "오랜만이에요 %고객명%님".
+※ 활용 예시: "${safeExamples || '%고객명%'}님 안녕하세요" / "%고객명%님, %고객등급% 회원 전용 안내드려요" / "오랜만이에요 %고객명%님".
 ※ ⚠️ 변수 활용 0건 응답 절대 금지 — 일반 안내만 작성 시 사고. 반드시 위 안전 변수에서 1~3개 본문 안에 자연스럽게 포함.
 ※ ⚠️ 3개 안(A/B/C) 모두 동일 안전 변수 자연 활용 의무 (한 안만 변수 활용 + 나머지 일반 안내 금지).
 

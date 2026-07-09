@@ -1,6 +1,6 @@
 import Anthropic from '@anthropic-ai/sdk';
 import OpenAI from 'openai';
-import { FIELD_MAP, getFieldByKey, getColumnFields, applyFieldAliases } from '../utils/standard-field-map';
+import { FIELD_MAP, getFieldByKey, getColumnFields, applyFieldAliases, applyFieldDisplayNames } from '../utils/standard-field-map';
 import { query } from '../config/database';
 import { currentUserId } from '../utils/request-context';
 import { AI_MODELS, AI_MAX_TOKENS, TIMEOUTS, isAdaptiveOnlyModel, resolveMaxTokens } from '../config/defaults';
@@ -601,6 +601,14 @@ export function extractVarCatalog(customerSchema: any): {
   // ★ D111 P2: FIELD_MAP.aliases 자동 주입 — standard-field-map.ts 컨트롤타워 호출
   //   인라인 로직 금지 — applyFieldAliases가 유일한 진입점
   applyFieldAliases(
+    result.fieldMappings,
+    result.availableVars,
+    (col) => Object.values(result.fieldMappings).find((e: any) => e.column === col)
+  );
+
+  // ★ 2026-07-09: FIELD_MAP displayName 항상 유효 토큰화 — customer_schema가 다른 라벨을 써도
+  //   %displayName%(활용가능컬럼·AI 프롬프트·미리보기가 쓰는 단일 표준 언어)이 발송 시 항상 매칭.
+  applyFieldDisplayNames(
     result.fieldMappings,
     result.availableVars,
     (col) => Object.values(result.fieldMappings).find((e: any) => e.column === col)

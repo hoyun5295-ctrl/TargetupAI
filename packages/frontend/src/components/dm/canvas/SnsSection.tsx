@@ -21,7 +21,7 @@ export default function SnsSection({ props }: { props: SnsProps }) {
 
   return (
     <div className="dm-section dm-sns" style={{ padding: 'var(--dm-sp-5)', background: 'var(--dm-bg)' }}>
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 'var(--dm-sp-3)', justifyContent: 'center', flexDirection: isIconMode ? 'row' : 'column' }}>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 'var(--dm-sp-3)', flexDirection: isIconMode ? 'row' : 'column', justifyContent: isIconMode ? 'var(--dm-section-justify, center)' : undefined, alignItems: isIconMode ? undefined : 'var(--dm-section-justify, center)' }}>
         {channels.map((ch, i) => {
           const color = SNS_COLORS[ch.type] || 'var(--dm-neutral-700)';
           const label = SNS_LABELS[ch.type] || ch.type;

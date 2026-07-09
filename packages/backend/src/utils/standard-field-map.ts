@@ -174,6 +174,35 @@ export function applyFieldAliases<T>(
   }
 }
 
+/**
+ * ★ 2026-07-09: FIELD_MAP displayName을 발송 사전의 "항상 유효한 토큰"으로 보강 — 개인화 토큰 단일 표준 언어(displayName) 정합.
+ *
+ * 배경: company-data-profile(활용가능컬럼 버튼·AI 프롬프트)·sample-customer(미리보기 키)를 FIELD_MAP displayName으로 통일함에 따라,
+ *       발송 사전(extractVarCatalog)이 customer_schema의 다른 라벨을 쓰는 회사에서도 %displayName%(고객등급·등록매장정보 등)이 항상 매칭되어야 한다.
+ *       스키마 라벨/alias는 그대로 유지(하위호환) — 컬럼 기준으로 이미 존재하는 엔트리에 displayName 키만 얹는다.
+ *
+ * ⚠️ applyFieldAliases와 동일 계열 — 인라인으로 displayName 주입 로직 작성 금지(재발 방지). 이 함수만 호출.
+ *
+ * @param fieldMappings  { varName: entry } 맵 (in-place 수정)
+ * @param availableVars  가용 변수명 배열 (in-place 수정)
+ * @param findEntryByColumn  column으로 기존 entry를 찾는 콜백
+ */
+export function applyFieldDisplayNames<T>(
+  fieldMappings: Record<string, T>,
+  availableVars: string[],
+  findEntryByColumn: (columnName: string) => T | undefined
+): void {
+  for (const f of FIELD_MAP) {
+    if (f.storageType === 'custom_fields') continue;
+    if (f.fieldKey === 'phone' || f.fieldKey === 'sms_opt_in') continue;
+    if (fieldMappings[f.displayName]) continue; // 이미 있으면(디폴트 카탈로그 등) 스킵
+    const entry = findEntryByColumn(f.columnName);
+    if (!entry) continue;
+    fieldMappings[f.displayName] = entry;
+    if (!availableVars.includes(f.displayName)) availableVars.push(f.displayName);
+  }
+}
+
 export function getColumnFields(): StandardFieldMapping[] {
   return FIELD_MAP.filter(f => f.storageType === 'column');
 }

@@ -38,7 +38,7 @@ export default function CountdownSection({ props, onEdit }: { props: CountdownPr
 
   // ★ 2026-07-02(5) 발행물(SSR) 격상과 동일 스타일 — 에디터·발행물 시각 일치 (3면 대조)
   return (
-    <div className="dm-section dm-countdown" style={{ padding: 'var(--dm-sp-8) var(--dm-sp-5)', background: 'var(--dm-neutral-900)', color: '#fff', textAlign: 'center' }}>
+    <div className="dm-section dm-countdown" style={{ padding: 'var(--dm-sp-8) var(--dm-sp-5)', background: 'var(--dm-neutral-900)', color: '#fff' }}>
       <InlineEditable
         style={{ fontSize: 'var(--dm-fs-small)', fontWeight: 700, letterSpacing: 3, color: 'var(--dm-accent)', marginBottom: 'var(--dm-sp-5)' }}
         value={props.urgency_text || '마감까지'}

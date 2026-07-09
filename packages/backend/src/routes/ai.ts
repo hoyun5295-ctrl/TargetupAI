@@ -3,7 +3,7 @@ import { query } from '../config/database';
 import { authenticate } from '../middlewares/auth';
 import { checkAPIStatus, extractVarCatalog, filterVarCatalogByData, generateCustomMessages, generateMessages, parseBriefing, recommendTarget, countFilteredCustomers, recommendNextCampaign, refineDirectMessage, callAIWithFallback } from '../services/ai';
 import { buildGenderFilter, buildGradeFilter, buildRegionFilter, getGenderVariants, getRegionVariants } from '../utils/normalize';
-import { FIELD_MAP, FIELD_DISPLAY_MAP, reverseDisplayValue } from '../utils/standard-field-map';
+import { FIELD_MAP, FIELD_DISPLAY_MAP, reverseDisplayValue, getColumnFields, renderFieldValue } from '../utils/standard-field-map';
 import { replaceVariables } from '../utils/messageUtils';
 import { STANDARD_FIELD_FALLBACKS } from '../utils/var-fallback';
 import { selectJourneyTargetCustomerIds } from '../utils/journey-target-extractor';
@@ -1135,45 +1135,32 @@ router.get('/operator/data-profile', async (req: Request, res: Response) => {
 // ============================================================
 // ★ 2026-06-29: sample-customer row → 표시명/Liquid 필드 매핑 (여정 trigger·AI Operator filters 두 경로 공용 — 인라인 중복 제거)
 function mapSampleCustomerRow(row: any): { sampleCustomer: Record<string, string | number | null>; sampleCustomerFields: Record<string, any> } {
-  const sampleCustomer: Record<string, string | number | null> = {
-    '고객명':       row.name || null,
-    '등급':         row.grade || null,
-    '성별':         row.gender || null,
-    '나이':         row.age || null,
-    '생일':         row.birth_date ? new Date(row.birth_date).toLocaleDateString('ko-KR') : null,
-    '이메일':       row.email || null,
-    '지역':         row.region || null,
-    '주소':         row.address || null,
-    '등록매장':     row.store_name || null,
-    '가입매장':     row.registered_store || null,
-    '포인트':       row.points != null ? Number(row.points).toLocaleString() : null,
-    '최근구매일':   row.recent_purchase_date ? new Date(row.recent_purchase_date).toLocaleDateString('ko-KR') : null,
-    '최근구매액':   row.recent_purchase_amount != null ? Number(row.recent_purchase_amount).toLocaleString() : null,
-    '최근구매매장': row.recent_purchase_store || null,
-    '누적구매액':   row.total_purchase_amount != null ? Number(row.total_purchase_amount).toLocaleString() : null,
-    '구매횟수':     row.purchase_count != null ? Number(row.purchase_count).toLocaleString() : null,
-    '평균주문액':   row.avg_order_value != null ? Number(row.avg_order_value).toLocaleString() : null,
-    'LTV점수':      row.ltv_score != null ? Number(row.ltv_score).toLocaleString() : null,
-    '결혼기념일':   row.wedding_anniversary ? new Date(row.wedding_anniversary).toLocaleDateString('ko-KR') : null,
-  };
-  const sampleCustomerFields: Record<string, any> = {
-    name: row.name || null, grade: row.grade || null, gender: row.gender || null, age: row.age || null,
-    birth_date: row.birth_date || null, email: row.email || null, region: row.region || null, address: row.address || null,
-    store_name: row.store_name || null, registered_store: row.registered_store || null,
-    points: row.points != null ? Number(row.points) : null,
-    recent_purchase_date: row.recent_purchase_date || null,
-    recent_purchase_amount: row.recent_purchase_amount != null ? Number(row.recent_purchase_amount) : null,
-    recent_purchase_store: row.recent_purchase_store || null,
-    total_purchase_amount: row.total_purchase_amount != null ? Number(row.total_purchase_amount) : null,
-    purchase_count: row.purchase_count != null ? Number(row.purchase_count) : null,
-    avg_order_value: row.avg_order_value != null ? Number(row.avg_order_value) : null,
-    ltv_score: row.ltv_score != null ? Number(row.ltv_score) : null,
-    wedding_anniversary: row.wedding_anniversary || null,
-    // Predictive 점수 = 중립 0.5 fallback (실제 발송 시 cdp_customer_predictions 정합)
-    churn_risk: 0.5, purchase_likelihood: 0.5, click_score: 0.5,
-  };
+  // ★ 2026-07-09: 하드코딩 라벨/컬럼 테이블 폐기 — FIELD_MAP 단일 소스 파생.
+  //   sampleCustomer 키 = FIELD_MAP displayName(발송 사전 키와 동일) → 미리보기 매칭 = 실제 발송 매칭 100% 일치
+  //   (옛 하드코딩은 '등급'·'등록매장'·'최근구매액' 등이 발송 사전 displayName과 어긋나 미리보기만 매칭·발송 빈칸이던 근본 원인).
+  //   표시값 = renderFieldValue(발송 치환과 동일 포맷). Liquid 필드(sampleCustomerFields) = column 키 + 예측 점수 fallback.
+  const sampleCustomer: Record<string, string | number | null> = {};
+  const sampleCustomerFields: Record<string, any> = {};
+  for (const f of getColumnFields()) {
+    if (f.fieldKey === 'phone' || f.fieldKey === 'sms_opt_in') continue;
+    const raw = row[f.columnName];
+    const empty = raw === null || raw === undefined || raw === '';
+    sampleCustomer[f.displayName] = empty ? null : renderFieldValue(raw, f.fieldKey);
+    sampleCustomerFields[f.columnName] = empty ? null : (f.dataType === 'number' ? Number(raw) : raw);
+  }
+  // Predictive 점수 = 중립 0.5 fallback (Liquid customer.churn_risk 등 — 실제 발송 시 cdp_customer_predictions 정합)
+  sampleCustomerFields.churn_risk = 0.5;
+  sampleCustomerFields.purchase_likelihood = 0.5;
+  sampleCustomerFields.click_score = 0.5;
   return { sampleCustomer, sampleCustomerFields };
 }
+
+// ★ 2026-07-09: 샘플 고객 SELECT 컬럼 = FIELD_MAP 컬럼 필드 단일 소스 (mapSampleCustomerRow와 동일 집합). phone/sms_opt_in 제외.
+//   컬럼명은 FIELD_MAP 컨트롤타워 값(주입 불가) — filterVarCatalogByData가 이미 운영 쿼리하는 검증된 컬럼 집합.
+const SAMPLE_CUSTOMER_COLUMNS = getColumnFields()
+  .filter((f) => f.fieldKey !== 'phone' && f.fieldKey !== 'sms_opt_in')
+  .map((f) => f.columnName)
+  .join(', ');
 
 router.post('/operator/sample-customer', async (req: Request, res: Response) => {
   try {
@@ -1204,10 +1191,7 @@ router.post('/operator/sample-customer', async (req: Request, res: Response) => 
       const { sql: filterWhere, params: filterParams } = buildFilterWhereClauseCompat(filters, fBaseParams.length + 1);
       const fParams = [...fBaseParams, ...filterParams];
       const fSql = `
-        SELECT name, grade, gender, age, birth_date, email, region, address,
-               store_name, registered_store, points, recent_purchase_date, recent_purchase_amount,
-               recent_purchase_store, total_purchase_amount, purchase_count, avg_order_value,
-               ltv_score, wedding_anniversary
+        SELECT ${SAMPLE_CUSTOMER_COLUMNS}
         FROM customers
         WHERE company_id = $1::uuid AND is_active = true AND sms_opt_in = true
           ${fStoreFilter}
@@ -1247,10 +1231,7 @@ router.post('/operator/sample-customer', async (req: Request, res: Response) => 
 
     // 추출 순서(trigger ORDER BY — 신규가입=created_at DESC 등) 유지 = array_position
     const sql = `
-      SELECT name, grade, gender, age, birth_date, email, region, address,
-             store_name, registered_store, points, recent_purchase_date, recent_purchase_amount,
-             recent_purchase_store, total_purchase_amount, purchase_count, avg_order_value,
-             ltv_score, wedding_anniversary
+      SELECT ${SAMPLE_CUSTOMER_COLUMNS}
       FROM customers
       WHERE company_id = $1::uuid
         AND id = ANY($2::uuid[])

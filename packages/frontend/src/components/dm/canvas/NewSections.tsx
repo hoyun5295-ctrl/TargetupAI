@@ -71,7 +71,7 @@ export function ProductCarouselSection({ props }: { props: ProductCarouselProps 
       {products.length === 0 ? (
         <div style={PLACEHOLDER_STYLE}>[상품을 추가해주세요]</div>
       ) : (
-        <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'center', gap: 12 }}>
+        <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'var(--dm-section-justify, center)', gap: 12 }}>
           {products.map((p, i) => {
             // ★ 2026-07-02(2) 할인 자동 계산 표시 + 링크 연결 표시 — 뷰어 SSR(renderProductCarousel)과 동일 규칙
             const price = Number(p.price || 0);

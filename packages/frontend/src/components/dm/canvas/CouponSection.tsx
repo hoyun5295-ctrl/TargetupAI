@@ -23,7 +23,7 @@ export default function CouponSection({ props, onEdit }: { props: CouponProps; o
   // ★ 2026-07-02(5) 발행물(SSR) 격상과 동일 스타일 — 에디터·발행물 시각 일치 (3면 대조)
   return (
     <div className="dm-section dm-coupon" style={{ padding: 'var(--dm-sp-8) var(--dm-sp-5)', background: 'var(--dm-primary-light)' }}>
-      <div style={{ background: 'var(--dm-bg)', border: '1px solid var(--dm-neutral-200)', borderRadius: 20, boxShadow: 'var(--dm-shadow-md)', padding: 'var(--dm-sp-8) var(--dm-sp-6)', textAlign: 'center' }}>
+      <div style={{ background: 'var(--dm-bg)', border: '1px solid var(--dm-neutral-200)', borderRadius: 20, boxShadow: 'var(--dm-shadow-md)', padding: 'var(--dm-sp-8) var(--dm-sp-6)' }}>
         <div style={{ fontSize: 'var(--dm-fs-tiny)', fontWeight: 700, letterSpacing: 3, color: 'var(--dm-neutral-500)', marginBottom: 'var(--dm-sp-3)' }}>COUPON</div>
         <InlineEditable
           className="dm-text-hero"

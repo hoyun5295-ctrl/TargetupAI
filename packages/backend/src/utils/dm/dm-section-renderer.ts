@@ -100,14 +100,14 @@ function renderHeader(props: HeaderProps, ctx: SectionRenderContext): string {
       const eventDate = props.event_date ? new Date(props.event_date) : null;
       const dday = eventDate ? Math.ceil((eventDate.getTime() - Date.now()) / 86400000) : 0;
       const ddayText = dday > 0 ? `D-${dday}` : dday === 0 ? 'D-Day' : `D+${Math.abs(dday)}`;
-      return `<div class="dm-header dm-header-countdown" data-variant="${escapeHtml(variant)}" style="background:linear-gradient(135deg,var(--dm-primary) 0%,var(--dm-primary-hover) 100%);color:#fff;padding:var(--dm-sp-6) var(--dm-sp-5);text-align:center">
+      return `<div class="dm-header dm-header-countdown" data-variant="${escapeHtml(variant)}" style="background:linear-gradient(135deg,var(--dm-primary) 0%,var(--dm-primary-hover) 100%);color:#fff;padding:var(--dm-sp-6) var(--dm-sp-5)">
         <div style="font-size:36px;font-weight:900;letter-spacing:2px">${escapeHtml(ddayText)}</div>
         ${props.event_title ? `<div style="font-size:var(--dm-fs-small);opacity:0.9;margin-top:var(--dm-sp-2);font-weight:500">${escapeHtml(props.event_title)}</div>` : ''}
         ${brand ? `<div style="font-size:var(--dm-fs-tiny);opacity:0.6;margin-top:var(--dm-sp-1)">${brand}</div>` : ''}
       </div>`;
     }
     case 'coupon': {
-      return `<div class="dm-header dm-header-coupon" data-variant="${escapeHtml(variant)}" style="background:linear-gradient(135deg,var(--dm-accent) 0%,var(--dm-primary) 100%);color:#fff;padding:var(--dm-sp-6) var(--dm-sp-5);text-align:center">
+      return `<div class="dm-header dm-header-coupon" data-variant="${escapeHtml(variant)}" style="background:linear-gradient(135deg,var(--dm-accent) 0%,var(--dm-primary) 100%);color:#fff;padding:var(--dm-sp-6) var(--dm-sp-5)">
         ${props.discount_label ? `<div style="font-size:var(--dm-fs-h3);font-weight:700;margin-bottom:var(--dm-sp-2)">${escapeHtml(props.discount_label)}</div>` : ''}
         ${props.coupon_code ? `<div style="background:rgba(255,255,255,0.25);display:inline-block;padding:var(--dm-sp-2) var(--dm-sp-6);border-radius:var(--dm-radius-md);font-size:var(--dm-fs-h2);font-weight:900;letter-spacing:3px;font-family:var(--dm-font-mono)">${escapeHtml(props.coupon_code)}</div>` : ''}
         ${brand ? `<div style="font-size:var(--dm-fs-tiny);opacity:0.7;margin-top:var(--dm-sp-2)">${brand}</div>` : ''}
@@ -122,17 +122,12 @@ function renderHeader(props: HeaderProps, ctx: SectionRenderContext): string {
           ${logo ? `<img src="${escapeHtml(logo)}" alt="${brand}" style="height:${logoH};border-radius:var(--dm-radius-sm)">` : ''}
           ${brand ? `<div style="font-size:${brandFs};font-weight:800;letter-spacing:-0.01em;color:var(--dm-neutral-900)">${brand}</div>` : ''}
         </div>`;
-      if (align === 'center') {
-        return `<div class="dm-header dm-header-logo" data-variant="${escapeHtml(variant)}" style="background:var(--dm-bg);padding:var(--dm-sp-4) var(--dm-sp-5);border-bottom:1px solid var(--dm-neutral-200);display:flex;flex-direction:column;align-items:center;gap:var(--dm-sp-1);text-align:center">
+      // ★ 2026-07-09: 좌/중/우 = column + align-items 통일 (편집 캔버스 HeaderSection과 미러).
+      //   이전 좌/우 row + justify-content는 편집기 contentEditable(브랜드) 블록이 폭을 꽉 채워 flex-end가 안 먹던 근본 정정.
+      const logoAlignItems = align === 'left' ? 'flex-start' : align === 'right' ? 'flex-end' : 'center';
+      return `<div class="dm-header dm-header-logo" data-variant="${escapeHtml(variant)}" style="background:var(--dm-bg);padding:var(--dm-sp-4) var(--dm-sp-5);border-bottom:1px solid var(--dm-neutral-200);display:flex;flex-direction:column;align-items:${logoAlignItems};gap:var(--dm-sp-1)">
         ${logoBrand}
         ${props.phone ? `<a href="tel:${escapeHtml(props.phone)}" style="font-size:var(--dm-fs-tiny);color:var(--dm-neutral-500)">${escapeHtml(props.phone)}</a>` : ''}
-      </div>`;
-      }
-      // ★ 2026-07-08: left/right 정렬 반영 — 기존엔 center가 아니면 무조건 space-between(로고 좌측 고정)이라 '우' 선택이 좌측으로 렌더되던 문제.
-      const logoJustify = align === 'right' ? 'flex-end' : 'flex-start';
-      return `<div class="dm-header dm-header-logo" data-variant="${escapeHtml(variant)}" style="background:var(--dm-bg);padding:var(--dm-sp-4) var(--dm-sp-5);border-bottom:1px solid var(--dm-neutral-200);display:flex;align-items:center;justify-content:${logoJustify};gap:var(--dm-sp-3)">
-        ${logoBrand}
-        ${props.phone ? `<a href="tel:${escapeHtml(props.phone)}" style="font-size:var(--dm-fs-small);color:var(--dm-neutral-500)">${escapeHtml(props.phone)}</a>` : ''}
       </div>`;
     }
   }
@@ -249,7 +244,7 @@ function renderCouponClassic(props: CouponProps): string {
 
   // ★ 2026-07-02(5) 발행물 디자인 격상 — 이메일 톤: 점선 테두리 카드 → 정돈된 카드 + 코드 점선 분리
   return `<div class="dm-section dm-coupon" data-section-type="coupon" style="padding:var(--dm-sp-8) var(--dm-sp-5);background:var(--dm-primary-light)">
-    <div style="background:var(--dm-bg);border:1px solid var(--dm-neutral-200);border-radius:20px;box-shadow:var(--dm-shadow-md);padding:var(--dm-sp-8) var(--dm-sp-6);text-align:center">
+    <div style="background:var(--dm-bg);border:1px solid var(--dm-neutral-200);border-radius:20px;box-shadow:var(--dm-shadow-md);padding:var(--dm-sp-8) var(--dm-sp-6)">
       <div style="font-size:var(--dm-fs-tiny);font-weight:700;letter-spacing:3px;color:var(--dm-neutral-500);margin-bottom:var(--dm-sp-3)">COUPON</div>
       <div class="dm-text-hero" style="color:var(--dm-primary);font-weight:900;font-family:var(--dm-font-display)">${discountLabel}</div>
       ${code ? `<div style="margin-top:var(--dm-sp-4);border-top:1px dashed var(--dm-neutral-300);padding-top:var(--dm-sp-4)"><span style="background:var(--dm-neutral-900);color:#fff;display:inline-block;padding:var(--dm-sp-2) var(--dm-sp-6);border-radius:999px;font-family:var(--dm-font-mono);font-size:var(--dm-fs-h3);font-weight:700;letter-spacing:3px">${code}</span></div>` : ''}
@@ -265,7 +260,7 @@ function renderCouponTicket(props: CouponProps): string {
   const code = props.coupon_code ? escapeHtml(props.coupon_code) : '';
   const notch = 'radial-gradient(circle at 0 50%, transparent 10px, var(--dm-bg) 11px) left/51% 100% no-repeat, radial-gradient(circle at 100% 50%, transparent 10px, var(--dm-bg) 11px) right/51% 100% no-repeat';
   return `<div class="dm-section dm-coupon" data-section-type="coupon" style="padding:calc(var(--dm-sp-6) * var(--dm-section-pad-scale)) var(--dm-sp-5);background:var(--dm-primary-light)">
-    <div style="background:${notch};box-shadow:var(--dm-shadow-md);border-radius:var(--dm-radius-lg);padding:var(--dm-sp-6) var(--dm-sp-8);text-align:center">
+    <div style="background:${notch};box-shadow:var(--dm-shadow-md);border-radius:var(--dm-radius-lg);padding:var(--dm-sp-6) var(--dm-sp-8)">
       <div style="font-size:var(--dm-fs-hero);font-weight:900;color:var(--dm-primary);font-family:var(--dm-font-display)">${discountLabel}</div>
       ${code ? `<div style="margin-top:var(--dm-sp-4);border-top:1px dashed var(--dm-neutral-300);padding-top:var(--dm-sp-4);font-family:var(--dm-font-mono);font-size:var(--dm-fs-h2);font-weight:700;letter-spacing:3px;color:var(--dm-neutral-900)">${code}</div>` : ''}
       ${couponMeta(props)}
@@ -278,7 +273,7 @@ function renderCouponTicket(props: CouponProps): string {
 function renderCouponSpotlight(props: CouponProps): string {
   const discountLabel = escapeHtml(props.discount_label || '');
   const code = props.coupon_code ? escapeHtml(props.coupon_code) : '';
-  return `<div class="dm-section dm-coupon" data-section-type="coupon" style="padding:calc(var(--dm-sp-8) * var(--dm-section-pad-scale)) var(--dm-sp-5);background:var(--dm-neutral-900);color:#fff;text-align:center">
+  return `<div class="dm-section dm-coupon" data-section-type="coupon" style="padding:calc(var(--dm-sp-8) * var(--dm-section-pad-scale)) var(--dm-sp-5);background:var(--dm-neutral-900);color:#fff">
     ${discountLabel ? `<div style="font-size:var(--dm-fs-h3);font-weight:700;color:var(--dm-accent);letter-spacing:1px">${discountLabel}</div>` : ''}
     ${code ? `<div style="margin-top:var(--dm-sp-3);font-family:var(--dm-font-mono);font-size:var(--dm-fs-hero);font-weight:900;letter-spacing:4px">${code}</div>` : ''}
     <div style="margin-top:var(--dm-sp-2);color:var(--dm-neutral-400)">${couponMeta(props)}</div>
@@ -291,7 +286,7 @@ function renderCountdown(props: CountdownProps): string {
   const urgency = escapeHtml(props.urgency_text || '마감까지');
 
   // ★ 2026-07-02(5) 발행물 디자인 격상 — 이메일 톤: 중앙 정렬 + 자간 라벨 + 여백 리듬 + 절제된 타일
-  return `<div class="dm-section dm-countdown" data-section-type="countdown" data-end="${escapeHtml(end)}" style="padding:var(--dm-sp-8) var(--dm-sp-5);background:var(--dm-neutral-900);color:#fff;text-align:center">
+  return `<div class="dm-section dm-countdown" data-section-type="countdown" data-end="${escapeHtml(end)}" style="padding:var(--dm-sp-8) var(--dm-sp-5);background:var(--dm-neutral-900);color:#fff">
     <div style="font-size:var(--dm-fs-small);font-weight:700;letter-spacing:3px;color:var(--dm-accent);margin-bottom:var(--dm-sp-5)">${urgency}</div>
     <div class="dm-countdown-display" style="display:flex;gap:var(--dm-sp-2);justify-content:var(--dm-section-justify,center);flex-wrap:wrap;align-items:stretch">
       ${props.show_days    ? `<div class="cd-unit"><div class="cd-num" data-unit="d">00</div><div class="cd-lbl">일</div></div>` : ''}
@@ -490,7 +485,7 @@ function renderSns(props: SnsProps): string {
   }).join('');
 
   return `<div class="dm-section dm-sns" data-section-type="sns" style="padding:var(--dm-sp-5);background:var(--dm-bg)">
-    <div style="display:flex;flex-wrap:wrap;gap:var(--dm-sp-3);justify-content:center;${isIconMode ? '' : 'flex-direction:column'}">${items}</div>
+    <div style="display:flex;flex-wrap:wrap;gap:var(--dm-sp-3);${isIconMode ? 'justify-content:var(--dm-section-justify,center)' : 'flex-direction:column;align-items:var(--dm-section-justify,center)'}">${items}</div>
   </div>`;
 }
 
@@ -498,7 +493,7 @@ function renderPromoCode(props: PromoCodeProps): string {
   if (!props.code) return '';
 
   // ★ 2026-07-02 v2 — 원색 그라데이션 도배 → 다크 에디토리얼 패널 + 대형 모노 코드
-  return `<div class="dm-section dm-promo-code" data-section-type="promo_code" style="padding:var(--dm-sp-8) var(--dm-sp-5);background:var(--dm-neutral-900);color:#fff;text-align:center">
+  return `<div class="dm-section dm-promo-code" data-section-type="promo_code" style="padding:var(--dm-sp-8) var(--dm-sp-5);background:var(--dm-neutral-900);color:#fff">
     <div class="dm-overline" style="color:var(--dm-accent);margin-bottom:var(--dm-sp-3)">PROMO CODE</div>
     ${props.description ? `<div class="dm-text-h3" style="font-weight:600;margin-bottom:var(--dm-sp-4);opacity:0.92">${escapeHtml(props.description)}</div>` : ''}
     <div style="font-family:var(--dm-font-mono);font-size:var(--dm-fs-h1);font-weight:800;letter-spacing:5px;padding:var(--dm-sp-3) var(--dm-sp-5);border:1px dashed rgba(255,255,255,0.35);border-radius:14px;display:inline-block">${escapeHtml(props.code)}</div>
@@ -513,7 +508,7 @@ function renderFooter(props: FooterProps, ctx: SectionRenderContext): string {
     : '';
 
   // ★ 2026-07-02(5) 발행물 디자인 격상 — 이메일 톤: 중앙 정렬 + 여유 행간 + 넉넉한 여백
-  return `<div class="dm-section dm-footer" data-section-type="footer" style="padding:var(--dm-sp-8) var(--dm-sp-6);background:var(--dm-neutral-100);border-top:1px solid var(--dm-neutral-200);text-align:center">
+  return `<div class="dm-section dm-footer" data-section-type="footer" style="padding:var(--dm-sp-8) var(--dm-sp-6);background:var(--dm-neutral-100);border-top:1px solid var(--dm-neutral-200)">
     ${props.notes ? `<div class="dm-text-small" style="color:var(--dm-neutral-600);margin-bottom:var(--dm-sp-4);white-space:pre-wrap;line-height:1.8">${escapeHtml(props.notes)}</div>` : ''}
     ${props.cs_phone ? `<div class="dm-text-small" style="color:var(--dm-neutral-700);margin-bottom:var(--dm-sp-1)"><strong>고객센터</strong> <a href="tel:${escapeHtml(props.cs_phone)}" style="color:var(--dm-primary);font-weight:600">${escapeHtml(props.cs_phone)}</a></div>` : ''}
     ${props.cs_hours ? `<div class="dm-text-tiny" style="color:var(--dm-neutral-500);margin-bottom:var(--dm-sp-2)">${escapeHtml(props.cs_hours)}</div>` : ''}
@@ -593,7 +588,7 @@ function renderProductCarousel(p: any): string {
   }).join('');
   return `<div class="dm-section dm-product-carousel" style="padding:var(--dm-sp-6) var(--dm-sp-5)">
     ${p.title ? `<div class="dm-text-h2" style="color:var(--dm-neutral-900);margin-bottom:var(--dm-sp-4)">${escapeHtml(p.title)}</div>` : ''}
-    <div style="display:flex;flex-wrap:wrap;justify-content:center;gap:12px">${items}</div>
+    <div style="display:flex;flex-wrap:wrap;justify-content:var(--dm-section-justify,center);gap:12px">${items}</div>
   </div>`;
 }
 

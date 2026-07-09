@@ -26,7 +26,7 @@ export default function HeaderSection({ props, storeName = '', onEdit }: { props
     const dday = eventDate ? Math.ceil((eventDate.getTime() - Date.now()) / 86400000) : 0;
     const ddayText = dday > 0 ? `D-${dday}` : dday === 0 ? 'D-Day' : `D+${Math.abs(dday)}`;
     return (
-      <div className="dm-header dm-header-countdown" style={{ background: 'linear-gradient(135deg,var(--dm-primary) 0%,var(--dm-primary-hover) 100%)', color: '#fff', padding: 'var(--dm-sp-6) var(--dm-sp-5)', textAlign: 'center' }}>
+      <div className="dm-header dm-header-countdown" style={{ background: 'linear-gradient(135deg,var(--dm-primary) 0%,var(--dm-primary-hover) 100%)', color: '#fff', padding: 'var(--dm-sp-6) var(--dm-sp-5)' }}>
         <div style={{ fontSize: 36, fontWeight: 900, letterSpacing: 2 }}>{ddayText}</div>
         {(props.event_title || editable) && (
           <InlineEditable
@@ -54,7 +54,7 @@ export default function HeaderSection({ props, storeName = '', onEdit }: { props
 
   if (variant === 'coupon') {
     return (
-      <div className="dm-header dm-header-coupon" style={{ background: 'linear-gradient(135deg,var(--dm-accent) 0%,var(--dm-primary) 100%)', color: '#fff', padding: 'var(--dm-sp-6) var(--dm-sp-5)', textAlign: 'center' }}>
+      <div className="dm-header dm-header-coupon" style={{ background: 'linear-gradient(135deg,var(--dm-accent) 0%,var(--dm-primary) 100%)', color: '#fff', padding: 'var(--dm-sp-6) var(--dm-sp-5)' }}>
         {(props.discount_label || editable) && (
           <InlineEditable
             style={{ fontSize: 'var(--dm-fs-h3)', fontWeight: 700, marginBottom: 'var(--dm-sp-2)' }}
@@ -90,7 +90,10 @@ export default function HeaderSection({ props, storeName = '', onEdit }: { props
   }
 
   // variant === 'logo'
+  // ★ 2026-07-09: 좌/중/우 정렬을 column + align-items로 통일 (center·히어로와 동일 방식).
+  //   이전 좌/우는 row + justify-content라 편집 캔버스의 contentEditable(브랜드) 블록이 폭을 꽉 채워 flex-end가 안 먹던 근본 정정. 발행 SSR renderHeader와 미러.
   const align = props.align || 'center';
+  const alignItems = align === 'left' ? 'flex-start' : align === 'right' ? 'flex-end' : 'center';
   const brandFs = props.brand_size === 'sm' ? 'var(--dm-fs-small)' : props.brand_size === 'lg' ? 'var(--dm-fs-h1)' : 'var(--dm-fs-h3)';
   const logoH = props.logo_size === 'sm' ? 24 : props.logo_size === 'lg' ? 48 : 32;
   const logoBrand = (
@@ -109,19 +112,10 @@ export default function HeaderSection({ props, storeName = '', onEdit }: { props
     </div>
   );
   const phoneLink = props.phone ? (
-    <a href={`tel:${props.phone}`} style={{ fontSize: align === 'center' ? 'var(--dm-fs-tiny)' : 'var(--dm-fs-small)', color: 'var(--dm-neutral-500)', textDecoration: 'none' }}>{props.phone}</a>
+    <a href={`tel:${props.phone}`} style={{ fontSize: 'var(--dm-fs-tiny)', color: 'var(--dm-neutral-500)', textDecoration: 'none' }}>{props.phone}</a>
   ) : null;
-  if (align === 'center') {
-    return (
-      <div className="dm-header dm-header-logo" style={{ background: 'var(--dm-bg)', padding: 'var(--dm-sp-4) var(--dm-sp-5)', borderBottom: '1px solid var(--dm-neutral-200)', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 'var(--dm-sp-1)', textAlign: 'center' }}>
-        {logoBrand}
-        {phoneLink}
-      </div>
-    );
-  }
-  // ★ 2026-07-08: left/right 정렬 반영 (백엔드 dm-section-renderer renderHeader 미러) — center 외 무조건 space-between으로 좌측 고정되던 문제.
   return (
-    <div className="dm-header dm-header-logo" style={{ background: 'var(--dm-bg)', padding: 'var(--dm-sp-4) var(--dm-sp-5)', borderBottom: '1px solid var(--dm-neutral-200)', display: 'flex', alignItems: 'center', justifyContent: align === 'right' ? 'flex-end' : 'flex-start', gap: 'var(--dm-sp-3)' }}>
+    <div className="dm-header dm-header-logo" style={{ background: 'var(--dm-bg)', padding: 'var(--dm-sp-4) var(--dm-sp-5)', borderBottom: '1px solid var(--dm-neutral-200)', display: 'flex', flexDirection: 'column', alignItems, gap: 'var(--dm-sp-1)' }}>
       {logoBrand}
       {phoneLink}
     </div>
