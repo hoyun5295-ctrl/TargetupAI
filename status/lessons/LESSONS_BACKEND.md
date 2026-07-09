@@ -619,6 +619,14 @@ else concat(concat(concat('{"sendercode":"',sender_code),'",'), replace(k_etc_js
 
 ---
 
+## 안내(단방향) 문자 발신번호 = 플랫폼 대표번호, 수신자 번호 금지 (2026-07-09 추가)
+
+### 2026-07-09 — 자동마케팅 담당자 사전알림이 담당자 본인 번호로 발신 → 번호도용차단 미수신
+- **현상**: 발송 2h 전 담당자에게 가는 사전 알림 문자의 발신번호가 대표번호(1800-8125)가 아니라 담당자 본인 번호(수신자와 동일). 번호도용차단서비스 가입 담당자는 자기→자기 발송으로 인식돼 아예 미수신(임은지 실측).
+- **근본**: `notifyOperatorAdmins`(continuous-operator.ts)가 SMS 큐 row의 call_back을 dest_no와 같은 수신자 phone으로 넣음. 안내는 단방향(회신 불필요)인데 발신=수신이 되어 도용/스팸 차단에 걸림. 동일 패턴이 `journey-pretest-notifier`(여정 2h전)에도 있었음.
+- **fix**: `getPlatformNoticeCallback()`(sms-queue CT 신설, `SYSTEM_SMS_CALLBACK||18008125` = internal-alert와 동일 소스) → operator·journey 안내 call_back을 플랫폼 대표번호로. 인비토=특수유형 부가통신사업자라 대표번호는 회신번호 등록 없이 발신 가능. system-alert(슈퍼관리자=우리 내부, "회신 안전" 의도)은 별개로 유지.
+- **교훈**: **시스템이 사용자/담당자에게 보내는 단방향 안내 문자의 call_back은 플랫폼 대표번호를 쓴다 — 수신자 번호를 넣으면 발신=수신이 되어 번호도용차단 가입자에게 통째 미수신.** 새 안내/알림 발송 코드 = call_back 소스부터 확인, `getPlatformNoticeCallback` 재사용.
+
 ## 자가 검증 매트릭스 (Backend 작업 시)
 
 - [ ] 발송 5경로 전수 점검 (AI/직접/타겟/스케줄/테스트)

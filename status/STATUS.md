@@ -37,6 +37,12 @@
 
 > **회전 룰:** 완료(★배포완료) 엔트리는 원문을 archive/TASKS_YYYY-MM.md로 이동 + INDEX 등재하고, 아래 "최근 완료 인덱스"에 1줄만 남긴다. 30KB 초과 = 회전 미이행 — 즉시 회전.
 
+### 🟢 2026-07-09 (5) — 자동마케팅 디버깅 3건: 노출범위+발송권한 소유자기준 · 오늘의 추천 문안3안 선택+편집 · 담당자 사전알림 발신번호 대표번호 (★배포완료 2026-07-09 — Harold 선언 / 운영 실측 = Harold)
+> **① 노출범위+권한**(임은지): listOperators/listProposals에 소유자 scope(비관리자=`created_by` 본인·관리자=전체) + run-now/approve/reject 게이트를 `userType!=='company_admin'` 하드차단→"관리자 OR operator.created_by===userId"(approve/reject는 proposal→operator JOIN 소유검증). 생성/수정/삭제는 이미 2026-06-19 사용자 허용이라 발송·실행만 막히던 비대칭 해소. 요금제·예산·080·스팸 안전망 불변. 프론트 무변경.
+> **② 문안3안 선택+편집**(임은지): ProposalDecisionCard 3안 클릭 선택("발송 선택됨")+문안 편집 textarea. approve payload{variantIndex,body,subject}→proposal_json.userSelection 병합(jsonb_set)→dispatchProposalSend가 userSelection 우선(없으면 Bandit=자동 스케줄 무변경). 편집 본문>90byte SMS는 LMS 자동승격. 옛 UI가 "고른 변형으로 발송" 표기했으나 선택 UI 부재=거짓 표기였음. DDL 없음.
+> **③ 사전알림 발신번호**(남지현+임은지): notifyOperatorAdmins call_back을 수신자 본인 번호→한줄로 대표번호(`getPlatformNoticeCallback`=SYSTEM_SMS_CALLBACK||18008125, sms-queue CT 신설). 발신=수신 동일→번호도용차단 가입 담당자 미수신이 근본. 단일 길목이라 사전알림·추천·승인대기·정지·D-2·보류 전건 해결. 동일 결함 journey-pretest-notifier(여정 2h전) 동시 수정. system-alert(내부) 범위 밖 유지.
+> 검증 backend tsc0·frontend tsc0·vitest382·금지패턴0·DDL없음. **Codex 리뷰 완료(CLI 0.121→0.143 업그레이드 후)**: P3(미조작 승인이 변형A 강제=Bandit 우회) fix — 선택/편집 시에만 selection 전송(ProposalDecisionCard) / P2(편집 문안 스팸 재검증)=수정 불요 판정(직접발송 정합 — 사용자 작성 문안 동급·(광고)/080/placeholder 가드는 파이프라인 적용). 잔여=P3 fix 재배포+운영 실측. 상세 [[project_2026_0709_automarketing_scope_permission_variant_notice]].
+
 ### 🟢 2026-07-09 (2~4) — AI Operator MMS + 모바일 DM 신고 4건 + 여정 전환오류 + 하드코딩 뒤로가기 전수 (★배포완료 2026-07-09 — Harold 선언 / 운영 실측 = Harold)
 > **① AI Operator MMS**(임은지): 추천 채널 MMS 유형변경(SMS/LMS/MMS 세그먼트+AI배지)+이미지 첨부 모달+비용 실단가 재계산(companies/settings) / 직접발송 MmsUploadModal 다크 재디자인(createPortal·z-[2000]·onConfirm 일반화) / MMS업로드 `hooks/useMmsUpload` 공용화(Dashboard 인라인 이관). handleApprove에 mmsImagePaths+MMS0장/SMS90byte 사전차단. backend 무수정·DDL없음.
 > **② 모바일 DM 신고 4건**(임은지): A 즉시쿠폰·쿠폰 사용조건 줄바꿈 pre-wrap(캔버스+SSR) / B 구도(treatment) 캔버스 미러 4섹션(hero5·coupon3·textcard3·cta3, 신규 `utils/dm-treatment.ts`+SectionRenderer 전달, split=상단 --dm-primary 블록, classic 골든보존) / C 카운트다운 배경색·글씨색(CountdownProps+Editor+canvas+SSR, DM JSON prop·DDL없음) / D 헤더 줄바꿈=코드 이미 라이브(Ctrl+F5 재확인).
@@ -68,11 +74,6 @@
 > **④ 로그인 문의 + DM 2열 그리드**: 로그인 페이지 "서비스 이용신청 문의" 버튼+모던 모달(기존 `/api/companies/inquiry` 재사용 — 발신 SMTP_USER·수신 SMTP_TO, 좌 그린패널+우 모바일 양쪽). product_carousel 좌우 스크롤→flex-wrap 2열 justify-center(홀수 마지막 중앙, 발송 렌더러+빌더 미리보기 일관).
 > **검증**: backend tsc 0·vitest 382/382·frontend tsc 0·금지패턴 0. 커밋 a5ea765e·1ba70066·ce67f7c4·a7625642·83a7802d + 개인화 fallback. **잔여**: Harold 운영 실측(행사 3채널 상품 반영·팝폰 인앱 블록/익명 "고객님"·발행 모달 hlj.kr) + `/codex:review`. **후속**: 구분선 정규화 타 AI문안 경로 6곳(services/ai.ts·journey-ai-generator·variant-generator 등, 발송 보호영역 별도 승인). 상세 [[project_2026_0708_event_campaign_product_extraction]] · [[reference_inapp_sdk_serving]].
 
-### 🟢 2026-07-07(6) — 마케팅 캘린더 완비: 등록 200크레딧의 통지·출구·타겟 축 구멍 4건 근본수정 (★배포완료 — DDL 2건+리뷰 정정 2건 포함, Harold 선언 / 운영 실측 = Harold)
-> **구멍(전 경로 실측)**: ①캘린더 등록이 담당자 번호를 안 담아 notifyOperatorAdmins가 조용히 return — 2h 예고·승인 대기·D-2·완료/보류 통지 전멸 ②자율발송 OFF(기본) 회사는 pending 7일 만료로 연 1회 캠페인이 소리 없이 무산 + 늦은 승인=즉시 발송 ③오퍼레이터 발송에만 혜택 placeholder 출구 가드 부재(이메일·인앱·여정엔 있음) — "[혜택 내용을 입력해주세요]" 실고객 노출 가능 ④타겟 확인 지점 0(발송 당일 AI 자유 해석).
-> **수정**: ①createOperator 담당자 기본값=등록 계정 users.phone + notifyOperatorAdmins 폴백(등록 계정→company_admin — CT 1곳, 기존 등록분 포함 전 통지 수혜) + 캘린더 크레딧 모달 extraContent 연락처 입력(선택) ②만료 D-3 리마인드(operator-prep-reminder에 sendPendingExpiryReminders, predictive 9시 사이클 합류, 멱등=expiry_reminder_sent_at) + scheduled_send_at pending에도 저장(발송 패스 status='scheduled' 게이트라 무영향, 소비처 17곳 전수) + 예정일 경과 승인 경고 모달 ③dispatchProposalSend 발송 직전 applyBenefitToBody 재치환(제안 생성 후 입력분 반영) + hasUneditedBenefitPlaceholder 검출 시 admin_review 강등(자동·수동·리마인드 3경로 공유 1곳) ④targetHint 축(TARGET_HINTS 화이트리스트 6종 — 명확 규칙만, 예측 축 금지) = 캘린더 설계 JSON→카드 select→등록 payload→continuous_operators.target_hint→recommendTarget 고정 지시 + 카드 혜택 입력칸.
-> **배포 2026-07-07 완료(Harold)**: DDL 2건(target_hint·expiry_reminder_sent_at) + 본체(e6c7f62d) + 코드리뷰 정정 2건(혜택 치환 $ 특수패턴 함수 치환 교체 / 통지 폴백 is_active·is_system 필터 — /engineering:code-review로 이중 검증, vitest 347/347). **잔여 = Harold 운영 실측 1건**: 캘린더 등록(대상 축·연락처)→발송일 08:00 생성→통지 수신→혜택 미입력 admin_review 보류 확인→혜택 입력 후 승인 발송(run-now로 단축 가능). 상세 [[project_2026_0705_marketing_calendar_overhaul]] 갱신분.
-
 ---
 
 ### 🟢 2026-07-07(9) — 뱃지 라벨 3단 정책 정리 (Harold 확정 / 코드완료·tsc 0 / 미배포)
@@ -93,6 +94,7 @@
 ### 최근 완료 인덱스 (원문 = 링크의 월별 아카이브)
 
 - 🟢 2026-07-07 — 인앱/이메일/DM 대개편 6종 + hlj.kr 단축링크 + 인앱 디자인 2.0~2.1 + 형태 4종 + 이메일·DM 2.0 + 행사 캠페인 (★DDL 6컬럼·hlj.kr 라이브 / frontend·SDK·backend build+deploy 잔여) → [archive/TASKS_2026-07.md](archive/TASKS_2026-07.md) · 상세 [[project_2026_0707_inapp_email_dm_overhaul]]
+- 🟢 2026-07-07(6) — 마케팅 캘린더 완비: 통지·출구·타겟 축 구멍 4건 근본수정 (★배포완료) → [archive/TASKS_2026-07.md](archive/TASKS_2026-07.md) · 상세 [[project_2026_0705_marketing_calendar_overhaul]]
 - 🟢 2026-07-06 — 운영 버그 5건 근본수정 (★배포완료 / **잔여: Harold 운영검증** — 복구 UPDATE 897 재실행·5건 실측·.env CLAUDE_MAPPING_MODEL 확인) → [archive/TASKS_2026-07.md](archive/TASKS_2026-07.md) · 상세 [[project_2026_0706_pending_fail_freeze_rootfix]]
 - 🟢 2026-07-05 — 자동마케팅 4수정(★배포완료) + 비토 Agent v1.0.8 MMS(**잔여: Gateway v135 E2E 실측 대기**) + 레거시 템플릿 이관 조사(**잔여: 서팀장 회의**) → [archive/TASKS_2026-07.md](archive/TASKS_2026-07.md) · 상세 [[project_2026_0705_bito_agent_v108_mms]] · [[project_2026_0705_legacy_template_migration]]
 - 🟢 2026-07-05 (4) — 카페24 심사 반려 3건 대응 + 마케팅 캘린더 헛점 12건 근본 수정 (★배포완료·DDL 2건 포함) → [archive/TASKS_2026-07.md](archive/TASKS_2026-07.md) · 상세 [[project_2026_0705_marketing_calendar_overhaul]] · [[project_2026_0703_cafe24_review_godo_integration]]

@@ -16,7 +16,8 @@ interface Props {
   variantData?: { variants: ProposalVariant[]; recommendation: BanditRecommendation | null };
   busy?: boolean;
   onToggleExpand: () => void;
-  onApprove: (selection: ProposalApproveSelection) => void;
+  // selection 없음(undefined) = 사용자가 아무것도 안 고름 → 백엔드 Bandit이 변형 결정(자동 경로 동일).
+  onApprove: (selection?: ProposalApproveSelection) => void;
   onReject: () => void;
   onStop: () => void;
   onPromoteToJourney?: () => void;
@@ -65,7 +66,13 @@ export default function ProposalDecisionCard({
   const effectiveMsg = messages[effectiveIdx];
   const effectiveBody = editedBody != null ? editedBody : (effectiveMsg?.body || effectiveMsg?.message || '');
   const selectVariant = (i: number) => { setSelectedIdx(i); setEditedBody(null); setEditing(false); };
-  const submitApprove = () => onApprove({ variantIndex: effectiveIdx, body: effectiveBody, subject: effectiveMsg?.subject });
+  // ★ Codex P3 (2026-07-09): 사용자가 명시적으로 선택/편집한 경우에만 selection 전송.
+  //   미조작 승인에 selection을 실으면 변형 데이터 로딩 전(recommendedIdx=undefined)엔 변형 A(0)가 강제되어
+  //   백엔드 Bandit 추천을 우회한다 — 미조작 = undefined로 보내 백엔드가 Bandit으로 결정(자동 경로 동일).
+  const submitApprove = () => {
+    if (selectedIdx == null && editedBody == null) { onApprove(); return; }
+    onApprove({ variantIndex: effectiveIdx, body: effectiveBody, subject: effectiveMsg?.subject });
+  };
 
   const hero = (
     <div className="flex items-end gap-5 flex-wrap">
