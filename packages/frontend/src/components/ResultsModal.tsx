@@ -307,21 +307,22 @@ export default function ResultsModal({ onClose, token, customerDbEnabled, isSubs
 
         {/* 콘텐츠 */}
         <div className="flex-1 overflow-y-auto p-5 relative" style={{ overscrollBehavior: 'contain' }}>
-          {/* ★ D120 P6: 캘린더 버튼 — 요약 탭에서만 + 무료 사용자 차단 */}
+          {/* ★ D120 P6 → 2026-07-09 (Harold 명시): 캘린더 = 요금제 미가입(FREE) 포함 전 요금제 개방.
+              발송결과는 basic_send 축(FREE 허용)이고 캘린더 데이터(GET /api/campaigns)도 요금제 게이트가 없다.
+              구독 만료/정지 잠금만 유지(전 기능 차단 원칙). */}
           {activeTab === 'summary' && (
             <button
               onClick={() => {
                 if (isSubscriptionLocked) { onSubscriptionLocked?.(); return; }
-                if (customerDbEnabled === false) { onFeatureLocked?.('캘린더', '스타터'); return; }
                 setShowCalendar(true);
               }}
               className={`absolute top-4 right-5 px-4 py-1.5 rounded-lg text-sm font-medium transition-colors z-10 ${
-                isSubscriptionLocked || customerDbEnabled === false
+                isSubscriptionLocked
                   ? 'bg-slate-200 text-slate-400 cursor-not-allowed'
                   : 'bg-violet-500 text-white hover:bg-violet-600'
               }`}
             >
-              {(isSubscriptionLocked || customerDbEnabled === false) && <span className="mr-1">🔒</span>}📅 캘린더
+              {isSubscriptionLocked && <span className="mr-1">🔒</span>}📅 캘린더
             </button>
           )}
           {activeTab === 'summary' && (

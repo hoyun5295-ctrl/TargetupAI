@@ -94,7 +94,7 @@ export default function ContinuousOperatorPage() {
       if (learnData.success) setLearningSummary(learnData.summary || null);
       // 브리핑은 부가 정보 — 미생성(503)·오류 시 조용히 숨김
       if (briefData.success) setDailyBrief(briefData.brief || null);
-      if (!opRes.ok && opData.code === 'BETA_GATE') setError('본 기능은 비즈니스 / 엔터프라이즈 요금제에서 이용 가능합니다.');
+      if (!opRes.ok && opData.code === 'BETA_GATE') setError('본 기능은 요금제 가입 후 이용 가능합니다.');
     } catch (e: any) {
       setError(e?.message || '조회 중 오류');
     } finally {

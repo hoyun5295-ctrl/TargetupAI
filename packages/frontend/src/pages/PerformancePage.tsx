@@ -415,7 +415,7 @@ export default function PerformancePage() {
       }
       if (!snapRes.ok) {
         if (snapData.code === 'BETA_GATE') {
-          setError('이 기능은 비즈니스 / 엔터프라이즈 요금제에서 이용 가능합니다.');
+          setError('본 기능은 요금제 가입 후 이용 가능합니다.');
         } else {
           setError(snapData.error || '성과 데이터 조회 실패');
         }
