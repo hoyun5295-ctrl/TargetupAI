@@ -8,6 +8,15 @@
 
 | 날짜 | 제목 | 검색 키워드 | 파일 |
 |------|------|-------------|------|
+| 2026-07-10 | 🟢 여정 목표 달성 자동 종료 goal_met + 옵션 UI 2단 (STATUS→archive 회전 2026-07-10) | goal_exit_enabled goal_met journey-executor tick 진입 이후 구매 recent_purchase_date 재진입 쿨다운 JourneyOptionsEditor Codex 날짜 경계 | [TASKS_2026-07.md](TASKS_2026-07.md) |
+| 2026-07-09 | 🟢 (8) CRM 대행 접수 웹 폼 전환 + 이미지 자동 입력 (회전 2026-07-10) | CampaignAgencyPage AdminCampaignAgencyPage AgencyRequestForm image_paths sniffImageMediaType 이미지 전사 analyze-images exceljs 제거 PDF bufferPages | [TASKS_2026-07.md](TASKS_2026-07.md) |
+| 2026-07-09 | 🟢 (7) 요금제 정책 정비 + AI 사용량 메뉴 이동 + Brand Voice 초기화/저장 (회전 2026-07-10) | 캘린더 FREE 개방 customerDbEnabled plans UPDATE ai_premium BETA_GATE 문구 24곳 brand-voice guideline DELETE | [TASKS_2026-07.md](TASKS_2026-07.md) |
+| 2026-07-09 | 🟢 (6) CRM 캠페인 대행 신설 (회전 2026-07-10) | crm-agency-request proposal-core pdf-render campaign-agency runInCreditBundle 캠페인대행요청서 xlsx 매직바이트 isSubscriptionBlocked | [TASKS_2026-07.md](TASKS_2026-07.md) |
+| 2026-07-09 | 🟢 (5) 자동마케팅 3건 노출scope·문안3안·사전알림 발신번호 (회전 2026-07-10) | listOperators listProposals created_by run-now approve 소유검증 variantIndex userSelection Bandit notifyOperatorAdmins call_back getPlatformNoticeCallback 18008125 journey-pretest-notifier | [TASKS_2026-07.md](TASKS_2026-07.md) |
+| 2026-07-09 | 🟢 (2~4) AI Operator MMS + 모바일 DM 신고 4건 + 여정 전환오류 + 뒤로가기 전수 (회전 2026-07-10) | MMS 유형변경 MmsUploadModal useMmsUpload pre-wrap dm-treatment 카운트다운 배경색 JourneyStats goBackOr 하드코딩 navigate 9곳 | [TASKS_2026-07.md](TASKS_2026-07.md) |
+| 2026-07-09 | 🟢 직접시점선택 모달화 + 추출타겟 리스트 공용화 + DM 정렬 일관화 + 개인화 변수 단일소스 (회전 2026-07-10) | DateTimeField TargetRecipientsModal targets/recipients ai/target-recipients dm-section-justify FIELD_MAP displayName applyFieldDisplayNames | [TASKS_2026-07.md](TASKS_2026-07.md) |
+| 2026-07-07 | 🟢 (9) 뱃지 라벨 3단 정책 정리 (회전 2026-07-10) | BETA 뱃지 22곳 제거 NEW 실험실 BETA_GATE 문구 21곳 비즈니스 엔터프라이즈 요금제 전용 | [TASKS_2026-07.md](TASKS_2026-07.md) |
+| 2026-07-07 | 🟢 알림톡 강조표기형 3관문 종결 7300 대표링크 9999 senderkey 3027 버튼 (회전 2026-07-10) | 716074dc SENDER_KEY insertAlimtalkQueue 대표링크 report_code 0000 btnJson attachment.button ALIMTALK-DEBUG2 | [TASKS_2026-07.md](TASKS_2026-07.md) |
 | 2026-07-06 | 🟢 운영 버그 5건 근본수정 (STATUS→archive 회전 2026-07-07) | 발송통계 성공 실패 복구 UPDATE 897 campaign-lifecycle 080 수신거부 합집합 psy5868 DmSendAndTrackModal useRef 백지 Liquid flattenLiquidToPlainText ai-call-invariants upload.ts 매핑 | [TASKS_2026-07.md](TASKS_2026-07.md) |
 | 2026-07-05 | 🟢 자동마케팅 4수정 + 비토 Agent v1.0.8 MMS + 레거시 템플릿 이관 조사 (STATUS→archive 회전 2026-07-07) | 자동마케팅 LIMIT 10000 staging INSERT 크레딧 차감 유실 isAiOperatorAllowed 비토 Agent MMS Gateway v135 event-admin 4519 템플릿 이관 | [TASKS_2026-07.md](TASKS_2026-07.md) |
 | 2026-07-04 | 🟢 (2) 모달/토스트 UX + 베스트 문안 재설계·진화 + 발송결과 집계 근본수정 + 스크롤 복원 + 직접발송 정리 (STATUS→archive 회전 2026-07-07) | 모달 배경클릭 백드롭 closeOnBackdrop 토스트 z-index 베스트 문안 best-copy-miner best_copy_seed_usage classifyResultTables SMSQ_SEND_13 ScrollManager goBackOr BrandLinkChips PlanUpgradeModal | [TASKS_2026-07.md](TASKS_2026-07.md) |

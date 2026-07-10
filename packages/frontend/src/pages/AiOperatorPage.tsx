@@ -301,6 +301,8 @@ export default function AiOperatorPage() {
   const [selectedVariantIdx, setSelectedVariantIdx] = useState(0);
   const [showRefineModal, setShowRefineModal] = useState(false);
   const [refinedOverrides, setRefinedOverrides] = useState<Record<number, string>>({});
+  // ★ 2026-07-10 (임은지 리포트): LMS/MMS 제목 확인·수정 — 변형별 제목 편집 오버라이드 (화면 표시 = 발송 값)
+  const [subjectOverrides, setSubjectOverrides] = useState<Record<number, string>>({});
   const [editingBody, setEditingBody] = useState(false); // ★ 2026-06-19: 생성 문안 직접 편집(타이핑) 모드
   const [copiedAt, setCopiedAt] = useState<number | null>(null);
   // ★ D166: 승인 → 발송 흐름 (preview-recipients + /direct-send 2-step)
@@ -382,6 +384,14 @@ export default function AiOperatorPage() {
 
   // 실효 발송 채널 = 사용자 변경값 우선, 없으면 AI 추천
   const effectiveChannel = (channelOverride || proposal?.channel?.recommended || 'SMS').toUpperCase();
+  // ★ 2026-07-10 (임은지 리포트): LMS/MMS 제목 단일 산출 — 제목 입력창 표시 값 = handleApprove 발송 값.
+  //   편집값 → AI 제목 → 캠페인명 → 회사명 fallback. 17자 = 기존 발송 계약(slice) 유지.
+  const resolveSubject = (idx: number): string => {
+    const ov = subjectOverrides[idx];
+    if (ov != null) return ov;
+    const v = proposal?.messages?.[idx];
+    return (v?.subject || proposal?.target?.suggestedName || `${companyName || ''} AI 캠페인`.trim() || 'AI Operator').slice(0, 17);
+  };
   // 실효 단가/예상비용 — 채널 변경 시 회사 실단가로 재계산 (미변경 시 백엔드 계산값=진실)
   const effectiveUnitCost = (() => {
     if (!proposal) return 0;
@@ -485,6 +495,11 @@ export default function AiOperatorPage() {
     setChannelOverride(null);
     setMmsError(null);
     setMmsUploadedImages([]);
+    // ★ 2026-07-10 Codex 지적: 재생성 시 이전 제안의 편집 본문/제목/선택 탭이 새 제안에 살아남던 문제 — 생성 시점 초기화
+    setRefinedOverrides({});
+    setSubjectOverrides({});
+    setSelectedVariantIdx(0);
+    setEditingBody(false);
 
     try {
       const token = localStorage.getItem('token');
@@ -551,6 +566,7 @@ export default function AiOperatorPage() {
     setSendResult(null);
     setSendError(null);
     setRefinedOverrides({});
+    setSubjectOverrides({});
     setEditingBody(false);
     setSelectedVariantIdx(0);
     // ★ D210+ Phase 2-fix5 (Harold 명시 2026-05-23): 새 입력 진입 시 옛 sample-customer 영역 초기화
@@ -671,9 +687,11 @@ export default function AiOperatorPage() {
 
       const channel = effectiveChannel; // 사용자 유형 변경(SMS/LMS/MMS) 반영
       const isLmsOrMms = channel === 'LMS' || channel === 'MMS';
-      // LMS/MMS subject 필수 — AI가 안 줬으면 suggestedName 또는 회사명으로 fallback (17자 이내)
-      const rawSubject = variant.subject || proposal.target.suggestedName || `${companyName || ''} AI 캠페인`.trim() || 'AI Operator';
-      const subject = isLmsOrMms ? rawSubject.slice(0, 17) : '';
+      // ★ 2026-07-10: LMS/MMS subject = 화면 제목 입력창과 동일 산출(resolveSubject — 편집값 → AI 제목 → 캠페인명 fallback, 17자)
+      const subject = isLmsOrMms ? resolveSubject(idx).slice(0, 17) : '';
+      if (isLmsOrMms && !subject.trim()) {
+        throw new Error('제목이 비어있습니다. 본문 위 제목 입력창에 제목을 입력해주세요.');
+      }
 
       // 2026-07-09: MMS 이미지 필수 사전 차단 — 백엔드 도달 전 친절 안내 + 첨부 모달 오픈
       const mmsImagePaths = channel === 'MMS' ? toMmsImagePaths(mmsUploadedImages) : [];
@@ -1207,6 +1225,26 @@ export default function AiOperatorPage() {
                             >
                               적용 (상위 고객 머지)
                             </button>
+                          </div>
+                        )}
+
+                        {/* ★ 2026-07-10 (임은지 리포트): LMS/MMS 제목 확인·수정 — 발송 전 확인 불가 문제 해소. 표시 값 = 발송 값(resolveSubject) */}
+                        {(activeChannel === 'LMS' || activeChannel === 'MMS') && (
+                          <div className="mb-3">
+                            <label className="block text-[11px] text-white/50 mb-1">
+                              제목 — 문자 상단에 표시{isAd ? ' · 광고 발송 시 "(광고)" 자동 부착' : ''}
+                            </label>
+                            <input
+                              type="text"
+                              value={resolveSubject(safeIdx)}
+                              onChange={(e) => setSubjectOverrides((prev) => ({ ...prev, [safeIdx]: e.target.value }))}
+                              maxLength={17}
+                              placeholder="제목 입력 (최대 17자)"
+                              className="w-full px-3 py-2 rounded-xl bg-indigo-950/60 border border-white/10 text-sm text-white placeholder-white/30 focus:border-amber-300/50 focus:outline-none transition-colors"
+                            />
+                            {!resolveSubject(safeIdx).trim() && (
+                              <p className="text-[10px] text-rose-300 mt-1">제목을 입력해주세요. LMS/MMS는 제목이 필요합니다.</p>
+                            )}
                           </div>
                         )}
 
@@ -1748,7 +1786,7 @@ export default function AiOperatorPage() {
                   type="button"
                   onClick={() => {
                     setSendResult(null);
-                    navigate('/dashboard');
+                    navigate('/dashboard?results=1');
                   }}
                   className="flex-1 px-5 py-3 rounded-xl bg-gradient-to-r from-emerald-400 to-teal-500 text-emerald-950 font-semibold hover:brightness-110 hover:shadow-lg hover:shadow-emerald-500/30 transition-all"
                 >

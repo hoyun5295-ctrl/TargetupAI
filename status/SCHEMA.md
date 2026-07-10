@@ -839,6 +839,24 @@
 | expires_at | timestamptz |
 | short_code | varchar(12) UNIQUE(부분 인덱스) — ★ 2026-07-06 추가 (ALTER) — hlj.kr 단축링크 코드(base62 8자). NULL=단축 미발급(긴 링크) |
 
+### dm_custom_short_links (고객사 자체 URL 단축 — hlj.kr) ★ 2026-07-10 신규 (CREATE Harold 실행)
+> 박성용 신기능(Harold 100크레딧 확정). 고객사 외부 MDM URL→hlj.kr/<code>. /s/:code 3순위 조회(토큰→발행 페이지→커스텀) — 발급 시 3축 코드 충돌 확인. 검증=dm-custom-short-link-core(오픈 리다이렉터 차단).
+
+| 컬럼 | 타입 |
+|------|------|
+| id | uuid PK DEFAULT gen_random_uuid() |
+| company_id | uuid NOT NULL FK companies ON DELETE CASCADE |
+| created_by | uuid |
+| code | varchar(12) NOT NULL UNIQUE — base62 8자(generateDmShortCode) |
+| target_url | text NOT NULL |
+| title | varchar(100) |
+| is_active | boolean NOT NULL DEFAULT true — 비활성=접속 시 서비스 홈 폴백 |
+| click_count | integer NOT NULL DEFAULT 0 |
+| last_clicked_at | timestamptz |
+| created_at | timestamptz NOT NULL DEFAULT NOW() |
+- INDEX: (company_id, created_at DESC)
+- 일일 생성 상한 50 = INSERT 단문 서브쿼리 결합(CT createCustomShortLink)
+
 ### dm_event_responses (DM 이벤트 응답 누적) ★ D216+ 신설
 > **신규 16 섹션 (poll / survey / email_capture / lucky_draw / roulette 등) 인터랙션 누적.**
 

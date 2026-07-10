@@ -944,10 +944,16 @@ export default function Dashboard() {
   };
 
   // ★ 2026-06-25: ?upload=1 진입(게이트 "올리러 가기" 동선) 시 고객 DB 업로드 모달 자동 오픈 + 파라미터 제거(새로고침 재오픈 방지)
+  // ★ 2026-07-10: ?results=1 진입(AI Operator "발송 결과 보기" 동선) 시 발송결과 자동 오픈 — 헤더 메뉴 클릭과 동일 동작
   useEffect(() => {
     if (searchParams.get('upload') === '1') {
       openFileUpload();
       searchParams.delete('upload');
+      setSearchParams(searchParams, { replace: true });
+    }
+    if (searchParams.get('results') === '1') {
+      setShowResults(true);
+      searchParams.delete('results');
       setSearchParams(searchParams, { replace: true });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps

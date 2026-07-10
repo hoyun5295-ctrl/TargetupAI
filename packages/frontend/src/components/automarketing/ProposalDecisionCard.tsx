@@ -47,6 +47,8 @@ export default function ProposalDecisionCard({
   const [selectedIdx, setSelectedIdx] = useState<number | null>(null);
   const [editing, setEditing] = useState(false);
   const [editedBody, setEditedBody] = useState<string | null>(null);
+  // ★ 2026-07-10 (임은지 리포트): LMS/MMS 제목 확인·수정 — 발송 전 제목 확인 불가 문제 해소. 백엔드 userSelection.subject 통로 기존 존재.
+  const [editedSubject, setEditedSubject] = useState<string | null>(null);
   const pj = proposal.proposalJson || {};
   const perf = pj.performance || {};
   const basis = perf.basis || {};
@@ -54,6 +56,8 @@ export default function ProposalDecisionCard({
   const grades = basis.gradeBreakdown || [];
   const compliance = pj.compliance;
   const channelName = (pj.channel?.recommended || 'SMS').toUpperCase();
+  // LMS/MMS = 제목이 발송되는 채널 — 제목 표시·편집 UI 노출 기준
+  const isLongType = channelName === 'LMS' || channelName === 'MMS';
   const channelReason = pj.channel?.reason;
   const messages = pj.messages || [];
   const revenue = perf.expectedRevenue;
@@ -114,13 +118,18 @@ export default function ProposalDecisionCard({
   const effectiveIdx = selectedIdx != null && messages[selectedIdx] ? selectedIdx : banditIdx;
   const effectiveMsg = messages[effectiveIdx];
   const effectiveBody = editedBody != null ? editedBody : (effectiveMsg?.body || effectiveMsg?.message || '');
-  const selectVariant = (i: number) => { setSelectedIdx(i); setEditedBody(null); setEditing(false); };
+  // ★ 2026-07-10: 화면 표시 제목 = 발송 제목(편집값 우선, 없으면 AI 생성 제목) — 발송부(dispatchProposalSend 1360행)와 동일 우선순위.
+  const effectiveSubject = editedSubject != null ? editedSubject : (effectiveMsg?.subject || '');
+  // 실발송 제목이 비면 승인 차단(여정 LMS/MMS 필수 규칙과 동일) — Codex 지적: 편집값만 검사하면 AI 제목 부재 제안이 빈 제목으로 발송됨.
+  const subjectInvalid = isLongType && canApprove && !effectiveSubject.trim();
+  const selectVariant = (i: number) => { setSelectedIdx(i); setEditedBody(null); setEditedSubject(null); setEditing(false); };
   // ★ Codex P3 (2026-07-09): 사용자가 명시적으로 선택/편집한 경우에만 selection 전송.
   //   미조작 승인에 selection을 실으면 변형 데이터 로딩 전(recommendedIdx=undefined)엔 변형 A(0)가 강제되어
   //   백엔드 Bandit 추천을 우회한다 — 미조작 = undefined로 보내 백엔드가 Bandit으로 결정(자동 경로 동일).
   const submitApprove = () => {
-    if (selectedIdx == null && editedBody == null) { onApprove(); return; }
-    onApprove({ variantIndex: effectiveIdx, body: effectiveBody, subject: effectiveMsg?.subject });
+    if (subjectInvalid) return;
+    if (selectedIdx == null && editedBody == null && editedSubject == null) { onApprove(); return; }
+    onApprove({ variantIndex: effectiveIdx, body: effectiveBody, subject: editedSubject != null ? editedSubject : effectiveMsg?.subject });
   };
 
   const hero = (
@@ -196,8 +205,14 @@ export default function ProposalDecisionCard({
   const messagePreview = effectiveMsg && (
     <div className="mt-3 rounded-lg border border-white/10 bg-slate-950/40 px-3 py-2.5">
       <div className="text-[10px] text-white/40 mb-1">
-        발송 문안 · 변형 {variantLetter(effectiveIdx)}{editedBody != null ? ' · 편집됨' : ''}
+        발송 문안 · 변형 {variantLetter(effectiveIdx)}{(editedBody != null || editedSubject != null) ? ' · 편집됨' : ''}
       </div>
+      {/* ★ 2026-07-10: LMS/MMS 제목 표시 — 광고 발송 시 "(광고)"는 발송 시점 자동 부착(buildAdSubject) */}
+      {isLongType && (
+        <div className="text-[12px] text-white/80 mb-1.5 pb-1.5 border-b border-white/10">
+          <span className="text-white/40 mr-1.5">제목</span>{effectiveSubject || <span className="text-rose-300">제목 없음 — 상세에서 입력해주세요</span>}
+        </div>
+      )}
       <div className="text-[13px] text-white/80 leading-relaxed whitespace-pre-wrap">{effectiveBody}</div>
     </div>
   );
@@ -214,7 +229,7 @@ export default function ProposalDecisionCard({
       )}
       {canApprove && (
         <>
-          <button onClick={submitApprove} disabled={busy} className="inline-flex items-center gap-1.5 bg-indigo-500/40 hover:bg-indigo-500/60 disabled:opacity-40 text-indigo-50 text-sm font-semibold px-4 py-2 rounded-lg transition-colors">
+          <button onClick={submitApprove} disabled={busy || subjectInvalid} className="inline-flex items-center gap-1.5 bg-indigo-500/40 hover:bg-indigo-500/60 disabled:opacity-40 text-indigo-50 text-sm font-semibold px-4 py-2 rounded-lg transition-colors">
             <Send className="w-4 h-4" />승인하고 발송
           </button>
           <button onClick={onReject} disabled={busy} className="inline-flex items-center gap-1.5 border border-rose-400/30 hover:bg-rose-500/20 disabled:opacity-40 text-rose-300 text-sm px-3 py-2 rounded-lg transition-colors">
@@ -274,6 +289,27 @@ export default function ProposalDecisionCard({
                     {isSel && <span className="text-[10px] bg-indigo-500/30 text-indigo-100 px-1.5 py-0.5 rounded-full">발송 선택됨</span>}
                     {v && <span className="text-[10px] text-white/40">발송 {v.sentCount} · 클릭 {v.clickCount} · 전환 {v.conversionCount}</span>}
                   </div>
+                  {/* ★ 2026-07-10: LMS/MMS 제목 — 변형별 표시 + 선택 변형 편집(비우면 승인 차단). "(광고)"는 발송 시점 자동 부착 */}
+                  {isLongType && (
+                    isSel && editing ? (
+                      <div className="mt-1 mb-1.5" onClick={(e) => e.stopPropagation()}>
+                        <label className="block text-[10px] text-white/40 mb-0.5">제목 — 문자 상단에 표시 · 광고 발송 시 "(광고)" 자동 부착</label>
+                        <input
+                          type="text"
+                          value={effectiveSubject}
+                          onChange={(e) => setEditedSubject(e.target.value)}
+                          maxLength={50}
+                          placeholder="발송 제목 입력"
+                          className="w-full rounded-lg bg-slate-950/60 border border-indigo-400/40 text-white/90 text-[12px] px-2.5 py-1.5 focus:outline-none focus:border-indigo-300"
+                        />
+                        {subjectInvalid && <div className="text-[10px] text-rose-300 mt-0.5">제목을 입력해주세요 — 비워두면 승인·발송할 수 없습니다.</div>}
+                      </div>
+                    ) : (
+                      <div className="text-[11px] text-white/50 mb-1">
+                        <span className="text-white/35 mr-1.5">제목</span>{isSel ? (effectiveSubject || '—') : (m.subject || '—')}
+                      </div>
+                    )
+                  )}
                   {isSel && editing ? (
                     <textarea
                       value={effectiveBody}
@@ -294,9 +330,9 @@ export default function ProposalDecisionCard({
                       >
                         <Pencil className="w-3 h-3" />{editing ? '편집 완료' : '문안 편집'}
                       </button>
-                      {editedBody != null && !editing && (
+                      {(editedBody != null || editedSubject != null) && !editing && (
                         <button
-                          onClick={(e) => { e.stopPropagation(); setEditedBody(null); }}
+                          onClick={(e) => { e.stopPropagation(); setEditedBody(null); setEditedSubject(null); }}
                           className="text-[11px] text-white/50 hover:text-white/80 px-1.5 py-1"
                         >원래대로</button>
                       )}
