@@ -324,15 +324,18 @@ export default function AiOperatorPage() {
   const [customScheduledAt, setCustomScheduledAt] = useState<string>(''); // YYYY-MM-DDTHH:mm 형식
   // 2026-07-09: "직접 시점 선택" 클릭 시 모달 피커 바로 오픈 (DateTimeField 제어형 오픈)
   const [customPickerOpen, setCustomPickerOpen] = useState(false);
-  // 2026-07-09: 추천 타겟 카드 클릭 → 추출 대상 리스트 모달 (preview-recipients 실조회 · 15명/페이징)
+  // ★ 2026-07-10 [타겟확인] 오퍼레이터판: 추천 타겟 카드 클릭 → 조건 필드 동적 컬럼 + 상한 100 리스트 (Harold 지시 — 자동마케팅과 동일 계약).
+  //   옛 preview-recipients 전량(최대 10,000행) 브라우저 적재 폐기 → target-recipients(LIMIT 100 단일 쿼리) 1회 로드 + 클라 페이징.
+  //   발송(preview-recipients → /direct-send 2-step)은 무변경 — 이 로더는 열람 전용.
   const [showTargetList, setShowTargetList] = useState(false);
+  const [targetListCols, setTargetListCols] = useState<{ key: string; label: string }[]>([]);
   const targetAllRef = useRef<Promise<TargetRecipient[]> | null>(null);
-  const openTargetList = () => { targetAllRef.current = null; setShowTargetList(true); };
+  const openTargetList = () => { targetAllRef.current = null; setTargetListCols([]); setShowTargetList(true); };
   const targetFetchPage: TargetPageLoader = async (pageNo, size) => {
     if (!proposal) return { recipients: [], total: 0 };
     if (!targetAllRef.current) {
       const token = localStorage.getItem('token');
-      targetAllRef.current = fetch('/api/ai/operator/preview-recipients', {
+      targetAllRef.current = fetch('/api/ai/operator/target-recipients', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({ filters: proposal.target.filters }),
@@ -340,8 +343,10 @@ export default function AiOperatorPage() {
         .then((r) => r.json())
         .then((d) => {
           if (!d || d.success === false) throw new Error(d?.error || '추출 대상 조회에 실패했습니다.');
+          setTargetListCols(Array.isArray(d.conditionColumns) ? d.conditionColumns : []);
           return (d.recipients || []) as TargetRecipient[];
-        });
+        })
+        .catch((e) => { targetAllRef.current = null; throw e; }); // 실패 시 캐시 비움 — 재시도 가능(모달이 에러 표시)
     }
     const all = await targetAllRef.current;
     return { recipients: all.slice((pageNo - 1) * size, pageNo * size), total: all.length };
@@ -1591,9 +1596,10 @@ export default function AiOperatorPage() {
                   title="추천 타겟 상세"
                   objective={objective}
                   criteria={proposal.target.criteria}
-                  totalCount={proposal.target.totalCount}
+                  totalCount={proposal.target.count}
                   fetchPage={targetFetchPage}
-                  sourceLabel="AI Operator preview-recipients (실제 발송 대상)"
+                  extraColumns={targetListCols}
+                  sourceLabel={`실제 발송 대상 조회와 동일 기준 · 전체 ${proposal.target.count.toLocaleString()}명 중 최대 100명 표시`}
                 />
                 {/* 2026-07-09: MMS 이미지 첨부 모달 (추천 채널 MMS 선택 시) */}
                 <MmsUploadModal

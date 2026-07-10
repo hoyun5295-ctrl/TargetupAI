@@ -11,7 +11,9 @@ import { filterByIndividualCallback } from '../utils/callback-filter';
 import { isValidCustomFieldKey } from '../utils/safe-field-name';
 import { getStoreScope } from '../utils/store-scope';
 import { buildFilterWhereClauseCompat } from '../utils/customer-filter';
-import { buildSendableRecipientsSql } from '../utils/operator-recipients';
+import { buildSendableRecipientsSql, buildSendableRecipientsTopSql, resolveConditionColumns } from '../utils/operator-recipients';
+// ★ 2026-07-10 [타겟확인]: 발송 피로도 cap — dispatchProposalSend 준비부와 동일 산출(원칙 2)
+import { getFatigueCap } from '../utils/fatigue-guard';
 import { aggregateCampaignPerformance } from '../utils/stats-aggregation';
 import { formatDateValue, getOpt080Number, buildAdMessage, buildAdSubject } from '../utils/messageUtils';
 import { resolveJourneyAdFlag } from '../utils/journey-ad-policy';
@@ -1429,6 +1431,65 @@ router.post('/operator/preview-recipients', async (req: Request, res: Response) 
   }
 });
 
+// ★ 2026-07-10 [타겟확인] 오퍼레이터판 — 추천 타겟 조건 리스트 (상한 100 + 조건 필드 동적 컬럼, Harold 지시).
+//   자동마케팅 /operator/proposals/:id/recipients와 동일 계약(SoT: docs/superpowers/specs/2026-07-10-send-target-list-three-phase-design.md §3-1).
+//   필터 원천만 요청 body(제안 미저장 단계 — proposal row 없음). 발송 경로(preview-recipients → /direct-send)는 무변경, 열람 전용.
+//   소유자 scope 없음(의도) — proposals/:id/recipients의 소유 검증은 영속 proposal 자원 대상이고, 여기는 요청자 본인의
+//   propose 결과 필터라 소유 대상이 없다. 접근 정책 = 같은 데이터를 전량 반환하는 preview-recipients와 동일(게이트+storeScope).
+//   WHERE = preview-recipients(실발송 대상 조회)와 동일 합성(안전필터+storeScope+filters). 피로도·클릭제외는 이 발송
+//   경로가 추출 단계에서 적용하지 않으므로 동봉하지 않는다(보여준 명단 = 나가는 명단 — 원칙 2, campaigns.ts 1589 실측).
+router.post('/operator/target-recipients', async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    const userId = req.user?.userId;
+    const userType = req.user?.userType;
+    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+
+    const ctx = await loadPlanContext(companyId);
+    if (!ctx) return res.status(404).json({ success: false, error: '회사 정보를 찾을 수 없습니다.' });
+    if (!isAiOperatorAllowed(ctx, req.user)) {
+      return res.status(403).json({ success: false, error: '본 기능은 요금제 가입 후 이용 가능합니다.', code: 'BETA_GATE' });
+    }
+
+    const { filters } = req.body;
+    if (!filters || typeof filters !== 'object') {
+      return res.status(400).json({ success: false, error: 'filters가 필요합니다.' });
+    }
+
+    // 브랜드 격리 — preview-recipients 미러
+    let storeFilter = '';
+    const baseParams: any[] = [companyId];
+    if (userType === 'company_user' && userId) {
+      const scope = await getStoreScope(companyId, userId);
+      if (scope.type === 'filtered') {
+        storeFilter = ' AND id IN (SELECT customer_id FROM customer_stores WHERE company_id = $1 AND store_code = ANY($2::text[]))';
+        baseParams.push(scope.storeCodes);
+      } else if (scope.type === 'blocked') {
+        return res.json({ success: true, recipients: [], conditionColumns: [] });
+      }
+    }
+
+    const { sql: filterWhere, params: filterParams } = buildFilterWhereClauseCompat(filters, baseParams.length + 1);
+    // 조건 필드 동적 컬럼 — FIELD_MAP 화이트리스트 + displayName 라벨 단일 소스
+    const conditionColumns = resolveConditionColumns(filters, FIELD_MAP);
+    const { sql, params } = buildSendableRecipientsTopSql(filterWhere, filterParams, baseParams, storeFilter, null, null, conditionColumns);
+    const result = await query(sql, params);
+
+    return res.json({
+      success: true,
+      recipients: result.rows,
+      conditionColumns: conditionColumns.map((c) => ({ key: c.key, label: c.label })),
+    });
+  } catch (err: any) {
+    const msg = err?.message || '';
+    if (msg.includes('column') && msg.includes('does not exist')) {
+      return res.status(503).json({ success: false, error: 'DB 마이그레이션 필요 — 운영자에게 customers 컬럼 확인을 요청해주세요.', code: 'DB_MIGRATION_PENDING' });
+    }
+    console.error('[AI Operator] target-recipients 오류:', err);
+    return res.status(500).json({ success: false, error: err?.message || '추출 대상 조회 실패' });
+  }
+});
+
 // ============================================================
 // ★ D174 (2026-05-19) Step 1 — Next Action Advisor (Opus 4.7)
 // AI Operator의 "1회성 발송툴 탈출" 진정 가치 박는 영역.
@@ -2507,6 +2568,88 @@ router.get('/operator/proposals', async (req: Request, res: Response) => {
   } catch (err: any) {
     console.error('[Proposals GET] 오류:', err);
     return res.status(500).json({ success: false, error: err?.message || '조회 실패' });
+  }
+});
+
+// ★ 2026-07-10 [타겟확인] — 추천 카드 발송 대상 명단 (SoT: docs/superpowers/specs/2026-07-10-send-target-list-three-phase-design.md §3-1②)
+//   발송 추출(dispatchProposalSend 준비부)과 동일 WHERE(안전필터+미클릭+피로도) + 동일 정렬 기준 LIMIT 100 단일 쿼리.
+//   COUNT·OFFSET 없음(부하 상수화·Harold 상한 확정) — displayTotal은 proposal.recipient_count(카드 "대상 N명") 재사용.
+//   SELECT 전용·크레딧 차감 없음.
+router.post('/operator/proposals/:id/recipients', async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    const userId = req.user?.userId;
+    const userType = req.user?.userType;
+    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+
+    const planCtx = await loadPlanContext(companyId);
+    if (!planCtx) return res.status(404).json({ success: false, error: '회사 정보를 찾을 수 없습니다.' });
+    if (!isAiOperatorAllowed(planCtx, req.user)) {
+      return res.status(403).json({ success: false, error: '본 기능은 요금제 가입 후 이용 가능합니다.', code: 'BETA_GATE' });
+    }
+
+    // 소유자 scope — listProposals/approve와 동일 기준(비관리자=본인 operator 제안만). 빠지면 타 담당자 고객 명단 노출.
+    const pRes = await query(
+      `SELECT p.proposal_json, p.recipient_count, p.status, o.created_by, o.name AS operator_name
+         FROM operator_proposals p
+         JOIN continuous_operators o ON o.id = p.operator_id
+        WHERE p.id = $1::uuid AND p.company_id = $2::uuid`,
+      [req.params.id, companyId]
+    );
+    if (pRes.rows.length === 0) return res.status(404).json({ success: false, error: '제안서를 찾을 수 없습니다.' });
+    const prow = pRes.rows[0];
+    if (userType !== 'company_admin' && prow.created_by !== userId) {
+      return res.status(403).json({ success: false, error: '본인이 만든 자동마케팅의 발송 대상만 확인할 수 있습니다.' });
+    }
+
+    const pj = prow.proposal_json || {};
+    // dispatchProposalSend 준비부(utils/continuous-operator.ts 1380행대)와 동일 해석 — 값이 갈리면 원칙 2 위반.
+    const filters = pj.target?.filters || {};
+    const excludeClickedSince = pj.meta?.excludeClickedSince ? new Date(pj.meta.excludeClickedSince) : null;
+    const fatigueCap = await getFatigueCap(companyId);
+
+    // 브랜드 격리 — preview-recipients 미러(열람자가 매장 사용자면 그 매장 고객만).
+    let storeFilter = '';
+    const baseParams: any[] = [companyId];
+    if (userType === 'company_user' && userId) {
+      const scope = await getStoreScope(companyId, userId);
+      if (scope.type === 'filtered') {
+        storeFilter = ' AND id IN (SELECT customer_id FROM customer_stores WHERE company_id = $1 AND store_code = ANY($2::text[]))';
+        baseParams.push(scope.storeCodes);
+      } else if (scope.type === 'blocked') {
+        return res.json({ success: true, recipients: [], displayTotal: 0, criteria: pj.target?.criteria || null, segmentName: null, basisLabel: null, conditionColumns: [] });
+      }
+    }
+
+    const { sql: filterWhere, params: filterParams } = buildFilterWhereClauseCompat(filters, baseParams.length + 1);
+    // 조건 필드 동적 컬럼 — FIELD_MAP 화이트리스트 + displayName 라벨 단일 소스(0709 개인화 라벨 통일 교훈).
+    const conditionColumns = resolveConditionColumns(filters, FIELD_MAP);
+    const { sql, params } = buildSendableRecipientsTopSql(
+      filterWhere, filterParams, baseParams, storeFilter, excludeClickedSince, fatigueCap, conditionColumns,
+    );
+    const result = await query(sql, params);
+
+    // 시점 정직 라벨(원칙 1) — 승인 대기/예약(리스트화 이후)=확정 기준. 발송 직전 수신거부·피로도는 발송 시점에 또 걸러진다.
+    const basisLabel = ['pending', 'scheduled', 'admin_review'].includes(String(prow.status))
+      ? '발송 확정 기준 명단 (지금 기준 실측 · 발송 시점 안전필터 재반영)'
+      : '예상 대상 (지금 기준 실측 · 발송 시점 재추출)';
+
+    return res.json({
+      success: true,
+      recipients: result.rows,
+      displayTotal: Number(prow.recipient_count) || 0,
+      criteria: pj.target?.criteria || null,
+      segmentName: pj.target?.suggestedName || prow.operator_name || null,
+      basisLabel,
+      conditionColumns: conditionColumns.map((c) => ({ key: c.key, label: c.label })),
+    });
+  } catch (err: any) {
+    const msg = err?.message || '';
+    if (msg.includes('column') && msg.includes('does not exist')) {
+      return res.status(503).json({ success: false, error: 'DB 마이그레이션 필요 — 운영자에게 customers/operator_proposals 컬럼 확인을 요청해주세요.', code: 'DB_MIGRATION_PENDING' });
+    }
+    console.error('[Proposals recipients] 오류:', err);
+    return res.status(500).json({ success: false, error: err?.message || '발송 대상 조회 실패' });
   }
 });
 

@@ -58,6 +58,8 @@ interface Props {
   /** Data source 캡션 (기본값 있음) */
   sourceLabel?: string;
   pageSize?: number;
+  /** ★ 2026-07-10 자동마케팅 [타겟확인]: 추출 조건에 쓰인 필드 동적 컬럼 — 미전달 시 기존 렌더 불변 */
+  extraColumns?: { key: string; label: string }[] | null;
 }
 
 const PAGE_SIZE_DEFAULT = 15;
@@ -87,6 +89,7 @@ const val = (v: any): string => {
 export default function TargetRecipientsModal({
   show, onClose, title = '추출 타겟 상세', objective, criteria, channelLabel,
   totalCount, fetchPage, sourceLabel = '실제 발송 대상 조회 (customer-filter)', pageSize = PAGE_SIZE_DEFAULT,
+  extraColumns,
 }: Props) {
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(false);
@@ -144,10 +147,19 @@ export default function TargetRecipientsModal({
 
   // 표시할 부가 컬럼 (데이터 있는 것만) — 연락처는 항상 표시
   const has = (key: keyof TargetRecipient) => rows.some((r) => r[key] !== null && r[key] !== undefined && r[key] !== '');
-  const showGrade = has('grade');
-  const showGender = has('gender');
-  const showRegion = has('region');
-  const showAge = has('age');
+  // ★ 조건 필드 동적 컬럼 — 기본 컬럼(이름·연락처) 뒤에 추가 렌더. 자동 감지 컬럼과 겹치면 조건 컬럼이 대신한다(중복 방지).
+  const extras = (extraColumns || []).filter((c) => c && c.key && c.key !== 'phone' && c.key !== 'name');
+  const extraKeys = new Set(extras.map((c) => c.key));
+  const extraVal = (r: TargetRecipient, key: string): string => {
+    if (key === 'gender') return genderLabel(r[key]);
+    const v = r[key];
+    if (typeof v === 'number') return v.toLocaleString();
+    return val(v);
+  };
+  const showGrade = has('grade') && !extraKeys.has('grade');
+  const showGender = has('gender') && !extraKeys.has('gender');
+  const showRegion = has('region') && !extraKeys.has('region');
+  const showAge = has('age') && !extraKeys.has('age');
 
   return createPortal(
     <div className="fixed inset-0 z-[2000] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4" onClick={(e) => e.stopPropagation()}>
@@ -222,6 +234,9 @@ export default function TargetRecipientsModal({
                     {showAge && <th className="py-2 px-2 font-medium whitespace-nowrap">나이</th>}
                     {showRegion && <th className="py-2 px-2 font-medium whitespace-nowrap">지역</th>}
                     <th className="py-2 px-2 font-medium whitespace-nowrap">연락처</th>
+                    {extras.map((c) => (
+                      <th key={c.key} className="py-2 px-2 font-medium whitespace-nowrap">{c.label}</th>
+                    ))}
                   </tr>
                 </thead>
                 <tbody>
@@ -234,6 +249,9 @@ export default function TargetRecipientsModal({
                       {showAge && <td className="py-2 px-2 text-white/70 tabular-nums whitespace-nowrap">{val(r.age)}</td>}
                       {showRegion && <td className="py-2 px-2 text-white/70 whitespace-nowrap">{val(r.region)}</td>}
                       <td className="py-2 px-2 text-white/70 tabular-nums whitespace-nowrap">{maskPhone(r.phone)}</td>
+                      {extras.map((c) => (
+                        <td key={c.key} className="py-2 px-2 text-white/70 tabular-nums whitespace-nowrap">{extraVal(r, c.key)}</td>
+                      ))}
                     </tr>
                   ))}
                 </tbody>

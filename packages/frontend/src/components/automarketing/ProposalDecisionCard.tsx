@@ -1,13 +1,25 @@
 // 오늘의 추천 — 의사결정 카드 (2026-06-27)
 // 버리는 데이터 0: proposal_json(orchestrate 결과 전체)을 위계로 렌더한다.
 //   히어로(기대 매출·ROI) → 근거(왜 지금·등급별 전환·안전·채널) → 보조(변형·인사이트·전략·리스크·비용·통합 분석).
-import { ReactNode, useState } from 'react';
+import { ReactNode, useRef, useState } from 'react';
 import {
   X, ChevronDown, ChevronUp, Target, ShieldCheck,
-  Send, GitMerge, MessageSquare, AlertCircle, Check, Pencil,
+  Send, GitMerge, MessageSquare, AlertCircle, Check, Pencil, Users,
 } from 'lucide-react';
 import { OperatorProposal, ProposalVariant, BanditRecommendation, ProposalApproveSelection, won } from './types';
 import StatusBadge from './StatusBadge';
+// ★ 2026-07-10 [타겟확인] — 발송 대상 명단 모달 (SoT: docs/superpowers/specs/2026-07-10-send-target-list-three-phase-design.md §3-2①)
+import TargetRecipientsModal, { arrayPager, TargetRecipient } from '../TargetRecipientsModal';
+
+// [타겟확인] 응답 — 1회 로드(LIMIT 100) 후 클라 페이징(서버 재호출 0)
+interface TargetListInfo {
+  recipients: TargetRecipient[];
+  displayTotal: number;
+  criteria: string | null;
+  segmentName: string | null;
+  basisLabel: string | null;
+  conditionColumns: { key: string; label: string }[];
+}
 
 interface Props {
   proposal: OperatorProposal;
@@ -59,6 +71,43 @@ export default function ProposalDecisionCard({
   const canApprove = proposal.status === 'pending' || proposal.status === 'admin_review';
   const canStop = proposal.status === 'scheduled';
   const canPromote = !!onPromoteToJourney && ['approved', 'auto_executed', 'sent'].includes(proposal.status);
+
+  // ★ 2026-07-10 [타겟확인] — 발송 전 상태에서 발송 대상 명단 열람. 발송 완료면 발송결과 상세 안내(문구만).
+  const canViewTargets = ['pending', 'admin_review', 'approved', 'scheduled'].includes(proposal.status);
+  const sentLike = proposal.status === 'sent' || proposal.status === 'auto_executed';
+  const [showTargets, setShowTargets] = useState(false);
+  const [targetInfo, setTargetInfo] = useState<TargetListInfo | null>(null);
+  const targetsPromise = useRef<Promise<TargetListInfo> | null>(null);
+  const fetchTargets = async (): Promise<TargetListInfo> => {
+    const res = await fetch(`/api/ai/operator/proposals/${proposal.id}/recipients`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('token')}` },
+      body: '{}',
+    });
+    const data = await res.json();
+    if (!data.success) throw new Error(data.error || '발송 대상 조회에 실패했습니다.');
+    const info: TargetListInfo = {
+      recipients: Array.isArray(data.recipients) ? data.recipients : [],
+      displayTotal: Number(data.displayTotal) || 0,
+      criteria: data.criteria || null,
+      segmentName: data.segmentName || null,
+      basisLabel: data.basisLabel || null,
+      conditionColumns: Array.isArray(data.conditionColumns) ? data.conditionColumns : [],
+    };
+    setTargetInfo(info);
+    return info;
+  };
+  // 1회 로드 캐시 — 실패 시 캐시 비워 재시도 가능(모달이 에러 표시).
+  const ensureTargets = () => {
+    if (!targetsPromise.current) {
+      targetsPromise.current = fetchTargets().catch((e) => { targetsPromise.current = null; throw e; });
+    }
+    return targetsPromise.current;
+  };
+  const targetPage = async (page: number, pageSize: number) => {
+    const info = await ensureTargets();
+    return arrayPager(info.recipients)(page, pageSize);
+  };
 
   const banditIdx = recommendedIdx != null && messages[recommendedIdx] ? recommendedIdx : 0;
   // 사용자가 고른 변형이 있으면 그것, 없으면 Bandit 추천. 미리보기·발송이 모두 이 index를 따른다.
@@ -155,6 +204,14 @@ export default function ProposalDecisionCard({
 
   const actions = (showToggle: boolean) => (
     <div className="mt-4 flex items-center gap-2 flex-wrap">
+      {canViewTargets && (
+        <button onClick={() => setShowTargets(true)} disabled={busy} className="inline-flex items-center gap-1.5 border border-white/15 hover:bg-white/10 disabled:opacity-40 text-white/80 text-sm px-3 py-2 rounded-lg transition-colors">
+          <Users className="w-3.5 h-3.5" />타겟확인
+        </button>
+      )}
+      {sentLike && (
+        <span className="text-[11px] text-white/40">발송 명단은 발송결과 화면의 수신자 상세에서 확인할 수 있습니다.</span>
+      )}
       {canApprove && (
         <>
           <button onClick={submitApprove} disabled={busy} className="inline-flex items-center gap-1.5 bg-indigo-500/40 hover:bg-indigo-500/60 disabled:opacity-40 text-indigo-50 text-sm font-semibold px-4 py-2 rounded-lg transition-colors">
@@ -294,6 +351,23 @@ export default function ProposalDecisionCard({
     </div>
   );
 
+  // ★ [타겟확인] 모달 — createPortal(z-2000)이라 카드 어디서 렌더해도 안전. totalCount=카드 "대상 N명"과 동일 값(별도 COUNT 없음).
+  const displayTotal = targetInfo?.displayTotal ?? proposal.recipientCount;
+  const targetModal = (
+    <TargetRecipientsModal
+      show={showTargets}
+      onClose={() => setShowTargets(false)}
+      title={`발송 대상 확인${targetInfo?.segmentName ? ` — ${targetInfo.segmentName}` : ''}`}
+      objective={proposal.operatorObjective || null}
+      criteria={targetInfo?.criteria ?? pj.target?.criteria ?? null}
+      channelLabel={channelName}
+      totalCount={displayTotal}
+      fetchPage={targetPage}
+      extraColumns={targetInfo?.conditionColumns || null}
+      sourceLabel={`${targetInfo?.basisLabel || '발송 추출과 동일 기준 실측'} · 전체 ${displayTotal.toLocaleString()}명 중 최대 100명 표시 (발송 추출과 동일 기준·순서)`}
+    />
+  );
+
   if (featured) {
     return (
       <div className="bg-white/5 border border-indigo-400/30 rounded-2xl p-5">
@@ -306,6 +380,7 @@ export default function ProposalDecisionCard({
         {messagePreview}
         {actions(true)}
         {expanded && detail}
+        {targetModal}
       </div>
     );
   }
@@ -338,6 +413,7 @@ export default function ProposalDecisionCard({
           {detail}
         </div>
       )}
+      {targetModal}
     </div>
   );
 }
